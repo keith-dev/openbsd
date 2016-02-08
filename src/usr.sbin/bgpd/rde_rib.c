@@ -1,4 +1,4 @@
-/*	$OpenBSD: rde_rib.c,v 1.83 2006/01/24 13:34:33 claudio Exp $ */
+/*	$OpenBSD: rde_rib.c,v 1.88 2006/06/01 22:29:47 claudio Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Claudio Jeker <claudio@openbsd.org>
@@ -312,6 +312,8 @@ path_copy(struct rde_aspath *asp)
 	nasp->origin = asp->origin;
 	nasp->rtlabelid = asp->rtlabelid;
 	rtlabel_ref(nasp->rtlabelid);
+	nasp->pftableid = asp->pftableid;
+	pftable_ref(nasp->pftableid);
 
 	nasp->flags = asp->flags & ~F_ATTR_LINKED;
 	attr_copy(nasp, asp);
@@ -351,6 +353,7 @@ path_put(struct rde_aspath *asp)
 		fatalx("path_put: linked object");
 
 	rtlabel_unref(asp->rtlabelid);
+	pftable_unref(asp->pftableid);
 	aspath_put(asp->aspath);
 	attr_freeall(asp);
 	rdemem.path_cnt--;
@@ -801,10 +804,18 @@ void
 nexthop_shutdown(void)
 {
 	u_int32_t		 i;
+	struct nexthop		*nh, *nnh;
 
-	for (i = 0; i <= nexthoptable.nexthop_hashmask; i++)
+	for (i = 0; i <= nexthoptable.nexthop_hashmask; i++) {
+		for(nh = LIST_FIRST(&nexthoptable.nexthop_hashtbl[i]);
+		    nh != NULL; nh = nnh) {
+			nnh = LIST_NEXT(nh, nexthop_l);
+			nh->state = NEXTHOP_UNREACH;
+			(void)nexthop_delete(nh);
+		}
 		if (!LIST_EMPTY(&nexthoptable.nexthop_hashtbl[i]))
 			log_warnx("nexthop_shutdown: non-free table");
+	}
 
 	free(nexthoptable.nexthop_hashtbl);
 }
@@ -817,7 +828,8 @@ nexthop_update(struct kroute_nexthop *msg)
 
 	nh = nexthop_lookup(&msg->nexthop);
 	if (nh == NULL) {
-		log_warnx("nexthop_update: non-existent nexthop");
+		log_warnx("nexthop_update: non-existent nexthop %s",
+		    log_addr(&msg->nexthop));
 		return;
 	}
 
@@ -825,6 +837,10 @@ nexthop_update(struct kroute_nexthop *msg)
 		nh->state = NEXTHOP_REACH;
 	else
 		nh->state = NEXTHOP_UNREACH;
+
+	if (nexthop_delete(nh))
+		/* nexthop no longer used */
+		return;
 
 	if (msg->connected) {
 		nh->flags |= NEXTHOP_CONNECTED;
@@ -880,6 +896,10 @@ nexthop_modify(struct rde_aspath *asp, struct bgpd_addr *nexthop,
 		asp->flags |= F_NEXTHOP_NOMODIFY;
 		return;
 	}
+	if (type == ACTION_SET_NEXTHOP_SELF) {
+		asp->flags |= F_NEXTHOP_SELF;
+		return;
+	}
 	if (af != nexthop->af)
 		return;
 
@@ -914,13 +934,25 @@ nexthop_unlink(struct rde_aspath *asp)
 	nh = asp->nexthop;
 	asp->nexthop = NULL;
 
+	(void)nexthop_delete(nh);
+}
+
+int
+nexthop_delete(struct nexthop *nh)
+{
+	/* either pinned or in a state where it may not be deleted */
+	if (nh->refcnt > 0 || nh->state == NEXTHOP_LOOKUP)
+		return (0);
+
 	if (LIST_EMPTY(&nh->path_h)) {
 		LIST_REMOVE(nh, nexthop_l);
 		rde_send_nexthop(&nh->exit_nexthop, 0);
 
 		rdemem.nexthop_cnt--;
 		free(nh);
+		return (1);
 	}
+	return (0);
 }
 
 struct nexthop *
@@ -952,7 +984,7 @@ nexthop_compare(struct nexthop *na, struct nexthop *nb)
 {
 	struct bgpd_addr	*a, *b;
 
-	if (na == NULL && nb == NULL)
+	if (na == nb)
 		return (0);
 	if (na == NULL)
 		return (-1);

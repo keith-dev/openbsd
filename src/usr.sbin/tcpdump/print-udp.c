@@ -1,4 +1,4 @@
-/*	$OpenBSD: print-udp.c,v 1.25 2005/11/22 11:36:12 reyk Exp $	*/
+/*	$OpenBSD: print-udp.c,v 1.28 2006/05/31 01:49:17 stevesk Exp $	*/
 
 /*
  * Copyright (c) 1988, 1989, 1990, 1991, 1992, 1993, 1994, 1995, 1996
@@ -23,7 +23,7 @@
 
 #ifndef lint
 static const char rcsid[] =
-    "@(#) $Header: /cvs/src/usr.sbin/tcpdump/print-udp.c,v 1.25 2005/11/22 11:36:12 reyk Exp $ (LBL)";
+    "@(#) $Header: /cvs/src/usr.sbin/tcpdump/print-udp.c,v 1.28 2006/05/31 01:49:17 stevesk Exp $ (LBL)";
 #endif
 
 #include <sys/param.h>
@@ -361,6 +361,7 @@ static int udp_cksum(register const struct ip *ip,
 #define RADIUS_AUTH_PORT     1812
 #define RADIUS_ACCT_PORT     1813
 #define HSRP_PORT 1985		/*XXX*/
+#define VQP_PORT 1589
 #define LWRES_PORT 921
 #define MULTICASTDNS_PORT 5353
 
@@ -527,7 +528,7 @@ udp_print(register const u_char *bp, u_int length, register const u_char *bp2)
 #ifdef INET6
 	if (ip6) {
 		if (ip6->ip6_nxt == IPPROTO_UDP) {
-			(void)printf("%s.%s > %s.%s: ",
+			(void)printf("%s.%s > %s.%s:",
 				ip6addr_string(&ip6->ip6_src),
 				udpport_string(sport),
 				ip6addr_string(&ip6->ip6_dst),
@@ -540,13 +541,13 @@ udp_print(register const u_char *bp, u_int length, register const u_char *bp2)
 #endif /*INET6*/
 	{
 		if (ip->ip_p == IPPROTO_UDP) {
-			(void)printf("%s.%s > %s.%s: ",
+			(void)printf("%s.%s > %s.%s:",
 				ipaddr_string(&ip->ip_src),
 				udpport_string(sport),
 				ipaddr_string(&ip->ip_dst),
 				udpport_string(dport));
 		} else {
-			(void)printf("%s > %s: ",
+			(void)printf("%s > %s:",
 				udpport_string(sport), udpport_string(dport));
 		}
 	}
@@ -607,8 +608,10 @@ udp_print(register const u_char *bp, u_int length, register const u_char *bp2)
                         radius_print((const u_char *)(up + 1), length);
 		else if (dport == 3456)
 			vat_print((const void *)(up + 1), length, up);
-		else if (ISPORT(IAPP_PORT))
+		else if (ISPORT(IAPP_PORT) || ISPORT(IAPP_OLD_PORT))
 			iapp_print((const u_char *)(up + 1), length);
+		else if (ISPORT(VQP_PORT))
+			vqp_print((const u_char *)(up + 1), length);
 #ifdef INET6
 		else if (ISPORT(RIPNG_PORT))
 			ripng_print((const u_char *)(up + 1), length);

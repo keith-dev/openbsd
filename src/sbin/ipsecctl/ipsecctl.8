@@ -1,4 +1,4 @@
-.\"	$OpenBSD: ipsecctl.8,v 1.15 2005/09/23 11:59:56 hshoexer Exp $
+.\"	$OpenBSD: ipsecctl.8,v 1.22 2006/09/11 09:01:43 jmc Exp $
 .\"
 .\" Copyright (c) 2004, 2005 Hans-Joerg Hoexer <hshoexer@openbsd.org>
 .\"
@@ -22,7 +22,9 @@
 .Nd control flows for IPsec
 .Sh SYNOPSIS
 .Nm ipsecctl
-.Op Fl dFnv
+.Op Fl dFmnv
+.Oo Fl D Ar macro Ns =
+.Ar value Oc
 .Op Fl f Ar file
 .Op Fl s Ar modifier
 .Sh DESCRIPTION
@@ -31,27 +33,45 @@ The
 utility controls flows that determine which packets are to be processed by
 IPsec.
 It allows ruleset configuration, and retrieval of status information from the
-kernel's SPD (Security Policy Database) and SADB (Security Association
+kernel's SPD (Security Policy Database) and SAD (Security Association
 Database).
-.Pp
 It also can control
 .Xr isakmpd 8
 and establish tunnels using automatic keying with
 .Xr isakmpd 8 .
-.Pp
-Additionally,
-.Nm
-can be used to configure the SADB for use with TCP MD5
-signatures, as described in RFC 2385.
-See
-.Xr tcp 4
-for details.
-.Pp
 The ruleset grammar is described in
 .Xr ipsec.conf 5 .
 .Pp
+When the variable
+.Va ipsec
+is set to
+.Dv YES
+in
+.Xr rc.conf.local 8 ,
+the rule file specified with the variable
+.Va ipsec_rules
+(by default
+.Pa /etc/ipsec.conf )
+is loaded automatically by the
+.Xr rc 8
+scripts.
+The keying daemon,
+.Xr isakmpd 8 ,
+can also be enabled to run at boot time via the
+.Va isakmpd_flags
+variable.
+.Pp
 The options are as follows:
 .Bl -tag -width Ds
+.It Fl D Ar macro Ns = Ns Ar value
+Define
+.Ar macro
+to be set to
+.Ar value
+on the command line.
+Overrides the definition of
+.Ar macro
+in the ruleset.
 .It Fl d
 When the
 .Fl d
@@ -62,10 +82,14 @@ will add flows.
 .It Fl F
 The
 .Fl F
-option flushes the SPD and the SADB.
+option flushes the SPD and the SAD.
 .It Fl f Ar file
 Load the rules contained in
 .Ar file .
+.It Fl m
+Continuously display all
+.Dv PF_KEY
+messages exchanged with the kernel.
 .It Fl n
 Do not actually load rules, just parse them.
 .It Fl s Ar modifier
@@ -77,7 +101,7 @@ Show the kernel's databases, specified by
 .It Fl s Cm flow
 Show the ruleset loaded into the SPD.
 .It Fl s Cm sa
-Show the active SADB entries.
+Show the active SAD entries.
 .It Fl s Cm all
 Show all of the above.
 .El

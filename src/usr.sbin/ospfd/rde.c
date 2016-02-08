@@ -1,4 +1,4 @@
-/*	$OpenBSD: rde.c,v 1.40 2006/02/21 13:02:59 claudio Exp $ */
+/*	$OpenBSD: rde.c,v 1.47 2006/06/28 10:53:39 norby Exp $ */
 
 /*
  * Copyright (c) 2004, 2005 Claudio Jeker <claudio@openbsd.org>
@@ -62,12 +62,13 @@ struct lsa	*rde_asext_put(struct kroute *);
 struct lsa	*orig_asext_lsa(struct kroute *, u_int16_t);
 struct lsa	*orig_sum_lsa(struct rt_node *, u_int8_t);
 
-volatile sig_atomic_t	 rde_quit = 0;
 struct ospfd_conf	*rdeconf = NULL;
 struct imsgbuf		*ibuf_ospfe;
 struct imsgbuf		*ibuf_main;
 struct rde_nbr		*nbrself;
+struct lsa_tree		 asext_tree;
 
+/* ARGSUSED */
 void
 rde_sig_handler(int sig, short event, void *arg)
 {
@@ -82,7 +83,6 @@ rde_sig_handler(int sig, short event, void *arg)
 		/* NOTREACHED */
 	default:
 		fatalx("unexpected signal");
-		/* NOTREACHED */
 	}
 }
 
@@ -91,20 +91,23 @@ pid_t
 rde(struct ospfd_conf *xconf, int pipe_parent2rde[2], int pipe_ospfe2rde[2],
     int pipe_parent2ospfe[2])
 {
+	struct timeval		 now;
 	struct passwd		*pw;
+	struct redistribute	*r;
 	struct event		 ev_sigint, ev_sigterm;
 	pid_t			 pid;
 
 	switch (pid = fork()) {
 	case -1:
 		fatal("cannot fork");
+		/* NOTREACHED */
 	case 0:
 		break;
 	default:
 		return (pid);
 	}
 
-	rdeconf = xconf; /* XXX may not be replaced because of the lsa_tree */
+	rdeconf = xconf;
 
 	if ((pw = getpwnam(OSPFD_USER)) == NULL)
 		fatal("getpwnam");
@@ -124,7 +127,7 @@ rde(struct ospfd_conf *xconf, int pipe_parent2rde[2], int pipe_ospfe2rde[2],
 
 	event_init();
 	rde_nbr_init(NBR_HASHSIZE);
-	lsa_init(&rdeconf->lsa_tree);
+	lsa_init(&asext_tree);
 
 	/* setup signal handler */
 	signal_set(&ev_sigint, SIGINT, rde_sig_handler, NULL);
@@ -158,6 +161,14 @@ rde(struct ospfd_conf *xconf, int pipe_parent2rde[2], int pipe_ospfe2rde[2],
 	evtimer_set(&rdeconf->ev, spf_timer, rdeconf);
 	cand_list_init();
 	rt_init();
+
+	while ((r = SIMPLEQ_FIRST(&rdeconf->redist_list)) != NULL) {
+		SIMPLEQ_REMOVE_HEAD(&rdeconf->redist_list, entry);
+		free(r);
+	}
+
+	gettimeofday(&now, NULL);
+	rdeconf->uptime = now.tv_sec;
 
 	event_dispatch();
 
@@ -206,6 +217,7 @@ rde_imsg_compose_ospfe(int type, u_int32_t peerid, pid_t pid, void *data,
 	return (imsg_compose(ibuf_ospfe, type, peerid, pid, data, datalen));
 }
 
+/* ARGSUSED */
 void
 rde_dispatch_imsg(int fd, short event, void *bula)
 {
@@ -220,8 +232,9 @@ rde_dispatch_imsg(int fd, short event, void *bula)
 	struct area		*area;
 	struct vertex		*v;
 	char			*buf;
+	ssize_t			 n;
 	time_t			 now;
-	int			 r, n, state, self;
+	int			 r, state, self;
 	u_int16_t		 l;
 
 	switch (event) {
@@ -397,10 +410,14 @@ rde_dispatch_imsg(int fd, short event, void *bula)
 					free(lsa);
 					break;
 				}
-				if (!(self = lsa_self(nbr, lsa, v)))
-					lsa_add(nbr, lsa);
 
 				rde_req_list_del(nbr, &lsa->hdr);
+
+				if (!(self = lsa_self(nbr, lsa, v)))
+					if (lsa_add(nbr, lsa))
+						/* delayed lsa */
+						break;
+
 				/* flood and perhaps ack LSA */
 				imsg_compose(ibuf_ospfe, IMSG_LS_FLOOD,
 				    imsg.hdr.peerid, 0, lsa,
@@ -507,7 +524,7 @@ rde_dispatch_imsg(int fd, short event, void *bula)
 					lsa_dump(&area->lsa_tree, imsg.hdr.type,
 					    imsg.hdr.pid);
 				}
-				lsa_dump(&rdeconf->lsa_tree, imsg.hdr.type,
+				lsa_dump(&asext_tree, imsg.hdr.type,
 				    imsg.hdr.pid);
 			} else {
 				memcpy(&aid, imsg.data, sizeof(aid));
@@ -518,7 +535,7 @@ rde_dispatch_imsg(int fd, short event, void *bula)
 					lsa_dump(&area->lsa_tree, imsg.hdr.type,
 					    imsg.hdr.pid);
 					if (!area->stub)
-						lsa_dump(&rdeconf->lsa_tree,
+						lsa_dump(&asext_tree,
 						    imsg.hdr.type,
 						    imsg.hdr.pid);
 				}
@@ -557,15 +574,17 @@ rde_dispatch_imsg(int fd, short event, void *bula)
 	imsg_event_add(ibuf);
 }
 
+/* ARGSUSED */
 void
 rde_dispatch_parent(int fd, short event, void *bula)
 {
-	struct imsgbuf		*ibuf = bula;
 	struct imsg		 imsg;
+	struct kroute		 kr;
+	struct imsgbuf		*ibuf = bula;
 	struct lsa		*lsa;
 	struct vertex		*v;
-	struct kroute		 kr;
-	int			 n;
+	struct rt_node		*rn;
+	ssize_t			 n;
 
 	switch (event) {
 	case EV_READ:
@@ -618,6 +637,22 @@ rde_dispatch_parent(int fd, short event, void *bula)
 				lsa_merge(nbrself, lsa, v);
 			}
 			break;
+		case IMSG_KROUTE_GET:
+			if (imsg.hdr.len != IMSG_HEADER_SIZE + sizeof(kr)) {
+				log_warnx("rde_dispatch: wrong imsg len");
+				break;
+			}
+			memcpy(&kr, imsg.data, sizeof(kr));
+
+			if ((rn = rt_find(kr.prefix.s_addr, kr.prefixlen,
+			    DT_NET)) != NULL)
+				rde_send_change_kroute(rn);
+			else
+				/* should not happen */
+				imsg_compose(ibuf_main, IMSG_KROUTE_DELETE, 0,
+				    0, &kr, sizeof(kr));
+
+			break;
 		default:
 			log_debug("rde_dispatch_parent: unexpected imsg %d",
 			    imsg.hdr.type);
@@ -664,7 +699,7 @@ void
 rde_send_summary(pid_t pid)
 {
 	static struct ctl_sum	 sumctl;
-	struct lsa_tree		*tree = &rdeconf->lsa_tree;
+	struct timeval		 now;
 	struct area		*area;
 	struct vertex		*v;
 
@@ -677,8 +712,14 @@ rde_send_summary(pid_t pid)
 	LIST_FOREACH(area, &rdeconf->area_list, entry)
 		sumctl.num_area++;
 
-	RB_FOREACH(v, lsa_tree, tree)
+	RB_FOREACH(v, lsa_tree, &asext_tree)
 		sumctl.num_ext_lsa++;
+
+	gettimeofday(&now, NULL);
+	if (rdeconf->uptime < now.tv_sec)
+		sumctl.uptime = now.tv_sec - rdeconf->uptime;
+	else
+		sumctl.uptime = 0;
 
 	sumctl.rfc1583compat = rdeconf->rfc1583compat;
 
@@ -1009,7 +1050,7 @@ struct lsa *
 orig_asext_lsa(struct kroute *kr, u_int16_t age)
 {
 	struct lsa	*lsa;
-	size_t		 len;
+	u_int16_t	 len;
 
 	len = sizeof(struct lsa_hdr) + sizeof(struct lsa_asext);
 	if ((lsa = calloc(1, len)) == NULL)
@@ -1059,7 +1100,7 @@ struct lsa *
 orig_sum_lsa(struct rt_node *rte, u_int8_t type)
 {
 	struct lsa	*lsa;
-	size_t		 len;
+	u_int16_t	 len;
 
 	len = sizeof(struct lsa_hdr) + sizeof(struct lsa_sum);
 	if ((lsa = calloc(1, len)) == NULL)

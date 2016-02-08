@@ -1,4 +1,4 @@
-/*	$OpenBSD: ftp.c,v 1.61 2006/02/16 07:41:01 pvalchev Exp $	*/
+/*	$OpenBSD: ftp.c,v 1.65 2006/06/23 20:35:25 steven Exp $	*/
 /*	$NetBSD: ftp.c,v 1.27 1997/08/18 10:20:23 lukem Exp $	*/
 
 /*
@@ -60,7 +60,7 @@
  */
 
 #if !defined(lint) && !defined(SMALL)
-static char rcsid[] = "$OpenBSD: ftp.c,v 1.61 2006/02/16 07:41:01 pvalchev Exp $";
+static const char rcsid[] = "$OpenBSD: ftp.c,v 1.65 2006/06/23 20:35:25 steven Exp $";
 #endif /* not lint and not SMALL */
 
 #include <sys/types.h>
@@ -146,6 +146,10 @@ hookup(char *host, char *port)
 			snprintf(pbuf, sizeof(pbuf), "%d", GATE_PORT);
 		else if (strcmp(port, "http") == 0)
 			snprintf(pbuf, sizeof(pbuf), "%d", HTTP_PORT);
+#ifndef SMALL
+		else if (strcmp(port, "https") == 0)
+			snprintf(pbuf, sizeof(pbuf), "%d", HTTPS_PORT);
+#endif
 		if (pbuf[0])
 			error = getaddrinfo(host, pbuf, &hints, &res0);
 	}
@@ -327,7 +331,7 @@ int
 getreply(int expecteof)
 {
 	char current_line[BUFSIZ];	/* last line of previous reply */
-	int c, n, line;
+	int c, n, lineno;
 	int dig;
 	int originalcode = 0, continuation = 0;
 	sig_t oldintr;
@@ -336,7 +340,7 @@ getreply(int expecteof)
 
 	memset(current_line, 0, sizeof(current_line));
 	oldintr = signal(SIGINT, cmdabort);
-	for (line = 0 ;; line++) {
+	for (lineno = 0 ;; lineno++) {
 		dig = n = code = 0;
 		cp = current_line;
 		while ((c = fgetc(cin)) != '\n') {
@@ -418,7 +422,7 @@ getreply(int expecteof)
 			(void)putc(c, ttyout);
 			(void)fflush (ttyout);
 		}
-		if (line == 0) {
+		if (lineno == 0) {
 			size_t len = cp - current_line;
 
 			if (len > sizeof(reply_string))
@@ -919,8 +923,7 @@ recvrequest(const char *cmd, const char * volatile local, const char *remote,
 	if (fstat(fileno(fout), &st) < 0 || st.st_blksize == 0)
 		st.st_blksize = BUFSIZ;
 	if (st.st_blksize > bufsize) {
-		if (buf)
-			(void)free(buf);
+		(void)free(buf);
 		buf = malloc((unsigned)st.st_blksize);
 		if (buf == NULL) {
 			warn("malloc");
@@ -1429,7 +1432,7 @@ noport:
 
 	if (sendport) {
 		char hname[NI_MAXHOST], pbuf[NI_MAXSERV];
-		int af;
+		int af_tmp;
 		union sockunion tmp;
 
 		tmp = data_addr;
@@ -1443,14 +1446,14 @@ noport:
 		case AF_INET6:
 			if (tmp.su_family == AF_INET6)
 				tmp.su_sin6.sin6_scope_id = 0;
-			af = (tmp.su_family == AF_INET) ? 1 : 2;
+			af_tmp = (tmp.su_family == AF_INET) ? 1 : 2;
 			if (getnameinfo((struct sockaddr *)&tmp,
 			    tmp.su_len, hname, sizeof(hname),
 			    pbuf, sizeof(pbuf), NI_NUMERICHOST | NI_NUMERICSERV)) {
 				result = ERROR;
 			} else {
 				result = command("EPRT |%d|%s|%s|",
-				    af, hname, pbuf);
+				    af_tmp, hname, pbuf);
 				if (result != COMPLETE) {
 					epsv4bad = 1;
 					if (debug) {

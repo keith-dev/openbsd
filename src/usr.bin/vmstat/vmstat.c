@@ -1,5 +1,5 @@
 /*	$NetBSD: vmstat.c,v 1.29.4.1 1996/06/05 00:21:05 cgd Exp $	*/
-/*	$OpenBSD: vmstat.c,v 1.100 2006/02/23 06:32:11 martin Exp $	*/
+/*	$OpenBSD: vmstat.c,v 1.103 2006/03/31 18:19:38 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1980, 1986, 1991, 1993
@@ -40,7 +40,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)vmstat.c	8.1 (Berkeley) 6/6/93";
 #else
-static const char rcsid[] = "$OpenBSD: vmstat.c,v 1.100 2006/02/23 06:32:11 martin Exp $";
+static const char rcsid[] = "$OpenBSD: vmstat.c,v 1.103 2006/03/31 18:19:38 deraadt Exp $";
 #endif
 #endif /* not lint */
 
@@ -120,6 +120,7 @@ kvm_t *kd;
 #define	VMSTAT		0x20
 
 void	cpustats(void);
+time_t	getuptime(void);
 void	dkstats(void);
 void	dointr(void);
 void	domem(void);
@@ -131,6 +132,8 @@ int	kreado(struct nlist *, void *, size_t);
 void	usage(void);
 void	dotimes(void);
 void	doforkst(void);
+void	needhdr(int);
+int	pct(long, long);
 void	printhdr(void);
 
 char	**choosedrives(char **);
@@ -148,17 +151,13 @@ int ncpu;
 int
 main(int argc, char *argv[])
 {
-	extern int optind;
-	extern char *optarg;
-	int mib[2];
-	size_t size;
-	int c, todo;
-	u_int interval;
-	int reps;
 	char errbuf[_POSIX2_LINE_MAX];
+	int c, todo = 0, reps = 0, mib[2];
+	const char *errstr;
+	u_int interval = 0;
+	size_t size;
 	gid_t gid;
 
-	interval = reps = todo = 0;
 	while ((c = getopt(argc, argv, "c:fiM:mN:stw:vz")) != -1) {
 		switch (c) {
 		case 'c':
@@ -186,7 +185,9 @@ main(int argc, char *argv[])
 			todo |= TIMESTAT;
 			break;
 		case 'w':
-			interval = atoi(optarg);
+			interval = (u_int)strtonum(optarg, 0, 1000, &errstr);
+			if (errstr)
+				err(1, "-w %s: %s\n", optarg, errstr);
 			break;
 		case 'v':
 			verbose = 1;
@@ -258,7 +259,7 @@ main(int argc, char *argv[])
 		dkinit(0);	/* Initialize disk stats, no disks selected. */
 		argv = choosedrives(argv);	/* Select disks. */
 		winsize.ws_row = 0;
-		(void) ioctl(STDOUT_FILENO, TIOCGWINSZ, (char *)&winsize);
+		(void) ioctl(STDOUT_FILENO, TIOCGWINSZ, &winsize);
 		if (winsize.ws_row > 0)
 			winlines = winsize.ws_row;
 
@@ -267,7 +268,10 @@ main(int argc, char *argv[])
 #define	BACKWARD_COMPATIBILITY
 #ifdef	BACKWARD_COMPATIBILITY
 	if (*argv) {
-		interval = atoi(*argv);
+		interval = (u_int)strtonum(*argv, 0, 1000, &errstr);
+		if (errstr)
+			err(1, "-w %s: %s\n", optarg, errstr);
+
 		if (*++argv)
 			reps = atoi(*argv);
 	}
@@ -333,11 +337,11 @@ choosedrives(char **argv)
 time_t
 getuptime(void)
 {
-	static time_t now;
 	static struct timeval boottime;
+	static time_t now;
 	time_t uptime;
-	int mib[2];
 	size_t size;
+	int mib[2];
 
 	if (boottime.tv_sec == 0) {
 		if (nlistf == NULL && memf == NULL) {
@@ -365,12 +369,11 @@ int	hz, hdrcnt;
 void
 dovmstat(u_int interval, int reps)
 {
-	struct vmtotal total;
 	time_t uptime, halfuptime;
-	void needhdr(int);
-	int mib[2];
 	struct clockinfo clkinfo;
+	struct vmtotal total;
 	size_t size;
+	int mib[2];
 
 	uptime = getuptime();
 	halfuptime = uptime / 2;
@@ -411,7 +414,7 @@ dovmstat(u_int interval, int reps)
 		(void)printf("%2u%2u%2u",
 		    total.t_rq - 1, total.t_dw + total.t_pw, total.t_sw);
 #define	rate(x)	(((x) + halfuptime) / uptime)	/* round */
-#define pgtok(a) ((a) * ((int)uvmexp.pagesize >> 10))
+#define pgtok(a) ((a) * ((unsigned int)uvmexp.pagesize >> 10))
 		(void)printf("%7u%7u ",
 		    pgtok(total.t_avm), pgtok(total.t_free));
 		(void)printf("%5u ", rate(uvmexp.faults - ouvmexp.faults));
@@ -480,8 +483,8 @@ void
 dotimes(void)
 {
 	u_int pgintime, rectime;
-	int mib[2];
 	size_t size;
+	int mib[2];
 
 	/* XXX Why are these set to 0 ? This doesn't look right. */
 	pgintime = 0;
@@ -509,13 +512,13 @@ dotimes(void)
 	    uvmexp.pageins, pgintime / 10);
 	if (uvmexp.pageins != 0)
 		(void)printf("average: %8.1f msec / page in\n",
-	    	    pgintime / (uvmexp.pageins * 10.0));
+		    pgintime / (uvmexp.pageins * 10.0));
 }
 
 int
 pct(long top, long bot)
 {
-	long ans;
+	int ans;
 
 	if (bot == 0)
 		return(0);
@@ -529,9 +532,9 @@ void
 dosum(void)
 {
 	struct nchstats nchstats;
+	int mib[2], nselcoll;
 	long nchtotal;
 	size_t size;
-	int mib[2], nselcoll;
 
 	if (nlistf == NULL && memf == NULL) {
 		size = sizeof(struct uvmexp);
@@ -691,31 +694,29 @@ dkstats(void)
 void
 cpustats(void)
 {
+	double percent, total;
 	int state;
-	double pct, total;
 
 	total = 0;
 	for (state = 0; state < CPUSTATES; ++state)
 		total += cur.cp_time[state];
 	if (total)
-		pct = 100 / total;
+		percent = 100 / total;
 	else
-		pct = 0;
-	(void)printf("%2.0f ", (cur.cp_time[CP_USER] + cur.cp_time[CP_NICE]) * pct);
-	(void)printf("%2.0f ", (cur.cp_time[CP_SYS] + cur.cp_time[CP_INTR]) * pct);
-	(void)printf("%2.0f", cur.cp_time[CP_IDLE] * pct);
+		percent = 0;
+	(void)printf("%2.0f ", (cur.cp_time[CP_USER] + cur.cp_time[CP_NICE]) * percent);
+	(void)printf("%2.0f ", (cur.cp_time[CP_SYS] + cur.cp_time[CP_INTR]) * percent);
+	(void)printf("%2.0f", cur.cp_time[CP_IDLE] * percent);
 }
 
 void
 dointr(void)
 {
-	time_t uptime;
-	u_int64_t inttotal;
-	int nintr;
+	int nintr, mib[4], i;
 	char intrname[128];
-	int mib[4];
+	u_int64_t inttotal;
+	time_t uptime;
 	size_t siz;
-	int i;
 
 	if (nlistf != NULL || memf != NULL) {
 		errx(1,
@@ -786,23 +787,19 @@ dointr(void)
 /*
  * These names are defined in <sys/malloc.h>.
  */
-char *kmemnames[] = INITKMEMNAMES;
+const char *kmemnames[] = INITKMEMNAMES;
 
 void
 domem(void)
 {
-	struct kmembuckets *kp;
-	struct kmemstats *ks;
-	int i, j;
-	int len, size, first;
+	struct kmembuckets buckets[MINBUCKET + 16], *kp;
+	struct kmemstats kmemstats[M_LAST], *ks;
+	int i, j, len, size, first, mib[4];
 	u_long totuse = 0, totfree = 0;
-	quad_t totreq = 0;
-	char *name;
-	struct kmemstats kmemstats[M_LAST];
-	struct kmembuckets buckets[MINBUCKET + 16];
-	int mib[4];
-	size_t siz;
 	char buf[BUFSIZ], *bufp, *ap;
+	quad_t totreq = 0;
+	const char *name;
+	size_t siz;
 
 	if (memf == NULL && nlistf == NULL) {
 		mib[0] = CTL_KERN;
@@ -871,7 +868,7 @@ domem(void)
 			mib[3] = i;
 			siz = sizeof(struct kmemstats);
 
-			/* 
+			/*
 			 * Skip errors -- these are presumed to be unallocated
 			 * entries.
 			 */
@@ -948,8 +945,8 @@ static void
 print_pool(struct pool *pp, char *name)
 {
 	static int first = 1;
-	int ovflw;
 	char maxp[32];
+	int ovflw;
 
 	if (first) {
 		(void)printf("Memory resource pool statistics\n");
@@ -1006,7 +1003,7 @@ print_pool(struct pool *pp, char *name)
 	PRWORD(ovflw, " %*d", 6, 1, pp->pr_hiwat);
 	PRWORD(ovflw, " %*d", 6, 1, pp->pr_minpages);
 	PRWORD(ovflw, " %*s", 6, 1, maxp);
-	PRWORD(ovflw, " %*lu\n", 5, 1, pp->pr_nidle);	
+	PRWORD(ovflw, " %*lu\n", 5, 1, pp->pr_nidle);
 }
 
 static void dopool_kvm(void);
@@ -1024,11 +1021,10 @@ dopool(void)
 void
 dopool_sysctl(void)
 {
+	int mib[4], npools, i, kmfp;
 	long total = 0, inuse = 0;
 	struct pool pool;
 	size_t size;
-	int mib[4];
-	int npools, i, kmfp;
 
 	mib[0] = CTL_KERN;
 	mib[1] = KERN_POOL;
@@ -1077,14 +1073,14 @@ dopool_sysctl(void)
 void
 dopool_kvm(void)
 {
-	long addr;
-	long total = 0, inuse = 0;
 	TAILQ_HEAD(,pool) pool_head;
 	struct pool pool, *pp = &pool;
+	long total = 0, inuse = 0;
+	u_long addr;
 	int kmfp;
 
 	kread(X_POOLHEAD, &pool_head, sizeof(pool_head));
-	addr = (long)TAILQ_FIRST(&pool_head);
+	addr = (u_long)TAILQ_FIRST(&pool_head);
 
 	while (addr != 0) {
 		char name[32];
@@ -1095,7 +1091,7 @@ dopool_kvm(void)
 			    kvm_geterr(kd));
 			exit(1);
 		}
-		if (kvm_read(kd, (long)pp->pr_wchan, name, sizeof name) < 0) {
+		if (kvm_read(kd, (u_long)pp->pr_wchan, name, sizeof name) < 0) {
 			(void)fprintf(stderr,
 			    "vmstat: pool name trashed: %s\n",
 			    kvm_geterr(kd));
@@ -1109,7 +1105,7 @@ dopool_kvm(void)
 		inuse += (pp->pr_nget - pp->pr_nput) * pp->pr_size;
 		total += pp->pr_npages * getpagesize();	/* XXX */
 
-		addr = (long)TAILQ_NEXT(pp, pr_poollist);
+		addr = (u_long)TAILQ_NEXT(pp, pr_poollist);
 	}
 
 	inuse /= 1024;

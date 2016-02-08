@@ -1,4 +1,4 @@
-/*	$OpenBSD: login_reject.c,v 1.6 2002/09/06 18:45:07 deraadt Exp $	*/
+/*	$OpenBSD: login_reject.c,v 1.8 2006/04/02 04:14:49 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 1995 Berkeley Software Design, Inc. All rights reserved.
@@ -52,12 +52,15 @@
 #include <syslog.h>
 #include <unistd.h>
 
+extern int	pwd_gensalt(char *, int, login_cap_t *, char);
+
 int
 main(int argc, char *argv[])
 {
-	FILE *back;
-	char passbuf[1];
 	struct rlimit rl;
+	login_cap_t *lc;
+	FILE *back;
+	char passbuf[1], salt[_PASSWORD_LEN + 1];
 	int mode = 0, c;
 
 	rl.rlim_cur = 0;
@@ -110,7 +113,7 @@ main(int argc, char *argv[])
 	if (mode == 2) {
 		mode = 0;
 		c = -1;
-		while (read(3, passbuf, 1) == 1) {
+		while (read(3, passbuf, (size_t)1) == 1) {
 			if (passbuf[0] == '\0' && ++mode == 2)
 				break;
 		}
@@ -121,7 +124,11 @@ main(int argc, char *argv[])
 	} else
 		getpass("Password:");
 
-	crypt("password", "xx");
+	if ((lc = login_getclass(NULL)) == NULL ||
+	    pwd_gensalt(salt, sizeof(salt), lc, 'l') == 0)
+		strlcpy(salt, "xx", sizeof(salt));
+	crypt("password", salt);
+
 	fprintf(back, BI_REJECT "\n");
 	exit(1);
 }

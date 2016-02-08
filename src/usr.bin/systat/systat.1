@@ -1,4 +1,4 @@
-.\"	$OpenBSD: systat.1,v 1.39 2006/01/16 10:26:13 jmc Exp $
+.\"	$OpenBSD: systat.1,v 1.45 2006/06/29 21:17:27 dlg Exp $
 .\"	$NetBSD: systat.1,v 1.6 1996/05/10 23:16:39 thorpej Exp $
 .\"
 .\" Copyright (c) 1985, 1990, 1993
@@ -35,7 +35,7 @@
 .Os
 .Sh NAME
 .Nm systat
-.Nd display system statistics on a CRT
+.Nd display system statistics
 .Sh SYNOPSIS
 .Nm systat
 .Op Fl n
@@ -179,46 +179,11 @@ is accounted to the
 .Dq idle
 process.
 .It Ic iostat
-Display, in the lower window, statistics about processor use
-and disk throughput.
-Statistics on processor use appear as
-bar graphs of the amount of time executing in user mode
-.Pq Dq user ,
-in user mode running low priority processes
-.Pq Dq nice ,
-in system mode
-.Pq Dq system ,
-and idle
-.Pq Dq idle .
+Display, in the lower window, statistics about disk throughput.
 Statistics
-on disk throughput show, for each drive, kilobytes of data transferred,
+on disk throughput show, for each drive, data transferred in kilobytes,
 number of disk transactions performed, and time spent in disk accesses
 (in milliseconds).
-This information may be displayed as
-bar graphs or as rows of numbers which scroll downward.
-Bar graphs are shown by default.
-.Pp
-The following commands are specific to the
-.Ic iostat
-display; the minimum unambiguous prefix may be supplied.
-.Pp
-.Bl -tag -width Fl -compact
-.It Cm numbers
-Show the disk
-.Tn I/O
-statistics in numeric form.
-Values are displayed in numeric columns which scroll downward.
-.It Cm bars
-Show the disk
-.Tn I/O
-statistics in bar graph form (default).
-.It Cm secs
-Toggle the display of time in disk activity (the default is to
-not display time).
-.It Cm split
-Toggle the display of separate read/write statistics (the default is
-combined statistics).
-.El
 .It Ic swap
 Show information about swap space usage on all the
 swap areas compiled into the kernel.
@@ -268,10 +233,12 @@ and swapped out but desiring to run
 .Pq Sq w .
 Below the queue length listing is a numerical listing and
 a bar graph showing the amount of
+interrupt (shown as
+.Ql | ) ,
 system (shown as
 .Ql = ) ,
 user (shown as
-.Ql > ) ,
+.Ql \*(Gt ) ,
 nice (shown as
 .Ql - ) ,
 and idle time (shown as
@@ -379,6 +346,26 @@ period, such as from boot time (see the
 option below).
 .It Ic ifstat
 Display, in the lower window, interface statistics.
+The
+.Dq State
+column has the format
+.Sm off
+.Xo
+.Cm up \*(Ba dn
+.Bq : Cm U \*(Ba D .
+.Xc
+.Sm on
+.Sq up
+and
+.Sq dn
+represent whether the interface is up or down.
+.Sq U
+and
+.Sq D
+represent whether the interface is connected or not;
+in the case of
+.Xr carp 4
+interfaces, whether the interface is in master or backup state, respectively.
 See below for more options.
 .It Ic netstat
 Display, in the lower window, network connections.

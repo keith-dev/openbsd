@@ -1,4 +1,4 @@
-/*	$OpenBSD: main.c,v 1.49 2006/02/25 14:40:16 otto Exp $	*/
+/*	$OpenBSD: main.c,v 1.54 2006/07/25 08:22:32 kjell Exp $	*/
 
 /* This file is in the public domain. */
 
@@ -20,13 +20,24 @@ int		 thisflag;			/* flags, this command	*/
 int		 lastflag;			/* flags, last command	*/
 int		 curgoal;			/* goal column		*/
 int		 startrow;			/* row to start		*/
-struct buffer		*curbp;				/* current buffer	*/
-struct buffer		*bheadp;			/* BUFFER list head	*/
-struct mgwin		*curwp;				/* current window	*/
-struct mgwin		*wheadp;			/* MGWIN listhead	*/
+struct buffer 	*curbp;				/* current buffer	*/
+struct buffer	*bheadp;			/* BUFFER list head	*/
+struct mgwin	*curwp;				/* current window	*/
+struct mgwin	*wheadp;			/* MGWIN listhead	*/
 char		 pat[NPAT];			/* pattern		*/
 
 static void	 edinit(PF);
+static __dead void usage(void);
+
+extern char	*__progname;
+
+static __dead void
+usage()
+{
+	fprintf(stderr, "usage: %s [+line] [-hn] [-f mode] [file ...]\n",
+	    __progname);
+	exit(1);
+}
 
 int
 main(int argc, char **argv)
@@ -36,7 +47,7 @@ main(int argc, char **argv)
 	int	 o, i, nfiles;
 	int	 nobackups = 0;
 
-	while ((o = getopt(argc, argv, "nf:")) != -1)
+	while ((o = getopt(argc, argv, "hnf:")) != -1)
 		switch (o) {
 		case 'n':
 			nobackups = 1;
@@ -47,8 +58,10 @@ main(int argc, char **argv)
 				    "initial function");
 			init_fcn_name = optarg;
 			break;
+		case 'h':
+			/* FALLTHRU */
 		default:
-			errx(1, "usage: mg [options] [file ...]");
+			usage();
 		}
 	argc -= optind;
 	argv += optind;
@@ -108,7 +121,7 @@ main(int argc, char **argv)
 			startrow = lval;
 		} else {
 notnum:
-			cp = adjustname(argv[i]);
+			cp = adjustname(argv[i], FALSE);
 			if (cp != NULL) {
 				if (nfiles == 1)
 					splitwind(0, 1);
@@ -135,10 +148,10 @@ notnum:
 	/* fake last flags */
 	thisflag = 0;
 	for (;;) {
-#ifndef NO_DPROMPT
-		if (epresf == KPROMPT)
+		if (epresf == KCLEAR)
 			eerase();
-#endif	/* !NO_DPROMPT */
+		if (epresf == TRUE)
+			epresf = KCLEAR;
 		if (winch_flag) {
 			do_redraw(0, 0, TRUE);
 			winch_flag = 0;
@@ -183,9 +196,9 @@ edinit(PF init_fcn)
 	wheadp = wp;
 	curwp = wp;
 	wp->w_wndp = NULL;			/* Initialize window.	 */
-	wp->w_linep = wp->w_dotp = bp->b_linep;
+	wp->w_linep = wp->w_dotp = bp->b_headp;
 	wp->w_ntrows = nrow - 2;		/* 2 = mode, echo.	 */
-	wp->w_flag = WFMODE | WFHARD;		/* Full.		 */
+	wp->w_flag = WFMODE | WFFULL;		/* Full.		 */
 
 	if (init_fcn)
 		init_fcn(0, 1);

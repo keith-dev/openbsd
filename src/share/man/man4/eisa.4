@@ -1,4 +1,4 @@
-.\"	$OpenBSD: eisa.4,v 1.10 2003/08/31 20:34:16 jmc Exp $
+.\"	$OpenBSD: eisa.4,v 1.15 2006/09/08 13:04:57 jmc Exp $
 .\"	$NetBSD: eisa.4,v 1.10 2001/09/11 22:52:52 wiz Exp $
 .\"
 .\" Copyright (c) 1997 Jonathan Stone
@@ -34,7 +34,7 @@
 .Os
 .Sh NAME
 .Nm eisa
-.Nd introduction to EISA bus machine-independent drivers and support
+.Nd introduction to EISA bus support
 .Sh SYNOPSIS
 Machine-dependent; depends on the bus topology and
 .Tn EISA
@@ -58,27 +58,15 @@ bus subsystem and several machine-independent
 .Tn EISA
 device drivers.
 .Pp
-Your system may support additional
-.Tn EISA
-devices.
-Drivers for
-.Tn EISA
-devices not listed here are machine-dependent.
-Consult your system's
-.Xr intro 4
-for additional information.
-.Sh SUPPORTED DEVICES
 .Ox
-includes machine-independent
-.Tn EISA
-drivers, sorted by device type
-and driver name:
+provides support for the following devices.
+Note that not all architectures support all devices.
 .Ss Disk and tape controllers
 .Bl -tag -width 12n -offset ind -compact
 .It Xr cac 4
-Compaq array controllers.
+Compaq Smart ARRAY 2/3/4 SCSI RAID controller.
 .It Xr dpt 4
-DPT SmartCache/SmartRAID controllers.
+DPT EATA SCSI RAID controller.
 .El
 .Ss SCSI interfaces
 .Bl -tag -width 12n -offset ind -compact
@@ -102,11 +90,7 @@ interfaces.
 .Ss Network interfaces
 .Bl -tag -width 12n -offset ind -compact
 .It Xr ep 4
-3Com 3c579 and 3c592 10Mbit
-.Tn Ethernet ,
-and 3c597 10/100Mbit
-.Tn Ethernet
-interfaces.
+3Com EtherLink III and Fast EtherLink III 10/100 Ethernet device.
 .It Xr fea 4
 Digital DEFEA FDDI interfaces.
 .\" .It Xr le 4
@@ -135,15 +119,7 @@ respectively.
 The manual pages for each individual driver also lists the
 supported bus variants.
 .Sh SEE ALSO
-.Xr ahb 4 ,
-.Xr ahc 4 ,
-.\" .Xr bha 4 ,
-.Xr cac 4 ,
-.Xr dpt 4 ,
-.Xr ep 4 ,
-.Xr fea 4 ,
-.Xr intro 4 ,
-.Xr uha 4
+.Xr intro 4
 .Sh HISTORY
 The machine-independent
 .Tn EISA

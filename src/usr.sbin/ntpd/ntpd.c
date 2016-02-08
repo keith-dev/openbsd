@@ -1,4 +1,4 @@
-/*	$OpenBSD: ntpd.c,v 1.41 2006/02/21 23:47:00 stevesk Exp $ */
+/*	$OpenBSD: ntpd.c,v 1.48 2006/06/30 16:52:13 deraadt Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -37,8 +37,12 @@ __dead void	usage(void);
 int		main(int, char *[]);
 int		check_child(pid_t, const char *);
 int		dispatch_imsg(struct ntpd_conf *);
+void		reset_adjtime(void);
 int		ntpd_adjtime(double);
+void		ntpd_adjfreq(double, int);
 void		ntpd_settime(double);
+void		readfreq(void);
+void		writefreq(double);
 
 volatile sig_atomic_t	 quit = 0;
 volatile sig_atomic_t	 reconfig = 0;
@@ -125,6 +129,7 @@ main(int argc, char *argv[])
 	}
 	endpwent();
 
+	reset_adjtime();
 	if (!conf.settime) {
 		log_init(conf.debug);
 		if (!conf.debug)
@@ -136,14 +141,15 @@ main(int argc, char *argv[])
 	if (socketpair(AF_UNIX, SOCK_STREAM, PF_UNSPEC, pipe_chld) == -1)
 		fatal("socketpair");
 
+	signal(SIGCHLD, sighdlr);
 	/* fork child process */
 	chld_pid = ntp_main(pipe_chld, &conf);
 
 	setproctitle("[priv]");
+	readfreq();
 
 	signal(SIGTERM, sighdlr);
 	signal(SIGINT, sighdlr);
-	signal(SIGCHLD, sighdlr);
 	signal(SIGHUP, sighdlr);
 
 	close(pipe_chld[1]);
@@ -218,7 +224,7 @@ int
 check_child(pid_t pid, const char *pname)
 {
 	int	 status, sig;
-	char 	*signame;
+	char	*signame;
 
 	if (waitpid(pid, &status, WNOHANG) > 0) {
 		if (WIFEXITED(status)) {
@@ -270,6 +276,12 @@ dispatch_imsg(struct ntpd_conf *conf)
 			n = ntpd_adjtime(d);
 			imsg_compose(ibuf, IMSG_ADJTIME, 0, 0, &n, sizeof(n));
 			break;
+		case IMSG_ADJFREQ:
+			if (imsg.hdr.len != IMSG_HEADER_SIZE + sizeof(d))
+				fatalx("invalid IMSG_ADJFREQ received");
+			memcpy(&d, imsg.data, sizeof(d));
+			ntpd_adjfreq(d, 1);
+			break;
 		case IMSG_SETTIME:
 			if (imsg.hdr.len != IMSG_HEADER_SIZE + sizeof(d))
 				fatalx("invalid IMSG_SETTIME received");
@@ -313,6 +325,17 @@ dispatch_imsg(struct ntpd_conf *conf)
 	return (0);
 }
 
+void
+reset_adjtime(void)
+{
+	struct timeval	tv;
+
+	tv.tv_sec = 0;
+	tv.tv_usec = 0;
+	if (adjtime(&tv, NULL) == -1)
+		log_warn("reset adjtime failed");
+}
+
 int
 ntpd_adjtime(double d)
 {
@@ -320,6 +343,7 @@ ntpd_adjtime(double d)
 	int		synced = 0;
 	static int	firstadj = 1;
 
+	d += getoffset();
 	if (d >= (double)LOG_NEGLIGEE / 1000 ||
 	    d <= -1 * (double)LOG_NEGLIGEE / 1000)
 		log_info("adjusting local clock by %fs", d);
@@ -332,6 +356,30 @@ ntpd_adjtime(double d)
 		synced = 1;
 	firstadj = 0;
 	return (synced);
+}
+
+void
+ntpd_adjfreq(double relfreq, int wrlog)
+{
+	int64_t curfreq;
+
+	if (adjfreq(NULL, &curfreq) == -1) {
+		log_warn("adjfreq failed");
+		return;
+	}
+
+	/*
+	 * adjfreq's unit is ns/s shifted left 32; convert relfreq to
+	 * that unit before adding. We log values in part per million.
+	 */
+	curfreq += relfreq * 1e9 * (1LL << 32);
+	if (wrlog)
+		log_info("adjusting clock frequency by %f to %fppm",
+		    relfreq * 1e6, curfreq / 1e3 / (1LL << 32));
+
+	if (adjfreq(&curfreq, NULL) == -1)
+		log_warn("adjfreq failed");
+	writefreq(curfreq / 1e9 / (1LL << 32));
 }
 
 void
@@ -362,4 +410,44 @@ ntpd_settime(double d)
 	strftime(buf, sizeof(buf), "%a %b %e %H:%M:%S %Z %Y",
 	    localtime(&tval));
 	log_info("set local clock to %s (offset %fs)", buf, d);
+}
+
+void
+readfreq(void)
+{
+	FILE *fp;
+	int64_t current;
+	double d;
+
+	/* if we're adjusting frequency already, don't override */
+	if (adjfreq(NULL, &current) == -1) {
+		log_warn("adjfreq failed");
+		return;
+	}
+	if (current != 0)
+		return;
+
+	fp = fopen(DRIFTFILE, "r");
+	if (fp == NULL)
+		return;
+
+	if (fscanf(fp, "%le", &d) == 1)
+		ntpd_adjfreq(d, 0);
+	fclose(fp);
+}
+
+void
+writefreq(double d)
+{
+	int r;
+	FILE *fp;
+
+	fp = fopen(DRIFTFILE, "w");
+	if (fp == NULL)
+		return;
+
+	fprintf(fp, "%e\n", d);
+	r = ferror(fp);
+	if (fclose(fp) != 0 || r != 0)
+		unlink(DRIFTFILE);
 }

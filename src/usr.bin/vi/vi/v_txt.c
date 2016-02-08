@@ -1,4 +1,4 @@
-/*	$OpenBSD: v_txt.c,v 1.18 2006/01/08 21:06:39 miod Exp $	*/
+/*	$OpenBSD: v_txt.c,v 1.21 2006/04/22 03:09:15 ray Exp $	*/
 
 /*-
  * Copyright (c) 1993, 1994
@@ -258,7 +258,7 @@ v_txt(sp, vp, tm, lp, len, prompt, ai_line, rcount, flags)
 	u_long rcount;		/* Replay count. */
 	u_int32_t flags;	/* TXT_* flags. */
 {
-	EVENT ev, *evp;		/* Current event. */
+	EVENT ev, *evp = NULL;	/* Current event. */
 	EVENT fc;		/* File name completion event. */
 	GS *gp;
 	TEXT *ntp, *tp;		/* Input text structures. */
@@ -512,15 +512,6 @@ next:	if (v_event_get(sp, evp, 0, ec_flags))
 	case E_EOF:
 		F_SET(sp, SC_EXIT_FORCE);
 		return (1);
-	case E_INTERRUPT:
-		/*
-		 * !!!
-		 * Historically, <interrupt> exited the user from text input
-		 * mode or cancelled a colon command, and returned to command
-		 * mode.  It also beeped the terminal, but that seems a bit
-		 * excessive.
-		 */
-		goto k_escape;
 	case E_REPAINT:
 		if (vs_repaint(sp, &ev))
 			return (1);
@@ -528,10 +519,37 @@ next:	if (v_event_get(sp, evp, 0, ec_flags))
 	case E_WRESIZE:
 		/* <resize> interrupts the input mode. */
 		v_emsg(sp, NULL, VIM_WRESIZE);
-		goto k_escape;
+	/* FALLTHROUGH */
 	default:
-		v_event_err(sp, evp);
-		goto k_escape;
+		if (evp->e_event != E_INTERRUPT && evp->e_event != E_WRESIZE)
+			v_event_err(sp, evp);
+		/*
+		 * !!!
+		 * Historically, <interrupt> exited the user from text input
+		 * mode or cancelled a colon command, and returned to command
+		 * mode.  It also beeped the terminal, but that seems a bit
+		 * excessive.
+		 */
+		/*
+		 * If we are recording, morph into <escape> key so that
+		 * we can repeat the command safely: there is no way to
+		 * invalidate the repetition of an instance of a command,
+		 * which would be the alternative possibility.
+		 * If we are not recording (most likely on the command line),
+		 * simply discard the input and return to command mode
+		 * so that an INTERRUPT doesn't become for example a file
+		 * completion request. -aymeric
+		 */
+		if (LF_ISSET(TXT_RECORD)) {
+		    evp->e_event = E_CHARACTER;
+		    evp->e_c = 033;
+		    evp->e_flags = 0;
+		    evp->e_value = K_ESCAPE;
+		    break;
+		} else {
+		    tp->term = TERM_ESC;
+		    goto k_escape;
+		}
 	}
 
 	/*
@@ -1474,7 +1492,6 @@ txt_abbrev(sp, tp, pushcp, isinfoline, didsubp, turnoffp)
 	CHAR_T *pushcp;
 	int isinfoline, *didsubp, *turnoffp;
 {
-	VI_PRIVATE *vip;
 	CHAR_T ch, *p;
 	SEQ *qp;
 	size_t len, off;
@@ -1483,8 +1500,6 @@ txt_abbrev(sp, tp, pushcp, isinfoline, didsubp, turnoffp)
 	*didsubp = 0;
 	if (tp->cno == tp->offset)
 		return (0);
-
-	vip = VIP(sp);
 
 	/*
 	 * Find the start of the "word".
@@ -1832,7 +1847,6 @@ txt_backup(sp, tiqh, tp, flagsp)
 	TEXT *tp;
 	u_int32_t *flagsp;
 {
-	VI_PRIVATE *vip;
 	TEXT *ntp;
 
 	/* Get a handle on the previous TEXT structure. */
@@ -1847,7 +1861,6 @@ txt_backup(sp, tiqh, tp, flagsp)
 	ntp->len = ntp->sv_len;
 
 	/* Handle appending to the line. */
-	vip = VIP(sp);
 	if (ntp->owrite == 0 && ntp->insert == 0) {
 		ntp->lb[ntp->len] = CH_CURSOR;
 		++ntp->insert;
@@ -2690,7 +2703,6 @@ txt_resolve(sp, tiqh, flags)
 	TEXTH *tiqh;
 	u_int32_t flags;
 {
-	VI_PRIVATE *vip;
 	TEXT *tp;
 	recno_t lno;
 	int changed;
@@ -2702,7 +2714,6 @@ txt_resolve(sp, tiqh, flags)
 	 * change, we have to redisplay it, otherwise the information cached
 	 * about the line will be wrong.
 	 */
-	vip = VIP(sp);
 	tp = CIRCLEQ_FIRST(tiqh);
 
 	if (LF_ISSET(TXT_AUTOINDENT))
@@ -2746,12 +2757,9 @@ txt_showmatch(sp, tp)
 	SCR *sp;
 	TEXT *tp;
 {
-	GS *gp;
 	VCS cs;
 	MARK m;
 	int cnt, endc, startc;
-
-	gp = sp->gp;
 
 	/*
 	 * Do a refresh first, in case we haven't done one in awhile,
@@ -2817,16 +2825,13 @@ txt_margin(sp, tp, wmtp, didbreak, flags)
 	int *didbreak;
 	u_int32_t flags;
 {
-	VI_PRIVATE *vip;
 	size_t len, off;
-	char *p, *wp;
+	char *p;
 
 	/* Find the nearest previous blank. */
 	for (off = tp->cno - 1, p = tp->lb + off, len = 0;; --off, --p, ++len) {
-		if (isblank(*p)) {
-			wp = p + 1;
+		if (isblank(*p))
 			break;
-		}
 
 		/*
 		 * If reach the start of the line, there's nowhere to break.
@@ -2853,7 +2858,6 @@ txt_margin(sp, tp, wmtp, didbreak, flags)
 	 * line -- it's going to be used to set the cursor value when we
 	 * move to the new line.
 	 */
-	vip = VIP(sp);
 	wmtp->lb = p + 1;
 	wmtp->offset = len;
 	wmtp->insert = LF_ISSET(TXT_APPENDEOL) ?  tp->insert - 1 : tp->insert;

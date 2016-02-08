@@ -1,4 +1,4 @@
-.\"	$OpenBSD: pppoe.4,v 1.7 2005/10/06 15:30:50 jmc Exp $
+.\"	$OpenBSD: pppoe.4,v 1.12 2006/09/08 19:06:41 jmc Exp $
 .\"	$NetBSD: pppoe.4,v 1.26 2003/10/02 07:06:36 wiz Exp $
 .\"
 .\" Copyright (c) 2002 The NetBSD Foundation, Inc.
@@ -42,7 +42,7 @@
 .Nm pppoe
 .Nd PPP over Ethernet protocol network interface
 .Sh SYNOPSIS
-.Nm pseudo-device pppoe
+.Cd "pseudo-device pppoe"
 .Sh DESCRIPTION
 The
 .Nm
@@ -93,7 +93,7 @@ As noted above it must be marked UP, but need not have an IP address.
 Configure authentication.
 The PPP session needs to identify the client to the peer.
 For more details on the available options see
-.Xr spppcontrol 8 .
+.Xr ifconfig 8 .
 .El
 .Pp
 This all is typically accomplished using an
@@ -104,13 +104,15 @@ A typical
 .Pa /etc/hostname.pppoe0
 file looks like this:
 .Bd -literal -offset indent
-pppoedev ne0
-!/sbin/ifconfig ne0 up
-!/usr/sbin/spppcontrol \e$if myauthproto=pap myauthname=testcaller \e
-	myauthkey=donttell
-!/sbin/ifconfig \e$if inet 0.0.0.0 0.0.0.1 netmask 0xffffffff
+inet 0.0.0.0 255.255.255.255 0.0.0.1 pppoedev ne0 \e
+	authproto pap authname testcaller authkey donttell up
 !/sbin/route add default 0.0.0.1
-up
+.Ed
+.Pp
+The physical interface must also be marked
+.Ql up :
+.Bd -literal -offset indent
+# echo "up" \*(Gt /etc/hostname.ne0
 .Ed
 .Pp
 Since this is a PPP interface, the addresses assigned to the interface
@@ -233,12 +235,12 @@ See
 .Xr pf.conf 5
 for more information on MTU, MSS, and NAT.
 .Sh SEE ALSO
+.Xr sppp 4 ,
 .Xr hostname.if 5 ,
 .Xr pf.conf 5 ,
 .Xr ifconfig 8 ,
 .Xr ppp 8 ,
-.Xr pppoe 8 ,
-.Xr spppcontrol 8
+.Xr pppoe 8
 .Rs
 .%R RFC 2516
 .%T A Method for Transmitting PPP Over Ethernet (PPPoE)
@@ -253,7 +255,7 @@ device first appeared in
 This implementation is client side only.
 .Pp
 It is important to specify
-.Dq Li netmask 0xffffffff
+.Dq Li netmask 255.255.255.255
 to
 .Xr ifconfig 8 .
 If the netmask is unspecified, it will be set to 8 when 0.0.0.0 is

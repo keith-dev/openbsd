@@ -1,7 +1,7 @@
 /*
  * file_media.c -
  *
- * Written by Eryk Vershen (eryk@apple.com)
+ * Written by Eryk Vershen
  */
 
 /*
@@ -38,16 +38,8 @@
 // for errno
 #include <errno.h>
 
-#ifdef __linux__
 #include <sys/ioctl.h>
-#include <linux/fs.h>
-#include <linux/hdreg.h>
 #include <sys/stat.h>
-#endif
-
-#ifdef __OpenBSD__
-#include <sys/stat.h>
-#endif
 
 #include "file_media.h"
 #include "errors.h"
@@ -56,14 +48,9 @@
 /*
  * Defines
  */
-#ifdef __linux__
-#define LOFF_MAX 9223372036854775807LL
-extern __loff_t llseek(int __fd, __loff_t __offset, int __whence);
-#else
-#define loff_t long
+#define loff_t off_t
 #define llseek lseek
-#define LOFF_MAX LONG_MAX
-#endif
+#define LOFF_MAX LLONG_MAX
 
 
 /*
@@ -179,7 +166,7 @@ compute_block_size(int fd)
 	    if (size == 0) {
 		break;
 	    }
-	    if ((x = llseek(fd, (loff_t)0, 0)) < 0) {
+	    if ((x = llseek(fd, (loff_t)0, SEEK_SET)) < 0) {
 		error(errno, "Can't seek on file");
 		break;
 	    }
@@ -199,9 +186,7 @@ open_file_as_media(char *file, int oflag)
     FILE_MEDIA	a;
     int			fd;
     loff_t off;
-#if defined(__linux__) || defined(__OpenBSD__)
     struct stat info;
-#endif
 	
     if (file_inited == 0) {
 	    file_init();
@@ -214,12 +199,7 @@ open_file_as_media(char *file, int oflag)
 	if (a != 0) {
 	    a->m.kind = file_info.kind;
 	    a->m.grain = compute_block_size(fd);
-	    off = llseek(fd, (loff_t)0, 2);	/* seek to end of media */
-#if !defined(__linux__) && !defined(__unix__)
-	    if (off <= 0) {
-		off = 1; /* XXX not right? */
-	    }
-#endif
+	    off = llseek(fd, (loff_t)0, SEEK_END);	/* seek to end of media */
 	    //printf("file size = %Ld\n", off);
 	    a->m.size_in_bytes = (long long) off;
 	    a->m.do_read = read_file_media;
@@ -228,13 +208,11 @@ open_file_as_media(char *file, int oflag)
 	    a->m.do_os_reload = os_reload_file_media;
 	    a->fd = fd;
 	    a->regular_file = 0;
-#if defined(__linux__) || defined(__OpenBSD__)
 	    if (fstat(fd, &info) < 0) {
 		error(errno, "can't stat file '%s'", file);
 	    } else {
 		a->regular_file = S_ISREG(info.st_mode);
 	    }
-#endif
 	} else {
 	    close(fd);
 	}
@@ -255,33 +233,33 @@ read_file_media(MEDIA m, long long offset, unsigned long count, void *address)
     rtn_value = 0;
     if (a == 0) {
 	/* no media */
-	//printf("no media\n");
+	fprintf(stderr,"no media\n");
     } else if (a->m.kind != file_info.kind) {
 	/* wrong kind - XXX need to error here - this is an internal problem */
-	//printf("wrong kind\n");
+	fprintf(stderr,"wrong kind\n");
     } else if (count <= 0 || count % a->m.grain != 0) {
 	/* can't handle size */
-	//printf("bad size\n");
+	fprintf(stderr,"bad size\n");
     } else if (offset < 0 || offset % a->m.grain != 0) {
 	/* can't handle offset */
-	//printf("bad offset\n");
+	fprintf(stderr,"bad offset\n");
     } else if (offset + count > a->m.size_in_bytes && a->m.size_in_bytes != (long long) 0) {
 	/* check for offset (and offset+count) too large */
-	//printf("offset+count too large\n");
+	fprintf(stderr,"offset+count too large\n");
     } else if (offset + count > (long long) LOFF_MAX) {
 	/* check for offset (and offset+count) too large */
-	//printf("offset+count too large 2\n");
+	fprintf(stderr,"offset+count too large 2\n");
     } else {
 	/* do the read */
 	off = offset;
-	if ((off = llseek(a->fd, off, 0)) >= 0) {
+	if ((off = llseek(a->fd, off, SEEK_SET)) >= 0) {
 	    if ((t = read(a->fd, address, count)) == count) {
 		rtn_value = 1;
 	    } else {
-		//printf("read failed\n");
+		fprintf(stderr,"read failed\n");
 	    }
 	} else {
-	    //printf("lseek failed\n");
+	    fprintf(stderr,"lseek failed\n");
 	}
     }
     return rtn_value;
@@ -295,7 +273,7 @@ write_file_media(MEDIA m, long long offset, unsigned long count, void *address)
     long rtn_value;
     loff_t off;
     int t;
-	
+
     a = (FILE_MEDIA) m;
     rtn_value = 0;
     if (a == 0) {
@@ -311,7 +289,7 @@ write_file_media(MEDIA m, long long offset, unsigned long count, void *address)
     } else {
 	/* do the write  */
 	off = offset;
-	if ((off = llseek(a->fd, off, 0)) >= 0) {
+	if ((off = llseek(a->fd, off, SEEK_SET)) >= 0) {
 	    if ((t = write(a->fd, address, count)) == count) {
 		if (off + count > a->m.size_in_bytes) {
 			a->m.size_in_bytes = off + count;
@@ -347,11 +325,7 @@ os_reload_file_media(MEDIA m)
 {
     FILE_MEDIA a;
     long rtn_value;
-#ifdef __linux__
-    int i;
-    int saved_errno;
-#endif
-	
+
     a = (FILE_MEDIA) m;
     rtn_value = 0;
     if (a == 0) {
@@ -362,39 +336,10 @@ os_reload_file_media(MEDIA m)
 	/* okay - nothing to do */
 	rtn_value = 1;
     } else {
-#ifdef __linux__
-	sync();
-	sleep(2);
-	if ((i = ioctl(a->fd, BLKRRPART)) != 0) {
-	    saved_errno = errno;
-	} else {
-	    // some kernel versions (1.2.x) seem to have trouble
-	    // rereading the partition table, but if asked to do it
-	    // twice, the second time works. - biro@yggdrasil.com */
-	    sync();
-	    sleep(2);
-	    if ((i = ioctl(a->fd, BLKRRPART)) != 0) {
-		saved_errno = errno;
-	    }
-	}
-
-	// printf("Syncing disks.\n");
-	sync();
-	sleep(4);		/* for sync() */
-
-	if (i < 0) {
-	    error(saved_errno, "Re-read of partition table failed");
-	    printf("Reboot your system to ensure the "
-		    "partition table is updated.\n");
-	}
-#endif
 	rtn_value = 1;
     }
     return rtn_value;
 }
-
-
-#pragma mark -
 
 
 FILE_MEDIA_ITERATOR
@@ -450,7 +395,9 @@ step_file_iterator(MEDIA_ITERATOR m)
     FILE_MEDIA_ITERATOR a;
     char *result;
     struct stat info;
-    size_t len = 20;
+    int	fd;
+    int bump;
+    int value;
 
     a = (FILE_MEDIA_ITERATOR) m;
     if (a == 0) {
@@ -479,7 +426,7 @@ step_file_iterator(MEDIA_ITERATOR m)
 		}
 #endif
 		/* generate result */
-		result = (char *) malloc(len);
+		result = (char *) malloc(20);
 		if (result != NULL) {
 		    /*
 		     * for DR3 we should actually iterate through:
@@ -489,35 +436,58 @@ step_file_iterator(MEDIA_ITERATOR m)
 		     *    /dev/scd[0...]   # first missing is end of list
 		     *
 		     * and stop in each group when either a stat of
-		     * the name fails or if an open fails (except opens
-		     * will fail if you run not as root)
+		     * the name fails or if an open fails for
+		     * particular reasons.
 		     */
+		    bump = 0;
+		    value = (int) a->index;
 		    switch (a->style) {
 		    case kSCSI_Disks:
-#ifdef __OpenBSD__
-			snprintf(result, len, "/dev/sd%dc", (int)a->index);
-#else
-			snprintf(result, len, "/dev/sd%c", 'a'+(int)a->index);
-#endif
+			if (value < 26) {
+			    snprintf(result, 20, "/dev/sd%c", 'a'+value);
+			} else if (value < 676) {
+			    snprintf(result, 20, "/dev/sd%c%c",
+				    'a' + value / 26,
+				    'a' + value % 26);
+			} else {
+			    bump = -1;
+			}
 			break;
 		    case kATA_Devices:
-#ifdef __OpenBSD__
-			snprintf(result, len, "/dev/wd%dc", (int)a->index);
-#else
-			snprintf(result, len, "/dev/hd%c", 'a'+(int)a->index);
-#endif
+			if (value < 26) {
+			    snprintf(result, 20, "/dev/hd%c", 'a'+value);
+			} else {
+			    bump = -1;
+			}
 			break;
 		    case kSCSI_CDs:
-#ifdef __OpenBSD__
-			snprintf(result, len, "/dev/cd%dc", (int)a->index);
-#else
-			snprintf(result, len, "/dev/scd%c", '0'+(int)a->index);
-#endif
+			if (value < 10) {
+			    snprintf(result, 20, "/dev/scd%c", '0'+value);
+			} else {
+			    bump = -1;
+			}
 			break;
 		    }
-		    if (stat(result, &info) < 0) {
-			a->style += 1; /* next style */
-			a->index = 0; /* first index again */
+		    if (bump != 0) {
+			// already set don't even check
+		    } else if (stat(result, &info) < 0) {
+			bump = 1;
+		    } else if ((fd = open(result, O_RDONLY)) >= 0) {
+			close(fd);
+		    } else if (errno == ENXIO || errno == ENODEV) {
+			if (a->style == kATA_Devices) {
+			    bump = -1;
+			} else {
+			    bump = 1;
+			}
+		    }
+		    if (bump) {
+			if (bump > 0) {
+			    a->style += 1; /* next style */
+			    a->index = 0; /* first index again */
+			} else {
+			    a->index += 1; /* next index */
+			}
 			free(result);
 			continue;
 		    }

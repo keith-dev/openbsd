@@ -1,5 +1,5 @@
 %{
-/*	$OpenBSD: date.y,v 1.11 2006/01/02 08:11:56 xsa Exp $	*/
+/*	$OpenBSD: date.y,v 1.13 2006/05/03 14:26:13 ray Exp $	*/
 
 /*
 **  Originally written by Steven M. Bellovin <smb@research.att.com> while
@@ -484,23 +484,20 @@ static int
 yyerror(const char *s)
 {
 	char *str;
-	int n;
 
 	if (isspace(yyInput[0]) || !isprint(yyInput[0]))
-		n = asprintf(&str, "%s: unexpected char 0x%02x in date string",
+		(void)xasprintf(&str, "%s: unexpected char 0x%02x in date string",
 		    s, yyInput[0]);
 	else
-		n = asprintf(&str, "%s: unexpected %s in date string",
+		(void)xasprintf(&str, "%s: unexpected %s in date string",
 		    s, yyInput);
-	if (n == -1)
-		return (0);
 
 #if defined(TEST)
 	printf("%s", str);
 #else
 	cvs_log(LP_ERR, "%s", str);
 #endif
-	free(str);
+	xfree(str);
 	return (0);
 }
 
@@ -814,41 +811,33 @@ difftm(struct tm *a, struct tm *b)
 time_t
 cvs_date_parse(const char *p)
 {
-	struct tm	*tm, gmt;
+	struct tm	gmt, *gmt_ptr, *tm;
 	struct timeb	ftz, *now;
 	time_t		Start, tod, nowtime;
 
-	now = NULL;
-
 	yyInput = p;
-	if (now == NULL) {
-		struct tm *gmt_ptr;
 
-		now = &ftz;
-		(void)time(&nowtime);
+	now = &ftz;
+	(void)time(&nowtime);
 
-		gmt_ptr = gmtime(&nowtime);
-		if (gmt_ptr != NULL) {
-			/* Make a copy, in case localtime modifies *tm (I think
-			 * that comment now applies to *gmt_ptr, but I am too
-			 * lazy to dig into how gmtime and locatime allocate the
-			 * structures they return pointers to).
-			 */
-			gmt = *gmt_ptr;
-		}
-
-		if (!(tm = localtime(&nowtime)))
-			return (-1);
-
-		if (gmt_ptr != NULL)
-			ftz.timezone = difftm(&gmt, tm) / 60;
-
-		if (tm->tm_isdst)
-			ftz.timezone += 60;
+	gmt_ptr = gmtime(&nowtime);
+	if (gmt_ptr != NULL) {
+		/* Make a copy, in case localtime modifies *tm (I think
+		 * that comment now applies to *gmt_ptr, but I am too
+		 * lazy to dig into how gmtime and locatime allocate the
+		 * structures they return pointers to).
+		 */
+		gmt = *gmt_ptr;
 	}
-	else {
-		nowtime = now->time;
-	}
+
+	if (!(tm = localtime(&nowtime)))
+		return (-1);
+
+	if (gmt_ptr != NULL)
+		ftz.timezone = difftm(&gmt, tm) / 60;
+
+	if (tm->tm_isdst)
+		ftz.timezone += 60;
 
 	tm = localtime(&nowtime);
 	yyYear = tm->tm_year + 1900;

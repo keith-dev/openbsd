@@ -1,4 +1,4 @@
-/*	$OpenBSD: sensorsd.c,v 1.20 2006/02/06 21:32:20 moritz Exp $ */
+/*	$OpenBSD: sensorsd.c,v 1.24 2006/09/16 10:46:26 mickey Exp $ */
 
 /*
  * Copyright (c) 2003 Henning Brauer <henning@openbsd.org>
@@ -36,18 +36,14 @@
 #define REPORT_PERIOD	60	/* report every n seconds */
 #define CHECK_PERIOD	60	/* check every n seconds */
 
-int		 main(int, char *[]);
+void		 usage(void);
 void		 check_sensors(void);
+void		 execute(char *);
 void		 report(time_t);
 static char	*print_sensor(enum sensor_type, int64_t);
 int		 parse_config(char *);
 int64_t		 get_val(char *, int, enum sensor_type);
 void		 reparse_cfg(int);
-
-enum sensorsd_status {
-	STATUS_OK,
-	STATUS_FAIL
-};
 
 struct limits_t {
 	TAILQ_ENTRY(limits_t)	entries;
@@ -105,7 +101,7 @@ main(int argc, char *argv[])
 		if (sysctl(mib, 3, &sensor, &len, NULL, 0) == -1) {
 			if (errno != ENOENT)
 				warn("sysctl");
-			break;
+			continue;
 		}
 		if (sensor.flags & SENSOR_FINVALID)
 			continue;
@@ -174,11 +170,11 @@ main(int argc, char *argv[])
 void
 check_sensors(void)
 {
-	struct sensor	 sensor;
-	struct limits_t	*limit;
-	size_t		 len;
-	int		 mib[3];
-	int		 newstatus;
+	struct sensor		 sensor;
+	struct limits_t		*limit;
+	size_t		 	 len;
+	int		 	 mib[3];
+	enum sensor_status 	 newstatus;
 
 	mib[0] = CTL_HW;
 	mib[1] = HW_SENSORS;
@@ -191,11 +187,18 @@ check_sensors(void)
 				err(1, "sysctl");
 
 			limit->last_val = sensor.value;
-			if (sensor.value > limit->upper ||
-			    sensor.value < limit->lower)
-				newstatus = STATUS_FAIL;
-			else
-				newstatus = STATUS_OK;
+			newstatus = sensor.status;
+			/* unknown may as well mean producing valid
+			 * status had failed so warn about it */
+			if (newstatus == SENSOR_S_UNKNOWN)
+				newstatus = SENSOR_S_WARN;
+			else if (newstatus == SENSOR_S_UNSPEC) {
+				if (sensor.value > limit->upper ||
+				    sensor.value < limit->lower)
+					newstatus = SENSOR_S_CRIT;
+				else
+					newstatus = SENSOR_S_OK;
+			}
 
 			if (limit->status != newstatus) {
 				limit->status = newstatus;
@@ -233,7 +236,7 @@ report(time_t last_report)
 
 		syslog(LOG_ALERT, "hw.sensors.%d: %s limits, value: %s",
 		    limit->num,
-		    (limit->status == STATUS_FAIL) ? "exceed" : "within",
+		    (limit->status != SENSOR_S_OK) ? "exceed" : "within",
 		    print_sensor(limit->type, limit->last_val));
 		if (limit->command) {
 			int i = 0, n = 0, r;
@@ -296,6 +299,11 @@ report(time_t last_report)
 	}
 }
 
+const char *drvstat[] = {
+	NULL, "empty", "ready", "powerup", "online", "idle", "active",
+	"rebuild", "powerdown", "fail", "pfail"
+};
+
 static char *
 print_sensor(enum sensor_type type, int64_t value)
 {
@@ -309,19 +317,36 @@ print_sensor(enum sensor_type type, int64_t value)
 
 	switch (type) {
 	case SENSOR_TEMP:
-		snprintf(fbuf, RFBUFSIZ, "%.2fC/%.2fF",
-		    (value - 273150000) / 1000000.0,
-		    (value - 273150000) / 1000000.0 * 9 / 5 + 32);
+		snprintf(fbuf, RFBUFSIZ, "%.2f degC",
+		    (value - 273150000) / 1000000.0);
 		break;
 	case SENSOR_FANRPM:
 		snprintf(fbuf, RFBUFSIZ, "%lld RPM", value);
 		break;
 	case SENSOR_VOLTS_DC:
-		snprintf(fbuf, RFBUFSIZ, "%.2fV", value / 1000.0 / 1000.0);
+		snprintf(fbuf, RFBUFSIZ, "%.2f V DC", value / 1000000.0);
+		break;
+	case SENSOR_AMPS:
+		snprintf(fbuf, RFBUFSIZ, "%.2f A", value / 1000000.0);
+		break;
+	case SENSOR_INDICATOR:
+		snprintf(fbuf, RFBUFSIZ, "%s", value? "On" : "Off");
 		break;
 	case SENSOR_INTEGER:
-		snprintf(fbuf, RFBUFSIZ, "%lld", value);
+		snprintf(fbuf, RFBUFSIZ, "%lld raw", value);
 		break;
+	case SENSOR_PERCENT:
+		snprintf(fbuf, RFBUFSIZ, "%.2f%%", value / 1000.0);
+		break;
+	case SENSOR_LUX:
+		snprintf(fbuf, RFBUFSIZ, "%.2f lx", value / 1000000.0);
+		break;
+	case SENSOR_DRIVE:
+		if (0 < value && value < sizeof(drvstat)/sizeof(drvstat[0])) {
+			snprintf(fbuf, RFBUFSIZ, "%s", drvstat[value]);
+			break;
+		}
+		/* FALLTHROUGH */
 	default:
 		snprintf(fbuf, RFBUFSIZ, "%lld ???", value);
 	}
@@ -410,8 +435,16 @@ get_val(char *buf, int upper, enum sensor_type type)
 			errx(1, "unknown unit %s for voltage sensor", p);
 		rval = val * 1000 * 1000;
 		break;
+	case SENSOR_PERCENT:
+		rval = val * 1000.0;
+		break;
+	case SENSOR_INDICATOR:
 	case SENSOR_INTEGER:
+	case SENSOR_DRIVE:
 		rval = val;
+		break;
+	case SENSOR_LUX:
+		rval = val * 1000 * 1000;
 		break;
 	default:
 		errx(1, "unsupported sensor type");

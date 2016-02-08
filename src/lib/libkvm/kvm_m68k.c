@@ -1,4 +1,4 @@
-/*	$OpenBSD: kvm_m68k.c,v 1.15 2004/09/15 19:31:31 miod Exp $ */
+/*	$OpenBSD: kvm_m68k.c,v 1.17 2006/06/12 18:00:08 miod Exp $ */
 /*	$NetBSD: kvm_m68k.c,v 1.9 1996/05/07 06:09:11 leo Exp $	*/
 
 /*-
@@ -38,7 +38,7 @@
 #if 0
 static char sccsid[] = "@(#)kvm_hp300.c	8.1 (Berkeley) 6/4/93";
 #else
-static char *rcsid = "$OpenBSD: kvm_m68k.c,v 1.15 2004/09/15 19:31:31 miod Exp $";
+static char *rcsid = "$OpenBSD: kvm_m68k.c,v 1.17 2006/06/12 18:00:08 miod Exp $";
 #endif
 #endif /* LIBC_SCCS and not lint */
 
@@ -154,7 +154,7 @@ _kvm_vatop(kvm_t *kd, st_entry_t *sta, u_long va, u_long *pa)
 		sta2 = (st_entry_t *)(ste & SG4_ADDR2);
 		addr = (u_long)&sta2[(va & SG4_MASK3) >> SG4_SHIFT3];
 	} else {
-		addr = (u_long)&sta[va >> SEGSHIFT];
+		addr = (u_long)&sta[va >> SEGSHIFT020];
 		/*
 		 * Can't use KREAD to read kernel segment table entries.
 		 * Fortunately it is 1-to-1 mapped so we don't have to.
@@ -192,7 +192,7 @@ invalid:
 }
 
 int
-_kvm_kvatop(kvm_t *kd, u_long va, u_long *pa)
+_kvm_kvatop(kvm_t *kd, u_long va, paddr_t *pa)
 {
 	cpu_kcore_hdr_t *cpu_kh;
 
@@ -204,7 +204,7 @@ _kvm_kvatop(kvm_t *kd, u_long va, u_long *pa)
  * Translate a physical address to a file-offset in the crash-dump.
  */
 off_t
-_kvm_pa2off(kvm_t *kd, u_long pa)
+_kvm_pa2off(kvm_t *kd, paddr_t pa)
 {
 	cpu_kcore_hdr_t *cpu_kh;
 	phys_ram_seg_t	*rsp;

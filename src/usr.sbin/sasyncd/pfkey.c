@@ -1,4 +1,4 @@
-/*	$OpenBSD: pfkey.c,v 1.13 2006/02/15 05:09:29 david Exp $	*/
+/*	$OpenBSD: pfkey.c,v 1.18 2006/09/01 01:13:25 mpf Exp $	*/
 
 /*
  * Copyright (c) 2005 Håkan Olsson.  All rights reserved.
@@ -46,9 +46,10 @@
 #include <unistd.h>
 
 #include "sasyncd.h"
+#include "monitor.h"
 #include "net.h"
 
-struct pfkey_msg 
+struct pfkey_msg
 {
 	SIMPLEQ_ENTRY(pfkey_msg)	next;
 
@@ -72,11 +73,15 @@ static int
 pfkey_write(u_int8_t *buf, ssize_t len)
 {
 	struct sadb_msg *msg = (struct sadb_msg *)buf;
+	ssize_t n;
 
 	if (cfgstate.pfkey_socket == -1)
 		return 0;
 
-	if (write(cfgstate.pfkey_socket, buf, len) != len) {
+	do {
+		n = write(cfgstate.pfkey_socket, buf, len);
+	} while (n == -1 && (errno == EAGAIN || errno == EINTR));
+	if (n == -1) {
 		log_err("pfkey: msg %s write() failed on socket %d",
 		    pfkey_print_type(msg), cfgstate.pfkey_socket);
 		return -1;
@@ -128,7 +133,7 @@ static const char *
 pfkey_print_type(struct sadb_msg *msg)
 {
 	static char	uk[20];
-	
+
 	if (msg->sadb_msg_type < sizeof msgtypes / sizeof msgtypes[0])
 		return msgtypes[msg->sadb_msg_type];
 	else {
@@ -166,6 +171,16 @@ pfkey_msg_filter(struct sadb_msg *msg)
 	u_int8_t		*max;
 
 	switch (msg->sadb_msg_type) {
+	case SADB_X_PROMISC:
+	case SADB_DUMP:
+	case SADB_GET:
+	case SADB_GETSPI:
+	case SADB_ACQUIRE:
+	case SADB_X_ASKPOLICY:
+	case SADB_REGISTER:
+		/* Some messages should not be synced. */
+		return 1;
+
 	case SADB_ADD:
 		/* No point in syncing LARVAL SAs */
 		if (pfkey_find_ext(msg, SADB_EXT_KEY_ENCRYPT) == 0)
@@ -223,12 +238,12 @@ pfkey_msg_filter(struct sadb_msg *msg)
 				return 1;
 			break;
 		case AF_INET6:
-			if (src && 
+			if (src &&
 			    memcmp(&((struct sockaddr_in6 *)p->sa)->sin6_addr,
 			    &((struct sockaddr_in6 *)src)->sin6_addr,
 			    sizeof(struct in_addr)) == 0)
 				return 1;
-			if (dst && 
+			if (dst &&
 			    memcmp(&((struct sockaddr_in6 *)p->sa)->sin6_addr,
 			    &((struct sockaddr_in6 *)dst)->sin6_addr,
 			    sizeof(struct in_addr)) == 0)
@@ -279,15 +294,6 @@ pfkey_handle_message(struct sadb_msg *m)
 	}
 
 	switch (msg->sadb_msg_type) {
-	case SADB_X_PROMISC:
-	case SADB_DUMP:
-	case SADB_GET:
-	case SADB_GETSPI:
-	/* case SADB_REGISTER: */
-		/* Some messages should not be synced. */
-		free(m);
-		break;
-
 	case SADB_UPDATE:
 		/*
 		 * Tweak -- the peers do not have a larval SA to update, so
@@ -396,6 +402,7 @@ pfkey_send_message(fd_set *fds)
 	SIMPLEQ_REMOVE_HEAD(&pfkey_msglist, next);
 	free(pmsg->buf);
 	free(pmsg);
+
 	return;
 }
 
@@ -453,7 +460,7 @@ pfkey_snapshot(void *v)
 
 	if (!p)
 		return;
-		
+
 	if (monitor_get_pfkey_snap(&sadb, &sadbsz, &spd, &spdsz)) {
 		log_msg(0, "pfkey_snapshot: failed to get pfkey snapshot");
 		return;
@@ -505,7 +512,7 @@ pfkey_snapshot(void *v)
 
 			/* Tweak msg type. */
 			m->sadb_msg_type = SADB_X_ADDFLOW;
-			
+
 			if (pfkey_msg_filter(m))
 				continue;
 
@@ -524,5 +531,7 @@ pfkey_snapshot(void *v)
 		memset(spd, 0, spdsz);
 		free(spd);
 	}
+
+	net_ctl_send_endsnap(p);
 	return;
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: rcsclean.c,v 1.23 2006/01/05 10:28:24 xsa Exp $	*/
+/*	$OpenBSD: rcsclean.c,v 1.47 2006/05/27 05:49:14 ray Exp $	*/
 /*
  * Copyright (c) 2005 Joris Vink <joris@openbsd.org>
  * All rights reserved.
@@ -29,7 +29,8 @@
 #include "rcsprog.h"
 #include "diff.h"
 
-static int rcsclean_file(char *, RCSNUM *);
+static void	rcsclean_file(char *, const char *);
+
 static int nflag = 0;
 static int kflag = RCS_KWEXP_ERR;
 static int uflag = 0;
@@ -40,49 +41,50 @@ int
 rcsclean_main(int argc, char **argv)
 {
 	int i, ch;
-	RCSNUM *rev;
+	char *rev_str;
 	DIR *dirp;
 	struct dirent *dp;
 
-	rev = RCS_HEAD_REV;
+	rev_str = NULL;
 
-	while ((ch = rcs_getopt(argc, argv, "k:n::q::r:Tu::Vx:")) != -1) {
+	while ((ch = rcs_getopt(argc, argv, "k:n::q::r::Tu::Vx::")) != -1) {
 		switch (ch) {
 		case 'k':
 			kflag = rcs_kflag_get(rcs_optarg);
 			if (RCS_KWEXP_INVAL(kflag)) {
-				cvs_log(LP_ERR,
-				    "invalid RCS keyword expansion mode");
+				warnx("invalid RCS keyword substitution mode");
 				(usage)();
 				exit(1);
 			}
 			break;
 		case 'n':
-			rcs_set_rev(rcs_optarg, &rev);
+			rcs_setrevstr(&rev_str, rcs_optarg);
 			nflag = 1;
 			break;
 		case 'q':
-			rcs_set_rev(rcs_optarg, &rev);
-			verbose = 0;
+			rcs_setrevstr(&rev_str, rcs_optarg);
+			flags |= QUIET;
 			break;
 		case 'r':
-			rcs_set_rev(rcs_optarg, &rev);
+			rcs_setrevstr(&rev_str, rcs_optarg);
 			break;
 		case 'T':
 			flags |= PRESERVETIME;
 			break;
 		case 'u':
-			rcs_set_rev(rcs_optarg, &rev);
+			rcs_setrevstr(&rev_str, rcs_optarg);
 			uflag = 1;
 			break;
 		case 'V':
 			printf("%s\n", rcs_version);
 			exit(0);
 		case 'x':
-			rcs_suffixes = rcs_optarg;
+			/* Use blank extension if none given. */
+			rcs_suffixes = rcs_optarg ? rcs_optarg : "";
 			break;
 		default:
-			break;
+			(usage)();
+			exit(1);
 		}
 	}
 
@@ -90,11 +92,11 @@ rcsclean_main(int argc, char **argv)
 	argv += rcs_optind;
 
 	if ((locker = getlogin()) == NULL)
-		fatal("getlogin failed");
+		err(1, "getlogin");
 
 	if (argc == 0) {
 		if ((dirp = opendir(".")) == NULL) {
-			cvs_log(LP_ERRNO, "failed to open directory '.'");
+			warn("opendir");
 			(usage)();
 			exit(1);
 		}
@@ -102,14 +104,13 @@ rcsclean_main(int argc, char **argv)
 		while ((dp = readdir(dirp)) != NULL) {
 			if (dp->d_type == DT_DIR)
 				continue;
-			rcsclean_file(dp->d_name, rev);
+			rcsclean_file(dp->d_name, rev_str);
 		}
 
-		closedir(dirp);
-	} else {
+		(void)closedir(dirp);
+	} else
 		for (i = 0; i < argc; i++)
-			rcsclean_file(argv[i], rev);
-	}
+			rcsclean_file(argv[i], rev_str);
 
 	return (0);
 }
@@ -118,84 +119,79 @@ void
 rcsclean_usage(void)
 {
 	fprintf(stderr,
-	    "usage: rcsclean [-V] [-kmode] [-n[rev]] [-q[rev]]\n"
-	    "                [-rrev] [-u[rev]] [-xsuffixes] [file] ...\n");
+	    "usage: rcsclean [-TV] [-kmode] [-n[rev]] [-q[rev]] [-r[rev]]\n"
+	    "                [-u[rev]] [-xsuffixes] [-ztz] [file] ...\n");
 }
 
-static int
-rcsclean_file(char *fname, RCSNUM *rev)
+static void
+rcsclean_file(char *fname, const char *rev_str)
 {
-	int match;
+	int fd, match;
 	RCSFILE *file;
 	char fpath[MAXPATHLEN], numb[64];
-	RCSNUM *frev;
+	RCSNUM *rev;
 	BUF *b1, *b2;
-	char *s1, *s2, *c1, *c2;
-	struct stat st;
 	time_t rcs_mtime = -1;
 
-	match = 1;
+	b1 = b2 = NULL;
+	file = NULL;
+	rev = NULL;
 
-	if (stat(fname, &st) == -1)
-		return (-1);
+	if ((fd = rcs_choosefile(fname, fpath, sizeof(fpath))) < 0)
+		goto out;
 
-	if (rcs_statfile(fname, fpath, sizeof(fpath)) < 0)
-		return (-1);
-
-	if ((file = rcs_open(fpath, RCS_RDWR)) == NULL)
-		return (-1);
+	if ((file = rcs_open(fpath, fd, RCS_RDWR)) == NULL)
+		goto out;
 
 	if (flags & PRESERVETIME)
-		rcs_mtime = rcs_get_mtime(file->rf_path);
+		rcs_mtime = rcs_get_mtime(file);
 
-	if (!RCS_KWEXP_INVAL(kflag))
-		rcs_kwexp_set(file, kflag);
+	rcs_kwexp_set(file, kflag);
 
-	if (rev == RCS_HEAD_REV)
-		frev = file->rf_head;
-	else
-		frev = rev;
-
-	if ((b1 = rcs_getrev(file, frev)) == NULL) {
-		cvs_log(LP_ERR, "failed to get needed revision");
-		rcs_close(file);
-		return (-1);
+	if (rev_str == NULL)
+		rev = file->rf_head;
+	else if ((rev = rcs_getrevnum(rev_str, file)) == NULL) {
+		warnx("%s: Symbolic name `%s' is undefined.", fpath, rev_str);
+		goto out;
 	}
 
-	if ((b2 = cvs_buf_load(fname, BUF_AUTOEXT)) == NULL) {
-		cvs_log(LP_ERRNO, "failed to load '%s'", fname);
-		rcs_close(file);
-		return (-1);
+	if ((b1 = rcs_getrev(file, rev)) == NULL) {
+		warnx("failed to get needed revision");
+		goto out;
+	}
+	if ((b2 = rcs_buf_load(fname, 0)) == NULL) {
+		warnx("failed to load `%s'", fname);
+		goto out;
 	}
 
-	cvs_buf_putc(b1, '\0');
-	cvs_buf_putc(b2, '\0');
+	/* If buffer lengths are the same, compare contents as well. */
+	if (rcs_buf_len(b1) != rcs_buf_len(b2))
+		match = 0;
+	else {
+		size_t len, n;
 
-	c1 = cvs_buf_release(b1);
-	c2 = cvs_buf_release(b2);
+		len = rcs_buf_len(b1);
 
-	for (s1 = c1, s2 = c2; *s1 && *s2; *s1++, *s2++) {
-		if (*s1 != *s2) {
-			match = 0;
-			break;
-		}
+		match = 1;
+		for (n = 0; n < len; ++n)
+			if (rcs_buf_getc(b1, n) != rcs_buf_getc(b2, n)) {
+				match = 0;
+				break;
+			}
 	}
-
-	xfree(c1);
-	xfree(c2);
 
 	if (match == 1) {
-		if ((uflag == 1) && (!TAILQ_EMPTY(&(file->rf_locks)))) {
-			if ((verbose == 1) && (nflag == 0)) {
+		if (uflag == 1 && !TAILQ_EMPTY(&(file->rf_locks))) {
+			if (!(flags & QUIET) && nflag == 0) {
 				printf("rcs -u%s %s\n",
-				    rcsnum_tostr(frev, numb, sizeof(numb)),
+				    rcsnum_tostr(rev, numb, sizeof(numb)),
 				    fpath);
 			}
-			(void)rcs_lock_remove(file, locker, frev);
+			(void)rcs_lock_remove(file, locker, rev);
 		}
 
 		if (TAILQ_EMPTY(&(file->rf_locks))) {
-			if (verbose == 1)
+			if (!(flags & QUIET))
 				printf("rm -f %s\n", fname);
 
 			if (nflag == 0)
@@ -203,10 +199,15 @@ rcsclean_file(char *fname, RCSNUM *rev)
 		}
 	}
 
-	rcs_close(file);
-
+	rcs_write(file);
 	if (flags & PRESERVETIME)
-		rcs_set_mtime(fpath, rcs_mtime);
+		rcs_set_mtime(file, rcs_mtime);
 
-	return (0);
+out:
+	if (b1 != NULL)
+		rcs_buf_free(b1);
+	if (b2 != NULL)
+		rcs_buf_free(b2);
+	if (file != NULL)
+		rcs_close(file);
 }

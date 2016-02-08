@@ -1,4 +1,4 @@
-/*	$OpenBSD: diff3.c,v 1.14 2006/02/26 10:07:50 xsa Exp $	*/
+/*	$OpenBSD: diff3.c,v 1.26 2006/07/08 09:25:44 ray Exp $	*/
 
 /*
  * Copyright (C) Caldera International Inc.  2001-2002.
@@ -72,7 +72,7 @@ static const char copyright[] =
 
 #ifndef lint
 static const char rcsid[] =
-    "$OpenBSD: diff3.c,v 1.14 2006/02/26 10:07:50 xsa Exp $";
+    "$OpenBSD: diff3.c,v 1.26 2006/07/08 09:25:44 ray Exp $";
 #endif /* not lint */
 
 #include "includes.h"
@@ -140,10 +140,10 @@ static int edit(struct diff *, int, int);
 static char *getchange(FILE *);
 static char *getline(FILE *, size_t *);
 static int number(char **);
-static int readin(char *, struct diff **);
+static size_t readin(char *, struct diff **);
 static int skip(int, int, char *);
 static int edscript(int);
-static int merge(int, int);
+static int merge(size_t, size_t);
 static void change(int, struct range *, int);
 static void keep(int, struct range *);
 static void prange(struct range *);
@@ -155,29 +155,31 @@ static int diff3_internal(int, char **, const char *, const char *);
 int diff3_conflicts = 0;
 
 BUF *
-cvs_diff3(RCSFILE *rf, char *workfile, RCSNUM *rev1, RCSNUM *rev2)
+cvs_diff3(RCSFILE *rf, char *workfile, int workfd, RCSNUM *rev1,
+	RCSNUM *rev2, int verbose)
 {
-	int ret, argc;
+	int argc;
 	char *data, *patch;
 	char *argv[5], r1[16], r2[16];
 	char path1[MAXPATHLEN], path2[MAXPATHLEN], path3[MAXPATHLEN];
 	char dp13[MAXPATHLEN], dp23[MAXPATHLEN];
 	BUF *b1, *b2, *b3, *d1, *d2, *diffb;
 
-	ret = -1;
 	b1 = b2 = b3 = d1 = d2 = diffb = NULL;
 
 	rcsnum_tostr(rev1, r1, sizeof(r1));
 	rcsnum_tostr(rev2, r2, sizeof(r2));
 
-	if ((b1 = cvs_buf_load(workfile, BUF_AUTOEXT)) == NULL)
+	if ((b1 = cvs_buf_load_fd(workfd, BUF_AUTOEXT)) == NULL)
 		goto out;
 
-	cvs_printf("Retrieving revision %s\n", r1);
+	if (verbose == 1)
+		cvs_printf("Retrieving revision %s\n", r1);
 	if ((b2 = rcs_getrev(rf, rev1)) == NULL)
 		goto out;
 
-	cvs_printf("Retrieving revision %s\n", r2);
+	if (verbose == 1)
+		cvs_printf("Retrieving revision %s\n", r2);
 	if ((b3 = rcs_getrev(rf, rev2)) == NULL)
 		goto out;
 
@@ -186,13 +188,13 @@ cvs_diff3(RCSFILE *rf, char *workfile, RCSNUM *rev1, RCSNUM *rev2)
 	diffb = cvs_buf_alloc((size_t)128, BUF_AUTOEXT);
 
 	strlcpy(path1, "/tmp/diff1.XXXXXXXXXX", sizeof(path1));
-	cvs_buf_write_stmp(b1, path1, 0600);
+	cvs_buf_write_stmp(b1, path1, NULL);
 
 	strlcpy(path2, "/tmp/diff2.XXXXXXXXXX", sizeof(path2));
-	cvs_buf_write_stmp(b2, path2, 0600);
+	cvs_buf_write_stmp(b2, path2, NULL);
 
 	strlcpy(path3, "/tmp/diff3.XXXXXXXXXX", sizeof(path3));
-	cvs_buf_write_stmp(b3, path3, 0600);
+	cvs_buf_write_stmp(b3, path3, NULL);
 
 	cvs_buf_free(b2);
 	b2 = NULL;
@@ -201,13 +203,13 @@ cvs_diff3(RCSFILE *rf, char *workfile, RCSNUM *rev1, RCSNUM *rev2)
 	cvs_diffreg(path2, path3, d2);
 
 	strlcpy(dp13, "/tmp/d13.XXXXXXXXXX", sizeof(dp13));
-	cvs_buf_write_stmp(d1, dp13, 0600);
+	cvs_buf_write_stmp(d1, dp13, NULL);
 
 	cvs_buf_free(d1);
 	d1 = NULL;
 
 	strlcpy(dp23, "/tmp/d23.XXXXXXXXXX", sizeof(dp23));
-	cvs_buf_write_stmp(d2, dp23, 0600);
+	cvs_buf_write_stmp(d2, dp23, NULL);
 
 	cvs_buf_free(d2);
 	d2 = NULL;
@@ -234,15 +236,12 @@ cvs_diff3(RCSFILE *rf, char *workfile, RCSNUM *rev1, RCSNUM *rev2)
 	data = cvs_buf_release(b1);
 	diffb = b1 = NULL;
 
-	cvs_printf("Merging differences between %s and %s into %s\n",
-	    r1, r2, workfile);
-
 	if ((diffb = cvs_patchfile(data, patch, ed_patch_lines)) == NULL)
 		goto out;
 
-	if (diff3_conflicts != 0) {
-		cvs_printf("%d conflict%s found during merge, "
-		    "please correct.\n", diff3_conflicts,
+	if (verbose == 1 && diff3_conflicts != 0) {
+		cvs_log(LP_ERR, "%d conflict%s found during merge, "
+		    "please correct.", diff3_conflicts,
 		    (diff3_conflicts > 1) ? "s" : "");
 	}
 
@@ -273,7 +272,8 @@ out:
 static int
 diff3_internal(int argc, char **argv, const char *fmark, const char *rmark)
 {
-	int i, m, n;
+	size_t m, n;
+	int i;
 
 	/* XXX */
 	eflag = 3;
@@ -294,7 +294,7 @@ diff3_internal(int argc, char **argv, const char *fmark, const char *rmark)
 
 	for (i = 0; i <= 2; i++) {
 		if ((fp[i] = fopen(argv[i + 2], "r")) == NULL) {
-			cvs_log(LP_ERRNO, "%s", argv[i + 2]);
+			cvs_log(LP_ERR, "%s", argv[i + 2]);
 			return (-1);
 		}
 	}
@@ -307,30 +307,30 @@ ed_patch_lines(struct cvs_lines *dlines, struct cvs_lines *plines)
 {
 	char op, *ep;
 	struct cvs_line *sort, *lp, *dlp, *ndlp;
-	int start, end, busy, i, lineno;
+	int start, end, i, lineno;
 
 	dlp = TAILQ_FIRST(&(dlines->l_lines));
 	lp = TAILQ_FIRST(&(plines->l_lines));
 
-	busy = end = 0;
+	end = 0;
 	for (lp = TAILQ_NEXT(lp, l_list); lp != NULL;
 	    lp = TAILQ_NEXT(lp, l_list)) {
 		op = lp->l_line[strlen(lp->l_line) - 1];
 		start = (int)strtol(lp->l_line, &ep, 10);
 		if (op == 'a') {
-			if ((start > dlines->l_nblines) ||
-			    (start < 0) || (*ep != 'a'))
-				return (-1);
+			if (start > dlines->l_nblines ||
+			    start < 0 || *ep != 'a')
+				fatal("ed_patch_lines");
 		} else if (op == 'c') {
-			if ((start > dlines->l_nblines) ||
-			    (start < 0) || ((*ep != ',') && (*ep != 'c')))
-				return (-1);
+			if (start > dlines->l_nblines ||
+			    start < 0 || (*ep != ',' && *ep != 'c'))
+				fatal("ed_patch_lines");
 
 			if (*ep == ',') {
 				ep++;
 				end = (int)strtol(ep, &ep, 10);
-				if ((end < 0) || (*ep != 'c'))
-					return (-1);
+				if (end < 0 || *ep != 'c')
+					fatal("ed_patch_lines");
 			} else {
 				end = start;
 			}
@@ -353,7 +353,7 @@ ed_patch_lines(struct cvs_lines *dlines, struct cvs_lines *plines)
 		}
 
 		if (dlp == NULL)
-			return (-1);
+			fatal("ed_patch_lines");
 
 
 		if (op == 'c') {
@@ -370,7 +370,7 @@ ed_patch_lines(struct cvs_lines *dlines, struct cvs_lines *plines)
 				ndlp = lp;
 				lp = TAILQ_NEXT(lp, l_list);
 				if (lp == NULL)
-					return (-1);
+					fatal("ed_patch_lines");
 
 				if (!strcmp(lp->l_line, "."))
 					break;
@@ -404,7 +404,7 @@ ed_patch_lines(struct cvs_lines *dlines, struct cvs_lines *plines)
  * since the vector is processed in one sequential pass.
  * The vector could be optimized out of existence)
  */
-static int
+static size_t
 readin(char *name, struct diff **dd)
 {
 	int a, b, c, d;
@@ -486,10 +486,12 @@ getline(FILE *b, size_t *n)
 	if (cp[len - 1] != '\n')
 		len++;
 	if (len + 1 > bufsize) {
+		char *newbuf;
 		do {
 			bufsize += 1024;
 		} while (len + 1 > bufsize);
-		buf = xrealloc(buf, bufsize);
+		newbuf = xrealloc(buf, 1, bufsize);
+		buf = newbuf;
 	}
 	memcpy(buf, cp, len - 1);
 	buf[len - 1] = '\n';
@@ -501,7 +503,7 @@ getline(FILE *b, size_t *n)
 }
 
 static int
-merge(int m1, int m2)
+merge(size_t m1, size_t m2)
 {
 	struct diff *d1, *d2, *d3;
 	int dpl, j, t1, t2;
@@ -512,10 +514,10 @@ merge(int m1, int m2)
 	while ((t1 = d1 < d13 + m1) | (t2 = d2 < d23 + m2)) {
 		if (debug) {
 			printf("%d,%d=%d,%d %d,%d=%d,%d\n",
-			d1->old.from,d1->old.to,
-			d1->new.from,d1->new.to,
-			d2->old.from,d2->old.to,
-			d2->new.from,d2->new.to);
+			d1->old.from, d1->old.to,
+			d1->new.from, d1->new.to,
+			d2->old.from, d2->old.to,
+			d2->new.from, d2->new.to);
 		}
 
 		/* first file is different from others */
@@ -789,17 +791,17 @@ increase(void)
 	newsz = szchanges == 0 ? 64 : 2 * szchanges;
 	incr = newsz - szchanges;
 
-	p = xrealloc(d13, newsz * sizeof(struct diff));
-	memset(p + szchanges, 0, incr * sizeof(struct diff));
+	p = xrealloc(d13, newsz, sizeof(*d13));
+	memset(p + szchanges, 0, incr * sizeof(*d13));
 	d13 = p;
-	p = xrealloc(d23, newsz * sizeof(struct diff));
-	memset(p + szchanges, 0, incr * sizeof(struct diff));
+	p = xrealloc(d23, newsz, sizeof(*d23));
+	memset(p + szchanges, 0, incr * sizeof(*d23));
 	d23 = p;
-	p = xrealloc(de, newsz * sizeof(struct diff));
-	memset(p + szchanges, 0, incr * sizeof(struct diff));
+	p = xrealloc(de, newsz, sizeof(*de));
+	memset(p + szchanges, 0, incr * sizeof(*de));
 	de = p;
-	q = xrealloc(overlap, newsz * sizeof(char));
-	memset(q + szchanges, 0, incr * sizeof(char));
+	q = xrealloc(overlap, newsz, sizeof(*overlap));
+	memset(q + szchanges, 0, incr * sizeof(*overlap));
 	overlap = q;
 	szchanges = newsz;
 }

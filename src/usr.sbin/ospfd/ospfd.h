@@ -1,4 +1,4 @@
-/*	$OpenBSD: ospfd.h,v 1.46 2006/02/24 21:06:47 norby Exp $ */
+/*	$OpenBSD: ospfd.h,v 1.60 2006/06/28 10:53:39 norby Exp $ */
 
 /*
  * Copyright (c) 2004 Esben Norby <norby@openbsd.org>
@@ -29,6 +29,8 @@
 #include <netinet/in.h>
 #include <event.h>
 
+#include "ospf.h"
+
 #define CONF_FILE		"/etc/ospfd.conf"
 #define	OSPFD_SOCKET		"/var/run/ospfd.sock"
 #define OSPFD_USER		"_ospfd"
@@ -48,16 +50,15 @@
 
 #define	F_OSPFD_INSERTED	0x0001
 #define	F_KERNEL		0x0002
-#define	F_CONNECTED		0x0004
+#define	F_BGPD_INSERTED		0x0004
+#define	F_CONNECTED		0x0008
 #define	F_DOWN			0x0010
 #define	F_STATIC		0x0020
 #define	F_DYNAMIC		0x0040
-#define	F_LONGER		0x0080
 #define	F_REDISTRIBUTED		0x0100
 
-#define REDISTRIBUTE_STATIC	0x01
-#define REDISTRIBUTE_CONNECTED	0x02
-#define REDISTRIBUTE_DEFAULT	0x04
+#define REDISTRIBUTE_ON		0x01
+#define REDISTRIBUTE_DEFAULT	0x02
 
 /* buffer */
 struct buf {
@@ -119,6 +120,7 @@ enum imsg_type {
 	IMSG_CTL_END,
 	IMSG_KROUTE_CHANGE,
 	IMSG_KROUTE_DELETE,
+	IMSG_KROUTE_GET,
 	IMSG_IFINFO,
 	IMSG_NEIGHBOR_UP,
 	IMSG_NEIGHBOR_DOWN,
@@ -166,13 +168,7 @@ struct area {
 /*	list			 addr_range_list; */
 	u_int32_t		 stub_default_cost;
 	u_int32_t		 num_spf_calc;
-	u_int32_t		 dead_interval;
 	int			 active;
-	u_int16_t		 transmit_delay;
-	u_int16_t		 hello_interval;
-	u_int16_t		 rxmt_interval;
-	u_int16_t		 metric;
-	u_int8_t		 priority;
 	u_int8_t		 transit;
 	u_int8_t		 stub;
 	u_int8_t		 dirty;
@@ -202,17 +198,6 @@ enum iface_event {
 	IF_EVT_DOWN
 };
 
-static const char * const if_event_names[] = {
-	"NOTHING",
-	"UP",
-	"WAITTIMER",
-	"BACKUPSEEN",
-	"NEIGHBORCHANGE",
-	"LOOP",
-	"UNLOOP",
-	"DOWN"
-};
-
 /* interface actions */
 enum iface_action {
 	IF_ACT_NOTHING,
@@ -228,6 +213,58 @@ enum iface_type {
 	IF_TYPE_NBMA,
 	IF_TYPE_POINTOMULTIPOINT,
 	IF_TYPE_VIRTUALLINK
+};
+
+/* neighbor states */
+#define	NBR_STA_DOWN		0x0001
+#define	NBR_STA_ATTEMPT		0x0002
+#define	NBR_STA_INIT		0x0004
+#define	NBR_STA_2_WAY		0x0008
+#define	NBR_STA_XSTRT		0x0010
+#define NBR_STA_SNAP		0x0020
+#define	NBR_STA_XCHNG		0x0040
+#define	NBR_STA_LOAD		0x0080
+#define	NBR_STA_FULL		0x0100
+#define	NBR_STA_ACTIVE		(~NBR_STA_DOWN)
+#define	NBR_STA_FLOOD		(NBR_STA_XCHNG | NBR_STA_LOAD | NBR_STA_FULL)
+#define	NBR_STA_ADJFORM		(NBR_STA_XSTRT | NBR_STA_SNAP | NBR_STA_FLOOD)
+#define	NBR_STA_BIDIR		(NBR_STA_2_WAY | NBR_STA_ADJFORM)
+#define	NBR_STA_PRELIM		(NBR_STA_DOWN | NBR_STA_ATTEMPT | NBR_STA_INIT)
+#define	NBR_STA_ANY		0xffff
+
+/* neighbor events */
+enum nbr_event {
+	NBR_EVT_NOTHING,
+	NBR_EVT_HELLO_RCVD,
+	NBR_EVT_2_WAY_RCVD,
+	NBR_EVT_NEG_DONE,
+	NBR_EVT_SNAP_DONE,
+	NBR_EVT_XCHNG_DONE,
+	NBR_EVT_BAD_LS_REQ,
+	NBR_EVT_LOAD_DONE,
+	NBR_EVT_ADJ_OK,
+	NBR_EVT_SEQ_NUM_MIS,
+	NBR_EVT_1_WAY_RCVD,
+	NBR_EVT_KILL_NBR,
+	NBR_EVT_ITIMER,
+	NBR_EVT_LL_DOWN,
+	NBR_EVT_ADJTMOUT
+};
+
+/* neighbor actions */
+enum nbr_action {
+	NBR_ACT_NOTHING,
+	NBR_ACT_RST_ITIMER,
+	NBR_ACT_STRT_ITIMER,
+	NBR_ACT_EVAL,
+	NBR_ACT_SNAP,
+	NBR_ACT_SNAP_DONE,
+	NBR_ACT_XCHNG_DONE,
+	NBR_ACT_ADJ_OK,
+	NBR_ACT_RESTRT_DD,
+	NBR_ACT_DEL,
+	NBR_ACT_CLR_LST,
+	NBR_ACT_HELLO_CHK
 };
 
 /* auth types */
@@ -250,11 +287,6 @@ enum dst_type {
 	DT_RTR
 };
 
-static const char * const dst_type_names[] = {
-	"Network",
-	"Router"
-};
-
 enum path_type {
 	PT_INTRA_AREA,
 	PT_INTER_AREA,
@@ -268,13 +300,6 @@ enum rib_type {
 	RIB_EXT
 };
 
-static const char * const path_type_names[] = {
-	"Intra-Area",
-	"Inter-Area",
-	"Type 1 ext",
-	"Type 2 ext"
-};
-
 struct auth_md {
 	TAILQ_ENTRY(auth_md)	 entry;
 	char			 key[MD5_DIGEST_LENGTH];
@@ -283,6 +308,7 @@ struct auth_md {
 
 /* lsa list used in RDE and OE */
 TAILQ_HEAD(lsa_head, lsa_entry);
+TAILQ_HEAD(auth_md_head, auth_md);
 
 struct iface {
 	LIST_ENTRY(iface)	 entry;
@@ -291,15 +317,15 @@ struct iface {
 	struct event		 lsack_tx_timer;
 
 	LIST_HEAD(, nbr)	 nbr_list;
-	TAILQ_HEAD(, auth_md)	 auth_md_list;
+	struct auth_md_head	 auth_md_list;
 	struct lsa_head		 ls_ack_list;
 
 	char			 name[IF_NAMESIZE];
+	char			 auth_key[MAX_SIMPLE_AUTH_LEN];
 	struct in_addr		 addr;
 	struct in_addr		 dst;
 	struct in_addr		 mask;
 	struct in_addr		 abr_id;
-	char			*auth_key;
 	struct nbr		*dr;	/* designated router */
 	struct nbr		*bdr;	/* backup designated router */
 	struct nbr		*self;
@@ -309,6 +335,7 @@ struct iface {
 	u_int32_t		 dead_interval;
 	u_int32_t		 ls_ack_cnt;
 	u_int32_t		 crypt_seq_num;
+	time_t			 uptime;
 	unsigned int		 ifindex;
 	int			 fd;
 	int			 state;
@@ -334,12 +361,26 @@ enum {
 	PROC_RDE_ENGINE
 } ospfd_process;
 
+#define	REDIST_CONNECTED	0x01
+#define	REDIST_STATIC		0x02
+#define	REDIST_LABEL		0x04
+#define	REDIST_ADDR		0x08
+#define	REDIST_NO		0x10
+
+struct redistribute {
+	SIMPLEQ_ENTRY(redistribute)	entry;
+	struct in_addr			addr;
+	struct in_addr			mask;
+	u_int16_t			label;
+	u_int16_t			type;
+};
+
 struct ospfd_conf {
 	struct event		ev;
 	struct in_addr		rtr_id;
-	struct lsa_tree		lsa_tree;
 	LIST_HEAD(, area)	area_list;
 	LIST_HEAD(, vertex)	cand_list;
+	SIMPLEQ_HEAD(, redistribute) redist_list;
 
 	u_int32_t		opts;
 #define OSPFD_OPT_VERBOSE	0x00000001
@@ -347,13 +388,14 @@ struct ospfd_conf {
 #define OSPFD_OPT_NOACTION	0x00000004
 	u_int32_t		spf_delay;
 	u_int32_t		spf_hold_time;
+	time_t			uptime;
 	int			spf_state;
 	int			ospf_socket;
 	int			flags;
-	int			redistribute_flags;
 	int			options; /* OSPF options */
 	u_int8_t		rfc1583compat;
 	u_int8_t		border;
+	u_int8_t		redistribute;
 };
 
 /* kroute */
@@ -361,6 +403,7 @@ struct kroute {
 	struct in_addr	prefix;
 	struct in_addr	nexthop;
 	u_int16_t	flags;
+	u_int16_t	rtlabel;
 	u_short		ifindex;
 	u_int8_t	prefixlen;
 };
@@ -388,6 +431,7 @@ struct ctl_iface {
 	struct in_addr		 bdr_id;
 	struct in_addr		 bdr_addr;
 	time_t			 hello_timer;
+	time_t			 uptime;
 	u_int32_t		 baudrate;
 	u_int32_t		 dead_interval;
 	unsigned int		 ifindex;
@@ -402,6 +446,7 @@ struct ctl_iface {
 	u_int16_t		 rxmt_interval;
 	enum iface_type		 type;
 	u_int8_t		 linkstate;
+	u_int8_t		 mediatype;
 	u_int8_t		 priority;
 	u_int8_t		 passive;
 	enum auth_type		 auth_type;
@@ -447,6 +492,7 @@ struct ctl_sum {
 	u_int32_t		 spf_hold_time;
 	u_int32_t		 num_ext_lsa;
 	u_int32_t		 num_area;
+	time_t			 uptime;
 	u_int8_t		 rfc1583compat;
 };
 
@@ -495,7 +541,7 @@ void	 imsg_free(struct imsg *);
 void	 imsg_event_add(struct imsgbuf *); /* needs to be provided externally */
 
 /* in_cksum.c */
-int		 in_cksum(void *, int);
+u_int16_t	 in_cksum(void *, size_t);
 
 /* iso_cksum.c */
 u_int16_t	 iso_cksum(void *, u_int16_t, u_int16_t);
@@ -515,6 +561,19 @@ struct kif	*kif_findname(char *);
 
 u_int8_t	mask2prefixlen(in_addr_t);
 in_addr_t	prefixlen2mask(u_int8_t);
+
+/* log.h */
+const char	*nbr_state_name(int);
+const char	*if_state_name(int);
+const char	*if_type_name(enum iface_type);
+const char	*if_auth_name(enum auth_type);
+const char	*dst_type_name(enum dst_type);
+const char	*path_type_name(enum path_type);
+
+/* name2id.c */
+u_int16_t	 rtlabel_name2id(const char *);
+const char	*rtlabel_id2name(u_int16_t);
+void		 rtlabel_unref(u_int16_t);
 
 /* ospfd.c */
 void	main_imsg_compose_ospfe(int, pid_t, void *, u_int16_t);

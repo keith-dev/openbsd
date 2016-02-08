@@ -1,16 +1,17 @@
-# $OpenBSD: Makefile.cross,v 1.13 2005/12/30 16:41:23 grange Exp $
+# $OpenBSD: Makefile.cross,v 1.19 2006/06/16 17:43:54 mickey Exp $
 
 cross-tools:	cross-includes cross-binutils cross-gcc cross-lib
 cross-distrib:	cross-tools cross-bin cross-etc-root-var
 
 # Have to compute TARGET_ARCH directly in the Makefile, for .if tests involving
 # this variable to work.
-.if	(${TARGET} == "cats" || ${TARGET} == "zaurus")
+.if	(${TARGET} == "armish" || ${TARGET} == "cats" || ${TARGET} == "zaurus")
 TARGET_ARCH=	arm
 .elif	(${TARGET} == "hp300" || ${TARGET} == "mac68k" || \
 	 ${TARGET} == "mvme68k")
 TARGET_ARCH=	m68k
-.elif	(${TARGET} == "luna88k" || ${TARGET} == "mvme88k")
+.elif	(${TARGET} == "aviion" || ${TARGET} == "luna88k" || \
+	 ${TARGET} == "mvme88k")
 TARGET_ARCH=	m88k
 .elif	(${TARGET} == "sgi")
 TARGET_ARCH=	mips64
@@ -50,7 +51,7 @@ CROSSINCLUDES=	${CROSSDIR}/usr/include/.includes_done
 CROSSBINUTILS=	${CROSSDIR}/usr/bin/.binutils_done
 CROSSGCC=	${CROSSDIR}/usr/bin/.gcc_done
 NO_CROSS=	isakmpd tn3270 less sudo openssl libkeynote libssl \
-		photurisd keynote sectok ssh
+		keynote sectok ssh
 
 # no libcrypto.... these won't build
 NO_CROSS+=	dc login_krb5 login_krb5-or-pwd passwd ppp tcpdump telnet
@@ -120,17 +121,19 @@ NEW_BINUTILS?=	Yes
 .endif
 
 ${CROSSBINUTILS}:	${CROSSINCLUDES}
-.if ${NEW_BINUTILS:L} == "yes"
 	(cd ${.CURDIR}/gnu/usr.bin/binutils; \
 	    MAKEOBJDIR=obj.${MACHINE}.${TARGET} \
+	    USING_NEW_BINUTILS=${NEW_BINUTILS} \
 	    TARGET_ARCH=${TARGET_ARCH} \
 	    ${MAKE} -f Makefile.bsd-wrapper depend && \
 	    MAKEOBJDIR=obj.${MACHINE}.${TARGET} \
+	    USING_NEW_BINUTILS=${NEW_BINUTILS} \
 	    TARGET_ARCH=${TARGET_ARCH} \
 	    ${MAKE} -f Makefile.bsd-wrapper all && \
 	    DESTDIR=${CROSSDIR} MAKEOBJDIR=obj.${MACHINE}.${TARGET} \
+	    USING_NEW_BINUTILS=${NEW_BINUTILS} \
 	    ${MAKE} -f Makefile.bsd-wrapper install)
-.else
+.if ${NEW_BINUTILS:L} != "yes"
 	(cd ${.CURDIR}/gnu/usr.bin/gas; \
 	    TARGET_MACHINE_ARCH=${TARGET_ARCH} \
 	    MAKEOBJDIR=obj.${MACHINE}.${TARGET} ${MAKE} depend all; \
@@ -149,13 +152,17 @@ ${CROSSBINUTILS}:	${CROSSINCLUDES}
 	ln -sf ${CROSSDIR}/usr/bin/ld \
 	    ${CROSSDIR}/usr/${TARGET_CANON}/bin/ld
 	(cd ${.CURDIR}/usr.bin/ar; \
+	    ELF_TOOLCHAIN=no \
 	    MAKEOBJDIR=obj.${MACHINE}.${TARGET} ${MAKE} NOMAN= depend all; \
+	    ELF_TOOLCHAIN=no \
 	    DESTDIR=${CROSSDIR} MAKEOBJDIR=obj.${MACHINE}.${TARGET} \
 	    ${MAKE} NOMAN= install)
 	ln -sf ${CROSSDIR}/usr/bin/ar \
 	    ${CROSSDIR}/usr/${TARGET_CANON}/bin/ar
 	(cd ${.CURDIR}/usr.bin/ranlib; \
+	    ELF_TOOLCHAIN=no \
 	    MAKEOBJDIR=obj.${MACHINE}.${TARGET} ${MAKE} NOMAN= depend all; \
+	    ELF_TOOLCHAIN=no \
 	    DESTDIR=${CROSSDIR} MAKEOBJDIR=obj.${MACHINE}.${TARGET} \
 	    ${MAKE} NOMAN= install)
 	ln -sf ${CROSSDIR}/usr/bin/ranlib \

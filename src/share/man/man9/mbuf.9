@@ -1,4 +1,4 @@
-.\"     $OpenBSD: mbuf.9,v 1.19 2005/04/25 23:33:40 brad Exp $
+.\"     $OpenBSD: mbuf.9,v 1.21 2006/09/05 18:00:34 thib Exp $
 .\"
 .\" Copyright (c) 2001 Jean-Jacques Bernard-Gundol <jjbg@openbsd.org>
 .\" All rights reserved.
@@ -85,7 +85,7 @@
 "int (*func)(caddr_t, caddr_t, unsigned int)" "caddr_t fstate"
 .Fn MEXTMALLOC "struct mbuf *m" "int size" "int how"
 .Fn MCLGET "struct mbuf *m" "int how"
-.Fn MEXTADD "struct mbuf *m" "caddr_t buf" "int type" \
+.Fn MEXTADD "struct mbuf *m" "caddr_t buf" "u_int size" "int type" \
 "void (*free)(caddr_t, u_int, void *)" "void *arg"
 .Fn M_ALIGN "struct mbuf *m" "int len"
 .Fn MH_ALIGN "struct mbuf *m" "int len"
@@ -518,7 +518,9 @@ is positive, the data will be trimmed from the head of the mbuf chain
 and if it is negative, it will be trimmed from the tail of the mbuf
 chain.
 .It Fn m_copyback "struct mbuf *m0" "int off" "int len" "caddr_t cp"
-Copy data from a buffer back into the mbuf chain pointed to by
+Copy data from a buffer pointed to by
+.Fa cp
+back into the mbuf chain pointed to by
 .Fa m0
 starting at
 .Fa off
@@ -600,7 +602,7 @@ See
 .Fn m_get
 for a description of
 .Fa how .
-.It Fn MEXTADD "struct mbuf *m" "caddr_t buf" "int type" \
+.It Fn MEXTADD "struct mbuf *m" "caddr_t buf" "u_int size" "int type" \
 "void (*free)(caddr_t, u_int, void *)" "void *arg"
 Add pre-allocated storage to the mbuf pointed to by
 .Fa m .

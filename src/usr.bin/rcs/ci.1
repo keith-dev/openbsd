@@ -1,4 +1,4 @@
-.\"     $OpenBSD: ci.1,v 1.23 2006/02/17 08:30:34 jmc Exp $
+.\"	$OpenBSD: ci.1,v 1.32 2006/08/04 06:26:39 ray Exp $
 .\"
 .\" Copyright (c) 2005 Niall O'Higgins <niallo@openbsd.org>
 .\" All rights reserved.
@@ -36,17 +36,47 @@
 .Op Fl n Ns Ar symbol
 .Op Fl r Ns Op Ar rev
 .Op Fl s Ns Ar state
-.Oo Fl t Ns Ar file Ns \*(Ba
-.Ar str Oc
+.Op Fl t Ns Ar str
 .Op Fl u Ns Op Ar rev
 .Op Fl w Ns Ar username
 .Op Fl x Ns Ar suffixes
-.Ar file ...
+.Ar
 .Ek
 .Sh DESCRIPTION
 The
 .Nm
-program is used to check new revisions into RCS files.
+program is used to check in new revisions to RCS files.
+.Pp
+When a file is checked in,
+it is stored in the RCS directory with a specific revision number,
+and the original file itself is deleted.
+The RCS file is stored with the same name, but with
+.Sq ,v
+appended.
+.Nm
+will prompt for a check-in message,
+to be stored with the file,
+which can be displayed using
+.Xr rlog 1 .
+.Pp
+Revision numbering starts at 1.1
+and increases logically.
+Numbering can be altered using the
+.Fl k
+option, however.
+The
+.Sq ,v
+suffix can also be altered,
+using the
+.Fl x
+option.
+.Pp
+.Nm
+also supports
+keyword substitution \(en
+see the
+.Xr rcs 1
+man page for more information.
 .Pp
 The following options are supported:
 .Bl -tag -width Ds
@@ -58,9 +88,8 @@ If
 .Ar date
 is not specified, use the working file's last modification time.
 .It Fl f Ns Op Ar rev
-Force check in - optionally to
-.Ar rev
-- even if no changes have been made to the working file.
+Force check-in
+\(en even if no changes have been made to the working file.
 .It Fl I
 Interactive mode.
 .It Fl i Ns Op Ar rev
@@ -87,14 +116,14 @@ A line beginning with a hash character
 .Pq Sq #
 is considered a comment and ignored.
 .It Fl N Ns Ar symbol
-The same as
-.Fl n
-except it overwrites any previous assignment of
-.Ar symbol .
-.It Fl n Ns Ar symbol
 Assign the symbolic name
 .Ar symbol
-to the checked in revision.
+to the checked in revision, overwriting any previous assignment of
+.Ar symbol .
+.It Fl n Ns Ar symbol
+The same as
+.Fl N
+except it does not overwrite previous symbols.
 .It Fl q
 Be quiet about reporting.
 .It Fl r Ns Op Ar rev
@@ -112,21 +141,18 @@ working file.
 Sets the state of the deposited revision to the identifier
 .Ar state .
 The specified value may not contain a space character.
-.Sm off
-.It Fl t Ar file \*(Ba Ar str
-.Sm on
+.It Fl t Ns Ar str
 Change the descriptive text.
-The descriptive text is taken from the
-.Ar file
-specified as argument or from the string
+The argument
 .Ar str
-given as argument if it is preceded by the
-.Sq -
-character.
-If no argument is used, the descriptive text is taken from standard input
-terminated by end-of-file or by a line containing the
-.Sq \&.
-character by itself.
+is interpreted as the name of a file containing
+the descriptive text or,
+if prefixed with a
+.Sq - ,
+the actual descriptive text itself.
+If no argument is given,
+this option is ignored
+(for compatibility reasons).
 .It Fl u
 The same as
 .Fl r ,
@@ -144,6 +170,8 @@ Suffixes should be separated by the
 .Sq /
 character.
 .El
+.Pp
+.Ex -std ci
 .Sh ENVIRONMENT
 .Bl -tag -width RCSINIT
 .It Ev RCSINIT

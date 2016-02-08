@@ -1,5 +1,5 @@
 /*
- * $OpenBSD: readlink.c,v 1.19 2003/06/10 22:20:50 deraadt Exp $
+ * $OpenBSD: readlink.c,v 1.22 2006/05/09 17:44:53 deraadt Exp $
  *
  * Copyright (c) 1997
  *	Kenneth Stailey (hereinafter referred to as the author)

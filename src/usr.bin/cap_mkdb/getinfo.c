@@ -1,4 +1,4 @@
-/*	$OpenBSD: getinfo.c,v 1.8 2006/02/20 09:23:26 jmc Exp $	*/
+/*	$OpenBSD: getinfo.c,v 1.10 2006/03/18 03:55:09 ray Exp $	*/
 
 /*-
  * Copyright (c) 1992, 1993
@@ -30,7 +30,7 @@
  */
 
 #ifndef lint
-static char rcsid[] = "$OpenBSD: getinfo.c,v 1.8 2006/02/20 09:23:26 jmc Exp $";
+static char rcsid[] = "$OpenBSD: getinfo.c,v 1.10 2006/03/18 03:55:09 ray Exp $";
 #endif /* not lint */
 
 #include <sys/types.h>
@@ -532,14 +532,15 @@ igetnext(char **bp, char **db_array)
 		(void)igetclose();
 		return (-1);
 	}
-	for(;;) {
+	for (;;) {
 		line = fgetln(pfp, &len);
-		if (line == NULL && pfp) {
-			(void)fclose(pfp);
+		if (line == NULL) {
 			if (ferror(pfp)) {
 				(void)igetclose();
 				return (-1);
 			} else {
+				(void)fclose(pfp);
+				pfp = NULL;
 				if (*++dbp == NULL) {
 					(void)igetclose();
 					return (0);
@@ -551,7 +552,7 @@ igetnext(char **bp, char **db_array)
 					continue;
 			}
 		} else
-			line[len - 1] = '\0';
+			line[len - 1] = '\0';/* XXX - assumes newline */
 		if (len == 1) {
 			slash = 0;
 			continue;
@@ -588,13 +589,20 @@ igetnext(char **bp, char **db_array)
 				break;
 			} else { /* name field extends beyond the line */
 				line = fgetln(pfp, &len);
-				if (line == NULL && pfp) {
-					(void)fclose(pfp);
+				if (line == NULL) {
 					if (ferror(pfp)) {
 						(void)igetclose();
 						return (-1);
 					}
+					/* Move on to next file. */
+					(void)fclose(pfp);
+					pfp = NULL;
+					++dbp;
+					/* NUL terminate nbuf. */
+					*np = '\0';
+					break;
 				} else
+					/* XXX - assumes newline */
 					line[len - 1] = '\0';
 			}
 		}

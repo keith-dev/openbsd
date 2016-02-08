@@ -1,4 +1,4 @@
-/*	$OpenBSD: tipout.c,v 1.12 2005/04/11 19:59:07 deraadt Exp $	*/
+/*	$OpenBSD: tipout.c,v 1.18 2006/05/31 07:03:08 jason Exp $	*/
 /*	$NetBSD: tipout.c,v 1.5 1996/12/29 10:34:12 cgd Exp $	*/
 
 /*
@@ -34,10 +34,11 @@
 #if 0
 static char sccsid[] = "@(#)tipout.c	8.1 (Berkeley) 6/6/93";
 #endif
-static const char rcsid[] = "$OpenBSD: tipout.c,v 1.12 2005/04/11 19:59:07 deraadt Exp $";
+static const char rcsid[] = "$OpenBSD: tipout.c,v 1.18 2006/05/31 07:03:08 jason Exp $";
 #endif /* not lint */
 
 #include "tip.h"
+
 /*
  * tip
  *
@@ -47,14 +48,19 @@ static const char rcsid[] = "$OpenBSD: tipout.c,v 1.12 2005/04/11 19:59:07 deraa
 
 static	jmp_buf sigbuf;
 
+static void	intIOT(int);
+static void	intEMT(int);
+static void	intTERM(int);
+static void	intSYS(int);
+
 /*
  * TIPOUT wait state routine --
  *   sent by TIPIN when it wants to posses the remote host
  */
-void
-intIOT()
+/*ARGSUSED*/
+static void
+intIOT(int signo)
 {
-
 	write(repdes[1],&ccc,1);
 	read(fildes[0], &ccc,1);
 	longjmp(sigbuf, 1);
@@ -64,8 +70,9 @@ intIOT()
  * Scripting command interpreter --
  *  accepts script file name over the pipe and acts accordingly
  */
-void
-intEMT()
+/*ARGSUSED*/
+static void
+intEMT(int signo)
 {
 	char c, line[256];
 	char *pline = line;
@@ -94,10 +101,9 @@ intEMT()
 	longjmp(sigbuf, 1);
 }
 
-void
+static void
 intTERM(int signo)
 {
-
 	if (boolean(value(SCRIPT)) && fscript != NULL)
 		fclose(fscript);
 	if (signo && tipin_pid)
@@ -105,10 +111,10 @@ intTERM(int signo)
 	exit(0);
 }
 
-void
-intSYS()
+/*ARGSUSED*/
+static void
+intSYS(int signo)
 {
-
 	setboolean(value(BEAUTIFY), !boolean(value(BEAUTIFY)));
 	longjmp(sigbuf, 1);
 }
@@ -117,11 +123,12 @@ intSYS()
  * ****TIPOUT   TIPOUT****
  */
 void
-tipout()
+tipout(void)
 {
 	char buf[BUFSIZ];
 	char *cp;
-	int cnt;
+	ssize_t scnt;
+	size_t cnt;
 	sigset_t mask, omask;
 
 	signal(SIGINT, SIG_IGN);
@@ -135,10 +142,10 @@ tipout()
 	sigprocmask(SIG_BLOCK, NULL, &omask);
 	for (;;) {
 		sigprocmask(SIG_SETMASK, &omask, NULL);
-		cnt = read(FD, buf, BUFSIZ);
-		if (cnt <= 0) {
+		scnt = read(FD, buf, BUFSIZ);
+		if (scnt <= 0) {
 			/* lost carrier */
-			if (cnt < 0 && errno == EIO) {
+			if (scnt == 0 || (scnt < 0 && errno == EIO)) {
 				sigemptyset(&mask);
 				sigaddset(&mask, SIGTERM);
 				sigprocmask(SIG_BLOCK, &mask, NULL);
@@ -147,6 +154,7 @@ tipout()
 			}
 			continue;
 		}
+		cnt = scnt;
 		sigemptyset(&mask);
 		sigaddset(&mask, SIGEMT);
 		sigaddset(&mask, SIGTERM);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: kroute.c,v 1.25 2006/01/23 22:29:15 claudio Exp $ */
+/*	$OpenBSD: kroute.c,v 1.33 2006/05/30 22:06:14 claudio Exp $ */
 
 /*
  * Copyright (c) 2004 Esben Norby <norby@openbsd.org>
@@ -50,11 +50,6 @@ struct {
 struct kroute_node {
 	RB_ENTRY(kroute_node)	 entry;
 	struct kroute		 r;
-};
-
-struct kif_kr {
-	LIST_ENTRY(kif_kr)	 entry;
-	struct kroute_node	*kr;
 };
 
 struct kif_node {
@@ -166,10 +161,25 @@ kr_change(struct kroute *kroute)
 
 	if ((kr = kroute_find(kroute->prefix.s_addr, kroute->prefixlen)) !=
 	    NULL) {
-		if (kr->r.flags & F_OSPFD_INSERTED)
+		if (!(kr->r.flags & F_KERNEL))
 			action = RTM_CHANGE;
-		else	/* a non-ospf route already exists. not a problem */
-			return (0);
+		else {	/* a non-ospf route already exists. not a problem */
+			if (!(kr->r.flags & F_BGPD_INSERTED)) {
+				kr->r.flags |= F_OSPFD_INSERTED;
+				return (0);
+			}
+			/*
+			 * ospf route has higher pref
+			 * - reset flags to the ospf ones
+			 * - use RTM_CHANGE
+			 * - zero out ifindex (this is no longer relevant)
+			 */
+			action = RTM_CHANGE;
+			kr->r.flags = kroute->flags | F_OSPFD_INSERTED;
+			kr->r.ifindex = 0;
+			rtlabel_unref(kr->r.rtlabel);
+			kr->r.rtlabel = 0;
+		}
 	}
 
 	/* nexthop within 127/8 -> ignore silently */
@@ -210,10 +220,11 @@ kr_delete(struct kroute *kroute)
 	if (!(kr->r.flags & F_OSPFD_INSERTED))
 		return (0);
 
-	/* nexthop within 127/8 -> ignore silently */
-	if ((kroute->nexthop.s_addr & htonl(IN_CLASSA_NET)) ==
-	    htonl(INADDR_LOOPBACK & IN_CLASSA_NET))
+	if (kr->r.flags & F_KERNEL) {
+		/* remove F_OSPFD_INSERTED flag, route still exists in kernel */
+		kr->r.flags &= ~F_OSPFD_INSERTED;
 		return (0);
+	}
 
 	if (send_rtmsg(kr_state.fd, RTM_DELETE, kroute) == -1)
 		return (-1);
@@ -243,7 +254,7 @@ kr_fib_couple(void)
 	kr_state.fib_sync = 1;
 
 	RB_FOREACH(kr, kroute_tree, &krt)
-		if ((kr->r.flags & F_OSPFD_INSERTED))
+		if (!(kr->r.flags & F_KERNEL))
 			send_rtmsg(kr_state.fd, RTM_ADD, &kr->r);
 
 	log_info("kernel routing table coupled");
@@ -258,7 +269,7 @@ kr_fib_decouple(void)
 		return;
 
 	RB_FOREACH(kr, kroute_tree, &krt)
-		if ((kr->r.flags & F_OSPFD_INSERTED))
+		if (!(kr->r.flags & F_KERNEL))
 			send_rtmsg(kr_state.fd, RTM_DELETE, &kr->r);
 
 	kr_state.fib_sync = 0;
@@ -266,6 +277,7 @@ kr_fib_decouple(void)
 	log_info("kernel routing table decoupled");
 }
 
+/* ARGSUSED */
 void
 kr_dispatch_msg(int fd, short event, void *bula)
 {
@@ -334,27 +346,28 @@ kr_redistribute(int type, struct kroute *kr)
 
 
 	if (type == IMSG_NETWORK_DEL) {
+dont_redistribute:
 		/* was the route redistributed? */
 		if (kr->flags & F_REDISTRIBUTED) {
-			/* remove redistributed flag */
+			/* remove redistributed flag and inform the RDE */
 			kr->flags &= ~F_REDISTRIBUTED;
-			main_imsg_compose_rde(type, 0, kr,
+			main_imsg_compose_rde(IMSG_NETWORK_DEL, 0, kr,
 			    sizeof(struct kroute));
 		}
 		return;
 	}
 
 	/* Only non-ospfd routes are considered for redistribution. */
-	if (kr->flags & F_OSPFD_INSERTED)
-		return;
+	if (!(kr->flags & F_KERNEL))
+		goto dont_redistribute;
 
 	/* Dynamic routes are not redistributable. */
 	if (kr->flags & F_DYNAMIC)
-		return;
+		goto dont_redistribute;
 
 	/* interface is not up and running so don't announce */
 	if (kr->flags & F_DOWN)
-		return;
+		goto dont_redistribute;
 
 	/*
 	 * We consider the loopback net, multicast and experimental addresses
@@ -363,16 +376,16 @@ kr_redistribute(int type, struct kroute *kr)
 	a = ntohl(kr->prefix.s_addr);
 	if (IN_MULTICAST(a) || IN_BADCLASS(a) ||
 	    (a >> IN_CLASSA_NSHIFT) == IN_LOOPBACKNET)
-		return;
+		goto dont_redistribute;
 	/*
 	 * Consider networks with nexthop loopback as not redistributable.
 	 */
 	if (kr->nexthop.s_addr == htonl(INADDR_LOOPBACK))
-		return;
+		goto dont_redistribute;
 
 	/* Should we redistrubute this route? */
 	if (!ospf_redistribute(kr))
-		return;
+		goto dont_redistribute;
 
 	/* Does not matter if we resend the kr, the RDE will cope. */
 	kr->flags |= F_REDISTRIBUTED;
@@ -422,7 +435,7 @@ kroute_insert(struct kroute_node *kr)
 		return (-1);
 	}
 
-	if (kr->r.flags & F_OSPFD_INSERTED) {
+	if (!(kr->r.flags & F_KERNEL)) {
 		/* don't validate or redistribute ospf route */
 		kr->r.flags &= ~F_DOWN;
 		return (0);
@@ -448,6 +461,7 @@ kroute_remove(struct kroute_node *kr)
 	}
 
 	kr_redistribute(IMSG_NETWORK_DEL, &kr->r);
+	rtlabel_unref(kr->r.rtlabel);
 
 	free(kr);
 	return (0);
@@ -524,8 +538,7 @@ kif_validate(int ifindex)
 	struct kif_node		*kif;
 
 	if ((kif = kif_find(ifindex)) == NULL) {
-		log_warnx("interface with index %u not found",
-		    ifindex);
+		log_warnx("interface with index %u not found", ifindex);
 		return (1);
 	}
 
@@ -633,8 +646,7 @@ if_change(u_short ifindex, int flags, struct if_data *ifd)
 	u_int8_t		 reachable;
 
 	if ((kif = kif_find(ifindex)) == NULL) {
-		log_warnx("interface with index %u not found",
-		    ifindex);
+		log_warnx("interface with index %u not found", ifindex);
 		return;
 	}
 
@@ -712,6 +724,9 @@ send_rtmsg(int fd, int action, struct kroute *kroute)
 	r.hdr.rtm_version = RTM_VERSION;
 	r.hdr.rtm_type = action;
 	r.hdr.rtm_flags = RTF_PROTO2;
+	if (action == RTM_CHANGE)	/* force PROTO2 reset the other flags */
+		r.hdr.rtm_fmask =
+		    RTF_PROTO2|RTF_PROTO1|RTF_REJECT|RTF_BLACKHOLE;
 	r.hdr.rtm_seq = kr_state.rtseq++;	/* overflow doesn't matter */
 	r.hdr.rtm_addrs = RTA_DST|RTA_GATEWAY|RTA_NETMASK;
 	r.prefix.sin_len = sizeof(r.prefix);
@@ -768,6 +783,7 @@ fetchtable(void)
 	struct rt_msghdr	*rtm;
 	struct sockaddr		*sa, *rti_info[RTAX_MAX];
 	struct sockaddr_in	*sa_in;
+	struct sockaddr_rtlabel	*label;
 	struct kroute_node	*kr;
 
 	mib[0] = CTL_NET;
@@ -825,6 +841,8 @@ fetchtable(void)
 				kr->r.flags |= F_STATIC;
 			if (rtm->rtm_flags & RTF_DYNAMIC)
 				kr->r.flags |= F_DYNAMIC;
+			if (rtm->rtm_flags & RTF_PROTO1)
+				kr->r.flags |= F_BGPD_INSERTED;
 			if (sa_in != NULL) {
 				if (sa_in->sin_len == 0)
 					break;
@@ -856,8 +874,13 @@ fetchtable(void)
 		if (rtm->rtm_flags & RTF_PROTO2)  {
 			send_rtmsg(kr_state.fd, RTM_DELETE, &kr->r);
 			free(kr);
-		} else
+		} else {
+			if ((label = (struct sockaddr_rtlabel *)
+			    rti_info[RTAX_LABEL]) != NULL)
+				kr->r.rtlabel =
+				    rtlabel_name2id(label->sr_label);
 			kroute_insert(kr);
+		}
 
 	}
 	free(buf);
@@ -949,11 +972,12 @@ dispatch_rtmsg(void)
 	struct if_msghdr	 ifm;
 	struct sockaddr		*sa, *rti_info[RTAX_MAX];
 	struct sockaddr_in	*sa_in;
+	struct sockaddr_rtlabel	*label;
 	struct kroute_node	*kr;
 	struct in_addr		 prefix, nexthop;
 	u_int8_t		 prefixlen;
 	int			 flags;
-	u_short			 ifindex;
+	u_short			 ifindex = 0;
 
 	if ((n = read(kr_state.fd, &buf, sizeof(buf))) == -1) {
 		log_warn("dispatch_rtmsg: read error");
@@ -968,24 +992,26 @@ dispatch_rtmsg(void)
 	lim = buf + n;
 	for (next = buf; next < lim; next += rtm->rtm_msglen) {
 		rtm = (struct rt_msghdr *)next;
-		sa = (struct sockaddr *)(rtm + 1);
-		get_rtaddrs(rtm->rtm_addrs, sa, rti_info);
 
 		prefix.s_addr = 0;
 		prefixlen = 0;
 		flags = F_KERNEL;
 		nexthop.s_addr = 0;
 
-		if (rtm->rtm_pid == kr_state.pid)	/* cause by us */
-			continue;
-
-		if (rtm->rtm_errno)			/* failed attempts... */
-			continue;
-
 		if (rtm->rtm_type == RTM_ADD || rtm->rtm_type == RTM_CHANGE ||
 		    rtm->rtm_type == RTM_DELETE) {
+			sa = (struct sockaddr *)(rtm + 1);
+			get_rtaddrs(rtm->rtm_addrs, sa, rti_info);
+
+			if (rtm->rtm_pid == kr_state.pid)	/* cause by us */
+				continue;
+
+			if (rtm->rtm_errno)			/* failed attempts... */
+				continue;
+
 			if (rtm->rtm_flags & RTF_LLINFO)	/* arp cache */
 				continue;
+
 			switch (sa->sa_family) {
 			case AF_INET:
 				prefix.s_addr =
@@ -1005,23 +1031,26 @@ dispatch_rtmsg(void)
 					flags |= F_STATIC;
 				if (rtm->rtm_flags & RTF_DYNAMIC)
 					flags |= F_DYNAMIC;
+				if (rtm->rtm_flags & RTF_PROTO1)
+					flags |= F_BGPD_INSERTED;
 				break;
 			default:
 				continue;
 			}
-		}
 
-		ifindex = rtm->rtm_index;
-		if ((sa = rti_info[RTAX_GATEWAY]) != NULL)
-			switch (sa->sa_family) {
-			case AF_INET:
-				nexthop.s_addr =
-				    ((struct sockaddr_in *)sa)->sin_addr.s_addr;
-				break;
-			case AF_LINK:
-				flags |= F_CONNECTED;
-				break;
+			ifindex = rtm->rtm_index;
+			if ((sa = rti_info[RTAX_GATEWAY]) != NULL) {
+				switch (sa->sa_family) {
+				case AF_INET:
+					nexthop.s_addr = ((struct
+					    sockaddr_in *)sa)->sin_addr.s_addr;
+					break;
+				case AF_LINK:
+					flags |= F_CONNECTED;
+					break;
+				}
 			}
+		}
 
 		switch (rtm->rtm_type) {
 		case RTM_ADD:
@@ -1034,24 +1063,30 @@ dispatch_rtmsg(void)
 
 			if ((kr = kroute_find(prefix.s_addr, prefixlen)) !=
 			    NULL) {
-				if (kr->r.flags & F_KERNEL) {
-					kr->r.nexthop.s_addr = nexthop.s_addr;
-					kr->r.flags = flags;
+				/* ospf route overridden by kernel */
+				/* pref is not checked because this is forced */
+				if (kr->r.flags & F_OSPFD_INSERTED)
+					flags |= F_OSPFD_INSERTED;
+				if (kr->r.flags & F_REDISTRIBUTED)
+					flags |= F_REDISTRIBUTED;
+				kr->r.nexthop.s_addr = nexthop.s_addr;
+				kr->r.flags = flags;
+				kr->r.ifindex = ifindex;
 
-					if (kif_validate(kr->r.ifindex))
-						kr->r.flags &= ~F_DOWN;
-					else
-						kr->r.flags |= F_DOWN;
+				rtlabel_unref(kr->r.rtlabel);
+				kr->r.rtlabel = 0;
+				if ((label = (struct sockaddr_rtlabel *)
+				    rti_info[RTAX_LABEL]) != NULL)
+					kr->r.rtlabel =
+					    rtlabel_name2id(label->sr_label);
 
-					/* just readd, the RDE will care */
-					kr_redistribute(IMSG_NETWORK_ADD,
-					    &kr->r);
-				}
-			} else if (rtm->rtm_type == RTM_CHANGE) {
-				log_warnx("change req for %s/%u: not "
-				    "in table", inet_ntoa(prefix),
-				    prefixlen);
-				continue;
+				if (kif_validate(kr->r.ifindex))
+					kr->r.flags &= ~F_DOWN;
+				else
+					kr->r.flags |= F_DOWN;
+
+				/* just readd, the RDE will care */
+				kr_redistribute(IMSG_NETWORK_ADD, &kr->r);
 			} else {
 				if ((kr = calloc(1,
 				    sizeof(struct kroute_node))) == NULL) {
@@ -1064,6 +1099,11 @@ dispatch_rtmsg(void)
 				kr->r.flags = flags;
 				kr->r.ifindex = ifindex;
 
+				if ((label = (struct sockaddr_rtlabel *)
+				    rti_info[RTAX_LABEL]) != NULL)
+					kr->r.rtlabel =
+					    rtlabel_name2id(label->sr_label);
+
 				kroute_insert(kr);
 			}
 			break;
@@ -1073,6 +1113,10 @@ dispatch_rtmsg(void)
 				continue;
 			if (!(kr->r.flags & F_KERNEL))
 				continue;
+			if (kr->r.flags & F_OSPFD_INSERTED)
+				main_imsg_compose_rde(IMSG_KROUTE_GET, 0,
+				    &kr->r, sizeof(struct kroute));
+			rtlabel_unref(kr->r.rtlabel);
 			if (kroute_remove(kr) == -1)
 				return (-1);
 			break;

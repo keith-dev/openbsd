@@ -1,4 +1,4 @@
-/*	$OpenBSD: session.h,v 1.81 2006/01/24 10:03:44 henning Exp $ */
+/*	$OpenBSD: session.h,v 1.86 2006/08/27 16:11:05 henning Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -26,6 +26,7 @@
 #define	INTERVAL_HOLD			90
 #define	INTERVAL_IDLE_HOLD_INITIAL	30
 #define	INTERVAL_HOLD_CLONED		3600
+#define	INTERVAL_HOLD_DEMOTED		60
 #define	MAX_IDLE_HOLD			3600
 #define	MSGSIZE_HEADER			19
 #define	MSGSIZE_HEADER_MARKER		16
@@ -102,7 +103,14 @@ enum opt_params {
 enum capa_codes {
 	CAPA_NONE,
 	CAPA_MP,
-	CAPA_REFRESH
+	CAPA_REFRESH,
+	CAPA_RESTART = 64
+};
+
+struct bgp_msg {
+	struct buf	*buf;
+	enum msg_type	 type;
+	u_int16_t	 len;
 };
 
 struct msg_header {
@@ -178,6 +186,7 @@ struct peer {
 	u_int16_t		 holdtime;
 	u_int8_t		 auth_established;
 	u_int8_t		 depend_ok;
+	u_int8_t		 demoted;
 	u_int8_t		 passive;
 };
 
@@ -189,6 +198,7 @@ pid_t		 session_main(struct bgpd_config *, struct peer *,
 		    struct network_head *, struct filter_head *,
 		    struct mrt_head *, int[2], int[2], int[2]);
 void		 bgp_fsm(struct peer *, enum session_events);
+int		 session_neighbor_rrefresh(struct peer *p);
 struct peer	*getpeerbyaddr(struct bgpd_addr *);
 struct peer	*getpeerbydesc(const char *);
 int		 imsg_compose_parent(int, pid_t, void *, u_int16_t);
@@ -219,7 +229,7 @@ int	control_init(int, char *);
 int	control_listen(int);
 void	control_shutdown(int);
 int	control_dispatch_msg(struct pollfd *, u_int *);
-int	control_accept(int, int);
+unsigned int	control_accept(int, int);
 
 /* pfkey.c */
 int	pfkey_establish(struct peer *);
@@ -229,3 +239,9 @@ int	pfkey_init(struct bgpd_sysdep *);
 /* printconf.c */
 void	print_config(struct bgpd_config *, struct network_head *, struct peer *,
 	    struct filter_head *, struct mrt_head *);
+
+/* carp.c */
+int	 carp_demote_init(char *, int);
+void	 carp_demote_shutdown(void);
+int	 carp_demote_get(char *);
+int	 carp_demote_set(char *, int);

@@ -1,4 +1,4 @@
-.\"	$OpenBSD: scsi.4,v 1.22 2005/08/03 00:23:49 mickey Exp $
+.\"	$OpenBSD: scsi.4,v 1.27 2006/08/13 07:56:37 steven Exp $
 .\"
 .\" Copyright (c) 1996
 .\"	Julian Elischer <julian@freebsd.org>.  All rights reserved.
@@ -36,12 +36,12 @@
 .Pp
 .Cd "cd* at scsibus?"
 .Cd "ch* at scsibus?"
+.Cd "safte* at scsibus?"
 .Cd "sd* at scsibus?"
+.Cd "ses* at scsibus?"
 .Cd "st* at scsibus?"
 .Cd "ss* at scsibus?"
 .Cd "uk* at scsibus?"
-.Pp
-.Cd "ses* at scsibus?"
 .Sh DESCRIPTION
 The
 .Em SCSI
@@ -126,18 +126,9 @@ The ioctl will return a successful status even if the device rejected the
 command.
 As all status is returned to the user, it is up to the user
 process to examine this information to decide the success of the command.
-.It Dv SCIOCREPROBE
-Ask the system to probe the scsi busses for any new devices.
-If it finds any, they will be attached to the appropriate drivers.
-The search can be narrowed to a specific bus, target or lun.
-The new device may or may not be related to the device on which
-the ioctl was performed.
 .It Dv SCIOCIDENTIFY
 Ask the driver what its bus, target and lun are.
 In addition, the device type, ATAPI or SCSI, is returned.
-.It Dv SCIOCDECONFIG
-Ask the device to disappear.
-This may not happen if the device is in use.
 .El
 .Sh ADAPTERS
 The system allows common device drivers to work through many different
@@ -148,13 +139,6 @@ bus and the system.
 The maximum size of a transfer is governed by the adapter.
 Most adapters can transfer 64KB in a single operation, and many can transfer
 larger amounts.
-.Sh TARGET MODE
-Some adapters support
-.Em target mode
-in which the system is capable of operating as a device, responding to
-operations initiated by another system.
-Target mode will be supported for some adapters, but is not yet complete for
-this version of the scsi system.
 .Sh DIAGNOSTICS
 When the kernel is compiled with option SCSIDEBUG, the SCIOCDEBUG ioctl
 can be used to enable various amounts of tracing information on any
@@ -175,53 +159,15 @@ of the return values of functions.
 shows more detailed information including DMA scatter-gather logs.
 .El
 .Sh SEE ALSO
-.Xr aac 4 ,
-.Xr adv 4 ,
-.Xr adw 4 ,
-.Xr aha 4 ,
-.Xr ahb 4 ,
-.Xr ahc 4 ,
-.Xr aic 4 ,
-.Xr ami 4 ,
-.Xr asc 4 ,
-.Xr atapiscsi 4 ,
-.Xr bha 4 ,
-.Xr cac 4 ,
 .Xr cd 4 ,
 .Xr ch 4 ,
-.Xr ciss 4 ,
-.Xr dpt 4 ,
-.Xr esp 4 ,
-.Xr gdt 4 ,
-.Xr iha 4 ,
 .Xr intro 4 ,
-.Xr ioprbs 4 ,
-.Xr iopsp 4 ,
-.Xr isp 4 ,
-.\" .Xr mesh 4 ,
-.Xr mpt 4 ,
-.Xr ncr 4 ,
-.Xr ncrscsi 4 ,
-.Xr oosiop 4 ,
-.Xr osiop 4 ,
-.Xr pcscp 4 ,
+.Xr safte 4 ,
 .Xr sd 4 ,
-.Xr sea 4 ,
 .Xr ses 4 ,
-.Xr si 4 ,
-.Xr siop 4 ,
 .Xr ss 4 ,
-.Xr ssh 4 ,
 .Xr st 4 ,
-.Xr sw 4 ,
-.Xr trm 4 ,
-.Xr twe 4 ,
 .Xr uk 4 ,
-.Xr umass 4 ,
-.Xr usscanner 4 ,
-.Xr vs 4 ,
-.Xr wds 4 ,
-.Xr wdsc 4 ,
 .Xr scsi 8
 .Sh HISTORY
 This

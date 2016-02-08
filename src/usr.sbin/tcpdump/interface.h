@@ -1,4 +1,4 @@
-/*	$OpenBSD: interface.h,v 1.51 2005/11/22 11:36:12 reyk Exp $	*/
+/*	$OpenBSD: interface.h,v 1.54 2006/06/01 17:18:38 moritz Exp $	*/
 
 /*
  * Copyright (c) 1988, 1989, 1990, 1991, 1992, 1993, 1994, 1995, 1996, 1997
@@ -20,7 +20,7 @@
  * WARRANTIES, INCLUDING, WITHOUT LIMITATION, THE IMPLIED WARRANTIES OF
  * MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE.
  *
- * @(#) $Header: /cvs/src/usr.sbin/tcpdump/interface.h,v 1.51 2005/11/22 11:36:12 reyk Exp $ (LBL)
+ * @(#) $Header: /cvs/src/usr.sbin/tcpdump/interface.h,v 1.54 2006/06/01 17:18:38 moritz Exp $ (LBL)
  */
 
 #ifndef tcpdump_interface_h
@@ -236,6 +236,7 @@ extern void l2tp_print(const u_char *dat, u_int length);
 extern void vrrp_print(const u_char *bp, u_int len, int ttl);
 extern void carp_print(const u_char *bp, u_int len, int ttl);
 extern void hsrp_print(const u_char *, u_int);
+extern void vqp_print(const u_char *, u_int);
 extern void nfsreply_print(const u_char *, u_int, const u_char *);
 extern void nfsreq_print(const u_char *, u_int, const u_char *);
 extern void ns_print(const u_char *, u_int, int);
@@ -270,9 +271,10 @@ extern void stp_print(const u_char *, u_int);
 extern void radius_print(const u_char *, u_int);
 extern void lwres_print(const u_char *, u_int);
 extern void ether_print(const u_char *, u_int);
-extern void etherip_print(const u_char *, u_int, const u_char *);
+extern void etherip_print(const u_char *, u_int, u_int, const u_char *);
 extern void ipcomp_print(const u_char *, u_int, const u_char *);
 extern void mpls_print(const u_char *, u_int);
+extern void lldp_print(const u_char *, u_int);
 
 #ifdef INET6
 extern void ip6_print(const u_char *, int);

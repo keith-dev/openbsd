@@ -1,4 +1,4 @@
-/* $OpenBSD: key.c,v 1.3 2005/05/29 02:41:42 marius Exp $ */
+/* $OpenBSD: key.c,v 1.5 2006/04/03 01:33:09 djm Exp $ */
 
 /*
  * key.c
@@ -33,6 +33,7 @@
  * $Vendor: key.c,v 1.2 2005/04/01 16:47:31 dugsong Exp $
  */
 
+#include <sys/limits.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/uio.h>
@@ -78,7 +79,7 @@ load_file(struct iovec *iov, char *filename)
 	if (fstat(fd, &st) < 0)
 		return (-1);
 	
-	if (st.st_size == 0) {
+	if (st.st_size == 0 || st.st_size >= SIZE_MAX) {
 		errno = EINVAL;
 		return (-1);
 	}
@@ -100,12 +101,7 @@ load_file(struct iovec *iov, char *filename)
 struct key *
 key_new(void)
 {
-	struct key *k;
-
-	if ((k = calloc(sizeof(*k), 1)) == NULL)
-		return (NULL);
-
-	return (k);
+	return (calloc(1, sizeof(struct key)));
 }
 
 int

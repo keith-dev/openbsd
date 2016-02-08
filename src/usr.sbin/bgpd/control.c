@@ -1,4 +1,4 @@
-/*	$OpenBSD: control.c,v 1.49 2006/01/24 15:28:03 henning Exp $ */
+/*	$OpenBSD: control.c,v 1.53 2006/08/23 08:13:04 claudio Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -111,7 +111,7 @@ control_cleanup(const char *path)
 		unlink(path);
 }
 
-int
+unsigned int
 control_accept(int listenfd, int restricted)
 {
 	int			 connfd;
@@ -193,6 +193,7 @@ control_dispatch_msg(struct pollfd *pfd, u_int *ctl_cnt)
 	int			 n;
 	struct peer		*p;
 	struct ctl_neighbor	*neighbor;
+	struct ctl_show_rib_request	*ribreq;
 
 	if ((c = control_connbyfd(pfd->fd)) == NULL) {
 		log_warn("control_dispatch_msg: fd %d: not found", pfd->fd);
@@ -271,7 +272,6 @@ control_dispatch_msg(struct pollfd *pfd, u_int *ctl_cnt)
 				    0, 0, -1, p, sizeof(struct peer));
 			imsg_compose(&c->ibuf, IMSG_CTL_END, 0, 0, -1, NULL, 0);
 			break;
-		case IMSG_CTL_RELOAD:
 		case IMSG_CTL_FIB_COUPLE:
 		case IMSG_CTL_FIB_DECOUPLE:
 			imsg_compose_parent(imsg.hdr.type, 0, NULL, 0);
@@ -279,6 +279,7 @@ control_dispatch_msg(struct pollfd *pfd, u_int *ctl_cnt)
 		case IMSG_CTL_NEIGHBOR_UP:
 		case IMSG_CTL_NEIGHBOR_DOWN:
 		case IMSG_CTL_NEIGHBOR_CLEAR:
+		case IMSG_CTL_NEIGHBOR_RREFRESH:
 			if (imsg.hdr.len == IMSG_HEADER_SIZE +
 			    sizeof(struct ctl_neighbor)) {
 				neighbor = imsg.data;
@@ -293,23 +294,33 @@ control_dispatch_msg(struct pollfd *pfd, u_int *ctl_cnt)
 				switch (imsg.hdr.type) {
 				case IMSG_CTL_NEIGHBOR_UP:
 					bgp_fsm(p, EVNT_START);
+					control_result(c, CTL_RES_OK);
 					break;
 				case IMSG_CTL_NEIGHBOR_DOWN:
 					bgp_fsm(p, EVNT_STOP);
+					control_result(c, CTL_RES_OK);
 					break;
 				case IMSG_CTL_NEIGHBOR_CLEAR:
 					bgp_fsm(p, EVNT_STOP);
 					p->IdleHoldTimer = time(NULL) +
 					    SESSION_CLEAR_DELAY;
+					control_result(c, CTL_RES_OK);
+					break;
+				case IMSG_CTL_NEIGHBOR_RREFRESH:
+					if (session_neighbor_rrefresh(p))
+						control_result(c,
+						    CTL_RES_NOCAP);
+					else
+						control_result(c, CTL_RES_OK);
 					break;
 				default:
 					fatal("king bula wants more humppa");
 				}
-				control_result(c, CTL_RES_OK);
 			} else
 				log_warnx("got IMSG_CTL_NEIGHBOR_ with "
 				    "wrong length");
 			break;
+		case IMSG_CTL_RELOAD:
 		case IMSG_CTL_KROUTE:
 		case IMSG_CTL_KROUTE_ADDR:
 		case IMSG_CTL_SHOW_NEXTHOP:
@@ -321,6 +332,46 @@ control_dispatch_msg(struct pollfd *pfd, u_int *ctl_cnt)
 		case IMSG_CTL_SHOW_RIB:
 		case IMSG_CTL_SHOW_RIB_AS:
 		case IMSG_CTL_SHOW_RIB_PREFIX:
+			if (imsg.hdr.len == IMSG_HEADER_SIZE +
+			    sizeof(struct ctl_show_rib_request)) {
+				ribreq = imsg.data;
+				neighbor = &ribreq->neighbor;
+				neighbor->descr[PEER_DESCR_LEN - 1] = 0;
+				ribreq->peerid = 0;
+				p = NULL;
+				if (neighbor->addr.af) {
+					p = getpeerbyaddr(&neighbor->addr);
+					if (p == NULL) {
+						control_result(c,
+						    CTL_RES_NOSUCHPEER);
+						break;
+					}
+					ribreq->peerid = p->conf.id;
+				} else if (neighbor->descr[0]) {
+					p = getpeerbydesc(neighbor->descr);
+					if (p == NULL) {
+						control_result(c,
+						    CTL_RES_NOSUCHPEER);
+						break;
+					}
+					ribreq->peerid = p->conf.id;
+				}
+				if ((ribreq->flags & F_CTL_ADJ_IN) && p &&
+				    !p->conf.softreconfig_in) {
+					/*
+					 * if no neighbor was specified we
+					 * try our best.
+					 */
+					control_result(c, CTL_RES_NOCAP);
+					break;
+				}
+				c->ibuf.pid = imsg.hdr.pid;
+				imsg_compose_rde(imsg.hdr.type, imsg.hdr.pid,
+				    imsg.data, imsg.hdr.len - IMSG_HEADER_SIZE);
+			} else
+				log_warnx("got IMSG_CTL_SHOW_RIB with "
+				    "wrong length");
+			break;
 		case IMSG_CTL_SHOW_RIB_MEM:
 		case IMSG_CTL_SHOW_NETWORK:
 			c->ibuf.pid = imsg.hdr.pid;

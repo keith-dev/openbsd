@@ -567,7 +567,6 @@ ipftest
 ipmon
 ipnat
 ipresend
-ipsecadm
 ipsend
 iptest
 irand
@@ -1399,7 +1398,6 @@ who
 whoami
 whois
 whom
-wicontrol
 window
 write
 writev

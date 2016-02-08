@@ -1,4 +1,4 @@
-/*	$OpenBSD: tty.c,v 1.26 2006/02/25 14:40:16 otto Exp $	*/
+/*	$OpenBSD: tty.c,v 1.28 2006/08/01 22:16:03 jason Exp $	*/
 
 /* This file is in the public domain. */
 
@@ -34,7 +34,6 @@
 #include <sys/ioctl.h>
 
 #include <term.h>
-#include <signal.h>
 
 static int	 charcost(char *);
 
@@ -412,7 +411,7 @@ ttresize(void)
 #ifdef	TIOCGWINSZ
 	struct	winsize winsize;
 
-	if (ioctl(0, TIOCGWINSZ, (char *) &winsize) == 0) {
+	if (ioctl(0, TIOCGWINSZ, &winsize) == 0) {
 		newrow = winsize.ws_row;
 		newcol = winsize.ws_col;
 	}

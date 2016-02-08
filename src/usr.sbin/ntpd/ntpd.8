@@ -1,6 +1,6 @@
-.\" $OpenBSD: ntpd.8,v 1.14 2005/06/21 19:55:18 deraadt Exp $
+.\" $OpenBSD: ntpd.8,v 1.16 2006/06/22 11:11:53 otto Exp $
 .\"
-.\" Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
+.\" Copyright (c) 2003, 2004, 2006 Henning Brauer <henning@openbsd.org>
 .\"
 .\" Permission to use, copy, modify, and distribute this software for any
 .\" purpose with or without fee is hereby granted, provided that the above
@@ -14,7 +14,7 @@
 .\" AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT
 .\" OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 .\"
-.Dd July 9, 2004
+.Dd May 26, 2006
 .Dt NTPD 8
 .Os
 .Sh NAME
@@ -29,8 +29,10 @@
 .Sh DESCRIPTION
 The
 .Nm
-daemon synchronizes the local clock to one or more remote NTP servers,
-and can also act as an NTP server itself,
+daemon synchronizes the local clock to one or more remote NTP servers
+or local timedelta sensors.
+.Nm
+can also act as an NTP server itself,
 redistributing the local time.
 It implements the Simple Network Time Protocol version 4,
 as described in RFC 2030,
@@ -100,11 +102,15 @@ before starting
 .Nm .
 .El
 .Sh FILES
-.Bl -tag -width "/etc/ntpd.confXXX" -compact
+.Bl -tag -width "/var/db/ntpd.driftXXX" -compact
 .It Pa /etc/ntpd.conf
 default
 .Nm
 configuration file
+.It Pa /var/db/ntpd.drift
+drift file, written by
+.Nm
+periodically and used at startup to get the initial clock drift
 .El
 .Sh SEE ALSO
 .Xr date 1 ,

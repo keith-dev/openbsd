@@ -1,4 +1,4 @@
-/*	$OpenBSD: co.c,v 1.54 2006/02/24 14:34:56 xsa Exp $	*/
+/*	$OpenBSD: co.c,v 1.97 2006/08/07 20:55:28 ray Exp $	*/
 /*
  * Copyright (c) 2005 Joris Vink <joris@openbsd.org>
  * All rights reserved.
@@ -28,7 +28,7 @@
 
 #include "rcsprog.h"
 
-#define CO_OPTSTRING	"d:f::k:l::M::p::q::r::s:Tu::Vw::x:"
+#define CO_OPTSTRING	"d:f::I::k:l::M::p::q::r::s:Tu::Vw::x::z::"
 
 static void	checkout_err_nobranch(RCSFILE *, const char *, const char *,
     const char *, int);
@@ -36,74 +36,76 @@ static void	checkout_err_nobranch(RCSFILE *, const char *, const char *,
 int
 checkout_main(int argc, char **argv)
 {
-	int i, ch, flags, kflag;
-	RCSNUM *frev, *rev;
+	int fd, i, ch, flags, kflag, status;
+	RCSNUM *rev;
 	RCSFILE *file;
+	const char *author, *date, *state;
 	char fpath[MAXPATHLEN];
-	char *author, *username, *date;
-	const char *state;
+	char *rev_str, *username;
 	time_t rcs_mtime = -1;
 
-	flags = 0;
+	flags = status = 0;
 	kflag = RCS_KWEXP_ERR;
 	rev = RCS_HEAD_REV;
-	frev = NULL;
-	state = NULL;
-	author = NULL;
-	date = NULL;
+	rev_str = NULL;
+	author = date = state = NULL;
 
 	while ((ch = rcs_getopt(argc, argv, CO_OPTSTRING)) != -1) {
 		switch (ch) {
 		case 'd':
-			date = xstrdup(rcs_optarg);
+			date = rcs_optarg;
 			break;
 		case 'f':
-			rcs_set_rev(rcs_optarg, &rev);
+			rcs_setrevstr(&rev_str, rcs_optarg);
 			flags |= FORCE;
 			break;
+		case 'I':
+			rcs_setrevstr(&rev_str, rcs_optarg);
+			flags |= INTERACTIVE;
+			break;
+
 		case 'k':
 			kflag = rcs_kflag_get(rcs_optarg);
 			if (RCS_KWEXP_INVAL(kflag)) {
-				cvs_log(LP_ERR,
-				    "invalid RCS keyword expansion mode");
+				warnx("invalid RCS keyword substitution mode");
 				(usage)();
 				exit(1);
 			}
 			break;
 		case 'l':
-			rcs_set_rev(rcs_optarg, &rev);
 			if (flags & CO_UNLOCK) {
-				cvs_log(LP_ERR, "warning: -u overridden by -l");
+				warnx("warning: -u overridden by -l");
 				flags &= ~CO_UNLOCK;
 			}
+			rcs_setrevstr(&rev_str, rcs_optarg);
 			flags |= CO_LOCK;
 			break;
 		case 'M':
-			rcs_set_rev(rcs_optarg, &rev);
+			rcs_setrevstr(&rev_str, rcs_optarg);
 			flags |= CO_REVDATE;
 			break;
 		case 'p':
-			rcs_set_rev(rcs_optarg, &rev);
-			pipeout = 1;
+			rcs_setrevstr(&rev_str, rcs_optarg);
+			flags |= PIPEOUT;
 			break;
 		case 'q':
-			rcs_set_rev(rcs_optarg, &rev);
-			verbose = 0;
+			rcs_setrevstr(&rev_str, rcs_optarg);
+			flags |= QUIET;
 			break;
 		case 'r':
-			rcs_set_rev(rcs_optarg, &rev);
+			rcs_setrevstr(&rev_str, rcs_optarg);
 			break;
 		case 's':
-			state = xstrdup(rcs_optarg);
+			state = rcs_optarg;
 			flags |= CO_STATE;
 			break;
 		case 'T':
 			flags |= PRESERVETIME;
 			break;
 		case 'u':
-			rcs_set_rev(rcs_optarg, &rev);
+			rcs_setrevstr(&rev_str, rcs_optarg);
 			if (flags & CO_LOCK) {
-				cvs_log(LP_ERR, "warning: -l overridden by -u");
+				warnx("warning: -l overridden by -u");
 				flags &= ~CO_LOCK;
 			}
 			flags |= CO_UNLOCK;
@@ -115,13 +117,17 @@ checkout_main(int argc, char **argv)
 			/* if no argument, assume current user */
 			if (rcs_optarg == NULL) {
 				if ((author = getlogin()) == NULL)
-					fatal("getlogin failed");
+					err(1, "getlogin");
 			} else
-				author = xstrdup(rcs_optarg);
+				author = rcs_optarg;
 			flags |= CO_AUTHOR;
 			break;
 		case 'x':
-			rcs_suffixes = rcs_optarg;
+			/* Use blank extension if none given. */
+			rcs_suffixes = rcs_optarg ? rcs_optarg : "";
+			break;
+		case 'z':
+			timezone_flag = rcs_optarg;
 			break;
 		default:
 			(usage)();
@@ -133,59 +139,74 @@ checkout_main(int argc, char **argv)
 	argv += rcs_optind;
 
 	if (argc == 0) {
-		cvs_log(LP_ERR, "no input file");
+		warnx("no input file");
 		(usage)();
 		exit (1);
 	}
 
-	if ((username = getlogin()) == NULL) {
-		cvs_log(LP_ERRNO, "failed to get username");
-		exit (1);
-	}
+	if ((username = getlogin()) == NULL)
+		err(1, "getlogin");
 
 	for (i = 0; i < argc; i++) {
-		if (rcs_statfile(argv[i], fpath, sizeof(fpath)) < 0)
+		fd = rcs_choosefile(argv[i], fpath, sizeof(fpath));
+		if (fd < 0) {
+			warnx("%s", fpath);
 			continue;
+		}
 
-		if (verbose == 1)
-			printf("%s  -->  %s\n", fpath,
-			    (pipeout == 1) ? "standard output" : argv[i]);
+		if (!(flags & QUIET))
+			(void)fprintf(stderr, "%s  -->  %s\n", fpath,
+			    (flags & PIPEOUT) ? "standard output" : argv[i]);
 
 		if ((flags & CO_LOCK) && (kflag & RCS_KWEXP_VAL)) {
-			cvs_log(LP_ERR, "%s: cannot combine -kv and -l", fpath);
+			warnx("%s: cannot combine -kv and -l", fpath);
+			(void)close(fd);
 			continue;
 		}
 
-		if ((file = rcs_open(fpath, RCS_RDWR|RCS_PARSE_FULLY)) == NULL)
+		if ((file = rcs_open(fpath, fd,
+		    RCS_RDWR|RCS_PARSE_FULLY)) == NULL)
 			continue;
 
 		if (flags & PRESERVETIME)
-			rcs_mtime = rcs_get_mtime(file->rf_path);
+			rcs_mtime = rcs_get_mtime(file);
 
-		if (kflag != RCS_KWEXP_ERR)
-			rcs_kwexp_set(file, kflag);
+		rcs_kwexp_set(file, kflag);
 
-		if (rev == RCS_HEAD_REV)
-			frev = file->rf_head;
-		else
-			frev = rev;
-
-		if (checkout_rev(file, frev, argv[i], flags,
-		    username, author, state, date) < 0) {
-				rcs_close(file);
-				continue;
+		if (rev_str != NULL) {
+			if ((rev = rcs_getrevnum(rev_str, file)) == NULL)
+				errx(1, "invalid revision: %s", rev_str);
+		} else {
+			/* no revisions in RCS file, generate empty 0.0 */
+			if (file->rf_ndelta == 0) {
+				rev = rcsnum_parse("0.0");
+				if (rev == NULL)
+					errx(1, "failed to generate rev 0.0");
+			} else {
+				rev = rcsnum_alloc();
+				rcsnum_cpy(file->rf_head, rev, 0);
+			}
 		}
 
+		if ((status = checkout_rev(file, rev, argv[i], flags,
+		    username, author, state, date)) < 0) {
+			rcs_close(file);
+			rcsnum_free(rev);
+			continue;
+		}
+
+		if (!(flags & QUIET))
+			(void)fprintf(stderr, "done\n");
+
+		rcsnum_free(rev);
+
+		rcs_write(file);
+		if (flags & PRESERVETIME)
+			rcs_set_mtime(file, rcs_mtime);
 		rcs_close(file);
-
-		if (flags & PRESERVETIME)
-			rcs_set_mtime(fpath, rcs_mtime);
 	}
 
-	if (rev != RCS_HEAD_REV)
-		rcsnum_free(frev);
-
-	return (0);
+	return (status);
 }
 
 void
@@ -199,7 +220,7 @@ checkout_usage(void)
 
 /*
  * Checkout revision <rev> from RCSFILE <file>, writing it to the path <dst>
- * Currenly recognised <flags> are CO_LOCK, CO_UNLOCK and CO_REVDATE.
+ * Currently recognised <flags> are CO_LOCK, CO_UNLOCK and CO_REVDATE.
  *
  * Looks up revision based upon <lockname>, <author>, <state> and <date>
  *
@@ -211,22 +232,36 @@ checkout_rev(RCSFILE *file, RCSNUM *frev, const char *dst, int flags,
     const char *date)
 {
 	BUF *bp;
-	int lcount;
-	char buf[16], yn;
+	u_int i;
+	int fd, lcount;
+	char buf[16];
 	mode_t mode = 0444;
 	struct stat st;
 	struct rcs_delta *rdp;
 	struct rcs_lock *lkp;
-	char *content, msg[128], *fdate;
+	char *fdate;
 	time_t rcsdate, givendate;
+	RCSNUM *rev;
 
 	rcsdate = givendate = -1;
 	if (date != NULL)
-		givendate = cvs_date_parse(date);
+		givendate = rcs_date_parse(date);
 
-	/* Check out the latest revision if <frev> is greater than HEAD */
-	if (rcsnum_cmp(frev, file->rf_head, 0) == -1)
-		frev = file->rf_head;
+	if (file->rf_ndelta == 0 && !(flags & QUIET))
+		(void)fprintf(stderr,
+		    "no revisions present; generating empty revision 0.0\n");
+
+	/* XXX rcsnum_cmp()
+	 * Check out the latest revision if <frev> is greater than HEAD
+	 */
+	if (file->rf_ndelta != 0) {
+		for (i = 0; i < file->rf_head->rn_len; i++) {
+			if (file->rf_head->rn_id[i] < frev->rn_id[i]) {
+				frev = file->rf_head;
+				break;
+			}
+		}
+	}
 
 	lcount = 0;
 	TAILQ_FOREACH(lkp, &(file->rf_locks), rl_list) {
@@ -241,10 +276,9 @@ checkout_rev(RCSFILE *file, RCSNUM *frev, const char *dst, int flags,
 	 * If we cannot find one, we return an error.
 	 */
 	rdp = NULL;
-	if (frev == file->rf_head) {
+	if (file->rf_ndelta != 0 && frev == file->rf_head) {
 		if (lcount > 1) {
-			cvs_log(LP_WARN,
-			    "multiple revisions locked by %s; "
+			warnx("multiple revisions locked by %s; "
 			    "please specify one", lockname);
 			return (-1);
 		}
@@ -252,127 +286,197 @@ checkout_rev(RCSFILE *file, RCSNUM *frev, const char *dst, int flags,
 		TAILQ_FOREACH(rdp, &file->rf_delta, rd_list) {
 			if (date != NULL) {
 				fdate = asctime(&rdp->rd_date);
-				rcsdate = cvs_date_parse(fdate);
+				rcsdate = rcs_date_parse(fdate);
 				if (givendate <= rcsdate)
 					continue;
 			}
 
-			if ((author != NULL) &&
-			    (strcmp(rdp->rd_author, author)))
+			if (author != NULL &&
+			    strcmp(rdp->rd_author, author))
 				continue;
 
-			if ((state != NULL) &&
-			    (strcmp(rdp->rd_state, state)))
+			if (state != NULL &&
+			    strcmp(rdp->rd_state, state))
 				continue;
 
 			frev = rdp->rd_num;
 			break;
 		}
-	} else {
+	} else if (file->rf_ndelta != 0) {
 		rdp = rcs_findrev(file, frev);
 	}
 
-	if (rdp == NULL) {
+	if (file->rf_ndelta != 0 && rdp == NULL) {
 		checkout_err_nobranch(file, author, date, state, flags);
 		return (-1);
 	}
 
-	rcsnum_tostr(frev, buf, sizeof(buf));
+	if (file->rf_ndelta == 0)
+		rev = frev;
+	else
+		rev = rdp->rd_num;
 
-	if (rdp->rd_locker != NULL) {
+	rcsnum_tostr(rev, buf, sizeof(buf));
+
+	if (file->rf_ndelta != 0 && rdp->rd_locker != NULL) {
 		if (strcmp(lockname, rdp->rd_locker)) {
-			strlcpy(msg, "Revision %s is already locked by %s; ",
-			    sizeof(msg));
-			if (flags & CO_UNLOCK)
-				strlcat(msg, "use co -r or rcs -u", sizeof(msg));
-			cvs_log(LP_ERR, msg, buf, rdp->rd_locker);
+			warnx("Revision %s is already locked by %s; %s",
+			    buf, rdp->rd_locker,
+			    (flags & CO_UNLOCK) ? "use co -r or rcs -u" : "");
 			return (-1);
 		}
 	}
 
-	if ((verbose == 1) && !(flags & NEWFILE))
-		printf("revision %s", buf);
+	if (!(flags & QUIET) && !(flags & NEWFILE) &&
+	    !(flags & CO_REVERT) && file->rf_ndelta != 0)
+		(void)fprintf(stderr, "revision %s", buf);
 
-
-	if ((bp = rcs_getrev(file, frev)) == NULL) {
-		cvs_log(LP_ERR, "cannot find revision `%s'", buf);
-		return (-1);
-	}
-
-	if (flags & CO_LOCK) {
-		if ((lockname != NULL)
-		    && (rcs_lock_add(file, lockname, frev) < 0)) {
-			if (rcs_errno != RCS_ERR_DUPENT)
-				return (-1);
+	if (file->rf_ndelta != 0) {
+		if ((bp = rcs_getrev(file, rev)) == NULL) {
+			warnx("cannot find revision `%s'", buf);
+			return (-1);
 		}
-
-		mode = 0644;
-		if ((verbose == 1) && !(flags & NEWFILE))
-			printf(" (locked)\n");
-	} else if (flags & CO_UNLOCK) {
-		if (rcs_lock_remove(file, lockname, frev) < 0) {
-			if (rcs_errno != RCS_ERR_NOENT)
-				return (-1);
-		}
-
-		mode = 0444;
-		if ((verbose == 1) && !(flags & NEWFILE))
-			printf(" (unlocked)\n");
-	}
-
-	if (flags & CO_LOCK) {
-		lcount++;
-		if (lcount > 1)
-			cvs_log(LP_WARN, "You now have %d locks.", lcount);
-	}
-
-	if ((pipeout == 0) && (stat(dst, &st) == 0) && !(flags & FORCE)) {
-		if (st.st_mode & S_IWUSR) {
-			yn = 0;
-			if (verbose == 0) {
-				cvs_log(LP_ERR,
-				    "writable %s exists; checkout aborted",
-				    dst);
-				return (-1);
-			}
-
-			while ((yn != 'y') && (yn != 'n')) {
-				printf("writable %s exists%s; ", dst,
-				    ((uid_t)getuid() == st.st_uid) ? "" :
-				    ", and you do not own it");
-				printf("remove it? [ny](n): ");
-				fflush(stdout);
-				yn = getchar();
-			}
-
-			if (yn == 'n') {
-				cvs_log(LP_ERR, "checkout aborted");
-				return (-1);
-			}
-		}
-	}
-
-	if (pipeout == 1) {
-		cvs_buf_putc(bp, '\0');
-		content = cvs_buf_release(bp);
-		printf("%s", content);
-		xfree(content);
 	} else {
-		if (cvs_buf_write(bp, dst, mode) < 0) {
-			cvs_log(LP_ERR, "failed to write revision to file");
-			cvs_buf_free(bp);
+		bp = rcs_buf_alloc(1, 0);
+	}
+
+	/*
+	 * Do keyword expansion if required.
+	 */
+	if (file->rf_ndelta != 0)
+		bp = rcs_kwexp_buf(bp, file, rev);
+	/*
+	 * File inherits permissions from its ,v file
+	 */
+	if (file->rf_fd != -1) {
+		if (fstat(file->rf_fd, &st) == -1)
+			err(1, "%s", file->rf_path);
+		mode = st.st_mode;
+	}
+
+	if (flags & CO_LOCK) {
+		if (file->rf_ndelta != 0) {
+			if (lockname != NULL &&
+			    rcs_lock_add(file, lockname, rev) < 0) {
+				if (rcs_errno != RCS_ERR_DUPENT)
+					return (-1);
+			}
+		}
+
+		/* Strip all write bits from mode */
+		if (file->rf_fd != -1) {
+			mode = st.st_mode &
+			    (S_IXUSR|S_IXGRP|S_IXOTH|S_IRUSR|S_IRGRP|S_IROTH);
+		}
+
+		mode |= S_IWUSR;
+
+		if (file->rf_ndelta != 0) {
+			if (!(flags & QUIET) && !(flags & NEWFILE) &&
+			    !(flags & CO_REVERT))
+				(void)fprintf(stderr, " (locked)");
+		}
+	} else if (flags & CO_UNLOCK) {
+		if (file->rf_ndelta != 0) {
+			if (rcs_lock_remove(file, lockname, rev) < 0) {
+				if (rcs_errno != RCS_ERR_NOENT)
+					return (-1);
+			}
+		}
+
+		/* Strip all write bits from mode */
+		if (file->rf_fd != -1) {
+			mode = st.st_mode &
+			    (S_IXUSR|S_IXGRP|S_IXOTH|S_IRUSR|S_IRGRP|S_IROTH);
+		}
+
+		if (file->rf_ndelta != 0) {
+			if (!(flags & QUIET) && !(flags & NEWFILE) &&
+			    !(flags & CO_REVERT))
+				(void)fprintf(stderr, " (unlocked)");
+		}
+	}
+
+	if (file->rf_ndelta == 0 && !(flags & QUIET) &&
+	    ((flags & CO_LOCK) || (flags & CO_UNLOCK))) {
+		(void)fprintf(stderr, "no revisions, so nothing can be %s\n",
+		    (flags & CO_LOCK) ? "locked" : "unlocked");
+	} else if (file->rf_ndelta != 0) {
+		/* XXX - Not a good way to detect if a newline is needed. */
+		if (!(flags & QUIET) && !(flags & NEWFILE) &&
+		    !(flags & CO_REVERT))
+			(void)fprintf(stderr, "\n");
+	}
+
+	if (flags & CO_LOCK) {
+		if (rcs_errno != RCS_ERR_DUPENT)
+			lcount++;
+		if (!(flags & QUIET) && lcount > 1 && !(flags & CO_REVERT))
+			warnx("%s: warning: You now have %d locks.",
+			    file->rf_path, lcount);
+	}
+
+	if (!(flags & PIPEOUT) && stat(dst, &st) != -1 && !(flags & FORCE)) {
+		/*
+		 * XXX - Not sure what is "right".  If we go according
+		 * to GNU's behavior, an existing file with no writable
+		 * bits is overwritten without prompting the user.
+		 *
+		 * This is dangerous, so we always prompt.
+		 * Unfortunately this interferes with an unlocked
+		 * checkout followed by a locked checkout, which should
+		 * not prompt.  One (unimplemented) solution is to check
+		 * if the existing file is the same as the checked out
+		 * revision, and prompt if there are differences.
+		 */
+		if (st.st_mode & (S_IWUSR|S_IWGRP|S_IWOTH))
+			(void)fprintf(stderr, "writable ");
+		(void)fprintf(stderr, "%s exists%s; ", dst,
+		    (getuid() == st.st_uid) ? "" :
+		    ", and you do not own it");
+		(void)fprintf(stderr, "remove it? [ny](n): ");
+		/* default is n */
+		if (rcs_yesno() == -1) {
+			if (!(flags & QUIET) && isatty(STDIN_FILENO))
+				warnx("writable %s exists; "
+				    "checkout aborted", dst);
+			else
+				warnx("checkout aborted");
 			return (-1);
 		}
-		cvs_buf_free(bp);
+	}
+
+	if (flags & PIPEOUT)
+		rcs_buf_write_fd(bp, STDOUT_FILENO);
+	else {
+		(void)unlink(dst);
+
+		if ((fd = open(dst, O_WRONLY|O_CREAT|O_TRUNC, mode)) < 0)
+			err(1, "%s", dst);
+
+		if (rcs_buf_write_fd(bp, fd) < 0) {
+			warnx("failed to write revision to file");
+			rcs_buf_free(bp);
+			(void)close(fd);
+			return (-1);
+		}
+
+		if (fchmod(fd, mode) == -1)
+			warn("%s", dst);
+
 		if (flags & CO_REVDATE) {
 			struct timeval tv[2];
 			memset(&tv, 0, sizeof(tv));
-			tv[0].tv_sec = (long)rcs_rev_getdate(file, frev);
+			tv[0].tv_sec = (long)rcs_rev_getdate(file, rev);
 			tv[1].tv_sec = tv[0].tv_sec;
-			if (utimes(dst, (const struct timeval *)&tv) < 0)
-				cvs_log(LP_ERRNO, "error setting utimes");
+			if (futimes(fd, (const struct timeval *)&tv) < 0)
+				warn("utimes");
 		}
+
+		(void)close(fd);
 	}
+
+	rcs_buf_free(bp);
 
 	return (0);
 }
@@ -391,7 +495,7 @@ checkout_err_nobranch(RCSFILE *file, const char *author, const char *date,
 	if (!(flags & CO_STATE))
 		state = NULL;
 
-	cvs_log(LP_ERR, "%s: No revision on branch has%s%s%s%s%s%s.",
+	warnx("%s: No revision on branch has%s%s%s%s%s%s.",
 	    file->rf_path,
 	    date ? " a date before " : "",
 	    date ? date : "",

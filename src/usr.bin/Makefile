@@ -1,11 +1,11 @@
-#	$OpenBSD: Makefile,v 1.99 2005/12/27 18:44:02 deraadt Exp $
+#	$OpenBSD: Makefile,v 1.101 2006/07/17 16:38:02 millert Exp $
 
 .include <bsd.own.mk>
 
 SUBDIR= apply apropos ar arch asa asn1_compile at aucat audioctl awk banner \
 	basename bc bdes \
-	biff cal calendar cap_mkdb cdio checknr chpass cmp col \
-	colcrt colrm column comm compile_et compress cpp crontab ctags cut \
+	biff cal calendar cap_mkdb cdio checknr chpass cmp col colcrt colrm \
+	column comm compile_et compress cpp crontab csplit ctags cut \
 	dc deroff diff diff3 dirname du elf2olf encrypt env expand false file \
 	file2c find fgen finger fmt fold from fsplit fstat ftp gencat getcap \
 	getconf getent getopt gprof grep gzsig head hexdump id indent \
@@ -15,9 +15,9 @@ SUBDIR= apply apropos ar arch asa asn1_compile at aucat audioctl awk banner \
 	midiplay mixerctl mkdep mklocale mkstr mktemp modstat msgs nc netstat \
 	newsyslog \
 	nfsstat nice nm nohup oldrdist pagesize passwd paste patch pctr pkill \
-	pmdb pr printenv printf quota radioctl ranlib rdist rdistd readlink \
-	renice rev rpcgen rpcinfo rs rsh rup ruptime rusers rwall rwho \
-	sdiff script sectok sed shar showmount skey \
+	pmdb pr printenv printf quota radioctl ranlib rcs rdist rdistd \
+	readlink renice rev rpcgen rpcinfo rs rsh rup ruptime rusers rwall \
+	rwho sdiff script sectok sed shar showmount skey \
 	skeyaudit skeyinfo skeyinit sort spell split ssh stat su sup systat \
 	sudo tail talk tcopy tee telnet tftp tic time tip tn3270 top touch \
 	tput tr true tset tsort tty usbhidaction usbhidctl ul uname \

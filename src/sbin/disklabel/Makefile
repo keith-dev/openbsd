@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.39 2005/08/30 05:02:40 uwe Exp $
+#	$OpenBSD: Makefile,v 1.41 2006/07/11 19:03:27 miod Exp $
 
 PROG=	disklabel
 SRCS=	disklabel.c dkcksum.c editor.c manual.c
@@ -13,12 +13,12 @@ CLEANFILES+=manual.c
 
 .ifdef NOMAN
 manual.c:
-	(echo 'const char manpage[] = {'; \
+	(echo 'const unsigned char manpage[] = {'; \
 	echo 'no manual' | gzip -9c | hexdump -ve '"0x" 1/1 "%02x,"'; \
 	echo '};'; echo 'const int manpage_sz = sizeof(manpage);') > manual.c
 .else
 manual.c:	disklabel.cat8
-	(echo 'const char manpage[] = {'; \
+	(echo 'const unsigned char manpage[] = {'; \
 	cat disklabel.cat8 | gzip -9c | hexdump -ve '"0x" 1/1 "%02x,"'; \
 	echo '};'; echo 'const int manpage_sz = sizeof(manpage);') > manual.c
 .endif
@@ -27,37 +27,37 @@ manual.c:	disklabel.cat8
 CFLAGS+= -DSEEALSO="\"fdisk(8), installboot(8)\""
 .endif
 
-.if (${MACHINE} == "cats")
-CFLAGS+= -DSEEALSO="\"fdisk(8)\""
-.endif
-
-.if (${MACHINE} == "i386") || (${MACHINE} == "amd64")
+.if (${MACHINE} == "amd64") || (${MACHINE} == "i386")
 CFLAGS+= -DNUMBOOT=2 -DDOSLABEL
 CFLAGS+= -DSEEALSO="\"fdisk(8), installboot(8)\""
 .endif
 
-.if (${MACHINE} == "zaurus")
-CFLAGS+= -DNUMBOOT=2 -DDOSLABEL
+.if (${MACHINE} == "armish") || (${MACHINE} == "cats")
+CFLAGS+= -DDOSLABEL
 CFLAGS+= -DSEEALSO="\"fdisk(8)\""
 .endif
 
-
-.if (${MACHINE} == "hp300") || (${MACHINE} == "vax") || \
-    (${MACHINE} == "hppa") || (${MACHINE} == "hppa64")
+.if (${MACHINE} == "hp300") || (${MACHINE} == "hppa") || \
+    (${MACHINE} == "hppa64") || (${MACHINE} == "vax")
 CFLAGS+= -DNUMBOOT=1
 .endif
 
-.if (${MACHINE} == "sun3") || (${MACHINE} == "sparc") || \
-    (${MACHINE} == "sparc64")
-CFLAGS+= -DSEEALSO="\"installboot(8)\"" -DCYLCHECK -DAAT0
+.if (${MACHINE} == "macppc")
+CFLAGS+= -DDOSLABEL
+CFLAGS+= -DSEEALSO="\"fdisk(8)\""
 .endif
 
 .if (${MACHINE} == "mvme68k") || (${MACHINE} == "mvme88k")
 CFLAGS+= -DSEEALSO="\"installboot(8)\""
 .endif
 
-.if (${MACHINE} == "macppc")
-CFLAGS+= -DDOSLABEL
+.if (${MACHINE} == "solbourne") || (${MACHINE} == "sparc") || \
+    (${MACHINE} == "sparc64")
+CFLAGS+= -DSEEALSO="\"installboot(8)\"" -DCYLCHECK -DAAT0
+.endif
+
+.if (${MACHINE} == "zaurus")
+CFLAGS+= -DNUMBOOT=2 -DDOSLABEL
 CFLAGS+= -DSEEALSO="\"fdisk(8)\""
 .endif
 

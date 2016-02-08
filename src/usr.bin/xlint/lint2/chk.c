@@ -1,4 +1,4 @@
-/*	$OpenBSD: chk.c,v 1.12 2005/12/10 20:26:10 cloder Exp $	*/
+/*	$OpenBSD: chk.c,v 1.15 2006/07/09 19:37:00 miod Exp $	*/
 /*	$NetBSD: chk.c,v 1.2 1995/07/03 21:24:42 cgd Exp $	*/
 
 /*
@@ -33,7 +33,7 @@
  */
 
 #ifndef lint
-static char rcsid[] = "$OpenBSD: chk.c,v 1.12 2005/12/10 20:26:10 cloder Exp $";
+static char rcsid[] = "$OpenBSD: chk.c,v 1.15 2006/07/09 19:37:00 miod Exp $";
 #endif
 
 #include <stdlib.h>
@@ -77,73 +77,73 @@ inittyp(void)
 		tspec_t	it_tspec;
 		ttab_t	it_ttab;
 	} ittab[] = {
-		{ SIGNED,   { 0, 0,
+		{ SIGNED,   { 0, 0, 0,
 				      SIGNED, UNSIGN,
 				      0, 0, 0, 0, 0, "signed" } },
-		{ UNSIGN,   { 0, 0,
+		{ UNSIGN,   { 0, 0, 0,
 				      SIGNED, UNSIGN,
 				      0, 0, 0, 0, 0, "unsigned" } },
-		{ CHAR,	    { CHAR_BIT, CHAR_BIT,
+		{ CHAR,	    { CHAR_BIT, CHAR_BIT, 20,
 				      SCHAR, UCHAR,
 				      1, 0, 0, 1, 1, "char" } },
-		{ SCHAR,    { CHAR_BIT, CHAR_BIT,
+		{ SCHAR,    { CHAR_BIT, CHAR_BIT, 20,
 				      SCHAR, UCHAR,
 				      1, 0, 0, 1, 1, "signed char" } },
-		{ UCHAR,    { CHAR_BIT, CHAR_BIT,
+		{ UCHAR,    { CHAR_BIT, CHAR_BIT, 20,
 				      SCHAR, UCHAR,
 				      1, 1, 0, 1, 1, "unsigned char" } },
-		{ SHORT,    { sizeof (short) * CHAR_BIT, 2 * CHAR_BIT,
+		{ SHORT,    { sizeof (short) * CHAR_BIT, 2 * CHAR_BIT, 30,
 				      SHORT, USHORT,
 				      1, 0, 0, 1, 1, "short" } },
-		{ USHORT,   { sizeof (u_short) * CHAR_BIT, 2 * CHAR_BIT,
+		{ USHORT,   { sizeof (u_short) * CHAR_BIT, 2 * CHAR_BIT, 30,
 				      SHORT, USHORT,
 				      1, 1, 0, 1, 1, "unsigned short" } },
-		{ INT,      { sizeof (int) * CHAR_BIT, 3 * CHAR_BIT,
+		{ INT,      { sizeof (int) * CHAR_BIT, 3 * CHAR_BIT, 40,
 				      INT, UINT,
 				      1, 0, 0, 1, 1, "int" } },
-		{ UINT,     { sizeof (u_int) * CHAR_BIT, 3 * CHAR_BIT,
+		{ UINT,     { sizeof (u_int) * CHAR_BIT, 3 * CHAR_BIT, 40,
 				      INT, UINT,
 				      1, 1, 0, 1, 1, "unsigned int" } },
-		{ LONG,     { sizeof (long) * CHAR_BIT, 4 * CHAR_BIT,
+		{ LONG,     { sizeof (long) * CHAR_BIT, 4 * CHAR_BIT, 50,
 				      LONG, ULONG,
 				      1, 0, 0, 1, 1, "long" } },
-		{ ULONG,    { sizeof (u_long) * CHAR_BIT, 4 * CHAR_BIT,
+		{ ULONG,    { sizeof (u_long) * CHAR_BIT, 4 * CHAR_BIT, 50,
 				      LONG, ULONG,
 				      1, 1, 0, 1, 1, "unsigned long" } },
-		{ QUAD,     { sizeof (quad_t) * CHAR_BIT, 8 * CHAR_BIT,
+		{ QUAD,     { sizeof (quad_t) * CHAR_BIT, 8 * CHAR_BIT, 60,
 				      QUAD, UQUAD,
 				      1, 0, 0, 1, 1, "long long" } },
-		{ UQUAD,    { sizeof (u_quad_t) * CHAR_BIT, 8 * CHAR_BIT,
+		{ UQUAD,    { sizeof (u_quad_t) * CHAR_BIT, 8 * CHAR_BIT, 60,
 				      QUAD, UQUAD,
 				      1, 1, 0, 1, 1, "unsigned long long" } },
-		{ FLOAT,    { sizeof (float) * CHAR_BIT, 4 * CHAR_BIT,
+		{ FLOAT,    { sizeof (float) * CHAR_BIT, 4 * CHAR_BIT, -1,
 				      FLOAT, FLOAT,
 				      0, 0, 1, 1, 1, "float" } },
-		{ DOUBLE,   { sizeof (double) * CHAR_BIT, 8 * CHAR_BIT,
+		{ DOUBLE,   { sizeof (double) * CHAR_BIT, 8 * CHAR_BIT, -1,
 				      DOUBLE, DOUBLE,
 				      0, 0, 1, 1, 1, "double" } },
-		{ LDOUBLE,  { sizeof (ldbl_t) * CHAR_BIT, 10 * CHAR_BIT,
+		{ LDOUBLE,  { sizeof (ldbl_t) * CHAR_BIT, 10 * CHAR_BIT, -1,
 				      LDOUBLE, LDOUBLE,
 				      0, 0, 1, 1, 1, "long double" } },
-		{ VOID,     { -1, -1,
+		{ VOID,     { -1, -1, -1,
 				      VOID, VOID,
 				      0, 0, 0, 0, 0, "void" } },
-		{ STRUCT,   { -1, -1,
+		{ STRUCT,   { -1, -1, -1,
 				      STRUCT, STRUCT,
 				      0, 0, 0, 0, 0, "struct" } },
-		{ UNION,    { -1, -1,
+		{ UNION,    { -1, -1, -1,
 				      UNION, UNION,
 				      0, 0, 0, 0, 0, "union" } },
-		{ ENUM,     { sizeof (int) * CHAR_BIT, 3 * CHAR_BIT,
+		{ ENUM,     { sizeof (int) * CHAR_BIT, 3 * CHAR_BIT, 40,
 				      ENUM, ENUM,
 				      1, 0, 0, 1, 1, "enum" } },
-		{ PTR,      { sizeof (void *) * CHAR_BIT, 4 * CHAR_BIT,
+		{ PTR,      { sizeof (void *) * CHAR_BIT, 4 * CHAR_BIT, -1,
 				      PTR, PTR,
 				      0, 1, 0, 0, 1, "pointer" } },
-		{ ARRAY,    { -1, -1,
+		{ ARRAY,    { -1, -1, -1,
 				      ARRAY, ARRAY,
 				      0, 0, 0, 0, 0, "array" } },
-		{ FUNC,     { -1, -1,
+		{ FUNC,     { -1, -1, -1,
 				      FUNC, FUNC,
 				      0, 0, 0, 0, 0, "function" } },
 	};
@@ -371,7 +371,7 @@ chkvtui(hte_t *hte, sym_t *def, sym_t *decl)
 		}
 		if (!eq || (sflag && warn)) {
 			pos1 = xstrdup(mkpos(&def->s_pos));
-			/* %s: %s used inconsistenty (%s) */
+			/* %s: %s used inconsistently (%s) */
 			msg(4, pos1, hte->h_name, mkpos(&call->f_pos));
 			free(pos1);
 		}
@@ -595,12 +595,12 @@ chkau(hte_t *hte, int n, sym_t *def, sym_t *decl, pos_t *pos1p,
 			} else if (t1 == CHAR || t1 == SCHAR) {
 				t1 = INT;
 			} else if (t1 == UCHAR) {
-				t1 = tflag ? UINT : INT;
+				t1 = INT;
 			} else if (t1 == SHORT) {
 				t1 = INT;
 			} else if (t1 == USHORT) {
 				/* CONSTCOND */
-				t1 = INT_MAX < USHRT_MAX || tflag ? UINT : INT;
+				t1 = INT_MAX < USHRT_MAX ? UINT : INT;
 			}
 		}
 
@@ -842,8 +842,8 @@ printflike(hte_t *hte, fcall_t *call, int n, const char *fmt, type_t **ap)
 					inconarg(hte, call, n);
 			}
 		} else if (fc == 'D' || fc == 'O' || fc == 'U') {
-			if ((alt && fc != 'O') || sz != NOTSPEC || !tflag)
-				badfmt(hte, call);
+			/* DOU are deprecated */
+			badfmt(hte, call);
 			sz = LONG;
 			if (fc == 'D') {
 				goto int_conv;
@@ -1000,13 +1000,11 @@ scanflike(hte_t *hte, fcall_t *call, int n, const char *fmt, type_t **ap)
 			}
 			goto conv;
 		} else if (fc == 'D') {
-			if (sz != NOTSPEC || !tflag)
-				badfmt(hte, call);
+			badfmt(hte, call);
 			sz = LONG;
 			goto conv;
 		} else if (fc == 'O') {
-			if (sz != NOTSPEC || !tflag)
-				badfmt(hte, call);
+			badfmt(hte, call);
 			sz = ULONG;
 			goto conv;
 		} else if (fc == 'X') {
@@ -1014,8 +1012,7 @@ scanflike(hte_t *hte, fcall_t *call, int n, const char *fmt, type_t **ap)
 			 * XXX valid in ANSI C, but in NetBSD's libc imple-
 			 * mented as "lx". Thats why it should be avoided.
 			 */
-			if (sz != NOTSPEC || !tflag)
-				badfmt(hte, call);
+			badfmt(hte, call);
 			sz = ULONG;
 			goto conv;
 		} else if (fc == 'E') {
@@ -1023,14 +1020,12 @@ scanflike(hte_t *hte, fcall_t *call, int n, const char *fmt, type_t **ap)
 			 * XXX valid in ANSI C, but in NetBSD's libc imple-
 			 * mented as "lf". Thats why it should be avoided.
 			 */
-			if (sz != NOTSPEC || !tflag)
-				badfmt(hte, call);
+			badfmt(hte, call);
 			sz = DOUBLE;
 			goto conv;
 		} else if (fc == 'F') {
 			/* XXX only for backward compatibility */
-			if (sz != NOTSPEC || !tflag)
-				badfmt(hte, call);
+			badfmt(hte, call);
 			sz = DOUBLE;
 			goto conv;
 		} else if (fc == 'G') {
@@ -1273,12 +1268,12 @@ eqtype(type_t *tp1, type_t *tp2, int ignqual, int promot, int asgn, int *warn)
 			} else if (t == CHAR || t == SCHAR) {
 				t = INT;
 			} else if (t == UCHAR) {
-				t = tflag ? UINT : INT;
+				t = INT;
 			} else if (t == SHORT) {
 				t = INT;
 			} else if (t == USHORT) {
 				/* CONSTCOND */
-				t = INT_MAX < USHRT_MAX || tflag ? UINT : INT;
+				t = INT_MAX < USHRT_MAX ? UINT : INT;
 			}
 		}
 
@@ -1318,7 +1313,7 @@ eqtype(type_t *tp1, type_t *tp2, int ignqual, int promot, int asgn, int *warn)
 				return (0);
 			if (!tp1->t_volatile && tp2->t_volatile)
 				return (0);
-		} else if (!ignqual && !tflag) {
+		} else if (!ignqual) {
 			if (tp1->t_const != tp2->t_const)
 				return (0);
 			if (tp1->t_const != tp2->t_const)

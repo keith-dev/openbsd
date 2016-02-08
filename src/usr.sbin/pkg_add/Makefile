@@ -1,4 +1,4 @@
-# $OpenBSD: Makefile,v 1.33 2005/09/18 02:56:12 deraadt Exp $
+# $OpenBSD: Makefile,v 1.36 2006/03/06 10:40:31 espie Exp $
 
 .include <bsd.own.mk>
 
@@ -21,14 +21,19 @@ PACKAGES= \
     OpenBSD/Interactive.pm \
     OpenBSD/Mtree.pm \
     OpenBSD/PackageInfo.pm \
+    OpenBSD/PackageLocation.pm \
     OpenBSD/PackageLocator.pm \
     OpenBSD/PackageName.pm \
+    OpenBSD/PackageRepository.pm \
+    OpenBSD/PackageRepository/SCP.pm \
+    OpenBSD/PackageRepositoryList.pm \
     OpenBSD/PackingElement.pm \
     OpenBSD/PackingList.pm \
     OpenBSD/PackingOld.pm \
     OpenBSD/PkgCfl.pm \
     OpenBSD/PkgSpec.pm \
     OpenBSD/ProgressMeter.pm \
+    OpenBSD/Replace.pm \
     OpenBSD/RequiredBy.pm \
     OpenBSD/SharedItems.pm \
     OpenBSD/SharedLibs.pm \
@@ -38,7 +43,7 @@ PACKAGES= \
     OpenBSD/Vstat.pm \
     OpenBSD/md5.pm \
 
-PACKAGEDIRS=OpenBSD
+PACKAGEDIRS=OpenBSD  OpenBSD/PackageRepository
 
 SCRIPTS= \
     pkg_add \

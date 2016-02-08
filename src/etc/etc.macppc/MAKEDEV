@@ -3,8 +3,8 @@
 # THIS FILE AUTOMATICALLY GENERATED.  DO NOT EDIT.
 # generated from:
 #
-#	OpenBSD: etc.macppc/MAKEDEV.md,v 1.22 2005/11/16 03:44:12 deraadt Exp 
-#	OpenBSD: MAKEDEV.common,v 1.23 2005/12/27 19:02:42 miod Exp 
+#	OpenBSD: etc.macppc/MAKEDEV.md,v 1.28 2006/04/16 11:34:02 todd Exp 
+#	OpenBSD: MAKEDEV.common,v 1.29 2006/08/28 21:04:04 tsi Exp 
 #	OpenBSD: MAKEDEV.mi,v 1.77 2005/10/06 06:43:19 otto Exp 
 #	OpenBSD: MAKEDEV.sub,v 1.14 2005/02/07 06:14:18 david Exp 
 #
@@ -42,13 +42,15 @@
 #	st*	SCSI tape drives
 # Terminal ports:
 #	tty[0-7][0-9a-f]	NS16x50 serial ports
+#	cua[a-z]*	Zilog 8530 serial ports
+#	tty[a-z]*	Zilog 8530 serial ports
 # Pseudo terminals:
 #	ptm	pty master device
 #	pty*	Set of 62 master pseudo terminals
 #	tty*	Set of 62 slave pseudo terminals
 # Console ports:
 #	wscons	Minimal wscons devices
-#	ttyC-F*	wscons display devices
+#	ttyC-J*	wscons display devices
 #	wskbd*	wscons keyboards
 #	wsmux	wscons keyboard/mouse mux devices
 # Pointing devices:
@@ -222,7 +224,6 @@ std)
 	M drum		c 3 0 640 kmem
 	M klog		c 6 0 600
 	M xf86		c 2 4 600
-	M reload	c 2 20 640 kmem
 	;;
 
 
@@ -380,13 +381,17 @@ wskbd*)
 	M wskbd$U c 68 $U 600
 	;;
 
-tty[C-F]*)
-	U=${i##tty[C-F]}
+tty[C-J]*)
+	U=${i##tty[C-J]}
 	case $i in
 	ttyC*) n=C m=0;;
 	ttyD*) n=D m=256;;
 	ttyE*) n=E m=512;;
 	ttyF*) n=F m=768;;
+	ttyG*) n=G m=1024;;
+	ttyH*) n=H m=1280;;
+	ttyI*) n=I m=1536;;
+	ttyJ*) n=J m=1792;;
 	esac
 	case $U in
 	[0-9a-f]) M tty$n$U c 67 $((16#$U+$m)) 600;;
@@ -427,11 +432,31 @@ ptm)
 	M ptm c 77 0 666
 	;;
 
+tty[a-z])
+	u=${i#tty*}
+	case $u in
+	a) n=0 ;;
+	b) n=1 ;;
+	*) echo unknown tty device $i ;;
+	esac
+	M tty$u c 7 $n 660 dialer uucp
+	;;
+
+cua[a-z])
+	u=${i#cua*}
+	case $u in
+	a) n=0 ;;
+	b) n=1 ;;
+	*) echo unknown cua device $i ;;
+	esac
+	M cua$u c 7 $(($n+128)) 660 dialer uucp
+	;;
+
 tty[0-7][0-9a-f])
 	U=${i#tty*}
 	o=$(h2d $U)
-	M tty$U c 7 $o 660 dialer uucp
-	M cua$U c 7 $(($o+128)) 660 dialer uucp
+	M tty$U c 26 $o 660 dialer uucp
+	M cua$U c 26 $(($o+128)) 660 dialer uucp
 	;;
 
 st*)
@@ -467,17 +492,17 @@ local)
 
 ramdisk)
 	R pty0 rd0 cd0 cd1 st0 st1 wd0 wd1 wd2 wd3 wd4 sd0 sd1 sd2
-	R sd3 sd4 bpf0 std
+	R sd3 sd4 tty00 tty01 bpf0 std
 	;;
 
 all)
 	R gpio0 gpio1 gpio2 ccd0 ccd1 ccd2 ccd3 vnd0 vnd1 vnd2 vnd3
 	R sd0 sd1 sd2 sd3 sd4 cd0 cd1 rd0 tun0 tun1 tun2 tun3 bpf0
 	R bpf1 bpf2 bpf3 bpf4 bpf5 bpf6 bpf7 bpf8 bpf9 pty0 xfs0 ss0
-	R ss1 ch0 hotplug ptm local wscons pci iop0 iop1 uall tuner0
-	R radio0 audio0 uk0 random lkm tty00 tty01 tty02 tty03 apm
-	R crypto pf systrace wd0 wd1 wd2 wd3 raid0 raid1 raid2 raid3
-	R std st0 st1 fd
+	R ss1 ch0 cuaa cuab ttya ttyb hotplug ptm local wscons pci
+	R iop0 iop1 uall tuner0 radio0 audio0 uk0 random lkm tty00
+	R tty01 tty02 tty03 apm crypto pf systrace wd0 wd1 wd2 wd3
+	R raid0 raid1 raid2 raid3 std st0 st1 fd
 	;;
 
 wd*|sd*|raid*|ccd*)

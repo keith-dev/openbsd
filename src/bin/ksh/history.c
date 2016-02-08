@@ -1,4 +1,4 @@
-/*	$OpenBSD: history.c,v 1.32 2005/12/11 18:53:51 deraadt Exp $	*/
+/*	$OpenBSD: history.c,v 1.35 2006/05/29 18:22:24 otto Exp $	*/
 
 /*
  * command history
@@ -65,7 +65,7 @@ c_fc(char **wp)
 	}
 
 	while ((optc = ksh_getopt(wp, &builtin_opt,
-	    "e:glnrs0,1,2,3,4,5,6,7,8,9,")) != EOF)
+	    "e:glnrs0,1,2,3,4,5,6,7,8,9,")) != -1)
 		switch (optc) {
 		case 'e':
 			p = builtin_opt.optarg;
@@ -646,7 +646,9 @@ hist_init(Source *s)
 	if ((fd = open(hname, O_RDWR|O_CREAT|O_APPEND, 0600)) < 0)
 		return;
 
-	histfd = savefd(fd, 0);
+	histfd = savefd(fd);
+	if (histfd != fd)
+		close(fd);
 
 	(void) flock(histfd, LOCK_EX);
 
@@ -849,6 +851,7 @@ histload(Source *s, unsigned char *base, int bytes)
 				}
 				else {
 					s->line = lno;
+					s->cmd_offset = lno;
 					histsave(lno, (char *)line, 0);
 				}
 				state = shdr;

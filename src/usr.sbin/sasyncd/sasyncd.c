@@ -1,4 +1,4 @@
-/*	$OpenBSD: sasyncd.c,v 1.9 2005/05/26 19:18:16 ho Exp $	*/
+/*	$OpenBSD: sasyncd.c,v 1.13 2006/09/01 01:13:25 mpf Exp $	*/
 
 /*
  * Copyright (c) 2005 Håkan Olsson.  All rights reserved.
@@ -75,9 +75,14 @@ sasyncd_run(pid_t ppid)
 		return -1;
 	}
 
+	isakmpd_setrun();
+
 	signal(SIGINT, sasyncd_stop);
 	signal(SIGTERM, sasyncd_stop);
 	signal(SIGHUP, sasyncd_stop);
+
+	timer_add("carp_undemote", CARP_DEMOTE_MAXTIME,
+	    monitor_carpundemote, NULL);
 
 	while (!daemon_shutdown) {
 		memset(rfds, 0, fdsetsize);
@@ -91,6 +96,10 @@ sasyncd_run(pid_t ppid)
 		pfkey_set_pending_wfd(wfds);
 		if (cfgstate.pfkey_socket + 1 > maxfd)
 			maxfd = cfgstate.pfkey_socket + 1;
+
+		carp_set_rfd(rfds);
+		if (cfgstate.route_socket + 1 > maxfd)
+			maxfd = cfgstate.route_socket + 1;
 
 		timeout = &tv;
 		timer_next_event(&tv);
@@ -106,6 +115,7 @@ sasyncd_run(pid_t ppid)
 			net_send_messages(wfds);
 			pfkey_read_message(rfds);
 			pfkey_send_message(wfds);
+			carp_read_message(rfds);
 		}
 		timer_run();
 
@@ -153,6 +163,8 @@ main(int argc, char **argv)
 	}
 	if (r)
 		return 1;
+
+	carp_demote(CARP_INC, 0);
 
 	if (carp_init())
 		return 1;

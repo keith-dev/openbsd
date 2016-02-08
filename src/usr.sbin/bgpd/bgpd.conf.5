@@ -1,4 +1,4 @@
-.\" $OpenBSD: bgpd.conf.5,v 1.64 2006/02/25 15:53:15 claudio Exp $
+.\" $OpenBSD: bgpd.conf.5,v 1.76 2006/09/12 13:39:37 jmc Exp $
 .\"
 .\" Copyright (c) 2004 Claudio Jeker <claudio@openbsd.org>
 .\" Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -54,11 +54,7 @@ the sections should be grouped and appear in
 .Nm
 in the order shown above.
 .Sh MACROS
-Much like
-.Xr cpp 1
-or
-.Xr m4 1 ,
-macros can be defined that will later be expanded in context.
+Macros can be defined that will later be expanded in context.
 Macro names must start with a letter, and may contain letters, digits
 and underscores.
 Macro names may not be reserved words (for example,
@@ -165,7 +161,7 @@ dump updates out "/tmp/updates-out-%H%M" 300
 .Xc
 If set to
 .Ic no ,
-do not update the Forward Information Base, a.k.a. the kernel
+do not update the Forwarding Information Base, a.k.a. the kernel
 routing table.
 The default is
 .Ic yes .
@@ -239,6 +235,23 @@ network 192.168.7.0/24 set localpref 220
 See also the
 .Sx ATTRIBUTE SET
 section.
+.Pp
+.It Xo
+.Ic nexthop
+.Ic qualify
+.Ic via
+.Pq Ic bgp Ns \&| Ns Ic default
+.Xc
+If set to
+.Ic bgp ,
+.Xr bgpd 8
+may use BGP routes to verify nexthops.
+If set to
+.Ic default ,
+bgpd may use the default route to verify nexthops.
+By default bgpd will only use static routes or routes added by other routing
+daemons like
+.Xr ospfd 8 .
 .Pp
 .It Xo
 .Ic rde
@@ -408,6 +421,29 @@ are supported) are announced during the capabilities negotiation.
 Only routes for that address family and subsequent address family will be
 announced and processed.
 .Pp
+.It Ic demote Ar group
+Increase the
+.Xr carp 4
+demotion counter on the given interface group, usually
+.Ar carp ,
+when the session is not in state
+.Em ESTABLISHED .
+The demotion counter will be increased as soon as
+.Xr bgpd 8
+starts and decreased
+60 seconds after the session went to state
+.Em ESTABLISHED.
+For neighbors added at runtime, the demotion counter is only increased after
+the session has been
+.Em ESTABLISHED
+at least once before dropping.
+.Pp
+For more information on interface groups,
+see the
+.Ic group
+keyword in
+.Xr ifconfig 8 .
+.Pp
 .It Ic depend on Ar interface
 The neighbor session will be kept in state
 .Em IDLE
@@ -562,9 +598,19 @@ is given,
 .Xr bgpd 8
 binds to this address first.
 .Pp
-.It Ic max-prefix Ar number
-Limit the amount of prefixes received.
-No such limit is imposed by default.
+.It Xo
+.Ic max-prefix Ar number
+.Op Ic restart Ar number
+.Xc
+Terminate the session after
+.Ar number
+prefixes have been received
+(no such limit is imposed by default).
+If
+.Ic restart
+is specified, the session will be restarted after
+.Ar number
+minutes.
 .Pp
 .It Ic multihop Ar hops
 Neighbors not in the same AS as the local
@@ -601,6 +647,13 @@ set localpref 300
 See also the
 .Sx ATTRIBUTE SET
 section.
+Set parameters are applied to the received prefixes; the only exceptions are
+.Ic prepend-self ,
+.Ic nexthop no-modify
+and
+.Ic nexthop self .
+These sets are rewritten into filter rules and can be viewed with
+.Dq bgpd -nv .
 .Pp
 .It Xo
 .Ic softreconfig
@@ -885,11 +938,14 @@ The following attributes can be modified:
 .Pp
 .Bl -tag -width Ds -compact
 .It Xo
-.Ic community
+.Ic community Op Ar delete
 .Ar as-number Ns Li : Ns Ar local
 .Xc
-.It Ic community Ar name
-Set the
+.It Xo
+.Ic community Op Ar delete
+.Ar name
+.Xc
+Set or delete the
 .Em COMMUNITIES
 AS path attribute.
 Communities are specified as
@@ -899,12 +955,13 @@ where
 is an AS number and
 .Ar local
 is a locally-significant number between zero and
-.Li 0xffff .
+.Li 65535 .
 Alternately, well-known communities may be specified by name:
 .Ic NO_EXPORT ,
 .Ic NO_ADVERTISE ,
+.Ic NO_EXPORT_SUBCONFED ,
 or
-.Ic NO_EXPORT_SUBCONFED .
+.Ic NO_PEER .
 .Pp
 .It Ic localpref Ar number
 Set the
@@ -939,18 +996,29 @@ otherwise it will be set to
 .Po Ar address \*(Ba
 .Ic blackhole \*(Ba
 .Ic reject \*(Ba
+.Ic self \*(Ba
 .Ic no-modify Pc
 .Sm on
 .Xc
 Set the
 .Em NEXTHOP
 AS path attribute
-to a different nexthop address, use blackhole or reject routes,
-or do not modify it.
+to a different nexthop address or use blackhole or reject routes.
+If set to
+.Em no-modify ,
+the nexthop attribute is not modified.
+Unless set to
+.Em self ,
+the nexthop is left unmodified for IBGP
+sessions.
+.Em self
+forces the nexthop to be set to the local interface address.
 .Bd -literal -offset indent
 set nexthop 192.168.0.1
 set nexthop blackhole
 set nexthop reject
+set nexthop no-modify
+set nexthop self
 .Ed
 .Pp
 .It Ic pftable Ar table
@@ -1006,7 +1074,7 @@ configuration file
 .Xr tcp 4 ,
 .Xr bgpctl 8 ,
 .Xr bgpd 8 ,
-.Xr ipsecadm 8 ,
+.Xr ipsecctl 8 ,
 .Xr isakmpd 8 ,
 .Xr rc.conf.local 8
 .Sh HISTORY

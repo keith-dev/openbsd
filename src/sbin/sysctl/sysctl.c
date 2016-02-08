@@ -1,4 +1,4 @@
-/*	$OpenBSD: sysctl.c,v 1.133 2005/11/30 15:46:32 dlg Exp $	*/
+/*	$OpenBSD: sysctl.c,v 1.141 2006/06/05 06:34:44 otto Exp $	*/
 /*	$NetBSD: sysctl.c,v 1.9 1995/09/30 07:12:50 thorpej Exp $	*/
 
 /*
@@ -40,7 +40,7 @@ static const char copyright[] =
 #if 0
 static const char sccsid[] = "@(#)sysctl.c	8.5 (Berkeley) 5/9/95";
 #else
-static const char rcsid[] = "$OpenBSD: sysctl.c,v 1.133 2005/11/30 15:46:32 dlg Exp $";
+static const char rcsid[] = "$OpenBSD: sysctl.c,v 1.141 2006/06/05 06:34:44 otto Exp $";
 #endif
 #endif /* not lint */
 
@@ -1146,20 +1146,17 @@ vfsinit(void)
 	if (sysctl(mib, 3, &maxtypenum, &buflen, (void *)0, (size_t)0) < 0)
 		return;
 	maxtypenum++;	/* + generic */
-	if ((vfs_typenums = malloc(maxtypenum * sizeof(int))) == NULL)
+	if ((vfs_typenums = calloc(maxtypenum, sizeof(int))) == NULL)
 		return;
-	memset(vfs_typenums, 0, maxtypenum * sizeof(int));
-	if ((vfsvars = malloc(maxtypenum * sizeof(*vfsvars))) == NULL) {
+	if ((vfsvars = calloc(maxtypenum, sizeof(*vfsvars))) == NULL) {
 		free(vfs_typenums);
 		return;
 	}
-	memset(vfsvars, 0, maxtypenum * sizeof(*vfsvars));
-	if ((vfsname = malloc(maxtypenum * sizeof(*vfsname))) == NULL) {
+	if ((vfsname = calloc(maxtypenum, sizeof(*vfsname))) == NULL) {
 		free(vfs_typenums);
 		free(vfsvars);
 		return;
 	}
-	memset(vfsname, 0, maxtypenum * sizeof(*vfsname));
 	mib[2] = VFS_CONF;
 	buflen = sizeof vfc;
 	for (loc = lastused, cnt = 1; cnt < maxtypenum; cnt++) {
@@ -2126,50 +2123,35 @@ print_sensor(struct sensor *s)
 	const char *name;
 
 	printf("%s, %s, ", s->device, s->desc);
-	switch (s->status) {
-	case SENSOR_S_OK:
-		printf("OK, ");
-		break;
-	case SENSOR_S_WARN:
-		printf("WARNING, ");
-		break;
-	case SENSOR_S_CRIT:
-		printf("CRITICAL, ");
-		break;
-	case SENSOR_S_UNKNOWN:
-		printf("UNKNOWN, ");
-		break;
-	}
 
 	if (s->flags & SENSOR_FUNKNOWN)
 		printf("unknown");
 	else {
 		switch (s->type) {
 		case SENSOR_TEMP:
-			printf("temp, %.2f degC / %.2f degF",
-			    (s->value - 273150000) / 1000000.0,
-			    (s->value - 273150000) / 1000000.0 * 9 / 5 + 32);
+			printf("%.2f degC",
+			    (s->value - 273150000) / 1000000.0);
 			break;
 		case SENSOR_FANRPM:
-			printf("fanrpm, %lld RPM", s->value);
+			printf("%lld RPM", s->value);
 			break;
 		case SENSOR_VOLTS_DC:
-			printf("volts_dc, %.2f V", s->value / 1000000.0);
+			printf("%.2f V DC", s->value / 1000000.0);
 			break;
 		case SENSOR_AMPS:
-			printf("amps, %.2f A", s->value / 1000000.0);
+			printf("%.2f A", s->value / 1000000.0);
 			break;
 		case SENSOR_INDICATOR:
-			printf("indicator, %s", s->value ? "On" : "Off");
+			printf("%s", s->value ? "On" : "Off");
 			break;
 		case SENSOR_INTEGER:
-			printf("raw, %lld", s->value);
+			printf("%lld raw", s->value);
 			break;
 		case SENSOR_PERCENT:
-			printf("percent, %.2f%%", (float)s->value / 1000.0);
+			printf("%.2f%%", s->value / 1000.0);
 			break;
 		case SENSOR_LUX:
-			printf("lux, %.2f lx", s->value / 1000000.0);
+			printf("%.2f lx", s->value / 1000000.0);
 			break;
 		case SENSOR_DRIVE:
 			switch (s->value) {
@@ -2201,18 +2183,44 @@ print_sensor(struct sensor *s)
 				name = "failed";
 				break;
 			case SENSOR_DRIVE_PFAIL:
-				name = "pfailed";
+				name = "degraded";
 				break;
 			default:
 				name = "unknown";
 				break;
 			}
-			printf("drive, %s", name);
+			printf("drive %s", name);
 			break;
-
+		case SENSOR_TIMEDELTA:
+			printf("%.2f secs", s->value / 1000000000.0);
+			break;
 		default:
 			printf("unknown");
 		}
+	}
+
+	switch (s->status) {
+	case SENSOR_S_OK:
+		printf(", OK");
+		break;
+	case SENSOR_S_WARN:
+		printf(", WARNING");
+		break;
+	case SENSOR_S_CRIT:
+		printf(", CRITICAL");
+		break;
+	case SENSOR_S_UNKNOWN:
+		printf(", UNKNOWN");
+		break;
+	}
+
+	if (s->tv.tv_sec) {
+		time_t t = s->tv.tv_sec;
+		char ct[26];
+
+		ctime_r(&t, ct);
+		ct[19] = '\0';
+		printf(", %s.%03ld", ct, s->tv.tv_usec / 1000);
 	}
 }
 

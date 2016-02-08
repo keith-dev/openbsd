@@ -1,4 +1,4 @@
-.\"	$OpenBSD: bridge.4,v 1.58 2004/08/11 16:55:43 jaredy Exp $
+.\"	$OpenBSD: bridge.4,v 1.61 2006/07/12 13:33:57 jmc Exp $
 .\"
 .\" Copyright (c) 1999-2001 Jason L. Wright (jason@thought.net)
 .\" All rights reserved.
@@ -31,7 +31,13 @@
 .Nm bridge
 .Nd Ethernet bridge interface
 .Sh SYNOPSIS
-.Cd "pseudo-device bridge" Op Ar count
+.Cd "pseudo-device bridge"
+.Pp
+.Fd #include <sys/types.h>
+.Fd #include <net/if.h>
+.Fd #include <netinet/in.h>
+.Fd #include <netinet/if_ether.h>
+.Fd #include <net/if_bridge.h>
 .Sh DESCRIPTION
 The
 .Nm
@@ -596,7 +602,7 @@ interface, the bridge will also perform transparent
 .Xr ipsec 4
 processing on the packets (encrypt or decrypt them), according to the
 policies set with the
-.Xr ipsecadm 8
+.Xr ipsecctl 8
 command by the administrator.
 If appropriate security associations (SAs) do not exist, any key
 management daemons such as
@@ -619,7 +625,7 @@ and certificates, to impersonate the protected host(s)).
 .Xr pf 4 ,
 .Xr bridgename.if 5 ,
 .Xr brconfig 8 ,
-.Xr ipsecadm 8 ,
+.Xr ipsecctl 8 ,
 .Xr isakmpd 8 ,
 .Xr netstart 8
 .Sh HISTORY

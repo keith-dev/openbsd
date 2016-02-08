@@ -1,4 +1,4 @@
-/*	$OpenBSD: route.c,v 1.92 2005/12/11 12:33:43 aaron Exp $	*/
+/*	$OpenBSD: route.c,v 1.100 2006/06/17 17:16:04 pascoe Exp $	*/
 /*	$NetBSD: route.c,v 1.16 1996/04/15 18:27:05 cgd Exp $	*/
 
 /*
@@ -76,6 +76,7 @@ int	iflag, verbose, aflen = sizeof(struct sockaddr_in);
 int	locking, lockrest, debugonly;
 u_long	rtm_inits;
 uid_t	uid;
+u_int	tableid = 0;
 
 struct rt_metrics	rt_metrics;
 
@@ -101,6 +102,7 @@ void	 set_metric(char *, int);
 void	 inet_makenetandmask(u_int32_t, struct sockaddr_in *, int);
 void	 interfaces(void);
 void	 getlabel(char *);
+void	 gettable(const char *);
 
 __dead void
 usage(char *cp)
@@ -130,7 +132,7 @@ main(int argc, char **argv)
 	if (argc < 2)
 		usage(NULL);
 
-	while ((ch = getopt(argc, argv, "dnqtv")) != -1)
+	while ((ch = getopt(argc, argv, "dnqtT:v")) != -1)
 		switch (ch) {
 		case 'n':
 			nflag = 1;
@@ -143,6 +145,9 @@ main(int argc, char **argv)
 			break;
 		case 't':
 			tflag = 1;
+			break;
+		case 'T':
+			gettable(optarg);
 			break;
 		case 'd':
 			debugonly = 1;
@@ -304,34 +309,18 @@ set_metric(char *value, int key)
 		valp = &rt_metrics.rmx_mtu;
 		flag = RTV_MTU;
 		break;
-	case K_HOPCOUNT:
-		valp = &rt_metrics.rmx_hopcount;
-		flag = RTV_HOPCOUNT;
-		break;
 	case K_EXPIRE:
 		valp = &rt_metrics.rmx_expire;
 		flag = RTV_EXPIRE;
 		break;
+	case K_HOPCOUNT:
 	case K_RECVPIPE:
-		valp = &rt_metrics.rmx_recvpipe;
-		flag = RTV_RPIPE;
-		break;
 	case K_SENDPIPE:
-		valp = &rt_metrics.rmx_sendpipe;
-		flag = RTV_SPIPE;
-		break;
 	case K_SSTHRESH:
-		valp = &rt_metrics.rmx_ssthresh;
-		flag = RTV_SSTHRESH;
-		break;
 	case K_RTT:
-		valp = &rt_metrics.rmx_rtt;
-		flag = RTV_RTT;
-		break;
 	case K_RTTVAR:
-		valp = &rt_metrics.rmx_rttvar;
-		flag = RTV_RTTVAR;
-		break;
+		/* no longer used, only for compatibility */
+		return;
 	default:
 		errx(1, "king bula sez: set_metric with invalid key");
 	}
@@ -601,6 +590,9 @@ show(int argc, char *argv[])
 			case K_LINK:
 				af = AF_LINK;
 				break;
+			case K_ENCAP:
+				af = PF_KEY;
+				break;
 			default:
 				usage(*argv);
 				/* NOTREACHED */
@@ -609,7 +601,7 @@ show(int argc, char *argv[])
 			usage(*argv);
 	}
 
-	p_rttables(af, 0);
+	p_rttables(af, tableid);
 }
 
 void
@@ -985,6 +977,7 @@ rtmsg(int cmd, int flags, int fmask)
 	rtm.rtm_addrs = rtm_addrs;
 	rtm.rtm_rmx = rt_metrics;
 	rtm.rtm_inits = rtm_inits;
+	rtm.rtm_tableid = tableid;
 
 	if (rtm_addrs & RTA_NETMASK)
 		mask_addr(&so_dst, &so_mask, RTA_DST);
@@ -1071,7 +1064,7 @@ char metricnames[] =
 "\011pksent\010rttvar\7rtt\6ssthresh\5sendpipe\4recvpipe\3expire\2hopcount\1mtu";
 char routeflags[] =
 "\1UP\2GATEWAY\3HOST\4REJECT\5DYNAMIC\6MODIFIED\7DONE\010MASK_PRESENT\011CLONING"
-"\012XRESOLVE\013LLINFO\014STATIC\015BLACKHOLE\016PROTO3\017PROTO2\020PROTO1\021CLONED";
+"\012XRESOLVE\013LLINFO\014STATIC\015BLACKHOLE\016PROTO3\017PROTO2\020PROTO1\021CLONED\022SOURCE\023MPATH\024JUMBO";
 char ifnetflags[] =
 "\1UP\2BROADCAST\3DEBUG\4LOOPBACK\5PTP\6NOTRAILERS\7RUNNING\010NOARP\011PPROMISC"
 "\012ALLMULTI\013OACTIVE\014SIMPLEX\015LINK0\016LINK1\017LINK2\020MULTICAST";
@@ -1094,7 +1087,8 @@ print_rtmsg(struct rt_msghdr *rtm, int msglen)
 		    rtm->rtm_version);
 		return;
 	}
-	printf("%s: len %d, ", msgtypes[rtm->rtm_type], rtm->rtm_msglen);
+	printf("%s: len %d, table %u, ", msgtypes[rtm->rtm_type],
+	    rtm->rtm_msglen, rtm->rtm_tableid);
 	switch (rtm->rtm_type) {
 	case RTM_IFINFO:
 		ifm = (struct if_msghdr *)rtm;
@@ -1225,13 +1219,8 @@ print_getmsg(struct rt_msghdr *rtm, int msglen)
 #define lock(f)	((rtm->rtm_rmx.rmx_locks & __CONCAT(RTV_,f)) ? 'L' : ' ')
 #define msec(u)	(((u) + 500) / 1000)		/* usec to msec */
 
-	printf("%s\n", "\
- recvpipe  sendpipe  ssthresh  rtt,msec    rttvar  hopcount      mtu     expire");
-	printf("%8lu%c ", rtm->rtm_rmx.rmx_recvpipe, lock(RPIPE));
-	printf("%8lu%c ", rtm->rtm_rmx.rmx_sendpipe, lock(SPIPE));
-	printf("%8lu%c ", rtm->rtm_rmx.rmx_ssthresh, lock(SSTHRESH));
-	printf("%8lu%c ", msec(rtm->rtm_rmx.rmx_rtt), lock(RTT));
-	printf("%8lu%c ", msec(rtm->rtm_rmx.rmx_rttvar), lock(RTTVAR));
+	printf("%s\n", "     use  hopcount       mtu    expire");
+	printf("%8lu  ", rtm->rtm_rmx.rmx_pksent);
 	printf("%8lu%c ", rtm->rtm_rmx.rmx_hopcount, lock(HOPCOUNT));
 	printf("%8lu%c ", rtm->rtm_rmx.rmx_mtu, lock(MTU));
 	if (rtm->rtm_rmx.rmx_expire)
@@ -1264,17 +1253,40 @@ void
 pmsg_addrs(char *cp, int addrs)
 {
 	struct sockaddr *sa;
+	int family = AF_UNSPEC;
 	int i;
+	char *p;
 
 	if (addrs != 0) {
 		printf("\nsockaddrs: ");
 		bprintf(stdout, addrs, addrnames);
 		putchar('\n');
+		/* first run, search for address family */
+		p = cp;
 		for (i = 1; i; i <<= 1)
 			if (i & addrs) {
-				sa = (struct sockaddr *)cp;
+				sa = (struct sockaddr *)p;
+				if (family == AF_UNSPEC)
+					switch (i) {
+					case RTA_DST:
+					case RTA_IFA:
+						family = sa->sa_family;
+					}
+				ADVANCE(p, sa);
+			}
+		/* second run, set address family for mask and print */
+		p = cp;
+		for (i = 1; i; i <<= 1)
+			if (i & addrs) {
+				sa = (struct sockaddr *)p;
+				if (family != AF_UNSPEC)
+					switch (i) {
+					case RTA_NETMASK:
+					case RTA_GENMASK:
+						sa->sa_family = family;
+					}
 				printf(" %s", routename(sa));
-				ADVANCE(cp, sa);
+				ADVANCE(p, sa);
 			}
 	}
 	putchar('\n');
@@ -1404,4 +1416,14 @@ getlabel(char *name)
 	    sizeof(so_label.rtlabel.sr_label))
 		errx(1, "label too long");
 	rtm_addrs |= RTA_LABEL;
+}
+
+void
+gettable(const char *s)
+{
+	const char	*errstr;
+
+	tableid = strtonum(s, 0, RT_TABLEID_MAX, &errstr);
+	if (errstr)
+		errx(1, "invalid table id: %s", errstr);
 }

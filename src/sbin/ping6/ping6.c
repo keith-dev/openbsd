@@ -1,4 +1,4 @@
-/*	$OpenBSD: ping6.c,v 1.61 2005/12/12 18:45:40 jaredy Exp $	*/
+/*	$OpenBSD: ping6.c,v 1.66 2006/08/10 18:40:35 jmc Exp $	*/
 /*	$KAME: ping6.c,v 1.163 2002/10/25 02:19:06 itojun Exp $	*/
 
 /*
@@ -214,7 +214,6 @@ char *hostname;
 int ident;			/* process id to identify our packets */
 u_int8_t nonce[8];		/* nonce field for node information */
 int hoplimit = -1;		/* hoplimit */
-int pathmtu = 0;		/* path MTU for the destination.  0 = unspec. */
 
 /* counters */
 long npackets;			/* max packets to transmit */
@@ -269,9 +268,11 @@ void	 pr_ip6opt(void *);
 void	 pr_rthdr(void *);
 int	 pr_bitrange(u_int32_t, int, int);
 void	 pr_retip(struct ip6_hdr *, u_char *);
-void	 summary(void);
+void	 summary(int);
 void	 tvsub(struct timeval *, struct timeval *);
+#ifdef IPSEC_POLICY_IPSEC
 int	 setpolicy(int, char *);
+#endif
 char	*nigroup(char *);
 void	 usage(void);
 
@@ -316,6 +317,7 @@ main(int argc, char *argv[])
 #ifdef IPV6_USE_MIN_MTU
 	int mflag = 0;
 #endif
+	uid_t uid;
 
 	/* just to be sure */
 	memset(&smsghdr, 0, sizeof(smsghdr));
@@ -611,7 +613,7 @@ main(int argc, char *argv[])
 	if (!res->ai_addr)
 		errx(1, "getaddrinfo failed");
 
-	(void)memcpy(&dst, res->ai_addr, res->ai_addrlen);
+	memcpy(&dst, res->ai_addr, res->ai_addrlen);
 
 	if ((s = socket(res->ai_family, res->ai_socktype,
 	    res->ai_protocol)) < 0)
@@ -642,7 +644,7 @@ main(int argc, char *argv[])
 			warnx("gateway resolves to multiple addresses");
 
 		if (setsockopt(s, IPPROTO_IPV6, IPV6_NEXTHOP,
-			       gres->ai_addr, gres->ai_addrlen)) {
+		    gres->ai_addr, gres->ai_addrlen)) {
 			err(1, "setsockopt(IPV6_NEXTHOP)");
 		}
 
@@ -658,20 +660,20 @@ main(int argc, char *argv[])
 
 #ifdef IPV6_RECVHOPOPTS
 		if (setsockopt(s, IPPROTO_IPV6, IPV6_RECVHOPOPTS, &opton,
-		    sizeof(opton)))
+		    (socklen_t)sizeof(opton)))
 			err(1, "setsockopt(IPV6_RECVHOPOPTS)");
 #else  /* old adv. API */
 		if (setsockopt(s, IPPROTO_IPV6, IPV6_HOPOPTS, &opton,
-		    sizeof(opton)))
+		    (socklen_t)sizeof(opton)))
 			err(1, "setsockopt(IPV6_HOPOPTS)");
 #endif
 #ifdef IPV6_RECVDSTOPTS
 		if (setsockopt(s, IPPROTO_IPV6, IPV6_RECVDSTOPTS, &opton,
-		    sizeof(opton)))
+		    (socklen_t)sizeof(opton)))
 			err(1, "setsockopt(IPV6_RECVDSTOPTS)");
 #else  /* old adv. API */
 		if (setsockopt(s, IPPROTO_IPV6, IPV6_DSTOPTS, &opton,
-		    sizeof(opton)))
+		    (socklen_t)sizeof(opton)))
 			err(1, "setsockopt(IPV6_DSTOPTS)");
 #endif
 #ifdef IPV6_RECVRTHDRDSTOPTS
@@ -682,8 +684,9 @@ main(int argc, char *argv[])
 	}
 
 	/* revoke root privilege */
-	seteuid(getuid());
-	setuid(getuid());
+	uid = getuid();
+	if (setresuid(uid, uid, uid) == -1)
+		err(1, "setresuid");
 
 	if ((options & F_FLOOD) && (options & F_INTERVAL))
 		errx(1, "-f and -i incompatible options");
@@ -706,7 +709,7 @@ main(int argc, char *argv[])
 		packlen = 2048 + IP6LEN + ICMP6ECHOLEN + EXTRA;
 	}
 
-	if (!(packet = (u_char *)malloc((u_int)packlen)))
+	if (!(packet = malloc(packlen)))
 		err(1, "Unable to allocate packet");
 	if (!(options & F_PINGFILLED))
 		for (i = ICMP6ECHOLEN; i < packlen; ++i)
@@ -720,19 +723,19 @@ main(int argc, char *argv[])
 	hold = 1;
 
 	if (options & F_SO_DEBUG)
-		(void)setsockopt(s, SOL_SOCKET, SO_DEBUG, (char *)&hold,
-		    sizeof(hold));
+		(void)setsockopt(s, SOL_SOCKET, SO_DEBUG, &hold,
+		    (socklen_t)sizeof(hold));
 	optval = IPV6_DEFHLIM;
 	if (IN6_IS_ADDR_MULTICAST(&dst.sin6_addr))
 		if (setsockopt(s, IPPROTO_IPV6, IPV6_MULTICAST_HOPS,
-		    &optval, sizeof(optval)) == -1)
+		    &optval, (socklen_t)sizeof(optval)) == -1)
 			err(1, "IPV6_MULTICAST_HOPS");
 #ifdef IPV6_USE_MIN_MTU
 	if (mflag != 1) {
 		optval = mflag > 1 ? 0 : 1;
 
 		if (setsockopt(s, IPPROTO_IPV6, IPV6_USE_MIN_MTU,
-		    &optval, sizeof(optval)) == -1)
+		    &optval, (socklen_t)sizeof(optval)) == -1)
 			err(1, "setsockopt(IPV6_USE_MIN_MTU)");
 	}
 #ifdef IPV6_RECVPATHMTU
@@ -789,7 +792,7 @@ main(int argc, char *argv[])
 		ICMP6_FILTER_SETPASSALL(&filt);
 	}
 	if (setsockopt(s, IPPROTO_ICMPV6, ICMP6_FILTER, &filt,
-	    sizeof(filt)) < 0)
+	    (socklen_t)sizeof(filt)) < 0)
 		err(1, "setsockopt(ICMP6_FILTER)");
     }
 #endif /*ICMP6_FILTER*/
@@ -804,7 +807,7 @@ main(int argc, char *argv[])
 			err(1, "setsockopt(IPV6_RECVRTHDR)");
 #else  /* old adv. API */
 		if (setsockopt(s, IPPROTO_IPV6, IPV6_RTHDR, &opton,
-		    sizeof(opton)))
+		    (socklen_t)sizeof(opton)))
 			err(1, "setsockopt(IPV6_RTHDR)");
 #endif
 	}
@@ -831,7 +834,7 @@ main(int argc, char *argv[])
 
 	/* set IP6 packet options */
 	if (ip6optlen) {
-		if ((scmsg = (char *)malloc(ip6optlen)) == 0)
+		if ((scmsg = malloc(ip6optlen)) == 0)
 			errx(1, "can't allocate enough memory");
 		smsghdr.msg_control = (caddr_t)scmsg;
 		smsghdr.msg_controllen = ip6optlen;
@@ -985,13 +988,12 @@ main(int argc, char *argv[])
 		if (datalen > sockbufsize)
 			warnx("you need -b to increase socket buffer size");
 		if (setsockopt(s, SOL_SOCKET, SO_SNDBUF, &sockbufsize,
-		    sizeof(sockbufsize)) < 0)
+		    (socklen_t)sizeof(sockbufsize)) < 0)
 			err(1, "setsockopt(SO_SNDBUF)");
 		if (setsockopt(s, SOL_SOCKET, SO_RCVBUF, &sockbufsize,
-		    sizeof(sockbufsize)) < 0)
+		    (socklen_t)sizeof(sockbufsize)) < 0)
 			err(1, "setsockopt(SO_RCVBUF)");
-	}
-	else {
+	} else {
 		if (datalen > 8 * 1024)	/*XXX*/
 			warnx("you need -b to increase socket buffer size");
 		/*
@@ -1001,8 +1003,8 @@ main(int argc, char *argv[])
 		 * to get some stuff for /etc/ethers.
 		 */
 		hold = 48 * 1024;
-		setsockopt(s, SOL_SOCKET, SO_RCVBUF, (char *)&hold,
-		    sizeof(hold));
+		setsockopt(s, SOL_SOCKET, SO_RCVBUF, &hold,
+		    (socklen_t)sizeof(hold));
 	}
 #endif
 
@@ -1010,21 +1012,21 @@ main(int argc, char *argv[])
 #ifndef USE_SIN6_SCOPE_ID
 #ifdef IPV6_RECVPKTINFO
 	if (setsockopt(s, IPPROTO_IPV6, IPV6_RECVPKTINFO, &optval,
-	    sizeof(optval)) < 0)
+	    (socklen_t)sizeof(optval)) < 0)
 		warn("setsockopt(IPV6_RECVPKTINFO)"); /* XXX err? */
 #else  /* old adv. API */
 	if (setsockopt(s, IPPROTO_IPV6, IPV6_PKTINFO, &optval,
-	    sizeof(optval)) < 0)
+	    (socklen_t)sizeof(optval)) < 0)
 		warn("setsockopt(IPV6_PKTINFO)"); /* XXX err? */
 #endif
 #endif /* USE_SIN6_SCOPE_ID */
 #ifdef IPV6_RECVHOPLIMIT
 	if (setsockopt(s, IPPROTO_IPV6, IPV6_RECVHOPLIMIT, &optval,
-	    sizeof(optval)) < 0)
+	    (socklen_t)sizeof(optval)) < 0)
 		warn("setsockopt(IPV6_RECVHOPLIMIT)"); /* XXX err? */
 #else  /* old adv. API */
 	if (setsockopt(s, IPPROTO_IPV6, IPV6_HOPLIMIT, &optval,
-	    sizeof(optval)) < 0)
+	    (socklen_t)sizeof(optval)) < 0)
 		warn("setsockopt(IPV6_HOPLIMIT)"); /* XXX err? */
 #endif
 
@@ -1079,7 +1081,7 @@ main(int argc, char *argv[])
 		}
 #ifdef SIGINFO
 		if (seeninfo) {
-			summary();
+			summary(0);
 			seeninfo = 0;
 			continue;
 		}
@@ -1123,7 +1125,7 @@ main(int argc, char *argv[])
 		} else if (cc == 0)
 			continue;
 
-		m.msg_name = (caddr_t)&from;
+		m.msg_name = &from;
 		m.msg_namelen = sizeof(from);
 		memset(&iov, 0, sizeof(iov));
 		iov[0].iov_base = (caddr_t)packet;
@@ -1164,7 +1166,7 @@ main(int argc, char *argv[])
 		if (npackets && nreceived >= npackets)
 			break;
 	}
-	summary();
+	summary(0);
 	exit(nreceived == 0);
 }
 
@@ -1340,7 +1342,7 @@ pinger(void)
 		errx(1, "internal error; length mismatch");
 #endif
 
-	smsghdr.msg_name = (caddr_t)&dst;
+	smsghdr.msg_name = &dst;
 	smsghdr.msg_namelen = sizeof(dst);
 	memset(&iov, 0, sizeof(iov));
 	iov[0].iov_base = (caddr_t)outpack;
@@ -1664,7 +1666,8 @@ pr_pack(u_char *buf, int cc, struct msghdr *mhdr)
 					putchar(')');
 					goto fqdnend;
 				}
-				ttl = (int32_t)ntohl(*(u_long *)&buf[off+ICMP6ECHOLEN+8]);
+				ttl = (int32_t)ntohl(*(u_long *)
+				    &buf[off+ICMP6ECHOLEN+8]);
 				if (comma)
 					printf(",");
 				if (!(ni->ni_flags & NI_FQDN_FLAG_VALIDTTL)) {
@@ -2151,17 +2154,18 @@ tvsub(struct timeval *out, struct timeval *in)
  * onint --
  *	SIGINT handler.
  */
-/* ARGSUSED */
 void
-onint(int notused)
+onint(int signo)
 {
-	summary();			/* XXX signal race */
+	summary(signo);
 
 	(void)signal(SIGINT, SIG_DFL);
 	(void)kill(getpid(), SIGINT);
 
-	/* NOTREACHED */
-	exit(1);			/* XXX signal race */
+	if (signo)
+		_exit(nreceived ? 0 : 1);
+	else
+		exit(nreceived ? 0 : 1);
 }
 
 /*
@@ -2169,34 +2173,50 @@ onint(int notused)
  *	Print out statistics.
  */
 void
-summary(void)
+summary(int signo)
 {
+	char buf[8192], buft[8192];
 
-	(void)printf("\n--- %s ping6 statistics ---\n", hostname);
-	(void)printf("%ld packets transmitted, ", ntransmitted);
-	(void)printf("%ld packets received, ", nreceived);
-	if (nrepeats)
-		(void)printf("+%ld duplicates, ", nrepeats);
+	buf[0] = '\0';
+
+	snprintf(buft, sizeof buft, "\n--- %s ping6 statistics ---\n",
+	    hostname);
+	strlcat(buf, buft, sizeof buf);
+	snprintf(buft, sizeof buft, "%ld packets transmitted, ",
+	    ntransmitted);
+	strlcat(buf, buft, sizeof buf);
+	snprintf(buft, sizeof buft, "%ld packets received, ",
+	    nreceived);
+	strlcat(buf, buft, sizeof buf);
+	if (nrepeats) {
+		snprintf(buft, sizeof buft, "+%ld duplicates, ",
+		    nrepeats);
+		strlcat(buf, buft, sizeof buf);
+	}
 	if (ntransmitted) {
 		if (nreceived > ntransmitted)
-			(void)printf("-- somebody's duplicating packets!");
+			snprintf(buft, sizeof buft,
+			    "-- somebody's duplicating packets!");
 		else
-			(void)printf("%.1lf%% packet loss",
+			snprintf(buft, sizeof buft, "%.1lf%% packet loss",
 			    ((((double)ntransmitted - nreceived) * 100) /
 			    ntransmitted));
+		strlcat(buf, buft, sizeof buf);
 	}
-	(void)putchar('\n');
+	strlcat(buf, "\n", sizeof buf);
 	if (nreceived && timing) {
 		/* Only display average to microseconds */
 		double num = nreceived + nrepeats;
 		double avg = tsum / num;
 		double dev = sqrt(tsumsq / num - avg * avg);
-		(void)printf(
+		snprintf(buft, sizeof buft,
 		    "round-trip min/avg/max/std-dev = %.3f/%.3f/%.3f/%.3f ms\n",
 		    tmin, avg, tmax, dev);
-		(void)fflush(stdout);
+		strlcat(buf, buft, sizeof buf);
 	}
-	(void)fflush(stdout);
+	write(STDOUT_FILENO, buf, strlen(buf));
+	if (signo == 0)
+		(void)fflush(stdout);
 }
 
 /*subject type*/
@@ -2431,7 +2451,7 @@ pr_icmph(struct icmp6_hdr *icp, u_char *end)
 			break;
 		}
 		if (options & F_VERBOSE) {
-			if (ni->ni_code > sizeof(nircode) / sizeof(nircode[0]))
+			if (ni->ni_code >= sizeof(nircode) / sizeof(nircode[0]))
 				printf(", invalid");
 			else
 				printf(", %s", nircode[ni->ni_code]);
@@ -2679,7 +2699,7 @@ usage(void)
 #ifdef IPV6_USE_MIN_MTU
 	    "m"
 #endif
-	    "nNqtvwW"
+	    "NnqtvWw"
 #ifdef IPV6_REACHCONF
 	    "R"
 #endif
@@ -2690,9 +2710,8 @@ usage(void)
 	    "AE"
 #endif
 #endif
-	    "] [-a [aAclsg]] [-b sockbufsiz] [-c count] \n"
-            "\t[-I interface] [-i wait] [-l preload] [-p pattern] "
-	    "[-S sourceaddr]\n"
-            "\t[-s packetsize] [-h hoplimit] [-g gateway] [hops...] host\n");
+	    "] [-a addrtype] [-b bufsiz] [-c count] [-g gateway]\n\t"
+            "[-h hoplimit] [-I interface] [-i wait] [-l preload] [-p pattern]"
+	    "\n\t[-S sourceaddr] [-s packetsize] [hops...] host\n");
 	exit(1);
 }

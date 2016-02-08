@@ -1,4 +1,4 @@
-/*	$OpenBSD: mkmakefile.c,v 1.17 2005/12/05 04:32:21 drahn Exp $	*/
+/*	$OpenBSD: mkmakefile.c,v 1.20 2006/05/06 11:31:46 espie Exp $	*/
 /*	$NetBSD: mkmakefile.c,v 1.34 1997/02/02 21:12:36 thorpej Exp $	*/
 
 /*
@@ -122,9 +122,6 @@ mkmakefile(void)
 		    "config: error reading %s (at line %d): %s\n",
 		    ifname, lineno, strerror(errno));
 		goto bad;
-		/* (void)unlink("Makefile"); */
-		free(ifname);
-		return (1);
 	}
 	if (fclose(ofp)) {
 		ofp = NULL;
@@ -223,15 +220,44 @@ emitobjs(FILE *fp)
 	struct files *fi;
 	struct objects *oi;
 	int lpos, len, sp;
+	const char *fpath;
 
-	if (fputs("OBJS=", fp) < 0)
+	if (fputs("LINTS=", fp) < 0)
 		return (1);
 	sp = '\t';
 	lpos = 7;
 	for (fi = allfiles; fi != NULL; fi = fi->fi_next) {
 		if ((fi->fi_flags & FI_SEL) == 0)
 			continue;
-		len = strlen(fi->fi_base) + 2;
+		if ((fpath = srcpath(fi)) == NULL)
+			return (1);
+		len = strlen(fpath);
+		if (fpath[len - 1] == 's' || fpath[len - 1] == 'S')
+			continue;
+		len = strlen(fi->fi_base) + 3;
+		if (lpos + len > 72) {
+			if (fputs(" \\\n", fp) < 0)
+				return (1);
+			sp = '\t';
+			lpos = 7;
+		}
+		if (fprintf(fp, "%c%s.ln", sp, fi->fi_base) < 0)
+			return (1);
+		lpos += len + 1;
+		sp = ' ';
+	}
+	if (fputs("\n\nOBJS=\t${LINTS:.ln=.o}", fp) < 0)
+		return (1);
+	lpos = 7 + strlen("${LINTS:.ln=.o}");
+	for (fi = allfiles; fi != NULL; fi = fi->fi_next) {
+		if ((fi->fi_flags & FI_SEL) == 0)
+			continue;
+		if ((fpath = srcpath(fi)) == NULL)
+			return (1);
+		len = strlen(fpath);
+		if (fpath[len - 1] != 's' && fpath[len - 1] != 'S')
+			continue;
+		len = strlen(fi->fi_base) + 3;
 		if (lpos + len > 72) {
 			if (fputs(" \\\n", fp) < 0)
 				return (1);
@@ -348,7 +374,7 @@ emitfiles(FILE *fp, int suffix)
  * Emit the make-rules.
  */
 static int
-emitrules(FILE *fp)
+emitrules1(FILE *fp, const char *suffix, const char *rule_prefix, int ruleindex)
 {
 	struct files *fi;
 	const char *cp, *fpath;
@@ -360,11 +386,11 @@ emitrules(FILE *fp)
 			continue;
 		if ((fpath = srcpath(fi)) == NULL)
 			return (1);
-		if (fprintf(fp, "%s.o: %s%s\n", fi->fi_base,
+		if (fprintf(fp, "%s%s: %s%s\n", fi->fi_base, suffix,
 		    *fpath != '/' ? "$S/" : "", fpath) < 0)
 			return (1);
-		if ((cp = fi->fi_mkrule) == NULL) {
-			cp = "NORMAL";
+		if ((cp = fi->fi_mkrule[ruleindex]) == NULL) {
+			cp = rule_prefix;
 			ch = fpath[strlen(fpath) - 1];
 			if (islower(ch))
 				ch = toupper(ch);
@@ -376,6 +402,12 @@ emitrules(FILE *fp)
 			return (1);
 	}
 	return (0);
+}
+
+static int
+emitrules(FILE *fp)
+{
+	return emitrules1(fp, ".o", "NORMAL", 0) || emitrules1(fp, ".ln", "LINT", 1);
 }
 
 /*

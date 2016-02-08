@@ -1,4 +1,4 @@
-/* $OpenBSD: init.c,v 1.37 2005/05/26 05:14:17 hshoexer Exp $	 */
+/* $OpenBSD: init.c,v 1.39 2006/07/02 13:19:00 hshoexer Exp $	 */
 /* $EOM: init.c,v 1.25 2000/03/30 14:27:24 ho Exp $	 */
 
 /*
@@ -55,6 +55,7 @@
 #include "udp.h"
 #include "ui.h"
 #include "util.h"
+#include "vendor.h"
 
 #include "policy.h"
 
@@ -94,7 +95,7 @@ init(void)
 	udp_init();
 	nat_t_init();
 	udp_encap_init();
-	monitor_ui_init();
+	vendor_init();
 }
 
 /* Reinitialize, either after a SIGHUP reception or by FIFO UI cmd.  */

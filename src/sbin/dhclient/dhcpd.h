@@ -1,4 +1,4 @@
-/*	$OpenBSD: dhcpd.h,v 1.47 2005/08/05 16:23:30 moritz Exp $	*/
+/*	$OpenBSD: dhcpd.h,v 1.49 2006/08/29 03:55:09 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2004 Henning Brauer <henning@openbsd.org>
@@ -156,6 +156,7 @@ struct client_config {
 	int			 requested_option_count;
 	time_t			 timeout;
 	time_t			 initial_interval;
+	time_t			 link_timeout;
 	time_t			 retry_interval;
 	time_t			 select_interval;
 	time_t			 reboot_timeout;
@@ -285,6 +286,8 @@ void cancel_timeout(void (*)(void *), void *);
 void add_protocol(char *, int, void (*)(struct protocol *), void *);
 void remove_protocol(struct protocol *);
 int interface_link_status(char *);
+int interface_link_forceup(char *);
+void interface_link_forcedown(char *);
 
 /* tables.c */
 extern const struct option dhcp_options[256];

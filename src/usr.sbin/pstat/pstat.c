@@ -1,4 +1,4 @@
-/*	$OpenBSD: pstat.c,v 1.56 2005/12/28 20:48:18 pedro Exp $	*/
+/*	$OpenBSD: pstat.c,v 1.64 2006/06/04 01:39:32 deraadt Exp $	*/
 /*	$NetBSD: pstat.c,v 1.27 1996/10/23 22:50:06 cgd Exp $	*/
 
 /*-
@@ -40,7 +40,7 @@ static char copyright[] =
 #if 0
 from: static char sccsid[] = "@(#)pstat.c	8.9 (Berkeley) 2/16/94";
 #else
-static char *rcsid = "$OpenBSD: pstat.c,v 1.56 2005/12/28 20:48:18 pedro Exp $";
+static char *rcsid = "$OpenBSD: pstat.c,v 1.64 2006/06/04 01:39:32 deraadt Exp $";
 #endif
 #endif /* not lint */
 
@@ -260,6 +260,13 @@ vnodemode(void)
 			(void)printf("\n");
 		}
 		vnode_print(evp->vptr, vp);
+
+		/* Syncer vnodes have no associated fs-specific data */
+		if (vp->v_data == NULL) {
+			printf(" %6c %5c %7c\n", '-', '-', '-');
+			continue;
+		}
+
 		if (!strncmp(mp->mnt_stat.f_fstypename, MOUNT_FFS, MFSNAMELEN) ||
 		    !strncmp(mp->mnt_stat.f_fstypename, MOUNT_MFS, MFSNAMELEN)) {
 			ufs_print(vp);
@@ -277,7 +284,7 @@ vnodemode(void)
 void
 vnode_header(void)
 {
-	(void)printf("ADDR     TYP VFLAG  USE HOLD");
+	(void)printf("%*s TYP VFLAG  USE HOLD", 2 * sizeof(long), "ADDR");
 }
 
 void
@@ -341,7 +348,7 @@ vnode_print(struct vnode *avnode, struct vnode *vp)
 	if (flag == 0)
 		*fp++ = '-';
 	*fp = '\0';
-	(void)printf("%8lx %s %5s %4d %4u",
+	(void)printf("%0*lx %s %5s %4d %4u", 2 * sizeof(long),
 	    (long)avnode, type, flags, vp->v_usecount, vp->v_holdcnt);
 }
 
@@ -689,12 +696,12 @@ loadvnodes(int *avnodes)
 }
 
 /*
- * simulate what a running kernel does in in kinfo_vnode
+ * simulate what a running kernel does in kinfo_vnode
  */
 struct e_vnode *
 kinfo_vnodes(int *avnodes)
 {
-	struct mntlist mountlist;
+	struct mntlist kvm_mountlist;
 	struct mount *mp, mount;
 	struct vnode *vp, vnode;
 	char *vbuf, *evbuf, *bp;
@@ -715,8 +722,8 @@ kinfo_vnodes(int *avnodes)
 	bp = vbuf;
 	evbuf = vbuf + (numvnodes + 20) *
 	    (sizeof(struct vnode *) + sizeof(struct vnode));
-	KGET(V_MOUNTLIST, mountlist);
-	for (num = 0, mp = CIRCLEQ_FIRST(&mountlist); ;
+	KGET(V_MOUNTLIST, kvm_mountlist);
+	for (num = 0, mp = CIRCLEQ_FIRST(&kvm_mountlist); ;
 	    mp = CIRCLEQ_NEXT(&mount, mnt_list)) {
 		KGET2(mp, &mount, sizeof(mount), "mount entry");
 		for (vp = LIST_FIRST(&mount.mnt_vnodelist);
@@ -732,7 +739,7 @@ kinfo_vnodes(int *avnodes)
 			bp += sizeof(struct vnode);
 			num++;
 		}
-		if (mp == CIRCLEQ_LAST(&mountlist))
+		if (mp == CIRCLEQ_LAST(&kvm_mountlist))
 			break;
 	}
 	*avnodes = num;
@@ -861,6 +868,9 @@ ttyprt(struct itty *tp)
 	case STRIPDISC:
 		(void)printf("strip\n");
 		break;
+	case NMEADISC:
+		(void)printf("nmea\n");
+		break;
 	default:
 		(void)printf("%d\n", tp->t_line);
 		break;
@@ -912,12 +922,12 @@ filemode(void)
 	(void)printf("%d/%d open files\n", nfile, maxfile);
 
 	(void)printf("%*s TYPE       FLG  CNT  MSG  %*s  OFFSET\n",
-	    8, "LOC", 8, "DATA");
+	    2 * sizeof(long), "LOC", 2 * sizeof(long), "DATA");
 	for (; (char *)ffp < buf + len; addr = LIST_NEXT(ffp, f_list), ffp++) {
 		memmove(&fp, ffp, sizeof fp);
 		if ((unsigned)fp.f_type > DTYPE_SOCKET)
 			continue;
-		(void)printf("%lx ", (long)addr);
+		(void)printf("%0*lx ", 2 * sizeof(long), (long)addr);
 		(void)printf("%-8.8s", dtypes[fp.f_type]);
 		fbp = flagbuf;
 		if (fp.f_flag & FREAD)
@@ -933,7 +943,7 @@ filemode(void)
 		*fbp = '\0';
 		(void)printf("%6s  %3ld", flagbuf, fp.f_count);
 		(void)printf("  %3ld", fp.f_msgcount);
-		(void)printf("  %8.1lx", (long)fp.f_data);
+		(void)printf("  %0*lx", 2 * sizeof(long), (long)fp.f_data);
 
 		if (fp.f_offset < 0)
 			(void)printf("  %llx\n", (long long)fp.f_offset);
@@ -984,7 +994,7 @@ swapmode(void)
 {
 	char *header;
 	int hlen = 10, nswap;
-	int div, i, avail, nfree, npfree, used;
+	int bdiv, i, avail, nfree, npfree, used;
 	long blocksize;
 	struct swapent *swdev;
 
@@ -1016,7 +1026,7 @@ swapmode(void)
 		    "Used", "Avail", "Capacity", "Priority");
 
 	/* Run through swap list, doing the funky monkey. */
-	div = blocksize / DEV_BSIZE;
+	bdiv = blocksize / DEV_BSIZE;
 	avail = nfree = npfree = 0;
 	for (i = 0; i < nswap; i++) {
 		int xsize, xfree;
@@ -1029,10 +1039,10 @@ swapmode(void)
 				(void)printf("%2d,%-2d       %*d ",
 				    major(swdev[i].se_dev),
 				    minor(swdev[i].se_dev),
-				    hlen, swdev[i].se_nblks / div);
+				    hlen, swdev[i].se_nblks / bdiv);
 			else
 				(void)printf("%-11s %*d ", swdev[i].se_path,
-				    hlen, swdev[i].se_nblks / div);
+				    hlen, swdev[i].se_nblks / bdiv);
 		}
 
 		xsize = swdev[i].se_nblks;
@@ -1044,7 +1054,7 @@ swapmode(void)
 		if (totalflag)
 			continue;
 		(void)printf("%8d %8d %5.0f%%    %d\n",
-		    used / div, xfree / div,
+		    used / bdiv, xfree / bdiv,
 		    (double)used / (double)xsize * 100.0,
 		    swdev[i].se_priority);
 	}
@@ -1063,7 +1073,7 @@ swapmode(void)
 	}
 	if (npfree > 1) {
 		(void)printf("%-11s %*d %8d %8d %5.0f%%\n",
-		    "Total", hlen, avail / div, used / div, nfree / div,
+		    "Total", hlen, avail / bdiv, used / bdiv, nfree / bdiv,
 		    (double)used / (double)avail * 100.0);
 	}
 }

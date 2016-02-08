@@ -1,4 +1,4 @@
-/*	$OpenBSD: bgpd.h,v 1.192 2006/02/10 14:34:40 claudio Exp $ */
+/*	$OpenBSD: bgpd.h,v 1.208 2006/08/27 16:11:04 henning Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -49,6 +49,7 @@
 #define	BGPD_OPT_VERBOSE		0x0001
 #define	BGPD_OPT_VERBOSE2		0x0002
 #define	BGPD_OPT_NOACTION		0x0004
+#define	BGPD_OPT_FORCE_DEMOTE		0x0008
 
 #define	BGPD_FLAG_NO_FIB_UPDATE		0x0001
 #define	BGPD_FLAG_NO_EVALUATE		0x0002
@@ -57,6 +58,8 @@
 #define	BGPD_FLAG_REDIST_CONNECTED	0x0010
 #define	BGPD_FLAG_REDIST6_STATIC	0x0020
 #define	BGPD_FLAG_REDIST6_CONNECTED	0x0040
+#define	BGPD_FLAG_NEXTHOP_BGP		0x0080
+#define	BGPD_FLAG_NEXTHOP_DEFAULT	0x1000
 #define	BGPD_FLAG_DECISION_MASK		0x0f00
 #define	BGPD_FLAG_DECISION_ROUTEAGE	0x0100
 #define	BGPD_FLAG_DECISION_TRANS_AS	0x0200
@@ -76,6 +79,9 @@
 #define	F_REJECT		0x0080
 #define	F_BLACKHOLE		0x0100
 #define	F_LONGER		0x0200
+#define	F_CTL_DETAIL		0x1000	/* only used by bgpctl */
+#define	F_CTL_ADJ_IN		0x2000
+#define	F_CTL_ADJ_OUT		0x4000
 
 enum {
 	PROC_MAIN,
@@ -142,6 +148,7 @@ struct bgpd_config {
 	struct filter_set_head			 staticset;
 	struct filter_set_head			 staticset6;
 	struct listen_addrs			*listen_addrs;
+	char					*csock;
 	char					*rcsock;
 	int					 opts;
 	int					 flags;
@@ -206,6 +213,7 @@ struct capabilities {
 	u_int8_t	mp_v4;		/* multiprotocol extensions, RFC 2858 */
 	u_int8_t	mp_v6;
 	u_int8_t	refresh;	/* route refresh, RFC 2918 */
+	u_int8_t	restart;	/* draft-ietf-idr-restart */
 };
 
 struct peer_config {
@@ -216,12 +224,14 @@ struct peer_config {
 	char			 group[PEER_DESCR_LEN];
 	char			 descr[PEER_DESCR_LEN];
 	char			 if_depend[IFNAMSIZ];
+	char			 demote_group[IFNAMSIZ];
 	u_int32_t		 id;
 	u_int32_t		 groupid;
 	u_int32_t		 max_prefix;
 	enum announce_type	 announce_type;
 	enum enforce_as		 enforce_as;
 	enum reconf_action	 reconf_action;
+	u_int16_t		 max_prefix_restart;
 	u_int16_t		 remote_as;
 	u_int16_t		 holdtime;
 	u_int16_t		 min_holdtime;
@@ -306,6 +316,7 @@ enum imsg_type {
 	IMSG_CTL_NEIGHBOR_UP,
 	IMSG_CTL_NEIGHBOR_DOWN,
 	IMSG_CTL_NEIGHBOR_CLEAR,
+	IMSG_CTL_NEIGHBOR_RREFRESH,
 	IMSG_CTL_KROUTE,
 	IMSG_CTL_KROUTE6,
 	IMSG_CTL_KROUTE_ADDR,
@@ -316,12 +327,14 @@ enum imsg_type {
 	IMSG_CTL_SHOW_RIB,
 	IMSG_CTL_SHOW_RIB_AS,
 	IMSG_CTL_SHOW_RIB_PREFIX,
+	IMSG_CTL_SHOW_RIB_ATTR,
 	IMSG_CTL_SHOW_NETWORK,
 	IMSG_CTL_SHOW_NETWORK6,
 	IMSG_CTL_SHOW_RIB_MEM,
 	IMSG_CTL_SHOW_TERSE,
 	IMSG_REFRESH,
-	IMSG_IFINFO
+	IMSG_IFINFO,
+	IMSG_DEMOTE
 };
 
 struct imsg_hdr {
@@ -336,10 +349,17 @@ struct imsg {
 	void		*data;
 };
 
+struct demote_msg {
+	char		 demote_group[IFNAMSIZ];
+	int		 level;
+};
+
 enum ctl_results {
 	CTL_RES_OK,
 	CTL_RES_NOSUCHPEER,
-	CTL_RES_DENIED
+	CTL_RES_DENIED,
+	CTL_RES_NOCAP,
+	CTL_RES_PARSE_ERROR
 };
 
 /* needed for session.h parse prototype */
@@ -461,9 +481,13 @@ struct kroute6_label {
 #define	F_RIB_ANNOUNCE	0x08
 
 struct ctl_show_rib {
-	struct bgpd_addr	nexthop;
+	struct bgpd_addr	true_nexthop;
+	struct bgpd_addr	exit_nexthop;
 	struct bgpd_addr	prefix;
+	struct bgpd_addr	remote_addr;
+	char			descr[PEER_DESCR_LEN];
 	time_t			lastchange;
+	u_int32_t		remote_id;
 	u_int32_t		local_pref;
 	u_int32_t		med;
 	u_int32_t		prefix_cnt;
@@ -494,6 +518,17 @@ enum as_spec {
 struct filter_as {
 	enum as_spec	type;
 	u_int16_t	as;
+};
+
+struct ctl_show_rib_request {
+	struct ctl_neighbor	neighbor;
+	struct bgpd_addr	prefix;
+	struct filter_as	as;
+	u_int32_t		peerid;
+	pid_t			pid;
+	u_int16_t		flags;
+	sa_family_t		af;
+	u_int8_t		prefixlen;
 };
 
 enum filter_actions {
@@ -590,33 +625,13 @@ enum action_types {
 	ACTION_SET_NEXTHOP_REJECT,
 	ACTION_SET_NEXTHOP_BLACKHOLE,
 	ACTION_SET_NEXTHOP_NOMODIFY,
+	ACTION_SET_NEXTHOP_SELF,
 	ACTION_SET_COMMUNITY,
 	ACTION_DEL_COMMUNITY,
 	ACTION_PFTABLE,
 	ACTION_PFTABLE_ID,
 	ACTION_RTLABEL,
 	ACTION_RTLABEL_ID
-};
-
-static const char * const filterset_names[] = {
-	"localpref",
-	"localpref",
-	"metric",
-	"metric",
-	"weight",
-	"weight",
-	"prepend-self",
-	"prepend-peer",
-	"nexthop",
-	"nexthop",
-	"nexthop",
-	"nexthop",
-	"community",
-	"community delete",
-	"pftable",
-	"pftable",
-	"rtlabel",
-	"rtlabel"
 };
 
 struct filter_set {
@@ -671,9 +686,11 @@ struct rde_memstats {
 void		 send_nexthop_update(struct kroute_nexthop *);
 void		 send_imsg_session(int, pid_t, void *, u_int16_t);
 int		 bgpd_redistribute(int, struct kroute *, struct kroute6 *);
+int		 bgpd_filternexthop(struct kroute *, struct kroute6 *);
 
 /* buffer.c */
 struct buf	*buf_open(size_t);
+struct buf	*buf_grow(struct buf *, size_t);
 int		 buf_add(struct buf *, const void *, size_t);
 void		*buf_reserve(struct buf *, size_t);
 int		 buf_close(struct msgbuf *, struct buf *);
@@ -682,8 +699,6 @@ void		 buf_free(struct buf *);
 void		 msgbuf_init(struct msgbuf *);
 void		 msgbuf_clear(struct msgbuf *);
 int		 msgbuf_write(struct msgbuf *);
-int		 msgbuf_writebound(struct msgbuf *);
-int		 msgbuf_unbounded(struct msgbuf *msgbuf);
 
 /* log.c */
 void		 log_init(int);
@@ -694,8 +709,8 @@ void		 log_warn(const char *, ...);
 void		 log_warnx(const char *, ...);
 void		 log_info(const char *, ...);
 void		 log_debug(const char *, ...);
-void		 fatal(const char *);
-void		 fatalx(const char *);
+void		 fatal(const char *) __dead;
+void		 fatalx(const char *) __dead;
 
 /* parse.y */
 int	 cmdline_symset(char *);
@@ -731,7 +746,7 @@ int		 kr_nexthop_add(struct bgpd_addr *);
 void		 kr_nexthop_delete(struct bgpd_addr *);
 void		 kr_show_route(struct imsg *);
 void		 kr_ifinfo(char *);
-int		 kr_redist_reload(void);
+int		 kr_reload(void);
 in_addr_t	 prefixlen2mask(u_int8_t);
 struct in6_addr	*prefixlen2mask6(u_int8_t prefixlen);
 void		 inet6applymask(struct in6_addr *, const struct in6_addr *,
@@ -763,6 +778,7 @@ void		 pftable_ref(u_int16_t);
 /* rde_filter.c */
 void		 filterset_free(struct filter_set_head *);
 int		 filterset_cmp(struct filter_set *, struct filter_set *);
+const char	*filterset_name(enum action_types);
 
 /* util.c */
 const char	*log_addr(const struct bgpd_addr *);

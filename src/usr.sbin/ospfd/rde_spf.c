@@ -1,4 +1,4 @@
-/*	$OpenBSD: rde_spf.c,v 1.49 2006/02/24 21:06:47 norby Exp $ */
+/*	$OpenBSD: rde_spf.c,v 1.55 2006/07/06 13:03:39 claudio Exp $ */
 
 /*
  * Copyright (c) 2005 Esben Norby <norby@openbsd.org>
@@ -35,44 +35,13 @@ RB_PROTOTYPE(rt_tree, rt_node, entry, rt_compare)
 RB_GENERATE(rt_tree, rt_node, entry, rt_compare)
 struct vertex			*spf_root = NULL;
 
-void		 spf_dump(struct area *);	/* XXX */
-void		 cand_list_dump(void);		/* XXX */
 void		 calc_next_hop(struct vertex *, struct vertex *);
 void		 rt_update(struct in_addr, u_int8_t, struct in_addr, u_int32_t,
 		     u_int32_t, struct in_addr, struct in_addr, enum path_type,
 		     enum dst_type, u_int8_t, u_int8_t);
 struct rt_node	*rt_lookup(enum dst_type, in_addr_t);
-void		 rt_invalidate(void);
+void		 rt_invalidate(struct area *);
 int		 linked(struct vertex *, struct vertex *);
-
-void
-spf_dump(struct area *area)
-{
-	struct lsa_tree	*tree = &area->lsa_tree;
-	struct vertex	*v;
-	struct vertex	*p;	/* parent */
-	struct in_addr	 addr;
-
-	log_debug("spf_dump:");
-	RB_FOREACH(v, lsa_tree, tree) {
-		addr.s_addr = htonl(v->ls_id);
-		log_debug("    id %s type %d cost %d", inet_ntoa(addr),
-		     v->type, v->cost);
-		log_debug("    nexthop: %s", inet_ntoa(v->nexthop));
-
-#if 1
-		log_debug("    --------------------------------------------");
-		p = v->prev;
-		while (p != NULL) {
-			addr.s_addr = htonl(p->ls_id);
-			log_debug("        id %15s type %d cost %d",
-			    inet_ntoa(addr), p->type, p->cost);
-			p = p->prev;
-		}
-	log_debug("");
-#endif
-	}
-}
 
 void
 spf_calc(struct area *area)
@@ -184,8 +153,6 @@ spf_calc(struct area *area)
 				cand_list_add(w);
 			}
 		}
-
-		/* cand_list_dump(); */
 
 		/* get next vertex */
 		v = cand_list_pop();
@@ -390,10 +357,11 @@ calc_next_hop(struct vertex *dst, struct vertex *parent)
 		case LSA_TYPE_ROUTER:
 			for (i = 0; i < lsa_num_links(dst); i++) {
 				rtr_link = get_rtr_link(dst, i);
-				if (rtr_link->type != LINK_TYPE_POINTTOPOINT &&
-				    rtr_link->id != parent->ls_id)
-					continue;
-				dst->nexthop.s_addr = rtr_link->data;
+				if (rtr_link->type == LINK_TYPE_POINTTOPOINT &&
+				    ntohl(rtr_link->id) == parent->ls_id) {
+					dst->nexthop.s_addr = rtr_link->data;
+					break;
+				}
 			}
 			return;
 		case LSA_TYPE_NETWORK:
@@ -468,21 +436,6 @@ cand_list_add(struct vertex *v)
 	TAILQ_INSERT_TAIL(&cand_list, v, cand);
 }
 
-void
-cand_list_dump(void)
-{
-	struct vertex	*c = NULL;
-	struct in_addr	 addr;
-
-	log_debug("cand_list_dump:");
-	TAILQ_FOREACH(c, &cand_list, cand) {
-		addr.s_addr = htonl(c->ls_id);
-		log_debug("    id %s type %d cost %d", inet_ntoa(addr),
-		     c->type, c->cost);
-	}
-	log_debug("");
-}
-
 struct vertex *
 cand_list_pop(void)
 {
@@ -519,6 +472,7 @@ cand_list_clr(void)
 }
 
 /* timers */
+/* ARGSUSED */
 void
 spf_timer(int fd, short event, void *arg)
 {
@@ -535,10 +489,11 @@ spf_timer(int fd, short event, void *arg)
 		conf->spf_state = SPF_DELAY;
 		/* FALLTHROUGH */
 	case SPF_DELAY:
-		rt_invalidate();
-
 		LIST_FOREACH(area, &conf->area_list, entry) {
 			if (area->dirty) {
+				/* invalidate RIB entries of this area */
+				rt_invalidate(area);
+
 				/* calculate SPF tree */
 				spf_calc(area);
 
@@ -551,8 +506,9 @@ spf_timer(int fd, short event, void *arg)
 			}
 		}
 
-		/* calculate as-external routes */
-		RB_FOREACH(v, lsa_tree, &conf->lsa_tree) {
+		/* calculate as-external routes, first invalidate them */
+		rt_invalidate(NULL);
+		RB_FOREACH(v, lsa_tree, &asext_tree) {
 			asext_calc(v);
 		}
 
@@ -583,7 +539,7 @@ spf_timer(int fd, short event, void *arg)
 	}
 }
 
-int
+void
 start_spf_timer(void)
 {
 	struct timeval	tv;
@@ -594,7 +550,9 @@ start_spf_timer(void)
 		timerclear(&tv);
 		tv.tv_sec = rdeconf->spf_delay;
 		rdeconf->spf_state = SPF_DELAY;
-		return (evtimer_add(&rdeconf->ev, &tv));
+		if (evtimer_add(&rdeconf->ev, &tv) == -1)
+			fatal("start_spf_timer");
+		break;
 	case SPF_DELAY:
 		/* ignore */
 		break;
@@ -608,17 +566,16 @@ start_spf_timer(void)
 	default:
 		fatalx("start_spf_timer: invalid spf_state");
 	}
-
-	return (1);
 }
 
-int
+void
 stop_spf_timer(struct ospfd_conf *conf)
 {
-	return (evtimer_del(&conf->ev));
+	if (evtimer_del(&conf->ev) == -1)
+		fatal("stop_spf_timer");
 }
 
-int
+void
 start_spf_holdtimer(struct ospfd_conf *conf)
 {
 	struct timeval	tv;
@@ -629,7 +586,9 @@ start_spf_holdtimer(struct ospfd_conf *conf)
 		tv.tv_sec = conf->spf_hold_time;
 		conf->spf_state = SPF_HOLD;
 		log_debug("spf_start_holdtimer: DELAY -> HOLD");
-		return (evtimer_add(&conf->ev, &tv));
+		if (evtimer_add(&conf->ev, &tv) == -1)
+			fatal("start_spf_holdtimer");
+		break;
 	case SPF_IDLE:
 	case SPF_HOLD:
 	case SPF_HOLDQUEUE:
@@ -637,8 +596,6 @@ start_spf_holdtimer(struct ospfd_conf *conf)
 	default:
 		fatalx("spf_start_holdtimer: unknown state");
 	}
-
-	return (1);
 }
 
 /* route table */
@@ -705,12 +662,27 @@ rt_remove(struct rt_node *r)
 }
 
 void
-rt_invalidate(void)
+rt_invalidate(struct area *area)
 {
 	struct rt_node	*r, *nr;
 
 	for (r = RB_MIN(rt_tree, &rt); r != NULL; r = nr) {
 		nr = RB_NEXT(rt_tree, &rt, r);
+		if (area == NULL) {
+			/* look only at as_ext routes */
+			if (r->p_type != PT_TYPE1_EXT &&
+			    r->p_type != PT_TYPE2_EXT)
+				continue;
+		} else {
+			/* ignore all as_ext routes */
+			if (r->p_type == PT_TYPE1_EXT ||
+			    r->p_type == PT_TYPE2_EXT)
+				continue;
+
+			/* look only at routes matching the area */
+			if (r->area.s_addr != area->id.s_addr)
+				continue;
+		}
 		if (r->invalid)
 			rt_remove(r);
 		else

@@ -1,4 +1,4 @@
-.\"	$OpenBSD: ping6.8,v 1.28 2003/10/25 07:40:37 jmc Exp $
+.\"	$OpenBSD: ping6.8,v 1.37 2006/08/10 19:35:24 jmc Exp $
 .\"	$KAME: ping6.8,v 1.57 2002/05/26 13:18:25 itojun Exp $
 .\"
 .\" Copyright (C) 1995, 1996, 1997, and 1998 WIDE Project.
@@ -33,71 +33,41 @@
 .Os
 .Sh NAME
 .Nm ping6
-.Nd send
-.Tn ICMPv6 ECHO_REQUEST
-packets to network hosts
+.Nd send ICMPv6 ECHO_REQUEST packets to network hosts
 .Sh SYNOPSIS
 .Nm ping6
 .\" without ipsec, or new ipsec
-.Op Fl dfHnNqRtvwW
+.Op Fl dfHmNnqtvWw
 .\" old ipsec
 .\" .Op Fl AdEfnNqRtvwW
-.Bk -words
 .Op Fl a Ar addrtype
-.Ek
-.Bk -words
 .Op Fl b Ar bufsiz
-.Ek
-.Bk -words
 .Op Fl c Ar count
-.Ek
-.Bk -words
 .Op Fl g Ar gateway
-.Ek
-.Bk -words
 .Op Fl h Ar hoplimit
-.Ek
-.Bk -words
 .Op Fl I Ar interface
-.Ek
-.Bk -words
 .Op Fl i Ar wait
-.Ek
-.Bk -words
 .Op Fl l Ar preload
-.Ek
-.Bk -words
 .Op Fl p Ar pattern
-.Ek
-.\".Bk -words
 .\" new ipsec
 .\".Op Fl P Ar policy
-.\".Ek
-.Bk -words
 .Op Fl S Ar sourceaddr
-.Ek
-.Bk -words
 .Op Fl s Ar packetsize
-.Ek
-.Bk -words
 .Op Ar hops ...
-.Ek
-.Bk -words
 .Ar host
-.Ek
 .Sh DESCRIPTION
 .Nm
 uses the
-.Tn ICMPv6
+ICMPv6
 protocol's mandatory
-.Tn ICMP6_ECHO_REQUEST
+.Dv ICMP6_ECHO_REQUEST
 datagram to elicit an
-.Tn ICMP6_ECHO_REPLY
+.Dv ICMP6_ECHO_REPLY
 from a host or gateway.
-.Tn ICMP6_ECHO_REQUEST
+.Dv ICMP6_ECHO_REQUEST
 datagrams (``pings'') have an IPv6 header,
 and
-.Tn ICMPv6
+ICMPv6
 header formatted as documented in RFC 2463.
 The options are as follows:
 .Bl -tag -width Ds
@@ -106,38 +76,40 @@ The options are as follows:
 .\" Enables transport-mode IPsec authentication header
 .\" .Pq experimental .
 .It Fl a Ar addrtype
-Generate ICMPv6 Node Information Node Addresses query, rather than echo-request.
+Generate an ICMPv6 Node Information Node Addresses query,
+rather than an echo-request.
 .Ar addrtype
-must be a string constructed of the following characters.
+must be a string constructed of the following characters:
+.Pp
 .Bl -tag -width Ds -compact
+.It Ic A
+Requests responder's anycast addresses.
+Without this character, the responder will return unicast addresses only.
+With this character, the responder will return anycast addresses only.
+Note that the specification does not specify how to get the responder's
+anycast addresses.
+This is an experimental option.
 .It Ic a
-requests unicast addresses from all of the responder's interfaces.
+Requests unicast addresses from all of the responder's interfaces.
 If the character is omitted,
 only those addresses which belong to the interface which has the
 responder's address are requests.
 .It Ic c
-requests responder's IPv4-compatible and IPv4-mapped addresses.
+Requests responder's IPv4-compatible and IPv4-mapped addresses.
 .It Ic g
-requests responder's global-scope addresses.
-.It Ic s
-requests responder's site-local addresses.
+Requests responder's global-scope addresses.
 .It Ic l
-requests responder's link-local addresses.
-.It Ic A
-requests responder's anycast addresses.
-Without this character, the responder will return unicast addresses only.
-With this character, the responder will return anycast addresses only.
-Note that the specification does not specify how to get responder's
-anycast addresses.
-This is an experimental option.
+Requests responder's link-local addresses.
+.It Ic s
+Requests responder's site-local addresses.
 .El
 .It Fl b Ar bufsiz
-Set socket buffer size.
+Set the socket buffer size.
 .It Fl c Ar count
 Stop after sending
 .Pq and receiving
 .Ar count
-.Tn ECHO_RESPONSE
+.Dv ECHO_RESPONSE
 packets.
 .It Fl d
 Set the
@@ -151,11 +123,11 @@ Flood ping.
 Outputs packets as fast as they come back or one hundred times per second,
 whichever is more.
 For every
-.Tn ECHO_REQUEST
+.Dv ECHO_REQUEST
 sent a period
-.Dq \&.
+.Pq Sq \&.
 is printed, while for every
-.Tn ECHO_REPLY
+.Dv ECHO_REPLY
 received a backspace is printed.
 This provides a rapid display of how many packets are being dropped.
 Only the super-user may use this option.
@@ -195,30 +167,32 @@ is specified,
 sends that many packets as fast as possible before falling into its normal
 mode of behavior.
 Only the super-user may use this option.
-.It Fl n
-Numeric output only.
-No attempt will be made to lookup symbolic names from addresses in the reply.
+.It Fl m
+Use minimal MTU size to avoid fragmentation.
 .It Fl N
-Probe node information multicast group
+Probe the node information multicast group
 .Pq Li ff02::2:xxxx:xxxx .
 .Ar host
-must be string hostname of the target
-.Pq must not be a numeric IPv6 address .
-Node information multicast group will be computed based on given
+must be the hostname of the target
+(i.e. it must not be a numeric IPv6 address).
+The node information multicast group is computed based on the given
 .Ar host ,
-and will be used as the final destination.
-Since node information multicast group is a link-local multicast group,
-outgoing interface needs to be specified by
+and is used as the final destination.
+Since the node information multicast group is a link-local multicast group,
+the outgoing interface needs to be specified using the
 .Fl I
 option.
+.It Fl n
+Numeric output only.
+No attempt will be made to look up symbolic names from addresses in the reply.
 .It Fl p Ar pattern
-You may specify up to 16
+Up to 16
 .Dq pad
-bytes to fill out the packet you send.
+bytes may be specified to fill out the packet sent.
 This is useful for diagnosing data-dependent problems in a network.
 For example,
-.Dq Li \-p ff
-will cause the sent packet to be filled with all
+.Dq -p ff
+will cause the packet sent to be filled with all
 ones.
 .\" new ipsec
 .\".It Fl P Ar policy
@@ -228,20 +202,20 @@ ones.
 Quiet output.
 Nothing is displayed except the summary lines at startup time and
 when finished.
-.It Fl R
-Make the kernel believe that the target
-.Ar host
-.Po
-or the first
-.Ar hop
-if you specify
-.Ar hops
-.Pc
-is reachable, by injecting upper-layer reachability confirmation hint.
-The option is meaningful only if the target
-.Ar host
-.Pq or the first hop
-is a neighbor.
+.\".It Fl R
+.\"Make the kernel believe that the target
+.\".Ar host
+.\".Po
+.\"or the first
+.\".Ar hop
+.\"if you specify
+.\".Ar hops
+.\".Pc
+.\"is reachable, by injecting upper-layer reachability confirmation hint.
+.\"The option is meaningful only if the target
+.\".Ar host
+.\".Pq or the first hop
+.\"is a neighbor.
 .It Fl S Ar sourceaddr
 Specifies the source address of request packets.
 The source address must be one of the unicast addresses of the sending node,
@@ -249,54 +223,58 @@ and must be numeric.
 .It Fl s Ar packetsize
 Specifies the number of data bytes to be sent.
 The default is 56, which translates into 64
-.Tn ICMP
+ICMP
 data bytes when combined
 with the 8 bytes of
-.Tn ICMP
+ICMP
 header data.
-You may need to specify
+It may also be necessary to specify
 .Fl b
-as well to extend socket buffer size.
+to extend the socket buffer size.
+.Pp
+This option is ignored if any of the flags
+.Op Fl tWw
+are specified.
 .It Fl t
-Generate ICMPv6 Node Information supported query types query,
+Generate an ICMPv6 Node Information query,
 rather than echo-request.
 .Fl s
 has no effect if
-.Fl t
+this option
 is specified.
 .It Fl v
 Verbose output.
-.Tn ICMP
-packets other than
-.Tn ECHO_RESPONSE
+All ICMP packets
 that are received are listed.
-.It Fl w
-Generate ICMPv6 Node Information DNS Name query, rather than echo-request.
-.Fl s
-has no effect if
-.Fl w
-is specified.
 .It Fl W
-Same as
+The
+same as
 .Fl w ,
-but with old packet format based on 03 draft.
+but with the old packet format based on the 03 draft.
 This option is present for backward compatibility.
 .Fl s
 has no effect if
-.Fl w
+this option
+is specified.
+.It Fl w
+Generate an ICMPv6 Node Information DNS Name query,
+rather than echo-request.
+.Fl s
+has no effect if
+this option
 is specified.
 .It Ar hops
-IPv6 addresses for intermediate nodes,
-which will be put into type 0 routing header.
+IPv6 addresses of intermediate nodes,
+which will be put into a type 0 routing header.
 .It Ar host
-IPv6 address of the final destination node.
+The IPv6 address of the final destination node.
 .El
 .Pp
 When using
 .Nm
 for fault isolation, it should first be run on the local host, to verify
 that the local network interface is up and running.
-Then, hosts and gateways further and further away should be
+Then hosts and gateways further and further away can be
 .Dq pinged .
 Round-trip times and packet loss statistics are computed.
 If duplicate packets are received, they are not included in the packet
@@ -310,11 +288,15 @@ a brief summary is displayed, showing the number of packets sent and
 received, and the minimum, maximum, mean, and standard deviation of
 the round-trip times.
 .Pp
-This program is intended for use in network testing, measurement and
+This program is intended for use in network testing, measurement, and
 management.
 Because of the load it can impose on the network, it is unwise to use
 .Nm
 during normal operations or from automated scripts.
+.Pp
+.Nm
+exits 0 if at least one reply is received,
+and \*(Gt0 if no reply is received or an error occurred.
 .\" .Sh ICMP PACKET DETAILS
 .\" An IP header without options is 20 bytes.
 .\" An
@@ -373,48 +355,40 @@ almost all zeros.
 It is not
 necessarily enough to specify a data pattern of all zeros (for example)
 on the command line because the pattern that is of interest is
-at the data link level, and the relationship between what you type and
+at the data link level, and the relationship between what is typed and
 what the controllers transmit can be complicated.
 .Pp
-This means that if you have a data-dependent problem you will probably
-have to do a lot of testing to find it.
-If you are lucky, you may manage to find a file that either
-cannot
-be sent across your network or that takes much longer to transfer than
+This means that if there is a data-dependent problem,
+a lot of testing will probably have to be done to find it.
+It may be possible to find a file that either cannot
+be sent across the network or that takes much longer to transfer than
 other similar length files.
-You can then examine this file for repeated patterns that you can test
+This file can then be examined for repeated patterns that can be tested
 using the
 .Fl p
-option of
-.Nm ping6 .
-.Sh RETURN VALUES
-.Nm
-returns 0 on success (the host is alive),
-and non-zero if the arguments are incorrect or the host is not responding.
+option.
 .Sh EXAMPLES
 Normally,
 .Nm
 works just like
 .Xr ping 8
-would work; the following will send ICMPv6 echo request to
-.Li dst.foo.com .
+would work; the following will send ICMPv6 echo request to dst.foo.com:
 .Bd -literal -offset indent
 $ ping6 -n dst.foo.com
 .Ed
 .Pp
-The following will probe hostnames for all nodes on the network link attached to
-.Li wi0
-interface.
+The following will probe hostnames for all nodes on the network link
+attached to the wi0 interface.
 The address
-.Li ff02::1
+.Dq ff02::1
 is named the link-local all-node multicast address, and the packet would
-reach every node on the network link.
+reach every node on the network link:
 .Bd -literal -offset indent
 $ ping6 -w ff02::1%wi0
 .Ed
 .Pp
 The following will probe addresses assigned to the destination node,
-.Li dst.foo.com .
+dst.foo.com:
 .Bd -literal -offset indent
 $ ping6 -a agl dst.foo.com
 .Ed
@@ -425,8 +399,7 @@ $ ping6 -a agl dst.foo.com
 .Xr ip6 4 ,
 .Xr ifconfig 8 ,
 .Xr ping 8 ,
-.Xr routed 8 ,
-.Xr traceroute 8 ,
+.Xr route6d 8 ,
 .Xr traceroute6 8
 .Rs
 .%A A. Conta
@@ -445,7 +418,7 @@ $ ping6 -a agl dst.foo.com
 .Sh HISTORY
 The
 .Xr ping 8
-command appeared in
+command first appeared in
 .Bx 4.3 .
 The
 .Nm

@@ -1,4 +1,4 @@
-/*	$OpenBSD: database.c,v 1.17 2005/11/12 18:18:24 deraadt Exp $ */
+/*	$OpenBSD: database.c,v 1.19 2006/03/13 09:36:06 claudio Exp $ */
 
 /*
  * Copyright (c) 2005 Claudio Jeker <claudio@openbsd.org>
@@ -363,6 +363,7 @@ db_sum_list_clr(struct nbr *nbr)
 }
 
 /* timers */
+/* ARGSUSED */
 void
 db_tx_timer(int fd, short event, void *arg)
 {
@@ -392,28 +393,30 @@ db_tx_timer(int fd, short event, void *arg)
 	if (nbr->master) {
 		timerclear(&tv);
 		tv.tv_sec = nbr->iface->rxmt_interval;
-		evtimer_add(&nbr->db_tx_timer, &tv);
+		if (evtimer_add(&nbr->db_tx_timer, &tv) == -1)
+			fatal("db_tx_timer");
 	}
 }
 
-int
+void
 start_db_tx_timer(struct nbr *nbr)
 {
 	struct timeval	tv;
 
 	if (nbr == nbr->iface->self)
-		return (0);
+		return;
 
 	timerclear(&tv);
-
-	return (evtimer_add(&nbr->db_tx_timer, &tv));
+	if (evtimer_add(&nbr->db_tx_timer, &tv) == -1)
+		fatal("start_db_tx_timer");
 }
 
-int
+void
 stop_db_tx_timer(struct nbr *nbr)
 {
 	if (nbr == nbr->iface->self)
-		return (0);
+		return;
 
-	return (evtimer_del(&nbr->db_tx_timer));
+	if (evtimer_del(&nbr->db_tx_timer) == -1)
+		fatal("stop_db_tx_timer");
 }

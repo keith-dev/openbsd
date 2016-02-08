@@ -1,4 +1,4 @@
-/*	$OpenBSD: rde_update.c,v 1.49 2006/01/13 13:04:33 claudio Exp $ */
+/*	$OpenBSD: rde_update.c,v 1.51 2006/04/21 08:49:29 claudio Exp $ */
 
 /*
  * Copyright (c) 2004 Claudio Jeker <claudio@openbsd.org>
@@ -30,7 +30,6 @@ int		up_generate_mp_reach(struct rde_peer *, struct update_attr *,
 		    struct rde_aspath *, sa_family_t);
 int		up_generate_attr(struct rde_peer *, struct update_attr *,
 		    struct rde_aspath *, sa_family_t);
-int		up_set_prefix(u_char *, int, struct bgpd_addr *, u_int8_t);
 
 /* update stuff. */
 struct update_prefix {
@@ -513,7 +512,9 @@ up_get_nexthop(struct rde_peer *peer, struct rde_aspath *a)
 			return (peer->local_v4_addr.v4.s_addr);
 		else
 			return (a->nexthop->exit_nexthop.v4.s_addr);
-	} else if (!peer->conf.ebgp) {
+	} else if (a->flags & F_NEXTHOP_SELF)
+		return (peer->local_v4_addr.v4.s_addr);
+	else if (!peer->conf.ebgp) {
 		/*
 		 * If directly connected use peer->local_v4_addr
 		 * this is only true for announced networks.

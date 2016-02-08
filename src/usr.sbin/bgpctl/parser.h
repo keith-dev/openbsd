@@ -1,4 +1,4 @@
-/*	$OpenBSD: parser.h,v 1.11 2006/01/24 15:28:03 henning Exp $ */
+/*	$OpenBSD: parser.h,v 1.14 2006/08/23 08:21:11 claudio Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -40,6 +40,7 @@ enum actions {
 	NEIGHBOR_UP,
 	NEIGHBOR_DOWN,
 	NEIGHBOR_CLEAR,
+	NEIGHBOR_RREFRESH,
 	NETWORK_ADD,
 	NETWORK_REMOVE,
 	NETWORK_FLUSH,
@@ -48,12 +49,13 @@ enum actions {
 
 struct parse_result {
 	struct bgpd_addr	addr;
+	struct bgpd_addr	peeraddr;
 	struct filter_as	as;
-	char			peerdesc[PEER_DESCR_LEN];
-	enum actions		action;
-	int			flags;
-	u_int8_t		prefixlen;
 	struct filter_set_head	set;
+	char			peerdesc[PEER_DESCR_LEN];
+	int			flags;
+	enum actions		action;
+	u_int8_t		prefixlen;
 	sa_family_t		af;
 };
 

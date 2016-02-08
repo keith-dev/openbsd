@@ -1,4 +1,4 @@
-/*	$OpenBSD: cl_main.c,v 1.15 2006/01/08 21:05:39 miod Exp $	*/
+/*	$OpenBSD: cl_main.c,v 1.17 2006/04/22 03:09:15 ray Exp $	*/
 
 /*-
  * Copyright (c) 1993, 1994
@@ -62,7 +62,10 @@ main(argc, argv)
 	GS *gp;
 	size_t rows, cols;
 	int rval;
-	char *ip_arg, **p_av, **t_av, *ttype;
+	char *ip_arg, *ttype;
+#ifdef RUNNING_IP
+	char **p_av, **t_av;
+#endif
 
 	/* If loaded at 0 and jumping through a NULL pointer, stop. */
 	if (reenter++)
@@ -110,8 +113,6 @@ main(argc, argv)
 	 */
 	if (ip_arg != NULL)
 		exit (ip_main(argc, argv, gp, ip_arg));
-#else
-	ip_arg = argv[0];
 #endif
 		
 	/* Create and initialize the CL_PRIVATE structure. */

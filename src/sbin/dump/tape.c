@@ -1,4 +1,4 @@
-/*	$OpenBSD: tape.c,v 1.24 2005/03/13 19:10:49 cloder Exp $	*/
+/*	$OpenBSD: tape.c,v 1.27 2006/06/02 05:09:35 krw Exp $	*/
 /*	$NetBSD: tape.c,v 1.11 1997/06/05 11:13:26 lukem Exp $	*/
 
 /*-
@@ -34,14 +34,16 @@
 #if 0
 static char sccsid[] = "@(#)tape.c	8.2 (Berkeley) 3/17/94";
 #else
-static const char rcsid[] = "$OpenBSD: tape.c,v 1.24 2005/03/13 19:10:49 cloder Exp $";
+static const char rcsid[] = "$OpenBSD: tape.c,v 1.27 2006/06/02 05:09:35 krw Exp $";
 #endif
 #endif /* not lint */
 
+#include <sys/types.h>
 #include <sys/param.h>
 #include <sys/socket.h>
 #include <sys/time.h>
 #include <sys/wait.h>
+#include <sys/stat.h>
 #ifdef sunos
 #include <sys/vnode.h>
 
@@ -272,8 +274,8 @@ statussig(int signo)
 	deltat = tstart_writing - tnow + (1.0 * (tnow - tstart_writing))
 		/ blockswritten * tapesize;
 	(void)snprintf(msgbuf, sizeof(msgbuf),
-	    "%3.2f%% done at %d KB/s, finished in %d:%02d\n",
-	    (blockswritten * 100.0) / tapesize,
+	    "dump: %s %3.2f%% done at %d KB/s, finished in %d:%02d\n",
+	    tape, (blockswritten * 100.0) / tapesize,
 	    (spcl.c_tapea - tapea_volume) / (tnow - tstart_volume),
 	    (int)(deltat / 3600), (int)((deltat % 3600) / 60));
 	write(STDERR_FILENO, msgbuf, strlen(msgbuf));
@@ -361,8 +363,8 @@ flushtape(void)
 void
 trewind(void)
 {
-	int f;
-	int got;
+	struct stat sb;
+	int f, got;
 
 	for (f = 0; f < SLAVES; f++) {
 		/*
@@ -405,6 +407,22 @@ trewind(void)
 		return;
 	}
 #endif
+	/*
+	 * st(4) says: "Bit 1 of the minor number specifies whether an eject is
+	 * attempted when the device is closed.  When it is set, the device
+	 * will attempt to eject its media on close ...".
+	 *
+	 * If the tape has been ejected, looping on open() will generate 'Media
+	 * not present' errors until a tape is loaded. Once loaded the tape
+	 * will be immediately ejected as a result of the second close().
+	 *
+	 * So if the tape will be ejected, just close and return.
+	 */
+	if ((fstat(tapefd, &sb) == 0) && (minor(sb.st_rdev) & 0x02)) {
+		(void) close(tapefd);
+		return;
+	}
+
 	(void) close(tapefd);
 	while ((f = open(tape, 0)) < 0)
 		sleep (10);

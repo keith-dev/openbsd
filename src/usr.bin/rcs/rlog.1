@@ -1,4 +1,4 @@
-.\"     $OpenBSD: rlog.1,v 1.11 2005/12/02 11:13:32 xsa Exp $
+.\"	$OpenBSD: rlog.1,v 1.18 2006/05/08 12:09:34 xsa Exp $
 .\"
 .\" Copyright (c) 2005 Xavier Santolaria <xsa@openbsd.org>
 .\" All rights reserved.
@@ -22,8 +22,7 @@
 .Nd display information about RCS files
 .Sh SYNOPSIS
 .Nm
-.Bk -words
-.Op Fl bhLNqRTtV
+.Op Fl bhLNqRtV
 .Op Fl d Ns Ar dates
 .Op Fl l Ns Op Ar lockers
 .Op Fl r Ns Op Ar revs
@@ -31,12 +30,19 @@
 .Op Fl w Ns Op Ar logins
 .Op Fl x Ns Ar suffixes
 .Op Fl z Ns Ar tz
-.Ar file ...
-.Ek
+.Ar
 .Sh DESCRIPTION
 The
 .Nm
 program displays information about RCS files.
+.Pp
+A file's complete RCS history can be displayed
+(the default if no options are specified)
+or a subset of its history log can be requested,
+depending on which options are specified.
+RCS keywords are displayed using the
+.Xr ident 1
+utility.
 .Pp
 The following options are supported:
 .Bl -tag -width Ds
@@ -72,8 +78,13 @@ character to imply an inclusive specification.
 Several specifications can be used by separating them with the
 .Sq \&;
 character.
+.Pp
+See also the
+.Fl z
+option, below.
 .It Fl h
-Print header.
+Print the RCS header,
+describing a file's branch, lock details, symbolic names, etc.
 .It Fl L
 Ignore RCS files with no locks set.
 .It Fl l Ns Op Ar lockers
@@ -127,9 +138,6 @@ Print information about revisions whose state matches one of the
 specified
 .Ar states .
 Multiple states may be specified as a comma-separated list.
-.It Fl T
-No effect.
-For compatibility.
 .It Fl t
 Print header and description only.
 .It Fl V
@@ -146,12 +154,21 @@ Suffixes should be separated by the
 .Sq /
 character.
 .It Fl z Ns Ar tz
-Specify the date output format, and the default time zone for
-.Ar dates
-used in the
+Specify the date output format.
+The
+.Ar tz
+argument should be a numeric UTC offset
+(e.g. +02:45 would specify an offset of 2 hours 45 minutes).
+.Sq LT
+may instead be used to specify local time.
+If no argument is given, a default format is used.
+This option is also used to set the default time zone for
+dates used in the
 .Fl d
 option.
 .El
+.Pp
+.Ex -std rlog
 .Sh ENVIRONMENT
 .Bl -tag -width RCSINIT
 .It Ev RCSINIT
@@ -174,3 +191,8 @@ Print the names of RCS files with locks set:
 .Xr rcsclean 1 ,
 .Xr rcsdiff 1 ,
 .Xr rcsmerge 1
+.Sh STANDARDS
+The flag
+.Op Fl T
+has no effect and is provided
+for compatibility only.

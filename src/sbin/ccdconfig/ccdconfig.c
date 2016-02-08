@@ -1,4 +1,4 @@
-/*	$OpenBSD: ccdconfig.c,v 1.26 2005/11/12 20:15:13 deraadt Exp $	*/
+/*	$OpenBSD: ccdconfig.c,v 1.29 2006/03/26 18:06:00 grunk Exp $	*/
 /*	$NetBSD: ccdconfig.c,v 1.6 1996/05/16 07:11:18 thorpej Exp $	*/
 
 /*-
@@ -99,13 +99,14 @@ static	struct nlist nl[] = {
 #define CCD_UNCONFIGALL		3	/* unconfigure all devices */
 #define CCD_DUMP		4	/* dump a ccd's configuration */
 
-static	int checkdev(char *);
+static	int checkdev(const char *);
 static	int do_io(char *, u_long, struct ccd_ioctl *);
 static	int do_single(int, char **, int);
 static	int do_all(int);
 static	int dump_ccd(int, char **);
 static	int flags_to_val(char *);
 #ifndef SMALL
+static 	int pathtounit(const char *, int *);
 static	void print_ccd_info(struct ccd_softc *, kvm_t *);
 #endif
 static	char *resolve_ccdname(char *);
@@ -115,6 +116,7 @@ int
 main(int argc, char *argv[])
 {
 	int ch, options = 0, action = CCD_CONFIG;
+	gid_t gid;
 
 	while ((ch = getopt(argc, argv, "cCf:gM:N:uUv")) != -1) {
 		switch (ch) {
@@ -172,10 +174,10 @@ main(int argc, char *argv[])
 	 * Discard setgid privileges if not the running kernel so that bad
 	 * guys can't print interesting stuff from kernel memory.
 	 */
-	if (core != NULL || kernel != NULL || action != CCD_DUMP) {
-		setegid(getgid());
-		setgid(getgid());
-	}
+	gid = getgid();
+	if (core != NULL || kernel != NULL || action != CCD_DUMP)
+		if (setresgid(gid, gid, gid) == -1)
+			err(1, "setresgid");
 
 	switch (action) {
 	case CCD_CONFIG:
@@ -202,8 +204,8 @@ static int
 do_single(int argc, char *argv[], int action)
 {
 	struct ccd_ioctl ccio;
-	char *ccd, *cp, *cp2, **disks;
-	int noflags = 0, i, ileave, flags = 0, j;
+	char *ccd, *cp, *cp2, **disks = NULL;
+	int noflags = 0, i, ileave, flags = 0, j, ret = 1;
 
 	memset(&ccio, 0, sizeof(ccio));
 
@@ -220,9 +222,12 @@ do_single(int argc, char *argv[], int action)
 			}
 			if (do_io(ccd, CCDIOCCLR, &ccio))
 				i = 1;
-			else
+			else {
 				if (verbose)
 					printf("%s unconfigured\n", cp);
+			}
+
+			free(ccd);
 		}
 		return (i);
 	}
@@ -254,7 +259,7 @@ do_single(int argc, char *argv[], int action)
 	ileave = (int)strtol(cp, &cp2, 10);
 	if ((errno == ERANGE) || (ileave < 0) || (*cp2 != '\0')) {
 		warnx("invalid interleave factor: %s", cp);
-		return (1);
+		goto done;	
 	}
 
 	if (noflags == 0) {
@@ -262,7 +267,7 @@ do_single(int argc, char *argv[], int action)
 		cp = *argv++; --argc;
 		if ((flags = flags_to_val(cp)) < 0) {
 			warnx("invalid flags argument: %s", cp);
-			return (1);
+			goto done;
 		}
 	}
 
@@ -270,7 +275,7 @@ do_single(int argc, char *argv[], int action)
 	disks = malloc(argc * sizeof(char *));
 	if (disks == NULL) {
 		warnx("no memory to configure ccd");
-		return (1);
+		goto done;
 	}
 	for (i = 0; argc != 0; ) {
 		cp = *argv++; --argc;
@@ -278,8 +283,7 @@ do_single(int argc, char *argv[], int action)
 			disks[i++] = cp;
 		else {
 			warnx("%s: %s", cp, strerror(j));
-			free(disks);
-			return (1);
+			goto done;
 		}
 	}
 
@@ -289,10 +293,8 @@ do_single(int argc, char *argv[], int action)
 	ccio.ccio_ileave = ileave;
 	ccio.ccio_flags = flags;
 
-	if (do_io(ccd, CCDIOCSET, &ccio)) {
-		free(disks);
-		return (1);
-	}
+	if (do_io(ccd, CCDIOCSET, &ccio))
+		goto done;
 
 	if (verbose) {
 		printf("ccd%d: %d components ", ccio.ccio_unit,
@@ -313,8 +315,12 @@ do_single(int argc, char *argv[], int action)
 			printf("concatenated\n");
 	}
 
+	ret = 0;
+
+done:
 	free(disks);
-	return (0);
+	free(ccd);
+	return (ret);
 }
 
 static int
@@ -384,7 +390,7 @@ do_all(int action)
 }
 
 static int
-checkdev(char *path)
+checkdev(const char *path)
 {
 	struct stat st;
 
@@ -399,7 +405,7 @@ checkdev(char *path)
 
 #ifndef SMALL
 static int
-pathtounit(char *path, int *unitp)
+pathtounit(const char *path, int *unitp)
 {
 	struct stat st;
 	int maxpartitions;
@@ -566,8 +572,10 @@ dump_ccd(int argc, char *argv[])
 			}
 			if ((error = pathtounit(ccd, &i)) != 0) {
 				warnx("%s: %s", ccd, strerror(error));
+				free(ccd);
 				continue;
 			}
+			free(ccd);
 			if (i >= numccd) {
 				warnx("ccd%d not configured", i);
 				continue;
@@ -600,7 +608,7 @@ print_ccd_info(struct ccd_softc *cs, kvm_t *kd)
 	int i;
 
 	if (header_printed == 0 && verbose) {
-		printf("# ccd\t\tileave\tflags\tcompnent devices\n");
+		printf("# ccd\t\tileave\tflags\tcomponent devices\n");
 		header_printed = 1;
 	}
 
@@ -613,7 +621,7 @@ print_ccd_info(struct ccd_softc *cs, kvm_t *kd)
 	memset(cip, 0, readsize);
 
 	/* Dump out softc information. */
-	printf("%s\t%d\t0x%x\t", cs->sc_xname, cs->sc_ileave,
+	printf("%s\t\t%d\t0x%x\t", cs->sc_xname, cs->sc_ileave,
 	    cs->sc_cflags & CCDF_USERMASK);
 	fflush(stdout);
 

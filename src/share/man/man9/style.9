@@ -22,7 +22,7 @@
 .\" OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 .\" SUCH DAMAGE.
 .\"
-.\"	$OpenBSD: style.9,v 1.42 2005/10/27 10:26:55 deraadt Exp $
+.\"	$OpenBSD: style.9,v 1.45 2006/05/27 05:05:16 deraadt Exp $
 .\"
 .Dd June 18, 2001
 .Dt STYLE 9
@@ -251,10 +251,8 @@ typedef struct _bar {
 int
 main(int argc, char *argv[])
 {
-	long num;
-	int ch;
-	char *ep;
-
+	int aflag, bflag, ch, num;
+	const char *errstr;
 .Ed
 .Pp
 For consistency,
@@ -277,14 +275,12 @@ while ((ch = getopt(argc, argv, "abn:")) != -1)
 		bflag = 1;
 		break;
 	case 'n':
-		num = strtol(optarg, &ep, 10);
-		if (num <= 0 || *ep != '\e0') {
-			warnx("illegal number, -n argument -- %s",
-			    optarg);
+		num = strtonum(optarg, 0, INT_MAX, &errstr);
+		if (errstr) {
+			warnx("number is %s: %s", errstr, optarg);
 			usage();
 		}
 		break;
-	case '?':
 	default:
 		usage();
 		/* NOTREACHED */
@@ -518,17 +514,6 @@ Use
 instead of
 (type\ *)0 or (type\ *)NULL in all cases except for arguments to variadic
 functions where the compiler does not know the type.
-Test pointers
-against
-.Dv NULL ,
-i.e., use:
-.Bd -literal -offset indent
-(p = f()) == NULL
-.Ed
-not:
-.Bd -literal -offset indent -compact
-!(p = f())
-.Ed
 .Pp
 Don't use
 .Ql \&!

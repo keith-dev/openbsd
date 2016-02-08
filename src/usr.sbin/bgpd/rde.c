@@ -1,4 +1,4 @@
-/*	$OpenBSD: rde.c,v 1.200 2006/02/10 14:34:40 claudio Exp $ */
+/*	$OpenBSD: rde.c,v 1.211 2006/08/23 08:13:04 claudio Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -58,14 +58,19 @@ void		 rde_update_log(const char *,
 		     const struct rde_peer *, const struct bgpd_addr *,
 		     const struct bgpd_addr *, u_int8_t);
 int		 rde_reflector(struct rde_peer *, struct rde_aspath *);
-void		 rde_dump_rib_as(struct prefix *, pid_t);
+void		 rde_dump_rib_as(struct prefix *, struct rde_aspath *,pid_t,
+		     int);
+void		 rde_dump_filter(struct prefix *,
+		     struct ctl_show_rib_request *);
+void		 rde_dump_filterout(struct rde_peer *, struct prefix *,
+		     struct ctl_show_rib_request *);
 void		 rde_dump_upcall(struct pt_entry *, void *);
-void		 rde_dump_as(struct filter_as *, pid_t);
+void		 rde_dump_as(struct ctl_show_rib_request *);
 void		 rde_dump_prefix_upcall(struct pt_entry *, void *);
-void		 rde_dump_prefix(struct ctl_show_rib_prefix *, pid_t);
+void		 rde_dump_prefix(struct ctl_show_rib_request *);
+void		 rde_up_dump_upcall(struct pt_entry *, void *);
 void		 rde_softreconfig_out(struct pt_entry *, void *);
 void		 rde_softreconfig_in(struct pt_entry *, void *);
-void		 rde_up_dump_upcall(struct pt_entry *, void *);
 void		 rde_update_queue_runner(void);
 void		 rde_update6_queue_runner(void);
 
@@ -78,6 +83,7 @@ struct rde_peer	*peer_get(u_int32_t);
 void		 peer_up(u_int32_t, struct session_up *);
 void		 peer_down(u_int32_t);
 void		 peer_dump(u_int32_t, u_int16_t, u_int8_t);
+void		 peer_send_eor(struct rde_peer *, u_int16_t, u_int16_t);
 
 void		 network_init(struct network_head *);
 void		 network_add(struct network_config *, int);
@@ -126,6 +132,9 @@ rde_main(struct bgpd_config *config, struct peer *peer_l,
 	struct peer		*p;
 	struct listen_addr	*la;
 	struct pollfd		 pfd[3];
+	struct filter_rule	*f;
+	struct filter_set	*set;
+	struct nexthop		*nh;
 	int			 i;
 
 	switch (pid = fork()) {
@@ -193,13 +202,22 @@ rde_main(struct bgpd_config *config, struct peer *peer_l,
 	pt_init();
 	path_init(pathhashsize);
 	aspath_init(pathhashsize);
-	attr_init(pathhashsize);
+	attr_init(attrhashsize);
 	nexthop_init(nexthophashsize);
 	peer_init(peerhashsize);
 	rules_l = rules;
 	network_init(net_l);
 
 	log_info("route decision engine ready");
+
+	TAILQ_FOREACH(f, rules, entry) {
+		TAILQ_FOREACH(set, &f->set, entry) {
+			if (set->type == ACTION_SET_NEXTHOP) {
+				nh = nexthop_get(&set->action.nexthop);
+				nh->refcnt++;
+			}
+		}
+	}
 
 	while (rde_quit == 0) {
 		bzero(pfd, sizeof(pfd));
@@ -279,7 +297,9 @@ rde_dispatch_imsg_session(struct imsgbuf *ibuf)
 	struct rrefresh		 r;
 	struct rde_peer		*peer;
 	struct session_up	 sup;
+	struct ctl_show_rib_request	req;
 	struct filter_set	*s;
+	struct nexthop		*nh;
 	pid_t			 pid;
 	int			 n;
 	sa_family_t		 af = AF_UNSPEC;
@@ -305,7 +325,8 @@ rde_dispatch_imsg_session(struct imsgbuf *ibuf)
 			memcpy(&pconf, imsg.data, sizeof(pconf));
 			peer = peer_add(imsg.hdr.peerid, &pconf);
 			if (peer == NULL) {
-				log_warnx("peer_up: peer id %d already exists",
+				log_warnx("session add: "
+				    "peer id %d already exists",
 				    imsg.hdr.peerid);
 				break;
 			}
@@ -343,7 +364,22 @@ rde_dispatch_imsg_session(struct imsgbuf *ibuf)
 				break;
 			}
 			session_set = NULL;
-			network_add(&netconf_s, 0);
+			switch (netconf_s.prefix.af) {
+			case AF_INET:
+				if (netconf_s.prefixlen > 32)
+					goto badnet;
+				network_add(&netconf_s, 0);
+				break;
+			case AF_INET6:
+				if (netconf_s.prefixlen > 128)
+					goto badnet;
+				network_add(&netconf_s, 0);
+				break;
+			default:
+badnet:
+				log_warnx("rde_dispatch: bad network");
+				break;
+			}
 			break;
 		case IMSG_NETWORK_REMOVE:
 			if (imsg.hdr.len - IMSG_HEADER_SIZE !=
@@ -377,6 +413,11 @@ rde_dispatch_imsg_session(struct imsgbuf *ibuf)
 				fatal(NULL);
 			memcpy(s, imsg.data, sizeof(struct filter_set));
 			TAILQ_INSERT_TAIL(session_set, s, entry);
+
+			if (s->type == ACTION_SET_NEXTHOP) {
+				nh = nexthop_get(&s->action.nexthop);
+				nh->refcnt++;
+			}
 			break;
 		case IMSG_CTL_SHOW_NETWORK:
 			if (imsg.hdr.len != IMSG_HEADER_SIZE + sizeof(af)) {
@@ -390,36 +431,36 @@ rde_dispatch_imsg_session(struct imsgbuf *ibuf)
 			    NULL, 0);
 			break;
 		case IMSG_CTL_SHOW_RIB:
-			if (imsg.hdr.len != IMSG_HEADER_SIZE + sizeof(af)) {
+			if (imsg.hdr.len != IMSG_HEADER_SIZE + sizeof(req)) {
 				log_warnx("rde_dispatch: wrong imsg len");
 				break;
 			}
-			pid = imsg.hdr.pid;
-			memcpy(&af, imsg.data, sizeof(af));
-			pt_dump(rde_dump_upcall, &pid, af);
-			imsg_compose(ibuf_se, IMSG_CTL_END, 0, pid, -1,
+			memcpy(&req, imsg.data, sizeof(req));
+			req.pid = imsg.hdr.pid;
+			pt_dump(rde_dump_upcall, &req, req.af);
+			imsg_compose(ibuf_se, IMSG_CTL_END, 0, req.pid, -1,
 			    NULL, 0);
 			break;
 		case IMSG_CTL_SHOW_RIB_AS:
-			if (imsg.hdr.len - IMSG_HEADER_SIZE !=
-			    sizeof(struct filter_as)) {
+			if (imsg.hdr.len != IMSG_HEADER_SIZE + sizeof(req)) {
 				log_warnx("rde_dispatch: wrong imsg len");
 				break;
 			}
-			pid = imsg.hdr.pid;
-			rde_dump_as(imsg.data, pid);
-			imsg_compose(ibuf_se, IMSG_CTL_END, 0, pid, -1,
+			memcpy(&req, imsg.data, sizeof(req));
+			req.pid = imsg.hdr.pid;
+			rde_dump_as(&req);
+			imsg_compose(ibuf_se, IMSG_CTL_END, 0, req.pid, -1,
 			    NULL, 0);
 			break;
 		case IMSG_CTL_SHOW_RIB_PREFIX:
-			if (imsg.hdr.len - IMSG_HEADER_SIZE !=
-			    sizeof(struct ctl_show_rib_prefix)) {
+			if (imsg.hdr.len != IMSG_HEADER_SIZE + sizeof(req)) {
 				log_warnx("rde_dispatch: wrong imsg len");
 				break;
 			}
-			pid = imsg.hdr.pid;
-			rde_dump_prefix(imsg.data, pid);
-			imsg_compose(ibuf_se, IMSG_CTL_END, 0, pid, -1,
+			memcpy(&req, imsg.data, sizeof(req));
+			req.pid = imsg.hdr.pid;
+			rde_dump_prefix(&req);
+			imsg_compose(ibuf_se, IMSG_CTL_END, 0, req.pid, -1,
 			    NULL, 0);
 			break;
 		case IMSG_CTL_SHOW_NEIGHBOR:
@@ -458,6 +499,7 @@ rde_dispatch_imsg_parent(struct imsgbuf *ibuf)
 	struct filter_rule	*r;
 	struct filter_set	*s;
 	struct mrt		*xmrt;
+	struct nexthop		*nh;
 	int			 n, reconf_in = 0, reconf_out = 0;
 
 	if ((n = imsg_read(ibuf)) == -1)
@@ -577,6 +619,11 @@ rde_dispatch_imsg_parent(struct imsgbuf *ibuf)
 				fatal(NULL);
 			memcpy(s, imsg.data, sizeof(struct filter_set));
 			TAILQ_INSERT_TAIL(parent_set, s, entry);
+
+			if (s->type == ACTION_SET_NEXTHOP) {
+				nh = nexthop_get(&s->action.nexthop);
+				nh->refcnt++;
+			}
 			break;
 		case IMSG_MRT_OPEN:
 		case IMSG_MRT_REOPEN:
@@ -1415,18 +1462,24 @@ int
 rde_reflector(struct rde_peer *peer, struct rde_aspath *asp)
 {
 	struct attr	*a;
+	u_int8_t	*p;
 	u_int16_t	 len;
+	u_int32_t	 id;
 
 	/* check for originator id if eq router_id drop */
 	if ((a = attr_optget(asp, ATTR_ORIGINATOR_ID)) != NULL) {
 		if (memcmp(&conf->bgpid, a->data, sizeof(conf->bgpid)) == 0)
 			/* this is coming from myself */
 			return (0);
-	} else if ((conf->flags & BGPD_FLAG_REFLECTOR) &&
-	    attr_optadd(asp, ATTR_OPTIONAL, ATTR_ORIGINATOR_ID,
-	    peer->conf.ebgp == 0 ? &peer->remote_bgpid : &conf->bgpid,
-	    sizeof(u_int32_t)) == -1)
-		fatalx("attr_optadd failed but impossible");
+	} else if (conf->flags & BGPD_FLAG_REFLECTOR) {
+		if (peer->conf.ebgp == 0)
+			id = htonl(peer->remote_bgpid);
+		else
+			id = conf->bgpid;
+		if (attr_optadd(asp, ATTR_OPTIONAL, ATTR_ORIGINATOR_ID,
+		    &id, sizeof(u_int32_t)) == -1)
+			fatalx("attr_optadd failed but impossible");
+	}
 
 	/* check for own id in the cluster list */
 	if (conf->flags & BGPD_FLAG_REFLECTOR) {
@@ -1438,15 +1491,19 @@ rde_reflector(struct rde_peer *peer, struct rde_aspath *asp)
 				    sizeof(conf->clusterid)) == 0)
 					return (0);
 
-			/* prepend own clusterid */
-			if ((a->data = realloc(a->data, a->len +
-			    sizeof(conf->clusterid))) == NULL)
+			/* prepend own clusterid by replacing attribute */
+			len = a->len + sizeof(conf->clusterid);
+			if (len < a->len)
+				fatalx("rde_reflector: cluster-list overflow");
+			if ((p = malloc(len)) == NULL)
 				fatal("rde_reflector");
-			memmove(a->data + sizeof(conf->clusterid),
-			    a->data, a->len);
-			a->len += sizeof(conf->clusterid);
-			memcpy(a->data, &conf->clusterid,
-			    sizeof(conf->clusterid));
+			memcpy(p, &conf->clusterid, sizeof(conf->clusterid));
+			memcpy(p + sizeof(conf->clusterid), a->data, a->len);
+			attr_free(asp, a);
+			if (attr_optadd(asp, ATTR_OPTIONAL, ATTR_CLUSTER_LIST,
+			    p, len) == -1)
+				fatalx("attr_optadd failed but impossible");
+			free(p);
 		} else if (attr_optadd(asp, ATTR_OPTIONAL, ATTR_CLUSTER_LIST,
 		    &conf->clusterid, sizeof(conf->clusterid)) == -1)
 			fatalx("attr_optadd failed but impossible");
@@ -1458,67 +1515,146 @@ rde_reflector(struct rde_peer *peer, struct rde_aspath *asp)
  * control specific functions
  */
 void
-rde_dump_rib_as(struct prefix *p, pid_t pid)
+rde_dump_rib_as(struct prefix *p, struct rde_aspath *asp, pid_t pid, int flags)
 {
 	struct ctl_show_rib	 rib;
 	struct buf		*wbuf;
+	struct attr		*a;
+	void			*bp;
+	u_int8_t		 l;
 
+	bzero(&rib, sizeof(rib));
 	rib.lastchange = p->lastchange;
-	rib.local_pref = p->aspath->lpref;
-	rib.med = p->aspath->med;
-	rib.prefix_cnt = p->aspath->prefix_cnt;
-	rib.active_cnt = p->aspath->active_cnt;
-	rib.adjrib_cnt = p->aspath->adjrib_cnt;
-	if (p->aspath->nexthop != NULL)
-		memcpy(&rib.nexthop, &p->aspath->nexthop->true_nexthop,
-		    sizeof(rib.nexthop));
-	else {
+	rib.local_pref = asp->lpref;
+	rib.med = asp->med;
+	rib.prefix_cnt = asp->prefix_cnt;
+	rib.active_cnt = asp->active_cnt;
+	rib.adjrib_cnt = asp->adjrib_cnt;
+	strlcpy(rib.descr, asp->peer->conf.descr, sizeof(rib.descr));
+	memcpy(&rib.remote_addr, &asp->peer->remote_addr,
+	    sizeof(rib.remote_addr));
+	rib.remote_id = asp->peer->remote_bgpid;
+	if (asp->nexthop != NULL) {
+		memcpy(&rib.true_nexthop, &asp->nexthop->true_nexthop,
+		    sizeof(rib.true_nexthop));
+		memcpy(&rib.exit_nexthop, &asp->nexthop->exit_nexthop,
+		    sizeof(rib.exit_nexthop));
+	} else {
 		/* announced network may have a NULL nexthop */
-		bzero(&rib.nexthop, sizeof(rib.nexthop));
-		rib.nexthop.af = p->prefix->af;
+		bzero(&rib.true_nexthop, sizeof(rib.true_nexthop));
+		bzero(&rib.exit_nexthop, sizeof(rib.exit_nexthop));
+		rib.true_nexthop.af = p->prefix->af;
+		rib.exit_nexthop.af = p->prefix->af;
 	}
 	pt_getaddr(p->prefix, &rib.prefix);
 	rib.prefixlen = p->prefix->prefixlen;
-	rib.origin = p->aspath->origin;
+	rib.origin = asp->origin;
 	rib.flags = 0;
 	if (p->prefix->active == p)
 		rib.flags |= F_RIB_ACTIVE;
-	if (p->aspath->peer->conf.ebgp == 0)
+	if (asp->peer->conf.ebgp == 0)
 		rib.flags |= F_RIB_INTERNAL;
-	if (p->aspath->flags & F_PREFIX_ANNOUNCED)
+	if (asp->flags & F_PREFIX_ANNOUNCED)
 		rib.flags |= F_RIB_ANNOUNCE;
-	if (p->aspath->nexthop == NULL ||
-	    p->aspath->nexthop->state == NEXTHOP_REACH)
+	if (asp->nexthop == NULL || asp->nexthop->state == NEXTHOP_REACH)
 		rib.flags |= F_RIB_ELIGIBLE;
-	rib.aspath_len = aspath_length(p->aspath->aspath);
+	rib.aspath_len = aspath_length(asp->aspath);
 
 	if ((wbuf = imsg_create(ibuf_se, IMSG_CTL_SHOW_RIB, 0, pid,
 	    sizeof(rib) + rib.aspath_len)) == NULL)
 		return;
 	if (imsg_add(wbuf, &rib, sizeof(rib)) == -1 ||
-	    imsg_add(wbuf, aspath_dump(p->aspath->aspath),
+	    imsg_add(wbuf, aspath_dump(asp->aspath),
 	    rib.aspath_len) == -1)
 		return;
 	if (imsg_close(ibuf_se, wbuf) == -1)
 		return;
+
+	if (flags & F_CTL_DETAIL)
+		for (l = 0; l < asp->others_len; l++) {
+			if ((a = asp->others[l]) == NULL)
+				break;
+			if ((wbuf = imsg_create(ibuf_se, IMSG_CTL_SHOW_RIB_ATTR,
+			    0, pid, attr_optlen(a))) == NULL)
+				return;
+			if ((bp = buf_reserve(wbuf, attr_optlen(a))) == NULL) {
+				buf_free(wbuf);
+				return;
+			}
+			if (attr_write(bp, attr_optlen(a), a->flags,
+			    a->type, a->data, a->len) == -1) {
+				buf_free(wbuf);
+				return;
+			}
+			if (imsg_close(ibuf_se, wbuf) == -1)
+				return;
+		}
+}
+
+void
+rde_dump_filterout(struct rde_peer *peer, struct prefix *p,
+    struct ctl_show_rib_request *req)
+{
+	struct bgpd_addr	 addr;
+	struct rde_aspath	*asp;
+	enum filter_actions	 a;
+
+	if (up_test_update(peer, p) != 1)
+		return;
+
+	pt_getaddr(p->prefix, &addr);
+	a = rde_filter(&asp, rules_l, peer, p->aspath, &addr,
+	    p->prefix->prefixlen, p->aspath->peer, DIR_OUT);
+	if (asp)
+		asp->peer = p->aspath->peer;
+	else
+		asp = p->aspath;
+
+	if (a == ACTION_ALLOW)
+		rde_dump_rib_as(p, asp, req->pid, req->flags);
+
+	if (asp != p->aspath)
+		path_put(asp);
+}
+
+void
+rde_dump_filter(struct prefix *p, struct ctl_show_rib_request *req)
+{
+	struct rde_peer		*peer;
+
+	if ((req->flags & F_CTL_ADJ_IN && p->flags & F_ORIGINAL) ||
+	    (!(req->flags & (F_CTL_ADJ_IN|F_CTL_ADJ_OUT)) &&
+	    p->flags & F_LOCAL)) {
+		if (req->peerid && req->peerid != p->aspath->peer->conf.id)
+			return;
+		rde_dump_rib_as(p, p->aspath, req->pid, req->flags);
+	} else if (req->flags & F_CTL_ADJ_OUT && p->flags & F_LOCAL) {
+		if (p->prefix->active != p)
+			/* only consider active prefix */
+			return;
+
+		if (req->peerid) {
+		       	if ((peer = peer_get(req->peerid)) != NULL)
+				rde_dump_filterout(peer, p, req);
+			return;
+		}
+		LIST_FOREACH(peer, &peerlist, peer_l)
+			rde_dump_filterout(peer, p, req);
+	}
 }
 
 void
 rde_dump_upcall(struct pt_entry *pt, void *ptr)
 {
 	struct prefix		*p;
-	pid_t			 pid;
-
-	memcpy(&pid, ptr, sizeof(pid));
+	struct ctl_show_rib_request	*req = ptr;
 
 	LIST_FOREACH(p, &pt->prefix_h, prefix_l)
-		/* for now dump only stuff from the local-RIB */
-		if (p->flags & F_LOCAL)
-			rde_dump_rib_as(p, pid);
+		rde_dump_filter(p, req);
 }
 
 void
-rde_dump_as(struct filter_as *a, pid_t pid)
+rde_dump_as(struct ctl_show_rib_request *req)
 {
 	extern struct path_table	 pathtable;
 	struct rde_aspath		*asp;
@@ -1527,13 +1663,12 @@ rde_dump_as(struct filter_as *a, pid_t pid)
 
 	for (i = 0; i <= pathtable.path_hashmask; i++) {
 		LIST_FOREACH(asp, &pathtable.path_hashtbl[i], path_l) {
-			if (!aspath_match(asp->aspath, a->type, a->as))
+			if (!aspath_match(asp->aspath, req->as.type,
+			    req->as.as))
 				continue;
 			/* match found */
 			LIST_FOREACH(p, &asp->prefix_h, path_l)
-				/* for now dump only stuff from the local-RIB */
-				if (p->flags & F_LOCAL)
-					rde_dump_rib_as(p, pid);
+				rde_dump_filter(p, req);
 		}
 	}
 }
@@ -1541,44 +1676,33 @@ rde_dump_as(struct filter_as *a, pid_t pid)
 void
 rde_dump_prefix_upcall(struct pt_entry *pt, void *ptr)
 {
-	struct {
-		pid_t				 pid;
-		struct ctl_show_rib_prefix	*pref;
-	}			*ctl = ptr;
-	struct prefix		*p;
-	struct bgpd_addr	 addr;
+	struct ctl_show_rib_request	*req = ptr;
+	struct prefix			*p;
+	struct bgpd_addr		 addr;
 
 	pt_getaddr(pt, &addr);
-	if (addr.af != ctl->pref->prefix.af)
+	if (addr.af != req->prefix.af)
 		return;
-	if (ctl->pref->prefixlen > pt->prefixlen)
+	if (req->prefixlen > pt->prefixlen)
 		return;
-	if (!prefix_compare(&ctl->pref->prefix, &addr, ctl->pref->prefixlen))
+	if (!prefix_compare(&req->prefix, &addr, req->prefixlen))
 		LIST_FOREACH(p, &pt->prefix_h, prefix_l)
-			/* for now dump only stuff from the local-RIB */
-			if (p->flags & F_LOCAL)
-				rde_dump_rib_as(p, ctl->pid);
+			rde_dump_filter(p, req);
 }
 
 void
-rde_dump_prefix(struct ctl_show_rib_prefix *pref, pid_t pid)
+rde_dump_prefix(struct ctl_show_rib_request *req)
 {
 	struct pt_entry	*pt;
-	struct {
-		pid_t				 pid;
-		struct ctl_show_rib_prefix	*pref;
-	} ctl;
 
-	if (pref->prefixlen == 32) {
-		if ((pt = pt_lookup(&pref->prefix)) != NULL)
-			rde_dump_upcall(pt, &pid);
-	} else if (pref->flags & F_LONGER) {
-		ctl.pid = pid;
-		ctl.pref = pref;
-		pt_dump(rde_dump_prefix_upcall, &ctl, AF_UNSPEC);
+	if (req->prefixlen == 32) {
+		if ((pt = pt_lookup(&req->prefix)) != NULL)
+			rde_dump_upcall(pt, req);
+	} else if (req->flags & F_LONGER) {
+		pt_dump(rde_dump_prefix_upcall, req, req->prefix.af);
 	} else {
-		if ((pt = pt_get(&pref->prefix, pref->prefixlen)) != NULL)
-			rde_dump_upcall(pt, &pid);
+		if ((pt = pt_get(&req->prefix, req->prefixlen)) != NULL)
+			rde_dump_upcall(pt, req);
 	}
 }
 
@@ -2223,6 +2347,43 @@ peer_dump(u_int32_t id, u_int16_t afi, u_int8_t safi)
 			else
 				pt_dump(rde_up_dump_upcall, peer, AF_INET6);
 		}
+
+#if 0
+	/* do not send EOR for now, juniper apparently has a problem with it */
+	peer_send_eor(peer, afi, safi);
+#endif
+}
+
+/* End-of-RIB marker, draft-ietf-idr-restart-13.txt */
+void
+peer_send_eor(struct rde_peer *peer, u_int16_t afi, u_int16_t safi)
+{
+	if (afi == AFI_IPv4 && safi == SAFI_UNICAST) {
+		u_char null[4];
+
+		bzero(&null, 4);
+		if (imsg_compose(ibuf_se, IMSG_UPDATE, peer->conf.id,
+		    0, -1, &null, 4) == -1)
+			fatal("imsg_compose error in peer_send_eor");
+	} else {
+		u_int16_t	i;
+		u_char		buf[10];
+
+		i = 0;	/* v4 withdrawn len */
+		bcopy(&i, &buf[0], sizeof(i));
+		i = htons(6);	/* path attr len */
+		bcopy(&i, &buf[2], sizeof(i));
+		buf[4] = ATTR_OPTIONAL;
+		buf[5] = ATTR_MP_UNREACH_NLRI;
+		buf[6] = 3;	/* withdrawn len */
+		i = htons(afi);
+		bcopy(&i, &buf[7], sizeof(i));
+		buf[9] = safi;
+
+		if (imsg_compose(ibuf_se, IMSG_UPDATE, peer->conf.id,
+		    0, -1, &buf, 10) == -1)
+			fatal("imsg_compose error in peer_send_eor");
+	}
 }
 
 /*
@@ -2232,20 +2393,22 @@ void
 network_init(struct network_head *net_l)
 {
 	struct network	*n;
+	struct in_addr   id;
 
 	reloadtime = time(NULL);
 	bzero(&peerself, sizeof(peerself));
 	peerself.state = PEER_UP;
-	peerself.remote_bgpid = conf->bgpid;
+	peerself.remote_bgpid = ntohl(conf->bgpid);
+	id.s_addr = conf->bgpid;
 	peerself.conf.remote_as = conf->as;
 	snprintf(peerself.conf.descr, sizeof(peerself.conf.descr),
-	    "LOCAL AS %hu", conf->as);
+	    "LOCAL: ID %s", inet_ntoa(id));
 	bzero(&peerdynamic, sizeof(peerdynamic));
 	peerdynamic.state = PEER_UP;
-	peerdynamic.remote_bgpid = conf->bgpid;
+	peerdynamic.remote_bgpid = ntohl(conf->bgpid);
 	peerdynamic.conf.remote_as = conf->as;
 	snprintf(peerdynamic.conf.descr, sizeof(peerdynamic.conf.descr),
-	    "LOCAL AS %hu", conf->as);
+	    "LOCAL: ID %s", inet_ntoa(id));
 
 	while ((n = TAILQ_FIRST(net_l)) != NULL) {
 		TAILQ_REMOVE(net_l, n, entry);
@@ -2383,6 +2546,7 @@ rde_shutdown(void)
 	/* free filters */
 	while ((r = TAILQ_FIRST(rules_l)) != NULL) {
 		TAILQ_REMOVE(rules_l, r, entry);
+		filterset_free(&r->set);
 		free(r);
 	}
 	free(rules_l);

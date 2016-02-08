@@ -1,4 +1,4 @@
-/* $OpenBSD: exchange.c,v 1.125 2005/11/16 18:35:32 cloder Exp $	 */
+/* $OpenBSD: exchange.c,v 1.128 2006/09/01 00:24:06 mpf Exp $	 */
 /* $EOM: exchange.c,v 1.143 2000/12/04 00:02:25 angelos Exp $	 */
 
 /*
@@ -58,6 +58,7 @@
 #include "transport.h"
 #include "ipsec.h"
 #include "sa.h"
+#include "ui.h"
 #include "util.h"
 #include "key.h"
 #include "dpd.h"
@@ -189,7 +190,7 @@ exchange_script(struct exchange *exchange)
 
 /*
  * Validate the message MSG's contents wrt what payloads the exchange type
- * requires at this point in the dialogoue.  Return -1 if the validation fails,
+ * requires at this point in the dialogue.  Return -1 if the validation fails,
  * 0 if it succeeds and the script is not finished and 1 if it's ready.
  */
 static int
@@ -720,7 +721,7 @@ exchange_establish_transaction(struct exchange *exchange, void *arg, int fail)
 void
 exchange_establish_p1(struct transport *t, u_int8_t type, u_int32_t doi,
     char *name, void *args, void (*finalize)(struct exchange *, void *, int),
-    void *arg)
+    void *arg, int stayalive)
 {
 	struct exchange		*exchange;
 	struct message		*msg;
@@ -848,6 +849,9 @@ exchange_establish_p1(struct transport *t, u_int8_t type, u_int32_t doi,
 			return;
 		}
 		sa_reference(msg->isakmp_sa);
+
+		if (stayalive)
+			msg->isakmp_sa->flags |= SA_FLAG_STAYALIVE;
 	}
 	msg->extra = args;
 
@@ -1676,7 +1680,7 @@ exchange_establish_finalize(struct exchange *exchange, void *arg, int fail)
 	    exchange, arg, name ? name : "<unnamed>", fail));
 
 	if (!fail)
-		exchange_establish(name, 0, 0);
+		exchange_establish(name, 0, 0, 0);
 	free(name);
 }
 
@@ -1686,7 +1690,7 @@ exchange_establish_finalize(struct exchange *exchange, void *arg, int fail)
  */
 void
 exchange_establish(char *name, void (*finalize)(struct exchange *, void *,
-    int), void *arg)
+    int), void *arg, int stayalive)
 {
 	struct transport	*transport;
 	struct sa		*isakmp_sa;
@@ -1695,6 +1699,13 @@ exchange_establish(char *name, void (*finalize)(struct exchange *, void *,
 	char	*trpt, *peer;
 
 	phase = conf_get_num(name, "Phase", 0);
+
+	if (ui_daemon_passive) {
+		LOG_DBG((LOG_EXCHANGE, 40, "exchange_establish:"
+		    " returning in passive mode for exchange %s phase %d",
+		    name, phase));
+		return;
+	}
 
 	/*
 	 * First of all, never try to establish anything if another exchange
@@ -1721,7 +1732,8 @@ exchange_establish(char *name, void (*finalize)(struct exchange *, void *,
 			    "peer \"%s\" could not be created", trpt, name);
 			return;
 		}
-		exchange_establish_p1(transport, 0, 0, name, 0, finalize, arg);
+		exchange_establish_p1(transport, 0, 0, name, 0, finalize, arg,
+		    stayalive);
 		break;
 
 	case 2:
@@ -1751,11 +1763,11 @@ exchange_establish(char *name, void (*finalize)(struct exchange *, void *,
 			 * original finalize routine was. As a result, if an
 			 * exchange does not manage to get through, there may
 			 * be application-specific information that won't get
-			 * cleaned up, since no error signalling will be done.
+			 * cleaned up, since no error signaling will be done.
 			 * This is the case with dynamic SAs and PFKEY.
 			 */
 			exchange_establish(peer, exchange_establish_finalize,
-			    name);
+			    name, 0);
 			exchange = exchange_lookup_by_name(peer, 1);
 			/*
 			 * If the exchange was correctly initialized, add the

@@ -1,4 +1,4 @@
-/*	$OpenBSD: dpd.c,v 1.14 2005/10/26 20:10:48 markus Exp $	*/
+/*	$OpenBSD: dpd.c,v 1.16 2006/07/24 11:45:44 ho Exp $	*/
 
 /*
  * Copyright (c) 2004 Håkan Olsson.  All rights reserved.
@@ -250,7 +250,7 @@ dpd_find_sa(struct sa *sa, void *v_sa)
 	struct sa	*isakmp_sa = v_sa;
 
 	if (!isakmp_sa->id_i || !isakmp_sa->id_r)
-		return (0);
+		return 0;
 	return (sa->phase == 2 && (sa->flags & SA_FLAG_READY) &&
 	    memcmp(sa->id_i, isakmp_sa->id_i, sa->id_i_len) == 0 &&
 	    memcmp(sa->id_r, isakmp_sa->id_r, sa->id_r_len) == 0);
@@ -347,7 +347,7 @@ dpd_event(void *v_sa)
 
 /*
  * Called by the timer. If this function is called, it means we did not
- * recieve any R_U_THERE_ACK confirmation from the other peer.
+ * received any R_U_THERE_ACK confirmation from the other peer.
  */
 static void
 dpd_check_event(void *v_sa)

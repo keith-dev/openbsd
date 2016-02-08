@@ -1,4 +1,4 @@
-/*	$OpenBSD: file.c,v 1.50 2005/12/20 06:17:36 kjell Exp $	*/
+/*	$OpenBSD: file.c,v 1.62 2006/07/25 08:27:09 kjell Exp $	*/
 
 /* This file is in the public domain. */
 
@@ -6,9 +6,9 @@
  *	File commands.
  */
 
-#include "def.h"
-
 #include <libgen.h>
+
+#include "def.h"
 
 /*
  * Insert a file into the current buffer.  Real easy - just call the
@@ -20,12 +20,15 @@ fileinsert(int f, int n)
 {
 	char	 fname[NFILEN], *bufp, *adjf;
 
-	bufp = eread("Insert file: ", fname, NFILEN, EFNEW | EFCR | EFFILE);
+	if (getbufcwd(fname, sizeof(fname)) != TRUE)
+		fname[0] = '\0';
+	bufp = eread("Insert file: ", fname, NFILEN,
+	    EFNEW | EFCR | EFFILE | EFDEF);
 	if (bufp == NULL)
 		return (ABORT);
 	else if (bufp[0] == '\0')
 		return (FALSE);
-	adjf = adjustname(bufp);
+	adjf = adjustname(bufp, TRUE);
 	if (adjf == NULL)
 		return (FALSE);
 	return (insertfile(adjf, NULL, FALSE));
@@ -42,32 +45,24 @@ int
 filevisit(int f, int n)
 {
 	struct buffer	*bp;
-	char	 fname[NFILEN], *bufp, *adjf, *slash;
+	char	 fname[NFILEN], *bufp, *adjf;
 	int	 status;
 
-	if (curbp->b_fname && curbp->b_fname[0] != '\0') {
-		if (strlcpy(fname, curbp->b_fname, sizeof(fname)) >= sizeof(fname))
-			return (FALSE);
-		if ((slash = strrchr(fname, '/')) != NULL) {
-			*(slash + 1) = '\0';
-		}
-	}
-	else
+	if (getbufcwd(fname, sizeof(fname)) != TRUE)
 		fname[0] = '\0';
-
 	bufp = eread("Find file: ", fname, NFILEN,
 	    EFNEW | EFCR | EFFILE | EFDEF);
 	if (bufp == NULL)
 		return (ABORT);
 	else if (bufp[0] == '\0')
 		return (FALSE);
-	adjf = adjustname(fname);
+	adjf = adjustname(fname, TRUE);
 	if (adjf == NULL)
 		return (FALSE);
 	if ((bp = findbuffer(adjf)) == NULL)
 		return (FALSE);
 	curbp = bp;
-	if (showbuffer(bp, curwp, WFHARD) != TRUE)
+	if (showbuffer(bp, curwp, WFFULL) != TRUE)
 		return (FALSE);
 	if (bp->b_fname[0] == '\0') {
 		if ((status = readin(adjf)) != TRUE)
@@ -88,18 +83,11 @@ int
 filevisitalt(int f, int n)
 {
 	struct buffer	*bp;
-	char	 fname[NFILEN], *bufp, *adjf, *slash;
+	char	 fname[NFILEN], *bufp, *adjf;
 	int	 status;
 
-	if (curbp->b_fname && curbp->b_fname[0] != '\0') {
-		if (strlcpy(fname, curbp->b_fname, sizeof(fname)) >= sizeof(fname))
-			return (FALSE);
-		if ((slash = strrchr(fname, '/')) != NULL) {
-			*(slash + 1) = '\0';
-		}
-	} else
+	if (getbufcwd(fname, sizeof(fname)) != TRUE)
 		fname[0] = '\0';
-
 	bufp = eread("Find alternate file: ", fname, NFILEN,
 	    EFNEW | EFCR | EFFILE | EFDEF);
 	if (bufp == NULL)
@@ -111,13 +99,13 @@ filevisitalt(int f, int n)
 	if (status == ABORT || status == FALSE)
 		return (ABORT);
 
-	adjf = adjustname(fname);
+	adjf = adjustname(fname, TRUE);
 	if (adjf == NULL)
 		return (FALSE);
 	if ((bp = findbuffer(adjf)) == NULL)
 		return (FALSE);
 	curbp = bp;
-	if (showbuffer(bp, curwp, WFHARD) != TRUE)
+	if (showbuffer(bp, curwp, WFFULL) != TRUE)
 		return (FALSE);
 	if (bp->b_fname[0] == '\0') {
 		if ((status = readin(adjf)) != TRUE)
@@ -152,16 +140,20 @@ poptofile(int f, int n)
 	char	 fname[NFILEN], *adjf, *bufp;
 	int	 status;
 
+	if (getbufcwd(fname, sizeof(fname)) != TRUE)
+		fname[0] = '\0';
 	if ((bufp = eread("Find file in other window: ", fname, NFILEN,
-	    EFNEW | EFCR | EFFILE)) == NULL)
+	    EFNEW | EFCR | EFFILE | EFDEF)) == NULL)
 		return (ABORT);
 	else if (bufp[0] == '\0')
 		return (FALSE);
-	adjf = adjustname(fname);
+	adjf = adjustname(fname, TRUE);
 	if (adjf == NULL)
 		return (FALSE);
 	if ((bp = findbuffer(adjf)) == NULL)
 		return (FALSE);
+	if (bp == curbp)
+		return (splitwind(f, n));
 	if ((wp = popbuf(bp)) == NULL)
 		return (FALSE);
 	curbp = bp;
@@ -181,9 +173,8 @@ poptofile(int f, int n)
 struct buffer *
 findbuffer(char *fn)
 {
-	struct buffer		*bp;
-	char		 bname[NBUFN], fname[NBUFN];
-	unsigned int	 count, remain, i;
+	struct buffer	*bp;
+	char		bname[NBUFN], fname[NBUFN];
 
 	if (strlcpy(fname, fn, sizeof(fname)) >= sizeof(fname)) {
 		ewprintf("filename too long");
@@ -194,14 +185,12 @@ findbuffer(char *fn)
 		if (strcmp(bp->b_fname, fname) == 0)
 			return (bp);
 	}
-	i = strlcpy(bname, basename(fname), sizeof(bname));
-	if (i >= sizeof(bname))
+	/* Not found. Create a new one, adjusting name first */
+	if (augbname(bname, fname, sizeof(bname)) == FALSE)
 		return (NULL);
-	remain = sizeof(bname) - i;
-	for (count = 2; bfind(bname, FALSE) != NULL; count++)
-		snprintf(&bname[i], remain, "<%d>", count);
 
-	return (bfind(bname, TRUE));
+	bp = bfind(bname, TRUE);
+	return (bp);
 }
 
 /*
@@ -220,9 +209,20 @@ readin(char *fname)
 	/* might be old */
 	if (bclear(curbp) != TRUE)
 		return (TRUE);
+	/* Clear readonly. May be set by autoexec path */
+	curbp->b_flag &=~ BFREADONLY;
 	if ((status = insertfile(fname, fname, TRUE)) != TRUE) {
 		ewprintf("File is not readable: %s", fname);
 		return (FALSE);
+	}
+
+	for (wp = wheadp; wp != NULL; wp = wp->w_wndp) {
+		if (wp->w_bufp == curbp) {
+			wp->w_dotp = wp->w_linep = bfirstlp(curbp);
+			wp->w_doto = 0;
+			wp->w_markp = NULL;
+			wp->w_marko = 0;
+		}
 	}
 
 	/*
@@ -236,14 +236,6 @@ readin(char *fname)
 
 	/* no change */
 	curbp->b_flag &= ~BFCHG;
-	for (wp = wheadp; wp != NULL; wp = wp->w_wndp) {
-		if (wp->w_bufp == curbp) {
-			wp->w_dotp = wp->w_linep = lforw(curbp->b_linep);
-			wp->w_doto = 0;
-			wp->w_markp = NULL;
-			wp->w_marko = 0;
-		}
-	}
 
 	/*
 	 * We need to set the READONLY flag after we insert the file,
@@ -255,12 +247,11 @@ readin(char *fname)
 		ro = TRUE;
 	if (ro == TRUE)
 		curbp->b_flag |= BFREADONLY;
-	else
-		curbp->b_flag &=~ BFREADONLY;
 
 	if (startrow)
 		gotoline(FFARG, startrow);
 
+	undo_add_modified();
 	return (status);
 }
 
@@ -292,8 +283,9 @@ insertfile(char *fname, char *newname, int replacebuf)
 	struct line	*lp1, *lp2;
 	struct line	*olp;			/* line we started at */
 	struct mgwin	*wp;
-	int	 nbytes, s, nline, siz, x = -1, x2;
+	int	 nbytes, s, nline = 0, siz, x = -1, x2;
 	int	 opos;			/* offset we started at */
+	int	 oline;			/* original line number */
 
 	if (replacebuf == TRUE)
 		x = undo_enable(FALSE);
@@ -308,8 +300,12 @@ insertfile(char *fname, char *newname, int replacebuf)
 
 	/* cheap */
 	bp = curbp;
-	if (newname != NULL)
-		(void)strlcpy(bp->b_fname, newname, sizeof bp->b_fname);
+	if (newname != NULL) {
+		(void)strlcpy(bp->b_fname, newname, sizeof(bp->b_fname));
+		(void)strlcpy(bp->b_cwd, dirname(newname),
+		    sizeof(bp->b_cwd));
+		(void)strlcat(bp->b_cwd, "/", sizeof(bp->b_cwd));
+	}
 
 	/* hard file open */
 	if ((s = ffropen(fname, (replacebuf == TRUE) ? bp : NULL)) == FIOERR)
@@ -333,15 +329,19 @@ insertfile(char *fname, char *newname, int replacebuf)
 			return (FALSE);
 		undo_enable(x);
 		curbp = bp;
-		return (showbuffer(bp, curwp, WFHARD | WFMODE));
+		return (showbuffer(bp, curwp, WFFULL | WFMODE));
+	} else {
+		(void)strlcpy(bp->b_cwd, dirname(fname), sizeof(bp->b_cwd));
+		(void)strlcat(bp->b_cwd, "/", sizeof(bp->b_cwd));
 	}
 	opos = curwp->w_doto;
 
-	/* open a new line, at point, and start inserting after it */
+	/* Open a new line, at point, and start inserting after it. */
 	x2 = undo_enable(FALSE);
+	oline = curwp->w_dotline;
 	(void)lnewline();
 	olp = lback(curwp->w_dotp);
-	if (olp == curbp->b_linep) {
+	if (olp == curbp->b_headp) {
 		/* if at end of buffer, create a line to insert before */
 		(void)lnewline();
 		curwp->w_dotp = lback(curwp->w_dotp);
@@ -356,10 +356,10 @@ doneread:
 		siz += nbytes + 1;
 		switch (s) {
 		case FIOSUC:
-			++nline;
 			/* FALLTHRU */
 		case FIOEOF:
 			/* the last line of the file */
+			++nline;
 			if ((lp1 = lalloc(nbytes)) == NULL) {
 				/* keep message on the display */
 				s = FIOERR;
@@ -381,7 +381,7 @@ doneread:
 
 				newsize = linesize * 2;
 				if (newsize < 0 ||
-				    (cp = malloc((unsigned)newsize)) == NULL) {
+				    (cp = malloc(newsize)) == NULL) {
 					ewprintf("Could not allocate %d bytes",
 					    newsize);
 						s = FIOERR;
@@ -405,7 +405,7 @@ doneread:
 		}
 	}
 endoffile:
-	undo_add_insert(olp, opos, siz-1);
+	undo_add_insert(olp, opos, siz - 1);
 
 	/* ignore errors */
 	ffclose(NULL);
@@ -422,7 +422,8 @@ endoffile:
 	(void)ldelnewline();
 	curwp->w_dotp = olp;
 	curwp->w_doto = opos;
-	if (olp == curbp->b_linep)
+	curwp->w_dotline = oline;
+	if (olp == curbp->b_headp)
 		curwp->w_dotp = lforw(olp);
 	if (newname != NULL)
 		bp->b_flag |= BFCHG | BFBAK;	/* Need a backup.	 */
@@ -435,7 +436,7 @@ endoffile:
 	 * pointers in other windows correctly if they are also at the end of
 	 * buffer.
 	 */
-	lp1 = bp->b_linep;
+	lp1 = bp->b_headp;
 	if (curwp->w_markp == lp1) {
 		lp2 = curwp->w_dotp;
 	} else {
@@ -456,6 +457,7 @@ out:		lp2 = NULL;
 			}
 		}
 	}
+	bp->b_lines += nline;
 cleanup:
 	undo_enable(x);
 
@@ -474,29 +476,32 @@ int
 filewrite(int f, int n)
 {
 	int	 s;
-	char	 fname[NFILEN];
-	char	*adjfname, *p, *bufp;
+	char	 fname[NFILEN], bn[NBUFN];
+	char	*adjfname, *bufp;
 
+	if (getbufcwd(fname, sizeof(fname)) != TRUE)
+		fname[0] = '\0';
 	if ((bufp = eread("Write file: ", fname, NFILEN,
-	    EFNEW | EFCR | EFFILE)) == NULL)
+	    EFDEF | EFNEW | EFCR | EFFILE)) == NULL)
 		return (ABORT);
 	else if (bufp[0] == '\0')
 		return (FALSE);
 
-	adjfname = adjustname(fname);
+	adjfname = adjustname(fname, TRUE);
 	if (adjfname == NULL)
 		return (FALSE);
 	/* old attributes are no longer current */
 	bzero(&curbp->b_fi, sizeof(curbp->b_fi));
 	if ((s = writeout(curbp, adjfname)) == TRUE) {
-		(void)strlcpy(curbp->b_fname, adjfname, sizeof curbp->b_fname);
-		p = strrchr(curbp->b_fname, '/');
-		if (p)
-			p++;
-		else
-			p = curbp->b_fname;
+		(void)strlcpy(curbp->b_fname, adjfname, sizeof(curbp->b_fname));
+		if (getbufcwd(curbp->b_cwd, sizeof(curbp->b_cwd)) != TRUE)
+			(void)strlcpy(curbp->b_cwd, "/", sizeof(curbp->b_cwd));
 		free(curbp->b_bname);
-		curbp->b_bname = strdup(p);
+		if (augbname(bn, basename(curbp->b_fname), sizeof(bn))
+		    == FALSE)
+			return (FALSE);
+		if ((curbp->b_bname = strdup(bn)) == NULL)
+			return (FALSE);
 		curbp->b_flag &= ~(BFBAK | BFCHG);
 		upmodes(curbp);
 	}
@@ -564,8 +569,7 @@ buffsave(struct buffer *bp)
  * Since we don't have variables (we probably should) this is a command
  * processor for changing the value of the make backup flag.  If no argument
  * is given, sets makebackup to true, so backups are made.  If an argument is
- * given, no backup files are made when saving a new version of a file. Only
- * used when BACKUP is #defined.
+ * given, no backup files are made when saving a new version of a file.
  */
 /* ARGSUSED */
 int

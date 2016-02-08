@@ -1,4 +1,4 @@
-/*	$OpenBSD: window.c,v 1.21 2006/02/25 14:40:16 otto Exp $	*/
+/*	$OpenBSD: window.c,v 1.25 2006/07/25 08:22:32 kjell Exp $	*/
 
 /* This file is in the public domain. */
 
@@ -23,8 +23,9 @@ new_window(struct buffer *bp)
 	wp->w_markp = NULL;
 	wp->w_marko = 0;
 	wp->w_flag = 0;
-	wp->w_force = 0;
+	wp->w_frame = 0;
 	wp->w_wrapline = NULL;
+	wp->w_dotline = wp->w_markline = 1;
 	if (bp)
 		bp->b_nwnd++;
 	return (wp);
@@ -43,11 +44,11 @@ int
 reposition(int f, int n)
 {
 #ifndef GOSREC
-	curwp->w_force = (f & FFARG) ? (n >= 0 ? n + 1 : n) : 0;
+	curwp->w_frame = (f & FFARG) ? (n >= 0 ? n + 1 : n) : 0;
 #else /* !GOSREC */
-	curwp->w_force = n;
+	curwp->w_frame = n;
 #endif /* !GOSREC */
-	curwp->w_flag |= WFFORCE;
+	curwp->w_flag |= WFFRAME;
 	sgarbf = TRUE;
 	return (TRUE);
 }
@@ -182,7 +183,7 @@ onlywind(int f, int n)
 	}
 	lp = curwp->w_linep;
 	i = curwp->w_toprow;
-	while (i != 0 && lback(lp) != curbp->b_linep) {
+	while (i != 0 && lback(lp) != curbp->b_headp) {
 		--i;
 		lp = lback(lp);
 	}
@@ -191,7 +192,7 @@ onlywind(int f, int n)
 	/* 2 = mode, echo */
 	curwp->w_ntrows = nrow - 2;
 	curwp->w_linep = lp;
-	curwp->w_flag |= WFMODE | WFHARD;
+	curwp->w_flag |= WFMODE | WFFULL;
 	return (TRUE);
 }
 
@@ -223,6 +224,8 @@ splitwind(int f, int n)
 	wp->w_doto = curwp->w_doto;
 	wp->w_markp = curwp->w_markp;
 	wp->w_marko = curwp->w_marko;
+	wp->w_dotline = curwp->w_dotline;
+	wp->w_markline = curwp->w_markline;
 
 	/* figure out which half of the screen we're in */
 	ntru = (curwp->w_ntrows - 1) / 2;	/* Upper size */
@@ -272,8 +275,8 @@ splitwind(int f, int n)
 	curwp->w_linep = lp;
 	wp->w_linep = lp;
 
-	curwp->w_flag |= WFMODE | WFHARD;
-	wp->w_flag |= WFMODE | WFHARD;
+	curwp->w_flag |= WFMODE | WFFULL;
+	wp->w_flag |= WFMODE | WFFULL;
 	return (TRUE);
 }
 
@@ -310,22 +313,22 @@ enlargewind(int f, int n)
 	/* shrink below */
 	if (curwp->w_wndp == adjwp) {
 		lp = adjwp->w_linep;
-		for (i = 0; i < n && lp != adjwp->w_bufp->b_linep; ++i)
+		for (i = 0; i < n && lp != adjwp->w_bufp->b_headp; ++i)
 			lp = lforw(lp);
 		adjwp->w_linep = lp;
 		adjwp->w_toprow += n;
 	/* shrink above */
 	} else {
 		lp = curwp->w_linep;
-		for (i = 0; i < n && lback(lp) != curbp->b_linep; ++i)
+		for (i = 0; i < n && lback(lp) != curbp->b_headp; ++i)
 			lp = lback(lp);
 		curwp->w_linep = lp;
 		curwp->w_toprow -= n;
 	}
 	curwp->w_ntrows += n;
 	adjwp->w_ntrows -= n;
-	curwp->w_flag |= WFMODE | WFHARD;
-	adjwp->w_flag |= WFMODE | WFHARD;
+	curwp->w_flag |= WFMODE | WFFULL;
+	adjwp->w_flag |= WFMODE | WFFULL;
 	return (TRUE);
 }
 
@@ -363,22 +366,22 @@ shrinkwind(int f, int n)
 	/* grow below */
 	if (curwp->w_wndp == adjwp) {
 		lp = adjwp->w_linep;
-		for (i = 0; i < n && lback(lp) != adjwp->w_bufp->b_linep; ++i)
+		for (i = 0; i < n && lback(lp) != adjwp->w_bufp->b_headp; ++i)
 			lp = lback(lp);
 		adjwp->w_linep = lp;
 		adjwp->w_toprow -= n;
 	/* grow above */
 	} else {
 		lp = curwp->w_linep;
-		for (i = 0; i < n && lp != curbp->b_linep; ++i)
+		for (i = 0; i < n && lp != curbp->b_headp; ++i)
 			lp = lforw(lp);
 		curwp->w_linep = lp;
 		curwp->w_toprow += n;
 	}
 	curwp->w_ntrows -= n;
 	adjwp->w_ntrows += n;
-	curwp->w_flag |= WFMODE | WFHARD;
-	adjwp->w_flag |= WFMODE | WFHARD;
+	curwp->w_flag |= WFMODE | WFFULL;
+	adjwp->w_flag |= WFMODE | WFFULL;
 	return (TRUE);
 }
 

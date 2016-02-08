@@ -1,4 +1,4 @@
-/*	$OpenBSD: rlog.c,v 1.23 2006/01/25 08:02:26 xsa Exp $	*/
+/*	$OpenBSD: rlog.c,v 1.55 2006/05/27 05:49:14 ray Exp $	*/
 /*
  * Copyright (c) 2005 Joris Vink <joris@openbsd.org>
  * Copyright (c) 2005, 2006 Xavier Santolaria <xsa@openbsd.org>
@@ -30,37 +30,40 @@
 #include "rcsprog.h"
 #include "diff.h"
 
-static int	  rlog_file(const char *, const char *);
-static void	  rlog_rev_print(struct rcs_delta *);
-static char	**rlog_strsplit(char *, const char *);
+static void	rlog_file(const char *, RCSFILE *);
+static void	rlog_rev_print(struct rcs_delta *);
 
+#define RLOG_OPTSTRING	"hLl::NqRr::s:TtVw::x::z::"
 #define REVSEP		"----------------------------"
 #define REVEND \
  "============================================================================="
 
-static int hflag, Lflag, lflag, tflag, Nflag, wflag;
+static int hflag, Lflag, lflag, rflag, tflag, Nflag, wflag;
 static char *llist = NULL;
 static char *slist = NULL;
 static char *wlist = NULL;
-static RCSFILE *file;
+static char *revisions = NULL;
 
 void
 rlog_usage(void)
 {
 	fprintf(stderr,
-	    "usage: rlog [-hLNqRTtV] [-l[lockers]] [-sstates] [-w[logins]]\n"
-	    "            [-xsuffixes] file ...\n");
+	    "usage: rlog [-bhLNqRtV] [-ddates] [-l[lockers]] [-r[revs]]\n"
+	    "            [-sstates] [-w[logins]] [-xsuffixes]\n"
+	    "            [-ztz] file ...\n");
 }
 
 int
 rlog_main(int argc, char **argv)
 {
+	RCSFILE *file;
 	int Rflag;
-	int i, ch;
+	int i, ch, fd;
 	char fpath[MAXPATHLEN];
 
-	hflag = Rflag = 0;
-	while ((ch = rcs_getopt(argc, argv, "hLl::NqRs:TtVw::x:")) != -1) {
+	rcsnum_flags |= RCSNUM_NO_MAGIC;
+	hflag = Rflag = rflag = 0;
+	while ((ch = rcs_getopt(argc, argv, RLOG_OPTSTRING)) != -1) {
 		switch (ch) {
 		case 'h':
 			hflag = 1;
@@ -76,10 +79,16 @@ rlog_main(int argc, char **argv)
 			Nflag = 1;
 			break;
 		case 'q':
-			verbose = 0;
+			/*
+			 * kept for compatibility
+			 */
 			break;
 		case 'R':
 			Rflag = 1;
+			break;
+		case 'r':
+			rflag = 1;
+			revisions = rcs_optarg;
 			break;
 		case 's':
 			slist = rcs_optarg;
@@ -100,7 +109,11 @@ rlog_main(int argc, char **argv)
 			wlist = rcs_optarg;
 			break;
 		case 'x':
-			rcs_suffixes = rcs_optarg;
+			/* Use blank extension if none given. */
+			rcs_suffixes = rcs_optarg ? rcs_optarg : "";
+			break;
+		case 'z':
+			timezone_flag = rcs_optarg;
 			break;
 		default:
 			(usage());
@@ -112,24 +125,28 @@ rlog_main(int argc, char **argv)
 	argv += rcs_optind;
 
 	if (argc == 0) {
-		cvs_log(LP_ERR, "no input file");
+		warnx("no input file");
 		(usage)();
 		exit(1);
 	}
 
-	if ((hflag == 1) && (tflag == 1)) {
-		cvs_log(LP_WARN, "warning: -t overrides -h.");
+	if (hflag == 1 && tflag == 1) {
+		warnx("warning: -t overrides -h.");
 		hflag = 0;
 	}
 
 	for (i = 0; i < argc; i++) {
-		if (rcs_statfile(argv[i], fpath, sizeof(fpath)) < 0)
+		fd = rcs_choosefile(argv[i], fpath, sizeof(fpath));
+		if (fd < 0) {
+			warnx("%s", fpath);
+			continue;
+		}
+
+		if ((file = rcs_open(fpath, fd,
+		    RCS_READ|RCS_PARSE_FULLY)) == NULL)
 			continue;
 
-		if ((file = rcs_open(fpath, RCS_READ|RCS_PARSE_FULLY)) == NULL)
-			continue;
-
-		if ((Lflag == 1) && (TAILQ_EMPTY(&(file->rf_locks)))) {
+		if (Lflag == 1 && TAILQ_EMPTY(&(file->rf_locks))) {
 			rcs_close(file);
 			continue;
 		}
@@ -140,7 +157,7 @@ rlog_main(int argc, char **argv)
 			continue;
 		}
 
-		rlog_file(argv[i], fpath);
+		rlog_file(argv[i], file);
 
 		rcs_close(file);
 	}
@@ -148,17 +165,33 @@ rlog_main(int argc, char **argv)
 	return (0);
 }
 
-static int
-rlog_file(const char *fname, const char *fpath)
+static void
+rlog_file(const char *fname, RCSFILE *file)
 {
 	char numb[64];
+	u_int nrev;
 	struct rcs_sym *sym;
 	struct rcs_access *acp;
 	struct rcs_delta *rdp;
 	struct rcs_lock *lkp;
+	char *workfile, *p;
 
-	printf("\nRCS file: %s", fpath);
-	printf("\nWorking file: %s", fname);
+	if (rflag == 1)
+		nrev = rcs_rev_select(file, revisions);
+	else
+		nrev = file->rf_ndelta;
+
+	if ((workfile = basename(fname)) == NULL)
+		err(1, "basename");
+
+	/*
+	 * In case they specified 'foo,v' as argument.
+	 */
+	if ((p = strrchr(workfile, ',')) != NULL)
+		*p = '\0';
+
+	printf("\nRCS file: %s", file->rf_path);
+	printf("\nWorking file: %s", workfile);
 	printf("\nhead:");
 	if (file->rf_head != NULL)
 		printf(" %s", rcsnum_tostr(file->rf_head, numb, sizeof(numb)));
@@ -190,82 +223,92 @@ rlog_file(const char *fname, const char *fpath)
 
 	printf("total revisions: %u", file->rf_ndelta);
 
-	if ((hflag == 0) && (tflag == 0))
-		printf(";\tselected revisions:"); /* XXX */
+	if (file->rf_head != NULL && hflag == 0 && tflag == 0)
+		printf(";\tselected revisions: %u", nrev);
 
 	printf("\n");
 
 
-	if ((hflag == 0) || (tflag == 1))
+	if (hflag == 0 || tflag == 1)
 		printf("description:\n%s", file->rf_desc);
 
-	if ((hflag == 0) && (tflag == 0)) {
-		TAILQ_FOREACH(rdp, &(file->rf_delta), rd_list)
-			rlog_rev_print(rdp);
+	if (hflag == 0 && tflag == 0 &&
+	    !(lflag == 1 && TAILQ_EMPTY(&file->rf_locks))) {
+		TAILQ_FOREACH(rdp, &(file->rf_delta), rd_list) {
+			/*
+			 * if selections are enabled verify that entry is
+			 * selected.
+			 */
+			if (rflag == 0 || (rdp->rd_flags & RCS_RD_SELECT))
+				rlog_rev_print(rdp);
+		}
 	}
 
 	printf("%s\n", REVEND);
-	return (0);
 }
 
 static void
 rlog_rev_print(struct rcs_delta *rdp)
 {
 	int i, found;
-	char *author, numb[64];
-	char **largv, **sargv, **wargv;
+	struct tm t;
+	char *author, numb[64], *fmt, timeb[64];
+	struct rcs_argvector *largv, *sargv, *wargv;
 
 	i = found = 0;
 	author = NULL;
 
 	/* -l[lockers] */
 	if (lflag == 1) {
-		/* if no locks at all, abort. */
-		if (TAILQ_EMPTY(&(file->rf_locks)))
-			return;
-		else
-			if (rdp->rd_locker != NULL)
-				found++;
+		if (rdp->rd_locker != NULL)
+			found++;
 
 		if (llist != NULL) {
 			/* if locker is empty, no need to go further. */
 			if (rdp->rd_locker == NULL)
 				return;
-			largv = rlog_strsplit(llist, ",");
-			for (i = 0; largv[i] != NULL; i++) {
-				if (strcmp(rdp->rd_locker, largv[i]) == 0) {
+			largv = rcs_strsplit(llist, ",");
+			for (i = 0; largv->argv[i] != NULL; i++) {
+				if (strcmp(rdp->rd_locker, largv->argv[i])
+				    == 0) {
 					found++;
 					break;
 				}
 				found = 0;
 			}
+			rcs_argv_destroy(largv);
 		}
 	}
+
 	/* -sstates */
 	if (slist != NULL) {
-		sargv = rlog_strsplit(slist, ",");
-		for (i = 0; sargv[i] != NULL; i++) {
-			if (strcmp(rdp->rd_state, sargv[i]) == 0) {
+		sargv = rcs_strsplit(slist, ",");
+		for (i = 0; sargv->argv[i] != NULL; i++) {
+			if (strcmp(rdp->rd_state, sargv->argv[i]) == 0) {
 				found++;
 				break;
 			}
 			found = 0;
 		}
+		rcs_argv_destroy(sargv);
 	}
+
 	/* -w[logins] */
 	if (wflag == 1) {
 		if (wlist != NULL) {
-			wargv = rlog_strsplit(wlist, ",");
-			for (i = 0; wargv[i] != NULL; i++) {
-				if (strcmp(rdp->rd_author, wargv[i]) == 0) {
+			wargv = rcs_strsplit(wlist, ",");
+			for (i = 0; wargv->argv[i] != NULL; i++) {
+				if (strcmp(rdp->rd_author, wargv->argv[i])
+				    == 0) {
 					found++;
 					break;
 				}
 				found = 0;
 			}
+			rcs_argv_destroy(wargv);
 		} else {
 			if ((author = getlogin()) == NULL)
-				fatal("getlogin failed");
+				err(1, "getlogin");
 
 			if (strcmp(rdp->rd_author, author) == 0)
 				found++;
@@ -273,11 +316,11 @@ rlog_rev_print(struct rcs_delta *rdp)
 	}
 
 	/* XXX dirty... */
-	if (((((slist != NULL) && (wflag == 1)) ||
-	    ((slist != NULL) && (lflag == 1)) ||
-	    ((lflag == 1) && (wflag == 1))) && (found < 2)) ||
-	    ((((slist != NULL) && (lflag == 1) && (wflag == 1)) ||
-	    ((slist != NULL) || (lflag == 1) || (wflag == 1))) && (found == 0)))
+	if ((((slist != NULL && wflag == 1) ||
+	    (slist != NULL && lflag == 1) ||
+	    (lflag == 1 && wflag == 1)) && found < 2) ||
+	    (((slist != NULL && lflag == 1 && wflag == 1) ||
+	    (slist != NULL || lflag == 1 || wflag == 1)) && found == 0))
 		return;
 
 	printf("%s\n", REVSEP);
@@ -287,38 +330,19 @@ rlog_rev_print(struct rcs_delta *rdp)
 	printf("revision %s", numb);
 	if (rdp->rd_locker != NULL)
 		printf("\tlocked by: %s;", rdp->rd_locker);
-	printf("\ndate: %d/%02d/%02d %02d:%02d:%02d;"
-	    "  author: %s;  state: %s;\n",
-	    rdp->rd_date.tm_year + 1900,
-	    rdp->rd_date.tm_mon + 1,
-	    rdp->rd_date.tm_mday, rdp->rd_date.tm_hour,
-	    rdp->rd_date.tm_min, rdp->rd_date.tm_sec,
-	    rdp->rd_author, rdp->rd_state);
-	printf("%s", rdp->rd_log);
-}
 
-/*
- * rlog_strsplit()
- *
- * Split a string <str> of <sep>-separated values and allocate
- * an argument vector for the values found.
- */
-static char **
-rlog_strsplit(char *str, const char *sep)
-{
-	char **argv, **nargv;
-	char *cp, *p;
-	int i = 0;
-
-	cp = xstrdup(str);
-	argv = (char **)xmalloc((i+1) * sizeof(char *));
-
-	while ((p = strsep(&cp, sep)) != NULL) {
-		argv[i++] = p;
-		nargv = (char **)xrealloc((void *)argv, (i+1) * sizeof(char *));
-		argv = nargv;
+	if (timezone_flag != NULL) {
+		rcs_set_tz(timezone_flag, rdp, &t);
+		fmt = "%Y-%m-%d %H:%M:%S%z";
+	} else {
+		t = rdp->rd_date;
+		fmt = "%Y/%m/%d %H:%M:%S";
 	}
-	argv[i] = NULL;
 
-	return (argv);
+	strftime(timeb, sizeof(timeb), fmt, &t);
+
+	printf("\ndate: %s;  author: %s;  state: %s;\n", timeb, rdp->rd_author,
+	    rdp->rd_state);
+
+	printf("%s", rdp->rd_log);
 }

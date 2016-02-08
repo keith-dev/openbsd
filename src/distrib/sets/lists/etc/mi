@@ -10,6 +10,7 @@
 ./etc/bgpd.conf
 ./etc/ccd.conf
 ./etc/changelist
+./etc/chio.conf
 ./etc/csh.cshrc
 ./etc/csh.login
 ./etc/csh.logout
@@ -19,6 +20,7 @@
 ./etc/dhcpd.interfaces
 ./etc/disktab
 ./etc/dumpdates
+./etc/dvmrpd.conf
 ./etc/exports
 ./etc/fbtab
 ./etc/ftpchroot

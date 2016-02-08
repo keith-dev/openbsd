@@ -1,4 +1,4 @@
-/* $OpenBSD: bioctl.c,v 1.39 2005/08/23 23:20:23 deraadt Exp $       */
+/* $OpenBSD: bioctl.c,v 1.48 2006/08/28 12:36:08 mickey Exp $       */
 
 /*
  * Copyright (c) 2004, 2005 Marco Peereboom
@@ -212,6 +212,7 @@ void
 bio_inq(char *name)
 {
 	char *status, size[64], scsiname[16], volname[32];
+	char percent[10], seconds[20];
 	int rv, i, d, volheader, hotspare, unused;
 	char encname[16], serial[32];
 	struct bioc_disk bd;
@@ -231,11 +232,20 @@ bio_inq(char *name)
 		return;
 	}
 
+	if (debug)
+		printf("bio_inq { %p, %s, %d, %d }\n",
+		    bi.bi_cookie,
+		    bi.bi_dev,
+		    bi.bi_novol,
+		    bi.bi_nodisk);
+
 	volheader = 0;
 	for (i = 0; i < bi.bi_novol; i++) {
 		memset(&bv, 0, sizeof(bv));
 		bv.bv_cookie = bl.bl_cookie;
 		bv.bv_volid = i;
+		bv.bv_percent = -1;
+		bv.bv_seconds = 0;
 
 		rv = ioctl(devh, BIOCVOL, &bv);
 		if (rv == -1) {
@@ -248,10 +258,18 @@ bio_inq(char *name)
 
 		if (!volheader) {
 			volheader = 1;
-			printf("%-7s %-10s %-14s %-8s\n",
+			printf("%-7s %-10s %14s %-8s\n",
 			    "Volume", "Status", "Size", "Device");
 		}
 
+		percent[0] = '\0';
+		seconds[0] = '\0';
+		if (bv.bv_percent != -1)
+			snprintf(percent, sizeof percent,
+			    " %d%% done", bv.bv_percent);
+		if (bv.bv_seconds)
+			snprintf(seconds, sizeof seconds,
+			    " %u seconds", bv.bv_seconds);
 		switch (bv.bv_status) {
 		case BIOC_SVONLINE:
 			status = BIOC_SVONLINE_S;
@@ -261,6 +279,15 @@ bio_inq(char *name)
 			break;
 		case BIOC_SVDEGRADED:
 			status = BIOC_SVDEGRADED_S;
+			break;
+		case BIOC_SVBUILDING:
+			status = BIOC_SVBUILDING_S;
+			break;
+		case BIOC_SVREBUILD:
+			status = BIOC_SVREBUILD_S;
+			break;
+		case BIOC_SVSCRUB:
+			status = BIOC_SVSCRUB_S;
 			break;
 		case BIOC_SVINVALID:
 		default:
@@ -283,8 +310,9 @@ bio_inq(char *name)
 			else
 				snprintf(size, sizeof size, "%14llu",
 				    bv.bv_size);
-			printf("%7s %-10s %14s %-7s RAID%u\n",
-			    volname, status, size, bv.bv_dev, bv.bv_level);
+			printf("%7s %-10s %14s %-7s RAID%u%s%s\n",
+			    volname, status, size, bv.bv_dev,
+			    bv.bv_level, percent, seconds);
 		}
 
 		for (d = 0; d < bv.bv_nodisk; d++) {
@@ -317,6 +345,9 @@ bio_inq(char *name)
 				break;
 			case BIOC_SDUNUSED:
 				status = BIOC_SDUNUSED_S;
+				break;
+			case BIOC_SDSCRUB:
+				status = BIOC_SDSCRUB_S;
 				break;
 			case BIOC_SDINVALID:
 			default:
@@ -450,6 +481,7 @@ bio_setblink(char *name, char *arg, int blink)
 	bb.bb_cookie = bl.bl_cookie;
 	bb.bb_status = blink;
 	bb.bb_target = location.target;
+	bb.bb_channel = location.channel;
 	rv = ioctl(devh, BIOCBLINK, &bb);
 	if (rv == 0)
 		return;

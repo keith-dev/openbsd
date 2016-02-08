@@ -1,4 +1,4 @@
-/*	$OpenBSD: rogue.h,v 1.14 2004/01/21 19:12:13 espie Exp $	*/
+/*	$OpenBSD: rogue.h,v 1.16 2006/03/07 14:35:24 otto Exp $	*/
 /*	$NetBSD: rogue.h,v 1.4 1995/04/24 12:25:04 cgd Exp $	*/
 
 /*
@@ -504,7 +504,7 @@ void	eat(void);
 void	edit_opts(void);
 void	env_get_value(char **, char *, boolean);
 void	error_save(int);
-void	fight(int);
+void	fight(boolean);
 void	fill_it(int, boolean);
 void	fill_out_level(void);
 boolean	flame_broil(object *);
@@ -565,7 +565,7 @@ void	inv_armor_weapon(boolean);
 void	inv_rings(void);
 void	inventory(object *, unsigned short);
 boolean	is_all_connected(void);
-boolean	is_digit(int);
+boolean	is_digit(short);
 boolean	is_direction(short, short *);
 boolean	is_pack_letter(short *, unsigned short *);
 boolean	is_passable(short, short);

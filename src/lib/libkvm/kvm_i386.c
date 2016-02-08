@@ -1,4 +1,4 @@
-/*	$OpenBSD: kvm_i386.c,v 1.13 2004/07/01 02:04:10 mickey Exp $ */
+/*	$OpenBSD: kvm_i386.c,v 1.19 2006/06/09 09:46:04 mickey Exp $ */
 /*	$NetBSD: kvm_i386.c,v 1.9 1996/03/18 22:33:38 thorpej Exp $	*/
 
 /*-
@@ -38,7 +38,7 @@
 #if 0
 static char sccsid[] = "@(#)kvm_hp300.c	8.1 (Berkeley) 6/4/93";
 #else
-static char *rcsid = "$OpenBSD: kvm_i386.c,v 1.13 2004/07/01 02:04:10 mickey Exp $";
+static char *rcsid = "$OpenBSD: kvm_i386.c,v 1.19 2006/06/09 09:46:04 mickey Exp $";
 #endif
 #endif /* LIBC_SCCS and not lint */
 
@@ -68,8 +68,20 @@ static char *rcsid = "$OpenBSD: kvm_i386.c,v 1.13 2004/07/01 02:04:10 mickey Exp
 #include <machine/pte.h>
 
 struct vmstate {
-	pd_entry_t *PTD;
+	void *PTD;
+	paddr_t pg_frame;
+	paddr_t pt_mask;
+	int size;
+	int pte_size;
 };
+
+#define	pdei(vm,v)	((v) >> ((vm)->size == NBPG ? 22 : 21))
+#define	ptei(vm,v)	(((v) & (vm)->pt_mask) >> PGSHIFT)
+#define	PDE(vm,v)	\
+    ((vm)->size == NBPG ? ((u_int32_t *)(vm)->PTD)[pdei(vm,v)] : \
+    ((u_int64_t *)(vm)->PTD)[pdei(vm,v)])
+#define	PG_FRAME(vm)	((vm)->pg_frame)
+#define	pte_size(vm)	((vm)->pte_size)
 
 void
 _kvm_freevtop(kvm_t *kd)
@@ -86,52 +98,72 @@ _kvm_freevtop(kvm_t *kd)
 int
 _kvm_initvtop(kvm_t *kd)
 {
-	struct nlist nlist[2];
+	struct nlist nl[3];
 	struct vmstate *vm;
-	u_long pa;
+	paddr_t pa;
+	int ps;
 
 	vm = (struct vmstate *)_kvm_malloc(kd, sizeof(*vm));
-	if (vm == 0)
+	if (vm == NULL)
 		return (-1);
 	kd->vmst = vm;
 
-	nlist[0].n_name = "_PTDpaddr";
-	nlist[1].n_name = 0;
+	vm->PTD = NULL;
 
-	if (kvm_nlist(kd, nlist) != 0) {
+	nl[0].n_name = "_PTDpaddr";
+	nl[1].n_name = "_PTDsize";
+	nl[2].n_name = NULL;
+
+	if (kvm_nlist(kd, nl) != 0) {
 		_kvm_err(kd, kd->program, "bad namelist");
 		return (-1);
 	}
 
-	vm->PTD = 0;
+	if (_kvm_pread(kd, kd->pmfd, &ps, sizeof ps,
+	    _kvm_pa2off(kd, nl[1].n_value - KERNBASE)) != sizeof ps)
+		return (-1);
 
-	if (_kvm_pread(kd, kd->pmfd, &pa, sizeof pa,
-	    (off_t)_kvm_pa2off(kd, nlist[0].n_value - KERNBASE)) != sizeof pa)
-		goto invalid;
+	pa = 0;
+	if (ps == NBPG) {
+		vm->pg_frame = 0xfffff000;
+		vm->pt_mask = 0x003ff000;
+		vm->pte_size = 4;
+	} else if (ps == NBPG * 4) {
+		vm->pg_frame = 0xffffff000ULL;
+		vm->pt_mask = 0x001ff000;
+		vm->pte_size = 8;
+	} else {
+		_kvm_err(kd, 0, "PTDsize is invalid");
+		return (-1);
+	}
 
-	vm->PTD = (pd_entry_t *)_kvm_malloc(kd, NBPG);
+	if (_kvm_pread(kd, kd->pmfd, &pa, vm->pte_size,
+	    _kvm_pa2off(kd, nl[0].n_value - KERNBASE)) != vm->pte_size)
+		return (-1);
 
-	if (_kvm_pread(kd, kd->pmfd, vm->PTD, NBPG,
-	    (off_t)_kvm_pa2off(kd, pa)) != NBPG)
-		goto invalid;
+	vm->PTD = _kvm_malloc(kd, ps);
+	if (vm->PTD == NULL)
+		return (-1);
 
-	return (0);
-
-invalid:
-	if (vm->PTD != 0)
+	if (_kvm_pread(kd, kd->pmfd, vm->PTD, ps, _kvm_pa2off(kd, pa)) != ps) {
 		free(vm->PTD);
-	return (-1);
+		vm->PTD = NULL;
+		return (-1);
+	}
+
+	vm->size = ps;
+	return (0);
 }
 
 /*
  * Translate a kernel virtual address to a physical address.
  */
 int
-_kvm_kvatop(kvm_t *kd, u_long va, u_long *pa)
+_kvm_kvatop(kvm_t *kd, u_long va, paddr_t *pa)
 {
-	u_long offset, pte_pa;
+	u_long offset;
 	struct vmstate *vm;
-	pt_entry_t pte;
+	paddr_t pte, pte_pa;
 
 	if (!kd->vmst) {
 		_kvm_err(kd, 0, "vatop called before initvtop");
@@ -150,23 +182,24 @@ _kvm_kvatop(kvm_t *kd, u_long va, u_long *pa)
 	 * If we are initializing (kernel page table descriptor pointer
 	 * not yet set) * then return pa == va to avoid infinite recursion.
 	 */
-	if (vm->PTD == 0) {
+	if (vm->PTD == NULL) {
 		*pa = va;
-		return (NBPG - offset);
+		return (NBPG - (int)offset);
 	}
-	if ((vm->PTD[pdei(va)] & PG_V) == 0)
+	if ((PDE(vm, va) & PG_V) == 0)
 		goto invalid;
 
-	pte_pa = (vm->PTD[pdei(va)] & PG_FRAME) +
-	    (ptei(va) * sizeof(pt_entry_t));
+	pte_pa = (PDE(vm, va) & PG_FRAME(vm)) +
+	    (ptei(vm, va) * pte_size(vm));
 
 	/* XXX READ PHYSICAL XXX */
-	if (_kvm_pread(kd, kd->pmfd, &pte, sizeof pte,
-	    (off_t)_kvm_pa2off(kd, pte_pa)) != sizeof pte)
+	pte = 0;
+	if (_kvm_pread(kd, kd->pmfd, &pte, pte_size(vm),
+	    _kvm_pa2off(kd, pte_pa)) != pte_size(vm))
 		goto invalid;
 
-	*pa = (pte & PG_FRAME) + offset;
-	return (NBPG - offset);
+	*pa = (pte & PG_FRAME(vm)) + offset;
+	return (NBPG - (int)offset);
 
 invalid:
 	_kvm_err(kd, 0, "invalid address (%lx)", va);
@@ -177,7 +210,7 @@ invalid:
  * Translate a physical address to a file-offset in the crash-dump.
  */
 off_t
-_kvm_pa2off(kvm_t *kd, u_long pa)
+_kvm_pa2off(kvm_t *kd, paddr_t pa)
 {
 	return ((off_t)(kd->dump_off + pa));
 }

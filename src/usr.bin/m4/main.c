@@ -1,4 +1,4 @@
-/*	$OpenBSD: main.c,v 1.69 2006/01/20 23:10:19 espie Exp $	*/
+/*	$OpenBSD: main.c,v 1.74 2006/03/24 08:03:44 espie Exp $	*/
 /*	$NetBSD: main.c,v 1.12 1997/02/08 23:54:49 cgd Exp $	*/
 
 /*-
@@ -41,6 +41,7 @@
 
 #include <assert.h>
 #include <signal.h>
+#include <err.h>
 #include <errno.h>
 #include <unistd.h>
 #include <stdio.h>
@@ -50,7 +51,6 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <ohash.h>
-#include <err.h>
 #include "mdef.h"
 #include "stdd.h"
 #include "extern.h"
@@ -205,6 +205,7 @@ main(int argc, char *argv[])
 			break;
 		case 'g':
 			mimic_gnu = 1;
+			setup_builtin("format", FORMATTYPE);
 			break;
 		case 'd':
 			set_trace_flags(optarg);

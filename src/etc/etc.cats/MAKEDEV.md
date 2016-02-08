@@ -1,8 +1,8 @@
 vers(__file__,
-	{-$OpenBSD: MAKEDEV.md,v 1.11 2005/08/01 22:22:13 deraadt Exp $-},
+	{-$OpenBSD: MAKEDEV.md,v 1.15 2006/07/28 17:37:10 kettenis Exp $-},
 etc.MACHINE)dnl
 dnl
-dnl Copyright (c) 2001-2004 Todd T. Fries <todd@OpenBSD.org>
+dnl Copyright (c) 2001-2006 Todd T. Fries <todd@OpenBSD.org>
 dnl All rights reserved.
 dnl
 dnl Redistribution and use in source and binary forms, with or without
@@ -72,7 +72,7 @@ _DEV(cry, 47)
 _DEV(fdesc, 7)
 _DEV(iop, 73)
 _DEV(lkm, 35)
-_DEV(pci, 71)
+_DEV(pci, 88)
 _DEV(pf, 39)
 _DEV(radio, 97)
 _DEV(rnd, 40)
@@ -88,7 +88,6 @@ divert(__mddivert)dnl
 dnl
 _std(1, 2, 8, 3, 6)
 	M xf86		c 2 4 600
-	M reload	c 2 20 640 kmem
 	;;
 dnl
 dnl *** cats specific targets
@@ -107,10 +106,4 @@ target(all, cd, 0, 1)dnl
 target(all, sd, 0, 1, 2, 3, 4)dnl
 target(all, vnd, 0, 1, 2, 3)dnl
 target(all, ccd, 0, 1, 2, 3)dnl
-target(ramd, sd, 0, 1, 2, 3, 4)dnl
-target(ramd, wd, 0, 1, 2, 3, 4)dnl
-target(ramd, st, 0, 1)dnl
-target(ramd, cd, 0, 1)dnl)dnl
-target(ramd, rd, 0)dnl
-target(ramd, tty0, 0, 1)dnl
 target(ramd, pty, 0)dnl

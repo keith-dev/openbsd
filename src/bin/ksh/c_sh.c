@@ -1,4 +1,4 @@
-/*	$OpenBSD: c_sh.c,v 1.31 2005/10/08 18:07:31 otto Exp $	*/
+/*	$OpenBSD: c_sh.c,v 1.35 2006/04/10 14:38:59 jaredy Exp $	*/
 
 /*
  * built-in Bourne commands
@@ -58,7 +58,7 @@ c_umask(char **wp)
 	mode_t old_umask;
 	int optc;
 
-	while ((optc = ksh_getopt(wp, &builtin_opt, "S")) != EOF)
+	while ((optc = ksh_getopt(wp, &builtin_opt, "S")) != -1)
 		switch (optc) {
 		case 'S':
 			symbolic = 1;
@@ -252,7 +252,7 @@ c_read(char **wp)
 	struct tbl *vp;
 	char *xp = NULL;
 
-	while ((optc = ksh_getopt(wp, &builtin_opt, "prsu,")) != EOF)
+	while ((optc = ksh_getopt(wp, &builtin_opt, "prsu,")) != -1)
 		switch (optc) {
 		case 'p':
 			if ((fd = coproc_getfd(R_OK, &emsg)) < 0) {
@@ -547,7 +547,7 @@ c_exitreturn(char **wp)
 
 	quitenv(NULL);	/* get rid of any i/o redirections */
 	unwind(how);
-	/*NOTREACHED*/
+	/* NOTREACHED */
 	return 0;
 }
 
@@ -601,7 +601,7 @@ c_brkcont(char **wp)
 	}
 
 	unwind(*wp[0] == 'b' ? LBREAK : LCONTIN);
-	/*NOTREACHED*/
+	/* NOTREACHED */
 }
 
 int
@@ -646,7 +646,7 @@ c_unset(char **wp)
 	int optc, unset_var = 1;
 	int ret = 0;
 
-	while ((optc = ksh_getopt(wp, &builtin_opt, "fv")) != EOF)
+	while ((optc = ksh_getopt(wp, &builtin_opt, "fv")) != -1)
 		switch (optc) {
 		case 'f':
 			unset_var = 0;
@@ -787,7 +787,7 @@ timex_hook(struct op *t, char **volatile *app)
 
 	ksh_getopt_reset(&opt, 0);
 	opt.optind = 0;	/* start at the start */
-	while ((optc = ksh_getopt(wp, &opt, ":p")) != EOF)
+	while ((optc = ksh_getopt(wp, &opt, ":p")) != -1)
 		switch (optc) {
 		case 'p':
 			t->str[0] |= TF_POSIX;
@@ -843,7 +843,7 @@ c_mknod(char **wp)
 	void *set = NULL;
 	mode_t mode = 0, oldmode = 0;
 
-	while ((optc = ksh_getopt(wp, &builtin_opt, "m:")) != EOF) {
+	while ((optc = ksh_getopt(wp, &builtin_opt, "m:")) != -1) {
 		switch (optc) {
 		case 'm':
 			set = setmode(builtin_opt.optarg);

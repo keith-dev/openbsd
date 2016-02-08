@@ -1,4 +1,4 @@
-.\" $OpenBSD: ipsec.4,v 1.69 2005/12/12 11:56:47 jmc Exp $
+.\" $OpenBSD: ipsec.4,v 1.76 2006/08/31 11:46:39 jmc Exp $
 .\"
 .\" Copyright 1997 Niels Provos <provos@physnet.uni-hamburg.de>
 .\" All rights reserved.
@@ -36,9 +36,13 @@
 .Sh NAME
 .Nm ipsec
 .Nd IP Security Protocol
-.Sh NOTE
-.Tn IPsec
-may be enabled or disabled using the following
+.Sh DESCRIPTION
+IPsec is a pair of protocols,
+Encapsulating Security Payload (ESP)
+and Authentication Header (AH),
+which provide security services for IP datagrams.
+.Pp
+Both protocols may be enabled or disabled using the following
 .Xr sysctl 3
 variables in
 .Pa /etc/sysctl.conf .
@@ -50,19 +54,7 @@ Enable the ESP IPsec protocol
 .It net.inet.ah.enable
 Enable the AH IPsec protocol
 .El
-.Sh DESCRIPTION
-IPsec is a pair of protocols,
-Encapsulating Security Payload (ESP)
-and Authentication Header (AH),
-which provide security services for IP datagrams.
 .Pp
-The original Internet Protocol, IPv4,
-does not inherently provide any
-protection to transferred data.
-Furthermore, it does not even guarantee that the sender is who he
-claims to be.
-IPsec tries to remedy this by providing the required security services for
-IP datagrams.
 There are four main security properties provided by IPsec:
 .Bl -inset -offset indent
 .It Confidentiality
@@ -89,7 +81,7 @@ by replaying it verbatim cause the peer to think a new message
 (withdrawal request) had been received.
 WARNING: as per the standard's specification, replay protection is not
 performed when using manual-keyed IPsec (e.g. when using
-.Xr ipsecadm 8 ) .
+.Xr ipsecctl 8 ) .
 .El
 .Ss IPsec Protocols
 IPsec provides these services using two new protocols:
@@ -113,13 +105,13 @@ AH and ESP is that AH also authenticates portions of the IP
 header of the packet
 (such as the source/destination addresses).
 ESP authenticates only the packet payload.
-.Pp
-A third protocol is available which is highly relevant to IPsec: IPComp.
-IPComp is a protocol used to reduce the size of IP datagrams
-(i.e. it provides compression).
-See
-.Xr ipcomp 4
-for further information.
+.\".Pp
+.\"A third protocol is available which is highly relevant to IPsec: IPComp.
+.\"IPComp is a protocol used to reduce the size of IP datagrams
+.\"(i.e. it provides compression).
+.\"See
+.\".Xr ipcomp 4
+.\"for further information.
 .Ss Authentication Header (AH)
 AH works by computing a value that depends on all of the payload
 data, some of the IP header data, and a certain secret value
@@ -155,9 +147,7 @@ using the information in the other end's SA.
 The only issue remaining is to ensure that both ends have matching SAs.
 This may be done manually, or automatically using a key management daemon.
 .Pp
-Further information on manual SA establishment is described in both
-.Xr ipsecadm 8
-and
+Further information on manual SA establishment is described in
 .Xr ipsecctl 8 .
 Information on automated key management may be found in
 .Xr isakmpd 8 .
@@ -190,9 +180,6 @@ for encrypting and decrypting the data passing over the public net.
 An SA will contain information specifying
 whether it is a tunnel or transport mode SA,
 and for tunnels it will contain values to fill in into the outer IP header.
-.Pp
-Further information on setting up VPNs is described in
-.Xr vpn 8 .
 .Ss Lifetimes
 The SA also holds a couple of other parameters, especially useful for
 automatic keying, called lifetimes, which puts a limit on how much we can
@@ -258,11 +245,9 @@ it is processed by the PF/NAT code.
 Unless PF drops the packet, it will then be IPsec-processed, even if the
 packet has been modified by NAT.
 .Pp
-Security Associations can be set up manually with the
-.Xr ipsecadm 8
-and
+Security Associations can be set up manually with
 .Xr ipsecctl 8
-utilities, or automatically with the
+or automatically with the
 .Xr isakmpd 8
 key management daemon.
 .Ss Additional Variables
@@ -381,22 +366,18 @@ displays information about memory use by IPsec with the
 .Fl m
 flag (look for ``tdb'' and ``xform'' allocations).
 .Sh SEE ALSO
-.Xr sysctl 3 ,
 .Xr enc 4 ,
-.Xr icmp 4 ,
-.Xr inet 4 ,
-.Xr ip 4 ,
-.Xr ipcomp 4 ,
-.Xr netintro 4 ,
+.\".Xr ipcomp 4 ,
 .Xr options 4 ,
-.Xr tcp 4 ,
-.Xr udp 4 ,
-.Xr ipsecadm 8 ,
 .Xr ipsecctl 8 ,
 .Xr isakmpd 8 ,
-.Xr sysctl 8 ,
-.Xr vpn 8
+.Xr sysctl 8
 .Sh HISTORY
+IPsec was originally designed to provide security services
+for Internet Protocol IPv6.
+It has since been engineered to provide those services for
+the original Internet Protocol, IPv4.
+.Pp
 The IPsec protocol design process was started in 1992 by
 John Ioannidis, Phil Karn, and William Allen Simpson.
 In 1995, the former wrote an implementation for
@@ -407,7 +388,7 @@ and
 .Nx .
 The latest transforms and new features were
 implemented by Angelos D. Keromytis and Niels Provos.
-.Sh ACKNOWLEDGMENTS
+.Sh AUTHORS
 The authors of the IPsec code proper are
 John Ioannidis, Angelos D. Keromytis, and Niels Provos.
 .Pp

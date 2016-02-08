@@ -1,4 +1,4 @@
-/*	$OpenBSD: rcsprog.h,v 1.35 2006/02/16 17:44:53 niallo Exp $	*/
+/*	$OpenBSD: rcsprog.h,v 1.59 2006/08/11 08:18:19 xsa Exp $	*/
 /*
  * Copyright (c) 2005 Joris Vink <joris@openbsd.org>
  * All rights reserved.
@@ -27,10 +27,12 @@
 #ifndef RCSPROG_H
 #define RCSPROG_H
 
-#include "log.h"
 #include "rcs.h"
+#include "rcsutil.h"
+#include "worklist.h"
 #include "xmalloc.h"
 
+#define RCS_DEFAULT_SUFFIX	",v/"
 #define RCS_TMPDIR_DEFAULT	"/tmp"
 
 /* flags specific to ci.c */
@@ -38,33 +40,47 @@
 #define CI_DEFAULT	(1<<1)
 #define CI_INIT		(1<<2)
 #define CI_KEYWORDSCAN  (1<<3)
+#define CI_SKIPDESC	(1<<4)
 
 /* flags specific to co.c */
-#define CO_ACLAPPEND	(1<<4)
-#define CO_AUTHOR	(1<<5)
-#define CO_LOCK		(1<<6)
-#define CO_REVDATE	(1<<7)
-#define CO_STATE	(1<<8)
-#define CO_UNLOCK	(1<<9)
+#define CO_ACLAPPEND	(1<<5)
+#define CO_AUTHOR	(1<<6)
+#define CO_LOCK		(1<<7)
+#define CO_REVDATE	(1<<8)
+#define CO_REVERT	(1<<9)
+#define CO_STATE	(1<<10)
+#define CO_UNLOCK	(1<<11)
+
+/* flags specific to rcsprog.c */
+#define RCSPROG_EFLAG	(1<<12)
+#define RCSPROG_LFLAG	(1<<13)
+#define RCSPROG_NFLAG	(1<<14)
+#define RCSPROG_UFLAG	(1<<15)
+
+/* flags shared between merge(1) and rcsmerge(1) */
+#define MERGE_EFLAG	(1<<16)
+#define MERGE_OFLAG	(1<<17)
 
 /* shared flags  */
-#define FORCE		(1<<10)
-#define INTERACTIVE	(1<<11)
-#define NEWFILE		(1<<12)
-#define PRESERVETIME	(1<<13)
+#define DESCRIPTION	(1<<18)
+#define FORCE		(1<<19)
+#define INTERACTIVE	(1<<20)
+#define NEWFILE		(1<<21)
+#define PIPEOUT		(1<<22)
+#define PRESERVETIME	(1<<23)
+#define QUIET		(1<<24)
 
 extern char	*__progname;
 extern const char	rcs_version[];
-extern int	verbose;
-extern int	pipeout;
 
 extern int	 rcs_optind;
 extern char	*rcs_optarg;
 extern char	*rcs_suffixes;
 extern char	*rcs_tmpdir;
+extern struct rcs_wklhead rcs_temp_files;
 
 /* date.y */
-time_t  cvs_date_parse(const char *);
+time_t  rcs_date_parse(const char *);
 
 /* ci.c */
 int	checkin_main(int, char **);
@@ -79,6 +95,10 @@ void	checkout_usage(void);
 /* ident.c */
 int	ident_main(int, char **);
 void	ident_usage(void);
+
+/* merge.c */
+int	merge_main(int, char **);
+void	merge_usage(void);
 
 /* rcsclean.c */
 int	rcsclean_main(int, char **);
@@ -96,10 +116,6 @@ void	rcsmerge_usage(void);
 int	rcs_init(char *, char **, int);
 int	rcs_getopt(int, char **, const char *);
 int	rcs_main(int, char **);
-int	rcs_set_mtime(const char *, time_t);
-int	rcs_statfile(char *, char *, size_t);
-time_t	rcs_get_mtime(const char *);
-void	rcs_set_rev(const char *, RCSNUM **);
 void	rcs_usage(void);
 void	(*usage)(void);
 

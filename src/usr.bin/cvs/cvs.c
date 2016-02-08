@@ -1,5 +1,6 @@
-/*	$OpenBSD: cvs.c,v 1.94 2006/01/29 11:17:09 xsa Exp $	*/
+/*	$OpenBSD: cvs.c,v 1.107 2006/07/09 01:57:51 joris Exp $	*/
 /*
+ * Copyright (c) 2006 Joris Vink <joris@openbsd.org>
  * Copyright (c) 2004 Jean-Francois Brousseau <jfb@openbsd.org>
  * All rights reserved.
  *
@@ -27,59 +28,94 @@
 #include "includes.h"
 
 #include "cvs.h"
+#include "config.h"
 #include "log.h"
 #include "file.h"
-
+#include "remote.h"
 
 extern char *__progname;
 
-
 /* verbosity level: 0 = really quiet, 1 = quiet, 2 = verbose */
-int verbosity = 2;
+int verbosity = 1;
 
 /* compression level used with zlib, 0 meaning no compression taking place */
-int   cvs_compress = 0;
-int   cvs_readrc = 1;		/* read .cvsrc on startup */
-int   cvs_trace = 0;
-int   cvs_nolog = 0;
-int   cvs_readonly = 0;
-int   cvs_nocase = 0;   /* set to 1 to disable filename case sensitivity */
-int   cvs_noexec = 0;	/* set to 1 to disable disk operations (-n option) */
-int   cvs_error = -1;	/* set to the correct error code on failure */
-char *cvs_defargs;		/* default global arguments from .cvsrc */
-char *cvs_command;		/* name of the command we are running */
-int   cvs_cmdop;
-char *cvs_rootstr;
-char *cvs_rsh = CVS_RSH_DEFAULT;
-char *cvs_editor = CVS_EDITOR_DEFAULT;
-char *cvs_homedir = NULL;
-char *cvs_msg = NULL;
-char *cvs_repo_base = NULL;
-char *cvs_tmpdir = CVS_TMPDIR_DEFAULT;
+int	cvs_compress = 0;
+int	cvs_readrc = 1;		/* read .cvsrc on startup */
+int	cvs_trace = 0;
+int	cvs_nolog = 0;
+int	cvs_readonly = 0;
+int	cvs_nocase = 0;	/* set to 1 to disable filename case sensitivity */
+int	cvs_noexec = 0;	/* set to 1 to disable disk operations (-n option) */
+int	cvs_error = -1;	/* set to the correct error code on failure */
+int	cvs_cmdop;
+int	cvs_umask = CVS_UMASK_DEFAULT;
+int	cvs_server_active = 0;
 
-/* hierarchy of all the files affected by the command */
-CVSFILE *cvs_files;
+char	*cvs_tagname = NULL;
+char	*cvs_defargs;		/* default global arguments from .cvsrc */
+char	*cvs_command;		/* name of the command we are running */
+char	*cvs_rootstr;
+char	*cvs_rsh = CVS_RSH_DEFAULT;
+char	*cvs_editor = CVS_EDITOR_DEFAULT;
+char	*cvs_homedir = NULL;
+char	*cvs_msg = NULL;
+char	*cvs_tmpdir = CVS_TMPDIR_DEFAULT;
+
+struct cvsroot *current_cvsroot = NULL;
 
 static TAILQ_HEAD(, cvs_var) cvs_variables;
 
-
+int		cvs_getopt(int, char **);
 void		usage(void);
 static void	cvs_read_rcfile(void);
-int		cvs_getopt(int, char **);
 
-/*
- * usage()
- *
- * Display usage information.
- */
+struct cvs_wklhead temp_files;
+
+void sighandler(int);
+volatile sig_atomic_t cvs_quit = 0;
+volatile sig_atomic_t sig_received = 0;
+
+void
+sighandler(int sig)
+{
+	sig_received = sig;
+
+	switch (sig) {
+	case SIGINT:
+	case SIGTERM:
+	case SIGPIPE:
+		cvs_quit = 1;
+		break;
+	default:
+		break;
+	}
+}
+
+void
+cvs_cleanup(void)
+{
+	cvs_log(LP_TRACE, "cvs_cleanup: removing locks");
+	cvs_worklist_run(&repo_locks, cvs_worklist_unlink);
+
+	cvs_log(LP_TRACE, "cvs_cleanup: removing temp files");
+	cvs_worklist_run(&temp_files, cvs_worklist_unlink);
+
+	if (cvs_server_active) {
+		if (cvs_rmdir(cvs_server_path) == -1)
+			cvs_log(LP_ERR,
+			    "warning: failed to remove server directory: %s",
+			    cvs_server_path);
+		xfree(cvs_server_path);
+	}
+}
+
 void
 usage(void)
 {
 	fprintf(stderr,
-	    "Usage: %s [-flnQqrtvw] [-d root] [-e editor] [-s var=val] "
+	    "Usage: %s [-flnQqrtvVw] [-d root] [-e editor] [-s var=val] "
 	    "[-T tmpdir] [-z level] command [...]\n", __progname);
 }
-
 
 int
 main(int argc, char **argv)
@@ -89,19 +125,14 @@ main(int argc, char **argv)
 	struct cvs_cmd *cmdp;
 	struct passwd *pw;
 	struct stat st;
+	char fpath[MAXPATHLEN];
+	char *root, *rootp;
 
 	tzset();
 
 	TAILQ_INIT(&cvs_variables);
-
-	cvs_log_init(LD_STD, 0);
-
-	/* by default, be very verbose */
-	(void)cvs_log_filter(LP_FILTER_UNSET, LP_INFO);
-
-#ifdef DEBUG
-	(void)cvs_log_filter(LP_FILTER_UNSET, LP_DEBUG);
-#endif
+	SLIST_INIT(&repo_locks);
+	SLIST_INIT(&temp_files);
 
 	/* check environment so command-line options override it */
 	if ((envstr = getenv("CVS_RSH")) != NULL)
@@ -130,7 +161,7 @@ main(int argc, char **argv)
 	argv += ret;
 	if (argc == 0) {
 		usage();
-		exit(CVS_EX_USAGE);
+		exit(1);
 	}
 
 	cvs_command = argv[0];
@@ -160,12 +191,12 @@ main(int argc, char **argv)
 	}
 
 	/* setup signal handlers */
-	signal(SIGPIPE, SIG_IGN);
-
-	if (cvs_file_init() < 0)
-		fatal("failed to initialize file support");
-
-	ret = -1;
+	signal(SIGTERM, sighandler);
+	signal(SIGINT, sighandler);
+	signal(SIGHUP, sighandler);
+	signal(SIGABRT, sighandler);
+	signal(SIGALRM, sighandler);
+	signal(SIGPIPE, sighandler);
 
 	cmdp = cvs_findcmd(cvs_command);
 	if (cmdp == NULL) {
@@ -174,7 +205,7 @@ main(int argc, char **argv)
 		for (i = 0; cvs_cdt[i] != NULL; i++)
 			fprintf(stderr, "\t%-16s%s\n",
 			    cvs_cdt[i]->cmd_name, cvs_cdt[i]->cmd_descr);
-		exit(CVS_EX_USAGE);
+		exit(1);
 	}
 
 	cvs_cmdop = cmdp->cmd_op;
@@ -192,46 +223,65 @@ main(int argc, char **argv)
 
 		cmd_argc += ret;
 	}
+
 	for (ret = 1; ret < argc; ret++)
 		cmd_argv[cmd_argc++] = argv[ret];
 
-	ret = cvs_startcmd(cmdp, cmd_argc, cmd_argv);
-	switch (ret) {
-	case CVS_EX_USAGE:
-		fprintf(stderr, "Usage: %s %s %s\n", __progname,
-		    cmdp->cmd_name, cmdp->cmd_synopsis);
-		break;
-	case CVS_EX_DATA:
-		cvs_log(LP_ABORT, "internal data error");
-		break;
-	case CVS_EX_PROTO:
-		cvs_log(LP_ABORT, "protocol error");
-		break;
-	case CVS_EX_FILE:
-		cvs_log(LP_ABORT, "an operation on a file or directory failed");
-		break;
-	case CVS_EX_BADROOT:
-		/* match GNU CVS output, thus the LP_ERR and LP_ABORT codes. */
-		cvs_log(LP_ERR,
-		    "No CVSROOT specified! Please use the `-d' option");
-		cvs_log(LP_ABORT,
-		    "or set the CVSROOT enviroment variable.");
-		break;
-	case CVS_EX_ERR:
-		cvs_log(LP_ABORT, "yeah, we failed, and we don't know why");
-		break;
-	default:
-		break;
+	cvs_file_init();
+
+	if (cvs_cmdop == CVS_OP_SERVER) {
+		setvbuf(stdin, NULL, _IOLBF, 0);
+		setvbuf(stdout, NULL, _IOLBF, 0);
+
+		cvs_server_active = 1;
+		root = cvs_remote_input();
+		if ((rootp = strchr(root, ' ')) == NULL)
+			fatal("bad Root request");
+		cvs_rootstr = xstrdup(rootp + 1);
+		xfree(root);
 	}
 
-	if (cvs_files != NULL)
-		cvs_file_free(cvs_files);
-	if (cvs_msg != NULL)
-		xfree(cvs_msg);
+	if ((current_cvsroot = cvsroot_get(".")) == NULL) {
+		cvs_log(LP_ERR,
+		    "No CVSROOT specified! Please use the '-d' option");
+		fatal("or set the CVSROOT environment variable.");
+	}
 
-	return (ret);
+	if (current_cvsroot->cr_method != CVS_METHOD_LOCAL) {
+		if (cvs_server_active == 1)
+			fatal("remote Root while already running as server?");
+
+		cvs_client_connect_to_server();
+		cmdp->cmd(cmd_argc, cmd_argv);
+		cvs_cleanup();
+		return (0);
+	}
+
+	i = snprintf(fpath, sizeof(fpath), "%s/%s", current_cvsroot->cr_dir,
+	    CVS_PATH_ROOT);
+	if (stat(fpath, &st) == -1 && cvs_cmdop != CVS_OP_INIT) {
+		if (errno == ENOENT)
+			fatal("repository '%s' does not exist",
+			    current_cvsroot->cr_dir);
+		else
+			fatal("%s: %s", current_cvsroot->cr_dir,
+			    strerror(errno));
+	} else {
+		if (!S_ISDIR(st.st_mode))
+			fatal("'%s' is not a directory",
+			    current_cvsroot->cr_dir);
+	}
+
+	if (cvs_cmdop != CVS_OP_INIT)
+		cvs_parse_configfile();
+
+	umask(cvs_umask);
+
+	cmdp->cmd(cmd_argc, cmd_argv);
+	cvs_cleanup();
+
+	return (0);
 }
-
 
 int
 cvs_getopt(int argc, char **argv)
@@ -239,7 +289,7 @@ cvs_getopt(int argc, char **argv)
 	int ret;
 	char *ep;
 
-	while ((ret = getopt(argc, argv, "b:d:e:fHlnQqrs:T:tvwz:")) != -1) {
+	while ((ret = getopt(argc, argv, "b:d:e:fHlnQqrs:T:tvVwz:")) != -1) {
 		switch (ret) {
 		case 'b':
 			/*
@@ -268,9 +318,9 @@ cvs_getopt(int argc, char **argv)
 			verbosity = 0;
 			break;
 		case 'q':
-			/* don't override -Q */
-			if (verbosity > 1)
-				verbosity = 1;
+			/*
+			 * Be quiet. This is the default in OpenCVS.
+			 */
 			break;
 		case 'r':
 			cvs_readonly = 1;
@@ -279,18 +329,22 @@ cvs_getopt(int argc, char **argv)
 			ep = strchr(optarg, '=');
 			if (ep == NULL) {
 				cvs_log(LP_ERR, "no = in variable assignment");
-				exit(CVS_EX_USAGE);
+				exit(1);
 			}
 			*(ep++) = '\0';
 			if (cvs_var_set(optarg, ep) < 0)
-				exit(CVS_EX_USAGE);
+				exit(1);
 			break;
 		case 'T':
 			cvs_tmpdir = optarg;
 			break;
 		case 't':
-			(void)cvs_log_filter(LP_FILTER_UNSET, LP_TRACE);
 			cvs_trace = 1;
+			break;
+		case 'V':
+			/* don't override -Q */
+			if (verbosity)
+				verbosity = 2;
 			break;
 		case 'v':
 			printf("%s\n", CVS_VERSION);
@@ -315,7 +369,7 @@ cvs_getopt(int argc, char **argv)
 			break;
 		default:
 			usage();
-			exit(CVS_EX_USAGE);
+			exit(1);
 		}
 	}
 
@@ -325,7 +379,6 @@ cvs_getopt(int argc, char **argv)
 
 	return (ret);
 }
-
 
 /*
  * cvs_read_rcfile()
@@ -347,7 +400,7 @@ cvs_read_rcfile(void)
 	    strlcat(rcpath, "/", sizeof(rcpath)) >= sizeof(rcpath) ||
 	    strlcat(rcpath, CVS_PATH_RC, sizeof(rcpath)) >= sizeof(rcpath)) {
 		errno = ENAMETOOLONG;
-		cvs_log(LP_ERRNO, "%s", rcpath);
+		cvs_log(LP_ERR, "%s", rcpath);
 		return;
 	}
 
@@ -364,7 +417,7 @@ cvs_read_rcfile(void)
 		if ((len = strlen(linebuf)) == 0)
 			continue;
 		if (linebuf[len - 1] != '\n') {
-			cvs_log(LP_WARN, "line too long in `%s:%d'", rcpath,
+			cvs_log(LP_ERR, "line too long in `%s:%d'", rcpath,
 				linenum);
 			break;
 		}
@@ -373,7 +426,7 @@ cvs_read_rcfile(void)
 		/* skip any whitespaces */
 		p = linebuf;
 		while (*p == ' ')
-			*p++;
+			p++;
 
 		/* allow comments */
 		if (*p == '#')
@@ -405,13 +458,13 @@ cvs_read_rcfile(void)
 			cmdp->cmd_defargs = xstrdup(lp);
 		}
 	}
+
 	if (ferror(fp)) {
 		cvs_log(LP_NOTICE, "failed to read line from `%s'", rcpath);
 	}
 
 	(void)fclose(fp);
 }
-
 
 /*
  * cvs_var_set()
@@ -427,7 +480,7 @@ cvs_var_set(const char *var, const char *val)
 	const char *cp;
 	struct cvs_var *vp;
 
-	if ((var == NULL) || (*var == '\0')) {
+	if (var == NULL || *var == '\0') {
 		cvs_log(LP_ERR, "no variable name");
 		return (-1);
 	}
@@ -447,8 +500,7 @@ cvs_var_set(const char *var, const char *val)
 
 	valcp = xstrdup(val);
 	if (vp == NULL) {
-		vp = (struct cvs_var *)xmalloc(sizeof(*vp));
-		memset(vp, 0, sizeof(*vp));
+		vp = xcalloc(1, sizeof(*vp));
 
 		vp->cv_name = xstrdup(var);
 		TAILQ_INSERT_TAIL(&cvs_variables, vp, cv_link);
@@ -460,7 +512,6 @@ cvs_var_set(const char *var, const char *val)
 
 	return (0);
 }
-
 
 /*
  * cvs_var_set()
@@ -483,9 +534,7 @@ cvs_var_unset(const char *var)
 		}
 
 	return (-1);
-
 }
-
 
 /*
  * cvs_var_get()

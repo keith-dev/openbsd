@@ -1,4 +1,4 @@
-.\"	$OpenBSD: usb.4,v 1.53 2005/12/20 21:47:57 jmc Exp $
+.\"	$OpenBSD: usb.4,v 1.72 2006/09/16 13:42:12 jmc Exp $
 .\"	$NetBSD: usb.4,v 1.15 1999/07/29 14:20:32 augustss Exp $
 .\"
 .\" Copyright (c) 1999 The NetBSD Foundation, Inc.
@@ -112,11 +112,10 @@ bus will be probed when the
 .Tn USB
 host device is attached instead of waiting
 until kernel processes start running.
-.Sh SUPPORTED DEVICES
+.Pp
 .Ox
-includes machine-independent
-.Tn USB
-drivers, sorted by device type and driver name:
+provides support for the following devices.
+Note that not all architectures support all devices.
 .Ss Storage devices
 .Bl -tag -width 12n -offset ind -compact
 .It Xr umass 4
@@ -126,37 +125,46 @@ Mass Storage Devices, e.g., external disk drives.
 .Ss Network adapters
 .Bl -tag -width 12n -offset ind -compact
 .It Xr atu 4
-Atmel AT76C50x IEEE 802.11b wireless network interfaces.
+Atmel AT76C50x IEEE 802.11b wireless network device.
 .It Xr aue 4
-ADMtek AN986 / ADM8511 Pegasus family USB Ethernet interfaces.
+ADMtek AN986/ADM8511 Pegasus family 10/100 USB Ethernet device.
 .It Xr axe 4
-ASIX Electronics AX88172/AX88178/AX88772 USB Ethernet interfaces.
+ASIX Electronics AX88172/AX88178/AX88772 10/100/Gigabit USB Ethernet device.
 .It Xr cdce 4
-USB Host-to-Host (aka USB-to-USB) bridges based on the USB
-Communication Device Class (CDC) and Ethernet subclass.
+USB Communication Device Class Ethernet device.
 .It Xr cue 4
-CATC USB-EL1201A-based Ethernet interfaces.
+CATC USB-EL1201A USB Ethernet device.
 .It Xr kue 4
-Kawasaki LSI KL5KUSB101B-based Ethernet interfaces.
+Kawasaki LSI KL5KUSB101B USB Ethernet device.
+.It Xr rum 4
+Ralink Technology USB IEEE 802.11a/b/g wireless network device.
+.It Xr uath 4
+Atheros USB IEEE 802.11a/b/g wireless network device.
 .It Xr ubt 4
 Bluetooth adapters.
 .It Xr udav 4
-Davicom DM9601 based Ethernet interfaces.
+Davicom DM9601 USB Ethernet device.
 .It Xr ueagle 4
 Analog Devices Eagle ADSL modems.
 .It Xr ural 4
-Ralink Technology RT2500 IEEE 802.11a/b/g wireless network adapters.
+Ralink Technology RT2500 IEEE 802.11a/b/g wireless network device.
 .It Xr url 4
-Realtek RTL8150L-based Ethernet interfaces.
+Realtek RTL8150L USB Ethernet device.
 .It Xr wi 4
-Intersil PRISM 2-3 IEEE 802.11b wireless network interfaces.
+Intersil PRISM 2-3 IEEE 802.11b wireless network device.
+.It Xr zyd 4
+Zydas ZD1211 IEEE 802.11b/g wireless network device.
 .El
 .Ss Serial and parallel interfaces
 .Bl -tag -width 12n -offset ind -compact
+.It Xr uark 4
+Arkmicro Technologies ARK3116 based serial adapters.
 .It Xr ubsa 4
 Belkin serial adapters.
 .It Xr ucom 4
 Serial port-like devices.
+.It Xr ucycom 4
+Cypress Semiconductor serial adapters.
 .It Xr uftdi 4
 FTDI FT8U100AX-based serial adapters.
 .It Xr uipaq 4
@@ -169,25 +177,28 @@ MCT USB-RS232 serial adapters.
 .It Xr umodem 4
 .Tn USB
 Modems.
+.It Xr umsm 4
+Qualcomm MSM EVDO modems.
 .It Xr uplcom 4
 Prolific PL-2303 serial adapters.
+.It Xr uslcom 4
+Silicon Laboratories CP2101/CP2102 serial adapters.
 .It Xr uvscom 4
 SUNTAC Slipper U VS-10U serial adapters.
 .El
 .Ss Audio devices
 .Bl -tag -width 12n -offset ind -compact
 .It Xr uaudio 4
-Audio devices.
+USB audio devices.
 .It Xr umidi 4
-.Tn USB
-MIDI devices.
+USB MIDI devices.
 .It Xr urio 4
 Diamond Multimedia Rio MP3 players.
 .El
 .Ss Radio receiver devices
 .Bl -tag -width 12n -offset ind -compact
 .It Xr udsbr 4
-D-Link DSB-R100 USB radio.
+D-Link DSB-R100 USB radio device.
 .El
 .Ss Human Interface Devices
 .Bl -tag -width 12n -offset ind -compact
@@ -206,6 +217,8 @@ mouse devices.
 .El
 .Ss Miscellaneous devices
 .Bl -tag -width 12n -offset ind -compact
+.It Xr udcf 4
+Gude ADS Expert mouseCLOCK DCF77 time signal receiver.
 .It Xr ugen 4
 Generic driver for unknown
 .Tn USB
@@ -520,52 +533,9 @@ Human Interface Devices
 .Xr usbhidaction 1 ,
 .Xr usbhidctl 1 ,
 .Xr ioctl 2 ,
-.Xr usbhid 3 ,
-.Xr atu 4 ,
-.Xr aue 4 ,
-.Xr axe 4 ,
-.Xr cardbus 4 ,
-.Xr cdce 4 ,
-.Xr cue 4 ,
-.Xr eisa 4 ,
-.Xr intro 4 ,
-.Xr isa 4 ,
-.Xr isapnp 4 ,
-.Xr kue 4 ,
-.Xr pci 4 ,
-.Xr pcmcia 4 ,
-.Xr scsi 4 ,
-.Xr tpms 4 ,
-.Xr uaudio 4 ,
-.Xr ubsa 4 ,
-.Xr ubt 4 ,
-.Xr ucom 4 ,
-.Xr udav 4 ,
-.Xr udsbr 4 ,
-.Xr ueagle 4 ,
-.Xr uftdi 4 ,
-.Xr ugen 4 ,
-.Xr uhid 4 ,
-.Xr uhidev 4 ,
-.Xr uipaq 4 ,
-.Xr ukbd 4 ,
-.Xr ulpt 4 ,
-.Xr umass 4 ,
-.Xr umct 4 ,
-.Xr umidi 4 ,
-.Xr umodem 4 ,
-.Xr ums 4 ,
-.Xr upl 4 ,
-.Xr uplcom 4 ,
-.Xr ural 4 ,
-.Xr urio 4 ,
-.Xr url 4 ,
-.Xr uscanner 4 ,
-.Xr usscanner 4 ,
-.Xr uvisor 4 ,
-.Xr uvscom 4 ,
-.Xr uyap 4 ,
-.Xr wi 4 ,
+.Xr ehci 4 ,
+.Xr ohci 4 ,
+.Xr uhci 4 ,
 .Xr config 8 ,
 .Xr usbdevs 8
 .Pp

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ospfctl.c,v 1.25 2006/02/24 21:06:46 norby Exp $ */
+/*	$OpenBSD: ospfctl.c,v 1.35 2006/08/23 08:26:03 claudio Exp $ */
 
 /*
  * Copyright (c) 2005 Claudio Jeker <claudio@openbsd.org>
@@ -39,10 +39,9 @@
 
 __dead void	 usage(void);
 int		 show_summary_msg(struct imsg *);
+int		 get_ifms_type(int);
 int		 show_interface_msg(struct imsg *);
-const char	*print_if_type(enum iface_type type);
-const char	*print_if_state(int);
-const char	*print_nbr_state(int);
+int		 show_interface_detail_msg(struct imsg *);
 const char	*print_link(int);
 const char	*fmt_timeframe(time_t t);
 const char	*fmt_timeframe_core(time_t t);
@@ -81,9 +80,11 @@ usage(void)
 	exit(1);
 }
 
+/* dummy function so that ospfctl does not need libevent */
 void
 imsg_event_add(struct imsgbuf *i)
 {
+	/* nothing */
 }
 
 int
@@ -126,6 +127,10 @@ main(int argc, char *argv[])
 		imsg_compose(ibuf, IMSG_CTL_SHOW_SUM, 0, 0, NULL, 0);
 		break;
 	case SHOW_IFACE:
+		printf("%-11s %-18s %-6s %-10s %-10s %-8s %3s %3s\n",
+		    "Interface", "Address", "State", "HelloTimer", "Linkstate",
+		    "Uptime", "nc", "ac");
+	case SHOW_IFACE_DTAIL:
 		if (*res->ifname) {
 			ifidx = if_nametoindex(res->ifname);
 			if (ifidx == 0)
@@ -188,6 +193,19 @@ main(int argc, char *argv[])
 			imsg_compose(ibuf, IMSG_CTL_IFINFO, 0, 0, NULL, 0);
 		show_interface_head();
 		break;
+	case FIB:
+		errx(1, "fib couple|decouple");
+		break;
+	case FIB_COUPLE:
+		imsg_compose(ibuf, IMSG_CTL_FIB_COUPLE, 0, 0, NULL, 0);
+		printf("couple request sent.\n");
+		done = 1;
+		break;
+	case FIB_DECOUPLE:
+		imsg_compose(ibuf, IMSG_CTL_FIB_DECOUPLE, 0, 0, NULL, 0);
+		printf("decouple request sent.\n");
+		done = 1;
+		break;
 	case RELOAD:
 		imsg_compose(ibuf, IMSG_CTL_RELOAD, 0, 0, NULL, 0);
 		printf("reload request sent.\n");
@@ -217,6 +235,9 @@ main(int argc, char *argv[])
 				break;
 			case SHOW_IFACE:
 				done = show_interface_msg(&imsg);
+				break;
+			case SHOW_IFACE_DTAIL:
+				done = show_interface_detail_msg(&imsg);
 				break;
 			case SHOW_NBR:
 				done = show_nbr_msg(&imsg);
@@ -249,6 +270,9 @@ main(int argc, char *argv[])
 				done = show_fib_interface_msg(&imsg);
 				break;
 			case NONE:
+			case FIB:
+			case FIB_COUPLE:
+			case FIB_DECOUPLE:
 			case RELOAD:
 				break;
 			}
@@ -271,6 +295,8 @@ show_summary_msg(struct imsg *imsg)
 	case IMSG_CTL_SHOW_SUM:
 		sum = imsg->data;
 		printf("Router ID: %s\n", inet_ntoa(sum->rtr_id));
+		printf("Uptime: %s\n", sum->uptime == 0 ? "00:00:00" :
+		    fmt_timeframe_core(sum->uptime));
 		printf("RFC1583 compatibility flag is ");
 		if (sum->rfc1583compat)
 			printf("enabled\n");
@@ -305,7 +331,59 @@ show_summary_msg(struct imsg *imsg)
 }
 
 int
+get_ifms_type(int mediatype)
+{
+	switch (mediatype) {
+	case IFT_ETHER:
+		return (IFM_ETHER);
+	case IFT_FDDI:
+		return (IFM_FDDI);
+	case IFT_ISO88025:
+		return (IFM_TOKEN);
+	case IFT_CARP:
+		return (IFM_CARP);
+	case IFT_PPP:
+		return (IFM_TDM);
+	default:
+		return (0);
+	}
+}
+
+int
 show_interface_msg(struct imsg *imsg)
+{
+	struct ctl_iface	*iface;
+	char			*netid;
+
+	switch (imsg->hdr.type) {
+	case IMSG_CTL_SHOW_INTERFACE:
+		iface = imsg->data;
+
+		if (asprintf(&netid, "%s/%d", inet_ntoa(iface->addr),
+		    mask2prefixlen(iface->mask.s_addr)) == -1)
+			err(1, NULL);
+		printf("%-11s %-18s %-6s %-10s %-10s %s %3d %3d\n",
+		    iface->name, netid, if_state_name(iface->state),
+		    iface->hello_timer < 0 ? "stopped" :
+		    fmt_timeframe_core(iface->hello_timer),
+		    get_linkstate(get_ifms_type(iface->mediatype),
+		    iface->linkstate), iface->uptime == 0 ? "00:00:00" :
+		    fmt_timeframe_core(iface->uptime), iface->nbr_cnt,
+		    iface->adj_cnt);
+		free(netid);
+		break;
+	case IMSG_CTL_END:
+		printf("\n");
+		return (1);
+	default:
+		break;
+	}
+
+	return (0);
+}
+
+int
+show_interface_detail_msg(struct imsg *imsg)
 {
 	struct ctl_iface	*iface;
 
@@ -313,17 +391,20 @@ show_interface_msg(struct imsg *imsg)
 	case IMSG_CTL_SHOW_INTERFACE:
 		iface = imsg->data;
 		printf("\n");
-		printf("Interface %s is %d, line protocol is %s\n",
-		    iface->name, iface->linkstate, print_link(iface->flags));
+		printf("Interface %s, line protocol is %s\n",
+		    iface->name, print_link(iface->flags));
 		printf("  Internet address %s/%d, ",
 		    inet_ntoa(iface->addr),
 		    mask2prefixlen(iface->mask.s_addr));
 		printf("Area %s\n", inet_ntoa(iface->area));
+		printf("  Linkstate %s\n",
+		    get_linkstate(get_ifms_type(iface->mediatype),
+		    iface->linkstate));
 		printf("  Router ID %s, network type %s, cost: %d\n",
 		    inet_ntoa(iface->rtr_id),
-		    print_if_type(iface->type), iface->metric);
+		    if_type_name(iface->type), iface->metric);
 		printf("  Transmit delay is %d sec(s), state %s, priority %d\n",
-		    iface->transmit_delay, print_if_state(iface->state),
+		    iface->transmit_delay, if_state_name(iface->state),
 		    iface->priority);
 		printf("  Designated Router (ID) %s, ",
 		    inet_ntoa(iface->dr_id));
@@ -342,6 +423,8 @@ show_interface_msg(struct imsg *imsg)
 		else
 			printf("    Hello timer due in %s\n",
 			    fmt_timeframe_core(iface->hello_timer));
+		printf("    Uptime %s\n", iface->uptime == 0 ?
+		    "00:00:00" : fmt_timeframe_core(iface->uptime));
 		printf("  Neighbor count is %d, adjacent neighbor count is "
 		    "%d\n", iface->nbr_cnt, iface->adj_cnt);
 		if (iface->auth_type > 0) {
@@ -369,75 +452,6 @@ show_interface_msg(struct imsg *imsg)
 	}
 
 	return (0);
-}
-
-const char *
-print_if_type(enum iface_type type)
-{
-	switch (type) {
-	case IF_TYPE_POINTOPOINT:
-		return ("POINTOPOINT");
-	case IF_TYPE_BROADCAST:
-		return ("BROADCAST");
-	case IF_TYPE_NBMA:
-		return ("NBMA");
-	case IF_TYPE_POINTOMULTIPOINT:
-		return ("POINTOMULTIPOINT");
-	case IF_TYPE_VIRTUALLINK:
-		return ("VIRTUALLINK");
-	default:
-		return ("UNKNOWN");
-	}
-}
-
-const char *
-print_if_state(int state)
-{
-	switch (state) {
-	case IF_STA_DOWN:
-		return ("DOWN");
-	case IF_STA_LOOPBACK:
-		return ("LOOP");
-	case IF_STA_WAITING:
-		return ("WAIT");
-	case IF_STA_POINTTOPOINT:
-		return ("P2P");
-	case IF_STA_DROTHER:
-		return ("OTHER");
-	case IF_STA_BACKUP:
-		return ("BCKUP");
-	case IF_STA_DR:
-		return ("DR");
-	default:
-		return ("UNKNW");
-	}
-}
-
-const char *
-print_nbr_state(int state)
-{
-	switch (state) {
-	case NBR_STA_DOWN:
-		return ("DOWN");
-	case NBR_STA_ATTEMPT:
-		return ("ATTMP");
-	case NBR_STA_INIT:
-		return ("INIT");
-	case NBR_STA_2_WAY:
-		return ("2-WAY");
-	case NBR_STA_XSTRT:
-		return ("EXSTA");
-	case NBR_STA_SNAP:
-		return ("SNAP");
-	case NBR_STA_XCHNG:
-		return ("EXCHG");
-	case NBR_STA_LOAD:
-		return ("LOAD");
-	case NBR_STA_FULL:
-		return ("FULL");
-	default:
-		return ("UNKNW");
-	}
 }
 
 const char *
@@ -839,8 +853,8 @@ show_nbr_msg(struct imsg *imsg)
 	switch (imsg->hdr.type) {
 	case IMSG_CTL_SHOW_NBR:
 		nbr = imsg->data;
-		if (asprintf(&state, "%s/%s", print_nbr_state(nbr->nbr_state),
-		    print_if_state(nbr->iface_state)) == -1)
+		if (asprintf(&state, "%s/%s", nbr_state_name(nbr->nbr_state),
+		    if_state_name(nbr->iface_state)) == -1)
 			err(1, NULL);
 		printf("%-15s %-3d %-12s %-9s", inet_ntoa(nbr->id),
 		    nbr->priority, state, fmt_timeframe_core(nbr->dead_timer));
@@ -886,13 +900,14 @@ show_nbr_detail_msg(struct imsg *imsg)
 		    nbr->name);
 		printf("  Neighbor priority is %d, "
 		    "State is %s, %d state changes\n",
-		    nbr->priority, print_nbr_state(nbr->nbr_state),
+		    nbr->priority, nbr_state_name(nbr->nbr_state),
 		    nbr->state_chng_cnt);
 		printf("  DR is %s, ", inet_ntoa(nbr->dr));
 		printf("BDR is %s\n", inet_ntoa(nbr->bdr));
 		printf("  Options %s\n", print_ospf_options(nbr->options));
 		printf("  Dead timer due in %s\n",
 		    fmt_timeframe_core(nbr->dead_timer));
+		printf("  Uptime %s\n", fmt_timeframe_core(nbr->uptime));
 		printf("  Database Summary List %d\n", nbr->db_sum_lst_cnt);
 		printf("  Link State Request List %d\n", nbr->ls_req_lst_cnt);
 		printf("  Link State Retransmission List %d\n",
@@ -933,8 +948,8 @@ show_rib_msg(struct imsg *imsg)
 		}
 
 		printf("%-20s %-17s %-12s %-9s %-7d %s\n", dstnet,
-		    inet_ntoa(rt->nexthop), path_type_names[rt->p_type],
-		    dst_type_names[rt->d_type], rt->cost,
+		    inet_ntoa(rt->nexthop), path_type_name(rt->p_type),
+		    dst_type_name(rt->d_type), rt->cost,
 		    rt->uptime == 0 ? "-" : fmt_timeframe_core(rt->uptime));
 		free(dstnet);
 		break;
@@ -1044,7 +1059,7 @@ show_rib_detail_msg(struct imsg *imsg)
 			}
 			printf("%-18s %-15s ", dstnet, inet_ntoa(rt->nexthop));
 			printf("%-15s %-12s %-7d", inet_ntoa(rt->adv_rtr),
-			    path_type_names[rt->p_type], rt->cost);
+			    path_type_name(rt->p_type), rt->cost);
 			free(dstnet);
 
 			if (rt->d_type == DT_RTR)
@@ -1064,7 +1079,7 @@ show_rib_detail_msg(struct imsg *imsg)
 
 			printf("%-18s %-15s ", dstnet, inet_ntoa(rt->nexthop));
 			printf("%-15s %-12s %-7d %-7d\n",
-			    inet_ntoa(rt->adv_rtr), path_type_names[rt->p_type],
+			    inet_ntoa(rt->adv_rtr), path_type_name(rt->p_type),
 			    rt->cost, rt->cost2);
 
 			lasttype = RIB_EXT;
@@ -1111,7 +1126,7 @@ show_fib_msg(struct imsg *imsg)
 		else
 			printf("*");
 
-		if (k->flags & F_OSPFD_INSERTED)
+		if (!(k->flags & F_KERNEL))
 			printf("O");
 		else if (k->flags & F_CONNECTED)
 			printf("C");
@@ -1166,7 +1181,7 @@ get_media_descr(int media_type)
 		if (media_type == p->ifmt_word)
 			return (p->ifmt_string);
 
-	return ("unknown media");
+	return ("unknown");
 }
 
 const char *
@@ -1186,7 +1201,7 @@ get_linkstate(int media_type, int link_state)
 			return (p->ifms_string[link_state == LINK_STATE_UP]);
 		}
 
-	return ("unknown link state");
+	return ("unknown");
 }
 
 void

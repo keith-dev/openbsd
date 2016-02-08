@@ -1,4 +1,4 @@
-/*	$OpenBSD: sysdef.h,v 1.13 2005/06/14 18:14:40 kjell Exp $	*/
+/*	$OpenBSD: sysdef.h,v 1.15 2006/08/01 22:16:03 jason Exp $	*/
 
 /* This file is in the public domain. */
 
@@ -6,15 +6,16 @@
  *		POSIX system header file
  */
 #include <sys/param.h>
+#include <sys/queue.h>
 #include <stdio.h>
 #include <unistd.h>
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
+#include <signal.h>
 
 #define	KBLOCK		8192	/* Kill grow.			 */
 #define	GOOD		0	/* Good exit status.		 */
-#define	SYMBLINK	1	/* Handle symbolic links.	 */
 
 typedef int	RSIZE;		/* Type for file/region sizes	 */
 typedef short	KCHAR;		/* Type for internal keystrokes	 */

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ventel.c,v 1.10 2003/06/03 02:56:18 millert Exp $	*/
+/*	$OpenBSD: ventel.c,v 1.12 2006/03/17 19:17:13 moritz Exp $	*/
 /*	$NetBSD: ventel.c,v 1.6 1997/02/11 09:24:21 mrg Exp $	*/
 
 /*
@@ -34,7 +34,7 @@
 #if 0
 static char sccsid[] = "@(#)ventel.c	8.1 (Berkeley) 6/6/93";
 #endif
-static const char rcsid[] = "$OpenBSD: ventel.c,v 1.10 2003/06/03 02:56:18 millert Exp $";
+static const char rcsid[] = "$OpenBSD: ventel.c,v 1.12 2006/03/17 19:17:13 moritz Exp $";
 #endif /* not lint */
 
 /*
@@ -47,13 +47,13 @@ static const char rcsid[] = "$OpenBSD: ventel.c,v 1.10 2003/06/03 02:56:18 mille
 
 #define	MAXRETRY	5
 
-static	void sigALRM();
-static	int timeout = 0;
+static	int dialtimeout = 0;
 static	jmp_buf timeoutbuf;
 
-static	int gobble(), vensync();
-static	void echo();
-void	ven_disconnect();
+static void	echo(char *);
+static void	sigALRM(int);
+static int	gobble(char, char *);
+static int	vensync(int);
 
 /*
  * some sleep calls have been replaced by this macro
@@ -66,9 +66,7 @@ void	ven_disconnect();
 #define busyloop(n) do { DELAY(n); } while (0)
 
 int
-ven_dialer(num, acu)
-	char *num;
-	char *acu;
+ven_dialer(char *num, char *acu)
 {
 	char *cp;
 	int connected = 0;
@@ -103,15 +101,15 @@ ven_dialer(num, acu)
 		connected = gobble('!', line);
 	tcflush(FD, TCIOFLUSH);
 #ifdef ACULOG
-	if (timeout) {
+	if (dialtimeout) {
 		(void)snprintf(line, sizeof line, "%ld second dial timeout",
 			number(value(DIALTIMEOUT)));
 		logent(value(HOST), num, "ventel", line);
 	}
 #endif
-	if (timeout)
+	if (dialtimeout)
 		ven_disconnect();	/* insurance */
-	if (connected || timeout || !boolean(value(VERBOSE)))
+	if (connected || dialtimeout || !boolean(value(VERBOSE)))
 		return (connected);
 	/* call failed, parse response for user */
 	cp = strchr(line, '\r');
@@ -135,23 +133,20 @@ ven_dialer(num, acu)
 }
 
 void
-ven_disconnect()
+ven_disconnect(void)
 {
-
 	close(FD);
 }
 
 void
-ven_abort()
+ven_abort(void)
 {
-
 	write(FD, "\03", 1);
 	close(FD);
 }
 
 static void
-echo(s)
-	char *s;
+echo(char *s)
 {
 	char c;
 
@@ -173,25 +168,24 @@ echo(s)
 		}
 }
 
+/*ARGSUSED*/
 static void
-sigALRM()
+sigALRM(int signo)
 {
 	printf("\07timeout waiting for reply\n");
-	timeout = 1;
+	dialtimeout = 1;
 	longjmp(timeoutbuf, 1);
 }
 
 static int
-gobble(match, response)
-	char match;
-	char response[];
+gobble(char match, char response[])
 {
 	char *cp = response;
 	sig_t f;
 	char c;
 
 	f = signal(SIGALRM, sigALRM);
-	timeout = 0;
+	dialtimeout = 0;
 	do {
 		if (setjmp(timeoutbuf)) {
 			signal(SIGALRM, f);
@@ -219,7 +213,7 @@ gobble(match, response)
  * there are gory ways to simulate this.
  */
 static int
-vensync(fd)
+vensync(int fd)
 {
 	int already = 0, nread;
 	char buf[60];
@@ -260,4 +254,3 @@ vensync(fd)
 	}
 	return (0);
 }
-

@@ -1,4 +1,4 @@
-.\" $OpenBSD: sasyncd.conf.5,v 1.9 2005/05/31 21:15:32 jmc Exp $
+.\" $OpenBSD: sasyncd.conf.5,v 1.14 2006/09/12 13:39:37 jmc Exp $
 .\"
 .\" Copyright (c) 2005 Håkan Olsson.  All rights reserved.
 .\"
@@ -59,17 +59,32 @@ pseudo user and be readable only by this owner, e.g.\&
 The following configuration settings are understood:
 .Bl -tag -width Ds
 .It Xo
-.Ic carp interface
-.Ar interface Op Ic interval Ar seconds
+.Ic interface
+.Ar interface
 .Xc
 Specify which
 .Xr carp 4
 interface
-.Nm sasyncd
+.Xr sasyncd 8
 should track master/slave state on.
-Optionally state how often the daemon should check the interface
-for state changes.
-Defaults to once every 10 seconds.
+.It Xo
+.Ic group
+.Ar group
+.Xc
+Specify which interface group
+.Xr sasyncd 8
+should use to suppress
+.Xr carp 4
+preemption while the system boots.
+The default is to use the
+.Dq carp
+group.
+.Pp
+For more information on interface groups,
+see the
+.Ic group
+keyword in
+.Xr ifconfig 8 .
 .It Ic flushmode sync | startup | never
 Controls how the
 .Xr sasyncd 8
@@ -81,10 +96,10 @@ Pass any SADB_FLUSH messages along.
 For example, in this mode
 .Xr sasyncd 8
 will synchronize an
-.Ic ipsecadm flush
+.Ic ipsecctl -F
 command to all connected slaves.
 For more information, see
-.Xr ipsecadm 8 .
+.Xr ipsecctl 8 .
 .It Ic startup
 Send a SADB_FLUSH message to the slaves as they connect, and act as
 .Ic sync
@@ -147,7 +162,7 @@ bytes long (corresponding to AES using a 128, 192 or 256 bit key).
 .Xr chmod 1 ,
 .Xr carp 4 ,
 .Xr chown 8 ,
-.Xr ipsecadm 8 ,
+.Xr ipsecctl 8 ,
 .Xr sasyncd 8
 .Sh HISTORY
 The

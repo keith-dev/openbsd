@@ -1,4 +1,4 @@
-/*	$OpenBSD: monitor.c,v 1.7 2006/01/26 09:53:46 moritz Exp $	*/
+/*	$OpenBSD: monitor.c,v 1.11 2006/09/01 01:13:25 mpf Exp $	*/
 
 /*
  * Copyright (c) 2005 Håkan Olsson.  All rights reserved.
@@ -29,17 +29,20 @@
 #include <sys/types.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <sys/sysctl.h>
 #include <sys/wait.h>
 #include <net/pfkeyv2.h>
 
 #include <errno.h>
+#include <fcntl.h>
 #include <pwd.h>
 #include <signal.h>
 #include <string.h>
 #include <stdlib.h>
 #include <unistd.h>
 
+#include "monitor.h"
 #include "sasyncd.h"
 
 struct m_state {
@@ -52,6 +55,8 @@ volatile sig_atomic_t		sigchld = 0;
 static void	got_sigchld(int);
 static void	sig_to_child(int);
 static void	m_priv_pfkey_snap(int);
+static void	m_priv_isakmpd_activate(void);
+static void	m_priv_isakmpd_passivate(void);
 static ssize_t	m_write(int, void *, size_t);
 static ssize_t	m_read(int, void *, size_t);
 
@@ -64,11 +69,11 @@ monitor_init(void)
 	int		p[2];
 
 	if (socketpair(AF_UNIX, SOCK_STREAM, PF_UNSPEC, p) != 0) {
-		log_err("%s: socketpair failed - %s", __progname, 
+		log_err("%s: socketpair failed - %s", __progname,
 		    strerror(errno));
 		exit(1);
 	}
-	
+
 	if (!pw) {
 		log_err("%s: getpwnam(\"%s\") failed", __progname,
 		    SASYNCD_USER);
@@ -82,11 +87,6 @@ monitor_init(void)
 	signal(SIGHUP, sig_to_child);
 	signal(SIGINT, sig_to_child);
 
-	if (chroot(pw->pw_dir) != 0 || chdir("/") != 0) {
-		log_err("%s: chroot failed", __progname);
-		exit(1);
-	}
-
 	m_state.pid = fork();
 
 	if (m_state.pid == -1) {
@@ -97,7 +97,12 @@ monitor_init(void)
 		m_state.s = p[0];
 		close(p[1]);
 
-		if (setgroups(1, &pw->pw_gid) || 
+		if (chroot(pw->pw_dir) != 0 || chdir("/") != 0) {
+			log_err("%s: chroot failed", __progname);
+			exit(1);
+		}
+
+		if (setgroups(1, &pw->pw_gid) ||
 		    setresgid(pw->pw_gid, pw->pw_gid, pw->pw_gid) ||
 		    setresuid(pw->pw_uid, pw->pw_uid, pw->pw_uid)) {
 			log_err("%s: failed to drop privileges", __progname);
@@ -157,20 +162,62 @@ monitor_loop(void)
 				break;
 		}
 
-		/* Wait for next snapshot task. Disregard read data. */
+		/* Wait for next task */
 		if ((r = m_read(m_state.s, &v, sizeof v)) < 1) {
 			if (r == -1)
 				log_err(0, "monitor_loop: read() ");
 			break;
 		}
 
-		/* Get the data. */
-		m_priv_pfkey_snap(m_state.s);
+		switch (v) {
+		case MONITOR_GETSNAP:
+			/* Get the data. */
+			m_priv_pfkey_snap(m_state.s);
+			break;
+		case MONITOR_CARPINC:
+			carp_demote(CARP_INC, 1);
+			break;
+		case MONITOR_CARPDEC:
+			carp_demote(CARP_DEC, 1);
+			break;
+		case MONITOR_ISAKMPD_ACTIVATE:
+			m_priv_isakmpd_activate();
+			break;
+		case MONITOR_ISAKMPD_PASSIVATE:
+			m_priv_isakmpd_passivate();
+			break;
+		}
 	}
+
+	monitor_carpundemote(NULL);
 
 	if (!sigchld)
 		log_msg(0, "monitor_loop: priv process exiting abnormally");
 	exit(0);
+}
+
+void
+monitor_carpundemote(void *v)
+{
+	u_int32_t mtype = MONITOR_CARPDEC;
+	if (!carp_demoted)
+		return;
+	if (m_write(m_state.s, &mtype, sizeof mtype) < 1)
+		log_msg(1, "monitor_carpundemote: unable to write to monitor");
+	else
+		carp_demoted = 0;
+}
+
+void
+monitor_carpdemote(void *v)
+{
+	u_int32_t mtype = MONITOR_CARPINC;
+	if (carp_demoted)
+		return;
+	if (m_write(m_state.s, &mtype, sizeof mtype) < 1)
+		log_msg(1, "monitor_carpdemote: unable to write to monitor");
+	else
+		carp_demoted = 1;
 }
 
 int
@@ -180,8 +227,7 @@ monitor_get_pfkey_snap(u_int8_t **sadb, u_int32_t *sadbsize, u_int8_t **spd,
 	u_int32_t	v;
 	ssize_t		rbytes;
 
-	/* We write a (any) value to the monitor socket to start a snapshot. */
-	v = 0;
+	v = MONITOR_GETSNAP;
 	if (m_write(m_state.s, &v, sizeof v) < 1)
 		return -1;
 
@@ -241,6 +287,16 @@ monitor_get_pfkey_snap(u_int8_t **sadb, u_int32_t *sadbsize, u_int8_t **spd,
 	return 0;
 }
 
+int
+monitor_isakmpd_active(int active)
+{
+	u_int32_t	cmd = 
+	    active ? MONITOR_ISAKMPD_ACTIVATE : MONITOR_ISAKMPD_PASSIVATE;
+	if (write(m_state.s, &cmd, sizeof cmd) < 1)
+		return -1;
+	return 0;
+}
+
 /* Privileged */
 static void
 m_priv_pfkey_snap(int s)
@@ -262,7 +318,7 @@ m_priv_pfkey_snap(int s)
 		sadb_buflen = 0;
 		goto try_spd;
 	}
-	
+
 	sadb_buflen = sz;
 	if ((sadb_buf = malloc(sadb_buflen)) == NULL) {
 		log_err("m_priv_pfkey_snap: malloc");
@@ -286,7 +342,7 @@ m_priv_pfkey_snap(int s)
 		spd_buflen = 0;
 		goto out;
 	}
-	
+
 	spd_buflen = sz;
 	if ((spd_buf = malloc(spd_buflen)) == NULL) {
 		log_err("m_priv_pfkey_snap: malloc");
@@ -328,6 +384,48 @@ m_priv_pfkey_snap(int s)
 		free(spd_buf);
 	}
 	return;
+}
+
+static void
+m_priv_isakmpd_fifocmd(const char *cmd)
+{
+	struct stat	sb;
+	int		fd = -1;
+
+	if ((fd = open(ISAKMPD_FIFO, O_WRONLY)) == -1) {
+		log_err("m_priv_isakmpd_fifocmd: open(%s)", ISAKMPD_FIFO);
+		goto out;
+	}
+	if (fstat(fd, &sb) == -1) {
+		log_err("m_priv_isakmpd_fifocmd: fstat(%s)", ISAKMPD_FIFO);
+		goto out;
+	}
+	if (!S_ISFIFO(sb.st_mode)) {
+		log_err("m_priv_isakmpd_fifocmd: %s not a fifo", ISAKMPD_FIFO);
+		goto out;
+	}
+
+	if (write(fd, cmd, strlen(cmd)) == -1) {
+		log_err("m_priv_isakmpd_fifocmd write");
+		goto out;
+	}
+ out:
+	if (fd != -1)
+		close(fd);
+	/* No values returned. */
+	return;
+}
+
+static void
+m_priv_isakmpd_activate(void)
+{
+	m_priv_isakmpd_fifocmd("M active\n");
+}
+
+static void
+m_priv_isakmpd_passivate(void)
+{
+	m_priv_isakmpd_fifocmd("M passive\n");
 }
 
 ssize_t

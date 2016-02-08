@@ -1,4 +1,4 @@
-/*	$OpenBSD: mopchk.c,v 1.10 2003/12/01 00:56:51 avsm Exp $	*/
+/*	$OpenBSD: mopchk.c,v 1.12 2006/04/29 16:26:56 maja Exp $	*/
 
 /*
  * Copyright (c) 1995-96 Mats O Jansson.  All rights reserved.
@@ -24,8 +24,8 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef LINT
-static const char rcsid[] = "$OpenBSD: mopchk.c,v 1.10 2003/12/01 00:56:51 avsm Exp $";
+#ifndef lint
+static const char rcsid[] = "$OpenBSD: mopchk.c,v 1.12 2006/04/29 16:26:56 maja Exp $";
 #endif
 
 /*
@@ -42,8 +42,7 @@ static const char rcsid[] = "$OpenBSD: mopchk.c,v 1.10 2003/12/01 00:56:51 avsm 
 #include "common/file.h"
 
 /*
- * The list of all interfaces that are being listened to.  rarp_loop()
- * "selects" on the descriptors in this list.
+ * The list of all interfaces that are being listened to.
  */
 struct if_info *iflist;
 
@@ -53,7 +52,7 @@ void   mopProcess(struct if_info *, u_char *);
 int     AllFlag = 0;		/* listen on "all" interfaces  */
 int	VersionFlag = 0;	/* Show version */
 int	promisc = 0;		/* promisc mode not needed */
-char	*Program;
+extern char *__progname;
 extern char version[];
 
 int
@@ -62,21 +61,12 @@ main(argc, argv)
 	char  **argv;
 {
 	int     op, i, fd;
-	char   *filename;
+	char   *filename, *p;
 	struct if_info *ii;
 	int	err, aout;
 
-	extern int optind, opterr;
-
-	if ((Program = strrchr(argv[0], '/')))
-		Program++;
-	else
-		Program = argv[0];
-	if (*Program == '-')
-		Program++;
-
 	/* All error reporting is done through syslogs. */
-	openlog(Program, LOG_PID | LOG_CONS, LOG_DAEMON);
+	openlog(__progname, LOG_PID | LOG_CONS, LOG_DAEMON);
 
 	opterr = 0;
 	while ((op = getopt(argc, argv, "av")) != -1) {
@@ -94,7 +84,7 @@ main(argc, argv)
 	}
 	
 	if (VersionFlag)
-		printf("%s: Version %s\n",Program,version);
+		printf("%s: Version %s\n", __progname, version);
 
 	if (AllFlag) {
 		if (VersionFlag)
@@ -105,11 +95,17 @@ main(argc, argv)
 			printf("No interface\n");
 		} else {
 			printf("Interface Address\n");
+			p = NULL;
 			for (ii = iflist; ii; ii = ii->next) {
+				if (p != NULL) {
+					if (strcmp(p,ii->if_name) == 0)
+						continue;
+				}	
 				printf("%-9s %x:%x:%x:%x:%x:%x\n",
 				       ii->if_name,
 				       ii->eaddr[0],ii->eaddr[1],ii->eaddr[2],
 				       ii->eaddr[3],ii->eaddr[4],ii->eaddr[5]);
+				p = ii->if_name;
 			}
 		}
 	}
@@ -130,8 +126,8 @@ main(argc, argv)
 		} else {
 			err = CheckAOutFile(fd);
 			if (err == 0) {
-				if (GetAOutFileInfo(fd, 0, 0, 0, 0,
-						    0, 0, 0, 0, &aout) < 0) {
+				if (GetAOutFileInfo(fd, 0, 0, 0, 0, 0, 0, 0, 0,
+						    &aout, INFO_PRINT) < 0) {
 					printf("Some failure in GetAOutFileInfo\n");
 					aout = -1;
 				}
@@ -141,7 +137,7 @@ main(argc, argv)
 			if (aout == -1)
 				err = CheckMopFile(fd);
 			if (aout == -1 && err == 0) {
-				if (GetMopFileInfo(fd, 0, 0) < 0) {
+				if (GetMopFileInfo(fd, 0, 0, INFO_PRINT) < 0) {
 					printf("Some failure in GetMopFileInfo\n");
 				}
 			};
@@ -153,13 +149,14 @@ main(argc, argv)
 void
 Usage()
 {
-	(void) fprintf(stderr, "usage: %s [-a] [-v] [filename...]\n",Program);
+	fprintf(stderr, "usage: %s [-a] [-v] [filename...]\n", __progname);
 	exit(1);
 }
 
 /*
  * Process incomming packages, NOT. 
  */
+/* ARGSUSED */
 void
 mopProcess(ii, pkt)
 	struct if_info *ii;

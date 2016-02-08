@@ -1,4 +1,4 @@
-/*	$OpenBSD: buffer.c,v 1.54 2005/12/20 06:17:35 kjell Exp $	*/
+/*	$OpenBSD: buffer.c,v 1.63 2006/07/25 08:27:09 kjell Exp $	*/
 
 /* This file is in the public domain. */
 
@@ -6,11 +6,14 @@
  *		Buffer handling.
  */
 
-#include "def.h"
-#include "kbd.h"		/* needed for modes */
+#include <libgen.h>
 #include <stdarg.h>
 
+#include "def.h"
+#include "kbd.h"		/* needed for modes */
+
 static struct buffer  *makelist(void);
+static struct buffer *bnew(void);
 
 /* ARGSUSED */
 int
@@ -47,7 +50,7 @@ usebuffer(int f, int n)
 		bufp = eread("Switch to buffer: ", bufn, NBUFN, EFNEW | EFBUF);
 	else
 		bufp = eread("Switch to buffer: (default %s) ", bufn, NBUFN,
-			  EFNUL | EFNEW | EFBUF, curbp->b_altb->b_bname);
+		    EFNUL | EFNEW | EFBUF, curbp->b_altb->b_bname);
 
 	if (bufp == NULL)
 		return (ABORT);
@@ -58,7 +61,7 @@ usebuffer(int f, int n)
 
 	/* and put it in current window */
 	curbp = bp;
-	return (showbuffer(bp, curwp, WFFORCE | WFHARD));
+	return (showbuffer(bp, curwp, WFFRAME | WFFULL));
 }
 
 /*
@@ -76,17 +79,18 @@ poptobuffer(int f, int n)
 	if ((curbp->b_altb == NULL) &&
 	    ((curbp->b_altb = bfind("*scratch*", TRUE)) == NULL))
 		bufp = eread("Switch to buffer in other window: ", bufn, NBUFN,
-			  EFNEW | EFBUF);
+		    EFNEW | EFBUF);
 	else
 		bufp = eread("Switch to buffer in other window: (default %s) ",
-			bufn, NBUFN, EFNUL | EFNEW | EFBUF, curbp->b_altb->b_bname);
+		    bufn, NBUFN, EFNUL | EFNEW | EFBUF, curbp->b_altb->b_bname);
 	if (bufp == NULL)
 		return (ABORT);
 	if (bufp[0] == '\0' && curbp->b_altb != NULL)
 		bp = curbp->b_altb;
 	else if ((bp = bfind(bufn, TRUE)) == NULL)
 		return (FALSE);
-
+	if (bp == curbp)
+		return (splitwind(f, n));
 	/* and put it in a new window */
 	if ((wp = popbuf(bp)) == NULL)
 		return (FALSE);
@@ -150,7 +154,7 @@ killbuffer(struct buffer *bp)
 	for (wp = wheadp; bp->b_nwnd > 0; wp = wp->w_wndp) {
 		if (wp->w_bufp == bp) {
 			bp2 = bp1->b_altb;	/* save alternate buffer */
-			if (showbuffer(bp1, wp, WFMODE | WFFORCE | WFHARD))
+			if (showbuffer(bp1, wp, WFMODE | WFFRAME | WFFULL))
 				bp1->b_altb = bp2;
 			else
 				bp1 = bp2;
@@ -158,7 +162,7 @@ killbuffer(struct buffer *bp)
 	}
 	if (bp == curbp)
 		curbp = bp1;
-	free(bp->b_linep);			/* Release header line.  */
+	free(bp->b_headp);			/* Release header line.  */
 	bp2 = NULL;				/* Find the header.	 */
 	bp1 = bheadp;
 	while (bp1 != bp) {
@@ -295,8 +299,8 @@ makelist(void)
 
 		nbytes = 0;			/* Count bytes in buf.	 */
 		if (bp != blp) {
-			lp = lforw(bp->b_linep);
-			while (lp != bp->b_linep) {
+			lp = bfirstlp(bp);
+			while (lp != bp->b_headp) {
 				nbytes += llength(lp) + 1;
 				lp = lforw(lp);
 			}
@@ -317,7 +321,7 @@ makelist(void)
 		    bp->b_fname) == FALSE)
 			return (NULL);
 	}
-	blp->b_dotp = lforw(blp->b_linep);	/* put dot at beginning of
+	blp->b_dotp = bfirstlp(blp);		/* put dot at beginning of
 						 * buffer */
 	blp->b_doto = 0;
 	return (blp);				/* All done		 */
@@ -406,10 +410,11 @@ addlinef(struct buffer *bp, char *fmt, ...)
 	lp->l_used = strlen(lp->l_text);
 	va_end(ap);
 
-	bp->b_linep->l_bp->l_fp = lp;		/* Hook onto the end	 */
-	lp->l_bp = bp->b_linep->l_bp;
-	bp->b_linep->l_bp = lp;
-	lp->l_fp = bp->b_linep;
+	bp->b_headp->l_bp->l_fp = lp;		/* Hook onto the end	 */
+	lp->l_bp = bp->b_headp->l_bp;
+	bp->b_headp->l_bp = lp;
+	lp->l_fp = bp->b_headp;
+	bp->b_lines++;
 
 	return (TRUE);
 }
@@ -455,16 +460,13 @@ anycb(int f)
 /*
  * Search for a buffer, by name.
  * If not found, and the "cflag" is TRUE,
- * create a buffer and put it in the list of
- * all buffers. Return pointer to the BUFFER
- * block for the buffer.
+ * create a new buffer. Return pointer to the found
+ * (or new) buffer.
  */
 struct buffer *
 bfind(const char *bname, int cflag)
 {
 	struct buffer	*bp;
-	struct line	*lp;
-	int		 i;
 
 	bp = bheadp;
 	while (bp != NULL) {
@@ -475,18 +477,34 @@ bfind(const char *bname, int cflag)
 	if (cflag != TRUE)
 		return (NULL);
 
-	bp = calloc(1, sizeof(struct buffer));
-	if (bp == NULL) {
-		ewprintf("Can't get %d bytes", sizeof(struct buffer));
-		return (NULL);
-	}
+	bp = bnew();
+
 	if ((bp->b_bname = strdup(bname)) == NULL) {
 		ewprintf("Can't get %d bytes", strlen(bname) + 1);
 		free(bp);
 		return (NULL);
 	}
+
+	return (bp);
+}
+
+/*
+ * Create a new buffer and put it in the list of
+ * all buffers. 
+ */
+static struct buffer *
+bnew()
+{
+	struct buffer *bp;
+	struct line	*lp;
+	int		 i;
+
+	bp = calloc(1, sizeof(struct buffer));
+	if (bp == NULL) {
+		ewprintf("Can't get %d bytes", sizeof(struct buffer));
+		return (NULL);
+	}
 	if ((lp = lalloc(0)) == NULL) {
-		free(bp->b_bname);
 		free(bp);
 		return (NULL);
 	}
@@ -497,7 +515,7 @@ bfind(const char *bname, int cflag)
 	bp->b_marko = 0;
 	bp->b_flag = defb_flag;
 	bp->b_nwnd = 0;
-	bp->b_linep = lp;
+	bp->b_headp = lp;
 	bp->b_nmodes = defb_nmodes;
 	LIST_INIT(&bp->b_undo);
 	bp->b_undoptr = NULL;
@@ -507,11 +525,15 @@ bfind(const char *bname, int cflag)
 		bp->b_modes[i] = defb_modes[i];
 	} while (i++ < defb_nmodes);
 	bp->b_fname[0] = '\0';
+	bp->b_cwd[0] = '\0';
 	bzero(&bp->b_fi, sizeof(bp->b_fi));
 	lp->l_fp = lp;
 	lp->l_bp = lp;
 	bp->b_bufp = bheadp;
 	bheadp = bp;
+	bp->b_dotline = bp->b_markline = 1;
+	bp->b_lines = 1;
+
 	return (bp);
 }
 
@@ -535,12 +557,15 @@ bclear(struct buffer *bp)
 	    (s = eyesno("Buffer modified; kill anyway")) != TRUE)
 		return (s);
 	bp->b_flag &= ~BFCHG;	/* Not changed		 */
-	while ((lp = lforw(bp->b_linep)) != bp->b_linep)
+	while ((lp = lforw(bp->b_headp)) != bp->b_headp)
 		lfree(lp);
-	bp->b_dotp = bp->b_linep;	/* Fix dot */
+	bp->b_dotp = bp->b_headp;	/* Fix dot */
 	bp->b_doto = 0;
 	bp->b_markp = NULL;	/* Invalidate "mark"	 */
 	bp->b_marko = 0;
+	bp->b_dotline = bp->b_markline = 1;
+	bp->b_lines = 1;
+
 	return (TRUE);
 }
 
@@ -567,6 +592,8 @@ showbuffer(struct buffer *bp, struct mgwin *wp, int flags)
 			obp->b_doto = wp->w_doto;
 			obp->b_markp = wp->w_markp;
 			obp->b_marko = wp->w_marko;
+			obp->b_dotline = wp->w_dotline;
+			obp->b_markline = wp->w_markline;
 		}
 	}
 	/* Now, attach the new buffer to the window */
@@ -577,6 +604,8 @@ showbuffer(struct buffer *bp, struct mgwin *wp, int flags)
 		wp->w_doto = bp->b_doto;
 		wp->w_markp = bp->b_markp;
 		wp->w_marko = bp->b_marko;
+		wp->w_dotline = bp->b_dotline;
+		wp->w_markline = bp->b_markline;
 	} else
 		/* already on screen, steal values from other window */
 		for (owp = wheadp; owp != NULL; owp = wp->w_wndp)
@@ -585,9 +614,35 @@ showbuffer(struct buffer *bp, struct mgwin *wp, int flags)
 				wp->w_doto = owp->w_doto;
 				wp->w_markp = owp->w_markp;
 				wp->w_marko = owp->w_marko;
+				wp->w_dotline = owp->w_dotline;
 				break;
 			}
 	wp->w_flag |= WFMODE | flags;
+	return (TRUE);
+}
+
+/*
+ * Augment a buffer name with a number, if necessary
+ *
+ * If more than one file of the same basename() is open,
+ * the additional buffers are named "file<2>", "file<3>", and
+ * so forth.  This function adjusts a buffer name to
+ * include the number, if necessary.
+ */
+int
+augbname(char *bn, const char *fn, size_t bs)
+{
+	int 	 count;
+	size_t	 remain, len;
+
+	len = strlcpy(bn, basename(fn), bs);
+	if (len >= bs)
+		return (FALSE);
+
+	remain = bs - len;
+	for (count = 2; bfind(bn, FALSE) != NULL; count++)
+		snprintf(bn + len, remain, "<%d>", count);
+
 	return (TRUE);
 }
 
@@ -606,10 +661,10 @@ popbuf(struct buffer *bp)
 	} else
 		for (wp = wheadp; wp != NULL; wp = wp->w_wndp)
 			if (wp->w_bufp == bp) {
-				wp->w_flag |= WFHARD | WFFORCE;
+				wp->w_flag |= WFFULL | WFFRAME;
 				return (wp);
 			}
-	if (showbuffer(bp, wp, WFHARD) != TRUE)
+	if (showbuffer(bp, wp, WFFULL) != TRUE)
 		return (NULL);
 	return (wp);
 }
@@ -645,12 +700,12 @@ bufferinsert(int f, int n)
 	}
 	/* insert the buffer */
 	nline = 0;
-	clp = lforw(bp->b_linep);
+	clp = bfirstlp(bp);
 	for (;;) {
 		for (clo = 0; clo < llength(clp); clo++)
 			if (linsert(1, lgetc(clp, clo)) == FALSE)
 				return (FALSE);
-		if ((clp = lforw(clp)) == bp->b_linep)
+		if ((clp = lforw(clp)) == bp->b_headp)
 			break;
 		if (newline(FFRAND, 1) == FALSE)	/* fake newline */
 			return (FALSE);
@@ -663,10 +718,10 @@ bufferinsert(int f, int n)
 
 	clp = curwp->w_linep;		/* cosmetic adjustment	*/
 	if (curwp->w_dotp == clp) {	/* for offscreen insert */
-		while (nline-- && lback(clp) != curbp->b_linep)
+		while (nline-- && lback(clp) != curbp->b_headp)
 			clp = lback(clp);
 		curwp->w_linep = clp;	/* adjust framing.	*/
-		curwp->w_flag |= WFHARD;
+		curwp->w_flag |= WFFULL;
 	}
 	return (TRUE);
 }
@@ -701,16 +756,43 @@ popbuftop(struct buffer *bp)
 {
 	struct mgwin *wp;
 
-	bp->b_dotp = lforw(bp->b_linep);
+	bp->b_dotp = bfirstlp(bp);
 	bp->b_doto = 0;
 	if (bp->b_nwnd != 0) {
 		for (wp = wheadp; wp != NULL; wp = wp->w_wndp)
 			if (wp->w_bufp == bp) {
 				wp->w_dotp = bp->b_dotp;
 				wp->w_doto = 0;
-				wp->w_flag |= WFHARD;
+				wp->w_flag |= WFFULL;
 			}
 	}
 	return (popbuf(bp) != NULL);
 }
 #endif
+
+/*
+ * Return the working directory for the current buffer, terminated
+ * with a '/'. First, try to extract it from the current buffer's
+ * filename. If that fails, use global cwd.
+ */
+int
+getbufcwd(char *path, size_t plen)
+{
+	char cwd[NFILEN];
+
+	if (plen == 0)
+		return (FALSE);
+
+	if (curbp->b_cwd[0] != '\0') {
+		(void)strlcpy(path, curbp->b_cwd, plen);
+	} else {
+		if (getcwdir(cwd, sizeof(cwd)) == FALSE)
+			goto error;
+		(void)strlcpy(path, cwd, plen);
+	}
+	return (TRUE);
+error:
+	path[0] = '\0';
+	return (FALSE);
+}
+

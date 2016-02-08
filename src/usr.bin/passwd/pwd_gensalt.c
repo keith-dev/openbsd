@@ -1,4 +1,4 @@
-/*	$OpenBSD: pwd_gensalt.c,v 1.22 2004/12/20 15:05:59 moritz Exp $ */
+/*	$OpenBSD: pwd_gensalt.c,v 1.25 2006/04/02 04:13:08 deraadt Exp $ */
 
 /*
  * Copyright 1997 Niels Provos <provos@physnet.uni-hamburg.de>
@@ -41,7 +41,7 @@
 #include <time.h>
 #include <login_cap.h>
 
-void	to64(char *, int32_t, int n);
+void	to64(char *, u_int32_t, int n);
 char	*bcrypt_gensalt(u_int8_t);
 int	pwd_gensalt(char *, int, login_cap_t *, char);
 
@@ -97,7 +97,7 @@ pwd_gensalt(char *salt, int saltlen, login_cap_t *lc, char type)
 		else if (rounds > 0xffffff)
 			rounds = 0xffffff;
 		salt[0] = _PASSWORD_EFMT1;
-		to64(&salt[1], (u_int32_t) rounds, 4);
+		to64(&salt[1], (u_int32_t)rounds, 4);
 		to64(&salt[5], arc4random(), 4);
 		salt[9] = '\0';
 	} else if (!strcmp(now, "md5")) {
@@ -133,7 +133,7 @@ static unsigned char itoa64[] =	 /* 0 ... 63 => ascii - 64 */
 	"./0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 
 void
-to64(char *s, int32_t v, int n)
+to64(char *s, u_int32_t v, int n)
 {
 	while (--n >= 0) {
 		*s++ = itoa64[v&0x3f];

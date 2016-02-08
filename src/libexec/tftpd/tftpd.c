@@ -1,4 +1,4 @@
-/*	$OpenBSD: tftpd.c,v 1.41 2006/01/23 17:29:22 millert Exp $	*/
+/*	$OpenBSD: tftpd.c,v 1.52 2006/07/28 15:14:04 mglocker Exp $	*/
 
 /*
  * Copyright (c) 1983 Regents of the University of California.
@@ -37,7 +37,7 @@ char copyright[] =
 
 #ifndef lint
 /*static char sccsid[] = "from: @(#)tftpd.c	5.13 (Berkeley) 2/26/91";*/
-static char rcsid[] = "$OpenBSD: tftpd.c,v 1.41 2006/01/23 17:29:22 millert Exp $";
+static char rcsid[] = "$OpenBSD: tftpd.c,v 1.52 2006/07/28 15:14:04 mglocker Exp $";
 #endif /* not lint */
 
 /*
@@ -46,113 +46,133 @@ static char rcsid[] = "$OpenBSD: tftpd.c,v 1.41 2006/01/23 17:29:22 millert Exp 
  * This version includes many modifications by Jim Guyton <guyton@rand-unix>
  */
 
-#include <sys/param.h>
 #include <sys/ioctl.h>
+#include <sys/param.h>
+#include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/uio.h>
-#include <signal.h>
-#include <unistd.h>
-#include <stdlib.h>
-#include <fcntl.h>
 
-#include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/tftp.h>
 #include <netdb.h>
 
-#include <setjmp.h>
-#include <syslog.h>
-#include <stdio.h>
-#include <errno.h>
 #include <ctype.h>
-#include <string.h>
-#include <stdlib.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <poll.h>
 #include <pwd.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <syslog.h>
+#include <unistd.h>
+#include <vis.h>
 
-#define	TIMEOUT		5
-#define	MAX_TIMEOUTS	5
+#define TIMEOUT		5		/* packet rexmt timeout */
+#define TIMEOUT_MIN	1		/* minimal packet rexmt timeout */
+#define TIMEOUT_MAX	255		/* maximal packet rexmt timeout */
 
-extern	char *__progname;
-struct	sockaddr_storage s_in;
-int	peer;
-int	rexmtval = TIMEOUT;
-int	max_rexmtval = 2*TIMEOUT;
+struct formats;
 
-#define	PKTSIZE	SEGSIZE+4
-char	buf[PKTSIZE];
-char	ackbuf[PKTSIZE];
-struct	sockaddr_storage from;
+int		readit(FILE *, struct tftphdr **, int, int);
+void		read_ahead(FILE *, int, int);
+int		writeit(FILE *, struct tftphdr **, int, int);
+int		write_behind(FILE *, int);
+int		synchnet(int);
 
-int	ndirs;
-char	**dirs;
+__dead void	usage(void);
+void		tftp(struct tftphdr *, int);
+int		validate_access(char *, int);
+int		sendfile(struct formats *);
+int		recvfile(struct formats *);
+void		nak(int);
+void		oack(int);
 
-int	secure;
-int	cancreate;
-
-struct	formats;
-int	validate_access(char *filename, int mode);
-int	recvfile(struct formats *pf);
-int	sendfile(struct formats *pf);
+FILE			 *file;
+extern char		 *__progname;
+struct sockaddr_storage	  s_in;
+int			  peer;
+int			  rexmtval = TIMEOUT;
+int			  maxtimeout = 5 * TIMEOUT;
+char			 *buf;
+char			 *ackbuf;
+struct sockaddr_storage	  from;
+int			  ndirs;
+char 			**dirs;
+int			  secure;
+int			  cancreate;
+unsigned int		  segment_size = SEGSIZE;
+unsigned int		  packet_size = SEGSIZE + 4;
+int			  has_options = 0;
 
 struct formats {
 	const char	*f_mode;
-	int	(*f_validate)(char *, int);
-	int	(*f_send)(struct formats *);
-	int	(*f_recv)(struct formats *);
-	int	f_convert;
+	int		 (*f_validate)(char *, int);
+	int		 (*f_send)(struct formats *);
+	int		 (*f_recv)(struct formats *);
+	int		 f_convert;
 } formats[] = {
 	{ "netascii",	validate_access,	sendfile,	recvfile, 1 },
 	{ "octet",	validate_access,	sendfile,	recvfile, 0 },
 	{ NULL,		NULL,			NULL,		NULL,	  0 }
 };
+
 struct options {
 	const char	*o_type;
 	char		*o_request;
-	int		o_reply;	/* turn into union if need be */
+	long long	 o_reply;	/* turn into union if need be */
 } options[] = {
 	{ "tsize",	NULL, 0 },	/* OPT_TSIZE */
 	{ "timeout",	NULL, 0 },	/* OPT_TIMEOUT */
+	{ "blksize",	NULL, 0 },	/* OPT_BLKSIZE */
 	{ NULL,		NULL, 0 }
 };
+
 enum opt_enum {
 	OPT_TSIZE = 0,
-	OPT_TIMEOUT
+	OPT_TIMEOUT,
+	OPT_BLKSIZE
 };
 
-int	validate_access(char *filename, int mode);
-void	tftp(struct tftphdr *tp, int size);
-void	nak(int error);
-void	oack(void);
+struct errmsg {
+	int		 e_code;
+	const char	*e_msg;
+} errmsgs[] = {
+	{ EUNDEF,	"Undefined error code" },
+	{ ENOTFOUND,	"File not found" },
+	{ EACCESS,	"Access violation" },
+	{ ENOSPACE,	"Disk full or allocation exceeded" },
+	{ EBADOP,	"Illegal TFTP operation" },
+	{ EBADID,	"Unknown transfer ID" },
+	{ EEXISTS,	"File already exists" },
+	{ ENOUSER,	"No such user" },
+	{ EOPTNEG,	"Option negotiation failed" },
+	{ -1,		NULL }
+};
 
-int	readit(FILE *file, struct tftphdr **dpp, int convert);
-void	read_ahead(FILE *file, int convert);
-int	writeit(FILE *file, struct tftphdr **dpp, int ct, int convert);
-int	write_behind(FILE *file, int convert);
-int	synchnet(int f);
-
-static void
+__dead void
 usage(void)
 {
-	syslog(LOG_ERR, "Usage: %s [-cs] [directory ...]", __progname);
+	syslog(LOG_ERR, "usage: %s [-cs] [directory ...]", __progname);
 	exit(1);
 }
 
 int
 main(int argc, char *argv[])
 {
-	int n = 0, on = 1, fd = 0, i, c;
-	struct tftphdr *tp;
-	struct passwd *pw;
-	char cbuf[CMSG_SPACE(sizeof(struct sockaddr_storage))];
-	struct cmsghdr *cmsg;
-	struct msghdr msg;
-	struct iovec iov;
-	pid_t pid = 0;
-	socklen_t j;
+	int		 n = 0, on = 1, fd = 0, i, c;
+	struct tftphdr	*tp;
+	struct passwd	*pw;
+	char		 cbuf[CMSG_SPACE(sizeof(struct sockaddr_storage))];
+	struct cmsghdr	*cmsg;
+	struct msghdr	 msg;
+	struct iovec	 iov;
+	pid_t		 pid = 0;
+	socklen_t	 j;
 
-	openlog(__progname, LOG_PID | LOG_NDELAY, LOG_DAEMON);
+	openlog(__progname, LOG_PID|LOG_NDELAY, LOG_DAEMON);
 
-	while ((c = getopt(argc, argv, "cs")) != -1)
+	while ((c = getopt(argc, argv, "cs")) != -1) {
 		switch (c) {
 		case 'c':
 			cancreate = 1;
@@ -162,15 +182,16 @@ main(int argc, char *argv[])
 			break;
 		default:
 			usage();
-			break;
+			/* NOTREACHED */
 		}
+	}
 
 	for (; optind != argc; optind++) {
 		char **d;
 
-		d = realloc(dirs, (ndirs+2) * sizeof (char *));
+		d = realloc(dirs, (ndirs + 2) * sizeof(char *));
 		if (d == NULL) {
-			syslog(LOG_ERR, "malloc: %m");
+			syslog(LOG_ERR, "realloc: %m");
 			exit(1);
 		}
 		dirs = d;
@@ -180,7 +201,7 @@ main(int argc, char *argv[])
 	}
 
 	pw = getpwnam("_tftpd");
-	if (!pw) {
+	if (pw == NULL) {
 		syslog(LOG_ERR, "no _tftpd: %m");
 		exit(1);
 	}
@@ -220,7 +241,7 @@ main(int argc, char *argv[])
 		syslog(LOG_ERR, "getsockname: %m");
 		exit(1);
 	}
-	
+
 	switch (s_in.ss_family) {
 	case AF_INET:
 		if (setsockopt(fd, IPPROTO_IP, IP_RECVDSTADDR, &on,
@@ -238,16 +259,25 @@ main(int argc, char *argv[])
 		break;
 	}
 
+	if ((buf = malloc(SEGSIZE_MAX + 4)) == NULL) {
+		syslog(LOG_ERR, "malloc: %m");
+		exit(1);
+	}
+	if ((ackbuf = malloc(SEGSIZE_MAX + 4)) == NULL) {
+		syslog(LOG_ERR, "malloc: %m");
+		exit(1);
+	}
+
 	bzero(&msg, sizeof(msg));
 	iov.iov_base = buf;
-	iov.iov_len = sizeof(buf);
+	iov.iov_len = packet_size;
 	msg.msg_name = &from;
 	msg.msg_namelen = sizeof(from);
 	msg.msg_iov = &iov;
 	msg.msg_iovlen = 1;
 	msg.msg_control = cbuf;
 	msg.msg_controllen = CMSG_LEN(sizeof(struct sockaddr_storage));
-	
+
 	n = recvmsg(fd, &msg, 0);
 	if (n < 0) {
 		syslog(LOG_ERR, "recvmsg: %m");
@@ -273,7 +303,7 @@ main(int argc, char *argv[])
 		if (pid < 0) {
 			sleep(i);
 			/*
-			 * flush out to most recently sent request.
+			 * Flush out to most recently sent request.
 			 *
 			 * This may drop some requests, but those
 			 * will be resent by the clients when
@@ -284,7 +314,7 @@ main(int argc, char *argv[])
 			 */
 			bzero(&msg, sizeof(msg));
 			iov.iov_base = buf;
-			iov.iov_len = sizeof(buf);
+			iov.iov_len = packet_size;
 			msg.msg_name = &from;
 			msg.msg_namelen = sizeof(from);
 			msg.msg_iov = &iov;
@@ -294,9 +324,8 @@ main(int argc, char *argv[])
 			    CMSG_LEN(sizeof(struct sockaddr_storage));
 
 			i = recvmsg(fd, &msg, 0);
-			if (i > 0) {
+			if (i > 0)
 				n = i;
-			}
 		} else
 			break;
 	}
@@ -334,7 +363,7 @@ main(int argc, char *argv[])
 			break;
 		}
 	}
-			
+
 	if (bind(peer, (struct sockaddr *)&s_in, s_in.ss_len) < 0) {
 		syslog(LOG_ERR, "bind: %m");
 		exit(1);
@@ -356,11 +385,12 @@ main(int argc, char *argv[])
 void
 tftp(struct tftphdr *tp, int size)
 {
-	char *cp;
-	int i, first = 1, has_options = 0, ecode;
-	struct formats *pf;
-	char *filename, *mode = NULL, *option, *ccp;
-	char fnbuf[MAXPATHLEN];
+	char		*cp;
+	int		 i, first = 1, ecode, opcode, to;
+	struct formats	*pf;
+	char		*filename, *mode = NULL, *option, *ccp;
+	char		 fnbuf[MAXPATHLEN], nicebuf[MAXPATHLEN];
+	const char	*errstr;
 
 	cp = tp->th_stuff;
 again:
@@ -418,38 +448,53 @@ again:
 				options[i].o_request = ++cp;
 				has_options = 1;
 			}
-		cp = ccp-1;
+		cp = ccp - 1;
 	}
 
 option_fail:
 	if (options[OPT_TIMEOUT].o_request) {
-		int to = atoi(options[OPT_TIMEOUT].o_request);
-		if (to < 1 || to > 255) {
+		to = strtonum(options[OPT_TIMEOUT].o_request,
+		    TIMEOUT_MIN, TIMEOUT_MAX, &errstr);
+		if (errstr) {
 			nak(EBADOP);
 			exit(1);
 		}
-		else if (to <= max_rexmtval)
-			options[OPT_TIMEOUT].o_reply = rexmtval = to;
-		else
-			options[OPT_TIMEOUT].o_request = NULL;
+		options[OPT_TIMEOUT].o_reply = rexmtval = to;
 	}
 
-	ecode = (*pf->f_validate)(filename, tp->th_opcode);
+	if (options[OPT_BLKSIZE].o_request) {
+		segment_size = strtonum(options[OPT_BLKSIZE].o_request,
+		    SEGSIZE_MIN, SEGSIZE_MAX, &errstr);
+		if (errstr) {
+			nak(EBADOP);
+			exit(1);
+		}
+		packet_size = segment_size + 4;
+		options[OPT_BLKSIZE].o_reply = segment_size;
+	}
+
+	/* save opcode before it gets overwritten by oack() */
+	opcode = tp->th_opcode;
+
+	(void)strnvis(nicebuf, filename, MAXPATHLEN, VIS_SAFE|VIS_OCTAL);
+	ecode = (*pf->f_validate)(filename, opcode);
 	if (has_options)
-		oack();
+		oack(opcode);
 	if (ecode) {
+		syslog(LOG_INFO, "denied %s access to '%s'",
+		    opcode == WRQ ? "write" : "read", nicebuf);
 		nak(ecode);
 		exit(1);
 	}
-	if (tp->th_opcode == WRQ)
+	if (opcode == WRQ) {
+		syslog(LOG_DEBUG, "receiving file '%s'", nicebuf);
 		(*pf->f_recv)(pf);
-	else
+	} else {
+		syslog(LOG_DEBUG, "sending file '%s'", nicebuf);
 		(*pf->f_send)(pf);
+	}
 	exit(0);
 }
-
-
-FILE *file;
 
 /*
  * Validate file access.  Since we
@@ -465,24 +510,25 @@ FILE *file;
 int
 validate_access(char *filename, int mode)
 {
-	struct stat stbuf;
-	char *cp, **dirp;
-	int fd, wmode;
+	struct stat	 stbuf;
+	char		*cp, **dirp;
+	int		 fd, wmode;
+	const char	*errstr;
 
 	if (!secure) {
 		if (*filename != '/')
 			return (EACCESS);
 		/*
-		 * prevent tricksters from getting around the directory
-		 * restrictions
+		 * Prevent tricksters from getting around the directory
+		 * restrictions.
 		 */
 		for (cp = filename + 1; *cp; cp++)
-			if (*cp == '.' && strncmp(cp-1, "/../", 4) == 0)
-				return(EACCESS);
+			if (*cp == '.' && strncmp(cp - 1, "/../", 4) == 0)
+				return (EACCESS);
 		for (dirp = dirs; *dirp; dirp++)
 			if (strncmp(filename, *dirp, strlen(*dirp)) == 0)
 				break;
-		if (*dirp==0 && dirp!=dirs)
+		if (*dirp == 0 && dirp != dirs)
 			return (EACCESS);
 	}
 
@@ -498,24 +544,30 @@ validate_access(char *filename, int mode)
 			if ((errno == ENOENT) && (mode != RRQ))
 				wmode |= O_CREAT;
 			else
-				return(EACCESS);
+				return (EACCESS);
 		}
 	} else {
 		if (mode == RRQ) {
-			if ((stbuf.st_mode&(S_IREAD >> 6)) == 0)
+			if ((stbuf.st_mode & (S_IREAD >> 6)) == 0)
 				return (EACCESS);
 		} else {
-			if ((stbuf.st_mode&(S_IWRITE >> 6)) == 0)
+			if ((stbuf.st_mode & (S_IWRITE >> 6)) == 0)
 				return (EACCESS);
 		}
 	}
 	if (options[OPT_TSIZE].o_request) {
 		if (mode == RRQ)
 			options[OPT_TSIZE].o_reply = stbuf.st_size;
-		else
-			/* XXX Allows writes of all sizes. */
+		else {
+			/* allows writes of 65535 blocks * SEGSIZE_MAX bytes */
 			options[OPT_TSIZE].o_reply =
-				atoi(options[OPT_TSIZE].o_request);
+			    strtonum(options[OPT_TSIZE].o_request,
+			    1, 65535LL * SEGSIZE_MAX, &errstr);
+			if (errstr) {
+				nak(EOPTNEG);
+				exit(1);
+			}
+		}
 	}
 	fd = open(filename, mode == RRQ ? O_RDONLY : (O_WRONLY|wmode), 0666);
 	if (fd < 0)
@@ -531,25 +583,12 @@ validate_access(char *filename, int mode)
 
 		return (serrno + 100);
 	}
-	file = fdopen(fd, (mode == RRQ)? "r":"w");
+	file = fdopen(fd, mode == RRQ ? "r" : "w");
 	if (file == NULL) {
 		close(fd);
 		return (errno + 100);
 	}
 	return (0);
-}
-
-int	timeouts;
-jmp_buf	timeoutbuf;
-
-/* ARGSUSED */
-static void
-timer(int signo)
-{
-	/* XXX longjmp/signal resource leaks */
-	if (++timeouts >= MAX_TIMEOUTS)
-		_exit(1);
-	longjmp(timeoutbuf, 1);
 }
 
 /*
@@ -558,37 +597,59 @@ timer(int signo)
 int
 sendfile(struct formats *pf)
 {
-	struct tftphdr *dp, *r_init(void);
-	struct tftphdr *ap;    /* ack packet */
-	volatile unsigned short block = 1;
-	int size, n;
+	struct tftphdr		*dp, *r_init(void);
+	struct tftphdr		*ap;	/* ack packet */
+	struct pollfd		 pfd[1];
+	volatile unsigned short	 block = 1;
+	int			 n, size, nfds, error, timeouts;
 
-	signal(SIGALRM, timer);
 	dp = r_init();
 	ap = (struct tftphdr *)ackbuf;
+
 	do {
-		size = readit(file, &dp, pf->f_convert);
+		/* read data from file */
+		size = readit(file, &dp, pf->f_convert, segment_size);
 		if (size < 0) {
 			nak(errno + 100);
 			goto abort;
 		}
 		dp->th_opcode = htons((u_short)DATA);
 		dp->th_block = htons((u_short)block);
-		timeouts = 0;
-		setjmp(timeoutbuf);
 
-send_data:
-		if (send(peer, dp, size + 4, 0) != size + 4) {
-			syslog(LOG_ERR, "tftpd: write: %m");
-			goto abort;
-		}
-		read_ahead(file, pf->f_convert);
-		for ( ; ; ) {
-			alarm(rexmtval);	/* read the ack */
-			n = recv(peer, ackbuf, sizeof (ackbuf), 0);
-			alarm(0);
-			if (n < 0) {
-				syslog(LOG_ERR, "tftpd: read: %m");
+		/* send data to client and wait for client ACK */
+		for (timeouts = 0, error = 0;;) {
+			if (timeouts >= maxtimeout)
+				exit(1);
+
+			if (!error) {
+				if (send(peer, dp, size + 4, 0) != size + 4) {
+					syslog(LOG_ERR, "send: %m");
+					goto abort;
+				}
+				read_ahead(file, pf->f_convert, segment_size);
+			}
+			error = 0;
+
+			pfd[0].fd = peer;
+			pfd[0].events = POLLIN;
+			nfds = poll(pfd, 1, rexmtval * 1000);
+			if (nfds == 0) {
+				timeouts += rexmtval;
+				continue;
+			}
+			if (nfds == -1) {
+				error = 1;
+				if (errno == EINTR)
+					continue;
+				syslog(LOG_ERR, "poll: %m");
+				goto abort;
+			}
+			n = recv(peer, ackbuf, packet_size, 0);
+			if (n == -1) {
+				error = 1;
+				if (errno == EINTR)
+					continue;
+				syslog(LOG_ERR, "recv: %m");
 				goto abort;
 			}
 			ap->th_opcode = ntohs((u_short)ap->th_opcode);
@@ -596,33 +657,24 @@ send_data:
 
 			if (ap->th_opcode == ERROR)
 				goto abort;
-
 			if (ap->th_opcode == ACK) {
-				if (ap->th_block == block) {
+				if (ap->th_block == block)
 					break;
-				}
-				/* Re-synchronize with the other side */
-				(void) synchnet(peer);
-				if (ap->th_block == (block -1)) {
-					goto send_data;
-				}
+				/* re-synchronize with the other side */
+				(void)synchnet(peer);
+				if (ap->th_block == (block - 1))
+					continue;
 			}
-
+			error = 1;	/* FALLTHROUGH */
 		}
+
 		block++;
-	} while (size == SEGSIZE);
+	} while (size == segment_size);
+
 abort:
 	fclose(file);
 	return (1);
 }
-
-/* ARGSUSED */
-static void
-justquit(int signo)
-{
-	_exit(0);
-}
-
 
 /*
  * Receive a file.
@@ -630,92 +682,117 @@ justquit(int signo)
 int
 recvfile(struct formats *pf)
 {
-	struct tftphdr *dp, *w_init(void);
-	struct tftphdr *ap;    /* ack buffer */
-	volatile unsigned short block = 0;
-	int n, size;
+	struct tftphdr		*dp, *w_init(void);
+	struct tftphdr		*ap;	/* ack buffer */
+	struct pollfd		 pfd[1];
+	volatile unsigned short	 block = 0;
+	int			 n, size, nfds, error, timeouts;
 
-	signal(SIGALRM, timer);
 	dp = w_init();
 	ap = (struct tftphdr *)ackbuf;
+
+	/* if we have options, do not send a first ACK */
+	if (has_options) {
+		block++;
+		goto noack;
+	}
+
 	do {
-		timeouts = 0;
+		/* create new ACK packet */
 		ap->th_opcode = htons((u_short)ACK);
 		ap->th_block = htons((u_short)block);
 		block++;
-		setjmp(timeoutbuf);
-send_ack:
-		if (send(peer, ackbuf, 4, 0) != 4) {
-			syslog(LOG_ERR, "tftpd: write: %m");
-			goto abort;
-		}
-		write_behind(file, pf->f_convert);
-		for ( ; ; ) {
-			alarm(rexmtval);
-			n = recv(peer, dp, PKTSIZE, 0);
-			alarm(0);
-			if (n < 0) {		/* really? */
-				syslog(LOG_ERR, "tftpd: read: %m");
+
+		/* send ACK to client and wait for client data */
+		for (timeouts = 0, error = 0;;) {
+			if (timeouts >= maxtimeout)
+				exit(1);
+
+			if (!error) {
+				if (send(peer, ackbuf, 4, 0) != 4) {
+					syslog(LOG_ERR, "send: %m");
+					goto abort;
+				}
+				write_behind(file, pf->f_convert);
+			}
+			error = 0;
+
+			pfd[0].fd = peer;
+			pfd[0].events = POLLIN;
+			nfds = poll(pfd, 1, rexmtval * 1000);
+			if (nfds == 0) {
+				timeouts += rexmtval;
+				continue;
+			}
+			if (nfds == -1) {
+				error = 1;
+				if (errno == EINTR)
+					continue;
+				syslog(LOG_ERR, "poll: %m");
+				goto abort;
+			}
+noack:
+			n = recv(peer, dp, packet_size, 0);
+			if (n == -1) {
+				error = 1;
+				if (errno == EINTR)
+					continue;
+				syslog(LOG_ERR, "recv: %m");
 				goto abort;
 			}
 			dp->th_opcode = ntohs((u_short)dp->th_opcode);
 			dp->th_block = ntohs((u_short)dp->th_block);
+
 			if (dp->th_opcode == ERROR)
 				goto abort;
 			if (dp->th_opcode == DATA) {
-				if (dp->th_block == block) {
-					break;   /* normal */
-				}
-				/* Re-synchronize with the other side */
-				(void) synchnet(peer);
-				if (dp->th_block == (block-1))
-					goto send_ack;		/* rexmit */
+				if (dp->th_block == block)
+					break;
+				/* re-synchronize with the other side */
+				(void)synchnet(peer);
+				if (dp->th_block == (block - 1))
+					continue;
 			}
+			error = 1;	/* FALLTHROUGH */
 		}
-		/*  size = write(file, dp->th_data, n - 4); */
+
+		/* write data to file */
 		size = writeit(file, &dp, n - 4, pf->f_convert);
-		if (size != (n-4)) {			/* ahem */
+		if (size != (n - 4)) {
 			if (size < 0)
 				nak(errno + 100);
-			else nak(ENOSPACE);
+			else
+				nak(ENOSPACE);
 			goto abort;
 		}
-	} while (size == SEGSIZE);
+	} while (size == segment_size);
+
+	/* close data file */
 	write_behind(file, pf->f_convert);
-	(void) fclose(file);		/* close data file */
+	(void)fclose(file);
 
-	ap->th_opcode = htons((u_short)ACK);    /* send the "final" ack */
+	/* send final ack */
+	ap->th_opcode = htons((u_short)ACK);
 	ap->th_block = htons((u_short)(block));
-	(void) send(peer, ackbuf, 4, 0);
+	(void)send(peer, ackbuf, 4, 0);
 
-	signal(SIGALRM, justquit);		/* just quit on timeout */
-	alarm(rexmtval);
-	n = recv(peer, buf, sizeof (buf), 0); /* normally times out and quits */
-	alarm(0);
-	if (n >= 4 &&			/* if read some data */
-	    dp->th_opcode == DATA &&    /* and got a data block */
-	    block == dp->th_block) {	/* then my last ack was lost */
-		(void) send(peer, ackbuf, 4, 0);	/* resend final ack */
-	}
+	/* just quit on timeout */
+	pfd[0].fd = peer;
+	pfd[0].events = POLLIN;
+	nfds = poll(pfd, 1, rexmtval * 1000);
+	if (nfds < 1)
+		exit(1);
+	n = recv(peer, buf, packet_size, 0);
+	/*
+	 * If read some data and got a data block then my last ack was lost
+	 * resend final ack.
+	 */
+	if (n >= 4 && dp->th_opcode == DATA && block == dp->th_block)
+		(void)send(peer, ackbuf, 4, 0);
+
 abort:
 	return (1);
 }
-
-struct errmsg {
-	int	e_code;
-	const char	*e_msg;
-} errmsgs[] = {
-	{ EUNDEF,	"Undefined error code" },
-	{ ENOTFOUND,	"File not found" },
-	{ EACCESS,	"Access violation" },
-	{ ENOSPACE,	"Disk full or allocation exceeded" },
-	{ EBADOP,	"Illegal TFTP operation" },
-	{ EBADID,	"Unknown transfer ID" },
-	{ EEXISTS,	"File already exists" },
-	{ ENOUSER,	"No such user" },
-	{ EOPTNEG,	"Option negotiation failed" },
-	{ -1,		NULL }
-};
 
 /*
  * Send a nak packet (error message).
@@ -726,9 +803,9 @@ struct errmsg {
 void
 nak(int error)
 {
-	struct tftphdr *tp;
-	struct errmsg *pe;
-	int length;
+	struct tftphdr	*tp;
+	struct errmsg	*pe;
+	int		 length;
 
 	tp = (struct tftphdr *)buf;
 	tp->th_opcode = htons((u_short)ERROR);
@@ -740,9 +817,9 @@ nak(int error)
 		pe->e_msg = strerror(error - 100);
 		tp->th_code = EUNDEF;   /* set 'undef' errorcode */
 	}
-	length = strlcpy(tp->th_msg, pe->e_msg, sizeof(buf)) + 5;
-	if (length > sizeof(buf))
-		length = sizeof(buf);
+	length = strlcpy(tp->th_msg, pe->e_msg, packet_size) + 5;
+	if (length > packet_size)
+		length = packet_size;
 	if (send(peer, buf, length, 0) != length)
 		syslog(LOG_ERR, "nak: %m");
 }
@@ -751,26 +828,27 @@ nak(int error)
  * Send an oack packet (option acknowledgement).
  */
 void
-oack(void)
+oack(int opcode)
 {
-	struct tftphdr *tp, *ap;
-	int size, i, n;
-	char *bp;
+	struct tftphdr	*tp, *ap;
+	struct pollfd	 pfd[1];
+	char		*bp;
+	int		 i, n, size, nfds, error, timeouts;
 
 	tp = (struct tftphdr *)buf;
 	bp = buf + 2;
-	size = sizeof(buf) - 2;
+	size = packet_size - 2;
 	tp->th_opcode = htons((u_short)OACK);
 	for (i = 0; options[i].o_type != NULL; i++) {
 		if (options[i].o_request) {
-			n = snprintf(bp, size, "%s%c%d", options[i].o_type,
+			n = snprintf(bp, size, "%s%c%lld", options[i].o_type,
 			    0, options[i].o_reply);
 			if (n == -1 || n >= size) {
 				syslog(LOG_ERR, "oack: no buffer space");
 				exit(1);
 			}
-			bp += n+1;
-			size -= n+1;
+			bp += n + 1;
+			size -= n + 1;
 			if (size < 0) {
 				syslog(LOG_ERR, "oack: no buffer space");
 				exit(1);
@@ -779,28 +857,54 @@ oack(void)
 	}
 	size = bp - buf;
 	ap = (struct tftphdr *)ackbuf;
-	signal(SIGALRM, timer);
-	timeouts = 0;
 
-	(void)setjmp(timeoutbuf);
-	if (send(peer, buf, size, 0) != size) {
-		syslog(LOG_INFO, "oack: %m");
-		exit(1);
-	}
+	/* send OACK to client and wait for client ACK */
+	for (timeouts = 0, error = 0;;) {
+		if (timeouts >= maxtimeout)
+			exit(1);
 
-	for (;;) {
-		alarm(rexmtval);
-		n = recv(peer, ackbuf, sizeof (ackbuf), 0);
-		alarm(0);
-		if (n < 0) {
+		if (!error) {
+			if (send(peer, buf, size, 0) != size) {
+				syslog(LOG_INFO, "oack: %m");
+				exit(1);
+			}
+		}
+		error = 0;
+
+		pfd[0].fd = peer;
+		pfd[0].events = POLLIN;
+		nfds = poll(pfd, 1, rexmtval * 1000);
+		if (nfds == 0) {
+			timeouts += rexmtval;
+			continue;
+		}
+		if (nfds == -1) {
+			error = 1;
+			if (errno == EINTR)
+				continue;
+			syslog(LOG_ERR, "poll: %m");
+			exit(1);
+		}
+
+		/* no client ACK for write requests with options */
+		if (opcode == WRQ)
+			break;
+
+		n = recv(peer, ackbuf, packet_size, 0);
+		if (n == -1) {
+			error = 1;
+			if (errno == EINTR)
+				continue;
 			syslog(LOG_ERR, "recv: %m");
 			exit(1);
 		}
 		ap->th_opcode = ntohs((u_short)ap->th_opcode);
 		ap->th_block = ntohs((u_short)ap->th_block);
+
 		if (ap->th_opcode == ERROR)
 			exit(1);
 		if (ap->th_opcode == ACK && ap->th_block == 0)
 			break;
+		error = 1;	/* FALLTHROUGH */
 	}
 }

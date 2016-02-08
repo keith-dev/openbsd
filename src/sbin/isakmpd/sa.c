@@ -1,4 +1,4 @@
-/* $OpenBSD: sa.c,v 1.102 2005/09/23 14:44:03 hshoexer Exp $	 */
+/* $OpenBSD: sa.c,v 1.109 2006/08/30 16:33:31 cloder Exp $	 */
 /* $EOM: sa.c,v 1.112 2000/12/12 00:22:52 niklas Exp $	 */
 
 /*
@@ -209,7 +209,7 @@ struct dst_isakmpspi_arg {
 
 /*
  * Check if SA matches what we are asking for through V_ARG.  It has to
- * be a finished phaes 1 (ISAKMP) SA.
+ * be a finished phase 1 (ISAKMP) SA.
  */
 static int
 isakmp_sa_check(struct sa *sa, void *v_arg)
@@ -717,6 +717,8 @@ sa_dump_all(FILE *fd, struct sa *sa)
 	/* Lifetimes */
 	report_lifetimes(fd, sa);
 
+	fprintf(fd, "Flags 0x%08x\n", sa->flags);
+
 	if (sa->phase == 1)
 		report_phase1(fd, sa);
 	else if (sa->phase == 2)
@@ -1175,7 +1177,7 @@ sa_soft_expire(void *v_sa)
 
 	if ((sa->flags & (SA_FLAG_STAYALIVE | SA_FLAG_REPLACED)) ==
 	    SA_FLAG_STAYALIVE)
-		exchange_establish(sa->name, 0, 0);
+		exchange_establish(sa->name, 0, 0, 1);
 	else
 		/*
 		 * Start to watch the use of this SA, so a renegotiation can
@@ -1195,7 +1197,7 @@ sa_hard_expire(void *v_sa)
 
 	if ((sa->flags & (SA_FLAG_STAYALIVE | SA_FLAG_REPLACED)) ==
 	    SA_FLAG_STAYALIVE)
-		exchange_establish(sa->name, 0, 0);
+		exchange_establish(sa->name, 0, 0, 1);
 
 	sa_delete(sa, 1);
 }

@@ -1,5 +1,5 @@
 vers(__file__,
-	{-$OpenBSD: MAKEDEV.md,v 1.7 2005/08/01 22:22:14 deraadt Exp $-},
+	{-$OpenBSD: MAKEDEV.md,v 1.9 2006/07/25 20:22:27 kettenis Exp $-},
 etc.MACHINE)dnl
 dnl
 dnl Copyright (c) 2001-2004 Todd T. Fries <todd@OpenBSD.org>
@@ -73,9 +73,7 @@ _DEV(bktr, 75)
 _DEV(bpf, 22)
 _DEV(cry, 47)
 _DEV(fdesc, 7)
-_DEV(iop, 73)
 _DEV(lkm, 35)
-_DEV(pci, 71)
 _DEV(pf, 46)
 _DEV(radio, 97)
 _DEV(rnd, 40)
@@ -94,8 +92,6 @@ ramdisk)
 	;;
 
 _std(1, 2, 8, 3, 6)
-	M xf86		c 2 4 600
-	M reload	c 2 20 640 kmem
 	;;
 dnl
 dnl *** zaurus specific targets

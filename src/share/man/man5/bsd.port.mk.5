@@ -1,4 +1,4 @@
-.\" $OpenBSD: bsd.port.mk.5,v 1.172 2006/01/07 15:24:31 jmc Exp $
+.\" $OpenBSD: bsd.port.mk.5,v 1.174 2006/08/02 09:09:38 espie Exp $
 .\"
 .\" Copyright (c) 2000 Marc Espie
 .\"
@@ -374,6 +374,10 @@ See also
 for possible
 .Ar post-patch
 clean-up.
+.It Ar peek-ftp
+Connect to the first site in
+.Ev MASTER_SITES ,
+in the right directory, and leaves user at ftp prompt.
 .It Ar print-package-signature
 Print the package signature, in the same format used for
 .Xr pkg_info 1
@@ -1816,7 +1820,7 @@ From
 This is DESCR.
 .Ox
 does not give a specific name to the generated file.
-It is not recommended to try to access them directly.
+It is not recommended to try to access it directly.
 .It Ev EXTRACT_AFTER_ARGS
 Was used to cobble together the normal extraction command, as
 ${EXTRACT_CMD} ${EXTRACT_BEFORE_ARGS} ${EXTRACT_AFTER_ARGS}.

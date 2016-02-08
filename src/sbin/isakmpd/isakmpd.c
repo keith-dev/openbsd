@@ -1,4 +1,4 @@
-/* $OpenBSD: isakmpd.c,v 1.90 2005/12/20 22:03:53 moritz Exp $	 */
+/* $OpenBSD: isakmpd.c,v 1.95 2006/09/01 00:24:06 mpf Exp $	 */
 /* $EOM: isakmpd.c,v 1.54 2000/10/05 09:28:22 niklas Exp $	 */
 
 /*
@@ -72,8 +72,11 @@ static void     usage(void);
  */
 int             debug = 0;
 
-/* Set when no policy file is found. */
+/* Set when no policy file shall be used. */
 int		acquire_only = 0;
+
+/* Set when SAs shall be deleted on shutdown. */
+int		delete_sas = 1;
 
 /*
  * If we receive a SIGHUP signal, this flag gets set to show we need to
@@ -110,7 +113,7 @@ usage(void)
 	extern char *__progname;
 
 	fprintf(stderr,
-	    "usage: %s [-46adKLnTv] [-c config-file] [-D class=level] [-f fifo]\n"
+	    "usage: %s [-46adKLnSTv] [-c config-file] [-D class=level] [-f fifo]\n"
 	    "          [-i pid-file] [-l packetlog-file] [-N udpencap-port]\n"
 	    "          [-p listen-port] [-R report-file]\n",
 	    __progname);
@@ -127,7 +130,7 @@ parse_args(int argc, char *argv[])
 	int             cls, level;
 	int             do_packetlog = 0;
 
-	while ((ch = getopt(argc, argv, "46ac:dD:f:i:KnN:p:Ll:r:R:Tv")) != -1) {
+	while ((ch = getopt(argc, argv, "46ac:dD:f:i:KnN:p:Ll:r:R:STv")) != -1) {
 		switch (ch) {
 		case '4':
 			bind_family |= BIND_FAMILY_INET4;
@@ -208,6 +211,11 @@ parse_args(int argc, char *argv[])
 #endif
 		case 'R':
 			report_file = optarg;
+			break;
+
+		case 'S':
+			delete_sas = 0;
+			ui_daemon_passive = 1;
 			break;
 
 		case 'T':
@@ -310,15 +318,18 @@ daemon_shutdown(void)
 	if (sigtermed == 1) {
 		log_print("isakmpd: shutting down...");
 
-		/*
-		 * Delete all active SAs.  First IPsec SAs, then ISAKMPD.
-		 * Each DELETE is another (outgoing) message.
-		 */
-		while ((sa = sa_find(phase2_sa_check, NULL)))
-			sa_delete(sa, 1);
+		if (delete_sas &&
+		    strncmp("no", conf_get_str("General", "Delete-SAs"), 2)) {
+			/*
+			 * Delete all active SAs.  First IPsec SAs, then
+			 * ISAKMPD.  Each DELETE is another (outgoing) message.
+			 */
+			while ((sa = sa_find(phase2_sa_check, NULL)))
+				sa_delete(sa, 1);
 
-		while ((sa = sa_find(phase1_sa_check, NULL)))
-			sa_delete(sa, 1);
+			while ((sa = sa_find(phase1_sa_check, NULL)))
+				sa_delete(sa, 1);
+		}
 
 		/* We only want to do this once. */
 		sigtermed++;
@@ -388,6 +399,9 @@ main(int argc, char *argv[])
 	/* Open protocols and services databases.  */
 	setprotoent(1);
 	setservent(1);
+
+	/* Open command fifo */
+	ui_init();
 
 	set_slave_signals();
 	/* Daemonize before forking unpriv'ed child */

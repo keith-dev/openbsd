@@ -1,4 +1,4 @@
-/*	$OpenBSD: vmstat.c,v 1.55 2005/09/28 00:24:04 pedro Exp $	*/
+/*	$OpenBSD: vmstat.c,v 1.60 2006/04/14 01:14:56 dlg Exp $	*/
 /*	$NetBSD: vmstat.c,v 1.5 1996/05/10 23:16:40 thorpej Exp $	*/
 
 /*-
@@ -34,7 +34,7 @@
 #if 0
 static char sccsid[] = "@(#)vmstat.c	8.2 (Berkeley) 1/12/94";
 #endif
-static char rcsid[] = "$OpenBSD: vmstat.c,v 1.55 2005/09/28 00:24:04 pedro Exp $";
+static char rcsid[] = "$OpenBSD: vmstat.c,v 1.60 2006/04/14 01:14:56 dlg Exp $";
 #endif /* not lint */
 
 /*
@@ -89,7 +89,7 @@ static void allocinfo(struct Info *);
 static void copyinfo(struct Info *, struct Info *);
 static float cputime(int);
 static void dinfo(int, int);
-static void getinfo(struct Info *, enum state);
+static void getinfo(struct Info *);
 static void putint(int, int, int, int);
 static void putuint64(u_int64_t, int, int, int);
 static void putfloat(double, int, int, int, int, int);
@@ -134,7 +134,7 @@ closekre(WINDOW *w)
  */
 #define STATROW		 0	/* uses 1 row and 68 cols */
 #define STATCOL		 2
-#define MEMROW		 2	/* uses 4 rows and 31 cols */
+#define MEMROW		 2	/* uses 4 rows and 34 cols */
 #define MEMCOL		 0
 #define PAGEROW		 2	/* uses 4 rows and 26 cols */
 #define PAGECOL		37
@@ -160,7 +160,7 @@ int ncpu = 1;
 int
 initkre(void)
 {
-	int mib[4], i, ret;
+	int mib[4], i;
 	size_t size;
 
 	mib[0] = CTL_HW;
@@ -185,7 +185,7 @@ initkre(void)
 
 	for (i = 0; i < nintr; i++) {
 		char name[128];
- 
+
 		mib[0] = CTL_KERN;
 		mib[1] = KERN_INTRCNT;
 		mib[2] = KERN_INTRCNT_NAME;
@@ -205,7 +205,7 @@ initkre(void)
 	allocinfo(&s2);
 	allocinfo(&z);
 
-	getinfo(&s2, RUN);
+	getinfo(&s2);
 	copyinfo(&s2, &s1);
 	return(1);
 }
@@ -217,7 +217,7 @@ fetchkre(void)
 
 	time(&now);
 	strlcpy(buf, ctime(&now), sizeof buf);
-	getinfo(&s, state);
+	getinfo(&s);
 }
 
 void
@@ -227,8 +227,8 @@ labelkre(void)
 
 	clear();
 	mvprintw(STATROW, STATCOL + 4, "users    Load");
-	mvprintw(MEMROW, MEMCOL,     "          memory totals (in KB)");
-	mvprintw(MEMROW + 1, MEMCOL, "         real   virtual    free");
+	mvprintw(MEMROW, MEMCOL,     "            memory totals (in KB)");
+	mvprintw(MEMROW + 1, MEMCOL, "           real   virtual     free");
 	mvprintw(MEMROW + 2, MEMCOL, "Active");
 	mvprintw(MEMROW + 3, MEMCOL, "All");
 
@@ -266,7 +266,7 @@ labelkre(void)
 	mvprintw(GENSTATROW, GENSTATCOL, "   Csw   Trp   Sys   Int   Sof  Flt");
 
 	mvprintw(GRAPHROW, GRAPHCOL,
-	    "    . %% Sys    . %% User    . %% Nice    . %% Idle");
+	    "    . %%Int    . %%Sys    . %%Usr    . %%Nic    . %%Idle");
 	mvprintw(PROCSROW, PROCSCOL, "Proc:r  d  s  w");
 	mvprintw(GRAPHROW + 1, GRAPHCOL,
 	    "|    |    |    |    |    |    |    |    |    |    |");
@@ -303,8 +303,8 @@ labelkre(void)
 	putint((int)((float)s.fld/etime + 0.5), l, c, w)
 #define MAXFAIL 5
 
-static	char cpuchar[CPUSTATES] = { '=' , '>', '-', ' ' };
-static	char cpuorder[CPUSTATES] = { CP_SYS, CP_USER, CP_NICE, CP_IDLE };
+static	char cpuchar[CPUSTATES] = { '|', '=', '>', '-', ' ' };
+static	char cpuorder[CPUSTATES] = { CP_INTR, CP_SYS, CP_USER, CP_NICE, CP_IDLE };
 
 void
 showkre(void)
@@ -373,34 +373,17 @@ showkre(void)
 	psiz = 0;
 	f2 = 0.0;
 
-	/*
-	 * Last CPU state not calculated yet.
-	 */
-	for (c = 0; c < CPUSTATES - 1; c++) {
+	for (c = 0; c < CPUSTATES; c++) {
 		i = cpuorder[c];
 		f1 = cputime(i);
 		f2 += f1;
 		l = (int) ((f2 + 1.0) / 2.0) - psiz;
-		if (c == 0)
-			putfloat(f1, GRAPHROW, GRAPHCOL + 1, 5, 1, 0);
-		else
-			putfloat(f1, GRAPHROW, GRAPHCOL + 12 * c,
-			    5, 1, 0);
+		putfloat(f1, GRAPHROW, GRAPHCOL + 1 + (10 * c), 5, 1, 0);
 		move(GRAPHROW + 2, psiz);
 		psiz += l;
 		while (l-- > 0)
 			addch(cpuchar[c]);
 	}
-
-	/*
-	 * The above code does not account for time in the CP_INTR state.
-	 * Thus the total may be less than 100%.  If the total is less than
-	 * the previous total old data may be left on the graph.  The graph
-	 * assumes one character position for every 2 percentage points for
-	 * a total of 50 positions.  Ensure all positions have been filled.
-	 */
-	while ( psiz++ <= 50 )
-		addch(' ');
 
 	putint(ucount(), STATROW, STATCOL, 3);
 	putfloat(avenrun[0], STATROW, STATCOL + 17, 6, 2, 0);
@@ -409,15 +392,15 @@ showkre(void)
 	mvaddstr(STATROW, STATCOL + 53, buf);
 #define pgtokb(pg)	((pg) * (s.uvmexp.pagesize / 1024))
 
-	putint(pgtokb(s.uvmexp.active), MEMROW + 2, MEMCOL + 6, 7);
+	putint(pgtokb(s.uvmexp.active), MEMROW + 2, MEMCOL + 7, 8);
 	putint(pgtokb(s.uvmexp.active + s.uvmexp.swpginuse),    /* XXX */
-	    MEMROW + 2, MEMCOL + 16, 7);
-	putint(pgtokb(s.uvmexp.npages - s.uvmexp.free), MEMROW + 3, MEMCOL + 6, 7);
+	    MEMROW + 2, MEMCOL + 17, 8);
+	putint(pgtokb(s.uvmexp.npages - s.uvmexp.free), MEMROW + 3, MEMCOL + 7, 8);
 	putint(pgtokb(s.uvmexp.npages - s.uvmexp.free + s.uvmexp.swpginuse),
-	    MEMROW + 3, MEMCOL + 16, 7);
-	putint(pgtokb(s.uvmexp.free), MEMROW + 2, MEMCOL + 24, 7);
+	    MEMROW + 3, MEMCOL + 17, 8);
+	putint(pgtokb(s.uvmexp.free), MEMROW + 2, MEMCOL + 26, 8);
 	putint(pgtokb(s.uvmexp.free + s.uvmexp.swpages - s.uvmexp.swpginuse),
-	    MEMROW + 3, MEMCOL + 24, 7);
+	    MEMROW + 3, MEMCOL + 26, 8);
 	putint(total.t_rq - 1, PROCSROW + 1, PROCSCOL + 3, 3);
 
 	putint(total.t_dw, PROCSROW + 1, PROCSCOL + 6, 3);
@@ -508,7 +491,7 @@ cmdkre(char *cmd, char *args)
 	}
 	if (prefix(cmd, "zero")) {
 		if (state == RUN)
-			getinfo(&s1, RUN);
+			getinfo(&s1);
 		return (1);
 	}
 	return (dkcmd(cmd, args));
@@ -605,7 +588,7 @@ putfloat(double f, int l, int c, int w, int d, int nz)
 }
 
 static void
-getinfo(struct Info *s, enum state st)
+getinfo(struct Info *s)
 {
 	static int cp_time_mib[] = { CTL_KERN, KERN_CPTIME };
 	static int nchstats_mib[2] = { CTL_KERN, KERN_NCHSTATS };

@@ -1,4 +1,4 @@
-/*	$OpenBSD: server.c,v 1.28 2006/01/19 11:20:23 dtucker Exp $ */
+/*	$OpenBSD: server.c,v 1.30 2006/07/01 18:52:46 otto Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -26,7 +26,6 @@
 #include <unistd.h>
 
 #include "ntpd.h"
-#include "ntp.h"
 
 int
 setup_listeners(struct servent *se, struct ntpd_conf *conf, u_int *cnt)
@@ -137,7 +136,7 @@ server_dispatch(int fd, struct ntpd_conf *conf)
 			fatal("recvfrom");
 	}
 
-	rectime = gettime();
+	rectime = gettime_corrected();
 
 	if (ntp_getmsg((struct sockaddr *)&fsa, buf, size, &query) == -1)
 		return (0);
@@ -160,7 +159,7 @@ server_dispatch(int fd, struct ntpd_conf *conf)
 	reply.precision = conf->status.precision;
 	reply.rectime = d_to_lfp(rectime);
 	reply.reftime = d_to_lfp(conf->status.reftime);
-	reply.xmttime = d_to_lfp(gettime());
+	reply.xmttime = d_to_lfp(gettime_corrected());
 	reply.orgtime = query.xmttime;
 	reply.rootdelay = d_to_sfp(conf->status.rootdelay);
 

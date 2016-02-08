@@ -1,4 +1,4 @@
-/*	$OpenBSD: init.c,v 1.7 2005/11/29 20:15:04 cloder Exp $	*/
+/*	$OpenBSD: init.c,v 1.10 2006/05/29 20:47:22 cloder Exp $	*/
 /*	$NetBSD: init.c,v 1.4 1995/10/02 17:21:37 jpo Exp $	*/
 
 /*
@@ -33,7 +33,7 @@
  */
 
 #ifndef lint
-static char rcsid[] = "$OpenBSD: init.c,v 1.7 2005/11/29 20:15:04 cloder Exp $";
+static char rcsid[] = "$OpenBSD: init.c,v 1.10 2006/05/29 20:47:22 cloder Exp $";
 #endif
 
 #include <stdlib.h>
@@ -200,9 +200,6 @@ pushinit(void)
 		istk->i_cnt = istk->i_type->t_dim;
 		break;
 	case UNION:
-		if (tflag)
-			/* initialisation of union is illegal in trad. C */
-			warning(238);
 		/* FALLTHROUGH */
 	case STRUCT:
 		if (incompl(istk->i_type)) {
@@ -307,13 +304,6 @@ initlbr(void)
 	if (initerr)
 		return;
 
-	if ((initsym->s_scl == AUTO || initsym->s_scl == REG) &&
-	    initstk->i_nxt == NULL) {
-		if (tflag && !issclt(initstk->i_subt->t_tspec))
-			/* no automatic aggregate initialization in trad. C*/
-			warning(188);
-	}
-
 	/*
 	 * Remove all entries which cannot be used for further initializers
 	 * and do not expect a closing brace.
@@ -400,7 +390,7 @@ mkinit(tnode_t *tn)
 	if (!issclt(lt))
 		lerror("mkinit() 1");
 
-	if (!typeok(INIT, 0, ln, tn))
+	if (!typeok(INIT, NULL, ln, tn))
 		goto end;
 
 	/*
@@ -411,18 +401,8 @@ mkinit(tnode_t *tn)
 	expr(tn, 1, 0);
 	trestor(tmem);
 
-	if (isityp(lt) && ln->tn_type->t_isfield && !isityp(rt)) {
-		/*
-		 * Bit-fields can be initialized in trad. C only by integer
-		 * constants.
-		 */
-		if (tflag)
-			/* bit-field initialisation is illegal in trad. C */
-			warning(186);
-	}
-
 	if (lt != rt || (initstk->i_type->t_isfield && tn->tn_op == CON))
-		tn = convert(INIT, 0, initstk->i_type, tn);
+		tn = convert(INIT, NULL, initstk->i_type, tn);
 
 	if (tn != NULL && tn->tn_op != CON) {
 		sym = NULL;
@@ -461,7 +441,7 @@ strginit(tnode_t *tn)
 	 * Check if we have an array type which can be initialized by
 	 * the string.
 	 */
-	if (istk->i_subt->t_tspec == ARRAY) {
+	if (istk->i_subt != NULL && istk->i_subt->t_tspec == ARRAY) {
 		t = istk->i_subt->t_subt->t_tspec;
 		if (!((strg->st_tspec == CHAR &&
 		       (t == CHAR || t == UCHAR || t == SCHAR)) ||

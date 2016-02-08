@@ -1,4 +1,4 @@
-/*	$OpenBSD: externs1.h,v 1.10 2005/12/18 19:21:02 cloder Exp $	*/
+/*	$OpenBSD: externs1.h,v 1.15 2006/05/29 20:47:22 cloder Exp $	*/
 /*	$NetBSD: externs1.h,v 1.7 1995/10/02 17:31:39 jpo Exp $	*/
 
 /*
@@ -35,8 +35,6 @@
 /*
  * main.c
  */
-extern	int	aflag;
-extern	int	bflag;
 extern	int	cflag;
 extern	int	dflag;
 extern	int	eflag;
@@ -47,7 +45,6 @@ extern	int	hflag;
 extern	int	pflag;
 extern	int	rflag;
 extern	int	sflag;
-extern	int	tflag;
 extern	int	uflag;
 extern	int	vflag;
 extern	int	yflag;
@@ -190,10 +187,10 @@ extern	tnode_t	*getsnode(strg_t *);
 extern	sym_t	*strmemb(tnode_t *, op_t, sym_t *);
 extern	tnode_t	*build(op_t, tnode_t *, tnode_t *);
 extern	tnode_t	*cconv(tnode_t *);
-extern	int	typeok(op_t, int, tnode_t *, tnode_t *);
+extern	int	typeok(op_t, farg_t *, tnode_t *, tnode_t *);
 extern	tnode_t	*promote(op_t, int, tnode_t *);
-extern	tnode_t	*convert(op_t, int, type_t *, tnode_t *);
-extern	void	cvtcon(op_t, int, type_t *, val_t *, val_t *);
+extern	tnode_t	*convert(op_t, farg_t *, type_t *, tnode_t *);
+extern	void	cvtcon(op_t, farg_t *, type_t *, val_t *, val_t *);
 extern	const	char *tyname(type_t *);
 extern	tnode_t	*bldszof(type_t *);
 extern	tnode_t	*bldszoftrm(tnode_t *);
@@ -226,6 +223,7 @@ extern	int	ccflg;
 extern	int	llibflg;
 extern	int	nowarn;
 extern	int	noretflg;
+extern	int	usedflg;
 extern	int	plibflg;
 extern	int	quadflg;
 
@@ -253,6 +251,7 @@ extern	void	doreturn(tnode_t *);
 extern	void	glclup(int);
 extern	void	argsused(int);
 extern	void	noreturn(int);
+extern	void	lintused(int);
 extern	void	constcond(int);
 extern	void	fallthru(int);
 extern	void	notreach(int);

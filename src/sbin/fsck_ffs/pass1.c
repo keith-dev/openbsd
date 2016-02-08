@@ -1,4 +1,4 @@
-/*	$OpenBSD: pass1.c,v 1.18 2005/12/19 15:18:01 pedro Exp $	*/
+/*	$OpenBSD: pass1.c,v 1.20 2006/03/22 20:24:32 deraadt Exp $	*/
 /*	$NetBSD: pass1.c,v 1.16 1996/09/27 22:45:15 christos Exp $	*/
 
 /*
@@ -34,7 +34,7 @@
 #if 0
 static char sccsid[] = "@(#)pass1.c	8.1 (Berkeley) 6/5/93";
 #else
-static const char rcsid[] = "$OpenBSD: pass1.c,v 1.18 2005/12/19 15:18:01 pedro Exp $";
+static const char rcsid[] = "$OpenBSD: pass1.c,v 1.20 2006/03/22 20:24:32 deraadt Exp $";
 #endif
 #endif /* not lint */
 
@@ -59,7 +59,7 @@ static void checkinode(ino_t, struct inodesc *);
 static ino_t info_inumber;
 
 static int
-pass1_info(char *buf, int buflen)
+pass1_info(char *buf, size_t buflen)
 {
 	return (snprintf(buf, buflen, "phase 1, inode %d/%d",
 	    info_inumber, sblock.fs_ipg * sblock.fs_ncg) > 0);

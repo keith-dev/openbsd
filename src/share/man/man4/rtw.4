@@ -1,4 +1,4 @@
-.\"	$OpenBSD: rtw.4,v 1.24 2005/11/28 00:20:53 jsg Exp $
+.\"	$OpenBSD: rtw.4,v 1.27 2006/08/30 23:14:30 jmc Exp $
 .\"
 .\" Copyright (c) 2004 Jonathan Gray <jsg@openbsd.org>
 .\"
@@ -19,7 +19,7 @@
 .Os
 .Sh NAME
 .Nm rtw
-.Nd Realtek RTL8180L IEEE 802.11b wireless network driver
+.Nd Realtek RTL8180L IEEE 802.11b wireless network device
 .Sh SYNOPSIS
 .Cd "rtw* at cardbus?"
 .Cd "rtw* at pci?"
@@ -183,7 +183,7 @@ The following adapters should work:
 .It Li "Allnet ALL0182" Ta SA2400 Ta CardBus
 .\".It Li "Belkin F5D6001 V3" Ta SA2400 Ta PCI
 .It Li "Belkin F5D6020 V3" Ta SA2400 Ta CardBus
-.It Li "Buffalo WLI-CB-B11" Ta ? Ta CardBus
+.It Li "Buffalo WLI-CB-B11" Ta SA2400 Ta CardBus
 .It Li "Corega CG-WLCB11V3" Ta SA2400 Ta CardBus
 .\".It Li "D-Link DWL-510" Ta SA2400 Ta PCI
 .\".It Li "D-Link DWL-520 rev D" Ta ? Ta PCI
@@ -286,7 +286,6 @@ and ported to
 by
 .An Jonathan Gray Aq jsg@openbsd.org .
 .Sh CAVEATS
-GCT refuse to release any documentation on their GRF5101 RF transceiver,
-so it likely doesn't work as well as it otherwise could.
+GCT refuse to release any documentation on their GRF5101 RF transceiver.
 .Pp
 While PCI devices will attach most of them are not able to transmit.

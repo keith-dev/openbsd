@@ -1,4 +1,4 @@
-/*	$OpenBSD: pfctl.c,v 1.244 2005/11/17 20:52:39 dhartmei Exp $ */
+/*	$OpenBSD: pfctl.c,v 1.247 2006/06/30 16:52:27 deraadt Exp $ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
@@ -1002,7 +1002,7 @@ pfctl_add_rule(struct pfctl *pf, struct pf_rule *r, const char *anchor_call)
 			while ((pa = TAILQ_FIRST(&r->rpool.list)) != NULL) {
 				TAILQ_REMOVE(&r->rpool.list, pa, entries);
 				TAILQ_INSERT_TAIL(&pfr->por_rule.rpool.list, pa,
-			    	entries);
+				    entries);
 			}
 		} else {
 			memset(&pfr->por_rule.rpool, 0,
@@ -1218,6 +1218,8 @@ pfctl_init_options(struct pfctl *pf)
 	pf->timeout[PFTM_INTERVAL] = PFTM_INTERVAL_VAL;
 	pf->timeout[PFTM_SRC_NODE] = PFTM_SRC_NODE_VAL;
 	pf->timeout[PFTM_TS_DIFF] = PFTM_TS_DIFF_VAL;
+	pf->timeout[PFTM_ADAPTIVE_START] = PFSTATE_ADAPT_START;
+	pf->timeout[PFTM_ADAPTIVE_END] = PFSTATE_ADAPT_END;
 
 	pf->limit[PF_LIMIT_STATES] = PFSTATE_HIWAT;
 	pf->limit[PF_LIMIT_FRAGS] = PFFRAG_FRENT_HIWAT;
@@ -1242,6 +1244,21 @@ pfctl_load_options(struct pfctl *pf)
 			continue;
 		if (pfctl_load_limit(pf, i, pf->limit[i]))
 			error = 1;
+	}
+
+	/*
+	 * If we've set the limit, but havn't explicitly set adaptive
+	 * timeouts, do it now with a start of 60% and end of 120%.
+	 */
+	if (pf->limit_set[PF_LIMIT_STATES] &&
+	    !pf->timeout_set[PFTM_ADAPTIVE_START] &&
+	    !pf->timeout_set[PFTM_ADAPTIVE_END]) {
+		pf->timeout[PFTM_ADAPTIVE_START] =
+			(pf->limit[PF_LIMIT_STATES] / 10) * 6;
+		pf->timeout_set[PFTM_ADAPTIVE_START] = 1;
+		pf->timeout[PFTM_ADAPTIVE_END] =
+			(pf->limit[PF_LIMIT_STATES] / 10) * 12;
+		pf->timeout_set[PFTM_ADAPTIVE_END] = 1;
 	}
 
 	/* load timeouts */
@@ -1929,7 +1946,8 @@ main(int argc, char *argv[])
 				err(1, "%s", rulesopt);
 		}
 	}
-	if ((rulesopt != NULL) && (!*anchorname))
+	if ((rulesopt != NULL) && (loadopt & PFCTL_FLAG_OPTION) &&
+	    !anchorname[0])
 		if (pfctl_clear_interface_flags(dev, opts | PF_OPT_QUIET))
 			error = 1;
 

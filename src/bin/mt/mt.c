@@ -1,4 +1,4 @@
-/*	$OpenBSD: mt.c,v 1.26 2005/12/22 17:23:27 deraadt Exp $	*/
+/*	$OpenBSD: mt.c,v 1.29 2006/06/14 02:14:25 krw Exp $	*/
 /*	$NetBSD: mt.c,v 1.14.2.1 1996/05/27 15:12:11 mrg Exp $	*/
 
 /*
@@ -40,7 +40,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)mt.c	8.2 (Berkeley) 6/6/93";
 #else
-static char rcsid[] = "$OpenBSD: mt.c,v 1.26 2005/12/22 17:23:27 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: mt.c,v 1.29 2006/06/14 02:14:25 krw Exp $";
 #endif
 #endif /* not lint */
 
@@ -179,7 +179,7 @@ main(int argc, char *argv[])
 
 	flags = comp->c_ronly ? O_RDONLY : O_WRONLY | O_CREAT;
 	if ((mtfd = host ? rmtopen(tape, flags) : opendev(tape, flags,
-	    OPENDEV_PART | OPENDEV_DRCT, &realtape)) < 0) {
+	    OPENDEV_PART, &realtape)) < 0) {
 		if (errno != 0)
 			warn("%s", host ? tape : realtape);
 		exit(2);
@@ -217,28 +217,12 @@ main(int argc, char *argv[])
 	/* NOTREACHED */
 }
 
-#ifdef sun
-#include <sundev/tmreg.h>
-#include <sundev/arreg.h>
-#endif
-
-#ifdef tahoe
-#include <tahoe/vba/cyreg.h>
-#endif
-
 struct tape_desc {
 	short	t_type;		/* type of magtape device */
 	char	*t_name;	/* printing name */
 	char	*t_dsbits;	/* "drive status" register */
 	char	*t_erbits;	/* "error" register */
 } tapes[] = {
-#ifdef sun
-	{ MT_ISCPC,	"TapeMaster",	TMS_BITS,	0 },
-	{ MT_ISAR,	"Archive",	ARCH_CTRL_BITS,	ARCH_BITS },
-#endif
-#ifdef tahoe
-	{ MT_ISCY,	"cipher",	CYS_BITS,	CYCW_BITS },
-#endif
 #define SCSI_DS_BITS	"\20\5WriteProtect\2Mounted"
 	{ 0x7,		"SCSI",		SCSI_DS_BITS,	"76543210" },
 	{ 0 }
@@ -265,12 +249,8 @@ status(struct mtget *bp)
 	printreg("ds", bp->mt_dsreg, mt->t_dsbits);
 	printreg("\ner", bp->mt_erreg, mt->t_erbits);
 	(void)putchar('\n');
-	(void)printf("blocksize: %d (%d, %d, %d, %d)\n",
-		bp->mt_blksiz, bp->mt_mblksiz[0], bp->mt_mblksiz[1],
-		bp->mt_mblksiz[2], bp->mt_mblksiz[3]);
-	(void)printf("density: %d (%d, %d, %d, %d)\n",
-		bp->mt_density, bp->mt_mdensity[0], bp->mt_mdensity[1],
-		bp->mt_mdensity[2], bp->mt_mdensity[3]);
+	(void)printf("blocksize: %d (%d)\n", bp->mt_blksiz, bp->mt_mblksiz);
+	(void)printf("density: %d (%d)\n", bp->mt_density, bp->mt_mdensity);
 }
 
 /*

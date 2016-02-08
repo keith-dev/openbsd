@@ -1,4 +1,4 @@
-/*	$OpenBSD: search.c,v 1.28 2006/02/03 13:57:03 otto Exp $	*/
+/*	$OpenBSD: search.c,v 1.32 2006/07/25 08:27:09 kjell Exp $	*/
 
 /* This file is in the public domain. */
 
@@ -164,6 +164,7 @@ isearch(int dir)
 	int	 xcase;
 	int	 i;
 	char	 opat[NPAT];
+	int	 cdotline;
 
 #ifndef NO_MACRO
 	if (macrodef) {
@@ -179,6 +180,7 @@ isearch(int dir)
 	pptr = -1;
 	clp = curwp->w_dotp;
 	cbo = curwp->w_doto;
+	cdotline = curwp->w_dotline;
 	is_lpush();
 	is_cpush(SRCH_BEGIN);
 	success = TRUE;
@@ -212,6 +214,7 @@ isearch(int dir)
 			}
 			curwp->w_dotp = clp;
 			curwp->w_doto = cbo;
+			curwp->w_dotline = cdotline;
 			curwp->w_flag |= WFMOVE;
 			srch_lastdir = dir;
 			(void)ctrlg(FFRAND, 0);
@@ -227,9 +230,10 @@ isearch(int dir)
 			}
 			if (success == FALSE && dir == SRCH_FORW) {
 				/* wrap the search to beginning */
-				clp = lforw(curbp->b_linep);
+				clp = bfirstlp(curbp);
 				curwp->w_dotp = clp;
 				curwp->w_doto = 0;
+				curwp->w_dotline = 1;
 				if (is_find(dir) != FALSE) {
 					is_cpush(SRCH_MARK);
 					success = TRUE;
@@ -258,10 +262,11 @@ isearch(int dir)
 			}
 			if (success == FALSE && dir == SRCH_BACK) {
 				/* wrap the search to end */
-				clp = lback(curbp->b_linep);
+				clp = blastlp(curbp);
 				curwp->w_dotp = clp;
 				curwp->w_doto =
 				    llength(curwp->w_dotp);
+				curwp->w_dotline = curwp->w_bufp->b_lines;
 				if (is_find(dir) != FALSE) {
 					is_cpush(SRCH_MARK);
 					success = TRUE;
@@ -591,7 +596,7 @@ retry:
 		}
 	}
 stopsearch:
-	curwp->w_flag |= WFHARD;
+	curwp->w_flag |= WFFULL;
 	update();
 	if (rcnt == 1)
 		ewprintf("Replaced 1 occurrence");
@@ -628,7 +633,7 @@ replstr(int f, int n)
 		rcnt++;
 	}
 
-	curwp->w_flag |= WFHARD;
+	curwp->w_flag |= WFFULL;
 	update();
 
 	if (rcnt == 1)
@@ -651,16 +656,19 @@ forwsrch(void)
 	struct line	*clp, *tlp;
 	int	 cbo, tbo, c, i, xcase = 0;
 	char	*pp;
+	int	 nline;
 
 	clp = curwp->w_dotp;
 	cbo = curwp->w_doto;
+	nline = curwp->w_dotline;
 	for (i = 0; pat[i]; i++)
 		if (ISUPPER(CHARMASK(pat[i])))
 			xcase = 1;
 	for (;;) {
 		if (cbo == llength(clp)) {
-			if ((clp = lforw(clp)) == curbp->b_linep)
+			if ((clp = lforw(clp)) == curbp->b_headp)
 				break;
+			nline++;
 			cbo = 0;
 			c = CCHR('J');
 		} else
@@ -672,17 +680,22 @@ forwsrch(void)
 			while (*pp != 0) {
 				if (tbo == llength(tlp)) {
 					tlp = lforw(tlp);
-					if (tlp == curbp->b_linep)
+					if (tlp == curbp->b_headp)
 						goto fail;
 					tbo = 0;
 					c = CCHR('J');
-				} else
+					if (eq(c, *pp++, xcase) == FALSE)
+						goto fail;
+					nline++;
+				} else {
 					c = lgetc(tlp, tbo++);
-				if (eq(c, *pp++, xcase) == FALSE)
-					goto fail;
+					if (eq(c, *pp++, xcase) == FALSE)
+						goto fail;
+				}
 			}
 			curwp->w_dotp = tlp;
 			curwp->w_doto = tbo;
+			curwp->w_dotline = nline;
 			curwp->w_flag |= WFMOVE;
 			return (TRUE);
 		}
@@ -703,18 +716,21 @@ backsrch(void)
 	struct line	*clp, *tlp;
 	int	 cbo, tbo, c, i, xcase = 0;
 	char	*epp, *pp;
+	int	 nline;
 
 	for (epp = &pat[0]; epp[1] != 0; ++epp);
 	clp = curwp->w_dotp;
 	cbo = curwp->w_doto;
+	nline = curwp->w_dotline;
 	for (i = 0; pat[i]; i++)
 		if (ISUPPER(CHARMASK(pat[i])))
 			xcase = 1;
 	for (;;) {
 		if (cbo == 0) {
 			clp = lback(clp);
-			if (clp == curbp->b_linep)
+			if (clp == curbp->b_headp)
 				return (FALSE);
+			nline--;
 			cbo = llength(clp) + 1;
 		}
 		if (--cbo == llength(clp))
@@ -728,8 +744,9 @@ backsrch(void)
 			while (pp != &pat[0]) {
 				if (tbo == 0) {
 					tlp = lback(tlp);
-					if (tlp == curbp->b_linep)
+					if (tlp == curbp->b_headp)
 						goto fail;
+					nline--;
 					tbo = llength(tlp) + 1;
 				}
 				if (--tbo == llength(tlp))
@@ -741,6 +758,7 @@ backsrch(void)
 			}
 			curwp->w_dotp = tlp;
 			curwp->w_doto = tbo;
+			curwp->w_dotline = nline;
 			curwp->w_flag |= WFMOVE;
 			return (TRUE);
 		}

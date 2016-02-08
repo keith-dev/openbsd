@@ -1,338 +1,284 @@
-/*	$OpenBSD: checkout.c,v 1.50 2006/01/31 13:55:20 xsa Exp $	*/
+/*	$OpenBSD: checkout.c,v 1.66 2006/07/07 17:37:17 joris Exp $	*/
 /*
- * Copyright (c) 2004 Jean-Francois Brousseau <jfb@openbsd.org>
- * All rights reserved.
+ * Copyright (c) 2006 Joris Vink <joris@openbsd.org>
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ * Permission to use, copy, modify, and distribute this software for any
+ * purpose with or without fee is hereby granted, provided that the above
+ * copyright notice and this permission notice appear in all copies.
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES,
- * INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY
- * AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL
- * THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
- * EXEMPLARY, OR CONSEQUENTIAL  DAMAGES (INCLUDING, BUT NOT LIMITED TO,
- * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
- * OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
- * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
- * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
- * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+ * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+ * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+ * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+ * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
 #include "includes.h"
 
 #include "cvs.h"
 #include "log.h"
-#include "proto.h"
+#include "diff.h"
+#include "remote.h"
 
+int	cvs_checkout(int, char **);
+int	cvs_export(int, char **);
+static void checkout_check_repository(int, char **);
+static void checkout_repository(const char *, const char *);
 
-#define CVS_LISTMOD	1
-#define CVS_STATMOD	2
-
-static int	cvs_checkout_init(struct cvs_cmd *, int, char **, int *);
-static int	cvs_checkout_pre_exec(struct cvsroot *);
-static int	cvs_checkout_local(CVSFILE *cf, void *);
+extern int prune_dirs;
+extern int build_dirs;
 
 struct cvs_cmd cvs_cmd_checkout = {
-	CVS_OP_CHECKOUT, CVS_REQ_CO, "checkout",
+	CVS_OP_CHECKOUT, 0, "checkout",
 	{ "co", "get" },
-	"Checkout sources for editing",
+	"Checkout a working copy of a repository",
 	"[-AcflNnPpRs] [-D date | -r tag] [-d dir] [-j rev] [-k mode] "
 	"[-t id] module ...",
 	"AcD:d:fj:k:lNnPRr:st:",
 	NULL,
-	0,
-	cvs_checkout_init,
-	cvs_checkout_pre_exec,
-	NULL,
-	NULL,
-	NULL,
-	NULL,
-	CVS_CMD_ALLOWSPEC | CVS_CMD_SENDDIR
+	cvs_checkout
 };
 
 struct cvs_cmd cvs_cmd_export = {
-	CVS_OP_EXPORT, CVS_REQ_EXPORT, "export",
-	{ "ex", "exp" },
-	"Extract copy of a module without management directories",
-	"[-flNnR] [-d dir] [-k mode] -D date | -r tag module ...",
-	"D:d:fk:lNnRr:",
+	CVS_OP_EXPORT, 0, "export",
+	{ "exp", "ex" },
+	"Export sources from CVS, similar to checkout",
+	"[-flNnR] [-d dir] [-k mode] -D date | -r rev module ...",
+	"D:d:k:flNnRr:",
 	NULL,
-	0,
-	cvs_checkout_init,
-	cvs_checkout_pre_exec,
-	NULL,
-	NULL,
-	NULL,
-	NULL,
-	CVS_CMD_ALLOWSPEC | CVS_CMD_SENDDIR
+	cvs_export
 };
 
-static char *currepo = NULL;
-static DIR *dirp = NULL;
-static int cwdfd = -1;
-static char *date, *tag, *koptstr, *tgtdir, *rcsid;
-static int statmod = 0;
-static int shorten = 0;
-static int usehead = 0;
-static int kflag = RCS_KWEXP_DEFAULT;
-
-/* modules */
-static char **co_mods;
-static int    co_nmod;
-
-/* XXX checkout has issues in remote mode, -N gets seen as module */
-
-static int
-cvs_checkout_init(struct cvs_cmd *cmd, int argc, char **argv, int *arg)
+int
+cvs_checkout(int argc, char **argv)
 {
 	int ch;
-	RCSNUM *rcs;
 
-	date = tag = koptstr = tgtdir = rcsid = NULL;
-
-	while ((ch = getopt(argc, argv, cmd->cmd_opts)) != -1) {
+	while ((ch = getopt(argc, argv, cvs_cmd_checkout.cmd_opts)) != -1) {
 		switch (ch) {
-		case 'A':
-			break;
-		case 'c':
-			statmod = CVS_LISTMOD;
-			break;
-		case 'D':
-			date = optarg;
-			cmd->cmd_flags |= CVS_CMD_PRUNEDIRS;
-			break;
-		case 'd':
-			tgtdir = optarg;
-			shorten = 1;
-			break;
-		case 'f':
-			usehead = 1;
-			break;
-		case 'j':
-			break;
-		case 'k':
-			koptstr = optarg;
-			kflag = rcs_kflag_get(koptstr);
-			if (RCS_KWEXP_INVAL(kflag)) {
-				cvs_log(LP_ERR,
-				    "invalid RCS keyword expansion mode");
-				rcs_kflag_usage();
-				return (CVS_EX_USAGE);
-			}
-			break;
 		case 'P':
-			cmd->cmd_flags |= CVS_CMD_PRUNEDIRS;
-			break;
-		case 'N':
-			shorten = 0;
-			break;
-		case 'p':
-			cvs_noexec = 1;	/* no locks will be created */
-			break;
-		case 'r':
-			tag = optarg;
-			cmd->cmd_flags |= CVS_CMD_PRUNEDIRS;
-			break;
-		case 's':
-			statmod = CVS_STATMOD;
-			break;
-		case 't':
-			rcsid = optarg;
+			prune_dirs = 1;
 			break;
 		default:
-			return (CVS_EX_USAGE);
+			fatal("%s", cvs_cmd_checkout.cmd_synopsis);
 		}
 	}
 
 	argc -= optind;
 	argv += optind;
 
-	co_mods = argv;
-	co_nmod = argc;
+	if (argc == 0)
+		fatal("%s", cvs_cmd_checkout.cmd_synopsis);
 
-	if ((statmod == 0) && (argc == 0))
-		fatal("must specify at least one module or directory");
-
-	if (statmod && (argc > 0))
-		fatal("-c and -s must not get any arguments");
-
-	/* `export' command exceptions */
-	if (cvs_cmdop == CVS_OP_EXPORT) {
-		if (!tag && !date)
-			fatal("must specify a tag or date");
-
-		/* we don't want numerical revisions here */
-		if (tag && (rcs = rcsnum_parse(tag)) != NULL)
-			fatal("tag `%s' must be a symbolic tag", tag);
-	}
-
-	*arg = optind;
-	return (0);
-}
-
-static int
-cvs_checkout_pre_exec(struct cvsroot *root)
-{
-	int i, ret;
-	char *sp, repo[MAXPATHLEN];
-
-	if ((dirp = opendir(".")) == NULL)
-		fatal("cvs_checkout_pre_exec: opendir failed");
-
-	cwdfd = dirfd(dirp);
-
-	for (i = 0; i < co_nmod; i++) {
-		if ((sp = strchr(co_mods[i], '/')) != NULL)
-			*sp = '\0';
-
-		if ((mkdir(co_mods[i], 0755) == -1) && (errno != EEXIST))
-			fatal("cvs_checkout_pre_exec: mkdir `%s': %s",
-			    co_mods[i], strerror(errno));
-
-		cvs_mkadmin(co_mods[i], root->cr_str, co_mods[i], NULL,
-		    NULL, 0);
-
-		if (sp != NULL)
-			*sp = '/';
-	}
-
-	if (root->cr_method == CVS_METHOD_LOCAL) {
-		if ((dirp = opendir(".")) == NULL)
-			fatal("cvs_checkout_pre_exec: opendir failed");
-
-		cwdfd = dirfd(dirp);
-
-		for (i = 0; i < co_nmod; i++) {
-			if (strlcpy(repo, root->cr_dir, sizeof(repo)) >=
-			    sizeof(repo) ||
-			    strlcat(repo, "/", sizeof(repo)) >= sizeof(repo) ||
-			    strlcat(repo, co_mods[i], sizeof(repo)) >=
-			    sizeof(repo))
-				fatal("cvs_checkout_pre_exec: path truncation");
-
-			currepo = co_mods[i];
-			ret = cvs_file_get(repo, CF_RECURSE | CF_REPO |
-			    CF_IGNORE, cvs_checkout_local, NULL, NULL);
-			if (ret != CVS_EX_OK) {
-				closedir(dirp);
-				return (ret);
-			}
-		}
-
-		closedir(dirp);
-	} else {
-		/*
-		 * These arguments are for the expand-modules
-		 * command that we send to the server before requesting
-		 * a checkout.
-		 */
-		for (i = 0; i < co_nmod; i++)
-			cvs_sendarg(root, co_mods[i], 0);
-
-		cvs_sendreq(root, CVS_REQ_DIRECTORY, ".");
-		cvs_sendln(root, root->cr_dir);
-		cvs_sendreq(root, CVS_REQ_XPANDMOD, NULL);
-
-		if (usehead == 1)
-			cvs_sendarg(root, "-f", 0);
-
-		if (tgtdir != NULL) {
-			cvs_sendarg(root, "-d", 0);
-			cvs_sendarg(root, tgtdir, 0);
-		}
-
-		if (shorten == 0)
-			cvs_sendarg(root, "-N", 0);
-
-		if (cvs_cmd_checkout.cmd_flags & CVS_CMD_PRUNEDIRS);
-			cvs_sendarg(root, "-P", 0);
-
-		for (i = 0; i < co_nmod; i++)
-			cvs_sendarg(root, co_mods[i], 0);
-
-		if (statmod == CVS_LISTMOD)
-			cvs_sendarg(root, "-c", 0);
-		else if (statmod == CVS_STATMOD)
-			cvs_sendarg(root, "-s", 0);
-
-		if (tag != NULL) {
-			cvs_sendarg(root, "-r", 0);
-			cvs_sendarg(root, tag, 0);
-		}
-
-		if (date != NULL) {
-			cvs_sendarg(root, "-D", 0);
-			cvs_sendarg(root, date, 0);
-		}
-	}
+	checkout_check_repository(argc, argv);
 
 	return (0);
 }
 
-static int
-cvs_checkout_local(CVSFILE *cf, void *arg)
+int
+cvs_export(int argc, char **argv)
 {
-	char rcspath[MAXPATHLEN], fpath[MAXPATHLEN];
-	RCSFILE *rf;
-	struct cvsroot *root;
-	static int inattic = 0;
+	int ch, flags;
 
-	/* we don't want these */
-	if ((cf->cf_type == DT_DIR) && !strcmp(cf->cf_name, "Attic")) {
-		inattic = 1;
-		return (CVS_EX_OK);
+	prune_dirs = 1;
+	flags = CR_RECURSE_DIRS;
+
+	while ((ch = getopt(argc, argv, cvs_cmd_export.cmd_opts)) != -1) {
+		switch (ch) {
+		case 'l':
+			flags &= ~CR_RECURSE_DIRS;
+			break;
+		case 'R':
+			break;
+		default:
+			fatal("%s", cvs_cmd_export.cmd_synopsis);
+		}
 	}
 
-	root = CVS_DIR_ROOT(cf);
+	argc -= optind;
+	argv += optind;
 
-	cvs_file_getpath(cf, fpath, sizeof(fpath));
-	cvs_rcs_getpath(cf, rcspath, sizeof(rcspath));
+	if (argc == 0)
+		fatal("%s", cvs_cmd_export.cmd_synopsis);
 
-	if (cf->cf_type == DT_DIR) {
-		inattic = 0;
-		if (verbosity > 1)
-			cvs_log(LP_INFO, "Updating %s", fpath);
+	checkout_check_repository(argc, argv);
 
-		if (cvs_cmdop != CVS_OP_SERVER) {
-			/*
-			 * We pass an empty repository name to
-			 * cvs_create_dir(), because it will correctly
-			 * create the repository directory for us.
-			 */
-			if (cvs_create_dir(fpath, 1, root->cr_dir, NULL) < 0)
-				fatal("cvs_checkout_local: cvs_create_dir failed");
-			if (fchdir(cwdfd) < 0)
-				fatal("cvs_checkout_local: fchdir failed");
+	return (0);
+}
+
+static void
+checkout_check_repository(int argc, char **argv)
+{
+	int i, l;
+	char repo[MAXPATHLEN];
+	struct stat st;
+
+	for (i = 0; i < argc; i++) {
+		cvs_mkpath(argv[i]);
+
+		l = snprintf(repo, sizeof(repo), "%s/%s",
+		    current_cvsroot->cr_dir, argv[i]);
+		if (l == -1 || l >= (int)sizeof(repo))
+			fatal("checkout_check_repository: overflow");
+
+		if (stat(repo, &st) == -1) {
+			cvs_log(LP_ERR, "cannot find repository %s - ignored",
+			    argv[i]);
+			continue;
+		}
+
+		checkout_repository(repo, argv[i]);
+	}
+}
+
+static void
+checkout_repository(const char *repobase, const char *wdbase)
+{
+	struct cvs_flisthead fl, dl;
+	struct cvs_recursion cr;
+
+	TAILQ_INIT(&fl);
+	TAILQ_INIT(&dl);
+
+	build_dirs = 1;
+	cr.enterdir = cvs_update_enterdir;
+	cr.leavedir = cvs_update_leavedir;
+	cr.fileproc = cvs_update_local;
+	cr.flags = CR_REPO | CR_RECURSE_DIRS;
+
+	cvs_repository_lock(repobase);
+	cvs_repository_getdir(repobase, wdbase, &fl, &dl, 1);
+
+	cvs_file_walklist(&fl, &cr);
+	cvs_file_freelist(&fl);
+
+	cvs_repository_unlock(repobase);
+
+	cvs_file_walklist(&dl, &cr);
+	cvs_file_freelist(&dl);
+}
+
+void
+cvs_checkout_file(struct cvs_file *cf, RCSNUM *rnum, BUF *bp, int flags)
+{
+	BUF *nbp;
+	int l, oflags, exists;
+	time_t rcstime;
+	CVSENTRIES *ent;
+	struct timeval tv[2];
+	char *p, *entry, rev[16], timebuf[64], tbuf[32], stickytag[32];
+
+	rcsnum_tostr(rnum, rev, sizeof(rev));
+
+	cvs_log(LP_TRACE, "cvs_checkout_file(%s, %s, %d) -> %s",
+	    cf->file_path, rev, flags,
+	    (cvs_server_active) ? "to client" : "to disk");
+
+	nbp = rcs_kwexp_buf(bp, cf->file_rcs, rnum);
+
+	if (flags & CO_DUMP) {
+		if (cvs_server_active) {
+			cvs_printf("dump file %s to client\n", cf->file_path);
 		} else {
-			/*
-			 * TODO: send responses to client so it'll
-			 * create it's directories.
-			 */
+			if (cvs_buf_write_fd(nbp, STDOUT_FILENO) == -1)
+				fatal("cvs_checkout_file: %s", strerror(errno));
 		}
 
-		return (CVS_EX_OK);
+		cvs_buf_free(nbp);
+		return;
 	}
 
-	if (inattic == 1)
-		return (CVS_EX_OK);
+	if (cvs_server_active == 0) {
+		oflags = O_WRONLY | O_TRUNC;
+		if (cf->fd != -1) {
+			exists = 1;
+			(void)close(cf->fd);
+		} else  {
+			exists = 0;
+			oflags |= O_CREAT;
+		}
 
-	if ((rf = rcs_open(rcspath, RCS_READ)) == NULL)
-		fatal("cvs_checkout_local: rcs_open `%s': %s", rcspath,
-		    rcs_errstr(rcs_errno));
+		cf->fd = open(cf->file_path, oflags);
+		if (cf->fd == -1)
+			fatal("cvs_checkout_file: open: %s", strerror(errno));
 
-	if (cvs_checkout_rev(rf, rf->rf_head, cf, fpath,
-	    (cvs_cmdop != CVS_OP_SERVER) ? 1 : 0,
-	    CHECKOUT_REV_CREATED) < 0)
-		fatal("cvs_checkout_local: cvs_checkout_rev failed");
+		if (cvs_buf_write_fd(nbp, cf->fd) == -1)
+			fatal("cvs_checkout_file: %s", strerror(errno));
 
-	rcs_close(rf);
+		cvs_buf_free(nbp);
 
-	cvs_printf("U %s\n", fpath);
-	return (0);
+		if (fchmod(cf->fd, 0644) == -1)
+			fatal("cvs_checkout_file: fchmod: %s", strerror(errno));
+
+		if (exists == 0) {
+			rcstime = rcs_rev_getdate(cf->file_rcs, rnum);
+			rcstime = cvs_hack_time(rcstime, 0);
+		} else {
+			time(&rcstime);
+		}
+
+		tv[0].tv_sec = rcstime;
+		tv[0].tv_usec = 0;
+		tv[1] = tv[0];
+		if (futimes(cf->fd, tv) == -1)
+			fatal("cvs_checkout_file: futimes: %s",
+			    strerror(errno));
+	} else {
+		time(&rcstime);
+	}
+
+	rcstime = cvs_hack_time(rcstime, 1);
+
+	ctime_r(&rcstime, tbuf);
+	if (tbuf[strlen(tbuf) - 1] == '\n')
+		tbuf[strlen(tbuf) - 1] = '\0';
+
+	if (flags & CO_MERGE) {
+		l = snprintf(timebuf, sizeof(timebuf), "Result of merge+%s",
+		    tbuf);
+		if (l == -1 || l >= (int)sizeof(timebuf))
+			fatal("cvs_checkout_file: overflow");
+	} else {
+		strlcpy(timebuf, tbuf, sizeof(timebuf));
+	}
+
+	if (flags & CO_SETSTICKY) {
+		l = snprintf(stickytag, sizeof(stickytag), "T%s", rev);
+		if (l == -1 || l >= (int)sizeof(stickytag))
+			fatal("cvs_checkout_file: overflow");
+	} else {
+		stickytag[0] = '\0';
+	}
+
+	entry = xmalloc(CVS_ENT_MAXLINELEN);
+	l = snprintf(entry, CVS_ENT_MAXLINELEN, "/%s/%s/%s//%s", cf->file_name,
+	    rev, timebuf, stickytag);
+
+	if (cvs_server_active == 0) {
+		ent = cvs_ent_open(cf->file_wd);
+		cvs_ent_add(ent, entry);
+		cvs_ent_close(ent, ENT_SYNC);
+	} else {
+		if ((p = strrchr(cf->file_rpath, ',')) != NULL)
+			*p = '\0';
+
+		cvs_server_send_response("Updated %s/", cf->file_wd);
+		cvs_remote_output(cf->file_rpath);
+		cvs_remote_output(entry);
+		cvs_remote_output("u=rw,g=rw,o=rw");
+
+		/* XXX */
+		printf("%ld\n", cvs_buf_len(nbp));
+
+		if (cvs_buf_write_fd(nbp, STDOUT_FILENO) == -1)
+			fatal("cvs_checkout_file: failed to send file");
+		cvs_buf_free(nbp);
+
+		if (p != NULL)
+			*p = ',';
+	}
+
+	xfree(entry);
 }

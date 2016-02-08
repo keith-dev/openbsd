@@ -1,4 +1,4 @@
-/*	$OpenBSD: rde_attr.c,v 1.63 2006/02/09 21:05:09 claudio Exp $ */
+/*	$OpenBSD: rde_attr.c,v 1.66 2006/05/27 15:39:56 claudio Exp $ */
 
 /*
  * Copyright (c) 2004 Claudio Jeker <claudio@openbsd.org>
@@ -28,8 +28,6 @@
 
 #include "bgpd.h"
 #include "rde.h"
-
-void	attr_free(struct rde_aspath *, struct attr *);
 
 int
 attr_write(void *p, u_int16_t p_len, u_int8_t flags, u_int8_t type,
@@ -774,6 +772,7 @@ community_set(struct rde_aspath *asp, int as, int type)
 
 	attr_optadd(asp, f, t, p, ncommunities << 2);
 
+	free(p);
 	return (1);
 }
 
@@ -800,9 +799,11 @@ community_delete(struct rde_aspath *asp, int as, int type)
 		etype <<= 8;
 		etype |= *p++;
 
-		if (as != COMMUNITY_ANY && (u_int16_t)as != eas &&
-		    type != COMMUNITY_ANY && (u_int16_t)type != etype)
-			len += 4;
+		if ((as == COMMUNITY_ANY || (u_int16_t)as == eas) &&
+		    (type == COMMUNITY_ANY || (u_int16_t)type == etype))
+			/* match */
+			continue;
+		len += 4;
 	}
 
 	if (len == 0) {
@@ -822,13 +823,14 @@ community_delete(struct rde_aspath *asp, int as, int type)
 		etype <<= 8;
 		etype |= *p++;
 
-		if (as != COMMUNITY_ANY && (u_int16_t)as != eas &&
-		    type != COMMUNITY_ANY && (u_int16_t)type != etype) {
-			n[l++] = eas >> 8;
-			n[l++] = eas & 0xff;
-			n[l++] = etype >> 8;
-			n[l++] = etype & 0xff;
-		}
+		if ((as == COMMUNITY_ANY || (u_int16_t)as == eas) &&
+		    (type == COMMUNITY_ANY || (u_int16_t)type == etype))
+			/* match */
+			continue;
+		n[l++] = eas >> 8;
+		n[l++] = eas & 0xff;
+		n[l++] = etype >> 8;
+		n[l++] = etype & 0xff;
 	}
 
 	f = attr->flags;
@@ -836,5 +838,6 @@ community_delete(struct rde_aspath *asp, int as, int type)
 
 	attr_free(asp, attr);
 	attr_optadd(asp, f, t, n, len);
+	free(n);
 }
 

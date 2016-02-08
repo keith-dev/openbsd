@@ -1,4 +1,4 @@
-/*	$OpenBSD: net_ctl.c,v 1.6 2005/05/26 19:19:51 ho Exp $	*/
+/*	$OpenBSD: net_ctl.c,v 1.8 2006/06/02 20:09:43 mcbride Exp $	*/
 
 /*
  * Copyright (c) 2005 Håkan Olsson.  All rights reserved.
@@ -50,11 +50,11 @@ struct ctlmsg {
 	u_int32_t	data2;
 };
 
+int snapcount = 0;
+
 static int
 net_ctl_check_state(struct syncpeer *p, enum RUNSTATE nstate)
 {
-	static char	*runstate[] = CARPSTATES;
-
 	if (nstate < INIT || nstate > FAIL) {
 		log_msg(0, "net_ctl: got bad state %d from peer \"%s\"",
 		    nstate, p->name);
@@ -70,7 +70,7 @@ net_ctl_check_state(struct syncpeer *p, enum RUNSTATE nstate)
 	if (p->runstate != nstate) {
 		p->runstate = nstate;
 		log_msg(1, "net_ctl: peer \"%s\" state change to %s", p->name,
-		    runstate[nstate]);
+		    carp_state_name(nstate));
 	}
 	return 0;
 }
@@ -91,6 +91,18 @@ net_ctl_handle_msg(struct syncpeer *p, u_int8_t *msg, u_int32_t msglen)
 	}
 
 	switch (ntohl(ctl->type)) {
+	case CTL_ENDSNAP:
+		log_msg(4, "net_ctl: got CTL_ENDSNAP from peer \"%s\"",
+		    p->name);
+
+		/* XXX More sophistication required to handle multiple peers. */
+		if (carp_demoted) {
+			snapcount++;
+			if (snapcount >= cfgstate.peercnt)
+				monitor_carpundemote(NULL);
+		}
+		break;
+
 	case CTL_STATE:
 		log_msg(4, "net_ctl: got CTL_STATE from peer \"%s\"", p->name);
 		nstate = (enum RUNSTATE)ntohl(ctl->data);
@@ -176,12 +188,17 @@ net_ctl_send_error(struct syncpeer *p, enum CTLTYPE prevtype)
 	return net_ctl_send(p, CTL_ERROR, (u_int32_t)prevtype, 0);
 }
 
+int
+net_ctl_send_endsnap(struct syncpeer *p)
+{
+	return net_ctl_send(p, CTL_ENDSNAP, 0, 0);
+}
+
 /* After a CARP tracker state change, send an state ctl msg to all peers. */
 void
 net_ctl_update_state(void)
 {
 	struct syncpeer *p;
-	static char	*carpstate[] = CARPSTATES;
 
 	/* We may have new peers available.  */
 	net_connect();
@@ -190,7 +207,7 @@ net_ctl_update_state(void)
 		if (p->socket == -1)
 			continue;
 		log_msg(4, "net_ctl: sending my state %s to peer \"%s\"",
-		    carpstate[cfgstate.runstate], p->name);
+		    carp_state_name(cfgstate.runstate), p->name);
 		net_ctl_send_state(p);
 	}
 }

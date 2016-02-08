@@ -1,5 +1,5 @@
 # ex:ts=8 sw=4:
-# $OpenBSD: PackingElement.pm,v 1.80 2006/02/07 11:16:57 espie Exp $
+# $OpenBSD: PackingElement.pm,v 1.83 2006/03/19 12:01:13 espie Exp $
 #
 # Copyright (c) 2003-2004 Marc Espie <espie@openbsd.org>
 #
@@ -27,22 +27,15 @@ require 5.008_000;
 # It does provide base methods for stuff under it, though.
 package OpenBSD::PackingElement;
 our %keyword;
-our %oldkeyword;
 
 sub Factory
 {
 	local $_ = shift;
 	if (m/^\@(\S+)\s*/) {
-		my $cmd = $1;
-		my $args = $';
-
-		if (defined $keyword{$cmd}) {
-			$keyword{$cmd}->add(@_, $args);
-		} elsif (defined $oldkeyword{$cmd}) {
-			$oldkeyword{$cmd}->add(@_, $args);
-			print STDERR "Warning: obsolete construct: \@$cmd $args\n";
+		if (defined $keyword{$1}) {
+			$keyword{$1}->add(@_, $');
 		} else {
-			print STDERR "Unknown element: \@$cmd $args\n";
+			print STDERR "Unknown element: $_\n";
 			exit(1);
 		}
 	} else {
@@ -54,11 +47,6 @@ sub setKeyword
 {
 	my ($class, $k) = @_;
 	$keyword{$k} = $class;
-}
-
-sub setOldKeyword {
-	my ($class, $k) = @_;
-	$oldkeyword{$k} = $class;
 }
 
 sub category() { 'items' }
@@ -1170,9 +1158,17 @@ sub finish_fontdirs
 		map { update_fontalias($_) } @l unless $state->{not};
 		print "You may wish to update your font path for ", join(' ', @l), "\n";
 		return if $state->{not};
-		eval { OpenBSD::Error::System("/usr/X11R6/bin/mkfontdir", @l); };
+		if (-x "/usr/X11R6/bin/mkfontdir") {
+			eval { OpenBSD::Error::System("/usr/X11R6/bin/mkfontdir", @l); };
+		} else {
+			OpenBSD::Error::Warn("/usr/X11R6/bin/mkfontdir not found\n");
+		}
 		map { restore_fontdir($_) } @l;
-		eval { OpenBSD::Error::System("/usr/X11R6/bin/fc-cache", @l); };
+		if (-x "/usr/X11R6/bin/fc-cache") {
+			eval { OpenBSD::Error::System("/usr/X11R6/bin/fc-cache", @l); };
+		} else {
+			OpenBSD::Error::Warn("/usr/X11R6/bin/fc-cache not found\n");
+		}
 	}
 }
 

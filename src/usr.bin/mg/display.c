@@ -1,4 +1,4 @@
-/*	$OpenBSD: display.c,v 1.26 2005/12/13 06:01:27 kjell Exp $	*/
+/*	$OpenBSD: display.c,v 1.30 2006/07/25 08:22:32 kjell Exp $	*/
 
 /* This file is in the public domain. */
 
@@ -100,6 +100,31 @@ struct video	  blanks;		/* Blank line image.		 */
  * Look at "setscores" to understand what is up.
  */
 struct score *score;			/* [NROW * NROW] */
+
+#ifndef LINENOMODE
+#define LINENOMODE TRUE
+#endif /* !LINENOMODE */ 
+static int      linenos = LINENOMODE;
+
+/*
+ * Since we don't have variables (we probably should) this is a command
+ * processor for changing the value of the line number mode flag.
+ */
+/* ARGSUSED */
+int
+linenotoggle(int f, int n)
+{
+	if (f & FFARG)
+		linenos = n > 0;
+	else
+		linenos = !linenos;
+
+	sgarbf = TRUE;	
+
+	return (TRUE);
+}
+
+
 
 /*
  * Reinit the display data structures, this is called when the terminal
@@ -376,7 +401,14 @@ update(void)
 	if (sgarbf) {		/* must update everything */
 		wp = wheadp;
 		while (wp != NULL) {
-			wp->w_flag |= WFMODE | WFHARD;
+			wp->w_flag |= WFMODE | WFFULL;
+			wp = wp->w_wndp;
+		}
+	}
+	if (linenos) {
+		wp = wheadp;
+		while (wp != NULL) {
+			wp->w_flag |= WFMODE;
 			wp = wp->w_wndp;
 		}
 	}
@@ -388,12 +420,12 @@ update(void)
 		if (wp->w_flag == 0)
 			continue;
 
-		if ((wp->w_flag & WFFORCE) == 0) {
+		if ((wp->w_flag & WFFRAME) == 0) {
 			lp = wp->w_linep;
 			for (i = 0; i < wp->w_ntrows; ++i) {
 				if (lp == wp->w_dotp)
 					goto out;
-				if (lp == wp->w_bufp->b_linep)
+				if (lp == wp->w_bufp->b_headp)
 					break;
 				lp = lforw(lp);
 			}
@@ -401,7 +433,7 @@ update(void)
 		/*
 		 * Put the middle-line in place.
 		 */
-		i = wp->w_force;
+		i = wp->w_frame;
 		if (i > 0) {
 			--i;
 			if (i >= wp->w_ntrows)
@@ -417,12 +449,12 @@ update(void)
 		 * Find the line.
 		 */
 		lp = wp->w_dotp;
-		while (i != 0 && lback(lp) != wp->w_bufp->b_linep) {
+		while (i != 0 && lback(lp) != wp->w_bufp->b_headp) {
 			--i;
 			lp = lback(lp);
 		}
 		wp->w_linep = lp;
-		wp->w_flag |= WFHARD;	/* Force full.		 */
+		wp->w_flag |= WFFULL;	/* Force full.		 */
 	out:
 		lp = wp->w_linep;	/* Try reduced update.	 */
 		i = wp->w_toprow;
@@ -437,13 +469,13 @@ update(void)
 			for (j = 0; j < llength(lp); ++j)
 				vtputc(lgetc(lp, j));
 			vteeol();
-		} else if ((wp->w_flag & (WFEDIT | WFHARD)) != 0) {
+		} else if ((wp->w_flag & (WFEDIT | WFFULL)) != 0) {
 			hflag = TRUE;
 			while (i < wp->w_toprow + wp->w_ntrows) {
 				vscreen[i]->v_color = CTEXT;
 				vscreen[i]->v_flag |= (VFCHG | VFHBAD);
 				vtmove(i, 0);
-				if (lp != wp->w_bufp->b_linep) {
+				if (lp != wp->w_bufp->b_headp) {
 					for (j = 0; j < llength(lp); ++j)
 						vtputc(lgetc(lp, j));
 					lp = lforw(lp);
@@ -455,7 +487,7 @@ update(void)
 		if ((wp->w_flag & WFMODE) != 0)
 			modeline(wp);
 		wp->w_flag = 0;
-		wp->w_force = 0;
+		wp->w_frame = 0;
 	}
 	lp = curwp->w_linep;	/* Cursor location. */
 	currow = curwp->w_toprow;
@@ -750,6 +782,8 @@ modeline(struct mgwin *wp)
 {
 	int	n, md;
 	struct buffer *bp;
+	char sl[21];		/* Overkill. Space for 2^64 in base 10. */
+	int len;
 
 	n = wp->w_toprow + wp->w_ntrows;	/* Location.		 */
 	vscreen[n]->v_color = CMODE;		/* Mode line color.	 */
@@ -791,6 +825,13 @@ modeline(struct mgwin *wp)
 	}
 	vtputc(')');
 	++n;
+
+	if (linenos) {
+		len = snprintf(sl, sizeof(sl), "--L%d", wp->w_dotline);
+		if (len < sizeof(sl) && len != -1)
+			n += vtputs(sl);
+	}
+
 	while (n < ncol) {			/* Pad out.		 */
 		vtputc('-');
 		++n;

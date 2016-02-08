@@ -1,4 +1,4 @@
-/*	$OpenBSD: brconfig.c,v 1.34 2005/12/21 01:40:23 millert Exp $	*/
+/*	$OpenBSD: brconfig.c,v 1.37 2006/07/25 00:26:42 djm Exp $	*/
 
 /*
  * Copyright (c) 1999, 2000 Jason L. Wright (jason@thought.net)
@@ -41,6 +41,7 @@
 #include <string.h>
 #include <err.h>
 #include <errno.h>
+#include <getopt.h>
 #include <sysexits.h>
 #include <limits.h>
 
@@ -106,23 +107,33 @@ usage(void)
 int
 main(int argc, char *argv[])
 {
-	int error = 0, sock;
+	int error = 0, ch, sock;
+	int aflag = 0;
 	char *brdg;
-
-	if (argc < 2) {
-		usage();
-		return (EX_USAGE);
-	}
 
 	sock = socket(AF_INET, SOCK_DGRAM, 0);
 	if (sock < 0)
 		err(1, "socket");
 
-	argc--; argv++;
-	brdg = argv[0];
+	while ((ch = getopt(argc, argv, "ah")) != -1) {
+		switch (ch) {
+		case 'a':
+			aflag = 1;
+			break;
+		case 'h':
+		default:
+			usage();
+			return (EX_USAGE);
+		}
+	}
 
-	if (strcmp(brdg, "-a") == 0)
+	argc -= optind;
+	argv += optind;
+
+	if (aflag || argc < 1)
 		return bridge_show_all(sock);
+
+	brdg = argv[0];
 
 	if (strlen(brdg) >= IFNAMSIZ) {
 		warnx("%s is not a bridge", brdg);
@@ -1353,8 +1364,9 @@ printb(char *s, unsigned short v, char *bits)
 		printf("%s=%o", s, v);
 	else
 		printf("%s=%x", s, v);
-	bits++;
+	
 	if (bits) {
+		bits++;
 		putchar('<');
 		while ((i = *bits++)) {
 			if (v & (1 << (i-1))) {

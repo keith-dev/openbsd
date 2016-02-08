@@ -1,4 +1,4 @@
-.\"	$OpenBSD: ksh.1,v 1.109 2005/12/06 20:40:02 jmc Exp $
+.\"	$OpenBSD: ksh.1,v 1.117 2006/08/03 11:22:05 jmc Exp $
 .\"
 .\"	Public Domain
 .\"
@@ -91,15 +91,13 @@ Restricted shell.
 A shell is
 .Dq restricted
 if this
-option is used or if either the basename the shell was invoked
-with or the
+option is used;
+if the basename the shell was invoked with was
+.Dq rksh ;
+or if the
 .Ev SHELL
-parameter match the pattern
-.Dq *r*sh
-(e.g.\&
-.Nm rsh ,
-.Nm rksh ,
-.Nm rpdksh ) .
+parameter is set to
+.Dq rksh .
 The following restrictions come into effect after the shell processes any
 profile and
 .Ev ENV
@@ -1502,7 +1500,7 @@ When using
 .Ic getopts ,
 it contains the argument for a parsed option, if it requires one.
 .It Ev OPTIND
-The index of the last argument processed when using
+The index of the next argument to be processed when using
 .Ic getopts .
 Assigning 1 to this parameter causes
 .Ic getopts
@@ -1530,17 +1528,7 @@ The primary prompt for interactive shells.
 Parameter, command, and arithmetic
 substitutions are performed,
 and the prompt string can be customised using
-backslash-escaped special characters (see below).
-.Ql \&!
-is replaced with the current command number (see the
-.Ic fc
-command below).
-A literal
-.Ql \&!
-can be put in the prompt by placing
-.Ql !!
-in
-.Ev PS1 .
+backslash-escaped special characters.
 .Pp
 Note that since the command-line editors try to figure out how long the prompt
 is (so they know how far it is to the edge of the screen), escape codes in
@@ -1632,11 +1620,17 @@ is abbreviated as
 The basename of
 the current working directory.
 .It Li \e!
-The current history number
-(see
-.Sq \e# ,
-below).
-Note: this sequence is not yet implemented.
+The current history number.
+An unescaped
+.Ql !\&
+will produce the current history number too,
+as per the POSIX specification.
+A literal
+.Ql \&!
+can be put in the prompt by placing
+.Ql !!
+in
+.Ev PS1 .
 .It Li \e#
 The current command number.
 This could be different to the current history number,
@@ -1649,7 +1643,11 @@ The default prompt i.e.\&
 if the effective UID is 0,
 otherwise
 .Sq $ \& .
-Note: this sequence is not yet implemented.
+Since the shell interprets
+.Sq $
+as a special character within double quotes,
+it is safer in this case to escape the backslash
+than to try quoting it.
 .It Li \e Ns Ar nnn
 The octal character
 .Ar nnn .
@@ -3172,7 +3170,9 @@ Each time
 .Ic getopts
 is invoked, it places the next option in the shell parameter
 .Ar name
-and the index of the next argument to be processed in the shell parameter
+and the index of the argument to be processed by the next call to
+.Ic getopts
+in the shell parameter
 .Ev OPTIND .
 If the option was introduced with a
 .Ql + ,
@@ -4323,7 +4323,7 @@ Impose a time limit of
 CPU seconds spent in user mode to be used by each process.
 .\".It Fl v Ar n
 .\"Impose a limit of
-..\"Ar n
+.\"Ar n
 .\"kilobytes on the amount of virtual memory used.
 .El
 .Pp

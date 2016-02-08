@@ -1,4 +1,4 @@
-# $OpenBSD: Makefile,v 1.12 2006/02/03 10:33:27 hshoexer Exp $
+# $OpenBSD: Makefile,v 1.42 2006/08/29 23:15:01 naddy Exp $
 
 # TARGETS
 # ipsec: feed ipsecNN.in through ipsecctl and check wether the output matches
@@ -7,11 +7,23 @@
 # sa:	 same as above, but for SA rules.
 # ike:	 same as above, but for ike rules.
 
-IPSECTESTS=1 2 3 4 5 6 7 8 9 10 11 12 13 14
+IPSECTESTS=1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24
+IPSECTESTS+=25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44
+IPSECTESTS+=51 52
 TCPMD5TESTS=1 2 3
-SATESTS=1 2 3 4 5 6 7 8 9 10
-SAFAIL=1
-IKETESTS=1 2 3 4 5 6 7 8
+SATESTS=1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24
+SAFAIL=1 2
+IPSECFAIL=1 2
+IKEFAIL=1 3 4 5 6 7
+IKETESTS=1 2 3 4 5 6 7 8 9 10 11 12 13 14 15
+IKETESTS+=16 17 18 19 20 21 22 23
+IKETESTS+=29 30 31 32 33 34 35 36 37 38 39 40
+IKETESTS+=41 42 43 46 47 48 49 50 51 52 53 54 55
+
+IKEDELTESTS=1 2 3 4 5 6 7 8 9 10 11 12 13 14 15
+IKEDELTESTS+=16 17 18 19 20 21 22 23
+IKEDELTESTS+=29 30 31 32 33 34 35 36 37 38 39 40
+IKEDELTESTS+=41 42 43 46 47
 
 SHELL=/bin/sh
 
@@ -49,12 +61,36 @@ safail${n}:
 	    ipsecctl -nv -f - 2>&1 | diff -u ${.CURDIR}/safail${n}.ok /dev/stdin
 .endfor
 
+.for n in ${IPSECFAIL}
+IPSECFAIL_TARGETS+=ipsecfail${n}
+
+ipsecfail${n}:
+	cat ${.CURDIR}/ipsecfail${n}.in | sed -e 's,DIR,${.CURDIR},g' | \
+	    ipsecctl -nv -f - 2>&1 | diff -u ${.CURDIR}/ipsecfail${n}.ok /dev/stdin
+.endfor
+
 .for n in ${IKETESTS}
 IKE_TARGETS+=ike${n}
 
 ike${n}:
 	cat ${.CURDIR}/ike${n}.in | sed -e 's,DIR,${.CURDIR},g' | \
 	    ipsecctl -nv -f - | diff -u ${.CURDIR}/ike${n}.ok /dev/stdin
+.endfor
+
+.for n in ${IKEFAIL}
+IKEFAIL_TARGETS+=ikefail${n}
+
+ikefail${n}:
+	cat ${.CURDIR}/ikefail${n}.in | sed -e 's,DIR,${.CURDIR},g' | \
+	    ipsecctl -nv -f - 2>&1 | diff -u ${.CURDIR}/ikefail${n}.ok /dev/stdin
+.endfor
+
+.for n in ${IKEDELTESTS}
+IKEDEL_TARGETS+=ikedel${n}
+
+ikedel${n}:
+	cat ${.CURDIR}/ikedel${n}.in | sed -e 's,DIR,${.CURDIR},g' | \
+	    ipsecctl -dnv -f - | diff -u ${.CURDIR}/ikedel${n}.ok /dev/stdin
 .endfor
 
 ipsec:		${IPSEC_TARGETS}
@@ -69,8 +105,17 @@ REGRESS_TARGETS+=sa
 safail:		${SAFAIL_TARGETS}
 REGRESS_TARGETS+=safail
 
+ipsecfail:	${IPSECFAIL_TARGETS}
+REGRESS_TARGETS+=ipsecfail
+
 ike:		${IKE_TARGETS}
 REGRESS_TARGETS+=ike
+
+ikefail:	${IKEFAIL_TARGETS}
+REGRESS_TARGETS+=ikefail
+
+ikedel:		${IKEDEL_TARGETS}
+REGRESS_TARGETS+=ikedel
 
 alltests: ${REGRESS_TARGETS}
 

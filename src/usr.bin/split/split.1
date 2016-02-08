@@ -1,4 +1,4 @@
-.\"	$OpenBSD: split.1,v 1.10 2005/09/07 12:45:59 jmc Exp $
+.\"	$OpenBSD: split.1,v 1.13 2006/08/10 06:05:11 jmc Exp $
 .\"	$NetBSD: split.1,v 1.5 1994/12/21 08:20:35 jtc Exp $
 .\"
 .\" Copyright (c) 1990, 1991, 1993, 1994
@@ -30,7 +30,7 @@
 .\"
 .\"	@(#)split.1	8.3 (Berkeley) 4/16/94
 .\"
-.Dd April 16, 1994
+.Dd August 9, 2006
 .Dt SPLIT 1
 .Os
 .Sh NAME
@@ -38,30 +38,40 @@
 .Nd split a file into pieces
 .Sh SYNOPSIS
 .Nm split
+.Op Fl a Ar suffix_length
+.br
 .Oo
 .Fl b
 .Sm off
-.Ar byte_count Op Ar k | m
+.Ar byte_count Op Cm k \*(Ba m
 .Sm on
+.No \*(Ba Fl l Ar line_count
+.No \*(Ba Fl p Ar pattern
 .Oc
-.Op Fl l Ar line_count
-.Op Fl p Ar pattern
 .Op Ar file Op Ar name
 .Sh DESCRIPTION
 The
 .Nm
 utility reads the given
-.Ar file
-(or standard input if no file is specified)
+.Ar file ,
+or standard input if no file is specified,
 and breaks it up into files of 1000 lines each.
+.Ar file
+itself is not altered.
 .Pp
 The options are as follows:
 .Bl -tag -width Ds
+.It Fl a Ar suffix_length
+Use
+.Ar suffix_length
+letters to form the suffix of the file name
+(see below).
+The default suffix length is 2.
 .It Xo
 .Fl b
 .Sm off
 .Ar byte_count
-.Op Ar k | m
+.Op Cm k \*(Ba m
 .Sm on
 .Xc
 Create smaller files
@@ -93,32 +103,49 @@ and
 options.
 .El
 .Pp
-If additional arguments are specified, the first is used as the name
-of the input file which is to be split.
-If a second additional argument is specified, it is used as a prefix
+If
+.Ar name
+is specified,
+it is used as a prefix
 for the names of the files into which the file is split.
 In this case, each file into which the file is split is named by the
-prefix followed by a lexically ordered suffix in the range of
-.Dq aa-zz .
+prefix followed by a lexically ordered suffix using
+.Ar suffix_length
+characters in the range
+.Dq a-z .
 .Pp
 If the
 .Ar name
 argument is not specified, the file is split into lexically ordered
-files named in the range of
-.Dq xaa-zzz .
+files named with the prefixes
+.Sq x ,
+.Sq y ,
+and
+.Sq z .
 .Sh SEE ALSO
 .Xr re_format 7
+.Sh STANDARDS
+The
+.Nm
+utility is compliant with the
+.St -p1003.1-2004
+specification.
+.Pp
+The use of
+.Sq y
+and
+.Sq z
+prefixes (in addition to the standard
+.Sq x )
+in the absence of a
+.Ar name
+parameter is an
+.Ox
+extension.
 .Sh HISTORY
 A
 .Nm
 command appeared in
 .At v3 .
 .Sh BUGS
-For historical reasons, if you specify
-.Ar name ,
-.Nm
-can only create 676 separate
-files.
-The default naming convention allows 2028 separate files.
-.Pp
 The maximum line length for matching patterns is 65536.

@@ -1,4 +1,4 @@
-/*	$OpenBSD: printconf.c,v 1.53 2006/02/10 14:34:40 claudio Exp $	*/
+/*	$OpenBSD: printconf.c,v 1.57 2006/08/04 12:01:48 henning Exp $	*/
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -25,6 +25,7 @@
 #include "session.h"
 
 void		 print_op(enum comp_ops);
+void		 print_community(int, int);
 void		 print_set(struct filter_set_head *);
 void		 print_mainconf(struct bgpd_config *);
 void		 print_network(struct network_config *);
@@ -74,6 +75,24 @@ print_op(enum comp_ops op)
 }
 
 void
+print_community(int as, int type)
+{
+	if (as == COMMUNITY_ANY)
+		printf("*:");
+	else if (as == COMMUNITY_NEIGHBOR_AS)
+		printf("neighbor-as:");
+	else
+		printf("%d:", as);
+
+	if (type == COMMUNITY_ANY)
+		printf("* ");
+	else if (type == COMMUNITY_NEIGHBOR_AS)
+		printf("neighbor-as ");
+	else
+		printf("%d ", type);
+}
+
+void
 print_set(struct filter_set_head *set)
 {
 	struct filter_set	*s;
@@ -114,6 +133,9 @@ print_set(struct filter_set_head *set)
 		case ACTION_SET_NEXTHOP_NOMODIFY:
 			printf("nexthop no-modify ");
 			break;
+		case ACTION_SET_NEXTHOP_SELF:
+			printf("nexthop self ");
+			break;
 		case ACTION_SET_PREPEND_SELF:
 			printf("prepend-self %u ", s->action.prepend);
 			break;
@@ -121,12 +143,16 @@ print_set(struct filter_set_head *set)
 			printf("prepend-neighbor %u ", s->action.prepend);
 			break;
 		case ACTION_DEL_COMMUNITY:
-			printf("community delete %u:%u ",
-			    s->action.community.as, s->action.community.type);
+			printf("community delete ");
+			print_community(s->action.community.as,
+			    s->action.community.type);
+			printf(" ");
 			break;
 		case ACTION_SET_COMMUNITY:
-			printf("community %u:%u ", s->action.community.as,
+			printf("community ");
+			print_community(s->action.community.as,
 			    s->action.community.type);
+			printf(" ");
 			break;
 		case ACTION_PFTABLE:
 			printf("pftable %s ", s->action.pftable);
@@ -181,6 +207,11 @@ print_mainconf(struct bgpd_config *conf)
 	TAILQ_FOREACH(la, conf->listen_addrs, entry)
 		printf("listen on %s\n",
 		    log_sockaddr((struct sockaddr *)&la->sa));
+
+	if (conf->flags & BGPD_FLAG_NEXTHOP_BGP)
+		printf("nexthop qualify via bgp\n");
+	if (conf->flags & BGPD_FLAG_NEXTHOP_DEFAULT)
+		printf("nexthop qualify via default\n");
 
 	if (conf->flags & BGPD_FLAG_REDIST_CONNECTED) {
 		printf("network inet connected");
@@ -244,8 +275,12 @@ print_peer(struct peer_config *p, struct bgpd_config *conf, const char *c)
 		printf("%s\tpassive\n", c);
 	if (p->local_addr.af)
 		printf("%s\tlocal-address %s\n", c, log_addr(&p->local_addr));
-	if (p->max_prefix)
-		printf("%s\tmax-prefix %u\n", c, p->max_prefix);
+	if (p->max_prefix) {
+		printf("%s\tmax-prefix %u", c, p->max_prefix);
+		if (p->max_prefix_restart)
+			printf(" restart %u", p->max_prefix_restart);
+		printf("\n");
+	}
 	if (p->holdtime)
 		printf("%s\tholdtime %u\n", c, p->holdtime);
 	if (p->min_holdtime)
@@ -433,19 +468,8 @@ print_rule(struct peer *peer_l, struct filter_rule *r)
 
 	if (r->match.community.as != 0) {
 		printf("community ");
-		if (r->match.community.as == COMMUNITY_ANY)
-			printf("*:");
-		else if (r->match.community.as == COMMUNITY_NEIGHBOR_AS)
-			printf("neighbor-as:");
-		else
-			printf("%d:", r->match.community.as);
-
-		if (r->match.community.type == COMMUNITY_ANY)
-			printf("* ");
-		else if (r->match.community.type == COMMUNITY_NEIGHBOR_AS)
-			printf("neighbor-as ");
-		else
-			printf("%d ", r->match.community.type);
+		print_community(r->match.community.as,
+		    r->match.community.type);
 	}
 
 	print_set(&r->set);

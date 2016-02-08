@@ -1,4 +1,4 @@
-/*	$OpenBSD: parse.y,v 1.181 2006/02/10 14:34:40 claudio Exp $ */
+/*	$OpenBSD: parse.y,v 1.193 2006/08/27 16:11:05 henning Exp $ */
 
 /*
  * Copyright (c) 2002, 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -149,7 +149,8 @@ typedef struct {
 %token	AS ROUTERID HOLDTIME YMIN LISTEN ON FIBUPDATE
 %token	RDE EVALUATE IGNORE COMPARE
 %token	GROUP NEIGHBOR NETWORK
-%token	REMOTEAS DESCR LOCALADDR MULTIHOP PASSIVE MAXPREFIX ANNOUNCE
+%token	REMOTEAS DESCR LOCALADDR MULTIHOP PASSIVE MAXPREFIX RESTART
+%token	ANNOUNCE DEMOTE
 %token	ENFORCE NEIGHBORAS CAPABILITIES REFLECTOR DEPEND DOWN SOFTRECONFIG
 %token	DUMP IN OUT
 %token	LOG ROUTECOLL TRANSPARENT
@@ -159,14 +160,15 @@ typedef struct {
 %token	FROM TO ANY
 %token	CONNECTED STATIC
 %token	PREFIX PREFIXLEN SOURCEAS TRANSITAS COMMUNITY DELETE
-%token	SET LOCALPREF MED METRIC NEXTHOP REJECT BLACKHOLE NOMODIFY
+%token	SET LOCALPREF MED METRIC NEXTHOP REJECT BLACKHOLE NOMODIFY SELF
 %token	PREPEND_SELF PREPEND_PEER PFTABLE WEIGHT RTLABEL
 %token	ERROR
 %token	IPSEC ESP AH SPI IKE
 %token	IPV4 IPV6
+%token	QUALIFY VIA
 %token	<v.string>		STRING
 %type	<v.number>		number asnumber optnumber yesno inout espah
-%type	<v.number>		family
+%type	<v.number>		family restart
 %type	<v.string>		string
 %type	<v.addr>		address
 %type	<v.prefix>		prefix addrspec
@@ -433,6 +435,19 @@ conf_main	: AS asnumber		{
 			}
 			free($4);
 		}
+		| NEXTHOP QUALIFY VIA STRING	{
+			if (!strcmp($4, "bgp"))
+				conf->flags |= BGPD_FLAG_NEXTHOP_BGP;
+			else if (!strcmp($4, "default"))
+				conf->flags |= BGPD_FLAG_NEXTHOP_DEFAULT;
+			else {
+				yyerror("nexthop depend on: "
+				    "unknown setting \"%s\"", $4);
+				free($4);
+				YYERROR;
+			}
+			free($4);
+		}
 		;
 
 mrtdump		: DUMP STRING inout STRING optnumber	{
@@ -676,10 +691,14 @@ peeropts	: REMOTEAS asnumber	{
 				fatal("king bula sees borked AFI");
 			}
 		}
+		| ANNOUNCE CAPABILITIES yesno {
+			curpeer->conf.announce_capa = $3;
+		}
+		| ANNOUNCE SELF {
+			curpeer->conf.announce_type = ANNOUNCE_SELF;
+		}
 		| ANNOUNCE STRING {
-			if (!strcmp($2, "self"))
-				curpeer->conf.announce_type = ANNOUNCE_SELF;
-			else if (!strcmp($2, "none"))
+			if (!strcmp($2, "none"))
 				curpeer->conf.announce_type = ANNOUNCE_NONE;
 			else if (!strcmp($2, "all"))
 				curpeer->conf.announce_type = ANNOUNCE_ALL;
@@ -699,8 +718,9 @@ peeropts	: REMOTEAS asnumber	{
 			else
 				curpeer->conf.enforce_as = ENFORCE_AS_OFF;
 		}
-		| MAXPREFIX number {
+		| MAXPREFIX number restart {
 			curpeer->conf.max_prefix = $2;
+			curpeer->conf.max_prefix_restart = $3;
 		}
 		| TCP MD5SIG PASSWORD string {
 			if (curpeer->conf.auth.method) {
@@ -833,9 +853,6 @@ peeropts	: REMOTEAS asnumber	{
 			}
 			free($7);
 		}
-		| ANNOUNCE CAPABILITIES yesno {
-			curpeer->conf.announce_capa = $3;
-		}
 		| SET filter_set_opt	{
 			struct filter_rule	*r;
 
@@ -894,11 +911,40 @@ peeropts	: REMOTEAS asnumber	{
 			}
 			free($3);
 		}
+		| DEMOTE STRING		{
+			if (strlcpy(curpeer->conf.demote_group, $2,
+			    sizeof(curpeer->conf.demote_group)) >=
+			    sizeof(curpeer->conf.demote_group)) {
+				yyerror("demote group name \"%s\" too long: "
+				    "max %u", $2,
+				    sizeof(curpeer->conf.demote_group) - 1);
+				free($2);
+				YYERROR;
+			}
+			free($2);
+			if (carp_demote_init(curpeer->conf.demote_group,
+			    conf->opts & BGPD_OPT_FORCE_DEMOTE) == -1) {
+				yyerror("error initializing group \"%s\"",
+				    curpeer->conf.demote_group);
+				YYERROR;
+			}
+		}
 		| SOFTRECONFIG inout yesno {
 			if ($2)
 				curpeer->conf.softreconfig_in = $3;
 			else
 				curpeer->conf.softreconfig_out = $3;
+		}
+		;
+
+restart		: /* nada */		{ $$ = 0; }
+		| RESTART number	{
+			if ($2 < 1 || $2 > USHRT_MAX) {
+				yyerror("restart out of range. 1 to %u minutes",
+				    USHRT_MAX);
+				YYERROR;
+			}
+			$$ = $2;
 		}
 		;
 
@@ -1254,7 +1300,7 @@ filter_set_opt	: LOCALPREF number		{
 		}
 		| LOCALPREF '+' number		{
 			if ($3 > INT_MAX) {
-				yyerror("localpref to big: max %u", INT_MAX);
+				yyerror("localpref too big: max %u", INT_MAX);
 				YYERROR;
 			}
 			if (($$ = calloc(1, sizeof(struct filter_set))) == NULL)
@@ -1280,7 +1326,7 @@ filter_set_opt	: LOCALPREF number		{
 		}
 		| MED '+' number			{
 			if ($3 > INT_MAX) {
-				yyerror("metric to big: max %u", INT_MAX);
+				yyerror("metric too big: max %u", INT_MAX);
 				YYERROR;
 			}
 			if (($$ = calloc(1, sizeof(struct filter_set))) == NULL)
@@ -1306,7 +1352,7 @@ filter_set_opt	: LOCALPREF number		{
 		}
 		| METRIC '+' number			{
 			if ($3 > INT_MAX) {
-				yyerror("metric to big: max %u", INT_MAX);
+				yyerror("metric too big: max %u", INT_MAX);
 				YYERROR;
 			}
 			if (($$ = calloc(1, sizeof(struct filter_set))) == NULL)
@@ -1332,7 +1378,7 @@ filter_set_opt	: LOCALPREF number		{
 		}
 		| WEIGHT '+' number			{
 			if ($3 > INT_MAX) {
-				yyerror("weight to big: max %u", INT_MAX);
+				yyerror("weight too big: max %u", INT_MAX);
 				YYERROR;
 			}
 			if (($$ = calloc(1, sizeof(struct filter_set))) == NULL)
@@ -1372,6 +1418,11 @@ filter_set_opt	: LOCALPREF number		{
 				fatal(NULL);
 			$$->type = ACTION_SET_NEXTHOP_NOMODIFY;
 		}
+		| NEXTHOP SELF		{
+			if (($$ = calloc(1, sizeof(struct filter_set))) == NULL)
+				fatal(NULL);
+			$$->type = ACTION_SET_NEXTHOP_SELF;
+		}
 		| PREPEND_SELF number		{
 			if (($$ = calloc(1, sizeof(struct filter_set))) == NULL)
 				fatal(NULL);
@@ -1400,6 +1451,7 @@ filter_set_opt	: LOCALPREF number		{
 			    pftable_exists($2) != 0) {
 				yyerror("pftable name does not exist");
 				free($2);
+				free($$);
 				YYERROR;
 			}
 			if (strlcpy($$->action.pftable, $2,
@@ -1407,11 +1459,13 @@ filter_set_opt	: LOCALPREF number		{
 			    sizeof($$->action.pftable)) {
 				yyerror("pftable name too long");
 				free($2);
+				free($$);
 				YYERROR;
 			}
 			if (pftable_add($2) != 0) {
 				yyerror("Couldn't register table");
 				free($2);
+				free($$);
 				YYERROR;
 			}
 			free($2);
@@ -1425,6 +1479,7 @@ filter_set_opt	: LOCALPREF number		{
 			    sizeof($$->action.rtlabel)) {
 				yyerror("rtlabel name too long");
 				free($2);
+				free($$);
 				YYERROR;
 			}
 			free($2);
@@ -1534,6 +1589,7 @@ lookup(char *s)
 		{ "compare",		COMPARE},
 		{ "connected",		CONNECTED},
 		{ "delete",		DELETE},
+		{ "demote",		DEMOTE},
 		{ "deny",		DENY},
 		{ "depend",		DEPEND},
 		{ "descr",		DESCR},
@@ -1576,14 +1632,17 @@ lookup(char *s)
 		{ "prefixlen",		PREFIXLEN},
 		{ "prepend-neighbor",	PREPEND_PEER},
 		{ "prepend-self",	PREPEND_SELF},
+		{ "qualify",		QUALIFY},
 		{ "quick",		QUICK},
 		{ "rde",		RDE},
 		{ "reject",		REJECT},
 		{ "remote-as",		REMOTEAS},
+		{ "restart",		RESTART},
 		{ "route-collector",	ROUTECOLL},
 		{ "route-reflector",	REFLECTOR},
 		{ "router-id",		ROUTERID},
 		{ "rtlabel",		RTLABEL},
+		{ "self",		SELF},
 		{ "set",		SET},
 		{ "softreconfig",	SOFTRECONFIG},
 		{ "source-as",		SOURCEAS},
@@ -1593,6 +1652,7 @@ lookup(char *s)
 		{ "to",			TO},
 		{ "transit-as",		TRANSITAS},
 		{ "transparent-as",	TRANSPARENT},
+		{ "via",		VIA},
 		{ "weight",		WEIGHT}
 	};
 	const struct keywords	*p;
@@ -1640,9 +1700,7 @@ lgetc(FILE *f)
 	while ((c = getc(f)) == '\\') {
 		next = getc(f);
 		if (next != '\n') {
-			if (isspace(next))
-				yyerror("whitespace after \\");
-			ungetc(next, f);
+			c = next;
 			break;
 		}
 		yylval.lineno = lineno;
@@ -2114,6 +2172,7 @@ alloc_peer(void)
 	p->conf.capabilities.mp_v4 = SAFI_UNICAST;
 	p->conf.capabilities.mp_v6 = SAFI_NONE;
 	p->conf.capabilities.refresh = 1;
+	p->conf.capabilities.restart = 0;
 	p->conf.softreconfig_in = 1;
 	p->conf.softreconfig_out = 1;
 
@@ -2200,18 +2259,25 @@ get_id(struct peer *newpeer)
 {
 	struct peer	*p;
 
-	if (newpeer->conf.remote_addr.af)
-		for (p = peer_l_old; p != NULL; p = p->next)
+	for (p = peer_l_old; p != NULL; p = p->next)
+		if (newpeer->conf.remote_addr.af) {
 			if (!memcmp(&p->conf.remote_addr,
 			    &newpeer->conf.remote_addr,
 			    sizeof(p->conf.remote_addr))) {
 				newpeer->conf.id = p->conf.id;
 				return (0);
 			}
+		} else {	/* newpeer is a group */
+			if (strcmp(newpeer->conf.group, p->conf.group) == 0) {
+				newpeer->conf.id = p->conf.groupid;
+				return (0);
+			}
+		}
 
 	/* new one */
 	for (; id < UINT_MAX / 2; id++) {
-		for (p = peer_l_old; p != NULL && p->conf.id != id; p = p->next)
+		for (p = peer_l_old; p != NULL &&
+		    p->conf.id != id && p->conf.groupid != id; p = p->next)
 			;	/* nothing */
 		if (p == NULL) {	/* we found a free id */
 			newpeer->conf.id = id++;
@@ -2402,7 +2468,7 @@ merge_filterset(struct filter_set_head *sh, struct filter_set *s)
 				yyerror("community is already set");
 			else
 				yyerror("redefining set parameter %s",
-				    filterset_names[s->type]);
+				    filterset_name(s->type));
 			return (-1);
 		}
 	}
@@ -2482,6 +2548,7 @@ get_rule(enum action_types type)
 	switch (type) {
 	case ACTION_SET_PREPEND_SELF:
 	case ACTION_SET_NEXTHOP_NOMODIFY:
+	case ACTION_SET_NEXTHOP_SELF:
 		out = 1;
 		break;
 	default:

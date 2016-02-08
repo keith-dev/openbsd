@@ -1,4 +1,4 @@
-/*	$OpenBSD: privsep.c,v 1.22 2005/09/23 15:42:51 otto Exp $	*/
+/*	$OpenBSD: privsep.c,v 1.25 2006/04/22 19:26:05 moritz Exp $	*/
 
 /*
  * Copyright (c) 2003 Can Erkin Acar
@@ -60,7 +60,7 @@ enum priv_state {
 	STATE_INIT,		/* initial state */
 	STATE_BPF,		/* input file/device opened */
 	STATE_FILTER,		/* filter applied */
-	STATE_RUN,		/* running and accepting network traffic */
+	STATE_RUN		/* running and accepting network traffic */
 };
 
 #define ALLOW(action)	(1 << (action))
@@ -77,8 +77,7 @@ static const int allowed_max[] = {
 			ALLOW(PRIV_ETHER_NTOHOST) | ALLOW(PRIV_INIT_DONE),
 	/* RUN */	ALLOW(PRIV_GETHOSTBYADDR) | ALLOW(PRIV_ETHER_NTOHOST) |
 			ALLOW(PRIV_GETRPCBYNUMBER) | ALLOW(PRIV_GETLINES) |
-			ALLOW(PRIV_LOCALTIME),
-	/* QUIT */	0
+			ALLOW(PRIV_LOCALTIME)
 };
 
 /*
@@ -89,8 +88,7 @@ static int allowed_ext[] = {
 	/* INIT */	ALLOW(PRIV_SETFILTER),
 	/* BPF */	ALLOW(PRIV_SETFILTER),
 	/* FILTER */	ALLOW(PRIV_GETSERVENTRIES),
-	/* RUN */	ALLOW(PRIV_GETLINES) | ALLOW(PRIV_LOCALTIME),
-	/* QUIT */	0
+	/* RUN */	ALLOW(PRIV_GETLINES) | ALLOW(PRIV_LOCALTIME)
 };
 
 struct ftab {
@@ -108,6 +106,8 @@ int		debug_level = LOG_INFO;
 int		priv_fd = -1;
 volatile	pid_t child_pid = -1;
 static volatile	sig_atomic_t cur_state = STATE_INIT;
+
+extern void	set_slave_signals(void);
 
 static void	impl_open_bpf(int, int *);
 static void	impl_open_dump(int, const char *);
@@ -136,6 +136,7 @@ priv_init(int argc, char **argv)
 	char *cmdbuf, *infile = NULL;
 	char *RFileName = NULL;
 	char *WFileName = NULL;
+	sigset_t allsigs, oset;
 
 	if (geteuid() != 0)
 		errx(1, "need root privileges");
@@ -147,6 +148,9 @@ priv_init(int argc, char **argv)
 	/* Create sockets */
 	if (socketpair(AF_LOCAL, SOCK_STREAM, PF_UNSPEC, socks) == -1)
 		err(1, "socketpair() failed");
+
+	sigfillset(&allsigs);
+	sigprocmask(SIG_BLOCK, &allsigs, &oset);
 
 	child_pid = fork();
 	if (child_pid < 0)
@@ -175,8 +179,14 @@ priv_init(int argc, char **argv)
 
 		close(socks[0]);
 		priv_fd = socks[1];
+
+		set_slave_signals();
+		sigprocmask(SIG_SETMASK, &oset, NULL);
+
 		return (0);
 	}
+
+	sigprocmask(SIG_SETMASK, &oset, NULL);
 
 	/* Child - drop suid privileges */
 	gid = getgid();
@@ -755,6 +765,7 @@ may_read(int fd, void *buf, size_t n)
 		case -1:
 			if (errno == EINTR || errno == EAGAIN)
 				continue;
+			/* FALLTHROUGH */
 		case 0:
 			return (1);
 		default:
@@ -778,6 +789,7 @@ must_read(int fd, void *buf, size_t n)
 		case -1:
 			if (errno == EINTR || errno == EAGAIN)
 				continue;
+			/* FALLTHROUGH */
 		case 0:
 			_exit(0);
 		default:
@@ -800,6 +812,7 @@ must_write(int fd, const void *buf, size_t n)
 		case -1:
 			if (errno == EINTR || errno == EAGAIN)
 				continue;
+			/* FALLTHROUGH */
 		case 0:
 			_exit(0);
 		default:

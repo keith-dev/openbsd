@@ -1,4 +1,4 @@
-/*	$OpenBSD: buffer.c,v 1.33 2005/11/02 15:34:43 claudio Exp $ */
+/*	$OpenBSD: buffer.c,v 1.35 2006/08/27 13:40:21 henning Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -44,6 +44,23 @@ buf_open(size_t len)
 	}
 	buf->size = len;
 	buf->fd = -1;
+
+	return (buf);
+}
+
+struct buf *
+buf_grow(struct buf *buf, size_t len)
+{
+	void	*p;
+
+	if ((p = realloc(buf->buf, buf->size + len)) == NULL) {
+		free(buf->buf);
+		free(buf);
+		return (NULL);
+	}
+
+	buf->buf = p;
+	buf->size += len;
 
 	return (buf);
 }
@@ -200,39 +217,6 @@ msgbuf_write(struct msgbuf *msgbuf)
 	}
 
 	return (0);
-}
-
-int
-msgbuf_writebound(struct msgbuf *msgbuf)
-{
-	struct buf	*buf;
-	int		 n;
-
-	if (!msgbuf_unbounded(msgbuf))
-		return (1);
-
-	buf = TAILQ_FIRST(&msgbuf->bufs);
-	if ((n = buf_write(msgbuf->fd, buf)) < 0)
-		return (n);
-
-	if (n == 1) {	/* everything written out */
-		buf_dequeue(msgbuf, buf);
-		return (1);
-	} else
-		return (0);
-}
-
-int
-msgbuf_unbounded(struct msgbuf *msgbuf)
-{
-	struct buf	*buf;
-
-	/* return 1 if last buffer was not completely written. */
-	buf = TAILQ_FIRST(&msgbuf->bufs);
-	if (buf != NULL && buf->rpos != 0)
-		return (1);
-	else
-		return (0);
 }
 
 void

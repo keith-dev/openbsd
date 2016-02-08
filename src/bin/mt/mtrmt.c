@@ -1,4 +1,4 @@
-/*	$OpenBSD: mtrmt.c,v 1.15 2004/09/16 08:35:49 deraadt Exp $	*/
+/*	$OpenBSD: mtrmt.c,v 1.17 2006/04/11 15:06:48 ray Exp $	*/
 /*	$NetBSD: mtrmt.c,v 1.2 1996/03/06 06:22:07 scottr Exp $	*/
 
 /*-
@@ -87,13 +87,8 @@ static	int rmtreply(char *);
 int
 rmthost(char *host)
 {
-	int len = strlen(host) + 1;
-
-	rmtpeer = malloc(len);
-	if (rmtpeer)
-		strlcpy(rmtpeer, host, len);
-	else
-		rmtpeer = host;
+	if ((rmtpeer = strdup(host)) == NULL)
+		err(1, "strdup");
 	signal(SIGPIPE, sigrmtconnaborted);
 	rmtgetconn();
 	if (rmtape < 0)

@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.y,v 1.7 2005/07/09 07:53:26 jmc Exp $	*/
+/*	$OpenBSD: conf.y,v 1.11 2006/06/02 20:31:48 moritz Exp $	*/
 
 /*
  * Copyright (c) 2005 Håkan Olsson.  All rights reserved.
@@ -57,12 +57,12 @@ void	yyerror(const char *);
 	int	 val;
 }
 
-%token MODE CARP INTERFACE INTERVAL LISTEN ON PORT PEER SHAREDKEY
+%token MODE INTERFACE INTERVAL LISTEN ON PORT PEER SHAREDKEY
 %token Y_SLAVE Y_MASTER INET INET6 FLUSHMODE STARTUP NEVER SYNC
-%token SKIPSLAVE
+%token GROUP SKIPSLAVE
 %token <string> STRING
 %token <val>	VALUE
-%type  <val>	af port interval mode flushmode
+%type  <val>	af port mode flushmode
 
 %%
 /* Rules */
@@ -97,23 +97,26 @@ modes		: SKIPSLAVE
 		}
 		;
 
-interval	: /* empty */		{ $$ = CARP_DEFAULT_INTERVAL; }
-		| INTERVAL VALUE	{ $$ = $2; }
-		;
-
 flushmode	: STARTUP		{ $$ = FM_STARTUP; }
 		| NEVER			{ $$ = FM_NEVER; }
 		| SYNC			{ $$ = FM_SYNC; }
 		;
 
-setting		: CARP INTERFACE STRING interval
+setting		: INTERFACE STRING
 		{
 			if (cfgstate.carp_ifname)
 				free(cfgstate.carp_ifname);
-			cfgstate.carp_ifname = $3;
-			cfgstate.carp_check_interval = $4;
-			log_msg(2, "config: carp interface %s interval %d",
-			    $3, $4);
+			cfgstate.carp_ifname = $2;
+			log_msg(2, "config: interface %s",
+			    cfgstate.carp_ifname);
+		}
+		| GROUP STRING
+		{
+			if (cfgstate.carp_ifgroup)
+				free(cfgstate.carp_ifgroup);
+			cfgstate.carp_ifgroup = $2;
+			log_msg(2, "config: group %s",
+			    cfgstate.carp_ifgroup);
 		}
 		| FLUSHMODE flushmode
 		{
@@ -140,11 +143,13 @@ setting		: CARP INTERFACE STRING interval
 				if (!peer) {
 					log_err("config: calloc(1, %lu) "
 					    "failed", sizeof *peer);
+					free($2);
 					YYERROR;
 				}
 				peer->name = $2;
 			}
 			LIST_INSERT_HEAD(&cfgstate.peerlist, peer, link);
+			cfgstate.peercnt++;
 			log_msg(2, "config: add peer %s", peer->name);
 		}
 		| LISTEN ON STRING af port
@@ -198,12 +203,11 @@ match(char *token)
 {
 	/* Sorted */
 	static const struct keyword keywords[] = {
-		{ "carp", CARP },
 		{ "flushmode", FLUSHMODE },
+		{ "group", GROUP },
 		{ "inet", INET },
 		{ "inet6", INET6 },
 		{ "interface", INTERFACE },
-		{ "interval", INTERVAL },
 		{ "listen", LISTEN },
 		{ "master", Y_MASTER },
 		{ "mode", MODE },
@@ -226,7 +230,7 @@ match(char *token)
 }
 
 int
-yylex(void) 
+yylex(void)
 {
 	char *p;
 	int v;
@@ -280,7 +284,7 @@ conf_parse_file(char *cfgfile)
 	if ((st.st_uid && st.st_uid != pw->pw_uid) ||
 	    ((st.st_mode & S_IFMT) != S_IFREG) ||
 	    ((st.st_mode & (S_IRWXG | S_IRWXO)) != 0)) {
-		log_msg(0, "configuration file has bad owner, type or mode"); 
+		log_msg(0, "configuration file has bad owner, type or mode");
 		goto bad;
 	}
 
@@ -328,6 +332,9 @@ conf_parse_file(char *cfgfile)
 	r = yyparse();
 	free(buf);
 
+	if (!cfgstate.carp_ifgroup)
+		cfgstate.carp_ifgroup = strdup("carp");
+
 	return r;
 
   bad:
@@ -345,7 +352,6 @@ conf_init(int argc, char **argv)
 	cfgstate.runstate = INIT;
 	LIST_INIT(&cfgstate.peerlist);
 
-	cfgstate.carp_check_interval = CARP_DEFAULT_INTERVAL;
 	cfgstate.listen_port = SASYNCD_DEFAULT_PORT;
 
 	while ((ch = getopt(argc, argv, "c:dv")) != -1) {

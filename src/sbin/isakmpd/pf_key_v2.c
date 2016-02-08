@@ -1,4 +1,4 @@
-/* $OpenBSD: pf_key_v2.c,v 1.168 2005/11/14 23:25:11 deraadt Exp $  */
+/* $OpenBSD: pf_key_v2.c,v 1.176 2006/09/01 00:24:06 mpf Exp $  */
 /* $EOM: pf_key_v2.c,v 1.79 2000/12/12 00:33:19 niklas Exp $	 */
 
 /*
@@ -52,6 +52,7 @@
 
 #include "cert.h"
 #include "conf.h"
+#include "connection.h"
 #include "exchange.h"
 #include "ipsec.h"
 #include "ipsec_num.h"
@@ -61,6 +62,7 @@
 #include "sa.h"
 #include "timer.h"
 #include "transport.h"
+#include "ui.h"
 #include "util.h"
 
 #include "policy.h"
@@ -373,7 +375,9 @@ pf_key_v2_write(struct pf_key_v2_msg *pmsg)
 		    (u_int8_t *) iov[i].iov_base, iov[i].iov_len));
 	}
 
-	n = writev(pf_key_v2_socket, iov, cnt);
+	do {
+		n = writev(pf_key_v2_socket, iov, cnt);
+	} while (n == -1 && (errno == EAGAIN || errno == EINTR));
 	if (n == -1) {
 		log_error("pf_key_v2_write: writev (%d, %p, %d) failed",
 		    pf_key_v2_socket, iov, cnt);
@@ -934,8 +938,11 @@ pf_key_v2_set_spi(struct sa *sa, struct proto *proto, int incoming,
 			break;
 
 		case IPSEC_ESP_AES:
-			/* case IPSEC_ESP_AES_128_CTR: */
 			ssa.sadb_sa_encrypt = SADB_X_EALG_AES;
+			break;
+
+		case IPSEC_ESP_AES_128_CTR:
+			ssa.sadb_sa_encrypt = SADB_X_EALG_AESCTR;
 			break;
 
 		case IPSEC_ESP_CAST:
@@ -2123,7 +2130,7 @@ passed:
 }
 
 /* Disable a flow given a SA.  */
-static int
+int
 pf_key_v2_disable_sa(struct sa *sa, int incoming)
 {
 	struct ipsec_sa *isa = sa->data;
@@ -2163,14 +2170,6 @@ pf_key_v2_delete_spi(struct sa *sa, struct proto *proto, int incoming)
 	/* If it's not an established SA, don't proceed. */
 	if (!(sa->flags & SA_FLAG_READY))
 		return 0;
-
-	/*
-	 * If the SA was not replaced and was not one acquired through the
-	 * kernel (ACQUIRE message), remove the flow associated with it.
-	 * We ignore any errors from the disabling of the flow.
-	 */
-	if (!(sa->flags & SA_FLAG_REPLACED) && !(sa->flags & SA_FLAG_ONDEMAND))
-		pf_key_v2_disable_sa(sa, incoming);
 
 	if (sa->name && !(sa->flags & SA_FLAG_REPLACED)) {
 		LOG_DBG((LOG_SYSDEP, 50,
@@ -2319,7 +2318,7 @@ pf_key_v2_connection_check(char *conn)
 	if (!sa_lookup_by_name(conn, 2)) {
 		LOG_DBG((LOG_SYSDEP, 70,
 		    "pf_key_v2_connection_check: SA for %s missing", conn));
-		exchange_establish(conn, pf_key_v2_stayalive, conn);
+		exchange_establish(conn, pf_key_v2_stayalive, conn, 0);
 	} else
 		LOG_DBG((LOG_SYSDEP, 70, "pf_key_v2_connection_check: "
 		    "SA for %s exists", conn));
@@ -2425,7 +2424,7 @@ pf_key_v2_expire(struct pf_key_v2_msg *pmsg)
 	if (!(sa->flags & SA_FLAG_REPLACED) &&
 	    (sa->flags & SA_FLAG_ONDEMAND) &&
 	    lifecurrent->sadb_lifetime_bytes)
-		exchange_establish(sa->name, 0, 0);
+		exchange_establish(sa->name, 0, 0, 0);
 
 	if (life->sadb_lifetime_exttype == SADB_EXT_LIFETIME_HARD) {
 		/* Remove the old SA, it isn't useful anymore.  */
@@ -3451,6 +3450,7 @@ pf_key_v2_acquire(struct pf_key_v2_msg *pmsg)
 
 	/* Let's rock 'n roll. */
 	pf_key_v2_connection_check(conn);
+	connection_record_passive(conn);
 	conn = 0;
 
 	/* Fall-through to cleanup. */
@@ -3479,7 +3479,8 @@ pf_key_v2_notify(struct pf_key_v2_msg *msg)
 		break;
 
 	case SADB_ACQUIRE:
-		pf_key_v2_acquire(msg);
+		if (!ui_daemon_passive)
+			pf_key_v2_acquire(msg);
 		break;
 
 	default:
@@ -3520,7 +3521,7 @@ pf_key_v2_handler(int fd)
  */
 int
 pf_key_v2_group_spis(struct sa *sa, struct proto *proto1,
-		     struct proto *proto2, int incoming)
+    struct proto *proto2, int incoming)
 {
 	struct sadb_msg msg;
 	struct sadb_sa  sa1, sa2;

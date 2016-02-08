@@ -1,4 +1,4 @@
-.\" $OpenBSD: cdio.1,v 1.31 2006/01/23 00:41:10 krw Exp $
+.\" $OpenBSD: cdio.1,v 1.38 2006/06/22 11:25:01 jmc Exp $
 .\"
 .\" Copyright (c) 1995 Serge V. Vakulenko
 .\" All rights reserved.
@@ -34,37 +34,23 @@
 .Os
 .Sh NAME
 .Nm cdio
-.Nd compact disc audio player and control utility
+.Nd compact disc control utility
 .Sh SYNOPSIS
 .Nm cdio
 .Op Fl sv
-.Xo
-.Oo Fl d
-.Ar host : Ns Ar port Oc
-.Xc
+.Oo Fl d Ar host :
+.Ar port Oc
 .Op Fl f Ar device
 .Op Ar command args ...
 .Sh DESCRIPTION
 The
 .Nm
-program controls audio features of a CD drive.
-The
-.Ar device
-is a name such
-as
-.Dq cd0
-or
-.Dq mcd0 .
-.Pp
-If a
-.Ar device
-is not specified, the environment variable
-.Ev DISC
-will be used to find the CD device.
+program is a compact disc control utility,
+with support for playing audio CDs and TAO CD writing.
 .Pp
 If no command is given,
 .Nm
-enters an interactive mode, reading commands from the standard input.
+enters interactive mode, reading commands from the standard input.
 .Pp
 The options are as follows:
 .Bl -tag -width Ds
@@ -72,16 +58,17 @@ The options are as follows:
 .Fl d
 .Ar host : Ns Ar port
 .Xc
-Specifies cddb host (default: freedb.freedb.org:cddb).
+Specifies a CDDB host
+.Bq default: freedb.freedb.org:cddb .
 .It Fl f Ar device
-Specifies a device name such as
+Specifies the name of the CD device, such as
 .Pa /dev/rcd0d
 or
 .Pa mcd0 .
 Both absolute and relative paths to
 .Pa /dev
-filenames are possible.
-The raw partition name is added if needed.
+filenames are possible;
+the raw partition name is added if needed.
 .It Fl s
 Silent mode.
 Do not print table headers or human-readable comments.
@@ -97,12 +84,14 @@ The word
 .Ic play
 may be omitted.
 .Bl -tag -width Ds
+.It Ic blank
+Minimally blank the disc.
 .It Ic cddb Op Ar n
-Print the table of contents after matching the disc with the cddb.
+Print the table of contents after matching the disc with the CDDB.
 In case of multiple matches, reissue the command with
 .Ar n .
 .It Ic cdid
-Print the disc ID that will be used for matching with the cddb.
+Print the disc ID that will be used for matching with the CDDB.
 .It Ic close
 Inject the disc.
 .It Ic debug Ar on | off
@@ -198,22 +187,49 @@ the current media catalog status,
 and the current values of the volume for left and right channels.
 .It Ic stop
 Stop the disc.
+.It Xo Ic tao
+.Op Fl ad
+.Ar trackfile ...
+.Xc
+.Bq command line only
+\ \&Write a track-at-once CD containing the specified
+.Ar trackfile .
+.Pp
+The options are as follows:
+.Pp
+.Bl -tag -width Ds -compact
+.It Fl a
+Write files as audio tracks.
+.It Fl d
+Write files as data tracks (the default).
+.El
 .It Ic volume Ar left_channel Ar right_channel
 Set the volume of the left channel to
 .Ar left_channel
 and the volume of the right channel to
 .Ar right_channel .
 Allowed values are in the range 0\-255.
-.It Ic volume Ar left
-Play the left subtrack on both left and right channels.
-.It Ic volume Ar mono
-Set the mono mode.
-.It Ic volume Ar mute
-Turn the sound off.
-.It Ic volume Ar right
-Play the right subtrack on both left and right channels.
-.It Ic volume Ar stereo
-Set the stereo mode.
+.It Xo Ic volume
+.Ic left \*(Ba
+.Ic right \*(Ba
+.Ic mono \*(Ba
+.Ic stereo \*(Ba
+.Ic mute
+.Xc
+Respectively:
+play the left subtrack on both left and right channels;
+play the right subtrack on both left and right channels;
+set mono mode;
+set stereo mode;
+turn the sound off.
+.El
+.Sh ENVIRONMENT
+.Bl -tag -width "DICSXXX"
+.It Ev DISC
+Specifies the name of the CD device
+(see also the
+.Fl f
+option).
 .El
 .Sh FILES
 .Bl -tag -width /dev/rmcd0c -compact

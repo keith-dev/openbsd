@@ -1,5 +1,5 @@
 # ex:ts=8 sw=4:
-# $OpenBSD: PackageName.pm,v 1.9 2005/08/29 00:42:58 espie Exp $
+# $OpenBSD: PackageName.pm,v 1.12 2006/08/11 11:01:12 bernd Exp $
 #
 # Copyright (c) 2003-2004 Marc Espie <espie@openbsd.org>
 #
@@ -28,7 +28,7 @@ sub url2pkgname($)
 	return $name;
 }
 
-# see package-specs(7)
+# see packages-specs(7)
 sub splitname
 {
 	local $_ = shift;
@@ -50,7 +50,7 @@ sub splitstem
 sub is_stem
 {
 	local $_ = shift;
-	if (m/\-\d/) {
+	if (m/\-\d/ || $_ eq '-') {
 		return 0;
 	} else {
 		return 1;
@@ -119,6 +119,21 @@ sub compile_stemlist
 		$hash->{$stem}->{$n} = 1;
 	}
 	bless $hash, "OpenBSD::PackageLocator::_compiled_stemlist";
+}
+
+sub available_stems
+{
+	my $state = shift;
+	my @avail = OpenBSD::PackageLocator::available();
+	if (@avail == 0) {
+		require OpenBSD::Error;
+
+		OpenBSD::Error::Warn("No packages available in the PKG_PATH\n");
+	}
+	unless ($state->{forced}->{allversions}) {
+	    @avail = OpenBSD::PackageName::keep_most_recent(@avail);
+	}
+	return OpenBSD::PackageName::compile_stemlist(@avail);
 }
 
 package OpenBSD::PackageLocator::_compiled_stemlist;

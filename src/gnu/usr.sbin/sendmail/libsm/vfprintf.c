@@ -13,7 +13,7 @@
  */
 
 #include <sm/gen.h>
-SM_IDSTR(id, "@(#)$Sendmail: vfprintf.c,v 1.53 2004/08/03 20:54:49 ca Exp $")
+SM_IDSTR(id, "@(#)$Sendmail: vfprintf.c,v 1.54 2005/05/16 03:52:00 ca Exp $")
 
 /*
 **  Overall:
@@ -535,11 +535,19 @@ reswitch:	switch (ch)
 				if (prec > 120)
 					prec = 120;
 				if (prec >= 0)
+#if HASSNPRINTF
 					snprintf(out, sizeof(out), fmt, width,
-					    prec, val);
+						prec, val);
+#else /* HASSNPRINTF */
+					sprintf(out, fmt, width, prec, val);
+#endif /* HASSNPRINTF */
 				else
+#if HASSNPRINTF
 					snprintf(out, sizeof(out), fmt, width,
-					    val);
+						val);
+#else /* HASSNPRINTF */
+					sprintf(out, fmt, width, val);
+#endif /* HASSNPRINTF */
 				len = strlen(out);
 				PRINT(out, len);
 				FLUSH();

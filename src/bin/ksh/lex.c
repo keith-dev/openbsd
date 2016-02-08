@@ -1,4 +1,4 @@
-/*	$OpenBSD: lex.c,v 1.38 2005/12/11 20:31:21 otto Exp $	*/
+/*	$OpenBSD: lex.c,v 1.42 2006/07/10 17:12:41 beck Exp $	*/
 
 /*
  * lexical analysis and source input
@@ -63,6 +63,7 @@ static const char *ungetsc(int);
 static void	gethere(void);
 static Lex_state *push_state_(State_info *, Lex_state *);
 static Lex_state *pop_state_(State_info *, Lex_state *);
+static char	*special_prompt_expand(char *);
 static int	dopprompt(const char *, int, const char **, int);
 
 static int backslash_skip;
@@ -249,7 +250,7 @@ yylex(int cf)
 				*wp++ = c;
 				break;
 			}
-			/* fall through.. */
+			/* FALLTHROUGH */
 		  Sbase1:	/* includes *(...|...) pattern (*+?@!) */
 			if (c == '*' || c == '@' || c == '+' || c == '?' ||
 			    c == '!') {
@@ -262,7 +263,7 @@ yylex(int cf)
 				}
 				ungetsc(c2);
 			}
-			/* fall through.. */
+			/* FALLTHROUGH */
 		  Sbase2:	/* doesn't include *(...|...) pattern (*+?@!) */
 			switch (c) {
 			case '\\':
@@ -568,7 +569,7 @@ yylex(int cf)
 						*wp++ = c;
 						break;
 					}
-					/* fall through.. */
+					/* FALLTHROUGH */
 				default:
 					if (c) { /* trailing \ is lost */
 						*wp++ = '\\';
@@ -909,6 +910,7 @@ pushs(int type, Area *areap)
 	s->str = null;
 	s->start = NULL;
 	s->line = 0;
+	s->cmd_offset = 0;
 	s->errline = 0;
 	s->file = NULL;
 	s->flags = 0;
@@ -1120,6 +1122,17 @@ getsc_line(Source *s)
 		set_prompt(PS2, (Source *) 0);
 }
 
+static char *
+special_prompt_expand(char *str)
+{
+	char *p = str;
+
+	while ((p = strstr(p, "\\$")) != NULL) {
+		*(p+1) = 'p';
+	}
+	return str;
+}
+
 void
 set_prompt(int to, Source *s)
 {
@@ -1141,9 +1154,11 @@ set_prompt(int to, Source *s)
 			 * unwinding its stack through this code as it
 			 * exits.
 			 */
-		} else
-			prompt = str_save(substitute(ps1, 0),
-			    saved_atemp);
+		} else {
+			/* expand \$ before other substitutions are done */
+			char *tmp = special_prompt_expand(ps1);
+			prompt = str_save(substitute(tmp, 0), saved_atemp);
+		}
 		quitenv(NULL);
 		break;
 	case PS2: /* command continuation */
@@ -1243,6 +1258,10 @@ dopprompt(const char *sp, int ntruncate, const char **spp, int doprint)
 				totlen = 0;	/* reset for prompt re-print */
 				sp = cp + 1;
 				break;
+			case 'p':	/* '\' '$' $ or # */
+				strbuf[0] = ksheuid ? '$' : '#';
+				strbuf[1] = '\0';
+				break;
 			case 'r':	/* '\' 'r' return */
 				strbuf[0] = '\r';
 				strbuf[1] = '\0';
@@ -1309,17 +1328,13 @@ dopprompt(const char *sp, int ntruncate, const char **spp, int doprint)
 				p = str_val(global("PWD"));
 				strlcpy(strbuf, basename(p), sizeof strbuf);
 				break;
-			case '!':	/* '\' '!' history line number XXX busted */
+			case '!':	/* '\' '!' history line number */
 				snprintf(strbuf, sizeof strbuf, "%d",
 				    source->line + 1);
 				break;
-			case '#':	/* '\' '#' command line number XXX busted */
+			case '#':	/* '\' '#' command line number */
 				snprintf(strbuf, sizeof strbuf, "%d",
-				    source->line + 1);
-				break;
-			case '$':	/* '\' '$' $ or # XXX busted */
-				strbuf[0] = ksheuid ? '$' : '#';
-				strbuf[1] = '\0';
+				    source->line - source->cmd_offset + 1);
 				break;
 			case '0':	/* '\' '#' '#' ' #' octal numeric handling */
 			case '1':
@@ -1399,7 +1414,7 @@ dopprompt(const char *sp, int ntruncate, const char **spp, int doprint)
 				totlen += len;
 			continue;
 		}
-		if (ntruncate)
+		if (counting && ntruncate)
 			--ntruncate;
 		else if (doprint) {
 			shf_putc(c, shl_out);
@@ -1449,7 +1464,7 @@ get_brace_var(XString *wsp, char *wp)
 				state = PS_SAW_HASH;
 				break;
 			}
-			/* fall through.. */
+			/* FALLTHROUGH */
 		case PS_SAW_HASH:
 			if (letter(c))
 				state = PS_IDENT;

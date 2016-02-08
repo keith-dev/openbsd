@@ -1,4 +1,4 @@
-/*	$OpenBSD: eval.c,v 1.59 2006/01/20 23:10:19 espie Exp $	*/
+/*	$OpenBSD: eval.c,v 1.63 2006/03/24 08:03:44 espie Exp $	*/
 /*	$NetBSD: eval.c,v 1.7 1996/11/10 21:21:29 pk Exp $	*/
 
 /*
@@ -40,6 +40,7 @@
  */
 
 #include <sys/types.h>
+#include <err.h>
 #include <errno.h>
 #include <limits.h>
 #include <unistd.h>
@@ -48,7 +49,6 @@
 #include <stddef.h>
 #include <string.h>
 #include <fcntl.h>
-#include <err.h>
 #include "mdef.h"
 #include "stdd.h"
 #include "extern.h"
@@ -101,8 +101,7 @@ eval(const char *argv[], int argc, int td, int is_traced)
 
 	expansion_id++;
 	if (td & RECDEF) 
-		errx(1, "%s at line %lu: expanding recursive definition for %s",
-			CURRENT_NAME, CURRENT_LINE, argv[1]);
+		m4errx(1, "expanding recursive definition for %s.", argv[1]);
 	if (is_traced)
 		mark = trace(argv, argc, infile+ilevel);
 	if (td == MACRTYPE)
@@ -180,13 +179,13 @@ expand_builtin(const char *argv[], int argc, int td)
 		if (argc > 3) {
 			base = strtonum(argv[3], 2, 36, &errstr);
 			if (errstr) {
-				errx(1, "base %s invalid", argv[3]);
+				m4errx(1, "expr: base %s invalid.", argv[3]);
 			}
 		}
 		if (argc > 4) {
 			maxdigits = strtonum(argv[4], 0, INT_MAX, &errstr);
 			if (errstr) {
-				errx(1, "maxdigits %s invalid", argv[4]);
+				m4errx(1, "expr: maxdigits %s invalid.", argv[4]);
 			}
 		}
 		if (argc > 2)
@@ -284,6 +283,9 @@ expand_builtin(const char *argv[], int argc, int td)
 	case SPASTYPE:
 		if (argc > 2)
 			(void) dopaste(argv[2]);
+		break;
+	case FORMATTYPE:
+		doformat(argv, argc);
 		break;
 #endif
 	case CHNQTYPE:
@@ -489,8 +491,7 @@ expand_builtin(const char *argv[], int argc, int td)
 		pbstr(lquote);
 		break;
 	default:
-		errx(1, "%s at line %lu: eval: major botch.",
-			CURRENT_NAME, CURRENT_LINE);
+		m4errx(1, "eval: major botch.");
 		break;
 	}
 }
@@ -576,8 +577,7 @@ void
 dodefine(const char *name, const char *defn)
 {
 	if (!*name)
-		errx(1, "%s at line %lu: null definition.", CURRENT_NAME,
-		    CURRENT_LINE);
+		m4errx(1, "null definition.");
 	macro_define(name, defn);
 }
 
@@ -613,8 +613,7 @@ static void
 dopushdef(const char *name, const char *defn)
 {
 	if (!*name)
-		errx(1, "%s at line %lu: null definition", CURRENT_NAME,
-		    CURRENT_LINE);
+		m4errx(1, "null definition.");
 	macro_pushdef(name, defn);
 }
 
@@ -697,8 +696,7 @@ static int
 doincl(const char *ifile)
 {
 	if (ilevel + 1 == MAXINP)
-		errx(1, "%s at line %lu: too many include files.",
-		    CURRENT_NAME, CURRENT_LINE);
+		m4errx(1, "too many include files.");
 	if (fopen_trypath(infile+ilevel+1, ifile) != NULL) {
 		ilevel++;
 		bbase[ilevel] = bufbase = bp;

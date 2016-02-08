@@ -1,4 +1,4 @@
-.\" $OpenBSD: hostapd.8,v 1.10 2005/12/18 17:54:12 reyk Exp $
+.\" $OpenBSD: hostapd.8,v 1.13 2006/05/16 05:10:56 jmc Exp $
 .\"
 .\" Copyright (c) 2004, 2005 Reyk Floeter <reyk@openbsd.org>
 .\"
@@ -69,6 +69,15 @@ If the
 receives ADD.notify messages it will request the Host AP
 remove a station which has been associated to another access point.
 .Pp
+.Nm
+may also handle dynamic roaming of IP addresses and routes in
+addition to the standard IAPP ADD.notify behaviour.
+See the section called
+.Sx IP Roaming
+in
+.Xr hostapd.conf 5
+for details.
+.Pp
 The options are as follows:
 .Bl -tag -width Ds
 .It Fl D Ar macro Ns = Ns Ar value
@@ -127,4 +136,11 @@ the
 driver still uses its own Host AP code in
 .Fn if_wi_hostap ,
 which is not supported by
+.Nm .
+.Pp
+The IEEE 802.11 WLAN protocol lacks authentication of management
+frames and is vulnerable to various Denial-of-Service and
+Man-in-the-Middle attacks.
+That should be considered when implementing wireless networks
+with
 .Nm .

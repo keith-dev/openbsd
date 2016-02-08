@@ -1,4 +1,4 @@
-/* $OpenBSD: conf.h,v 1.31 2005/12/28 10:57:35 hshoexer Exp $	 */
+/* $OpenBSD: conf.h,v 1.34 2006/08/30 16:56:56 hshoexer Exp $	 */
 /* $EOM: conf.h,v 1.13 2000/09/18 00:01:47 ho Exp $	 */
 
 /*
@@ -63,9 +63,12 @@
 #define CONF_DFLT_X509_CA_DIR          ISAKMPD_ROOT "ca/"
 #define CONF_DFLT_X509_CERT_DIR        ISAKMPD_ROOT "certs/"
 #define CONF_DFLT_X509_PRIVATE_KEY     ISAKMPD_ROOT "private/local.key"
+#define CONF_DFLT_X509_PRIVATE_KEY_DIR ISAKMPD_ROOT "private/"
 #define CONF_DFLT_X509_CRL_DIR         ISAKMPD_ROOT "crls/"
 #define CONF_DFLT_PUBKEY_DIR           ISAKMPD_ROOT "pubkeys/"
 #define CONF_DFLT_KEYNOTE_CRED_DIR     ISAKMPD_ROOT "keynote/"
+
+#define CONF_DFLT_DELETE_SAS		"yes"
 
 #define CONF_DFLT_TAG_PHASE1_CONFIG    "Default-phase-1-configuration"
 #define CONF_DFLT_PHASE1_EXCH_TYPE     "ID_PROT"

@@ -1,4 +1,4 @@
-/*	$OpenBSD: rcsprog.c,v 1.63 2006/02/21 16:39:23 niallo Exp $	*/
+/*	$OpenBSD: rcsprog.c,v 1.132 2006/08/16 07:39:15 ray Exp $	*/
 /*
  * Copyright (c) 2005 Jean-Francois Brousseau <jfb@openbsd.org>
  * All rights reserved.
@@ -29,21 +29,11 @@
 #include "rcsprog.h"
 
 #define RCS_CMD_MAXARG	128
-#define RCS_DEFAULT_SUFFIX	",v/"
-#define RCSPROG_OPTSTRING	"A:a:b::c:e::hik:Lm:Mn:N:qt::TUVx:z:"
-
-#define DESC_PROMPT	"enter description, terminated with single '.' "      \
-			"or end of file:\nNOTE: This is NOT the log message!" \
-			"\n>> "
+#define RCSPROG_OPTSTRING	"A:a:b::c:e::ik:Ll::m:Mn:N:o:qt::TUu::Vx::z::"
 
 const char rcs_version[] = "OpenCVS RCS version 3.6";
-int verbose = 1;
-int pipeout = 0;
 
-#define RCS_NFLAG	1
-#define RCS_TFLAG	2
-static int rcsflags = 0;
-
+int	 rcsflags;
 int	 rcs_optind;
 char	*rcs_optarg;
 char	*rcs_suffixes;
@@ -62,88 +52,20 @@ struct rcs_prog {
 	{ "rcsmerge",	rcsmerge_main,	rcsmerge_usage	},
 	{ "rlog",	rlog_main,	rlog_usage	},
 	{ "ident",	ident_main,	ident_usage	},
+	{ "merge",	merge_main,	merge_usage	},
 };
 
-static void rcs_set_description(RCSFILE *, const char *);
-static void rcs_attach_symbol(RCSFILE *, const char *);
+struct rcs_wklhead rcs_temp_files;
 
+void sighdlr(int);
+static void  rcs_attach_symbol(RCSFILE *, const char *);
+
+/* ARGSUSED */
 void
-rcs_set_rev(const char *str, RCSNUM **rev)
+sighdlr(int sig)
 {
-	RCSNUM *t;
-
-	if (str == NULL)
-		return;
-
-	if ((*rev != NULL) && (*rev != RCS_HEAD_REV))
-		cvs_log(LP_WARN, "redefinition of revision number");
-
-	if ((*rev = rcsnum_parse(str)) == NULL)
-		fatal("bad revision number '%s'", str);
-        /*
-	 * If 0 is specified as a revision number, exit and warn the user.
-	 * This differs from GNU ci's plainly buggy behaviour, where 0 ends up
-	 * being 0.1 and other weird stuff.
-	 */
-	t = rcsnum_parse("0");
-	if (rcsnum_cmp(*rev, t, 0) == 0)
-		fatal("0 is not a valid revision number");
-	rcsnum_free(t);
-	/*
-	 * If 1 is specified as revision number, silently assume 1.1.
-	 * This is what GNU ci does. 
-	 */
-	t = rcsnum_parse(RCS_HEAD_INIT);
-	if (rcsnum_cmp(*rev, t, 0) > 0)
-		rcsnum_cpy(t, *rev, 0); 
-	rcsnum_free(t);
-	
-}
-
-/*
- * rcs_get_mtime()
- *
- * Get <filename> last modified time.
- * Returns last modified time on success, or -1 on failure.
- */
-time_t
-rcs_get_mtime(const char *filename)
-{
-	struct stat st;
-	time_t mtime;
-
-	if (stat(filename, &st) == -1) {
-		cvs_log(LP_ERRNO, "failed to stat `%s'", filename);
-		return (-1);
-	}
-	mtime = (time_t)st.st_mtimespec.tv_sec;
-
-	return (mtime);
-}
-
-/*
- * rcs_set_mtime()
- *
- * Set <filename> last modified time to <mtime> if it's not set to -1.
- * Returns 0 on success, or -1 on failure.
- */
-int
-rcs_set_mtime(const char *filename, time_t mtime)
-{
-	static struct timeval tv[2];
-
-	if (mtime == -1)
-		return (0);
-
-	tv[0].tv_sec = mtime;
-	tv[1].tv_sec = tv[0].tv_sec;
-
-	if (utimes(filename, tv) == -1) {
-		cvs_log(LP_ERRNO, "error setting utimes");
-		return (-1);
-	}
-
-	return (0);
+	rcs_worklist_clean(&rcs_temp_files, rcs_worklist_unlink);
+	_exit(1);
 }
 
 int
@@ -153,8 +75,9 @@ rcs_init(char *envstr, char **argv, int argvlen)
 	int argc, error;
 	char linebuf[256],  *lp, *cp;
 
-	strlcpy(linebuf, envstr, sizeof(linebuf));
-	memset(argv, 0, argvlen * sizeof(char *));
+	if (strlcpy(linebuf, envstr, sizeof(linebuf)) >= sizeof(linebuf))
+		errx(1, "rcs_init: string truncation");
+	(void)memset(argv, 0, argvlen * sizeof(char *));
 
 	error = argc = 0;
 	for (lp = linebuf; lp != NULL;) {
@@ -183,145 +106,6 @@ rcs_init(char *envstr, char **argv, int argvlen)
 }
 
 int
-rcs_getopt(int argc, char **argv, const char *optstr)
-{
-	char *a;
-	const char *c;
-	static int i = 1;
-	int opt, hasargument, ret;
-
-	hasargument = 0;
-	rcs_optarg = NULL;
-
-	if (i >= argc)
-		return (-1);
-
-	a = argv[i++];
-	if (*a++ != '-')
-		return (-1);
-
-	ret = 0;
-	opt = *a;
-	for (c = optstr; *c != '\0'; c++) {
-		if (*c == opt) {
-			a++;
-			ret = opt;
-
-			if (*(c + 1) == ':') {
-				if (*(c + 2) == ':') {
-					if (*a != '\0')
-						hasargument = 1;
-				} else {
-					if (*a != '\0') {
-						hasargument = 1;
-					} else {
-						ret = 1;
-						break;
-					}
-				}
-			}
-
-			if (hasargument == 1)
-				rcs_optarg = a;
-
-			if (ret == opt)
-				rcs_optind++;
-			break;
-		}
-	}
-
-	if (ret == 0)
-		cvs_log(LP_ERR, "unknown option -%c", opt);
-	else if (ret == 1)
-		cvs_log(LP_ERR, "missing argument for option -%c", opt);
-
-	return (ret);
-}
-
-int
-rcs_statfile(char *fname, char *out, size_t len)
-{
-	int found, strdir;
-	char defaultsuffix[] = RCS_DEFAULT_SUFFIX;
-	char filev[MAXPATHLEN], fpath[MAXPATHLEN];
-	char *ext, *slash;
-	struct stat st;
-
-	strdir = found = 0;
-
-	/* we might have gotten a RCS file as argument */
-	if ((ext = strchr(fname, ',')) != NULL)
-		*ext = '\0';
-
-	/* we might have gotten the RCS/ dir in the argument string */
-	if (strstr(fname, RCSDIR) != NULL)
-		strdir = 1;
-
-	if (rcs_suffixes != NULL)
-		ext = rcs_suffixes;
-	else
-		ext = defaultsuffix;
-
-	for (;;) {
-		/*
-		 * GNU documentation says -x,v/ specifies two suffixes,
-		 * namely the ,v one and an empty one (which matches
-		 * everything).
-		 * The problem is that they don't follow this rule at
-		 * all, and their documentation seems flawed.
-		 * We try to be compatible, so let's do so.
-		 */
-		if (*ext == '\0')
-			break;
-
-		if ((slash = strchr(ext, '/')) != NULL)
-			*slash = '\0';
-
-		if (strlcpy(filev, fname, sizeof(filev)) >= sizeof(filev) ||
-		    strlcat(filev, ext, sizeof(filev)) >= sizeof(filev))
-			fatal("rcs_statfile: path truncation");
-
-		if ((strdir == 0) &&
-		    (stat(RCSDIR, &st) != -1) && (st.st_mode & S_IFDIR)) {
-			if (strlcpy(fpath, RCSDIR,
-			    sizeof(fpath)) >= sizeof(fpath) ||
-			    strlcat(fpath, "/",
-			    sizeof(fpath)) >= sizeof(fpath) ||
-			    strlcat(fpath, filev,
-			    sizeof(fpath)) >= sizeof(fpath))
-				fatal("rcs_statfile: path truncation");
-		} else {
-			if (strlcpy(fpath, filev,
-			    sizeof(fpath)) >= sizeof(fpath))
-				fatal("rcs_statfile: path truncation");
-		}
-
-		if ((stat(fpath, &st) != -1) || (rcsflags & RCS_CREATE)) {
-			found++;
-			break;
-		}
-
-		if (slash == NULL)
-			break;
-
-		*slash++ = '/';
-		ext = slash;
-	}
-
-	if (found != 1) {
-		if ((strcmp(__progname, "rcsclean") != 0)
-		    && (strcmp(__progname, "ci") != 0))
-			cvs_log(LP_ERRNO, "%s", fpath);
-		return (-1);
-	}
-
-	if (strlcpy(out, fpath, len) >= len)
-		fatal("rcs_statfile: path truncation");
-
-	return (0);
-}
-
-int
 main(int argc, char **argv)
 {
 	u_int i;
@@ -330,7 +114,7 @@ main(int argc, char **argv)
 
 	ret = -1;
 	rcs_optind = 1;
-	cvs_log_init(LD_STD, 0);
+	SLIST_INIT(&rcs_temp_files);
 
 	cmd_argc = 0;
 	cmd_argv[cmd_argc++] = argv[0];
@@ -338,7 +122,7 @@ main(int argc, char **argv)
 		ret = rcs_init(rcsinit, cmd_argv + 1,
 		    RCS_CMD_MAXARG - 1);
 		if (ret < 0) {
-			cvs_log(LP_ERRNO, "failed to prepend RCSINIT options");
+			warnx("failed to prepend RCSINIT options");
 			exit (1);
 		}
 
@@ -351,12 +135,22 @@ main(int argc, char **argv)
 	for (ret = 1; ret < argc; ret++)
 		cmd_argv[cmd_argc++] = argv[ret];
 
+	signal(SIGHUP, sighdlr);
+	signal(SIGINT, sighdlr);
+	signal(SIGQUIT, sighdlr);
+	signal(SIGABRT, sighdlr);
+	signal(SIGALRM, sighdlr);
+	signal(SIGTERM, sighdlr);
+
 	for (i = 0; i < (sizeof(programs)/sizeof(programs[0])); i++)
 		if (strcmp(__progname, programs[i].prog_name) == 0) {
 			usage = programs[i].prog_usage;
 			ret = programs[i].prog_hdlr(cmd_argc, cmd_argv);
 			break;
 		}
+
+	/* clean up temporary files */
+	rcs_worklist_run(&rcs_temp_files, rcs_worklist_unlink);
 
 	exit(ret);
 }
@@ -366,8 +160,10 @@ void
 rcs_usage(void)
 {
 	fprintf(stderr,
-	    "usage: rcs [-hiLMTUV] [-Aoldfile] [-ausers] [-b[rev]] [-cstring]\n"
-	    "           [-eusers] [-kmode] [-mrev:msg] [-xsuffixes] [-ztz] file ...\n");
+	    "usage: rcs [-eIiLqTUV] [-Aoldfile] [-ausers] [-b[rev]]\n"
+	    "           [-cstring] [-e[users]] [-kmode] [-l[rev]] [-mrev:msg]\n"
+	    "           [-orev] [-sstate[:rev]] [-tstr] [-u[rev]]\n"
+	    "           [-xsuffixes] file ...\n");
 }
 
 /*
@@ -379,27 +175,35 @@ rcs_usage(void)
 int
 rcs_main(int argc, char **argv)
 {
-	int i, ch, flags, kflag, lkmode;
-	char fpath[MAXPATHLEN], ofpath[MAXPATHLEN];
-	char *logstr, *logmsg, *nflag, *descfile;
-	char *alist, *comment, *elist, *unp, *sp;
+	int fd;
+	int i, j, ch, flags, kflag, lkmode;
+	const char *nflag, *oldfilename, *orange;
+	char fpath[MAXPATHLEN];
+	char *logstr, *logmsg, *descfile;
+	char *alist, *comment, *elist, *lrev, *urev;
 	mode_t fmode;
-	RCSFILE *file, *oldfile;
+	RCSFILE *file;
 	RCSNUM *logrev;
 	struct rcs_access *acp;
 	time_t rcs_mtime = -1;
 
-	kflag = lkmode = -1;
-	fmode = 0;
+	kflag = RCS_KWEXP_ERR;
+	lkmode = -1;
+	fmode =  S_IRUSR|S_IRGRP|S_IROTH;
 	flags = RCS_RDWR|RCS_PARSE_FULLY;
-	descfile = nflag = NULL;
+	lrev = urev = descfile = NULL;
 	logstr = alist = comment = elist = NULL;
+	nflag = oldfilename = orange = NULL;
+
+	/* match GNU */
+	if (1 < argc && argv[1][0] != '-')
+		warnx("warning: No options were given; "
+		    "this usage is obsolescent.");
 
 	while ((ch = rcs_getopt(argc, argv, RCSPROG_OPTSTRING)) != -1) {
 		switch (ch) {
 		case 'A':
-			if (rcs_statfile(rcs_optarg, ofpath, sizeof(ofpath)) < 0)
-				exit(1);
+			oldfilename = rcs_optarg;
 			rcsflags |= CO_ACLAPPEND;
 			break;
 		case 'a':
@@ -410,61 +214,73 @@ rcs_main(int argc, char **argv)
 			break;
 		case 'e':
 			elist = rcs_optarg;
+			rcsflags |= RCSPROG_EFLAG;
 			break;
-		case 'h':
-			(usage)();
-			exit(0);
 		case 'i':
 			flags |= RCS_CREATE;
-			rcsflags |= RCS_CREATE;
 			break;
 		case 'k':
 			kflag = rcs_kflag_get(rcs_optarg);
 			if (RCS_KWEXP_INVAL(kflag)) {
-				cvs_log(LP_ERR,
-				    "invalid keyword substitution mode `%s'",
-				    rcs_optarg);
+				warnx("invalid RCS keyword substitution mode");
+				(usage)();
 				exit(1);
 			}
 			break;
 		case 'L':
 			if (lkmode == RCS_LOCK_LOOSE)
-				cvs_log(LP_WARN, "-U overriden by -L");
+				warnx("-U overriden by -L");
 			lkmode = RCS_LOCK_STRICT;
 			break;
+		case 'l':
+			/* XXX - Check with -u flag. */
+			lrev = rcs_optarg;
+			rcsflags |= RCSPROG_LFLAG;
+			break;
 		case 'm':
+			if (logstr != NULL)
+				xfree(logstr);
 			logstr = xstrdup(rcs_optarg);
 			break;
 		case 'M':
 			/* ignore for the moment */
 			break;
 		case 'n':
-			nflag = xstrdup(rcs_optarg);
+			nflag = rcs_optarg;
 			break;
 		case 'N':
-			nflag = xstrdup(rcs_optarg);
-			rcsflags |= RCS_NFLAG;
+			nflag = rcs_optarg;
+			rcsflags |= RCSPROG_NFLAG;
+			break;
+		case 'o':
+			orange = rcs_optarg;
 			break;
 		case 'q':
-			verbose = 0;
+			rcsflags |= QUIET;
 			break;
 		case 't':
 			descfile = rcs_optarg;
-			rcsflags |= RCS_TFLAG;
+			rcsflags |= DESCRIPTION;
 			break;
 		case 'T':
 			rcsflags |= PRESERVETIME;
 			break;
 		case 'U':
 			if (lkmode == RCS_LOCK_STRICT)
-				cvs_log(LP_WARN, "-L overriden by -U");
+				warnx("-L overriden by -U");
 			lkmode = RCS_LOCK_LOOSE;
+			break;
+		case 'u':
+			/* XXX - Check with -l flag. */
+			urev = rcs_optarg;
+			rcsflags |= RCSPROG_UFLAG;
 			break;
 		case 'V':
 			printf("%s\n", rcs_version);
 			exit(0);
 		case 'x':
-			rcs_suffixes = rcs_optarg;
+			/* Use blank extension if none given. */
+			rcs_suffixes = rcs_optarg ? rcs_optarg : "";
 			break;
 		case 'z':
 			/*
@@ -481,51 +297,63 @@ rcs_main(int argc, char **argv)
 	argv += rcs_optind;
 
 	if (argc == 0) {
-		cvs_log(LP_ERR, "no input file");
+		warnx("no input file");
 		(usage)();
 		exit(1);
 	}
 
 	for (i = 0; i < argc; i++) {
-		if (rcs_statfile(argv[i], fpath, sizeof(fpath)) < 0)
+		fd = rcs_choosefile(argv[i], fpath, sizeof(fpath));
+		if (fd < 0 && !(flags & RCS_CREATE)) {
+			warnx("%s", fpath);
 			continue;
+		}
 
-		if (verbose == 1)
-			printf("RCS file: %s\n", fpath);
+		if (!(rcsflags & QUIET))
+			(void)fprintf(stderr, "RCS file: %s\n", fpath);
 
-		if ((file = rcs_open(fpath, flags, fmode)) == NULL)
+		if ((file = rcs_open(fpath, fd, flags, fmode)) == NULL) {
+			close(fd);
 			continue;
+		}
 
-		if (rcsflags & RCS_CREATE)
-			rcs_set_description(file, NULL);
-
-		if (rcsflags & RCS_TFLAG)
-			rcs_set_description(file, descfile);
+		if (rcsflags & DESCRIPTION) {
+			if (rcs_set_description(file, descfile) == -1) {
+				warn("%s", descfile);
+				rcs_close(file);
+				continue;
+			}
+		}
+		else if (flags & RCS_CREATE) {
+			if (rcs_set_description(file, NULL) == -1) {
+				warn("stdin");
+				rcs_close(file);
+				continue;
+			}
+		}
 
 		if (rcsflags & PRESERVETIME)
-			rcs_mtime = rcs_get_mtime(file->rf_path);
+			rcs_mtime = rcs_get_mtime(file);
 
 		if (nflag != NULL)
 			rcs_attach_symbol(file, nflag);
 
 		if (logstr != NULL) {
 			if ((logmsg = strchr(logstr, ':')) == NULL) {
-				cvs_log(LP_ERR, "missing log message");
+				warnx("missing log message");
 				rcs_close(file);
 				continue;
 			}
 
 			*logmsg++ = '\0';
 			if ((logrev = rcsnum_parse(logstr)) == NULL) {
-				cvs_log(LP_ERR,
-				    "'%s' bad revision number", logstr);
+				warnx("`%s' bad revision number", logstr);
 				rcs_close(file);
 				continue;
 			}
 
 			if (rcs_rev_setlog(file, logrev, logmsg) < 0) {
-				cvs_log(LP_ERR,
-				    "failed to set logmsg for '%s' to '%s'",
+				warnx("failed to set logmsg for `%s' to `%s'",
 				    logstr, logmsg);
 				rcs_close(file);
 				rcsnum_free(logrev);
@@ -537,53 +365,157 @@ rcs_main(int argc, char **argv)
 
 		/* entries to add from <oldfile> */
 		if (rcsflags & CO_ACLAPPEND) {
-			/* XXX */
-			if ((oldfile = rcs_open(ofpath, RCS_READ)) == NULL)
+			RCSFILE *oldfile;
+			int ofd;
+			char ofpath[MAXPATHLEN];
+
+			ofd = rcs_choosefile(oldfilename, ofpath, sizeof(ofpath));
+			if (ofd < 0) {
+				if (!(flags & RCS_CREATE))
+					warnx("%s", ofpath);
+				exit(1);
+			}
+			if ((oldfile = rcs_open(ofpath, ofd, RCS_READ)) == NULL)
 				exit(1);
 
 			TAILQ_FOREACH(acp, &(oldfile->rf_access), ra_list)
 				rcs_access_add(file, acp->ra_name);
 
 			rcs_close(oldfile);
+			(void)close(ofd);
 		}
 
 		/* entries to add to the access list */
 		if (alist != NULL) {
-			unp = alist;
-			do {
-				sp = strchr(unp, ',');
-				if (sp != NULL)
-					*(sp++) = '\0';
+			struct rcs_argvector *aargv;
 
-				rcs_access_add(file, unp);
+			aargv = rcs_strsplit(alist, ",");
+			for (j = 0; aargv->argv[j] != NULL; j++)
+				rcs_access_add(file, aargv->argv[j]);
 
-				unp = sp;
-			} while (sp != NULL);
+			rcs_argv_destroy(aargv);
 		}
 
 		if (comment != NULL)
 			rcs_comment_set(file, comment);
 
-		if (kflag != -1)
-			rcs_kwexp_set(file, kflag);
+		if (elist != NULL) {
+			struct rcs_argvector *eargv;
+
+			eargv = rcs_strsplit(elist, ",");
+			for (j = 0; eargv->argv[j] != NULL; j++)
+				rcs_access_remove(file, eargv->argv[j]);
+
+			rcs_argv_destroy(eargv);
+		} else if (rcsflags & RCSPROG_EFLAG) {
+			struct rcs_access *rap;
+
+			/* XXX rcs_access_remove(file, NULL); ?? */
+			while (!TAILQ_EMPTY(&(file->rf_access))) {
+				rap = TAILQ_FIRST(&(file->rf_access));
+				TAILQ_REMOVE(&(file->rf_access), rap, ra_list);
+				xfree(rap->ra_name);
+				xfree(rap);
+			}
+			/* not synced anymore */
+			file->rf_flags &= ~RCS_SYNCED;
+		}
+
+		rcs_kwexp_set(file, kflag);
 
 		if (lkmode != -1)
-			rcs_lock_setmode(file, lkmode);
+			(void)rcs_lock_setmode(file, lkmode);
+
+		if (rcsflags & RCSPROG_LFLAG) {
+			RCSNUM *rev;
+			const char *username;
+			char rev_str[16];
+
+			if ((username = getlogin()) == NULL)
+				err(1, "getlogin");
+			if (lrev == NULL) {
+				rev = rcsnum_alloc();
+				rcsnum_cpy(file->rf_head, rev, 0);
+			} else if ((rev = rcsnum_parse(lrev)) == NULL) {
+				warnx("unable to unlock file");
+				rcs_close(file);
+				continue;
+			}
+			rcsnum_tostr(rev, rev_str, sizeof(rev_str));
+			/* Make sure revision exists. */
+			if (rcs_findrev(file, rev) == NULL)
+				errx(1, "%s: cannot lock nonexisting "
+				    "revision %s", fpath, rev_str);
+			if (rcs_lock_add(file, username, rev) != -1 &&
+			    !(rcsflags & QUIET))
+				(void)fprintf(stderr, "%s locked\n", rev_str);
+			rcsnum_free(rev);
+		}
+
+		if (rcsflags & RCSPROG_UFLAG) {
+			RCSNUM *rev;
+			const char *username;
+			char rev_str[16];
+
+			if ((username = getlogin()) == NULL)
+				err(1, "getlogin");
+			if (urev == NULL) {
+				rev = rcsnum_alloc();
+				rcsnum_cpy(file->rf_head, rev, 0);
+			} else if ((rev = rcsnum_parse(urev)) == NULL) {
+				warnx("unable to unlock file");
+				rcs_close(file);
+				continue;
+			}
+			rcsnum_tostr(rev, rev_str, sizeof(rev_str));
+			/* Make sure revision exists. */
+			if (rcs_findrev(file, rev) == NULL)
+				errx(1, "%s: cannot unlock nonexisting "
+				    "revision %s", fpath, rev_str);
+			if (rcs_lock_remove(file, username, rev) == -1 &&
+			    !(rcsflags & QUIET))
+				warnx("%s: warning: No locks are set.", fpath);
+			else {
+				if (!(rcsflags & QUIET))
+					(void)fprintf(stderr,
+					    "%s unlocked\n", rev_str);
+			}
+			rcsnum_free(rev);
+		}
+
+		if (orange != NULL) {
+			struct rcs_delta *rdp, *nrdp;
+			char b[16];
+
+			rcs_rev_select(file, orange);
+			for (rdp = TAILQ_FIRST(&(file->rf_delta));
+			    rdp != NULL; rdp = nrdp) {
+				nrdp = TAILQ_NEXT(rdp, rd_list);
+
+				/*
+				 * Delete selected revisions.
+				 */
+				if (rdp->rd_flags & RCS_RD_SELECT) {
+					rcsnum_tostr(rdp->rd_num, b, sizeof(b));
+					if (!(rcsflags & QUIET)) {
+						(void)fprintf(stderr, "deleting"
+						    " revision %s\n", b);
+					}
+					(void)rcs_rev_remove(file, rdp->rd_num);
+				}
+			}
+		}
+
+		rcs_write(file);
+
+		if (rcsflags & PRESERVETIME)
+			rcs_set_mtime(file, rcs_mtime);
 
 		rcs_close(file);
 
-		if (rcsflags & PRESERVETIME)
-			rcs_set_mtime(fpath, rcs_mtime);
-
-		if (verbose == 1)
-			printf("done\n");
+		if (!(rcsflags & QUIET))
+			(void)fprintf(stderr, "done\n");
 	}
-
-	if (logstr != NULL)
-		xfree(logstr);
-
-	if (nflag != NULL)
-		xfree(nflag);
 
 	return (0);
 }
@@ -608,59 +540,31 @@ rcs_attach_symbol(RCSFILE *file, const char *symname)
 
 	if (rev == NULL && rm != 1) {
 		if ((rev = rcsnum_parse(rnum)) == NULL)
-			fatal("bad revision %s", rnum);
+			errx(1, "bad revision %s", rnum);
 	}
 
-	if (rcsflags & RCS_NFLAG)
+	if (rcsflags & RCSPROG_NFLAG)
 		rm = 1;
 
 	if (rm == 1) {
 		if (rcs_sym_remove(file, symname) < 0) {
-			if ((rcs_errno == RCS_ERR_NOENT) &&
-			    !(rcsflags & RCS_NFLAG))
-				cvs_log(LP_WARN,
-				    "can't delete nonexisting symbol %s", symname);
+			if (rcs_errno == RCS_ERR_NOENT &&
+			    !(rcsflags & RCSPROG_NFLAG))
+				warnx("cannot delete nonexisting symbol %s",
+				    symname);
 		} else {
-			if (rcsflags & RCS_NFLAG)
+			if (rcsflags & RCSPROG_NFLAG)
 				rm = 0;
 		}
 	}
 
 	if (rm == 0) {
-		if ((rcs_sym_add(file, symname, rev) < 0) &&
-		    (rcs_errno == RCS_ERR_DUPENT)) {
+		if (rcs_sym_add(file, symname, rev) < 0 &&
+		    rcs_errno == RCS_ERR_DUPENT) {
 			rcsnum_tostr(rcs_sym_getrev(file, symname),
 			    rbuf, sizeof(rbuf));
-			fatal("symbolic name %s already bound to %s",
+			errx(1, "symbolic name %s already bound to %s",
 			    symname, rbuf);
 		}
 	}
-}
-
-static void
-rcs_set_description(RCSFILE *file, const char *in)
-{
-	BUF *bp;
-	char *content, buf[128];
-
-	content = NULL;
-	if (in != NULL) {
-		bp = cvs_buf_load(in, BUF_AUTOEXT);
-	} else {
-		bp = cvs_buf_alloc(64, BUF_AUTOEXT);
-
-		printf(DESC_PROMPT);
-		for (;;) {
-			fgets(buf, sizeof(buf), stdin);
-			if (feof(stdin) || ferror(stdin) || buf[0] == '.')
-				break;
-			cvs_buf_append(bp, buf, strlen(buf));
-			printf(">> ");
-		}
-	}
-
-	cvs_buf_putc(bp, '\0');
-	content = cvs_buf_release(bp);
-
-	rcs_desc_set(file, content);
 }

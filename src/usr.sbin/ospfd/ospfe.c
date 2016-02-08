@@ -1,4 +1,4 @@
-/*	$OpenBSD: ospfe.c,v 1.40 2006/02/21 13:02:59 claudio Exp $ */
+/*	$OpenBSD: ospfe.c,v 1.47 2006/06/02 18:49:55 norby Exp $ */
 
 /*
  * Copyright (c) 2005 Claudio Jeker <claudio@openbsd.org>
@@ -48,12 +48,11 @@ void		 ospfe_shutdown(void);
 void		 orig_rtr_lsa_all(struct area *);
 struct iface	*find_vlink(struct abr_rtr *);
 
-volatile sig_atomic_t	 ospfe_quit = 0;
 struct ospfd_conf	*oeconf = NULL;
 struct imsgbuf		*ibuf_main;
 struct imsgbuf		*ibuf_rde;
-struct ctl_conn		*ctl_conn;
 
+/* ARGSUSED */
 void
 ospfe_sig_handler(int sig, short event, void *bula)
 {
@@ -64,7 +63,6 @@ ospfe_sig_handler(int sig, short event, void *bula)
 		/* NOTREACHED */
 	default:
 		fatalx("unexpected signal");
-		/* NOTREACHED */
 	}
 }
 
@@ -75,6 +73,7 @@ ospfe(struct ospfd_conf *xconf, int pipe_parent2ospfe[2], int pipe_ospfe2rde[2],
 {
 	struct area	*area = NULL;
 	struct iface	*iface = NULL;
+	struct redistribute *r;
 	struct passwd	*pw;
 	struct event	 ev_sigint, ev_sigterm;
 	pid_t		 pid;
@@ -166,6 +165,12 @@ ospfe(struct ospfd_conf *xconf, int pipe_parent2ospfe[2], int pipe_ospfe2rde[2],
 	    recv_packet, oeconf);
 	event_add(&oeconf->ev, NULL);
 
+	/* remove unneeded config stuff */
+	while ((r = SIMPLEQ_FIRST(&oeconf->redist_list)) != NULL) {
+		SIMPLEQ_REMOVE_HEAD(&oeconf->redist_list, entry);
+		free(r);
+	}
+
 	/* listen on ospfd control socket */
 	TAILQ_INIT(&ctl_conns);
 	control_listen();
@@ -239,6 +244,7 @@ ospfe_imsg_compose_rde(int type, u_int32_t peerid, pid_t pid,
 	return (imsg_compose(ibuf_rde, type, peerid, pid, data, datalen));
 }
 
+/* ARGSUSED */
 void
 ospfe_dispatch_main(int fd, short event, void *bula)
 {
@@ -286,7 +292,8 @@ ospfe_dispatch_main(int fd, short event, void *bula)
 			LIST_FOREACH(area, &oeconf->area_list, entry) {
 				LIST_FOREACH(iface, &area->iface_list, entry) {
 					if (kif->ifindex == iface->ifindex &&
-					    iface->type != IF_TYPE_VIRTUALLINK) {
+					    iface->type !=
+					    IF_TYPE_VIRTUALLINK) {
 						iface->flags = kif->flags;
 						iface->linkstate =
 						    kif->link_state;
@@ -294,9 +301,14 @@ ospfe_dispatch_main(int fd, short event, void *bula)
 						if (link_ok) {
 							if_fsm(iface,
 							    IF_EVT_UP);
+							log_warnx("interface %s"
+							    " up", iface->name);
 						} else {
 							if_fsm(iface,
 							    IF_EVT_DOWN);
+							log_warnx("interface %s"
+							    " down",
+							    iface->name);
 						}
 					}
 				}
@@ -318,6 +330,7 @@ ospfe_dispatch_main(int fd, short event, void *bula)
 	imsg_event_add(ibuf);
 }
 
+/* ARGSUSED */
 void
 ospfe_dispatch_rde(int fd, short event, void *bula)
 {
@@ -427,7 +440,7 @@ ospfe_dispatch_rde(int fd, short event, void *bula)
 				    LIST_FOREACH(iface, &area->iface_list,
 					entry) {
 					    noack += lsa_flood(iface, nbr,
-						&lsa_hdr, imsg.data, l);
+						&lsa_hdr, imsg.data);
 				    }
 				}
 			} else {
@@ -438,7 +451,7 @@ ospfe_dispatch_rde(int fd, short event, void *bula)
 				area = nbr->iface->area;
 				LIST_FOREACH(iface, &area->iface_list, entry) {
 					noack += lsa_flood(iface, nbr,
-					    &lsa_hdr, imsg.data, l);
+					    &lsa_hdr, imsg.data);
 				}
 				/* XXX virtual links */
 			}
@@ -515,7 +528,17 @@ ospfe_dispatch_rde(int fd, short event, void *bula)
 			if (nbr->iface->self == nbr)
 				break;
 
-			/* TODO for case one check for implied acks */
+			if (imsg.hdr.len - IMSG_HEADER_SIZE != sizeof(lsa_hdr))
+				fatalx("ospfe_dispatch_rde: bad imsg size");
+			memcpy(&lsa_hdr, imsg.data, sizeof(lsa_hdr));
+
+			/* for case one check for implied acks */
+			if (nbr->iface->state & IF_STA_DROTHER)
+				if (ls_retrans_list_del(nbr->iface->self,
+				    &lsa_hdr) == 0)
+					break;
+			if (ls_retrans_list_del(nbr, &lsa_hdr) == 0)
+				break;
 
 			/* send a direct acknowledgement */
 			send_ls_ack(nbr->iface, nbr->addr, imsg.data,
@@ -794,11 +817,10 @@ orig_rtr_lsa(struct area *area)
 	 * Set the E bit as soon as an as-ext lsa may be redistributed, only
 	 * setting it in case we redistribute something is not worth the fuss.
 	 */
-	if (oeconf->redistribute_flags && (oeconf->options & OSPF_OPTION_E))
+	if (oeconf->redistribute && (oeconf->options & OSPF_OPTION_E))
 		lsa_rtr.flags |= OSPF_RTR_E;
 
-	border = area_border_router(oeconf);
-
+	border = (area_border_router(oeconf) != 0);
 	if (border != oeconf->border) {
 		oeconf->border = border;
 		orig_rtr_lsa_all(area);

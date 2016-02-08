@@ -1,4 +1,4 @@
-/*	$OpenBSD: dhclient.c,v 1.81 2005/10/26 15:42:04 henning Exp $	*/
+/*	$OpenBSD: dhclient.c,v 1.88 2006/08/31 10:12:18 deraadt Exp $	*/
 
 /*
  * Copyright 2004 Henning Brauer <henning@openbsd.org>
@@ -200,7 +200,8 @@ routehandler(struct protocol *p)
 			if (addr_eq(a, l->address))
 				break;
 
-		if (l != NULL)	/* new addr is the one we set */
+		if (l != NULL || addr_eq(a, ifi->client->alias->address))
+			/* new addr is the one we set */
 			break;
 
 		goto die;
@@ -309,14 +310,24 @@ main(int argc, char *argv[])
 	read_client_conf();
 
 	if (!interface_link_status(ifi->name)) {
+		int linkstat = interface_link_forceup(ifi->name);
+
 		fprintf(stderr, "%s: no link ...", ifi->name);
+		if (ifi->client->config->link_timeout == 0) {
+			fprintf(stderr, " giving up\n");
+			if (linkstat == 0)
+				interface_link_forcedown(ifi->name);
+			exit(1);
+		}
 		fflush(stderr);
 		sleep(1);
 		while (!interface_link_status(ifi->name)) {
 			fprintf(stderr, ".");
 			fflush(stderr);
-			if (++i > 10) {
+			if (++i > ifi->client->config->link_timeout) {
 				fprintf(stderr, " giving up\n");
+				if (linkstat == 0)
+					interface_link_forcedown(ifi->name);
 				exit(1);
 			}
 			sleep(1);
@@ -363,10 +374,12 @@ main(int argc, char *argv[])
 	if (chdir("/") == -1)
 		error("chdir(\"/\")");
 
-	if (setgroups(1, &pw->pw_gid) ||
-	    setegid(pw->pw_gid) || setgid(pw->pw_gid) ||
-	    seteuid(pw->pw_uid) || setuid(pw->pw_uid))
-		error("can't drop privileges: %m");
+	if (setresgid(pw->pw_gid, pw->pw_gid, pw->pw_gid) == -1)
+		error("setresgid");
+	if (setgroups(1, &pw->pw_gid) == -1)
+		error("setgroups");
+	if (setresuid(pw->pw_uid, pw->pw_uid, pw->pw_uid) == -1)
+		error("setresuid");
 
 	endpwent();
 
@@ -2268,6 +2281,9 @@ fork_privchld(int fd, int fd2)
 	default:
 		return (0);
 	}
+
+	if (chdir("/") == -1)
+		error("chdir(\"/\")");
 
 	setproctitle("%s [priv]", ifi->name);
 

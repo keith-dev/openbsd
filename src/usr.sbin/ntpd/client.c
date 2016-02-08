@@ -1,4 +1,4 @@
-/*	$OpenBSD: client.c,v 1.66 2005/09/24 00:32:03 dtucker Exp $ */
+/*	$OpenBSD: client.c,v 1.70 2006/06/07 06:29:03 otto Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -161,7 +161,7 @@ client_query(struct ntp_peer *p)
 
 	p->query->msg.xmttime.int_partl = arc4random();
 	p->query->msg.xmttime.fractionl = arc4random();
-	p->query->xmttime = gettime();
+	p->query->xmttime = gettime_corrected();
 
 	if (ntp_sendmsg(p->query->fd, NULL, &p->query->msg,
 	    NTP_MSGSIZE_NOAUTH, 0) == -1) {
@@ -196,7 +196,7 @@ client_dispatch(struct ntp_peer *p, u_int8_t settime)
 			fatal("recvfrom");
 	}
 
-	T4 = gettime();
+	T4 = gettime_corrected();
 
 	ntp_getmsg((struct sockaddr *)&p->addr->ss, buf, size, &msg);
 
@@ -237,9 +237,10 @@ client_dispatch(struct ntp_peer *p, u_int8_t settime)
 	if (p->reply[p->shift].delay < 0) {
 		interval = error_interval();
 		set_next(p, interval);
-		log_info("reply from %s: negative delay %f",
+		log_info("reply from %s: negative delay %fs, "
+		    "next query %ds",
 		    log_sockaddr((struct sockaddr *)&p->addr->ss),
-		    p->reply[p->shift].delay);
+		    p->reply[p->shift].delay, interval);
 		return (0);
 	}
 	p->reply[p->shift].error = (T2 - T1) - (T3 - T4);
@@ -255,6 +256,12 @@ client_dispatch(struct ntp_peer *p, u_int8_t settime)
 	p->reply[p->shift].status.reftime = lfp_to_d(msg.reftime);
 	p->reply[p->shift].status.poll = msg.ppoll;
 	p->reply[p->shift].status.stratum = msg.stratum;
+
+	if (p->addr->ss.ss_family == AF_INET)
+		p->reply[p->shift].status.send_refid =
+		    ((struct sockaddr_in *)&p->addr->ss)->sin_addr.s_addr;
+	else
+		p->reply[p->shift].status.send_refid = msg.xmttime.fractionl;
 
 	if (p->trustlevel < TRUSTLEVEL_PATHETIC)
 		interval = scale_interval(INTERVAL_QUERY_PATHETIC);
@@ -318,12 +325,11 @@ client_update(struct ntp_peer *p)
 		return (-1);
 
 	memcpy(&p->update, &p->reply[best], sizeof(p->update));
-	priv_adjtime();
-
-	for (i = 0; i < OFFSET_ARRAY_SIZE; i++)
-		if (p->reply[i].rcvd <= p->reply[best].rcvd)
-			p->reply[i].good = 0;
-
+	if (priv_adjtime() == 0) {
+		for (i = 0; i < OFFSET_ARRAY_SIZE; i++)
+			if (p->reply[i].rcvd <= p->reply[best].rcvd)
+				p->reply[i].good = 0;
+	}
 	return (0);
 }
 

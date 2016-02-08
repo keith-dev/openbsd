@@ -1,4 +1,4 @@
-.\"	$OpenBSD: ste.4,v 1.19 2005/09/30 20:34:24 jaredy Exp $
+.\"	$OpenBSD: ste.4,v 1.21 2006/08/30 22:56:05 jmc Exp $
 .\"
 .\" Copyright (c) 1997, 1998, 1999
 .\"	Bill Paul <wpaul@ctr.columbia.edu>. All rights reserved.
@@ -37,7 +37,7 @@
 .Os
 .Sh NAME
 .Nm ste
-.Nd Sundance Technologies ST201 Fast Ethernet driver
+.Nd Sundance Technologies ST201 10/100 Ethernet device
 .Sh SYNOPSIS
 .Cd "ste* at pci?"
 .Sh DESCRIPTION
@@ -53,6 +53,8 @@ This includes:
 D-Link DFE-550TX
 .It
 D-Link DFE-580TX
+.It
+Encore ENL832-TX-ICNT 10/100 M PCI
 .El
 .Pp
 The Sundance ST201 uses bus master DMA and is designed to be a

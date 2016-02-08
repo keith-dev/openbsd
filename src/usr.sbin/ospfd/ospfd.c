@@ -1,4 +1,4 @@
-/*	$OpenBSD: ospfd.c,v 1.27 2006/02/10 18:30:47 claudio Exp $ */
+/*	$OpenBSD: ospfd.c,v 1.35 2006/08/06 12:35:44 claudio Exp $ */
 
 /*
  * Copyright (c) 2005 Claudio Jeker <claudio@openbsd.org>
@@ -24,6 +24,8 @@
 #include <sys/time.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
+#include <sys/param.h>
+#include <sys/sysctl.h>
 
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -37,7 +39,6 @@
 #include <string.h>
 #include <signal.h>
 #include <unistd.h>
-#include <util.h>
 
 #include "ospfd.h"
 #include "ospf.h"
@@ -61,8 +62,6 @@ int	pipe_parent2ospfe[2];
 int	pipe_parent2rde[2];
 int	pipe_ospfe2rde[2];
 
-volatile sig_atomic_t	 main_quit = 0;
-
 struct ospfd_conf	*conf = NULL;
 struct imsgbuf		*ibuf_ospfe;
 struct imsgbuf		*ibuf_rde;
@@ -70,6 +69,7 @@ struct imsgbuf		*ibuf_rde;
 pid_t			 ospfe_pid = 0;
 pid_t			 rde_pid = 0;
 
+/* ARGSUSED */
 void
 main_sig_handler(int sig, short event, void *arg)
 {
@@ -122,12 +122,12 @@ main(int argc, char *argv[])
 	char			*conffile;
 	int			 ch, opts = 0;
 	int			 debug = 0;
+	int			 ipforwarding;
+	int			 mib[4];
+	size_t			 len;
 
 	conffile = CONF_FILE;
 	ospfd_process = PROC_MAIN;
-
-	/* start logging */
-	log_init(1);
 
 	while ((ch = getopt(argc, argv, "df:nv")) != -1) {
 		switch (ch) {
@@ -152,7 +152,19 @@ main(int argc, char *argv[])
 		}
 	}
 
+	/* start logging */
 	log_init(debug);
+
+	mib[0] = CTL_NET;
+	mib[1] = PF_INET;
+	mib[2] = IPPROTO_IP;
+	mib[3] = IPCTL_FORWARDING;
+	len = sizeof(ipforwarding);
+	if (sysctl(mib, 4, &ipforwarding, &len, NULL, 0) == -1)
+		err(1, "sysctl");
+
+	if (!ipforwarding)
+		log_warnx("WARNING: IP forwarding NOT enabled");
 
 	/* fetch interfaces early */
 	kif_init();
@@ -309,12 +321,13 @@ check_child(pid_t pid, const char *pname)
 }
 
 /* imsg handling */
+/* ARGSUSED */
 void
 main_dispatch_ospfe(int fd, short event, void *bula)
 {
 	struct imsgbuf  *ibuf = bula;
 	struct imsg	 imsg;
-	int		 n;
+	ssize_t		 n;
 
 	switch (event) {
 	case EV_READ:
@@ -371,12 +384,13 @@ main_dispatch_ospfe(int fd, short event, void *bula)
 	imsg_event_add(ibuf);
 }
 
+/* ARGSUSED */
 void
 main_dispatch_rde(int fd, short event, void *bula)
 {
 	struct imsgbuf  *ibuf = bula;
 	struct imsg	 imsg;
-	int		 n;
+	ssize_t		 n;
 
 	switch (event) {
 	case EV_READ:
@@ -473,6 +487,8 @@ imsg_event_add(struct imsgbuf *ibuf)
 int
 ospf_redistribute(struct kroute *kr)
 {
+	struct redistribute	*r;
+
 	/* stub area router? */
 	if ((conf->options & OSPF_OPTION_E) == 0)
 		return (0);
@@ -481,12 +497,39 @@ ospf_redistribute(struct kroute *kr)
 	if (kr->prefix.s_addr == INADDR_ANY && kr->prefixlen == 0)
 		return (0);
 
-	if ((conf->redistribute_flags & REDISTRIBUTE_STATIC) &&
-	    (kr->flags & F_STATIC))
-		return (1);
-	if ((conf->redistribute_flags & REDISTRIBUTE_CONNECTED) &&
-	    (kr->flags & F_CONNECTED))
-		return (1);
+	SIMPLEQ_FOREACH(r, &conf->redist_list, entry) {
+		switch (r->type & ~REDIST_NO) {
+		case REDIST_LABEL:
+			if (kr->rtlabel == r->label)
+				return (r->type & REDIST_NO ? 0 : 1);
+			break;
+		case REDIST_STATIC:
+			/*
+			 * Dynamic routes are not redistributable. Placed here
+			 * so that link local addresses can be redistributed
+			 * via a rtlabel.
+			 */
+			if (kr->flags & F_DYNAMIC)
+				continue;
+			if (kr->flags & F_STATIC)
+				return (r->type & REDIST_NO ? 0 : 1);
+			break;
+		case REDIST_CONNECTED:
+			if (kr->flags & F_DYNAMIC)
+				continue;
+			if (kr->flags & F_CONNECTED)
+				return (r->type & REDIST_NO ? 0 : 1);
+			break;
+		case REDIST_ADDR:
+			if (kr->flags & F_DYNAMIC)
+				continue;
+			if ((kr->prefix.s_addr & r->mask.s_addr) ==
+			    (r->addr.s_addr & r->mask.s_addr) &&
+			    kr->prefixlen >= mask2prefixlen(r->mask.s_addr))
+				return (r->type & REDIST_NO? 0 : 1);
+			break;
+		}
+	}
 
 	return (0);
 }
@@ -497,7 +540,7 @@ ospf_redistribute_default(int type)
 	struct kroute	kr;
 
 	bzero(&kr, sizeof(kr));
-	if (conf->redistribute_flags & REDISTRIBUTE_DEFAULT)
+	if (conf->redistribute & REDISTRIBUTE_DEFAULT)
 		main_imsg_compose_rde(type, 0, &kr, sizeof(struct kroute));
 }
 

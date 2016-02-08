@@ -1,4 +1,4 @@
-/*	$OpenBSD: ping.c,v 1.73 2006/01/09 22:42:35 deraadt Exp $	*/
+/*	$OpenBSD: ping.c,v 1.77 2006/04/13 00:49:15 deraadt Exp $	*/
 /*	$NetBSD: ping.c,v 1.20 1995/08/11 22:37:58 cgd Exp $	*/
 
 /*
@@ -43,7 +43,7 @@ static const char copyright[] =
 #if 0
 static char sccsid[] = "@(#)ping.c	8.1 (Berkeley) 6/5/93";
 #else
-static const char rcsid[] = "$OpenBSD: ping.c,v 1.73 2006/01/09 22:42:35 deraadt Exp $";
+static const char rcsid[] = "$OpenBSD: ping.c,v 1.77 2006/04/13 00:49:15 deraadt Exp $";
 #endif
 #endif /* not lint */
 
@@ -136,7 +136,7 @@ int moptions;
 int mx_dup_ck = MAX_DUP_CHK;
 char rcvd_tbl[MAX_DUP_CHK / 8];
 
-struct sockaddr whereto;	/* who to ping */
+struct sockaddr_in whereto;	/* who to ping */
 struct sockaddr_in whence;		/* Which interface we come from */
 unsigned int datalen = DEFDATALEN;
 int s;				/* socket file descriptor */
@@ -198,13 +198,15 @@ main(int argc, char *argv[])
 	const char *errstr;
 	fd_set *fdmaskp;
 	size_t fdmasks;
+	uid_t uid;
 
 	if ((s = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP)) < 0)
 		err(1, "socket");
 
 	/* revoke privs */
-	seteuid(getuid());
-	setuid(getuid());
+	uid = getuid();
+	if (setresuid(uid, uid, uid) == -1)
+		err(1, "setresuid");
 
 	preload = 0;
 	datap = &outpack[8 + sizeof(struct tvi)];
@@ -332,8 +334,8 @@ main(int argc, char *argv[])
 
 	target = *argv;
 
-	memset(&whereto, 0, sizeof(struct sockaddr));
-	to = (struct sockaddr_in *)&whereto;
+	memset(&whereto, 0, sizeof(whereto));
+	to = &whereto;
 	to->sin_len = sizeof(struct sockaddr_in);
 	to->sin_family = AF_INET;
 	if (inet_aton(target, &to->sin_addr) != 0)
@@ -354,7 +356,7 @@ main(int argc, char *argv[])
 	if (datalen >= sizeof(struct tvi))	/* can we time transfer */
 		timing = 1;
 	packlen = datalen + MAXIPLEN + MAXICMPLEN;
-	if (!(packet = (u_char *)malloc((u_int)packlen)))
+	if (!(packet = malloc((size_t)packlen)))
 		err(1, "malloc");
 	if (!(options & F_PINGFILLED))
 		for (i = sizeof(struct tvi); i < datalen; ++i)
@@ -513,7 +515,7 @@ main(int argc, char *argv[])
 				continue;
 		}
 		fromlen = sizeof(from);
-		if ((cc = recvfrom(s, (char *)packet, packlen, 0,
+		if ((cc = recvfrom(s, packet, packlen, 0,
 		    (struct sockaddr *)&from, &fromlen)) < 0) {
 			if (errno == EINTR)
 				continue;
@@ -570,7 +572,6 @@ catcher(int signo)
 
 /*
  * Print statistics when SIGINFO is received.
- * XXX not race safe
  */
 /* ARGSUSED */
 void
@@ -614,7 +615,7 @@ pinger(void)
 		(void)gettimeofday(&tv, (struct timezone *)NULL);
 		tvi.tv_sec = htonl(tv.tv_sec);
 		tvi.tv_usec = htonl(tv.tv_usec);
-		memcpy((u_int *)&outpack[8], &tvi, sizeof tvi);
+		memcpy(&outpack[8], &tvi, sizeof tvi);
 	}
 
 	cc = datalen + 8;			/* skips ICMP portion */
@@ -631,8 +632,8 @@ pinger(void)
 		ip->ip_sum = in_cksum((u_short *)outpackhdr, cc);
 	}
 
-	i = sendto(s, (char *)packet, cc, 0, &whereto,
-	    sizeof(struct sockaddr));
+	i = sendto(s, packet, cc, 0, (struct sockaddr *)&whereto,
+	    sizeof(whereto));
 
 	if (i < 0 || i != cc)  {
 		if (i < 0)
@@ -758,7 +759,7 @@ pr_pack(char *buf, int cc, struct sockaddr_in *from)
 		/* We've got something other than an ECHOREPLY */
 		if (!(options & F_VERBOSE))
 			return;
-		ip2 = (struct ip *) (buf + hlen + sizeof (struct icmp));
+		ip2 = (struct ip *)(buf + hlen + sizeof (struct icmp));
 		hlen2 = ip2->ip_hl << 2;
 		if (cc >= hlen2 + 8 && check_icmph((struct ip *)(icp +
 		    sizeof (struct icmp))) != 1)
@@ -905,13 +906,13 @@ in_cksum(u_short *addr, int len)
 }
 
 void
-summary(int header, int sig)
+summary(int header, int insig)
 {
 	char buf[8192], buft[8192];
 
 	buf[0] = '\0';
 
-	if (!sig) {
+	if (!insig) {
 		(void)putchar('\r');
 		(void)fflush(stdout);
 	} else
@@ -986,7 +987,7 @@ finish(int signo)
 {
 	(void)signal(SIGINT, SIG_IGN);
 
-	summary(1, 0);
+	summary(1, signo);
 	if (signo)
 		_exit(nreceived ? 0 : 1);
 	else

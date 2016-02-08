@@ -1,4 +1,4 @@
-.\"	$OpenBSD: sysctl.3,v 1.147 2005/11/30 11:18:27 jmc Exp $
+.\"	$OpenBSD: sysctl.3,v 1.159 2006/09/15 20:41:44 otto Exp $
 .\"
 .\" Copyright (c) 1993
 .\"	The Regents of the University of California.  All rights reserved.
@@ -181,9 +181,10 @@ More information is also available in
 .It Dv DBCTL_CONSOLE
 When this variable is set, an architecture dependent magic key sequence
 on the console or a debugger button will permit entry into the kernel debugger.
-As described in
-.Xr securelevel 7 ,
-a security level greater than 1 blocks modification of this variable.
+When running with a
+.Xr securelevel 7
+greater than 0,
+this variable may not be raised.
 .It Dv DBCTL_LOG
 When set, ddb output is also logged in the kernel message buffer.
 .It Dv DBCTL_MAXLINE
@@ -200,9 +201,10 @@ This variable is also available as the ddb
 variable.
 .It Dv DBCTL_PANIC
 When this variable is set, system panics may drop into the kernel debugger.
-As described in
-.Xr securelevel 7 ,
-a security level greater than 1 blocks modification of this variable.
+When running with a
+.Xr securelevel 7
+greater than 0,
+this variable may not be raised.
 .It Dv DBCTL_RADIX
 Determines the default radix or base for non-prefixed numbers
 entered into
@@ -283,9 +285,14 @@ privileges may change the value.
 .It Dv HW_NCPU No "	integer	no"
 .It Dv HW_PAGESIZE No "	integer	no"
 .It Dv HW_PHYSMEM No "	integer	no"
+.It Dv HW_PRODUCT No "	string	no"
 .It Dv HW_SENSORS No "	struct	no"
+.It Dv HW_SERIALNO No "	string	no"
 .It Dv HW_SETPERF No "	integer	yes"
 .It Dv HW_USERMEM No "	integer	no"
+.It Dv HW_UUID No "	string	no"
+.It Dv HW_VENDOR No "	string	no"
+.It Dv HW_VERSION No "	string	no"
 .El
 .Bl -tag -width "123456"
 .It Dv HW_BYTEORDER
@@ -311,15 +318,25 @@ The number of CPUs.
 The software page size.
 .It Dv HW_PHYSMEM
 The total physical memory, in bytes.
+.It Dv HW_PRODUCT
+The product name of the machine.
 .It Dv HW_SENSORS
 An array of
 .Li struct sensor
 structures containing information from the hardware monitoring sensors.
+.It Dv HW_SERIALNO
+The serial number of the machine.
 .It Dv HW_SETPERF
 Current CPU performance
 .Pq percentage .
 .It Dv HW_USERMEM
 The amount of available non-kernel memory in bytes.
+.It Dv HW_UUID
+The universal unique identification number assigned to the machine.
+.It Dv HW_VENDOR
+The vendor name for this machine.
+.It Dv HW_VERSION
+The version or revision of this machine.
 .El
 .Ss CTL_KERN
 The string and integer information available for the
@@ -397,7 +414,7 @@ information.
 .It Dv KERN_USERCRYPTO No "	integer	yes"
 .It Dv KERN_USERMOUNT No "	integer	yes"
 .It Dv KERN_VERSION No "	string	no"
-.It Dv KERN_VNODE No "	struct vnode	no"
+.It Dv KERN_VNODE No "	struct e_vnode	no"
 .It Dv KERN_WATCHDOG No "	node	not applicable"
 .El
 .Bl -tag -width "123456"
@@ -1019,6 +1036,7 @@ The fifth and sixth level names are as follows:
 .It Dv NET_RT_DUMP No "	None"
 .It Dv NET_RT_FLAGS No "	rtflags"
 .It Dv NET_RT_IFLIST No "	None"
+.It Dv NET_RT_STATS No "	None"
 .El
 .It Dv PF_INET
 Get or set various global information about IPv4
@@ -1233,9 +1251,7 @@ associations on behalf of the kernel.
 Such security associations can occur as a result of a process having
 requested some security level through
 .Xr setsockopt 2 ,
-or as a result of dynamic
-.Xr vpn 8
-entries.
+or as a result of dynamic VPN entries.
 Supported values are hmac-md5, hmac-sha1, and hmac-ripemd160.
 If set to any other value, it is left to the key management daemons to
 select an authentication algorithm for the security association.
@@ -1256,7 +1272,7 @@ and
 Note that lzs is only available with
 .Xr hifn 4 .
 See
-.Xr ipsecadm 8
+.Xr ipsecctl 8
 for more information.
 .It Li ip.ipsec-enc-alg
 This is the default encryption algorithm the kernel will instruct key
@@ -1265,9 +1281,7 @@ associations on behalf of the kernel.
 Such security associations can occur as a result of a process having
 requested some security level through
 .Xr setsockopt 2 ,
-or as a result of dynamic
-.Xr vpn 8
-entries.
+or as a result of dynamic VPN entries.
 Supported values are aes, des, 3des, blowfish, cast128, and skipjack.
 If set to any other value, it is left to the key management daemons to
 select an encryption algorithm for the security association.
@@ -1394,7 +1408,7 @@ This value applies to normal transport protocols, not to
 .It Li ipcomp.enable
 Enable the IPComp protocol.
 See
-.Xr ipsecadm 8
+.Xr ipsecctl 8
 for more information.
 .It Li ipip.allow
 If set to 0, incoming IP-in-IP packets will not be processed.
@@ -1536,6 +1550,7 @@ The currently defined protocols and names are:
 .It ip6	log_interval	integer	yes
 .It ip6	maxfragpackets	integer	yes
 .It ip6	maxfrags	integer	yes
+.It ip6	mforwarding	integer	yes
 .It ip6	redirect	integer	yes
 .It ip6	rr_prune	integer	yes
 .It ip6	use_deprecated	integer	yes
@@ -1715,6 +1730,10 @@ The maximum number of fragments the node will accept.
 \-1 means that the node will accept as many fragments as it receives.
 The flag is provided basically for avoiding possible DoS attacks.
 .Pp
+.It Li ip6.mforwarding
+If set to 1, then multicast forwarding is enabled for the host.
+The default is 0.
+.Pp
 .It Li ip6.redirect
 Returns 1 when ICMPv6 redirects may be sent by the node.
 This option is ignored unless the node is routing IP packets,
@@ -1854,7 +1873,7 @@ The changeable column shows whether a process with appropriate
 privileges may change the value.
 .Bl -column "Second level nameXXXXXX" "struct loadavgXXX" -offset indent
 .It Sy Second level name	Type	Changeable
-.It Dv VFS_GENERIC No "	VM generic info	no"
+.It Dv VFS_GENERIC No "	VFS generic info	no"
 .It Dv filesystem # No "	filesystem info	no"
 .El
 .Bl -tag -width "123456"
@@ -1878,7 +1897,7 @@ it is possible to access filesystem dependent information.
 .Pp
 Some filesystems may contain settings.
 .Bl -tag -width "123"
-.It ffs
+.It FFS
 .Bl -column "Third level nameXXXX" "FFS_SD_DIRECT_BLK " -offset ind
 .It Sy Third level name	Type	Changeable
 .It Dv FFS_ASYNCFREE No "	integer	yes"
@@ -1917,11 +1936,18 @@ The amount of memory currently used by all directory hashes.
 When enabled, the kernel will attempt to relocate growing files so that they
 are contiguous on disk, reducing fragmentation.
 .El
-.It nfs
+.It NFS
 .Bl -column "Third level nameXXX" "struct loadavgXXX" -offset ind
 .It Sy Third level name	Type	Changeable
 .It Dv NFS_NFSSTATS No "	struct nfsstats	yes"
 .It Dv NFS_NIOTHREADS No "	int	yes"
+.El
+.Bl -tag -width Ds
+.It Dv NFS_NIOTHREADS
+The number of NFS I/O kernel threads.
+Should be set high enough for the server to handle
+the maximum level of concurrency from its clients,
+typically four to six.
 .El
 .El
 .El
@@ -2098,6 +2124,8 @@ A process without appropriate privileges attempts to set a value.
 .It Bq Er EPERM
 An attempt to change a value protected by the current kernel security
 level is made.
+.It Bq Er ESRCH
+No process could be found which corresponds to the given process ID.
 .El
 .Sh SEE ALSO
 .Xr pathconf 2 ,

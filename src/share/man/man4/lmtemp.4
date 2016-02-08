@@ -1,4 +1,4 @@
-.\"	$OpenBSD: lmtemp.4,v 1.7 2006/01/06 03:42:38 deraadt Exp $
+.\"	$OpenBSD: lmtemp.4,v 1.11 2006/08/19 20:57:38 jmc Exp $
 .\"
 .\" Copyright (c) 2004 Alexander Yurchenko <grange@openbsd.org>
 .\"
@@ -14,28 +14,27 @@
 .\" ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 .\" OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 .\"
-.Dd May 16, 2004
+.Dd August 19, 2006
 .Dt LMTEMP 4
 .Os
 .Sh NAME
 .Nm lmtemp
 .Nd National Semiconductor LM75/LM77 temperature sensor
 .Sh SYNOPSIS
-.Cd "# i386"
-.Cd "lmtemp0 at iic? addr 0x48"
-.Pp
-.Cd "# macppc"
 .Cd "lmtemp* at iic?"
 .Sh DESCRIPTION
 The
 .Nm
 driver provides support for the National Semiconductor LM75,
-National Semiconductor LM77, and Dallas Semiconductor 1775
-temperature sensors.
-The sensor possesses single temperature value that can be accessed
+National Semiconductor LM77, Dallas Semiconductor 1775, and
+Philips Semiconductor LM75A temperature sensors.
+The sensor possesses a single temperature value that can be accessed
 through the
 .Xr sysctl 8
 interface.
+.Pp
+The sensors can report temperatures between -55C and +125C in
+increments of 0.5C.
 .Sh SEE ALSO
 .Xr iic 4 ,
 .Xr intro 4 ,
@@ -45,19 +44,4 @@ interface.
 The
 .Nm
 driver first appeared in
-.Nx 2.0 .
-.Ox
-support was added in
 .Ox 3.6 .
-.Sh AUTHORS
-.An -nosplit
-The
-.Nm
-driver was written by
-.An Jason R. Thorpe Aq thorpej@netbsd.org
-for
-.Nx .
-.An Alexander Yurchenko Aq grange@openbsd.org
-ported it to
-.Ox
-and added support for the LM77 chip.

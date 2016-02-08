@@ -1,4 +1,4 @@
-/*	$OpenBSD: buf.c,v 1.33 2006/02/26 09:45:02 xsa Exp $	*/
+/*	$OpenBSD: buf.c,v 1.55 2006/07/08 09:25:44 ray Exp $	*/
 /*
  * Copyright (c) 2003 Jean-Francois Brousseau <jfb@openbsd.org>
  * All rights reserved.
@@ -26,9 +26,11 @@
 
 #include "includes.h"
 
+#include "cvs.h"
 #include "buf.h"
 #include "log.h"
 #include "xmalloc.h"
+#include "worklist.h"
 
 #define BUF_INCR	128
 
@@ -47,7 +49,7 @@ struct cvs_buf {
 #define SIZE_LEFT(b)	(b->cb_size - (size_t)(b->cb_cur - b->cb_buf) \
 			    - b->cb_len)
 
-static ssize_t	cvs_buf_grow(BUF *, size_t);
+static void	cvs_buf_grow(BUF *, size_t);
 
 /*
  * cvs_buf_alloc()
@@ -61,12 +63,11 @@ cvs_buf_alloc(size_t len, u_int flags)
 {
 	BUF *b;
 
-	b = (BUF *)xmalloc(sizeof(*b));
+	b = xmalloc(sizeof(*b));
 	/* Postpone creation of zero-sized buffers */
-	if (len > 0) {
-		b->cb_buf = xmalloc(len);
-		memset(b->cb_buf, 0, len);
-	} else
+	if (len > 0)
+		b->cb_buf = xcalloc(1, len);
+	else
 		b->cb_buf = NULL;
 
 	b->cb_flags = flags;
@@ -77,43 +78,47 @@ cvs_buf_alloc(size_t len, u_int flags)
 	return (b);
 }
 
-/*
- * cvs_buf_load()
- *
- * Open the file specified by <path> and load all of its contents into a
- * buffer.
- * Returns the loaded buffer on success.
- */
 BUF *
 cvs_buf_load(const char *path, u_int flags)
 {
 	int fd;
+	BUF *bp;
+
+	if ((fd = open(path, O_RDONLY, 0600)) == -1)
+		fatal("cvs_buf_load: failed to load '%s' : %s", path,
+		    strerror(errno));
+
+	bp = cvs_buf_load_fd(fd, flags);
+	(void)close(fd);
+	return (bp);
+}
+
+BUF *
+cvs_buf_load_fd(int fd, u_int flags)
+{
 	ssize_t ret;
 	size_t len;
 	u_char *bp;
 	struct stat st;
 	BUF *buf;
 
-	if ((fd = open(path, O_RDONLY, 0600)) == -1)
-		fatal("%s: %s", path, strerror(errno));
-
 	if (fstat(fd, &st) == -1)
-		fatal("cvs_buf_load: fstat: %s", strerror(errno));
+		fatal("cvs_buf_load_fd: fstat: %s", strerror(errno));
 
-	buf = cvs_buf_alloc((size_t)st.st_size, flags);
+	if (lseek(fd, 0, SEEK_SET) == -1)
+		fatal("cvs_buf_load_fd: lseek: %s", strerror(errno));
+
+	buf = cvs_buf_alloc(st.st_size, flags);
 	for (bp = buf->cb_cur; ; bp += (size_t)ret) {
 		len = SIZE_LEFT(buf);
 		ret = read(fd, bp, len);
-		if (ret == -1) {
-			cvs_buf_free(buf);
+		if (ret == -1)
 			fatal("cvs_buf_load: read: %s", strerror(errno));
-		} else if (ret == 0)
+		else if (ret == 0)
 			break;
 
 		buf->cb_len += (size_t)ret;
 	}
-
-	(void)close(fd);
 
 	return (buf);
 }
@@ -162,27 +167,6 @@ cvs_buf_empty(BUF *b)
 }
 
 /*
- * cvs_buf_copy()
- *
- * Copy the first <len> bytes of data in the buffer <b> starting at offset
- * <off> in the destination buffer <dst>, which can accept up to <len> bytes.
- * Returns the number of bytes successfully copied, or -1 on failure.
- */
-ssize_t
-cvs_buf_copy(BUF *b, size_t off, void *dst, size_t len)
-{
-	size_t rc;
-
-	if (off > b->cb_len)
-		fatal("cvs_buf_copy failed");
-
-	rc = MIN(len, (b->cb_len - off));
-	memcpy(dst, b->cb_buf + off, rc);
-
-	return (ssize_t)rc;
-}
-
-/*
  * cvs_buf_set()
  *
  * Set the contents of the buffer <b> at offset <off> to the first <len>
@@ -195,14 +179,17 @@ cvs_buf_set(BUF *b, const void *src, size_t len, size_t off)
 	size_t rlen = 0;
 
 	if (b->cb_size < (len + off)) {
-		if ((b->cb_flags & BUF_AUTOEXT) &&
-		    (cvs_buf_grow(b, len + off - b->cb_size) < 0))
-			fatal("cvs_buf_set failed");
-		else
+		if ((b->cb_flags & BUF_AUTOEXT)) {
+			cvs_buf_grow(b, len + off - b->cb_size);
+			rlen = len + off;
+		} else {
 			rlen = b->cb_size - off;
-	} else
+		}
+	} else {
 		rlen = len;
+	}
 
+	b->cb_len = rlen;
 	memcpy((b->cb_buf + off), src, rlen);
 
 	if (b->cb_len == 0) {
@@ -217,9 +204,8 @@ cvs_buf_set(BUF *b, const void *src, size_t len, size_t off)
  * cvs_buf_putc()
  *
  * Append a single character <c> to the end of the buffer <b>.
- * Returns 0 on success.
  */
-int
+void
 cvs_buf_putc(BUF *b, int c)
 {
 	u_char *bp;
@@ -227,8 +213,9 @@ cvs_buf_putc(BUF *b, int c)
 	bp = b->cb_cur + b->cb_len;
 	if (bp == (b->cb_buf + b->cb_size)) {
 		/* extend */
-		if (!(b->cb_flags & BUF_AUTOEXT) ||
-		    (cvs_buf_grow(b, (size_t)BUF_INCR) < 0))
+		if (b->cb_flags & BUF_AUTOEXT)
+			cvs_buf_grow(b, (size_t)BUF_INCR);
+		else
 			fatal("cvs_buf_putc failed");
 
 		/* the buffer might have been moved */
@@ -236,8 +223,6 @@ cvs_buf_putc(BUF *b, int c)
 	}
 	*bp = (u_char)c;
 	b->cb_len++;
-
-	return (0);
 }
 
 /*
@@ -247,7 +232,7 @@ cvs_buf_putc(BUF *b, int c)
  *
  */
 u_char
-cvs_buf_getc(BUF *b, u_int pos)
+cvs_buf_getc(BUF *b, size_t pos)
 {
 	return (b->cb_cur[pos]);
 }
@@ -274,8 +259,7 @@ cvs_buf_append(BUF *b, const void *data, size_t len)
 
 	if (left < len) {
 		if (b->cb_flags & BUF_AUTOEXT) {
-			if (cvs_buf_grow(b, len - left) < 0)
-				fatal("cvs_buf_append failed");
+			cvs_buf_grow(b, len - left);
 			bp = b->cb_cur + b->cb_len;
 		} else
 			rlen = bep - bp;
@@ -291,10 +275,10 @@ cvs_buf_append(BUF *b, const void *data, size_t len)
  * cvs_buf_fappend()
  *
  */
-int
+ssize_t
 cvs_buf_fappend(BUF *b, const char *fmt, ...)
 {
-	int ret;
+	ssize_t ret;
 	char *str;
 	va_list vap;
 
@@ -319,20 +303,6 @@ size_t
 cvs_buf_len(BUF *b)
 {
 	return (b->cb_len);
-}
-
-/*
- * cvs_buf_peek()
- *
- * Peek at the contents of the buffer <b> at offset <off>.
- */
-const void *
-cvs_buf_peek(BUF *b, size_t off)
-{
-	if (off >= b->cb_len)
-		return (NULL);
-
-	return (b->cb_buf + off);
 }
 
 /*
@@ -377,7 +347,7 @@ cvs_buf_write(BUF *b, const char *path, mode_t mode)
 	int fd;
  open:
 	if ((fd = open(path, O_WRONLY|O_CREAT|O_TRUNC, mode)) == -1) {
-		if ((errno == EACCES) && (unlink(path) != -1))
+		if (errno == EACCES && unlink(path) != -1)
 			goto open;
 		else
 			fatal("open: `%s': %s", path, strerror(errno));
@@ -387,10 +357,11 @@ cvs_buf_write(BUF *b, const char *path, mode_t mode)
 		(void)unlink(path);
 		fatal("cvs_buf_write: cvs_buf_write_fd: `%s'", path);
 	}
-	(void)close(fd);
 
-	if (chmod(path, mode) < 0)
-		fatal("cvs_buf_write: chmod failed: %s", strerror(errno));
+	if (fchmod(fd, mode) < 0)
+		cvs_log(LP_ERR, "permissions not set on file %s", path);
+
+	(void)close(fd);
 
 	return (0);
 }
@@ -402,8 +373,8 @@ cvs_buf_write(BUF *b, const char *path, mode_t mode)
  * specified using <template> (see mkstemp.3). NB. This function will modify
  * <template>, as per mkstemp
  */
-int
-cvs_buf_write_stmp(BUF *b, char *template, mode_t mode)
+void
+cvs_buf_write_stmp(BUF *b, char *template, struct timeval *tv)
 {
 	int fd;
 
@@ -414,9 +385,15 @@ cvs_buf_write_stmp(BUF *b, char *template, mode_t mode)
 		(void)unlink(template);
 		fatal("cvs_buf_write_stmp: cvs_buf_write_fd: `%s'", template);
 	}
+
+	if (tv != NULL) {
+		if (futimes(fd, tv) == -1)
+			fatal("cvs_buf_write_stmp: futimes failed");
+	}
+
 	(void)close(fd);
 
-	return (0);
+	cvs_worklist_add(template, &temp_files);
 }
 
 /*
@@ -424,25 +401,79 @@ cvs_buf_write_stmp(BUF *b, char *template, mode_t mode)
  *
  * Grow the buffer <b> by <len> bytes.  The contents are unchanged by this
  * operation regardless of the result.
- * Returns the new size on success, or -1 on failure.
  */
-static ssize_t
+static void
 cvs_buf_grow(BUF *b, size_t len)
 {
 	void *tmp;
 	size_t diff;
 
 	diff = b->cb_cur - b->cb_buf;
-	/* Buffer not allocated yet */
-	if (b->cb_size == 0)
-		tmp = xmalloc(len);
-	else
-		tmp = xrealloc(b->cb_buf, b->cb_size + len);
-	b->cb_buf = (u_char *)tmp;
+	tmp = xrealloc(b->cb_buf, 1, b->cb_size + len);
+	b->cb_buf = tmp;
 	b->cb_size += len;
 
 	/* readjust pointers in case the buffer moved in memory */
 	b->cb_cur = b->cb_buf + diff;
+}
 
-	return (ssize_t)b->cb_size;
+/*
+ * cvs_buf_copy()
+ *
+ * Copy the first <len> bytes of data in the buffer <b> starting at offset
+ * <off> in the destination buffer <dst>, which can accept up to <len> bytes.
+ * Returns the number of bytes successfully copied, or -1 on failure.
+ */
+ssize_t
+cvs_buf_copy(BUF *b, size_t off, void *dst, size_t len)
+{
+	size_t rc;
+
+	if (off > b->cb_len)
+		fatal("cvs_buf_copy failed");
+
+	rc = MIN(len, (b->cb_len - off));
+	memcpy(dst, b->cb_buf + off, rc);
+
+	return (ssize_t)rc;
+}
+
+/*
+ * cvs_buf_peek()
+ *
+ * Peek at the contents of the buffer <b> at offset <off>.
+ */
+const void *
+cvs_buf_peek(BUF *b, size_t off)
+{
+	if (off >= b->cb_len)
+		return (NULL);
+
+	return (b->cb_buf + off);
+}
+
+int
+cvs_buf_differ(BUF *b1, BUF *b2)
+{
+	char *c1, *c2;
+	int l1, l2, len, ret;
+
+	l1 = cvs_buf_len(b1);
+	l2 = cvs_buf_len(b2);
+	len = MIN(l1, l2);
+
+	if (l1 != l2)
+		return (1);
+
+	c1 = cvs_buf_release(b1);
+	c2 = cvs_buf_release(b2);
+
+	ret = memcmp(c1, c2, len);
+
+	if (c1 != NULL)
+		xfree(c1);
+	if (c2 != NULL)
+		xfree(c2);
+
+	return (ret);
 }

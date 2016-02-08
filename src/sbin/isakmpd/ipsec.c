@@ -1,4 +1,4 @@
-/* $OpenBSD: ipsec.c,v 1.122 2005/09/23 14:44:03 hshoexer Exp $	 */
+/* $OpenBSD: ipsec.c,v 1.126 2006/06/10 20:10:02 hshoexer Exp $	 */
 /* $EOM: ipsec.c,v 1.143 2000/12/11 23:57:42 niklas Exp $	 */
 
 /*
@@ -864,17 +864,17 @@ static int
 ipsec_validate_transform_id(u_int8_t proto, u_int8_t transform_id)
 {
 	switch (proto) {
-		/*
-		 * As no unexpected protocols can occur, we just tie the
-		 * default case to the first case, in orer to silence a GCC
-		 * warning.
-		 */
-		default:
-		case ISAKMP_PROTO_ISAKMP:
-			return transform_id != IPSEC_TRANSFORM_KEY_IKE;
-		case IPSEC_PROTO_IPSEC_AH:
-			return transform_id < IPSEC_AH_MD5 ||
-			    transform_id > IPSEC_AH_DES ? -1 : 0;
+	/*
+	 * As no unexpected protocols can occur, we just tie the
+	 * default case to the first case, in order to silence a GCC
+	 * warning.
+	 */
+	default:
+	case ISAKMP_PROTO_ISAKMP:
+		return transform_id != IPSEC_TRANSFORM_KEY_IKE;
+	case IPSEC_PROTO_IPSEC_AH:
+		return transform_id < IPSEC_AH_MD5 ||
+		    transform_id > IPSEC_AH_RIPEMD ? -1 : 0;
 	case IPSEC_PROTO_IPSEC_ESP:
 		return transform_id < IPSEC_ESP_DES_IV64 ||
 		    (transform_id > IPSEC_ESP_AES_128_CTR &&
@@ -1068,6 +1068,12 @@ from_ike_hash(u_int16_t hash)
 		return HASH_MD5;
 	case IKE_HASH_SHA:
 		return HASH_SHA1;
+	case IKE_HASH_SHA2_256:
+		return HASH_SHA2_256;
+	case IKE_HASH_SHA2_384:
+		return HASH_SHA2_384;
+	case IKE_HASH_SHA2_512:
+		return HASH_SHA2_512;
 	}
 	return -1;
 }
@@ -1410,6 +1416,17 @@ ipsec_delete_spi(struct sa *sa, struct proto *proto, int incoming)
 {
 	if (sa->phase == 1)
 		return;
+
+	/*
+	 * If the SA was not replaced and was not one acquired through the
+	 * kernel (ACQUIRE message), remove the flow associated with it.
+	 * We ignore any errors from the disabling of the flow.
+	 */
+	if (sa->flags & SA_FLAG_READY && !(sa->flags & SA_FLAG_ONDEMAND ||
+	    sa->flags & SA_FLAG_REPLACED || acquire_only ||
+	    conf_get_str("General", "Acquire-Only")))
+		pf_key_v2_disable_sa(sa, incoming);
+
 	/* XXX Error handling?  Is it interesting?  */
 	pf_key_v2_delete_spi(sa, proto, incoming);
 }
@@ -1654,8 +1671,9 @@ ipsec_esp_enckeylength(struct proto *proto)
 		if (!iproto->keylen)
 			return 16;
 		return iproto->keylen / 8;
-	case IPSEC_ESP_AES:
 	case IPSEC_ESP_AES_128_CTR:
+		return 20;
+	case IPSEC_ESP_AES:
 		if (!iproto->keylen)
 			return 16;
 		/* FALLTHROUGH */
@@ -2076,9 +2094,10 @@ ipsec_proto_init(struct proto *proto, char *section)
 {
 	struct ipsec_proto *iproto = proto->data;
 
-	if (proto->sa->phase == 2 && section)
-		iproto->replay_window = conf_get_num(section, "ReplayWindow",
-		    DEFAULT_REPLAY_WINDOW);
+	if (proto->sa->phase == 2)
+		iproto->replay_window = section ? conf_get_num(section,
+		    "ReplayWindow", DEFAULT_REPLAY_WINDOW) :
+		    DEFAULT_REPLAY_WINDOW;
 }
 
 /*

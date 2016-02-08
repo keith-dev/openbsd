@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.36 2005/03/04 08:48:46 djm Exp $
+#	$OpenBSD: Makefile,v 1.42 2006/07/19 13:34:52 dtucker Exp $
 
 REGRESS_TARGETS=	t1 t2 t3 t4 t5 t6 t7
 
@@ -37,7 +37,9 @@ LTESTS= 	connect \
 		forwarding \
 		multiplex \
 		reexec \
-		brokenkeys
+		brokenkeys \
+		cfgmatch \
+		forcecommand
 
 USER!=		id -un
 CLEANFILES+=	authorized_keys_${USER} known_hosts pidfile \
@@ -45,12 +47,17 @@ CLEANFILES+=	authorized_keys_${USER} known_hosts pidfile \
 		rsa.pub rsa rsa1.pub rsa1 host.rsa host.rsa1 \
 		rsa-agent rsa-agent.pub rsa1-agent rsa1-agent.pub \
 		ls.copy banner.in banner.out empty.in \
-		scp-ssh-wrapper.exe ssh_proxy_envpass
+		scp-ssh-wrapper.exe ssh_proxy_envpass remote_pid \
+		sshd_proxy_bak rsa_ssh2_cr.prv rsa_ssh2_crnl.prv
 
 #LTESTS+=	ssh-com ssh-com-client ssh-com-keygen ssh-com-sftp
 
 t1:
 	ssh-keygen -if ${.CURDIR}/rsa_ssh2.prv | diff - ${.CURDIR}/rsa_openssh.prv
+	tr '\n' '\r' <${.CURDIR}/rsa_ssh2.prv > ${.OBJDIR}/rsa_ssh2_cr.prv
+	ssh-keygen -if ${.OBJDIR}/rsa_ssh2_cr.prv | diff - ${.CURDIR}/rsa_openssh.prv
+	awk '{print $$0 "\r"}' ${.CURDIR}/rsa_ssh2.prv > ${.OBJDIR}/rsa_ssh2_crnl.prv
+	ssh-keygen -if ${.OBJDIR}/rsa_ssh2_crnl.prv | diff - ${.CURDIR}/rsa_openssh.prv
 
 t2:
 	cat ${.CURDIR}/rsa_openssh.prv > t2.out

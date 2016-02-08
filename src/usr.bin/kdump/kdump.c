@@ -1,4 +1,4 @@
-/*	$OpenBSD: kdump.c,v 1.30 2005/12/31 20:56:37 miod Exp $	*/
+/*	$OpenBSD: kdump.c,v 1.37 2006/05/17 02:12:17 tedu Exp $	*/
 
 /*-
  * Copyright (c) 1988, 1993
@@ -30,7 +30,7 @@
  */
 
 #ifndef lint
-static char copyright[] =
+static const char copyright[] =
 "@(#) Copyright (c) 1988, 1993\n\
 	The Regents of the University of California.  All rights reserved.\n";
 #endif /* not lint */
@@ -39,7 +39,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)kdump.c	8.4 (Berkeley) 4/28/95";
 #endif
-static char *rcsid = "$OpenBSD: kdump.c,v 1.30 2005/12/31 20:56:37 miod Exp $";
+static const char rcsid[] = "$OpenBSD: kdump.c,v 1.37 2006/05/17 02:12:17 tedu Exp $";
 #endif /* not lint */
 
 #include <sys/param.h>
@@ -53,6 +53,7 @@ static char *rcsid = "$OpenBSD: kdump.c,v 1.30 2005/12/31 20:56:37 miod Exp $";
 #include <sys/errno.h>
 #undef _KERNEL
 
+#include <ctype.h>
 #include <err.h>
 #include <signal.h>
 #include <stdio.h>
@@ -65,7 +66,7 @@ static char *rcsid = "$OpenBSD: kdump.c,v 1.30 2005/12/31 20:56:37 miod Exp $";
 #include "kdump.h"
 #include "extern.h"
 
-int timestamp, decimal, fancy = 1, tail, maxdata;
+int timestamp, decimal, iohex, fancy = 1, tail, maxdata;
 char *tracefile = DEF_TRACEFILE;
 struct ktr_header ktr_header;
 pid_t pid = -1;
@@ -152,12 +153,12 @@ static char *ptrace_ops[] = {
 	"PT_KILL",	"PT_ATTACH",	"PT_DETACH",	"PT_IO",
 };
 
-static int fread_tail(void *, int, int);
+static int fread_tail(void *, size_t, size_t);
 static void dumpheader(struct ktr_header *);
 static void ktrcsw(struct ktr_csw *);
-static void ktremul(char *, int);
-static void ktrgenio(struct ktr_genio *, int);
-static void ktrnamei(const char *, int);
+static void ktremul(char *, size_t);
+static void ktrgenio(struct ktr_genio *, size_t);
+static void ktrnamei(const char *, size_t);
 static void ktrpsig(struct ktr_psig *);
 static void ktrsyscall(struct ktr_syscall *);
 static void ktrsysret(struct ktr_sysret *);
@@ -167,13 +168,14 @@ static void usage(void);
 int
 main(int argc, char *argv[])
 {
-	int ch, ktrlen, size, silent;
+	int ch, silent;
+	size_t ktrlen, size;
 	int trpoints = ALL_POINTS;
 	void *m;
 
 	current = &emulations[0];	/* native */
 
-	while ((ch = getopt(argc, argv, "e:f:dlm:nRp:Tt:")) != -1)
+	while ((ch = getopt(argc, argv, "e:f:dlm:nRp:Tt:xX")) != -1)
 		switch (ch) {
 		case 'e':
 			setemul(optarg);
@@ -207,15 +209,21 @@ main(int argc, char *argv[])
 			if (trpoints < 0)
 				errx(1, "unknown trace point in %s", optarg);
 			break;
+		case 'x':
+			iohex = 1;
+			break;
+		case 'X':
+			iohex = 2;
+			break;
 		default:
 			usage();
 		}
 	if (argc > optind)
 		usage();
 
-	m = (void *)malloc(size = 1025);
+	m = malloc(size = 1025);
 	if (m == NULL)
-		errx(1, "%s", strerror(ENOMEM));
+		err(1, NULL);
 	if (!freopen(tracefile, "r", stdin))
 		err(1, "%s", tracefile);
 	while (fread_tail(&ktr_header, sizeof(struct ktr_header), 1)) {
@@ -224,14 +232,13 @@ main(int argc, char *argv[])
 			silent = 1;
 		if (silent == 0 && trpoints & (1<<ktr_header.ktr_type))
 			dumpheader(&ktr_header);
-		if ((ktrlen = ktr_header.ktr_len) < 0)
-			errx(1, "bogus length 0x%x", ktrlen);
+		ktrlen = ktr_header.ktr_len;
 		if (ktrlen > size) {
 			void *newm;
 
 			newm = realloc(m, ktrlen+1);
 			if (newm == NULL)
-				errx(1, "%s", strerror(ENOMEM));
+				err(1, NULL);
 			m = newm;
 			size = ktrlen;
 		}
@@ -271,7 +278,7 @@ main(int argc, char *argv[])
 }
 
 static int
-fread_tail(void *buf, int size, int num)
+fread_tail(void *buf, size_t size, size_t num)
 {
 	int i;
 
@@ -341,10 +348,10 @@ ioctldecode(u_long cmd)
 		*dir++ = 'R';
 	*dir = '\0';
 
-	printf(decimal ? ",_IO%s('%c',%ld" : ",_IO%s('%c',%#lx",
-	    dirbuf, (cmd >> 8) & 0xff, cmd & 0xff);
+	printf(decimal ? ",_IO%s('%c',%lu" : ",_IO%s('%c',%#lx",
+	    dirbuf, (int)((cmd >> 8) & 0xff), cmd & 0xff);
 	if ((cmd & IOC_VOID) == 0)
-		printf(decimal ? ",%ld)" : ",%#lx)", (cmd >> 16) & 0xff);
+		printf(decimal ? ",%lu)" : ",%#lx)", (cmd >> 16) & 0xff);
 	else
 		printf(")");
 }
@@ -488,13 +495,13 @@ ktrsysret(struct ktr_sysret *ktr)
 }
 
 static void
-ktrnamei(const char *cp, int len)
+ktrnamei(const char *cp, size_t len)
 {
-	(void)printf("\"%.*s\"\n", len, cp);
+	(void)printf("\"%.*s\"\n", (int)len, cp);
 }
 
 static void
-ktremul(char *cp, int len)
+ktremul(char *cp, size_t len)
 {
 	char name[1024];
 
@@ -509,13 +516,14 @@ ktremul(char *cp, int len)
 }
 
 static void
-ktrgenio(struct ktr_genio *ktr, int len)
+ktrgenio(struct ktr_genio *ktr, size_t len)
 {
-	char *dp = (char *)ktr + sizeof (struct ktr_genio);
-	int datalen = len - sizeof (struct ktr_genio);
+	unsigned char *dp = (unsigned char *)ktr + sizeof(struct ktr_genio);
+	int i, j;
+	size_t datalen = len - sizeof(struct ktr_genio);
 	static int screenwidth = 0;
-	int col = 0, width;
-	char visbuf[5], *cp;
+	int col = 0, width, bpl;
+	unsigned char visbuf[5], *cp, c;
 
 	if (screenwidth == 0) {
 		struct winsize ws;
@@ -526,14 +534,58 @@ ktrgenio(struct ktr_genio *ktr, int len)
 		else
 			screenwidth = 80;
 	}
-	printf("fd %d %s %d bytes\n", ktr->ktr_fd,
+	printf("fd %d %s %zu bytes\n", ktr->ktr_fd,
 		ktr->ktr_rw == UIO_READ ? "read" : "wrote", datalen);
 	if (maxdata && datalen > maxdata)
 		datalen = maxdata;
+	if (iohex && !datalen)
+		return;
+	if (iohex == 1) {
+		putchar('\t');
+		col = 8;
+		for (i = 0; i < datalen; i++) {
+			printf("%02x", dp[i]);
+			col += 3;
+			if (i < datalen - 1) {
+				if (col + 3 > screenwidth) {
+					printf("\n\t");
+					col = 8;
+				} else
+					putchar(' ');
+			}
+		}
+		putchar('\n');
+		return;
+	}
+	if (iohex == 2) {
+		bpl = (screenwidth - 13)/4;
+		if (bpl <= 0)
+			bpl = 1;
+		for (i = 0; i < datalen; i += bpl) {
+			printf("   %04x:  ", i);
+			for (j = 0; j < bpl; j++) {
+				if (i+j >= datalen)
+					printf("   ");
+				else
+					printf("%02x ", dp[i+j]);
+			}
+			putchar(' ');
+			for (j = 0; j < bpl; j++) {
+				if (i+j >= datalen)
+					break;
+				c = dp[i+j];
+				if (!isprint(c))
+					c = '.';
+				putchar(c);
+			}
+			putchar('\n');
+		}
+		return;
+	}
 	(void)printf("       \"");
 	col = 8;
 	for (; datalen > 0; datalen--, dp++) {
-		(void) vis(visbuf, *dp, VIS_CSTYLE, *(dp+1));
+		(void)vis(visbuf, *dp, VIS_CSTYLE, *(dp+1));
 		cp = visbuf;
 
 		/*
@@ -605,7 +657,7 @@ usage(void)
 
 	extern char *__progname;
 	fprintf(stderr, "usage: %s "
-	    "[-dnlRT] [-e emulation] [-p pid] [-f trfile] [-m maxdata] "
+	    "[-dnlRTXx] [-e emulation] [-p pid] [-f trfile] [-m maxdata] "
 	    "[-t [ceinsw]]\n", __progname);
 	exit(1);
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: lint1.h,v 1.11 2005/12/17 21:08:27 cloder Exp $	*/
+/*	$OpenBSD: lint1.h,v 1.13 2006/04/18 02:59:40 cloder Exp $	*/
 /*	$NetBSD: lint1.h,v 1.6 1995/10/02 17:31:41 jpo Exp $	*/
 
 /*
@@ -90,7 +90,7 @@ typedef struct {
  * Structures of type str_t uniqely identify structures. This can't
  * be done in structures of type type_t, because these are copied
  * if they must be modified. So it would not be possible to check
- * if to structures are identical by comparing the pointers to
+ * if two structures are identical by comparing the pointers to
  * the type structures.
  *
  * The typename is used if the structure is unnamed to identify
@@ -382,5 +382,15 @@ typedef struct cstk {
 	pos_t	c_cfpos;	        /* same for csrc_pos */
 	struct	cstk *c_nxt;		/* outer control statement */
 } cstk_t;
+
+/*
+ * Used to keep information about arguments passed to functions with
+ * prototypes.
+ */
+typedef struct farg {
+	int	fa_num;			/* argument number (1-basde) */
+	sym_t	*fa_sym;		/* argument symbol */
+	tnode_t	*fa_func;		/* function name */
+} farg_t;
 
 #include "externs1.h"

@@ -1,4 +1,4 @@
-/*	$OpenBSD: rde.h,v 1.89 2006/02/09 21:05:09 claudio Exp $ */
+/*	$OpenBSD: rde.h,v 1.95 2006/05/28 23:24:15 claudio Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Claudio Jeker <claudio@openbsd.org> and
@@ -63,7 +63,7 @@ struct rde_peer {
 	struct capabilities		 capa_received;
 	u_int32_t			 prefix_cnt; /* # of prefixes */
 	u_int32_t			 adjrib_cnt; /* # of p. in Adj-RIB-In */
-	u_int32_t			 remote_bgpid;
+	u_int32_t			 remote_bgpid; /* host byte order! */
 	u_int32_t			 up_pcnt;
 	u_int32_t			 up_acnt;
 	u_int32_t			 up_nlricnt;
@@ -150,9 +150,10 @@ LIST_HEAD(prefix_head, prefix);
 #define	F_NEXTHOP_REJECT	0x0200
 #define	F_NEXTHOP_BLACKHOLE	0x0400
 #define	F_NEXTHOP_NOMODIFY	0x0800
-#define	F_ATTR_LINKED		0x1000
-#define	F_LOCAL			0x2000	/* Local-RIB */
-#define	F_ORIGINAL		0x4000	/* Adj-RIB-In */
+#define	F_NEXTHOP_SELF		0x1000
+#define	F_ATTR_LINKED		0x2000
+#define	F_LOCAL			0x4000	/* Local-RIB */
+#define	F_ORIGINAL		0x8000	/* Adj-RIB-In */
 
 
 #define ORIGIN_IGP		0
@@ -200,6 +201,7 @@ struct nexthop {
 	 */
 	u_int32_t		costs;
 #endif
+	int			refcnt;	/* filterset reference counter */
 	enum nexthop_state	state;
 	u_int8_t		nexthop_netlen;
 	u_int8_t		flags;
@@ -272,6 +274,9 @@ struct attr	*attr_optget(const struct rde_aspath *, u_int8_t);
 void		 attr_copy(struct rde_aspath *, struct rde_aspath *);
 int		 attr_compare(struct rde_aspath *, struct rde_aspath *);
 void		 attr_freeall(struct rde_aspath *);
+void		 attr_free(struct rde_aspath *, struct attr *);
+#define		 attr_optlen(x)	\
+    ((x)->len > 255 ? (x)->len + 4 : (x)->len + 3)
 
 int		 aspath_verify(void *, u_int16_t);
 #define		 AS_ERR_LEN	-1
@@ -330,6 +335,7 @@ void		 nexthop_modify(struct rde_aspath *, struct bgpd_addr *,
 		     enum action_types, sa_family_t);
 void		 nexthop_link(struct rde_aspath *);
 void		 nexthop_unlink(struct rde_aspath *);
+int		 nexthop_delete(struct nexthop *);
 void		 nexthop_update(struct kroute_nexthop *);
 struct nexthop	*nexthop_get(struct bgpd_addr *);
 int		 nexthop_compare(struct nexthop *, struct nexthop *);

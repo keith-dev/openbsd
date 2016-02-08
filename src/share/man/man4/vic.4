@@ -1,4 +1,4 @@
-.\"	$OpenBSD: vic.4,v 1.4 2006/02/26 18:23:15 brad Exp $
+.\"	$OpenBSD: vic.4,v 1.6 2006/04/20 05:51:47 martin Exp $
 .\"
 .\" Copyright (c) 2006 Reyk Floeter <reyk@openbsd.org>
 .\"
@@ -27,8 +27,8 @@ The
 .Nm
 driver provides support for the virtual NIC available in virtual
 machines by VMware.
-It appears as a simple Ethernet device but is a virtual network
-interface to the underlying host operating system indeed.
+It appears as a simple Ethernet device but is actually a virtual network
+interface to the underlying host operating system.
 .Pp
 This driver supports the
 .Ic vmxnet
@@ -107,7 +107,7 @@ A fatal initialization error has occurred.
 A fatal initialization error has occurred.
 .It "vic%d: watchdog timeout"
 The device has stopped responding to the network, or there is a problem with
-the network connection (cable of the host).
+the network connection (host cable).
 .El
 .Sh SEE ALSO
 .Xr arp 4 ,

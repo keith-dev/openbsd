@@ -1,4 +1,4 @@
-/*	$OpenBSD: root.c,v 1.30 2006/01/25 13:31:45 xsa Exp $	*/
+/*	$OpenBSD: root.c,v 1.33 2006/06/16 14:07:42 joris Exp $	*/
 /*
  * Copyright (c) 2004 Jean-Francois Brousseau <jfb@openbsd.org>
  * All rights reserved.
@@ -28,11 +28,8 @@
 
 #include "cvs.h"
 #include "log.h"
-#include "proto.h"
-
 
 extern char *cvs_rootstr;
-
 
 /* keep these ordered with the defines */
 const char *cvs_methods[] = {
@@ -90,15 +87,10 @@ cvsroot_parse(const char *str)
 		}
 	}
 
-	root = (struct cvsroot *)xmalloc(sizeof(*root));
-	memset(root, 0, sizeof(*root));
+	root = xcalloc(1, sizeof(*root));
 	root->cr_ref = 1;
 	root->cr_method = CVS_METHOD_NONE;
 	CVS_RSTVR(root);
-
-	/* enable the most basic commands at least */
-	CVS_SETVR(root, CVS_REQ_VALIDREQ);
-	CVS_SETVR(root, CVS_REQ_VALIDRESP);
 
 	root->cr_str = xstrdup(str);
 	root->cr_buf = xstrdup(str);
@@ -127,6 +119,7 @@ cvsroot_parse(const char *str)
 		fatal("no path specification in CVSROOT");
 
 	root->cr_dir = sp;
+	STRIP_SLASH(root->cr_dir);
 	if (sp == cp) {
 		if (root->cr_method == CVS_METHOD_NONE)
 			root->cr_method = CVS_METHOD_LOCAL;
@@ -250,7 +243,7 @@ cvsroot_get(const char *dir)
 			if ((rootstr = getenv("CVSROOT")) != NULL)
 				return cvsroot_parse(rootstr);
 			else
-				fatal("cvsroot_get: empty CVSROOT variable");
+				return (NULL);
 		} else {
 			fatal("cvsroot_get: fopen: `%s': %s",
 			    CVS_PATH_ROOTSPEC, strerror(errno));
@@ -264,7 +257,7 @@ cvsroot_get(const char *dir)
 
 	len = strlen(line);
 	if (len == 0)
-		cvs_log(LP_WARN, "empty %s file", CVS_PATH_ROOTSPEC);
+		cvs_log(LP_ERR, "empty %s file", CVS_PATH_ROOTSPEC);
 	else if (line[len - 1] == '\n')
 		line[--len] = '\0';
 

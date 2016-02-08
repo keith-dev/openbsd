@@ -1,4 +1,4 @@
-/*	$OpenBSD: ident.c,v 1.11 2006/01/20 14:35:02 xsa Exp $	*/
+/*	$OpenBSD: ident.c,v 1.22 2006/08/07 19:32:49 ray Exp $	*/
 /*
  * Copyright (c) 2005 Xavier Santolaria <xsa@openbsd.org>
  * All rights reserved.
@@ -32,9 +32,10 @@
 #define VALDELIM	':'	/* values delimiter */
 
 static int found = 0;
+static int flags = 0;
 
-static int	ident_file(const char *, FILE *);
-static int	ident_line(FILE *);
+static void	ident_file(const char *, FILE *);
+static void	ident_line(FILE *);
 
 int
 ident_main(int argc, char **argv)
@@ -45,7 +46,7 @@ ident_main(int argc, char **argv)
 	while ((ch = rcs_getopt(argc, argv, "qV")) != -1) {
 		switch(ch) {
 		case 'q':
-			verbose = 0;
+			flags |= QUIET;
 			break;
 		case 'V':
 			printf("%s\n", rcs_version);
@@ -64,12 +65,12 @@ ident_main(int argc, char **argv)
 	else {
 		for (i = 0; i < argc; i++) {
 			if ((fp = fopen(argv[i], "r")) == NULL) {
-				cvs_log(LP_ERRNO, "%s", argv[i]);
+				warn("%s", argv[i]);
 				continue;
 			}
 
 			ident_file(argv[i], fp);
-			fclose(fp);
+			(void)fclose(fp);
 		}
 	}
 
@@ -77,7 +78,7 @@ ident_main(int argc, char **argv)
 }
 
 
-static int
+static void
 ident_file(const char *filename, FILE *fp)
 {
 	int c;
@@ -87,67 +88,72 @@ ident_file(const char *filename, FILE *fp)
 	else
 		filename = "standard output";
 
-	for (c = 0; c != EOF; (c = getc(fp))) {
-		if ((feof(fp)) || (ferror(fp)))
+	for (c = 0; c != EOF; c = getc(fp)) {
+		if (feof(fp) || ferror(fp))
 			break;
 		if (c == KEYDELIM)
 			ident_line(fp);
 	}
 
-	if ((found == 0) && (verbose == 1))
+	if (found == 0 && !(flags & QUIET))
 		fprintf(stderr, "ident warning: no id keywords in %s\n",
-	 	    filename);
+		    filename);
 
 	found = 0;
-
-	return (0);
 }
 
-static int
+static void
 ident_line(FILE *fp)
 {
 	int c;
-	char *p, linebuf[1024];
+	BUF *bp;
+	size_t len;
 
-	p = linebuf;
+	bp = rcs_buf_alloc(512, BUF_AUTOEXT);
 
 	while ((c = getc(fp)) != VALDELIM) {
-		if ((c == EOF) && (feof(fp) | ferror(fp)))
-			return (0);
+		if (c == EOF && (feof(fp) | ferror(fp)))
+			goto out;
 
 		if (isalpha(c))
-			*(p++) = c;
+			rcs_buf_putc(bp, c);
 		else
-			return (0);
+			goto out;
 	}
 
-	*(p++) = VALDELIM;
+	rcs_buf_putc(bp, VALDELIM);
 
 	while ((c = getc(fp)) != KEYDELIM) {
-		if ((c == EOF) && (feof(fp) | ferror(fp)))
-			return (0);
+		if (c == EOF && (feof(fp) | ferror(fp)))
+			goto out;
 
 		if (c == '\n')
-			return (0);
+			goto out;
 
-		*(p++) = c;
+		rcs_buf_putc(bp, c);
 	}
 
-	if (p[-1] != ' ')
-		return (0);
+	len = rcs_buf_len(bp);
+	if (rcs_buf_getc(bp, len - 1) != ' ')
+		goto out;
 
 	/* append trailing KEYDELIM */
-	*(p++) = c;
-	*p = '\0';
+	rcs_buf_putc(bp, c);
+
+	/* Append newline for printing. */
+	rcs_buf_putc(bp, '\n');
+	printf("     %c", KEYDELIM);
+	fflush(stdout);
+	rcs_buf_write_fd(bp, STDOUT_FILENO);
 
 	found++;
-	printf("     %c%s\n", KEYDELIM, linebuf);
-
-	return (0);
+out:
+	if (bp != NULL)
+		rcs_buf_free(bp);
 }
 
 void
 ident_usage(void)
 {
-	fprintf(stderr, "usage: ident [-qV] [file ...]\n");
+	fprintf(stderr, "usage: ident [-qV] file ...\n");
 }

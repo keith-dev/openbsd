@@ -1,4 +1,4 @@
-/*	$OpenBSD: edit.c,v 1.12 2006/02/20 08:38:18 otto Exp $ */
+/*	$OpenBSD: edit.c,v 1.14 2006/05/25 03:20:32 ray Exp $ */
 
 /*
  * Written by Raymond Lai <ray@cyth.net>.
@@ -12,6 +12,7 @@
 #include <err.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <unistd.h>
 
 #include "common.h"
@@ -42,11 +43,9 @@ edit(const char *filename)
 		execlp(editor, editor, filename, (void *)NULL);
 		warn("could not execute editor: %s", editor);
 		cleanup(filename);
-		/* NOTREACHED */
 	case -1:
 		warn("could not fork");
 		cleanup(filename);
-		/* NOTREACHED */
 	}
 
 	/* parent */
@@ -54,14 +53,12 @@ edit(const char *filename)
 	if (waitpid(pid, &status, 0) == -1) {
 		warn("waitpid");
 		cleanup(filename);
-		/* NOTREACHED */
 	}
 
 	/* Check that editor terminated normally. */
 	if (!WIFEXITED(status)) {
 		warn("%s terminated abnormally", editor);
 		cleanup(filename);
-		/* NOTREACHED */
 	}
 }
 
@@ -73,6 +70,7 @@ eparse(const char *cmd, const char *left, const char *right)
 {
 	FILE *file;
 	size_t nread, nwritten;
+	int fd;
 	char *filename;
 	char buf[BUFSIZ], *text;
 
@@ -125,7 +123,21 @@ RIGHT:
 	}
 
 	/* Create temp file. */
-	filename = xmktemp(text);
+	if (asprintf(&filename, "%s/sdiff.XXXXXXXXXX", tmpdir) == -1)
+		err(2, "asprintf");
+	if ((fd = mkstemp(filename)) == -1)
+		err(2, "mkstemp");
+	if (text != NULL) {
+		size_t len;
+
+		len = strlen(text);
+		if ((nwritten = write(fd, text, len)) == -1 ||
+		    nwritten != len) {
+			warn("error writing to temp file");
+			cleanup(filename);
+		}
+	}
+	close(fd);
 
 	/* text is no longer used. */
 	free(text);
@@ -137,7 +149,6 @@ RIGHT:
 	if (!(file = fopen(filename, "r"))) {
 		warn("could not open edited file: %s", filename);
 		cleanup(filename);
-		/* NOTREACHED */
 	}
 
 	/* Copy temporary file contents to output file. */
@@ -148,7 +159,6 @@ RIGHT:
 		    (ferror(file) || !feof(file))) {
 			warnx("error reading edited file: %s", filename);
 			cleanup(filename);
-			/* NOTREACHED */
 		}
 
 		/*
@@ -163,7 +173,6 @@ RIGHT:
 		if (nwritten != nread) {
 			warnx("error writing to output file");
 			cleanup(filename);
-			/* NOTREACHED */
 		}
 	}
 
@@ -172,7 +181,6 @@ RIGHT:
 		warn("could not delete: %s", filename);
 	fclose(file);
 
-	/* filename was malloc()ed in xmktemp(). */
 	free(filename);
 
 	return (0);

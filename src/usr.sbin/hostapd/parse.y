@@ -1,7 +1,7 @@
-/*	$OpenBSD: parse.y,v 1.20 2005/12/29 04:33:58 reyk Exp $	*/
+/*	$OpenBSD: parse.y,v 1.24 2006/06/27 18:14:59 reyk Exp $	*/
 
 /*
- * Copyright (c) 2004, 2005 Reyk Floeter <reyk@openbsd.org>
+ * Copyright (c) 2004, 2005, 2006 Reyk Floeter <reyk@openbsd.org>
  * Copyright (c) 2002 - 2005 Henning Brauer <henning@openbsd.org>
  * Copyright (c) 2001 Markus Friedl.  All rights reserved.
  * Copyright (c) 2001 Daniel Hartmeier.  All rights reserved.
@@ -39,6 +39,9 @@
 #include <netinet/in.h>
 #include <netinet/if_ether.h>
 #include <arpa/inet.h>
+
+#include <net80211/ieee80211.h>
+#include <net80211/ieee80211_radiotap.h>
 
 #include <ctype.h>
 #include <errno.h>
@@ -101,6 +104,7 @@ typedef struct {
 		char			*string;
 		long			val;
 		u_int16_t		reason;
+		enum hostapd_op		op;
 	} v;
 	int lineno;
 } YYSTYPE;
@@ -119,12 +123,23 @@ u_int negative;
 	frame.f_flags |= HOSTAPD_FRAME_F_##_m##_TABLE | (negative ?	\
 	    HOSTAPD_FRAME_F_##_m##_N : HOSTAPD_FRAME_F_##_m);		\
 }
+#define HOSTAPD_MATCH_RADIOTAP(_x) {					\
+	if (hostapd_cfg.c_apme_dlt == DLT_IEEE802_11 ||			\
+	    (hostapd_cfg.c_apme_dlt == 0 &&				\
+	    HOSTAPD_DLT == DLT_IEEE802_11)) {				\
+		yyerror("option %s requires radiotap headers", #_x);	\
+		YYERROR;						\
+	}								\
+	frame.f_radiotap |= HOSTAPD_RADIOTAP_F(RSSI);			\
+	frame.f_flags |= HOSTAPD_FRAME_F_##_x;				\
+}
 #define HOSTAPD_IAPP_FLAG(_f) {						\
 	if (negative)							\
 		hostapd_cfg.c_iapp.i_flags &= ~(HOSTAPD_IAPP_F_##_f);	\
 	else								\
 		hostapd_cfg.c_iapp.i_flags |= (HOSTAPD_IAPP_F_##_f);	\
 }
+
 %}
 
 %token	MODE INTERFACE IAPP HOSTAP MULTICAST BROADCAST SET SEC USEC
@@ -134,7 +149,7 @@ u_int negative;
 %token	ERROR CONST TABLE NODE DELETE ADD LOG VERBOSE LIMIT QUICK SKIP
 %token	REASON UNSPECIFIED EXPIRE LEAVE ASSOC TOOMANY NOT AUTHED ASSOCED
 %token	RESERVED RSN REQUIRED INCONSISTENT IE INVALID MIC FAILURE OPEN
-%token	ADDRESS PORT ON NOTIFY TTL INCLUDE
+%token	ADDRESS PORT ON NOTIFY TTL INCLUDE ROUTE ROAMING RSSI TXRATE FREQ
 %token	<v.string>	STRING
 %token	<v.val>		VALUE
 %type	<v.val>		number
@@ -144,6 +159,10 @@ u_int negative;
 %type	<v.string>	table
 %type	<v.string>	string
 %type	<v.authalg>	authalg
+%type	<v.op>		unaryop
+%type	<v.val>		percent
+%type	<v.val>		txrate
+%type	<v.val>		freq
 
 %%
 
@@ -191,11 +210,31 @@ option		: SET HOSTAP INTERFACE hostapifaces
 			hostapd_cfg.c_flags |= HOSTAPD_CFG_F_IAPP;
 
 			hostapd_log(HOSTAPD_LOG_DEBUG,
-			    "%s: IAPP interface added\n", $4);
+			    "%s: IAPP interface added", $4);
 
 			free($4);
 		}
 		| SET IAPP MODE iappmode
+		| SET IAPP ADDRESS ROAMING TABLE table
+		{
+			if ((hostapd_cfg.c_iapp.i_addr_tbl =
+			    hostapd_table_lookup(&hostapd_cfg, $6)) == NULL) {
+				yyerror("undefined table <%s>", $6);
+				free($6);
+				YYERROR;
+			}
+			free($6);
+		}
+		| SET IAPP ROUTE ROAMING TABLE table
+		{
+			if ((hostapd_cfg.c_iapp.i_route_tbl =
+			    hostapd_table_lookup(&hostapd_cfg, $6)) == NULL) {
+				yyerror("undefined table <%s>", $6);
+				free($6);
+				YYERROR;
+			}
+			free($6);
+		}
 		| SET IAPP HANDLE SUBTYPE iappsubtypes
 		;
 
@@ -314,6 +353,14 @@ iappsubtype	: not ADD NOTIFY
 		{
 			HOSTAPD_IAPP_FLAG(RADIOTAP);
 		}
+		| not ROUTE ROAMING
+		{
+			HOSTAPD_IAPP_FLAG(ROAMING_ROUTE);
+		}
+		| not ADDRESS ROAMING
+		{
+			HOSTAPD_IAPP_FLAG(ROAMING_ADDRESS);
+		}
 		;
 
 eventopt	: /* empty */
@@ -382,7 +429,7 @@ nodeopt		: DELETE
 
 frmmatch	: ANY
 		| frm frmmatchtype frmmatchdir frmmatchfrom frmmatchto
-			frmmatchbssid
+			frmmatchbssid frmmatchrtap
 		;
 
 frm		: /* empty */
@@ -682,6 +729,42 @@ frmmatchbssid	: /* any */
 		}
 		;
 
+frmmatchrtap	: /* empty */
+		| frmmatchrtap_l
+		;
+
+frmmatchrtap_l	: frmmatchrtap_l frmmatchrtapopt
+		| frmmatchrtapopt
+		;
+
+frmmatchrtapopt	: RSSI unaryop percent
+		{
+			if (($2 == HOSTAPD_OP_GT && $3 == 100) ||
+			    ($2 == HOSTAPD_OP_LE && $3 == 100) ||
+			    ($2 == HOSTAPD_OP_LT && $3 == 0) ||
+			    ($2 == HOSTAPD_OP_GE && $3 == 0)) {
+				yyerror("absurd unary comparison");
+				YYERROR;
+			}
+
+			frame.f_rssi_op = $2;
+			frame.f_rssi = $3;
+			HOSTAPD_MATCH_RADIOTAP(RSSI);
+		}
+		| TXRATE unaryop txrate
+		{
+			frame.f_txrate_op = $2;
+			frame.f_txrate = $3;
+			HOSTAPD_MATCH_RADIOTAP(RATE);
+		}
+		| FREQ unaryop freq
+		{
+			frame.f_chan_op = $2;
+			frame.f_chan = $3;
+			HOSTAPD_MATCH_RADIOTAP(CHANNEL);
+		}
+		;
+
 frmmatchaddr	: ANY
 		{
 			$$.flags = 0;
@@ -969,6 +1052,100 @@ not		: /* empty */
 		}
 		;
 
+unaryop		: /* any */
+		{
+			$$ = HOSTAPD_OP_EQ;
+		}
+		| '='
+		{
+			$$ = HOSTAPD_OP_EQ;
+		}
+		| '=='
+		{
+			$$ = HOSTAPD_OP_EQ;
+		}
+		| '!'
+		{
+			$$ = HOSTAPD_OP_NE;
+		}
+		| '!' '='
+		{
+			$$ = HOSTAPD_OP_NE;
+		}
+		| '<' '='
+		{
+			$$ = HOSTAPD_OP_LE;
+		}
+		| '<'
+		{
+			$$ = HOSTAPD_OP_LT;
+		}
+		| '>' '='
+		{
+			$$ = HOSTAPD_OP_GE;
+		}
+		| '>'
+		{
+			$$ = HOSTAPD_OP_GT;
+		}
+		;
+
+percent		: STRING
+		{
+			double val;
+			char *cp;
+
+			val = strtod($1, &cp);
+			if (cp == NULL || strcmp(cp, "%") != 0 ||
+			    val < 0 || val > 100) {
+				yyerror("invalid percentage: %s", $1);
+				free($1);
+				YYERROR;
+			}
+			free($1);
+			$$ = val;
+		}
+		;
+
+txrate		: STRING
+		{
+			double val;
+			char *cp;
+
+			val = strtod($1, &cp) * 2;
+			if (cp == NULL || strcasecmp(cp, "mb") != 0 ||
+			    val != (int)val) {
+				yyerror("invalid rate: %s", $1);
+				free($1);
+				YYERROR;
+			}
+			free($1);
+			$$ = val;
+		}
+		;
+
+freq		: STRING
+		{
+			double val;
+			char *cp;
+
+			val = strtod($1, &cp);
+			if (cp != NULL) {
+				if (strcasecmp(cp, "ghz") == 0) {
+					$$ = val * 1000;
+				} else if (strcasecmp(cp, "mhz") == 0) {
+					$$ = val;
+				} else
+					cp = NULL;
+			}
+			if (cp == NULL) {
+				yyerror("invalid frequency: %s", $1);
+				free($1);
+				YYERROR;
+			}
+			free($1);
+		}
+		;
 %%
 
 /*
@@ -1012,6 +1189,7 @@ lookup(char *token)
 		{ "expire",		EXPIRE },
 		{ "failure",		FAILURE },
 		{ "frame",		FRAME },
+		{ "freq",		FREQ },
 		{ "from",		FROM },
 		{ "handle",		HANDLE },
 		{ "hostap",		HOSTAP },
@@ -1050,15 +1228,19 @@ lookup(char *token)
 		{ "resend",		RESEND },
 		{ "reserved",		RESERVED },
 		{ "response",		RESPONSE },
+		{ "roaming",		ROAMING },
+		{ "route",		ROUTE },
 		{ "rsn",		RSN },
 		{ "sec",		SEC },
 		{ "set",		SET },
+		{ "signal",		RSSI },
 		{ "skip",		SKIP },
 		{ "subtype",		SUBTYPE },
 		{ "table",		TABLE },
 		{ "to",			TO },
 		{ "toomany",		TOOMANY },
 		{ "ttl",		TTL },
+		{ "txrate",		TXRATE },
 		{ "type",		TYPE },
 		{ "unspecified",	UNSPECIFIED },
 		{ "usec",		USEC },
@@ -1103,9 +1285,7 @@ lgetc(void)
 	while ((c = getc(file->stream)) == '\\') {
 		next = getc(file->stream);
 		if (next != '\n') {
-			if (isspace(next))
-				yyerror("whitespace after \\");
-			ungetc(next, file->stream);
+			c = next;
 			break;
 		}
 		yylval.lineno = file->lineno;
@@ -1309,7 +1489,7 @@ symset(const char *nam, const char *val, int persist)
 	sym->persist = persist;
 	TAILQ_INSERT_TAIL(&symhead, sym, entry);
 
-	hostapd_log(HOSTAPD_LOG_DEBUG, "%s = \"%s\"\n", sym->nam, sym->val);
+	hostapd_log(HOSTAPD_LOG_DEBUG, "%s = \"%s\"", sym->nam, sym->val);
 
 	return (0);
 }
@@ -1362,12 +1542,12 @@ hostapd_add_file(struct hostapd_config *cfg, const char *name)
 		goto err;
 
 	if ((nfile->stream = fopen(name, "rb")) == NULL) {
-		hostapd_log(HOSTAPD_LOG, "failed to open %s\n", name);
+		hostapd_log(HOSTAPD_LOG, "failed to open %s", name);
 		goto err;
 	}
 
 	if (hostapd_check_file_secrecy(fileno(nfile->stream), name)) {
-		hostapd_log(HOSTAPD_LOG, "invalid permissions for %s\n", name);
+		hostapd_log(HOSTAPD_LOG, "invalid permissions for %s", name);
 		goto err;
 	}
 
@@ -1422,7 +1602,7 @@ hostapd_parse_file(struct hostapd_config *cfg)
 		next = TAILQ_NEXT(sym, entry);
 		if (!sym->used)
 			hostapd_log(HOSTAPD_LOG_VERBOSE,
-			    "warning: macro \"%s\" not used\n", sym->nam);
+			    "warning: macro \"%s\" not used", sym->nam);
 		if (!sym->persist) {
 			free(sym->nam);
 			free(sym->val);

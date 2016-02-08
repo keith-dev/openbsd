@@ -1,4 +1,4 @@
-.\"	$OpenBSD: sysctl.8,v 1.127 2005/10/05 17:38:58 norby Exp $
+.\"	$OpenBSD: sysctl.8,v 1.132 2006/05/29 16:49:42 avsm Exp $
 .\"	$NetBSD: sysctl.8,v 1.4 1995/09/30 07:12:49 thorpej Exp $
 .\"
 .\" Copyright (c) 1993
@@ -55,6 +55,13 @@ The state to be retrieved or set is described using a
 .Dq Management Information Base
 .Pq MIB
 style name, described as a dotted set of components.
+.Pp
+When retreiving a variable,
+a subset of the MIB name may be specified to retreive a list of
+variables in that subset.
+For example, to list all the machdep variables:
+.Pp
+.Dl $ sysctl machdep
 .Pp
 When setting a variable,
 the MIB name should be followed by an equal sign and the new value.
@@ -295,6 +302,7 @@ not all of the variables are relevant to all architectures.
 .It net.inet6.ip6.rr_prune	integer	yes
 .It net.inet6.ip6.v6only	integer	no
 .It net.inet6.ip6.maxfrags	integer	yes
+.It net.inet6.ip6.mforwarding	integer	yes
 .It net.inet6.icmp6.rediraccept	integer	yes
 .It net.inet6.icmp6.redirtimeout	integer	yes
 .It net.inet6.icmp6.nd6_prune	integer	yes
@@ -333,6 +341,11 @@ not all of the variables are relevant to all architectures.
 .It hw.sensors	struct	no
 .It hw.cpuspeed	integer	no
 .It hw.setperf	integer	yes
+.It hw.vendor	string	no
+.It hw.product	string	no
+.It hw.version	string	no
+.It hw.serialno	string	no
+.It hw.uuid	string	no
 .It machdep.console_device	dev_t	no
 .It machdep.unaligned_print	integer	yes
 .It machdep.unaligned_fix	integer	yes

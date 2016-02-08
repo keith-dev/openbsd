@@ -1,4 +1,4 @@
-/*	$OpenBSD: main1.c,v 1.8 2005/12/10 17:51:49 cloder Exp $	*/
+/*	$OpenBSD: main1.c,v 1.11 2006/05/29 20:47:22 cloder Exp $	*/
 /*	$NetBSD: main1.c,v 1.3 1995/10/02 17:29:56 jpo Exp $	*/
 
 /*
@@ -33,7 +33,7 @@
  */
 
 #ifndef lint
-static char rcsid[] = "$OpenBSD: main1.c,v 1.8 2005/12/10 17:51:49 cloder Exp $";
+static char rcsid[] = "$OpenBSD: main1.c,v 1.11 2006/05/29 20:47:22 cloder Exp $";
 #endif
 
 #include <stdio.h>
@@ -45,17 +45,6 @@ static char rcsid[] = "$OpenBSD: main1.c,v 1.8 2005/12/10 17:51:49 cloder Exp $"
 
 /* set yydebug to 1*/
 int	yflag;
-
-/*
- * Print warnings if an assignment of an integertype to another integertype
- * causes an implicit narrowing conversion. If aflag is 1, these warnings
- * are printed only if the source type is at least as wide as long. If aflag
- * is greather then 1, they are always printed.
- */
-int	aflag;
-
-/* Print a warning if a break statement cannot be reached. */
-int	bflag;
 
 /* Print warnings for pointer casts. */
 int	cflag;
@@ -93,9 +82,6 @@ int	rflag;
 /* Strict ANSI C mode. */
 int	sflag;
 
-/* Traditional C mode. */
-int	tflag;
-
 /*
  * Complain about functions and external variables used and not defined,
  * or defined and not used.
@@ -117,8 +103,8 @@ main(int argc, char *argv[])
 
 	while ((c = getopt(argc, argv, "abcdefghprstuvyzF")) != -1) {
 		switch (c) {
-		case 'a':	aflag++;	break;
-		case 'b':	bflag = 1;	break;
+		case 'a':	/* obsolete */	break;
+		case 'b':	/* obsolete */	break;
 		case 'c':	cflag = 1;	break;
 		case 'd':	dflag = 1;	break;
 		case 'e':	eflag = 1;	break;
@@ -129,7 +115,7 @@ main(int argc, char *argv[])
 		case 'p':	pflag = 1;	break;
 		case 'r':	rflag = 1;	break;
 		case 's':	sflag = 1;	break;
-		case 't':	tflag = 1;	break;
+		case 't':	/* obsolete */	break;
 		case 'u':	uflag = 0;	break;
 		case 'v':	vflag = 0;	break;
 		case 'y':	yflag = 1;	break;

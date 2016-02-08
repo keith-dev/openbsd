@@ -1,4 +1,4 @@
-/*	$OpenBSD: uthread_init.c,v 1.33 2005/10/30 03:37:34 brad Exp $	*/
+/*	$OpenBSD: uthread_init.c,v 1.35 2006/04/09 02:57:41 krw Exp $	*/
 /*
  * Copyright (c) 1995-1998 John Birrell <jb@cimlogic.com.au>
  * All rights reserved.
@@ -134,6 +134,8 @@ static void *references[] = {
 	&_thread_malloc_init,
 	&_thread_malloc_lock,
 	&_thread_malloc_unlock,
+	&_thread_atexit_lock,
+	&_thread_atexit_unlock,
 	&_thread_tag_lock,
 	&_thread_tag_unlock,
 	&_thread_tag_storage,
@@ -272,7 +274,7 @@ _thread_init(void)
 	_thread_initial->last_active = (long) _sched_ticks;
 
 	/* Give it a useful name */
-	pthread_set_name_np(_thread_initial, (char *)"main");
+	pthread_set_name_np(_thread_initial, "main");
 
 	/* Initialise the rest of the fields: */
 	_thread_initial->poll_data.nfds = 0;

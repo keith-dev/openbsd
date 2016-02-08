@@ -1,4 +1,4 @@
-dnl	$OpenBSD: hardware,v 1.69 2006/02/13 06:19:25 brad Exp $
+dnl	$OpenBSD: hardware,v 1.76 2006/06/24 07:51:30 jsg Exp $
 OpenBSD/MACHINE OSREV should work on all Athlon 64-based and
 compatible designs.
 
@@ -40,8 +40,10 @@ dnl		YENTA-compatible PCI-CardBus bridges
 		National Semiconductor SCx200 (found on SC1100 SoC)
 		NVIDIA nForce/nForce2/nForce2-400/nForce3/nForce3-250/nForce4
 		Promise PDC20246, PDC20262, PDC20265, PDC20267, PDC20268,
-		    PDC20268R, PDC20269, PDC20271, PDC20275, PDC20276,
-		    PDC20277, PDC20376 (RAID mode is not supported)
+		    PDC20268R, PDC20269, PDC20271, PDC20275, PDC20276, PDC20277,
+		    PDC20318, PDC20319, PDC20371, PDC20375, PDC20376, PDC20377,
+		    PDC20378, PDC20379, PDC20571, PDC20575, PDC20579, PDC20775,
+		    PDC40518, PDC40718, PDC40719
 		ServerWorks OSB4, CSB5, CSB6 (including support for the third
 		    channel)
 		Silicon Image SiI3112, SiI3512, SiI3114
@@ -105,7 +107,7 @@ dnl		YENTA-compatible PCI-CardBus bridges
 		Tekram DC-3x5U (DC-315U, DC-395U/UW/F) TRM-S1040 based
 		  PCI SCSI host adapters
 	RAID and Cache Controllers
-		3ware Escalade 3W-5x00, 3W-6x00
+		3ware Escalade 3W-5x00, 3W-6x00, 3W-7x00
 		Adaptec FSA-based RAID controllers, including:
 		    Adaptec AAC-2622, AAC-364, AAC-3642
 		    Dell PERC 2/Si, PERC 2/QC, PERC 3/Si, PERC 3/Di,
@@ -356,11 +358,12 @@ dnl		YENTA-compatible PCI-CardBus bridges
 		    Accton MPX 5030/5038
 		    Allied Telesyn AT2550
 		    D-Link DFE530TX+, DFE538TX
-		    Encore ENL832-TX 10/100 M PCI
+		    Encore ENL832-TX-RENT 10/100 M PCI
 		    Genius GF100TXR
 		    KTX-9130TX 10/100 Fast Ethernet
 		    Longshine LCS-8038TX-R
 		    NDC NE100TX-E
+		    Netgear FA311 v2
 		    Netronix EA-1210 Net Ether 10/100
 		    Nortel BayStack 21
 		    OvisLink LEF-8129TX, LEF-8139TX
@@ -408,6 +411,24 @@ dnl		YENTA-compatible PCI-CardBus bridges
 		    TRENDnet TE100-PCIE
 		    Compex RL100-ATX 10/100baseTX
 	Wireless Ethernet Adapters
+		Atheros AR521x based CardBus IEEE 802.11a/b/g adapters
+		    3Com 3CRPAG175
+		    Cisco AIR-CB21AG
+		    D-Link DWL-A650
+		    D-Link DWL-AB650
+		    Elecom LD-WL54
+		    Linksys WPC51AB
+		    Netgear WAB501
+		    Planet WL-3560
+		    Proxim Skyline 4030
+		    SMC SMC2735W
+		    Sony PCWA-C500
+		Atheros AR521x based PCI IEEE 802.11a/b/g adapters
+		    D-Link DWL-A520
+		    IBM 11ABG WL LAN
+		    Proxim Skyline 4032
+		    Senao NL-5354MP
+		    Wistron CM9
 		Atmel AT76C50x based USB IEEE 802.11b adapters
 		    3Com 3CRSHEW696
 		    AboCom BWU613
@@ -540,8 +561,16 @@ dnl		YENTA-compatible PCI-CardBus bridges
 		    Farallon PN9000SX
 		    Netgear GA620 and GA620T
 		    SGI Tigon
-		Intel i82540, i82541, i82542, i82543, i82544, i82545, i82546
-		and i82547 based adapters, including:
+		Intel i82540, i82541, i82542, i82543, i82544, i82545, i82546,
+		i82547, i82571, i82572 and i82573 based adapters, including:
+		    HP ProLiant NC310F PCI-X Gigabit NIC (SX Fiber)
+		    HP ProLiant NC340T PCI-X Gigabit NIC
+		    HP ProLiant NC6134 PCI Gigabit NIC (SX Fiber)
+		    HP ProLiant NC6136 PCI Gigabit NIC (SX Fiber)
+		    HP ProLiant NC6170 PCI-X Gigabit NIC (SX Fiber)
+		    HP ProLiant NC7131 PCI Gigabit NIC
+		    HP ProLiant NC7170 PCI-X Gigabit NIC
+		    HP ProLiant NC7170LP PCI-X Gigabit NIC
 		    Intel PRO/1000 Gigabit Server Adapter (SX Fiber)
 		      (PWLA8490)
 		    Intel PRO/1000F Gigabit Server Adapter (SX Fiber)

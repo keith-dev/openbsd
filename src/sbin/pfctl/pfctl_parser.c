@@ -1,4 +1,4 @@
-/*	$OpenBSD: pfctl_parser.c,v 1.222 2005/11/04 08:24:15 mcbride Exp $ */
+/*	$OpenBSD: pfctl_parser.c,v 1.227 2006/08/08 20:05:54 dhartmei Exp $ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
@@ -485,7 +485,7 @@ print_status(struct pf_status *s, int opts)
 	time_t			runtime;
 	int			i;
 	char			buf[PF_MD5_DIGEST_LENGTH * 2 + 1];
-	static const char 	hex[] = "0123456789abcdef";
+	static const char	hex[] = "0123456789abcdef";
 
 	runtime = time(NULL) - s->since;
 	running = s->running ? "Enabled" : "Disabled";
@@ -921,12 +921,13 @@ print_rule(struct pf_rule *r, const char *anchor_call, int verbose)
 				if (!opts)
 					printf(", ");
 				opts = 0;
-				for (j = 0; j < sizeof(pf_timeouts) /
-				    sizeof(pf_timeouts[0]); ++j)
+				for (j = 0; pf_timeouts[j].name != NULL;
+				    ++j)
 					if (pf_timeouts[j].timeout == i)
 						break;
-				printf("%s %u", j == PFTM_MAX ?  "inv.timeout" :
-				    pf_timeouts[j].name, r->timeout[i]);
+				printf("%s %u", pf_timeouts[j].name == NULL ?
+				    "inv.timeout" : pf_timeouts[j].name,
+				    r->timeout[i]);
 			}
 		printf(")");
 	}
@@ -966,6 +967,8 @@ print_rule(struct pf_rule *r, const char *anchor_call, int verbose)
 			printf(" !");
 		printf(" tagged %s", r->match_tagname);
 	}
+	if (r->rtableid != -1)
+		printf(" rtable %u", r->rtableid);
 	if (!anchor_call[0] && (r->action == PF_NAT ||
 	    r->action == PF_BINAT || r->action == PF_RDR)) {
 		printf(" -> ");
@@ -1204,7 +1207,7 @@ ifa_grouplookup(const char *ifa_name, int flags)
 	struct ifg_req		*ifg;
 	struct ifgroupreq	 ifgr;
 	int			 s, len;
-	struct node_host	*n, *h = NULL, *hn;
+	struct node_host	*n, *h = NULL;
 
 	if ((s = socket(AF_INET, SOCK_DGRAM, 0)) == -1)
 		err(1, "socket");
@@ -1224,17 +1227,16 @@ ifa_grouplookup(const char *ifa_name, int flags)
 	for (ifg = ifgr.ifgr_groups; ifg && len >= sizeof(struct ifg_req);
 	    ifg++) {
 		len -= sizeof(struct ifg_req);
-		n = ifa_lookup(ifg->ifgrq_member, flags);
+		if ((n = ifa_lookup(ifg->ifgrq_member, flags)) == NULL)
+			continue;
 		if (h == NULL)
 			h = n;
 		else {
-			for (hn = h; hn->next != NULL; hn = hn->next)
-				;	/* nothing */
-			hn->next = n;
-			n->tail = hn;
+			h->tail->next = n;
+			h->tail = n->tail;
 		}
 	}
-	free(ifgr.ifgr_groups);	
+	free(ifgr.ifgr_groups);
 	close(s);
 
 	return (h);

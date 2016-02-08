@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile.inc,v 1.75 2005/11/29 21:29:15 deraadt Exp $
+#	$OpenBSD: Makefile.inc,v 1.78 2006/06/14 19:55:24 otto Exp $
 #	$NetBSD: Makefile.inc,v 1.35 1995/10/16 23:49:07 jtc Exp $
 #	@(#)Makefile.inc	8.1 (Berkeley) 6/17/93
 
@@ -29,7 +29,8 @@ SRCS+=	ftruncate.c lseek.c mquery.c mmap.c ptrace.c semctl.c truncate.c \
 SRCS+=	stack_protector.c
 
 # modules with default implementations on all architectures:
-ASM=	accept.o access.o acct.o adjtime.o bind.o chdir.o chflags.o chmod.o \
+ASM=	accept.o access.o acct.o adjfreq.o adjtime.o bind.o chdir.o chflags.o \
+	chmod.o \
 	chown.o chroot.o clock_gettime.o clock_settime.o clock_getres.o \
 	close.o closefrom.o connect.o dup.o dup2.o execve.o fchdir.o \
 	fchflags.o fchmod.o fchown.o fcntl.o fhopen.o fhstat.o fhstatfs.o \
@@ -57,7 +58,7 @@ ASM=	accept.o access.o acct.o adjtime.o bind.o chdir.o chflags.o chmod.o \
 	sigaltstack.o socket.o socketpair.o stat.o statfs.o swapctl.o \
 	symlink.o sync.o sysarch.o umask.o unlink.o unmount.o \
 	utimes.o vadvise.o wait4.o write.o writev.o xfspioctl.o __semctl.o \
-	__syscall.o __sysctl.o
+	__syscall.o __sysctl.o __getcwd.o
 
 GASM=	${ASM:.o=.go}
 PASM=	${ASM:.o=.po}
@@ -183,7 +184,7 @@ ${PSEUDO_NOERR}: ${LIBCSRCDIR}/arch/${MACHINE_ARCH}/SYS.h /usr/include/sys/sysca
 LSRCS+=	LintSysNormal.c LintSysPseudoNoerr.c
 DPSRCS+= LintSysNormal.c LintSysPseudoNoerr.c
 
-CLEANFILES+= LintSysNormal.c LintSysNoerr.c LintSysPseudo.c
+CLEANFILES+= LintSysNormal.c LintSysNoerr.c LintSysPseudoNoerr.c
 
 LintSysNormal.c: ${LIBCSRCDIR}/sys/makelintstub.sh \
     ${DESTDIR}/usr/include/sys/syscall.h
@@ -203,7 +204,8 @@ LintSysPseudoNoerr.c: ${LIBCSRCDIR}/sys/makelintstub.sh \
 	@sh ${LIBCSRCDIR}/sys/makelintstub.sh -o ${.TARGET} -p \
 	    -s ${DESTDIR}/usr/include/sys/syscall.h ${PSEUDO_NOERR}
 
-MAN+=	accept.2 access.2 acct.2 adjtime.2 bind.2 brk.2 chdir.2 chflags.2 \
+MAN+=	accept.2 access.2 acct.2 adjfreq.2 adjtime.2 bind.2 brk.2 chdir.2 \
+	chflags.2 \
 	chmod.2 chown.2 chroot.2 clock_gettime.2 close.2 closefrom.2 connect.2 \
 	dup.2 execve.2 _exit.2 fcntl.2 fhopen.2 \
 	flock.2 fork.2 fsync.2 getdirentries.2 \

@@ -1,8 +1,8 @@
 vers(__file__,
-	{-$OpenBSD: MAKEDEV.md,v 1.22 2005/11/16 03:44:12 deraadt Exp $-},
+	{-$OpenBSD: MAKEDEV.md,v 1.28 2006/04/16 11:34:02 todd Exp $-},
 etc.MACHINE)dnl
 dnl
-dnl Copyright (c) 2001-2004 Todd T. Fries <todd@OpenBSD.org>
+dnl Copyright (c) 2001-2006 Todd T. Fries <todd@OpenBSD.org>
 dnl
 dnl Permission to use, copy, modify, and distribute this software for any
 dnl purpose with or without fee is hereby granted, provided that the above
@@ -17,6 +17,22 @@ dnl ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 dnl OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 dnl
 dnl
+__devitem(s64_tzs, tty[a-z]*, Zilog 8530 serial ports,zs)dnl
+__devitem(s64_czs, cua[a-z]*, Zilog 8530 serial ports,zs)dnl
+_mkdev(s64_tzs, {-tty[a-z]-}, {-u=${i#tty*}
+	case $u in
+	a) n=0 ;;
+	b) n=1 ;;
+	*) echo unknown tty device $i ;;
+	esac
+	M tty$u c major_s64_tzs_c $n 660 dialer uucp-})dnl
+_mkdev(s64_czs, cua[a-z], {-u=${i#cua*}
+	case $u in
+	a) n=0 ;;
+	b) n=1 ;;
+	*) echo unknown cua device $i ;;
+	esac
+	M cua$u c major_s64_czs_c Add($n, 128) 660 dialer uucp-})dnl
 __devitem(apm, apm, Power management device)dnl
 _TITLE(make)
 _DEV(all)
@@ -35,7 +51,9 @@ _TITLE(tap)
 _DEV(ch, 10)
 _DEV(st, 20, 5)
 _TITLE(term)
-_DEV(com, 7)
+_DEV(com, 26)
+_DEV(s64_czs, 7)
+_DEV(s64_tzs, 7)
 _TITLE(pty)
 _DEV(ptm, 77)
 _DEV(pty, 5)
@@ -82,12 +100,13 @@ divert(__mddivert)dnl
 dnl
 _std(1, 2, 43, 3, 6)
 	M xf86		c 2 4 600
-	M reload	c 2 20 640 kmem
 	;;
 
 dnl
 dnl *** macppc specific targets
 dnl
+twrget(all, s64_tzs, tty, a, b)dnl
+twrget(all, s64_czs, cua, a, b)dnl
 target(all, ch, 0)dnl
 target(all, ss, 0, 1)dnl
 target(all, xfs, 0)dnl
@@ -103,10 +122,6 @@ target(all, sd, 0, 1, 2, 3, 4)dnl
 target(all, vnd, 0, 1, 2, 3)dnl
 target(all, ccd, 0, 1, 2, 3)dnl
 target(all, gpio, 0, 1, 2)dnl
-target(ramd, sd, 0, 1, 2, 3, 4)dnl
-target(ramd, wd, 0, 1, 2, 3, 4)dnl
-target(ramd, st, 0, 1)dnl
-target(ramd, cd, 0, 1)dnl)dnl
-target(ramd, rd, 0)dnl
-target(ramd, tty0, 0, 1)dnl
+target(ramd, ttya, 0, 1)dnl
+target(ramd, ttyb, 0, 1)dnl
 target(ramd, pty, 0)dnl

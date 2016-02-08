@@ -1,4 +1,4 @@
-.\"	$OpenBSD: nfe.4,v 1.7 2006/02/28 08:13:47 jsg Exp $
+.\"	$OpenBSD: nfe.4,v 1.10 2006/08/30 22:56:05 jmc Exp $
 .\"
 .\" Copyright (c) 2006 Jonathan Gray <jsg@openbsd.org>
 .\"
@@ -19,7 +19,7 @@
 .Os
 .Sh NAME
 .Nm nfe
-.Nd NVIDIA nForce MCP Ethernet driver
+.Nd NVIDIA nForce MCP 10/100/Gigabit Ethernet device
 .Sh SYNOPSIS
 .Cd "nfe* at pci?"
 .Cd "ciphy* at mii?"
@@ -31,8 +31,8 @@ The
 .Nm
 driver supports PCI Ethernet adapters based on the NVIDIA
 nForce Media and Communications Processors (MCP), such as
-the nForce, nForce 2, nForce 3, CK804, MCP04, MCP51 and MCP55
-Ethernet controller chips.
+the nForce, nForce 2, nForce 3, CK804, MCP04, MCP51, MCP55,
+MCP61 and MCP65 Ethernet controller chips.
 .Pp
 The
 .Nm
@@ -78,5 +78,4 @@ and
 .An Damien Bergamini
 .Aq damien@openbsd.org .
 .Sh CAVEATS
-NVIDIA refuse to release any documentation on their products
-so the driver likely doesn't work as well as it otherwise could.
+NVIDIA refuse to release any documentation on their products.

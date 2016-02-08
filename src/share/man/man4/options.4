@@ -1,4 +1,4 @@
-.\"	$OpenBSD: options.4,v 1.173 2005/12/06 20:18:57 pedro Exp $
+.\"	$OpenBSD: options.4,v 1.177 2006/07/22 18:03:07 krw Exp $
 .\"	$NetBSD: options.4,v 1.21 1997/06/25 03:13:00 thorpej Exp $
 .\"
 .\" Copyright (c) 1998 Theo de Raadt
@@ -667,6 +667,17 @@ See
 for details.
 .It Cd option MULTIPROCESSOR
 On those architectures that have it, this enables multiprocessor support.
+.It Cd option USER_LDT
+Enable userland manipulation of per-process
+Local Descriptor Table (LDT) entries;
+see
+.Xr i386_set_ldt 2
+and the
+.Va machdep.userldt
+.Xr sysctl 8 .
+This option is supported on the
+.Va i386
+architecture.
 .El
 .Ss Networking Options
 .Bl -ohang
@@ -884,24 +895,6 @@ Each bit enables debugging info for the corresponding target.
 .It Cd option SCSIDEBUG_LUNS=value
 Define which SCSI luns will print debug info.
 Each bit enables debugging info for the corresponding lun.
-.It Cd option SCSIFORCELUN_BUSES=value
-Define which SCSI buses will do full lun scanning.
-.Em SCSIFORCELUN_TARGETS
-must also be set to a non-zero value for this option to take effect.
-Each bit enables a full lun scan for the corresponding SCSI bus.
-The lun scan normally terminates if identical INQUIRY data is seen for
-lun 0 and another lun, as this usually means the target cannot
-distinguish between different luns.
-But some devices (e.g. some external RAID devices) can legitimately
-supply identical INQUIRY data for several luns.
-.It Cd option SCSIFORCELUN_TARGETS=value
-Define which SCSI targets will do full lun scanning.
-.Em SCSIFORCELUN_BUSES
-must also be set to a non-zero value for this option to have any
-effect.
-Each bit enables a full lun scan for the corresponding target on the
-buses specified by
-.Em SCSIFORCELUN_BUSES .
 .El
 .Ss System V IPC Options
 .Bl -ohang
@@ -994,11 +987,6 @@ panic.
 These options set the number of pages available for the buffer cache.
 Their default value is a machine dependent value, often calculated as
 between 5% and 10% of total available RAM.
-.It Cd option DUMMY_NOPS
-This option is supported on the i386 architecture.
-When enabled, it speeds up interrupt processing by removing delays
-while accessing the interrupt controller.
-Care should be taken when using this option.
 .It Cd option APM_NOPRINT
 This option is supported on the i386 architecture.
 When enabled, kernel messages regarding the status of the automatic power

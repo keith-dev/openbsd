@@ -1,4 +1,4 @@
-/*	$OpenBSD: interface.c,v 1.41 2006/01/05 15:53:36 claudio Exp $ */
+/*	$OpenBSD: interface.c,v 1.52 2006/08/18 11:54:28 claudio Exp $ */
 
 /*
  * Copyright (c) 2005 Claudio Jeker <claudio@openbsd.org>
@@ -39,12 +39,12 @@
 #include "ospfe.h"
 
 void		 if_hello_timer(int, short, void *);
-int		 if_start_hello_timer(struct iface *);
-int		 if_stop_hello_timer(struct iface *);
-int		 if_stop_wait_timer(struct iface *);
+void		 if_start_hello_timer(struct iface *);
+void		 if_stop_hello_timer(struct iface *);
+void		 if_stop_wait_timer(struct iface *);
 void		 if_wait_timer(int, short, void *);
-int		 if_start_wait_timer(struct iface *);
-int		 if_stop_wait_timer(struct iface *);
+void		 if_start_wait_timer(struct iface *);
+void		 if_stop_wait_timer(struct iface *);
 struct nbr	*if_elect(struct nbr *, struct nbr *);
 
 struct {
@@ -69,25 +69,22 @@ struct {
 
 static int vlink_cnt = 0;
 
+const char * const if_event_names[] = {
+	"NOTHING",
+	"UP",
+	"WAITTIMER",
+	"BACKUPSEEN",
+	"NEIGHBORCHANGE",
+	"LOOP",
+	"UNLOOP",
+	"DOWN"
+};
+
 const char * const if_action_names[] = {
 	"NOTHING",
 	"START",
 	"ELECT",
 	"RESET"
-};
-
-const char * const if_type_names[] = {
-	"POINTOPOINT",
-	"BROADCAST",
-	"NBMA",
-	"POINTOMULTIPOINT",
-	"VIRTUALLINK"
-};
-
-const char * const if_auth_names[] = {
-	"none",
-	"simple",
-	"crypt"
 };
 
 int
@@ -107,10 +104,10 @@ if_fsm(struct iface *iface, enum iface_event event)
 		}
 
 	if (iface_fsm[i].state == -1) {
-		/* XXX event outside of the defined fsm, ignore it. */
+		/* event outside of the defined fsm, ignore it. */
 		log_debug("if_fsm: interface %s, "
 		    "event %s not expected in state %s", iface->name,
-		    if_event_name(event), if_state_name(old_state));
+		    if_event_names[event], if_state_name(old_state));
 		return (0);
 	}
 
@@ -131,7 +128,7 @@ if_fsm(struct iface *iface, enum iface_event event)
 
 	if (ret) {
 		log_debug("if_fsm: error changing state for interface %s, "
-		    "event %s, state %s", iface->name, if_event_name(event),
+		    "event %s, state %s", iface->name, if_event_names[event],
 		    if_state_name(old_state));
 		return (-1);
 	}
@@ -144,7 +141,7 @@ if_fsm(struct iface *iface, enum iface_event event)
 
 	log_debug("if_fsm: event %s resulted in action %s and changing "
 	    "state for interface %s from %s to %s",
-	    if_event_name(event), if_action_name(iface_fsm[i].action),
+	    if_event_names[event], if_action_names[iface_fsm[i].action],
 	    iface->name, if_state_name(old_state), if_state_name(iface->state));
 
 	return (ret);
@@ -165,7 +162,7 @@ if_new(struct kif *kif)
 
 	LIST_INIT(&iface->nbr_list);
 	TAILQ_INIT(&iface->ls_ack_list);
-	md_list_init(iface);
+	TAILQ_INIT(&iface->auth_md_list);
 
 	iface->crypt_seq_num = arc4random() & 0x0fffffff;
 
@@ -207,22 +204,22 @@ if_new(struct kif *kif)
 	iface->media_type = kif->media_type;
 
 	/* get address */
-	if (ioctl(s, SIOCGIFADDR, (caddr_t)ifr) < 0)
+	if (ioctl(s, SIOCGIFADDR, ifr) < 0)
 		err(1, "if_new: cannot get address");
-	sain = (struct sockaddr_in *) &ifr->ifr_addr;
+	sain = (struct sockaddr_in *)&ifr->ifr_addr;
 	iface->addr = sain->sin_addr;
 
 	/* get mask */
-	if (ioctl(s, SIOCGIFNETMASK, (caddr_t)ifr) < 0)
+	if (ioctl(s, SIOCGIFNETMASK, ifr) < 0)
 		err(1, "if_new: cannot get mask");
-	sain = (struct sockaddr_in *) &ifr->ifr_addr;
+	sain = (struct sockaddr_in *)&ifr->ifr_addr;
 	iface->mask = sain->sin_addr;
 
 	/* get p2p dst address */
 	if (kif->flags & IFF_POINTOPOINT) {
-		if (ioctl(s, SIOCGIFDSTADDR, (caddr_t)ifr) < 0)
+		if (ioctl(s, SIOCGIFDSTADDR, ifr) < 0)
 			err(1, "if_new: cannot get dst addr");
-		sain = (struct sockaddr_in *) &ifr->ifr_addr;
+		sain = (struct sockaddr_in *)&ifr->ifr_addr;
 		iface->dst = sain->sin_addr;
 	}
 
@@ -244,8 +241,7 @@ if_del(struct iface *iface)
 		nbr_del(nbr);
 
 	ls_ack_list_clr(iface);
-	md_list_clr(iface);
-	free(iface->auth_key);
+	md_list_clr(&iface->auth_md_list);
 	free(iface);
 }
 
@@ -264,6 +260,7 @@ if_init(struct ospfd_conf *xconf, struct iface *iface)
 }
 
 /* timers */
+/* ARGSUSED */
 void
 if_hello_timer(int fd, short event, void *arg)
 {
@@ -275,24 +272,28 @@ if_hello_timer(int fd, short event, void *arg)
 	/* reschedule hello_timer */
 	timerclear(&tv);
 	tv.tv_sec = iface->hello_interval;
-	evtimer_add(&iface->hello_timer, &tv);
+	if (evtimer_add(&iface->hello_timer, &tv) == -1)
+		fatal("if_hello_timer");
 }
 
-int
+void
 if_start_hello_timer(struct iface *iface)
 {
 	struct timeval tv;
 
 	timerclear(&tv);
-	return (evtimer_add(&iface->hello_timer, &tv));
+	if (evtimer_add(&iface->hello_timer, &tv) == -1)
+		fatal("if_start_hello_timer");
 }
 
-int
+void
 if_stop_hello_timer(struct iface *iface)
 {
-	return (evtimer_del(&iface->hello_timer));
+	if (evtimer_del(&iface->hello_timer) == -1)
+		fatal("if_stop_hello_timer");
 }
 
+/* ARGSUSED */
 void
 if_wait_timer(int fd, short event, void *arg)
 {
@@ -301,20 +302,22 @@ if_wait_timer(int fd, short event, void *arg)
 	if_fsm(iface, IF_EVT_WTIMER);
 }
 
-int
+void
 if_start_wait_timer(struct iface *iface)
 {
 	struct timeval	tv;
 
 	timerclear(&tv);
 	tv.tv_sec = iface->dead_interval;
-	return (evtimer_add(&iface->wait_timer, &tv));
+	if (evtimer_add(&iface->wait_timer, &tv) == -1)
+		fatal("if_start_wait_timer");
 }
 
-int
+void
 if_stop_wait_timer(struct iface *iface)
 {
-	return (evtimer_del(&iface->wait_timer));
+	if (evtimer_del(&iface->wait_timer) == -1)
+		fatal("if_stop_wait_timer");
 }
 
 /* actions */
@@ -322,6 +325,7 @@ int
 if_act_start(struct iface *iface)
 {
 	struct in_addr		 addr;
+	struct timeval		 now;
 
 	if (!((iface->flags & IFF_UP) &&
 	    (iface->linkstate == LINK_STATE_UP ||
@@ -345,6 +349,9 @@ if_act_start(struct iface *iface)
 		return (0);
 	}
 
+	gettimeofday(&now, NULL);
+	iface->uptime = now.tv_sec;
+
 	switch (iface->type) {
 	case IF_TYPE_POINTOPOINT:
 		inet_aton(AllSPFRouters, &addr);
@@ -354,15 +361,9 @@ if_act_start(struct iface *iface)
 			return (-1);
 		}
 		iface->state = IF_STA_POINTTOPOINT;
-		if (if_start_hello_timer(iface))
-			log_warnx("if_act_start: cannot schedule hello "
-			    "timer, interface %s", iface->name);
 		break;
 	case IF_TYPE_VIRTUALLINK:
 		iface->state = IF_STA_POINTTOPOINT;
-		if (if_start_hello_timer(iface))
-			log_warnx("if_act_start: cannot schedule hello "
-			    "timer, interface %s", iface->name);
 		break;
 	case IF_TYPE_POINTOMULTIPOINT:
 	case IF_TYPE_NBMA:
@@ -378,23 +379,17 @@ if_act_start(struct iface *iface)
 		}
 		if (iface->priority == 0) {
 			iface->state = IF_STA_DROTHER;
-			if (if_start_hello_timer(iface))
-				log_warnx("if_act_start: cannot schedule hello "
-				    "timer, interface %s", iface->name);
 		} else {
 			iface->state = IF_STA_WAITING;
-			if (if_start_hello_timer(iface))
-				log_warnx("if_act_start: cannot schedule hello "
-				    "timer, interface %s", iface->name);
-			if (if_start_wait_timer(iface))
-				log_warnx("if_act_start: cannot schedule wait "
-				    "timer, interface %s", iface->name);
+			if_start_wait_timer(iface);
 		}
 		break;
 	default:
 		fatalx("if_act_start: unknown interface type");
 	}
 
+	/* hello timer needs to be started in any case */
+	if_start_hello_timer(iface);
 	return (0);
 }
 
@@ -544,11 +539,7 @@ start:
 			orig_net_lsa(iface);
 	}
 
-	if (if_start_hello_timer(iface)) {
-		log_warnx("if_act_elect: cannot schedule hello_timer");
-		return (-1);
-	}
-
+	if_start_hello_timer(iface);
 	return (0);
 }
 
@@ -571,6 +562,14 @@ if_act_reset(struct iface *iface)
 		if (if_leave_group(iface, &addr)) {
 			log_warnx("if_act_reset: error leaving group %s, "
 			    "interface %s", inet_ntoa(addr), iface->name);
+		}
+		if (iface->state & IF_STA_DRORBDR) {
+			inet_aton(AllDRouters, &addr);
+			if (if_leave_group(iface, &addr)) {
+				log_warnx("if_act_reset: "
+				    "error leaving group %s, interface %s",
+				    inet_ntoa(addr), iface->name);
+			}
 		}
 		break;
 	case IF_TYPE_VIRTUALLINK:
@@ -596,23 +595,9 @@ if_act_reset(struct iface *iface)
 	iface->bdr = NULL;
 
 	ls_ack_list_clr(iface);
-	if (stop_ls_ack_tx_timer(iface)) {
-		log_warnx("if_act_reset: error removing ls_ack_tx_timer, "
-		    "interface %s", iface->name);
-		return (-1);
-	}
-
-	if (if_stop_hello_timer(iface)) {
-		log_warnx("if_act_reset: error removing hello_timer, "
-		    "interface %s", iface->name);
-		return (-1);
-	}
-
-	if (if_stop_wait_timer(iface)) {
-		log_warnx("if_act_reset: error removing wait_timer, "
-		    "interface %s", iface->name);
-		return (-1);
-	}
+	stop_ls_ack_tx_timer(iface);
+	if_stop_hello_timer(iface);
+	if_stop_wait_timer(iface);
 
 	return (0);
 }
@@ -658,6 +643,7 @@ if_to_ctl(struct iface *iface)
 	ictl.rxmt_interval = iface->rxmt_interval;
 	ictl.type = iface->type;
 	ictl.linkstate = iface->linkstate;
+	ictl.mediatype = iface->media_type;
 	ictl.priority = iface->priority;
 	ictl.passive = iface->passive;
 	ictl.auth_type = iface->auth_type;
@@ -670,6 +656,11 @@ if_to_ctl(struct iface *iface)
 	} else
 		ictl.hello_timer = -1;
 
+	if (iface->state != IF_STA_DOWN) {
+		ictl.uptime = now.tv_sec - iface->uptime;
+	} else
+		ictl.uptime = 0;
+
 	LIST_FOREACH(nbr, &iface->nbr_list, entry) {
 		if (nbr == iface->self)
 			continue;
@@ -679,54 +670,6 @@ if_to_ctl(struct iface *iface)
 	}
 
 	return (&ictl);
-}
-
-/* names */
-const char *
-if_state_name(int state)
-{
-	switch (state) {
-	case IF_STA_DOWN:
-		return ("DOWN");
-	case IF_STA_LOOPBACK:
-		return ("LOOPBACK");
-	case IF_STA_WAITING:
-		return ("WAITING");
-	case IF_STA_POINTTOPOINT:
-		return ("POINT-TO-POINT");
-	case IF_STA_DROTHER:
-		return ("DROTHER");
-	case IF_STA_BACKUP:
-		return ("BACKUP");
-	case IF_STA_DR:
-		return ("DR");
-	default:
-		return ("UNKNOWN");
-	}
-}
-
-const char *
-if_event_name(int event)
-{
-	return (if_event_names[event]);
-}
-
-const char *
-if_action_name(int action)
-{
-	return (if_action_names[action]);
-}
-
-const char *
-if_type_name(int type)
-{
-	return (if_type_names[type]);
-}
-
-const char *
-if_auth_name(int type)
-{
-	return (if_auth_names[type]);
 }
 
 /* misc */
@@ -763,7 +706,7 @@ if_set_recvbuf(int fd)
 	bsize = 65535;
 	while (setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &bsize,
 	    sizeof(bsize)) == -1)
-		bsize /= 2; 
+		bsize /= 2;
 }
 
 int
@@ -835,8 +778,7 @@ if_set_mcast(struct iface *iface)
 	case IF_TYPE_POINTOPOINT:
 	case IF_TYPE_BROADCAST:
 		if (setsockopt(iface->fd, IPPROTO_IP, IP_MULTICAST_IF,
-		    (char *)&iface->addr.s_addr,
-		    sizeof(iface->addr.s_addr)) < 0) {
+		    &iface->addr.s_addr, sizeof(iface->addr.s_addr)) < 0) {
 			log_debug("if_set_mcast: error setting "
 			    "IP_MULTICAST_IF, interface %s", iface->name);
 			return (-1);

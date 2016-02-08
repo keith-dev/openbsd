@@ -1,7 +1,7 @@
 /*
  * util.h -
  *
- * Written by Eryk Vershen (eryk@apple.com)
+ * Written by Eryk Vershen
  */
 
 /*
@@ -53,9 +53,6 @@
  * Forward declarations
  */
 void clear_memory(void *dataPtr, unsigned long size);
-#if !defined(__linux__) && !defined(__unix__)
-int TrapAvailable(short theTrap);
-#endif
 int istrncmp(const char *x, const char *y, long len);
 const char *get_version_string(void);
 

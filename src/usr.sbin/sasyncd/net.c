@@ -1,4 +1,4 @@
-/*	$OpenBSD: net.c,v 1.11 2006/01/26 09:53:46 moritz Exp $	*/
+/*	$OpenBSD: net.c,v 1.14 2006/06/02 20:31:48 moritz Exp $	*/
 
 /*
  * Copyright (c) 2005 Håkan Olsson.  All rights reserved.
@@ -139,7 +139,7 @@ net_add_listener(struct sockaddr *sa)
 	}
 
 	if (getnameinfo(sa, sa->sa_len, host, sizeof host, port, sizeof port,
-		NI_NUMERICHOST | NI_NUMERICSERV)) 
+		NI_NUMERICHOST | NI_NUMERICSERV))
 		log_msg(3, "listening on port %u fd %d", cfgstate.listen_port,
 		    s);
 	else
@@ -165,7 +165,7 @@ net_setup_listeners(void)
 		listeners = (int *)calloc(2, sizeof(int));
 		if (!listeners) {
 			perror("net_setup_listeners: calloc()");
-			return -1;
+			goto errout;
 		}
 		listeners[1] = -1;
 		listeners[0] = net_add_listener(sa);
@@ -177,14 +177,14 @@ net_setup_listeners(void)
 		return 0;
 	}
 
-	/* 
+	/*
 	 * If net_set_sa() failed, cfgstate.listen_on is probably an
 	 * interface name, so we should listen on all it's addresses.
 	 */
 
 	if (getifaddrs(&ifap) != 0) {
-		perror("net_setup_listeners: getifaddrs()"); 
-		return -1;
+		perror("net_setup_listeners: getifaddrs()");
+		goto errout;
 	}
 
 	/* How many addresses matches? */
@@ -204,14 +204,14 @@ net_setup_listeners(void)
 	if (!count) {
 		log_msg(0, "net_setup_listeners: no listeners found for %s",
 		    cfgstate.listen_on);
-		return -1;
+		goto errout;
 	}
 
 	/* Allocate one extra slot and set to -1, marking end of array. */
 	listeners = (int *)calloc(count + 1, sizeof(int));
 	if (!listeners) {
 		perror("net_setup_listeners: calloc()");
-		return -1;
+		goto errout;
 	}
 	for (i = 0; i <= count; i++)
 		listeners[i] = -1;
@@ -261,9 +261,11 @@ net_setup_listeners(void)
   errout:
 	if (ifap)
 		freeifaddrs(ifap);
-	for (i = 0; listeners[i] != -1; i++)
-		close(listeners[i]);
-	free(listeners);
+	if (listeners) {
+		for (i = 0; listeners[i] != -1; i++)
+			close(listeners[i]);
+		free(listeners);
+	}
 	return -1;
 }
 
@@ -651,6 +653,7 @@ net_shutdown(void)
 		if (p->name)
 			free(p->name);
 		LIST_REMOVE(p, link);
+		cfgstate.peercnt--;
 		free(p);
 	}
 
@@ -680,7 +683,7 @@ net_read(struct syncpeer *p, u_int32_t *msgtype, u_int32_t *msglen)
 		if (r < 1)
 			net_disconnect_peer(p);
 		return NULL;
-	} 
+	}
 
 	blob_len = ntohl(v);
 	if (blob_len < sizeof hash + AES_IV_LEN + 2 * sizeof(u_int32_t))

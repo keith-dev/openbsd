@@ -1,4 +1,4 @@
-/*	$OpenBSD: route6d.c,v 1.43 2006/02/06 17:51:30 jmc Exp $	*/
+/*	$OpenBSD: route6d.c,v 1.45 2006/06/16 13:51:21 claudio Exp $	*/
 /*	$KAME: route6d.c,v 1.94 2002/10/26 20:08:55 itojun Exp $	*/
 
 /*
@@ -31,7 +31,7 @@
  */
 
 #if 0
-static char _rcsid[] = "$OpenBSD: route6d.c,v 1.43 2006/02/06 17:51:30 jmc Exp $";
+static char _rcsid[] = "$OpenBSD: route6d.c,v 1.45 2006/06/16 13:51:21 claudio Exp $";
 #endif
 
 #include <stdio.h>
@@ -2566,9 +2566,7 @@ rt_entry(struct rt_msghdr *rtm, int again)
 	if ((rtm->rtm_flags & (RTF_HOST|RTF_GATEWAY)) == RTF_HOST)
 		rrt->rrt_t = 0;	/* Don't age non-gateway host routes */
 	np->rip6_tag = 0;
-	np->rip6_metric = rtm->rtm_rmx.rmx_hopcount;
-	if (np->rip6_metric < 1)
-		np->rip6_metric = 1;
+	np->rip6_metric = 1;
 	rrt->rrt_flags = rtm->rtm_flags;
 	np->rip6_dest = sin6_dst->sin6_addr;
 
@@ -2680,7 +2678,6 @@ addroute(struct riprt *rrt, const struct in6_addr *gw, struct ifc *ifcp)
 	rtm->rtm_pid = pid;
 	rtm->rtm_flags = rrt->rrt_flags;
 	rtm->rtm_addrs = RTA_DST | RTA_GATEWAY | RTA_NETMASK;
-	rtm->rtm_rmx.rmx_hopcount = np->rip6_metric - 1;
 	rtm->rtm_inits = RTV_HOPCOUNT;
 	sin6 = (struct sockaddr_in6 *)&buf[sizeof(struct rt_msghdr)];
 	/* Destination */
@@ -3409,13 +3406,11 @@ setindex2ifc(int idx, struct ifc *ifcp)
 
 	if (!index2ifc) {
 		nindex2ifc = 5;	/*initial guess*/
-		index2ifc = (struct ifc **)
-			malloc(sizeof(*index2ifc) * nindex2ifc);
+		index2ifc = calloc(nindex2ifc, sizeof(*index2ifc));
 		if (index2ifc == NULL) {
-			fatal("malloc");
+			fatal("calloc");
 			/*NOTREACHED*/
 		}
-		memset(index2ifc, 0, sizeof(*index2ifc) * nindex2ifc);
 	}
 	n = nindex2ifc;
 	while (nindex2ifc <= idx)

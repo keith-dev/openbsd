@@ -1,4 +1,4 @@
-/*	$OpenBSD: pfctl_altq.c,v 1.87 2006/01/28 18:54:28 henning Exp $	*/
+/*	$OpenBSD: pfctl_altq.c,v 1.89 2006/05/14 15:52:11 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2002
@@ -223,8 +223,8 @@ eval_pfaltq(struct pfctl *pf, struct pf_altq *pa, struct node_queue_bw *bw,
 		pa->ifbandwidth = bw->bw_absolute;
 	else
 		if ((rate = getifspeed(pa->ifname)) == 0) {
-			fprintf(stderr, "cannot determine interface bandwidth "
-			    "for %s, specify an absolute bandwidth\n",
+			fprintf(stderr, "interface %s does not know its bandwidth, "
+			    "please specify an absolute bandwidth\n",
 			    pa->ifname);
 			errors++;
 		} else if ((pa->ifbandwidth = eval_bwspec(bw, rate)) == 0)
@@ -475,10 +475,7 @@ cbq_compute_idletime(struct pfctl *pf, struct pf_altq *pa)
 		maxidle = ptime * maxidle;
 	else
 		maxidle = ptime * maxidle_s;
-	if (minburst)
-		offtime = cptime * (1.0 + 1.0/(1.0 - g) * (1.0 - gtom) / gtom);
-	else
-		offtime = cptime;
+	offtime = cptime * (1.0 + 1.0/(1.0 - g) * (1.0 - gtom) / gtom);
 	minidle = -((double)opts->maxpktsize * (double)nsPerByte);
 
 	/* scale parameters */

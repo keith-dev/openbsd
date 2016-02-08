@@ -1,4 +1,4 @@
-/*	$OpenBSD: fileio.c,v 1.68 2005/12/20 06:17:36 kjell Exp $	*/
+/*	$OpenBSD: fileio.c,v 1.77 2006/07/25 08:22:32 kjell Exp $	*/
 
 /* This file is in the public domain. */
 
@@ -8,17 +8,20 @@
 #include "def.h"
 
 
+#include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/time.h>
 #include <sys/resource.h>
 #include <sys/wait.h>
-#include "kbd.h"
-#include <limits.h>
-#include <sys/stat.h>
-#include <sys/dir.h>
-#include <string.h>
+
 #include <fcntl.h>
+#include <limits.h>
+#include <dirent.h>
+#include <pwd.h>
+#include <string.h>
 #include <unistd.h>
+
+#include "kbd.h"
 
 static FILE	*ffp;
 
@@ -110,7 +113,7 @@ ffputbuf(struct buffer *bp)
 {
 	struct line   *lp, *lpend;
 
-	lpend = bp->b_linep;
+	lpend = bp->b_headp;
 	for (lp = lforw(lpend); lp != lpend; lp = lforw(lp)) {
 		if (fwrite(ltext(lp), 1, llength(lp), ffp) != llength(lp)) {
 			ewprintf("Write I/O error");
@@ -204,7 +207,7 @@ fbackupfile(const char *fn)
 		return (FALSE);
 	}
 	while ((nread = read(from, buf, sizeof(buf))) > 0) {
-		if (write(to, buf, nread) != nread) {
+		if (write(to, buf, (size_t)nread) != nread) {
 			nread = -1;
 			break;
 		}
@@ -231,29 +234,34 @@ fbackupfile(const char *fn)
 }
 
 /*
- * The string "fn" is a file name.  Perform any required appending of directory
- * name or case adjustments.  The same file should be referred to even if the
- * working directory changes.
+ * Convert "fn" to a canonicalized absolute filename, replacing
+ * a leading ~/ with the user's home dir, following symlinks, and
+ * and remove all occurences of /./ and /../
  */
-#ifdef SYMBLINK
-#include <sys/types.h>
-#include <sys/stat.h>
-#ifndef MAXLINK
-#define MAXLINK 8		/* maximum symbolic links to follow */
-#endif
-#endif
-#include <pwd.h>
-extern char	*wdir;
-
 char *
-adjustname(const char *fn)
+adjustname(const char *fn, int slashslash)
 {
 	static char	 fnb[MAXPATHLEN];
-	const char	*cp;
+	const char	*cp, *ep = NULL;
 	char		 user[LOGIN_NAME_MAX], path[MAXPATHLEN];
 	size_t		 ulen, plen;
 
 	path[0] = '\0';
+
+	if (slashslash == TRUE) {
+		cp = fn + strlen(fn) - 1;
+		for (; cp >= fn; cp--) {
+			if (ep && (*cp == '/')) {
+				fn = ep;
+				break;
+			}
+			if (*cp == '/' || *cp == '~')
+				ep = cp;
+			else
+				ep = NULL;
+		}
+	}
+
 	/* first handle tilde expansion */
 	if (fn[0] == '~') {
 		struct passwd *pw;
@@ -351,10 +359,11 @@ nohome:
 int
 copy(char *frname, char *toname)
 {
-	int	ifd, ofd, n;
+	int	ifd, ofd;
 	char	buf[BUFSIZ];
 	mode_t	fmode = DEFFILEMODE;	/* XXX?? */
 	struct	stat orig;
+	ssize_t	sr;
 
 	if ((ifd = open(frname, O_RDONLY)) == -1)
 		return (FALSE);
@@ -368,8 +377,8 @@ copy(char *frname, char *toname)
 		close(ifd);
 		return (FALSE);
 	}
-	while ((n = read(ifd, buf, sizeof(buf))) > 0) {
-		if (write(ofd, buf, n) != n) {
+	while ((sr = read(ifd, buf, sizeof(buf))) > 0) {
+		if (write(ofd, buf, (size_t)sr) != sr) {
 			ewprintf("write error : %s", strerror(errno));
 			break;
 		}
@@ -377,7 +386,7 @@ copy(char *frname, char *toname)
 	if (fchmod(ofd, orig.st_mode) == -1)
 		ewprintf("Cannot set original mode : %s", strerror(errno));
 
-	if (n == -1) {
+	if (sr == -1) {
 		ewprintf("Read error : %s", strerror(errno));
 		close(ifd);
 		close(ofd);
@@ -403,7 +412,8 @@ struct list *
 make_file_list(char *buf)
 {
 	char		*dir, *file, *cp;
-	int		 len, preflen, ret;
+	size_t		 len, preflen;
+	int		 ret;
 	DIR		*dirp;
 	struct dirent	*dent;
 	struct list	*last, *current;
@@ -411,39 +421,42 @@ make_file_list(char *buf)
 	char		 prefixx[NFILEN + 1];
 
 	/*
-	 * We need three different strings: dir - the name of the directory
-	 * containing what the user typed. Must be a real unix file name,
-	 * e.g. no ~user, etc..  Must not end in /. prefix - the portion of
-	 * what the user typed that is before the names we are going to find
-	 * in the directory.  Must have a trailing / if the user typed it.
-	 * names from the directory. We open dir, and return prefix
+	 * We need three different strings: 
+
+	 * dir - the name of the directory containing what the user typed.
+	 *  Must be a real unix file name, e.g. no ~user, etc..
+	 *  Must not end in /.
+	 * prefix - the portion of what the user typed that is before the
+	 *  names we are going to find in the directory.  Must have a
+	 * trailing / if the user typed it.
+	 * names from the directory - We open dir, and return prefix
 	 * concatenated with names.
 	 */
 
 	/* first we get a directory name we can look up */
 	/*
 	 * Names ending in . are potentially odd, because adjustname will
-	 * treat foo/.. as a reference to another directory, whereas we are
+	 * treat foo/bar/.. as a foo/, whereas we are
 	 * interested in names starting with ..
 	 */
 	len = strlen(buf);
-	if (buf[len - 1] == '.') {
+	if (len && buf[len - 1] == '.') {
 		buf[len - 1] = 'x';
-		dir = adjustname(buf);
+		dir = adjustname(buf, TRUE);
 		buf[len - 1] = '.';
 	} else
-		dir = adjustname(buf);
+		dir = adjustname(buf, TRUE);
 	if (dir == NULL)
 		return (NULL);
 	/*
 	 * If the user typed a trailing / or the empty string
 	 * he wants us to use his file spec as a directory name.
 	 */
-	if (buf[0] && buf[strlen(buf) - 1] != '/') {
+	if (len && buf[len - 1] != '/') {
 		file = strrchr(dir, '/');
 		if (file) {
-			*file = 0;
-			if (*dir == 0)
+			*file = '\0';
+			if (*dir == '\0')
 				dir = "/";
 		} else
 			return (NULL);
@@ -467,7 +480,7 @@ make_file_list(char *buf)
 	 * SV files are fairly short.  For BSD, something more general would
 	 * be required.
 	 */
-	if ((preflen + MAXNAMLEN) > NFILEN)
+	if (preflen > NFILEN - MAXNAMLEN)
 		return (NULL);
 
 	/* loop over the specified directory, making up the list of files */

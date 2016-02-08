@@ -1,4 +1,4 @@
-/*	$OpenBSD: main.c,v 1.59 2005/09/21 22:31:47 fgsch Exp $	*/
+/*	$OpenBSD: main.c,v 1.61 2006/05/16 16:20:42 deraadt Exp $	*/
 /*	$NetBSD: main.c,v 1.24 1997/08/18 10:20:26 lukem Exp $	*/
 
 /*
@@ -60,13 +60,13 @@
  */
 
 #ifndef lint
-static char copyright[] =
+static const char copyright[] =
 "@(#) Copyright (c) 1985, 1989, 1993, 1994\n\
 	The Regents of the University of California.  All rights reserved.\n";
 #endif /* not lint */
 
 #if !defined(lint) && !defined(SMALL)
-static char rcsid[] = "$OpenBSD: main.c,v 1.59 2005/09/21 22:31:47 fgsch Exp $";
+static const char rcsid[] = "$OpenBSD: main.c,v 1.61 2006/05/16 16:20:42 deraadt Exp $";
 #endif /* not lint and not SMALL */
 
 /*
@@ -100,6 +100,9 @@ main(volatile int argc, char *argv[])
 
 	ftpport = "ftp";
 	httpport = "http";
+#ifndef SMALL
+	httpsport = "https";
+#endif
 	gateport = getenv("FTPSERVERPORT");
 	if (gateport == NULL || *gateport == '\0')
 		gateport = "ftpgate";
@@ -730,7 +733,14 @@ usage(void)
 	    "usage: %s [-46AadEegimnptVv] [-P port] [-r seconds] [host [port]]\n"
 	    "       %s [-o output] ftp://[user:password@]host[:port]/file[/]\n"
 	    "       %s [-o output] http://host[:port]/file\n"
+#ifndef SMALL
+	    "       %s [-o output] https://host[:port]/file\n"
+#endif
 	    "       %s [-o output] host:[/path/]file[/]\n",
+#ifndef SMALL
+	    __progname, __progname, __progname, __progname, __progname);
+#else
 	    __progname, __progname, __progname, __progname);
+#endif
 	exit(1);
 }

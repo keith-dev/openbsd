@@ -1,4 +1,4 @@
-/*	$OpenBSD: rcs.h,v 1.46 2006/02/09 08:08:56 niallo Exp $	*/
+/*	$OpenBSD: rcs.h,v 1.69 2006/06/09 14:57:13 xsa Exp $	*/
 /*
  * Copyright (c) 2004 Jean-Francois Brousseau <jfb@openbsd.org>
  * All rights reserved.
@@ -40,6 +40,9 @@
 #define RCS_HEAD_INIT		"1.1"
 #define RCS_HEAD_REV		((RCSNUM *)(-1))
 
+#define RCS_CONFLICT_MARKER1	"<<<<<<< "
+#define RCS_CONFLICT_MARKER2	">>>>>>> "
+#define RCS_CONFLICT_MARKER3	"=======\n"
 
 #define RCS_SYM_INVALCHAR	"$,.:;@"
 
@@ -86,7 +89,7 @@
 
 #define RCS_KWEXP_INVAL(k) \
 	((k & RCS_KWEXP_ERR) || \
-	((k & RCS_KWEXP_OLD) && (RCS_KWEXP_OLD & ~RCS_KWEXP_OLD)))
+	((k & RCS_KWEXP_OLD) && (k & ~RCS_KWEXP_OLD)))
 
 
 struct rcs_kw {
@@ -100,7 +103,8 @@ struct rcs_kw {
 #define RCSNUM_MAXLEN	64
 
 #define RCSNUM_ISBRANCH(n)	((n)->rn_len % 2)
-
+#define RCSNUM_ISBRANCHREV(n)	(!((n)->rn_len % 2) && ((n)->rn_len >= 4))
+#define RCSNUM_NO_MAGIC		(1<<0)
 
 /* file flags */
 #define RCS_READ	  (1<<0)
@@ -121,6 +125,7 @@ struct rcs_kw {
 
 /* delta flags */
 #define RCS_RD_DEAD	0x01	/* dead */
+#define RCS_RD_SELECT	0x02	/* select for operation */
 
 /* RCS error codes */
 #define RCS_ERR_NOERR	0
@@ -131,7 +136,7 @@ struct rcs_kw {
 #define RCS_ERR_PARSE	5
 #define RCS_ERR_ERRNO	255
 
-/* used for cvs_checkout_rev */
+/* used for rcs_checkout_rev */
 #define CHECKOUT_REV_CREATED	1
 #define CHECKOUT_REV_MERGED	2
 #define CHECKOUT_REV_REMOVED	3
@@ -168,10 +173,7 @@ struct rcs_branch {
 	TAILQ_ENTRY(rcs_branch)	rb_list;
 };
 
-struct rcs_dlist {
-	struct rcs_delta	*tqh_first;
-	struct rcs_delta	**tqh_last;
-};
+TAILQ_HEAD(rcs_dlist, rcs_delta);
 
 struct rcs_delta {
 	RCSNUM		*rd_num;
@@ -185,13 +187,15 @@ struct rcs_delta {
 	u_char		*rd_text;
 	size_t		 rd_tlen;
 
-	struct rcs_dlist		rd_snodes;
 	TAILQ_HEAD(, rcs_branch)	rd_branches;
 	TAILQ_ENTRY(rcs_delta)		rd_list;
 };
 
 
 typedef struct rcs_file {
+	int	fd;
+	int	 rf_dead;
+	int	 rf_inattic;
 	char	*rf_path;
 	mode_t	 rf_mode;
 	u_int	 rf_flags;
@@ -211,13 +215,11 @@ typedef struct rcs_file {
 	void	*rf_pdata;
 } RCSFILE;
 
-
 extern int rcs_errno;
 
-
-RCSFILE			*rcs_open(const char *, int, ...);
+RCSFILE			*rcs_open(const char *, int, int, ...);
 void			 rcs_close(RCSFILE *);
-const RCSNUM		*rcs_head_get(RCSFILE *);
+RCSNUM			*rcs_head_get(RCSFILE *);
 int			 rcs_head_set(RCSFILE *, RCSNUM *);
 const RCSNUM		*rcs_branch_get(RCSFILE *);
 int			 rcs_branch_set(RCSFILE *, const RCSNUM *);
@@ -226,9 +228,11 @@ int			 rcs_access_remove(RCSFILE *, const char *);
 int			 rcs_access_check(RCSFILE *, const char *);
 struct rcs_delta	*rcs_findrev(RCSFILE *, RCSNUM *);
 int			 rcs_sym_add(RCSFILE *, const char *, RCSNUM *);
+int			 rcs_sym_check(const char *);
+struct rcs_sym		*rcs_sym_get(RCSFILE *, const char *);
 int			 rcs_sym_remove(RCSFILE *, const char *);
 RCSNUM			*rcs_sym_getrev(RCSFILE *, const char *);
-int			 rcs_sym_check(const char *);
+RCSNUM			*rcs_translate_tag(const char *, RCSFILE *);
 int			 rcs_lock_getmode(RCSFILE *);
 int			 rcs_lock_setmode(RCSFILE *, int);
 int			 rcs_lock_add(RCSFILE *, const char *, RCSNUM *);
@@ -236,11 +240,12 @@ int			 rcs_lock_remove(RCSFILE *, const char *, RCSNUM *);
 BUF			*rcs_getrev(RCSFILE *, RCSNUM *);
 int			 rcs_deltatext_set(RCSFILE *, RCSNUM *, const char *);
 const char		*rcs_desc_get(RCSFILE *);
-int			 rcs_desc_set(RCSFILE *, const char *);
+void			 rcs_desc_set(RCSFILE *, const char *);
 const char		*rcs_comment_lookup(const char *);
 const char		*rcs_comment_get(RCSFILE *);
-int			 rcs_comment_set(RCSFILE *, const char *);
-int			 rcs_kwexp_set(RCSFILE *, int);
+void			 rcs_comment_set(RCSFILE *, const char *);
+BUF			*rcs_kwexp_buf(BUF *, RCSFILE *, RCSNUM *);
+void			 rcs_kwexp_set(RCSFILE *, int);
 int			 rcs_kwexp_get(RCSFILE *);
 int			 rcs_rev_add(RCSFILE *, RCSNUM *, const char *, time_t,
 			     const char *);
@@ -252,7 +257,7 @@ const char		*rcs_state_get(RCSFILE *, RCSNUM *);
 int			 rcs_state_check(const char *);
 RCSNUM			*rcs_tag_resolve(RCSFILE *, const char *);
 const char		*rcs_errstr(int);
-
+void			 rcs_write(RCSFILE *);
 
 int	rcs_kflag_get(const char *);
 void	rcs_kflag_usage(void);
@@ -267,7 +272,13 @@ RCSNUM	*rcsnum_dec(RCSNUM *);
 void	 rcsnum_free(RCSNUM *);
 int	 rcsnum_aton(const char *, char **, RCSNUM *);
 char	*rcsnum_tostr(const RCSNUM *, char *, size_t);
-int	 rcsnum_cpy(const RCSNUM *, RCSNUM *, u_int);
-int	 rcsnum_cmp(const RCSNUM *, const RCSNUM *, u_int);
+void	 rcsnum_cpy(const RCSNUM *, RCSNUM *, u_int);
+int	 rcsnum_cmp(RCSNUM *, RCSNUM *, u_int);
+int	 rcsnum_differ(RCSNUM *, RCSNUM *);
+
+/* rcstime.c */
+void	 rcs_set_tz(char *, struct rcs_delta *, struct tm *);
+extern char *timezone_flag;
+extern int rcsnum_flags;
 
 #endif	/* RCS_H */

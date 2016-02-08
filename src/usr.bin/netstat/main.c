@@ -1,4 +1,4 @@
-/*	$OpenBSD: main.c,v 1.61 2005/07/04 01:54:10 djm Exp $	*/
+/*	$OpenBSD: main.c,v 1.63 2006/08/29 21:51:13 claudio Exp $	*/
 /*	$NetBSD: main.c,v 1.9 1996/05/07 02:55:02 thorpej Exp $	*/
 
 /*
@@ -40,7 +40,7 @@ char copyright[] =
 #if 0
 static char sccsid[] = "from: @(#)main.c	8.4 (Berkeley) 3/1/94";
 #else
-static char *rcsid = "$OpenBSD: main.c,v 1.61 2005/07/04 01:54:10 djm Exp $";
+static char *rcsid = "$OpenBSD: main.c,v 1.63 2006/08/29 21:51:13 claudio Exp $";
 #endif
 #endif /* not lint */
 
@@ -152,6 +152,12 @@ struct nlist nl[] = {
 	{ "_pfsyncstats" },
 #define N_PIMSTAT	42
 	{ "_pimstat" },
+#define N_AF2RTAFIDX	43
+	{ "_af2rtafidx" },
+#define N_RTBLIDMAX	44
+	{ "_rtbl_id_max" },
+#define N_RTMASK	45
+	{ "_mask_rnhead" },
 	{ ""}
 };
 
@@ -290,6 +296,8 @@ main(int argc, char *argv[])
 				af = PF_KEY;
 			else if (strcmp(optarg, "atalk") == 0)
 				af = AF_APPLETALK;
+			else if (strcmp(optarg, "mask") == 0)
+				af = 0xff;
 			else {
 				(void)fprintf(stderr,
 				    "%s: %s: unknown address family\n",
@@ -396,7 +404,16 @@ main(int argc, char *argv[])
 	if (nlistf != NULL || memf != NULL || Pflag)
 		if (setresgid(gid, gid, gid) == -1)
 			err(1, "setresgid");
-
+	if (nlistf == NULL && memf == NULL && rflag && !Aflag) {
+		/* printing the routing table no longer needs kvm */
+		if (setresgid(gid, gid, gid) == -1)
+			err(1, "setresgid");
+		if (sflag)
+			rt_stats(1, 0);
+		else
+			p_rttables(af);
+		exit(0);
+	}
 	if ((kvmd = kvm_openfiles(nlistf, memf, NULL, O_RDONLY,
 	    buf)) == NULL) {
 		fprintf(stderr, "%s: kvm_open: %s\n", __progname, buf);
@@ -466,9 +483,10 @@ main(int argc, char *argv[])
 	}
 	if (rflag) {
 		if (sflag)
-			rt_stats(nl[N_RTSTAT].n_value);
+			rt_stats(0, nl[N_RTSTAT].n_value);
 		else
-			routepr(nl[N_RTREE].n_value);
+			routepr(nl[N_RTREE].n_value, nl[N_RTMASK].n_value,
+			    nl[N_AF2RTAFIDX].n_value, nl[N_RTBLIDMAX].n_value);
 		exit(0);
 	}
 	if (gflag) {

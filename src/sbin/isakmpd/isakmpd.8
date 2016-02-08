@@ -1,4 +1,4 @@
-.\" $OpenBSD: isakmpd.8,v 1.83 2005/09/23 14:45:25 hshoexer Exp $
+.\" $OpenBSD: isakmpd.8,v 1.93 2006/09/09 07:52:04 jmc Exp $
 .\" $EOM: isakmpd.8,v 1.23 2000/05/02 00:30:23 niklas Exp $
 .\"
 .\" Copyright (c) 1998, 1999, 2000, 2001 Niklas Hallqvist.
@@ -30,7 +30,7 @@
 .\"
 .\" Manual page, using -mandoc macros
 .\"
-.Dd August 07, 2002
+.Dd September 9, 2006
 .Dt ISAKMPD 8
 .Os
 .Sh NAME
@@ -39,7 +39,7 @@
 .Sh SYNOPSIS
 .Nm isakmpd
 .Bk -words
-.Op Fl 46adKLnTv
+.Op Fl 46adKLnSTv
 .Op Fl c Ar config-file
 .Xo
 .Oo Fl D
@@ -60,6 +60,13 @@ and/or authenticated network traffic.
 At this moment, and probably forever, this means
 .Xr ipsec 4
 traffic.
+Traditionally,
+.Nm
+was configured using the
+.Xr isakmpd.conf 5
+file format.
+A newer, much simpler format is now available:
+.Xr ipsec.conf 5 .
 .Pp
 The way
 .Nm
@@ -76,11 +83,6 @@ socket, and lastly by scheduled events triggered by timers running out.
 Most uses of
 .Nm
 will be to implement so called "virtual private networks" (VPNs).
-The
-.Xr vpn 8
-manual page describes how to set up
-.Nm
-for a simple VPN.
 For other uses, some more knowledge of IKE as a protocol is required.
 One source of information are the RFCs mentioned below.
 .Pp
@@ -112,7 +114,7 @@ If given,
 .Nm
 does not set up flows automatically.
 This is useful when flows are configured with
-.Xr ipsecadm 8
+.Xr ipsecctl 8
 or by other programs like
 .Xr bgpd 8 .
 Thus
@@ -129,6 +131,12 @@ only by the user running the daemon.
 will reread the configuration file when sent a
 .Dv SIGHUP
 signal.
+.Pp
+Note that this option applies only to configuration files in the
+.Xr isakmpd.conf 5
+format, not those in the
+.Xr ipsec.conf 5
+format.
 .It Fl D Ar class Ns = Ns Ar level
 Debugging class.
 It's possible to specify this argument many times.
@@ -217,7 +225,7 @@ does not read the policy configuration file and no
 policy check is accomplished.
 This option can be used when policies for flows and SA establishment are
 arranged by other programs like
-.Xr ipsecadm 8
+.Xr ipsecctl 8
 or
 .Xr bgpd 8 .
 .It Fl L
@@ -234,6 +242,9 @@ and other utilities using
 As option
 .Fl L
 above, but capture to a specified file.
+Note that only paths beginning with
+.Pa /var/run
+are allowed.
 .It Fl N Ar udpencap-port
 The
 .Fl N
@@ -263,6 +274,10 @@ flag.
 Note that only paths beginning with
 .Pa /var/run
 are allowed.
+.It Fl S
+When this option is given,
+.Nm
+will not delete SAs on shutdown by sending delete messages to all peers.
 .It Fl T
 When this option is given, NAT-Traversal will be disabled and
 .Nm
@@ -483,9 +498,6 @@ A number of methods exist to allow authentication:
 .Bl -ohang -offset indent
 .It Passphrase:
 This method does not use keys at all, but relies on a shared passphrase.
-See
-.Xr vpn 8
-for an example implementation.
 .It Host Keys:
 Public keys are used to authenticate.
 See
@@ -628,17 +640,12 @@ them as below.
 A
 .Em subjectAltName
 extension field should be added to the certificate.
-This field is not mandatory, but is highly recommended since it allows
-.Nm
-to avoid
-.Dq man in the middle
-attacks.
 Replace 10.0.0.1 with the IP address which
 .Nm
 will use as the certificate identity.
 .Bd -literal -offset indent
-# setenv CERTIP 10.0.0.1
-# openssl x509 -req -days 365 -in 10.0.0.1.csr \e
+# env CERTIP=10.0.0.1 openssl x509 -req \e
+	-days 365 -in 10.0.0.1.csr \e
 	-CA /etc/ssl/ca.crt -CAkey /etc/ssl/private/ca.key \e
 	-CAcreateserial -extfile /etc/ssl/x509v3.cnf \e
 	-extensions x509v3_IPAddr -out 10.0.0.1.crt
@@ -646,12 +653,23 @@ will use as the certificate identity.
 .Pp
 For a FQDN certificate, do:
 .Bd -literal -offset indent
-# setenv CERTFQDN somehost.somedomain
-# openssl x509 -req -days 365 -in somehost.somedomain.csr \e
+# env CERTFQDN=somehost.somedomain openssl x509 -req \e
+	-days 365 -in somehost.somedomain.csr \e
 	-CA /etc/ssl/ca.crt -CAkey /etc/ssl/private/ca.key \e
 	-CAcreateserial -extfile /etc/ssl/x509v3.cnf \e
 	-extensions x509v3_FQDN -out somehost.somedomain.crt
 .Ed
+.Pp
+If CERTFQDN is being used,
+make sure that the
+.Va subjectAltName
+field of the certificate is specified using
+.Ic srcid
+in
+.Xr ipsec.conf 5 .
+A similar setup will be required if
+.Xr isakmpd.conf 5
+is being used instead.
 .Pp
 Put the certificate (the file ending in .crt) in
 .Pa /etc/isakmpd/certs/
@@ -750,11 +768,11 @@ command is issued in the command FIFO.
 .Xr getnameinfo 3 ,
 .Xr pcap 3 ,
 .Xr ipsec 4 ,
+.Xr ipsec.conf 5 ,
 .Xr isakmpd.conf 5 ,
 .Xr isakmpd.policy 5 ,
 .Xr ssl 8 ,
-.Xr tcpdump 8 ,
-.Xr vpn 8
+.Xr tcpdump 8
 .Sh HISTORY
 The ISAKMP/Oakley key management protocol is described in
 RFC 2407, RFC 2408, and RFC 2409.

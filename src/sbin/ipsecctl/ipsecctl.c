@@ -1,4 +1,4 @@
-/*	$OpenBSD: ipsecctl.c,v 1.42 2006/02/01 12:38:47 hshoexer Exp $	*/
+/*	$OpenBSD: ipsecctl.c,v 1.59 2006/08/31 19:01:16 ho Exp $	*/
 /*
  * Copyright (c) 2004, 2005 Hans-Joerg Hoexer <hshoexer@openbsd.org>
  *
@@ -35,6 +35,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <netdb.h>
 
 #include "ipsecctl.h"
 #include "pfkey.h"
@@ -43,16 +44,19 @@ int		 ipsecctl_rules(char *, int);
 FILE		*ipsecctl_fopen(const char *, const char *);
 int		 ipsecctl_commit(int, struct ipsecctl *);
 int		 ipsecctl_add_rule(struct ipsecctl *, struct ipsec_rule *);
+void		 ipsecctl_free_rule(struct ipsec_rule *);
 void		 ipsecctl_print_addr(struct ipsec_addr_wrap *);
+void		 ipsecctl_print_proto(u_int8_t);
+void		 ipsecctl_print_port(u_int16_t, const char *);
 void		 ipsecctl_print_key(struct ipsec_key *);
 void		 ipsecctl_print_flow(struct ipsec_rule *, int);
 void		 ipsecctl_print_sa(struct ipsec_rule *, int);
-void		 ipsecctl_print_rule(struct ipsec_rule *, int);
 int		 ipsecctl_flush(int);
 void		 ipsecctl_get_rules(struct ipsecctl *);
 void		 ipsecctl_print_title(char *);
 void		 ipsecctl_show_flows(int);
 void		 ipsecctl_show_sas(int);
+int		 ipsecctl_monitor(int);
 void		 usage(void);
 const char	*ipsecctl_lookup_option(char *, const char **);
 static int	 unmask(struct ipsec_addr *, sa_family_t);
@@ -69,7 +73,7 @@ static const char *showopt_list[] = {
 static const char *direction[] = {"?", "in", "out"};
 static const char *flowtype[] = {"?", "use", "acquire", "require", "deny",
     "bypass", "dontacq"};
-static const char *proto[] = {"?", "esp", "ah", "ipcomp", "tcpmd5", "ipip"};
+static const char *satype[] = {"?", "esp", "ah", "ipcomp", "tcpmd5", "ipip"};
 static const char *tmode[] = {"?", "transport", "tunnel"};
 static const char *auth[] = {"?", "psk", "rsa"};
 
@@ -83,6 +87,7 @@ ipsecctl_rules(char *filename, int opts)
 	bzero(&ipsec, sizeof(ipsec));
 	ipsec.opts = opts;
 	TAILQ_INIT(&ipsec.rule_queue);
+	TAILQ_INIT(&ipsec.group_queue);
 
 	if (strcmp(filename, "-") == 0) {
 		fin = stdin;
@@ -105,8 +110,7 @@ ipsecctl_rules(char *filename, int opts)
 			action = ACTION_ADD;
 
 		if ((opts & IPSECCTL_OPT_NOACTION) == 0)
-			if (ipsecctl_commit(action, &ipsec))
-				err(1, NULL);
+			error = ipsecctl_commit(action, &ipsec);
 	}
 
 	if (fin != stdin) {
@@ -141,74 +145,102 @@ ipsecctl_fopen(const char *name, const char *mode)
 int
 ipsecctl_commit(int action, struct ipsecctl *ipsec)
 {
-	struct ipsec_rule *rp;
+	struct ipsec_rule	*rp;
+	int			 ret = 0;
 
 	if (pfkey_init() == -1)
 		errx(1, "ipsecctl_commit: failed to open PF_KEY socket");
 
 	while ((rp = TAILQ_FIRST(&ipsec->rule_queue))) {
-		TAILQ_REMOVE(&ipsec->rule_queue, rp, entries);
+		TAILQ_REMOVE(&ipsec->rule_queue, rp, rule_entry);
 
 		if (rp->type & RULE_IKE) {
-			if (ike_ipsec_establish(action, rp) == -1)
+			if (ike_ipsec_establish(action, rp) == -1) {
 				warnx("failed to %s rule %d",
 				    action == ACTION_DELETE ? "delete" : "add",
 				    rp->nr);
+				ret = 2;
+			}
 		} else {
-			if (pfkey_ipsec_establish(action, rp) == -1)
+			if (pfkey_ipsec_establish(action, rp) == -1) {
 				warnx("failed to %s rule %d",
 				    action == ACTION_DELETE ? "delete" : "add",
 				    rp->nr);
+				ret = 2;
+			}
 		}
-
-		/* src and dst are always used. */
-		free(rp->src->name);
-		free(rp->src);
-		free(rp->dst->name);
-		free(rp->dst);
-
-		if (rp->peer) {
-			free(rp->peer->name);
-			free(rp->peer);
-		}
-		if (rp->auth) {
-			if (rp->auth->srcid)
-				free(rp->auth->srcid);
-			if (rp->auth->dstid)
-				free(rp->auth->dstid);
-			free(rp->auth);
-		}
-		if (rp->ikeauth) {
-			if (rp->ikeauth->string)
-				free(rp->ikeauth->string);
-			free(rp->ikeauth);
-		}
-		if (rp->xfs)
-			free(rp->xfs);
-		if (rp->authkey) {
-			free(rp->authkey->data);
-			free(rp->authkey);
-		}
-		if (rp->enckey) {
-			free(rp->enckey->data);
-			free(rp->enckey);
-		}
-		free(rp);
+		ipsecctl_free_rule(rp);
 	}
 
-	return (0);
+	return (ret);
 }
 
 int
 ipsecctl_add_rule(struct ipsecctl *ipsec, struct ipsec_rule *r)
 {
-	TAILQ_INSERT_TAIL(&ipsec->rule_queue, r, entries);
+	TAILQ_INSERT_TAIL(&ipsec->rule_queue, r, rule_entry);
 
 	if ((ipsec->opts & IPSECCTL_OPT_VERBOSE) && !(ipsec->opts &
 	    IPSECCTL_OPT_SHOW))
 		ipsecctl_print_rule(r, ipsec->opts);
 
 	return (0);
+}
+
+void
+ipsecctl_free_rule(struct ipsec_rule *rp)
+{
+	if (rp->src) {
+		free(rp->src->name);
+		free(rp->src);
+	}
+	if (rp->dst) {
+		free(rp->dst->name);
+		free(rp->dst);
+	}
+	if (rp->dst2) {
+		free(rp->dst2->name);
+		free(rp->dst2);
+	}
+	if (rp->local) {
+		free(rp->local->name);
+		free(rp->local);
+	}
+	if (rp->peer) {
+		free(rp->peer->name);
+		free(rp->peer);
+	}
+	if (rp->auth) {
+		if (rp->auth->srcid)
+			free(rp->auth->srcid);
+		if (rp->auth->dstid)
+			free(rp->auth->dstid);
+		free(rp->auth);
+	}
+	if (rp->ikeauth) {
+		if (rp->ikeauth->string)
+			free(rp->ikeauth->string);
+		free(rp->ikeauth);
+	}
+	if (rp->xfs)
+		free(rp->xfs);
+	if (rp->mmxfs)
+		free(rp->mmxfs);
+	if (rp->qmxfs)
+		free(rp->qmxfs);
+	if (rp->mmlife)
+		free(rp->mmlife);
+	if (rp->qmlife)
+		free(rp->qmlife);
+	if (rp->authkey) {
+		free(rp->authkey->data);
+		free(rp->authkey);
+	}
+	if (rp->enckey) {
+		free(rp->enckey->data);
+		free(rp->enckey);
+	}
+	free(rp);
 }
 
 void
@@ -232,6 +264,28 @@ ipsecctl_print_addr(struct ipsec_addr_wrap *ipa)
 }
 
 void
+ipsecctl_print_proto(u_int8_t proto)
+{
+	struct protoent *p;
+
+	if ((p = getprotobynumber(proto)) != NULL)
+		printf("%s", p->p_name);
+	else
+		printf("%u", proto);
+}
+
+void
+ipsecctl_print_port(u_int16_t port, const char *proto)
+{
+	struct servent *s;
+
+	if ((s = getservbyport(port, proto)) != NULL)
+		printf("%s", s->s_name);
+	else
+		printf("%u", ntohs(port));
+}
+
+void
 ipsecctl_print_key(struct ipsec_key *key)
 {
 	int	i;
@@ -243,28 +297,43 @@ ipsecctl_print_key(struct ipsec_key *key)
 void
 ipsecctl_print_flow(struct ipsec_rule *r, int opts)
 {
-	printf("flow %s %s", proto[r->proto], direction[r->direction]);
+	printf("flow %s %s", satype[r->satype], direction[r->direction]);
 
+	if (r->proto) {
+		printf(" proto ");
+		ipsecctl_print_proto(r->proto);
+	}
 	printf(" from ");
 	ipsecctl_print_addr(r->src);
+	if (r->sport) {
+		printf(" port ");
+		ipsecctl_print_port(r->sport,
+		    r->proto == IPPROTO_TCP ? "tcp" : "udp");
+	}
 	printf(" to ");
 	ipsecctl_print_addr(r->dst);
+	if (r->dport) {
+		printf(" port ");
+		ipsecctl_print_port(r->dport,
+		    r->proto == IPPROTO_TCP ? "tcp" : "udp");
+	}
+	if (r->local) {
+		printf(" local ");
+		ipsecctl_print_addr(r->local);
+	}
 	if (r->peer) {
 		printf(" peer ");
 		ipsecctl_print_addr(r->peer);
 	}
-
-	if (opts & IPSECCTL_OPT_VERBOSE) {
-		if (r->auth) {
-			if (r->auth->srcid)
-				printf("\n\tsrcid %s", r->auth->srcid);
-			if (r->auth->dstid)
-				printf("\n\tdstid %s", r->auth->dstid);
-			if (r->auth->type > 0)
-				printf("\n\t%s", auth[r->auth->type]);
-		}
-		printf("\n\ttype %s", flowtype[r->flowtype]);
+	if (r->auth) {
+		if (r->auth->srcid)
+			printf(" srcid %s", r->auth->srcid);
+		if (r->auth->dstid)
+			printf(" dstid %s", r->auth->dstid);
+		if (r->auth->type > 0)
+			printf(" %s", auth[r->auth->type]);
 	}
+	printf(" type %s", flowtype[r->flowtype]);
 	printf("\n");
 }
 
@@ -272,9 +341,9 @@ ipsecctl_print_flow(struct ipsec_rule *r, int opts)
 void
 ipsecctl_print_sa(struct ipsec_rule *r, int opts)
 {
-	printf("%s ", proto[r->proto]);
+	printf("%s ", satype[r->satype]);
 	/* tunnel/transport is only meaningful esp/ah/ipcomp */
-	if (r->proto != IPSEC_TCPMD5 && r->proto != IPSEC_IPIP)
+	if (r->satype != IPSEC_TCPMD5 && r->satype != IPSEC_IPIP)
 		printf("%s ", tmode[r->tmode]);
 	printf("from ");
 	ipsecctl_print_addr(r->src);
@@ -282,7 +351,7 @@ ipsecctl_print_sa(struct ipsec_rule *r, int opts)
 	ipsecctl_print_addr(r->dst);
 	printf(" spi 0x%08x", r->spi);
 
-	if (r->proto != IPSEC_TCPMD5) {
+	if (r->satype != IPSEC_TCPMD5) {
 		if (r->xfs && r->xfs->authxf)
 			printf(" auth %s", r->xfs->authxf->name);
 		if (r->xfs && r->xfs->encxf)
@@ -291,18 +360,18 @@ ipsecctl_print_sa(struct ipsec_rule *r, int opts)
 			printf(" comp %s", r->xfs->compxf->name);
 	}
 	if (r->authkey) {
-		if (r->proto == IPSEC_TCPMD5)
+		if (r->satype == IPSEC_TCPMD5)
 			printf(" ");
 		else
-			printf("\n\t");
+			printf(" \\\n\t");
 		printf("authkey 0x");
 		ipsecctl_print_key(r->authkey);
 	}
 	if (r->enckey) {
-		if (r->proto == IPSEC_TCPMD5)
+		if (r->satype == IPSEC_TCPMD5)
 			printf(" ");
 		else
-			printf("\n\t");
+			printf(" \\\n\t");
 		printf("enckey 0x");
 		ipsecctl_print_key(r->enckey);
 	}
@@ -370,7 +439,7 @@ ipsecctl_get_rules(struct ipsecctl *ipsec)
 
 		rule = calloc(1, sizeof(struct ipsec_rule));
 		if (rule == NULL)
-			err(1, "ipsecctl_get_rules: malloc");
+			err(1, "ipsecctl_get_rules: calloc");
 		rule->nr = ipsec->rule_nr++;
 		rule->type |= RULE_FLOW;
 
@@ -415,7 +484,7 @@ ipsecctl_show_flows(int opts)
 	}
 
 	while ((rp = TAILQ_FIRST(&ipsec.rule_queue))) {
-		TAILQ_REMOVE(&ipsec.rule_queue, rp, entries);
+		TAILQ_REMOVE(&ipsec.rule_queue, rp, rule_entry);
 
 		ipsecctl_print_rule(rp, ipsec.opts);
 
@@ -423,6 +492,10 @@ ipsecctl_show_flows(int opts)
 		free(rp->src);
 		free(rp->dst->name);
 		free(rp->dst);
+		if (rp->local) {
+			free(rp->local->name);
+			free(rp->local);
+		}
 		if (rp->peer) {
 			free(rp->peer->name);
 			free(rp->peer);
@@ -453,9 +526,9 @@ ipsecctl_show_sas(int opts)
 	mib[4] = SADB_SATYPE_UNSPEC;
 
 	if (opts & IPSECCTL_OPT_SHOWALL)
-		ipsecctl_print_title("SADB:");
+		ipsecctl_print_title("SAD:");
 
-	/* When the SADB is empty we get ENOENT, no need to err(). */
+	/* When the SAD is empty we get ENOENT, no need to err(). */
 	if (sysctl(mib, 5, NULL, &need, NULL, 0) == -1 && errno != ENOENT)
 		err(1, "ipsecctl_show_sas: sysctl");
 	if (need == 0) {
@@ -479,13 +552,19 @@ ipsecctl_show_sas(int opts)
 	free(buf);
 }
 
+int
+ipsecctl_monitor(int opts)
+{
+	return (pfkey_monitor(opts));
+}
+
 __dead void
 usage(void)
 {
 	extern char	*__progname;
 
-	fprintf(stderr, "usage: %s [-dFnv] [-f file] [-s modifier]\n",
-	    __progname);
+	fprintf(stderr, "usage: %s [-dFmnv] [-D macro=value] [-f file]"
+	    " [-s modifier]\n", __progname);
 	exit(1);
 }
 
@@ -510,8 +589,13 @@ main(int argc, char *argv[])
 	if (argc < 2)
 		usage();
 
-	while ((ch = getopt(argc, argv, "df:Fnvs:")) != -1) {
+	while ((ch = getopt(argc, argv, "D:df:Fmnvs:")) != -1) {
 		switch (ch) {
+		case 'D':
+			if (cmdline_symset(optarg) < 0)
+				warnx("could not parse macro definition %s",
+				    optarg);
+			break;
 		case 'd':
 			opts |= IPSECCTL_OPT_DELETE;
 			break;
@@ -521,6 +605,10 @@ main(int argc, char *argv[])
 
 		case 'F':
 			opts |= IPSECCTL_OPT_FLUSH;
+			break;
+
+		case 'm':
+			opts |= IPSECCTL_OPT_MONITOR;
 			break;
 
 		case 'n':
@@ -576,6 +664,10 @@ main(int argc, char *argv[])
 			ipsecctl_show_sas(opts);
 		}
 	}
+
+	if (opts & IPSECCTL_OPT_MONITOR)
+		if (ipsecctl_monitor(opts))
+			error = 1;
 
 	exit(error);
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: echo.c,v 1.43 2005/12/20 06:17:36 kjell Exp $	*/
+/*	$OpenBSD: echo.c,v 1.46 2006/04/02 17:18:58 kjell Exp $	*/
 
 /* This file is in the public domain. */
 
@@ -63,9 +63,9 @@ eyorn(const char *sp)
 	ewprintf("%s? (y or n) ", sp);
 	for (;;) {
 		s = getkey(FALSE);
-		if (s == 'y' || s == 'Y')
+		if (s == 'y' || s == 'Y' || s == ' ')
 			return (TRUE);
-		if (s == 'n' || s == 'N')
+		if (s == 'n' || s == 'N' || s == CCHR('M'))
 			return (FALSE);
 		if (s == CCHR('G'))
 			return (ctrlg(FFRAND, 1));
@@ -420,6 +420,7 @@ veread(const char *fp, char *buf, size_t nbuf, int flag, va_list ap)
 					ttputc('\b');
 					--ttcol;
 				}
+				epos--;
 			}
 			while ((cpos > 0) && ISWORD(buf[cpos - 1])) {
 				ttputc('\b');
@@ -432,6 +433,7 @@ veread(const char *fp, char *buf, size_t nbuf, int flag, va_list ap)
 					ttputc('\b');
 					--ttcol;
 				}
+				epos--;
 			}
 			ttflush();
 			break;
@@ -937,7 +939,7 @@ copy_list(struct list *lp)
 
 	last = NULL;
 	while (lp) {
-		current = (struct list *)malloc(sizeof(struct list));
+		current = malloc(sizeof(struct list));
 		if (current == NULL) {
 			/* Free what we have allocated so far */
 			for (current = last; current; current = nxt) {

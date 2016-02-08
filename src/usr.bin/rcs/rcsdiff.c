@@ -1,4 +1,4 @@
-/*	$OpenBSD: rcsdiff.c,v 1.30 2006/01/05 10:28:24 xsa Exp $	*/
+/*	$OpenBSD: rcsdiff.c,v 1.68 2006/07/31 06:51:55 ray Exp $	*/
 /*
  * Copyright (c) 2005 Joris Vink <joris@openbsd.org>
  * All rights reserved.
@@ -30,73 +30,78 @@
 #include "diff.h"
 
 static int rcsdiff_file(RCSFILE *, RCSNUM *, const char *);
-static int rcsdiff_rev(RCSFILE *, RCSNUM *, RCSNUM *, const char *);
+static int rcsdiff_rev(RCSFILE *, RCSNUM *, RCSNUM *);
 
+static int flags = 0;
 static int kflag = RCS_KWEXP_ERR;
 
 int
 rcsdiff_main(int argc, char **argv)
 {
-	int i, ch, status;
-	RCSNUM *rev, *rev2, *frev;
+	int fd, i, ch, status;
+	RCSNUM *rev1, *rev2;
 	RCSFILE *file;
-	char fpath[MAXPATHLEN];
+	char fpath[MAXPATHLEN], *rev_str1, *rev_str2;
 
-	rev = RCS_HEAD_REV;
-	rev2 = NULL;
-	status = 0;
+	rev1 = rev2 = NULL;
+	rev_str1 = rev_str2 = NULL;
+	status = D_SAME;
 
-	strlcpy(diffargs, "diff", sizeof(diffargs));
+	if (strlcpy(diffargs, "diff", sizeof(diffargs)) >= sizeof(diffargs))
+		errx(D_ERROR, "diffargs too long");
 
-	while ((ch = rcs_getopt(argc, argv, "ck:nqr:TuVx:")) != -1) {
+	while ((ch = rcs_getopt(argc, argv, "ck:nqr:TuVx::z::")) != -1) {
 		switch (ch) {
 		case 'c':
-			strlcat(diffargs, " -c", sizeof(diffargs));
+			if (strlcat(diffargs, " -c", sizeof(diffargs)) >=
+			    sizeof(diffargs))
+				errx(D_ERROR, "diffargs too long");
 			diff_format = D_CONTEXT;
 			break;
 		case 'k':
 			kflag = rcs_kflag_get(rcs_optarg);
 			if (RCS_KWEXP_INVAL(kflag)) {
-				cvs_log(LP_ERR,
-				    "invalid RCS keyword expansion mode");
+				warnx("invalid RCS keyword substitution mode");
 				(usage)();
-				exit(1);
+				exit(D_ERROR);
 			}
 			break;
 		case 'n':
-			strlcat(diffargs, " -n", sizeof(diffargs));
+			if (strlcat(diffargs, " -n", sizeof(diffargs)) >=
+			    sizeof(diffargs))
+				errx(D_ERROR, "diffargs too long");
 			diff_format = D_RCSDIFF;
 			break;
 		case 'q':
-			verbose = 0;
-			break;
-		case 'u':
-			strlcat(diffargs, " -u", sizeof(diffargs));
-			diff_format = D_UNIFIED;
+			flags |= QUIET;
 			break;
 		case 'r':
-			if (rev == RCS_HEAD_REV) {
-				if ((rev = rcsnum_parse(rcs_optarg)) == NULL)
-					fatal("bad revision number");
-			} else {
-				if ((rev2 = rcsnum_parse(rcs_optarg)) == NULL)
-					fatal("bad revision number");
-			}
+			rcs_setrevstr2(&rev_str1, &rev_str2, rcs_optarg);
 			break;
 		case 'T':
 			/*
 			 * kept for compatibility
 			 */
 			break;
+		case 'u':
+			if (strlcat(diffargs, " -u", sizeof(diffargs)) >=
+			    sizeof(diffargs))
+				errx(D_ERROR, "diffargs too long");
+			diff_format = D_UNIFIED;
+			break;
 		case 'V':
 			printf("%s\n", rcs_version);
 			exit(0);
 		case 'x':
-			rcs_suffixes = rcs_optarg;
+			/* Use blank extension if none given. */
+			rcs_suffixes = rcs_optarg ? rcs_optarg : "";
+			break;
+		case 'z':
+			timezone_flag = rcs_optarg;
 			break;
 		default:
 			(usage)();
-			exit (1);
+			exit(D_ERROR);
 		}
 	}
 
@@ -104,48 +109,60 @@ rcsdiff_main(int argc, char **argv)
 	argv += rcs_optind;
 
 	if (argc == 0) {
-		cvs_log(LP_ERR, "no input file");
+		warnx("no input file");
 		(usage)();
-		exit(1);
+		exit(D_ERROR);
 	}
 
 	for (i = 0; i < argc; i++) {
-		if (rcs_statfile(argv[i], fpath, sizeof(fpath)) < 0)
+		fd = rcs_choosefile(argv[i], fpath, sizeof(fpath));
+		if (fd < 0) {
+			warnx("%s", fpath);
+			continue;
+		}
+
+		if ((file = rcs_open(fpath, fd,
+		    RCS_READ|RCS_PARSE_FULLY)) == NULL)
 			continue;
 
-		if ((file = rcs_open(fpath, RCS_READ|RCS_PARSE_FULLY)) == NULL)
-			continue;
+		rcs_kwexp_set(file, kflag);
 
-		if (kflag != RCS_KWEXP_ERR)
-			rcs_kwexp_set(file, kflag);
+		if (rev_str1 != NULL) {
+			if ((rev1 = rcs_getrevnum(rev_str1, file)) == NULL)
+				errx(D_ERROR, "bad revision number");
+		}
+		if (rev_str2 != NULL) {
+			if ((rev2 = rcs_getrevnum(rev_str2, file)) == NULL)
+				errx(D_ERROR, "bad revision number");
+		}
 
-		if (rev == RCS_HEAD_REV)
-			frev = file->rf_head;
-		else
-			frev = rev;
-
-		if (verbose == 1) {
+		if (!(flags & QUIET)) {
 			fprintf(stderr, "%s\n", RCS_DIFF_DIV);
 			fprintf(stderr, "RCS file: %s\n", fpath);
 		}
 
 		diff_file = argv[i];
 
-		if (rev2 == NULL) {
-			if (rcsdiff_file(file, frev, argv[i]) < 0) {
-				rcs_close(file);
-				status = 2;
-				continue;
-			}
-		} else {
-			if (rcsdiff_rev(file, rev, rev2, argv[i]) < 0) {
-				rcs_close(file);
-				status = 2;
-				continue;
-			}
-		}
+		/* No revisions given. */
+		if (rev_str1 == NULL)
+			status = rcsdiff_file(file, file->rf_head, argv[i]);
+		/* One revision given. */
+		else if (rev_str2 == NULL)
+			status = rcsdiff_file(file, rev1, argv[i]);
+		/* Two revisions given. */
+		else
+			status = rcsdiff_rev(file, rev1, rev2);
 
 		rcs_close(file);
+
+		if (rev1 != NULL) {
+			rcsnum_free(rev1);
+			rev1 = NULL;
+		}
+		if (rev2 != NULL) {
+			rcsnum_free(rev2);
+			rev2 = NULL;
+		}
 	}
 
 	return (status);
@@ -155,141 +172,177 @@ void
 rcsdiff_usage(void)
 {
 	fprintf(stderr,
-	    "usage: rcsdiff [-cnqTuV] [-kmode] [-rrev1 [-rrev2]] "
-	    "[-xsuffixes] file ...\n");
+	    "usage: rcsdiff [-cnquV] [-kmode] [-rrev] "
+	    "[-xsuffixes] [-ztz] file ...\n");
 }
 
 static int
 rcsdiff_file(RCSFILE *file, RCSNUM *rev, const char *filename)
 {
-	char path1[MAXPATHLEN], path2[MAXPATHLEN];
+	int ret, fd;
+	time_t t;
+	struct stat st;
+	char *path1, *path2;
 	BUF *b1, *b2;
 	char rbuf[64];
-	struct stat st;
+	struct tm *tb;
 	struct timeval tv[2], tv2[2];
+
 	memset(&tv, 0, sizeof(tv));
 	memset(&tv2, 0, sizeof(tv2));
 
-	if (stat(filename, &st) == -1) {
-		cvs_log(LP_ERRNO, "%s", filename);
-		return (-1);
+	ret = D_ERROR;
+	b1 = b2 = NULL;
+
+	diff_rev1 = rev;
+	diff_rev2 = NULL;
+	path1 = path2 = NULL;
+
+	if ((fd = open(filename, O_RDONLY)) == -1) {
+		warn("%s", filename);
+		goto out;
 	}
 
 	rcsnum_tostr(rev, rbuf, sizeof(rbuf));
-	if (verbose == 1) {
+	if (!(flags & QUIET)) {
 		fprintf(stderr, "retrieving revision %s\n", rbuf);
 		fprintf(stderr, "%s -r%s %s\n", diffargs, rbuf, filename);
 	}
 
 	if ((b1 = rcs_getrev(file, rev)) == NULL) {
-		cvs_log(LP_ERR, "failed to retrieve revision");
-		return (-1);
+		warnx("failed to retrieve revision %s", rbuf);
+		goto out;
 	}
+
+	b1 = rcs_kwexp_buf(b1, file, rev);
 	tv[0].tv_sec = (long)rcs_rev_getdate(file, rev);
 	tv[1].tv_sec = tv[0].tv_sec;
 
-	if ((b2 = cvs_buf_load(filename, BUF_AUTOEXT)) == NULL) {
-		cvs_log(LP_ERR, "failed to load file: '%s'", filename);
-		cvs_buf_free(b1);
-		return (-1);
+	if ((b2 = rcs_buf_load(filename, BUF_AUTOEXT)) == NULL) {
+		warnx("failed to load file: `%s'", filename);
+		goto out;
 	}
-	tv2[0].tv_sec = st.st_mtime;
-	tv2[1].tv_sec = st.st_mtime;
 
-	strlcpy(path1, rcs_tmpdir, sizeof(path1));
-	strlcat(path1, "/diff1.XXXXXXXXXX", sizeof(path1));
-	if (cvs_buf_write_stmp(b1, path1, 0600) == -1) {
-		cvs_log(LP_ERRNO, "could not write temporary file");
-		cvs_buf_free(b1);
-		cvs_buf_free(b2);
-		return (-1);
-	}
-	cvs_buf_free(b1);
+	/* XXX - GNU uses GMT */
+	if (fstat(fd, &st) == -1)
+		err(D_ERROR, "%s", filename);
+
+	tb = gmtime(&st.st_mtime);
+	t = mktime(tb);
+
+	tv2[0].tv_sec = t;
+	tv2[1].tv_sec = t;
+
+	(void)xasprintf(&path1, "%s/diff1.XXXXXXXXXX", rcs_tmpdir);
+	rcs_buf_write_stmp(b1, path1);
+
+	rcs_buf_free(b1);
+	b1 = NULL;
+
 	if (utimes(path1, (const struct timeval *)&tv) < 0)
-		cvs_log(LP_ERRNO, "error setting utimes");
+		warn("utimes");
 
-	strlcpy(path2, rcs_tmpdir, sizeof(path2));
-	strlcat(path2, "/diff2.XXXXXXXXXX", sizeof(path2));
-	if (cvs_buf_write_stmp(b2, path2, 0600) == -1) {
-		cvs_buf_free(b2);
-		(void)unlink(path1);
-		return (-1);
-	}
-	cvs_buf_free(b2);
+	(void)xasprintf(&path2, "%s/diff2.XXXXXXXXXX", rcs_tmpdir);
+	rcs_buf_write_stmp(b2, path2);
+
+	rcs_buf_free(b2);
+	b2 = NULL;
+
 	if (utimes(path2, (const struct timeval *)&tv2) < 0)
-		cvs_log(LP_ERRNO, "error setting utimes");
+		warn("utimes");
 
-	cvs_diffreg(path1, path2, NULL);
-	(void)unlink(path1);
-	(void)unlink(path2);
+	ret = rcs_diffreg(path1, path2, NULL);
 
-	return (0);
+out:
+	if (fd != -1)
+		(void)close(fd);
+	if (b1 != NULL)
+		rcs_buf_free(b1);
+	if (b2 != NULL)
+		rcs_buf_free(b2);
+	if (path1 != NULL)
+		xfree(path1);
+	if (path2 != NULL)
+		xfree(path2);
+
+	return (ret);
 }
 
 static int
-rcsdiff_rev(RCSFILE *file, RCSNUM *rev1, RCSNUM *rev2, const char *filename)
+rcsdiff_rev(RCSFILE *file, RCSNUM *rev1, RCSNUM *rev2)
 {
-	char path1[MAXPATHLEN], path2[MAXPATHLEN];
-	BUF *b1, *b2;
-	char rbuf1[64], rbuf2[64];
 	struct timeval tv[2], tv2[2];
+	BUF *b1, *b2;
+	int ret;
+	char *path1, *path2, rbuf1[64], rbuf2[64];
 
+	ret = D_ERROR;
+	b1 = b2 = NULL;
 	memset(&tv, 0, sizeof(tv));
 	memset(&tv2, 0, sizeof(tv2));
 
+	diff_rev1 = rev1;
+	diff_rev2 = rev2;
+	path1 = path2 = NULL;
+
 	rcsnum_tostr(rev1, rbuf1, sizeof(rbuf1));
-	if (verbose == 1)
-		printf("retrieving revision %s\n", rbuf1);
+	if (!(flags & QUIET))
+		fprintf(stderr, "retrieving revision %s\n", rbuf1);
 
 	if ((b1 = rcs_getrev(file, rev1)) == NULL) {
-		cvs_log(LP_ERR, "failed to retrieve revision");
-		return (-1);
+		warnx("failed to retrieve revision %s", rbuf1);
+		goto out;
 	}
+
+	b1 = rcs_kwexp_buf(b1, file, rev1);
 	tv[0].tv_sec = (long)rcs_rev_getdate(file, rev1);
 	tv[1].tv_sec = tv[0].tv_sec;
 
 	rcsnum_tostr(rev2, rbuf2, sizeof(rbuf2));
-	if (verbose == 1)
+	if (!(flags & QUIET))
 		fprintf(stderr, "retrieving revision %s\n", rbuf2);
 
 	if ((b2 = rcs_getrev(file, rev2)) == NULL) {
-		cvs_log(LP_ERR, "failed to retrieve revision");
-		return (-1);
+		warnx("failed to retrieve revision %s", rbuf2);
+		goto out;
 	}
+
+	b2 = rcs_kwexp_buf(b2, file, rev2);
 	tv2[0].tv_sec = (long)rcs_rev_getdate(file, rev2);
 	tv2[1].tv_sec = tv2[0].tv_sec;
 
-	if (verbose == 1)
-		fprintf(stderr,
-		    "%s -r%s -r%s %s\n", diffargs, rbuf1, rbuf2, filename);
+	if (!(flags & QUIET))
+		fprintf(stderr, "%s -r%s -r%s\n", diffargs, rbuf1, rbuf2);
 
-	strlcpy(path1, rcs_tmpdir, sizeof(path1));
-	strlcat(path1, "/diff1.XXXXXXXXXX", sizeof(path1));
-	if (cvs_buf_write_stmp(b1, path1, 0600) == -1) {
-		cvs_log(LP_ERRNO, "could not write temporary file");
-		cvs_buf_free(b1);
-		cvs_buf_free(b2);
-		return (-1);
-	}
-	cvs_buf_free(b1);
+	(void)xasprintf(&path1, "%s/diff1.XXXXXXXXXX", rcs_tmpdir);
+	rcs_buf_write_stmp(b1, path1);
+
+	rcs_buf_free(b1);
+	b1 = NULL;
+
 	if (utimes(path1, (const struct timeval *)&tv) < 0)
-		cvs_log(LP_ERRNO, "error setting utimes");
+		warn("utimes");
 
-	strlcpy(path2, rcs_tmpdir, sizeof(path2));
-	strlcat(path2, "/diff2.XXXXXXXXXX", sizeof(path2));
-	if (cvs_buf_write_stmp(b2, path2, 0600) == -1) {
-		cvs_buf_free(b2);
-		(void)unlink(path1);
-		return (-1);
-	}
-	cvs_buf_free(b2);
+	(void)xasprintf(&path2, "%s/diff2.XXXXXXXXXX", rcs_tmpdir);
+	rcs_buf_write_stmp(b2, path2);
+
+	rcs_buf_free(b2);
+	b2 = NULL;
 
 	if (utimes(path2, (const struct timeval *)&tv2) < 0)
-		cvs_log(LP_ERRNO, "error setting utimes");
-	
-	cvs_diffreg(path1, path2, NULL);
-	(void)unlink(path1);
-	(void)unlink(path2);
+		warn("utimes");
 
-	return (0);
+	ret = rcs_diffreg(path1, path2, NULL);
+
+out:
+	if (b1 != NULL)
+		rcs_buf_free(b1);
+	if (b2 != NULL)
+		rcs_buf_free(b2);
+	if (path1 != NULL)
+		xfree(path1);
+	if (path2 != NULL)
+		xfree(path2);
+
+	return (ret);
 }

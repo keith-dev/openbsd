@@ -1,4 +1,4 @@
-.\"	$OpenBSD: pcmcia.4,v 1.42 2006/02/01 19:33:24 martin Exp $
+.\"	$OpenBSD: pcmcia.4,v 1.49 2006/09/12 17:22:18 jmc Exp $
 .\"	$NetBSD: pcmcia.4,v 1.4 1998/06/07 09:10:30 enami Exp $
 .\"
 .\" Copyright (c) 1997 The NetBSD Foundation, Inc.
@@ -73,9 +73,10 @@ The
 subsystem provides machine-independent bus support and
 drivers for PCMCIA (PC Card)
 devices.
-.Sh SUPPORTED DEVICES
-The following devices are supported, sorted by function
-and driver name:
+.Pp
+.Ox
+provides support for the following devices.
+Note that not all architectures support all devices.
 .Ss Miscellaneous
 .Bl -tag -width 12n -offset ind -compact
 .It Xr gpr 4
@@ -89,25 +90,25 @@ GemPlus GPR400 smartcard reader.
 .Ss Network interfaces
 .Bl -tag -width 12n -offset ind -compact
 .It Xr an 4
-Aironet Communications 4500/4800 IEEE 802.11b wireless controllers.
+Aironet Communications 4500/4800 IEEE 802.11FH/b wireless network device.
 .It Xr awi 4
-BayStack 650 wireless 802.11FH wireless controllers.
+BayStack 650 IEEE 802.11FH PCMCIA wireless network device.
 .It Xr cnw 4
-Xircom Creditcard Netwave cards.
+Xircom CreditCard Netwave wireless network device.
 .It Xr ep 4
-3Com 3c556, 3c562, 3c574, and 3c589 EtherLink III Ethernet cards.
+3Com EtherLink III and Fast EtherLink III 10/100 Ethernet device.
 .It Xr ne 4
-NE2000 compatible cards.
+NE2000 and compatible 10/100 Ethernet device.
 .It Xr ray 4
-Raytheon Raylink / WebGear Aviator IEEE 802.11FH 2Mbps wireless controllers.
+Raytheon Raylink/WebGear Aviator IEEE 802.11FH wireless network device.
 .It Xr rln 4
-Proxim RangeLAN2 PC-Card.
+Proxim RangeLAN2 wireless network device.
 .It Xr sm 4
-SMC91C9x and SMC91C1xx-based Ethernet.
+SMC91C9x and SMC91C1xx-based 10/100 Ethernet device.
 .It Xr wi 4
-WaveLAN/IEEE, PRISM-II and Spectrum24 IEEE 802.11b cards.
+WaveLAN/IEEE, PRISM 2-3, and Spectrum24 IEEE 802.11b wireless network device.
 .It Xr xe 4
-Xircom 16bit Ethernet cards.
+Xircom-based 16-bit PCMCIA 10/100 Ethernet device.
 .El
 .Ss SCSI controllers
 .Bl -tag -width 12n -offset ind -compact
@@ -167,35 +168,9 @@ cases the size parameter of the
 .Em pcic
 device may need to be decreased to avoid a conflict.
 .Sh SEE ALSO
-.Xr aic 4 ,
-.Xr an 4 ,
-.Xr awi 4 ,
 .Xr cardbus 4 ,
-.Xr cbb 4 ,
-.Xr cnw 4 ,
-.Xr com 4 ,
-.Xr eisa 4 ,
-.Xr ep 4 ,
-.Xr gpr 4 ,
 .Xr intro 4 ,
-.Xr isa 4 ,
-.Xr isapnp 4 ,
-.Xr ne 4 ,
-.Xr pci 4 ,
-.Xr pcic 4 ,
-.Xr pxaip 4 ,
-.Xr pxapcic 4 ,
-.Xr ray 4 ,
-.Xr rln 4 ,
-.Xr sbus 4 ,
-.Xr sm 4 ,
-.Xr stp 4 ,
-.Xr tcic 4 ,
-.Xr tslot 4 ,
-.Xr usb 4 ,
-.Xr wdc 4 ,
-.Xr wi 4 ,
-.Xr xe 4
+.Xr isa 4
 .Sh HISTORY
 The
 .Nm

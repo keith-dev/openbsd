@@ -1,4 +1,4 @@
-/*	$OpenBSD: spamd.c,v 1.81 2005/11/30 20:44:07 deraadt Exp $	*/
+/*	$OpenBSD: spamd.c,v 1.83 2006/05/15 16:47:48 jcs Exp $	*/
 
 /*
  * Copyright (c) 2002 Theo de Raadt.  All rights reserved.
@@ -144,7 +144,7 @@ usage(void)
 	fprintf(stderr,
 	    "usage: spamd [-45dgv] [-B maxblack] [-b address] [-c maxcon]\n");
 	fprintf(stderr,
-	    "             [-G mins:hours:hours] [-n name] [-p port]\n");
+	    "             [-G mins:hours:hours] [-h host] [-n name] [-p port]\n");
 	fprintf(stderr,
 	    "             [-r reply] [-S secs] [-s secs] [-w window]\n");
 	exit(1);
@@ -576,7 +576,7 @@ initcon(struct con *cp, int fd, struct sockaddr *sa)
 		errx(1, "not supported yet");
 	memcpy(&cp->ss, sa, sa->sa_len);
 	cp->af = sa->sa_family;
-	cp->ia = &((struct sockaddr_in *)sa)->sin_addr;
+	cp->ia = &((struct sockaddr_in *)&cp->ss)->sin_addr;
 	cp->blacklists = sdl_lookup(blacklists, cp->af, cp->ia);
 	cp->stutter = (greylist && !grey_stutter && cp->blacklists == NULL) ?
 	    0 : stutter;
@@ -957,7 +957,7 @@ main(int argc, char *argv[])
 	if (gethostname(hostname, sizeof hostname) == -1)
 		err(1, "gethostname");
 
-	while ((ch = getopt(argc, argv, "45b:c:B:p:dgG:r:s:S:n:vw:")) != -1) {
+	while ((ch = getopt(argc, argv, "45b:c:B:p:dgG:h:r:s:S:n:vw:")) != -1) {
 		switch (ch) {
 		case '4':
 			nreply = "450";
@@ -998,6 +998,12 @@ main(int argc, char *argv[])
 			whiteexp *= (60 * 60);
 			/* convert to seconds from hours */
 			greyexp *= (60 * 60);
+			break;
+		case 'h':
+			bzero(&hostname, sizeof(hostname));
+			if (strlcpy(hostname, optarg, sizeof(hostname)) >=
+			    sizeof(hostname))
+				errx(1, "-h arg too long"); 
 			break;
 		case 'r':
 			reply = optarg;

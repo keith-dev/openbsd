@@ -1,4 +1,4 @@
-.\"	$OpenBSD: sbus.4,v 1.27 2005/03/05 01:44:48 miod Exp $
+.\"	$OpenBSD: sbus.4,v 1.35 2006/09/12 17:14:05 jmc Exp $
 .\"	$NetBSD: sbus.4,v 1.5 2002/01/21 17:54:10 wiz Exp $
 .\"
 .\" Copyright (c) 2001 The NetBSD Foundation, Inc.
@@ -40,7 +40,7 @@
 .Os
 .Sh NAME
 .Nm sbus
-.Nd introduction to sbus bus support and drivers
+.Nd introduction to SBus bus support
 .Sh SYNOPSIS
 .Cd "sbus* at mainbus?"
 .Cd "sbus* at iommu?"
@@ -59,61 +59,45 @@ The
 .Nm
 specifications define the bus protocol as well as the electrical and
 mechanical properties of the extension slots.
-.Sh HARDWARE
+.Pp
 .Ox
-includes the following
-.Nm
-drivers, sorted by device type and driver name:
+provides support for the following devices.
+Note that not all architectures support all devices.
 .Ss Audio interfaces
 .Bl -tag -width 13n -offset ind -compact
 .It Xr audioamd 4
-.Tn AMD
-7990 codecs.
+SPARC telephone quality audio device.
 .It Xr audiocs 4
-.Tn "Crystal Semiconductor"
-CS4231A codecs.
+SPARC CS4231 audio device.
 .El
 .Ss SCSI interfaces
 .Bl -tag -width 13n -offset ind -compact
 .It Xr esp 4
-NCR53c94 and compatible
-.Tn SCSI
-interfaces.
+ESP NCR 53c94 on-board or SBus SCSI controller.
 .It Xr isp 4
-Qlogic
-.Tn SCSI
-interfaces.
+Qlogic based SCSI or FibreChannel SCSI Host Adapters.
 .El
 .Ss Network interfaces
 .Bl -tag -width 13n -offset ind -compact
 .It Xr be 4
-.Dq Big Mac
-.Tn Ethernet
-board.
+SPARC 10/100 Ethernet device.
 .It Xr hme 4
-.Dq Happy Meal
-.Tn Ethernet
-interfaces.
+Sun Happy Meal 10/100 Ethernet device.
 .It Xr le 4
-.Tn Lance
-7990 series
-.Tn Ethernet
-interfaces.
+AMD LANCE Ethernet device.
 .It Xr lebuffer 4 , Xr ledma 4
-.Tn Lance
-7990 series
-.Tn Ethernet
-DMA interfaces.
+AMD LANCE Ethernet device.
 .It Xr qe 4
-Quad Ethernet Controller
-board.
+SPARC 10/100 Ethernet device.
+.It Xr qec 4
+SPARC Quad Ethernet Controller.
 .El
 .Ss Bridges
 .Bl -tag -width 13n -offset ind -compact
 .It Xr stp 4
-.Nm sbus
-.Xr pcmcia 4
-bridge.
+SBus PCMCIA bridge.
+.It Xr tslot 4
+Tadpole PCMCIA Controller.
 .El
 .Ss Graphics devices
 .Bl -tag -width 13n -offset ind -compact
@@ -160,6 +144,8 @@ Parallel port.
 Magma LC series Serial/Parallel Interface cards.
 .It Xr spif 4
 Sun Serial/Parallel Interface card.
+.It Xr zs 4
+Zilog 8530 (ZSCC) serial communications driver.
 .El
 .Ss Miscellaneous devices
 .Bl -tag -width 13n -offset ind -compact
@@ -167,6 +153,8 @@ Sun Serial/Parallel Interface card.
 Miscellaneous I/O controls.
 .It Xr clock 4
 Realtime clock.
+.It Xr fdc 4
+NEC765 compatible floppy disk driver.
 .It Xr presto 4
 Prestoserve battery-backed memory.
 .It Xr uperf 4
@@ -175,42 +163,7 @@ Performance counters on the host bridge.
 SBus Expansion subsystem.
 .El
 .Sh SEE ALSO
-.Xr agten 4 ,
-.Xr apio 4 ,
-.Xr asio 4 ,
-.Xr audioamd 4 ,
-.Xr audiocs 4 ,
-.Xr auxio 4 ,
-.Xr be 4 ,
-.Xr bpp 4 ,
-.Xr bwtwo 4 ,
-.Xr cgfourteen 4 ,
-.Xr cgsix 4 ,
-.Xr cgthree 4 ,
-.Xr cgtwelve 4 ,
-.Xr clock 4 ,
-.Xr esp 4 ,
-.Xr hme 4 ,
-.Xr intro 4 ,
-.Xr isp 4 ,
-.Xr le 4 ,
-.Xr lebuffer 4 ,
-.Xr ledma 4 ,
-.Xr magma 4 ,
-.Xr mgx 4 ,
-.Xr pnozz 4 ,
-.Xr presto 4 ,
-.Xr qe 4 ,
-.Xr qec 4 ,
-.Xr rfx 4 ,
-.Xr spif 4 ,
-.Xr stp 4 ,
-.Xr tcx 4 ,
-.Xr tvtwo 4 ,
-.Xr uperf 4 ,
-.Xr vigra 4 ,
-.Xr xbox 4 ,
-.Xr zx 4
+.Xr intro 4
 .Sh HISTORY
 The machine-independent
 .Nm sbus

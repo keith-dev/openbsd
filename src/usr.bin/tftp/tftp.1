@@ -1,4 +1,4 @@
-.\"	$OpenBSD: tftp.1,v 1.11 2006/01/02 16:35:17 jmc Exp $
+.\"	$OpenBSD: tftp.1,v 1.15 2006/07/26 09:10:03 mglocker Exp $
 .\"	$NetBSD: tftp.1,v 1.5 1995/08/18 14:45:44 pk Exp $
 .\"
 .\" Copyright (c) 1990, 1993, 1994
@@ -72,6 +72,11 @@ Shorthand for
 .It Ic binary
 Shorthand for
 .Ic mode Ar binary .
+.Pp
+.It Ic blksize Ar block-size
+Set the block size in bytes for one packet.
+The default value is 512 bytes.
+Valid values are 8 bytes \(en 65464 bytes.
 .Pp
 .It Ic connect Ar host Op Ar port
 Set the
@@ -176,12 +181,34 @@ An end-of-file also exits.
 .Pp
 .It Ic rexmt Ar retransmission-timeout
 Set the per-packet retransmission timeout, in seconds.
+The default value is 5 seconds.
+Valid values are 1 second \(en 255 seconds.
 .Pp
 .It Ic status
 Show current status.
 .Pp
 .It Ic timeout Ar total-transmission-timeout
 Set the total transmission timeout, in seconds.
+The default value is 25 seconds.
+Valid values are 1 second \(en 255 seconds.
+.Pp
+.It Ic tout
+Toggle the
+.Ic tout
+option.
+This option devlivers the retransmission timeout,
+which is set by
+.Ic rexmt ,
+to the server,
+so the server uses the same retransmission timeout as the client.
+.Pp
+.It Ic tsize
+Toggle the
+.Ic tsize
+option.
+This option delivers the total size of the file to be transferred.
+With this value given, the client or server can decide
+whether they are able to accept the file.
 .Pp
 .It Ic trace
 Toggle packet tracing.
@@ -206,11 +233,3 @@ protocol, the remote site will probably have some
 sort of file access restrictions in place.
 The exact methods are specific to each site and therefore
 difficult to document here.
-.Pp
-This implementation of
-.Nm
-does not support blocksize negotiation
-.Pq RFC 1783 ,
-so files larger than 33488896 octets
-.Pq 65535 blocks
-cannot be transferred.

@@ -1,4 +1,4 @@
-/*	$OpenBSD: vs_refresh.c,v 1.11 2006/01/08 21:05:40 miod Exp $	*/
+/*	$OpenBSD: vs_refresh.c,v 1.14 2006/03/11 06:58:00 ray Exp $	*/
 
 /*-
  * Copyright (c) 1992, 1993, 1994
@@ -171,7 +171,7 @@ vs_paint(sp, flags)
 	VI_PRIVATE *vip;
 	recno_t lastline, lcnt;
 	size_t cwtotal, cnt, len, notused, off, y;
-	int ch, didpaint, isempty, leftright_warp;
+	int ch = 0, didpaint, isempty, leftright_warp;
 	char *p;
 
 #define	 LNO	sp->lno			/* Current file line. */
@@ -508,7 +508,7 @@ adjust:	if (!O_ISSET(sp, O_LEFTRIGHT) &&
 
 		/*
 		 * Count up the widths of the characters.  If it's a tab
-		 * character, go do it the the slow way.
+		 * character, go do it the slow way.
 		 */
 		for (cwtotal = 0; cnt--; cwtotal += KEY_LEN(sp, ch))
 			if ((ch = *(u_char *)p--) == '\t')
@@ -546,7 +546,7 @@ adjust:	if (!O_ISSET(sp, O_LEFTRIGHT) &&
 
 		/*
 		 * Count up the widths of the characters.  If it's a tab
-		 * character, go do it the the slow way.  If we cross a
+		 * character, go do it the slow way.  If we cross a
 		 * screen boundary, we can quit.
 		 */
 		for (cwtotal = SCNO; cnt--;) {
@@ -778,7 +778,7 @@ vs_modeline(sp)
 	};
 	GS *gp;
 	size_t cols, curcol, curlen, endpoint, len, midpoint;
-	const char *t;
+	const char *t = NULL;
 	int ellipsis;
 	char *p, buf[20];
 
@@ -856,8 +856,8 @@ vs_modeline(sp)
 	cols = sp->cols - 1;
 	if (O_ISSET(sp, O_RULER)) {
 		vs_column(sp, &curcol);
-		len =
-		    snprintf(buf, sizeof(buf), "%lu,%lu", sp->lno, curcol + 1);
+		len = snprintf(buf, sizeof(buf), "%lu,%zu",
+		    (ulong)sp->lno, curcol + 1);
 
 		midpoint = (cols - ((len + 1) / 2)) / 2;
 		if (curlen < midpoint) {

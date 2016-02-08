@@ -1,4 +1,4 @@
-/*	$OpenBSD: usbhidaction.c,v 1.6 2004/10/27 18:16:57 jaredy Exp $ */
+/*	$OpenBSD: usbhidaction.c,v 1.8 2006/07/09 23:02:21 mk Exp $ */
 /*      $NetBSD: usbhidaction.c,v 1.7 2002/01/18 14:38:59 augustss Exp $ */
 
 /*
@@ -56,7 +56,7 @@
 
 int verbose = 0;
 int isdemon = 0;
-int reparse = 1;
+int reparse = 0;
 
 struct command {
 	struct command *next;
@@ -137,9 +137,17 @@ main(int argc, char **argv)
 		dev = devnamebuf;
 	}
 
+	if (demon && conf[0] != '/')
+		errx(1, "config file must have an absolute path, %s", conf);
+
 	fd = open(dev, O_RDWR);
 	if (fd < 0)
 		err(1, "%s", dev);
+
+	/* Avoid passing the device file descriptor to executed commands */
+	if (fcntl(fd, F_SETFD, FD_CLOEXEC) == -1)
+		err(1, "fcntl(F_SETFD, FD_CLOEXEC)");
+
 	if (ioctl(fd, USB_GET_REPORT_ID, &reportid) < 0)
 		reportid = -1;
 	repd = hid_get_report_desc(fd);

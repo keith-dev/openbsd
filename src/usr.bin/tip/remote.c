@@ -1,4 +1,4 @@
-/*	$OpenBSD: remote.c,v 1.13 2003/09/20 18:15:32 millert Exp $	*/
+/*	$OpenBSD: remote.c,v 1.16 2006/06/06 23:24:52 deraadt Exp $	*/
 /*	$NetBSD: remote.c,v 1.5 1997/04/20 00:02:45 mellon Exp $	*/
 
 /*
@@ -41,7 +41,7 @@ static const char copyright[] =
 #if 0
 static char sccsid[] = "@(#)remote.c	8.1 (Berkeley) 6/6/93";
 #endif
-static const char rcsid[] = "$OpenBSD: remote.c,v 1.13 2003/09/20 18:15:32 millert Exp $";
+static const char rcsid[] = "$OpenBSD: remote.c,v 1.16 2006/06/06 23:24:52 deraadt Exp $";
 #endif /* not lint */
 
 #include <stdio.h>
@@ -68,13 +68,12 @@ static char	*db_array[3] = { _PATH_REMOTE, 0, 0 };
 
 #define cgetflag(f)	(cgetcap(bp, f, ':') != NULL)
 
+static void	getremcap(char *);
+
 static void
-getremcap(host)
-	char *host;
+getremcap(char *host)
 {
-	char **p, ***q;
-	char *bp;
-	char *rempath;
+	char **p, ***q, *bp, *rempath;
 	int   stat;
 
 	rempath = getenv("REMOTE");
@@ -100,18 +99,18 @@ getremcap(host)
 			FS = DEFFS;
 			return;
 		}
-		switch(stat) {
+		switch (stat) {
 		case -1:
 			fprintf(stderr, "%s: unknown host %s\n", __progname,
 			    host);
 			break;
 		case -2:
-			fprintf(stderr, 
+			fprintf(stderr,
 			    "%s: can't open host description file\n",
 			    __progname);
 			break;
 		case -3:
-			fprintf(stderr, 
+			fprintf(stderr,
 			    "%s: possible reference loop in host description file\n", __progname);
 			break;
 		}
@@ -123,6 +122,8 @@ getremcap(host)
 			cgetstr(bp, *p, *q);
 	if (!BR && (cgetnum(bp, "br", &BR) == -1))
 		BR = DEFBR;
+	if (!LD && (cgetnum(bp, "ld", &LD) == -1))
+		LD = TTYDISC;
 	if (cgetnum(bp, "fs", &FS) == -1)
 		FS = DEFFS;
 	if (DU < 0)
@@ -205,8 +206,7 @@ getremcap(host)
 }
 
 char *
-getremote(host)
-	char *host;
+getremote(char *host)
 {
 	char *cp;
 	static char *next;

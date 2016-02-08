@@ -1,4 +1,4 @@
-/* $OpenBSD: message.c,v 1.116 2005/10/25 10:38:01 hshoexer Exp $	 */
+/* $OpenBSD: message.c,v 1.120 2006/07/02 13:19:00 hshoexer Exp $	 */
 /* $EOM: message.c,v 1.156 2000/10/10 12:36:39 provos Exp $	 */
 
 /*
@@ -58,6 +58,7 @@
 #include "timer.h"
 #include "transport.h"
 #include "util.h"
+#include "vendor.h"
 #include "virtual.h"
 
 /* A local set datatype, coincidentally fd_set suits our purpose fine.  */
@@ -1144,6 +1145,7 @@ message_validate_vendor(struct message *msg, struct payload *p)
 		message_drop(msg, ISAKMP_NOTIFY_INVALID_PAYLOAD_TYPE, 0, 1, 1);
 		return -1;
 	}
+	check_vendor_openbsd(msg, p);
 	dpd_check_vendor_payload(msg, p);
 	nat_t_check_vendor_payload(msg, p);
 	if (!(p->flags & PL_MARK))
@@ -1719,7 +1721,7 @@ message_send_notification(struct message *msg, struct sa *isakmp_sa,
 	else
 		exchange_establish_p1(msg->transport, ISAKMP_EXCH_INFO,
 		    msg->exchange ? msg->exchange->doi->id : ISAKMP_DOI_ISAKMP,
-		    0, &args, 0, 0);
+		    0, &args, 0, 0, 0);
 }
 
 /* Send a DELETE inside an informational exchange for each protocol in SA.  */
@@ -2054,7 +2056,7 @@ message_check_duplicate(struct message *msg)
 			    "message_check_duplicate: dropping dup"));
 
 			/*
-			 * Retransmit if the previos sent message was the last
+			 * Retransmit if the previous sent message was the last
 			 * of an exchange, otherwise just wait for the
 			 * ordinary retransmission.
 			 */
@@ -2410,7 +2412,7 @@ message_add_sa_payload(struct message *msg)
 		for (proto = TAILQ_FIRST(&sa->protos), i = 0; proto;
 		    proto = TAILQ_NEXT(proto, link), i++) {
 			if (message_add_payload(msg, ISAKMP_PAYLOAD_PROPOSAL,
-			    proposals[i], proposal_lens[i], i > 1))
+			    proposals[i], proposal_lens[i], i > 0))
 				goto cleanup;
 			SET_ISAKMP_GEN_LENGTH(proposals[i], proposal_lens[i] +
 			    transform_lens[i]);

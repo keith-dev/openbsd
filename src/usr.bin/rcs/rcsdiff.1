@@ -1,4 +1,4 @@
-.\"     $OpenBSD: rcsdiff.1,v 1.15 2006/02/24 14:15:53 xsa Exp $
+.\"	$OpenBSD: rcsdiff.1,v 1.22 2006/05/05 15:47:36 xsa Exp $
 .\"
 .\" Copyright (c) 2005 Joris Vink <joris@openbsd.org>
 .\" All rights reserved.
@@ -22,21 +22,37 @@
 .Nd compare RCS revisions
 .Sh SYNOPSIS
 .Nm
-.Bk -words
-.Op Fl cnqTuV
+.Op Fl cnquV
 .Op Fl k Ns Ar mode
-.Oo
-.Fl r Ns Ar rev
-.Op Fl r Ns Ar rev2
-.Oc
+.Op Fl r Ns Ar rev
 .Op Fl x Ns Ar suffixes
 .Op Fl z Ns Ar tz
-.Ar file ...
-.Ek
+.Ar
 .Sh DESCRIPTION
 The
 .Nm
-program is used to compare two revisions of each RCS file given.
+program is used to compare revisions of RCS files,
+in much the same way as the
+.Xr diff 1
+utility.
+Differences between two specific revisions can be requested,
+as well as differences between the current working file and
+the latest revision of the default branch.
+.Pp
+It is not possible to display differences between entire directories,
+or differences between more than two files.
+All diffs produced are in the standard diff format,
+unless the
+.Fl u
+option is specified,
+which produces unified diffs.
+.Pp
+.Nm
+also supports
+keyword substitution \(en
+see the
+.Xr rcs 1
+man page for more information.
 .Pp
 The following options are supported:
 .Bl -tag -width Ds
@@ -50,16 +66,15 @@ Specify the keyword substitution mode.
 .It Fl n
 Produces a diff in the same format that is used in the RCS files.
 .It Fl r Ns Ar rev
-If one -r option is given, the diff is generated between the
-working file and
+Produces a diff with respect to revision
 .Ar rev .
-If two -r options are given, the diff is generated between the
-two revisions specified.
+This option should be specified twice to generate a diff
+between two specific revisions.
+If only one revision is specified,
+diffing is done between that revision and
+the latest revision of the default branch.
 .It Fl q
 Be quiet about reporting.
-.It Fl T
-No effect.
-For compatibility.
 .It Fl u
 Produces a unified diff with three lines of context.
 See
@@ -98,11 +113,30 @@ Compare revision 1.7 and 1.8 of file
 and ignore differences in keyword values:
 .Pp
 .Dl $ rcsdiff -kk -r1.7 -r1.8 foo.c
+.Sh DIAGNOSTICS
+The
+.Nm
+utility exits with one of the following values:
+.Pp
+.Bl -tag -width Ds -compact -offset indent
+.It 0
+No differences were found.
+.It 1
+Differences were found.
+.It 2
+An error occurred.
+.El
 .Sh SEE ALSO
 .Xr ci 1 ,
 .Xr co 1 ,
+.Xr diff 1 ,
 .Xr ident 1 ,
 .Xr rcs 1 ,
 .Xr rcsclean 1 ,
 .Xr rcsmerge 1 ,
 .Xr rlog 1
+.Sh STANDARDS
+The flag
+.Op Fl T
+has no effect and is provided
+for compatibility only.

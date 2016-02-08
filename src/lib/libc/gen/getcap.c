@@ -1,4 +1,4 @@
-/*	$OpenBSD: getcap.c,v 1.23 2005/08/08 08:05:34 espie Exp $ */
+/*	$OpenBSD: getcap.c,v 1.27 2006/05/15 04:18:19 hugh Exp $ */
 /*-
  * Copyright (c) 1992, 1993
  *	The Regents of the University of California.  All rights reserved.
@@ -591,6 +591,8 @@ cgetmatch(char *buf, const char *name)
 	char *bp;
 	const char *np;
 
+	if (*name == '\0')
+		return (-1);
 	/*
 	 * Start search at beginning of record.
 	 */
@@ -659,7 +661,7 @@ cgetnext(char **bp, char **db_array)
 {
 	size_t len;
 	int status, done;
-	char *cp, *line, *np, buf[BSIZE], nbuf[BSIZE];
+	char *line, *np, buf[BSIZE], nbuf[BSIZE];
 	u_int dummy;
 
 	if (dbp == NULL)
@@ -669,13 +671,13 @@ cgetnext(char **bp, char **db_array)
 		(void)cgetclose();
 		return (-1);
 	}
-	for(;;) {
+	for (;;) {
 		if (toprec && !gottoprec) {
 			gottoprec = 1;
 			line = toprec;
 		} else {
 			line = fgetln(pfp, &len);
-			if (line == NULL && pfp) {
+			if (line == NULL) {
 				if (ferror(pfp)) {
 					(void)cgetclose();
 					return (-1);
@@ -719,17 +721,12 @@ cgetnext(char **bp, char **db_array)
 		done = 0;
 		np = nbuf;
 		for (;;) {
-			for (cp = line; *cp != '\0'; cp++) {
-				if (*cp == ':') {
-					done = 1;
-					cp++;
-					break;
-				}
-				if (*cp == '\\')
-					break;
+			len = strcspn(line, ":\\");
+			if (line[len] == ':') {
+				done = 1;
+				++len;
 			}
 			/* copy substring */
-			len = cp - line;
 			if (len >= sizeof(nbuf) - (np - nbuf)) {
 				(void)cgetclose();
 				return (-1);
@@ -742,13 +739,18 @@ cgetnext(char **bp, char **db_array)
 				break;
 			} else { /* name field extends beyond the line */
 				line = fgetln(pfp, &len);
-				if (line == NULL && pfp) {
+				if (line == NULL) {
 					if (ferror(pfp)) {
 						(void)cgetclose();
 						return (-1);
 					}
+					/* Move on to next file. */
 					(void)fclose(pfp);
 					pfp = NULL;
+					++dbp;
+					/* NUL terminate nbuf. */
+					*np = '\0';
+					break;
 				} else
 					/* XXX - assumes newline */
 					line[len - 1] = '\0';

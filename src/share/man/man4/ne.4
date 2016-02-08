@@ -1,4 +1,4 @@
-.\"	$OpenBSD: ne.4,v 1.26 2006/02/12 00:54:34 brad Exp $
+.\"	$OpenBSD: ne.4,v 1.28 2006/08/30 22:56:05 jmc Exp $
 .\"	$NetBSD: ne.4,v 1.4 1998/02/22 05:21:20 enami Exp $
 .\"
 .\" Copyright (c) 1997 The NetBSD Foundation, Inc.
@@ -41,7 +41,7 @@
 .Os
 .Sh NAME
 .Nm ne
-.Nd NE2000 and compatible Ethernet driver
+.Nd NE2000 and compatible 10/100 Ethernet device
 .Sh SYNOPSIS
 .Cd "ne0 at isa? port 0x240 irq 9"
 .Cd "ne1 at isa? port 0x300 irq 10"
@@ -112,6 +112,7 @@ cards, including:
 .It Li "SMC EZCard, 8041" Ta PCMCIA
 .It Li "SMC EZCard, 8041TX" Ta PCMCIA
 .It Li "Socket Communications LP-CF, LP-E" Ta PCMCIA
+.It Li "Socket Communications CF 10/100" Ta CF
 .It Li "SVEC PN650TX, ComboCard, LANCard" Ta PCMCIA
 .It Li "Surecom NE-34" Ta PCI
 .It Li "Synergy S21810" Ta PCMCIA

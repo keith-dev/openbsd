@@ -1,4 +1,4 @@
-.\"	$OpenBSD: st.4,v 1.11 2005/09/11 23:25:59 krw Exp $
+.\"	$OpenBSD: st.4,v 1.13 2006/06/01 19:17:04 krw Exp $
 .\"	$NetBSD: st.4,v 1.2 1996/10/20 23:15:24 explorer Exp $
 .\"
 .\" Copyright (c) 1996
@@ -41,14 +41,16 @@ The
 driver provides support for
 .Tn SCSI
 tape drives.
-It allows a tape drive to be run in several different modes depending
-on minor numbers and supports several different
-.Dq sub-modes .
 The device can have both a
 .Em raw
 interface and a
 .Em block
 interface; however, only the raw interface is usually used (or recommended).
+The raw interface devices will have an
+.Sq r
+in their names
+e.g.\&
+.Pa /dev/rst0 .
 .Pp
 .Tn SCSI
 devices have a relatively high level interface and talk to the system via a
@@ -56,11 +58,11 @@ devices have a relatively high level interface and talk to the system via a
 adapter and a
 .Tn SCSI
 adapter driver
-(e.g.,
-.Xr ahc 4 ) .
-A
+e.g.\&
+.Xr ahc 4 .
+The
 .Tn SCSI
-adapter must also be separately configured into the system before a
+adapter must be separately configured into the system before a
 .Tn SCSI
 tape can be configured.
 .Pp
@@ -70,7 +72,7 @@ adapter is probed during boot, the
 .Tn SCSI
 bus is scanned for devices.
 Any devices found which answer as
-.Sq Em Sequential
+.Em Sequential
 type devices will be attached to the
 .Nm
 driver.
@@ -78,9 +80,9 @@ driver.
 The
 .Nm
 driver is based around the concept of a
-.Dq Em mount session ,
+.Em mount session ,
 which is defined as the period between the time that a tape is
-mounted, and the time when it is unmounted.
+mounted and the time when it is unmounted.
 Any parameters set during a mount session remain in effect for the remainder
 of the session or until replaced.
 The tape can be unmounted, bringing the session to a close in several ways.
@@ -88,74 +90,59 @@ These include:
 .Bl -enum
 .It
 Closing an
-.Dq unmount device ,
-referred to as sub-mode 00 below.
-An example is
-.Pa /dev/rst0 .
+.Dq unmount device .
 .It
 Using the
 .Dv MTOFFL
 .Xr ioctl 2
 command, reachable through the
-.Sq Cm offline
+.Cm offline
 command of
 .Xr mt 1 .
-.It
-Opening a different mode will implicitly unmount the tape, thereby
-closing off the mode that was previously mounted.
-All parameters will be loaded freshly from the new mode.
-(See below for more on modes.)
 .El
-.Sh MODES AND SUB-MODES
-There are several different
-.Sq operation
-modes.
-These are controlled by bits 2 and 3 of the minor number
-and are designed to allow users to easily read and write different
-formats of tape on devices that allow multiple formats.
-The parameters for each mode can be set individually by hand with the
-.Xr mt 1
-command.
-When a device corresponding to a particular mode is first
-mounted, the operating parameters for that mount session are copied
-from that mode.
-Further changes to the parameters during the session will change those in
-effect for the session but not those set in the operation mode.
-To change the parameters for an operation mode, one must compile them into the
-.Dq Em quirk
-table in the driver's source code.
+.Sh EJECT and REWIND
+Bit 0 of the minor number specifies whether a rewind is attempted when the
+device is closed.
+When it is set, the device will not attempt a rewind on close
+and the device will have an
+.Sq n
+in its name.
+For example,
+.Pa /dev/rst0
+will rewind on close but
+.Pa /dev/nrst0
+will not.
 .Pp
-In addition to the operating modes mentioned above, bits 0 and 1
-of the minor number are interpreted as
-.Sq sub-modes .
-The sub-modes differ in the action taken when the device is closed:
-.Bl -tag -width XXXX
-.It 00
-A close will rewind the device; if the tape has been written, then
-a file mark will be written before the rewind is requested.
-The device is unmounted.
-.It 01
-A close will leave the tape mounted.
-If the tape was written to, a file mark will be written.
-No other head positioning takes place.
-Any further reads or writes will occur directly after the last
-read, or the written file mark.
-.It 10
-A close will rewind the device.
-If the tape has been written, then a file mark will be written before the
-rewind is requested.
-On completion of the rewind an unload command will be issued.
-The device is unmounted.
-.It 11
-Reserved.
-Currently unused.
-.El
+Bit 1 of the minor number specifies whether an eject is attempted when the
+device is closed.
+When it is set, the device will attempt to eject its media on close
+and the device will have an
+.Sq e
+in its name.
+For example,
+.Pa /dev/erst0
+will eject its media on close but
+.Pa /dev/rst0
+will not.
+.Pp
+If both bit 0 and bit 1 are set then an eject will
+be attempted without a rewind and the device will have both an
+.Sq e
+and an
+.Sq n
+in its name.
+For example,
+.Pa /dev/enrst0
+will eject its media without first rewinding it on close.
+.Pp
+There is no guarantee that the attempted eject or rewind will be supported
+by the actual hardware.
 .Sh BLOCKING MODES
 .Tn SCSI
 tapes may run in either
-.Sq Em variable
+.Em variable
 or
-.Sq Em fixed
+.Em fixed
 block-size modes.
 Most
 .Tn QIC Ns -type
@@ -218,22 +205,6 @@ These devices include the QIC family of devices.
 (It might be that this set of devices is the same set as that of fixed.
 This has not yet been determined, and they are treated as separate
 behaviors by the driver at this time.)
-.Sh KERNEL CONFIGURATION
-Because different tape drives behave differently, there is a
-mechanism within the source to
-.Nm
-to quickly and conveniently recognize and deal with brands and
-models of drive that have special requirements.
-.Pp
-There is a table (called the
-.Dq Em quirk table )
-in which the identification strings of known errant drives can be stored.
-Alongside each is a set of flags that allows the setting
-of densities and blocksizes for each of the modes, along with a
-set of
-.Dq QUIRK
-flags that can be used to enable or disable sections
-of code within the driver if a particular drive is recognized.
 .Sh IOCTLS
 The following
 .Xr ioctl 2
@@ -326,13 +297,15 @@ devices).
 .Sh FILES
 .Bl -tag -width /dev/[e][n][r]st[0-9] -compact
 .It Pa /dev/[e][n][r]st[0-9]
-general form
+General form.
 .It Pa /dev/rst0
-Mode 0, rewind on close
+No eject, rewind on close.
 .It Pa /dev/nrst0
-Mode 2, No rewind on close
+No eject, no rewind on close.
 .It Pa /dev/erst0
-Mode 3, Eject on close (if capable)
+Eject, rewind on close.
+.It Pa /dev/enrst0
+Eject, no rewind on close.
 .El
 .Sh SEE ALSO
 .Xr mt 1 ,

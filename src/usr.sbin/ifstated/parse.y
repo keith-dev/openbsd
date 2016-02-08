@@ -1,4 +1,4 @@
-/*	$OpenBSD: parse.y,v 1.11 2006/01/20 00:01:20 millert Exp $	*/
+/*	$OpenBSD: parse.y,v 1.14 2006/05/26 01:06:12 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2004 Ryan McBride <mcbride@openbsd.org>
@@ -453,9 +453,7 @@ lgetc(FILE *f)
 	while ((c = getc(f)) == '\\') {
 		next = getc(f);
 		if (next != '\n') {
-			if (isspace(next))
-				yyerror("whitespace after \\");
-			ungetc(next, f);
+			c = next;
 			break;
 		}
 		yylval.lineno = lineno;
@@ -675,6 +673,7 @@ parse_config(char *filename, int opts)
 
 	if (errors) {
 		clear_config(conf);
+		errors = 0;
 		return (NULL);
 	}
 
@@ -699,6 +698,11 @@ link_states(struct ifsd_action *action)
 				action->act.nextstate = state;
 				break;
 			}
+		}
+		if (state == NULL) {
+			fprintf(stderr, "error: state '%s' not declared\n",
+			    action->act.statename);
+			errors++;
 		}
 		break;
 	}

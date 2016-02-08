@@ -1,4 +1,4 @@
-.\"	$OpenBSD: swapctl.8,v 1.22 2003/06/03 13:16:09 jmc Exp $
+.\"	$OpenBSD: swapctl.8,v 1.26 2006/08/24 08:51:55 jmc Exp $
 .\"	$NetBSD: swapctl.8,v 1.14 1998/05/22 18:27:52 msaitoh Exp $
 .\"
 .\" Copyright (c) 1997 Matthew R. Green
@@ -62,21 +62,15 @@ program adds, removes,
 lists and prioritizes swap devices and files for the system.
 The
 .Nm swapon
-program acts the same as the
-.Nm
-program, as if called with the
-.Fl a
-option, except if
+program acts the same as
+.Ic swapctl -a ,
+except if
 .Nm swapon
 itself is called with
 .Fl a ,
 in which case
-.Nm swapon
-acts as
-.Nm
-with the
-.Fl A
-option.
+it acts as
+.Ic swapctl -A .
 .Pp
 .Sy Note :
 The initial swap device (root disk, partition b) is handled automatically
@@ -134,14 +128,14 @@ The
 option removes the listed
 .Ar path
 from the kernel's list of swap devices or files.
+.It Fl k
+The
+.Fl k
+option uses 1024 byte blocks instead of the default 512 byte.
 .It Fl l
 The
 .Fl l
 option lists the current swap devices and files, and their usage statistics.
-.It Fl s
-The
-.Fl s
-option displays a single line summary of current swap statistics.
 .It Fl p Ar priority
 The
 .Fl p
@@ -155,10 +149,10 @@ This works with the
 and
 .Fl l
 options.
-.It Fl k
+.It Fl s
 The
-.Fl k
-option uses 1024 byte blocks instead of the default 512 byte.
+.Fl s
+option displays a single line summary of current swap statistics.
 .It Fl t Ar blk|noblk
 This flag modifies the function of the
 .Fl A
@@ -180,6 +174,8 @@ This option is useful in early system startup, where swapping
 may be needed before all file systems are available, such as during
 disk checks of large file systems.
 .El
+.Pp
+.Ex -std swapctl
 .Sh SWAP OPTIONS
 When parsing the
 .Pa /etc/fstab
@@ -193,8 +189,14 @@ Additional flags include:
 .Pp
 .Bl -tag -width nfsmntpt=/path -compact
 .It priority=N
-This option sets the priority of the specified swap device to N.
-The highest priority is 0, second priority is 1, etc.
+Swap devices and files may be assigned different priorities,
+to allow faster resources to be used first.
+Swap devices at the same priority are used in a round-robin fashion until
+there is no more space available at this priority, when the next priority
+level will be used.
+The default priority is 0, the highest.
+This value can be any valid integer,
+with higher values receiving less priority.
 .It nfsmntpt=/path
 This option is useful for swapping to NFS files.
 It specifies the local mount point to mount an NFS filesystem.
@@ -206,20 +208,6 @@ For example:
 server:/export/swap/client none swap sw,nfsmntpt=/swap
 .Ed
 .El
-.Sh WARNINGS
-Local and remote swap files cannot be configured until the file
-systems they reside on are mounted read/write.
-The system startup scripts need to
-.Xr fsck 8
-all local file systems before this can happen.
-This process requires substantial amounts of memory on some systems.
-If one configures no
-local block swap devices on a machine that has local file systems to
-check and rely only on swap files, the machine will have no swap space
-at all during system
-.Xr fsck 8
-and may run out of real memory, causing fsck to abnormally exit and
-startup scripts to fail.
 .Sh SEE ALSO
 .Xr swapctl 2 ,
 .Xr fstab 5 ,
@@ -242,3 +230,17 @@ The
 .Nm
 program was written by
 .An Matthew R. Green Aq mrg@eterna.com.au .
+.Sh BUGS
+Local and remote swap files cannot be configured until the file
+systems they reside on are mounted read/write.
+The system startup scripts need to
+.Xr fsck 8
+all local file systems before this can happen.
+This process requires substantial amounts of memory on some systems.
+If one configures no
+local block swap devices on a machine that has local file systems to
+check and rely only on swap files, the machine will have no swap space
+at all during system
+.Xr fsck 8
+and may run out of real memory, causing fsck to abnormally exit and
+startup scripts to fail.

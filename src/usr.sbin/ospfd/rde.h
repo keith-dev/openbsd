@@ -1,4 +1,4 @@
-/*	$OpenBSD: rde.h,v 1.26 2006/02/24 21:06:47 norby Exp $ */
+/*	$OpenBSD: rde.h,v 1.30 2006/05/29 16:50:36 claudio Exp $ */
 
 /*
  * Copyright (c) 2004, 2005 Esben Norby <norby@openbsd.org>
@@ -41,6 +41,7 @@ struct vertex {
 	u_int32_t		 adv_rtr;
 	u_int8_t		 type;
 	u_int8_t		 flooded;
+	u_int8_t		 deleted;
 };
 
 struct rde_req_entry {
@@ -87,6 +88,8 @@ struct abr_rtr {
 	u_int16_t		 metric;
 };
 
+extern struct lsa_tree	asext_tree;
+
 /* rde.c */
 pid_t		 rde(struct ospfd_conf *, int [2], int [2], int [2]);
 int		 rde_imsg_compose_parent(int, pid_t, void *, u_int16_t);
@@ -107,12 +110,12 @@ void		 vertex_free(struct vertex *);
 int		 lsa_newer(struct lsa_hdr *, struct lsa_hdr *);
 int		 lsa_check(struct rde_nbr *, struct lsa *, u_int16_t);
 int		 lsa_self(struct rde_nbr *, struct lsa *, struct vertex *);
-void		 lsa_add(struct rde_nbr *, struct lsa *);
+int		 lsa_add(struct rde_nbr *, struct lsa *);
 void		 lsa_del(struct rde_nbr *, struct lsa_hdr *);
 void		 lsa_age(struct vertex *);
 struct vertex	*lsa_find(struct area *, u_int8_t, u_int32_t, u_int32_t);
 struct vertex	*lsa_find_net(struct area *area, u_int32_t);
-int		 lsa_num_links(struct vertex *);
+u_int16_t	 lsa_num_links(struct vertex *);
 void		 lsa_snap(struct area *, u_int32_t);
 void		 lsa_dump(struct lsa_tree *, int, pid_t);
 void		 lsa_merge(struct rde_nbr *, struct lsa *, struct vertex *);
@@ -131,9 +134,9 @@ int		 cand_list_present(struct vertex *);
 void		 cand_list_clr(void);
 
 void		 spf_timer(int, short, void *);
-int		 start_spf_timer(void);
-int		 stop_spf_timer(struct ospfd_conf *);
-int		 start_spf_holdtimer(struct ospfd_conf *);
+void		 start_spf_timer(void);
+void		 stop_spf_timer(struct ospfd_conf *);
+void		 start_spf_holdtimer(struct ospfd_conf *);
 
 void		 rt_init(void);
 int		 rt_compare(struct rt_node *, struct rt_node *);

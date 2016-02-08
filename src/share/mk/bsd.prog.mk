@@ -1,4 +1,4 @@
-#	$OpenBSD: bsd.prog.mk,v 1.46 2005/09/16 21:23:21 espie Exp $
+#	$OpenBSD: bsd.prog.mk,v 1.49 2006/06/30 19:00:29 otto Exp $
 #	$NetBSD: bsd.prog.mk,v 1.55 1996/04/08 21:19:26 jtc Exp $
 #	@(#)bsd.prog.mk	5.26 (Berkeley) 6/25/91
 
@@ -8,7 +8,7 @@
 
 .include <bsd.own.mk>
 
-.SUFFIXES: .out .o .c .cc .C .cxx .y .l .s .8 .7 .6 .5 .4 .3 .2 .1 .0
+.SUFFIXES: .out .ln .o .c .cc .C .cxx .y .l .s .8 .7 .6 .5 .4 .3 .2 .1 .0
 
 .if ${WARNINGS:L} == "yes"
 CFLAGS+=       ${CDIAGFLAGS}
@@ -17,7 +17,7 @@ CXXFLAGS+=     ${CXXDIAGFLAGS}
 CFLAGS+=	${COPTS}
 CXXFLAGS+=     ${CXXOPTS}
 
-.if (${ELF_TOOLCHAIN:L} == "yes")
+.if ${ELF_TOOLCHAIN:L} == "yes"
 CRTBEGIN?=       ${DESTDIR}/usr/lib/crtbegin.o
 CRTEND?=         ${DESTDIR}/usr/lib/crtend.o
 .endif
@@ -63,8 +63,8 @@ LIBWRAP?=	${DESTDIR}/usr/lib/libwrap.a
 LIBY?=		${DESTDIR}/usr/lib/liby.a
 LIBZ?=		${DESTDIR}/usr/lib/libz.a
 
-.if (${MACHINE_ARCH} == "alpha" || ${MACHINE_ARCH} == "amd64" || \
-     ${MACHINE_ARCH} == "i386")
+.if ${MACHINE_ARCH} == "alpha" || ${MACHINE_ARCH} == "amd64" || \
+    ${MACHINE_ARCH} == "i386"
 LIBARCH?=	${DESTDIR}/usr/lib/lib${MACHINE_ARCH}.a
 .else
 LIBARCH?=
@@ -81,7 +81,9 @@ LIBRESOLV?=	${DESTDIR}/usr/lib/libresolv.a
 SRCS?=	${PROG}.c
 .  if !empty(SRCS:N*.h:N*.sh)
 OBJS+=	${SRCS:N*.h:N*.sh:R:S/$/.o/g}
-LOBJS+=	${LSRCS:.c=.ln} ${SRCS:M*.c:.c=.ln}
+_LEXINTM+=${SRCS:M*.l:.l=.c}
+_YACCINTM+=${SRCS:M*.y:.y=.c}
+LOBJS+=	${LSRCS:.c=.ln} ${SRCS:M*.c:.c=.ln} ${SRCS:M*.y:.y=.ln} ${SRCS:M*.l:.l=.ln}
 .  endif
 
 .  if defined(OBJS) && !empty(OBJS)
@@ -104,8 +106,8 @@ all: ${PROG} _SUBDIRUSE
 
 .if !target(clean)
 clean: _SUBDIRUSE
-	rm -f a.out [Ee]rrs mklog core *.core \
-	    ${PROG} ${OBJS} ${LOBJS} ${CLEANFILES}
+	rm -f a.out [Ee]rrs mklog core *.core y.tab.h \
+	    ${PROG} ${OBJS} ${LOBJS} ${_LEXINTM} ${_YACCINTM} ${CLEANFILES}
 .endif
 
 cleandir: _SUBDIRUSE clean

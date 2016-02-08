@@ -1,4 +1,4 @@
-/*	$OpenBSD: tcpdump.c,v 1.49 2006/02/15 20:34:23 otto Exp $	*/
+/*	$OpenBSD: tcpdump.c,v 1.55 2006/06/16 16:55:46 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1988, 1989, 1990, 1991, 1992, 1993, 1994, 1995, 1996, 1997
@@ -26,7 +26,7 @@ static const char copyright[] =
     "@(#) Copyright (c) 1988, 1989, 1990, 1991, 1992, 1993, 1994, 1995, 1996, 1997\n\
 The Regents of the University of California.  All rights reserved.\n";
 static const char rcsid[] =
-    "@(#) $Header: /cvs/src/usr.sbin/tcpdump/tcpdump.c,v 1.49 2006/02/15 20:34:23 otto Exp $ (LBL)";
+    "@(#) $Header: /cvs/src/usr.sbin/tcpdump/tcpdump.c,v 1.55 2006/06/16 16:55:46 deraadt Exp $ (LBL)";
 #endif
 
 /*
@@ -195,7 +195,7 @@ pcap_list_linktypes(pcap_t *p)
 		err(1, "BIOCGDLTLIST");
 
 	if (dl.bfl_len > MAXDLT)
-		error("Invalid number of linktypes: %u\n", dl.bfl_len);
+		error("Invalid number of linktypes: %u", dl.bfl_len);
 
 	fprintf(stderr, "%d link type%s supported:\n", dl.bfl_len,
 	    dl.bfl_len == 1 ? "" : "s");
@@ -213,31 +213,24 @@ extern char *optarg;
 int
 main(int argc, char **argv)
 {
-	register int cnt, op, i;
+	int cnt = -1, op, i;
 	bpf_u_int32 localnet, netmask;
-	register char *cp, *infile, *device, *RFileName, *WFileName;
+	char *cp, *infile = NULL, *device = NULL, *RFileName = NULL;
+	char ebuf[PCAP_ERRBUF_SIZE], *WFileName = NULL;
 	pcap_handler printer;
 	struct bpf_program *fcode;
-	RETSIGTYPE (*oldhandler)(int);
 	u_char *pcap_userdata;
-	char ebuf[PCAP_ERRBUF_SIZE];
 	u_int dlt = (u_int) -1;
 
-	cnt = -1;
-	device = NULL;
-	infile = NULL;
-	RFileName = NULL;
-	WFileName = NULL;
-
-	if (priv_init(argc, argv))
-		error("Failed to setup privsep");
-
-	/* state: STATE_INIT */
 	if ((cp = strrchr(argv[0], '/')) != NULL)
 		program_name = cp + 1;
 	else
 		program_name = argv[0];
 
+	if (priv_init(argc, argv))
+		error("Failed to setup privsep");
+
+	/* state: STATE_INIT */
 	if (abort_on_misalignment(ebuf, sizeof(ebuf)) < 0)
 		error("%s", ebuf);
 
@@ -456,13 +449,6 @@ main(int argc, char **argv)
 	}
 	init_addrtoname(localnet, netmask);
 
-	setsignal(SIGTERM, cleanup);
-	setsignal(SIGINT, cleanup);
-	setsignal(SIGCHLD, gotchld);
-	/* Cooperate with nohup(1) XXX is this still necessary/working? */
-	if ((oldhandler = setsignal(SIGHUP, cleanup)) != SIG_DFL)
-		(void)setsignal(SIGHUP, oldhandler);
-
 	if (WFileName) {
 		pcap_dumper_t *p;
 
@@ -506,6 +492,7 @@ main(int argc, char **argv)
 }
 
 /* make a clean exit on interrupts */
+/* ARGSUSED */
 RETSIGTYPE
 cleanup(int signo)
 {
@@ -535,6 +522,7 @@ cleanup(int signo)
 	_exit(0);
 }
 
+/* ARGSUSED */
 RETSIGTYPE
 gotchld(int signo)
 {
@@ -658,20 +646,28 @@ default_print(register const u_char *bp, register u_int length)
 	}
 }
 
+void
+set_slave_signals(void)
+{
+	RETSIGTYPE (*oldhandler)(int);
+
+	setsignal(SIGTERM, cleanup);
+	setsignal(SIGINT, cleanup);
+	setsignal(SIGCHLD, gotchld);
+	/* Cooperate with nohup(1) XXX is this still necessary/working? */
+	if ((oldhandler = setsignal(SIGHUP, cleanup)) != SIG_DFL)
+		(void)setsignal(SIGHUP, oldhandler);
+}
+
 __dead void
 usage(void)
 {
-	extern char version[];
-	extern char pcap_version[];
-
-	(void)fprintf(stderr, "%s version %s\n", program_name, version);
-	(void)fprintf(stderr, "libpcap version %s\n", pcap_version);
 	(void)fprintf(stderr,
 "Usage: %s [-adefLlNnOopqStvXx] [-c count] [-E [espalg:]espkey] [-F file]\n",
 	    program_name);
 	(void)fprintf(stderr,
-"\t\t[-i interface] [-r file] [-s snaplen] [-T type] [-w file]\n");
+"\t       [-i interface] [-r file] [-s snaplen] [-T type] [-w file]\n");
 	(void)fprintf(stderr,
-"\t\t[-y datalinktype] [expression]\n");
+"\t       [-y datalinktype] [expression]\n");
 	exit(1);
 }

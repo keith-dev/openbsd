@@ -1,4 +1,4 @@
-/*	$OpenBSD: ntp.c,v 1.67 2005/08/10 13:48:36 dtucker Exp $ */
+/*	$OpenBSD: ntp.c,v 1.91 2006/07/01 18:52:46 otto Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -32,10 +32,10 @@
 #include <unistd.h>
 
 #include "ntpd.h"
-#include "ntp.h"
 
 #define	PFD_PIPE_MAIN	0
-#define	PFD_MAX		1
+#define	PFD_HOTPLUG	1
+#define	PFD_MAX		2
 
 volatile sig_atomic_t	 ntp_quit = 0;
 struct imsgbuf		*ibuf_main;
@@ -62,9 +62,11 @@ ntp_sighdlr(int sig)
 pid_t
 ntp_main(int pipe_prnt[2], struct ntpd_conf *nconf)
 {
-	int			 a, b, nfds, i, j, idx_peers, timeout, nullfd;
+	int			 a, b, nfds, i, j, idx_peers, timeout;
+	int			 hotplugfd, nullfd;
 	u_int			 pfd_elms = 0, idx2peer_elms = 0;
 	u_int			 listener_cnt, new_cnt, sent_cnt, trial_cnt;
+	u_int			 sensors_cnt = 0;
 	pid_t			 pid;
 	struct pollfd		*pfd = NULL;
 	struct passwd		*pw;
@@ -72,9 +74,10 @@ ntp_main(int pipe_prnt[2], struct ntpd_conf *nconf)
 	struct listen_addr	*la;
 	struct ntp_peer		*p;
 	struct ntp_peer		**idx2peer = NULL;
+	struct ntp_sensor	*s, *next_s;
 	struct timespec		 tp;
 	struct stat		 stb;
-	time_t			 nextaction;
+	time_t			 nextaction, last_sensor_scan = 0;
 	void			*newp;
 
 	switch (pid = fork()) {
@@ -87,6 +90,12 @@ ntp_main(int pipe_prnt[2], struct ntpd_conf *nconf)
 		return (pid);
 	}
 
+	/* in this case the parent didn't init logging and didn't daemonize */
+	if (nconf->settime && !nconf->debug) {
+		log_init(nconf->debug);
+		if (setsid() == -1)
+			fatal("setsid");
+	}
 	if ((se = getservbyname("ntp", "udp")) == NULL)
 		fatal("getservbyname");
 
@@ -95,6 +104,7 @@ ntp_main(int pipe_prnt[2], struct ntpd_conf *nconf)
 
 	if ((nullfd = open(_PATH_DEVNULL, O_RDWR, 0)) == -1)
 		fatal(NULL);
+	hotplugfd = sensor_hotplugfd();
 
 	if (stat(pw->pw_dir, &stb) == -1)
 		fatal("stat");
@@ -128,6 +138,7 @@ ntp_main(int pipe_prnt[2], struct ntpd_conf *nconf)
 	signal(SIGINT, ntp_sighdlr);
 	signal(SIGPIPE, SIG_IGN);
 	signal(SIGHUP, SIG_IGN);
+	signal(SIGCHLD, SIG_DFL);
 
 	close(pipe_prnt[0]);
 	if ((ibuf_main = malloc(sizeof(struct imsgbuf))) == NULL)
@@ -138,6 +149,15 @@ ntp_main(int pipe_prnt[2], struct ntpd_conf *nconf)
 		client_peer_init(p);
 
 	bzero(&conf->status, sizeof(conf->status));
+
+	conf->freq.num = 0;
+	conf->freq.samples = 0;
+	conf->freq.x = 0.0;
+	conf->freq.xx = 0.0;
+	conf->freq.xy = 0.0;
+	conf->freq.y = 0.0;
+	conf->freq.overall_offset = 0.0;
+
 	conf->status.synced = 0;
 	clock_getres(CLOCK_REALTIME, &tp);
 	b = 1000000000 / tp.tv_nsec;	/* convert to Hz */
@@ -145,6 +165,8 @@ ntp_main(int pipe_prnt[2], struct ntpd_conf *nconf)
 		;
 	conf->status.precision = a;
 	conf->scale = 1;
+
+	sensor_init(conf);
 
 	log_info("ntp engine ready");
 
@@ -183,8 +205,10 @@ ntp_main(int pipe_prnt[2], struct ntpd_conf *nconf)
 		nextaction = time(NULL) + 3600;
 		pfd[PFD_PIPE_MAIN].fd = ibuf_main->fd;
 		pfd[PFD_PIPE_MAIN].events = POLLIN;
+		pfd[PFD_HOTPLUG].fd = hotplugfd;
+		pfd[PFD_HOTPLUG].events = POLLIN;
 
-		i = 1;
+		i = PFD_MAX;
 		TAILQ_FOREACH(la, &conf->listen_addrs, entry) {
 			pfd[i].fd = la->fd;
 			pfd[i].events = POLLIN;
@@ -227,8 +251,20 @@ ntp_main(int pipe_prnt[2], struct ntpd_conf *nconf)
 			}
 		}
 
+		if (last_sensor_scan + SENSOR_SCAN_INTERVAL < time(NULL)) {
+			sensor_scan();
+			last_sensor_scan = time(NULL);
+		}
+		sensors_cnt = 0;
+		TAILQ_FOREACH(s, &conf->ntp_sensors, entry) {
+			sensors_cnt++;
+			if (s->next > 0 && s->next < nextaction)
+				nextaction = s->next;
+		}
+
 		if (conf->settime &&
-		    ((trial_cnt > 0 && sent_cnt == 0) || peer_cnt == 0))
+		    ((trial_cnt > 0 && sent_cnt == 0) ||
+		    (peer_cnt == 0 && sensors_cnt == 0)))
 			priv_settime(0);	/* no good peers, don't wait */
 
 		if (ibuf_main->w.queued > 0)
@@ -256,6 +292,11 @@ ntp_main(int pipe_prnt[2], struct ntpd_conf *nconf)
 				ntp_quit = 1;
 		}
 
+		if (nfds > 0 && pfd[PFD_HOTPLUG].revents & (POLLIN|POLLERR)) {
+			nfds--;
+			sensor_hotplugevent(hotplugfd);
+		}
+
 		for (j = 1; nfds > 0 && j < idx_peers; j++)
 			if (pfd[j].revents & (POLLIN|POLLERR)) {
 				nfds--;
@@ -270,6 +311,13 @@ ntp_main(int pipe_prnt[2], struct ntpd_conf *nconf)
 				    conf->settime) == -1)
 					ntp_quit = 1;
 			}
+
+		for (s = TAILQ_FIRST(&conf->ntp_sensors); s != NULL;
+		    s = next_s) {
+			next_s = TAILQ_NEXT(s, entry);
+			if (s->next <= time(NULL))
+				sensor_query(s);
+		}
 	}
 
 	msgbuf_write(&ibuf_main->w);
@@ -345,6 +393,7 @@ ntp_dispatch_imsg(void)
 				dlen -= sizeof(h->ss);
 				if (peer->addr_head.pool) {
 					npeer = new_peer();
+					npeer->weight = peer->weight;
 					h->next = NULL;
 					npeer->addr = h;
 					npeer->addr_head.a = h;
@@ -388,87 +437,146 @@ peer_remove(struct ntp_peer *p)
 	peer_cnt--;
 }
 
-void
+static void
+priv_adjfreq(double offset)
+{
+	double curtime, freq;
+
+	if (!conf->status.synced)
+		return;
+
+	conf->freq.samples++;
+
+	if (conf->freq.samples <= 0)
+		return;
+
+	conf->freq.overall_offset += offset;
+	offset = conf->freq.overall_offset;
+
+	curtime = gettime_corrected();
+	conf->freq.xy += offset * curtime;
+	conf->freq.x += curtime;
+	conf->freq.y += offset;
+	conf->freq.xx += curtime * curtime;
+
+	if (conf->freq.samples % FREQUENCY_SAMPLES != 0)
+		return;
+
+	freq =
+	    (conf->freq.xy - conf->freq.x * conf->freq.y / conf->freq.samples)
+	    /
+	    (conf->freq.xx - conf->freq.x * conf->freq.x / conf->freq.samples);
+
+	if (freq > MAX_FREQUENCY_ADJUST)
+		freq = MAX_FREQUENCY_ADJUST;
+	else if (freq < -MAX_FREQUENCY_ADJUST)
+		freq = -MAX_FREQUENCY_ADJUST;
+
+	imsg_compose(ibuf_main, IMSG_ADJFREQ, 0, 0, &freq, sizeof(freq));
+	conf->freq.xy = 0.0;
+	conf->freq.x = 0.0;
+	conf->freq.y = 0.0;
+	conf->freq.xx = 0.0;
+	conf->freq.samples = 0;
+	conf->freq.overall_offset = 0.0;
+	conf->freq.num++;
+}
+
+int
 priv_adjtime(void)
 {
-	struct ntp_peer	 *p;
-	int		  offset_cnt = 0, i = 0;
-	struct ntp_peer	**peers;
-	double		  offset_median;
+	struct ntp_peer		 *p;
+	struct ntp_sensor	 *s;
+	int			  offset_cnt = 0, i = 0, j;
+	struct ntp_offset	**offsets;
+	double			  offset_median;
 
 	TAILQ_FOREACH(p, &conf->ntp_peers, entry) {
 		if (p->trustlevel < TRUSTLEVEL_BADPEER)
 			continue;
 		if (!p->update.good)
-			return;
-		offset_cnt++;
+			return (1);
+		offset_cnt += p->weight;
 	}
 
-	if ((peers = calloc(offset_cnt, sizeof(struct ntp_peer *))) == NULL)
+	TAILQ_FOREACH(s, &conf->ntp_sensors, entry) {
+		if (!s->update.good)
+			continue;
+		offset_cnt += s->weight;
+	}
+
+	if (offset_cnt == 0)
+		return (1);
+
+	if ((offsets = calloc(offset_cnt, sizeof(struct ntp_offset *))) == NULL)
 		fatal("calloc priv_adjtime");
 
 	TAILQ_FOREACH(p, &conf->ntp_peers, entry) {
 		if (p->trustlevel < TRUSTLEVEL_BADPEER)
 			continue;
-		peers[i++] = p;
+		for (j = 0; j < p->weight; j++)
+			offsets[i++] = &p->update;
 	}
 
-	qsort(peers, offset_cnt, sizeof(struct ntp_peer *), offset_compare);
-
-	if (offset_cnt > 0) {
-		if (offset_cnt > 1 && offset_cnt % 2 == 0) {
-			offset_median =
-			    (peers[offset_cnt / 2 - 1]->update.offset +
-			    peers[offset_cnt / 2]->update.offset) / 2;
-			conf->status.rootdelay =
-			    (peers[offset_cnt / 2 - 1]->update.delay +
-			    peers[offset_cnt / 2]->update.delay) / 2;
-			conf->status.stratum = MAX(
-			    peers[offset_cnt / 2 - 1]->update.status.stratum,
-			    peers[offset_cnt / 2]->update.status.stratum);
-		} else {
-			offset_median = peers[offset_cnt / 2]->update.offset;
-			conf->status.rootdelay =
-			    peers[offset_cnt / 2]->update.delay;
-			conf->status.stratum =
-			    peers[offset_cnt / 2]->update.status.stratum;
-		}
-		conf->status.leap = peers[offset_cnt / 2]->update.status.leap;
-
-		imsg_compose(ibuf_main, IMSG_ADJTIME, 0, 0,
-		    &offset_median, sizeof(offset_median));
-
-		conf->status.reftime = gettime();
-		conf->status.stratum++;	/* one more than selected peer */
-		update_scale(offset_median);
-
-		conf->status.refid4 =
-		    peers[offset_cnt / 2]->update.status.refid4;
-		if (peers[offset_cnt / 2]->addr->ss.ss_family == AF_INET)
-			conf->status.refid = ((struct sockaddr_in *)
-			    &peers[offset_cnt / 2]->addr->ss)->sin_addr.s_addr;
-		else
-			conf->status.refid = conf->status.refid4;
+	TAILQ_FOREACH(s, &conf->ntp_sensors, entry) {
+		if (!s->update.good)
+			continue;
+		for (j = 0; j < s->weight; j++)
+			offsets[i++] = &s->update;
 	}
 
-	free(peers);
+	qsort(offsets, offset_cnt, sizeof(struct ntp_offset *), offset_compare);
 
-	TAILQ_FOREACH(p, &conf->ntp_peers, entry)
+	i = offset_cnt / 2;
+	if (offset_cnt % 2 == 0) {
+		offset_median =
+		    (offsets[i - 1]->offset + offsets[i]->offset) / 2;
+		conf->status.rootdelay =
+		    (offsets[i - 1]->delay + offsets[i]->delay) / 2;
+		conf->status.stratum = MAX(
+		    offsets[i - 1]->status.stratum, offsets[i]->status.stratum);
+	} else {
+		offset_median = offsets[i]->offset;
+		conf->status.rootdelay = offsets[i]->delay;
+		conf->status.stratum = offsets[i]->status.stratum;
+	}
+	conf->status.leap = offsets[i]->status.leap;
+
+	imsg_compose(ibuf_main, IMSG_ADJTIME, 0, 0,
+	    &offset_median, sizeof(offset_median));
+
+	priv_adjfreq(offset_median);
+
+	conf->status.reftime = gettime();
+	conf->status.stratum++;	/* one more than selected peer */
+	update_scale(offset_median);
+
+	conf->status.refid4 = offsets[i]->status.refid4;
+	conf->status.refid = offsets[i]->status.send_refid;
+
+	free(offsets);
+
+	TAILQ_FOREACH(p, &conf->ntp_peers, entry) {
+		for (i = 0; i < OFFSET_ARRAY_SIZE; i++)
+			p->reply[i].offset -= offset_median;
 		p->update.good = 0;
+	}
+
+	return (0);
 }
 
 int
 offset_compare(const void *aa, const void *bb)
 {
-	const struct ntp_peer * const *a;
-	const struct ntp_peer * const *b;
+	const struct ntp_offset * const *a;
+	const struct ntp_offset * const *b;
 
 	a = aa;
 	b = bb;
 
-	if ((*a)->update.offset < (*b)->update.offset)
+	if ((*a)->offset < (*b)->offset)
 		return (-1);
-	else if ((*a)->update.offset > (*b)->update.offset)
+	else if ((*a)->offset > (*b)->offset)
 		return (1);
 	else
 		return (0);
@@ -502,10 +610,12 @@ priv_host_dns(char *name, u_int32_t peerid)
 void
 update_scale(double offset)
 {
+	offset += getoffset();
 	if (offset < 0)
 		offset = -offset;
 
-	if (offset > QSCALE_OFF_MAX)
+	if (offset > QSCALE_OFF_MAX || !conf->status.synced ||
+	    conf->freq.num < 3)
 		conf->scale = 1;
 	else if (offset < QSCALE_OFF_MIN)
 		conf->scale = QSCALE_OFF_MAX / QSCALE_OFF_MIN;

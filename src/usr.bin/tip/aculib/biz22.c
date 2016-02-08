@@ -1,4 +1,4 @@
-/*	$OpenBSD: biz22.c,v 1.11 2003/06/03 02:56:18 millert Exp $	*/
+/*	$OpenBSD: biz22.c,v 1.13 2006/03/17 19:17:13 moritz Exp $	*/
 /*	$NetBSD: biz22.c,v 1.6 1997/02/11 09:24:11 mrg Exp $	*/
 
 /*
@@ -34,19 +34,20 @@
 #if 0
 static char sccsid[] = "@(#)biz22.c	8.1 (Berkeley) 6/6/93";
 #endif
-static const char rcsid[] = "$OpenBSD: biz22.c,v 1.11 2003/06/03 02:56:18 millert Exp $";
+static const char rcsid[] = "$OpenBSD: biz22.c,v 1.13 2006/03/17 19:17:13 moritz Exp $";
 #endif /* not lint */
 
 #include "tip.h"
 
 #define DISCONNECT_CMD	"\20\04"	/* disconnection string */
 
-static	void sigALRM();
-static	int timeout = 0;
+static	int dialtimeout = 0;
 static	jmp_buf timeoutbuf;
 
-static	int cmd(), detect();
-void	biz22_disconnect();
+static int	biz_dialer(char *, char *);
+static void	sigALRM(int);
+static int	cmd(char *);
+static int	detect(char *);
 
 /*
  * Dial up on a BIZCOMP Model 1022 with either
@@ -54,8 +55,7 @@ void	biz22_disconnect();
  *	pulse dialing (mod = "W")
  */
 static int
-biz_dialer(num, mod)
-	char *num, *mod;
+biz_dialer(char *num, char *mod)
 {
 	int connected = 0;
 	char cbuf[40];
@@ -91,7 +91,7 @@ biz_dialer(num, mod)
 	 */
 	connected = detect("1\r");
 #ifdef ACULOG
-	if (timeout) {
+	if (dialtimeout) {
 		char line[80];
 
 		(void)snprintf(line, sizeof line, "%ld second dial timeout",
@@ -99,29 +99,25 @@ biz_dialer(num, mod)
 		logent(value(HOST), num, "biz1022", line);
 	}
 #endif
-	if (timeout)
+	if (dialtimeout)
 		biz22_disconnect();	/* insurance */
 	return (connected);
 }
 
 int
-biz22w_dialer(num, acu)
-	char *num, *acu;
+biz22w_dialer(char *num, char *acu)
 {
-
 	return (biz_dialer(num, "W"));
 }
 
 int
-biz22f_dialer(num, acu)
-	char *num, *acu;
+biz22f_dialer(char *num, char *acu)
 {
-
 	return (biz_dialer(num, "V"));
 }
 
 void
-biz22_disconnect()
+biz22_disconnect(void)
 {
 	write(FD, DISCONNECT_CMD, sizeof(DISCONNECT_CMD)-1);
 	sleep(2);
@@ -129,23 +125,21 @@ biz22_disconnect()
 }
 
 void
-biz22_abort()
+biz22_abort(void)
 {
-
 	write(FD, "\02", 1);
 }
 
+/*ARGSUSED*/
 static void
-sigALRM()
+sigALRM(int signo)
 {
-
-	timeout = 1;
+	dialtimeout = 1;
 	longjmp(timeoutbuf, 1);
 }
 
 static int
-cmd(s)
-	char *s;
+cmd(char *s)
 {
 	sig_t f;
 	char c;
@@ -166,14 +160,13 @@ cmd(s)
 }
 
 static int
-detect(s)
-	char *s;
+detect(char *s)
 {
 	sig_t f;
 	char c;
 
 	f = signal(SIGALRM, sigALRM);
-	timeout = 0;
+	dialtimeout = 0;
 	while (*s) {
 		if (setjmp(timeoutbuf)) {
 			biz22_abort();
@@ -187,5 +180,5 @@ detect(s)
 			return (0);
 	}
 	signal(SIGALRM, f);
-	return (timeout == 0);
+	return (dialtimeout == 0);
 }

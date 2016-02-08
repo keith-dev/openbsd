@@ -1,4 +1,4 @@
-/*	$OpenBSD: editor.c,v 1.101 2005/12/05 21:30:40 miod Exp $	*/
+/*	$OpenBSD: editor.c,v 1.104 2006/07/01 16:50:33 krw Exp $	*/
 
 /*
  * Copyright (c) 1997-2000 Todd C. Miller <Todd.Miller@courtesan.com>
@@ -17,7 +17,7 @@
  */
 
 #ifndef lint
-static char rcsid[] = "$OpenBSD: editor.c,v 1.101 2005/12/05 21:30:40 miod Exp $";
+static char rcsid[] = "$OpenBSD: editor.c,v 1.104 2006/07/01 16:50:33 krw Exp $";
 #endif /* not lint */
 
 #include <sys/types.h>
@@ -295,7 +295,7 @@ editor(struct disklabel *lp, int f, char *dev, char *fstabfile)
 		case 'M': {
 			sig_t opipe = signal(SIGPIPE, SIG_IGN);
 			char *pager, *cmd = NULL;
-			extern const char manpage[];
+			extern const u_char manpage[];
 			extern const int manpage_sz;
 
 			if ((pager = getenv("PAGER")) == NULL || *pager == '\0')
@@ -496,8 +496,6 @@ editor_add(struct disklabel *lp, char **mp, u_int32_t *freep, char *p)
 
 	/* Set defaults */
 	pp = &lp->d_partitions[partno];
-	if (partno >= lp->d_npartitions)
-		lp->d_npartitions = partno + 1;
 	memset(pp, 0, sizeof(*pp));
 	pp->p_size = *freep;
 	pp->p_offset = next_offset(lp, &pp->p_size);
@@ -1630,8 +1628,8 @@ find_bounds(struct disklabel *lp, struct disklabel *bios_lp)
 			u_int32_t i, new_end;
 
 			/* Set start and end based on fdisk partition bounds */
-			starting_sector = get_le(&dosdp->dp_start);
-			ending_sector = starting_sector + get_le(&dosdp->dp_size);
+			starting_sector = letoh32(dosdp->dp_start);
+			ending_sector = starting_sector + letoh32(dosdp->dp_size);
 
 			/*
 			 * If the ending sector of the BSD fdisk partition

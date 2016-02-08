@@ -1,4 +1,4 @@
-/*	$OpenBSD: apmd.c,v 1.41 2006/01/19 19:17:10 sturm Exp $	*/
+/*	$OpenBSD: apmd.c,v 1.44 2006/04/12 19:40:18 deraadt Exp $	*/
 
 /*
  *  Copyright (c) 1995, 1996 John T. Kohl
@@ -307,7 +307,7 @@ handle_client(int sock_fd, int ctl_fd)
 	struct apm_command cmd;
 	struct apm_reply reply;
 	int cpuspeed_mib[] = {CTL_HW, HW_CPUSPEED};
-	int cpuspeed;
+	int cpuspeed = 0;
 	size_t cpuspeed_sz = sizeof(cpuspeed);
 
 	fromlen = sizeof(from);
@@ -338,13 +338,13 @@ handle_client(int sock_fd, int ctl_fd)
 		reply.newstate = STANDING_BY;
 		break;
 	case SETPERF_LOW:
-		doperf = PERF_LOW;
+		doperf = PERF_MANUAL;
 		reply.newstate = NORMAL;
 		syslog(LOG_NOTICE, "setting hw.setperf to %d", PERFMIN);
 		setperf(PERFMIN);
 		break;
 	case SETPERF_HIGH:
-		doperf = PERF_HIGH;
+		doperf = PERF_MANUAL;
 		reply.newstate = NORMAL;
 		syslog(LOG_NOTICE, "setting hw.setperf to %d", PERFMAX);
 		setperf(PERFMAX);
@@ -368,7 +368,7 @@ handle_client(int sock_fd, int ctl_fd)
 		syslog(LOG_INFO, "cannot read hw.cpuspeed");
 
 	reply.cpuspeed = cpuspeed;
-	reply.perfstate = doperf;
+	reply.perfmode = doperf;
 	reply.vno = APMD_VNO;
 	if (send(cli_fd, &reply, sizeof(reply), 0) != sizeof(reply))
 		syslog(LOG_INFO, "client reply botch");
@@ -460,13 +460,13 @@ main(int argc, char *argv[])
 		case 'L':
 			if (doperf != PERF_NONE)
 				usage();
-			doperf = PERF_LOW;
+			doperf = PERF_MANUAL;
 			setperf(PERFMIN);
 			break;
 		case 'H':
 			if (doperf != PERF_NONE)
 				usage();
-			doperf = PERF_HIGH;
+			doperf = PERF_MANUAL;
 			setperf(PERFMAX);
 			break;
 		case 'm':
@@ -479,6 +479,9 @@ main(int argc, char *argv[])
 
 	argc -= optind;
 	argv += optind;
+
+	if (doperf == PERF_NONE)
+		doperf = PERF_MANUAL;
 
 	if (debug)
 		openlog(__progname, LOG_CONS, LOG_LOCAL1);
@@ -493,7 +496,7 @@ main(int argc, char *argv[])
 	(void) signal(SIGINT, sigexit);
 
 	if ((ctl_fd = open(fname, O_RDWR)) == -1) {
-		if (errno != ENXIO)
+		if (errno != ENXIO && errno != ENOENT)
 			error("cannot open device file `%s'", fname);
 	} else if (fcntl(ctl_fd, F_SETFD, 1) == -1)
 		error("cannot set close-on-exec for `%s'", fname);

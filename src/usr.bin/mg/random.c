@@ -1,4 +1,4 @@
-/*	$OpenBSD: random.c,v 1.17 2005/11/22 05:02:44 kjell Exp $	*/
+/*	$OpenBSD: random.c,v 1.22 2006/07/25 08:27:09 kjell Exp $	*/
 
 /* This file is in the public domain. */
 
@@ -31,7 +31,7 @@ showcpos(int f, int n)
 	int	 ratio;
 
 	/* collect the data */
-	clp = lforw(curbp->b_linep);
+	clp = bfirstlp(curbp);
 	cchar = 0;
 	cline = 0;
 	cbyte = 0;
@@ -52,7 +52,7 @@ showcpos(int f, int n)
 		/* now count the chars */
 		nchar += llength(clp);
 		clp = lforw(clp);
-		if (clp == curbp->b_linep)
+		if (clp == curbp->b_headp)
 			break;
 		/* count the newline */
 		nchar++;
@@ -60,7 +60,7 @@ showcpos(int f, int n)
 	/* determine row */
 	row = curwp->w_toprow + 1;
 	clp = curwp->w_linep;
-	while (clp != curbp->b_linep && clp != curwp->w_dotp) {
+	while (clp != curbp->b_headp && clp != curwp->w_dotp) {
 		++row;
 		clp = lforw(clp);
 	}
@@ -75,6 +75,7 @@ int
 getcolpos(void)
 {
 	int	col, i, c;
+	char tmp[5];
 
 	/* determine column */
 	col = 0;
@@ -90,12 +91,10 @@ getcolpos(void)
 			col++;
 		} else if (ISCTRL(c) != FALSE)
 			col += 2;
-		else if (isprint(c))
+		else if (isprint(c)) {
 			col++;
-		else {
-			char tmp[5];
-			snprintf(tmp, sizeof(tmp), "\\%o", c);
-			col += strlen(tmp);
+		} else {
+			col += snprintf(tmp, sizeof(tmp), "\\%o", c);
 		}
 
 	}
@@ -116,20 +115,29 @@ twiddle(int f, int n)
 {
 	struct line	*dotp;
 	int	 doto, cr;
+	int	 fudge = FALSE;
 
 	dotp = curwp->w_dotp;
 	doto = curwp->w_doto;
+	undo_add_boundary();
+	undo_no_boundary(TRUE);
 	if (doto == llength(dotp)) {
 		if (--doto <= 0)
 			return (FALSE);
+		(void)backchar(FFRAND, 1);
+		fudge = TRUE;
 	} else {
 		if (doto == 0)
 			return (FALSE);
-		++curwp->w_doto;
 	}
-	cr = lgetc(dotp, doto--);
-	lputc(dotp, doto + 1, lgetc(dotp, doto));
-	lputc(dotp, doto, cr);
+	cr = lgetc(dotp, doto - 1);
+	(void)backdel(FFRAND, 1);
+	(void)forwchar(FFRAND, 1);
+	linsert(1, cr);
+	if (fudge != TRUE)
+		(void)backchar(FFRAND, 1);
+	undo_no_boundary(FALSE);
+	undo_add_boundary();
 	lchange(WFEDIT);
 	return (TRUE);
 }
@@ -198,11 +206,11 @@ deblank(int f, int n)
 	RSIZE	 nld;
 
 	lp1 = curwp->w_dotp;
-	while (llength(lp1) == 0 && (lp2 = lback(lp1)) != curbp->b_linep)
+	while (llength(lp1) == 0 && (lp2 = lback(lp1)) != curbp->b_headp)
 		lp1 = lp2;
 	lp2 = lp1;
 	nld = (RSIZE)0;
-	while ((lp2 = lforw(lp2)) != curbp->b_linep && llength(lp2) == 0)
+	while ((lp2 = lforw(lp2)) != curbp->b_headp && llength(lp2) == 0)
 		++nld;
 	if (nld == 0)
 		return (TRUE);

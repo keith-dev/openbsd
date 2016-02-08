@@ -1,4 +1,4 @@
-/*	$OpenBSD: control.c,v 1.13 2006/02/10 18:30:47 claudio Exp $ */
+/*	$OpenBSD: control.c,v 1.15 2006/04/25 08:00:22 claudio Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -108,6 +108,7 @@ control_cleanup(void)
 	unlink(OSPFD_SOCKET);
 }
 
+/* ARGSUSED */
 void
 control_accept(int listenfd, short event, void *bula)
 {
@@ -180,6 +181,7 @@ control_close(int fd)
 	free(c);
 }
 
+/* ARGSUSED */
 void
 control_dispatch_imsg(int fd, short event, void *bula)
 {
@@ -276,10 +278,8 @@ control_imsg_relay(struct imsg *imsg)
 {
 	struct ctl_conn	*c;
 
-	if ((c = control_connbypid(imsg->hdr.pid)) == NULL) {
-		log_debug("control_imsg_relay: no connection pid");
+	if ((c = control_connbypid(imsg->hdr.pid)) == NULL)
 		return (0);
-	}
 
 	return (imsg_compose(&c->ibuf, imsg->hdr.type, 0, imsg->hdr.pid,
 	    imsg->data, imsg->hdr.len - IMSG_HEADER_SIZE));

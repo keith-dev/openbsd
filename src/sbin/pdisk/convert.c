@@ -1,7 +1,7 @@
 //
 // convert.c - Little-endian conversion
 //
-// Written by Eryk Vershen (eryk@apple.com)
+// Written by Eryk Vershen
 //
 // See comments in convert.h
 //
@@ -27,13 +27,8 @@
  * WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-#ifdef __linux__
-#include <endian.h>
-#else
-#define LITTLE_ENDIAN 1234
-#define BIG_ENDIAN 4321
-#define BYTE_ORDER 4321
-#endif
+#include <sys/param.h>
+#include <machine/endian.h>
 
 #include "convert.h"
 

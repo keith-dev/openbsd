@@ -1,4 +1,4 @@
-/*	$OpenBSD: bgpd.c,v 1.132 2006/01/24 14:26:52 claudio Exp $ */
+/*	$OpenBSD: bgpd.c,v 1.139 2006/06/19 20:48:36 jmc Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -40,8 +40,7 @@ void		sighdlr(int);
 __dead void	usage(void);
 int		main(int, char *[]);
 int		check_child(pid_t, const char *);
-int		send_filterset(struct imsgbuf *, struct filter_set_head *,
-		    int);
+int		send_filterset(struct imsgbuf *, struct filter_set_head *);
 int		reconfigure(char *, struct bgpd_config *, struct mrt_head *,
 		    struct peer **, struct filter_head *);
 int		dispatch_imsg(struct imsgbuf *, int);
@@ -54,8 +53,9 @@ struct filter_set_head	*staticset;
 struct filter_set_head	*staticset6;
 volatile sig_atomic_t	 mrtdump = 0;
 volatile sig_atomic_t	 quit = 0;
-volatile sig_atomic_t	 reconfig = 0;
 volatile sig_atomic_t	 sigchld = 0;
+volatile sig_atomic_t	 reconfig = 0;
+pid_t			 reconfpid = 0;
 struct imsgbuf		*ibuf_se;
 struct imsgbuf		*ibuf_rde;
 
@@ -85,8 +85,8 @@ usage(void)
 {
 	extern char *__progname;
 
-	fprintf(stderr, "usage: %s [-dnv] ", __progname);
-	fprintf(stderr, "[-D macro=value] [-f file] [-r path]\n");
+	fprintf(stderr, "usage: %s [-cdnv] ", __progname);
+	fprintf(stderr, "[-D macro=value] [-f file] [-r path] [-s path]\n");
 	exit(1);
 }
 
@@ -130,9 +130,13 @@ main(int argc, char *argv[])
 	TAILQ_INIT(&net_l);
 	TAILQ_INIT(rules_l);
 	peer_l = NULL;
+	conf.csock = SOCKET_NAME;
 
-	while ((ch = getopt(argc, argv, "dD:f:nr:v")) != -1) {
+	while ((ch = getopt(argc, argv, "cdD:f:nr:s:v")) != -1) {
 		switch (ch) {
+		case 'c':
+			conf.opts |= BGPD_OPT_FORCE_DEMOTE;
+			break;
 		case 'd':
 			debug = 1;
 			break;
@@ -154,6 +158,9 @@ main(int argc, char *argv[])
 			break;
 		case 'r':
 			conf.rcsock = optarg;
+			break;
+		case 's':
+			conf.csock = optarg;
 			break;
 		default:
 			usage();
@@ -306,9 +313,27 @@ main(int argc, char *argv[])
 		}
 
 		if (reconfig) {
+			u_int	error;
+
 			reconfig = 0;
 			log_info("rereading config");
-			reconfigure(conffile, &conf, &mrt_l, &peer_l, rules_l);
+			switch (reconfigure(conffile, &conf, &mrt_l, &peer_l,
+			    rules_l)) {
+			case -1:	/* fatal error */
+				quit = 1;
+				break;
+			case 0:		/* all OK */
+				error = 0;
+				break;
+			default:	/* parse error */
+				error = CTL_RES_PARSE_ERROR;
+				break;
+			}
+			if (reconfpid != 0) {
+				send_imsg_session(IMSG_CTL_RESULT, reconfpid,
+				    &error, sizeof(error));
+				reconfpid = 0;
+			}
 		}
 
 		if (sigchld) {
@@ -352,8 +377,9 @@ main(int argc, char *argv[])
 	}
 
 	free(rules_l);
-	control_cleanup(SOCKET_NAME);
+	control_cleanup(conf.csock);
 	control_cleanup(conf.rcsock);
+	carp_demote_shutdown();
 	kr_shutdown();
 	pftable_clear_all();
 	free(conf.listen_addrs);
@@ -394,12 +420,12 @@ check_child(pid_t pid, const char *pname)
 }
 
 int
-send_filterset(struct imsgbuf *i, struct filter_set_head *set, int id)
+send_filterset(struct imsgbuf *i, struct filter_set_head *set)
 {
 	struct filter_set	*s;
 
 	TAILQ_FOREACH(s, set, entry)
-		if (imsg_compose(i, IMSG_FILTER_SET, id, 0, -1, s,
+		if (imsg_compose(i, IMSG_FILTER_SET, 0, 0, -1, s,
 		    sizeof(struct filter_set)) == -1)
 			return (-1);
 	return (0);
@@ -418,7 +444,7 @@ reconfigure(char *conffile, struct bgpd_config *conf, struct mrt_head *mrt_l,
 	if (parse_config(conffile, conf, mrt_l, peer_l, &net_l, rules_l)) {
 		log_warnx("config file %s has errors, not reloading",
 		    conffile);
-		return (-1);
+		return (1);
 	}
 
 	cflags = conf->flags;
@@ -455,7 +481,7 @@ reconfigure(char *conffile, struct bgpd_config *conf, struct mrt_head *mrt_l,
 		if (imsg_compose(ibuf_rde, IMSG_NETWORK_ADD, 0, 0, -1,
 		    &n->net, sizeof(struct network_config)) == -1)
 			return (-1);
-		if (send_filterset(ibuf_rde, &n->net.attrset, 0) == -1)
+		if (send_filterset(ibuf_rde, &n->net.attrset) == -1)
 			return (-1);
 		if (imsg_compose(ibuf_rde, IMSG_NETWORK_DONE, 0, 0, -1,
 		    NULL, 0) == -1)
@@ -466,7 +492,7 @@ reconfigure(char *conffile, struct bgpd_config *conf, struct mrt_head *mrt_l,
 	}
 
 	/* redistribute list needs to be reloaded too */
-	if (kr_redist_reload() == -1)
+	if (kr_reload() == -1)
 		return (-1);
 
 	/* filters for the RDE */
@@ -474,7 +500,7 @@ reconfigure(char *conffile, struct bgpd_config *conf, struct mrt_head *mrt_l,
 		if (imsg_compose(ibuf_rde, IMSG_RECONF_FILTER, 0, 0, -1,
 		    r, sizeof(struct filter_rule)) == -1)
 			return (-1);
-		if (send_filterset(ibuf_rde, &r->set, 0) == -1)
+		if (send_filterset(ibuf_rde, &r->set) == -1)
 			return (-1);
 		TAILQ_REMOVE(rules_l, r, entry);
 		filterset_free(&r->set);
@@ -593,6 +619,7 @@ dispatch_imsg(struct imsgbuf *ibuf, int idx)
 				log_warnx("reload request not from SE");
 			else
 				reconfig = 1;
+				reconfpid = imsg.hdr.pid;
 			break;
 		case IMSG_CTL_FIB_COUPLE:
 			if (idx != PFD_PIPE_SESSION)
@@ -622,6 +649,19 @@ dispatch_imsg(struct imsgbuf *ibuf, int idx)
 				log_warnx("IFINFO request with wrong len");
 			else
 				kr_ifinfo(imsg.data);
+			break;
+		case IMSG_DEMOTE:
+			if (idx != PFD_PIPE_SESSION)
+				log_warnx("demote request not from SE");
+			else if (imsg.hdr.len != IMSG_HEADER_SIZE +
+			    sizeof(struct demote_msg))
+				log_warnx("DEMOTE request with wrong len");
+			else {
+				struct demote_msg	*msg;
+
+				msg = imsg.data;
+				carp_demote_set(msg->demote_group, msg->level);
+			}
 			break;
 		default:
 			break;
@@ -708,7 +748,7 @@ bgpd_redistribute(int type, struct kroute *kr, struct kroute6 *kr6)
 	if (type == IMSG_NETWORK_REMOVE)
 		return (1);
 
-	if (send_filterset(ibuf_rde, h, 0) == -1)
+	if (send_filterset(ibuf_rde, h) == -1)
 		return (-1);
 	if (imsg_compose(ibuf_rde, IMSG_NETWORK_DONE, 0, 0, -1, NULL, 0) == -1)
 		return (-1);
@@ -716,3 +756,28 @@ bgpd_redistribute(int type, struct kroute *kr, struct kroute6 *kr6)
 	return (1);
 }
 
+int
+bgpd_filternexthop(struct kroute *kr, struct kroute6 *kr6)
+{
+	/* kernel routes are never filtered */
+	if (kr && kr->flags & F_KERNEL && kr->prefixlen != 0)
+		return (0);
+	if (kr6 && kr6->flags & F_KERNEL && kr6->prefixlen != 0)
+		return (0);
+
+	if (cflags & BGPD_FLAG_NEXTHOP_BGP) {
+		if (kr && kr->flags & F_BGPD_INSERTED)
+			return (0);
+		if (kr6 && kr6->flags & F_BGPD_INSERTED)
+			return (0);
+	}
+
+	if (cflags & BGPD_FLAG_NEXTHOP_DEFAULT) {
+		if (kr && kr->prefixlen == 0)
+			return (0);
+		if (kr6 && kr6->prefixlen == 0)
+			return (0);
+	}
+
+	return (1);
+}

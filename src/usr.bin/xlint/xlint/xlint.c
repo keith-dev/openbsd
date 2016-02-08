@@ -1,4 +1,4 @@
-/*	$OpenBSD: xlint.c,v 1.25 2005/12/10 17:51:50 cloder Exp $	*/
+/*	$OpenBSD: xlint.c,v 1.31 2006/05/06 20:47:58 espie Exp $	*/
 /*	$NetBSD: xlint.c,v 1.3 1995/10/23 14:29:30 jpo Exp $	*/
 
 /*
@@ -33,7 +33,7 @@
  */
 
 #ifndef lint
-static char rcsid[] = "$OpenBSD: xlint.c,v 1.25 2005/12/10 17:51:50 cloder Exp $";
+static char rcsid[] = "$OpenBSD: xlint.c,v 1.31 2006/05/06 20:47:58 espie Exp $";
 #endif
 
 #include <sys/param.h>
@@ -110,7 +110,6 @@ static	int	first = 1;
  */
 static	const	char *currfn;
 
-
 static	void	appstrg(char ***, char *);
 static	void	appcstrg(char ***, const char *);
 static	void	applst(char ***, char *const *);
@@ -121,7 +120,7 @@ static	void	terminate(int);
 static	const	char *lbasename(const char *, int);
 static	void	appdef(char ***, const char *);
 static	void	usage(void);
-static	void	fname(const char *, int);
+static	void	fname(const char *);
 static	int	runchild(const char *, char *const *, const char *);
 static	void	findlibs(char *const *);
 static	int	rdok(const char *);
@@ -278,8 +277,9 @@ int
 main(int argc, char *argv[])
 {
 	int	c;
+	int	fd;
 	char	flgbuf[3], *tmp, *s;
-	size_t	len, l;
+	size_t	len;
 	struct	utsname un;
 
 	if ((tmp = getenv("TMPDIR")) == NULL || (len = strlen(tmp)) == 0) {
@@ -291,13 +291,13 @@ main(int argc, char *argv[])
 		tmpdir = s;
 	}
 
-	len = strlen(tmpdir) + sizeof ("lint0.XXXXXXXXXX");
-	cppout = xmalloc(len);
-	(void)snprintf(cppout, len, "%slint0.XXXXXXXXXX", tmpdir);
-	if (mktemp(cppout) == NULL) {
+	if (asprintf(&cppout, "%slint0.XXXXXXXXXX", tmpdir) == -1)
+		err(1, NULL);
+	if ((fd = mkstemp(cppout)) == -1) {
 		warn("can't make temp");
 		terminate(-1);
 	}
+	close(fd);
 
 	p1out = xcalloc(1, sizeof (char *));
 	p2in = xcalloc(1, sizeof (char *));
@@ -315,10 +315,14 @@ main(int argc, char *argv[])
 	appcstrg(&cppflags, "-undef");
 	/* even with -undef cpp still identifies as GNUC */
 	appcstrg(&cppflags, "-U__GNUC__");
-#if defined(__GNUC__) && __GNUC__ < 3
+#if defined(__GNUC__)
+#if __GNUC__ < 3
 	appcstrg(&cppflags, "-$");
-#endif
 	appcstrg(&cppflags, "-C");
+#else
+	appcstrg(&cppflags, "-CC");
+#endif
+#endif
 	appcstrg(&cppflags, "-Wcomment");
 	appcstrg(&cppflags, "-D__OpenBSD__");
 	appcstrg(&cppflags, "-Dlint");		/* XXX don't def. with -s */
@@ -427,9 +431,8 @@ main(int argc, char *argv[])
 				usage();
 			Cflag = 1;
 			appstrg(&l2flags, concat2("-C", optarg));
-			l = sizeof ("llib-l.ln") + strlen(optarg);
-			p2out = xmalloc(l);
-			(void)snprintf(p2out, l, "llib-l%s.ln", optarg);
+			if (asprintf(&p2out, "llib-l%s.ln", optarg) == -1)
+				err(1, NULL);
 			freelst(&deflibs);
 			break;
 
@@ -469,7 +472,9 @@ main(int argc, char *argv[])
 
 		case -1:
 			/* filename */
-			fname(argv[optind++], argc == 1);
+			if (argv[optind] == NULL)
+				break;
+			fname(argv[optind++]);
 			first = 0;
 		}
 
@@ -509,12 +514,13 @@ main(int argc, char *argv[])
  * and pass it through lint1 if it is a C source.
  */
 static void
-fname(const char *name, int last)
+fname(const char *name)
 {
 	const	char *bn, *suff;
 	char	**args, *ofn, *path;
 	size_t	len;
 	int	error;
+	int	fd;
 
 	bn = lbasename(name, '/');
 	suff = lbasename(bn, '.');
@@ -544,13 +550,13 @@ fname(const char *name, int last)
 		    bn == suff ? strlen(bn) : (suff - 1) - bn, bn);
 		(void)strlcat(ofn, ".ln", len);
 	} else {
-		len = strlen(tmpdir) + sizeof ("lint1.XXXXXXXXXX");
-		ofn = xmalloc(len);
-		(void)snprintf(ofn, len, "%slint1.XXXXXXXXXX", tmpdir);
-		if (mktemp(ofn) == NULL) {
+		if (asprintf(&ofn, "%slint1.XXXXXXXXXX", tmpdir) == -1)
+			err(1, NULL);
+		if ((fd  = mkstemp(ofn)) == -1) {
 			warn("can't make temp");
 			terminate(-1);
 		}
+		close(fd);
 	}
 	if (!iflag)
 		appcstrg(&p1out, ofn);
@@ -559,9 +565,8 @@ fname(const char *name, int last)
 
 	/* run cpp */
 
-	len = strlen(PATH_LIBEXEC) + sizeof ("/cpp");
-	path = xmalloc(len);
-	(void)snprintf(path, len, "%s/cpp", PATH_LIBEXEC);
+	if (asprintf(&path, "%s/cpp", PATH_LIBEXEC) == -1)
+		err(1, NULL);
 
 	appcstrg(&args, path);
 	applst(&args, cppflags);
@@ -577,9 +582,8 @@ fname(const char *name, int last)
 
 	/* run lint1 */
 
-	len = strlen(PATH_LIBEXEC) + sizeof ("/lint1");
-	path = xmalloc(len);
-	(void)snprintf(path, len, "%s/lint1", PATH_LIBEXEC);
+	if (asprintf(&path, "%s/lint1", PATH_LIBEXEC) == -1)
+		err(1, NULL);
 
 	appcstrg(&args, path);
 	applst(&args, l1flags);
@@ -698,13 +702,11 @@ static void
 lint2()
 {
 	char	*path, **args;
-	size_t len;
 
 	args = xcalloc(1, sizeof (char *));
 
-	len = strlen(PATH_LIBEXEC) + sizeof ("/lint2");
-	path = xmalloc(len);
-	(void)snprintf(path, len, "%s/lint2", PATH_LIBEXEC);
+	if (asprintf(&path, "%s/lint2", PATH_LIBEXEC) == -1)
+		err(1, NULL);
 
 	appcstrg(&args, path);
 	applst(&args, l2flags);

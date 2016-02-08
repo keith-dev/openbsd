@@ -1,4 +1,4 @@
-/*	$OpenBSD: name2id.c,v 1.5 2005/11/02 15:34:43 claudio Exp $ */
+/*	$OpenBSD: name2id.c,v 1.7 2006/05/02 14:41:26 claudio Exp $ */
 
 /*
  * Copyright (c) 2004, 2005 Henning Brauer <henning@openbsd.org>
@@ -42,7 +42,6 @@ u_int16_t	 _name2id(struct n2id_labels *, const char *);
 const char	*_id2name(struct n2id_labels *, u_int16_t);
 void		 _unref(struct n2id_labels *, u_int16_t);
 void		 _ref(struct n2id_labels *, u_int16_t);
-int		 _exists(struct n2id_labels *, const char *);
 
 struct n2id_labels	rt_labels = TAILQ_HEAD_INITIALIZER(rt_labels);
 struct n2id_labels	pftable_labels = TAILQ_HEAD_INITIALIZER(pftable_labels);
@@ -74,25 +73,25 @@ rtlabel_ref(u_int16_t id)
 u_int16_t
 pftable_name2id(const char *name)
 {
-	return (_name2id(&rt_labels, name));
+	return (_name2id(&pftable_labels, name));
 }
 
 const char *
 pftable_id2name(u_int16_t id)
 {
-	return (_id2name(&rt_labels, id));
+	return (_id2name(&pftable_labels, id));
 }
 
 void
 pftable_unref(u_int16_t id)
 {
-	_unref(&rt_labels, id);
+	_unref(&pftable_labels, id);
 }
 
 void
 pftable_ref(u_int16_t id)
 {
-	_ref(&rt_labels, id);
+	_ref(&pftable_labels, id);
 }
 
 u_int16_t
@@ -194,19 +193,4 @@ _ref(struct n2id_labels *head, u_int16_t id)
 			++label->ref;
 			break;
 		}
-}
-
-int
-_exists(struct n2id_labels *head, const char *name)
-{
-	struct n2id_label	*label;
-
-	if (!name[0])
-		return (0);
-
-	TAILQ_FOREACH(label, head, entry)
-		if (strcmp(name, label->name) == 0)
-			return (label->id);
-
-	return (0);
 }

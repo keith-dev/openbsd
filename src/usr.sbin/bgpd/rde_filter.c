@@ -1,4 +1,4 @@
-/*	$OpenBSD: rde_filter.c,v 1.46 2006/02/09 21:05:09 claudio Exp $ */
+/*	$OpenBSD: rde_filter.c,v 1.50 2006/05/28 23:24:15 claudio Exp $ */
 
 /*
  * Copyright (c) 2004 Claudio Jeker <claudio@openbsd.org>
@@ -160,6 +160,7 @@ rde_apply_set(struct rde_aspath *asp, struct filter_set_head *sh,
 		case ACTION_SET_NEXTHOP_REJECT:
 		case ACTION_SET_NEXTHOP_BLACKHOLE:
 		case ACTION_SET_NEXTHOP_NOMODIFY:
+		case ACTION_SET_NEXTHOP_SELF:
 			nexthop_modify(asp, &set->action.nexthop, set->type,
 			    af);
 			break;
@@ -427,6 +428,7 @@ void
 filterset_free(struct filter_set_head *sh)
 {
 	struct filter_set	*s;
+	struct nexthop		*nh;
 
 	while ((s = TAILQ_FIRST(sh)) != NULL) {
 		TAILQ_REMOVE(sh, s, entry);
@@ -434,6 +436,12 @@ filterset_free(struct filter_set_head *sh)
 			rtlabel_unref(s->action.id);
 		else if (s->type == ACTION_PFTABLE_ID)
 			pftable_unref(s->action.id);
+		else if (s->type == ACTION_SET_NEXTHOP &&
+		    bgpd_process == PROC_RDE) {
+			nh = nexthop_get(&s->action.nexthop);
+			--nh->refcnt;
+			(void)nexthop_delete(nh);
+		}
 		free(s);
 	}
 }
@@ -448,7 +456,7 @@ filterset_free(struct filter_set_head *sh)
 int
 filterset_cmp(struct filter_set *a, struct filter_set *b)
 {
-	if (strcmp(filterset_names[a->type], filterset_names[b->type]))
+	if (strcmp(filterset_name(a->type), filterset_name(b->type)))
 		return (a->type - b->type);
 
 	if (a->type == ACTION_SET_COMMUNITY) {	/* a->type == b->type */
@@ -512,6 +520,7 @@ filterset_equal(struct filter_set_head *ah, struct filter_set_head *bh)
 		case ACTION_SET_NEXTHOP_BLACKHOLE:
 		case ACTION_SET_NEXTHOP_REJECT:
 		case ACTION_SET_NEXTHOP_NOMODIFY:
+		case ACTION_SET_NEXTHOP_SELF:
 			if (a->type == b->type)
 				continue;
 			break;
@@ -565,3 +574,40 @@ filterset_equal(struct filter_set_head *ah, struct filter_set_head *bh)
 	return (1);
 }
 
+const char *
+filterset_name(enum action_types type)
+{
+	switch (type) {
+	case ACTION_SET_LOCALPREF:
+	case ACTION_SET_RELATIVE_LOCALPREF:
+		return ("localpref");
+	case ACTION_SET_MED:
+	case ACTION_SET_RELATIVE_MED:
+		return ("metric");
+	case ACTION_SET_WEIGHT:
+	case ACTION_SET_RELATIVE_WEIGHT:
+		return ("weight");
+	case ACTION_SET_PREPEND_SELF:
+		return ("prepend-self");
+	case ACTION_SET_PREPEND_PEER:
+		return ("prepend-peer");
+	case ACTION_SET_NEXTHOP:
+	case ACTION_SET_NEXTHOP_REJECT:
+	case ACTION_SET_NEXTHOP_BLACKHOLE:
+	case ACTION_SET_NEXTHOP_NOMODIFY:
+	case ACTION_SET_NEXTHOP_SELF:
+		return ("nexthop");
+	case ACTION_SET_COMMUNITY:
+		return ("community");
+	case ACTION_DEL_COMMUNITY:
+		return ("community delete");
+	case ACTION_PFTABLE:
+	case ACTION_PFTABLE_ID:
+		return ("pftable");
+	case ACTION_RTLABEL:
+	case ACTION_RTLABEL_ID:
+		return ("rtlabel");
+	}
+
+	fatalx("filterset_name: got lost");
+}

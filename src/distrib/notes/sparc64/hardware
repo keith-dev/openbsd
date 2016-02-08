@@ -1,4 +1,4 @@
-dnl	$OpenBSD: hardware,v 1.110 2006/02/16 20:39:51 martin Exp $
+dnl	$OpenBSD: hardware,v 1.116 2006/06/20 18:56:41 miod Exp $
 OpenBSD/MACHINE OSREV runs on the following classes of machines:
 	Sun Blade 100/150
 	Sun Fire V100
@@ -8,6 +8,7 @@ OpenBSD/MACHINE OSREV runs on the following classes of machines:
 	Enterprise 250
 	Enterprise 420R
 	Enterprise 450
+	Enterprise 4000/5000/6000
 	Enterprise 4500/5500
 	Netra T1 100/105
 	Netra T1 AC200/DC200
@@ -107,8 +108,19 @@ dnl		PCI Alteon Tigon I/II PCI Gigabit Ethernet boards (ti)
 		PCI Intel i8255x-based (except the i82556) adapters (fxp)
 		PCI 3Com 3c9xx EtherLink XL adapters (xl)
 		PCI SMC 83C170 ("EtherPower II") (EPIC/100) (epic)
-		Intel i82540, i82541, i82542, i82543, i82544, i82545, i82546
-		and i82547 based adapters, including:
+		AMD PCnet-based PCI adapters (pcn)
+                    BOCALANcard/PCI
+                    AT&T StarLAN 10, EN100, and StarLAN Fiber
+		Intel i82540, i82541, i82542, i82543, i82544, i82545, i82546,
+		i82547, i82571, i82572 and i82573 based adapters, including:
+		    HP ProLiant NC310F PCI-X Gigabit NIC (SX Fiber)
+		    HP ProLiant NC340T PCI-X Gigabit NIC
+		    HP ProLiant NC6134 PCI Gigabit NIC (SX Fiber)
+		    HP ProLiant NC6136 PCI Gigabit NIC (SX Fiber)
+		    HP ProLiant NC6170 PCI-X Gigabit NIC (SX Fiber)
+		    HP ProLiant NC7131 PCI Gigabit NIC
+		    HP ProLiant NC7170 PCI-X Gigabit NIC
+		    HP ProLiant NC7170LP PCI-X Gigabit NIC
 		    Intel PRO/1000 Gigabit Server Adapter (SX Fiber)
 		      (PWLA8490)
 		    Intel PRO/1000F Gigabit Server Adapter (SX Fiber)
@@ -130,11 +142,12 @@ dnl		PCI Alteon Tigon I/II PCI Gigabit Ethernet boards (ti)
 		    Accton MPX 5030/5038
                     Allied Telesyn AT2550
                     D-Link DFE530TX+, DFE538TX
-                    Encore ENL832-TX 10/100 M PCI
+                    Encore ENL832-TX-RENT 10/100 M PCI
                     Genius GF100TXR
                     KTX-9130TX 10/100 Fast Ethernet
                     Longshine LCS-8038TX-R
                     NDC NE100TX-E
+                    Netgear FA311 v2
                     Netronix EA-1210 Net Ether 10/100
                     Nortel BayStack 21
                     OvisLink LEF-8129TX, LEF-8139TX

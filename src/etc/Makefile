@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.232 2006/01/04 20:38:59 miod Exp $
+#	$OpenBSD: Makefile,v 1.239 2006/07/27 17:59:51 deraadt Exp $
 
 TZDIR=		/usr/share/zoneinfo
 LOCALTIME=	Canada/Mountain
@@ -21,8 +21,8 @@ BIN1=	changelist ccd.conf csh.cshrc csh.login csh.logout daily dhcpd.conf \
 	etc.${MACHINE}/disktab dhclient.conf mailer.conf ntpd.conf \
 	moduli pf.os sensorsd.conf ifstated.conf
 
-.if ${MACHINE} != "mvme68k" && ${MACHINE} != "mvme88k" && \
-    ${MACHINE} != "vax"
+.if ${MACHINE} != "aviion" && ${MACHINE} != "mvme68k" && \
+    ${MACHINE} != "mvme88k"
 BIN1+=	wsconsctl.conf
 .endif
 
@@ -30,8 +30,6 @@ BIN1+=	wsconsctl.conf
 BIN2=	motd
 
 PCS=	pcs750.bin
-WCS1=	wcs fppwcs poc poc1 poc2 fppoc
-WCS2=	fpevent fppwcs fppwcs_dual hdcwcs load_diags start_fpp wcs wcs_dual
 
 # Use NOGZIP on architectures where the gzip'ing would take too much time
 # (pmax or slower :-)).  This way you get only tar'ed snap files and you can
@@ -49,7 +47,7 @@ GZIPEXT=
 all clean cleandir depend etc install lint:
 
 .ifndef DESTDIR
-distribution-etc-root-var distribution distrib-dirs release snapshot:
+distribution-etc-root-var distribution distrib-dirs release:
 	@echo setenv DESTDIR before doing that!
 	@false
 .else
@@ -78,7 +76,9 @@ distribution-etc-root-var: distrib-dirs
 	pwd_mkdb -p -d ${DESTDIR}/etc /etc/master.passwd
 	${INSTALL} -c -o root -g wheel -m 600 bgpd.conf ${DESTDIR}/etc
 	${INSTALL} -c -o root -g wheel -m 600 ospfd.conf ${DESTDIR}/etc
+	${INSTALL} -c -o root -g wheel -m 600 dvmrpd.conf ${DESTDIR}/etc
 	${INSTALL} -c -o root -g wheel -m 600 pf.conf ${DESTDIR}/etc
+	${INSTALL} -c -o root -g wheel -m 600 chio.conf ${DESTDIR}/etc
 	${INSTALL} -c -o root -g wheel -m 600 hostapd.conf ${DESTDIR}/etc
 	${INSTALL} -c -o root -g wheel -m 600 ipsec.conf ${DESTDIR}/etc
 	${INSTALL} -c -o ${BINOWN} -g ${BINGRP} -m 555 \
@@ -272,62 +272,21 @@ release: distribution snap_pre snap_md
 	-cd ${RELEASEDIR}; \
 		cksum *bsd!(*.gz) *boot* cdbr *BOOT* INSTALL.* Packages *.fs \
 		*.iso *.gz *.tgz > CKSUM
-.if defined(MACHINE_HAS_TOOLS)
-	mkdir -p ${RELEASEDIR}/tools
-	cp ${DESTDIR}/snapshot/tools/* ${RELEASEDIR}/tools
-	cd ${RELEASEDIR} && md5 tools/* >>MD5
-	cd ${RELEASEDIR} && cksum tools/* >>CKSUM
-.endif
 	-cd ${RELEASEDIR} && sort -o MD5 MD5
 	-cd ${RELEASEDIR} && sort -o CKSUM -k 3 CKSUM
-.endif
-
-snapshot: distribution snap_pre snap_tar snap_md
-	cd ${DESTDIR}/snapshot && cksum * > CKSUMS
-	cd ${DESTDIR}/snapshot && md5 * > MD5
 
 snap_pre:
 	${SUDO} /bin/rm -rf ${DESTDIR}/snapshot
 	${SUDO} ${INSTALL} -d -o root -g wheel -m 755 ${DESTDIR}/snapshot
 
-snap_tar:
-	cd ${DESTDIR} && tar cf - bin \
-	    | ${GZIP} ${GZIPFLAGS} > snapshot/bin.tar${GZIPEXT}
-	cd ${DESTDIR} && tar cf - dev \
-	    | ${GZIP} ${GZIPFLAGS} > snapshot/dev.tar${GZIPEXT}
-	cd ${DESTDIR} && tar cf - .profile .cshrc altroot etc home mnt \
-	    root stand sys tmp | ${GZIP} ${GZIPFLAGS} \
-	    > snapshot/etc.tar${GZIPEXT}
-	cd ${DESTDIR} && tar cf - sbin \
-	    | ${GZIP} ${GZIPFLAGS} > snapshot/sbin.tar${GZIPEXT}
-	cd ${DESTDIR} && tar cf - usr/bin \
-	    | ${GZIP} ${GZIPFLAGS} > snapshot/usr.bin.tar${GZIPEXT}
-	cd ${DESTDIR} && tar cf - usr/games \
-	    | ${GZIP} ${GZIPFLAGS} > snapshot/usr.games.tar${GZIPEXT}
-	cd ${DESTDIR} && tar cf - usr/include \
-	    | ${GZIP} ${GZIPFLAGS} > snapshot/usr.include.tar${GZIPEXT}
-	cd ${DESTDIR} && tar cf - usr/lib \
-	    | ${GZIP} ${GZIPFLAGS} > snapshot/usr.lib.tar${GZIPEXT}
-	cd ${DESTDIR} && tar cf - usr/libexec \
-	    | ${GZIP} ${GZIPFLAGS} > snapshot/usr.libexec.tar${GZIPEXT}
-	cd ${DESTDIR} && tar cf - usr/mdec usr/libdata usr/lkm usr/local \
-	    usr/src usr/obj | ${GZIP} ${GZIPFLAGS} \
-	    > snapshot/usr.misc.tar${GZIPEXT}
-	cd ${DESTDIR} && tar cf - usr/sbin \
-	    | ${GZIP} ${GZIPFLAGS} > snapshot/usr.sbin.tar${GZIPEXT}
-	cd ${DESTDIR} && tar cf - usr/share \
-	    | ${GZIP} ${GZIPFLAGS} > snapshot/usr.share.tar${GZIPEXT}
-	cd ${DESTDIR} && tar cf - var \
-	    | ${GZIP} ${GZIPFLAGS} > snapshot/var.tar${GZIPEXT}
-	cd ../distrib/notes; ${MAKE}; ${MAKE} install
-
-snap_md:
-# nothing here -- look in the machine-dependent Makefile.inc
+.endif
 
 .endif	# DESTDIR check
 
 MAKEDEVARCHS+= alpha
 MAKEDEVARCHS+= amd64
+MAKEDEVARCHS+= armish
+MAKEDEVARCHS+= aviion
 MAKEDEVARCHS+= cats
 MAKEDEVARCHS+= hp300
 MAKEDEVARCHS+= hppa
@@ -378,7 +337,7 @@ distrib:
 DHSIZE=1024 1536 2048 3072 4096
 update-moduli:
 	( \
-		echo '#    $$OpenBSD: Makefile,v 1.232 2006/01/04 20:38:59 miod Exp $$'; \
+		echo '#    $$OpenBSD: Makefile,v 1.239 2006/07/27 17:59:51 deraadt Exp $$'; \
 		echo '# Time Type Tests Tries Size Generator Modulus'; \
 		( for i in ${DHSIZE}; do \
 			ssh-keygen -b $$i -G /dev/stdout; \
@@ -387,5 +346,5 @@ update-moduli:
 	) > moduli
 
 .PHONY: distribution-etc-root-var distribution distrib-dirs \
-	release snapshot allarchs snap_pre snap_tar snap_md m4
+	release allarchs snap_md m4 snap_pre
 .include <bsd.prog.mk>

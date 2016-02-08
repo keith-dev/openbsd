@@ -1,4 +1,4 @@
-/*	$OpenBSD: apme.c,v 1.11 2006/01/31 10:55:02 reyk Exp $	*/
+/*	$OpenBSD: apme.c,v 1.13 2006/06/01 22:09:09 reyk Exp $	*/
 
 /*
  * Copyright (c) 2004, 2005 Reyk Floeter <reyk@openbsd.org>
@@ -64,7 +64,7 @@ hostapd_apme_add(struct hostapd_config *cfg, const char *name)
 	TAILQ_INSERT_TAIL(&cfg->c_apmes, apme, a_entries);
 
 	hostapd_log(HOSTAPD_LOG_DEBUG,
-	    "%s: Host AP interface added\n", apme->a_iface);
+	    "%s: Host AP interface added", apme->a_iface);
 
 	return (0);
 }
@@ -89,14 +89,14 @@ hostapd_apme_deauth(struct hostapd_apme *apme)
 
 	if (write(apme->a_raw, buf, sizeof(buf)) == -1) {
 		hostapd_log(HOSTAPD_LOG_VERBOSE,
-		    "%s/%s: failed to deauthenticate all stations: %s\n",
+		    "%s/%s: failed to deauthenticate all stations: %s",
 		    iapp->i_iface, apme->a_iface,
 		    strerror(errno));
 		return (EIO);
 	}
 
 	hostapd_log(HOSTAPD_LOG_VERBOSE,
-	    "%s/%s: deauthenticated all stations\n",
+	    "%s/%s: deauthenticated all stations",
 	    apme->a_iface, iapp->i_iface);
 
 	return (0);
@@ -126,8 +126,12 @@ hostapd_apme_term(struct hostapd_apme *apme)
 
 	TAILQ_REMOVE(&cfg->c_apmes, apme, a_entries);
 
+	/* Remove all dynamic roaming addresses */
+	if (cfg->c_flags & HOSTAPD_CFG_F_PRIV)
+		hostapd_roaming_term(apme);
+
 	hostapd_log(HOSTAPD_LOG_DEBUG,
-	    "%s: Host AP interface removed\n", apme->a_iface);
+	    "%s: Host AP interface removed", apme->a_iface);
 
 	free(apme);
 }
@@ -254,6 +258,7 @@ void
 hostapd_apme_frame(struct hostapd_apme *apme, u_int8_t *buf, u_int len)
 {
 	struct hostapd_config *cfg = (struct hostapd_config *)apme->a_cfg;
+	struct hostapd_iapp *iapp = &cfg->c_iapp;
 	struct hostapd_apme *other_apme;
 	struct hostapd_node node;
 	struct ieee80211_frame *wh;
@@ -299,7 +304,7 @@ hostapd_apme_frame(struct hostapd_apme *apme, u_int8_t *buf, u_int len)
 	bcopy(wh->i_addr1, node.ni_macaddr, IEEE80211_ADDR_LEN);
 	if (hostapd_priv_apme_getnode(apme, &node) != 0) {
 		hostapd_log(HOSTAPD_LOG_DEBUG,
-		    "%s: invalid association from %s on the Host AP\n",
+		    "%s: invalid association from %s on the Host AP",
 		    apme->a_iface, etheraddr_string(wh->i_addr1));
 		return;
 	}
@@ -311,9 +316,14 @@ hostapd_apme_frame(struct hostapd_apme *apme, u_int8_t *buf, u_int len)
 	TAILQ_FOREACH(other_apme, &cfg->c_apmes, a_entries) {
 		if (apme == other_apme)
 			continue;
+		if (iapp->i_flags & HOSTAPD_IAPP_F_ROAMING)
+			hostapd_roaming_del(other_apme, &node);
 		if (hostapd_apme_delnode(other_apme, &node) == 0)
 			cfg->c_stats.cn_tx_apme++;
 	}
+
+	if (iapp->i_flags & HOSTAPD_IAPP_F_ROAMING)
+		hostapd_roaming_add(apme, &node);
 
 	hostapd_iapp_add_notify(apme, &node);
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: line.c,v 1.37 2005/12/20 06:17:36 kjell Exp $	*/
+/*	$OpenBSD: line.c,v 1.42 2006/07/25 08:27:09 kjell Exp $	*/
 
 /* This file is in the public domain. */
 
@@ -122,7 +122,7 @@ lchange(int flag)
 		if (wp->w_bufp == curbp) {
 			wp->w_flag |= flag;
 			if (wp != curwp)
-				wp->w_flag |= WFHARD;
+				wp->w_flag |= WFFULL;
 		}
 	}
 }
@@ -152,13 +152,13 @@ linsert_str(const char *s, int n)
 	if (!n)
 		return (TRUE);
 
-	lchange(WFHARD);
+	lchange(WFFULL);
 
 	/* current line */
 	lp1 = curwp->w_dotp;
 
 	/* special case for the end */
-	if (lp1 == curbp->b_linep) {
+	if (lp1 == curbp->b_headp) {
 		struct line *lp2, *lp3;
 
 		/* now should only happen in empty buffer */
@@ -248,7 +248,7 @@ linsert(int n, int c)
 	lp1 = curwp->w_dotp;
 
 	/* special case for the end */
-	if (lp1 == curbp->b_linep) {
+	if (lp1 == curbp->b_headp) {
 		struct line *lp2, *lp3;
 
 		/* now should only happen in empty buffer */
@@ -316,7 +316,7 @@ lnewline_at(struct line *lp1, int doto)
 	int	 nlen;
 	struct mgwin	*wp;
 
-	lchange(WFHARD);
+	lchange(WFFULL);
 
 	/* If start of line, allocate a new line instead of copying */
 	if (doto == 0) {
@@ -377,6 +377,8 @@ lnewline(void)
 		ewprintf("Buffer is read only");
 		return (FALSE);
 	}
+	curwp->w_bufp->b_lines++;
+	curwp->w_dotline++;
 	return (lnewline_at(curwp->w_dotp, curwp->w_doto));
 }
 
@@ -415,7 +417,7 @@ ldelete(RSIZE n, int kflag)
 		dotp = curwp->w_dotp;
 		doto = curwp->w_doto;
 		/* Hit the end of the buffer */
-		if (dotp == curbp->b_linep)
+		if (dotp == curbp->b_headp)
 			return (FALSE);
 		/* Size of the chunk */
 		chunk = dotp->l_used - doto;
@@ -424,10 +426,9 @@ ldelete(RSIZE n, int kflag)
 			chunk = n;
 		/* End of line, merge */
 		if (chunk == 0) {
-			if (dotp == lback(curbp->b_linep))
-				/* End of buffer */
+			if (dotp == blastlp(curbp))
 				return (FALSE);
-			lchange(WFHARD);
+			lchange(WFFULL);
 			if (ldelnewline() == FALSE)
 				return (FALSE);
 			end = strlcat(sv, "\n", len + 1);
@@ -473,7 +474,8 @@ ldelete(RSIZE n, int kflag)
  * operation.  Even if nothing is done, this makes the kill buffer work
  * "right".  Easy cases can be done by shuffling data around.  Hard cases
  * require that lines be moved about in memory.  Return FALSE on error and
- * TRUE if all looks ok.
+ * TRUE if all looks ok. We do not update w_dotline here, as deletes are done
+ * after moves.
  */
 int
 ldelnewline(void)
@@ -489,8 +491,9 @@ ldelnewline(void)
 	lp1 = curwp->w_dotp;
 	lp2 = lp1->l_fp;
 	/* at the end of the buffer */
-	if (lp2 == curbp->b_linep)
+	if (lp2 == curbp->b_headp)
 		return (TRUE);
+	curwp->w_bufp->b_lines--;
 	if (lp2->l_used <= lp1->l_size - lp1->l_used) {
 		bcopy(&lp2->l_text[0], &lp1->l_text[lp1->l_used], lp2->l_used);
 		for (wp = wheadp; wp != NULL; wp = wp->w_wndp) {
@@ -563,9 +566,31 @@ lreplace(RSIZE plen, char *st)
 
 	rlen = strlen(st);
 	region_put_data(st, rlen);
-	lchange(WFHARD);
+	lchange(WFFULL);
 
 	undo_no_boundary(FALSE);
 	undo_add_boundary();
 	return (TRUE);
+}
+
+/*
+ * Allocate and return the supplied line as a C string
+ */
+char *
+linetostr(const struct line *ln)
+{
+	size_t	 len;
+	char	*line;
+
+	len = llength(ln);
+	if (len == SIZE_MAX)  /* (len + 1) overflow */
+		return (NULL);
+
+	if ((line = malloc(len + 1)) == NULL)
+		return (NULL);
+
+	(void)memcpy(line, ltext(ln), len);
+	line[len] = '\0';
+
+	return (line);
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ipsecctl.h,v 1.27 2006/01/17 00:05:39 deraadt Exp $	*/
+/*	$OpenBSD: ipsecctl.h,v 1.49 2006/06/18 18:18:01 hshoexer Exp $	*/
 /*
  * Copyright (c) 2004, 2005 Hans-Joerg Hoexer <hshoexer@openbsd.org>
  *
@@ -27,6 +27,7 @@
 #define IPSECCTL_OPT_SHOWALL		0x0080
 #define IPSECCTL_OPT_FLUSH		0x0100
 #define IPSECCTL_OPT_DELETE		0x0200
+#define IPSECCTL_OPT_MONITOR		0x0400
 
 enum {
 	ACTION_ADD, ACTION_DELETE
@@ -35,6 +36,7 @@ enum {
 #define RULE_FLOW	0x01
 #define RULE_SA		0x02
 #define RULE_IKE	0x04
+#define RULE_GROUP	0x08
 
 enum {
 	DIRECTION_UNKNOWN, IPSEC_IN, IPSEC_OUT, IPSEC_INOUT
@@ -66,7 +68,11 @@ enum {
 	COMPXF_UNKNOWN, COMPXF_DEFLATE, COMPXF_LZS
 };
 enum {
-	IKE_ACTIVE, IKE_PASSIVE
+	GROUPXF_UNKNOWN, GROUPXF_NONE, GROUPXF_768, GROUPXF_1024, GROUPXF_1536,
+	GROUPXF_2048, GROUPXF_3072, GROUPXF_4096, GROUPXF_6144, GROUPXF_8192,
+};
+enum {
+	IKE_ACTIVE, IKE_PASSIVE, IKE_DYNAMIC
 };
 enum {
 	IKE_AUTH_RSA, IKE_AUTH_PSK
@@ -93,6 +99,15 @@ struct ipsec_addr_wrap {
 	int			 netaddress;
 	sa_family_t		 af;
 	char			*name;
+	struct ipsec_addr_wrap	*next;
+	struct ipsec_addr_wrap	*tail;
+};
+
+struct ipsec_hosts {
+	struct ipsec_addr_wrap	*src;
+	struct ipsec_addr_wrap	*dst;
+	u_int16_t		 sport;
+	u_int16_t		 dport;
 };
 
 struct ipsec_auth {
@@ -123,10 +138,24 @@ struct ipsec_transforms {
 	const struct ipsec_xf *authxf;
 	const struct ipsec_xf *encxf;
 	const struct ipsec_xf *compxf;
+	const struct ipsec_xf *groupxf;
+};
+
+struct ipsec_life {
+	int		 lifetime;
+	int		 lifevolume;
+};
+
+struct ike_mode {
+	struct ipsec_transforms	*xfs;
+	struct ipsec_life	*life;
 };
 
 extern const struct ipsec_xf authxfs[];
 extern const struct ipsec_xf encxfs[];
+extern const struct ipsec_xf compxfs[];
+
+TAILQ_HEAD(dst_group_queue, ipsec_rule);
 
 /* Complete state of one rule. */
 struct ipsec_rule {
@@ -134,45 +163,57 @@ struct ipsec_rule {
 
 	struct ipsec_addr_wrap *src;
 	struct ipsec_addr_wrap *dst;
+	struct ipsec_addr_wrap *dst2;
+	struct ipsec_addr_wrap *local;
 	struct ipsec_addr_wrap *peer;
 	struct ipsec_auth *auth;
 	struct ike_auth *ikeauth;
 	struct ipsec_transforms *xfs;
 	struct ipsec_transforms *mmxfs;
+	struct ipsec_life *mmlife;
 	struct ipsec_transforms *qmxfs;
+	struct ipsec_life *qmlife;
 	struct ipsec_key  *authkey;
 	struct ipsec_key  *enckey;
 
-	u_int8_t	 proto;
+	u_int8_t	 satype;	/* encapsulating prococol */
+	u_int8_t	 proto;		/* encapsulated protocol */
+	u_int8_t	 proto2;
 	u_int8_t	 tmode;
 	u_int8_t	 direction;
 	u_int8_t	 flowtype;
 	u_int8_t	 ikemode;
+	u_int16_t	 sport;
+	u_int16_t	 dport;
 	u_int32_t	 spi;
+	u_int32_t	 spi2;
 	u_int32_t	 nr;
 
-	TAILQ_ENTRY(ipsec_rule) entries;
+	TAILQ_ENTRY(ipsec_rule) rule_entry;
+	TAILQ_ENTRY(ipsec_rule) group_entry;
+	TAILQ_ENTRY(ipsec_rule) dst_group_entry;
+
+	struct dst_group_queue	dst_group_queue;
 };
 
 TAILQ_HEAD(ipsec_rule_queue, ipsec_rule);
+TAILQ_HEAD(ipsec_group_queue, ipsec_rule);
 
 struct ipsecctl {
 	u_int32_t	rule_nr;
 	int		opts;
 	struct ipsec_rule_queue rule_queue;
-};
-
-struct addr_node {
-	struct ipsec_addr_wrap	 addr;
-	sa_family_t		 af;
-	struct addr_node	*next;
-	struct addr_node	*tail;
+	struct ipsec_group_queue group_queue;
 };
 
 int	parse_rules(FILE *, struct ipsecctl *);
-int	ipsecctl_add_rule(struct ipsecctl * ipsec, struct ipsec_rule *);
+int	cmdline_symset(char *);
+int	ipsecctl_add_rule(struct ipsecctl *, struct ipsec_rule *);
+void	ipsecctl_free_rule(struct ipsec_rule *);
 void	ipsecctl_get_rules(struct ipsecctl *);
+void	ipsecctl_print_rule(struct ipsec_rule *, int);
 int	ike_print_config(struct ipsec_rule *, int);
 int	ike_ipsec_establish(int, struct ipsec_rule *);
+void	set_ipmask(struct ipsec_addr_wrap *, u_int8_t);
 
 #endif /* _IPSECCTL_H_ */

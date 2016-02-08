@@ -1,4 +1,4 @@
-/*	$OpenBSD: dkstats.c,v 1.27 2005/10/17 19:04:20 otto Exp $	*/
+/*	$OpenBSD: dkstats.c,v 1.30 2006/03/31 18:19:38 deraadt Exp $	*/
 /*	$NetBSD: dkstats.c,v 1.1 1996/05/10 23:19:27 thorpej Exp $	*/
 
 /*
@@ -75,7 +75,7 @@ static struct nlist namelist[] = {
 }
 
 /*
- * Dereference the namelist pointer `v' and fill in the local copy 
+ * Dereference the namelist pointer `v' and fill in the local copy
  * 'p' which is of size 's'.
  */
 #define deref_nl(v, p, s) deref_kptr((void *)namelist[(v)].n_value, (p), (s));
@@ -98,7 +98,7 @@ static struct disk	*dk_drivehead = NULL;
 #endif
 
 /* Backward compatibility references. */
-int	  	dk_ndrive = 0;
+int		dk_ndrive = 0;
 int		*dk_select;
 char		**dr_name;
 
@@ -143,7 +143,11 @@ dkswap(void)
 		timerset(&tmp_timer, &(last.dk_time[i]));
 	}
 	for (i = 0; i < CPUSTATES; i++) {
-		SWAP(cp_time[i]);
+		long ltmp;
+
+		ltmp = cur.cp_time[i];
+		cur.cp_time[i] -= last.cp_time[i];
+		last.cp_time[i] = ltmp;
 	}
 	SWAP(tk_nin);
 	SWAP(tk_nout);
@@ -152,7 +156,7 @@ dkswap(void)
 }
 
 /*
- * Read the disk statistics for each disk in the disk list. 
+ * Read the disk statistics for each disk in the disk list.
  * Also collect statistics for tty i/o and cpu ticks.
  */
 void
@@ -180,7 +184,7 @@ dkreadstats(void)
 
 		if (cur.dk_ndrive != dk_ndrive) {
 			/* Re-read the disk names. */
-			dk_name = calloc(dk_ndrive, sizeof(char *));
+			dk_name = calloc((size_t)dk_ndrive, sizeof(char *));
 			if (dk_name == NULL)
 				err(1, NULL);
 			mib[0] = CTL_HW;
@@ -347,7 +351,7 @@ dkreadstats(void)
 		}
 		free(q);
 
-	 	size = sizeof(cur.cp_time);
+		size = sizeof(cur.cp_time);
 		mib[0] = CTL_KERN;
 		mib[1] = KERN_CPTIME;
 		if (sysctl(mib, 2, cur.cp_time, &size, NULL, 0) < 0) {
@@ -396,7 +400,7 @@ dkreadstats(void)
  * track disk statistics.
  */
 int
-dkinit(int select)
+dkinit(int sel)
 {
 #if !defined(NOKVM)
 	struct disklist_head disk_head;
@@ -472,21 +476,21 @@ dkinit(int select)
 	}
 
 	/* allocate space for the statistics */
-	cur.dk_time = calloc(cur.dk_ndrive, sizeof(struct timeval));
-	cur.dk_rxfer = calloc(cur.dk_ndrive, sizeof(u_int64_t));
-	cur.dk_wxfer = calloc(cur.dk_ndrive, sizeof(u_int64_t));
-	cur.dk_seek = calloc(cur.dk_ndrive, sizeof(u_int64_t));
-	cur.dk_rbytes = calloc(cur.dk_ndrive, sizeof(u_int64_t));
-	cur.dk_wbytes = calloc(cur.dk_ndrive, sizeof(u_int64_t));
-	last.dk_time = calloc(cur.dk_ndrive, sizeof(struct timeval));
-	last.dk_rxfer = calloc(cur.dk_ndrive, sizeof(u_int64_t));
-	last.dk_wxfer = calloc(cur.dk_ndrive, sizeof(u_int64_t));
-	last.dk_seek = calloc(cur.dk_ndrive, sizeof(u_int64_t));
-	last.dk_rbytes = calloc(cur.dk_ndrive, sizeof(u_int64_t));
-	last.dk_wbytes = calloc(cur.dk_ndrive, sizeof(u_int64_t));
-	cur.dk_select = calloc(cur.dk_ndrive, sizeof(int));
-	cur.dk_name = calloc(cur.dk_ndrive, sizeof(char *));
-	
+	cur.dk_time = calloc((size_t)cur.dk_ndrive, sizeof(struct timeval));
+	cur.dk_rxfer = calloc((size_t)cur.dk_ndrive, sizeof(u_int64_t));
+	cur.dk_wxfer = calloc((size_t)cur.dk_ndrive, sizeof(u_int64_t));
+	cur.dk_seek = calloc((size_t)cur.dk_ndrive, sizeof(u_int64_t));
+	cur.dk_rbytes = calloc((size_t)cur.dk_ndrive, sizeof(u_int64_t));
+	cur.dk_wbytes = calloc((size_t)cur.dk_ndrive, sizeof(u_int64_t));
+	last.dk_time = calloc((size_t)cur.dk_ndrive, sizeof(struct timeval));
+	last.dk_rxfer = calloc((size_t)cur.dk_ndrive, sizeof(u_int64_t));
+	last.dk_wxfer = calloc((size_t)cur.dk_ndrive, sizeof(u_int64_t));
+	last.dk_seek = calloc((size_t)cur.dk_ndrive, sizeof(u_int64_t));
+	last.dk_rbytes = calloc((size_t)cur.dk_ndrive, sizeof(u_int64_t));
+	last.dk_wbytes = calloc((size_t)cur.dk_ndrive, sizeof(u_int64_t));
+	cur.dk_select = calloc((size_t)cur.dk_ndrive, sizeof(int));
+	cur.dk_name = calloc((size_t)cur.dk_ndrive, sizeof(char *));
+
 	if (!cur.dk_time || !cur.dk_rxfer || !cur.dk_wxfer || !cur.dk_seek ||
 	    !cur.dk_rbytes || !cur.dk_wbytes || !last.dk_time ||
 	    !last.dk_rxfer || !last.dk_wxfer || !last.dk_seek ||
@@ -513,7 +517,7 @@ dkinit(int select)
 		bufpp = disknames;
 		for (i = 0; i < dk_ndrive && (name = strsep(&bufpp, ",")) != NULL; i++) {
 			cur.dk_name[i] = name;
-			cur.dk_select[i] = select;
+			cur.dk_select[i] = sel;
 		}
 	} else {
 #if !defined(NOKVM)
@@ -526,7 +530,7 @@ dkinit(int select)
 			cur.dk_name[i] = strdup(buf);
 			if (!cur.dk_name[i])
 				errx(1, "Memory allocation failure.");
-			cur.dk_select[i] = select;
+			cur.dk_select[i] = sel;
 
 			p = TAILQ_NEXT(&cur_disk, dk_link);
 		}
@@ -540,7 +544,7 @@ dkinit(int select)
 
 #if !defined(NOKVM)
 /*
- * Dereference the kernel pointer `kptr' and fill in the local copy 
+ * Dereference the kernel pointer `kptr' and fill in the local copy
  * pointed to by `ptr'.  The storage space must be pre-allocated,
  * and the size of the copy passed in `len'.
  */

@@ -1,4 +1,4 @@
-.\"	$OpenBSD: mv.1,v 1.18 2003/06/02 23:32:08 millert Exp $
+.\"	$OpenBSD: mv.1,v 1.20 2006/08/10 06:50:37 jmc Exp $
 .\"	$NetBSD: mv.1,v 1.8 1995/03/21 09:06:51 cgd Exp $
 .\"
 .\" Copyright (c) 1989, 1990, 1993
@@ -61,12 +61,17 @@ In its second form,
 .Nm
 moves each file named by a
 .Ar source
-operand to a destination file in the existing directory named by the
+operand to a destination specified by the
 .Ar directory
 operand.
-The destination path for each operand is the pathname produced by the
-concatenation of the last operand, a slash, and the final pathname
-component of the named file.
+It is an error if the
+.Ar directory
+operand does not exist.
+The destination path for each
+.Ar file
+operand is the pathname produced by the concatenation of the
+.Ar directory
+operand, a slash, and the final pathname component of the named file.
 .Pp
 The options are as follows:
 .Bl -tag -width Ds
@@ -91,10 +96,6 @@ options is the one which affects
 .Nm mv Ns 's
 behavior.
 .Pp
-It is an error for either the
-.Ar source
-operand or the destination path to specify a directory unless both do.
-.Pp
 If the destination path does not have a mode which permits writing,
 .Nm
 prompts the user for confirmation as specified for the
@@ -113,27 +114,21 @@ to accomplish the move.
 The effect is equivalent to:
 .Bd -literal -offset indent
 $ rm -f destination_path && \e
-\tcp -PRp source_file destination && \e
-\trm -rf source_file
+    cp -PRp source_file destination && \e
+    rm -rf source_file
 .Ed
 .Pp
-The
-.Nm
-utility exits 0 on success or >0 if an error occurred.
+.Ex -std mv
 .Sh EXAMPLES
-.Li $ mv -f foo bar
-.Pp
 Rename file
 .Pa foo
 to
 .Pa bar ,
 overwriting
 .Pa bar
-if it already exists.
+if it already exists:
 .Pp
-.Li $ mv -i -- -f bar
-.br
-.Li $ mv -i ./-f bar
+.Dl $ mv -f foo bar
 .Pp
 Either of these commands will rename the file
 .Pa -f
@@ -141,7 +136,11 @@ to
 .Pa bar ,
 prompting for confirmation if
 .Pa bar
-already exists.
+already exists:
+.Bd -literal -offset indent
+$ mv -i -- -f bar
+$ mv -i ./-f bar
+.Ed
 .Sh SEE ALSO
 .Xr cp 1 ,
 .Xr symlink 7
@@ -149,10 +148,27 @@ already exists.
 The
 .Nm
 utility is expected to be
-.St -p1003.2
+.St -p1003.1-2004
 compatible.
 .Sh HISTORY
 A
 .Nm
 command appeared in
 .At v1 .
+.Sh CAVEATS
+In the second synopsis form
+if the destination path exists,
+the
+.Ar source
+operand and the destination path
+must both be a file or must both be a directory
+for the operation to succeed.
+For example, if
+.Pa f
+is a file and
+.Pa d
+and
+.Pa d/f
+are directories, the following command will fail:
+.Pp
+.Dl $ mv f d

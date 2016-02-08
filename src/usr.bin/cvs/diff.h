@@ -1,4 +1,4 @@
-/*	$OpenBSD: diff.h,v 1.7 2005/11/21 15:01:10 xsa Exp $	*/
+/*	$OpenBSD: diff.h,v 1.13 2006/06/14 14:10:50 joris Exp $	*/
 /*
  * Copyright (C) Caldera International Inc.  2001-2002.
  * All rights reserved.
@@ -67,7 +67,6 @@
 #define CVS_DIFF_H
 #define CVS_DIFF_DEFCTX	3	/* default context length */
 
-
 /*
  * Output format options
  */
@@ -79,7 +78,7 @@
 #define	D_RCSDIFF	5       /* Reverse editor output: RCS format */
 
 /*
- * Status values for print_status() and diffreg() return values
+ * Status values for cvs_diffreg() return values
  */
 #define	D_SAME		0	/* Files are the same */
 #define	D_DIFFER	1	/* Files are different */
@@ -92,20 +91,18 @@
 #define	D_SKIPPED1	8	/* path1 was a special file */
 #define	D_SKIPPED2	9	/* path2 was a special file */
 
-
-#if defined(RCSPROG)
-struct cvs_lines;
-#endif
-
-BUF		*cvs_diff3(RCSFILE *, char *, RCSNUM *, RCSNUM *);
+BUF		*cvs_diff3(RCSFILE *, char *, int, RCSNUM *, RCSNUM *, int);
 void		diff_output(const char *, ...);
 int		cvs_diffreg(const char *, const char *, BUF *out);
 int		ed_patch_lines(struct cvs_lines *, struct cvs_lines *);
 
 extern int       diff_format;
 extern int	 diff3_conflicts;
+extern int	 diff_pflag;
 extern char	*diff_file;
 extern char	 diffargs[128];
 extern BUF	*diffbuf;
+extern RCSNUM	*diff_rev1;
+extern RCSNUM	*diff_rev2;
 
 #endif

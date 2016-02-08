@@ -1,4 +1,4 @@
-/* $OpenBSD: connection.c,v 1.32 2005/05/04 10:05:01 hshoexer Exp $	 */
+/* $OpenBSD: connection.c,v 1.34 2006/09/01 00:24:06 mpf Exp $	 */
 /* $EOM: connection.c,v 1.28 2000/11/23 12:21:18 niklas Exp $	 */
 
 /*
@@ -49,6 +49,7 @@
 
 #include "log.h"
 #include "timer.h"
+#include "ui.h"
 #include "util.h"
 
 /* How often should we check that connections we require to be up, are up?  */
@@ -155,7 +156,8 @@ connection_checker(void *vconn)
 	    connection_checker, conn, &now);
 	if (!conn->ev)
 		log_print("connection_checker: could not add timer event");
-	pf_key_v2_connection_check(conn->name);
+	if (!ui_daemon_passive)
+		pf_key_v2_connection_check(conn->name);
 }
 
 /* Find the connection named NAME.  */
@@ -245,7 +247,7 @@ connection_passive_lookup_by_ids(u_int8_t *id1, u_int8_t *id2)
 		if (compare_ids(id1, conn->local_id, conn->local_sz) == 0 ||
 		    compare_ids(id2, conn->local_id, conn->local_sz) == 0) {
 			LOG_DBG((LOG_MISC, 60,
-			    "connection passive_lookup_by_ids: returned \"%s\""
+			    "connection_passive_lookup_by_ids: returned \"%s\""
 			    " only matched local id", conn->name));
 			return conn->name;
 		}

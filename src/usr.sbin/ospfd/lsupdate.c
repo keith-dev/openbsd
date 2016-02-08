@@ -1,4 +1,4 @@
-/*	$OpenBSD: lsupdate.c,v 1.27 2006/02/23 16:06:29 claudio Exp $ */
+/*	$OpenBSD: lsupdate.c,v 1.32 2006/06/02 18:49:55 norby Exp $ */
 
 /*
  * Copyright (c) 2005 Claudio Jeker <claudio@openbsd.org>
@@ -45,7 +45,7 @@ void	ls_retrans_list_remove(struct nbr *, struct lsa_entry *);
 /* link state update packet handling */
 int
 lsa_flood(struct iface *iface, struct nbr *originator, struct lsa_hdr *lsa_hdr,
-    void *data, u_int16_t len)
+    void *data)
 {
 	struct nbr		*nbr;
 	struct lsa_entry	*le = NULL;
@@ -311,7 +311,7 @@ ls_retrans_list_add(struct nbr *nbr, struct lsa_hdr *lsa,
 		tv.tv_sec = TAILQ_FIRST(&nbr->ls_retrans_list)->le_when;
 
 		if (evtimer_add(&nbr->ls_retrans_timer, &tv) == -1)
-			log_warn("ls_retrans_list_add: evtimer_add failed");
+			fatal("ls_retrans_list_add");
 	}
 }
 
@@ -327,9 +327,6 @@ ls_retrans_list_del(struct nbr *nbr, struct lsa_hdr *lsa_hdr)
 		ls_retrans_list_free(nbr, le);
 		return (0);
 	}
-
-	log_warnx("ls_retrans_list_del: invalid LS ack received, neighbor %s",
-	     inet_ntoa(nbr->id));
 
 	return (-1);
 }
@@ -387,13 +384,14 @@ ls_retrans_list_remove(struct nbr *nbr, struct lsa_entry *le)
 	nbr->ls_ret_cnt--;
 
 	if (reset && TAILQ_FIRST(&nbr->ls_retrans_list)) {
-		evtimer_del(&nbr->ls_retrans_timer);
+		if (evtimer_del(&nbr->ls_retrans_timer) == -1)
+			fatal("ls_retrans_list_remove");
 
 		timerclear(&tv);
 		tv.tv_sec = TAILQ_FIRST(&nbr->ls_retrans_list)->le_when;
 
 		if (evtimer_add(&nbr->ls_retrans_timer, &tv) == -1)
-			log_warn("ls_retrans_timer: evtimer_add failed");
+			fatal("ls_retrans_list_remove");
 	}
 }
 
@@ -417,12 +415,7 @@ ls_retrans_list_clr(struct nbr *nbr)
 	nbr->ls_ret_cnt = 0;
 }
 
-int
-ls_retrans_list_empty(struct nbr *nbr)
-{
-	return (TAILQ_EMPTY(&nbr->ls_retrans_list));
-}
-
+/* ARGSUSED */
 void
 ls_retrans_timer(int fd, short event, void *bula)
 {
@@ -443,7 +436,7 @@ ls_retrans_timer(int fd, short event, void *bula)
 
 	clock_gettime(CLOCK_MONOTONIC, &tp);
 	now = tp.tv_sec;
-	
+
 	if (nbr->iface->self == nbr) {
 		/*
 		 * oneshot needs to be set for lsa queued for flooding,
@@ -458,7 +451,7 @@ ls_retrans_timer(int fd, short event, void *bula)
 			 * flood by rerunning the lsa_flood.
 			 */
 			lsa_flood(nbr->iface, nbr, &le->le_ref->hdr,
-			    le->le_ref->data, le->le_ref->len);
+			    le->le_ref->data);
 			ls_retrans_list_free(nbr, le);
 			/* ls_retrans_list_free retriggers the timer */
 			return;
@@ -501,7 +494,7 @@ done:
 		tv.tv_sec = le->le_when;
 
 		if (evtimer_add(&nbr->ls_retrans_timer, &tv) == -1)
-			log_warn("ls_retrans_timer: evtimer_add failed");
+			fatal("ls_retrans_timer");
 	}
 }
 

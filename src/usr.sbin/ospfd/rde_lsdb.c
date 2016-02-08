@@ -1,4 +1,4 @@
-/*	$OpenBSD: rde_lsdb.c,v 1.27 2006/02/23 16:16:27 norby Exp $ */
+/*	$OpenBSD: rde_lsdb.c,v 1.33 2006/08/30 05:25:33 norby Exp $ */
 
 /*
  * Copyright (c) 2004, 2005 Claudio Jeker <claudio@openbsd.org>
@@ -34,15 +34,12 @@ void		 lsa_timeout(int, short, void *);
 void		 lsa_refresh(struct vertex *);
 int		 lsa_equal(struct lsa *, struct lsa *);
 
-struct lsa_tree	*global_lsa_tree;
-
 RB_GENERATE(lsa_tree, vertex, entry, lsa_compare)
 
 void
 lsa_init(struct lsa_tree *t)
 {
-	global_lsa_tree = t;
-	RB_INIT(global_lsa_tree);
+	RB_INIT(t);
 }
 
 int
@@ -91,10 +88,12 @@ vertex_get(struct lsa *lsa, struct rde_nbr *nbr)
 void
 vertex_free(struct vertex *v)
 {
-	if (v == NULL)
-		return;
+	if (v->type == LSA_TYPE_EXTERNAL)
+		RB_REMOVE(lsa_tree, &asext_tree, v);
+	else
+		RB_REMOVE(lsa_tree, &v->nbr->area->lsa_tree, v);
 
-	evtimer_del(&v->ev);
+	(void)evtimer_del(&v->ev);
 	free(v->lsa);
 	free(v);
 }
@@ -313,7 +312,7 @@ self:
 		 * the dummy LSA will be reflooded via the default timeout
 		 * handler.
 		 */
-		lsa_add(rde_nbr_self(nbr->area), dummy);
+		(void)lsa_add(rde_nbr_self(nbr->area), dummy);
 		return (1);
 	}
 
@@ -328,15 +327,15 @@ self:
 	return (1);
 }
 
-void
+int
 lsa_add(struct rde_nbr *nbr, struct lsa *lsa)
 {
 	struct lsa_tree	*tree;
 	struct vertex	*new, *old;
-	struct timeval	 tv;
+	struct timeval	 tv, now, res;
 
 	if (lsa->hdr.type == LSA_TYPE_EXTERNAL)
-		tree = global_lsa_tree;
+		tree = &asext_tree;
 	else
 		tree = &nbr->area->lsa_tree;
 
@@ -344,12 +343,28 @@ lsa_add(struct rde_nbr *nbr, struct lsa *lsa)
 	old = RB_INSERT(lsa_tree, tree, new);
 
 	if (old != NULL) {
+		if (old->deleted && evtimer_pending(&old->ev, &tv)) {
+			/* new update added before hold time expired */
+			gettimeofday(&now, NULL);
+			timersub(&tv, &now, &res);
+
+			/* remove old LSA and insert new LSA with delay */
+			vertex_free(old);
+			RB_INSERT(lsa_tree, tree, new);
+			new->deleted = 1;
+
+			log_debug("lsa_add: removing %p and putting %p on hold "
+			    "queue (timeout %d)", old, new, res.tv_sec);
+
+			if (evtimer_add(&new->ev, &res) != 0)
+				fatal("lsa_add");
+			return (1);
+		}
 		if (!lsa_equal(new->lsa, old->lsa)) {
 			if (lsa->hdr.type != LSA_TYPE_EXTERNAL)
 				nbr->area->dirty = 1;
 			start_spf_timer();
 		}
-		RB_REMOVE(lsa_tree, tree, old);
 		vertex_free(old);
 		RB_INSERT(lsa_tree, tree, new);
 	} else {
@@ -368,27 +383,27 @@ lsa_add(struct rde_nbr *nbr, struct lsa *lsa)
 
 	if (evtimer_add(&new->ev, &tv) != 0)
 		fatal("lsa_add");
+	return (0);
 }
 
 void
 lsa_del(struct rde_nbr *nbr, struct lsa_hdr *lsa)
 {
-	struct lsa_tree	*tree;
 	struct vertex	*v;
+	struct timeval	 tv;
 
 	v = lsa_find(nbr->area, lsa->type, lsa->ls_id, lsa->adv_rtr);
-	if (v == NULL) {
-		log_warnx("lsa_del: LSA no longer in table");
+	if (v == NULL)
 		return;
-	}
 
-	if (lsa->type == LSA_TYPE_EXTERNAL)
-		tree = global_lsa_tree;
-	else
-		tree = &nbr->area->lsa_tree;
+	log_debug("lsa_del: putting %p on hold queue", v);
 
-	RB_REMOVE(lsa_tree, tree, v);
-	vertex_free(v);
+	v->deleted = 1;
+	/* hold time to make sure that a new lsa is not added premature */
+	timerclear(&tv);
+	tv.tv_sec = MIN_LS_INTERVAL;
+	if (evtimer_add(&v->ev, &tv) == -1)
+		fatal("lsa_merge");
 }
 
 void
@@ -432,11 +447,16 @@ lsa_find(struct area *area, u_int8_t type, u_int32_t ls_id, u_int32_t adv_rtr)
 	key.type = type;
 
 	if (type == LSA_TYPE_EXTERNAL)
-		tree = global_lsa_tree;
+		tree = &asext_tree;
 	else
 		tree = &area->lsa_tree;
 
 	v = RB_FIND(lsa_tree, tree, &key);
+
+	/* LSA that are deleted are not findable */
+	if (v && v->deleted)
+		return (NULL);
+
 	if (v)
 		lsa_age(v);
 
@@ -453,6 +473,9 @@ lsa_find_net(struct area *area, u_int32_t ls_id)
 	RB_FOREACH(v, lsa_tree, tree) {
 		if (v->lsa->hdr.type == LSA_TYPE_NETWORK &&
 		    v->lsa->hdr.ls_id == ls_id) {
+			/* LSA that are deleted are not findable */
+			if (v->deleted)
+				return (NULL);
 			lsa_age(v);
 			return (v);
 		}
@@ -461,7 +484,7 @@ lsa_find_net(struct area *area, u_int32_t ls_id)
 	return (NULL);
 }
 
-int
+u_int16_t
 lsa_num_links(struct vertex *v)
 {
 	switch (v->type) {
@@ -485,6 +508,8 @@ lsa_snap(struct area *area, u_int32_t peerid)
 
 	do {
 		RB_FOREACH(v, lsa_tree, tree) {
+			if (v->deleted)
+				continue;
 			lsa_age(v);
 			if (ntohs(v->lsa->hdr.age) >= MAX_AGE)
 				rde_imsg_compose_ospfe(IMSG_LS_UPD, peerid,
@@ -495,7 +520,7 @@ lsa_snap(struct area *area, u_int32_t peerid)
 		}
 		if (tree != &area->lsa_tree)
 			break;
-		tree = global_lsa_tree;
+		tree = &asext_tree;
 	} while (1);
 }
 
@@ -505,6 +530,8 @@ lsa_dump(struct lsa_tree *tree, int imsg_type, pid_t pid)
 	struct vertex	*v;
 
 	RB_FOREACH(v, lsa_tree, tree) {
+		if (v->deleted)
+			continue;
 		lsa_age(v);
 		switch (imsg_type) {
 		case IMSG_CTL_SHOW_DATABASE:
@@ -545,12 +572,45 @@ lsa_dump(struct lsa_tree *tree, int imsg_type, pid_t pid)
 	}
 }
 
+/* ARGSUSED */
 void
 lsa_timeout(int fd, short event, void *bula)
 {
 	struct vertex	*v = bula;
+	struct timeval	 tv;
 
 	lsa_age(v);
+
+	if (v->deleted) {
+		if (ntohs(v->lsa->hdr.age) >= MAX_AGE) {
+			log_debug("lsa_timeout: finally free %p", v);
+			vertex_free(v);
+		} else {
+			v->deleted = 0;
+
+			/* schedule recalculation of the RIB */
+			if (v->lsa->hdr.type != LSA_TYPE_EXTERNAL)
+				v->nbr->area->dirty = 1;
+			start_spf_timer();
+
+			rde_imsg_compose_ospfe(IMSG_LS_FLOOD, v->nbr->peerid, 0,
+			    v->lsa, ntohs(v->lsa->hdr.len));
+
+			/* timeout handling either MAX_AGE or LS_REFRESH_TIME */
+			timerclear(&tv);
+			if (v->nbr->self)
+				tv.tv_sec = LS_REFRESH_TIME;
+			else
+				tv.tv_sec = MAX_AGE - ntohs(v->lsa->hdr.age);
+
+			log_debug("lsa_timeout: flodding %p new timeout %d",
+			    v, tv.tv_sec);
+
+			if (evtimer_add(&v->ev, &tv) != 0)
+				fatal("lsa_add");
+		}
+		return;
+	}
 
 	if (v->nbr->self && ntohs(v->lsa->hdr.age) < MAX_AGE)
 		lsa_refresh(v);
@@ -585,7 +645,8 @@ lsa_refresh(struct vertex *v)
 
 	timerclear(&tv);
 	tv.tv_sec = LS_REFRESH_TIME;
-	evtimer_add(&v->ev, &tv);
+	if (evtimer_add(&v->ev, &tv) == -1)
+		fatal("lsa_refresh");
 }
 
 void
@@ -597,7 +658,9 @@ lsa_merge(struct rde_nbr *nbr, struct lsa *lsa, struct vertex *v)
 	u_int16_t	len;
 
 	if (v == NULL) {
-		lsa_add(nbr, lsa);
+		if (lsa_add(nbr, lsa))
+			/* delayed update */
+			return;
 		rde_imsg_compose_ospfe(IMSG_LS_FLOOD, nbr->peerid, 0,
 		    lsa, ntohs(lsa->hdr.len));
 		return;
@@ -629,7 +692,8 @@ lsa_merge(struct rde_nbr *nbr, struct lsa *lsa, struct vertex *v)
 	timerclear(&tv);
 	if (v->changed + MIN_LS_INTERVAL >= now)
 		tv.tv_sec = MIN_LS_INTERVAL;
-	evtimer_add(&v->ev, &tv);
+	if (evtimer_add(&v->ev, &tv) == -1)
+		fatal("lsa_merge");
 }
 
 void
@@ -664,7 +728,7 @@ lsa_equal(struct lsa *a, struct lsa *b)
 	if (a == NULL || b == NULL)
 		return (0);
 	if (a->hdr.len != b->hdr.len)
-	       return (0);
+		return (0);
 	if (a->hdr.opts != b->hdr.opts)
 		return (0);
 	/* LSA with age MAX_AGE are never equal */

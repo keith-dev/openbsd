@@ -1,4 +1,4 @@
-/*	$OpenBSD: authpf.c,v 1.96 2005/12/12 16:06:01 beck Exp $	*/
+/*	$OpenBSD: authpf.c,v 1.99 2006/08/09 16:21:39 dhartmei Exp $	*/
 
 /*
  * Copyright (C) 1998 - 2002 Bob Beck (beck@openbsd.org).
@@ -308,7 +308,7 @@ main(int argc, char *argv[])
 	signal(SIGALRM, need_death);
 	signal(SIGPIPE, need_death);
 	signal(SIGHUP, need_death);
-	signal(SIGSTOP, need_death);
+	signal(SIGQUIT, need_death);
 	signal(SIGTSTP, need_death);
 	while (1) {
 		printf("\r\nHello %s. ", luser);
@@ -556,9 +556,11 @@ check_luser(char *luserdir, char *luser)
 		while (fputs(tmp, stdout) != EOF && !feof(f)) {
 			if (fgets(tmp, sizeof(tmp), f) == NULL) {
 				fflush(stdout);
+				fclose(f);
 				return (0);
 			}
 		}
+		fclose(f);
 	}
 	fflush(stdout);
 	return (0);
@@ -739,7 +741,8 @@ change_table(int add, const char *luser, const char *ipsrc)
 	struct pfr_addr		addr;
 
 	bzero(&io, sizeof(io));
-	strlcpy(io.pfrio_table.pfrt_name, tablename, sizeof(io.pfrio_table));
+	strlcpy(io.pfrio_table.pfrt_name, tablename,
+	    sizeof(io.pfrio_table.pfrt_name));
 	io.pfrio_buffer = &addr;
 	io.pfrio_esize = sizeof(addr);
 	io.pfrio_size = 1;
