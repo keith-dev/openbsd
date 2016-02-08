@@ -1,4 +1,4 @@
-/* $OpenBSD: tmux.c,v 1.104 2011/03/04 23:26:44 nicm Exp $ */
+/* $OpenBSD: tmux.c,v 1.108 2012/01/21 08:40:09 nicm Exp $ */
 
 /*
  * Copyright (c) 2007 Nicholas Marriott <nicm@users.sourceforge.net>
@@ -98,7 +98,9 @@ getshell(void)
 int
 checkshell(const char *shell)
 {
-	if (shell == NULL || *shell == '\0' || areshell(shell))
+	if (shell == NULL || *shell == '\0' || *shell != '/')
+		return (0);
+	if (areshell(shell))
 		return (0);
 	if (access(shell, X_OK) != 0)
 		return (0);
@@ -120,6 +122,22 @@ areshell(const char *shell)
 	if (strcmp(ptr, progname) == 0)
 		return (1);
 	return (0);
+}
+
+const char*
+get_full_path(const char *wd, const char *path)
+{
+	static char	newpath[MAXPATHLEN];
+	char		oldpath[MAXPATHLEN];
+
+	if (getcwd(oldpath, sizeof oldpath) == NULL)
+		return (NULL);
+	if (chdir(wd) != 0)
+		return (NULL);
+	if (realpath(path, newpath) != 0)
+		return (NULL);
+	chdir(oldpath);
+	return (newpath);
 }
 
 void
@@ -214,7 +232,6 @@ int
 main(int argc, char **argv)
 {
 	struct passwd	*pw;
-	struct keylist	*keylist;
 	char		*s, *path, *label, *home, **var;
 	int	 	 opt, flags, quiet, keys;
 
@@ -287,8 +304,8 @@ main(int argc, char **argv)
 		 * if not they know that output from UTF-8-capable programs may
 		 * be wrong.
 		 */
-		if ((s = getenv("LC_ALL")) == NULL) {
-			if ((s = getenv("LC_CTYPE")) == NULL)
+		if ((s = getenv("LC_ALL")) == NULL || *s == '\0') {
+			if ((s = getenv("LC_CTYPE")) == NULL || *s == '\0')
 				s = getenv("LANG");
 		}
 		if (s != NULL && (strcasestr(s, "UTF-8") != NULL ||
@@ -310,12 +327,6 @@ main(int argc, char **argv)
 
 	options_init(&global_w_options, NULL);
 	options_table_populate_tree(window_options_table, &global_w_options);
-
-	/* Set the prefix option (its a list, so not in the table). */
-	keylist = xmalloc(sizeof *keylist);
-	ARRAY_INIT(keylist);
-	ARRAY_ADD(keylist, '\002');
-	options_set_data(&global_s_options, "prefix", keylist, xfree);
 
 	/* Enable UTF-8 if the first client is on UTF-8 terminal. */
 	if (flags & IDENTIFY_UTF8) {

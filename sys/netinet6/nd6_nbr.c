@@ -1,4 +1,4 @@
-/*	$OpenBSD: nd6_nbr.c,v 1.57 2011/07/26 21:19:51 bluhm Exp $	*/
+/*	$OpenBSD: nd6_nbr.c,v 1.62 2012/01/11 19:12:23 bluhm Exp $	*/
 /*	$KAME: nd6_nbr.c,v 1.61 2001/02/10 16:06:14 jinmei Exp $	*/
 
 /*
@@ -183,7 +183,7 @@ nd6_ns_input(struct mbuf *m, int off, int icmp6len)
 	 * We do not add one in MUST NOT cases.
 	 */
 #if 0 /* too much! */
-	ifa = (struct ifaddr *)in6ifa_ifpwithaddr(ifp, &daddr6);
+	ifa = &in6ifa_ifpwithaddr(ifp, &daddr6)->ia_ifa;
 	if (ifa && (((struct in6_ifaddr *)ifa)->ia6_flags & IN6_IFF_ANYCAST))
 		tlladdr = 0;
 	else
@@ -200,16 +200,11 @@ nd6_ns_input(struct mbuf *m, int off, int icmp6len)
 	 * (3) "tentative" address on which DAD is being performed.
 	 */
 	/* (1) and (3) check. */
+	ifa = &in6ifa_ifpwithaddr(ifp, &taddr6)->ia_ifa;
 #if NCARP > 0
-	if (ifp->if_type == IFT_CARP) {
-		ifa = (struct ifaddr *)in6ifa_ifpwithaddr(ifp, &taddr6);
-		if (ifa && !carp_iamatch6(ifp, lladdr, &proxydl))
-			ifa = NULL;
-	} else {
-		ifa = (struct ifaddr *)in6ifa_ifpwithaddr(ifp, &taddr6);
-	}
-#else
-	ifa = (struct ifaddr *)in6ifa_ifpwithaddr(ifp, &taddr6);
+	if (ifp->if_type == IFT_CARP && ifa &&
+	    !carp_iamatch6(ifp, lladdr, &proxydl))
+		ifa = NULL;
 #endif
 
 	/* (2) check. */
@@ -222,14 +217,15 @@ nd6_ns_input(struct mbuf *m, int off, int icmp6len)
 		tsin6.sin6_family = AF_INET6;
 		tsin6.sin6_addr = taddr6;
 
-		rt = rtalloc1((struct sockaddr *)&tsin6, 0, 0);
+		rt = rtalloc1((struct sockaddr *)&tsin6, 0,
+			      m->m_pkthdr.rdomain);
 		if (rt && (rt->rt_flags & RTF_ANNOUNCE) != 0 &&
 		    rt->rt_gateway->sa_family == AF_LINK) {
 			/*
 			 * proxy NDP for single entry
 			 */
-			ifa = (struct ifaddr *)in6ifa_ifpforlinklocal(ifp,
-				IN6_IFF_NOTREADY|IN6_IFF_ANYCAST);
+			ifa = &in6ifa_ifpforlinklocal(ifp,
+			    IN6_IFF_NOTREADY | IN6_IFF_ANYCAST)->ia_ifa;
 			if (ifa) {
 				proxy = 1;
 				proxydl = SDL(rt->rt_gateway);
@@ -382,6 +378,7 @@ nd6_ns_output(struct ifnet *ifp, struct in6_addr *daddr6,
 	if (m == NULL)
 		return;
 	m->m_pkthdr.rcvif = NULL;
+	m->m_pkthdr.rdomain = ifp->if_rdomain;
 
 	if (daddr6 == NULL || IN6_IS_ADDR_MULTICAST(daddr6)) {
 		m->m_flags |= M_MCAST;
@@ -454,7 +451,7 @@ nd6_ns_output(struct ifnet *ifp, struct in6_addr *daddr6,
 
 			bcopy(&dst_sa, &ro.ro_dst, sizeof(dst_sa));
 			src0 = in6_selectsrc(&dst_sa, NULL, NULL, &ro, NULL,
-			    &error);
+			    &error, m->m_pkthdr.rdomain);
 			if (src0 == NULL) {
 				nd6log((LOG_DEBUG,
 				    "nd6_ns_output: source can't be "
@@ -613,7 +610,7 @@ nd6_na_input(struct mbuf *m, int off, int icmp6len)
 		lladdrlen = ndopts.nd_opts_tgt_lladdr->nd_opt_len << 3;
 	}
 
-	ifa = (struct ifaddr *)in6ifa_ifpwithaddr(ifp, &taddr6);
+	ifa = &in6ifa_ifpwithaddr(ifp, &taddr6)->ia_ifa;
 
 	/*
 	 * Target address matches one of my interface address.
@@ -869,6 +866,9 @@ nd6_na_output(struct ifnet *ifp, struct in6_addr *daddr6,
 	int icmp6len, maxlen, error;
 	caddr_t mac;
 	struct route_in6 ro;
+#if NCARP > 0
+	struct sockaddr_dl *proxydl = NULL;
+#endif
 
 	mac = NULL;
 	bzero(&ro, sizeof(ro));
@@ -896,6 +896,7 @@ nd6_na_output(struct ifnet *ifp, struct in6_addr *daddr6,
 	if (m == NULL)
 		return;
 	m->m_pkthdr.rcvif = NULL;
+	m->m_pkthdr.rdomain = ifp->if_rdomain;
 
 	if (IN6_IS_ADDR_MULTICAST(daddr6)) {
 		m->m_flags |= M_MCAST;
@@ -936,7 +937,8 @@ nd6_na_output(struct ifnet *ifp, struct in6_addr *daddr6,
 	 * Select a source whose scope is the same as that of the dest.
 	 */
 	bcopy(&dst_sa, &ro.ro_dst, sizeof(dst_sa));
-	src0 = in6_selectsrc(&dst_sa, NULL, NULL, &ro, NULL, &error);
+	src0 = in6_selectsrc(&dst_sa, NULL, NULL, &ro, NULL, &error,
+	    m->m_pkthdr.rdomain);
 	if (src0 == NULL) {
 		nd6log((LOG_DEBUG, "nd6_na_output: source can't be "
 		    "determined: dst=%s, error=%d\n",
@@ -989,6 +991,12 @@ nd6_na_output(struct ifnet *ifp, struct in6_addr *daddr6,
 		bcopy(mac, (caddr_t)(nd_opt + 1), ifp->if_addrlen);
 	} else
 		flags &= ~ND_NA_FLAG_OVERRIDE;
+
+#if NCARP > 0
+	/* Do not send NAs for carp addresses if we're not the CARP master. */
+	if (ifp->if_type == IFT_CARP && !carp_iamatch6(ifp, mac, &proxydl))
+		goto bad;
+#endif
 
 	ip6->ip6_plen = htons((u_short)icmp6len);
 	nd_na->nd_na_flags_reserved = flags;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if.h,v 1.128 2011/07/08 18:48:51 henning Exp $	*/
+/*	$OpenBSD: if.h,v 1.131 2011/12/02 03:15:31 haesbaert Exp $	*/
 /*	$NetBSD: if.h,v 1.23 1996/05/07 02:40:27 thorpej Exp $	*/
 
 /*
@@ -142,6 +142,7 @@ struct	if_data {
 	u_int64_t	ifi_omcasts;		/* packets sent via multicast */
 	u_int64_t	ifi_iqdrops;		/* dropped on input, this interface */
 	u_int64_t	ifi_noproto;		/* destined for unsupported protocol */
+	u_int32_t	ifi_capabilities;	/* interface capabilities */
 	struct	timeval ifi_lastchange;	/* last operational state change */
 
 	struct mclpool	ifi_mclpool[MCLPOOLS];
@@ -264,7 +265,6 @@ struct ifnet {				/* and the entries */
 	int	if_xflags;		/* extra softnet flags */
 	struct	if_data if_data;	/* stats and other data about if */
 	u_int32_t if_hardmtu;		/* maximum MTU device supports */
-	int	if_capabilities;	/* interface capabilities */
 	u_int	if_rdomain;		/* routing instance */
 	char	if_description[IFDESCRSIZE]; /* interface description */
 	u_short	if_rtlabelid;		/* next route label */
@@ -311,6 +311,7 @@ struct ifnet {				/* and the entries */
 #define	if_iqdrops	if_data.ifi_iqdrops
 #define	if_noproto	if_data.ifi_noproto
 #define	if_lastchange	if_data.ifi_lastchange
+#define	if_capabilities	if_data.ifi_capabilities
 
 #define	IFF_UP		0x1		/* interface is up */
 #define	IFF_BROADCAST	0x2		/* broadcast address valid */
@@ -354,14 +355,10 @@ struct ifnet {				/* and the entries */
 #define	IFCAP_CSUM_IPv4		0x00000001	/* can do IPv4 header csum */
 #define	IFCAP_CSUM_TCPv4	0x00000002	/* can do IPv4/TCP csum */
 #define	IFCAP_CSUM_UDPv4	0x00000004	/* can do IPv4/UDP csum */
-#define	IFCAP_IPSEC		0x00000008	/* can do IPsec */
 #define	IFCAP_VLAN_MTU		0x00000010	/* VLAN-compatible MTU */
 #define	IFCAP_VLAN_HWTAGGING	0x00000020	/* hardware VLAN tag support */
-#define	IFCAP_IPCOMP		0x00000040	/* can do IPcomp */
 #define	IFCAP_CSUM_TCPv6	0x00000080	/* can do IPv6/TCP checksums */
 #define	IFCAP_CSUM_UDPv6	0x00000100	/* can do IPv6/UDP checksums */
-#define	IFCAP_CSUM_TCPv4_Rx	0x00000200	/* can do IPv4/TCP (Rx only) */
-#define	IFCAP_CSUM_UDPv4_Rx	0x00000400	/* can do IPv4/UDP (Rx only) */
 #define	IFCAP_WOL		0x00008000	/* can do wake on lan */
 
 /*
@@ -724,8 +721,8 @@ do {									\
 
 #define	IFQ_DEQUEUE(ifq, m)						\
 do {									\
-	if (TBR_IS_ENABLED((ifq)))					\
-		(m) = tbr_dequeue((ifq), ALTDQ_REMOVE);			\
+	if (OLDTBR_IS_ENABLED((ifq)))					\
+		(m) = oldtbr_dequeue((ifq), ALTDQ_REMOVE);			\
 	else if (ALTQ_IS_ENABLED((ifq)))				\
 		ALTQ_DEQUEUE((ifq), (m));				\
 	else								\
@@ -735,7 +732,7 @@ do {									\
 #define	IFQ_POLL(ifq, m)						\
 do {									\
 	if (TBR_IS_ENABLED((ifq)))					\
-		(m) = tbr_dequeue((ifq), ALTDQ_POLL);			\
+		(m) = oldtbr_dequeue((ifq), ALTDQ_POLL);			\
 	else if (ALTQ_IS_ENABLED((ifq)))				\
 		ALTQ_POLL((ifq), (m));					\
 	else								\

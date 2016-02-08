@@ -1,4 +1,4 @@
-/*	$OpenBSD: socket.h,v 1.76 2011/07/08 20:53:59 deraadt Exp $	*/
+/*	$OpenBSD: socket.h,v 1.78 2011/12/03 12:38:30 fgsch Exp $	*/
 /*	$NetBSD: socket.h,v 1.14 1996/02/09 18:25:36 christos Exp $	*/
 
 /*
@@ -35,10 +35,7 @@
 #ifndef _SYS_SOCKET_H_
 #define	_SYS_SOCKET_H_
 
-/*
- * needed for ALIGNBYTES
- */
-#include <machine/param.h>
+#include <sys/_types.h>
 
 /*
  * Definitions related to sockets: types, address families, options.
@@ -415,6 +412,7 @@ struct msghdr {
 #define	MSG_DONTWAIT	0x80		/* this message should be nonblocking */
 #define	MSG_BCAST	0x100		/* this message rec'd as broadcast */
 #define	MSG_MCAST	0x200		/* this message rec'd as multicast */
+#define	MSG_NOSIGNAL	0x400		/* do not send SIGPIPE */
 
 /*
  * Header for ancillary data objects in msg_control buffer.
@@ -431,15 +429,15 @@ struct cmsghdr {
 
 /* given pointer to struct cmsghdr, return pointer to data */
 #define	CMSG_DATA(cmsg) \
-	((u_char *)(cmsg) + __CMSG_ALIGN(sizeof(struct cmsghdr)))
+	((u_char *)(cmsg) + _ALIGN(sizeof(struct cmsghdr)))
 
 /* given pointer to struct cmsghdr, return pointer to next cmsghdr */
 #define	CMSG_NXTHDR(mhdr, cmsg)	\
-	(((caddr_t)(cmsg) + __CMSG_ALIGN((cmsg)->cmsg_len) + \
-			    __CMSG_ALIGN(sizeof(struct cmsghdr)) > \
+	(((caddr_t)(cmsg) + _ALIGN((cmsg)->cmsg_len) + \
+			    _ALIGN(sizeof(struct cmsghdr)) > \
 	    ((caddr_t)(mhdr)->msg_control) + (mhdr)->msg_controllen) ? \
 	    (struct cmsghdr *)NULL : \
-	    (struct cmsghdr *)((caddr_t)(cmsg) + __CMSG_ALIGN((cmsg)->cmsg_len)))
+	    (struct cmsghdr *)((caddr_t)(cmsg) + _ALIGN((cmsg)->cmsg_len)))
 
 /*
  * RFC 2292 requires to check msg_controllen, in case that the kernel returns
@@ -451,16 +449,15 @@ struct cmsghdr {
 	 (struct cmsghdr *)NULL)
 
 /* Round len up to next alignment boundary */
-#define	__CMSG_ALIGN(len)	ALIGN(len)
 #ifdef _KERNEL
-#define CMSG_ALIGN(n)		__CMSG_ALIGN(n)
+#define CMSG_ALIGN(n)		_ALIGN(n)
 #endif
 
 /* Length of the contents of a control message of length len */
-#define	CMSG_LEN(len)	(__CMSG_ALIGN(sizeof(struct cmsghdr)) + (len))
+#define	CMSG_LEN(len)	(_ALIGN(sizeof(struct cmsghdr)) + (len))
 
 /* Length of the space taken up by a padded control message of length len */
-#define	CMSG_SPACE(len)	(__CMSG_ALIGN(sizeof(struct cmsghdr)) + __CMSG_ALIGN(len))
+#define	CMSG_SPACE(len)	(_ALIGN(sizeof(struct cmsghdr)) + _ALIGN(len))
 
 /* "Socket"-level control message types: */
 #define	SCM_RIGHTS	0x01		/* access rights (array of int) */

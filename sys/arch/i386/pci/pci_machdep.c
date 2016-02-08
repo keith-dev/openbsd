@@ -1,4 +1,4 @@
-/*	$OpenBSD: pci_machdep.c,v 1.63 2011/06/08 22:57:59 kettenis Exp $	*/
+/*	$OpenBSD: pci_machdep.c,v 1.68 2011/12/04 20:08:09 kettenis Exp $	*/
 /*	$NetBSD: pci_machdep.c,v 1.28 1997/06/06 23:29:17 thorpej Exp $	*/
 
 /*-
@@ -212,6 +212,13 @@ pci_attach_hook(struct device *parent, struct device *self,
 		return;
 
 	/*
+	 * Machines that use the non-standard method of generating PCI
+	 * configuration cycles are way too old to support MSI.
+	 */
+	if (pci_mode == 2)
+		return;
+
+	/*
 	 * In order to decide whether the system supports MSI we look
 	 * at the host bridge, which should be device 0 function 0 on
 	 * bus 0.  It is better to not enable MSI on systems that
@@ -318,7 +325,7 @@ pci_bus_maxdevs(pci_chipset_tag_t pc, int busno)
 	/*
 	 * Bus number is irrelevant.  If Configuration Mechanism 2 is in
 	 * use, can only have devices 0-15 on any bus.  If Configuration
-	 * Mechanism 1 is in use, can have devices 0-32 (i.e. the `normal'
+	 * Mechanism 1 is in use, can have devices 0-31 (i.e. the `normal'
 	 * range).
 	 */
 	if (pci_mode == 2)
@@ -411,6 +418,8 @@ pci_conf_read(pci_chipset_tag_t pc, pcitag_t tag, int reg)
 	pcireg_t data;
 	int bus;
 
+	KASSERT((reg & 0x3) == 0);
+
 	if (pci_mcfg_addr && reg >= PCI_CONFIG_SPACE_SIZE) {
 		pci_decompose_tag(pc, tag, &bus, NULL, NULL);
 		if (bus >= pci_mcfg_min_bus && bus <= pci_mcfg_max_bus) {
@@ -446,6 +455,8 @@ void
 pci_conf_write(pci_chipset_tag_t pc, pcitag_t tag, int reg, pcireg_t data)
 {
 	int bus;
+
+	KASSERT((reg & 0x3) == 0);
 
 	if (pci_mcfg_addr && reg >= PCI_CONFIG_SPACE_SIZE) {
 		pci_decompose_tag(pc, tag, &bus, NULL, NULL);
@@ -628,17 +639,18 @@ pci_intr_map(struct pci_attach_args *pa, pci_intr_handle_t *ihp)
 	pci_decompose_tag (pa->pa_pc, pa->pa_tag, &bus, &dev, &func);
 
 	if (!(ihp->line & PCI_INT_VIA_ISA) && mp_busses != NULL) {
-		/*
-		 * Assumes 1:1 mapping between PCI bus numbers and
-		 * the numbers given by the MP bios.
-		 * XXX Is this a valid assumption?
-		 */
-		int mpspec_pin = (dev<<2)|(pin-1);
+		int mpspec_pin = (dev << 2) | (pin - 1);
 
-		for (mip = mp_busses[bus].mb_intrs; mip != NULL; mip=mip->next) {
-			if (mip->bus_pin == mpspec_pin) {
-				ihp->line = mip->ioapic_ih | line;
-				return 0;
+		if (bus < mp_nbusses) {
+			for (mip = mp_busses[bus].mb_intrs;
+			     mip != NULL; mip = mip->next) {
+				if (&mp_busses[bus] == mp_isa_bus ||
+				    &mp_busses[bus] == mp_eisa_bus)
+					continue;
+				if (mip->bus_pin == mpspec_pin) {
+					ihp->line = mip->ioapic_ih | line;
+					return 0;
+				}
 			}
 		}
 

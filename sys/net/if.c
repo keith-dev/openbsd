@@ -1,4 +1,4 @@
-/*	$OpenBSD: if.c,v 1.239 2011/07/09 00:47:18 henning Exp $	*/
+/*	$OpenBSD: if.c,v 1.241 2012/01/03 23:41:51 bluhm Exp $	*/
 /*	$NetBSD: if.c,v 1.35 1996/05/07 05:26:04 thorpej Exp $	*/
 
 /*
@@ -712,7 +712,7 @@ if_clone_destroy(const char *name)
 {
 	struct if_clone *ifc;
 	struct ifnet *ifp;
-	int s, ret;
+	int s;
 
 	ifc = if_clone_lookup(name, NULL);
 	if (ifc == NULL)
@@ -731,12 +731,7 @@ if_clone_destroy(const char *name)
 		splx(s);
 	}
 
-	if_delgroup(ifp, ifc->ifc_name);
-
-	if ((ret = (*ifc->ifc_destroy)(ifp)) != 0)
-		if_addgroup(ifp, ifc->ifc_name);
-
-	return (ret);
+	return ((*ifc->ifc_destroy)(ifp));
 }
 
 /*
@@ -2324,13 +2319,12 @@ ifnewlladdr(struct ifnet *ifp)
 	/* Update the link-local address. Don't do it if we're
 	 * a router to avoid confusing hosts on the network. */
 	if (!(ifp->if_xflags & IFXF_NOINET6) && !ip6_forwarding) {
-		ifa = (struct ifaddr *)in6ifa_ifpforlinklocal(ifp, 0);
+		ifa = &in6ifa_ifpforlinklocal(ifp, 0)->ia_ifa;
 		if (ifa) {
 			in6_purgeaddr(ifa);
 			in6_ifattach_linklocal(ifp, NULL);
 			if (in6if_do_dad(ifp)) {
-				ifa = (struct ifaddr *)
-				    in6ifa_ifpforlinklocal(ifp, 0);
+				ifa = &in6ifa_ifpforlinklocal(ifp, 0)->ia_ifa;
 				if (ifa)
 					nd6_dad_start(ifa, NULL);
 			}

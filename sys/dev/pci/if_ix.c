@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ix.c,v 1.54 2011/06/18 21:19:44 claudio Exp $	*/
+/*	$OpenBSD: if_ix.c,v 1.60 2012/01/20 14:48:49 mikeb Exp $	*/
 
 /******************************************************************************
 
@@ -209,7 +209,7 @@ ixgbe_attach(struct device *parent, struct device *self, void *aux)
 	INIT_DEBUGOUT("ixgbe_attach: begin");
 
 	sc->osdep.os_sc = sc;
-	sc->osdep.os_pa = pa;
+	sc->osdep.os_pa = *pa;
 
 	/* Core Lock Init*/
 	mtx_init(&sc->core_mtx, IPL_NET);
@@ -635,8 +635,7 @@ ixgbe_init(void *arg)
 	struct ifnet	*ifp = &sc->arpcom.ac_if;
 	struct rx_ring	*rxr = sc->rx_rings;
 	uint32_t	 k, txdctl, rxdctl, rxctrl, mhadd, gpie;
-	int		 err;
-	int		 i, s;
+	int		 i, s, err, llimode = 0;
 
 	INIT_DEBUGOUT("ixgbe_init: begin");
 
@@ -695,9 +694,17 @@ ixgbe_init(void *arg)
 	/* Enable Fan Failure Interrupt */
 	gpie |= IXGBE_SDP1_GPIEN;
 
-	/* Add for Thermal detection */
-	if (sc->hw.mac.type == ixgbe_mac_82599EB)
+	if (sc->hw.mac.type == ixgbe_mac_82599EB) {
+		/* Add for Thermal detection */
 		gpie |= IXGBE_SDP2_GPIEN;
+
+		/*
+		 * Set LL interval to max to reduce the number of low latency
+		 * interrupts hitting the card when the ring is getting full.
+		 */
+		gpie |= 0xf << IXGBE_GPIE_LLI_DELAY_SHIFT;
+		llimode = IXGBE_EITR_LLI_MOD;
+	}
 
 	if (sc->msix > 1) {
 		/* Enable Enhanced MSIX mode */
@@ -714,7 +721,7 @@ ixgbe_init(void *arg)
 		mhadd |= sc->max_frame_size << IXGBE_MHADD_MFS_SHIFT;
 		IXGBE_WRITE_REG(&sc->hw, IXGBE_MHADD, mhadd);
 	}
-	
+
 	/* Now enable all the queues */
 
 	for (i = 0; i < sc->num_queues; i++) {
@@ -801,7 +808,8 @@ ixgbe_init(void *arg)
 	}
 
 	/* Set moderation on the Link interrupt */
-	IXGBE_WRITE_REG(&sc->hw, IXGBE_EITR(sc->linkvec), IXGBE_LINK_ITR);
+	IXGBE_WRITE_REG(&sc->hw, IXGBE_EITR(sc->linkvec),
+	    IXGBE_LINK_ITR | llimode);
 
 	/* Config/Enable Link */
 	ixgbe_config_link(sc);
@@ -953,8 +961,8 @@ ixgbe_legacy_irq(void *arg)
 			/* Advance the Rx Queue "Tail Pointer" */
 			IXGBE_WRITE_REG(&sc->hw, IXGBE_RDT(que->rxr->me),
 			    que->rxr->last_desc_filled);
-		} else if (que->rxr->rx_ndescs < 2)
-			timeout_add(&sc->rx_refill, 0);
+		} else
+			timeout_add(&sc->rx_refill, 1);
 	}
 
 	if (ifp->if_flags & IFF_RUNNING && !IFQ_IS_EMPTY(&ifp->if_snd))
@@ -1392,7 +1400,7 @@ void
 ixgbe_identify_hardware(struct ix_softc *sc)
 {
 	struct ixgbe_osdep	*os = &sc->osdep;
-	struct pci_attach_args	*pa = os->os_pa;
+	struct pci_attach_args	*pa = &os->os_pa;
 	uint32_t		 reg;
 
 	/* Save off the information about this board */
@@ -1526,7 +1534,7 @@ ixgbe_allocate_legacy(struct ix_softc *sc)
 {
 	struct ifnet		*ifp = &sc->arpcom.ac_if;
 	struct ixgbe_osdep	*os = &sc->osdep;
-	struct pci_attach_args	*pa = os->os_pa;
+	struct pci_attach_args	*pa = &os->os_pa;
 	const char		*intrstr = NULL;
 	pci_chipset_tag_t	pc = pa->pa_pc;
 	pci_intr_handle_t	ih;
@@ -1568,7 +1576,7 @@ int
 ixgbe_allocate_pci_resources(struct ix_softc *sc)
 {
 	struct ixgbe_osdep	*os = &sc->osdep;
-	struct pci_attach_args	*pa = os->os_pa;
+	struct pci_attach_args	*pa = &os->os_pa;
 	int			 val;
 
 	val = pci_conf_read(pa->pa_pc, pa->pa_tag, PCIR_BAR(0));
@@ -1601,7 +1609,7 @@ void
 ixgbe_free_pci_resources(struct ix_softc * sc)
 {
 	struct ixgbe_osdep	*os = &sc->osdep;
-	struct pci_attach_args	*pa = os->os_pa;
+	struct pci_attach_args	*pa = &os->os_pa;
 	struct ix_queue *que = sc->queues;
 	int i;
 
@@ -1741,7 +1749,7 @@ ixgbe_dma_malloc(struct ix_softc *sc, bus_size_t size,
 	struct ixgbe_osdep	*os = &sc->osdep;
 	int			 r;
 
-	dma->dma_tag = os->os_pa->pa_dmat;
+	dma->dma_tag = os->os_pa.pa_dmat;
 	r = bus_dmamap_create(dma->dma_tag, size, 1,
 	    size, 0, BUS_DMA_NOWAIT, &dma->dma_map);
 	if (r != 0) {
@@ -2284,9 +2292,6 @@ ixgbe_tx_ctx_setup(struct tx_ring *txr, struct mbuf *mp)
 		if (mp->m_pkthdr.csum_flags & M_UDP_CSUM_OUT)
 			type_tucmd_mlhl |= IXGBE_ADVTXD_TUCMD_L4T_UDP;
 		break;
-	default:
-		offload = FALSE;
-		break;
 	}
 
 	/* Now copy bits into descriptor */
@@ -2544,7 +2549,7 @@ ixgbe_get_buf(struct rx_ring *rxr, int i)
 {
 	struct ix_softc		*sc = rxr->sc;
 	struct ixgbe_rx_buf	*rxbuf;
-	struct mbuf		*mh, *mp;
+	struct mbuf		*mp, *mh = NULL;
 	int			error;
 	union ixgbe_adv_rx_desc	*rxdesc;
 	size_t			 dsize = sizeof(union ixgbe_adv_rx_desc);
@@ -2568,8 +2573,10 @@ ixgbe_get_buf(struct rx_ring *rxr, int i)
 		goto no_split;
 
 	mh = m_gethdr(M_DONTWAIT, MT_DATA);
-	if (mh == NULL)
+	if (mh == NULL) {
+		m_freem(mp);
 		return (ENOBUFS);
+	}
 
 	mh->m_pkthdr.len = mh->m_len = MHLEN;
 	mh->m_len = MHLEN;
@@ -2579,6 +2586,7 @@ ixgbe_get_buf(struct rx_ring *rxr, int i)
 	error = bus_dmamap_load_mbuf(rxr->rxdma.dma_tag, rxbuf->hmap,
 	    mh, BUS_DMA_NOWAIT);
 	if (error) {
+		m_freem(mp);
 		m_freem(mh);
 		return (error);
 	}
@@ -2598,6 +2606,11 @@ no_split:
 	error = bus_dmamap_load_mbuf(rxr->rxdma.dma_tag, rxbuf->pmap,
 	    mp, BUS_DMA_NOWAIT);
 	if (error) {
+		if (mh) {
+			bus_dmamap_unload(rxr->rxdma.dma_tag, rxbuf->hmap);
+			rxbuf->m_head = NULL;
+			m_freem(mh);
+		}
 		m_freem(mp);
 		return (error);
 	}
@@ -2739,7 +2752,7 @@ ixgbe_rxrefill(void *xsc)
 		/* Advance the Rx Queue "Tail Pointer" */
 		IXGBE_WRITE_REG(&sc->hw, IXGBE_RDT(que->rxr->me),
 		    que->rxr->last_desc_filled);
-	} else if (que->rxr->rx_ndescs < 2)
+	} else
 		timeout_add(&sc->rx_refill, 1);
 	splx(s);
 }
@@ -3102,8 +3115,7 @@ ixgbe_rxeof(struct ix_queue *que, int count)
 				/* Singlet, prepare to send */
 				sendmp = mh;
 #if NVLAN > 0
-				if ((sc->num_vlans) &&
-				    (staterr & IXGBE_RXD_STAT_VP)) {
+				if (staterr & IXGBE_RXD_STAT_VP) {
 					sendmp->m_pkthdr.ether_vtag = vtag;
 					sendmp->m_flags |= M_VLANTAG;
 				}
@@ -3130,8 +3142,7 @@ ixgbe_rxeof(struct ix_queue *que, int count)
 				 sendmp = mp;
 				 sendmp->m_pkthdr.len = mp->m_len;
 #if NVLAN > 0
-				if ((sc->num_vlans) &&
-				    (staterr & IXGBE_RXD_STAT_VP)) {
+				if (staterr & IXGBE_RXD_STAT_VP) {
 					sendmp->m_pkthdr.ether_vtag = vtag;
 					sendmp->m_flags |= M_VLANTAG;
 				}
@@ -3219,15 +3230,6 @@ ixgbe_setup_vlan_hw_support(struct ix_softc *sc)
 {
 	uint32_t	ctrl;
 	int		i;
-
-	/*
-	 * We get here thru ixgbe_init, meaning
-	 * a soft reset, this has already cleared
-	 * the VFTA and other state, so if there
-	 * have been no vlan's registered do nothing.
-	 */
-	if (sc->num_vlans == 0)
-		return;
 
 	/*
 	 * A soft reset zero's out the VFTA, so
@@ -3328,7 +3330,7 @@ ixgbe_read_pci_cfg(struct ixgbe_hw *hw, uint32_t reg)
 		high = 1;
 		reg &= ~0x2;
 	}
-	pa = ((struct ixgbe_osdep *)hw->back)->os_pa;
+	pa = &((struct ixgbe_osdep *)hw->back)->os_pa;
 	value = pci_conf_read(pa->pa_pc, pa->pa_tag, reg);
 
 	if (high)
@@ -3349,7 +3351,7 @@ ixgbe_write_pci_cfg(struct ixgbe_hw *hw, uint32_t reg, uint16_t value)
 		high = 1;
 		reg &= ~0x2;
 	}
-	pa = ((struct ixgbe_osdep *)hw->back)->os_pa;
+	pa = &((struct ixgbe_osdep *)hw->back)->os_pa;
 	rv = pci_conf_read(pa->pa_pc, pa->pa_tag, reg);
 	if (!high)
 		rv = (rv & 0xffff0000) | value;

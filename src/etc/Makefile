@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.309 2011/07/22 09:30:54 espie Exp $
+#	$OpenBSD: Makefile,v 1.313 2012/02/09 04:39:32 david Exp $
 
 TZDIR=		/usr/share/zoneinfo
 LOCALTIME=	Canada/Mountain
@@ -30,14 +30,14 @@ kernels: bootblocks ${ALL_KERNELS}
 # -rw-r--r--
 BINOWN= root
 BINGRP= wheel
-BIN1=	changelist ccd.conf csh.cshrc csh.login csh.logout daily dhcpd.conf \
+BIN1=	changelist csh.cshrc csh.login csh.logout daily dhcpd.conf \
 	exports ftpusers ftpchroot gettytab group hosts hosts.lpd inetd.conf \
 	ksh.kshrc locate.rc man.conf monthly motd mrouted.conf myname \
 	netstart networks newsyslog.conf printcap protocols \
 	rbootd.conf rc rc.conf rc.local rc.securelevel rc.shutdown \
 	remote rpc services shells syslog.conf weekly \
 	etc.${MACHINE}/disktab dhclient.conf mailer.conf ntpd.conf \
-	moduli pf.os sensorsd.conf ifstated.conf
+	moduli pf.os sensorsd.conf ifstated.conf mixerctl.conf
 
 .if ${MACHINE} != "aviion" && ${MACHINE} != "mvme68k" && \
     ${MACHINE} != "mvme88k"
@@ -48,14 +48,14 @@ BIN1+=	wsconsctl.conf
 BIN2=	motd
 
 # -r-xr-xr-x
-RCDAEMONS=	amd apmd aucat bgpd bootparamd btd cron dhcpd dhcrelay dvmrpd \
+RCDAEMONS=	amd apmd bgpd bootparamd btd cron dhcpd dhcrelay dvmrpd \
 		ftpd ftpproxy hostapd hotplugd httpd identd ifstated iked \
 		inetd isakmpd ldapd ldattach ldpd lpd mopd mrouted named nsd \
 		ntpd ospfd ospf6d portmap pflogd rarpd rbootd relayd ripd \
 		route6d rtadvd rtsold rwhod sasyncd sendmail sensorsd smtpd \
 		snmpd spamd sshd syslogd watchdogd wsmoused xdm ypbind ypldap \
 		yppasswdd ypserv kdc kadmind kpasswdd nfsd mountd lockd statd \
-		spamlogd
+		spamlogd sndiod popa3d
 
 MISETS=	base${OSrev}.tgz comp${OSrev}.tgz \
 	man${OSrev}.tgz game${OSrev}.tgz etc${OSrev}.tgz

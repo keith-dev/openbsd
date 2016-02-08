@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.78 2011/06/26 22:39:59 deraadt Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.80 2012/01/28 11:34:19 aoyama Exp $	*/
 /*
  * Copyright (c) 1998, 1999, 2000, 2001 Steve Murphree, Jr.
  * Copyright (c) 1996 Nivas Madhur
@@ -119,7 +119,7 @@ void powerdown(void);
 void get_fuse_rom_data(void);
 void get_nvram_data(void);
 char *nvram_by_symbol(char *);
-void get_autoboot_device(void);			/* in disksubr.c */
+void get_autoboot_device(void);			/* in autoconf.c */
 int clockintr(void *);				/* in clock.c */
 
 /*
@@ -179,7 +179,11 @@ int physmem;	  /* available physical memory, in pages */
 struct vm_map *exec_map = NULL;
 struct vm_map *phys_map = NULL;
 
-__cpu_simple_lock_t cpu_mutex = __SIMPLELOCK_UNLOCKED;
+__cpu_simple_lock_t cpu_hatch_mutex = __SIMPLELOCK_UNLOCKED;
+#ifdef MULTIPROCESSOR
+__cpu_simple_lock_t cpu_boot_mutex = __SIMPLELOCK_LOCKED;
+int hatch_pending_count;
+#endif
 
 struct uvm_constraint_range  dma_constraint = { 0x0, (paddr_t)-1 };
 struct uvm_constraint_range *uvm_md_constraints[] = { NULL };
@@ -283,19 +287,12 @@ size_memory()
 	 * count it up.
 	 */
 	max = (void *)MAXPHYSMEM;
-#if 0
-	for (look = (void *)Roundup(end, STRIDE); look < max;
-#else
 	for (look = (void *)first_addr; look < max;
-#endif
 	    look = (int *)((unsigned)look + STRIDE)) {
 		unsigned save;
 
 		/* if can't access, we've reached the end */
 		if (badaddr((vaddr_t)look, 4)) {
-#if defined(DEBUG)
-			printf("%x\n", look);
-#endif
 			look = (int *)((int)look - STRIDE);
 			break;
 		}
@@ -673,13 +670,22 @@ abort:
 }
 
 /*
- * Release the cpu_mutex; secondary processors will now have their
- * chance to initialize.
+ * Release the cpu_{hatch,boot}_mutex; secondary processors will now
+ * have their chance to initialize.
  */
 void
 cpu_boot_secondary_processors()
 {
-	__cpu_simple_unlock(&cpu_mutex);
+#ifdef MULTIPROCESSOR
+	hatch_pending_count = ncpusfound - 1;
+#endif
+	__cpu_simple_unlock(&cpu_hatch_mutex);
+
+#ifdef MULTIPROCESSOR
+	while (hatch_pending_count != 0)
+		delay(10000);	/* 10ms */
+	__cpu_simple_unlock(&cpu_boot_mutex);
+#endif
 }
 
 #ifdef MULTIPROCESSOR
@@ -694,12 +700,27 @@ vaddr_t
 secondary_pre_main()
 {
 	struct cpu_info *ci;
+	vaddr_t init_stack;
 
-	set_cpu_number(cmmu_cpu_number());
-	ci = curcpu();
+        /*
+         * Invoke the CMMU initialization routine as early as possible,
+         * so that we do not risk any memory writes to be lost during
+         * cache setup.
+         */
+        cmmu_initialize_cpu(cmmu_cpu_number());
 
 	/*
-	 * Setup CMMUs and translation tables (shared with the master cpu).
+	 * Now initialize your cpu_info structure.
+	 */
+	set_cpu_number(cmmu_cpu_number());
+	ci = curcpu();
+	ci->ci_curproc = &proc0;
+	m88100_smp_setup(ci);
+
+	splhigh();
+
+	/*
+	 * Enable MMU on this processor.
 	 */
 	pmap_bootstrap_cpu(ci->ci_cpuid);
 
@@ -710,6 +731,8 @@ secondary_pre_main()
 	if (init_stack == (vaddr_t)NULL) {
 		printf("cpu%d: unable to allocate startup stack\n",
 		    ci->ci_cpuid);
+		hatch_pending_count--;
+		__cpu_simple_unlock(&cpu_hatch_mutex);
 		for (;;) ;
 	}
 
@@ -722,6 +745,7 @@ secondary_pre_main()
  * We are now running on our startup stack, with proper page tables.
  * There is nothing to do but display some details about the CPU and its CMMUs.
  */
+
 void
 secondary_main()
 {
@@ -729,17 +753,30 @@ secondary_main()
 	int s;
 
 	cpu_configuration_print(0);
-	sched_init_cpu(ci);
 	ncpus++;
-	__cpu_simple_unlock(&cpu_mutex);
 
+	sched_init_cpu(ci);
 	microuptime(&ci->ci_schedstate.spc_runtime);
 	ci->ci_curproc = NULL;
+	ci->ci_randseed = random();
 
-	set_psr(get_psr() & ~PSR_IND);
+	/*
+	 * Release cpu_hatch_mutex to let other secondary processors
+	 * have a chance to run.
+	 */
+	hatch_pending_count--;
+	__cpu_simple_unlock(&cpu_hatch_mutex);
+
+	/* wait for cpu_boot_secondary_processors() */
+	__cpu_simple_lock(&cpu_boot_mutex);
+	__cpu_simple_unlock(&cpu_boot_mutex);
+
 	spl0();
-
 	SCHED_LOCK(s);
+	set_psr(get_psr() & ~PSR_IND);
+
+	SET(ci->ci_flags, CIF_ALIVE);
+
 	cpu_switchto(NULL, sched_chooseproc());
 }
 
@@ -752,7 +789,12 @@ secondary_main()
 void 
 luna88k_ext_int(struct trapframe *eframe)
 {
-	int cpu = cpu_number();
+#ifdef MULTIPROCESSOR
+	struct cpu_info *ci = curcpu();
+	uint cpu = ci->ci_cpuid;
+#else
+	u_int cpu = cpu_number();
+#endif
 	u_int32_t cur_mask, cur_int;
 	u_int level, old_spl;
 
@@ -783,6 +825,10 @@ luna88k_ext_int(struct trapframe *eframe)
 	 * priority. 
 	 */
 
+#ifdef MULTIPROCESSOR
+	if (old_spl < IPL_SCHED)
+		__mp_lock(&kernel_lock);
+#endif
 	/* XXX: This is very rough. Should be considered more. (aoyama) */
 	do {
 		level = (cur_int > old_spl ? cur_int : old_spl);
@@ -804,14 +850,34 @@ luna88k_ext_int(struct trapframe *eframe)
 		case 5:
 		case 4:
 		case 3:
-			isrdispatch_autovec(cur_int);
+#ifdef MULTIPROCESSOR
+			if (cpu == master_cpu) {
+#endif
+				isrdispatch_autovec(cur_int);
+#ifdef MULTIPROCESSOR
+			}
+#endif
 			break;
 		default:
 			printf("luna88k_ext_int(): level %d interrupt.\n", cur_int);
 			break;
 		}
-	} while ((cur_int = (*int_mask_reg[cpu]) >> 29) != 0);
 
+                cur_int = (*int_mask_reg[cpu]) >> 29;
+#ifdef MULTIPROCESSOR
+                if ((cpu != master_cpu) &&
+		    (cur_int != CLOCK_INT_LEVEL) && (cur_int != 0)) {
+			printf("cpu%d: cur_int=%d\n", cpu, cur_int);
+			flush_pipeline();
+			cur_int = 0;
+		}
+#endif
+	} while (cur_int != 0);
+
+#ifdef MULTIPROCESSOR
+	if (old_spl < IPL_SCHED)
+		__mp_unlock(&kernel_lock);
+#endif
 out:
 	/*
 	 * process any remaining data access exceptions before
@@ -900,8 +966,6 @@ luna88k_bootstrap()
 #ifndef MULTIPROCESSOR
 	cpuid_t master_cpu;
 #endif
-	extern void m8820x_initialize_cpu(cpuid_t);
-	extern void m8820x_set_sapr(cpuid_t, apr_t);
 
 	cmmu = &cmmu8820x;
 
@@ -921,6 +985,9 @@ luna88k_bootstrap()
 	setup_board_config();
 	master_cpu = cmmu_init();
 	set_cpu_number(master_cpu);
+#ifdef MULTIPROCESSOR
+	m88100_smp_setup(curcpu());
+#endif
 	SET(curcpu()->ci_flags, CIF_ALIVE | CIF_PRIMARY);
 
 	m88100_apply_patches();
@@ -961,8 +1028,10 @@ luna88k_bootstrap()
 	/* Initialize the "u-area" pages. */
 	bzero((caddr_t)curpcb, USPACE);
 
-	/* Release the cpu_mutex */
+#ifndef MULTIPROCESSOR
+	/* Release the cpu_hatch_mutex */
 	cpu_boot_secondary_processors();
+#endif
 
 #ifdef DEBUG
 	printf("leaving luna88k_bootstrap()\n");
@@ -1156,7 +1225,12 @@ void
 setlevel(u_int level)
 {
 	u_int32_t set_value;
+#ifdef MULTIPROCESSOR
+	struct cpu_info *ci = curcpu();
+	int cpu = ci->ci_cpuid;
+#else
 	int cpu = cpu_number();
+#endif
 
 	set_value = int_set_val[level];
 
@@ -1184,11 +1258,19 @@ int
 setipl(int level)
 {
 	u_int curspl, psr;
+#ifdef MULTIPROCESSOR
+	struct cpu_info *ci = curcpu();
+	int cpu = ci->ci_cpuid;
+#else
+	int cpu = cpu_number();
+#endif
 
 	psr = get_psr();
 	set_psr(psr | PSR_IND);
-	curspl = luna88k_curspl[cpu_number()];
+
+	curspl = luna88k_curspl[cpu];
 	setlevel((u_int)level);
+
 	set_psr(psr);
 	return (int)curspl;
 }
@@ -1197,12 +1279,34 @@ int
 raiseipl(int level)
 {
 	u_int curspl, psr;
+#ifdef MULTIPROCESSOR
+	struct cpu_info *ci = curcpu();
+	int cpu = ci->ci_cpuid;
+#else
+	int cpu = cpu_number();
+#endif
 
 	psr = get_psr();
 	set_psr(psr | PSR_IND);
-	curspl = luna88k_curspl[cpu_number()];
+
+	curspl = luna88k_curspl[cpu];
 	if (curspl < (u_int)level)
 		setlevel((u_int)level);
+
 	set_psr(psr);
 	return (int)curspl;
 }
+
+#ifdef MULTIPROCESSOR
+void
+m88k_send_ipi(int ipi, cpuid_t cpu)
+{
+	/* XXX: not yet */
+}
+
+void
+m88k_broadcast_ipi(int ipi)
+{
+	/* XXX: not yet */
+}
+#endif

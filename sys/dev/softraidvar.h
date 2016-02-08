@@ -1,4 +1,4 @@
-/* $OpenBSD: softraidvar.h,v 1.106 2011/07/07 03:50:00 tedu Exp $ */
+/* $OpenBSD: softraidvar.h,v 1.116 2012/01/28 14:40:04 jsing Exp $ */
 /*
  * Copyright (c) 2006 Marco Peereboom <marco@peereboom.us>
  * Copyright (c) 2008 Chris Kuethe <ckuethe@openbsd.org>
@@ -28,7 +28,7 @@
 
 #include <crypto/md5.h>
 
-#define SR_META_VERSION		4	/* bump when sr_metadata changes */
+#define SR_META_VERSION		5	/* bump when sr_metadata changes */
 #define SR_META_SIZE		64	/* save space at chunk beginning */
 #define SR_META_OFFSET		16	/* skip 8192 bytes at chunk beginning */
 
@@ -134,7 +134,19 @@ struct sr_crypto_chk_hmac_sha1 {
 	u_int8_t	sch_mac[20];
 } __packed;
 
+#define SR_OPT_INVALID		0x00
+#define SR_OPT_CRYPTO		0x01
+#define SR_OPT_BOOT		0x02
+#define SR_OPT_KEYDISK		0x03
+
+struct sr_meta_opt_hdr {
+	u_int32_t	som_type;	/* optional metadata type. */
+	u_int32_t	som_length;	/* optional metadata length. */
+	u_int8_t	som_checksum[MD5_DIGEST_LENGTH];
+} __packed;
+
 struct sr_meta_crypto {
+	struct sr_meta_opt_hdr	scm_hdr;
 	u_int32_t		scm_alg;	/* vol crypto algorithm */
 #define SR_CRYPTOA_AES_XTS_128	1
 #define SR_CRYPTOA_AES_XTS_256	2
@@ -162,39 +174,26 @@ struct sr_meta_crypto {
 #define	chk_hmac_sha1	_scm_chk.chk_hmac_sha1
 } __packed;
 
+#define SR_MAX_BOOT_DISKS 16
 struct sr_meta_boot {
-	u_int64_t		sbm_root_uid;
+	struct sr_meta_opt_hdr	sbm_hdr;
 	u_int32_t		sbm_bootblk_size;
 	u_int32_t		sbm_bootldr_size;
+	u_char			sbm_root_duid[8];
+	u_char			sbm_boot_duid[SR_MAX_BOOT_DISKS][8];
 } __packed;
 
 struct sr_meta_keydisk {
+	struct sr_meta_opt_hdr	skm_hdr;
 	u_int8_t		skm_maskkey[SR_CRYPTO_MAXKEYBYTES];
 } __packed;
 
-struct sr_meta_opt {
-	struct sr_meta_opt_invariant {
-		u_int32_t	som_type;	/* optional type */
-#define SR_OPT_INVALID		0x00
-#define SR_OPT_CRYPTO		0x01
-#define SR_OPT_BOOT		0x02
-#define SR_OPT_KEYDISK		0x03
-		u_int32_t	som_pad;
-		union {
-			struct sr_meta_crypto smm_crypto;
-			struct sr_meta_boot smm_boot;
-			struct sr_meta_keydisk smm_keydisk;
-		}		som_meta;
-	} _som_invariant;
-#define somi			_som_invariant
-#define somi_crypto		_som_invariant.smm_crypto
-#define somi_boot		_som_invariant.smm_boot
-	/* MD5 of invariant optional metadata */
-	u_int8_t		som_checksum[MD5_DIGEST_LENGTH];
-} __packed;
+#define SR_OLD_META_OPT_SIZE	2480
+#define SR_OLD_META_OPT_OFFSET	8
+#define SR_OLD_META_OPT_MD5	(SR_OLD_META_OPT_SIZE - MD5_DIGEST_LENGTH)
 
 struct sr_meta_opt_item {
-	struct sr_meta_opt	omi_om;
+	struct sr_meta_opt_hdr	*omi_som;
 	SLIST_ENTRY(sr_meta_opt_item) omi_link;
 };
 
@@ -253,6 +252,45 @@ struct sr_aoe_config {
 	unsigned char	slot;
 };
 
+struct sr_boot_chunk {
+	struct sr_metadata *sbc_metadata;
+	dev_t		sbc_mm;			
+
+	u_int32_t	sbc_chunk_id;		/* Chunk ID. */
+	u_int32_t	sbc_state;		/* Chunk state. */
+	u_int32_t	sbc_disk;		/* Disk number. */
+	int		sbc_part;		/* Partition number. */
+	u_int64_t	sbc_ondisk;		/* Ondisk version. */
+
+	void		*sbc_diskinfo;		/* MD disk information. */
+
+	SLIST_ENTRY(sr_boot_chunk) sbc_link;
+};
+
+SLIST_HEAD(sr_boot_chunk_head, sr_boot_chunk);
+
+struct sr_boot_volume {
+	struct sr_uuid	sbv_uuid;		/* Volume UUID. */
+	u_int32_t	sbv_level;		/* RAID Level. */
+	u_int32_t	sbv_volid;		/* Volume ID. */
+	u_int32_t	sbv_chunk_no;		/* Number of chunks. */
+	u_int32_t	sbv_flags;		/* Volume specific flags. */
+	u_int32_t	sbv_state;		/* Volume state. */
+	int64_t		sbv_size;		/* Virtual disk size. */
+	u_int32_t	sbv_data_offset;	/* Data offset. */
+	u_int64_t	sbv_ondisk;		/* Ondisk version. */
+
+	u_int32_t	sbv_chunks_found;	/* Number of chunks found. */
+	u_int32_t	sbv_unit;		/* Disk unit number. */
+	char		sbv_part;		/* Partition opened. */
+	void		*sbv_diskinfo;		/* MD disk information. */
+
+	struct sr_boot_chunk_head sbv_chunks;	/* List of chunks. */
+
+	SLIST_ENTRY(sr_boot_volume)	sbv_link;
+};
+
+SLIST_HEAD(sr_boot_volume_head, sr_boot_volume);
 
 #ifdef _KERNEL
 #include <dev/biovar.h>
@@ -419,30 +457,9 @@ struct sr_aoe {
 	struct ether_addr	sra_eaddr;
 };
 
-struct sr_boot_chunk {
-	struct sr_metadata	sbc_metadata;
-	dev_t			sbc_mm;
-	u_int32_t		sbc_chunk_id;
-	int			sbc_used;
-
-	SLIST_ENTRY(sr_boot_chunk) sbc_link;
+#define SR_CONCAT_NOWU		16
+struct sr_concat {
 };
-
-SLIST_HEAD(sr_boot_chunk_head, sr_boot_chunk);
-
-struct sr_boot_volume {
-	struct sr_uuid		sbv_uuid;	/* Volume UUID. */
-	u_int32_t		sbv_level;	/* Level. */
-	u_int32_t		sbv_volid;	/* Volume ID. */
-	u_int32_t		sbv_chunk_no;	/* Number of chunks. */
-	u_int32_t		sbv_dev_no;	/* Number of devs discovered. */
-
-	struct sr_boot_chunk_head sbv_chunks;	/* List of chunks. */
-
-	SLIST_ENTRY(sr_boot_volume)	sbv_link;
-};
-
-SLIST_HEAD(sr_boot_volume_head, sr_boot_volume);
 
 struct sr_chunk {
 	struct sr_meta_chunk	src_meta;	/* chunk meta data */
@@ -454,6 +471,7 @@ struct sr_chunk {
 	/* helper members before metadata makes it onto the chunk  */
 	int			src_meta_ondisk;/* set when meta is on disk */
 	char			src_devname[32];
+	u_char			src_duid[8];	/* Chunk disklabel UID. */
 	int64_t			src_size;	/* in blocks */
 
 	SLIST_ENTRY(sr_chunk)	src_link;
@@ -465,11 +483,12 @@ struct sr_volume {
 	/* runtime data */
 	struct sr_chunk_head	sv_chunk_list;	/* linked list of all chunks */
 	struct sr_chunk		**sv_chunks;	/* array to same chunks */
+	int64_t			sv_chunk_minsz; /* Size of smallest chunk. */
+	int64_t			sv_chunk_maxsz; /* Size of largest chunk. */
 
 	/* sensors */
 	struct ksensor		sv_sensor;
 	int			sv_sensor_attached;
-	int			sv_sensor_valid;
 };
 
 struct sr_discipline {
@@ -484,20 +503,25 @@ struct sr_discipline {
 #define	SR_MD_AOE_TARG		6
 #define	SR_MD_RAID4		7
 #define	SR_MD_RAID6		8
+#define	SR_MD_CONCAT		9
 	char			sd_name[10];	/* human readable dis name */
 	u_int16_t		sd_target;	/* scsibus target discipline uses */
 
 	u_int32_t		sd_capabilities;
-#define SR_CAP_SYSTEM_DISK	0x00000001
-#define SR_CAP_AUTO_ASSEMBLE	0x00000002
-#define SR_CAP_REBUILD		0x00000004
+#define SR_CAP_SYSTEM_DISK	0x00000001	/* Attaches as a system disk. */
+#define SR_CAP_AUTO_ASSEMBLE	0x00000002	/* Can auto assemble. */
+#define SR_CAP_REBUILD		0x00000004	/* Supports rebuild. */
+#define SR_CAP_NON_COERCED	0x00000008	/* Uses non-coerced size. */
 
 	union {
 	    struct sr_raid0	mdd_raid0;
 	    struct sr_raid1	mdd_raid1;
 	    struct sr_raidp	mdd_raidp;
 	    struct sr_raid6	mdd_raid6;
+	    struct sr_concat	mdd_concat;
+#ifdef CRYPTO
 	    struct sr_crypto	mdd_crypto;
+#endif /* CRYPTO */
 #ifdef AOE
 	    struct sr_aoe	mdd_aoe;
 #endif /* AOE */
@@ -559,8 +583,8 @@ struct sr_discipline {
 				    int, int);
 	void			(*sd_set_vol_state)(struct sr_discipline *);
 	int			(*sd_openings)(struct sr_discipline *);
-	int			(*sd_meta_opt_load)(struct sr_discipline *,
-				    struct sr_meta_opt *);
+	int			(*sd_meta_opt_handler)(struct sr_discipline *,
+				    struct sr_meta_opt_hdr *);
 
 	/* SCSI emulation */
 	struct scsi_sense_data	sd_scsi_sense;
@@ -579,13 +603,13 @@ struct sr_discipline {
 struct sr_softc {
 	struct device		sc_dev;
 
-	int			(*sc_ioctl)(struct device *, u_long, caddr_t);
 	void			(*sc_shutdownhook)(void *);
 
 	struct rwlock		sc_lock;
 
+	struct bio_status	sc_status;	/* Status and messages. */
+
 	struct sr_chunk_head	sc_hotspare_list;	/* List of hotspares. */
-	struct sr_chunk		**sc_hotspares;	/* Array to hotspare chunks. */
 	struct rwlock		sc_hs_lock;	/* Lock for hotspares list. */
 	int			sc_hotspare_no; /* Number of hotspares. */
 
@@ -620,6 +644,9 @@ void			*sr_wu_get(void *);
 void			sr_wu_put(void *, void *);
 
 /* misc functions */
+void			sr_info(struct sr_softc *, const char *, ...);
+void			sr_warn(struct sr_softc *, const char *, ...);
+void			sr_error(struct sr_softc *, const char *, ...);
 int32_t			sr_validate_stripsize(u_int32_t);
 int			sr_meta_read(struct sr_discipline *);
 int			sr_meta_native_read(struct sr_discipline *, dev_t,
@@ -630,6 +657,8 @@ void			sr_meta_save_callback(void *, void *);
 int			sr_meta_save(struct sr_discipline *, u_int32_t);
 void			sr_meta_getdevname(struct sr_softc *, dev_t, char *,
 			    int);
+void			sr_meta_opt_load(struct sr_softc *,
+			    struct sr_metadata *, struct sr_meta_opt_head *);
 void			sr_checksum(struct sr_softc *, void *, void *,
 			    u_int32_t);
 int			sr_validate_io(struct sr_workunit *, daddr64_t *,
@@ -655,14 +684,9 @@ void			sr_raidp_discipline_init(struct sr_discipline *,
 			    u_int8_t);
 void			sr_raid6_discipline_init(struct sr_discipline *);
 void			sr_crypto_discipline_init(struct sr_discipline *);
+void			sr_concat_discipline_init(struct sr_discipline *);
 void			sr_aoe_discipline_init(struct sr_discipline *);
 void			sr_aoe_server_discipline_init(struct sr_discipline *);
-
-/* raid 1 */
-/* XXX - currently (ab)used by AOE and CRYPTO. */
-void			sr_raid1_set_chunk_state(struct sr_discipline *,
-			    int, int);
-void			sr_raid1_set_vol_state(struct sr_discipline *);
 
 /* Crypto discipline hooks. */
 int			sr_crypto_get_kdf(struct bioc_createraid *,

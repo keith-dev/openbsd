@@ -1,4 +1,4 @@
-#  $OpenBSD: Makefile,v 1.96 2011/07/24 19:25:50 martynas Exp $
+#  $OpenBSD: Makefile,v 1.98 2011/09/22 04:56:09 schwarze Exp $
 #  $NetBSD: Makefile,v 1.28 1995/11/20 22:06:19 jtc Exp $
 #
 #  @(#)Makefile 5.1beta 93/09/24 
@@ -11,6 +11,9 @@
 #  software is freely granted, provided that this notice 
 #  is preserved.
 #  ====================================================
+
+# SUBDIR is only used to install the infnan(3/VAX) manual page.
+SUBDIR = man
 
 .if (${MACHINE_ARCH} == "alpha")
 .PATH:	${.CURDIR}/arch/alpha
@@ -156,7 +159,6 @@ NOIEEE_SRCS = n_acosh.c n_argred.c n_asincos.c n_asinh.c n_atan.c \
 
 .if (${MACHINE_ARCH} == "vax")
 SRCS=	${NOIEEE_SRCS} ${NOIEEE_ARCH}
-MAN+=	infnan.3
 .else
 SRCS=	${COMMON_SRCS}
 .if (${MACHINE_ARCH} == "amd64") || (${MACHINE_ARCH} == "i386") || \
@@ -165,8 +167,7 @@ SRCS=	${COMMON_SRCS}
 CPPFLAGS+=	-I${.CURDIR}/src -I${.CURDIR}/src/ld80
 SRCS+=		${LONG_SRCS}
 .endif
-.if (${MACHINE_ARCH} == "hppa64") || (${MACHINE_CPU} == "mips64") || \
-	(${MACHINE_ARCH} == "sparc64")
+.if (${MACHINE_CPU} == "mips64") || (${MACHINE_ARCH} == "sparc64")
 .PATH:		${.CURDIR}/src/ld128
 CPPFLAGS+=	-I${.CURDIR}/src -I${.CURDIR}/src/ld128
 SRCS+=		${LONG_SRCS}

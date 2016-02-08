@@ -1,4 +1,4 @@
-#	$OpenBSD: bsd.own.mk,v 1.110 2011/07/10 17:03:38 miod Exp $
+#	$OpenBSD: bsd.own.mk,v 1.114 2011/11/25 05:25:25 miod Exp $
 #	$NetBSD: bsd.own.mk,v 1.24 1996/04/13 02:08:09 thorpej Exp $
 
 # Host-specific overrides
@@ -32,9 +32,9 @@ ELF_TOOLCHAIN?=	yes
 .endif
 
 GCC2_ARCH=m68k m88k vax
-#GCC3_ARCH=alpha sh
-GCC4_ARCH=amd64 arm hppa hppa64 i386 ia64 mips64 mips64el powerpc sparc sparc64
-BINUTILS217_ARCH=ia64
+#GCC3_ARCH=sh
+GCC4_ARCH=alpha amd64 arm avr32 hppa hppa64 i386 ia64 mips64 mips64el powerpc sparc sparc64
+BINUTILS217_ARCH=avr32 hppa64 ia64
 
 .for _arch in ${MACHINE_ARCH}
 .if !empty(GCC2_ARCH:M${_arch})
@@ -74,11 +74,6 @@ MANDIR?=	/usr/share/man/man
 MANGRP?=	bin
 MANOWN?=	root
 MANMODE?=	${NONBINMODE}
-
-PSDIR?=		/usr/share/man/ps
-PSGRP?=		bin
-PSOWN?=		root
-PSMODE?=	${NONBINMODE}
 
 LIBDIR?=	/usr/lib
 LINTLIBDIR?=	/usr/libdata/lint

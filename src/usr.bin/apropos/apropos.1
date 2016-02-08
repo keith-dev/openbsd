@@ -1,4 +1,4 @@
-.\"     $OpenBSD: apropos.1,v 1.13 2008/12/24 09:05:17 jmc Exp $
+.\"     $OpenBSD: apropos.1,v 1.16 2012/01/22 13:45:22 schwarze Exp $
 .\"     $NetBSD: apropos.1,v 1.4 1995/09/04 20:46:17 tls Exp $
 .\"
 .\" Copyright (c) 1989, 1990, 1993
@@ -30,7 +30,7 @@
 .\"
 .\"	@(#)apropos.1	8.1 (Berkeley) 6/29/93
 .\"
-.Dd $Mdocdate: December 24 2008 $
+.Dd $Mdocdate: January 22 2012 $
 .Dt APROPOS 1
 .Os
 .Sh NAME
@@ -137,5 +137,30 @@ configuration file
 .Sh HISTORY
 The
 .Nm
-command appeared in
-.Bx 3.0 .
+command first appeared in
+.Bx 2 .
+.Pp
+The
+.Fl M
+option and the
+.Ev MANPATH
+variable first appeared in
+.Bx 4.3 ;
+.Fl m
+in
+.Bx 4.3 Reno ;
+.Fl C
+in
+.Bx 4.4 Lite1 ;
+and
+.Fl s
+and
+.Fl S
+in
+.Ox 4.5 .
+.Sh AUTHORS
+.An Bill Joy
+wrote the original
+.Bx
+.Nm
+in February 1979.

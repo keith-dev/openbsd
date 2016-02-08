@@ -1,4 +1,4 @@
-/*	$OpenBSD: main.c,v 1.61 2009/06/04 02:23:37 kjell Exp $	*/
+/*	$OpenBSD: main.c,v 1.63 2012/01/26 04:14:11 lum Exp $	*/
 
 /* This file is in the public domain. */
 
@@ -30,6 +30,7 @@ static void	 edinit(PF);
 static __dead void usage(void);
 
 extern char	*__progname;
+extern void     closetags(void);
 
 static __dead void
 usage()
@@ -203,11 +204,13 @@ edinit(PF init_fcn)
 
 	bheadp = NULL;
 	bp = bfind("*init*", TRUE);		/* Text buffer.		 */
+	if (bp == NULL)
+		panic("edinit");
+
 	wp = new_window(bp);
 	if (wp == NULL)
 		panic("Out of memory");
-	if (bp == NULL || wp == NULL)
-		panic("edinit");
+
 	curbp = bp;				/* Current ones.	 */
 	wheadp = wp;
 	curwp = wp;
@@ -235,6 +238,7 @@ quit(int f, int n)
 #ifdef SYSCLEANUP
 		SYSCLEANUP;
 #endif	/* SYSCLEANUP */
+		closetags();
 		exit(GOOD);
 	}
 	return (TRUE);

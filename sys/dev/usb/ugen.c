@@ -1,4 +1,4 @@
-/*	$OpenBSD: ugen.c,v 1.66 2011/07/03 15:47:17 matthew Exp $ */
+/*	$OpenBSD: ugen.c,v 1.68 2011/12/07 06:23:18 mglocker Exp $ */
 /*	$NetBSD: ugen.c,v 1.63 2002/11/26 18:49:48 christos Exp $	*/
 /*	$FreeBSD: src/sys/dev/usb/ugen.c,v 1.26 1999/11/17 22:33:41 n_hibma Exp $	*/
 
@@ -467,7 +467,6 @@ ugenclose(dev_t dev, int flag, int mode, struct proc *p)
 		if (sce->ibuf != NULL) {
 			free(sce->ibuf, M_USBDEV);
 			sce->ibuf = NULL;
-			clfree(&sce->q);
 		}
 	}
 	sc->sc_is_open[endpt] = 0;
@@ -1169,6 +1168,8 @@ ugen_do_ioctl(struct ugen_softc *sc, int endpt, u_long cmd,
 		int error;
 
 		cdesc = ugen_get_cdesc(sc, fd->ufd_config_index, &len);
+		if (cdesc == NULL)
+			return (EINVAL);
 		if (len > fd->ufd_size)
 			len = fd->ufd_size;
 		iov.iov_base = (caddr_t)fd->ufd_data;

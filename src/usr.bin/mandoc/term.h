@@ -1,4 +1,4 @@
-/*	$Id: term.h,v 1.30 2011/05/29 21:22:18 schwarze Exp $ */
+/*	$Id: term.h,v 1.34 2011/11/13 13:30:42 schwarze Exp $ */
 /*
  * Copyright (c) 2008, 2009, 2010, 2011 Kristaps Dzonsons <kristaps@bsd.lv>
  *
@@ -52,6 +52,8 @@ struct	termp_tbl {
 struct	termp {
 	enum termtype	  type;
 	struct rofftbl	  tbl;		/* table configuration */
+	int		  mdocstyle;	/* imitate mdoc(7) output */
+	size_t		  defindent;	/* Default indent for text. */
 	size_t		  defrmargin;	/* Right margin of the device. */
 	size_t		  rmargin;	/* Current right margin. */
 	size_t		  maxrmargin;	/* Max right margin. */
@@ -64,7 +66,6 @@ struct	termp {
 	int		  flags;
 #define	TERMP_SENTENCE	 (1 << 1)	/* Space before a sentence. */
 #define	TERMP_NOSPACE	 (1 << 2)	/* No space before words. */
-#define	TERMP_NOLPAD	 (1 << 3)	/* See term_flushln(). */
 #define	TERMP_NOBREAK	 (1 << 4)	/* See term_flushln(). */
 #define	TERMP_IGNDELIM	 (1 << 6)	/* Delims like regulars. */
 #define	TERMP_NONOSPACE	 (1 << 7)	/* No space (no autounset). */
@@ -96,6 +97,7 @@ struct	termp {
 	struct termp_ps	 *ps;
 };
 
+void		  term_eqn(struct termp *, const struct eqn *);
 void		  term_tbl(struct termp *, const struct tbl_span *);
 void		  term_free(struct termp *);
 void		  term_newln(struct termp *);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: locore.s,v 1.139 2011/07/09 01:49:16 pirofti Exp $	*/
+/*	$OpenBSD: locore.s,v 1.141 2011/11/02 23:53:44 jsg Exp $	*/
 /*	$NetBSD: locore.s,v 1.145 1996/05/03 19:41:19 christos Exp $	*/
 
 /*-
@@ -156,6 +156,7 @@
 	.globl	_C_LABEL(cpuid_level)
 	.globl	_C_LABEL(cpu_miscinfo)
 	.globl	_C_LABEL(cpu_feature), _C_LABEL(cpu_ecxfeature)
+	.globl	_C_LABEL(ecpu_feature), _C_LABEL(ecpu_ecxfeature)
 	.globl	_C_LABEL(cpu_cache_eax), _C_LABEL(cpu_cache_ebx)
 	.globl	_C_LABEL(cpu_cache_ecx), _C_LABEL(cpu_cache_edx)
 	.globl	_C_LABEL(cold), _C_LABEL(cnvmem), _C_LABEL(extmem)
@@ -193,7 +194,9 @@ _C_LABEL(cpu):		.long	0	# are we 386, 386sx, 486, 586 or 686
 _C_LABEL(cpu_id):	.long	0	# saved from 'cpuid' instruction
 _C_LABEL(cpu_miscinfo):	.long	0	# misc info (apic/brand id) from 'cpuid'
 _C_LABEL(cpu_feature):	.long	0	# feature flags from 'cpuid' instruction
-_C_LABEL(cpu_ecxfeature):.long	0	# extended feature flags from 'cpuid'
+_C_LABEL(ecpu_feature): .long	0	# extended feature flags from 'cpuid'
+_C_LABEL(cpu_ecxfeature):.long	0	# ecx feature flags from 'cpuid'
+_C_LABEL(ecpu_ecxfeature): .long 0	# extended ecx feature flags
 _C_LABEL(cpuid_level):	.long	-1	# max. lvl accepted by 'cpuid' insn
 _C_LABEL(cpu_cache_eax):.long	0
 _C_LABEL(cpu_cache_ebx):.long	0
@@ -407,6 +410,10 @@ try586:	/* Use the `cpuid' instruction. */
 	cpuid
 	cmpl	$0x80000000,%eax
 	jbe	2f
+	movl	$0x80000001,%eax
+	cpuid
+	movl	%edx,RELOC(_C_LABEL(ecpu_feature))
+	movl	%ecx,RELOC(_C_LABEL(ecpu_ecxfeature))
 	movl	$0x80000002,%eax
 	cpuid
 	movl	%eax,RELOC(_C_LABEL(cpu_brandstr))
@@ -1160,21 +1167,6 @@ ENTRY(longjmp)
 
 /*****************************************************************************/
 		
-#ifdef DIAGNOSTIC
-NENTRY(switch_error1)
-	pushl	%edi
-	pushl	$1f
-	call	_C_LABEL(panic)
-	/* NOTREACHED */
-1:	.asciz	"cpu_switch1 %p"
-NENTRY(switch_error2)
-	pushl	%edi
-	pushl	$1f
-	call	_C_LABEL(panic)
-	/* NOTREACHED */
-1:	.asciz	"cpu_switch2 %p"
-#endif /* DIAGNOSTIC */
-
 /*
  * cpu_switchto(struct proc *old, struct proc *new)
  * Switch from the "old" proc to the "new" proc. If "old" is NULL, we
@@ -1187,14 +1179,6 @@ ENTRY(cpu_switchto)
 
 	movl	16(%esp), %esi
 	movl	20(%esp), %edi
-
-#ifdef	DIAGNOSTIC
-	xorl	%eax, %eax
-	cmpl	%eax,P_WCHAN(%edi)	# Waiting for something?
-	jne	_C_LABEL(switch_error1)	# Yes; shouldn't be queued.
-	cmpb	$SRUN,P_STAT(%edi)	# In run state?
-	jne	_C_LABEL(switch_error2)	# No; shouldn't be queued.
-#endif /* DIAGNOSTIC */
 
 	/* If old process exited, don't bother. */
 	testl	%esi,%esi

@@ -1,4 +1,4 @@
-/*	$OpenBSD: pciide.c,v 1.332 2011/07/15 16:44:18 deraadt Exp $	*/
+/*	$OpenBSD: pciide.c,v 1.337 2012/01/15 15:16:23 jsg Exp $	*/
 /*	$NetBSD: pciide.c,v 1.127 2001/08/03 01:31:08 tsutsui Exp $	*/
 
 /*
@@ -749,6 +749,10 @@ const struct pciide_product_desc pciide_sis_products[] =  {
 	{ PCI_PRODUCT_SIS_182,		/* SIS 182 SATA */
 	  0,
 	  sata_chip_map
+	},
+	{ PCI_PRODUCT_SIS_1183,		/* SIS 1183 SATA */
+	  0,
+	  sata_chip_map
 	}
 };
 
@@ -1101,35 +1105,35 @@ const struct pciide_product_desc pciide_nvidia_products[] = {
 	  0,
 	  sata_chip_map
 	},
-	{ PCI_PRODUCT_NVIDIA_MCP65_SATA,
+	{ PCI_PRODUCT_NVIDIA_MCP65_SATA_1,
 	  0,
 	  sata_chip_map
 	},
-	{ PCI_PRODUCT_NVIDIA_MCP65_SATA2,
+	{ PCI_PRODUCT_NVIDIA_MCP65_SATA_2,
 	  0,
 	  sata_chip_map
 	},
-	{ PCI_PRODUCT_NVIDIA_MCP65_SATA3,
+	{ PCI_PRODUCT_NVIDIA_MCP65_SATA_3,
 	  0,
 	  sata_chip_map
 	},
-	{ PCI_PRODUCT_NVIDIA_MCP65_SATA4,
+	{ PCI_PRODUCT_NVIDIA_MCP65_SATA_4,
 	  0,
 	  sata_chip_map
 	},
-	{ PCI_PRODUCT_NVIDIA_MCP67_SATA,
+	{ PCI_PRODUCT_NVIDIA_MCP67_SATA_1,
 	  0,
 	  sata_chip_map
 	},
-	{ PCI_PRODUCT_NVIDIA_MCP67_SATA2,
+	{ PCI_PRODUCT_NVIDIA_MCP67_SATA_2,
 	  0,
 	  sata_chip_map
 	},
-	{ PCI_PRODUCT_NVIDIA_MCP67_SATA3,
+	{ PCI_PRODUCT_NVIDIA_MCP67_SATA_3,
 	  0,
 	  sata_chip_map
 	},
-	{ PCI_PRODUCT_NVIDIA_MCP67_SATA4,
+	{ PCI_PRODUCT_NVIDIA_MCP67_SATA_4,
 	  0,
 	  sata_chip_map
 	},
@@ -2478,6 +2482,7 @@ sata_chip_map(struct pciide_softc *sc, struct pci_attach_args *pa)
 	sc->sc_wdcdev.cap |= WDC_CAPABILITY_DATA16 | WDC_CAPABILITY_DATA32 |
 	    WDC_CAPABILITY_MODE | WDC_CAPABILITY_SATA;
 	sc->sc_wdcdev.set_modes = sata_setup_channel;
+	sc->chip_unmap = default_chip_unmap;
 
 	for (channel = 0; channel < sc->sc_wdcdev.nchannels; channel++) {
 		cp = &sc->pciide_channels[channel];
@@ -4961,7 +4966,9 @@ static struct sis_hostbr_type {
 	{PCI_PRODUCT_SIS_962, 0x00, 6, "962", SIS_TYPE_133NEW},
 	{PCI_PRODUCT_SIS_963, 0x00, 6, "963", SIS_TYPE_133NEW},
 	{PCI_PRODUCT_SIS_964, 0x00, 6, "964", SIS_TYPE_133NEW},
-	{PCI_PRODUCT_SIS_965, 0x00, 6, "965", SIS_TYPE_133NEW}
+	{PCI_PRODUCT_SIS_965, 0x00, 6, "965", SIS_TYPE_133NEW},
+	{PCI_PRODUCT_SIS_966, 0x00, 6, "966", SIS_TYPE_133NEW},
+	{PCI_PRODUCT_SIS_968, 0x00, 6, "968", SIS_TYPE_133NEW}
 };
 
 static struct sis_hostbr_type *sis_hostbr_type_match;
@@ -7427,6 +7434,7 @@ serverworks_chip_map(struct pciide_softc *sc, struct pci_attach_args *pa)
 		sc->sc_wdcdev.UDMA_cap = 4;
 		break;
 	case PCI_PRODUCT_RCC_CSB6_RAID_IDE:
+	case PCI_PRODUCT_RCC_HT_1000_IDE:
 		sc->sc_wdcdev.UDMA_cap = 5;
 		break;
 	}

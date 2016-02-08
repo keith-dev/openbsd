@@ -1,4 +1,4 @@
-/*	$OpenBSD: uthread_kern.c,v 1.38 2011/07/07 09:25:16 guenther Exp $	*/
+/*	$OpenBSD: uthread_kern.c,v 1.41 2011/10/07 08:59:43 fgsch Exp $	*/
 /*
  * Copyright (c) 1995-1998 John Birrell <jb@cimlogic.com.au>
  * All rights reserved.
@@ -225,8 +225,10 @@ _thread_kern_sched(struct sigcontext * scp)
 				_spinblock_count++;
 
 				/* FALLTHROUGH */
+			case PS_CONNECT_WAIT:
 			case PS_FDR_WAIT:
 			case PS_FDW_WAIT:
+			case PS_KEVENT_WAIT:
 			case PS_POLL_WAIT:
 			case PS_SELECT_WAIT:
 				/* Restart the time slice: */
@@ -467,15 +469,15 @@ _thread_kern_sched(struct sigcontext * scp)
 				curthread->slice_usec = 0;
 			}
 
+			/* Restore errno. */
+			errno = curthread->error;
+
 			/*
 			 * If we're 'switching' to the current thread,
 			 * then don't bother with the save/restore
 			 */
 			if (curthread == old_thread_run)
 				goto after_switch;
-
-			/* Restore errno. */
-			errno = curthread->error;
 
 			/* Restore floating point state. */
 			_thread_machdep_restore_float_state(&curthread->_machdep);
@@ -714,6 +716,7 @@ _thread_kern_poll(int wait_reqd)
 
 		/* File descriptor read wait: */
 		case PS_FDR_WAIT:
+		case PS_KEVENT_WAIT:
 			/* if fd is closing then reschedule this thread */
 			if (_thread_fd_table[pthread->data.fd.fd]->state == FD_ENTRY_CLOSING) {
 				pthread->closing_fd = 1;
@@ -732,6 +735,7 @@ _thread_kern_poll(int wait_reqd)
 			break;
 
 		/* File descriptor write wait: */
+		case PS_CONNECT_WAIT:
 		case PS_FDW_WAIT:
 			/* if fd is closing then reschedule this thread */
 			if (_thread_fd_table[pthread->data.fd.fd]->state == FD_ENTRY_CLOSING) {
@@ -844,6 +848,7 @@ _thread_kern_poll(int wait_reqd)
 
 			/* File descriptor read wait: */
 			case PS_FDR_WAIT:
+			case PS_KEVENT_WAIT:
 				if ((nfds < _thread_max_pfdtsize) &&
 				    (_thread_pfd_table[nfds].revents
 				       & (POLLRDNORM|POLLERR|POLLHUP|POLLNVAL))
@@ -857,6 +862,7 @@ _thread_kern_poll(int wait_reqd)
 				break;
 
 			/* File descriptor write wait: */
+			case PS_CONNECT_WAIT:
 			case PS_FDW_WAIT:
 				if ((nfds < _thread_max_pfdtsize) &&
 				    (_thread_pfd_table[nfds].revents

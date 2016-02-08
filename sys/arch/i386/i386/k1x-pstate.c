@@ -1,4 +1,4 @@
-/*	$OpenBSD: k1x-pstate.c,v 1.2 2011/05/29 12:29:28 claudio Exp $ */
+/*	$OpenBSD: k1x-pstate.c,v 1.4 2012/01/31 01:59:20 jsg Exp $ */
 /*
  * Copyright (c) 2011 Bryan Steele <brynet@gmail.com>
  *
@@ -75,9 +75,8 @@ struct k1x_cpu_state *k1x_current_state;
 void k1x_transition(struct k1x_cpu_state *, int);
 
 #if NACPICPU > 0
-void k1x_acpi_init(struct k1x_cpu_state *, u_int64_t);
-void k1x_acpi_states(struct k1x_cpu_state *, struct acpicpu_pss *, int,
-    u_int64_t);
+void k1x_acpi_init(struct k1x_cpu_state *);
+void k1x_acpi_states(struct k1x_cpu_state *, struct acpicpu_pss *, int);
 #endif
 
 void
@@ -131,7 +130,7 @@ k1x_transition(struct k1x_cpu_state *cstate, int level)
 
 void
 k1x_acpi_states(struct k1x_cpu_state *cstate, struct acpicpu_pss *pss,
-    int nstates, u_int64_t msr)
+    int nstates)
 {
 	struct k1x_state state;
 	int j, n;
@@ -154,7 +153,7 @@ k1x_acpi_states(struct k1x_cpu_state *cstate, struct acpicpu_pss *pss,
 }
 
 void
-k1x_acpi_init(struct k1x_cpu_state *cstate, u_int64_t msr)
+k1x_acpi_init(struct k1x_cpu_state *cstate)
 {
 	struct acpicpu_pss *pss;
 
@@ -162,7 +161,7 @@ k1x_acpi_init(struct k1x_cpu_state *cstate, u_int64_t msr)
 	if (cstate->n_states == 0)
 		return;
 
-	k1x_acpi_states(cstate, pss, cstate->n_states, msr);
+	k1x_acpi_states(cstate, pss, cstate->n_states);
 
 	return;
 }
@@ -172,12 +171,9 @@ k1x_acpi_init(struct k1x_cpu_state *cstate, u_int64_t msr)
 void
 k1x_init(struct cpu_info *ci)
 {
-#if NACPICPU > 0
-	u_int64_t msr;
-#endif
-	u_int i;
 	struct k1x_cpu_state *cstate;
 	struct k1x_state *state;
+	u_int i;
 
 	if (setperf_prio > 1)
 		return;
@@ -189,8 +185,7 @@ k1x_init(struct cpu_info *ci)
 	cstate->n_states = 0;
 
 #if NACPICPU > 0
-	msr = rdmsr(MSR_K1X_STATUS);
-	k1x_acpi_init(cstate, msr);
+	k1x_acpi_init(cstate);
 #endif
 	if (cstate->n_states) {
 		printf("%s: %d MHz: speeds:",

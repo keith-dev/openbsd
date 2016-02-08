@@ -1,5 +1,5 @@
-/*	$OpenBSD: wsfont.h,v 1.5 2008/06/26 05:42:20 ray Exp $ */
-/* 	$NetBSD: wsfont.h,v 1.12 2000/06/13 13:37:07 ad Exp $	*/
+/*	$OpenBSD: wsfont.h,v 1.8 2012/01/10 18:53:18 shadchin Exp $ */
+/*	$NetBSD: wsfont.h,v 1.12 2000/06/13 13:37:07 ad Exp $	*/
 
 /*-
  * Copyright (c) 1999 The NetBSD Foundation, Inc.
@@ -38,7 +38,7 @@
  * don't care about that aspect of the font. It returns a cookie which
  * we can use with the other functions. When more flexibility is required,
  * wsfont_enum() should be used. The last two parameters to wsfont_lock()
- * are the bit order and byte order required (WSDISPLAY_FONTORDER_L2R or 
+ * are the bit order and byte order required (WSDISPLAY_FONTORDER_L2R or
  * WSDISPLAY_FONTORDER_R2L).
  *
  * Example:
@@ -63,7 +63,6 @@ struct wsdisplay_font;
 /* For wsfont_add() */
 #define WSFONT_BUILTIN	(0x01)
 #define WSFONT_STATIC	(0x02)
-#define WSFONT_RDONLY	(0x04)
 
 /* wsfont.c */
 void	wsfont_init(void);
@@ -73,7 +72,6 @@ int	wsfont_remove(int);
 void	wsfont_enum(void (*)(char *, int, int, int));
 int	wsfont_lock(int, struct wsdisplay_font **, int, int);
 int	wsfont_unlock(int);
-int	wsfont_getflg(int, int *, int *);
 int	wsfont_map_unichar(struct wsdisplay_font *, int);
 int	wsfont_rotate(int);
 

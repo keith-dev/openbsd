@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_sppp.h,v 1.15 2009/02/16 20:03:36 canacar Exp $	*/
+/*	$OpenBSD: if_sppp.h,v 1.17 2012/01/29 10:21:54 sthen Exp $	*/
 /*	$NetBSD: if_sppp.h,v 1.2.2.1 1999/04/04 06:57:39 explorer Exp $	*/
 
 /*
@@ -66,7 +66,7 @@ struct sipcp {
 	u_int	flags;
 #define IPCP_HISADDR_SEEN 1	/* have seen his address already */
 #define IPCP_MYADDR_DYN   2	/* my address is dynamically assigned */
-#define IPCP_MYADDR_SEEN  4	/* have seen his address already */
+#define IPCP_MYADDR_SEEN  4	/* have seen my address already */
 #define IPCP_HISADDR_DYN  8	/* his address is dynamically assigned */
 #define IPV6CP_MYIFID_DYN	2
 #define IPV6CP_MYIFID_SEEN	4
@@ -107,7 +107,6 @@ enum ppp_phase {
 struct sppp {
 	/* NB: pp_if _must_ be first */
 	struct  ifnet pp_if;    /* network interface data */
-	struct  ifqueue pp_fastq; /* fast output queue */
 	struct	ifqueue pp_cpq;	/* PPP control protocol queue */
 	struct  sppp *pp_next;  /* next interface in keepalive list */
 	u_int   pp_flags;       /* use Cisco protocol instead of PPP */

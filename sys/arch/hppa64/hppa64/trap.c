@@ -1,4 +1,4 @@
-/*	$OpenBSD: trap.c,v 1.22 2011/08/07 15:49:34 kettenis Exp $	*/
+/*	$OpenBSD: trap.c,v 1.29 2011/11/26 19:14:17 kettenis Exp $	*/
 
 /*
  * Copyright (c) 2005 Michael Shalayeff
@@ -17,7 +17,7 @@
  * OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-#define TRAPDEBUG
+#undef TRAPDEBUG
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -56,6 +56,8 @@ static __inline int inst_store(u_int ins) {
 	       (ins & 0xfc0003c0) == 0x0c0001c0 ||	/* ldcw */
 	       (ins & 0xfc0003c0) == 0x0c000140;	/* ldcd */
 }
+
+void	ast(struct proc *);
 
 const char *trap_type[] = {
 	"invalid",
@@ -128,43 +130,18 @@ u_char hppa64_regmap[32] = {
 	offsetof(struct trapframe, tf_r31) / 8,
 };
 
-void	userret(struct proc *p, register_t pc, u_quad_t oticks);
-
 void
-userret(struct proc *p, register_t pc, u_quad_t oticks)
+ast(struct proc *p)
 {
-	int sig;
-
-	/* take pending signals */
-	while ((sig = CURSIG(p)) != 0)
-		postsig(sig);
-
-	p->p_priority = p->p_usrpri;
 	if (astpending) {
 		astpending = 0;
+		uvmexp.softs++;
 		if (p->p_flag & P_OWEUPC) {
 			ADDUPROF(p);
 		}
+		if (want_resched)
+			preempt(NULL);
 	}
-	if (want_resched) {
-		/*
-		 * We're being preempted.
-		 */
-		preempt(NULL);
-		while ((sig = CURSIG(p)) != 0)
-			postsig(sig);
-	}
-
-	/*
-	 * If profiling, charge recent system time to the trapped pc.
-	 */
-	if (p->p_flag & P_PROFIL) {
-		extern int psratio;
-
-		addupc_task(p, pc, (int)(p->p_sticks - oticks) * psratio);
-	}
-
-	p->p_cpu->ci_schedstate.spc_curpriority = p->p_priority;
 }
 
 void
@@ -190,7 +167,8 @@ trap(int type, struct trapframe *frame)
 	opcode = frame->tf_iir;
 	if (trapnum <= T_EXCEPTION || trapnum == T_HIGHERPL ||
 	    trapnum == T_LOWERPL || trapnum == T_TAKENBR ||
-	    trapnum == T_IDEBUG || trapnum == T_PERFMON) {
+	    trapnum == T_IDEBUG || trapnum == T_PERFMON ||
+	    trapnum == T_IPROT) {
 		va = frame->tf_iioq[0];
 		space = frame->tf_iisq[0];
 		vftype = UVM_PROT_EXEC;
@@ -366,7 +344,6 @@ trap(int type, struct trapframe *frame)
 		trapsignal(p, SIGSEGV, vftype, SEGV_ACCERR, sv);
 		break;
 
-	case T_IPROT | T_USER:
 	case T_DPROT | T_USER:
 		sv.sival_int = va;
 		trapsignal(p, SIGSEGV, vftype, SEGV_ACCERR, sv);
@@ -414,6 +391,7 @@ trap(int type, struct trapframe *frame)
 	case T_TLB_DIRTY | T_USER:
 	case T_DATACC:
 	case T_DATACC | T_USER:
+	case T_IPROT | T_USER:
 		fault = VM_FAULT_PROTECT;
 	case T_ITLBMISS:
 	case T_ITLBMISS | T_USER:
@@ -444,7 +422,6 @@ trap(int type, struct trapframe *frame)
 			break;
 		}
 
-printf("here\n");
 		ret = uvm_fault(map, trunc_page(va), fault, vftype);
 
 		/*
@@ -554,8 +531,10 @@ printf("here\n");
 	 * and also see a note in locore.S:TLABEL(all)
 	 */
 	if ((type & T_USER) &&
-	    (frame->tf_iioq[0] & ~PAGE_MASK) != SYSCALLGATE)
-		userret(p, frame->tf_iioq[0], 0);
+	    (frame->tf_iioq[0] & ~PAGE_MASK) != SYSCALLGATE) {
+		ast(p);
+		userret(p);
+	}
 }
 
 void
@@ -571,7 +550,8 @@ child_return(void *arg)
 	tf->tf_ret1 = 1;	/* ischild */
 	tf->tf_r1 = 0;		/* errno */
 
-	userret(p, tf->tf_iioq[0], 0);
+	ast(p);
+	userret(p);
 #ifdef KTRACE
 	if (KTRPOINT(p, KTR_SYSRET))
 		ktrsysret(p,
@@ -659,8 +639,8 @@ syscall(struct trapframe *frame)
 		frame->tf_r1 = 0;
 		break;
 	case ERESTART:
-		frame->tf_iioq[0] -= 12;
-		frame->tf_iioq[1] -= 12;
+		frame->tf_iioq[0] -= 16;
+		frame->tf_iioq[1] -= 16;
 	case EJUSTRETURN:
 		break;
 	default:
@@ -674,7 +654,8 @@ syscall(struct trapframe *frame)
 #ifdef SYSCALL_DEBUG
 	scdebug_ret(p, code, oerror, rval);
 #endif
-	userret(p, frame->tf_iioq[1], 0);
+	ast(p);
+	userret(p);
 #ifdef KTRACE
 	if (KTRPOINT(p, KTR_SYSRET))
 		ktrsysret(p, code, oerror, rval[0]);

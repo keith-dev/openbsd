@@ -1,4 +1,4 @@
-/*	$OpenBSD: pfctl_parser.h,v 1.97 2011/07/27 00:26:10 mcbride Exp $ */
+/*	$OpenBSD: pfctl_parser.h,v 1.99 2011/12/03 12:46:16 mcbride Exp $ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
@@ -48,6 +48,7 @@
 #define PF_OPT_SHOWALL		0x0400
 #define PF_OPT_OPTIMIZE		0x0800
 #define PF_OPT_RECURSE		0x4000
+#define PF_OPT_PORTNAMES	0x8000
 
 #define PF_TH_ALL		0xFF
 
@@ -208,7 +209,7 @@ int	pfctl_set_reassembly(struct pfctl *, int, int);
 int	pfctl_set_optimization(struct pfctl *, const char *);
 int	pfctl_set_limit(struct pfctl *, const char *, unsigned int);
 int	pfctl_set_logif(struct pfctl *, char *);
-int	pfctl_set_hostid(struct pfctl *, u_int32_t);
+void	pfctl_set_hostid(struct pfctl *, u_int32_t);
 int	pfctl_set_debug(struct pfctl *, char *);
 int	pfctl_set_interface_flags(struct pfctl *, char *, int, int);
 

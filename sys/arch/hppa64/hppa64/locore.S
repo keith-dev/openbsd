@@ -1,4 +1,4 @@
-/*	$OpenBSD: locore.S,v 1.33 2011/08/07 22:35:53 kettenis Exp $	*/
+/*	$OpenBSD: locore.S,v 1.41 2011/10/12 18:30:09 miod Exp $	*/
 
 /*
  * Copyright (c) 2005 Michael Shalayeff
@@ -59,6 +59,9 @@
 
 	.text
 
+#define MFCPU(r,x)    .word   0x140008a0 | ((r) << 21) | ((x))
+#define MTCPU(x,r)    .word   0x14001840 | ((r) << 21) | ((x) << 16)
+		
 /*
  * $start(pdc, boothowto, bootdev, esym)
  */
@@ -90,11 +93,16 @@ $start
 	mtctl	%r1, %eirr
 	mtctl	%r0, %cr10	/* ccr */
 
+	/* disable space-ID hashing */
+	MFCPU(2,28)
+	depdi	0, 54, 1, %r28
+	MTCPU(28,2)
+
 	ldil	L%cpu0_info, %r1
 	ldo	R%cpu0_info(%r1), %r1
 	mtctl	%r1, %cr24
-	ldil	L%(PSL_W|PSL_Q|PSL_P|PSL_C|PSL_D|PSL_S|PSL_O), %r8
-	ldo	R%(PSL_W|PSL_Q|PSL_P|PSL_C|PSL_D|PSL_S|PSL_O)(%r8), %r8
+	ldil	L%(PSL_W|PSL_Q|PSL_P|PSL_C|PSL_D|PSL_O), %r8
+	ldo	R%(PSL_W|PSL_Q|PSL_P|PSL_C|PSL_D|PSL_O)(%r8), %r8
 	stw	%r8, CI_PSW(%r1)
 	ldi	IPL_HIGH, %r8
 	stw	%r8, CI_CPL(%r1)
@@ -611,11 +619,6 @@ $syscall_return
 	mtctl	%arg2, %cr0
 	mtctl	%arg3, %cr10
 
-	ldd	TF_IOR(%arg0), %arg2		/* ior */
-	ldd	TF_ISR(%arg0), %arg3		/* isr */
-	mtctl	%arg2, %cr27
-	mtsp	%arg3, %sr6
-
 	ldd	TF_SAR(%arg0), %arg2		/* sar */
 	ldd	TF_VTOP(%arg0), %arg3		/* vtop */
 	mtctl	%arg2, %sar
@@ -892,8 +895,11 @@ ENTRY(TLABEL(all),0)
 	extrd,u	%r8, 63, SID_SHIFT, %r16
 	depd	%r16, 31, SID_SHIFT, %r9
 	depd	%r0, 63, SID_SHIFT, %r8
-	mtsp	%r8, %sr6
-	mtctl	%r9, %cr27
+
+	mfctl	%cr24, %r24
+	ldo	CI_TRAP_SAVE(%r24), %r24
+	std	%r9, 2*8(%r24)		/* ior */
+	std	%r8, 3*8(%r24)		/* isr */
 
 	mfctl	%pcsq, %r24
 	mtctl	%r0, %pcsq
@@ -992,7 +998,7 @@ TLABEL(all_virt)
 	std,ma	%arg3, 8(%sr3,%sp)	/* %sr1 */
 
 	mfsp	%sr2, %arg2
-	mfsp	%sr3, %arg3
+	mfsp	%sr2, %arg3		/* XXX */
 	std,ma	%arg2, 8(%sr3,%sp)	/* %sr2 */
 	std,ma	%arg3, 8(%sr3,%sp)	/* %sr3 */
 
@@ -1035,12 +1041,7 @@ TLABEL(all_virt)
 	std,ma	%arg2, 8(%sr3,%sp)	/* eiem */
 	std,ma	%arg3, 8(%sr3,%sp)	/* eirr */
 
-	mfctl	%cr27, %arg2
-	mfsp	%sr6, %arg3
-	std,ma	%arg2, 8(%sr3,%sp)	/* ior */
-	std,ma	%arg3, 8(%sr3,%sp)	/* isr */
-
-	ldo	8(%sp), %sp		/* iir */
+	ldo	24(%sp), %sp		/* ior, isr, iir */
 	mfctl	%cr31, %arg3
 	std,ma	%arg3, 8(%sr3,%sp)	/* ipsw */
 
@@ -1073,6 +1074,10 @@ TLABEL(all_virt)
 	ldd	1*8(%r1), %arg3
 	std	%arg2, TF_SP(%arg1)
 	std	%arg3, TF_IIR(%arg1)
+	ldd	2*8(%r1), %arg2
+	ldd	3*8(%r1), %arg3
+	std	%arg2, TF_IOR(%arg1)
+	std	%arg3, TF_ISR(%arg1)
 
 	ldo	TRAPFRAME_SIZEOF(%arg1), %sp
 	copy	%sp, %r3
@@ -1517,6 +1522,30 @@ LEAF_ENTRY(pitlb)
 EXIT(pitlb)
 
 /*
+ * void  
+ * pdtlbe(pa_space_t sp, vaddr_t va)
+ */
+LEAF_ENTRY(pdtlbe)
+	mfsp	%sr1, %arg2
+	mtsp	%arg0, %sr1
+	pdtlbe	%r0(%sr1, %arg1)
+	bv	%r0(%rp)
+	mtsp	%arg2, %sr1
+EXIT(pdtlb)
+
+/*
+ * void  
+ * pitlbe(pa_space_t sp, vaddr_t va)
+ */
+LEAF_ENTRY(pitlbe)
+	mfsp	%sr1, %arg2
+	mtsp	%arg0, %sr1
+	pitlbe	%r0(%sr1, %arg1)
+	bv	%r0(%rp)
+	mtsp	%arg2, %sr1
+EXIT(pitlb)
+
+/*
  * register_t
  * mfctl(int reg)
  */
@@ -1790,12 +1819,6 @@ Lcspstr
 	.asciz	"cpu_switchto: old=%p, new=%p"
 	.align	8
 kstack_check
-	ldd	P_WCHAN(%arg1), %arg3
-	comb,<>,n %r0, %arg3, switch_error
-	nop
-	ldb	P_STAT(%arg1), %arg3
-	comib,<>,n SRUN, %arg3, switch_error
-	nop
 	/*
 	 * The new process' kernel stack must be reasonable.
 	 */
@@ -1819,7 +1842,7 @@ kstack_ok
 	std	%arg1, CI_CURPROC(%r1)
 
 	/* If old process exited, don't bother. */
-	comb,=,n %r0, %arg2, switch_exited
+	comb,=,n %r0, %arg0, switch_exited
 
 	/*
 	 * 2. save old proc context
@@ -1935,19 +1958,21 @@ EXIT(switch_trampoline)
  * Signal "trampoline" code. Invoked from RTE setup by sendsig().
  */
 ENTRY(sigcode,0)
-	ldd	0x18(%arg3), %r19
+	ldd	0x18(%arg3), %dp
 	ldd	0x10(%arg3), %arg3
 	.call
 	ble	0(%sr0, %arg3)
 	copy	%r31, %rp
 
 	ldil	L%SYSCALLGATE, %r1
+	depd	%r0, 31, 32, %r1
 	copy	%r4, %arg0
 	.call
 	ble	4(%sr7, %r1)
 	ldi	SYS_sigreturn, %r1
 
 	ldil	L%SYSCALLGATE, %r1
+	depd	%r0, 31, 32, %r1
 	copy	%ret0, %arg0
 	.call
 	ble	4(%sr7, %r1)

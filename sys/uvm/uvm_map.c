@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_map.c,v 1.145 2011/07/05 03:10:29 dhill Exp $	*/
+/*	$OpenBSD: uvm_map.c,v 1.147 2011/11/24 18:47:34 guenther Exp $	*/
 /*	$NetBSD: uvm_map.c,v 1.86 2000/11/27 08:40:03 chs Exp $	*/
 
 /* 
@@ -3184,10 +3184,10 @@ uvmspace_init(struct vmspace *vm, struct pmap *pmap, vaddr_t min, vaddr_t max,
 }
 
 /*
- * uvmspace_share: share a vmspace between two proceses
+ * uvmspace_share: share a vmspace between two processes
  *
  * - XXX: no locking on vmspace
- * - used for vfork, threads(?)
+ * - used for vfork and threads
  */
 
 void
@@ -3807,12 +3807,17 @@ uvm_page_printit(struct vm_page *pg, boolean_t full,
 	    pg->uobject, pg->uanon, (long long)pg->offset, pg->loan_count);
 #if defined(UVM_PAGE_TRKOWN)
 	if (pg->pg_flags & PG_BUSY)
-		(*pr)("  owning process = %d, tag=%s\n",
+		(*pr)("  owning process = %d, tag=%s",
 		    pg->owner, pg->owner_tag);
 	else
-		(*pr)("  page not busy, no owner\n");
+		(*pr)("  page not busy, no owner");
 #else
-	(*pr)("  [page ownership tracking disabled]\n");
+	(*pr)("  [page ownership tracking disabled]");
+#endif
+#ifdef __HAVE_VM_PAGE_MD
+	(*pr)("\tvm_page_md %p\n", &pg->mdpage);
+#else
+	(*pr)("\n");
 #endif
 
 	if (!full)

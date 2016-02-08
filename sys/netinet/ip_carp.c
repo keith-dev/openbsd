@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_carp.c,v 1.189 2011/07/08 19:07:18 henning Exp $	*/
+/*	$OpenBSD: ip_carp.c,v 1.194 2011/11/19 13:54:53 mikeb Exp $	*/
 
 /*
  * Copyright (c) 2002 Michael Shalayeff. All rights reserved.
@@ -434,7 +434,8 @@ carp_setroute(struct carp_softc *sc, int cmd)
 
 			/* Check for our address on another interface */
 			/* XXX cries for proper API */
-			rnh = rt_gettable(ifa->ifa_addr->sa_family, 0);
+			rnh = rt_gettable(ifa->ifa_addr->sa_family,
+			    sc->sc_if.if_rdomain);
 			rn = rnh->rnh_matchaddr(ifa->ifa_addr, rnh);
 			rt = (struct rtentry *)rn;
 			hr_otherif = (rt && rt->rt_ifp != &sc->sc_if &&
@@ -650,13 +651,12 @@ carp6_proto_input(struct mbuf **mp, int *offp, int proto)
 
 	/* verify that we have a complete carp packet */
 	len = m->m_len;
-	IP6_EXTHDR_GET(ch, struct carp_header *, m, *offp, sizeof(*ch));
-	if (ch == NULL) {
+	if ((m = m_pullup(m, *offp + sizeof(*ch))) == NULL) {
 		carpstats.carps_badlen++;
 		CARP_LOG(LOG_INFO, sc, ("packet size %u too small", len));
 		return (IPPROTO_DONE);
 	}
-
+	ch = (struct carp_header *)(mtod(m, caddr_t) + *offp);
 
 	/* verify the CARP checksum */
 	m->m_data += *offp;
@@ -981,7 +981,7 @@ carpdetach(struct carp_softc *sc)
 	carp_del_all_timeouts(sc);
 
 	if (sc->sc_demote_cnt)
-		carp_group_demote_adj(&sc->sc_if, sc->sc_demote_cnt, "detach");
+		carp_group_demote_adj(&sc->sc_if, -sc->sc_demote_cnt, "detach");
 	sc->sc_suppress = 0;
 	sc->sc_sendad_errors = 0;
 
@@ -1733,6 +1733,8 @@ carp_setrun(struct carp_vhost_entry *vhe, sa_family_t af)
 		tv.tv_sec = 3 * sc->sc_advbase;
 		if (sc->sc_advbase == 0 && vhe->advskew == 0)
 			tv.tv_usec = 3 * 1000000 / 256;
+		else if (sc->sc_advbase == 0)
+			tv.tv_usec = 3 * vhe->advskew * 1000000 / 256;
 		else
 			tv.tv_usec = vhe->advskew * 1000000 / 256;
 		if (vhe->vhe_leader)
@@ -1820,7 +1822,7 @@ carp_set_ifp(struct carp_softc *sc, struct ifnet *ifp)
 			return (EINVAL);
 
 		if (ifp->if_carp == NULL) {
-			ncif = malloc(sizeof(*cif), M_IFADDR, M_NOWAIT);
+			ncif = malloc(sizeof(*cif), M_IFADDR, M_NOWAIT|M_ZERO);
 			if (ncif == NULL)
 				return (ENOBUFS);
 			if ((error = ifpromisc(ifp, 1))) {

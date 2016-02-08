@@ -1,4 +1,4 @@
-/*	$OpenBSD: rfork_thread.S,v 1.1 2007/03/24 18:21:34 miod Exp $	*/
+/*	$OpenBSD: rfork_thread.S,v 1.3 2012/01/17 02:34:18 guenther Exp $	*/
 
 /*
  * Copyright (c) 2007 Miodrag Vallat.
@@ -20,11 +20,11 @@
 #include "../../../libc/arch/sh/SYS.h"
 
 /*
- * int rfork_thread(int flags, void *stack, void (*func)(void *), void *arg);
- *			r4	     r5		   r6			r7
+ * int __tfork_thread(const struct __tfork *param, void *stack, void (*func)(void *), void *arg);
+ *			r4			r5		   r6		r7
  */
-ENTRY(rfork_thread)
-	mov.l	.LSYS_rfork, r0
+ENTRY(__tfork_thread)
+	mov.l	.LSYS___tfork, r0
 	.word	0xc380		/* trapa #0x80 */
 	bf	9f
 
@@ -45,7 +45,7 @@ ENTRY(rfork_thread)
 	jsr	@r6
 	 mov	r7, r4
 
-	mov.l	.LSYS_threxit, r0
+	mov.l	.LSYS___threxit, r0
 	.word	0xc380		/* trapa #0x80 */
 
 9:
@@ -55,7 +55,7 @@ ENTRY(rfork_thread)
 	JUMP_CERROR
 
 	.align 2
-.LSYS_rfork:	.long SYS_rfork
-.LSYS_threxit:	.long SYS_threxit
+.LSYS___tfork:	.long SYS___tfork
+.LSYS___threxit:	.long SYS___threxit
 
-	SET_ENTRY_SIZE(rfork_thread)
+	SET_ENTRY_SIZE(__tfork_thread)

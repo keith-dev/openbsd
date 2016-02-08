@@ -1,6 +1,6 @@
 define(MACHINE,hp300)dnl
 vers(__file__,
-	{-$OpenBSD: MAKEDEV.md,v 1.42 2010/11/19 20:55:48 miod Exp $-},
+	{-$OpenBSD: MAKEDEV.md,v 1.44 2011/12/21 23:12:24 miod Exp $-},
 etc.MACHINE)dnl
 dnl
 dnl Copyright (c) 2001-2006 Todd T. Fries <todd@OpenBSD.org>
@@ -50,7 +50,6 @@ _DEV(ramdisk)
 _DEV(std)
 _DEV(local)
 _TITLE(dis)
-_DEV(ccd, 17, 5)
 _DEV(cd, 18, 9)
 _DEV(hd, 9, 2)
 _DEV(rd, 34, 8)
@@ -80,6 +79,7 @@ _DEV(wsmouse, 42)
 _TITLE(prn)
 _DEV(ppi, 11)
 _TITLE(spec)
+_DEV(au, 44)
 _DEV(bio, 49)
 _DEV(bpf, 22)
 _DEV(diskmap, 54)
@@ -168,6 +168,7 @@ ppi*)
 	;;
 
 dnl
+twrget(all, au, audio, 0)
 target(all, ch, 0)dnl
 target(all, nnpfs, 0)dnl
 target(all, vscsi, 0)dnl
@@ -185,11 +186,10 @@ target(all, sd, 0, 1, 2, 3, 4)dnl
 target(all, st, 0, 1)dnl
 target(all, uk, 0)dnl
 target(all, vnd, 0, 1, 2, 3)dnl
-target(all, ccd, 0, 1, 2, 3)dnl
-target( all, dca, 0, 1)dnl
-target( all, dcm, 0, 1, 2, 3)dnl
-target( all, hd, 0, 1, 2)dnl
-target( all, ct, 0, 1)dnl
+target(all, dca, 0, 1)dnl
+target(all, dcm, 0, 1, 2, 3)dnl
+target(all, hd, 0, 1, 2)dnl
+target(all, ct, 0, 1)dnl
 target(ramd, ct, 0, 1)dnl
 target(ramd, hd, 0, 1, 2)dnl
 target(ramd, pty, 0)dnl

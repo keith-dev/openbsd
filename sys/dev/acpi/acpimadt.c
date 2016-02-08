@@ -1,4 +1,4 @@
-/* $OpenBSD: acpimadt.c,v 1.24 2011/03/06 22:40:05 deraadt Exp $ */
+/* $OpenBSD: acpimadt.c,v 1.26 2012/01/07 20:13:16 kettenis Exp $ */
 /*
  * Copyright (c) 2006 Mark Kettenis <kettenis@openbsd.org>
  *
@@ -131,6 +131,14 @@ acpimadt_validate(struct acpi_madt *madt)
 			if (length != sizeof(entry->madt_platform_int))
 				return (0);
 			break;
+		case ACPI_MADT_X2APIC:
+			if (length != sizeof(entry->madt_x2apic))
+				return (0);
+			break;
+		case ACPI_MADT_X2APIC_NMI:
+			if (length != sizeof(entry->madt_x2apic_nmi))
+				return (0);
+			break;
 		}
 
 		addr += length;
@@ -212,6 +220,7 @@ acpimadt_attach(struct device *parent, struct device *self, void *aux)
 		return;
 
 	mp_busses = acpimadt_busses;
+	mp_nbusses = nitems(acpimadt_busses);
 	mp_isa_bus = &acpimadt_isa_bus;
 
 	lapic_boot_init(madt->local_apic_address);
@@ -346,6 +355,10 @@ acpimadt_attach(struct device *parent, struct device *self, void *aux)
 			acpimadt_cfg_intr(entry->madt_lapic_nmi.flags, &map->redir);
 			map->redir &= ~IOAPIC_REDLO_DEL_MASK;
 			map->redir |= (IOAPIC_REDLO_DEL_NMI << IOAPIC_REDLO_DEL_SHIFT);
+			break;
+
+		case ACPI_MADT_X2APIC:
+		case ACPI_MADT_X2APIC_NMI:
 			break;
 
 		default:

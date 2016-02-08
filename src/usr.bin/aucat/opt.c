@@ -1,4 +1,4 @@
-/*	$OpenBSD: opt.c,v 1.10 2010/07/06 01:12:45 ratchov Exp $	*/
+/*	$OpenBSD: opt.c,v 1.12 2011/11/15 08:05:22 ratchov Exp $	*/
 /*
  * Copyright (c) 2008 Alexandre Ratchov <alex@caoua.org>
  *
@@ -25,13 +25,14 @@
 #include "dbg.h"
 #endif
 
-struct optlist opt_list = SLIST_HEAD_INITIALIZER(&opt_list);
+struct opt *opt_list = NULL;
 
-void
-opt_new(char *name, struct dev *d, struct aparams *wpar, struct aparams *rpar,
+struct opt *
+opt_new(char *name, struct dev *dev,
+    struct aparams *wpar, struct aparams *rpar,
     int maxweight, int mmc, int join, unsigned mode)
 {
-	struct opt *o;
+	struct opt *o, **po;
 	unsigned len;
 	char c;
 
@@ -41,17 +42,9 @@ opt_new(char *name, struct dev *d, struct aparams *wpar, struct aparams *rpar,
 			exit(1);
 		}
 		c = name[len];
-		if (c < 'a' && c > 'z' &&
-		    c < 'A' && c > 'Z' &&
-		    c < '0' && c > '9' && 
-		    c != '_') {
+		if ((c < 'a' || c > 'z') &&
+		    (c < 'A' || c > 'Z')) {
 			fprintf(stderr, "%s: '%c' not allowed\n", name, c);
-			exit(1);
-		}
-	}
-	SLIST_FOREACH(o, &opt_list, entry) {
-		if (strcmp(name, o->name) == 0) {
-			fprintf(stderr, "%s: already defined\n", name);
 			exit(1);
 		}
 	}
@@ -60,7 +53,6 @@ opt_new(char *name, struct dev *d, struct aparams *wpar, struct aparams *rpar,
 		perror("opt_new: malloc");
 		exit(1);
 	}
-	memcpy(o->name, name, len + 1);
 	if (mode & MODE_RECMASK)
 		o->wpar = (mode & MODE_MON) ? *rpar : *wpar;
 	if (mode & MODE_PLAY)
@@ -69,20 +61,30 @@ opt_new(char *name, struct dev *d, struct aparams *wpar, struct aparams *rpar,
 	o->mmc = mmc;
 	o->join = join;
 	o->mode = mode;
-	o->dev = d;
+	o->dev = dev;
+	memcpy(o->name, name, len + 1);
+	for (po = &opt_list; *po != NULL; po = &(*po)->next) {
+		if (o->dev->num == (*po)->dev->num &&
+		    strcmp(o->name, (*po)->name) == 0) {
+			fprintf(stderr, "%s: already defined\n", o->name);
+			exit(1);
+		}
+	}
+	o->next = NULL;
+	*po = o;
 #ifdef DEBUG
 	if (debug_level >= 2) {
+		dev_dbg(o->dev);
+		dbg_puts(".");
 		dbg_puts(o->name);
-		dbg_puts("@");
-		dbg_puts(o->dev->path);
 		dbg_puts(":");
-		if (mode & MODE_REC) {
+		if (o->mode & MODE_REC) {
 			dbg_puts(" rec=");
 			dbg_putu(o->wpar.cmin);
 			dbg_puts(":");
 			dbg_putu(o->wpar.cmax);
 		}
-		if (mode & MODE_PLAY) {
+		if (o->mode & MODE_PLAY) {
 			dbg_puts(" play=");
 			dbg_putu(o->rpar.cmin);
 			dbg_puts(":");
@@ -90,42 +92,39 @@ opt_new(char *name, struct dev *d, struct aparams *wpar, struct aparams *rpar,
 			dbg_puts(" vol=");
 			dbg_putu(o->maxweight);
 		}
-		if (mode & MODE_MON) {
+		if (o->mode & MODE_MON) {
 			dbg_puts(" mon=");
 			dbg_putu(o->wpar.cmin);
 			dbg_puts(":");
 			dbg_putu(o->wpar.cmax);
 		}
-		if (o->mmc)
-			dbg_puts(" mmc");
+		if (o->mode & (MODE_RECMASK | MODE_PLAY)) {
+			if (o->mmc)
+				dbg_puts(" mmc");
+			if (o->join)
+				dbg_puts(" join");
+		}
+		if (o->mode & MODE_MIDIIN)
+			dbg_puts(" midi/in");
+		if (o->mode & MODE_MIDIOUT)
+			dbg_puts(" midi/out");
 		dbg_puts("\n");
 	}
 #endif
-	SLIST_INSERT_HEAD(&opt_list, o, entry);
+	return o;
 }
 
 struct opt *
-opt_byname(char *name)
+opt_byname(char *name, unsigned num)
 {
 	struct opt *o;
 
-	SLIST_FOREACH(o, &opt_list, entry) {
-		if (strcmp(name, o->name) == 0) {
-#ifdef DEBUG
-			if (debug_level >= 3) {
-				dbg_puts(o->name);
-				dbg_puts(": option found\n");
-			}
-#endif
+	for (o = opt_list; o != NULL; o = o->next) {
+		if (o->dev->num != num)
+			continue;
+		if (strcmp(name, o->name) == 0)
 			return o;
-		}
 	}
-#ifdef DEBUG
-	if (debug_level >= 3) {
-		dbg_puts(name);
-		dbg_puts(": option not found\n");
-	}
-#endif
 	return NULL;
 }
 

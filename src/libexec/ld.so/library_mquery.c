@@ -1,4 +1,4 @@
-/*	$OpenBSD: library_mquery.c,v 1.38 2010/11/16 18:59:00 drahn Exp $ */
+/*	$OpenBSD: library_mquery.c,v 1.40 2012/01/09 17:01:22 ariane Exp $ */
 
 /*
  * Copyright (c) 2002 Dale Rahn
@@ -113,7 +113,7 @@ _dl_tryload_shlib(const char *libname, int type, int flags)
 	for (object = _dl_objects; object != NULL; object = object->next) {
 		if (object->dev == sb.st_dev &&
 		    object->inode == sb.st_ino) {
-			object->obj_flags |= flags & RTLD_GLOBAL;
+			object->obj_flags |= flags & DF_1_GLOBAL;
 			_dl_close(libfile);
 			if (_dl_loading_object == NULL)
 				_dl_loading_object = object;
@@ -157,15 +157,17 @@ _dl_tryload_shlib(const char *libname, int type, int flags)
 			off = (phdp->p_vaddr & align);
 			size = off + phdp->p_filesz;
 
-			ld = _dl_malloc(sizeof(struct load_list));
-			ld->start = NULL;
-			ld->size = size;
-			ld->moff = TRUNC_PG(phdp->p_vaddr);
-			ld->foff = TRUNC_PG(phdp->p_offset);
-			ld->prot = PFLAGS(phdp->p_flags);
-			LDLIST_INSERT(ld);
+			if (size != 0) {
+				ld = _dl_malloc(sizeof(struct load_list));
+				ld->start = NULL;
+				ld->size = size;
+				ld->moff = TRUNC_PG(phdp->p_vaddr);
+				ld->foff = TRUNC_PG(phdp->p_offset);
+				ld->prot = PFLAGS(phdp->p_flags);
+				LDLIST_INSERT(ld);
+			}
 
-			if ((ld->prot & PROT_WRITE) == 0 ||
+			if ((PFLAGS(phdp->p_flags) & PROT_WRITE) == 0 ||
 			    ROUND_PG(size) == ROUND_PG(off + phdp->p_memsz))
 				break;
 			/* This phdr has a zfod section */

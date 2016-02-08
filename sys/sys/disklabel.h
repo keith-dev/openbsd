@@ -1,4 +1,4 @@
-/*	$OpenBSD: disklabel.h,v 1.51 2011/06/03 21:14:11 matthew Exp $	*/
+/*	$OpenBSD: disklabel.h,v 1.53 2011/10/06 21:16:01 deraadt Exp $	*/
 /*	$NetBSD: disklabel.h,v 1.41 1996/05/10 23:07:37 mark Exp $	*/
 
 /*
@@ -158,18 +158,6 @@ struct	__partitionv0 {		/* the partition table */
 		u_int16_t sgs;	/* LFS: FS segment shift */
 	} __partitionv0_u1;
 };
-
-#else /* _LOCORE */
-	/*
-	 * offsets for asm boot files.
-	 */
-	.set	d_secsize,40
-	.set	d_nsectors,44
-	.set	d_ntracks,48
-	.set	d_ncylinders,52
-	.set	d_secpercyl,56
-	.set	d_secperunit,60
-	.set	d_end_,404		/* size of disk label */
 #endif /* _LOCORE */
 
 
@@ -232,7 +220,7 @@ struct	__partitionv0 {		/* the partition table */
 #define	DTYPE_HPIB		7		/* CS/80 on HP-IB */
 #define	DTYPE_HPFL		8		/* HP Fiber-link */
 #define	DTYPE_FLOPPY		10		/* floppy */
-#define	DTYPE_CCD		11		/* concatenated disk device */
+#define	DTYPE_CCD		11		/* was: concatenated disk device */
 #define	DTYPE_VND		12		/* vnode pseudo-disk */
 #define	DTYPE_ATAPI		13		/* ATAPI */
 #define DTYPE_RAID		14		/* RAIDframe */
@@ -250,7 +238,7 @@ static char *dktypenames[] = {
 	"HP-FL",
 	"type 9",
 	"floppy",
-	"ccd",
+	"ccd",			/* deprecated */
 	"vnd",
 	"ATAPI",
 	"RAID",

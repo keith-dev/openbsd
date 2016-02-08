@@ -1,4 +1,4 @@
-/*	$OpenBSD: rthread_file.c,v 1.2 2009/11/27 19:45:54 guenther Exp $	*/
+/*	$OpenBSD: rthread_file.c,v 1.4 2012/01/17 02:34:18 guenther Exp $	*/
 /*
  * Copyright (c) 1995 John Birrell <jb@cimlogic.com.au>.
  * All rights reserved.
@@ -40,10 +40,8 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 #include <sys/queue.h>
 #include <pthread.h>
-#include <machine/spinlock.h>
 #include "rthread.h"
 
 /*
@@ -206,7 +204,7 @@ void
 		 */
 		TAILQ_INSERT_TAIL(&p->lockers,self,waiting);
 		while (p->owner != self) {
-			thrsleep(self, 0, NULL, &hash_lock);
+			__thrsleep(self, 0, NULL, &hash_lock, NULL);
 			_spinlock(&hash_lock);
 		}
 	}
@@ -294,7 +292,7 @@ void
 				 */
 				p->count = 1;
 
-				thrwakeup(p->owner, 1);
+				__thrwakeup(p->owner, 1);
 			}
 		}
 	}

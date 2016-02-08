@@ -1,4 +1,4 @@
-/*	$OpenBSD: rfork_thread.S,v 1.1 2005/12/23 20:08:27 miod Exp $	*/
+/*	$OpenBSD: rfork_thread.S,v 1.3 2012/01/17 02:34:18 guenther Exp $	*/
 
 /*
  * Copyright (c) 2005, Miodrag Vallat
@@ -28,11 +28,11 @@
 #include "../../../libc/arch/m88k/SYS.h"
 
 /*
- * int rfork_thread(int flags, void *stack, void (*func)(void *), void *arg);
+ * int __tfork_thread(const struct __tfork *param, void *stack, void (*func)(void *), void *arg);
  */
-ENTRY(rfork_thread)
+ENTRY(__tfork_thread)
 	or	r6,  r3,  r0	/* save stack */
-	or	r13, r0,  __SYSCALLNAME(SYS_,rfork)
+	or	r13, r0,  __SYSCALLNAME(SYS_,__tfork)
 	tb0	0,   r0,  128	/* corrupts r2 and r3 in the child */
 	br	__cerror
 
@@ -51,5 +51,5 @@ ENTRY(rfork_thread)
 	jsr.n	r4		/* func */
 	 or	r2,  r5,  r0	/* arg */
 
-	or	r13, r0,  __SYSCALLNAME(SYS_,threxit)
+	or	r13, r0,  __SYSCALLNAME(SYS_,__threxit)
 	tb0	0,   r0,  128

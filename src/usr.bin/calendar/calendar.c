@@ -1,4 +1,4 @@
-/*	$OpenBSD: calendar.c,v 1.26 2009/10/27 23:59:36 deraadt Exp $	*/
+/*	$OpenBSD: calendar.c,v 1.28 2012/01/31 08:29:25 otto Exp $	*/
 
 /*
  * Copyright (c) 1989, 1993, 1994
@@ -169,6 +169,7 @@ main(int argc, char *argv[])
 				warn("fork");
 				continue;
 			case 0:	/* child */
+				(void)setpgid(getpid(), getpid());
 				(void)setlocale(LC_ALL, "");
 				if (setusercontext(NULL, pw, pw->pw_uid,
 				    LOGIN_SETALL ^ LOGIN_SETLOGIN))
@@ -214,7 +215,10 @@ main(int argc, char *argv[])
 				/* It doesn't _really_ matter if the kill fails, e.g.
 				 * if there's only a zombie now.
 				 */
-				(void)kill(kid, SIGTERM);
+				if (getpgid(kid) != getpgrp())
+					(void)killpg(getpgid(kid), SIGTERM);
+				else
+					(void)kill(kid, SIGTERM);
 				warnx("uid %u did not finish in time", pw->pw_uid);
 			}
 			if (time(NULL) - t >= SECSPERDAY)
@@ -246,7 +250,7 @@ usage(void)
 {
 	(void)fprintf(stderr,
 	    "usage: calendar [-ab] [-A num] [-B num] [-f calendarfile] "
-	    "[-t [[[cc]yy][mm]]dd]\n");
+	    "[-t [[[cc]yy]mm]dd]\n");
 	exit(1);
 }
 

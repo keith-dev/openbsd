@@ -1,4 +1,4 @@
-/*	$OpenBSD: ahci.c,v 1.181 2011/07/04 22:06:07 jmatthew Exp $ */
+/*	$OpenBSD: ahci.c,v 1.186 2012/02/04 21:44:54 krw Exp $ */
 
 /*
  * Copyright (c) 2006 David Gwynne <dlg@openbsd.org>
@@ -416,9 +416,8 @@ struct ahci_softc {
 
 	int			sc_flags;
 #define AHCI_F_NO_NCQ			(1<<0)
-#define AHCI_F_IGN_FR			(1<<1)
-#define AHCI_F_IPMS_PROBE		(1<<2)	/* IPMS on failed PMP probe */
-#define AHCI_F_NO_PMP			(1<<3)	/* ignore PMP capability */
+#define AHCI_F_IPMS_PROBE		(1<<1)	/* IPMS on failed PMP probe */
+#define AHCI_F_NO_PMP			(1<<2)	/* ignore PMP capability */
 
 	u_int			sc_ncmds;
 
@@ -458,8 +457,6 @@ int			ahci_ati_sb700_attach(struct ahci_softc *,
 int			ahci_amd_hudson2_attach(struct ahci_softc *,
 			    struct pci_attach_args *);
 int			ahci_intel_attach(struct ahci_softc *,
-			    struct pci_attach_args *);
-int			ahci_nvidia_mcp_attach(struct ahci_softc *,
 			    struct pci_attach_args *);
 
 static const struct ahci_device ahci_devices[] = {
@@ -518,27 +515,6 @@ static const struct ahci_device ahci_devices[] = {
 	{ PCI_VENDOR_INTEL,	PCI_PRODUCT_INTEL_EP80579_AHCI,
 	    NULL,		ahci_intel_attach },
 
-	{ PCI_VENDOR_NVIDIA,	PCI_PRODUCT_NVIDIA_MCP65_AHCI_2,
-	    NULL,		ahci_nvidia_mcp_attach },
-	{ PCI_VENDOR_NVIDIA,	PCI_PRODUCT_NVIDIA_MCP67_AHCI_1,
-	    NULL,		ahci_nvidia_mcp_attach },
-	{ PCI_VENDOR_NVIDIA,	PCI_PRODUCT_NVIDIA_MCP73_AHCI_5,
-	    NULL,		ahci_nvidia_mcp_attach },
-	{ PCI_VENDOR_NVIDIA,	PCI_PRODUCT_NVIDIA_MCP73_AHCI_9,
-	    NULL,		ahci_nvidia_mcp_attach },
-	{ PCI_VENDOR_NVIDIA,	PCI_PRODUCT_NVIDIA_MCP77_AHCI_5,
-	    NULL,		ahci_nvidia_mcp_attach },
-	{ PCI_VENDOR_NVIDIA,	PCI_PRODUCT_NVIDIA_MCP77_AHCI_6,
-	    NULL,		ahci_nvidia_mcp_attach },
-	{ PCI_VENDOR_NVIDIA,	PCI_PRODUCT_NVIDIA_MCP79_AHCI_1,
-	    NULL,		ahci_nvidia_mcp_attach },
-	{ PCI_VENDOR_NVIDIA,	PCI_PRODUCT_NVIDIA_MCP79_AHCI_2,
-	    NULL,		ahci_nvidia_mcp_attach },
-	{ PCI_VENDOR_NVIDIA,	PCI_PRODUCT_NVIDIA_MCP79_AHCI_3,
-	    NULL,		ahci_nvidia_mcp_attach },
-	{ PCI_VENDOR_NVIDIA,	PCI_PRODUCT_NVIDIA_MCP79_AHCI_4,
-	    NULL,		ahci_nvidia_mcp_attach },
-
 	{ PCI_VENDOR_VIATECH,	PCI_PRODUCT_VIATECH_VT8251_SATA,
 	  ahci_no_match,	ahci_vt8251_attach }
 };
@@ -548,6 +524,13 @@ void			ahci_pci_attach(struct device *, struct device *,
 			    void *);
 int			ahci_pci_detach(struct device *, int);
 int			ahci_pci_activate(struct device *, int);
+
+#ifdef HIBERNATE
+#include <sys/hibernate.h>
+
+int			ahci_hibernate_io(dev_t dev, daddr_t blkno,
+			    vaddr_t addr, size_t size, int wr, void *page);
+#endif
 
 struct cfattach ahci_pci_ca = {
 	sizeof(struct ahci_softc),
@@ -630,6 +613,7 @@ int			ahci_pwait_eq(struct ahci_port *, bus_size_t,
 			    u_int32_t, u_int32_t, int);
 void			ahci_flush_tfd(struct ahci_port *ap);
 u_int32_t		ahci_active_mask(struct ahci_port *);
+int			ahci_port_detect_pmp(struct ahci_port *);
 void			ahci_pmp_probe_timeout(void *);
 
 /* pmp operations */
@@ -730,7 +714,7 @@ ahci_ati_sb600_attach(struct ahci_softc *sc, struct pci_attach_args *pa)
 {
 	ahci_ati_sb_idetoahci(sc, pa);
 
-	sc->sc_flags |= AHCI_F_IGN_FR | AHCI_F_IPMS_PROBE;
+	sc->sc_flags |= AHCI_F_IPMS_PROBE;
 
 	return (0);
 }
@@ -754,14 +738,6 @@ int
 ahci_intel_attach(struct ahci_softc *sc, struct pci_attach_args *pa)
 {
 	sc->sc_flags |= AHCI_F_NO_PMP;
-	return (0);
-}
-
-int
-ahci_nvidia_mcp_attach(struct ahci_softc *sc, struct pci_attach_args *pa)
-{
-	sc->sc_flags |= AHCI_F_IGN_FR;
-	
 	return (0);
 }
 
@@ -1551,12 +1527,6 @@ ahci_port_start(struct ahci_port *ap, int fre_only)
 	}
 #endif
 
-	if (!(ap->ap_sc->sc_flags & AHCI_F_IGN_FR)) {
-		/* Wait for FR to come on */
-		if (ahci_pwait_set(ap, AHCI_PREG_CMD, AHCI_PREG_CMD_FR, 1))
-			return (2);
-	}
-
 	/* Wait for CR to come on */
 	if (!fre_only &&
 	    ahci_pwait_set(ap, AHCI_PREG_CMD, AHCI_PREG_CMD_CR, 1))
@@ -1759,7 +1729,7 @@ ahci_pmp_port_softreset(struct ahci_port *ap, int pmp_port)
 
 	s = splbio();
 	/* ignore spurious IFS errors while resetting */
-	printf("%s: now ignoring IFS\n", PORTNAME(ap));
+	DPRINTF(AHCI_D_VERBOSE, "%s: now ignoring IFS\n", PORTNAME(ap));
 	ap->ap_pmp_ignore_ifs = 1;
 
 	count = 2;
@@ -1850,7 +1820,7 @@ ahci_pmp_port_softreset(struct ahci_port *ap, int pmp_port)
 	ahci_pwrite(ap, AHCI_PREG_SERR, -1);
 	ahci_pwrite(ap, AHCI_PREG_IS, AHCI_PREG_IS_IFS);
 	ap->ap_pmp_ignore_ifs = 0;
-	printf("%s: no longer ignoring IFS\n", PORTNAME(ap));
+	DPRINTF(AHCI_D_VERBOSE, "%s: no longer ignoring IFS\n", PORTNAME(ap));
 	splx(s);
 
 	return (rc);
@@ -1863,7 +1833,8 @@ ahci_pmp_port_probe(struct ahci_port *ap, int pmp_port)
 	
 	ap->ap_state = AP_S_PMP_PORT_PROBE;
 
-	printf("%s.%d: probing pmp port\n", PORTNAME(ap), pmp_port);
+	DPRINTF(AHCI_D_VERBOSE, "%s.%d: probing pmp port\n", PORTNAME(ap),
+	    pmp_port);
 	if (ahci_pmp_port_portreset(ap, pmp_port)) {
 		printf("%s.%d: unable to probe PMP port; portreset failed\n",
 		    PORTNAME(ap), pmp_port);
@@ -1879,8 +1850,8 @@ ahci_pmp_port_probe(struct ahci_port *ap, int pmp_port)
 	}
 
 	sig = ahci_port_signature(ap);
-	printf("%s.%d: port signature returned %d\n", PORTNAME(ap), pmp_port,
-	    sig);
+	DPRINTF(AHCI_D_VERBOSE, "%s.%d: port signature returned %d\n",
+	    PORTNAME(ap), pmp_port, sig);
 	ap->ap_state = AP_S_NORMAL;
 	return (sig);
 }
@@ -2047,7 +2018,8 @@ ahci_pmp_port_portreset(struct ahci_port *ap, int pmp_port)
 	}
 
 	/* device detected */
-	printf("%s.%d: device detected\n", PORTNAME(ap), pmp_port);
+	DPRINTF(AHCI_D_VERBOSE, "%s.%d: device detected\n", PORTNAME(ap),
+	    pmp_port);
 
 	/* clean up a bit */
 	delay(100000);
@@ -2066,10 +2038,7 @@ int
 ahci_port_portreset(struct ahci_port *ap, int pmp)
 {
 	u_int32_t			cmd, r;
-	int				rc, count, pmp_rc, s;
-	struct ahci_cmd_hdr		*cmd_slot;
-	struct ahci_ccb			*ccb = NULL;
-	u_int8_t			*fis = NULL;
+	int				rc, s;
 
 	s = splbio();
 	DPRINTF(AHCI_D_VERBOSE, "%s: port reset\n", PORTNAME(ap));
@@ -2123,12 +2092,35 @@ ahci_port_portreset(struct ahci_port *ap, int pmp)
 		}
 	}
 
-	if (pmp == 0 ||
-	    (ap->ap_sc->sc_flags & AHCI_F_NO_PMP) ||
-	    !ISSET(ahci_read(ap->ap_sc, AHCI_REG_CAP), AHCI_REG_CAP_SPM)) {
-		goto err;
+	if (pmp != 0) {
+		if (ahci_port_detect_pmp(ap) != 0) {
+			rc = EBUSY;
+		}
 	}
 
+err:
+	/* Restore preserved port state */
+	ahci_pwrite(ap, AHCI_PREG_CMD, cmd);
+	splx(s);
+
+	return (rc);
+}
+
+int
+ahci_port_detect_pmp(struct ahci_port *ap)
+{
+	int				 count, pmp_rc, rc;
+	u_int32_t			 r, cmd;
+	struct ahci_cmd_hdr		*cmd_slot;
+	struct ahci_ccb			*ccb = NULL;
+	u_int8_t			*fis = NULL;
+
+	if ((ap->ap_sc->sc_flags & AHCI_F_NO_PMP) ||
+	    !ISSET(ahci_read(ap->ap_sc, AHCI_REG_CAP), AHCI_REG_CAP_SPM)) {
+		return 0;
+	}
+
+	rc = 0;
 	pmp_rc = 0;
 	count = 2;
 	do {
@@ -2169,7 +2161,7 @@ ahci_port_portreset(struct ahci_port *ap, int pmp)
 		 */
 		/* Restart port */
 		if (ahci_port_start(ap, 0)) {
-			rc = 1;
+			rc = EBUSY;
 			printf("%s: failed to start port, cannot probe PMP\n",
 			    PORTNAME(ap));
 			break;
@@ -2315,11 +2307,6 @@ ahci_port_portreset(struct ahci_port *ap, int pmp)
 
 		ahci_port_portreset(ap, 0);
 	}
-
-err:
-	/* Restore preserved port state */
-	ahci_pwrite(ap, AHCI_PREG_CMD, cmd);
-	splx(s);
 
 	return (rc);
 }
@@ -3453,9 +3440,8 @@ ahci_ata_cmd(struct ata_xfer *xa)
 	if (xa->flags & ATA_F_POLL)
 		ahci_poll(ccb, xa->timeout, ahci_ata_cmd_timeout);
 	else {
-		timeout_add_msec(&xa->stimeout, xa->timeout);
-
 		s = splbio();
+		timeout_add_msec(&xa->stimeout, xa->timeout);
 		ahci_start(ccb);
 		splx(s);
 	}
@@ -3727,3 +3713,12 @@ ahci_pmp_identify(struct ahci_port *ap, int *ret_nports)
 	*ret_nports = nports;
 	return (0);
 }
+
+#ifdef HIBERNATE
+int
+ahci_hibernate_io(dev_t dev, daddr_t blkno, vaddr_t addr, size_t size,
+    int op, void *page)
+{
+	return (EIO);
+}
+#endif /* HIBERNATE */

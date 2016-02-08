@@ -1,4 +1,4 @@
-/*	$OpenBSD: amsg.h,v 1.2 2011/04/28 06:19:57 ratchov Exp $	*/
+/*	$OpenBSD: amsg.h,v 1.4 2011/11/15 08:05:22 ratchov Exp $	*/
 /*
  * Copyright (c) 2008 Alexandre Ratchov <alex@caoua.org>
  *
@@ -24,8 +24,6 @@
  */
 #define AUCAT_PATH		"aucat"
 #define AUCAT_PORT		11025
-#define MIDICAT_PATH		"midicat"
-#define MIDICAT_PORT		11041
 #define DEFAULT_OPT		"default"
 
 /*
@@ -84,8 +82,10 @@ struct amsg {
 			uint16_t mode;		/* bitmap of MODE_XXX */
 #define AMSG_VERSION	5
 			uint8_t version;	/* protocol version */
-			uint8_t reserved1[5];	/* for future use */
-			char opt[12];		/* profile name */
+			uint8_t devnum;		/* device number */
+			uint32_t _reserved[1];	/* for future use */
+#define AMSG_OPTMAX	12
+			char opt[AMSG_OPTMAX];	/* profile name */
 			char who[12];		/* hint for leases */
 		} hello;
 		struct amsg_auth {

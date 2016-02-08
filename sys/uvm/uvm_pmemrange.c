@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_pmemrange.c,v 1.32 2011/07/08 18:25:56 ariane Exp $	*/
+/*	$OpenBSD: uvm_pmemrange.c,v 1.34 2012/01/05 17:49:45 ariane Exp $	*/
 
 /*
  * Copyright (c) 2009, 2010 Ariane van der Steldt <ariane@stack.nl>
@@ -673,7 +673,7 @@ uvm_pmr_extract_range(struct uvm_pmemrange *pmr, struct vm_page *pg,
 
 	/* Add selected pages to result. */
 	for (pg_i = pg + before_sz; pg_i != after; pg_i++) {
-		KDASSERT(pg_i->pg_flags & PQ_FREE);
+		KASSERT(pg_i->pg_flags & PQ_FREE);
 		pg_i->fpgsz = 0;
 		TAILQ_INSERT_TAIL(result, pg_i, pageq);
 	}
@@ -910,14 +910,14 @@ drain_found:
 
 			fstart = PMR_ALIGN(fstart, align);
 			fend = atop(VM_PAGE_TO_PHYS(found)) + found->fpgsz;
-			if (fstart >= fend)
-				continue;
+			if (end != 0)
+				fend = MIN(end, fend);
 			if (boundary != 0) {
 				fend =
 				    MIN(fend, PMR_ALIGN(fstart + 1, boundary));
 			}
-			if (end != 0)
-				fend = MIN(end, fend);
+			if (fstart >= fend)
+				continue;
 			if (fend - fstart > count - fcount)
 				fend = fstart + (count - fcount);
 
@@ -1109,6 +1109,7 @@ uvm_pmr_freepages(struct vm_page *pg, psize_t count)
 {
 	struct uvm_pmemrange *pmr;
 	psize_t i, pmr_count;
+	struct vm_page *firstpg = pg;
 
 	for (i = 0; i < count; i++) {
 		KASSERT(atop(VM_PAGE_TO_PHYS(&pg[i])) ==
@@ -1127,21 +1128,20 @@ uvm_pmr_freepages(struct vm_page *pg, psize_t count)
 
 	uvm_lock_fpageq();
 
-	while (count > 0) {
+	for (i = count; i > 0; i -= pmr_count) {
 		pmr = uvm_pmemrange_find(atop(VM_PAGE_TO_PHYS(pg)));
 		KASSERT(pmr != NULL);
 
-		pmr_count = MIN(count, pmr->high - atop(VM_PAGE_TO_PHYS(pg)));
+		pmr_count = MIN(i, pmr->high - atop(VM_PAGE_TO_PHYS(pg)));
 		pg->fpgsz = pmr_count;
 		uvm_pmr_insert(pmr, pg, 0);
 
 		uvmexp.free += pmr_count;
-		count -= pmr_count;
 		pg += pmr_count;
 	}
 	wakeup(&uvmexp.free);
 
-	uvm_wakeup_pla(VM_PAGE_TO_PHYS(pg), ptoa(count));
+	uvm_wakeup_pla(VM_PAGE_TO_PHYS(firstpg), ptoa(count));
 
 	uvm_unlock_fpageq();
 }

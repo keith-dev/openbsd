@@ -1,4 +1,4 @@
-/*	$OpenBSD: print.c,v 1.48 2011/04/10 03:20:58 guenther Exp $	*/
+/*	$OpenBSD: print.c,v 1.52 2011/12/29 17:13:55 guenther Exp $	*/
 /*	$NetBSD: print.c,v 1.27 1995/09/29 21:58:12 cgd Exp $	*/
 
 /*-
@@ -76,6 +76,8 @@ printheader(void)
 	VAR *v;
 	struct varent *vent;
 
+	if (!needheader)
+		return;
 	for (vent = vhead; vent; vent = vent->next) {
 		v = vent->var;
 		if (v->flag & LJUST) {
@@ -178,6 +180,21 @@ ucomm(const struct kinfo_proc *kp, VARENT *ve)
 }
 
 void
+curwd(const struct kinfo_proc *kp, VARENT *ve)
+{
+	VAR *v;
+	int name[] = { CTL_KERN, KERN_PROC_CWD, kp->p_pid };
+	char path[MAXPATHLEN];
+	size_t pathlen = sizeof path;
+
+	if (!kvm_sysctl_only || sysctl(name, 3, path, &pathlen, NULL, 0) != 0)
+		*path = '\0';
+
+	v = ve->var;
+	(void)printf("%-*s", v->width, path);
+}
+
+void
 logname(const struct kinfo_proc *kp, VARENT *ve)
 {
 	VAR *v;
@@ -197,7 +214,6 @@ logname(const struct kinfo_proc *kp, VARENT *ve)
 void
 state(const struct kinfo_proc *kp, VARENT *ve)
 {
-	extern int ncpu;
 	int flag;
 	char *cp, state = '\0';
 	VAR *v;
@@ -245,7 +261,7 @@ state(const struct kinfo_proc *kp, VARENT *ve)
 		*cp++ = 'x';
 	if (flag & P_WEXIT && kp->p_stat != SZOMB)
 		*cp++ = 'E';
-	if (flag & P_PPWAIT)
+	if (flag & PS_ISPWAIT)
 		*cp++ = 'V';
 	if (flag & P_SYSTEM)
 		*cp++ = 'K';
@@ -258,7 +274,7 @@ state(const struct kinfo_proc *kp, VARENT *ve)
 		*cp++ = '+';
 	*cp = '\0';
 
-	if (state == 'R' && ncpu && kp->p_cpuid != KI_NOCPU) {
+	if (state == 'R' && kp->p_cpuid != KI_NOCPU) {
 		char pbuf[16];
 
 		snprintf(pbuf, sizeof pbuf, "/%llu", kp->p_cpuid);

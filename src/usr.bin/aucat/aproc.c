@@ -1,4 +1,4 @@
-/*	$OpenBSD: aproc.c,v 1.66 2011/05/26 07:26:36 ratchov Exp $	*/
+/*	$OpenBSD: aproc.c,v 1.69 2012/01/10 08:10:21 ratchov Exp $	*/
 /*
  * Copyright (c) 2008 Alexandre Ratchov <alex@caoua.org>
  *
@@ -279,6 +279,8 @@ aproc_depend(struct aproc *p, struct aproc *dep)
 
 	if (p == dep)
 		return 1;
+	if (p == NULL)
+		return 0;
 	LIST_FOREACH(i, &p->ins, ient) {
 		if (i->wproc && aproc_depend(i->wproc, dep))
 			return 1;
@@ -1000,8 +1002,6 @@ mix_opos(struct aproc *p, struct abuf *obuf, int delta)
 		dbg_puts("\n");
 	}
 #endif
-	if (APROC_OK(p->u.mix.ctl))
-		ctl_ontick(p->u.mix.ctl, delta);
 	aproc_opos(p, obuf, delta);
 	if (APROC_OK(p->u.mix.mon))
 		p->u.mix.mon->ops->ipos(p->u.mix.mon, NULL, delta);
@@ -1030,7 +1030,6 @@ mix_new(char *name, int maxlat, unsigned round, unsigned autovol)
 	p->u.mix.lat = 0;
 	p->u.mix.round = round;
 	p->u.mix.maxlat = maxlat;
-	p->u.mix.ctl = NULL;
 	p->u.mix.mon = NULL;
 	p->u.mix.autovol = autovol;
 	return p;
@@ -1046,34 +1045,20 @@ mix_setmaster(struct aproc *p)
 	struct abuf *i, *j;
 	int weight;
 
-	if (!p->u.mix.autovol)
-		return;
-
-	/*
-	 * count the number of inputs. If a set of inputs
-	 * uses channels that have no intersection, they are 
-	 * counted only once because they don't need to 
-	 * share their volume
-	 *
-	 * XXX: this is wrong, this is not optimal if we have two
-	 *      buckets of N and N' clients, in which case we should
-	 *	get 1/N and 1/N' respectively
-	 */
-	n = 0;
 	LIST_FOREACH(i, &p->ins, ient) {
-		j = LIST_NEXT(i, ient);
-		for (;;) {
-			if (j == NULL) {
-				n++;
-				break;
+		weight = ADATA_UNIT;
+		if (p->u.mix.autovol) {
+			/*
+			 * count the number of inputs that have
+			 * overlapping channel sets
+			 */
+			n = 0;
+			LIST_FOREACH(j, &p->ins, ient) {
+				if (i->cmin <= j->cmax && i->cmax >= j->cmin)
+					n++;
 			}
-			if (i->cmin > j->cmax || i->cmax < j->cmin)
-				break;
-			j = LIST_NEXT(j, ient);
+			weight /= n;
 		}
-	}
-	LIST_FOREACH(i, &p->ins, ient) {
-		weight = ADATA_UNIT / n;
 		if (weight > i->r.mix.maxweight)
 			weight = i->r.mix.maxweight;
 		i->r.mix.weight = weight;
@@ -1423,8 +1408,6 @@ sub_ipos(struct aproc *p, struct abuf *ibuf, int delta)
 		dbg_puts("\n");
 	}
 #endif
-	if (APROC_OK(p->u.sub.ctl))
-		ctl_ontick(p->u.sub.ctl, delta);
 	aproc_ipos(p, ibuf, delta);
 }
 
@@ -1451,7 +1434,6 @@ sub_new(char *name, int maxlat, unsigned round)
 	p->u.sub.lat = 0;
 	p->u.sub.round = round;
 	p->u.sub.maxlat = maxlat;
-	p->u.sub.ctl = NULL;
 	return p;
 }
 

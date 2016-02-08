@@ -1,4 +1,4 @@
-/*	$OpenBSD: rfork_thread.S,v 1.2 2005/12/25 00:21:59 miod Exp $	*/
+/*	$OpenBSD: rfork_thread.S,v 1.4 2012/01/17 02:34:18 guenther Exp $	*/
 
 /*
  * Copyright (c) 2005, Miodrag Vallat
@@ -28,12 +28,12 @@
 #include  "../../../libc/arch/alpha/SYS.h"
 
 /*
- * int rfork_thread(int flags, void *stack, void (*func)(void *), void *arg);
+ * int __tfork_thread(const struct __tfork *param, void *stack, void (*func)(void *), void *arg);
  */
-LEAF(rfork_thread,0)
+LEAF(__tfork_thread,0)
 	/* a0 = flags, a1 = stack, a2 = func, a3 = arg */
 	mov	a3, a5
-	CALLSYS_ERROR(rfork)
+	CALLSYS_ERROR(__tfork)
 
 	beq	v0, 1f
 
@@ -52,6 +52,6 @@ LEAF(rfork_thread,0)
 	jsr	ra, (pv)
 
 	mov	zero, a0
-	CALLSYS_NOERROR(threxit)
+	CALLSYS_NOERROR(__threxit)
 	
-END(rfork_thread)
+END(__tfork_thread)

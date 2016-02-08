@@ -2687,6 +2687,10 @@ find_barrier (num_mova, mova, from)
 
   si_limit = 1018;
   hi_limit = 510;
+#if defined(OPENBSD_NATIVE) || defined(OPENBSD_CROSS)
+  si_limit -= flag_pic ? 16 : 8;
+  hi_limit -= flag_pic ? 16 : 8;
+#endif
 
   while (from && count_si < si_limit && count_hi < hi_limit)
     {

@@ -1,4 +1,4 @@
-/* $OpenBSD: window.c,v 1.66 2011/06/05 10:53:05 nicm Exp $ */
+/* $OpenBSD: window.c,v 1.72 2012/02/02 00:10:12 nicm Exp $ */
 
 /*
  * Copyright (c) 2007 Nicholas Marriott <nicm@users.sourceforge.net>
@@ -58,7 +58,8 @@ struct windows windows;
 
 /* Global panes tree. */
 struct window_pane_tree all_window_panes;
-u_int	next_window_pane;
+u_int	next_window_pane_id;
+u_int	next_window_id;
 
 void	window_pane_read_callback(struct bufferevent *, void *);
 void	window_pane_error_callback(struct bufferevent *, short, void *);
@@ -102,6 +103,18 @@ winlink_find_by_index(struct winlinks *wwl, int idx)
 
 	wl.idx = idx;
 	return (RB_FIND(winlinks, wwl, &wl));
+}
+
+struct winlink *
+winlink_find_by_window_id(struct winlinks *wwl, u_int id)
+{
+	struct winlink *wl;
+
+	RB_FOREACH(wl, winlinks, wwl) {
+		if (wl->window->id == id)
+			return (wl);
+	}
+	return NULL;
 }
 
 int
@@ -249,12 +262,27 @@ window_index(struct window *s, u_int *i)
 }
 
 struct window *
+window_find_by_id(u_int id)
+{
+	struct window	*w;
+	u_int		 i;
+
+	for (i = 0; i < ARRAY_LENGTH(&windows); i++) {
+		w = ARRAY_ITEM(&windows, i);
+		if (w->id == id)
+			return (w);
+	}
+	return NULL;
+}
+
+struct window *
 window_create1(u_int sx, u_int sy)
 {
 	struct window	*w;
 	u_int		 i;
 
 	w = xcalloc(1, sizeof *w);
+	w->id = next_window_id++;
 	w->name = NULL;
 	w->flags = 0;
 
@@ -331,6 +359,14 @@ window_destroy(struct window *w)
 	if (w->name != NULL)
 		xfree(w->name);
 	xfree(w);
+}
+
+void
+window_set_name(struct window *w, const char *new_name)
+{
+	if (w->name != NULL)
+		xfree(w->name);
+	w->name = xstrdup(new_name);
 }
 
 void
@@ -454,7 +490,7 @@ window_pane_at_index(struct window *w, u_int idx)
 	struct window_pane	*wp;
 	u_int			 n;
 
-	n = 0;
+	n = options_get_number(&w->options, "pane-base-index");
 	TAILQ_FOREACH(wp, &w->panes, entry) {
 		if (n == idx)
 			return (wp);
@@ -486,19 +522,21 @@ window_pane_previous_by_number(struct window *w, struct window_pane *wp,
 	return (wp);
 }
 
-u_int
-window_pane_index(struct window *w, struct window_pane *wp)
+int
+window_pane_index(struct window_pane *wp, u_int *i)
 {
 	struct window_pane	*wq;
-	u_int			 n;
+	struct window		*w = wp->window;
 
-	n = 0;
+	*i = options_get_number(&w->options, "pane-base-index");
 	TAILQ_FOREACH(wq, &w->panes, entry) {
-		if (wp == wq)
-			break;
-		n++;
+		if (wp == wq) {
+			return (0);
+		}
+		(*i)++;
 	}
-	return (n);
+
+	return (-1);
 }
 
 u_int
@@ -569,7 +607,7 @@ window_pane_create(struct window *w, u_int sx, u_int sy, u_int hlimit)
 	wp = xcalloc(1, sizeof *wp);
 	wp->window = w;
 
-	wp->id = next_window_pane++;
+	wp->id = next_window_pane_id++;
 	RB_INSERT(window_pane_tree, &all_window_panes, wp);
 
 	wp->cmd = NULL;
@@ -609,8 +647,8 @@ window_pane_destroy(struct window_pane *wp)
 	window_pane_reset_mode(wp);
 
 	if (wp->fd != -1) {
-		close(wp->fd);
 		bufferevent_free(wp->event);
+		close(wp->fd);
 	}
 
 	input_free(wp);
@@ -620,8 +658,8 @@ window_pane_destroy(struct window_pane *wp)
 		grid_destroy(wp->saved_grid);
 
 	if (wp->pipe_fd != -1) {
-		close(wp->pipe_fd);
 		bufferevent_free(wp->pipe_event);
+		close(wp->pipe_fd);
 	}
 
 	RB_REMOVE(window_pane_tree, &all_window_panes, wp);
@@ -645,8 +683,8 @@ window_pane_spawn(struct window_pane *wp, const char *cmd, const char *shell,
 	struct termios	 tio2;
 
 	if (wp->fd != -1) {
-		close(wp->fd);
 		bufferevent_free(wp->event);
+		close(wp->fd);
 	}
 	if (cmd != NULL) {
 		if (wp->cmd != NULL)
@@ -697,7 +735,7 @@ window_pane_spawn(struct window_pane *wp, const char *cmd, const char *shell,
 		if (*wp->cmd != '\0') {
 			/* Set SHELL but only if it is currently not useful. */
 			shell = getenv("SHELL");
-			if (shell == NULL || *shell == '\0' || areshell(shell))
+			if (checkshell(shell))
 				setenv("SHELL", wp->shell, 1);
 
 			execl(_PATH_BSHELL, "sh", "-c", wp->cmd, (char *) NULL);

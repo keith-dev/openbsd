@@ -1,4 +1,4 @@
-/*	$OpenBSD: in6.c,v 1.93 2011/08/08 13:04:35 bluhm Exp $	*/
+/*	$OpenBSD: in6.c,v 1.96 2012/01/17 02:07:32 stsp Exp $	*/
 /*	$KAME: in6.c,v 1.372 2004/06/14 08:14:21 itojun Exp $	*/
 
 /*
@@ -171,7 +171,8 @@ in6_ifloop_request(int cmd, struct ifaddr *ifa)
 	if (cmd != RTM_DELETE)
 		info.rti_info[RTAX_GATEWAY] = ifa->ifa_addr;
 	info.rti_info[RTAX_NETMASK] = (struct sockaddr *)&all1_sa;
-	e = rtrequest1(cmd, &info, RTP_CONNECTED, &nrt, 0);
+	e = rtrequest1(cmd, &info, RTP_CONNECTED, &nrt,
+	    ifa->ifa_ifp->if_rdomain);
 	if (e != 0) {
 		log(LOG_ERR, "in6_ifloop_request: "
 		    "%s operation failed for %s (errno=%d)\n",
@@ -227,7 +228,7 @@ in6_ifaddloop(struct ifaddr *ifa)
 	struct rtentry *rt;
 
 	/* If there is no loopback entry, allocate one. */
-	rt = rtalloc1(ifa->ifa_addr, 0, 0);
+	rt = rtalloc1(ifa->ifa_addr, 0, ifa->ifa_ifp->if_rdomain);
 	if (rt == NULL || (rt->rt_flags & RTF_HOST) == 0 ||
 	    (rt->rt_ifp->if_flags & IFF_LOOPBACK) == 0)
 		in6_ifloop_request(RTM_ADD, ifa);
@@ -1084,7 +1085,7 @@ in6_update_ifa(struct ifnet *ifp, struct in6_aliasreq *ifra,
 		 * actually do not need the routes, since they usually specify
 		 * the outgoing interface.
 		 */
-		rt = rtalloc1((struct sockaddr *)&mltaddr, 0, 0);
+		rt = rtalloc1((struct sockaddr *)&mltaddr, 0, ifp->if_rdomain);
 		if (rt) {
 			/*
 			 * 32bit came from "mltmask"
@@ -1110,7 +1111,7 @@ in6_update_ifa(struct ifnet *ifp, struct in6_aliasreq *ifra,
 			/* XXX: we need RTF_CLONING to fake nd6_rtrequest */
 			info.rti_flags = RTF_UP | RTF_CLONING;
 			error = rtrequest1(RTM_ADD, &info, RTP_CONNECTED, NULL,
-			    0);
+			    ifp->if_rdomain);
 			if (error)
 				goto cleanup;
 		} else {
@@ -1156,7 +1157,7 @@ in6_update_ifa(struct ifnet *ifp, struct in6_aliasreq *ifra,
 		mltaddr.sin6_scope_id = 0;
 
 		/* XXX: again, do we really need the route? */
-		rt = rtalloc1((struct sockaddr *)&mltaddr, 0, 0);
+		rt = rtalloc1((struct sockaddr *)&mltaddr, 0, ifp->if_rdomain);
 		if (rt) {
 			/* 32bit came from "mltmask" */
 			if (memcmp(&mltaddr.sin6_addr,
@@ -1179,7 +1180,7 @@ in6_update_ifa(struct ifnet *ifp, struct in6_aliasreq *ifra,
 			    (struct sockaddr *)&ia->ia_addr;
 			info.rti_flags = RTF_UP | RTF_CLONING;
 			error = rtrequest1(RTM_ADD, &info, RTP_CONNECTED,
-			    NULL, 0);
+			    NULL, ifp->if_rdomain);
 			if (error)
 				goto cleanup;
 		} else {
@@ -1204,7 +1205,7 @@ in6_update_ifa(struct ifnet *ifp, struct in6_aliasreq *ifra,
 	if (hostIsNew && in6if_do_dad(ifp) &&
 	    (ifra->ifra_flags & IN6_IFF_NODAD) == 0)
 	{
-		nd6_dad_start((struct ifaddr *)ia, NULL);
+		nd6_dad_start(&ia->ia_ifa, NULL);
 	}
 
 	return (error);
@@ -1405,7 +1406,7 @@ in6_lifaddr_ioctl(struct socket *so, u_long cmd, caddr_t data,
 			 * address.  hostid points to the first link-local
 			 * address attached to the interface.
 			 */
-			ifa = (struct ifaddr *)in6ifa_ifpforlinklocal(ifp, 0);
+			ifa = &in6ifa_ifpforlinklocal(ifp, 0)->ia_ifa;
 			if (!ifa)
 				return EADDRNOTAVAIL;
 			hostid = IFA_IN6(ifa);
@@ -1937,7 +1938,7 @@ in6_ifpprefix(const struct ifnet *ifp, const struct in6_addr *addr)
 {
 	struct sockaddr_in6 dst;
 	struct rtentry *rt;
-	u_int tableid = 0;  /* XXX */
+	u_int tableid = ifp->if_rdomain;
 
 	bzero(&dst, sizeof(dst));
 	dst.sin6_len = sizeof(struct sockaddr_in6);
@@ -2179,7 +2180,7 @@ in6_prefixlen2mask(struct in6_addr *maskp, int len)
  * return the best address out of the same scope
  */
 struct in6_ifaddr *
-in6_ifawithscope(struct ifnet *oifp, struct in6_addr *dst)
+in6_ifawithscope(struct ifnet *oifp, struct in6_addr *dst, u_int rdomain)
 {
 	int dst_scope =	in6_addrscope(dst), src_scope, best_scope = 0;
 	int blen = -1;
@@ -2199,6 +2200,9 @@ in6_ifawithscope(struct ifnet *oifp, struct in6_addr *dst)
 	 */
 	for (ifp = TAILQ_FIRST(&ifnet); ifp; ifp = TAILQ_NEXT(ifp, if_list))
 	{
+		if (ifp->if_rdomain != rdomain)
+			continue;
+
 		/*
 		 * We can never take an address that breaks the scope zone
 		 * of the destination.
@@ -2306,22 +2310,6 @@ in6_ifawithscope(struct ifnet *oifp, struct in6_addr *dst)
 			     IN6_IFF_DEPRECATED) == 0)
 				goto replace;
 
-			if (oifp == ifp) {
-				/* Do not replace temporary autoconf addresses
-				 * with non-temporary addresses. */
-				if ((ifa_best->ia6_flags & IN6_IFF_PRIVACY) &&
-			            !(((struct in6_ifaddr *)ifa)->ia6_flags &
-				    IN6_IFF_PRIVACY))
-					continue;
-
-				/* Replace non-temporary autoconf addresses
-				 * with temporary addresses. */
-				if (!(ifa_best->ia6_flags & IN6_IFF_PRIVACY) &&
-			            (((struct in6_ifaddr *)ifa)->ia6_flags &
-				    IN6_IFF_PRIVACY))
-					goto replace;
-			}
-
 			/*
 			 * At this point, we have two cases:
 			 * 1. we are looking at a non-deprecated address,
@@ -2396,7 +2384,25 @@ in6_ifawithscope(struct ifnet *oifp, struct in6_addr *dst)
 			 * At last both dscopecmp and bscopecmp must be 0.
 			 * We need address matching against dst for
 			 * tiebreaking.
+			 * Privacy addresses are preferred over public
+			 * addresses (RFC3484 requires a config knob for
+			 * this which we don't provide).
 			 */
+			if (oifp == ifp) {
+				/* Do not replace temporary autoconf addresses
+				 * with non-temporary addresses. */
+				if ((ifa_best->ia6_flags & IN6_IFF_PRIVACY) &&
+			            !(((struct in6_ifaddr *)ifa)->ia6_flags &
+				    IN6_IFF_PRIVACY))
+					continue;
+
+				/* Replace non-temporary autoconf addresses
+				 * with temporary addresses. */
+				if (!(ifa_best->ia6_flags & IN6_IFF_PRIVACY) &&
+			            (((struct in6_ifaddr *)ifa)->ia6_flags &
+				    IN6_IFF_PRIVACY))
+					goto replace;
+			}
 			tlen = in6_matchlen(IFA_IN6(ifa), dst);
 			matchcmp = tlen - blen;
 			if (matchcmp > 0) /* (8) */

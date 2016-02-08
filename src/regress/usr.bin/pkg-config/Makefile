@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.22 2011/07/27 12:30:58 jasper Exp $
+#	$OpenBSD: Makefile,v 1.27 2011/11/17 11:38:13 jasper Exp $
 
 REGRESS_TARGETS=cmp-vers1-1 \
 		cmp-vers1-2 \
@@ -41,17 +41,18 @@ REGRESS_TARGETS=cmp-vers1-1 \
 		static-libs2 \
 		static-libs3 \
 		static-libs4 \
-		variable-get \
+		variable-get-1 \
 		variable-set \
-		variable-requires \
 		missing-req-1 \
 		missing-req-2 \
 		missing-req-3 \
 		whitespace-cflags \
 		whitespace-libs \
+		whitespace-linebreak \
 		whitespace-name
 
 PKG_CONFIG=	pkg-config
+#PKG_CONFIG=	/usr/obj/ports/pkgconfig-0.26/fake-i386/usr/local/bin/pkg-config
 WANT=		${.OBJDIR}/$@.want
 GOT=		${.OBJDIR}/$@.got
 
@@ -322,7 +323,7 @@ static-cflags1:
 
 static-cflags2:
 	# Test grabbing Cflags (with Requires.private)
-	@echo "-I/usr/local/include -I/usr/local/include/foo" > ${WANT}
+	@echo "-I/usr/local/include/foo -I/usr/local/include" > ${WANT}
 	@PKG_CONFIG_PATH=${.CURDIR}/pcdir/ ${PKG_CONFIG} --print-errors \
 		--errors-to-stdout --cflags --static static2 > ${GOT}
 	@diff -u ${WANT} ${GOT}
@@ -336,27 +337,27 @@ static-libs1:
 
 static-libs2:
 	# Test grabbing Libs.private from Requires in order
-	@echo "-L/usr/local/lib -lutil -lz -lc -lm -ll" > ${WANT}
+	@echo "-L/usr/local/lib -lc -lm -ll -lutil -lz" > ${WANT}
 	@PKG_CONFIG_PATH=${.CURDIR}/pcdir/ ${PKG_CONFIG} --print-errors \
 		--errors-to-stdout --libs --static static2 > ${GOT}
 	@diff -u ${WANT} ${GOT}
 
 static-libs3:
 	# Test grabbing Libs.private from Requires.private in order
-	@echo "-L/usr/local/lib -L/tmp/lib -L/tmp/lib/foo -lutil -lz -lc -lm -ll -lbaz\ quux" > ${WANT}
+	@echo "-L/tmp/lib -L/tmp/lib/foo -L/usr/local/lib -lbaz\ quux -lc -lm -ll -lutil -lz" > ${WANT}
 	@PKG_CONFIG_PATH=${.CURDIR}/pcdir/ ${PKG_CONFIG} --print-errors \
 		--errors-to-stdout --libs --static static3 > ${GOT}
 	@diff -u ${WANT} ${GOT}
 
 static-libs4:
 	# Test Requires.private
-	@echo "-L/requires-test/lib -L/private-dep/lib -L/public-dep/lib -lrequires-test -lprivate-dep -lpublic-dep" > ${WANT}
+	@echo "-L/public-dep/lib -L/private-dep/lib -L/requires-test/lib -lpublic-dep -lprivate-dep -lrequires-test" > ${WANT}
 	@PKG_CONFIG_PATH=${.CURDIR}/pcdir/ ${PKG_CONFIG} --print-errors \
 		--errors-to-stdout --libs --static requires-test > ${GOT}
 	@diff -u ${WANT} ${GOT}
 
 # Misc. tests
-variable-get:
+variable-get-1:
 	# Test --variable
 	@echo "/tmp" > ${WANT}
 	@PKG_CONFIG_PATH=${.CURDIR}/pcdir/ ${PKG_CONFIG} --errors-to-stdout \
@@ -369,13 +370,6 @@ variable-set:
 	@PKG_CONFIG_PATH=${.CURDIR}/pcdir/ ${PKG_CONFIG} --errors-to-stdout \
 		--print-errors --define-variable=prefix=/usr/local2 \
 		--cflags sysroot > ${GOT}
-	@diff -u ${WANT} ${GOT}
-
-variable-requires:
-	# Test variable expansion in non-variable fields, to multiple values
-	@echo " -lalpha2" > ${WANT}
-	@PKG_CONFIG_PATH=${.CURDIR}/pcdir/ ${PKG_CONFIG} --errors-to-stdout \
-		--print-errors --libs requires-test3 > ${GOT}
 	@diff -u ${WANT} ${GOT}
 
 # This fails as we read and check Requires as well as Requires.private where
@@ -413,6 +407,13 @@ whitespace-libs:
 	@echo "-L/tmp/lib -L/tmp/lib/foo -lbaz\ quux" > ${WANT}
 	@PKG_CONFIG_PATH=${.CURDIR}/pcdir/ ${PKG_CONFIG} --libs \
 		--errors-to-stdout --print-errors whitespace > ${GOT}
+	@diff -u ${WANT} ${GOT}
+
+whitespace-linebreak:
+	# Test linebreak in Description field
+	@echo " -lc" > ${WANT}
+	@PKG_CONFIG_PATH=${.CURDIR}/pcdir/ ${PKG_CONFIG} --errors-to-stdout \
+		--print-errors --libs linebreak > ${GOT}
 	@diff -u ${WANT} ${GOT}
 
 whitespace-name:

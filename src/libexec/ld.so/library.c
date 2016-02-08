@@ -1,4 +1,4 @@
-/*	$OpenBSD: library.c,v 1.62 2011/05/10 04:50:35 otto Exp $ */
+/*	$OpenBSD: library.c,v 1.64 2012/01/09 17:01:22 ariane Exp $ */
 
 /*
  * Copyright (c) 2002 Dale Rahn
@@ -107,7 +107,7 @@ _dl_tryload_shlib(const char *libname, int type, int flags)
 	for (object = _dl_objects; object != NULL; object = object->next) {
 		if (object->dev == sb.st_dev &&
 		    object->inode == sb.st_ino) {
-			object->obj_flags |= flags & RTLD_GLOBAL;
+			object->obj_flags |= flags & DF_1_GLOBAL;
 			_dl_close(libfile);
 			if (_dl_loading_object == NULL)
 				_dl_loading_object = object;
@@ -181,17 +181,20 @@ _dl_tryload_shlib(const char *libname, int type, int flags)
 			Elf_Addr size = off + phdp->p_filesz;
 			void *res;
 
-			res = _dl_mmap(start, ROUND_PG(size),
-			    PFLAGS(phdp->p_flags),
-			    MAP_FIXED|MAP_PRIVATE, libfile,
-			    TRUNC_PG(phdp->p_offset));
+			if (size != 0) {
+				res = _dl_mmap(start, ROUND_PG(size),
+				    PFLAGS(phdp->p_flags),
+				    MAP_FIXED|MAP_PRIVATE, libfile,
+				    TRUNC_PG(phdp->p_offset));
+			} else
+				res = NULL;	/* silence gcc */
 			next_load = _dl_malloc(sizeof(struct load_list));
 			next_load->next = load_list;
 			load_list = next_load;
 			next_load->start = start;
 			next_load->size = size;
 			next_load->prot = PFLAGS(phdp->p_flags);
-			if (_dl_mmap_error(res)) {
+			if (size != 0 && _dl_mmap_error(res)) {
 				_dl_printf("%s: rtld mmap failed mapping %s.\n",
 				    _dl_progname, libname);
 				_dl_close(libfile);

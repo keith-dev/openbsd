@@ -1,4 +1,4 @@
-/* $OpenBSD: options-table.c,v 1.12 2011/07/30 18:01:26 nicm Exp $ */
+/* $OpenBSD: options-table.c,v 1.20 2012/01/29 09:37:02 nicm Exp $ */
 
 /*
  * Copyright (c) 2011 Nicholas Marriott <nicm@users.sourceforge.net>
@@ -47,6 +47,9 @@ const char *options_table_status_keys_list[] = {
 };
 const char *options_table_status_justify_list[] = {
 	"left", "centre", "right", NULL
+};
+const char *options_table_status_position_list[] = {
+	"top", "bottom", NULL
 };
 const char *options_table_bell_action_list[] = {
 	"none", "any", "current", NULL
@@ -194,6 +197,21 @@ const struct options_table_entry session_options_table[] = {
 	  .default_num = 3
 	},
 
+	{ .name = "message-command-attr",
+	  .type = OPTIONS_TABLE_ATTRIBUTES,
+	  .default_num = 0
+	},
+
+	{ .name = "message-command-bg",
+	  .type = OPTIONS_TABLE_COLOUR,
+	  .default_num = 0
+	},
+
+	{ .name = "message-command-fg",
+	  .type = OPTIONS_TABLE_COLOUR,
+	  .default_num = 3
+	},
+
 	{ .name = "message-fg",
 	  .type = OPTIONS_TABLE_COLOUR,
 	  .default_num = 0
@@ -247,8 +265,13 @@ const struct options_table_entry session_options_table[] = {
 	},
 
 	{ .name = "prefix",
-	  .type = OPTIONS_TABLE_KEYS,
-	  /* set in main() */
+	  .type = OPTIONS_TABLE_KEY,
+	  .default_num = '\002',
+	},
+
+	{ .name = "prefix2",
+	  .type = OPTIONS_TABLE_KEY,
+	  .default_num = KEYC_NONE,
 	},
 
 	{ .name = "repeat-time",
@@ -339,6 +362,12 @@ const struct options_table_entry session_options_table[] = {
 	  .default_num = 10
 	},
 
+	{ .name = "status-position",
+	  .type = OPTIONS_TABLE_CHOICE,
+	  .choices = options_table_status_position_list,
+	  .default_num = 1
+	},
+
 	{ .name = "status-right",
 	  .type = OPTIONS_TABLE_STRING,
 	  .default_str = "\"#22T\" %H:%M %d-%b-%y"
@@ -376,7 +405,7 @@ const struct options_table_entry session_options_table[] = {
 	  .default_str = "*88col*:colors=88,*256col*:colors=256"
 	                 ",xterm*:XT:Ms=\\E]52;%p1%s;%p2%s\\007"
 	                 ":Cc=\\E]12;%p1%s\\007:Cr=\\E]112\\007"
-			 ":Cs=\\E[%p1%d q:Csr=\\E[2 q"
+			 ":Cs=\\E[%p1%d q:Csr=\\E[2 q,screen*:XT"
 	},
 
 	{ .name = "update-environment",
@@ -406,6 +435,11 @@ const struct options_table_entry session_options_table[] = {
 	  .default_num = 0
 	},
 
+	{ .name = "word-separators",
+	  .type = OPTIONS_TABLE_STRING,
+	  .default_str = " -_@"
+	},
+
 	{ .name = NULL }
 };
 
@@ -414,6 +448,11 @@ const struct options_table_entry window_options_table[] = {
 	{ .name = "aggressive-resize",
 	  .type = OPTIONS_TABLE_FLAG,
 	  .default_num = 0
+	},
+
+	{ .name = "allow-rename",
+	  .type = OPTIONS_TABLE_FLAG,
+	  .default_num = 1
 	},
 
 	{ .name = "alternate-screen",
@@ -523,6 +562,13 @@ const struct options_table_entry window_options_table[] = {
 	  .default_num = 0
 	},
 
+	{ .name = "pane-base-index",
+	  .type = OPTIONS_TABLE_NUMBER,
+	  .minimum = 0,
+	  .maximum = USHRT_MAX,
+	  .default_num = 0
+	},
+
 	{ .name = "remain-on-exit",
 	  .type = OPTIONS_TABLE_FLAG,
 	  .default_num = 0
@@ -538,17 +584,47 @@ const struct options_table_entry window_options_table[] = {
 	  .default_num = 0 /* overridden in main() */
 	},
 
-	{ .name = "window-status-alert-attr",
+	{ .name = "window-status-bell-attr",
 	  .type = OPTIONS_TABLE_ATTRIBUTES,
 	  .default_num = GRID_ATTR_REVERSE
 	},
 
-	{ .name = "window-status-alert-bg",
+	{ .name = "window-status-bell-bg",
 	  .type = OPTIONS_TABLE_COLOUR,
 	  .default_num = 8
 	},
 
-	{ .name = "window-status-alert-fg",
+	{ .name = "window-status-bell-fg",
+	  .type = OPTIONS_TABLE_COLOUR,
+	  .default_num = 8
+	},
+
+	{ .name = "window-status-content-attr",
+	  .type = OPTIONS_TABLE_ATTRIBUTES,
+	  .default_num = GRID_ATTR_REVERSE
+	},
+
+	{ .name = "window-status-content-bg",
+	  .type = OPTIONS_TABLE_COLOUR,
+	  .default_num = 8
+	},
+
+	{ .name = "window-status-content-fg",
+	  .type = OPTIONS_TABLE_COLOUR,
+	  .default_num = 8
+	},
+
+	{ .name = "window-status-activity-attr",
+	  .type = OPTIONS_TABLE_ATTRIBUTES,
+	  .default_num = GRID_ATTR_REVERSE
+	},
+
+	{ .name = "window-status-activity-bg",
+	  .type = OPTIONS_TABLE_COLOUR,
+	  .default_num = 8
+	},
+
+	{ .name = "window-status-activity-fg",
 	  .type = OPTIONS_TABLE_COLOUR,
 	  .default_num = 8
 	},
@@ -593,11 +669,6 @@ const struct options_table_entry window_options_table[] = {
 	  .default_str = "#I:#W#F"
 	},
 
-	{ .name = "word-separators",
-	  .type = OPTIONS_TABLE_STRING,
-	  .default_str = " -_@"
-	},
-
 	{ .name = "xterm-keys",
 	  .type = OPTIONS_TABLE_FLAG,
 	  .default_num = 0
@@ -626,10 +697,8 @@ const char *
 options_table_print_entry(
     const struct options_table_entry *oe, struct options_entry *o)
 {
-	static char				 out[BUFSIZ];
-	const char				*s;
-	struct keylist				*keylist;
-	u_int					 i;
+	static char	 out[BUFSIZ];
+	const char	*s;
 
 	*out = '\0';
 	switch (oe->type) {
@@ -639,14 +708,8 @@ options_table_print_entry(
 	case OPTIONS_TABLE_NUMBER:
 		xsnprintf(out, sizeof out, "%lld", o->num);
 		break;
-	case OPTIONS_TABLE_KEYS:
-		keylist = o->data;
-		for (i = 0; i < ARRAY_LENGTH(keylist); i++) {
-			s = key_string_lookup_key(ARRAY_ITEM(keylist, i));
-			strlcat(out, s, sizeof out);
-			if (i != ARRAY_LENGTH(keylist) - 1)
-				strlcat(out, ",", sizeof out);
-		}
+	case OPTIONS_TABLE_KEY:
+		xsnprintf(out, sizeof out, "%s", key_string_lookup_key(o->num));
 		break;
 	case OPTIONS_TABLE_COLOUR:
 		s = colour_tostring(o->num);

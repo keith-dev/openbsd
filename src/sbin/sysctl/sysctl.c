@@ -1,4 +1,4 @@
-/*	$OpenBSD: sysctl.c,v 1.177 2011/07/08 18:30:17 yasuoka Exp $	*/
+/*	$OpenBSD: sysctl.c,v 1.182 2012/01/19 09:44:16 chl Exp $	*/
 /*	$NetBSD: sysctl.c,v 1.9 1995/09/30 07:12:50 thorpej Exp $	*/
 
 /*
@@ -192,6 +192,7 @@ int sysctl_inet6(char *, char **, int *, int, int *);
 #endif
 int sysctl_bpf(char *, char **, int *, int, int *);
 int sysctl_mpls(char *, char **, int *, int, int *);
+int sysctl_pipex(char *, char **, int *, int, int *);
 int sysctl_fs(char *, char **, int *, int, int *);
 static int sysctl_vfs(char *, char **, int[], int, int *);
 static int sysctl_vfsgen(char *, char **, int[], int, int *);
@@ -2184,7 +2185,6 @@ sysctl_mpls(char *string, char **bufpp, int mib[], int flags, int *typep)
 int
 sysctl_pipex(char *string, char **bufpp, int mib[], int flags, int *typep)
 {
-	struct list *lp;
 	int indx;
 
 	if (*bufpp == NULL) {
@@ -2466,6 +2466,12 @@ print_sensor(struct sensor *s)
 		case SENSOR_VOLTS_DC:
 			printf("%.2f VDC", s->value / 1000000.0);
 			break;
+		case SENSOR_VOLTS_AC:
+			printf("%.2f VAC", s->value / 1000000.0);
+			break;
+		case SENSOR_OHMS:
+			printf("%lld ohm", s->value);
+			break;
 		case SENSOR_WATTS:
 			printf("%.2f W", s->value / 1000000.0);
 			break;
@@ -2535,7 +2541,7 @@ print_sensor(struct sensor *s)
 			printf("%.2f%%", s->value / 1000.0);
 			break;
 		case SENSOR_FREQ:
-			printf("%lld Hz", s->value);
+			printf("%.2f Hz", s->value / 1000000.0);
 			break;
 		case SENSOR_ANGLE:
 			printf("%3.4f degrees", s->value / 1000000.0);

@@ -1,4 +1,4 @@
-/* $OpenBSD: cmd-new-window.c,v 1.17 2011/01/04 00:42:47 nicm Exp $ */
+/* $OpenBSD: cmd-new-window.c,v 1.20 2012/01/31 15:52:21 nicm Exp $ */
 
 /*
  * Copyright (c) 2007 Nicholas Marriott <nicm@users.sourceforge.net>
@@ -30,8 +30,9 @@ int	cmd_new_window_exec(struct cmd *, struct cmd_ctx *);
 
 const struct cmd_entry cmd_new_window_entry = {
 	"new-window", "neww",
-	"adkn:Pt:", 0, 1,
-	"[-adk] [-n window-name] [-t target-window] [command]",
+	"ac:dkn:Pt:", 0, 1,
+	"[-adk] [-c start-directory] [-n window-name] [-t target-window] "
+	"[command]",
 	0,
 	NULL,
 	NULL,
@@ -44,7 +45,8 @@ cmd_new_window_exec(struct cmd *self, struct cmd_ctx *ctx)
 	struct args	*args = self->args;
 	struct session	*s;
 	struct winlink	*wl;
-	char		*cmd, *cwd, *cause;
+	const char     	*cmd, *cwd;
+	char		*cause;
 	int		 idx, last, detached;
 
 	if (args_has(args, 'a')) {
@@ -98,13 +100,7 @@ cmd_new_window_exec(struct cmd *self, struct cmd_ctx *ctx)
 		cmd = options_get_string(&s->options, "default-command");
 	else
 		cmd = args->argv[0];
-	cwd = options_get_string(&s->options, "default-path");
-	if (*cwd == '\0') {
-		if (ctx->cmdclient != NULL && ctx->cmdclient->cwd != NULL)
-			cwd = ctx->cmdclient->cwd;
-		else
-			cwd = s->cwd;
-	}
+	cwd = cmd_get_default_path(ctx, args_get(args, 'c'));
 
 	if (idx == -1)
 		idx = -1 - options_get_number(&s->options, "base-index");

@@ -1,7 +1,8 @@
-/*	$OpenBSD: installboot.c,v 1.11 2011/04/10 10:06:09 miod Exp $	*/
+/*	$OpenBSD: installboot.c,v 1.16 2012/02/12 00:53:10 deraadt Exp $	*/
 /*	$NetBSD: installboot.c,v 1.8 2001/02/19 22:48:59 cgd Exp $ */
 
 /*-
+ * Copyright (c) 2012 Joel Sing <jsing@openbsd.org>
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
@@ -31,118 +32,59 @@
  */
 
 #include <sys/param.h>
-#include <sys/mount.h>
-#include <sys/time.h>
-#include <sys/stat.h>
-#include <sys/sysctl.h>
+#include <sys/disklabel.h>
+#include <sys/dkio.h>
 #include <sys/mman.h>
-#include <sys/utsname.h>
-#include <ufs/ufs/dinode.h>
-#include <ufs/ufs/dir.h>
+#include <sys/stat.h>
+#include <sys/time.h>
+
+#include <dev/biovar.h>
+#include <dev/softraidvar.h>
+
 #include <ufs/ffs/fs.h>
+
 #include <err.h>
-#include <a.out.h>
 #include <fcntl.h>
-#include <nlist.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
+#include <util.h>
 
-#include "loadfile.h"
+int	verbose, nowrite;
+char	*dev, *blkstore;
+size_t	blksize;
 
-int	verbose, nowrite, sparc64, uflag, hflag = 1;
-char	*boot, *proto, *dev;
-
-#if 0
-#ifdef __ELF__
-#define SYMNAME(a)	a
-#else
-#define SYMNAME(a)	__CONCAT("_",a)
-#endif
-#else
-/* XXX: Hack in libc nlist works with both formats */
-#define SYMNAME(a)	"_"a
-#endif
-
-struct nlist nl[] = {
-#define X_BLOCKTABLE	0
-	{ {SYMNAME("block_table")} },
-#define X_BLOCKCOUNT	1
-	{ {SYMNAME("block_count")} },
-#define X_BLOCKSIZE	2
-	{ {SYMNAME("block_size")} },
-	{ {NULL} }
-};
-daddr32_t *block_table;		/* block number array in prototype image */
-int32_t	*block_count_p;		/* size of this array */
-int32_t	*block_size_p;		/* filesystem block size */
-int32_t	max_block_count;
-
-char		*loadprotoblocks(char *, size_t *);
-int		loadblocknums(char *, int);
-static void	devread(int, void *, daddr32_t, size_t, char *);
 static void	usage(void);
 int 		main(int, char *[]);
+static void	write_bootblk(int);
+
+static int	sr_volume(int, int *, int *);
+static void	sr_installboot(int);
+static void	sr_install_bootblk(int, int, int);
 
 static void
-usage()
+usage(void)
 {
 	extern char *__progname;
-	const char *progname = __progname;
 
-	if (sparc64)
-		(void)fprintf(stderr,
-		    "Usage: %s [-nv] <bootblk> <device>\n"
-		    "       %s -U [-nv] <boot> <proto> <device>\n",
-		    progname, progname);
-	else
-		(void)fprintf(stderr,
-		    "Usage: %s [-nv] <boot> <proto> <device>\n"
-		    "       %s -u [-n] [-v] <bootblk> <device>\n",
-		    progname, progname);
+	fprintf(stderr, "Usage: %s [-nv] <bootblk> <device>\n", __progname);
 	exit(1);
 }
 
 int
-main(argc, argv)
-	int argc;
-	char *argv[];
+main(int argc, char *argv[])
 {
-	int	c;
-	int	devfd;
-	char	*protostore;
-	size_t	protosize;
-	struct	utsname utsname;
+	char		*blkfile, *realdev;
+	int		vol = -1, ndisks = 0, disk;
+	int		c, devfd, blkfd;
+	struct stat	sb;
 
-	/*
-	 * For UltraSPARC machines, we turn on the uflag by default.
-	 */
-	if (uname(&utsname) == -1)
-		err(1, "uname");
-	if (strcmp(utsname.machine, "sparc64") == 0)
-		sparc64 = uflag = 1;
-
-	while ((c = getopt(argc, argv, "a:nhuUv")) != -1) {
+	while ((c = getopt(argc, argv, "nv")) != -1) {
 		switch (c) {
-		case 'a':
-			warnx("-a option is obsolete");
-			break;
-		case 'h':	/* Note: for backwards compatibility */
-			/* Don't strip a.out header */
-			warnx("-h option is obsolete");
-			break;
 		case 'n':
-			/* Do not actually write the bootblock to disk */
+			/* Do not actually write the bootblock to disk. */
 			nowrite = 1;
-			break;
-		case 'u':
-			/* UltraSPARC boot block */
-			uflag = 1;
-			break;
-		case 'U':
-			/* Force non-ultrasparc */
-			uflag = 0;
 			break;
 		case 'v':
 			/* Chat */
@@ -153,308 +95,189 @@ main(argc, argv)
 		}
 	}
 
-	if (uflag) {
-		if (argc - optind < 2)
-			usage();
-	} else {
-		if (argc - optind < 3)
-			usage();
-		boot = argv[optind++];
-	}
+	if (argc - optind < 2)
+		usage();
 
-	proto = argv[optind++];
+	blkfile = argv[optind++];
 	dev = argv[optind];
 
-	if (verbose) {
-		if (!uflag)
-			printf("boot: %s\n", boot);
-		printf("proto: %s\n", proto);
-		printf("device: %s\n", dev);
-	}
+	if (verbose)
+		printf("bootblk: %s\n", blkfile);
 
-	/* Load proto blocks into core */
-	if (uflag == 0) {
-		if ((protostore = loadprotoblocks(proto, &protosize)) == NULL)
-			exit(1);
+	if ((blkfd = open(blkfile, O_RDONLY)) < 0)
+		err(1, "open: %s", blkfile);
 
-		/* Open and check raw disk device */
-		if ((devfd = open(dev, O_RDONLY, 0)) < 0)
-			err(1, "open: %s", dev);
+	if (fstat(blkfd, &sb) == -1)
+		err(1, "fstat: %s", blkfile);
+	if (sb.st_size == 0)
+		errx(1, "%s is empty", blkfile);
 
-		/* Extract and load block numbers */
-		if (loadblocknums(boot, devfd) != 0)
-			exit(1);
+	blksize = howmany(sb.st_size, DEV_BSIZE) * DEV_BSIZE;
+	if (blksize > SBSIZE - DEV_BSIZE)
+		errx(1, "boot blocks too big");
+	if ((blkstore = malloc(blksize)) == NULL)
+		err(1, "malloc: %s", blkfile);
+	bzero(blkstore, blksize);
+	if (read(blkfd, blkstore, sb.st_size) != sb.st_size)
+		err(1, "read: %s", blkfile);
 
-		(void)close(devfd);
+	if ((devfd = opendev(dev, (nowrite ? O_RDONLY : O_RDWR),
+	    OPENDEV_PART, &realdev)) < 0)
+		err(1, "open: %s", realdev);
+	if (verbose)
+		printf("device: %s\n", realdev);
+
+	if (sr_volume(devfd, &vol, &ndisks)) {
+
+		/* Install boot loader in softraid volume. */
+		sr_installboot(devfd);
+
+		/* Install bootblk on each disk that is part of this volume. */
+		for (disk = 0; disk < ndisks; disk++)
+			sr_install_bootblk(devfd, vol, disk);
+
 	} else {
-		struct stat sb;
-		int protofd;
-		size_t blanklen;
 
-		if ((protofd = open(proto, O_RDONLY)) < 0)
-			err(1, "open: %s", proto);
+		/* Write boot blocks to device. */
+		write_bootblk(devfd);
 
-		if (fstat(protofd, &sb) == -1)
-			err(1, "fstat: %s", proto);
-		if (sb.st_size == 0)
-			errx(1, "%s is empty", proto);
-
-		/* there must be a better way */
-		blanklen = DEV_BSIZE - ((sb.st_size + DEV_BSIZE) & (DEV_BSIZE - 1));
-		protosize = sb.st_size + blanklen;
-		if ((protostore = mmap(0, (size_t)protosize,
-		    PROT_READ|PROT_WRITE, MAP_PRIVATE,
-		    protofd, 0)) == MAP_FAILED)
-			err(1, "mmap: %s", proto);
-		/* and provide the rest of the block */
-		if (blanklen)
-			memset(protostore + sb.st_size, 0, blanklen);
 	}
+
+	close(devfd);
+}
+
+static void
+write_bootblk(int devfd)
+{
+	/*
+	 * Write bootblock into the superblock.
+	 */
 
 	if (nowrite)
-		return 0;
-
-	/* Write patched proto bootblocks into the superblock */
-	if (protosize > SBSIZE - DEV_BSIZE)
-		errx(1, "proto bootblocks too big");
-
-	if ((devfd = open(dev, O_RDWR, 0)) < 0)
-		err(1, "open: %s", dev);
+		return;
 
 	if (lseek(devfd, DEV_BSIZE, SEEK_SET) != DEV_BSIZE)
-		err(1, "lseek bootstrap");
+		err(1, "lseek boot block");
 
 	/* Sync filesystems (to clean in-memory superblock?) */
 	sync();
 
-	if (write(devfd, protostore, protosize) != protosize)
-		err(1, "write bootstrap");
-	(void)close(devfd);
-	return 0;
+	if (write(devfd, blkstore, blksize) != blksize)
+		err(1, "write boot block");
 }
 
-char *
-loadprotoblocks(fname, size)
-	char *fname;
-	size_t *size;
+static int
+sr_volume(int devfd, int *vol, int *disks)
 {
-	int	fd, sz;
-	u_long	ap, bp, st, en;
-	u_long	marks[MARK_MAX];
+	struct	bioc_inq bi;
+	struct	bioc_vol bv;
+	int	rv, i;
 
-	/* Locate block number array in proto file */
-	if (nlist(fname, nl) != 0) {
-		warnx("nlist: %s: symbols not found", fname);
-		return NULL;
-	}
-	if (nl[X_BLOCKTABLE].n_type != N_DATA + N_EXT) {
-		warnx("nlist: %s: wrong type", nl[X_BLOCKTABLE].n_un.n_name);
-		return NULL;
-	}
-	if (nl[X_BLOCKCOUNT].n_type != N_DATA + N_EXT) {
-		warnx("nlist: %s: wrong type", nl[X_BLOCKCOUNT].n_un.n_name);
-		return NULL;
-	}
-	if (nl[X_BLOCKSIZE].n_type != N_DATA + N_EXT) {
-		warnx("nlist: %s: wrong type", nl[X_BLOCKSIZE].n_un.n_name);
-		return NULL;
-	}
+	/* Get volume information. */
+	memset(&bi, 0, sizeof(bi));
+	rv = ioctl(devfd, BIOCINQ, &bi);
+	if (rv == -1)
+		return 0;
 
-	marks[MARK_START] = 0;
-	if ((fd = loadfile(fname, marks, COUNT_TEXT|COUNT_DATA)) == -1)
-		return NULL;
-	(void)close(fd);
+	/* XXX - softraid volumes will always have a "softraid0" controller. */
+	if (strncmp(bi.bi_dev, "softraid0", sizeof("softraid0")))
+		return 0;
 
-	sz = (marks[MARK_END] - marks[MARK_START]) + (hflag ? 32 : 0);
-	sz = roundup(sz, DEV_BSIZE);
-	st = marks[MARK_START];
-	en = marks[MARK_ENTRY];
+	/* Locate specific softraid volume. */
+	for (i = 0; i < bi.bi_novol; i++) {
 
-	if ((ap = (u_long)malloc(sz)) == 0) {
-		warn("malloc: %s", "");
-		return NULL;
+		memset(&bv, 0, sizeof(bv));
+		bv.bv_volid = i;
+		rv = ioctl(devfd, BIOCVOL, &bv);
+		if (rv == -1)
+			err(1, "BIOCVOL");
+
+		if (strncmp(dev, bv.bv_dev, sizeof(bv.bv_dev)) == 0) {
+			*vol = i;
+			*disks = bv.bv_nodisk;
+			break;
+		}
+
 	}
 
-	bp = ap + (hflag ? 32 : 0);
-	marks[MARK_START] = bp - st;
-	if ((fd = loadfile(fname, marks, LOAD_TEXT|LOAD_DATA)) == -1) {
-		free((void *)ap);
-		return NULL;
-	}
-	(void)close(fd);
+	if (verbose)
+		fprintf(stderr, "%s: softraid volume with %i disk(s)\n",
+		    dev, *disks);
 
-	block_table = (daddr32_t *) (bp + nl[X_BLOCKTABLE].n_value - st);
-	block_count_p = (int32_t *)(bp + nl[X_BLOCKCOUNT].n_value - st);
-	block_size_p = (int32_t *) (bp + nl[X_BLOCKSIZE].n_value - st);
-	if ((int)(u_long)block_table & 3) {
-		warn("%s: invalid address: block_table = %p",
-		     fname, block_table);
-		free((void *)ap);
-		return NULL;
-	}
-	if ((int)(u_long)block_count_p & 3) {
-		warn("%s: invalid address: block_count_p = %p",
-		     fname, block_count_p);
-		free((void *)ap);
-		return NULL;
-	}
-	if ((int)(u_long)block_size_p & 3) {
-		warn("%s: invalid address: block_size_p = %p",
-		     fname, block_size_p);
-		free((void *)ap);
-		return NULL;
-	}
-	max_block_count = *block_count_p;
-
-	if (verbose) {
-		printf("%s: entry point %#lx\n", fname, en);
-		printf("%s: a.out header %s\n", fname,
-		    hflag ? "left on" : "stripped off");
-		printf("proto bootblock size %d\n", sz);
-		printf("room for %d filesystem blocks at %#lx\n",
-		    max_block_count, nl[X_BLOCKTABLE].n_value);
-	}
-
-	if (hflag) {
-		/*
-		 * We convert the a.out header in-vitro into something that
-		 * Sun PROMs understand.
-		 * Old-style (sun4) ROMs do not expect a header at all, so
-		 * we turn the first two words into code that gets us past
-		 * the 32-byte header where the actual code begins. In assembly
-		 * speak:
-		 *	.word	MAGIC		! a NOP
-		 *	ba,a	start		!
-		 *	.skip	24		! pad
-		 * start:
-		 */
-#define SUN_MAGIC	0x01030107
-#define SUN4_BASTART	0x30800007	/* i.e.: ba,a `start' */
-		*((int *)ap) = SUN_MAGIC;
-		*((int *)ap + 1) = SUN4_BASTART;
-	}
-
-	*size = sz;
-	return (char *)ap;
+	return 1;
 }
 
 static void
-devread(fd, buf, blk, size, msg)
-	int	fd;
-	void	*buf;
-	daddr32_t	blk;
-	size_t	size;
-	char	*msg;
+sr_installboot(int devfd)
 {
-	if (lseek(fd, dbtob(blk), SEEK_SET) != dbtob(blk))
-		err(1, "%s: devread: lseek", msg);
+	struct bioc_installboot bb;
+	struct stat sb;
+	int fd, i, rv;
+	u_char *p;
 
-	if (read(fd, buf, size) != size)
-		err(1, "%s: devread: read", msg);
+	/*
+	 * Install boot loader into softraid boot loader storage area.
+	 */
+	bb.bb_bootldr = "XXX";
+	bb.bb_bootldr_size = sizeof("XXX");
+	bb.bb_bootblk = blkstore;
+	bb.bb_bootblk_size = blksize;
+	strncpy(bb.bb_dev, dev, sizeof(bb.bb_dev));
+	if (!nowrite) {
+		if (verbose)
+			fprintf(stderr, "%s: installing boot loader on "
+			    "softraid volume\n", dev);
+		rv = ioctl(devfd, BIOCINSTALLBOOT, &bb);
+		if (rv != 0)
+			errx(1, "softraid installboot failed");
+	}
 }
 
-static char sblock[SBSIZE];
-
-int
-loadblocknums(boot, devfd)
-char	*boot;
-int	devfd;
+static void
+sr_install_bootblk(int devfd, int vol, int disk)
 {
-	int		i, fd;
-	struct	stat	statbuf;
-	struct	statfs	statfsbuf;
-	struct fs	*fs;
-	char		*buf;
-	daddr32_t		blk, *ap;
-	struct ufs1_dinode	*ip;
-	int		ndb;
+	struct bioc_disk bd;
+	struct disklabel dl;
+	struct partition *pp;
+	uint32_t poffset;
+	char *realdev;
+	char part;
+	int diskfd;
+	int rv;
 
-	/*
-	 * Open 2nd-level boot program and record the block numbers
-	 * it occupies on the filesystem represented by `devfd'.
-	 */
-	if ((fd = open(boot, O_RDONLY)) < 0)
-		err(1, "open: %s", boot);
+	/* Get device name for this disk/chunk. */
+	memset(&bd, 0, sizeof(bd));
+	bd.bd_volid = vol;
+	bd.bd_diskid = disk;
+	rv = ioctl(devfd, BIOCDISK, &bd);
+	if (rv == -1)
+		err(1, "BIOCDISK");
 
-	if (fstatfs(fd, &statfsbuf) != 0)
-		err(1, "statfs: %s", boot);
-
-	if (strncmp(statfsbuf.f_fstypename, "ffs", MFSNAMELEN) &&
-	    strncmp(statfsbuf.f_fstypename, "ufs", MFSNAMELEN)) {
-		errx(1, "%s: must be on an FFS filesystem", boot);
+	/* Check disk status. */
+	if (bd.bd_status != BIOC_SDONLINE && bd.bd_status != BIOC_SDREBUILD) {
+		fprintf(stderr, "softraid chunk %u not online - skipping...\n",
+		    disk);
+		return;	
 	}
 
-	if (fsync(fd) != 0)
-		err(1, "fsync: %s", boot);
+	if (strlen(bd.bd_vendor) < 1)
+		errx(1, "invalid disk name");
+	part = bd.bd_vendor[strlen(bd.bd_vendor) - 1];
+	if (part < 'a' || part >= 'a' + MAXPARTITIONS)
+		errx(1, "invalid partition %c\n", part);
+	bd.bd_vendor[strlen(bd.bd_vendor) - 1] = '\0';
 
-	if (fstat(fd, &statbuf) != 0)
-		err(1, "fstat: %s", boot);
-
-	close(fd);
-
-	/* Read superblock */
-	devread(devfd, sblock, btodb(SBOFF), SBSIZE, "superblock");
-	fs = (struct fs *)sblock;
-
-	/* Read inode */
-	if ((buf = malloc(fs->fs_bsize)) == NULL)
-		errx(1, "No memory for filesystem block");
-
-	blk = fsbtodb(fs, ino_to_fsba(fs, statbuf.st_ino));
-	devread(devfd, buf, blk, fs->fs_bsize, "inode");
-	ip = (struct ufs1_dinode *)(buf) + ino_to_fsbo(fs, statbuf.st_ino);
-
-	/*
-	 * Register filesystem block size.
-	 */
-	*block_size_p = fs->fs_bsize;
-
-	/*
-	 * Get the block numbers; we don't handle fragments
-	 */
-	ndb = howmany(ip->di_size, fs->fs_bsize);
-	if (ndb > max_block_count)
-		errx(1, "%s: Too many blocks", boot);
-
-	/*
-	 * Register block count.
-	 */
-	*block_count_p = ndb;
+	/* Open device. */
+	if ((diskfd = opendev(bd.bd_vendor, (nowrite ? O_RDONLY : O_RDWR),
+	    OPENDEV_PART, &realdev)) < 0)
+		err(1, "open: %s", realdev);
 
 	if (verbose)
-		printf("%s: block numbers: ", boot);
-	ap = ip->di_db;
-	for (i = 0; i < NDADDR && *ap && ndb; i++, ap++, ndb--) {
-		blk = fsbtodb(fs, *ap);
-		block_table[i] = blk;
-		if (verbose)
-			printf("%d ", blk);
-	}
-	if (verbose)
-		printf("\n");
+		fprintf(stderr, "%s%c: installing boot blocks on %s\n",
+		    bd.bd_vendor, part, realdev);
 
-	if (ndb == 0)
-		return 0;
+	/* Write boot blocks to device. */
+	write_bootblk(diskfd);
 
-	/*
-	 * Just one level of indirections; there isn't much room
-	 * for more in the 1st-level bootblocks anyway.
-	 */
-	if (verbose)
-		printf("%s: block numbers (indirect): ", boot);
-	blk = ip->di_ib[0];
-	devread(devfd, buf, blk, fs->fs_bsize, "indirect block");
-	ap = (daddr32_t *)buf;
-	for (; i < NINDIR(fs) && *ap && ndb; i++, ap++, ndb--) {
-		blk = fsbtodb(fs, *ap);
-		block_table[i] = blk;
-		if (verbose)
-			printf("%d ", blk);
-	}
-	if (verbose)
-		printf("\n");
-
-	if (ndb)
-		errx(1, "%s: Too many blocks", boot);
-	return 0;
+	close(diskfd);
 }

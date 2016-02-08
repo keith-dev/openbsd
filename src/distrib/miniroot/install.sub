@@ -1,4 +1,4 @@
-#	$OpenBSD: install.sub,v 1.652 2011/08/08 15:41:17 halex Exp $
+#	$OpenBSD: install.sub,v 1.655 2011/11/22 14:02:14 krw Exp $
 #	$NetBSD: install.sub,v 1.5.2.8 1996/09/02 23:25:02 pk Exp $
 #
 # Copyright (c) 1997-2009 Todd Miller, Theo de Raadt, Ken Westerback
@@ -505,7 +505,7 @@ makedev() {
 		return 1
 	fi
 
-	(cd /dev && sh MAKEDEV "$_dev") >/dev/null 2>&1
+	[[ -z $(cd /dev && sh MAKEDEV "$_dev" 2>&1) ]]
 }
 
 # Create an entry in the hosts file. If an entry with the
@@ -1141,6 +1141,11 @@ install_files() {
 	shacmd="cat"
 	[[ -x /bin/sha256 ]] && shacmd="sha256 /tmp/h"
 
+        # XXX Fix xkb mistake in 5.0
+        # XXX Remove this chunk after 5.2 release
+	local _bad_dir=/mnt/usr/X11R6/share/X11/xkb/symbols/srvr_ctrl
+	isin xshare${VERSION}.tgz $_get_sets && [[ -d $_bad_dir ]] && rm -rf $_bad_dir
+
 	for _f in $THESETS ; do
 		isin $_f $_get_sets || continue
 		echo -n "Getting $_f ..."
@@ -1645,11 +1650,7 @@ run_sysmerge() {
 }
 
 update_firmware() {
-	local _get=Install
-	[[ $MODE == upgrade ]] && _get=Update
-	ask_yn "$_get non-free firmware files on first boot?" no
-	[[ $resp == y ]] && \
-		echo "/usr/sbin/fw_update -v" >> /mnt/etc/rc.firsttime
+	echo "/usr/sbin/fw_update -v" >> /mnt/etc/rc.firsttime
 }
 
 # Create a skeletal but useful /etc/fstab from /tmp/fstab by stripping all

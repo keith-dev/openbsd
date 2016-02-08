@@ -1,4 +1,4 @@
-#	$OpenBSD: funcs.pl,v 1.6 2011/07/04 05:43:02 bluhm Exp $
+#	$OpenBSD: funcs.pl,v 1.8 2011/08/29 01:50:38 bluhm Exp $
 
 # Copyright (c) 2010,2011 Alexander Bluhm <bluhm@openbsd.org>
 #
@@ -31,6 +31,7 @@ use BSD::Socket::Splice qw(setsplice getsplice geterror);
 sub write_char {
 	my $self = shift;
 	my $len = shift // $self->{len} // 251;
+	my $sleep = $self->{sleep};
 
 	my $ctx = Digest::MD5->new();
 	my $char = '0';
@@ -44,6 +45,10 @@ sub write_char {
 			when(/z/)	{ $char = "\n" }
 			when(/\n/)	{ print STDERR "."; $char = '0' }
 			default		{ $char++ }
+		}
+		if ($self->{sleep}) {
+			IO::Handle::flush(\*STDOUT);
+			sleep $self->{sleep};
 		}
 	}
 	if ($len) {
@@ -152,7 +157,7 @@ sub relay_copy {
 		}
 		my $read = sysread(STDIN, $buf,
 		    $max && $max < $size ? $max : $size);
-		defined $read
+		defined($read)
 		    or die ref($self), " sysread at $len failed: $!";
 		if ($read == 0) {
 			print STDERR "\n";
@@ -172,9 +177,9 @@ sub relay_copy {
 				    " select write failed: $!";
 			}
 			my $write = syswrite(STDOUT, $buf, $read - $off, $off);
-			defined $write
+			defined($write) || $!{ETIMEDOUT}
 			    or die ref($self), " syswrite at $len failed: $!";
-			defined $write or next;
+			defined($write) or next;
 			$off += $write;
 			$len += $write;
 		}

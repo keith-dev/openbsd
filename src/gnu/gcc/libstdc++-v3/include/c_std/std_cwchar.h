@@ -152,9 +152,7 @@ _GLIBCXX_BEGIN_NAMESPACE(std)
   using ::fputws;
   using ::fwide;
   using ::fwprintf;
-#if !defined(__OpenBSD__)
   using ::fwscanf;
-#endif
   using ::getwc;
   using ::getwchar;
   using ::mbrlen;
@@ -164,9 +162,7 @@ _GLIBCXX_BEGIN_NAMESPACE(std)
   using ::putwc;
   using ::putwchar;
   using ::swprintf;
-#if !defined(__OpenBSD__)
   using ::swscanf;
-#endif
   using ::ungetwc;
   using ::vfwprintf;
 #if _GLIBCXX_HAVE_VFWSCANF
@@ -186,9 +182,7 @@ _GLIBCXX_BEGIN_NAMESPACE(std)
   using ::wcscoll;
   using ::wcscpy;
   using ::wcscspn;
-#if !defined(__OpenBSD__)
   using ::wcsftime;
-#endif
   using ::wcslen;
   using ::wcsncat;
   using ::wcsncmp;
@@ -209,9 +203,7 @@ _GLIBCXX_BEGIN_NAMESPACE(std)
   using ::wmemmove;
   using ::wmemset;
   using ::wprintf;
-#if !defined(__OpenBSD__)
   using ::wscanf;
-#endif
 
   using ::wcschr;
 
@@ -255,16 +247,16 @@ _GLIBCXX_BEGIN_NAMESPACE(__gnu_cxx)
 
 #if _GLIBCXX_USE_C99_CHECK || _GLIBCXX_USE_C99_DYNAMIC
   extern "C" long double
-    (wcstold)(const wchar_t * restrict, wchar_t ** restrict);
+    (wcstold)(const wchar_t * __restrict, wchar_t ** __restrict);
 #endif
 #if !_GLIBCXX_USE_C99_DYNAMIC
   using ::wcstold;
 #endif
 #if _GLIBCXX_USE_C99_LONG_LONG_CHECK || _GLIBCXX_USE_C99_LONG_LONG_DYNAMIC
   extern "C" long long int
-    (wcstoll)(const wchar_t * restrict, wchar_t ** restrict, int);
+    (wcstoll)(const wchar_t * __restrict, wchar_t ** __restrict, int);
   extern "C" unsigned long long int
-    (wcstoull)(const wchar_t * restrict, wchar_t ** restrict, int);
+    (wcstoull)(const wchar_t * __restrict, wchar_t ** __restrict, int);
 #endif
 #if !_GLIBCXX_USE_C99_LONG_LONG_DYNAMIC
   using ::wcstoll;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvideo.c,v 1.164 2011/07/03 15:47:17 matthew Exp $ */
+/*	$OpenBSD: uvideo.c,v 1.166 2011/10/28 12:48:31 mglocker Exp $ */
 
 /*
  * Copyright (c) 2008 Robert Nagy <robert@openbsd.org>
@@ -34,6 +34,7 @@
 #include <sys/stat.h>
 #include <sys/device.h>
 #include <sys/poll.h>
+#include <sys/timeout.h>
 #include <sys/kthread.h>
 #include <uvm/uvm.h>
 
@@ -1413,11 +1414,11 @@ uvideo_vs_negotiation(struct uvideo_softc *sc, int commit)
 				frame = fmtgrp->frame[i];
 				break;
 			}
-			if (i == fmtgrp->frame_num) {
-				DPRINTF(1, "%s: %s: invalid frame index 0x%x\n",
-				    DEVNAME(sc), __func__, pc->bFrameIndex);
-				return (USBD_INVAL);
-			}
+		}
+		if (i == fmtgrp->frame_num) {
+			DPRINTF(1, "%s: %s: invalid frame index 0x%x\n",
+			    DEVNAME(sc), __func__, pc->bFrameIndex);
+			return (USBD_INVAL);
 		}
 	} else
 		frame = fmtgrp->frame_cur;

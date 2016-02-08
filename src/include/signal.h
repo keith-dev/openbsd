@@ -1,4 +1,4 @@
-/*	$OpenBSD: signal.h,v 1.15 2011/07/06 17:39:22 guenther Exp $	*/
+/*	$OpenBSD: signal.h,v 1.17 2012/01/03 16:53:48 kettenis Exp $	*/
 /*	$NetBSD: signal.h,v 1.8 1996/02/29 00:04:57 jtc Exp $	*/
 
 /*-
@@ -60,6 +60,9 @@ int	sigfillset(sigset_t *);
 int	sigismember(const sigset_t *, int);
 int	sigpending(sigset_t *);
 int	sigprocmask(int, const sigset_t *, sigset_t *);
+#if __POSIX_VISIBLE >= 199506
+int	pthread_sigmask(int, const sigset_t *, sigset_t *);
+#endif
 int	sigsuspend(const sigset_t *);
 
 #if !defined(_ANSI_LIBRARY) && !defined(lint)
@@ -105,19 +108,20 @@ __only_inline int sigismember(const sigset_t *set, int signo) {
 int	killpg(pid_t, int);
 int	siginterrupt(int, int);
 int	sigpause(int);
-int	sigreturn(struct sigcontext *);
-int	sigstack(const struct sigstack *, struct sigstack *);
 int	sigaltstack(const struct sigaltstack *, struct sigaltstack *);
 #if __BSD_VISIBLE
-void	psignal(unsigned int, const char *);
 int	sigblock(int);
+int	sigreturn(struct sigcontext *);
 int	sigsetmask(int);
 int	sigvec(int, struct sigvec *, struct sigvec *);
 #endif
+#endif /* __BSD_VISIBLE || __XPG_VISIBLE >= 420 */
 #if __BSD_VISIBLE ||  __POSIX_VISIBLE >= 199309 || __XPG_VISIBLE >= 500
 int	sigwait(const sigset_t *, int *);
 #endif
-#endif /* __BSD_VISIBLE || __XPG_VISIBLE >= 420 */
+#if __BSD_VISIBLE ||  __POSIX_VISIBLE >= 200809
+void	psignal(unsigned int, const char *);
+#endif
 #endif /* __BSD_VISIBLE || __POSIX_VISIBLE || __XPG_VISIBLE */
 __END_DECLS
 

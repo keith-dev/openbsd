@@ -1,6 +1,7 @@
-# $OpenBSD: Makefile,v 1.3 2011/01/04 02:11:32 schwarze Exp $
+# $OpenBSD: Makefile,v 1.5 2011/12/01 23:57:51 schwarze Exp $
 
-REGRESS_TARGETS=empty blank offset-empty
-GROFF_TARGETS=empty blank offset-empty
+REGRESS_TARGETS=empty blank offset-empty spacing
+
+SKIP_TMAN ?= empty offset-empty spacing
 
 .include <bsd.regress.mk>

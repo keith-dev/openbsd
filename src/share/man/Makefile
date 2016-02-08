@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.7 2011/02/22 00:23:48 espie Exp $
+#	$OpenBSD: Makefile,v 1.9 2012/01/16 08:42:38 schwarze Exp $
 #	from: @(#)Makefile	5.9 (Berkeley) 7/1/91
 
 SUBDIR=	man1 man3 man4 man5 man6 man7 man8 man9

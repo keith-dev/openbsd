@@ -1,4 +1,4 @@
-/*	$Id: chars.c,v 1.21 2011/07/08 16:59:50 schwarze Exp $ */
+/*	$Id: chars.c,v 1.23 2011/11/12 22:43:18 schwarze Exp $ */
 /*
  * Copyright (c) 2009, 2010, 2011 Kristaps Dzonsons <kristaps@bsd.lv>
  * Copyright (c) 2011 Ingo Schwarze <schwarze@openbsd.org>
@@ -33,7 +33,7 @@ struct	ln {
 	int		  unicode;
 };
 
-#define	LINES_MAX	  325
+#define	LINES_MAX	  328
 
 #define CHAR(in, ch, code) \
 	{ NULL, (in), (ch), (code) },
@@ -47,7 +47,8 @@ struct	mchars {
 	struct ln	**htab;
 };
 
-static	const struct ln	 *find(struct mchars *, const char *, size_t);
+static	const struct ln	 *find(const struct mchars *, 
+				const char *, size_t);
 
 void
 mchars_free(struct mchars *arg)
@@ -92,7 +93,7 @@ mchars_alloc(void)
 }
 
 int
-mchars_spec2cp(struct mchars *arg, const char *p, size_t sz)
+mchars_spec2cp(const struct mchars *arg, const char *p, size_t sz)
 {
 	const struct ln	*ln;
 
@@ -107,9 +108,10 @@ mchars_num2char(const char *p, size_t sz)
 {
 	int		  i;
 
-	if ((i = mandoc_strntou(p, sz, 10)) < 0)
+	if ((i = mandoc_strntoi(p, sz, 10)) < 0)
 		return('\0');
-	return(i > 0 && i < 256 && isprint(i) ? i : '\0');
+	return(i > 0 && i < 256 && isprint(i) ? 
+			/* LINTED */ i : '\0');
 }
 
 int
@@ -117,14 +119,15 @@ mchars_num2uc(const char *p, size_t sz)
 {
 	int               i;
 
-	if ((i = mandoc_strntou(p, sz, 16)) < 0)
+	if ((i = mandoc_strntoi(p, sz, 16)) < 0)
 		return('\0');
 	/* FIXME: make sure we're not in a bogus range. */
 	return(i > 0x80 && i <= 0x10FFFF ? i : '\0');
 }
 
 const char *
-mchars_spec2str(struct mchars *arg, const char *p, size_t sz, size_t *rsz)
+mchars_spec2str(const struct mchars *arg, 
+		const char *p, size_t sz, size_t *rsz)
 {
 	const struct ln	*ln;
 
@@ -139,9 +142,9 @@ mchars_spec2str(struct mchars *arg, const char *p, size_t sz, size_t *rsz)
 }
 
 static const struct ln *
-find(struct mchars *tab, const char *p, size_t sz)
+find(const struct mchars *tab, const char *p, size_t sz)
 {
-	struct ln	 *pp;
+	const struct ln	 *pp;
 	int		  hash;
 
 	assert(p);

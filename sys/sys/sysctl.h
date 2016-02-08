@@ -1,4 +1,4 @@
-/*	$OpenBSD: sysctl.h,v 1.116 2011/07/08 18:38:55 yasuoka Exp $	*/
+/*	$OpenBSD: sysctl.h,v 1.120 2012/01/07 05:38:12 guenther Exp $	*/
 /*	$NetBSD: sysctl.h,v 1.16 1996/04/09 20:55:36 cgd Exp $	*/
 
 /*
@@ -38,15 +38,10 @@
 #ifndef _SYS_SYSCTL_H_
 #define	_SYS_SYSCTL_H_
 
-/*
- * These are for the eproc structure defined below.
- */
 #ifndef _KERNEL
 #include <sys/proc.h>		/* for SRUN, SIDL, etc */
-#include <sys/resource.h>
+#include <sys/resource.h>	/* for struct loadavg */
 #endif
-
-#include <sys/resourcevar.h>	/* XXX */
 
 #include <uvm/uvm_extern.h>
 
@@ -177,7 +172,6 @@ struct ctlname {
 #define	KERN_WATCHDOG		64	/* node: watchdog */
 #define	KERN_EMUL		65	/* node: emuls */
 #define	KERN_PROC		66	/* struct: process entries */
-#define	KERN_PROC2		KERN_PROC	/* backwards compat name */
 #define	KERN_MAXCLUSTERS	67	/* number of mclusters */
 #define KERN_EVCOUNT		68	/* node: event counters */
 #define	KERN_TIMECOUNTER	69	/* node: timecounter */
@@ -189,7 +183,8 @@ struct ctlname {
 #define	KERN_CONSDEV		75	/* dev_t: console terminal device */
 #define	KERN_NETLIVELOCKS	76	/* int: number of network livelocks */
 #define	KERN_POOL_DEBUG		77	/* int: enable pool_debug */
-#define	KERN_MAXID		78	/* number of valid kern ids */
+#define	KERN_PROC_CWD		78      /* node: proc cwd */
+#define	KERN_MAXID		79	/* number of valid kern ids */
 
 #define	CTL_KERN_NAMES { \
 	{ 0, 0 }, \
@@ -270,6 +265,7 @@ struct ctlname {
 	{ "consdev", CTLTYPE_STRUCT }, \
 	{ "netlivelocks", CTLTYPE_INT }, \
 	{ "pool_debug", CTLTYPE_INT }, \
+	{ "proc_cwd", CTLTYPE_NODE }, \
 }
 
 /*
@@ -323,9 +319,6 @@ struct ctlname {
 #define KI_NOCPU	(~(u_int64_t)0)
 
 struct kinfo_proc {
-#ifndef kinfo_proc2
-#define kinfo_proc2	kinfo_proc
-#endif
 	u_int64_t p_forw;		/* PTR: linked run/sleep queue. */
 	u_int64_t p_back;
 	u_int64_t p_paddr;		/* PTR: address of proc */
@@ -441,6 +434,8 @@ struct kinfo_proc {
 	u_int64_t p_rlim_rss_cur;	/* RLIM_T: soft limit for rss */
 	u_int64_t p_cpuid;		/* LONG: CPU id */
 	u_int64_t p_vm_map_size;	/* VSIZE_T: virtual size */
+	int32_t   p_tid;		/* PID_T: Thread identifier. */
+	u_int32_t p_rtableid;		/* U_INT: Routing table identifier. */
 };
 
 #if defined(_KERNEL) || defined(_LIBKVM)
@@ -453,7 +448,7 @@ struct kinfo_proc {
  *	kp - target kinfo_proc structure
  *	copy_str - a function or macro invoked as copy_str(dst,src,maxlen)
  *	    that has strlcpy or memcpy semantics; the destination is
- *	    pre-filled with zeros
+ *	    pre-filled with zeros; for libkvm, src is a kvm address
  *	p - source struct proc
  *	pr - source struct process
  *	pc - source struct pcreds
@@ -466,7 +461,7 @@ struct kinfo_proc {
  *	ps - source struct pstats
  *	sa - source struct sigacts
  * There are some members that are not handled by these macros
- * because they're too painful to generalize: p_ppid, p_sid, p_tdev,
+ * because they're too painful to generalize: p_pid, p_ppid, p_sid, p_tdev,
  * p_tpgid, p_tsess, p_vm_rssize, p_u[us]time_{sec,usec}, p_cpuid
  */
 
@@ -482,13 +477,12 @@ do {									\
 	(kp)->p_limit = PTRTOINT64((pr)->ps_limit);			\
 	(kp)->p_vmspace = PTRTOINT64((p)->p_vmspace);			\
 	(kp)->p_sigacts = PTRTOINT64((p)->p_sigacts);			\
-	(kp)->p_sess = PTRTOINT64((pr)->ps_session);			\
+	(kp)->p_sess = PTRTOINT64((pg)->pg_session);			\
 	(kp)->p_ru = PTRTOINT64((p)->p_ru);				\
 									\
 	(kp)->p_exitsig = (p)->p_exitsig;				\
 	(kp)->p_flag = (p)->p_flag | (pr)->ps_flags | P_INMEM;		\
 									\
-	(kp)->p_pid = (p)->p_pid;					\
 	(kp)->p__pgid = (pg)->pg_id;					\
 									\
 	(kp)->p_uid = (uc)->cr_uid;					\
@@ -514,8 +508,8 @@ do {									\
 	(kp)->p_sticks = (p)->p_sticks;					\
 	(kp)->p_iticks = (p)->p_iticks;					\
 									\
-	(kp)->p_tracep = PTRTOINT64((p)->p_tracep);			\
-	(kp)->p_traceflag = (p)->p_traceflag;				\
+	(kp)->p_tracep = PTRTOINT64((pr)->ps_tracevp);			\
+	(kp)->p_traceflag = (pr)->ps_traceflag;				\
 									\
 	(kp)->p_siglist = (p)->p_siglist;				\
 	(kp)->p_sigmask = (p)->p_sigmask;				\
@@ -528,12 +522,12 @@ do {									\
 	(kp)->p_xstat = (p)->p_xstat;					\
 	(kp)->p_acflag = (p)->p_acflag;					\
 									\
-	/* XXX depends on p_emul being an array and not a pointer */	\
+	/* XXX depends on e_name being an array and not a pointer */	\
 	copy_str((kp)->p_emul, (char *)(p)->p_emul +			\
 	    offsetof(struct emul, e_name), sizeof((kp)->p_emul));	\
-	copy_str((kp)->p_comm, (p)->p_comm, sizeof((kp)->p_comm));	\
-	copy_str((kp)->p_login, (sess)->s_login,			\
-	    MIN(sizeof((kp)->p_login) - 1, sizeof((sess)->s_login)));	\
+	strlcpy((kp)->p_comm, (p)->p_comm, sizeof((kp)->p_comm));	\
+	strlcpy((kp)->p_login, (sess)->s_login,			\
+	    MIN(sizeof((kp)->p_login), sizeof((sess)->s_login)));	\
 									\
 	if ((sess)->s_ttyvp)						\
 		(kp)->p_eflag |= EPROC_CTTY;				\
@@ -594,6 +588,8 @@ do {									\
 	}								\
 									\
 	(kp)->p_cpuid = KI_NOCPU;					\
+	(kp)->p_tid = (p)->p_pid + THREAD_PID_OFFSET;			\
+	(kp)->p_rtableid = (pr)->ps_rtableid;				\
 } while (0)
 
 #endif /* defined(_KERNEL) || defined(_LIBKVM) */
@@ -683,8 +679,14 @@ struct kinfo_file2 {
 	uint32_t	fd_ofileflags;	/* CHAR: open file flags */
 	uint32_t	p_uid;		/* UID_T: process credentials */
 	uint32_t	p_gid;		/* GID_T: process credentials */
-	uint32_t	__spare;	/* padding */
+	uint32_t	p_tid;		/* PID_T: thread id */
 	char		p_comm[KI_MAXCOMLEN];
+
+	/* more socket information */
+	uint32_t	inp_rtableid;	/* UINT: Routing table identifier. */
+	uint64_t	so_splice;	/* PTR: f_data of spliced socket */
+	int64_t		so_splicelen;	/* OFF_T: already spliced count or */
+					/* -1 if this is target of splice */
 };
 
 /*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: lpt.c,v 1.7 2010/08/06 00:00:41 miod Exp $ */
+/*	$OpenBSD: lpt.c,v 1.9 2012/01/11 16:22:33 dhill Exp $ */
 /*	$NetBSD: lpt.c,v 1.42 1996/10/21 22:41:14 thorpej Exp $	*/
 
 /*
@@ -59,7 +59,6 @@
 #include <sys/proc.h>
 #include <sys/buf.h>
 #include <sys/kernel.h>
-#include <sys/ioctl.h>
 #include <sys/uio.h>
 #include <sys/device.h>
 #include <sys/conf.h>
@@ -111,12 +110,8 @@ int	lptpushbytes(struct lpt_softc *);
  * Internal routine to lptprobe to do port tests of one byte value.
  */
 int
-lpt_port_test(iot, ioh, base, off, data, mask)
-	bus_space_tag_t iot;
-	bus_space_handle_t ioh;
-	bus_addr_t base;
-	bus_size_t off;
-	u_int8_t data, mask;
+lpt_port_test(bus_space_tag_t iot, bus_space_handle_t ioh, bus_addr_t base,
+    bus_size_t off, u_int8_t data, u_int8_t mask)
 {
 	int timeout;
 	u_int8_t temp;
@@ -134,8 +129,7 @@ lpt_port_test(iot, ioh, base, off, data, mask)
 }
 
 void
-lpt_attach_common(sc)
-	struct lpt_softc *sc;
+lpt_attach_common(struct lpt_softc *sc)
 {
 	printf("\n");
 
@@ -148,11 +142,7 @@ lpt_attach_common(sc)
  * Reset the printer, then wait until it's selected and not busy.
  */
 int
-lptopen(dev, flag, mode, p)
-	dev_t dev;
-	int flag;
-	int mode;
-	struct proc *p;
+lptopen(dev_t dev, int flag, int mode, struct proc *p)
 {
 	int unit = LPTUNIT(dev);
 	u_int8_t flags = LPTFLAGS(dev);
@@ -230,9 +220,7 @@ lptopen(dev, flag, mode, p)
 }
 
 int
-lpt_not_ready(status, sc)
-	u_int8_t status;
-	struct lpt_softc *sc;
+lpt_not_ready(u_int8_t status, struct lpt_softc *sc)
 {
 	u_int8_t new;
 
@@ -251,8 +239,7 @@ lpt_not_ready(status, sc)
 }
 
 void
-lptwakeup(arg)
-	void *arg;
+lptwakeup(void *arg)
 {
 	struct lpt_softc *sc = arg;
 	int s;
@@ -268,11 +255,7 @@ lptwakeup(arg)
  * Close the device, and free the local line buffer.
  */
 int
-lptclose(dev, flag, mode, p)
-	dev_t dev;
-	int flag;
-	int mode;
-	struct proc *p;
+lptclose(dev_t dev, int flag, int mode, struct proc *p)
 {
 	int unit = LPTUNIT(dev);
 	struct lpt_softc *sc = lpt_cd.cd_devs[unit];
@@ -295,8 +278,7 @@ lptclose(dev, flag, mode, p)
 }
 
 int
-lptpushbytes(sc)
-	struct lpt_softc *sc;
+lptpushbytes(struct lpt_softc *sc)
 {
 	bus_space_tag_t iot = sc->sc_iot;
 	bus_space_handle_t ioh = sc->sc_ioh;
@@ -363,10 +345,7 @@ lptpushbytes(sc)
  * chars moved to the output queue.
  */
 int
-lptwrite(dev, uio, flags)
-	dev_t dev;
-	struct uio *uio;
-	int flags;
+lptwrite(dev_t dev, struct uio *uio, int flags)
 {
 	struct lpt_softc *sc = lpt_cd.cd_devs[LPTUNIT(dev)];
 	size_t n;
@@ -396,8 +375,7 @@ lptwrite(dev, uio, flags)
  * another char.
  */
 int
-lptintr(arg)
-	void *arg;
+lptintr(void *arg)
 {
 	struct lpt_softc *sc = arg;
 	bus_space_tag_t iot = sc->sc_iot;
@@ -429,22 +407,4 @@ lptintr(arg)
 	}
 
 	return 1;
-}
-
-int
-lptioctl(dev, cmd, data, flag, p)
-	dev_t dev;
-	u_long cmd;
-	caddr_t data;
-	int flag;
-	struct proc *p;
-{
-	int error = 0;
-
-	switch (cmd) {
-	default:
-		error = ENODEV;
-	}
-
-	return error;
 }

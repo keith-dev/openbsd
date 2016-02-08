@@ -106,7 +106,6 @@
 ./sbin/atactl
 ./sbin/badsect
 ./sbin/bioctl
-./sbin/ccdconfig
 ./sbin/chown
 ./sbin/clri
 ./sbin/dhclient
@@ -340,7 +339,6 @@
 ./usr/bin/merge
 ./usr/bin/mesg
 ./usr/bin/mg
-./usr/bin/midicat
 ./usr/bin/midiplay
 ./usr/bin/mixerctl
 ./usr/bin/mkdep
@@ -430,6 +428,7 @@
 ./usr/bin/skeyinit
 ./usr/bin/skeyprune
 ./usr/bin/slogin
+./usr/bin/sndiod
 ./usr/bin/sort
 ./usr/bin/spell
 ./usr/bin/splain
@@ -2419,6 +2418,7 @@
 ./usr/libexec/auth/login_snk
 ./usr/libexec/auth/login_tis
 ./usr/libexec/auth/login_token
+./usr/libexec/auth/login_yubikey
 ./usr/libexec/comsat
 ./usr/libexec/cpp
 ./usr/libexec/cvs
@@ -2440,7 +2440,6 @@
 ./usr/libexec/diff3prog
 ./usr/libexec/fingerd
 ./usr/libexec/ftpd
-./usr/libexec/getNAME
 ./usr/libexec/getty
 ./usr/libexec/hprop
 ./usr/libexec/hpropd
@@ -2628,7 +2627,6 @@
 ./usr/sbin/pkg_create
 ./usr/sbin/pkg_delete
 ./usr/sbin/pkg_info
-./usr/sbin/pkg_merge
 ./usr/sbin/pkg_mklocatedb
 ./usr/sbin/popa3d
 ./usr/sbin/portmap
@@ -3026,6 +3024,7 @@
 ./usr/share/mk/bsd.nls.mk
 ./usr/share/mk/bsd.obj.mk
 ./usr/share/mk/bsd.own.mk
+./usr/share/mk/bsd.port.arch.mk
 ./usr/share/mk/bsd.port.mk
 ./usr/share/mk/bsd.port.subdir.mk
 ./usr/share/mk/bsd.prog.mk
@@ -3259,6 +3258,7 @@
 ./usr/share/snmp
 ./usr/share/snmp/mibs
 ./usr/share/snmp/mibs/OPENBSD-BASE-MIB.txt
+./usr/share/snmp/mibs/OPENBSD-CARP-MIB.txt
 ./usr/share/snmp/mibs/OPENBSD-MEM-MIB.txt
 ./usr/share/snmp/mibs/OPENBSD-SENSORS-MIB.txt
 ./usr/share/snmp/mibs/OPENBSD-SNMPD-CONF.txt
@@ -3310,6 +3310,7 @@
 ./usr/share/zoneinfo/Africa/Gaborone
 ./usr/share/zoneinfo/Africa/Harare
 ./usr/share/zoneinfo/Africa/Johannesburg
+./usr/share/zoneinfo/Africa/Juba
 ./usr/share/zoneinfo/Africa/Kampala
 ./usr/share/zoneinfo/Africa/Khartoum
 ./usr/share/zoneinfo/Africa/Kigali
@@ -3548,6 +3549,7 @@
 ./usr/share/zoneinfo/Asia/Dushanbe
 ./usr/share/zoneinfo/Asia/Gaza
 ./usr/share/zoneinfo/Asia/Harbin
+./usr/share/zoneinfo/Asia/Hebron
 ./usr/share/zoneinfo/Asia/Ho_Chi_Minh
 ./usr/share/zoneinfo/Asia/Hong_Kong
 ./usr/share/zoneinfo/Asia/Hovd
@@ -3911,6 +3913,7 @@
 ./usr/share/zoneinfo/posix/Africa/Gaborone
 ./usr/share/zoneinfo/posix/Africa/Harare
 ./usr/share/zoneinfo/posix/Africa/Johannesburg
+./usr/share/zoneinfo/posix/Africa/Juba
 ./usr/share/zoneinfo/posix/Africa/Kampala
 ./usr/share/zoneinfo/posix/Africa/Khartoum
 ./usr/share/zoneinfo/posix/Africa/Kigali
@@ -4149,6 +4152,7 @@
 ./usr/share/zoneinfo/posix/Asia/Dushanbe
 ./usr/share/zoneinfo/posix/Asia/Gaza
 ./usr/share/zoneinfo/posix/Asia/Harbin
+./usr/share/zoneinfo/posix/Asia/Hebron
 ./usr/share/zoneinfo/posix/Asia/Ho_Chi_Minh
 ./usr/share/zoneinfo/posix/Asia/Hong_Kong
 ./usr/share/zoneinfo/posix/Asia/Hovd
@@ -4513,6 +4517,7 @@
 ./usr/share/zoneinfo/right/Africa/Gaborone
 ./usr/share/zoneinfo/right/Africa/Harare
 ./usr/share/zoneinfo/right/Africa/Johannesburg
+./usr/share/zoneinfo/right/Africa/Juba
 ./usr/share/zoneinfo/right/Africa/Kampala
 ./usr/share/zoneinfo/right/Africa/Khartoum
 ./usr/share/zoneinfo/right/Africa/Kigali
@@ -4751,6 +4756,7 @@
 ./usr/share/zoneinfo/right/Asia/Dushanbe
 ./usr/share/zoneinfo/right/Asia/Gaza
 ./usr/share/zoneinfo/right/Asia/Harbin
+./usr/share/zoneinfo/right/Asia/Hebron
 ./usr/share/zoneinfo/right/Asia/Ho_Chi_Minh
 ./usr/share/zoneinfo/right/Asia/Hong_Kong
 ./usr/share/zoneinfo/right/Asia/Hovd
@@ -5103,6 +5109,7 @@
 ./var/db/ns
 ./var/db/pkg
 ./var/db/sysmerge
+./var/db/yubikey
 ./var/empty
 ./var/empty/dev
 ./var/games

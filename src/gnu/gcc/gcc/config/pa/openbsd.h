@@ -30,6 +30,8 @@ Boston, MA 02111-1307, USA.  */
 #undef TARGET_ELF32
 #define TARGET_ELF32 1
 
+#undef MAX_OFILE_ALIGNMENT
+#define MAX_OFILE_ALIGNMENT 0x8000
 
 /* Run-time target specifications. */
 #undef TARGET_OS_CPP_BUILTINS
@@ -128,6 +130,7 @@ Boston, MA 02111-1307, USA.  */
     {									\
       switch_to_section (bss_section);					\
       assemble_name((FILE), (NAME));					\
+      fprintf((FILE), "\t.align %d\n", ((ALIGN) / BITS_PER_UNIT));	\
       fprintf ((FILE), "\t.comm %d\n",					\
 	       MAX ((SIZE), ((ALIGN) / BITS_PER_UNIT)));		\
     }									\
@@ -155,7 +158,8 @@ Boston, MA 02111-1307, USA.  */
    %{!shared: %{!non_shared: %{!call_shared: -non_shared}}} \
    %{!dynamic-linker:-dynamic-linker /usr/libexec/ld.so} \
    %{!nostdlib:%{!r*:%{!e*:-e __start}}} -dc -dp \
-   %{static:-Bstatic} %{!static:-Bdynamic} %{assert*}"
+   %{static:-Bstatic} %{!static:-Bdynamic} %{rdynamic:-export-dynamic} \
+   %{assert*}"
 
 /* Layout of source language data types. */
 

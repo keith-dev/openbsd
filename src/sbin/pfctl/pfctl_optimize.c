@@ -1,4 +1,4 @@
-/*	$OpenBSD: pfctl_optimize.c,v 1.29 2011/07/27 00:26:10 mcbride Exp $ */
+/*	$OpenBSD: pfctl_optimize.c,v 1.31 2011/12/19 23:26:16 mikeb Exp $ */
 
 /*
  * Copyright (c) 2004 Mike Frantzen <frantzen@openbsd.org>
@@ -175,6 +175,7 @@ struct pf_rule_field {
     PF_RULE_FIELD(dst.neg,		NOMERGE),
     PF_RULE_FIELD(rtableid,		NOMERGE),
     PF_RULE_FIELD(onrdomain,		NOMERGE),
+    PF_RULE_FIELD(naf,			NOMERGE),
 
     /* These fields can be merged */
     PF_RULE_FIELD(src.addr,		COMBINED),
@@ -394,7 +395,7 @@ optimize_superblock(struct pfctl *pf, struct superblock *block)
 	TAILQ_FOREACH(por, &block->sb_rules, por_entry) {
 		printf("  ");
 		print_rule(&por->por_rule, por->por_rule.anchor ?
-		    por->por_rule.anchor->name : "", 1);
+		    por->por_rule.anchor->name : "", PF_OPT_DEBUG);
 	}
 #endif /* OPT_DEBUG */
 

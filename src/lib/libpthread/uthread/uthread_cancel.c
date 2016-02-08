@@ -1,4 +1,4 @@
-/*	$OpenBSD: uthread_cancel.c,v 1.16 2007/04/27 19:44:48 kurt Exp $	*/
+/*	$OpenBSD: uthread_cancel.c,v 1.18 2011/10/07 08:59:43 fgsch Exp $	*/
 /*
  * David Leonard <d@openbsd.org>, 1999. Public domain.
  */
@@ -39,8 +39,10 @@ pthread_cancel(pthread_t pthread)
 				break;
 
 			case PS_SPINBLOCK:
+			case PS_CONNECT_WAIT:
 			case PS_FDR_WAIT:
 			case PS_FDW_WAIT:
+			case PS_KEVENT_WAIT:
 			case PS_POLL_WAIT:
 			case PS_SELECT_WAIT:
 				/* Remove these threads from the work queue: */

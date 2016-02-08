@@ -1,4 +1,4 @@
-/* $OpenBSD: tmux.h,v 1.292 2011/07/02 21:05:44 nicm Exp $ */
+/* $OpenBSD: tmux.h,v 1.311 2012/02/02 00:10:12 nicm Exp $ */
 
 /*
  * Copyright (c) 2007 Nicholas Marriott <nicm@users.sourceforge.net>
@@ -206,6 +206,7 @@ enum tty_code_code {
 	TTYC_DIM,	/* enter_dim_mode, mh */
 	TTYC_DL,	/* parm_delete_line, DL */
 	TTYC_DL1,	/* delete_line, dl */
+	TTYC_E3,
 	TTYC_EL,	/* clr_eol, ce */
 	TTYC_EL1,	/* clr_bol, cb */
 	TTYC_ENACS,	/* ena_acs, eA */
@@ -441,11 +442,18 @@ enum mode_key_cmd {
 	MODEKEYEDIT_DELETE,
 	MODEKEYEDIT_DELETELINE,
 	MODEKEYEDIT_DELETETOENDOFLINE,
+	MODEKEYEDIT_DELETEWORD,
 	MODEKEYEDIT_ENDOFLINE,
 	MODEKEYEDIT_ENTER,
 	MODEKEYEDIT_HISTORYDOWN,
 	MODEKEYEDIT_HISTORYUP,
+	MODEKEYEDIT_NEXTSPACE,
+	MODEKEYEDIT_NEXTSPACEEND,
+	MODEKEYEDIT_NEXTWORD,
+	MODEKEYEDIT_NEXTWORDEND,
 	MODEKEYEDIT_PASTE,
+	MODEKEYEDIT_PREVIOUSSPACE,
+	MODEKEYEDIT_PREVIOUSWORD,
 	MODEKEYEDIT_STARTOFLINE,
 	MODEKEYEDIT_SWITCHMODE,
 	MODEKEYEDIT_SWITCHMODEAPPEND,
@@ -480,6 +488,8 @@ enum mode_key_cmd {
 	MODEKEYCOPY_JUMPAGAIN,
 	MODEKEYCOPY_JUMPREVERSE,
 	MODEKEYCOPY_JUMPBACK,
+	MODEKEYCOPY_JUMPTO,
+	MODEKEYCOPY_JUMPTOBACK,
 	MODEKEYCOPY_LEFT,
 	MODEKEYCOPY_MIDDLELINE,
 	MODEKEYCOPY_NEXTPAGE,
@@ -535,9 +545,9 @@ struct mode_key_binding {
 	int			mode;
 	enum mode_key_cmd	cmd;
 
-	SPLAY_ENTRY(mode_key_binding) entry;
+	RB_ENTRY(mode_key_binding) entry;
 };
-SPLAY_HEAD(mode_key_tree, mode_key_binding);
+RB_HEAD(mode_key_tree, mode_key_binding);
 
 /* Command to string mapping. */
 struct mode_key_cmdstr {
@@ -663,20 +673,14 @@ struct options_entry {
 
 	char		*str;
 	long long	 num;
-	void		*data;
 
-	void		 (*freefn)(void *);
-
-	SPLAY_ENTRY(options_entry) entry;
+	RB_ENTRY(options_entry) entry;
 };
 
 struct options {
-	SPLAY_HEAD(options_tree, options_entry) tree;
+	RB_HEAD(options_tree, options_entry) tree;
 	struct options	*parent;
 };
-
-/* Key list for prefix option. */
-ARRAY_DECL(keylist, int);
 
 /* Scheduled job. */
 struct job {
@@ -844,6 +848,7 @@ RB_HEAD(window_pane_tree, window_pane);
 
 /* Window structure. */
 struct window {
+	u_int		 id;
 	char		*name;
 	struct event	 name_timer;
 	struct timeval   silence_timer;
@@ -1074,6 +1079,9 @@ struct tty_ctx {
 	u_int		 orupper;
 	u_int		 orlower;
 
+	u_int		 xoff;
+	u_int		 yoff;
+
 	/* Saved last cell on line. */
 	struct grid_cell last_cell;
 	struct grid_utf8 last_utf8;
@@ -1164,8 +1172,7 @@ struct client {
 #define CLIENT_DEAD 0x200
 #define CLIENT_BORDERS 0x400
 #define CLIENT_READONLY 0x800
-#define CLIENT_BACKOFF 0x1000
-#define CLIENT_REDRAWWINDOW 0x2000
+#define CLIENT_REDRAWWINDOW 0x1000
 	int		 flags;
 
 	struct event	 identify_timer;
@@ -1272,9 +1279,9 @@ struct key_binding {
 	struct cmd_list	*cmdlist;
 	int		 can_repeat;
 
-	SPLAY_ENTRY(key_binding) entry;
+	RB_ENTRY(key_binding) entry;
 };
-SPLAY_HEAD(key_bindings, key_binding);
+RB_HEAD(key_bindings, key_binding);
 
 /*
  * Option table entries. The option table is the user-visible part of the
@@ -1284,7 +1291,7 @@ SPLAY_HEAD(key_bindings, key_binding);
 enum options_table_type {
 	OPTIONS_TABLE_STRING,
 	OPTIONS_TABLE_NUMBER,
-	OPTIONS_TABLE_KEYS,
+	OPTIONS_TABLE_KEY,
 	OPTIONS_TABLE_COLOUR,
 	OPTIONS_TABLE_ATTRIBUTES,
 	OPTIONS_TABLE_FLAG,
@@ -1302,6 +1309,15 @@ struct options_table_entry {
 	const char	       *default_str;
 	long long		default_num;
 };
+
+/* Tree of format entries. */
+struct format_entry {
+	char		       *key;
+	char		       *value;
+
+	RB_ENTRY(format_entry)	entry;
+};
+RB_HEAD(format_tree, format_entry);
 
 /* List of configuration causes. */
 ARRAY_DECL(causelist, char *);
@@ -1336,6 +1352,7 @@ void		 logfile(const char *);
 const char	*getshell(void);
 int		 checkshell(const char *);
 int		 areshell(const char *);
+const char*	 get_full_path(const char *, const char *);
 void		 setblocking(int, int);
 __dead void	 shell_exec(const char *, const char *);
 
@@ -1344,6 +1361,21 @@ extern int       cfg_finished;
 extern struct causelist cfg_causes;
 void printflike2 cfg_add_cause(struct causelist *, const char *, ...);
 int		 load_cfg(const char *, struct cmd_ctx *, struct causelist *);
+
+/* format.c */
+int		 format_cmp(struct format_entry *, struct format_entry *);
+RB_PROTOTYPE(format_tree, format_entry, entry, format_cmp);
+struct format_tree *format_create(void);
+void		 format_free(struct format_tree *);
+void		 format_add(
+		     struct format_tree *, const char *, const char *, ...);
+const char	*format_find(struct format_tree *, const char *);
+char		*format_expand(struct format_tree *, const char *);
+void		 format_session(struct format_tree *, struct session *);
+void		 format_client(struct format_tree *, struct client *);
+void		 format_winlink(
+		     struct format_tree *, struct session *, struct winlink *);
+void		 format_window_pane(struct format_tree *, struct window_pane *);
 
 /* mode-key.c */
 extern const struct mode_key_table mode_key_tables[];
@@ -1354,7 +1386,7 @@ extern struct mode_key_tree mode_key_tree_emacs_edit;
 extern struct mode_key_tree mode_key_tree_emacs_choice;
 extern struct mode_key_tree mode_key_tree_emacs_copy;
 int	mode_key_cmp(struct mode_key_binding *, struct mode_key_binding *);
-SPLAY_PROTOTYPE(mode_key_tree, mode_key_binding, entry, mode_key_cmp);
+RB_PROTOTYPE(mode_key_tree, mode_key_binding, entry, mode_key_cmp);
 const char *mode_key_tostring(const struct mode_key_cmdstr *,
 	    enum mode_key_cmd);
 enum mode_key_cmd mode_key_fromstring(const struct mode_key_cmdstr *,
@@ -1366,7 +1398,7 @@ enum mode_key_cmd mode_key_lookup(struct mode_key_data *, int);
 
 /* options.c */
 int	options_cmp(struct options_entry *, struct options_entry *);
-SPLAY_PROTOTYPE(options_tree, options_entry, entry, options_cmp);
+RB_PROTOTYPE(options_tree, options_entry, entry, options_cmp);
 void	options_init(struct options *, struct options *);
 void	options_free(struct options *);
 struct options_entry *options_find1(struct options *, const char *);
@@ -1378,9 +1410,6 @@ char   *options_get_string(struct options *, const char *);
 struct options_entry *options_set_number(
 	    struct options *, const char *, long long);
 long long options_get_number(struct options *, const char *);
-struct options_entry *options_set_data(
-	    struct options *, const char *, void *, void (*)(void *));
-void   *options_get_data(struct options *, const char *);
 
 /* options-table.c */
 extern const struct options_table_entry server_options_table[];
@@ -1438,8 +1467,8 @@ void	tty_draw_line(struct tty *, struct screen *, u_int, u_int, u_int);
 int	tty_open(struct tty *, const char *, char **);
 void	tty_close(struct tty *);
 void	tty_free(struct tty *);
-void	tty_write(void (*)(
-	    struct tty *, const struct tty_ctx *), const struct tty_ctx *);
+void	tty_write(
+	    void (*)(struct tty *, const struct tty_ctx *), struct tty_ctx *);
 void	tty_cmd_alignmenttest(struct tty *, const struct tty_ctx *);
 void	tty_cmd_cell(struct tty *, const struct tty_ctx *);
 void	tty_cmd_clearendofline(struct tty *, const struct tty_ctx *);
@@ -1458,6 +1487,7 @@ void	tty_cmd_utf8character(struct tty *, const struct tty_ctx *);
 void	tty_cmd_reverseindex(struct tty *, const struct tty_ctx *);
 void	tty_cmd_setselection(struct tty *, const struct tty_ctx *);
 void	tty_cmd_rawstring(struct tty *, const struct tty_ctx *);
+void	tty_bell(struct tty *);
 
 /* tty-term.c */
 extern struct tty_terms tty_terms;
@@ -1529,6 +1559,7 @@ int		 cmd_find_index(
 struct winlink	*cmd_find_pane(struct cmd_ctx *,
 		     const char *, struct session **, struct window_pane **);
 char		*cmd_template_replace(char *, const char *, int);
+const char     	*cmd_get_default_path(struct cmd_ctx *, const char *);
 extern const struct cmd_entry *cmd_table[];
 extern const struct cmd_entry cmd_attach_session_entry;
 extern const struct cmd_entry cmd_bind_key_entry;
@@ -1629,7 +1660,7 @@ int	client_main(int, char **, int);
 /* key-bindings.c */
 extern struct key_bindings key_bindings;
 int	 key_bindings_cmp(struct key_binding *, struct key_binding *);
-SPLAY_PROTOTYPE(key_bindings, key_binding, entry, key_bindings_cmp);
+RB_PROTOTYPE(key_bindings, key_binding, entry, key_bindings_cmp);
 struct key_binding *key_bindings_lookup(int);
 void	 key_bindings_add(int, int, struct cmd_list *);
 void	 key_bindings_remove(int);
@@ -1695,6 +1726,7 @@ void	 server_update_event(struct client *);
 /* status.c */
 int	 status_out_cmp(struct status_out *, struct status_out *);
 RB_PROTOTYPE(status_out_tree, status_out, entry, status_out_cmp);
+int	 status_at_line(struct client *);
 void	 status_free_jobs(struct status_out_tree *);
 void	 status_update_jobs(struct client *);
 void	 status_set_window_at(struct client *, u_int);
@@ -1795,6 +1827,7 @@ char	*grid_view_string_cells(struct grid *, u_int, u_int, u_int);
 void	 screen_write_start(
 	     struct screen_write_ctx *, struct window_pane *, struct screen *);
 void	 screen_write_stop(struct screen_write_ctx *);
+void	 screen_write_reset(struct screen_write_ctx *);
 size_t printflike2 screen_write_cstrlen(int, const char *, ...);
 void printflike5 screen_write_cnputs(struct screen_write_ctx *,
 	     ssize_t, struct grid_cell *, int, const char *, ...);
@@ -1840,6 +1873,7 @@ void	 screen_write_kkeypadmode(struct screen_write_ctx *, int);
 void	 screen_write_clearendofscreen(struct screen_write_ctx *);
 void	 screen_write_clearstartofscreen(struct screen_write_ctx *);
 void	 screen_write_clearscreen(struct screen_write_ctx *);
+void	 screen_write_clearhistory(struct screen_write_ctx *);
 void	 screen_write_cell(struct screen_write_ctx *,
 	     const struct grid_cell *, const struct utf8_data *);
 void	 screen_write_setselection(struct screen_write_ctx *, u_char *, u_int);
@@ -1872,6 +1906,7 @@ int		 window_pane_cmp(struct window_pane *, struct window_pane *);
 RB_PROTOTYPE(window_pane_tree, window_pane, tree_entry, window_pane_cmp);
 struct winlink	*winlink_find_by_index(struct winlinks *, int);
 struct winlink	*winlink_find_by_window(struct winlinks *, struct window *);
+struct winlink	*winlink_find_by_window_id(struct winlinks *, u_int);
 int		 winlink_next_index(struct winlinks *, int);
 u_int		 winlink_count(struct winlinks *);
 struct winlink	*winlink_add(struct winlinks *, int);
@@ -1886,6 +1921,7 @@ struct winlink	*winlink_previous_by_number(struct winlink *, struct session *,
 void		 winlink_stack_push(struct winlink_stack *, struct winlink *);
 void		 winlink_stack_remove(struct winlink_stack *, struct winlink *);
 int		 window_index(struct window *, u_int *);
+struct window	*window_find_by_id(u_int);
 struct window	*window_create1(u_int, u_int);
 struct window	*window_create(const char *, const char *, const char *,
 		     const char *, struct environ *, struct termios *,
@@ -1903,7 +1939,7 @@ struct window_pane *window_pane_next_by_number(struct window *,
 		        struct window_pane *, u_int);
 struct window_pane *window_pane_previous_by_number(struct window *,
 		        struct window_pane *, u_int);
-u_int		 window_pane_index(struct window *, struct window_pane *);
+int		 window_pane_index(struct window_pane *, u_int *);
 u_int		 window_count_panes(struct window *);
 void		 window_destroy_panes(struct window *);
 struct window_pane *window_pane_find_by_id(u_int);
@@ -1932,6 +1968,7 @@ struct window_pane *window_pane_find_up(struct window_pane *);
 struct window_pane *window_pane_find_down(struct window_pane *);
 struct window_pane *window_pane_find_left(struct window_pane *);
 struct window_pane *window_pane_find_right(struct window_pane *);
+void		 window_set_name(struct window *, const char *);
 
 /* layout.c */
 u_int		 layout_count_cells(struct layout_cell *);
@@ -2045,6 +2082,7 @@ u_int	utf8_split2(u_int, u_char *);
 
 /* procname.c */
 char   *get_proc_name(int, char *);
+char   *get_proc_cwd(pid_t);
 
 /* log.c */
 void		 log_open_tty(int);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: usb.h,v 1.37 2011/03/04 23:55:32 kettenis Exp $ */
+/*	$OpenBSD: usb.h,v 1.39 2012/01/08 13:12:38 miod Exp $ */
 /*	$NetBSD: usb.h,v 1.69 2002/09/22 23:20:50 augustss Exp $	*/
 /*	$FreeBSD: src/sys/dev/usb/usb.h,v 1.14 1999/11/17 22:33:46 n_hibma Exp $	*/
 
@@ -412,6 +412,7 @@ typedef struct {
 #define	 UISUBCLASS_CAPI_CONTROLMODEL		5
 #define	 UISUBCLASS_ETHERNET_NETWORKING_CONTROL_MODEL 6
 #define	 UISUBCLASS_ATM_NETWORKING_CONTROL_MODEL 7
+#define	 UISUBCLASS_MOBILE_DIRECT_LINE_MODEL	10
 #define   UIPROTO_CDC_AT			1
 
 #define UICLASS_HID		0x03
@@ -587,14 +588,11 @@ struct usb_ctl_report_desc {
 	u_char	ucrd_data[1024];	/* filled data size will vary */
 };
 
-typedef struct { u_int32_t cookie; } usb_event_cookie_t;
-
 #define USB_MAX_DEVNAMES 4
 #define USB_MAX_DEVNAMELEN 16
 struct usb_device_info {
 	u_int8_t	udi_bus;
 	u_int8_t	udi_addr;	/* device address */
-	usb_event_cookie_t udi_cookie;
 	char		udi_product[USB_MAX_STRING_LEN];
 	char		udi_vendor[USB_MAX_STRING_LEN];
 	char		udi_release[8];
@@ -624,7 +622,6 @@ struct usb_device_info {
 struct usb_device_info_48 {
 	u_int8_t	udi_bus;
 	u_int8_t	udi_addr;	/* device address */
-	usb_event_cookie_t udi_cookie;
 	char		udi_product[USB_MAX_STRING_LEN];
 	char		udi_vendor[USB_MAX_STRING_LEN];
 	char		udi_release[8];
@@ -669,7 +666,6 @@ struct usb_event {
 		} ue_ctrlr;
 		struct usb_device_info		ue_device;
 		struct {
-			usb_event_cookie_t	ue_cookie;
 			char			ue_devname[16];
 		} ue_driver;
 	} u;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: subr_disk.c,v 1.131 2011/07/26 12:32:14 krw Exp $	*/
+/*	$OpenBSD: subr_disk.c,v 1.143 2012/02/10 18:41:36 phessler Exp $	*/
 /*	$NetBSD: subr_disk.c,v 1.17 1996/03/16 23:17:08 christos Exp $	*/
 
 /*
@@ -67,6 +67,8 @@
 #include <dev/rndvar.h>
 #include <dev/cons.h>
 
+#include "softraid.h"
+
 /*
  * A global list of all disks attached to the system.  May grow or
  * shrink over time.
@@ -78,12 +80,14 @@ int	disk_change;		/* set if a disk has been attached/detached
 				 * is reset by hw_sysctl()
 				 */
 
+u_char	bootduid[8];		/* DUID of boot disk. */
 u_char	rootduid[8];		/* DUID of root disk. */
 
 /* softraid callback, do not use! */
 void (*softraid_disk_attach)(struct disk *, int);
 
-char *disk_readlabel(struct disklabel *, dev_t, char *, size_t);
+void sr_map_root(void);
+
 void disk_attach_callback(void *, void *);
 
 /*
@@ -228,8 +232,8 @@ initdisklabel(struct disklabel *lp)
  * a newer version if needed, etc etc.
  */
 int
-checkdisklabel(void *rlp, struct disklabel *lp,
-	u_int64_t boundstart, u_int64_t boundend)
+checkdisklabel(void *rlp, struct disklabel *lp, u_int64_t boundstart,
+    u_int64_t boundend)
 {
 	struct disklabel *dlp = rlp;
 	struct __partitionv0 *v0pp;
@@ -666,7 +670,8 @@ setdisklabel(struct disklabel *olp, struct disklabel *nlp, u_int openmask)
 				if (dk->dk_label && bcmp(dk->dk_label->d_uid,
 				    nlp->d_uid, sizeof(nlp->d_uid)) == 0)
 					break;
-		} while (dk != NULL);
+		} while (dk != NULL &&
+		    bcmp(nlp->d_uid, &uid, sizeof(nlp->d_uid)) == 0);
 	}
 
 	nlp->d_checksum = 0;
@@ -866,17 +871,23 @@ disk_attach_callback(void *arg1, void *arg2)
 		if (dk->dk_devno == dev)
 			break;
 	}
-	if (dk == NULL || (dk->dk_flags & (DKF_OPENED | DKF_NOLABELREAD)))
+	if (dk == NULL)
 		return;
 
 	/* XXX: Assumes dk is part of the device softc. */
 	device_ref(dk->dk_device);
 
-	/* Read disklabel. */
-	disk_readlabel(&dl, dev, errbuf, sizeof(errbuf));
-	dk->dk_flags |= DKF_OPENED;
+	if (dk->dk_flags & (DKF_OPENED | DKF_NOLABELREAD))
+		goto done;
 
+	/* Read disklabel. */
+	if (disk_readlabel(&dl, dev, errbuf, sizeof(errbuf)) == NULL)
+		dk->dk_flags |= DKF_LABELVALID;
+
+done:
+	dk->dk_flags |= DKF_OPENED;
 	device_unref(dk->dk_device);
+	wakeup(dk);
 }
 
 /*
@@ -1150,22 +1161,59 @@ parsedisk(char *str, int len, int defpart, dev_t *devp)
 void
 setroot(struct device *bootdv, int part, int exitflags)
 {
-	int majdev, unit, len, s;
+	int majdev, unit, len, s, slept = 0;
 	struct swdevt *swp;
 	struct device *rootdv, *dv;
 	dev_t nrootdev, nswapdev = NODEV, temp = NODEV;
 	struct ifnet *ifp = NULL;
-	struct disk *dk = NULL;
+	struct disk *dk;
 	u_char duid[8];
 	char buf[128];
 #if defined(NFSCLIENT)
 	extern char *nfsbootdevname;
 #endif
 
+	/* Ensure that all disk attach callbacks have completed. */
+	do {
+		TAILQ_FOREACH(dk, &disklist, dk_link) {
+			if (dk->dk_devno != NODEV &&
+			    (dk->dk_flags & DKF_OPENED) == 0) {
+				tsleep(dk, 0, "dkopen", hz);
+				slept++;
+				break;
+			}
+		}
+	} while (dk != NULL && slept < 5);
+
+	if (slept == 5) {
+		printf("disklabels not read:");
+		TAILQ_FOREACH(dk, &disklist, dk_link)
+			if (dk->dk_devno != NODEV &&
+			    (dk->dk_flags & DKF_OPENED) == 0)
+				printf(" %s", dk->dk_name);
+		printf("\n");
+	}
+
+	/* Locate DUID for boot disk if not already provided. */
+	bzero(duid, sizeof(duid));
+	if (bcmp(bootduid, duid, sizeof(bootduid)) == 0) {
+		TAILQ_FOREACH(dk, &disklist, dk_link)
+			if (dk->dk_device == bootdv)
+				break;
+		if (dk && (dk->dk_flags & DKF_LABELVALID))
+			bcopy(dk->dk_label->d_uid, bootduid, sizeof(bootduid));
+	}
+	bcopy(bootduid, rootduid, sizeof(rootduid));
+
+#if NSOFTRAID > 0
+	sr_map_root();
+#endif
+
 	/*
 	 * If `swap generic' and we couldn't determine boot device,
 	 * ask the user.
 	 */
+	dk = NULL;
 	if (mountroot == NULL && bootdv == NULL)
 		boothowto |= RB_ASKNAME;
 	if (boothowto & RB_ASKNAME) {
@@ -1262,20 +1310,23 @@ gotswap:
 		 * `swap generic'
 		 */
 		rootdv = bootdv;
-		bzero(&duid, sizeof(duid));
-		if (bcmp(rootduid, &duid, sizeof(rootduid)) != 0) {
-			TAILQ_FOREACH(dk, &disklist, dk_link)
-				if (dk->dk_label && bcmp(dk->dk_label->d_uid,
-				    &rootduid, sizeof(rootduid)) == 0)
-					break;
-			if (dk == NULL)
-				panic("root device (%02hhx%02hhx%02hhx%02hhx"
-				    "%02hhx%02hhx%02hhx%02hhx) not found",
-				    rootduid[0], rootduid[1], rootduid[2],
-				    rootduid[3], rootduid[4], rootduid[5],
-				    rootduid[6], rootduid[7]);
-			bcopy(rootduid, duid, sizeof(duid));
-			rootdv = dk->dk_device;
+
+		if (bootdv->dv_class == DV_DISK) {
+			bzero(&duid, sizeof(duid));
+			if (bcmp(rootduid, &duid, sizeof(rootduid)) != 0) {
+				TAILQ_FOREACH(dk, &disklist, dk_link)
+					if ((dk->dk_flags & DKF_LABELVALID) &&
+					    dk->dk_label && bcmp(dk->dk_label->d_uid,
+					    &rootduid, sizeof(rootduid)) == 0)
+						break;
+				if (dk == NULL)
+					panic("root device (%02hx%02hx%02hx%02hx"
+					    "%02hx%02hx%02hx%02hx) not found",
+					    rootduid[0], rootduid[1], rootduid[2],
+					    rootduid[3], rootduid[4], rootduid[5],
+					    rootduid[6], rootduid[7]);
+				rootdv = dk->dk_device;
+			}
 		}
 
 		majdev = findblkmajor(rootdv);
@@ -1335,8 +1386,8 @@ gotswap:
 
 	printf("root on %s%c", rootdv->dv_xname, 'a' + part);
 
-	if (dk != NULL && bcmp(rootduid, &duid, sizeof(rootduid)) == 0)
-		printf(" (%02hhx%02hhx%02hhx%02hhx%02hhx%02hhx%02hhx%02hhx.%c)",
+	if (dk && dk->dk_device == rootdv)
+		printf(" (%02hx%02hx%02hx%02hx%02hx%02hx%02hx%02hx.%c)",
 		    rootduid[0], rootduid[1], rootduid[2], rootduid[3],
 		    rootduid[4], rootduid[5], rootduid[6], rootduid[7],
 		    'a' + part);
@@ -1497,7 +1548,8 @@ disk_map(char *path, char *mappath, int size, int flags)
 
 	mdk = NULL;
 	TAILQ_FOREACH(dk, &disklist, dk_link) {
-		if (dk->dk_label && bcmp(dk->dk_label->d_uid, uid,
+		if ((dk->dk_flags & DKF_LABELVALID) && dk->dk_label &&
+		    bcmp(dk->dk_label->d_uid, uid,
 		    sizeof(dk->dk_label->d_uid)) == 0) {
 			/* Fail if there are duplicate UIDs! */
 			if (mdk != NULL)

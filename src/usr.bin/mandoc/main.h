@@ -1,4 +1,4 @@
-/*	$Id: main.h,v 1.8 2011/05/29 21:22:18 schwarze Exp $ */
+/*	$Id: main.h,v 1.10 2011/10/09 17:59:56 schwarze Exp $ */
 /*
  * Copyright (c) 2009, 2010, 2011 Kristaps Dzonsons <kristaps@bsd.lv>
  *
@@ -40,6 +40,9 @@ void		  html_free(void *);
 
 void		  tree_mdoc(void *, const struct mdoc *);
 void		  tree_man(void *, const struct man *);
+
+void		  man_mdoc(void *, const struct mdoc *);
+void		  man_man(void *, const struct man *);
 
 void		 *locale_alloc(char *);
 void		 *utf8_alloc(char *);

@@ -65,6 +65,7 @@ struct {
 	int	  Sflag;	/* Socket buffer size (tcp mode) */
 	u_int	  rflag;	/* Report rate (ms) */
 	int	  sflag;	/* True if server */
+	int	  Tflag;	/* ToS if != -1 */
 	int	  vflag;	/* Verbose */
 	int	  uflag;	/* UDP mode */
 	kvm_t	 *kvmh;		/* Kvm handler */
@@ -109,11 +110,12 @@ static void	tcp_server_handle_sc(int, short, void *);
 static void	tcp_server_accept(int, short, void *);
 static void	server_init(struct addrinfo *, struct statctx *);
 static void	client_handle_sc(int, short, void *);
-static void	client_init(struct addrinfo *, int, struct statctx *);
+static void	client_init(struct addrinfo *, int, struct statctx *,
+    struct addrinfo *);
 static int	clock_gettime_tv(clockid_t, struct timeval *);
 static void	udp_server_handle_sc(int, short, void *);
 static void	udp_process_slice(int, short, void *);
-
+static int	map_tos(char *, int *);
 /*
  * We account the mainstats here, that is the stats
  * for all connections, all variables starting with slice
@@ -132,36 +134,36 @@ static struct {
 static const char *allowed_kvars[] = {
 	"inpcb.inp_flags",
 	"sockb.so_rcv.sb_cc",
-	"sockb.so_rcv.sb_wat",
 	"sockb.so_rcv.sb_hiwat",
+	"sockb.so_rcv.sb_wat",
 	"sockb.so_snd.sb_cc",
-	"sockb.so_snd.sb_wat",
 	"sockb.so_snd.sb_hiwat",
-	"tcpcb.snd_una",
+	"sockb.so_snd.sb_wat",
+	"tcpcb.last_ack_sent",
+	"tcpcb.max_sndwnd",
+	"tcpcb.rcv_adv",
+	"tcpcb.rcv_nxt",
+	"tcpcb.rcv_scale",
+	"tcpcb.rcv_wnd",
+	"tcpcb.rfbuf_cnt",
+	"tcpcb.rfbuf_ts",
+	"tcpcb.snd_cwnd",
+	"tcpcb.snd_max",
 	"tcpcb.snd_nxt",
+	"tcpcb.snd_scale",
+	"tcpcb.snd_ssthresh",
+	"tcpcb.snd_una",
 	"tcpcb.snd_wl1",
 	"tcpcb.snd_wl2",
 	"tcpcb.snd_wnd",
-	"tcpcb.rcv_wnd",
-	"tcpcb.rcv_nxt",
-	"tcpcb.rcv_adv",
-	"tcpcb.snd_max",
-	"tcpcb.snd_cwnd",
-	"tcpcb.snd_ssthresh",
 	"tcpcb.t_rcvtime",
-	"tcpcb.t_rtttime",
 	"tcpcb.t_rtseq",
-	"tcpcb.t_srtt",
-	"tcpcb.t_rttvar",
 	"tcpcb.t_rttmin",
-	"tcpcb.max_sndwnd",
-	"tcpcb.snd_scale",
-	"tcpcb.rcv_scale",
-	"tcpcb.last_ack_sent",
-	"tcpcb.rfbuf_cnt",
-	"tcpcb.rfbuf_ts",
-	"tcpcb.ts_recent_age",
+	"tcpcb.t_rtttime",
+	"tcpcb.t_rttvar",
+	"tcpcb.t_srtt",
 	"tcpcb.ts_recent",
+	"tcpcb.ts_recent_age",
 	NULL
 };
 
@@ -172,10 +174,11 @@ usage(void)
 {
 	fprintf(stderr,
 	    "usage: tcpbench -l\n"
-	    "       tcpbench [-uv] [-B buf] [-k kvars] [-n connections] [-p port]\n"
-	    "                [-r interval] [-S space] [-V rtable] hostname\n"
+	    "       tcpbench [-uv] [-B buf] [-b addr] [-k kvars] [-n connections]\n"
+	    "                [-p port] [-r interval] [-S space] [-T toskeyword]\n"
+	    "                [-t secs] [-V rtable] hostname\n"
 	    "       tcpbench -s [-uv] [-B buf] [-k kvars] [-p port]\n"
-	    "                [-r interval] [-S space] [-V rtable]\n");
+	    "                [-r interval] [-S space] [-T toskeyword] [-V rtable]\n");
 	exit(1);
 }
 
@@ -327,8 +330,7 @@ retry:
 			if (nretry--) {
 				warnx("pcb prev pointer insane");
 				goto retry;
-			}
-			else
+			} else
 				errx(1, "pcb prev pointer insane,"
 				     " all attempts exausted");
 		}
@@ -424,9 +426,9 @@ list_kvars(void)
 {
 	u_int i;
 
-	fprintf(stderr, "Supported kernel variables:\n");
+	printf("Supported kernel variables:\n");
 	for (i = 0; allowed_kvars[i] != NULL; i++)
-		fprintf(stderr, "\t%s\n", allowed_kvars[i]);
+		printf("\t%s\n", allowed_kvars[i]);
 }
 
 static char **
@@ -483,36 +485,36 @@ tcp_stats_display(unsigned long long total_elapsed, long double mbps,
 			}
 			P(inpcb, inp_flags, "0x%08x")
 			P(sockb, so_rcv.sb_cc, "%lu")
-			P(sockb, so_rcv.sb_wat, "%lu")
 			P(sockb, so_rcv.sb_hiwat, "%lu")
+			P(sockb, so_rcv.sb_wat, "%lu")
 			P(sockb, so_snd.sb_cc, "%lu")
-			P(sockb, so_snd.sb_wat, "%lu")
 			P(sockb, so_snd.sb_hiwat, "%lu")
-			P(tcpcb, snd_una, "%u")
+			P(sockb, so_snd.sb_wat, "%lu")
+			P(tcpcb, last_ack_sent, "%u")
+			P(tcpcb, max_sndwnd, "%lu")
+			P(tcpcb, rcv_adv, "%u")
+			P(tcpcb, rcv_nxt, "%u")
+			P(tcpcb, rcv_scale, "%u")
+			P(tcpcb, rcv_wnd, "%lu")
+			P(tcpcb, rfbuf_cnt, "%u")
+			P(tcpcb, rfbuf_ts, "%u")
+			P(tcpcb, snd_cwnd, "%lu")
+			P(tcpcb, snd_max, "%u")
 			P(tcpcb, snd_nxt, "%u")
+			P(tcpcb, snd_scale, "%u")
+			P(tcpcb, snd_ssthresh, "%lu")
+			P(tcpcb, snd_una, "%u")
 			P(tcpcb, snd_wl1, "%u")
 			P(tcpcb, snd_wl2, "%u")
 			P(tcpcb, snd_wnd, "%lu")
-			P(tcpcb, rcv_wnd, "%lu")
-			P(tcpcb, rcv_nxt, "%u")
-			P(tcpcb, rcv_adv, "%u")
-			P(tcpcb, snd_max, "%u")
-			P(tcpcb, snd_cwnd, "%lu")
-			P(tcpcb, snd_ssthresh, "%lu")
 			P(tcpcb, t_rcvtime, "%u")
-			P(tcpcb, t_rtttime, "%u")
 			P(tcpcb, t_rtseq, "%u")
-			P(tcpcb, t_srtt, "%hu")
-			P(tcpcb, t_rttvar, "%hu")
 			P(tcpcb, t_rttmin, "%hu")
-			P(tcpcb, max_sndwnd, "%lu")
-			P(tcpcb, snd_scale, "%u")
-			P(tcpcb, rcv_scale, "%u")
-			P(tcpcb, last_ack_sent, "%u")
-			P(tcpcb, rfbuf_cnt, "%u")
-			P(tcpcb, rfbuf_ts, "%u")
-			P(tcpcb, ts_recent_age, "%u")
+			P(tcpcb, t_rtttime, "%u")
+			P(tcpcb, t_rttvar, "%hu")
+			P(tcpcb, t_srtt, "%hu")
 			P(tcpcb, ts_recent, "%u")
+			P(tcpcb, ts_recent_age, "%u")
 #undef S			    
 #undef P
 		}
@@ -569,8 +571,8 @@ static void
 udp_process_slice(int fd, short event, void *v_sc)
 {
 	struct statctx *sc = v_sc;
-	unsigned long long total_elapsed, since_last;
-	long double slice_mbps, pps;
+	unsigned long long total_elapsed, since_last, pps;
+	long double slice_mbps;
 	struct timeval t_cur, t_diff;
 
 	if (clock_gettime_tv(CLOCK_MONOTONIC, &t_cur) == -1)
@@ -584,7 +586,7 @@ udp_process_slice(int fd, short event, void *v_sc)
 	pps = (sc->udp_slice_pkts * 1000) / since_last;
 	if (slice_mbps > mainstats.peak_mbps)
 		mainstats.peak_mbps = slice_mbps;
-	printf("Elapsed: %11llu Mbps: %11.3Lf Peak Mbps: %11.3Lf %s PPS: %10.3Lf\n",
+	printf("Elapsed: %11llu Mbps: %11.3Lf Peak Mbps: %11.3Lf %s PPS: %7llu\n",
 	    total_elapsed, slice_mbps, mainstats.peak_mbps,
 	    ptb->sflag ? "Rx" : "Tx", pps);
 
@@ -642,6 +644,7 @@ again:
 	} else if (n == 0) {
 		if (ptb->vflag)
 			fprintf(stderr, "%8d closed by remote end\n", sc->fd);
+		event_del(&sc->ev);
 		close(sc->fd);
 		TAILQ_REMOVE(&sc_queue, sc, entry);
 		free(sc);
@@ -679,6 +682,16 @@ again:
 	r |= O_NONBLOCK;
 	if (fcntl(sock, F_SETFL, r) == -1)
 		err(1, "fcntl(F_SETFL, O_NONBLOCK)");
+	if (ptb->Tflag != -1 && ss.ss_family == AF_INET) {
+		if (setsockopt(sock, IPPROTO_IP, IP_TOS,
+		    &ptb->Tflag, sizeof(ptb->Tflag)))
+			err(1, "setsockopt IP_TOS");
+	}
+	if (ptb->Tflag != -1 && ss.ss_family == AF_INET6) {
+		if (setsockopt(sock, IPPROTO_IPV6, IPV6_TCLASS,
+		    &ptb->Tflag, sizeof(ptb->Tflag)))
+			err(1, "setsockopt IPV6_TCLASS");
+	}
 	/* Alloc client structure and register reading callback */
 	if ((sc = calloc(1, sizeof(*sc))) == NULL)
 		err(1, "calloc");
@@ -691,7 +704,8 @@ again:
 	mainstats.nconns++;
 	set_slice_timer(mainstats.nconns > 0);
 	if (ptb->vflag)
-		warnx("Accepted connection from %s, fd = %d\n", tmp, sc->fd);
+		fprintf(stderr, "Accepted connection from %s, fd = %d\n",
+		    tmp, sc->fd);
 }
 
 static void
@@ -702,9 +716,6 @@ server_init(struct addrinfo *aitop, struct statctx *udp_sc)
 	struct addrinfo *ai;
 	struct event *ev;
 	nfds_t lnfds;
-
-	if (setpgid(0, 0) == -1)
-		err(1, "setpgid");
 
 	lnfds = 0;
 	for (ai = aitop; ai != NULL; ai = ai->ai_next) {
@@ -727,6 +738,16 @@ server_init(struct addrinfo *aitop, struct statctx *udp_sc)
 				else
 					err(1, "setsockopt SO_RTABLE");
 			}
+		}
+		if (ptb->Tflag != -1 && ai->ai_family == AF_INET) {
+			if (setsockopt(sock, IPPROTO_IP, IP_TOS,
+			    &ptb->Tflag, sizeof(ptb->Tflag)))
+				err(1, "setsockopt IP_TOS");
+		}
+		if (ptb->Tflag != -1 && ai->ai_family == AF_INET6) {
+			if (setsockopt(sock, IPPROTO_IPV6, IPV6_TCLASS,
+			    &ptb->Tflag, sizeof(ptb->Tflag)))
+				err(1, "setsockopt IPV6_TCLASS");
 		}
 		if (setsockopt(sock, SOL_SOCKET, SO_REUSEADDR,
 		    &on, sizeof(on)) == -1)
@@ -786,11 +807,11 @@ again:
 		err(1, "write");
 	}
 	if (TCP_MODE && n == 0) {	
-		warnx("Remote end closed connection");
+		fprintf(stderr, "Remote end closed connection");
 		exit(1);
 	}
 	if (ptb->vflag >= 3)
-		warnx("write: %zd bytes\n", n);
+		fprintf(stderr, "write: %zd bytes\n", n);
 	sc->bytes += n;
 	mainstats.slice_bytes += n;
 	if (UDP_MODE)
@@ -798,7 +819,8 @@ again:
 }
 
 static void
-client_init(struct addrinfo *aitop, int nconn, struct statctx *udp_sc)
+client_init(struct addrinfo *aitop, int nconn, struct statctx *udp_sc,
+    struct addrinfo *aib)
 {
 	struct statctx *sc;
 	struct addrinfo *ai;
@@ -819,6 +841,27 @@ client_init(struct addrinfo *aitop, int nconn, struct statctx *udp_sc)
 				if (ptb->vflag)
 					warn("socket");
 				continue;
+			}
+			if (aib != NULL) {
+				saddr_ntop(aib->ai_addr, aib->ai_addrlen,
+				    tmp, sizeof(tmp));
+				if (ptb->vflag)
+					fprintf(stderr,
+					    "Try to bind to %s\n", tmp);
+				if (bind(sock, (struct sockaddr *)aib->ai_addr,
+				    aib->ai_addrlen) == -1)
+					err(1, "bind");
+				freeaddrinfo(aib);
+			}
+			if (ptb->Tflag != -1 && ai->ai_family == AF_INET) {
+				if (setsockopt(sock, IPPROTO_IP, IP_TOS,
+				    &ptb->Tflag, sizeof(ptb->Tflag)))
+					err(1, "setsockopt IP_TOS");
+			}
+			if (ptb->Tflag != -1 && ai->ai_family == AF_INET6) {
+				if (setsockopt(sock, IPPROTO_IPV6, IPV6_TCLASS,
+				    &ptb->Tflag, sizeof(ptb->Tflag)))
+					err(1, "setsockopt IPV6_TCLASS");
 			}
 			if (ptb->Vflag) {
 				if (setsockopt(sock, SOL_SOCKET, SO_RTABLE,
@@ -865,13 +908,66 @@ client_init(struct addrinfo *aitop, int nconn, struct statctx *udp_sc)
 		TAILQ_INSERT_TAIL(&sc_queue, sc, entry);
 		mainstats.nconns++;
 		set_slice_timer(mainstats.nconns > 0);
-		if (UDP_MODE)
-			break;
 	}
 	freeaddrinfo(aitop);
 
 	if (ptb->vflag && nconn > 1)
-		fprintf(stderr, "%u connections established\n", nconn);
+		fprintf(stderr, "%d connections established\n",
+		    mainstats.nconns);
+}
+
+static int
+map_tos(char *s, int *val)
+{
+	/* DiffServ Codepoints and other TOS mappings */
+	const struct toskeywords {
+		const char	*keyword;
+		int		 val;
+	} *t, toskeywords[] = {
+		{ "af11",		IPTOS_DSCP_AF11 },
+		{ "af12",		IPTOS_DSCP_AF12 },
+		{ "af13",		IPTOS_DSCP_AF13 },
+		{ "af21",		IPTOS_DSCP_AF21 },
+		{ "af22",		IPTOS_DSCP_AF22 },
+		{ "af23",		IPTOS_DSCP_AF23 },
+		{ "af31",		IPTOS_DSCP_AF31 },
+		{ "af32",		IPTOS_DSCP_AF32 },
+		{ "af33",		IPTOS_DSCP_AF33 },
+		{ "af41",		IPTOS_DSCP_AF41 },
+		{ "af42",		IPTOS_DSCP_AF42 },
+		{ "af43",		IPTOS_DSCP_AF43 },
+		{ "critical",		IPTOS_PREC_CRITIC_ECP },
+		{ "cs0",		IPTOS_DSCP_CS0 },
+		{ "cs1",		IPTOS_DSCP_CS1 },
+		{ "cs2",		IPTOS_DSCP_CS2 },
+		{ "cs3",		IPTOS_DSCP_CS3 },
+		{ "cs4",		IPTOS_DSCP_CS4 },
+		{ "cs5",		IPTOS_DSCP_CS5 },
+		{ "cs6",		IPTOS_DSCP_CS6 },
+		{ "cs7",		IPTOS_DSCP_CS7 },
+		{ "ef",			IPTOS_DSCP_EF },
+		{ "inetcontrol",	IPTOS_PREC_INTERNETCONTROL },
+		{ "lowdelay",		IPTOS_LOWDELAY },
+		{ "netcontrol",		IPTOS_PREC_NETCONTROL },
+		{ "reliability",	IPTOS_RELIABILITY },
+		{ "throughput",		IPTOS_THROUGHPUT },
+		{ NULL, 		-1 },
+	};
+	
+	for (t = toskeywords; t->keyword != NULL; t++) {
+		if (strcmp(s, t->keyword) == 0) {
+			*val = t->val;
+			return (1);
+		}
+	}
+	
+	return (0);
+}
+
+static void
+quit(int sig, short event, void *arg)
+{
+	exit(0);
 }
 
 int
@@ -879,28 +975,37 @@ main(int argc, char **argv)
 {
 	extern int optind;
 	extern char *optarg;
+	struct timeval tv;
+	unsigned int secs;
 
 	char kerr[_POSIX2_LINE_MAX], *tmp;
-	struct addrinfo *aitop, hints;
+	struct addrinfo *aitop, *aib, hints;
 	const char *errstr;
 	struct rlimit rl;
 	int ch, herr, nconn;
 	struct nlist nl[] = { { "_tcbtable" }, { "" } };
-	const char *host = NULL, *port = DEFAULT_PORT;
-	struct event ev_sigint, ev_sigterm, ev_sighup;
+	const char *host = NULL, *port = DEFAULT_PORT, *srcbind = NULL;
+	struct event ev_sigint, ev_sigterm, ev_sighup, ev_progtimer;
 	struct statctx *udp_sc = NULL;
 
 	/* Init world */
+	setlinebuf(stdout);
 	ptb = &tcpbench;
 	ptb->dummybuf_len = 0;
 	ptb->Sflag = ptb->sflag = ptb->vflag = ptb->Vflag = 0;
 	ptb->kvmh  = NULL;
 	ptb->kvars = NULL;
 	ptb->rflag = DEFAULT_STATS_INTERVAL;
+	ptb->Tflag = -1;
 	nconn = 1;
+	aib = NULL;
+	secs = 0;
 
-	while ((ch = getopt(argc, argv, "B:hlk:n:p:r:sS:uvV:")) != -1) {
+	while ((ch = getopt(argc, argv, "b:B:hlk:n:p:r:sS:t:T:uvV:")) != -1) {
 		switch (ch) {
+		case 'b':
+			srcbind = optarg;
+			break;
 		case 'l':
 			list_kvars();
 			exit(0);
@@ -956,6 +1061,25 @@ main(int argc, char **argv)
 		case 'u':
 			ptb->uflag = 1;
 			break;
+		case 'T':
+			if (map_tos(optarg, &ptb->Tflag))
+				break;
+			errstr = NULL;
+			if (strlen(optarg) > 1 && optarg[0] == '0' &&
+			    optarg[1] == 'x')
+				ptb->Tflag = (int)strtol(optarg, NULL, 16);
+			else
+				ptb->Tflag = (int)strtonum(optarg, 0, 255,
+				    &errstr);
+			if (ptb->Tflag == -1 || ptb->Tflag > 255 || errstr)
+				errx(1, "illegal tos value %s", optarg);
+			break;
+		case 't':
+			secs = strtonum(optarg, 1, UINT_MAX, &errstr);
+			if (errstr != NULL)
+				errx(1, "secs is %s: %s",
+				    errstr, optarg);
+			break;
 		case 'h':
 		default:
 			usage();
@@ -984,12 +1108,26 @@ main(int argc, char **argv)
 	}
 
 	bzero(&hints, sizeof(hints));
-	if (UDP_MODE)
+	if (UDP_MODE) {
 		hints.ai_socktype = SOCK_DGRAM;
-	else
+		hints.ai_protocol = IPPROTO_UDP;
+	} else {
 		hints.ai_socktype = SOCK_STREAM;
+		hints.ai_protocol = IPPROTO_TCP;
+	}
 	if (ptb->sflag)
 		hints.ai_flags = AI_PASSIVE;
+	if (srcbind != NULL) {
+		hints.ai_flags |= AI_NUMERICHOST;
+		herr = getaddrinfo(srcbind, NULL, &hints, &aib);
+		hints.ai_flags &= ~AI_NUMERICHOST;
+		if (herr != 0) {
+			if (herr == EAI_SYSTEM)
+				err(1, "getaddrinfo");
+			else
+				errx(1, "getaddrinfo: %s", gai_strerror(herr));
+		}
+	}
 	if ((herr = getaddrinfo(host, port, &hints, &aitop)) != 0) {
 		if (herr == EAI_SYSTEM)
 			err(1, "getaddrinfo");
@@ -1022,13 +1160,6 @@ main(int argc, char **argv)
 		err(1, "malloc");
 	arc4random_buf(ptb->dummybuf, ptb->dummybuf_len);
 
-	if (UDP_MODE) {
-		if ((udp_sc = calloc(1, sizeof(*udp_sc))) == NULL)
-			err(1, "calloc");
-		udp_sc->fd = -1;
-		stats_prepare(udp_sc);
-	}
-
 	/* Setup libevent and signals */
 	event_init();
 	signal_set(&ev_sigterm, SIGTERM, signal_handler, NULL);
@@ -1039,18 +1170,28 @@ main(int argc, char **argv)
 	signal_add(&ev_sighup, NULL);
 	signal(SIGPIPE, SIG_IGN);
 	
-	if (TCP_MODE)
-		print_tcp_header();
-	
-	if (UDP_MODE)
+	if (UDP_MODE) {
+		if ((udp_sc = calloc(1, sizeof(*udp_sc))) == NULL)
+			err(1, "calloc");
+		udp_sc->fd = -1;
+		stats_prepare(udp_sc);
 		evtimer_set(&mainstats.timer, udp_process_slice, udp_sc);
-	else
+	} else {
+		print_tcp_header();
 		evtimer_set(&mainstats.timer, tcp_process_slice, NULL);
+	}
 
-	if (ptb->sflag) {
+	if (ptb->sflag)
 		server_init(aitop, udp_sc);
-	} else
-		client_init(aitop, nconn, udp_sc);
+	else {
+		if (secs > 0) {
+			timerclear(&tv);
+			tv.tv_sec = secs + 1;
+			evtimer_set(&ev_progtimer, quit, NULL);
+			evtimer_add(&ev_progtimer, &tv);
+		}
+		client_init(aitop, nconn, udp_sc, aib);
+	}
 	
 	/* libevent main loop*/
 	event_dispatch();

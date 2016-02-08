@@ -1,4 +1,4 @@
-/* $OpenBSD: cmd-split-window.c,v 1.23 2011/02/10 12:12:14 nicm Exp $ */
+/* $OpenBSD: cmd-split-window.c,v 1.28 2012/01/31 15:52:21 nicm Exp $ */
 
 /*
  * Copyright (c) 2009 Nicholas Marriott <nicm@users.sourceforge.net>
@@ -33,8 +33,9 @@ int	cmd_split_window_exec(struct cmd *, struct cmd_ctx *);
 
 const struct cmd_entry cmd_split_window_entry = {
 	"split-window", "splitw",
-	"dl:hp:Pt:v", 0, 1,
-	"[-dhvP] [-p percentage|-l size] [-t target-pane] [command]",
+	"c:dl:hp:Pt:v", 0, 1,
+	"[-dhvP] [-c start-directory] [-p percentage|-l size] [-t target-pane] "
+	"[command]",
 	0,
 	cmd_split_window_key_binding,
 	NULL,
@@ -58,8 +59,8 @@ cmd_split_window_exec(struct cmd *self, struct cmd_ctx *ctx)
 	struct window		*w;
 	struct window_pane	*wp, *new_wp = NULL;
 	struct environ		 env;
-	char		 	*cmd, *cwd, *cause;
-	const char		*shell;
+	const char	       	*cmd, *cwd, *shell;
+	char			*cause, *new_cause;
 	u_int			 hlimit, paneidx;
 	int			 size, percentage;
 	enum layout_type	 type;
@@ -78,13 +79,7 @@ cmd_split_window_exec(struct cmd *self, struct cmd_ctx *ctx)
 		cmd = options_get_string(&s->options, "default-command");
 	else
 		cmd = args->argv[0];
-	cwd = options_get_string(&s->options, "default-path");
-	if (*cwd == '\0') {
-		if (ctx->cmdclient != NULL && ctx->cmdclient->cwd != NULL)
-			cwd = ctx->cmdclient->cwd;
-		else
-			cwd = s->cwd;
-	}
+	cwd = cmd_get_default_path(ctx, args_get(args, 'c'));
 
 	type = LAYOUT_TOPBOTTOM;
 	if (args_has(args, 'h'))
@@ -94,16 +89,18 @@ cmd_split_window_exec(struct cmd *self, struct cmd_ctx *ctx)
 	if (args_has(args, 'l')) {
 		size = args_strtonum(args, 'l', 0, INT_MAX, &cause);
 		if (cause != NULL) {
-			ctx->error(ctx, "size %s", cause);
+			xasprintf(&new_cause, "size %s", cause);
 			xfree(cause);
-			return (-1);
+			cause = new_cause;
+			goto error;
 		}
 	} else if (args_has(args, 'p')) {
 		percentage = args_strtonum(args, 'p', 0, INT_MAX, &cause);
 		if (cause != NULL) {
-			ctx->error(ctx, "percentage %s", cause);
+			xasprintf(&new_cause, "percentage %s", cause);
 			xfree(cause);
-			return (-1);
+			cause = new_cause;
+			goto error;
 		}
 		if (type == LAYOUT_TOPBOTTOM)
 			size = (wp->sy * percentage) / 100;
@@ -138,7 +135,8 @@ cmd_split_window_exec(struct cmd *self, struct cmd_ctx *ctx)
 	environ_free(&env);
 
 	if (args_has(args, 'P')) {
-		paneidx = window_pane_index(wl->window, new_wp);
+		if (window_pane_index(new_wp, &paneidx) != 0)
+			fatalx("index not found");
 		ctx->print(ctx, "%s:%u.%u", s->name, wl->idx, paneidx);
 	}
 	return (0);

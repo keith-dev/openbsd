@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap.h,v 1.7 2011/07/07 18:40:12 kettenis Exp $	*/
+/*	$OpenBSD: pmap.h,v 1.9 2011/09/18 11:55:23 kettenis Exp $	*/
 
 /*
  * Copyright (c) 2005 Michael Shalayeff
@@ -24,9 +24,11 @@
 #include <uvm/uvm_page.h>
 #include <uvm/uvm_object.h>
 
+#ifdef _KERNEL
+
 struct pmap {
-	simple_lock_data_t pm_lock;
-	int		pm_refcount;
+	struct uvm_object pm_obj;	/* object (lck by object lock) */
+#define	pm_lock	pm_obj.vmobjlock
 	struct vm_page	*pm_ptphint;
 	struct pglist	pm_pglist;
 	volatile u_int32_t *pm_pdir;	/* page dir (read-only after create) */
@@ -42,8 +44,6 @@ struct pv_entry {			/* locked by its list's pvh_lock */
 	vaddr_t		pv_va;		/* the virtual address */
 	struct vm_page	*pv_ptp;	/* the vm_page of the PTP */
 };
-
-#ifdef	_KERNEL
 
 extern struct pmap kernel_pmap_store;
 

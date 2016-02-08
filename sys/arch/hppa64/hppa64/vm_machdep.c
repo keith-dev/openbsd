@@ -1,4 +1,4 @@
-/*	$OpenBSD: vm_machdep.c,v 1.14 2011/07/07 18:18:38 kettenis Exp $	*/
+/*	$OpenBSD: vm_machdep.c,v 1.17 2011/09/22 13:50:30 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2005 Michael Shalayeff
@@ -43,11 +43,8 @@ extern struct pool hppa_fppl;
  * Dump the machine specific header information at the start of a core dump.
  */
 int
-cpu_coredump(p, vp, cred, core)
-	struct proc *p;
-	struct vnode *vp;
-	struct ucred *cred;
-	struct core *core;
+cpu_coredump(struct proc *p, struct vnode *vp, struct ucred *cred,
+    struct core *core)
 {
 	struct md_coredump md_core;
 	struct coreseg cseg;
@@ -84,12 +81,8 @@ cpu_coredump(p, vp, cred, core)
 }
 
 void
-cpu_fork(p1, p2, stack, stacksize, func, arg)
-	struct proc *p1, *p2;
-	void *stack;
-	size_t stacksize;
-	void (*func)(void *);
-	void *arg;
+cpu_fork(struct proc *p1, struct proc *p2, void *stack, size_t stacksize,
+    void (*func)(void *), void *arg)
 {
 	extern register_t switch_tramp_p;
 
@@ -136,7 +129,8 @@ cpu_fork(p1, p2, stack, stacksize, func, arg)
 	 */
 	tf->tf_sr7 = HPPA_SID_KERNEL;
 	tf->tf_eiem = mfctl(CR_EIEM);
-	tf->tf_ipsw = PSL_W | PSL_C | PSL_Q | PSL_P | PSL_D | PSL_I /* | PSL_L */;
+	tf->tf_ipsw = PSL_C | PSL_Q | PSL_P | PSL_D | PSL_I /* | PSL_L */ |
+	    PSL_O | PSL_W;
 
 	/*
 	 * If specified, give the child a different stack.
@@ -145,14 +139,14 @@ cpu_fork(p1, p2, stack, stacksize, func, arg)
 		tf->tf_sp = (register_t)stack;
 
 	/*
-	 * Build stack frames for the cpu_switch & co.
+	 * Build stack frames for the cpu_switchto & co.
 	 */
 	osp = sp + HPPA_FRAME_SIZE;
 	*(register_t*)(osp - HPPA_FRAME_SIZE) = 0;
 	*(register_t*)(osp + HPPA_FRAME_RP) = switch_tramp_p;
 	*(register_t*)(osp) = (osp - HPPA_FRAME_SIZE);
 
-	sp = osp + HPPA_FRAME_SIZE + 20*8; /* frame + calee-save registers */
+	sp = osp + HPPA_FRAME_SIZE + 20*8; /* frame + callee-saved registers */
 	*(register_t*)(sp - HPPA_FRAME_SIZE + 0) = (register_t)arg;
 	*(register_t*)(sp - HPPA_FRAME_SIZE + 8) = KERNMODE(func);
 	*(register_t*)(sp - HPPA_FRAME_SIZE + 16) = 0;	/* cpl */
@@ -176,9 +170,7 @@ cpu_exit(struct proc *p)
  * Map an IO request into kernel virtual address space.
  */
 void
-vmapbuf(bp, len)
-	struct buf *bp;
-	vsize_t len;
+vmapbuf(struct buf *bp, vsize_t len)
 {
 	struct pmap *pm = vm_map_pmap(&bp->b_proc->p_vmspace->vm_map);
 	vaddr_t kva, uva;
@@ -213,9 +205,7 @@ vmapbuf(bp, len)
  * Unmap IO request from the kernel virtual address space.
  */
 void
-vunmapbuf(bp, len)
-	struct buf *bp;
-	vsize_t len;
+vunmapbuf(struct buf *bp, vsize_t len)
 {
 	vaddr_t addr, off;
 

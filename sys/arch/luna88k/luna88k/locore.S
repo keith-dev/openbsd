@@ -1,4 +1,4 @@
-/*	$OpenBSD: locore.S,v 1.21 2010/12/23 20:05:08 miod Exp $	*/
+/*	$OpenBSD: locore.S,v 1.24 2012/01/28 11:34:19 aoyama Exp $	*/
 /*
  * Copyright (c) 1998 Steve Murphree, Jr.
  * Copyright (c) 1996 Nivas Madhur
@@ -108,8 +108,8 @@ ASLOCAL(main_start)
 	 * Now we will compete with the other processors to see which one
 	 * will be elected as the main one.
 	 */
-	or.u	r11, r0,  hi16(_C_LABEL(cpu_mutex))
-	or	r11, r11, lo16(_C_LABEL(cpu_mutex))
+	or.u	r11, r0,  hi16(_C_LABEL(cpu_hatch_mutex))
+	or	r11, r11, lo16(_C_LABEL(cpu_hatch_mutex))
 1:
 	FLUSH_PIPELINE
 	or	r22, r0,  1
@@ -144,9 +144,20 @@ ASLOCAL(main_start)
 	bcnd	ne0, r22, _ASM_LABEL(secondary_init)
 
 	/*
-	 * Main processor specific initialization (with cpu_mutex held).
+	 * Main processor specific initialization (with
+	 * cpu_hatch_mutex held).
 	 */
 ASLOCAL(main_init)
+	/*
+	 * Have curcpu() point to the dummy cpuinfo structure,
+	 * and initialize cr17.
+	 * This is necessary for early spl*() usage, as well as
+	 * mutex diagnostic code.
+	 */
+	or.u	r11, r0,  hi16(_ASM_LABEL(dummy_cpu))
+	or	r11, r11, lo16(_ASM_LABEL(dummy_cpu))
+	stcr	r11, CPU
+
 	/* Switch to startup stack */
 	or.u	r31, r0,  hi16(_ASM_LABEL(initstack_end))
 	or	r31, r31, lo16(_ASM_LABEL(initstack_end))
@@ -225,13 +236,26 @@ ASLOCAL(main_panic)
 	.align	8
 
 	/*
-	 * Secondary processor specific initialization (with cpu_mutex held).
+	 * Secondary processor specific initialization (with
+	 * cpu_hatch_mutex held).
 	 */
 ASLOCAL(secondary_init)
 #ifdef MULTIPROCESSOR
 	/*
-	 * While holding the cpu_mutex, the secondary cpu can use the slavestack
-	 * to call secondary_pre_main() to determine its cpu number.
+	 * Have curcpu() point to the dummy cpuinfo structure,
+	 * and initialize cr17.
+	 * This is necessary for early spl*() usage, as well as
+	 * mutex diagnostic code.
+	 */
+	or.u	r11, r0,  hi16(_ASM_LABEL(dummy_cpu))
+	or	r11, r11, lo16(_ASM_LABEL(dummy_cpu))
+	st	r0,  r11, CI_FLAGS		/* reset CIF_PRIMARY */
+	stcr	r11, CPU
+
+	/*
+	 * While holding the cpu_hatch_mutex, the secondary cpu can use the
+	 * slavestack to call secondary_pre_main() to determine its cpu
+	 * number.
 	 * After that, however, it should allocate its own stack and switch
 	 * to it.
 	 */
@@ -253,6 +277,16 @@ ASLOCAL(secondary_init)
 	 */
 1:	br	1b
 
+#endif	/* MULTIPROCESSOR */
+
+#ifdef MULTIPROCESSOR
+	/*
+	 * Dummy mp_atomic_begin() and mp_atomic_end() routine, so that
+	 * we can interact with ddb if things go wrong very early during
+	 * bootstrap. Of course this should never happen (-:
+	 */
+ASLOCAL(dummy_mplock)
+	jmp	r1
 #endif	/* MULTIPROCESSOR */
 
 /*
@@ -304,9 +338,25 @@ ASLOCAL(u0)
 GLOBAL(proc0paddr)
 	word	_ASM_LABEL(u0)	/*  KVA of proc0 uarea */
 
-/* The first processor that XMEMs this becomes the master */
+/* The first processor to XMEM this becomes the master */
 ASLOCAL(master_mpu)
 	word 0
+
+/* Dummy cpuinfo structure, for early bootstrap */
+ASLOCAL(dummy_cpu)
+	word	3 /* CIF_ALIVE | CIF_PRIMARY */	/* ci_flags */
+	word	0				/* ci_curproc */
+	word	0				/* ci_curpcb */
+	word	0				/* ci_curpmap */
+	word	0				/* ci_cpuid */
+#ifdef MULTIPROCESSOR
+	word	_ASM_LABEL(dummy_mplock)	/* ci_mp_atomic_begin */
+	word	_ASM_LABEL(dummy_mplock)	/* ci_mp_atomic_end */
+#else
+	word	0
+	word	0
+#endif
+	space	CPU_INFO_SIZEOF - 7 * 4
 
 #if defined(DDB) || NKSYMS > 0
 GLOBAL(esym)

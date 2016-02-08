@@ -1,4 +1,4 @@
-/*	$OpenBSD: pfctl.c,v 1.304 2011/07/08 02:16:12 mcbride Exp $ */
+/*	$OpenBSD: pfctl.c,v 1.309 2012/01/15 15:59:33 dhill Exp $ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
@@ -232,7 +232,7 @@ usage(void)
 {
 	extern char *__progname;
 
-	fprintf(stderr, "usage: %s [-deghnqrvz] ", __progname);
+	fprintf(stderr, "usage: %s [-deghnPqrvz] ", __progname);
 	fprintf(stderr, "[-a anchor] [-D macro=value] [-F modifier]\n");
 	fprintf(stderr, "\t[-f file] [-i interface] [-K host | network]\n");
 	fprintf(stderr, "\t[-k host | network | label | id] ");
@@ -705,7 +705,7 @@ void
 pfctl_print_rule_counters(struct pf_rule *rule, int opts)
 {
 	if (opts & PF_OPT_DEBUG) {
-		const char *t[PF_SKIP_COUNT] = { "i", "r", "d", "f",
+		const char *t[PF_SKIP_COUNT] = { "i", "d", "r", "f",
 		    "p", "sa", "da", "sp", "dp" };
 		int i;
 
@@ -755,7 +755,6 @@ pfctl_show_rules(int dev, char *path, int opts, enum pfctl_show format,
 {
 	struct pfioc_rule pr;
 	u_int32_t nr, mnr, header = 0;
-	int rule_numbers = opts & (PF_OPT_VERBOSE2 | PF_OPT_DEBUG);
 	int len = strlen(path), ret = 0;
 	char *npath, *p;
 
@@ -773,7 +772,7 @@ pfctl_show_rules(int dev, char *path, int opts, enum pfctl_show format,
 	if (anchorname[0] == '/') {
 		if ((npath = calloc(1, MAXPATHLEN)) == NULL)
 			errx(1, "pfctl_rules: calloc");
-		snprintf(npath, MAXPATHLEN, anchorname);
+		strlcpy(npath, anchorname, MAXPATHLEN);
 	} else {
 		if (path[0])
 			snprintf(&path[len], MAXPATHLEN - len, "/%s", anchorname);
@@ -884,7 +883,7 @@ pfctl_show_rules(int dev, char *path, int opts, enum pfctl_show format,
 			if (pr.rule.label[0] && (opts & PF_OPT_SHOWALL))
 				labels = 1;
 			INDENT(depth, !(opts & PF_OPT_VERBOSE));
-			print_rule(&pr.rule, pr.anchor_call, rule_numbers);
+			print_rule(&pr.rule, pr.anchor_call, opts);
 
 			/*
 			 * If this is a 'unnamed' brace notation
@@ -1232,7 +1231,7 @@ pfctl_load_rule(struct pfctl *pf, char *path, struct pf_rule *r, int depth)
 
 	if (pf->opts & PF_OPT_VERBOSE) {
 		INDENT(depth, !(pf->opts & PF_OPT_VERBOSE2));
-		print_rule(r, name, pf->opts & PF_OPT_VERBOSE2);
+		print_rule(r, name, pf->opts);
 	}
 	path[len] = '\0';
 	return (0);
@@ -1274,6 +1273,7 @@ pfctl_rules(int dev, char *filename, int opts, int optimize,
 	char			*path = NULL;
 	int			 osize;
 
+	bzero(&pf, sizeof(pf));
 	RB_INIT(&pf_anchors);
 	memset(&pf_main_anchor, 0, sizeof(pf_main_anchor));
 	pf_init_ruleset(&pf_main_anchor.ruleset);
@@ -1669,7 +1669,7 @@ pfctl_load_logif(struct pfctl *pf, char *ifname)
 	return (0);
 }
 
-int
+void
 pfctl_set_hostid(struct pfctl *pf, u_int32_t hostid)
 {
 	HTONL(hostid);
@@ -1679,8 +1679,6 @@ pfctl_set_hostid(struct pfctl *pf, u_int32_t hostid)
 
 	if (pf->opts & PF_OPT_VERBOSE)
 		printf("set hostid 0x%08x\n", ntohl(hostid));
-
-	return (0);
 }
 
 int
@@ -1948,7 +1946,7 @@ main(int argc, char *argv[])
 		usage();
 
 	while ((ch = getopt(argc, argv,
-	    "a:dD:eqf:F:ghi:k:K:L:no:p:R:rS:s:t:T:vx:z")) != -1) {
+	    "a:dD:eqf:F:ghi:k:K:L:no:Pp:R:rS:s:t:T:vx:z")) != -1) {
 		switch (ch) {
 		case 'a':
 			anchoropt = optarg;
@@ -2025,6 +2023,9 @@ main(int argc, char *argv[])
 				usage();
 			}
 			opts |= PF_OPT_OPTIMIZE;
+			break;
+		case 'P':
+			opts |= PF_OPT_PORTNAMES;
 			break;
 		case 'p':
 			pf_device = optarg;

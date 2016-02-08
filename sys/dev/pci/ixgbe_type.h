@@ -1,4 +1,4 @@
-/*	$OpenBSD: ixgbe_type.h,v 1.8 2011/06/10 12:46:35 claudio Exp $	*/
+/*	$OpenBSD: ixgbe_type.h,v 1.10 2011/12/09 11:41:55 mikeb Exp $	*/
 
 /******************************************************************************
 
@@ -1113,6 +1113,7 @@
 #define IXGBE_GPIE_EIAME         0x40000000
 #define IXGBE_GPIE_PBA_SUPPORT   0x80000000
 #define IXGBE_GPIE_RSC_DELAY_SHIFT 11
+#define IXGBE_GPIE_LLI_DELAY_SHIFT 7
 #define IXGBE_GPIE_VTMODE_MASK   0x0000C000 /* VT Mode Mask */
 #define IXGBE_GPIE_VTMODE_16     0x00004000 /* 16 VFs 8 queues per VF */
 #define IXGBE_GPIE_VTMODE_32     0x00008000 /* 32 VFs 4 queues per VF */
@@ -1317,7 +1318,6 @@
 #define IXGBE_EIMS_ENABLE_MASK ( \
                                 IXGBE_EIMS_RTX_QUEUE       | \
                                 IXGBE_EIMS_LSC             | \
-                                IXGBE_EIMS_TCP_TIMER       | \
                                 IXGBE_EIMS_OTHER)
 
 /* Immediate Interrupt Rx (A.K.A. Low Latency Interrupt) */

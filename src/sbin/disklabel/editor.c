@@ -1,4 +1,4 @@
-/*	$OpenBSD: editor.c,v 1.258 2011/07/05 21:39:08 krw Exp $	*/
+/*	$OpenBSD: editor.c,v 1.266 2012/01/30 10:05:31 chl Exp $	*/
 
 /*
  * Copyright (c) 1997-2000 Todd C. Miller <Todd.Miller@courtesan.com>
@@ -204,7 +204,7 @@ editor(int f)
 	}
 
 #ifdef SUN_CYLCHECK
-	if (newlab.d_flags & D_VENDOR) {
+	if ((newlab.d_flags & D_VENDOR) & !aflag) {
 		puts("This platform requires that partition offsets/sizes "
 		    "be on cylinder boundaries.\n"
 		    "Partition offsets/sizes will be rounded to the "
@@ -254,8 +254,9 @@ editor(int f)
 
 		case 'A':
 			if (ioctl(f, DIOCGPDINFO, &newlab) == 0) {
-				aflag = 1;
+				++aflag;
 				editor_allocspace(&newlab);
+				--aflag;
 			} else
 				newlab = lastlabel;
 			break;
@@ -891,7 +892,8 @@ editor_add(struct disklabel *lp, char *p)
 
 	if (get_offset(lp, partno) == 0 &&
 	    get_size(lp, partno) == 0) {
-		fragsize = 2048;
+		fragsize = (lp->d_secsize == DEV_BSIZE) ? 2048 :
+		    lp->d_secsize;
 		new_size = DL_GETPSIZE(pp) * lp->d_secsize;
 		if (new_size > 128ULL * 1024 * 1024 * 1024)
 			fragsize *= 2;
@@ -1178,12 +1180,13 @@ getuint(struct disklabel *lp, char *prompt, char *helpstring,
 					buf[--n] = '\0';
 					break;
 				case 'b':
-					mult = -lp->d_secsize;
+					mult = -(int64_t)lp->d_secsize;
 					buf[--n] = '\0';
 					break;
 				case 'k':
 					if (lp->d_secsize > 1024)
-						mult = -lp->d_secsize / 1024LL;
+						mult = -(int64_t)lp->d_secsize /
+						    1024LL;
 					else
 						mult = 1024LL / lp->d_secsize;
 					buf[--n] = '\0';
@@ -1268,7 +1271,9 @@ getuint(struct disklabel *lp, char *prompt, char *helpstring,
 			if ((cyls * lp->d_secpercyl) - offset > maxval)
 				cyls--;
 			rval = (cyls * lp->d_secpercyl) - offset;
-			printf("Rounding to cylinder: %llu\n", rval);
+			if (!aflag)
+				printf("Rounding size to cylinder (%d sectors)"
+				    ": %llu\n", lp->d_secpercyl, rval);
 		}
 	}
 
@@ -1534,7 +1539,7 @@ getdisktype(struct disklabel *lp, char *banner, char *dev)
 		{ "xd",   "SMD" },
 		{ "xy",   "SMD" },
 		{ "hd",   "HP-IB" },
-		{ "ccd",  "CCD" },
+		{ "ccd",  "CCD" },		/* deprecated */
 		{ "vnd",  "VND" },
 		{ "svnd", "VND" },
 		{ NULL,   NULL }
@@ -1568,7 +1573,7 @@ getdisktype(struct disklabel *lp, char *banner, char *dev)
 		for (;;) {
 			s = getstring("Disk type",
 			    "What kind of disk is this?  Usually SCSI, IDE, "
-			    "ESDI, CCD, ST506, or floppy.", def);
+			    "ESDI, ST506, or floppy.", def);
 			if (s == NULL)
 				continue;
 			if (strcasecmp(s, "IDE") == 0) {
@@ -1725,7 +1730,7 @@ find_bounds(struct disklabel *lp)
 			    " command to change this.\n\n", starting_sector,
 			    ending_sector);
 	} else {
-#if (NUMBOOT == 1)
+#if NUMBOOT > 0 
 		/* Boot blocks take up the first cylinder */
 		starting_sector = lp->d_secpercyl;
 		if (verbose)
@@ -1948,7 +1953,7 @@ get_size(struct disklabel *lp, int partno)
 	else if (ui == ULLONG_MAX)
 		fputs("Invalid entry\n", stderr);
 	else if (ui == 0)
-		fputs("The size must be > 0\n", stderr);
+		fputs("The size must be > 0 sectors\n", stderr);
 	else if (ui + DL_GETPOFFSET(pp) > ending_sector)
 		fprintf(stderr, "The size can't be more than "
 		    "%llu sectors, or the partition would\n"
@@ -1984,14 +1989,18 @@ get_fsize(struct disklabel *lp, int partno)
 
 	for (;;) {
 		ui = getuint(lp, "fragment size",
-		    "Size of fs block fragments.  Usually 2048 or 512.",
-		    fsize, fsize, 0, 0);
+		    "Size of ffs block fragments. A multiple of the disk "
+		    "sector-size.", fsize, ULLONG_MAX-2, 0, 0);
 		if (ui == ULLONG_MAX - 1) {
 			fputs("Command aborted\n", stderr);
-			return(1);
-		} else if (ui == ULLONG_MAX)
+			return (1);
+		} else if (ui == ULLONG_MAX) {
 			fputs("Invalid entry\n", stderr);
-		else
+		} else if (ui < lp->d_secsize || (ui % lp->d_secsize) != 0) {
+			fprintf(stderr, "Error: fragment size must be a "
+			    "multiple of the disk sector size (%d)\n",
+			    lp->d_secsize);
+		} else
 			break;
 	}
 	if (ui == 0)
@@ -2003,8 +2012,9 @@ get_fsize(struct disklabel *lp, int partno)
 int
 get_bsize(struct disklabel *lp, int partno)
 {
-	u_int64_t adj, ui, bsize, frag, fsize;
+	u_int64_t adj, ui, bsize, frag, fsize, orig_offset, orig_size;
 	struct partition *pp = &lp->d_partitions[partno];
+	char *p;
 
 	if (pp->p_fstype != FS_BSDFFS)
 		return (0);
@@ -2021,9 +2031,8 @@ get_bsize(struct disklabel *lp, int partno)
 
 	for (;;) {
 		ui = getuint(lp, "block size",
-		    "Size of filesystem blocks.  Usually 16384 or 4096.",
-		    fsize * frag, fsize * frag,
-		    0, 0);
+		    "Size of ffs blocks. A multiple of the ffs fragment size.",
+		    fsize * frag, ULLONG_MAX - 2, 0, 0);
 
 		/* sanity checks */
 		if (ui == ULLONG_MAX - 1) {
@@ -2035,19 +2044,29 @@ get_bsize(struct disklabel *lp, int partno)
 			fprintf(stderr,
 			    "Error: block size must be at least as big "
 			    "as page size (%d).\n", getpagesize());
-		else if (ui % fsize != 0)
-			fputs("Error: block size must be a multiple of the "
-			    "fragment size.\n", stderr);
-		else if (ui / fsize < 1)
-			fputs("Error: block size must be at least as big as "
-			    "fragment size.\n", stderr);
+		else if (ui < fsize || (ui % fsize) != 0)
+			fprintf(stderr, "Error: block size must be a multiple "
+			    "of the fragment size (%llu).\n",
+			    (unsigned long long) fsize);
 		else
 			break;
 	}
 	pp->p_fragblock = DISKLABELV1_FFS_FRAGBLOCK(ui / frag, frag);
 
-align:
 #ifndef SUN_CYLCHECK
+	p = getstring("Align partition to block size",
+	    "Round the partition offset and size to multiples of bsize?", "y");
+
+	if (*p == 'n' || *p == 'N')
+		return (0);
+#endif
+
+align:
+
+#ifndef SUN_CYLCHECK
+	orig_size = DL_GETPSIZE(pp);
+	orig_offset = DL_GETPOFFSET(pp);
+
 	bsize = (DISKLABELV1_FFS_FRAG(pp->p_fragblock) *
 	    DISKLABELV1_FFS_FSIZE(pp->p_fragblock)) / lp->d_secsize;
 	if (DL_GETPOFFSET(pp) != starting_sector) {
@@ -2062,6 +2081,13 @@ align:
 	adj = (DL_GETPOFFSET(pp) + DL_GETPSIZE(pp)) % bsize;
 	if (adj > 0)
 		DL_SETPSIZE(pp, DL_GETPSIZE(pp) - adj);
+
+	if (orig_offset != DL_GETPOFFSET(pp) && !aflag)
+		printf("Rounding offset to bsize (%llu sectors): %llu\n",
+		    bsize, DL_GETPOFFSET(pp));
+	if (orig_size != DL_GETPSIZE(pp) && !aflag)
+		printf("Rounding size to bsize (%llu sectors): %llu\n",
+		    bsize, DL_GETPSIZE(pp));
 #endif
 	return(0);
 }

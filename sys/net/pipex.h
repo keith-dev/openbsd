@@ -1,4 +1,4 @@
-/*	$OpenBSD: pipex.h,v 1.9 2011/07/08 18:30:17 yasuoka Exp $	*/
+/*	$OpenBSD: pipex.h,v 1.11 2012/01/23 03:36:21 yasuoka Exp $	*/
 
 /*
  * Copyright (c) 2009 Internet Initiative Japan Inc.
@@ -89,6 +89,7 @@ struct pipex_session_req {
 #define	PIPEX_PPP_MPPE_REQUIRED		0x00000040
 #define	PIPEX_PPP_HAS_ACF		0x00000080
 #define	PIPEX_PPP_ADJUST_TCPMSS		0x00000100
+#define	PIPEX_PPP_INGRESS_FILTER	0x00000200
 	int8_t		pr_ccp_id;		/* CCP current packet id */
 	int		pr_ppp_id;		/* PPP Id. */
 	uint16_t	pr_peer_mru; 		/* Peer's MRU */
@@ -216,6 +217,11 @@ struct pipex_session  *pipex_l2tp_userland_lookup_session_ipv4 (struct mbuf *, s
 struct pipex_session  *pipex_l2tp_userland_lookup_session_ipv6 (struct mbuf *, struct in6_addr);
 struct mbuf           *pipex_l2tp_userland_output (struct mbuf *, struct pipex_session *);
 int                   pipex_ioctl (struct pipex_iface_context *, int, caddr_t);
+void                  pipex_session_init_mppe_recv(struct pipex_session *, int,
+int, u_char *);
+void                  pipex_session_init_mppe_send(struct pipex_session *, int,
+int, u_char *);
+
 __END_DECLS
 
 #endif /* _KERNEL */

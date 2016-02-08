@@ -1,7 +1,8 @@
-/*	$OpenBSD: subr_hibernate.c,v 1.15 2011/07/18 16:50:56 ariane Exp $	*/
+/*	$OpenBSD: subr_hibernate.c,v 1.32 2011/11/29 05:21:08 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2011 Ariane van der Steldt <ariane@stack.nl>
+ * Copyright (c) 2011 Mike Larkin <mlarkin@openbsd.org>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -23,6 +24,7 @@
 #include <sys/types.h>
 #include <sys/systm.h>
 #include <sys/disklabel.h>
+#include <sys/disk.h>
 #include <sys/conf.h>
 #include <sys/buf.h>
 #include <sys/fcntl.h>
@@ -30,9 +32,16 @@
 #include <uvm/uvm.h>
 #include <machine/hibernate.h>
 
-extern char *disk_readlabel(struct disklabel *, dev_t, char *, size_t);
+struct hibernate_zlib_state *hibernate_state;
 
-struct hibernate_state *hibernate_state;
+/* Temporary vaddr ranges used during hibernate */
+vaddr_t hibernate_temp_page;
+vaddr_t hibernate_copy_page;
+
+/* Hibernate info as read from disk during resume */
+union hibernate_info disk_hiber_info;
+paddr_t global_pig_start;
+vaddr_t global_piglet_va;
 
 /*
  * Hib alloc enforced alignment.
@@ -44,8 +53,7 @@ struct hibernate_state *hibernate_state;
  */
 #define HIB_SIZEOF(_type)	roundup(sizeof(_type), HIB_ALIGN)
 
-struct hiballoc_entry
-{
+struct hiballoc_entry {
 	size_t			hibe_use;
 	size_t			hibe_space;
 	RB_ENTRY(hiballoc_entry) hibe_entry;
@@ -68,7 +76,7 @@ RB_PROTOTYPE(hiballoc_addr, hiballoc_entry, hibe_entry, hibe_cmp)
 /*
  * Given a hiballoc entry, return the address it manages.
  */
-static __inline void*
+static __inline void *
 hib_entry_to_addr(struct hiballoc_entry *entry)
 {
 	caddr_t addr;
@@ -82,7 +90,7 @@ hib_entry_to_addr(struct hiballoc_entry *entry)
  * Given an address, find the hiballoc that corresponds.
  */
 static __inline struct hiballoc_entry*
-hib_addr_to_entry(void* addr_param)
+hib_addr_to_entry(void *addr_param)
 {
 	caddr_t addr;
 
@@ -98,7 +106,7 @@ RB_GENERATE(hiballoc_addr, hiballoc_entry, hibe_entry, hibe_cmp)
  *
  * Returns NULL if no memory is available.
  */
-void*
+void *
 hib_alloc(struct hiballoc_arena *arena, size_t alloc_sz)
 {
 	struct hiballoc_entry *entry, *new_entry;
@@ -156,7 +164,7 @@ hib_alloc(struct hiballoc_arena *arena, size_t alloc_sz)
 
 /*
  * Free a pointer previously allocated from this arena.
- * 
+ *
  * If addr is NULL, this will be silently accepted.
  */
 void
@@ -182,14 +190,14 @@ hib_free(struct hiballoc_arena *arena, void *addr)
 	 */
 	prev = RB_PREV(hiballoc_addr, &arena->hib_addrs, entry);
 	if (prev != NULL &&
-	    (void*)((caddr_t)prev + HIB_SIZEOF(struct hiballoc_entry) +
+	    (void *)((caddr_t)prev + HIB_SIZEOF(struct hiballoc_entry) +
 	    prev->hibe_use + prev->hibe_space) == entry) {
 		/* Merge entry. */
 		RB_REMOVE(hiballoc_addr, &arena->hib_addrs, entry);
 		prev->hibe_space += HIB_SIZEOF(struct hiballoc_entry) +
 		    entry->hibe_use + entry->hibe_space;
 	} else {
-	  	/* Flip used memory to free space. */
+		/* Flip used memory to free space. */
 		entry->hibe_space += entry->hibe_use;
 		entry->hibe_use = 0;
 	}
@@ -233,7 +241,6 @@ hiballoc_init(struct hiballoc_arena *arena, void *p_ptr, size_t p_len)
 
 	return 0;
 }
-
 
 /*
  * Zero all free memory.
@@ -401,13 +408,14 @@ found:
  * the allocation to fail.
  */
 int
-uvm_pmr_alloc_piglet(paddr_t *addr, psize_t sz, paddr_t align)
+uvm_pmr_alloc_piglet(vaddr_t *va, paddr_t *pa, vsize_t sz, paddr_t align)
 {
-	vaddr_t			 pg_addr, piglet_addr;
+	paddr_t			 pg_addr, piglet_addr;
 	struct uvm_pmemrange	*pmr;
 	struct vm_page		*pig_pg, *pg;
 	struct pglist		 pageq;
 	int			 pdaemon_woken;
+	vaddr_t			 piglet_va;
 
 	KASSERT((align & (align - 1)) == 0);
 	pdaemon_woken = 0; /* Didn't wake the pagedaemon. */
@@ -419,7 +427,7 @@ uvm_pmr_alloc_piglet(paddr_t *addr, psize_t sz, paddr_t align)
 	 */
 	if (align < PAGE_SIZE)
 		align = PAGE_SIZE;
-	sz = atop(round_page(sz));
+	sz = round_page(sz);
 
 	uvm_lock_fpageq();
 
@@ -436,24 +444,23 @@ retry:
 			piglet_addr = (pg_addr + (align - 1)) & ~(align - 1);
 
 			if (atop(pg_addr) + pig_pg->fpgsz >=
-			    atop(piglet_addr) + sz) {
+			    atop(piglet_addr) + atop(sz))
 				goto found;
-			}
 		}
+	}
 
-		/*
-		 * Try to coerse the pagedaemon into freeing memory
-		 * for the piglet.
-		 *
-		 * pdaemon_woken is set to prevent the code from
-		 * falling into an endless loop.
-		 */
-		if (!pdaemon_woken) {
-			pdaemon_woken = 1;
-			if (uvm_wait_pla(ptoa(pmr->low), ptoa(pmr->high) - 1,
-			    ptoa(sz), UVM_PLA_FAILOK) == 0)
-				goto retry;
-		}
+	/*
+	 * Try to coerse the pagedaemon into freeing memory
+	 * for the piglet.
+	 *
+	 * pdaemon_woken is set to prevent the code from
+	 * falling into an endless loop.
+	 */
+	if (!pdaemon_woken) {
+		pdaemon_woken = 1;
+		if (uvm_wait_pla(ptoa(pmr->low), ptoa(pmr->high) - 1,
+		    sz, UVM_PLA_FAILOK) == 0)
+			goto retry;
 	}
 
 	/* Return failure. */
@@ -466,10 +473,10 @@ found:
 	 */
 	TAILQ_INIT(&pageq);
 	uvm_pmr_extract_range(pmr, pig_pg,
-	    atop(piglet_addr), atop(piglet_addr) + sz, &pageq);
+	    atop(piglet_addr), atop(piglet_addr) + atop(sz), &pageq);
 
-	*addr = piglet_addr;
-	uvmexp.free -= sz;
+	*pa = piglet_addr;
+	uvmexp.free -= atop(sz);
 
 	/*
 	 * Update pg flags.
@@ -493,17 +500,75 @@ found:
 	}
 
 	uvm_unlock_fpageq();
+
+	/*
+	 * Now allocate a va.
+	 * Use direct mappings for the pages.
+	 */
+
+	piglet_va = *va = (vaddr_t)km_alloc(sz, &kv_any, &kp_none, &kd_waitok);
+	if (!piglet_va) {
+		uvm_pglistfree(&pageq);
+		return ENOMEM;
+	}
+
+	/*
+	 * Map piglet to va.
+	 */
+	TAILQ_FOREACH(pg, &pageq, pageq) {
+		pmap_kenter_pa(piglet_va, VM_PAGE_TO_PHYS(pg), UVM_PROT_RW);
+		piglet_va += PAGE_SIZE;
+	}
+	pmap_update(pmap_kernel());
+
 	return 0;
+}
+
+/*
+ * Free a piglet area.
+ */
+void
+uvm_pmr_free_piglet(vaddr_t va, vsize_t sz)
+{
+	paddr_t			 pa;
+	struct vm_page		*pg;
+
+	/*
+	 * Fix parameters.
+	 */
+	sz = round_page(sz);
+
+	/*
+	 * Find the first page in piglet.
+	 * Since piglets are contiguous, the first pg is all we need.
+	 */
+	if (!pmap_extract(pmap_kernel(), va, &pa))
+		panic("uvm_pmr_free_piglet: piglet 0x%lx has no pages", va);
+	pg = PHYS_TO_VM_PAGE(pa);
+	if (pg == NULL)
+		panic("uvm_pmr_free_piglet: unmanaged page 0x%lx", pa);
+
+	/*
+	 * Unmap.
+	 */
+	pmap_kremove(va, sz);
+	pmap_update(pmap_kernel());
+
+	/*
+	 * Free the physical and virtual memory.
+	 */
+	uvm_pmr_freepages(pg, atop(sz));
+	km_free((void *)va, sz, &kv_any, &kp_none);
 }
 
 /*
  * Physmem RLE compression support.
  *
- * Given a physical page address, it will return the number of pages 
- * starting at the address, that are free.
+ * Given a physical page address, it will return the number of pages
+ * starting at the address, that are free.  Clamps to a max of 255 pages.
  * Returns 0 if the page at addr is not free.
  */
-psize_t
+u_char
 uvm_page_rle(paddr_t addr)
 {
 	struct vm_page		*pg, *pg_end;
@@ -525,20 +590,18 @@ uvm_page_rle(paddr_t addr)
 	 * therefore pg->fpgsz cannot be used.
 	 */
 	for (pg_end = pg; pg_end <= vmp->lastpg &&
-	    (pg_end->pg_flags & PQ_FREE) == PQ_FREE; pg_end++);
-	return pg_end - pg;
+	    (pg_end->pg_flags & PQ_FREE) == PQ_FREE; pg_end++)
+		;
+	return max(pg_end - pg, 255);
 }
 
 /*
- * get_hibernate_info
- *
  * Fills out the hibernate_info union pointed to by hiber_info
  * with information about this machine (swap signature block
  * offsets, number of memory ranges, kernel in use, etc)
- *
  */
 int
-get_hibernate_info(union hibernate_info *hiber_info)
+get_hibernate_info(union hibernate_info *hiber_info, int suspend)
 {
 	int chunktable_size;
 	struct disklabel dl;
@@ -570,39 +633,67 @@ get_hibernate_info(union hibernate_info *hiber_info)
 
 	/* Calculate signature block location */
 	hiber_info->sig_offset = dl.d_partitions[1].p_offset +
-		dl.d_partitions[1].p_size -
-		sizeof(union hibernate_info)/hiber_info->secsize;
+	    dl.d_partitions[1].p_size -
+	    sizeof(union hibernate_info)/hiber_info->secsize;
 
 	chunktable_size = HIBERNATE_CHUNK_TABLE_SIZE / hiber_info->secsize;
 
-	/* Calculate memory image location */
-	hiber_info->image_offset = dl.d_partitions[1].p_offset +
-		dl.d_partitions[1].p_size -
-		(hiber_info->image_size / hiber_info->secsize) -
-		sizeof(union hibernate_info)/hiber_info->secsize -
-		chunktable_size;
-
 	/* Stash kernel version information */
 	bzero(&hiber_info->kernel_version, 128);
-	bcopy(version, &hiber_info->kernel_version, 
-		min(strlen(version), sizeof(hiber_info->kernel_version)-1));
+	bcopy(version, &hiber_info->kernel_version,
+	    min(strlen(version), sizeof(hiber_info->kernel_version)-1));
 
-	/* Allocate piglet region */
-	if (uvm_pmr_alloc_piglet(&hiber_info->piglet_base, HIBERNATE_CHUNK_SIZE,
-		HIBERNATE_CHUNK_SIZE)) {
-		printf("Hibernate failed to allocate the piglet\n");
-		return (1);
+	if (suspend) {
+		/* Allocate piglet region */
+		if (uvm_pmr_alloc_piglet(&hiber_info->piglet_va,
+		    &hiber_info->piglet_pa, HIBERNATE_CHUNK_SIZE*3,
+		    HIBERNATE_CHUNK_SIZE)) {
+			printf("Hibernate failed to allocate the piglet\n");
+			return (1);
+		}
+		hiber_info->io_page = (void *)hiber_info->piglet_va;
+	} else {
+		/*
+		 * Resuming kernels use a regular I/O page since we won't
+		 * have access to the suspended kernel's piglet VA at this
+		 * point. No need to free this I/O page as it will vanish
+		 * as part of the resume.
+		 */
+		hiber_info->io_page = malloc(PAGE_SIZE, M_DEVBUF, M_NOWAIT);
+		if (!hiber_info->io_page)
+			return (1);
 	}
 
-	return get_hibernate_info_md(hiber_info);
+
+	/*
+	 * Initialize of the hibernate IO function (for drivers which
+	 * need that)
+	 */
+	if (hiber_info->io_func(hiber_info->device, 0,
+	    (vaddr_t)NULL, 0, HIB_INIT, hiber_info->io_page))
+		goto fail;
+
+	if (get_hibernate_info_md(hiber_info))
+		goto fail;
+
+	/* Calculate memory image location */
+	hiber_info->image_offset = dl.d_partitions[1].p_offset +
+	    dl.d_partitions[1].p_size -
+	    (hiber_info->image_size / hiber_info->secsize) -
+	    sizeof(union hibernate_info)/hiber_info->secsize -
+	    chunktable_size;
+
+	return (0);
+fail:
+	if (suspend)
+		uvm_pmr_free_piglet(hiber_info->piglet_va, HIBERNATE_CHUNK_SIZE*3);
+
+	return (1);
 }
 
 /*
- * hibernate_zlib_alloc
- *
  * Allocate nitems*size bytes from the hiballoc area presently in use
- *
- */ 
+ */
 void
 *hibernate_zlib_alloc(void *unused, int nitems, int size)
 {
@@ -610,11 +701,8 @@ void
 }
 
 /*
- * hibernate_zlib_free
- *
  * Free the memory pointed to by addr in the hiballoc area presently in
  * use
- *
  */
 void
 hibernate_zlib_free(void *unused, void *addr)
@@ -623,48 +711,82 @@ hibernate_zlib_free(void *unused, void *addr)
 }
 
 /*
- * hibernate_inflate
- *
  * Inflate size bytes from src into dest, skipping any pages in
  * [src..dest] that are special (see hibernate_inflate_skip)
- *
- * For each page of output data, we map HIBERNATE_TEMP_PAGE
- * to the current output page, and tell inflate() to inflate
- * its data there, resulting in the inflated data being placed
- * at the proper paddr.
  *
  * This function executes while using the resume-time stack
  * and pmap, and therefore cannot use ddb/printf/etc. Doing so
  * will likely hang or reset the machine.
- *
  */
 void
-hibernate_inflate(paddr_t dest, paddr_t src, size_t size)
+hibernate_inflate(union hibernate_info *hiber_info, paddr_t dest,
+    paddr_t src, size_t size)
 {
 	int i;
+	u_char rle;
 
-	hibernate_state->hib_stream.avail_in = size;
 	hibernate_state->hib_stream.next_in = (char *)src;
+	hibernate_state->hib_stream.avail_in = size;
 
 	do {
 		/* Flush cache and TLB */
 		hibernate_flush();
 
+		/* Read RLE code */
+		hibernate_state->hib_stream.next_out = (char *)&rle;
+		hibernate_state->hib_stream.avail_out = sizeof(rle);
+
+		i = inflate(&hibernate_state->hib_stream, Z_FULL_FLUSH);
+		if (i != Z_OK && i != Z_STREAM_END) {
+			/*
+			 * XXX - this will likely reboot/hang most machines,
+			 *       but there's not much else we can do here.
+			 */
+			panic("inflate rle error");
+		}
+
+		if (i == Z_STREAM_END)
+			goto next_page;
+
+		/* Skip while RLE code is != 0 */
+		while (rle != 0) {
+			dest += (rle * PAGE_SIZE);
+			hibernate_state->hib_stream.next_out = (char *)&rle;
+			hibernate_state->hib_stream.avail_out = sizeof(rle);
+
+			i = inflate(&hibernate_state->hib_stream,
+			    Z_FULL_FLUSH);
+			if (i != Z_OK && i != Z_STREAM_END) {
+				/*
+				 * XXX - this will likely reboot/hang most
+				 *       machines but there's not much else
+				 *       we can do here.
+				 */
+				panic("inflate rle error 2");
+			}
+		}
+
+		if (i == Z_STREAM_END)
+			goto next_page;
+
 		/*
 		 * Is this a special page? If yes, redirect the
 		 * inflate output to a scratch page (eg, discard it)
 		 */
-		if (hibernate_inflate_skip(dest))
-			hibernate_enter_resume_mapping(HIBERNATE_TEMP_PAGE,
-				HIBERNATE_TEMP_PAGE, 0);
+		if (hibernate_inflate_skip(hiber_info, dest))
+			hibernate_enter_resume_mapping(
+			    HIBERNATE_INFLATE_PAGE,
+			    HIBERNATE_INFLATE_PAGE, 0);
 		else
-			hibernate_enter_resume_mapping(HIBERNATE_TEMP_PAGE,
-				dest, 0);
+			hibernate_enter_resume_mapping(
+			    HIBERNATE_INFLATE_PAGE, dest, 0);
+
+		hibernate_flush();
 
 		/* Set up the stream for inflate */
-		hibernate_state->hib_stream.avail_out = PAGE_SIZE;
 		hibernate_state->hib_stream.next_out =
-			(char *)HIBERNATE_TEMP_PAGE;
+		    (char *)HIBERNATE_INFLATE_PAGE;
+		hibernate_state->hib_stream.avail_out = PAGE_SIZE;
 
 		/* Process next block of data */
 		i = inflate(&hibernate_state->hib_stream, Z_PARTIAL_FLUSH);
@@ -676,44 +798,42 @@ hibernate_inflate(paddr_t dest, paddr_t src, size_t size)
 			panic("inflate error");
 		}
 
+next_page:
 		dest += PAGE_SIZE - hibernate_state->hib_stream.avail_out;
 	} while (i != Z_STREAM_END);
 }
 
 /*
- * hibernate_deflate
- *
  * deflate from src into the I/O page, up to 'remaining' bytes
  *
  * Returns number of input bytes consumed, and may reset
  * the 'remaining' parameter if not all the output space was consumed
  * (this information is needed to know how much to write to disk
- *
  */
 size_t
-hibernate_deflate(paddr_t src, size_t *remaining)
+hibernate_deflate(union hibernate_info *hiber_info, paddr_t src,
+    size_t *remaining)
 {
+	vaddr_t hibernate_io_page = hiber_info->piglet_va + PAGE_SIZE;
+
 	/* Set up the stream for deflate */
-	hibernate_state->hib_stream.avail_in = PAGE_SIZE -
-		(src & PAGE_MASK);
-	hibernate_state->hib_stream.avail_out = *remaining;
 	hibernate_state->hib_stream.next_in = (caddr_t)src;
-	hibernate_state->hib_stream.next_out = (caddr_t)HIBERNATE_IO_PAGE +
-		(PAGE_SIZE - *remaining);
+	hibernate_state->hib_stream.avail_in = PAGE_SIZE - (src & PAGE_MASK);
+	hibernate_state->hib_stream.next_out = (caddr_t)hibernate_io_page +
+	    (PAGE_SIZE - *remaining);
+	hibernate_state->hib_stream.avail_out = *remaining;
 
 	/* Process next block of data */
 	if (deflate(&hibernate_state->hib_stream, Z_PARTIAL_FLUSH) != Z_OK)
-		panic("hibernate zlib deflate error\n");
+		panic("hibernate zlib deflate error");
 
 	/* Update pointers and return number of bytes consumed */
 	*remaining = hibernate_state->hib_stream.avail_out;
 	return (PAGE_SIZE - (src & PAGE_MASK)) -
-		hibernate_state->hib_stream.avail_in;
+	    hibernate_state->hib_stream.avail_in;
 }
 
 /*
- * hibernate_write_signature
- *
  * Write the hibernation information specified in hiber_info
  * to the location in swap previously calculated (last block of
  * swap), called the "signature block".
@@ -724,74 +844,76 @@ hibernate_deflate(paddr_t src, size_t *remaining)
 int
 hibernate_write_signature(union hibernate_info *hiber_info)
 {
-	u_int8_t *io_page;
-	daddr_t chunkbase;
-	size_t i;
-
-	io_page = malloc(PAGE_SIZE, M_DEVBUF, M_NOWAIT);
-	if (!io_page)
-		return (1);
-
 	/* Write hibernate info to disk */
-	if( hiber_info->io_func(hiber_info->device, hiber_info->sig_offset,
-		(vaddr_t)hiber_info, hiber_info->secsize, 1, io_page))
-			panic("error in hibernate write sig\n");
+	return (hiber_info->io_func(hiber_info->device, hiber_info->sig_offset,
+	    (vaddr_t)hiber_info, hiber_info->secsize, HIB_W,
+	    hiber_info->io_page));
+}
+
+/*
+ * Write the memory chunk table to the area in swap immediately
+ * preceding the signature block. The chunk table is stored
+ * in the piglet when this function is called.
+ */
+int
+hibernate_write_chunktable(union hibernate_info *hiber_info)
+{
+	struct hibernate_disk_chunk *chunks;
+	vaddr_t hibernate_chunk_table_start;
+	size_t hibernate_chunk_table_size;
+	daddr_t chunkbase;
+	int i;
+
+	hibernate_chunk_table_size = HIBERNATE_CHUNK_TABLE_SIZE;
 
 	chunkbase = hiber_info->sig_offset -
-		    (HIBERNATE_CHUNK_TABLE_SIZE / hiber_info->secsize);
+	    (hibernate_chunk_table_size / hiber_info->secsize);
+
+	hibernate_chunk_table_start = hiber_info->piglet_va +
+	    HIBERNATE_CHUNK_SIZE;
+
+	chunks = (struct hibernate_disk_chunk *)(hiber_info->piglet_va +
+	    HIBERNATE_CHUNK_SIZE);
 
 	/* Write chunk table */
-	for(i=0; i < HIBERNATE_CHUNK_TABLE_SIZE; i += NBPG) {
-		if(hiber_info->io_func(hiber_info->device,
-			chunkbase + (i/hiber_info->secsize),
-			(vaddr_t)(HIBERNATE_CHUNK_TABLE_START + i),
-			NBPG,
-			1,
-			io_page))
-				panic("error in hibernate write chunks\n");
+	for (i = 0; i < hibernate_chunk_table_size; i += MAXPHYS) {
+		if (hiber_info->io_func(hiber_info->device,
+		    chunkbase + (i/hiber_info->secsize),
+		    (vaddr_t)(hibernate_chunk_table_start + i),
+		    MAXPHYS, HIB_W, hiber_info->io_page))
+			return (1);
 	}
-
-	free(io_page, M_DEVBUF);
 
 	return (0);
 }
 
 /*
- * hibernate_clear_signature
- *
  * Write an empty hiber_info to the swap signature block, which is
  * guaranteed to not match any valid hiber_info.
  */
 int
-hibernate_clear_signature()
+hibernate_clear_signature(void)
 {
 	union hibernate_info blank_hiber_info;
 	union hibernate_info hiber_info;
-	u_int8_t *io_page;
 
 	/* Zero out a blank hiber_info */
 	bzero(&blank_hiber_info, sizeof(hiber_info));
 
-	if (get_hibernate_info(&hiber_info))
-		return (1);
-
-	io_page = malloc(PAGE_SIZE, M_DEVBUF, M_NOWAIT);
-	if (!io_page)
+	if (get_hibernate_info(&hiber_info, 0))
 		return (1);
 
 	/* Write (zeroed) hibernate info to disk */
-	if(hiber_info.io_func(hiber_info.device, hiber_info.sig_offset,
-		(vaddr_t)&blank_hiber_info, hiber_info.secsize, 1, io_page))
-			panic("error hibernate write 6\n");
+	/* XXX - use regular kernel write routine for this */
+	if (hiber_info.io_func(hiber_info.device, hiber_info.sig_offset,
+	    (vaddr_t)&blank_hiber_info, hiber_info.secsize, HIB_W,
+	    hiber_info.io_page))
+		panic("error hibernate write 6");
 
-	free(io_page, M_DEVBUF);
-	
 	return (0);
 }
 
 /*
- * hibernate_check_overlap
- *
  * Check chunk range overlap when calculating whether or not to copy a
  * compressed chunk to the piglet area before decompressing.
  *
@@ -801,7 +923,7 @@ int
 hibernate_check_overlap(paddr_t r1s, paddr_t r1e, paddr_t r2s, paddr_t r2e)
 {
 	/* case A : end of r1 overlaps start of r2 */
-	if (r1s < r2s && r1e > r2s) 
+	if (r1s < r2s && r1e > r2s)
 		return (1);
 
 	/* case B : r1 entirely inside r2 */
@@ -820,8 +942,6 @@ hibernate_check_overlap(paddr_t r1s, paddr_t r1e, paddr_t r2s, paddr_t r2e)
 }
 
 /*
- * hibernate_compare_signature
- *
  * Compare two hibernate_infos to determine if they are the same (eg,
  * we should be performing a hibernate resume on this machine.
  * Not all fields are checked - just enough to verify that the machine
@@ -830,7 +950,7 @@ hibernate_check_overlap(paddr_t r1s, paddr_t r1e, paddr_t r2s, paddr_t r2e)
  */
 int
 hibernate_compare_signature(union hibernate_info *mine,
-	union hibernate_info *disk)
+    union hibernate_info *disk)
 {
 	u_int i;
 
@@ -840,19 +960,17 @@ hibernate_compare_signature(union hibernate_info *mine,
 	if (strcmp(mine->kernel_version, disk->kernel_version) != 0)
 		return (1);
 
-	for (i=0; i< mine->nranges; i++) {
+	for (i = 0; i < mine->nranges; i++) {
 		if ((mine->ranges[i].base != disk->ranges[i].base) ||
-			(mine->ranges[i].end != disk->ranges[i].end) )
-		return (1);
+		    (mine->ranges[i].end != disk->ranges[i].end) )
+			return (1);
 	}
 
 	return (0);
 }
 
 /*
- * hibernate_read_block
- *
- * Reads read_size blocks from the hibernate device specified in
+ * Reads read_size bytes from the hibernate device specified in
  * hib_info at offset blkctr. Output is placed into the vaddr specified
  * at dest.
  *
@@ -865,7 +983,7 @@ hibernate_compare_signature(union hibernate_info *mine,
  */
 int
 hibernate_read_block(union hibernate_info *hib_info, daddr_t blkctr,
-	size_t read_size, vaddr_t dest)
+    size_t read_size, vaddr_t dest)
 {
 	struct buf *bp;
 	struct bdevsw *bdsw;
@@ -892,8 +1010,8 @@ hibernate_read_block(union hibernate_info *hib_info, daddr_t blkctr,
 	if (error) {
 		printf("hibernate_read_block biowait failed %d\n", error);
 		error = (*bdsw->d_close)(hib_info->device, 0, S_IFCHR,
-				curproc);
-		if (error) 
+		    curproc);
+		if (error)
 			printf("hibernate_read_block error close failed\n");
 		return (1);
 	}
@@ -912,3 +1030,781 @@ hibernate_read_block(union hibernate_info *hib_info, daddr_t blkctr,
 	return (0);
 }
 
+/*
+ * Reads the signature block from swap, checks against the current machine's
+ * information. If the information matches, perform a resume by reading the
+ * saved image into the pig area, and unpacking.
+ */
+void
+hibernate_resume(void)
+{
+	union hibernate_info hiber_info;
+	int s;
+
+	/* Get current running machine's hibernate info */
+	bzero(&hiber_info, sizeof(hiber_info));
+	if (get_hibernate_info(&hiber_info, 0))
+		return;
+
+	/* Read hibernate info from disk */
+	s = splbio();
+
+	/* XXX use regular kernel read routine here */
+	if (hiber_info.io_func(hiber_info.device, hiber_info.sig_offset,
+	    (vaddr_t)&disk_hiber_info, hiber_info.secsize, HIB_R,
+	    hiber_info.io_page))
+		panic("error in hibernate read");
+
+	/*
+	 * If on-disk and in-memory hibernate signatures match,
+	 * this means we should do a resume from hibernate.
+	 */
+	if (hibernate_compare_signature(&hiber_info, &disk_hiber_info))
+		return;
+
+	/* Read the image from disk into the image (pig) area */
+	if (hibernate_read_image(&disk_hiber_info))
+		goto fail;
+
+	/* Point of no return ... */
+
+	disable_intr();
+	cold = 1;
+
+	/* Switch stacks */
+	hibernate_switch_stack_machdep();
+
+	/*
+	 * Image is now in high memory (pig area), copy to correct location
+	 * in memory. We'll eventually end up copying on top of ourself, but
+	 * we are assured the kernel code here is the same between the
+	 * hibernated and resuming kernel, and we are running on our own
+	 * stack, so the overwrite is ok.
+	 */
+	hibernate_unpack_image(&disk_hiber_info);
+
+	/*
+	 * Resume the loaded kernel by jumping to the MD resume vector.
+	 * We won't be returning from this call.
+	 */
+	hibernate_resume_machdep();
+
+fail:
+	printf("Unable to resume hibernated image\n");
+}
+
+/*
+ * Unpack image from pig area to original location by looping through the
+ * list of output chunks in the order they should be restored (fchunks).
+ * This ordering is used to avoid having inflate overwrite a chunk in the
+ * middle of processing that chunk. This will, of course, happen during the
+ * final output chunk, where we copy the chunk to the piglet area first,
+ * before inflating.
+ */
+void
+hibernate_unpack_image(union hibernate_info *hiber_info)
+{
+	struct hibernate_disk_chunk *chunks;
+	union hibernate_info local_hiber_info;
+	paddr_t image_cur = global_pig_start;
+	int *fchunks, i;
+	char *pva = (char *)hiber_info->piglet_va;
+
+	/* Mask off based on arch-specific piglet page size */
+	pva = (char *)((paddr_t)pva & (PIGLET_PAGE_MASK));
+	fchunks = (int *)(pva + (6 * PAGE_SIZE));
+
+	chunks = (struct hibernate_disk_chunk *)(pva +  HIBERNATE_CHUNK_SIZE);
+
+	/* Can't use hiber_info that's passed in after here */
+	bcopy(hiber_info, &local_hiber_info, sizeof(union hibernate_info));
+
+	hibernate_state = (struct hibernate_zlib_state *)
+	    (pva + (7 * PAGE_SIZE));
+
+	hibernate_activate_resume_pt_machdep();
+
+	for (i = 0; i < local_hiber_info.chunk_ctr; i++) {
+		/* Reset zlib for inflate */
+		if (hibernate_zlib_reset(&local_hiber_info, 0) != Z_OK)
+			panic("hibernate failed to reset zlib for inflate");
+
+		/*
+		 * If there is a conflict, copy the chunk to the piglet area
+		 * before unpacking it to its original location.
+		 */
+		if ((chunks[fchunks[i]].flags & HIBERNATE_CHUNK_CONFLICT) == 0)
+			hibernate_inflate(&local_hiber_info,
+			    chunks[fchunks[i]].base, image_cur,
+			    chunks[fchunks[i]].compressed_size);
+		else {
+			bcopy((caddr_t)image_cur,
+			    pva + (HIBERNATE_CHUNK_SIZE * 2),
+			    chunks[fchunks[i]].compressed_size);
+			hibernate_inflate(&local_hiber_info,
+			    chunks[fchunks[i]].base,
+			    (vaddr_t)(pva + (HIBERNATE_CHUNK_SIZE * 2)),
+			    chunks[fchunks[i]].compressed_size);
+		}
+		image_cur += chunks[fchunks[i]].compressed_size;
+	}
+}
+
+/*
+ * Write a compressed version of this machine's memory to disk, at the
+ * precalculated swap offset:
+ *
+ * end of swap - signature block size - chunk table size - memory size
+ *
+ * The function begins by looping through each phys mem range, cutting each
+ * one into 4MB chunks. These chunks are then compressed individually
+ * and written out to disk, in phys mem order. Some chunks might compress
+ * more than others, and for this reason, each chunk's size is recorded
+ * in the chunk table, which is written to disk after the image has
+ * properly been compressed and written (in hibernate_write_chunktable).
+ *
+ * When this function is called, the machine is nearly suspended - most
+ * devices are quiesced/suspended, interrupts are off, and cold has
+ * been set. This means that there can be no side effects once the
+ * write has started, and the write function itself can also have no
+ * side effects.
+ *
+ * This function uses the piglet area during this process as follows:
+ *
+ * offset from piglet base	use
+ * -----------------------	--------------------
+ * 0				i/o allocation area
+ * PAGE_SIZE			i/o write area
+ * 2*PAGE_SIZE			temp/scratch page
+ * 3*PAGE_SIZE			temp/scratch page
+ * 4*PAGE_SIZE			hiballoc arena
+ * 5*PAGE_SIZE to 85*PAGE_SIZE	zlib deflate area
+ * ...
+ * HIBERNATE_CHUNK_SIZE		chunk table temporary area
+ *
+ * Some transient piglet content is saved as part of deflate,
+ * but it is irrelevant during resume as it will be repurposed
+ * at that time for other things.
+ */
+int
+hibernate_write_chunks(union hibernate_info *hiber_info)
+{
+	paddr_t range_base, range_end, inaddr, temp_inaddr;
+	size_t nblocks, out_remaining, used, offset = 0;
+	struct hibernate_disk_chunk *chunks;
+	vaddr_t hibernate_io_page = hiber_info->piglet_va + PAGE_SIZE;
+	daddr_t blkctr = hiber_info->image_offset;
+	int i;
+
+	hiber_info->chunk_ctr = 0;
+
+	/*
+	 * Allocate VA for the temp and copy page.
+	 * These will becomee part of the suspended kernel and will
+	 * be freed in hibernate_free, upon resume.
+	 */
+	hibernate_temp_page = (vaddr_t)km_alloc(PAGE_SIZE, &kv_any,
+	    &kp_none, &kd_nowait);
+	if (!hibernate_temp_page)
+		return (1);
+
+	hibernate_copy_page = (vaddr_t)km_alloc(PAGE_SIZE, &kv_any,
+	    &kp_none, &kd_nowait);
+	if (!hibernate_copy_page)
+		return (1);
+
+	pmap_kenter_pa(hibernate_copy_page,
+	    (hiber_info->piglet_pa + 3*PAGE_SIZE), VM_PROT_ALL);
+
+	/* XXX - not needed on all archs */
+	pmap_activate(curproc);
+
+	chunks = (struct hibernate_disk_chunk *)(hiber_info->piglet_va +
+	    HIBERNATE_CHUNK_SIZE);
+
+	/* Calculate the chunk regions */
+	for (i = 0; i < hiber_info->nranges; i++) {
+		range_base = hiber_info->ranges[i].base;
+		range_end = hiber_info->ranges[i].end;
+
+		inaddr = range_base;
+
+		while (inaddr < range_end) {
+			chunks[hiber_info->chunk_ctr].base = inaddr;
+			if (inaddr + HIBERNATE_CHUNK_SIZE < range_end)
+				chunks[hiber_info->chunk_ctr].end = inaddr +
+				    HIBERNATE_CHUNK_SIZE;
+			else
+				chunks[hiber_info->chunk_ctr].end = range_end;
+
+			inaddr += HIBERNATE_CHUNK_SIZE;
+			hiber_info->chunk_ctr ++;
+		}
+	}
+
+	/* Compress and write the chunks in the chunktable */
+	for (i = 0; i < hiber_info->chunk_ctr; i++) {
+		range_base = chunks[i].base;
+		range_end = chunks[i].end;
+
+		chunks[i].offset = blkctr;
+
+		/* Reset zlib for deflate */
+		if (hibernate_zlib_reset(hiber_info, 1) != Z_OK)
+			return (1);
+
+		inaddr = range_base;
+
+		/*
+		 * For each range, loop through its phys mem region
+		 * and write out the chunks (the last chunk might be
+		 * smaller than the chunk size).
+		 */
+		while (inaddr < range_end) {
+			out_remaining = PAGE_SIZE;
+			while (out_remaining > 0 && inaddr < range_end) {
+				u_char rle;
+
+				/*
+				 * Adjust for regions that are not evenly
+				 * divisible by PAGE_SIZE or overflowed
+				 * pages from the previous iteration.
+				 */
+				temp_inaddr = (inaddr & PAGE_MASK) +
+				    hibernate_copy_page;
+
+				rle = uvm_page_rle(inaddr);
+				while (rle != 0 && inaddr < range_end) {
+					hibernate_state->hib_stream.next_in =
+					    (char *)&rle;
+					hibernate_state->hib_stream.avail_in =
+					    sizeof(rle);
+					hibernate_state->hib_stream.next_out =
+					    (caddr_t)hibernate_io_page +
+					    (PAGE_SIZE - out_remaining);
+					hibernate_state->hib_stream.avail_out =
+					    out_remaining;
+
+					if (deflate(&hibernate_state->hib_stream,
+					    Z_PARTIAL_FLUSH) != Z_OK)
+						return (1);
+
+					out_remaining =
+					    hibernate_state->hib_stream.avail_out;
+					inaddr += (rle * PAGE_SIZE);
+					if (inaddr > range_end)
+						inaddr = range_end;
+					else
+						rle = uvm_page_rle(inaddr);
+				}
+
+				if (out_remaining == 0) {
+					/* Filled up the page */
+					nblocks = PAGE_SIZE / hiber_info->secsize;
+
+					if (hiber_info->io_func(hiber_info->device,
+					    blkctr, (vaddr_t)hibernate_io_page,
+					    PAGE_SIZE, HIB_W, hiber_info->io_page))
+						return (1);
+
+					blkctr += nblocks;
+					out_remaining = PAGE_SIZE;
+				}
+
+				/* Write '0' RLE code */
+				if (inaddr < range_end) {
+					hibernate_state->hib_stream.next_in =
+					    (char *)&rle;
+					hibernate_state->hib_stream.avail_in =
+					    sizeof(rle);
+					hibernate_state->hib_stream.next_out =
+				    	    (caddr_t)hibernate_io_page +
+					    (PAGE_SIZE - out_remaining);
+					hibernate_state->hib_stream.avail_out =
+					    out_remaining;
+
+					if (deflate(&hibernate_state->hib_stream,
+					    Z_PARTIAL_FLUSH) != Z_OK)
+						return (1);
+
+					out_remaining =
+					    hibernate_state->hib_stream.avail_out;
+				}
+
+				if (out_remaining == 0) {
+					/* Filled up the page */
+					nblocks = PAGE_SIZE / hiber_info->secsize;
+
+					if (hiber_info->io_func(hiber_info->device,
+					    blkctr, (vaddr_t)hibernate_io_page,
+					    PAGE_SIZE, HIB_W, hiber_info->io_page))
+						return (1);
+
+					blkctr += nblocks;
+					out_remaining = PAGE_SIZE;
+				}
+
+				/* Deflate from temp_inaddr to IO page */
+				if (inaddr != range_end) {
+					pmap_kenter_pa(hibernate_temp_page,
+					    inaddr & PMAP_PA_MASK, VM_PROT_ALL);
+
+					/* XXX - not needed on all archs */
+					pmap_activate(curproc);
+
+					bcopy((caddr_t)hibernate_temp_page,
+					    (caddr_t)hibernate_copy_page, PAGE_SIZE);
+					inaddr += hibernate_deflate(hiber_info,
+					    temp_inaddr, &out_remaining);
+				}
+			}
+
+			if (out_remaining == 0) {
+				/* Filled up the page */
+				nblocks = PAGE_SIZE / hiber_info->secsize;
+
+				if (hiber_info->io_func(hiber_info->device,
+				    blkctr, (vaddr_t)hibernate_io_page,
+				    PAGE_SIZE, HIB_W, hiber_info->io_page))
+					return (1);
+
+				blkctr += nblocks;
+			}
+		}
+
+		if (inaddr != range_end)
+			return (1);
+
+		/*
+		 * End of range. Round up to next secsize bytes
+		 * after finishing compress
+		 */
+		if (out_remaining == 0)
+			out_remaining = PAGE_SIZE;
+
+		/* Finish compress */
+		hibernate_state->hib_stream.next_in = (caddr_t)inaddr;
+		hibernate_state->hib_stream.avail_in = 0;
+		hibernate_state->hib_stream.next_out =
+		    (caddr_t)hibernate_io_page + (PAGE_SIZE - out_remaining);
+		hibernate_state->hib_stream.avail_out = out_remaining;
+
+		if (deflate(&hibernate_state->hib_stream, Z_FINISH) !=
+		    Z_STREAM_END)
+			return (1);
+
+		out_remaining = hibernate_state->hib_stream.avail_out;
+
+		used = PAGE_SIZE - out_remaining;
+		nblocks = used / hiber_info->secsize;
+
+		/* Round up to next block if needed */
+		if (used % hiber_info->secsize != 0)
+			nblocks ++;
+
+		/* Write final block(s) for this chunk */
+		if (hiber_info->io_func(hiber_info->device, blkctr,
+		    (vaddr_t)hibernate_io_page, nblocks*hiber_info->secsize,
+		    HIB_W, hiber_info->io_page))
+			return (1);
+
+		blkctr += nblocks;
+
+		offset = blkctr;
+		chunks[i].compressed_size = (offset - chunks[i].offset) *
+		    hiber_info->secsize;
+	}
+
+	return (0);
+}
+
+/*
+ * Reset the zlib stream state and allocate a new hiballoc area for either
+ * inflate or deflate. This function is called once for each hibernate chunk.
+ * Calling hiballoc_init multiple times is acceptable since the memory it is
+ * provided is unmanaged memory (stolen). We use the memory provided to us
+ * by the piglet allocated via the supplied hiber_info.
+ */
+int
+hibernate_zlib_reset(union hibernate_info *hiber_info, int deflate)
+{
+	vaddr_t hibernate_zlib_start;
+	size_t hibernate_zlib_size;
+	char *pva = (char *)hiber_info->piglet_va;
+
+	hibernate_state = (struct hibernate_zlib_state *)
+	    (pva + (7 * PAGE_SIZE));
+
+	hibernate_zlib_start = (vaddr_t)(pva + (8 * PAGE_SIZE));
+	hibernate_zlib_size = 80 * PAGE_SIZE;
+
+	bzero((caddr_t)hibernate_zlib_start, hibernate_zlib_size);
+	bzero((caddr_t)hibernate_state, PAGE_SIZE);
+
+	/* Set up stream structure */
+	hibernate_state->hib_stream.zalloc = (alloc_func)hibernate_zlib_alloc;
+	hibernate_state->hib_stream.zfree = (free_func)hibernate_zlib_free;
+
+	/* Initialize the hiballoc arena for zlib allocs/frees */
+	hiballoc_init(&hibernate_state->hiballoc_arena,
+	    (caddr_t)hibernate_zlib_start, hibernate_zlib_size);
+
+	if (deflate) {
+		return deflateInit(&hibernate_state->hib_stream,
+		    Z_BEST_SPEED);
+	} else
+		return inflateInit(&hibernate_state->hib_stream);
+}
+
+/*
+ * Reads the hibernated memory image from disk, whose location and
+ * size are recorded in hiber_info. Begin by reading the persisted
+ * chunk table, which records the original chunk placement location
+ * and compressed size for each. Next, allocate a pig region of
+ * sufficient size to hold the compressed image. Next, read the
+ * chunks into the pig area (calling hibernate_read_chunks to do this),
+ * and finally, if all of the above succeeds, clear the hibernate signature.
+ * The function will then return to hibernate_resume, which will proceed
+ * to unpack the pig image to the correct place in memory.
+ */
+int
+hibernate_read_image(union hibernate_info *hiber_info)
+{
+	size_t compressed_size, disk_size, chunktable_size, pig_sz;
+	paddr_t image_start, image_end, pig_start, pig_end;
+	struct hibernate_disk_chunk *chunks;
+	daddr_t blkctr;
+	vaddr_t chunktable = (vaddr_t)NULL;
+	paddr_t piglet_chunktable = hiber_info->piglet_pa +
+	    HIBERNATE_CHUNK_SIZE;
+	int i;
+
+	/* Calculate total chunk table size in disk blocks */
+	chunktable_size = HIBERNATE_CHUNK_TABLE_SIZE / hiber_info->secsize;
+
+	blkctr = hiber_info->sig_offset - chunktable_size -
+			hiber_info->swap_offset;
+
+	chunktable = (vaddr_t)km_alloc(HIBERNATE_CHUNK_TABLE_SIZE, &kv_any,
+	    &kp_none, &kd_nowait);
+
+	if (!chunktable)
+		return (1);
+
+	/* Read the chunktable from disk into the piglet chunktable */
+	for (i = 0; i < HIBERNATE_CHUNK_TABLE_SIZE;
+	    i += PAGE_SIZE, blkctr += PAGE_SIZE/hiber_info->secsize) {
+		pmap_kenter_pa(chunktable + i, piglet_chunktable + i, VM_PROT_ALL);
+		hibernate_read_block(hiber_info, blkctr, PAGE_SIZE,
+		    chunktable + i);
+	}
+
+	blkctr = hiber_info->image_offset;
+	compressed_size = 0;
+	pmap_kenter_pa(chunktable, piglet_chunktable, VM_PROT_ALL);
+	chunks = (struct hibernate_disk_chunk *)chunktable;
+
+	for (i = 0; i < hiber_info->chunk_ctr; i++)
+		compressed_size += chunks[i].compressed_size;
+
+	disk_size = compressed_size;
+
+	/* Allocate the pig area */
+	pig_sz = compressed_size + HIBERNATE_CHUNK_SIZE;
+	if (uvm_pmr_alloc_pig(&pig_start, pig_sz) == ENOMEM)
+		return (1);
+
+	pig_end = pig_start + pig_sz;
+
+	/* Calculate image extents. Pig image must end on a chunk boundary. */
+	image_end = pig_end & ~(HIBERNATE_CHUNK_SIZE - 1);
+	image_start = pig_start;
+
+	image_start = image_end - disk_size;
+
+	hibernate_read_chunks(hiber_info, image_start, image_end, disk_size,
+	    chunks);
+
+	/* Prepare the resume time pmap/page table */
+	hibernate_populate_resume_pt(hiber_info, image_start, image_end);
+
+	/* Read complete, clear the signature and return */
+	return hibernate_clear_signature();
+}
+
+/*
+ * Read the hibernated memory chunks from disk (chunk information at this
+ * point is stored in the piglet) into the pig area specified by
+ * [pig_start .. pig_end]. Order the chunks so that the final chunk is the
+ * only chunk with overlap possibilities.
+ *
+ * This function uses the piglet area during this process as follows:
+ *
+ * offset from piglet base	use
+ * -----------------------	--------------------
+ * 0				i/o allocation area
+ * PAGE_SIZE			i/o write area
+ * 2*PAGE_SIZE			temp/scratch page
+ * 3*PAGE_SIZE			temp/scratch page
+ * 4*PAGE_SIZE to 6*PAGE_SIZE	chunk ordering area
+ * 7*PAGE_SIZE			hiballoc arena
+ * 8*PAGE_SIZE to 88*PAGE_SIZE	zlib deflate area
+ * ...
+ * HIBERNATE_CHUNK_SIZE		chunk table temporary area
+ */
+int
+hibernate_read_chunks(union hibernate_info *hib_info, paddr_t pig_start,
+    paddr_t pig_end, size_t image_compr_size,
+    struct hibernate_disk_chunk *chunks)
+{
+	paddr_t img_index, img_cur, r1s, r1e, r2s, r2e;
+	paddr_t copy_start, copy_end, piglet_cur;
+	paddr_t piglet_base = hib_info->piglet_pa;
+	paddr_t piglet_end = piglet_base + HIBERNATE_CHUNK_SIZE;
+	daddr_t blkctr;
+	size_t processed, compressed_size, read_size;
+	int i, j, overlap, found, nchunks;
+	int nochunks = 0, nfchunks = 0, npchunks = 0;
+	int *ochunks, *pchunks, *fchunks;
+	vaddr_t tempva = (vaddr_t)NULL, hibernate_fchunk_area = (vaddr_t)NULL;
+
+	global_pig_start = pig_start;
+
+	/* XXX - dont need this on all archs */
+	pmap_activate(curproc);
+
+	/*
+	 * These mappings go into the resuming kernel's page table, and are
+	 * used only during image read. They dissappear from existence
+	 * when the suspended kernel is unpacked on top of us.
+	 */
+	tempva = (vaddr_t)km_alloc(2*PAGE_SIZE, &kv_any, &kp_none, &kd_nowait);
+	if (!tempva)
+		return (1);
+	hibernate_fchunk_area = (vaddr_t)km_alloc(3*PAGE_SIZE, &kv_any,
+	    &kp_none, &kd_nowait);
+	if (!hibernate_fchunk_area)
+		return (1);
+
+	/* Temporary output chunk ordering */
+	ochunks = (int *)hibernate_fchunk_area;
+
+	/* Piglet chunk ordering */
+	pchunks = (int *)(hibernate_fchunk_area + PAGE_SIZE);
+
+	/* Final chunk ordering */
+	fchunks = (int *)(hibernate_fchunk_area + (2*PAGE_SIZE));
+
+	/* Map the chunk ordering region */
+	pmap_kenter_pa(hibernate_fchunk_area,
+	    piglet_base + (4*PAGE_SIZE), VM_PROT_ALL);
+	pmap_kenter_pa((vaddr_t)pchunks, piglet_base + (5*PAGE_SIZE),
+	    VM_PROT_ALL);
+	pmap_kenter_pa((vaddr_t)fchunks, piglet_base + (6*PAGE_SIZE),
+	    VM_PROT_ALL);
+
+	nchunks = hib_info->chunk_ctr;
+
+	/* Initially start all chunks as unplaced */
+	for (i = 0; i < nchunks; i++)
+		chunks[i].flags = 0;
+
+	/*
+	 * Search the list for chunks that are outside the pig area. These
+	 * can be placed first in the final output list.
+	 */
+	for (i = 0; i < nchunks; i++) {
+		if (chunks[i].end <= pig_start || chunks[i].base >= pig_end) {
+			ochunks[nochunks] = (u_int8_t)i;
+			fchunks[nfchunks] = (u_int8_t)i;
+			nochunks++;
+			nfchunks++;
+			chunks[i].flags |= HIBERNATE_CHUNK_USED;
+		}
+	}
+
+	/*
+	 * Walk the ordering, place the chunks in ascending memory order.
+	 * Conflicts might arise, these are handled next.
+	 */
+	do {
+		img_index = -1;
+		found = 0;
+		j = -1;
+		for (i = 0; i < nchunks; i++)
+			if (chunks[i].base < img_index &&
+			    chunks[i].flags == 0 ) {
+				j = i;
+				img_index = chunks[i].base;
+			}
+
+		if (j != -1) {
+			found = 1;
+			ochunks[nochunks] = (short)j;
+			nochunks++;
+			chunks[j].flags |= HIBERNATE_CHUNK_PLACED;
+		}
+	} while (found);
+
+	img_index = pig_start;
+
+	/*
+	 * Identify chunk output conflicts (chunks whose pig load area
+	 * corresponds to their original memory placement location)
+	 */
+	for (i = 0; i < nochunks ; i++) {
+		overlap = 0;
+		r1s = img_index;
+		r1e = img_index + chunks[ochunks[i]].compressed_size;
+		r2s = chunks[ochunks[i]].base;
+		r2e = chunks[ochunks[i]].end;
+
+		overlap = hibernate_check_overlap(r1s, r1e, r2s, r2e);
+		if (overlap)
+			chunks[ochunks[i]].flags |= HIBERNATE_CHUNK_CONFLICT;
+		img_index += chunks[ochunks[i]].compressed_size;
+	}
+
+	/*
+	 * Prepare the final output chunk list. Calculate an output
+	 * inflate strategy for overlapping chunks if needed.
+	 */
+	img_index = pig_start;
+	for (i = 0; i < nochunks ; i++) {
+		/*
+		 * If a conflict is detected, consume enough compressed
+		 * output chunks to fill the piglet
+		 */
+		if (chunks[ochunks[i]].flags & HIBERNATE_CHUNK_CONFLICT) {
+			copy_start = piglet_base;
+			copy_end = piglet_end;
+			piglet_cur = piglet_base;
+			npchunks = 0;
+			j = i;
+			while (copy_start < copy_end && j < nochunks) {
+				piglet_cur += chunks[ochunks[j]].compressed_size;
+				pchunks[npchunks] = ochunks[j];
+				npchunks++;
+				copy_start += chunks[ochunks[j]].compressed_size;
+				img_index += chunks[ochunks[j]].compressed_size;
+				i++;
+				j++;
+			}
+
+			piglet_cur = piglet_base;
+			for (j = 0; j < npchunks; j++) {
+				piglet_cur += chunks[pchunks[j]].compressed_size;
+				fchunks[nfchunks] = pchunks[j];
+				chunks[pchunks[j]].flags |= HIBERNATE_CHUNK_USED;
+				nfchunks++;
+			}
+		} else {
+			/*
+			 * No conflict, chunk can be added without copying
+			 */
+			if ((chunks[ochunks[i]].flags &
+			    HIBERNATE_CHUNK_USED) == 0) {
+				fchunks[nfchunks] = ochunks[i];
+				chunks[ochunks[i]].flags |= HIBERNATE_CHUNK_USED;
+				nfchunks++;
+			}
+			img_index += chunks[ochunks[i]].compressed_size;
+		}
+	}
+
+	img_index = pig_start;
+	for (i = 0; i < nfchunks; i++) {
+		piglet_cur = piglet_base;
+		img_index += chunks[fchunks[i]].compressed_size;
+	}
+
+	img_cur = pig_start;
+
+	for (i = 0; i < nfchunks; i++) {
+		blkctr = chunks[fchunks[i]].offset - hib_info->swap_offset;
+		processed = 0;
+		compressed_size = chunks[fchunks[i]].compressed_size;
+
+		while (processed < compressed_size) {
+			pmap_kenter_pa(tempva, img_cur, VM_PROT_ALL);
+			pmap_kenter_pa(tempva + PAGE_SIZE, img_cur+PAGE_SIZE,
+			    VM_PROT_ALL);
+
+			/* XXX - not needed on all archs */
+			pmap_activate(curproc);
+			if (compressed_size - processed >= PAGE_SIZE)
+				read_size = PAGE_SIZE;
+			else
+				read_size = compressed_size - processed;
+
+			hibernate_read_block(hib_info, blkctr, read_size,
+			    tempva + (img_cur & PAGE_MASK));
+
+			blkctr += (read_size / hib_info->secsize);
+
+			hibernate_flush();
+			pmap_kremove(tempva, PAGE_SIZE);
+			pmap_kremove(tempva + PAGE_SIZE, PAGE_SIZE);
+			processed += read_size;
+			img_cur += read_size;
+		}
+	}
+
+	return (0);
+}
+
+/*
+ * Hibernating a machine comprises the following operations:
+ *  1. Calculating this machine's hibernate_info information
+ *  2. Allocating a piglet and saving the piglet's physaddr
+ *  3. Calculating the memory chunks
+ *  4. Writing the compressed chunks to disk
+ *  5. Writing the chunk table
+ *  6. Writing the signature block (hibernate_info)
+ *
+ * On most architectures, the function calling hibernate_suspend would
+ * then power off the machine using some MD-specific implementation.
+ */
+int
+hibernate_suspend(void)
+{
+	union hibernate_info hib_info;
+
+	/*
+	 * Calculate memory ranges, swap offsets, etc.
+	 * This also allocates a piglet whose physaddr is stored in
+	 * hib_info->piglet_pa and vaddr stored in hib_info->piglet_va
+	 */
+	if (get_hibernate_info(&hib_info, 1))
+		return (1);
+
+	global_piglet_va = hib_info.piglet_va;
+
+	if (hibernate_write_chunks(&hib_info))
+		return (1);
+
+	if (hibernate_write_chunktable(&hib_info))
+		return (1);
+
+	if (hibernate_write_signature(&hib_info))
+		return (1);
+
+	delay(500000);
+	return (0);
+}
+
+/*
+ * Free items allocated during hibernate
+ */
+void
+hibernate_free(void)
+{
+	uvm_pmr_free_piglet(global_piglet_va, 3*HIBERNATE_CHUNK_SIZE);
+
+	pmap_kremove(hibernate_copy_page, PAGE_SIZE);
+	pmap_kremove(hibernate_temp_page, PAGE_SIZE);
+	pmap_update(pmap_kernel());
+
+	km_free((void *)hibernate_copy_page, PAGE_SIZE, &kv_any, &kp_none);
+	km_free((void *)hibernate_temp_page, PAGE_SIZE, &kv_any, &kp_none);
+}

@@ -1,4 +1,4 @@
-/*	$OpenBSD: locore.S,v 1.48 2011/07/04 15:54:24 guenther Exp $	*/
+/*	$OpenBSD: locore.S,v 1.51 2011/12/26 23:07:04 haesbaert Exp $	*/
 /*	$NetBSD: locore.S,v 1.13 2004/03/25 18:33:17 drochner Exp $	*/
 
 /*
@@ -169,7 +169,7 @@ _C_LABEL(lapic_isr):
 
 	.globl	_C_LABEL(cpu_id),_C_LABEL(cpu_vendor), _C_LABEL(cpu_brand_id)
 	.globl	_C_LABEL(cpuid_level),_C_LABEL(cpu_feature)
-	.globl	_C_LABEL(cpu_ecxfeature)
+	.globl	_C_LABEL(cpu_ecxfeature),_C_LABEL(ecpu_ecxfeature)
 	.globl	_C_LABEL(esym),_C_LABEL(boothowto),_C_LABEL(bootdev)
 	.globl	_C_LABEL(bootinfo), _C_LABEL(bootinfo_size), _C_LABEL(atdevbase)
 	.globl	_C_LABEL(proc0paddr),_C_LABEL(PTDpaddr)
@@ -181,6 +181,7 @@ _C_LABEL(cpu_id):	.long	0	# saved from `cpuid' instruction
 _C_LABEL(cpu_feature):	.long	0	# feature flags from 'cpuid'
 					#   instruction
 _C_LABEL(cpu_ecxfeature):.long	0	# extended feature flags from 'cpuid'
+_C_LABEL(ecpu_ecxfeature):.long	0	# extended ecx feature flags
 _C_LABEL(cpuid_level):	.long	-1	# max. level accepted by 'cpuid'
 					#   instruction
 _C_LABEL(cpu_vendor):	.space	16	# vendor string returned by `cpuid'
@@ -637,6 +638,7 @@ longmode_hi:
 
 /*
  * Signal trampoline; copied to top of user stack.
+ * gdb's backtrace logic matches against the instructions in this.
  */
 NENTRY(sigcode)
 	call	*%rax
@@ -722,14 +724,6 @@ ENTRY(cpu_switchto)
 
 	movq	%rdi, %r13
 	movq	%rsi, %r12
-
-#ifdef DIAGNOSTIC
-	xorq	%rax,%rax
-	cmpq	%rax,P_WCHAN(%r12)
-	jne	_C_LABEL(switch_error2)
-	cmpb	$SRUN,P_STAT(%r12)
-	jne	_C_LABEL(switch_error3)
-#endif
 
 	/* Record new proc. */
 	movb	$SONPROC,P_STAT(%r12)	# p->p_stat = SONPROC
@@ -857,21 +851,6 @@ ENTRY(cpu_idle_leave)
 	.globl	_C_LABEL(panic)
 
 #ifdef DIAGNOSTIC
-NENTRY(switch_error1)
-	movabsq	$1f,%rdi
-	call	_C_LABEL(panic)
-	/* NOTREACHED */
-1:	.asciz	"cpu_switch 1"
-NENTRY(switch_error2)
-	movabsq	$1f,%rdi
-	call	_C_LABEL(panic)
-	/* NOTREACHED */
-1:	.asciz	"cpu_switch 2"
-NENTRY(switch_error3)
-	movabsq	$1f,%rdi
-	call	_C_LABEL(panic)
-	/* NOTREACHED */
-1:	.asciz	"cpu_switch 3"
 NENTRY(switch_pmcpu_set)
 	movabsq	$1f,%rdi
 	call	_C_LABEL(panic)

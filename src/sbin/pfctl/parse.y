@@ -1,4 +1,4 @@
-/*	$OpenBSD: parse.y,v 1.607 2011/07/29 10:51:46 mcbride Exp $	*/
+/*	$OpenBSD: parse.y,v 1.613 2011/12/19 23:26:16 mikeb Exp $	*/
 
 /*
  * Copyright (c) 2001 Markus Friedl.  All rights reserved.
@@ -217,6 +217,7 @@ struct redirspec {
 	struct redirection      *rdr;
 	struct pool_opts         pool_opts;
 	int			 binat;
+	int			 af;
 };
 
 struct filter_opts {
@@ -228,9 +229,11 @@ struct filter_opts {
 #define FOM_SRCTRACK	0x0010
 #define FOM_MINTTL	0x0020
 #define FOM_MAXMSS	0x0040
+#define FOM_AFTO	0x0080
 #define FOM_SETTOS	0x0100
 #define FOM_SCRUB_TCP	0x0200
 #define FOM_PRIO	0x0400
+#define FOM_ONCE	0x1000
 	struct node_uid		*uid;
 	struct node_gid		*gid;
 	struct node_if		*rcv;
@@ -455,11 +458,11 @@ int	parseport(char *, struct range *r, int);
 %token	WEIGHT
 %token	ALTQ CBQ PRIQ HFSC BANDWIDTH TBRSIZE LINKSHARE REALTIME UPPERLIMIT
 %token	QUEUE PRIORITY QLIMIT RTABLE RDOMAIN
-%token	LOAD RULESET_OPTIMIZATION RTABLE RDOMAIN PRIO
+%token	LOAD RULESET_OPTIMIZATION RTABLE RDOMAIN PRIO ONCE
 %token	STICKYADDRESS MAXSRCSTATES MAXSRCNODES SOURCETRACK GLOBAL RULE
 %token	MAXSRCCONN MAXSRCCONNRATE OVERLOAD FLUSH SLOPPY PFLOW
 %token	TAGGED TAG IFBOUND FLOATING STATEPOLICY STATEDEFAULTS ROUTE SETTOS
-%token	DIVERTTO DIVERTREPLY DIVERTPACKET NATTO RDRTO RECEIVEDON NE LE GE
+%token	DIVERTTO DIVERTREPLY DIVERTPACKET NATTO AFTO RDRTO RECEIVEDON NE LE GE
 %token	<v.string>		STRING
 %token	<v.number>		NUMBER
 %token	<v.i>			PORTBINARY
@@ -605,10 +608,7 @@ option		: SET REASSEMBLE yesno optnodf		{
 				yyerror("hostid must be non-zero");
 				YYERROR;
 			}
-			if (pfctl_set_hostid(pf, $3) != 0) {
-				yyerror("error setting hostid %08x", $3);
-				YYERROR;
-			}
+			pfctl_set_hostid(pf, $3);
 		}
 		| SET BLOCKPOLICY DROP	{
 			if (pf->opts & PF_OPT_VERBOSE)
@@ -870,6 +870,12 @@ anchorrule	: ANCHOR anchorname dir quick interface af proto fromto
 
 			if ($9.route.rt) {
 				yyerror("cannot specify route handling "
+				    "on anchors");
+				YYERROR;
+			}
+
+			if ($9.marker & FOM_ONCE) {
+				yyerror("cannot specify 'once' "
 				    "on anchors");
 				YYERROR;
 			}
@@ -1705,8 +1711,24 @@ pfrule		: action dir logquick interface af proto fromto
 				r.prio[1] = $8.prio[1];
 			} else
 				r.prio[0] = r.prio[1] = PF_PRIO_NOTSET;
+			if ($8.marker & FOM_ONCE)
+				r.rule_flag |= PFRULE_ONCE;
 
+			if ($8.marker & FOM_AFTO) {
+				if (!$5) {
+					yyerror("must indicate source address "
+					    "family with af-to");
+					YYERROR;
+				}
+				if ($5 == $8.nat.af) {
+					yyerror("incorrect address family "
+					    "translation");
+					YYERROR;
+				}
+				r.rule_flag |= PFRULE_AFTO;
+			}
 			r.af = $5;
+
 			if ($8.tag)
 				if (strlcpy(r.tagname, $8.tag,
 				    PF_TAG_NAME_SIZE) >= PF_TAG_NAME_SIZE) {
@@ -2256,6 +2278,55 @@ filter_opt	: USER uids {
 			memcpy(&filter_opts.nat.pool_opts, &$3,
 			    sizeof(filter_opts.nat.pool_opts));
 		}
+		| AFTO af FROM redirpool pool_opts {
+			if (filter_opts.nat.rdr) {
+				yyerror("cannot respecify af-to");
+				YYERROR;
+			}
+			if ($2 == 0) {
+				yyerror("no address family specified");
+				YYERROR;
+			}
+			if ($4->host->af && $4->host->af != $2) {
+				yyerror("af-to addresses must be in the "
+				    "target address family");
+				YYERROR;
+			}
+			filter_opts.nat.af = $2;
+			filter_opts.nat.rdr = $4;
+			memcpy(&filter_opts.nat.pool_opts, &$5,
+			    sizeof(filter_opts.nat.pool_opts));
+			filter_opts.rdr.rdr =
+			    calloc(1, sizeof(struct redirection));
+			bzero(&filter_opts.rdr.pool_opts,
+			    sizeof(filter_opts.rdr.pool_opts));
+			filter_opts.marker |= FOM_AFTO;
+		}
+		| AFTO af FROM redirpool pool_opts TO redirpool pool_opts {
+			if (filter_opts.nat.rdr) {
+				yyerror("cannot respecify af-to");
+				YYERROR;
+			}
+			if ($2 == 0) {
+				yyerror("no address family specified");
+				YYERROR;
+			}
+			if (($4->host->af && $4->host->af != $2) ||
+			    ($7->host->af && $7->host->af != $2)) {
+				yyerror("af-to addresses must be in the "
+				    "target address family");
+				YYERROR;
+			}
+			filter_opts.nat.af = $2;
+			filter_opts.nat.rdr = $4;
+			memcpy(&filter_opts.nat.pool_opts, &$5,
+			    sizeof(filter_opts.nat.pool_opts));
+			filter_opts.rdr.af = $2;
+			filter_opts.rdr.rdr = $7;
+			memcpy(&filter_opts.nat.pool_opts, &$8,
+			    sizeof(filter_opts.nat.pool_opts));
+			filter_opts.marker |= FOM_AFTO;
+		}
 		| RDRTO redirpool pool_opts {
 			if (filter_opts.rdr.rdr) {
 				yyerror("cannot respecify rdr-to");
@@ -2316,6 +2387,9 @@ filter_opt	: USER uids {
 			filter_opts.marker |= FOM_PRIO;
 			filter_opts.prio[0] = $1.b1;
 			filter_opts.prio[1] = $1.b2;
+		}
+		| ONCE {
+			filter_opts.marker |= FOM_ONCE;
 		}
 		;
 
@@ -3369,7 +3443,7 @@ tos	: STRING			{
 		| NUMBER			{
 			$$ = $1;
 			if ($$ > 255) {
-				yyerror("illegal tos value %s", $1);
+				yyerror("illegal tos value %lu", $1);
 				YYERROR;
 			}
 		}
@@ -4119,6 +4193,10 @@ rule_consistent(struct pf_rule *r, int anchor_call)
 			   "must not be used on match rules");
 			problems++;
 		}
+		if (r->rule_flag & PFRULE_AFTO) {
+			yyerror("af-to is not supported on match rules");
+			problems++;
+		}
 	}
 	return (-problems);
 }
@@ -4623,13 +4701,17 @@ collapse_redirspec(struct pf_pool *rpool, struct pf_rule *r,
 		return (0);
 	}
 
+	if (r->rule_flag & PFRULE_AFTO)
+		r->naf = rs->af;
+
 	/* count matching addresses */
 	for (h = rs->rdr->host; h != NULL; h = h->next) {
-		if (!r->af || !h->af || h->af == r->af) {
+		if (!r->af || !h->af || rs->af || h->af == r->af) {
 			i++;
 			if (h->af && !r->af)
 				r->af = h->af;
-		}
+		} else if (r->naf && h->af == r->naf)
+			i++;
 	}
 
 	if (i == 0) {		/* no pool address */
@@ -4638,7 +4720,8 @@ collapse_redirspec(struct pf_pool *rpool, struct pf_rule *r,
 		return (1);
 	} else if (i == 1) {	/* only one address */
 		for (h = rs->rdr->host; h != NULL; h = h->next)
-			if (!h->af || !r->af || r->af == h->af)
+			if (!h->af || !r->af || rs->af || r->af == h->af ||
+			    (r->naf && r->naf == h->af))
 				break;
 		rpool->addr = h->addr;
 		if (!allow_if && h->ifname) {
@@ -4660,7 +4743,7 @@ collapse_redirspec(struct pf_pool *rpool, struct pf_rule *r,
 			return (1);
 		}
 		for (h = rs->rdr->host; h != NULL; h = h->next) {
-			if (r->af != h->af)
+			if (!rs->af && r->af != h->af)
 				continue;
 			if (h->addr.type != PF_ADDR_ADDRMASK &&
 			    h->addr.type != PF_ADDR_NONE) {
@@ -5105,6 +5188,7 @@ lookup(char *s)
 {
 	/* this has to be sorted always */
 	static const struct keywords keywords[] = {
+		{ "af-to",		AFTO},
 		{ "all",		ALL},
 		{ "allow-opts",		ALLOWOPTS},
 		{ "altq",		ALTQ},
@@ -5167,6 +5251,7 @@ lookup(char *s)
 		{ "no-route",		NOROUTE},
 		{ "no-sync",		NOSYNC},
 		{ "on",			ON},
+		{ "once",		ONCE},
 		{ "optimization",	OPTIMIZATION},
 		{ "os",			OS},
 		{ "out",		OUT},

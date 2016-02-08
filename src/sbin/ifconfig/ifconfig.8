@@ -1,4 +1,4 @@
-.\"	$OpenBSD: ifconfig.8,v 1.219 2011/07/09 08:44:54 jmc Exp $
+.\"	$OpenBSD: ifconfig.8,v 1.226 2012/02/02 12:34:37 benno Exp $
 .\"	$NetBSD: ifconfig.8,v 1.11 1996/01/04 21:27:29 pk Exp $
 .\"     $FreeBSD: ifconfig.8,v 1.16 1998/02/01 07:03:29 steve Exp $
 .\"
@@ -31,7 +31,7 @@
 .\"
 .\"     @(#)ifconfig.8	8.4 (Berkeley) 6/1/94
 .\"
-.Dd $Mdocdate: July 9 2011 $
+.Dd $Mdocdate: February 2 2012 $
 .Dt IFCONFIG 8
 .Os
 .Sh NAME
@@ -206,10 +206,11 @@ This action automatically disables routes using the interface.
 .It Cm group Ar group-name
 Assign the interface to a
 .Dq group .
+.Ar group-name
+may not be longer than 15 characters and must not end with a digit.
 Any interface can be in multiple groups.
 .Pp
-For instance, such a group could be used to create a hardware
-independent
+For instance, a group could be used to create a hardware independent
 .Xr pf 4
 ruleset (i.e. not one based on the names of NICs) using
 existing (egress, carp, etc.) or user-defined groups.
@@ -244,6 +245,29 @@ interface group.
 .It Cm -group Ar group-name
 Remove the interface from the given
 .Dq group .
+.It Cm hwfeatures
+Display the interface hardware features:
+.Pp
+.Bl -tag -width 14n -offset indent -compact
+.It Sy CSUM_IPv4
+The device supports IPv4 checksum offload.
+.It Sy CSUM_TCPv4
+As above, for TCP in IPv4 datagrams.
+.It Sy CSUM_UDPv4
+As above, for UDP.
+.It Sy VLAN_MTU
+MTU can be configured on a per-vlan basis.
+.It Sy VLAN_HWTAGGING
+On transmit, the device can prepend the
+.Xr vlan
+tag.
+.It Sy CSUM_TCPv6
+As CSUM_TCPv4, but supports IPv6 datagrams.
+.It Sy CSUM_UDPv6
+As above, for UDP.
+.It Sy WOL
+The device supports Wake on LAN (WoL).
+.El
 .It Fl inet6
 Disable
 .Xr inet6 4
@@ -1162,10 +1186,15 @@ packets entering the MPLS domain.
 .El
 .\" PFLOW
 .Sh PFLOW
+.nr nS 1
+.Bk -words
 .Nm ifconfig
 .Ar pflow-interface
 .Op Oo Fl Oc Ns Cm flowdst Ar addr : Ns Ar port
 .Op Oo Fl Oc Ns Cm flowsrc Ar addr
+.Op Cm pflowproto Ar n
+.Ek
+.nr nS 0
 .Pp
 The following options are available for a
 .Xr pflow 4
@@ -1190,6 +1219,9 @@ is the IP address used as sender of the UDP packets and may be used to
 identify the source of the data on the pflow collector.
 .It Fl flowsrc
 Unset the source address.
+.It Cm pflowproto Ar n
+Set the protocol version.
+The default is version 5.
 .El
 .\" PFSYNC
 .Sh PFSYNC
@@ -1436,7 +1468,6 @@ the corresponding routing domain is derived from this table.
 .Ar vlan-interface
 .Op Cm vlan Ar vlan-tag
 .Op Oo Fl Oc Ns Cm vlandev Ar parent-interface
-.Op Cm vlanprio Ar vlan-priority
 .Ek
 .nr nS 0
 .Pp
@@ -1475,12 +1506,6 @@ will be assigned 802.1Q tag 5.
 Disassociate from the parent interface.
 This breaks the link between the vlan interface and its parent,
 clears its vlan tag, flags, and link address, and shuts the interface down.
-.It Cm vlanprio Ar vlan-priority
-Set the vlan priority value
-to
-.Ar vlan-priority .
-This value is a 3-bit number which is used to create an 802.1Q
-vlan header for packets sent from the vlan interface.
 .El
 .Sh EXAMPLES
 Assign the

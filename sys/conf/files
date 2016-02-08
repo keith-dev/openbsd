@@ -1,4 +1,4 @@
-#	$OpenBSD: files,v 1.525 2011/07/09 00:47:18 henning Exp $
+#	$OpenBSD: files,v 1.533 2011/12/31 17:06:10 jsing Exp $
 #	$NetBSD: files,v 1.87 1996/05/19 17:17:50 jonathan Exp $
 
 #	@(#)files.newconf	7.5 (Berkeley) 5/10/93
@@ -339,8 +339,8 @@ file	dev/ic/lpt.c			lpt & (lpt_isa | lpt_localbus |
 
 # STI (hp graphics)
 device	sti: wsemuldisplaydev
-file	dev/ic/sti.c			sti & (sti_pci | sti_gedoens |
-					       sti_sgc) needs-flag
+file	dev/ic/sti.c			sti & (sti_dio | sti_gedoens |
+					       sti_pci | sti_sgc) needs-flag
 
 # Initio ULTRA WIDE/ULTRA2 WIDE SCSI Controllers
 device	iha: scsi
@@ -450,6 +450,14 @@ device wbsd: sdmmcbus
 file	dev/ic/w83l518d.c		wbsd
 file	dev/ic/w83l518d_sdmmc.c		wbsd
 
+# AMD 7930 audio/ISDN codec
+define	am7930
+file	dev/ic/am7930.c			am7930
+
+# Siemens PSB2160 audio codec, as found in HP systems
+device	arcofi: audio, auconv, mulaw
+file	dev/ic/arcofi.c			arcofi
+
 # radio devices, attaches to radio hardware driver
 device	radio
 attach	radio at radiobus
@@ -483,6 +491,7 @@ file	dev/softraid_raidp.c		softraid
 file	dev/softraid_crypto.c		softraid & crypto
 file	dev/softraid_aoe.c		softraid & ether & aoe
 file	dev/softraid_raid6.c		softraid
+file	dev/softraid_concat.c		softraid
 
 # SPD Memory EEPROM
 device	spdmem
@@ -490,7 +499,6 @@ file	dev/spdmem.c			spdmem
 
 # legitimate pseudo-devices
 pseudo-device vnd: disk
-pseudo-device ccd: disk
 pseudo-device raid: disk
 pseudo-device rd: disk
 file	dev/rd.c			rd needs-flag
@@ -582,7 +590,6 @@ file ddb/db_write_cmd.c			ddb
 file ddb/db_usrreq.c			ddb
 file dev/auconv.c			auconv
 file dev/audio.c			audio			needs-flag
-file dev/ccd.c				ccd			needs-flag
 file dev/cons.c
 file dev/diskmap.c
 file dev/firmload.c			firmload
@@ -772,9 +779,7 @@ file kern/spec_vnops.c
 file miscfs/deadfs/dead_vnops.c
 file miscfs/fifofs/fifo_vnops.c		fifo
 file miscfs/procfs/procfs_cmdline.c	procfs
-file miscfs/procfs/procfs_ctl.c		procfs
 file miscfs/procfs/procfs_linux.c	procfs
-file miscfs/procfs/procfs_note.c	procfs
 file miscfs/procfs/procfs_status.c	procfs
 file miscfs/procfs/procfs_subr.c	procfs
 file miscfs/procfs/procfs_vfsops.c	procfs
@@ -848,6 +853,7 @@ file netinet/igmp.c			inet
 file netinet/in.c			inet
 file netinet/in_pcb.c			inet
 file netinet/in_proto.c			inet
+file netinet/inet_nat64.c		inet & pf
 file netinet/ip_divert.c		inet & pf
 file netinet/ip_icmp.c			inet
 file netinet/ip_id.c			inet

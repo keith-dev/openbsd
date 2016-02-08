@@ -130,7 +130,6 @@
 ./usr/include/dev/cardbus/cardbusvar.h
 ./usr/include/dev/cardbus/cardslotvar.h
 ./usr/include/dev/cardbus/rbus.h
-./usr/include/dev/ccdvar.h
 ./usr/include/dev/clock_subr.h
 ./usr/include/dev/cons.h
 ./usr/include/dev/dec
@@ -186,6 +185,7 @@
 ./usr/include/dev/ic/aic7xxx_openbsd.h
 ./usr/include/dev/ic/aic7xxxvar.h
 ./usr/include/dev/ic/am7930reg.h
+./usr/include/dev/ic/am7930var.h
 ./usr/include/dev/ic/am79900reg.h
 ./usr/include/dev/ic/am7990reg.h
 ./usr/include/dev/ic/am7990var.h
@@ -208,6 +208,7 @@
 ./usr/include/dev/ic/ar9285reg.h
 ./usr/include/dev/ic/ar9287reg.h
 ./usr/include/dev/ic/ar9380reg.h
+./usr/include/dev/ic/arcofivar.h
 ./usr/include/dev/ic/athnreg.h
 ./usr/include/dev/ic/athnvar.h
 ./usr/include/dev/ic/athvar.h
@@ -436,6 +437,7 @@
 ./usr/include/dev/isa/spkrio.h
 ./usr/include/dev/isa/vga_isavar.h
 ./usr/include/dev/isa/viasioreg.h
+./usr/include/dev/isa/wbsioreg.h
 ./usr/include/dev/isa/wdsreg.h
 ./usr/include/dev/isa/wssreg.h
 ./usr/include/dev/isa/wssvar.h
@@ -1850,6 +1852,7 @@
 ./usr/share/lkm/syscall/module/newsyscall.c
 ./usr/share/lkm/syscall/test/Makefile
 ./usr/share/lkm/syscall/test/testsyscall.c
+./usr/share/man/man1/addr2line.1
 ./usr/share/man/man1/ar.1
 ./usr/share/man/man1/as.1
 ./usr/share/man/man1/asa.1
@@ -1869,11 +1872,15 @@
 ./usr/share/man/man1/lint.1
 ./usr/share/man/man1/lorder.1
 ./usr/share/man/man1/mkstr.1
+./usr/share/man/man1/objcopy.1
 ./usr/share/man/man1/objdump.1
 ./usr/share/man/man1/pmdb.1
+./usr/share/man/man1/protoize.1
 ./usr/share/man/man1/ranlib.1
+./usr/share/man/man1/readelf.1
 ./usr/share/man/man1/rpcgen.1
 ./usr/share/man/man1/strip.1
+./usr/share/man/man1/unprotoize.1
 ./usr/share/man/man1/xstr.1
 ./usr/share/man/man1/yacc.1
 ./usr/share/man/man2/EV_SET.2
@@ -1892,6 +1899,8 @@
 ./usr/share/man/man2/WIFSTOPPED.2
 ./usr/share/man/man2/WSTOPSIG.2
 ./usr/share/man/man2/WTERMSIG.2
+./usr/share/man/man2/__get_tcb.2
+./usr/share/man/man2/__set_tcb.2
 ./usr/share/man/man2/__syscall.2
 ./usr/share/man/man2/_exit.2
 ./usr/share/man/man2/accept.2
@@ -2102,7 +2111,6 @@
 ./usr/share/man/man2/sigpending.2
 ./usr/share/man/man2/sigprocmask.2
 ./usr/share/man/man2/sigreturn.2
-./usr/share/man/man2/sigstack.2
 ./usr/share/man/man2/sigsuspend.2
 ./usr/share/man/man2/socket.2
 ./usr/share/man/man2/socketpair.2
@@ -2918,7 +2926,6 @@
 ./usr/share/man/man3/SLIST_ENTRY.3
 ./usr/share/man/man3/SLIST_FIRST.3
 ./usr/share/man/man3/SLIST_FOREACH.3
-./usr/share/man/man3/SLIST_FOREACH_PREVPTR.3
 ./usr/share/man/man3/SLIST_FOREACH_SAFE.3
 ./usr/share/man/man3/SLIST_HEAD.3
 ./usr/share/man/man3/SLIST_HEAD_INITIALIZER.3
@@ -4014,6 +4021,7 @@
 ./usr/share/man/man3/fwopen.3
 ./usr/share/man/man3/fwprintf.3
 ./usr/share/man/man3/fwrite.3
+./usr/share/man/man3/fwscanf.3
 ./usr/share/man/man3/gai_strerror.3
 ./usr/share/man/man3/gamma.3
 ./usr/share/man/man3/gammaf.3
@@ -4987,14 +4995,11 @@
 ./usr/share/man/man3/kvm_dump_mkheader.3
 ./usr/share/man/man3/kvm_dump_wrtheader.3
 ./usr/share/man/man3/kvm_getargv.3
-./usr/share/man/man3/kvm_getargv2.3
 ./usr/share/man/man3/kvm_getenvv.3
-./usr/share/man/man3/kvm_getenvv2.3
 ./usr/share/man/man3/kvm_geterr.3
 ./usr/share/man/man3/kvm_getfile2.3
 ./usr/share/man/man3/kvm_getfiles.3
 ./usr/share/man/man3/kvm_getloadavg.3
-./usr/share/man/man3/kvm_getproc2.3
 ./usr/share/man/man3/kvm_getprocs.3
 ./usr/share/man/man3/kvm_nlist.3
 ./usr/share/man/man3/kvm_open.3
@@ -5278,7 +5283,6 @@
 ./usr/share/man/man3/nearbyint.3
 ./usr/share/man/man3/nearbyintf.3
 ./usr/share/man/man3/nearbyintl.3
-./usr/share/man/man3/net_addrcmp.3
 ./usr/share/man/man3/network.3
 ./usr/share/man/man3/new_field.3
 ./usr/share/man/man3/new_fieldtype.3
@@ -5855,6 +5859,8 @@
 ./usr/share/man/man3/stdarg.3
 ./usr/share/man/man3/stdio.3
 ./usr/share/man/man3/store.3
+./usr/share/man/man3/stpcpy.3
+./usr/share/man/man3/stpncpy.3
 ./usr/share/man/man3/strcasecmp.3
 ./usr/share/man/man3/strcasestr.3
 ./usr/share/man/man3/strcat.3
@@ -5943,6 +5949,7 @@
 ./usr/share/man/man3/swap32.3
 ./usr/share/man/man3/swap64.3
 ./usr/share/man/man3/swprintf.3
+./usr/share/man/man3/swscanf.3
 ./usr/share/man/man3/syncok.3
 ./usr/share/man/man3/sys_siglist.3
 ./usr/share/man/man3/sys_signame.3
@@ -6073,11 +6080,13 @@
 ./usr/share/man/man3/valloc.3
 ./usr/share/man/man3/varargs.3
 ./usr/share/man/man3/vasprintf.3
+./usr/share/man/man3/vax/infnan.3
 ./usr/share/man/man3/verr.3
 ./usr/share/man/man3/verrx.3
 ./usr/share/man/man3/vfprintf.3
 ./usr/share/man/man3/vfscanf.3
 ./usr/share/man/man3/vfwprintf.3
+./usr/share/man/man3/vfwscanf.3
 ./usr/share/man/man3/vidattr.3
 ./usr/share/man/man3/vidputs.3
 ./usr/share/man/man3/vis.3
@@ -6089,6 +6098,7 @@
 ./usr/share/man/man3/vsprintf.3
 ./usr/share/man/man3/vsscanf.3
 ./usr/share/man/man3/vswprintf.3
+./usr/share/man/man3/vswscanf.3
 ./usr/share/man/man3/vsyslog.3
 ./usr/share/man/man3/vsyslog_r.3
 ./usr/share/man/man3/vw_printw.3
@@ -6097,6 +6107,7 @@
 ./usr/share/man/man3/vwarnx.3
 ./usr/share/man/man3/vwprintf.3
 ./usr/share/man/man3/vwprintw.3
+./usr/share/man/man3/vwscanf.3
 ./usr/share/man/man3/vwscanw.3
 ./usr/share/man/man3/wadd_wch.3
 ./usr/share/man/man3/wadd_wchnstr.3
@@ -6136,6 +6147,7 @@
 ./usr/share/man/man3/wcscpy.3
 ./usr/share/man/man3/wcscspn.3
 ./usr/share/man/man3/wcsdup.3
+./usr/share/man/man3/wcsftime.3
 ./usr/share/man/man3/wcslcat.3
 ./usr/share/man/man3/wcslcpy.3
 ./usr/share/man/man3/wcslen.3
@@ -6214,6 +6226,7 @@
 ./usr/share/man/man3/wredrawln.3
 ./usr/share/man/man3/wrefresh.3
 ./usr/share/man/man3/wresize.3
+./usr/share/man/man3/wscanf.3
 ./usr/share/man/man3/wscanw.3
 ./usr/share/man/man3/wscrl.3
 ./usr/share/man/man3/wsetscrreg.3
@@ -6773,7 +6786,32 @@
 ./usr/share/man/man9/readdisklabel.9
 ./usr/share/man/man9/relookup.9
 ./usr/share/man/man9/resettodr.9
+./usr/share/man/man9/route.9
 ./usr/share/man/man9/rssadapt.9
+./usr/share/man/man9/rt_gettable.9
+./usr/share/man/man9/rt_lookup.9
+./usr/share/man/man9/rt_setgate.9
+./usr/share/man/man9/rt_timer_add.9
+./usr/share/man/man9/rt_timer_count.9
+./usr/share/man/man9/rt_timer_queue_change.9
+./usr/share/man/man9/rt_timer_queue_create.9
+./usr/share/man/man9/rt_timer_queue_destroy.9
+./usr/share/man/man9/rt_timer_remove_all.9
+./usr/share/man/man9/rtable_add.9
+./usr/share/man/man9/rtable_exists.9
+./usr/share/man/man9/rtable_l2.9
+./usr/share/man/man9/rtable_l2set.9
+./usr/share/man/man9/rtalloc.9
+./usr/share/man/man9/rtalloc1.9
+./usr/share/man/man9/rtalloc_noclone.9
+./usr/share/man/man9/rtdeletemsg.9
+./usr/share/man/man9/rtfree.9
+./usr/share/man/man9/rtlabel_id2name.9
+./usr/share/man/man9/rtlabel_id2sa.9
+./usr/share/man/man9/rtlabel_name2id.9
+./usr/share/man/man9/rtlabel_unref.9
+./usr/share/man/man9/rtredirect.9
+./usr/share/man/man9/rtrequest1.9
 ./usr/share/man/man9/runtime.9
 ./usr/share/man/man9/rw_assert_rdlock.9
 ./usr/share/man/man9/rw_assert_unlocked.9

@@ -1,7 +1,7 @@
-.\"	$OpenBSD: mg.1,v 1.53 2011/08/01 12:15:23 lum Exp $
+.\"	$OpenBSD: mg.1,v 1.58 2012/02/09 09:00:14 lum Exp $
 .\" This file is in the public domain.
 .\"
-.Dd $Mdocdate: August 1 2011 $
+.Dd $Mdocdate: February 9 2012 $
 .Dt MG 1
 .Os
 .Sh NAME
@@ -73,10 +73,16 @@ the mark at the point of deletion.
 Note: The point and mark are window-specific in
 .Nm ,
 not buffer-specific, as in other emacs flavours.
+.Sh TAGS
+.Nm
+supports tag files created by
+.Xr ctags 1 ,
+allowing the user to quickly locate various object definitions.
+Note though that emacs uses etags, not ctags.
 .Sh DEFAULT KEY BINDINGS
 Normal editing commands are very similar to GNU Emacs.
 In the following examples, C-x means Control-x, and M-x means Meta-x,
-where the Meta key may be either a special key on your keyboard
+where the Meta key may be either a special key on the keyboard
 or the ALT key; otherwise ESC followed by the key X works as well.
 .Pp
 .Bl -tag -width xxxxxxxxxx -compact
@@ -212,6 +218,10 @@ suspend-emacs
 scroll-other-window
 .It M-SPC
 just-one-space
+.It M-.
+find-tag
+.It M-*
+pop-tag-mark
 .It M-%
 query-replace
 .It M-<
@@ -447,9 +457,9 @@ Print an error if there is anything wrong.
 Justify a paragraph, wrapping text at the current fill column.
 .It find-file
 Select a file for editing.
-First check if you can find the file
-in another buffer; if you can find it, just switch to the buffer.
-If you cannot find the file, create a new buffer, read in the
+First check if the file can be found
+in another buffer; if it is there, just switch to that buffer.
+If the file cannot be found, create a new buffer, read in the
 file from disk, and switch to the new buffer.
 .It find-file-read-only
 Same as find-file, except the new buffer is set to read-only.
@@ -461,6 +471,8 @@ If the kill fails, or is aborted, revert to the original file.
 .It find-file-other-window
 Opens the specified file in a second buffer.
 Splits the current window if necessary.
+.It find-tag
+Jump to definition of tag at dot.
 .It forward-char
 Move cursor forwards (or backwards, if
 .Va n
@@ -606,6 +618,8 @@ This command makes the previous (up the screen) window the
 current window.
 There are no errors, although the command does not do
 a lot if there is only 1 window.
+.It pop-tag-mark
+Return to position where find-tag was previously invoked.
 .It push-shell
 Suspend
 .Nm
@@ -706,7 +720,7 @@ characters, if not found, print a message.
 .It self-insert-command
 Insert a character.
 .It set-case-fold-search
-Set case-fold searching, causing case nopt to matter
+Set case-fold searching, causing case not to matter
 in regular expression searches.
 This is the default.
 .It set-default-mode
@@ -775,7 +789,9 @@ Change all of the lower case characters in the region to
 upper case.
 .It upcase-word
 Move the cursor forward by the specified number of words.
-As you move, convert any characters to upper case.
+As it moves, convert any characters to upper case.
+.It visit-tags-table
+Record name of the tags file to be used for subsequent find-tag.
 .It what-cursor-position
 Display a bunch of useful information about the current location of
 dot.
@@ -804,7 +820,7 @@ and
 .Pa .mg-TERM .
 Here,
 .Ev TERM
-represents the name of your terminal type; e.g., if your terminal type
+represents the name of the terminal type; e.g., if the terminal type
 is set to
 .Dq vt100 ,
 .Nm
@@ -826,7 +842,7 @@ set-fill-column 72
 auto-execute *.c c-mode
 .Ed
 .Sh FILES
-.Bl -tag -width ~/.mg-TERM -compact
+.Bl -tag -width /usr/share/doc/mg/tutorial -compact
 .It Pa ~/.mg
 normal startup file
 .It Pa ~/.mg-TERM
@@ -835,11 +851,12 @@ terminal-specific startup file
 concise tutorial
 .El
 .Sh SEE ALSO
+.Xr ctags 1 ,
 .Xr vi 1
 .Sh CAVEATS
 Since it is written completely in C, there is currently no
-language in which you can write extensions;
-however, you can rebind keys and change certain parameters
+language in which extensions can be written;
+however, keys can be rebound and certain parameters can be changed
 in startup files.
 .Pp
 In order to use 8-bit characters (such as German umlauts), the Meta key
