@@ -1,4 +1,4 @@
-/* $OpenBSD: cmd-show-options.c,v 1.14 2011/04/05 19:37:01 nicm Exp $ */
+/* $OpenBSD: cmd-show-options.c,v 1.16 2012/07/11 07:10:15 nicm Exp $ */
 
 /*
  * Copyright (c) 2007 Nicholas Marriott <nicm@users.sourceforge.net>
@@ -27,12 +27,12 @@
  * Show options.
  */
 
-int	cmd_show_options_exec(struct cmd *, struct cmd_ctx *);
+enum cmd_retval	 cmd_show_options_exec(struct cmd *, struct cmd_ctx *);
 
 const struct cmd_entry cmd_show_options_entry = {
 	"show-options", "show",
-	"gst:w", 0, 0,
-	"[-gsw] [-t target-session|target-window]",
+	"gst:w", 0, 1,
+	"[-gsw] [-t target-session|target-window] [option]",
 	0,
 	NULL,
 	NULL,
@@ -41,15 +41,15 @@ const struct cmd_entry cmd_show_options_entry = {
 
 const struct cmd_entry cmd_show_window_options_entry = {
 	"show-window-options", "showw",
-	"gt:", 0, 0,
-	"[-g] " CMD_TARGET_WINDOW_USAGE,
+	"gt:", 0, 1,
+	"[-g] " CMD_TARGET_WINDOW_USAGE " [option]",
 	0,
 	NULL,
 	NULL,
 	cmd_show_options_exec
 };
 
-int
+enum cmd_retval
 cmd_show_options_exec(struct cmd *self, struct cmd_ctx *ctx)
 {
 	struct args				*args = self->args;
@@ -71,7 +71,7 @@ cmd_show_options_exec(struct cmd *self, struct cmd_ctx *ctx)
 		else {
 			wl = cmd_find_window(ctx, args_get(args, 't'), NULL);
 			if (wl == NULL)
-				return (-1);
+				return (CMD_RETURN_ERROR);
 			oo = &wl->window->options;
 		}
 	} else {
@@ -81,17 +81,33 @@ cmd_show_options_exec(struct cmd *self, struct cmd_ctx *ctx)
 		else {
 			s = cmd_find_session(ctx, args_get(args, 't'), 0);
 			if (s == NULL)
-				return (-1);
+				return (CMD_RETURN_ERROR);
 			oo = &s->options;
 		}
 	}
 
-	for (oe = table; oe->name != NULL; oe++) {
+	if (args->argc != 0) {
+		table = oe = NULL;
+		if (options_table_find(args->argv[0], &table, &oe) != 0) {
+			ctx->error(ctx, "ambiguous option: %s", args->argv[0]);
+			return (CMD_RETURN_ERROR);
+		}
+		if (oe == NULL) {
+			ctx->error(ctx, "unknown option: %s", args->argv[0]);
+			return (CMD_RETURN_ERROR);
+		}
 		if ((o = options_find1(oo, oe->name)) == NULL)
-			continue;
+			return (CMD_RETURN_NORMAL);
 		optval = options_table_print_entry(oe, o);
 		ctx->print(ctx, "%s %s", oe->name, optval);
+	} else {
+		for (oe = table; oe->name != NULL; oe++) {
+			if ((o = options_find1(oo, oe->name)) == NULL)
+				continue;
+			optval = options_table_print_entry(oe, o);
+			ctx->print(ctx, "%s %s", oe->name, optval);
+		}
 	}
 
-	return (0);
+	return (CMD_RETURN_NORMAL);
 }

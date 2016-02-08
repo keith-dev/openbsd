@@ -1,4 +1,4 @@
-.\"	$OpenBSD: man.7,v 1.26 2011/12/02 01:45:43 schwarze Exp $
+.\"	$OpenBSD: man.7,v 1.29 2012/06/20 21:37:32 schwarze Exp $
 .\"
 .\" Copyright (c) 2009, 2010, 2011 Kristaps Dzonsons <kristaps@bsd.lv>
 .\" Copyright (c) 2011 Ingo Schwarze <schwarze@openbsd.org>
@@ -15,7 +15,7 @@
 .\" ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 .\" OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 .\"
-.Dd $Mdocdate: December 2 2011 $
+.Dd $Mdocdate: June 20 2012 $
 .Dt MAN 7
 .Os
 .Sh NAME
@@ -339,6 +339,18 @@ and
 .Ss \&DT
 Has no effect.
 Included for compatibility.
+.Ss \&EE
+This is a non-standard GNU extension, included only for compatibility.
+In
+.Xr mandoc 1 ,
+it does the same as
+.Sx \&fi .
+.Ss \&EX
+This is a non-standard GNU extension, included only for compatibility.
+In
+.Xr mandoc 1 ,
+it does the same as
+.Sx \&nf .
 .Ss \&HP
 Begin a paragraph whose initial output line is left-justified, but
 subsequent output lines are indented, with the following syntax:
@@ -349,8 +361,9 @@ subsequent output lines are indented, with the following syntax:
 .Pp
 The
 .Cm width
-argument must conform to
-.Sx Scaling Widths .
+argument is a
+.Xr roff 7
+scaling width.
 If specified, it's saved for later paragraph left-margins; if unspecified, the
 saved or default width is used.
 .Pp
@@ -392,8 +405,9 @@ Begin an indented paragraph with the following syntax:
 .Pp
 The
 .Cm width
-argument defines the width of the left margin and is defined by
-.Sx Scaling Widths .
+argument is a
+.Xr roff 7
+scaling width defining the left margin.
 It's saved for later paragraph left-margins; if unspecified, the saved or
 default width is used.
 .Pp
@@ -437,6 +451,20 @@ See also
 .Sx \&PP ,
 and
 .Sx \&TP .
+.Ss \&OP
+Optional command-line argument.
+This is a non-standard GNU extension, included only for compatibility.
+It has the following syntax:
+.Bd -filled -offset indent
+.Pf \. Sx \&OP
+.Cm key Op Cm value
+.Ed
+.Pp
+The
+.Cm key
+is usually a command-line flag and
+.Cm value
+its argument.
 .Ss \&P
 Synonym for
 .Sx \&LP .
@@ -512,8 +540,9 @@ This has the following syntax:
 .Pp
 The
 .Cm width
-argument must conform to
-.Sx Scaling Widths .
+argument is a
+.Xr roff 7
+scaling width.
 If not specified, the saved or default width is used.
 .Pp
 See also
@@ -578,8 +607,9 @@ The syntax is as follows:
 .Pp
 The
 .Cm width
-argument must conform to
-.Sx Scaling Widths .
+argument is a
+.Xr roff 7
+scaling width.
 If specified, it's saved for later paragraph left-margins; if
 unspecified, the saved or default width is used.
 .Pp
@@ -631,10 +661,10 @@ Insert vertical spaces into output with the following syntax:
 .Op Cm height
 .Ed
 .Pp
-Insert
+The
 .Cm height
-spaces, which must conform to
-.Sx Scaling Widths .
+argument is a scaling width as described in
+.Xr roff 7 .
 If 0, this is equivalent to the
 .Sx \&br
 macro.
@@ -686,6 +716,7 @@ The syntax is as follows:
 .It Sx \&I   Ta    n         Ta    next-line Ta    \&
 .It Sx \&IB  Ta    n         Ta    current   Ta    \&
 .It Sx \&IR  Ta    n         Ta    current   Ta    \&
+.It Sx \&OP  Ta    0, 1      Ta    current   Ta    compat
 .It Sx \&R   Ta    n         Ta    next-line Ta    \&
 .It Sx \&RB  Ta    n         Ta    current   Ta    \&
 .It Sx \&RI  Ta    n         Ta    current   Ta    \&
@@ -848,6 +879,12 @@ number when no
 is given, like in
 .Xr mdoc 7 .
 .El
+.Pp
+The
+.Sx OP
+macro is part of the extended
+.Nm
+macro set, and may not be portable to non-GNU troff implementations.
 .Sh SEE ALSO
 .Xr man 1 ,
 .Xr mandoc 1 ,
@@ -863,6 +900,9 @@ language first appeared as a macro package for the roff typesetting
 system in
 .At v7 .
 It was later rewritten by James Clark as a macro package for groff.
+Eric S. Raymond wrote the extended
+.Nm
+macros for groff in 2007.
 The stand-alone implementation that is part of the
 .Xr mandoc 1
 utility written by Kristaps Dzonsons appeared in

@@ -1,4 +1,4 @@
-/*	$OpenBSD: malloc.c,v 1.140 2011/10/06 14:37:04 otto Exp $	*/
+/*	$OpenBSD: malloc.c,v 1.146 2012/07/09 08:39:24 deraadt Exp $	*/
 /*
  * Copyright (c) 2008 Otto Moerbeek <otto@drijf.net>
  *
@@ -54,7 +54,7 @@
 #elif defined(__mips64__)
 #define MALLOC_PAGESHIFT	(14U)
 #else
-#define MALLOC_PAGESHIFT	(PGSHIFT)
+#define MALLOC_PAGESHIFT	(PAGE_SHIFT)
 #endif
 
 #define MALLOC_MINSHIFT		4
@@ -93,6 +93,9 @@
 
 #define MMAPA(a,sz)	mmap((a), (size_t)(sz), PROT_READ | PROT_WRITE, \
     MAP_ANON | MAP_PRIVATE, -1, (off_t) 0)
+
+#define MQUERY(a, sz)	mquery((a), (size_t)(sz), PROT_READ | PROT_WRITE, \
+    MAP_ANON | MAP_PRIVATE | MAP_FIXED, -1, (off_t)0)
 
 struct region_info {
 	void *p;		/* page; low bits used to mark chunks */
@@ -317,7 +320,7 @@ unmap(struct dir_info *d, void *p, size_t sz)
 	rsz = mopts.malloc_cache - d->free_regions_size;
 	if (psz > rsz)
 		tounmap = psz - rsz;
-	offset = getrnibble();
+	offset = getrnibble() + getrnibble() << 4;
 	for (i = 0; tounmap > 0 && i < mopts.malloc_cache; i++) {
 		r = &d->free_regions[(i + offset) & (mopts.malloc_cache - 1)];
 		if (r->p != NULL) {
@@ -337,7 +340,7 @@ unmap(struct dir_info *d, void *p, size_t sz)
 	if (tounmap > 0)
 		wrterror("malloc cache underflow", NULL);
 	for (i = 0; i < mopts.malloc_cache; i++) {
-		r = &d->free_regions[i];
+		r = &d->free_regions[(i + offset) & (mopts.malloc_cache - 1)];
 		if (r->p == NULL) {
 			if (mopts.malloc_hint)
 				madvise(p, sz, MADV_FREE);
@@ -356,7 +359,7 @@ unmap(struct dir_info *d, void *p, size_t sz)
 }
 
 static void
-zapcacheregion(struct dir_info *d, void *p)
+zapcacheregion(struct dir_info *d, void *p, size_t len)
 {
 	u_int i;
 	struct region_info *r;
@@ -364,7 +367,7 @@ zapcacheregion(struct dir_info *d, void *p)
 
 	for (i = 0; i < mopts.malloc_cache; i++) {
 		r = &d->free_regions[i];
-		if (r->p == p) {
+		if (r->p >= p && r->p <= (void *)((char *)p + len)) {
 			rsz = r->size << MALLOC_PAGESHIFT;
 			if (munmap(r->p, rsz))
 				wrterror("munmap", r->p);
@@ -389,7 +392,7 @@ map(struct dir_info *d, size_t sz, int zero_fill)
 		wrterror("internal struct corrupt", NULL);
 	if (sz != PAGEROUND(sz)) {
 		wrterror("map round", NULL);
-		return NULL;
+		return MAP_FAILED;
 	}
 	if (psz > d->free_regions_size) {
 		p = MMAP(sz);
@@ -398,7 +401,7 @@ map(struct dir_info *d, size_t sz, int zero_fill)
 		/* zero fill not needed */
 		return p;
 	}
-	offset = getrnibble();
+	offset = getrnibble() + getrnibble() << 4;
 	for (i = 0; i < mopts.malloc_cache; i++) {
 		r = &d->free_regions[(i + offset) & (mopts.malloc_cache - 1)];
 		if (r->p != NULL) {
@@ -724,6 +727,11 @@ alloc_chunk_info(struct dir_info *d, int bits)
 	return p;
 }
 
+
+/* 
+ * The hashtable uses the assumption that p is never NULL. This holds since
+ * non-MAP_FIXED mappings with hint 0 start at BRKSIZ.
+ */
 static int
 insert(struct dir_info *d, void *p, size_t sz, void *f)
 {
@@ -774,7 +782,7 @@ find(struct dir_info *d, void *p)
 		q = MASK_POINTER(r);
 		STATS_INC(d->find_collisions);
 	}
-	return q == p ? &d->r[index] : NULL;
+	return (q == p && r != NULL) ? &d->r[index] : NULL;
 }
 
 static void
@@ -1278,20 +1286,28 @@ orealloc(void *p, size_t newsz, void *f)
 
 		if (rnewsz > roldsz) {
 			if (!mopts.malloc_guard) {
+				void *hint = (char *)p + roldsz;
+				size_t needed = rnewsz - roldsz;
+
 				STATS_INC(g_pool->cheap_realloc_tries);
-				zapcacheregion(g_pool, (char *)p + roldsz);
-				q = MMAPA((char *)p + roldsz, rnewsz - roldsz);
-				if (q == (char *)p + roldsz) {
-					malloc_used += rnewsz - roldsz;
+				zapcacheregion(g_pool, hint, needed);
+				q = MQUERY(hint, needed);
+				if (q == hint)
+					q = MMAPA(hint, needed);
+				else
+					q = MAP_FAILED;
+				if (q == hint) {
+					malloc_used += needed;
 					if (mopts.malloc_junk)
-						memset(q, SOME_JUNK,
-						    rnewsz - roldsz);
+						memset(q, SOME_JUNK, needed);
 					r->size = newsz;
 					STATS_SETF(r, f);
 					STATS_INC(g_pool->cheap_reallocs);
 					return p;
-				} else if (q != MAP_FAILED)
-					munmap(q, rnewsz - roldsz);
+				} else if (q != MAP_FAILED) {
+					if (munmap(q, needed))
+						wrterror("munmap", q);
+				}
 			}
 		} else if (rnewsz < roldsz) {
 			if (mopts.malloc_guard) {
@@ -1408,29 +1424,136 @@ calloc(size_t nmemb, size_t size)
 	return r;
 }
 
+static void *
+mapalign(struct dir_info *d, size_t alignment, size_t sz, int zero_fill)
+{
+	void *p, *q;
+
+	if (alignment < MALLOC_PAGESIZE || alignment & (alignment - 1) != 0) {
+		wrterror("mapalign bad alignment", NULL);
+		return MAP_FAILED;
+	}
+	if (sz != PAGEROUND(sz)) {
+		wrterror("mapalign round", NULL);
+		return MAP_FAILED;
+	}
+
+	/* Allocate sz + alignment bytes of memory, which must include a
+	 * subrange of size bytes that is properly aligned.  Unmap the
+	 * other bytes, and then return that subrange.
+	 */
+
+	/* We need sz + alignment to fit into a size_t. */
+	if (alignment > SIZE_MAX - sz)
+		return MAP_FAILED;
+
+	p = map(d, sz + alignment, zero_fill);
+	if (p == MAP_FAILED)
+		return MAP_FAILED;
+	q = (void *)(((uintptr_t)p + alignment - 1) & ~(alignment - 1));
+	if (q != p) {
+		if (munmap(p, q - p))
+			wrterror("munmap", p);
+	}
+	if (munmap(q + sz, alignment - (q - p)))
+		wrterror("munmap", q + sz);
+	malloc_used -= alignment;
+
+	return q;
+}
+
+static void *
+omemalign(size_t alignment, size_t sz, int zero_fill, void *f)
+{
+	size_t psz;
+	void *p;
+
+	if (alignment <= MALLOC_PAGESIZE) {
+		/*
+		 * max(size, alignment) is enough to assure the requested alignment,
+		 * since the allocator always allocates power-of-two blocks.
+		 */
+		if (sz < alignment)
+			sz = alignment;
+		return omalloc(sz, zero_fill, f);
+	}
+
+	if (sz >= SIZE_MAX - mopts.malloc_guard - MALLOC_PAGESIZE) {
+		errno = ENOMEM;
+		return NULL;
+	}
+
+	sz += mopts.malloc_guard;
+	psz = PAGEROUND(sz);
+
+	p = mapalign(g_pool, alignment, psz, zero_fill);
+	if (p == NULL) {
+		errno = ENOMEM;
+		return NULL;
+	}
+
+	if (insert(g_pool, p, sz, f)) {
+		unmap(g_pool, p, psz);
+		errno = ENOMEM;
+		return NULL;
+	}
+
+	if (mopts.malloc_guard) {
+		if (mprotect((char *)p + psz - mopts.malloc_guard,
+		    mopts.malloc_guard, PROT_NONE))
+			wrterror("mprotect", NULL);
+		malloc_guarded += mopts.malloc_guard;
+	}
+
+	if (mopts.malloc_junk) {
+		if (zero_fill)
+			memset((char *)p + sz - mopts.malloc_guard,
+			    SOME_JUNK, psz - sz);
+		else
+			memset(p, SOME_JUNK, psz - mopts.malloc_guard);
+	}
+
+	return p;
+}
+
 int
 posix_memalign(void **memptr, size_t alignment, size_t size)
 {
-	void *result;
+	int res, saved_errno = errno;
+	void *r;
 
 	/* Make sure that alignment is a large enough power of 2. */
-	if (((alignment - 1) & alignment) != 0 || alignment < sizeof(void *) ||
-	    alignment > MALLOC_PAGESIZE)
+	if (((alignment - 1) & alignment) != 0 || alignment < sizeof(void *))
 		return EINVAL;
 
-	/* 
-	 * max(size, alignment) is enough to assure the requested alignment,
-	 * since the allocator always allocates power-of-two blocks.
-	 */
-	if (size < alignment)
-		size = alignment;
-	result = malloc(size);
-
-	if (result == NULL)
-		return ENOMEM;
-
-	*memptr = result;
+	_MALLOC_LOCK();
+	malloc_func = " in posix_memalign():";
+	if (g_pool == NULL) {
+		if (malloc_init() != 0)
+			goto err;
+	}
+	if (malloc_active++) {
+		malloc_recurse();
+		goto err;
+	}
+	r = omemalign(alignment, size, mopts.malloc_zero, CALLER);
+	malloc_active--;
+	_MALLOC_UNLOCK();
+	if (r == NULL) {
+		if (mopts.malloc_xmalloc) {
+			wrterror("out of memory", NULL);
+			errno = ENOMEM;
+		}
+		goto err;
+	}
+	errno = saved_errno;
+	*memptr = r;
 	return 0;
+
+err:
+	res = errno;
+	errno = saved_errno;
+	return res;
 }
 
 #ifdef MALLOC_STATS

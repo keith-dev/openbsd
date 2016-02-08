@@ -1,4 +1,4 @@
-/*	$OpenBSD: iked.h,v 1.41 2011/05/09 11:15:18 reyk Exp $	*/
+/*	$OpenBSD: iked.h,v 1.52 2012/07/02 13:03:24 mikeb Exp $	*/
 /*	$vantronix: iked.h,v 1.61 2010/06/03 07:57:33 reyk Exp $	*/
 
 /*
@@ -76,6 +76,7 @@ struct imsgev {
 struct control_sock {
 	const char	*cs_name;
 	struct event	 cs_ev;
+	struct event	 cs_evt;
 	int		 cs_fd;
 	int		 cs_restricted;
 	void		*cs_env;
@@ -95,6 +96,13 @@ enum privsep_procid privsep_process;
 /*
  * Runtime structures
  */
+
+struct iked_timer {
+	struct event	 tmr_ev;
+	struct iked	*tmr_env;
+	void		(*tmr_cb)(struct iked *, void *);
+	void		*tmr_cbarg;
+};
 
 struct iked_spi {
 	u_int64_t	 spi;
@@ -156,6 +164,7 @@ struct iked_childsa {
 	u_int8_t			 csa_rekey;	/* will be deleted */
 	u_int8_t			 csa_allocated;	/* from the kernel */
 	u_int8_t			 csa_persistent;/* do not rekey */
+	u_int8_t			 csa_esn;	/* use ESN */
 
 	struct iked_spi			 csa_spi;
 
@@ -317,6 +326,8 @@ struct iked_id {
 #define IKED_REQ_BITS	\
     "\10\01CERT\02VALID\03AUTH\04SA"
 
+TAILQ_HEAD(iked_msgqueue, iked_message);
+
 struct iked_sahdr {
 	u_int64_t			 sh_ispi;	/* Initiator SPI */
 	u_int64_t			 sh_rspi;	/* Responder SPI */
@@ -390,6 +401,15 @@ struct iked_sa {
 	struct iked_childsas		 sa_childsas;	/* IPSec Child SAs */
 	struct iked_saflows		 sa_flows;	/* IPSec flows */
 
+	struct iked_timer		 sa_timer;	/* SA timeouts */
+#define IKED_IKE_SA_REKEY_TIMEOUT	 300		/* 5 minutes */
+
+	struct iked_msgqueue		 sa_requests;	/* request queue */
+#define IKED_RETRANSMIT_TIMEOUT		 2		/* 2 seconds */
+
+	struct iked_msgqueue		 sa_responses;	/* response queue */
+#define IKED_RESPONSE_TIMEOUT		 120		/* 2 minutes */
+
 	RB_ENTRY(iked_sa)		 sa_peer_entry;
 	RB_ENTRY(iked_sa)		 sa_entry;
 };
@@ -418,6 +438,9 @@ struct iked_message {
 	struct iked_policy	*msg_policy;
 	struct iked_sa		*msg_sa;
 
+	u_int32_t		 msg_msgid;
+	u_int8_t		 msg_exchange;
+
 	/* Parsed information */
 	struct iked_proposals	 msg_proposals;
 	struct iked_spi		 msg_rekey;
@@ -430,6 +453,13 @@ struct iked_message {
 	/* Parse stack */
 	struct iked_proposal	*msg_prop;
 	u_int16_t		 msg_attrlength;
+
+	/* Retransmit queue */
+	struct iked_timer	 msg_timer;
+	TAILQ_ENTRY(iked_message)
+				 msg_entry;
+	int			 msg_tries;	/* retransmits sent */
+#define IKED_RETRANSMIT_TRIES	 5		/* try 5 times */
 };
 
 struct iked_user {
@@ -498,6 +528,10 @@ struct iked {
 
 	struct iked_socket		*sc_sock4;
 	struct iked_socket		*sc_sock6;
+
+	struct iked_timer		 sc_inittmr;
+#define IKED_INITIATOR_INITIAL		 2
+#define IKED_INITIATOR_INTERVAL		 60
 
 	struct privsep			 sc_ps;
 };
@@ -643,9 +677,9 @@ pid_t	 ikev1(struct privsep *, struct privsep_proc *);
 /* ikev2.c */
 pid_t	 ikev2(struct privsep *, struct privsep_proc *);
 void	 ikev2_recv(struct iked *, struct iked_message *);
-int	 ikev2_init_ike_sa(struct iked *, struct iked_policy *);
+void	 ikev2_init_ike_sa(struct iked *, void *);
 int	 ikev2_sa_negotiate(struct iked_sa *, struct iked_proposals *,
-	    struct iked_proposals *, u_int8_t);
+	    struct iked_proposals *);
 int	 ikev2_policy2id(struct iked_static_id *, struct iked_id *, int);
 int	 ikev2_childsa_enable(struct iked *, struct iked_sa *);
 int	 ikev2_childsa_delete(struct iked *, struct iked_sa *,
@@ -679,9 +713,11 @@ struct ibuf *
 	 ikev2_msg_init(struct iked *, struct iked_message *,
 	    struct sockaddr_storage *, socklen_t,
 	    struct sockaddr_storage *, socklen_t, int);
+struct iked_message *
+	 ikev2_msg_copy(struct iked *, struct iked_message *);
 void	 ikev2_msg_cleanup(struct iked *, struct iked_message *);
 u_int32_t
-	 ikev2_msg_id(struct iked *, struct iked_sa *, int);
+	 ikev2_msg_id(struct iked *, struct iked_sa *);
 struct ibuf
 	*ikev2_msg_auth(struct iked *, struct iked_sa *, int);
 int	 ikev2_msg_authsign(struct iked *, struct iked_sa *,
@@ -690,7 +726,7 @@ int	 ikev2_msg_authverify(struct iked *, struct iked_sa *,
 	    struct iked_auth *, u_int8_t *, size_t, struct ibuf *);
 int	 ikev2_msg_valid_ike_sa(struct iked *, struct ike_header *,
 	    struct iked_message *);
-int	 ikev2_msg_send(struct iked *, int, struct iked_message *);
+int	 ikev2_msg_send(struct iked *, struct iked_message *);
 int	 ikev2_msg_send_encrypt(struct iked *, struct iked_sa *,
 	    struct ibuf **, u_int8_t, u_int8_t, int);
 struct ibuf
@@ -702,6 +738,16 @@ int	 ikev2_msg_integr(struct iked *, struct iked_sa *, struct ibuf *);
 int	 ikev2_msg_frompeer(struct iked_message *);
 struct iked_socket *
 	 ikev2_msg_getsocket(struct iked *, int);
+int	 ikev2_msg_retransmit_response(struct iked *, struct iked_sa *,
+	    struct iked_message *);
+void	 ikev2_msg_prevail(struct iked *, struct iked_msgqueue *,
+	    struct iked_message *);
+void	 ikev2_msg_dispose(struct iked *, struct iked_msgqueue *,
+	    struct iked_message *);
+void	 ikev2_msg_flushqueue(struct iked *, struct iked_msgqueue *);
+struct iked_message *
+	 ikev2_msg_lookup(struct iked *, struct iked_msgqueue *,
+	    struct iked_message *, struct ike_header *);
 
 /* ikev2_pld.c */
 int	 ikev2_pld_parse(struct iked *, struct ike_header *,
@@ -736,9 +782,11 @@ char	*ca_asn1_name(u_int8_t *, size_t);
 char	*ca_x509_name(void *);
 
 /* timer.c */
-void	 timer_register_initiator(struct iked *,
-	    int (*)(struct iked *, struct iked_policy *));
-void	 timer_unregister_initiator(struct iked *);
+void	 timer_initialize(struct iked *, struct iked_timer *,
+	    void (*)(struct iked *, void *), void *);
+int	 timer_initialized(struct iked *, struct iked_timer *);
+void	 timer_register(struct iked *, struct iked_timer *, int);
+void	 timer_deregister(struct iked *, struct iked_timer *);
 
 /* proc.c */
 void	 proc_init(struct privsep *, struct privsep_proc *, u_int);
@@ -766,6 +814,7 @@ void	 socket_set_blockmode(int, enum blockmodes);
 int	 socket_af(struct sockaddr *, in_port_t);
 in_port_t
 	 socket_getport(struct sockaddr_storage *);
+int	 socket_getaddr(int, struct sockaddr_storage *);
 int	 socket_bypass(int, struct sockaddr *);
 int	 udp_bind(struct sockaddr *, in_port_t);
 ssize_t	 recvfromto(int, void *, size_t, int, struct sockaddr *,

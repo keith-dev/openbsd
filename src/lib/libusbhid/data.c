@@ -1,4 +1,4 @@
-/*	$OpenBSD: data.c,v 1.3 2004/06/04 00:47:32 deraadt Exp $	*/
+/*	$OpenBSD: data.c,v 1.6 2012/07/16 19:57:17 jasper Exp $	*/
 /*	$NetBSD: data.c,v 1.1 2001/12/28 17:45:26 augustss Exp $	*/
 
 /*

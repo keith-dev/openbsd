@@ -131,9 +131,9 @@ along with GCC; see the file COPYING.  If not see
    This two-stage defines makes it easy to pick that for targets that
    have subspecs.  */
 #ifdef CPP_CPU_SPEC
-#define OBSD_CPP_SPEC "%(cpp_cpu) %{posix:-D_POSIX_SOURCE} %{pthread:-D_POSIX_THREADS}"
+#define OBSD_CPP_SPEC "%(cpp_cpu) %{posix:-D_POSIX_SOURCE} %{pthread:-D_REENTRANT}"
 #else
-#define OBSD_CPP_SPEC "%{posix:-D_POSIX_SOURCE} %{pthread:-D_POSIX_THREADS}"
+#define OBSD_CPP_SPEC "%{posix:-D_POSIX_SOURCE} %{pthread:-D_REENTRANT}"
 #endif
 
 #undef LIB_SPEC
@@ -342,6 +342,12 @@ __enable_execute_stack (void *addr)					\
   if (mprotect (page, end - page, PROT_READ | PROT_WRITE | PROT_EXEC) < 0) \
     perror ("mprotect of trampoline code");				\
 }
+
+/* 
+ * Disable the use of unsafe builtin functions, (strcat, strcpy, stpcpy),
+ * making them easier to spot in the object files.
+ */
+#define NO_UNSAFE_BUILTINS
 
 #include <sys/types.h>
 #include <sys/mman.h>

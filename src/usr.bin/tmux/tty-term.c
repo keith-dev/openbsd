@@ -1,4 +1,4 @@
-/* $OpenBSD: tty-term.c,v 1.27 2011/12/01 23:47:08 nicm Exp $ */
+/* $OpenBSD: tty-term.c,v 1.29 2012/07/10 11:53:01 nicm Exp $ */
 
 /*
  * Copyright (c) 2008 Nicholas Marriott <nicm@users.sourceforge.net>
@@ -174,7 +174,6 @@ const struct tty_term_code_entry tty_term_codes[NTTYCODE] = {
 	{ TTYC_RI, TTYCODE_STRING, "ri" },
 	{ TTYC_RMACS, TTYCODE_STRING, "rmacs" },
 	{ TTYC_RMCUP, TTYCODE_STRING, "rmcup" },
-	{ TTYC_RMIR, TTYCODE_STRING, "rmir" },
 	{ TTYC_RMKX, TTYCODE_STRING, "rmkx" },
 	{ TTYC_SETAB, TTYCODE_STRING, "setab" },
 	{ TTYC_SETAF, TTYCODE_STRING, "setaf" },
@@ -182,7 +181,6 @@ const struct tty_term_code_entry tty_term_codes[NTTYCODE] = {
 	{ TTYC_SITM, TTYCODE_STRING, "sitm" },
 	{ TTYC_SMACS, TTYCODE_STRING, "smacs" },
 	{ TTYC_SMCUP, TTYCODE_STRING, "smcup" },
-	{ TTYC_SMIR, TTYCODE_STRING, "smir" },
 	{ TTYC_SMKX, TTYCODE_STRING, "smkx" },
 	{ TTYC_SMSO, TTYCODE_STRING, "smso" },
 	{ TTYC_SMUL, TTYCODE_STRING, "smul" },
@@ -254,7 +252,7 @@ tty_term_override(struct tty_term *term, const char *overrides)
 				*ptr++ = '\0';
 				val = xstrdup(ptr);
 				if (strunvis(val, ptr) == -1) {
-					xfree(val);
+					free(val);
 					val = xstrdup(ptr);
 				}
 			} else if (entstr[strlen(entstr) - 1] == '@') {
@@ -280,7 +278,7 @@ tty_term_override(struct tty_term *term, const char *overrides)
 					break;
 				case TTYCODE_STRING:
 					if (code->type == TTYCODE_STRING)
-						xfree(code->value.string);
+						free(code->value.string);
 					code->value.string = xstrdup(val);
 					code->type = ent->type;
 					break;
@@ -298,12 +296,11 @@ tty_term_override(struct tty_term *term, const char *overrides)
 				}
 			}
 
-			if (val != NULL)
-				xfree(val);
+			free(val);
 		}
 	}
 
-	xfree(s);
+	free(s);
 }
 
 struct tty_term *
@@ -465,10 +462,10 @@ tty_term_free(struct tty_term *term)
 
 	for (i = 0; i < NTTYCODE; i++) {
 		if (term->codes[i].type == TTYCODE_STRING)
-			xfree(term->codes[i].value.string);
+			free(term->codes[i].value.string);
 	}
-	xfree(term->name);
-	xfree(term);
+	free(term->name);
+	free(term);
 }
 
 int

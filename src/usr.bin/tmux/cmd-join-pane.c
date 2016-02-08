@@ -1,6 +1,7 @@
-/* $OpenBSD: cmd-join-pane.c,v 1.7 2011/01/23 15:49:10 nicm Exp $ */
+/* $OpenBSD: cmd-join-pane.c,v 1.12 2012/07/11 07:10:15 nicm Exp $ */
 
 /*
+ * Copyright (c) 2011 George Nachman <tmux@georgester.com>
  * Copyright (c) 2009 Nicholas Marriott <nicm@users.sourceforge.net>
  *
  * Permission to use, copy, modify, and distribute this software for any
@@ -25,18 +26,30 @@
 #include "tmux.h"
 
 /*
- * Join a pane into another (like split/swap/kill).
+ * Join or move a pane into another (like split/swap/kill).
  */
 
-void	cmd_join_pane_key_binding(struct cmd *, int);
-int	cmd_join_pane_exec(struct cmd *, struct cmd_ctx *);
+void		 cmd_join_pane_key_binding(struct cmd *, int);
+enum cmd_retval	 cmd_join_pane_exec(struct cmd *, struct cmd_ctx *);
+
+enum cmd_retval	 join_pane(struct cmd *, struct cmd_ctx *, int);
 
 const struct cmd_entry cmd_join_pane_entry = {
 	"join-pane", "joinp",
-	"dhvp:l:s:t:", 0, 0,
-	"[-dhv] [-p percentage|-l size] [-s src-pane] [-t dst-pane]",
+	"bdhvp:l:s:t:", 0, 0,
+	"[-bdhv] [-p percentage|-l size] [-s src-pane] [-t dst-pane]",
 	0,
 	cmd_join_pane_key_binding,
+	NULL,
+	cmd_join_pane_exec
+};
+
+const struct cmd_entry cmd_move_pane_entry = {
+	"move-pane", "movep",
+	"bdhvp:l:s:t:", 0, 0,
+	"[-bdhv] [-p percentage|-l size] [-s src-pane] [-t dst-pane]",
+	0,
+	NULL,
 	NULL,
 	cmd_join_pane_exec
 };
@@ -55,8 +68,14 @@ cmd_join_pane_key_binding(struct cmd *self, int key)
 	}
 }
 
-int
+enum cmd_retval
 cmd_join_pane_exec(struct cmd *self, struct cmd_ctx *ctx)
+{
+	return (join_pane(self, ctx, self->entry == &cmd_join_pane_entry));
+}
+
+enum cmd_retval
+join_pane(struct cmd *self, struct cmd_ctx *ctx, int not_same_window)
 {
 	struct args		*args = self->args;
 	struct session		*dst_s;
@@ -70,18 +89,22 @@ cmd_join_pane_exec(struct cmd *self, struct cmd_ctx *ctx)
 
 	dst_wl = cmd_find_pane(ctx, args_get(args, 't'), &dst_s, &dst_wp);
 	if (dst_wl == NULL)
-		return (-1);
+		return (CMD_RETURN_ERROR);
 	dst_w = dst_wl->window;
 	dst_idx = dst_wl->idx;
 
 	src_wl = cmd_find_pane(ctx, args_get(args, 's'), NULL, &src_wp);
 	if (src_wl == NULL)
-		return (-1);
+		return (CMD_RETURN_ERROR);
 	src_w = src_wl->window;
 
-	if (src_w == dst_w) {
+	if (not_same_window && src_w == dst_w) {
 		ctx->error(ctx, "can't join a pane to its own window");
-		return (-1);
+		return (CMD_RETURN_ERROR);
+	}
+	if (!not_same_window && src_wp == dst_wp) {
+		ctx->error(ctx, "source and target panes must be different");
+		return (CMD_RETURN_ERROR);
 	}
 
 	type = LAYOUT_TOPBOTTOM;
@@ -93,25 +116,25 @@ cmd_join_pane_exec(struct cmd *self, struct cmd_ctx *ctx)
 		size = args_strtonum(args, 'l', 0, INT_MAX, &cause);
 		if (cause != NULL) {
 			ctx->error(ctx, "size %s", cause);
-			xfree(cause);
-			return (-1);
+			free(cause);
+			return (CMD_RETURN_ERROR);
 		}
 	} else if (args_has(args, 'p')) {
 		percentage = args_strtonum(args, 'p', 0, 100, &cause);
 		if (cause != NULL) {
 			ctx->error(ctx, "percentage %s", cause);
-			xfree(cause);
-			return (-1);
+			free(cause);
+			return (CMD_RETURN_ERROR);
 		}
 		if (type == LAYOUT_TOPBOTTOM)
 			size = (dst_wp->sy * percentage) / 100;
 		else
 			size = (dst_wp->sx * percentage) / 100;
 	}
-
-	if ((lc = layout_split_pane(dst_wp, type, size)) == NULL) {
+	lc = layout_split_pane(dst_wp, type, size, args_has(args, 'b'));
+	if (lc == NULL) {
 		ctx->error(ctx, "create pane failed: pane too small");
-		return (-1);
+		return (CMD_RETURN_ERROR);
 	}
 
 	layout_close_pane(src_wp);
@@ -125,6 +148,8 @@ cmd_join_pane_exec(struct cmd *self, struct cmd_ctx *ctx)
 
 	if (window_count_panes(src_w) == 0)
 		server_kill_window(src_w);
+	else
+		notify_window_layout_changed(src_w);
 
 	src_wp->window = dst_w;
 	TAILQ_INSERT_AFTER(&dst_w->panes, dst_wp, src_wp, entry);
@@ -142,5 +167,6 @@ cmd_join_pane_exec(struct cmd *self, struct cmd_ctx *ctx)
 	} else
 		server_status_session(dst_s);
 
-	return (0);
+	notify_window_layout_changed(dst_w);
+	return (CMD_RETURN_NORMAL);
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ikev2_pld.c,v 1.21 2011/01/26 16:59:24 mikeb Exp $	*/
+/*	$OpenBSD: ikev2_pld.c,v 1.26 2012/06/22 16:06:31 mikeb Exp $	*/
 /*	$vantronix: ikev2.c,v 1.101 2010/06/03 07:57:33 reyk Exp $	*/
 
 /*
@@ -185,7 +185,7 @@ ikev2_pld_payloads(struct iked *env, struct iked_message *msg,
 		case IKEV2_PAYLOAD_TSr | IKED_E:
 			ret = ikev2_pld_ts(env, &pld, msg, offset, payload);
 			break;
-		case IKEV2_PAYLOAD_E:
+		case IKEV2_PAYLOAD_SK:
 			ret = ikev2_pld_e(env, &pld, msg, offset);
 			break;
 		case IKEV2_PAYLOAD_CP | IKED_E:
@@ -206,7 +206,7 @@ ikev2_pld_payloads(struct iked *env, struct iked_message *msg,
 		}
 
 		/* Encrypted payload must appear last */
-		if (payload == IKEV2_PAYLOAD_E)
+		if (payload == IKEV2_PAYLOAD_SK)
 			return (0);
 
  next:
@@ -705,7 +705,9 @@ ikev2_pld_notify(struct iked *env, struct ikev2_payload *pld,
 		    group);
 		sa_free(env, msg->msg_sa);
 		msg->msg_sa = NULL;
-		timer_register_initiator(env, ikev2_init_ike_sa);
+		timer_initialize(env, &env->sc_inittmr, ikev2_init_ike_sa,
+		    NULL);
+		timer_register(env, &env->sc_inittmr, IKED_INITIATOR_INITIAL);
 		break;
 	case IKEV2_N_NO_ADDITIONAL_SAS:
 		/* This makes sense for Child SAs only atm */
@@ -860,7 +862,7 @@ ikev2_pld_delete(struct iked *env, struct ikev2_payload *pld,
 
 	/* Parsed outgoing message? */
 	if (!ikev2_msg_frompeer(msg))
-		return (0);
+		goto done;
 
 	if (ikev2_msg_frompeer(msg) && (sa->sa_stateflags & IKED_REQ_DELETE)) {
 		/* Finish rekeying */

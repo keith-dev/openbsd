@@ -1,8 +1,8 @@
-.\"	$OpenBSD: ksh.1,v 1.141 2011/09/03 22:59:08 jmc Exp $
+.\"	$OpenBSD: ksh.1,v 1.144 2012/07/08 08:13:20 guenther Exp $
 .\"
 .\"	Public Domain
 .\"
-.Dd $Mdocdate: September 3 2011 $
+.Dd $Mdocdate: July 8 2012 $
 .Dt KSH 1
 .Os
 .Sh NAME
@@ -1050,6 +1050,18 @@ or
 where
 .Ar name
 is a parameter name.
+If
+.Ar expr
+is a literal
+.Ql @
+then the named array is expanded using the same quoting rules as
+.Ql $@ ,
+while if
+.Ar expr
+is a literal
+.Ql *
+then the named array is expanded using the same quoting rules as
+.Ql $* .
 If substitution is performed on a parameter
 (or an array parameter element)
 that is not set, a null string is substituted unless the
@@ -2166,6 +2178,7 @@ Grouping operators:
 ( )
 .Ed
 .Pp
+A parameter that is NULL or unset evaluates to 0.
 Integer constants may be specified with arbitrary bases using the notation
 .Ar base Ns # Ns Ar number ,
 where
@@ -2866,8 +2879,7 @@ string, which may contain editing commands.
 .Pp
 Control characters may be written using caret notation
 i.e. ^X represents Control-X.
-Note that although only two prefix characters (usually ESC and ^X)
-are supported, some multi-character sequences can be supported.
+Multi-character sequences are supported.
 .Pp
 The following default bindings show how the arrow keys
 on an ANSI terminal or xterm are bound

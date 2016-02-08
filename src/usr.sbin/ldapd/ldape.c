@@ -1,4 +1,4 @@
-/*	$OpenBSD: ldape.c,v 1.14 2010/11/10 08:00:54 martinh Exp $ */
+/*	$OpenBSD: ldape.c,v 1.17 2012/06/16 00:08:32 jmatthew Exp $ */
 
 /*
  * Copyright (c) 2009, 2010 Martin Hedenfalk <martin@bzero.se>
@@ -37,6 +37,7 @@ static void		 ldape_auth_result(struct imsg *imsg);
 static void		 ldape_open_result(struct imsg *imsg);
 static void		 ldape_imsgev(struct imsgev *iev, int code,
 			    struct imsg *imsg);
+static void		 ldape_needfd(struct imsgev *iev);
 
 int			 ldap_starttls(struct request *req);
 void			 send_ldap_extended_response(struct conn *conn,
@@ -340,6 +341,7 @@ ldape(struct passwd *pw, char *csockpath, int pipe_parent2ldap[2])
 	struct event		 ev_sigchld;
 	struct event		 ev_sighup;
 	char			 host[128];
+	mode_t			old_umask = 0;
 
 	TAILQ_INIT(&conn_list);
 
@@ -367,7 +369,8 @@ ldape(struct passwd *pw, char *csockpath, int pipe_parent2ldap[2])
 	/* Initialize parent imsg events. */
 	if ((iev_ldapd = calloc(1, sizeof(struct imsgev))) == NULL)
 		fatal("calloc");
-	imsgev_init(iev_ldapd, pipe_parent2ldap[1], NULL, ldape_imsgev);
+	imsgev_init(iev_ldapd, pipe_parent2ldap[1], NULL, ldape_imsgev,
+	    ldape_needfd);
 
 	/* Initialize control socket. */
 	bzero(&csock, sizeof(csock));
@@ -395,23 +398,31 @@ ldape(struct passwd *pw, char *csockpath, int pipe_parent2ldap[2])
 			log_info("listening on %s:%d", host, ntohs(l->port));
 		}
 
+		if (l->ss.ss_family == AF_UNIX) {
+			old_umask = umask(S_IXUSR|S_IXGRP|S_IXOTH);
+		}
+
 		if (bind(l->fd, (struct sockaddr *)&l->ss, l->ss.ss_len) != 0)
 			fatal("ldape: bind");
-		if (listen(l->fd, 20) != 0)
-			fatal("ldape: listen");
 
 		if (l->ss.ss_family == AF_UNIX) {
 			mode_t mode = S_IRUSR|S_IWUSR|S_IRGRP|S_IWGRP|S_IROTH|S_IWOTH;
+
+			(void)umask(old_umask);
 			if (chmod(sun->sun_path, mode) == -1) {
 				unlink(sun->sun_path);
 				fatal("ldape: chmod");
 			}
 		}
 
+		if (listen(l->fd, 20) != 0)
+			fatal("ldape: listen");
+
 		fd_nonblock(l->fd);
 
-		event_set(&l->ev, l->fd, EV_READ|EV_PERSIST, conn_accept, l);
+		event_set(&l->ev, l->fd, EV_READ, conn_accept, l);
 		event_add(&l->ev, NULL);
+		evtimer_set(&l->evt, conn_accept, l);
 
 		ssl_setup(conf, l);
 	}
@@ -474,6 +485,23 @@ ldape_imsgev(struct imsgev *iev, int code, struct imsg *imsg)
 		event_loopexit(NULL);
 		break;
 	}
+}
+
+static void
+ldape_needfd(struct imsgev *iev)
+{
+	/* Try to close a control connection first */
+	if (control_close_any(&csock) == 0) {
+		log_warn("closed a control connection");
+		return;
+	}
+
+	if (conn_close_any() == 0) {
+		log_warn("closed a client connection");
+		return;
+	}
+
+	fatal("unable to free an fd");
 }
 
 static void

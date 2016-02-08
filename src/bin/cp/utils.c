@@ -1,4 +1,4 @@
-/*	$OpenBSD: utils.c,v 1.31 2011/06/23 11:43:13 otto Exp $	*/
+/*	$OpenBSD: utils.c,v 1.33 2012/07/11 16:19:24 matthew Exp $	*/
 /*	$NetBSD: utils.c,v 1.6 1997/02/26 14:40:51 cgd Exp $	*/
 
 /*-
@@ -121,6 +121,7 @@ copy_file(FTSENT *entp, int dne)
 	 * wins some CPU back.
 	 */
 #ifdef VM_AND_BUFFER_CACHE_SYNCHRONIZED
+	/* XXX broken for 0-size mmap */
 	if (fs->st_size <= 8 * 1048576) {
 		if ((p = mmap(NULL, (size_t)fs->st_size, PROT_READ,
 		    MAP_FILE|MAP_SHARED, from_fd, (off_t)0)) == MAP_FAILED) {
@@ -157,7 +158,7 @@ copy_file(FTSENT *entp, int dne)
 			}
 		}
 		if (skipholes && rcount >= 0)
-			rcount = ftruncate(to_fd, fs->st_size);
+			rcount = ftruncate(to_fd, lseek(to_fd, 0, SEEK_CUR));
 		if (rcount < 0) {
 			warn("%s", entp->fts_path);
 			rval = 1;

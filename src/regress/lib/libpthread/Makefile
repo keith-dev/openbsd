@@ -1,13 +1,17 @@
-# $OpenBSD: Makefile,v 1.30 2012/01/04 17:38:24 mpi Exp $
+# $OpenBSD: Makefile,v 1.39 2012/05/03 09:07:17 pirofti Exp $
 
-SUBDIR= blocked_close blocked_dup2 blocked_shutdown cancel cancel2 \
-	close close_race closefrom cwd dup2_race execve fork \
+# disabled because it requires a buggy behavior that uthread had:
+#	dup2_race
+
+SUBDIR= barrier blocked_close blocked_dup2 blocked_fifo blocked_shutdown \
+	cancel cancel2 close close_race closefrom cwd errno execve fork \
 	group malloc_duel netdb pcap poll preemption preemption_float \
 	pthread_atfork pthread_cond_timedwait pthread_create \
-	pthread_join pthread_kill pthread_mutex pthread_specific \
+	pthread_join pthread_kill pthread_mutex \
+	pthread_rwlock pthread_specific \
 	readdir restart select semaphore setjmp setsockopt sigdeliver siginfo \
 	siginterrupt signal signals signodefer sigsuspend sigwait sleep \
-	socket stdarg stdio switch system
+	socket spinlock stack stdarg stdio switch system
 
 # Not available or disabled: fcntl, getaddrinfo, pause, pw, sigmask, stdfiles
 

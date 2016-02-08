@@ -1,4 +1,4 @@
-/*	$OpenBSD: usbhid.h,v 1.3 2004/06/04 00:47:32 deraadt Exp $	*/
+/*	$OpenBSD: usbhid.h,v 1.5 2012/07/16 19:57:17 jasper Exp $	*/
 /*	$NetBSD: usbhid.h,v 1.1 2001/12/28 17:45:27 augustss Exp $	*/
 
 /*

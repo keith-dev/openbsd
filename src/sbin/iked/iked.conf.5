@@ -1,4 +1,4 @@
-.\" $OpenBSD: iked.conf.5,v 1.15 2011/09/03 22:59:08 jmc Exp $
+.\" $OpenBSD: iked.conf.5,v 1.19 2012/06/30 14:51:31 naddy Exp $
 .\" $vantronix: iked.conf.5,v 1.10 2010/06/03 16:13:40 reyk Exp $
 .\"
 .\" Copyright (c) 2010 Reyk Floeter <reyk@vantronix.net>
@@ -16,7 +16,7 @@
 .\" ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 .\" OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 .\"
-.Dd $Mdocdate: September 3 2011 $
+.Dd $Mdocdate: June 30 2012 $
 .Dt IKED.CONF 5
 .Os
 .Sh NAME
@@ -82,6 +82,9 @@ Lines may be split using the
 .Sq \e
 character.
 .Pp
+Argument names not beginning with a letter, digit, or underscore
+must be quoted.
+.Pp
 Addresses can be specified in CIDR notation (matching netblocks),
 as symbolic host names, interface names, or interface group names.
 .Pp
@@ -93,8 +96,8 @@ include "/etc/macros.conf"
 .Ed
 .Sh MACROS
 Macros can be defined that will later be expanded in context.
-Macro names must start with a letter, and may contain letters, digits
-and underscores.
+Macro names must start with a letter, digit, or underscore,
+and may contain any of those characters.
 Macro names may not be reserved words (for example
 .Ic flow ,
 .Ic from ,
@@ -712,7 +715,9 @@ keyword:
 .It Li aes-128 Ta "128 bits" Ta ""
 .It Li aes-192 Ta "192 bits" Ta ""
 .It Li aes-256 Ta "256 bits" Ta ""
-.It Li aes-ctr Ta "160 bits" Ta "[ESP only]"
+.It Li aes-128-ctr Ta "160 bits" Ta "[ESP only]"
+.It Li aes-192-ctr Ta "224 bits" Ta "[ESP only]"
+.It Li aes-256-ctr Ta "288 bits" Ta "[ESP only]"
 .It Li aes-128-gcm Ta "160 bits" Ta "[ESP only]"
 .It Li aes-192-gcm Ta "224 bits" Ta "[ESP only]"
 .It Li aes-256-gcm Ta "288 bits" Ta "[ESP only]"
@@ -721,7 +726,7 @@ keyword:
 .It Li aes-256-gmac Ta "288 bits" Ta "[ESP only]"
 .It Li blowfish Ta "160 bits" Ta "[ESP only]"
 .It Li cast Ta "128 bits" Ta "[ESP only]"
- Ta "".It Li null Ta "" Ta "[ESP only]"
+.It Li null Ta "" Ta "[ESP only]"
 .El
 .Pp
 Use of DES as an encryption algorithm is not recommended (except for
@@ -781,7 +786,7 @@ authentication:
 user "test" "password123"
 
 ikev2 "win7" esp \e
-	from 172.16.2.0/24 to 0.0.0.0/0 \e
+	from 0.0.0.0/0 to 172.16.2.0/24 \e
 	peer 10.0.0.0/8 local 192.168.56.0/24 \e
 	eap "mschap-v2" \e
 	config address 172.16.2.1 \e

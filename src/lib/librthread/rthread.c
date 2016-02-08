@@ -1,4 +1,4 @@
-/*	$OpenBSD: rthread.c,v 1.50 2012/01/17 02:34:18 guenther Exp $ */
+/*	$OpenBSD: rthread.c,v 1.62 2012/06/21 00:56:59 guenther Exp $ */
 /*
  * Copyright (c) 2004,2005 Ted Unangst <tedu@openbsd.org>
  * All Rights Reserved.
@@ -39,6 +39,7 @@
 static int concurrency_level;	/* not used */
 
 int _threads_ready;
+size_t _thread_pagesize;
 struct listhead _thread_list = LIST_HEAD_INITIALIZER(_thread_list);
 _spinlock_lock_t _thread_lock = _SPINLOCK_UNLOCKED;
 static struct pthread_queue _thread_gc_list
@@ -47,7 +48,20 @@ static _spinlock_lock_t _thread_gc_lock = _SPINLOCK_UNLOCKED;
 struct pthread _initial_thread;
 struct thread_control_block _initial_thread_tcb;
 
-int __tfork_thread(const struct __tfork *, void *, void (*)(void *), void *);
+struct pthread_attr _rthread_attr_default = {
+#ifndef lint
+	.stack_addr			= NULL,
+	.stack_size			= RTHREAD_STACK_SIZE_DEF,
+/*	.guard_size		set in _rthread_init */
+	.detach_state			= PTHREAD_CREATE_JOINABLE,
+	.contention_scope		= PTHREAD_SCOPE_SYSTEM,
+	.sched_policy			= SCHED_OTHER,
+	.sched_param = { .sched_priority = 0 },
+	.sched_inherit			= PTHREAD_INHERIT_SCHED,
+#else
+	0
+#endif
+};
 
 /*
  * internal support functions
@@ -57,7 +71,7 @@ _spinlock(_spinlock_lock_t *lock)
 {
 
 	while (_atomic_lock(lock))
-		pthread_yield();
+		sched_yield();
 }
 
 void
@@ -70,7 +84,7 @@ _spinunlock(_spinlock_lock_t *lock)
 /*
  * This sets up the thread base for the initial thread so that it
  * references the errno location provided by libc.  For other threads
- * this is handled by the block in _rthread_start().
+ * this is handled by __tfork_thread()
  */
 void _rthread_initlib(void) __attribute__((constructor));
 void _rthread_initlib(void)
@@ -98,6 +112,7 @@ _rthread_start(void *v)
 	pthread_exit(retval);
 }
 
+/* ARGSUSED0 */
 static void
 sigthr_handler(__unused int sig)
 {
@@ -131,11 +146,10 @@ sigthr_handler(__unused int sig)
 		pthread_exit(PTHREAD_CANCELED);
 }
 
-static int
+int
 _rthread_init(void)
 {
 	pthread_t thread = &_initial_thread;
-	extern int __isthreaded;
 	struct sigaction sa;
 
 	thread->tid = getthrid();
@@ -146,8 +160,10 @@ _rthread_init(void)
 	LIST_INSERT_HEAD(&_thread_list, thread, threads);
 	_rthread_debug_init();
 
+	_thread_pagesize = (size_t)sysconf(_SC_PAGESIZE);
+	_rthread_attr_default.guard_size = _thread_pagesize;
+
 	_threads_ready = 1;
-	__isthreaded = 1;
 
 	_rthread_debug(1, "rthread init\n");
 
@@ -161,6 +177,7 @@ _rthread_init(void)
 	_rthread_dl_lock(1);
 	_rthread_bind_lock(0);
 	_rthread_bind_lock(1);
+	sched_yield();
 	dlctl(NULL, DL_SETTHREADLCK, _rthread_dl_lock);
 	dlctl(NULL, DL_SETBINDLCK, _rthread_bind_lock);
 #endif
@@ -235,7 +252,8 @@ _rthread_reaper(void)
 {
 	pthread_t thread;
 
-restart:_spinlock(&_thread_gc_lock);
+restart:
+	_spinlock(&_thread_gc_lock);
 	TAILQ_FOREACH(thread, &_thread_gc_list, waiting) {
 		if (thread->tid != 0)
 			continue;
@@ -300,10 +318,10 @@ pthread_exit(void *retval)
 int
 pthread_join(pthread_t thread, void **retval)
 {
-	int e, r;
+	int e;
 	pthread_t self = pthread_self();
 
-	e = r = 0;
+	e = 0;
 	_enter_delayed_cancel(self);
 	if (thread == NULL)
 		e = EINVAL;
@@ -311,7 +329,8 @@ pthread_join(pthread_t thread, void **retval)
 		e = EDEADLK;
 	else if (thread->flags & THREAD_DETACHED)
 		e = EINVAL;
-	else if ((r = _sem_wait(&thread->donesem, 0, &self->delayed_cancel))) {
+	else if ((e = _sem_wait(&thread->donesem, 0, NULL,
+	    &self->delayed_cancel)) == 0) {
 		if (retval)
 			*retval = thread->retval;
 
@@ -324,7 +343,7 @@ pthread_join(pthread_t thread, void **retval)
 			_rthread_free(thread);
 	}
 
-	_leave_delayed_cancel(self, !r);
+	_leave_delayed_cancel(self, e);
 	_rthread_reaper();
 	return (e);
 }
@@ -353,6 +372,7 @@ int
 pthread_create(pthread_t *threadp, const pthread_attr_t *attr,
     void *(*start_routine)(void *), void *arg)
 {
+	extern int __isthreaded;
 	struct thread_control_block *tcb;
 	pthread_t thread;
 	struct __tfork param;
@@ -373,13 +393,7 @@ pthread_create(pthread_t *threadp, const pthread_attr_t *attr,
 	thread->arg = arg;
 	thread->tid = -1;
 
-	if (attr)
-		thread->attr = *(*attr);
-	else {
-		thread->attr.stack_size = RTHREAD_STACK_SIZE_DEF;
-		thread->attr.guard_size = sysconf(_SC_PAGESIZE);
-		thread->attr.stack_size -= thread->attr.guard_size;
-	}
+	thread->attr = attr != NULL ? *(*attr) : _rthread_attr_default;
 	if (thread->attr.detach_state == PTHREAD_CREATE_DETACHED)
 		thread->flags |= THREAD_DETACHED;
 	thread->flags |= THREAD_CANCEL_ENABLE|THREAD_CANCEL_DEFERRED;
@@ -399,13 +413,15 @@ pthread_create(pthread_t *threadp, const pthread_attr_t *attr,
 
 	param.tf_tcb = tcb;
 	param.tf_tid = &thread->tid;
-	param.tf_flags = 0;
+	param.tf_stack = thread->stack->sp;
 
 	_spinlock(&_thread_lock);
 	LIST_INSERT_HEAD(&_thread_list, thread, threads);
 	_spinunlock(&_thread_lock);
 
-	rc = __tfork_thread(&param, thread->stack->sp, _rthread_start, thread);
+	/* we're going to be multi-threaded real soon now */
+	__isthreaded = 1;
+	rc = __tfork_thread(&param, sizeof(param), _rthread_start, thread);
 	if (rc != -1) {
 		/* success */
 		*threadp = thread;
@@ -488,7 +504,6 @@ pthread_setcanceltype(int type, int *oldtypep)
 	    PTHREAD_CANCEL_DEFERRED : PTHREAD_CANCEL_ASYNCHRONOUS;
 	if (type == PTHREAD_CANCEL_DEFERRED) {
 		_rthread_setflag(self, THREAD_CANCEL_DEFERRED);
-		pthread_testcancel();
 	} else if (type == PTHREAD_CANCEL_ASYNCHRONOUS) {
 		_rthread_clearflag(self, THREAD_CANCEL_DEFERRED);
 	} else {
@@ -561,15 +576,55 @@ _thread_dump_info(void)
 }
 
 #if defined(__ELF__) && defined(PIC)
+/*
+ * _rthread_dl_lock() provides the locking for dlopen(), dlclose(), and
+ * the function called via atexit() to invoke all destructors.  The latter
+ * two call shared-object destructors, which may need to call dlclose(),
+ * so this lock needs to permit recursive locking.
+ * The specific code here was extracted from _rthread_mutex_lock() and
+ * pthread_mutex_unlock() and simplified to use the static variables.
+ */
 void
 _rthread_dl_lock(int what)
 {
 	static _spinlock_lock_t lock = _SPINLOCK_UNLOCKED;
+	static pthread_t owner = NULL;
+	static struct pthread_queue lockers = TAILQ_HEAD_INITIALIZER(lockers);
+	static int count = 0;
 
 	if (what == 0)
+	{
+		pthread_t self = pthread_self();
+
+		/* lock, possibly recursive */
 		_spinlock(&lock);
-	else
+		if (owner == NULL) {
+			owner = self;
+		} else if (owner != self) {
+			TAILQ_INSERT_TAIL(&lockers, self, waiting);
+			while (owner != self) {
+				__thrsleep(self, 0, NULL, &lock, NULL);
+				_spinlock(&lock);
+			}
+		}
+		count++;
 		_spinunlock(&lock);
+	}
+	else
+	{
+		/* unlock, possibly recursive */
+		if (--count == 0) {
+			pthread_t next;
+
+			_spinlock(&lock);
+			owner = next = TAILQ_FIRST(&lockers);
+			if (next != NULL)
+				TAILQ_REMOVE(&lockers, next, waiting);
+			_spinunlock(&lock);
+			if (next != NULL)
+				__thrwakeup(next, 1);
+		}
+	}
 }
 
 void

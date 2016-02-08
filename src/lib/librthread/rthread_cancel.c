@@ -1,9 +1,7 @@
-/* $OpenBSD: rthread_cancel.c,v 1.4 2012/01/17 02:34:18 guenther Exp $ */
+/* $OpenBSD: rthread_cancel.c,v 1.6 2012/04/17 15:10:11 miod Exp $ */
 /* $snafu: libc_tag.c,v 1.4 2004/11/30 07:00:06 marc Exp $ */
 
 /* PUBLIC DOMAIN: No Rights Reserved. Marco S Hyman <marc@snafu.org> */
-
-#define _POSIX_THREADS
 
 #include <sys/types.h>
 #include <sys/ioctl.h>
@@ -31,6 +29,7 @@
 
 int	_thread_sys_accept(int, struct sockaddr *, socklen_t *);
 int	_thread_sys_close(int);
+int	_thread_sys_closefrom(int);
 int	_thread_sys_connect(int, const struct sockaddr *, socklen_t);
 int	_thread_sys_fcntl(int, int, ...);
 int	_thread_sys_fsync(int);
@@ -129,6 +128,19 @@ close(int fd)
 
 	_enter_cancel(self);
 	rv = _thread_sys_close(fd);
+	_leave_cancel(self);
+	return (rv);
+}
+
+
+int
+closefrom(int fd)
+{
+	pthread_t self = pthread_self();
+	int rv;
+
+	_enter_cancel(self);
+	rv = _thread_sys_closefrom(fd);
 	_leave_cancel(self);
 	return (rv);
 }
@@ -442,7 +454,7 @@ select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds,
 }
 
 #if 0
-sem_timedwait()			/* don't have yet */
+sem_timedwait()			/* in rthread_sem.c */
 sem_wait()			/* in rthread_sem.c */
 send()				/* built on sendto() */
 #endif

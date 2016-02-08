@@ -1,4 +1,4 @@
-/*	$OpenBSD: parse.y,v 1.152 2011/12/20 13:27:51 mikeb Exp $	*/
+/*	$OpenBSD: parse.y,v 1.156 2012/07/10 13:58:33 lteo Exp $	*/
 
 /*
  * Copyright (c) 2002, 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -98,25 +98,28 @@ const struct ipsec_xf authxfs[] = {
 };
 
 const struct ipsec_xf encxfs[] = {
-	{ "unknown",		ENCXF_UNKNOWN,		0,	0,	0 },
-	{ "none",		ENCXF_NONE,		0,	0,	0 },
-	{ "3des-cbc",		ENCXF_3DES_CBC,		24,	24,	0 },
-	{ "des-cbc",		ENCXF_DES_CBC,		8,	8,	0 },
-	{ "aes",		ENCXF_AES,		16,	32,	0 },
-	{ "aes-128",		ENCXF_AES_128,		16,	16,	0 },
-	{ "aes-192",		ENCXF_AES_192,		24,	24,	0 },
-	{ "aes-256",		ENCXF_AES_256,		32,	32,	0 },
-	{ "aesctr",		ENCXF_AESCTR,		16+4,	32+4,	0 },
-	{ "aes-128-gcm",	ENCXF_AES_128_GCM,	16+4,	16+4,	1 },
-	{ "aes-192-gcm",	ENCXF_AES_192_GCM,	24+4,	24+4,	1 },
-	{ "aes-256-gcm",	ENCXF_AES_256_GCM,	32+4,	32+4,	1 },
-	{ "aes-128-gmac",	ENCXF_AES_128_GMAC,	16+4,	16+4,	1 },
-	{ "aes-192-gmac",	ENCXF_AES_192_GMAC,	24+4,	24+4,	1 },
-	{ "aes-256-gmac",	ENCXF_AES_256_GMAC,	32+4,	32+4,	1 },
-	{ "blowfish",		ENCXF_BLOWFISH,		5,	56,	0 },
-	{ "cast128",		ENCXF_CAST128,		5,	16,	0 },
-	{ "null",		ENCXF_NULL,		0,	0,	0 },
-	{ NULL,			0,			0,	0,	0 },
+	{ "unknown",		ENCXF_UNKNOWN,		0,	0,	0, 0 },
+	{ "none",		ENCXF_NONE,		0,	0,	0, 0 },
+	{ "3des-cbc",		ENCXF_3DES_CBC,		24,	24,	0, 0 },
+	{ "des-cbc",		ENCXF_DES_CBC,		8,	8,	0, 0 },
+	{ "aes",		ENCXF_AES,		16,	32,	0, 0 },
+	{ "aes-128",		ENCXF_AES_128,		16,	16,	0, 0 },
+	{ "aes-192",		ENCXF_AES_192,		24,	24,	0, 0 },
+	{ "aes-256",		ENCXF_AES_256,		32,	32,	0, 0 },
+	{ "aesctr",		ENCXF_AESCTR,		16+4,	32+4,	0, 1 },
+	{ "aes-128-ctr",	ENCXF_AES_128_CTR,	16+4,	16+4,	0, 1 },
+	{ "aes-192-ctr",	ENCXF_AES_192_CTR,	24+4,	24+4,	0, 1 },
+	{ "aes-256-ctr",	ENCXF_AES_256_CTR,	32+4,	32+4,	0, 1 },
+	{ "aes-128-gcm",	ENCXF_AES_128_GCM,	16+4,	16+4,	1, 1 },
+	{ "aes-192-gcm",	ENCXF_AES_192_GCM,	24+4,	24+4,	1, 1 },
+	{ "aes-256-gcm",	ENCXF_AES_256_GCM,	32+4,	32+4,	1, 1 },
+	{ "aes-128-gmac",	ENCXF_AES_128_GMAC,	16+4,	16+4,	1, 1 },
+	{ "aes-192-gmac",	ENCXF_AES_192_GMAC,	24+4,	24+4,	1, 1 },
+	{ "aes-256-gmac",	ENCXF_AES_256_GMAC,	32+4,	32+4,	1, 1 },
+	{ "blowfish",		ENCXF_BLOWFISH,		5,	56,	0, 0 },
+	{ "cast128",		ENCXF_CAST128,		5,	16,	0, 0 },
+	{ "null",		ENCXF_NULL,		0,	0,	0, 0 },
+	{ NULL,			0,			0,	0,	0, 0 },
 };
 
 const struct ipsec_xf compxfs[] = {
@@ -165,9 +168,9 @@ struct ipsec_addr_wrap	*ifa_lookup(const char *ifa_name);
 struct ipsec_addr_wrap	*ifa_grouplookup(const char *);
 void			 set_ipmask(struct ipsec_addr_wrap *, u_int8_t);
 const struct ipsec_xf	*parse_xf(const char *, const struct ipsec_xf *);
-struct ipsec_life	*parse_life(int);
+struct ipsec_lifetime	*parse_life(const char *);
 struct ipsec_transforms *copytransforms(const struct ipsec_transforms *);
-struct ipsec_life	*copylife(const struct ipsec_life *);
+struct ipsec_lifetime	*copylife(const struct ipsec_lifetime *);
 struct ipsec_auth	*copyipsecauth(const struct ipsec_auth *);
 struct ike_auth		*copyikeauth(const struct ike_auth *);
 struct ipsec_key	*copykey(struct ipsec_key *);
@@ -244,7 +247,7 @@ typedef struct {
 			struct ipsec_key *keyin;
 		} keys;
 		struct ipsec_transforms *transforms;
-		struct ipsec_life	*life;
+		struct ipsec_lifetime	*life;
 		struct ike_mode		*mode;
 	} v;
 	int lineno;
@@ -254,7 +257,7 @@ typedef struct {
 
 %token	FLOW FROM ESP AH IN PEER ON OUT TO SRCID DSTID RSA PSK TCPMD5 SPI
 %token	AUTHKEY ENCKEY FILENAME AUTHXF ENCXF ERROR IKE MAIN QUICK AGGRESSIVE
-%token	PASSIVE ACTIVE ANY IPIP IPCOMP COMPXF TUNNEL TRANSPORT DYNAMIC LIFE
+%token	PASSIVE ACTIVE ANY IPIP IPCOMP COMPXF TUNNEL TRANSPORT DYNAMIC LIFETIME
 %token	TYPE DENY BYPASS LOCAL PROTO USE ACQUIRE REQUIRE DONTACQ GROUP PORT TAG
 %token	INCLUDE
 %token	<v.string>		STRING
@@ -282,7 +285,7 @@ typedef struct {
 %type	<v.ikemode>		ikemode
 %type	<v.ikeauth>		ikeauth
 %type	<v.type>		type
-%type	<v.life>		life
+%type	<v.life>		lifetime
 %type	<v.mode>		phase1mode phase2mode
 %type	<v.string>		tag
 %%
@@ -710,8 +713,8 @@ phase1mode	: /* empty */	{
 			p1->ike_exch = IKE_MM;
 			$$ = p1;
 		}
-		| MAIN transforms life		{
-			struct ike_mode	*p1;
+		| MAIN transforms lifetime		{
+			struct ike_mode *p1;
 
 			if ((p1 = calloc(1, sizeof(struct ike_mode))) == NULL)
 				err(1, "phase1mode: calloc");
@@ -720,7 +723,7 @@ phase1mode	: /* empty */	{
 			p1->ike_exch = IKE_MM;
 			$$ = p1;
 		}
-		| AGGRESSIVE transforms life		{
+		| AGGRESSIVE transforms lifetime	{
 			struct ike_mode	*p1;
 
 			if ((p1 = calloc(1, sizeof(struct ike_mode))) == NULL)
@@ -737,15 +740,15 @@ phase2mode	: /* empty */	{
 
 			/* We create just an empty quick mode */
 			if ((p2 = calloc(1, sizeof(struct ike_mode))) == NULL)
-				err(1, "phase1mode: calloc");
+				err(1, "phase2mode: calloc");
 			p2->ike_exch = IKE_QM;
 			$$ = p2;
 		}
-		| QUICK transforms life		{
+		| QUICK transforms lifetime	{
 			struct ike_mode	*p2;
 
 			if ((p2 = calloc(1, sizeof(struct ike_mode))) == NULL)
-				err(1, "phase1mode: calloc");
+				err(1, "phase2mode: calloc");
 			p2->xfs = $2;
 			p2->life = $3;
 			p2->ike_exch = IKE_QM;
@@ -753,22 +756,28 @@ phase2mode	: /* empty */	{
 		}
 		;
 
-life		: /* empty */			{
-			struct ipsec_life *life;
+lifetime	: /* empty */			{
+			struct ipsec_lifetime *life;
 
 			/* We create just an empty transform */
-			if ((life = calloc(1, sizeof(struct ipsec_life)))
+			if ((life = calloc(1, sizeof(struct ipsec_lifetime)))
 			    == NULL)
 				err(1, "life: calloc");
-			life->lifetime = -1;
-			life->lifevolume = -1;
+			life->lt_seconds = -1;
+			life->lt_bytes = -1;
 			$$ = life;
 		}
-		| LIFE NUMBER			{
-			if ($2 > INT_MAX || $2 < 0) {
-				yyerror("%lld not a valid lifetime", $2);
-				YYERROR;
-			}
+		| LIFETIME NUMBER		{
+			struct ipsec_lifetime *life;
+
+			if ((life = calloc(1, sizeof(struct ipsec_lifetime)))
+			    == NULL)
+				err(1, "life: calloc");
+			life->lt_seconds = $2;
+			life->lt_bytes = -1;
+			$$ = life;
+		}
+		| LIFETIME STRING		{
 			$$ = parse_life($2);
 		}
 		;
@@ -947,7 +956,7 @@ lookup(char *s)
 		{ "include",		INCLUDE },
 		{ "ipcomp",		IPCOMP },
 		{ "ipip",		IPIP },
-		{ "life",		LIFE },
+		{ "lifetime",		LIFETIME },
 		{ "local",		LOCAL },
 		{ "main",		MAIN },
 		{ "out",		OUT },
@@ -1964,16 +1973,35 @@ parse_xf(const char *name, const struct ipsec_xf xfs[])
 	return (NULL);
 }
 
-struct ipsec_life *
-parse_life(int value)
+struct ipsec_lifetime *
+parse_life(const char *value)
 {
-	struct ipsec_life	*life;
+	struct ipsec_lifetime	*life;
+	int			ret;
+	int			seconds = 0;
+	char			unit = 0;
 
-	life = calloc(1, sizeof(struct ipsec_life));
+	ret = sscanf(value, "%d%c", &seconds, &unit);
+	if (ret == 2) {
+		switch (tolower(unit)) {
+		case 'm':
+			seconds *= 60;
+			break;
+		case 'h':
+			seconds *= 60 * 60;
+			break;
+		default:
+			err(1, "invalid time unit");
+		}
+	} else if (ret != 1)
+		err(1, "invalid time specification: %s", value);
+
+	life = calloc(1, sizeof(struct ipsec_lifetime));
 	if (life == NULL)
 		err(1, "calloc");
 
-	life->lifetime = value;
+	life->lt_seconds = seconds;
+	life->lt_bytes = -1;
 
 	return (life);
 }
@@ -1994,19 +2022,19 @@ copytransforms(const struct ipsec_transforms *xfs)
 	return (newxfs);
 }
 
-struct ipsec_life *
-copylife(const struct ipsec_life *life)
+struct ipsec_lifetime *
+copylife(const struct ipsec_lifetime *life)
 {
-	struct ipsec_life *newlife;
+	struct ipsec_lifetime *newlife;
 
 	if (life == NULL)
 		return (NULL);
 
-	newlife = calloc(1, sizeof(struct ipsec_life));
+	newlife = calloc(1, sizeof(struct ipsec_lifetime));
 	if (newlife == NULL)
 		err(1, "copylife: calloc");
 
-	memcpy(newlife, life, sizeof(struct ipsec_life));
+	memcpy(newlife, life, sizeof(struct ipsec_lifetime));
 	return (newlife);
 }
 
@@ -2216,6 +2244,11 @@ validate_sa(u_int32_t spi, u_int8_t satype, struct ipsec_transforms *xfs,
 		}
 		if (!xfs->encxf)
 			xfs->encxf = &encxfs[ENCXF_AES];
+		if (xfs->encxf->nostatic) {
+			yyerror("%s is disallowed with static keys",
+			    xfs->encxf->name);
+			return 0;
+		}
 		if (xfs->encxf->noauth && xfs->authxf) {
 			yyerror("authentication is implicit for %s",
 			    xfs->encxf->name);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: pfkdump.c,v 1.30 2011/04/13 11:31:27 markus Exp $	*/
+/*	$OpenBSD: pfkdump.c,v 1.33 2012/07/05 09:02:20 mikeb Exp $	*/
 
 /*
  * Copyright (c) 2003 Markus Friedl.  All rights reserved.
@@ -58,16 +58,17 @@ static void	print_udpenc(struct sadb_ext *, struct sadb_msg *);
 static void	print_tag(struct sadb_ext *, struct sadb_msg *);
 static void	print_tap(struct sadb_ext *, struct sadb_msg *);
 
-static struct idname *lookup(struct idname *, u_int8_t);
-static char    *lookup_name(struct idname *, u_int8_t);
+static struct idname *lookup(struct idname *, u_int32_t);
+static char    *lookup_name(struct idname *, u_int32_t);
 static void	print_ext(struct sadb_ext *, struct sadb_msg *);
 
 void		pfkey_print_raw(u_int8_t *, ssize_t);
+static char	*print_flags(uint32_t);
 
 struct sadb_ext *extensions[SADB_EXT_MAX + 1];
 
 struct idname {
-	u_int8_t id;
+	u_int32_t id;
 	char *name;
 	void (*func)(struct sadb_ext *, struct sadb_msg *);
 };
@@ -202,6 +203,18 @@ struct idname xauth_types[] = {
 	{ 0,				NULL,			NULL }
 };
 
+struct idname flag_types[] = {
+	{ SADB_SAFLAGS_PFS,		"pfs",			NULL },
+	{ SADB_X_SAFLAGS_HALFIV,	"halfiv",		NULL },
+	{ SADB_X_SAFLAGS_TUNNEL,	"tunnel",		NULL },
+	{ SADB_X_SAFLAGS_CHAINDEL,	"chaindel",		NULL },
+	{ SADB_X_SAFLAGS_RANDOMPADDING,	"randpad",		NULL },
+	{ SADB_X_SAFLAGS_NOREPLAY,	"noreplay",		NULL },
+	{ SADB_X_SAFLAGS_UDPENCAP,	"udpencap",		NULL },
+	{ SADB_X_SAFLAGS_ESN,		"esn",			NULL },
+	{ 0,				NULL,			NULL }
+};
+
 struct idname identity_types[] = {
 	{ SADB_IDENTTYPE_RESERVED,	"reserved",		NULL },
 	{ SADB_IDENTTYPE_PREFIX,	"prefix",		NULL },
@@ -230,7 +243,7 @@ struct idname states[] = {
 };
 
 static struct idname *
-lookup(struct idname *tab, u_int8_t id)
+lookup(struct idname *tab, u_int32_t id)
 {
 	struct idname *entry;
 
@@ -241,7 +254,7 @@ lookup(struct idname *tab, u_int8_t id)
 }
 
 static char *
-lookup_name(struct idname *tab, u_int8_t id)
+lookup_name(struct idname *tab, u_int32_t id)
 {
 	struct idname *entry;
 
@@ -268,6 +281,28 @@ print_ext(struct sadb_ext *ext, struct sadb_msg *msg)
 	printf("\n");
 }
 
+static char *
+print_flags(uint32_t flags)
+{
+	static char fstr[80];
+	struct idname *entry;
+	size_t len;
+	int i, comma = 0;
+
+	len = snprintf(fstr, sizeof(fstr), "%#x<", flags);
+	for (i = 0; i < 32; i++) {
+		if ((flags & (1 << i)) == 0 ||
+		    (entry = lookup(flag_types, 1 << i)) == NULL)
+			continue;
+		len += snprintf(fstr + len, sizeof(fstr) - len - 1,
+		    comma ? ",%s" : "%s", entry->name);
+		comma = 1;
+	}
+	strlcat(fstr, ">", sizeof(fstr));
+
+	return (fstr);
+}
+
 static void
 print_sa(struct sadb_ext *ext, struct sadb_msg *msg)
 {
@@ -282,9 +317,9 @@ print_sa(struct sadb_ext *ext, struct sadb_msg *msg)
 		    ntohl(sa->sadb_sa_spi),
 		    lookup_name(auth_types, sa->sadb_sa_auth),
 		    lookup_name(enc_types, sa->sadb_sa_encrypt));
-	printf("\t\tstate %s replay %u flags %x",
+	printf("\t\tstate %s replay %u flags %s",
 	    lookup_name(states, sa->sadb_sa_state),
-	    sa->sadb_sa_replay, sa->sadb_sa_flags);
+	    sa->sadb_sa_replay, print_flags(sa->sadb_sa_flags));
 }
 
 /* ARGSUSED1 */
@@ -710,7 +745,17 @@ pfkey_print_sa(struct sadb_msg *msg, int opts)
 				}
 				break;
 			case SADB_X_EALG_AESCTR:
-				xfs.encxf = &encxfs[ENCXF_AESCTR];
+				switch (r.enckey->len) {
+				case 28:
+					xfs.encxf = &encxfs[ENCXF_AES_192_CTR];
+					break;
+				case 36:
+					xfs.encxf = &encxfs[ENCXF_AES_256_CTR];
+					break;
+				default:
+					xfs.encxf = &encxfs[ENCXF_AESCTR];
+					break;
+				}
 				break;
 			case SADB_X_EALG_AESGCM16:
 				switch (r.enckey->len) {

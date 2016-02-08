@@ -21,6 +21,7 @@ piddir = @piddir@
 dbdir = @dbdir@
 pidfile = @pidfile@
 logfile = @logfile@
+zonestatsfile = @zonestatsfile@
 dbfile = @dbfile@
 difffile = @difffile@
 xfrdfile = @xfrdfile@
@@ -53,6 +54,7 @@ EDIT		= sed \
 			-e 's,@zonesdir\@,$(zonesdir),g' \
 			-e 's,@pidfile\@,$(pidfile),g' \
 			-e 's,@logfile\@,$(logfile),g' \
+			-e 's,@zonestatsfile\@,$(zonestatsfile),g' \
 			-e 's,@dbfile\@,$(dbfile),g' \
 			-e 's,@difffile\@,$(difffile),g' \
 			-e 's,@xfrdfile\@,$(xfrdfile),g' \
@@ -351,7 +353,9 @@ nsd-patch.8:	$(srcdir)/nsd-patch.8.in config.h
 	rm -f nsd-patch.8
 	$(EDIT) $(srcdir)/nsd-patch.8.in > nsd-patch.8
 
-install: all
+install:
+
+orig-install: all
 	$(INSTALL) -d $(DESTDIR)$(sbindir)
 	$(INSTALL) -d $(DESTDIR)$(configdir)
 	$(INSTALL) -d $(DESTDIR)$(piddir)

@@ -1,6 +1,7 @@
 
 /*
  * Copyright (C) Igor Sysoev
+ * Copyright (C) Nginx, Inc.
  */
 
 
@@ -444,7 +445,7 @@ ngx_epoll_del_event(ngx_event_t *ev, ngx_int_t event, ngx_uint_t flags)
 
     /*
      * when the file descriptor is closed, the epoll automatically deletes
-     * it from its queue, so we do not need to delete explicity the event
+     * it from its queue, so we do not need to delete explicitly the event
      * before the closing the file descriptor
      */
 
@@ -523,7 +524,7 @@ ngx_epoll_del_connection(ngx_connection_t *c, ngx_uint_t flags)
 
     /*
      * when the file descriptor is closed the epoll automatically deletes
-     * it from its queue so we do not need to delete explicity the event
+     * it from its queue so we do not need to delete explicitly the event
      * before the closing the file descriptor
      */
 
@@ -682,6 +683,18 @@ ngx_epoll_process_events(ngx_cycle_t *cycle, ngx_msec_t timer, ngx_uint_t flags)
         wev = c->write;
 
         if ((revents & EPOLLOUT) && wev->active) {
+
+            if (c->fd == -1 || wev->instance != instance) {
+
+                /*
+                 * the stale event from a file descriptor
+                 * that was just closed in this iteration
+                 */
+
+                ngx_log_debug1(NGX_LOG_DEBUG_EVENT, cycle->log, 0,
+                               "epoll: stale event %p", c);
+                continue;
+            }
 
             if (flags & NGX_POST_THREAD_EVENTS) {
                 wev->posted_ready = 1;

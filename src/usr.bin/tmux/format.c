@@ -1,4 +1,4 @@
-/* $OpenBSD: format.c,v 1.6 2012/02/02 00:03:45 nicm Exp $ */
+/* $OpenBSD: format.c,v 1.9 2012/07/10 11:53:01 nicm Exp $ */
 
 /*
  * Copyright (c) 2011 Nicholas Marriott <nicm@users.sourceforge.net>
@@ -20,6 +20,7 @@
 
 #include <netdb.h>
 #include <stdarg.h>
+#include <stdlib.h>
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
@@ -102,12 +103,12 @@ format_free(struct format_tree *ft)
 		fe_next = RB_NEXT(format_tree, ft, fe);
 
 		RB_REMOVE(format_tree, ft, fe);
-		xfree(fe->value);
-		xfree(fe->key);
-		xfree(fe);
+		free(fe->value);
+		free(fe->key);
+		free(fe);
 	}
 
-	xfree (ft);
+	free (ft);
 }
 
 /* Add a key-value pair. */
@@ -195,11 +196,11 @@ format_replace(struct format_tree *ft,
 	memcpy(*buf + *off, value, valuelen);
 	*off += valuelen;
 
-	xfree(copy);
+	free(copy);
 	return (0);
 
 fail:
-	xfree(copy);
+	free(copy);
 	return (-1);
 }
 
@@ -349,9 +350,10 @@ format_winlink(struct format_tree *ft, struct session *s, struct winlink *wl)
 	format_add(ft, "window_flags", "%s", flags);
 	format_add(ft, "window_layout", "%s", layout);
 	format_add(ft, "window_active", "%d", wl == s->curw);
+	format_add(ft, "window_panes", "%u", window_count_panes(w));
 
-	xfree(flags);
-	xfree(layout);
+	free(flags);
+	free(layout);
 }
 
 /* Set default format keys for a window pane. */
@@ -389,6 +391,18 @@ format_window_pane(struct format_tree *ft, struct window_pane *wp)
 		format_add(ft, "pane_start_command", "%s", wp->cmd);
 	if (wp->cwd != NULL)
 		format_add(ft, "pane_start_path", "%s", wp->cwd);
+	format_add(ft, "pane_current_path", "%s", get_proc_cwd(wp->pid));
 	format_add(ft, "pane_pid", "%ld", (long) wp->pid);
 	format_add(ft, "pane_tty", "%s", wp->tty);
+}
+
+void
+format_paste_buffer(struct format_tree *ft, struct paste_buffer *pb)
+{
+	char	*pb_print = paste_print(pb, 50);
+
+	format_add(ft, "buffer_size", "%zu", pb->size);
+	format_add(ft, "buffer_sample", "%s", pb_print);
+
+	free(pb_print);
 }

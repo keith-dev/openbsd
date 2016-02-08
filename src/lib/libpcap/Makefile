@@ -1,9 +1,9 @@
-#	$OpenBSD: Makefile,v 1.20 2009/08/13 19:54:58 jmc Exp $
+#	$OpenBSD: Makefile,v 1.22 2012/07/16 08:55:48 giovanni Exp $
 #	$NetBSD: Makefile,v 1.3 1996/05/10 21:54:24 cgd Exp $
 
 LIB=	pcap
 WANTLINT=
-MAN=	pcap.3
+MAN=	pcap.3 pcap-filter.3
 MLINKS=	pcap.3 pcap_open_live.3 pcap.3 pcap_open_offline.3 \
         pcap.3 pcap_dump_open.3 pcap.3 pcap_lookupdev.3 pcap.3 \
         pcap_lookupnet.3 pcap.3 pcap_dispatch.3 pcap.3 pcap_loop.3 \
@@ -25,11 +25,15 @@ MLINKS=	pcap.3 pcap_open_live.3 pcap.3 pcap_open_offline.3 \
 	pcap.3 pcap_sendpacket.3 pcap.3 pcap_next_ex.3 \
 	pcap.3 pcap_setdirection.3 pcap.3 pcap_dump_file.3 \
 	pcap.3 pcap_dump_ftell.3 pcap.3 pcap_fopen_offline.3 \
-	pcap.3 pcap_dump_flush.3
+	pcap.3 pcap_dump_flush.3 pcap.3 pcap_create.3 \
+	pcap.3 pcap_set_snaplen.3 pcap.3 pcap_set_promisc.3 \
+	pcap.3 pcap_can_set_rfmon.3 pcap.3 pcap_set_rfmon.3 \
+	pcap.3 pcap_set_timeout.3 pcap.3 pcap_set_buffer_size.3 \
+	pcap.3 pcap_activate.3 pcap.3 pcap_statustostr.3
 
 DEFS=	-DHAVE_SYS_IOCCOM_H -DHAVE_SYS_SOCKIO_H -DHAVE_ETHER_HOSTTON \
 	-DHAVE_STRERROR -DHAVE_SOCKADDR_SA_LEN -DLBL_ALIGN -DHAVE_IFADDRS_H \
-	-DINET6
+	-DINET6 -DHAVE_BSD_IEEE80211
 
 CFLAGS+=-I. -I${.CURDIR} -Dyylval=pcap_yylval ${DEFS}
 

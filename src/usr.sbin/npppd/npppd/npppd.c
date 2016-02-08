@@ -1,4 +1,4 @@
-/* $OpenBSD: npppd.c,v 1.15 2012/01/23 03:36:22 yasuoka Exp $ */
+/*	$OpenBSD: npppd.c,v 1.20 2012/07/17 03:18:57 yasuoka Exp $ */
 
 /*-
  * Copyright (c) 2009 Internet Initiative Japan Inc.
@@ -29,7 +29,7 @@
  * Next pppd(nppd). This file provides a npppd daemon process and operations
  * for npppd instance.
  * @author	Yasuoka Masahiko
- * $Id: npppd.c,v 1.15 2012/01/23 03:36:22 yasuoka Exp $
+ * $Id: npppd.c,v 1.20 2012/07/17 03:18:57 yasuoka Exp $
  */
 #include <sys/cdefs.h>
 #include "version.h"
@@ -79,9 +79,10 @@ __COPYRIGHT(
 #include "npppd_local.h"
 #include "npppd_auth.h"
 #include "radish.h"
-#include "rtev.h"
 #include "net_utils.h"
 #include "time_utils.h"
+
+#include "l2tp_local.h"	/* XXX sa_cookie */
 
 #ifdef USE_NPPPD_ARP
 #include "npppd_arp.h"
@@ -148,12 +149,11 @@ int        main (int, char *[]);
 int
 main(int argc, char *argv[])
 {
-	int ch, retstatus, ll_adjust = 0, runasdaemon = 0;
+	int ch, stop_by_error, ll_adjust = 0, runasdaemon = 0;
 	extern char *optarg;
 	const char *npppd_conf0 = DEFAULT_NPPPD_CONF;
 	struct passwd *pw;
 
-	retstatus = EXIT_SUCCESS;
 	while ((ch = getopt(argc, argv, "Dc:dhs")) != -1) {
 		switch (ch) {
 		case 's':
@@ -194,33 +194,28 @@ main(int argc, char *argv[])
 	if (privsep_init() != 0)
 		err(1, "cannot drop privileges");
 
-	if (npppd_init(&s_npppd, npppd_conf0) != 0) {
-		retstatus = EXIT_FAILURE;
-		goto fail;
-	}
+	if (npppd_init(&s_npppd, npppd_conf0) != 0)
+		exit(EXIT_FAILURE);
 
 	if ((pw = getpwnam(NPPPD_USER)) == NULL)
-		err(1, "gwpwnam");
+		err(EXIT_FAILURE, "gwpwnam");
 	if (chroot(pw->pw_dir) == -1)
-		err(1, "chroot");
+		err(EXIT_FAILURE, "chroot");
 	if (chdir("/") == -1)
-		err(1, "chdir(\"/\")");
+		err(EXIT_FAILURE, "chdir(\"/\")");
         if (setgroups(1, &pw->pw_gid) ||
 	    setresgid(pw->pw_gid, pw->pw_gid, pw->pw_gid) ||
 	    setresuid(pw->pw_uid, pw->pw_uid, pw->pw_uid))
-		err(1, "cannot drop privileges");
+		err(EXIT_FAILURE, "cannot drop privileges");
 	/* privileges is dropped */
 
 	npppd_start(&s_npppd);
-	if (s_npppd.stop_by_error != 0)
-		retstatus = EXIT_FAILURE;
+	stop_by_error = s_npppd.stop_by_error;
 	npppd_fini(&s_npppd);
-	/* FALLTHROUGH */
-fail:
 	privsep_fini();
 	log_printf(LOG_NOTICE, "Terminate npppd.");
 
-	exit(retstatus);
+	exit((!stop_by_error)? EXIT_SUCCESS : EXIT_FAILURE);
 }
 
 static void
@@ -331,17 +326,6 @@ npppd_init(npppd *_this, const char *config_file)
 
 	/* initialize event(3) */
 	event_init();
-
-	/* initialize rtev */
-	rtev_libevent_init(
-	    npppd_config_int(_this, "rtsock.event_delay",
-		DEFAULT_RTSOCK_EVENT_DELAY),
-	    npppd_config_int(_this, "rtsock.send_wait_millisec",
-		DEFAULT_RTSOCK_SEND_WAIT_MILLISEC),
-	    npppd_config_int(_this, "rtsock.send_npkts",
-		DEFAULT_RTSOCK_SEND_NPKTS), 0);
-
-	_this->rtev_event_serial = -1;
 
 	/* ignore signals */
 	signal(SIGPIPE, SIG_IGN);
@@ -512,8 +496,6 @@ npppd_fini(npppd *_this)
 
 	if (_this->map_user_ppp != NULL)
 		hash_free(_this->map_user_ppp);
-
-	rtev_fini();
 }
 
 /***********************************************************************
@@ -559,14 +541,10 @@ npppd_timer(int fd, short evtype, void *ctx)
 			npppd_auth_finalizer_periodic(_this);
 	}
 
-	if (_this->rtev_event_serial != rtev_get_event_serial()) {
 #ifdef USE_NPPPD_PPPOE
-		if (pppoed_need_polling(&_this->pppoed))
-			pppoed_reload_listeners(&_this->pppoed);
+	if (pppoed_need_polling(&_this->pppoed))
+		pppoed_reload_listeners(&_this->pppoed);
 #endif
-	}
-	_this->rtev_event_serial = rtev_get_event_serial();
-
 #ifdef USE_NPPPD_PIPEX
 	pipex_periodic(_this);
 #endif
@@ -1063,7 +1041,6 @@ npppd_ppp_pipex_enable(npppd *_this, npppd_ppp *ppp)
 		req.pr_session_id = l2tp->session_id;
 		req.pr_peer_session_id = l2tp->peer_session_id;
 
-		/* options: XXX: needs other? */
 		if (l2tpctrl->data_use_seq)
 			req.pr_proto.l2tp.option_flags |=
 			    PIPEX_L2TP_USE_SEQUENCING;
@@ -1072,16 +1049,16 @@ npppd_ppp_pipex_enable(npppd *_this, npppd_ppp *ppp)
 		req.pr_proto.l2tp.ns_nxt = l2tp->snd_nxt;
 		req.pr_proto.l2tp.nr_nxt = l2tp->rcv_nxt;
 
-		NPPPD_ASSERT(l2tpctrl->peer.ss_family == AF_INET);
-
 		memcpy(&req.peer_address, &l2tpctrl->peer,
 		    l2tpctrl->peer.ss_len);
 		memcpy(&req.local_address, &l2tpctrl->sock,
 		    l2tpctrl->sock.ss_len);
-#ifdef	IP_IPSEC_SA_COOKIE
-		if (l2tpctrl->sa_cookie != NULL)
-			req.pr_proto.l2tp.ipsec_sa_cookie =
-			    *(struct in_ipsec_sa_cookie *)l2tpctrl->sa_cookie;
+#ifdef USE_SA_COOKIE
+		if (l2tpctrl->sa_cookie != NULL) {
+			req.pr_proto.l2tp.ipsecflowinfo =
+			    ((struct in_ipsec_sa_cookie *)l2tpctrl->sa_cookie)
+				    ->ipsecflow;
+		}
 #endif
 		break;
 #endif
@@ -1800,7 +1777,8 @@ npppd_set_radish(npppd *_this, void *radish_head)
 
 	if (_this->rd != NULL)
 		npppd_rd_walktree_delete(_this->rd);
-	_this->rd = radish_head;
+	if (radish_head == NULL)
+		npppd_get_all_users(_this, &delppp);
 
 	for (slist_itr_first(&delppp); slist_itr_has_next(&delppp);) {
 		ppp = slist_itr_next(&delppp);
@@ -1810,6 +1788,7 @@ npppd_set_radish(npppd *_this, void *radish_head)
 		ppp_stop(ppp, NULL);
 	}
 	slist_fini(&delppp);
+	_this->rd = radish_head;
 
 	return 0;
 fail:
@@ -1835,6 +1814,8 @@ npppd_get_all_users(npppd *_this, slist *users)
 	NPPPD_ASSERT(_this != NULL);
 
 	slist_init(&list);
+	if (_this->rd == NULL)
+		return 0;
 	rval = rd2slist(_this->rd, &list);
 	if (rval != 0)
 		return rval;
@@ -1948,11 +1929,11 @@ npppd_on_sigchld(int fd, short ev_type, void *ctx)
 	if (wait4(wpid, &status, WNOHANG, NULL) == wpid) {
 		if (WIFSIGNALED(status))
 			log_printf(LOG_WARNING,
-			    "priviledged process exits abnormaly.  signal=%d",
+			    "privileged process exits abnormaly.  signal=%d",
 			    WTERMSIG(status));
 		else
 			log_printf(LOG_WARNING,
-			    "priviledged process exits abnormaly.  status=%d",
+			    "privileged process exits abnormaly.  status=%d",
 			    WEXITSTATUS(status));
 		_this->stop_by_error = 1;
 		npppd_stop(_this);

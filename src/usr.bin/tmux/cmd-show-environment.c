@@ -1,4 +1,4 @@
-/* $OpenBSD: cmd-show-environment.c,v 1.4 2011/04/05 19:37:01 nicm Exp $ */
+/* $OpenBSD: cmd-show-environment.c,v 1.6 2012/07/11 07:10:15 nicm Exp $ */
 
 /*
  * Copyright (c) 2009 Nicholas Marriott <nicm@users.sourceforge.net>
@@ -27,19 +27,19 @@
  * Show environment.
  */
 
-int	cmd_show_environment_exec(struct cmd *, struct cmd_ctx *);
+enum cmd_retval	 cmd_show_environment_exec(struct cmd *, struct cmd_ctx *);
 
 const struct cmd_entry cmd_show_environment_entry = {
 	"show-environment", "showenv",
-	"gt:", 0, 0,
-	"[-g] " CMD_TARGET_SESSION_USAGE,
+	"gt:", 0, 1,
+	"[-g] " CMD_TARGET_SESSION_USAGE " [name]",
 	0,
 	NULL,
 	NULL,
 	cmd_show_environment_exec
 };
 
-int
+enum cmd_retval
 cmd_show_environment_exec(struct cmd *self, struct cmd_ctx *ctx)
 {
 	struct args		*args = self->args;
@@ -51,8 +51,21 @@ cmd_show_environment_exec(struct cmd *self, struct cmd_ctx *ctx)
 		env = &global_environ;
 	else {
 		if ((s = cmd_find_session(ctx, args_get(args, 't'), 0)) == NULL)
-			return (-1);
+			return (CMD_RETURN_ERROR);
 		env = &s->environ;
+	}
+
+	if (args->argc != 0) {
+		envent = environ_find(env, args->argv[0]);
+		if (envent == NULL) {
+			ctx->error(ctx, "unknown variable: %s", args->argv[0]);
+			return (CMD_RETURN_ERROR);
+		}
+		if (envent->value != NULL)
+			ctx->print(ctx, "%s=%s", envent->name, envent->value);
+		else
+			ctx->print(ctx, "-%s", envent->name);
+		return (CMD_RETURN_NORMAL);
 	}
 
 	RB_FOREACH(envent, environ, env) {
@@ -62,5 +75,5 @@ cmd_show_environment_exec(struct cmd *self, struct cmd_ctx *ctx)
 			ctx->print(ctx, "-%s", envent->name);
 	}
 
-	return (0);
+	return (CMD_RETURN_NORMAL);
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: trap.c,v 1.77 2011/11/16 20:50:19 deraadt Exp $	*/
+/*	$OpenBSD: trap.c,v 1.81 2012/04/11 14:38:55 mikeb Exp $	*/
 
 /*
  * Copyright (c) 1988 University of Utah.
@@ -150,7 +150,7 @@ ast()
 	struct cpu_info *ci = curcpu();
 	struct proc *p = ci->ci_curproc;
 
-	uvmexp.softs++;
+	atomic_add_int(&uvmexp.softs, 1);
 
 	p->p_md.md_astpending = 0;
 	if (p->p_flag & P_OWEUPC) {
@@ -185,6 +185,8 @@ trap(struct trap_frame *trapframe)
 	trapdebug_enter(ci, trapframe, -1);
 
 	type = (trapframe->cause & CR_EXC_CODE) >> CR_EXC_CODE_SHIFT;
+	if (type != T_SYSCALL)
+		atomic_add_int(&uvmexp.traps, 1);
 	if (USERMODE(trapframe->sr)) {
 		type |= T_USER;
 	}
@@ -406,7 +408,7 @@ printf("SIG-BUSB @%p pc %p, ra %p\n", trapframe->badvaddr, trapframe->pc, trapfr
 		} args;
 		register_t rval[2];
 
-		uvmexp.syscalls++;
+		atomic_add_int(&uvmexp.syscalls, 1);
 
 		/* compute next PC after syscall instruction */
 		tpc = trapframe->pc; /* Remember if restart */
@@ -763,6 +765,34 @@ printf("SIG-BUSB @%p pc %p, ra %p\n", trapframe->badvaddr, trapframe->pc, trapfr
 		}
 		goto err;
 
+#ifdef CPU_R4000
+	case T_VCEI:
+	case T_VCEI+T_USER:
+	    {
+		vaddr_t va = trapframe->badvaddr;
+#ifdef DEBUG
+		printf("VCEI trap, badvaddr %p\n", trapframe->badvaddr);
+#endif
+		/* HitWBInvalidate_S */
+		__asm__ __volatile__ ("cache 0x17, 0(%0)" :: "r"(va));
+		/* HitInvalidate_I */
+		__asm__ __volatile__ ("cache 0x10, 0(%0)" :: "r"(va));
+	    }
+		return;
+	case T_VCED:
+	case T_VCED+T_USER:
+	    {
+		vaddr_t va = trapframe->badvaddr & ~3;
+#ifdef DEBUG
+		printf("VCED trap, badvaddr %p\n", trapframe->badvaddr);
+#endif
+		/* HitWBInvalidate_S */
+		__asm__ __volatile__ ("cache 0x17, 0(%0)" :: "r"(va));
+		/* HitInvalidate_D */
+		__asm__ __volatile__ ("cache 0x11, 0(%0)" :: "r"(va));
+	    }
+		return;
+#endif	/* CPU_R4000 */
 	default:
 	err:
 		disableintr();
@@ -822,7 +852,7 @@ child_return(arg)
 	if (KTRPOINT(p, KTR_SYSRET)) {
 		KERNEL_LOCK();
 		ktrsysret(p,
-		    (p->p_flag & P_THREAD) ? SYS_rfork :
+		    (p->p_flag & P_THREAD) ? SYS___tfork :
 		    (p->p_p->ps_flags & PS_PPWAIT) ? SYS_vfork : SYS_fork,
 		    0, 0);
 		KERNEL_UNLOCK();

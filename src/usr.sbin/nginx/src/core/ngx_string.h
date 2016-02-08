@@ -1,6 +1,7 @@
 
 /*
  * Copyright (C) Igor Sysoev
+ * Copyright (C) Nginx, Inc.
  */
 
 
@@ -226,5 +227,6 @@ void ngx_sort(void *base, size_t n, size_t size,
 #define ngx_value_helper(n)   #n
 #define ngx_value(n)          ngx_value_helper(n)
 
+void ngx_strip_chroot(ngx_str_t *root);
 
 #endif /* _NGX_STRING_H_INCLUDED_ */

@@ -1,4 +1,4 @@
-/*	$OpenBSD: relay.c,v 1.144 2012/01/21 13:40:48 camield Exp $	*/
+/*	$OpenBSD: relay.c,v 1.150 2012/07/13 07:54:14 benno Exp $	*/
 
 /*
  * Copyright (c) 2006, 2007, 2008 Reyk Floeter <reyk@openbsd.org>
@@ -469,9 +469,10 @@ relay_launch(void)
 		else
 			callback = relay_accept;
 
-		event_set(&rlay->rl_ev, rlay->rl_s, EV_READ|EV_PERSIST,
+		event_set(&rlay->rl_ev, rlay->rl_s, EV_READ,
 		    callback, rlay);
 		event_add(&rlay->rl_ev, NULL);
+		evtimer_set(&rlay->rl_evt, callback, rlay);
 	}
 }
 
@@ -649,10 +650,21 @@ relay_connected(int fd, short sig, void *arg)
 	evbuffercb		 outwr = relay_write;
 	struct bufferevent	*bev;
 	struct ctl_relay_event	*out = &con->se_out;
+	socklen_t		 len;
+	int			 error;
 
 	if (sig == EV_TIMEOUT) {
 		relay_close_http(con, 504, "connect timeout", 0);
 		return;
+	}
+
+	len = sizeof(error);
+	if (getsockopt(fd, SOL_SOCKET, SO_ERROR, &error,
+	    &len) == -1 || error) {
+		if (error)
+			errno = error;
+		relay_close_http(con, 500, "socket error", 0);
+		return;		
 	}
 
 	if ((rlay->rl_conf.flags & F_SSLCLIENT) && (out->ssl == NULL)) {
@@ -1081,16 +1093,16 @@ relay_read_httpcontent(struct bufferevent *bev, void *arg)
 	if (gettimeofday(&con->se_tv_last, NULL) == -1)
 		goto fail;
 	size = EVBUFFER_LENGTH(src);
-	DPRINTF("%s: size %d, to read %d", __func__,
+	DPRINTF("%s: size %lu, to read %llu", __func__,
 	    size, cre->toread);
 	if (!size)
 		return;
 	if (relay_bufferevent_write_buffer(cre->dst, src) == -1)
 		goto fail;
-	if (size >= cre->toread)
+	if ((off_t)size >= cre->toread)
 		bev->readcb = relay_read_http;
 	cre->toread -= size;
-	DPRINTF("%s: done, size %d, to read %d", __func__,
+	DPRINTF("%s: done, size %lu, to read %llu", __func__,
 	    size, cre->toread);
 	if (con->se_done)
 		goto done;
@@ -1118,7 +1130,7 @@ relay_read_httpchunks(struct bufferevent *bev, void *arg)
 	if (gettimeofday(&con->se_tv_last, NULL) == -1)
 		goto fail;
 	size = EVBUFFER_LENGTH(src);
-	DPRINTF("%s: size %d, to read %d", __func__,
+	DPRINTF("%s: size %lu, to read %llu", __func__,
 	    size, cre->toread);
 	if (!size)
 		return;
@@ -1167,12 +1179,12 @@ relay_read_httpchunks(struct bufferevent *bev, void *arg)
 		}
 	} else {
 		/* Read chunk data */
-		if (size > cre->toread)
+		if ((off_t)size > cre->toread)
 			size = cre->toread;
 		if (relay_bufferevent_write_chunk(cre->dst, src, size) == -1)
 			goto fail;
 		cre->toread -= size;
-		DPRINTF("%s: done, size %d, to read %d", __func__,
+		DPRINTF("%s: done, size %lu, to read %llu", __func__,
 		    size, cre->toread);
 
 		if (cre->toread == 0) {
@@ -1240,7 +1252,7 @@ relay_read_http(struct bufferevent *bev, void *arg)
 	if (gettimeofday(&con->se_tv_last, NULL) == -1)
 		goto fail;
 	size = EVBUFFER_LENGTH(src);
-	DPRINTF("%s: size %d, to read %d", __func__, size, cre->toread);
+	DPRINTF("%s: size %lu, to read %llu", __func__, size, cre->toread);
 	if (!size) {
 		if (cre->dir == RELAY_DIR_RESPONSE)
 			return;
@@ -1371,7 +1383,11 @@ relay_read_http(struct bufferevent *bev, void *arg)
 				if (ret == PN_FAIL)
 					goto abort;
 			}
-		} else if ((cre->method == HTTP_METHOD_POST ||
+		} else if ((cre->method == HTTP_METHOD_DELETE ||
+		    cre->method == HTTP_METHOD_GET ||
+		    cre->method == HTTP_METHOD_HEAD ||
+		    cre->method == HTTP_METHOD_OPTIONS ||
+		    cre->method == HTTP_METHOD_POST ||
 		    cre->method == HTTP_METHOD_PUT ||
 		    cre->method == HTTP_METHOD_RESPONSE) &&
 		    strcasecmp("Content-Length", pk.key) == 0) {
@@ -1382,11 +1398,19 @@ relay_read_http(struct bufferevent *bev, void *arg)
 			 * the carriage return? And some browsers seem to
 			 * include the line length in the content-length.
 			 */
-			cre->toread = strtonum(pk.value, 0, INT_MAX, &errstr);
+			cre->toread = strtonum(pk.value, 0, ULLONG_MAX, &errstr);
 			if (errstr) {
 				relay_close_http(con, 500, errstr, 0);
 				goto abort;
 			}
+		} else if ((cre->method == HTTP_METHOD_TRACE) &&
+		    strcasecmp("Content-Length", pk.key) == 0) {
+			/*
+			 * This method should not have a body and thus no
+			 * Content-Length header.
+			 */
+			relay_close_http(con, 400, "malformed", 0);
+			goto abort;
 		}
  lookup:
 		if (strcasecmp("Transfer-Encoding", pk.key) == 0 &&
@@ -1465,6 +1489,10 @@ relay_read_http(struct bufferevent *bev, void *arg)
 			/* Data stream */
 			bev->readcb = relay_read;
 			break;
+		case HTTP_METHOD_DELETE:
+		case HTTP_METHOD_GET:
+		case HTTP_METHOD_HEAD:
+		case HTTP_METHOD_OPTIONS:
 		case HTTP_METHOD_POST:
 		case HTTP_METHOD_PUT:
 		case HTTP_METHOD_RESPONSE:
@@ -1945,7 +1973,7 @@ relay_error(struct bufferevent *bev, short error, void *arg)
 }
 
 void
-relay_accept(int fd, short sig, void *arg)
+relay_accept(int fd, short event, void *arg)
 {
 	struct relay *rlay = (struct relay *)arg;
 	struct protocol *proto = rlay->rl_proto;
@@ -1956,10 +1984,24 @@ relay_accept(int fd, short sig, void *arg)
 	struct sockaddr_storage ss;
 	int s = -1;
 
-	slen = sizeof(ss);
-	if ((s = accept(fd, (struct sockaddr *)&ss, (socklen_t *)&slen)) == -1)
+	event_add(&rlay->rl_ev, NULL);
+	if ((event & EV_TIMEOUT))
 		return;
 
+	slen = sizeof(ss);
+	if ((s = accept(fd, (struct sockaddr *)&ss, (socklen_t *)&slen)) == -1) {
+		/*
+		 * Pause accept if we are out of file descriptors, or
+		 * libevent will haunt us here too.
+		 */
+		if (errno == ENFILE || errno == EMFILE) {
+			struct timeval evtpause = { 1, 0 };
+
+			event_del(&rlay->rl_ev);
+			evtimer_add(&rlay->rl_evt, &evtpause);
+		}
+		return;
+	}
 	if (relay_sessions >= RELAY_MAX_SESSIONS ||
 	    rlay->rl_conf.flags & F_DISABLE)
 		goto err;
@@ -2393,8 +2435,16 @@ relay_close(struct rsession *con, const char *msg)
 			SSL_shutdown(con->se_out.ssl);
 		SSL_free(con->se_out.ssl);
 	}
-	if (con->se_out.s != -1)
+	if (con->se_out.s != -1) {
 		close(con->se_out.s);
+
+		/* Some file descriptors are available again. */
+		if (evtimer_pending(&rlay->rl_evt, NULL)) {
+			evtimer_del(&rlay->rl_evt);
+			event_add(&rlay->rl_ev, NULL);
+		}
+	}
+
 	if (con->se_out.path != NULL)
 		free(con->se_out.path);
 	if (con->se_out.buf != NULL)
@@ -3139,6 +3189,7 @@ int
 relay_load_certfiles(struct relay *rlay)
 {
 	struct protocol *proto = rlay->rl_proto;
+	int	 useport = htons(rlay->rl_conf.port);
 	char	 certfile[PATH_MAX];
 	char	 hbuf[sizeof("ffff:ffff:ffff:ffff:ffff:ffff:255.255.255.255")];
 
@@ -3156,16 +3207,29 @@ relay_load_certfiles(struct relay *rlay)
 		return (-1);
 
 	if (snprintf(certfile, sizeof(certfile),
-	    "/etc/ssl/%s.crt", hbuf) == -1)
+	    "/etc/ssl/%s:%u.crt", hbuf, useport) == -1)
 		return (-1);
 	if ((rlay->rl_ssl_cert = relay_load_file(certfile,
-	    &rlay->rl_conf.ssl_cert_len)) == NULL)
-		return (-1);
+	    &rlay->rl_conf.ssl_cert_len)) == NULL) {
+		if (snprintf(certfile, sizeof(certfile),
+		    "/etc/ssl/%s.crt", hbuf) == -1)
+			return (-1);
+		if ((rlay->rl_ssl_cert = relay_load_file(certfile,
+		    &rlay->rl_conf.ssl_cert_len)) == NULL)
+			return (-1);
+		useport = 0;
+	}
 	log_debug("%s: using certificate %s", __func__, certfile);
 
-	if (snprintf(certfile, sizeof(certfile),
-	    "/etc/ssl/private/%s.key", hbuf) == -1)
-		return -1;
+	if (useport) {
+		if (snprintf(certfile, sizeof(certfile),
+		    "/etc/ssl/private/%s:%u.key", hbuf, useport) == -1)
+			return -1;
+	} else {
+		if (snprintf(certfile, sizeof(certfile),
+		    "/etc/ssl/private/%s.key", hbuf) == -1)
+			return -1;
+	}
 	if ((rlay->rl_ssl_key = relay_load_file(certfile,
 	    &rlay->rl_conf.ssl_key_len)) == NULL)
 		return (-1);

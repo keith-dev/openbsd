@@ -1,4 +1,4 @@
-.\" $OpenBSD: mio_open.3,v 1.6 2011/12/09 14:38:09 ratchov Exp $
+.\" $OpenBSD: mio_open.3,v 1.8 2012/05/23 19:25:11 ratchov Exp $
 .\"
 .\" Copyright (c) 2007 Alexandre Ratchov <alex@caoua.org>
 .\"
@@ -14,7 +14,7 @@
 .\" ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 .\" OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 .\"
-.Dd $Mdocdate: December 9 2011 $
+.Dd $Mdocdate: May 23 2012 $
 .Dt MIO_OPEN 3
 .Os
 .Sh NAME
@@ -30,7 +30,7 @@
 .Sh SYNOPSIS
 .Fd #include <sndio.h>
 .Ft "struct mio_hdl *"
-.Fn "mio_open" "const char *name" "unsigned mode" "int nbio_flag"
+.Fn "mio_open" "const char *name" "unsigned int mode" "int nbio_flag"
 .Ft "void"
 .Fn "mio_close" "struct mio_hdl *hdl"
 .Ft "size_t"
@@ -72,7 +72,7 @@ The
 parameter gives the device string discussed in
 .Xr sndio 7 .
 If the program is using a single device and is providing no device chooser,
-it should be set to NULL to allow the user to select it using the
+it should be set to MIO_PORTANY to allow the user to select it using the
 .Ev MIDIDEVICE
 environment variable.
 .Pp

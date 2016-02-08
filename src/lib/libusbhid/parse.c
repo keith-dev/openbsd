@@ -1,4 +1,4 @@
-/*	$OpenBSD: parse.c,v 1.5 2009/07/24 11:41:15 jsg Exp $	*/
+/*	$OpenBSD: parse.c,v 1.7 2012/07/16 19:57:17 jasper Exp $	*/
 /*	$NetBSD: parse.c,v 1.2 2001/12/29 20:44:22 augustss Exp $	*/
 
 /*
@@ -392,40 +392,63 @@ hid_get_item_raw(hid_data_t s, hid_item_t *h)
 				c->set_delimiter = dval;
 				break;
 			default:
-				return (-4);
+				break;
 			}
 			break;
 		default:
-			return (-5);
+			break;
 		}
 	}
+	return (0);
 }
 
 int
 hid_report_size(report_desc_t r, enum hid_kind k, int id)
 {
 	struct hid_data *d;
-	hid_item_t h;
-	int size;
+	struct hid_item h;
+	uint32_t temp;
+	uint32_t hpos;
+	uint32_t lpos;
+	int report_id = 0;
+
+	hpos = 0;
+	lpos = 0xffffffff;
 
 	memset(&h, 0, sizeof h);
-	size = 0;
 	for (d = hid_start_parse(r, 1<<k, id); hid_get_item(d, &h); ) {
-		if (h.report_ID == id && h.kind == k) {
-			size = d->kindpos[k];
+		if ((h.report_ID == id || id < 0) && h.kind == k) {
+			/* compute minimum */
+			if (lpos > h.pos)
+				lpos = h.pos;
+			/* compute end position */
+			temp = h.pos + (h.report_size * h.report_count);
+			/* compute maximum */
+			if (hpos < temp)
+				hpos = temp;
+			if (h.report_ID != 0)
+				report_id = 1;
 		}
 	}
 	hid_end_parse(d);
-	return ((size + 7) / 8);
+
+	/* safety check - can happen in case of currupt descriptors */
+	if (lpos > hpos)
+		temp = 0;
+	else
+		temp = hpos - lpos;
+
+	/* return length in bytes rounded up */
+	return ((temp + 7) / 8);
 }
 
 int
 hid_locate(report_desc_t desc, unsigned int u, enum hid_kind k,
     hid_item_t *h, int id)
 {
-	hid_data_t d;
+	struct hid_data *d;
 
-	for (d = hid_start_parse(desc, 1<<k, id); hid_get_item(d, h); ) {
+	for (d = hid_start_parse(desc, 1 << k, id); hid_get_item(d, h); ) {
 		if (h->kind == k && !(h->flags & HIO_CONST) && h->usage == u) {
 			hid_end_parse(d);
 			return (1);

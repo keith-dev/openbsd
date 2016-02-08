@@ -1,5 +1,5 @@
 # ex:ts=8 sw=4:
-# $OpenBSD: State.pm,v 1.21 2011/08/26 08:46:10 espie Exp $
+# $OpenBSD: State.pm,v 1.23 2012/05/01 10:18:13 espie Exp $
 #
 # Copyright (c) 2007-2010 Marc Espie <espie@openbsd.org>
 #
@@ -161,7 +161,8 @@ our @EXPORT = ();
 
 sub new
 {
-	my ($class, $cmd) = @_;
+	my $class = shift;
+	my $cmd = shift;
 	my $o = bless {cmd => $cmd}, $class;
 	$o->init(@_);
 	return $o;
@@ -237,6 +238,7 @@ sub _fatal
 	my $self = shift;
 	# implementation note: to print "fatal errors" elsewhere,
 	# the way is to eval { croak @_}; and decide what to do with $@.
+	delete $SIG{__DIE__};
 	croak "Fatal error: ", @_, "\n";
 }
 

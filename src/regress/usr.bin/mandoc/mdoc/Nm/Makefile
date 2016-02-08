@@ -1,7 +1,7 @@
-# $OpenBSD: Makefile,v 1.2 2011/11/17 16:28:45 schwarze Exp $
+# $OpenBSD: Makefile,v 1.5 2012/07/12 15:31:49 schwarze Exp $
 
-REGRESS_TARGETS=empty
+REGRESS_TARGETS = empty font emptyNAME emptyNAMEuse badNAME badNAMEuse
 
-SKIP_TMAN ?= empty
+SKIP_GROFF = emptyNAME emptyNAMEuse badNAME badNAMEuse
 
 .include <bsd.regress.mk>

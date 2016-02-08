@@ -1,4 +1,4 @@
-#	$OpenBSD: install.md,v 1.37 2011/07/06 18:32:58 miod Exp $
+#	$OpenBSD: install.md,v 1.39 2012/07/13 14:50:34 halex Exp $
 #	$NetBSD: install.md,v 1.3.2.5 1996/08/26 15:45:28 gwr Exp $
 #
 #
@@ -39,14 +39,14 @@ MDCDDEVS='/^cd[0-9] /s/ .*//p;/^ra[0-9] .* RRD40$/s/ .*//p'
 MDMTDEVS='/^[ms]t[0-9][0-9]* /s/ .*//p'
 
 md_installboot() {
-	cp /mnt/usr/mdec/boot /mnt/boot
+	# Use cat to avoid holes created by cp(1)
+	cat /mnt/usr/mdec/boot > /mnt/boot
 	/sbin/disklabel -B $1
 }
 
 md_prep_disklabel() {
 	local _disk=$1 _f _op
 
-	disklabel -W $_disk >/dev/null 2>&1
 	_f=/tmp/fstab.$_disk
 	if [[ $_disk == $ROOTDISK ]]; then
 		while :; do

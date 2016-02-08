@@ -1,4 +1,4 @@
-dnl	$OpenBSD: prep,v 1.20 2010/04/17 11:15:29 miod Exp $
+dnl	$OpenBSD: prep,v 1.24 2012/05/25 17:40:35 miod Exp $
 Before you install your system, you should identify your system family and
 familiarize yourself with the ARCBios setup and how to run programs from
 the Command monitor prompt.
@@ -8,11 +8,22 @@ Identifying your system:
     Due to significant design differences in SGI systems, OpenBSD
     needs to use different kernels, depending on the system family.
 
-    There are currently four system families supported by OpenBSD:
+    There are currently five system families supported by OpenBSD:
 
+    IP22 family:
+	Indigo (R4x00 flavour)
+	Indigo 2, Challenge M (R4x00 flavour)
+	Indy, Challenge S
+
+dnl    IP26 family:
+dnl	POWER Indigo 2 (R8000)
+dnl
     IP27 family:
 	Origin 200, Onyx 2
 	Origin 2000
+
+    IP28 family:
+	POWER Indigo 2 R10000
 
     IP30 family:
 	Octane, Octane 2
@@ -71,13 +82,7 @@ Switching from serial to graphics console and vice versa:
     support your frame buffer, it will fallback to serial console on the
     first serial port.
 
-    As of OpenBSD OSREV, supported graphics console devices are:
-    - the onboard frame buffer on IP32 systems (gbe)
-    - ImpactSR (Mardigras) frame buffer on IP30 (I-Series and E-Series)
-      (impact)
-    - VPro family frame buffers on IP27, IP30 and IP35 systems (odyssey)
-
-    And the following graphics devices are not supported yet:
+    As of OpenBSD OSREV, the only unsupported graphics console devices are:
     - Infinite Reality (Kona) frame buffer on IP27/IP35 Onyx systems
     - Voyager (Ultimate Vision) frame buffer on IP35 Onyx 4 systems
 
@@ -116,12 +121,13 @@ Setting the environment:
     When setting up the system to boot from disk, the ``OSLoader''
     environment variable will need to be changed.
 
-    Its default value is ``sash'' or ``sash64'', which is IRIX's standalone
-    shell and loader. Set it to ``boot'', the OpenBSD boot loader.
+    Its default value is ``sashARCS'', ``sash'' or ``sash64'', which is
+    IRIX's standalone shell and loader. Set it to ``boot'', the name under
+    which the OpenBSD boot loader has been installed.
 
     The kernel image loaded by default is specified in the ``OSLoadFilename''
-    variable, which defaults to ``/unix''.  To boot OpenBSD, set it to
-    ``/bsd''.
+    variable, which defaults to ``unix''.  To boot OpenBSD, set it to
+    ``bsd''.
 
     To enable automatic booting of OpenBSD once the machine has passed its
     diagnostic tests, change the value of ``AutoLoad'' to ``Yes''.

@@ -1,4 +1,4 @@
-/*	$OpenBSD: parse.y,v 1.22 2011/05/27 12:01:02 reyk Exp $	*/
+/*	$OpenBSD: parse.y,v 1.26 2012/06/30 14:51:31 naddy Exp $	*/
 /*	$vantronix: parse.y,v 1.22 2010/06/03 11:08:34 reyk Exp $	*/
 
 /*
@@ -108,6 +108,7 @@ struct ipsec_transforms {
 	const struct ipsec_xf *prfxf;
 	const struct ipsec_xf *encxf;
 	const struct ipsec_xf *groupxf;
+	const struct ipsec_xf *esnxf;
 };
 
 struct ipsec_mode {
@@ -151,7 +152,9 @@ const struct ipsec_xf ipsecencxfs[] = {
 	{ "aes-128",		IKEV2_XFORMENCR_AES_CBC,	16, 16 },
 	{ "aes-192",		IKEV2_XFORMENCR_AES_CBC,	24, 24 },
 	{ "aes-256",		IKEV2_XFORMENCR_AES_CBC,	32, 32 },
-	{ "aes-ctr",		IKEV2_XFORMENCR_AES_CTR,	16, 16, 4 },
+	{ "aes-128-ctr",	IKEV2_XFORMENCR_AES_CTR,	16, 16, 4 },
+	{ "aes-192-ctr",	IKEV2_XFORMENCR_AES_CTR,	24, 24, 4 },
+	{ "aes-256-ctr",	IKEV2_XFORMENCR_AES_CTR,	32, 32, 4 },
 	{ "aes-128-gcm",	IKEV2_XFORMENCR_AES_GCM_16,	16, 16, 4, 1 },
 	{ "aes-192-gcm",	IKEV2_XFORMENCR_AES_GCM_16,	24, 24, 4, 1 },
 	{ "aes-256-gcm",	IKEV2_XFORMENCR_AES_GCM_16,	32, 32, 4, 1 },
@@ -1551,7 +1554,7 @@ int
 parsekeyfile(char *filename, struct iked_auth *auth)
 {
 	struct stat	 sb;
-	int		 fd;
+	int		 fd, ret;
 	unsigned char	*hex;
 
 	if ((fd = open(filename, O_RDONLY)) < 0)
@@ -1566,7 +1569,9 @@ parsekeyfile(char *filename, struct iked_auth *auth)
 	if (read(fd, hex, sb.st_size) < sb.st_size)
 		err(1, "parsekeyfile: read");
 	close(fd);
-	return (parsekey(hex, sb.st_size, auth));
+	ret = parsekey(hex, sb.st_size, auth);
+	free(hex);
+	return (ret);
 }
 
 int
@@ -2291,7 +2296,7 @@ create_ike(char *name, int af, u_int8_t ipproto, struct ipsec_hosts *hosts,
 	struct iked_policy	 pol;
 	struct iked_proposal	 prop[2];
 	u_int			 j;
-	struct iked_transform	 ikexforms[64], espxforms[64];
+	struct iked_transform	 ikexforms[64], ipsecxforms[64];
 	struct iked_flow	 flows[64];
 	static u_int		 policy_id = 0;
 	struct iked_cfg		*cfg;
@@ -2462,26 +2467,26 @@ create_ike(char *name, int af, u_int8_t ipproto, struct ipsec_hosts *hosts,
 		    (ipsec_sa->xfs->encxf && !ipsec_sa->xfs->encxf->noauth))
 			copy_transforms(IKEV2_XFORMTYPE_INTEGR,
 			    ipsec_sa->xfs->authxf, authxfs,
-			    espxforms, nitems(espxforms), &j,
+			    ipsecxforms, nitems(ipsecxforms), &j,
 			    ikev2_default_esp_transforms,
 			    ikev2_default_nesp_transforms);
 		copy_transforms(IKEV2_XFORMTYPE_ENCR,
 		    ipsec_sa->xfs->encxf, ipsecencxfs,
-		    espxforms, nitems(espxforms), &j,
+		    ipsecxforms, nitems(ipsecxforms), &j,
 		    ikev2_default_esp_transforms,
 		    ikev2_default_nesp_transforms);
 		copy_transforms(IKEV2_XFORMTYPE_DH,
 		    ipsec_sa->xfs->groupxf, groupxfs,
-		    espxforms, nitems(espxforms), &j,
+		    ipsecxforms, nitems(ipsecxforms), &j,
 		    ikev2_default_esp_transforms,
 		    ikev2_default_nesp_transforms);
 		copy_transforms(IKEV2_XFORMTYPE_ESN,
 		    NULL, NULL,
-		    espxforms, nitems(espxforms), &j,
+		    ipsecxforms, nitems(ipsecxforms), &j,
 		    ikev2_default_esp_transforms,
 		    ikev2_default_nesp_transforms);
 		prop[1].prop_nxforms = j;
-		prop[1].prop_xforms = espxforms;
+		prop[1].prop_xforms = ipsecxforms;
 	}
 	TAILQ_INSERT_TAIL(&pol.pol_proposals, &prop[1], prop_entry);
 

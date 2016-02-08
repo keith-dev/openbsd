@@ -1,7 +1,7 @@
-/*	$Id: mdoc.c,v 1.86 2011/09/30 00:13:21 schwarze Exp $ */
+/*	$Id: mdoc.c,v 1.91 2012/07/18 11:09:30 schwarze Exp $ */
 /*
  * Copyright (c) 2008, 2009, 2010, 2011 Kristaps Dzonsons <kristaps@bsd.lv>
- * Copyright (c) 2010 Ingo Schwarze <schwarze@openbsd.org>
+ * Copyright (c) 2010, 2012 Ingo Schwarze <schwarze@openbsd.org>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -193,13 +193,14 @@ mdoc_free(struct mdoc *mdoc)
  * Allocate volatile and non-volatile parse resources.  
  */
 struct mdoc *
-mdoc_alloc(struct roff *roff, struct mparse *parse)
+mdoc_alloc(struct roff *roff, struct mparse *parse, char *defos)
 {
 	struct mdoc	*p;
 
 	p = mandoc_calloc(1, sizeof(struct mdoc));
 
 	p->parse = parse;
+	p->defos = defos;
 	p->roff = roff;
 
 	mdoc_hash_init();
@@ -297,7 +298,7 @@ mdoc_parseln(struct mdoc *m, int ln, char *buf, int offs)
 			m->flags &= ~MDOC_SYNOPSIS;
 	}
 
-	return(mandoc_getcontrol(buf, &offs) ?
+	return(roff_getcontrol(m->roff, buf, &offs) ?
 			mdoc_pmacro(m, ln, buf, offs) :
 			mdoc_ptext(m, ln, buf, offs));
 }
@@ -643,6 +644,14 @@ mdoc_node_delete(struct mdoc *m, struct mdoc_node *p)
 	mdoc_node_free(p);
 }
 
+int
+mdoc_node_relink(struct mdoc *m, struct mdoc_node *p)
+{
+
+	mdoc_node_unlink(m, p);
+	return(node_append(m, p));
+}
+
 #if 0
 /*
  * Pre-treat a text line.
@@ -796,7 +805,8 @@ mdoc_ptext(struct mdoc *m, int line, char *buf, int offs)
 			return(0);
 
 		m->next = MDOC_NEXT_SIBLING;
-		return(1);
+
+		return(mdoc_valid_post(m));
 	}
 
 	if ( ! mdoc_word_alloc(m, line, offs, buf+offs))
@@ -976,7 +986,7 @@ mdoc_isdelim(const char *p)
 
 	if (0 == strcmp(p + 1, "."))
 		return(DELIM_CLOSE);
-	if (0 == strcmp(p + 1, "*(Ba"))
+	if (0 == strcmp(p + 1, "fR|\\fP"))
 		return(DELIM_MIDDLE);
 
 	return(DELIM_NONE);

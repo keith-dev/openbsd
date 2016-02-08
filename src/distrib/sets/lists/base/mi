@@ -159,7 +159,6 @@
 ./sbin/ping
 ./sbin/ping6
 ./sbin/quotacheck
-./sbin/raidctl
 ./sbin/rdump
 ./sbin/reboot
 ./sbin/restore
@@ -316,6 +315,7 @@
 ./usr/bin/less
 ./usr/bin/lesskey
 ./usr/bin/libnetcfg
+./usr/bin/libtool
 ./usr/bin/lndir
 ./usr/bin/locate
 ./usr/bin/lock
@@ -433,6 +433,7 @@
 ./usr/bin/spell
 ./usr/bin/splain
 ./usr/bin/split
+./usr/bin/sqlite3
 ./usr/bin/ssh
 ./usr/bin/ssh-add
 ./usr/bin/ssh-agent
@@ -525,16 +526,17 @@
 ./usr/lib/apache/modules
 ./usr/lib/gcc-lib
 ./usr/lib/pkgconfig
+./usr/lib/pkgconfig/expat.pc
 ./usr/lib/pkgconfig/libcrypto.pc
 ./usr/lib/pkgconfig/libssl.pc
 ./usr/lib/pkgconfig/openssl.pc
+./usr/lib/pkgconfig/sqlite3.pc
 ./usr/lib/pkgconfig/zlib.pc
 ./usr/libdata
 ./usr/libdata/cvs
 ./usr/libdata/cvs/contrib
 ./usr/libdata/cvs/contrib/README
 ./usr/libdata/cvs/contrib/intro.doc
-./usr/libdata/lint
 ./usr/libdata/perl5
 ./usr/libdata/perl5/AnyDBM_File.pm
 ./usr/libdata/perl5/App
@@ -808,6 +810,24 @@
 ./usr/libdata/perl5/IPC/Cmd.pm
 ./usr/libdata/perl5/IPC/Open2.pm
 ./usr/libdata/perl5/IPC/Open3.pm
+./usr/libdata/perl5/LT
+./usr/libdata/perl5/LT/Archive.pm
+./usr/libdata/perl5/LT/Exec.pm
+./usr/libdata/perl5/LT/Getopt.pm
+./usr/libdata/perl5/LT/LaFile.pm
+./usr/libdata/perl5/LT/LaLoFile.pm
+./usr/libdata/perl5/LT/Library.pm
+./usr/libdata/perl5/LT/LoFile.pm
+./usr/libdata/perl5/LT/Mode
+./usr/libdata/perl5/LT/Mode/Compile.pm
+./usr/libdata/perl5/LT/Mode/Install.pm
+./usr/libdata/perl5/LT/Mode/Link
+./usr/libdata/perl5/LT/Mode/Link/Library.pm
+./usr/libdata/perl5/LT/Mode/Link/Program.pm
+./usr/libdata/perl5/LT/Mode/Link.pm
+./usr/libdata/perl5/LT/Program.pm
+./usr/libdata/perl5/LT/Trace.pm
+./usr/libdata/perl5/LT/Util.pm
 ./usr/libdata/perl5/Locale
 ./usr/libdata/perl5/Locale/Constants.pm
 ./usr/libdata/perl5/Locale/Constants.pod
@@ -2484,7 +2504,6 @@
 ./usr/libexec/ssh-pkcs11-helper
 ./usr/libexec/tcpd
 ./usr/libexec/tftp-proxy
-./usr/libexec/tftpd
 ./usr/libexec/uucpd
 ./usr/libexec/vi.recover
 ./usr/lkm
@@ -2605,6 +2624,7 @@
 ./usr/sbin/named-checkzone
 ./usr/sbin/ndp
 ./usr/sbin/netgroup_mkdb
+./usr/sbin/nginx
 ./usr/sbin/nsd
 ./usr/sbin/nsd-checkconf
 ./usr/sbin/nsd-notify
@@ -2621,7 +2641,6 @@
 ./usr/sbin/ospfctl
 ./usr/sbin/ospfd
 ./usr/sbin/pac
-./usr/sbin/pkg
 ./usr/sbin/pkg_add
 ./usr/sbin/pkg_check
 ./usr/sbin/pkg_create
@@ -2693,6 +2712,7 @@
 ./usr/sbin/tcpdmatch
 ./usr/sbin/tcpdrop
 ./usr/sbin/tcpdump
+./usr/sbin/tftpd
 ./usr/sbin/tokenadm
 ./usr/sbin/tokeninit
 ./usr/sbin/traceroute
@@ -3260,6 +3280,7 @@
 ./usr/share/snmp/mibs/OPENBSD-BASE-MIB.txt
 ./usr/share/snmp/mibs/OPENBSD-CARP-MIB.txt
 ./usr/share/snmp/mibs/OPENBSD-MEM-MIB.txt
+./usr/share/snmp/mibs/OPENBSD-PF-MIB.txt
 ./usr/share/snmp/mibs/OPENBSD-SENSORS-MIB.txt
 ./usr/share/snmp/mibs/OPENBSD-SNMPD-CONF.txt
 ./usr/share/tabset
@@ -3384,6 +3405,7 @@
 ./usr/share/zoneinfo/America/Coral_Harbour
 ./usr/share/zoneinfo/America/Cordoba
 ./usr/share/zoneinfo/America/Costa_Rica
+./usr/share/zoneinfo/America/Creston
 ./usr/share/zoneinfo/America/Cuiaba
 ./usr/share/zoneinfo/America/Curacao
 ./usr/share/zoneinfo/America/Danmarkshavn
@@ -3987,6 +4009,7 @@
 ./usr/share/zoneinfo/posix/America/Coral_Harbour
 ./usr/share/zoneinfo/posix/America/Cordoba
 ./usr/share/zoneinfo/posix/America/Costa_Rica
+./usr/share/zoneinfo/posix/America/Creston
 ./usr/share/zoneinfo/posix/America/Cuiaba
 ./usr/share/zoneinfo/posix/America/Curacao
 ./usr/share/zoneinfo/posix/America/Danmarkshavn
@@ -4591,6 +4614,7 @@
 ./usr/share/zoneinfo/right/America/Coral_Harbour
 ./usr/share/zoneinfo/right/America/Cordoba
 ./usr/share/zoneinfo/right/America/Costa_Rica
+./usr/share/zoneinfo/right/America/Creston
 ./usr/share/zoneinfo/right/America/Cuiaba
 ./usr/share/zoneinfo/right/America/Curacao
 ./usr/share/zoneinfo/right/America/Danmarkshavn
@@ -5154,6 +5178,7 @@
 ./var/www/bin/ping6
 ./var/www/bin/traceroute
 ./var/www/bin/traceroute6
+./var/www/cache
 ./var/www/cgi-bin
 ./var/www/cgi-bin/bgplg
 ./var/www/conf

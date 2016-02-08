@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.9 2012/01/18 03:13:04 yasuoka Exp $
+#	$OpenBSD: Makefile,v 1.12 2012/07/16 18:05:36 markus Exp $
 
 NPPPD_COMMON_DIR=	${.CURDIR}/../common
 
@@ -9,9 +9,9 @@ CPPFLAGS+=	-I${NPPPD_COMMON_DIR} -I${.CURDIR}
 SRCS=		ccp.c chap.c chap_ms.c fsm.c ipcp.c lcp.c
 SRCS+=		mppe.c pap.c ppp.c
 SRCS+=		npppd.c npppd_config.c npppd_subr.c npppd_auth.c npppd_iface.c
-SRCS+=		config_helper.c slist.c hash.c properties.c rtev_common.c
-SRCS+=		rtev_libevent.c bytebuf.c debugutil.c csvreader.c net_utils.c
-SRCS+=		radish.c time_utils.c npppd_pool.c addr_range.c
+SRCS+=		config_helper.c slist.c hash.c properties.c bytebuf.c
+SRCS+=		debugutil.c csvreader.c net_utils.c radish.c time_utils.c
+SRCS+=		npppd_pool.c addr_range.c
 SRCS+=		radius+.c radius_req.c npppd_radius.c
 SRCS+=		recvfromto.c
 SRCS+=		privsep.c
@@ -31,9 +31,11 @@ SRCS+=		pppoe_session.c pppoed.c
 .PATH:	${.CURDIR}/../pppoe
 
 CPPFLAGS+=	-D__COPYRIGHT\(x\)= -D__RCSID\(x\)=
+CPPFLAGS+=	-DNPPPD_MAX_IFACE=8
 CPPFLAGS+=	-DUSE_NPPPD_MPPE
 CPPFLAGS+=	-DUSE_NPPPD_PIPEX
 CPPFLAGS+=	-DUSE_NPPPD_RADIUS
+CPPFLAGS+=	-DUSE_SA_COOKIE
 
 CPPFLAGS+=	-DGENERIC_USE -DRADISH
 

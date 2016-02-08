@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.313 2012/02/09 04:39:32 david Exp $
+#	$OpenBSD: Makefile,v 1.319 2012/06/20 18:33:58 matthew Exp $
 
 TZDIR=		/usr/share/zoneinfo
 LOCALTIME=	Canada/Mountain
@@ -48,14 +48,14 @@ BIN1+=	wsconsctl.conf
 BIN2=	motd
 
 # -r-xr-xr-x
-RCDAEMONS=	amd apmd bgpd bootparamd btd cron dhcpd dhcrelay dvmrpd \
+RCDAEMONS=	amd apmd bgpd bootparamd cron dhcpd dhcrelay dvmrpd \
 		ftpd ftpproxy hostapd hotplugd httpd identd ifstated iked \
-		inetd isakmpd ldapd ldattach ldpd lpd mopd mrouted named nsd \
-		ntpd ospfd ospf6d portmap pflogd rarpd rbootd relayd ripd \
+		inetd isakmpd ldapd ldattach ldpd lpd mopd mrouted named nginx \
+		nsd ntpd ospfd ospf6d portmap pflogd rarpd rbootd relayd ripd \
 		route6d rtadvd rtsold rwhod sasyncd sendmail sensorsd smtpd \
 		snmpd spamd sshd syslogd watchdogd wsmoused xdm ypbind ypldap \
 		yppasswdd ypserv kdc kadmind kpasswdd nfsd mountd lockd statd \
-		spamlogd sndiod popa3d
+		spamlogd sndiod popa3d tftpd
 
 MISETS=	base${OSrev}.tgz comp${OSrev}.tgz \
 	man${OSrev}.tgz game${OSrev}.tgz etc${OSrev}.tgz
@@ -76,13 +76,13 @@ GZIPEXT=
 all clean cleandir depend etc install lint:
 
 install-mtree:
-	${INSTALL} -c -o root -g wheel -m 600 ${.CURDIR}/mtree/special \
+	${INSTALL} -c -o root -g wheel -m 600 mtree/special \
 	    ${DESTDIR}${MTREEDIR}
-	${INSTALL} -c -o root -g wheel -m 444 ${.CURDIR}/mtree/4.4BSD.dist \
+	${INSTALL} -c -o root -g wheel -m 444 mtree/4.4BSD.dist \
 	    ${DESTDIR}${MTREEDIR}
-	${INSTALL} -c -o root -g wheel -m 444 ${.CURDIR}/mtree/BSD.local.dist \
+	${INSTALL} -c -o root -g wheel -m 444 mtree/BSD.local.dist \
 	    ${DESTDIR}${MTREEDIR}
-	${INSTALL} -c -o root -g wheel -m 444 ${.CURDIR}/mtree/BSD.x11.dist \
+	${INSTALL} -c -o root -g wheel -m 444 mtree/BSD.x11.dist \
 	    ${DESTDIR}${MTREEDIR}
 
 .ifndef DESTDIR
@@ -104,7 +104,7 @@ distribution-etc-root-var: distrib-dirs
 	    chown ${BINOWN} ${DESTDIR}/etc/fbtab && \
 	    chgrp ${BINGRP} ${DESTDIR}/etc/fbtab && \
 	    chmod 644 ${DESTDIR}/etc/fbtab
-	awk -f ${.CURDIR}/mklogin.conf `test -f etc.${MACHINE}/login.conf.overrides && echo etc.${MACHINE}/login.conf.overrides` < ${.CURDIR}/login.conf.in > \
+	awk -f mklogin.conf `test -f etc.${MACHINE}/login.conf.overrides && echo etc.${MACHINE}/login.conf.overrides` < login.conf.in > \
 	    ${DESTDIR}/etc/login.conf && \
 	    chown ${BINOWN}:${BINGRP} ${DESTDIR}/etc/login.conf && \
 	    chmod 644 ${DESTDIR}/etc/login.conf
@@ -270,6 +270,7 @@ distribution-etc-root-var: distrib-dirs
 	cd ../usr.bin/bgplg && exec ${MAKE} distribution
 	cd ../usr.bin/mail && exec ${MAKE} distribution
 	cd ../usr.sbin/ldapd && exec ${MAKE} distribution
+	cd ../usr.sbin/nginx && exec ${MAKE} -f Makefile.bsd-wrapper distribution
 	cd mail && exec ${MAKE} distribution
 	${INSTALL} -c -o root -g wheel -m 600 root/root.mail \
 	    ${DESTDIR}/var/mail/root
@@ -308,20 +309,23 @@ release:
 .else
 
 release-sets:
-	cd ${.CURDIR}/../distrib/sets && exec ${SUDO} sh maketars ${OSrev}
+	cd ../distrib/sets && exec ${SUDO} sh maketars ${OSrev}
 
 sha:
 	-cd ${RELEASEDIR}; \
 	    sum -a sha256 INSTALL.`arch -ks` ${ALL_KERNELS} ${MDEXT} ${MISETS} > SHA256
 
-release: distribution kernels release-sets distrib sha
+release: sha
+sha: distrib
+distrib: release-sets kernels
+release-sets: distribution
 
 .endif
 
 .endif	# DESTDIR check
 
 distrib:
-	cd ${.CURDIR}/../distrib && \
+	cd ../distrib && \
 	    ${MAKE} && exec ${SUDO} ${MAKE} install
 
 DHSIZE=1024 1536 2048 3072 4096
@@ -342,7 +346,7 @@ update-moduli:
 
 SUBDIR+= etc.alpha etc.amd64 etc.armish etc.aviion etc.hp300 etc.hppa
 SUBDIR+= etc.hppa64 etc.i386 etc.landisk etc.loongson etc.luna88k 
-SUBDIR+= etc.mac68k etc.macppc etc.mvme68k etc.mvme88k etc.palm 
+SUBDIR+= etc.macppc etc.mvme68k etc.mvme88k etc.palm 
 SUBDIR+= etc.sgi etc.socppc etc.sparc etc.sparc64 etc.vax etc.zaurus
 
 .include <bsd.subdir.mk>

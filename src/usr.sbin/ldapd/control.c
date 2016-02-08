@@ -1,4 +1,4 @@
-/*	$OpenBSD: control.c,v 1.6 2010/09/01 17:34:15 martinh Exp $	*/
+/*	$OpenBSD: control.c,v 1.8 2012/06/16 00:08:32 jmatthew Exp $	*/
 
 /*
  * Copyright (c) 2010 Martin Hedenfalk <martin@bzero.se>
@@ -42,8 +42,9 @@
 struct ctl_connlist ctl_conns;
 
 struct ctl_conn	*control_connbyfd(int);
-void		 control_close(int);
+void		 control_close(int, struct control_sock *);
 static void	 control_imsgev(struct imsgev *iev, int code, struct imsg *imsg);
+static void	 control_needfd(struct imsgev *iev);
 
 void
 control_init(struct control_sock *cs)
@@ -102,9 +103,10 @@ control_listen(struct control_sock *cs)
 	if (listen(cs->cs_fd, CONTROL_BACKLOG) == -1)
 		fatal("control_listen: listen");
 
-	event_set(&cs->cs_ev, cs->cs_fd, EV_READ | EV_PERSIST,
+	event_set(&cs->cs_ev, cs->cs_fd, EV_READ,
 	    control_accept, cs);
 	event_add(&cs->cs_ev, NULL);
+	evtimer_set(&cs->cs_evt, control_accept, cs);
 }
 
 void
@@ -112,6 +114,8 @@ control_cleanup(struct control_sock *cs)
 {
 	if (cs->cs_name == NULL)
 		return;
+	event_del(&cs->cs_ev);
+	event_del(&cs->cs_evt);
 	(void)unlink(cs->cs_name);
 }
 
@@ -125,10 +129,23 @@ control_accept(int listenfd, short event, void *arg)
 	struct sockaddr_un	 sun;
 	struct ctl_conn		*c;
 
+	event_add(&cs->cs_ev, NULL);
+	if ((event & EV_TIMEOUT))
+		return;
+
 	len = sizeof(sun);
-	if ((connfd = accept(listenfd,
-	    (struct sockaddr *)&sun, &len)) == -1) {
-		if (errno != EWOULDBLOCK && errno != EINTR)
+	if ((connfd = accept_reserve(listenfd,
+	    (struct sockaddr *)&sun, &len, FD_RESERVE)) == -1) {
+		/*
+		 * Pause accept if we are out of file descriptors, or
+		 * libevent will haunt us here too.
+		 */
+		if (errno == ENFILE || errno == EMFILE) {
+			struct timeval evtpause = { 1, 0 };
+
+			event_del(&cs->cs_ev);
+			evtimer_add(&cs->cs_evt, &evtpause);
+		} else if (errno != EWOULDBLOCK && errno != EINTR)
 			log_warn("control_accept");
 		return;
 	}
@@ -143,7 +160,7 @@ control_accept(int listenfd, short event, void *arg)
 
 	log_debug("accepted control fd %i", connfd);
 	TAILQ_INSERT_TAIL(&ctl_conns, c, entry);
-	imsgev_init(&c->iev, connfd, cs, control_imsgev);
+	imsgev_init(&c->iev, connfd, cs, control_imsgev, control_needfd);
 }
 
 struct ctl_conn *
@@ -159,7 +176,7 @@ control_connbyfd(int fd)
 }
 
 void
-control_close(int fd)
+control_close(int fd, struct control_sock *cs)
 {
 	struct ctl_conn	*c;
 
@@ -171,6 +188,13 @@ control_close(int fd)
 	log_debug("close control fd %i", c->iev.ibuf.fd);
 	TAILQ_REMOVE(&ctl_conns, c, entry);
 	imsgev_clear(&c->iev);
+
+	/* Some file descriptors are available again. */
+	if (evtimer_pending(&cs->cs_evt, NULL)) {
+		evtimer_del(&cs->cs_evt);
+		event_add(&cs->cs_ev, NULL);
+	}
+
 	free(c);
 }
 
@@ -220,7 +244,7 @@ control_imsgev(struct imsgev *iev, int code, struct imsg *imsg)
 	}
 
 	if (code != IMSGEV_IMSG) {
-		control_close(fd);
+		control_close(fd, cs);
 		return;
 	}
 
@@ -229,7 +253,7 @@ control_imsgev(struct imsgev *iev, int code, struct imsg *imsg)
 	case IMSG_CTL_STATS:
 		if (send_stats(iev) == -1) {
 			log_debug("%s: failed to send statistics", __func__);
-			control_close(fd);
+			control_close(fd, cs);
 		}
 		break;
 	case IMSG_CTL_LOG_VERBOSE:
@@ -248,3 +272,23 @@ control_imsgev(struct imsgev *iev, int code, struct imsg *imsg)
 	}
 }
 
+void
+control_needfd(struct imsgev *iev)
+{
+	fatal("should never need an fd for control messages");
+}
+
+int
+control_close_any(struct control_sock *cs)
+{
+	struct ctl_conn		*c;
+
+	c = TAILQ_FIRST(&ctl_conns);
+	if (c != NULL) {
+		log_warn("closing oldest control connection");
+		control_close(c->iev.ibuf.fd, cs);
+		return (0);
+	}
+	log_warn("no control connections to close");
+	return (-1);
+}

@@ -1,4 +1,4 @@
-/*	$OpenBSD: mio.c,v 1.13 2011/11/15 08:05:22 ratchov Exp $	*/
+/*	$OpenBSD: mio.c,v 1.15 2012/05/23 19:25:11 ratchov Exp $	*/
 /*
  * Copyright (c) 2008 Alexandre Ratchov <alex@caoua.org>
  *
@@ -32,8 +32,9 @@
 #include "mio_priv.h"
 
 struct mio_hdl *
-mio_open(const char *str, unsigned mode, int nbio)
+mio_open(const char *str, unsigned int mode, int nbio)
 {
+	static char portany[] = MIO_PORTANY;
 	struct mio_hdl *hdl;
 	const char *p;
 
@@ -42,9 +43,14 @@ mio_open(const char *str, unsigned mode, int nbio)
 #endif
 	if ((mode & (MIO_OUT | MIO_IN)) == 0)
 		return NULL;
-	if (str == NULL && !issetugid())
+	if (str == NULL) /* backward compat */
+		str = portany;
+	if (strcmp(str, portany) == 0 && !issetugid()) {
 		str = getenv("MIDIDEVICE");
-	if (str == NULL) {
+		if (str == NULL)
+			str = portany;
+	}
+	if (strcmp(str, portany) == 0) {
 		hdl = mio_aucat_open("/0", mode, nbio, 1);
 		if (hdl != NULL)
 			return hdl;
@@ -62,7 +68,8 @@ mio_open(const char *str, unsigned mode, int nbio)
 }
 
 void
-mio_create(struct mio_hdl *hdl, struct mio_ops *ops, unsigned mode, int nbio)
+mio_create(struct mio_hdl *hdl, struct mio_ops *ops,
+    unsigned int mode, int nbio)
 {
 	hdl->ops = ops;
 	hdl->mode = mode;

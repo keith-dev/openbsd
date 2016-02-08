@@ -1,4 +1,4 @@
-/*	$OpenBSD: rthread_mutexattr.c,v 1.1 2011/12/21 00:49:47 guenther Exp $ */
+/*	$OpenBSD: rthread_mutexattr.c,v 1.3 2012/04/13 13:50:37 kurt Exp $ */
 /*
  * Copyright (c) 2004,2005 Ted Unangst <tedu@openbsd.org>
  * Copyright (c) 2011 Philip Guenther <guenther@openbsd.org>
@@ -26,6 +26,7 @@
 #include <errno.h>
 
 #include <pthread.h>
+#include <pthread_np.h>
 
 #include "rthread.h"
 
@@ -37,7 +38,7 @@ pthread_mutexattr_init(pthread_mutexattr_t *attrp)
 	attr = calloc(1, sizeof(*attr));
 	if (!attr)
 		return (errno);
-	attr->ma_type = PTHREAD_MUTEX_ERRORCHECK;
+	attr->ma_type = PTHREAD_MUTEX_DEFAULT;
 	*attrp = attr;
 
 	return (0);
@@ -101,3 +102,31 @@ pthread_mutexattr_getprioceiling(pthread_mutexattr_t *attrp, int *prioceiling)
 	return (0);
 }
 
+int
+pthread_mutexattr_getkind_np(pthread_mutexattr_t attrp)
+{
+	int	ret;
+
+	if (attrp == NULL)
+		ret = EINVAL;
+	else
+		ret = attrp->ma_type;
+
+        return(ret);
+}
+
+int
+pthread_mutexattr_setkind_np(pthread_mutexattr_t *attrp, int kind)
+{
+	int	ret;
+
+	if (attrp == NULL || *attrp == NULL ||
+	    kind < PTHREAD_MUTEX_ERRORCHECK || kind >= PTHREAD_MUTEX_TYPE_MAX)
+		ret = EINVAL;
+	else {
+		(*attrp)->ma_type = kind;
+		ret = 0;
+	}
+
+	return (ret);
+}

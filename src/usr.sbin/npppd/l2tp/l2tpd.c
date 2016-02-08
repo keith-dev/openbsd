@@ -1,4 +1,4 @@
-/* $OpenBSD: l2tpd.c,v 1.7 2012/01/18 02:53:56 yasuoka Exp $ */
+/*	$OpenBSD: l2tpd.c,v 1.10 2012/07/16 18:05:36 markus Exp $ */
 
 /*-
  * Copyright (c) 2009 Internet Initiative Japan Inc.
@@ -26,7 +26,7 @@
  * SUCH DAMAGE.
  */
 /**@file L2TP(Layer Two Tunneling Protocol "L2TP") / RFC2661 */
-/* $Id: l2tpd.c,v 1.7 2012/01/18 02:53:56 yasuoka Exp $ */
+/* $Id: l2tpd.c,v 1.10 2012/07/16 18:05:36 markus Exp $ */
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/time.h>
@@ -81,11 +81,6 @@ static inline uint32_t  short_hash (const void *, int);
 
 /* sequence # of l2tpd ID */
 static u_int l2tpd_id_seq = 0;
-
-#ifndef USE_LIBSOCKUTIL
-struct in_ipsec_sa_cookie	{	};
-#endif
-
 
 /* L2TP daemon instance */
 
@@ -298,15 +293,6 @@ l2tpd_listener_start(l2tpd_listener *_this, char *ipsec_policy_in,
 	int sock, ival;
 	l2tpd *_l2tpd;
 	char hbuf[NI_MAXHOST + NI_MAXSERV + 16];
-#ifdef NPPPD_FAKEBIND
-	int wildcardbinding = 0;
-	extern void set_faith(int, int);
-
-	/* XXX IPv6? */
-	wildcardbinding =
-	    (_this->bind.sin4.sin_family == AF_INET4 && 
-		    _this->bind.sin4.sin_addr.s_addr == INADDR_ANY)? 1 : 0;
-#endif
 	sock = -1;
 	_l2tpd = _this->self;
 
@@ -319,10 +305,6 @@ l2tpd_listener_start(l2tpd_listener *_this, char *ipsec_policy_in,
 		    "socket() failed in %s(): %m", __func__);
 		goto fail;
 	}
-#ifdef NPPPD_FAKEBIND
-	if (!wildcardbinding)
-		set_faith(sock, 1);
-#endif
 #if defined(IP_STRICT_RCVIF) && defined(USE_STRICT_RCVIF)
 	ival = 1;
 	if (setsockopt(sock, IPPROTO_IP, IP_STRICT_RCVIF, &ival, sizeof(ival))
@@ -353,20 +335,6 @@ l2tpd_listener_start(l2tpd_listener *_this, char *ipsec_policy_in,
 		    _this->bind.sin6.sin6_len, hbuf, sizeof(hbuf)));
 		goto fail;
 	}
-#ifdef NPPPD_FAKEBIND
-	if (!wildcardbinding)
-		set_faith(sock, 0);
-#endif
-#ifdef UDP_NO_CKSUM
-	ival = 1;
-	if (setsockopt(sock, IPPROTO_UDP, UDP_NO_CKSUM, &ival, sizeof(ival))
-	    != 0) {
-		l2tpd_log(_l2tpd, LOG_ERR,
-		    "setsockopt(,,UDP_NO_CKSUM) failed in %s(): %m",
-		    __func__);
-		goto fail;
-	}
-#endif
 #ifdef USE_LIBSOCKUTIL
 	if (setsockoptfromto(sock) != 0) {
 		l2tpd_log(_l2tpd, LOG_ERR,
@@ -383,6 +351,16 @@ l2tpd_listener_start(l2tpd_listener *_this, char *ipsec_policy_in,
 			    __func__);
 			goto fail;
 		}
+#ifdef USE_SA_COOKIE
+		ival = 1;
+		if (setsockopt(sock, IPPROTO_IP, IP_IPSECFLOWINFO, &ival,
+		    sizeof(ival)) != 0) {
+			l2tpd_log(_l2tpd, LOG_ERR,
+			    "setsockopt(,,IP_IPSECFLOWINFO) failed in %s(): %m",
+			    __func__);
+			goto fail;
+		}
+#endif
 	} else {
 		ival = 1;
                 if (setsockopt(sock, IPPROTO_IPV6, IPV6_RECVPKTINFO, &ival,
@@ -394,39 +372,60 @@ l2tpd_listener_start(l2tpd_listener *_this, char *ipsec_policy_in,
 		}
 	}
 #endif
-#ifdef IP_PIPEX
 	if (_this->bind.sin6.sin6_family == AF_INET) {
+#ifdef IP_PIPEX
 		ival = 1;
 		if (setsockopt(sock, IPPROTO_IP, IP_PIPEX, &ival,
 		    sizeof(ival)) != 0)
 			l2tpd_log(_l2tpd, LOG_WARNING,
 			    "%s(): setsockopt(IP_PIPEX) failed: %m", __func__);
+#endif
+#ifdef IP_IPSEC_POLICY
+		if (ipsec_policy_in != NULL &&
+		    setsockopt(sock, IPPROTO_IP, IP_IPSEC_POLICY,
+		    ipsec_policy_in, ipsec_get_policylen(ipsec_policy_in))
+		    < 0) {
+			l2tpd_log(_l2tpd, LOG_WARNING,
+			    "setsockopt(,,IP_IPSEC_POLICY(in)) failed "
+			    "in %s(): %m", __func__);
+		}
+		if (ipsec_policy_out != NULL &&
+		    setsockopt(sock, IPPROTO_IP, IP_IPSEC_POLICY,
+		    ipsec_policy_out, ipsec_get_policylen(ipsec_policy_out))
+		    < 0) {
+			l2tpd_log(_l2tpd, LOG_WARNING,
+			    "setsockopt(,,IP_IPSEC_POLICY(out)) failed "
+			    "in %s(): %m", __func__);
+		}
+#endif
 	} else {
+#ifdef IPV6_PIPEX
 		ival = 1;
 		if (setsockopt(sock, IPPROTO_IPV6, IPV6_PIPEX, &ival,
 		    sizeof(ival)) != 0)
 			l2tpd_log(_l2tpd, LOG_WARNING,
 			    "%s(): setsockopt(IPV6_PIPEX) failed: %m",
 			    __func__);
-	}
 #endif
-#ifdef IP_IPSEC_POLICY
-/*XXX */
-	if (ipsec_policy_in != NULL &&
-	    setsockopt(sock, IPPROTO_IP, IP_IPSEC_POLICY,
-	    ipsec_policy_in, ipsec_get_policylen(ipsec_policy_in)) < 0) {
-		l2tpd_log(_l2tpd, LOG_WARNING,
-		    "setsockopt(,,IP_IPSEC_POLICY(in)) failed in %s(): %m",
-		    __func__);
-	}
-	if (ipsec_policy_out != NULL &&
-	    setsockopt(sock, IPPROTO_IP, IP_IPSEC_POLICY,
-	    ipsec_policy_out, ipsec_get_policylen(ipsec_policy_out)) < 0) {
-		l2tpd_log(_l2tpd, LOG_WARNING,
-		    "setsockopt(,,IP_IPSEC_POLICY(out)) failed in %s(): %m",
-		    __func__);
-	}
+#ifdef IPV6_IPSEC_POLICY
+		if (ipsec_policy_in != NULL &&
+		    setsockopt(sock, IPPROTO_IPV6, IPV6_IPSEC_POLICY,
+		    ipsec_policy_in, ipsec_get_policylen(ipsec_policy_in))
+		    < 0) {
+			l2tpd_log(_l2tpd, LOG_WARNING,
+			    "setsockopt(,,IPV6_IPSEC_POLICY(in)) failed "
+			    "in %s(): %m", __func__);
+		}
+		if (ipsec_policy_out != NULL &&
+		    setsockopt(sock, IPPROTO_IPV6, IPV6_IPSEC_POLICY,
+		    ipsec_policy_out, ipsec_get_policylen(ipsec_policy_out))
+		    < 0) {
+			l2tpd_log(_l2tpd, LOG_WARNING,
+			    "setsockopt(,,IPV6_IPSEC_POLICY(out)) failed "
+			    "in %s(): %m", __func__);
+		}
 #endif
+	}
 	_this->sock = sock;
 
 	event_set(&_this->ev_sock, _this->sock, EV_READ | EV_PERSIST,
@@ -762,16 +761,11 @@ l2tpd_reload(l2tpd *_this, struct properties *config, const char *name,
 void
 l2tpd_log_access_deny(l2tpd *_this, const char *reason, struct sockaddr *peer)
 {
-	char hostbuf[NI_MAXHOST], servbuf[NI_MAXSERV];
+	char buf[BUFSIZ];
 
-	if (getnameinfo(peer, peer->sa_len, hostbuf, sizeof(hostbuf),
-	    servbuf, sizeof(servbuf), NI_NUMERICHOST | NI_NUMERICSERV) != 0) {
-		l2tpd_log(_this, LOG_ERR, "getnameinfo() failed at %s(): %m",
-		    __func__);
-		return;
-	}
-	l2tpd_log(_this, LOG_ALERT, "Received packet from %s:%s/udp: "
-	    "%s", hostbuf, servbuf, reason);
+	l2tpd_log(_this, LOG_ALERT, "Received packet from %s/udp: "
+	    "%s", addrport_tostring(peer, peer->sa_len, buf, sizeof(buf)),
+	    reason);
 }
 
 /* I/O event handler */
@@ -792,7 +786,7 @@ l2tpd_io_event(int fd, short evtype, void *ctx)
 		peerlen = sizeof(peer);
 		socklen = sizeof(sock);
 		while (!l2tpd_is_stopped(_l2tpd)) {
-#ifdef USE_LIBSOCKUTIL
+#if defined(USE_LIBSOCKUTIL) || defined(USE_SA_COOKIE)
 			int sa_cookie_len;
 			struct in_ipsec_sa_cookie sa_cookie;
 
@@ -819,7 +813,7 @@ l2tpd_io_event(int fd, short evtype, void *ctx)
 			/* source address check (allows.in) */
 			switch (peer.ss_family) {
 			case AF_INET:
-#ifdef USE_LIBSOCKUTIL
+#if defined(USE_LIBSOCKUTIL) || defined(USE_SA_COOKIE)
 				if (sa_cookie_len > 0)
 					nat_t = &sa_cookie;
 				else
@@ -898,7 +892,7 @@ l2tpd_log(l2tpd *_this, int prio, const char *fmt, ...)
 	va_list ap;
 
 	va_start(ap, fmt);
-#ifdef	L2TPD_MULITPLE
+#ifdef	L2TPD_MULTIPLE
 	snprintf(logbuf, sizeof(logbuf), "l2tpd id=%u %s", _this->id, fmt);
 #else
 	snprintf(logbuf, sizeof(logbuf), "l2tpd %s", fmt);

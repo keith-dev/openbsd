@@ -1,4 +1,4 @@
-/*	$OpenBSD: smtpd.c,v 1.150 2012/01/28 16:52:24 gilles Exp $	*/
+/*	$OpenBSD: smtpd.c,v 1.155 2012/07/09 17:57:54 gilles Exp $	*/
 
 /*
  * Copyright (c) 2008 Gilles Chehade <gilles@openbsd.org>
@@ -90,6 +90,9 @@ extern char	**environ;
 void		(*imsg_callback)(struct imsgev *, struct imsg *);
 
 struct smtpd	*env = NULL;
+
+const char	*backend_queue = "fs";
+const char	*backend_scheduler = "ramqueue";
 
 static void
 parent_imsg(struct imsgev *iev, struct imsg *imsg)
@@ -415,7 +418,7 @@ main(int argc, char *argv[])
 {
 	int		 c;
 	int		 debug, verbose;
-	int		 opts;
+	int		 opts, flags;
 	const char	*conffile = CONF_FILE;
 	struct smtpd	 smtpd;
 	struct event	 ev_sigint;
@@ -435,6 +438,7 @@ main(int argc, char *argv[])
 
 	env = &smtpd;
 
+	flags = 0;
 	opts = 0;
 	debug = 0;
 	verbose = 0;
@@ -443,8 +447,16 @@ main(int argc, char *argv[])
 
 	TAILQ_INIT(&offline_q);
 
-	while ((c = getopt(argc, argv, "dD:nf:T:v")) != -1) {
+	while ((c = getopt(argc, argv, "B:dD:nP:f:T:v")) != -1) {
 		switch (c) {
+		case 'B':
+			if (strstr(optarg, "queue=") == optarg)
+				backend_queue = strchr(optarg, '=') + 1;
+			else if (strstr(optarg, "scheduler=") == optarg)
+				backend_scheduler = strchr(optarg, '=') + 1;
+			else
+				log_warnx("invalid backend specifier %s", optarg);
+			break;
 		case 'd':
 			debug = 2;
 			verbose |= TRACE_VERBOSE;
@@ -472,10 +484,20 @@ main(int argc, char *argv[])
 				verbose |= TRACE_MTA;
 			else if (!strcmp(optarg, "bounce"))
 				verbose |= TRACE_BOUNCE;
+			else if (!strcmp(optarg, "scheduler"))
+				verbose |= TRACE_SCHEDULER;
 			else if (!strcmp(optarg, "all"))
 				verbose |= ~TRACE_VERBOSE;
 			else
 				log_warnx("unknown trace flag \"%s\"", optarg);
+			break;
+		case 'P':
+			if (!strcmp(optarg, "smtp"))
+				flags |= SMTPD_SMTP_PAUSED;
+			else if (!strcmp(optarg, "mta"))
+				flags |= SMTPD_MTA_PAUSED;
+			else if (!strcmp(optarg, "mda"))
+				flags |= SMTPD_MDA_PAUSED;
 			break;
 		case 'v':
 			verbose |=  TRACE_VERBOSE;
@@ -503,6 +525,8 @@ main(int argc, char *argv[])
 		exit(0);
 	}
 
+	env->sc_flags |= flags;
+
 	/* check for root privileges */
 	if (geteuid())
 		errx(1, "need root privileges");
@@ -517,9 +541,17 @@ main(int argc, char *argv[])
 	if (ckdir(PATH_SPOOL PATH_PURGE, 0700, env->sc_pw->pw_uid, 0, 1) == 0)
 		errx(1, "error in purge directory setup");
 
-	env->sc_queue = queue_backend_lookup(QT_FS);
+	mvpurge(PATH_SPOOL PATH_INCOMING, PATH_SPOOL PATH_PURGE);
+
+	if (ckdir(PATH_SPOOL PATH_INCOMING, 0700, env->sc_pw->pw_uid, 0, 1) == 0)
+		errx(1, "error in incoming directory setup");
+
+	log_debug("using \"%s\" queue backend", backend_queue);
+	log_debug("using \"%s\" scheduler backend", backend_scheduler);
+
+	env->sc_queue = queue_backend_lookup(backend_queue);
 	if (env->sc_queue == NULL)
-		errx(1, "could not find queue backend");
+		errx(1, "could not find queue backend \"%s\"", backend_queue);
 
 	if (!env->sc_queue->init(1))
 		errx(1, "could not initialize queue backend");
@@ -612,7 +644,7 @@ fork_peers(void)
 	env->sc_instances[PROC_MTA] = 1;
 	env->sc_instances[PROC_PARENT] = 1;
 	env->sc_instances[PROC_QUEUE] = 1;
-	env->sc_instances[PROC_RUNNER] = 1;
+	env->sc_instances[PROC_SCHEDULER] = 1;
 	env->sc_instances[PROC_SMTP] = 1;
 
 	init_pipes();
@@ -623,7 +655,7 @@ fork_peers(void)
 	env->sc_title[PROC_MFA] = "mail filter agent";
 	env->sc_title[PROC_MTA] = "mail transfer agent";
 	env->sc_title[PROC_QUEUE] = "queue";
-	env->sc_title[PROC_RUNNER] = "runner";
+	env->sc_title[PROC_SCHEDULER] = "scheduler";
 	env->sc_title[PROC_SMTP] = "smtp server";
 
 	child_add(control(), CHILD_DAEMON, PROC_CONTROL);
@@ -632,7 +664,7 @@ fork_peers(void)
 	child_add(mfa(), CHILD_DAEMON, PROC_MFA);
 	child_add(mta(), CHILD_DAEMON, PROC_MTA);
 	child_add(queue(), CHILD_DAEMON, PROC_QUEUE);
-	child_add(runner(), CHILD_DAEMON, PROC_RUNNER);
+	child_add(scheduler(), CHILD_DAEMON, PROC_SCHEDULER);
 	child_add(smtp(), CHILD_DAEMON, PROC_SMTP);
 
 	setproctitle("[priv]");
@@ -1148,7 +1180,7 @@ proc_to_str(int proc)
 	CASE(PROC_MDA);
 	CASE(PROC_MTA);
 	CASE(PROC_CONTROL);
-	CASE(PROC_RUNNER);
+	CASE(PROC_SCHEDULER);
 	default:
 		return "PROC_???";
 	}
@@ -1211,8 +1243,8 @@ imsg_to_str(int type)
 	CASE(IMSG_QUEUE_SCHEDULE);
 	CASE(IMSG_QUEUE_REMOVE);
 
-	CASE(IMSG_RUNNER_REMOVE);
-	CASE(IMSG_RUNNER_SCHEDULE);
+	CASE(IMSG_SCHEDULER_REMOVE);
+	CASE(IMSG_SCHEDULER_SCHEDULE);
 
 	CASE(IMSG_BATCH_CREATE);
 	CASE(IMSG_BATCH_APPEND);

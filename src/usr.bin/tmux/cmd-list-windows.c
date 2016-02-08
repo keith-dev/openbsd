@@ -1,4 +1,4 @@
-/* $OpenBSD: cmd-list-windows.c,v 1.18 2012/01/30 20:39:56 nicm Exp $ */
+/* $OpenBSD: cmd-list-windows.c,v 1.23 2012/07/11 07:10:15 nicm Exp $ */
 
 /*
  * Copyright (c) 2007 Nicholas Marriott <nicm@users.sourceforge.net>
@@ -18,6 +18,7 @@
 
 #include <sys/types.h>
 
+#include <stdlib.h>
 #include <unistd.h>
 
 #include "tmux.h"
@@ -26,7 +27,7 @@
  * List windows on given session.
  */
 
-int	cmd_list_windows_exec(struct cmd *, struct cmd_ctx *);
+enum cmd_retval	 cmd_list_windows_exec(struct cmd *, struct cmd_ctx *);
 
 void	cmd_list_windows_server(struct cmd *, struct cmd_ctx *);
 void	cmd_list_windows_session(
@@ -34,7 +35,7 @@ void	cmd_list_windows_session(
 
 const struct cmd_entry cmd_list_windows_entry = {
 	"list-windows", "lsw",
-	"aF:t:", 0, 0,
+	"F:at:", 0, 0,
 	"[-a] [-F format] " CMD_TARGET_SESSION_USAGE,
 	0,
 	NULL,
@@ -42,7 +43,7 @@ const struct cmd_entry cmd_list_windows_entry = {
 	cmd_list_windows_exec
 };
 
-int
+enum cmd_retval
 cmd_list_windows_exec(struct cmd *self, struct cmd_ctx *ctx)
 {
 	struct args	*args = self->args;
@@ -53,11 +54,11 @@ cmd_list_windows_exec(struct cmd *self, struct cmd_ctx *ctx)
 	else {
 		s = cmd_find_session(ctx, args_get(args, 't'), 0);
 		if (s == NULL)
-			return (-1);
+			return (CMD_RETURN_ERROR);
 		cmd_list_windows_session(self, s, ctx, 0);
 	}
 
-	return (0);
+	return (CMD_RETURN_NORMAL);
 }
 
 void
@@ -84,18 +85,12 @@ cmd_list_windows_session(
 	if (template == NULL) {
 		switch (type) {
 		case 0:
-			template = "#{window_index}: "
-			    "#{window_name} "
-			    "[#{window_width}x#{window_height}] "
-			    "[layout #{window_layout}] #{window_id}"
-			    "#{?window_active, (active),}";
+			template = DEFAULT_WINDOW_TEMPLATE \
+				" [layout #{window_layout}] #{window_id}" \
+				"#{?window_active, (active),}";
 			break;
 		case 1:
-			template = "#{session_name}:#{window_index}: "
-			    "#{window_name} "
-			    "[#{window_width}x#{window_height}] "
-			    "[layout #{window_layout}] #{window_id}"
-			    "#{?window_active, (active),}";
+			template = "#{session_name}:" DEFAULT_WINDOW_TEMPLATE;
 			break;
 		}
 	}
@@ -109,7 +104,7 @@ cmd_list_windows_session(
 
 		line = format_expand(ft, template);
 		ctx->print(ctx, "%s", line);
-		xfree(line);
+		free(line);
 
 		format_free(ft);
 		n++;

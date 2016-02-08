@@ -1,4 +1,4 @@
-#	$OpenBSD: install.md,v 1.36 2011/07/06 20:02:16 halex Exp $
+#	$OpenBSD: install.md,v 1.38 2012/07/13 14:50:34 halex Exp $
 #	$NetBSD: install.md,v 1.3.2.5 1996/08/26 15:45:28 gwr Exp $
 #
 #
@@ -53,7 +53,8 @@ md_installboot() {
 		return
 	fi
 
-	cp ${_prefix}/ofwboot /mnt/ofwboot
+	# Use cat to avoid holes created by cp(1)
+	cat ${_prefix}/ofwboot > /mnt/ofwboot
 	sync
 	${_prefix}/installboot ${_prefix}/bootblk /dev/r${1}c
 }
@@ -61,7 +62,6 @@ md_installboot() {
 md_prep_disklabel() {
 	local _disk=$1 _f _op
 
-	disklabel -W $_disk >/dev/null 2>&1
 	_f=/tmp/fstab.$_disk
 	if [[ $_disk == $ROOTDISK ]]; then
 		while :; do

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ipsecctl.h,v 1.62 2011/11/08 13:26:06 henning Exp $	*/
+/*	$OpenBSD: ipsecctl.h,v 1.67 2012/07/10 13:58:33 lteo Exp $	*/
 /*
  * Copyright (c) 2004, 2005 Hans-Joerg Hoexer <hshoexer@openbsd.org>
  *
@@ -64,6 +64,7 @@ enum {
 enum {
 	ENCXF_UNKNOWN, ENCXF_NONE, ENCXF_3DES_CBC, ENCXF_DES_CBC, ENCXF_AES,
 	ENCXF_AES_128, ENCXF_AES_192, ENCXF_AES_256, ENCXF_AESCTR,
+	ENCXF_AES_128_CTR, ENCXF_AES_192_CTR, ENCXF_AES_256_CTR,
 	ENCXF_AES_128_GCM, ENCXF_AES_192_GCM, ENCXF_AES_256_GCM,
 	ENCXF_AES_128_GMAC, ENCXF_AES_192_GMAC, ENCXF_AES_256_GMAC,
 	ENCXF_BLOWFISH, ENCXF_CAST128, ENCXF_NULL
@@ -142,7 +143,8 @@ struct ipsec_xf {
 	u_int16_t	 id;
 	size_t		 keymin;
 	size_t		 keymax;
-	int		 noauth;
+	u_int8_t	 noauth;
+	u_int8_t	 nostatic;
 };
 
 struct ipsec_transforms {
@@ -152,14 +154,14 @@ struct ipsec_transforms {
 	const struct ipsec_xf *groupxf;
 };
 
-struct ipsec_life {
-	int		 lifetime;
-	int		 lifevolume;
+struct ipsec_lifetime {
+	int		 lt_bytes;
+	int		 lt_seconds;
 };
 
 struct ike_mode {
 	struct ipsec_transforms	*xfs;
-	struct ipsec_life	*life;
+	struct ipsec_lifetime	*life;
 	u_int8_t		 ike_exch;
 };
 
@@ -182,9 +184,9 @@ struct ipsec_rule {
 	struct ike_auth *ikeauth;
 	struct ipsec_transforms *xfs;
 	struct ipsec_transforms *p1xfs;
-	struct ipsec_life *p1life;
+	struct ipsec_lifetime *p1life;
 	struct ipsec_transforms *p2xfs;
-	struct ipsec_life *p2life;
+	struct ipsec_lifetime *p2life;
 	struct ipsec_key  *authkey;
 	struct ipsec_key  *enckey;
 

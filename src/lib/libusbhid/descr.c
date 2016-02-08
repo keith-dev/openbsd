@@ -1,4 +1,4 @@
-/*	$OpenBSD: descr.c,v 1.4 2004/06/04 00:47:32 deraadt Exp $	*/
+/*	$OpenBSD: descr.c,v 1.6 2012/07/16 19:57:17 jasper Exp $	*/
 /*	$NetBSD: descr.c,v 1.2 2002/02/20 20:31:07 christos Exp $	*/
 
 /*

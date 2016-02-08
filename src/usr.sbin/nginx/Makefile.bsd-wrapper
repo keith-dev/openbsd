@@ -1,9 +1,13 @@
 # Build wrapper for Nginx
-# $OpenBSD: Makefile.bsd-wrapper,v 1.3 2011/10/05 18:04:18 robert Exp $
+# $OpenBSD: Makefile.bsd-wrapper,v 1.8 2012/07/12 09:17:40 jasper Exp $
 
 LNDIR=	/usr/bin/lndir
 
 .include <bsd.own.mk>
+
+.if (${MACHINE_ARCH} == "vax")
+CFLAGS=-O1 ${PIPE} ${DEBUG}
+.endif
 
 CONFIGURE_ARGS=	--prefix=/var/www \
 		--conf-path=/etc/nginx/nginx.conf \
@@ -12,11 +16,11 @@ CONFIGURE_ARGS=	--prefix=/var/www \
 		--lock-path=/var/run/nginx.lock \
 		--http-log-path=logs/access.log \
 		--error-log-path=logs/error.log \
-		--http-client-body-temp-path=/tmp/client_body_temp \
-		--http-proxy-temp-path=/tmp/proxy_temp \
-		--http-fastcgi-temp-path=/tmp/fastcgi_temp \
-		--http-scgi-temp-path=/tmp/scgi_temp \
-		--http-uwsgi-temp-path=/tmp/uwsgi_temp \
+		--http-client-body-temp-path=/var/www/cache/client_body_temp \
+		--http-proxy-temp-path=/var/www/cache/proxy_temp \
+		--http-fastcgi-temp-path=/var/www/cache/fastcgi_temp \
+		--http-scgi-temp-path=/var/www/cache/scgi_temp \
+		--http-uwsgi-temp-path=/var/www/cache/uwsgi_temp \
 		--user=www \
 		--group=www \
 		--with-http_gzip_static_module \
@@ -28,8 +32,6 @@ CONFIGURE_ARGS=	--prefix=/var/www \
 		--without-mail_smtp_module
 
 MAN+=	${.OBJDIR}/objs/nginx.8
-
-.include <bsd.own.mk>
 
 all: 	${.OBJDIR}/objs/ngx_auto_config.h
 	@cd ${.OBJDIR} && ${MAKE}
@@ -74,6 +76,18 @@ lint:
 
 tags:
 	# Nothing here so far...
+
+distribution:
+	${INSTALL} -C -o root -g wheel -m 0644 \
+		${.CURDIR}/conf/fastcgi_params \
+		${.CURDIR}/conf/koi-utf \
+		${.CURDIR}/conf/koi-win  \
+		${.CURDIR}/conf/mime.types \
+		${.CURDIR}/conf/nginx.conf \
+		${.CURDIR}/conf/scgi_params \
+		${.CURDIR}/conf/uwsgi_params \
+		${.CURDIR}/conf/win-utf \
+			${DESTDIR}/etc/nginx/
 
 .ifdef NOMAN
 maninstall:

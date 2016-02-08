@@ -1,4 +1,4 @@
-/* $OpenBSD: l2tp_call.c,v 1.10 2012/01/23 03:41:21 yasuoka Exp $	*/
+/*	$OpenBSD: l2tp_call.c,v 1.13 2012/07/13 15:11:14 yasuoka Exp $	*/
 
 /*-
  * Copyright (c) 2009 Internet Initiative Japan Inc.
@@ -25,7 +25,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  */
-/* $Id: l2tp_call.c,v 1.10 2012/01/23 03:41:21 yasuoka Exp $ */
+/* $Id: l2tp_call.c,v 1.13 2012/07/13 15:11:14 yasuoka Exp $ */
 /**@file L2TP LNS call */
 #include <sys/types.h>
 #include <sys/param.h>
@@ -329,6 +329,7 @@ l2tp_call_recv_ICRQ(l2tp_call *_this, u_char *pkt, int pktlen)
 			 * Windows 98/Me/NT asserts mandatory bit in
 			 * Physical Channel Id
 			 */
+			break;
 		case L2TP_AVP_TYPE_CALLING_NUMBER:
 			slen = MIN(sizeof(_this->calling_number) - 1,
 			    avp_attr_length(avp));
@@ -412,7 +413,7 @@ l2tp_call_send_ICRP(l2tp_call *_this)
 	bytebuf_add_avp(bytebuf, avp, 2);
 
 	if ((rval = l2tp_ctrl_send_packet(_this->ctrl, _this->peer_session_id,
-	    bytebuf, 1)) != 0) {
+	    bytebuf)) != 0) {
 		l2tp_call_log(_this, LOG_ERR, "failed to SendICRP: %m");
 		return 1;
 	}
@@ -792,7 +793,7 @@ l2tp_call_send_CDN(l2tp_call *_this, int result_code, int error_code, const
 		bytebuf_add_avp(bytebuf, addavp[i], addavp[i]->length - 6);
 
 	if (l2tp_ctrl_send_packet(_this->ctrl, _this->peer_session_id,
-	    bytebuf, 1) != 0) {
+	    bytebuf) != 0) {
 		l2tp_call_log(_this, LOG_ERR, "Error sending CDN: %m");
 		return 1;
 	}
@@ -824,7 +825,7 @@ l2tp_call_send_ZLB(l2tp_call *_this)
 		return 1;
 	}
 	return l2tp_ctrl_send_packet(_this->ctrl, _this->peer_session_id,
-	    bytebuf, 1);
+	    bytebuf);
 }
 
 /*
@@ -838,7 +839,7 @@ l2tp_call_log(l2tp_call *_this, int prio, const char *fmt, ...)
 	va_list ap;
 
 	va_start(ap, fmt);
-#ifdef	L2TPD_MULITPLE
+#ifdef	L2TPD_MULTIPLE
 	snprintf(logbuf, sizeof(logbuf), "l2tpd id=%u ctrl=%u call=%u %s",
 	    _this->ctrl->l2tpd->id, _this->ctrl->id, _this->id, fmt);
 #else

@@ -1,4 +1,4 @@
-/*	$OpenBSD: smtpctl.c,v 1.78 2012/01/28 11:33:07 gilles Exp $	*/
+/*	$OpenBSD: smtpctl.c,v 1.83 2012/07/09 09:57:53 gilles Exp $	*/
 
 /*
  * Copyright (c) 2006 Pierre-Yves Ritschard <pyr@openbsd.org>
@@ -46,7 +46,7 @@ void usage(void);
 static void setup_env(struct smtpd *);
 static int show_command_output(struct imsg *);
 static int show_stats_output(struct imsg *);
-static void show_queue(enum queue_kind, int);
+static void show_queue(int);
 static void show_envelope(struct envelope *, int);
 static void getflag(u_int *, int, char *, char *, size_t);
 
@@ -80,7 +80,7 @@ setup_env(struct smtpd *smtpd)
 	if ((env->sc_pw = getpwnam(SMTPD_USER)) == NULL)
 		errx(1, "unknown user %s", SMTPD_USER);
 
-	env->sc_queue = queue_backend_lookup(QT_FS);
+	env->sc_queue = queue_backend_lookup("fs");
 	if (env->sc_queue == NULL)
 		errx(1, "could not find queue backend");
 
@@ -106,7 +106,7 @@ main(int argc, char *argv[])
 		if (geteuid())
 			errx(1, "need root privileges");
 		setup_env(&smtpd);
-		show_queue(Q_QUEUE, 0);
+		show_queue(0);
 		return 0;
 	} else if (strcmp(__progname, "smtpctl") == 0) {
 
@@ -122,7 +122,7 @@ main(int argc, char *argv[])
 		/* handle "disconnected" commands */
 		switch (res->action) {
 		case SHOW_QUEUE:
-			show_queue(Q_QUEUE, 0);
+			show_queue(0);
 			break;
 		case SHOW_RUNQUEUE:
 			break;
@@ -175,10 +175,10 @@ connected:
 			errx(1, "invalid msgid/evpid");
 
 		if (res->action == SCHEDULE)
-			imsg_compose(ibuf, IMSG_RUNNER_SCHEDULE, 0, 0, -1, &ulval,
+			imsg_compose(ibuf, IMSG_SCHEDULER_SCHEDULE, 0, 0, -1, &ulval,
 			    sizeof(ulval));
 		if (res->action == REMOVE)
-			imsg_compose(ibuf, IMSG_RUNNER_REMOVE, 0, 0, -1, &ulval,
+			imsg_compose(ibuf, IMSG_SCHEDULER_REMOVE, 0, 0, -1, &ulval,
 			    sizeof(ulval));
 		break;
 	}
@@ -186,7 +186,7 @@ connected:
 	case SCHEDULE_ALL: {
 		u_int64_t ulval = 0;
 
-		imsg_compose(ibuf, IMSG_RUNNER_SCHEDULE, 0, 0, -1, &ulval,
+		imsg_compose(ibuf, IMSG_SCHEDULER_SCHEDULE, 0, 0, -1, &ulval,
 		    sizeof(ulval));
 		break;
 	}
@@ -228,7 +228,7 @@ connected:
 		done = 1;
 		break;
 	default:
-		err(1, "unknown request (%d)", res->action);
+		errx(1, "unknown request (%d)", res->action);
 	}
 
 	while (ibuf->w.queued)
@@ -320,8 +320,8 @@ stat_print(int stat, int what)
 		"lka.sessions.cname",
 		"lka.sessions.failure",
 
-		"runner",
-		"runner.bounces",
+		"scheduler",
+		"scheduler.bounces",
 
 		"queue.inserts.local",
 		"queue.inserts.remote",
@@ -347,7 +347,6 @@ static int
 show_stats_output(struct imsg *imsg)
 {
 	struct stats	*stats;
-	struct stat_counter	*s;
 
 	if (imsg->hdr.type != IMSG_STATS)
 		errx(1, "show_stats_output: bad hdr type (%d)", imsg->hdr.type);
@@ -357,7 +356,6 @@ show_stats_output(struct imsg *imsg)
 
 	stats = imsg->data;
 	stat_init(stats->counters, STATS_MAX);
-	s = stats->counters;
 
 	stat_print(STATS_CONTROL_SESSION, STAT_COUNT);
 	stat_print(STATS_CONTROL_SESSION, STAT_ACTIVE);
@@ -385,13 +383,13 @@ show_stats_output(struct imsg *imsg)
 	stat_print(STATS_QUEUE_LOCAL, STAT_COUNT);
 	stat_print(STATS_QUEUE_REMOTE, STAT_COUNT);
 
-	stat_print(STATS_RUNNER, STAT_COUNT);
-	stat_print(STATS_RUNNER, STAT_ACTIVE);
-	stat_print(STATS_RUNNER, STAT_MAXACTIVE);
+	stat_print(STATS_SCHEDULER, STAT_COUNT);
+	stat_print(STATS_SCHEDULER, STAT_ACTIVE);
+	stat_print(STATS_SCHEDULER, STAT_MAXACTIVE);
 
-	stat_print(STATS_RUNNER_BOUNCES, STAT_COUNT);
-	stat_print(STATS_RUNNER_BOUNCES, STAT_ACTIVE);
-	stat_print(STATS_RUNNER_BOUNCES, STAT_MAXACTIVE);
+	stat_print(STATS_SCHEDULER_BOUNCES, STAT_COUNT);
+	stat_print(STATS_SCHEDULER_BOUNCES, STAT_ACTIVE);
+	stat_print(STATS_SCHEDULER_BOUNCES, STAT_MAXACTIVE);
 
 	stat_print(STATS_RAMQUEUE_HOST, STAT_ACTIVE);
 	stat_print(STATS_RAMQUEUE_BATCH, STAT_ACTIVE);
@@ -439,7 +437,7 @@ show_stats_output(struct imsg *imsg)
 }
 
 static void
-show_queue(enum queue_kind kind, int flags)
+show_queue(int flags)
 {
 	struct qwalk	*q;
 	struct envelope	 envelope;
@@ -450,10 +448,10 @@ show_queue(enum queue_kind kind, int flags)
 	if (chroot(PATH_SPOOL) == -1 || chdir(".") == -1)
 		err(1, "%s", PATH_SPOOL);
 
-	q = qwalk_new(kind, 0);
+	q = qwalk_new(0);
 
 	while (qwalk(q, &evpid)) {
-		if (! queue_envelope_load(kind, evpid, &envelope))
+		if (! queue_envelope_load(evpid, &envelope))
 			continue;
 		show_envelope(&envelope, flags);
 	}

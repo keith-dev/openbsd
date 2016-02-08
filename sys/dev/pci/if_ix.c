@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ix.c,v 1.60 2012/01/20 14:48:49 mikeb Exp $	*/
+/*	$OpenBSD: if_ix.c,v 1.65 2012/07/06 11:08:44 mikeb Exp $	*/
 
 /******************************************************************************
 
@@ -123,9 +123,7 @@ void	ixgbe_update_stats_counters(struct ix_softc *);
 int	ixgbe_txeof(struct tx_ring *);
 int	ixgbe_rxeof(struct ix_queue *, int);
 void	ixgbe_rx_checksum(uint32_t, struct mbuf *, uint32_t);
-void	ixgbe_set_promisc(struct ix_softc *);
-void	ixgbe_disable_promisc(struct ix_softc *);
-void	ixgbe_set_multi(struct ix_softc *);
+void	ixgbe_iff(struct ix_softc *);
 #ifdef IX_DEBUG
 void	ixgbe_print_hw_stats(struct ix_softc *);
 #endif
@@ -517,18 +515,14 @@ ixgbe_ioctl(struct ifnet * ifp, u_long command, caddr_t data)
 	case SIOCSIFFLAGS:
 		IOCTL_DEBUGOUT("ioctl: SIOCSIFFLAGS (Set Interface Flags)");
 		if (ifp->if_flags & IFF_UP) {
-			if ((ifp->if_flags & IFF_RUNNING)) {
-				if ((ifp->if_flags ^ sc->if_flags) &
-				    (IFF_PROMISC | IFF_ALLMULTI)) {
-					ixgbe_disable_promisc(sc);
-					ixgbe_set_promisc(sc);
-                                }
-			} else
+			if (ifp->if_flags & IFF_RUNNING)
+				error = ENETRESET;
+			else
 				ixgbe_init(sc);
-		} else
+		} else {
 			if (ifp->if_flags & IFF_RUNNING)
 				ixgbe_stop(sc);
-		sc->if_flags = ifp->if_flags;
+		}
 		break;
 
 	case SIOCSIFMEDIA:
@@ -544,7 +538,7 @@ ixgbe_ioctl(struct ifnet * ifp, u_long command, caddr_t data)
 	if (error == ENETRESET) {
 		if (ifp->if_flags & IFF_RUNNING) {
 			ixgbe_disable_intr(sc);
-			ixgbe_set_multi(sc);
+			ixgbe_iff(sc);
 			ixgbe_enable_intr(sc);
 		}
 		error = 0;
@@ -634,8 +628,8 @@ ixgbe_init(void *arg)
 	struct ix_softc	*sc = (struct ix_softc *)arg;
 	struct ifnet	*ifp = &sc->arpcom.ac_if;
 	struct rx_ring	*rxr = sc->rx_rings;
-	uint32_t	 k, txdctl, rxdctl, rxctrl, mhadd, gpie;
-	int		 i, s, err, llimode = 0;
+	uint32_t	 k, txdctl, rxdctl, rxctrl, mhadd, gpie, itr;
+	int		 i, s, err;
 
 	INIT_DEBUGOUT("ixgbe_init: begin");
 
@@ -664,9 +658,6 @@ ixgbe_init(void *arg)
 	ixgbe_hw0(&sc->hw, init_hw);
 	ixgbe_initialize_transmit_units(sc);
 
-	/* Setup Multicast table */
-	ixgbe_set_multi(sc);
-
 	/* Determine the correct buffer size for jumbo/headersplit */
 	if (sc->max_frame_size <= 2048)
 		sc->rx_mbuf_sz = MCLBYTES;
@@ -689,6 +680,9 @@ ixgbe_init(void *arg)
 	/* Configure RX settings */
 	ixgbe_initialize_receive_units(sc);
 
+	/* Program promiscuous mode and multicast filters. */
+	ixgbe_iff(sc);
+
 	gpie = IXGBE_READ_REG(&sc->hw, IXGBE_GPIE);
 
 	/* Enable Fan Failure Interrupt */
@@ -703,7 +697,6 @@ ixgbe_init(void *arg)
 		 * interrupts hitting the card when the ring is getting full.
 		 */
 		gpie |= 0xf << IXGBE_GPIE_LLI_DELAY_SHIFT;
-		llimode = IXGBE_EITR_LLI_MOD;
 	}
 
 	if (sc->msix > 1) {
@@ -729,6 +722,12 @@ ixgbe_init(void *arg)
 		txdctl |= IXGBE_TXDCTL_ENABLE;
 		/* Set WTHRESH to 8, burst writeback */
 		txdctl |= (8 << 16);
+		/*
+		 * When the internal queue falls below PTHRESH (16),
+		 * start prefetching as long as there are at least
+		 * HTHRESH (1) buffers ready.
+		 */
+		txdctl |= (16 << 0) | (1 << 8);
 		IXGBE_WRITE_REG(&sc->hw, IXGBE_TXDCTL(i), txdctl);
 	}
 
@@ -807,9 +806,14 @@ ixgbe_init(void *arg)
 		}
 	}
 
-	/* Set moderation on the Link interrupt */
-	IXGBE_WRITE_REG(&sc->hw, IXGBE_EITR(sc->linkvec),
-	    IXGBE_LINK_ITR | llimode);
+	/* Setup interrupt moderation */
+	if (sc->hw.mac.type == ixgbe_mac_82598EB)
+		itr = (8000000 / IXGBE_INTS_PER_SEC) & 0xff8;
+	else {
+		itr = (4000000 / IXGBE_INTS_PER_SEC) & 0xff8;
+		itr |= IXGBE_EITR_LLI_MOD | IXGBE_EITR_CNT_WDIS;
+	}
+	IXGBE_WRITE_REG(&sc->hw, IXGBE_EITR(0), itr);
 
 	/* Config/Enable Link */
 	ixgbe_config_link(sc);
@@ -925,7 +929,7 @@ ixgbe_legacy_irq(void *arg)
 	struct tx_ring	*txr = sc->tx_rings;
 	struct ixgbe_hw	*hw = &sc->hw;
 	uint32_t	 reg_eicr;
-	int		 refill = 0;
+	int		 i, refill = 0;
 
 	reg_eicr = IXGBE_READ_REG(&sc->hw, IXGBE_EICR);
 	if (reg_eicr == 0) {
@@ -968,7 +972,9 @@ ixgbe_legacy_irq(void *arg)
 	if (ifp->if_flags & IFF_RUNNING && !IFQ_IS_EMPTY(&ifp->if_snd))
 		ixgbe_start_locked(txr, ifp);
 
-	ixgbe_enable_intr(sc);
+	for (i = 0; i < sc->num_queues; i++, que++)
+		ixgbe_enable_queue(sc, que->msix);
+
 	return (1);
 }
 
@@ -1050,7 +1056,6 @@ ixgbe_encap(struct tx_ring *txr, struct mbuf *m_head)
 		cmd_type_len |= IXGBE_ADVTXD_DCMD_VLE;
 #endif
 
-#if 0
 	/*
 	 * Force a cleanup if number of TX descriptors
 	 * available is below the threshold. If it fails
@@ -1059,12 +1064,9 @@ ixgbe_encap(struct tx_ring *txr, struct mbuf *m_head)
 	if (txr->tx_avail <= IXGBE_TX_CLEANUP_THRESHOLD) {
 		ixgbe_txeof(txr);
 		/* Make sure things have improved */
-		if (txr->tx_avail <= IXGBE_TX_OP_THRESHOLD) {
-			txr->no_desc_avail++;
+		if (txr->tx_avail <= IXGBE_TX_OP_THRESHOLD)
 			return (ENOBUFS);
-		}
 	}
-#endif
 
         /*
          * Important to capture the first descriptor
@@ -1091,7 +1093,6 @@ ixgbe_encap(struct tx_ring *txr, struct mbuf *m_head)
 
 	/* Make certain there are enough descriptors */
 	if (map->dm_nsegs > txr->tx_avail - 2) {
-		txr->no_desc_avail++;
 		error = ENOBUFS;
 		goto xmit_fail;
 	}
@@ -1162,99 +1163,56 @@ xmit_fail:
 }
 
 void
-ixgbe_set_promisc(struct ix_softc *sc)
+ixgbe_iff(struct ix_softc *sc)
 {
-
-	uint32_t       reg_rctl;
 	struct ifnet *ifp = &sc->arpcom.ac_if;
-
-	reg_rctl = IXGBE_READ_REG(&sc->hw, IXGBE_FCTRL);
-
-	if (ifp->if_flags & IFF_PROMISC) {
-		reg_rctl |= (IXGBE_FCTRL_UPE | IXGBE_FCTRL_MPE);
-		IXGBE_WRITE_REG(&sc->hw, IXGBE_FCTRL, reg_rctl);
-	} else if (ifp->if_flags & IFF_ALLMULTI) {
-		reg_rctl |= IXGBE_FCTRL_MPE;
-		reg_rctl &= ~IXGBE_FCTRL_UPE;
-		IXGBE_WRITE_REG(&sc->hw, IXGBE_FCTRL, reg_rctl);
-	}
-	return;
-}
-
-void
-ixgbe_disable_promisc(struct ix_softc * sc)
-{
-	uint32_t       reg_rctl;
-
-	reg_rctl = IXGBE_READ_REG(&sc->hw, IXGBE_FCTRL);
-	reg_rctl &= ~(IXGBE_FCTRL_UPE | IXGBE_FCTRL_MPE);
-	IXGBE_WRITE_REG(&sc->hw, IXGBE_FCTRL, reg_rctl);
-
-	return;
-}
-
-
-/*********************************************************************
- *  Multicast Update
- *
- *  This routine is called whenever multicast address list is updated.
- *
- **********************************************************************/
-void
-ixgbe_set_multi(struct ix_softc *sc)
-{
+	struct arpcom *ac = &sc->arpcom;
 	uint32_t	fctrl;
 	uint8_t	*mta;
 	uint8_t	*update_ptr;
 	struct ether_multi *enm;
 	struct ether_multistep step;
 	int	mcnt = 0;
-	struct ifnet *ifp = &sc->arpcom.ac_if;
 
-	IOCTL_DEBUGOUT("ixgbe_set_multi: begin");
+	IOCTL_DEBUGOUT("ixgbe_iff: begin");
 
 	mta = sc->mta;
 	bzero(mta, sizeof(uint8_t) * IXGBE_ETH_LENGTH_OF_ADDRESS *
 	    MAX_NUM_MULTICAST_ADDRESSES);
 
 	fctrl = IXGBE_READ_REG(&sc->hw, IXGBE_FCTRL);
-	fctrl |= (IXGBE_FCTRL_UPE | IXGBE_FCTRL_MPE);
-	if (ifp->if_flags & IFF_PROMISC)
-		fctrl |= (IXGBE_FCTRL_UPE | IXGBE_FCTRL_MPE);
-	else if (ifp->if_flags & IFF_ALLMULTI) {
-		fctrl |= IXGBE_FCTRL_MPE;
-		fctrl &= ~IXGBE_FCTRL_UPE;
-	} else
-		fctrl &= ~(IXGBE_FCTRL_UPE | IXGBE_FCTRL_MPE);
-	
-	IXGBE_WRITE_REG(&sc->hw, IXGBE_FCTRL, fctrl);
+	fctrl &= ~(IXGBE_FCTRL_MPE | IXGBE_FCTRL_UPE);
+	ifp->if_flags &= ~IFF_ALLMULTI;
 
-	ETHER_FIRST_MULTI(step, &sc->arpcom, enm);
-	while (enm != NULL) {
-		if (bcmp(enm->enm_addrlo, enm->enm_addrhi, ETHER_ADDR_LEN)) {
-			ifp->if_flags |= IFF_ALLMULTI;
-			mcnt = MAX_NUM_MULTICAST_ADDRESSES;
+	if (ifp->if_flags & IFF_PROMISC || ac->ac_multirangecnt > 0 ||
+	    ac->ac_multicnt > MAX_NUM_MULTICAST_ADDRESSES) {
+		ifp->if_flags |= IFF_ALLMULTI;
+		fctrl |= IXGBE_FCTRL_MPE;
+		if (ifp->if_flags & IFF_PROMISC)
+			fctrl |= IXGBE_FCTRL_UPE;
+	} else {
+		ETHER_FIRST_MULTI(step, &sc->arpcom, enm);
+		while (enm != NULL) {
+			bcopy(enm->enm_addrlo,
+			    &mta[mcnt * IXGBE_ETH_LENGTH_OF_ADDRESS],
+			    IXGBE_ETH_LENGTH_OF_ADDRESS);
+			mcnt++;
+
+			ETHER_NEXT_MULTI(step, enm);
 		}
-		if (mcnt == MAX_NUM_MULTICAST_ADDRESSES)
-			break;
-		bcopy(enm->enm_addrlo,
-		    &mta[mcnt * IXGBE_ETH_LENGTH_OF_ADDRESS],
-		    IXGBE_ETH_LENGTH_OF_ADDRESS);
-		mcnt++;
-		ETHER_NEXT_MULTI(step, enm);
+
+		update_ptr = mta;
+		ixgbe_hw(&sc->hw, update_mc_addr_list,
+		    update_ptr, mcnt, ixgbe_mc_array_itr);
 	}
 
-	update_ptr = mta;
-	ixgbe_hw(&sc->hw, update_mc_addr_list,
-	    update_ptr, mcnt, ixgbe_mc_array_itr);
-
-	return;
+	IXGBE_WRITE_REG(&sc->hw, IXGBE_FCTRL, fctrl);
 }
 
 /*
  * This is an iterator function now needed by the multicast
  * shared code. It simply feeds the shared code routine the
- * addresses in the array of ixgbe_set_multi() one by one.
+ * addresses in the array of ixgbe_iff() one by one.
  */
 uint8_t *
 ixgbe_mc_array_itr(struct ixgbe_hw *hw, uint8_t **update_ptr, uint32_t *vmdq)
@@ -1701,7 +1659,7 @@ void
 ixgbe_config_link(struct ix_softc *sc)
 {
 	uint32_t	autoneg, err = 0;
-	int		sfp, negotiate;
+	int		sfp, negotiate = FALSE;
 
 	switch (sc->hw.phy.type) {
 	case ixgbe_phy_sfp_avago:
@@ -2832,10 +2790,7 @@ ixgbe_initialize_receive_units(struct ix_softc *sc)
 		    sc->num_rx_desc * sizeof(union ixgbe_adv_rx_desc));
 
 		/* Set up the SRRCTL register */
-		srrctl = IXGBE_READ_REG(&sc->hw, IXGBE_SRRCTL(i));
-		srrctl &= ~IXGBE_SRRCTL_BSIZEHDR_MASK;
-		srrctl &= ~IXGBE_SRRCTL_BSIZEPKT_MASK;
-		srrctl |= bufsz;
+		srrctl = bufsz;
 		if (rxr->hdr_split) {
 			/* Use a standard mbuf for the header */
 			srrctl |= ((IXGBE_RX_HDR <<

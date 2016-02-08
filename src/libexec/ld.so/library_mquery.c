@@ -1,4 +1,4 @@
-/*	$OpenBSD: library_mquery.c,v 1.40 2012/01/09 17:01:22 ariane Exp $ */
+/*	$OpenBSD: library_mquery.c,v 1.43 2012/07/21 06:46:58 matthew Exp $ */
 
 /*
  * Copyright (c) 2002 Dale Rahn
@@ -184,6 +184,12 @@ _dl_tryload_shlib(const char *libname, int type, int flags)
 		case PT_DYNAMIC:
 			dynp = (Elf_Dyn *)phdp->p_vaddr;
 			break;
+		case PT_TLS:
+			_dl_printf("%s: unsupported TLS program header in %s\n",
+			    _dl_progname, libname);
+			_dl_close(libfile);
+			_dl_errno = DL_CANT_LOAD_OBJ;
+			return(0);
 		default:
 			break;
 		}
@@ -195,71 +201,64 @@ retry:
 	for (ld = lowld; ld != NULL; ld = ld->next) {
 		off_t foff;
 		int fd, flags;
-
-		/*
-		 * We don't want to provide the fd/off hint for anything
-		 * but the first mapping, all other might have
-		 * cache-incoherent aliases and will cause this code to
-		 * loop forever.
-		 */
-		if (ld == lowld) {
-			fd = libfile;
-			foff = ld->foff;
-			flags = 0;
-		} else {
-			fd = -1;
-			foff = 0;
-			flags = MAP_FIXED;
-		}
-
-		ld->start = (void *)(LOFF + ld->moff);
-
-		/*
-		 * Magic here.
-		 * The first mquery is done with MAP_FIXED to see if
-		 * the mapping we want is free. If it's not, we redo the
-		 * mquery without MAP_FIXED to get the next free mapping,
-		 * adjust the base mapping address to match this free mapping
-		 * and restart the process again.
-		 */
-		ld->start = _dl_mquery(ld->start, ROUND_PG(ld->size), ld->prot,
-		    flags, fd, foff);
-		if (_dl_mmap_error(ld->start)) {
-			ld->start = (void *)(LOFF + ld->moff);
-			ld->start = _dl_mquery(ld->start, ROUND_PG(ld->size),
-			    ld->prot, flags & ~MAP_FIXED, fd, foff);
-			if (_dl_mmap_error(ld->start))
-				goto fail;
-		}
-
-		if (ld->start != (void *)(LOFF + ld->moff)) {
-			lowld->start = ld->start - ld->moff + lowld->moff;
-			goto retry;
-		}
-		/*
-		 * XXX - we need some kind of boundary condition here,
-		 * or fix mquery to not run into the stack
-		 */
-	}
-
-	for (ld = lowld; ld != NULL; ld = ld->next) {
-		int fd, flags;
-		off_t foff;
 		void *res;
+
+		flags = MAP_PRIVATE;
+		if (LOFF + ld->moff != 0)
+			flags |= MAP_FIXED | __MAP_NOREPLACE;
 
 		if (ld->foff < 0) {
 			fd = -1;
 			foff = 0;
-			flags = MAP_FIXED|MAP_PRIVATE|MAP_ANON;
+			flags |= MAP_ANON;
 		} else {
 			fd = libfile;
 			foff = ld->foff;
-			flags = MAP_FIXED|MAP_PRIVATE;
 		}
-		res = _dl_mmap(ld->start, ROUND_PG(ld->size), ld->prot, flags,
-		    fd, foff);
-		if (_dl_mmap_error(res))
-			goto fail;
+
+		res = _dl_mmap((void *)(LOFF + ld->moff), ROUND_PG(ld->size),
+		    ld->prot, flags, fd, foff);
+		if (_dl_mmap_error(res)) {
+			/*
+			 * The mapping we wanted isn't free, so we do an
+			 * mquery without MAP_FIXED to get the next free
+			 * mapping, adjust the base mapping address to match
+			 * this free mapping and restart the process again.
+			 *
+			 * XXX - we need some kind of boundary condition
+			 * here, or fix mquery to not run into the stack
+			 */
+			res = _dl_mquery((void *)(LOFF + ld->moff),
+			    ROUND_PG(ld->size), ld->prot,
+			    flags & ~(MAP_FIXED | __MAP_NOREPLACE), fd, foff);
+
+			/*
+			 * If ld == lowld, then ld->start is just a hint and
+			 * thus shouldn't be unmapped.
+			 */
+			ld->start = NULL;
+
+			/* Unmap any mappings that we did get in. */
+			for (ld = lowld; ld != NULL; ld = ld->next) {
+				if (ld->start == NULL)
+					break;
+				_dl_munmap(ld->start, ROUND_PG(ld->size));
+				ld->start = NULL;
+			}
+
+			/* if the mquery failed, give up */
+			if (_dl_mmap_error(res))
+				goto fail;
+
+			/* otherwise, reset the start of the base mapping */
+			lowld->start = res - ld->moff + lowld->moff;
+			goto retry;
+		}
+
+		ld->start = res;
+	}
+
+	for (ld = lowld; ld != NULL; ld = ld->next) {
 		/* Zero out everything past the EOF */
 		if ((ld->prot & PROT_WRITE) != 0 && (ld->size & align) != 0)
 			_dl_memset((char *)ld->start + ld->size, 0,
@@ -283,9 +282,8 @@ retry:
 		object->dev = sb.st_dev;
 		object->inode = sb.st_ino;
 		object->obj_flags |= flags;
-		_dl_build_sod(object->load_name, &object->sod);
+		_dl_set_sod(object->load_name, &object->sod);
 	} else {
-		/* XXX no point. object is never returned NULL */
 		_dl_load_list_free(lowld);
 	}
 	return(object);

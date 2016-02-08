@@ -1,6 +1,7 @@
 
 /*
  * Copyright (C) Igor Sysoev
+ * Copyright (C) Nginx, Inc.
  */
 
 
@@ -62,7 +63,7 @@ ngx_int_t              ngx_threads_n;
 #endif
 
 
-u_long         cpu_affinity;
+uint64_t       cpu_affinity;
 static u_char  master_process[] = "master process";
 
 
@@ -250,6 +251,10 @@ ngx_master_process_cycle(ngx_cycle_t *cycle)
             ngx_start_worker_processes(cycle, ccf->worker_processes,
                                        NGX_PROCESS_JUST_RESPAWN);
             ngx_start_cache_manager_processes(cycle, 1);
+
+            /* allow new processes to start */
+            ngx_msleep(100);
+
             live = 1;
             ngx_signal_worker_processes(cycle,
                                         ngx_signal_value(NGX_SHUTDOWN_SIGNAL));
@@ -707,6 +712,8 @@ ngx_master_process_exit(ngx_cycle_t *cycle)
     ngx_exit_log.file = &ngx_exit_log_file;
 
     ngx_exit_cycle.log = &ngx_exit_log;
+    ngx_exit_cycle.files = ngx_cycle->files;
+    ngx_exit_cycle.files_n = ngx_cycle->files_n;
     ngx_cycle = &ngx_exit_cycle;
 
     ngx_destroy_pool(cycle->pool);
@@ -951,19 +958,9 @@ nochroot:
         }
     }
 
-#if (NGX_HAVE_SCHED_SETAFFINITY)
-
     if (cpu_affinity) {
-        ngx_log_error(NGX_LOG_NOTICE, cycle->log, 0,
-                      "sched_setaffinity(0x%08Xl)", cpu_affinity);
-
-        if (sched_setaffinity(0, 32, (cpu_set_t *) &cpu_affinity) == -1) {
-            ngx_log_error(NGX_LOG_ALERT, cycle->log, ngx_errno,
-                          "sched_setaffinity(0x%08Xl) failed", cpu_affinity);
-        }
+        ngx_setaffinity(cpu_affinity, cycle->log);
     }
-
-#endif
 
 #if (NGX_HAVE_PR_SET_DUMPABLE)
 
@@ -1102,6 +1099,8 @@ ngx_worker_process_exit(ngx_cycle_t *cycle)
     ngx_exit_log.file = &ngx_exit_log_file;
 
     ngx_exit_cycle.log = &ngx_exit_log;
+    ngx_exit_cycle.files = ngx_cycle->files;
+    ngx_exit_cycle.files_n = ngx_cycle->files_n;
     ngx_cycle = &ngx_exit_cycle;
 
     ngx_destroy_pool(cycle->pool);

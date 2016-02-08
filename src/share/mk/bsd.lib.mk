@@ -1,4 +1,4 @@
-#	$OpenBSD: bsd.lib.mk,v 1.61 2011/07/16 23:34:21 guenther Exp $
+#	$OpenBSD: bsd.lib.mk,v 1.64 2012/07/08 08:44:55 espie Exp $
 #	$NetBSD: bsd.lib.mk,v 1.67 1996/01/17 20:39:26 mycroft Exp $
 #	@(#)bsd.lib.mk	5.26 (Berkeley) 5/2/91
 
@@ -22,10 +22,10 @@ SHLIB_MINOR=${minor}
 .MAIN: all
 
 # prefer .S to a .c, add .po, remove stuff not used in the BSD libraries.
-# .so used for PIC object files.  .ln used for lint output files.
+# .so used for PIC object files.
 # .m for objective c files.
 .SUFFIXES:
-.SUFFIXES: .out .o .go .po .so .S .s .c .cc .C .cxx .f .y .l .ln .m4 .m
+.SUFFIXES: .out .o .go .po .so .S .s .c .cc .C .cxx .f .y .l .m4 .m
 
 .c.o:
 	@echo "${COMPILE.c} ${.IMPSRC} -o ${.TARGET}"
@@ -50,9 +50,6 @@ SHLIB_MINOR=${minor}
 	@${COMPILE.c} ${PICFLAG} -DPIC ${.IMPSRC} -o ${.TARGET}.o
 	@${LD} -X -r ${.TARGET}.o -o ${.TARGET}
 	@rm -f ${.TARGET}.o
-
-.c.ln:
-	${LINT} ${LINTFLAGS} ${CFLAGS:M-[IDU]*} ${CPPFLAGS:M-[IDU]*} -i ${.IMPSRC}
 
 .cc.o .C.o .cxx.o:
 	@echo "${COMPILE.cc} ${.IMPSRC} -o ${.TARGET}"
@@ -104,15 +101,10 @@ SHLIB_MINOR=${minor}
 	@rm -f ${.TARGET}.o
 
 .S.o .s.o:
-.if (${MACHINE_ARCH} == "arm")
-	@echo ${COMPILE.S:Q} ${CPPFLAGS} ${CFLAGS:M-[ID]*} ${AINC} ${.IMPSRC}
-	@${COMPILE.S} ${CFLAGS:M-[ID]*} ${AINC} ${.IMPSRC} -o ${.TARGET}.o
-.else
 	@echo "${CPP} ${CPPFLAGS} ${CFLAGS:M-[ID]*} ${AINC} ${.IMPSRC} | \
 		${AS} -o ${.TARGET}"
 	@${CPP} ${CPPFLAGS} ${CFLAGS:M-[ID]*} ${AINC} ${.IMPSRC} | \
 	    ${AS} -o ${.TARGET}.o
-.endif
 	@${LD} -X -r ${.TARGET}.o -o ${.TARGET}
 	@rm -f ${.TARGET}.o
 
@@ -168,36 +160,32 @@ _LIBS+=lib${LIB}.so.${SHLIB_MAJOR}.${SHLIB_MINOR}
 .endif
 .endif
 
-.if defined(WANTLINT) && ${WANTLINT:L} != "no"
-_LIBS+=llib-l${LIB}.ln
-.endif
-
 all: ${_LIBS} _SUBDIRUSE
 
 OBJS+=	${SRCS:N*.h:R:S/$/.o/}
 
-lib${LIB}.a:: ${OBJS}
+lib${LIB}.a: ${OBJS}
 	@echo building standard ${LIB} library
 	@rm -f lib${LIB}.a
 	@${AR} cq lib${LIB}.a `${LORDER} ${OBJS} | tsort -q`
 	${RANLIB} lib${LIB}.a
 
 GOBJS+=	${OBJS:.o=.go}
-lib${LIB}_g.a:: ${GOBJS}
+lib${LIB}_g.a: ${GOBJS}
 	@echo building debugging ${LIB} library
 	@rm -f lib${LIB}_g.a
 	@${AR} cq lib${LIB}_g.a `${LORDER} ${GOBJS} | tsort -q`
 	${RANLIB} lib${LIB}_g.a
 
 POBJS+=	${OBJS:.o=.po}
-lib${LIB}_p.a:: ${POBJS}
+lib${LIB}_p.a: ${POBJS}
 	@echo building profiled ${LIB} library
 	@rm -f lib${LIB}_p.a
 	@${AR} cq lib${LIB}_p.a `${LORDER} ${POBJS} | tsort -q`
 	${RANLIB} lib${LIB}_p.a
 
 SOBJS+=	${OBJS:.o=.so}
-lib${LIB}_pic.a:: ${SOBJS}
+lib${LIB}_pic.a: ${SOBJS}
 	@echo building shared object ${LIB} library
 	@rm -f lib${LIB}_pic.a
 	@${AR} cq lib${LIB}_pic.a `${LORDER} ${SOBJS} | tsort -q`
@@ -210,13 +198,6 @@ lib${LIB}.so.${SHLIB_MAJOR}.${SHLIB_MINOR}: ${SOBJS} ${DPADD}
 	    -o lib${LIB}.so.${SHLIB_MAJOR}.${SHLIB_MINOR} \
 	    `${LORDER} ${SOBJS}|tsort -q` ${LDADD}
 
-LOBJS+=	${LSRCS:.c=.ln} ${SRCS:M*.c:.c=.ln}
-LLIBS?=	-lc
-llib-l${LIB}.ln: ${LOBJS}
-	@echo building llib-l${LIB}.ln
-	@rm -f llib-l${LIB}.ln
-	@${LINT} -C${LIB} ${LOBJS} ${LLIBS}
-
 .if !target(clean)
 clean: _SUBDIRUSE
 	rm -f a.out [Ee]rrs mklog core *.core ${CLEANFILES}
@@ -224,7 +205,6 @@ clean: _SUBDIRUSE
 	rm -f lib${LIB}_g.a ${GOBJS}
 	rm -f lib${LIB}_p.a ${POBJS}
 	rm -f lib${LIB}_pic.a lib${LIB}.so.*.* ${SOBJS}
-	rm -f llib-l${LIB}.ln ${LOBJS}
 .endif
 
 cleandir: _SUBDIRUSE clean
@@ -284,10 +264,6 @@ realinstall:
 .if !defined(NOPIC) && defined(SHLIB_MAJOR) && defined(SHLIB_MINOR)
 	${INSTALL} ${INSTALL_COPY} -S -o ${LIBOWN} -g ${LIBGRP} -m ${LIBMODE} \
 	    lib${LIB}.so.${SHLIB_MAJOR}.${SHLIB_MINOR} ${DESTDIR}${LIBDIR}
-.endif
-.if defined(WANTLINT) && ${WANTLINT:L} != "no"
-	${INSTALL} ${INSTALL_COPY} -o ${LIBOWN} -g ${LIBGRP} -m ${LIBMODE} \
-	    llib-l${LIB}.ln ${DESTDIR}${LINTLIBDIR}
 .endif
 .if defined(LINKS) && !empty(LINKS)
 .  for lnk file in ${LINKS}

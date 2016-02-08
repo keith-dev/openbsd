@@ -1,4 +1,4 @@
-/*	$Id: libmdoc.h,v 1.48 2011/12/02 01:45:43 schwarze Exp $ */
+/*	$Id: libmdoc.h,v 1.50 2012/07/18 11:09:30 schwarze Exp $ */
 /*
  * Copyright (c) 2008, 2009, 2010, 2011 Kristaps Dzonsons <kristaps@bsd.lv>
  *
@@ -24,6 +24,7 @@ enum	mdoc_next {
 
 struct	mdoc {
 	struct mparse	 *parse; /* parse pointer */
+	char		 *defos; /* default argument for .Os */
 	int		  flags; /* parse flags */
 #define	MDOC_HALT	 (1 << 0) /* error in parse: halt */
 #define	MDOC_LITERAL	 (1 << 1) /* in a literal scope */
@@ -117,6 +118,7 @@ int		  mdoc_endbody_alloc(struct mdoc *m, int line, int pos,
 			enum mdoct tok, struct mdoc_node *body,
 			enum mdoc_endbody end);
 void		  mdoc_node_delete(struct mdoc *, struct mdoc_node *);
+int		  mdoc_node_relink(struct mdoc *, struct mdoc_node *);
 void		  mdoc_hash_init(void);
 enum mdoct	  mdoc_hash_find(const char *);
 const char	 *mdoc_a2att(const char *);

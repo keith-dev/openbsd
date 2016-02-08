@@ -1,5 +1,6 @@
 
 # Copyright (C) Igor Sysoev
+# Copyright (C) Nginx, Inc.
 
 
 # gcc 2.7.2.3, 2.8.1, 2.95.4, egcs-1.1.2
@@ -30,9 +31,9 @@ ngx_feature_test=
 
 CC_TEST_FLAGS=
 
-if [ $ngx_found = yes ]; then
-    PIPE="-pipe"
-fi
+#if [ $ngx_found = yes ]; then
+#    PIPE="-pipe"
+#fi
 
 
 case "$NGX_MACHINE" in
@@ -49,7 +50,7 @@ esac
 
 #NGX_GCC_OPT="-O2"
 #NGX_GCC_OPT="-Os"
-NGX_GCC_OPT="-O"
+NGX_GCC_OPT="$OPTIM"
 
 #CFLAGS="$CFLAGS -fomit-frame-pointer"
 

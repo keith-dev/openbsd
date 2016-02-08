@@ -1,4 +1,4 @@
-/*	$OpenBSD: ipsecctl.c,v 1.75 2011/11/08 16:49:32 jmc Exp $	*/
+/*	$OpenBSD: ipsecctl.c,v 1.77 2012/07/05 09:02:20 mikeb Exp $	*/
 /*
  * Copyright (c) 2004, 2005 Hans-Joerg Hoexer <hshoexer@openbsd.org>
  *
@@ -360,7 +360,7 @@ void
 ipsecctl_print_sa(struct ipsec_rule *r, int opts)
 {
 	printf("%s ", satype[r->satype]);
-	/* tunnel/transport is only meaningful esp/ah/ipcomp */
+	/* tunnel/transport is only meaningful for esp/ah/ipcomp */
 	if (r->satype != IPSEC_TCPMD5 && r->satype != IPSEC_IPIP)
 		printf("%s ", tmode[r->tmode]);
 	printf("from ");

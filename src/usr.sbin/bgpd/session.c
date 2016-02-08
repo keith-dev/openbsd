@@ -1,4 +1,4 @@
-/*	$OpenBSD: session.c,v 1.320 2012/01/06 17:33:11 sthen Exp $ */
+/*	$OpenBSD: session.c,v 1.323 2012/07/11 09:43:10 sthen Exp $ */
 
 /*
  * Copyright (c) 2003, 2004, 2005 Henning Brauer <henning@openbsd.org>
@@ -78,6 +78,7 @@ void	session_notification(struct peer *, u_int8_t, u_int8_t, void *,
 	    ssize_t);
 void	session_rrefresh(struct peer *, u_int8_t);
 int	session_dispatch_msg(struct pollfd *, struct peer *);
+int	session_process_msg(struct peer *);
 int	parse_header(struct peer *, u_char *, u_int16_t *, u_int8_t *);
 int	parse_open(struct peer *);
 int	parse_update(struct peer *);
@@ -107,6 +108,7 @@ struct imsgbuf		*ibuf_rde_ctl;
 struct imsgbuf		*ibuf_main;
 
 struct mrt_head		 mrthead;
+time_t			 pauseaccept;
 
 void
 session_sighdlr(int sig)
@@ -372,17 +374,25 @@ session_main(int pipe_m2s[2], int pipe_s2r[2], int pipe_m2r[2],
 			 * messages if the ctl sockets are getting full.
 			 */
 			pfd[PFD_PIPE_ROUTE_CTL].events = POLLIN;
-		pfd[PFD_SOCK_CTL].fd = csock;
-		pfd[PFD_SOCK_CTL].events = POLLIN;
-		pfd[PFD_SOCK_RCTL].fd = rcsock;
-		pfd[PFD_SOCK_RCTL].events = POLLIN;
+		if (pauseaccept == 0) {
+			pfd[PFD_SOCK_CTL].fd = csock;
+			pfd[PFD_SOCK_CTL].events = POLLIN;
+			pfd[PFD_SOCK_RCTL].fd = rcsock;
+			pfd[PFD_SOCK_RCTL].events = POLLIN;
+		} else {
+			pfd[PFD_SOCK_CTL].fd = -1;
+			pfd[PFD_SOCK_RCTL].fd = -1;
+		}
 		pfd[PFD_SOCK_PFKEY].fd = pfkeysock;
 		pfd[PFD_SOCK_PFKEY].events = POLLIN;
 
 		i = PFD_LISTENERS_START;
 		TAILQ_FOREACH(la, conf->listen_addrs, entry) {
-			pfd[i].fd = la->fd;
-			pfd[i].events = POLLIN;
+			if (pauseaccept == 0) {
+				pfd[i].fd = la->fd;
+				pfd[i].events = POLLIN;
+			} else
+				pfd[i].fd = -1;
 			i++;
 		}
 		idx_listeners = i;
@@ -439,6 +449,9 @@ session_main(int pipe_m2s[2], int pipe_s2r[2], int pipe_m2r[2],
 			events = POLLIN;
 			if (p->wbuf.queued > 0 || p->state == STATE_CONNECT)
 				events |= POLLOUT;
+			/* is there still work to do? */
+			if (p->rbuf && p->rbuf->wpos)
+				timeout = 0;
 
 			/* poll events */
 			if (p->fd != -1 && events != 0) {
@@ -469,11 +482,20 @@ session_main(int pipe_m2s[2], int pipe_s2r[2], int pipe_m2r[2],
 			i++;
 		}
 
+		if (pauseaccept && timeout > 1)
+			timeout = 1;
 		if (timeout < 0)
 			timeout = 0;
 		if ((nfds = poll(pfd, i, timeout * 1000)) == -1)
 			if (errno != EINTR)
 				fatal("poll error");
+
+		/*
+		 * If we previously saw fd exhaustion, we stop accept()
+		 * for 1 second to throttle the accept() loop.
+		 */
+		if (pauseaccept && getmonotime() > pauseaccept + 1)
+			pauseaccept = 0;
 
 		if (nfds > 0 && pfd[PFD_PIPE_MAIN].revents & POLLOUT)
 			if (msgbuf_write(&ibuf_main->w) < 0)
@@ -529,6 +551,10 @@ session_main(int pipe_m2s[2], int pipe_s2r[2], int pipe_m2r[2],
 		for (; nfds > 0 && j < idx_peers; j++)
 			nfds -= session_dispatch_msg(&pfd[j],
 			    peer_l[j - idx_listeners]);
+
+		for (p = peers; p != NULL; p = p->next)
+			if (p->rbuf && p->rbuf->wpos)
+				session_process_msg(p);
 
 		for (; nfds > 0 && j < idx_mrts; j++)
 			if (pfd[j].revents & POLLOUT) {
@@ -869,9 +895,10 @@ start_timer_keepalive(struct peer *peer)
 void
 session_close_connection(struct peer *peer)
 {
-	if (peer->fd != -1)
+	if (peer->fd != -1) {
 		close(peer->fd);
-
+		pauseaccept = 0;
+	}
 	peer->fd = peer->wbuf.fd = -1;
 }
 
@@ -975,7 +1002,10 @@ session_accept(int listenfd)
 	len = sizeof(cliaddr);
 	if ((connfd = accept(listenfd,
 	    (struct sockaddr *)&cliaddr, &len)) == -1) {
-		if (errno == EWOULDBLOCK || errno == EINTR)
+		if (errno == ENFILE || errno == EMFILE) {
+			pauseaccept = getmonotime();
+			return;
+		} else if (errno == EWOULDBLOCK || errno == EINTR)
 			return;
 		else
 			log_warn("accept");
@@ -1181,12 +1211,14 @@ session_setup_socket(struct peer *p)
 	if (p->conf.auth.method != AUTH_NONE) {
 		/* try to increase bufsize. no biggie if it fails */
 		bsize = 65535;
-		while (setsockopt(p->fd, SOL_SOCKET, SO_RCVBUF, &bsize,
-		    sizeof(bsize)) == -1)
+		while (bsize > 8192 &&
+		    setsockopt(p->fd, SOL_SOCKET, SO_RCVBUF, &bsize,
+		    sizeof(bsize)) == -1 && errno != EINVAL)
 			bsize /= 2;
 		bsize = 65535;
-		while (setsockopt(p->fd, SOL_SOCKET, SO_SNDBUF, &bsize,
-		    sizeof(bsize)) == -1)
+		while (bsize > 8192 &&
+		    setsockopt(p->fd, SOL_SOCKET, SO_SNDBUF, &bsize,
+		    sizeof(bsize)) == -1 && errno != EINVAL)
 			bsize /= 2;
 	}
 
@@ -1553,11 +1585,9 @@ session_rrefresh(struct peer *p, u_int8_t aid)
 int
 session_dispatch_msg(struct pollfd *pfd, struct peer *p)
 {
-	ssize_t		n, rpos, av, left;
+	ssize_t		n;
 	socklen_t	len;
-	int		error, processed = 0;
-	u_int16_t	msglen;
-	u_int8_t	msgtype;
+	int		error;
 
 	if (p->state == STATE_CONNECT) {
 		if (pfd->revents & POLLOUT) {
@@ -1627,71 +1657,83 @@ session_dispatch_msg(struct pollfd *pfd, struct peer *p)
 			return (1);
 		}
 
-		rpos = 0;
-		av = p->rbuf->wpos + n;
+		p->rbuf->wpos += n;
 		p->stats.last_read = time(NULL);
-
-		/*
-		 * session might drop to IDLE -> buffers deallocated
-		 * we MUST check rbuf != NULL before use
-		 */
-		for (;;) {
-			if (rpos + MSGSIZE_HEADER > av)
-				break;
-			if (p->rbuf == NULL)
-				break;
-			if (parse_header(p, p->rbuf->buf + rpos, &msglen,
-			    &msgtype) == -1)
-				return (0);
-			if (rpos + msglen > av)
-				break;
-			p->rbuf->rptr = p->rbuf->buf + rpos;
-
-			switch (msgtype) {
-			case OPEN:
-				bgp_fsm(p, EVNT_RCVD_OPEN);
-				p->stats.msg_rcvd_open++;
-				break;
-			case UPDATE:
-				bgp_fsm(p, EVNT_RCVD_UPDATE);
-				p->stats.msg_rcvd_update++;
-				break;
-			case NOTIFICATION:
-				bgp_fsm(p, EVNT_RCVD_NOTIFICATION);
-				p->stats.msg_rcvd_notification++;
-				break;
-			case KEEPALIVE:
-				bgp_fsm(p, EVNT_RCVD_KEEPALIVE);
-				p->stats.msg_rcvd_keepalive++;
-				break;
-			case RREFRESH:
-				parse_refresh(p);
-				p->stats.msg_rcvd_rrefresh++;
-				break;
-			default:	/* cannot happen */
-				session_notification(p, ERR_HEADER,
-				    ERR_HDR_TYPE, &msgtype, 1);
-				log_warnx("received message with "
-				    "unknown type %u", msgtype);
-				bgp_fsm(p, EVNT_CON_FATAL);
-			}
-			rpos += msglen;
-			if (++processed > MSG_PROCESS_LIMIT)
-				break;
-		}
-		if (p->rbuf == NULL)
-			return (1);
-
-		if (rpos < av) {
-			left = av - rpos;
-			memcpy(&p->rbuf->buf, p->rbuf->buf + rpos, left);
-			p->rbuf->wpos = left;
-		} else
-			p->rbuf->wpos = 0;
-
 		return (1);
 	}
 	return (0);
+}
+
+int
+session_process_msg(struct peer *p)
+{
+	ssize_t		rpos, av, left;
+	int		processed = 0;
+	u_int16_t	msglen;
+	u_int8_t	msgtype;
+
+	rpos = 0;
+	av = p->rbuf->wpos;
+
+	/*
+	 * session might drop to IDLE -> buffers deallocated
+	 * we MUST check rbuf != NULL before use
+	 */
+	for (;;) {
+		if (rpos + MSGSIZE_HEADER > av)
+			break;
+		if (p->rbuf == NULL)
+			break;
+		if (parse_header(p, p->rbuf->buf + rpos, &msglen,
+		    &msgtype) == -1)
+			return (0);
+		if (rpos + msglen > av)
+			break;
+		p->rbuf->rptr = p->rbuf->buf + rpos;
+
+		switch (msgtype) {
+		case OPEN:
+			bgp_fsm(p, EVNT_RCVD_OPEN);
+			p->stats.msg_rcvd_open++;
+			break;
+		case UPDATE:
+			bgp_fsm(p, EVNT_RCVD_UPDATE);
+			p->stats.msg_rcvd_update++;
+			break;
+		case NOTIFICATION:
+			bgp_fsm(p, EVNT_RCVD_NOTIFICATION);
+			p->stats.msg_rcvd_notification++;
+			break;
+		case KEEPALIVE:
+			bgp_fsm(p, EVNT_RCVD_KEEPALIVE);
+			p->stats.msg_rcvd_keepalive++;
+			break;
+		case RREFRESH:
+			parse_refresh(p);
+			p->stats.msg_rcvd_rrefresh++;
+			break;
+		default:	/* cannot happen */
+			session_notification(p, ERR_HEADER, ERR_HDR_TYPE,
+			    &msgtype, 1);
+			log_warnx("received message with unknown type %u",
+			    msgtype);
+			bgp_fsm(p, EVNT_CON_FATAL);
+		}
+		rpos += msglen;
+		if (++processed > MSG_PROCESS_LIMIT)
+			break;
+	}
+	if (p->rbuf == NULL)
+		return (1);
+
+	if (rpos < av) {
+		left = av - rpos;
+		memcpy(&p->rbuf->buf, p->rbuf->buf + rpos, left);
+		p->rbuf->wpos = left;
+	} else
+		p->rbuf->wpos = 0;
+
+	return (1);
 }
 
 int

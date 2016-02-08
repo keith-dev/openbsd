@@ -1,4 +1,4 @@
-/*	$OpenBSD: delivery_maildir.c,v 1.3 2012/02/04 17:11:45 chl Exp $	*/
+/*	$OpenBSD: delivery_maildir.c,v 1.7 2012/07/12 08:51:43 chl Exp $	*/
 
 /*
  * Copyright (c) 2011 Gilles Chehade <gilles@openbsd.org>
@@ -33,6 +33,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "smtpd.h"
@@ -61,7 +62,7 @@ delivery_maildir_open(struct deliver *deliver)
 #define error2(m)	{ msg = m; goto err2; }
 
 	setproctitle("maildir delivery");
-	if (mkdir(deliver->to, 0700) < 0 && errno != EEXIST)
+	if (mkdir_p(deliver->to, 0700) < 0 && errno != EEXIST)
 		error("cannot mkdir maildir");
 	if (chdir(deliver->to) < 0)
 		error("cannot cd to maildir");

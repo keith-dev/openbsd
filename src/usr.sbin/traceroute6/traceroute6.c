@@ -1,4 +1,4 @@
-/*	$OpenBSD: traceroute6.c,v 1.47 2012/02/10 22:50:48 sthen Exp $	*/
+/*	$OpenBSD: traceroute6.c,v 1.49 2012/04/06 17:43:03 deraadt Exp $	*/
 /*	$KAME: traceroute6.c,v 1.63 2002/10/24 12:53:25 itojun Exp $	*/
 
 /*
@@ -572,7 +572,7 @@ main(int argc, char *argv[])
 		    minlen, (long)MAXPACKET);
 		exit(1);
 	}
-	outpacket = (struct opacket *)malloc((unsigned)datalen);
+	outpacket = (struct opacket *)malloc((size_t)datalen);
 	if (!outpacket) {
 		perror("malloc");
 		exit(1);
@@ -1202,7 +1202,7 @@ usage(void)
 {
 
 	fprintf(stderr,
-"usage: traceroute6 [-dIlnrv] [-f firsthop] [-g gateway] [-m hoplimit]\n"
+"usage: traceroute6 [-AdIlnrv] [-f firsthop] [-g gateway] [-m hoplimit]\n"
 "       [-p port] [-q probes] [-s src] [-w waittime] host [datalen]\n");
 	exit(1);
 }

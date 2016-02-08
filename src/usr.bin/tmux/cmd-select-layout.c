@@ -1,4 +1,4 @@
-/* $OpenBSD: cmd-select-layout.c,v 1.13 2012/01/30 20:57:02 nicm Exp $ */
+/* $OpenBSD: cmd-select-layout.c,v 1.16 2012/07/11 07:10:15 nicm Exp $ */
 
 /*
  * Copyright (c) 2009 Nicholas Marriott <nicm@users.sourceforge.net>
@@ -24,13 +24,13 @@
  * Switch window to selected layout.
  */
 
-void	cmd_select_layout_key_binding(struct cmd *, int);
-int	cmd_select_layout_exec(struct cmd *, struct cmd_ctx *);
+void		 cmd_select_layout_key_binding(struct cmd *, int);
+enum cmd_retval	 cmd_select_layout_exec(struct cmd *, struct cmd_ctx *);
 
 const struct cmd_entry cmd_select_layout_entry = {
 	"select-layout", "selectl",
-	"npt:", 0, 1,
-	"[-np] " CMD_TARGET_WINDOW_USAGE " [layout-name]",
+	"nprut:", 0, 1,
+	"[-npUu] " CMD_TARGET_WINDOW_USAGE " [layout-name]",
 	0,
 	cmd_select_layout_key_binding,
 	NULL,
@@ -76,22 +76,32 @@ cmd_select_layout_key_binding(struct cmd *self, int key)
 	case '5' | KEYC_ESCAPE:
 		self->args = args_create(1, "tiled");
 		break;
+	case 'u':
+		self->args = args_create(0);
+		args_set(self->args, 'u', NULL);
+		break;
+	case 'U':
+		self->args = args_create(0);
+		args_set(self->args, 'U', NULL);
+		break;
 	default:
 		self->args = args_create(0);
 		break;
 	}
 }
 
-int
+enum cmd_retval
 cmd_select_layout_exec(struct cmd *self, struct cmd_ctx *ctx)
 {
 	struct args	*args = self->args;
 	struct winlink	*wl;
+	struct window	*w;
 	const char	*layoutname;
 	int		 next, previous, layout;
 
 	if ((wl = cmd_find_window(ctx, args_get(args, 't'), NULL)) == NULL)
-		return (-1);
+		return (CMD_RETURN_ERROR);
+	w = wl->window;
 
 	next = self->entry == &cmd_next_layout_entry;
 	if (args_has(self->args, 'n'))
@@ -100,6 +110,21 @@ cmd_select_layout_exec(struct cmd *self, struct cmd_ctx *ctx)
 	if (args_has(self->args, 'p'))
 		previous = 1;
 
+	layout_list_add(w);
+	if (args_has(self->args, 'U')) {
+		if ((layoutname = layout_list_redo(w)) == NULL) {
+			ctx->info(ctx, "no more layout history");
+			return (CMD_RETURN_ERROR);
+		}
+		goto set_layout;
+	} else if (args_has(self->args, 'u')) {
+		if ((layoutname = layout_list_undo(w)) == NULL) {
+			ctx->info(ctx, "no more layout history");
+			return (CMD_RETURN_ERROR);
+		}
+		goto set_layout;
+	}
+
 	if (next || previous) {
 		if (next)
 			layout = layout_set_next(wl->window);
@@ -107,7 +132,7 @@ cmd_select_layout_exec(struct cmd *self, struct cmd_ctx *ctx)
 			layout = layout_set_previous(wl->window);
 		server_redraw_window(wl->window);
 		ctx->info(ctx, "arranging in: %s", layout_set_name(layout));
-		return (0);
+		return (CMD_RETURN_NORMAL);
 	}
 
 	if (args->argc == 0)
@@ -118,19 +143,19 @@ cmd_select_layout_exec(struct cmd *self, struct cmd_ctx *ctx)
 		layout = layout_set_select(wl->window, layout);
 		server_redraw_window(wl->window);
 		ctx->info(ctx, "arranging in: %s", layout_set_name(layout));
-		return (0);
+		return (CMD_RETURN_NORMAL);
 	}
 
-	if (args->argc != 0) {
-		layoutname = args->argv[0];
-		if (layout_parse(wl->window, layoutname) == -1) {
-			ctx->error(ctx, "can't set layout: %s", layoutname);
-			return (-1);
-		}
-		server_redraw_window(wl->window);
-		ctx->info(ctx, "arranging in: %s", layoutname);
-		return (0);
-	}
+	if (args->argc == 0)
+		return (CMD_RETURN_NORMAL);
+	layoutname = args->argv[0];
 
-	return (0);
+set_layout:
+	if (layout_parse(wl->window, layoutname) == -1) {
+		ctx->error(ctx, "can't set layout: %s", layoutname);
+		return (CMD_RETURN_ERROR);
+	}
+	server_redraw_window(wl->window);
+	ctx->info(ctx, "arranging in: %s", layoutname);
+	return (CMD_RETURN_NORMAL);
 }

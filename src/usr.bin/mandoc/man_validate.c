@@ -1,7 +1,7 @@
-/*	$Id: man_validate.c,v 1.51 2011/12/02 01:45:43 schwarze Exp $ */
+/*	$Id: man_validate.c,v 1.55 2012/07/18 16:51:50 schwarze Exp $ */
 /*
  * Copyright (c) 2008, 2009, 2010, 2011 Kristaps Dzonsons <kristaps@bsd.lv>
- * Copyright (c) 2010 Ingo Schwarze <schwarze@openbsd.org>
+ * Copyright (c) 2010, 2012 Ingo Schwarze <schwarze@openbsd.org>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -41,6 +41,7 @@ struct	man_valid {
 };
 
 static	int	  check_eq0(CHKARGS);
+static	int	  check_eq2(CHKARGS);
 static	int	  check_le1(CHKARGS);
 static	int	  check_ge2(CHKARGS);
 static	int	  check_le5(CHKARGS);
@@ -50,6 +51,7 @@ static	int	  check_root(CHKARGS);
 static	void	  check_text(CHKARGS);
 
 static	int	  post_AT(CHKARGS);
+static	int	  post_IP(CHKARGS);
 static	int	  post_vs(CHKARGS);
 static	int	  post_fi(CHKARGS);
 static	int	  post_ft(CHKARGS);
@@ -62,8 +64,10 @@ static	int	  pre_sec(CHKARGS);
 static	v_check	  posts_at[] = { post_AT, NULL };
 static	v_check	  posts_br[] = { post_vs, check_eq0, NULL };
 static	v_check	  posts_eq0[] = { check_eq0, NULL };
+static	v_check	  posts_eq2[] = { check_eq2, NULL };
 static	v_check	  posts_fi[] = { check_eq0, post_fi, NULL };
 static	v_check	  posts_ft[] = { post_ft, NULL };
+static	v_check	  posts_ip[] = { post_IP, NULL };
 static	v_check	  posts_nf[] = { check_eq0, post_nf, NULL };
 static	v_check	  posts_par[] = { check_par, NULL };
 static	v_check	  posts_part[] = { check_part, NULL };
@@ -82,7 +86,7 @@ static	const struct man_valid man_valids[MAN_MAX] = {
 	{ NULL, posts_par }, /* LP */
 	{ NULL, posts_par }, /* PP */
 	{ NULL, posts_par }, /* P */
-	{ NULL, NULL }, /* IP */
+	{ NULL, posts_ip }, /* IP */
 	{ NULL, NULL }, /* HP */
 	{ NULL, NULL }, /* SM */
 	{ NULL, NULL }, /* SB */
@@ -95,8 +99,8 @@ static	const struct man_valid man_valids[MAN_MAX] = {
 	{ NULL, NULL }, /* I */
 	{ NULL, NULL }, /* IR */
 	{ NULL, NULL }, /* RI */
-	{ NULL, posts_eq0 }, /* na */ /* FIXME: should warn only. */
-	{ NULL, posts_sp }, /* sp */ /* FIXME: should warn only. */
+	{ NULL, posts_eq0 }, /* na */
+	{ NULL, posts_sp }, /* sp */
 	{ NULL, posts_nf }, /* nf */
 	{ NULL, posts_fi }, /* fi */
 	{ NULL, NULL }, /* RE */
@@ -107,6 +111,9 @@ static	const struct man_valid man_valids[MAN_MAX] = {
 	{ NULL, posts_at }, /* AT */
 	{ NULL, NULL }, /* in */
 	{ NULL, posts_ft }, /* ft */
+	{ NULL, posts_eq2 }, /* OP */
+	{ NULL, posts_nf }, /* EX */
+	{ NULL, posts_fi }, /* EE */
 };
 
 
@@ -228,6 +235,7 @@ check_##name(CHKARGS) \
 }
 
 INEQ_DEFINE(0, ==, eq0)
+INEQ_DEFINE(2, ==, eq2)
 INEQ_DEFINE(1, <=, le1)
 INEQ_DEFINE(2, >=, ge2)
 INEQ_DEFINE(5, <=, le5)
@@ -344,6 +352,24 @@ check_par(CHKARGS)
 	return(1);
 }
 
+static int
+post_IP(CHKARGS)
+{
+
+	switch (n->type) {
+	case (MAN_BLOCK):
+		if (0 == n->head->nchild && 0 == n->body->nchild)
+			man_node_delete(m, n);
+		break;
+	case (MAN_BODY):
+		if (0 == n->parent->head->nchild && 0 == n->nchild)
+			man_nmsg(m, n, MANDOCERR_IGNPAR);
+		break;
+	default:
+		break;
+	}
+	return(1);
+}
 
 static int
 post_TH(CHKARGS)
@@ -531,12 +557,25 @@ static int
 post_vs(CHKARGS)
 {
 
-	/* 
-	 * Don't warn about this because it occurs in pod2man and would
-	 * cause considerable (unfixable) warnage.
-	 */
-	if (NULL == n->prev && MAN_ROOT == n->parent->type)
+	if (NULL != n->prev)
+		return(1);
+
+	switch (n->parent->tok) {
+	case (MAN_SH):
+		/* FALLTHROUGH */
+	case (MAN_SS):
+		man_nmsg(m, n, MANDOCERR_IGNPAR);
+		/* FALLTHROUGH */
+	case (MAN_MAX):
+		/* 
+		 * Don't warn about this because it occurs in pod2man
+		 * and would cause considerable (unfixable) warnage.
+		 */
 		man_node_delete(m, n);
+		break;
+	default:
+		break;
+	}
 
 	return(1);
 }

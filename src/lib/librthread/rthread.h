@@ -1,4 +1,4 @@
-/*	$OpenBSD: rthread.h,v 1.31 2012/01/17 02:34:18 guenther Exp $ */
+/*	$OpenBSD: rthread.h,v 1.39 2012/05/03 09:07:17 pirofti Exp $ */
 /*
  * Copyright (c) 2004,2005 Ted Unangst <tedu@openbsd.org>
  * All Rights Reserved.
@@ -37,11 +37,12 @@
 #endif
 
 struct stack {
-	void *sp;
-	void *base;
-	void *guard;
-	size_t guardsize;
-	size_t len;
+	SLIST_ENTRY(stack)	link;	/* link for free default stacks */
+	void	*sp;			/* machine stack pointer */
+	void	*base;			/* bottom of allocated area */
+	size_t	guardsize;		/* size of PROT_NONE zone or */
+					/* ==1 if application alloced */
+	size_t	len;			/* total size of allocated stack */
 };
 
 struct sem {
@@ -72,10 +73,11 @@ struct pthread_cond {
 	_spinlock_lock_t lock;
 	struct pthread_queue waiters;
 	struct pthread_mutex *mutex;
+	clockid_t clock;
 };
 
 struct pthread_cond_attr {
-	int shared;
+	clockid_t ca_clock;
 };
 
 struct pthread_rwlock {
@@ -86,7 +88,7 @@ struct pthread_rwlock {
 };
 
 struct pthread_rwlockattr {
-	int dummy;
+	int pshared;
 };
 
 struct pthread_attr {
@@ -98,7 +100,6 @@ struct pthread_attr {
 	int sched_policy;
 	struct sched_param sched_param;
 	int sched_inherit;
-	int create_suspended;
 };
 
 #define	PTHREAD_MIN_PRIORITY	0
@@ -119,6 +120,23 @@ struct rthread_cleanup_fn {
 	void (*fn)(void *);
 	void *arg;
 	struct rthread_cleanup_fn *next;
+};
+
+struct pthread_barrier {
+	pthread_mutex_t mutex;
+	pthread_cond_t cond;
+	int threshold;
+	int sofar;
+	int generation;
+};
+
+struct pthread_barrierattr {
+	int pshared;
+};
+
+struct pthread_spinlock {
+	_spinlock_lock_t lock;
+	pthread_t owner;
 };
 
 struct pthread {
@@ -163,15 +181,21 @@ struct pthread {
 
 
 extern int _threads_ready;
+extern size_t _thread_pagesize;
 extern LIST_HEAD(listhead, pthread) _thread_list;
 extern struct pthread _initial_thread;
 extern _spinlock_lock_t _thread_lock;
+extern struct pthread_attr _rthread_attr_default;
+
+#define	ROUND_TO_PAGE(size) \
+	(((size) + (_thread_pagesize - 1)) & ~(_thread_pagesize - 1))
 
 void	_spinlock(_spinlock_lock_t *);
 void	_spinunlock(_spinlock_lock_t *);
-int	_sem_wait(sem_t, int, int *);
+int	_sem_wait(sem_t, int, const struct timespec *, int *);
 int	_sem_post(sem_t);
 
+int	_rthread_init(void);
 void	_rthread_setflag(pthread_t, int);
 void	_rthread_clearflag(pthread_t, int);
 struct stack *_rthread_alloc_stack(pthread_t);

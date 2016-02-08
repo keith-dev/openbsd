@@ -1,4 +1,4 @@
-/*	$OpenBSD: queue.c,v 1.117 2012/01/28 11:33:07 gilles Exp $	*/
+/*	$OpenBSD: queue.c,v 1.121 2012/07/09 09:57:53 gilles Exp $	*/
 
 /*
  * Copyright (c) 2008 Gilles Chehade <gilles@openbsd.org>
@@ -39,7 +39,7 @@
 #include "log.h"
 
 static void queue_imsg(struct imsgev *, struct imsg *);
-static void queue_pass_to_runner(struct imsgev *, struct imsg *);
+static void queue_pass_to_scheduler(struct imsgev *, struct imsg *);
 static void queue_shutdown(void);
 static void queue_sig_handler(int, short, void *);
 
@@ -61,7 +61,7 @@ queue_imsg(struct imsgev *iev, struct imsg *imsg)
 			ss.id = e->session_id;
 			ss.code = 250;
 			ss.u.msgid = 0;
-			ret = queue_message_create(Q_INCOMING, &ss.u.msgid);
+			ret = queue_message_create(&ss.u.msgid);
 			if (ret == 0)
 				ss.code = 421;
 			imsg_compose_event(iev, IMSG_QUEUE_CREATE_MESSAGE, 0, 0, -1,
@@ -69,12 +69,13 @@ queue_imsg(struct imsgev *iev, struct imsg *imsg)
 			return;
 
 		case IMSG_QUEUE_REMOVE_MESSAGE:
-			queue_message_delete(Q_INCOMING, evpid_to_msgid(e->id));
+			queue_message_incoming_delete(evpid_to_msgid(e->id));
 			return;
 
 		case IMSG_QUEUE_COMMIT_MESSAGE:
 			ss.id = e->session_id;
-			if (queue_message_commit(Q_INCOMING, evpid_to_msgid(e->id)))
+			ss.code = 250;
+			if (queue_message_commit(evpid_to_msgid(e->id)))
 				stat_increment(e->flags & DF_ENQUEUED ?
 				    STATS_QUEUE_LOCAL : STATS_QUEUE_REMOTE);
 			else
@@ -84,13 +85,13 @@ queue_imsg(struct imsgev *iev, struct imsg *imsg)
 			    &ss, sizeof ss);
 
 			if (ss.code != 421)
-				queue_pass_to_runner(iev, imsg);
+				queue_pass_to_scheduler(iev, imsg);
 
 			return;
 
 		case IMSG_QUEUE_MESSAGE_FILE:
 			ss.id = e->session_id;
-			fd = queue_message_fd_rw(Q_INCOMING, evpid_to_msgid(e->id));
+			fd = queue_message_fd_rw(evpid_to_msgid(e->id));
 			if (fd == -1)
 				ss.code = 421;
 			imsg_compose_event(iev, IMSG_QUEUE_MESSAGE_FILE, 0, 0, fd,
@@ -98,7 +99,7 @@ queue_imsg(struct imsgev *iev, struct imsg *imsg)
 			return;
 
 		case IMSG_SMTP_ENQUEUE:
-			queue_pass_to_runner(iev, imsg);
+			queue_pass_to_scheduler(iev, imsg);
 			return;
 		}
 	}
@@ -109,7 +110,7 @@ queue_imsg(struct imsgev *iev, struct imsg *imsg)
 		switch (imsg->hdr.type) {
 		case IMSG_QUEUE_SUBMIT_ENVELOPE:
 			ss.id = e->session_id;
-			ret = queue_envelope_create(Q_INCOMING, e);
+			ret = queue_envelope_create(e);
 			if (ret == 0) {
 				ss.code = 421;
 				imsg_compose_event(env->sc_ievs[PROC_SMTP],
@@ -128,8 +129,8 @@ queue_imsg(struct imsgev *iev, struct imsg *imsg)
 		}
 	}
 
-	if (iev->proc == PROC_RUNNER) {
-		/* forward imsgs from runner on its behalf */
+	if (iev->proc == PROC_SCHEDULER) {
+		/* forward imsgs from scheduler on its behalf */
 		imsg_compose_event(env->sc_ievs[imsg->hdr.peerid], imsg->hdr.type,
 		    0, imsg->hdr.pid, imsg->fd, (char *)imsg->data,
 		    imsg->hdr.len - sizeof imsg->hdr);
@@ -140,7 +141,7 @@ queue_imsg(struct imsgev *iev, struct imsg *imsg)
 		switch (imsg->hdr.type) {
 		case IMSG_QUEUE_MESSAGE_FD:
 			mta_batch = imsg->data;
-			fd = queue_message_fd_r(Q_QUEUE, mta_batch->msgid);
+			fd = queue_message_fd_r(mta_batch->msgid);
 			imsg_compose_event(iev,  IMSG_QUEUE_MESSAGE_FD, 0, 0,
 			    fd, mta_batch, sizeof *mta_batch);
 			return;
@@ -149,7 +150,7 @@ queue_imsg(struct imsgev *iev, struct imsg *imsg)
 		case IMSG_QUEUE_DELIVERY_TEMPFAIL:
 		case IMSG_QUEUE_DELIVERY_PERMFAIL:
 		case IMSG_BATCH_DONE:
-			queue_pass_to_runner(iev, imsg);
+			queue_pass_to_scheduler(iev, imsg);
 			return;
 		}
 	}
@@ -160,7 +161,7 @@ queue_imsg(struct imsgev *iev, struct imsg *imsg)
 		case IMSG_QUEUE_DELIVERY_TEMPFAIL:
 		case IMSG_QUEUE_DELIVERY_PERMFAIL:
 		case IMSG_MDA_SESS_NEW:
-			queue_pass_to_runner(iev, imsg);
+			queue_pass_to_scheduler(iev, imsg);
 			return;
 		}
 	}
@@ -173,7 +174,7 @@ queue_imsg(struct imsgev *iev, struct imsg *imsg)
 		case IMSG_QUEUE_RESUME_MTA:
 		case IMSG_QUEUE_SCHEDULE:
 		case IMSG_QUEUE_REMOVE:
-			queue_pass_to_runner(iev, imsg);
+			queue_pass_to_scheduler(iev, imsg);
 			return;
 		}
 	}
@@ -182,7 +183,7 @@ queue_imsg(struct imsgev *iev, struct imsg *imsg)
 		switch (imsg->hdr.type) {
 		case IMSG_CTL_VERBOSE:
 			log_verbose(*(int *)imsg->data);
-			queue_pass_to_runner(iev, imsg);
+			queue_pass_to_scheduler(iev, imsg);
 			return;
 		}
 	}
@@ -191,9 +192,9 @@ queue_imsg(struct imsgev *iev, struct imsg *imsg)
 }
 
 static void
-queue_pass_to_runner(struct imsgev *iev, struct imsg *imsg)
+queue_pass_to_scheduler(struct imsgev *iev, struct imsg *imsg)
 {
-	imsg_compose_event(env->sc_ievs[PROC_RUNNER], imsg->hdr.type,
+	imsg_compose_event(env->sc_ievs[PROC_SCHEDULER], imsg->hdr.type,
 	    iev->proc, imsg->hdr.pid, imsg->fd, imsg->data,
 	    imsg->hdr.len - sizeof imsg->hdr);
 }
@@ -228,13 +229,13 @@ queue(void)
 	struct event	 ev_sigterm;
 
 	struct peer peers[] = {
-		{ PROC_PARENT,	imsg_dispatch },
-		{ PROC_CONTROL,	imsg_dispatch },
-		{ PROC_SMTP,	imsg_dispatch },
-		{ PROC_MDA,	imsg_dispatch },
-		{ PROC_MTA,	imsg_dispatch },
-		{ PROC_LKA,	imsg_dispatch },
-		{ PROC_RUNNER,	imsg_dispatch }
+		{ PROC_PARENT,		imsg_dispatch },
+		{ PROC_CONTROL,		imsg_dispatch },
+		{ PROC_SMTP,		imsg_dispatch },
+		{ PROC_MDA,		imsg_dispatch },
+		{ PROC_MTA,		imsg_dispatch },
+		{ PROC_LKA,		imsg_dispatch },
+		{ PROC_SCHEDULER,	imsg_dispatch }
 	};
 
 	switch (pid = fork()) {
@@ -280,7 +281,7 @@ queue(void)
 	 */
 	fdlimit(1.0);
 	if ((env->sc_maxconn = availdesc() / 4) < 1)
-		fatalx("runner: fd starvation");
+		fatalx("queue: fd starvation");
 
 	config_pipes(peers, nitems(peers));
 	config_peers(peers, nitems(peers));

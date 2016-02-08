@@ -1,4 +1,4 @@
-/*	$OpenBSD: ldapd.h,v 1.21 2010/11/10 08:00:54 martinh Exp $ */
+/*	$OpenBSD: ldapd.h,v 1.23 2012/06/16 00:08:32 jmatthew Exp $ */
 
 /*
  * Copyright (c) 2009, 2010 Martin Hedenfalk <martin@bzero.se>
@@ -45,6 +45,7 @@
 #define LDAPS_PORT		 636
 #define LDAPD_SESSION_TIMEOUT	 30
 #define MAX_LISTEN		 64
+#define FD_RESERVE		 8 /* 5 overhead, 2 for db, 1 accept */
 
 #define F_STARTTLS		 0x01
 #define F_LDAPS			 0x02
@@ -200,6 +201,7 @@ struct listener {
 	int			 port;
 	int			 fd;
 	struct event		 ev;
+	struct event		 evt;
 	char			 ssl_cert_name[PATH_MAX];
 	struct ssl		*ssl;
 	void			*ssl_ctx;
@@ -209,8 +211,7 @@ TAILQ_HEAD(listenerlist, listener);
 
 /* An LDAP client connection.
  */
-struct conn
-{
+struct conn {
 	TAILQ_ENTRY(conn)	 next;
 	int			 fd;
 	struct bufferevent	*bev;
@@ -323,6 +324,7 @@ extern  struct ctl_connlist ctl_conns;
 struct control_sock {
 	const char		*cs_name;
 	struct event		 cs_ev;
+	struct event		 cs_evt;
 	int			 cs_fd;
 	int			 cs_restricted;
 };
@@ -346,6 +348,7 @@ void			 conn_write(struct bufferevent *bev, void *data);
 void			 conn_err(struct bufferevent *bev, short w, void *data);
 void			 conn_accept(int fd, short why, void *data);
 void			 conn_close(struct conn *conn);
+int			 conn_close_any(void);
 void			 conn_disconnect(struct conn *conn);
 void			 request_dispatch(struct request *req);
 void			 request_free(struct request *req);
@@ -400,6 +403,7 @@ int			 namespace_queue_request(struct namespace *ns,
 void			 namespace_queue_schedule(struct namespace *ns,
 				unsigned int usec);
 void			 namespace_cancel_conn(struct conn *conn);
+int			 namespace_conn_queue_count(struct conn *conn);
 
 int			 namespace_ber2db(struct namespace *ns,
 				struct ber_element *root, struct btval *val);
@@ -432,6 +436,7 @@ void			 control_listen(struct control_sock *);
 void			 control_accept(int, short, void *);
 void			 control_dispatch_imsg(int, short, void *);
 void			 control_cleanup(struct control_sock *);
+int			 control_close_any(struct control_sock *);
 
 /* filter.c */
 int			 ldap_matches_filter(struct ber_element *root,
@@ -485,6 +490,8 @@ void			 normalize_dn(char *dn);
 int			 ber2db(struct ber_element *root, struct btval *val,
 			    int compression_level);
 struct ber_element	*db2ber(struct btval *val, int compression_level);
+int			 accept_reserve(int sockfd, struct sockaddr *addr,
+			    socklen_t *addrlen, int reserve);
 
 /* index.c */
 int			 index_entry(struct namespace *ns, struct btval *dn,

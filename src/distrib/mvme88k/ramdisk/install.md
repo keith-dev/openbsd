@@ -1,4 +1,4 @@
-#       $OpenBSD: install.md,v 1.40 2011/07/06 20:02:16 halex Exp $
+#       $OpenBSD: install.md,v 1.42 2012/07/13 14:50:34 halex Exp $
 # Copyright (c) 1996 The NetBSD Foundation, Inc.
 # All rights reserved.
 #
@@ -37,14 +37,14 @@ NCPU=$(sysctl -n hw.ncpufound)
 ((NCPU > 1)) && { DEFAULTSETS="bsd bsd.rd bsd.mp" ; SANESETS="bsd bsd.mp" ; }
 
 md_installboot() {
-	cp /mnt/usr/mdec/bootsd /mnt/boot
+	# Use cat to avoid holes created by cp(1)
+	cat /mnt/usr/mdec/bootsd > /mnt/boot
 	/mnt/usr/mdec/installboot /mnt/boot /mnt/usr/mdec/bootxx /dev/r${1}a
 }
 
 md_prep_disklabel() {
 	local _disk=$1 _f _op
 
-	disklabel -W $_disk >/dev/null 2>&1
 	_f=/tmp/fstab.$_disk
 	if [[ $_disk == $ROOTDISK ]]; then
 		while :; do

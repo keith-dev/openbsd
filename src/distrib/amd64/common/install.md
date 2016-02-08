@@ -1,4 +1,4 @@
-#	$OpenBSD: install.md,v 1.29 2011/07/06 20:02:16 halex Exp $
+#	$OpenBSD: install.md,v 1.31 2012/07/13 14:50:34 halex Exp $
 #
 #
 # Copyright (c) 1996 The NetBSD Foundation, Inc.
@@ -39,7 +39,8 @@ NCPU=$(sysctl -n hw.ncpufound)
 ((NCPU > 1)) && { DEFAULTSETS="bsd bsd.rd bsd.mp" ; SANESETS="bsd bsd.mp" ; }
 
 md_installboot() {
-	cp /usr/mdec/boot /mnt/boot
+	# Use cat to avoid holes created by cp(1)
+	cat /usr/mdec/boot > /mnt/boot
 	if ! /usr/mdec/installboot /mnt/boot /usr/mdec/biosboot ${1} ; then
 		echo "\nFailed to install bootblocks."
 		echo "You will not be able to boot OpenBSD from ${1}."
@@ -97,7 +98,6 @@ md_prep_disklabel() {
 
 	md_prep_fdisk $_disk
 
-	disklabel -W $_disk >/dev/null 2>&1
 	_f=/tmp/fstab.$_disk
 	if [[ $_disk == $ROOTDISK ]]; then
 		while :; do

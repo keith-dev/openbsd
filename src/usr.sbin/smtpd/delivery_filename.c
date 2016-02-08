@@ -1,4 +1,4 @@
-/*	$OpenBSD: delivery_filename.c,v 1.2 2012/02/04 17:11:45 chl Exp $	*/
+/*	$OpenBSD: delivery_filename.c,v 1.5 2012/05/25 13:51:41 chl Exp $	*/
 
 /*
  * Copyright (c) 2011 Gilles Chehade <gilles@openbsd.org>
@@ -33,6 +33,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "smtpd.h"

@@ -1,4 +1,4 @@
-/*	$OpenBSD: util.c,v 1.55 2011/09/20 17:00:24 shadchin Exp $ */
+/*	$OpenBSD: util.c,v 1.58 2012/07/14 08:25:12 shadchin Exp $ */
 /*	$NetBSD: util.c,v 1.8 2000/03/14 08:11:53 sato Exp $ */
 
 /*-
@@ -45,7 +45,7 @@
 
 extern struct wskbd_map_data kbmap;	/* from keyboard.c */
 extern struct wskbd_map_data newkbmap;	/* from map_parse.y */
-extern struct wsmouse_calibcoords wmcoords; 	/* from mouse.c */
+extern struct wsmouse_calibcoords wmcoords;	/* from mouse.c */
 
 struct nameint {
 	int value;
@@ -71,6 +71,7 @@ static const struct nameint kbtype_tab[] = {
 	{ WSKBD_TYPE_DOMAIN,	"domain" },
 	{ WSKBD_TYPE_BLUETOOTH,	"bluetooth" },
 	{ WSKBD_TYPE_KPC,	"kpc" },
+	{ WSKBD_TYPE_SGI,	"sgi" },
 };
 
 static const struct nameint mstype_tab[] = {
@@ -89,7 +90,8 @@ static const struct nameint mstype_tab[] = {
 	{ WSMOUSE_TYPE_BLUETOOTH, "bluetooth" },
 	{ WSMOUSE_TYPE_SUN,	"sun" },
 	{ WSMOUSE_TYPE_SYNAPTICS, "synaptics" },
-	{ WSMOUSE_TYPE_ALPS,	"alps" }
+	{ WSMOUSE_TYPE_ALPS,	"alps" },
+	{ WSMOUSE_TYPE_SGI,	"sgi" }
 };
 
 static const struct nameint dpytype_tab[] = {
@@ -158,7 +160,10 @@ static const struct nameint dpytype_tab[] = {
 	{ WSDISPLAY_TYPE_SMFB,		"smfb" },
 	{ WSDISPLAY_TYPE_SISFB,		"sisfb" },
 	{ WSDISPLAY_TYPE_ODYSSEY,	"odyssey" },
-	{ WSDISPLAY_TYPE_IMPACT,	"impact" }
+	{ WSDISPLAY_TYPE_IMPACT,	"impact" },
+	{ WSDISPLAY_TYPE_GRTWO,		"grtwo" },
+	{ WSDISPLAY_TYPE_NEWPORT,	"newport" },
+	{ WSDISPLAY_TYPE_LIGHT,		"light" }
 };
 
 static const struct nameint kbdenc_tab[] = {

@@ -1,4 +1,4 @@
-/* $OpenBSD: tmux.c,v 1.108 2012/01/21 08:40:09 nicm Exp $ */
+/* $OpenBSD: tmux.c,v 1.112 2012/07/10 11:53:01 nicm Exp $ */
 
 /*
  * Copyright (c) 2007 Nicholas Marriott <nicm@users.sourceforge.net>
@@ -70,11 +70,10 @@ logfile(const char *name)
 {
 	char	*path;
 
-	log_close();
 	if (debug_level > 0) {
 		xasprintf(&path, "tmux-%s-%ld.log", name, (long) getpid());
-		log_open_file(debug_level, path);
-		xfree(path);
+		log_open(debug_level, path);
+		free(path);
 	}
 }
 
@@ -242,7 +241,7 @@ main(int argc, char **argv)
 	quiet = flags = 0;
 	label = path = NULL;
 	login_shell = (**argv == '-');
-	while ((opt = getopt(argc, argv, "28c:df:lL:qS:uUv")) != -1) {
+	while ((opt = getopt(argc, argv, "28c:Cdf:lL:qS:uUv")) != -1) {
 		switch (opt) {
 		case '2':
 			flags |= IDENTIFY_256COLOURS;
@@ -253,29 +252,31 @@ main(int argc, char **argv)
 			flags &= ~IDENTIFY_256COLOURS;
 			break;
 		case 'c':
-			if (shell_cmd != NULL)
-				xfree(shell_cmd);
+			free(shell_cmd);
 			shell_cmd = xstrdup(optarg);
 			break;
+		case 'C':
+			if (flags & IDENTIFY_CONTROL)
+				flags |= IDENTIFY_TERMIOS;
+			else
+				flags |= IDENTIFY_CONTROL;
+			break;
 		case 'f':
-			if (cfg_file != NULL)
-				xfree(cfg_file);
+			free(cfg_file);
 			cfg_file = xstrdup(optarg);
 			break;
 		case 'l':
 			login_shell = 1;
 			break;
 		case 'L':
-			if (label != NULL)
-				xfree(label);
+			free(label);
 			label = xstrdup(optarg);
 			break;
 		case 'q':
 			quiet = 1;
 			break;
 		case 'S':
-			if (path != NULL)
-				xfree(path);
+			free(path);
 			path = xstrdup(optarg);
 			break;
 		case 'u':
@@ -293,8 +294,6 @@ main(int argc, char **argv)
 
 	if (shell_cmd != NULL && argc != 0)
 		usage();
-
-	log_open_tty(debug_level);
 
 	if (!(flags & IDENTIFY_UTF8)) {
 		/*
@@ -357,7 +356,7 @@ main(int argc, char **argv)
 		}
 		xasprintf(&cfg_file, "%s/%s", home, DEFAULT_CFG);
 		if (access(cfg_file, R_OK) != 0 && errno == ENOENT) {
-			xfree(cfg_file);
+			free(cfg_file);
 			cfg_file = NULL;
 		}
 	}
@@ -379,16 +378,15 @@ main(int argc, char **argv)
 		/* -L or default set. */
 		if (label != NULL) {
 			if ((path = makesocketpath(label)) == NULL) {
-				log_warn("can't create socket");
+				fprintf(stderr, "can't create socket\n");
 				exit(1);
 			}
 		}
 	}
-	if (label != NULL)
-		xfree(label);
+	free(label);
 	if (realpath(path, socket_path) == NULL)
 		strlcpy(socket_path, path, sizeof socket_path);
-	xfree(path);
+	free(path);
 
 	/* Set process title. */
 	setproctitle("%s (%s)", __progname, socket_path);

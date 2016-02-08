@@ -1,4 +1,4 @@
-/*	$OpenBSD: sio.c,v 1.7 2011/11/15 08:05:22 ratchov Exp $	*/
+/*	$OpenBSD: sio.c,v 1.10 2012/05/23 19:25:11 ratchov Exp $	*/
 /*
  * Copyright (c) 2008 Alexandre Ratchov <alex@caoua.org>
  *
@@ -41,8 +41,9 @@ sio_initpar(struct sio_par *par)
 }
 
 struct sio_hdl *
-sio_open(const char *str, unsigned mode, int nbio)
+sio_open(const char *str, unsigned int mode, int nbio)
 {
+	static char devany[] = SIO_DEVANY;
 	struct sio_hdl *hdl;
 	const char *p;
 
@@ -51,13 +52,18 @@ sio_open(const char *str, unsigned mode, int nbio)
 #endif
 	if ((mode & (SIO_PLAY | SIO_REC)) == 0)
 		return NULL;
-	if (str == NULL && !issetugid())
+	if (str == NULL) /* backward compat */
+		str = devany;
+	if (strcmp(str, devany) == 0 && !issetugid()) {
 		str = getenv("AUDIODEVICE");
-	if (str == NULL) {
+		if (str == NULL)
+			str = devany;
+	}
+	if (strcmp(str, devany) == 0) {
 		hdl = sio_aucat_open("/0", mode, nbio);
 		if (hdl != NULL)
 			return hdl;
-		return sio_sun_open("/", mode, nbio);
+		return sio_sun_open("/0", mode, nbio);
 	}
 	if ((p = sndio_parsetype(str, "snd")) != NULL ||
 	    (p = sndio_parsetype(str, "aucat")) != NULL)
@@ -71,7 +77,8 @@ sio_open(const char *str, unsigned mode, int nbio)
 }
 
 void
-sio_create(struct sio_hdl *hdl, struct sio_ops *ops, unsigned mode, int nbio)
+sio_create(struct sio_hdl *hdl, struct sio_ops *ops,
+    unsigned int mode, int nbio)
 {
 	hdl->ops = ops;
 	hdl->mode = mode;
@@ -226,7 +233,7 @@ sio_psleep(struct sio_hdl *hdl, int event)
 size_t
 sio_read(struct sio_hdl *hdl, void *buf, size_t len)
 {
-	unsigned n;
+	unsigned int n;
 	char *data = buf;
 	size_t todo = len;
 
@@ -264,12 +271,12 @@ sio_read(struct sio_hdl *hdl, void *buf, size_t len)
 size_t
 sio_write(struct sio_hdl *hdl, const void *buf, size_t len)
 {
-	unsigned n;
+	unsigned int n;
 	const unsigned char *data = buf;
 	size_t todo = len;
 #ifdef DEBUG
 	struct timeval tv0, tv1, dtv;
-	unsigned us;
+	unsigned int us;
 
 	if (sndio_debug >= 2)
 		gettimeofday(&tv0, NULL);
@@ -341,7 +348,7 @@ sio_revents(struct sio_hdl *hdl, struct pollfd *pfd)
 	int revents;
 #ifdef DEBUG
 	struct timeval tv0, tv1, dtv;
-	unsigned us;
+	unsigned int us;
 
 	if (sndio_debug >= 2)
 		gettimeofday(&tv0, NULL);
@@ -415,7 +422,7 @@ sio_onmove_cb(struct sio_hdl *hdl, int delta)
 }
 
 int
-sio_setvol(struct sio_hdl *hdl, unsigned ctl)
+sio_setvol(struct sio_hdl *hdl, unsigned int ctl)
 {
 	if (hdl->eof)
 		return 0;
@@ -428,7 +435,7 @@ sio_setvol(struct sio_hdl *hdl, unsigned ctl)
 }
 
 int
-sio_onvol(struct sio_hdl *hdl, void (*cb)(void *, unsigned), void *addr)
+sio_onvol(struct sio_hdl *hdl, void (*cb)(void *, unsigned int), void *addr)
 {
 	if (hdl->started) {
 		DPRINTF("sio_onvol: already started\n");
@@ -444,7 +451,7 @@ sio_onvol(struct sio_hdl *hdl, void (*cb)(void *, unsigned), void *addr)
 }
 
 void
-sio_onvol_cb(struct sio_hdl *hdl, unsigned ctl)
+sio_onvol_cb(struct sio_hdl *hdl, unsigned int ctl)
 {
 	if (hdl->vol_cb)
 		hdl->vol_cb(hdl->vol_addr, ctl);

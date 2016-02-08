@@ -1,6 +1,7 @@
 
 /*
  * Copyright (C) Igor Sysoev
+ * Copyright (C) Nginx, Inc.
  */
 
 
@@ -78,18 +79,6 @@ ngx_module_t  ngx_openssl_module = {
 };
 
 
-static long  ngx_ssl_protocols[] = {
-    SSL_OP_NO_SSLv2|SSL_OP_NO_SSLv3|SSL_OP_NO_TLSv1,
-    SSL_OP_NO_SSLv3|SSL_OP_NO_TLSv1,
-    SSL_OP_NO_SSLv2|SSL_OP_NO_TLSv1,
-    SSL_OP_NO_TLSv1,
-    SSL_OP_NO_SSLv2|SSL_OP_NO_SSLv3,
-    SSL_OP_NO_SSLv3,
-    SSL_OP_NO_SSLv2,
-    0,
-};
-
-
 int  ngx_ssl_connection_index;
 int  ngx_ssl_server_conf_index;
 int  ngx_ssl_session_cache_index;
@@ -103,9 +92,25 @@ ngx_ssl_init(ngx_log_t *log)
     SSL_library_init();
     SSL_load_error_strings();
 
-    ENGINE_load_builtin_engines();
-
     OpenSSL_add_all_algorithms();
+
+#ifndef SSL_OP_NO_COMPRESSION
+    {
+    /*
+     * Disable gzip compression in OpenSSL prior to 1.0.0 version,
+     * this saves about 522K per connection.
+     */
+    int                 i, n;
+    STACK_OF(SSL_COMP)  *ssl_comp_methods;
+
+    ssl_comp_methods = SSL_COMP_get_compression_methods();
+    n = sk_SSL_COMP_num(ssl_comp_methods);
+
+    for (i = 0; i < n; i++) {
+        (void) sk_SSL_COMP_delete(ssl_comp_methods, i);
+    }
+    }
+#endif
 
     ngx_ssl_connection_index = SSL_get_ex_new_index(0, NULL, NULL, NULL, NULL);
 
@@ -171,9 +176,25 @@ ngx_ssl_create(ngx_ssl_t *ssl, ngx_uint_t protocols, void *data)
 
     SSL_CTX_set_options(ssl->ctx, SSL_OP_SINGLE_DH_USE);
 
-    if (ngx_ssl_protocols[protocols >> 1] != 0) {
-        SSL_CTX_set_options(ssl->ctx, ngx_ssl_protocols[protocols >> 1]);
+    if (!(protocols & NGX_SSL_SSLv2)) {
+        SSL_CTX_set_options(ssl->ctx, SSL_OP_NO_SSLv2);
     }
+    if (!(protocols & NGX_SSL_SSLv3)) {
+        SSL_CTX_set_options(ssl->ctx, SSL_OP_NO_SSLv3);
+    }
+    if (!(protocols & NGX_SSL_TLSv1)) {
+        SSL_CTX_set_options(ssl->ctx, SSL_OP_NO_TLSv1);
+    }
+#ifdef SSL_OP_NO_TLSv1_1
+    if (!(protocols & NGX_SSL_TLSv1_1)) {
+        SSL_CTX_set_options(ssl->ctx, SSL_OP_NO_TLSv1_1);
+    }
+#endif
+#ifdef SSL_OP_NO_TLSv1_2
+    if (!(protocols & NGX_SSL_TLSv1_2)) {
+        SSL_CTX_set_options(ssl->ctx, SSL_OP_NO_TLSv1_2);
+    }
+#endif
 
 #ifdef SSL_OP_NO_COMPRESSION
     SSL_CTX_set_options(ssl->ctx, SSL_OP_NO_COMPRESSION);
@@ -475,6 +496,7 @@ ngx_ssl_dhparam(ngx_conf_t *cf, ngx_ssl_t *ssl, ngx_str_t *file)
     return NGX_OK;
 }
 
+
 ngx_int_t
 ngx_ssl_ecdh_curve(ngx_conf_t *cf, ngx_ssl_t *ssl, ngx_str_t *name)
 {
@@ -485,7 +507,7 @@ ngx_ssl_ecdh_curve(ngx_conf_t *cf, ngx_ssl_t *ssl, ngx_str_t *name)
 
     /*
      * Elliptic-Curve Diffie-Hellman parameters are either "named curves"
-     * from RFC 4492 section 5.1.1, or explicitely described curves over
+     * from RFC 4492 section 5.1.1, or explicitly described curves over
      * binary fields. OpenSSL only supports the "named curves", which provide
      * maximum interoperability.
      */
@@ -514,6 +536,7 @@ ngx_ssl_ecdh_curve(ngx_conf_t *cf, ngx_ssl_t *ssl, ngx_str_t *name)
 
     return NGX_OK;
 }
+
 
 ngx_int_t
 ngx_ssl_create_connection(ngx_ssl_t *ssl, ngx_connection_t *c, ngx_uint_t flags)
@@ -839,7 +862,7 @@ ngx_ssl_recv(ngx_connection_t *c, u_char *buf, size_t size)
         case NGX_ERROR:
             c->read->error = 1;
 
-            /* fall thruogh */
+            /* fall through */
 
         case NGX_AGAIN:
             return c->ssl->last;
@@ -985,11 +1008,11 @@ ngx_ssl_send_chain(ngx_connection_t *c, ngx_chain_t *in, off_t limit)
             }
 
             if (n == NGX_AGAIN) {
-                c->buffered |= NGX_SSL_BUFFERED;
                 return in;
             }
 
             in->buf->pos += n;
+            c->sent += n;
 
             if (in->buf->pos == in->buf->last) {
                 in = in->next;
@@ -1798,44 +1821,39 @@ ngx_ssl_get_cached_session(ngx_ssl_conn_t *ssl_conn, u_char *id, int len,
 
         /* hash == node->key */
 
-        do {
-            sess_id = (ngx_ssl_sess_id_t *) node;
+        sess_id = (ngx_ssl_sess_id_t *) node;
 
-            rc = ngx_memn2cmp(id, sess_id->id,
-                              (size_t) len, (size_t) node->data);
-            if (rc == 0) {
+        rc = ngx_memn2cmp(id, sess_id->id, (size_t) len, (size_t) node->data);
 
-                if (sess_id->expire > ngx_time()) {
-                    ngx_memcpy(buf, sess_id->session, sess_id->len);
+        if (rc == 0) {
 
-                    ngx_shmtx_unlock(&shpool->mutex);
+            if (sess_id->expire > ngx_time()) {
+                ngx_memcpy(buf, sess_id->session, sess_id->len);
 
-                    p = buf;
-                    sess = d2i_SSL_SESSION(NULL, &p, sess_id->len);
+                ngx_shmtx_unlock(&shpool->mutex);
 
-                    return sess;
-                }
+                p = buf;
+                sess = d2i_SSL_SESSION(NULL, &p, sess_id->len);
 
-                ngx_queue_remove(&sess_id->queue);
-
-                ngx_rbtree_delete(&cache->session_rbtree, node);
-
-                ngx_slab_free_locked(shpool, sess_id->session);
-#if (NGX_PTR_SIZE == 4)
-                ngx_slab_free_locked(shpool, sess_id->id);
-#endif
-                ngx_slab_free_locked(shpool, sess_id);
-
-                sess = NULL;
-
-                goto done;
+                return sess;
             }
 
-            node = (rc < 0) ? node->left : node->right;
+            ngx_queue_remove(&sess_id->queue);
 
-        } while (node != sentinel && hash == node->key);
+            ngx_rbtree_delete(&cache->session_rbtree, node);
 
-        break;
+            ngx_slab_free_locked(shpool, sess_id->session);
+#if (NGX_PTR_SIZE == 4)
+            ngx_slab_free_locked(shpool, sess_id->id);
+#endif
+            ngx_slab_free_locked(shpool, sess_id);
+
+            sess = NULL;
+
+            goto done;
+        }
+
+        node = (rc < 0) ? node->left : node->right;
     }
 
 done:
@@ -1905,31 +1923,26 @@ ngx_ssl_remove_session(SSL_CTX *ssl, ngx_ssl_session_t *sess)
 
         /* hash == node->key */
 
-        do {
-            sess_id = (ngx_ssl_sess_id_t *) node;
+        sess_id = (ngx_ssl_sess_id_t *) node;
 
-            rc = ngx_memn2cmp(id, sess_id->id, len, (size_t) node->data);
+        rc = ngx_memn2cmp(id, sess_id->id, len, (size_t) node->data);
 
-            if (rc == 0) {
+        if (rc == 0) {
 
-                ngx_queue_remove(&sess_id->queue);
+            ngx_queue_remove(&sess_id->queue);
 
-                ngx_rbtree_delete(&cache->session_rbtree, node);
+            ngx_rbtree_delete(&cache->session_rbtree, node);
 
-                ngx_slab_free_locked(shpool, sess_id->session);
+            ngx_slab_free_locked(shpool, sess_id->session);
 #if (NGX_PTR_SIZE == 4)
-                ngx_slab_free_locked(shpool, sess_id->id);
+            ngx_slab_free_locked(shpool, sess_id->id);
 #endif
-                ngx_slab_free_locked(shpool, sess_id);
+            ngx_slab_free_locked(shpool, sess_id);
 
-                goto done;
-            }
+            goto done;
+        }
 
-            node = (rc < 0) ? node->left : node->right;
-
-        } while (node != sentinel && hash == node->key);
-
-        break;
+        node = (rc < 0) ? node->left : node->right;
     }
 
 done:

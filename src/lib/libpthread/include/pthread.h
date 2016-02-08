@@ -1,4 +1,4 @@
-/*	$OpenBSD: pthread.h,v 1.31 2012/01/03 16:53:48 kettenis Exp $	*/
+/*	$OpenBSD: pthread.h,v 1.37 2012/05/14 23:21:35 matthew Exp $	*/
 
 /*
  * Copyright (c) 1993, 1994 by Chris Provenzano, proven@mit.edu
@@ -37,11 +37,6 @@
 #ifndef _PTHREAD_H_
 #define _PTHREAD_H_
 
-/* Previous releases of OpenBSD used a hacked gcc that defined this */
-#ifdef _POSIX_THREADS
-#undef _POSIX_THREADS	/* Allow to be defined below */
-#endif
-
 /*
  * Header files.
  */
@@ -59,20 +54,6 @@
 #define PTHREAD_KEYS_MAX			256
 #define PTHREAD_STACK_MIN			2048
 #define PTHREAD_THREADS_MAX			ULONG_MAX
-
-/*
- * Compile time symbolic constants for portability specifications:
- *
- * Note that those commented out are not currently supported by the
- * implementation.
- */
-#define _POSIX_THREADS				1
-#define _POSIX_THREAD_ATTR_STACKADDR		1
-#define _POSIX_THREAD_ATTR_STACKSIZE		1
-#define _POSIX_THREAD_PRIORITY_SCHEDULING	1
-#define _POSIX_THREAD_PRIO_INHERIT		1
-#define _POSIX_THREAD_PRIO_PROTECT		1
-/* #define _POSIX_THREAD_PROCESS_SHARED */
 
 /*
  * Flags for threads and thread attributes.
@@ -101,6 +82,11 @@
 #define PTHREAD_CANCEL_DEFERRED		0
 #define PTHREAD_CANCEL_ASYNCHRONOUS	2
 #define PTHREAD_CANCELED		((void *) 1)
+
+/*
+ * Barrier flags
+ */
+#define PTHREAD_BARRIER_SERIAL_THREAD -1
 
 /*
  * Forward structure definitions.
@@ -134,6 +120,9 @@ typedef volatile int  			pthread_key_t;
 typedef struct	pthread_once		pthread_once_t;
 typedef struct	pthread_rwlock		*pthread_rwlock_t;
 typedef struct	pthread_rwlockattr	*pthread_rwlockattr_t;
+typedef struct	pthread_barrier		*pthread_barrier_t;
+typedef struct	pthread_barrierattr	*pthread_barrierattr_t;
+typedef struct	pthread_spinlock	*pthread_spinlock_t;
 
 /*
  * Additional type definitions:
@@ -185,13 +174,14 @@ struct pthread_once {
  * will deviate from POSIX specified semantics.
  */
 enum pthread_mutextype {
-	PTHREAD_MUTEX_ERRORCHECK	= 1,	/* Default POSIX mutex */
+	PTHREAD_MUTEX_ERRORCHECK	= 1,	/* Error checking mutex */
 	PTHREAD_MUTEX_RECURSIVE		= 2,	/* Recursive mutex */
 	PTHREAD_MUTEX_NORMAL		= 3,	/* No error checking */
+	PTHREAD_MUTEX_STRICT_NP		= 4,	/* Strict error checking */
 	PTHREAD_MUTEX_TYPE_MAX
 };
 
-#define PTHREAD_MUTEX_DEFAULT		PTHREAD_MUTEX_ERRORCHECK
+#define PTHREAD_MUTEX_DEFAULT		PTHREAD_MUTEX_STRICT_NP
 
 /*
  * Thread function prototype definitions:
@@ -243,6 +233,8 @@ int		pthread_mutex_destroy(pthread_mutex_t *);
 int		pthread_mutex_init(pthread_mutex_t *,
 			const pthread_mutexattr_t *);
 int		pthread_mutex_lock(pthread_mutex_t *);
+int		pthread_mutex_timedlock(pthread_mutex_t *,
+		    const struct timespec *);
 int		pthread_mutex_trylock(pthread_mutex_t *);
 int		pthread_mutex_unlock(pthread_mutex_t *);
 int		pthread_once(pthread_once_t *, void (*) (void));
@@ -285,6 +277,10 @@ int		pthread_mutex_setprioceiling(pthread_mutex_t *, int, int *);
 int		pthread_mutexattr_getprotocol(pthread_mutexattr_t *, int *);
 int		pthread_mutexattr_setprotocol(pthread_mutexattr_t *, int);
 
+int		pthread_condattr_getclock(const pthread_condattr_t *,
+		    clockid_t *);
+int		pthread_condattr_setclock(pthread_condattr_t *, clockid_t);
+
 int		pthread_attr_getinheritsched(const pthread_attr_t *, int *);
 int		pthread_attr_getschedparam(const pthread_attr_t *,
 			struct sched_param *);
@@ -301,6 +297,19 @@ int		pthread_setschedparam(pthread_t, int,
 			const struct sched_param *);
 int		pthread_getconcurrency(void);
 int		pthread_setconcurrency(int);
+int		pthread_barrier_init(pthread_barrier_t *,
+		    pthread_barrierattr_t *, unsigned int);
+int		pthread_barrier_destroy(pthread_barrier_t *);
+int		pthread_barrier_wait(pthread_barrier_t *);
+int		pthread_barrierattr_init(pthread_barrierattr_t *);
+int		pthread_barrierattr_destroy(pthread_barrierattr_t *);
+int		pthread_barrierattr_getpshared(pthread_barrierattr_t *, int *);
+int		pthread_barrierattr_setpshared(pthread_barrierattr_t *, int);
+int		pthread_spin_init(pthread_spinlock_t *, int);
+int		pthread_spin_destroy(pthread_spinlock_t *);
+int		pthread_spin_trylock(pthread_spinlock_t *);
+int		pthread_spin_lock(pthread_spinlock_t *);
+int		pthread_spin_unlock(pthread_spinlock_t *);
 __END_DECLS
 
 #endif /* _PTHREAD_H_ */

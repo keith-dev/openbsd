@@ -1,4 +1,4 @@
-#	$OpenBSD: install.sub,v 1.655 2011/11/22 14:02:14 krw Exp $
+#	$OpenBSD: install.sub,v 1.662 2012/07/20 01:33:40 krw Exp $
 #	$NetBSD: install.sub,v 1.5.2.8 1996/09/02 23:25:02 pk Exp $
 #
 # Copyright (c) 1997-2009 Todd Miller, Theo de Raadt, Ken Westerback
@@ -135,7 +135,7 @@ get_cddevs () {
 }
 
 get_ifdevs() {
-	ifconfig "$@" 2>&- \
+	ifconfig "$@" 2>/dev/null \
 		| egrep -v '^[[:space:]]|(bridge|enc|gif|gre|lo|pflog|pfsync|ppp|sl|tun)[[:digit:]]+:' \
 		| sed -ne 's/^\(.*\):.*/\1/p'
 }
@@ -197,17 +197,17 @@ rm -df /tmp/lock
 
 # Acquire lock
 lock() {
-	while ! mkdir /tmp/lock 2>&- && sleep .1; do done
+	while ! mkdir /tmp/lock 2>/dev/null && sleep .1; do done
 }
 
 # Release lock
 unlock() {
-	rm -d /tmp/lock 2>&-
+	rm -d /tmp/lock 2>/dev/null
 }
 
 # Add trap to kill the listener process
 retrap() {
-	trap '>&- && kill -KILL $cppid 2>&-; echo; stty echo; exit 0' \
+	trap 'kill -KILL $cppid 2>/dev/null; echo; stty echo; exit 0' \
 		INT EXIT TERM
 }
 
@@ -222,7 +222,7 @@ rm -f /tmp/update
 		lock
 		if test -e /tmp/update && [[ "`dmesg`" != "`cat /tmp/update`" ]]; then
 			dmesg >/tmp/update
-			kill -TERM 2>&- $$ || exit 1
+			kill -TERM 2>/dev/null $$ || exit 1
 		fi
 		unlock
 		sleep .5
@@ -237,12 +237,18 @@ retrap
 # changed while inside this function, the current read will be aborted
 # and the function will return a non-zero value. Normally, the caller
 # will then reprint any prompt and call the function again.
+#
+# Optional parameters:
+#    $1    = the question to ask the user
+#    $2    = the default answer
+#
 _ask() {
-	local _int _redo=0 _pid
+	local _q=$1 _def=$2 _int _redo=0 _pid
 
 	trap "_int=1" INT
 	trap "_redo=1" TERM
 	lock; dmesg >/tmp/update; unlock
+	echo -n "${_q:+$_q }${_def:+[$_def] }"
 	read resp
 	lock; rm /tmp/update; unlock
 	if (( _redo )); then
@@ -261,26 +267,15 @@ _ask() {
 	fi
 	retrap
 	(( _int )) && kill -INT $$
+	: ${resp:=$_def}
 	return $_redo
 }
 
-# Ask for user input.
-#
-#    $1    = the question to ask the user
-#    $2    = the default answer
-#
-# Save the user input (or the default) in $resp.
-#
-# Allow the user to escape to shells ('!') or execute commands
-# ('!foo') before entering the input.
+# Ask for user input, which is returned in $resp.
+# Any parameters are passed on to _ask(), which is called
+# repeatedly until it succeds.
 ask() {
-	local _question=$1 _default=$2
-
-	while :; do
-		echo -n "$_question "
-		[[ -z $_default ]] || echo -n "[$_default] "
-		_ask && : ${resp:=$_default} && break
-	done
+	while ! _ask "$1" "$2"; do done
 }
 
 # Ask for a password twice, saving the input in $_password
@@ -360,7 +355,7 @@ ask_until() {
 #
 # Return 'y' or 'n' in $resp.
 ask_yn() {
-	local _q=$1 _a=${2:-no} _resp
+	local _q=$1 _a=${2:-no}
 	typeset -l _resp
 
 	while :; do
@@ -484,14 +479,6 @@ showcols() {
 	done
 	(cd $_cdir; ls -Cdf "${_clist[@]}")
 	rm -rf -- $_cdir
-}
-
-# Offer to shell out for manual network configuration, and do so if
-# the user accepts the offer.
-manual_net_cfg() {
-	ask_yn "Do you want to do any manual network configuration?"
-
-	[[ $resp == y ]] && { echo "Type 'exit' to return to $MODE." ; sh ; }
 }
 
 # Create a device.
@@ -650,7 +637,7 @@ configure_ifs() {
 		fi
 
 		# Test if it is an 802.11 interface
-		ifconfig $_ifs 2>&- | grep -q "^[[:space:]]*ieee80211:" &&
+		ifconfig $_ifs 2>/dev/null | grep -q "^[[:space:]]*ieee80211:" &&
 			ieee80211_config $_ifs $_hn
 
 		# First interface configured will use the hostname without
@@ -733,7 +720,7 @@ __EOT
 		return 0
 	fi
 
-	ifconfig $_ifs delete down -group dhcp 2>&-
+	ifconfig $_ifs delete down -group dhcp 2>/dev/null
 	rm /etc/dhclient.conf /etc/resolv.conf.tail
 	return 1
 }
@@ -768,7 +755,7 @@ ieee80211_config() {
 
 	# Reset 802.11 settings and determine wpa capability
 	ifconfig $_ifs -nwid -nwkey
-	ifconfig $_ifs -wpa 2>&- && _haswpa=1
+	ifconfig $_ifs -wpa 2>/dev/null && _haswpa=1
 
 	# Empty scan cache
 	rm -f $WLANLIST
@@ -1141,8 +1128,8 @@ install_files() {
 	shacmd="cat"
 	[[ -x /bin/sha256 ]] && shacmd="sha256 /tmp/h"
 
-        # XXX Fix xkb mistake in 5.0
-        # XXX Remove this chunk after 5.2 release
+	# XXX Fix xkb mistake in 5.0
+	# XXX Remove this chunk after 5.2 release
 	local _bad_dir=/mnt/usr/X11R6/share/X11/xkb/symbols/srvr_ctrl
 	isin xshare${VERSION}.tgz $_get_sets && [[ -d $_bad_dir ]] && rm -rf $_bad_dir
 
@@ -1286,8 +1273,8 @@ waitftplist() {
 # If possible, print the timestamp received from the ftplist.cgi output,
 # adjusted with the time elapsed since it was received
 ftp_time() {
-	local _ftplist_sec=$(cat $SERVERLISTSEC 2>&-)
-	local _time=$(sed '/^TIME=\([0-9]*\)$/!d;s//\1/;q' $SERVERLISTALL 2>&-)
+	local _ftplist_sec=$(cat $SERVERLISTSEC 2>/dev/null)
+	local _time=$(sed '/^TIME=\([0-9]*\)$/!d;s//\1/;q' $SERVERLISTALL 2>/dev/null)
 	[[ -n $_ftplist_sec && -n $_time ]] &&
 		echo $((_time + SECONDS - _ftplist_sec))
 }
@@ -1350,7 +1337,7 @@ install_url() {
 	# name. This means the last install from a mirror will not keep
 	# the specific directory info. But an install from a local
 	# server *will* remember the specific directory info.
-	set -- $(sed "/^$_server_ip/x;\$!d;x" $SERVERLIST 2>&-)
+	set -- $(sed "/^$_server_ip/x;\$!d;x" $SERVERLIST 2>/dev/null)
 	resp=${1#*/}
 	# If there is no directory specified, don't use the server name!
 	[[ $resp == "$1" ]] && resp=
@@ -1840,8 +1827,6 @@ donetconfig() {
 		done
 		cp /tmp/resolv.conf /tmp/resolv.conf.shadow
 	fi
-
-	manual_net_cfg
 }
 
 populateusrlocal() {
@@ -1959,7 +1944,7 @@ finish_up() {
 
 	# Create or update pkg.conf with the new package path, if any
 	if [[ -n $package_path ]]; then
-		grep -v '^[ 	]*installpath[ 	]*=' /mnt/etc/pkg.conf 2>&- > /tmp/pkgconf
+		grep -v '^[ 	]*installpath[ 	]*=' /mnt/etc/pkg.conf 2>/dev/null > /tmp/pkgconf
 		print -r -- "installpath = $package_path" >> /tmp/pkgconf
 		cp /tmp/pkgconf /mnt/etc/pkg.conf
 	fi
@@ -2093,7 +2078,7 @@ umount -af 1>/dev/null 2>&1
 for _ifs in $(get_ifdevs dhcp); do
 	set -- $(v4_info $_ifs)
 	[[ $1 == UP && -n $2 ]] && continue
-	ifconfig $_ifs delete down -group dhcp 2>&-
+	ifconfig $_ifs delete down -group dhcp 2>/dev/null
 done
 
 cat <<__EOT
@@ -2132,11 +2117,31 @@ if [[ $MODE == install ]]; then
 	echo
 fi
 
+# Show device name, label and size for the provided list of devices
+diskinfo() {
+	local _d
+	for _d; do
+		makedev $_d
+		echo -n "$_d: "
+		disklabel -dpg $_d 2>/dev/null |
+		sed	-e '/^label: /{s,,,;s/ *$//;s/^$/<no label>/;H;d;}' \
+			-e '/.*# total bytes: \(.*\)/{s//(\1)/;H;}' \
+			-e '$!d;x;s/\n/ /'
+		rm -f /dev/{r,}$_d?
+	done
+}
+
 # Get ROOTDISK, ROOTDEV and SWAPDEV.
 while :; do
-	ask_which "disk" "is the root disk" '$(get_dkdevs | sed s,^$,none, )'
-	[[ $resp == done ]] && exit
-	[[ $resp != none ]] && break
+	echo "Available disks are: $(get_dkdevs | sed 's/^$/none/')."
+	_ask "Which disk is the root disk? ('?' for details)" \
+		$(get_dkdevs | sed 's/ .*//') || continue
+	case $resp in
+	"?")	diskinfo $(get_dkdevs);;
+	'')	;;
+	*)	isin "$resp" $(get_dkdevs) && break
+		echo "no such disk";;
+	esac
 done
 makedev $resp || exit
 

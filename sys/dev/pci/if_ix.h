@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ix.h,v 1.13 2011/06/15 00:03:00 dlg Exp $	*/
+/*	$OpenBSD: if_ix.h,v 1.15 2012/07/05 14:36:22 mikeb Exp $	*/
 
 /******************************************************************************
 
@@ -80,7 +80,7 @@
  * This parameters control when the driver calls the routine to reclaim
  * transmit descriptors.
  */
-#define IXGBE_TX_CLEANUP_THRESHOLD	(sc->num_tx_desc / 8)
+#define IXGBE_TX_CLEANUP_THRESHOLD	(sc->num_tx_desc / 16)
 #define IXGBE_TX_OP_THRESHOLD		(sc->num_tx_desc / 32)
 
 #define IXGBE_MAX_FRAME_SIZE	0x3F00
@@ -119,12 +119,9 @@
 #define IXGBE_QUEUE_HUNG                2
 
 /*
- * Interrupt Moderation parameters 
+ * Interrupt Moderation parameters
  */
-#define IXGBE_LOW_LATENCY       128
-#define IXGBE_AVE_LATENCY       400
-#define IXGBE_BULK_LATENCY      1200
-#define IXGBE_LINK_ITR          2000
+#define IXGBE_INTS_PER_SEC		8000
 
 /* Used for auto RX queue configuration */
 extern int mp_ncpus;
@@ -191,7 +188,6 @@ struct tx_ring {
 	uint32_t		bytes; /* Used for AIM calc */
 	uint32_t		packets;
 	/* Soft Stats */
-	uint64_t		no_desc_avail;
 	uint64_t		tx_packets;
 };
 

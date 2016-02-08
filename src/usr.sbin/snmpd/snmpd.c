@@ -1,4 +1,4 @@
-/*	$OpenBSD: snmpd.c,v 1.9 2009/06/06 05:52:01 pyr Exp $	*/
+/*	$OpenBSD: snmpd.c,v 1.11 2012/05/28 20:55:40 joel Exp $	*/
 
 /*
  * Copyright (c) 2007, 2008 Reyk Floeter <reyk@vantronix.net>
@@ -173,6 +173,8 @@ main(int argc, char *argv[])
 	gettimeofday(&env->sc_starttime, NULL);
 
 	log_info("startup");
+
+	pf_init();
 
 	if (socketpair(AF_UNIX, SOCK_STREAM, PF_UNSPEC,
 	    pipe_parent2snmpe) == -1)

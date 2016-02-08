@@ -1,4 +1,4 @@
-/*	$OpenBSD: cmd.c,v 1.46 2011/11/11 18:21:06 krw Exp $	*/
+/*	$OpenBSD: cmd.c,v 1.58 2012/07/11 10:27:34 krw Exp $	*/
 
 /*
  * Copyright (c) 1997 Tobias Weingartner
@@ -82,12 +82,12 @@ Xdisk(cmd_t *cmd, disk_t *disk, mbr_t *mbr, mbr_t *tt, int offset)
 
 	/* Ask for new info */
 	if (ask_yn("Change disk geometry?")) {
-		disk->real->cylinders = ask_num("BIOS Cylinders", ASK_DEC,
-		    disk->real->cylinders, 1, maxcyl, NULL);
-		disk->real->heads = ask_num("BIOS Heads", ASK_DEC,
-		    disk->real->heads, 1, maxhead, NULL);
-		disk->real->sectors = ask_num("BIOS Sectors", ASK_DEC,
-		    disk->real->sectors, 1, maxsec, NULL);
+		disk->real->cylinders = ask_num("BIOS Cylinders",
+		    disk->real->cylinders, 1, maxcyl);
+		disk->real->heads = ask_num("BIOS Heads",
+		    disk->real->heads, 1, maxhead);
+		disk->real->sectors = ask_num("BIOS Sectors",
+		    disk->real->sectors, 1, maxsec);
 
 		disk->real->size = disk->real->cylinders * disk->real->heads
 			* disk->real->sectors;
@@ -100,27 +100,29 @@ Xdisk(cmd_t *cmd, disk_t *disk, mbr_t *mbr, mbr_t *tt, int offset)
 int
 Xswap(cmd_t *cmd, disk_t *disk, mbr_t *mbr, mbr_t *tt, int offset)
 {
+	const char *errstr;
+	char *from, *to;
 	int pf, pt, ret;
 	prt_t pp;
 
 	ret = CMD_CONT;
 
-	if (!isdigit(cmd->args[0])) {
-		printf("Invalid argument: %s <from partition number>\n",
-		    cmd->cmd);
+	to = cmd->args;
+	from = strsep(&to, " \t");
+
+	if (to == NULL) {
+		printf("partition number is invalid:\n");
 		return (ret);
 	}
 
-	pf = atoi(cmd->args);
-	if (pf < 0 || pf > 3) {
-		printf("Invalid partition number %d.\n", pf);
+	pf = (int)strtonum(from, 0, 3, &errstr);
+	if (errstr) {
+		printf("partition number is %s: %s\n", errstr, from);
 		return (ret);
 	}
-
-	pt = ask_num("Swap with what partition?", ASK_DEC,
-	    -1, 0, 3, NULL);
-	if (pt < 0 || pt > 3) {
-		printf("Invalid partition number %d.\n", pt);
+	pt = (int)strtonum(to, 0, 3, &errstr);
+	if (errstr) {
+		printf("partition number is %s: %s\n", errstr, to);
 		return (ret);
 	}
 
@@ -142,34 +144,24 @@ Xswap(cmd_t *cmd, disk_t *disk, mbr_t *mbr, mbr_t *tt, int offset)
 int
 Xedit(cmd_t *cmd, disk_t *disk, mbr_t *mbr, mbr_t *tt, int offset)
 {
+	const char *errstr;
 	int pn, num, ret;
 	prt_t *pp;
 
-	ret = CMD_CONT;
-
-	if (!isdigit(cmd->args[0])) {
-		printf("Invalid argument: %s <partition number>\n", cmd->cmd);
-		return (ret);
+	pn = (int)strtonum(cmd->args, 0, 3, &errstr);
+	if (errstr) {
+		printf("partition number is %s: %s\n", errstr, cmd->args);
+		return (CMD_CONT);
 	}
-	pn = atoi(cmd->args);
-
-	if (pn < 0 || pn > 3) {
-		printf("Invalid partition number.\n");
-		return (ret);
-	}
-
-	/* Print out current table entry */
 	pp = &mbr->part[pn];
-	PRT_print(0, NULL, NULL);
-	PRT_print(pn, pp, NULL);
 
-#define	EDIT(p, f, v, n, m, h)				\
-	if ((num = ask_num(p, f, v, n, m, h)) != v)	\
-		ret = CMD_DIRTY;			\
+	/* Edit partition type */
+	ret = Xsetpid(cmd, disk, mbr, tt, offset);
+
+#define	EDIT(p, v, n, m)					\
+	if ((num = ask_num(p, v, n, m)) != v)	\
+		ret = CMD_DIRTY;				\
 	v = num;
-
-	/* Ask for partition type */
-	EDIT("Partition id ('0' to disable) ", ASK_HEX, pp->id, 0, 0xFF, PRT_printall);
 
 	/* Unused, so just zero out */
 	if (pp->id == DOSPTYP_UNUSED) {
@@ -188,46 +180,21 @@ Xedit(cmd_t *cmd, disk_t *disk, mbr_t *mbr, mbr_t *tt, int offset)
 		maxsect = disk->real->sectors;
 
 		/* Get data */
-		EDIT("BIOS Starting cylinder", ASK_DEC, pp->scyl,  0, maxcyl, NULL);
-		EDIT("BIOS Starting head",     ASK_DEC, pp->shead, 0, maxhead, NULL);
-		EDIT("BIOS Starting sector",   ASK_DEC, pp->ssect, 1, maxsect, NULL);
-		EDIT("BIOS Ending cylinder",   ASK_DEC, pp->ecyl,  0, maxcyl, NULL);
-		EDIT("BIOS Ending head",       ASK_DEC, pp->ehead, 0, maxhead, NULL);
-		EDIT("BIOS Ending sector",     ASK_DEC, pp->esect, 1, maxsect, NULL);
+		EDIT("BIOS Starting cylinder", pp->scyl,  0, maxcyl);
+		EDIT("BIOS Starting head",     pp->shead, 0, maxhead);
+		EDIT("BIOS Starting sector",   pp->ssect, 1, maxsect);
+		EDIT("BIOS Ending cylinder",   pp->ecyl,  0, maxcyl);
+		EDIT("BIOS Ending head",       pp->ehead, 0, maxhead);
+		EDIT("BIOS Ending sector",     pp->esect, 1, maxsect);
 		/* Fix up off/size values */
 		PRT_fix_BN(disk, pp, pn);
 		/* Fix up CHS values for LBA */
 		PRT_fix_CHS(disk, pp);
 	} else {
-		u_int m;
-		u_int32_t d;
-
-		/* Get data */
-		d = pp->bs;
-		do {
-			pp->bs = getuint(disk, "offset",
-			   "Starting sector for this partition.", d,
-			   disk->real->size, 0, DO_CONVERSIONS |
-			   (pp->id == FS_BSDFFS ? DO_ROUNDING : 0));
-			if (pp->bs == UINT_MAX)
-				printf("Invalid offset.\n");
-		} while (pp->bs == UINT_MAX);
-
-		m = MAX(pp->ns, disk->real->size - pp->bs);
-		if ( m > disk->real->size - pp->bs) {
-			/* dont have default value extend beyond end of disk */
-			m = disk->real->size - pp->bs;
-		}
-		d = pp->ns;
-		do {
-			pp->ns = getuint(disk, "size", "Size of the partition.",
-			    d, m, pp->bs , DO_CONVERSIONS |
-			    ((pp->id == FS_BSDFFS || pp->id == FS_SWAP) ?
-			    DO_ROUNDING : 0));
-			if (pp->ns == UINT_MAX || pp->ns == 0)
-				printf("Invalid size.\n");
-		} while (pp->ns == UINT_MAX || pp->ns == 0);
-
+		pp->bs = getuint(disk, "Partition offset", pp->bs,
+		    disk->real->size);
+		pp->ns = getuint(disk, "Partition size", pp->ns,
+		    disk->real->size - pp->bs);
 		/* Fix up CHS values */
 		PRT_fix_CHS(disk, pp);
 	}
@@ -239,36 +206,30 @@ Xedit(cmd_t *cmd, disk_t *disk, mbr_t *mbr, mbr_t *tt, int offset)
 int
 Xsetpid(cmd_t *cmd, disk_t *disk, mbr_t *mbr, mbr_t *tt, int offset)
 {
+	const char *errstr;
 	int pn, num, ret;
 	prt_t *pp;
 
 	ret = CMD_CONT;
 
-	if (!isdigit(cmd->args[0])) {
-		printf("Invalid argument: %s <partition number>\n", cmd->cmd);
+	pn = (int)strtonum(cmd->args, 0, 3, &errstr);
+	if (errstr) {
+		printf("partition number is %s: %s\n", errstr, cmd->args);
 		return (ret);
 	}
-	pn = atoi(cmd->args);
-
-	if (pn < 0 || pn > 3) {
-		printf("Invalid partition number.\n");
-		return (ret);
-	}
+	pp = &mbr->part[pn];
 
 	/* Print out current table entry */
-	pp = &mbr->part[pn];
 	PRT_print(0, NULL, NULL);
 	PRT_print(pn, pp, NULL);
 
-#define	EDIT(p, f, v, n, m, h)				\
-	if ((num = ask_num(p, f, v, n, m, h)) != v)	\
-		ret = CMD_DIRTY;			\
-	v = num;
-
 	/* Ask for partition type */
-	EDIT("Partition id ('0' to disable) ", ASK_HEX, pp->id, 0, 0xFF, PRT_printall);
+	num = ask_pid(pp->id);
+	if (num != pp->id)
+		ret = CMD_DIRTY;
 
-#undef EDIT
+	pp->id = num;
+
 	return (ret);
 }
 
@@ -276,16 +237,17 @@ Xsetpid(cmd_t *cmd, disk_t *disk, mbr_t *mbr, mbr_t *tt, int offset)
 int
 Xselect(cmd_t *cmd, disk_t *disk, mbr_t *mbr, mbr_t *tt, int offset)
 {
+	const char *errstr;
 	static int firstoff = 0;
 	int off;
 	int pn;
 
-	if (!isdigit(cmd->args[0])) {
-		printf("Invalid argument: %s <partition number>\n", cmd->cmd);
+	pn = (int)strtonum(cmd->args, 0, 3, &errstr);
+	if (errstr) {
+		printf("partition number is %s: %s\n", errstr, cmd->args);
 		return (CMD_CONT);
 	}
 
-	pn = atoi(cmd->args);
 	off = mbr->part[pn].bs;
 
 	/* Sanity checks */
@@ -328,7 +290,16 @@ int
 Xwrite(cmd_t *cmd, disk_t *disk, mbr_t *mbr, mbr_t *tt, int offset)
 {
 	char mbr_buf[DEV_BSIZE];
-	int fd;
+	int fd, i, n;
+
+	for (i = 0, n = 0; i < NDOSPART; i++)
+		if (mbr->part[i].id == 0xA6)
+			n++;
+	if (n >= 2) {
+		warnx("MBR contains more than one OpenBSD partition!");
+		if (!ask_yn("Write MBR anyway?"))
+			return (CMD_CONT);
+	}
 
 	fd = DISK_open(disk->name, O_RDWR);
 	MBR_make(mbr, mbr_buf);
@@ -412,23 +383,25 @@ Xupdate(cmd_t *cmd, disk_t *disk, mbr_t *mbr, mbr_t *tt, int offset)
 int
 Xflag(cmd_t *cmd, disk_t *disk, mbr_t *mbr, mbr_t *tt, int offset)
 {
+	const char *errstr;
 	int i, pn = -1, val = -1;
-	char *p;
+	char *part, *flag;
 
-	/* Parse partition table entry number */
-	if (!isdigit(cmd->args[0])) {
-		printf("Invalid argument: %s <partition number> [value]\n",
-		    cmd->cmd);
+	flag = cmd->args;
+	part = strsep(&flag, " \t");
+
+	pn = (int)strtonum(part, 0, 3, &errstr);
+	if (errstr) {
+		printf("partition number is %s: %s.\n", errstr, part);
 		return (CMD_CONT);
 	}
-	pn = atoi(cmd->args);
-	p = strchr(cmd->args, ' ');
-	if (p != NULL)
-		val = strtol(p + 1, NULL, 0) & 0xff;
 
-	if (pn < 0 || pn > 3) {
-		printf("Invalid partition number.\n");
-		return (CMD_CONT);
+	if (flag != NULL) {
+		val = (int)strtonum(flag, 0, 0xff, &errstr);
+		if (errstr) {
+			printf("flag value is %s: %s.\n", errstr, flag);
+			return (CMD_CONT);
+		}
 	}
 
 	if (val == -1) {

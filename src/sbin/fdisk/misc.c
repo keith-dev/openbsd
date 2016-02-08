@@ -1,4 +1,4 @@
-/*	$OpenBSD: misc.c,v 1.23 2010/07/04 22:15:31 halex Exp $	*/
+/*	$OpenBSD: misc.c,v 1.29 2012/07/11 10:27:34 krw Exp $	*/
 
 /*
  * Copyright (c) 1997 Tobias Weingartner
@@ -89,10 +89,10 @@ ask_cmd(cmd_t *cmd)
 }
 
 int
-ask_num(const char *str, int flags, int dflt, int low, int high,
-    void (*help)(void))
+ask_num(const char *str, int dflt, int low, int high)
 {
 	char lbuf[100], *cp;
+	const char *errstr;
 	size_t lbuflen;
 	int num;
 
@@ -102,13 +102,46 @@ ask_num(const char *str, int flags, int dflt, int low, int high,
 		dflt = high;
 
 	do {
+		printf("%s [%d - %d]: [%d] ", str, low, high, dflt);
+
+		if (fgets(lbuf, sizeof lbuf, stdin) == NULL)
+			errx(1, "eof");
+
+		lbuflen = strlen(lbuf);
+		if (lbuflen > 0 && lbuf[lbuflen - 1] == '\n')
+			lbuf[lbuflen - 1] = '\0';
+
+		if (lbuf[0] == '\0') {
+			num = dflt;
+			errstr = NULL;
+		} else {
+			num = (int)strtonum(lbuf, low, high, &errstr);
+			if (errstr)
+				printf("%s is %s: %s.\n", str, errstr, lbuf);
+		}
+	} while (errstr);
+
+	return (num);
+}
+
+int
+ask_pid(int dflt)
+{
+	char lbuf[100], *cp;
+	size_t lbuflen;
+	int num;
+	const int low = 0, high = 0xff;
+
+	if (dflt < low)
+		dflt = low;
+	else if (dflt > high)
+		dflt = high;
+
+	do {
 again:
-		if (flags == ASK_HEX)
-			printf("%s [%X - %X]: [%X] ", str, low, high, dflt);
-		else
-			printf("%s [%d - %d]: [%d] ", str, low, high, dflt);
-		if (help)
-			printf("(? for help) ");
+		printf("Partition id ('0' to disable) [%X - %X]: [%X] ", low,
+		    high, dflt);
+		printf("(? for help) ");
 
 		if (fgets(lbuf, sizeof lbuf, stdin) == NULL)
 			errx(1, "eof");
@@ -116,14 +149,14 @@ again:
 		if (lbuflen > 0 && lbuf[lbuflen - 1] == '\n')
 			lbuf[lbuflen - 1] = '\0';
 
-		if (help && lbuf[0] == '?') {
-			(*help)();
+		if (lbuf[0] == '?') {
+			PRT_printall();
 			goto again;
 		}
 
 		/* Convert */
 		cp = lbuf;
-		num = strtol(lbuf, &cp, ((flags==ASK_HEX)?16:10));
+		num = strtol(lbuf, &cp, 16);
 
 		/* Make sure only number present */
 		if (cp == lbuf)
@@ -132,7 +165,7 @@ again:
 			printf("'%s' is not a valid number.\n", lbuf);
 			num = low - 1;
 		} else if (num < low || num > high) {
-			printf("'%d' is out of range.\n", num);
+			printf("'%x' is out of range.\n", num);
 		}
 	} while (num < low || num > high);
 
@@ -199,125 +232,116 @@ putlong(void *p, u_int32_t l)
 
 /*
  * adapted from sbin/disklabel/editor.c
- * Returns UINT_MAX on error
  */
 u_int32_t
-getuint(disk_t *disk, char *prompt, char *helpstring, u_int32_t oval,
-    u_int32_t maxval, u_int32_t offset,	int flags)
+getuint(disk_t *disk, char *prompt, u_int32_t oval, u_int32_t maxval)
 {
 	char buf[BUFSIZ], *endptr, *p, operator = '\0';
-	u_int32_t rval = oval;
 	size_t n;
 	int mult = 1, secsize = unit_types[SECTORS].conversion;
-	double d;
-	int secpercyl;
+	double d, d2;
+	int secpercyl, saveerr;
+	char unit;
+
+	if (oval > maxval)
+		oval = maxval;
 
 	secpercyl = disk->real->sectors * disk->real->heads;
 
-	/* We only care about the remainder */
-	offset = offset % secpercyl;
-
-	buf[0] = '\0';
 	do {
 		printf("%s: [%u] ", prompt, oval);
+
 		if (fgets(buf, sizeof(buf), stdin) == NULL)
 			errx(1, "eof");
+
 		n = strlen(buf);
 		if (n > 0 && buf[n-1] == '\n')
 			buf[--n] = '\0';
-		if (buf[0] == '?')
-			puts(helpstring);
-	} while (buf[0] == '?');
 
-	if (buf[0] == '*' && buf[1] == '\0') {
-		rval = maxval;
-	} else {
+		if (buf[0] == '\0') {
+			return (oval);
+		} else if (buf[0] == '*' && buf[1] == '\0') {
+			return (maxval);
+		}
+
 		/* deal with units */
-		if (buf[0] != '\0' && n > 0) {
-			if ((flags & DO_CONVERSIONS)) {
-				switch (tolower(buf[n-1])) {
-
-				case 'c':
-					mult = secpercyl;
-					buf[--n] = '\0';
-					break;
-				case 'b':
-					mult = -secsize;
-					buf[--n] = '\0';
-					break;
-				case 's':
-					buf[--n] = '\0';
-					break;
-				case 'k':
-					if (secsize > 1024)
-						mult = -secsize / 1024;
-					else
-						mult = 1024 / secsize;
-					buf[--n] = '\0';
-					break;
-				case 'm':
-					mult = 1048576 / secsize;
-					buf[--n] = '\0';
-					break;
-				case 'g':
-					mult = 1073741824 / secsize;
-					buf[--n] = '\0';
-					break;
-				}
-			}
-
-			/* Did they give us an operator? */
-			p = &buf[0];
-			if (*p == '+' || *p == '-')
-				operator = *p++;
-
-			endptr = p;
-			errno = 0;
-			d = strtod(p, &endptr);
-			if (errno == ERANGE)
-				rval = UINT_MAX;	/* too big/small */
-			else if (*endptr != '\0') {
-				errno = EINVAL;		/* non-numbers in str */
-				rval = UINT_MAX;
-			} else {
-				/* XXX - should check for overflow */
-				if (mult > 0)
-					rval = d * mult;
-				else
-					/* Negative mult means divide (fancy) */
-					rval = d / (-mult);
-
-				/* Apply the operator */
-				if (operator == '+')
-					rval += oval;
-				else if (operator == '-')
-					rval = oval - rval;
-			}
+		switch (tolower(buf[n-1])) {
+		case 'c':
+			unit = 'c';
+			mult = secpercyl;
+			buf[--n] = '\0';
+			break;
+		case 'b':
+			unit = 'b';
+			mult = -secsize;
+			buf[--n] = '\0';
+			break;
+		case 's':
+			unit = 's';
+			mult = 1;
+			buf[--n] = '\0';
+			break;
+		case 'k':
+			unit = 'k';
+			if (secsize > 1024)
+				mult = -secsize / 1024;
+			else
+				mult = 1024 / secsize;
+			buf[--n] = '\0';
+			break;
+		case 'm':
+			unit = 'm';
+			mult = 1048576 / secsize;
+			buf[--n] = '\0';
+			break;
+		case 'g':
+			unit = 'g';
+			mult = 1073741824 / secsize;
+			buf[--n] = '\0';
+			break;
+		default:
+			unit = ' ';
+			mult = 1;
+			break;
 		}
-	}
-	if ((flags & DO_ROUNDING) && rval < UINT_MAX) {
-#ifndef CYLCHECK
-		/* Round to nearest cylinder unless given in sectors */
-		if (mult != 1)
-#endif
-		{
-			u_int32_t cyls;
 
-			/* If we round up past the end, round down instead */
-			cyls = (u_int32_t)((rval / (double)secpercyl)
-			    + 0.5);
-			if (cyls != 0 && secpercyl != 0) {
-				if ((cyls * secpercyl) - offset > maxval)
-					cyls--;
+		/* deal with the operator */
+		p = &buf[0];
+		if (*p == '+' || *p == '-')
+			operator = *p++;
+		else
+			operator = ' ';
 
-				if (rval != (cyls * secpercyl) - offset) {
-					rval = (cyls * secpercyl) - offset;
-					printf("Rounding to nearest cylinder: %u\n",
-					    rval);
-				}
-			}
+		endptr = p;
+		errno = 0;
+		d = strtod(p, &endptr);
+		saveerr = errno;
+		d2 = d;
+		if (mult > 0)
+			d *= mult;
+		else {
+			d /= (-mult);
+			d2 = d;
 		}
-	}
 
-	return(rval);
+		/* Apply the operator */
+		if (operator == '+')
+			d = oval + d;
+		else if (operator == '-') {
+			d = oval - d;
+			d2 = d;
+		}
+
+		if (saveerr == ERANGE || d > maxval || d < 0 || d < d2) {
+			printf("%s is out of range: %c%s%c\n", prompt, operator,
+			    p, unit); 
+		} else if (*endptr != '\0') {
+			printf("%s is invalid: %c%s%c\n", prompt, operator,
+			    p, unit); 
+		} else {
+			break;
+		}
+	} while (1);
+
+	return ((u_int32_t)d);
 }

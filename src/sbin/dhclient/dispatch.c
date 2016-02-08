@@ -1,4 +1,4 @@
-/*	$OpenBSD: dispatch.c,v 1.49 2010/10/23 14:26:57 phessler Exp $	*/
+/*	$OpenBSD: dispatch.c,v 1.53 2012/07/26 18:42:58 krw Exp $	*/
 
 /*
  * Copyright 2004 Henning Brauer <henning@openbsd.org>
@@ -47,8 +47,7 @@
 #include <ifaddrs.h>
 #include <poll.h>
 
-struct timeout *timeouts;
-static struct timeout *free_timeouts;
+struct timeout timeout;
 static int interfaces_invalidated;
 
 /*
@@ -124,10 +123,11 @@ dispatch(void)
 	int count, to_msec;
 	struct pollfd fds[2];
 	time_t howlong;
+	void (*func)(void);
 
 	do {
 		/*
-		 * Call any expired timeouts, and then if there's still
+		 * Call expired timeout, and then if there's still
 		 * a timeout registered, time out the select call then.
 		 */
 another:
@@ -142,25 +142,21 @@ another:
 			    " rdomain changed out from under us",
 			    ifi->name);
 
-		if (timeouts) {
-			struct timeout *t;
-
-			if (timeouts->when <= cur_time) {
-				t = timeouts;
-				timeouts = timeouts->next;
-				(*(t->func))();
-				t->next = free_timeouts;
-				free_timeouts = t;
+		if (timeout.func) {
+			time(&cur_time);
+			if (timeout.when <= cur_time) {
+				func = timeout.func;
+				cancel_timeout();
+				(*(func))();
 				goto another;
 			}
-
 			/*
 			 * Figure timeout in milliseconds, and check for
 			 * potential overflow, so we can cram into an
 			 * int for poll, while not polling with a
 			 * negative timeout and blocking indefinitely.
 			 */
-			howlong = timeouts->when - cur_time;
+			howlong = timeout.when - cur_time;
 			if (howlong > INT_MAX / 1000)
 				howlong = INT_MAX / 1000;
 			to_msec = howlong * 1000;
@@ -177,9 +173,6 @@ another:
 
 		/* Wait for a packet or a timeout... XXX */
 		count = poll(fds, 2, to_msec);
-
-		/* Get the current time... */
-		time(&cur_time);
 
 		/* Not likely to be transitory... */
 		if (count == -1) {
@@ -273,7 +266,7 @@ interface_status(char *ifname)
 	/* get interface flags */
 	memset(&ifr, 0, sizeof(ifr));
 	strlcpy(ifr.ifr_name, ifname, sizeof(ifr.ifr_name));
-	if (ioctl(sock, SIOCGIFFLAGS, &ifr) < 0) {
+	if (ioctl(sock, SIOCGIFFLAGS, &ifr) == -1) {
 		error("ioctl(SIOCGIFFLAGS) on %s: %m", ifname);
 	}
 
@@ -289,7 +282,7 @@ interface_status(char *ifname)
 		goto active;
 	memset(&ifmr, 0, sizeof(ifmr));
 	strlcpy(ifmr.ifm_name, ifname, sizeof(ifmr.ifm_name));
-	if (ioctl(sock, SIOCGIFMEDIA, (caddr_t)&ifmr) < 0) {
+	if (ioctl(sock, SIOCGIFMEDIA, (caddr_t)&ifmr) == -1) {
 		/*
 		 * EINVAL or ENOTTY simply means that the interface
 		 * does not support the SIOCGIFMEDIA ioctl. We regard it alive.
@@ -308,126 +301,29 @@ interface_status(char *ifname)
 		else
 			goto inactive;
 	}
-inactive:
-	close(sock);
-	return (0);
+
+	/* Assume 'active' if IFM_AVALID is not set. */
+
 active:
 	close(sock);
 	return (1);
-}
-
-void
-add_timeout(time_t when, void (*where)(void))
-{
-	struct timeout *t, *q;
-
-	/* See if this timeout supersedes an existing timeout. */
-	t = NULL;
-	for (q = timeouts; q; q = q->next) {
-		if (q->func == where) {
-			if (t)
-				t->next = q->next;
-			else
-				timeouts = q->next;
-			break;
-		}
-		t = q;
-	}
-
-	/* If we didn't supersede a timeout, allocate a timeout
-	   structure now. */
-	if (!q) {
-		if (free_timeouts) {
-			q = free_timeouts;
-			free_timeouts = q->next;
-			q->func = where;
-		} else {
-			q = malloc(sizeof(struct timeout));
-			if (!q)
-				error("Can't allocate timeout structure!");
-			q->func = where;
-		}
-	}
-
-	q->when = when;
-
-	/* Now sort this timeout into the timeout list. */
-
-	/* Beginning of list? */
-	if (!timeouts || timeouts->when > q->when) {
-		q->next = timeouts;
-		timeouts = q;
-		return;
-	}
-
-	/* Middle of list? */
-	for (t = timeouts; t->next; t = t->next) {
-		if (t->next->when > q->when) {
-			q->next = t->next;
-			t->next = q;
-			return;
-		}
-	}
-
-	/* End of list. */
-	t->next = q;
-	q->next = NULL;
-}
-
-void
-cancel_timeout(void (*where)(void))
-{
-	struct timeout *t, *q;
-
-	/* Look for this timeout on the list, and unlink it if we find it. */
-	t = NULL;
-	for (q = timeouts; q; q = q->next) {
-		if (q->func == where) {
-			if (t)
-				t->next = q->next;
-			else
-				timeouts = q->next;
-			break;
-		}
-		t = q;
-	}
-
-	/* If we found the timeout, put it on the free list. */
-	if (q) {
-		q->next = free_timeouts;
-		free_timeouts = q;
-	}
-}
-
-int
-interface_link_status(char *ifname)
-{
-	struct ifmediareq ifmr;
-	int sock;
-
-	if ((sock = socket(AF_INET, SOCK_DGRAM, 0)) == -1)
-		error("Can't create socket");
-
-	memset(&ifmr, 0, sizeof(ifmr));
-	strlcpy(ifmr.ifm_name, ifname, sizeof(ifmr.ifm_name));
-	if (ioctl(sock, SIOCGIFMEDIA, (caddr_t)&ifmr) == -1) {
-		/* EINVAL/ENOTTY -> link state unknown. treat as active */
-#ifdef DEBUG
-		if (errno != EINVAL && errno != ENOTTY)
-			debug("ioctl(SIOCGIFMEDIA) on %s: %m", ifname);
-#endif
-		close(sock);
-		return (1);
-	}
+inactive:
 	close(sock);
+	return (0);
+}
 
-	if (ifmr.ifm_status & IFM_AVALID) {
-		if (ifmr.ifm_status & IFM_ACTIVE)
-			return (1);
-		else
-			return (0);
-	}
-	return (1);
+void
+set_timeout(time_t when, void (*where)(void))
+{
+	timeout.when = when;
+	timeout.func = where;
+}
+
+void
+cancel_timeout(void)
+{
+	timeout.when = 0;
+	timeout.func = NULL;
 }
 
 int

@@ -1,4 +1,4 @@
-# $OpenBSD: Makefile.cross,v 1.50 2011/11/12 18:32:35 jasper Exp $
+# $OpenBSD: Makefile.cross,v 1.53 2012/07/13 15:54:10 jsing Exp $
 
 cross-tools:	cross-includes cross-binutils cross-gcc cross-lib
 cross-distrib:	cross-tools cross-bin cross-share cross-sys cross-etc-root-var
@@ -10,8 +10,7 @@ cross-distrib:	cross-tools cross-bin cross-share cross-sys cross-etc-root-var
 	 ${TARGET} == "gumstix" || ${TARGET} == "palm" || \
 	 ${TARGET} == "zaurus")
 TARGET_ARCH=	arm
-.elif	(${TARGET} == "hp300" || ${TARGET} == "mac68k" || \
-	 ${TARGET} == "mvme68k")
+.elif	(${TARGET} == "hp300" || ${TARGET} == "mvme68k")
 TARGET_ARCH=	m68k
 .elif	(${TARGET} == "aviion" || ${TARGET} == "luna88k" || \
 	 ${TARGET} == "mvme88k")
@@ -133,6 +132,8 @@ NO_CROSS+=httpd
 NO_CROSS+=microcode
 NO_CROSS+=groff lynx binutils binutils-2.17 perl texinfo gcc cvs
 NO_CROSS+=nsd
+NO_CROSS+=nginx
+NO_CROSS+=sqlite3
 
 cross-dirs:	${CROSSDIRS}
 cross-obj:	${CROSSOBJ}

@@ -1,4 +1,4 @@
-/*	$OpenBSD: util.c,v 1.57 2012/01/28 16:54:10 gilles Exp $	*/
+/*	$OpenBSD: util.c,v 1.66 2012/07/12 08:51:43 chl Exp $	*/
 
 /*
  * Copyright (c) 2000,2001 Markus Friedl.  All rights reserved.
@@ -18,6 +18,37 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
+/* the mkdir_p() function is based on bin/mkdir/mkdir.c that is covered
+ * by the following license: */
+/*
+ * Copyright (c) 1983, 1992, 1993
+ *	The Regents of the University of California.  All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. Neither the name of the University nor the names of its contributors
+ *    may be used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ */
+
 #include <sys/types.h>
 #include <sys/param.h>
 #include <sys/queue.h>
@@ -27,6 +58,7 @@
 #include <sys/resource.h>
 
 #include <netinet/in.h>
+#include <arpa/inet.h>
 
 #include <ctype.h>
 #include <err.h>
@@ -51,6 +83,8 @@
 const char *log_in6addr(const struct in6_addr *);
 const char *log_sockaddr(struct sockaddr *);
 
+static int temp_inet_net_pton_ipv6(const char *, void *, size_t);
+
 int
 bsnprintf(char *str, size_t size, const char *format, ...)
 {
@@ -64,6 +98,59 @@ bsnprintf(char *str, size_t size, const char *format, ...)
 		return 0;
 
 	return 1;
+}
+
+/*
+ * mkdir -p. Based on bin/mkdir/mkdir.c:mkpath()
+ */
+int
+mkdir_p(char *path, mode_t mode)
+{
+	struct stat	 sb;
+	char		*slash;
+	int		 done, exists;
+	mode_t		 dir_mode;
+
+	dir_mode = mode | S_IWUSR | S_IXUSR;
+
+	slash = path;
+
+	for (;;) {
+		slash += strspn(slash, "/");
+		slash += strcspn(slash, "/");
+
+		done = (*slash == '\0');
+		*slash = '\0';
+
+		/* skip existing path components */
+		exists = !stat(path, &sb);
+		if (!done && exists && S_ISDIR(sb.st_mode)) {
+			*slash = '/';
+			continue;
+		}
+
+		if (mkdir(path, done ? mode : dir_mode) == 0) {
+			if (mode > 0777 && chmod(path, mode) < 0)
+				return (-1);
+		} else {
+			if (!exists) {
+				/* Not there */
+				return (-1);
+			}
+			if (!S_ISDIR(sb.st_mode)) {
+				/* Is there, but isn't a directory */
+				errno = ENOTDIR;
+				return (-1);
+			}
+		}
+
+		if (done)
+			break;
+
+		*slash = '/';
+	}
+
+	return (0);
 }
 
 int
@@ -254,9 +341,13 @@ hostname_match(char *hostname, char *pattern)
 }
 
 int
-valid_localpart(char *s)
+valid_localpart(const char *s)
 {
-#define IS_ATEXT(c)     (isalnum((int)(c)) || strchr("!#$%&'*+-/=?^_`{|}~", (c)))
+/*
+ * RFC 5322 defines theses characters as valid: !#$%&'*+-/=?^_`{|}~
+ * some of them are potentially dangerous, and not so used after all.
+ */
+#define IS_ATEXT(c)     (isalnum((int)(c)) || strchr("%+-=_", (c)))
 nextatom:
         if (! IS_ATEXT(*s) || *s == '\0')
                 return 0;
@@ -275,8 +366,29 @@ nextatom:
 }
 
 int
-valid_domainpart(char *s)
+valid_domainpart(const char *s)
 {
+	struct in_addr	 ina;
+	struct in6_addr	 ina6;
+	char		*c, domain[MAX_DOMAINPART_SIZE];
+
+	if (*s == '[') {
+		strlcpy(domain, s + 1, sizeof domain);
+
+		c = strchr(domain, (int)']');
+		if (!c || c[1] != '\0')
+			return 0;
+
+		*c = '\0';
+
+		if (inet_pton(AF_INET6, domain, &ina6) == 1)
+			return 1;
+		if (inet_pton(AF_INET, domain, &ina) == 1)
+			return 1;
+
+		return 0;
+	}
+
 nextsub:
         if (!isalnum((int)*s))
                 return 0;
@@ -390,6 +502,132 @@ time_to_text(time_t when)
 		fatalx("time_to_text: bsnprintf");
 	
 	return buf;
+}
+
+int
+text_to_netaddr(struct netaddr *netaddr, char *s)
+{
+	struct sockaddr_storage	ss;
+	struct sockaddr_in	ssin;
+	struct sockaddr_in6	ssin6;
+	int			bits;
+
+	if (strncmp("IPv6:", s, 5) == 0)
+		s += 5;
+
+	if (strchr(s, '/') != NULL) {
+		/* dealing with netmask */
+
+		bzero(&ssin, sizeof(struct sockaddr_in));
+		bits = inet_net_pton(AF_INET, s, &ssin.sin_addr,
+		    sizeof(struct in_addr));
+
+		if (bits != -1) {
+			ssin.sin_family = AF_INET;
+			memcpy(&ss, &ssin, sizeof(ssin));
+			ss.ss_len = sizeof(struct sockaddr_in);
+		}
+		else {
+			bzero(&ssin6, sizeof(struct sockaddr_in6));
+			bits = inet_net_pton(AF_INET6, s, &ssin6.sin6_addr,
+			    sizeof(struct in6_addr));
+			if (bits == -1) {
+
+				/* XXX - until AF_INET6 support gets in base */
+				if (errno != EAFNOSUPPORT) {
+					log_warn("inet_net_pton");
+					return 0;
+				}
+				bits = temp_inet_net_pton_ipv6(s,
+				    &ssin6.sin6_addr,
+				    sizeof(struct in6_addr));
+			}
+			if (bits == -1) {
+				log_warn("inet_net_pton");
+				return 0;
+			}
+			ssin6.sin6_family = AF_INET6;
+			memcpy(&ss, &ssin6, sizeof(ssin6));
+			ss.ss_len = sizeof(struct sockaddr_in6);
+		}
+	}
+	else {
+		/* IP address ? */
+		if (inet_pton(AF_INET, s, &ssin.sin_addr) == 1) {
+			ssin.sin_family = AF_INET;
+			bits = 32;
+			memcpy(&ss, &ssin, sizeof(ssin));
+			ss.ss_len = sizeof(struct sockaddr_in);
+		}
+		else if (inet_pton(AF_INET6, s, &ssin6.sin6_addr) == 1) {
+			ssin6.sin6_family = AF_INET6;
+			bits = 128;
+			memcpy(&ss, &ssin6, sizeof(ssin6));
+			ss.ss_len = sizeof(struct sockaddr_in6);
+		}
+		else return 0;
+	}
+
+	netaddr->ss   = ss;
+	netaddr->bits = bits;
+	return 1;
+}
+
+int
+text_to_relayhost(struct relayhost *relay, char *s)
+{
+	u_int32_t		 i;
+	struct schema {
+		char		*name;
+		u_int8_t	 flags;
+	} schemas [] = {
+		{ "smtp://",		0				},
+		{ "smtps://",		F_SMTPS				},
+		{ "tls://",		F_STARTTLS			},
+		{ "smtps+auth://",     	F_SMTPS|F_AUTH			},
+		{ "tls+auth://",	F_STARTTLS|F_AUTH		},
+		{ "ssl://",		F_SMTPS|F_STARTTLS		},
+		{ "ssl+auth://",	F_SMTPS|F_STARTTLS|F_AUTH	}
+	};
+	const char	*errstr = NULL;
+	char	*p;
+	char	*sep;
+	int	 len;
+
+	for (i = 0; i < nitems(schemas); ++i)
+		if (strncasecmp(schemas[i].name, s, strlen(schemas[i].name)) == 0)
+			break;
+
+	if (i == nitems(schemas)) {
+		/* there is a schema, but it's not recognized */
+		if (strstr(s, "://"))
+			return 0;
+
+		/* no schema, default to smtp:// */
+		i = 0;
+		p = s;
+	}
+	else
+		p = s + strlen(schemas[i].name);
+
+	relay->flags = schemas[i].flags;
+
+	if ((sep = strrchr(p, ':')) != NULL) {
+		relay->port = strtonum(sep+1, 1, 0xffff, &errstr);
+		if (errstr)
+			return 0;
+		len = sep - p;
+	}
+	else 
+		len = strlen(p);
+
+	if (strlcpy(relay->hostname, p, sizeof (relay->hostname))
+	    >= sizeof (relay->hostname))
+		return 0;
+
+	relay->hostname[len] = 0;
+
+	return 1;
 }
 
 /*
@@ -517,18 +755,9 @@ sa_set_port(struct sockaddr *sa, int port)
 u_int64_t
 generate_uid(void)
 {
-	u_int64_t	id;
-	struct timeval	tp;
+	static u_int32_t id = 0;
 
-	if (gettimeofday(&tp, NULL) == -1)
-		fatal("generate_uid: time");
-
-	id = (u_int32_t)tp.tv_sec;
-	id <<= 32;
-	id |= (u_int32_t)tp.tv_usec;
-	usleep(1);
-
-	return (id);
+	return ((uint64_t)(id++) << 32 | arc4random());
 }
 
 void
@@ -677,4 +906,36 @@ parse_smtp_response(char *line, size_t len, char **msg, int *cont)
 			return "non-printable character in reply";
 
 	return NULL;
+}
+
+static int
+temp_inet_net_pton_ipv6(const char *src, void *dst, size_t size)
+{
+	int	ret;
+	int	bits;
+	char	buf[sizeof("xxxx:xxxx:xxxx:xxxx:xxxx:xxxx:255:255:255:255/128")];
+	char		*sep;
+	const char	*errstr;
+
+	if (strlcpy(buf, src, sizeof buf) >= sizeof buf) {
+		errno = EMSGSIZE;
+		return (-1);
+	}
+
+	sep = strchr(buf, '/');
+	if (sep != NULL)
+		*sep++ = '\0';
+
+	ret = inet_pton(AF_INET6, buf, dst);
+	if (ret != 1)
+		return (-1);
+
+	if (sep == NULL)
+		return 128;
+
+	bits = strtonum(sep, 0, 128, &errstr);
+	if (errstr)
+		return (-1);
+
+	return bits;
 }

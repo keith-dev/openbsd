@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_synch.c,v 1.99 2012/01/17 02:34:18 guenther Exp $	*/
+/*	$OpenBSD: kern_synch.c,v 1.103 2012/07/10 16:56:28 haesbaert Exp $	*/
 /*	$NetBSD: kern_synch.c,v 1.37 1996/04/22 01:38:37 christos Exp $	*/
 
 /*
@@ -215,7 +215,7 @@ sleep_finish(struct sleep_state *sls, int do_sleep)
 
 	if (sls->sls_do_sleep && do_sleep) {
 		p->p_stat = SSLEEP;
-		p->p_stats->p_ru.ru_nvcsw++;
+		p->p_ru.ru_nvcsw++;
 		SCHED_ASSERT_LOCKED();
 		mi_switch();
 	} else if (!do_sleep) {
@@ -378,7 +378,9 @@ wakeup_n(const volatile void *ident, int n)
 				p->p_stat = SRUN;
 				p->p_cpu = sched_choosecpu(p);
 				setrunqueue(p);
-				need_resched(p->p_cpu);
+				if (p->p_priority <
+				    p->p_cpu->ci_schedstate.spc_curpriority)
+					need_resched(p->p_cpu);
 				/* END INLINE EXPANSION */
 
 			}
@@ -435,6 +437,10 @@ sys___thrsleep(struct proc *p, void *v, register_t *retval)
 			*retval = error;
 			return (0);
 		}
+#ifdef KTRACE
+		if (KTRPOINT(p, KTR_STRUCT))
+			ktrabstimespec(p, &ats);
+#endif
 
 		if (timespeccmp(&ats, &now, <)) {
 			/* already passed: still do the unlock */
@@ -451,11 +457,9 @@ sys___thrsleep(struct proc *p, void *v, register_t *retval)
 
 		timespecsub(&ats, &now, &ats);
 		to_ticks = (long long)hz * ats.tv_sec +
-		    ats.tv_nsec / (tick * 1000);
+		    (ats.tv_nsec + tick * 1000 - 1) / (tick * 1000) + 1;
 		if (to_ticks > INT_MAX)
 			to_ticks = INT_MAX;
-		if (to_ticks == 0)
-			to_ticks = 1;
 	}
 
 	p->p_thrslpid = ident;

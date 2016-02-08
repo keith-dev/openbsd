@@ -1,4 +1,4 @@
-/*	$OpenBSD: timer.c,v 1.5 2011/05/27 12:01:02 reyk Exp $	*/
+/*	$OpenBSD: timer.c,v 1.8 2012/06/22 16:06:31 mikeb Exp $	*/
 
 /*
  * Copyright (c) 2010 Reyk Floeter <reyk@vantronix.net>
@@ -32,86 +32,50 @@
 
 #include "iked.h"
 
-struct timer_cbarg {
-	int		 tmr_active;
-	struct event	 tmr_ev;
-	struct iked	*tmr_env;
-	struct timeval	 tmr_first;
-	struct timeval	 tmr_last;
-	struct timeval	 tmr_tv;
-	int		(*tmr_initcb)(struct iked *, struct iked_policy *);
-} timer_initiator;
-
-void	 timer_initiator_cb(int, short, void *);
-
-#define IKED_TIMER_INITIATOR_INITIAL	2
-#define IKED_TIMER_INITIATOR_INTERVAL	60
+void	 timer_callback(int, short, void *);
 
 void
-timer_register_initiator(struct iked *env,
-    int (*cb)(struct iked *, struct iked_policy *))
+timer_initialize(struct iked *env, struct iked_timer *tmr,
+    void (*cb)(struct iked *, void *), void *arg)
 {
-	struct timer_cbarg	*tmr;
-
-	timer_unregister_initiator(env);
-
-	if (env->sc_passive)
-		return;
-
-	tmr = &timer_initiator;
-	gettimeofday(&tmr->tmr_first, NULL);
-	gettimeofday(&tmr->tmr_last, NULL);
-
 	tmr->tmr_env = env;
-	tmr->tmr_initcb = cb;
-	tmr->tmr_active = 1;
-	evtimer_set(&tmr->tmr_ev, timer_initiator_cb, tmr);
+	tmr->tmr_cb = cb;
+	tmr->tmr_cbarg = arg;
+	evtimer_set(&tmr->tmr_ev, timer_callback, tmr);
+}
 
-	tmr->tmr_tv.tv_sec = IKED_TIMER_INITIATOR_INITIAL;
-	tmr->tmr_tv.tv_usec = 0;
-	evtimer_add(&tmr->tmr_ev, &tmr->tmr_tv);
+int
+timer_initialized(struct iked *env, struct iked_timer *tmr)
+{
+	if (tmr && tmr->tmr_env == env && tmr->tmr_cb &&
+	    evtimer_initialized(&tmr->tmr_ev))
+		return (1);
+	return (0);
 }
 
 void
-timer_unregister_initiator(struct iked *env)
+timer_register(struct iked *env, struct iked_timer *tmr, int timeout)
 {
-	struct timer_cbarg	*tmr;
+	struct timeval		 tv = { timeout };
 
-	tmr = &timer_initiator;
-	if (!tmr->tmr_active)
-		return;
+	if (evtimer_initialized(&tmr->tmr_ev) &&
+	    evtimer_pending(&tmr->tmr_ev, NULL))
+		evtimer_del(&tmr->tmr_ev);
 
-	event_del(&tmr->tmr_ev);
-	bzero(tmr, sizeof(*tmr));
+	evtimer_add(&tmr->tmr_ev, &tv);
 }
 
 void
-timer_initiator_cb(int fd, short event, void *arg)
+timer_deregister(struct iked *env, struct iked_timer *tmr)
 {
-	struct timer_cbarg	*tmr = arg;
-	struct iked		*env = tmr->tmr_env;
-	struct iked_policy	*pol;
+	evtimer_del(&tmr->tmr_ev);
+}
 
-	gettimeofday(&tmr->tmr_last, NULL);
+void
+timer_callback(int fd, short event, void *arg)
+{
+	struct iked_timer	*tmr = arg;
 
-	TAILQ_FOREACH(pol, &env->sc_policies, pol_entry) {
-		if ((pol->pol_flags & IKED_POLICY_ACTIVE) == 0)
-			continue;
-		if (sa_peer_lookup(pol, &pol->pol_peer.addr) != NULL) {
-			log_debug("%s: \"%s\" is already active",
-			    __func__, pol->pol_name);
-			continue;
-		}
-
-		log_debug("%s: initiating \"%s\"", __func__, pol->pol_name);
-
-		if (tmr->tmr_initcb != NULL) {
-			/* Ignore error but what should we do on failure? */
-			(void)tmr->tmr_initcb(env, pol);
-		}
-	}
-
-	tmr->tmr_tv.tv_sec = IKED_TIMER_INITIATOR_INTERVAL;
-	tmr->tmr_tv.tv_usec = 0;
-	evtimer_add(&tmr->tmr_ev, &tmr->tmr_tv);
+	if (tmr->tmr_cb)
+		tmr->tmr_cb(tmr->tmr_env, tmr->tmr_cbarg);
 }
