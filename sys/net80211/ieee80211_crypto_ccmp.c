@@ -1,4 +1,4 @@
-/*	$OpenBSD: ieee80211_crypto_ccmp.c,v 1.2 2008/07/26 12:41:34 damien Exp $	*/
+/*	$OpenBSD: ieee80211_crypto_ccmp.c,v 1.8 2008/12/03 17:25:41 damien Exp $	*/
 
 /*-
  * Copyright (c) 2008 Damien Bergamini <damien.bergamini@free.fr>
@@ -16,13 +16,17 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
+/*
+ * This code implements the CTR with CBC-MAC protocol (CCMP) defined in
+ * IEEE Std 802.11-2007 section 8.3.3.
+ */
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/mbuf.h>
 #include <sys/malloc.h>
 #include <sys/kernel.h>
 #include <sys/socket.h>
-#include <sys/sockio.h>
 #include <sys/endian.h>
 
 #include <net/if.h>
@@ -84,7 +88,7 @@ ieee80211_ccmp_phase1(rijndael_ctx *ctx, const struct ieee80211_frame *wh,
 	u_int8_t tid = 0;
 	int la, i;
 
-	/* construct AAD (additional authentication data) */
+	/* construct AAD (additional authenticated data) */
 	aad = &auth[2];	/* skip l(a), will be filled later */
 	*aad = wh->i_fc[0];
 	/* 11w: conditionnally mask subtype field */
@@ -97,9 +101,7 @@ ieee80211_ccmp_phase1(rijndael_ctx *ctx, const struct ieee80211_frame *wh,
 	*aad &= ~(IEEE80211_FC1_RETRY | IEEE80211_FC1_PWR_MGT |
 	    IEEE80211_FC1_MORE_DATA);
 	/* 11n: conditionnally mask order bit */
-	if ((wh->i_fc[0] &
-	    (IEEE80211_FC0_TYPE_MASK | IEEE80211_FC0_SUBTYPE_QOS)) ==
-	    (IEEE80211_FC0_TYPE_DATA | IEEE80211_FC0_SUBTYPE_QOS))
+	if (ieee80211_has_htc(wh))
 		*aad &= ~IEEE80211_FC1_ORDER;
 	aad++;
 	IEEE80211_ADDR_COPY(aad, wh->i_addr1); aad += IEEE80211_ADDR_LEN;
@@ -107,26 +109,13 @@ ieee80211_ccmp_phase1(rijndael_ctx *ctx, const struct ieee80211_frame *wh,
 	IEEE80211_ADDR_COPY(aad, wh->i_addr3); aad += IEEE80211_ADDR_LEN;
 	*aad++ = wh->i_seq[0] & ~0xf0;
 	*aad++ = 0;
-	if ((wh->i_fc[1] & IEEE80211_FC1_DIR_MASK) ==
-	    IEEE80211_FC1_DIR_DSTODS) {
-		const struct ieee80211_frame_addr4 *wh4 =
-		    (const struct ieee80211_frame_addr4 *)wh;
-		IEEE80211_ADDR_COPY(aad, wh4->i_addr4);
+	if (ieee80211_has_addr4(wh)) {
+		IEEE80211_ADDR_COPY(aad,
+		    ((const struct ieee80211_frame_addr4 *)wh)->i_addr4);
 		aad += IEEE80211_ADDR_LEN;
-		if ((wh->i_fc[0] &
-		    (IEEE80211_FC0_TYPE_MASK | IEEE80211_FC0_SUBTYPE_QOS)) ==
-		    (IEEE80211_FC0_TYPE_DATA | IEEE80211_FC0_SUBTYPE_QOS)) {
-			const struct ieee80211_qosframe_addr4 *qwh4 =
-			    (const struct ieee80211_qosframe_addr4 *)wh;
-			*aad++ = tid = qwh4->i_qos[0] & 0x0f;
-			*aad++ = 0;
-		}
-	} else if ((wh->i_fc[0] &
-	    (IEEE80211_FC0_TYPE_MASK | IEEE80211_FC0_SUBTYPE_QOS)) ==
-	    (IEEE80211_FC0_TYPE_DATA | IEEE80211_FC0_SUBTYPE_QOS)) {
-		const struct ieee80211_qosframe *qwh =
-		    (const struct ieee80211_qosframe *)wh;
-		*aad++ = tid = qwh->i_qos[0] & 0x0f;
+	}
+	if (ieee80211_has_qos(wh)) {
+		*aad++ = tid = ieee80211_get_qos(wh) & IEEE80211_QOS_TID;
 		*aad++ = 0;
 	}
 
@@ -246,7 +235,7 @@ ieee80211_ccmp_encrypt(struct ieee80211com *ic, struct mbuf *m0,
 				goto nospace;
 			n = n->m_next;
 			n->m_len = MLEN;
-			if (left > MLEN - IEEE80211_CCMP_MICLEN) {
+			if (left >= MINCLSIZE - IEEE80211_CCMP_MICLEN) {
 				MCLGET(n, M_DONTWAIT);
 				if (n->m_flags & M_EXT)
 					n->m_len = n->m_ext.ext_size;
@@ -291,7 +280,7 @@ ieee80211_ccmp_encrypt(struct ieee80211com *ic, struct mbuf *m0,
 		n = n->m_next;
 		n->m_len = 0;
 	}
-	/* finalize MIC, U := T XOR first-M-bytes( S_O ) */
+	/* finalize MIC, U := T XOR first-M-bytes( S_0 ) */
 	mic = mtod(n, u_int8_t *) + n->m_len;
 	for (i = 0; i < IEEE80211_CCMP_MICLEN; i++)
 		mic[i] = b[i] ^ s0[i];
@@ -314,7 +303,7 @@ ieee80211_ccmp_decrypt(struct ieee80211com *ic, struct mbuf *m0,
 {
 	struct ieee80211_ccmp_ctx *ctx = k->k_priv;
 	struct ieee80211_frame *wh;
-	u_int64_t pn;
+	u_int64_t pn, *prsc;
 	const u_int8_t *ivp, *src;
 	u_int8_t *dst;
 	u_int8_t mic0[IEEE80211_CCMP_MICLEN];
@@ -333,11 +322,21 @@ ieee80211_ccmp_decrypt(struct ieee80211com *ic, struct mbuf *m0,
 		m_freem(m0);
 		return NULL;
 	}
-	/* check that ExtIV bit is be set */
+	/* check that ExtIV bit is set */
 	if (!(ivp[3] & IEEE80211_WEP_EXTIV)) {
 		m_freem(m0);
 		return NULL;
 	}
+
+	/* retrieve last seen packet number for this frame type/priority */
+	if ((wh->i_fc[0] & IEEE80211_FC0_TYPE_MASK) ==
+	    IEEE80211_FC0_TYPE_DATA) {
+		u_int8_t tid = ieee80211_has_qos(wh) ?
+		    ieee80211_get_qos(wh) & IEEE80211_QOS_TID : 0;
+		prsc = &k->k_rsc[tid];
+	} else	/* 11w: management frames have their own counters */
+		prsc = &k->k_mgmt_rsc;
+
 	/* extract the 48-bit PN from the CCMP header */
 	pn = (u_int64_t)ivp[0]       |
 	     (u_int64_t)ivp[1] <<  8 |
@@ -345,8 +344,9 @@ ieee80211_ccmp_decrypt(struct ieee80211com *ic, struct mbuf *m0,
 	     (u_int64_t)ivp[5] << 24 |
 	     (u_int64_t)ivp[6] << 32 |
 	     (u_int64_t)ivp[7] << 40;
-	if (pn <= k->k_rsc[0]) {
+	if (pn <= *prsc) {
 		/* replayed frame, discard */
+		ic->ic_stats.is_ccmp_replays++;
 		m_freem(m0);
 		return NULL;
 	}
@@ -400,7 +400,7 @@ ieee80211_ccmp_decrypt(struct ieee80211com *ic, struct mbuf *m0,
 				goto nospace;
 			n = n->m_next;
 			n->m_len = MLEN;
-			if (left > MLEN) {
+			if (left >= MINCLSIZE) {
 				MCLGET(n, M_DONTWAIT);
 				if (n->m_flags & M_EXT)
 					n->m_len = n->m_ext.ext_size;
@@ -437,23 +437,21 @@ ieee80211_ccmp_decrypt(struct ieee80211com *ic, struct mbuf *m0,
 	if (j != 0)	/* partial block, encrypt MIC */
 		rijndael_encrypt(&ctx->rijndael, b, b);
 
-	/* finalize MIC, U := T XOR first-M-bytes( S_O ) */
+	/* finalize MIC, U := T XOR first-M-bytes( S_0 ) */
 	for (i = 0; i < IEEE80211_CCMP_MICLEN; i++)
 		b[i] ^= s0[i];
 
 	/* check that it matches the MIC in received frame */
 	m_copydata(m, moff, IEEE80211_CCMP_MICLEN, mic0);
 	if (memcmp(mic0, b, IEEE80211_CCMP_MICLEN) != 0) {
+		ic->ic_stats.is_ccmp_dec_errs++;
 		m_freem(m0);
 		m_freem(n0);
 		return NULL;
 	}
 
-	/*
-	 * Update last seen packet number (note that it must be done
-	 * after MIC is validated.)
-	 */
-	k->k_rsc[0] = pn;
+	/* update last seen packet number (MIC is validated) */
+	*prsc = pn;
 
 	m_freem(m0);
 	return n0;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ugen.c,v 1.54 2008/06/26 05:42:18 ray Exp $ */
+/*	$OpenBSD: ugen.c,v 1.56 2008/12/14 16:48:04 fgsch Exp $ */
 /*	$NetBSD: ugen.c,v 1.63 2002/11/26 18:49:48 christos Exp $	*/
 /*	$FreeBSD: src/sys/dev/usb/ugen.c,v 1.26 1999/11/17 22:33:41 n_hibma Exp $	*/
 
@@ -504,6 +504,7 @@ ugen_do_read(struct ugen_softc *sc, int endpt, struct uio *uio, int flag)
 			DPRINTFN(5, ("ugenread: sleep on %p\n", sce));
 			error = tsleep(sce, PZERO | PCATCH, "ugenri",
 			    (sce->timeout * hz) / 1000);
+			sce->state &= ~UGEN_ASLP;
 			DPRINTFN(5, ("ugenread: woke, error=%d\n", error));
 			if (sc->sc_dying)
 				error = EIO;
@@ -511,10 +512,8 @@ ugen_do_read(struct ugen_softc *sc, int endpt, struct uio *uio, int flag)
 				error = 0;
 				break;
 			}
-			if (error) {
-				sce->state &= ~UGEN_ASLP;
+			if (error)
 				break;
-			}
 		}
 		splx(s);
 
@@ -571,14 +570,18 @@ ugen_do_read(struct ugen_softc *sc, int endpt, struct uio *uio, int flag)
 			}
 			sce->state |= UGEN_ASLP;
 			DPRINTFN(5, ("ugenread: sleep on %p\n", sce));
-			error = tsleep(sce, PZERO | PCATCH, "ugenri", 0);
+			error = tsleep(sce, PZERO | PCATCH, "ugenri",
+			    (sce->timeout * hz) / 1000);
+			sce->state &= ~UGEN_ASLP;
 			DPRINTFN(5, ("ugenread: woke, error=%d\n", error));
 			if (sc->sc_dying)
 				error = EIO;
-			if (error) {
-				sce->state &= ~UGEN_ASLP;
+			if (error == EWOULDBLOCK) {	/* timeout, return 0 */
+				error = 0;
 				break;
 			}
+			if (error)
+				break;
 		}
 
 		while (sce->cur != sce->fill && uio->uio_resid > 0 && !error) {
@@ -903,7 +906,6 @@ ugen_set_interface(struct ugen_softc *sc, int ifaceidx, int altno)
 	err = usbd_endpoint_count(iface, &nendpt);
 	if (err)
 		return (err);
-	/* XXX should only do this after setting new altno has succeeded */
 	for (endptno = 0; endptno < nendpt; endptno++) {
 		ed = usbd_interface2endpoint_descriptor(iface,endptno);
 		endpt = ed->bEndpointAddress;
@@ -917,11 +919,13 @@ ugen_set_interface(struct ugen_softc *sc, int ifaceidx, int altno)
 	/* change setting */
 	err = usbd_set_interface(iface, altno);
 	if (err)
-		return (err);
+		goto out;
 
 	err = usbd_endpoint_count(iface, &nendpt);
 	if (err)
-		return (err);
+		goto out;
+
+out:
 	for (endptno = 0; endptno < nendpt; endptno++) {
 		ed = usbd_interface2endpoint_descriptor(iface,endptno);
 		endpt = ed->bEndpointAddress;
@@ -931,7 +935,7 @@ ugen_set_interface(struct ugen_softc *sc, int ifaceidx, int altno)
 		sce->edesc = ed;
 		sce->iface = iface;
 	}
-	return (0);
+	return (err);
 }
 
 /* Retrieve a complete descriptor for a certain device and index. */
@@ -1020,11 +1024,11 @@ ugen_do_ioctl(struct ugen_softc *sc, int endpt, u_long cmd,
 		return (0);
 	case USB_SET_TIMEOUT:
 		sce = &sc->sc_endpoints[endpt][IN];
-		if (sce == NULL
-		    /* XXX this shouldn't happen, but the distinction between
-		       input and output pipes isn't clear enough.
-		       || sce->pipeh == NULL */
-			)
+		if (sce == NULL)
+			return (EINVAL);
+		sce->timeout = *(int *)addr;
+		sce = &sc->sc_endpoints[endpt][OUT];
+		if (sce == NULL)
 			return (EINVAL);
 		sce->timeout = *(int *)addr;
 		return (0);

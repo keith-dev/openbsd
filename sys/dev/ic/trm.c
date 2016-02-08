@@ -1,4 +1,4 @@
-/*	$OpenBSD: trm.c,v 1.8 2007/09/07 17:41:09 krw Exp $
+/*	$OpenBSD: trm.c,v 1.12 2009/02/16 21:19:07 miod Exp $
  * ------------------------------------------------------------
  *   O.S       : OpenBSD
  *   File Name : trm.c
@@ -61,7 +61,7 @@
 
 /* #define TRM_DEBUG0 */
 
-void	trm_minphys(struct buf *);
+void	trm_minphys(struct buf *, struct scsi_link *);
 
 void	trm_initSRB(struct trm_scsi_req_q *);
 
@@ -397,7 +397,7 @@ trm_scsi_cmd(struct scsi_xfer *xs)
 
 	if (pSRB == NULL) {
 		splx(intflag);
-		return TRY_AGAIN_LATER;
+		return (NO_CCB);
 	}
 
 	/* 
@@ -461,7 +461,7 @@ trm_scsi_cmd(struct scsi_xfer *xs)
 	trm_StartWaitingSRB(sc);
 
 	if ((xferflags & SCSI_POLL) == 0) {
-		timeout_add(&xs->stimeout, (xs->timeout * hz) / 1000);
+		timeout_add_msec(&xs->stimeout, xs->timeout);
 		splx(intflag);
 		return SUCCESSFULLY_QUEUED;
 	}
@@ -653,9 +653,8 @@ trm_timeout(void *arg1)
  	if (xs != NULL) {
  		sc = xs->sc_link->adapter_softc;
  		sc_print_addr(xs->sc_link);
- 		printf("%s: SCSI OpCode 0x%02x for target %d lun %d timed out\n",
- 		    sc->sc_device.dv_xname, xs->cmd->opcode,
-		    xs->sc_link->target, xs->sc_link->lun);
+ 		printf("SCSI OpCode 0x%02x timed out\n",
+ 		    sc->sc_device.dv_xname, xs->cmd->opcode);
 		pSRB->SRBFlag |= TRM_SCSI_TIMED_OUT;
  		trm_FinishSRB(sc, pSRB);
 		trm_StartWaitingSRB(sc);
@@ -2283,7 +2282,7 @@ trm_RequestSense(struct trm_softc *sc, struct trm_scsi_req_q *pSRB)
 	pSRB->ScsiCmdLen = 6;
 
 	if ((pSRB->xs != NULL) && ((pSRB->xs->flags & SCSI_POLL) == 0))
-		timeout_add(&pSRB->xs->stimeout, (pSRB->xs->timeout/1000) * hz);
+		timeout_add_msec(&pSRB->xs->stimeout, pSRB->xs->timeout);
 
 	if (trm_StartSRB(sc, pSRB) != 0)
 		trm_RewaitSRB(sc, pSRB);
@@ -2368,7 +2367,7 @@ trm_linkSRB(struct trm_softc *sc)
  * ------------------------------------------------------------
  */
 void
-trm_minphys(struct buf *bp)
+trm_minphys(struct buf *bp, struct scsi_link *sl)
 {
 	if (bp->b_bcount > (TRM_MAX_SG_LISTENTRY-1) * (long) NBPG) {
 		bp->b_bcount = (TRM_MAX_SG_LISTENTRY-1) * (long) NBPG;

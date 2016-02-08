@@ -1,4 +1,4 @@
-/*	$OpenBSD: hypervisor.h,v 1.2 2008/07/21 13:30:04 art Exp $	*/
+/*	$OpenBSD: hypervisor.h,v 1.10 2009/01/02 15:35:54 kettenis Exp $	*/
 
 /*
  * Copyright (c) 2008 Mark Kettenis
@@ -31,16 +31,13 @@ int64_t	hv_api_get_version(uint64_t api_group,
  * Domain services
  */
 
-int64_t	hv_mach_set_soft_state(uint64_t software_state,
-	    paddr_t software_description_ptr);
-
-#define SIS_NORMAL	0x1
-#define SIS_TRANSITION	0x2
+int64_t hv_mach_desc(paddr_t buffer, psize_t *length);
 
 /*
  * CPU services
  */
 
+void	hv_cpu_yield(void);
 int64_t	hv_cpu_qconf(uint64_t queue, uint64_t base, uint64_t nentries);
 
 #define CPU_MONDO_QUEUE		0x3c
@@ -48,8 +45,6 @@ int64_t	hv_cpu_qconf(uint64_t queue, uint64_t base, uint64_t nentries);
 
 int64_t	hv_cpu_mondo_send(uint64_t ncpus, paddr_t cpulist, paddr_t data);
 int64_t	hv_cpu_myid(uint64_t *cpuid);
-
-void hv_cpu_yield(void);
 
 /*
  * MMU services
@@ -107,6 +102,23 @@ int64_t	hv_intr_settarget(uint64_t sysino, uint64_t cpuid);
 #define INTR_RECEIVED	1
 #define INTR_DELIVERED	2
 
+int64_t	hv_vintr_getcookie(uint64_t devhandle, uint64_t devino,
+	    uint64_t *cookie_value);
+int64_t	hv_vintr_setcookie(uint64_t devhandle, uint64_t devino,
+	    uint64_t cookie_value);
+int64_t	hv_vintr_getenabled(uint64_t devhandle, uint64_t devino,
+	    uint64_t *intr_enabled);
+int64_t	hv_vintr_setenabled(uint64_t devhandle, uint64_t devino,
+	    uint64_t intr_enabled);
+int64_t	hv_vintr_getstate(uint64_t devhandle, uint64_t devino,
+	    uint64_t *intr_state);
+int64_t	hv_vintr_setstate(uint64_t devhandle, uint64_t devino,
+	    uint64_t intr_state);
+int64_t	hv_vintr_gettarget(uint64_t devhandle, uint64_t devino,
+	    uint64_t *cpuid);
+int64_t	hv_vintr_settarget(uint64_t devhandle, uint64_t devino,
+	    uint64_t cpuid);
+
 /*
  * Time of day services
  */
@@ -121,6 +133,16 @@ int64_t	hv_tod_set(uint64_t tod);
 int64_t	hv_cons_getchar(int64_t *ch);
 int64_t	hv_cons_putchar(int64_t ch);
 int64_t	hv_api_putchar(int64_t ch);
+
+/*
+ * Domain state services
+ */
+
+int64_t	hv_soft_state_set(uint64_t software_state,
+	    paddr_t software_description_ptr);
+
+#define SIS_NORMAL	0x1
+#define SIS_TRANSITION	0x2
 
 /*
  * PCI I/O services
@@ -145,6 +167,56 @@ int64_t	hv_pci_config_put(uint64_t devhandle, uint64_t pci_device,
 
 #define PCI_MAP_ATTR_READ  0x01		/* From memory */
 #define PCI_MAP_ATTR_WRITE 0x02		/* To memory */
+
+/*
+ * Logical Domain Channel services
+ */
+
+int64_t hv_ldc_tx_qconf(uint64_t ldc_id, paddr_t base_raddr,
+	    uint64_t nentries);
+int64_t hv_ldc_tx_qinfo(uint64_t ldc_id, paddr_t *base_raddr,
+	    uint64_t *nentries);
+int64_t hv_ldc_tx_get_state(uint64_t ldc_id, uint64_t *head_offset,
+	    uint64_t *tail_offset, uint64_t *channel_state);
+int64_t hv_ldc_tx_set_qtail(uint64_t ldc_id, uint64_t tail_offset);
+int64_t hv_ldc_rx_qconf(uint64_t ldc_id, paddr_t base_raddr,
+	    uint64_t nentries);
+int64_t hv_ldc_rx_qinfo(uint64_t ldc_id, paddr_t *base_raddr,
+	    uint64_t *nentries);
+int64_t hv_ldc_rx_get_state(uint64_t ldc_id, uint64_t *head_offset,
+	    uint64_t *tail_offset, uint64_t *channel_state);
+int64_t hv_ldc_rx_set_qhead(uint64_t ldc_id, uint64_t head_offset);
+
+#define LDC_CHANNEL_DOWN	0
+#define LDC_CHANNEL_UP		1
+#define LDC_CHANNEL_RESET	2
+
+int64_t	hv_ldc_set_map_table(uint64_t ldc_id, paddr_t base_raddr,
+	    uint64_t nentries);
+int64_t	hv_ldc_get_map_table(uint64_t ldc_id, paddr_t *base_raddr,
+	    uint64_t *nentries);
+int64_t hv_ldc_copy(uint64_t ldc_id, uint64_t flags, uint64_t cookie,
+	    paddr_t raddr, psize_t length, paddr_t *ret_length);
+
+#define LDC_COPY_IN		0
+#define LDC_COPY_OUT		1
+
+/*
+ * Cryptographic services
+ */
+
+int64_t	hv_rng_get_diag_control(void);
+int64_t	hv_rng_ctl_read(paddr_t raddr, uint64_t *state, uint64_t *delta);
+int64_t	hv_rng_ctl_write(paddr_t raddr, uint64_t state, uint64_t timeout,
+	uint64_t *delta);
+
+#define RNG_STATE_UNCONFIGURED	0
+#define RNG_STATE_CONFIGURED	1
+#define RNG_STATE_HEALTHCHECK	2
+#define RNG_STATE_ERROR		3
+
+int64_t	hv_rng_data_read_diag(paddr_t raddr, uint64_t size, uint64_t *delta);
+int64_t	hv_rng_data_read(paddr_t raddr, uint64_t *delta);
 
 /*
  * Error codes

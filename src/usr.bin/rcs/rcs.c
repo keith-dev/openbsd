@@ -1,4 +1,4 @@
-/*	$OpenBSD: rcs.c,v 1.47 2008/05/11 12:13:41 tobias Exp $	*/
+/*	$OpenBSD: rcs.c,v 1.53 2009/02/25 23:16:20 ray Exp $	*/
 /*
  * Copyright (c) 2004 Jean-Francois Brousseau <jfb@openbsd.org>
  * All rights reserved.
@@ -175,6 +175,7 @@ struct rcs_kw rcs_expkw[] =  {
 	{ "Date",	RCS_KW_DATE     },
 	{ "Header",	RCS_KW_HEADER   },
 	{ "Id",		RCS_KW_ID       },
+	{ "OpenBSD",	RCS_KW_ID       },
 	{ "Log",	RCS_KW_LOG      },
 	{ "Name",	RCS_KW_NAME     },
 	{ "RCSfile",	RCS_KW_RCSFILE  },
@@ -402,6 +403,8 @@ rcs_write(RCSFILE *rfp)
 		errno = saved_errno;
 		err(1, "%s", fn);
 	}
+
+	rcs_worklist_add(fn, &rcs_temp_files);
 
 	if (rfp->rf_head != NULL)
 		rcsnum_tostr(rfp->rf_head, numbuf, sizeof(numbuf));
@@ -1235,7 +1238,8 @@ rcs_getrev(RCSFILE *rfp, RCSNUM *frev)
 				/* XXX rcsnum_cmp() is totally broken for
 				 * this purpose.
 				 */
-				numlen = MIN(brev->rn_len, rb->rb_num->rn_len);
+				numlen = MIN(brev->rn_len,
+				    rb->rb_num->rn_len - 1);
 				for (i = 0; i < numlen; i++) {
 					if (rb->rb_num->rn_id[i] !=
 					    brev->rn_id[i])
@@ -1350,6 +1354,7 @@ rcs_rev_add(RCSFILE *rf, RCSNUM *rev, const char *msg, time_t date,
 	time_t now;
 	struct passwd *pw;
 	struct rcs_delta *ordp, *rdp;
+	uid_t uid;
 
 	if (rev == RCS_HEAD_REV) {
 		if (rf->rf_flags & RCS_CREATE) {
@@ -1367,7 +1372,8 @@ rcs_rev_add(RCSFILE *rf, RCSNUM *rev, const char *msg, time_t date,
 		}
 	}
 
-	if ((pw = getpwuid(getuid())) == NULL)
+	uid = getuid();
+	if ((pw = getpwuid(uid)) == NULL)
 		errx(1, "getpwuid failed");
 
 	rdp = xcalloc(1, sizeof(*rdp));
@@ -1385,8 +1391,9 @@ rcs_rev_add(RCSFILE *rf, RCSNUM *rev, const char *msg, time_t date,
 		rcsnum_cpy(ordp->rd_num, rdp->rd_next, 0);
 	}
 
-
-	if (username == NULL)
+	if (uid == 0)
+		username = getlogin();
+	if (username == NULL || *username == '\0')
 		username = pw->pw_name;
 
 	rdp->rd_author = xstrdup(username);
@@ -1465,7 +1472,7 @@ rcs_rev_remove(RCSFILE *rf, RCSNUM *rev)
 		rcs_buf_free(prevbuf);
 
 		diff_format = D_RCSDIFF;
-		if (diffreg(path_tmp1, path_tmp2, newdiff, 0) == D_ERROR)
+		if (diffreg(path_tmp1, path_tmp2, newdiff, D_FORCEASCII) == D_ERROR)
 			errx(1, "diffreg failed");
 
 		newdeltatext = newdiff;
@@ -2897,15 +2904,12 @@ rcs_deltatext_set(RCSFILE *rfp, RCSNUM *rev, BUF *bp)
 /*
  * rcs_rev_setlog()
  *
- * Sets the log message of revision <rev> to <logtext>
+ * Sets the log message of revision <rev> to <logtext>.
  */
 int
 rcs_rev_setlog(RCSFILE *rfp, RCSNUM *rev, const char *logtext)
 {
 	struct rcs_delta *rdp;
-	char buf[RCS_REV_BUFSZ];
-
-	rcsnum_tostr(rev, buf, sizeof(buf));
 
 	if ((rdp = rcs_findrev(rfp, rev)) == NULL)
 		return (-1);

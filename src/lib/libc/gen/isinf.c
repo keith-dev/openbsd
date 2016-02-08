@@ -1,4 +1,4 @@
-/*	$OpenBSD: isinf.c,v 1.1 2008/07/24 09:31:07 martynas Exp $	*/
+/*	$OpenBSD: isinf.c,v 1.4 2008/12/10 01:15:02 martynas Exp $	*/
 /*
  * Copyright (c) 2008 Martynas Venckus <martynas@openbsd.org>
  *
@@ -16,7 +16,9 @@
  */
 
 #include <sys/types.h>
+#include <sys/cdefs.h>
 #include <machine/ieee.h>
+#include <float.h>
 
 int
 __isinf(double d)
@@ -28,22 +30,23 @@ __isinf(double d)
 }
 
 int
-isinff(float f)
+__isinff(float f)
 {
 	struct ieee_single *p = (struct ieee_single *)&f;
  
 	return (p->sng_exp == SNG_EXP_INFNAN && p->sng_frac == 0);
 }
 
-#if 0	/* XXX */
-int
-__isinfl(long double e)
-{
-	struct ieee_ext *p = (struct ieee_ext *)&e;
+#if LDBL_MANT_DIG == 53
+#ifdef __weak_alias
+__weak_alias(__isinfl, __isinf);
+#endif /* __weak_alias */
+#endif /* LDBL_MANT_DIG == 53 */
 
-	p->ext_frach &= ~0x80000000;	/* clear sign bit */
-
-	return (p->ext_exp == EXT_EXP_INFNAN &&
-	    p->ext_frach == 0 && p->ext_fracl == 0);
-}
-#endif	/* XXX */
+/*
+ * 3BSD compatibility aliases.
+ */
+#ifdef __weak_alias
+__weak_alias(isinf, __isinf);
+__weak_alias(isinff, __isinff);
+#endif /* __weak_alias */

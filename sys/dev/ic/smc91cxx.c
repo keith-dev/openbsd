@@ -1,4 +1,4 @@
-/*	$OpenBSD: smc91cxx.c,v 1.27 2008/06/26 05:42:16 ray Exp $	*/
+/*	$OpenBSD: smc91cxx.c,v 1.30 2008/11/28 02:44:17 brad Exp $	*/
 /*	$NetBSD: smc91cxx.c,v 1.11 1998/08/08 23:51:41 mycroft Exp $	*/
 
 /*-
@@ -518,7 +518,7 @@ smc91cxx_init(sc)
 	if (sc->sc_flags & SMC_FLAGS_HAS_MII) {
 		/* Start the one second clock. */
 		timeout_set(&sc->sc_mii_timeout, smc91cxx_tick, sc);
-		timeout_add(&sc->sc_mii_timeout, hz);
+		timeout_add_sec(&sc->sc_mii_timeout, 1);
 	}
 
 	/*
@@ -1089,35 +1089,19 @@ smc91cxx_ioctl(ifp, cmd, data)
 		}
 		break;
 
-	case SIOCADDMULTI:
-	case SIOCDELMULTI:
-		if ((sc->sc_flags & SMC_FLAGS_ENABLED) == 0) {
-			error = EIO;
-			break;
-		}
-
-		error = (cmd == SIOCADDMULTI) ?
-		    ether_addmulti(ifr, &sc->sc_arpcom) :
-		    ether_delmulti(ifr, &sc->sc_arpcom);
-		if (error == ENETRESET) {
-			/*
-			 * Multicast list has changed; set the hardware
-			 * filter accordingly.
-			 */
-			if (ifp->if_flags & IFF_RUNNING)
-				smc91cxx_reset(sc);
-			error = 0;
-		}
-		break;
-
 	case SIOCGIFMEDIA:
 	case SIOCSIFMEDIA:
 		error = ifmedia_ioctl(ifp, ifr, &sc->sc_mii.mii_media, cmd);
 		break;
 
 	default:
-		error = EINVAL;
-		break;
+		error = ether_ioctl(ifp, &sc->sc_arpcom, cmd, data);
+	}
+
+	if (error == ENETRESET) {
+		if (ifp->if_flags & IFF_RUNNING)
+			smc91cxx_reset(sc);
+		error = 0;
 	}
 
 	splx(s);
@@ -1362,5 +1346,5 @@ smc91cxx_tick(arg)
 	mii_tick(&sc->sc_mii);
 	splx(s);
 
-	timeout_add(&sc->sc_mii_timeout, hz);
+	timeout_add_sec(&sc->sc_mii_timeout, 1);
 }

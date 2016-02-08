@@ -1,4 +1,4 @@
-/*	$OpenBSD: gemvar.h,v 1.17 2007/04/19 19:00:01 kettenis Exp $	*/
+/*	$OpenBSD: gemvar.h,v 1.20 2008/12/14 21:31:50 kettenis Exp $	*/
 /*	$NetBSD: gemvar.h,v 1.1 2001/09/16 00:11:43 eeh Exp $ */
 
 /*
@@ -141,8 +141,6 @@ struct gem_softc {
 #endif
 	int		sc_burst;	/* DVMA burst size in effect */
 
-	int		sc_if_flags;
-
 	int		sc_mif_config;	/* Selected MII reg setting */
 
 	int		sc_pci;		/* XXXXX -- PCI buses are LE. */
@@ -177,6 +175,7 @@ struct gem_softc {
 	u_int32_t sc_tx_cnt, sc_tx_prod, sc_tx_cons;
 
 	struct gem_rxsoft sc_rxsoft[GEM_NRXDESC];
+	u_int32_t sc_rx_cnt, sc_rx_prod, sc_rx_cons;
 
 	/*
 	 * Control data structures.
@@ -193,7 +192,6 @@ struct gem_softc {
 
 	u_int32_t		sc_setup_fsls;	/* FS|LS on setup descriptor */
 
-	int			sc_rxptr;		/* next ready RX descriptor/descsoft */
 	int			sc_rxfifosize;
 
 	/* ========== */
@@ -264,7 +262,6 @@ do {									\
 	struct gem_desc *__rxd = &sc->sc_rxdescs[(x)];			\
 	struct mbuf *__m = __rxs->rxs_mbuf;				\
 									\
-	__m->m_data = __m->m_ext.ext_buf;				\
 	__rxd->gd_addr =						\
 	    GEM_DMA_WRITE((sc), __rxs->rxs_dmamap->dm_segs[0].ds_addr);	\
 	__rxd->gd_flags =						\
@@ -273,10 +270,6 @@ do {									\
 	    & GEM_RD_BUFSIZE) | GEM_RD_OWN);				\
 	GEM_CDRXSYNC((sc), (x), BUS_DMASYNC_PREREAD|BUS_DMASYNC_PREWRITE); \
 } while (0)
-
-#define GEM_IS_APPLE(sc)	\
-    ((sc)->sc_variant >= GEM_APPLE_INTREPID2_GMAC &&	\
-    (sc)->sc_variant <= GEM_APPLE_UNINORTH2GMAC)
 
 #ifdef _KERNEL
 void	gem_attach(struct gem_softc *, const u_int8_t *);
@@ -296,6 +289,5 @@ void	gem_config(struct gem_softc *);
 void	gem_reset(struct gem_softc *);
 int	gem_intr(void *);
 #endif /* _KERNEL */
-
 
 #endif

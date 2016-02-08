@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_trunk.c,v 1.48 2008/08/06 17:04:28 reyk Exp $	*/
+/*	$OpenBSD: if_trunk.c,v 1.65 2009/01/27 16:40:54 naddy Exp $	*/
 
 /*
  * Copyright (c) 2005, 2006, 2007 Reyk Floeter <reyk@openbsd.org>
@@ -91,6 +91,7 @@ int	 trunk_media_change(struct ifnet *);
 void	 trunk_media_status(struct ifnet *, struct ifmediareq *);
 struct trunk_port *trunk_link_active(struct trunk_softc *,
 	    struct trunk_port *);
+const void *trunk_gethdr(struct mbuf *, u_int, u_int, void *);
 
 struct if_clone trunk_cloner =
     IF_CLONE_INITIALIZER("trunk", trunk_clone_create, trunk_clone_destroy);
@@ -119,7 +120,6 @@ int	 trunk_lb_start(struct trunk_softc *, struct mbuf *);
 int	 trunk_lb_input(struct trunk_softc *, struct trunk_port *,
 	    struct ether_header *, struct mbuf *);
 int	 trunk_lb_porttable(struct trunk_softc *, struct trunk_port *);
-const void *trunk_lb_gethdr(struct mbuf *, u_int, u_int, void *);
 
 /* Broadcast mode */
 int	 trunk_bcast_attach(struct trunk_softc *);
@@ -479,14 +479,13 @@ trunk_port_destroy(struct trunk_port *tp)
 void
 trunk_port_watchdog(struct ifnet *ifp)
 {
-	struct trunk_softc *tr;
 	struct trunk_port *tp;
 
 	/* Should be checked by the caller */
 	if (ifp->if_type != IFT_IEEE8023ADLAG)
 		return;
 	if ((tp = (struct trunk_port *)ifp->if_tp) == NULL ||
-	    (tr = (struct trunk_softc *)tp->tp_trunk) == NULL)
+	    tp->tp_trunk == NULL)
 		return;
 
 	if (tp->tp_watchdog != NULL)
@@ -499,7 +498,7 @@ trunk_port_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 {
 	struct trunk_reqport *rp = (struct trunk_reqport *)data;
 	struct trunk_softc *tr;
-	struct trunk_port *tp;
+	struct trunk_port *tp = NULL;
 	int s, error = 0;
 
 	s = splnet();
@@ -596,6 +595,11 @@ trunk_port2req(struct trunk_port *tp, struct trunk_reqport *rp)
 	/* Add protocol specific flags */
 	switch (tr->tr_proto) {
 	case TRUNK_PROTO_FAILOVER:
+		rp->rp_flags = tp->tp_flags;
+		if (tp == trunk_link_active(tr, tr->tr_primary))
+			rp->rp_flags |= TRUNK_PORT_ACTIVE;
+		break;
+
 	case TRUNK_PROTO_ROUNDROBIN:
 	case TRUNK_PROTO_LOADBALANCE:
 	case TRUNK_PROTO_BROADCAST:
@@ -632,9 +636,6 @@ trunk_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	int s, i, error = 0;
 
 	s = splnet();
-
-	if ((error = ether_ioctl(ifp, &tr->tr_ac, cmd, data)) > 0)
-		goto out;
 
 	bzero(&rpbuf, sizeof(rpbuf));
 
@@ -741,13 +742,6 @@ trunk_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 #endif /* INET */
 		error = ENETRESET;
 		break;
-	case SIOCSIFMTU:
-		if (ifr->ifr_mtu > ETHERMTU) {
-			error = EINVAL;
-			break;
-		}
-		ifp->if_mtu = ifr->ifr_mtu;
-		break;
 	case SIOCSIFFLAGS:
 		error = ENETRESET;
 		break;
@@ -768,8 +762,7 @@ trunk_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		error = ENETRESET;
 		break;
 	default:
-		error = EINVAL;
-		break;
+		error = ether_ioctl(ifp, &tr->tr_ac, cmd, data);
 	}
 
 	if (error == ENETRESET) {
@@ -943,36 +936,39 @@ trunk_start(struct ifnet *ifp)
 
 #if NBPFILTER > 0
 		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_OUT);
+			bpf_mtap_ether(ifp->if_bpf, m, BPF_DIRECTION_OUT);
 #endif
 
-		if (tr->tr_proto != TRUNK_PROTO_NONE)
+		if (tr->tr_proto != TRUNK_PROTO_NONE && tr->tr_count) {
 			error = (*tr->tr_start)(tr, m);
-		else
+			if (error == 0)
+				ifp->if_opackets++;
+			else
+				ifp->if_oerrors++;
+		} else {
 			m_freem(m);
-
-		if (error == 0)
-			ifp->if_opackets++;
-		else
-			ifp->if_oerrors++;
+			if (tr->tr_proto != TRUNK_PROTO_NONE)
+				ifp->if_oerrors++;
+		}
 	}
-
-	return;
 }
 
 int
 trunk_enqueue(struct ifnet *ifp, struct mbuf *m)
 {
-	int error = 0;
+	int len, error = 0;
+	u_short mflags;
 
 	/* Send mbuf */
+	mflags = m->m_flags;
+	len = m->m_pkthdr.len;
 	IFQ_ENQUEUE(&ifp->if_snd, m, NULL, error);
 	if (error)
 		return (error);
 	if_start(ifp);
 
-	ifp->if_obytes += m->m_pkthdr.len;
-	if (m->m_flags & M_MCAST)
+	ifp->if_obytes += len;
+	if (mflags & M_MCAST)
 		ifp->if_omcasts++;
 
 	return (error);
@@ -981,7 +977,7 @@ trunk_enqueue(struct ifnet *ifp, struct mbuf *m)
 u_int32_t
 trunk_hashmbuf(struct mbuf *m, u_int32_t key)
 {
-	u_int16_t etype;
+	u_int16_t etype, ether_vtag;
 	u_int32_t p = 0;
 	u_int16_t *vlan, vlanbuf[2];
 	int off;
@@ -990,6 +986,7 @@ trunk_hashmbuf(struct mbuf *m, u_int32_t key)
 	struct ip *ip, ipbuf;
 #endif
 #ifdef INET6
+	u_int32_t flow;
 	struct ip6_hdr *ip6, ip6buf;
 #endif
 
@@ -1002,11 +999,15 @@ trunk_hashmbuf(struct mbuf *m, u_int32_t key)
 	p = hash32_buf(&eh->ether_dhost, ETHER_ADDR_LEN, p);
 
 	/* Special handling for encapsulating VLAN frames */
-	if (etype == ETHERTYPE_VLAN) {
+	if (m->m_flags & M_VLANTAG) {
+		ether_vtag = EVL_VLANOFTAG(m->m_pkthdr.ether_vtag);
+		p = hash32_buf(&ether_vtag, sizeof(ether_vtag), p);
+	} else if (etype == ETHERTYPE_VLAN) {
 		if ((vlan = (u_int16_t *)
-		    trunk_lb_gethdr(m, off, EVL_ENCAPLEN, &vlanbuf)) == NULL)
+		    trunk_gethdr(m, off, EVL_ENCAPLEN, &vlanbuf)) == NULL)
 			return (p);
-		p = hash32_buf(vlan, sizeof(*vlan), p);
+		ether_vtag = EVL_VLANOFTAG(*vlan);
+		p = hash32_buf(&ether_vtag, sizeof(ether_vtag), p);
 		etype = ntohs(vlan[1]);
 		off += EVL_ENCAPLEN;
 	}
@@ -1015,7 +1016,7 @@ trunk_hashmbuf(struct mbuf *m, u_int32_t key)
 #ifdef INET
 	case ETHERTYPE_IP:
 		if ((ip = (struct ip *)
-		    trunk_lb_gethdr(m, off, sizeof(*ip), &ipbuf)) == NULL)
+		    trunk_gethdr(m, off, sizeof(*ip), &ipbuf)) == NULL)
 			return (p);
 		p = hash32_buf(&ip->ip_src, sizeof(struct in_addr), p);
 		p = hash32_buf(&ip->ip_dst, sizeof(struct in_addr), p);
@@ -1024,10 +1025,12 @@ trunk_hashmbuf(struct mbuf *m, u_int32_t key)
 #ifdef INET6
 	case ETHERTYPE_IPV6:
 		if ((ip6 = (struct ip6_hdr *)
-		    trunk_lb_gethdr(m, off, sizeof(*ip6), &ip6buf)) == NULL)
+		    trunk_gethdr(m, off, sizeof(*ip6), &ip6buf)) == NULL)
 			return (p);
 		p = hash32_buf(&ip6->ip6_src, sizeof(struct in6_addr), p);
 		p = hash32_buf(&ip6->ip6_dst, sizeof(struct in6_addr), p);
+		flow = ip6->ip6_flow & IPV6_FLOWLABEL_MASK;
+		p = hash32_buf(&flow, sizeof(flow), p); /* IPv6 flow label */
 		break;
 #endif
 	}
@@ -1145,9 +1148,10 @@ trunk_media_status(struct ifnet *ifp, struct ifmediareq *imr)
 	imr->ifm_status = IFM_AVALID;
 	imr->ifm_active = IFM_ETHER | IFM_AUTO;
 
-	tp = tr->tr_primary;
-	if (tp != NULL && tp->tp_if->if_flags & IFF_UP)
-		imr->ifm_status |= IFM_ACTIVE;
+	SLIST_FOREACH(tp, &tr->tr_ports, tp_entries) {
+		if (TRUNK_PORTACTIVE(tp))
+			imr->ifm_status |= IFM_ACTIVE;
+	}
 }
 
 void
@@ -1217,6 +1221,18 @@ trunk_link_active(struct trunk_softc *tr, struct trunk_port *tp)
 	}
 
 	return (rval);
+}
+
+const void *
+trunk_gethdr(struct mbuf *m, u_int off, u_int len, void *buf)
+{
+	if (m->m_pkthdr.len < (off + len))
+		return (NULL);
+	else if (m->m_len < (off + len)) {
+		m_copydata(m, off, len, buf);
+		return (buf);
+	}
+	return (mtod(m, const void *) + off);
 }
 
 /*
@@ -1443,37 +1459,16 @@ trunk_lb_port_destroy(struct trunk_port *tp)
 	trunk_lb_porttable(tr, tp);
 }
 
-const void *
-trunk_lb_gethdr(struct mbuf *m, u_int off, u_int len, void *buf)
-{
-	if (m->m_pkthdr.len < (off + len)) {
-		return (NULL);
-	} else if (m->m_len < (off + len)) {
-		m_copydata(m, off, len, buf);
-		return (buf);
-	}
-	return (mtod(m, const void *) + off);
-}
-
 int
 trunk_lb_start(struct trunk_softc *tr, struct mbuf *m)
 {
 	struct trunk_lb *lb = (struct trunk_lb *)tr->tr_psc;
 	struct trunk_port *tp = NULL;
 	u_int32_t p = 0;
-	int idx;
-
-	if (tr->tr_count == 0) {
-		m_freem(m);
-		return (EINVAL);
-	}
 
 	p = trunk_hashmbuf(m, lb->lb_key);
-	if ((idx = p % tr->tr_count) >= TRUNK_MAX_PORTS) {
-		m_freem(m);
-		return (EINVAL);
-	}
-	tp = lb->lb_ports[idx];
+	p %= tr->tr_count;
+	tp = lb->lb_ports[p];
 
 	/*
 	 * Check the port's link state. This will return the next active
@@ -1642,7 +1637,7 @@ trunk_lacp_input(struct trunk_softc *tr, struct trunk_port *tp,
 
 	/* Tap off LACP control messages */
 	if (etype == ETHERTYPE_SLOW) {
-		m = lacp_input(tp, m);
+		m = lacp_input(tp, eh, m);
 		if (m == NULL)
 			return (-1);
 	}

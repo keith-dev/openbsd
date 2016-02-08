@@ -1,4 +1,4 @@
-/*	$OpenBSD: snmpe.c,v 1.19 2008/07/18 12:30:06 reyk Exp $	*/
+/*	$OpenBSD: snmpe.c,v 1.23 2008/12/08 11:34:55 reyk Exp $	*/
 
 /*
  * Copyright (c) 2007, 2008 Reyk Floeter <reyk@vantronix.net>
@@ -60,6 +60,7 @@ snmpe_sig_handler(int sig, short event, void *arg)
 	case SIGINT:
 	case SIGTERM:
 		snmpe_shutdown();
+		break;
 	default:
 		fatalx("snmpe_sig_handler: unexpected signal");
 	}
@@ -87,8 +88,10 @@ snmpe(struct snmpd *x_env, int pipe_parent2snmpe[2])
 
 	env = x_env;
 
-	if (control_init() == -1)
+	if (control_init(&env->sc_csock) == -1)
 		fatalx("snmpe: control socket setup failed");
+	if (control_init(&env->sc_rcsock) == -1)
+		fatalx("snmpe: restricted control socket setup failed");
 
 	if ((env->sc_sock = snmpe_bind(&env->sc_address)) == -1)
 		fatalx("snmpe: failed to bind SNMP UDP socket");
@@ -146,8 +149,10 @@ snmpe(struct snmpd *x_env, int pipe_parent2snmpe[2])
 
 	TAILQ_INIT(&ctl_conns);
 
-	if (control_listen(env, ibuf_parent) == -1)
+	if (control_listen(&env->sc_csock) == -1)
 		fatalx("snmpe: control socket listen failed");
+	if (control_listen(&env->sc_rcsock) == -1)
+		fatalx("snmpe: restricted control socket listen failed");
 
 	event_set(&env->sc_ev, env->sc_sock, EV_READ|EV_PERSIST,
 	    snmpe_recvmsg, env);
@@ -155,6 +160,7 @@ snmpe(struct snmpd *x_env, int pipe_parent2snmpe[2])
 
 	kr_init();
 	trap_init();
+	timer_init();
 
 	event_dispatch();
 
@@ -425,7 +431,8 @@ snmpe_debug_elements(struct ber_element *root)
 			fprintf(stderr, "addr %s\n",
 			    inet_ntoa(*(struct in_addr *)buf));
 		} else
-			fprintf(stderr, "string \"%s\"\n", buf);
+			fprintf(stderr, "string \"%s\"\n",
+			    root->be_len ? buf : "");
 		break;
 	case BER_TYPE_NULL:	/* no payload */
 	case BER_TYPE_EOC:

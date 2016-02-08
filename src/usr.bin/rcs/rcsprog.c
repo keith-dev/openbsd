@@ -1,4 +1,4 @@
-/*	$OpenBSD: rcsprog.c,v 1.145 2008/07/08 12:25:47 joris Exp $	*/
+/*	$OpenBSD: rcsprog.c,v 1.147 2009/02/15 12:58:01 joris Exp $	*/
 /*
  * Copyright (c) 2005 Jean-Francois Brousseau <jfb@openbsd.org>
  * All rights reserved.
@@ -36,7 +36,7 @@
 
 #define RCSPROG_OPTSTRING	"A:a:b::c:e::ik:Ll::m:Mn:N:o:qt::TUu::Vx::z::"
 
-const char rcs_version[] = "OpenRCS 4.4";
+const char rcs_version[] = "OpenRCS 4.5";
 
 int	 rcsflags;
 int	 rcs_optind;
@@ -229,7 +229,7 @@ rcs_main(int argc, char **argv)
 			break;
 		case 'L':
 			if (lkmode == RCS_LOCK_LOOSE)
-				warnx("-U overriden by -L");
+				warnx("-U overridden by -L");
 			lkmode = RCS_LOCK_STRICT;
 			break;
 		case 'l':
@@ -267,7 +267,7 @@ rcs_main(int argc, char **argv)
 			break;
 		case 'U':
 			if (lkmode == RCS_LOCK_STRICT)
-				warnx("-L overriden by -U");
+				warnx("-L overridden by -U");
 			lkmode = RCS_LOCK_LOOSE;
 			break;
 		case 'u':

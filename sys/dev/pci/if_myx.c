@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_myx.c,v 1.7 2008/05/23 08:49:27 brad Exp $	*/
+/*	$OpenBSD: if_myx.c,v 1.10 2008/11/28 02:44:18 brad Exp $	*/
 
 /*
  * Copyright (c) 2007 Reyk Floeter <reyk@openbsd.org>
@@ -290,7 +290,7 @@ myx_attach(struct device *parent, struct device *self, void *aux)
 	ether_ifattach(ifp);
 
 	timeout_set(&sc->sc_tick, myx_tick, sc);
-	timeout_add(&sc->sc_tick, hz);
+	timeout_add_sec(&sc->sc_tick, 1);
 
 	mountroothook_establish(myx_attachhook, sc);
 
@@ -810,7 +810,7 @@ myx_tick(void *arg)
 		return;
 
 	myx_link_state(sc);
-	timeout_add(&sc->sc_tick, hz);
+	timeout_add_sec(&sc->sc_tick, 1);
 }
 
 int
@@ -822,10 +822,6 @@ myx_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	int			 s, error = 0;
 
 	s = splnet();
-	if ((error = ether_ioctl(ifp, &sc->sc_ac, cmd, data)) > 0) {
-		splx(s);
-		return (error);
-	}
 
 	switch (cmd) {
 	case SIOCSIFADDR:
@@ -835,6 +831,7 @@ myx_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 			arp_ifinit(&sc->sc_ac, ifa);
 #endif
 		/* FALLTHROUGH */
+
 	case SIOCSIFFLAGS:
 		if (ifp->if_flags & IFF_UP) {
 			if (ifp->if_flags & IFF_RUNNING)
@@ -847,28 +844,13 @@ myx_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		}
 		break;
 
-	case SIOCSIFMTU:
-		if (ifr->ifr_mtu < ETHERMIN || ifr->ifr_mtu > ifp->if_hardmtu)
-			error = EINVAL;
-		else if (ifp->if_mtu != ifr->ifr_mtu)
-			ifp->if_mtu = ifr->ifr_mtu;
-		break;
-
-	case SIOCADDMULTI:
-		error = ether_addmulti(ifr, &sc->sc_ac);
-		break;
-
-	case SIOCDELMULTI:
-		error = ether_delmulti(ifr, &sc->sc_ac);
-		break;
-
 	case SIOCGIFMEDIA:
 	case SIOCSIFMEDIA:
 		error = ifmedia_ioctl(ifp, ifr, &sc->sc_media, cmd);
 		break;
 
 	default:
-		error = ENOTTY;
+		error = ether_ioctl(ifp, &sc->sc_ac, cmd, data);
 	}
 
 	if (error == ENETRESET) {
@@ -879,7 +861,6 @@ myx_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	}
 
 	splx(s);
-
 	return (error);
 }
 

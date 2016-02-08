@@ -1,4 +1,4 @@
-dnl	$OpenBSD: hardware,v 1.93 2008/08/06 20:30:09 miod Exp $
+dnl	$OpenBSD: hardware,v 1.96 2008/09/11 05:28:25 jmc Exp $
 OpenBSD/MACHINE OSREV runs on iMac, G4 Power Macintosh, and G4 Cube, as well
 as PowerBook and iBook machines.
 
@@ -400,6 +400,7 @@ Supported devices {:-include-:}:
 		detected as PCMCIA adapters)
 		    Ambicom WL54CF
 		    I-O DATA WN-G54/CF
+		    SparkLAN WCFM-100
 		Ralink Technology IEEE 802.11a/b/g PCI adapters
 		    A-Link WL54H
 		    AirLive WN-5000PCI
@@ -441,6 +442,7 @@ Supported devices {:-include-:}:
 		    KCORP LifeStyle KLS-660
 		    LevelOne WNC-0301 v2
 		    Linksys WMP54G v4
+		    Longshine LCS-8031N
 		    Micronet SP906GK
 		    Minitar MN54GPC-R
 		    MSI MP54G2 Mini PCI
@@ -518,6 +520,7 @@ Supported devices {:-include-:}:
 		    Corega CG-WLUSB2GL
 		    Corega CG-WLUSB2GO
 		    Corega CG-WLUSB2GPX
+		    D-Link DWA-110
 		    D-Link DWA-111
 		    D-Link DWL-G122 rev C1
 		    D-Link WUA-1340

@@ -1,4 +1,4 @@
-/*	$OpenBSD: mpls.h,v 1.11 2008/05/23 16:03:03 thib Exp $	*/
+/*	$OpenBSD: mpls.h,v 1.19 2009/02/03 16:42:54 michele Exp $	*/
 
 /*
  * Copyright (C) 1999, 2000 and 2001 AYAME Project, WIDE Project.
@@ -50,6 +50,8 @@ struct shim_hdr {
 	u_int32_t shim_label;	/* 20 bit label, 4 bit exp & BoS, 8 bit TTL */
 };
 
+#define MPLS_HDRLEN	sizeof(struct shim_hdr)
+
 /*
  * By byte-swapping the constants, we avoid ever having to byte-swap IP
  * addresses inside the kernel.  Unfortunately, user-level programs rely
@@ -87,22 +89,20 @@ struct shim_hdr {
 struct sockaddr_mpls {
 	u_int8_t	smpls_len;		/* length */
 	u_int8_t	smpls_family;		/* AF_MPLS */
-	u_int8_t	smpls_operation;
-	u_int8_t	smpls_out_exp;		/* outgoing exp value */
-	u_int32_t	smpls_out_label;	/* outgoing MPLS label */
-	u_int16_t	smpls_out_ifindex;
-	u_int16_t	smpls_in_ifindex;
-	u_int32_t	smpls_in_label;		/* MPLS label 20 bits*/
-#if MPLS_MCAST
-	u_int8_t smpls_mcexp;
-	u_int8_t smpls_pad2[2];
-	u_int32_t smpls_mclabel;
-#endif
+	u_int16_t	smpls_pad0;
+	u_int32_t	smpls_label;		/* MPLS label */
+	u_int32_t	smpls_pad1[2];
 };
 
-#define MPLS_OP_POP		1
-#define MPLS_OP_PUSH		2
-#define MPLS_OP_SWAP		3
+struct rt_mpls {
+	u_int32_t	mpls_label;
+	u_int8_t	mpls_operation;
+	u_int8_t	mpls_exp;
+};
+
+#define MPLS_OP_POP		0x1
+#define MPLS_OP_PUSH		0x2
+#define MPLS_OP_SWAP		0x4
 
 #define MPLS_INKERNEL_LOOP_MAX	16
 
@@ -116,7 +116,9 @@ struct sockaddr_mpls {
 #define	MPLSCTL_DEFTTL			2
 #define MPLSCTL_IFQUEUE			3
 #define	MPLSCTL_MAXINKLOOP		4
-#define MPLSCTL_MAXID			5
+#define MPLSCTL_MAPTTL_IP		5
+#define MPLSCTL_MAPTTL_IP6		6
+#define MPLSCTL_MAXID			7	
 
 #define MPLSCTL_NAMES { \
 	{ 0, 0 }, \
@@ -124,6 +126,8 @@ struct sockaddr_mpls {
 	{ "ttl", CTLTYPE_INT }, \
 	{ "ifq", CTLTYPE_NODE },\
 	{ "maxloop_inkernel", CTLTYPE_INT }, \
+	{ "mapttl_ip", CTLTYPE_INT }, \
+	{ "mapttl_ip6", CTLTYPE_INT }, \
 }
 
 #define MPLSCTL_VARS { \
@@ -132,6 +136,8 @@ struct sockaddr_mpls {
 	&mpls_defttl, \
 	0, \
 	&mpls_inkloop, \
+	&mpls_mapttl_ip, \
+	&mpls_mapttl_ip6, \
 }
 
 #endif
@@ -151,7 +157,9 @@ struct mpe_softc {
 #define MPE_MTU_MAX	8192
 
 void	mpe_input(struct mbuf *, struct ifnet *, struct sockaddr_mpls *,
-	    u_int32_t);
+	    u_int8_t);
+void	mpe_input6(struct mbuf *, struct ifnet *, struct sockaddr_mpls *,
+	    u_int8_t);
 
 extern int mpls_raw_usrreq(struct socket *, int, struct mbuf *,
 			struct mbuf *, struct mbuf *, struct proc *);
@@ -165,10 +173,11 @@ void	mpls_init(void);
 void	mplsintr(void);
 
 struct mbuf	*mpls_shim_pop(struct mbuf *);
-struct mbuf	*mpls_shim_swap(struct mbuf *, struct sockaddr_mpls *);
-struct mbuf	*mpls_shim_push(struct mbuf *, struct sockaddr_mpls *);
+struct mbuf	*mpls_shim_swap(struct mbuf *, struct rt_mpls *);
+struct mbuf	*mpls_shim_push(struct mbuf *, struct rt_mpls *);
 
-int	mpls_sysctl(int *, u_int, void *, size_t *, void *, size_t);
-void	mpls_input(struct mbuf *);
+int		 mpls_sysctl(int *, u_int, void *, size_t *, void *, size_t);
+void		 mpls_input(struct mbuf *);
+struct mbuf	*mpls_output(struct mbuf *, struct rtentry *);
 
 #endif /* _KERNEL */

@@ -1,4 +1,4 @@
-/* $OpenBSD: acpi.c,v 1.125 2008/07/02 03:14:54 fgsch Exp $ */
+/* $OpenBSD: acpi.c,v 1.132 2009/02/21 13:09:20 marco Exp $ */
 /*
  * Copyright (c) 2005 Thorsten Lockert <tholo@sigmasoft.com>
  * Copyright (c) 2005 Jordan Hargrave <jordan@openbsd.org>
@@ -26,6 +26,7 @@
 #include <sys/signalvar.h>
 #include <sys/proc.h>
 #include <sys/kthread.h>
+#include <sys/workq.h>
 
 #include <machine/conf.h>
 #include <machine/cpufunc.h>
@@ -80,6 +81,10 @@ void	acpi_load_dsdt(paddr_t, struct acpi_q **);
 void	acpi_init_states(struct acpi_softc *);
 void	acpi_init_gpes(struct acpi_softc *);
 void	acpi_init_pm(struct acpi_softc *);
+
+#ifdef ACPI_SLEEP_ENABLED
+void acpi_sleep_walk(struct acpi_softc *, int);
+#endif /* ACPI_SLEEP_ENABLED */
 
 #ifndef SMALL_KERNEL
 int acpi_add_device(struct aml_node *node, void *arg);
@@ -658,7 +663,7 @@ acpi_loadtables(struct acpi_softc *sc, struct acpi_rsdp *rsdp)
 	int i, ntables;
 	size_t len;
 
-	if (rsdp->rsdp_revision == 2) {
+	if (rsdp->rsdp_revision == 2 && rsdp->rsdp_xsdt) {
 		struct acpi_xsdt *xsdt;
 
 		if (acpi_map(rsdp->rsdp_xsdt, sizeof(*hdr), &handle)) {
@@ -841,6 +846,13 @@ acpiioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 	ACPI_LOCK(sc);
 	/* fake APM */
 	switch (cmd) {
+#ifdef ACPI_SLEEP_ENABLED
+	case APM_IOC_SUSPEND:
+	case APM_IOC_STANDBY:
+		workq_add_task(NULL, 0, (workq_fn)acpi_sleep_state,
+		acpi_softc, (void *)ACPI_STATE_S3);
+		break;
+#endif /* ACPI_SLEEP_ENABLED */
 	case APM_IOC_GETPOWER:
 		/* A/C */
 		pi->ac_state = APM_AC_UNKNOWN;
@@ -1434,19 +1446,17 @@ acpi_foundprw(struct aml_node *node, void *arg)
 	struct acpi_softc *sc = arg;
 	struct acpi_wakeq *wq;
 
-	wq = (struct acpi_wakeq *)malloc(sizeof(struct acpi_wakeq), M_DEVBUF, M_NOWAIT);
+	wq = malloc(sizeof(struct acpi_wakeq), M_DEVBUF, M_NOWAIT | M_ZERO);
 	if (wq == NULL) {
 		return 0;
 	}
-	memset(wq, 0, sizeof(struct acpi_wakeq));
 
-	wq->q_wakepkg = (struct aml_value *)malloc(sizeof(struct aml_value),
-	    M_DEVBUF, M_NOWAIT);
+	wq->q_wakepkg = malloc(sizeof(struct aml_value), M_DEVBUF,
+	    M_NOWAIT | M_ZERO);
 	if (wq->q_wakepkg == NULL) {
 		free(wq, M_DEVBUF);
 		return 0;
 	}
-	memset(wq->q_wakepkg, 0, sizeof(struct aml_value));
 	dnprintf(10, "Found _PRW (%s)\n", node->parent->name);
 	aml_evalnode(sc, node, 0, NULL, wq->q_wakepkg);
 	wq->q_node = node->parent;
@@ -1653,65 +1663,77 @@ acpi_init_pm(struct acpi_softc *sc)
 	sc->sc_gts = aml_searchname(&aml_root, "_GTS");
 }
 
+#ifndef SMALL_KERNEL
 void
-acpi_enter_sleep_state(struct acpi_softc *sc, int state)
+acpi_sleep_walk(struct acpi_softc *sc, int state)
 {
-	struct aml_value env;
-	u_int16_t rega, regb;
-	int retries;
+	struct acpi_wakeq *wentry;
+	int idx;
 
-	if (state == ACPI_STATE_S0)
-		return;
-	if (sc->sc_sleeptype[state].slp_typa == -1 ||
-	    sc->sc_sleeptype[state].slp_typb == -1) {
-		printf("%s: state S%d unavailable\n",
-		    sc->sc_dev.dv_xname, state);
-		return;
+	/* Clear GPE status */
+	for (idx = 0; idx < sc->sc_lastgpe; idx += 8) {
+		acpi_write_pmreg(sc, ACPIREG_GPE_EN,  idx>>3, 0);
+		acpi_write_pmreg(sc, ACPIREG_GPE_STS, idx>>3, -1);
 	}
 
-	memset(&env, 0, sizeof(env));
-	env.type = AML_OBJTYPE_INTEGER;
-	env.v_integer = state;
-	/* _TTS(state) */
-	if (sc->sc_tts) {
-		if (aml_evalnode(sc, sc->sc_tts, 1, &env, NULL) != 0) {
-			dnprintf(10, "%s evaluating method _TTS failed.\n",
-			    DEVNAME(sc));
-			return;
-		}
+	SIMPLEQ_FOREACH(wentry, &sc->sc_wakedevs, q_next) {
+		dnprintf(10, "%.4s(S%d) gpe %.2x\n", wentry->q_node->name,
+		    wentry->q_state,
+		    wentry->q_gpe);
+
+	if (state <= wentry->q_state)
+		acpi_enable_onegpe(sc, wentry->q_gpe, 1);
 	}
+}
+#endif /* ! SMALL_KERNEL */
+
+int
+acpi_sleep_state(struct acpi_softc *sc, int state)
+{
+	int ret;
+
 	switch (state) {
+	case ACPI_STATE_S0:
+		return (0);
+	case ACPI_STATE_S4:
+		return (EOPNOTSUPP);
+	case ACPI_STATE_S5:
+		break;
 	case ACPI_STATE_S1:
 	case ACPI_STATE_S2:
-		resettodr();
-		dopowerhooks(PWR_SUSPEND);
-		break;
 	case ACPI_STATE_S3:
-		resettodr();
-		dopowerhooks(PWR_STANDBY);
-		break;
+		if (sc->sc_sleeptype[state].slp_typa == -1 ||
+		    sc->sc_sleeptype[state].slp_typb == -1)
+			return (EOPNOTSUPP);
 	}
-	/* _PTS(state) */
-	if (sc->sc_pts) {
-		if (aml_evalnode(sc, sc->sc_pts, 1, &env, NULL) != 0) {
-			dnprintf(10, "%s evaluating method _PTS failed.\n",
-			    DEVNAME(sc));
-			return;
-		}
-	}
-	sc->sc_state = state;
-	/* _GTS(state) */
-	if (sc->sc_gts) {
-		if (aml_evalnode(sc, sc->sc_gts, 1, &env, NULL) != 0) {
-			dnprintf(10, "%s evaluating method _GTS failed.\n",
-			    DEVNAME(sc));
-			return;
-		}
-	}
-	disable_intr();
+
+	acpi_sleep_walk(sc, state);
+
+	if ((ret = acpi_prepare_sleep_state(sc, state)) != 0)
+		return (ret);
+
+	if (state != ACPI_STATE_S1)
+		ret = acpi_sleep_machdep(sc, state);
+	else
+		ret = acpi_enter_sleep_state(sc, state);
+
+#ifndef SMALL_KERNEL
+	acpi_resume(sc);
+#endif /* ! SMALL_KERNEL */
+	return (ret);
+}
+
+int
+acpi_enter_sleep_state(struct acpi_softc *sc, int state)
+{
+	uint16_t rega, regb;
+	int retries;
 
 	/* Clear WAK_STS bit */
-	acpi_write_pmreg(sc, ACPIREG_PM1_STS, 0, ACPI_PM1_WAK_STS);
+	acpi_write_pmreg(sc, ACPIREG_PM1_STS, 1, ACPI_PM1_WAK_STS);
+
+	/* Disable BM arbitration */
+	acpi_write_pmreg(sc, ACPIREG_PM2_CNT, 1, ACPI_PM2_ARB_DIS);
 
 	/* Write SLP_TYPx values */
 	rega = acpi_read_pmreg(sc, ACPIREG_PM1A_CNT, 0);
@@ -1726,9 +1748,15 @@ acpi_enter_sleep_state(struct acpi_softc *sc, int state)
 	/* Set SLP_EN bit */
 	rega |= ACPI_PM1_SLP_EN;
 	regb |= ACPI_PM1_SLP_EN;
+
+	/*
+	 * Let the machdep code flush caches and do any other necessary
+	 * tasks before going away.
+	 */
+	acpi_cpu_flush(sc, state);
+
 	acpi_write_pmreg(sc, ACPIREG_PM1A_CNT, 0, rega);
 	acpi_write_pmreg(sc, ACPIREG_PM1B_CNT, 0, regb);
-
 	/* Loop on WAK_STS */
 	for (retries = 1000; retries > 0; retries--) {
 		rega = acpi_read_pmreg(sc, ACPIREG_PM1A_STS, 0);
@@ -1739,10 +1767,10 @@ acpi_enter_sleep_state(struct acpi_softc *sc, int state)
 		DELAY(10);
 	}
 
-	enable_intr();
+	return (-1);
 }
 
-#if 0
+#ifndef SMALL_KERNEL
 void
 acpi_resume(struct acpi_softc *sc)
 {
@@ -1752,36 +1780,107 @@ acpi_resume(struct acpi_softc *sc)
 	env.type = AML_OBJTYPE_INTEGER;
 	env.v_integer = sc->sc_state;
 
-	if (sc->sc_bfs) {
+	if (sc->sc_bfs)
 		if (aml_evalnode(sc, sc->sc_pts, 1, &env, NULL) != 0) {
 			dnprintf(10, "%s evaluating method _BFS failed.\n",
 			    DEVNAME(sc));
 		}
-	}
+
 	dopowerhooks(PWR_RESUME);
 	inittodr(0);
-	if (sc->sc_wak) {
+
+	if (sc->sc_wak)
 		if (aml_evalnode(sc, sc->sc_wak, 1, &env, NULL) != 0) {
 			dnprintf(10, "%s evaluating method _WAK failed.\n",
 			    DEVNAME(sc));
 		}
-	}
+
 	sc->sc_state = ACPI_STATE_S0;
 	if (sc->sc_tts) {
 		env.v_integer = sc->sc_state;
-		if (aml_evalnode(sc, sc->sc_wak, 1, &env, NULL) != 0) {
+		if (aml_evalnode(sc, sc->sc_tts, 1, &env, NULL) != 0) {
 			dnprintf(10, "%s evaluating method _TTS failed.\n",
 			    DEVNAME(sc));
 		}
 	}
 }
-#endif
+#endif /* ! SMALL_KERNEL */
+
+int
+acpi_prepare_sleep_state(struct acpi_softc *sc, int state)
+{
+	struct aml_value env;
+
+	if (sc == NULL || state == ACPI_STATE_S0)
+		return(0);
+
+	if (sc->sc_sleeptype[state].slp_typa == -1 ||
+	    sc->sc_sleeptype[state].slp_typb == -1) {
+		printf("%s: state S%d unavailable\n",
+		    sc->sc_dev.dv_xname, state);
+		return (ENXIO);
+	}
+
+	memset(&env, 0, sizeof(env));
+	env.type = AML_OBJTYPE_INTEGER;
+	env.v_integer = state;
+	/* _TTS(state) */
+	if (sc->sc_tts)
+		if (aml_evalnode(sc, sc->sc_tts, 1, &env, NULL) != 0) {
+			dnprintf(10, "%s evaluating method _TTS failed.\n",
+			    DEVNAME(sc));
+			return (ENXIO);
+		}
+
+	switch (state) {
+	case ACPI_STATE_S1:
+	case ACPI_STATE_S2:
+		resettodr();
+		dopowerhooks(PWR_SUSPEND);
+		break;
+	case ACPI_STATE_S3:
+		resettodr();
+		dopowerhooks(PWR_STANDBY);
+		break;
+	}
+
+	/* _PTS(state) */
+	if (sc->sc_pts)
+		if (aml_evalnode(sc, sc->sc_pts, 1, &env, NULL) != 0) {
+			dnprintf(10, "%s evaluating method _PTS failed.\n",
+			    DEVNAME(sc));
+			return (ENXIO);
+		}
+
+	sc->sc_state = state;
+	/* _GTS(state) */
+	if (sc->sc_gts)
+		if (aml_evalnode(sc, sc->sc_gts, 1, &env, NULL) != 0) {
+			dnprintf(10, "%s evaluating method _GTS failed.\n",
+			    DEVNAME(sc));
+			return (ENXIO);
+		}
+
+	disable_intr();
+	aml_evalname(sc, &aml_root, "\\_SST", 1, &env, NULL);
+	sc->sc_state = state;
+
+	return (0);
+}
+
+
 
 void
 acpi_powerdown(void)
 {
-	acpi_enter_sleep_state(acpi_softc, ACPI_STATE_S5);
+	/*
+	 * In case acpi_prepare_sleep fails, we shouldn't try to enter
+	 * the sleep state. It might cost us the battery.
+	 */
+	if (acpi_prepare_sleep_state(acpi_softc, ACPI_STATE_S5) == 0)
+		acpi_enter_sleep_state(acpi_softc, ACPI_STATE_S5);
 }
+
 
 extern int aml_busy;
 
@@ -1951,6 +2050,23 @@ acpi_foundec(struct aml_node *node, void *arg)
 	aml_freevalue(&res);
 
 	return 0;
+}
+
+int
+acpi_matchhids(struct acpi_attach_args *aa, const char *hids[],
+    const char *driver)
+{
+	int i;
+
+	if (aa->aaa_dev == NULL || aa->aaa_node == NULL)
+		return (0);
+	for (i = 0; hids[i]; i++) {
+		if (!strcmp(aa->aaa_dev, hids[i])) {
+			dnprintf(5, "driver %s matches %s\n", driver, hids[i]);
+			return (1);
+		}
+	}
+	return (0);
 }
 
 int

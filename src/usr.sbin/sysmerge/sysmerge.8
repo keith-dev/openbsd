@@ -1,4 +1,4 @@
-.\"	$OpenBSD: sysmerge.8,v 1.10 2008/07/04 15:03:45 sthen Exp $
+.\"	$OpenBSD: sysmerge.8,v 1.14 2009/02/17 16:48:11 ajacoutot Exp $
 .\"
 .\" Copyright (c) 2008 Antoine Jacoutot <ajacoutot@openbsd.org>
 .\"
@@ -14,7 +14,7 @@
 .\" ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 .\" OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 .\"
-.Dd $Mdocdate: July 4 2008 $
+.Dd $Mdocdate: February 17 2009 $
 .Dt SYSMERGE 8
 .Os
 .Sh NAME
@@ -81,14 +81,9 @@ when upgrading from binary sets.
 When run in
 .Em automatic
 mode
-.Pq Fl a ,
+.Pq Fl a
 .Nm
-will skip files with identical CVS Id, install missing ones and run commands
-associated with the following special files if they were modified:
-.Xr aliases 5 ,
-.Xr login.conf 5 ,
-.Xr MAKEDEV 8 ,
-.Xr passwd 5 .
+will skip files with identical CVS Id and install missing ones.
 In
 .Em manual
 mode (the default unless
@@ -109,8 +104,9 @@ mode.
 .Pp
 .Nm
 will work through the fileset,
-offering the chance to merge any differences using
-.Xr sdiff 1 .
+offering the chance to merge any differences using ${MERGE_CMD}.
+Merged files may be edited using a default editor,
+or one defined by the ${VISUAL} or ${EDITOR} environment variables.
 Files may also be left to deal with at a later date.
 Should any problems occur,
 such as a failure to upgrade a file,
@@ -150,9 +146,8 @@ The options are as follows:
 Automatic mode.
 If this option is specified,
 .Nm
-will automatically install missing files,
-create databases and device nodes,
-and will disable strict file comparison when possible (using CVS Ids).
+will automatically install missing files and disable strict file
+comparison when possible (using CVS Ids).
 .It Fl b
 Batch mode.
 If this option is specified,
@@ -177,10 +172,33 @@ to ${FETCH_CMD}.
 Directory in which to merge and install files.
 If unset, this defaults to
 .Pa / .
+.It Ev EDITOR , VISUAL
+Specifies an editor to use.
+If both
+.Ev EDITOR
+and
+.Ev VISUAL
+are set,
+.Ev VISUAL
+takes precedence.
+If neither
+.Ev EDITOR
+nor
+.Ev VISUAL
+are set,
+the default is
+.Xr vi 1 .
 .It Ev FETCH_CMD
 Command used to fetch remote files.
 Defaults to
 .Xr ftp 1 .
+.It Ev MERGE_CMD
+Command used to merge diffs.
+This will be called with three arguments: the first argument is the
+output file to create, the second argument is the currently installed
+file and the third argument is the reference file.
+If unset, this defaults to
+.Dq sdiff -as -w ${SWIDTH} -o .
 .It Ev TMPDIR
 Directory in which the work directory is created.
 If unset, this defaults to

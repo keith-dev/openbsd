@@ -1,4 +1,4 @@
-dnl	$OpenBSD: hardware,v 1.269 2008/08/07 06:18:44 miod Exp $
+dnl	$OpenBSD: hardware,v 1.275 2008/11/27 15:15:03 jmc Exp $
 OpenBSD/MACHINE OSREV works across a broad range of standard PCs and
 clones, with a wide variety of processors and I/O bus architectures.  It
 can be expected to install and run with minimal difficulties on most
@@ -617,6 +617,7 @@ dnl		XR16850-based ports (only in the pccom driver)
 		    Netgear WG111U
 		    Netgear WPN111
 		    Olitec 000544
+		    Philips SNU6500
 		    PLANET WDL-U357
 		    Siemens Gigaset 108
 		    SMC SMCWUSBT-G
@@ -723,7 +724,6 @@ dnl		XR16850-based ports (only in the pccom driver)
 		    FSC Connect2Air E-5400 USB D1700
 		    Gigaset USB Adapter 54
 		    Inventel UR045G
-		    Netgear WG111v2
 		    SMC EZ ConnectG SMC2862W-G
 		    Sagem XG703A
 		    Spinnaker DUT
@@ -744,6 +744,7 @@ dnl		XR16850-based ports (only in the pccom driver)
 		detected as PCMCIA adapters) [G]
 		    Ambicom WL54CF
 		    I-O DATA WN-G54/CF
+		    SparkLAN WCFM-100
 		Ralink Technology IEEE 802.11a/b/g CardBus adapters [A] [B]
 		    A-Link WL54PC
 		    Alfa AWPC036
@@ -783,7 +784,8 @@ dnl		XR16850-based ports (only in the pccom driver)
 		    Repotec RP-WB7108
 		    SATech SN-54C
 		    Sitecom WL-112
-		    SparkLAN WL-685R
+		    SparkLAN WL-611R
+		    SparkLAN WPCR-501
 		    Surecom EP-9428-g
 		    Sweex LC500050
 		    TekComm NE-9428-g
@@ -832,6 +834,7 @@ dnl		XR16850-based ports (only in the pccom driver)
 		    KCORP LifeStyle KLS-660
 		    LevelOne WNC-0301 v2
 		    Linksys WMP54G v4
+		    Longshine LCS-8031N
 		    Micronet SP906GK
 		    Minitar MN54GPC-R
 		    MSI MP54G2 Mini PCI
@@ -909,6 +912,7 @@ dnl		XR16850-based ports (only in the pccom driver)
 		    Corega CG-WLUSB2GL
 		    Corega CG-WLUSB2GO
 		    Corega CG-WLUSB2GPX
+		    D-Link DWA-110
 		    D-Link DWA-111
 		    D-Link DWL-G122 rev C1
 		    D-Link WUA-1340

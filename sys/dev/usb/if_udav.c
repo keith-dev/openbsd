@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_udav.c,v 1.40 2007/11/23 15:43:02 mbalmer Exp $ */
+/*	$OpenBSD: if_udav.c,v 1.43 2008/11/28 02:44:18 brad Exp $ */
 /*	$NetBSD: if_udav.c,v 1.3 2004/04/23 17:25:25 itojun Exp $	*/
 /*	$nabe: if_udav.c,v 1.3 2003/08/21 16:57:19 nabe Exp $	*/
 /*
@@ -683,7 +683,7 @@ udav_init(struct ifnet *ifp)
 
 	splx(s);
 
-	timeout_add(&sc->sc_stat_ch, hz);
+	timeout_add_sec(&sc->sc_stat_ch, 1);
 
 	return (0);
 }
@@ -1223,6 +1223,7 @@ udav_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		mii = GET_MII(sc);
 		error = ifmedia_ioctl(ifp, ifr, &mii->mii_media, cmd);
 		break;
+
 	case SIOCSIFADDR:
 		ifp->if_flags |= IFF_UP;
 		udav_init(ifp);
@@ -1236,12 +1237,6 @@ udav_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		}
 		break;
 
-	case SIOCSIFMTU:
-		if (ifr->ifr_mtu > ETHERMTU)
-			error = EINVAL;
-		else
-			ifp->if_mtu = ifr->ifr_mtu;
-		break;
 	case SIOCSIFFLAGS:
 		if (ifp->if_flags & IFF_UP) {
 			if (ifp->if_flags & IFF_RUNNING &&
@@ -1260,25 +1255,18 @@ udav_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		}
 		error = 0;
 		break;
-	case SIOCADDMULTI:
-	case SIOCDELMULTI:
-		error = (cmd == SIOCADDMULTI) ?
-		    ether_addmulti(ifr, &sc->sc_ac) :
-		    ether_delmulti(ifr, &sc->sc_ac);
 
-		if (error == ENETRESET) {
-			if (ifp->if_flags & IFF_RUNNING)
-				udav_setmulti(sc);
-			error = 0;
-		}
-		break;
 	default:
-		error = EINVAL;
-		break;
+		error = ether_ioctl(ifp, &sc->sc_ac, cmd, data);
+	}
+
+	if (error == ENETRESET) {
+		if (ifp->if_flags & IFF_RUNNING)
+			udav_setmulti(sc);
+		error = 0;
 	}
 
 	splx(s);
-
 	return (error);
 }
 
@@ -1497,7 +1485,7 @@ udav_tick_task(void *xsc)
 			   udav_start(ifp);
 	}
 
-	timeout_add(&sc->sc_stat_ch, hz);
+	timeout_add_sec(&sc->sc_stat_ch, 1);
 
 	splx(s);
 }

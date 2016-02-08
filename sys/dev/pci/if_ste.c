@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ste.c,v 1.40 2007/07/17 23:25:15 krw Exp $ */
+/*	$OpenBSD: if_ste.c,v 1.43 2008/11/28 02:44:18 brad Exp $ */
 /*
  * Copyright (c) 1997, 1998, 1999
  *	Bill Paul <wpaul@ctr.columbia.edu>.  All rights reserved.
@@ -815,7 +815,7 @@ ste_stats_update(void *xsc)
 		}
 	}
 
-	timeout_add(&sc->sc_stats_tmo, hz);
+	timeout_add_sec(&sc->sc_stats_tmo, 1);
 	splx(s);
 
 	return;
@@ -1196,7 +1196,7 @@ ste_init(void *xsc)
 	splx(s);
 
 	timeout_set(&sc->sc_stats_tmo, ste_stats_update, sc);
-	timeout_add(&sc->sc_stats_tmo, hz);
+	timeout_add_sec(&sc->sc_stats_tmo, 1);
 
 	return;
 }
@@ -1275,17 +1275,12 @@ int
 ste_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 {
 	struct ste_softc	*sc = ifp->if_softc;
+	struct ifaddr		*ifa = (struct ifaddr *) data;
 	struct ifreq		*ifr = (struct ifreq *) data;
-	struct ifaddr		*ifa = (struct ifaddr *)data;
 	struct mii_data		*mii;
 	int			s, error = 0;
 
 	s = splnet();
-
-	if ((error = ether_ioctl(ifp, &sc->arpcom, command, data)) > 0) {
-		splx(s);
-		return error;
-	}
 
 	switch(command) {
 	case SIOCSIFADDR:
@@ -1300,6 +1295,7 @@ ste_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 			break;
 		}
 		break;
+
 	case SIOCSIFFLAGS:
 		if (ifp->if_flags & IFF_UP) {
 			if (ifp->if_flags & IFF_RUNNING &&
@@ -1327,34 +1323,24 @@ ste_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 		sc->ste_if_flags = ifp->if_flags;
 		error = 0;
 		break;
-	case SIOCADDMULTI:
-	case SIOCDELMULTI:
-		error = (command == SIOCADDMULTI) ?
-		    ether_addmulti(ifr, &sc->arpcom) :
-		    ether_delmulti(ifr, &sc->arpcom);
 
-		if (error == ENETRESET) {
-			/*
-			 * Multicast list has changed; set the hardware
-			 * filter accordingly.
-			 */
-			if (ifp->if_flags & IFF_RUNNING)
-				ste_setmulti(sc);
-			error = 0;
-		}
-		break;
 	case SIOCGIFMEDIA:
 	case SIOCSIFMEDIA:
 		mii = &sc->sc_mii;
 		error = ifmedia_ioctl(ifp, ifr, &mii->mii_media, command);
 		break;
+
 	default:
-		error = ENOTTY;
-		break;
+		error = ether_ioctl(ifp, &sc->arpcom, command, data);
+	}
+
+	if (error == ENETRESET) {
+		if (ifp->if_flags & IFF_RUNNING)
+			ste_setmulti(sc);
+		error = 0;
 	}
 
 	splx(s);
-
 	return(error);
 }
 

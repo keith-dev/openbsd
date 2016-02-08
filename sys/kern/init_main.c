@@ -1,4 +1,4 @@
-/*	$OpenBSD: init_main.c,v 1.150 2008/06/09 07:07:16 djm Exp $	*/
+/*	$OpenBSD: init_main.c,v 1.157 2009/02/13 19:58:27 deraadt Exp $	*/
 /*	$NetBSD: init_main.c,v 1.84.4.1 1996/06/02 09:08:06 mrg Exp $	*/
 
 /*
@@ -98,12 +98,13 @@
 extern void nfs_init(void);
 #endif
 
+#include "vscsi.h"
 #include "softraid.h"
 
 const char	copyright[] =
 "Copyright (c) 1982, 1986, 1989, 1991, 1993\n"
 "\tThe Regents of the University of California.  All rights reserved.\n"
-"Copyright (c) 1995-2008 OpenBSD. All rights reserved.  http://www.OpenBSD.org\n";
+"Copyright (c) 1995-2009 OpenBSD. All rights reserved.  http://www.OpenBSD.org\n";
 
 /* Components of the first process -- never freed. */
 struct	session session0;
@@ -256,6 +257,7 @@ main(void *framep)
 	process0.ps_mainproc = p;
 	TAILQ_INIT(&process0.ps_threads);
 	TAILQ_INSERT_TAIL(&process0.ps_threads, p, p_thr_link);
+	process0.ps_refcnt = 1;
 	p->p_p = &process0;
 
 	LIST_INSERT_HEAD(&allproc, p, p_list);
@@ -295,7 +297,7 @@ main(void *framep)
 
 	/* Create the limits structures. */
 	p->p_p->ps_limit = &limit0;
-	for (i = 0; i < sizeof(p->p_rlimit)/sizeof(p->p_rlimit[0]); i++)
+	for (i = 0; i < nitems(p->p_rlimit); i++)
 		limit0.pl_rlimit[i].rlim_cur =
 		    limit0.pl_rlimit[i].rlim_max = RLIM_INFINITY;
 	limit0.pl_rlimit[RLIMIT_NOFILE].rlim_cur = NOFILE;
@@ -398,7 +400,7 @@ main(void *framep)
 
 		arc4random_buf((long *)newguard, sizeof(newguard));
 
-		for (i = sizeof(__guard)/sizeof(__guard[0]) - 1; i; i--)
+		for (i = nitems(__guard) - 1; i; i--)
 			__guard[i] = newguard[i];
 	}
 #endif
@@ -439,6 +441,9 @@ main(void *framep)
 
 	dostartuphooks();
 
+#if NVSCSI > 0
+	config_rootfound("vscsi", NULL);
+#endif
 #if NSOFTRAID > 0
 	config_rootfound("softraid", NULL);
 #endif
@@ -512,7 +517,7 @@ main(void *framep)
 #endif /* CRYPTO */
 
 	microtime(&rtv);
-	srandom((u_long)(rtv.tv_sec ^ rtv.tv_usec));
+	srandom((u_int32_t)(rtv.tv_sec ^ rtv.tv_usec) ^ arc4random());
 
 	randompid = 1;
 

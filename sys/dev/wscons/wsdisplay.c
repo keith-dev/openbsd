@@ -1,4 +1,4 @@
-/* $OpenBSD: wsdisplay.c,v 1.86 2008/06/07 20:34:36 miod Exp $ */
+/* $OpenBSD: wsdisplay.c,v 1.89 2009/01/10 23:02:47 miod Exp $ */
 /* $NetBSD: wsdisplay.c,v 1.82 2005/02/27 00:27:52 perry Exp $ */
 
 /*
@@ -233,6 +233,7 @@ void	wsdisplay_common_attach(struct wsdisplay_softc *sc,
 	    const struct wsdisplay_accessops *accessops,
 	    void *accesscookie, u_int defaultscreens);
 int	wsdisplay_common_detach(struct wsdisplay_softc *, int);
+void	wsdisplay_kbdholdscr(struct wsscreen *, int);
 
 #ifdef WSDISPLAY_COMPAT_RAWKBD
 int	wsdisplay_update_rawkbd(struct wsdisplay_softc *, struct wsscreen *);
@@ -906,7 +907,7 @@ wsdisplayclose(dev_t dev, int flag, int mode, struct proc *p)
 
 			/* XXX RESET KEYBOARD LEDS, etc. */
 			s = spltty();	/* avoid conflict with keyboard */
-			wsdisplay_kbdholdscreen((struct device *)sc, 0);
+			wsdisplay_kbdholdscr(scr, 0);
 			splx(s);
 		}
 		tp = scr->scr_tty;
@@ -1153,7 +1154,10 @@ wsdisplay_internal_ioctl(struct wsdisplay_softc *sc, struct wsscreen *scr,
 			    (scr->scr_dconf->wsemulcookie, WSEMUL_CLEARCURSOR);
 
 #ifdef BURNER_SUPPORT
-			/* disable the burner while X is running */
+			/* enable video _immediately_ if it nedes to be... */
+			if (sc->sc_burnman)
+				wsdisplay_burner(sc);
+			/* ...and disable the burner while X is running */
 			if (sc->sc_burnout)
 				timeout_del(&sc->sc_burner);
 #endif
@@ -1204,6 +1208,7 @@ wsdisplay_internal_ioctl(struct wsdisplay_softc *sc, struct wsscreen *scr,
 			return (EOPNOTSUPP);
 		(*sc->sc_accessops->burn_screen)(sc->sc_accesscookie,
 		     *(u_int *)data, sc->sc_burnflags);
+		sc->sc_burnman = *(u_int *)data == WSDISPLAYIO_VIDEO_OFF;
 		break;
 
 	case WSDISPLAYIO_GBURNER:
@@ -1230,8 +1235,12 @@ wsdisplay_internal_ioctl(struct wsdisplay_softc *sc, struct wsscreen *scr,
 		if (d->on) {
 			error = 0;
 			sc->sc_burninintvl = hz * d->on / 1000;
-			if (sc->sc_burnman)
+			if (sc->sc_burnman) {
 				sc->sc_burnout = sc->sc_burninintvl;
+				/* reinit timeout if changed */
+				if ((scr->scr_flags & SCR_GRAPHICS) == 0)
+					wsdisplay_burn(sc, sc->sc_burnflags);
+			}
 		}
 		if (d->off) {
 			error = 0;
@@ -1539,6 +1548,7 @@ wsdisplay_emulbell(void *v)
 	    FWRITE, NULL);
 }
 
+#if !defined(WSEMUL_NO_VT100)
 void
 wsdisplay_emulinput(void *v, const u_char *data, u_int count)
 {
@@ -1557,6 +1567,7 @@ wsdisplay_emulinput(void *v, const u_char *data, u_int count)
 	while (count-- > 0)
 		(*linesw[tp->t_line].l_rint)(*data++, tp);
 }
+#endif
 
 /*
  * Calls from the keyboard interface.
@@ -2011,19 +2022,25 @@ wsscreen_switchwait(struct wsdisplay_softc *sc, int no)
 }
 
 void
-wsdisplay_kbdholdscreen(struct device *dev, int hold)
+wsdisplay_kbdholdscr(struct wsscreen *scr, int hold)
 {
-	struct wsdisplay_softc *sc = (struct wsdisplay_softc *)dev;
-	struct wsscreen *scr;
-
-	scr = sc->sc_focus;
-
 	if (hold)
 		scr->scr_hold_screen = 1;
 	else {
 		scr->scr_hold_screen = 0;
 		timeout_add(&scr->scr_tty->t_rstrt_to, 0); /* "immediate" */
 	}
+}
+
+void
+wsdisplay_kbdholdscreen(struct device *dev, int hold)
+{
+	struct wsdisplay_softc *sc = (struct wsdisplay_softc *)dev;
+	struct wsscreen *scr;
+
+	scr = sc->sc_focus;
+	if (scr != NULL)
+		wsdisplay_kbdholdscr(scr, hold);
 }
 
 #if NWSKBD > 0
@@ -2153,6 +2170,9 @@ wsscrollback(void *arg, int op)
 	struct wsdisplay_softc *sc = arg;
 	int lines;
 
+	if (sc->sc_focus == NULL)
+		return;
+
 	if (op == WSDISPLAY_SCROLL_RESET)
 		lines = 0;
 	else {
@@ -2219,7 +2239,7 @@ wsdisplay_shutdownhook(void *arg)
  * wsmoused(8) support functions
  */
 
-/* pointer to the current screen wsdisplay_softc structure */
+/* XXX pointer to the current screen wsdisplay_softc structure */
 static struct wsdisplay_softc *sc = NULL;
 
 /*
@@ -2234,16 +2254,21 @@ wsmoused(struct wsdisplay_softc *ws_sc, u_long cmd, caddr_t data,
 
 	if (cmd == WSDISPLAYIO_WSMOUSED) {
 		if (IS_MOTION_EVENT(mouse_event.type)) {
-			motion_event(mouse_event.type, mouse_event.value);
+			if (ws_sc->sc_focus != NULL)
+				motion_event(mouse_event.type,
+				    mouse_event.value);
 			return (0);
 		}
 		if (IS_BUTTON_EVENT(mouse_event.type)) {
-			/* XXX tv_sec contains the number of clicks */
-			if (mouse_event.type == WSCONS_EVENT_MOUSE_DOWN) {
-				button_event(mouse_event.value,
-				    mouse_event.time.tv_sec);
-			} else
-				button_event(mouse_event.value, 0);
+			if (ws_sc->sc_focus != NULL) {
+				/* XXX tv_sec contains the number of clicks */
+				if (mouse_event.type ==
+				    WSCONS_EVENT_MOUSE_DOWN) {
+					button_event(mouse_event.value,
+					    mouse_event.time.tv_sec);
+				} else
+					button_event(mouse_event.value, 0);
+			}
 			return (0);
 		}
 		if (IS_CTRL_EVENT(mouse_event.type)) {

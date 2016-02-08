@@ -1,4 +1,4 @@
-/*	$OpenBSD: netstat.h,v 1.47 2008/01/03 21:01:40 claudio Exp $	*/
+/*	$OpenBSD: netstat.h,v 1.49 2009/01/27 13:49:21 claudio Exp $	*/
 /*	$NetBSD: netstat.h,v 1.6 1996/05/07 02:55:05 thorpej Exp $	*/
 
 /*
@@ -66,8 +66,8 @@ extern	char *__progname; /* program name, from crt0.o */
 
 
 int	kread(u_long addr, void *buf, int size);
-char	*plural(int);
-char	*plurales(int);
+char	*plural(u_int64_t);
+char	*plurales(u_int64_t);
 
 void	protopr(u_long, char *);
 void	ip6protopr(u_long, char *);
@@ -82,6 +82,7 @@ void	esp_stats(char *);
 void	ipip_stats(char *);
 void	carp_stats (char *);
 void	pfsync_stats (char *);
+void	pflow_stats (char *);
 void	etherip_stats(char *);
 void	ipcomp_stats(char *);
 

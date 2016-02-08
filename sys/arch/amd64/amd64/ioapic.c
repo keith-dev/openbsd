@@ -1,4 +1,4 @@
-/*	$OpenBSD: ioapic.c,v 1.13 2008/06/26 05:42:09 ray Exp $	*/
+/*	$OpenBSD: ioapic.c,v 1.17 2008/12/21 18:49:45 kettenis Exp $	*/
 /* 	$NetBSD: ioapic.c,v 1.6 2003/05/15 13:30:31 fvdl Exp $	*/
 
 /*-
@@ -84,10 +84,6 @@
 
 #include <machine/mpbiosvar.h>
 
-#if !defined(MPBIOS) && !defined(MPACPI)
-#error "ioapic needs at least one of the MPBIOS or MPACPI options"
-#endif
-
 /*
  * XXX locking
  */
@@ -122,14 +118,18 @@ ioapic_lock(struct ioapic_softc *sc)
 
 	flags = read_psl();
 	disable_intr();
+#ifdef MULTIPROCESSOR
 	mtx_enter(&sc->sc_pic.pic_mutex);
+#endif
 	return flags;
 }
 
 static __inline void
 ioapic_unlock(struct ioapic_softc *sc, u_long flags)
 {
+#ifdef MULTIPROCESSOR
 	mtx_leave(&sc->sc_pic.pic_mutex);
+#endif
 	write_psl(flags);
 }
 
@@ -307,7 +307,9 @@ ioapic_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_data = (volatile u_int32_t *)(bh + IOAPIC_DATA);	
 
 	sc->sc_pic.pic_type = PIC_IOAPIC;
+#ifdef MULTIPROCESSOR
 	mtx_init(&sc->sc_pic.pic_mutex, IPL_NONE);
+#endif
 	sc->sc_pic.pic_hwmask = ioapic_hwmask;
 	sc->sc_pic.pic_hwunmask = ioapic_hwunmask;
 	sc->sc_pic.pic_addroute = ioapic_addroute;
@@ -344,7 +346,7 @@ ioapic_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_pins = malloc(sizeof(struct ioapic_pin) * sc->sc_apic_sz,
 	    M_DEVBUF, M_WAITOK);
 
-	for (i=0; i<sc->sc_apic_sz; i++) {
+	for (i = 0; i < sc->sc_apic_sz; i++) {
 		sc->sc_pins[i].ip_next = NULL;
 		sc->sc_pins[i].ip_map = NULL;
 		sc->sc_pins[i].ip_vector = 0;
@@ -365,7 +367,7 @@ ioapic_attach(struct device *parent, struct device *self, void *aux)
 #if 0
 	/* output of this was boring. */
 	if (mp_verbose)
-		for (i=0; i<sc->sc_apic_sz; i++)
+		for (i = 0; i < sc->sc_apic_sz; i++)
 			ioapic_print_redir(sc, "boot", i);
 #endif
 }
@@ -487,9 +489,8 @@ ioapic_hwunmask(struct pic *pic, int pin)
 	struct ioapic_softc *sc = (struct ioapic_softc *)pic;
 	u_long flags;
 
-	if (ioapic_cold) {
+	if (ioapic_cold)
 		return;
-	}
 	flags = ioapic_lock(sc);
 	redlo = ioapic_read_ul(sc, IOAPIC_REDLO(pin));
 	redlo &= ~IOAPIC_REDLO_MASK;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_lge.c,v 1.47 2008/05/23 08:49:27 brad Exp $	*/
+/*	$OpenBSD: if_lge.c,v 1.50 2008/11/28 02:44:18 brad Exp $	*/
 /*
  * Copyright (c) 2001 Wind River Systems
  * Copyright (c) 1997, 1998, 1999, 2000, 2001
@@ -595,7 +595,7 @@ lge_attach(struct device *parent, struct device *self, void *aux)
 	ether_ifattach(ifp);
 	DPRINTFN(5, ("timeout_set\n"));
 	timeout_set(&sc->lge_timeout, lge_tick, sc);
-	timeout_add(&sc->lge_timeout, hz);
+	timeout_add_sec(&sc->lge_timeout, 1);
 	return;
 
 fail_5:
@@ -640,7 +640,7 @@ lge_list_tx_init(struct lge_softc *sc)
 
 /*
  * Initialize the RX descriptors and allocate mbufs for them. Note that
- * we arralge the descriptors in a closed ring, so that the last descriptor
+ * we arrange the descriptors in a closed ring, so that the last descriptor
  * points back to the first.
  */
 int
@@ -671,7 +671,7 @@ lge_list_rx_init(struct lge_softc *sc)
 }
 
 /*
- * Initialize an RX descriptor and attach an MBUF cluster.
+ * Initialize a RX descriptor and attach a MBUF cluster.
  */
 int
 lge_newbuf(struct lge_softc *sc, struct lge_rx_desc *c, struct mbuf *m)
@@ -1035,7 +1035,7 @@ lge_tick(void *xsc)
 		}
 	}
 
-	timeout_add(&sc->lge_timeout, hz);
+	timeout_add_sec(&sc->lge_timeout, 1);
 
 	splx(s);
 }
@@ -1325,7 +1325,7 @@ lge_init(void *xsc)
 
 	splx(s);
 
-	timeout_add(&sc->lge_timeout, hz);
+	timeout_add_sec(&sc->lge_timeout, 1);
 }
 
 /*
@@ -1366,8 +1366,8 @@ int
 lge_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 {
 	struct lge_softc	*sc = ifp->if_softc;
+	struct ifaddr		*ifa = (struct ifaddr *) data;
 	struct ifreq		*ifr = (struct ifreq *) data;
-	struct ifaddr		*ifa = (struct ifaddr *)data;
 	struct mii_data		*mii;
 	int			s, error = 0;
 
@@ -1383,12 +1383,7 @@ lge_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 			arp_ifinit(&sc->arpcom, ifa);
 #endif /* INET */
 		break;
-	case SIOCSIFMTU:
-		if (ifr->ifr_mtu < ETHERMIN || ifr->ifr_mtu > ifp->if_hardmtu)
-			error = EINVAL;
-		else if (ifp->if_mtu != ifr->ifr_mtu)
-			ifp->if_mtu = ifr->ifr_mtu;
-		break;
+
 	case SIOCSIFFLAGS:
 		if (ifp->if_flags & IFF_UP) {
 			if (ifp->if_flags & IFF_RUNNING &&
@@ -1417,30 +1412,24 @@ lge_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 		}
 		sc->lge_if_flags = ifp->if_flags;
 		break;
-	case SIOCADDMULTI:
-	case SIOCDELMULTI:
-		error = (command == SIOCADDMULTI)
-			? ether_addmulti(ifr, &sc->arpcom)
-			: ether_delmulti(ifr, &sc->arpcom);
 
-		if (error == ENETRESET) {
-			if (ifp->if_flags & IFF_RUNNING)
-				lge_setmulti(sc);
-			error = 0;
-		}
-		break;
 	case SIOCGIFMEDIA:
 	case SIOCSIFMEDIA:
 		mii = &sc->lge_mii;
 		error = ifmedia_ioctl(ifp, ifr, &mii->mii_media, command);
 		break;
+
 	default:
-		error = ENOTTY;
-		break;
+		error = ether_ioctl(ifp, &sc->arpcom, command, data);
+	}
+
+	if (error == ENETRESET) {
+		if (ifp->if_flags & IFF_RUNNING)
+			lge_setmulti(sc);
+		error = 0;
 	}
 
 	splx(s);
-
 	return (error);
 }
 

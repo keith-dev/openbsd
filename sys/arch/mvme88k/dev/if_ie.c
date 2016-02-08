@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ie.c,v 1.41 2006/05/08 14:36:10 miod Exp $ */
+/*	$OpenBSD: if_ie.c,v 1.43 2008/11/28 02:44:17 brad Exp $ */
 
 /*-
  * Copyright (c) 1998 Steve Murphree, Jr.
@@ -1789,18 +1789,11 @@ ieioctl(ifp, cmd, data)
 {
 	struct ie_softc *sc = ifp->if_softc;
 	struct ifaddr *ifa = (struct ifaddr *)data;
-	struct ifreq *ifr = (struct ifreq *)data;
 	int s, error = 0;
 
 	s = splnet();
 
-	if ((error = ether_ioctl(ifp, &sc->sc_arpcom, cmd, data)) > 0) {
-		splx(s);
-		return error;
-	}
-
 	switch(cmd) {
-
 	case SIOCSIFADDR:
 		ifp->if_flags |= IFF_UP;
 
@@ -1850,26 +1843,16 @@ ieioctl(ifp, cmd, data)
 #endif
 		break;
 
-	case SIOCADDMULTI:
-	case SIOCDELMULTI:
-		error = (cmd == SIOCADDMULTI) ?
-		    ether_addmulti(ifr, &sc->sc_arpcom):
-		    ether_delmulti(ifr, &sc->sc_arpcom);
-
-		if (error == ENETRESET) {
-			/*
-			 * Multicast list has changed; set the hardware filter
-			 * accordingly.
-			 */
-			if (ifp->if_flags & IFF_RUNNING)
-				mc_reset(sc);
-			error = 0;
-		}
-		break;
-
 	default:
-		error = EINVAL;
+		error = ether_ioctl(ifp, &sc->sc_arpcom, cmd, data);
 	}
+
+	if (error == ENETRESET) {
+		if (ifp->if_flags & IFF_RUNNING)
+			mc_reset(sc);
+		error = 0;
+	}
+
 	splx(s);
 	return error;
 }

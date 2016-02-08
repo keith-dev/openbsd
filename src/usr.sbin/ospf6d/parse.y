@@ -1,4 +1,4 @@
-/*	$OpenBSD: parse.y,v 1.13 2008/02/26 10:09:58 mpf Exp $ */
+/*	$OpenBSD: parse.y,v 1.15 2009/01/26 23:20:57 stsp Exp $ */
 
 /*
  * Copyright (c) 2004, 2005 Esben Norby <norby@openbsd.org>
@@ -638,11 +638,13 @@ findeol(void)
 	int	c;
 
 	parsebuf = NULL;
-	pushback_index = 0;
 
 	/* skip to either EOF or the first real EOL */
 	while (1) {
-		c = lgetc(0);
+		if (pushback_index)
+			c = pushback_buffer[--pushback_index];
+		else
+			c = lgetc(0);
 		if (c == '\n') {
 			file->lineno++;
 			break;
@@ -1045,7 +1047,7 @@ get_rtr_id(void)
 		cur = ((struct sockaddr_in *)ifa->ifa_addr)->sin_addr.s_addr;
 		if ((cur & localnet) == localnet)	/* skip 127/8 */
 			continue;
-		if (cur > ip || ip == 0)
+		if (ntohl(cur) < ntohl(ip) || ip == 0)
 			ip = cur;
 	}
 	freeifaddrs(ifap);

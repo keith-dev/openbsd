@@ -1,4 +1,4 @@
-/*	$OpenBSD: siop_common.c,v 1.30 2007/08/05 19:05:09 kettenis Exp $ */
+/*	$OpenBSD: siop_common.c,v 1.33 2009/02/16 21:19:07 miod Exp $ */
 /*	$NetBSD: siop_common.c,v 1.37 2005/02/27 00:27:02 perry Exp $	*/
 
 /*
@@ -707,8 +707,7 @@ siop_ppr_msg(siop_cmd, offset, ssync, soff)
 }
 
 void
-siop_minphys(bp)
-	struct buf *bp;
+siop_minphys(struct buf *bp, struct scsi_link *sl)
 {
 	if (bp->b_bcount > SIOP_MAXFER)
 		bp->b_bcount = SIOP_MAXFER;
@@ -805,13 +804,13 @@ siop_sdp(siop_cmd, offset)
 #ifdef DIAGNOSTIC
 	if (offset > SIOP_NSG) {
 		sc_print_addr(siop_cmd->xs->sc_link);
-		printf(": offset %d > %d\n", offset, SIOP_NSG);
+		printf("offset %d > %d\n", offset, SIOP_NSG);
 		panic("siop_sdp: offset");
 	}
 #endif
 	/*
 	 * Save data pointer. We do this by adjusting the tables to point
-	 * at the begginning of the data not yet transfered. 
+	 * at the beginning of the data not yet transfered. 
 	 * offset points to the first table with untransfered data.
 	 */
 
@@ -837,7 +836,7 @@ siop_sdp(siop_cmd, offset)
 
 	/*
 	 * now we can remove entries which have been transfered.
-	 * We just move the entries with data left at the beggining of the
+	 * We just move the entries with data left at the beginning of the
 	 * tables
 	 */
 	bcopy(&siop_cmd->siop_tables->data[offset],

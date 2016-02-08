@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.h,v 1.2 2008/05/28 07:36:23 ratchov Exp $	*/
+/*	$OpenBSD: conf.h,v 1.6 2009/02/03 19:44:58 ratchov Exp $	*/
 /*
  * Copyright (c) 2008 Alexandre Ratchov <alex@caoua.org>
  *
@@ -14,8 +14,8 @@
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
-#ifndef ACONF_H
-#define ACONF_H
+#ifndef CONF_H
+#define CONF_H
 
 /*
  * debug trace levels:
@@ -43,12 +43,20 @@ extern int debug_level;
 #define DPRINTFN(n, ...) do {} while(0)
 #endif
 
+/*
+ * number of blocks in the device play/record buffers.  because Sun API
+ * cannot notify apps of the current positions, we have to use all N
+ * buffers devices blocks plus one extra block, to make write() block,
+ * so that poll() can return the exact postition.
+ */
+#define DEV_NBLK 2
 
-#define MIDI_MAXCTL		127
-#define MIDI_TO_ADATA(m)	((ADATA_UNIT * (m) + 64) / 127)
+/*
+ * number of blocks in the wav-file i/o buffers
+ */
+#define WAV_NBLK 6
 
-#define DEFAULT_NFR	0x400		/* buf size in frames */
-#define DEFAULT_NBLK	0x2		/* blocks per buffer */
-#define DEFAULT_DEVICE	"/dev/audio"	/* defaul device */
+#define DEFAULT_DEVICE	"/dev/audio"
+#define DEFAULT_SOCKET	"default"
 
 #endif /* !defined(CONF_H) */

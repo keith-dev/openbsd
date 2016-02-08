@@ -1,4 +1,4 @@
-/*	$OpenBSD: iha.c,v 1.29 2007/12/29 03:04:19 dlg Exp $ */
+/*	$OpenBSD: iha.c,v 1.33 2009/02/16 21:19:06 miod Exp $ */
 /*-------------------------------------------------------------------------
  *
  * Device driver for the INI-9XXXU/UW or INIC-940/950  PCI SCSI Controller.
@@ -277,7 +277,7 @@ iha_scsi_cmd(xs)
 	if (pScb == NULL) {
 		/* XXX - different xs->error/return if
 		 * SCSI_POLL/_NOSLEEP? */
-		return (TRY_AGAIN_LATER);
+		return (NO_CCB);
 	}
 
 	pScb->SCB_Target = sc_link->target;
@@ -298,18 +298,10 @@ iha_scsi_cmd(xs)
 	pScb->SCB_BufCharsLeft = pScb->SCB_BufChars = xs->datalen;
 
 	if ((pScb->SCB_Flags & (SCSI_DATA_IN | SCSI_DATA_OUT)) != 0) {
-#ifdef TFS
-		if (pScb->SCB_Flags & SCSI_DATA_UIO)
-			error = bus_dmamap_load_uio(sc->sc_dmat,
-			    pScb->SCB_DataDma, (struct uio *)xs->data,
-			    (pScb->SCB_Flags & SCSI_NOSLEEP) ?
-			    BUS_DMA_NOWAIT : BUS_DMA_WAITOK);
-		else
-#endif /* TFS */
-			error = bus_dmamap_load(sc->sc_dmat, pScb->SCB_DataDma,
-			    xs->data, pScb->SCB_BufChars, NULL,
-			    (pScb->SCB_Flags & SCSI_NOSLEEP) ?
-			    BUS_DMA_NOWAIT : BUS_DMA_WAITOK);
+		error = bus_dmamap_load(sc->sc_dmat, pScb->SCB_DataDma,
+		    xs->data, pScb->SCB_BufChars, NULL,
+		    (pScb->SCB_Flags & SCSI_NOSLEEP) ?
+		    BUS_DMA_NOWAIT : BUS_DMA_WAITOK);
 
 		if (error) {
 			sc_print_addr(xs->sc_link);
@@ -346,7 +338,7 @@ iha_scsi_cmd(xs)
 	 */
 	timeout_set(&xs->stimeout, iha_timeout, pScb);
 	if ((pScb->SCB_Flags & SCSI_POLL) == 0)
-		timeout_add(&xs->stimeout, (xs->timeout/1000) * hz);
+		timeout_add_msec(&xs->stimeout, xs->timeout);
 
 	iha_exec_scb(sc, pScb);
 
@@ -481,8 +473,7 @@ iha_init_tulip(sc)
  *		 via sc->sc_adapter.scsi_minphys.
  */
 void
-iha_minphys(bp)
-	struct buf *bp;
+iha_minphys(struct buf *bp, struct scsi_link *sl)
 {
 	if (bp->b_bcount > ((IHA_MAX_SG_ENTRIES - 1) * PAGE_SIZE))
 		bp->b_bcount = ((IHA_MAX_SG_ENTRIES - 1) * PAGE_SIZE);
@@ -885,8 +876,8 @@ iha_push_sense_request(sc, pScb)
 	sensecmd->length = sizeof(pScb->SCB_ScsiSenseData);
 
 	if ((pScb->SCB_Flags & SCSI_POLL) == 0)
-		timeout_add(&pScb->SCB_Xs->stimeout,
-		    (pScb->SCB_Xs->timeout/1000) * hz);
+		timeout_add_msec(&pScb->SCB_Xs->stimeout,
+		    pScb->SCB_Xs->timeout);
 
 	iha_push_pend_scb(sc, pScb);
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: nd6_rtr.c,v 1.47 2008/06/11 19:00:50 mcbride Exp $	*/
+/*	$OpenBSD: nd6_rtr.c,v 1.50 2009/01/30 11:56:59 rainer Exp $	*/
 /*	$KAME: nd6_rtr.c,v 1.97 2001/02/07 11:09:13 itojun Exp $	*/
 
 /*
@@ -758,6 +758,9 @@ defrtrlist_update(struct nd_defrouter *new)
 			dr->rtlifetime = new->rtlifetime;
 			dr->expire = new->expire;
 
+			if (!dr->installed)
+				defrouter_select();
+
 			/*
 			 * If the preference does not change, there's no need
 			 * to sort the entries.
@@ -1045,7 +1048,6 @@ prelist_update(struct nd_prefix *new, struct nd_defrouter *dr,
 	struct nd_prefix *pr;
 	int s = splsoftnet();
 	int error = 0;
-	int newprefix = 0;
 	int auth;
 	struct in6_addrlifetime lt6_tmp;
 
@@ -1100,8 +1102,6 @@ prelist_update(struct nd_prefix *new, struct nd_defrouter *dr,
 			pfxrtr_add(pr, dr);
 	} else {
 		struct nd_prefix *newpr = NULL;
-
-		newprefix = 1;
 
 		if (new->ndpr_vltime == 0)
 			goto end;
@@ -1686,7 +1686,7 @@ in6_ifadd(struct nd_prefix *pr)
 	struct ifaddr *ifa;
 	struct in6_aliasreq ifra;
 	struct in6_ifaddr *ia, *ib;
-	int error, plen0;
+	int error, s, plen0;
 	struct in6_addr mask;
 	int prefixlen = pr->ndpr_plen;
 
@@ -1782,7 +1782,11 @@ in6_ifadd(struct nd_prefix *pr)
 	ifra.ifra_flags |= IN6_IFF_AUTOCONF; /* obey autoconf */
 
 	/* allocate ifaddr structure, link into chain, etc. */
-	if ((error = in6_update_ifa(ifp, &ifra, NULL)) != 0) {
+	s = splsoftnet();
+	error = in6_update_ifa(ifp, &ifra, NULL);
+	splx(s);
+
+	if (error != 0) {
 		nd6log((LOG_ERR,
 		    "in6_ifadd: failed to make ifaddr %s on %s (errno=%d)\n",
 		    ip6_sprintf(&ifra.ifra_addr.sin6_addr), ifp->if_xname,

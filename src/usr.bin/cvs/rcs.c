@@ -1,4 +1,4 @@
-/*	$OpenBSD: rcs.c,v 1.278 2008/06/26 21:31:40 joris Exp $	*/
+/*	$OpenBSD: rcs.c,v 1.286 2009/02/21 19:46:40 tobias Exp $	*/
 /*
  * Copyright (c) 2004 Jean-Francois Brousseau <jfb@openbsd.org>
  * All rights reserved.
@@ -400,6 +400,8 @@ rcs_write(RCSFILE *rfp)
 		(void)unlink(fn);
 		fatal("fdopen %s: %s", fn, strerror(saved_errno));
 	}
+
+	cvs_worklist_add(fn, &temp_files);
 
 	if (rfp->rf_head != NULL)
 		rcsnum_tostr(rfp->rf_head, numbuf, sizeof(numbuf));
@@ -1209,6 +1211,7 @@ rcs_rev_add(RCSFILE *rf, RCSNUM *rev, const char *msg, time_t date,
 	struct passwd *pw;
 	struct rcs_branch *brp, *obrp;
 	struct rcs_delta *ordp, *rdp;
+	uid_t uid;
 
 	if (rev == RCS_HEAD_REV) {
 		if (rf->rf_flags & RCS_CREATE) {
@@ -1228,7 +1231,8 @@ rcs_rev_add(RCSFILE *rf, RCSNUM *rev, const char *msg, time_t date,
 			return (-1);
 	}
 
-	if ((pw = getpwuid(getuid())) == NULL)
+	uid = getuid();
+	if ((pw = getpwuid(uid)) == NULL)
 		fatal("getpwuid failed");
 
 	rdp = xcalloc(1, sizeof(*rdp));
@@ -1240,7 +1244,9 @@ rcs_rev_add(RCSFILE *rf, RCSNUM *rev, const char *msg, time_t date,
 
 	rdp->rd_next = rcsnum_alloc();
 
-	if (username == NULL)
+	if (uid == 0)
+		username = getlogin();
+	if (username == NULL || *username == '\0')
 		username = pw->pw_name;
 
 	rdp->rd_author = xstrdup(username);
@@ -2535,15 +2541,12 @@ rcs_deltatext_set(RCSFILE *rfp, RCSNUM *rev, BUF *bp)
 /*
  * rcs_rev_setlog()
  *
- * Sets the log message of revision <rev> to <logtext>
+ * Sets the log message of revision <rev> to <logtext>.
  */
 int
 rcs_rev_setlog(RCSFILE *rfp, RCSNUM *rev, const char *logtext)
 {
 	struct rcs_delta *rdp;
-	char buf[CVS_REV_BUFSZ];
-
-	rcsnum_tostr(rev, buf, sizeof(buf));
 
 	if ((rdp = rcs_findrev(rfp, rev)) == NULL)
 		return (-1);
@@ -2608,7 +2611,7 @@ rcs_state_set(RCSFILE *rfp, RCSNUM *rev, const char *state)
 int
 rcs_state_check(const char *state)
 {
-	if (strchr(state, ' ') != NULL)
+	if (strcmp(state, RCS_STATE_DEAD) && strcmp(state, RCS_STATE_EXP))
 		return (-1);
 
 	return (0);
@@ -2645,7 +2648,7 @@ rcs_get_revision(const char *revstr, RCSFILE *rfp)
 
 	if (!strcmp(revstr, RCS_HEAD_BRANCH)) {
 		if (rfp->rf_head == NULL)
-			return NULL;
+			return (NULL);
 
 		frev = rcsnum_alloc();
 		rcsnum_cpy(rfp->rf_head, frev, 0);
@@ -2655,11 +2658,8 @@ rcs_get_revision(const char *revstr, RCSFILE *rfp)
 	/* Possibly we could be passed a version number */
 	if ((rev = rcsnum_parse(revstr)) != NULL) {
 		/* Do not return if it is not in RCS file */
-		if ((rdp = rcs_findrev(rfp, rev)) != NULL) {
-			frev = rcsnum_alloc();
-			rcsnum_cpy(rev, frev, 0);
-			return (frev);
-		}
+		if ((rdp = rcs_findrev(rfp, rev)) != NULL)
+			return (rev);
 	} else {
 		/* More likely we will be passed a symbol */
 		rev = rcs_sym_getrev(rfp, revstr);
@@ -2681,13 +2681,10 @@ rcs_get_revision(const char *revstr, RCSFILE *rfp)
 		 * the minimum of both revision lengths is taken
 		 * instead of just 2.
 		 */
-		if (rfp->rf_head == NULL)
-			return NULL;
-
-		if (rcsnum_cmp(rev, rfp->rf_head,
+		if (rfp->rf_head == NULL || rcsnum_cmp(rev, rfp->rf_head,
 		    MIN(rfp->rf_head->rn_len, rev->rn_len)) < 0) {
 			rcsnum_free(rev);
-			return NULL;
+			return (NULL);
 		}
 		return (rev);
 	}
@@ -3184,7 +3181,6 @@ rcs_kwexp_line(char *rcsfile, struct rcs_delta *rdp, struct cvs_lines *lines,
 	const u_char *c, *start, *fin, *end;
 	char *kwstr;
 	char expbuf[256], buf[256];
-	char *fmt;
 	size_t clen, kwlen, len, tlen;
 
 	kwtype = 0;
@@ -3319,9 +3315,8 @@ rcs_kwexp_line(char *rcsfile, struct rcs_delta *rdp, struct cvs_lines *lines,
 			}
 
 			if (kwtype & RCS_KW_DATE) {
-				fmt = "%Y/%m/%d %H:%M:%S ";
-
-				if (strftime(buf, sizeof(buf), fmt,
+				if (strftime(buf, sizeof(buf),
+				    "%Y/%m/%d %H:%M:%S ",
 				    &rdp->rd_date) == 0)
 					fatal("rcs_kwexp_line: strftime "
 					    "failure");
@@ -3337,12 +3332,9 @@ rcs_kwexp_line(char *rcsfile, struct rcs_delta *rdp, struct cvs_lines *lines,
 				 * digit, %e would do so and there is
 				 * no better format for strftime().
 				 */
-				if (rdp->rd_date.tm_mday < 10)
-					fmt = "%B%e %Y ";
-				else
-					fmt = "%B %e %Y ";
-
-				if (strftime(buf, sizeof(buf), fmt,
+				if (strftime(buf, sizeof(buf),
+				    (rdp->rd_date.tm_mday < 10) ?
+				        "%B%e %Y " : "%B %e %Y ",
 				    &rdp->rd_date) == 0)
 					fatal("rcs_kwexp_line: strftime "
 					    "failure");
@@ -3416,8 +3408,8 @@ rcs_kwexp_line(char *rcsfile, struct rcs_delta *rdp, struct cvs_lines *lines,
 				if (strlcat(linebuf, buf, sizeof(linebuf))
 				    >= sizeof(buf))
 					fatal("rcs_kwexp_line: truncated");
-				fmt = "  %Y/%m/%d %H:%M:%S  ";
-				if (strftime(buf, sizeof(buf), fmt,
+				if (strftime(buf, sizeof(buf),
+				    "  %Y/%m/%d %H:%M:%S  ",
 				    &rdp->rd_date) == 0)
 					fatal("rcs_kwexp_line: strftime "
 					    "failure");
@@ -3626,7 +3618,7 @@ rcs_translate_tag(const char *revstr, RCSFILE *rfp)
 	rcsnum_free(rev);
 
 	do {
-		deltatime = timelocal(&(rdp->rd_date));
+		deltatime = timegm(&(rdp->rd_date));
 
 		if (RCSNUM_ISBRANCHREV(rdp->rd_num)) {
 			if (deltatime > cdate) {

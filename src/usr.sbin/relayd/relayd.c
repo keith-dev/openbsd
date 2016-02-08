@@ -1,4 +1,4 @@
-/*	$OpenBSD: relayd.c,v 1.79 2008/07/22 23:17:37 reyk Exp $	*/
+/*	$OpenBSD: relayd.c,v 1.83 2008/09/29 15:12:22 reyk Exp $	*/
 
 /*
  * Copyright (c) 2007, 2008 Reyk Floeter <reyk@openbsd.org>
@@ -370,8 +370,10 @@ merge_config(struct relayd *env, struct relayd *new_env)
 	env->sc_protocount = new_env->sc_protocount;
 	env->sc_relaycount = new_env->sc_relaycount;
 
-	memcpy(&env->sc_interval, &new_env->sc_interval, sizeof(env->sc_interval));
-	memcpy(&env->sc_timeout, &new_env->sc_timeout, sizeof(env->sc_timeout));
+	memcpy(&env->sc_interval, &new_env->sc_interval,
+	    sizeof(env->sc_interval));
+	memcpy(&env->sc_timeout, &new_env->sc_timeout,
+	    sizeof(env->sc_timeout));
 	memcpy(&env->sc_empty_table, &new_env->sc_empty_table,
 	    sizeof(env->sc_empty_table));
 	memcpy(&env->sc_proto_default, &new_env->sc_proto_default,
@@ -489,7 +491,8 @@ purge_config(struct relayd *env, u_int8_t what)
 	if (what & PURGE_RELAYS && env->sc_relays != NULL) {
 		while ((rlay = TAILQ_FIRST(env->sc_relays)) != NULL) {
 			TAILQ_REMOVE(env->sc_relays, rlay, rl_entry);
-			while ((sess = SPLAY_ROOT(&rlay->rl_sessions)) != NULL) {
+			while ((sess =
+			    SPLAY_ROOT(&rlay->rl_sessions)) != NULL) {
 				SPLAY_REMOVE(session_tree,
 				    &rlay->rl_sessions, sess);
 				free(sess);
@@ -910,7 +913,7 @@ event_again(struct event *ev, int fd, short event,
 {
 	struct timeval tv_next, tv_now, tv;
 
-	if (gettimeofday(&tv_now, NULL))
+	if (gettimeofday(&tv_now, NULL) == -1)
 		fatal("event_again: gettimeofday");
 
 	bcopy(end, &tv_next, sizeof(tv_next));
@@ -1169,6 +1172,47 @@ protonode_add(enum direction dir, struct protocol *proto,
 	}
 
 	return (0);
+}
+
+int
+protonode_load(enum direction dir, struct protocol *proto,
+    struct protonode *node, const char *name)
+{
+	FILE			*fp;
+	char			 buf[BUFSIZ];
+	int			 ret = -1;
+	struct protonode	 pn;
+
+	bcopy(node, &pn, sizeof(pn));
+	pn.key = pn.value = NULL;
+
+	if ((fp = fopen(name, "r")) == NULL)
+		return (-1);
+
+	while (fgets(buf, sizeof(buf), fp) != NULL) {
+		/* strip whitespace and newline characters */
+		buf[strcspn(buf, "\r\n\t ")] = '\0';
+		if (!strlen(buf) || buf[0] == '#')
+			continue;
+		pn.key = strdup(buf);
+		if (node->value != NULL)
+			pn.value = strdup(node->value);
+		if (pn.key == NULL ||
+		    (node->value != NULL && pn.value == NULL))
+			goto fail;
+		if (protonode_add(dir, proto, &pn) == -1)
+			goto fail;
+		pn.key = pn.value = NULL;
+	}
+
+	ret = 0;
+ fail:
+	if (pn.key != NULL)
+		free(pn.key);
+	if (pn.value != NULL)
+		free(pn.value);
+	fclose(fp);
+	return (ret);
 }
 
 int

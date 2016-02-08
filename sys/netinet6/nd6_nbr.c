@@ -1,4 +1,4 @@
-/*	$OpenBSD: nd6_nbr.c,v 1.51 2008/06/11 19:00:50 mcbride Exp $	*/
+/*	$OpenBSD: nd6_nbr.c,v 1.54 2008/11/25 12:11:45 markus Exp $	*/
 /*	$KAME: nd6_nbr.c,v 1.61 2001/02/10 16:06:14 jinmei Exp $	*/
 
 /*
@@ -132,7 +132,17 @@ nd6_ns_input(struct mbuf *m, int off, int icmp6len)
 			    "(wrong ip6 dst)\n"));
 			goto bad;
 		}
+	} else {
+		/*
+		 * Make sure the source address is from a neighbor's address.
+		 */
+		if (in6ifa_ifplocaladdr(ifp, &saddr6) == NULL) {
+			nd6log((LOG_INFO, "nd6_ns_input: "
+			    "NS packet from non-neighbor\n"));
+			goto bad;
+		}
 	}
+
 
 	if (IN6_IS_ADDR_MULTICAST(&taddr6)) {
 		nd6log((LOG_INFO, "nd6_ns_input: bad NS target (multicast)\n"));
@@ -540,9 +550,7 @@ nd6_na_input(struct mbuf *m, int off, int icmp6len)
 	struct ifnet *ifp = m->m_pkthdr.rcvif;
 	struct ip6_hdr *ip6 = mtod(m, struct ip6_hdr *);
 	struct nd_neighbor_advert *nd_na;
-#if 0
 	struct in6_addr saddr6 = ip6->ip6_src;
-#endif
 	struct in6_addr daddr6 = ip6->ip6_dst;
 	struct in6_addr taddr6;
 	int flags;
@@ -628,6 +636,14 @@ nd6_na_input(struct mbuf *m, int off, int icmp6len)
 		    "nd6_na_input: duplicate IP6 address %s\n",
 		    ip6_sprintf(&taddr6));
 		goto freeit;
+	}
+	/*
+	 * Make sure the source address is from a neighbor's address.
+	 */
+	if (in6ifa_ifplocaladdr(ifp, &saddr6) == NULL) {
+		nd6log((LOG_INFO, "nd6_na_input: "
+		    "ND packet from non-neighbor\n"));
+		goto bad;
 	}
 
 	if (lladdr && ((ifp->if_addrlen + 2 + 7) & ~7) != lladdrlen) {
@@ -1111,6 +1127,7 @@ nd6_dad_start(struct ifaddr *ifa, int *tick)
 	}
 	bzero(&dp->dad_timer_ch, sizeof(dp->dad_timer_ch));
 	TAILQ_INSERT_TAIL(&dadq, (struct dadq *)dp, dad_list);
+	ip6_dad_pending++;
 
 	nd6log((LOG_DEBUG, "%s: starting DAD for %s\n", ifa->ifa_ifp->if_xname,
 	    ip6_sprintf(&ia->ia_addr.sin6_addr)));
@@ -1165,6 +1182,7 @@ nd6_dad_stop(struct ifaddr *ifa)
 	free(dp, M_IP6NDP);
 	dp = NULL;
 	IFAFREE(ifa);
+	ip6_dad_pending--;
 }
 
 static void
@@ -1210,6 +1228,7 @@ nd6_dad_timer(struct ifaddr *ifa)
 		free(dp, M_IP6NDP);
 		dp = NULL;
 		IFAFREE(ifa);
+		ip6_dad_pending--;
 		goto done;
 	}
 
@@ -1263,6 +1282,7 @@ nd6_dad_timer(struct ifaddr *ifa)
 			free(dp, M_IP6NDP);
 			dp = NULL;
 			IFAFREE(ifa);
+			ip6_dad_pending--;
 		}
 	}
 
@@ -1302,6 +1322,7 @@ nd6_dad_duplicated(struct ifaddr *ifa)
 	free(dp, M_IP6NDP);
 	dp = NULL;
 	IFAFREE(ifa);
+	ip6_dad_pending--;
 }
 
 static void
@@ -1332,7 +1353,6 @@ static void
 nd6_dad_ns_input(struct ifaddr *ifa)
 {
 	struct in6_ifaddr *ia;
-	struct ifnet *ifp;
 	struct in6_addr *taddr6;
 	struct dadq *dp;
 	int duplicate;
@@ -1341,7 +1361,6 @@ nd6_dad_ns_input(struct ifaddr *ifa)
 		panic("ifa == NULL in nd6_dad_ns_input");
 
 	ia = (struct in6_ifaddr *)ifa;
-	ifp = ifa->ifa_ifp;
 	taddr6 = &ia->ia_addr.sin6_addr;
 	duplicate = 0;
 	dp = nd6_dad_find(ifa);

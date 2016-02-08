@@ -1,4 +1,4 @@
-/* $OpenBSD: tsp_dma.c,v 1.5 2006/04/04 21:20:40 brad Exp $ */
+/* $OpenBSD: tsp_dma.c,v 1.7 2009/02/01 14:34:00 miod Exp $ */
 /* $NetBSD: tsp_dma.c,v 1.1 1999/06/29 06:46:47 ross Exp $ */
 
 /*-
@@ -48,13 +48,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the NetBSD
- *	Foundation, Inc. and its contributors.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -110,12 +103,6 @@ int	tsp_bus_dmamap_load_raw_sgmap(bus_dma_tag_t, bus_dmamap_t,
 void	tsp_bus_dmamap_unload_sgmap(bus_dma_tag_t, bus_dmamap_t);
 
 void	tsp_tlb_invalidate(struct tsp_config *);
-
-/*
- * XXX Need to figure out what this is, if any.  Initialize it to
- * XXX something that should be safe.
- */
-#define	TSP_SGMAP_PFTHRESH	256
 
 void
 tsp_dma_init(pcp)
@@ -185,7 +172,6 @@ tsp_dma_init(pcp)
 	t->_next_window = NULL;
 	t->_boundary = 0;
 	t->_sgmap = &pcp->pc_sgmap;
-	t->_pfthresh = TSP_SGMAP_PFTHRESH;
 	t->_get_tag = tsp_dma_get_tag;
 	t->_dmamap_create = alpha_sgmap_dmamap_create;
 	t->_dmamap_destroy = alpha_sgmap_dmamap_destroy;

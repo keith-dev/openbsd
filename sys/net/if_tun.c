@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_tun.c,v 1.94 2008/08/04 18:55:08 damien Exp $	*/
+/*	$OpenBSD: if_tun.c,v 1.96 2009/02/20 12:47:57 jsing Exp $	*/
 /*	$NetBSD: if_tun.c,v 1.24 1996/05/07 02:40:48 thorpej Exp $	*/
 
 /*
@@ -438,11 +438,7 @@ tun_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	int			 error = 0, s;
 
 	s = splnet();
-	if (tp->tun_flags & TUN_LAYER2)
-		if ((error = ether_ioctl(ifp, &tp->arpcom, cmd, data)) > 0) {
-			splx(s);
-			return (error);
-		}
+
 	switch (cmd) {
 	case SIOCSIFADDR:
 		tuninit(tp);
@@ -515,8 +511,12 @@ tun_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		    ifp->if_flags & IFF_LINK0 ? TUN_LAYER2 : 0);
 		break;
 	default:
-		error = ENOTTY;
+		if (tp->tun_flags & TUN_LAYER2)
+			error = ether_ioctl(ifp, &tp->arpcom, cmd, data);
+		else
+			error = ENOTTY;
 	}
+
 	splx(s);
 	return (error);
 }
@@ -556,13 +556,14 @@ tun_output(struct ifnet *ifp, struct mbuf *m0, struct sockaddr *dst,
 	af = mtod(m0, u_int32_t *);
 	*af = htonl(dst->sa_family);
 
+	s = splnet();
+
 #if NBPFILTER > 0
 	if (ifp->if_bpf)
 		bpf_mtap(ifp->if_bpf, m0, BPF_DIRECTION_OUT);
 #endif
 
 	len = m0->m_pkthdr.len;
-	s = splnet();
 	IFQ_ENQUEUE(&ifp->if_snd, m0, NULL, error);
 	if (error) {
 		splx(s);
@@ -852,16 +853,23 @@ tunwrite(dev_t dev, struct uio *uio, int ioflag)
 	top->m_pkthdr.rcvif = ifp;
 
 #if NBPFILTER > 0
-	if (ifp->if_bpf)
+	if (ifp->if_bpf) {
+		s = splnet();
 		bpf_mtap(ifp->if_bpf, top, BPF_DIRECTION_IN);
+		splx(s);
+	}
 #endif
 
 	if (tp->tun_flags & TUN_LAYER2) {
 		/* quirk to not add randomness from a virtual device */
 		atomic_setbits_int(&netisr, (1 << NETISR_RND_DONE));
 
+		s = splnet();
 		ether_input_mbuf(ifp, top);
+		splx(s);
+
 		ifp->if_ipackets++; /* ibytes are counted in ether_input */
+
 		return (0);
 	}
 
@@ -1087,6 +1095,8 @@ tunstart(struct ifnet *ifp)
 {
 	struct tun_softc	*tp = ifp->if_softc;
 	struct mbuf		*m;
+
+	splassert(IPL_NET);
 
 	if (!(tp->tun_flags & TUN_LAYER2) &&
 	    !ALTQ_IS_ENABLED(&ifp->if_snd) &&

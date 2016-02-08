@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_msk.c,v 1.64 2008/06/21 21:15:20 brad Exp $	*/
+/*	$OpenBSD: if_msk.c,v 1.69 2009/02/22 16:40:13 kettenis Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998, 1999, 2000
@@ -329,7 +329,8 @@ msk_miibus_statchg(struct device *dev)
 	gpcr = SK_YU_READ_2(sc_if, YUKON_GPCR);
 	gpcr &= (YU_GPCR_TXEN | YU_GPCR_RXEN);
 
-	if (IFM_SUBTYPE(ife->ifm_media) != IFM_AUTO) {
+	if (IFM_SUBTYPE(ife->ifm_media) != IFM_AUTO ||
+	    sc_if->sk_softc->sk_type == SK_YUKON_FE_P) {
 		/* Set speed. */
 		gpcr |= YU_GPCR_SPEED_DIS;
 		switch (IFM_SUBTYPE(mii->mii_media_active)) {
@@ -727,17 +728,12 @@ int
 msk_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 {
 	struct sk_if_softc *sc_if = ifp->if_softc;
-	struct ifreq *ifr = (struct ifreq *) data;
 	struct ifaddr *ifa = (struct ifaddr *) data;
+	struct ifreq *ifr = (struct ifreq *) data;
 	struct mii_data *mii;
 	int s, error = 0;
 
 	s = splnet();
-
-	if ((error = ether_ioctl(ifp, &sc_if->arpcom, command, data)) > 0) {
-		splx(s);
-		return (error);
-	}
 
 	switch(command) {
 	case SIOCSIFADDR:
@@ -749,12 +745,7 @@ msk_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 			arp_ifinit(&sc_if->arpcom, ifa);
 #endif /* INET */
 		break;
-	case SIOCSIFMTU:
-		if (ifr->ifr_mtu < ETHERMIN || ifr->ifr_mtu > ifp->if_hardmtu)
-			error = EINVAL;
-		else if (ifp->if_mtu != ifr->ifr_mtu)
-			ifp->if_mtu = ifr->ifr_mtu;
-		break;
+
 	case SIOCSIFFLAGS:
 		if (ifp->if_flags & IFF_UP) {
 			if (ifp->if_flags & IFF_RUNNING &&
@@ -772,34 +763,24 @@ msk_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 		}
 		sc_if->sk_if_flags = ifp->if_flags;
 		break;
-	case SIOCADDMULTI:
-	case SIOCDELMULTI:
-		error = (command == SIOCADDMULTI) ?
-		    ether_addmulti(ifr, &sc_if->arpcom) :
-		    ether_delmulti(ifr, &sc_if->arpcom);
 
-		if (error == ENETRESET) {
-			/*
-			 * Multicast list has changed; set the hardware
-			 * filter accordingly.
-			 */
-			if (ifp->if_flags & IFF_RUNNING)
-				msk_setmulti(sc_if);
-			error = 0;
-		}
-		break;
 	case SIOCGIFMEDIA:
 	case SIOCSIFMEDIA:
 		mii = &sc_if->sk_mii;
 		error = ifmedia_ioctl(ifp, ifr, &mii->mii_media, command);
 		break;
+
 	default:
-		error = ENOTTY;
-		break;
+		error = ether_ioctl(ifp, &sc_if->arpcom, command, data);
+	}
+
+	if (error == ENETRESET) {
+		if (ifp->if_flags & IFF_RUNNING)
+			msk_setmulti(sc_if);
+		error = 0;
 	}
 
 	splx(s);
-
 	return (error);
 }
 
@@ -1273,7 +1254,8 @@ mskc_attach(struct device *parent, struct device *self, void *aux)
 	sc->sk_pc = pc;
 
 	if (bus_dmamem_alloc(sc->sc_dmatag,
-	    MSK_STATUS_RING_CNT * sizeof(struct msk_status_desc), PAGE_SIZE,
+	    MSK_STATUS_RING_CNT * sizeof(struct msk_status_desc),
+	    MSK_STATUS_RING_CNT * sizeof(struct msk_status_desc),
 	    0, &sc->sk_status_seg, 1, &sc->sk_status_nseg, BUS_DMA_NOWAIT)) {
 		printf(": can't alloc status buffers\n");
 		goto fail_2;
@@ -1709,14 +1691,13 @@ msk_rxeof(struct sk_if_softc *sc_if, u_int16_t len, u_int32_t rxstat)
 	 */
 	if (msk_newbuf(sc_if, cur, NULL, dmamap) == ENOBUFS) {
 		struct mbuf		*m0;
-		m0 = m_devget(mtod(m, char *) - ETHER_ALIGN,
-		    total_len + ETHER_ALIGN, 0, ifp, NULL);
+		m0 = m_devget(mtod(m, char *), total_len, ETHER_ALIGN,
+		    ifp, NULL);
 		msk_newbuf(sc_if, cur, m, dmamap);
 		if (m0 == NULL) {
 			ifp->if_ierrors++;
 			return;
 		}
-		m_adj(m0, ETHER_ALIGN);
 		m = m0;
 	} else {
 		m->m_pkthdr.rcvif = ifp;
@@ -1802,7 +1783,7 @@ msk_tick(void *xsc_if)
 	s = splnet();
 	mii_tick(mii);
 	splx(s);
-	timeout_add(&sc_if->sk_tick_ch, hz);
+	timeout_add_sec(&sc_if->sk_tick_ch, 1);
 }
 
 void
@@ -1829,6 +1810,7 @@ int
 msk_intr(void *xsc)
 {
 	struct sk_softc		*sc = xsc;
+	struct sk_if_softc	*sc_if;
 	struct sk_if_softc	*sc_if0 = sc->sk_if[SK_PORT_A];
 	struct sk_if_softc	*sc_if1 = sc->sk_if[SK_PORT_B];
 	struct ifnet		*ifp0 = NULL, *ifp1 = NULL;
@@ -1867,12 +1849,11 @@ msk_intr(void *xsc)
 		cur_st->sk_opcode &= ~SK_Y2_STOPC_OWN;
 		switch (cur_st->sk_opcode) {
 		case SK_Y2_STOPC_RXSTAT:
-			msk_rxeof(sc->sk_if[cur_st->sk_link],
-			    letoh16(cur_st->sk_len),
+			sc_if = sc->sk_if[cur_st->sk_link & 0x01];
+			msk_rxeof(sc_if, letoh16(cur_st->sk_len),
 			    letoh32(cur_st->sk_status));
-			SK_IF_WRITE_2(sc->sk_if[cur_st->sk_link], 0,
-			    SK_RXQ1_Y2_PREF_PUTIDX,
-			    sc->sk_if[cur_st->sk_link]->sk_cdata.sk_rx_prod);
+			SK_IF_WRITE_2(sc_if, 0,  SK_RXQ1_Y2_PREF_PUTIDX,
+			    sc_if->sk_cdata.sk_rx_prod);
 			break;
 		case SK_Y2_STOPC_TXSTAT:
 			if (sc_if0)
@@ -2133,7 +2114,7 @@ msk_init(void *xsc_if)
 	ifp->if_flags |= IFF_RUNNING;
 	ifp->if_flags &= ~IFF_OACTIVE;
 
-	timeout_add(&sc_if->sk_tick_ch, hz);
+	timeout_add_sec(&sc_if->sk_tick_ch, 1);
 
 	splx(s);
 }

@@ -1,6 +1,6 @@
 define(MACHINE,sgi)dnl
 vers(__file__,
-	{-$OpenBSD: MAKEDEV.md,v 1.20 2008/06/28 21:46:05 mglocker Exp $-},
+	{-$OpenBSD: MAKEDEV.md,v 1.23 2009/02/06 21:17:15 grange Exp $-},
 etc.MACHINE)dnl
 dnl
 dnl Copyright (c) 2001-2006 Todd T. Fries <todd@OpenBSD.org>
@@ -55,6 +55,13 @@ _DEV(wsmux, 28)
 _TITLE(point)
 _DEV(wsmouse, 27)
 _TITLE(usb)
+_DEV(uall)
+_DEV(ttyU, 66)
+_DEV(ugen, 63)
+_DEV(uhid, 62)
+_DEV(ulpt, 64)
+_DEV(urio, 65)
+_DEV(usb, 61)
 _TITLE(spec)
 _DEV(au, 44)
 _DEV(bio, 49)
@@ -74,7 +81,7 @@ _DEV(xfs, 51)
 dnl
 divert(__mddivert)dnl
 dnl
-_std(2, 3, 35, 1, 6)
+_std(2, 3, 35, 6)
 	;;
 dnl
 dnl *** sgi specific targets
@@ -91,7 +98,7 @@ target(all, tun, 0, 1, 2, 3)dnl
 target(all, xy, 0, 1, 2, 3)dnl
 target(all, rd, 0)dnl
 target(all, cd, 0, 1)dnl
-target(all, sd, 0, 1, 2, 3, 4)dnl
+target(all, sd, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9)dnl
 target(all, vnd, 0, 1, 2, 3)dnl
 target(all, ccd, 0, 1, 2, 3)dnl
 target(ramd, pty, 0)dnl

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ncr53c9x.c,v 1.37 2008/05/27 09:43:26 kettenis Exp $	*/
+/*	$OpenBSD: ncr53c9x.c,v 1.40 2008/11/24 00:31:35 krw Exp $	*/
 /*     $NetBSD: ncr53c9x.c,v 1.56 2000/11/30 14:41:46 thorpej Exp $    */
 
 /*
@@ -824,7 +824,7 @@ ncr53c9x_scsi_cmd(xs)
 	}
 
 	if ((ecb = ncr53c9x_get_ecb(sc, flags)) == NULL)
-		return (TRY_AGAIN_LATER);
+		return (NO_CCB);
 
 	/* Initialize ecb */
 	ecb->xs = xs;
@@ -2779,10 +2779,9 @@ ncr53c9x_timeout(arg)
 	int s;
 
 	sc_print_addr(sc_link);
-	printf("%s: timed out [ecb %p (flags 0x%x, dleft %x, stat %x)], "
+	printf("timed out [ecb %p (flags 0x%x, dleft %x, stat %x)], "
 	       "<state %d, nexus %p, phase(l %x, c %x, p %x), resid %lx, "
 	       "msg(q %x,o %x) %s>",
-		sc->sc_dev.dv_xname,
 		ecb, ecb->flags, ecb->dleft, ecb->stat,
 		sc->sc_state, sc->sc_nexus,
 		NCR_READ_REG(sc, NCR_STAT),
@@ -2847,5 +2846,5 @@ ncr53c9x_watch(arg)
 		}
 	}
 	splx(s);
-	timeout_add(&sc->sc_watchdog, 60*hz);
+	timeout_add_sec(&sc->sc_watchdog, 60);
 }

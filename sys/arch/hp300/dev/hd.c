@@ -1,4 +1,4 @@
-/*	$OpenBSD: hd.c,v 1.53 2007/06/21 20:23:07 miod Exp $	*/
+/*	$OpenBSD: hd.c,v 1.55 2009/01/25 14:29:29 miod Exp $	*/
 /*	$NetBSD: rd.c,v 1.33 1997/07/10 18:14:08 kleink Exp $	*/
 
 /*
@@ -292,7 +292,6 @@ hdattach(parent, self, aux)
 	/*
 	 * Initialize and attach the disk structure.
 	 */
-	bzero(&sc->sc_dkdev, sizeof(sc->sc_dkdev));
 	sc->sc_dkdev.dk_name = sc->sc_dev.dv_xname;
 	disk_attach(&sc->sc_dkdev);
 
@@ -545,6 +544,14 @@ hdopen(dev, flags, mode, p)
 	rs = hdlookup(unit);
 	if (rs == NULL)
 		return (ENXIO);
+
+	/*
+	 * Fail open if we tried to attach but the disk did not answer.
+	 */
+	if (!ISSET(rs->sc_dkdev.dk_flags, DKF_CONSTRUCTED)) {
+		device_unref(&rs->sc_dev);
+		return (error);
+	}
 
 	if ((error = hdlock(rs)) != 0) {
 		device_unref(&rs->sc_dev);
@@ -1036,7 +1043,7 @@ hderror(unit)
 		rs->sc_stats.hdtimeouts++;
 #endif
 		hpibfree(rs->sc_dev.dv_parent, &rs->sc_hq);
-		timeout_add(&rs->sc_timeout, hdtimo * hz);
+		timeout_add_sec(&rs->sc_timeout, hdtimo);
 		return(0);
 	}
 	/*

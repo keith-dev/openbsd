@@ -1,4 +1,4 @@
-/*	$OpenBSD: neighbor.c,v 1.6 2008/02/11 13:48:39 norby Exp $ */
+/*	$OpenBSD: neighbor.c,v 1.10 2009/02/19 22:02:59 stsp Exp $ */
 
 /*
  * Copyright (c) 2005 Claudio Jeker <claudio@openbsd.org>
@@ -195,9 +195,6 @@ nbr_fsm(struct nbr *nbr, enum nbr_event event)
 
 	if (old_state != nbr->state) {
 		nbr->stats.sta_chng++;
-		/* state change inform RDE */
-		ospfe_imsg_compose_rde(IMSG_NEIGHBOR_CHANGE,
-		    nbr->peerid, 0, &new_state, sizeof(new_state));
 
 		if (old_state & NBR_STA_FULL || nbr->state & NBR_STA_FULL) {
 			extern struct ospfd_conf        *oeconf; /* XXX */
@@ -214,6 +211,10 @@ nbr_fsm(struct nbr *nbr, enum nbr_event event)
 			gettimeofday(&now, NULL);
 			nbr->uptime = now.tv_sec;
 		}
+
+		/* state change inform RDE */
+		ospfe_imsg_compose_rde(IMSG_NEIGHBOR_CHANGE,
+		    nbr->peerid, 0, &nbr->state, sizeof(nbr->state));
 
 		/* bidirectional communication lost */
 		if (old_state & ~NBR_STA_PRELIM && nbr->state & NBR_STA_PRELIM)
@@ -268,7 +269,7 @@ nbr_init(u_int32_t hashsize)
 }
 
 struct nbr *
-nbr_new(u_int32_t nbr_id, struct iface *iface, int self)
+nbr_new(u_int32_t nbr_id, struct iface *iface, u_int32_t iface_id, int self)
 {
 	struct nbr_head	*head;
 	struct nbr	*nbr;
@@ -291,6 +292,7 @@ nbr_new(u_int32_t nbr_id, struct iface *iface, int self)
 
 	/* add to peer list */
 	nbr->iface = iface;
+	nbr->iface_id = iface_id;
 	LIST_INSERT_HEAD(&iface->nbr_list, nbr, entry);
 
 	TAILQ_INIT(&nbr->ls_retrans_list);
@@ -301,7 +303,6 @@ nbr_new(u_int32_t nbr_id, struct iface *iface, int self)
 
 	if (self) {
 		nbr->state = NBR_STA_FULL;
-//XXX		nbr->addr.s_addr = iface->addr.s_addr;
 		nbr->addr = iface->addr;
 		nbr->priority = iface->priority;
 	}
@@ -317,6 +318,7 @@ nbr_new(u_int32_t nbr_id, struct iface *iface, int self)
 	rn.id.s_addr = nbr->id.s_addr;
 	rn.area_id.s_addr = nbr->iface->area_id.s_addr;
 	rn.ifindex = nbr->iface->ifindex;
+	rn.iface_id = nbr->iface_id;
 	rn.state = nbr->state;
 	rn.self = self;
 	ospfe_imsg_compose_rde(IMSG_NEIGHBOR_UP, nbr->peerid, 0, &rn,

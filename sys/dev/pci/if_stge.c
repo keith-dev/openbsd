@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_stge.c,v 1.39 2008/06/26 05:42:17 ray Exp $	*/
+/*	$OpenBSD: if_stge.c,v 1.45 2008/11/28 02:44:18 brad Exp $	*/
 /*	$NetBSD: if_stge.c,v 1.27 2005/05/16 21:35:32 bouyer Exp $	*/
 
 /*-
@@ -390,6 +390,10 @@ stge_attach(struct device *parent, struct device *self, void *aux)
 
 	ifp->if_capabilities = IFCAP_VLAN_MTU;
 
+#if NVLAN > 0
+	ifp->if_capabilities |= IFCAP_VLAN_HWTAGGING;
+#endif
+
 	/*
 	 * The manual recommends disabling early transmit, so we
 	 * do.  It's disabled anyway, if using IP checksumming,
@@ -501,7 +505,7 @@ stge_start(struct ifnet *ifp)
 	struct stge_tfd *tfd;
 	bus_dmamap_t dmamap;
 	int error, firsttx, nexttx, opending, seg, totlen;
-	uint64_t csum_flags = 0;
+	uint64_t csum_flags = 0, tfc;
 
 	if ((ifp->if_flags & (IFF_RUNNING|IFF_OACTIVE)) != IFF_RUNNING)
 		return;
@@ -602,11 +606,19 @@ stge_start(struct ifnet *ifp)
 		/*
 		 * Initialize the descriptor and give it to the chip.
 		 */
-		tfd->tfd_control = htole64(TFD_FrameId(nexttx) |
-		    TFD_WordAlign(/*totlen & */3) |
-		    TFD_FragCount(seg) | csum_flags |
-		    (((nexttx & STGE_TXINTR_SPACING_MASK) == 0) ?
-		     TFD_TxDMAIndicate : 0));
+		tfc = TFD_FrameId(nexttx) | TFD_WordAlign(/*totlen & */3) |
+		    TFD_FragCount(seg) | csum_flags;
+		if ((nexttx & STGE_TXINTR_SPACING_MASK) == 0)
+			tfc |= TFD_TxDMAIndicate;
+
+#if NVLAN > 0
+		/* Check if we have a VLAN tag to insert. */
+		if (m0->m_flags & M_VLANTAG)
+			tfc |= (TFD_VLANTagInsert |
+			    TFD_VID(m0->m_pkthdr.ether_vtag));
+#endif
+
+		tfd->tfd_control = htole64(tfc);
 
 		/* Sync the descriptor. */
 		STGE_CDTXSYNC(sc, nexttx,
@@ -632,7 +644,7 @@ stge_start(struct ifnet *ifp)
 		 * Pass the packet to any BPF listeners.
 		 */
 		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, m0, BPF_DIRECTION_OUT);
+			bpf_mtap_ether(ifp->if_bpf, m0, BPF_DIRECTION_OUT);
 #endif /* NBPFILTER > 0 */
 	}
 
@@ -688,19 +700,11 @@ int
 stge_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 {
 	struct stge_softc *sc = ifp->if_softc;
-	struct ifreq *ifr = (struct ifreq *)data;
 	struct ifaddr *ifa = (struct ifaddr *)data;
-	int s, error;
+	struct ifreq *ifr = (struct ifreq *)data;
+	int s, error = 0;
 
 	s = splnet();
-
-	if ((error = ether_ioctl(ifp, &sc->sc_arpcom, cmd, data)) > 0) {
-		/* Try to get more packets going. */
-		stge_start(ifp);
-
-		splx(s);
-		return (error);
-	}
 
 	switch (cmd) {
 	case SIOCSIFADDR:
@@ -712,13 +716,6 @@ stge_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		if (ifa->ifa_addr->sa_family == AF_INET)
 			arp_ifinit(&sc->sc_arpcom, ifa);
 #endif
-		break;
-
-	case SIOCSIFMTU:
-		if (ifr->ifr_mtu < ETHERMIN || ifr->ifr_mtu > ifp->if_hardmtu)
-			error = EINVAL;
-		else if (ifp->if_mtu != ifr->ifr_mtu)
-			ifp->if_mtu = ifr->ifr_mtu;
 		break;
 
 	case SIOCSIFFLAGS:
@@ -738,30 +735,19 @@ stge_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		sc->stge_if_flags = ifp->if_flags;
 		break;
 
-	case SIOCADDMULTI:
-	case SIOCDELMULTI:
-		error = (cmd == SIOCADDMULTI) ?
-		    ether_addmulti(ifr, &sc->sc_arpcom) :
-		    ether_delmulti(ifr, &sc->sc_arpcom);
-
-		if (error == ENETRESET) {
-			/*
-			 * Multicast list has changed; set the hardware
-			 * filter accordingly.
-			 */
-			if (ifp->if_flags & IFF_RUNNING)
-				stge_set_filter(sc);
-			error = 0;
-		}
-		break;
-
 	case SIOCSIFMEDIA:
 	case SIOCGIFMEDIA:
 		error = ifmedia_ioctl(ifp, ifr, &sc->sc_mii.mii_media, cmd);
 		break;
 
 	default:
-		error = ENOTTY;
+		error = ether_ioctl(ifp, &sc->sc_arpcom, cmd, data);
+	}
+
+	if (error == ENETRESET) {
+		if (ifp->if_flags & IFF_RUNNING)
+			stge_set_filter(sc);
+		error = 0;
 	}
 
 	/* Try to get more packets going. */
@@ -1037,16 +1023,23 @@ stge_rxintr(struct stge_softc *sc)
 		/*
 		 * Set the incoming checksum information for the packet.
 		 */
-		if (status & RFD_IPDetected) {
-			if (!(status & RFD_IPError))
-				m->m_pkthdr.csum_flags |= M_IPV4_CSUM_IN_OK;
-			if ((status & RFD_TCPDetected) &&
-			   (!(status & RFD_TCPError)))
-				m->m_pkthdr.csum_flags |= M_TCP_CSUM_IN_OK;
-			else if ((status & RFD_UDPDetected) &&
-				(!(status & RFD_UDPError)))
-				m->m_pkthdr.csum_flags |= M_UDP_CSUM_IN_OK;
+		if ((status & RFD_IPDetected) &&
+		    (!(status & RFD_IPError)))
+			m->m_pkthdr.csum_flags |= M_IPV4_CSUM_IN_OK;
+		if ((status & RFD_TCPDetected) &&
+		    (!(status & RFD_TCPError)))
+			m->m_pkthdr.csum_flags |= M_TCP_CSUM_IN_OK;
+		else if ((status & RFD_UDPDetected) &&
+		    (!(status & RFD_UDPError)))
+			m->m_pkthdr.csum_flags |= M_UDP_CSUM_IN_OK;
+
+#if NVLAN > 0
+		/* Check for VLAN tagged packets. */
+		if (status & RFD_VLANDetected) {
+			m->m_pkthdr.ether_vtag = RFD_TCI(status);
+			m->m_flags |= M_VLANTAG;
 		}
+#endif
 
 		m->m_pkthdr.rcvif = ifp;
 		m->m_pkthdr.len = len;
@@ -1057,7 +1050,7 @@ stge_rxintr(struct stge_softc *sc)
 		 * pass if up the stack if it's for us.
 		 */
 		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
+			bpf_mtap_ether(ifp->if_bpf, m, BPF_DIRECTION_IN);
 #endif /* NBPFILTER > 0 */
 
 		/* Pass it on. */
@@ -1084,7 +1077,7 @@ stge_tick(void *arg)
 	stge_stats_update(sc);
 	splx(s);
 
-	timeout_add(&sc->sc_timeout, hz);
+	timeout_add_sec(&sc->sc_timeout, 1);
 }
 
 /*
@@ -1322,6 +1315,10 @@ stge_init(struct ifnet *ifp)
 	 */
 	sc->sc_MACCtrl = MC_IFSSelect(0);
 	CSR_WRITE_4(sc, STGE_MACCtrl, sc->sc_MACCtrl);
+
+	if (ifp->if_capabilities & IFCAP_VLAN_HWTAGGING)
+		sc->sc_MACCtrl |= MC_AutoVLANuntagging;
+
 	sc->sc_MACCtrl |= MC_StatisticsEnable | MC_TxEnable | MC_RxEnable;
 
 	if (sc->sc_rev >= 6) {		/* >= B.2 */
@@ -1345,7 +1342,7 @@ stge_init(struct ifnet *ifp)
 	/*
 	 * Start the one second MII clock.
 	 */
-	timeout_add(&sc->sc_timeout, hz);
+	timeout_add_sec(&sc->sc_timeout, 1);
 
 	/*
 	 * ...all done!

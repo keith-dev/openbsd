@@ -1,4 +1,4 @@
-/*	$OpenBSD: math.h,v 1.20 2008/07/24 09:41:58 martynas Exp $	*/
+/*	$OpenBSD: math.h,v 1.24 2008/12/11 12:08:27 martynas Exp $	*/
 /*
  * ====================================================
  * Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
@@ -34,7 +34,12 @@ extern char __infinity[];
 typedef	__double_t	double_t;
 typedef	__float_t	float_t;
 
+#ifdef __vax__
+extern char __infinityf[];
+#define	HUGE_VALF	(*(float *)(void *)__infinityf)
+#else /* __vax__ */
 #define	HUGE_VALF	((float)HUGE_VAL)
+#endif /* __vax__ */
 #define	HUGE_VALL	((long double)HUGE_VAL)
 #define	INFINITY	HUGE_VALF
 #ifndef __vax__
@@ -63,18 +68,6 @@ extern char __nan[];
 	: (sizeof (x) == sizeof (double)) ? \
 		__isfinite(x) \
 	:	__isfinitel(x))
-#define isinf(x) \
-	((sizeof (x) == sizeof (float)) ? \
-		isinff(x) \
-	: (sizeof (x) == sizeof (double)) ? \
-		__isinf(x) \
-	:	__isinfl(x))
-#define isnan(x) \
-	((sizeof (x) == sizeof (float)) ? \
-		isnanf(x) \
-	: (sizeof (x) == sizeof (double)) ? \
-		__isnan(x) \
-	:	__isnanl(x))
 #define isnormal(x) \
 	((sizeof (x) == sizeof (float)) ? \
 		__isnormalf(x) \
@@ -96,6 +89,19 @@ extern char __nan[];
 					((x) > (y) || (y) > (x)))
 #define	isunordered(x, y)	(isnan(x) || isnan(y))
 #endif /* __ISO_C_VISIBLE >= 1999 */
+
+#define isinf(x) \
+	((sizeof (x) == sizeof (float)) ? \
+		__isinff(x) \
+	: (sizeof (x) == sizeof (double)) ? \
+		__isinf(x) \
+	:	__isinfl(x))
+#define isnan(x) \
+	((sizeof (x) == sizeof (float)) ? \
+		__isnanf(x) \
+	: (sizeof (x) == sizeof (double)) ? \
+		__isnan(x) \
+	:	__isnanl(x))
 
 /*
  * XOPEN/SVID
@@ -125,51 +131,7 @@ extern int signgam;
 #endif /* __BSD_VISIBLE || __XPG_VISIBLE */
 
 #if __BSD_VISIBLE
-enum fdversion {fdlibm_ieee = -1, fdlibm_svid, fdlibm_xopen, fdlibm_posix};
-
-#define _LIB_VERSION_TYPE enum fdversion
-#define _LIB_VERSION _fdlib_version
-
-/* if global variable _LIB_VERSION is not desirable, one may
- * change the following to be a constant by:
- *	#define _LIB_VERSION_TYPE const enum version
- * In that case, after one initializes the value _LIB_VERSION (see
- * s_lib_version.c) during compile time, it cannot be modified
- * in the middle of a program
- */
-extern _LIB_VERSION_TYPE	_LIB_VERSION;
-
-#define _IEEE_	fdlibm_ieee
-#define _SVID_	fdlibm_svid
-#define _XOPEN_	fdlibm_xopen
-#define _POSIX_	fdlibm_posix
-
-#ifndef __cplusplus
-struct exception {
-	int type;
-	char *name;
-	double arg1;
-	double arg2;
-	double retval;
-};
-#endif /* !__cplusplus */
-
 #define	HUGE		MAXFLOAT
-
-/*
- * set X_TLOSS = pi*2**52, which is possibly defined in <values.h>
- * (one may replace the following line by "#include <values.h>")
- */
-
-#define X_TLOSS		1.41484755040568800000e+16
-
-#define	DOMAIN		1
-#define	SING		2
-#define	OVERFLOW	3
-#define	UNDERFLOW	4
-#define	TLOSS		5
-#define	PLOSS		6
-
 #endif /* __BSD_VISIBLE */
 
 __BEGIN_DECLS
@@ -215,9 +177,7 @@ extern double exp2(double);
 extern double expm1(double);
 extern int ilogb(double);
 extern double log1p(double);
-#if 0
 extern double log2(double);
-#endif
 extern double logb(double);
 extern double scalbn(double, int);
 #if 0
@@ -253,11 +213,9 @@ extern double nextafter(double, double);
 extern double nexttoward(double, long double);
 #endif
 
-#if 0
 extern double fdim(double, double);
 extern double fmax(double, double);
 extern double fmin(double, double);
-#endif
 
 #if 0
 extern double fma(double, double, double);
@@ -291,10 +249,6 @@ extern int finite(double);
  */
 extern double gamma_r(double, int *);
 extern double lgamma_r(double, int *);
-
-#ifdef __LIBM_PRIVATE
-extern int matherr(struct exception *);
-#endif /* __LIBM_PRIVATE */
 
 /*
  * IEEE Test Vector
@@ -330,9 +284,7 @@ extern float ldexpf(float, int);
 extern float logf(float);
 extern float log10f(float);
 extern float log1pf(float);
-#if 0
 extern float log2f(float);
-#endif
 extern float logbf(float);
 extern float modff(float, float *);
 extern float scalbnf(float, int);
@@ -375,11 +327,9 @@ extern float nextafterf(float, float);
 extern float nexttowardf(float, long double);
 #endif
 
-#if 0
 extern float fdimf(float, float);
 extern float fmaxf(float, float);
 extern float fminf(float, float);
-#endif
 
 #if 0
 extern float fmaf(float, float, float);
@@ -427,7 +377,6 @@ extern float significandf(float);
  * Long double versions of C99 functions
  */
 #if __ISO_C_VISIBLE >= 1999
-#if 0
 extern long double acosl(long double);
 extern long double asinl(long double);
 extern long double atanl(long double);
@@ -436,63 +385,90 @@ extern long double cosl(long double);
 extern long double sinl(long double);
 extern long double tanl(long double);
 
+#if 0
 extern long double acoshl(long double);
 extern long double asinhl(long double);
 extern long double atanhl(long double);
 extern long double coshl(long double);
 extern long double sinhl(long double);
 extern long double tanhl(long double);
+#endif
 
+#if 0
 extern long double expl(long double);
+#endif
 extern long double exp2l(long double);
+#if 0
 extern long double expm1l(long double);
+#endif
 extern long double frexpl(long double, int *);
 extern int ilogbl(long double);
 extern long double ldexpl(long double, int);
+#if 0
 extern long double logl(long double);
 extern long double log10l(long double);
 extern long double log1pl(long double);
 extern long double log2l(long double);
+#endif
 extern long double logbl(long double);
+#if 0
 extern long double modfl(long double, long double *);
+#endif
 extern long double scalbnl(long double, int);
+#if 0
 extern long double scalblnl(long double, long int);
+#endif
 
+#if 0
 extern long double cbrtl(long double);
+#endif
 extern long double fabsl(long double);
+#if 0
 extern long double hypotl(long double, long double);
 extern long double powl(long double, long double);
+#endif
 extern long double sqrtl(long double);
 
+#if 0
 extern long double erfl(long double);
 extern long double erfcl(long double);
 extern long double lgammal(long double);
 extern long double tgammal(long double);
+#endif
 
+#if 0
 extern long double ceill(long double);
 extern long double floorl(long double);
 extern long double nearbyintl(long double);
+#endif
 extern long double rintl(long double);
+#if 0
 extern long int lrintl(long double);
 extern long long int llrintl(long double);
 extern long double roundl(long double);
 extern long int lroundl(long double);
 extern long long int llroundl(long double);
 extern long double truncl(long double);
+#endif
 
+#if 0
 extern long double fmodl(long double, long double);
 extern long double remainderl(long double, long double);
 extern long double remquol(long double, long double, int *);
+#endif
 
 extern long double copysignl(long double, long double);
 extern long double nanl(const char *);
+#if 0
 extern long double nextafterl(long double, long double);
 extern long double nexttowardl(long double, long double);
+#endif
 
 extern long double fdiml(long double, long double);
 extern long double fmaxl(long double, long double);
 extern long double fminl(long double, long double);
 
+#if 0
 extern long double fmal(long double, long double, long double);
 #endif
 #endif /* __ISO_C_VISIBLE >= 1999 */
@@ -507,8 +483,10 @@ extern int __isfinite(double);
 extern int __isfinitef(float);
 extern int __isfinitel(long double);
 extern int __isinf(double);
+extern int __isinff(float);
 extern int __isinfl(long double);
 extern int __isnan(double);
+extern int __isnanf(float);
 extern int __isnanl(long double);
 extern int __isnormal(double);
 extern int __isnormalf(float);

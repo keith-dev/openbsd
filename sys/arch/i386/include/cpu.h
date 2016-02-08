@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.103 2008/07/18 23:43:31 art Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.107 2009/02/16 15:44:25 jsg Exp $	*/
 /*	$NetBSD: cpu.h,v 1.35 1996/05/05 19:29:26 christos Exp $	*/
 
 /*-
@@ -49,10 +49,6 @@
 #ifdef MULTIPROCESSOR
 #include <machine/i82489reg.h>
 #include <machine/i82489var.h>
-
-/* XXX for now... */
-#define NLAPIC 1
-
 #endif
 
 /*
@@ -90,6 +86,7 @@ struct cpu_info {
 	u_long ci_spin_locks;		/* # of spin locks held */
 	u_long ci_simple_locks;		/* # of simple locks held */
 #endif
+	u_int32_t ci_randseed;
 
 	/*
 	 * Private members.
@@ -118,6 +115,8 @@ struct cpu_info {
 	u_int32_t	ci_level;
 	u_int32_t	ci_vendor[4];
 	u_int32_t	ci_signature;		/* X86 cpuid type */
+	u_int32_t	ci_family;		/* extended cpuid family */
+	u_int32_t	ci_model;		/* extended cpuid model */
 	u_int32_t	ci_feature_flags;	/* X86 CPUID feature bits */
 	u_int32_t	cpu_class;		/* CPU class */
 
@@ -208,6 +207,8 @@ extern struct cpu_info	*cpu_info[MAXCPUS];
 extern void cpu_boot_secondary_processors(void);
 extern void cpu_init_idle_pcbs(void);
 
+void cpu_unidle(struct cpu_info *);
+
 #else /* MULTIPROCESSOR */
 
 #define MAXCPUS			1
@@ -216,6 +217,8 @@ extern void cpu_init_idle_pcbs(void);
 #define	curcpu()		(&cpu_info_primary)
 
 #define CPU_IS_PRIMARY(ci)	1
+
+#define cpu_unidle(ci)
 
 #endif
 

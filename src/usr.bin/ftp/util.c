@@ -1,4 +1,4 @@
-/*	$OpenBSD: util.c,v 1.54 2008/07/08 21:07:57 martynas Exp $	*/
+/*	$OpenBSD: util.c,v 1.56 2009/01/27 22:04:36 martynas Exp $	*/
 /*	$NetBSD: util.c,v 1.12 1997/08/18 10:20:27 lukem Exp $	*/
 
 /*-
@@ -64,7 +64,7 @@
  */
 
 #if !defined(lint) && !defined(SMALL)
-static const char rcsid[] = "$OpenBSD: util.c,v 1.54 2008/07/08 21:07:57 martynas Exp $";
+static const char rcsid[] = "$OpenBSD: util.c,v 1.56 2009/01/27 22:04:36 martynas Exp $";
 #endif /* not lint and not SMALL */
 
 /*
@@ -113,7 +113,7 @@ setpeer(int argc, char *argv[])
 	if (argc < 2)
 		(void)another(&argc, &argv, "to");
 	if (argc < 2 || argc > 3) {
-		fprintf(ttyout, "usage: %s host-name [port]\n", argv[0]);
+		fprintf(ttyout, "usage: %s host [port]\n", argv[0]);
 		code = -1;
 		return;
 	}
@@ -458,7 +458,10 @@ again:
 #ifndef SMALL
 	if (type) {
 		parse_list(&bufp, type);
-		if (!bufp)
+		if (!bufp ||
+		    (bufp[0] == '.' &&	/* LIST defaults to -a on some ftp */
+		    (bufp[1] == '\0' ||	/* servers.  Ignore '.' and '..'. */
+		    (bufp[1] == '.' && bufp[2] == '\0'))))
 			goto again;
 	}
 #endif /* !SMALL */

@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.143 2008/07/23 11:45:21 art Exp $
+#	$OpenBSD: Makefile,v 1.149 2009/01/29 16:47:25 claudio Exp $
 #	$NetBSD: Makefile,v 1.4 1996/01/09 03:23:01 thorpej Exp $
 
 #	Makefile for section 9 (kernel function and variable) manual pages.
@@ -23,7 +23,7 @@ MAN=	altq.9 aml_evalnode.9 atomic.9 audio.9 autoconf.9 bio_register.9 \
 	radio.9 random.9 rasops.9 ratecheck.9 resettodr.9 rssadapt.9 rwlock.9 \
 	sensor_attach.9 \
 	shutdownhook_establish.9 tsleep.9 spl.9 startuphook_establish.9 \
-	style.9 syscall.9 systrace.9 sysctl_int.9 \
+	socreate.9 style.9 syscall.9 systrace.9 sysctl_int.9 \
 	tc_init.9 time.9 timeout.9 tvtohz.9 uiomove.9 uvm.9 vfs.9 vfs_busy.9 \
 	vfs_cache.9 vaccess.9 vclean.9 vcount.9 vdevgone.9 vfinddev.9 vflush.9 \
 	vflushbuf.9 vget.9 vgone.9 vhold.9 vinvalbuf.9 vnode.9 vnsubr.9 \
@@ -194,7 +194,7 @@ MLINKS+=lock.9 lockinit.9 lock.9 lockmgr.9 lock.9 lockstatus.9 \
 	lock.9 simple_lock_init.9 lock.9 simple_lock.9 \
 	lock.9 simple_lock_try.9 lock.9 simple_unlock.9
 MLINKS+=log.9 addlog.9
-MLINKS+=malloc.9 MALLOC.9 malloc.9 free.9 malloc.9 FREE.9
+MLINKS+=malloc.9 free.9
 MLINKS+=mbuf.9 m_copym2.9 mbuf.9 m_copym.9 mbuf.9 m_free.9 mbuf.9 MFREE.9 \
 	mbuf.9 m_get.9 mbuf.9 MGET.9 mbuf.9 m_getclr.9 mbuf.9 m_gethdr.9 \
 	mbuf.9 MGETHDR.9 mbuf.9 m_prepend.9 mbuf.9 M_PREPEND.9 \
@@ -203,8 +203,9 @@ MLINKS+=mbuf.9 m_copym2.9 mbuf.9 m_copym.9 mbuf.9 m_free.9 mbuf.9 MFREE.9 \
 	mbuf.9 m_inject.9 mbuf.9 m_getptr.9 mbuf.9 m_adj.9 mbuf.9 m_copyback.9 \
 	mbuf.9 m_freem.9 mbuf.9 m_reclaim.9 mbuf.9 m_copydata.9 \
 	mbuf.9 m_cat.9 mbuf.9 m_devget.9 mbuf.9 m_zero.9 mbuf.9 m_apply.9 \
-	mbuf.9 MEXTALLOC.9 mbuf.9 MCLGET.9 mbuf.9 MEXTADD.9 mbuf.9 M_ALIGN.9 \
-	mbuf.9 MH_ALIGN.9 mbuf.9 M_READONLY.9 mbuf.9 M_LEADINGSPACE.9 \
+	mbuf.9 MEXTALLOC.9 mbuf.9 MCLGET.9 mbuf.9 MCLGETI.9 \
+	mbuf.9 MEXTADD.9 mbuf.9 M_ALIGN.9 mbuf.9 MH_ALIGN.9 \
+	mbuf.9 M_READONLY.9 mbuf.9 M_LEADINGSPACE.9 \
 	mbuf.9 M_TRAILINGSPACE.9 mbuf.9 MCHTYPE.9 mbuf.9 mtod.9
 MLINKS+=mbuf_tags.9 m_tag_get.9 mbuf_tags.9 m_tag_find.9 \
 	mbuf_tags.9 m_tag_prepend.9 mbuf_tags.9 m_tag_delete.9 \
@@ -237,11 +238,8 @@ MLINKS+=pmap.9 pmap_init.9 pmap.9 pmap_enter.9 pmap.9 pmap_remove.9 \
 	pmap.9 pmap_copy.9 pmap.9 pmap_kenter_pa.9 pmap.9 pmap_kremove.9
 MLINKS+=pool.9 pool_init.9 pool.9 pool_destroy.9 \
 	pool.9 pool_get.9 pool.9 pool_put.9 pool.9 pool_prime.9 \
-	pool.9 pool_sethiwat.9 pool.9 pool_setlowat.9 \
-	pool.9 pool_sethardlimit.9 pool.9 pool_cache_init.9 \
-	pool.9 pool_cache_destroy.9 pool.9 pool_cache_get.9 \
-	pool.9 pool_cache_put.9 pool.9 pool_cache_destruct_object.9 \
-	pool.9 pool_cache_invalidate.9
+	pool.9 pool_sethiwat.9 pool.9 pool_setipl.9 pool.9 pool_setlowat.9 \
+	pool.9 pool_sethardlimit.9
 MLINKS+=powerhook_establish.9 powerhook_disestablish.9
 MLINKS+=printf.9 snprintf.9 printf.9 vsnprintf.9 printf.9 vprintf.9 \
 	printf.9 uprintf.9 printf.9 ttyprintf.9 printf.9 db_printf.9
@@ -275,7 +273,9 @@ MLINKS+=sensor_attach.9 sensordev_install.9 \
 	sensor_attach.9 sensor_task_register.9 \
 	sensor_attach.9 sensor_task_unregister.9
 MLINKS+=shutdownhook_establish.9 shutdownhook_disestablish.9
-MLINKS+=tsleep.9 wakeup.9 tsleep.9 msleep.9
+MLINKS+=socreate.9 sobind.9 socreate.9 soclose.9 socreate.9 soconnect.9 \
+	socreate.9 sogetopt.9 socreate.9 soreceive.9 socreate.9 sosetopt.9 \
+	socreate.9 sosend.9 socreate.9 soshutdown.9
 MLINKS+=spl.9 spl0.9 spl.9 splassert.9 spl.9 splbio.9 spl.9 splclock.9 \
 	spl.9 splhigh.9 spl.9 spllowersoftclock.9 \
 	spl.9 splnet.9 spl.9 splsched.9 spl.9 splserial.9 spl.9 splsoftclock.9 \
@@ -297,14 +297,14 @@ MLINKS+=timeout.9 timeout_add.9 timeout.9 timeout_set.9 \
 	timeout.9 timeout_add_ts.9 timeout.9 timeout_add_bt.9 \
 	timeout.9 timeout_add_sec.9 timeout.9 timeout_add_usec.9 \
 	timeout.9 timeout_add_nsec.9
+MLINKS+=tsleep.9 wakeup.9 tsleep.9 msleep.9
 MLINKS+=uiomove.9 uio.9
 MLINKS+=uvm.9 uvm_init.9 uvm.9 uvm_init_limits.9 uvm.9 uvm_setpagesize.9 \
 	uvm.9 uvm_swap_init.9 uvm.9 uvm_map.9 uvm.9 uvm_map_pageable.9 \
 	uvm.9 uvm_map_pageable_all.9 uvm.9 uvm_map_checkprot.9 \
 	uvm.9 uvm_map_protect.9 uvm.9 uvm_deallocate.9 uvm.9 uvmspace_alloc.9 \
 	uvm.9 uvmspace_exec.9 uvm.9 uvmspace_fork.9 uvm.9 uvmspace_free.9 \
-	uvm.9 uvmspace_share.9 uvm.9 uvmspace_unshare.9 uvm.9 UVM_MAPFLAG.9 \
-	uvm.9 uvm_fault.9 \
+	uvm.9 uvmspace_share.9 uvm.9 UVM_MAPFLAG.9 uvm.9 uvm_fault.9 \
 	uvm.9 uvn_attach.9 uvm.9 uvm_vnp_setsize.9 uvm.9 uvm_vnp_sync.9 \
 	uvm.9 uvm_vnp_terminate.9 uvm.9 uvm_vnp_uncache.9 uvm.9 uvm_io.9 \
 	uvm.9 uvm_km_alloc.9 uvm.9 uvm_km_zalloc.9 uvm.9 uvm_km_alloc1.9 \

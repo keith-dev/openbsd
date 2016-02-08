@@ -1,4 +1,4 @@
-/* $OpenBSD: acpicpu.c,v 1.45 2008/08/06 05:24:44 gwk Exp $ */
+/* $OpenBSD: acpicpu.c,v 1.53 2009/02/24 13:20:02 deraadt Exp $ */
 /*
  * Copyright (c) 2005 Marco Peereboom <marco@openbsd.org>
  *
@@ -315,7 +315,7 @@ acpicpu_attach(struct device *parent, struct device *self, void *aux)
 #endif
 		if (sc->sc_pss_len == 0) {
 			/* this should never happen */
-			printf("%s: invalid _PSS length\n");
+			printf("%s: invalid _PSS length\n", DEVNAME(sc));
 			sc->sc_flags |= FLAGS_NOPSS;
 		}
 
@@ -533,7 +533,7 @@ acpicpu_fetch_pss(struct acpicpu_pss **pss)
 
 	/*
 	 * XXX: According to the ACPI spec in an SMP system all processors
-	 * are supposed to support the same states. For now we prey
+	 * are supposed to support the same states. For now we pray
 	 * the bios ensures this...
 	 * XXX part deux: this needs to account for _PPC as well
 	 * when AC is removed the nr of _PSS entries can go down

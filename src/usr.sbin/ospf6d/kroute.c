@@ -1,4 +1,4 @@
-/*	$OpenBSD: kroute.c,v 1.8 2008/05/09 12:55:48 claudio Exp $ */
+/*	$OpenBSD: kroute.c,v 1.10 2009/02/03 14:06:18 stsp Exp $ */
 
 /*
  * Copyright (c) 2004 Esben Norby <norby@openbsd.org>
@@ -838,9 +838,18 @@ if_newaddr(u_short ifindex, struct sockaddr_in6 *ifa, struct sockaddr_in6 *mask,
 		log_warnx("if_newaddr: corresponding if %i not found", ifindex);
 		return;
 	}
+
+	/* We only care about link-local and global-scope. */
+	if (IN6_IS_ADDR_UNSPECIFIED(&ifa->sin6_addr) ||
+	    IN6_IS_ADDR_LOOPBACK(&ifa->sin6_addr) ||
+	    IN6_IS_ADDR_MULTICAST(&ifa->sin6_addr) ||
+	    IN6_IS_ADDR_SITELOCAL(&ifa->sin6_addr) ||
+	    IN6_IS_ADDR_V4MAPPED(&ifa->sin6_addr) ||
+	    IN6_IS_ADDR_V4COMPAT(&ifa->sin6_addr))
+	    	return;
+
 	/* XXX thanks, KAME, for this ugliness... adopted from route/show.c */
-	if (IN6_IS_ADDR_LINKLOCAL(&ifa->sin6_addr) ||
-	    IN6_IS_ADDR_MC_LINKLOCAL(&ifa->sin6_addr)) {
+	if (IN6_IS_ADDR_LINKLOCAL(&ifa->sin6_addr)) {
 		ifa->sin6_addr.s6_addr[2] = 0;
 		ifa->sin6_addr.s6_addr[3] = 0;
 	}
@@ -854,18 +863,32 @@ if_newaddr(u_short ifindex, struct sockaddr_in6 *ifa, struct sockaddr_in6 *mask,
 	ia->addr = ifa->sin6_addr;
 
 	if (mask)
-		ia->prefixlen = 64; // XXX mask2prefixlen(&mask->sin6_addr);
+		ia->prefixlen = mask2prefixlen(mask);
 	else
 		ia->prefixlen = 0;
-#if 0 /* XXX fix me */
-	if (brd)
-		ka->dstbrd = brd->sin6_addr;
+	if (brd && brd->sin6_family == AF_INET6)
+		ia->dstbrd = brd->sin6_addr;
 	else
-		bzero(&ka->dstbrd, sizeof(ka->dstbrd));
-#endif
+		bzero(&ia->dstbrd, sizeof(ia->dstbrd));
 
-	log_debug("if_newaddr: ifindex %u, addr %s", ifindex,
-	    log_in6addr(&ia->addr));
+	switch (iface->type) {
+	case IF_TYPE_BROADCAST:
+	case IF_TYPE_NBMA:
+		log_debug("if_newaddr: ifindex %u, addr %s/%d",
+		    ifindex, log_in6addr(&ia->addr), ia->prefixlen);
+		break;
+	case IF_TYPE_VIRTUALLINK:	/* FIXME */
+		break;
+	case IF_TYPE_POINTOPOINT:
+	case IF_TYPE_POINTOMULTIPOINT:
+		log_debug("if_newaddr: ifindex %u, addr %s/%d, "
+		    "dest %s", ifindex, log_in6addr(&ia->addr),
+		    ia->prefixlen, log_in6addr(&ia->dstbrd));
+		break;
+	default:
+		fatalx("if_newaddr: unknown interface type");
+	}
+		
 	TAILQ_INSERT_TAIL(&iface->ifa_list, ia, entry);
 }
 

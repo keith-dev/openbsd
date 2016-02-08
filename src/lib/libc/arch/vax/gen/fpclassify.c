@@ -1,4 +1,4 @@
-/*	$OpenBSD: fpclassify.c,v 1.1 2008/07/24 09:31:07 martynas Exp $	*/
+/*	$OpenBSD: fpclassify.c,v 1.3 2008/12/10 01:15:02 martynas Exp $	*/
 /*
  * Copyright (c) 2008 Martynas Venckus <martynas@openbsd.org>
  *
@@ -15,6 +15,7 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
+#include <sys/cdefs.h>
 #include <machine/vaxfp.h>
 #include <math.h>
 
@@ -41,3 +42,7 @@ __fpclassifyf(float f)
 
 	return FP_NORMAL;
 }
+
+#ifdef __weak_alias
+__weak_alias(__fpclassifyl, __fpclassify);
+#endif /* __weak_alias */

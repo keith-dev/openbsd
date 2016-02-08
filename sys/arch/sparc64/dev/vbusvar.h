@@ -1,4 +1,4 @@
-/*	$OpenBSD: vbusvar.h,v 1.1 2008/03/09 18:10:34 kettenis Exp $	*/
+/*	$OpenBSD: vbusvar.h,v 1.3 2008/12/30 21:23:33 kettenis Exp $	*/
 /*
  * Copyright (c) 2008 Mark Kettenis
  *
@@ -22,11 +22,16 @@ struct vbus_attach_args {
 	char		*va_name;
 	int		va_node;
 
+	bus_space_tag_t	va_bustag;
+	bus_dma_tag_t	va_dmatag;
+
 	u_int32_t	*va_reg;
 	u_int32_t	*va_intr;
 
 	int		va_nreg;
 	int		va_nintr;
 };
+
+int vbus_intr_map(int, int, uint64_t *);
 
 #endif

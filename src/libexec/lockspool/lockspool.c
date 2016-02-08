@@ -1,4 +1,4 @@
-/*	$OpenBSD: lockspool.c,v 1.13 2006/03/31 00:37:26 deraadt Exp $	*/
+/*	$OpenBSD: lockspool.c,v 1.15 2008/10/01 20:32:44 millert Exp $	*/
 
 /*
  * Copyright (c) 1998 Theo de Raadt <deraadt@theos.com>
@@ -27,7 +27,7 @@
  */
 
 #ifndef lint
-static const char rcsid[] = "$OpenBSD: lockspool.c,v 1.13 2006/03/31 00:37:26 deraadt Exp $";
+static const char rcsid[] = "$OpenBSD: lockspool.c,v 1.15 2008/10/01 20:32:44 millert Exp $";
 #endif /* not lint */
 
 #include <signal.h>
@@ -37,6 +37,7 @@ static const char rcsid[] = "$OpenBSD: lockspool.c,v 1.13 2006/03/31 00:37:26 de
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <poll.h>
 #include "mail.local.h"
 
 void unhold(int);
@@ -48,6 +49,8 @@ int
 main(int argc, char *argv[])
 {
 	struct passwd *pw;
+	struct pollfd pfd;
+	ssize_t nread;
 	char *from, c;
 	int holdfd;
 
@@ -64,21 +67,12 @@ main(int argc, char *argv[])
 	signal(SIGPIPE, unhold);
 
 	if (argc == 2)
-		from = argv[1];
+		pw = getpwnam(argv[1]);
 	else
-		from = getlogin();
-
-	if (from) {
-		pw = getpwnam(from);
-		if (pw == NULL)
-			exit (1);
-	} else {
 		pw = getpwuid(getuid());
-		if (pw)
-			from = pw->pw_name;
-		else
-			exit (1);
-	}
+	if (pw == NULL)
+		exit (1);
+	from = pw->pw_name;
 
 	holdfd = getlock(from, pw);
 	if (holdfd == -1) {
@@ -87,8 +81,18 @@ main(int argc, char *argv[])
 	}
 	write(STDOUT_FILENO, "1\n", 2);
 
-	while (read(STDIN_FILENO, &c, 1) == -1 && errno == EINTR)
-		;
+	/* wait for the other end of the pipe to close, then release the lock */
+	pfd.fd = STDIN_FILENO;
+	pfd.events = POLLIN;
+	do {
+		if (poll(&pfd, 1, INFTIM) == -1) {
+			if (errno != EINTR)
+				break;
+		}
+		do {
+			nread = read(STDIN_FILENO, &c, 1);
+		} while (nread == 1 || (nread == -1 && errno == EINTR));
+	} while (nread == -1 && errno == EAGAIN);
 	rellock();
 	exit (0);
 }

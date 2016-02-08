@@ -1,4 +1,4 @@
-/* $Id: pftop.c,v 1.4 2008/07/16 10:23:39 canacar Exp $	 */
+/* $Id: pftop.c,v 1.8 2009/01/01 22:50:39 mcbride Exp $	 */
 /*
  * Copyright (c) 2001, 2007 Can Erkin Acar
  * Copyright (c) 2001 Daniel Hartmeier
@@ -36,6 +36,7 @@
 
 #include <net/if.h>
 #include <netinet/in.h>
+#include <netinet/tcp.h>
 #include <netinet/tcp_fsm.h>
 #include <net/pfvar.h>
 #include <arpa/inet.h>
@@ -58,6 +59,7 @@
 #include <unistd.h>
 #include <stdarg.h>
 
+#include "systat.h"
 #include "engine.h"
 #include "cache.h"
 
@@ -92,6 +94,8 @@ int keyboard_callback(int ch);
 int select_queues(void);
 int read_queues(void);
 void print_queues(void);
+
+void update_cache(void);
 
 /* qsort callbacks */
 int sort_size_callback(const void *s1, const void *s2);
@@ -1281,7 +1285,13 @@ print_rule(struct pf_rule *pr)
 	print_fld_size(FLD_BYTES, pr->bytes[0] + pr->bytes[1]);
 
 	print_fld_uint(FLD_RULE, pr->nr);
-	print_fld_str(FLD_DIR, pr->direction == PF_OUT ? "Out" : "In");
+	if (pr->direction == PF_OUT)
+		print_fld_str(FLD_DIR, "Out");
+	else if (pr->direction == PF_IN)
+		print_fld_str(FLD_DIR, "In");
+	else
+		print_fld_str(FLD_DIR, "Any");
+
 	if (pr->quick)
 		print_fld_str(FLD_QUICK, "Quick");
 
@@ -1365,11 +1375,16 @@ print_rule(struct pf_rule *pr)
 		tb_print_ugid(pr->gid.op, pr->gid.gid[0], pr->gid.gid[1],
 		        "group", GID_MAX);
 
-	if (pr->flags || pr->flagset) {
-		tbprintf(" flags ");
-		tb_print_flags(pr->flags);
-		tbprintf("/");
-		tb_print_flags(pr->flagset);
+	if (pr->action == PF_PASS &&
+	    (pr->proto == 0 || pr->proto == IPPROTO_TCP) &&
+	    (pr->flags != TH_SYN || pr->flagset != (TH_SYN | TH_ACK) )) {
+		tbprintf("flags ");
+		if (pr->flags || pr->flagset) {
+			tb_print_flags(pr->flags);
+			tbprintf("/");
+			tb_print_flags(pr->flagset);
+		} else
+			tbprintf("any ");
 	}
 
 	tbprintf(" ");
@@ -1510,12 +1525,19 @@ pfctl_insert_altq_node(struct pf_altq_node **root,
 			prev->next = node;
 		}
 	}
-	if (*root != node) {
-		struct pf_altq_node	*prev_flat = *root;
-		while (prev_flat->next_flat != NULL) {
-			prev_flat = prev_flat->next_flat;
-		}
-		prev_flat->next_flat = node;
+}
+
+void
+pfctl_set_next_flat(struct pf_altq_node *node, struct pf_altq_node *up)
+{
+	while (node) {
+		struct pf_altq_node *next = node->next ? node->next : up;
+		if (node->children) {
+			node->next_flat = node->children;
+			pfctl_set_next_flat(node->children, next);
+		} else
+			node->next_flat = next;
+		node = node->next;
 	}
 }
 
@@ -1528,6 +1550,7 @@ pfctl_update_qstats(struct pf_altq_node **root, int *inserts)
 	u_int32_t		 nr;
 	struct queue_stats	 qstats;
 	u_int32_t		 nr_queues;
+	int			 ret = 0;
 
 	*inserts = 0;
 	memset(&pa, 0, sizeof(pa));
@@ -1541,12 +1564,14 @@ pfctl_update_qstats(struct pf_altq_node **root, int *inserts)
 		error("DIOCGETALTQS: %s", strerror(errno));
 		return (-1);
 	}
+
 	num_queues = nr_queues = pa.nr;
 	for (nr = 0; nr < nr_queues; ++nr) {
 		pa.nr = nr;
 		if (ioctl(pf_dev, DIOCGETALTQ, &pa)) {
 			error("DIOCGETALTQ: %s", strerror(errno));
-			return (-1);
+			ret = -1;
+			break;
 		}
 		if (pa.altq.qid > 0) {
 			pq.nr = nr;
@@ -1555,13 +1580,14 @@ pfctl_update_qstats(struct pf_altq_node **root, int *inserts)
 			pq.nbytes = sizeof(qstats);
 			if (ioctl(pf_dev, DIOCGETQSTATS, &pq)) {
 				error("DIOCGETQSTATS: %s", strerror(errno));
-				return (-1);
+				ret = -1;
+				break;
 			}
 			qstats.valid = 1;
 			gettimeofday(&qstats.timestamp, NULL);
 			if ((node = pfctl_find_altq_node(*root, pa.altq.qname,
 			    pa.altq.ifname)) != NULL) {
-				// update altq data too as bandwidth may have changed
+				/* update altq data too as bandwidth may have changed */
 				memcpy(&node->altq, &pa.altq, sizeof(struct pf_altq));
 				memcpy(&node->qstats_last, &node->qstats,
 				    sizeof(struct queue_stats));
@@ -1576,7 +1602,10 @@ pfctl_update_qstats(struct pf_altq_node **root, int *inserts)
 		else
 			--num_queues;
 	}
-	return (0);
+
+	pfctl_set_next_flat(*root, NULL);
+
+	return (ret);
 }
 
 void
@@ -1641,8 +1670,9 @@ read_queues(void)
 	if (pfctl_update_qstats(&altq_root, &inserts))
 		return (-1);
 	
-	// Allow inserts only on first read;
-	// on subsequent reads clear and reload
+	/* Allow inserts only on first read;
+	 * on subsequent reads clear and reload
+	 */
 	if (first_read == 0 &&
 	    (inserts != 0 || pfctl_have_unvisited(altq_root) != 0)) {
 		pfctl_free_altq_node(altq_root);
@@ -1811,7 +1841,7 @@ print_queues(void)
 /* main program functions */
 
 void
-update_cache()
+update_cache(void)
 {
 	static int pstate = -1;
 	if (pstate == cachestates)
@@ -1830,7 +1860,7 @@ update_cache()
 	field_setup();
 }
 
-void
+int
 initpftop(void)
 {
 	struct pf_status status;
@@ -1860,4 +1890,6 @@ initpftop(void)
 
 	show_field(FLD_STMAX);
 	show_field(FLD_ANCHOR);
+
+	return (1);
 }

@@ -1,4 +1,4 @@
-/* $OpenBSD: vga_pci.c,v 1.35 2008/08/02 15:50:34 oga Exp $ */
+/* $OpenBSD: vga_pci.c,v 1.39 2008/11/22 21:26:48 oga Exp $ */
 /* $NetBSD: vga_pci.c,v 1.3 1998/06/08 06:55:58 thorpej Exp $ */
 
 /*
@@ -95,19 +95,19 @@
 #include <dev/vesa/vesabiosvar.h>
 #endif
 
-#include "agp.h"
-#include "drmbase.h"
+#include "intagp.h"
+#include "drm.h"
 
 int	vga_pci_match(struct device *, void *, void *);
 void	vga_pci_attach(struct device *, struct device *, void *);
 paddr_t	vga_pci_mmap(void* v, off_t off, int prot);
 void	vga_pci_bar_init(struct vga_pci_softc *, struct pci_attach_args *);
 
-#if NAGP > 0
-int	agpsubmatch(struct device *, void *, void *);
-int	agpbus_print(void *, const char *);
+#if NINTAGP > 0
+int	intagpsubmatch(struct device *, void *, void *);
+int	intagp_print(void *, const char *);
 #endif 
-#if NDRMBASE > 0
+#if NDRM > 0
 int	drmsubmatch(struct device *, void *, void *);
 int	vga_drm_print(void *, const char *);
 #endif
@@ -120,20 +120,6 @@ int vesafb_getcmap(struct vga_pci_softc *, struct wsdisplay_cmap *);
 struct cfattach vga_pci_ca = {
 	sizeof(struct vga_pci_softc), vga_pci_match, vga_pci_attach,
 };
-
-#if NAGP > 0
-struct pci_attach_args agp_pchb_pa;
-int agp_pchb_pa_set = 0;
-
-void
-agp_set_pchb(struct pci_attach_args *pa)
-{
-	if (!agp_pchb_pa_set) {
-		memcpy(&agp_pchb_pa, pa, sizeof *pa);
-		agp_pchb_pa_set++;
-	}
-}
-#endif
 
 int
 vga_pci_match(struct device *parent, void *match, void *aux)
@@ -166,9 +152,6 @@ void
 vga_pci_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct pci_attach_args *pa = aux;
-#if NAGP >0
-	struct agpbus_attach_args aba;
-#endif
 	pcireg_t reg;
 	struct vga_pci_softc *sc = (struct vga_pci_softc *)self;
 
@@ -194,47 +177,45 @@ vga_pci_attach(struct device *parent, struct device *self, void *aux)
 
 	vga_pci_bar_init(sc, pa);
 
-#if NAGP > 0
+#if NINTAGP > 0
 	/*
-	 * attach agp here instead of pchb so it can share mappings
-	 * with the DRM
+	 * attach intagp here instead of pchb so it can share mappings
+	 * with the DRM.
 	 */
-	if (agp_pchb_pa_set) {
-		aba.apa_pci_args = agp_pchb_pa;
-		memcpy(&aba.apa_vga_args, pa, sizeof(struct pci_attach_args));
-		config_found_sm(self, &aba, agpbus_print, agpsubmatch);
+	if (PCI_VENDOR(pa->pa_id) == PCI_VENDOR_INTEL) {
+		config_found_sm(self, aux, intagp_print, intagpsubmatch);
 
 	}
 #endif
 
-#if NDRMBASE > 0
-	config_found_sm(self, aux, vga_drm_print, drmsubmatch);
+#if NDRM > 0
+	config_found_sm(self, aux, NULL, drmsubmatch);
 #endif
 }
 
-#if NAGP > 0
+#if NINTAGP > 0
 int
-agpsubmatch(struct device *parent, void *match, void *aux)
+intagpsubmatch(struct device *parent, void *match, void *aux)
 {
-	extern struct cfdriver agp_cd;
+	extern struct cfdriver intagp_cd;
 	struct cfdata *cf = match;
 
-	/* only allow agp to attach */
-	if (cf->cf_driver == &agp_cd)
+	/* only allow intagp to attach */
+	if (cf->cf_driver == &intagp_cd)
 		return ((*cf->cf_attach->ca_match)(parent, match, aux));
 	return (0);
 }
 
 int
-agpbus_print(void *vaa, const char *pnp)
+intagp_print(void *vaa, const char *pnp)
 {
 	if (pnp)
-		printf("agp at %s", pnp);
+		printf("intagp at %s", pnp);
 	return (UNCONF);
 }
 #endif
 
-#if NDRMBASE > 0
+#if NDRM > 0
 int
 drmsubmatch(struct device *parent, void *match, void *aux)
 {
@@ -247,19 +228,11 @@ drmsubmatch(struct device *parent, void *match, void *aux)
 
 	/* is this a *drm device? */
 	len = strlen(cd->cd_name);
-	sm = cd->cd_name + len -3;
-	if (strncmp(sm,"drm",3) == 0)
+	sm = cd->cd_name + len - 3;
+	if (strncmp(sm, "drm", 3) == 0)
 		return ((*cf->cf_attach->ca_match)(parent, match, aux));
 
 	return (0);
-}
-
-int
-vga_drm_print(void *aux, const char *pnp)
-{
-       if (pnp)
-               printf("drm at %s", pnp);
-       return (UNSUPP);
 }
 #endif
 

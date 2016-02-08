@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.55 2008/07/23 17:39:35 kettenis Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.60 2009/02/01 14:53:04 miod Exp $	*/
 
 /*
  * Copyright (c) 2000-2004 Michael Shalayeff
@@ -68,9 +68,10 @@
 #include <sys/sched.h>
 
 struct cpu_info {
-	struct proc *ci_curproc;
+	struct proc	*ci_curproc;
 
 	struct schedstate_percpu ci_schedstate;
+	u_int32_t	ci_randseed;
 };
 
 extern struct cpu_info cpu_info_primary;
@@ -81,8 +82,10 @@ extern struct cpu_info cpu_info_primary;
 #define CPU_INFO_ITERATOR	int
 #define CPU_INFO_FOREACH(cii, ci)	\
 	for (cii = 0, ci = curcpu(); ci != NULL; ci = NULL)
-
+#define CPU_INFO_UNIT(ci)	0
+#define MAXCPUS	1
 #define cpu_number()	0
+#define cpu_unidle(ci)
 
 /* types */
 enum hppa_cpu_type {
@@ -139,6 +142,7 @@ extern register_t kpsw;
 #define	HPPA_FLEX_DATA	0xfff80001
 #define	HPPA_DMA_ENABLE	0x00000001
 #define	HPPA_FLEX_MASK	0xfffc0000
+#define	HPPA_FLEX_SIZE	(1 + ~HPPA_FLEX_MASK)
 #define	HPPA_FLEX(a)	(((a) & HPPA_FLEX_MASK) >> 18)
 #define	HPPA_SPA_ENABLE	0x00000020
 #define	HPPA_NMODSPBUS	64

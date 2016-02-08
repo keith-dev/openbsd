@@ -1,4 +1,4 @@
-/*	$OpenBSD: pciide.c,v 1.287 2008/07/29 20:09:11 kettenis Exp $	*/
+/*	$OpenBSD: pciide.c,v 1.293 2009/02/07 02:09:01 jsg Exp $	*/
 /*	$NetBSD: pciide.c,v 1.127 2001/08/03 01:31:08 tsutsui Exp $	*/
 
 /*
@@ -130,11 +130,6 @@ int wdcdebug_pciide_mask = WDCDEBUG_PCIIDE_MASK;
 #include <dev/pci/pciide_svwsata_reg.h>
 #include <dev/pci/pciide_jmicron_reg.h>
 #include <dev/pci/cy82c693var.h>
-
-#ifdef __sparc64__
-#include <machine/autoconf.h>
-#include <machine/openfirm.h>
-#endif
 
 /* functions for reading/writing 8-bit PCI registers */
 
@@ -285,21 +280,6 @@ void ixp_setup_channel(struct channel_softc *);
 
 void jmicron_chip_map(struct pciide_softc *, struct pci_attach_args *);
 void jmicron_setup_channel(struct channel_softc *);
-
-u_int8_t pciide_dmacmd_read(struct pciide_softc *, int);
-void pciide_dmacmd_write(struct pciide_softc *, int, u_int8_t);
-u_int8_t pciide_dmactl_read(struct pciide_softc *, int);
-void pciide_dmactl_write(struct pciide_softc *, int, u_int8_t);
-void pciide_dmatbl_write(struct pciide_softc *, int, u_int32_t);
-
-void pciide_channel_dma_setup(struct pciide_channel *);
-int  pciide_dma_table_setup(struct pciide_softc *, int, int);
-int  pciide_dma_init(void *, int, int, void *, size_t, int);
-void pciide_dma_start(void *, int, int);
-int  pciide_dma_finish(void *, int, int, int);
-void pciide_irqack(struct channel_softc *);
-void pciide_print_modes(struct pciide_channel *);
-void pciide_print_channels(int, pcireg_t);
 
 struct pciide_product_desc {
 	u_int32_t ide_product;
@@ -691,7 +671,17 @@ const struct pciide_product_desc pciide_sis_products[] =  {
 	}
 };
 
+/*
+ * The National/AMD CS5535 requires MSRs to set DMA/PIO modes so it
+ * has been banished to the MD i386 pciide_machdep
+ */
 const struct pciide_product_desc pciide_natsemi_products[] =  {
+#ifdef __i386__
+	{ PCI_PRODUCT_NS_CS5535_IDE,	/* National/AMD CS5535 IDE */
+	  0,
+	  gcsc_chip_map
+	},
+#endif
 	{ PCI_PRODUCT_NS_PC87415,	/* National Semi PC87415 IDE */
 	  0,
 	  natsemi_chip_map
@@ -1061,6 +1051,22 @@ const struct pciide_product_desc pciide_nvidia_products[] = {
 	{ PCI_PRODUCT_NVIDIA_MCP67_SATA4,
 	  0,
 	  sata_chip_map
+	},
+	{ PCI_PRODUCT_NVIDIA_MCP79_SATA_1,
+	  0,
+	  sata_chip_map
+	},
+	{ PCI_PRODUCT_NVIDIA_MCP79_SATA_2,
+	  0,
+	  sata_chip_map
+	},
+	{ PCI_PRODUCT_NVIDIA_MCP79_SATA_3,
+	  0,
+	  sata_chip_map
+	},
+	{ PCI_PRODUCT_NVIDIA_MCP79_SATA_4,
+	  0,
+	  sata_chip_map
 	}
 };
 
@@ -1076,35 +1082,35 @@ const struct pciide_product_desc pciide_ite_products[] = {
 };
 
 const struct pciide_product_desc pciide_ati_products[] = {
-	{ PCI_PRODUCT_ATI_IXP_IDE_200,
+	{ PCI_PRODUCT_ATI_SB200_IDE,
 	  0,
 	  ixp_chip_map
 	},
-	{ PCI_PRODUCT_ATI_IXP_IDE_300,
+	{ PCI_PRODUCT_ATI_SB300_IDE,
 	  0,
 	  ixp_chip_map
 	},
-	{ PCI_PRODUCT_ATI_IXP_IDE_400,
+	{ PCI_PRODUCT_ATI_SB400_IDE,
 	  0,
 	  ixp_chip_map
 	},
-	{ PCI_PRODUCT_ATI_IXP_IDE_600,
+	{ PCI_PRODUCT_ATI_SB600_IDE,
 	  0,
 	  ixp_chip_map
 	},
-	{ PCI_PRODUCT_ATI_IXP_IDE_700,
+	{ PCI_PRODUCT_ATI_SB700_IDE,
 	  0,
 	  ixp_chip_map
 	},
-	{ PCI_PRODUCT_ATI_IXP_SATA_300,
+	{ PCI_PRODUCT_ATI_SB300_SATA,
 	  0,
 	  sii3112_chip_map
 	},
-	{ PCI_PRODUCT_ATI_IXP_SATA_400_1,
+	{ PCI_PRODUCT_ATI_SB400_SATA_1,
 	  0,
 	  sii3112_chip_map
 	},
-	{ PCI_PRODUCT_ATI_IXP_SATA_400_2,
+	{ PCI_PRODUCT_ATI_SB400_SATA_2,
 	  0,
 	  sii3112_chip_map
 	}
@@ -1195,26 +1201,6 @@ struct cfattach pciide_jmb_ca = {
 struct cfdriver pciide_cd = {
 	NULL, "pciide", DV_DULL
 };
-
-int	pciide_mapregs_compat( struct pci_attach_args *,
-	    struct pciide_channel *, int, bus_size_t *, bus_size_t *);
-int	pciide_mapregs_native(struct pci_attach_args *,
-	    struct pciide_channel *, bus_size_t *, bus_size_t *,
-	    int (*pci_intr)(void *));
-void	pciide_mapreg_dma(struct pciide_softc *,
-	    struct pci_attach_args *);
-int	pciide_chansetup(struct pciide_softc *, int, pcireg_t);
-void	pciide_mapchan(struct pci_attach_args *,
-	    struct pciide_channel *, pcireg_t, bus_size_t *, bus_size_t *,
-	    int (*pci_intr)(void *));
-int	pciide_chan_candisable(struct pciide_channel *);
-void	pciide_map_compat_intr( struct pci_attach_args *,
-	    struct pciide_channel *, int, int);
-void	pciide_unmap_compat_intr( struct pci_attach_args *,
-	    struct pciide_channel *, int, int);
-int	pciide_compat_intr(void *);
-int	pciide_pci_intr(void *);
-int	pciide_intr_flag(struct pciide_channel *);
 
 const struct pciide_product_desc *pciide_lookup_product(u_int32_t);
 
@@ -4233,7 +4219,6 @@ sii3114_chip_map(struct pciide_softc *sc, struct pci_attach_args *pa)
 void
 sii3114_mapreg_dma(struct pciide_softc *sc, struct pci_attach_args *pa)
 {
-	struct pciide_channel *pc;
 	int chan, reg;
 	bus_size_t size;
 	struct pciide_satalink *sl = sc->sc_cookie;
@@ -4250,7 +4235,6 @@ sii3114_mapreg_dma(struct pciide_softc *sc, struct pci_attach_args *pa)
 
 	sc->sc_dma_iot = sl->ba5_st;
 	for (chan = 0; chan < 4; chan++) {
-		pc = &sc->pciide_channels[chan];
 		for (reg = 0; reg < IDEDMA_NREGS; reg++) {
 			size = 4;
 			if (size > (IDEDMA_SCH_OFFSET - reg))
@@ -5347,26 +5331,11 @@ acer_chip_map(struct pciide_softc *sc, struct pci_attach_args *pa)
 	pcireg_t cr, interface;
 	bus_size_t cmdsize, ctlsize;
 	int rev = sc->sc_rev;
-#ifdef __sparc64__
-	char buf[32];
-#endif
 
 	printf(": DMA");
 	pciide_mapreg_dma(sc, pa);
 	sc->sc_wdcdev.cap = WDC_CAPABILITY_DATA16 | WDC_CAPABILITY_DATA32 |
 	    WDC_CAPABILITY_MODE;
-
-#ifdef __sparc64__
-	/*
-	 * XXX The Tadpole SPARCLE doesn't want to do DMA.  PIO works
-	 * fine, so we have this ugly hack to make the machine work.
-	 * It is likely the real cause is still lurking somewhere in
-	 * the code.
-	 */
-	if (OF_getprop(findroot(), "name", buf, sizeof(buf)) > 0 &&
-	    strcmp(buf, "TAD,SPARCLE") == 0)
-		sc->sc_dma_ok = 0;
-#endif
 
 	if (sc->sc_dma_ok) {
 		sc->sc_wdcdev.cap |= WDC_CAPABILITY_DMA;
@@ -8469,7 +8438,6 @@ pio:
 		if (mode <= 2) {
 			drvp->DMA_mode = 0;
 			drvp->PIO_mode = 0;
-			mode = 0;
 		} else {
 			drvp->PIO_mode = mode;
 			drvp->DMA_mode = mode - 2;

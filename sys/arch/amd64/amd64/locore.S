@@ -1,4 +1,4 @@
-/*	$OpenBSD: locore.S,v 1.27 2008/07/28 19:08:46 miod Exp $	*/
+/*	$OpenBSD: locore.S,v 1.31 2009/02/15 17:06:30 mikeb Exp $	*/
 /*	$NetBSD: locore.S,v 1.13 2004/03/25 18:33:17 drochner Exp $	*/
 
 /*
@@ -209,7 +209,7 @@ _C_LABEL(biosextmem):	.long	REALEXTMEM
 	.globl	gdt64
 
 gdt64:
-	.word	gdt64_end-gdt64_start
+	.word	gdt64_end-gdt64_start-1
 	.quad	_RELOC(gdt64_start)
 .align 64
 
@@ -222,7 +222,7 @@ gdt64_end:
 farjmp64:
 	.long	longmode-KERNBASE
 	.word	GSEL(GCODE_SEL, SEL_KPL)
-	
+
 	.space 512
 tmpstk:
 
@@ -637,6 +637,12 @@ longmode_hi:
 
 /*
  * Signal trampoline; copied to top of user stack.
+ *
+ * Note, the "system call" to sigreturn() needs to be an 'int $0x80' one
+ * so that the kernel returns using 'iretq' method.  This way if a process
+ * was interrupted (by tick) as opposed to in the kernel when a signal was
+ * being delivered, the process will be completely restored, including the
+ * userland %rcx register, which the 'sysret' instruction can not restore.
  */
 NENTRY(sigcode)
 	call	*%rax
@@ -752,7 +758,6 @@ ENTRY(cpu_switchto)
 	movq	%rdi, %r13
 	movq	%rsi, %r12
 
-switch_resume:
 #ifdef DIAGNOSTIC
 	xorq	%rax,%rax
 	cmpq	%rax,P_WCHAN(%r12)

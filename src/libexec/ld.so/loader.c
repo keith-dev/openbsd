@@ -1,4 +1,4 @@
-/*	$OpenBSD: loader.c,v 1.115 2008/06/13 23:52:42 kurt Exp $ */
+/*	$OpenBSD: loader.c,v 1.117 2009/02/04 19:44:51 kettenis Exp $ */
 
 /*
  * Copyright (c) 1998 Per Fogelstrom, Opsycon AB
@@ -44,6 +44,8 @@
 #include "sod.h"
 #include "stdlib.h"
 #include "dl_prebind.h"
+
+#include "../../lib/csu/common_elf/os-note-elf.h"
 
 /*
  * Local decls.
@@ -816,7 +818,7 @@ _dl_rtld(elf_object_t *object)
 
 		_dl_symcache = (void *)_dl_mmap(0, sz, PROT_READ|PROT_WRITE,
 		    MAP_PRIVATE|MAP_ANON, -1, 0);
-		if (_dl_symcache == (void *)MAP_FAILED) {
+		if (_dl_mmap_error(_dl_symcache)) {
 			sz = 0;
 			_dl_symcache = NULL;
 		}

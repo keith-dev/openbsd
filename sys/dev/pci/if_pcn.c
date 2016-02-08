@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_pcn.c,v 1.18 2008/05/13 02:24:08 brad Exp $	*/
+/*	$OpenBSD: if_pcn.c,v 1.21 2008/11/28 02:44:18 brad Exp $	*/
 /*	$NetBSD: if_pcn.c,v 1.26 2005/05/07 09:15:44 is Exp $	*/
 
 /*
@@ -1082,19 +1082,11 @@ int
 pcn_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 {
 	struct pcn_softc *sc = ifp->if_softc;
+	struct ifaddr *ifa = (struct ifaddr *) data;
 	struct ifreq *ifr = (struct ifreq *) data;
-	struct ifaddr *ifa = (struct ifaddr *)data;
 	int s, error = 0;
 
 	s = splnet();
-
-	if ((error = ether_ioctl(ifp, &sc->sc_arpcom, cmd, data)) > 0) {
-		/* Try to get more packets going. */
-		pcn_start(ifp);
-
-		splx(s);
-		return (error);
-	}
 
 	switch (cmd) {
 	case SIOCSIFADDR:
@@ -1113,13 +1105,6 @@ pcn_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		}
 		break;
 
-	case SIOCSIFMTU:
-		if (ifr->ifr_mtu > ETHERMTU || ifr->ifr_mtu < ETHERMIN)
-			error = EINVAL;
-		else if (ifp->if_mtu != ifr->ifr_mtu)
-			ifp->if_mtu = ifr->ifr_mtu;
-		break;
-
 	case SIOCSIFFLAGS:
 		/*
 		 * If interface is marked up and not running, then start it.
@@ -1133,31 +1118,20 @@ pcn_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 			pcn_stop(ifp, 1);
 		break;
 
-	case SIOCADDMULTI:
-	case SIOCDELMULTI:
-		error = (cmd == SIOCADDMULTI) ?
-		    ether_addmulti(ifr, &sc->sc_arpcom) :
-		    ether_delmulti(ifr, &sc->sc_arpcom);
-
-		if (error == ENETRESET) {
-			/*
-			 * Multicast list has changed; set the hardware
-			 * filter accordingly.
-			 */
-			if (ifp->if_flags & IFF_RUNNING)
-				error = pcn_init(ifp);
-			else
-				error = 0;
-		}
-		break;
-
 	case SIOCSIFMEDIA:
 	case SIOCGIFMEDIA:
 		error = ifmedia_ioctl(ifp, ifr, &sc->sc_mii.mii_media, cmd);
 		break;
 
 	default:
-		error = ENOTTY;
+		error = ether_ioctl(ifp, &sc->sc_arpcom, cmd, data);
+	}
+
+	if (error == ENETRESET) {
+		if (ifp->if_flags & IFF_RUNNING)
+			error = pcn_init(ifp);
+		else
+			error = 0;
 	}
 
 	/* Try to get more packets going. */
@@ -1520,7 +1494,7 @@ pcn_tick(void *arg)
 	mii_tick(&sc->sc_mii);
 	splx(s);
 
-	timeout_add(&sc->sc_tick_timeout, hz);
+	timeout_add_sec(&sc->sc_tick_timeout, 1);
 }
 
 /*
@@ -1762,7 +1736,7 @@ pcn_init(struct ifnet *ifp)
 
 	if (sc->sc_flags & PCN_F_HAS_MII) {
 		/* Start the one second MII clock. */
-		timeout_add(&sc->sc_tick_timeout, hz);
+		timeout_add_sec(&sc->sc_tick_timeout, 1);
 	}
 
 	/* ...all done! */

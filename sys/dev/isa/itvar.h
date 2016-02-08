@@ -1,4 +1,4 @@
-/*	$OpenBSD: itvar.h,v 1.9 2008/04/07 09:43:54 form Exp $	*/
+/*	$OpenBSD: itvar.h,v 1.12 2009/01/16 06:58:32 form Exp $	*/
 
 /*
  * Copyright (c) 2007-2008 Oleg Safiullin <form@pdp-11.org.ru>
@@ -31,7 +31,7 @@
 #define _DEV_ISA_ITVAR_H_
 
 #define IT_EC_INTERVAL		5
-#define IT_EC_NUMSENSORS	15
+#define IT_EC_NUMSENSORS	17
 #define IT_EC_VREF		4096
 
 #define IO_IT1			0x2e
@@ -44,6 +44,7 @@
 #define IT_ID_8712		0x8712
 #define IT_ID_8716		0x8716
 #define IT_ID_8718		0x8718
+#define IT_ID_8720		0x8720
 #define IT_ID_8726		0x8726
 
 #define IT_CCR			0x02
@@ -61,11 +62,26 @@
 
 #define IT_EC_CFG		0x00
 #define IT_EC_FAN_DIV		0x0b
-#define IT_EC_FAN_ECR		0x0c
-#define IT_EC_FANBASE		0x0d
-#define IT_EC_FANEXTBASE	0x18
+#define IT_EC_FAN_ECER		0x0c
+#define IT_EC_FAN_TAC1		0x0d
+#define IT_EC_FAN_TAC2		0x0e
+#define IT_EC_FAN_TAC3		0x0f
+#define IT_EC_FAN_MCR		0x13
+#define IT_EC_FAN_EXT_TAC1	0x18
+#define IT_EC_FAN_EXT_TAC2	0x19
+#define IT_EC_FAN_EXT_TAC3	0x1a
 #define IT_EC_VOLTBASE		0x20
 #define IT_EC_TEMPBASE		0x29
+#define IT_EC_ADC_VINER		0x50
+#define IT_EC_ADC_TEMPER	0x51
+#define IT_EC_FAN_TAC4_LSB	0x80
+#define IT_EC_FAN_TAC4_MSB	0x81
+#define IT_EC_FAN_TAC5_LSB	0x82
+#define IT_EC_FAN_TAC5_MSB	0x83
+
+#define IT_EC_CFG_START		0x01
+#define IT_EC_CFG_INTCLR	0x08
+#define IT_EC_CFG_UPDVBAT	0x40
 
 #define IT_WDT_LDN		0x07
 

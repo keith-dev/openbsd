@@ -1,4 +1,4 @@
-/*	$OpenBSD: ioapic.c,v 1.16 2008/06/26 05:42:10 ray Exp $	*/
+/*	$OpenBSD: ioapic.c,v 1.20 2009/01/09 18:53:16 kettenis Exp $	*/
 /* 	$NetBSD: ioapic.c,v 1.7 2003/07/14 22:32:40 lukem Exp $	*/
 
 /*-
@@ -112,20 +112,6 @@ int nioapics = 0;	   	 /* number attached */
 static int ioapic_vecbase;
 
 void ioapic_set_id(struct ioapic_softc *);
-
-/*
- * A bitmap telling what APIC IDs usable for I/O APICs are free.
- * The size must be at least IOAPIC_ID_MAX bits (16).
- */
-u_int16_t ioapic_id_map = (1 << IOAPIC_ID_MAX) - 1;
-
-/*
- * When we renumber I/O APICs we provide a mapping vector giving us the new
- * ID out of the old BIOS supplied one.  Each item must be able to hold IDs
- * in [0, IOAPIC_ID_MAX << 1), since we use an extra bit to tell if the ID
- * has actually been remapped.
- */
-u_int8_t ioapic_id_remap[IOAPIC_ID_MAX];
 
 /*
  * Register read/write routines.
@@ -258,15 +244,23 @@ ioapic_attach(struct device *parent, struct device *self, void *aux)
 	struct ioapic_softc *sc = (struct ioapic_softc *)self;
 	struct apic_attach_args  *aaa = (struct apic_attach_args *)aux;
 	int apic_id;
-	int8_t new_id;
 	bus_space_handle_t bh;
 	u_int32_t ver_sz;
-	int i, ioapic_found;
+	int i;
 
 	sc->sc_flags = aaa->flags;
 	sc->sc_apicid = aaa->apic_id;
 
-	printf(": apid %d pa 0x%lx", aaa->apic_id, aaa->apic_address);
+	printf(": apid %d", aaa->apic_id);
+
+	if (ioapic_find(aaa->apic_id) != NULL) {
+		printf(", duplicate apic id (ignored)\n");
+		return;
+	}
+
+	ioapic_add(sc);
+
+	printf(" pa 0x%lx", aaa->apic_address);
 
 	if (bus_mem_add_mapping(aaa->apic_address, PAGE_SIZE, 0, &bh) != 0) {
 		printf(", map failed\n");
@@ -298,42 +292,13 @@ ioapic_attach(struct device *parent, struct device *self, void *aux)
 
 	printf(", version %x, %d pins\n", sc->sc_apic_vers, sc->sc_apic_sz);
 
-	/*
-	 * If either a LAPIC or an I/O APIC is already at the ID the BIOS
-	 * setup for this I/O APIC, try to find a free ID to use and reprogram
-	 * the chip.  Record this remapping since all references done by the
-	 * MP BIOS will be through the old ID.
-	 */
-	ioapic_found = ioapic_find(sc->sc_apicid) != NULL;
-	if (cpu_info[sc->sc_apicid] != NULL || ioapic_found) {
-		printf("%s: duplicate apic id", sc->sc_dev.dv_xname);
-		new_id = ffs(ioapic_id_map) - 1;
-		if (new_id == -1) {
-			printf(" (and none free, ignoring)\n");
-			return;
-		}
-
-		/*
-		 * If there were many I/O APICs at the same ID, we choose
-		 * to let later references to that ID (in the MP BIOS) refer
-		 * to the first found.
-		 */
-		if (!ioapic_found && !IOAPIC_REMAPPED(sc->sc_apicid))
-			IOAPIC_REMAP(sc->sc_apicid, new_id);
-		sc->sc_apicid = new_id;
-		ioapic_set_id(sc);
-	}
-	ioapic_id_map &= ~(1 << sc->sc_apicid);
-
-	ioapic_add(sc);
-
 	apic_id = (ioapic_read(sc, IOAPIC_ID) & IOAPIC_ID_MASK) >>
 	    IOAPIC_ID_SHIFT;
 
 	sc->sc_pins = malloc(sizeof(struct ioapic_pin) * sc->sc_apic_sz,
 	    M_DEVBUF, M_WAITOK);
 
-	for (i=0; i<sc->sc_apic_sz; i++) {
+	for (i = 0; i < sc->sc_apic_sz; i++) {
 		sc->sc_pins[i].ip_handler = NULL;
 		sc->sc_pins[i].ip_next = NULL;
 		sc->sc_pins[i].ip_map = NULL;
@@ -355,7 +320,7 @@ ioapic_attach(struct device *parent, struct device *self, void *aux)
 #if 0
 	/* output of this was boring. */
 	if (mp_verbose)
-		for (i=0; i<sc->sc_apic_sz; i++)
+		for (i = 0; i < sc->sc_apic_sz; i++)
 			ioapic_print_redir(sc, "boot", i);
 #endif
 }
@@ -477,7 +442,7 @@ apic_vectorset(struct ioapic_softc *sc, int pin, int minlevel, int maxlevel)
 		pp->ip_minlevel = 0xff; /* XXX magic */
 		pp->ip_maxlevel = 0; /* XXX magic */
 		pp->ip_vector = 0;
-	} else if (maxlevel != pp->ip_maxlevel) {
+	} else if (minlevel != pp->ip_minlevel) {
 #ifdef MPVERBOSE
 		if (minlevel != maxlevel)
 			printf("%s: pin %d shares different IPL interrupts "
@@ -493,7 +458,6 @@ apic_vectorset(struct ioapic_softc *sc, int pin, int minlevel, int maxlevel)
 		 * as appropriate.
 		 */
 		nvector = idt_vec_alloc(minlevel, minlevel+15);
-
 		if (nvector == 0) {
 			/*
 			 * XXX XXX we should be able to deal here..
@@ -503,16 +467,14 @@ apic_vectorset(struct ioapic_softc *sc, int pin, int minlevel, int maxlevel)
 			panic("%s: can't alloc vector for pin %d at level %x",
 			    sc->sc_dev.dv_xname, pin, maxlevel);
 		}
-		apic_maxlevel[nvector] = maxlevel;
-		/*
-		 * XXX want special handler for the maxlevel != minlevel
-		 * case here!
-		 */
+
 		idt_vec_set(nvector, apichandler[nvector & 0xf]);
-		pp->ip_vector = nvector;
 		pp->ip_minlevel = minlevel;
-		pp->ip_maxlevel = maxlevel;
+		pp->ip_vector = nvector;
 	}
+
+	pp->ip_maxlevel = maxlevel;
+	apic_maxlevel[pp->ip_vector] = maxlevel;
 	apic_intrhand[pp->ip_vector] = pp->ip_handler;
 
 	if (ovector && ovector != pp->ip_vector) {
@@ -531,7 +493,6 @@ apic_vectorset(struct ioapic_softc *sc, int pin, int minlevel, int maxlevel)
 		 */
 		apic_intrhand[ovector] = NULL;
 		idt_vec_free(ovector);
-		printf("freed vector %x\n", ovector);
 	}
 
 	apic_set_redir(sc, pin);
@@ -576,7 +537,7 @@ ioapic_enable(void)
 		if (mp_verbose)
 			printf("%s: enabling\n", sc->sc_dev.dv_xname);
 
-		for (p=0; p<sc->sc_apic_sz; p++) {
+		for (p = 0; p < sc->sc_apic_sz; p++) {
 			maxlevel = 0;	 /* magic */
 			minlevel = 0xff; /* magic */
 				
@@ -761,7 +722,7 @@ apic_intr_disestablish(void *arg)
 		*p = q->ih_next;
 	else
 		panic("intr_disestablish: handler not registered");
-	for (; q != NULL; q = q->ih_next) {
+	for (q = *p; q != NULL; q = q->ih_next) {
 		if (q->ih_level > maxlevel)
 			maxlevel = q->ih_level;
 		if (q->ih_level < minlevel)

@@ -76,6 +76,14 @@ typedef struct drm_r128_ring_buffer {
 } drm_r128_ring_buffer_t;
 
 typedef struct drm_r128_private {
+	struct device		 dev;
+	struct device		*drmdev;
+
+	pci_chipset_tag_t	 pc;
+	pci_intr_handle_t	 ih;
+	void			*irqh;
+
+	struct vga_pci_bar	*regs;
 	drm_r128_ring_buffer_t ring;
 	drm_r128_sarea_t *sarea_priv;
 
@@ -116,7 +124,6 @@ typedef struct drm_r128_private {
 	u32 span_pitch_offset_c;
 
 	drm_local_map_t *sarea;
-	drm_local_map_t *mmio;
 	drm_local_map_t *cce_ring;
 	drm_local_map_t *ring_rptr;
 	drm_local_map_t *agp_textures;
@@ -131,9 +138,6 @@ typedef struct drm_r128_buf_priv {
 	drm_r128_freelist_t *list_entry;
 } drm_r128_buf_priv_t;
 
-extern struct drm_ioctl_desc r128_ioctls[];
-extern int r128_max_ioctl;
-
 				/* r128_cce.c */
 extern int r128_cce_init(struct drm_device *dev, void *data, struct drm_file *file_priv);
 extern int r128_cce_start(struct drm_device *dev, void *data, struct drm_file *file_priv);
@@ -143,6 +147,16 @@ extern int r128_cce_idle(struct drm_device *dev, void *data, struct drm_file *fi
 extern int r128_engine_reset(struct drm_device *dev, void *data, struct drm_file *file_priv);
 extern int r128_fullscreen(struct drm_device *dev, void *data, struct drm_file *file_priv);
 extern int r128_cce_buffers(struct drm_device *dev, void *data, struct drm_file *file_priv);
+extern int r128_cce_swap(struct drm_device *dev, void *data, struct drm_file *file_priv);
+extern int r128_cce_flip(struct drm_device *dev, void *data, struct drm_file *file_priv);
+extern int r128_cce_clear(struct drm_device *dev, void *data, struct drm_file *file_priv);
+extern int r128_cce_vertex(struct drm_device *dev, void *data, struct drm_file *file_priv);
+extern int r128_cce_indices(struct drm_device *dev, void *data, struct drm_file *file_priv);
+extern int r128_cce_blit(struct drm_device *dev, void *data, struct drm_file *file_priv);
+extern int r128_cce_depth(struct drm_device *dev, void *data, struct drm_file *file_priv);
+extern int r128_cce_stipple(struct drm_device *dev, void *data, struct drm_file *file_priv);
+extern int r128_cce_indirect(struct drm_device *dev, void *data, struct drm_file *file_priv);
+extern int r128_getparam(struct drm_device *dev, void *data, struct drm_file *file_priv);
 
 extern void r128_freelist_reset(struct drm_device * dev);
 
@@ -155,11 +169,10 @@ extern int r128_enable_vblank(struct drm_device *dev, int crtc);
 extern void r128_disable_vblank(struct drm_device *dev, int crtc);
 extern u32 r128_get_vblank_counter(struct drm_device *dev, int crtc);
 extern irqreturn_t r128_driver_irq_handler(DRM_IRQ_ARGS);
-extern void r128_driver_irq_preinstall(struct drm_device * dev);
-extern int r128_driver_irq_postinstall(struct drm_device * dev);
+extern int r128_driver_irq_install(struct drm_device * dev);
 extern void r128_driver_irq_uninstall(struct drm_device * dev);
 extern void r128_driver_lastclose(struct drm_device * dev);
-extern void r128_driver_preclose(struct drm_device * dev,
+extern void r128_driver_close(struct drm_device * dev,
 				 struct drm_file *file_priv);
 
 extern long r128_compat_ioctl(struct file *filp, unsigned int cmd,
@@ -389,10 +402,14 @@ extern long r128_compat_ioctl(struct file *filp, unsigned int cmd,
 
 #define R128_PCIGART_TABLE_SIZE         32768
 
-#define R128_READ(reg)		DRM_READ32(  dev_priv->mmio, (reg) )
-#define R128_WRITE(reg,val)	DRM_WRITE32( dev_priv->mmio, (reg), (val) )
-#define R128_READ8(reg)		DRM_READ8(   dev_priv->mmio, (reg) )
-#define R128_WRITE8(reg,val)	DRM_WRITE8(  dev_priv->mmio, (reg), (val) )
+#define R128_READ(reg)		bus_space_read_4(dev_priv->regs->bst,	\
+				    dev_priv->regs->bsh, (reg))
+#define R128_WRITE(reg,val)	bus_space_write_4(dev_priv->regs->bst,	\
+				    dev_priv->regs->bsh, (reg), (val))
+#define R128_READ8(reg)		bus_space_read_1(dev_priv->regs->bst,	\
+				    dev_priv->regs->bsh, (reg))
+#define R128_WRITE8(reg,val)	bus_space_write_1(dev_priv->regs->bst,	\
+				    dev_priv->regs->bsh, (reg), (val))
 
 #define R128_WRITE_PLL(addr,val)					\
 do {									\
@@ -432,7 +449,7 @@ do {									\
 			DRM_UDELAY(1);				\
 		}							\
 		DRM_ERROR( "ring space check failed!\n" );		\
-		return -EBUSY;				\
+		return EBUSY;				\
 	}								\
  __ring_space_done:							\
 	;								\

@@ -1,4 +1,4 @@
-/*	$OpenBSD: pf_print_state.c,v 1.51 2008/06/29 08:42:15 mcbride Exp $	*/
+/*	$OpenBSD: pf_print_state.c,v 1.53 2008/09/09 13:56:38 henning Exp $	*/
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
@@ -306,7 +306,7 @@ print_state(struct pfsync_state *s, int opts)
 		printf("   age %.2u:%.2u:%.2u", creation, min, sec);
 		sec = expire % 60;
 		expire /= 60;
-		min = s->expire % 60;
+		min = expire % 60;
 		expire /= 60;
 		printf(", expires in %.2u:%.2u:%.2u", expire, min, sec);
 
@@ -325,6 +325,8 @@ print_state(struct pfsync_state *s, int opts)
 			printf(", rule %u", ntohl(s->rule));
 		if (s->state_flags & PFSTATE_SLOPPY)
 			printf(", sloppy");
+		if (s->state_flags & PFSTATE_PFLOW)
+			printf(", pflow");
 		if (s->sync_flags & PFSYNC_FLAG_SRCNODE)
 			printf(", source-track");
 		if (s->sync_flags & PFSYNC_FLAG_NATSRCNODE)

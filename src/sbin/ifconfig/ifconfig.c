@@ -1,4 +1,4 @@
-/*	$OpenBSD: ifconfig.c,v 1.202 2008/07/17 08:14:24 sthen Exp $	*/
+/*	$OpenBSD: ifconfig.c,v 1.214 2009/02/16 20:04:12 canacar Exp $	*/
 /*	$NetBSD: ifconfig.c,v 1.40 1997/10/01 02:19:43 enami Exp $	*/
 
 /*
@@ -79,6 +79,7 @@
 #include <net80211/ieee80211_ioctl.h>
 #include <net/pfvar.h>
 #include <net/if_pfsync.h>
+#include <net/if_pflow.h>
 #include <net/if_pppoe.h>
 #include <net/if_trunk.h>
 #include <net/if_sppp.h>
@@ -123,12 +124,14 @@ u_long	metric, mtu;
 int	clearaddr, s;
 int	newaddr = 0;
 int	af = AF_INET;
-int	mflag;
-int	net80211flag;
 int	explicit_prefix = 0;
 #ifdef INET6
 int	Lflag = 1;
 #endif /* INET6 */
+
+int	showmediaflag;
+int	shownet80211chans;
+int	shownet80211nodes;
 
 void	notealias(const char *, int);
 void	notrailers(const char *, int);
@@ -148,7 +151,6 @@ void	setifmtu(const char *, int);
 void	setifnwid(const char *, int);
 void	setifbssid(const char *, int);
 void	setifnwkey(const char *, int);
-void	setifwmm(const char *, int);
 void	setifwpa(const char *, int);
 void	setifwpaprotos(const char *, int);
 void	setifwpaakms(const char *, int);
@@ -156,9 +158,9 @@ void	setifwpaciphers(const char *, int);
 void	setifwpagroupcipher(const char *, int);
 void	setifwpapsk(const char *, int);
 void	setifchan(const char *, int);
+void	setifscan(const char *, int);
 void	setiftxpower(const char *, int);
 void	setifpowersave(const char *, int);
-void	setifpowersavesleep(const char *, int);
 void	setifnwflag(const char *, int);
 void	unsetifnwflag(const char *, int);
 void	setifnetmask(const char *, int);
@@ -224,13 +226,22 @@ void	setsppppeerflag(const char *, int);
 void	unsetsppppeerflag(const char *, int);
 void	spppinfo(struct spppreq *);
 void	sppp_status(void);
-void	sppp_printproto(const char *, struct sauth *);
+void	sppp_printproto(const char *, struct sauthreq *);
 void	settrunkport(const char *, int);
 void	unsettrunkport(const char *, int);
 void	settrunkproto(const char *, int);
 void	trunk_status(void);
+void	setpriority(const char *, int);
 int	main(int, char *[]);
 int	prefix(void *val, int);
+
+#ifndef SMALL
+void	pflow_status(void);
+void	setpflow_sender(const char *, int);
+void	unsetpflow_sender(const char *, int);
+void	setpflow_receiver(const char *, int);
+void	unsetpflow_receiver(const char *, int);
+#endif
 
 /*
  * Media stuff.  Whenever a media command is first performed, the
@@ -251,9 +262,11 @@ int	actions;			/* Actions performed */
 #define	A_MEDIAOPT	(A_MEDIAOPTSET|A_MEDIAOPTCLR)
 #define	A_MEDIAINST	0x0008		/* instance or inst command */
 #define	A_MEDIAMODE	0x0010		/* mode command */
+#define A_SILENT	0x8000000	/* doing operation, do not print */
 
-#define	NEXTARG		0xffffff
-#define NEXTARG2	0xfffffe
+#define	NEXTARG0	0xffffff
+#define NEXTARG		0xfffffe
+#define	NEXTARG2	0xfffffd
 
 const struct	cmd {
 	char	*c_name;
@@ -289,8 +302,6 @@ const struct	cmd {
 	{ "-bssid",	-1,		0,		setifbssid },
 	{ "nwkey",	NEXTARG,	0,		setifnwkey },
 	{ "-nwkey",	-1,		0,		setifnwkey },
-	{ "wmm",	1,		0,		setifwmm },
-	{ "-wmm",	0,		0,		setifwmm },
 	{ "wpa",	1,		0,		setifwpa },
 	{ "-wpa",	0,		0,		setifwpa },
 	{ "wpaakms",	NEXTARG,	0,		setifwpaakms },
@@ -299,14 +310,15 @@ const struct	cmd {
 	{ "wpaprotos",	NEXTARG,	0,		setifwpaprotos },
 	{ "wpapsk",	NEXTARG,	0,		setifwpapsk },
 	{ "-wpapsk",	-1,		0,		setifwpapsk },
-	{ "chan",	NEXTARG,	0,		setifchan },
+	{ "chan",	NEXTARG0,	0,		setifchan },
 	{ "-chan",	-1,		0,		setifchan },
-	{ "powersave",	1,		0,		setifpowersave },
-	{ "-powersave",	0,		0,		setifpowersave },
-	{ "powersavesleep", NEXTARG,	0,		setifpowersavesleep },
+	{ "scan",	NEXTARG0,	0,		setifscan },
+	{ "powersave",	NEXTARG0,	0,		setifpowersave },
+	{ "-powersave",	-1,		0,		setifpowersave },
 	{ "broadcast",	NEXTARG,	0,		setifbroadaddr },
 	{ "ipdst",	NEXTARG,	0,		setifipdst },
 	{ "prefixlen",  NEXTARG,	0,		setifprefixlen},
+	{ "priority",	NEXTARG,	0,		setpriority },
 #ifdef INET6
 	{ "anycast",	IN6_IFF_ANYCAST,	0,	setia6flags },
 	{ "-anycast",	-IN6_IFF_ANYCAST,	0,	setia6flags },
@@ -381,7 +393,7 @@ const struct	cmd {
 	{ "-link1",	-IFF_LINK1,	0,		setifflags } ,
 	{ "link2",	IFF_LINK2,	0,		setifflags } ,
 	{ "-link2",	-IFF_LINK2,	0,		setifflags } ,
-	{ "media",	NEXTARG,	A_MEDIA,	setmedia },
+	{ "media",	NEXTARG0,	A_MEDIA,	setmedia },
 	{ "mediaopt",	NEXTARG,	A_MEDIAOPTSET,	setmediaopt },
 	{ "-mediaopt",	NEXTARG,	A_MEDIAOPTCLR,	unsetmediaopt },
 	{ "mode",	NEXTARG,	A_MEDIAMODE,	setmediamode },
@@ -392,6 +404,12 @@ const struct	cmd {
 	{ "descr",	NEXTARG,	0,		setifdesc },
 	{ "-description", 1,		0,		unsetifdesc },
 	{ "-descr",	1,		0,		unsetifdesc },
+#ifndef SMALL
+	{ "flowsrc",	NEXTARG,	0,		setpflow_sender },
+	{ "-flowsrc",	1,		0,		unsetpflow_sender },
+	{ "flowdst", 	NEXTARG,	0,		setpflow_receiver },
+	{ "-flowdst", 1,		0,		unsetpflow_receiver },
+#endif
 	{ NULL, /*src*/	0,		0,		setifaddr },
 	{ NULL, /*dst*/	0,		0,		setifdstaddr },
 	{ NULL, /*illegal*/0,		0,		NULL },
@@ -438,6 +456,7 @@ void	in6_getprefix(const char *, int);
 void    at_status(int);
 void    at_getaddr(const char *, int);
 void	ieee80211_status(void);
+void	ieee80211_listchans(void);
 void	ieee80211_listnodes(void);
 void	ieee80211_printnode(struct ieee80211_nodereq *);
 
@@ -469,13 +488,14 @@ const struct afswtch {
 
 const struct afswtch *afp;	/*the address family being set or asked about*/
 
+int ifaliases = 0;
+int aflag = 0;
+
 int
 main(int argc, char *argv[])
 {
 	const struct afswtch *rafp = NULL;
 	int create = 0;
-	int aflag = 0;
-	int ifaliases = 0;
 	int Cflag = 0;
 	int gflag = 0;
 	int i;
@@ -502,12 +522,6 @@ main(int argc, char *argv[])
 				break;
 			case 'g':
 				gflag = 1;
-				break;
-			case 'm':
-				mflag = 1;
-				break;
-			case 'M':
-				net80211flag = 1;
 				break;
 			case 'C':
 				Cflag = 1;
@@ -540,7 +554,7 @@ main(int argc, char *argv[])
 		af = ifr.ifr_addr.sa_family = rafp->af_af;
 	}
 	if (Cflag) {
-		if (argc > 0 || mflag || aflag)
+		if (argc > 0 || aflag)
 			usage(1);
 		list_cloners();
 		exit(0);
@@ -552,17 +566,7 @@ main(int argc, char *argv[])
 			setgroupattribs(name, argc, argv);
 		exit(0);
 	}
-	if (aflag) {
-		if (argc > 0)
-			usage(0);
-		printif(NULL, ifaliases);
-		exit(0);
-	}
 	(void) strlcpy(ifr.ifr_name, name, sizeof(ifr.ifr_name));
-	if (argc == 0) {
-		printif(ifr.ifr_name, 1);
-		exit(0);
-	}
 
 #ifdef INET6
 	/* initialization */
@@ -579,9 +583,10 @@ main(int argc, char *argv[])
 		if (argc == 0)
 			exit(0);
 	}
-	create = (argc > 0) && strcmp(argv[0], "destroy") != 0;
-	if (getinfo(&ifr, create) < 0)
-		exit(1);
+	if (aflag == 0) {
+		create = (argc > 0) && strcmp(argv[0], "destroy") != 0;
+		(void)getinfo(&ifr, create);
+	}
 	while (argc > 0) {
 		const struct cmd *p;
 
@@ -595,12 +600,31 @@ main(int argc, char *argv[])
 					errx(1, "%s: bad value", *argv);
 			}
 		if (p->c_func || p->c_func2) {
-			if (p->c_parameter == NEXTARG) {
+			if (p->c_parameter == NEXTARG0) {
+				const struct cmd *p0;
+				int noarg = 1;
+
+				if (argv[1]) {
+					for (p0 = cmds; p0->c_name; p0++)
+						if (strcmp(argv[1], p0->c_name) == 0) {
+							noarg = 0;
+							break;
+						}
+				} else
+					noarg = 0;
+
+				if (noarg == 0)
+					(*p->c_func)(NULL, 0);
+				else
+					goto nextarg;
+			} else if (p->c_parameter == NEXTARG) {
+nextarg:
 				if (argv[1] == NULL)
 					errx(1, "'%s' requires argument",
 					    p->c_name);
 				(*p->c_func)(argv[1], 0);
 				argc--, argv++;
+				actions = actions | A_SILENT | p->c_action;
 			} else if (p->c_parameter == NEXTARG2) {
 				if ((argv[1] == NULL) ||
 				    (argv[2] == NULL))
@@ -609,11 +633,18 @@ main(int argc, char *argv[])
 				(*p->c_func2)(argv[1], argv[2]);
 				argc -= 2;
 				argv += 2;
-			} else
+				actions = actions | A_SILENT | p->c_action;
+			} else {
 				(*p->c_func)(*argv, p->c_parameter);
-			actions |= p->c_action;
+				actions = actions | A_SILENT | p->c_action;
+			}
 		}
 		argc--, argv++;
+	}
+
+	if (argc == 0 && actions == 0) {
+		printif(ifr.ifr_name, 1);
+		exit(0);
 	}
 
 	/* Process any media commands that may have been issued. */
@@ -674,33 +705,30 @@ getinfo(struct ifreq *ifr, int create)
 	getsock(af);
 	if (s < 0)
 		err(1, "socket");
+	if (!isdigit(name[strlen(name) - 1]))
+		return (-1);	/* ignore groups here */
 	if (ioctl(s, SIOCGIFFLAGS, (caddr_t)ifr) < 0) {
 		int oerrno = errno;
 
-		if (!create) {
-			warn("SIOCGIFFLAGS");
+		if (!create)
 			return (-1);
-		}
 		if (ioctl(s, SIOCIFCREATE, (caddr_t)ifr) < 0) {
 			errno = oerrno;
-			warn("SIOCGIFFLAGS");
 			return (-1);
 		}
-		if (ioctl(s, SIOCGIFFLAGS, (caddr_t)ifr) < 0) {
-			warn("SIOCGIFFLAGS");
+		if (ioctl(s, SIOCGIFFLAGS, (caddr_t)ifr) < 0)
 			return (-1);
-		}
 	}
 	flags = ifr->ifr_flags;
-	if (ioctl(s, SIOCGIFMETRIC, (caddr_t)ifr) < 0) {
-		warn("SIOCGIFMETRIC");
+	if (ioctl(s, SIOCGIFMETRIC, (caddr_t)ifr) < 0)
 		metric = 0;
-	} else
+	else
 		metric = ifr->ifr_metric;
 	if (ioctl(s, SIOCGIFMTU, (caddr_t)ifr) < 0)
 		mtu = 0;
 	else
 		mtu = ifr->ifr_mtu;
+
 	return (0);
 }
 
@@ -797,6 +825,8 @@ printif(char *ifname, int ifaliases)
 	int count = 0, noinet = 1;
 	size_t nlen = 0;
 
+	if (aflag)
+		ifname = NULL;
 	if (ifname) {
 		if ((oname = strdup(ifname)) == NULL)
 			err(1, "strdup");
@@ -1419,18 +1449,6 @@ setifnwkey(const char *val, int d)
 
 /* ARGSUSED */
 void
-setifwmm(const char *val, int d)
-{
-	struct ieee80211_wmmparams wmm;
-
-	(void)strlcpy(wmm.i_name, name, sizeof(wmm.i_name));
-	wmm.i_enabled = d;
-	if (ioctl(s, SIOCS80211WMMPARMS, (caddr_t)&wmm) < 0)
-		err(1, "SIOCS80211WMMPARMS");
-}
-
-/* ARGSUSED */
-void
 setifwpa(const char *val, int d)
 {
 	struct ieee80211_wpaparams wpa;
@@ -1488,7 +1506,7 @@ setifwpaakms(const char *val, int d)
 		if (strcasecmp(str, "psk") == 0)
 			rval |= IEEE80211_WPA_AKM_PSK;
 		else if (strcasecmp(str, "802.1x") == 0)
-			rval |= IEEE80211_WPA_AKM_IEEE8021X;
+			rval |= IEEE80211_WPA_AKM_8021X;
 		else
 			errx(1, "wpaakms: unknown akm: %s", str);
 		str = strtok(NULL, ",");
@@ -1583,7 +1601,7 @@ setifwpapsk(const char *val, int d)
 		len = sizeof(psk.i_psk);
 		val = get_string(val, NULL, psk.i_psk, &len);
 		if (val == NULL)
-			errx(1, "wpapsk: invalid pre-shared key\n");
+			errx(1, "wpapsk: invalid pre-shared key");
 		if (len != sizeof(psk.i_psk))
 			errx(1, "wpapsk: bad pre-shared key length");
 		psk.i_enabled = 1;
@@ -1601,11 +1619,17 @@ setifchan(const char *val, int d)
 	struct ieee80211chanreq channel;
 	int chan;
 
+	if (val == NULL) {
+		if (shownet80211chans || shownet80211nodes)
+			usage(1);
+		shownet80211chans = 1;
+		return;
+	}
 	if (d != 0)
 		chan = IEEE80211_CHAN_ANY;
 	else {
 		chan = atoi(val);
-		if (chan < 0 || chan > 0xffff) {
+		if (chan < 1 || chan > 256) {
 			warnx("invalid channel: %s", val);
 			return;
 		}
@@ -1615,6 +1639,15 @@ setifchan(const char *val, int d)
 	channel.i_channel = (u_int16_t)chan;
 	if (ioctl(s, SIOCS80211CHANNEL, (caddr_t)&channel) == -1)
 		warn("SIOCS80211CHANNEL");
+}
+
+/* ARGSUSED */
+void
+setifscan(const char *val, int d)
+{
+	if (shownet80211chans || shownet80211nodes)
+		usage(1);
+	shownet80211nodes = 1;
 }
 
 #ifndef SMALL
@@ -1680,23 +1713,6 @@ void
 setifpowersave(const char *val, int d)
 {
 	struct ieee80211_power power;
-
-	(void)strlcpy(power.i_name, name, sizeof(power.i_name));
-	if (ioctl(s, SIOCG80211POWER, (caddr_t)&power) == -1) {
-		warn("SIOCG80211POWER");
-		return;
-	}
-
-	power.i_enabled = d;
-	if (ioctl(s, SIOCS80211POWER, (caddr_t)&power) == -1)
-		warn("SIOCS80211POWER");
-}
-
-/* ARGSUSED */
-void
-setifpowersavesleep(const char *val, int d)
-{
-	struct ieee80211_power power;
 	const char *errmsg = NULL;
 
 	(void)strlcpy(power.i_name, name, sizeof(power.i_name));
@@ -1705,10 +1721,13 @@ setifpowersavesleep(const char *val, int d)
 		return;
 	}
 
-	power.i_maxsleep = strtonum(val, 0, INT_MAX, &errmsg);
-	if (errmsg)
-		errx(1, "powersavesleep %s: %s", val, errmsg);
+	if (d != -1 && val != NULL) {
+		power.i_maxsleep = strtonum(val, 0, INT_MAX, &errmsg);
+		if (errmsg)
+			errx(1, "powersave %s: %s", val, errmsg);
+	}
 
+	power.i_enabled = d == -1 ? 0 : 1;
 	if (ioctl(s, SIOCS80211POWER, (caddr_t)&power) == -1)
 		warn("SIOCS80211POWER");
 }
@@ -1735,7 +1754,7 @@ void
 ieee80211_status(void)
 {
 	int len, i, nwkey_verbose, inwid, inwkey, ipsk, ichan, ipwr;
-	int ibssid, itxpower, iwmm, iwpa;
+	int ibssid, itxpower, iwpa;
 	struct ieee80211_nwid nwid;
 	struct ieee80211_nwkey nwkey;
 	struct ieee80211_wpapsk psk;
@@ -1743,7 +1762,6 @@ ieee80211_status(void)
 	struct ieee80211chanreq channel;
 	struct ieee80211_bssid bssid;
 	struct ieee80211_txpower txpower;
-	struct ieee80211_wmmparams wmm;
 	struct ieee80211_wpaparams wpa;
 	struct ieee80211_nodereq nr;
 	u_int8_t zero_bssid[IEEE80211_ADDR_LEN];
@@ -1780,18 +1798,13 @@ ieee80211_status(void)
 	strlcpy(txpower.i_name, name, sizeof(txpower.i_name));
 	itxpower = ioctl(s, SIOCG80211TXPOWER, &txpower);
 
-	memset(&wmm, 0, sizeof(wmm));
-	strlcpy(wmm.i_name, name, sizeof(wmm.i_name));
-	iwmm = ioctl(s, SIOCG80211WMMPARMS, &wmm);
-
 	memset(&wpa, 0, sizeof(wpa));
 	strlcpy(wpa.i_name, name, sizeof(wpa.i_name));
 	iwpa = ioctl(s, SIOCG80211WPAPARMS, &wpa);
 
 	/* check if any ieee80211 option is active */
 	if (inwid == 0 || inwkey == 0 || ipsk == 0 || ipwr == 0 ||
-	    ichan == 0 || ibssid == 0 || iwmm == 0 || iwpa == 0 ||
-	    itxpower == 0)
+	    ichan == 0 || ibssid == 0 || iwpa == 0 || itxpower == 0)
 		fputs("\tieee80211:", stdout);
 	else
 		return;
@@ -1806,7 +1819,7 @@ ieee80211_status(void)
 	}
 
 	if (ichan == 0 && channel.i_channel != 0 &&
-	    channel.i_channel != (u_int16_t)-1)
+	    channel.i_channel != IEEE80211_CHAN_ANY)
 		printf(" chan %u", channel.i_channel);
 
 	memset(&zero_bssid, 0, sizeof(zero_bssid));
@@ -1907,7 +1920,7 @@ ieee80211_status(void)
 			fputs("psk", stdout);
 			sep = ",";
 		}
-		if (wpa.i_akms & IEEE80211_WPA_AKM_IEEE8021X)
+		if (wpa.i_akms & IEEE80211_WPA_AKM_8021X)
 			printf("%s802.1x", sep);
 
 		fputs(" wpaciphers ", stdout);
@@ -1916,8 +1929,6 @@ ieee80211_status(void)
 		fputs(" wpagroupcipher ", stdout);
 		print_cipherset(wpa.i_groupcipher);
 	}
-	if (iwmm == 0 && wmm.i_enabled)
-		fputs(" wmm", stdout);
 
 	if (ipwr == 0 && power.i_enabled)
 		printf(" powersave on (%dms sleep)", power.i_maxsleep);
@@ -1934,8 +1945,39 @@ ieee80211_status(void)
 	}
 
 	putchar('\n');
-	if (net80211flag)
+	if (shownet80211chans)
+		ieee80211_listchans();
+	else if (shownet80211nodes)
 		ieee80211_listnodes();
+}
+
+void
+ieee80211_listchans(void)
+{
+	static struct ieee80211_channel chans[256+1];
+	struct ieee80211_chanreq_all ca;
+	int i;
+
+	bzero(&ca, sizeof(ca));
+	bzero(chans, sizeof(chans));
+	ca.i_chans = chans;
+	strlcpy(ca.i_name, name, sizeof(ca.i_name));
+
+	if (ioctl(s, SIOCG80211ALLCHANS, &ca) != 0) {
+		warn("SIOCG80211ALLCHANS");
+		return;
+	}
+	printf("\t\t%4s  %-8s  %s\n", "chan", "freq", "properties");
+	for (i = 1; i <= 256; i++) {
+		if (chans[i].ic_flags == 0)
+			continue;
+		printf("\t\t%4d  %4d MHz  ", i, chans[i].ic_freq);
+		if (chans[i].ic_flags & IEEE80211_CHAN_PASSIVE)
+			printf("passive scan");
+		else
+			putchar('-');
+		putchar('\n');
+	}
 }
 
 void
@@ -2083,7 +2125,7 @@ process_media_commands(void)
 	ifr.ifr_media = media_current;
 
 	if (ioctl(s, SIOCSIFMEDIA, (caddr_t)&ifr) < 0)
-		err(1, "SIOCSIFMEDIA");
+		;
 }
 
 /* ARGSUSED */
@@ -2091,6 +2133,13 @@ void
 setmedia(const char *val, int d)
 {
 	int type, subtype, inst;
+
+	if (val == NULL) {
+		if (showmediaflag)
+			usage(1);
+		showmediaflag = 1;
+		return;
+	}
 
 	init_current_media();
 
@@ -2553,6 +2602,9 @@ status(int link, struct sockaddr_dl *sdl)
 		printf("\tdescription: %s\n", ifrdesc.ifr_data);
 
 #ifndef SMALL
+	if (ioctl(s, SIOCGIFPRIORITY, &ifrdesc) == 0)
+		printf("\tpriority: %d\n", ifrdesc.ifr_metric);
+
 	vlan_status();
 	carp_status();
 	pfsync_status();
@@ -2561,6 +2613,7 @@ status(int link, struct sockaddr_dl *sdl)
 	sppp_status();
 	trunk_status();
 	mpe_status();
+	pflow_status();
 #endif
 	getifgroups();
 
@@ -2630,7 +2683,7 @@ status(int link, struct sockaddr_dl *sdl)
 
 	ieee80211_status();
 
-	if (mflag) {
+	if (showmediaflag) {
 		int type, printed_type = 0;
 
 		for (type = IFM_NMIN; type <= IFM_NMAX; type += IFM_NMIN) {
@@ -3643,6 +3696,123 @@ pfsync_status(void)
 	}
 }
 
+#ifndef SMALL
+void
+pflow_status(void)
+{
+	struct pflowreq preq;
+
+	bzero((char *)&preq, sizeof(struct pflowreq));
+	ifr.ifr_data = (caddr_t)&preq;
+
+	if (ioctl(s, SIOCGETPFLOW, (caddr_t)&ifr) == -1)
+		 return;
+
+	printf("\tpflow: sender: %s ", inet_ntoa(preq.sender_ip));
+	printf("receiver: %s:%u\n", inet_ntoa(preq.receiver_ip),
+	    ntohs(preq.receiver_port));
+}
+
+/* ARGSUSED */
+void
+setpflow_sender(const char *val, int d)
+{
+	struct pflowreq preq;
+	struct addrinfo hints, *sender;
+	int ecode;
+
+	memset(&hints, 0, sizeof(hints));
+	hints.ai_family = AF_INET;
+	hints.ai_socktype = SOCK_DGRAM; /*dummy*/
+
+	if ((ecode = getaddrinfo(val, NULL, &hints, &sender)) != 0)
+		errx(1, "error in parsing address string: %s",
+		    gai_strerror(ecode));
+
+	if (sender->ai_addr->sa_family != AF_INET)
+		errx(1, "only IPv4 addresses supported for the sender");
+
+	bzero((char *)&preq, sizeof(struct pflowreq));
+	ifr.ifr_data = (caddr_t)&preq;
+	preq.addrmask |= PFLOW_MASK_SRCIP;
+	preq.sender_ip.s_addr = ((struct sockaddr_in *)
+	    sender->ai_addr)->sin_addr.s_addr;
+	
+
+	if (ioctl(s, SIOCSETPFLOW, (caddr_t)&ifr) == -1)
+		err(1, "SIOCSETPFLOW");
+
+	freeaddrinfo(sender);
+}
+
+void
+unsetpflow_sender(const char *val, int d)
+{
+	struct pflowreq preq;
+
+	bzero((char *)&preq, sizeof(struct pflowreq));
+	preq.addrmask |= PFLOW_MASK_SRCIP;
+	ifr.ifr_data = (caddr_t)&preq;
+	if (ioctl(s, SIOCSETPFLOW, (caddr_t)&ifr) == -1)
+		err(1, "SIOCSETPFLOW");
+}
+
+/* ARGSUSED */
+void
+setpflow_receiver(const char *val, int d)
+{
+	struct pflowreq preq;
+	struct addrinfo hints, *receiver;
+	int ecode;
+	char *ip, *port, buf[MAXHOSTNAMELEN+sizeof (":65535")];
+
+	if (strchr (val, ':') == NULL)
+		errx(1, "%s bad value", val);
+
+	if (strlcpy(buf, val, sizeof(buf)) >= sizeof(buf))
+		errx(1, "%s bad value", val);
+	port = strchr(buf, ':');
+	*port++ = '\0';
+	ip = buf;
+
+	memset(&hints, 0, sizeof(hints));
+	hints.ai_family = AF_INET;
+	hints.ai_socktype = SOCK_DGRAM; /*dummy*/
+
+	if ((ecode = getaddrinfo(ip, port, &hints, &receiver)) != 0)
+		errx(1, "error in parsing address string: %s",
+		    gai_strerror(ecode));
+
+	if (receiver->ai_addr->sa_family != AF_INET)
+		errx(1, "only IPv4 addresses supported for the receiver");
+
+	bzero((char *)&preq, sizeof(struct pflowreq));
+	ifr.ifr_data = (caddr_t)&preq;
+	preq.addrmask |= PFLOW_MASK_DSTIP | PFLOW_MASK_DSTPRT;
+	preq.receiver_ip.s_addr = ((struct sockaddr_in *)
+	    receiver->ai_addr)->sin_addr.s_addr;
+	preq.receiver_port = (u_int16_t) ((struct sockaddr_in *)
+	    receiver->ai_addr)->sin_port;
+
+	if (ioctl(s, SIOCSETPFLOW, (caddr_t)&ifr) == -1)
+		err(1, "SIOCSETPFLOW");
+
+	freeaddrinfo(receiver);
+}
+
+void
+unsetpflow_receiver(const char *val, int d)
+{
+	struct pflowreq preq;
+
+	bzero((char *)&preq, sizeof(struct pflowreq));
+	ifr.ifr_data = (caddr_t)&preq;
+	preq.addrmask |= PFLOW_MASK_DSTIP | PFLOW_MASK_DSTPRT;
+	if (ioctl(s, SIOCSETPFLOW, (caddr_t)&ifr) == -1)
+		err(1, "SIOCSETPFLOW");
+}
+#endif /* SMALL */
+
 void
 pppoe_status(void)
 {
@@ -3773,31 +3943,41 @@ spppinfo(struct spppreq *spr)
 	bzero(spr, sizeof(struct spppreq));
 
 	ifr.ifr_data = (caddr_t)spr;
-	spr->cmd = (int)SPPPIOGDEFS;
+	spr->cmd = SPPPIOGDEFS;
 	if (ioctl(s, SIOCGIFGENERIC, &ifr) == -1)
 		err(1, "SIOCGIFGENERIC(SPPPIOGDEFS)");
 }
 
 void
+spppauthinfo(struct sauthreq *spa, int d)
+{
+	bzero(spa, sizeof(struct sauthreq));
+
+	ifr.ifr_data = (caddr_t)spa;
+	spa->cmd = d == 0 ? SPPPIOGMAUTH : SPPPIOGHAUTH;
+	if (ioctl(s, SIOCGIFGENERIC, &ifr) == -1)
+		err(1, "SIOCGIFGENERIC(SPPPIOGXAUTH)");
+}
+
+void
 setspppproto(const char *val, int d)
 {
-	struct spppreq spr;
-	struct sauth *auth;
+	struct sauthreq spa;
 
-	spppinfo(&spr);
-	auth = d == 0 ? &spr.defs.myauth : &spr.defs.hisauth;
+	spppauthinfo(&spa, d);
+
 	if (strcmp(val, "pap") == 0)
-		auth->proto = PPP_PAP;
+		spa.proto = PPP_PAP;
 	else if (strcmp(val, "chap") == 0)
-		auth->proto = PPP_CHAP;
+		spa.proto = PPP_CHAP;
 	else if (strcmp(val, "none") == 0)
-		auth->proto = 0;
+		spa.proto = 0;
 	else
 		errx(1, "setpppproto");
 
-	spr.cmd = (int)SPPPIOSDEFS;
+	spa.cmd = d == 0 ? SPPPIOSMAUTH : SPPPIOSHAUTH;
 	if (ioctl(s, SIOCSIFGENERIC, &ifr) == -1)
-		err(1, "SIOCSIFGENERIC(SPPPIOSDEFS)");
+		err(1, "SIOCSIFGENERIC(SPPPIOSXAUTH)");
 }
 
 void
@@ -3809,19 +3989,18 @@ setsppppeerproto(const char *val, int d)
 void
 setspppname(const char *val, int d)
 {
-	struct spppreq spr;
-	struct sauth *auth;
+	struct sauthreq spa;
 
-	spppinfo(&spr);
-	auth = d == 0 ? &spr.defs.myauth : &spr.defs.hisauth;
-	if (auth->proto == 0)
+	spppauthinfo(&spa, d);
+
+	if (spa.proto == 0)
 		errx(1, "unspecified protocol");
-	if (strlcpy((char *)auth->name, val, AUTHNAMELEN) >= AUTHNAMELEN)
+	if (strlcpy(spa.name, val, sizeof(spa.name)) >= sizeof(spa.name))
 		errx(1, "setspppname");
 
-	spr.cmd = (int)SPPPIOSDEFS;
+	spa.cmd = d == 0 ? SPPPIOSMAUTH : SPPPIOSHAUTH;
 	if (ioctl(s, SIOCSIFGENERIC, &ifr) == -1)
-		err(1, "SIOCSIFGENERIC(SPPPIOSDEFS)");
+		err(1, "SIOCSIFGENERIC(SPPPIOSXAUTH)");
 }
 
 void
@@ -3833,19 +4012,18 @@ setsppppeername(const char *val, int d)
 void
 setspppkey(const char *val, int d)
 {
-	struct spppreq spr;
-	struct sauth *auth;
+	struct sauthreq spa;
 
-	spppinfo(&spr);
-	auth = d == 0 ? &spr.defs.myauth : &spr.defs.hisauth;
-	if (auth->proto == 0)
+	spppauthinfo(&spa, d);
+
+	if (spa.proto == 0)
 		errx(1, "unspecified protocol");
-	if (strlcpy((char *)auth->secret, val, AUTHKEYLEN) >= AUTHKEYLEN)
+	if (strlcpy(spa.secret, val, sizeof(spa.secret)) >= sizeof(spa.secret))
 		errx(1, "setspppkey");
 
-	spr.cmd = (int)SPPPIOSDEFS;
+	spa.cmd = d == 0 ? SPPPIOSMAUTH : SPPPIOSHAUTH;
 	if (ioctl(s, SIOCSIFGENERIC, &ifr) == -1)
-		err(1, "SIOCSIFGENERIC(SPPPIOSDEFS)");
+		err(1, "SIOCSIFGENERIC(SPPPIOSXAUTH)");
 }
 
 void
@@ -3857,13 +4035,12 @@ setsppppeerkey(const char *val, int d)
 void
 setsppppeerflag(const char *val, int d)
 {
-	struct spppreq spr;
-	struct sauth *auth;
+	struct sauthreq spa;
 	int flag;
 
-	spppinfo(&spr);
-	auth = &spr.defs.hisauth;
-	if (auth->proto == 0)
+	spppauthinfo(&spa, 1);
+
+	if (spa.proto == 0)
 		errx(1, "unspecified protocol");
 	if (strcmp(val, "callin") == 0)
 		flag = AUTHFLAG_NOCALLOUT;
@@ -3873,13 +4050,13 @@ setsppppeerflag(const char *val, int d)
 		errx(1, "setppppeerflags");
 
 	if (d)
-		auth->flags &= ~flag;
+		spa.flags &= ~flag;
 	else
-		auth->flags |= flag;
+		spa.flags |= flag;
 
-	spr.cmd = (int)SPPPIOSDEFS;
+	spa.cmd = SPPPIOSHAUTH;
 	if (ioctl(s, SIOCSIFGENERIC, &ifr) == -1)
-		err(1, "SIOCSIFGENERIC(SPPPIOSDEFS)");
+		err(1, "SIOCSIFGENERIC(SPPPIOSXAUTH)");
 }
 
 void
@@ -3889,7 +4066,7 @@ unsetsppppeerflag(const char *val, int d)
 }
 
 void
-sppp_printproto(const char *name, struct sauth *auth)
+sppp_printproto(const char *name, struct sauthreq *auth)
 {
 	if (auth->proto == 0)
 		return;
@@ -3906,20 +4083,25 @@ sppp_printproto(const char *name, struct sauth *auth)
 		break;
 	}
 	if (auth->name[0])
-		printf("%sname \"%.*s\" ", name, AUTHNAMELEN, auth->name);
+		printf("%sname \"%s\" ", name, auth->name);
+	if (auth->secret[0])
+		printf("%skey \"%s\" ", name, auth->secret);
 }
 
 void
 sppp_status(void)
 {
 	struct spppreq spr;
+	struct sauthreq spa;
 
 	bzero(&spr, sizeof(spr));
 
 	ifr.ifr_data = (caddr_t)&spr;
-	spr.cmd = (int)SPPPIOGDEFS;
-	if (ioctl(s, SIOCGIFGENERIC, &ifr) == -1)
+	spr.cmd = SPPPIOGDEFS;
+	if (ioctl(s, SIOCGIFGENERIC, &ifr) == -1) {
 		return;
+	}
+
 	if (spr.defs.pp_phase == PHASE_DEAD)
 		return;
 	printf("\tsppp: phase ");
@@ -3941,11 +4123,13 @@ sppp_status(void)
 		break;
 	}
 
-	sppp_printproto("auth", &spr.defs.myauth);
-	sppp_printproto("peer", &spr.defs.hisauth);
-	if (spr.defs.hisauth.flags & AUTHFLAG_NOCALLOUT)
+	spppauthinfo(&spa, 0);
+	sppp_printproto("auth", &spa);
+	spppauthinfo(&spa, 1);
+	sppp_printproto("peer", &spa);
+	if (spa.flags & AUTHFLAG_NOCALLOUT)
 		printf("callin ");
-	if (spr.defs.hisauth.flags & AUTHFLAG_NORECHALLENGE)
+	if (spa.flags & AUTHFLAG_NORECHALLENGE)
 		printf("norechallenge ");
 	putchar('\n');
 }
@@ -4038,15 +4222,19 @@ trunk_status(void)
 			printf(" trunkdev %s", rp.rp_ifname);
 		putchar('\n');
 		if (ra.ra_proto == TRUNK_PROTO_LACP) {
+			char *act_mac = strdup(
+			    ether_ntoa((struct ether_addr*)lp->actor_mac));
+			if (act_mac == NULL)
+				err(1, "strdup");
 			printf("\ttrunk id: [(%04X,%s,%04X,%04X,%04X),\n"
 			    "\t\t (%04X,%s,%04X,%04X,%04X)]\n",
-			    lp->actor_prio,
-			    ether_ntoa((struct ether_addr*)lp->actor_mac),
+			    lp->actor_prio, act_mac,
 			    lp->actor_key, lp->actor_portprio, lp->actor_portno,
 			    lp->partner_prio,
 			    ether_ntoa((struct ether_addr*)lp->partner_mac),
 			    lp->partner_key, lp->partner_portprio,
 			    lp->partner_portno);
+			free(act_mac);
 		}
 
 		for (i = 0; i < ra.ra_ports; i++) {
@@ -4055,7 +4243,7 @@ trunk_status(void)
 			putchar('\n');
 		}
 
-		if (mflag) {
+		if (showmediaflag) {
 			printf("\tsupported trunk protocols:\n");
 			for (i = 0; i < (sizeof(tpr) / sizeof(tpr[0])); i++)
 				printf("\t\ttrunkproto %s\n", tpr[i].tpr_name);
@@ -4064,6 +4252,24 @@ trunk_status(void)
 		printf("\ttrunk: trunkdev %s\n", rp.rp_ifname);
 }
 #endif /* SMALL */
+
+void
+setpriority(const char *id, int param)
+{
+#ifndef SMALL
+	const char *errmsg = NULL;
+	int prio;
+
+	prio = strtonum(id, 0, 15, &errmsg);
+	if (errmsg)
+		errx(1, "priority %s: %s", id, errmsg);
+
+	strlcpy(ifr.ifr_name, name, sizeof(ifr.ifr_name));
+	ifr.ifr_metric = prio;
+	if (ioctl(s, SIOCSIFPRIORITY, (caddr_t)&ifr) < 0)
+		warn("SIOCSIFPRIORITY");
+#endif
+}
 
 #define SIN(x) ((struct sockaddr_in *) &(x))
 struct sockaddr_in *sintab[] = {
@@ -4288,7 +4494,7 @@ void
 usage(int value)
 {
 	fprintf(stderr,
-	    "usage: ifconfig [-AaCm] [interface] [address_family] "
+	    "usage: ifconfig [-AaC] [interface] [address_family] "
 	    "[address [dest_address]]\n"
 	    "\t\t[parameters]\n");
 	exit(value);

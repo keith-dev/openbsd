@@ -1,4 +1,4 @@
-.\"	$OpenBSD: aucat.1,v 1.25 2008/06/03 19:27:42 jmc Exp $
+.\"	$OpenBSD: aucat.1,v 1.47 2009/02/27 17:35:33 ratchov Exp $
 .\"
 .\" Copyright (c) 2006 Alexandre Ratchov <alex@caoua.org>
 .\"
@@ -14,28 +14,28 @@
 .\" ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 .\" OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 .\"
-.Dd $Mdocdate: June 3 2008 $
+.Dd $Mdocdate: February 27 2009 $
 .Dt AUCAT 1
 .Os
 .Sh NAME
 .Nm aucat
-.Nd manipulate linear audio streams
+.Nd audio server and stream manipulation tool
 .Sh SYNOPSIS
 .Nm aucat
 .Bk -words
-.Op Fl qu
+.Op Fl lnu
+.Op Fl b Ar nsamples
 .Op Fl C Ar min : Ns Ar max
 .Op Fl c Ar min : Ns Ar max
-.Op Fl E Ar enc
 .Op Fl e Ar enc
 .Op Fl f Ar device
-.Op Fl H Ar fmt
 .Op Fl h Ar fmt
 .Op Fl i Ar file
+.Op Fl m Ar mode
 .Op Fl o Ar file
-.Op Fl R Ar rate
 .Op Fl r Ar rate
-.Op Fl X Ar policy
+.Op Fl s Ar socket
+.Op Fl v Ar volume
 .Op Fl x Ar policy
 .Ek
 .Sh DESCRIPTION
@@ -51,15 +51,19 @@ also has a legacy mode that works like previous versions of
 which does not convert on the fly and supports playback of .au files.
 .Pp
 The options are as follows:
-.Bl -tag -width "-m mmmmmmmm "
+.Bl -tag -width Ds
+.It Fl b Ar nsamples
+The buffer size in frames.
+This is the number of samples that will be buffered before being played
+and controls the playback latency.
 .It Xo
 .Fl C Ar min : Ns Ar max ,
 .Fl c Ar min : Ns Ar max
 .Xc
-The range of channel numbers on the output or input stream, respectively.
+The range of channel numbers on the record or playback stream, respectively.
 The default is 0:1, i.e. stereo.
-.It Fl E Ar enc , Fl e Ar enc
-Encoding of the output or input stream, respectively (see below).
+.It Fl e Ar enc
+Encoding of the playback or recording stream (see below).
 The default is signed, 16-bit, native byte order.
 .It Fl f Ar device
 The
@@ -67,86 +71,138 @@ The
 device to use for playing and/or recording.
 The default is
 .Pa /dev/audio .
-.It Fl H Ar fmt , Fl h Ar fmt
-File format of the output or input stream, respectively (see below).
+.It Fl h Ar fmt
+File format of the playback or record stream (see below).
 The default is auto.
 .It Fl i Ar file
 Add this file to the list of files to play.
 If the option argument is
 .Sq -
 then standard input will be used.
+.It Fl l
+Listen for incoming connections on Unix domain sockets.
+This allows clients to use
+.Nm
+instead of the regular
+.Xr audio 4
+device for audio input and output
+in order to share the physical device with other clients.
+The default socket name is
+.Pa default
+but other names can be used with the
+.Fl s
+option.
+.It Fl m Ar mode
+Set the server mode.
+Valid modes are
+.Ar play ,
+.Ar rec ,
+and
+.Ar duplex ,
+for play-only, record-only, and full-duplex, respectively.
+The default is
+.Ar duplex .
+.It Fl n
+Loopback mode.
+Instead of using an audio device, send input streams
+to the output, processing them on the fly.
+This mode is useful to mix, demultiplex, resample or reencode
+audio files offline.
 .It Fl o Ar file
 Add this file to the list of files in which to store recorded samples.
 If the option argument is
 .Sq -
 then standard output will be used.
-.It Fl q
-Do not print progress information; run quietly.
-.It Fl R Ar rate , Fl r Ar rate
-Sample rate in Hertz of the output or input stream, respectively.
+.It Fl r Ar rate
+Sample rate in Hertz of the playback or record stream.
 The default is 44100Hz.
+.It Fl s Ar socket
+Add the name
+.Ar socket
+to the list of sockets to listen on.
+.Ar socket
+cannot contain '/'.
+Meaningful in server mode only.
 .It Fl u
 Normally
 .Nm
 tries to automatically determine the optimal parameters for the audio device;
 if this option is specified,
 it will instead use the parameters specified by the
-.Fl CcEeRr
+.Fl Ccer
 options.
-.It Fl X Ar policy
+.It Fl v Ar volume
+Software volume attenuation of the playback stream.
+The value must be between 1 and 127,
+corresponding to \-42dB and \-0dB attenuation.
+In server mode, clients inherit this parameter.
+Reducing the volume in advance reduces a client's dynamic range,
+but allows client volume to stay independent from the number
+of clients as long as their number is small enough.
+A good compromise is to use \-4dB attenuation (12 volume units)
+for each additional client expected
+(115 if 2 clients are expected, 103 for 3 clients, and so on).
+.It Fl x Ar policy
 Action when the output stream cannot accept
-recorded data fast enough.
+recorded data fast enough or the input stream
+cannot provide data to play fast enough.
 If the policy
 is
 .Dq ignore
-(the default) then samples that cannot be written are discarded.
+(the default) then samples that cannot be written are discarded
+and samples that cannot be read are replaced by silence.
 If the policy is
 .Dq sync
-then samples are discarded, but the same amount of silence will be written
+then recorded samples are discarded, but the same amount of silence will be written
 once the stream is unblocked, in order to reach the right position in time.
-If the policy is
-.Dq error
-then the stream is closed permanently.
-.It Fl x Ar policy
-Action when the input stream cannot provide
-data to play fast enough.
-If the policy is
-.Dq ignore
-(the default) then silence is played.
-If the policy is
-.Dq sync
-then silence is played, but the same amount of samples will be discarded
-once the stream is unblocked, in order to reach the right position in time.
+Similarly silence is played, but the same amount of samples will be discarded
+once the stream is unblocked.
 If the policy is
 .Dq error
 then the stream is closed permanently.
 .El
 .Pp
-Settings for input
-.Pq Fl i
-and output
-.Pq Fl o
-files can be changed using the
-.Fl CcEeHhRrXx
+If
+.Nm
+is sent
+.Dv SIGHUP ,
+.Dv SIGINT
+or
+.Dv SIGTERM ,
+it terminates recording to files.
+If sent
+.Dv SIGUSR1
+or
+.Dv SIGUSR2 ,
+it increases or decreases debug level, respectively.
+.Pp
+Settings for input files
+.Pq Fl i ,
+output files
+.Pq Fl o ,
+and sockets
+.Pq Fl s
+can be changed using the
+.Fl Ccehrvx
 options.
 The last
-.Fl CcEeHhRrXx
+.Fl Ccehrvx
 options specified before an
-.Fl i
+.Fl i ,
+.Fl o ,
 or
-.Fl o
-are applied to
-.Ar file .
+.Fl s
+are applied to the corresponding file.
 .Pp
 Settings for the audio device
 can be changed using the
-.Fl CcEeRr
+.Fl Ccer
 options.
 They apply to the audio device only if the
 .Fl u
 option is given as well.
 The last
-.Fl CcEeRr
+.Fl Ccer
 option specified before an
 .Fl f
 is applied to
@@ -158,22 +214,19 @@ is specified but
 .Fl u
 is given anyway,
 any
-.Fl CcEeRr
+.Fl Ccer
 options specified before
-.Fl io
-options are applied both to
-.Ar file
+.Fl ios
+options are applied both to the corresponding file
 and the default audio device;
 if they are specified after
-.Fl io
+.Fl ios
 options,
 they will be applied only to the default audio device.
 .Pp
 File formats are specified using the
-.Fl H
-and
 .Fl h
-options.
+option.
 The following file formats are supported:
 .Bl -tag -width s32lexxx -offset -indent
 .It raw
@@ -192,10 +245,8 @@ Try to guess, depending on the file name.
 .El
 .Pp
 Encodings are specified using the
-.Fl E
-and
 .Fl e
-options.
+option.
 The following encodings are supported:
 .Pp
 .Bl -tag -width s32lexxx -offset -indent -compact
@@ -252,6 +303,46 @@ signed 18-bit, packed in 3 bytes, little endian
 .It u18be3
 unsigned 18-bit, packed in 3 bytes, big endian
 .El
+.Sh SERVER MODE
+.Nm
+can be used in server mode
+.Pq Fl l
+to overcome hardware limitations and allow applications
+to run on fixed sample rate devices or on devices
+supporting only unusual encodings.
+It is generally not desirable to have multiple
+instances of
+.Nm
+running in server mode,
+so it is good practice to start it thus:
+.Bd -literal -offset indent
+$ pgrep -x aucat || aucat -l
+.Ed
+.Pp
+This also ensures privacy by preventing
+other users from accessing the audio system.
+On multi-user machines
+.Nm
+should be killed when no longer in use to make audio resources
+available again to others:
+.Bd -literal -offset indent
+$ pkill -x aucat
+.Ed
+.Pp
+Certain applications, such as synthesis software,
+require a low latency audio setup.
+To reduce the probability of buffer underruns or overruns,
+the
+.Xr renice 8
+command can be used to give higher priority to
+.Nm
+process to.
+Superuser privileges are required.
+For example:
+.Bd -literal -offset indent
+$ aucat -b 3500 -l
+$ sudo renice -n -20 -p `pgrep -x aucat`
+.Ed
 .Sh LEGACY MODE
 If neither
 .Fl i
@@ -282,7 +373,7 @@ If the device does not support the encoding,
 .Nm
 will exit with an error.
 .Sh ENVIRONMENT
-.Bl -tag -width "AUDIODEVICEXXX" -compact
+.Bl -tag -width "AUDIODEVICE" -compact
 .It Ev AUCAT_DEBUG
 The debug level:
 may be a value between 0 and 4.
@@ -290,20 +381,6 @@ may be a value between 0 and 4.
 The audio device to use.
 .El
 .Sh EXAMPLES
-The following command will record a stereo s16le stream at
-44100Hz from the default device.
-If necessary, the stream will be converted and/or resampled
-to match parameters supported by the device:
-.Bd -literal -offset indent
-$ aucat -o file.raw
-.Ed
-.Pp
-The following command will play a stereo s16le stream at
-44100Hz on the default device, doing any necessary conversions:
-.Bd -literal -offset indent
-$ aucat -i file.raw
-.Ed
-.Pp
 The following will mix and play two stereo streams,
 the first at 48kHz and the second at 44.1kHz:
 .Bd -literal -offset indent
@@ -314,18 +391,29 @@ The following will record channels 2 and 3 into one stereo file and
 channels 6 and 7 into another stereo file using a 96kHz sampling rate for
 both:
 .Bd -literal -offset indent
-$ aucat -R 96000 -C 2:3 -o file1.raw -C 6:7 -o file2.raw
+$ aucat -r 96000 -C 2:3 -o file1.raw -C 6:7 -o file2.raw
 .Ed
 .Pp
-The following will play two s18le mono files, one on each channel:
+The following will split a stereo file into two mono files:
 .Bd -literal -offset indent
-$ aucat -e s18le -c 0:0 -i f1.raw -c 1:1 -i f2.raw
+$ aucat -n -i stereo.wav -C 0:0 -o left.wav -C 1:1 -o right.wav
 .Ed
 .Pp
-The following will mix and play two files and record a third one in
-full-duplex:
+The following will start
+.Nm
+in server mode using default parameters, but will create an
+additional socket for output to channels 2:3 only (rear speakers
+on most cards):
 .Bd -literal -offset indent
-$ aucat -i drums.raw -i bass.raw -o guitar.raw
+$ aucat -l -s default -c 2:3 -s rear
+.Ed
+.Pp
+The following will start
+.Nm
+in server mode creating the default socket with low volume and
+an additional socket for high volume output:
+.Bd -literal -offset indent
+$ aucat -l -v 65 -s default -v 127 -s max
 .Ed
 .Sh SEE ALSO
 .Xr audioctl 1 ,
@@ -341,9 +429,6 @@ It will not work reliably on files that may block
 .Pp
 Resampling is low quality; down-sampling especially should be avoided
 when recording.
-.Pp
-CPU usage is the same for all conversions.
-It should be smaller for simpler ones.
 .Pp
 Processing is done using 16-bit arithmetic,
 thus samples with more than 16 bits are rounded.

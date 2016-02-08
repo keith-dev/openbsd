@@ -1,4 +1,4 @@
-/*	$OpenBSD: usb.h,v 1.32 2008/06/29 10:04:15 yuo Exp $ */
+/*	$OpenBSD: usb.h,v 1.34 2008/12/09 03:08:07 yuo Exp $ */
 /*	$NetBSD: usb.h,v 1.69 2002/09/22 23:20:50 augustss Exp $	*/
 /*	$FreeBSD: src/sys/dev/usb/usb.h,v 1.14 1999/11/17 22:33:46 n_hibma Exp $	*/
 
@@ -240,6 +240,8 @@ typedef struct {
 #define  UE_ISO_SYNC	0x0c
 #define UE_GET_ISO_TYPE(a)	((a) & UE_ISO_TYPE)
 	uWord		wMaxPacketSize;
+#define UE_GET_TRANS(a)	(((a) >> 11) & 0x3)
+#define UE_GET_SIZE(a)	((a) & 0x7ff)
 	uByte		bInterval;
 } __packed usb_endpoint_descriptor_t;
 #define USB_ENDPOINT_DESCRIPTOR_SIZE 7
@@ -651,7 +653,7 @@ struct usb_event {
 
 /* USB controller */
 #define USB_REQUEST		_IOWR('U', 1, struct usb_ctl_request)
-#define USB_SETDEBUG		_IOW ('U', 2, int)
+#define USB_SETDEBUG		_IOW ('U', 2, unsigned int)
 #define USB_DISCOVER		_IO  ('U', 3)
 #define USB_DEVICEINFO		_IOWR('U', 4, struct usb_device_info)
 #define USB_DEVICESTATS		_IOR ('U', 5, struct usb_device_stats)

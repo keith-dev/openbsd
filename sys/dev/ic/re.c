@@ -1,4 +1,4 @@
-/*	$OpenBSD: re.c,v 1.85 2008/08/05 01:58:47 brad Exp $	*/
+/*	$OpenBSD: re.c,v 1.104 2009/02/12 11:55:29 martynas Exp $	*/
 /*	$FreeBSD: if_re.c,v 1.31 2004/09/04 07:54:05 ru Exp $	*/
 /*
  * Copyright (c) 1997, 1998-2003
@@ -165,8 +165,8 @@ int	re_encap(struct rl_softc *, struct mbuf *, int *);
 int	re_newbuf(struct rl_softc *, int, struct mbuf *);
 int	re_rx_list_init(struct rl_softc *);
 int	re_tx_list_init(struct rl_softc *);
-void	re_rxeof(struct rl_softc *);
-void	re_txeof(struct rl_softc *);
+int	re_rxeof(struct rl_softc *);
+int	re_txeof(struct rl_softc *);
 void	re_tick(void *);
 void	re_start(struct ifnet *);
 int	re_ioctl(struct ifnet *, u_long, caddr_t);
@@ -185,9 +185,15 @@ int	re_miibus_readreg(struct device *, int, int);
 void	re_miibus_writereg(struct device *, int, int, int);
 void	re_miibus_statchg(struct device *);
 
-void	re_setmulti(struct rl_softc *);
-void	re_setpromisc(struct rl_softc *);
+void	re_iff(struct rl_softc *);
 void	re_reset(struct rl_softc *);
+
+void	re_setup_hw_im(struct rl_softc *);
+void	re_setup_sim_im(struct rl_softc *);
+void	re_disable_hw_im(struct rl_softc *);
+void	re_disable_sim_im(struct rl_softc *);
+void	re_config_imtype(struct rl_softc *, int);
+void	re_setup_intr(struct rl_softc *, int, int);
 
 #ifdef RE_DIAG
 int	re_diag(struct rl_softc *);
@@ -224,6 +230,7 @@ static const struct re_revision {
 	{ RL_HWREV_8168C,	"RTL8168C/8111C" },
 	{ RL_HWREV_8168C_SPIN2,	"RTL8168C/8111C" },
 	{ RL_HWREV_8168CP,	"RTL8168CP/8111CP" },
+	{ RL_HWREV_8168D,	"RTL8168D/8111D" },
 	{ RL_HWREV_8169,	"RTL8169" },
 	{ RL_HWREV_8169_8110SB,	"RTL8169/8110SB" },
 	{ RL_HWREV_8169_8110SBL, "RTL8169SBL" },
@@ -504,13 +511,10 @@ re_miibus_statchg(struct device *dev)
 {
 }
 
-/*
- * Program the 64-bit multicast hash filter.
- */
 void
-re_setmulti(struct rl_softc *sc)
+re_iff(struct rl_softc *sc)
 {
-	struct ifnet		*ifp;
+	struct ifnet		*ifp = &sc->sc_arpcom.ac_if;
 	int			h = 0;
 	u_int32_t		hashes[2] = { 0, 0 };
 	u_int32_t		rxfilt;
@@ -518,49 +522,39 @@ re_setmulti(struct rl_softc *sc)
 	struct arpcom		*ac = &sc->sc_arpcom;
 	struct ether_multi	*enm;
 	struct ether_multistep	step;
-	
-	ifp = &sc->sc_arpcom.ac_if;
 
 	rxfilt = CSR_READ_4(sc, RL_RXCFG);
+	rxfilt &= ~(RL_RXCFG_RX_ALLPHYS | RL_RXCFG_RX_MULTI);
+	ifp->if_flags &= ~IFF_ALLMULTI;
 
-	if (ifp->if_flags & IFF_ALLMULTI || ifp->if_flags & IFF_PROMISC) {
+	if (ifp->if_flags & IFF_PROMISC ||
+	    ac->ac_multirangecnt > 0) {
+		ifp ->if_flags |= IFF_ALLMULTI;
 		rxfilt |= RL_RXCFG_RX_MULTI;
-		CSR_WRITE_4(sc, RL_RXCFG, rxfilt);
-		CSR_WRITE_4(sc, RL_MAR0, 0xFFFFFFFF);
-		CSR_WRITE_4(sc, RL_MAR4, 0xFFFFFFFF);
-		return;
-	}
+		if (ifp->if_flags & IFF_PROMISC)
+			rxfilt |= RL_RXCFG_RX_ALLPHYS;
+		hashes[0] = hashes[1] = 0xFFFFFFFF;
+	} else {
+		/* first, zot all the existing hash bits */
+		CSR_WRITE_4(sc, RL_MAR0, 0);
+		CSR_WRITE_4(sc, RL_MAR4, 0);
 
-	/* first, zot all the existing hash bits */
-	CSR_WRITE_4(sc, RL_MAR0, 0);
-	CSR_WRITE_4(sc, RL_MAR4, 0);
-
-	/* now program new ones */
-	ETHER_FIRST_MULTI(step, ac, enm);
-	while (enm != NULL) {
-		if (bcmp(enm->enm_addrlo, enm->enm_addrhi, ETHER_ADDR_LEN)) {
-			ifp->if_flags |= IFF_ALLMULTI;
-			mcnt = MAX_NUM_MULTICAST_ADDRESSES;
+		/* now program new ones */
+		ETHER_FIRST_MULTI(step, ac, enm);
+		while (enm != NULL) {
+			h = ether_crc32_be(enm->enm_addrlo,
+			    ETHER_ADDR_LEN) >> 26;
+			if (h < 32)
+				hashes[0] |= (1 << h);
+			else
+				hashes[1] |= (1 << (h - 32));
+			mcnt++;
+			ETHER_NEXT_MULTI(step, enm);
 		}
-		if (mcnt == MAX_NUM_MULTICAST_ADDRESSES)
-			break;
 
-		h = (ether_crc32_be(enm->enm_addrlo,
-		    ETHER_ADDR_LEN) >> 26) & 0x0000003F;
-		if (h < 32)
-			hashes[0] |= (1 << h);
-		else
-			hashes[1] |= (1 << (h - 32));
-		mcnt++;
-		ETHER_NEXT_MULTI(step, enm);
+		if (mcnt)
+			rxfilt |= RL_RXCFG_RX_MULTI;
 	}
-
-	if (mcnt)
-		rxfilt |= RL_RXCFG_RX_MULTI;
-	else
-		rxfilt &= ~RL_RXCFG_RX_MULTI;
-
-	CSR_WRITE_4(sc, RL_RXCFG, rxfilt);
 
 	/*
 	 * For some unfathomable reason, RealTek decided to reverse
@@ -575,22 +569,8 @@ re_setmulti(struct rl_softc *sc)
 		CSR_WRITE_4(sc, RL_MAR0, hashes[0]);
 		CSR_WRITE_4(sc, RL_MAR4, hashes[1]);
 	}
-}
 
-void
-re_setpromisc(struct rl_softc *sc)
-{
-	struct ifnet	*ifp;
-	u_int32_t	rxcfg = 0;
-
-	ifp = &sc->sc_arpcom.ac_if;
-
-	rxcfg = CSR_READ_4(sc, RL_RXCFG);
-	if (ifp->if_flags & IFF_PROMISC) 
-		rxcfg |= RL_RXCFG_RX_ALLPHYS;
-        else
-		rxcfg &= ~RL_RXCFG_RX_ALLPHYS;
-	CSR_WRITE_4(sc, RL_RXCFG, rxcfg);
+	CSR_WRITE_4(sc, RL_RXCFG, rxfilt);
 }
 
 void
@@ -608,7 +588,8 @@ re_reset(struct rl_softc *sc)
 	if (i == RL_TIMEOUT)
 		printf("%s: reset never completed!\n", sc->sc_dev.dv_xname);
 
-	CSR_WRITE_1(sc, RL_LDPS, 1);
+	if (sc->rl_flags & RL_FLAG_MACLDPS)
+		CSR_WRITE_1(sc, RL_LDPS, 1);
 }
 
 #ifdef RE_DIAG
@@ -668,7 +649,7 @@ re_diag(struct rl_softc *sc)
 	sc->rl_testmode = 1;
 	re_reset(sc);
 	re_init(ifp);
-	sc->rl_link = 1;
+	sc->rl_flags |= RL_FLAG_LINK;
 	if (sc->sc_hwrev == RL_HWREV_8139CPLUS)
 		phyaddr = 0;
 	else
@@ -782,9 +763,8 @@ re_diag(struct rl_softc *sc)
 
 done:
 	/* Turn interface off, release resources */
-
 	sc->rl_testmode = 0;
-	sc->rl_link = 0;
+	sc->rl_flags &= ~RL_FLAG_LINK;
 	ifp->if_flags &= ~IFF_PROMISC;
 	re_stop(ifp, 1);
 	if (m0 != NULL)
@@ -823,9 +803,6 @@ re_attach(struct rl_softc *sc, const char *intrstr)
 	const struct re_revision *rr;
 	const char	*re_name = NULL;
 
-	/* Reset the adapter. */
-	re_reset(sc);
-
 	sc->sc_hwrev = CSR_READ_4(sc, RL_TXCFG) & RL_TXCFG_HWREV;
 
 	switch (sc->sc_hwrev) {
@@ -848,13 +825,15 @@ re_attach(struct rl_softc *sc, const char *intrstr)
 	case RL_HWREV_8168_SPIN2:
 	case RL_HWREV_8168_SPIN3:
 		sc->rl_flags |= RL_FLAG_INVMAR | RL_FLAG_PHYWAKE |
-		    RL_FLAG_MACSTAT;
+		    RL_FLAG_MACSTAT | RL_FLAG_HWIM;
 		break;
 	case RL_HWREV_8168C:
 	case RL_HWREV_8168C_SPIN2:
 	case RL_HWREV_8168CP:
+	case RL_HWREV_8168D:
 		sc->rl_flags |= RL_FLAG_INVMAR | RL_FLAG_PHYWAKE |
-		    RL_FLAG_PAR | RL_FLAG_DESCV2 | RL_FLAG_MACSTAT;
+		    RL_FLAG_PAR | RL_FLAG_DESCV2 | RL_FLAG_MACSTAT |
+		    RL_FLAG_HWIM;
 		/*
 		 * These controllers support jumbo frame but it seems
 		 * that enabling it requires touching additional magic
@@ -867,14 +846,59 @@ re_attach(struct rl_softc *sc, const char *intrstr)
 		 */
 		sc->rl_flags |= RL_FLAG_NOJUMBO;
 		break;
+	case RL_HWREV_8169:
+	case RL_HWREV_8169S:
+	case RL_HWREV_8110S:
+		sc->rl_flags |= RL_FLAG_MACLDPS;
+		break;
 	case RL_HWREV_8169_8110SB:
-	case RL_HWREV_8169_8110SCd:
 	case RL_HWREV_8169_8110SBL:
-		sc->rl_flags |= RL_FLAG_PHYWAKE;
+	case RL_HWREV_8169_8110SCd:
+	case RL_HWREV_8169_8110SCe:
+		sc->rl_flags |= RL_FLAG_PHYWAKE | RL_FLAG_MACLDPS;
 		break;
 	default:
 		break;
 	}
+
+	/* Reset the adapter. */
+	re_reset(sc);
+
+	sc->rl_tx_time = 5;		/* 125us */
+	sc->rl_rx_time = 2;		/* 50us */
+	if (sc->rl_flags & RL_FLAG_PCIE)
+		sc->rl_sim_time = 75;	/* 75us */
+	else
+		sc->rl_sim_time = 125;	/* 125us */
+	sc->rl_imtype = RL_IMTYPE_SIM;	/* simulated interrupt moderation */
+
+	if (sc->sc_hwrev == RL_HWREV_8139CPLUS)
+		sc->rl_bus_speed = 33; /* XXX */
+	else if (sc->rl_flags & RL_FLAG_PCIE)
+		sc->rl_bus_speed = 125;
+	else {
+		u_int8_t cfg2;
+
+		cfg2 = CSR_READ_1(sc, RL_CFG2);
+		switch (cfg2 & RL_CFG2_PCI_MASK) {
+		case RL_CFG2_PCI_33MHZ:
+ 			sc->rl_bus_speed = 33;
+			break;
+		case RL_CFG2_PCI_66MHZ:
+			sc->rl_bus_speed = 66;
+			break;
+		default:
+			printf("%s: unknown bus speed, assume 33MHz\n",
+			    sc->sc_dev.dv_xname);
+			sc->rl_bus_speed = 33;
+			break;
+		}
+
+		if (cfg2 & RL_CFG2_PCI_64BIT)
+			sc->rl_flags |= RL_FLAG_PCI64;
+	}
+
+	re_config_imtype(sc, sc->rl_imtype);
 
 	if (sc->rl_flags & RL_FLAG_PAR) {
 		/*
@@ -1043,16 +1067,16 @@ re_attach(struct rl_softc *sc, const char *intrstr)
 		goto fail_7;
 	}
 
-        /* Create DMA maps for RX buffers */
-        for (i = 0; i < RL_RX_DESC_CNT; i++) {
-                error = bus_dmamap_create(sc->sc_dmat, MCLBYTES, 1, MCLBYTES,
-                    0, 0, &sc->rl_ldata.rl_rxsoft[i].rxs_dmamap);
-                if (error) {
-                        printf("%s: can't create DMA map for RX\n",
-                            sc->sc_dev.dv_xname);
+	/* Create DMA maps for RX buffers */
+	for (i = 0; i < RL_RX_DESC_CNT; i++) {
+		error = bus_dmamap_create(sc->sc_dmat, MCLBYTES, 1, MCLBYTES,
+		    0, 0, &sc->rl_ldata.rl_rxsoft[i].rxs_dmamap);
+		if (error) {
+			printf("%s: can't create DMA map for RX\n",
+			    sc->sc_dev.dv_xname);
 			goto fail_8;
-                }
-        }
+		}
+	}
 
 	ifp = &sc->sc_arpcom.ac_if;
 	ifp->if_softc = sc;
@@ -1067,17 +1091,20 @@ re_attach(struct rl_softc *sc, const char *intrstr)
 	IFQ_SET_MAXLEN(&ifp->if_snd, RL_TX_QLEN);
 	IFQ_SET_READY(&ifp->if_snd);
 
-	
-	ifp->if_capabilities = IFCAP_VLAN_MTU;
-	if ((sc->rl_flags & RL_FLAG_DESCV2) == 0)
-		ifp->if_capabilities |= IFCAP_CSUM_IPv4 |
-		    IFCAP_CSUM_TCPv4 | IFCAP_CSUM_UDPv4;
+	ifp->if_capabilities = IFCAP_VLAN_MTU | IFCAP_CSUM_IPv4 |
+			       IFCAP_CSUM_TCPv4 | IFCAP_CSUM_UDPv4;
 
 #if NVLAN > 0
 	ifp->if_capabilities |= IFCAP_VLAN_HWTAGGING;
 #endif
 
 	timeout_set(&sc->timer_handle, re_tick, sc);
+
+	/* Take PHY out of power down mode. */
+	if (sc->rl_flags & RL_FLAG_PHYWAKE) {
+		re_gmii_writereg((struct device *)sc, 1, 0x1f, 0);
+		re_gmii_writereg((struct device *)sc, 1, 0x0e, 0);
+	}
 
 	/* Do MII setup */
 	sc->sc_mii.mii_ifp = ifp;
@@ -1284,15 +1311,15 @@ re_rx_list_init(struct rl_softc *sc)
  * the reception of jumbo frames that have been fragmented
  * across multiple 2K mbuf cluster buffers.
  */
-void
+int
 re_rxeof(struct rl_softc *sc)
 {
 	struct mbuf	*m;
 	struct ifnet	*ifp;
-	int		i, total_len;
+	int		i, total_len, rx = 0;
 	struct rl_desc	*cur_rx;
 	struct rl_rxsoft *rxs;
-	u_int32_t	rxstat;
+	u_int32_t	rxstat, rxvlan;
 
 	ifp = &sc->sc_arpcom.ac_if;
 
@@ -1301,12 +1328,14 @@ re_rxeof(struct rl_softc *sc)
 		RL_RXDESCSYNC(sc, i,
 		    BUS_DMASYNC_POSTREAD|BUS_DMASYNC_POSTWRITE);
 		rxstat = letoh32(cur_rx->rl_cmdstat);
+		rxvlan = letoh32(cur_rx->rl_vlanctl);
 		RL_RXDESCSYNC(sc, i, BUS_DMASYNC_PREREAD);
 		if ((rxstat & RL_RDESC_STAT_OWN) != 0)
 			break;
 		total_len = rxstat & sc->rl_rxlenmask;
 		rxs = &sc->rl_ldata.rl_rxsoft[i];
 		m = rxs->rxs_mbuf;
+		rx = 1;
 
 		/* Invalidate the RX mbuf and unload its map */
 
@@ -1413,7 +1442,19 @@ re_rxeof(struct rl_softc *sc)
 		/* Do RX checksumming */
 
 		if (sc->rl_flags & RL_FLAG_DESCV2) {
-			/* XXX V2 CSUM */
+			/* Check IP header checksum */
+			if ((rxstat & RL_RDESC_STAT_PROTOID) &&
+			    !(rxstat & RL_RDESC_STAT_IPSUMBAD) &&
+			    (rxvlan & RL_RDESC_IPV4))
+				m->m_pkthdr.csum_flags |= M_IPV4_CSUM_IN_OK;
+
+			/* Check TCP/UDP checksum */
+			if (((rxstat & RL_RDESC_STAT_TCP) &&
+			    !(rxstat & RL_RDESC_STAT_TCPSUMBAD)) ||
+			    ((rxstat & RL_RDESC_STAT_UDP) &&
+			    !(rxstat & RL_RDESC_STAT_UDPSUMBAD)))
+				m->m_pkthdr.csum_flags |= M_TCP_CSUM_IN_OK |
+				    M_UDP_CSUM_IN_OK;
 		} else {
 			/* Check IP header checksum */
 			if ((rxstat & RL_RDESC_STAT_PROTOID) &&
@@ -1428,24 +1469,33 @@ re_rxeof(struct rl_softc *sc)
 				m->m_pkthdr.csum_flags |= M_TCP_CSUM_IN_OK |
 				    M_UDP_CSUM_IN_OK;
 		}
+#if NVLAN > 0
+		if (rxvlan & RL_RDESC_VLANCTL_TAG) {
+			m->m_pkthdr.ether_vtag =
+			    ntohs((rxvlan & RL_RDESC_VLANCTL_DATA));
+			m->m_flags |= M_VLANTAG;
+		}
+#endif
 
 #if NBPFILTER > 0
 		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
+			bpf_mtap_ether(ifp->if_bpf, m, BPF_DIRECTION_IN);
 #endif
 		ether_input_mbuf(ifp, m);
 	}
 
 	sc->rl_ldata.rl_rx_prodidx = i;
+
+	return (rx);
 }
 
-void
+int
 re_txeof(struct rl_softc *sc)
 {
 	struct ifnet	*ifp;
 	struct rl_txq	*txq;
 	uint32_t	txstat;
-	int		idx, descidx;
+	int		idx, descidx, tx = 0;
 
 	ifp = &sc->sc_arpcom.ac_if;
 
@@ -1467,6 +1517,7 @@ re_txeof(struct rl_softc *sc)
 		if (txstat & RL_TDESC_CMD_OWN)
 			break;
 
+		tx = 1;
 		sc->rl_ldata.rl_tx_free += txq->txq_nsegs;
 		KASSERT(sc->rl_ldata.rl_tx_free <= RL_TX_DESC_CNT(sc));
 		bus_dmamap_sync(sc->sc_dmat, txq->txq_dmamap,
@@ -1488,25 +1539,19 @@ re_txeof(struct rl_softc *sc)
 	if (sc->rl_ldata.rl_tx_free > RL_NTXDESC_RSVD)
 		ifp->if_flags &= ~IFF_OACTIVE;
 
-	if (sc->rl_ldata.rl_tx_free < RL_TX_DESC_CNT(sc)) {
-		/*
-		 * Some chips will ignore a second TX request issued while an
-		 * existing transmission is in progress. If the transmitter goes
-		 * idle but there are still packets waiting to be sent, we need
-		 * to restart the channel here to flush them out. This only
-		 * seems to be required with the PCIe devices.
-		 */
+	/*
+	 * Some chips will ignore a second TX request issued while an
+	 * existing transmission is in progress. If the transmitter goes
+	 * idle but there are still packets waiting to be sent, we need
+	 * to restart the channel here to flush them out. This only
+	 * seems to be required with the PCIe devices.
+	 */
+	if (sc->rl_ldata.rl_tx_free < RL_TX_DESC_CNT(sc))
 		CSR_WRITE_1(sc, sc->rl_txstart, RL_TXSTART_START);
-
-		/*
-		 * If not all descriptors have been released reaped yet,
-		 * reload the timer so that we will eventually get another
-		 * interrupt that will cause us to re-enter this routine.
-		 * This is done in case the transmitter has gone idle.
-		 */
-		CSR_WRITE_4(sc, RL_TIMERCNT, 1);
-	} else
+	else
 		ifp->if_timer = 0;
+
+	return (tx);
 }
 
 void
@@ -1523,20 +1568,20 @@ re_tick(void *xsc)
 	s = splnet();
 
 	mii_tick(mii);
-	if (sc->rl_link) {
+	if (sc->rl_flags & RL_FLAG_LINK) {
 		if (!(mii->mii_media_status & IFM_ACTIVE))
-			sc->rl_link = 0;
+			sc->rl_flags &= ~RL_FLAG_LINK;
 	} else {
 		if (mii->mii_media_status & IFM_ACTIVE &&
 		    IFM_SUBTYPE(mii->mii_media_active) != IFM_NONE) {
-			sc->rl_link = 1;
+			sc->rl_flags |= RL_FLAG_LINK;
 			if (!IFQ_IS_EMPTY(&ifp->if_snd))
 				re_start(ifp);
 		}
 	}
 	splx(s);
 
-	timeout_add(&sc->timer_handle, hz);
+	timeout_add_sec(&sc->timer_handle, 1);
 }
 
 int
@@ -1545,13 +1590,14 @@ re_intr(void *arg)
 	struct rl_softc	*sc = arg;
 	struct ifnet	*ifp;
 	u_int16_t	status;
-	int		claimed = 0;
+	int		claimed = 0, rx, tx;
 
 	ifp = &sc->sc_arpcom.ac_if;
 
-	if (!(ifp->if_flags & IFF_UP))
+	if (!(ifp->if_flags & IFF_RUNNING))
 		return (0);
 
+	rx = tx = 0;
 	for (;;) {
 
 		status = CSR_READ_2(sc, RL_ISR);
@@ -1564,14 +1610,13 @@ re_intr(void *arg)
 		if ((status & RL_INTRS_CPLUS) == 0)
 			break;
 
-		if (status & (RL_ISR_RX_OK | RL_ISR_RX_ERR)) {
-			re_rxeof(sc);
+		if (status & (sc->rl_rx_ack | RL_ISR_RX_ERR)) {
+			rx |= re_rxeof(sc);
 			claimed = 1;
 		}
 
-		if (status & (RL_ISR_TIMEOUT_EXPIRED | RL_ISR_TX_ERR |
-		    RL_ISR_TX_DESC_UNAVAIL)) {
-			re_txeof(sc);
+		if (status & (sc->rl_tx_ack | RL_ISR_TX_ERR)) {
+			tx |= re_txeof(sc);
 			claimed = 1;
 		}
 
@@ -1588,7 +1633,35 @@ re_intr(void *arg)
 		}
 	}
 
-	if (claimed && !IFQ_IS_EMPTY(&ifp->if_snd))
+	if (sc->rl_imtype == RL_IMTYPE_SIM) {
+		if ((sc->rl_flags & RL_FLAG_TIMERINTR)) {
+			if ((tx | rx) == 0) {
+				/*
+				 * Nothing needs to be processed, fallback
+				 * to use TX/RX interrupts.
+				 */
+				re_setup_intr(sc, 1, RL_IMTYPE_NONE);
+
+				/*
+				 * Recollect, mainly to avoid the possible
+				 * race introduced by changing interrupt
+				 * masks.
+				 */
+				re_rxeof(sc);
+				tx = re_txeof(sc);
+			} else
+				CSR_WRITE_4(sc, RL_TIMERCNT, 1); /* reload */
+		} else if (tx | rx) {
+			/*
+			 * Assume that using simulated interrupt moderation
+			 * (hardware timer based) could reduce the interrupt
+			 * rate.
+			 */
+			re_setup_intr(sc, 1, RL_IMTYPE_SIM);
+		}
+	}
+
+	if (tx && !IFQ_IS_EMPTY(&ifp->if_snd))
 		re_start(ifp);
 
 	return (claimed);
@@ -1600,15 +1673,8 @@ re_encap(struct rl_softc *sc, struct mbuf *m, int *idx)
 	bus_dmamap_t	map;
 	int		error, seg, nsegs, uidx, startidx, curidx, lastidx, pad;
 	struct rl_desc	*d;
-	u_int32_t	cmdstat, vlanctl, rl_flags = 0;
+	u_int32_t	cmdstat, vlanctl = 0, csum_flags = 0;
 	struct rl_txq	*txq;
-#if NVLAN > 0
-	struct ifvlan	*ifv = NULL;
-
-	if ((m->m_flags & (M_PROTO1|M_PKTHDR)) == (M_PROTO1|M_PKTHDR) &&
-	    m->m_pkthdr.rcvif != NULL)
-		ifv = m->m_pkthdr.rcvif->if_softc;
-#endif
 
 	if (sc->rl_ldata.rl_tx_free <= RL_NTXDESC_RSVD)
 		return (EFBIG);
@@ -1628,11 +1694,19 @@ re_encap(struct rl_softc *sc, struct mbuf *m, int *idx)
 
 	if ((m->m_pkthdr.csum_flags &
 	    (M_IPV4_CSUM_OUT|M_TCPV4_CSUM_OUT|M_UDPV4_CSUM_OUT)) != 0) {
-		rl_flags |= RL_TDESC_CMD_IPCSUM;
-		if (m->m_pkthdr.csum_flags & M_TCPV4_CSUM_OUT)
-			rl_flags |= RL_TDESC_CMD_TCPCSUM;
-		if (m->m_pkthdr.csum_flags & M_UDPV4_CSUM_OUT)
-			rl_flags |= RL_TDESC_CMD_UDPCSUM;
+		if (sc->rl_flags & RL_FLAG_DESCV2) {
+			vlanctl |= RL_TDESC_CMD_IPCSUMV2;
+			if (m->m_pkthdr.csum_flags & M_TCPV4_CSUM_OUT)
+				vlanctl |= RL_TDESC_CMD_TCPCSUMV2;
+			if (m->m_pkthdr.csum_flags & M_UDPV4_CSUM_OUT)
+				vlanctl |= RL_TDESC_CMD_UDPCSUMV2;
+		} else {
+			csum_flags |= RL_TDESC_CMD_IPCSUM;
+			if (m->m_pkthdr.csum_flags & M_TCPV4_CSUM_OUT)
+				csum_flags |= RL_TDESC_CMD_TCPCSUM;
+			if (m->m_pkthdr.csum_flags & M_UDPV4_CSUM_OUT)
+				csum_flags |= RL_TDESC_CMD_UDPCSUM;
+		}
 	}
 
 	txq = &sc->rl_ldata.rl_txq[*idx];
@@ -1648,8 +1722,9 @@ re_encap(struct rl_softc *sc, struct mbuf *m, int *idx)
 
 	nsegs = map->dm_nsegs;
 	pad = 0;
-	if (m->m_pkthdr.len <= RL_IP4CSUMTX_PADLEN &&
-	    (rl_flags & RL_TDESC_CMD_IPCSUM) != 0) {
+	if ((sc->rl_flags & RL_FLAG_DESCV2) == 0 &&
+	    m->m_pkthdr.len <= RL_IP4CSUMTX_PADLEN &&
+	    (csum_flags & RL_TDESC_CMD_IPCSUM) != 0) {
 		pad = 1;
 		nsegs++;
 	}
@@ -1671,10 +1746,10 @@ re_encap(struct rl_softc *sc, struct mbuf *m, int *idx)
 	 * appear in all descriptors of a multi-descriptor
 	 * transmission attempt.
 	 */
-	vlanctl = 0;
 #if NVLAN > 0
-	if (ifv != NULL)
-		vlanctl = swap16(ifv->ifv_tag) | RL_TDESC_VLANCTL_TAG;
+	if (m->m_flags & M_VLANTAG)
+		vlanctl |= swap16(m->m_pkthdr.ether_vtag) |
+		    RL_TDESC_VLANCTL_TAG;
 #endif
 
 	/*
@@ -1713,7 +1788,7 @@ re_encap(struct rl_softc *sc, struct mbuf *m, int *idx)
 
 		d->rl_vlanctl = htole32(vlanctl);
 		re_set_bufaddr(d, map->dm_segs[seg].ds_addr);
-		cmdstat = rl_flags | map->dm_segs[seg].ds_len;
+		cmdstat = csum_flags | map->dm_segs[seg].ds_len;
 		if (seg == 0)
 			cmdstat |= RL_TDESC_CMD_SOF;
 		else
@@ -1735,7 +1810,7 @@ re_encap(struct rl_softc *sc, struct mbuf *m, int *idx)
 		d->rl_vlanctl = htole32(vlanctl);
 		paddaddr = RL_TXPADDADDR(sc);
 		re_set_bufaddr(d, paddaddr);
-		cmdstat = rl_flags |
+		cmdstat = csum_flags |
 		    RL_TDESC_CMD_OWN | RL_TDESC_CMD_EOF |
 		    (RL_IP4CSUMTX_PADLEN + 1 - m->m_pkthdr.len);
 		if (curidx == (RL_TX_DESC_CNT(sc) - 1))
@@ -1784,7 +1859,9 @@ re_start(struct ifnet *ifp)
 
 	sc = ifp->if_softc;
 
-	if (!sc->rl_link || ifp->if_flags & IFF_OACTIVE)
+	if (ifp->if_flags & IFF_OACTIVE)
+		return;
+	if ((sc->rl_flags & RL_FLAG_LINK) == 0)
 		return;
 
 	idx = sc->rl_ldata.rl_txq_prodidx;
@@ -1824,29 +1901,16 @@ re_start(struct ifnet *ifp)
 		 * to him.
 		 */
 		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_OUT);
+			bpf_mtap_ether(ifp->if_bpf, m, BPF_DIRECTION_OUT);
 #endif
 	}
 
-	if (queued == 0) {
-		if (sc->rl_ldata.rl_tx_free != RL_TX_DESC_CNT(sc))
-			CSR_WRITE_4(sc, RL_TIMERCNT, 1);
+	if (queued == 0)
 		return;
-	}
 
 	sc->rl_ldata.rl_txq_prodidx = idx;
 
 	CSR_WRITE_1(sc, sc->rl_txstart, RL_TXSTART_START);
-
-	/*
-	 * Use the countdown timer for interrupt moderation.
-	 * 'TX done' interrupts are disabled. Instead, we reset the
-	 * countdown timer, which will begin counting until it hits
-	 * the value in the TIMERINT register, and then trigger an
-	 * interrupt. Each time we write to the TIMERCNT register,
-	 * the timer count is reset to 0.
-	 */
-	CSR_WRITE_4(sc, RL_TIMERCNT, 1);
 
 	/*
 	 * Set a timeout in case the chip goes out to lunch.
@@ -1880,6 +1944,8 @@ re_init(struct ifnet *ifp)
 	cfg = RL_CPLUSCMD_PCI_MRW;
 	if (ifp->if_capabilities & IFCAP_CSUM_IPv4)
 		cfg |= RL_CPLUSCMD_RXCSUM_ENB;
+	if (ifp->if_capabilities & IFCAP_VLAN_HWTAGGING)
+		cfg |= RL_CPLUSCMD_VLANSTRIP;
 	if (sc->rl_flags & RL_FLAG_MACSTAT) {
 		cfg |= RL_CPLUSCMD_MACSTAT_DIS;
 		/* XXX magic. */
@@ -1957,13 +2023,8 @@ re_init(struct ifnet *ifp)
 
 	CSR_WRITE_4(sc, RL_RXCFG, rxcfg);
 
-	/* Set promiscuous mode. */
-	re_setpromisc(sc);
-
-	/*
-	 * Program the multicast filter, if necessary.
-	 */
-	re_setmulti(sc);
+	/* Program promiscuous mode and multicast filters. */
+	re_iff(sc);
 
 	/*
 	 * Enable interrupts.
@@ -1971,8 +2032,8 @@ re_init(struct ifnet *ifp)
 	if (sc->rl_testmode)
 		CSR_WRITE_2(sc, RL_IMR, 0);
 	else
-		CSR_WRITE_2(sc, RL_IMR, RL_INTRS_CPLUS);
-	CSR_WRITE_2(sc, RL_ISR, RL_INTRS_CPLUS);
+		re_setup_intr(sc, 1, sc->rl_imtype);
+	CSR_WRITE_2(sc, RL_ISR, sc->rl_imtype);
 
 	/* Start RX/TX process. */
 	CSR_WRITE_4(sc, RL_MISSEDPKT, 0);
@@ -1980,18 +2041,6 @@ re_init(struct ifnet *ifp)
 	/* Enable receiver and transmitter. */
 	CSR_WRITE_1(sc, RL_COMMAND, RL_CMD_TX_ENB|RL_CMD_RX_ENB);
 #endif
-
-	/*
-	 * Initialize the timer interrupt register so that
-	 * a timer interrupt will be generated once the timer
-	 * reaches a certain number of ticks. The timer is
-	 * reloaded on each transmit. This gives us TX interrupt
-	 * moderation, which dramatically improves TX frame rate.
-	 */
-	if (sc->sc_hwrev == RL_HWREV_8139CPLUS)
-		CSR_WRITE_4(sc, RL_TIMERINT, 0x400);
-	else
-		CSR_WRITE_4(sc, RL_TIMERINT_8169, 0x800);
 
 	/*
 	 * For 8169 gigE NICs, set the max allowed RX packet
@@ -2012,9 +2061,9 @@ re_init(struct ifnet *ifp)
 
 	splx(s);
 
-	sc->rl_link = 0;
+	sc->rl_flags &= ~RL_FLAG_LINK;
 
-	timeout_add(&sc->timer_handle, hz);
+	timeout_add_sec(&sc->timer_handle, 1);
 
 	return (0);
 }
@@ -2057,12 +2106,6 @@ re_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 
 	s = splnet();
 
-	if ((error = ether_ioctl(ifp, &sc->sc_arpcom, command,
-	    data)) > 0) {
-		splx(s);
-		return (error);
-	}
-
 	switch(command) {
 	case SIOCSIFADDR:
 		ifp->if_flags |= IFF_UP;
@@ -2073,54 +2116,33 @@ re_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 			arp_ifinit(&sc->sc_arpcom, ifa);
 #endif /* INET */
 		break;
-	case SIOCSIFMTU:
-		if (ifr->ifr_mtu < ETHERMIN || ifr->ifr_mtu > ifp->if_hardmtu)
-			error = EINVAL;
-		else if (ifp->if_mtu != ifr->ifr_mtu)
-			ifp->if_mtu = ifr->ifr_mtu;
-		break;
 	case SIOCSIFFLAGS:
 		if (ifp->if_flags & IFF_UP) {
-			if (ifp->if_flags & IFF_RUNNING &&
-			    ((ifp->if_flags ^ sc->if_flags) &
-			     IFF_PROMISC)) {
-				re_setpromisc(sc);
-			} else {
-				if (!(ifp->if_flags & IFF_RUNNING))
-					re_init(ifp);
-			}
+			if (ifp->if_flags & IFF_RUNNING)
+				re_iff(sc);
+			else
+				re_init(ifp);
 		} else {
 			if (ifp->if_flags & IFF_RUNNING)
 				re_stop(ifp, 1);
 		}
 		sc->if_flags = ifp->if_flags;
 		break;
-	case SIOCADDMULTI:
-	case SIOCDELMULTI:
-		error = (command == SIOCADDMULTI) ?
-		    ether_addmulti(ifr, &sc->sc_arpcom) :
-		    ether_delmulti(ifr, &sc->sc_arpcom);
-		if (error == ENETRESET) {
-			/*
-			 * Multicast list has changed; set the hardware
-			 * filter accordingly.
-			 */
-			if (ifp->if_flags & IFF_RUNNING)
-				re_setmulti(sc);
-			error = 0;
-		}
-		break;
 	case SIOCGIFMEDIA:
 	case SIOCSIFMEDIA:
 		error = ifmedia_ioctl(ifp, ifr, &sc->sc_mii.mii_media, command);
 		break;
 	default:
-		error = EINVAL;
-		break;
+		error = ether_ioctl(ifp, &sc->sc_arpcom, command, data);
+	}
+
+	if (error == ENETRESET) {
+		if (ifp->if_flags & IFF_RUNNING)
+			re_iff(sc);
+		error = 0;
 	}
 
 	splx(s);
-
 	return (error);
 }
 
@@ -2156,7 +2178,7 @@ re_stop(struct ifnet *ifp, int disable)
 	sc = ifp->if_softc;
 
 	ifp->if_timer = 0;
-	sc->rl_link = 0;
+	sc->rl_flags &= ~(RL_FLAG_LINK|RL_FLAG_TIMERINTR);
 
 	timeout_del(&sc->timer_handle);
 	ifp->if_flags &= ~(IFF_RUNNING | IFF_OACTIVE);
@@ -2190,5 +2212,136 @@ re_stop(struct ifnet *ifp, int disable)
 			m_freem(sc->rl_ldata.rl_rxsoft[i].rxs_mbuf);
 			sc->rl_ldata.rl_rxsoft[i].rxs_mbuf = NULL;
 		}
+	}
+}
+
+void
+re_setup_hw_im(struct rl_softc *sc)
+{
+	KASSERT(sc->rl_flags & RL_FLAG_HWIM);
+
+	/*
+	 * Interrupt moderation
+	 *
+	 * 0xABCD
+	 * A - unknown (maybe TX related)
+	 * B - TX timer (unit: 25us)
+	 * C - unknown (maybe RX related)
+	 * D - RX timer (unit: 25us)
+	 *
+	 *
+	 * re(4)'s interrupt moderation is actually controlled by
+	 * two variables, like most other NICs (bge, bnx etc.)
+	 * o  timer
+	 * o  number of packets [P]
+	 *
+	 * The logic relationship between these two variables is
+	 * similar to other NICs too:
+	 * if (timer expire || packets > [P])
+	 *     Interrupt is delivered
+	 *
+	 * Currently we only know how to set 'timer', but not
+	 * 'number of packets', which should be ~30, as far as I
+	 * tested (sink ~900Kpps, interrupt rate is 30KHz)
+	 */
+	CSR_WRITE_2(sc, RL_IM,
+		    RL_IM_RXTIME(sc->rl_rx_time) |
+		    RL_IM_TXTIME(sc->rl_tx_time) |
+		    RL_IM_MAGIC);
+}
+
+void
+re_disable_hw_im(struct rl_softc *sc)
+{
+	if (sc->rl_flags & RL_FLAG_HWIM)
+		CSR_WRITE_2(sc, RL_IM, 0);
+}
+
+void
+re_setup_sim_im(struct rl_softc *sc)
+{
+	if (sc->sc_hwrev == RL_HWREV_8139CPLUS)
+		CSR_WRITE_4(sc, RL_TIMERINT, 0x400); /* XXX */
+	else {
+		u_int32_t ticks;
+
+		/*
+		 * Datasheet says tick decreases at bus speed,
+		 * but it seems the clock runs a little bit
+		 * faster, so we do some compensation here.
+		 */
+		ticks = (sc->rl_sim_time * sc->rl_bus_speed * 8) / 5;
+		CSR_WRITE_4(sc, RL_TIMERINT_8169, ticks);
+	}
+	CSR_WRITE_4(sc, RL_TIMERCNT, 1); /* reload */
+	sc->rl_flags |= RL_FLAG_TIMERINTR;
+}
+
+void
+re_disable_sim_im(struct rl_softc *sc)
+{
+	if (sc->sc_hwrev == RL_HWREV_8139CPLUS)
+		CSR_WRITE_4(sc, RL_TIMERINT, 0);
+	else 
+		CSR_WRITE_4(sc, RL_TIMERINT_8169, 0);
+	sc->rl_flags &= ~RL_FLAG_TIMERINTR;
+}
+
+void
+re_config_imtype(struct rl_softc *sc, int imtype)
+{
+	switch (imtype) {
+	case RL_IMTYPE_HW:
+		KASSERT(sc->rl_flags & RL_FLAG_HWIM);
+		/* FALL THROUGH */
+	case RL_IMTYPE_NONE:
+		sc->rl_intrs = RL_INTRS_CPLUS;
+		sc->rl_rx_ack = RL_ISR_RX_OK | RL_ISR_FIFO_OFLOW |
+				RL_ISR_RX_OVERRUN;
+		sc->rl_tx_ack = RL_ISR_TX_OK;
+		break;
+
+	case RL_IMTYPE_SIM:
+		sc->rl_intrs = RL_INTRS_TIMER;
+		sc->rl_rx_ack = RL_ISR_TIMEOUT_EXPIRED;
+		sc->rl_tx_ack = RL_ISR_TIMEOUT_EXPIRED;
+		break;
+
+	default:
+		panic("%s: unknown imtype %d\n",
+		      sc->sc_dev.dv_xname, imtype);
+	}
+}
+
+void
+re_setup_intr(struct rl_softc *sc, int enable_intrs, int imtype)
+{
+	re_config_imtype(sc, imtype);
+
+	if (enable_intrs)
+		CSR_WRITE_2(sc, RL_IMR, sc->rl_intrs);
+	else
+		CSR_WRITE_2(sc, RL_IMR, 0); 
+
+	switch (imtype) {
+	case RL_IMTYPE_NONE:
+		re_disable_sim_im(sc);
+		re_disable_hw_im(sc);
+		break;
+
+	case RL_IMTYPE_HW:
+		KASSERT(sc->rl_flags & RL_FLAG_HWIM);
+		re_disable_sim_im(sc);
+		re_setup_hw_im(sc);
+		break;
+
+	case RL_IMTYPE_SIM:
+		re_disable_hw_im(sc);
+		re_setup_sim_im(sc);
+		break;
+
+	default:
+		panic("%s: unknown imtype %d\n",
+		      sc->sc_dev.dv_xname, imtype);
 	}
 }

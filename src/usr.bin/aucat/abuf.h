@@ -1,4 +1,4 @@
-/*	$OpenBSD: abuf.h,v 1.4 2008/06/02 17:06:36 ratchov Exp $	*/
+/*	$OpenBSD: abuf.h,v 1.16 2009/02/13 20:48:49 ratchov Exp $	*/
 /*
  * Copyright (c) 2008 Alexandre Ratchov <alex@caoua.org>
  *
@@ -19,24 +19,24 @@
 
 #include <sys/queue.h>
 
-struct abuf;
 struct aproc;
+struct aparams;
 
 struct abuf {
 	/*
 	 * Misc aproc-specific per-buffer parameters.
 	 * since the buffer can connect any pair of aproc structure,
-	 * each aproc must have it's own specific data. Thus we cannot 
-	 * use an union. The only exception is the xrun field, because
-	 * there can be only one aproc that absorbs xruns in any 
+	 * each aproc must have it's own specific data. Thus we cannot
+	 * use a union. The only exception is the xrun field, because
+	 * there can be only one aproc that absorbs xruns in any
 	 * intput->output path.
 	 */
-	int mixvol;		/* input gain */
-	unsigned mixdone;	/* input of mixer */
-	unsigned mixtodo;	/* output of mixer */
-	unsigned mixdrop;	/* frames mix_in() will discard */
-	unsigned subdone;	/* output if sub */
-	unsigned subdrop;	/* silence frames sub_out() will insert */ 
+	int mixweight;		/* dynamic range for the source stream */
+	int mixmaxweight;	/* max dynamic range allowed */
+	unsigned mixvol;	/* volume within the dynamic range */
+	unsigned mixodone;	/* bytes done on the dest stream */
+	unsigned mixitodo;	/* bytes to do on the source stream */
+	unsigned subidone;	/* bytes copied from the source stream */
 #define XRUN_IGNORE	0	/* on xrun silently insert/discard samples */
 #define XRUN_SYNC	1	/* catchup to sync to the mix/sub */
 #define XRUN_ERROR	2	/* xruns are errors, eof/hup buffer */
@@ -48,12 +48,18 @@ struct abuf {
 	 * fifo parameters
 	 */
 	unsigned bpf;		/* bytes per frame */
+	unsigned cmin, cmax;	/* channel range of this buf */
 	unsigned start;		/* offset where data starts */
 	unsigned used;		/* valid data */
 	unsigned len;		/* size of the ring */
+	unsigned abspos;	/* frame number of the start position */
+	unsigned silence;	/* silence to insert on next write */
+	unsigned drop;		/* bytes to drop on next read */
 	struct aproc *rproc;	/* reader */
 	struct aproc *wproc;	/* writer */
-	unsigned char *data;	/* pointer to actual data (immediately following) */
+	struct abuf *duplex;	/* link to buffer of the other direction */
+	unsigned inuse;		/* in abuf_{flush,fill,run}() */
+	unsigned char *data;	/* actual data (immediately following) */
 };
 
 /*
@@ -73,6 +79,11 @@ struct abuf {
 #define ABUF_EOF(b) (!ABUF_ROK(b) && (b)->wproc == NULL)
 
 /*
+ * the buffer is empty and has no more writer
+ */
+#define ABUF_HUP(b) (!ABUF_WOK(b) && (b)->rproc == NULL)
+
+/*
  * similar to !ABUF_WOK, but is used for file i/o, where
  * operation may not involve an integer number of frames
  */
@@ -84,14 +95,19 @@ struct abuf {
  */
 #define ABUF_EMPTY(b) ((b)->used == 0)
 
-struct abuf *abuf_new(unsigned, unsigned);
+struct abuf *abuf_new(unsigned, struct aparams *);
 void abuf_del(struct abuf *);
+void abuf_clear(struct abuf *);
 unsigned char *abuf_rgetblk(struct abuf *, unsigned *, unsigned);
 unsigned char *abuf_wgetblk(struct abuf *, unsigned *, unsigned);
-void abuf_fill(struct abuf *);
-void abuf_flush(struct abuf *);
+void abuf_rdiscard(struct abuf *, unsigned);
+void abuf_wcommit(struct abuf *, unsigned);
+int abuf_fill(struct abuf *);
+int abuf_flush(struct abuf *);
 void abuf_eof(struct abuf *);
 void abuf_hup(struct abuf *);
 void abuf_run(struct abuf *);
+void abuf_ipos(struct abuf *, int);
+void abuf_opos(struct abuf *, int);
 
 #endif /* !defined(ABUF_H) */

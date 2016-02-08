@@ -1,4 +1,4 @@
-/*	$OpenBSD: nd6.c,v 1.79 2008/06/11 19:00:50 mcbride Exp $	*/
+/*	$OpenBSD: nd6.c,v 1.82 2009/01/30 11:56:59 rainer Exp $	*/
 /*	$KAME: nd6.c,v 1.280 2002/06/08 19:52:07 itojun Exp $	*/
 
 /*
@@ -142,7 +142,7 @@ nd6_init()
 
 	/* start timer */
 	timeout_set(&nd6_slowtimo_ch, nd6_slowtimo, NULL);
-	timeout_add(&nd6_slowtimo_ch, ND6_SLOWTIMER_INTERVAL * hz);
+	timeout_add_sec(&nd6_slowtimo_ch, ND6_SLOWTIMER_INTERVAL);
 }
 
 struct nd_ifinfo *
@@ -510,11 +510,10 @@ nd6_timer(void *ignored_arg)
 	struct nd_defrouter *dr;
 	struct nd_prefix *pr;
 	struct in6_ifaddr *ia6, *nia6;
-	struct in6_addrlifetime *lt6;
 
 	s = splsoftnet();
 	timeout_set(&nd6_timer_ch, nd6_timer, NULL);
-	timeout_add(&nd6_timer_ch, nd6_prune * hz);
+	timeout_add_sec(&nd6_timer_ch, nd6_prune);
 
 	/* expire default router list */
 	dr = TAILQ_FIRST(&nd_defrouter);
@@ -538,7 +537,6 @@ nd6_timer(void *ignored_arg)
 	for (ia6 = in6_ifaddr; ia6; ia6 = nia6) {
 		nia6 = ia6->ia_next;
 		/* check address lifetime */
-		lt6 = &ia6->ia6_lifetime;
 		if (IFA6_IS_INVALID(ia6)) {
 			in6_purgeaddr(&ia6->ia_ifa);
 		} else if (IFA6_IS_DEPRECATED(ia6)) {
@@ -997,8 +995,18 @@ nd6_rtrequest(int req, struct rtentry *rt, struct rt_addrinfo *info)
 	static struct sockaddr_dl null_sdl = {sizeof(null_sdl), AF_LINK};
 	struct ifnet *ifp = rt->rt_ifp;
 	struct ifaddr *ifa;
-	int mine = 0;
+	struct nd_defrouter *dr;
 
+	if (req == RTM_DELETE && (rt->rt_flags & RTF_GATEWAY) &&
+	    (IN6_ARE_ADDR_EQUAL(&(satosin6(rt_key(rt)))->sin6_addr,
+	    &in6addr_any) && rt_mask(rt) && (rt_mask(rt)->sa_len == 0 ||
+	    IN6_ARE_ADDR_EQUAL(&(satosin6(rt_mask(rt)))->sin6_addr,
+	    &in6addr_any)))) {
+		dr = defrouter_lookup(&SIN6(gate)->sin6_addr, ifp);
+		if (dr)
+			dr->installed = 0;
+	}
+	
 	if ((rt->rt_flags & RTF_GATEWAY) != 0)
 		return;
 
@@ -1185,7 +1193,6 @@ nd6_rtrequest(int req, struct rtentry *rt, struct rt_addrinfo *info)
 			nd6_llinfo_settimer(ln, -1);
 			ln->ln_state = ND6_LLINFO_REACHABLE;
 			ln->ln_byhint = 0;
-			mine = 1;
 			if (macp) {
 				Bcopy(macp, LLADDR(SDL(gate)), ifp->if_addrlen);
 				SDL(gate)->sdl_alen = ifp->if_addrlen;
@@ -1720,7 +1727,7 @@ nd6_slowtimo(void *ignored_arg)
 	struct ifnet *ifp;
 
 	timeout_set(&nd6_slowtimo_ch, nd6_slowtimo, NULL);
-	timeout_add(&nd6_slowtimo_ch, ND6_SLOWTIMER_INTERVAL * hz);
+	timeout_add_sec(&nd6_slowtimo_ch, ND6_SLOWTIMER_INTERVAL);
 	for (ifp = TAILQ_FIRST(&ifnet); ifp; ifp = TAILQ_NEXT(ifp, if_list))
 	{
 		nd6if = ND_IFINFO(ifp);
@@ -2019,11 +2026,10 @@ nd6_sysctl(int name, void *oldp, size_t *oldlenp, void *newp,
 	size_t newlen)
 {
 	void *p;
-	size_t ol, l;
+	size_t ol;
 	int error;
 
 	error = 0;
-	l = 0;
 
 	if (newp)
 		return EPERM;

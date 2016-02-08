@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_de.c,v 1.19 2006/04/16 00:46:32 pascoe Exp $	*/
+/*	$OpenBSD: if_de.c,v 1.22 2008/10/09 00:43:48 brad Exp $	*/
 /*	$NetBSD: if_de.c,v 1.27 1997/04/19 15:02:29 ragge Exp $	*/
 
 /*
@@ -258,7 +258,7 @@ deinit(ds)
 		return;
 	if ((ifp->if_flags & IFF_RUNNING) == 0) {
 		if (if_ubaminit(&ds->ds_deuba, (void *)ds->ds_dev.dv_parent,
-		    sizeof (struct ether_header), (int)vax_btoc(ETHERMTU),
+		    sizeof (struct ether_header), (int)vax_atop(ETHERMTU),
 		    ds->ds_ifr, NRCV, ds->ds_ifw, NXMT) == 0) { 
 			printf("%s: can't initialize\n", ds->ds_dev.dv_xname);
 			ds->ds_if.if_flags &= ~IFF_UP;
@@ -575,10 +575,11 @@ deioctl(ifp, cmd, data)
 {
 	register struct ifaddr *ifa = (struct ifaddr *)data;
 	register struct de_softc *ds = ifp->if_softc;
-	int s = splnet(), error = 0;
+	int s, error = 0;
+
+	s = splnet();
 
 	switch (cmd) {
-
 	case SIOCSIFADDR:
 		ifp->if_flags |= IFF_UP;
 		deinit(ds);
@@ -606,8 +607,9 @@ deioctl(ifp, cmd, data)
 		break;
 
 	default:
-		error = EINVAL;
+		error = ether_ioctl(ifp, &ds->ds_ac, cmd, data);
 	}
+
 	splx(s);
 	return (error);
 }

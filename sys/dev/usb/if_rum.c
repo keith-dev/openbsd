@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_rum.c,v 1.75 2008/07/30 06:25:23 damien Exp $	*/
+/*	$OpenBSD: if_rum.c,v 1.82 2009/02/03 10:53:28 kevlo Exp $	*/
 
 /*-
  * Copyright (c) 2005-2007 Damien Bergamini <damien.bergamini@free.fr>
@@ -95,11 +95,13 @@ static const struct usb_devno rum_devs[] = {
 	{ USB_VENDOR_CISCOLINKSYS,	USB_PRODUCT_CISCOLINKSYS_WUSB54GC },
 	{ USB_VENDOR_CISCOLINKSYS,	USB_PRODUCT_CISCOLINKSYS_WUSB54GR },
 	{ USB_VENDOR_CONCEPTRONIC2,	USB_PRODUCT_CONCEPTRONIC2_C54RU2 },
+	{ USB_VENDOR_CONCEPTRONIC2,	USB_PRODUCT_CONCEPTRONIC2_RT2573 },
 	{ USB_VENDOR_COREGA,		USB_PRODUCT_COREGA_CGWLUSB2GL },
 	{ USB_VENDOR_COREGA,		USB_PRODUCT_COREGA_CGWLUSB2GPX },
 	{ USB_VENDOR_DICKSMITH,		USB_PRODUCT_DICKSMITH_CWD854F },
 	{ USB_VENDOR_DICKSMITH,		USB_PRODUCT_DICKSMITH_RT2573 },
 	{ USB_VENDOR_DLINK2,		USB_PRODUCT_DLINK2_DWA111 },
+	{ USB_VENDOR_DLINK2,		USB_PRODUCT_DLINK2_DWA110 },
 	{ USB_VENDOR_DLINK2,		USB_PRODUCT_DLINK2_DWLG122C1 },
 	{ USB_VENDOR_DLINK2,		USB_PRODUCT_DLINK2_WUA1340 },
 	{ USB_VENDOR_GIGABYTE,		USB_PRODUCT_GIGABYTE_GNWB01GS },
@@ -111,6 +113,7 @@ static const struct usb_devno rum_devs[] = {
 	{ USB_VENDOR_HUAWEI3COM,	USB_PRODUCT_HUAWEI3COM_WUB320G },
 	{ USB_VENDOR_MELCO,		USB_PRODUCT_MELCO_G54HP },
 	{ USB_VENDOR_MELCO,		USB_PRODUCT_MELCO_SG54HP },
+	{ USB_VENDOR_MELCO,		USB_PRODUCT_MELCO_SG54HG },
 	{ USB_VENDOR_MSI,		USB_PRODUCT_MSI_RT2573_1 },
 	{ USB_VENDOR_MSI,		USB_PRODUCT_MSI_RT2573_2 },
 	{ USB_VENDOR_MSI,		USB_PRODUCT_MSI_RT2573_3 },
@@ -182,7 +185,9 @@ int		rum_bbp_init(struct rum_softc *);
 int		rum_init(struct ifnet *);
 void		rum_stop(struct ifnet *, int);
 int		rum_load_microcode(struct rum_softc *, const u_char *, size_t);
+#ifndef IEEE80211_STA_ONLY
 int		rum_prepare_beacon(struct rum_softc *);
+#endif
 void		rum_newassoc(struct ieee80211com *, struct ieee80211_node *,
 		    int);
 void		rum_amrr_start(struct rum_softc *, struct ieee80211_node *);
@@ -358,9 +363,11 @@ rum_attach(struct device *parent, struct device *self, void *aux)
 
 	/* set device capabilities */
 	ic->ic_caps =
-	    IEEE80211_C_IBSS |		/* IBSS mode supported */
 	    IEEE80211_C_MONITOR |	/* monitor mode supported */
+#ifndef IEEE80211_STA_ONLY
+	    IEEE80211_C_IBSS |		/* IBSS mode supported */
 	    IEEE80211_C_HOSTAP |	/* HostAp mode supported */
+#endif
 	    IEEE80211_C_TXPMGT |	/* tx power management */
 	    IEEE80211_C_SHPREAMBLE |	/* short preamble supported */
 	    IEEE80211_C_SHSLOT |	/* short slot time supported */
@@ -682,9 +689,11 @@ rum_task(void *arg)
 			rum_set_bssid(sc, ni->ni_bssid);
 		}
 
+#ifndef IEEE80211_STA_ONLY
 		if (ic->ic_opmode == IEEE80211_M_HOSTAP ||
 		    ic->ic_opmode == IEEE80211_M_IBSS)
 			rum_prepare_beacon(sc);
+#endif
 
 		if (ic->ic_opmode != IEEE80211_M_MONITOR)
 			rum_enable_tsf_sync(sc);
@@ -868,13 +877,6 @@ rum_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
 
 	/* node is no longer needed */
 	ieee80211_release_node(ic, ni);
-
-	/*
-	 * In HostAP mode, ieee80211_input() will enqueue packets in if_snd
-	 * without calling if_start().
-	 */
-	if (!IFQ_IS_EMPTY(&ifp->if_snd) && !(ifp->if_flags & IFF_OACTIVE))
-		rum_start(ifp);
 
 	splx(s);
 
@@ -1179,11 +1181,13 @@ rum_tx_data(struct rum_softc *sc, struct mbuf *m0, struct ieee80211_node *ni)
 		    ic->ic_flags) + sc->sifs;
 		*(uint16_t *)wh->i_dur = htole16(dur);
 
+#ifndef IEEE80211_STA_ONLY
 		/* tell hardware to set timestamp in probe responses */
 		if ((wh->i_fc[0] &
 		    (IEEE80211_FC0_TYPE_MASK | IEEE80211_FC0_SUBTYPE_MASK)) ==
 		    (IEEE80211_FC0_TYPE_MGT | IEEE80211_FC0_SUBTYPE_PROBE_RESP))
 			flags |= RT2573_TX_TIMESTAMP;
+#endif
 	}
 
 #if NBPFILTER > 0
@@ -1751,6 +1755,7 @@ rum_enable_tsf_sync(struct rum_softc *sc)
 	struct ieee80211com *ic = &sc->sc_ic;
 	uint32_t tmp;
 
+#ifndef IEEE80211_STA_ONLY
 	if (ic->ic_opmode != IEEE80211_M_STA) {
 		/*
 		 * Change default 16ms TBTT adjustment to 8ms.
@@ -1758,6 +1763,7 @@ rum_enable_tsf_sync(struct rum_softc *sc)
 		 */
 		rum_write(sc, RT2573_TXRX_CSR10, 1 << 12 | 8);
 	}
+#endif
 
 	tmp = rum_read(sc, RT2573_TXRX_CSR9) & 0xff000000;
 
@@ -1767,9 +1773,10 @@ rum_enable_tsf_sync(struct rum_softc *sc)
 	tmp |= RT2573_TSF_TICKING | RT2573_ENABLE_TBTT;
 	if (ic->ic_opmode == IEEE80211_M_STA)
 		tmp |= RT2573_TSF_MODE(1);
+#ifndef IEEE80211_STA_ONLY
 	else
 		tmp |= RT2573_TSF_MODE(2) | RT2573_GENERATE_BEACON;
-
+#endif
 	rum_write(sc, RT2573_TXRX_CSR9, tmp);
 }
 
@@ -2070,7 +2077,9 @@ rum_init(struct ifnet *ifp)
 	if (ic->ic_opmode != IEEE80211_M_MONITOR) {
 		tmp |= RT2573_DROP_CTL | RT2573_DROP_VER_ERROR |
 		       RT2573_DROP_ACKCTS;
+#ifndef IEEE80211_STA_ONLY
 		if (ic->ic_opmode != IEEE80211_M_HOSTAP)
+#endif
 			tmp |= RT2573_DROP_TODS;
 		if (!(ifp->if_flags & IFF_PROMISC))
 			tmp |= RT2573_DROP_NOT_TO_ME;
@@ -2113,6 +2122,10 @@ rum_stop(struct ifnet *ifp, int disable)
 	rum_write(sc, RT2573_MAC_CSR1, 3);
 	rum_write(sc, RT2573_MAC_CSR1, 0);
 
+	if (sc->amrr_xfer != NULL) {
+		usbd_free_xfer(sc->amrr_xfer);
+		sc->amrr_xfer = NULL;
+	}
 	if (sc->sc_rx_pipeh != NULL) {
 		usbd_abort_pipe(sc->sc_rx_pipeh);
 		usbd_close_pipe(sc->sc_rx_pipeh);
@@ -2153,6 +2166,7 @@ rum_load_microcode(struct rum_softc *sc, const u_char *ucode, size_t size)
 	return error;
 }
 
+#ifndef IEEE80211_STA_ONLY
 int
 rum_prepare_beacon(struct rum_softc *sc)
 {
@@ -2185,6 +2199,7 @@ rum_prepare_beacon(struct rum_softc *sc)
 
 	return 0;
 }
+#endif
 
 void
 rum_newassoc(struct ieee80211com *ic, struct ieee80211_node *ni, int isnew)
@@ -2209,7 +2224,7 @@ rum_amrr_start(struct rum_softc *sc, struct ieee80211_node *ni)
 	     i--);
 	ni->ni_txrate = i;
 
-	timeout_add(&sc->amrr_to, hz);
+	timeout_add_sec(&sc->amrr_to, 1);
 }
 
 void
@@ -2260,7 +2275,7 @@ rum_amrr_update(usbd_xfer_handle xfer, usbd_private_handle priv,
 
 	ieee80211_amrr_choose(&sc->amrr, sc->sc_ic.ic_bss, &sc->amn);
 
-	timeout_add(&sc->amrr_to, hz);
+	timeout_add_sec(&sc->amrr_to, 1);
 }
 
 int

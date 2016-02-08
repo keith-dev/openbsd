@@ -1,4 +1,4 @@
-/*	$OpenBSD: rtsold.c,v 1.43 2008/06/12 16:12:31 jmc Exp $	*/
+/*	$OpenBSD: rtsold.c,v 1.45 2009/01/30 17:25:51 rainer Exp $	*/
 /*	$KAME: rtsold.c,v 1.75 2004/01/03 00:00:07 itojun Exp $	*/
 
 /*
@@ -106,9 +106,6 @@ main(int argc, char *argv[])
 	struct timeval *timeout;
 	char *argv0, *opts;
 	struct pollfd set[2];
-#ifdef USE_RTSOCK
-	int rtsock;
-#endif
 
 	/*
 	 * Initialization
@@ -222,16 +219,6 @@ main(int argc, char *argv[])
 
 	set[1].fd = -1;
 
-#ifdef USE_RTSOCK
-	if ((rtsock = rtsock_open()) < 0) {
-		warnmsg(LOG_ERR, __func__, "failed to open a socket");
-		exit(1);
-		/*NOTREACHED*/
-	}
-	set[1].fd = rtsock;
-	set[1].events = POLLIN;
-#endif
-
 	/* configuration per interface */
 	if (ifinit()) {
 		warnmsg(LOG_ERR, __func__,
@@ -297,10 +284,6 @@ main(int argc, char *argv[])
 		}
 
 		/* packet reception */
-#ifdef USE_RTSOCK
-		if (set[1].revents & POLLIN)
-			rtsock_input(rtsock);
-#endif
 		if (set[0].revents & POLLIN)
 			rtsol_input(s);
 	}
@@ -660,13 +643,13 @@ static void
 usage(char *progname)
 {
 	if (progname && progname[0] != '\0' && progname[strlen(progname) - 1] != 'd') {
-		fprintf(stderr, "usage: rtsol [-DdF] [-O script] "
-		    "interface ...\n");
-		fprintf(stderr, "usage: rtsol [-DdF] -a\n");
+		fprintf(stderr,
+		    "usage: rtsol [-DdF] [-O script-name] interface ...\n"
+		    "       rtsol [-DdF] -a\n");
 	} else {
-		fprintf(stderr, "usage: rtsold [-1DdFfm] [-O script] "
-		    "interface ...\n");
-		fprintf(stderr, "usage: rtsold [-1DdFfm] -a\n");
+		fprintf(stderr,
+		    "usage: rtsold [-1DdFfm] [-O script-name] interface ...\n"
+		    "       rtsold [-1DdFfm] -a\n");
 	}
 	exit(1);
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: bwi.c,v 1.77 2008/07/21 18:43:19 damien Exp $	*/
+/*	$OpenBSD: bwi.c,v 1.85 2009/01/21 21:53:59 grange Exp $	*/
 
 /*
  * Copyright (c) 2007 The DragonFly Project.  All rights reserved.
@@ -99,6 +99,8 @@ int bwi_debug = 1;
 
 #define __unused __attribute__((__unused__))
 
+extern int ticks;
+
 /* XXX end porting goop */
 
 /* MAC */
@@ -121,6 +123,13 @@ struct ieee80211_ds_plcp_hdr {
 	uint16_t	i_length;
 	uint16_t	i_crc;
 } __packed;
+
+enum bwi_modtype {
+	IEEE80211_MODTYPE_DS	= 0,	/* DS/CCK modulation */
+	IEEE80211_MODTYPE_PBCC	= 1,	/* PBCC modulation */
+	IEEE80211_MODTYPE_OFDM	= 2	/* OFDM modulation */
+};
+#define IEEE80211_MODTYPE_CCK   IEEE80211_MODTYPE_DS
 
 /* MAC */
 void		 bwi_tmplt_write_4(struct bwi_mac *, uint32_t, uint32_t);
@@ -292,6 +301,8 @@ void		 bwi_iter_func(void *, struct ieee80211_node *);
 void		 bwi_amrr_timeout(void *);
 void		 bwi_newassoc(struct ieee80211com *, struct ieee80211_node *,
 		     int);
+struct ieee80211_node
+		*bwi_node_alloc(struct ieee80211com *ic);
 int		 bwi_dma_alloc(struct bwi_softc *);
 void		 bwi_dma_free(struct bwi_softc *);
 int		 bwi_dma_ring_alloc(struct bwi_softc *,
@@ -569,13 +580,6 @@ const struct {
 
 static const uint8_t bwi_zero_addr[IEEE80211_ADDR_LEN];
 
-
-enum bwi_modtype {
-	IEEE80211_MODTYPE_DS	= 0,	/* DS/CCK modulation */
-	IEEE80211_MODTYPE_PBCC	= 1,	/* PBCC modulation */
-	IEEE80211_MODTYPE_OFDM	= 2	/* OFDM modulation */
-};
-#define IEEE80211_MODTYPE_CCK   IEEE80211_MODTYPE_DS
 
 /* CODE */
 
@@ -877,6 +881,7 @@ bwi_attach(struct bwi_softc *sc)
 	sc->sc_newstate = ic->ic_newstate;
 	ic->ic_newstate = bwi_newstate;
 	ic->ic_newassoc = bwi_newassoc;
+	ic->ic_node_alloc = bwi_node_alloc;
 
 	ieee80211_media_init(ifp, bwi_media_change, ieee80211_media_status);
 
@@ -2107,12 +2112,14 @@ bwi_mac_opmode_init(struct bwi_mac *mac)
 		mac_status |= BWI_MAC_STATUS_PROMISC;
 
 	switch (ic->ic_opmode) {
+#ifndef IEEE80211_STA_ONLY
 	case IEEE80211_M_IBSS:
 		mac_status &= ~BWI_MAC_STATUS_INFRA;
 		break;
 	case IEEE80211_M_HOSTAP:
 		mac_status |= BWI_MAC_STATUS_OPMODE_HOSTAP;
 		break;
+#endif
 	case IEEE80211_M_MONITOR:
 #if 0
 		/* Do you want data from your microwave oven? */
@@ -2133,14 +2140,18 @@ bwi_mac_opmode_init(struct bwi_mac *mac)
 
 	CSR_WRITE_4(sc, BWI_MAC_STATUS, mac_status);
 
+#ifndef IEEE80211_STA_ONLY
 	if (ic->ic_opmode != IEEE80211_M_IBSS &&
 	    ic->ic_opmode != IEEE80211_M_HOSTAP) {
+#endif
 		if (sc->sc_bbp_id == BWI_BBPID_BCM4306 && sc->sc_bbp_rev == 3)
 			pre_tbtt = 100;
 		else
 			pre_tbtt = 50;
+#ifndef IEEE80211_STA_ONLY
 	} else
 		pre_tbtt = 2;
+#endif
 	CSR_WRITE_2(sc, BWI_MAC_PRE_TBTT, pre_tbtt);
 }
 
@@ -2751,13 +2762,15 @@ void
 bwi_mac_lock(struct bwi_mac *mac)
 {
 	struct bwi_softc *sc = mac->mac_sc;
-	struct ieee80211com *ic = &sc->sc_ic;
 
 	KASSERT((mac->mac_flags & BWI_MAC_F_LOCKED) == 0);
 
 	if (mac->mac_rev < 3)
 		bwi_mac_stop(mac);
-	else if (ic->ic_opmode != IEEE80211_M_HOSTAP)
+	else
+#ifndef IEEE80211_STA_ONLY
+	if (sc->sc_ic.ic_opmode != IEEE80211_M_HOSTAP)
+#endif
 		bwi_mac_config_ps(mac);
 
 	CSR_SETBITS_4(sc, BWI_MAC_STATUS, BWI_MAC_STATUS_RFLOCK);
@@ -2773,7 +2786,6 @@ void
 bwi_mac_unlock(struct bwi_mac *mac)
 {
 	struct bwi_softc *sc = mac->mac_sc;
-	struct ieee80211com *ic = &sc->sc_ic;
 
 	KASSERT(mac->mac_flags & BWI_MAC_F_LOCKED);
 
@@ -2783,7 +2795,10 @@ bwi_mac_unlock(struct bwi_mac *mac)
 
 	if (mac->mac_rev < 3)
 		bwi_mac_start(mac);
-	else if (ic->ic_opmode != IEEE80211_M_HOSTAP)
+	else
+#ifndef IEEE80211_STA_ONLY
+	if (sc->sc_ic.ic_opmode != IEEE80211_M_HOSTAP)
+#endif
 		bwi_mac_config_ps(mac);
 
 	mac->mac_flags &= ~BWI_MAC_F_LOCKED;
@@ -5633,7 +5648,7 @@ bwi_rf_init_hw_nrssi_table(struct bwi_mac *mac, uint16_t adjust)
 		val -= adjust;
 		if (val < -32)
 			val = -32;
-		else if (val > 31);
+		else if (val > 31)
 			val = 31;
 
 		bwi_nrssi_write(mac, i, val);
@@ -7437,10 +7452,10 @@ back:
 	error = sc->sc_newstate(ic, nstate, arg);
 
 	if (nstate == IEEE80211_S_SCAN) {
-		timeout_add(&sc->sc_scan_ch, (sc->sc_dwell_time * hz) / 1000);
+		timeout_add_msec(&sc->sc_scan_ch, sc->sc_dwell_time);
 	} else if (nstate == IEEE80211_S_RUN) {
 		/* XXX 15 seconds */
-		timeout_add(&sc->sc_calib_ch, hz);
+		timeout_add_sec(&sc->sc_calib_ch, 1);
 	}
 
 	return (error);
@@ -7478,8 +7493,10 @@ bwi_amrr_timeout(void *arg)
 
 	if (ic->ic_opmode == IEEE80211_M_STA)
 		bwi_iter_func(sc, ic->ic_bss);
+#ifndef IEEE80211_STA_ONLY
 	else
 		ieee80211_iterate_nodes(ic, bwi_iter_func, sc);
+#endif
 
 	timeout_add(&sc->sc_amrr_ch, hz / 2);
 }
@@ -7500,6 +7517,18 @@ bwi_newassoc(struct ieee80211com *ic, struct ieee80211_node *ni, int isnew)
 	    i--);
 
 	ni->ni_txrate = i;
+}
+
+struct ieee80211_node *
+bwi_node_alloc(struct ieee80211com *ic)
+{
+	struct bwi_node *bn;
+
+	bn = malloc(sizeof(*bn), M_DEVBUF, M_NOWAIT | M_ZERO);
+	if (bn == NULL)
+		return (NULL);
+
+	return ((struct ieee80211_node *)bn);
 }
 
 int
@@ -8266,7 +8295,7 @@ bwi_rxeof(struct bwi_softc *sc, int end_idx)
 			struct bwi_rx_radiotap_hdr *tap = &sc->sc_rxtap;
 
 			tap->wr_tsf = hdr->rxh_tsf;
-			tap->wr_flags = 0;
+			tap->wr_flags = IEEE80211_RADIOTAP_F_FCS;
 			tap->wr_rate = rate;
 			tap->wr_chan_freq =
 			    htole16(ic->ic_bss->ni_chan->ic_freq);
@@ -9367,7 +9396,7 @@ bwi_calibrate(void *xsc)
 		}
 
 		/* XXX 15 seconds */
-		timeout_add(&sc->sc_calib_ch, hz * 15);
+		timeout_add_sec(&sc->sc_calib_ch, 15);
 	}
 
 	splx(s);

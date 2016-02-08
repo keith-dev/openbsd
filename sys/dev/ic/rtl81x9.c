@@ -1,4 +1,4 @@
-/*	$OpenBSD: rtl81x9.c,v 1.58 2008/04/20 00:23:28 brad Exp $ */
+/*	$OpenBSD: rtl81x9.c,v 1.63 2009/02/04 19:54:44 claudio Exp $ */
 
 /*
  * Copyright (c) 1997, 1998
@@ -676,27 +676,19 @@ rl_rxeof(sc)
 		wrap = (sc->rl_cdata.rl_rx_buf + RL_RXBUFLEN) - rxbufpos;
 
 		if (total_len > wrap) {
-			m = m_devget(rxbufpos - ETHER_ALIGN,
-			    wrap + ETHER_ALIGN, 0, ifp, NULL);
-			if (m == NULL)
-				ifp->if_ierrors++;
-			else {
-				m_copyback(m, wrap + ETHER_ALIGN,
-				     total_len - wrap, sc->rl_cdata.rl_rx_buf);
-				m = m_pullup(m, sizeof(struct ip) +ETHER_ALIGN);
-				if (m == NULL)
-					ifp->if_ierrors++;
-				else
-					m_adj(m, ETHER_ALIGN);
+			m = m_devget(rxbufpos, wrap, ETHER_ALIGN, ifp, NULL);
+			if (m != NULL) {
+				m_copyback(m, wrap, total_len - wrap,
+				    sc->rl_cdata.rl_rx_buf);
+				if (m->m_pkthdr.len < total_len) {
+					m_freem(m);
+					m = NULL;
+				}
 			}
 			cur_rx = (total_len - wrap + ETHER_CRC_LEN);
 		} else {
-			m = m_devget(rxbufpos - ETHER_ALIGN,
-			    total_len + ETHER_ALIGN, 0, ifp, NULL);
-			if (m == NULL)
-				ifp->if_ierrors++;
-			else
-				m_adj(m, ETHER_ALIGN);
+			m = m_devget(rxbufpos, total_len, ETHER_ALIGN, ifp,
+			    NULL);
 			cur_rx += total_len + 4 + ETHER_CRC_LEN;
 		}
 
@@ -710,6 +702,7 @@ rl_rxeof(sc)
 			bus_dmamap_sync(sc->sc_dmat, sc->sc_rx_dmamap,
 			    0, sc->sc_rx_dmamap->dm_mapsize,
 			    BUS_DMASYNC_PREREAD);
+			ifp->if_ierrors++;
 			continue;
 		}
 
@@ -1052,7 +1045,7 @@ void rl_init(xsc)
 	splx(s);
 
 	timeout_set(&sc->sc_tick_tmo, rl_tick, sc);
-	timeout_add(&sc->sc_tick_tmo, hz);
+	timeout_add_sec(&sc->sc_tick_tmo, 1);
 }
 
 /*
@@ -1088,15 +1081,10 @@ int rl_ioctl(ifp, command, data)
 {
 	struct rl_softc		*sc = ifp->if_softc;
 	struct ifreq		*ifr = (struct ifreq *) data;
-	struct ifaddr *ifa = (struct ifaddr *)data;
+	struct ifaddr		*ifa = (struct ifaddr *) data;
 	int			s, error = 0;
 
 	s = splnet();
-
-	if ((error = ether_ioctl(ifp, &sc->sc_arpcom, command, data)) > 0) {
-		splx(s);
-		return error;
-	}
 
 	switch(command) {
 	case SIOCSIFADDR:
@@ -1113,13 +1101,6 @@ int rl_ioctl(ifp, command, data)
 			break;
 		}
 		break;
-	case SIOCSIFMTU:
-		if (ifr->ifr_mtu > ETHERMTU || ifr->ifr_mtu < ETHERMIN) {
-			error = EINVAL;
-		} else if (ifp->if_mtu != ifr->ifr_mtu) {
-			ifp->if_mtu = ifr->ifr_mtu;
-		}
-		break;
 	case SIOCSIFFLAGS:
 		if (ifp->if_flags & IFF_UP) {
 			rl_init(sc);
@@ -1129,33 +1110,21 @@ int rl_ioctl(ifp, command, data)
 		}
 		error = 0;
 		break;
-	case SIOCADDMULTI:
-	case SIOCDELMULTI:
-		error = (command == SIOCADDMULTI) ?
-		    ether_addmulti(ifr, &sc->sc_arpcom) :
-		    ether_delmulti(ifr, &sc->sc_arpcom);
-
-		if (error == ENETRESET) {
-			/*
-			 * Multicast list has changed; set the hardware
-			 * filter accordingly.
-			 */
-			if (ifp->if_flags & IFF_RUNNING)
-				rl_setmulti(sc);
-			error = 0;
-		}
-		break;
 	case SIOCGIFMEDIA:
 	case SIOCSIFMEDIA:
 		error = ifmedia_ioctl(ifp, ifr, &sc->sc_mii.mii_media, command);
 		break;
 	default:
-		error = EINVAL;
-		break;
+		error = ether_ioctl(ifp, &sc->sc_arpcom, command, data);
+	}
+
+	if (error == ENETRESET) {
+		if (ifp->if_flags & IFF_RUNNING)
+			rl_setmulti(sc);
+		error = 0;
 	}
 
 	splx(s);
-
 	return(error);
 }
 
@@ -1473,7 +1442,7 @@ rl_tick(v)
 	s = splnet();
 	mii_tick(&sc->sc_mii);
 	splx(s);
-	timeout_add(&sc->sc_tick_tmo, hz);
+	timeout_add_sec(&sc->sc_tick_tmo, 1);
 }
 
 struct cfdriver rl_cd = {

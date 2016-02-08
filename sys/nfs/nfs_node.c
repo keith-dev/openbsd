@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_node.c,v 1.40 2008/06/14 10:55:21 mk Exp $	*/
+/*	$OpenBSD: nfs_node.c,v 1.44 2008/12/24 02:43:52 thib Exp $	*/
 /*	$NetBSD: nfs_node.c,v 1.16 1996/02/18 11:53:42 fvdl Exp $	*/
 
 /*
@@ -64,9 +64,6 @@ struct pool nfs_node_pool;
 
 extern int prtactive;
 
-#define TRUE	1
-#define	FALSE	0
-
 #define	nfs_hash(x,y)	hash32_buf((x), (y), HASHINIT)
 
 /*
@@ -94,6 +91,7 @@ nfs_nget(mntp, fhp, fhsize, npp)
 	int fhsize;
 	struct nfsnode **npp;
 {
+	struct nfsmount *nmp;
 	struct proc *p = curproc;	/* XXX */
 	struct nfsnode *np;
 	struct nfsnodehashhead *nhpp;
@@ -133,21 +131,16 @@ loop:
 	 * Are we getting the root? If so, make sure the vnode flags
 	 * are correct 
 	 */
-	{
-		struct nfsmount *nmp = VFSTONFS(mntp);
-		if ((fhsize == nmp->nm_fhsize) &&
-		    !bcmp(fhp, nmp->nm_fh, fhsize)) {
-			if (vp->v_type == VNON)
-				vp->v_type = VDIR;
-			vp->v_flag |= VROOT;
-		}
+	nmp = VFSTONFS(mntp);
+	if ((fhsize == nmp->nm_fhsize) &&
+	    !bcmp(fhp, nmp->nm_fh, fhsize)) {
+		if (vp->v_type == VNON)
+			vp->v_type = VDIR;
+		vp->v_flag |= VROOT;
 	}
 	
 	LIST_INSERT_HEAD(nhpp, np, n_hash);
-	if (fhsize > NFS_SMALLFH) {
-		np->n_fhp = malloc(fhsize, M_NFSBIGFH, M_WAITOK);
-	} else
-		np->n_fhp = &np->n_fh;
+	np->n_fhp = &np->n_fh;
 	bcopy((caddr_t)fhp, (caddr_t)np->n_fhp, fhsize);
 	np->n_fhsize = fhsize;
 	np->n_accstamp = -1;
@@ -181,7 +174,7 @@ nfs_inactive(v)
 		/*
 		 * Remove the silly file that was rename'd earlier
 		 */
-		(void) nfs_vinvalbuf(ap->a_vp, 0, sp->s_cred, p, 1);
+		nfs_vinvalbuf(ap->a_vp, 0, sp->s_cred, p);
 		nfs_removeit(sp);
 		crfree(sp->s_cred);
 		vrele(sp->s_dvp);
@@ -212,9 +205,6 @@ nfs_reclaim(v)
 	if (np->n_hash.le_prev != NULL)
 		LIST_REMOVE(np, n_hash);
 
-	if (np->n_fhsize > NFS_SMALLFH)
-		free(np->n_fhp, M_NFSBIGFH);
-
 	if (np->n_rcred)
 		crfree(np->n_rcred);
 	if (np->n_wcred)
@@ -224,4 +214,3 @@ nfs_reclaim(v)
 	vp->v_data = NULL;
 	return (0);
 }
-

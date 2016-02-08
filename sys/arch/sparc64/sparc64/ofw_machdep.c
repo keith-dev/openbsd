@@ -1,4 +1,4 @@
-/*	$OpenBSD: ofw_machdep.c,v 1.28 2008/07/10 08:57:05 kettenis Exp $	*/
+/*	$OpenBSD: ofw_machdep.c,v 1.31 2009/02/19 11:12:42 kettenis Exp $	*/
 /*	$NetBSD: ofw_machdep.c,v 1.16 2001/07/20 00:07:14 eeh Exp $	*/
 
 /*
@@ -782,6 +782,53 @@ prom_opl_get_tod(void)
 
 	return (time_t)args.time;
 }
+
+uint64_t
+prom_set_sun4v_api_version(uint64_t api_group, uint64_t major,
+    uint64_t minor, uint64_t *supported_minor)
+{
+	static struct {
+		cell_t  name;
+		cell_t  nargs;
+		cell_t  nreturns;
+		cell_t  api_group;
+		cell_t  major;
+		cell_t  minor;
+		cell_t	status;
+		cell_t	supported_minor;
+	} args;
+
+	args.name = ADR2CELL("SUNW,set-sun4v-api-version");
+	args.nargs = 3;
+	args.nreturns = 2;
+	args.api_group = api_group;
+	args.major = major;
+	args.minor = minor;
+	args.status = -1;
+	args.supported_minor = -1;
+
+	openfirmware(&args);
+
+	*supported_minor = args.supported_minor;
+	return (uint64_t)args.status;
+}
+
+void
+prom_sun4v_soft_state_supported(void)
+{
+	static struct {
+		cell_t  name;
+		cell_t  nargs;
+		cell_t  nreturns;
+	} args;
+
+	args.name = ADR2CELL("SUNW,soft-state-supported");
+	args.nargs = 0;
+	args.nreturns = 0;
+
+	openfirmware(&args);
+}
+
 
 #ifdef DEBUG
 int ofmapintrdebug = 0;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: apm.c,v 1.81 2007/12/11 15:44:00 tedu Exp $	*/
+/*	$OpenBSD: apm.c,v 1.83 2009/02/26 17:19:47 oga Exp $	*/
 
 /*-
  * Copyright (c) 1998-2001 Michael Shalayeff. All rights reserved.
@@ -751,7 +751,7 @@ apmprobe(struct device *parent, void *match, void *aux)
 
 	if (apm_cd.cd_ndevs || strcmp(ba->ba_name, "apm") ||
 	    !(ba->ba_apmp->apm_detail & APM_32BIT_SUPPORTED)) {
-		DPRINTF(("%s: %x\n", ba->bios_dev, ba->bios_apmp->apm_detail));
+		DPRINTF(("%s: %x\n", ba->ba_name, ba->ba_apmp->apm_detail));
 		return 0;
 	}
 
@@ -1145,7 +1145,20 @@ apmioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 			error = EIO;
 		}
 		break;
-
+	case APM_IOC_STANDBY_REQ:
+		if ((flag & FWRITE) == 0)
+			error = EBADF;
+		/* only fails if no one cares. apmd at least should */
+		else if (apm_record_event(sc, APM_USER_STANDBY_REQ))
+			error = EINVAL; /* ? */
+		break;
+	case APM_IOC_SUSPEND_REQ:
+		if ((flag & FWRITE) == 0)
+			error = EBADF;
+		/* only fails if no one cares. apmd at least should */
+		else if (apm_record_event(sc, APM_USER_SUSPEND_REQ))
+			error = EINVAL; /* ? */
+		break;
 	default:
 		error = ENOTTY;
 	}

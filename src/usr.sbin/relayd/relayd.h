@@ -1,4 +1,4 @@
-/*	$OpenBSD: relayd.h,v 1.109 2008/07/22 23:17:37 reyk Exp $	*/
+/*	$OpenBSD: relayd.h,v 1.113 2008/12/05 16:37:56 reyk Exp $	*/
 
 /*
  * Copyright (c) 2006, 2007 Pierre-Yves Ritschard <pyr@openbsd.org>
@@ -186,6 +186,7 @@ struct ctl_status {
 	int		 up;
 	int		 retry_cnt;
 	u_long		 check_cnt;
+	u_int16_t	 he;
 };
 
 struct ctl_id {
@@ -227,15 +228,16 @@ struct ctl_tcp_event {
 };
 
 enum httpmethod {
-	HTTP_METHOD_GET		= 0,
-	HTTP_METHOD_HEAD	= 1,
-	HTTP_METHOD_POST	= 2,
-	HTTP_METHOD_PUT		= 3,
-	HTTP_METHOD_DELETE	= 4,
-	HTTP_METHOD_OPTIONS	= 5,
-	HTTP_METHOD_TRACE	= 6,
-	HTTP_METHOD_CONNECT	= 7,
-	HTTP_METHOD_RESPONSE	= 8	/* Server response */
+	HTTP_METHOD_NONE	= 0,
+	HTTP_METHOD_GET		= 1,
+	HTTP_METHOD_HEAD	= 2,
+	HTTP_METHOD_POST	= 3,
+	HTTP_METHOD_PUT		= 4,
+	HTTP_METHOD_DELETE	= 5,
+	HTTP_METHOD_OPTIONS	= 6,
+	HTTP_METHOD_TRACE	= 7,
+	HTTP_METHOD_CONNECT	= 8,
+	HTTP_METHOD_RESPONSE	= 9	/* Server response */
 };
 
 enum direction {
@@ -308,9 +310,14 @@ struct ctl_stats {
 	u_int32_t		 last_day;
 };
 
+struct portrange {
+	in_port_t		 val[2];
+	u_int8_t		 op;
+};
+
 struct address {
 	struct sockaddr_storage	 ss;
-	in_port_t		 port;
+	struct portrange	 port;
 	char			 ifname[IFNAMSIZ];
 	TAILQ_ENTRY(address)	 entry;
 };
@@ -336,6 +343,7 @@ TAILQ_HEAD(addresslist, address);
 #define F_RETURN		0x00020000
 #define F_TRAP			0x00040000
 #define F_NEEDPF		0x00080000
+#define F_PORT			0x00100000
 
 enum forwardmode {
 	FWD_NORMAL		= 0,
@@ -365,9 +373,45 @@ struct host {
 	u_long			 up_cnt;
 	int			 retry_cnt;
 	int			 idx;
+	u_int16_t		 he;
 	struct ctl_tcp_event	 cte;
 };
 TAILQ_HEAD(hostlist, host);
+
+enum host_error {
+	HCE_NONE		= 0,
+	HCE_ABORT,
+	HCE_INTERVAL_TIMEOUT,
+	HCE_ICMP_OK,
+	HCE_ICMP_READ_TIMEOUT,
+	HCE_ICMP_WRITE_TIMEOUT,
+	HCE_TCP_CONNECT_ERROR,
+	HCE_TCP_CONNECT_FAIL,
+	HCE_TCP_CONNECT_TIMEOUT,
+	HCE_TCP_CONNECT_OK,
+	HCE_TCP_WRITE_TIMEOUT,
+	HCE_TCP_WRITE_FAIL,
+	HCE_TCP_READ_TIMEOUT,
+	HCE_TCP_READ_FAIL,
+	HCE_SCRIPT_OK,
+	HCE_SCRIPT_FAIL,
+	HCE_SSL_CONNECT_ERROR,
+	HCE_SSL_CONNECT_FAIL,
+	HCE_SSL_CONNECT_OK,
+	HCE_SSL_CONNECT_TIMEOUT,
+	HCE_SSL_READ_TIMEOUT,
+	HCE_SSL_WRITE_TIMEOUT,
+	HCE_SSL_READ_ERROR,
+	HCE_SSL_WRITE_ERROR,
+	HCE_SEND_EXPECT_FAIL,
+	HCE_SEND_EXPECT_OK,
+	HCE_HTTP_CODE_ERROR,
+	HCE_HTTP_CODE_FAIL,
+	HCE_HTTP_CODE_OK,
+	HCE_HTTP_DIGEST_ERROR,
+	HCE_HTTP_DIGEST_FAIL,
+	HCE_HTTP_DIGEST_OK,
+};
 
 enum host_status {
 	HOST_DOWN	= -1,
@@ -727,6 +771,7 @@ void	log_info(const char *, ...);
 void	log_debug(const char *, ...);
 __dead void fatal(const char *);
 __dead void fatalx(const char *);
+const char *host_error(enum host_error);
 const char *host_status(enum host_status);
 const char *table_check(enum table_check);
 const char *print_availability(u_long, u_long);
@@ -789,7 +834,7 @@ u_int64_t
 /* hce.c */
 pid_t	 hce(struct relayd *, int [2], int [2], int [RELAY_MAXPROC][2],
 	    int [2], int [RELAY_MAXPROC][2]);
-void	 hce_notify_done(struct host *, const char *);
+void	 hce_notify_done(struct host *, enum host_error);
 
 /* relay.c */
 pid_t	 relay(struct relayd *, int [2], int [2], int [RELAY_MAXPROC][2],
@@ -864,6 +909,8 @@ struct protonode *protonode_header(enum direction, struct protocol *,
 		    struct protonode *);
 int		 protonode_add(enum direction, struct protocol *,
 		    struct protonode *);
+int		 protonode_load(enum direction, struct protocol *,
+		    struct protonode *, const char *);
 int		 map6to4(struct sockaddr_storage *);
 int		 map4to6(struct sockaddr_storage *, struct sockaddr_storage *);
 

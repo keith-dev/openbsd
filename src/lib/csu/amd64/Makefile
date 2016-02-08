@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.3 2008/07/28 14:17:00 kurt Exp $
+#	$OpenBSD: Makefile,v 1.5 2008/11/11 23:49:46 kurt Exp $
 
 CFLAGS+=	-DLIBC_SCCS -fno-omit-frame-pointer
 OBJS=		crt0.o gcrt0.o
@@ -10,13 +10,11 @@ ELFDIR=		${.CURDIR}/../common_elf
 .PATH:		${ELFDIR}
 CFLAGS+=	-I${ELFDIR} -I${.CURDIR}
 
-PICFLAG?=-fpic
-
 all: ${OBJS}
 
 crt0.o: crt0.c
-	@echo ${COMPILE.c} -DCRT0 ${.CURDIR}/crt0.c -o ${.TARGET}
-	@${COMPILE.c} -DCRT0 ${.CURDIR}/crt0.c -o ${.TARGET}.o
+	@echo ${COMPILE.c} -DCRT0 -fpie ${.CURDIR}/crt0.c -o ${.TARGET}
+	@${COMPILE.c} -DCRT0 -fpie ${.CURDIR}/crt0.c -o ${.TARGET}.o
 	@${LD} -x -r -o ${.TARGET} ${.TARGET}.o
 	@rm -f ${.TARGET}.o
 
@@ -27,8 +25,8 @@ gcrt0.o: crt0.c
 	@rm -f ${.TARGET}.o
 
 crtbegin.o: crtbegin.c
-	@echo ${COMPILE.c} ${ELFDIR}/crtbegin.c -o ${.TARGET}
-	@${COMPILE.c} ${ELFDIR}/crtbegin.c -o ${.TARGET}.o
+	@echo ${COMPILE.c} -fpie ${ELFDIR}/crtbegin.c -o ${.TARGET}
+	@${COMPILE.c} -fpie ${ELFDIR}/crtbegin.c -o ${.TARGET}.o
 	@${LD} -x -r -o ${.TARGET} ${.TARGET}.o
 	@rm -f ${.TARGET}.o
 
@@ -39,8 +37,8 @@ crtbeginS.o: crtbeginS.c
 	@rm -f ${.TARGET}.o
 
 crtend.o: crtend.c
-	@echo ${COMPILE.c} ${ELFDIR}/crtend.c -o ${.TARGET}
-	@${COMPILE.c} ${ELFDIR}/crtend.c -o ${.TARGET}.o
+	@echo ${COMPILE.c} -fpie ${ELFDIR}/crtend.c -o ${.TARGET}
+	@${COMPILE.c} -fpie ${ELFDIR}/crtend.c -o ${.TARGET}.o
 	@${LD} -x -r -o ${.TARGET} ${.TARGET}.o
 	@rm -f ${.TARGET}.o
 

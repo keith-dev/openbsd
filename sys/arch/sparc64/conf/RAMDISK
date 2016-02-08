@@ -1,4 +1,4 @@
-#	$OpenBSD: RAMDISK,v 1.76 2008/07/12 13:20:42 kettenis Exp $
+#	$OpenBSD: RAMDISK,v 1.85 2009/02/10 19:06:40 damien Exp $
 
 # Machine architecture; required by config(8)
 machine		sparc64
@@ -69,6 +69,22 @@ ebus*	at mainbus0
 ebus*	at pci?
 vbus0	at mainbus0
 sbbc*	at pci?
+cbus*	at vbus?
+
+# CardBus bus support
+cardbus* at cardslot?
+pcmcia*	at cardslot?
+cbb*	at pci?
+cardslot* at cbb?
+
+ath*	at cardbus?		# Atheros AR5k (802.11a/b/g)
+ral*	at pci?			# Ralink RT2500/RT2501/RT2600
+ral*	at cardbus?		# Ralink RT2500/RT2501/RT2600
+com*	at pcmcia?		# PCMCIA modems/serial ports
+ep*	at pcmcia?		# PCMCIA based 3C5xx ethernet
+ne*	at pcmcia?		# PCMCIA based NE2000 ethernet
+wi*	at pci?			# WaveLAN IEEE 802.11DS
+wi*	at pcmcia?		# WaveLAN IEEE 802.11DS
 
 # PCI Ethernet
 hme*	at pci?			# Sun Happy Meal 10/100
@@ -81,9 +97,11 @@ mskc*	at pci?			# Marvell Yukon-2
 msk*	at mskc?		#  each port of above
 fxp*	at pci?			# EtherExpress 10/100B ethernet
 xl*	at pci?			# 3C9xx ethernet
+xl*	at cardbus?		# 3C9xx ethernet
 pcn*	at pci?			# AMD PCnet-PCI Ethernet
 de*	at pci?			# DC21X4X-based ethernet
 dc*	at pci?			# 21143, "tulip" clone ethernet
+dc*	at cardbus?		# 21143, "tulip" clone ethernet
 epic*	at pci?			# SMC EPIC/100 ethernet
 em*	at pci?			# Intel Pro/1000 ethernet
 #ixgb*	at pci?			# Intel Pro/10Gb ethernet
@@ -92,6 +110,8 @@ stge*	at pci?			# Sundance TC9021 GigE
 rl*	at pci?			# RealTek 81[23]9 ethernet
 vr*	at pci?			# VIA Rhine ethernet
 re*	at pci?			# RealTek 8169/8169S/8110S
+re*	at cardbus?		# RealTek 8169/8169S/8110S
+jme*	at pci?			# JMicron JMC250/JMC260 Ethernet
 
 auxio*	at ebus?
 auxio*	at sbus?
@@ -105,6 +125,9 @@ timer*	at mainbus0			# Timer chip
 # Virtual devices for sun4v systems.
 vcons0	at vbus?
 vrtc0	at vbus?
+vdsk*	at cbus?
+scsibus* at vdsk?
+vnet*	at cbus?
 
 ## Lance Ethernet - AMD7990
 le*		at sbus?
@@ -189,12 +212,16 @@ urlphy*	at mii?			# Realtek RTL8150L internal PHY
 rgephy*	at mii?			# Realtek 8169S/8110S PHY
 gentbi*	at mii?			# Generic 1000BASE-X ten-bit PHY
 nsgphy*	at mii?			# NS gigabit PHYs
+jmphy*	at mii?			# JMicron JMP202/JMP211 PHYs
+ipgphy*	at mii?			# IC Plus IP1000A PHYs
 ukphy*	at mii?			# Unknown PHYs
 
 # PCI USB Controllers
 ohci*	at pci?			# Open Host Controller
+ohci*	at cardbus?
 uhci*	at pci?			# Universal Host Controller (Intel)
 ehci*	at pci?			# Enhanced Host Controller
+ehci*	at cardbus?
 
 # USB bus support
 usb*	at ohci?
@@ -207,6 +234,19 @@ uhub*	at uhub?		# USB Hubs
 uhidev*	at uhub?		# Human Interface Devices
 ukbd*	at uhidev?		# USB keyboard
 wskbd*	at ukbd?
+umass*	at uhub?		# USB Mass Storage devices
+scsibus* at umass?
+atapiscsi* at umass?
+aue*	at uhub?		# ADMtek AN986 Pegasus Ethernet
+axe*	at uhub?		# ASIX Electronics AX88172 USB Ethernet
+cue*	at uhub?		# CATC USB-EL1201A based Ethernet
+kue*	at uhub?		# Kawasaki KL5KUSB101B based Ethernet
+cdce*	at uhub?		# CDC Ethernet
+udav*	at uhub?		# Davicom DM9601 based Ethernet
+mos*	at uhub?		# MOSCHIP MCS7730/7830 10/100 Ethernet
+ural*	at uhub?		# Ralink RT2500USB
+rum*	at uhub?		# Ralink RT2501USB/RT2601USB
+url*	at uhub?		# Realtek RTL8150L based adapters
 
 # SAB82532 based serial ports
 sab*	at ebus?
@@ -243,6 +283,8 @@ wsdisplay*	at cgtwelve?
 creator*	at mainbus0		# Creator3D/Elite3D framebuffers
 creator*	at upa0
 wsdisplay*	at creator?
+ifb*		at pci?			# Expert3D/XVR-500 framebuffers
+wsdisplay*	at ifb?
 mgx*		at sbus?		# SMS MGX/MGXPlus framebuffer
 wsdisplay*	at mgx?
 rfx*		at sbus?		# RasterFlex framebuffer series

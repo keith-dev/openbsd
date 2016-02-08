@@ -1,4 +1,4 @@
-/*	$OpenBSD: rde.c,v 1.73 2008/02/11 12:37:37 norby Exp $ */
+/*	$OpenBSD: rde.c,v 1.77 2009/01/27 12:45:52 michele Exp $ */
 
 /*
  * Copyright (c) 2004, 2005 Claudio Jeker <claudio@openbsd.org>
@@ -236,7 +236,7 @@ rde_dispatch_imsg(int fd, short event, void *bula)
 	char			*buf;
 	ssize_t			 n;
 	time_t			 now;
-	int			 r, state, self, shut = 0;
+	int			 r, state, self, error, shut = 0;
 	u_int16_t		 l;
 
 	switch (event) {
@@ -270,10 +270,9 @@ rde_dispatch_imsg(int fd, short event, void *bula)
 				fatalx("invalid size of OE request");
 			memcpy(&rn, imsg.data, sizeof(rn));
 
-			if (rde_nbr_find(imsg.hdr.peerid))
+			if (rde_nbr_new(imsg.hdr.peerid, &rn) == NULL)
 				fatalx("rde_dispatch_imsg: "
 				    "neighbor already exists");
-			rde_nbr_new(imsg.hdr.peerid, &rn);
 			break;
 		case IMSG_NEIGHBOR_DOWN:
 			rde_nbr_del(rde_nbr_find(imsg.hdr.peerid));
@@ -311,11 +310,17 @@ rde_dispatch_imsg(int fd, short event, void *bula)
 				break;
 
 			buf = imsg.data;
+			error = 0;
 			for (l = imsg.hdr.len - IMSG_HEADER_SIZE;
 			    l >= sizeof(lsa_hdr); l -= sizeof(lsa_hdr)) {
 				memcpy(&lsa_hdr, buf, sizeof(lsa_hdr));
 				buf += sizeof(lsa_hdr);
 
+				if (lsa_hdr.type == LSA_TYPE_EXTERNAL &&
+				    nbr->area->stub) {
+					error = 1;
+					break;
+				}
 				v = lsa_find(nbr->area, lsa_hdr.type,
 				    lsa_hdr.ls_id, lsa_hdr.adv_rtr);
 				if (v == NULL)
@@ -334,13 +339,17 @@ rde_dispatch_imsg(int fd, short event, void *bula)
 					    sizeof(lsa_hdr));
 				}
 			}
-			if (l != 0)
+			if (l != 0 && !error)
 				log_warnx("rde_dispatch_imsg: peerid %lu, "
 				    "trailing garbage in Database Description "
 				    "packet", imsg.hdr.peerid);
 
-			imsg_compose(ibuf_ospfe, IMSG_DD_END, imsg.hdr.peerid,
-			    0, NULL, 0);
+			if (!error)
+				imsg_compose(ibuf_ospfe, IMSG_DD_END,
+				    imsg.hdr.peerid, 0, NULL, 0);
+			else
+				imsg_compose(ibuf_ospfe, IMSG_DD_BADLSA,
+				    imsg.hdr.peerid, 0, NULL, 0);
 			break;
 		case IMSG_LS_REQ:
 			nbr = rde_nbr_find(imsg.hdr.peerid);
@@ -575,12 +584,11 @@ rde_dispatch_parent(int fd, short event, void *bula)
 	static struct area	*narea;
 	struct iface		*niface;
 	struct imsg		 imsg;
-	struct kroute		 kr;
 	struct rroute		 rr;
 	struct imsgbuf		*ibuf = bula;
 	struct lsa		*lsa;
 	struct vertex		*v;
-	struct rt_node		*rn;
+	struct redistribute	*nred;
 	ssize_t			 n;
 	int			 shut = 0;
 
@@ -642,22 +650,6 @@ rde_dispatch_parent(int fd, short event, void *bula)
 					lsa_merge(nbrself, lsa, v);
 			}
 			break;
-		case IMSG_KROUTE_GET:
-			if (imsg.hdr.len != IMSG_HEADER_SIZE + sizeof(kr)) {
-				log_warnx("rde_dispatch_parent: "
-				    "wrong imsg len");
-				break;
-			}
-			memcpy(&kr, imsg.data, sizeof(kr));
-
-			if ((rn = rt_find(kr.prefix.s_addr, kr.prefixlen,
-			    DT_NET)) != NULL)
-				rde_send_change_kroute(rn);
-			else
-				/* should not happen */
-				imsg_compose(ibuf_main, IMSG_KROUTE_DELETE, 0,
-				    0, &kr, sizeof(kr));
-			break;
 		case IMSG_RECONF_CONF:
 			if ((nconf = malloc(sizeof(struct ospfd_conf))) ==
 			    NULL)
@@ -675,8 +667,16 @@ rde_dispatch_parent(int fd, short event, void *bula)
 			LIST_INIT(&narea->iface_list);
 			LIST_INIT(&narea->nbr_list);
 			RB_INIT(&narea->lsa_tree);
+			SIMPLEQ_INIT(&narea->redist_list);
 
 			LIST_INSERT_HEAD(&nconf->area_list, narea, entry);
+			break;
+		case IMSG_RECONF_REDIST:
+			if ((nred= malloc(sizeof(struct redistribute))) == NULL)
+				fatal(NULL);
+			memcpy(nred, imsg.data, sizeof(struct redistribute));
+
+			SIMPLEQ_INSERT_TAIL(&narea->redist_list, nred, entry);
 			break;
 		case IMSG_RECONF_IFACE:
 			if ((niface = malloc(sizeof(struct iface))) == NULL)
@@ -715,6 +715,16 @@ u_int32_t
 rde_router_id(void)
 {
 	return (rdeconf->rtr_id.s_addr);
+}
+
+struct area *
+rde_backbone_area(void)
+{
+	struct in_addr	id;
+
+	id.s_addr = INADDR_ANY;
+
+	return (area_find(rdeconf, id));
 }
 
 void
@@ -1064,6 +1074,8 @@ rde_asext_put(struct rroute *rr)
 void
 rde_summary_update(struct rt_node *rte, struct area *area)
 {
+	struct rt_nexthop	*rn;
+	struct rt_node		*nr;
 	struct vertex		*v = NULL;
 	struct lsa		*lsa;
 	u_int8_t		 type = 0;
@@ -1080,7 +1092,16 @@ rde_summary_update(struct rt_node *rte, struct area *area)
 	/* no need to originate inter-area routes to the backbone */
 	if (rte->p_type == PT_INTER_AREA && area->id.s_addr == INADDR_ANY)
 		return;
-	/* TODO nexthop check, nexthop part of area -> no summary */
+	/* nexthop check, nexthop part of area -> no summary */
+	TAILQ_FOREACH(rn, &rte->nexthop, entry) {
+		nr = rt_lookup(DT_NET, rn->nexthop.s_addr);
+		if (nr && nr->area.s_addr == area->id.s_addr)
+			continue;
+		break;
+	}
+	if (rn == NULL)	/* all nexthops belong to this area */
+		return;
+
 	if (rte->cost >= LS_INFINITY)
 		return;
 	/* TODO AS border router specific checks */
@@ -1090,6 +1111,9 @@ rde_summary_update(struct rt_node *rte, struct area *area)
 	if (rte->d_type == DT_NET) {
 		type = LSA_TYPE_SUM_NETWORK;
 	} else if (rte->d_type == DT_RTR) {
+		if (area->stub)
+			/* do not redistribute type 4 LSA into stub areas */
+			return;
 		type = LSA_TYPE_SUM_ROUTER;
 	} else
 		fatalx("rde_summary_update: unknown route type");

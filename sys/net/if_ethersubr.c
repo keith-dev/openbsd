@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ethersubr.c,v 1.123 2008/08/04 18:55:08 damien Exp $	*/
+/*	$OpenBSD: if_ethersubr.c,v 1.131 2009/01/28 22:18:43 michele Exp $	*/
 /*	$NetBSD: if_ethersubr.c,v 1.19 1996/05/07 02:40:30 thorpej Exp $	*/
 
 /*
@@ -135,6 +135,10 @@ didn't get a copy, you may request one from <license@ipv6.nrl.navy.mil>.
 #include <net/if_trunk.h>
 #endif
 
+#ifdef AOE
+#include <net/if_aoe.h>
+#endif /* AOE */
+
 #ifdef INET6
 #ifndef INET
 #include <netinet/in.h>
@@ -162,17 +166,13 @@ u_char etherbroadcastaddr[ETHER_ADDR_LEN] =
 
 
 int
-ether_ioctl(ifp, arp, cmd, data)
-	struct ifnet *ifp;
-	struct arpcom *arp;
-	u_long cmd;
-	caddr_t data;
+ether_ioctl(struct ifnet *ifp, struct arpcom *arp, u_long cmd, caddr_t data)
 {
 	struct ifaddr *ifa = (struct ifaddr *)data;
-	int	error = 0;
+	struct ifreq *ifr = (struct ifreq *)data;
+	int error = 0;
 
 	switch (cmd) {
-
 	case SIOCSIFADDR:
 		switch (ifa->ifa_addr->sa_family) {
 #ifdef NETATALK
@@ -182,11 +182,29 @@ ether_ioctl(ifp, arp, cmd, data)
 #endif /* NETATALK */
 		}
 		break;
-	default:
+
+	case SIOCSIFMTU:
+		if (ifr->ifr_mtu < ETHERMIN || ifr->ifr_mtu > ifp->if_hardmtu)
+			error = EINVAL;
+		else
+			ifp->if_mtu = ifr->ifr_mtu;
 		break;
+
+	case SIOCADDMULTI:
+	case SIOCDELMULTI:
+		if (ifp->if_flags & IFF_MULTICAST) {
+			error = (cmd == SIOCADDMULTI) ?
+			    ether_addmulti(ifr, arp) :
+			    ether_delmulti(ifr, arp);
+		} else
+			error = ENOTTY;
+		break;
+
+	default:
+		error = ENOTTY;
 	}
 
-	return error;
+	return (error);
 }
 
 /*
@@ -245,6 +263,12 @@ ether_output(ifp0, m0, dst, rt0)
 			else
 				senderr(EHOSTUNREACH);
 		}
+#ifdef MPLS
+		if (rt->rt_flags & RTF_MPLS) {
+			if ((m = mpls_output(m, rt)) == NULL)
+				senderr(EHOSTUNREACH);
+		}
+#endif
 		if (rt->rt_flags & RTF_GATEWAY) {
 			if (rt->rt_gwroute == 0)
 				goto lookup;
@@ -271,7 +295,12 @@ ether_output(ifp0, m0, dst, rt0)
 		if ((m->m_flags & M_BCAST) && (ifp->if_flags & IFF_SIMPLEX) &&
 		    !m->m_pkthdr.pf.routed)
 			mcopy = m_copy(m, 0, (int)M_COPYALL);
-		etype = htons(ETHERTYPE_IP);
+#ifdef MPLS
+		if (rt0->rt_flags & RTF_MPLS)
+			etype = htons(ETHERTYPE_MPLS);
+		else
+#endif
+			etype = htons(ETHERTYPE_IP);
 		break;
 #endif
 #ifdef INET6
@@ -501,6 +530,8 @@ ether_input(ifp0, eh, m)
 	struct ether_header *eh_tmp;
 #endif
 
+	m_cluncount(m, 1);
+
 	if (eh == NULL) {
 		eh = mtod(m, struct ether_header *);
 		m_adj(m, ETHER_HDR_LEN);
@@ -573,7 +604,8 @@ ether_input(ifp0, eh, m)
 	}
 
 #if NVLAN > 0
-	if (etype == ETHERTYPE_VLAN && (vlan_input(eh, m) == 0))
+	if (((m->m_flags & M_VLANTAG) || etype == ETHERTYPE_VLAN)
+	    && (vlan_input(eh, m) == 0))
 		return;
 #endif
 
@@ -598,7 +630,7 @@ ether_input(ifp0, eh, m)
 #endif
 
 #if NVLAN > 0
-	if (etype == ETHERTYPE_VLAN) {
+	if ((m->m_flags & M_VLANTAG) || etype == ETHERTYPE_VLAN) {
 		/* The bridge did not want the vlan frame either, drop it. */
 		ifp->if_noproto++;
 		m_freem(m);
@@ -714,13 +746,18 @@ decapsulate:
 		bcopy(eh, eh_tmp, sizeof(struct ether_header));
 
 		if (etype == ETHERTYPE_PPPOEDISC)
-			inq = &ppoediscinq;
+			inq = &pppoediscinq;
 		else
-			inq = &ppoeinq;
+			inq = &pppoeinq;
 
 		schednetisr(NETISR_PPPOE);
 		break;
 #endif /* NPPPOE > 0 */
+#ifdef AOE
+	case ETHERTYPE_AOE:
+		aoe_input(ifp, m);
+		goto done;
+#endif /* AOE */
 #ifdef MPLS
 	case ETHERTYPE_MPLS:
 	case ETHERTYPE_MPLS_MCAST:

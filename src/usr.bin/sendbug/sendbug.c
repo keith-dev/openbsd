@@ -1,4 +1,4 @@
-/*	$OpenBSD: sendbug.c,v 1.57 2008/06/14 20:45:45 pvalchev Exp $	*/
+/*	$OpenBSD: sendbug.c,v 1.60 2009/01/28 20:43:24 ray Exp $	*/
 
 /*
  * Written by Ray Lai <ray@cyth.net>.
@@ -44,12 +44,7 @@ const char *categories = "system user library documentation kernel "
 char *version = "4.2";
 const char *comment[] = {
 	"<synopsis of the problem (one line)>",
-	"<[ non-critical | serious | critical ] (one line)>",
-	"<[ low | medium | high ] (one line)>",
 	"<PR category (one line)>",
-	"<[ sw-bug | doc-bug | change-request | support ] (one line)>",
-	"<release number or tag (one line)>",
-	"<machine, os, target, libraries (multiple lines)>",
 	"<precise description of the problem (multiple lines)>",
 	"<code/input/activities to reproduce the problem (multiple lines)>",
 	"<how to correct or work around the problem, if known (multiple lines)>"
@@ -58,14 +53,14 @@ const char *comment[] = {
 struct passwd *pw;
 char os[BUFSIZ], rel[BUFSIZ], mach[BUFSIZ], details[BUFSIZ];
 char *fullname, *tmppath;
-int Dflag, wantcleanup;
+int Dflag, Pflag, wantcleanup;
 
 __dead void
 usage(void)
 {
 	extern char *__progname;
 
-	fprintf(stderr, "usage: %s [-DLPV]\n", __progname);
+	fprintf(stderr, "usage: %s [-DPV]\n", __progname);
 	exit(1);
 }
 
@@ -87,19 +82,14 @@ main(int argc, char *argv[])
 	time_t mtime;
 	FILE *fp;
 
-	while ((ch = getopt(argc, argv, "DLPV")) != -1)
+	while ((ch = getopt(argc, argv, "DPV")) != -1)
 		switch (ch) {
 		case 'D':
 			Dflag = 1;
 			break;
-		case 'L':
-			printf("Known categories:\n");
-			printf("%s\n\n", categories);
-			exit(0);
 		case 'P':
-			init();
-			template(stdout);
-			exit(0);
+			Pflag = 1;
+			break;
 		case 'V':
 			printf("%s\n", version);
 			exit(0);
@@ -111,6 +101,12 @@ main(int argc, char *argv[])
 
 	if (argc > 0)
 		usage();
+
+	if (Pflag) {
+		init();
+		template(stdout);
+		exit(0);
+	}
 
 	if ((tmpdir = getenv("TMPDIR")) == NULL || tmpdir[0] == '\0')
 		tmpdir = _PATH_TMP;
@@ -532,31 +528,21 @@ checkfile(const char *pathname)
 {
 	FILE *fp;
 	size_t len;
-	int category, class, priority, release, severity, synopsis;
+	int category = 0, synopsis = 0;
 	char *buf;
 
 	if ((fp = fopen(pathname, "r")) == NULL) {
 		warn("%s", pathname);
 		return (0);
 	}
-	category = class = priority = release = severity = synopsis = 0;
 	while ((buf = fgetln(fp, &len))) {
 		if (matchline(">Category:", buf, len))
 			category = 1;
-		else if (matchline(">Class:", buf, len))
-			class = 1;
-		else if (matchline(">Priority:", buf, len))
-			priority = 1;
-		else if (matchline(">Release:", buf, len))
-			release = 1;
-		else if (matchline(">Severity:", buf, len))
-			severity = 1;
 		else if (matchline(">Synopsis:", buf, len))
 			synopsis = 1;
 	}
 	fclose(fp);
-	return (category && class && priority && release && severity &&
-	    synopsis);
+	return (category && synopsis);
 }
 
 void
@@ -576,31 +562,20 @@ template(FILE *fp)
 	fprintf(fp, "From: %s\n", pw->pw_name);
 	fprintf(fp, "Cc: %s\n", pw->pw_name);
 	fprintf(fp, "Reply-To: %s\n", pw->pw_name);
-	fprintf(fp, "X-sendbug-version: %s\n", version);
 	fprintf(fp, "\n");
-	fprintf(fp, "\n");
-	fprintf(fp, ">Submitter-Id:\tnet\n");
-	fprintf(fp, ">Originator:\t%s\n", fullname);
-	fprintf(fp, ">Organization:\n");
-	fprintf(fp, "net\n");
 	fprintf(fp, ">Synopsis:\t%s\n", comment[0]);
-	fprintf(fp, ">Severity:\t%s\n", comment[1]);
-	fprintf(fp, ">Priority:\t%s\n", comment[2]);
-	fprintf(fp, ">Category:\t%s\n", comment[3]);
-	fprintf(fp, ">Class:\t\t%s\n", comment[4]);
-	fprintf(fp, ">Release:\t%s\n", comment[5]);
+	fprintf(fp, ">Category:\t%s\n", comment[1]);
 	fprintf(fp, ">Environment:\n");
-	fprintf(fp, "\t%s\n", comment[6]);
 	fprintf(fp, "\tSystem      : %s %s\n", os, rel);
 	fprintf(fp, "\tDetails     : %s\n", details);
 	fprintf(fp, "\tArchitecture: %s.%s\n", os, mach);
 	fprintf(fp, "\tMachine     : %s\n", mach);
 	fprintf(fp, ">Description:\n");
-	fprintf(fp, "\t%s\n", comment[7]);
+	fprintf(fp, "\t%s\n", comment[2]);
 	fprintf(fp, ">How-To-Repeat:\n");
-	fprintf(fp, "\t%s\n", comment[8]);
+	fprintf(fp, "\t%s\n", comment[3]);
 	fprintf(fp, ">Fix:\n");
-	fprintf(fp, "\t%s\n", comment[9]);
+	fprintf(fp, "\t%s\n", comment[4]);
 
 	if (!Dflag)
 		dmesg(fp);

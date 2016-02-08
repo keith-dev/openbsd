@@ -1,4 +1,4 @@
-/*	$OpenBSD: i2c_scan.c,v 1.126 2008/04/22 02:22:54 cnst Exp $	*/
+/*	$OpenBSD: i2c_scan.c,v 1.130 2009/02/19 23:09:17 jsg Exp $	*/
 
 /*
  * Copyright (c) 2005 Theo de Raadt <deraadt@openbsd.org>
@@ -771,6 +771,9 @@ iic_probe_sensor(struct device *self, u_int8_t addr)
 			case 0x7a:
 				name = "w83792d";
 				break;
+			case 0xc1:
+				name = "w83627dhg";
+				break;
 			}
 		} else {
 			/*
@@ -872,6 +875,10 @@ iic_probe_sensor(struct device *self, u_int8_t addr)
 	    (iicprobew(0x07) & 0xfff0) == 0x0800 &&
 	    iicprobew(0x00) == 0x001d) {
 		name = "adt7408";
+	} else if ((addr & 0x18) == 0x18 && iicprobew(0x06) == 0x104a &&
+	    (iicprobew(0x07) & 0xfffe) == 0x0000 &&
+	    (iicprobew(0x00) == 0x002d || iicprobew(0x00) == 0x002e)) {
+		name = "stts424e02";
 	} else if (name == NULL &&
 	    (addr & 0x78) == 0x48) {		/* addr 0b1001xxx */
 		name = lm75probe();
@@ -919,18 +926,17 @@ iic_probe_sensor(struct device *self, u_int8_t addr)
 char *
 iic_probe_eeprom(struct device *self, u_int8_t addr)
 {
-	int reg, csum = 0;
+	u_int8_t type;
 	char *name = NULL;
 
-	/* SPD EEPROMs should only set lower nibble for size (ie <= 32K) */
-	if ((iicprobe(0x01) & 0xf0) != 0)
+	type = iicprobe(0x02);
+	/* limit to SPD types seen in the wild */
+	if (type < 4 || type > 11)
 		return (name);
 
-	for (reg = 0; reg < 0x3f; reg++)
-		csum += iicprobe(reg);
+	/* more matching in driver(s) */
+	name = "eeprom";
 
-	if (iicprobe(0x3f) == (csum & 0xff))
-		name = "spd";
 	return (name);
 }
 

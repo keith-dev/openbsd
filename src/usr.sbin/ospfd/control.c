@@ -1,4 +1,4 @@
-/*	$OpenBSD: control.c,v 1.20 2008/01/31 12:17:35 henning Exp $ */
+/*	$OpenBSD: control.c,v 1.22 2009/02/25 17:09:55 claudio Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -171,8 +171,10 @@ control_close(int fd)
 {
 	struct ctl_conn	*c;
 
-	if ((c = control_connbyfd(fd)) == NULL)
+	if ((c = control_connbyfd(fd)) == NULL) {
 		log_warn("control_close: fd %d: not found", fd);
+		return;
+	}
 
 	msgbuf_clear(&c->ibuf.w);
 	TAILQ_REMOVE(&ctl_conns, c, entry);
@@ -188,7 +190,7 @@ control_dispatch_imsg(int fd, short event, void *bula)
 {
 	struct ctl_conn	*c;
 	struct imsg	 imsg;
-	int		 n;
+	ssize_t		 n;
 	unsigned int	 ifidx;
 
 	if ((c = control_connbyfd(fd)) == NULL) {

@@ -1,4 +1,4 @@
-/*	$OpenBSD: headers.c,v 1.1 2008/05/23 07:15:46 ratchov Exp $	*/
+/*	$OpenBSD: headers.c,v 1.4 2009/01/23 17:38:15 ratchov Exp $	*/
 /*
  * Copyright (c) 2008 Alexandre Ratchov <alex@caoua.org>
  *
@@ -43,7 +43,7 @@ struct wavfmt {
 	uint32_t rate;
 	uint32_t byterate;
 	uint16_t blkalign;
-	uint16_t bits;	
+	uint16_t bits;
 } __packed;
 
 char wav_id_riff[4] = { 'R', 'I', 'F', 'F' };
@@ -76,7 +76,7 @@ wav_readfmt(int fd, unsigned csize, struct aparams *par)
 		return 0;
 	}
 	cmax = par->cmin + nch - 1;
-	if (cmax >= CHAN_MAX) {
+	if (cmax >= NCHAN_MAX) {
 		warnx("%u:%u: bad range", par->cmin, cmax);
 		return 0;
 	}
@@ -97,11 +97,13 @@ wav_readfmt(int fd, unsigned csize, struct aparams *par)
 	par->msb = 1;
 	par->cmax = cmax;
 	par->rate = rate;
+#ifdef DEBUG
 	if (debug_level > 0) {
 		fprintf(stderr, "wav_readfmt: using ");
 		aparams_print(par);
 		fprintf(stderr, "\n");
 	}
+#endif
 	return 1;
 }
 
@@ -217,7 +219,7 @@ wav_writehdr(int fd, struct aparams *par)
 
 	memcpy(hdr.data_hdr.id, wav_id_data, 4);
 	hdr.data_hdr.size = htole32(datasz);
-	    
+
 	if (lseek(fd, 0, SEEK_SET) < 0) {
 		warn("wav_writehdr: lseek");
 		return 0;

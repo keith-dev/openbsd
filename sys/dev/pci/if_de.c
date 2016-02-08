@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_de.c,v 1.99 2008/03/04 19:43:18 miod Exp $	*/
+/*	$OpenBSD: if_de.c,v 1.101 2008/11/28 02:44:17 brad Exp $	*/
 /*	$NetBSD: if_de.c,v 1.58 1998/01/12 09:39:58 thorpej Exp $	*/
 
 /*-
@@ -4152,11 +4152,6 @@ tulip_ifioctl(struct ifnet * ifp, u_long cmd, caddr_t data)
 
     s = splnet();
 
-    if ((error = ether_ioctl(ifp, &sc->tulip_ac, cmd, data)) > 0) {
-	    splx(s);
-	    return (error);
-    }
-
     switch (cmd) {
     case SIOCSIFADDR: {
 	ifp->if_flags |= IFF_UP;
@@ -4187,39 +4182,16 @@ tulip_ifioctl(struct ifnet * ifp, u_long cmd, caddr_t data)
 	break;
     }
 
-    case SIOCADDMULTI:
-    case SIOCDELMULTI: {
-	/*
-	 * Update multicast listeners
-	 */
-	if (cmd == SIOCADDMULTI)
-	    error = ether_addmulti(ifr, &sc->tulip_ac);
-	else
-	    error = ether_delmulti(ifr, &sc->tulip_ac);
-
-	if (error == ENETRESET) {
-	    if (ifp->if_flags & IFF_RUNNING) {
-		tulip_addr_filter(sc); /* reset multicast filtering */
-		tulip_init(sc);
-	    }
-	    error = 0;
-	}
-	break;
+    default:
+	error = ether_ioctl(ifp, &sc->tulip_ac, cmd, data);
     }
 
-    case SIOCSIFMTU:
-	/*
-	 * Set the interface MTU.
-	 */
-	if (ifr->ifr_mtu < ETHERMIN || ifr->ifr_mtu > ETHERMTU)
-	    error = EINVAL;
-	else if (ifp->if_mtu != ifr->ifr_mtu)
-	    ifp->if_mtu = ifr->ifr_mtu;
-	break;
-
-    default:
-	error = ENOTTY;
-	break;
+    if (error == ENETRESET) {
+	if (ifp->if_flags & IFF_RUNNING) {
+		tulip_addr_filter(sc); /* reset multicast filtering */
+		tulip_init(sc);
+	}
+	error = 0;
     }
 
     splx(s);

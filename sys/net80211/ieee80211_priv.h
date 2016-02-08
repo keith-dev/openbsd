@@ -1,4 +1,4 @@
-/*	$OpenBSD: ieee80211_priv.h,v 1.2 2008/07/27 14:21:15 damien Exp $	*/
+/*	$OpenBSD: ieee80211_priv.h,v 1.5 2009/01/26 19:09:41 damien Exp $	*/
 
 /*-
  * Copyright (c) 2008 Damien Bergamini <damien.bergamini@free.fr>
@@ -31,12 +31,48 @@ extern int ieee80211_debug;
 #define DPRINTF(X)
 #endif
 
+#define SEQ_LT(a,b)	\
+	((((u_int16_t)(a) - (u_int16_t)(b)) & 0xfff) > 2048)
+
 #define IEEE80211_AID_SET(b, w) \
 	((w)[IEEE80211_AID(b) / 32] |= (1 << (IEEE80211_AID(b) % 32)))
 #define IEEE80211_AID_CLR(b, w) \
 	((w)[IEEE80211_AID(b) / 32] &= ~(1 << (IEEE80211_AID(b) % 32)))
 #define IEEE80211_AID_ISSET(b, w) \
 	((w)[IEEE80211_AID(b) / 32] & (1 << (IEEE80211_AID(b) % 32)))
+
+#define IEEE80211_RSNIE_MAXLEN						\
+	(2 +		/* Version */					\
+	 4 +		/* Group Data Cipher Suite */			\
+	 2 +		/* Pairwise Cipher Suite Count */		\
+	 4 * 2 +	/* Pairwise Cipher Suite List (max 2) */	\
+	 2 +		/* AKM Suite List Count */			\
+	 4 * 4 +	/* AKM Suite List (max 4) */			\
+	 2 +		/* RSN Capabilities */				\
+	 2 +		/* PMKID Count */				\
+	 16 * 1 +	/* PMKID List (max 1) */			\
+	 4)		/* 11w: Group Integrity Cipher Suite */
+
+#define IEEE80211_WPAIE_MAXLEN						\
+	(4 +		/* MICROSOFT_OUI */				\
+	 2 +		/* Version */					\
+	 4 +		/* Group Cipher Suite */			\
+	 2 +		/* Pairwise Cipher Suite Count */		\
+	 4 * 2 +	/* Pairwise Cipher Suite List (max 2) */	\
+	 2 +		/* AKM Suite List Count */			\
+	 4 * 2)		/* AKM Suite List (max 2) */
+
+struct ieee80211_rsnparams {
+	u_int16_t		rsn_nakms;
+	u_int32_t		rsn_akms;
+	u_int16_t		rsn_nciphers;
+	u_int32_t		rsn_ciphers;
+	enum ieee80211_cipher	rsn_groupcipher;
+	enum ieee80211_cipher	rsn_groupmgmtcipher;
+	u_int16_t		rsn_caps;
+	u_int8_t		rsn_npmkids;
+	const u_int8_t		*rsn_pmkids;
+};
 
 /* unaligned big endian access */
 #define BE_READ_2(p)				\

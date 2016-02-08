@@ -1,4 +1,4 @@
-/* $OpenBSD: user.c,v 1.72 2007/08/02 16:18:05 deraadt Exp $ */
+/* $OpenBSD: user.c,v 1.77 2009/02/08 11:37:43 chl Exp $ */
 /* $NetBSD: user.c,v 1.69 2003/04/14 17:40:07 agc Exp $ */
 
 /*
@@ -426,7 +426,7 @@ modify_gid(char *group, char *newent)
 	groupc = strlen(group);
 	while (fgets(buf, sizeof(buf), from) != NULL) {
 		cc = strlen(buf);
-		if (buf[cc - 1] != '\n' && !feof(from)) {
+		if (cc > 0 && buf[cc - 1] != '\n' && !feof(from)) {
 			while (fgetc(from) != '\n' && !feof(from))
 				cc++;
 			warn("%s: line `%s' too long (%d bytes), skipping",
@@ -530,7 +530,7 @@ append_group(char *user, int ngroups, const char **groups)
 	}
 	while (fgets(buf, sizeof(buf), from) != NULL) {
 		cc = strlen(buf);
-		if (buf[cc - 1] != '\n' && !feof(from)) {
+		if (cc > 0 && buf[cc - 1] != '\n' && !feof(from)) {
 			while (fgetc(from) != '\n' && !feof(from))
 				cc++;
 			warn("%s: line `%s' too long (%d bytes), skipping",
@@ -911,6 +911,7 @@ scantime(time_t *tp, char *s)
 	*tp = 0;
 	if (s != NULL) {
 		(void) memset(&tm, 0, sizeof(tm));
+		tm.tm_isdst = -1;
 		if (strptime(s, "%c", &tm) != NULL) {
 			*tp = mktime(&tm);
 		} else if (strptime(s, "%B %d %Y", &tm) != NULL) {
@@ -985,9 +986,14 @@ adduser(char *login_name, user_t *up)
 	}
 	while (fgets(buf, sizeof(buf), fp) != NULL) {
 		cc = strlen(buf);
+		/*
+		 * Stop copying the file at the yp entry; we want to
+		 * put the new user before it, and preserve entries
+		 * after the yp entry.
+		 */
 		if (cc > 1 && buf[0] == '+' && buf[1] == ':') {
 			yp = 1;
-			continue;
+			break;
 		}
 		if (write(ptmpfd, buf, (size_t)(cc)) != cc) {
 			(void) fclose(fp);
@@ -1129,6 +1135,7 @@ adduser(char *login_name, user_t *up)
 		err(EXIT_FAILURE, "can't add `%s'", buf);
 	}
 	if (yp) {
+		/* put back the + line */
 		cc = snprintf(buf, sizeof(buf), "+:*::::::::\n");
 		if (cc == -1 || cc >= sizeof(buf)) {
 			(void) close(ptmpfd);
@@ -1139,6 +1146,22 @@ adduser(char *login_name, user_t *up)
 			(void) close(ptmpfd);
 			pw_abort();
 			err(EXIT_FAILURE, "can't add `%s'", buf);
+		}
+		/* copy the entries following it, if any */
+		while (fgets(buf, sizeof(buf), fp) != NULL) {
+			cc = strlen(buf);
+			if (write(ptmpfd, buf, (size_t)(cc)) != cc) {
+				(void) fclose(fp);
+				(void) close(ptmpfd);
+				pw_abort();
+				err(EXIT_FAILURE, "short write to /etc/ptmp (not %d chars)", cc);
+			}
+		}
+		if (ferror(fp)) {
+			(void) fclose(fp);
+			(void) close(ptmpfd);
+			pw_abort();
+			err(EXIT_FAILURE, "read error on %s", _PATH_MASTERPASSWD);
 		}
 	}
 	if (up->u_flags & F_MKDIR) {
@@ -1219,7 +1242,7 @@ rm_user_from_groups(char *login_name)
 	}
 	while (fgets(buf, sizeof(buf), from) > 0) {
 		cc = strlen(buf);
-		if (buf[cc - 1] != '\n' && !feof(from)) {
+		if (cc > 0 && buf[cc - 1] != '\n' && !feof(from)) {
 			while (fgetc(from) != '\n' && !feof(from))
 				cc++;
 			warn("%s: line `%s' too long (%d bytes), skipping",
@@ -1233,8 +1256,8 @@ rm_user_from_groups(char *login_name)
 				cc++;
 		}
 		if (cc != 3) {
-			warnx("Malformed entry `%.*s'. Skipping",
-			    (int)strlen(buf) - 1, buf);
+			buf[strcspn(buf, "\n")] = '\0';
+			warnx("Malformed entry `%s'. Skipping", buf);
 			continue;
 		}
 		while ((cp = strstr(cp, login_name)) != NULL) {
@@ -1294,7 +1317,7 @@ is_local(char *name, const char *file)
 	len = strlen(name);
 	for (ret = 0 ; fgets(buf, sizeof(buf), fp) != NULL ; ) {
 		cc = strlen(buf);
-		if (buf[cc - 1] != '\n' && !feof(fp)) {
+		if (cc > 0 && buf[cc - 1] != '\n' && !feof(fp)) {
 			while (fgetc(fp) != '\n' && !feof(fp))
 				cc++;
 			warn("%s: line `%s' too long (%d bytes), skipping",
@@ -1575,27 +1598,35 @@ void
 usermgmt_usage(const char *prog)
 {
 	if (strcmp(prog, "useradd") == 0) {
-		(void) fprintf(stderr, "usage: %s -D [-b basedir] [-e expiry] "
-		    "[-f changetime] [-g group]\n\t\t[-k skeletondir] "
-		    "[-r low..high] [-s shell] [-L class]\n", prog);
-		(void) fprintf(stderr, "usage: %s [-mov] [-G group[,group,...]]"
-		    " [-b basedir] [-c comment]\n\t\t"
-		    "[-d homedir] [-e expiry] [-f changetime] [-g group]\n\t\t"
-		    "[-k skeletondir] [-p password] "
-		    "[-r lowuid..highuid]\n\t\t[-s shell] [-u uid] [-L class] "
-		    "user\n", prog);
+		(void) fprintf(stderr, "usage: %s -D [-b base-directory] "
+		    "[-e expiry-time] [-f inactive-time]\n"
+		    "               [-g gid | name | =uid] [-k skel-directory] "
+		    "[-L login-class]\n"
+		    "               [-r low..high] [-s shell]\n", prog);
+		(void) fprintf(stderr, "       %s [-mov] [-b base-directory] "
+		    "[-c comment] [-d home-directory]\n"
+		    "               [-e expiry-time] [-f inactive-time]\n"
+		    "               [-G secondary-group[,group,...]] "
+		    "[-g gid | name | =uid]\n"
+		    "               [-k skel-directory] [-L login-class] "
+		    "[-p password] [-r low..high]\n"
+		    "               [-s shell] [-u uid] user\n", prog);
 	} else if (strcmp(prog, "usermod") == 0) {
-		(void) fprintf(stderr, "usage: %s [-mov] [-G group[,group,...]]"
-		    " [-c comment] [-d homedir]\n\t\t"
-		    "[-e expire] [-f changetime] [-g group] [-l newname]\n\t\t"
-		    "[-p password] [-s shell] [-u uid] [-L class] user\n",
+		(void) fprintf(stderr, "usage: %s [-mov] "
+		    "[-G secondary-group[,group,...]] [-c comment]\n"
+		    "               [-d home-directory] [-e expiry-time] "
+		    "[-f inactive-time]\n"
+		    "               [-g gid | name | =uid] [-L login-class] "
+		    "[-l new-login]\n"
+		    "               [-p password] [-s shell] [-u uid] user\n",
 		    prog);
 	} else if (strcmp(prog, "userdel") == 0) {
-		(void) fprintf(stderr, "usage: %s -D [-p preserve]\n", prog);
-		(void) fprintf(stderr, "usage: %s [-prv] user\n", prog);
+		(void) fprintf(stderr, "usage: %s -D [-p preserve-value]\n",
+		    prog);
+		(void) fprintf(stderr, "       %s [-prv] user\n", prog);
 #ifdef EXTENSIONS
 	} else if (strcmp(prog, "userinfo") == 0) {
-		(void) fprintf(stderr, "usage: %s [-ev] user\n", prog);
+		(void) fprintf(stderr, "usage: %s [-e] user\n", prog);
 #endif
 	} else if (strcmp(prog, "groupadd") == 0) {
 		(void) fprintf(stderr, "usage: %s [-ov] [-g gid] group\n",
@@ -1606,15 +1637,15 @@ usermgmt_usage(const char *prog)
 		(void) fprintf(stderr, "usage: %s [-ov] [-g gid] [-n newname] "
 		    "group\n", prog);
 	} else if (strcmp(prog, "user") == 0 || strcmp(prog, "group") == 0) {
-		(void) fprintf(stderr, "usage: %s [ add | del | mod "
+		(void) fprintf(stderr, "usage: %s [add | del | mod"
 #ifdef EXTENSIONS
-		"| info "
+		" | info"
 #endif
 		"] ...\n",
 		    prog);
 #ifdef EXTENSIONS
 	} else if (strcmp(prog, "groupinfo") == 0) {
-		(void) fprintf(stderr, "usage: %s [-ev] group\n", prog);
+		(void) fprintf(stderr, "usage: %s [-e] group\n", prog);
 #endif
 	} else {
 		(void) fprintf(stderr, "This program must be called as {user,group}{add,del,mod,info},\n%s is not an understood name.\n", prog);

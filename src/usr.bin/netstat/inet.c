@@ -1,4 +1,4 @@
-/*	$OpenBSD: inet.c,v 1.106 2008/05/08 03:13:55 mpf Exp $	*/
+/*	$OpenBSD: inet.c,v 1.110 2009/02/07 15:06:04 chl Exp $	*/
 /*	$NetBSD: inet.c,v 1.14 1995/10/03 21:42:37 thorpej Exp $	*/
 
 /*
@@ -68,12 +68,14 @@
 #include <net/if.h>
 #include <net/pfvar.h>
 #include <net/if_pfsync.h>
+#include <net/if_pflow.h>
 
 #include <rpc/rpc.h>
 #include <rpc/pmap_prot.h>
 #include <rpc/pmap_clnt.h>
 
 #include <arpa/inet.h>
+#include <err.h>
 #include <limits.h>
 #include <netdb.h>
 #include <stdio.h>
@@ -92,7 +94,7 @@ static void protopr0(u_long, char *, int);
 char	*inetname(struct in_addr *);
 void	inetprint(struct in_addr *, in_port_t, char *, int);
 char	*inet6name(struct in6_addr *);
-void	inet6print(struct in6_addr *, int, char *, int);
+void	inet6print(struct in6_addr *, int, char *);
 
 /*
  * Print a summary of connections related to an Internet
@@ -198,9 +200,9 @@ protopr0(u_long off, char *name, int af)
 		    sockb.so_snd.sb_cc);
 		if (inpcb.inp_flags & INP_IPV6) {
 			inet6print(&inpcb.inp_laddr6, (int)inpcb.inp_lport,
-			    name, 1);
+			    name);
 			inet6print(&inpcb.inp_faddr6, (int)inpcb.inp_fport,
-			    name, 0);
+			    name);
 		} else {
 			inetprint(&inpcb.inp_laddr, (int)inpcb.inp_lport,
 			    name, 1);
@@ -410,7 +412,7 @@ ip_stats(char *name)
 {
 	struct ipstat ipstat;
 	int mib[] = { CTL_NET, AF_INET, IPPROTO_IP, IPCTL_STATS };
-	size_t len = sizeof(ipstat);;
+	size_t len = sizeof(ipstat);
 
 	if (sysctl(mib, sizeof(mib) / sizeof(mib[0]),
 	    &ipstat, &len, NULL, 0) == -1) {
@@ -1033,6 +1035,37 @@ pfsync_stats(char *name)
 	p(pfsyncs_opackets6, "\t%llu packet%s sent (IPv6)\n");
 	p2(pfsyncs_onomem, "\t\t%llu send failed due to mbuf memory error\n");
 	p2(pfsyncs_oerrors, "\t\t%llu send error\n");
+#undef p
+#undef p2
+}
+
+/*
+ * Dump pflow statistics structure.
+ */
+void
+pflow_stats(char *name)
+{
+	struct pflowstats flowstats;
+	int mib[] = { CTL_NET, PF_PFLOW, NET_PFLOW_STATS };
+	size_t len = sizeof(struct pflowstats);
+
+	if (sysctl(mib, sizeof(mib) / sizeof(mib[0]), &flowstats, &len,
+	    NULL, 0) == -1) {
+		if (errno != ENOPROTOOPT)
+			warn(name);
+		return;
+	}
+
+	printf("%s:\n", name);
+#define p(f, m) if (flowstats.f || sflag <= 1) \
+	printf(m, flowstats.f, plural(flowstats.f))
+#define p2(f, m) if (flowstats.f || sflag <= 1) \
+	printf(m, flowstats.f)
+
+	p(pflow_flows, "\t%llu flow%s sent\n");
+	p(pflow_packets, "\t%llu packet%s sent\n");
+	p2(pflow_onomem, "\t\t%llu send failed due to mbuf memory error\n");
+	p2(pflow_oerrors, "\t\t%llu send error\n");
 #undef p
 #undef p2
 }

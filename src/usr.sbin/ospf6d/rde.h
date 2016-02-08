@@ -1,4 +1,4 @@
-/*	$OpenBSD: rde.h,v 1.5 2007/11/27 12:23:06 claudio Exp $ */
+/*	$OpenBSD: rde.h,v 1.9 2009/02/12 16:54:30 stsp Exp $ */
 
 /*
  * Copyright (c) 2004, 2005 Esben Norby <norby@openbsd.org>
@@ -41,6 +41,7 @@ struct vertex {
 	struct event		 ev;
 	struct area		*area;
 	struct lsa		*lsa;
+	struct lsa_tree		*lsa_tree;
 	time_t			 changed;
 	time_t			 stamp;
 	u_int32_t		 cost;
@@ -70,8 +71,18 @@ struct rde_nbr {
 	struct iface			*iface;
 	u_int32_t			 peerid;	/* unique ID in DB */
 	unsigned int			 ifindex;
+	u_int32_t		 	 iface_id;	/* id of neighbor's
+							   iface */
 	int				 state;
 	int				 self;
+};
+
+/* expanded and host-byte-order version of a lsa_prefix */
+struct rt_prefix {
+	struct in6_addr	prefix;
+	u_int16_t	metric;
+	u_int8_t	prefixlen;
+	u_int8_t	options;
 };
 
 struct rt_nexthop {
@@ -133,7 +144,7 @@ void		 lsa_age(struct vertex *);
 struct vertex	*lsa_find(struct iface *, u_int16_t, u_int32_t, u_int32_t);
 struct vertex	*lsa_find_net(struct area *area, u_int32_t);
 u_int16_t	 lsa_num_links(struct vertex *);
-void		 lsa_snap(struct area *, u_int32_t);
+void		 lsa_snap(struct rde_nbr *, u_int32_t);
 void		 lsa_dump(struct lsa_tree *, int, pid_t);
 void		 lsa_merge(struct rde_nbr *, struct lsa *, struct vertex *);
 void		 lsa_remove_invalid_sums(struct area *);

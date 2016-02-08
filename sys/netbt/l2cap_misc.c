@@ -1,5 +1,5 @@
-/*	$OpenBSD: l2cap_misc.c,v 1.4 2008/06/08 21:10:28 claudio Exp $	*/
-/*	$NetBSD: l2cap_misc.c,v 1.5 2007/11/03 17:20:17 plunky Exp $	*/
+/*	$OpenBSD: l2cap_misc.c,v 1.6 2008/11/22 04:42:58 uwe Exp $	*/
+/*	$NetBSD: l2cap_misc.c,v 1.6 2008/04/24 11:38:37 ad Exp $	*/
 
 /*-
  * Copyright (c) 2005 Iain Hibbert.
@@ -137,7 +137,7 @@ l2cap_request_alloc(struct l2cap_channel *chan, uint8_t code)
 	req->lr_link = link;
 
 	timeout_set(&req->lr_rtx, l2cap_rtx, req);
-	timeout_add(&req->lr_rtx, l2cap_response_timeout*hz);
+	timeout_add_sec(&req->lr_rtx, l2cap_response_timeout);
 
 	TAILQ_INSERT_TAIL(&link->hl_reqs, req, lr_next);
 
@@ -188,9 +188,8 @@ l2cap_rtx(void *arg)
 {
 	struct l2cap_req *req = arg;
 	struct l2cap_channel *chan;
-	int s;
 
-	s = splsoftnet();
+	mutex_enter(&bt_lock);
 
 	chan = req->lr_chan;
 	DPRINTF("cid %d, ident %d\n", (chan ? chan->lc_lcid : 0), req->lr_id);
@@ -200,7 +199,7 @@ l2cap_rtx(void *arg)
 	if (chan && chan->lc_state != L2CAP_CLOSED)
 		l2cap_close(chan, ETIMEDOUT);
 
-	splx(s);
+	mutex_exit(&bt_lock);
 }
 
 /*

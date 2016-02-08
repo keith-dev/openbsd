@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_axe.c,v 1.85 2008/05/14 01:41:10 brad Exp $	*/
+/*	$OpenBSD: if_axe.c,v 1.91 2008/11/28 02:44:18 brad Exp $	*/
 
 /*
  * Copyright (c) 2005, 2006, 2007 Jonathan Gray <jsg@openbsd.org>
@@ -708,6 +708,8 @@ axe_attach(struct device *parent, struct device *self, void *aux)
 
 	IFQ_SET_READY(&ifp->if_snd);
 
+	ifp->if_capabilities = IFCAP_VLAN_MTU;
+
 	/* Initialize MII/media info. */
 	mii = &sc->axe_mii;
 	mii->mii_ifp = ifp;
@@ -754,8 +756,6 @@ axe_detach(struct device *self, int flags)
 	timeout_del(&sc->axe_stat_ch);
 
 	sc->axe_dying = 1;
-
-	ether_ifdetach(ifp);
 
 	if (sc->axe_ep[AXE_ENDPT_TX] != NULL)
 		usbd_abort_pipe(sc->axe_ep[AXE_ENDPT_TX]);
@@ -1126,7 +1126,7 @@ axe_tick_task(void *xsc)
 			   axe_start(ifp);
 	}
 
-	timeout_add(&sc->axe_stat_ch, hz);
+	timeout_add_sec(&sc->axe_stat_ch, 1);
 
 	splx(s);
 }
@@ -1325,7 +1325,7 @@ axe_init(void *xsc)
 
 	splx(s);
 
-	timeout_add(&sc->axe_stat_ch, hz);
+	timeout_add_sec(&sc->axe_stat_ch, 1);
 	return;
 }
 
@@ -1337,7 +1337,9 @@ axe_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	struct ifaddr		*ifa = (struct ifaddr *)data;
 	struct mii_data		*mii;
 	uWord			rxmode;
-	int			error = 0;
+	int			s, error = 0;
+
+	s = splnet();
 
 	switch(cmd) {
 	case SIOCSIFADDR:
@@ -1348,13 +1350,6 @@ axe_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		if (ifa->ifa_addr->sa_family == AF_INET)
 			arp_ifinit(&sc->arpcom, ifa);
 #endif
-		break;
-
-	case SIOCSIFMTU:
-		if (ifr->ifr_mtu < ETHERMIN || ifr->ifr_mtu > ifp->if_hardmtu)
-			error = EINVAL;
-		else if (ifp->if_mtu != ifr->ifr_mtu)
-			ifp->if_mtu = ifr->ifr_mtu;
 		break;
 
 	case SIOCSIFFLAGS:
@@ -1383,22 +1378,7 @@ axe_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		}
 		sc->axe_if_flags = ifp->if_flags;
 		break;
-	case SIOCADDMULTI:
-	case SIOCDELMULTI:
-		error = (cmd == SIOCADDMULTI) ?
-		    ether_addmulti(ifr, &sc->arpcom) :
-		    ether_delmulti(ifr, &sc->arpcom);
 
-		if (error == ENETRESET) {
-			/*
-			 * Multicast list has changed; set the hardware
-			 * filter accordingly.
-			 */
-			if (ifp->if_flags & IFF_RUNNING)
-				axe_setmulti(sc);
-			error = 0;
-		}
-		break;
 	case SIOCGIFMEDIA:
 	case SIOCSIFMEDIA:
 		mii = GET_MII(sc);
@@ -1406,10 +1386,16 @@ axe_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		break;
 
 	default:
-		error = EINVAL;
-		break;
+		error = ether_ioctl(ifp, &sc->arpcom, cmd, data);
 	}
 
+	if (error == ENETRESET) {
+		if (ifp->if_flags & IFF_RUNNING)
+			axe_setmulti(sc);
+		error = 0;
+	}
+
+	splx(s);
 	return(error);
 }
 

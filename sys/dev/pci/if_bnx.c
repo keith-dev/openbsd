@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_bnx.c,v 1.64 2008/06/24 23:02:42 brad Exp $	*/
+/*	$OpenBSD: if_bnx.c,v 1.71 2008/11/28 02:44:17 brad Exp $	*/
 
 /*-
  * Copyright (c) 2006 Broadcom Corporation
@@ -4014,26 +4014,14 @@ bnx_rx_intr(struct bnx_softc *sc)
 			if ((status & L2_FHDR_STATUS_L2_VLAN_TAG) &&
 			    !(sc->rx_mode & BNX_EMAC_RX_MODE_KEEP_VLAN_TAG)) {
 #if NVLAN > 0
-				struct ether_vlan_header vh;
-
 				DBPRINT(sc, BNX_VERBOSE_SEND,
 				    "%s(): VLAN tag = 0x%04X\n",
 				    __FUNCTION__,
 				    l2fhdr->l2_fhdr_vlan_tag);
 
-				if (m->m_pkthdr.len < ETHER_HDR_LEN) {
-					m_freem(m);
-					goto bnx_rx_int_next_rx;
-				}
-				m_copydata(m, 0, ETHER_HDR_LEN, (caddr_t)&vh);
-				vh.evl_proto = vh.evl_encap_proto;
-				vh.evl_tag = htons(l2fhdr->l2_fhdr_vlan_tag);
-				vh.evl_encap_proto = htons(ETHERTYPE_VLAN);
-				m_adj(m, ETHER_HDR_LEN);
-				M_PREPEND(m, sizeof(vh), M_DONTWAIT);
-				if (m == NULL)
-					goto bnx_rx_int_next_rx;
-				m_copyback(m, 0, sizeof(vh), &vh);
+				m->m_pkthdr.ether_vtag =
+				    l2fhdr->l2_fhdr_vlan_tag;
+				m->m_flags |= M_VLANTAG;
 #else
 				m_freem(m);
 				goto bnx_rx_int_next_rx;
@@ -4059,7 +4047,8 @@ bnx_rx_int_next_rx:
 			 * user see the packet.
 			 */
 			if (ifp->if_bpf)
-				bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
+				bpf_mtap_ether(ifp->if_bpf, m,
+				    BPF_DIRECTION_IN);
 #endif
 
 			DBPRINT(sc, BNX_VERBOSE_RECV,
@@ -4327,7 +4316,7 @@ bnx_init(void *xsc)
 	ifp->if_flags |= IFF_RUNNING;
 	ifp->if_flags &= ~IFF_OACTIVE;
 
-	timeout_add(&sc->bnx_timeout, hz);
+	timeout_add_sec(&sc->bnx_timeout, 1);
 
 bnx_init_exit:
 	DBPRINT(sc, BNX_VERBOSE_RESET, "Exiting %s()\n", __FUNCTION__);
@@ -4400,11 +4389,9 @@ bnx_tx_encap(struct bnx_softc *sc, struct mbuf **m_head)
 
 #if NVLAN > 0
 	/* Transfer any VLAN tags to the bd. */
-	if ((m0->m_flags & (M_PROTO1|M_PKTHDR)) == (M_PROTO1|M_PKTHDR) &&
-	    m0->m_pkthdr.rcvif != NULL) {
-		struct ifvlan *ifv = m0->m_pkthdr.rcvif->if_softc;
+	if (m0->m_flags & M_VLANTAG) {
 		flags |= TX_BD_FLAGS_VLAN_TAG;
-		vlan_tag = ifv->ifv_tag;
+		vlan_tag = m0->m_pkthdr.ether_vtag;
 	}
 #endif
 
@@ -4560,7 +4547,7 @@ bnx_start(struct ifnet *ifp)
 #if NBPFILTER > 0
 		/* Send a copy of the frame to any BPF listeners. */
 		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, m_head, BPF_DIRECTION_OUT);
+			bpf_mtap_ether(ifp->if_bpf, m_head, BPF_DIRECTION_OUT);
 #endif
 	}
 
@@ -4599,17 +4586,12 @@ int
 bnx_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 {
 	struct bnx_softc	*sc = ifp->if_softc;
+	struct ifaddr		*ifa = (struct ifaddr *) data;
 	struct ifreq		*ifr = (struct ifreq *) data;
-	struct ifaddr		*ifa = (struct ifaddr *)data;
 	struct mii_data		*mii = &sc->bnx_mii;
 	int			s, error = 0;
 
 	s = splnet();
-
-	if ((error = ether_ioctl(ifp, &sc->arpcom, command, data)) > 0) {
-		splx(s);
-		return (error);
-	}
 
 	switch (command) {
 	case SIOCSIFADDR:
@@ -4620,13 +4602,6 @@ bnx_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 		if (ifa->ifa_addr->sa_family == AF_INET)
 			arp_ifinit(&sc->arpcom, ifa);
 #endif /* INET */
-		break;
-
-	case SIOCSIFMTU:
-		if (ifr->ifr_mtu < ETHERMIN || ifr->ifr_mtu > ifp->if_hardmtu)
-			error = EINVAL;
-		else if (ifp->if_mtu != ifr->ifr_mtu)
-			ifp->if_mtu = ifr->ifr_mtu;
 		break;
 
 	case SIOCSIFFLAGS:
@@ -4646,19 +4621,6 @@ bnx_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 		sc->bnx_if_flags = ifp->if_flags;
 		break;
 
-	case SIOCADDMULTI:
-	case SIOCDELMULTI:
-		error = (command == SIOCADDMULTI)
-			? ether_addmulti(ifr, &sc->arpcom)
-			: ether_delmulti(ifr, &sc->arpcom);
-
-		if (error == ENETRESET) {
-			if (ifp->if_flags & IFF_RUNNING)
-				bnx_set_rx_mode(sc);
-			error = 0;
-		}
-		break;
-
 	case SIOCSIFMEDIA:
 	case SIOCGIFMEDIA:
 		DBPRINT(sc, BNX_VERBOSE, "bnx_phy_flags = 0x%08X\n",
@@ -4668,12 +4630,16 @@ bnx_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 		break;
 
 	default:
-		error = ENOTTY;
-		break;
+		error = ether_ioctl(ifp, &sc->arpcom, command, data);
+	}
+
+	if (error == ENETRESET) {
+		if (ifp->if_flags & IFF_RUNNING)
+			bnx_set_rx_mode(sc);
+		error = 0;
 	}
 
 	splx(s);
-
 	return (error);
 }
 
@@ -4857,7 +4823,8 @@ bnx_set_rx_mode(struct bnx_softc *sc)
 	 * ASF/IPMI/UMP firmware requires that VLAN tag stripping
 	 * be enbled.
 	 */
-	if (!(sc->bnx_flags & BNX_MFW_ENABLE_FLAG))
+	if (!(ifp->if_capabilities & IFCAP_VLAN_HWTAGGING) &&
+	    (!(sc->bnx_flags & BNX_MFW_ENABLE_FLAG)))
 		rx_mode |= BNX_EMAC_RX_MODE_KEEP_VLAN_TAG;
 
 	/*
@@ -5140,7 +5107,7 @@ bnx_tick(void *xsc)
 	bnx_stats_update(sc);
 
 	/* Schedule the next tick. */
-	timeout_add(&sc->bnx_timeout, hz);
+	timeout_add_sec(&sc->bnx_timeout, 1);
 
 	/* If link is up already up then we're done. */
 	if (sc->bnx_link)

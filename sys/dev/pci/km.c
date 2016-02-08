@@ -1,4 +1,4 @@
-/*	$OpenBSD: km.c,v 1.1 2008/04/29 05:29:59 cnst Exp $	*/
+/*	$OpenBSD: km.c,v 1.4 2009/01/26 15:07:49 kettenis Exp $	*/
 
 /*
  * Copyright (c) 2008 Constantine A. Murenin <cnst+openbsd@bugmail.mojo.ru>
@@ -29,7 +29,7 @@
 
 
 /*
- * AMD Family 10h Processors, Function 3 -- Miscellaneous Control
+ * AMD Family 10h/11h Processors, Function 3 -- Miscellaneous Control
  */
 
 /* Function 3 Registers */
@@ -68,7 +68,8 @@ struct cfdriver km_cd = {
 };
 
 static const struct pci_matchid km_devices[] = {
-	{ PCI_VENDOR_AMD, PCI_PRODUCT_AMD_AMD64_10_MISC}
+	{ PCI_VENDOR_AMD, PCI_PRODUCT_AMD_AMD64_10_MISC },
+	{ PCI_VENDOR_AMD, PCI_PRODUCT_AMD_AMD64_11_MISC }
 };
 
 
@@ -96,7 +97,7 @@ km_attach(struct device *parent, struct device *self, void *aux)
 	sensor_attach(&sc->sc_sensordev, &sc->sc_sensor);
 
 	if (sensor_task_register(sc, km_refresh, 5) == NULL) {
-		printf(": unable to register the update task\n");
+		printf(": unable to register update task\n");
 		return;
 	}
 

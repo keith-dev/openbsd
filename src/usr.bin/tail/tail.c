@@ -1,4 +1,4 @@
-/*	$OpenBSD: tail.c,v 1.14 2007/10/31 16:29:50 jmc Exp $	*/
+/*	$OpenBSD: tail.c,v 1.16 2008/11/13 18:33:03 landry Exp $	*/
 
 /*-
  * Copyright (c) 1991, 1993
@@ -42,7 +42,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)tail.c	8.1 (Berkeley) 6/6/93";
 #endif
-static char rcsid[] = "$OpenBSD: tail.c,v 1.14 2007/10/31 16:29:50 jmc Exp $";
+static char rcsid[] = "$OpenBSD: tail.c,v 1.16 2008/11/13 18:33:03 landry Exp $";
 #endif /* not lint */
 
 #include <sys/types.h>

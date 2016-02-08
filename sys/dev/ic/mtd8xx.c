@@ -1,4 +1,4 @@
-/*	$OpenBSD: mtd8xx.c,v 1.13 2007/11/26 09:28:33 martynas Exp $	*/
+/*	$OpenBSD: mtd8xx.c,v 1.16 2008/11/28 02:44:17 brad Exp $	*/
 
 /*
  * Copyright (c) 2003 Oleg Safiullin <form@pdp11.org.ru>
@@ -578,15 +578,11 @@ static int
 mtd_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 {
 	struct mtd_softc *sc = ifp->if_softc;
-	struct ifreq *ifr = (struct ifreq *)data;
 	struct ifaddr *ifa = (struct ifaddr *)data;
-	int s, error;
+	struct ifreq *ifr = (struct ifreq *)data;
+	int s, error = 0;
 
 	s = splnet();
-	if ((error = ether_ioctl(ifp, &sc->sc_arpcom, command, data)) > 0) {
-		splx(s);
-		return (error);
-	}
 
 	switch (command) {
 	case SIOCSIFADDR:
@@ -600,12 +596,6 @@ mtd_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 #endif /* INET */
 		}
 		break;
-	case SIOCSIFMTU:
-		if (ifr->ifr_mtu >= ETHERMIN && ifr->ifr_mtu <= ETHERMTU)
-			ifp->if_mtu = ifr->ifr_mtu;
-		else
-			error = EINVAL;
-		break;
 
 	case SIOCSIFFLAGS:
 		if (ifp->if_flags & IFF_UP)
@@ -616,29 +606,19 @@ mtd_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 		}
 		error = 0;
 		break;
-	case SIOCADDMULTI:
-	case SIOCDELMULTI:
-		error = (command == SIOCADDMULTI) ?
-		    ether_addmulti(ifr, &sc->sc_arpcom) :
-		    ether_delmulti(ifr, &sc->sc_arpcom);
 
-		if (error == ENETRESET) {
-			/*
-			 * Multicast list has changed; set the hardware
-			 * filter accordingly.
-			 */
-			if (ifp->if_flags & IFF_RUNNING)
-				mtd_setmulti(sc);
-			error = 0;
-		}
-		break;
 	case SIOCGIFMEDIA:
 	case SIOCSIFMEDIA:
 		error = ifmedia_ioctl(ifp, ifr, &sc->sc_mii.mii_media, command);
 		break;
 	default:
-		error = EINVAL;
-		break;
+		error = ether_ioctl(ifp, &sc->sc_arpcom, command, data);
+	}
+
+	if (error == ENETRESET) {
+		if (ifp->if_flags & IFF_RUNNING)
+			mtd_setmulti(sc);
+		error = 0;
 	}
 
 	splx(s);
@@ -950,15 +930,14 @@ mtd_rxeof(struct mtd_softc *sc)
 		    0, sc->mtd_cdata.mtd_rx_chain[i].sd_map->dm_mapsize,
 		    BUS_DMASYNC_POSTREAD);
 
-		m0 = m_devget(mtod(m, char *) - ETHER_ALIGN, total_len + ETHER_ALIGN,
-		    0, ifp, NULL);
+		m0 = m_devget(mtod(m, char *), total_len,  ETHER_ALIGN,
+		    ifp, NULL);
 		mtd_newbuf(sc, i, m);
 		i = (i + 1) % MTD_RX_LIST_CNT;
 		if (m0 == NULL) {
 			ifp->if_ierrors++;
 			continue;
 		}
-		m_adj(m0, ETHER_ALIGN);
 		m = m0;
 
 		ifp->if_ipackets++;

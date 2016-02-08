@@ -1,4 +1,4 @@
-/*	$OpenBSD: ffs_alloc.c,v 1.85 2008/08/02 08:34:36 otto Exp $	*/
+/*	$OpenBSD: ffs_alloc.c,v 1.87 2009/01/17 18:50:25 grange Exp $	*/
 /*	$NetBSD: ffs_alloc.c,v 1.11 1996/05/11 18:27:09 mycroft Exp $	*/
 
 /*
@@ -894,7 +894,9 @@ ffs_inode_alloc(struct inode *pip, mode_t mode, struct ucred *cred,
 	 * XXX - just increment for now, this is wrong! (millert)
 	 *       Need a way to preserve randomization.
 	 */
-	if (DIP(ip, gen) == 0 || ++(DIP(ip, gen)) == 0)
+	if (DIP(ip, gen) != 0)
+		DIP_ADD(ip, gen, 1);
+	if (DIP(ip, gen) == 0)
 		DIP_ASSIGN(ip, gen, arc4random() & INT_MAX);
 
 	if (DIP(ip, gen) == 0 || DIP(ip, gen) == -1)
@@ -1346,7 +1348,7 @@ ffs_alloccg(struct inode *ip, int cg, daddr64_t bpref, int size)
 	if (frags != allocsiz)
 		cgp->cg_frsum[allocsiz - frags]++;
 
-	blkno = (daddr64_t)cg * fs->fs_fpg + bno;
+	blkno = cgbase(fs, cg) + bno;
 	if (DOINGSOFTDEP(ITOV(ip)))
 		softdep_setup_blkmapdep(bp, fs, blkno);
 	bdwrite(bp);
@@ -1407,7 +1409,7 @@ gotit:
 	}
 
 	fs->fs_fmod = 1;
-	blkno = (daddr64_t)cgp->cg_cgx * fs->fs_fpg + bno;
+	blkno = cgbase(fs, cgp->cg_cgx) + bno;
 
 	if (DOINGSOFTDEP(ITOV(ip)))
 		softdep_setup_blkmapdep(bp, fs, blkno);
@@ -1509,7 +1511,7 @@ ffs_clusteralloc(struct inode *ip, int cg, daddr64_t bpref, int len)
 		if (!ffs_isblock(fs, cg_blksfree(cgp), got - run + i))
 			panic("ffs_clusteralloc: map mismatch");
 #endif
-	bno = cg * fs->fs_fpg + blkstofrags(fs, got - run + 1);
+	bno = cgbase(fs, cg) + blkstofrags(fs, got - run + 1);
 #ifdef DIAGNOSTIC
 	if (dtog(fs, bno) != cg)
 		panic("ffs_clusteralloc: allocated out of group");

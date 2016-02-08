@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_sis.c,v 1.80 2008/07/15 12:10:48 thib Exp $ */
+/*	$OpenBSD: if_sis.c,v 1.87 2009/02/24 21:10:14 claudio Exp $ */
 /*
  * Copyright (c) 1997, 1998, 1999
  *	Bill Paul <wpaul@ctr.columbia.edu>.  All rights reserved.
@@ -319,22 +319,15 @@ void
 sis_read_cmos(struct sis_softc *sc, struct pci_attach_args *pa,
     caddr_t dest, int off, int cnt)
 {
-	bus_space_tag_t btag;
 	u_int32_t reg;
 	int i;
 
 	reg = pci_conf_read(pa->pa_pc, pa->pa_tag, 0x48);
 	pci_conf_write(pa->pa_pc, pa->pa_tag, 0x48, reg | 0x40);
 
-#if defined(__amd64__)
-	btag = X86_BUS_SPACE_IO;
-#elif defined(__i386__)
-	btag = I386_BUS_SPACE_IO;
-#endif
-
 	for (i = 0; i < cnt; i++) {
-		bus_space_write_1(btag, 0x0, 0x70, i + off);
-		*(dest + i) = bus_space_read_1(btag, 0x0, 0x71);
+		bus_space_write_1(pa->pa_iot, 0x0, 0x70, i + off);
+		*(dest + i) = bus_space_read_1(pa->pa_iot, 0x0, 0x71);
 	}
 
 	pci_conf_write(pa->pa_pc, pa->pa_tag, 0x48, reg & ~0x40);
@@ -834,7 +827,7 @@ allmulti:
 void
 sis_setpromisc(struct sis_softc *sc)
 {
-	struct ifnet	*ifp = ifp = &sc->arpcom.ac_if;
+	struct ifnet	*ifp = &sc->arpcom.ac_if;
 
 	/* If we want promiscuous mode, set the allframes bit. */
 	if (ifp->if_flags & IFF_PROMISC)
@@ -1314,9 +1307,13 @@ sis_rxeof(struct sis_softc *sc)
 		 * If an error occurs, update stats, clear the
 		 * status word and leave the mbuf cluster in place:
 		 * it should simply get re-used next time this descriptor
-	 	 * comes up in the ring.
+	 	 * comes up in the ring. However, don't report long
+		 * frames as errors since they could be VLANs.
 		 */
-		if (!(rxstat & SIS_CMDSTS_PKT_OK)) {
+		if (rxstat & SIS_RXSTAT_GIANT &&
+		    total_len <= (ETHER_MAX_DIX_LEN - ETHER_CRC_LEN))
+			rxstat &= ~SIS_RXSTAT_GIANT;
+		if (SIS_RXSTAT_ERROR(rxstat)) {
 			ifp->if_ierrors++;
 			if (rxstat & SIS_RXSTAT_COLL)
 				ifp->if_collisions++;
@@ -1344,14 +1341,13 @@ sis_rxeof(struct sis_softc *sc)
 #endif
 		{
 			struct mbuf *m0;
-			m0 = m_devget(mtod(m, char *) - ETHER_ALIGN,
-			    total_len + ETHER_ALIGN, 0, ifp, NULL);
+			m0 = m_devget(mtod(m, char *), total_len, ETHER_ALIGN,
+			    ifp, NULL);
 			sis_newbuf(sc, cur_rx, m);
 			if (m0 == NULL) {
 				ifp->if_ierrors++;
 				continue;
 			}
-			m_adj(m0, ETHER_ALIGN);
 			m = m0;
 		}
 
@@ -1463,7 +1459,7 @@ sis_tick(void *xsc)
 		if (!IFQ_IS_EMPTY(&ifp->if_snd))
 			sis_start(ifp);
 	}
-	timeout_add(&sc->sis_timeout, hz);
+	timeout_add_sec(&sc->sis_timeout, 1);
 
 	splx(s);
 }
@@ -1501,10 +1497,10 @@ sis_intr(void *arg)
 
 		if (status &
 		    (SIS_ISR_RX_DESC_OK | SIS_ISR_RX_OK |
-		     SIS_ISR_RX_IDLE))
+		     SIS_ISR_RX_ERR | SIS_ISR_RX_IDLE))
 			sis_rxeof(sc);
 
-		if (status & (SIS_ISR_RX_ERR | SIS_ISR_RX_OFLOW))
+		if (status & SIS_ISR_RX_OFLOW)
 			sis_rxeoc(sc);
 
 #if 0
@@ -1841,7 +1837,7 @@ sis_init(void *xsc)
 
 	splx(s);
 
-	timeout_add(&sc->sis_timeout, hz);
+	timeout_add_sec(&sc->sis_timeout, 1);
 }
 
 /*
@@ -1888,17 +1884,12 @@ int
 sis_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 {
 	struct sis_softc	*sc = ifp->if_softc;
+	struct ifaddr		*ifa = (struct ifaddr *) data;
 	struct ifreq		*ifr = (struct ifreq *) data;
-	struct ifaddr		*ifa = (struct ifaddr *)data;
 	struct mii_data		*mii;
 	int			s, error = 0;
 
 	s = splnet();
-
-	if ((error = ether_ioctl(ifp, &sc->arpcom, command, data)) > 0) {
-		splx(s);
-		return error;
-	}
 
 	switch(command) {
 	case SIOCSIFADDR:
@@ -1910,6 +1901,7 @@ sis_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 			arp_ifinit(&sc->arpcom, ifa);
 #endif
 		break;
+
 	case SIOCSIFFLAGS:
 		if (ifp->if_flags & IFF_UP) {
 			if (ifp->if_flags & IFF_RUNNING &&
@@ -1931,40 +1923,24 @@ sis_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 		}
 		sc->sc_if_flags = ifp->if_flags;
 		break;
-	case SIOCSIFMTU:
-		if (ifr->ifr_mtu < ETHERMIN || ifr->ifr_mtu > ETHERMTU)
-			error = EINVAL;
-		else if (ifp->if_mtu != ifr->ifr_mtu)
-			ifp->if_mtu = ifr->ifr_mtu;
-		break;
-	case SIOCADDMULTI:
-	case SIOCDELMULTI:
-		error = (command == SIOCADDMULTI) ?
-		    ether_addmulti(ifr, &sc->arpcom) :
-		    ether_delmulti(ifr, &sc->arpcom);
 
-		if (error == ENETRESET) {
-			/*
-			 * Multicast list has changed; set the hardware
-			 * filter accordingly.
-			 */
-			if (ifp->if_flags & IFF_RUNNING)
-				sis_setmulti(sc);
-			error = 0;
-		}
-		break;
 	case SIOCGIFMEDIA:
 	case SIOCSIFMEDIA:
 		mii = &sc->sc_mii;
 		error = ifmedia_ioctl(ifp, ifr, &mii->mii_media, command);
 		break;
+
 	default:
-		error = ENOTTY;
-		break;
+		error = ether_ioctl(ifp, &sc->arpcom, command, data);
+	}
+
+	if (error == ENETRESET) {
+		if (ifp->if_flags & IFF_RUNNING)
+			sis_setmulti(sc);
+		error = 0;
 	}
 
 	splx(s);
-
 	return(error);
 }
 

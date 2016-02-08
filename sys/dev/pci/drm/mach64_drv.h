@@ -73,6 +73,14 @@ typedef struct drm_mach64_descriptor_ring {
 } drm_mach64_descriptor_ring_t;
 
 typedef struct drm_mach64_private {
+	struct device		 dev;
+	struct device		*drmdev;
+
+	pci_chipset_tag_t	 pc;
+	pci_intr_handle_t	 ih;
+	void			*irqh;
+
+	struct vga_pci_bar	*regs;
 	drm_mach64_sarea_t *sarea_priv;
 
 	int is_pci;
@@ -104,14 +112,10 @@ typedef struct drm_mach64_private {
 
 	drm_local_map_t *sarea;
 	drm_local_map_t *fb;
-	drm_local_map_t *mmio;
 	drm_local_map_t *ring_map;
 	drm_local_map_t *dev_buffers;	/* this is a pointer to a structure in dev */
 	drm_local_map_t *agp_textures;
 } drm_mach64_private_t;
-
-extern struct drm_ioctl_desc mach64_ioctls[];
-extern int mach64_max_ioctl;
 
 				/* mach64_dma.c */
 extern int mach64_dma_init(struct drm_device *dev, void *data,
@@ -167,8 +171,7 @@ extern u32 mach64_get_vblank_counter(struct drm_device *dev, int crtc);
 extern int mach64_enable_vblank(struct drm_device *dev, int crtc);
 extern void mach64_disable_vblank(struct drm_device *dev, int crtc);
 extern irqreturn_t mach64_driver_irq_handler(DRM_IRQ_ARGS);
-extern void mach64_driver_irq_preinstall(struct drm_device *dev);
-extern int mach64_driver_irq_postinstall(struct drm_device *dev);
+extern int mach64_driver_irq_install(struct drm_device *dev);
 extern void mach64_driver_irq_uninstall(struct drm_device *dev);
 
 /* ================================================================
@@ -487,8 +490,10 @@ extern void mach64_driver_irq_uninstall(struct drm_device *dev);
 #define MACH64_DATATYPE_AYUV444				14
 #define MACH64_DATATYPE_ARGB4444			15
 
-#define MACH64_READ(reg)	DRM_READ32(dev_priv->mmio, (reg) )
-#define MACH64_WRITE(reg,val)	DRM_WRITE32(dev_priv->mmio, (reg), (val) )
+#define MACH64_READ(reg)	bus_space_read_4(dev_priv->regs->bst,	\
+				    dev_priv->regs->bsh, (reg))
+#define MACH64_WRITE(reg,val)	bus_space_write_4(dev_priv->regs->bst,	\
+				    dev_priv->regs->bsh, (reg), (val))
 
 #define DWMREG0		0x0400
 #define DWMREG0_END	0x07ff
@@ -719,14 +724,14 @@ static __inline__ int mach64_find_pending_buf_entry(drm_mach64_private_t *
 #if MACH64_EXTRA_CHECKING
 	if (list_empty(&dev_priv->pending)) {
 		DRM_ERROR("Empty pending list in \n");
-		return -EINVAL;
+		return EINVAL;
 	}
 #endif
 	ptr = dev_priv->pending.prev;
 	*entry = list_entry(ptr, drm_mach64_freelist_t, list);
 	while ((*entry)->buf != buf) {
 		if (ptr == &dev_priv->pending) {
-			return -EFAULT;
+			return EFAULT;
 		}
 		ptr = ptr->prev;
 		*entry = list_entry(ptr, drm_mach64_freelist_t, list);
@@ -750,11 +755,11 @@ do {									\
 	_buf = mach64_freelist_get( dev_priv );				\
 	if (_buf == NULL) {						\
 		DRM_ERROR("couldn't get buffer in DMAGETPTR\n");	\
-		return -EAGAIN;					\
+		return EAGAIN;					\
 	}								\
 	if (_buf->pending) {						\
 	        DRM_ERROR("pending buf in DMAGETPTR\n");		\
-		return -EFAULT;					\
+		return EFAULT;					\
 	}								\
 	_buf->file_priv = file_priv;					\
 	_outcount = 0;							\
@@ -785,7 +790,7 @@ do {								\
 		if (_buf->used <= 0) {					\
 			DRM_ERROR( "DMAADVANCE(): sending empty buf %d\n", \
 				   _buf->idx );				\
-			return -EFAULT;					\
+			return EFAULT;					\
 		}							\
 		if (_buf->pending) {					\
 			/* This is a resued buffer, so we need to find it in the pending list */ \
@@ -795,12 +800,12 @@ do {								\
 			}						\
 			if (_entry->discard) {				\
 				DRM_ERROR( "DMAADVANCE(): sending discarded pending buf %d\n", _buf->idx ); \
-				return -EFAULT;				\
+				return EFAULT;				\
 			}						\
 		} else {						\
 			if (list_empty(&dev_priv->placeholders)) {	\
 				DRM_ERROR( "DMAADVANCE(): empty placeholder list\n"); \
-				return -EFAULT;				\
+				return EFAULT;				\
 			}						\
 			ptr = dev_priv->placeholders.next;		\
 			list_del(ptr);					\
@@ -838,11 +843,11 @@ do {								\
 									\
 		if (_buf->used <= 0) {					\
 			DRM_ERROR( "DMAADVANCEHOSTDATA(): sending empty buf %d\n", _buf->idx );	\
-			return -EFAULT;					\
+			return EFAULT;					\
 		}							\
 		if (list_empty(&dev_priv->placeholders)) {		\
 			DRM_ERROR( "empty placeholder list in DMAADVANCEHOSTDATA()\n" ); \
-			return -EFAULT;					\
+			return EFAULT;					\
 		}							\
 									\
 		ptr = dev_priv->placeholders.next;			\

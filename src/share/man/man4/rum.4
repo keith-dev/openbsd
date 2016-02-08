@@ -1,4 +1,4 @@
-.\" $OpenBSD: rum.4,v 1.39 2008/07/29 16:44:19 jmc Exp $
+.\" $OpenBSD: rum.4,v 1.44 2009/02/16 08:15:22 jmc Exp $
 .\"
 .\" Copyright (c) 2005-2007
 .\"	Damien Bergamini <damien.bergamini@free.fr>
@@ -15,7 +15,7 @@
 .\" ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 .\" OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 .\"
-.Dd $Mdocdate: July 29 2008 $
+.Dd $Mdocdate: February 16 2009 $
 .Os
 .Dt RUM 4
 .Sh NAME
@@ -114,6 +114,7 @@ The following adapters should work:
 .It Belkin F5D7050 ver 3
 .It Belkin F5D9050 ver 3
 .It Belkin F5D9050C
+.It Buffalo WLI-U2-SG54HG
 .It Buffalo WLI-U2-SG54HP
 .It Buffalo WLI-U2-G54HP
 .It CNet CWD-854 ver F
@@ -121,6 +122,7 @@ The following adapters should work:
 .It Corega CG-WLUSB2GL
 .It Corega CG-WLUSB2GO
 .It Corega CG-WLUSB2GPX
+.It D-Link DWA-110
 .It D-Link DWA-111
 .It "D-Link DWL-G122 rev C1"
 .It D-Link WUA-1340
@@ -169,7 +171,7 @@ using WPA-PSK with passphrase
 .Dq my_passphrase :
 .Bd -literal -offset indent
 # ifconfig rum0 nwid my_net wpa wpapsk \e
-	$(wpa-psk my_net my_passphrase)
+	`wpa-psk my_net my_passphrase`
 .Ed
 .Pp
 Return rum0 to its default settings:
@@ -229,3 +231,7 @@ driver supports automatic control of the transmit speed in BSS mode only.
 Therefore the use of a
 .Nm
 adapter in Host AP mode is discouraged.
+.Pp
+Host AP mode doesn't support power saving.
+Clients attempting to use power saving mode may experience significant
+packet loss (disabling power saving on the client will fix this).

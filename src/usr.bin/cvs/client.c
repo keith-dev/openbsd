@@ -1,4 +1,4 @@
-/*	$OpenBSD: client.c,v 1.116 2008/06/14 03:19:15 joris Exp $	*/
+/*	$OpenBSD: client.c,v 1.119 2009/02/23 21:28:57 tobias Exp $	*/
 /*
  * Copyright (c) 2006 Joris Vink <joris@openbsd.org>
  *
@@ -519,7 +519,7 @@ cvs_client_sendfile(struct cvs_file *cf)
 
 	switch (cf->file_status) {
 	case FILE_UNKNOWN:
-		if (cf->fd != -1)
+		if (cf->file_flags & FILE_ON_DISK)
 			cvs_client_send_request("Questionable %s",
 			    cf->file_name);
 		break;
@@ -645,7 +645,8 @@ cvs_client_checkedin(char *data)
 		if (len >= sizeof(timebuf))
 			fatal("cvs_client_sendfile: truncation");
 	} else {
-		ctime_r(&ent->ce_mtime, timebuf);
+		gmtime_r(&ent->ce_mtime, &datetm);
+		asctime_r(&datetm, timebuf);
 		timebuf[strcspn(timebuf, "\n")] = '\0';
 
 		if (newent->ce_tag != NULL) {
@@ -686,7 +687,7 @@ cvs_client_updated(char *data)
 	struct timeval tv[2];
 	char repo[MAXPATHLEN], *entry;
 	char timebuf[CVS_TIME_BUFSZ], revbuf[CVS_REV_BUFSZ];
-	char *en, *mode, *len, *rpath;
+	char *en, *mode, *len, *rpath, *p;
 	char sticky[CVS_ENT_MAXLINELEN], fpath[MAXPATHLEN];
 
 	if (data == NULL)
@@ -705,8 +706,11 @@ cvs_client_updated(char *data)
 	if (strlen(repo) + 1 > strlen(rpath))
 		fatal("received a repository path that is too short");
 
-	(void)xsnprintf(fpath, sizeof(fpath), "%s/%s", data,
-	    strrchr(rpath, '/'));
+	p = strrchr(rpath, '/');
+	if (p == NULL)
+		fatal("malicious repository path from server");
+
+	(void)xsnprintf(fpath, sizeof(fpath), "%s/%s", data, p);
 
 	flen = strtonum(len, 0, INT_MAX, &errstr);
 	if (errstr != NULL)

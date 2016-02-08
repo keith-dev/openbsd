@@ -1,4 +1,4 @@
-/*	$OpenBSD: ospf6ctl.c,v 1.12 2007/12/13 08:57:32 claudio Exp $ */
+/*	$OpenBSD: ospf6ctl.c,v 1.24 2009/01/30 22:23:30 stsp Exp $ */
 
 /*
  * Copyright (c) 2005 Claudio Jeker <claudio@openbsd.org>
@@ -56,7 +56,7 @@ char		*print_rtr_link_type(u_int8_t);
 const char	*print_ospf_flags(u_int8_t);
 int		 show_db_msg_detail(struct imsg *imsg);
 int		 show_nbr_msg(struct imsg *);
-const char	*print_ospf_options(u_int8_t);
+const char	*print_ospf_options(u_int32_t);
 int		 show_nbr_detail_msg(struct imsg *);
 int		 show_rib_msg(struct imsg *);
 void		 show_rib_head(struct in_addr, u_int8_t, u_int8_t);
@@ -75,7 +75,7 @@ usage(void)
 {
 	extern char *__progname;
 
-	fprintf(stderr, "usage: %s <command> [arg [...]]\n", __progname);
+	fprintf(stderr, "usage: %s command [argument ...]\n", __progname);
 	exit(1);
 }
 
@@ -156,11 +156,17 @@ main(int argc, char *argv[])
 	case SHOW_DBEXT:
 		imsg_compose(ibuf, IMSG_CTL_SHOW_DB_EXT, 0, 0, NULL, 0);
 		break;
+	case SHOW_DBLINK:
+		imsg_compose(ibuf, IMSG_CTL_SHOW_DB_LINK, 0, 0, NULL, 0);
+		break;
 	case SHOW_DBNET:
 		imsg_compose(ibuf, IMSG_CTL_SHOW_DB_NET, 0, 0, NULL, 0);
 		break;
 	case SHOW_DBRTR:
 		imsg_compose(ibuf, IMSG_CTL_SHOW_DB_RTR, 0, 0, NULL, 0);
+		break;
+	case SHOW_DBINTRA:
+		imsg_compose(ibuf, IMSG_CTL_SHOW_DB_INTRA, 0, 0, NULL, 0);
 		break;
 	case SHOW_DBSELF:
 		imsg_compose(ibuf, IMSG_CTL_SHOW_DB_SELF, 0, 0, NULL, 0);
@@ -245,8 +251,10 @@ main(int argc, char *argv[])
 				done = show_database_msg(&imsg);
 				break;
 			case SHOW_DBEXT:
+			case SHOW_DBLINK:
 			case SHOW_DBNET:
 			case SHOW_DBRTR:
+			case SHOW_DBINTRA:
 			case SHOW_DBSUM:
 			case SHOW_DBASBR:
 				done = show_db_msg_detail(&imsg);
@@ -516,7 +524,7 @@ show_database_head(struct in_addr aid, char *ifname, u_int16_t type)
 
 	switch (ntohs(type)) {
 	case LSA_TYPE_LINK:
-		format = "Link Link States";
+		format = "Link (Type-8) Link States";
 		break;
 	case LSA_TYPE_ROUTER:
 		format = "Router Link States";
@@ -531,7 +539,7 @@ show_database_head(struct in_addr aid, char *ifname, u_int16_t type)
 		format = "Inter Area Router Link States";
 		break;
 	case LSA_TYPE_INTRA_A_PREFIX:
-		format = "Router Link States";
+		format = "Intra Area Prefix Link States";
 		break;
 	case LSA_TYPE_EXTERNAL:
 		printf("\n%-15s %s\n\n", "", "Type-5 AS External Link States");
@@ -562,7 +570,7 @@ int
 show_database_msg(struct imsg *imsg)
 {
 	static struct in_addr	 area_id;
-	static u_int8_t		 lasttype;
+	static u_int16_t	 lasttype;
 	static char		 ifname[IF_NAMESIZE];
 	struct area		*area;
 	struct iface		*iface;
@@ -630,33 +638,23 @@ void
 show_db_hdr_msg_detail(struct lsa_hdr *lsa)
 {
 	printf("LS age: %d\n", ntohs(lsa->age));
-//XXX	printf("Options: %s\n", print_ospf_options(lsa->opts));
 	printf("LS Type: %s\n", print_ls_type(lsa->type));
 
 	switch (ntohs(lsa->type)) {
-	case LSA_TYPE_LINK:
+	case LSA_TYPE_ROUTER:
+	case LSA_TYPE_INTER_A_PREFIX:
+	case LSA_TYPE_INTER_A_ROUTER:
+	case LSA_TYPE_INTRA_A_PREFIX:
+	case LSA_TYPE_EXTERNAL:
 		printf("Link State ID: %s\n", log_id(lsa->ls_id));
 		break;
-	case LSA_TYPE_ROUTER:
-		printf("Link State ID: %s\n", log_id(lsa->ls_id));
+	case LSA_TYPE_LINK:
+		printf("Link State ID: %s (Interface ID of Advertising "
+		    "Router)\n", log_id(lsa->ls_id));
 		break;
 	case LSA_TYPE_NETWORK:
-		printf("Link State ID: %s (address of Designated Router)\n",
-		    log_id(lsa->ls_id));
-		break;
-	case LSA_TYPE_INTER_A_PREFIX:
-		printf("Link State ID: %s (Network ID)\n", log_id(lsa->ls_id));
-		break;
-	case LSA_TYPE_INTER_A_ROUTER:
-		printf("Link State ID: %s (ASBR Router ID)\n",
-		    log_id(lsa->ls_id));
-		break;
-	case LSA_TYPE_INTRA_A_PREFIX:
-		printf("Link State ID: %s (Network ID)\n", log_id(lsa->ls_id));
-		break;
-	case LSA_TYPE_EXTERNAL:
-		printf("Link State ID: %s (External Network Number)\n",
-		     log_id(lsa->ls_id));
+		printf("Link State ID: %s (Interface ID of Designated "
+		    "Router)\n", log_id(lsa->ls_id));
 		break;
 	}
 
@@ -688,8 +686,7 @@ print_ospf_flags(u_int8_t opts)
 {
 	static char	optbuf[32];
 
-	snprintf(optbuf, sizeof(optbuf), "*|*|*|*|%s|%s|%s|%s",
-	    opts & OSPF_RTR_W ? "W" : "-",
+	snprintf(optbuf, sizeof(optbuf), "*|*|*|*|*|%s|%s|%s",
 	    opts & OSPF_RTR_V ? "V" : "-",
 	    opts & OSPF_RTR_E ? "E" : "-",
 	    opts & OSPF_RTR_B ? "B" : "-");
@@ -707,6 +704,7 @@ show_db_msg_detail(struct imsg *imsg)
 	struct iface		*iface;
 	struct lsa		*lsa;
 	struct lsa_rtr_link	*rtr_link;
+	struct lsa_prefix	*prefix;
 	struct lsa_asext	*asext;
 	u_int16_t		 i, nlinks, off;
 
@@ -736,17 +734,50 @@ show_db_msg_detail(struct imsg *imsg)
 
 		lasttype = lsa->hdr.type;
 		break;
+	case IMSG_CTL_SHOW_DB_LINK:
+		lsa = imsg->data;
+		if (lsa->hdr.type != lasttype)
+			show_database_head(area_id, ifname, lsa->hdr.type);
+		show_db_hdr_msg_detail(&lsa->hdr);
+		printf("Options: %s\n", print_ospf_options(LSA_24_GETLO(
+		    ntohl(lsa->data.link.opts))));
+		printf("Link Local Address: %s\n",
+		    log_in6addr(&lsa->data.link.lladdr));
+
+		nlinks = ntohl(lsa->data.link.numprefix);
+		printf("Number of Prefixes: %d\n", nlinks);
+		off = sizeof(lsa->hdr) + sizeof(struct lsa_link);
+
+		for (i = 0; i < nlinks; i++) {
+			struct in6_addr	ia6;
+			prefix = (struct lsa_prefix *)((char *)lsa + off);
+			bzero(&ia6, sizeof(ia6));
+			bcopy(prefix + 1, &ia6,
+			    LSA_PREFIXSIZE(prefix->prefixlen));
+
+			printf("    Prefix Address: %s\n", log_in6addr(&ia6));
+			printf("    Prefix Length: %d, Options: %x\n",
+			    prefix->prefixlen, prefix->options);
+
+			off += sizeof(struct lsa_prefix)
+			    + LSA_PREFIXSIZE(prefix->prefixlen);
+		}
+
+		printf("\n");
+		lasttype = lsa->hdr.type;
+		break;
 	case IMSG_CTL_SHOW_DB_NET:
 		lsa = imsg->data;
 		if (lsa->hdr.type != lasttype)
 			show_database_head(area_id, ifname, lsa->hdr.type);
 		show_db_hdr_msg_detail(&lsa->hdr);
-		addr.s_addr = lsa->data.net.mask;
-		printf("Network Mask: %s\n", inet_ntoa(addr));
+		printf("Options: %s\n",
+		    print_ospf_options(LSA_24_GETLO(ntohl(lsa->data.net.opts))));
 
 		nlinks = (ntohs(lsa->hdr.len) - sizeof(struct lsa_hdr)
 		    - sizeof(u_int32_t)) / sizeof(struct lsa_net_link);
 		off = sizeof(lsa->hdr) + sizeof(u_int32_t);
+		printf("Number of Routers: %d\n", nlinks);
 
 		for (i = 0; i < nlinks; i++) {
 			addr.s_addr = lsa->data.net.att_rtr[i];
@@ -762,13 +793,13 @@ show_db_msg_detail(struct imsg *imsg)
 			show_database_head(area_id, ifname, lsa->hdr.type);
 		show_db_hdr_msg_detail(&lsa->hdr);
 		printf("Flags: %s\n",
-		    print_ospf_flags(ntohl(lsa->data.rtr.opts) >> 24));
+		    print_ospf_flags(LSA_24_GETHI(ntohl(lsa->data.rtr.opts))));
 		printf("Options: %s\n",
-		    print_ospf_options(ntohl(lsa->data.rtr.opts)));
+		    print_ospf_options(LSA_24_GETLO(ntohl(lsa->data.rtr.opts))));
 
 		nlinks = (ntohs(lsa->hdr.len) - sizeof(struct lsa_hdr)
 		    - sizeof(u_int32_t)) / sizeof(struct lsa_rtr_link);
-		printf("Number of Links: %d\n\n", nlinks);
+		printf("Number of Links: %d\n", nlinks);
 
 		off = sizeof(lsa->hdr) + sizeof(struct lsa_rtr);
 
@@ -809,13 +840,47 @@ show_db_msg_detail(struct imsg *imsg)
 
 		lasttype = lsa->hdr.type;
 		break;
+	case IMSG_CTL_SHOW_DB_INTRA:
+		lsa = imsg->data;
+		if (lsa->hdr.type != lasttype)
+			show_database_head(area_id, ifname, lsa->hdr.type);
+		show_db_hdr_msg_detail(&lsa->hdr);
+		printf("Referenced LS Type: %s\n",
+		    print_ls_type(lsa->data.pref_intra.ref_type));
+		addr.s_addr = lsa->data.pref_intra.ref_lsid;
+		printf("Referenced Link State ID: %s\n", inet_ntoa(addr));
+		addr.s_addr = lsa->data.pref_intra.ref_adv_rtr;
+		printf("Referenced Advertising Router: %s\n", inet_ntoa(addr));
+		nlinks = ntohs(lsa->data.pref_intra.numprefix);
+		printf("Number of Prefixes: %d\n", nlinks);
+
+		off = sizeof(lsa->hdr) + sizeof(struct lsa_intra_prefix);
+
+		for (i = 0; i < nlinks; i++) {
+			struct in6_addr	ia6;
+			prefix = (struct lsa_prefix *)((char *)lsa + off);
+			bzero(&ia6, sizeof(ia6));
+			bcopy(prefix + 1, &ia6,
+			    LSA_PREFIXSIZE(prefix->prefixlen));
+
+			printf("    Prefix Address: %s\n", log_in6addr(&ia6));
+			printf("    Prefix Length: %d, Options: %x\n",
+			    prefix->prefixlen, prefix->options);
+
+			off += sizeof(struct lsa_prefix)
+			    + LSA_PREFIXSIZE(prefix->prefixlen);
+		}
+
+		printf("\n");
+		lasttype = lsa->hdr.type;
+		break;
 	case IMSG_CTL_SHOW_DB_SUM:
 		lsa = imsg->data;
 		if (lsa->hdr.type != lasttype)
 			show_database_head(area_id, ifname, lsa->hdr.type);
 		show_db_hdr_msg_detail(&lsa->hdr);
 		printf("Prefix: XXX\n");
-		printf("Metric: %d\n\n", ntohl(lsa->data.pref_sum.metric) &
+		printf("Metric: %d\n", ntohl(lsa->data.pref_sum.metric) &
 		    LSA_METRIC_MASK);
 		lasttype = lsa->hdr.type;
 		break;
@@ -828,7 +893,7 @@ show_db_msg_detail(struct imsg *imsg)
 		addr.s_addr = lsa->data.rtr_sum.dest_rtr_id;
 		printf("Destination Router ID: %s\n", inet_ntoa(addr));
 		printf("Options: %s\n",
-		    print_ospf_options(ntohl(lsa->data.rtr_sum.options)));
+		    print_ospf_options(ntohl(lsa->data.rtr_sum.opts)));
 		printf("Metric: %d\n\n", ntohl(lsa->data.rtr_sum.metric) &
 		    LSA_METRIC_MASK);
 	case IMSG_CTL_AREA:
@@ -879,15 +944,14 @@ show_nbr_msg(struct imsg *imsg)
 }
 
 const char *
-print_ospf_options(u_int8_t opts)
+print_ospf_options(u_int32_t opts)
 {
 	static char	optbuf[32];
 
-	snprintf(optbuf, sizeof(optbuf), "*|*|%s|%s|%s|%s|%s|%s",
+	snprintf(optbuf, sizeof(optbuf), "*|*|%s|%s|%s|*|%s|%s",
 	    opts & OSPF_OPTION_DC ? "DC" : "-",
 	    opts & OSPF_OPTION_R ? "R" : "-",
 	    opts & OSPF_OPTION_N ? "N" : "-",
-	    opts & OSPF_OPTION_MC ? "MC" : "-",
 	    opts & OSPF_OPTION_E ? "E" : "-",
 	    opts & OSPF_OPTION_V6 ? "V6" : "-");
 	return (optbuf);
@@ -1091,6 +1155,7 @@ show_rib_detail_msg(struct imsg *imsg)
 			printf("%-15s %-12s %-7d %-7d\n",
 			    inet_ntoa(rt->adv_rtr), path_type_name(rt->p_type),
 			    rt->cost, rt->cost2);
+			free(dstnet);
 
 			lasttype = RIB_EXT;
 			break;

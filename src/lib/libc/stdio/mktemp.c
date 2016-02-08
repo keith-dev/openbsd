@@ -1,4 +1,4 @@
-/*	$OpenBSD: mktemp.c,v 1.21 2008/07/22 21:47:45 deraadt Exp $ */
+/*	$OpenBSD: mktemp.c,v 1.25 2009/02/17 22:53:43 deraadt Exp $ */
 /*
  * Copyright (c) 1987, 1993
  *	The Regents of the University of California.  All rights reserved.
@@ -34,6 +34,7 @@
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <ctype.h>
 #include <unistd.h>
 
@@ -82,63 +83,38 @@ mktemp(char *path)
 static int
 _gettemp(char *path, int *doopen, int domkdir, int slen)
 {
-	char *start, *trv, *suffp;
+	char *start, *cp, *ep;
 	struct stat sbuf;
-	int rval;
-	pid_t pid;
+	size_t len;
+	int r;
 
 	if (doopen && domkdir) {
 		errno = EINVAL;
 		return(0);
 	}
 
-	for (trv = path; *trv; ++trv)
-		;
-	trv -= slen;
-	suffp = trv;
-	--trv;
-	if (trv < path) {
+	len = strlen(path);
+	if (len == 0 || slen >= len) {
 		errno = EINVAL;
-		return (0);
+		return(0);
 	}
-	pid = getpid();
-	while (trv >= path && *trv == 'X' && pid != 0) {
-		*trv-- = (pid % 10) + '0';
-		pid /= 10;
-	}
-	while (trv >= path && *trv == 'X') {
-		char c;
+	ep = path + len - slen;
 
-		pid = arc4random_uniform(26+26);
-		if (pid < 26)
-			c = pid + 'A';
-		else
-			c = (pid - 26) + 'a';
-		*trv-- = c;
-	}
-	start = trv + 1;
-
-	/* Check the target directory. */
-	if (doopen || domkdir) {
-		for (;; --trv) {
-			if (trv <= path)
-				break;
-			if (*trv == '/') {
-				*trv = '\0';
-				rval = stat(path, &sbuf);
-				*trv = '/';
-				if (rval != 0)
-					return(0);
-				if (!S_ISDIR(sbuf.st_mode)) {
-					errno = ENOTDIR;
-					return(0);
-				}
-				break;
-			}
+	for (start = ep - 1; start != path; start--)
+		if (*start != 'X') {
+			start++;
+			break;
 		}
-	}
 
 	for (;;) {
+		for (cp = start; cp != ep; cp++) {
+			r = arc4random_uniform(26 + 26);
+			if (r < 26)
+				*cp = r + 'A';
+			else
+				*cp = (r - 26) + 'a';
+		}
+
 		if (doopen) {
 			if ((*doopen =
 			    open(path, O_CREAT|O_EXCL|O_RDWR, 0600)) >= 0)
@@ -152,28 +128,6 @@ _gettemp(char *path, int *doopen, int domkdir, int slen)
 				return(0);
 		} else if (lstat(path, &sbuf))
 			return(errno == ENOENT ? 1 : 0);
-
-		/* tricky little algorithm for backward compatibility */
-		for (trv = start;;) {
-			if (!*trv)
-				return (0);
-			if (*trv == 'Z') {
-				if (trv == suffp)
-					return (0);
-				*trv++ = 'a';
-			} else {
-				if (isdigit(*trv))
-					*trv = 'a';
-				else if (*trv == 'z')	/* inc from z to A */
-					*trv = 'A';
-				else {
-					if (trv == suffp)
-						return (0);
-					++*trv;
-				}
-				break;
-			}
-		}
 	}
 	/*NOTREACHED*/
 }

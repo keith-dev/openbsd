@@ -1,4 +1,4 @@
-/*	$OpenBSD: rt2661.c,v 1.42 2008/07/21 18:43:19 damien Exp $	*/
+/*	$OpenBSD: rt2661.c,v 1.47 2008/12/22 18:20:47 damien Exp $	*/
 
 /*-
  * Copyright (c) 2006
@@ -101,7 +101,9 @@ void		rt2661_tx_intr(struct rt2661_softc *);
 void		rt2661_tx_dma_intr(struct rt2661_softc *,
 		    struct rt2661_tx_ring *);
 void		rt2661_rx_intr(struct rt2661_softc *);
+#ifndef IEEE80211_STA_ONLY
 void		rt2661_mcu_beacon_expire(struct rt2661_softc *);
+#endif
 void		rt2661_mcu_wakeup(struct rt2661_softc *);
 void		rt2661_mcu_cmd_intr(struct rt2661_softc *);
 int		rt2661_intr(void *);
@@ -150,7 +152,9 @@ void		rt2661_rx_tune(struct rt2661_softc *);
 void		rt2661_radar_start(struct rt2661_softc *);
 int		rt2661_radar_stop(struct rt2661_softc *);
 #endif
+#ifndef IEEE80211_STA_ONLY
 int		rt2661_prepare_beacon(struct rt2661_softc *);
+#endif
 void		rt2661_enable_tsf_sync(struct rt2661_softc *);
 int		rt2661_get_rssi(struct rt2661_softc *, uint8_t);
 void		rt2661_power(int, void *);
@@ -246,9 +250,11 @@ rt2661_attach(void *xsc, int id)
 
 	/* set device capabilities */
 	ic->ic_caps =
-	    IEEE80211_C_IBSS |		/* IBSS mode supported */
 	    IEEE80211_C_MONITOR |	/* monitor mode supported */
+#ifndef IEEE80211_STA_ONLY
+	    IEEE80211_C_IBSS |		/* IBSS mode supported */
 	    IEEE80211_C_HOSTAP |	/* HostAP mode supported */
+#endif
 	    IEEE80211_C_TXPMGT |	/* tx power management */
 	    IEEE80211_C_SHPREAMBLE |	/* short preamble supported */
 	    IEEE80211_C_SHSLOT |	/* short slot time supported */
@@ -805,9 +811,11 @@ rt2661_newstate(struct ieee80211com *ic, enum ieee80211_state nstate, int arg)
 			rt2661_set_bssid(sc, ni->ni_bssid);
 		}
 
+#ifndef IEEE80211_STA_ONLY
 		if (ic->ic_opmode == IEEE80211_M_HOSTAP ||
 		    ic->ic_opmode == IEEE80211_M_IBSS)
 			rt2661_prepare_beacon(sc);
+#endif
 
 		if (ic->ic_opmode == IEEE80211_M_STA) {
 			/* fake a join to init the tx rate */
@@ -1142,15 +1150,9 @@ skip:		desc->flags |= htole32(RT2661_RX_BUSY);
 
 		sc->rxq.cur = (sc->rxq.cur + 1) % RT2661_RX_RING_COUNT;
 	}
-
-	/*
-	 * In HostAP mode, ieee80211_input() will enqueue packets in if_snd
-	 * without calling if_start().
-	 */
-	if (!IFQ_IS_EMPTY(&ifp->if_snd) && !(ifp->if_flags & IFF_OACTIVE))
-		rt2661_start(ifp);
 }
 
+#ifndef IEEE80211_STA_ONLY
 /*
  * This function is called in HostAP or IBSS modes when it's time to send a
  * new beacon (every ni_intval milliseconds).
@@ -1176,6 +1178,7 @@ rt2661_mcu_beacon_expire(struct rt2661_softc *sc)
 
 	DPRINTFN(15, ("beacon expired\n"));
 }
+#endif
 
 void
 rt2661_mcu_wakeup(struct rt2661_softc *sc)
@@ -1245,8 +1248,10 @@ rt2661_intr(void *arg)
 	if (r2 & RT2661_MCU_CMD_DONE)
 		rt2661_mcu_cmd_intr(sc);
 
+#ifndef IEEE80211_STA_ONLY
 	if (r2 & RT2661_MCU_BEACON_EXPIRE)
 		rt2661_mcu_beacon_expire(sc);
+#endif
 
 	if (r2 & RT2661_MCU_WAKEUP)
 		rt2661_mcu_wakeup(sc);
@@ -1501,11 +1506,13 @@ rt2661_tx_mgt(struct rt2661_softc *sc, struct mbuf *m0,
 		    sc->sifs;
 		*(uint16_t *)wh->i_dur = htole16(dur);
 
+#ifndef IEEE80211_STA_ONLY
 		/* tell hardware to set timestamp in probe responses */
 		if ((wh->i_fc[0] &
 		    (IEEE80211_FC0_TYPE_MASK | IEEE80211_FC0_SUBTYPE_MASK)) ==
 		    (IEEE80211_FC0_TYPE_MGT | IEEE80211_FC0_SUBTYPE_PROBE_RESP))
 			flags |= RT2661_TX_TIMESTAMP;
+#endif
 	}
 
 	rt2661_setup_tx_desc(sc, desc, flags, 0 /* XXX HWSEQ */,
@@ -1539,7 +1546,7 @@ rt2661_tx_data(struct rt2661_softc *sc, struct mbuf *m0,
 	struct rt2661_tx_data *data;
 	struct ieee80211_frame *wh;
 	struct ieee80211_key *k;
-	struct mbuf *mnew;
+	struct mbuf *m1;
 	uint16_t dur;
 	uint32_t flags = 0;
 	int pktlen, rate, needcts = 0, needrts = 0, error;
@@ -1665,26 +1672,23 @@ rt2661_tx_data(struct rt2661_softc *sc, struct mbuf *m0,
 	}
 	if (error != 0) {
 		/* too many fragments, linearize */
-
-		MGETHDR(mnew, M_DONTWAIT, MT_DATA);
-		if (mnew == NULL) {
+		MGETHDR(m1, M_DONTWAIT, MT_DATA);
+		if (m1 == NULL) {
 			m_freem(m0);
-			return ENOMEM;
+			return ENOBUFS;
 		}
-		M_DUP_PKTHDR(mnew, m0);
 		if (m0->m_pkthdr.len > MHLEN) {
-			MCLGET(mnew, M_DONTWAIT);
-			if (!(mnew->m_flags & M_EXT)) {
+			MCLGET(m1, M_DONTWAIT);
+			if (!(m1->m_flags & M_EXT)) {
 				m_freem(m0);
-				m_freem(mnew);
-				return ENOMEM;
+				m_freem(m1);
+				return ENOBUFS;
 			}
 		}
-
-		m_copydata(m0, 0, m0->m_pkthdr.len, mtod(mnew, caddr_t));
+		m_copydata(m0, 0, m0->m_pkthdr.len, mtod(m1, caddr_t));
+		m1->m_pkthdr.len = m1->m_len = m0->m_pkthdr.len;
 		m_freem(m0);
-		mnew->m_len = mnew->m_pkthdr.len;
-		m0 = mnew;
+		m0 = m1;
 
 		error = bus_dmamap_load_mbuf(sc->sc_dmat, data->map, m0,
 		    BUS_DMA_NOWAIT);
@@ -2251,6 +2255,7 @@ rt2661_updateslot(struct ieee80211com *ic)
 {
 	struct rt2661_softc *sc = ic->ic_if.if_softc;
 
+#ifndef IEEE80211_STA_ONLY
 	if (ic->ic_opmode == IEEE80211_M_HOSTAP) {
 		/*
 		 * In HostAP mode, we defer setting of new slot time until
@@ -2259,6 +2264,7 @@ rt2661_updateslot(struct ieee80211com *ic)
 		 */
 		sc->sc_flags |= RT2661_UPDATE_SLOT;
 	} else
+#endif
 		rt2661_set_slottime(sc);
 }
 
@@ -2378,7 +2384,6 @@ rt2661_read_eeprom(struct rt2661_softc *sc)
 int
 rt2661_bbp_init(struct rt2661_softc *sc)
 {
-#define N(a)	(sizeof (a) / sizeof ((a)[0]))
 	int i, ntries;
 
 	/* wait for BBP to be ready */
@@ -2394,7 +2399,7 @@ rt2661_bbp_init(struct rt2661_softc *sc)
 	}
 
 	/* initialize BBP registers to default values */
-	for (i = 0; i < N(rt2661_def_bbp); i++) {
+	for (i = 0; i < nitems(rt2661_def_bbp); i++) {
 		rt2661_bbp_write(sc, rt2661_def_bbp[i].reg,
 		    rt2661_def_bbp[i].val);
 	}
@@ -2407,13 +2412,11 @@ rt2661_bbp_init(struct rt2661_softc *sc)
 	}
 
 	return 0;
-#undef N
 }
 
 int
 rt2661_init(struct ifnet *ifp)
 {
-#define N(a)	(sizeof (a) / sizeof ((a)[0]))
 	struct rt2661_softc *sc = ifp->if_softc;
 	struct ieee80211com *ic = &sc->sc_ic;
 	const char *name = NULL;	/* make lint happy */
@@ -2506,7 +2509,7 @@ rt2661_init(struct ifnet *ifp)
 	RAL_WRITE(sc, RT2661_RX_CNTL_CSR, 2);
 
 	/* initialize MAC registers to default values */
-	for (i = 0; i < N(rt2661_def_mac); i++)
+	for (i = 0; i < nitems(rt2661_def_mac); i++)
 		RAL_WRITE(sc, rt2661_def_mac[i].reg, rt2661_def_mac[i].val);
 
 	IEEE80211_ADDR_COPY(ic->ic_myaddr, LLADDR(ifp->if_sadl));
@@ -2546,7 +2549,9 @@ rt2661_init(struct ifnet *ifp)
 	if (ic->ic_opmode != IEEE80211_M_MONITOR) {
 		tmp |= RT2661_DROP_CTL | RT2661_DROP_VER_ERROR |
 		       RT2661_DROP_ACKCTS;
+#ifndef IEEE80211_STA_ONLY
 		if (ic->ic_opmode != IEEE80211_M_HOSTAP)
+#endif
 			tmp |= RT2661_DROP_TODS;
 		if (!(ifp->if_flags & IFF_PROMISC))
 			tmp |= RT2661_DROP_NOT_TO_ME;
@@ -2555,7 +2560,7 @@ rt2661_init(struct ifnet *ifp)
 	RAL_WRITE(sc, RT2661_TXRX_CSR0, tmp);
 
 	/* clear STA registers */
-	RAL_READ_REGION_4(sc, RT2661_STA_CSR0, sta, N(sta));
+	RAL_READ_REGION_4(sc, RT2661_STA_CSR0, sta, nitems(sta));
 
 	/* initialize ASIC */
 	RAL_WRITE(sc, RT2661_MAC_CSR1, 4);
@@ -2579,7 +2584,6 @@ rt2661_init(struct ifnet *ifp)
 		ieee80211_new_state(ic, IEEE80211_S_RUN, -1);
 
 	return 0;
-#undef N
 }
 
 void
@@ -2784,6 +2788,7 @@ rt2661_radar_stop(struct rt2661_softc *sc)
 }
 #endif
 
+#ifndef IEEE80211_STA_ONLY
 int
 rt2661_prepare_beacon(struct rt2661_softc *sc)
 {
@@ -2836,6 +2841,7 @@ rt2661_prepare_beacon(struct rt2661_softc *sc)
 
 	return 0;
 }
+#endif
 
 /*
  * Enable TSF synchronization and tell h/w to start sending beacons for IBSS
@@ -2847,6 +2853,7 @@ rt2661_enable_tsf_sync(struct rt2661_softc *sc)
 	struct ieee80211com *ic = &sc->sc_ic;
 	uint32_t tmp;
 
+#ifndef IEEE80211_STA_ONLY
 	if (ic->ic_opmode != IEEE80211_M_STA) {
 		/*
 		 * Change default 16ms TBTT adjustment to 8ms.
@@ -2854,7 +2861,7 @@ rt2661_enable_tsf_sync(struct rt2661_softc *sc)
 		 */
 		RAL_WRITE(sc, RT2661_TXRX_CSR10, 1 << 12 | 8);
 	}
-
+#endif
 	tmp = RAL_READ(sc, RT2661_TXRX_CSR9) & 0xff000000;
 
 	/* set beacon interval (in 1/16ms unit) */
@@ -2863,9 +2870,10 @@ rt2661_enable_tsf_sync(struct rt2661_softc *sc)
 	tmp |= RT2661_TSF_TICKING | RT2661_ENABLE_TBTT;
 	if (ic->ic_opmode == IEEE80211_M_STA)
 		tmp |= RT2661_TSF_MODE(1);
+#ifndef IEEE80211_STA_ONLY
 	else
 		tmp |= RT2661_TSF_MODE(2) | RT2661_GENERATE_BEACON;
-
+#endif
 	RAL_WRITE(sc, RT2661_TXRX_CSR9, tmp);
 }
 

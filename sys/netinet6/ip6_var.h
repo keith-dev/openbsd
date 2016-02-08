@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip6_var.h,v 1.34 2008/06/11 06:30:36 mcbride Exp $	*/
+/*	$OpenBSD: ip6_var.h,v 1.36 2008/11/25 12:11:45 markus Exp $	*/
 /*	$KAME: ip6_var.h,v 1.33 2000/06/11 14:59:20 jinmei Exp $	*/
 
 /*
@@ -264,6 +264,7 @@ extern int	ip6_log_interval;
 extern time_t	ip6_log_time;
 extern int	ip6_hdrnestlimit; /* upper limit of # of extension headers */
 extern int	ip6_dad_count;		/* DupAddrDetectionTransmits */
+extern int	ip6_dad_pending;	/* number of currently running DADs */
 
 extern int ip6_auto_flowlabel;
 extern int ip6_auto_linklocal;
@@ -299,7 +300,6 @@ void	ip6_initpktopts(struct ip6_pktopts *);
 int	ip6_setpktopts(struct mbuf *, struct ip6_pktopts *,
 	    struct ip6_pktopts *, int, int);
 void	ip6_clearpktopts(struct ip6_pktopts *, int);
-struct ip6_pktopts *ip6_copypktopts(struct ip6_pktopts *, int);
 int	ip6_optlen(struct inpcb *);
 void	ip6_randomid_init(void);
 u_int32_t ip6_randomid(void);

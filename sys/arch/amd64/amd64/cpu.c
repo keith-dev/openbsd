@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.c,v 1.19 2008/06/26 05:42:09 ray Exp $	*/
+/*	$OpenBSD: cpu.c,v 1.22 2009/02/15 02:03:40 marco Exp $	*/
 /* $NetBSD: cpu.c,v 1.1 2003/04/26 18:39:26 fvdl Exp $ */
 
 /*-
@@ -397,6 +397,7 @@ cpu_boot_secondary_processors(void)
 		ci = cpu_info[i];
 		if (ci == NULL)
 			continue;
+		ci->ci_randseed = random();
 		if (ci->ci_idle_pcb == NULL)
 			continue;
 		if ((ci->ci_flags & CPUF_PRESENT) == 0)
@@ -428,10 +429,7 @@ cpu_init_idle_pcbs(void)
 void
 cpu_start_secondary(struct cpu_info *ci)
 {
-	struct pcb *pcb;
 	int i;
-
-	pcb = ci->ci_idle_pcb;
 
 	ci->ci_flags |= CPUF_AP;
 
@@ -566,29 +564,18 @@ cpu_copy_trampoline(void)
 	extern u_char cpu_spinup_trampoline[];
 	extern u_char cpu_spinup_trampoline_end[];
 
-	struct pmap *kmp = pmap_kernel();
 	extern u_int32_t mp_pdirpa;
-	extern vaddr_t lo32_vaddr;
-	extern paddr_t lo32_paddr;
+	extern paddr_t tramp_pdirpa;
 
-	pmap_kenter_pa((vaddr_t)MP_TRAMPOLINE,	/* virtual */
-	    (paddr_t)MP_TRAMPOLINE,	/* physical */
-	    VM_PROT_ALL);		/* protection */
 	memcpy((caddr_t)MP_TRAMPOLINE,
 	    cpu_spinup_trampoline,
 	    cpu_spinup_trampoline_end-cpu_spinup_trampoline);
 
 	/*
-	 * The initial PML4 pointer must be below 4G, so if the
-	 * current one isn't, use a "bounce buffer"
 	 * We need to patch this after we copy the trampoline,
 	 * the symbol points into the copied trampoline.
 	 */
-	if (kmp->pm_pdirpa > 0xffffffff) {
-		memcpy((void *)lo32_vaddr, kmp->pm_pdir, PAGE_SIZE);
-		mp_pdirpa = lo32_paddr;
-	} else
-		mp_pdirpa = kmp->pm_pdirpa;
+	mp_pdirpa = tramp_pdirpa;
 }
 
 

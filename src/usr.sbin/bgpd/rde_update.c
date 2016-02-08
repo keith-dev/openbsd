@@ -1,4 +1,4 @@
-/*	$OpenBSD: rde_update.c,v 1.61 2007/11/27 01:13:54 claudio Exp $ */
+/*	$OpenBSD: rde_update.c,v 1.64 2009/01/13 21:35:16 sthen Exp $ */
 
 /*
  * Copyright (c) 2004 Claudio Jeker <claudio@openbsd.org>
@@ -360,7 +360,7 @@ up_generate(struct rde_peer *peer, struct rde_aspath *asp,
 	if (asp) {
 		ua = calloc(1, sizeof(struct update_attr));
 		if (ua == NULL)
-			fatal("up_generate_updates");
+			fatal("up_generate");
 
 		if (up_generate_attr(peer, ua, asp, addr->af) == -1) {
 			log_warnx("generation of bgp path attributes failed");
@@ -379,7 +379,7 @@ up_generate(struct rde_peer *peer, struct rde_aspath *asp,
 
 	up = calloc(1, sizeof(struct update_prefix));
 	if (up == NULL)
-		fatal("up_generate_updates");
+		fatal("up_generate");
 	up->prefix = *addr;
 	up->prefixlen = prefixlen;
 
@@ -617,7 +617,7 @@ up_generate_attr(struct rde_peer *peer, struct update_attr *upa,
 	u_char		*pdata;
 	u_int32_t	 tmp32;
 	in_addr_t	 nexthop;
-	int		 r, ismp = 0, neednewpath = 0;
+	int		 flags, r, ismp = 0, neednewpath = 0;
 	u_int16_t	 len = sizeof(up_attr_buf), wlen = 0, plen;
 	u_int8_t	 l;
 
@@ -768,19 +768,23 @@ up_generate_attr(struct rde_peer *peer, struct update_attr *upa,
 		else
 			pdata = aspath_prepend(a->aspath, rde_local_as(), 1,
 			    &plen);
+		flags = ATTR_OPTIONAL|ATTR_TRANSITIVE;
+		if (!(a->flags & F_PREFIX_ANNOUNCED))
+			flags |= ATTR_PARTIAL;
 		if (plen == 0)
 			r = 0;
-		else if ((r = attr_write(up_attr_buf + wlen, len,
-		    ATTR_OPTIONAL|ATTR_TRANSITIVE, ATTR_NEW_ASPATH,
-		    pdata, plen)) == -1)
+		else if ((r = attr_write(up_attr_buf + wlen, len, flags,
+		    ATTR_AS4_PATH, pdata, plen)) == -1)
 			return (-1);
 		wlen += r; len -= r;
 		free(pdata);
 	}
 	if (newaggr) {
-		if ((r = attr_write(up_attr_buf + wlen, len,
-		    ATTR_OPTIONAL|ATTR_TRANSITIVE, ATTR_NEW_AGGREGATOR,
-		    newaggr->data, newaggr->len)) == -1)
+		flags = ATTR_OPTIONAL|ATTR_TRANSITIVE;
+		if (!(a->flags & F_PREFIX_ANNOUNCED))
+			flags |= ATTR_PARTIAL;
+		if ((r = attr_write(up_attr_buf + wlen, len, flags,
+		    ATTR_AS4_AGGREGATOR, newaggr->data, newaggr->len)) == -1)
 			return (-1);
 		wlen += r; len -= r;
 	}

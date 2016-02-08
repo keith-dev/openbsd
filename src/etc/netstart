@@ -1,6 +1,6 @@
 #!/bin/sh -
 #
-#	$OpenBSD: netstart,v 1.122 2008/07/23 16:05:47 sthen Exp $
+#	$OpenBSD: netstart,v 1.124 2008/11/25 12:11:44 markus Exp $
 
 # Strip comments (and leading/trailing whitespace if IFS is set)
 # from a file and spew to stdout
@@ -40,7 +40,9 @@ ifstart() {
 		echo "netstart: $file: No such file or directory"
 		return
 	fi
-	if [ "$(stat -Lf "%SLp %u %g" $file)" != "--- 0 0" ]; then
+	# Not using stat(1), we can't rely on having /usr yet
+	set -A stat -- `ls -nL $file`
+	if [ "${stat[0]#???????} ${stat[2]} ${stat[3]}" != "--- 0 0" ]; then
 		echo "WARNING: $file is insecure, fixing permissions"
 		chmod -LR o-rwx $file
 		chown -LR root.wheel $file
@@ -388,5 +390,8 @@ done
 
 if [ "$ip6kernel" = "YES" ]; then
 	# this is to make sure DAD is completed before going further.
-	sleep `sysctl -n net.inet6.ip6.dad_count`
+	count=0
+	while [ $((count++)) -lt 10 -a "x"`sysctl -n net.inet6.ip6.dad_pending` != "x0" ]; do
+		sleep 1
+	done
 fi

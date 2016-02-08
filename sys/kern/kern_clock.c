@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_clock.c,v 1.66 2008/03/15 21:21:09 miod Exp $	*/
+/*	$OpenBSD: kern_clock.c,v 1.68 2009/01/21 21:02:39 miod Exp $	*/
 /*	$NetBSD: kern_clock.c,v 1.34 1996/06/09 04:51:03 briggs Exp $	*/
 
 /*-
@@ -166,6 +166,11 @@ initclocks(void)
 	if (profhz == 0)
 		profhz = i;
 	psratio = profhz / i;
+
+	/* For very large HZ, ensure that division by 0 does not occur later */
+	if (tickadj == 0)
+		tickadj = 1;
+
 #ifdef __HAVE_TIMECOUNTER
 	inittimecounter();
 #endif
@@ -572,7 +577,7 @@ statclock(struct clockframe *frame)
  * Return information about system clocks.
  */
 int
-sysctl_clockrate(char *where, size_t *sizep)
+sysctl_clockrate(char *where, size_t *sizep, void *newp)
 {
 	struct clockinfo clkinfo;
 
@@ -584,7 +589,7 @@ sysctl_clockrate(char *where, size_t *sizep)
 	clkinfo.hz = hz;
 	clkinfo.profhz = profhz;
 	clkinfo.stathz = stathz ? stathz : hz;
-	return (sysctl_rdstruct(where, sizep, NULL, &clkinfo, sizeof(clkinfo)));
+	return (sysctl_rdstruct(where, sizep, newp, &clkinfo, sizeof(clkinfo)));
 }
 
 #ifndef __HAVE_TIMECOUNTER

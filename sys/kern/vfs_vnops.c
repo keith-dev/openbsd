@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfs_vnops.c,v 1.59 2008/04/08 14:46:45 thib Exp $	*/
+/*	$OpenBSD: vfs_vnops.c,v 1.62 2009/01/29 22:08:45 guenther Exp $	*/
 /*	$NetBSD: vfs_vnops.c,v 1.20 1996/02/04 02:18:41 christos Exp $	*/
 
 /*
@@ -52,6 +52,7 @@
 #include <sys/tty.h>
 #include <sys/cdio.h>
 #include <sys/poll.h>
+#include <sys/filedesc.h>
 
 #include <uvm/uvm_extern.h>
 #include <miscfs/specfs/specdev.h>
@@ -96,6 +97,8 @@ vn_open(struct nameidata *ndp, int fmode, int cmode)
 			VATTR_NULL(&va);
 			va.va_type = VREG;
 			va.va_mode = cmode;
+			if (fmode & O_EXCL)
+				va.va_vaflags |= VA_EXCLUSIVE;
 			error = VOP_CREATE(ndp->ni_dvp, &ndp->ni_vp,
 					   &ndp->ni_cnd, &va);
 			if (error)
@@ -390,9 +393,9 @@ vn_stat(struct vnode *vp, struct stat *sb, struct proc *p)
 	sb->st_gid = va.va_gid;
 	sb->st_rdev = va.va_rdev;
 	sb->st_size = va.va_size;
-	sb->st_atimespec = va.va_atime;
-	sb->st_mtimespec = va.va_mtime;
-	sb->st_ctimespec = va.va_ctime;
+	sb->st_atim = va.va_atime;
+	sb->st_mtim = va.va_mtime;
+	sb->st_ctim = va.va_ctime;
 	sb->st_blksize = va.va_blocksize;
 	sb->st_flags = va.va_flags;
 	sb->st_gen = va.va_gen;
@@ -482,8 +485,18 @@ vn_lock(struct vnode *vp, int flags, struct proc *p)
 int
 vn_closefile(struct file *fp, struct proc *p)
 {
-	return (vn_close(((struct vnode *)fp->f_data), fp->f_flag,
-		fp->f_cred, p));
+	struct vnode *vp = fp->f_data;
+	struct flock lf;
+	
+	if ((fp->f_flag & FHASLOCK)) {
+		lf.l_whence = SEEK_SET;
+		lf.l_start = 0;
+		lf.l_len = 0;
+		lf.l_type = F_UNLCK;
+		(void) VOP_ADVLOCK(vp, (caddr_t)fp, F_UNLCK, &lf, F_FLOCK);
+	}
+
+	return (vn_close(vp, fp->f_flag, fp->f_cred, p));
 }
 
 int

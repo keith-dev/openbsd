@@ -38,33 +38,23 @@
 
 #include "drmP.h"
 
-void
-drm_mem_init(void)
-{
-}
-
-void
-drm_mem_uninit(void)
-{
-}
-
 void*
-drm_alloc(size_t size, int area)
+_drm_alloc(size_t size)
 {
 	return malloc(size, M_DRM, M_NOWAIT);
 }
 
 void *
-drm_calloc(size_t nmemb, size_t size, int area)
+_drm_calloc(size_t nmemb, size_t size)
 {
-	if (SIZE_MAX / nmemb < size)
+	if (nmemb == 0 || SIZE_MAX / nmemb < size)
 		return (NULL);
 	else
 		return malloc(size * nmemb, M_DRM, M_NOWAIT | M_ZERO);
 }
 
 void *
-drm_realloc(void *oldpt, size_t oldsize, size_t size, int area)
+_drm_realloc(void *oldpt, size_t oldsize, size_t size)
 {
 	void *pt;
 
@@ -72,14 +62,14 @@ drm_realloc(void *oldpt, size_t oldsize, size_t size, int area)
 	if (pt == NULL)
 		return NULL;
 	if (oldpt && oldsize) {
-		memcpy(pt, oldpt, oldsize);
+		memcpy(pt, oldpt, min(oldsize, size));
 		free(oldpt, M_DRM);
 	}
 	return pt;
 }
 
 void
-drm_free(void *pt, size_t size, int area)
+_drm_free(void *pt)
 {
 	if (pt != NULL)
 		free(pt, M_DRM);
@@ -88,9 +78,6 @@ drm_free(void *pt, size_t size, int area)
 void *
 drm_ioremap(struct drm_device *dev, drm_local_map_t *map)
 {
-	struct vga_pci_bar *bar = NULL;
-	int i;
-
 	DRM_DEBUG("offset: 0x%x size: 0x%x type: %d\n", map->offset, map->size,
 	    map->type);
 
@@ -101,34 +88,15 @@ drm_ioremap(struct drm_device *dev, drm_local_map_t *map)
 	 * to map it.
 	 */
 		DRM_DEBUG("AGP map\n");
-		map->bst = dev->pa.pa_memt;
+		map->bst = dev->bst;
 		if (bus_space_map(map->bst, map->offset,
 		    map->size, BUS_SPACE_MAP_LINEAR, &map->bsh)) {
 			DRM_ERROR("ioremap fail\n");
 			return (NULL);
 		}
-		goto done;
 	} else {
-		for (i = 0 ; i < DRM_MAX_PCI_RESOURCE; ++i) {
-			bar = vga_pci_bar_info(dev->vga_softc, i);
-			if (bar == NULL)
-				continue;
-
-			if (bar->base == map->offset) {
-				DRM_DEBUG("REGISTERS map\n");
-				map->bsr = vga_pci_bar_map(dev->vga_softc,
-				    bar->addr, map->size, BUS_SPACE_MAP_LINEAR);
-				if (map->bsr == NULL) {
-					DRM_ERROR("ioremap fail\n");
-					return (NULL);
-				}
-				map->bst = map->bsr->bst;
-				map->bsh = map->bsr->bsh;
-				goto done;
-			}
-		}
+		return (NULL);
 	}
-done:
 	/* handles are still supposed to be kernel virtual addresses */
 	return bus_space_vaddr(map->bst, map->bsh);
 }
@@ -136,10 +104,11 @@ done:
 void
 drm_ioremapfree(drm_local_map_t *map)
 {
-	if (map != NULL && map->bsr != NULL)
-		vga_pci_bar_unmap(map->bsr);
-	else
-		bus_space_unmap(map->bst, map->bsh, map->size);
+	if (map == NULL || (map->type != _DRM_AGP && map->type !=
+	    _DRM_FRAME_BUFFER))
+		return;
+
+	bus_space_unmap(map->bst, map->bsh, map->size);
 }
 
 int

@@ -1,4 +1,4 @@
-/*	$OpenBSD: param.h,v 1.75 2008/07/02 00:13:32 deraadt Exp $	*/
+/*	$OpenBSD: param.h,v 1.82 2009/02/08 21:02:22 miod Exp $	*/
 /*	$NetBSD: param.h,v 1.23 1996/03/17 01:02:29 thorpej Exp $	*/
 
 /*-
@@ -41,8 +41,8 @@
 #define BSD4_3	1
 #define BSD4_4	1
 
-#define OpenBSD	200811		/* OpenBSD version (year & month). */
-#define OpenBSD4_4 1		/* OpenBSD 4.4 */
+#define OpenBSD	200905		/* OpenBSD version (year & month). */
+#define OpenBSD4_5 1		/* OpenBSD 4.5 */
 
 #ifndef NULL
 #ifdef 	__GNUG__
@@ -67,7 +67,7 @@
 #include <sys/syslimits.h>
 
 #define	MAXCOMLEN	16		/* max command name remembered */
-#define	MAXINTERP	64		/* max interpreter file name length */
+#define	MAXINTERP	128		/* max interpreter file name length */
 #define	MAXLOGNAME	LOGIN_NAME_MAX	/* max login name length w/ NUL */
 #define	MAXUPRC		CHILD_MAX	/* max simultaneous processes */
 #define	NCARGS		ARG_MAX		/* max bytes for an exec function */
@@ -141,7 +141,6 @@
 #define	MCLBYTES	(1 << MCLSHIFT)	/* size of a m_buf cluster */
 #define	MCLOFSET	(MCLBYTES - 1)
 
-
 /*
  * File system parameters and macros.
  *
@@ -196,6 +195,8 @@
 #if !defined(offsetof) && defined(_KERNEL)
 #define offsetof(s, e) ((size_t)&((s *)0)->e)
 #endif
+
+#define nitems(_a)	(sizeof((_a)) / sizeof((_a)[0]))
 
 /*
  * Constants for setting the parameters of the kernel memory allocator.

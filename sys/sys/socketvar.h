@@ -1,4 +1,4 @@
-/*	$OpenBSD: socketvar.h,v 1.41 2008/05/23 15:51:12 thib Exp $	*/
+/*	$OpenBSD: socketvar.h,v 1.45 2009/02/22 07:47:22 otto Exp $	*/
 /*	$NetBSD: socketvar.h,v 1.18 1996/02/09 18:25:38 christos Exp $	*/
 
 /*-
@@ -91,7 +91,7 @@ struct socket {
 					      socket buffer */
 		struct	selinfo sb_sel;	/* process selecting read/write */
 		short	sb_flags;	/* flags, see below */
-		short	sb_timeo;	/* timeout for read/write */
+		u_short	sb_timeo;	/* timeout for read/write */
 	} so_rcv, so_snd;
 #define	SB_MAX		(256*1024)	/* default for max chars in sockbuf */
 #define	SB_LOCK		0x01		/* lock on data queue */
@@ -110,8 +110,7 @@ struct socket {
 	pid_t	so_cpid;		/* pid of process that opened socket */
 };
 
-#define	SB_EMPTY_FIXUP(sb)						\
-do {									\
+#define	SB_EMPTY_FIXUP(sb) do {						\
 	if ((sb)->sb_mb == NULL) {					\
 		(sb)->sb_mbtail = NULL;					\
 		(sb)->sb_lastrecord = NULL;				\
@@ -173,29 +172,29 @@ do {									\
 /* can we write something to so? */
 #define	sowriteable(so) \
     ((sbspace(&(so)->so_snd) >= (so)->so_snd.sb_lowat && \
-	(((so)->so_state&SS_ISCONNECTED) || \
-	  ((so)->so_proto->pr_flags&PR_CONNREQUIRED)==0)) || \
+	(((so)->so_state & SS_ISCONNECTED) || \
+	  ((so)->so_proto->pr_flags & PR_CONNREQUIRED)==0)) || \
     ((so)->so_state & SS_CANTSENDMORE) || (so)->so_error)
 
 /* adjust counters in sb reflecting allocation of m */
-#define	sballoc(sb, m) { \
-	(sb)->sb_cc += (m)->m_len; \
-	if ((m)->m_type != MT_CONTROL && (m)->m_type != MT_SONAME) \
-		(sb)->sb_datacc += (m)->m_len; \
-	(sb)->sb_mbcnt += MSIZE; \
-	if ((m)->m_flags & M_EXT) \
-		(sb)->sb_mbcnt += (m)->m_ext.ext_size; \
-}
+#define	sballoc(sb, m) do {						\
+	(sb)->sb_cc += (m)->m_len;					\
+	if ((m)->m_type != MT_CONTROL && (m)->m_type != MT_SONAME)	\
+		(sb)->sb_datacc += (m)->m_len;				\
+	(sb)->sb_mbcnt += MSIZE;					\
+	if ((m)->m_flags & M_EXT)					\
+		(sb)->sb_mbcnt += (m)->m_ext.ext_size;			\
+} while (/* CONSTCOND */ 0)
 
 /* adjust counters in sb reflecting freeing of m */
-#define	sbfree(sb, m) { \
-	(sb)->sb_cc -= (m)->m_len; \
-	if ((m)->m_type != MT_CONTROL && (m)->m_type != MT_SONAME) \
-		(sb)->sb_datacc -= (m)->m_len; \
-	(sb)->sb_mbcnt -= MSIZE; \
-	if ((m)->m_flags & M_EXT) \
-		(sb)->sb_mbcnt -= (m)->m_ext.ext_size; \
-}
+#define	sbfree(sb, m) do {						\
+	(sb)->sb_cc -= (m)->m_len;					\
+	if ((m)->m_type != MT_CONTROL && (m)->m_type != MT_SONAME)	\
+		(sb)->sb_datacc -= (m)->m_len;				\
+	(sb)->sb_mbcnt -= MSIZE;					\
+	if ((m)->m_flags & M_EXT)					\
+		(sb)->sb_mbcnt -= (m)->m_ext.ext_size;			\
+} while (/* CONSTCOND */ 0)
 
 /*
  * Set lock on sockbuf sb; sleep if lock is already held.
@@ -207,18 +206,20 @@ do {									\
 		((sb)->sb_flags |= SB_LOCK, 0))
 
 /* release lock on sockbuf sb */
-#define	sbunlock(sb) { \
-	(sb)->sb_flags &= ~SB_LOCK; \
-	if ((sb)->sb_flags & SB_WANT) { \
-		(sb)->sb_flags &= ~SB_WANT; \
-		wakeup((caddr_t)&(sb)->sb_flags); \
-	} \
-}
+#define	sbunlock(sb) do {						\
+	(sb)->sb_flags &= ~SB_LOCK;					\
+	if ((sb)->sb_flags & SB_WANT) {					\
+		(sb)->sb_flags &= ~SB_WANT;				\
+		wakeup((caddr_t)&(sb)->sb_flags);			\
+	}								\
+} while (/* CONSTCOND */ 0)
 
-#define	sorwakeup(so)	{ sowakeup((so), &(so)->so_rcv); \
-			  if ((so)->so_upcall) \
-			    (*((so)->so_upcall))((so), (so)->so_upcallarg, M_DONTWAIT); \
-			}
+#define	sorwakeup(so) do {						\
+	sowakeup((so), &(so)->so_rcv);					\
+	if ((so)->so_upcall)						\
+		(*((so)->so_upcall))((so), (so)->so_upcallarg,		\
+		    M_DONTWAIT);					\
+} while (/* CONSTCOND */ 0)
 
 #define	sowwakeup(so)	sowakeup((so), &(so)->so_snd)
 
@@ -297,7 +298,8 @@ struct socket *sonewconn(struct socket *head, int connstatus);
 void	soqinsque(struct socket *head, struct socket *so, int q);
 int	soqremque(struct socket *so, int q);
 int	soreceive(struct socket *so, struct mbuf **paddr, struct uio *uio,
-	    struct mbuf **mp0, struct mbuf **controlp, int *flagsp);
+	    struct mbuf **mp0, struct mbuf **controlp, int *flagsp,
+	    socklen_t controllen);
 int	soreserve(struct socket *so, u_long sndcc, u_long rcvcc);
 void	sorflush(struct socket *so);
 int	sosend(struct socket *so, struct mbuf *addr, struct uio *uio,

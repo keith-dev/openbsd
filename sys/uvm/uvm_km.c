@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_km.c,v 1.67 2008/06/14 03:48:32 art Exp $	*/
+/*	$OpenBSD: uvm_km.c,v 1.70 2009/02/22 19:59:01 miod Exp $	*/
 /*	$NetBSD: uvm_km.c,v 1.42 2001/01/14 02:10:01 thorpej Exp $	*/
 
 /* 
@@ -664,86 +664,6 @@ uvm_km_valloc_wait(struct vm_map *map, vsize_t size)
 	return uvm_km_valloc_prefer_wait(map, size, UVM_UNKNOWN_OFFSET);
 }
 
-/*
- * uvm_km_alloc_poolpage: allocate a page for the pool allocator
- *
- * => if the pmap specifies an alternate mapping method, we use it.
- */
-
-/* ARGSUSED */
-vaddr_t
-uvm_km_alloc_poolpage1(struct vm_map *map, struct uvm_object *obj,
-    boolean_t waitok)
-{
-#if defined(__HAVE_PMAP_DIRECT)
-	struct vm_page *pg;
-	vaddr_t va;
-
- again:
-	pg = uvm_pagealloc(NULL, 0, NULL, UVM_PGA_USERESERVE);
-	if (__predict_false(pg == NULL)) {
-		if (waitok) {
-			uvm_wait("plpg");
-			goto again;
-		} else
-			return (0);
-	}
-	va = pmap_map_direct(pg);
-	if (__predict_false(va == 0))
-		uvm_pagefree(pg);
-	return (va);
-#else
-	vaddr_t va;
-	int s;
-
-	/*
-	 * NOTE: We may be called with a map that doesn't require splvm
-	 * protection (e.g. kernel_map).  However, it does not hurt to
-	 * go to splvm in this case (since unprotected maps will never be
-	 * accessed in interrupt context).
-	 *
-	 * XXX We may want to consider changing the interface to this
-	 * XXX function.
-	 */
-
-	s = splvm();
-	va = uvm_km_kmemalloc(map, obj, PAGE_SIZE, waitok ? 0 : UVM_KMF_NOWAIT);
-	splx(s);
-	return (va);
-#endif /* __HAVE_PMAP_DIRECT */
-}
-
-/*
- * uvm_km_free_poolpage: free a previously allocated pool page
- *
- * => if the pmap specifies an alternate unmapping method, we use it.
- */
-
-/* ARGSUSED */
-void
-uvm_km_free_poolpage1(struct vm_map *map, vaddr_t addr)
-{
-#if defined(__HAVE_PMAP_DIRECT)
-	uvm_pagefree(pmap_unmap_direct(addr));
-#else
-	int s;
-
-	/*
-	 * NOTE: We may be called with a map that doesn't require splvm
-	 * protection (e.g. kernel_map).  However, it does not hurt to
-	 * go to splvm in this case (since unprocted maps will never be
-	 * accessed in interrupt context).
-	 *
-	 * XXX We may want to consider changing the interface to this
-	 * XXX function.
-	 */
-
-	s = splvm();
-	uvm_km_free(map, addr, PAGE_SIZE);
-	splx(s);
-#endif /* __HAVE_PMAP_DIRECT */
-}
-
 int uvm_km_pages_free; /* number of pages currently on free list */
 
 #if defined(__HAVE_PMAP_DIRECT)
@@ -760,17 +680,31 @@ uvm_km_page_init(void)
 }
 
 void *
-uvm_km_getpage(boolean_t waitok)
+uvm_km_getpage(boolean_t waitok, int *slowdown)
 {
+	struct vm_page *pg;
+	vaddr_t va;
 
-	return ((void *)uvm_km_alloc_poolpage1(NULL, NULL, waitok));
+	*slowdown = 0;
+ again:
+	pg = uvm_pagealloc(NULL, 0, NULL, UVM_PGA_USERESERVE);
+	if (__predict_false(pg == NULL)) {
+		if (waitok) {
+			uvm_wait("plpg");
+			goto again;
+		} else
+			return (NULL);
+	}
+	va = pmap_map_direct(pg);
+	if (__predict_false(va == 0))
+		uvm_pagefree(pg);
+	return ((void *)va);
 }
 
 void
 uvm_km_putpage(void *v)
 {
-
-	uvm_km_free_poolpage1(NULL, (vaddr_t)v);
+	uvm_pagefree(pmap_unmap_direct((vaddr_t)v));
 }
 
 #else
@@ -791,6 +725,8 @@ struct km_page {
 	struct km_page *next;
 } *uvm_km_pages_head;
 
+struct proc *uvm_km_proc;
+
 void uvm_km_createthread(void *);
 void uvm_km_thread(void *);
 
@@ -804,6 +740,7 @@ void
 uvm_km_page_init(void)
 {
 	struct km_page *page;
+	int lowat_min;
 	int i;
 
 	mtx_init(&uvm_km_mtx, IPL_VM);
@@ -812,8 +749,9 @@ uvm_km_page_init(void)
 		uvm_km_pages_lowat = physmem / 256;
 		if (uvm_km_pages_lowat > 2048)
 			uvm_km_pages_lowat = 2048;
-		if (uvm_km_pages_lowat < 128)
-			uvm_km_pages_lowat = 128;
+		lowat_min = physmem < atop(16 * 1024 * 1024) ? 32 : 128;
+		if (uvm_km_pages_lowat < lowat_min)
+			uvm_km_pages_lowat = lowat_min;
 	}
 
 	for (i = 0; i < uvm_km_pages_lowat * 4; i++) {
@@ -833,7 +771,7 @@ uvm_km_page_init(void)
 void
 uvm_km_createthread(void *arg)
 {
-	kthread_create(uvm_km_thread, NULL, NULL, "kmthread");
+	kthread_create(uvm_km_thread, NULL, &uvm_km_proc, "kmthread");
 }
 
 /*
@@ -878,10 +816,11 @@ uvm_km_thread(void *arg)
  * permits it.  Wake up the thread if we've dropped below lowat.
  */
 void *
-uvm_km_getpage(boolean_t waitok)
+uvm_km_getpage(boolean_t waitok, int *slowdown)
 {
 	struct km_page *page = NULL;
 
+	*slowdown = 0;
 	mtx_enter(&uvm_km_mtx);
 	for (;;) {
 		page = uvm_km_pages_head;
@@ -894,22 +833,12 @@ uvm_km_getpage(boolean_t waitok)
 			break;
 		msleep(&uvm_km_pages_free, &uvm_km_mtx, PVM, "getpage", 0);
 	}
-	if (uvm_km_pages_free < uvm_km_pages_lowat) {
-		wakeup(&uvm_km_pages_head);
-
-		/*
-		 * If we're below the low watermark and are allowed to
-		 * sleep, we should slow down our allocations a bit
-		 * to not exhaust the reserve of pages for nosleep
-		 * allocators.
-		 *
-		 * Just sleep once.
-		 */
-		if (waitok)
-			msleep(&uvm_km_pages_free, &uvm_km_mtx, PPAUSE,
-			    "getpg2", 0);
-	}
 	mtx_leave(&uvm_km_mtx);
+	if (uvm_km_pages_free < uvm_km_pages_lowat) {
+		if (curproc != uvm_km_proc)
+			*slowdown = 1;
+		wakeup(&uvm_km_pages_head);
+	}
 	return (page);
 }
 

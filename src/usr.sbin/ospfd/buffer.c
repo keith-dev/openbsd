@@ -1,4 +1,4 @@
-/*	$OpenBSD: buffer.c,v 1.8 2006/02/10 18:30:47 claudio Exp $ */
+/*	$OpenBSD: buffer.c,v 1.10 2009/01/31 11:44:49 claudio Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -121,6 +121,12 @@ buf_seek(struct buf *buf, size_t pos, size_t len)
 	return (buf->buf + pos);
 }
 
+size_t
+buf_left(struct buf *buf)
+{
+	return (buf->max - buf->wpos);
+}
+
 int
 buf_close(struct msgbuf *msgbuf, struct buf *buf)
 {
@@ -157,7 +163,7 @@ msgbuf_write(struct msgbuf *msgbuf)
 {
 	struct iovec	 iov[IOV_MAX];
 	struct buf	*buf, *next;
-	int		 i = 0;
+	unsigned int	 i = 0;
 	ssize_t		 n;
 	struct msghdr	 msg;
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: vnode.h,v 1.95 2008/06/09 23:38:37 millert Exp $	*/
+/*	$OpenBSD: vnode.h,v 1.97 2008/12/23 21:43:15 thib Exp $	*/
 /*	$NetBSD: vnode.h,v 1.38 1996/02/29 20:59:05 cgd Exp $	*/
 
 /*
@@ -164,7 +164,7 @@ struct vattr {
 };
 
 /*
- * Flags for va_cflags.
+ * Flags for va_vaflags.
  */
 #define	VA_UTIMES_NULL	0x01		/* utimes argument was NULL */
 #define VA_EXCLUSIVE    0x02		/* exclusive create request */
@@ -365,7 +365,7 @@ int	vwaitforio(struct vnode *, int, char *, int);
 void	vwakeup(struct vnode *);
 void	vput(struct vnode *);
 int	vrecycle(struct vnode *, struct proc *);
-void	vrele(struct vnode *);
+int	vrele(struct vnode *);
 void	vref(struct vnode *);
 void	vprint(char *, struct vnode *);
 void	copy_statfs_info(struct statfs *, const struct mount *);

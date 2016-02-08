@@ -1,4 +1,4 @@
-/*	$OpenBSD: ciss.c,v 1.30 2008/04/24 09:04:14 jakob Exp $	*/
+/*	$OpenBSD: ciss.c,v 1.33 2009/02/16 21:19:06 miod Exp $	*/
 
 /*
  * Copyright (c) 2005,2006 Michael Shalayeff
@@ -72,7 +72,7 @@ struct cfdriver ciss_cd = {
 int	ciss_scsi_cmd(struct scsi_xfer *xs);
 int	ciss_scsi_ioctl(struct scsi_link *link, u_long cmd,
     caddr_t addr, int flag, struct proc *p);
-void	cissminphys(struct buf *bp);
+void	cissminphys(struct buf *bp, struct scsi_link *sl);
 
 struct scsi_adapter ciss_switch = {
 	ciss_scsi_cmd, cissminphys, NULL, NULL, ciss_scsi_ioctl
@@ -339,7 +339,7 @@ ciss_attach(struct ciss_softc *sc)
 	CISS_UNLOCK_SCRATCH(sc, lock);
 
 	timeout_set(&sc->sc_hb, ciss_heartbeat, sc);
-	timeout_add(&sc->sc_hb, hz * 3);
+	timeout_add_sec(&sc->sc_hb, 3);
 
 	/* map LDs */
 	if (ciss_ldmap(sc)) {
@@ -458,7 +458,7 @@ ciss_shutdown(void *v)
 }
 
 void
-cissminphys(struct buf *bp)
+cissminphys(struct buf *bp, struct scsi_link *sl)
 {
 #if 0	/* TODO */
 #define	CISS_MAXFER	(PAGE_SIZE * (sc->maxsg + 1))
@@ -826,7 +826,6 @@ ciss_scsi_raw_cmd(struct scsi_xfer *xs)	/* TODO */
 	struct ciss_ccb *ccb;
 	struct ciss_cmd *cmd;
 	ciss_lock_t lock;
-	int error;
 
 	CISS_DPRINTF(CISS_D_CMD, ("ciss_scsi_raw_cmd "));
 
@@ -843,7 +842,6 @@ ciss_scsi_raw_cmd(struct scsi_xfer *xs)	/* TODO */
 		return (COMPLETE);
 	}
 
-	error = 0;
 	xs->error = XS_NOERROR;
 
 	/* TODO check this target has not yet employed w/ any volume */
@@ -886,7 +884,6 @@ ciss_scsi_cmd(struct scsi_xfer *xs)
 	u_int8_t target = link->target;
 	struct ciss_ccb *ccb;
 	struct ciss_cmd *cmd;
-	int error;
 	ciss_lock_t lock;
 
 	CISS_DPRINTF(CISS_D_CMD, ("ciss_scsi_cmd "));
@@ -904,7 +901,6 @@ ciss_scsi_cmd(struct scsi_xfer *xs)
 		return (COMPLETE);
 	}
 
-	error = 0;
 	xs->error = XS_NOERROR;
 
 	/* XXX emulate SYNCHRONIZE_CACHE ??? */
@@ -985,7 +981,7 @@ ciss_heartbeat(void *v)
 	else
 		sc->heartbeat = hb;
 
-	timeout_add(&sc->sc_hb, hz * 3);
+	timeout_add_sec(&sc->sc_hb, 3);
 }
 
 void

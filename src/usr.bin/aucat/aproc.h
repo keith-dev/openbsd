@@ -1,4 +1,4 @@
-/*	$OpenBSD: aproc.h,v 1.2 2008/06/02 17:06:36 ratchov Exp $	*/
+/*	$OpenBSD: aproc.h,v 1.16 2009/01/23 17:38:15 ratchov Exp $	*/
 /*
  * Copyright (c) 2008 Alexandre Ratchov <alex@caoua.org>
  *
@@ -91,25 +91,24 @@ struct aproc_ops {
 	 * A new output was connected
 	 */
 	void (*newout)(struct aproc *, struct abuf *);
-};
 
-struct aconv {
 	/*
-	 * Format of the buffer. This part is used by conversion code.
+	 * Real-time record position changed (for input buffer),
+	 * by the given amount of _frames_
 	 */
+	void (*ipos)(struct aproc *, struct abuf *, int);
 
-	int bfirst;		/* bytes to skip at startup */
-	unsigned rate;		/* frames per second */
-	unsigned pos;		/* current position in the stream */
-	unsigned nch;		/* number of channels: nch = cmax - cmin + 1 */
-	unsigned bps;		/* bytes per sample (padding included) */
-	unsigned shift;		/* shift to get 32bit MSB-justified int */
-	int sigbit;		/* sign bits to XOR to unsigned samples */
-	int bnext;		/* bytes to skip to reach the next byte */
-	int snext;		/* bytes to skip to reach the next sample */
-	unsigned cmin;		/* provided/consumed channels */
-	unsigned bpf;		/* bytes per frame: bpf = nch * bps */
-	int ctx[CHAN_MAX];	/* current frame (for resampling) */
+	/*
+	 * Real-time play position changed (for output buffer),
+	 * by the given amount of _frames_
+	 */
+	void (*opos)(struct aproc *, struct abuf *, int);
+
+	/*
+	 * destroy the aproc, called just before to free the
+	 * aproc structure
+	 */
+	void (*done)(struct aproc *);
 };
 
 /*
@@ -122,32 +121,78 @@ struct aproc {
 	struct aproc_ops *ops;			/* call-backs */
 	LIST_HEAD(, abuf) ibuflist;		/* list of inputs */
 	LIST_HEAD(, abuf) obuflist;		/* list of outputs */
+	unsigned refs;				/* extern references */
 	union {					/* follow type-specific data */
 		struct {			/* file/device io */
 			struct file *file;	/* file to read/write */
 		} io;
 		struct {
-			struct aconv ist, ost;
-		} conv;
-		struct {
-#define MIX_DROP 1
-			unsigned flags;
+#define MIX_DROP	1
+#define MIX_AUTOQUIT	2
+			unsigned flags;		/* bit mask of above */
+			unsigned idle;		/* frames since idleing */
+			int lat;		/* current latency */
+			int maxlat;		/* max latency allowed*/
 		} mix;
 		struct {
-#define SUB_DROP 1
-			unsigned flags;
+#define SUB_DROP	1
+#define SUB_AUTOQUIT	2
+			unsigned idle;		/* frames since idleing */
+			unsigned flags;		/* bit mask of above */
+			int lat;		/* current latency */
+			int maxlat;		/* max latency allowed*/
 		} sub;
+		struct {
+#define RESAMP_NCTX	2
+			unsigned ctx_start;
+			short ctx[NCHAN_MAX * RESAMP_NCTX];
+			unsigned iblksz, oblksz;
+			int diff;
+			int idelta, odelta;	/* remainder of resamp_[io]pos */
+		} resamp;
+		struct {
+			short ctx[NCHAN_MAX];
+		} cmap;
+		struct {
+			int bfirst;		/* bytes to skip at startup */
+			unsigned bps;		/* bytes per sample */
+			unsigned shift;		/* shift to get 32bit MSB */
+			int sigbit;		/* sign bits to XOR */
+			int bnext;		/* to reach the next byte */
+			int snext;		/* to reach the next sample */
+		} conv;
 	} u;
 };
 
+struct aproc *aproc_new(struct aproc_ops *, char *);
 void aproc_del(struct aproc *);
 void aproc_setin(struct aproc *, struct abuf *);
 void aproc_setout(struct aproc *, struct abuf *);
 
 struct aproc *rpipe_new(struct file *);
-struct aproc *wpipe_new(struct file *);
-struct aproc *mix_new(void);
-struct aproc *sub_new(void);
-struct aproc *conv_new(char *, struct aparams *, struct aparams *);
+int rpipe_in(struct aproc *, struct abuf *);
+int rpipe_out(struct aproc *, struct abuf *);
+void rpipe_done(struct aproc *);
+void rpipe_eof(struct aproc *, struct abuf *);
+void rpipe_hup(struct aproc *, struct abuf *);
 
-#endif /* !defined(FIFO_H) */
+struct aproc *wpipe_new(struct file *);
+void wpipe_done(struct aproc *);
+int wpipe_in(struct aproc *, struct abuf *);
+int wpipe_out(struct aproc *, struct abuf *);
+void wpipe_eof(struct aproc *, struct abuf *);
+void wpipe_hup(struct aproc *, struct abuf *);
+
+struct aproc *mix_new(char *, int);
+struct aproc *sub_new(char *, int);
+struct aproc *resamp_new(char *, unsigned, unsigned);
+struct aproc *cmap_new(char *, struct aparams *, struct aparams *);
+struct aproc *enc_new(char *, struct aparams *);
+struct aproc *dec_new(char *, struct aparams *);
+
+void mix_pushzero(struct aproc *);
+void mix_setmaster(struct aproc *);
+void mix_clear(struct aproc *);
+void sub_clear(struct aproc *);
+
+#endif /* !defined(APROC_H) */

@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_subs.c,v 1.84 2008/06/15 04:03:40 thib Exp $	*/
+/*	$OpenBSD: nfs_subs.c,v 1.92 2009/01/24 23:30:42 thib Exp $	*/
 /*	$NetBSD: nfs_subs.c,v 1.27.4.3 1996/07/08 20:34:24 jtc Exp $	*/
 
 /*
@@ -514,7 +514,6 @@ static short *nfsrv_v3errmap[] = {
 	nfsv3err_commit,
 };
 
-extern struct proc *nfs_iodwant[NFS_MAXASYNCDAEMON];
 extern struct nfsrtt nfsrtt;
 
 struct pool nfsreqpl;
@@ -562,8 +561,7 @@ nfs_get_xid(void)
  * other authorization methods, such as Kerberos.
  */
 void
-nfsm_rpchead(struct nfsreq *req, struct ucred *cr, int auth_type,
-    struct mbuf *mrest, int mrest_len)
+nfsm_rpchead(struct nfsreq *req, struct ucred *cr, int auth_type)
 {
 	struct mbuf	*mb;
 	u_int32_t	*tl;
@@ -573,10 +571,10 @@ nfsm_rpchead(struct nfsreq *req, struct ucred *cr, int auth_type,
 
 	/*
 	 * RPCAUTH_UNIX fits in an hdr mbuf, in the future other
-	 * authorization methods need to figure out there own sizes
+	 * authorization methods need to figure out their own sizes
 	 * and allocate and chain mbuf's accorindgly.
 	 */
-	MGETHDR(mb, M_WAIT, MT_DATA);
+	mb = req->r_mreq;
 
 	/*
 	 * We need to start out by finding how big the authorization cred
@@ -641,10 +639,8 @@ nfsm_rpchead(struct nfsreq *req, struct ucred *cr, int auth_type,
 		break;
 	}
 
-	mb->m_next = mrest;
-	mb->m_pkthdr.len = authsiz + 10 * NFSX_UNSIGNED + mrest_len;
+	mb->m_pkthdr.len += authsiz + 10 * NFSX_UNSIGNED;
 	mb->m_pkthdr.rcvif = NULL;
-	req->r_mreq = mb;
 }
 
 /*
@@ -706,7 +702,8 @@ nfsm_mbuftouio(mrep, uiop, siz, dpos)
 			uiop->uio_iovcnt--;
 			uiop->uio_iov++;
 		} else {
-			(char *)uiop->uio_iov->iov_base += uiosiz;
+			uiop->uio_iov->iov_base =
+			    (char *)uiop->uio_iov->iov_base + uiosiz;
 			uiop->uio_iov->iov_len -= uiosiz;
 		}
 		siz -= uiosiz;
@@ -926,8 +923,8 @@ nfs_init()
 	rpc_autherr = txdr_unsigned(RPC_AUTHERR);
 	rpc_auth_unix = txdr_unsigned(RPCAUTH_UNIX);
 	nfs_prog = txdr_unsigned(NFS_PROG);
-	nfs_true = txdr_unsigned(TRUE);
-	nfs_false = txdr_unsigned(FALSE);
+	nfs_true = txdr_unsigned(1);
+	nfs_false = txdr_unsigned(0);
 	nfs_xdrneg1 = txdr_unsigned(-1);
 	nfs_ticks = (hz * NFS_TICKINTVL + 500) / 1000;
 	if (nfs_ticks < 1)
@@ -954,11 +951,6 @@ int
 nfs_vfs_init(vfsp)
 	struct vfsconf *vfsp;
 {
-	int i;
-
-	/* Ensure async daemons disabled */
-	for (i = 0; i < NFS_MAXASYNCDAEMON; i++)
-		nfs_iodwant[i] = (struct proc *)0;
 	TAILQ_INIT(&nfs_bufq);
 	nfs_nhinit();			/* Init the nfsnode table */
 
@@ -1071,11 +1063,10 @@ nfs_loadattrcache(vpp, mdp, dposp, vaper)
 				*vpp = vp = nvp;
 			}
 		}
-		np->n_mtime = mtime.tv_sec;
+		np->n_mtime = mtime;
 	}
 	vap = &np->n_vattr;
 	vap->va_type = vtyp;
-	vap->va_mode = (vmode & 07777);
 	vap->va_rdev = (dev_t)rdev;
 	vap->va_mtime = mtime;
 	vap->va_fsid = vp->v_mount->mnt_stat.f_fsid.val[0];
@@ -1085,8 +1076,10 @@ nfs_loadattrcache(vpp, mdp, dposp, vaper)
 	/* Invalidate access cache if uid, gid or mode changed. */
 	if (np->n_accstamp != -1 &&
 	    (gid != vap->va_gid || uid != vap->va_uid ||
-	    vmode != vap->va_mode))
+	    (vmode & 07777) != vap->va_mode))
 		np->n_accstamp = -1;
+
+	vap->va_mode = (vmode & 07777);
 
 	switch (vtyp) {
 	case VBLK:
@@ -1162,7 +1155,7 @@ nfs_attrtimeo (np)
 {
 	struct vnode *vp = np->n_vnode;
 	struct nfsmount *nmp = VFSTONFS(vp->v_mount);
-	int tenthage = (time_second - np->n_mtime) / 10;
+	int tenthage = (time_second - np->n_mtime.tv_sec) / 10;
 	int minto, maxto;
 
 	if (vp->v_type == VDIR) {
@@ -1292,7 +1285,7 @@ nfs_namei(ndp, fhp, len, slp, nam, mdp, dposp, retdirp, p)
 	/*
 	 * Extract and set starting directory.
 	 */
-	error = nfsrv_fhtovp(fhp, FALSE, &dp, ndp->ni_cnd.cn_cred, slp,
+	error = nfsrv_fhtovp(fhp, 0, &dp, ndp->ni_cnd.cn_cred, slp,
 	    nam, &rdonly);
 	if (error)
 		goto out;
@@ -1562,9 +1555,8 @@ nfsrv_fhtovp(fhp, lockflag, vpp, cred, slp, nam, rdonlyp)
 }
 
 /*
- * This function compares two net addresses by family and returns TRUE
- * if they are the same host.
- * If there is any doubt, return FALSE.
+ * This function compares two net addresses by family and returns non zero
+ * if they are the same host, or if there is any doubt it returns 0.
  * The AF_INET family is handled as a special case so that address mbufs
  * don't need to be saved to store "struct in_addr", which is only 4 bytes.
  */
@@ -1809,7 +1801,7 @@ nfsrv_errmap(nd, err)
 	    } else
 		return (err & 0xffff);
 	}
-	if (err <= sizeof(nfsrv_v2errmap)/sizeof(nfsrv_v2errmap[0]))
+	if (err <= nitems(nfsrv_v2errmap))
 		return ((int)nfsrv_v2errmap[err - 1]);
 	return (NFSERR_IO);
 }
@@ -1857,7 +1849,7 @@ nfsrv_setcred(incred, outcred)
 }
 
 /*
- * If full is true, set all fields, otherwise just set mode and time fields
+ * If full is non zero, set all fields, otherwise just set mode and time fields
  */
 void
 nfsm_v3attrbuild(struct mbuf **mp, struct vattr *a, int full)

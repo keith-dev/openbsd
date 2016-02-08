@@ -1,4 +1,4 @@
-/*	$OpenBSD: sbic.c,v 1.19 2007/05/29 13:56:14 pyr Exp $ */
+/*	$OpenBSD: sbic.c,v 1.22 2009/02/16 21:19:06 miod Exp $ */
 /*	$NetBSD: sbic.c,v 1.2 1996/04/23 16:32:54 chuck Exp $	*/
 
 /*
@@ -150,21 +150,6 @@ void    sbictimeout(struct sbic_softc *dev);
 #else
 #define QPRINTF(a)  /* */
 #endif
-
-
-/*
- * default minphys routine for sbic based controllers
- */
-void
-sbic_minphys(bp)
-    struct buf *bp;
-{
-    /*
-     * No max transfer at this level.
-     */
-    minphys(bp);
-}
-
 
 /*
  * Save DMA pointers.  Take into account partial transfer. Shut down DMA.
@@ -364,9 +349,6 @@ sbic_scsicmd(xs)
     int                 flags = xs->flags,
                         s;
 
-    if ( flags & SCSI_DATA_UIO )
-        panic("sbic: scsi data uio requested");
-
     if ( dev->sc_nexus && (flags & SCSI_POLL) )
         panic("sbic_scsicmd: busy");
 
@@ -388,7 +370,7 @@ sbic_scsicmd(xs)
         Debugger();
 #endif
 #endif
-        return(TRY_AGAIN_LATER);
+        return (NO_CCB);
     }
 
     if ( flags & SCSI_DATA_IN )

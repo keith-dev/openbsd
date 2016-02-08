@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ni.c,v 1.10 2007/05/11 10:06:55 pedro Exp $ */
+/*	$OpenBSD: if_ni.c,v 1.13 2008/11/28 02:44:17 brad Exp $ */
 /*	$NetBSD: if_ni.c,v 1.15 2002/05/22 16:03:14 wiz Exp $ */
 /*
  * Copyright (c) 2000 Ludd, University of Lule}, Sweden. All rights reserved.
@@ -695,12 +695,12 @@ niioctl(ifp, cmd, data)
 	caddr_t data;
 {
 	struct ni_softc *sc = ifp->if_softc;
-	struct ifreq *ifr = (struct ifreq *)data;
 	struct ifaddr *ifa = (struct ifaddr *)data;
-	int s = splnet(), error = 0;
+	int s, error = 0;
+
+	s = splnet();
 
 	switch (cmd) {
-
 	case SIOCSIFADDR:
 		ifp->if_flags |= IFF_UP;
 		switch(ifa->ifa_addr->sa_family) {
@@ -738,30 +738,16 @@ niioctl(ifp, cmd, data)
 		}
 		break;
 
-	case SIOCADDMULTI:
-	case SIOCDELMULTI:
-		/*
-		 * Update our multicast list.
-		 */
-		error = (cmd == SIOCADDMULTI) ?
-			ether_addmulti(ifr, &sc->sc_ec):
-			ether_delmulti(ifr, &sc->sc_ec);
-
-		if (error == ENETRESET) {
-			/*
-			 * Multicast list has changed; set the hardware filter
-			 * accordingly.
-			 */
-			if (ifp->if_flags & IFF_RUNNING)
-				ni_setup(sc);
-			error = 0;
-		}
-		break;
-
 	default:
-		error = EINVAL;
-
+		error = ether_ioctl(ifp, &sc->sc_ec, cmd, data);
 	}
+
+	if (error == ENETRESET) {
+		if (ifp->if_flags & IFF_RUNNING)
+			ni_setup(sc);
+		error = 0;
+	}
+
 	splx(s);
 	return (error);
 }

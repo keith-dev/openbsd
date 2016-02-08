@@ -1,4 +1,4 @@
-/*	$OpenBSD: video.c,v 1.20 2008/07/31 15:26:25 mglocker Exp $	*/
+/*	$OpenBSD: video.c,v 1.23 2008/11/11 12:37:07 mglocker Exp $	*/
 /*
  * Copyright (c) 2008 Robert Nagy <robert@openbsd.org>
  * Copyright (c) 2008 Marcus Glocker <mglocker@openbsd.org>
@@ -66,7 +66,7 @@ videoprobe(struct device *parent, void *match, void *aux)
 void
 videoattach(struct device *parent, struct device *self, void *aux)
 {
-	struct video_softc *sc = (void *) self;
+	struct video_softc *sc = (void *)self;
 	struct video_attach_args *sa = aux;
 	int video_buf_size = 0;
 
@@ -199,6 +199,16 @@ videoioctl(dev_t dev, u_long cmd, caddr_t data, int flags, struct proc *p)
 			error = (sc->hw_if->enum_fmt)(sc->hw_hdl,
 			    (struct v4l2_fmtdesc *)data);
 		break;
+	case VIDIOC_ENUM_FRAMESIZES:
+		if (sc->hw_if->enum_fsizes)
+			error = (sc->hw_if->enum_fsizes)(sc->hw_hdl,
+			    (struct v4l2_frmsizeenum *)data);
+		break;
+	case VIDIOC_ENUM_FRAMEINTERVALS:
+		if (sc->hw_if->enum_fivals)
+			error = (sc->hw_if->enum_fivals)(sc->hw_hdl,
+			    (struct v4l2_frmivalenum *)data);
+		break;
 	case VIDIOC_S_FMT:
 		if (!(flags & FWRITE))
 			return (EACCES);
@@ -260,6 +270,16 @@ videoioctl(dev_t dev, u_long cmd, caddr_t data, int flags, struct proc *p)
 		if (sc->hw_if->queryctrl)
 			error = (sc->hw_if->queryctrl)(sc->hw_hdl,
 			    (struct v4l2_queryctrl *)data);
+		break;
+	case VIDIOC_G_CTRL:
+		if (sc->hw_if->g_ctrl)
+			error = (sc->hw_if->g_ctrl)(sc->hw_hdl,
+			    (struct v4l2_control *)data);
+		break;
+	case VIDIOC_S_CTRL:
+		if (sc->hw_if->s_ctrl)
+			error = (sc->hw_if->s_ctrl)(sc->hw_hdl,
+			    (struct v4l2_control *)data);
 		break;
 	default:
 		error = (ENOTTY);

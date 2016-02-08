@@ -1,4 +1,4 @@
-/*	$OpenBSD: ospfe.h,v 1.9 2007/12/13 08:54:05 claudio Exp $ */
+/*	$OpenBSD: ospfe.h,v 1.14 2009/02/19 22:08:14 stsp Exp $ */
 
 /*
  * Copyright (c) 2004, 2005 Esben Norby <norby@openbsd.org>
@@ -77,6 +77,7 @@ struct nbr {
 	struct lsa_entry	*ls_req;
 	struct lsa_entry	*dd_end;
 
+	u_int32_t		 iface_id;	/* id of neighbor's iface */
 	u_int32_t		 dd_seq_num;
 	u_int32_t		 dd_pending;
 	u_int32_t		 peerid;	/* unique ID in DB */
@@ -121,6 +122,7 @@ void		 ospfe_iface_ctl(struct ctl_conn *, unsigned int);
 void		 ospfe_nbr_ctl(struct ctl_conn *);
 void		 orig_rtr_lsa(struct iface *);
 void		 orig_net_lsa(struct iface *);
+void		 orig_link_lsa(struct iface *);
 void		 ospfe_demote_area(struct area *, int);
 void		 ospfe_demote_iface(struct iface *, int);
 
@@ -190,7 +192,7 @@ void		 lsa_cache_put(struct lsa_ref *, struct nbr *);
 
 /* neighbor.c */
 void		 nbr_init(u_int32_t);
-struct nbr	*nbr_new(u_int32_t, struct iface *, int);
+struct nbr	*nbr_new(u_int32_t, struct iface *, u_int32_t, int);
 void		 nbr_del(struct nbr *);
 
 struct nbr	*nbr_find_id(struct iface *, u_int32_t);

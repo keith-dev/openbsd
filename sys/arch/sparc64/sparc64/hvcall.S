@@ -1,4 +1,4 @@
-/*	$OpenBSD: hvcall.S,v 1.2 2008/07/21 13:30:05 art Exp $	*/
+/*	$OpenBSD: hvcall.S,v 1.8 2009/01/02 15:35:54 kettenis Exp $	*/
 
 /*
  * Copyright (c) 2008 Mark Kettenis
@@ -27,8 +27,6 @@
 #define MACH_EXIT		0x00
 #define MACH_DESC		0x01
 #define MACH_SIR		0x02
-#define MACH_SET_SOFT_STATE	0x03
-#define MACH_GET_SOFT_STATE	0x04
 #define MACH_SET_WATCHDOG	0x05
 
 #define CPU_START		0x10
@@ -65,6 +63,9 @@
 #define CONS_GETCHAR		0x60
 #define CONS_PUTCHAR		0x61
 
+#define SOFT_STATE_SET		0x70
+#define SOFT_STATE_GET		0x71
+
 #define INTR_DEVINO2SYSINO	0xa0
 #define INTR_GETENABLED		0xa1
 #define INTR_SETENABLED		0xa2
@@ -73,12 +74,40 @@
 #define INTR_GETTARGET		0xa5
 #define INTR_SETTARGET		0xa6
 
+#define VINTR_GETCOOKIE		0xa7
+#define VINTR_SETCOOKIE		0xa8
+#define VINTR_GETENABLED	0xa9
+#define VINTR_SETENABLED	0xaa
+#define VINTR_GETSTATE		0xab
+#define VINTR_SETSTATE		0xac
+#define VINTR_GETTARGET		0xad
+#define VINTR_SETTARGET		0xae
+
 #define PCI_IOMMU_MAP		0xb0
 #define PCI_IOMMU_DEMAP		0xb1
 #define PCI_IOMMU_GETMAP	0xb2
 #define PCI_IOMMU_GETBYPASS	0xb3
 #define PCI_CONFIG_GET		0xb4
 #define PCI_CONFIG_PUT		0xb5
+
+#define LDC_TX_QCONF		0xe0
+#define LDC_TX_QINFO		0xe1
+#define LDC_TX_GET_STATE	0xe2
+#define LDC_TX_SET_QTAIL	0xe3
+#define LDC_RX_QCONF		0xe4
+#define LDC_RX_QINFO		0xe5
+#define LDC_RX_GET_STATE	0xe6
+#define LDC_RX_SET_QHEAD	0xe7
+
+#define LDC_SET_MAP_TABLE	0xea
+#define LDC_GET_MAP_TABLE	0xeb
+#define LDC_COPY		0xec
+
+#define RNG_GET_DIAG_CONTROL	0x130
+#define RNG_CTL_READ		0x131
+#define RNG_CTL_WRITE		0x132
+#define RNG_DATA_READ_DIAG	0x133
+#define RNG_DATA_READ		0x134
 
 #define API_SET_VERSION		0x00
 #define API_PUTCHAR		0x01
@@ -101,8 +130,16 @@ ENTRY(hv_api_get_version)
 	retl
 	 stx	%o2, [%o4]
 
-ENTRY(hv_mach_set_soft_state)
-	mov	MACH_SET_SOFT_STATE, %o5
+ENTRY(hv_mach_desc)
+	mov	%o1, %o2
+	ldx	[%o2], %o1
+	mov	MACH_DESC, %o5
+	ta	FAST_TRAP
+	retl
+	 stx	%o1, [%o2]
+
+ENTRY(hv_cpu_yield)
+	mov	CPU_YIELD, %o5
 	ta	FAST_TRAP
 	retl
 	 nop
@@ -234,6 +271,12 @@ ENTRY(hv_cons_putchar)
 	retl
 	 nop
 
+ENTRY(hv_soft_state_set)
+	mov	SOFT_STATE_SET, %o5
+	ta	FAST_TRAP
+	retl
+	 nop
+
 ENTRY(hv_intr_devino_to_sysino)
 	mov	INTR_DEVINO2SYSINO, %o5
 	ta	FAST_TRAP
@@ -275,6 +318,54 @@ ENTRY(hv_intr_gettarget)
 
 ENTRY(hv_intr_settarget)
 	mov	INTR_SETTARGET, %o5
+	ta	FAST_TRAP
+	retl
+	 nop
+
+ENTRY(hv_vintr_getcookie)
+	mov	VINTR_GETCOOKIE, %o5
+	ta	FAST_TRAP
+	retl
+	 stx	%o1, [%o2]
+
+ENTRY(hv_vintr_setcookie)
+	mov	VINTR_SETCOOKIE, %o5
+	ta	FAST_TRAP
+	retl
+	 nop
+
+ENTRY(hv_vintr_getenabled)
+	mov	VINTR_GETENABLED, %o5
+	ta	FAST_TRAP
+	retl
+	 stx	%o1, [%o2]
+
+ENTRY(hv_vintr_setenabled)
+	mov	VINTR_SETENABLED, %o5
+	ta	FAST_TRAP
+	retl
+	 nop
+
+ENTRY(hv_vintr_getstate)
+	mov	VINTR_GETSTATE, %o5
+	ta	FAST_TRAP
+	retl
+	 stx	%o1, [%o2]
+
+ENTRY(hv_vintr_setstate)
+	mov	VINTR_SETSTATE, %o5
+	ta	FAST_TRAP
+	retl
+	 nop
+
+ENTRY(hv_vintr_gettarget)
+	mov	VINTR_GETTARGET, %o5
+	ta	FAST_TRAP
+	retl
+	 stx	%o1, [%o2]
+
+ENTRY(hv_vintr_settarget)
+	mov	VINTR_SETTARGET, %o5
 	ta	FAST_TRAP
 	retl
 	 nop
@@ -321,8 +412,122 @@ ENTRY(hv_pci_config_put)
 	retl
 	 stx	%o1, [%g5]
 
-ENTRY(hv_cpu_yield)
-	mov	CPU_YIELD, %o5
+ENTRY(hv_ldc_tx_qconf)
+	mov	LDC_TX_QCONF, %o5
 	ta	FAST_TRAP
 	retl
 	 nop
+
+ENTRY(hv_ldc_tx_qinfo)
+	mov	%o2, %o4
+	mov	%o1, %o3
+	mov	LDC_TX_QINFO, %o5
+	ta	FAST_TRAP
+	stx	%o1, [%o3]
+	retl
+	 stx	%o2, [%o4]
+
+ENTRY(hv_ldc_tx_get_state)
+	mov	%o3, %g5
+	mov	%o2, %g4
+	mov	%o1, %o4
+	mov	LDC_TX_GET_STATE, %o5
+	ta	FAST_TRAP
+	stx	%o1, [%o4]
+	stx	%o2, [%g4]
+	retl
+	 stx	%o3, [%g5]
+
+ENTRY(hv_ldc_tx_set_qtail)
+	mov	LDC_TX_SET_QTAIL, %o5
+	ta	FAST_TRAP
+	retl
+	 nop
+
+ENTRY(hv_ldc_rx_qconf)
+	mov	LDC_RX_QCONF, %o5
+	ta	FAST_TRAP
+	retl
+	 nop
+
+ENTRY(hv_ldc_rx_qinfo)
+	mov	%o2, %o4
+	mov	%o1, %o3
+	mov	LDC_RX_QINFO, %o5
+	ta	FAST_TRAP
+	stx	%o1, [%o3]
+	retl
+	 stx	%o2, [%o4]
+
+ENTRY(hv_ldc_rx_get_state)
+	mov	%o3, %g5
+	mov	%o2, %g4
+	mov	%o1, %o4
+	mov	LDC_RX_GET_STATE, %o5
+	ta	FAST_TRAP
+	stx	%o1, [%o4]
+	stx	%o2, [%g4]
+	retl
+	 stx	%o3, [%g5]
+
+ENTRY(hv_ldc_rx_set_qhead)
+	mov	LDC_RX_SET_QHEAD, %o5
+	ta	FAST_TRAP
+	retl
+	 nop
+
+ENTRY(hv_ldc_set_map_table)
+	mov	LDC_SET_MAP_TABLE, %o5
+	ta	FAST_TRAP
+	retl
+	 nop
+
+ENTRY(hv_ldc_get_map_table)
+	mov	%o2, %o4
+	mov	%o1, %o3
+	mov	LDC_GET_MAP_TABLE, %o5
+	ta	FAST_TRAP
+	stx	%o1, [%o3]
+	retl
+	 stx	%o2, [%o4]
+
+ENTRY(hv_ldc_copy)
+	mov	%o5, %g5
+	mov	LDC_COPY, %o5
+	ta	FAST_TRAP
+	retl
+	 stx	%o1, [%g5]
+
+ENTRY(hv_rng_get_diag_control)
+	mov	RNG_GET_DIAG_CONTROL, %o5
+	ta	FAST_TRAP
+	retl
+	 nop
+
+ENTRY(hv_rng_ctl_read)
+	mov	%o2, %o4
+	mov	%o1, %o3
+	mov	RNG_CTL_READ, %o5
+	ta	FAST_TRAP
+	stx	%o1, [%o3]
+	retl
+	 stx	%o2, [%o4]
+
+ENTRY(hv_rng_ctl_write)
+	mov	RNG_CTL_WRITE, %o5
+	ta	FAST_TRAP
+	retl
+	 stx	%o1, [%o3]
+
+ENTRY(hv_rng_data_read_diag)
+	mov	RNG_DATA_READ_DIAG, %o5
+	ta	FAST_TRAP
+	retl
+	 stx	%o1, [%o2]
+
+ENTRY(hv_rng_data_read)
+	mov	%o1, %o2
+	mov	RNG_DATA_READ, %o5
+	ta	FAST_TRAP
+	retl
+	 stx	%o1, [%o2]

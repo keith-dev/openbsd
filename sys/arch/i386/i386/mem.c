@@ -1,5 +1,5 @@
 /*	$NetBSD: mem.c,v 1.31 1996/05/03 19:42:19 christos Exp $	*/
-/*	$OpenBSD: mem.c,v 1.34 2007/09/07 15:00:19 art Exp $ */
+/*	$OpenBSD: mem.c,v 1.36 2009/01/13 19:44:20 grange Exp $ */
 /*
  * Copyright (c) 1988 University of Utah.
  * Copyright (c) 1982, 1986, 1990, 1993
@@ -108,7 +108,7 @@ mmclose(dev_t dev, int flag, int mode, struct proc *p)
 {
 #ifdef APERTURE
 	if (minor(dev) == 4)
-		ap_open_count--;
+		ap_open_count = 0;
 #endif
 	return (0);
 }
@@ -193,7 +193,7 @@ mmrw(dev_t dev, struct uio *uio, int flags)
 		default:
 			return (ENXIO);
 		}
-		(char *)iov->iov_base += c;
+		iov->iov_base = (char *)iov->iov_base + c;
 		iov->iov_len -= c;
 		uio->uio_offset += c;
 		uio->uio_resid -= c;

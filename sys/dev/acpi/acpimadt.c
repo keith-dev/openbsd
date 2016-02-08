@@ -1,4 +1,4 @@
-/* $OpenBSD: acpimadt.c,v 1.19 2008/06/11 04:42:09 marco Exp $ */
+/* $OpenBSD: acpimadt.c,v 1.22 2009/02/16 20:11:06 kettenis Exp $ */
 /*
  * Copyright (c) 2006 Mark Kettenis <kettenis@openbsd.org>
  *
@@ -33,6 +33,8 @@
 #include <machine/i8259.h>
 #include <machine/i82093reg.h>
 #include <machine/i82093var.h>
+#include <machine/i82489reg.h>
+#include <machine/i82489var.h>
 
 #include <machine/mpbiosvar.h>
 
@@ -51,6 +53,7 @@ struct cfdriver acpimadt_cd = {
 	NULL, "acpimadt", DV_DULL
 };
 
+int acpimadt_validate(struct acpi_madt *);
 void acpimadt_cfg_intr(int, u_int32_t *);
 int acpimadt_print(void *, const char *);
 
@@ -72,6 +75,66 @@ acpimadt_match(struct device *parent, void *match, void *aux)
 	hdr = (struct acpi_table_header *)aaa->aaa_table;
 	if (memcmp(hdr->signature, MADT_SIG, sizeof(MADT_SIG) - 1) != 0)
 		return (0);
+
+	return (1);
+}
+
+int
+acpimadt_validate(struct acpi_madt *madt)
+{
+	caddr_t addr = (caddr_t)(madt + 1);
+
+	while (addr < (caddr_t)madt + madt->hdr.length) {
+		union acpi_madt_entry *entry = (union acpi_madt_entry *)addr;
+		u_int8_t length = entry->madt_lapic.length;
+
+		if (length < 2)
+			return (0);
+
+		if (addr + length > (caddr_t)madt + madt->hdr.length)
+			return (0);
+
+		switch (entry->madt_lapic.apic_type) {
+		case ACPI_MADT_LAPIC:
+			if (length != sizeof(entry->madt_lapic))
+				return (0);
+			break;
+		case ACPI_MADT_IOAPIC:
+			if (length != sizeof(entry->madt_ioapic))
+				return (0);
+			break;
+		case ACPI_MADT_OVERRIDE:
+			if (length != sizeof(entry->madt_override))
+				return (0);
+			break;
+		case ACPI_MADT_NMI:
+			if (length != sizeof(entry->madt_nmi))
+				return (0);
+			break;
+		case ACPI_MADT_LAPIC_NMI:
+			if (length != sizeof(entry->madt_lapic_nmi))
+				return (0);
+			break;
+		case ACPI_MADT_LAPIC_OVERRIDE:
+			if (length != sizeof(entry->madt_lapic_override))
+				return (0);
+			break;
+		case ACPI_MADT_IO_SAPIC:
+			if (length != sizeof(entry->madt_io_sapic))
+				return (0);
+			break;
+		case ACPI_MADT_LOCAL_SAPIC:
+			if (length != sizeof(entry->madt_local_sapic))
+				return (0);
+			break;
+		case ACPI_MADT_PLATFORM_INT:
+			if (length != sizeof(entry->madt_platform_int))
+				return (0);
+			break;
+		}
+
+		addr += length;
+	}
 
 	return (1);
 }
@@ -126,9 +189,14 @@ acpimadt_attach(struct device *parent, struct device *self, void *aux)
 	struct aml_value arg;
 	struct mp_intr_map *map;
 	struct ioapic_softc *apic;
-	int cpu_role = CPU_ROLE_BP;
 	int nlapic_nmis = 0;
 	int pin;
+
+	/* Do some sanity checks before committing to run in APIC mode. */
+	if (!acpimadt_validate(madt)) {
+		printf(": invalid, skipping\n");
+		return;
+	}
 
 	printf(" addr 0x%x", madt->local_apic_address);
 	if (madt->flags & ACPI_APIC_PCAT_COMPAT)
@@ -151,6 +219,8 @@ acpimadt_attach(struct device *parent, struct device *self, void *aux)
 	/* 1st pass, get CPUs and IOAPICs */
 	while (addr < (caddr_t)madt + madt->hdr.length) {
 		union acpi_madt_entry *entry = (union acpi_madt_entry *)addr;
+		struct cpu_attach_args caa;
+		struct apic_attach_args aaa;
 
 		switch (entry->madt_lapic.apic_type) {
 		case ACPI_MADT_LAPIC:
@@ -164,33 +234,32 @@ acpimadt_attach(struct device *parent, struct device *self, void *aux)
 			acpi_lapic_flags[entry->madt_lapic.acpi_proc_id] =
 			    entry->madt_lapic.flags;
 
-			{
-				struct cpu_attach_args caa;
+			if ((entry->madt_lapic.flags & ACPI_PROC_ENABLE) == 0)
+				break;
 
-				if ((entry->madt_lapic.flags & ACPI_PROC_ENABLE) == 0)
-					break;
-
-				memset(&caa, 0, sizeof(struct cpu_attach_args));
-				caa.cpu_role = cpu_role;
-				caa.caa_name = "cpu";
-				caa.cpu_number = entry->madt_lapic.apic_id;
-				caa.cpu_func = &mp_cpu_funcs;
+			memset(&caa, 0, sizeof(struct cpu_attach_args));
+			if (lapic_cpu_number() == entry->madt_lapic.apic_id)
+				caa.cpu_role = CPU_ROLE_BP;
+			else
+				caa.cpu_role = CPU_ROLE_AP;
+			caa.caa_name = "cpu";
+			caa.cpu_number = entry->madt_lapic.apic_id;
+#ifdef MULTIPROCESSOR
+			caa.cpu_func = &mp_cpu_funcs;
+#endif
 #ifdef __i386__
-				/*
-				 * XXX utterly wrong.  These are the
-				 * cpu_feature/cpu_id from the BSP cpu,
-				 * now being given to another cpu.
-				 * This is bullshit.
-				 */
-				extern int cpu_id, cpu_feature;
-				caa.cpu_signature = cpu_id;
-				caa.feature_flags = cpu_feature;
+			/*
+			 * XXX utterly wrong.  These are the
+			 * cpu_feature/cpu_id from the BSP cpu, now
+			 * being given to another cpu.  This is
+			 * bullshit.
+			 */
+			extern int cpu_id, cpu_feature;
+			caa.cpu_signature = cpu_id;
+			caa.feature_flags = cpu_feature;
 #endif
 
-				config_found(mainbus, &caa, acpimadt_print);
-
-				cpu_role = CPU_ROLE_AP;
-			}
+			config_found(mainbus, &caa, acpimadt_print);
 			break;
 		case ACPI_MADT_IOAPIC:
 			dprintf("%s: IOAPIC: acpi_ioapic_id %x, address 0x%x, global_int_base 0x%x\n",
@@ -198,17 +267,13 @@ acpimadt_attach(struct device *parent, struct device *self, void *aux)
 			    entry->madt_ioapic.address,
 			    entry->madt_ioapic.global_int_base);
 
-			{
-				struct apic_attach_args aaa;
+			memset(&aaa, 0, sizeof(struct apic_attach_args));
+			aaa.aaa_name = "ioapic";
+			aaa.apic_id = entry->madt_ioapic.acpi_ioapic_id;
+			aaa.apic_address = entry->madt_ioapic.address;
+			aaa.apic_vecbase = entry->madt_ioapic.global_int_base;
 
-				memset(&aaa, 0, sizeof(struct apic_attach_args));
-				aaa.aaa_name = "ioapic";
-				aaa.apic_id = entry->madt_ioapic.acpi_ioapic_id;
-				aaa.apic_address = entry->madt_ioapic.address;
-				aaa.apic_vecbase = entry->madt_ioapic.global_int_base;
-
-				config_found(mainbus, &aaa, acpimadt_print);
-			}
+			config_found(mainbus, &aaa, acpimadt_print);
 			break;
 		case ACPI_MADT_LAPIC_NMI:
 			nlapic_nmis++;

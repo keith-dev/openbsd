@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_ipsp.c,v 1.171 2008/04/18 06:42:20 djm Exp $	*/
+/*	$OpenBSD: ip_ipsp.c,v 1.175 2009/02/16 00:31:25 dlg Exp $	*/
 /*
  * The authors of this code are John Ioannidis (ji@tla.org),
  * Angelos D. Keromytis (kermit@csd.uch.gr),
@@ -38,6 +38,7 @@
  */
 
 #include "pf.h"
+#include "pfsync.h"
 
 #include <sys/param.h>
 #include <sys/mbuf.h>
@@ -50,6 +51,10 @@
 
 #if NPF > 0
 #include <net/pfvar.h>
+#endif
+
+#if NPFSYNC > 0
+#include <net/if_pfsync.h>
 #endif
 
 #ifdef INET
@@ -262,8 +267,8 @@ reserve_spi(u_int32_t sspi, u_int32_t tspi, union sockaddr_union *src,
 		if (ipsec_keep_invalid > 0) {
 			tdbp->tdb_flags |= TDBF_TIMER;
 			tdbp->tdb_exp_timeout = ipsec_keep_invalid;
-			timeout_add(&tdbp->tdb_timer_tmo,
-			    hz * ipsec_keep_invalid);
+			timeout_add_sec(&tdbp->tdb_timer_tmo,
+			    ipsec_keep_invalid);
 		}
 
 		return spi;
@@ -701,14 +706,12 @@ tdb_delete(struct tdb *tdbp)
 
 	s = spltdb();
 	if (tdbh[hashval] == tdbp) {
-		tdbpp = tdbp;
 		tdbh[hashval] = tdbp->tdb_hnext;
 	} else {
 		for (tdbpp = tdbh[hashval]; tdbpp != NULL;
 		    tdbpp = tdbpp->tdb_hnext) {
 			if (tdbpp->tdb_hnext == tdbp) {
 				tdbpp->tdb_hnext = tdbp->tdb_hnext;
-				tdbpp = tdbp;
 				break;
 			}
 		}
@@ -719,14 +722,12 @@ tdb_delete(struct tdb *tdbp)
 	hashval = tdb_hash(0, &tdbp->tdb_dst, tdbp->tdb_sproto);
 
 	if (tdbaddr[hashval] == tdbp) {
-		tdbpp = tdbp;
 		tdbaddr[hashval] = tdbp->tdb_anext;
 	} else {
 		for (tdbpp = tdbaddr[hashval]; tdbpp != NULL;
 		    tdbpp = tdbpp->tdb_anext) {
 			if (tdbpp->tdb_anext == tdbp) {
 				tdbpp->tdb_anext = tdbp->tdb_anext;
-				tdbpp = tdbp;
 				break;
 			}
 		}
@@ -735,7 +736,6 @@ tdb_delete(struct tdb *tdbp)
 	hashval = tdb_hash(0, &tdbp->tdb_src, tdbp->tdb_sproto);
 
 	if (tdbsrc[hashval] == tdbp) {
-		tdbpp = tdbp;
 		tdbsrc[hashval] = tdbp->tdb_snext;
 	}
 	else {
@@ -743,7 +743,6 @@ tdb_delete(struct tdb *tdbp)
 		    tdbpp = tdbpp->tdb_snext) {
 			if (tdbpp->tdb_snext == tdbp) {
 				tdbpp->tdb_snext = tdbp->tdb_snext;
-				tdbpp = tdbp;
 				break;
 			}
 		}
@@ -794,6 +793,11 @@ tdb_free(struct tdb *tdbp)
 		(*(tdbp->tdb_xform->xf_zeroize))(tdbp);
 		tdbp->tdb_xform = NULL;
 	}
+
+#if NPFSYNC > 0
+	/* Cleanup pfsync references */
+	pfsync_delete_tdb(tdbp);
+#endif
 
 	/* Cleanup inp references. */
 	for (inp = TAILQ_FIRST(&tdbp->tdb_inp_in); inp;
@@ -971,12 +975,12 @@ char *
 ipsp_address(union sockaddr_union sa)
 {
 	switch (sa.sa.sa_family) {
-#if INET
+#ifdef INET
 	case AF_INET:
 		return inet_ntoa4(sa.sin.sin_addr);
 #endif /* INET */
 
-#if INET6
+#ifdef INET6
 	case AF_INET6:
 		return ip6_sprintf(&sa.sin6.sin6_addr);
 #endif /* INET6 */

@@ -1,4 +1,4 @@
-/*	$OpenBSD: s_nan.c,v 1.1 2008/07/24 09:40:16 martynas Exp $	*/
+/*	$OpenBSD: s_nan.c,v 1.6 2008/12/10 01:08:25 martynas Exp $	*/
 /*-
  * Copyright (c) 2007 David Schultz
  * All rights reserved.
@@ -27,6 +27,7 @@
  * $FreeBSD: src/lib/msun/src/s_nan.c,v 1.2 2007/12/18 23:46:32 das Exp $
  */
 
+#include <sys/cdefs.h>
 #include <sys/types.h>
 #include <sys/endian.h>
 #include <ctype.h>
@@ -40,7 +41,7 @@
 /*
  * OpenBSD's ctype doesn't have digittoint, so we define it here.
  */
-int
+static int
 _digittoint(int c)
 {
 	if (!isxdigit(c))
@@ -121,3 +122,9 @@ nanf(const char *s)
 	u.bits[0] |= 0x7fc00000;
 	return (u.f);
 }
+
+#if LDBL_MANT_DIG == 53
+#ifdef __weak_alias
+__weak_alias(nanl, nan);
+#endif /* __weak_alias */
+#endif /* LDBL_MANT_DIG == 53 */

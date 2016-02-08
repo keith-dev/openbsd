@@ -1,4 +1,4 @@
-/*	$OpenBSD: ieee80211.h,v 1.37 2008/07/27 14:15:42 damien Exp $	*/
+/*	$OpenBSD: ieee80211.h,v 1.49 2009/01/28 18:55:18 damien Exp $	*/
 /*	$NetBSD: ieee80211.h,v 1.6 2004/04/30 23:51:53 dyoung Exp $	*/
 
 /*-
@@ -129,6 +129,9 @@ struct ieee80211_htframe_addr4 {	/* 11n */
 #define IEEE80211_FC0_SUBTYPE_ACTION		0xd0
 #define IEEE80211_FC0_SUBTYPE_ACTION_NOACK	0xe0	/* 11n */
 /* for TYPE_CTL */
+#define IEEE80211_FC0_SUBTYPE_WRAPPER		0x70	/* 11n */
+#define IEEE80211_FC0_SUBTYPE_BAR		0x80
+#define IEEE80211_FC0_SUBTYPE_BA		0x90
 #define	IEEE80211_FC0_SUBTYPE_PS_POLL		0xa0
 #define	IEEE80211_FC0_SUBTYPE_RTS		0xb0
 #define	IEEE80211_FC0_SUBTYPE_CTS		0xc0
@@ -169,15 +172,21 @@ struct ieee80211_htframe_addr4 {	/* 11n */
 #define	IEEE80211_SEQ_SEQ_SHIFT			4
 
 #define	IEEE80211_NWID_LEN			32
+#define IEEE80211_MMIE_LEN			18	/* 11w */
 
 /*
  * QoS Control field (see 7.1.3.5).
  */
-#define	IEEE80211_QOS_TXOP			0x00ff
-/* bit 8 is reserved */
-#define	IEEE80211_QOS_ACKPOLICY			0x0600
-#define	IEEE80211_QOS_ESOP			0x0800
-#define	IEEE80211_QOS_TID			0xf000
+#define IEEE80211_QOS_TXOP			0xff00
+#define IEEE80211_QOS_AMSDU			0x0080	/* 11n */
+#define IEEE80211_QOS_ACK_POLICY_NORMAL		0x0000
+#define IEEE80211_QOS_ACK_POLICY_NOACK		0x0020
+#define IEEE80211_QOS_ACK_POLICY_NOEXPLACK	0x0040
+#define IEEE80211_QOS_ACK_POLICY_BA		0x0060
+#define IEEE80211_QOS_ACK_POLICY_MASK		0x0060
+#define IEEE80211_QOS_ACK_POLICY_SHIFT		5
+#define IEEE80211_QOS_EOSP			0x0010
+#define IEEE80211_QOS_TID			0x000f
 
 /*
  * Control frames.
@@ -228,6 +237,52 @@ struct ieee80211_frame_cfend {		/* NB: also CF-End+CF-Ack */
 	/* FCS */
 } __packed;
 
+#ifdef _KERNEL
+static __inline int
+ieee80211_has_seq(const struct ieee80211_frame *wh)
+{
+	return (wh->i_fc[0] & IEEE80211_FC0_TYPE_MASK) !=
+	    IEEE80211_FC0_TYPE_CTL;
+}
+
+static __inline int
+ieee80211_has_addr4(const struct ieee80211_frame *wh)
+{
+	return (wh->i_fc[1] & IEEE80211_FC1_DIR_MASK) ==
+	    IEEE80211_FC1_DIR_DSTODS;
+}
+
+static __inline int
+ieee80211_has_qos(const struct ieee80211_frame *wh)
+{
+	return (wh->i_fc[0] &
+	    (IEEE80211_FC0_TYPE_MASK | IEEE80211_FC0_SUBTYPE_QOS)) ==
+	    (IEEE80211_FC0_TYPE_DATA | IEEE80211_FC0_SUBTYPE_QOS);
+}
+
+static __inline int
+ieee80211_has_htc(const struct ieee80211_frame *wh)
+{
+	return (wh->i_fc[1] & IEEE80211_FC1_ORDER) &&
+	    (ieee80211_has_qos(wh) ||
+	     (wh->i_fc[0] & IEEE80211_FC0_TYPE_MASK) ==
+	     IEEE80211_FC0_TYPE_MGT);
+}
+
+static __inline u_int16_t
+ieee80211_get_qos(const struct ieee80211_frame *wh)
+{
+	const u_int8_t *frm;
+
+	if (ieee80211_has_addr4(wh))
+		frm = ((const struct ieee80211_qosframe_addr4 *)wh)->i_qos;
+	else
+		frm = ((const struct ieee80211_qosframe *)wh)->i_qos;
+
+	return letoh16(*(const u_int16_t *)frm);
+}
+#endif	/* _KERNEL */
+
 /*
  * Capability Information field (see 7.3.1.4).
  */
@@ -270,15 +325,47 @@ enum {
 	IEEE80211_ELEMID_CHALLENGE		= 16,
 	/* 17-31 reserved for challenge text extension */
 	IEEE80211_ELEMID_ERP			= 42,
+	IEEE80211_ELEMID_HTCAPS			= 45,	/* 11n */
 	IEEE80211_ELEMID_QOS_CAP		= 46,
 	IEEE80211_ELEMID_RSN			= 48,
 	IEEE80211_ELEMID_XRATES			= 50,
+	IEEE80211_ELEMID_TIE			= 56,	/* 11r */
+	IEEE80211_ELEMID_HTOP			= 61,	/* 11n */
+	IEEE80211_ELEMID_MMIE			= 76,	/* 11w */
 	IEEE80211_ELEMID_TPC			= 150,
 	IEEE80211_ELEMID_CCKM			= 156,
 	IEEE80211_ELEMID_VENDOR			= 221	/* vendor private */
 };
 
-#define IEEE80211_CHALLENGE_LEN			128
+/*
+ * Action field category values (see Table 7-24).
+ */
+enum {
+	IEEE80211_CATEG_SPECTRUM	= 0,
+	IEEE80211_CATEG_QOS		= 1,
+	IEEE80211_CATEG_DLS		= 2,
+	IEEE80211_CATEG_BA		= 3,
+	IEEE80211_CATEG_HT		= 7,	/* 11n */
+	IEEE80211_CATEG_SA_QUERY	= 8	/* 11w */
+};
+
+/*
+ * Block Ack Action field values (see Table 7-54).
+ */
+#define IEEE80211_ACTION_ADDBA_REQ	0
+#define IEEE80211_ACTION_ADDBA_RESP	1
+#define IEEE80211_ACTION_DELBA		2
+
+/*
+ * SA Query Action field values (see Table 7-57l).
+ */
+#define IEEE80211_ACTION_SA_QUERY_REQ	0
+#define IEEE80211_ACTION_SA_QUERY_RESP	1
+
+/*
+ * HT Action field values (see Table 7-57m).
+ */
+#define IEEE80211_ACTION_NOTIFYCW	0
 
 #define	IEEE80211_RATE_BASIC			0x80
 #define	IEEE80211_RATE_VAL			0x7f
@@ -286,11 +373,138 @@ enum {
 #define	IEEE80211_RATE_MAXSIZE			15	/* max rates we'll handle */
 
 /*
+ * BlockAck/BlockAckReq Control field (see Figure 7-13).
+ */
+#define IEEE80211_BA_ACK_POLICY		0x0001
+#define IEEE80211_BA_MULTI_TID		0x0002
+#define IEEE80211_BA_COMPRESSED		0x0004
+#define IEEE80211_BA_TID_INFO_MASK	0xf000
+#define IEEE80211_BA_TID_INFO_SHIFT	12
+
+/*
+ * DELBA Parameter Set field (see Figure 7-34).
+ */
+#define IEEE80211_DELBA_INITIATOR	0x0800
+
+/*
  * ERP information element (see 7.3.2.13).
  */
 #define	IEEE80211_ERP_NON_ERP_PRESENT		0x01
 #define	IEEE80211_ERP_USE_PROTECTION		0x02
 #define	IEEE80211_ERP_BARKER_MODE		0x04
+
+/*
+ * RSN capabilities (see 7.3.2.25.3).
+ */
+#define IEEE80211_RSNCAP_PREAUTH		0x0001
+#define IEEE80211_RSNCAP_NOPAIRWISE		0x0002
+#define IEEE80211_RSNCAP_PTKSA_RCNT_MASK	0x000c
+#define IEEE80211_RSNCAP_PTKSA_RCNT_SHIFT	2
+#define IEEE80211_RSNCAP_GTKSA_RCNT_MASK	0x0030
+#define IEEE80211_RSNCAP_GTKSA_RCNT_SHIFT	4
+#define IEEE80211_RSNCAP_RCNT1			0
+#define IEEE80211_RSNCAP_RCNT2			1
+#define IEEE80211_RSNCAP_RCNT4			2
+#define IEEE80211_RSNCAP_RCNT16			3
+#define IEEE80211_RSNCAP_MFPR			0x0040	/* 11w */
+#define IEEE80211_RSNCAP_MFPC			0x0080	/* 11w */
+#define IEEE80211_RSNCAP_PEERKEYENA		0x0200
+#define IEEE80211_RSNCAP_SPPAMSDUC		0x0400	/* 11n */
+#define IEEE80211_RSNCAP_SPPAMSDUR		0x0800	/* 11n */
+#define IEEE80211_RSNCAP_PBAC			0x1000	/* 11n */
+
+/*
+ * HT Capabilities Info (see 7.3.2.57.2).
+ */
+#define IEEE80211_HTCAP_LDPC		0x00000001
+#define IEEE80211_HTCAP_CBW20_40	0x00000002
+#define IEEE80211_HTCAP_SMPS_MASK	0x0000000c
+#define IEEE80211_HTCAP_SMPS_SHIFT	2
+#define IEEE80211_HTCAP_SMPS_STA	0
+#define IEEE80211_HTCAP_SMPS_DYN	1
+#define IEEE80211_HTCAP_SMPS_DIS	3
+#define IEEE80211_HTCAP_GF		0x00000010
+#define IEEE80211_HTCAP_SGI20		0x00000020
+#define IEEE80211_HTCAP_SGI40		0x00000040
+#define IEEE80211_HTCAP_TXSTBC		0x00000080
+#define IEEE80211_HTCAP_RXSTBC_MASK	0x00000300
+#define IEEE80211_HTCAP_RXSTBC_SHIFT	8
+#define IEEE80211_HTCAP_DELAYEDBA	0x00000400
+#define IEEE80211_HTCAP_AMSDU7935	0x00000800
+#define IEEE80211_HTCAP_DSSSCCK40	0x00001000
+#define IEEE80211_HTCAP_PSMP		0x00002000
+#define IEEE80211_HTCAP_40INTOLERANT	0x00004000
+#define IEEE80211_HTCAP_LSIGTXOPPROT	0x00008000
+
+/*
+ * HT Extended Capabilities (see 7.3.2.57.5).
+ */
+#define IEEE80211_HTXCAP_PCO		0x0001
+#define IEEE80211_HTXCAP_PCOTT_MASK	0x0006
+#define IEEE80211_HTXCAP_PCOTT_SHIFT	1
+#define IEEE80211_HTXCAP_PCOTT_400	1
+#define IEEE80211_HTXCAP_PCOTT_1500	2
+#define IEEE80211_HTXCAP_PCOTT_5000	3
+/* Bits 3-7 are reserved. */
+#define IEEE80211_HTXCAP_MFB_MASK	0x0300
+#define IEEE80211_HTXCAP_MFB_SHIFT	8
+#define IEEE80211_HTXCAP_MFB_NONE	0
+#define IEEE80211_HTXCAP_MFB_UNSOL	2
+#define IEEE80211_HTXCAP_MFB_BOTH	3
+#define IEEE80211_HTXCAP_HTC		0x0400
+#define IEEE80211_HTXCAP_RDRESP		0x0800
+/* Bits 12-15 are reserved. */
+
+/*
+ * Transmit Beamforming (TxBF) Capabilities (see 7.3.2.57.6).
+ */
+#define IEEE80211_TXBFCAP_IMPLICIT_RX	0x00000001
+#define IEEE80211_TXBFCAP_RSSC		0x00000002
+#define IEEE80211_TXBFCAP_TSSC		0x00000004
+#define IEEE80211_TXBFCAP_RNDP		0x00000008
+#define IEEE80211_TXBFCAP_TNDP		0x00000010
+#define IEEE80211_TXBFCAP_IMPLICIT_TX	0x00000020
+#define IEEE80211_TXBFCAP_CALIB_MASK	0x000000c0
+#define IEEE80211_TXBFCAP_CALIB_SHIFT	6
+#define IEEE80211_TXBFCAP_TX_CSI	0x00000100
+
+/*
+ * Antenna Selection (ASEL) Capability (see 7.3.2.57.7).
+ */
+#define IEEE80211_ASELCAP_ASEL		0x01
+#define IEEE80211_ASELCAP_CSIFB		0x02
+/* Bit 7 is reserved. */
+
+/*
+ * HT Operation element (see 7.3.2.58).
+ */
+/* Byte 1. */
+#define IEEE80211_HTOP0_SCO_MASK	0x03
+#define IEEE80211_HTOP0_SCO_SHIFT	0
+#define IEEE80211_HTOP0_SCO_SCN		0
+#define IEEE80211_HTOP0_SCO_SCA		1
+#define IEEE80211_HTOP0_SCO_SCB		3
+#define IEEE80211_HTOP0_CHW		0x04
+#define IEEE80211_HTOP0_RIFS		0x08
+#define IEEE80211_HTOP0_SPSMP		0x10
+#define IEEE80211_HTOP0_SIG_MASK	0xe0
+#define IEEE80211_HTOP0_SIG_SHIFT	5
+/* Bytes 2-3. */
+#define IEEE80211_HTOP1_PROT_MASK	0x0003
+#define IEEE80211_HTOP1_PROT_SHIFT	0
+#define IEEE80211_HTOP1_NONGTSTA	0x0004
+/* Bit 3 is reserved. */
+#define IEEE80211_HTOP1_OBSS_NONHTSTA	0x0010
+/* Bits 5-15 are reserved. */
+/* Bytes 4-5. */
+/* Bits 0-5 are reserved. */
+#define IEEE80211_HTOP2_DUALBEACON	0x0040
+#define IEEE80211_HTOP2_DUALCTSPROT	0x0080
+#define IEEE80211_HTOP2_STBCBEACON	0x0100
+#define IEEE80211_HTOP2_LSIGTXOP	0x0200
+#define IEEE80211_HTOP2_PCOACTIVE	0x0400
+#define IEEE80211_HTOP2_PCOPHASE40	0x0800
+/* Bits 12-15 are reserved. */
 
 /*
  * EDCA Access Categories.
@@ -379,7 +593,10 @@ enum {
 	IEEE80211_REASON_RSN_IE_VER_UNSUP	= 21,
 	IEEE80211_REASON_RSN_IE_BAD_CAP		= 22,
 
-	IEEE80211_REASON_CIPHER_REJ_POLICY	= 24
+	IEEE80211_REASON_CIPHER_REJ_POLICY	= 24,
+
+	IEEE80211_REASON_SETUP_REQUIRED		= 38,
+	IEEE80211_REASON_TIMEOUT		= 39
 };
 
 /*
@@ -405,6 +622,12 @@ enum {
 	IEEE80211_STATUS_SHORTSLOT_REQUIRED	= 25,
 	IEEE80211_STATUS_DSSSOFDM_REQUIRED	= 26,
 
+	IEEE80211_STATUS_TRY_AGAIN_LATER	= 30,
+	IEEE80211_STATUS_MFP_POLICY		= 31,
+
+	IEEE80211_STATUS_REFUSED		= 37,
+	IEEE80211_STATUS_INVALID_PARAM		= 38,
+
 	IEEE80211_STATUS_IE_INVALID		= 40,
 	IEEE80211_STATUS_BAD_GROUP_CIPHER	= 41,
 	IEEE80211_STATUS_BAD_PAIRWISE_CIPHER	= 42,
@@ -416,6 +639,7 @@ enum {
 
 #define	IEEE80211_WEP_KEYLEN			5	/* 40bit */
 #define	IEEE80211_WEP_NKID			4	/* number of key ids */
+#define IEEE80211_CHALLENGE_LEN			128
 
 /* WEP header constants */
 #define	IEEE80211_WEP_IVLEN			3	/* 24bit */
@@ -508,14 +732,14 @@ enum {
  * The RSNA key descriptor used by IEEE 802.11 does not use the IEEE 802.1X
  * key descriptor.  Instead, it uses the key descriptor described in 8.5.2.
  */
-#define EAPOL_VERSION	1
-
 #define EAPOL_KEY_NONCE_LEN	32
 #define EAPOL_KEY_IV_LEN	16
 #define EAPOL_KEY_MIC_LEN	16
 
 struct ieee80211_eapol_key {
 	u_int8_t	version;
+#define EAPOL_VERSION	1
+
 	u_int8_t	type;
 /* IEEE Std 802.1X-2004, 7.5.4 (only type EAPOL-Key is used here) */
 #define EAP_PACKET	0
@@ -535,6 +759,7 @@ struct ieee80211_eapol_key {
 #define EAPOL_KEY_VERSION_MASK	0x7
 #define EAPOL_KEY_DESC_V1	1
 #define EAPOL_KEY_DESC_V2	2
+#define EAPOL_KEY_DESC_V3	3		/* 11r */
 #define EAPOL_KEY_PAIRWISE	(1 <<  3)
 #define EAPOL_KEY_INSTALL	(1 <<  6)	/* I */
 #define EAPOL_KEY_KEYACK	(1 <<  7)	/* A */
@@ -579,38 +804,8 @@ enum {
 	IEEE80211_KDE_SMK	= 5,
 	IEEE80211_KDE_NONCE	= 6,
 	IEEE80211_KDE_LIFETIME	= 7,
-	IEEE80211_KDE_ERROR	= 8
+	IEEE80211_KDE_ERROR	= 8,
+	IEEE80211_KDE_IGTK	= 9	/* 11w */
 };
-
-/*
- * Channel attributes (not 802.11 but exported by radiotap).
- */
-#define IEEE80211_CHAN_TURBO	0x0010	/* Turbo channel */
-#define IEEE80211_CHAN_CCK	0x0020	/* CCK channel */
-#define IEEE80211_CHAN_OFDM	0x0040	/* OFDM channel */
-#define IEEE80211_CHAN_2GHZ	0x0080	/* 2 GHz spectrum channel */
-#define IEEE80211_CHAN_5GHZ	0x0100	/* 5 GHz spectrum channel */
-#define IEEE80211_CHAN_PASSIVE	0x0200	/* Only passive scan allowed */
-#define IEEE80211_CHAN_DYN	0x0400	/* Dynamic CCK-OFDM channel */
-#define IEEE80211_CHAN_GFSK	0x0800	/* GFSK channel (FHSS PHY) */
-#define IEEE80211_CHAN_XR	0x1000	/* Extended range OFDM channel */
-
-/*
- * Useful combinations of channel characteristics.
- */
-#define IEEE80211_CHAN_FHSS \
-	(IEEE80211_CHAN_2GHZ | IEEE80211_CHAN_GFSK)
-#define IEEE80211_CHAN_A \
-	(IEEE80211_CHAN_5GHZ | IEEE80211_CHAN_OFDM)
-#define IEEE80211_CHAN_B \
-	(IEEE80211_CHAN_2GHZ | IEEE80211_CHAN_CCK)
-#define IEEE80211_CHAN_PUREG \
-	(IEEE80211_CHAN_2GHZ | IEEE80211_CHAN_OFDM)
-#define IEEE80211_CHAN_G \
-	(IEEE80211_CHAN_2GHZ | IEEE80211_CHAN_DYN)
-#define IEEE80211_CHAN_T \
-	(IEEE80211_CHAN_5GHZ | IEEE80211_CHAN_OFDM | IEEE80211_CHAN_TURBO)
-#define IEEE80211_CHAN_TG \
-	(IEEE80211_CHAN_2GHZ | IEEE80211_CHAN_OFDM | IEEE80211_CHAN_TURBO)
 
 #endif /* _NET80211_IEEE80211_H_ */

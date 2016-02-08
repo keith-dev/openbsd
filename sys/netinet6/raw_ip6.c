@@ -1,4 +1,4 @@
-/*	$OpenBSD: raw_ip6.c,v 1.36 2008/06/11 19:00:50 mcbride Exp $	*/
+/*	$OpenBSD: raw_ip6.c,v 1.38 2008/11/23 13:30:59 claudio Exp $	*/
 /*	$KAME: raw_ip6.c,v 1.69 2001/03/04 15:55:44 itojun Exp $	*/
 
 /*
@@ -253,8 +253,6 @@ void
 rip6_ctlinput(int cmd, struct sockaddr *sa, void *d)
 {
 	struct ip6_hdr *ip6;
-	struct mbuf *m;
-	int off;
 	struct ip6ctlparam *ip6cp = NULL;
 	const struct sockaddr_in6 *sa6_src = NULL;
 	void *cmdarg;
@@ -279,14 +277,11 @@ rip6_ctlinput(int cmd, struct sockaddr *sa, void *d)
 	/* if the parameter is from icmp6, decode it. */
 	if (d != NULL) {
 		ip6cp = (struct ip6ctlparam *)d;
-		m = ip6cp->ip6c_m;
 		ip6 = ip6cp->ip6c_ip6;
-		off = ip6cp->ip6c_off;
 		cmdarg = ip6cp->ip6c_cmdarg;
 		sa6_src = ip6cp->ip6c_src;
 		nxt = ip6cp->ip6c_nxt;
 	} else {
-		m = NULL;
 		ip6 = NULL;
 		cmdarg = NULL;
 		sa6_src = &sa6_any;
@@ -442,10 +437,9 @@ rip6_output(struct mbuf *m, ...)
 			goto bad;
 		}
 		ip6->ip6_src = *in6a;
-		if (in6p->in6p_route.ro_rt) {
-			/* what if oifp contradicts ? */
-			oifp = ifindex2ifnet[in6p->in6p_route.ro_rt->rt_ifp->if_index];
-		}
+		if (in6p->in6p_route.ro_rt &&
+		    in6p->in6p_route.ro_rt->rt_flags & RTF_UP)
+			oifp = in6p->in6p_route.ro_rt->rt_ifp;
 	}
 
 	ip6->ip6_flow = in6p->in6p_flowinfo & IPV6_FLOWINFO_MASK;

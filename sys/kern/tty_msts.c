@@ -1,4 +1,4 @@
-/*	$OpenBSD: tty_msts.c,v 1.4 2008/06/11 17:11:36 mbalmer Exp $ */
+/*	$OpenBSD: tty_msts.c,v 1.12 2009/01/12 16:45:38 stevesk Exp $ */
 
 /*
  * Copyright (c) 2008 Marc Balmer <mbalmer@openbsd.org>
@@ -23,7 +23,6 @@
 
 #include <sys/param.h>
 #include <sys/systm.h>
-#include <sys/queue.h>
 #include <sys/proc.h>
 #include <sys/malloc.h>
 #include <sys/sensors.h>
@@ -53,7 +52,6 @@ void	mstsattach(int);
 #endif
 
 int msts_count, msts_nxid;
-static int t_trust;
 
 struct msts {
 	char			cbuf[MSTSMAX];	/* receive buffer */
@@ -66,9 +64,8 @@ struct msts {
 	int64_t			gap;		/* gap between two sentences */
 	int64_t			last;		/* last time rcvd */
 	int			sync;		/* if 1, waiting for <STX> */
-	int			pos;		/* positon in rcv buffer */
+	int			pos;		/* position in rcv buffer */
 	int			no_pps;		/* no PPS although requested */
-	char			mode;		/* GPS mode */
 };
 
 /* MSTS decoding */
@@ -92,7 +89,6 @@ mstsopen(dev_t dev, struct tty *tp)
 {
 	struct proc *p = curproc;
 	struct msts *np;
-	struct timeval t;
 	int error;
 
 	DPRINTF(("mstsopen\n"));
@@ -128,11 +124,6 @@ mstsopen(dev_t dev, struct tty *tp)
 	} else {
 		sensordev_install(&np->timedev);
 		timeout_set(&np->msts_tout, msts_timeout, np);
-
-		/* convert timevals to hz */
-		t.tv_sec = TRUSTTIME;
-		t.tv_usec = 0;
-		t_trust = tvtohz(&t);
 	}
 
 	return error;
@@ -226,7 +217,7 @@ msts_scan(struct msts *np, struct tty *tp)
 	char *fld[MAXFLDS], *cs;
 
 	/* split into fields */
-	fld[fldcnt++] = &np->cbuf[0];	/* message type */
+	fld[fldcnt++] = &np->cbuf[0];
 	for (cs = NULL, n = 0; n < np->pos && cs == NULL; n++) {
 		switch (np->cbuf[n]) {
 		case 3:		/* ASCII <ETX> */
@@ -238,8 +229,8 @@ msts_scan(struct msts *np, struct tty *tp)
 				np->cbuf[n] = '\0';
 				fld[fldcnt++] = &np->cbuf[n + 1];
 			} else {
-				DPRINTF(("nr of fields in %s sentence exceeds "
-				    "maximum of %d\n", fld[0], MAXFLDS));
+				DPRINTF(("nr of fields in sentence exceeds "
+				    "maximum of %d\n", MAXFLDS));
 				return;
 			}
 			break;
@@ -254,7 +245,7 @@ msts_decode(struct msts *np, struct tty *tp, char *fld[], int fldcnt)
 {
 	int64_t date_nano, time_nano, msts_now;
 
-	if (fldcnt != 4) {
+	if (fldcnt != MAXFLDS) {
 		DPRINTF(("msts: field count mismatch, %d\n", fldcnt));
 		return;
 	}
@@ -280,9 +271,8 @@ msts_decode(struct msts *np, struct tty *tp, char *fld[], int fldcnt)
 #ifdef MSTS_DEBUG
 	if (np->time.status == SENSOR_S_UNKNOWN) {
 		np->time.status = SENSOR_S_OK;
-		timeout_add(&np->msts_tout, t_trust);
+		timeout_add_sec(&np->msts_tout, TRUSTTIME);
 	}
-	np->gapno = 0;
 #endif
 
 	np->time.value = np->ts.tv_sec * 1000000000LL +
@@ -305,12 +295,12 @@ msts_decode(struct msts *np, struct tty *tp, char *fld[], int fldcnt)
 	if (fld[3][0] == ' ' && fld[3][1] == ' ') {
 		np->time.status = SENSOR_S_OK;
 		np->signal.status = SENSOR_S_OK;
-		timeout_add(&np->msts_tout, t_trust);
+		timeout_add_sec(&np->msts_tout, TRUSTTIME);
 	} else
 		np->signal.status = SENSOR_S_WARN;
 
 	/*
-	 * If tty timestamping is requested, but not PPS signal is present, set
+	 * If tty timestamping is requested, but no PPS signal is present, set
 	 * the sensor state to CRITICAL.
 	 */
 	if (np->no_pps)
@@ -318,7 +308,7 @@ msts_decode(struct msts *np, struct tty *tp, char *fld[], int fldcnt)
 }
 
 /*
- * Convert date field from MSTS to nanoseconds since midnight.
+ * Convert date field from MSTS to nanoseconds since the epoch.
  * The string must be of the form D:DD.MM.YY .
  * Return 0 on success, -1 if illegal characters are encountered.
  */
@@ -428,7 +418,7 @@ msts_timeout(void *xnp)
 		 * further degrade in TRUSTTIME seconds if no new valid MSTS
 		 * strings are received.
 		 */
-		timeout_add(&np->msts_tout, t_trust);
+		timeout_add_sec(&np->msts_tout, TRUSTTIME);
 	} else
 		np->time.status = SENSOR_S_CRIT;
 }

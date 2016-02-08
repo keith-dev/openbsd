@@ -1,4 +1,4 @@
-/*	$OpenBSD: atw.c,v 1.60 2008/07/21 18:43:19 damien Exp $	*/
+/*	$OpenBSD: atw.c,v 1.65 2009/01/21 21:53:59 grange Exp $	*/
 /*	$NetBSD: atw.c,v 1.69 2004/07/23 07:07:55 dyoung Exp $	*/
 
 /*-
@@ -200,8 +200,10 @@ void	atw_linkintr(struct atw_softc *, u_int32_t);
 /* 802.11 state machine */
 int	atw_newstate(struct ieee80211com *, enum ieee80211_state, int);
 int	atw_tune(struct atw_softc *);
+#ifndef IEEE80211_STA_ONLY
 void	atw_recv_mgmt(struct ieee80211com *, struct mbuf *,
 	    struct ieee80211_node *, struct ieee80211_rxinfo *, int);
+#endif
 void	atw_next_scan(void *);
 
 /* Device initialization */
@@ -304,27 +306,6 @@ const char *atw_rx_state[] = {
 	"RUNNING - fifo drain"
 };
 
-#endif
-
-#ifndef __OpenBSD__
-int
-atw_activate(struct device *self, enum devact act)
-{
-	struct atw_softc *sc = (struct atw_softc *)self;
-	int rv = 0, s;
-
-	s = splnet();
-	switch (act) {
-	case DVACT_ACTIVATE:
-		break;
-
-	case DVACT_DEACTIVATE:
-		if_deactivate(&sc->sc_ic.ic_if);
-		break;
-	}
-	splx(s);
-	return rv;
-}
 #endif
 
 /*
@@ -804,17 +785,14 @@ atw_attach(struct atw_softc *sc)
 	ifp->if_ioctl = atw_ioctl;
 	ifp->if_start = atw_start;
 	ifp->if_watchdog = atw_watchdog;
-#if !defined(__OpenBSD__)
-	ifp->if_init = atw_init;
-	ifp->if_stop = atw_stop;
-#endif
 	IFQ_SET_READY(&ifp->if_snd);
 
 	ic->ic_phytype = IEEE80211_T_DS;
 	ic->ic_opmode = IEEE80211_M_STA;
-	ic->ic_caps = IEEE80211_C_PMGT | IEEE80211_C_IBSS |
-	    IEEE80211_C_HOSTAP | IEEE80211_C_MONITOR | IEEE80211_C_WEP;
-
+	ic->ic_caps = IEEE80211_C_PMGT | IEEE80211_C_MONITOR | IEEE80211_C_WEP;
+#ifndef IEEE80211_STA_ONLY
+	ic->ic_caps |= IEEE80211_C_IBSS;
+#endif
 	ic->ic_sup_rates[IEEE80211_MODE_11B] = ieee80211_std_rateset_11b;	
 
 	/*
@@ -827,8 +805,10 @@ atw_attach(struct atw_softc *sc)
 	sc->sc_newstate = ic->ic_newstate;
 	ic->ic_newstate = atw_newstate;
 
+#ifndef IEEE80211_STA_ONLY
 	sc->sc_recv_mgmt = ic->ic_recv_mgmt;
 	ic->ic_recv_mgmt = atw_recv_mgmt;
+#endif
 
 	sc->sc_node_free = ic->ic_node_free;
 	ic->ic_node_free = atw_node_free;
@@ -1419,19 +1399,19 @@ atw_init(struct ifnet *ifp)
 	switch (ic->ic_opmode) {
 	case IEEE80211_M_STA:
 		break;
+#ifndef IEEE80211_STA_ONLY
 	case IEEE80211_M_AHDEMO: /* XXX */
 	case IEEE80211_M_IBSS:
 		ic->ic_flags |= IEEE80211_F_IBSSON;
 		/*FALLTHROUGH*/
-	case IEEE80211_M_HOSTAP: /* XXX */
-		break;
-	case IEEE80211_M_MONITOR: /* XXX */
+#endif
+	default: /* XXX */
 		break;
 	}
 
+#ifndef IEEE80211_STA_ONLY
 	switch (ic->ic_opmode) {
 	case IEEE80211_M_AHDEMO:
-	case IEEE80211_M_HOSTAP:
 		ic->ic_bss->ni_intval = ic->ic_lintval;
 		ic->ic_bss->ni_rssi = 0;
 		ic->ic_bss->ni_rstamp = 0;
@@ -1439,7 +1419,7 @@ atw_init(struct ifnet *ifp)
 	default:					/* XXX */
 		break;
 	}
-
+#endif
 	sc->sc_wepctl = 0;
 
 	atw_write_ssid(sc);
@@ -2053,11 +2033,7 @@ void
 atw_filter_setup(struct atw_softc *sc)
 {
 	struct ieee80211com *ic = &sc->sc_ic;
-#if defined(__OpenBSD__)
 	struct arpcom *ec = &ic->ic_ac;
-#else
-	struct ethercom *ec = &ic->ic_ec;
-#endif
 	struct ifnet *ifp = &sc->sc_ic.ic_if;
 	int hash;
 	u_int32_t hashes[2];
@@ -2260,6 +2236,7 @@ atw_change_ibss(struct atw_softc *sc)
 	atw_start_beacon(sc, 1);
 }
 
+#ifndef IEEE80211_STA_ONLY
 void
 atw_recv_mgmt(struct ieee80211com *ic, struct mbuf *m,
     struct ieee80211_node *ni, struct ieee80211_rxinfo *rxi, int subtype)
@@ -2287,6 +2264,7 @@ atw_recv_mgmt(struct ieee80211com *ic, struct mbuf *m,
 	}
 	return;
 }
+#endif
 
 /* Write the SSID in the ieee80211com to the SRAM on the ADM8211.
  * In ad hoc mode, the SSID is written to the beacons sent by the
@@ -2339,8 +2317,11 @@ void
 atw_start_beacon(struct atw_softc *sc, int start)
 {
 	struct ieee80211com *ic = &sc->sc_ic;
+#ifndef IEEE80211_STA_ONLY
 	uint16_t chan;
-	uint32_t bcnt, bpli, cap0, cap1, capinfo;
+	uint32_t bpli;
+#endif
+	uint32_t bcnt, cap0, cap1, capinfo;
 	size_t len;
 
 	if (ATW_IS_ENABLED(sc) == 0)
@@ -2373,15 +2354,11 @@ atw_start_beacon(struct atw_softc *sc, int start)
 	if (ic->ic_flags & IEEE80211_F_WEPON)
 		capinfo |= IEEE80211_CAPINFO_PRIVACY;
 
+#ifndef IEEE80211_STA_ONLY
 	switch (ic->ic_opmode) {
 	case IEEE80211_M_IBSS:
 		len += 4; /* IBSS parameters */
 		capinfo |= IEEE80211_CAPINFO_IBSS;
-		break;
-	case IEEE80211_M_HOSTAP:
-		/* XXX 6-byte minimum TIM */
-		len += atw_beacon_len_adjust;
-		capinfo |= IEEE80211_CAPINFO_ESS;
 		break;
 	default:
 		return;
@@ -2408,6 +2385,7 @@ atw_start_beacon(struct atw_softc *sc, int start)
 	    sc->sc_dev.dv_xname, bcnt));
 	DPRINTF(sc, ("%s: atw_start_beacon reg[ATW_CAP1] = %08x\n",
 	    sc->sc_dev.dv_xname, cap1));
+#endif
 }
 
 /* Return the 32 lsb of the last TSFT divisible by ival. */
@@ -2463,14 +2441,16 @@ atw_predict_beacon(struct atw_softc *sc)
 		uint8_t		tstamp[8];
 	} u;
 
-	if ((ic->ic_opmode == IEEE80211_M_HOSTAP) ||
-	    ((ic->ic_opmode == IEEE80211_M_IBSS) &&
-	     (ic->ic_flags & IEEE80211_F_SIBSS))) {
+#ifndef IEEE80211_STA_ONLY
+	if ((ic->ic_opmode == IEEE80211_M_IBSS) &&
+	    (ic->ic_flags & IEEE80211_F_SIBSS)) {
 		tsft = atw_get_tsft(sc);
 		u.word = htole64(tsft);
 		(void)memcpy(&ic->ic_bss->ni_tstamp[0], &u.tstamp[0],
 		    sizeof(ic->ic_bss->ni_tstamp));
-	} else {
+	} else
+#endif
+	{
 		(void)memcpy(&u, &ic->ic_bss->ni_tstamp[0], sizeof(u));
 		tsft = letoh64(u.word);
 	}
@@ -2539,7 +2519,7 @@ atw_newstate(struct ieee80211com *ic, enum ieee80211_state nstate, int arg)
 		panic("%s: unexpected state IEEE80211_S_INIT", __func__);
 		break;
 	case IEEE80211_S_SCAN:
-		timeout_add(&sc->sc_scan_to, atw_dwelltime * hz / 1000);
+		timeout_add_msec(&sc->sc_scan_to, atw_dwelltime);
 		break;
 	case IEEE80211_S_RUN:
 		if (ic->ic_opmode == IEEE80211_M_STA)
@@ -2550,7 +2530,10 @@ atw_newstate(struct ieee80211com *ic, enum ieee80211_state nstate, int arg)
 		atw_write_ssid(sc);
 		atw_write_sup_rates(sc);
 
-		if (ic->ic_opmode == IEEE80211_M_AHDEMO ||
+		if (
+#ifndef IEEE80211_STA_ONLY
+		    ic->ic_opmode == IEEE80211_M_AHDEMO ||
+#endif
 		    ic->ic_opmode == IEEE80211_M_MONITOR)
 			break;
 
@@ -2572,11 +2555,12 @@ atw_newstate(struct ieee80211com *ic, enum ieee80211_state nstate, int arg)
 	if (nstate != IEEE80211_S_SCAN)
 		timeout_del(&sc->sc_scan_to);
 
+#ifndef IEEE80211_STA_ONLY
 	if (nstate == IEEE80211_S_RUN &&
-	    (ic->ic_opmode == IEEE80211_M_HOSTAP ||
-	     ic->ic_opmode == IEEE80211_M_IBSS))
+	    ic->ic_opmode == IEEE80211_M_IBSS)
 		atw_start_beacon(sc, 1);
 	else
+#endif
 		atw_start_beacon(sc, 0);
 
 	error = (*sc->sc_newstate)(ic, nstate, arg);
@@ -3116,11 +3100,7 @@ atw_rxintr(struct atw_softc *sc)
 		 */
 
 		if ((rxstat & ATW_RXSTAT_ES) != 0 &&
-#if defined(__OpenBSD__)
 		    ((sc->sc_ic.ic_if.if_capabilities & IFCAP_VLAN_MTU) == 0 ||
-#else
-		    ((sc->sc_ic.ic_ec.ec_capenable & ETHERCAP_VLAN_MTU) == 0 ||
-#endif
 		     (rxstat & (ATW_RXSTAT_DE | ATW_RXSTAT_SFDE |
 		                ATW_RXSTAT_SIGE | ATW_RXSTAT_CRC16E |
 				ATW_RXSTAT_RXTOE | ATW_RXSTAT_CRC32E |
@@ -3307,18 +3287,9 @@ atw_txintr(struct atw_softc *sc)
 
 		if ((ifp->if_flags & IFF_DEBUG) != 0 &&
 		    (txstat & TXSTAT_ERRMASK) != 0) {
-#if defined(__OpenBSD__)
 			printf("%s: txstat %b %d\n", sc->sc_dev.dv_xname,
 			    txstat & TXSTAT_ERRMASK, TXSTAT_FMT,
 			    MASK_AND_RSHIFT(txstat, ATW_TXSTAT_ARC_MASK));
-#else
-			static char txstat_buf[sizeof("ffffffff<>" TXSTAT_FMT)];
-			bitmask_snprintf(txstat & TXSTAT_ERRMASK, TXSTAT_FMT,
-			    txstat_buf, sizeof(txstat_buf));
-			printf("%s: txstat %s %d\n", sc->sc_dev.dv_xname,
-			    txstat_buf,
-			    MASK_AND_RSHIFT(txstat, ATW_TXSTAT_ARC_MASK));
-#endif
 		}
 
 		/*
@@ -4045,12 +4016,6 @@ atw_power(int why, void *arg)
 			atw_init(ifp);
 		}
 		break;
-#if !defined(__OpenBSD__)
-	case PWR_SOFTSUSPEND:
-	case PWR_SOFTSTANDBY:
-	case PWR_SOFTRESUME:
-		break;
-#endif
 	}
 	splx(s);
 }
@@ -4076,13 +4041,6 @@ atw_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	s = splnet();
 
 	switch (cmd) {
-        case SIOCSIFMTU:
-                if (ifr->ifr_mtu > ETHERMTU || ifr->ifr_mtu < ETHERMIN) {
-                        error = EINVAL;
-                } else if (ifp->if_mtu != ifr->ifr_mtu) {
-                        ifp->if_mtu = ifr->ifr_mtu;
-                }
-                break;
         case SIOCSIFADDR:
                 ifp->if_flags |= IFF_UP;
 #ifdef INET
@@ -4091,6 +4049,7 @@ atw_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
                 }
 #endif  /* INET */
 		/* FALLTHROUGH */
+
 	case SIOCSIFFLAGS:
 		if (ifp->if_flags & IFF_UP) {
 			if (ATW_IS_ENABLED(sc)) {
@@ -4105,16 +4064,12 @@ atw_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		} else if (ATW_IS_ENABLED(sc))
 			atw_stop(ifp, 1);
 		break;
+
 	case SIOCADDMULTI:
 	case SIOCDELMULTI:
 		error = (cmd == SIOCADDMULTI) ?
-#if defined(__OpenBSD__)
 		    ether_addmulti(ifr, &sc->sc_ic.ic_ac) :
 		    ether_delmulti(ifr, &sc->sc_ic.ic_ac);
-#else
-		    ether_addmulti(ifr, &sc->sc_ic.ic_ec) :
-		    ether_delmulti(ifr, &sc->sc_ic.ic_ec);
-#endif
 
 		if (error == ENETRESET) {
 			if (ifp->if_flags & IFF_RUNNING)
@@ -4122,6 +4077,7 @@ atw_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 			error = 0;
 		}
 		break;
+
 	default:
 		error = ieee80211_ioctl(ifp, cmd, data);
 		if (error == ENETRESET) {

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_wi.c,v 1.140 2008/04/18 09:16:14 djm Exp $	*/
+/*	$OpenBSD: if_wi.c,v 1.143 2008/11/28 02:44:17 brad Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998, 1999
@@ -126,7 +126,7 @@ u_int32_t	widebug = WIDEBUG;
 
 #if !defined(lint) && !defined(__OpenBSD__)
 static const char rcsid[] =
-	"$OpenBSD: if_wi.c,v 1.140 2008/04/18 09:16:14 djm Exp $";
+	"$OpenBSD: if_wi.c,v 1.143 2008/11/28 02:44:17 brad Exp $";
 #endif	/* lint */
 
 #ifdef foo
@@ -873,7 +873,7 @@ wi_inquire(void *xsc)
 	sc = xsc;
 	ifp = &sc->sc_ic.ic_if;
 
-	timeout_add(&sc->sc_timo, hz * 60);
+	timeout_add_sec(&sc->sc_timo, 60);
 
 	/* Don't do this while we're transmitting */
 	if (ifp->if_flags & IFF_OACTIVE)
@@ -1574,11 +1574,6 @@ wi_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 	DPRINTF (WID_IOCTL, ("wi_ioctl: command %lu data %p\n",
 	    command, data));
 
-	if ((error = ether_ioctl(ifp, &sc->sc_ic.ic_ac, command, data)) > 0) {
-		splx(s);
-		return error;
-	}
-
 	switch(command) {
 	case SIOCSIFADDR:
 		ifp->if_flags |= IFF_UP;
@@ -1594,15 +1589,6 @@ wi_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 			break;
 		}
 		break;
-
-	case SIOCSIFMTU:
-		if (ifr->ifr_mtu > ETHERMTU || ifr->ifr_mtu < ETHERMIN) {
-			error = EINVAL;
-		} else if (ifp->if_mtu != ifr->ifr_mtu) {
-			ifp->if_mtu = ifr->ifr_mtu;
-		}
-		break;
-
 	case SIOCSIFFLAGS:
 		if (ifp->if_flags & IFF_UP) {
 			if (ifp->if_flags & IFF_RUNNING &&
@@ -1621,23 +1607,6 @@ wi_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 			wi_stop(sc);
 		sc->wi_if_flags = ifp->if_flags;
 		error = 0;
-		break;
-	case SIOCADDMULTI:
-	case SIOCDELMULTI:
-		/* Update our multicast list. */
-		error = (command == SIOCADDMULTI) ?
-		    ether_addmulti(ifr, &sc->sc_ic.ic_ac) :
-		    ether_delmulti(ifr, &sc->sc_ic.ic_ac);
-
-		if (error == ENETRESET) {
-			/*
-			 * Multicast list has changed; set the hardware filter
-			 * accordingly.
-			 */
-			if (ifp->if_flags & IFF_RUNNING)
-				wi_setmulti(sc);
-			error = 0;
-		}
 		break;
 	case SIOCSIFMEDIA:
 	case SIOCGIFMEDIA:
@@ -2053,14 +2022,20 @@ wi_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 		error = wihap_ioctl(sc, command, data);
 		break;
 	default:
-		error = EINVAL;
-		break;
+		error = ether_ioctl(ifp, &sc->sc_ic.ic_ac, command, data);
+	}
+
+	if (error == ENETRESET) {
+		if (ifp->if_flags & IFF_RUNNING)
+			wi_setmulti(sc);
+		error = 0;
 	}
 
 	if (wreq)
 		free(wreq, M_DEVBUF);
 	if (nwidp)
 		free(nwidp, M_DEVBUF);
+
 	splx(s);
 	return(error);
 }
@@ -2253,7 +2228,7 @@ wi_init_io(struct wi_softc *sc)
 	ifp->if_flags |= IFF_RUNNING;
 	ifp->if_flags &= ~IFF_OACTIVE;
 
-	timeout_add(&sc->sc_timo, hz * 60);
+	timeout_add_sec(&sc->sc_timo, 60);
 
 	return;
 }

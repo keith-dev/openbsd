@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_bridge.c,v 1.170 2008/06/14 21:46:22 reyk Exp $	*/
+/*	$OpenBSD: if_bridge.c,v 1.174 2009/01/06 21:23:18 claudio Exp $	*/
 
 /*
  * Copyright (c) 1999, 2000 Jason L. Wright (jason@thought.net)
@@ -35,6 +35,7 @@
 #include "gif.h"
 #include "pf.h"
 #include "carp.h"
+#include "vlan.h"
 
 #include <sys/param.h>
 #include <sys/proc.h>
@@ -95,6 +96,10 @@
 #include <netinet/ip_carp.h>
 #endif
 
+#if NVLAN > 0
+#include <net/if_vlan_var.h>
+#endif
+
 #include <net/if_bridge.h>
 
 /*
@@ -116,6 +121,8 @@ int	bridge_ioctl(struct ifnet *, u_long, caddr_t);
 void	bridge_start(struct ifnet *);
 void	bridgeintr_frame(struct bridge_softc *, struct mbuf *);
 void	bridge_broadcast(struct bridge_softc *, struct ifnet *,
+    struct ether_header *, struct mbuf *);
+void	bridge_localbroadcast(struct bridge_softc *, struct ifnet *,
     struct ether_header *, struct mbuf *);
 void	bridge_span(struct bridge_softc *, struct ether_header *,
     struct mbuf *);
@@ -601,7 +608,7 @@ bridge_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		}
 		sc->sc_brttimeout = bparam->ifbrp_ctime;
 		if (bparam->ifbrp_ctime != 0)
-			timeout_add(&sc->sc_brtimeout, sc->sc_brttimeout * hz);
+			timeout_add_sec(&sc->sc_brtimeout, sc->sc_brttimeout);
 		else
 			timeout_del(&sc->sc_brtimeout);
 		break;
@@ -965,7 +972,7 @@ bridge_init(struct bridge_softc *sc)
 	bstp_initialization(sc->sc_stp);
 
 	if (sc->sc_brttimeout != 0)
-		timeout_add(&sc->sc_brtimeout, sc->sc_brttimeout * hz);
+		timeout_add_sec(&sc->sc_brtimeout, sc->sc_brttimeout);
 }
 
 /*
@@ -999,7 +1006,7 @@ bridge_output(struct ifnet *ifp, struct mbuf *m, struct sockaddr *sa,
 {
 	struct ether_header *eh;
 	struct ifnet *dst_if;
-	struct ether_addr *src, *dst;
+	struct ether_addr *dst;
 	struct bridge_softc *sc;
 	int s, error, len;
 #ifdef IPSEC
@@ -1020,7 +1027,6 @@ bridge_output(struct ifnet *ifp, struct mbuf *m, struct sockaddr *sa,
 	}
 	eh = mtod(m, struct ether_header *);
 	dst = (struct ether_addr *)&eh->ether_dhost[0];
-	src = (struct ether_addr *)&eh->ether_shost[0];
 
 	s = splnet();
 
@@ -1355,6 +1361,11 @@ bridgeintr_frame(struct bridge_softc *sc, struct mbuf *m)
 #endif
 
 	len = m->m_pkthdr.len;
+#if NVLAN > 0
+	if ((m->m_flags & M_VLANTAG) &&
+	    (dst_if->if_capabilities & IFCAP_VLAN_HWTAGGING) == 0)
+		len += ETHER_VLAN_ENCAP_LEN;
+#endif
 	if ((len - ETHER_HDR_LEN) > dst_if->if_mtu)
 		bridge_fragment(sc, dst_if, &eh, m);
 	else {
@@ -1528,7 +1539,7 @@ bridge_broadcast(struct bridge_softc *sc, struct ifnet *ifp,
 	struct bridge_iflist *p;
 	struct mbuf *mc;
 	struct ifnet *dst_if;
-	int len = m->m_pkthdr.len, used = 0;
+	int len, used = 0;
 
 	splassert(IPL_NET);
 
@@ -1568,6 +1579,8 @@ bridge_broadcast(struct bridge_softc *sc, struct ifnet *ifp,
 
 		if (bridge_filterrule(&p->bif_brlout, eh, m) == BRL_ACTION_BLOCK)
 			continue;
+
+		bridge_localbroadcast(sc, dst_if, eh, m);
 
 		/* If last one, reuse the passed-in mbuf */
 		if (LIST_NEXT(p, next) == LIST_END(&sc->sc_iflist)) {
@@ -1610,6 +1623,12 @@ bridge_broadcast(struct bridge_softc *sc, struct ifnet *ifp,
 			continue;
 #endif
 
+		len = mc->m_pkthdr.len;
+#if NVLAN > 0
+		if ((mc->m_flags & M_VLANTAG) &&
+		    (dst_if->if_capabilities & IFCAP_VLAN_HWTAGGING) == 0)
+			len += ETHER_VLAN_ENCAP_LEN;
+#endif
 		if ((len - ETHER_HDR_LEN) > dst_if->if_mtu)
 			bridge_fragment(sc, dst_if, eh, mc);
 		else {
@@ -1619,6 +1638,40 @@ bridge_broadcast(struct bridge_softc *sc, struct ifnet *ifp,
 
 	if (!used)
 		m_freem(m);
+}
+
+void
+bridge_localbroadcast(struct bridge_softc *sc, struct ifnet *ifp,
+    struct ether_header *eh, struct mbuf *m)
+{
+	struct mbuf *m1;
+	u_int16_t etype;
+
+#ifdef INET
+	/*
+	 * quick optimisation, don't send packets up the stack if no
+	 * corresponding address has been specified.
+	 */
+	etype = ntohs(eh->ether_type);
+	if (!(m->m_flags & M_VLANTAG) && etype == ETHERTYPE_IP) {
+		struct in_ifaddr *ia;
+		IFP_TO_IA(ifp, ia);
+		if (!ia)
+			return;
+	}
+#endif
+
+	m1 = m_copym2(m, 0, M_COPYALL, M_DONTWAIT);
+	if (m1 == NULL) {
+		sc->sc_if.if_oerrors++;
+		return;
+	}
+	m_adj(m1, ETHER_HDR_LEN);
+
+	/* fixup header a bit */
+	m1->m_flags |= M_PROTO1;
+	m1->m_pkthdr.rcvif = ifp;
+	ether_input(ifp, eh, m1);
 }
 
 void
@@ -1904,7 +1957,7 @@ bridge_rtage(struct bridge_softc *sc)
 	}
 
 	if (sc->sc_brttimeout != 0)
-		timeout_add(&sc->sc_brtimeout, sc->sc_brttimeout * hz);
+		timeout_add_sec(&sc->sc_brtimeout, sc->sc_brttimeout);
 }
 
 void
@@ -2076,6 +2129,11 @@ bridge_blocknonip(struct ether_header *eh, struct mbuf *m)
 
 	if (m->m_pkthdr.len < ETHER_HDR_LEN)
 		return (1);
+
+#if NVLAN > 0
+	if (m->m_flags & M_VLANTAG)
+		return (1);
+#endif
 
 	etype = ntohs(eh->ether_type);
 	switch (etype) {
@@ -2413,6 +2471,11 @@ bridge_filter(struct bridge_softc *sc, int dir, struct ifnet *ifp,
 	int hlen;
 	u_int16_t etype;
 
+#if NVLAN > 0
+	if (m->m_flags & M_VLANTAG)
+		return (m);
+#endif
+
 	etype = ntohs(eh->ether_type);
 
 	if (etype != ETHERTYPE_IP && etype != ETHERTYPE_IPV6) {
@@ -2590,7 +2653,7 @@ bridge_fragment(struct bridge_softc *sc, struct ifnet *ifp,
 {
 	struct llc llc;
 	struct mbuf *m0;
-	int s, len, error = 0;
+	int s, error = 0;
 	int hassnap = 0;
 #ifdef INET
 	u_int16_t etype;
@@ -2601,15 +2664,22 @@ bridge_fragment(struct bridge_softc *sc, struct ifnet *ifp,
 	goto dropit;
 #else
 	etype = ntohs(eh->ether_type);
-	if (etype == ETHERTYPE_VLAN &&
-	    (ifp->if_capabilities & IFCAP_VLAN_MTU) &&
-	    ((m->m_pkthdr.len - sizeof(struct ether_vlan_header)) <=
-	    ifp->if_mtu)) {
-		s = splnet();
-		bridge_ifenqueue(sc, ifp, m);
-		splx(s);
-		return;
+#if NVLAN > 0
+	if ((m->m_flags & M_VLANTAG) || etype == ETHERTYPE_VLAN) {
+		int len = m->m_pkthdr.len;
+
+		if (m->m_flags & M_VLANTAG)
+			len += ETHER_VLAN_ENCAP_LEN;
+		if ((ifp->if_capabilities & IFCAP_VLAN_MTU) &&
+		    (len - sizeof(struct ether_vlan_header) <= ifp->if_mtu)) {
+			s = splnet();
+			bridge_ifenqueue(sc, ifp, m);
+			splx(s);
+			return;
+		}
+		goto dropit;
 	}
+#endif
 	if (etype != ETHERTYPE_IP) {
 		if (etype > ETHERMTU ||
 		    m->m_pkthdr.len < (LLC_SNAPFRAMELEN +
@@ -2671,7 +2741,6 @@ bridge_fragment(struct bridge_softc *sc, struct ifnet *ifp,
 				error = ENOBUFS;
 				continue;
 			}
-			len = m->m_pkthdr.len;
 			bcopy(eh, mtod(m, caddr_t), sizeof(*eh));
 			s = splnet();
 			error = bridge_ifenqueue(sc, ifp, m);
@@ -2704,6 +2773,29 @@ bridge_ifenqueue(struct bridge_softc *sc, struct ifnet *ifp, struct mbuf *m)
 	/* Packet needs etherip encapsulation. */
 	if (ifp->if_type == IFT_GIF)
 		m->m_flags |= M_PROTO1;
+#endif
+#if NVLAN > 0
+	/*
+	 * If the underlying interface cannot do VLAN tag insertion itself,
+	 * create an encapsulation header.
+	 */
+	if ((m->m_flags & M_VLANTAG) &&
+	    (ifp->if_capabilities & IFCAP_VLAN_HWTAGGING) == 0) {
+		struct ether_vlan_header evh;
+
+		m_copydata(m, 0, ETHER_HDR_LEN, (caddr_t)&evh);
+		evh.evl_proto = evh.evl_encap_proto;
+		evh.evl_encap_proto = htons(ETHERTYPE_VLAN);
+		evh.evl_tag = htons(m->m_pkthdr.ether_vtag);
+		m_adj(m, ETHER_HDR_LEN);
+		M_PREPEND(m, sizeof(evh), M_DONTWAIT);
+		if (m == NULL) {
+			sc->sc_if.if_oerrors++;
+			return (ENOBUFS);
+		}
+		m_copyback(m, 0, sizeof(evh), &evh);
+		m->m_flags &= ~M_VLANTAG;
+	}
 #endif
 	len = m->m_pkthdr.len;
 	mflags = m->m_flags;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: fxp.c,v 1.91 2008/02/21 03:58:07 brad Exp $	*/
+/*	$OpenBSD: fxp.c,v 1.94 2008/11/28 02:44:17 brad Exp $	*/
 /*	$NetBSD: if_fxp.c,v 1.2 1997/06/05 02:01:55 thorpej Exp $	*/
 
 /*
@@ -1049,7 +1049,7 @@ fxp_stats_update(void *arg)
 	/*
 	 * Schedule another timeout one second from now.
 	 */
-	timeout_add(&sc->stats_update_to, hz);
+	timeout_add_sec(&sc->stats_update_to, 1);
 }
 
 /*
@@ -1437,7 +1437,7 @@ fxp_init(void *xsc)
 	/*
 	 * Start stats updater.
 	 */
-	timeout_add(&sc->stats_update_to, hz);
+	timeout_add_sec(&sc->stats_update_to, 1);
 }
 
 /*
@@ -1633,11 +1633,6 @@ fxp_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 
 	s = splnet();
 
-	if ((error = ether_ioctl(ifp, &sc->sc_arpcom, command, data)) > 0) {
-		splx(s);
-		return (error);
-	}
-
 	switch (command) {
 	case SIOCSIFADDR:
 		ifp->if_flags |= IFF_UP;
@@ -1647,13 +1642,6 @@ fxp_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 		if (ifa->ifa_addr->sa_family == AF_INET)
 			arp_ifinit(&sc->sc_arpcom, ifa);
 #endif
-		break;
-
-	case SIOCSIFMTU:
-		if (ifr->ifr_mtu > ETHERMTU || ifr->ifr_mtu < ETHERMIN)
-			error = EINVAL;
-		else if (ifp->if_mtu != ifr->ifr_mtu)
-			ifp->if_mtu = ifr->ifr_mtu;
 		break;
 
 	case SIOCSIFFLAGS:
@@ -1669,30 +1657,21 @@ fxp_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 			fxp_stop(sc, 1);
 		break;
 
-	case SIOCADDMULTI:
-	case SIOCDELMULTI:
-		error = (command == SIOCADDMULTI) ?
-		    ether_addmulti(ifr, &sc->sc_arpcom) :
-		    ether_delmulti(ifr, &sc->sc_arpcom);
-		if (error == ENETRESET) {
-			/*
-			 * Multicast list has changed; set the hardware
-			 * filter accordingly.
-			 */
-			if (ifp->if_flags & IFF_RUNNING)
-				fxp_init(sc);
-			error = 0;
-		}
-		break;
-
 	case SIOCSIFMEDIA:
 	case SIOCGIFMEDIA:
 		error = ifmedia_ioctl(ifp, ifr, &sc->sc_mii.mii_media, command);
 		break;
 
 	default:
-		error = EINVAL;
+		error = ether_ioctl(ifp, &sc->sc_arpcom, command, data);
 	}
+
+	if (error == ENETRESET) {
+		if (ifp->if_flags & IFF_RUNNING)
+			fxp_init(sc);
+		error = 0;
+	}
+
 	splx(s);
 	return (error);
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: owsbm.c,v 1.4 2007/06/24 05:34:35 dlg Exp $	*/
+/*	$OpenBSD: owsbm.c,v 1.6 2009/01/26 15:07:49 kettenis Exp $	*/
 
 /*
  * Copyright (c) 2007 Aaron Linville <aaron@linville.org>
@@ -117,6 +117,8 @@ owsbm_attach(struct device *parent, struct device *self, void *aux)
 	strlcpy(sc->sc_sensordev.xname, sc->sc_dev.dv_xname,
 	    sizeof(sc->sc_sensordev.xname));
 	sc->sc_temp.type = SENSOR_TEMP;
+	snprintf(sc->sc_temp.desc, sizeof(sc->sc_temp.desc), "sn %012llx",
+	    ONEWIRE_ROM_SN(oa->oa_rom));
 	sensor_attach(&sc->sc_sensordev, &sc->sc_temp);
 
 	/* Initialize voltage sensor */
@@ -136,7 +138,7 @@ owsbm_attach(struct device *parent, struct device *self, void *aux)
 
 	sc->sc_sensortask = sensor_task_register(sc, owsbm_update, 10);
 	if (sc->sc_sensortask == NULL) {
-		printf(": unable to register owsbm update task\n");
+		printf(": unable to register update task\n");
 		return;
 	}
 

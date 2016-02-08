@@ -1,4 +1,4 @@
-/*	$OpenBSD: checkout.c,v 1.156 2008/07/08 12:29:58 joris Exp $	*/
+/*	$OpenBSD: checkout.c,v 1.160 2009/02/23 21:32:08 joris Exp $	*/
 /*
  * Copyright (c) 2006 Joris Vink <joris@openbsd.org>
  *
@@ -48,6 +48,7 @@ static char *dateflag = NULL;
 
 static int nflag = 0;
 
+static char lastwd[MAXPATHLEN];
 char *checkout_target_dir = NULL;
 
 time_t cvs_specified_date = -1;
@@ -181,6 +182,15 @@ cvs_export(int argc, char **argv)
 
 	while ((ch = getopt(argc, argv, cvs_cmd_export.cmd_opts)) != -1) {
 		switch (ch) {
+		case 'd':
+			if (dflag != NULL)
+				fatal("-d specified two or more times");
+			dflag = optarg;
+			checkout_target_dir = dflag;
+
+			if (cvs_server_active == 1)
+				disable_fast_checkout = 1;
+			break;
 		case 'k':
 			koptstr = optarg;
 			kflag = rcs_kflag_get(koptstr);
@@ -439,7 +449,7 @@ checkout_repository(const char *repobase, const char *wdbase)
 
 	cvs_repository_lock(repobase, 0);
 	cvs_repository_getdir(repobase, wdbase, &fl, &dl,
-	    flags & CR_RECURSE_DIRS ? 1 : 0);
+	    flags & CR_RECURSE_DIRS ? REPOSITORY_DODIRS : 0);
 
 	cvs_file_walklist(&fl, &cr);
 	cvs_file_freelist(&fl);
@@ -485,7 +495,7 @@ cvs_checkout_file(struct cvs_file *cf, RCSNUM *rnum, char *tag, int co_flags)
 		(void)unlink(cf->file_path);
 
 		if (!(co_flags & CO_MERGE)) {
-			if (cf->fd != -1) {
+			if (cf->file_flags & FILE_ON_DISK) {
 				exists = 1;
 				(void)close(cf->fd);
 			}
@@ -497,6 +507,7 @@ cvs_checkout_file(struct cvs_file *cf, RCSNUM *rnum, char *tag, int co_flags)
 				    strerror(errno));
 
 			rcs_rev_write_fd(cf->file_rcs, rnum, cf->fd, 0);
+			cf->file_flags |= FILE_ON_DISK;
 		} else {
 			cvs_merge_file(cf, (cvs_join_rev1 == NULL));
 		}
@@ -581,6 +592,15 @@ cvs_checkout_file(struct cvs_file *cf, RCSNUM *rnum, char *tag, int co_flags)
 			(void)unlink(cf->file_path);
 			cvs_merge_file(cf, (cvs_join_rev1 == NULL));
 			tosend = cf->file_path;
+		}
+
+		/*
+		 * If this file has a tag, push out the Directory with the
+		 * tag to the client. 
+		 */
+		if (tag != NULL && strcmp(cf->file_wd, lastwd)) {
+			strlcpy(lastwd, cf->file_wd, MAXPATHLEN);
+			cvs_server_set_sticky(cf->file_wd, sticky);
 		}
 
 		if (co_flags & CO_COMMIT)

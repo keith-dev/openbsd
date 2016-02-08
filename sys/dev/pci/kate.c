@@ -1,4 +1,4 @@
-/*	$OpenBSD: kate.c,v 1.3 2008/04/28 08:57:08 brad Exp $	*/
+/*	$OpenBSD: kate.c,v 1.5 2009/01/26 15:07:49 kettenis Exp $	*/
 
 /*
  * Copyright (c) 2008 Constantine A. Murenin <cnst+openbsd@bugmail.mojo.ru>
@@ -158,7 +158,7 @@ kate_attach(struct device *parent, struct device *self, void *aux)
 	}
 
 	d = pci_conf_read(pa->pa_pc, pa->pa_tag, K_NORTHBRIDGE_CAP_R);
-	cmpcap = (d >> 12) && 0x3;
+	cmpcap = (d >> 12) & 0x3;
 
 	sc->sc_pc = pa->pa_pc;
 	sc->sc_pcitag = pa->pa_tag;
@@ -183,7 +183,7 @@ kate_attach(struct device *parent, struct device *self, void *aux)
 	}
 
 	if (sensor_task_register(sc, kate_refresh, 5) == NULL) {
-		printf(": unable to register the update task\n");
+		printf(": unable to register update task\n");
 		return;
 	}
 

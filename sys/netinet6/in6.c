@@ -1,4 +1,4 @@
-/*	$OpenBSD: in6.c,v 1.78 2008/07/13 20:41:39 claudio Exp $	*/
+/*	$OpenBSD: in6.c,v 1.80 2009/01/30 10:47:46 mcbride Exp $	*/
 /*	$KAME: in6.c,v 1.372 2004/06/14 08:14:21 itojun Exp $	*/
 
 /*
@@ -619,6 +619,7 @@ in6_control(struct socket *so, u_long cmd, caddr_t data,
 	{
 		int i, error = 0;
 		struct nd_prefix pr0, *pr;
+		int s;
 
 		/* reject read-only flags */
 		if ((ifra->ifra_flags & IN6_IFF_DUPLICATED) != 0 ||
@@ -631,7 +632,10 @@ in6_control(struct socket *so, u_long cmd, caddr_t data,
 		 * first, make or update the interface address structure,
 		 * and link it to the list.
 		 */
-		if ((error = in6_update_ifa(ifp, ifra, ia)) != 0)
+ 		s = splsoftnet();
+		error = in6_update_ifa(ifp, ifra, ia);
+		splx(s);
+		if (error != 0)
 			return (error);
 		if ((ia = in6ifa_ifpwithaddr(ifp, &ifra->ifra_addr.sin6_addr))
 		    == NULL) {
@@ -765,7 +769,6 @@ in6_control(struct socket *so, u_long cmd, caddr_t data,
  * Update parameters of an IPv6 interface address.
  * If necessary, a new entry is created and linked into address chains.
  * This function is separated from in6_control().
- * XXX: should this be performed under splnet()?
  */
 int
 in6_update_ifa(struct ifnet *ifp, struct in6_aliasreq *ifra, 
@@ -777,6 +780,8 @@ in6_update_ifa(struct ifnet *ifp, struct in6_aliasreq *ifra,
 	struct in6_addrlifetime *lt;
 	struct in6_multi_mship *imm;
 	struct rtentry *rt;
+
+	splassert(IPL_SOFTNET);
 
 	/* Validate parameters */
 	if (ifp == NULL || ifra == NULL) /* this maybe redundant */
@@ -1941,6 +1946,31 @@ in6ifa_ifpwithaddr(struct ifnet *ifp, struct in6_addr *addr)
 	}
 
 	return ((struct in6_ifaddr *)ifa);
+}
+
+/*
+ * find the internet address on a given interface corresponding to a neighbor's
+ * address.
+ */
+struct in6_ifaddr *
+in6ifa_ifplocaladdr(const struct ifnet *ifp, const struct in6_addr *addr)
+{
+	struct ifaddr *ifa;
+	struct in6_ifaddr *ia;
+
+	TAILQ_FOREACH(ifa, &ifp->if_addrlist, ifa_list) {
+		if (ifa->ifa_addr == NULL)
+			continue;	/* just for safety */
+		if (ifa->ifa_addr->sa_family != AF_INET6)
+			continue;
+		ia = (struct in6_ifaddr *)ifa;
+		if (IN6_ARE_MASKED_ADDR_EQUAL(addr,
+				&ia->ia_addr.sin6_addr,
+				&ia->ia_prefixmask.sin6_addr))
+			return ia;
+	}
+
+	return NULL;
 }
 
 /*

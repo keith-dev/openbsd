@@ -1,4 +1,4 @@
-/*	$OpenBSD: cmds.c,v 1.63 2008/07/08 21:07:57 martynas Exp $	*/
+/*	$OpenBSD: cmds.c,v 1.67 2008/10/16 23:15:53 martynas Exp $	*/
 /*	$NetBSD: cmds.c,v 1.27 1997/08/18 10:20:15 lukem Exp $	*/
 
 /*
@@ -60,7 +60,7 @@
  */
 
 #if !defined(lint) && !defined(SMALL)
-static const char rcsid[] = "$OpenBSD: cmds.c,v 1.63 2008/07/08 21:07:57 martynas Exp $";
+static const char rcsid[] = "$OpenBSD: cmds.c,v 1.67 2008/10/16 23:15:53 martynas Exp $";
 #endif /* not lint and not SMALL */
 
 /*
@@ -118,12 +118,12 @@ settype(int argc, char *argv[])
 		char *sep;
 
 		fprintf(ttyout, "usage: %s [", argv[0]);
-		sep = " ";
+		sep = "";
 		for (p = types; p->t_name; p++) {
 			fprintf(ttyout, "%s%s", sep, p->t_name);
 			sep = " | ";
 		}
-		fputs(" ]\n", ttyout);
+		fputs("]\n", ttyout);
 		code = -1;
 		return;
 	}
@@ -300,7 +300,8 @@ putit(int argc, char *argv[], int restartit)
 		goto usage;
 	if ((argc < 3 && !another(&argc, &argv, "remote-file")) || argc > 3) {
 usage:
-		fprintf(ttyout, "usage: %s local-file [ remote-file ]\n", argv[0]);
+		fprintf(ttyout, "usage: %s local-file [remote-file]\n",
+		    argv[0]);
 		code = -1;
 		return;
 	}
@@ -523,7 +524,7 @@ void
 reget(int argc, char *argv[])
 {
 
-	(void)getit(argc, argv, 1, "r+w");
+	(void)getit(argc, argv, 1, "a+w");
 }
 #endif /* !SMALL */
 
@@ -531,7 +532,7 @@ void
 get(int argc, char *argv[])
 {
 
-	(void)getit(argc, argv, 0, restart_point ? "r+w" : "w" );
+	(void)getit(argc, argv, 0, restart_point ? "a+w" : "w" );
 }
 
 /*
@@ -553,7 +554,8 @@ getit(int argc, char *argv[], int restartit, const char *mode)
 		goto usage;
 	if ((argc < 3 && !another(&argc, &argv, "local-file")) || argc > 3) {
 usage:
-		fprintf(ttyout, "usage: %s remote-file [ local-file ]\n", argv[0]);
+		fprintf(ttyout, "usage: %s remote-file [local-file]\n",
+		    argv[0]);
 		code = -1;
 		return (0);
 	}
@@ -594,11 +596,7 @@ usage:
 
 		ret = stat(argv[2], &stbuf);
 		if (restartit == 1) {
-			if (ret < 0) {
-				warn("local: %s", argv[2]);
-				goto freegetit;
-			}
-			restart_point = stbuf.st_size;
+			restart_point = (ret < 0) ? 0 : stbuf.st_size;
 		} else {
 			if (ret == 0) {
 				time_t mtime;
@@ -616,7 +614,7 @@ usage:
 #endif /* !SMALL */
 
 	recvrequest("RETR", argv[2], argv[1], mode,
-	    argv[1] != oldargv1 || argv[2] != oldargv2, loc);
+	    argv[1] != oldargv1 || argv[2] != oldargv2 || !interactive, loc);
 	restart_point = 0;
 freegetit:
 	if (oldargv2 != globargv2)	/* free up after globulize() */
@@ -647,25 +645,44 @@ mget(int argc, char *argv[])
 {
 	extern int optind, optreset;
 	sig_t oldintr;
-	int ch;
-	char *cp, *tp, *tp2, tmpbuf[MAXPATHLEN], localcwd[MAXPATHLEN];
+	int ch, xargc = 2;
+	char *cp, localcwd[MAXPATHLEN], *xargv[] = {argv[0], NULL, NULL};
+	static int restartit = 0;
 #ifndef SMALL
-	int i = 1, restartit = 0, xargc = 2;
-	char type = NULL, *xargv[] = {argv[0], ".", NULL, NULL};
+	extern char *optarg;
+	const char *errstr;
+	int i = 1;
+	char type = NULL, *dummyargv[] = {argv[0], ".", NULL};
 	FILE *ftemp = NULL;
-	static int depth = 0;
+	static int depth = 0, max_depth = 0;
 #endif /* !SMALL */
 
 	optind = optreset = 1;
 
 #ifndef SMALL
-	while ((ch = getopt(argc, argv, "cr")) != -1) {
+
+	if (depth)
+		depth++;
+
+	while ((ch = getopt(argc, argv, "cd:nr")) != -1) {
 		switch(ch) {
 		case 'c':
 			restartit = 1;
 			break;
+		case 'd':
+			max_depth = strtonum(optarg, 0, INT_MAX, &errstr);
+			if (errstr != NULL) {
+				fprintf(ttyout, "bad depth value, %s: %s\n",
+				    errstr, optarg);
+				code = -1;
+				return;
+			}
+			break;
+		case 'n':
+			restartit = -1;
+			break;
 		case 'r':
-			depth++;
+			depth = 1;
 			break;
 		default:
 			goto usage;
@@ -675,7 +692,8 @@ mget(int argc, char *argv[])
 
 	if (argc - optind < 1 && !another(&argc, &argv, "remote-files")) {
 usage:
-		fprintf(ttyout, "usage: %s [-cr] remote-files\n", argv[0]);
+		fprintf(ttyout, "usage: %s [-cnr] [-d depth] remote-files\n",
+		    argv[0]);
 		code = -1;
 		return;
 	}
@@ -695,7 +713,7 @@ usage:
 	(void)setjmp(jabort);
 	while ((cp =
 #ifndef SMALL
-	    depth ? remglob2(xargv, proxy, NULL, &ftemp, &type) :
+	    depth ? remglob2(dummyargv, proxy, NULL, &ftemp, &type) :
 #endif /* !SMALL */
 	    remglob(argv, proxy, NULL)) != NULL
 #ifndef SMALL
@@ -721,6 +739,10 @@ usage:
 			    cp);
 			continue;
 		}
+#ifndef SMALL
+		if (type == 'd' && depth == max_depth)
+			continue;
+#endif /* !SMALL */
 		if (confirm(argv[0], cp)) {
 #ifndef SMALL
 			if (type == 'd') {
@@ -731,21 +753,14 @@ usage:
 				}
 
 				xargv[1] = cp;
-				xargv[2] = NULL;
-				xargc = 2;
 				cd(xargc, xargv);
 				if (dirchange != 1)
 					goto out;
 
-				xargv[1] = (restartit == 1) ? "-cr" : "-r";
-				xargv[2] = "*";
-				xargv[3] = NULL;
-				xargc = 3;
+				xargv[1] = "*";
 				mget(xargc, xargv);
 
 				xargv[1] = "..";
-				xargv[2] = NULL;
-				xargc = 2;
 				cd(xargc, xargv);
 				if (dirchange != 1) {
 					mflag = 0;
@@ -757,39 +772,15 @@ out:
 					warn("local: %s", cp);
 					mflag = 0;
 				}
-
-				xargv[1] = ".";
-				xargv[2] = NULL;
-				xargc = 2;
 				continue;
 			}
 			if (type == 's')
 				/* Currently ignored. */
 				continue;
 #endif /* !SMALL */
-			tp = cp;
-			if (mcase) {
-				for (tp2 = tmpbuf; (ch = *tp++) != 0; )
-					*tp2++ = isupper(ch) ? tolower(ch) : ch;
-				*tp2 = '\0';
-				tp = tmpbuf;
-			}
-			if (ntflag)
-				tp = dotrans(tp);
-			if (mapflag)
-				tp = domap(tp);
-#ifndef SMALL
-			if (restartit == 1) {
-				struct stat stbuf;
-				int ret;
-
-				ret = stat(tp, &stbuf);
-				restart_point = (ret < 0) ? 0 : stbuf.st_size;
-			}
-#endif /* !SMALL */
-			recvrequest("RETR", tp, cp, restart_point ? "r+w" : "w",
-			    tp != cp || !interactive, 1);
-			restart_point = 0;
+			xargv[1] = cp;
+			(void)getit(xargc, xargv, restartit,
+			    (restartit == 1 || restart_point) ? "a+w" : "w");
 			if (!mflag && fromatty) {
 				if (confirm(argv[0], NULL))
 					mflag = 1;
@@ -801,7 +792,7 @@ out:
 	if (depth)
 		depth--;
 	if (depth == 0 || mflag == 0)
-		depth = mflag = 0;
+		depth = max_depth = mflag = restartit = 0;
 #else /* !SMALL */
 	mflag = 0;
 #endif /* !SMALL */
@@ -893,7 +884,7 @@ togglevar(int argc, char *argv[], int *var, const char *mesg)
 	} else if (argc == 2 && strcasecmp(argv[1], "off") == 0) {
 		*var = 0;
 	} else {
-		fprintf(ttyout, "usage: %s [ on | off ]\n", argv[0]);
+		fprintf(ttyout, "usage: %s [on | off]\n", argv[0]);
 		return (-1);
 	}
 	if (mesg)
@@ -959,7 +950,7 @@ sethash(int argc, char *argv[])
 	if (argc == 1)
 		hash = !hash;
 	else if (argc != 2) {
-		fprintf(ttyout, "usage: %s [ on | off | bytecount ]\n", argv[0]);
+		fprintf(ttyout, "usage: %s [on | off | size]\n", argv[0]);
 		code = -1;
 		return;
 	} else if (strcasecmp(argv[1], "on") == 0)
@@ -1041,7 +1032,7 @@ setgate(int argc, char *argv[])
 	static char gsbuf[MAXHOSTNAMELEN];
 
 	if (argc > 3) {
-		fprintf(ttyout, "usage: %s [ on | off | gateserver [ port ] ]\n",
+		fprintf(ttyout, "usage: %s [on | off | host [port]]\n",
 		    argv[0]);
 		code = -1;
 		return;
@@ -1106,7 +1097,7 @@ void
 setdebug(int argc, char *argv[])
 {
 	if (argc > 2) {
-		fprintf(ttyout, "usage: %s [ on | off | debuglevel ]\n", argv[0]);
+		fprintf(ttyout, "usage: %s [on | off | debuglevel]\n", argv[0]);
 		code = -1;
 		return;
 	} else if (argc == 2) {
@@ -1178,7 +1169,7 @@ lcd(int argc, char *argv[])
 	if (argc < 2)
 		argc++, argv[1] = home;
 	if (argc != 2) {
-		fprintf(ttyout, "usage: %s local-directory\n", argv[0]);
+		fprintf(ttyout, "usage: %s [local-directory]\n", argv[0]);
 		code = -1;
 		return;
 	}
@@ -1284,7 +1275,8 @@ ls(int argc, char *argv[])
 	if (argc < 3)
 		argc++, argv[2] = "-";
 	if (argc > 3) {
-		fprintf(ttyout, "usage: %s remote-directory local-file\n", argv[0]);
+		fprintf(ttyout, "usage: %s [remote-directory [local-file]]\n",
+		    argv[0]);
 		code = -1;
 		return;
 	}
@@ -1427,7 +1419,8 @@ user(int argc, char *argv[])
 	if (argc < 2)
 		(void)another(&argc, &argv, "username");
 	if (argc < 2 || argc > 4) {
-		fprintf(ttyout, "usage: %s username [password] [account]\n", argv[0]);
+		fprintf(ttyout, "usage: %s username [password [account]]\n",
+		    argv[0]);
 		code = -1;
 		return;
 	}
@@ -1549,7 +1542,7 @@ quote(int argc, char *argv[])
 {
 
 	if (argc < 2 && !another(&argc, &argv, "command line to send")) {
-		fprintf(ttyout, "usage: %s line-to-send\n", argv[0]);
+		fprintf(ttyout, "usage: %s arg ...\n", argv[0]);
 		code = -1;
 		return;
 	}
@@ -1566,7 +1559,7 @@ site(int argc, char *argv[])
 {
 
 	if (argc < 2 && !another(&argc, &argv, "arguments to SITE command")) {
-		fprintf(ttyout, "usage: %s line-to-send\n", argv[0]);
+		fprintf(ttyout, "usage: %s arg ...\n", argv[0]);
 		code = -1;
 		return;
 	}
@@ -1617,9 +1610,9 @@ do_chmod(int argc, char *argv[])
 
 	if (argc < 2 && !another(&argc, &argv, "mode"))
 		goto usage;
-	if ((argc < 3 && !another(&argc, &argv, "file-name")) || argc > 3) {
+	if ((argc < 3 && !another(&argc, &argv, "file")) || argc > 3) {
 usage:
-		fprintf(ttyout, "usage: %s mode file-name\n", argv[0]);
+		fprintf(ttyout, "usage: %s mode file\n", argv[0]);
 		code = -1;
 		return;
 	}
@@ -1867,8 +1860,8 @@ setnmap(int argc, char *argv[])
 		code = mapflag;
 		return;
 	}
-	if ((argc < 3 && !another(&argc, &argv, "mapout")) || argc > 3) {
-		fprintf(ttyout, "usage: %s [mapin mapout]\n", argv[0]);
+	if ((argc < 3 && !another(&argc, &argv, "outpattern")) || argc > 3) {
+		fprintf(ttyout, "usage: %s [inpattern outpattern]\n", argv[0]);
 		code = -1;
 		return;
 	}
@@ -2144,8 +2137,8 @@ macdef(int argc, char *argv[])
 		code = -1;
 		return;
 	}
-	if ((argc < 2 && !another(&argc, &argv, "macro name")) || argc > 2) {
-		fprintf(ttyout, "usage: %s macro_name\n", argv[0]);
+	if ((argc < 2 && !another(&argc, &argv, "macro-name")) || argc > 2) {
+		fprintf(ttyout, "usage: %s macro-name\n", argv[0]);
 		code = -1;
 		return;
 	}
@@ -2199,8 +2192,8 @@ sizecmd(int argc, char *argv[])
 {
 	off_t size;
 
-	if ((argc < 2 && !another(&argc, &argv, "filename")) || argc > 2) {
-		fprintf(ttyout, "usage: %s filename\n", argv[0]);
+	if ((argc < 2 && !another(&argc, &argv, "file")) || argc > 2) {
+		fprintf(ttyout, "usage: %s file\n", argv[0]);
 		code = -1;
 		return;
 	}
@@ -2218,8 +2211,8 @@ modtime(int argc, char *argv[])
 {
 	time_t mtime;
 
-	if ((argc < 2 && !another(&argc, &argv, "filename")) || argc > 2) {
-		fprintf(ttyout, "usage: %s filename\n", argv[0]);
+	if ((argc < 2 && !another(&argc, &argv, "file")) || argc > 2) {
+		fprintf(ttyout, "usage: %s file\n", argv[0]);
 		code = -1;
 		return;
 	}
@@ -2260,8 +2253,8 @@ page(int argc, char *argv[])
 	int orestart_point, ohash, overbose;
 	char *p, *pager, *oldargv1;
 
-	if ((argc < 2 && !another(&argc, &argv, "filename")) || argc > 2) {
-		fprintf(ttyout, "usage: %s filename\n", argv[0]);
+	if ((argc < 2 && !another(&argc, &argv, "file")) || argc > 2) {
+		fprintf(ttyout, "usage: %s file\n", argv[0]);
 		code = -1;
 		return;
 	}

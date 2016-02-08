@@ -1,4 +1,4 @@
-/*	$OpenBSD: rde.h,v 1.102 2008/01/23 08:11:32 claudio Exp $ */
+/*	$OpenBSD: rde.h,v 1.104 2009/01/13 21:35:16 sthen Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Claudio Jeker <claudio@openbsd.org> and
@@ -107,8 +107,8 @@ enum attrtypes {
 	ATTR_MP_REACH_NLRI=14,
 	ATTR_MP_UNREACH_NLRI=15,
 	ATTR_EXT_COMMUNITIES=16,
-	ATTR_NEW_ASPATH=17,
-	ATTR_NEW_AGGREGATOR=18
+	ATTR_AS4_PATH=17,
+	ATTR_AS4_AGGREGATOR=18
 };
 
 /* attribute flags. 4 low order bits reserved */
@@ -154,7 +154,7 @@ LIST_HEAD(prefix_head, prefix);
 #define	F_ATTR_MED_ANNOUNCE	0x00020
 #define	F_ATTR_MP_REACH		0x00040
 #define	F_ATTR_MP_UNREACH	0x00080
-#define	F_ATTR_AS4BYTE_NEW	0x00100	/* NEW_ASPATH or NEW_AGGREGATOR */
+#define	F_ATTR_AS4BYTE_NEW	0x00100	/* AS4_PATH or AS4_AGGREGATOR */
 #define	F_ATTR_LOOP		0x00200 /* path would cause a route loop */
 #define	F_PREFIX_ANNOUNCED	0x01000
 #define	F_NEXTHOP_REJECT	0x02000
@@ -352,7 +352,8 @@ void		 prefix_remove(struct rde_peer *, struct bgpd_addr *, int,
 		    u_int32_t);
 int		 prefix_write(u_char *, int, struct bgpd_addr *, u_int8_t);
 struct prefix	*prefix_bypeer(struct pt_entry *, struct rde_peer *, u_int32_t);
-void		 prefix_updateall(struct rde_aspath *, enum nexthop_state);
+void		 prefix_updateall(struct rde_aspath *, enum nexthop_state,
+		     enum nexthop_state);
 void		 prefix_destroy(struct prefix *);
 void		 prefix_network_clean(struct rde_peer *, time_t);
 

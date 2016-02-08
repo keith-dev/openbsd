@@ -1,4 +1,4 @@
-/* $OpenBSD: acpibtn.c,v 1.19 2008/06/01 17:59:55 marco Exp $ */
+/* $OpenBSD: acpibtn.c,v 1.21 2009/02/19 21:02:05 marco Exp $ */
 /*
  * Copyright (c) 2005 Marco Peereboom <marco@openbsd.org>
  *
@@ -62,6 +62,8 @@ struct cfdriver acpibtn_cd = {
 	NULL, "acpibtn", DV_DULL
 };
 
+const char *acpibtn_hids[] = { ACPI_DEV_LD, ACPI_DEV_PBD, ACPI_DEV_SBD, 0 };
+
 int
 acpibtn_match(struct device *parent, void *match, void *aux)
 {
@@ -69,12 +71,7 @@ acpibtn_match(struct device *parent, void *match, void *aux)
 	struct cfdata		*cf = match;
 
 	/* sanity */
-	if (aa->aaa_name == NULL ||
-	    strcmp(aa->aaa_name, cf->cf_driver->cd_name) != 0 ||
-	    aa->aaa_table != NULL)
-		return (0);
-
-	return (1);
+	return (acpi_matchhids(aa, acpibtn_hids, cf->cf_driver->cd_name));
 }
 
 void
@@ -125,6 +122,9 @@ acpibtn_notify(struct aml_node *node, int notify_type, void *arg)
 	switch (sc->sc_btn_type) {
 	case ACPIBTN_LID:
 	case ACPIBTN_SLEEP:
+#ifdef ACPI_SLEEP_ENABLED
+		acpi_sleep_state(sc->sc_acpi, ACPI_STATE_S3);
+#endif /* ACPI_SLEEP_ENABLED */
 		break;
 	case ACPIBTN_POWER:
 		if (notify_type == 0x80)

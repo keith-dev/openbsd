@@ -1,4 +1,4 @@
-/*	$OpenBSD: bios.c,v 1.81 2008/06/08 13:55:06 kettenis Exp $	*/
+/*	$OpenBSD: bios.c,v 1.84 2009/01/13 13:53:50 kettenis Exp $	*/
 
 /*
  * Copyright (c) 1997-2001 Michael Shalayeff
@@ -52,6 +52,7 @@
 #include <machine/pcb.h>
 #include <machine/biosvar.h>
 #include <machine/apmvar.h>
+#include <machine/mpbiosvar.h>
 #include <machine/smbiosvar.h>
 
 #include <dev/isa/isareg.h>
@@ -64,6 +65,7 @@
 
 #include "apm.h"
 #include "acpi.h"
+#include "mpbios.h"
 #include "pcibios.h"
 #include "pci.h"
 
@@ -132,7 +134,7 @@ biosprobe(struct device *parent, void *match, void *aux)
 
 #ifdef BIOS_DEBUG
 	printf("%s%d: boot API ver %x, %x; args %p[%d]\n",
-	    bia->bios_dev, bios_cd.cd_ndevs,
+	    bia->ba_name, bios_cd.cd_ndevs,
 	    bootapiver, BOOTARG_APIVER, bootargp, bootargc);
 #endif
 	/* there could be only one */
@@ -156,10 +158,7 @@ biosattach(struct device *parent, struct device *self, void *aux)
 	struct smbtable bios;
 	volatile u_int8_t *va;
 	char scratch[64], *str;
-	int flags, havesmbios = 0;
-#if NAPM > 0 || defined(MULTIPROCESSOR)
-	int ncpu = 0;
-#endif
+	int flags, smbiosrev = 0, ncpu = 0;
 
 	/* remember flags */
 	flags = sc->sc_dev.dv_cfdata->cf_flags;
@@ -275,9 +274,15 @@ biosattach(struct device *parent, struct device *self, void *aux)
 			for (; pa < end; pa+= NBPG, eva+= NBPG)
 				pmap_kenter_pa(eva, pa, VM_PROT_READ);
 
-			havesmbios = 1;
 			printf(", SMBIOS rev. %d.%d @ 0x%lx (%d entries)",
 			    sh->majrev, sh->minrev, sh->addr, sh->count);
+			/*
+			 * Unbelievably the SMBIOS version number
+			 * sequence is like 2.3 ... 2.33 ... 2.4 ... 2.5
+			 */
+			smbiosrev = sh->majrev * 100 + sh->minrev;
+			if (sh->minrev < 10)
+				smbiosrev = sh->majrev * 100 + sh->minrev * 10;
 
 			bios.cookie = 0;
 			if (smbios_find_table(SMBIOS_TYPE_BIOS, &bios)) {
@@ -298,18 +303,14 @@ biosattach(struct device *parent, struct device *self, void *aux)
 			}
 			smbios_info(sc->sc_dev.dv_xname);
 
-#ifdef MULTIPROCESSOR
 			/* count cpus so that we can disable apm when cpu > 1 */
 			bzero(&bios, sizeof(bios));
 			while (smbios_find_table(SMBIOS_TYPE_PROCESSOR,&bios)) {
 				struct smbios_cpu *cpu = bios.tblhdr;
 
 				if (cpu->cpu_status & SMBIOS_CPUST_POPULATED) {
-					/*
-					 * smbios 2.5 added multi code support
-					 */
-					if (sh->majrev * 100 +
-					    sh->minrev >= 250 &&
+					/* SMBIOS 2.5 added multicore support */
+					if (smbiosrev >= 250 &&
 					    cpu->cpu_core_enabled)
 						ncpu += cpu->cpu_core_enabled;
 					else {
@@ -319,8 +320,6 @@ biosattach(struct device *parent, struct device *self, void *aux)
 					}
 				}
 			}
-#endif /* MULTIPROCESSOR */
-
 			break;
 		}
 	}
@@ -328,7 +327,7 @@ biosattach(struct device *parent, struct device *self, void *aux)
 	printf("\n");
 
 #if NAPM > 0
-	if (apm && ncpu < 2) {
+	if (apm && ncpu < 2 && smbiosrev < 240) {
 		struct bios_attach_args ba;
 
 #if defined(DEBUG) || defined(APMDEBUG)
@@ -349,7 +348,7 @@ biosattach(struct device *parent, struct device *self, void *aux)
 
 #if NACPI > 0
 #if NPCI > 0
-	if (havesmbios && pci_mode_detect() != 0)
+	if (smbiosrev && pci_mode_detect() != 0)
 #endif
 	{
 		struct bios_attach_args ba;
@@ -361,6 +360,19 @@ biosattach(struct device *parent, struct device *self, void *aux)
 		ba.ba_memt = I386_BUS_SPACE_MEM;
 		if (config_found(self, &ba, bios_print))
 			flags |= BIOSF_PCIBIOS;
+	}
+#endif
+
+#if NMPBIOS > 0
+	if (mpbios_probe(self)) {
+		struct bios_attach_args ba;
+
+		memset(&ba, 0, sizeof(ba));
+		ba.ba_name = "mpbios";
+		ba.ba_iot = I386_BUS_SPACE_IO;
+		ba.ba_memt = I386_BUS_SPACE_MEM;
+
+		config_found(self, &ba, bios_print);
 	}
 #endif
 

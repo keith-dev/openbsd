@@ -1,4 +1,4 @@
-/*      $OpenBSD: auglx.c,v 1.2 2008/07/09 02:47:03 brad Exp $	*/
+/*      $OpenBSD: auglx.c,v 1.4 2009/01/13 19:44:20 grange Exp $	*/
 
 /*
  * Copyright (c) 2008 Marc Balmer <mbalmer@openbsd.org>
@@ -575,6 +575,10 @@ auglx_set_params(void *v, int setmode, int usemode, struct audio_params *play,
 	if (setmode & AUMODE_PLAY) {
 		play->factor = 1;
 		play->sw_code = NULL;
+		if (play->precision > 16)
+			play->precision = 16;
+		if (play->channels > 2)
+			play->channels = 2;
 		switch(play->encoding) {
 		case AUDIO_ENCODING_ULAW:
 			switch (play->channels) {
@@ -766,6 +770,10 @@ auglx_set_params(void *v, int setmode, int usemode, struct audio_params *play,
 	if (setmode & AUMODE_RECORD) {
 		rec->factor = 1;
 		rec->sw_code = 0;
+		if (rec->precision > 16)
+			rec->precision = 16;
+		if (rec->channels > 2)
+			rec->channels = 2;
 		switch(rec->encoding) {
 		case AUDIO_ENCODING_ULAW:
 			switch (rec->channels) {
@@ -1136,7 +1144,7 @@ auglx_trigger_output(void *v, void *start, void *end, int blksize,
 	for (i = 0; i < nprd; i++) {
 		sc->bm0.sc_vprd[i].base = addr;
 		sc->bm0.sc_vprd[i].size = blksize | AUGLX_PRD_EOP;
-		(char *)addr += blksize;
+		addr += blksize;
 	}
 	sc->bm0.sc_vprd[i].base = sc->bm0.sc_prd->dm_segs[0].ds_addr;
 	sc->bm0.sc_vprd[i].size = AUGLX_PRD_JMP;
@@ -1195,7 +1203,7 @@ auglx_trigger_input(void *v, void *start, void *end, int blksize,
 	for (i = 0; i < nprd; i++) {
 		sc->bm1.sc_vprd[i].base = addr;
 		sc->bm1.sc_vprd[i].size = blksize | AUGLX_PRD_EOP;
-		(char *)addr += blksize;
+		addr += blksize;
 	}
 	sc->bm1.sc_vprd[i].base = sc->bm1.sc_prd->dm_segs[0].ds_addr;
 	sc->bm1.sc_vprd[i].size = AUGLX_PRD_JMP;

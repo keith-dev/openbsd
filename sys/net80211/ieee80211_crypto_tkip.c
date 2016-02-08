@@ -1,4 +1,4 @@
-/*	$OpenBSD: ieee80211_crypto_tkip.c,v 1.4 2008/07/26 12:36:15 damien Exp $	*/
+/*	$OpenBSD: ieee80211_crypto_tkip.c,v 1.12 2008/12/03 17:25:41 damien Exp $	*/
 
 /*-
  * Copyright (c) 2008 Damien Bergamini <damien.bergamini@free.fr>
@@ -14,6 +14,11 @@
  * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ */
+
+/*
+ * This code implements the Temporal Key Integrity Protocol (TKIP) defined
+ * in IEEE Std 802.11-2007 section 8.3.2.
  */
 
 #include <sys/param.h>
@@ -75,10 +80,13 @@ ieee80211_tkip_set_key(struct ieee80211com *ic, struct ieee80211_key *k)
 	 * Use bits 128-191 as the Michael key for AA->SPA and bits
 	 * 192-255 as the Michael key for SPA->AA.
 	 */
+#ifndef IEEE80211_STA_ONLY
 	if (ic->ic_opmode == IEEE80211_M_HOSTAP) {
 		ctx->txmic = &k->k_key[16];
 		ctx->rxmic = &k->k_key[24];
-	} else {
+	} else
+#endif
+	{
 		ctx->rxmic = &k->k_key[16];
 		ctx->txmic = &k->k_key[24];
 	}
@@ -142,20 +150,9 @@ ieee80211_tkip_mic(struct mbuf *m0, int off, const u_int8_t *key,
 		    ((const struct ieee80211_frame_addr4 *)wh)->i_addr4);
 		break;
 	}
-	if ((wh->i_fc[0] &
-	    (IEEE80211_FC0_TYPE_MASK | IEEE80211_FC0_SUBTYPE_QOS)) ==
-	    (IEEE80211_FC0_TYPE_DATA | IEEE80211_FC0_SUBTYPE_QOS)) {
-		if ((wh->i_fc[1] & IEEE80211_FC1_DIR_MASK) ==
-		    IEEE80211_FC1_DIR_DSTODS) {
-			const struct ieee80211_qosframe_addr4 *qwh4 =
-			    (const struct ieee80211_qosframe_addr4 *)wh;
-			wht.i_pri = qwh4->i_qos[0] & 0xf;
-		} else {
-			const struct ieee80211_qosframe *qwh =
-			    (const struct ieee80211_qosframe *)wh;
-			wht.i_pri = qwh->i_qos[0] & 0xf;
-		}
-	}  else
+	if (ieee80211_has_qos(wh))
+		wht.i_pri = ieee80211_get_qos(wh) & IEEE80211_QOS_TID;
+	else
 		wht.i_pri = 0;
 	wht.i_pad[0] = wht.i_pad[1] = wht.i_pad[2] = 0;
 
@@ -254,7 +251,7 @@ ieee80211_tkip_encrypt(struct ieee80211com *ic, struct mbuf *m0,
 				goto nospace;
 			n = n->m_next;
 			n->m_len = MLEN;
-			if (left > MLEN - IEEE80211_TKIP_TAILLEN) {
+			if (left >= MINCLSIZE - IEEE80211_TKIP_TAILLEN) {
 				MCLGET(n, M_DONTWAIT);
 				if (n->m_flags & M_EXT)
 					n->m_len = n->m_ext.ext_size;
@@ -323,9 +320,10 @@ ieee80211_tkip_decrypt(struct ieee80211com *ic, struct mbuf *m0,
 	u_int16_t wepseed[8];	/* needs to be 16-bit aligned for Phase2 */
 	u_int8_t buf[IEEE80211_TKIP_MICLEN + IEEE80211_WEP_CRCLEN];
 	u_int8_t mic[IEEE80211_TKIP_MICLEN];
-	u_int64_t tsc;
+	u_int64_t tsc, *prsc;
 	u_int32_t crc, crc0;
 	u_int8_t *ivp, *mic0;
+	u_int8_t tid;
 	struct mbuf *n0, *m, *n;
 	int hdrlen, left, moff, noff, len;
 
@@ -338,11 +336,17 @@ ieee80211_tkip_decrypt(struct ieee80211com *ic, struct mbuf *m0,
 	}
 
 	ivp = (u_int8_t *)wh + hdrlen;
-	/* check that ExtIV bit is be set */
+	/* check that ExtIV bit is set */
 	if (!(ivp[3] & IEEE80211_WEP_EXTIV)) {
 		m_freem(m0);
 		return NULL;
 	}
+
+	/* retrieve last seen packet number for this frame priority */
+	tid = ieee80211_has_qos(wh) ?
+	    ieee80211_get_qos(wh) & IEEE80211_QOS_TID : 0;
+	prsc = &k->k_rsc[tid];
+
 	/* extract the 48-bit TSC from the TKIP header */
 	tsc = (u_int64_t)ivp[2]       |
 	      (u_int64_t)ivp[0] <<  8 |
@@ -350,9 +354,9 @@ ieee80211_tkip_decrypt(struct ieee80211com *ic, struct mbuf *m0,
 	      (u_int64_t)ivp[5] << 24 |
 	      (u_int64_t)ivp[6] << 32 |
 	      (u_int64_t)ivp[7] << 40;
-	/* NB: the keys are refreshed, we'll never overflow the 48 bits */
-	if (tsc <= k->k_rsc[0]) {
+	if (tsc <= *prsc) {
 		/* replayed frame, discard */
+		ic->ic_stats.is_tkip_replays++;
 		m_freem(m0);
 		return NULL;
 	}
@@ -377,7 +381,7 @@ ieee80211_tkip_decrypt(struct ieee80211com *ic, struct mbuf *m0,
 	wh->i_fc[1] &= ~IEEE80211_FC1_PROTECTED;
 
 	/* compute WEP seed */
-	if (!ctx->TTAK2ok || ((tsc >> 16) != (k->k_rsc[0] >> 16))) {
+	if (!ctx->TTAK2ok || ((tsc >> 16) != (*prsc >> 16))) {
 		Phase1(ctx->TTAK2, k->k_key, wh->i_addr2, tsc >> 16);
 		ctx->TTAK2ok = 1;
 	}
@@ -404,7 +408,7 @@ ieee80211_tkip_decrypt(struct ieee80211com *ic, struct mbuf *m0,
 				goto nospace;
 			n = n->m_next;
 			n->m_len = MLEN;
-			if (left > MLEN) {
+			if (left >= MINCLSIZE) {
 				MCLGET(n, M_DONTWAIT);
 				if (n->m_flags & M_EXT)
 					n->m_len = n->m_ext.ext_size;
@@ -436,7 +440,7 @@ ieee80211_tkip_decrypt(struct ieee80211com *ic, struct mbuf *m0,
 	/* decrypt ICV and compare it with calculated ICV */
 	crc0 = *(u_int32_t *)(buf + IEEE80211_TKIP_MICLEN);
 	if (crc != letoh32(crc0)) {
-		ic->ic_stats.is_rx_decryptcrc++;
+		ic->ic_stats.is_tkip_icv_errs++;
 		m_freem(m0);
 		m_freem(n0);
 		return NULL;
@@ -453,11 +457,8 @@ ieee80211_tkip_decrypt(struct ieee80211com *ic, struct mbuf *m0,
 		return NULL;
 	}
 
-	/*
-	 * Update last seen packet number (note that it must be done
-	 * after MIC is validated.)
-	 */
-	k->k_rsc[0] = tsc;
+	/* update last seen packet number (MIC is validated) */
+	*prsc = tsc;
 
 	m_freem(m0);
 	return n0;
@@ -469,6 +470,7 @@ ieee80211_tkip_decrypt(struct ieee80211com *ic, struct mbuf *m0,
 	return NULL;
 }
 
+#ifndef IEEE80211_STA_ONLY
 /*
  * This function is called in HostAP mode to deauthenticate all STAs using
  * TKIP as their pairwise or group cipher (as part of TKIP countermeasures).
@@ -487,6 +489,7 @@ ieee80211_tkip_deauth(void *arg, struct ieee80211_node *ni)
 		ieee80211_node_leave(ic, ni);
 	}
 }
+#endif	/* IEEE80211_STA_ONLY */
 
 /*
  * This function can be called by the software TKIP crypto code or by the
@@ -502,12 +505,13 @@ ieee80211_michael_mic_failure(struct ieee80211com *ic, u_int64_t tsc)
 
 	log(LOG_WARNING, "%s: Michael MIC failure", ic->ic_if.if_xname);
 
-	if (ic->ic_opmode == IEEE80211_M_STA) {
-		/* send a Michael MIC Failure Report frame to the AP */
-		(void)ieee80211_send_eapol_key_req(ic, ic->ic_bss,
-		    EAPOL_KEY_KEYMIC | EAPOL_KEY_ERROR | EAPOL_KEY_SECURE,
-		    tsc);
-	}
+	/*
+	 * NB. do not send Michael MIC Failure reports as recommended since
+	 * these may be used as an oracle to verify CRC guesses as described
+	 * in Beck, M. and Tews S. "Practical attacks against WEP and WPA"
+	 * http://dl.aircrack-ng.org/breakingwepandwpa.pdf
+	 */
+
 	/*
 	 * Activate TKIP countermeasures (see 8.3.2.4) if less than 60
 	 * seconds have passed since the most recent previous MIC failure.
@@ -515,25 +519,46 @@ ieee80211_michael_mic_failure(struct ieee80211com *ic, u_int64_t tsc)
 	if (ic->ic_tkip_micfail == 0 ||
 	    ticks >= ic->ic_tkip_micfail + 60 * hz) {
 		ic->ic_tkip_micfail = ticks;
+		ic->ic_tkip_micfail_last_tsc = tsc;
 		return;
 	}
-	ic->ic_tkip_micfail = ticks;
 
-	if (ic->ic_opmode == IEEE80211_M_HOSTAP) {
+	switch (ic->ic_opmode) {
+#ifndef IEEE80211_STA_ONLY
+	case IEEE80211_M_HOSTAP:
 		/* refuse new TKIP associations for the next 60 seconds */
 		ic->ic_flags |= IEEE80211_F_COUNTERM;
 
 		/* deauthenticate all currently associated STAs using TKIP */
 		ieee80211_iterate_nodes(ic, ieee80211_tkip_deauth, ic);
+		break;
+#endif
+	case IEEE80211_M_STA:
+		/*
+		 * Notify the AP of MIC failures: send two Michael
+		 * MIC Failure Report frames back-to-back to trigger
+		 * countermeasures at the AP end.
+		 */
+		(void)ieee80211_send_eapol_key_req(ic, ic->ic_bss,
+		    EAPOL_KEY_KEYMIC | EAPOL_KEY_ERROR | EAPOL_KEY_SECURE,
+		    ic->ic_tkip_micfail_last_tsc);
+		(void)ieee80211_send_eapol_key_req(ic, ic->ic_bss,
+		    EAPOL_KEY_KEYMIC | EAPOL_KEY_ERROR | EAPOL_KEY_SECURE,
+		    tsc);
 
-	} else if (ic->ic_opmode == IEEE80211_M_STA) {
 		/* deauthenticate from the AP.. */
 		IEEE80211_SEND_MGMT(ic, ic->ic_bss,
 		    IEEE80211_FC0_SUBTYPE_DEAUTH,
 		    IEEE80211_REASON_MIC_FAILURE);
 		/* ..and find another one */
 		(void)ieee80211_new_state(ic, IEEE80211_S_SCAN, -1);
+		break;
+	default:
+		break;
 	}
+
+	ic->ic_tkip_micfail = ticks;
+	ic->ic_tkip_micfail_last_tsc = tsc;
 }
 
 /***********************************************************************

@@ -1,4 +1,4 @@
-.\"	$OpenBSD: systat.1,v 1.61 2007/11/22 18:20:04 jmc Exp $
+.\"	$OpenBSD: systat.1,v 1.78 2008/12/17 08:21:43 canacar Exp $
 .\"	$NetBSD: systat.1,v 1.6 1996/05/10 23:16:39 thorpej Exp $
 .\"
 .\" Copyright (c) 1985, 1990, 1993
@@ -30,7 +30,7 @@
 .\"
 .\"	@(#)systat.1	8.2 (Berkeley) 12/30/93
 .\"
-.Dd $Mdocdate: November 22 2007 $
+.Dd $Mdocdate: December 17 2008 $
 .Dt SYSTAT 1
 .Os
 .Sh NAME
@@ -38,113 +38,160 @@
 .Nd display system statistics
 .Sh SYNOPSIS
 .Nm systat
-.Op Fl n
-.Op Fl w Ar wait
-.Op Ar display
-.Op Ar refresh-interval
+.Op Fl abin
+.Op Fl d Ar count
+.Op Fl s Ar delay
+.Op Fl w Ar width
+.Op Ar view
+.Op Ar delay
 .Sh DESCRIPTION
 .Nm
-displays various system statistics in a screen oriented fashion
-using the curses screen display library,
-.Xr curses 3 .
+displays various system statistics in a screen-oriented fashion
+using the
+.Xr curses 3
+screen display library.
 .Pp
 While
 .Nm
-is running the screen is usually divided into two windows (an exception
-is the vmstat display which uses the entire screen).
-The upper window depicts the current system load average.
-The information displayed in the lower window may vary, depending on
-user commands.
-The last line on the screen is reserved for user
-input and error messages.
+is running, the screen is divided into differing areas.
+The top line depicts the current system load average.
+The bottom line of the screen is reserved for
+user input and error messages.
+The information displayed in the rest of the screen
+comprises a
+.Em view ,
+and is the main interface for
+displaying different types of system statistics.
+The
+.Ic vmstat
+view is the default.
 .Pp
-By default
-.Nm
-displays the processes getting the largest percentage of the processor
-in the lower window.
-Other displays include swap space usage, disk I/O
-statistics (a la
-.Xr iostat 8 ) ,
-virtual memory statistics (a la
-.Xr vmstat 8 ) ,
-network
-.Dq mbuf
-utilization, and network connections (a la
-.Xr netstat 1 ) .
-.Pp
-Input is interpreted at two different levels.
-A
-.Dq global
-command interpreter processes all keyboard input.
-If this command interpreter fails to recognize a command, the
-input line is passed to a per-display command interpreter.
-This allows each display to have certain display-specific commands.
+Certain information may be discarded when the screen size is
+insufficient for display.
+For example, on a machine with 10 drives the
+.Ic iostat
+bar graph displays only 3 drives on a 24 line terminal.
+When a bar graph would overflow the allotted screen space it is
+truncated and the actual value is printed
+.Dq over top
+of the bar.
+.\".Pp
+.\"Input is interpreted at two different levels.
+.\"A
+.\".Dq global
+.\"command interpreter processes all keyboard input.
+.\"If this command interpreter fails to recognize a command, the
+.\"input line is passed to a per-display command interpreter.
+.\"This allows each display to have certain display-specific commands.
 .Pp
 The options are as follows:
-.Bl -tag -width "refresh-interval"
+.Bl -tag -width Ds
+.It Fl a
+Display all lines.
+.It Fl b
+Raw, non interactive mode.
+.It Fl d Ar count
+Exit after
+.Ar count
+screen updates.
+.It Fl i
+Interactive mode.
 .It Fl n
-Do not try to reverse-map IP address.
-.It Fl w Ar wait
+Do not try to reverse map IP addresses.
+.It Fl s Ar delay
 Specifies the screen refresh time interval in seconds.
-This option is overridden by
-.Ar refresh-interval ,
-if given.
+This option is overridden by the final
+.Ar delay
+argument, if given.
 The default interval is 5 seconds.
-.It Ar display
+.It Fl w Ar width
+Specifies the maximum width of the display.
+.\" XXX not sure for the above.
+.It Ar view
 The
-.Ar display
+.Ar view
 argument expects to be one of:
+.Ic vmstat ,
 .Ic pigs ,
+.Ic ifstat ,
 .Ic iostat ,
-.Ic swap ,
 .Ic sensors ,
 .Ic mbufs ,
-.Ic vmstat ,
-.Ic ifstat
+.Ic netstat ,
+.Ic swap ,
+.Ic states ,
+.Ic rules ,
+.Ic queues ,
+.Ic pf ,
+.Ic pool ,
+.Ic malloc ,
 or
-.Ic netstat .
+.Ic buckets .
 These displays can also be requested interactively and are described in
 full detail below.
-.Ar display
+.Ar view
 may be abbreviated to the minimum unambiguous prefix;
 for example,
 .Dq io
 for
 .Dq iostat .
-.It Ar refresh-interval
+.It Ar delay
 The
-.Ar refresh-interval
-specifies the screen refresh time interval in seconds.
-This is provided for backwards compatibility, and overrides the
-.Ar wait
+.Ar delay
+argument specifies the screen refresh time interval in seconds.
+This is provided for backwards compatibility, and overrides any
 interval specified with the
-.Fl w
+.Fl s
 flag.
 The default interval is 5 seconds.
 .El
 .Pp
 Certain characters cause immediate action by
 .Nm .
-These are
+These are:
 .Bl -tag -width Fl
-.It Ic \&^L
-Refresh the screen.
-.It Ic \&^G
-Print the name of the current
-.Dq display
-being shown in
-the lower window and the refresh interval.
-.It Ic \&^Z
-Suspend
-.Nm .
 .It Ic \&:
 Move the cursor to the command line and interpret the input
 line typed as a command.
 While entering a command the
 current character erase, word erase, and line kill characters
 may be used.
+.It Ic o
+Select the next ordering which sorts the rows according to a
+combination of columns.
+Available orderings depend on the view.
+Not all views support orderings.
+.It Ic p
+Pause
+.Nm .
 .It Ic q
-Exit
+Quit
+.Nm .
+.It Ic r
+Reverse the selected ordering if supported by the view.
+.It Ic ^A \*(Ba Aq Ic Home
+Jump to the beginning of the current view.
+.It Ic ^B \*(Ba Aq Ic right arrow
+Select previous view.
+.It Ic ^E \*(Ba Aq Ic End
+Jump to the end of the current view.
+.It Ic ^F \*(Ba Aq Ic left arrow
+Select the next view.
+.It Ic ^G
+Print the name of the current
+view being shown and the refresh interval.
+.It Ic ^L
+Refresh the screen.
+.It Ic ^N \*(Ba Aq Ic down arrow
+Scroll current view down by one line.
+.It Ic ^P \*(Ba Aq Ic up arrow
+Scroll current view up by one line.
+.It Ic ^V \*(Ba Aq Ic Page Down
+Scroll current view down by one page.
+.It Ic Alt-V \*(Ba Aq Ic Page Up
+Scroll current view up by one page.
+.It Ic ^Z
+Suspend
 .Nm .
 .El
 .Pp
@@ -153,12 +200,9 @@ The following commands are interpreted by the
 command interpreter.
 .Bl -tag -width Fl
 .It Ic help
-Print the names of the available displays on the command line.
-.It Ic load
-Print the load average over the past 1, 5, and 15 minutes
-on the command line.
+Print the names of the available views on the command line.
 .It Ic quit
-Exit
+Quit
 .Nm .
 (This may be abbreviated to
 .Ic q . )
@@ -176,13 +220,17 @@ Supplying only a number will set the refresh interval to this
 value.
 .El
 .Pp
-Again,
-.Ar display
+.Ar view
 may be abbreviated to the minimum unambiguous prefix.
-The available displays are:
+The available views are:
 .Bl -tag -width "netstatXXX"
+.It Ic buckets
+Display kernel
+.Xr malloc 9
+bucket statistics similar to the output of
+.Cm vmstat Fl m .
 .It Ic ifstat
-Display, in the lower window, interface statistics.
+Display interface statistics.
 The
 .Dq State
 column has the format
@@ -203,86 +251,140 @@ represent whether the interface is connected or not;
 in the case of
 .Xr carp 4
 interfaces, whether the interface is in master or backup state, respectively.
-See below for more options.
+.\"See below for more options.
 .It Ic iostat
-Display, in the lower window, statistics about disk throughput.
+Display statistics about disk throughput.
 Statistics
 on disk throughput show, for each drive, data transferred in kilobytes,
 number of disk transactions performed, and time spent in disk accesses
 (in fractions of a second).
+.It Ic malloc
+Display kernel
+.Xr malloc 9
+type statistics similar to the output of
+.Cm vmstat Fl m .
+Available orderings are:
+.Ic name ,
+.Ic inuse ,
+.Ic memuse ,
+and
+.Ic requests .
 .It Ic mbufs
-Display, in the lower window, the number of mbufs allocated
-for particular uses, i.e., data, socket structures, etc.
+Display mbuf usage information from kernel pools
+and mbuf cluster pool statistics of each network interface.
 .It Ic netstat
-Display, in the lower window, network connections.
+Display network connections.
 By default, network servers awaiting requests are not displayed.
 Each address
 is displayed in the format
-.Dq host.port ,
+.Dq host:port ,
 with each shown symbolically, when possible.
-It is possible to have addresses displayed numerically,
-limit the display to a set of ports, hosts, and/or protocols
-(the minimum unambiguous prefix may be supplied):
-.Bl -tag -width Ar
-.It Cm all
-Toggle the displaying of server processes awaiting requests (this
-is the equivalent of the
-.Fl a
-flag to
-.Xr netstat 1 ) .
-.It Cm display Op Ar items
-Display information about the connections associated with the
-specified hosts or ports.
-As for
-.Ar ignore ,
-.Ar items
-may be names or numbers.
-.It Cm ignore Op Ar items
-Do not display information about connections associated with
-the specified hosts or ports.
-Hosts and ports may be specified
-by name
-.Pf ( Dq vangogh ,
-.Dq ftp ) ,
-or numerically.
-Host addresses
-use the Internet dot notation
-.Pq Dq 128.32.0.9 .
-Multiple items
-may be specified with a single command by separating them with
-spaces.
-.It Cm names
-Display network addresses symbolically.
-.It Cm numbers
-Display network addresses numerically.
-.It Cm reset
-Reset the port, host, and protocol matching mechanisms to the default
-(any protocol, port, or host).
-.It Cm show Op Ar protos\&|ports\&|hosts
-Show, on the command line, the currently selected protocols,
-hosts, and ports.
-Protocols, hosts and ports which are being ignored are prefixed with a
-.Ql \&! .
-If an argument is supplied to
-.Cm show ,
-then only the requested information will be displayed.
-.It Cm tcp \*(Ba udp \*(Ba all
-Display only network connections using the indicated protocol.
-.El
+.\"It is possible to have addresses displayed numerically,
+.\"limit the display to a set of ports, hosts, and/or protocols
+.\"(the minimum unambiguous prefix may be supplied):
+.\".Bl -tag -width Ar
+.\".It Cm all
+.\"Toggle the displaying of server processes awaiting requests (this
+.\"is the equivalent of the
+.\".Fl a
+.\"flag to
+.\".Xr netstat 1 ) .
+.\".It Cm display Op Ar items
+.\"Display information about the connections associated with the
+.\"specified hosts or ports.
+.\"As for
+.\".Ar ignore ,
+.\".Ar items
+.\"may be names or numbers.
+.\".It Cm ignore Op Ar items
+.\"Do not display information about connections associated with
+.\"the specified hosts or ports.
+.\"Hosts and ports may be specified
+.\"by name
+.\".Pf ( Dq vangogh ,
+.\".Dq ftp ) ,
+.\"or numerically.
+.\"Host addresses
+.\"use the Internet dot notation
+.\".Pq Dq 128.32.0.9 .
+.\"Multiple items
+.\"may be specified with a single command by separating them with
+.\"spaces.
+.\".It Cm names
+.\"Display network addresses symbolically.
+.\".It Cm numbers
+.\"Display network addresses numerically.
+.\".It Cm reset
+.\"Reset the port, host, and protocol matching mechanisms to the default
+.\"(any protocol, port, or host).
+.\".It Cm show Oo
+.\".Ar protocols \*(Ba ports \*(Ba hosts
+.\".Oc
+.\"Show, on the command line, the currently selected protocols,
+.\"hosts, and ports.
+.\"Protocols, hosts and ports which are being ignored are prefixed with a
+.\".Ql \&! .
+.\"If an argument is supplied to
+.\".Cm show ,
+.\"then only the requested information will be displayed.
+.\".It Cm tcp \*(Ba udp \*(Ba all
+.\"Display only network connections using the indicated protocol.
+.\".El
+.It Ic pf
+Display filter information about
+.Xr pf 4 ,
+similar to the output of
+.Cm pfctl Fl s Cm info
+option.
 .It Ic pigs
-Display, in the lower window, those processes resident in main
+Display those processes resident in main
 memory and getting the
-largest portion of the processor (the default display).
+largest portion of the processor.
 When less than 100% of the
 processor is scheduled to user processes, the remaining time
 is accounted to the
 .Dq idle
 process.
+.It Ic pool
+Display kernel
+.Xr pool 9
+statistics similar to the output of
+.Cm vmstat Fl m .
+Available orderings are:
+.Ic name ,
+.Ic requests ,
+.Ic size ,
+and
+.Ic number of pages .
+.It Ic queues
+Display statistics about the active
+.Xr altq 9
+queues, similar to the output of
+.Cm pfctl Fl s Cm queue .
+.It Ic rules
+Display pf rules statistics, similar to the output of
+.Cm pfctl Fl s Cm rules .
 .It Ic sensors
-Display, in the lower window,
-the current values of available hardware sensors,
+Display the current values of available hardware sensors,
 in a format similar to that of
 .Xr sysctl 8 .
+.It Ic states
+Display pf states statistics, similar to the output of
+.Cm pfctl Fl s Cm states .
+Available orderings are:
+.Ic none ,
+.Ic bytes ,
+.Ic expiry ,
+.Ic packets ,
+.Ic age ,
+.Ic source address ,
+.Ic source port ,
+.Ic destination address ,
+.Ic destination port ,
+.Ic rate ,
+and
+.Ic peak
+columns.
 .It Ic swap
 Show information about swap space usage on all the
 swap areas compiled into the kernel.
@@ -299,6 +401,7 @@ Areas known to the kernel but not in use are shown as not available.
 Take over the entire display and show a (rather crowded) compendium
 of statistics related to virtual memory usage, process scheduling,
 device interrupts, system name translation caching, disk I/O etc.
+This view is the default.
 .Pp
 The upper left quadrant of the screen shows the number
 of users logged in and the load average over the last 1, 5,
@@ -328,7 +431,7 @@ and swapped out but desiring to run
 Below the queue length listing is a numerical listing and
 a bar graph showing the amount of
 interrupt (shown as
-.Ql | ) ,
+.Ql \*(Ba ) ,
 system (shown as
 .Ql = ) ,
 user (shown as
@@ -435,62 +538,55 @@ number of kernel map entries
 The
 .Ql %zfod
 value is more interesting when observed over a long
-period, such as from boot time (see the
-.Cm boot
-option below).
+period, such as from boot time.
+.\"(see the
+.\".Cm boot
+.\"option below).
 .El
-.Pp
-The following commands are specific to the
-.Ic vmstat
-and
-.Ic ifstat
-displays; the minimum unambiguous prefix may be supplied.
-.Pp
-.Bl -tag -width Ds -compact
-.It Cm boot
-Display cumulative statistics since the system was booted.
-.It Cm run
-Display statistics as a running total from the point this
-command is given.
-.It Cm time
-Display statistics averaged over the refresh interval (the default).
-.It Cm zero
-Reset running statistics to zero.
-.El
-.Pp
-Certain information may be discarded when the screen size is
-insufficient for display.
-For example, on a machine with 10 drives the
-.Ic iostat
-bar graph displays only 3 drives on a 24 line terminal.
-When a bar graph would overflow the allotted screen space it is
-truncated and the actual value is printed
-.Dq over top
-of the bar.
-.Pp
-The following commands are common to each display which shows
-information about disk drives.
-These commands are used to
-select a set of drives to report on, should your system have
-more drives configured than can normally be displayed on the
-screen.
-.Pp
-.Bl -tag -width Tx -compact
-.It Cm display Op Ar drives
-Display information about the drives indicated.
-Multiple drives may be specified, separated by spaces.
-.It Cm ignore Op Ar drives
-Do not display information about the drives indicated.
-Multiple drives may be specified, separated by spaces.
-.El
+.\".Pp
+.\"The following commands are specific to the
+.\".Ic vmstat
+.\"and
+.\".Ic ifstat
+.\"views; the minimum unambiguous prefix may be supplied.
+.\".Pp
+.\".Bl -tag -width Ds -compact
+.\".It Cm boot
+.\"Display cumulative statistics since the system was booted.
+.\".It Cm run
+.\"Display statistics as a running total from the point this
+.\"command is given.
+.\".It Cm time
+.\"Display statistics averaged over the refresh interval (the default).
+.\".It Cm zero
+.\"Reset running statistics to zero.
+.\".El
+.\".Pp
+.\"The following commands are common to each view which shows
+.\"information about disk drives.
+.\"These commands are used to select a set of drives to report on,
+.\"should a system have more drives configured
+.\"than can normally be displayed on the screen.
+.\".Pp
+.\".Bl -tag -width Tx -compact
+.\".It Cm display Op Ar drives
+.\"Display information about the drives indicated.
+.\"Multiple drives may be specified, separated by spaces.
+.\".It Cm ignore Op Ar drives
+.\"Do not display information about the drives indicated.
+.\"Multiple drives may be specified, separated by spaces.
+.\".El
 .Sh FILES
-.Bl -tag -width /etc/networks -compact
+.Bl -tag -width "/etc/networksXXX" -compact
 .It Pa /etc/hosts
-host names
+Host names.
 .It Pa /etc/networks
-network names
+Network names.
+.It Pa /etc/pf.conf
+.Xr pf 4
+configuration.
 .It Pa /etc/services
-port names
+Port names.
 .El
 .Sh SEE ALSO
 .Xt fstat 1 ,
@@ -499,6 +595,7 @@ port names
 .Xr ps 1 ,
 .Xr top 1 ,
 .Xr iostat 8 ,
+.Xr pfctl 8 ,
 .Xr pstat 8 ,
 .Xr renice 8 ,
 .Xr sysctl 8 ,
@@ -506,7 +603,7 @@ port names
 .Sh HISTORY
 The
 .Nm
-program appeared in
+program first appeared in
 .Bx 4.3 .
 .Sh BUGS
 Certain displays presume a minimum of 80 characters per line.

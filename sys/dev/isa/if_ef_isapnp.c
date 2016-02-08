@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ef_isapnp.c,v 1.21 2006/03/25 22:41:44 djm Exp $	*/
+/*	$OpenBSD: if_ef_isapnp.c,v 1.24 2008/11/28 02:44:17 brad Exp $	*/
 
 /*
  * Copyright (c) 1999 Jason L. Wright (jason@thought.net)
@@ -346,11 +346,6 @@ efioctl(ifp, cmd, data)
 
 	s = splnet();
 
-	if ((error = ether_ioctl(ifp, &sc->sc_arpcom, cmd, data)) > 0) {
-		splx(s);
-		return (error);
-	}
-
 	switch (cmd) {
 	case SIOCSIFADDR:
 		ifp->if_flags |= IFF_UP;
@@ -382,22 +377,16 @@ efioctl(ifp, cmd, data)
 		efsetmulti(sc);
 		break;
 
-	case SIOCADDMULTI:
-	case SIOCDELMULTI:
-		error = (cmd == SIOCADDMULTI) ?
-		    ether_addmulti(ifr, &sc->sc_arpcom) :
-		    ether_delmulti(ifr, &sc->sc_arpcom);
-
-		if (error == ENETRESET) {
-			if (ifp->if_flags & IFF_RUNNING)
-				efreset(sc);
-			error = 0;
-		}
-		efsetmulti(sc);
-		break;
 	default:
-		error = EINVAL;
-		break;
+		error = ether_ioctl(ifp, &sc->sc_arpcom, cmd, data);
+	}
+
+	if (error == ENETRESET) {
+		if (ifp->if_flags & IFF_RUNNING) {
+			efreset(sc);
+			efsetmulti(sc);
+		}
+		error = 0;
 	}
 
 	splx(s);
@@ -471,7 +460,7 @@ efinit(sc)
 
 	splx(s);
 
-	timeout_add(&sc->sc_tick_tmo, hz);
+	timeout_add_sec(&sc->sc_tick_tmo, 1);
 
 	efstart(ifp);
 }
@@ -1009,5 +998,5 @@ ef_tick(v)
 	s = splnet();
 	mii_tick(&sc->sc_mii);
 	splx(s);
-	timeout_add(&sc->sc_tick_tmo, hz);
+	timeout_add_sec(&sc->sc_tick_tmo, 1);
 }

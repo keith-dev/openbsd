@@ -1,4 +1,4 @@
-/*	$OpenBSD: locore.s,v 1.149 2008/07/28 19:08:46 miod Exp $	*/
+/*	$OpenBSD: locore.s,v 1.157 2009/01/23 19:16:39 kettenis Exp $	*/
 /*	$NetBSD: locore.s,v 1.137 2001/08/13 06:10:10 jdolecek Exp $	*/
 
 /*
@@ -1573,15 +1573,11 @@ intr_setup_msg:
 
 	stx	%i5, [%sp + CC64FSZ + BIAS + TF_O + (5*8)]
 	stx	%i6, [%sp + CC64FSZ + BIAS + TF_O + (6*8)]
-	stx	%i6, [%sp + CC64FSZ + BIAS + TF_G + (0*8)]	! Save fp in clockframe->cf_fp
 	brz,pt	%g3, 1f				! If we were in kernel mode start saving globals
 	 stx	%i7, [%sp + CC64FSZ + BIAS + TF_O + (7*8)]
 
 	! came from user mode -- switch to kernel mode stack
-	rdpr	%otherwin, %g5			! Has this already been done?
-	brnz,pn	%g5, 1f				! Don't set this twice
-
-	 rdpr	%canrestore, %g5		! Fixup register window state registers
+	rdpr	%canrestore, %g5		! Fixup register window state registers
 	wrpr	%g0, 0, %canrestore
 	wrpr	%g0, %g5, %otherwin
 	wrpr	%g0, WSTATE_KERN, %wstate	! Enable kernel mode window traps -- now we can trap again
@@ -4282,12 +4278,13 @@ _C_LABEL(sparc_interrupt):
 	 * If this is a %tick softint, clear it then call interrupt_vector.
 	 */
 	rd	SOFTINT, %g1
-	btst	1, %g1
+	set	(TICK_INT|STICK_INT), %g2
+	andcc	%g2, %g1, %g2
 	bz,pt	%icc, 0f
-	 set	_C_LABEL(intrlev), %g3
-	wr	%g0, 1, CLEAR_SOFTINT
+	 GET_CPUINFO_VA(%g7)
+	wr	%g2, 0, CLEAR_SOFTINT
 	ba,pt	%icc, setup_sparcintr
-	 ldx	[%g3 + 8], %g5	! intrlev[1] is reserved for %tick intr.
+	 add	%g7, CI_TICKINTR, %g5
 0:
 	INTR_SETUP -CC64FSZ-TF_SIZE-8
 
@@ -8868,8 +8865,8 @@ ENTRY(cecc_catch)
  */
 ENTRY(send_softint)
 	rdpr	%pstate, %g1
-	andn	%g1, PSTATE_IE, %g1
-	wrpr	%g1, 0, %pstate
+	andn	%g1, PSTATE_IE, %o3
+	wrpr	%o3, 0, %pstate
 
 	brz,pn	%o2, 1f
 	 add	%g7, CI_INTRPENDING, %o3
@@ -8894,6 +8891,26 @@ ENTRY(send_softint)
 	 wrpr	%g1, 0, %pstate		! restore interrupts
 
 /*
+ * Flush user windows to memory.
+ */
+ENTRY(write_user_windows)
+	rdpr	%otherwin, %g1
+	brz	%g1, 3f
+	clr	%g2
+1:
+	save	%sp, -CC64FSZ, %sp
+	rdpr	%otherwin, %g1
+	brnz	%g1, 1b
+	 inc	%g2
+2:
+	dec	%g2
+	brnz	%g2, 2b
+	 restore
+3:
+	retl
+	 nop
+
+/*
  * On Blackbird (UltraSPARC-II) CPUs, writes to %tick_cmpr may fail.
  * The workaround is to do a read immediately after the write and make
  * sure the same cache line.
@@ -8911,6 +8928,78 @@ ENTRY(tickcmpr_set)
 
 	cmp	%o0, %o1		! Make sure the value we wrote to
 	bg,pt	%xcc, 2f		!   %tick_cmpr was in the future.
+	 add	%o0, %o2, %o0		! If not, add the step size, double
+	ba,pt	%xcc, 1b		!   the step size and try again.
+	 sllx	%o2, 1, %o2
+2:
+	retl
+	 nop
+
+ENTRY(sys_tickcmpr_set)
+	ba	1f
+	 mov	8, %o2			! Initial step size
+	.align	64
+1:	wr	%o0, 0, %sys_tick_cmpr
+	rd	%sys_tick_cmpr, %g0
+
+	rd	%sys_tick, %o1		! Read current %sys_tick
+	sllx	%o1, 1, %o1
+	srlx	%o1, 1, %o1
+
+	cmp	%o0, %o1		! Make sure the value we wrote to
+	bg,pt	%xcc, 2f		!   %sys_tick_cmpr was in the future.
+	 add	%o0, %o2, %o0		! If not, add the step size, double
+	ba,pt	%xcc, 1b		!   the step size and try again.
+	 sllx	%o2, 1, %o2
+2:
+	retl
+	 nop
+
+/*
+ * Support for the STICK logic found on the integrated PCI host bridge
+ * of Hummingbird (UltraSPARC-IIe).  The chip designers made the
+ * brilliant decision to split the 64-bit counters into two 64-bit
+ * aligned 32-bit registers, making atomic access impossible.  This
+ * means we have to check for wraparound in various places.  Sigh.
+ */
+
+#define STICK_CMP_LOW	0x1fe0000f060
+#define STICK_CMP_HIGH	0x1fe0000f068
+#define STICK_REG_LOW	0x1fe0000f070
+#define STICK_REG_HIGH	0x1fe0000f078
+
+ENTRY(stick)
+	setx	STICK_REG_LOW, %o1, %o3
+0:
+	ldxa	[%o3] ASI_PHYS_NON_CACHED, %o0
+	add	%o3, (STICK_REG_HIGH - STICK_REG_LOW), %o4
+	ldxa	[%o4] ASI_PHYS_NON_CACHED, %o1
+	ldxa	[%o3] ASI_PHYS_NON_CACHED, %o2
+	cmp	%o2, %o0		! Check for wraparound
+	blu,pn	%icc, 0b
+	 sllx	%o1, 33, %o1		! Clear the MSB
+	srlx	%o1, 1, %o1
+	retl
+	 or	%o2, %o1, %o0
+
+ENTRY(stickcmpr_set)
+	setx	STICK_CMP_HIGH, %o1, %o3
+	mov	8, %o2			! Initial step size
+1:
+	srlx	%o0, 32, %o1
+	stxa	%o1, [%o3] ASI_PHYS_NON_CACHED
+	add	%o3, (STICK_CMP_LOW - STICK_CMP_HIGH), %o4
+	stxa	%o0, [%o4] ASI_PHYS_NON_CACHED
+
+	add	%o3, (STICK_REG_LOW - STICK_CMP_HIGH), %o4
+	ldxa	[%o4] ASI_PHYS_NON_CACHED, %o1
+	add	%o3, (STICK_REG_HIGH - STICK_CMP_HIGH), %o4
+	ldxa	[%o4] ASI_PHYS_NON_CACHED, %o5
+	sllx	%o5, 32, %o5
+	or	%o1, %o5, %o1
+
+	cmp	%o0, %o1		! Make sure the value we wrote
+	bg,pt	%xcc, 2f		!   was in the future
 	 add	%o0, %o2, %o0		! If not, add the step size, double
 	ba,pt	%xcc, 1b		!   the step size and try again.
 	 sllx	%o2, 1, %o2
@@ -8966,20 +9055,6 @@ ENTRY(delay)			! %o0 = n
 	brgz,pt	%o0, 1b						! Done?
 	 rdpr	%tick, %o2					! Get new tick
 
-	retl
-	 nop
-
-	/*
-	 * If something's wrong with the standard setup do this stupid loop
-	 * calibrated for a 143MHz processor.
-	 */
-Lstupid_delay:
-	set	142857143/MICROPERSEC, %o1
-Lstupid_loop:
-	brnz,pt	%o1, Lstupid_loop
-	 dec	%o1
-	brnz,pt	%o0, Lstupid_delay
-	 dec	%o0
 	retl
 	 nop
 

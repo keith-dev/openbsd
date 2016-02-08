@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs.h,v 1.33 2008/07/05 17:34:26 thib Exp $	*/
+/*	$OpenBSD: nfs.h,v 1.38 2009/01/24 23:35:47 thib Exp $	*/
 /*	$NetBSD: nfs.h,v 1.10.4.1 1996/05/27 11:23:56 fvdl Exp $	*/
 
 /*
@@ -80,7 +80,6 @@
 /*
  * Oddballs
  */
-#define	NMOD(a)		((a) % nfs_asyncdaemons)
 #define NFS_CMPFH(n, f, s) \
 	((n)->n_fhsize == (s) && !bcmp((caddr_t)(n)->n_fhp, (caddr_t)(f), (s)))
 #define NFS_ISV3(v)	(VFSTONFS((v)->v_mount)->nm_flag & NFSMNT_NFSV3)
@@ -90,8 +89,6 @@
 
 /*
  * sys/malloc.h needs M_NFSDIROFF, M_NFSRVDESC and M_NFSBIGFH added.
- * The VA_EXCLUSIVE flag should be added for va_vaflags and set for an
- * exclusive create.
  */
 #ifndef M_NFSRVDESC
 #define M_NFSRVDESC	M_TEMP
@@ -101,9 +98,6 @@
 #endif
 #ifndef M_NFSBIGFH
 #define M_NFSBIGFH	M_TEMP
-#endif
-#ifndef VA_EXCLUSIVE
-#define VA_EXCLUSIVE	0
 #endif
 
 /*
@@ -118,17 +112,6 @@
  */
 #ifndef IO_METASYNC
 #define IO_METASYNC	0
-#endif
-
-/*
- * Set the attribute timeout based on how recently the file has been modified.
- */
-#if 0 /* replaced by nfs_attrtimeo() in nfs_subs.c */
-#define	NFS_ATTRTIMEO(np) \
-	((((np)->n_flag & NMODIFIED) || \
-	 (time_second - (np)->n_mtime) / 10 < NFS_MINATTRTIMO) ? NFS_MINATTRTIMO : \
-	 ((time_second - (np)->n_mtime) / 10 > NFS_MAXATTRTIMO ? NFS_MAXATTRTIMO : \
-	  (time_second - (np)->n_mtime) / 10))
 #endif
 
 /*
@@ -337,10 +320,6 @@ struct nfsd {
 	TAILQ_ENTRY(nfsd) nfsd_chain;	/* List of all nfsd's */
 	int		nfsd_flag;	/* NFSD_ flags */
 	struct nfssvc_sock *nfsd_slp;	/* Current socket */
-	int		nfsd_authlen;	/* Authenticator len */
-	u_char		nfsd_authstr[RPCAUTH_MAXSIZ]; /* Authenticator data */
-	int		nfsd_verflen;	/* and the Verifier */
-	u_char		nfsd_verfstr[RPCVERF_MAXSIZ];
 	struct proc	*nfsd_procp;	/* Proc ptr */
 	struct nfsrv_descript *nfsd_nd;	/* Associated nfsrv_descript */
 };
@@ -356,7 +335,7 @@ struct nfsd {
  * Some fields are used only when write request gathering is performed.
  */
 struct nfsrv_descript {
-	u_quad_t		nd_time;	/* Write deadline (usec) */
+	struct timeval		nd_time;	/* Write deadline */
 	off_t			nd_off;		/* Start byte offset */
 	off_t			nd_eoff;	/* and end byte offset */
 	LIST_ENTRY(nfsrv_descript) nd_hash;	/* Hash list */

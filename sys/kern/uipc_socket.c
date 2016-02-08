@@ -1,4 +1,4 @@
-/*	$OpenBSD: uipc_socket.c,v 1.71 2008/06/14 10:55:21 mk Exp $	*/
+/*	$OpenBSD: uipc_socket.c,v 1.75 2009/02/22 07:47:22 otto Exp $	*/
 /*	$NetBSD: uipc_socket.c,v 1.21 1996/02/04 02:17:52 christos Exp $	*/
 
 /*
@@ -459,7 +459,7 @@ restart:
 					mlen = MLEN;
 				}
 				if (resid >= MINCLSIZE && space >= MCLBYTES) {
-					MCLGET(m, M_WAIT);
+					MCLGET(m, M_NOWAIT);
 					if ((m->m_flags & M_EXT) == 0)
 						goto nopages;
 					mlen = MCLBYTES;
@@ -544,7 +544,8 @@ out:
  */
 int
 soreceive(struct socket *so, struct mbuf **paddr, struct uio *uio,
-    struct mbuf **mp0, struct mbuf **controlp, int *flagsp)
+    struct mbuf **mp0, struct mbuf **controlp, int *flagsp,
+    socklen_t controllen)
 {
 	struct mbuf *m, **mp;
 	int flags, len, error, s, offset;
@@ -698,7 +699,8 @@ dontblock:
 				if (pr->pr_domain->dom_externalize &&
 				    mtod(m, struct cmsghdr *)->cmsg_type ==
 				    SCM_RIGHTS)
-				   error = (*pr->pr_domain->dom_externalize)(m);
+				   error = (*pr->pr_domain->dom_externalize)(m,
+				       controllen);
 				*controlp = m;
 				so->so_rcv.sb_mb = m->m_next;
 				m->m_next = 0;
@@ -1040,7 +1042,7 @@ sosetopt(struct socket *so, int level, int optname, struct mbuf *m0)
 
 			case SO_SNDBUF:
 				if (sbcheckreserve(cnt, so->so_snd.sb_hiwat) ||
-				    sbreserve(&so->so_snd, cnt) == 0) {
+				    sbreserve(&so->so_snd, cnt)) {
 					error = ENOBUFS;
 					goto bad;
 				}
@@ -1048,7 +1050,7 @@ sosetopt(struct socket *so, int level, int optname, struct mbuf *m0)
 
 			case SO_RCVBUF:
 				if (sbcheckreserve(cnt, so->so_rcv.sb_hiwat) ||
-				    sbreserve(&so->so_rcv, cnt) == 0) {
+				    sbreserve(&so->so_rcv, cnt)) {
 					error = ENOBUFS;
 					goto bad;
 				}
@@ -1070,14 +1072,14 @@ sosetopt(struct socket *so, int level, int optname, struct mbuf *m0)
 		case SO_RCVTIMEO:
 		    {
 			struct timeval *tv;
-			short val;
+			u_short val;
 
 			if (m == NULL || m->m_len < sizeof (*tv)) {
 				error = EINVAL;
 				goto bad;
 			}
 			tv = mtod(m, struct timeval *);
-			if (tv->tv_sec > (SHRT_MAX - tv->tv_usec / tick) / hz) {
+			if (tv->tv_sec > (USHRT_MAX - tv->tv_usec / tick) / hz) {
 				error = EDOM;
 				goto bad;
 			}

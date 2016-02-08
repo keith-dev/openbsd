@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_upgt.c,v 1.36 2008/07/21 18:43:19 damien Exp $ */
+/*	$OpenBSD: if_upgt.c,v 1.42 2009/02/14 20:05:09 chl Exp $ */
 
 /*
  * Copyright (c) 2007 Marcus Glocker <mglocker@openbsd.org>
@@ -49,7 +49,6 @@
 #include <netinet/ip.h>
 
 #include <net80211/ieee80211_var.h>
-#include <net80211/ieee80211_amrr.h>
 #include <net80211/ieee80211_radiotap.h>
 
 #include <dev/usb/usb.h>
@@ -174,7 +173,6 @@ static const struct usb_devno upgt_devs_2[] = {
 	{ USB_VENDOR_GLOBESPAN,		USB_PRODUCT_GLOBESPAN_PRISM_GT_1 },
 	{ USB_VENDOR_GLOBESPAN,		USB_PRODUCT_GLOBESPAN_PRISM_GT_2 },
 	{ USB_VENDOR_INTERSIL,		USB_PRODUCT_INTERSIL_PRISM_GT },
-	{ USB_VENDOR_NETGEAR,		USB_PRODUCT_NETGEAR_WG111V2_2 },
 	{ USB_VENDOR_SMC,		USB_PRODUCT_SMC_2862WG },
 	{ USB_VENDOR_WISTRONNEWEB,	USB_PRODUCT_WISTRONNEWEB_UR045G },
 	{ USB_VENDOR_XYRATEX,		USB_PRODUCT_XYRATEX_PRISM_GT_1 },
@@ -1340,10 +1338,7 @@ upgt_newstate_task(void *arg)
 	struct upgt_softc *sc = arg;
 	struct ieee80211com *ic = &sc->sc_ic;
 	struct ieee80211_node *ni;
-	enum ieee80211_state ostate;
 	unsigned channel;
-
-	ostate = ic->ic_state;
 
 	switch (sc->sc_state) {
 	case IEEE80211_S_INIT:
@@ -1780,16 +1775,12 @@ upgt_rx(struct upgt_softc *sc, uint8_t *data, int pkglen)
 	rxdesc = (struct upgt_lmac_rx_desc *)data;
 
 	/* create mbuf which is suitable for strict alignment archs */
-	m = m_devget(rxdesc->data - ETHER_ALIGN, pkglen + ETHER_ALIGN, 0, ifp,
-	    NULL);
+	m = m_devget(rxdesc->data, pkglen, ETHER_ALIGN, ifp, NULL);
 	if (m == NULL) {
-		printf("%s: could not create RX mbuf!\n", sc->sc_dev.dv_xname);
+		DPRINTF(1, "%s: could not create RX mbuf!\n", sc->sc_dev.dv_xname);
+		ifp->if_ierrors++;
 		return;
 	}
-	m_adj(m, ETHER_ALIGN);
-
-	/* trim FCS */
-	m_adj(m, -IEEE80211_CRC_LEN);
 
 	s = splnet();
 
@@ -1798,7 +1789,7 @@ upgt_rx(struct upgt_softc *sc, uint8_t *data, int pkglen)
 		struct mbuf mb;
 		struct upgt_rx_radiotap_header *tap = &sc->sc_rxtap;
 
-		tap->wr_flags = 0;
+		tap->wr_flags = IEEE80211_RADIOTAP_F_FCS;
 		tap->wr_rate = upgt_rx_rate(sc, rxdesc->rate);
 		tap->wr_chan_freq = htole16(ic->ic_bss->ni_chan->ic_freq);
 		tap->wr_chan_flags = htole16(ic->ic_bss->ni_chan->ic_flags);
@@ -1813,6 +1804,8 @@ upgt_rx(struct upgt_softc *sc, uint8_t *data, int pkglen)
 		bpf_mtap(sc->sc_drvbpf, &mb, BPF_DIRECTION_IN);
 	}
 #endif
+	/* trim FCS */
+	m_adj(m, -IEEE80211_CRC_LEN);
 
 	wh = mtod(m, struct ieee80211_frame *);
 	ni = ieee80211_find_rxnode(ic, wh);

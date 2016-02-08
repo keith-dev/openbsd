@@ -1,4 +1,4 @@
-/*	$OpenBSD: subr_disk.c,v 1.79 2008/06/25 15:26:43 reyk Exp $	*/
+/*	$OpenBSD: subr_disk.c,v 1.84 2009/02/09 20:00:48 otto Exp $	*/
 /*	$NetBSD: subr_disk.c,v 1.17 1996/03/16 23:17:08 christos Exp $	*/
 
 /*
@@ -229,9 +229,13 @@ checkdisklabel(void *rlp, struct disklabel *lp)
 	if (dlp->d_magic != DISKMAGIC || dlp->d_magic2 != DISKMAGIC)
 		msg = "no disk label";
 	else if (dlp->d_npartitions > MAXPARTITIONS)
-		msg = "unreasonable partition count";
+		msg = "invalid label, partition count > MAXPARTITIONS";
+	else if (dlp->d_secpercyl == 0)
+		msg = "invalid label, d_secpercyl == 0";
+	else if (dlp->d_secsize == 0)
+		msg = "invalid label, d_secsize == 0";
 	else if (dkcksum(dlp) != 0)
-		msg = "disk label corrupted";
+		msg = "invalid label, incorrect checksum";
 
 	if (msg) {
 		u_int16_t *start, *end, sum = 0;
@@ -378,6 +382,7 @@ readdoslabel(struct buf *bp, void (*strat)(struct buf *),
 	daddr64_t part_blkno = DOSBBSECTOR;
 	int dospartoff = 0, i, ourpart = -1;
 	int wander = 1, n = 0, loop = 0;
+	int offset;
 
 	if (lp->d_secpercyl == 0)
 		return ("invalid label, d_secpercyl == 0");
@@ -397,7 +402,8 @@ readdoslabel(struct buf *bp, void (*strat)(struct buf *),
 			part_blkno = extoff;
 
 		/* read boot record */
-		bp->b_blkno = part_blkno;
+		bp->b_blkno = DL_BLKTOSEC(lp, part_blkno) * DL_BLKSPERSEC(lp);
+		offset = DL_BLKOFFSET(lp, part_blkno) + DOSPARTOFF;
 		bp->b_bcount = lp->d_secsize;
 		bp->b_flags = B_BUSY | B_READ | B_RAW;
 		(*strat)(bp);
@@ -407,7 +413,7 @@ readdoslabel(struct buf *bp, void (*strat)(struct buf *),
 			return ("dos partition I/O error");
 		}
 
-		bcopy(bp->b_data + DOSPARTOFF, dp, sizeof(dp));
+		bcopy(bp->b_data + offset, dp, sizeof(dp));
 
 		if (ourpart == -1) {
 			/* Search for our MBR partition */
@@ -445,6 +451,7 @@ donot:
 		 */
 		for (dp2=dp, i=0; i < NDOSPART && n < 8; i++, dp2++) {
 			struct partition *pp = &lp->d_partitions[8+n];
+			u_int8_t fstype;
 
 			if (dp2->dp_typ == DOSPTYP_OPENBSD)
 				continue;
@@ -457,17 +464,17 @@ donot:
 
 			switch (dp2->dp_typ) {
 			case DOSPTYP_UNUSED:
-				pp->p_fstype = FS_UNUSED;
+				fstype = FS_UNUSED;
 				n++;
 				break;
 
 			case DOSPTYP_LINUX:
-				pp->p_fstype = FS_EXT2FS;
+				fstype = FS_EXT2FS;
 				n++;
 				break;
 
 			case DOSPTYP_NTFS:
-				pp->p_fstype = FS_NTFS;
+				fstype = FS_NTFS;
 				n++;
 				break;
 
@@ -477,7 +484,7 @@ donot:
 			case DOSPTYP_FAT16L:
 			case DOSPTYP_FAT32:
 			case DOSPTYP_FAT32L:
-				pp->p_fstype = FS_MSDOS;
+				fstype = FS_MSDOS;
 				n++;
 				break;
 			case DOSPTYP_EXTEND:
@@ -490,35 +497,55 @@ donot:
 				wander = 1;
 				break;
 			default:
-				pp->p_fstype = FS_OTHER;
+				fstype = FS_OTHER;
 				n++;
 				break;
 			}
 
 			/*
-			 * There is no need to set the offset/size when
-			 * wandering; it would also invalidate the
-			 * disklabel checksum.
+			 * Don't set fstype/offset/size when wandering or just
+			 * looking for the offset of the OpenBSD partition. It
+			 * would invalidate the disklabel checksum!
 			 */
-			if (wander)
+			if (wander || partoffp)
 				continue;
 
+			pp->p_fstype = fstype;
 			if (letoh32(dp2->dp_start))
 				DL_SETPOFFSET(pp,
 				    letoh32(dp2->dp_start) + part_blkno);
 			DL_SETPSIZE(pp, letoh32(dp2->dp_size));
 		}
 	}
+	if (partoffp)
+		/* dospartoff has been set and we must not modify *lp. */
+		goto notfat;
+
 	lp->d_npartitions = MAXPARTITIONS;
 
 	if (n == 0 && part_blkno == DOSBBSECTOR) {
 		u_int16_t fattest;
 
-		/* Check for a short jump instruction. */
-		fattest = ((bp->b_data[0] << 8) & 0xff00) |
-		    (bp->b_data[2] & 0xff);
-		if (fattest != 0xeb90 && fattest != 0xe900)
+		/* Check for a valid initial jmp instruction. */
+		switch ((u_int8_t)bp->b_data[0]) {
+		case 0xeb:
+			/*
+			 * Two-byte jmp instruction. The 2nd byte is the number
+			 * of bytes to jmp and the 3rd byte must be a NOP.
+			 */
+			if ((u_int8_t)bp->b_data[2] != 0x90)
+				goto notfat;
+			break;
+		case 0xe9:
+			/*
+			 * Three-byte jmp instruction. The next two bytes are a
+			 * little-endian 16 bit value.
+			 */
+			break;
+		default:
 			goto notfat;
+			break;
+		}
 
 		/* Check for a valid bytes per sector value. */
 		fattest = ((bp->b_data[12] << 8) & 0xff00) |
@@ -548,7 +575,9 @@ notfat:
 	if (spoofonly)
 		return (NULL);
 
-	bp->b_blkno = dospartoff + DOS_LABELSECTOR;
+	bp->b_blkno = DL_BLKTOSEC(lp, dospartoff + DOS_LABELSECTOR) *
+	    DL_BLKSPERSEC(lp);
+	offset = DL_BLKOFFSET(lp, dospartoff + DOS_LABELSECTOR);
 	bp->b_bcount = lp->d_secsize;
 	bp->b_flags = B_BUSY | B_READ | B_RAW;
 	(*strat)(bp);
@@ -556,7 +585,7 @@ notfat:
 		return ("disk label I/O error");
 
 	/* sub-MBR disklabels are always at a LABELOFFSET of 0 */
-	return checkdisklabel(bp->b_data, lp);
+	return checkdisklabel(bp->b_data + offset, lp);
 }
 
 /*
@@ -620,7 +649,6 @@ setdisklabel(struct disklabel *olp, struct disklabel *nlp, u_int openmask)
 int
 bounds_check_with_label(struct buf *bp, struct disklabel *lp, int wlabel)
 {
-#define blockpersec(count, lp) ((count) * (((lp)->d_secsize) / DEV_BSIZE))
 	struct partition *p = &lp->d_partitions[DISKPART(bp->b_dev)];
 	daddr64_t sz = howmany(bp->b_bcount, DEV_BSIZE);
 
@@ -632,8 +660,8 @@ bounds_check_with_label(struct buf *bp, struct disklabel *lp, int wlabel)
 		panic("bounds_check_with_label %lld %lld\n", bp->b_blkno, sz);
 
 	/* beyond partition? */
-	if (bp->b_blkno + sz > blockpersec(DL_GETPSIZE(p), lp)) {
-		sz = blockpersec(DL_GETPSIZE(p), lp) - bp->b_blkno;
+	if (bp->b_blkno + sz > DL_SECTOBLK(lp, DL_GETPSIZE(p))) {
+		sz = DL_SECTOBLK(lp, DL_GETPSIZE(p)) - bp->b_blkno;
 		if (sz == 0) {
 			/* If exactly at end of disk, return EOF. */
 			bp->b_resid = bp->b_bcount;
@@ -648,8 +676,8 @@ bounds_check_with_label(struct buf *bp, struct disklabel *lp, int wlabel)
 	}
 
 	/* calculate cylinder for disksort to order transfers with */
-	bp->b_cylinder = (bp->b_blkno + blockpersec(DL_GETPOFFSET(p), lp)) /
-	    blockpersec(lp->d_secpercyl, lp);
+	bp->b_cylinder = (bp->b_blkno + DL_SECTOBLK(lp, DL_GETPOFFSET(p))) /
+	    DL_SECTOBLK(lp, lp->d_secpercyl);
 	return (1);
 
 bad:
@@ -1013,8 +1041,8 @@ struct device *
 parsedisk(char *str, int len, int defpart, dev_t *devp)
 {
 	struct device *dv;
+	int majdev, part = defpart;
 	char c;
-	int majdev, part;
 
 	if (len == 0)
 		return (NULL);
@@ -1022,9 +1050,7 @@ parsedisk(char *str, int len, int defpart, dev_t *devp)
 	if (c >= 'a' && (c - 'a') < MAXPARTITIONS) {
 		part = c - 'a';
 		len -= 1;
-	} else
-		part = defpart;
-
+	}
 
 	TAILQ_FOREACH(dv, &alldevs, dv_list) {
 		if (dv->dv_class == DV_DISK &&
@@ -1254,11 +1280,17 @@ extern struct nam2blk nam2blk[];
 int
 findblkmajor(struct device *dv)
 {
-	char *name = dv->dv_xname;
+	char buf[16], *p;
 	int i;
 
+	if (strlcpy(buf, dv->dv_xname, sizeof buf) >= sizeof buf)
+		return (-1);
+	for (p = buf; *p; p++)
+		if (*p >= '0' && *p <= '9')
+			*p = '\0';
+
 	for (i = 0; nam2blk[i].name; i++)
-		if (!strncmp(name, nam2blk[i].name, strlen(nam2blk[i].name)))
+		if (!strcmp(buf, nam2blk[i].name))
 			return (nam2blk[i].maj);
 	return (-1);
 }

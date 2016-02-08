@@ -1,4 +1,4 @@
-/*	$OpenBSD: ypldap.c,v 1.3 2008/07/02 17:36:15 pyr Exp $ */
+/*	$OpenBSD: ypldap.c,v 1.7 2009/01/29 11:21:42 form Exp $ */
 
 /*
  * Copyright (c) 2008 Pierre-Yves Ritschard <pyr@openbsd.org>
@@ -176,14 +176,12 @@ main_dispatch_client(int fd, short event, void *p)
 			ue->ue_uid = ir.ir_key.ik_uid;
 			len = strlen(ue->ue_line) + 1;
 			ue->ue_line[strcspn(ue->ue_line, ":")] = '\0';
-			if (RB_FIND(user_name_tree, env->sc_user_names_t,
+			if (RB_INSERT(user_name_tree, env->sc_user_names_t,
 			    ue) != NULL) { /* dup */
 				free(ue->ue_line);
 				free(ue);
-				break;
-			}
-			RB_INSERT(user_name_tree, env->sc_user_names_t, ue);
-			env->sc_user_line_len += len;
+			} else
+				env->sc_user_line_len += len;
 			break;
 		}
 		case IMSG_GRP_ENTRY: {
@@ -201,14 +199,12 @@ main_dispatch_client(int fd, short event, void *p)
 			ge->ge_gid = ir.ir_key.ik_gid;
 			len = strlen(ge->ge_line) + 1;
 			ge->ge_line[strcspn(ge->ge_line, ":")] = '\0';
-			if (RB_FIND(group_name_tree, env->sc_group_names_t,
+			if (RB_INSERT(group_name_tree, env->sc_group_names_t,
 			    ge) != NULL) { /* dup */
 				free(ge->ge_line);
 				free(ge);
-				break;
-			}
-			RB_INSERT(group_name_tree, env->sc_group_names_t, ge);
-			env->sc_group_line_len += len;
+			} else
+				env->sc_group_line_len += len;
 			break;
 		}
 		case IMSG_TRASH_UPDATE: {
@@ -248,7 +244,7 @@ main_dispatch_client(int fd, short event, void *p)
 				env->sc_group_names = env->sc_group_names_t;
 				env->sc_group_lines = NULL;
 				env->sc_group_names_t = NULL;
-	
+
 				flatten_entries(env);
 				goto make_uids;
 			}
@@ -279,7 +275,7 @@ main_dispatch_client(int fd, short event, void *p)
 			env->sc_group_names = env->sc_group_names_t;
 			env->sc_group_lines = NULL;
 			env->sc_group_names_t = NULL;
-			
+
 
 			flatten_entries(env);
 
@@ -365,7 +361,7 @@ main(int argc, char *argv[])
 
 	log_init(1);
 
-	while ((c = getopt(argc, argv, "dD;nf:v")) != -1) {
+	while ((c = getopt(argc, argv, "dD:nf:v")) != -1) {
 		switch (c) {
 		case 'd':
 			debug = 2;
@@ -378,6 +374,7 @@ main(int argc, char *argv[])
 		case 'n':
 			debug = 2;
 			opts |= YPLDAP_OPT_NOACTION;
+			break;
 		case 'f':
 			conffile = optarg;
 			break;
@@ -394,7 +391,7 @@ main(int argc, char *argv[])
 
 	if (argc)
 		usage();
-	
+
 	RB_INIT(&env.sc_user_uids);
 	RB_INIT(&env.sc_group_gids);
 
@@ -409,7 +406,7 @@ main(int argc, char *argv[])
 		errx(1, "need root privileges");
 
 	log_init(debug);
-	
+
 	if (!debug) {
 		if (daemon(1, 0) == -1)
 			err(1, "failed to daemonize");
@@ -466,7 +463,7 @@ main(int argc, char *argv[])
 	bzero(&tv, sizeof(tv));
 	evtimer_set(&ev_timer, main_init_timer, &env);
 	evtimer_add(&ev_timer, &tv);
-	
+
 	yp_enable_events();
 	event_dispatch();
 	main_shutdown();
@@ -482,7 +479,7 @@ imsg_event_add(struct imsgbuf *ibuf)
 	ibuf->events = EV_READ;
 	if (ibuf->w.queued)
 		ibuf->events |= EV_WRITE;
-	
+
 	event_del(&ibuf->ev);
 	event_set(&ibuf->ev, ibuf->fd, ibuf->events, ibuf->handler, env);
 	event_add(&ibuf->ev, NULL);
@@ -492,12 +489,12 @@ void
 set_nonblock(int fd)
 {
 	int	flags;
- 
+
 	if ((flags = fcntl(fd, F_GETFL, 0)) == -1)
 		fatal("fcntl F_GETFL");
-        
+
 	flags |= O_NONBLOCK;
-         
+
 	if ((flags = fcntl(fd, F_SETFL, flags)) == -1)
 		fatal("fcntl F_SETFL");
 }

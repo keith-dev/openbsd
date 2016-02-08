@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.37 2008/07/18 23:43:31 art Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.41 2009/02/16 15:50:05 jsg Exp $	*/
 /*	$NetBSD: cpu.h,v 1.1 2003/04/26 18:39:39 fvdl Exp $	*/
 
 /*-
@@ -71,6 +71,7 @@ struct cpu_info {
 	u_int ci_apicid;
 	u_long ci_spin_locks;
 	u_long ci_simple_locks;
+	u_int32_t ci_randseed;
 
 	u_int64_t ci_scratch;
 
@@ -97,6 +98,8 @@ struct cpu_info {
 	u_int32_t	ci_feature_flags;
 	u_int32_t	ci_feature_eflags;
 	u_int32_t	ci_signature;
+	u_int32_t	ci_family;
+	u_int32_t	ci_model;
 	u_int64_t	ci_tsc_freq;
 
 	struct cpu_functions *ci_func;
@@ -154,7 +157,7 @@ extern struct cpu_info *cpu_info_list;
 #define CPU_INFO_FOREACH(cii, ci)	for (cii = 0, ci = cpu_info_list; \
 					    ci != NULL; ci = ci->ci_next)
 
-#define CPU_INFO_UNIT(ci)	((ci)->ci_dev->dv_unit)
+#define CPU_INFO_UNIT(ci)	((ci)->ci_dev ? (ci)->ci_dev->dv_unit : 0)
 
 /*      
  * Preempt the current process if in interrupt from user mode,
@@ -183,6 +186,8 @@ extern struct cpu_info *cpu_info[MAXCPUS];
 void cpu_boot_secondary_processors(void);
 void cpu_init_idle_pcbs(void);    
 
+void cpu_unidle(struct cpu_info *);
+
 #else /* !MULTIPROCESSOR */
 
 #define MAXCPUS		1
@@ -191,6 +196,8 @@ void cpu_init_idle_pcbs(void);
 extern struct cpu_info cpu_info_primary;
 
 #define curcpu()		(&cpu_info_primary)
+
+#define cpu_unidle(ci)
 
 #endif
 

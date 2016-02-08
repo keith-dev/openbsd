@@ -1,4 +1,4 @@
-/* $Id: main.c,v 1.42 2008/07/31 04:24:11 canacar Exp $	 */
+/* $Id: main.c,v 1.51 2008/11/08 06:38:27 canacar Exp $	 */
 /*
  * Copyright (c) 2001, 2007 Can Erkin Acar
  * Copyright (c) 2001 Daniel Hartmeier
@@ -69,11 +69,14 @@ int	CMDLINE;
 
 #define TIMEPOS 55
 
+int  ucount(void);
+void usage(void);
+
 /* command prompt */
 
-void cmd_delay(void);
-void cmd_count(void);
-void cmd_compat(void);
+void cmd_delay(const char *);
+void cmd_count(const char *);
+void cmd_compat(const char *);
 
 struct command cm_compat = {"Command", cmd_compat};
 struct command cm_delay = {"Seconds to delay", cmd_delay};
@@ -85,28 +88,14 @@ struct command cm_count = {"Number of lines to display", cmd_count};
 int
 print_header(void)
 {
-	struct tm *tp;
-	time_t t, now;
-	order_type *ordering;
+	time_t now;
 	int start = dispstart + 1, end = dispstart + maxprint;
-	extern int ucount();
 	char tbuf[26];
 
 	if (end > num_disp)
 		end = num_disp;
 
 	tb_start();
-
-#if 0
-	if (curr_mgr && curr_mgr->sort_fn != NULL) {
-		ordering = curr_mgr->order_curr;
-		if (ordering != NULL) {
-			tbprintf(", Order: %s", ordering->name);
-			if (sortdir < 0 && ordering->func != NULL)
-				tbprintf(" (rev)");
-		}
-	}
-#endif
 
 	getloadavg(avenrun, sizeof(avenrun) / sizeof(avenrun[0]));
 
@@ -205,14 +194,25 @@ ucount(void)
 /* main program functions */
 
 void
-usage()
+usage(void)
 {
 	extern char *__progname;
-	fprintf(stderr, "usage: %s [-abhir] [-c cache] [-d cnt]", __progname);
-	fprintf(stderr, " [-o field] [-s time] [-w width] [view] [num]\n");
+	fprintf(stderr, "usage: %s [-abin] [-d count] "
+	    "[-s delay] [-w width] [view] [delay]\n", __progname);
 	exit(1);
 }
 
+void
+show_view(void)
+{
+	if (rawmode)
+		return;
+
+	tb_start();
+	tbprintf("%s %g", curr_view->name, naptime);
+	tb_end();
+	message_set(tmp_buf);
+}
 
 void
 add_view_tb(field_view *v)
@@ -226,8 +226,6 @@ add_view_tb(field_view *v)
 void
 show_help(void)
 {
-	int line = 0;
-
 	if (rawmode)
 		return;
 
@@ -235,79 +233,48 @@ show_help(void)
 	foreach_view(add_view_tb);
 	tb_end();
 	message_set(tmp_buf);
-
-#if 0
-	erase();
-	mvprintw(line, 2, "Systat Help");
-	line += 2;
-	mvprintw(line,    5, " h  - Help (this page)");
-	mvprintw(line++, 40, " l  - set number of Lines");
-	mvprintw(line,    5, " p  - Pause display");
-	mvprintw(line++, 40, " s  - Set update interval");
-	mvprintw(line,    5, " v  - next View");
-	mvprintw(line++, 40, " q  - Quit");
-	line++;
-	mvprintw(line++, 5, "0-7 - select view directly");
-	mvprintw(line++, 5, "SPC - update immediately");
-	mvprintw(line++, 5, "^L  - refresh display");
-	line++;
-	mvprintw(line++, 5, "cursor keys - scroll display");
-	line++;
-	mvprintw(line++,  3, "Netstat specific keys::");
-	mvprintw(line,    5, " t  - toggle TCP display");
-	mvprintw(line++, 40, " u  - toggle UDP display");
-	mvprintw(line++,  5, " n  - toggle Name resolution");
-	line++;
-	mvprintw(line++,  3, "Ifstat specific keys::");
-	mvprintw(line,    5, " r  - initialize RUN mode");
-	mvprintw(line++, 40, " b  - set BOOT mode");
-	mvprintw(line,    5, " t  - set TIME mode (default)");
-	line++;
-	line++;
-	mvprintw(line++,  3, "VMstat specific keys::");
-	mvprintw(line,    5, " r  - initialize RUN mode");
-	mvprintw(line++, 40, " b  - set BOOT mode");
-	mvprintw(line,    5, " t  - set TIME mode (default)");
-	mvprintw(line++, 40, " z  - zero in RUN mode");
-	line++;
-	mvprintw(line++, 6, "press any key to continue ...");
-
-	while (getch() == ERR) {
-		if (gotsig_close)
-			break;
-	}
-#endif
 }
 
 void
-cmd_compat(void)
+cmd_compat(const char *buf)
 {
-	char *s;
+	const char *s;
 
-	if (strcasecmp(cmdbuf, "help") == 0) {
+	if (strcasecmp(buf, "help") == 0) {
 		show_help();
 		need_update = 1;
 		return;
 	}
-	if (strcasecmp(cmdbuf, "quit") == 0 || strcasecmp(cmdbuf, "q") == 0) {
+	if (strcasecmp(buf, "quit") == 0 || strcasecmp(buf, "q") == 0) {
 		gotsig_close = 1;
 		return;
 	}
+	if (strcasecmp(buf, "stop") == 0) {
+		paused = 1;
+		gotsig_alarm = 1;
+		return;
+	}
+	if (strncasecmp(buf, "start", 5) == 0) {
+		paused = 0;
+		gotsig_alarm = 1;
+		cmd_delay(buf + 5);
+		return;
+	}
 
-	for (s = cmdbuf; *s && strchr("0123456789+-.eE", *s) != NULL; s++)
+	for (s = buf; *s && strchr("0123456789+-.eE", *s) != NULL; s++)
 		;
 	if (*s) {
-		if (set_view(cmdbuf))
-			error("Invalid/ambigious view: %s", cmdbuf);
+		if (set_view(buf))
+			error("Invalid/ambiguous view: %s", buf);
 	} else
-		cmd_delay();
+		cmd_delay(buf);
 }
 
 void
-cmd_delay(void)
+cmd_delay(const char *buf)
 {
 	double del;
-	del = atof(cmdbuf);
+	del = atof(buf);
 
 	if (del > 0) {
 		udelay = (useconds_t)(del * 1000000);
@@ -317,10 +284,10 @@ cmd_delay(void)
 }
 
 void
-cmd_count(void)
+cmd_count(const char *buf)
 {
 	int ms;
-	ms = atoi(cmdbuf);
+	ms = atoi(buf);
 
 	if (ms <= 0 || ms > lines - HEADER_LINES)
 		maxprint = lines - HEADER_LINES;
@@ -337,6 +304,10 @@ keyboard_callback(int ch)
 		/* FALLTHROUGH */
 	case 'h':
 		show_help();
+		need_update = 1;
+		break;
+	case CTRL_G:
+		show_view();
 		need_update = 1;
 		break;
 	case 'l':
@@ -370,6 +341,8 @@ initialize(void)
 	initswap();
 	initpftop();
 	initpf();
+	initpool();
+	initmalloc();
 }
 
 void
@@ -409,14 +382,12 @@ main(int argc, char *argv[])
 	}
 
 	kd = kvm_openfiles(NULL, NULL, NULL, O_RDONLY, errbuf);
-	if (kd == NULL)
-		warnx("kvm_openfiles: %s", errbuf);
 
 	gid = getgid();
 	if (setresgid(gid, gid, gid) == -1)
 		err(1, "setresgid");
 
-	while ((ch = getopt(argc, argv, "abd:hins:S:w:")) != -1) {
+	while ((ch = getopt(argc, argv, "abd:ins:w:")) != -1) {
 		switch (ch) {
 		case 'a':
 			maxlines = -1;
@@ -441,11 +412,6 @@ main(int argc, char *argv[])
 			if (delay <= 0)
 				delay = 5;
 			break;
-		case 'S':
-			dispstart = atoi(optarg);
-			if (dispstart < 0)
-				dispstart = 0;
-			break;
 		case 'w':
 			rawwidth = atoi(optarg);
 			if (rawwidth < 1)
@@ -453,13 +419,14 @@ main(int argc, char *argv[])
 			if (rawwidth >= MAX_LINE_BUF)
 				rawwidth = MAX_LINE_BUF - 1;
 			break;
-		case 'h':
-			/* FALLTHROUGH */
 		default:
 			usage();
 			/* NOTREACHED */
 		}
 	}
+
+	if (kd == NULL)
+		warnx("kvm_openfiles: %s", errbuf);
 
 	argc -= optind;
 	argv += optind;
@@ -490,7 +457,7 @@ main(int argc, char *argv[])
 
 	set_order(NULL);
 	if (viewstr && set_view(viewstr)) {
-		fprintf(stderr, "Unknown/ambigious view name: %s\n", viewstr);
+		fprintf(stderr, "Unknown/ambiguous view name: %s\n", viewstr);
 		return 1;
 	}
 

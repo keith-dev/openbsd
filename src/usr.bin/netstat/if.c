@@ -1,4 +1,4 @@
-/*	$OpenBSD: if.c,v 1.57 2008/03/18 20:03:37 claudio Exp $	*/
+/*	$OpenBSD: if.c,v 1.60 2009/02/07 15:06:04 chl Exp $	*/
 /*	$NetBSD: if.c,v 1.16.4.2 1996/06/07 21:46:46 thorpej Exp $	*/
 
 /*
@@ -45,6 +45,7 @@
 #include <netinet/if_ether.h>
 #include <arpa/inet.h>
 
+#include <err.h>
 #include <limits.h>
 #include <signal.h>
 #include <stdio.h>
@@ -172,6 +173,7 @@ intpr(int interval)
 			break;
 		}
 	}
+	free(buf);
 }
 
 static void
@@ -528,7 +530,7 @@ fetchifs(void)
 			else if (sdl->sdl_nlen > 0) 
 				memcpy(name, sdl->sdl_data, sdl->sdl_nlen);
 
-			if (interface != 0 && !strcmp(name, interface)) {
+			if (interface != NULL && !strcmp(name, interface)) {
 				strlcpy(ip_cur.ift_name, name,
 				    sizeof(ip_cur.ift_name));
 				ip_cur.ift_ip = ifd->ifi_ipackets;
@@ -566,4 +568,5 @@ fetchifs(void)
 		ip_cur.ift_dr = 0;
 		    /* XXX ifnet.if_snd.ifq_drops */
 	}
+	free(buf);
 }

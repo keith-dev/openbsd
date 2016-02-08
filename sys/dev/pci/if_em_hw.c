@@ -31,7 +31,7 @@
 
 *******************************************************************************/
 
-/* $OpenBSD: if_em_hw.c,v 1.29 2008/03/21 00:20:55 brad Exp $ */
+/* $OpenBSD: if_em_hw.c,v 1.31 2008/12/04 02:36:52 brad Exp $ */
 
 /* if_em_hw.c
  * Shared functions for accessing and configuring the MAC
@@ -243,7 +243,6 @@ em_set_phy_type(struct em_hw *hw)
 static void
 em_phy_init_script(struct em_hw *hw)
 {
-    uint32_t ret_val;
     uint16_t phy_saved_data;
 
     DEBUGFUNC("em_phy_init_script");
@@ -253,7 +252,7 @@ em_phy_init_script(struct em_hw *hw)
 
         /* Save off the current value of register 0x2F5B to be restored at
          * the end of this routine. */
-        ret_val = em_read_phy_reg(hw, 0x2F5B, &phy_saved_data);
+        em_read_phy_reg(hw, 0x2F5B, &phy_saved_data);
 
         /* Disabled the PHY transmitter */
         em_write_phy_reg(hw, 0x2F5B, 0x0003);
@@ -461,6 +460,8 @@ em_set_mac_type(struct em_hw *hw)
     case E1000_DEV_ID_ICH9_IFE_GT:
     case E1000_DEV_ID_ICH9_IGP_AMT:
     case E1000_DEV_ID_ICH9_IGP_C:
+    case E1000_DEV_ID_ICH9_IGP_M:
+    case E1000_DEV_ID_ICH9_IGP_M_AMT:
         hw->mac_type = em_ich9lan;
         break;
     default:
@@ -4046,6 +4047,15 @@ em_detect_gig_phy(struct em_hw *hw)
         hw->mac_type == em_82572) {
         hw->phy_id = IGP01E1000_I_PHY_ID;
         hw->phy_type = em_phy_igp_2;
+        return E1000_SUCCESS;
+    }
+
+    /* until something better comes along... makes the Lenovo X200 work */
+    if (hw->mac_type == em_ich9lan &&
+        (hw->device_id == E1000_DEV_ID_ICH9_IGP_M ||
+         hw->device_id == E1000_DEV_ID_ICH9_IGP_M_AMT)) {
+        hw->phy_id = IGP03E1000_E_PHY_ID;
+        hw->phy_type = em_phy_igp_3;
         return E1000_SUCCESS;
     }
 

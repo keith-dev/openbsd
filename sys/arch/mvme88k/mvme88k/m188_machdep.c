@@ -1,4 +1,4 @@
-/*	$OpenBSD: m188_machdep.c,v 1.44 2007/12/27 23:17:55 miod Exp $	*/
+/*	$OpenBSD: m188_machdep.c,v 1.50 2009/02/21 18:37:48 miod Exp $	*/
 /*
  * Copyright (c) 1998, 1999, 2000, 2001 Steve Murphree, Jr.
  * Copyright (c) 1996 Nivas Madhur
@@ -138,7 +138,7 @@ u_int	safe_level(u_int, u_int);
 
 void	m188_bootstrap(void);
 void	m188_clock_ipi_handler(struct trapframe *);
-void	m188_ext_int(u_int, struct trapframe *);
+void	m188_ext_int(struct trapframe *);
 u_int	m188_getipl(void);
 void	m188_init_clocks(void);
 void	m188_ipi_handler(struct trapframe *);
@@ -146,6 +146,7 @@ vaddr_t	m188_memsize(void);
 u_int	m188_raiseipl(u_int);
 void	m188_send_ipi(int, cpuid_t);
 u_int	m188_setipl(u_int);
+void	m188_soft_ipi(void);
 void	m188_startup(void);
 
 /*
@@ -180,9 +181,9 @@ u_int32_t int_mask_val[NIPLS];
  * the range. Since memory is packed at low addresses, we will hit all memory
  * boards in order until reaching either a VME space or a non-claimed space.
  *
- * As a safety measure, we never check for more than 256MB - the 188 can
+ * As a safety measure, we never check for more than 512MB - the 188 can
  * only have up to 4 memory boards, which theoretically can not be larger
- * than 64MB, and I am not aware of third-party larger memory boards.
+ * than 128MB, and I am not aware of third-party larger memory boards.
  */
 vaddr_t
 m188_memsize()
@@ -190,7 +191,7 @@ m188_memsize()
 	u_int pgnum;
 	int32_t rmad;
 
-#define	MVME188_MAX_MEMORY	((4 * 64) / 4)	/* 4 64MB boards */
+#define	MVME188_MAX_MEMORY	((4 * 128) / 4)	/* 4 128MB boards */
 	for (pgnum = 0; pgnum <	MVME188_MAX_MEMORY; pgnum++) {
 		*(volatile int32_t *)MVME188_RMAD = (pgnum << 22);
 		rmad = *(volatile int32_t *)MVME188_RMAD;
@@ -220,6 +221,11 @@ m188_bootstrap()
 	md_init_clocks = m188_init_clocks;
 #ifdef MULTIPROCESSOR
 	md_send_ipi = m188_send_ipi;
+	md_soft_ipi = m188_soft_ipi;
+#endif
+	md_delay = m188_delay;
+#ifdef MULTIPROCESSOR
+	md_smp_setup = m88100_smp_setup;
 #endif
 
 	/* clear and disable all interrupts */
@@ -428,6 +434,12 @@ m188_clock_ipi_handler(struct trapframe *eframe)
 		statclock((struct clockframe *)eframe);
 }
 
+void
+m188_soft_ipi()
+{
+	/* this function is not used on MVME188 */
+}
+
 #endif
 
 /*
@@ -476,7 +488,7 @@ const u_int obio_vec[32] = {
 #define VME_BERR_MASK		0x100 	/* timeout during VME IACK cycle */
 
 void
-m188_ext_int(u_int v, struct trapframe *eframe)
+m188_ext_int(struct trapframe *eframe)
 {
 #ifdef MULTIPROCESSOR
 	struct cpu_info *ci = curcpu();
@@ -643,7 +655,8 @@ m188_ext_int(u_int v, struct trapframe *eframe)
 				    warn == 1 ? "spurious" : "unclaimed",
 				    level, intbit, cur_mask, IST_STRING);
 		}
-	} while (((cur_mask = ISR_GET_CURRENT_MASK(cpu)) & ~ign_mask) != 0);
+	} while (((cur_mask = ISR_GET_CURRENT_MASK(cpu)) & ~ign_mask &
+	    ~IPI_MASK) != 0);
 
 #ifdef DIAGNOSTIC
 	if (ign_mask != 0) {

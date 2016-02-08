@@ -1,4 +1,4 @@
-/*	$OpenBSD: pool.h,v 1.29 2008/06/26 05:42:20 ray Exp $	*/
+/*	$OpenBSD: pool.h,v 1.31 2008/12/23 06:54:12 dlg Exp $	*/
 /*	$NetBSD: pool.h,v 1.27 2001/06/06 22:00:17 rafal Exp $	*/
 
 /*-
@@ -52,7 +52,7 @@
 struct pool;
 
 struct pool_allocator {
-	void *(*pa_alloc)(struct pool *, int);
+	void *(*pa_alloc)(struct pool *, int, int *);
 	void (*pa_free)(struct pool *, void *);
 	int pa_pagesz;
 	int pa_pagemask;
@@ -160,6 +160,7 @@ int		pool_prime(struct pool *, int);
 void		pool_printit(struct pool *, const char *,
 		    int (*)(const char *, ...));
 int		pool_chk(struct pool *, const char *);
+void		pool_walk(struct pool *, void (*)(void *));
 #endif
 #endif /* _KERNEL */
 

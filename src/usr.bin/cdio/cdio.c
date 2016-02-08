@@ -1,4 +1,4 @@
-/*	$OpenBSD: cdio.c,v 1.64 2008/07/23 21:33:32 av Exp $	*/
+/*	$OpenBSD: cdio.c,v 1.69 2009/02/07 20:21:13 naddy Exp $	*/
 
 /*  Copyright (c) 1995 Serge V. Vakulenko
  * All rights reserved.
@@ -111,7 +111,7 @@
 struct cmdtab {
 	int command;
 	char *name;
-	unsigned int min;
+	int min;
 	char *args;
 } cmdtab[] = {
 { CMD_CLOSE,    "close",        1, "" },
@@ -139,8 +139,8 @@ struct cmdtab {
 { CMD_CDID,	"cdid",		3, "" },
 { CMD_QUIT,	"exit",		2, "" },
 { CMD_BLANK,	"blank",	1, "" },
-{ CMD_CDRIP,	"cdrip",	1, "[[track1-trackN] ...]" },
-{ CMD_CDPLAY,	"cdplay",	1, "[[track1-trackN] ...]" },
+{ CMD_CDRIP,	"cdrip",	3, "[[track1-trackN] ...]" },
+{ CMD_CDPLAY,	"cdplay",	3, "[[track1-trackN] ...]" },
 { 0, 0, 0, 0}
 };
 
@@ -149,7 +149,7 @@ struct cd_toc_entry *toc_buffer;
 char		*cdname;
 int		fd = -1;
 int		writeperm = 0;
-int		mediacap = 0;
+int		mediacap[MMC_FEATURE_MAX / 8];
 int		verbose = 1;
 int		msf = 1;
 const char	*cddb_host;
@@ -165,7 +165,6 @@ int		setvol(int, int);
 int		read_toc_entrys(int);
 int		play_msf(int, int, int, int, int, int);
 int		play_track(int, int, int, int);
-int		get_vol(int *, int *);
 int		status(int *, int *, int *, int *);
 int		is_wave(int);
 __dead void	tao(int argc, char **argv);
@@ -197,7 +196,7 @@ help(void)
 {
 	struct cmdtab *c;
 	char *s, n;
-	u_int i;
+	int i;
 
 	for (c = cmdtab; c->name; ++c) {
 		if (!c->args)
@@ -266,8 +265,10 @@ main(int argc, char **argv)
 
 	if (!cdname) {
 		cdname = DEFAULT_CD_DRIVE;
-		fprintf(stderr,
-		    "No CD device name specified. Defaulting to %s.\n", cdname);
+		if (verbose == 2)
+			fprintf(stderr,
+			    "No CD device name specified. Defaulting to %s.\n",
+			    cdname);
 	}
 
 	if (argc > 0 && !strcasecmp(*argv, "tao")) {
@@ -514,11 +515,12 @@ run(int cmd, char *arg)
 		if (!open_cd(cdname, 1))
 			return 0;
 
-		if (get_media_capabilities(&mediacap) == -1) {
+		if (get_media_capabilities(mediacap, 1) == -1) {
 			warnx("Can't determine media type");
 			return (0);
 		}
-		if ((mediacap & MEDIACAP_CDRW_WRITE) == 0) {
+		if (isset(mediacap, MMC_FEATURE_CDRW_WRITE) == 0 &&
+		    get_media_type() != MEDIATYPE_CDRW) {
 			warnx("The media doesn't support blanking");
 			return (0);
 		}
@@ -658,9 +660,9 @@ tao(int argc, char **argv)
 
 	if (!open_cd(cdname, 1))
 		exit(1);
-	if (get_media_capabilities(&mediacap) == -1)
+	if (get_media_capabilities(mediacap, 1) == -1)
 		errx(1, "Can't determine media type");
-	if ((mediacap & MEDIACAP_TAO) == 0)
+	if (isset(mediacap, MMC_FEATURE_CD_TAO) == 0)
 		errx(1, "The media can't be written in TAO mode");
 
 	get_disc_size(&availblk);

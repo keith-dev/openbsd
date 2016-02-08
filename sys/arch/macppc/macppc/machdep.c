@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.99 2008/06/27 17:22:14 miod Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.104 2009/01/22 22:41:42 kettenis Exp $	*/
 /*	$NetBSD: machdep.c,v 1.4 1996/10/16 19:33:11 ws Exp $	*/
 
 /*
@@ -82,6 +82,7 @@
 
 #ifdef DDB
 #include <machine/db_machdep.h>
+#include <ddb/db_interface.h>
 #include <ddb/db_access.h>
 #include <ddb/db_sym.h>
 #include <ddb/db_extern.h>
@@ -387,6 +388,7 @@ initppc(startkernel, endkernel, args)
 
 #ifdef DDB
 	ddb_init();
+	db_machine_init();
 #endif
 
 	/*
@@ -1020,11 +1022,17 @@ void
 signotify(struct proc *p)
 {
 	aston(p);
-#ifdef MULTIPROCESSOR
-	if (p->p_cpu != curcpu() && p->p_cpu != NULL)
-		openpic_send_ipi(p->p_cpu->ci_cpuid);
-#endif
+	cpu_unidle(p->p_cpu);
 }
+
+#ifdef MULTIPROCESSOR
+void
+cpu_unidle(struct cpu_info *ci)
+{
+	if (ci != curcpu())
+		ppc_send_ipi(ci, PPC_IPI_NOP);
+}
+#endif
 
 /*
  * set system type from string
@@ -1101,6 +1109,22 @@ ppc_intr_setup(intr_establish_t *establish, intr_disestablish_t *disestablish)
 	intr_establish_func = establish;
 	intr_disestablish_func = disestablish;
 }
+
+intr_send_ipi_t ppc_no_send_ipi;
+intr_send_ipi_t *intr_send_ipi_func = ppc_no_send_ipi;
+
+void
+ppc_no_send_ipi(struct cpu_info *ci, int id)
+{
+	panic("ppc_send_ipi called: no ipi function\n");
+}
+
+void
+ppc_send_ipi(struct cpu_info *ci, int id)
+{
+	(*intr_send_ipi_func)(ci, id);
+}
+
 
 /* BUS functions */
 int
@@ -1205,8 +1229,7 @@ bus_mem_add_mapping(bus_addr_t bpa, bus_size_t size, int cacheable,
 		vaddr = uvm_km_kmemalloc(phys_map, NULL, len,
 		    UVM_KMF_NOWAIT|UVM_KMF_VALLOC);
 		if (vaddr == 0)
-			panic("bus_mem_add_mapping: kvm alloc of 0x%x failed",
-			    len);
+			return (ENOMEM);
 	}
 	*bshp = vaddr + off;
 #ifdef DEBUG_BUS_MEM_ADD_MAPPING

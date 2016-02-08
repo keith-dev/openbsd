@@ -1,4 +1,4 @@
-/*	$OpenBSD: sd.c,v 1.152 2008/08/01 01:44:20 dlg Exp $	*/
+/*	$OpenBSD: sd.c,v 1.154 2009/02/16 21:19:07 miod Exp $	*/
 /*	$NetBSD: sd.c,v 1.111 1997/04/02 02:29:41 mycroft Exp $	*/
 
 /*-
@@ -225,9 +225,9 @@ sdattach(struct device *parent, struct device *self, void *aux)
 	printf("%s: ", sd->sc_dev.dv_xname);
 	switch (result) {
 	case SDGP_RESULT_OK:
-		printf("%lldMB, %lu cyl, %lu head, %lu sec, %lu bytes/sec, %lld sec total",
-		    dp->disksize / (1048576 / dp->blksize), dp->cyls,
-		    dp->heads, dp->sectors, dp->blksize, dp->disksize);
+		printf("%lldMB, %lu bytes/sec, %lld sec total",
+		    dp->disksize / (1048576 / dp->blksize), dp->blksize,
+		    dp->disksize);
 		break;
 
 	case SDGP_RESULT_OFFLINE:
@@ -808,7 +808,7 @@ sdminphys(struct buf *bp)
 			bp->b_bcount = max;
 	}
 
-	(*sd->sc_link->adapter->scsi_minphys)(bp);
+	(*sd->sc_link->adapter->scsi_minphys)(bp, sd->sc_link);
 
 	device_unref(&sd->sc_dev);
 }

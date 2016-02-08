@@ -1,6 +1,6 @@
 #!/bin/sh -
 #
-# $OpenBSD: sysmerge.sh,v 1.19 2008/07/21 08:28:55 ajacoutot Exp $
+# $OpenBSD: sysmerge.sh,v 1.29 2009/02/17 16:48:11 ajacoutot Exp $
 #
 # This script is based on the FreeBSD mergemaster script, written by
 # Douglas Barton <DougB@FreeBSD.org>
@@ -26,11 +26,37 @@
 
 umask 0022
 
-PAGER="${PAGER:=/usr/bin/more}"
-SWIDTH=`stty size | awk '{w=$2} END {if (w==0) {w=80} print w}'`
 WRKDIR=`mktemp -d -p /var/tmp sysmerge.XXXXX` || exit 1
+SWIDTH=`stty size | awk '{w=$2} END {if (w==0) {w=80} print w}'`
+MERGE_CMD="${MERGE_CMD:=sdiff -as -w ${SWIDTH} -o}"
 
-trap "rm -rf ${WRKDIR}; exit 1" 1 2 3 13 15
+EDITOR="${EDITOR:=/usr/bin/vi}"
+PAGER="${PAGER:=/usr/bin/more}"
+
+# clean leftovers created by make in src
+clean_src() {
+	if [ "${SRCDIR}" ]; then
+		cd ${SRCDIR}/gnu/usr.sbin/sendmail/cf/cf && make cleandir 1> /dev/null
+	fi
+}
+
+# remove newly created work directory and exit with status 1
+error_rm_wrkdir() {
+	rmdir ${WRKDIR} 2> /dev/null
+	exit 1
+}
+
+usage() {
+	echo "usage: ${0##*/} [-ab] [-s src | etcXX.tgz] [-x xetcXX.tgz]" >&2
+}
+
+trap "clean_src; rm -rf ${WRKDIR}; exit 1" 1 2 3 13 15
+
+if [ `id -u` -ne 0 ]; then
+	echo " *** ERROR: Need root privileges to run this script"
+	usage
+	error_rm_wrkdir
+fi
 
 if [ -z "${FETCH_CMD}" ]; then
 	if [ -z "${FTP_KEEPALIVE}" ]; then
@@ -46,7 +72,7 @@ do_pre() {
 			SRCDIR=/usr/src
 		else
 			echo " *** ERROR: please specify a valid path to src or (x)etcXX.tgz"
-			exit 1
+			error_rm_wrkdir
 		fi
 	fi
 
@@ -81,8 +107,7 @@ do_pre() {
 				echo ""
 				;;
 			*)
-				rm -rf ${WRKDIR} 2> /dev/null
-				exit 1
+				error_rm_wrkdir
 				;;
 		esac
 	fi
@@ -170,16 +195,21 @@ mm_install() {
 
 
 merge_loop() {
-	echo "===> Type h at the sdiff prompt (%) to get usage help\n"
+	if [ `expr "$MERGE_CMD" : ^sdiff.*` -gt 0 ]; then
+		echo "===> Type h at the sdiff prompt (%) to get usage help\n"
+	fi
 	MERGE_AGAIN=1
 	while [ "${MERGE_AGAIN}" ]; do
 		cp -p "${COMPFILE}" "${COMPFILE}.merged"
-		sdiff -as -o "${COMPFILE}.merged" -w ${SWIDTH} \
+		${MERGE_CMD} "${COMPFILE}.merged" \
 			"${DESTDIR}${COMPFILE#.}" "${COMPFILE}"
 		INSTALL_MERGED=v
 		while [ "${INSTALL_MERGED}" = "v" ]; do
 			echo ""
-			echo "  Use 'i' to install merged file"
+			echo "  Use 'e' to edit the merged file"
+			echo "  Use 'i' to install the merged file"
+			echo "  Use 'n' to view a diff between the merged and new files"
+			echo "  Use 'o' to view a diff between the old and merged files"
 			echo "  Use 'r' to re-do the merge"
 			echo "  Use 'v' to view the merged file"
 			echo "  Default is to leave the temporary file to deal with by hand"
@@ -187,6 +217,20 @@ merge_loop() {
 			echo -n "===> How should I deal with the merged file? [Leave it for later] "
 			read INSTALL_MERGED
 			case "${INSTALL_MERGED}" in
+			[eE])
+				echo "editing merged file...\n"
+				if [ -z "${VISUAL}" ]; then
+					EDIT="${EDITOR}"
+				else
+					EDIT="${VISUAL}"
+				fi
+				if which ${EDIT} > /dev/null 2>&1; then
+					${EDIT} ${COMPFILE}.merged
+				else
+					echo " *** ERROR: ${EDIT} can not be found or is not executable"
+				fi
+				INSTALL_MERGED=v
+				;;
 			[iI])
 				mv "${COMPFILE}.merged" "${COMPFILE}"
 				echo ""
@@ -196,6 +240,16 @@ merge_loop() {
 						echo " *** WARNING: Problem installing ${COMPFILE}, it will remain to merge by hand"
 					fi
 				unset MERGE_AGAIN
+				;;
+			[nN])
+				echo "comparison between merged and new files:\n"
+				diff -u ${COMPFILE}.merged ${COMPFILE}
+				INSTALL_MERGED=v
+				;;
+			[oO])
+				echo "comparison between old and merged files:\n"
+				diff -u ${DESTDIR}${COMPFILE#.} ${COMPFILE}.merged
+				INSTALL_MERGED=v
 				;;
 			[rR])
 				rm "${COMPFILE}.merged"
@@ -255,7 +309,9 @@ diff_loop() {
 
 		if [ -z "${BATCHMODE}" ]; then
 			echo "  Use 'd' to delete the temporary ${COMPFILE}"
-			echo "  Use 'i' to install the temporary ${COMPFILE}"
+			if [ "${COMPFILE}" != "./etc/master.passwd" -a "${COMPFILE}" != "./etc/group" ]; then
+				echo "  Use 'i' to install the temporary ${COMPFILE}"
+			fi
 			if [ -z "${NO_INSTALLED}" -a -z "${IS_BINFILE}" ]; then
 				echo "  Use 'm' to merge the temporary and installed versions"
 				echo "  Use 'v' to view the diff results again"
@@ -275,12 +331,18 @@ diff_loop() {
 			echo "\n===> Deleting ${COMPFILE}"
 			;;
 		[iI])
-			echo ""
-			if mm_install "${COMPFILE}"; then
-				echo "===> ${COMPFILE} installed successfully"
+			if [ "${COMPFILE}" != "./etc/master.passwd" -a "${COMPFILE}" != "./etc/group" ]; then
+				echo ""
+				if mm_install "${COMPFILE}"; then
+					echo "===> ${COMPFILE} installed successfully"
+				else
+					echo " *** WARNING: Problem installing ${COMPFILE}, it will remain to merge by hand"
+				fi
 			else
-				echo " *** WARNING: Problem installing ${COMPFILE}, it will remain to merge by hand"
+				echo "invalid choice: ${HANDLE_COMPFILE}\n"
+				HANDLE_COMPFILE="todo"
 			fi
+				
 			;;
 		[mM])
 			if [ -z "${NO_INSTALLED}" -a -z "${IS_BINFILE}" ]; then
@@ -316,7 +378,7 @@ diff_loop() {
 do_compare() {
 	echo "===> Starting comparison"
 
-	cd ${TEMPROOT} || exit 1
+	cd ${TEMPROOT} || error_rm_wrkdir
 
 	# use -size +0 to avoid comparing empty log files and device nodes
 	for COMPFILE in `find . -type f -size +0`; do
@@ -363,59 +425,38 @@ do_post() {
 	fi
 
 	if [ "${NEED_CAP_MKDB}" ]; then
-		echo -n "===> You installed a new ${DESTDIR}/etc/login.conf file, "
-		if [ "${AUTOMODE}" ]; then
-			echo "running cap_mkdb"
-			cap_mkdb ${DESTDIR}/etc/login.conf
-		else
-			echo "\n    rebuild your login.conf database by running the following command as root:"
-			echo "    'cap_mkdb ${DESTDIR}/etc/login.conf'"
-		fi
+		echo -n "===> A new ${DESTDIR}/etc/login.conf file was installed, "
+		echo "running cap_mkdb..."
+		cap_mkdb ${DESTDIR}/etc/login.conf
 	fi
 
 	if [ "${NEED_PWD_MKDB}" ]; then
 		echo -n "===> A new ${DESTDIR}/etc/master.passwd file was installed, "
-		if [ "${AUTOMODE}" ]; then
-			echo "running pwd_mkdb"
-			pwd_mkdb -d ${DESTDIR}/etc -p ${DESTDIR}/etc/master.passwd
-		else
-			echo "\n    rebuild your password files by running the following command as root:"
-			echo "    'pwd_mkdb -d ${DESTDIR}/etc -p ${DESTDIR}/etc/master.passwd'"
-		fi
+		echo "running pwd_mkdb..."
+		pwd_mkdb -d ${DESTDIR}/etc -p ${DESTDIR}/etc/master.passwd
 	fi
 
 	if [ "${NEED_MAKEDEV}" ]; then
 		echo -n "===> A new ${DESTDIR}/dev/MAKEDEV script was installed, "
-		if [ "${AUTOMODE}" ]; then
-			echo "running MAKEDEV"
-			cd ${DESTDIR}/dev && /bin/sh MAKEDEV all
-		else
-			echo "\n    rebuild your device nodes by running the following command as root:"
-			echo "    'cd ${DESTDIR}/dev && /bin/sh MAKEDEV all'"
-		fi
+		echo "running MAKEDEV..."
+		cd ${DESTDIR}/dev && /bin/sh MAKEDEV all
 	fi
 
 	if [ "${NEED_NEWALIASES}" ]; then
 		echo -n "===> A new ${DESTDIR}/etc/mail/aliases file was installed, "
 		if [ "${DESTDIR}" ]; then
-			echo "\n    but the newaliases command is limited to the directories configured"
-			echo "    in sendmail.cf.  Make sure to create your aliases database by"
-			echo "    hand when your sendmail configuration is done."
-		elif [ "${AUTOMODE}" ]; then
-			echo "running newaliases"
-			newaliases
+			echo "\n     but the newaliases command is limited to the directories configured"
+			echo "     in sendmail.cf.  Make sure to create your aliases database by"
+			echo "     hand when your sendmail configuration is done."
 		else
-			echo "\n    rebuild your aliases database by running the following command as root:"
-			echo "    'newaliases'"
+			echo "running newaliases..."
+			newaliases
 		fi
 	fi
 
-	# clean leftovers created by make in src
-	if [ "${SRCDIR}" ]; then
-		cd ${SRCDIR}/gnu/usr.sbin/sendmail/cf/cf && make cleandir 1> /dev/null
-	fi
+	clean_src
 
-	echo "===> Making sure your directory hierarchy has correct perms, running mtree"
+	echo "===> Making sure your directory hierarchy has correct perms, running mtree..."
 	mtree -qdef ${DESTDIR}/etc/mtree/4.4BSD.dist -p ${DESTDIR:=/} -U 1> /dev/null
 
 	FILES_IN_WRKDIR=`find ${WRKDIR} -type f -size +0 2>/dev/null`
@@ -428,7 +469,7 @@ do_post() {
 		fi
 		if [ "${FILES_IN_TEMPROOT}" ]; then
 			echo "===> File(s) remaining for you to merge by hand:"
-			find "${TEMPROOT}" -type f -size +0 -exec echo "     {}" \;
+			find "${TEMPROOT}" -type f ! -name \*.merged -size +0 -exec echo "     {}" \;
 		fi
 		if [ "${FILES_IN_BKPDIR}" ]; then
 			echo "===> Backup of replaced file(s) can be found under"
@@ -442,72 +483,56 @@ do_post() {
 }
 
 
-ARGS=`getopt abs:x: $*`
-if [ $? -ne 0 ]; then
-	echo "usage: ${0##*/} [-ab] [-s src | etcXX.tgz] [-x xetcXX.tgz]" >&2
-	exit 1
-fi
-
-if [ `id -u` -ne 0 ]; then
-	echo " *** ERROR: Need root privilege to run this script"
-	exit 1
-fi
-
-set -- ${ARGS}
-while [ $# -ne 0 ]
-do
-	case "$1" in
-	-a)
+while getopts abs:x: arg; do
+	case ${arg} in
+	a)
 		AUTOMODE=1
-		shift;;
-	-b)
+		;;
+	b)
 		BATCHMODE=1
-		shift;;
-	-s)
-		WHERE="${2}"
-		shift 2
-		if [ -f "${WHERE}/etc/Makefile" ]; then
-			SRCDIR=${WHERE}
-		elif [ -f "${WHERE}" ] && echo -n ${WHERE} |		\
-		    awk -F/ '{print $NF}' | 				\
+		;;
+	s)
+		if [ -f "${OPTARG}/etc/Makefile" ]; then
+			SRCDIR=${OPTARG}
+		elif [ -f "${OPTARG}" ] && echo -n ${OPTARG} | \
+		    awk -F/ '{print $NF}' | \
 		    grep '^etc[0-9][0-9]\.tgz$' > /dev/null 2>&1 ; then
-			TGZ=${WHERE}
-		elif echo ${WHERE} | \
+			TGZ=${OPTARG}
+		elif echo ${OPTARG} | \
 		    grep -qE '^(http|ftp)://.*/etc[0-9][0-9]\.tgz$'; then
 			TGZ=${WRKDIR}/etc.tgz
-			TGZURL="${WHERE}"
+			TGZURL=${OPTARG}
 			if ! ${FETCH_CMD} -o ${TGZ} ${TGZURL}; then
 				echo " *** ERROR: Could not retrieve ${TGZURL}"
-				exit 1
+				error_rm_wrkdir
 			fi
 		else
-			echo " *** ERROR: ${WHERE} is not a path to src nor etcXX.tgz"
-			exit 1
+			echo " *** ERROR: ${OPTARG} is not a path to src nor etcXX.tgz"
+			error_rm_wrkdir
 		fi
 		;;
-	-x)
-		WHERE="${2}"
-		shift 2
-		if [ -f "${WHERE}" ] && echo -n ${WHERE} | 		\
-		    awk -F/ '{print $NF}' | 				\
+	x)
+		if [ -f "${OPTARG}" ] && echo -n ${OPTARG} | \
+		    awk -F/ '{print $NF}' | \
 		    grep '^xetc[0-9][0-9]\.tgz$' > /dev/null 2>&1 ; then
-			XTGZ=${WHERE}
-		elif echo ${WHERE} | \
+			XTGZ=${OPTARG}
+		elif echo ${OPTARG} | \
 		    grep -qE '^(http|ftp)://.*/xetc[0-9][0-9]\.tgz$'; then
 			XTGZ=${WRKDIR}/xetc.tgz
-			XTGZURL="${WHERE}"
+			XTGZURL=${OPTARG}
 			if ! ${FETCH_CMD} -o ${XTGZ} ${XTGZURL}; then
 				echo " *** ERROR: Could not retrieve ${XTGZURL}"
-				exit 1
+				error_rm_wrkdir
 			fi
 		else
-			echo " *** ERROR: ${WHERE} is not a path to xetcXX.tgz"
-			exit 1
+			echo " *** ERROR: ${OPTARG} is not a path to xetcXX.tgz"
+			error_rm_wrkdir
 		fi
 		;;
-	--)
-		shift
-		break;;
+	*)
+		usage
+		error_rm_wrkdir
+		;;
 	esac
 done
 

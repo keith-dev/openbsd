@@ -1,4 +1,4 @@
-/*	$OpenBSD: dvmrpd.h,v 1.8 2007/09/11 18:23:05 claudio Exp $ */
+/*	$OpenBSD: dvmrpd.h,v 1.13 2009/01/20 01:35:34 todd Exp $ */
 
 /*
  * Copyright (c) 2004, 2005, 2006 Esben Norby <norby@openbsd.org>
@@ -108,7 +108,11 @@ enum imsg_type {
 	IMSG_FULL_ROUTE_REPORT,
 	IMSG_FULL_ROUTE_REPORT_END,
 	IMSG_MFC_ADD,
-	IMSG_MFC_DEL
+	IMSG_MFC_DEL,
+	IMSG_NEIGHBOR_UP,
+	IMSG_NEIGHBOR_DOWN,
+	IMSG_FLASH_UPDATE,
+	IMSG_FLASH_UPDATE_DS
 };
 
 struct imsg_hdr {
@@ -261,7 +265,6 @@ struct dvmrpd_conf {
 #define DVMRPD_OPT_NOACTION	 0x00000004
 	int			 maxdepth;
 	LIST_HEAD(, iface)	 iface_list;
-	struct src_head		 src_list;
 	int			 dvmrp_socket;
 	int			 mroute_socket;
 	int			 flags;

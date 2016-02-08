@@ -1,4 +1,4 @@
-/*	$OpenBSD: forward.c,v 1.23 2007/10/22 01:14:26 deraadt Exp $	*/
+/*	$OpenBSD: forward.c,v 1.25 2008/11/13 18:33:03 landry Exp $	*/
 /*	$NetBSD: forward.c,v 1.7 1996/02/13 16:49:10 ghudson Exp $	*/
 
 /*-
@@ -37,7 +37,7 @@
 #if 0
 static char sccsid[] = "@(#)forward.c	8.1 (Berkeley) 6/6/93";
 #endif
-static char rcsid[] = "$OpenBSD: forward.c,v 1.23 2007/10/22 01:14:26 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: forward.c,v 1.25 2008/11/13 18:33:03 landry Exp $";
 #endif /* not lint */
 
 #include <sys/types.h>

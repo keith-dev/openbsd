@@ -1,4 +1,4 @@
-/*	$OpenBSD: database.c,v 1.22 2008/02/11 12:37:37 norby Exp $ */
+/*	$OpenBSD: database.c,v 1.26 2009/01/31 11:44:49 claudio Exp $ */
 
 /*
  * Copyright (c) 2005 Claudio Jeker <claudio@openbsd.org>
@@ -91,8 +91,8 @@ send_db_description(struct nbr *nbr)
 
 		/* build LSA list, keep space for a possible md5 sum */
 		for (le = TAILQ_FIRST(&nbr->db_sum_list); le != NULL &&
-		    buf->wpos + sizeof(struct lsa_hdr) < buf->max -
-		    MD5_DIGEST_LENGTH; le = nle) {
+		    buf_left(buf) >= MD5_DIGEST_LENGTH + sizeof(struct lsa_hdr);
+		    le = nle) {
 			nbr->dd_end = nle = TAILQ_NEXT(le, entry);
 			if (buf_add(buf, le->le_lsa, sizeof(struct lsa_hdr)))
 				goto fail;
@@ -150,7 +150,7 @@ send_db_description(struct nbr *nbr)
 		goto fail;
 
 	/* transmit packet */
-	ret = send_packet(nbr->iface, buf->buf, buf->wpos, &dst);
+	ret = send_packet(nbr->iface, buf, &dst);
 done:
 	buf_free(buf);
 	return (ret);
@@ -187,7 +187,8 @@ recv_db_description(struct nbr *nbr, char *buf, u_int16_t len)
 	    nbr->last_rx_bits == dd_hdr.bits &&
 	    ntohl(dd_hdr.dd_seq_num) == nbr->dd_seq_num - nbr->dd_master ?
 	    1 : 0) {
-			log_debug("recv_db_description: dupe");
+			log_debug("recv_db_description: dupe from ID %s",
+			    inet_ntoa(nbr->id));
 			dupe = 1;
 	}
 
@@ -235,16 +236,15 @@ recv_db_description(struct nbr *nbr, char *buf, u_int16_t len)
 			}
 			nbr->dd_seq_num++;
 
+			/* event negotiation done */
+			nbr_fsm(nbr, NBR_EVT_NEG_DONE);
+
 			/* this packet may already have data so pass it on */
 			if (len > 0) {
 				nbr->dd_pending++;
 				ospfe_imsg_compose_rde(IMSG_DD, nbr->peerid,
 				    0, buf, len);
 			}
-
-			/* event negotiation done */
-			nbr_fsm(nbr, NBR_EVT_NEG_DONE);
-
 		} else {
 			/* ignore packet */
 			log_debug("recv_db_description: packet ignored in "
