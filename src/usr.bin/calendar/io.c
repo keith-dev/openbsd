@@ -1,4 +1,4 @@
-/*	$OpenBSD: io.c,v 1.22 2003/03/13 09:09:29 deraadt Exp $	*/
+/*	$OpenBSD: io.c,v 1.24 2003/06/03 02:56:06 millert Exp $	*/
 
 /*
  * Copyright (c) 1989, 1993, 1994
@@ -12,11 +12,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -43,7 +39,7 @@ static const char copyright[] =
 #if 0
 static const char sccsid[] = "@(#)calendar.c  8.3 (Berkeley) 3/25/94";
 #else
-static char rcsid[] = "$OpenBSD: io.c,v 1.22 2003/03/13 09:09:29 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: io.c,v 1.24 2003/06/03 02:56:06 millert Exp $";
 #endif
 #endif /* not lint */
 
@@ -92,6 +88,7 @@ cal(void)
 	char buf[2048 + 1], *prefix = NULL;
 	struct event *events, *cur_evt, *ev1, *tmp;
 	struct match *m;
+	size_t nlen;
 
 	events = NULL;
 	cur_evt = NULL;
@@ -198,11 +195,10 @@ cal(void)
 			}
 		}
 		else if (printing) {
-			if ((ev1->ldesc = realloc(ev1->ldesc,
-			    (2 + strlen(ev1->ldesc) + strlen(buf)))) == NULL)
+			nlen = strlen(ev1->ldesc) + strlen(buf) + 2;
+			if ((ev1->ldesc = realloc(ev1->ldesc, nlen)) == NULL)
 				err(1, NULL);
-			strcat(ev1->ldesc, "\n");
-			strcat(ev1->ldesc, buf);
+			snprintf(ev1->ldesc, nlen, "%s\n%s", ev1->ldesc, buf);
 		}
 	}
 	tmp = events;

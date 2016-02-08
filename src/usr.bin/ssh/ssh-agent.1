@@ -1,4 +1,4 @@
-.\" $OpenBSD: ssh-agent.1,v 1.36 2003/01/21 18:14:36 marc Exp $
+.\" $OpenBSD: ssh-agent.1,v 1.39 2003/06/10 09:12:11 jmc Exp $
 .\"
 .\" Author: Tatu Ylonen <ylo@cs.hut.fi>
 .\" Copyright (c) 1995 Tatu Ylonen <ylo@cs.hut.fi>, Espoo, Finland
@@ -88,7 +88,7 @@ Kill the current agent (given by the
 .Ev SSH_AGENT_PID
 environment variable).
 .It Fl t Ar life
-Set a default value for the maximum lifetime of identities added to the agent. 
+Set a default value for the maximum lifetime of identities added to the agent.
 The lifetime may be specified in seconds or in a time format specified in
 .Xr sshd 8 .
 A lifetime specified for an identity with
@@ -96,7 +96,8 @@ A lifetime specified for an identity with
 overrides this value.
 Without this option the default maximum lifetime is forever.
 .It Fl d
-Debug mode.  When this option is specified
+Debug mode.
+When this option is specified
 .Nm
 will not fork.
 .El
@@ -132,7 +133,7 @@ However, the connection to the agent is forwarded over SSH
 remote logins, and the user can thus use the privileges given by the
 identities anywhere in the network in a secure way.
 .Pp
-There are two main ways to get an agent setup:
+There are two main ways to get an agent set up:
 Either the agent starts a new subcommand into which some environment
 variables are exported, or the agent prints the needed shell commands
 (either
@@ -178,6 +179,11 @@ authentication agent.
 These sockets should only be readable by the owner.
 The sockets should get automatically removed when the agent exits.
 .El
+.Sh SEE ALSO
+.Xr ssh 1 ,
+.Xr ssh-add 1 ,
+.Xr ssh-keygen 1 ,
+.Xr sshd 8
 .Sh AUTHORS
 OpenSSH is a derivative of the original and free
 ssh 1.2.12 release by Tatu Ylonen.
@@ -187,8 +193,3 @@ removed many bugs, re-added newer features and
 created OpenSSH.
 Markus Friedl contributed the support for SSH
 protocol versions 1.5 and 2.0.
-.Sh SEE ALSO
-.Xr ssh 1 ,
-.Xr ssh-add 1 ,
-.Xr ssh-keygen 1 ,
-.Xr sshd 8

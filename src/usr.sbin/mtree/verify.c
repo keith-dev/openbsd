@@ -1,4 +1,4 @@
-/*	$OpenBSD: verify.c,v 1.11 2002/03/14 16:44:25 mpech Exp $	*/
+/*	$OpenBSD: verify.c,v 1.13 2003/06/02 23:36:54 millert Exp $	*/
 /*	$NetBSD: verify.c,v 1.10 1995/03/07 21:26:28 cgd Exp $	*/
 
 /*-
@@ -13,11 +13,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -38,7 +34,7 @@
 #if 0
 static const char sccsid[] = "@(#)verify.c	8.1 (Berkeley) 6/6/93";
 #else
-static const char rcsid[] = "$OpenBSD: verify.c,v 1.11 2002/03/14 16:44:25 mpech Exp $";
+static const char rcsid[] = "$OpenBSD: verify.c,v 1.13 2003/06/02 23:36:54 millert Exp $";
 #endif
 #endif /* not lint */
 
@@ -61,7 +57,7 @@ extern char fullpath[MAXPATHLEN];
 static NODE *root;
 static char path[MAXPATHLEN];
 
-static void	miss(NODE *, char *);
+static void	miss(NODE *, char *, size_t);
 static int	vwalk(void);
 
 int
@@ -71,7 +67,7 @@ verify()
 
 	root = spec();
 	rval = vwalk();
-	miss(root, path);
+	miss(root, path, sizeof(path));
 	return (rval);
 }
 
@@ -157,9 +153,10 @@ extra:
 }
 
 static void
-miss(p, tail)
+miss(p, tail, len)
 	NODE *p;
 	char *tail;
+	size_t len;
 {
 	int create;
 	char *tp;
@@ -169,7 +166,7 @@ miss(p, tail)
 			continue;
 		if (p->type != F_DIR && (dflag || p->flags & F_VISIT))
 			continue;
-		(void)strcpy(tail, p->name);
+		(void)strlcpy(tail, p->name, len);
 		if (!(p->flags & F_VISIT)) {
 			/* Don't print missing message if file exists as a
 			   symbolic link and the -q flag is set. */
@@ -207,7 +204,7 @@ miss(p, tail)
 
 		for (tp = tail; *tp; ++tp);
 		*tp = '/';
-		miss(p->child, tp + 1);
+		miss(p->child, tp + 1, len - (tp + 1 - tail));
 		*tp = '\0';
 
 		if (!create)

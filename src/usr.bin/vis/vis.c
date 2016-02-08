@@ -1,4 +1,4 @@
-/*	$OpenBSD: vis.c,v 1.5 2002/02/16 21:27:58 millert Exp $	*/
+/*	$OpenBSD: vis.c,v 1.8 2003/09/08 00:07:41 millert Exp $	*/
 /*	$NetBSD: vis.c,v 1.4 1994/12/20 16:13:03 jtc Exp $	*/
 
 /*-
@@ -13,11 +13,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -35,16 +31,16 @@
  */
 
 #ifndef lint
-static char copyright[] =
+static const char copyright[] =
 "@(#) Copyright (c) 1989, 1993\n\
 	The Regents of the University of California.  All rights reserved.\n";
 #endif /* not lint */
 
 #ifndef lint
 #if 0
-static char sccsid[] = "@(#)vis.c	8.1 (Berkeley) 6/6/93";
+static const char sccsid[] = "@(#)vis.c	8.1 (Berkeley) 6/6/93";
 #endif
-static char rcsid[] = "$OpenBSD: vis.c,v 1.5 2002/02/16 21:27:58 millert Exp $";
+static const char rcsid[] = "$OpenBSD: vis.c,v 1.8 2003/09/08 00:07:41 millert Exp $";
 #endif /* not lint */
 
 #include <stdio.h>
@@ -58,11 +54,10 @@ int eflags, fold, foldwidth=80, none, markeol, debug;
 
 int foldit(char *, int, int);
 void process(FILE *, char *);
+__dead void usage(void);
 
 int
-main(argc, argv) 
-	int argc;
-	char *argv[];
+main(int argc, char *argv[])
 {
 	FILE *fp;
 	int ch;
@@ -109,9 +104,7 @@ main(argc, argv)
 #endif
 		case '?':
 		default:
-			fprintf(stderr, 
-		"usage: vis [-nwctsobf] [-F foldwidth]\n");
-			exit(1);
+			usage();
 		}
 	argc -= optind;
 	argv += optind;
@@ -130,9 +123,7 @@ main(argc, argv)
 }
 	
 void
-process(fp, filename)
-	FILE *fp;
-	char *filename;
+process(FILE *fp, char *filename)
 {
 	static int col = 0;
 	char *cp = "\0"+1;	/* so *(cp-1) starts out != '\n' */
@@ -180,4 +171,14 @@ process(fp, filename)
 	 */
 	if (fold && *(cp-1) != '\n')
 		printf("\\\n");
+}
+
+__dead void
+usage(void)
+{
+	extern char *__progname;
+
+	fprintf(stderr, "usage: %s [-cbflnostw] [-F [foldwidth]] [file ...]\n",
+	    __progname);
+	exit(1);
 }

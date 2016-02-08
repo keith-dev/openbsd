@@ -1,4 +1,4 @@
-/*      $OpenBSD: md5.c,v 1.3 2002/06/23 21:46:10 wcobb Exp $  */
+/*      $OpenBSD: md5.c,v 1.5 2003/09/02 23:52:17 david Exp $  */
 
 /*
  * Copyright (c) 2002 Markus Friedl.  All rights reserverd.
@@ -32,12 +32,13 @@
 #include <err.h>
 #include <fcntl.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
 #define MD5LEN 16
 
-char *
+static char *
 sysmd5(const char *s, size_t len)
 {
 	static char md[MD5LEN*2 + 1];
@@ -94,7 +95,7 @@ err:
 	return (NULL);
 }
 
-int
+static int
 getallowsoft(void)
 {
 	int mib[2], old;
@@ -110,7 +111,7 @@ getallowsoft(void)
 	return old;
 }
 
-void
+static void
 setallowsoft(int new)
 {
 	int mib[2], old;

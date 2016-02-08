@@ -1,4 +1,4 @@
-/*	$OpenBSD: sysdep-os.h,v 1.1 2002/08/23 18:17:17 ho Exp $	*/
+/*	$OpenBSD: sysdep-os.h,v 1.3 2003/08/06 11:23:11 markus Exp $	*/
 
 /*
  * Copyright (c) 1998, 1999 Niklas Hallqvist.  All rights reserved.
@@ -12,11 +12,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by Ericsson Radio Systems.
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -49,6 +44,14 @@ typedef u_int32_t socklen_t;
 #define CPI_RESERVED_MAX	255
 #define CPI_PRIVATE_MIN		61440
 #define CPI_PRIVATE_MAX		65536
+#endif
+
+#if !defined(SADB_X_EALG_CAST) && defined(SADB_X_EALG_CAST128CBC)
+#define SADB_X_EALG_CAST SADB_X_EALG_CAST128CBC
+#endif
+
+#if !defined(SADB_X_EALG_BLF) && defined(SADB_X_EALG_BLOWFISHCBC)
+#define SADB_X_EALG_BLF SADB_X_EALG_BLOWFISHCBC
 #endif
 
 #if 1

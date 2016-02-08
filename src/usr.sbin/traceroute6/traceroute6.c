@@ -1,4 +1,4 @@
-/*	$OpenBSD: traceroute6.c,v 1.34 2003/01/21 08:55:14 itojun Exp $	*/
+/*	$OpenBSD: traceroute6.c,v 1.36 2003/06/11 23:33:30 deraadt Exp $	*/
 /*	$KAME: traceroute6.c,v 1.63 2002/10/24 12:53:25 itojun Exp $	*/
 
 /*
@@ -45,11 +45,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -357,9 +353,7 @@ int useicmp;
 int lflag;			/* print both numerical address & hostname */
 
 int
-main(argc, argv)
-	int argc;
-	char *argv[];
+main(int argc, char *argv[])
 {
 	struct hostent *hp;
 	int error;
@@ -956,9 +950,7 @@ wait_for_reply(sock, mhdr)
 #ifdef IPSEC
 #ifdef IPSEC_POLICY_IPSEC
 int
-setpolicy(so, policy)
-	int so;
-	char *policy;
+setpolicy(int so, char *policy)
 {
 	char *buf;
 
@@ -978,9 +970,7 @@ setpolicy(so, policy)
 #endif
 
 void
-send_probe(seq, hops)
-	int seq;
-	u_long hops;
+send_probe(int seq, u_long hops)
 {
 	int i;
 
@@ -1025,8 +1015,7 @@ send_probe(seq, hops)
 }
 
 int
-get_hoplim(mhdr)
-	struct msghdr *mhdr;
+get_hoplim(struct msghdr *mhdr)
 {
 	struct cmsghdr *cm;
 
@@ -1042,10 +1031,9 @@ get_hoplim(mhdr)
 }
 
 double
-deltaT(t1p, t2p)
-	struct timeval *t1p, *t2p;
+deltaT(struct timeval *t1p, struct timeval *t2p)
 {
-	register double dt;
+	double dt;
 
 	dt = (double)(t2p->tv_sec - t1p->tv_sec) * 1000.0 +
 	    (double)(t2p->tv_usec - t1p->tv_usec) / 1000.0;
@@ -1056,8 +1044,7 @@ deltaT(t1p, t2p)
  * Convert an ICMP "type" field to a printable string.
  */
 char *
-pr_type(t0)
-	int t0;
+pr_type(int t0)
 {
 	u_char t = t0 & 0xff;
 	char *cp;
@@ -1113,12 +1100,9 @@ pr_type(t0)
 }
 
 int
-packet_ok(mhdr, cc, seq)
-	struct msghdr *mhdr;
-	int cc;
-	int seq;
+packet_ok(struct msghdr *mhdr, int cc, int seq)
 {
-	register struct icmp6_hdr *icp;
+	struct icmp6_hdr *icp;
 	struct sockaddr_in6 *from = (struct sockaddr_in6 *)mhdr->msg_name;
 	u_char type, code;
 	char *buf = (char *)mhdr->msg_iov[0].iov_base;
@@ -1245,9 +1229,7 @@ packet_ok(mhdr, cc, seq)
  * Increment pointer until find the UDP or ICMP header.
  */
 struct udphdr *
-get_udphdr(ip6, lim)
-	struct ip6_hdr *ip6;
-	u_char *lim;
+get_udphdr(struct ip6_hdr *ip6, u_char *lim)
 {
 	u_char *cp = (u_char *)ip6, nh;
 	int hlen;
@@ -1288,9 +1270,7 @@ get_udphdr(ip6, lim)
 }
 
 void
-print(mhdr, cc)
-	struct msghdr *mhdr;
-	int cc;
+print(struct msghdr *mhdr, int cc)
 {
 	struct sockaddr_in6 *from = (struct sockaddr_in6 *)mhdr->msg_name;
 	char hbuf[NI_MAXHOST];
@@ -1323,8 +1303,7 @@ print(mhdr, cc)
  * Out is assumed to be >= in.
  */
 void
-tvsub(out, in)
-	register struct timeval *out, *in;
+tvsub(struct timeval *out, struct timeval *in)
 {
 
 	if ((out->tv_usec -= in->tv_usec) < 0)   {
@@ -1340,10 +1319,9 @@ tvsub(out, in)
  * numeric value, otherwise try for symbolic name.
  */
 const char *
-inetname(sa)
-	struct sockaddr *sa;
+inetname(struct sockaddr *sa)
 {
-	register char *cp;
+	char *cp;
 	static char line[NI_MAXHOST];
 	static char domain[MAXHOSTNAMELEN + 1];
 	static int first = 1;
@@ -1376,7 +1354,7 @@ inetname(sa)
 }
 
 void
-usage()
+usage(void)
 {
 
 	fprintf(stderr,

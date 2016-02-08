@@ -1,9 +1,9 @@
-/*	$OpenBSD: ui.c,v 1.30 2002/06/09 08:13:07 todd Exp $	*/
+/*	$OpenBSD: ui.c,v 1.33 2003/06/03 14:28:16 ho Exp $	*/
 /*	$EOM: ui.c,v 1.43 2000/10/05 09:25:12 niklas Exp $	*/
 
 /*
  * Copyright (c) 1998, 1999, 2000 Niklas Hallqvist.  All rights reserved.
- * Copyright (c) 1999, 2000, 2001 Håkan Olsson.  All rights reserved.
+ * Copyright (c) 1999, 2000, 2001, 2002 Håkan Olsson.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -13,11 +13,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by Ericsson Radio Systems.
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -52,6 +47,7 @@
 #include "init.h"
 #include "isakmp.h"
 #include "log.h"
+#include "monitor.h"
 #include "sa.h"
 #include "timer.h"
 #include "transport.h"
@@ -90,10 +86,10 @@ ui_init (void)
 
       /* No need to know about errors.  */
       unlink (ui_fifo);
-      if (mkfifo (ui_fifo, 0600) == -1)
+      if (monitor_mkfifo (ui_fifo, 0600) == -1)
 	log_fatal ("ui_init: mkfifo (\"%s\", 0600) failed", ui_fifo);
 
-      ui_socket = open (ui_fifo, O_RDWR | O_NONBLOCK, 0);
+      ui_socket = monitor_open (ui_fifo, O_RDWR | O_NONBLOCK, 0);
       if (ui_socket == -1)
 	log_fatal ("ui_init: open (\"%s\", O_RDWR | O_NONBLOCK, 0) failed",
 		   ui_fifo);
@@ -152,8 +148,8 @@ ui_teardown_all (char *cmd)
 static void
 ui_config (char *cmd)
 {
-  char subcmd[81], section[81], tag[81], value[81];
-  int override, trans = 0;
+  char subcmd[81], section[81], tag[81], value[81], tmp[81];
+  int trans = 0, items;
 
   if (sscanf (cmd, "C %80s", subcmd) != 1)
     goto fail;
@@ -161,10 +157,11 @@ ui_config (char *cmd)
   trans = conf_begin ();
   if (strcasecmp (subcmd, "set") == 0)
     {
-      if (sscanf (cmd, "C %*s [%80[^]]]:%80[^=]=%80s %d", section, tag, value,
-		  &override) != 4)
+      items = sscanf (cmd, "C %*s [%80[^]]]:%80[^=]=%80s %80s", section, tag,
+		      value, tmp);
+      if (!(items == 3 || items == 4))
 	goto fail;
-      conf_set (trans, section, tag, value, override, 0);
+      conf_set (trans, section, tag, value, items == 4 ? 1 : 0, 0);
     }
   else if (strcasecmp (subcmd, "rm") == 0)
     {

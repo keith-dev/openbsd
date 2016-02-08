@@ -12,11 +12,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -35,7 +31,7 @@
 
 #ifndef lint
 /*static char sccsid[] = "from: @(#)mkmake.y	4.2 (Berkeley) 4/26/91";*/
-static char rcsid[] = "$Id: mkmake.y,v 1.2 2000/07/06 08:51:06 deraadt Exp $";
+static char rcsid[] = "$Id: mkmake.y,v 1.4 2003/06/03 02:56:19 millert Exp $";
 #endif /* not lint */
 
 typedef struct string {
@@ -504,16 +500,16 @@ same_t
     *t2;
 {
     if (same_singleton(t1) && same_singleton(t2)) {
-	int length = strlen(t1->string->string)+strlen(t2->string->string);
-	char *buffer = malloc(length+1);
+	int length = strlen(t1->string->string)+strlen(t2->string->string) + 1;
+	char *buffer = malloc(length);
 	same_t *value;
 
 	if (buffer == 0) {
 	    yyerror("No space to merge strings in same_merge!");
 	    exit(1);
 	}
-	strcpy(buffer, t1->string->string);
-	strcat(buffer, t2->string->string);
+	strlcpy(buffer, t1->string->string, length);
+	strlcat(buffer, t2->string->string, length);
 	value = same_item(string_lookup(buffer));
 	free(buffer);
 	return value;
@@ -760,18 +756,18 @@ same_t *
 variable(var_name)
 same_t *var_name;
 {
-    int length = strlen(var_name->string->string);
+    int length = strlen(var_name->string->string) + 3 + 1;
     same_t *resolved;
     char *newname;
 
-    if ((newname = malloc(length+1+3)) == 0) {
+    if ((newname = malloc(length)) == 0) {
 	fprintf("Out of space for a variable name.\n");
 	exit(1);
     }
     newname[0] = '$';
     newname[1] = '{';
-    strcpy(newname+2, var_name->string->string);
-    strcat(newname, "}");
+    strlcpy(newname+2, var_name->string->string, length - 2);
+    strlcat(newname, "}", length);
     resolved = same_item(string_lookup(newname));
     free(newname);
 
@@ -783,17 +779,17 @@ same_t *
 shell_variable(var_name)
 same_t *var_name;
 {
-    int length = strlen(var_name->string->string);
+    int length = strlen(var_name->string->string) + 2 + 1;
     same_t *resolved;
     char *newname;
 
-    if ((newname = malloc(length+1+2)) == 0) {
+    if ((newname = malloc(length)) == 0) {
 	fprintf("Out of space for a variable name.\n");
 	exit(1);
     }
     newname[0] = '$';
     newname[1] = '$';
-    strcpy(newname+2, var_name->string->string);
+    strlcpy(newname+2, var_name->string->string, length - 2);
     resolved = same_item(string_lookup(newname));
     free(newname);
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: login_radius.c,v 1.3 2002/09/29 03:23:01 millert Exp $	*/
+/*	$OpenBSD: login_radius.c,v 1.5 2003/07/29 18:39:23 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 1996, 1997 Berkeley Software Design, Inc. All rights reserved.
@@ -78,9 +78,9 @@
 #include <syslog.h>
 #include <unistd.h>
 #include <bsd_auth.h>
+#include "login_radius.h"
 
 static int cleanstring(char *);
-int raddauth(char *, char *, char *, char *, char *, char **);
 
 int
 main(int argc, char **argv)
@@ -175,7 +175,7 @@ main(int argc, char **argv)
 
 	emsg = NULL;
 
-	c = raddauth(username, class, style, 
+	c = raddauth(username, class, style,
 	    strcmp(service, "login") ? challenge : NULL, password, &emsg);
 
 	if (c == 0) {

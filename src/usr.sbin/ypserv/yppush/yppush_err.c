@@ -1,4 +1,4 @@
-/*	$OpenBSD: yppush_err.c,v 1.4 2002/07/19 02:38:40 deraadt Exp $ */
+/*	$OpenBSD: yppush_err.c,v 1.7 2003/07/15 06:10:46 deraadt Exp $ */
 
 /*
  * Copyright (c) 1996 Mats O Jansson <moj@stacken.kth.se>
@@ -12,11 +12,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by Mats O Jansson
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS
  * OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
@@ -32,10 +27,11 @@
  */
 
 #ifndef lint
-static char rcsid[] = "$OpenBSD: yppush_err.c,v 1.4 2002/07/19 02:38:40 deraadt Exp $";
+static const char rcsid[] = "$OpenBSD: yppush_err.c,v 1.7 2003/07/15 06:10:46 deraadt Exp $";
 #endif /* not lint */
 
 #include <rpcsvc/yp.h>
+#include "yppush.h"
 
 char *
 yppush_err_string(enum yppush_status y)

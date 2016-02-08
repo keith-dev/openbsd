@@ -211,6 +211,7 @@ static ERR_STRING_DATA ERR_str_reasons[]=
 
 {0,NULL},
 	};
+#endif
 
 
 /* Define the predeclared (but externally opaque) "ERR_FNS" type */
@@ -491,6 +492,7 @@ static int int_err_get_next_lib(void)
 	}
 
 
+#ifndef OPENSSL_NO_ERR
 #define NUM_SYS_STR_REASONS 127
 #define LEN_SYS_STR_REASON 32
 
@@ -1023,7 +1025,7 @@ void ERR_add_error_data(int num, ...)
 				else
 					str=p;
 				}
-			strcat(str,a);
+			strlcat(str,a,s+1);
 			}
 		}
 	ERR_set_error_data(str,ERR_TXT_MALLOCED|ERR_TXT_STRING);

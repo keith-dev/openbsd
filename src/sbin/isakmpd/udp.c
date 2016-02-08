@@ -1,4 +1,4 @@
-/*	$OpenBSD: udp.c,v 1.58 2003/02/12 15:11:31 markus Exp $	*/
+/*	$OpenBSD: udp.c,v 1.64 2003/06/10 16:41:29 deraadt Exp $	*/
 /*	$EOM: udp.c,v 1.57 2001/01/26 10:09:57 niklas Exp $	*/
 
 /*
@@ -13,11 +13,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by Ericsson Radio Systems.
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -59,6 +54,7 @@
 #include "isakmp.h"
 #include "log.h"
 #include "message.h"
+#include "monitor.h"
 #include "sysdep.h"
 #include "transport.h"
 #include "udp.h"
@@ -190,7 +186,7 @@ udp_make (struct sockaddr *laddr)
 
   t->transport.vtbl = &udp_transport_vtbl;
   t->src = laddr;
-  if (bind (s, t->src, sysdep_sa_len (t->src)))
+  if (monitor_bind (s, t->src, sysdep_sa_len (t->src)))
     {
       char *tstr;
       if (sockaddr2text (t->src, &tstr, 0))
@@ -293,7 +289,8 @@ static int
 udp_bind_if (char *ifname, struct sockaddr *if_addr, void *arg)
 {
   char *port = (char *)arg;
-  struct sockaddr saddr;
+  struct sockaddr_storage saddr_st;
+  struct sockaddr *saddr = (struct sockaddr *)&saddr_st;
   struct conf_list *listen_on;
   struct udp_transport *u;
   struct conf_list_node *address;
@@ -346,20 +343,20 @@ udp_bind_if (char *ifname, struct sockaddr *if_addr, void *arg)
    * address bound. If so, unmark the transport and skip it; this allows
    * us to call this function when we suspect a new address has appeared.
    */
-  bcopy (if_addr, &saddr, sizeof saddr);
-  switch (saddr.sa_family)  /* Add the port number to the sockaddr. */
+  memcpy (saddr, if_addr, sizeof saddr_st);
+  switch (saddr->sa_family)  /* Add the port number to the sockaddr. */
     {
     case AF_INET:
-      ((struct sockaddr_in *)&saddr)->sin_port
+      ((struct sockaddr_in *)saddr)->sin_port
 	= htons (strtol (port, &ep, 10));
       break;
     case AF_INET6:
-      ((struct sockaddr_in6 *)&saddr)->sin6_port
+      ((struct sockaddr_in6 *)saddr)->sin6_port
 	= htons (strtol (port, &ep, 10));
       break;
     }
 
-  if ((u = udp_listen_lookup (&saddr)) != 0)
+  if ((u = udp_listen_lookup (saddr)) != 0)
     {
       u->transport.flags &= ~TRANSPORT_MARK;
       return 0;
@@ -608,7 +605,7 @@ udp_reinit (void)
 
   /* Re-probe interface list.  */
   if (if_map (udp_bind_if, port) == -1)
-    log_error ("udp_init: Could not bind the ISAKMP UDP port %s on all "
+    log_print ("udp_init: Could not bind the ISAKMP UDP port %s on all "
 	       "interfaces", port);
 
   /*
@@ -677,7 +674,9 @@ udp_init (void)
     {
       memset (&dflt_stor, 0, sizeof dflt_stor);
       dflt->sin_family = AF_INET;
+#if !defined (LINUX_IPSEC)
       ((struct sockaddr_in *)dflt)->sin_len = sizeof (struct sockaddr_in);
+#endif
       ((struct sockaddr_in *)dflt)->sin_port = htons (lport);
 
       default_transport = udp_bind ((struct sockaddr *)&dflt_stor);
@@ -690,12 +689,14 @@ udp_init (void)
       LIST_INSERT_HEAD (&udp_listen_list,
 			(struct udp_transport *)default_transport, link);
     }
-  
+
   if (!bind_family || (bind_family & BIND_FAMILY_INET6))
     {
       memset (&dflt_stor, 0, sizeof dflt_stor);
       dflt->sin_family = AF_INET6;
+#if !defined (LINUX_IPSEC)
       ((struct sockaddr_in6 *)dflt)->sin6_len = sizeof (struct sockaddr_in6);
+#endif
       ((struct sockaddr_in6 *)dflt)->sin6_port = htons (lport);
 
       default_transport6 = udp_bind ((struct sockaddr *)&dflt_stor);
@@ -870,7 +871,7 @@ udp_decode_ids (struct transport *t)
   strlcpy (iddst, inet_ntoa (((struct udp_transport *)t)->dst.sin_addr), 256);
 #endif /* HAVE_GETNAMEINFO */
 
-  snprintf (result, 1024, "src: %s dst: %s", idsrc, iddst);
+  snprintf (result, sizeof result, "src: %s dst: %s", idsrc, iddst);
 
   return result;
 }

@@ -102,6 +102,8 @@ typedef struct app_mem_info_st
 	int references;
 	} APP_INFO;
 
+static void app_info_free(APP_INFO *);
+
 static LHASH *amih=NULL; /* hash-table with those app_mem_info_st's
                           * that are at the top of their thread's stack
                           * (with `thread' as key);
@@ -139,6 +141,18 @@ static unsigned long disabling_thread = 0; /* Valid iff num_disable > 0.
                                             * exactly in this case (by the
                                             * thread named in disabling_thread).
                                             */
+
+static void app_info_free(APP_INFO *inf)
+	{
+	if (--(inf->references) <= 0)
+		{
+		if (inf->next != NULL)
+			{
+			app_info_free(inf->next);
+			}
+		OPENSSL_free(inf);
+		}
+	}
 
 int CRYPTO_mem_ctrl(int mode)
 	{
@@ -502,9 +516,7 @@ void CRYPTO_dbg_free(void *addr, int before_p)
 				mp->order, mp->addr, mp->num);
 #endif
 				if (mp->app_info != NULL)
-					{
-					mp->app_info->references--;
-					}
+					app_info_free(mp->app_info);
 				OPENSSL_free(mp);
 				}
 
@@ -585,6 +597,8 @@ static void print_leak(const MEM *m, MEM_LEAK *l)
 	struct tm *lcl = NULL;
 	unsigned long ti;
 
+#define BUF_REMAIN (sizeof buf - (size_t)(bufp - buf))
+
 	if(m->addr == (char *)l->bio)
 	    return;
 
@@ -592,22 +606,22 @@ static void print_leak(const MEM *m, MEM_LEAK *l)
 		{
 		lcl = localtime(&m->time);
 	
-		sprintf(bufp, "[%02d:%02d:%02d] ",
+		snprintf(bufp, BUF_REMAIN, "[%02d:%02d:%02d] ",
 			lcl->tm_hour,lcl->tm_min,lcl->tm_sec);
 		bufp += strlen(bufp);
 		}
 
-	sprintf(bufp, "%5lu file=%s, line=%d, ",
+	snprintf(bufp, BUF_REMAIN, "%5lu file=%s, line=%d, ",
 		m->order,m->file,m->line);
 	bufp += strlen(bufp);
 
 	if (options & V_CRYPTO_MDEBUG_THREAD)
 		{
-		sprintf(bufp, "thread=%lu, ", m->thread);
+		snprintf(bufp, BUF_REMAIN, "thread=%lu, ", m->thread);
 		bufp += strlen(bufp);
 		}
 
-	sprintf(bufp, "number=%d, address=%08lX\n",
+	snprintf(bufp, BUF_REMAIN, "number=%d, address=%08lX\n",
 		m->num,(unsigned long)m->addr);
 	bufp += strlen(bufp);
 
@@ -667,7 +681,6 @@ static IMPLEMENT_LHASH_DOALL_ARG_FN(print_leak, const MEM *, MEM_LEAK *)
 void CRYPTO_mem_leaks(BIO *b)
 	{
 	MEM_LEAK ml;
-	char buf[80];
 
 	if (mh == NULL && amih == NULL)
 		return;
@@ -682,9 +695,8 @@ void CRYPTO_mem_leaks(BIO *b)
 				(char *)&ml);
 	if (ml.chunks != 0)
 		{
-		sprintf(buf,"%ld bytes leaked in %d chunks\n",
-			ml.bytes,ml.chunks);
-		BIO_puts(b,buf);
+		BIO_printf(b,"%ld bytes leaked in %d chunks\n",
+			   ml.bytes,ml.chunks);
 		}
 	else
 		{

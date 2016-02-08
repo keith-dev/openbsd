@@ -109,11 +109,8 @@
  *
  */
 
-#define _XOPEN_SOURCE 600	/* Or gethostname won't be declared properly
+#define _BSD_SOURCE 1		/* Or gethostname won't be declared properly
 				   on Linux and GNU platforms. */
-#define _XOPEN_SOURCE_EXTENDED	1 /* Or gethostname won't be declared properly
-				   on Compaq platforms (at least with DEC C).
-				*/
 
 #include <assert.h>
 #include <errno.h>
@@ -122,7 +119,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <inttypes.h>
 
+#define USE_SOCKETS
 #include "e_os.h"
 
 #include <openssl/bio.h>
@@ -130,12 +129,20 @@
 #include <openssl/evp.h>
 #include <openssl/x509.h>
 #include <openssl/ssl.h>
+#ifndef OPENSSL_NO_ENGINE
 #include <openssl/engine.h>
+#endif
 #include <openssl/err.h>
 #include <openssl/rand.h>
+
+#define _XOPEN_SOURCE_EXTENDED	1 /* Or gethostname won't be declared properly
+				     on Compaq platforms (at least with DEC C).
+				     Do not try to put it earlier, or IPv6 includes
+				     get screwed...
+				  */
+
 #ifdef OPENSSL_SYS_WINDOWS
 #include <winsock.h>
-#include "../crypto/bio/bss_file.c"
 #else
 #include OPENSSL_UNISTD
 #endif
@@ -143,6 +150,9 @@
 #ifdef OPENSSL_SYS_VMS
 #  define TEST_SERVER_CERT "SYS$DISK:[-.APPS]SERVER.PEM"
 #  define TEST_CLIENT_CERT "SYS$DISK:[-.APPS]CLIENT.PEM"
+#elif defined(OPENSSL_SYS_WINCE)
+#  define TEST_SERVER_CERT "\\OpenSSL\\server.pem"
+#  define TEST_CLIENT_CERT "\\OpenSSL\\client.pem"
 #else
 #  define TEST_SERVER_CERT "../apps/server.pem"
 #  define TEST_CLIENT_CERT "../apps/client.pem"
@@ -364,7 +374,9 @@ int main(int argc, char *argv[])
 	verbose = 0;
 	debug = 0;
 	cipher = 0;
-	
+
+	bio_err=BIO_new_fp(stderr,BIO_NOCLOSE);	
+
 	CRYPTO_set_locking_callback(lock_dbg_cb);
 
 	/* enable memory leak checking unless explicitly disabled */
@@ -382,7 +394,6 @@ int main(int argc, char *argv[])
 
 	RAND_seed(rnd_seed, sizeof rnd_seed);
 
-	bio_err=BIO_new_fp(stderr,BIO_NOCLOSE);
 	bio_stdout=BIO_new_fp(stdout,BIO_NOCLOSE);
 
 	argc--;
@@ -405,7 +416,7 @@ int main(int argc, char *argv[])
 #ifndef OPENSSL_NO_DH
 			dhe1024=1;
 #else
-			fprintf(stderr,"ignoring -dhe1024, since I'm compiled without DH\n";
+			fprintf(stderr,"ignoring -dhe1024, since I'm compiled without DH\n");
 #endif
 			}
 		else if	(strcmp(*argv,"-dhe1024dsa") == 0)
@@ -413,7 +424,7 @@ int main(int argc, char *argv[])
 #ifndef OPENSSL_NO_DH
 			dhe1024dsa=1;
 #else
-			fprintf(stderr,"ignoring -dhe1024, since I'm compiled without DH\n";
+			fprintf(stderr,"ignoring -dhe1024, since I'm compiled without DH\n");
 #endif
 			}
 		else if	(strcmp(*argv,"-no_dhe") == 0)
@@ -530,7 +541,7 @@ bad:
 			"the test anyway (and\n-d to see what happens), "
 			"or add one of -ssl2, -ssl3, -tls1, -reuse\n"
 			"to avoid protocol mismatch.\n");
-		exit(1);
+		EXIT(1);
 		}
 
 	if (print_time)
@@ -686,10 +697,16 @@ bad:
 #ifndef OPENSSL_NO_KRB5
 	if (c_ssl  &&  c_ssl->kssl_ctx)
                 {
-                char	localhost[257];
+                char	localhost[MAXHOSTNAMELEN+2];
 
-		if (gethostname(localhost, 256) == 0)
+		if (gethostname(localhost, sizeof localhost-1) == 0)
                         {
+			localhost[sizeof localhost-1]='\0';
+			if(strlen(localhost) == sizeof localhost-1)
+				{
+				BIO_printf(bio_err,"localhost name too long\n");
+				goto end;
+				}
 			kssl_ctx_setstring(c_ssl->kssl_ctx, KSSL_SERVER,
                                 localhost);
 			}
@@ -745,7 +762,9 @@ end:
 #ifndef OPENSSL_NO_RSA
 	free_tmp_rsa();
 #endif
+#ifndef OPENSSL_NO_ENGINE
 	ENGINE_cleanup();
+#endif
 	CRYPTO_cleanup_all_ex_data();
 	ERR_free_strings();
 	ERR_remove_state(0);
@@ -835,6 +854,8 @@ int doit_biopair(SSL *s_ssl, SSL *c_ssl, long count,
 			int i, r;
 			clock_t c_clock = clock();
 
+			memset(cbuf, 0, sizeof(cbuf));
+
 			if (debug)
 				if (SSL_in_init(c_ssl))
 					printf("client waiting in SSL_connect - %s\n",
@@ -918,6 +939,8 @@ int doit_biopair(SSL *s_ssl, SSL *c_ssl, long count,
 			MS_STATIC char sbuf[1024*8];
 			int i, r;
 			clock_t s_clock = clock();
+
+			memset(sbuf, 0, sizeof(sbuf));
 
 			if (debug)
 				if (SSL_in_init(s_ssl))
@@ -1161,6 +1184,9 @@ int doit(SSL *s_ssl, SSL *c_ssl, long count)
 	int done=0;
 	int c_write,s_write;
 	int do_server=0,do_client=0;
+
+	memset(cbuf,0,sizeof(cbuf));
+	memset(sbuf,0,sizeof(sbuf));
 
 	c_to_s=BIO_new(BIO_s_mem());
 	s_to_c=BIO_new(BIO_s_mem());
@@ -1443,7 +1469,8 @@ static int MS_CALLBACK verify_callback(int ok, X509_STORE_CTX *ctx)
 	{
 	char *s,buf[256];
 
-	s=X509_NAME_oneline(X509_get_subject_name(ctx->current_cert),buf,256);
+	s=X509_NAME_oneline(X509_get_subject_name(ctx->current_cert),buf,
+			    sizeof buf);
 	if (s != NULL)
 		{
 		if (ok)
@@ -1474,8 +1501,8 @@ static int MS_CALLBACK app_verify_callback(X509_STORE_CTX *ctx, void *arg)
 
 	fprintf(stderr, "In app_verify_callback, allowing cert. ");
 	fprintf(stderr, "Arg is: %s\n", (char *)arg);
-	fprintf(stderr, "Finished printing do we have a context? 0x%x a cert? 0x%x\n",
-			(unsigned int)ctx, (unsigned int)ctx->cert);
+	fprintf(stderr, "Finished printing do we have a context? 0x%lx a cert? 0x%lx\n",
+			(uintptr_t)ctx, (uintptr_t)ctx->cert);
 	if (ctx->cert)
 		s=X509_NAME_oneline(X509_get_subject_name(ctx->cert),buf,256);
 	if (s != NULL)

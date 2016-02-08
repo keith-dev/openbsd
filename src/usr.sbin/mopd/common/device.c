@@ -1,4 +1,4 @@
-/*	$OpenBSD: device.c,v 1.6 2002/09/07 08:09:49 maja Exp $ */
+/*	$OpenBSD: device.c,v 1.9 2003/08/31 09:06:46 maja Exp $ */
 
 /*
  * Copyright (c) 1993-95 Mats O Jansson.  All rights reserved.
@@ -11,11 +11,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by Mats O Jansson.
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -30,7 +25,7 @@
  */
 
 #ifndef LINT
-static char rcsid[] = "$OpenBSD: device.c,v 1.6 2002/09/07 08:09:49 maja Exp $";
+static char rcsid[] = "$OpenBSD: device.c,v 1.9 2003/08/31 09:06:46 maja Exp $";
 #endif
 
 #include "os.h"
@@ -63,34 +58,21 @@ deviceEthAddr(ifname, eaddr)
 	struct sockaddr_dl *sdl;
 	int fd;
 	int i, len;
+	struct ifaddrs *ifap, *ifa;
 
-	/* We cannot use SIOCGIFADDR on the BPF descriptor.
-	   We must instead get all the interfaces with SIOCGIFCONF
-	   and find the right one.  */
-
-	/* Use datagram socket to get Ethernet address. */
-	if ((fd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
-		syslog(LOG_ERR, "deviceEthAddr: socket: %m");
+	if (getifaddrs(&ifap) != 0) {
+		syslog(LOG_ERR, "deviceEthAddr: getifaddrs: %m");
 		exit(1);
 	}
 
-	ifc.ifc_len = sizeof(inbuf);
-	ifc.ifc_buf = inbuf;
-	if (ioctl(fd, SIOCGIFCONF, (caddr_t)&ifc) < 0 ||
-	    ifc.ifc_len < sizeof(struct ifreq)) {
-		syslog(LOG_ERR, "deviceEthAddr: SIOGIFCONF: %m");
-		exit(1);
-	}
-	ifr = ifc.ifc_req;
-	for (i = 0; i < ifc.ifc_len;
-	     i += len, ifr = (struct ifreq *)((caddr_t)ifr + len)) {
-		len = sizeof(ifr->ifr_name) + ifr->ifr_addr.sa_len;
-		sdl = (struct sockaddr_dl *)&ifr->ifr_addr;
+	for (ifa = ifap; ifa; ifa = ifa->ifa_next) {
+		sdl = (struct sockaddr_dl *)ifa->ifa_addr;
 		if (sdl->sdl_family != AF_LINK || sdl->sdl_type != IFT_ETHER ||
 		    sdl->sdl_alen != 6)
 			continue;
-		if (!strncmp(ifr->ifr_name, ifname, sizeof(ifr->ifr_name))) {
+		if (!strcmp(ifa->ifa_name, ifname)) {
 			bcopy((caddr_t)LLADDR(sdl), (caddr_t)eaddr, 6);
+			freeifaddrs(ifap);
 			return;
 		}
 	}
@@ -267,74 +249,41 @@ deviceInitOne(ifname)
 void
 deviceInitAll()
 {
-#ifdef	DEV_NEW_CONF
-	char inbuf[8192];
-	struct ifconf ifc;
-	struct ifreq *ifr;
+#ifdef DEV_NEW_CONF
 	struct sockaddr_dl *sdl;
-	int fd;
-	int i, len;
+	struct ifaddrs *ifap, *ifa;
 
-	if ((fd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
-		syslog(LOG_ERR, "deviceInitAll: socket: %m");
+	if (getifaddrs(&ifap) != 0) {
+		syslog(LOG_ERR, "deviceInitAll: getifaddrs: %m");
 		exit(1);
 	}
 
-	ifc.ifc_len = sizeof(inbuf);
-	ifc.ifc_buf = inbuf;
-	if (ioctl(fd, SIOCGIFCONF, (caddr_t)&ifc) < 0 ||
-	    ifc.ifc_len < sizeof(struct ifreq)) {
-		syslog(LOG_ERR, "deviceInitAll: SIOCGIFCONF: %m");
-		exit(1);
-	}
-	ifr = ifc.ifc_req;
-	for (i = 0; i < ifc.ifc_len;
-	     i += len, ifr = (struct ifreq *)((caddr_t)ifr + len)) {
-		len = sizeof(ifr->ifr_name) + ifr->ifr_addr.sa_len;
-		sdl = (struct sockaddr_dl *)&ifr->ifr_addr;
+	for (ifa = ifap; ifa; ifa = ifa->ifa_next) {
+		sdl = (struct sockaddr_dl *)ifa->ifa_addr;
 		if (sdl->sdl_family != AF_LINK || sdl->sdl_type != IFT_ETHER ||
 		    sdl->sdl_alen != 6)
 			continue;
-		if (ioctl(fd, SIOCGIFFLAGS, (caddr_t)ifr) < 0) {
-			syslog(LOG_ERR, "deviceInitAll: SIOCGIFFLAGS: %m");
-			continue;
-		}
-		if ((ifr->ifr_flags &
+		if ((ifa->ifa_flags &
 		    (IFF_UP | IFF_LOOPBACK | IFF_POINTOPOINT)) != IFF_UP)
 			continue;
-		deviceInitOne(ifr->ifr_name);
+		deviceInitOne(ifa->ifa_name);
 	}
-	(void) close(fd);
+	freeifaddrs(ifap);
 #else
-	int fd;
-	int n;
-	struct ifreq ibuf[8], *ifrp;
-	struct ifconf ifc;
+	struct ifaddrs *ifap, *ifa;
 
-	if ((fd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
-		syslog(LOG_ERR, "deviceInitAll: old socket: %m");
+	if (getifaddrs(&ifap) != 0) {
+		syslog(LOG_ERR, "deviceInitAll: getifaddrs: %m");
 		exit(1);
 	}
-	ifc.ifc_len = sizeof ibuf;
-	ifc.ifc_buf = (caddr_t)ibuf;
-	if (ioctl(fd, SIOCGIFCONF, (char *)&ifc) < 0 ||
-	    ifc.ifc_len < sizeof(struct ifreq)) {
-		syslog(LOG_ERR, "deviceInitAll: old SIOCGIFCONF: %m");
-		exit(1);
-	}
-	ifrp = ibuf;
-	n = ifc.ifc_len / sizeof(*ifrp);
-	for (; --n >= 0; ++ifrp) {
-		if (ioctl(fd, SIOCGIFFLAGS, (char *)ifrp) < 0) {
+
+	for (ifa = ifap; ifa; ifa = ifa->ifa_next) {
+		if (/*(ifa->ifa_flags & IFF_UP) == 0 ||*/
+		    ifa->ifa_flags & IFF_LOOPBACK ||
+		    ifa->ifa_flags & IFF_POINTOPOINT)
 			continue;
-		}
-		if (/*(ifrp->ifr_flags & IFF_UP) == 0 ||*/
-		    ifrp->ifr_flags & IFF_LOOPBACK ||
-		    ifrp->ifr_flags & IFF_POINTOPOINT)
-			continue;
-		deviceInitOne(ifrp->ifr_name);
+		deviceInitOne(ifa->ifa_name);
 	}
-	
-	(void) close(fd);
-#endif /* DEV_NEW_CONF */
+	freeifaddrs(ifap);
+#endif
 }

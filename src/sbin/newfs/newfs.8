@@ -1,4 +1,4 @@
-.\"	$OpenBSD: newfs.8,v 1.32 2003/03/11 00:53:47 tedu Exp $
+.\"	$OpenBSD: newfs.8,v 1.35 2003/06/26 07:07:49 tedu Exp $
 .\"	$NetBSD: newfs.8,v 1.12 1995/03/18 14:58:41 cgd Exp $
 .\"
 .\" Copyright (c) 1983, 1987, 1991, 1993, 1994
@@ -12,11 +12,7 @@
 .\" 2. Redistributions in binary form must reproduce the above copyright
 .\"    notice, this list of conditions and the following disclaimer in the
 .\"    documentation and/or other materials provided with the distribution.
-.\" 3. All advertising materials mentioning features or use of this software
-.\"    must display the following acknowledgement:
-.\"	This product includes software developed by the University of
-.\"	California, Berkeley and its contributors.
-.\" 4. Neither the name of the University nor the names of its contributors
+.\" 3. Neither the name of the University nor the names of its contributors
 .\"    may be used to endorse or promote products derived from this software
 .\"    without specific prior written permission.
 .\"
@@ -42,6 +38,7 @@
 .Nd construct a new file system
 .Sh SYNOPSIS
 .Nm newfs
+.Bk -words
 .Op Fl NO
 .Op Fl S Ar sector-size
 .Op Fl a Ar maxcontig
@@ -51,7 +48,7 @@
 .Op Fl e Ar maxbpg
 .Op Fl f Ar frag-size
 .Op Fl g Ar avgfilesize
-.Op Fl h Ar files
+.Op Fl h Ar avgfpdir
 .Op Fl i Ar bytes
 .Op Fl k Ar skew
 .Op Fl l Ar interleave
@@ -67,8 +64,10 @@
 .Op Fl x Ar sectors
 .Op Fl z Ar tracks
 .Ar special
+.Ek
 .Pp
 .Nm mount_mfs
+.Bk -words
 .Op Fl a Ar maxcontig
 .Op Fl b Ar block-size
 .Op Fl c Ar cylinders
@@ -80,6 +79,7 @@
 .Op Fl o Ar options
 .Op Fl s Ar size
 .Ar special node
+.Ek
 .Sh DESCRIPTION
 Before running
 .Nm

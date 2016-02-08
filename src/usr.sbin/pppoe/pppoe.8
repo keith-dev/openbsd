@@ -1,8 +1,7 @@
-.\"	$OpenBSD: pppoe.8,v 1.12 2003/02/09 07:26:45 jmc Exp $
+.\"	$OpenBSD: pppoe.8,v 1.15 2003/08/08 10:13:33 jmc Exp $
 .\"
 .\" Copyright (c) 2000 Network Security Technologies, Inc.
 .\" (http://www.netsec.net)
-.\" All rights reserved.
 .\"
 .\" Redistribution and use in source and binary forms, with or without
 .\" modification, are permitted provided that the following conditions
@@ -12,11 +11,6 @@
 .\" 2. Redistributions in binary form must reproduce the above copyright
 .\"    notice, this list of conditions and the following disclaimer in the
 .\"    documentation and/or other materials provided with the distribution.
-.\" 3. All advertising materials mentioning features or use of this software
-.\"    must display the following acknowledgement:
-.\"	This product includes software developed by Jason L. Wright
-.\" 4. The name of the author may not be used to endorse or promote products
-.\"    derived from this software without specific prior written permission.
 .\"
 .\" THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
 .\" IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
@@ -39,7 +33,7 @@
 .Nd PPP Over Ethernet translator
 .Sh SYNOPSIS
 .Nm pppoe
-.Op Ar -sv 
+.Op Ar -sv
 .Op Ar -i interface
 .Op Ar -n service
 .Op Ar -p system
@@ -64,8 +58,8 @@ will use the first Ethernet interface that is up and running.
 .It Fl n Ar service
 Use
 .Ar service
-as the service name when negotiating with the server.  By default,
-the client will ask for any service, and expect the server to
+as the service name when negotiating with the server.
+By default, the client will ask for any service, and expect the server to
 respond with the same.
 .It Fl p Ar system
 This argument is passed, uninterpreted, to
@@ -76,7 +70,8 @@ This option is only used in server mode.
 .It Fl s
 If this option is specified,
 .Nm
-will run as a server.  Otherwise,
+will run as a server.
+Otherwise,
 .Nm
 runs as a client.
 .It Fl v
@@ -112,7 +107,8 @@ line tells
 to use
 .Nm pppoe
 program for input and output instead of using a serial port or other
-network connection.  The
+network connection.
+The
 .Nm mtu
 and
 .Nm mru
@@ -126,11 +122,11 @@ line tells
 .Nm ppp
 to use synchronous encoding for the packets sent between it and
 .Nm pppoe .
-According to RFC2516, protocol compression,
+According to RFC 2516, protocol compression,
 .Em protocomp ,
 is not recommended, so
-it is disabled, but not denied.  On the other hand, address and control
-field compression,
+it is disabled, but not denied.
+On the other hand, address and control field compression,
 .Em acfcomp ,
 must be disabled and denied.
 .Pp
@@ -151,7 +147,8 @@ for details.
 .Pp
 Next, a
 .Pa /etc/ppp/ppp.conf
-file must be created.  Below is a minimal PPPoE style configuration, see
+file must be created.
+Below is a minimal PPPoE style configuration, see
 .Xr ppp 8
 for more options.
 .Bd -literal -offset indent
@@ -179,7 +176,7 @@ username and password to use to authenticated to the service provider.
 .Pp
 Once the
 .Pa /etc/ppp/ppp.conf
-file is setup, it is just a matter of setting
+file is set up, it is just a matter of setting
 .Xr ppp 8
 into action:
 .Bd -literal -offset indent
@@ -219,7 +216,7 @@ to adjust the maximum segment size on outgoing SYN packets.
 .Xr hostname.if 5 ,
 .Xr ppp 8
 .Rs
-.%T RFC2516 A Method for Transmitting PPP Over Ethernet (PPPoE)
+.%T RFC 2516 A Method for Transmitting PPP Over Ethernet (PPPoE)
 .%A L. Mamakos, et al.
 .Re
 .Sh HISTORY
@@ -237,8 +234,8 @@ of
 .An Network Security Technologies, Inc.
 .Aq http://www.netsec.net .
 .Sh BUGS
-This software runs completely in user mode.  As such it will have much
-more overhead than a kernel implementation.
+This software runs completely in user mode.
+As such it will have much more overhead than a kernel implementation.
 .Pp
 The
 .Ar service

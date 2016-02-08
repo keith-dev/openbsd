@@ -1,4 +1,4 @@
-.\"	$OpenBSD: ed.1,v 1.39 2003/02/18 07:57:49 jmc Exp $
+.\"	$OpenBSD: ed.1,v 1.43 2003/09/02 18:09:43 jmc Exp $
 .\"
 .\" Copyright (c) 1993 Andrew Moore, Talke Studio.
 .\" All rights reserved.
@@ -131,8 +131,6 @@ Suppress diagnostics.
 This should be used if
 .Nm
 standard input is from a script.
-.Fl s
-flag.
 .It Fl x
 Prompt for an encryption key to be used in subsequent reads and writes
 (see the
@@ -262,12 +260,12 @@ The search wraps to the beginning of the buffer and continues down to the
 current line, if necessary.
 .Em //
 repeats the last search.
-.It Em ? Ns No re Ns Em ?
+.It Em \&? Ns No re Ns Em \&?
 The previous line containing the regular expression
 .Em re .
 The search wraps to the end of the buffer and continues up to the
 current line, if necessary.
-.Em ??
+.Em ??\&
 repeats the last search.
 .It Em \&\' Ns No lc
 The line previously marked by a
@@ -291,7 +289,7 @@ Regular expressions are also used by the
 .Em s
 command for selecting old text to be replaced with new.
 .Pp
-In addition to a specifying string literals, regular expressions can
+In addition to specifying string literals, regular expressions can
 represent classes of strings.
 Strings thus represented are said to be matched by the
 corresponding regular expression.
@@ -423,11 +421,11 @@ For example, the regular expression
 matches the beginning of the string
 .Em abbb
 (as opposed to the substring
-.Em bbb Ns No ),
+.Em bbb ) ,
 since a null match is the only leftmost match.
 .Sm off
 .It Xo Em \e{ No n,m
-.Em \e}\ \e{ No n, Em \e}\ 
+.Em \e}\ \e{ No n, Em \e}\ \&
 .Em \e{ No n Em \e}
 .Xc
 .Sm on
@@ -504,8 +502,8 @@ The current address is set to the last line read.
 Edits the standard output of
 .Em !command Ns No ,
 (see
-.Em ! No command
-below).
+.Em !\&
+command below).
 The default filename is unchanged.
 Any lines in the buffer are deleted before the output of
 .Em command
@@ -653,7 +651,7 @@ The current address is set to the last line read.
 Reads to after the addressed line the standard output of
 .Em !command Ns No ,
 (see the
-.Em !
+.Em !\&
 command below).
 The default filename is unchanged.
 The current address is set to the last line read.
@@ -736,14 +734,14 @@ match is replaced.
 The
 .Em r
 suffix causes
-the regular expression of the last search to be used instead of the
+the regular expression of the last search to be used instead of
 that of the last substitution.
 The
 .Em g
 suffix toggles the global suffix of the last substitution.
 The
 .Em p
-suffix toggles the print suffix of the last substitution
+suffix toggles the print suffix of the last substitution.
 The current address is set to the last line affected.
 .It (.,.) Ns Em t Ns No (.)
 Copies (i.e., transfers) the addressed lines to after the right-hand
@@ -759,7 +757,7 @@ The global commands
 .Em G Ns No ,
 .Em v Ns No ,
 and
-.Em V Ns No .
+.Em V
 are treated as a single command by undo.
 .Em u
 is its own inverse.
@@ -782,7 +780,7 @@ Writes the addressed lines to
 .Em file Ns No .
 Any previous contents of
 .Em file
-is lost without warning.
+are lost without warning.
 If there is no default filename, then the default filename is set to
 .Em file Ns No ,
 otherwise it is unchanged.
@@ -798,7 +796,7 @@ command.
 Writes the addressed lines to the standard input of
 .Em !command Ns No ,
 (see the
-.Em !
+.Em !\&
 command below).
 The default filename and current address are unchanged.
 .It (1,$) Ns Em W No file
@@ -806,7 +804,7 @@ Appends the addressed lines to the end of
 .Em file Ns No .
 This is similar to the
 .Em w
-command, expect that the previous contents of file is not clobbered.
+command, except that the previous contents of file are not clobbered.
 The current address is unchanged.
 .It Em x
 Prompts for an encryption key which is used in subsequent reads and writes.
@@ -827,7 +825,7 @@ The current address is set to the last line printed.
 Prints the line number of the addressed line.
 .It (.+1) Ns Em newline
 Prints the addressed line, and sets the current address to that line.
-.It Em ! Ns No command
+.It Em \&! Ns No command
 Executes
 .Em command
 via
@@ -835,7 +833,7 @@ via
 If the first character of
 .Em command
 is
-.Em ! Ns No ,
+.Em \&! Ns No ,
 then it is replaced by text of the previous
 .Em !command Ns No .
 .Nm
@@ -848,7 +846,7 @@ However, an unescaped
 .Em %
 is replaced by the default filename.
 When the shell returns from execution, a
-.Em !
+.Em !\&
 is printed to the standard output.
 The current line is unchanged.
 .El
@@ -868,11 +866,20 @@ appends one on reading/writing it.
 In the case of a binary file,
 .Nm
 does not append a newline on reading/writing.
+.Sh FILES
+.Bl -tag -width /tmp/ed.* -compact
+.It Pa /tmp/ed.*
+buffer file
+.It Pa ed.hup
+where
+.Nm
+attempts to write the buffer if the terminal hangs up
+.El
 .Sh DIAGNOSTICS
 When an error occurs,
 .Nm
 prints a
-.Dq ?
+.Dq \&?
 and either returns to command mode or exits if its input is from a script.
 An explanation of the last error can be printed with the
 .Em h
@@ -901,15 +908,6 @@ If diagnostics are not disabled, attempting to quit
 or edit another file before writing a modified buffer results in an error.
 If the command is entered a second time, it succeeds,
 but any changes to the buffer are lost.
-.Sh FILES
-.Bl -tag -width /tmp/ed.* -compact
-.It Pa /tmp/ed.*
-buffer file
-.It Pa ed.hup
-where
-.Nm
-attempts to write the buffer if the terminal hangs up
-.El
 .Sh SEE ALSO
 .Xr bdes 1 ,
 .Xr sed 1 ,
@@ -917,7 +915,7 @@ attempts to write the buffer if the terminal hangs up
 .Xr vi 1 ,
 .Xr regex 3
 .Pp
-USD:12-13
+USD:09-10
 .Rs
 .%A B. W. Kernighan
 .%A P. J. Plauger

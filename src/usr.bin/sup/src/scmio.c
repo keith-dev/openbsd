@@ -1,4 +1,4 @@
-/*	$OpenBSD: scmio.c,v 1.12 2002/08/03 08:55:35 pvalchev Exp $	*/
+/*	$OpenBSD: scmio.c,v 1.14 2003/08/27 23:05:14 tedu Exp $	*/
 
 /*
  * Copyright (c) 1992 Carnegie Mellon University
@@ -675,15 +675,19 @@ int readstring(buf)	/* read string data block */
 		x = getcryptbuf(count+1);
 		if (x == SCMOK)
 			x = readdata(count, cryptbuf);
-		if (x != SCMOK)
+		if (x != SCMOK) {
+			free(p);
 			return (x);
-	if (scmdebug > 3)
-		printf("SCM Reading encrypted string %s\n", cryptbuf);
+		}
+		if (scmdebug > 3)
+			printf("SCM Reading encrypted string %s\n", cryptbuf);
 		decode(cryptbuf, p, count);
 	} else {
 		x = readdata(count,p);
-		if (x != SCMOK)
+		if (x != SCMOK) {
+			free(p);
 			return (x);
+		}
 	}
 	p[count] = 0;		/* NULL at end of string */
 	*buf = p;

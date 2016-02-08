@@ -1,4 +1,4 @@
-/*	$OpenBSD: main.c,v 1.23 2003/03/10 03:48:16 david Exp $	*/
+/*	$OpenBSD: main.c,v 1.25 2003/06/26 00:09:45 deraadt Exp $	*/
 
 /*
  * startup, main loop, environments and error handling
@@ -83,9 +83,7 @@ static const char *const initcoms [] = {
 };
 
 int
-main(argc, argv)
-	int argc;
-	register char **argv;
+main(int argc, char *argv[])
 {
 	register int i;
 	int argi;
@@ -829,7 +827,7 @@ remove_temps(tp)
 				    APERM);
 				memset(t, 0, sizeof(struct temp));
 				t->name = (char *) &t[1];
-				strcpy(t->name, tp->name);
+				strlcpy(t->name, tp->name, strlen(tp->name) + 1);
 				t->next = delayed_remove;
 				delayed_remove = t;
 			}

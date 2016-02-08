@@ -1,7 +1,7 @@
 /* ====================================================================
  * The Apache Software License, Version 1.1
  *
- * Copyright (c) 2000-2002 The Apache Software Foundation.  All rights
+ * Copyright (c) 2000-2003 The Apache Software Foundation.  All rights
  * reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -221,6 +221,7 @@ API_EXPORT(int) ap_getline(char *s, int n, BUFF *in, int fold);
 
 API_EXPORT(long) ap_get_chunk_size(char *b);
 
+API_EXPORT(void) ap_init_etag(pool *pconf);
 
 #ifdef __cplusplus
 }

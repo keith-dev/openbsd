@@ -1,4 +1,4 @@
-.\"	$OpenBSD: getopt_long.3,v 1.5 2003/02/24 03:09:07 deraadt Exp $
+.\"	$OpenBSD: getopt_long.3,v 1.9 2003/09/02 18:24:21 jmc Exp $
 .\"	$NetBSD: getopt_long.3,v 1.11 2002/10/02 10:54:19 wiz Exp $
 .\"
 .\" Copyright (c) 1988, 1991, 1993
@@ -12,11 +12,7 @@
 .\" 2. Redistributions in binary form must reproduce the above copyright
 .\"    notice, this list of conditions and the following disclaimer in the
 .\"    documentation and/or other materials provided with the distribution.
-.\" 3. All advertising materials mentioning features or use of this software
-.\"    must display the following acknowledgement:
-.\"	This product includes software developed by the University of
-.\"	California, Berkeley and its contributors.
-.\" 4. Neither the name of the University nor the names of its contributors
+.\" 3. Neither the name of the University nor the names of its contributors
 .\"    may be used to endorse or promote products derived from this software
 .\"    without specific prior written permission.
 .\"
@@ -44,10 +40,10 @@
 .Sh SYNOPSIS
 .Fd #include <getopt.h>
 .Vt extern char *optarg;
-.Vt extern int   optind;
-.Vt extern int   optopt;
-.Vt extern int   opterr;
-.Vt extern int   optreset;
+.Vt extern int optind;
+.Vt extern int optopt;
+.Vt extern int opterr;
+.Vt extern int optreset;
 .Ft int
 .Fn getopt_long "int argc" "char * const *argv" "const char *optstring" "const struct option *longopts" "int *index"
 .Ft int
@@ -187,7 +183,7 @@ in the location pointed to by
 These functions return
 .Sq \:
 if there was a missing option argument,
-.Sq ?
+.Sq \&?
 if the user specified an unknown or ambiguous option, and
 \-1 when the argument list has been exhausted.
 .Sh EXAMPLES
@@ -241,7 +237,7 @@ arguments to option '\e1'.
 honors POSIXLY_CORRECT and stops at the first non-option.
 .El
 .It Li o
-handling of - within the option string (not the first character).
+handling of - within the option string (not the first character):
 .Bl -tag -width "OpenBSD"
 .It Li GNU
 treats a
@@ -283,8 +279,8 @@ handling of --a in getopt:
 .It Li GNU
 parses this as option '-', option 'a'.
 .It Li OpenBSD
-parses this as '--', and returns -1 (ignoring the a).  (Because
-the original getopt does.)
+parses this as '--', and returns \-1 (ignoring the a).
+(Because the original getopt does.)
 .El
 .It Li o
 setting of optopt for long options with flag !=
@@ -368,6 +364,3 @@ argument is not really
 as its elements may be permuted (unless
 .Ev POSIXLY_CORRECT
 is set).
-.Pp
-In a future release, this implementation should completely replace
-.Xr getopt 3 .

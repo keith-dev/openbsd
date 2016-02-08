@@ -1,4 +1,4 @@
-/*	$OpenBSD: gamesupport.c,v 1.4 2000/06/29 07:39:43 pjanzen Exp $	*/
+/*	$OpenBSD: gamesupport.c,v 1.6 2003/04/25 21:37:47 deraadt Exp $	*/
 /*	$NetBSD: gamesupport.c,v 1.3 1995/04/24 12:24:28 cgd Exp $	*/
 
 /*
@@ -21,7 +21,7 @@
 / RETURN VALUE: none
 /
 / MODULES CALLED: freerecord(), writerecord(), descrstatus(), truncstring(), 
-/	time(), more(), wmove(), wclear(), strcmp(), printw(), strcpy(), 
+/	time(), more(), wmove(), wclear(), strcmp(), printw(), strlcpy(), 
 /	infloat(), waddstr(), cleanup(), findname(), userlist(), mvprintw(), 
 /	localtime(), getanswer(), descrtype(), getstring()
 /
@@ -231,7 +231,8 @@ changestats(ingameflag)
 				truncstring(Databuf);
 				if (Databuf[0] != '\0')
 					if (Wizard || findname(Databuf, &Other) < 0L)
-						strcpy(playerp->p_name, Databuf);
+						strlcpy(playerp->p_name, Databuf,
+						    sizeof playerp->p_name);
 			} else
 				/* get new password */
 			{
@@ -661,7 +662,7 @@ purgeoldplayers()
 / RETURN VALUE: none
 /
 / MODULES CALLED: fread(), fseek(), fopen(), error(), strcmp(), fclose(), 
-/	strcpy(), fwrite(), descrtype()
+/	strlcpy(), fwrite(), descrtype()
 /
 / GLOBAL INPUTS: Player
 /
@@ -705,10 +706,13 @@ enterscore()
 	if ((!found) || Player.p_level > sbuf.sb_level)
 		/* put new entry in for this login */
 	{
-		strcpy(sbuf.sb_login, Player.p_login);
-		strcpy(sbuf.sb_name, Player.p_name);
+		strlcpy(sbuf.sb_login, Player.p_login,
+		    sizeof sbuf.sb_login);
+		strlcpy(sbuf.sb_name, Player.p_name,
+		    sizeof sbuf.sb_name);
 		sbuf.sb_level = Player.p_level;
-		strcpy(sbuf.sb_type, descrtype(&Player, TRUE));
+		strlcpy(sbuf.sb_type, descrtype(&Player, TRUE),
+		    sizeof sbuf.sb_type);
 	}
 	/* update entry */
 	fseek(fp, loc, SEEK_SET);

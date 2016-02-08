@@ -1,4 +1,4 @@
-/*	$OpenBSD: sort.c,v 1.18 2002/02/16 21:27:52 millert Exp $	*/
+/*	$OpenBSD: sort.c,v 1.22 2003/06/26 00:12:39 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 1993
@@ -15,11 +15,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -46,7 +42,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)sort.c	8.1 (Berkeley) 6/6/93";
 #else
-static char rcsid[] = "$OpenBSD: sort.c,v 1.18 2002/02/16 21:27:52 millert Exp $";
+static char rcsid[] = "$OpenBSD: sort.c,v 1.22 2003/06/26 00:12:39 deraadt Exp $";
 #endif
 #endif /* not lint */
 
@@ -89,9 +85,9 @@ struct coldesc *clist;
 int ncols = 0;
 int ND = 10;			/* limit on number of -k options. */
 
-char devstdin[] = _PATH_STDIN;
-char toutpath[_POSIX_PATH_MAX];
+char *devstdin = _PATH_STDIN;
 char *tmpdir = _PATH_VARTMP;
+char toutpath[PATH_MAX];
 
 static void cleanup(void);
 static void onsig(int);
@@ -107,11 +103,9 @@ static void usage(char *);
 	}
 
 int
-main(argc, argv)
-	int argc;
-	char *argv[];
+main(int argc, char *argv[])
 {
-	int (*get)();
+	int (*get)(int, union f_handle, int, RECHEADER *, u_char *, struct field *);
 	int ch, i, stdinflag = 0, tmp = 0;
 	char nfields = 0, cflag = 0, mflag = 0;
 	char *outfile, *outpath = 0;
@@ -314,8 +308,7 @@ main(argc, argv)
 }
 
 static void
-onsig(s)
-	int s;
+onsig(int signo)
 {
 
 	cleanup();
@@ -323,7 +316,7 @@ onsig(s)
 }
 
 static void
-cleanup()
+cleanup(void)
 {
 
 	if (toutpath[0])
@@ -331,8 +324,7 @@ cleanup()
 }
 
 static void
-usage(msg)
-	char *msg;
+usage(char *msg)
 {
 	extern char *__progname;
 

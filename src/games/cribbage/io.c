@@ -1,4 +1,4 @@
-/*	$OpenBSD: io.c,v 1.7 2002/02/19 19:39:36 millert Exp $	*/
+/*	$OpenBSD: io.c,v 1.9 2003/06/03 03:01:39 millert Exp $	*/
 /*	$NetBSD: io.c,v 1.9 1997/07/09 06:25:47 phil Exp $	*/
 
 /*-
@@ -13,11 +13,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -401,7 +397,7 @@ msg(const char *fmt, ...)
 	va_list ap;
 
 	va_start(ap, fmt);
-	(void)vsprintf(&Msgbuf[Newpos], fmt, ap);
+	(void)vsnprintf(&Msgbuf[Newpos], sizeof Msgbuf - Newpos, fmt, ap);
 	Newpos = strlen(Msgbuf);
 	va_end(ap);
 	endmsg();
@@ -417,7 +413,7 @@ addmsg(const char *fmt, ...)
 	va_list ap;
 
 	va_start(ap, fmt);
-	(void)vsprintf(&Msgbuf[Newpos], fmt, ap);
+	(void)vsnprintf(&Msgbuf[Newpos], sizeof Msgbuf - Newpos, fmt, ap);
 	Newpos = strlen(Msgbuf);
 	va_end(ap);
 }

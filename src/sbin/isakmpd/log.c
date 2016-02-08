@@ -1,9 +1,9 @@
-/*	$OpenBSD: log.c,v 1.30 2002/08/08 13:25:28 ho Exp $	*/
+/*	$OpenBSD: log.c,v 1.35 2003/06/10 16:41:29 deraadt Exp $	*/
 /*	$EOM: log.c,v 1.30 2000/09/29 08:19:23 niklas Exp $	*/
 
 /*
  * Copyright (c) 1998, 1999, 2001 Niklas Hallqvist.  All rights reserved.
- * Copyright (c) 1999, 2000, 2001 Håkan Olsson.  All rights reserved.
+ * Copyright (c) 1999, 2000, 2001, 2003 Håkan Olsson.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -13,11 +13,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by Ericsson Radio Systems.
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -63,15 +58,17 @@
 #include <string.h>
 #include <syslog.h>
 #include <stdarg.h>
+#include <unistd.h>
 
 #include "isakmp_num.h"
 #include "log.h"
+#include "monitor.h"
 
 static void _log_print (int, int, const char *, va_list, int, int);
 
 static FILE *log_output;
 
-#ifdef USE_DEBUG
+#if defined (USE_DEBUG)
 static int log_level[LOG_ENDCLASS];
 
 #define TCPDUMP_MAGIC	0xa1b2c3d4
@@ -148,24 +145,27 @@ _log_print (int error, int syslog_level, const char *fmt, va_list ap,
   struct timeval now;
   time_t t;
 
-  len = vsnprintf (buffer, LOG_SIZE, fmt, ap);
-  if (len > 0 && len < LOG_SIZE - 1 && error)
-    snprintf (buffer + len, LOG_SIZE - len, ": %s", strerror (errno));
+  len = vsnprintf (buffer, sizeof buffer, fmt, ap);
+  if (len > 0 && len < sizeof buffer - 1 && error)
+    snprintf (buffer + len, sizeof buffer - len, ": %s", strerror (errno));
   if (log_output)
     {
       gettimeofday (&now, 0);
       t = now.tv_sec;
       tm = localtime (&t);
       if (class >= 0)
-	snprintf (nbuf, LOG_SIZE + 32, "%02d%02d%02d.%06ld %s %02d ",
+	snprintf (nbuf, sizeof nbuf, "%02d%02d%02d.%06ld %s %02d ",
 		  tm->tm_hour, tm->tm_min, tm->tm_sec, now.tv_usec,
 		  _log_get_class (class), level);
       else /* LOG_PRINT (-1) or LOG_REPORT (-2) */
-	snprintf (nbuf, LOG_SIZE + 32, "%02d%02d%02d.%06ld %s ", tm->tm_hour,
+	snprintf (nbuf, sizeof nbuf, "%02d%02d%02d.%06ld %s ", tm->tm_hour,
 		  tm->tm_min, tm->tm_sec, now.tv_usec,
-		  class == LOG_PRINT ? "Default" : "Report>");	
-      strlcat (nbuf, buffer, LOG_SIZE + 32);
-      strlcat (nbuf, "\n", LOG_SIZE + 32);
+		  class == LOG_PRINT ? "Default" : "Report>");
+      strlcat (nbuf, buffer, sizeof nbuf);
+#if defined (USE_PRIVSEP)
+      strlcat (nbuf, getuid() ? "" : " [priv]", LOG_SIZE + 32);
+#endif
+      strlcat (nbuf, "\n", sizeof nbuf);
 
       if (fwrite (nbuf, strlen (nbuf), 1, log_output) == 0)
 	{
@@ -227,7 +227,7 @@ log_debug_buf (int cls, int level, const char *header, const u_int8_t *buf,
   log_debug (cls, level, "%s:", header);
   for (i = j = 0; i < sz;)
     {
-      snprintf (s + j, 73 - j, "%02x", buf[i++]);
+      snprintf (s + j, sizeof s - j, "%02x", buf[i++]);
       j += 2;
       if (i % 4 == 0)
 	{
@@ -379,7 +379,7 @@ log_packet_init (char *newname)
     mode = "w";
 
   old_umask = umask (S_IRWXG | S_IRWXO);
-  packet_log = fopen (pcaplog_file, mode);
+  packet_log = monitor_fopen (pcaplog_file, mode);
   umask (old_umask);
 
   if (!packet_log)

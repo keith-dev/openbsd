@@ -1,4 +1,4 @@
-.\"	$OpenBSD: mbuf_tags.9,v 1.14 2003/02/26 15:05:07 david Exp $
+.\"	$OpenBSD: mbuf_tags.9,v 1.17 2003/06/06 20:56:32 jmc Exp $
 .\"
 .\" The author of this man page is Angelos D. Keromytis (angelos@cis.upenn.edu)
 .\"
@@ -184,6 +184,15 @@ and will short circuit it if processed again.
 If they were to re-enter the fragcache, they would be indistinguishable
 from a duplicate of a previous packet and would be dropped.
 Contains no data.
+.It PACKET_TAG_PF_QID
+Used by
+.Xr pf 4
+for queueing.
+The tag contains the ID of the queue this packet should go to.
+.It PACKET_TAG_PF_TAG
+Used by
+.Xr pf 4
+to tag packets and filtering on those later on.
 .El
 .Pp
 .Fn m_tag_free
@@ -288,4 +297,5 @@ The tag-manipulating code is contained in the file
 .Sh HISTORY
 The packet tags first appeared in
 .Ox 2.9
-and were written by Angelos D. Keromytis <angelos@openbsd.org>.
+and were written by
+.An Angelos D. Keromytis Aq angelos@openbsd.org .

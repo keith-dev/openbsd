@@ -1,4 +1,4 @@
-/*	$OpenBSD: process.c,v 1.14 2002/11/25 07:40:09 itojun Exp $	*/
+/*	$OpenBSD: process.c,v 1.16 2003/06/11 14:24:46 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1983 Regents of the University of California.
@@ -12,11 +12,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -35,7 +31,7 @@
 
 #ifndef lint
 /*static char sccsid[] = "from: @(#)process.c	5.10 (Berkeley) 2/26/91";*/
-static char rcsid[] = "$Id: process.c,v 1.14 2002/11/25 07:40:09 itojun Exp $";
+static char rcsid[] = "$Id: process.c,v 1.16 2003/06/11 14:24:46 deraadt Exp $";
 #endif /* not lint */
 
 /*
@@ -63,9 +59,7 @@ static char rcsid[] = "$Id: process.c,v 1.14 2002/11/25 07:40:09 itojun Exp $";
 #define	satosin(sa)	((struct sockaddr_in *)(sa))
 
 void
-process_request(mp, rp)
-	CTL_MSG *mp;
-	CTL_RESPONSE *rp;
+process_request(CTL_MSG *mp, CTL_RESPONSE *rp)
 {
 	CTL_MSG *ptr;
 	char *s;
@@ -152,9 +146,7 @@ process_request(mp, rp)
 }
 
 void
-do_announce(mp, rp)
-	CTL_MSG *mp;
-	CTL_RESPONSE *rp;
+do_announce(CTL_MSG *mp, CTL_RESPONSE *rp)
 {
 	struct hostent *hp;
 	CTL_MSG *ptr;
@@ -199,9 +191,7 @@ do_announce(mp, rp)
  * Search utmp for the local user
  */
 int
-find_user(name, tty, ttyl)
-	char *name, *tty;
-	size_t ttyl;
+find_user(char *name, char *tty, size_t ttyl)
 {
 	struct utmp ubuf, ubuf1;
 	int status;

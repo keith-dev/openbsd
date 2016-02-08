@@ -1,4 +1,4 @@
-/*	$OpenBSD: dtors.c,v 1.3 2002/02/18 11:09:48 art Exp $	*/
+/*	$OpenBSD: dtors.c,v 1.5 2003/09/02 23:52:16 david Exp $	*/
 /*
  *	Written by Artur Grabowski <art@openbsd.org>, 2002 Public Domain.
  */
@@ -7,8 +7,10 @@
 #include <sys/wait.h>
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <err.h>
+#include <unistd.h>
 
 void zap(void) __attribute__((destructor));
 

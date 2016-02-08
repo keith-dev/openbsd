@@ -1,4 +1,4 @@
-.\"	$OpenBSD: pw_init.3,v 1.5 2002/05/01 08:03:30 mpech Exp $
+.\"	$OpenBSD: pw_init.3,v 1.7 2003/06/02 20:18:42 millert Exp $
 .\"
 .\" Copyright (c) 1995
 .\"	The Regents of the University of California.  All rights reserved.
@@ -15,11 +15,7 @@
 .\" 2. Redistributions in binary form must reproduce the above copyright
 .\"    notice, this list of conditions and the following disclaimer in the
 .\"    documentation and/or other materials provided with the distribution.
-.\" 3. All advertising materials mentioning features or use of this software
-.\"    must display the following acknowledgement:
-.\"	This product includes software developed by the University of
-.\"	California, Berkeley and its contributors.
-.\" 4. Neither the name of the University nor the names of its contributors
+.\" 3. Neither the name of the University nor the names of its contributors
 .\"    may be used to endorse or promote products derived from this software
 .\"    without specific prior written permission.
 .\"
@@ -83,10 +79,11 @@ disabling most signals.
 .Pp
 The
 .Fn pw_setdir
-function sets an alternative directory where the rest of the functions looks
+function sets an alternative directory where the rest of the functions look
 for password-related files.
 Use this if you are writing utilities that should
-be able to handle password files outside of /etc.
+be able to handle password files outside of
+.Pa /etc .
 .Pp
 The
 .Fn pw_file
@@ -94,7 +91,7 @@ function transforms filenames so that they end up in the directory specified
 to the latest
 .Fn pw_setdir
 call.
-The rule is that all directories are stripped off the given name and
+The rule is that all directories are stripped of the given name and
 only the filename is appended to the directory.
 .Pp
 The
@@ -188,7 +185,8 @@ The
 .Fn pw_scan
 function prints a warning message and returns 0 if the string in the
 .Fa bp
-argument is not a valid passwd string.  Otherwise,
+argument is not a valid passwd string.
+Otherwise,
 .Fn pw_scan
 returns 1.
 .Sh FILES

@@ -1,4 +1,4 @@
-/* $OpenBSD: siginfo.c,v 1.8 2002/10/27 21:49:45 marc Exp $ */
+/* $OpenBSD: siginfo.c,v 1.10 2003/07/31 21:48:06 deraadt Exp $ */
 /* PUBLIC DOMAIN Oct 2002 <marc@snafu.org> */
 
 /*
@@ -9,12 +9,13 @@
 #include <signal.h>
 #include <stdio.h>
 #include <unistd.h>
+#include <stdlib.h>
 
 #include "test.h"
 
 #define BOGUS	(char *)0x987230
 
-void
+static void
 act_handler(int signal, siginfo_t *siginfo, void *context)
 {
 	struct sigaction sa;
@@ -27,6 +28,7 @@ act_handler(int signal, siginfo_t *siginfo, void *context)
 		 "addr %p, code %d, trap %d\n", signal, siginfo, context,
 		 siginfo->si_addr, siginfo->si_code, siginfo->si_trapno);
 	write(STDOUT_FILENO, str, strlen(str));
+	free(str);
  	ASSERT(siginfo->si_addr == BOGUS);
 	ASSERT(siginfo->si_code != SI_USER);
 	ASSERT(siginfo->si_code > 0 && siginfo->si_code <= NSIGSEGV);

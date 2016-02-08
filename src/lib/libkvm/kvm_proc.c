@@ -1,4 +1,4 @@
-/*	$OpenBSD: kvm_proc.c,v 1.16 2002/06/20 17:16:56 art Exp $	*/
+/*	$OpenBSD: kvm_proc.c,v 1.18 2003/08/06 21:08:05 millert Exp $	*/
 /*	$NetBSD: kvm_proc.c,v 1.30 1999/03/24 05:50:50 mrg Exp $	*/
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -52,11 +52,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -77,7 +73,7 @@
 #if 0
 static char sccsid[] = "@(#)kvm_proc.c	8.3 (Berkeley) 9/23/93";
 #else
-static char *rcsid = "$OpenBSD: kvm_proc.c,v 1.16 2002/06/20 17:16:56 art Exp $";
+static char *rcsid = "$OpenBSD: kvm_proc.c,v 1.18 2003/08/06 21:08:05 millert Exp $";
 #endif
 #endif /* LIBC_SCCS and not lint */
 
@@ -558,7 +554,7 @@ kvm_argv(kd, p, addr, narg, maxcnt)
 		cp = kd->argbuf + addr;
 		cc = kd->nbpg - addr;
 		if (maxcnt > 0 && cc > maxcnt - len)
-			cc = maxcnt - len;;
+			cc = maxcnt - len;
 		ep = memchr(cp, '\0', cc);
 		if (ep != 0)
 			cc = ep - cp + 1;

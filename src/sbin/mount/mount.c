@@ -1,4 +1,4 @@
-/*	$OpenBSD: mount.c,v 1.29 2002/11/06 14:14:48 gluk Exp $	*/
+/*	$OpenBSD: mount.c,v 1.33 2003/08/05 20:48:59 tedu Exp $	*/
 /*	$NetBSD: mount.c,v 1.24 1995/11/18 03:34:29 cgd Exp $	*/
 
 /*
@@ -13,11 +13,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -44,7 +40,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)mount.c	8.19 (Berkeley) 4/19/94";
 #else
-static char rcsid[] = "$OpenBSD: mount.c,v 1.29 2002/11/06 14:14:48 gluk Exp $";
+static char rcsid[] = "$OpenBSD: mount.c,v 1.33 2003/08/05 20:48:59 tedu Exp $";
 #endif
 #endif /* not lint */
 
@@ -292,7 +288,7 @@ main(int argc, char * const argv[])
 	if ((rval == 0 || new) && getuid() == 0 &&
 	    (mountdfp = fopen(_PATH_MOUNTDPID, "r")) != NULL) {
 		if (fscanf(mountdfp, "%d", &pid) == 1 &&
-		     pid > 0 && kill(pid, SIGHUP) == -1 && errno != ESRCH)
+		    pid > 0 && kill(pid, SIGHUP) == -1 && errno != ESRCH)
 			err(1, "signal mountd");
 		(void)fclose(mountdfp);
 	}
@@ -384,7 +380,7 @@ mountfs(const char *vfstype, const char *spec, const char *name,
 			if (verbose)
 				(void)printf("%s on %s type %.*s: %s\n",
 				    sf.f_mntfromname, sf.f_mntonname,
-			            MFSNAMELEN, sf.f_fstypename,
+				    MFSNAMELEN, sf.f_fstypename,
 				    "already mounted");
 			return (0);
 		}
@@ -574,6 +570,8 @@ prmount(struct statfs *sf)
 			(void)printf("%s%s", !f++ ? " (" : ", ", "nowin95");
 		if (msdosfs_args->flags & MSDOSFSMNT_GEMDOSFS)
 			(void)printf("%s%s", !f++ ? " (" : ", ", "gem");
+		if (msdosfs_args->flags & MSDOSFSMNT_ALLOWDIRX)
+			(void)printf("%s%s", !f++ ? " (" : ", ", "direxec");
 	} else if (strcmp(sf->f_fstypename, MOUNT_CD9660) == 0) {
 		struct iso_args *iso_args = &sf->mount_info.iso_args;
 
@@ -583,6 +581,13 @@ prmount(struct statfs *sf)
 			(void)printf("%s%s", !f++ ? " (" : ", ", "gens");
 		if (iso_args->flags & ISOFSMNT_EXTATT)
 			(void)printf("%s%s", !f++ ? " (" : ", ", "extatt");
+	} else if (strcmp(sf->f_fstypename, MOUNT_PROCFS) == 0) {
+		struct procfs_args *procfs_args = &sf->mount_info.procfs_args;
+
+		if (verbose)
+			(void)printf("version %d", procfs_args->version);
+		if (procfs_args->flags & PROCFSMNT_LINUXCOMPAT)
+			(void)printf("%s%s", !f++ ? " (" : ", ", "linux");
 	}
 	(void)printf(f ? ")\n" : "\n");
 }

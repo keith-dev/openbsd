@@ -1,4 +1,5 @@
-/* $OpenBSD: pwd_gensalt.c,v 1.15 2002/11/21 15:02:03 henning Exp $ */
+/*	$OpenBSD: pwd_gensalt.c,v 1.17 2003/07/02 21:04:10 deraadt Exp $ */
+
 /*
  * Copyright 1997 Niels Provos <provos@physnet.uni-hamburg.de>
  * All rights reserved.
@@ -43,6 +44,7 @@
 
 void	to64(char *, int32_t, int n);
 char	*bcrypt_gensalt(u_int8_t);
+int	pwd_gensalt(char *, int, struct passwd *, login_cap_t *, char);
 
 int
 pwd_gensalt(char *salt, int saltlen, struct passwd *pwd, login_cap_t *lc, char type)
@@ -121,7 +123,7 @@ pwd_gensalt(char *salt, int saltlen, struct passwd *pwd, login_cap_t *lc, char t
 		strlcpy(salt, "$1$", saltlen);
 		to64(&salt[3], arc4random(), 4);
 		to64(&salt[7], arc4random(), 4);
-		strcpy(&salt[11], "$");
+		strlcpy(&salt[11], "$", saltlen - 11);
 	} else if (!strcmp(now, "blowfish")) {
 		int rounds = atoi(next);
 

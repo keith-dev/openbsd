@@ -1,7 +1,7 @@
 /* ====================================================================
  * The Apache Software License, Version 1.1
  *
- * Copyright (c) 2000-2002 The Apache Software Foundation.  All rights
+ * Copyright (c) 2000-2003 The Apache Software Foundation.  All rights
  * reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -505,7 +505,7 @@ API_EXPORT(void) ap_bpushh(BUFF *fb, HANDLE hFH)
 API_EXPORT(int) ap_bsetopt(BUFF *fb, int optname, const void *optval)
 {
     if (optname == BO_BYTECT) {
-	fb->bytes_sent = *(const long int *) optval - (long int) fb->outcnt;;
+	fb->bytes_sent = *(const long int *) optval - (long int) fb->outcnt;
 	return 0;
     }
     else {

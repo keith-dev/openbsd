@@ -1,4 +1,4 @@
-/*	$OpenBSD: exec_elf.c,v 1.6 2002/08/05 00:26:56 art Exp $ */
+/*	$OpenBSD: exec_elf.c,v 1.8 2003/06/28 04:55:07 deraadt Exp $ */
 
 /*
  * Copyright (c) 1999 Mats O Jansson.  All rights reserved.
@@ -11,11 +11,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by Mats O Jansson.
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -30,7 +25,7 @@
  */
 
 #ifndef LINT
-static char rcsid[] = "$OpenBSD: exec_elf.c,v 1.6 2002/08/05 00:26:56 art Exp $";
+static char rcsid[] = "$OpenBSD: exec_elf.c,v 1.8 2003/06/28 04:55:07 deraadt Exp $";
 #endif
 
 #include <err.h>
@@ -54,9 +49,14 @@ char		*elf_total;
 char		*elf_shstrtab;
 off_t		elf_size;
 
+caddr_t		elf_adjust(caddr_t);
+caddr_t		elf_readjust(caddr_t);
+int		elf_check(char *);
+void		elf_loadkernel(char *);
+void		elf_savekernel(char *);
+
 caddr_t
-elf_adjust(x)
-	caddr_t x;
+elf_adjust(caddr_t x)
 {
 	int i;
 	Elf_Shdr *s;
@@ -79,8 +79,7 @@ elf_adjust(x)
 }
 
 caddr_t
-elf_readjust(x)
-	caddr_t x;
+elf_readjust(caddr_t x)
 {
 	int i;
 	Elf_Shdr *s;
@@ -101,8 +100,7 @@ elf_readjust(x)
 }
 
 int
-elf_check(file)
-	char *file;
+elf_check(char *file)
 {
 	int fd, ret = 1;
 
@@ -122,8 +120,7 @@ elf_check(file)
 }
 
 void
-elf_loadkernel(file)
-	char *file;
+elf_loadkernel(char *file)
 {
 	int fd;
 	Elf_Phdr *p;
@@ -157,9 +154,7 @@ elf_loadkernel(file)
 }
 
 void
-elf_savekernel(outfile)
-
-	char *outfile;
+elf_savekernel(char *outfile)
 {
 	int fd;
 

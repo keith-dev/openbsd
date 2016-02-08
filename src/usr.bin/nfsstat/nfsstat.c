@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfsstat.c,v 1.17 2003/01/15 22:57:42 millert Exp $	*/
+/*	$OpenBSD: nfsstat.c,v 1.21 2003/07/07 21:36:52 deraadt Exp $	*/
 /*	$NetBSD: nfsstat.c,v 1.7 1996/03/03 17:21:30 thorpej Exp $	*/
 
 /*
@@ -16,11 +16,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -48,7 +44,7 @@ static char copyright[] =
 static char sccsid[] = "from: @(#)nfsstat.c	8.1 (Berkeley) 6/6/93";
 static char *rcsid = "$NetBSD: nfsstat.c,v 1.7 1996/03/03 17:21:30 thorpej Exp $";
 #else
-static char *rcsid = "$OpenBSD: nfsstat.c,v 1.17 2003/01/15 22:57:42 millert Exp $";
+static char *rcsid = "$OpenBSD: nfsstat.c,v 1.21 2003/07/07 21:36:52 deraadt Exp $";
 #endif
 #endif /* not lint */
 
@@ -90,11 +86,10 @@ void printhdr(void);
 void intpr(u_int);
 void sidewaysintpr(u_int, u_int);
 void usage(void);
+void catchalarm(int);
 
 int
-main(argc, argv)
-	int argc;
-	char **argv;
+main(int argc, char *argv[])
 {
 	extern int optind;
 	extern char *optarg;
@@ -189,8 +184,7 @@ main(argc, argv)
 }
 
 void
-getnfsstats(p)
-	struct nfsstats *p;
+getnfsstats(struct nfsstats *p)
 {
 	if (kd) {
 		if (kvm_read(kd, nl[N_NFSSTAT].n_value, p, sizeof(*p)) != sizeof(*p))
@@ -212,8 +206,7 @@ getnfsstats(p)
  * Print a description of the nfs stats.
  */
 void
-intpr(display)
-	u_int display;
+intpr(u_int display)
 {
 	struct nfsstats nfsstats;
 
@@ -350,14 +343,11 @@ intpr(display)
  * First line printed at top of screen is always cumulative.
  */
 void
-sidewaysintpr(interval, display)
-	u_int interval;
-	u_int display;
+sidewaysintpr(u_int interval, u_int display)
 {
 	struct nfsstats nfsstats, lastst;
 	int hdrcnt;
 	sigset_t emptyset;
-	void catchalarm();
 
 	(void)signal(SIGALRM, catchalarm);
 	signalled = 0;
@@ -406,7 +396,7 @@ sidewaysintpr(interval, display)
 }
 
 void
-printhdr()
+printhdr(void)
 {
 	printf("        %8.8s %8.8s %8.8s %8.8s %8.8s %8.8s %8.8s %8.8s\n",
 	    "Getattr", "Lookup", "Readlink", "Read", "Write", "Rename",
@@ -419,13 +409,13 @@ printhdr()
  * Sets a flag to not wait for the alarm.
  */
 void
-catchalarm()
+catchalarm(int signo)
 {
 	signalled = 1;
 }
 
 void
-usage()
+usage(void)
 {
 	extern char *__progname;
 	fprintf(stderr,

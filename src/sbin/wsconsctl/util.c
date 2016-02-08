@@ -1,4 +1,4 @@
-/*	$OpenBSD: util.c,v 1.19 2003/02/12 01:44:09 miod Exp $ */
+/*	$OpenBSD: util.c,v 1.22 2003/06/17 21:21:26 miod Exp $ */
 /*	$NetBSD: util.c,v 1.8 2000/03/14 08:11:53 sato Exp $ */
 
 /*-
@@ -112,7 +112,20 @@ static const struct nameint dpytype_tab[] = {
 	{ WSDISPLAY_TYPE_DCPVR,		"powervr" },
 	{ WSDISPLAY_TYPE_SUN24,		"sun24" },
 	{ WSDISPLAY_TYPE_SUNBW,		"sunbw" },
-	{ WSDISPLAY_TYPE_STI,		"hp-sti" }
+	{ WSDISPLAY_TYPE_STI,		"hp-sti" },
+	{ WSDISPLAY_TYPE_SUNCG3,	"suncg3" },
+	{ WSDISPLAY_TYPE_SUNCG6,	"suncg6" },
+	{ WSDISPLAY_TYPE_SUNFFB,	"sunffb" },
+	{ WSDISPLAY_TYPE_SUNCG14,	"suncg14" },
+	{ WSDISPLAY_TYPE_SUNCG2,	"suncg2" },
+	{ WSDISPLAY_TYPE_SUNCG4,	"suncg4" },
+	{ WSDISPLAY_TYPE_SUNCG8,	"suncg8" },
+	{ WSDISPLAY_TYPE_SUNTCX,	"suntcx" },
+	{ WSDISPLAY_TYPE_AGTEN,		"agten" },
+	{ WSDISPLAY_TYPE_XVIDEO,	"xvideo" },
+	{ WSDISPLAY_TYPE_SUNCG12,	"suncg12" },
+	{ WSDISPLAY_TYPE_MGX,		"mgx" },
+	{ WSDISPLAY_TYPE_SB_P9000,	"p9000" },
 };
 
 static const struct nameint kbdenc_tab[] = {

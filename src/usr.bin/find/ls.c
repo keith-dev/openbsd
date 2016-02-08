@@ -1,4 +1,4 @@
-/*	$OpenBSD: ls.c,v 1.9 2002/02/16 21:27:46 millert Exp $	*/
+/*	$OpenBSD: ls.c,v 1.12 2003/07/06 22:35:59 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1989, 1993
@@ -12,11 +12,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -35,7 +31,7 @@
 
 #ifndef lint
 /*static char sccsid[] = "from: @(#)ls.c	8.1 (Berkeley) 6/6/93";*/
-static char rcsid[] = "$OpenBSD: ls.c,v 1.9 2002/02/16 21:27:46 millert Exp $";
+static char rcsid[] = "$OpenBSD: ls.c,v 1.12 2003/07/06 22:35:59 deraadt Exp $";
 #endif /* not lint */
 
 #include <sys/param.h>
@@ -49,6 +45,11 @@ static char rcsid[] = "$OpenBSD: ls.c,v 1.9 2002/02/16 21:27:46 millert Exp $";
 #include <tzfile.h>
 #include <unistd.h>
 #include <utmp.h>
+#include <pwd.h>
+#include <grp.h>
+#include <fts.h>
+#include "find.h"
+#include "extern.h"
 
 /* Derived from the print routines in the ls(1) source code. */
 
@@ -58,12 +59,9 @@ static void printtime(time_t);
 #define NAME_WIDTH	8
 
 void
-printlong(name, accpath, sb)
-	char *name;			/* filename to print */
-	char *accpath;			/* current valid path to filename */
-	struct stat *sb;		/* stat buffer */
+printlong(char *name, char *accpath, struct stat *sb)
 {
-	char modep[15], *user_from_uid(), *group_from_gid();
+	char modep[15];
 
 	(void)printf("%6u %4lld ", sb->st_ino, (long long)sb->st_blocks);
 	(void)strmode(sb->st_mode, modep);
@@ -84,8 +82,7 @@ printlong(name, accpath, sb)
 }
 
 static void
-printtime(ftime)
-	time_t ftime;
+printtime(time_t ftime)
 {
 	int i;
 	char *longstring;
@@ -107,8 +104,7 @@ printtime(ftime)
 }
 
 static void
-printlink(name)
-	char *name;
+printlink(char *name)
 {
 	int lnklen;
 	char path[MAXPATHLEN];

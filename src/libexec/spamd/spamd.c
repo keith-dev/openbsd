@@ -1,4 +1,4 @@
-/*	$OpenBSD: spamd.c,v 1.26 2003/03/20 01:39:36 david Exp $	*/
+/*	$OpenBSD: spamd.c,v 1.42 2003/09/04 01:20:33 tedu Exp $	*/
 
 /*
  * Copyright (c) 2002 Theo de Raadt.  All rights reserved.
@@ -28,6 +28,7 @@
 #include <sys/file.h>
 #include <sys/wait.h>
 #include <sys/socket.h>
+#include <sys/resource.h>
 
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -72,9 +73,12 @@ struct con {
 
 	int obufalloc;
 	char *obuf;
+	char *lists;
 	size_t osize;
 	char *op;
 	int ol;
+	int data_lines;
+	int data_body;
 } *con;
 
 void     usage(void);
@@ -83,12 +87,12 @@ int      parse_configline(char *);
 void     parse_configs(void);
 void     do_config(void);
 int      append_error_string (struct con *, size_t, char *, int, void *);
-void     build_reply(struct  con *);
-void     doreply(struct con *);
+char    *build_reply(struct  con *);
+char    *doreply(struct con *);
 void     setlog(char *, size_t, char *);
 void     initcon(struct con *, int, struct sockaddr_in *);
 void     closecon(struct con *);
-int      match(char *, char *);
+int      match(const char *, const char *);
 void     nextstate(struct con *);
 void     handler(struct con *);
 void     handlew(struct con *, int one);
@@ -111,6 +115,8 @@ time_t t;
 int maxcon = MAXCON;
 int clients;
 int debug;
+int stutter = 1;
+int window;
 #define MAXTIME 400
 
 
@@ -118,7 +124,8 @@ void
 usage(void)
 {
 	fprintf(stderr,
-	    "usage: spamd [-45d] [-c maxcon] [-n name] [-p port] [-r reply]\n");
+	    "usage: spamd [-45d] [-c maxcon] [-n name] [-p port] [-r reply] "
+	    "[-s secs]\n");
 	exit(1);
 }
 
@@ -297,7 +304,7 @@ configdone:
 
 
 int
-append_error_string (struct con *cp, size_t off, char *fmt, int af, void *ia)
+append_error_string(struct con *cp, size_t off, char *fmt, int af, void *ia)
 {
 	char sav = '\0';
 	static int lastcont = 0;
@@ -311,7 +318,8 @@ append_error_string (struct con *cp, size_t off, char *fmt, int af, void *ia)
 
 	if (lastcont != 0)
 		cp->obuf[lastcont] = '-';
-	i += snprintf(c, len, "%s ", nreply);
+	snprintf(c, len, "%s ", nreply);
+	i += strlen(c);
 	lastcont = off + i - 1;
 	if (*s == '"')
 		s++;
@@ -331,7 +339,8 @@ append_error_string (struct con *cp, size_t off, char *fmt, int af, void *ia)
 		if (c[i-1] == '\n') {
 			if (lastcont != 0)
 				cp->obuf[lastcont] = '-';
-			i += snprintf(c + i, len, "%s ", nreply);
+			snprintf(c + i, len, "%s ", nreply);
+			i += strlen(c);
 			lastcont = off + i - 1;
 		}
 
@@ -390,11 +399,14 @@ no_mem:
 }
 
 
-void
+char *
 build_reply(struct con *cp)
 {
 	struct sdlist **matches;
+	static char matchlists[80];
 	int off = 0;
+
+	matchlists[0] = '\0';
 
 	matches = sdl_lookup(blacklists, cp->af, cp->ia);
 	if (matches == NULL) {
@@ -405,10 +417,20 @@ build_reply(struct con *cp)
 		goto bad;
 	}
 	for (; *matches; matches++) {
-		int used = 0;
+		int used = 0, s = sizeof(matchlists) - 4;
 		char *c = cp->obuf + off;
 		int left = cp->osize - off;
 
+		/* don't report an insane amount of lists in the logs.
+		 * just truncate and indicate with ...
+		 */
+		if (strlen(matchlists) + strlen(matches[0]->tag) + 1
+		    >= s)
+			strlcat(matchlists, " ...", sizeof(matchlists));
+		else {
+			strlcat(matchlists, " ", s);
+			strlcat(matchlists, matches[0]->tag, s);
+		}
 		used = append_error_string(cp, off, matches[0]->string,
 		    cp->af, cp->ia);
 		if (used == -1)
@@ -430,7 +452,7 @@ build_reply(struct con *cp)
 			cp->obuf[off] = '\0';
 		}
 	}
-	return;
+	return matchlists;
 bad:
 	/* Out of memory, or no match. give generic reply */
 	asprintf(&cp->obuf,
@@ -444,18 +466,19 @@ bad:
 		cp->obuf = "450 Try again\n";
 	} else
 		cp->osize = strlen(cp->obuf) + 1;
+	return matchlists;
 }
 
-void
+char *
 doreply(struct con *cp)
 {
 	if (reply) {
 		if (!cp->obufalloc)
 			errx(1, "shouldn't happen");
 		snprintf(cp->obuf, cp->osize, "%s %s\n", nreply, reply);
-		return;
+		return("");
 	}
-	build_reply(cp);
+	return (build_reply(cp));
 }
 
 void
@@ -464,8 +487,10 @@ setlog(char *p, size_t len, char *f)
 	char *s;
 
 	s = strsep(&f, ":");
-	if (!s)
+	if (!f)
 		return;
+	while (*f == ' ' || *f == '\t')
+		f++;
 	s = strsep(&f, " \t");
 	if (s == NULL)
 		return;
@@ -501,20 +526,26 @@ initcon(struct con *cp, int fd, struct sockaddr_in *sin)
 	    hostname, spamd, ctime(&t));
 	cp->op = cp->obuf;
 	cp->ol = strlen(cp->op);
-	cp->w = t + 1;
+	cp->w = t + stutter;
 	cp->s = t;
-	strlcpy(cp->rend, "\n\r", sizeof cp->rend);
+	strlcpy(cp->rend, "\n", sizeof cp->rend);
 	clients++;
 }
 
 void
 closecon(struct con *cp)
 {
-	if (debug > 0) {
-		time_t t;
+	time_t t;
 
-		time(&t);
-		printf("%s connected for %d seconds.\n", cp->addr, t - cp->s);
+	time(&t);
+	syslog_r(LOG_INFO, &sdata, "%s: disconnected after %ld seconds.",
+	    cp->addr, (long)(t - cp->s));
+	if (debug > 0)
+		printf("%s connected for %ld seconds.\n", cp->addr,
+		    (long)(t - cp->s));
+	if (cp->lists != NULL) {
+		free(cp->lists);
+		cp->lists = NULL;
 	}
 	if (cp->osize > 0 && cp->obufalloc) {
 		free(cp->obuf);
@@ -527,7 +558,7 @@ closecon(struct con *cp)
 }
 
 int
-match(char *s1, char *s2)
+match(const char *s1, const char *s2)
 {
 	return (strncasecmp(s1, s2, strlen(s2)) == 0);
 }
@@ -553,7 +584,7 @@ nextstate(struct con *cp)
 			cp->op = cp->obuf;
 			cp->ol = strlen(cp->op);
 			cp->state = 2;
-			cp->w = t + 1;
+			cp->w = t + stutter;
 			break;
 		}
 		goto mail;
@@ -574,7 +605,7 @@ nextstate(struct con *cp)
 			cp->op = cp->obuf;
 			cp->ol = strlen(cp->op);
 			cp->state = 4;
-			cp->w = t + 1;
+			cp->w = t + stutter;
 			break;
 		}
 		goto rcpt;
@@ -595,7 +626,10 @@ nextstate(struct con *cp)
 			cp->op = cp->obuf;
 			cp->ol = strlen(cp->op);
 			cp->state = 6;
-			cp->w = t + 1;
+			cp->w = t + stutter;
+			if (cp->mail[0] && cp->rcpt[0])
+				syslog_r(LOG_INFO, &sdata, "%s: %s -> %s",
+				    cp->addr, cp->mail, cp->rcpt);
 			break;
 		}
 		goto spam;
@@ -609,13 +643,50 @@ nextstate(struct con *cp)
 
 	spam:
 	case 50:
-		syslog_r(LOG_INFO, &sdata, "%s: %s -> %s",
-		    cp->addr, cp->mail, cp->rcpt);
-		doreply(cp);
+		if (match(cp->ibuf, "DATA")) {
+			snprintf(cp->obuf, cp->osize,
+			    "354 Enter spam, end with \".\" on a line by "
+			    "itself\n");
+			cp->state = 60;
+		} else {
+			snprintf(cp->obuf, cp->osize,
+			    "500 5.5.1 Command unrecognized\n");
+		}
+		cp->ip = cp->ibuf;
+		cp->il = sizeof(cp->ibuf) - 1;
 		cp->op = cp->obuf;
 		cp->ol = strlen(cp->op);
+		cp->w = t + stutter;
+		break;
+	case 60:
+		if (!strcmp(cp->ibuf, ".") ||
+		    (cp->data_body && ++cp->data_lines >= 10)) {
+			cp->state = 98;
+			goto done;
+		}
+		if (!cp->data_body && !*cp->ibuf)
+			cp->data_body = 1;
+		if (cp->data_body && *cp->ibuf)
+			syslog_r(LOG_INFO, &sdata, "%s: Body: %s", cp->addr,
+			    cp->ibuf);
+		else if (match(cp->ibuf, "FROM:") || match(cp->ibuf, "TO:") ||
+		    match(cp->ibuf, "SUBJECT:"))
+			syslog_r(LOG_INFO, &sdata, "%s: %s", cp->addr,
+			    cp->ibuf);
+		cp->ip = cp->ibuf;
+		cp->il = sizeof(cp->ibuf) - 1;
+		cp->r = t;
+		break;
+	done:
+	case 98:
+		cp->lists = strdup(doreply(cp));
+		if (cp->lists != NULL)
+			syslog_r(LOG_INFO, &sdata, "%s: matched lists: %s",
+			    cp->addr, cp->lists);
+		cp->op = cp->obuf;
+		cp->ol = strlen(cp->op);
+		cp->w = t + stutter;
 		cp->state = 99;
-		cp->w = t + 1;
 		break;
 	case 99:
 		closecon(cp);
@@ -630,7 +701,7 @@ void
 handler(struct con *cp)
 {
 	int end = 0;
-	int i, n;
+	int n;
 
 	if (cp->r) {
 		n = read(cp->fd, cp->ip, cp->il);
@@ -641,17 +712,22 @@ handler(struct con *cp)
 				perror("read()");
 			closecon(cp);
 		} else {
+			cp->ip[n] = '\0';
 			if (cp->rend[0])
-				for (i = 0; i < n; i++)
-					if (strchr(cp->rend, cp->op[i]))
-						end = 1;
+				if (strpbrk(cp->ip, cp->rend))
+					end = 1;
 			cp->ip += n;
 			cp->il -= n;
 		}
 	}
 	if (end || cp->il == 0) {
+		while (cp->ip > cp->ibuf &&
+		    (cp->ip[-1] == '\r' || cp->ip[-1] == '\n'))
+			cp->ip--;
 		*cp->ip = '\0';
 		cp->r = 0;
+		syslog_r(LOG_DEBUG, &sdata, "%s: says '%s'", cp->addr,
+		    cp->ibuf);
 		nextstate(cp);
 	}
 }
@@ -688,7 +764,7 @@ handlew(struct con *cp, int one)
 		}
 	}
 handled:
-	cp->w = t + 1;
+	cp->w = t + stutter;
 	if (cp->ol == 0) {
 		cp->w = 0;
 		nextstate(cp);
@@ -706,6 +782,7 @@ main(int argc, char *argv[])
 	int sinlen, one = 1;
 	u_short port, cfg_port;
 	struct servent *ent;
+	struct rlimit rlp;
 
 	tzset();
 	openlog_r("spamd", LOG_PID | LOG_NDELAY, LOG_DAEMON, &sdata);
@@ -720,7 +797,7 @@ main(int argc, char *argv[])
 	if (gethostname(hostname, sizeof hostname) == -1)
 		err(1, "gethostname");
 
-	while ((ch = getopt(argc, argv, "45c:p:dr:n:")) != -1) {
+	while ((ch = getopt(argc, argv, "45c:p:dr:s:n:w:")) != -1) {
 		switch (ch) {
 		case '4':
 			nreply = "450";
@@ -744,14 +821,28 @@ main(int argc, char *argv[])
 		case 'r':
 			reply = optarg;
 			break;
+		case 's':
+			i = atoi(optarg);
+			if (i < 0 || i > 10)
+				usage();
+			stutter = i;
 		case 'n':
 			spamd = optarg;
+			break;
+		case 'w':
+			window = atoi(optarg);
+			if (window <= 0)
+				usage();
 			break;
 		default:
 			usage();
 			break;
 		}
 	}
+
+	rlp.rlim_cur = rlp.rlim_max = maxcon + 7;
+	if (setrlimit(RLIMIT_NOFILE, &rlp) == -1)
+		err(1, "setrlimit");
 
 	con = calloc(maxcon, sizeof(*con));
 	if (con == NULL)
@@ -775,6 +866,11 @@ main(int argc, char *argv[])
 	if (setsockopt(s, SOL_SOCKET, SO_REUSEADDR, &one,
 	    sizeof(one)) == -1)
 		return (-1);
+
+	if (window && setsockopt(s, SOL_SOCKET, SO_RCVBUF, &window, sizeof(window)) == -1) {
+		syslog(LOG_ERR, "setsockopt: %s", strerror(errno));
+		return (-1);
+	}
 
 	conflisten = socket(AF_INET, SOCK_STREAM, 0);
 	if (conflisten == -1)
@@ -830,6 +926,7 @@ main(int argc, char *argv[])
 			err(1, "fork");
 	} else
 		printf("listening for incoming connections.\n");
+	syslog_r(LOG_WARNING, &sdata, "listening for incoming connections.");
 
 	while (1) {
 		struct timeval tv, *tvp;
@@ -901,8 +998,11 @@ main(int argc, char *argv[])
 		}
 
 		n = select(max+1, fdsr, fdsw, NULL, tvp);
-		if (n == -1 && errno == EINTR)
-			err(1, "select");
+		if (n == -1) {
+			if (errno != EINTR)
+				err(1, "select");
+			continue;
+		}
 		if (n == 0)
 			continue;
 
@@ -925,8 +1025,11 @@ main(int argc, char *argv[])
 					break;
 			if (i == maxcon)
 				close(s2);
-			else
+			else {
 				initcon(&con[i], s2, &sin);
+				syslog_r(LOG_INFO, &sdata, "%s: connected (%d)",
+				    con[i].addr, clients);
+			}
 		}
 		if (FD_ISSET(conflisten, fdsr)) {
 			sinlen = sizeof(lin);
@@ -940,7 +1043,6 @@ main(int argc, char *argv[])
 				close(conffd);
 				conffd = -1;
 			}
-				
 		}
 		if (conffd != -1 && FD_ISSET(conffd, fdsr)) {
 			do_config();

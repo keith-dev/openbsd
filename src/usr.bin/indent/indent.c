@@ -1,4 +1,4 @@
-/*	$OpenBSD: indent.c,v 1.13 2002/11/29 20:15:43 deraadt Exp $	*/
+/*	$OpenBSD: indent.c,v 1.17 2003/06/26 21:43:07 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1980, 1993
@@ -15,11 +15,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -47,7 +43,7 @@ char copyright[] =
 
 #ifndef lint
 /*static char sccsid[] = "@(#)indent.c	5.17 (Berkeley) 6/7/93";*/
-static char rcsid[] = "$OpenBSD: indent.c,v 1.13 2002/11/29 20:15:43 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: indent.c,v 1.17 2003/06/26 21:43:07 deraadt Exp $";
 #endif /* not lint */
 
 #include <sys/param.h>
@@ -68,12 +64,10 @@ char       *out_name = "Standard Output";	/* will always point to name
 						 * of output file */
 char        bakfile[MAXPATHLEN] = "";
 
-void bakcopy();
+void bakcopy(void);
 
 int
-main(argc, argv)
-    int         argc;
-    char      **argv;
+main(int argc, char **argv)
 {
 
     extern int  found_err;	/* flag set in diag() on error */
@@ -507,8 +501,10 @@ check_type:
 	    if (ps.in_decl && !ps.block_init)
 		if (troff && !ps.dumped_decl_indent && !is_procname && ps.last_token == decl) {
 		    ps.dumped_decl_indent = 1;
-		    sprintf(e_code, "\n.Du %dp+\200p \"%s\"\n", dec_ind * 7, token);
+		    snprintf(e_code, (l_code - e_code) + 5, 
+			"\n.Du %dp+\200p \"%s\"\n", dec_ind * 7, token);
 		    e_code += strlen(e_code);
+		    CHECK_SIZE_CODE;
 		}
 		else {
 		    while ((e_code - s_code) < dec_ind) {
@@ -577,9 +573,11 @@ check_type:
 		*e_code++ = ' ';
 
 	    if (troff && !ps.dumped_decl_indent && ps.in_decl && !is_procname) {
-		sprintf(e_code, "\n.Du %dp+\200p \"%s\"\n", dec_ind * 7, token);
+		snprintf(e_code, (l_code - e_code) + 5,
+		    "\n.Du %dp+\200p \"%s\"\n", dec_ind * 7, token);
 		ps.dumped_decl_indent = 1;
 		e_code += strlen(e_code);
+		CHECK_SIZE_CODE;
 	    }
 	    else {
 		char       *res = token;
@@ -918,9 +916,11 @@ check_type:
 		if (is_procname == 0 || !procnames_start_line) {
 		    if (!ps.block_init) {
 			if (troff && !ps.dumped_decl_indent) {
-			    sprintf(e_code, "\n.De %dp+\200p\n", dec_ind * 7);
+			    snprintf(e_code, (l_code - e_code) + 5,
+				"\n.De %dp+\200p\n", dec_ind * 7);
 			    ps.dumped_decl_indent = 1;
 			    e_code += strlen(e_code);
+			    CHECK_SIZE_CODE;
 			}
 			else
 			    while ((e_code - s_code) < dec_ind) {
@@ -1146,7 +1146,7 @@ check_type:
  * original input file the output
  */
 void
-bakcopy()
+bakcopy(void)
 {
     int         n,
                 bakchn;

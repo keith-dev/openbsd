@@ -11,11 +11,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -33,11 +29,11 @@
  */
 
 /*
- * $OpenBSD: os-openbsd.h,v 1.11 2002/05/09 19:13:02 millert Exp $
+ * $OpenBSD: os-openbsd.h,v 1.13 2003/06/03 02:56:14 millert Exp $
  */
 
 /*
- * TEMPLATE os-*.h file
+ * OpenBSD os-*.h file
  */
 
 /*
@@ -63,9 +59,6 @@
  * Determine what routines we have to get filesystem info.
  */
 #define FSI_TYPE	FSI_GETFSSTAT
-#ifndef FSTYPENAME
-#define FSTYPENAME	1		/* use f_fstypename */
-#endif
 
 /*
  * Type of non-blocking I/O.
@@ -92,7 +85,12 @@
 /*
  * Select the type of statfs() system call (if any).
  */
-#define STATFS_TYPE	STATFS_BSD
+#define STATFS_TYPE	STATFS_44BSD
+
+/*
+ * Use f_fstypename in struct statfs.
+ */
+#define HAVE_FSTYPENAME	1
 
 /*
  * Type of arg functions we have.
@@ -128,23 +126,31 @@ typedef void POINTER;
 /*
  * Type of set line buffering function available
  */
-#define SETBUF_TYPE	SETLINEBUF
+#define SETBUF_TYPE	SETBUF_SETLINEBUF
 
 /*
  * Things we have
  */
 #define HAVE_FCHOWN			/* Have fchown() */
+#define HAVE_LCHOWN			/* Have lchown() */
 #define HAVE_FCHMOD			/* Have fchmod() */
+#define HAVE_FTRUNCATE			/* Have ftruncate() */
 #define HAVE_SELECT			/* Have select() */
 #define HAVE_SAVED_IDS			/* Have POSIX style saved [ug]id's */
+#define HAVE_VIS			/* Have vis() */
+#define HAVE_VSNPRINTF			/* Have vsnprintf() */
 #define POSIX_SIGNALS			/* Have POSIX signals */
 #define HAVE_PATHS_H			/* Have <paths.h> */
 
 /*
- * Things we need
+ * Path to old-style rdist command
  */
-#define NEED_UNISTD_H			/* Need <unistd.h> */
-#define NEED_STRING_H			/* Need <string.h> */
+#define _PATH_OLDRDIST	"/usr/bin/oldrdist"
+
+/*
+ * Path to remote shell command
+ */
+#define _PATH_REMSH	"/usr/bin/ssh"
 
 /*
  * Use the system <paths.h>

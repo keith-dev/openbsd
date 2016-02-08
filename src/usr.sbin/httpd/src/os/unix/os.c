@@ -18,7 +18,7 @@ void ap_is_not_here(void) {}
  * to 4.3. Use the native DSO code for 4.3 and later.
  */
 #if defined(AIX) && !defined(NO_DL_NEEDED)
-#if AIX < 43
+#if AIX < 430
 #include "os-aix-dso.c"
 #endif
 #endif
@@ -102,7 +102,7 @@ void *ap_os_dso_load(const char *path)
 {
 #if defined(HPUX) || defined(HPUX10) || defined(HPUX11)
     shl_t handle;
-    handle = shl_load(path, BIND_IMMEDIATE|BIND_VERBOSE|BIND_NOSTART, 0L);
+    handle = shl_load(path, BIND_IMMEDIATE|BIND_VERBOSE, 0L);
     return (void *)handle;
 
 #elif defined(HAVE_DYLD)
@@ -159,16 +159,15 @@ void *ap_os_dso_sym(void *handle, const char *symname)
 
 #elif defined(HAVE_DYLD)
     NSSymbol symbol;
-    char *symname2 = (char*)malloc(sizeof(char)*(strlen(symname)+2));
-    sprintf(symname2, "_%s", symname);
+    asprintf(&symname2, "_%s", symname);
     symbol = NSLookupAndBindSymbol(symname2);
     free(symname2);
     return NSAddressOfSymbol(symbol);
 
 #elif defined(DLSYM_NEEDS_UNDERSCORE)
-    char *symbol = (char*)malloc(sizeof(char)*(strlen(symname)+2));
+    char *symbol;
     void *retval;
-    sprintf(symbol, "_%s", symname);
+    asprintf(&symbol, "_%s", symname);
     retval = dlsym(handle, symbol);
     free(symbol);
     return retval;

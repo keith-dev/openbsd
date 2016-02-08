@@ -1,4 +1,4 @@
-#	$OpenBSD: services,v 1.50 2003/03/09 19:22:25 beck Exp $
+#	$OpenBSD: services,v 1.52 2003/06/19 23:20:59 pvalchev Exp $
 #
 # Network services, Internet style
 #
@@ -130,6 +130,8 @@ svrloc		427/tcp				# Server Location
 svrloc		427/udp
 nnsp		433/tcp		usenet		# Network News Transfer
 https		443/tcp				# secure http (SSL)
+microsoft-ds	445/tcp				# Microsoft-DS
+microsoft-ds	445/udp				# Microsoft-DS
 kpasswd		464/tcp				# Kerberos 5 password changing
 kpasswd		464/udp				# Kerberos 5 password changing
 photuris	468/tcp				# Photuris Key Management
@@ -138,6 +140,8 @@ isakmp		500/udp				# ISAKMP key management
 klogin		543/tcp				# Kerberos authenticated rlogin
 kshell		544/tcp		krcmd		# Kerberos remote shell
 ekshell		545/tcp				# Kerberos encrypted shell
+rtsp		554/tcp				# Real Time Stream Control Proto
+rtsp		554/udp				# Real Time Stream Control Proto
 submission	587/tcp		msa		# mail message submission
 ldaps		636/tcp				# LDAP over SSL
 ldaps		636/udp

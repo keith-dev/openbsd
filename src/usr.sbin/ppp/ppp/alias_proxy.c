@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $OpenBSD: alias_proxy.c,v 1.11 2002/06/15 08:01:59 brian Exp $
+ * $OpenBSD: alias_proxy.c,v 1.13 2003/04/04 20:28:57 deraadt Exp $
  */
 
 /* file: alias_proxy.c
@@ -306,11 +306,11 @@ ProxyEncodeTcpStream(struct alias_link *link,
     switch (slen % 2)
     {
     case 0:
-        strcat(buffer, " \n");
+        strlcat(buffer, " \n", sizeof(buffer));
 	slen += 2;
         break;
     case 1:
-        strcat(buffer, "\n");
+        strlcat(buffer, "\n", sizeof(buffer));
 	slen += 1;
     }
 
@@ -563,7 +563,7 @@ PacketAliasProxyRule(const char *cmd)
     cmd_len = strlen(cmd);
     if (cmd_len > (sizeof(buffer) - 1))
         return -1;
-    strcpy(buffer, cmd);
+    strlcpy(buffer, cmd, sizeof buffer);
 
 /* Convert to lower case */
     len = strlen(buffer);
@@ -639,7 +639,7 @@ PacketAliasProxyRule(const char *cmd)
             break;
 
         case STATE_READ_PORT:
-            strcpy(str_port, token);
+            strlcpy(str_port, token, sizeof str_port);
             state = STATE_READ_KEYWORD;
             break;
 

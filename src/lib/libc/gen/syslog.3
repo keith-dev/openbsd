@@ -1,4 +1,4 @@
-.\"	$OpenBSD: syslog.3,v 1.20 2003/01/19 23:13:04 millert Exp $
+.\"	$OpenBSD: syslog.3,v 1.23 2003/06/02 20:18:35 millert Exp $
 .\"
 .\" Copyright (c) 1985, 1991, 1993
 .\"	The Regents of the University of California.  All rights reserved.
@@ -11,11 +11,7 @@
 .\" 2. Redistributions in binary form must reproduce the above copyright
 .\"    notice, this list of conditions and the following disclaimer in the
 .\"    documentation and/or other materials provided with the distribution.
-.\" 3. All advertising materials mentioning features or use of this software
-.\"    must display the following acknowledgement:
-.\"	This product includes software developed by the University of
-.\"	California, Berkeley and its contributors.
-.\" 4. Neither the name of the University nor the names of its contributors
+.\" 3. Neither the name of the University nor the names of its contributors
 .\"    may be used to endorse or promote products derived from this software
 .\"    without specific prior written permission.
 .\"
@@ -36,14 +32,14 @@
 .Os
 .Sh NAME
 .Nm syslog ,
-.Nm syslog_r,
+.Nm syslog_r ,
 .Nm vsyslog ,
-.Nm vsyslog_r,
+.Nm vsyslog_r ,
 .Nm openlog ,
-.Nm openlog_r,
+.Nm openlog_r ,
 .Nm closelog ,
-.Nm closelog_r,
-.Nm setlogmask,
+.Nm closelog_r ,
+.Nm setlogmask ,
 .Nm setlogmask_r
 .Nd control system log
 .Sh SYNOPSIS
@@ -107,7 +103,7 @@ A trailing newline is added if none is present.
 The
 .Fn syslog_r
 function is a reentrant version of the
-.Xr syslog 3
+.Fn syslog
 function.
 It takes a pointer to a
 .Fa syslog_data
@@ -122,13 +118,13 @@ The
 structure is composed of the following elements:
 .Bl -tag -width connected
 .It Dv log_file
-contains the file descriptor of the file where the message is logged.
+contains the file descriptor of the file where the message is logged
 .It Dv connected
 indicates if connect has been done
 .It Dv opened
 indicates if
 .Xr openlog_r 3
-has been called.
+has been called
 .It Dv log_stat
 status bits, set by
 .Xr openlog_r 3
@@ -182,9 +178,9 @@ normally of use only when debugging a program.
 .Pp
 The
 .Fn vsyslog_r
-is used the same way than
+is used the same way as
 .Fn vsyslog
-except than it takes an additional pointer on a
+except that it takes an additional pointer on a
 .Fa syslog_data
 structure.
 It is a reentrant version of the
@@ -325,7 +321,7 @@ is calculated by the macro
 the mask for all priorities up to and including
 .Fa toppri
 is given by the macro
-.Fn LOG_UPTO toppri ; .
+.Fn LOG_UPTO toppri .
 The default allows all priorities to be logged.
 .Pp
 The

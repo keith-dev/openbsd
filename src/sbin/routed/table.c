@@ -1,4 +1,4 @@
-/*	$OpenBSD: table.c,v 1.10 2003/03/13 09:09:27 deraadt Exp $	*/
+/*	$OpenBSD: table.c,v 1.14 2003/06/10 16:41:29 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1983, 1988, 1993
@@ -12,11 +12,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -1091,8 +1087,11 @@ read_rt(void)
 		strlcpy(str, rtm_type_name(m.r.rtm.rtm_type),
 		    sizeof str);
 		strp = &str[strlen(str)];
-		if (m.r.rtm.rtm_type <= RTM_CHANGE)
-			strp += sprintf(strp," from pid %ld", (long)m.r.rtm.rtm_pid);
+		if (m.r.rtm.rtm_type <= RTM_CHANGE) {
+			snprintf(strp, str + sizeof str - strp,
+			    " from pid %ld", (long)m.r.rtm.rtm_pid);
+			strp+= strlen(strp);
+		}
 
 		rt_xaddrs(&info, m.r.addrs, &m.r.addrs[RTAX_MAX],
 			  m.r.rtm.rtm_addrs);
@@ -1114,8 +1113,9 @@ read_rt(void)
 			? HOST_MASK
 			: std_mask(S_ADDR(INFO_DST(&info))));
 
-		strp += sprintf(strp, ": %s",
-				addrname(S_ADDR(INFO_DST(&info)), mask, 0));
+		snprintf(strp, str + sizeof str - strp, ": %s",
+			addrname(S_ADDR(INFO_DST(&info)), mask, 0));
+		strp+= strlen(strp);
 
 		if (IN_MULTICAST(ntohl(S_ADDR(INFO_DST(&info))))) {
 			trace_act("ignore multicast %s\n", str);
@@ -1123,13 +1123,18 @@ read_rt(void)
 		}
 
 		if (INFO_GATE(&info) != 0
-		    && INFO_GATE(&info)->sa_family == AF_INET)
-			strp += sprintf(strp, " --> %s",
-					saddr_ntoa(INFO_GATE(&info)));
+		    && INFO_GATE(&info)->sa_family == AF_INET) {
+			snprintf(strp, str + sizeof str - strp,
+				" --> %s", saddr_ntoa(INFO_GATE(&info)));
+			strp+= strlen(strp);
+		}
 
-		if (INFO_AUTHOR(&info) != 0)
-			strp += sprintf(strp, " by authority of %s",
-					saddr_ntoa(INFO_AUTHOR(&info)));
+		if (INFO_AUTHOR(&info) != 0) {
+			snprintf(strp, str + sizeof str - strp,
+				" by authority of %s",
+				saddr_ntoa(INFO_AUTHOR(&info)));
+			strp+= strlen(strp);
+		}
 
 		switch (m.r.rtm.rtm_type) {
 		case RTM_ADD:
@@ -1657,7 +1662,7 @@ rtswitch(struct rt_entry *rt,
 	 struct rt_spare *rts)
 {
 	struct rt_spare swap;
-	char label[10];
+	char *label;
 
 
 	/* Do not change permanent routes */
@@ -1675,10 +1680,14 @@ rtswitch(struct rt_entry *rt,
 		return;
 
 	swap = rt->rt_spares[0];
-	(void)snprintf(label, sizeof label, "Use #%d", (int)(rts - rt->rt_spares));
-	rtchange(rt, rt->rt_state & ~(RS_NET_SYN | RS_RDISC),
-		 rts->rts_gate, rts->rts_router, rts->rts_metric,
-		 rts->rts_tag, rts->rts_ifp, rts->rts_time, label);
+	if (asprintf(&label, "Use #%d", (int)(rts - rt->rt_spares)) == -1)
+		msglog("asprintf: cannot allocate memory");
+	else {
+		rtchange(rt, rt->rt_state & ~(RS_NET_SYN | RS_RDISC),
+		    rts->rts_gate, rts->rts_router, rts->rts_metric,
+		    rts->rts_tag, rts->rts_ifp, rts->rts_time, label);
+		free(label);
+	}
 	*rts = swap;
 }
 

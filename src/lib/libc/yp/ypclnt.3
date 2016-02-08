@@ -1,4 +1,4 @@
-.\"	$OpenBSD: ypclnt.3,v 1.14 2002/09/04 10:14:38 deraadt Exp $
+.\"	$OpenBSD: ypclnt.3,v 1.16 2003/07/07 15:46:37 jmc Exp $
 .\"
 .\" Copyright (c) 1996 The NetBSD Foundation, Inc.
 .\" All rights reserved.
@@ -162,7 +162,7 @@ is returned and control given back to the user code.
 The
 .Nm ypclnt
 suite provides the following functionality:
-.Bl -tag -width Fn yp_match
+.Bl -tag -width "yperr_string()"
 .It Fn yp_match
 Provides the value associated with the given key.
 .It Fn yp_first
@@ -241,7 +241,6 @@ function should return non-zero when it no longer wishes to process
 key-value pairs, at which time
 .Fn yp_all
 returns a value of 0, and is called with the following arguments:
-.Pp
 .Bd -literal -offset indent
 int foreach (
 	int instatus,
@@ -257,13 +256,13 @@ Where:
 .Bl -tag -width "inkey, inval"
 .It Fa instatus
 Holds one of the return status values described in
-.Nm <rpcsvc/yp_prot.h> :
+.Aq Pa rpcsvc/yp_prot.h :
 see
 .Fn ypprot_err
 below for a function that will translate YP protocol errors into a
 .Nm ypclnt
 layer error code as described in
-.Nm <rpcsvc/ypclnt.h> .
+.Aq Pa rpcsvc/ypclnt.h .
 .It Fa inkey, inval
 The key and value arguments are somewhat different here than described
 above.
@@ -318,7 +317,7 @@ suite which are of type
 return 0 upon success or one of the following error codes upon failure:
 .Bl -tag -width "YPERR_BADARGS   "
 .It Bq Er YPERR_BADARGS
-The passed arguments to the function are invalid
+The passed arguments to the function are invalid.
 .It Bq Er YPERR_BADDB
 The YP map that was polled is defective.
 .It Bq Er YPERR_DOMAIN

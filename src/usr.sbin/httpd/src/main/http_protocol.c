@@ -1,8 +1,8 @@
-/*	$OpenBSD: http_protocol.c,v 1.21 2003/02/21 18:41:09 henning Exp $ */
+/*	$OpenBSD: http_protocol.c,v 1.23 2003/08/21 13:11:35 henning Exp $ */
 /* ====================================================================
  * The Apache Software License, Version 1.1
  *
- * Copyright (c) 2000-2002 The Apache Software Foundation.  All rights
+ * Copyright (c) 2000-2003 The Apache Software Foundation.  All rights
  * reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -1089,10 +1089,9 @@ static int read_request_line(request_rec *r)
         r->proto_num = HTTP_VERSION(r->protocol[5] - '0', r->protocol[7] - '0');
     }
     else {
-        char *lint;
+        char lint[2];
         char http[5];
-	lint = ap_palloc(r->pool, strlen(r->protocol)+1);
-	if (3 == sscanf(r->protocol, "%4s/%u.%u%s", http, &major, &minor, lint)
+	if (3 == sscanf(r->protocol, "%4s/%u.%u%1s", http, &major, &minor, lint)
             && (strcasecmp("http", http) == 0)
 	    && (minor < HTTP_VERSION(1,0)) ) /* don't allow HTTP/0.1000 */
 	    r->proto_num = HTTP_VERSION(major, minor);
@@ -3226,18 +3225,6 @@ int ap_create_etag_state(pool *pconf)
     close (fd);
 }
 
-API_EXPORT(void) ap_init_etag(pool *pconf)
-{
-    if (ap_read_etag_state(pconf) == -1) {
-        ap_create_etag_state(pconf);
-        if (ap_read_etag_state(pconf) == -1) {
-            ap_log_error(APLOG_MARK, APLOG_CRIT, NULL,
-              "could not initialize etag state");
-            exit(-1);
-        }
-    }			
-}
-
 int ap_read_etag_state(pool *pconf)
 {
     struct stat st;
@@ -3284,6 +3271,18 @@ int ap_read_etag_state(pool *pconf)
           "could not properly close %s", filename);
         exit(-1);
     }
+}
+
+API_EXPORT(void) ap_init_etag(pool *pconf)
+{
+    if (ap_read_etag_state(pconf) == -1) {
+        ap_create_etag_state(pconf);
+        if (ap_read_etag_state(pconf) == -1) {
+            ap_log_error(APLOG_MARK, APLOG_CRIT, NULL,
+              "could not initialize etag state");
+            exit(-1);
+        }
+    }			
 }
 
 API_EXPORT(char *) ap_make_etag(request_rec *r, int force_weak)

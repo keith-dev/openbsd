@@ -1,4 +1,4 @@
-/*	$OpenBSD: system.c,v 1.11 2002/06/12 06:07:16 mpech Exp $	*/
+/*	$OpenBSD: system.c,v 1.15 2003/07/10 00:06:51 david Exp $	*/
 
 /*-
  * Copyright (c) 1988 The Regents of the University of California.
@@ -12,11 +12,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -35,7 +31,7 @@
 
 #ifndef lint
 /*static char sccsid[] = "from: @(#)system.c	4.5 (Berkeley) 4/26/91";*/
-static char rcsid[] = "$OpenBSD: system.c,v 1.11 2002/06/12 06:07:16 mpech Exp $";
+static char rcsid[] = "$OpenBSD: system.c,v 1.15 2003/07/10 00:06:51 david Exp $";
 #endif /* not lint */
 
 #include <sys/types.h>
@@ -65,6 +61,7 @@ static char rcsid[] = "$OpenBSD: system.c,v 1.11 2002/06/12 06:07:16 mpech Exp $
 #include <stdlib.h>
 #include <string.h>
 #include <pwd.h>
+#include <unistd.h>
 
 #include "../general/general.h"
 #include "../ctlr/api.h"
@@ -214,7 +211,8 @@ doassociate()
 	if ((pwent = getpwuid((int)geteuid())) == 0) {
 	    return -1;
 	}
-	sprintf(promptbuf, "Enter password for user %s:", pwent->pw_name);
+	snprintf(promptbuf, sizeof promptbuf,
+		"Enter password for user %s:", pwent->pw_name);
 	if (api_exch_outcommand(EXCH_CMD_SEND_AUTH) == -1) {
 	    return -1;
 	}
@@ -658,7 +656,7 @@ char	*argv[];
     do {
 	ikey = random();
     } while (ikey == 0);
-    sprintf(key, "%lu\n", (unsigned long) ikey);
+    snprintf(key, sizeof key, "%lu\n", (unsigned long) ikey);
     if (write(fd, key, strlen(key)) != strlen(key)) {
 	perror("write");
 	return 0;
@@ -690,14 +688,16 @@ char	*argv[];
     }
     listen(serversock, 1);
     /* Get name to advertise in address list */
-    strcpy(sockNAME, "API3270=");
+    strlcpy(sockNAME, "API3270=", sizeof sockNAME);
     gethostname(sockNAME+strlen(sockNAME), sizeof sockNAME-strlen(sockNAME));
     if (strlen(sockNAME) > (sizeof sockNAME-(10+strlen(keyname)))) {
 	fprintf(stderr, "Local hostname too large; using 'localhost'.\n");
-	strcpy(sockNAME, "localhost");
+	strlcpy(sockNAME, "localhost", sizeof sockNAME);
     }
-    sprintf(sockNAME+strlen(sockNAME), ":%u", ntohs(server.sin_port));
-    sprintf(sockNAME+strlen(sockNAME), ":%s", keyname);
+    snprintf(sockNAME+strlen(sockNAME), sizeof(sockNAME) - strlen(sockNAME),
+	":%u", ntohs(server.sin_port));
+    snprintf(sockNAME+strlen(sockNAME), sizeof(sockNAME) - strlen(sockNAME),
+	":%s", keyname);
 
     if (whereAPI == 0) {
 	char **ptr, **nextenv;

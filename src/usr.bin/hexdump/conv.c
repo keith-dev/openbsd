@@ -1,4 +1,4 @@
-/*	$OpenBSD: conv.c,v 1.5 2003/03/13 09:09:31 deraadt Exp $	*/
+/*	$OpenBSD: conv.c,v 1.7 2003/06/12 20:58:09 deraadt Exp $	*/
 /*	$NetBSD: conv.c,v 1.7 2001/12/07 15:14:29 bjh21 Exp $	*/
 
 /*
@@ -13,11 +13,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -36,7 +32,7 @@
 
 #ifndef lint
 /*static char sccsid[] = "from: @(#)conv.c	5.4 (Berkeley) 6/1/90";*/
-static char rcsid[] = "$OpenBSD: conv.c,v 1.5 2003/03/13 09:09:31 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: conv.c,v 1.7 2003/06/12 20:58:09 deraadt Exp $";
 #endif /* not lint */
 
 #include <sys/types.h>
@@ -47,9 +43,7 @@ static char rcsid[] = "$OpenBSD: conv.c,v 1.5 2003/03/13 09:09:31 deraadt Exp $"
 #include "hexdump.h"
 
 void
-conv_c(pr, p)
-	PR *pr;
-	u_char *p;
+conv_c(PR *pr, u_char *p)
 {
 	char buf[10];
 	char const *str;
@@ -99,9 +93,7 @@ strpr:		*pr->cchar = 's';
 }
 
 void
-conv_u(pr, p)
-	PR *pr;
-	u_char *p;
+conv_u(PR *pr, u_char *p)
 {
 	static const char *list[] = {
 		"nul", "soh", "stx", "etx", "eot", "enq", "ack", "bel",

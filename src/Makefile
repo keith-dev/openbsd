@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.89 2003/01/05 22:52:19 mickey Exp $
+#	$OpenBSD: Makefile,v 1.92 2003/05/17 20:58:52 millert Exp $
 
 #
 # For more information on building in tricky environments, please see
@@ -39,10 +39,6 @@ SUBDIR+= gnu
 
 SUBDIR+= sys lkm
 
-.if (${KERBEROS:L} == "yes")
-SUBDIR+= kerberosIV
-.endif
-
 .if (${KERBEROS5:L} == "yes")
 SUBDIR+= kerberosV
 .endif
@@ -80,18 +76,10 @@ build:
 	    NOMAN=1 exec ${SUDO} ${MAKE} install
 	cd ${.CURDIR}/gnu/lib && ${MAKE} depend && ${MAKE} && \
 	    NOMAN=1 exec ${SUDO} ${MAKE} install
-.if (${KERBEROS:L} == "yes")
-	cd ${.CURDIR}/kerberosIV/lib && ${MAKE} depend && ${MAKE} && \
-	    NOMAN=1 exec ${SUDO} ${MAKE} install
-.endif
 .if (${KERBEROS5:L} == "yes")
 	cd ${.CURDIR}/kerberosV/lib && ${MAKE} depend && ${MAKE} && \
 	    NOMAN=1 exec ${SUDO} ${MAKE} install
 .endif
-	cd ${.CURDIR}/gnu/usr.bin/perl && \
-	    ${MAKE} -f Makefile.bsd-wrapper depend && \
-	    ${MAKE} -f Makefile.bsd-wrapper perl.lib && \
-	    exec ${SUDO} ${MAKE} -f Makefile.bsd-wrapper install.lib
 	${MAKE} depend && ${MAKE} && exec ${SUDO} ${MAKE} install
 
 .if !defined(TARGET)
@@ -190,9 +178,9 @@ ${CROSSINCLUDES}:	${CROSSOBJ}
 	    ${MAKE} DESTDIR=${CROSSDIR} includes)
 	@touch ${CROSSINCLUDES}
 
-.if ${TARGET} == "alpha" || ${TARGET} == "hppa" || ${TARGET} == "macppc" || \
-    ${TARGET} == "mvmeppc" || ${TARGET} == "sgi" || ${TARGET} == "sparc" || \
-    ${TARGET} == "sparc64"
+.if ${TARGET} == "alpha" || ${TARGET} == "hppa" || ${TARGET} == "i386" || \
+    ${TARGET} == "macppc" || ${TARGET} == "mvmeppc" || ${TARGET} == "sgi" || \
+    ${TARGET} == "sparc" || ${TARGET} == "sparc64"
 BINUTILS=	ar as gasp ld nm objcopy objdump ranlib readelf size \
 		strings strip
 NEW_BINUTILS?=	Yes
@@ -326,13 +314,6 @@ cross-lib:	${CROSSGCC}
 	    ${CROSSENV} MAKEOBJDIR=obj.${MACHINE}.${TARGET} \
 	        SKIPDIR="${NO_CROSS} libocurses/PSD.doc" \
 	        ${MAKE} depend all install)
-.if (${KERBEROS:L} == "yes")
-	MACHINE=${TARGET} MACHINE_ARCH=`cat ${CROSSDIR}/TARGET_ARCH`; \
-	export MACHINE MACHINE_ARCH; \
-	cd kerberosIV/lib; \
-	${CROSSENV} MAKEOBJDIR=obj.${MACHINE}.${TARGET} \
-	    ${MAKE} depend all install
-.endif
 .if (${KERBEROS5:L} == "yes")
 	MACHINE=${TARGET} MACHINE_ARCH=`cat ${CROSSDIR}/TARGET_ARCH`; \
 	export MACHINE MACHINE_ARCH; \

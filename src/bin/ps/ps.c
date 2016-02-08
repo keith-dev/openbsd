@@ -1,4 +1,4 @@
-/*	$OpenBSD: ps.c,v 1.30 2002/06/12 03:44:35 art Exp $	*/
+/*	$OpenBSD: ps.c,v 1.34 2003/07/29 00:24:15 deraadt Exp $	*/
 /*	$NetBSD: ps.c,v 1.15 1995/05/18 20:33:25 mycroft Exp $	*/
 
 /*-
@@ -13,11 +13,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -44,7 +40,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)ps.c	8.4 (Berkeley) 4/2/94";
 #else
-static char rcsid[] = "$OpenBSD: ps.c,v 1.30 2002/06/12 03:44:35 art Exp $";
+static char rcsid[] = "$OpenBSD: ps.c,v 1.34 2003/07/29 00:24:15 deraadt Exp $";
 #endif
 #endif /* not lint */
 
@@ -107,9 +103,7 @@ kvm_t *kd;
 int kvm_sysctl_only;
 
 int
-main(argc, argv)
-	int argc;
-	char *argv[];
+main(int argc, char *argv[])
 {
 	struct kinfo_proc *kp;
 	struct varent *vent;
@@ -124,9 +118,9 @@ main(argc, argv)
 	size_t size;
 
 	if ((ioctl(STDOUT_FILENO, TIOCGWINSZ, (char *)&ws) == -1 &&
-	     ioctl(STDERR_FILENO, TIOCGWINSZ, (char *)&ws) == -1 &&
-	     ioctl(STDIN_FILENO,  TIOCGWINSZ, (char *)&ws) == -1) ||
-	     ws.ws_col == 0)
+	    ioctl(STDERR_FILENO, TIOCGWINSZ, (char *)&ws) == -1 &&
+	    ioctl(STDIN_FILENO,  TIOCGWINSZ, (char *)&ws) == -1) ||
+	    ws.ws_col == 0)
 		termwidth = 79;
 	else
 		termwidth = ws.ws_col - 1;
@@ -389,7 +383,7 @@ main(argc, argv)
 }
 
 static void
-scanvars()
+scanvars(void)
 {
 	struct varent *vent;
 	VAR *v;
@@ -408,8 +402,7 @@ scanvars()
 }
 
 static void
-saveuser(ki)
-	KINFO *ki;
+saveuser(KINFO *ki)
 {
 	struct usave *usp;
 
@@ -423,8 +416,7 @@ saveuser(ki)
 }
 
 static int
-pscomp(a, b)
-	const void *a, *b;
+pscomp(const void *a, const void *b)
 {
 	int i;
 #define VSIZE(k) (KI_EPROC(k)->e_vm.vm_dsize + KI_EPROC(k)->e_vm.vm_ssize + \
@@ -456,20 +448,20 @@ pscomp(a, b)
  * feature is available with the option 'T', which takes no argument.
  */
 static char *
-kludge_oldps_options(s)
-	char *s;
+kludge_oldps_options(char *s)
 {
 	size_t len;
 	char *newopts, *ns, *cp;
 
 	len = strlen(s);
-	if ((newopts = ns = malloc(len + 3)) == NULL)
+	if ((newopts = ns = malloc(2 + len + 1)) == NULL)
 		err(1, NULL);
 	/*
 	 * options begin with '-'
 	 */
 	if (*s != '-')
 		*ns++ = '-';	/* add option flag */
+
 	/*
 	 * gaze to end of argv[1]
 	 */
@@ -499,17 +491,18 @@ kludge_oldps_options(s)
 	if (isdigit(*cp) && (cp == s || (cp[-1] != 't' && cp[-1] != 'p' &&
 	    (cp - 1 == s || cp[-2] != 't'))))
 		*ns++ = 'p';
-	(void)strcpy(ns, cp);		/* and append the number */
+	/* and append the number */
+	(void)strlcpy(ns, cp, newopts + len + 3 - ns);
 
 	return (newopts);
 }
 
 static void
-usage()
+usage(void)
 {
 	(void)fprintf(stderr,
-            "usage: %s [-][acCehjklmrSTuvwx] [-O|o fmt] [-p pid] [-t tty] [-U user]\n",
-	     __progname);	
+	    "usage: %s [-][acCehjklmrSTuvwx] [-O|o fmt] [-p pid] [-t tty] [-U user]\n",
+	    __progname);	
 	(void)fprintf(stderr,
 	    "%-*s[-M core] [-N system] [-W swap]\n", strlen(__progname) + 8, "");
 	(void)fprintf(stderr, "       %s [-L]\n", __progname);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: spamd-setup.c,v 1.8 2003/03/13 21:20:42 beck Exp $ */
+/*	$OpenBSD: spamd-setup.c,v 1.14 2003/08/22 21:50:34 david Exp $ */
 /*
  * Copyright (c) 2003 Bob Beck.  All rights reserved.
  *
@@ -61,6 +61,30 @@ struct blacklist {
 	size_t blc, bls;
 	u_int8_t black;
 };
+
+u_int32_t	imask(u_int8_t b);
+u_int8_t	maxblock(u_int32_t addr, u_int8_t bits);
+u_int8_t	maxdiff(u_int32_t a, u_int32_t b);
+struct cidr	*range2cidrlist(u_int32_t start, u_int32_t end);
+void		cidr2range(struct cidr cidr, u_int32_t *start, u_int32_t *end);
+char		*atop(u_int32_t addr);
+u_int32_t	ptoa(char *cp);
+int		parse_netblock(char *buf, struct bl *start, struct bl *end,
+		    int white);
+int		open_child(char *file, char **argv);
+int		fetch(char *url);
+int		open_file(char *method, char *file);
+char		*fix_quoted_colons(char *buf);
+void		do_message(FILE *sdc, char *msg);
+struct bl	*add_blacklist(struct bl *bl, int *blc, int *bls, int fd,
+		    int white);
+int		cmpbl(const void *a, const void *b);
+struct cidr	**collapse_blacklist(struct bl *bl, int blc);
+int		configure_spamd(u_short dport, char *name, char *message,
+		    struct cidr **blacklists);
+int		configure_pf(struct cidr **blacklists);
+int		getlist(char ** db_array, char *name, struct blacklist *blist,
+		    struct blacklist *blistnew);
 
 u_int32_t
 imask(u_int8_t b)
@@ -174,7 +198,9 @@ parse_netblock(char *buf, struct bl *start, struct bl *end, int white)
 	if (sscanf(buf, "%15[^/]/%u", astring, &maskbits) == 2) {
 		/* looks like a cidr */
 		struct cidr c;
-		if (inet_pton(AF_INET, astring, &c.addr) != 1)
+		memset(&c.addr, 0, sizeof(c.addr));
+		if (inet_net_pton(AF_INET, astring, &c.addr, sizeof(c.addr))
+		    == -1)
 			return(0);
 		c.addr = ntohl(c.addr);
 		if (maskbits > 32)
@@ -185,17 +211,23 @@ parse_netblock(char *buf, struct bl *start, struct bl *end, int white)
 	} else if (sscanf(buf, "%15[0123456789.]%*[ -]%15[0123456789.]",
 	    astring, astring2) == 2) {
 		/* looks like start - end */
-		if (inet_pton(AF_INET, astring, &start->addr) != 1)
+		memset(&start->addr, 0, sizeof(start->addr));
+		memset(&end->addr, 0, sizeof(end->addr));
+		if (inet_net_pton(AF_INET, astring, &start->addr,
+		    sizeof(start->addr)) == -1)
 			return(0);
 		start->addr = ntohl(start->addr);
-		if (inet_pton(AF_INET, astring2, &end->addr) != 1)
+		if (inet_net_pton(AF_INET, astring2, &end->addr,
+		    sizeof(end->addr)) == -1)
 			return(0);
 		end->addr = ntohl(end->addr) + 1;
 		if (start > end)
 			return(0);
 	} else if (sscanf(buf, "%15[0123456789.]", astring) == 1) {
 		/* just a single address */
-		if (inet_pton(AF_INET, astring, &start->addr) != 1)
+		memset(&start->addr, 0, sizeof(start->addr));
+		if (inet_net_pton(AF_INET, astring, &start->addr,
+		    sizeof(start->addr)) == -1)
 			return(0);
 		start->addr = ntohl(start->addr);
 		end->addr = start->addr + 1;
@@ -295,7 +327,7 @@ open_file(char *method, char *file)
  * fix_quoted_colons walks through a buffer returned by cgetent.  We
  * look for quoted strings, to escape colons (:) in quoted strings for
  * getcap by replacing them with \C so cgetstr() deals with it correctly
- * without having to see the \C bletchery in a configuration file tha
+ * without having to see the \C bletchery in a configuration file that
  * needs to have urls in it. Frees the buffer passed to it, passes back
  * another larger one, with can be used with cgetxxx(), like the original
  * buffer, it must be freed by the caller.
@@ -496,8 +528,8 @@ cmpbl(const void *a, const void *b)
 }
 
 /*
- * collapse_blacklist takes blacklist/whitelist enties sorts, removes
- * ovelaps and whitelist portions, and returns netblocks to blacklis
+ * collapse_blacklist takes blacklist/whitelist entries sorts, removes
+ * overlaps and whitelist portions, and returns netblocks to blacklist
  * as lists of nonoverlapping cidr blocks suitable for feeding in
  * printable form to pfctl or spamd.
  */
@@ -508,6 +540,8 @@ collapse_blacklist(struct bl *bl, int blc)
 	struct cidr ** cl;
 	u_int32_t bstart = 0;
 
+	if (blc == 0)
+		return(NULL);
 	cl = malloc((blc / 2) * sizeof(struct cidr));
 	if (cl == NULL) {
 		return (NULL);
@@ -642,15 +676,13 @@ getlist(char ** db_array, char *name, struct blacklist *blist,
 		blc = blistnew->blc;
 		bls = blistnew->bls;
 		bl = blistnew->bl;
-	}
-	else if (cgetcap(buf, "white", ':') != NULL) {
+	} else if (cgetcap(buf, "white", ':') != NULL) {
 		/* apply to most recent blacklist */
 		black = 0;
 		blc = blist->blc;
 		bls = blist->bls;
 		bl = blist->bl;
-	}
-	else
+	} else
 		errx(1, "Must have \"black\" or \"white\" in %s", name);
 
 	switch (cgetstr(buf, "msg", &message)) {
@@ -762,20 +794,23 @@ main(int argc, char *argv[])
 	}
 	for (i = 0; i < blc; i++) {
 		struct cidr **cidrs, **tmp;
-		cidrs = collapse_blacklist(blists[i].bl, blists[i].blc);
-		if (cidrs == NULL)
-			errx(1, "malloc failed");
-		if (configure_spamd(ent->s_port, blists[i].name,
-		    blists[i].message, cidrs) == -1)
-			err(1, "Can't connect to spamd on port %d",
-			    ent->s_port);
-		if (configure_pf(cidrs) == -1)
-			err(1, "pfctl failed");
-		tmp = cidrs;
-		while (*tmp != NULL)
-			free(*tmp++);
-		free(cidrs);
-		free(blists[i].bl);
+		if (blists[i].blc > 0) {
+			cidrs = collapse_blacklist(blists[i].bl,
+			   blists[i].blc);
+			if (cidrs == NULL)
+				errx(1, "malloc failed");
+			if (configure_spamd(ent->s_port, blists[i].name,
+					    blists[i].message, cidrs) == -1)
+				err(1, "Can't connect to spamd on port %d",
+				    ent->s_port);
+			if (configure_pf(cidrs) == -1)
+				err(1, "pfctl failed");
+			tmp = cidrs;
+			while (*tmp != NULL)
+				free(*tmp++);
+			free(cidrs);
+			free(blists[i].bl);
+		}
 	}
-	exit(0);
+	return (0);
 }

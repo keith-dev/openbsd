@@ -1,4 +1,4 @@
-/*	$OpenBSD: compress.c,v 1.7 2003/03/11 21:26:26 ian Exp $	*/
+/*	$OpenBSD: compress.c,v 1.10 2003/07/02 00:21:16 avsm Exp $	*/
 
 /*
  * compress routines:
@@ -20,11 +20,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *    This product includes software developed by Ian F. Darwin and others.
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *  
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
  * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
@@ -161,7 +156,7 @@ pipe2file(int fd, void *startbuf, size_t nbytes)
 	char buf[4096];
 	int r, tfd;
 
-	(void)strcpy(buf, "/tmp/file.XXXXXX");
+	(void)strlcpy(buf, "/tmp/file.XXXXXXXXXX", sizeof buf);
 #ifndef HAVE_MKSTEMP
 	{
 		char *ptr = mktemp(buf);

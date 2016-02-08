@@ -1,4 +1,4 @@
-/*	$OpenBSD: rcp.c,v 1.33 2003/03/08 17:18:25 deraadt Exp $	*/
+/*	$OpenBSD: rcp.c,v 1.38 2003/07/29 00:24:16 deraadt Exp $	*/
 /*	$NetBSD: rcp.c,v 1.9 1995/03/21 08:19:06 cgd Exp $	*/
 
 /*
@@ -13,11 +13,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -44,7 +40,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)rcp.c	8.2 (Berkeley) 4/2/94";
 #else
-static char rcsid[] = "$NetBSD: rcp.c,v 1.9 1995/03/21 08:19:06 cgd Exp $";
+static const char rcsid[] = "$OpenBSD: rcp.c,v 1.38 2003/07/29 00:24:16 deraadt Exp $";
 #endif
 #endif /* not lint */
 
@@ -180,7 +176,7 @@ main(int argc, char *argv[])
 	port = sp->s_port;
 
 	if ((pwd = getpwuid(userid = getuid())) == NULL)
-		errx(1, "unknown user %d", (int)userid);
+		errx(1, "unknown user %u", userid);
 
 	unsetenv("RSH");		/* Force the use of /usr/bin/rsh */
 
@@ -495,7 +491,7 @@ rsource(char *name, struct stat *statp)
 		return;
 	}
 	last = strrchr(name, '/');
-	if (last == 0)
+	if (last == NULL)
 		last = name;
 	else
 		last++;
@@ -848,13 +844,13 @@ usage(void)
 {
 #ifdef KERBEROS
 	(void)fprintf(stderr, "usage: %s [-Kpx] [-k realm] f1 f2\n",
-            __progname);
+	    __progname);
  	(void)fprintf(stderr, "       %s [-Kprx] [-k realm] f1 ... fn directory\n",
-            __progname);
+	    __progname);
 #else
 	(void)fprintf(stderr,
 	    "usage: %s [-p] f1 f2; or: rcp [-pr] f1 ... fn directory\n",
-             __progname);
+	    __progname);
 #endif
 	exit(1);
 }

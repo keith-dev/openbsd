@@ -10,11 +10,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -52,7 +48,7 @@
  */
 
 #if defined(LIBC_SCCS) && !defined(lint)
-static char rcsid[] = "$OpenBSD: gethostnamadr.c,v 1.55 2003/03/04 00:29:17 itojun Exp $";
+static char rcsid[] = "$OpenBSD: gethostnamadr.c,v 1.57 2003/06/27 22:23:05 vincent Exp $";
 #endif /* LIBC_SCCS and not lint */
 
 #include <sys/param.h>
@@ -161,15 +157,12 @@ getanswer(answer, anslen, qname, qtype)
 	int qtype;
 {
 	struct __res_state *_resp = _THREAD_PRIVATE(_res, _res, &_res);
-	register const HEADER *hp;
-	register const u_char *cp;
-	register int n;
-	const u_char *eom;
-	char *bp, **ap, **hap, *ep;
-	int type, class, ancount, qdcount;
-	int haveanswer, had_error;
-	int toobig = 0;
+	const HEADER *hp;
+	const u_char *cp, *eom;
 	char tbuf[MAXDNAME];
+	char *bp, **ap, **hap, *ep;
+	int type, class, ancount, qdcount, n;
+	int haveanswer, had_error, toobig = 0;
 	const char *tname;
 	int (*name_ok)(const char *);
 
@@ -238,12 +231,20 @@ getanswer(answer, anslen, qname, qtype)
 			continue;
 		}
 		cp += n;			/* name */
+		if (cp > eom)
+			break;
 		type = _getshort(cp);
- 		cp += INT16SZ;			/* type */
+		cp += INT16SZ;			/* type */
+		if (cp > eom)
+			break;
 		class = _getshort(cp);
  		cp += INT16SZ + INT32SZ;	/* class, TTL */
+		if (cp > eom)
+			break;
 		n = _getshort(cp);
 		cp += INT16SZ;			/* len */
+		if (cp > eom)
+			break;
 		if (type == T_SIG) {
 			/* XXX - ignore signatures as we don't use them yet */
 			cp += n;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: misc.c,v 1.14 2003/03/13 09:03:07 deraadt Exp $	*/
+/*	$OpenBSD: misc.c,v 1.19 2003/09/01 15:47:40 naddy Exp $	*/
 
 /*
  * Miscellaneous functions
@@ -83,7 +83,15 @@ str_save(s, ap)
 	register const char *s;
 	Area *ap;
 {
-	return s ? strcpy((char*) alloc((size_t)strlen(s)+1, ap), s) : NULL;
+	size_t len;
+	char *p;
+
+	if (!s)
+		return NULL;
+	len = strlen(s)+1;
+	p = alloc(len, ap);
+	strlcpy(p, s, len+1);
+	return (p);
 }
 
 /* Allocate a string of size n+1 and copy upto n characters from the possibly
@@ -133,6 +141,7 @@ const struct option options[] = {
 	{ (char *) 0, 	'c',	    OF_CMDLINE },
 #ifdef EMACS
 	{ "emacs",	  0,		OF_ANY },
+	{ "emacs-usemeta",  0,		OF_ANY }, /* non-standard */
 #endif
 	{ "errexit",	'e',		OF_ANY },
 #ifdef EMACS
@@ -532,7 +541,7 @@ gmatch(s, p, isfile)
 		char tbuf[64];
 		char *t = len <= sizeof(tbuf) ? tbuf
 				: (char *) alloc(len, ATEMP);
-		debunk(t, p);
+		debunk(t, p, len);
 		return !strcmp(t, s);
 	}
 	return do_gmatch((const unsigned char *) s, (const unsigned char *) se,
@@ -1041,13 +1050,13 @@ ksh_getopt(argv, go, options)
 				go->optarg = argv[go->optind - 1] + go->p;
 				go->p = 0;
 			} else
-				go->optarg = (char *) 0;;
+				go->optarg = (char *) 0;
 		} else {
 			if (argv[go->optind] && digit(argv[go->optind][0])) {
 				go->optarg = argv[go->optind++];
 				go->p = 0;
 			} else
-				go->optarg = (char *) 0;;
+				go->optarg = (char *) 0;
 		}
 	}
 	return c;

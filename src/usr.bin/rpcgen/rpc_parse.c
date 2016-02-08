@@ -1,4 +1,4 @@
-/*	$OpenBSD: rpc_parse.c,v 1.11 2002/07/05 05:39:42 deraadt Exp $	*/
+/*	$OpenBSD: rpc_parse.c,v 1.14 2003/07/09 03:35:21 deraadt Exp $	*/
 /*	$NetBSD: rpc_parse.c,v 1.5 1995/08/29 23:05:55 cgd Exp $	*/
 /*
  * Sun RPC is a product of Sun Microsystems, Inc. and is provided for
@@ -64,7 +64,7 @@ static void unsigned_dec(char **);
  * return the next definition you see
  */
 definition *
-get_definition()
+get_definition(void)
 {
 	definition *defp;
 	token tok;
@@ -376,9 +376,7 @@ static char *reserved_types[] = {
 /* check that the given name is not one that would eventually result in
    xdr routines that would conflict with internal XDR routines. */
 static void
-check_type_name(name, new_type)
-	int new_type;
-	char *name;
+check_type_name(char *name, int new_type)
 {
 	int i;
 	char tmp[100];
@@ -478,7 +476,6 @@ get_prog_declaration(dec, dkind, num)
 	int num;  /* arg number */
 {
 	token tok;
-	char name[10]; /* argument name */
 
 	if (dkind == DEF_PROGRAM) {
 		peek(&tok);
@@ -492,16 +489,15 @@ get_prog_declaration(dec, dkind, num)
 	}
 	get_type(&dec->prefix, &dec->type, dkind);
 	dec->rel = REL_ALIAS;
-	if (peekscan(TOK_IDENT, &tok))  /* optional name of argument */
-		strlcpy(name, tok.str, sizeof name);
-	else {
+	if (peekscan(TOK_IDENT, &tok)) {  /* optional name of argument */
+		dec->name = (char *)strdup(tok.str);
+		if (dec->name == NULL)
+			error("out of memory");
+	} else {
 		/* default name of argument */
-		snprintf(name, sizeof name, "%s%d", ARGNAME, num);
+		if (asprintf(&dec->name, "%s%d", ARGNAME, num) == -1)
+			error("out of memory");
 	}
-
-	dec->name = (char *)strdup(name);
-	if (dec->name == NULL)
-		error("out of memory");
 
 	if (streq(dec->type, "void"))
 		return;

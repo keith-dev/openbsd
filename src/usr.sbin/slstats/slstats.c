@@ -1,4 +1,4 @@
-/*	$OpenBSD: slstats.c,v 1.15 2002/06/18 17:29:02 deraadt Exp $	*/
+/*	$OpenBSD: slstats.c,v 1.17 2003/09/06 17:27:53 jmc Exp $	*/
 /*	$NetBSD: slstats.c,v 1.6.6.1 1996/06/07 01:42:30 thorpej Exp $	*/
 
 /*
@@ -36,7 +36,7 @@
  */
 
 #ifndef lint
-static char rcsid[] = "$OpenBSD: slstats.c,v 1.15 2002/06/18 17:29:02 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: slstats.c,v 1.17 2003/09/06 17:27:53 jmc Exp $";
 #endif
 
 #define INET
@@ -83,16 +83,14 @@ void	intpr(void);
 void	usage(void);
 
 int
-main(argc, argv)
-	int argc;
-	char *argv[];
+main(int argc, char *argv[])
 {
 	struct ifreq ifr;
 	int ch;
 
 	(void)strlcpy(interface, "sl0", sizeof(interface));
 
-	while ((ch = getopt(argc, argv, "i:M:N:v")) != -1) {
+	while ((ch = getopt(argc, argv, "i:v")) != -1) {
 		switch (ch) {
 		case 'i':
 			interval = atoi(optarg);
@@ -137,16 +135,15 @@ void
 usage()
 {
 
-	fprintf(stderr, "usage: %s [-i interval] %s",
-	    __progname, "[-v] [unit]\n");
+	fprintf(stderr, "usage: %s [-v] %s",
+	    __progname, "[-i interval] [unit-number]\n");
 	exit(1);
 }
 
 volatile sig_atomic_t	signalled; 	/* set if alarm goes off "early" */
 
 static void
-get_sl_stats(curp)
-	struct sl_stats *curp;
+get_sl_stats(struct sl_stats *curp)
 {
 	struct ifslstatsreq req;
 
@@ -169,7 +166,7 @@ get_sl_stats(curp)
  * First line printed at top of screen is always cumulative.
  */
 void
-intpr()
+intpr(void)
 {
 	struct sl_stats cur, old;
 	sigset_t mask, oldmask;
@@ -179,7 +176,7 @@ intpr()
 	while (1) {
 		get_sl_stats(&cur);
 
-		(void)signal(SIGALRM, (void (*)())catchalarm);
+		(void)signal(SIGALRM, (void (*)(int))catchalarm);
 		signalled = 0;
 		(void)alarm(interval);
 

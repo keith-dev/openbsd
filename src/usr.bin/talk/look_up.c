@@ -1,4 +1,4 @@
-/*	$OpenBSD: look_up.c,v 1.7 2001/07/17 02:23:58 pvalchev Exp $	*/
+/*	$OpenBSD: look_up.c,v 1.9 2003/06/10 22:20:53 deraadt Exp $	*/
 /*	$NetBSD: look_up.c,v 1.3 1994/12/09 02:14:21 jtc Exp $	*/
 
 /*
@@ -13,11 +13,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -38,7 +34,7 @@
 #if 0
 static char sccsid[] = "@(#)look_up.c	8.1 (Berkeley) 6/6/93";
 #endif
-static char rcsid[] = "$OpenBSD: look_up.c,v 1.7 2001/07/17 02:23:58 pvalchev Exp $";
+static char rcsid[] = "$OpenBSD: look_up.c,v 1.9 2003/06/10 22:20:53 deraadt Exp $";
 #endif /* not lint */
 
 #include "talk.h"
@@ -50,7 +46,7 @@ static char rcsid[] = "$OpenBSD: look_up.c,v 1.7 2001/07/17 02:23:58 pvalchev Ex
  * See if the local daemon has an invitation for us.
  */
 int
-check_local()
+check_local(void)
 {
 	CTL_RESPONSE response;
 
@@ -99,8 +95,7 @@ check_local()
  * Look for an invitation on 'machine'
  */
 int
-look_for_invite(rp)
-	CTL_RESPONSE *rp;
+look_for_invite(CTL_RESPONSE *rp)
 {
 	current_state = "Checking for invitation on caller's machine";
 	ctl_transact(his_machine_addr, msg, LOOK_UP, rp);

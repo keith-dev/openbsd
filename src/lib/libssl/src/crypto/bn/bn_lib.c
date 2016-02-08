@@ -145,10 +145,10 @@ char *BN_options(void)
 		{
 		init++;
 #ifdef BN_LLONG
-		sprintf(data,"bn(%d,%d)",(int)sizeof(BN_ULLONG)*8,
+		snprintf(data,sizeof data,"bn(%d,%d)",(int)sizeof(BN_ULLONG)*8,
 			(int)sizeof(BN_ULONG)*8);
 #else
-		sprintf(data,"bn(%d,%d)",(int)sizeof(BN_ULONG)*8,
+		snprintf(data,sizeof data,"bn(%d,%d)",(int)sizeof(BN_ULONG)*8,
 			(int)sizeof(BN_ULONG)*8);
 #endif
 		}
@@ -263,12 +263,12 @@ void BN_clear_free(BIGNUM *a)
 	if (a == NULL) return;
 	if (a->d != NULL)
 		{
-		memset(a->d,0,a->dmax*sizeof(a->d[0]));
+		OPENSSL_cleanse(a->d,a->dmax*sizeof(a->d[0]));
 		if (!(BN_get_flags(a,BN_FLG_STATIC_DATA)))
 			OPENSSL_free(a->d);
 		}
 	i=BN_get_flags(a,BN_FLG_MALLOCED);
-	memset(a,0,sizeof(BIGNUM));
+	OPENSSL_cleanse(a,sizeof(BIGNUM));
 	if (i)
 		OPENSSL_free(a);
 	}

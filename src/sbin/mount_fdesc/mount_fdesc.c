@@ -1,4 +1,4 @@
-/*	$OpenBSD: mount_fdesc.c,v 1.7 2002/02/16 21:27:36 millert Exp $	*/
+/*	$OpenBSD: mount_fdesc.c,v 1.10 2003/07/03 22:41:40 tedu Exp $	*/
 /*	$NetBSD: mount_fdesc.c,v 1.7 1996/04/13 01:31:15 jtc Exp $	*/
 
 /*
@@ -17,11 +17,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -48,7 +44,7 @@ char copyright[] =
 #if 0
 static char sccsid[] = "@(#)mount_fdesc.c	8.2 (Berkeley) 3/27/94";
 #else
-static char rcsid[] = "$OpenBSD: mount_fdesc.c,v 1.7 2002/02/16 21:27:36 millert Exp $";
+static char rcsid[] = "$OpenBSD: mount_fdesc.c,v 1.10 2003/07/03 22:41:40 tedu Exp $";
 #endif
 #endif /* not lint */
 
@@ -72,11 +68,10 @@ const struct mntopt mopts[] = {
 void	usage(void);
 
 int
-main(argc, argv)
-	int argc;
-	char *argv[];
+main(int argc, char *argv[])
 {
 	int ch, mntflags;
+	char path[MAXPATHLEN];
 
 	mntflags = 0;
 	while ((ch = getopt(argc, argv, "o:")) != -1)
@@ -94,7 +89,10 @@ main(argc, argv)
 	if (argc != 2)
 		usage();
 
-	if (mount(MOUNT_FDESC, argv[1], mntflags, NULL)) {
+	if (realpath(argv[1], path) == NULL)
+		err(1, "realpath %s", path);
+
+	if (mount(MOUNT_FDESC, path, mntflags, NULL)) {
 		if (errno == EOPNOTSUPP)
 			errx(1, "%s: Filesystem not supported by kernel",
 			    argv[1]);
@@ -105,7 +103,7 @@ main(argc, argv)
 }
 
 void
-usage()
+usage(void)
 {
 	(void)fprintf(stderr,
 		"usage: mount_fdesc [-o options] fdesc mount_point\n");

@@ -1,4 +1,4 @@
-/*	$OpenBSD: pfkdump.c,v 1.3 2003/03/14 04:58:11 margarida Exp $	*/
+/*	$OpenBSD: pfkdump.c,v 1.8 2003/07/29 18:38:36 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2003 Markus Friedl.  All rights reserved.
@@ -52,6 +52,19 @@ void	print_ident(struct sadb_ext *, struct sadb_msg *);
 void	print_policy(struct sadb_ext *, struct sadb_msg *);
 void	print_cred(struct sadb_ext *, struct sadb_msg *);
 void	print_auth(struct sadb_ext *, struct sadb_msg *);
+
+struct idname *lookup(struct idname [], u_int8_t);
+char	*lookup_name(struct idname [], u_int8_t);
+void	print_ext(struct sadb_ext *, struct sadb_msg *);
+void	print_msg(struct sadb_msg *, int);
+char	*alg_by_ext(u_int8_t, u_int8_t);
+void	print_alg(struct sadb_alg *, u_int8_t);
+void	print_comb(struct sadb_comb *, struct sadb_msg *);
+void	msg_send(int, u_int8_t, u_int8_t);
+void	msg_read(int);
+void	do_pfkey(int, u_int8_t);
+void	ipsecadm_monitor(void);
+void	ipsecadm_show(u_int8_t);
 
 struct idname {
 	u_int8_t id;
@@ -129,13 +142,13 @@ struct idname sa_types[] = {
 
 struct idname auth_types[] = {
 	{ SADB_AALG_NONE,		"none",			NULL },
-	{ SADB_AALG_DES,		"des",			NULL },
+	{ SADB_X_AALG_DES,		"des",			NULL },
 	{ SADB_AALG_MD5HMAC,		"hmac-md5",		NULL },
-	{ SADB_AALG_RIPEMD160HMAC,	"hmac-ripemd160",	NULL },
+	{ SADB_X_AALG_RIPEMD160HMAC,	"hmac-ripemd160",	NULL },
 	{ SADB_AALG_SHA1HMAC,		"hmac-sha1",		NULL },
-	{ SADB_AALG_SHA2_256,		"sha2-256",		NULL },
-	{ SADB_AALG_SHA2_384,		"sha2-384",		NULL },
-	{ SADB_AALG_SHA2_512,		"sha2-512",		NULL },
+	{ SADB_X_AALG_SHA2_256,		"hmac-sha2-256",	NULL },
+	{ SADB_X_AALG_SHA2_384,		"hmac-sha2-384",	NULL },
+	{ SADB_X_AALG_SHA2_512,		"hmac-sha2-512",	NULL },
 	{ SADB_X_AALG_MD5,		"md5",			NULL },
 	{ SADB_X_AALG_SHA1,		"sha1",			NULL },
 	{ 0,				NULL,			NULL }
@@ -152,7 +165,7 @@ struct idname enc_types[] = {
 	{ SADB_X_EALG_DES_IV32,		"des-iv32",		NULL },
 	{ SADB_X_EALG_DES_IV64,		"des-iv64",		NULL },
 	{ SADB_X_EALG_IDEA,		"idea",			NULL },
-	{ SADB_X_EALG_NULL,		"null",			NULL },
+	{ SADB_EALG_NULL,		"null",			NULL },
 	{ SADB_X_EALG_RC4,		"rc4",			NULL },
 	{ SADB_X_EALG_RC5,		"rc5",			NULL },
 	{ SADB_X_EALG_SKIPJACK,		"skipjack",		NULL },
@@ -251,9 +264,9 @@ print_msg(struct sadb_msg *msg, int promisc)
 	struct sadb_ext *ext;
 
 	printf("%s: satype %s vers %u len %u seq %u %spid %u\n",
-            lookup_name(msg_types, msg->sadb_msg_type),
-            lookup_name(sa_types, msg->sadb_msg_satype),
-            msg->sadb_msg_version, msg->sadb_msg_len,
+	    lookup_name(msg_types, msg->sadb_msg_type),
+	    lookup_name(sa_types, msg->sadb_msg_satype),
+	    msg->sadb_msg_version, msg->sadb_msg_len,
 	    msg->sadb_msg_seq,
 #if 0
 	    promisc ? "from " : "to ",
@@ -280,16 +293,16 @@ print_sa(struct sadb_ext *ext, struct sadb_msg *msg)
 
 	if (msg->sadb_msg_satype == SADB_X_SATYPE_IPCOMP)
 		printf("cpi 0x%8.8x comp %s\n",
-		    ntohl(sa->sadb_sa_spi), 
+		    ntohl(sa->sadb_sa_spi),
 		    lookup_name(comp_types, sa->sadb_sa_encrypt));
 	else
 		printf("spi 0x%8.8x auth %s enc %s\n",
-		    ntohl(sa->sadb_sa_spi), 
+		    ntohl(sa->sadb_sa_spi),
 		    lookup_name(auth_types, sa->sadb_sa_auth),
 		    lookup_name(enc_types, sa->sadb_sa_encrypt));
 	printf("\t\tstate %s replay %u flags %u\n",
 	    lookup_name(states, sa->sadb_sa_state),
-            sa->sadb_sa_replay, sa->sadb_sa_flags);
+	    sa->sadb_sa_replay, sa->sadb_sa_flags);
 }
 
 void
@@ -404,8 +417,8 @@ void
 print_alg(struct sadb_alg *alg, u_int8_t ext_type)
 {
 	printf("\t\t%s iv %u min %u max %u\n",
-            alg_by_ext(ext_type, alg->sadb_alg_id), alg->sadb_alg_ivlen,
-            alg->sadb_alg_minbits, alg->sadb_alg_maxbits);
+	    alg_by_ext(ext_type, alg->sadb_alg_id), alg->sadb_alg_ivlen,
+	    alg->sadb_alg_minbits, alg->sadb_alg_maxbits);
 }
 
 void
@@ -489,7 +502,7 @@ print_ident(struct sadb_ext *ext, struct sadb_msg *msg)
 	struct sadb_ident *ident = (struct sadb_ident *) ext;
 
 	printf("type %s id %llu: %s\n",
-            lookup_name(identity_types, ident->sadb_ident_type),
+	    lookup_name(identity_types, ident->sadb_ident_type),
 	    ident->sadb_ident_id, (char *)(ident + 1));
 }
 
@@ -531,7 +544,7 @@ msg_send(int pfkey, u_int8_t satype, u_int8_t mtype)
 	msg.sadb_msg_seq = ++seq;
 	msg.sadb_msg_satype = satype;
 	msg.sadb_msg_type = mtype;
-	msg.sadb_msg_len = sizeof(msg) / PFKEY2_CHUNK; 
+	msg.sadb_msg_len = sizeof(msg) / PFKEY2_CHUNK;
 	if (write(pfkey, &msg, sizeof(msg)) != sizeof(msg))
 		err(1, "write");
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: uname.c,v 1.6 2002/09/17 19:37:40 deraadt Exp $	*/
+/*	$OpenBSD: uname.c,v 1.8 2003/07/10 00:06:51 david Exp $	*/
 
 /*
  * Copyright (c) 1994 Winning Strategies, Inc.
@@ -32,18 +32,19 @@
  */
 
 #ifndef lint
-static char rcsid[] = "$OpenBSD: uname.c,v 1.6 2002/09/17 19:37:40 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: uname.c,v 1.8 2003/07/10 00:06:51 david Exp $";
 #endif /* not lint */
 
 #include <sys/param.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <locale.h>
 #include <unistd.h>
 #include <sys/utsname.h>
 #include <sys/sysctl.h>
 #include <err.h>
 
-static void usage();
+static void usage(void);
 
 #define	PRINT_SYSNAME	0x01
 #define	PRINT_NODENAME	0x02

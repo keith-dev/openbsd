@@ -1,4 +1,4 @@
-/*	$OpenBSD: fsck.h,v 1.11 2003/03/11 04:42:25 david Exp $	*/
+/*	$OpenBSD: fsck.h,v 1.13 2003/08/25 23:28:15 tedu Exp $	*/
 /*	$NetBSD: fsck.h,v 1.13 1996/10/11 20:15:46 thorpej Exp $	*/
 
 /*
@@ -13,11 +13,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -67,7 +63,7 @@ struct bufarea {
 		daddr_t	*b_indir;		/* indirect block */
 		struct	fs *b_fs;		/* super block */
 		struct	cg *b_cg;		/* cylinder group */
-		struct	dinode *b_dinode;	/* inode block */
+		struct	ufs1_dinode *b_dinode;	/* inode block */
 	} b_un;
 	char	b_dirty;
 };
@@ -202,7 +198,7 @@ daddr_t	n_blks;			/* number of blocks in use */
 daddr_t	n_files;		/* number of files in use */
 
 #define	clearinode(dp)	(*(dp) = zino)
-struct	dinode zino;
+struct	ufs1_dinode zino;
 
 #define	setbmap(blkno)	setbit(blockmap, blkno)
 #define	testbmap(blkno)	isset(blockmap, blkno)
@@ -214,7 +210,7 @@ struct	dinode zino;
 #define	ALTERED	0x08
 #define	FOUND	0x10
 
-struct dinode *ginode(ino_t);
+struct ufs1_dinode *ginode(ino_t);
 struct inoinfo *getinoinfo(ino_t);
 void getblk(struct bufarea *, daddr_t, long);
 ino_t allocino(ino_t, int);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: process.c,v 1.10 2002/08/08 18:27:57 art Exp $	*/
+/*	$OpenBSD: process.c,v 1.13 2003/08/18 17:55:57 jfb Exp $	*/
 /*
  * Copyright (c) 2002 Artur Grabowski <art@openbsd.org>
  * All rights reserved. 
@@ -53,7 +53,7 @@ process_load(struct pstate *ps)
 	if (access(*ps->ps_argv, R_OK|X_OK) < 0) {
 		fprintf(stderr, "%s: %s.\n", *ps->ps_argv,
 		    strerror(errno));
-		return (0);
+		return (1);
 	}
 
 	if (stat(ps->ps_argv[0], &(ps->exec_stat)) < 0)
@@ -74,6 +74,37 @@ process_load(struct pstate *ps)
 		ps->ps_flags |= PSF_ATCH;
 	}
 
+	return (0);
+}
+
+
+int
+process_setargv(struct pstate *ps, int argc, char **argv)
+{
+	int i;
+
+	if (ps->ps_argv != NULL) {
+		for (i = 0; i < ps->ps_argc; i++)
+			free(ps->ps_argv[i]);
+		free(ps->ps_argv);
+	}
+
+	ps->ps_argv = (char **)calloc((argc + 1), sizeof(char *));
+	if (ps->ps_argv == NULL) {
+		warn("failed to allocate argument vector");
+		return (-1);
+	}
+
+	ps->ps_argc = argc;
+	for (i = 0; i < argc; i++) {
+		ps->ps_argv[i] = strdup(argv[i]);
+		if (ps->ps_argv[i] == NULL) {
+			warn("failed to copy argument");
+			return (-1);
+		}
+	}
+
+	ps->ps_argv[i] = NULL;
 	return (0);
 }
 
@@ -140,7 +171,8 @@ process_read(struct pstate *ps, off_t from, void *to, size_t size)
 		piod.piod_addr = to;
 		piod.piod_len = size;
 
-		return (ptrace(PT_IO, ps->ps_pid, (caddr_t)&piod, 0));
+		return (ptrace(PT_IO, ps->ps_pid, (caddr_t)&piod, 0) < 0?
+		    -1 : piod.piod_len);
 	}
 }
 
@@ -157,7 +189,8 @@ process_write(struct pstate *ps, off_t to, void *from, size_t size)
 		piod.piod_addr = from;
 		piod.piod_len = size;
 
-		return (ptrace(PT_IO, ps->ps_pid, (caddr_t)&piod, 0));
+		return (ptrace(PT_IO, ps->ps_pid, (caddr_t)&piod, 0) < 0?
+		    -1 : piod.piod_len);
 	}
 }
 
@@ -200,7 +233,9 @@ cmd_process_run(int argc, char **argv, void *arg)
 	if (ps->ps_state == NONE) {
 		reg main_addr;
 
-		process_load(ps);
+		if (process_load(ps) != 0)
+			return (0);
+
 		if (sym_lookup(ps, "main", &main_addr))
 			warnx("no main");
 		else if (bkpt_add_cb(ps, main_addr, process_bkpt_main, NULL))

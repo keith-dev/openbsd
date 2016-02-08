@@ -1,5 +1,5 @@
-# $OpenBSD: Makefile,v 1.4 2002/06/10 18:03:08 hin Exp $
+# $OpenBSD: Makefile,v 1.6 2003/07/14 16:14:43 mho Exp $
 
-SUBDIR	= roken asn1 krb5 hdb kadm5clnt kadm5srv 45 gssapi kafs
+SUBDIR	= roken
 
 .include <bsd.subdir.mk>

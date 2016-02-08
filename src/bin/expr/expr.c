@@ -1,4 +1,4 @@
-/*	$OpenBSD: expr.c,v 1.12 2002/07/04 04:26:39 deraadt Exp $	*/
+/*	$OpenBSD: expr.c,v 1.15 2003/06/11 23:42:12 deraadt Exp $	*/
 /*	$NetBSD: expr.c,v 1.3.6.1 1996/06/04 20:41:47 cgd Exp $	*/
 
 /*
@@ -14,6 +14,22 @@
 #include <regex.h>
 #include <err.h>
 
+struct val	*make_int(int);
+struct val	*make_str(char *);
+void		 free_value(struct val *);
+int		 is_integer(struct val *, int *);
+int		 to_integer(struct val *);
+void		 to_string(struct val *);
+int		 is_zero_or_null(struct val *);
+void		 nexttoken(int);
+__dead void	 error(void);
+struct val	*eval6(void);
+struct val	*eval5(void);
+struct val	*eval4(void);
+struct val	*eval3(void);
+struct val	*eval2(void);
+struct val	*eval1(void);
+struct val	*eval0(void);
 
 enum token {
 	OR, AND, EQ, LT, GT, ADD, SUB, MUL, DIV, MOD, MATCH, RP, LP,
@@ -141,15 +157,17 @@ void
 to_string(struct val *vp)
 {
 	char	       *tmp;
+	size_t		len;
 
 	if (vp->type == string)
 		return;
 
-	tmp = malloc(25);
+	len = 25;
+	tmp = malloc(len);
 	if (tmp == NULL) {
 		err(3, NULL);
 	}
-	snprintf(tmp, 25, "%d", vp->u.i);
+	snprintf(tmp, len, "%d", vp->u.i);
 	vp->type = string;
 	vp->u.s = tmp;
 }
@@ -206,7 +224,7 @@ nexttoken(int pat)
 }
 
 __dead void
-error()
+error(void)
 {
 	errx(2, "syntax error");
 	/* NOTREACHED */
@@ -215,7 +233,6 @@ error()
 struct val *
 eval6(void)
 {
-	struct val     *eval0(void);
 	struct val     *v;
 
 	if (token == OPERAND) {

@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.38 2002/11/30 13:56:23 mickey Exp $
+#	$OpenBSD: Makefile,v 1.42 2003/08/21 19:14:23 frantzen Exp $
 #
 #  Copyright (c) 1988, 1989, 1990, 1991, 1992, 1993, 1994
 # 	The Regents of the University of California.  All rights reserved.
@@ -23,7 +23,7 @@
 PROG=	tcpdump
 MAN=	tcpdump.8
 
-CFLAGS+=-Wall -Werror -I${.CURDIR}/../../sbin/pfctl
+CFLAGS+=-Wall -I${.CURDIR}/../../sbin/pfctl
 .PATH:	${.CURDIR}/../../sbin/pfctl
 
 CFLAGS+=-DCSLIP -DPPP -DHAVE_FDDI -DETHER_SERVICE -DRETSIGTYPE=void -DHAVE_NET_SLIP_H -DHAVE_ETHER_NTOHOST -DINET6
@@ -32,8 +32,8 @@ CFLAGS+=-DCSLIP -DPPP -DHAVE_FDDI -DETHER_SERVICE -DRETSIGTYPE=void -DHAVE_NET_S
 CFLAGS+=-DLBL_ALIGN
 .endif
 
-LDADD+=	-lpcap -ll
-DPADD+=	${LIBL} ${LIBPCAP}
+LDADD+=	-lpcap -ll -lcrypto
+DPADD+=	${LIBL} ${LIBPCAP} ${LIBCRYPTO}
 
 SRCS=	tcpdump.c addrtoname.c \
 	print-ether.c print-ip.c print-arp.c print-tcp.c print-udp.c \
@@ -50,7 +50,15 @@ SRCS=	tcpdump.c addrtoname.c \
 	print-bgp.c print-ospf6.c print-ripng.c print-rt6.c print-stp.c \
 	print-etherip.c print-lwres.c print-cdp.c print-pflog.c \
 	print-pfsync.c pf_print_state.c \
+	print-udpencap.c \
 	gmt2local.c savestr.c setsignal.c
+
+# TCP OS Fingerprinting
+.PATH: ${.CURDIR}/../../sys/net
+.PATH: ${.CURDIR}/../../sbin/pfctl
+SRCS+=	pf_osfp.c pfctl_osfp.c
+CFLAGS+=-I${.CURDIR}/../../sbin/pfctl
+CFLAGS+=-DFAKE_PF_KERNEL
 
 #SRCS+=	smbutil.c print-smb.c
 

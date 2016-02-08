@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.49 2003/02/04 20:02:34 markus Exp $	*/
+/*	$OpenBSD: conf.c,v 1.59 2003/09/02 18:15:55 ho Exp $	*/
 /*	$EOM: conf.c,v 1.48 2000/12/04 02:04:29 angelos Exp $	*/
 
 /*
@@ -13,11 +13,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by Ericsson Radio Systems.
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -55,6 +50,7 @@
 #include "app.h"
 #include "conf.h"
 #include "log.h"
+#include "monitor.h"
 #include "util.h"
 
 static char *conf_get_trans_str (int, char *, char *);
@@ -253,7 +249,8 @@ conf_parse_line (int trans, char *line, size_t sz)
       section = malloc (i);
       if (!section)
 	{
-	  log_print ("conf_parse_line: %d: malloc (%d) failed", ln, i);
+	  log_print ("conf_parse_line: %d: malloc (%lu) failed", ln,
+		(unsigned long)i);
 	  return;
 	}
       strlcpy (section, line + 1, i);
@@ -324,13 +321,13 @@ conf_parse (int trans, char *buf, size_t sz)
  *
  * Resulting section names can be:
  *  For main mode:
- *     {DES,BLF,3DES,CAST}-{MD5,SHA}[-GRP{1,2,5}][-{DSS,RSA_SIG}]
+ *     {DES,BLF,3DES,CAST,AES}-{MD5,SHA}[-GRP{1,2,5}][-{DSS,RSA_SIG}]
  *  For quick mode:
  *     QM-{proto}[-TRP]-{cipher}[-{hash}][-PFS[-{group}]]-SUITE
  *     where
  *       {proto}  = ESP, AH
  *       {cipher} = DES, 3DES, CAST, BLF, AES
- *       {hash}   = MD5, SHA, RIPEMD
+ *       {hash}   = MD5, SHA, RIPEMD, SHA2-{-256,384,512}
  *       {group}  = GRP1, GRP2, GRP5
  *
  * DH group defaults to MODP_1024.
@@ -393,17 +390,21 @@ conf_load_defaults (int tr)
   char *mm_auth[]   = { "PRE_SHARED", "DSS", "RSA_SIG", 0 };
   char *mm_hash[]   = { "MD5", "SHA", 0 };
   char *mm_enc[]    = { "DES_CBC", "BLOWFISH_CBC", "3DES_CBC",
-			"CAST_CBC", 0 };
+			"CAST_CBC", "AES_CBC", 0 };
   char *dh_group[]  = { "MODP_768", "MODP_1024", "MODP_1536", 0 };
   char *qm_enc[]    = { "DES", "3DES", "CAST", "BLOWFISH", "AES", 0 };
-  char *qm_hash[]   = { "HMAC_MD5", "HMAC_SHA", "HMAC_RIPEMD", "NONE", 0 };
+  char *qm_hash[]   = { "HMAC_MD5", "HMAC_SHA", "HMAC_RIPEMD",
+			"HMAC_SHA2_256", "HMAC_SHA2_384", "HMAC_SHA2_512",
+			"NONE", 0 };
 
   /* Abbreviations to make section names a bit shorter.  */
   char *mm_auth_p[] = { "", "-DSS", "-RSA_SIG", 0 };
-  char *mm_enc_p[]  = { "DES", "BLF", "3DES", "CAST", 0 };
+  char *mm_enc_p[]  = { "DES", "BLF", "3DES", "CAST", "AES", 0 };
   char *dh_group_p[]= { "-GRP1", "-GRP2", "-GRP5", "", 0 };
   char *qm_enc_p[]  = { "-DES", "-3DES", "-CAST", "-BLF", "-AES", 0 };
-  char *qm_hash_p[] = { "-MD5", "-SHA", "-RIPEMD", "", 0 };
+  char *qm_hash_p[] = { "-MD5", "-SHA", "-RIPEMD",
+                        "-SHA2-256", "-SHA2-384", "-SHA2-512",
+                        "", 0 };
 
   /* Helper #defines, incl abbreviations.  */
 #define PROTO(x)  ((x) ? "AH" : "ESP")
@@ -416,6 +417,7 @@ conf_load_defaults (int tr)
   conf_set (tr, "General", "Retransmits", CONF_DFLT_RETRANSMITS, 0, 1);
   conf_set (tr, "General", "Exchange-max-time", CONF_DFLT_EXCH_MAX_TIME, 0, 1);
   conf_set (tr, "General", "Policy-file", CONF_DFLT_POLICY_FILE, 0, 1);
+  conf_set (tr, "General", "Pubkey-directory", CONF_DFLT_PUBKEY_DIR, 0, 1);
 
 #ifdef USE_X509
   conf_set (tr, "X509-certificates", "CA-directory", CONF_DFLT_X509_CA_DIR, 0,
@@ -449,7 +451,7 @@ conf_load_defaults (int tr)
   /* Default Phase-1 Configuration section */
   conf_set (tr, CONF_DFLT_TAG_PHASE1_CONFIG, "EXCHANGE_TYPE",
 	    CONF_DFLT_PHASE1_EXCH_TYPE, 0, 1);
-  conf_set (tr, CONF_DFLT_TAG_PHASE1_CONFIG, "Transforms", 
+  conf_set (tr, CONF_DFLT_TAG_PHASE1_CONFIG, "Transforms",
 	    CONF_DFLT_PHASE1_TRANSFORMS, 0, 1);
 
   /* Main modes */
@@ -458,7 +460,7 @@ conf_load_defaults (int tr)
       for (auth = 0; mm_auth[auth]; auth ++)
 	for (group = 0; dh_group_p[group]; group ++) /* special */
 	  {
-	    snprintf (sect, CONF_MAX, "%s-%s%s%s", mm_enc_p[enc],
+	    snprintf (sect, sizeof sect, "%s-%s%s%s", mm_enc_p[enc],
 		      mm_hash[hash], dh_group_p[group], mm_auth_p[auth]);
 
 #if 0
@@ -507,7 +509,7 @@ conf_load_defaults (int tr)
 		{
 		  char tmp[CONF_MAX];
 
-		  snprintf (tmp, CONF_MAX, "QM-%s%s%s%s%s%s", PROTO (proto),
+		  snprintf (tmp, sizeof tmp, "QM-%s%s%s%s%s%s", PROTO (proto),
 			    MODE_p (mode), qm_enc_p[enc], qm_hash_p[hash],
 			    PFS (pfs), dh_group_p[group]);
 
@@ -524,7 +526,7 @@ conf_load_defaults (int tr)
 
 		  conf_set (tr, sect, "Protocols", tmp, 0, 1);
 
-		  snprintf (sect, CONF_MAX, "IPSEC_%s", PROTO (proto));
+		  snprintf (sect, sizeof sect, "IPSEC_%s", PROTO (proto));
 		  conf_set (tr, tmp, "PROTOCOL_ID", sect, 0, 1);
 
 		  strlcpy (sect, tmp, CONF_MAX);
@@ -587,7 +589,7 @@ conf_reinit (void)
       if (check_file_secrecy (conf_path, &sz))
 	return;
 
-      fd = open (conf_path, O_RDONLY);
+      fd = monitor_open (conf_path, O_RDONLY, 0);
       if (fd == -1)
         {
 	  log_error ("conf_reinit: open (\"%s\", O_RDONLY) failed", conf_path);

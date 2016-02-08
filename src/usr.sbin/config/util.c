@@ -1,4 +1,4 @@
-/*	$OpenBSD: util.c,v 1.10 2002/07/14 02:59:41 deraadt Exp $	*/
+/*	$OpenBSD: util.c,v 1.12 2003/06/28 04:55:07 deraadt Exp $	*/
 /*	$NetBSD: util.c,v 1.5 1996/08/31 20:58:29 mycroft Exp $	*/
 
 /*
@@ -22,11 +22,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -60,8 +56,7 @@ static void vxerror(const char *, int, const char *, va_list);
  * Malloc, with abort on error.
  */
 void *
-emalloc(size)
-	size_t size;
+emalloc(size_t size)
 {
 	void *p;
 
@@ -75,9 +70,7 @@ emalloc(size)
  * Realloc, with abort on error.
  */
 void *
-erealloc(p, size)
-	void *p;
-	size_t size;
+erealloc(void *p, size_t size)
 {
 
 	if ((p = realloc(p, size)) == NULL)
@@ -86,7 +79,7 @@ erealloc(p, size)
 }
 
 static void
-nomem()
+nomem(void)
 {
 
 	(void)fprintf(stderr, "config: out of memory\n");
@@ -97,8 +90,7 @@ nomem()
  * Prepend the source path to a file name.
  */
 char *
-sourcepath(file)
-	const char *file;
+sourcepath(const char *file)
 {
 	char *cp;
 	int len = strlen(srcdir) + 1 + strlen(file) + 1;
@@ -111,11 +103,7 @@ sourcepath(file)
 static struct nvlist *nvhead;
 
 struct nvlist *
-newnv(name, str, ptr, i, next)
-	const char *name, *str;
-	void *ptr;
-	int i;
-	struct nvlist *next;
+newnv(const char *name, const char *str, void *ptr, int i, struct nvlist *next)
 {
 	struct nvlist *nv;
 
@@ -124,7 +112,7 @@ newnv(name, str, ptr, i, next)
 	else
 		nvhead = nv->nv_next;
 	nv->nv_next = next;
-	nv->nv_name = name;
+	nv->nv_name = (char *)name;
 	if (ptr == NULL)
 		nv->nv_str = str;
 	else {
@@ -140,8 +128,7 @@ newnv(name, str, ptr, i, next)
  * Free an nvlist structure (just one).
  */
 void
-nvfree(nv)
-	struct nvlist *nv;
+nvfree(struct nvlist *nv)
 {
 
 	nv->nv_next = nvhead;
@@ -152,8 +139,7 @@ nvfree(nv)
  * Free an nvlist (the whole list).
  */
 void
-nvfreel(nv)
-	struct nvlist *nv;
+nvfreel(struct nvlist *nv)
 {
 	struct nvlist *next;
 
@@ -197,11 +183,7 @@ xerror(const char *file, int line, const char *fmt, ...)
  * Internal form of error() and xerror().
  */
 static void
-vxerror(file, line, fmt, ap)
-	const char *file;
-	int line;
-	const char *fmt;
-	va_list ap;
+vxerror(const char *file, int line, const char *fmt, va_list ap)
 {
 
 	(void)fprintf(stderr, "%s:%d: ", file, line);

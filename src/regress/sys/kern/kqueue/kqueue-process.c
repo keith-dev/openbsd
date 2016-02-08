@@ -1,4 +1,4 @@
-/*	$OpenBSD: kqueue-process.c,v 1.2 2002/06/11 06:16:36 jsyn Exp $	*/
+/*	$OpenBSD: kqueue-process.c,v 1.4 2003/07/31 21:48:08 deraadt Exp $	*/
 /*
  *	Written by Artur Grabowski <art@openbsd.org> 2002 Public Domain
  */
@@ -19,11 +19,13 @@ static int process_child(void);
 
 #define ASSX(cond) ASS(cond, warnx("assertion " #cond " failed on line %d", __LINE__))
 
-void
+static void
 usr1handler(int signum)
 {
 	/* nada */
 }
+
+int do_process(void);
 
 int
 do_process(void)
@@ -67,6 +69,7 @@ do_process(void)
 
 	didfork = didchild = 0;
 
+	pid2 = -1;
 	for (i = 0; i < 2; i++) {
 		ASS(kevent(kq, NULL, 0, &ke, 1, &ts) == 1,
 		    warnx("didn't receive event"));
@@ -90,6 +93,9 @@ do_process(void)
 			    ke.fflags, (pid_t)ke.ident);
 		}
 	}
+
+	if (pid2 == -1)
+		return (1);
 
 	/* Both children now sleeping. */
 
@@ -122,7 +128,7 @@ process_child(void)
 	case 0:
 		/* sync 2.1 */
 		pause();
-		execl("/usr/bin/true", "true", NULL);
+		execl("/usr/bin/true", "true", (void *)NULL);
 		err(1, "execl(true)");
 	}
 

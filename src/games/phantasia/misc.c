@@ -1,4 +1,4 @@
-/*	$OpenBSD: misc.c,v 1.10 2003/03/11 04:47:39 david Exp $	*/
+/*	$OpenBSD: misc.c,v 1.13 2003/08/06 21:08:05 millert Exp $	*/
 /*	$NetBSD: misc.c,v 1.2 1995/03/24 03:59:03 cgd Exp $	*/
 
 /*
@@ -103,7 +103,7 @@ movelevel()
 /
 / RETURN VALUE: pointer to string containing result
 /
-/ MODULES CALLED: fabs(), floor(), sprintf(), distance()
+/ MODULES CALLED: fabs(), floor(), snprintf(), distance()
 /
 / GLOBAL INPUTS: Databuf[]
 /
@@ -161,9 +161,10 @@ descrlocation(playerp, shortflag)
 	}
 
 	if (shortflag)
-		sprintf(Databuf, "%.29s", label);
+		snprintf(Databuf, sizeof Databuf, "%.29s", label);
 	else
-		sprintf(Databuf, " is in %s  (%.0f,%.0f)", label, playerp->p_x, playerp->p_y);
+		snprintf(Databuf, sizeof Databuf,
+			" is in %s  (%.0f,%.0f)", label, playerp->p_x, playerp->p_y);
 
 	return (Databuf);
 }
@@ -566,7 +567,7 @@ allstatslist()
 /
 / RETURN VALUE: pointer to string describing player type
 /
-/ MODULES CALLED: strcpy()
+/ MODULES CALLED: strlcpy()
 /
 / GLOBAL INPUTS: Databuf[]
 /
@@ -638,7 +639,7 @@ descrtype(playerp, shortflag)
 		++type;
 
 	if (playerp->p_crowns > 0) {
-		strcpy(Databuf, results[type]);
+		strlcpy(Databuf, results[type], sizeof Databuf);
 		Databuf[0] = '*';
 		return (Databuf);
 	} else
@@ -827,7 +828,7 @@ leavegame()
 /
 / MODULES CALLED: freerecord(), enterscore(), more(), exit(), fread(), 
 /	fseek(), execl(), fopen(), floor(), wmove(), drandom(), wclear(), strcmp(), 
-/	fwrite(), fflush(), printw(), strcpy(), fclose(), waddstr(), cleanup(), 
+/	fwrite(), fflush(), printw(), strlcpy(), fclose(), waddstr(), cleanup(), 
 /	fprintf(), wrefresh(), getanswer(), descrtype()
 /
 / GLOBAL INPUTS: Curmonster, Wizard, Player, *stdscr, Fileloc, *Monstfp
@@ -901,7 +902,8 @@ death(how)
 			    "Your ring has taken control of you and turned you into a monster!\n");
 			fseek(Monstfp, 13L * SZ_MONSTERSTRUCT, SEEK_SET);
 			fread((char *) &Curmonster, SZ_MONSTERSTRUCT, 1, Monstfp);
-			strcpy(Curmonster.m_name, Player.p_name);
+			strlcpy(Curmonster.m_name, Player.p_name,
+			    sizeof Curmonster.m_name);
 			fseek(Monstfp, 13L * SZ_MONSTERSTRUCT, SEEK_SET);
 			fwrite((char *) &Curmonster, SZ_MONSTERSTRUCT, 1, Monstfp);
 			fflush(Monstfp);
@@ -1198,7 +1200,7 @@ adjuststats()
 
 	/* calculate effective quickness */
 	dtemp = ((Player.p_gold + Player.p_gems / 2.0) - 1000.0) / Statptr->c_goldtote
-	    - Player.p_level;;
+	    - Player.p_level;
 	dtemp = MAX(0.0, dtemp);/* gold slows player down */
 	Player.p_speed = Player.p_quickness + Player.p_quksilver - dtemp;
 

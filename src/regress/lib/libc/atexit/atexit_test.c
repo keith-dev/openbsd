@@ -1,4 +1,4 @@
-/*	$OpenBSD: atexit_test.c,v 1.3 2002/10/21 20:40:50 mickey Exp $ */
+/*	$OpenBSD: atexit_test.c,v 1.5 2003/09/02 23:52:16 david Exp $ */
 
 /*
  * Copyright (c) 2002 Daniel Hartmeier
@@ -36,14 +36,15 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <signal.h>
 #include "stdlib/atexit.h"
 
-void	handle_first();
-void	handle_middle();
-void	handle_last();
-void	handle_invalid();
-void	handle_cleanup();
+void	handle_first(void);
+void	handle_middle(void);
+void	handle_last(void);
+void	handle_invalid(void);
+void	handle_cleanup(void);
 void	handle_signal(int);
 
 static int counter;
@@ -96,31 +97,31 @@ main(int argc, char *argv[])
 }
 
 void
-handle_first()
+handle_first(void)
 {
 	fprintf(stderr, "handle_first() counter == %i\n", counter);
 }
 
 void
-handle_middle()
+handle_middle(void)
 {
 	counter++;
 }
 
 void
-handle_last()
+handle_last(void)
 {
 	fprintf(stderr, "handle_last() counter == %i\n", counter);
 }
 
 void
-handle_cleanup()
+handle_cleanup(void)
 {
 	fprintf(stderr, "handle_cleanup()\n");
 }
 
 void
-handle_invalid()
+handle_invalid(void)
 {
 	fprintf(stderr, "handle_invalid() THIS SHOULD HAVE SEGFAULTED INSTEAD!\n");
 }

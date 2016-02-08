@@ -1,4 +1,4 @@
-.\"     $OpenBSD: spif.4,v 1.6 2002/10/01 21:03:28 miod Exp $
+.\"     $OpenBSD: spif.4,v 1.9 2003/06/06 10:29:42 jmc Exp $
 .\"
 .\" Copyright (c) 1999-2002 Jason L. Wright (jason@thought.net)
 .\" All rights reserved.
@@ -11,11 +11,6 @@
 .\" 2. Redistributions in binary form must reproduce the above copyright
 .\"    notice, this list of conditions and the following disclaimer in the
 .\"    documentation and/or other materials provided with the distribution.
-.\" 3. All advertising materials mentioning features or use of this software
-.\"    must display the following acknowledgement:
-.\"      This product includes software developed by Jason L. Wright
-.\" 4. The name of the author may not be used to endorse or promote products
-.\"    derived from this software without specific prior written permission.
 .\"
 .\" THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
 .\" IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
@@ -60,7 +55,7 @@ The device minor numbers for this driver are encoded as follows:
       |   |   |   |   |
       |   |   |   |   +---------------> unused
       |   |   |   |
-      |   |   |   +-------------------> dialout (on tty ports)
+      |   |   |   +-------------------> dial-out (on tty ports)
       |   |   |
       |   |   +-----------------------> unused
       |   |
@@ -71,6 +66,13 @@ Up to four cards are supported in the system.
 .Pp
 Each of the serial ports has an 8 byte FIFO for receive and transmit as
 well as automatic hardware (RTS/CTS) flow control.
+.Sh FILES
+.Bl -tag -width /dev/tty[jkl][0-7] -compact
+.It /dev/tty[jkl][0-7]
+Serial ports
+.It /dev/sbpp[0-3]
+Parallel ports
+.El
 .Sh DIAGNOSTICS
 .Bl -diag
 .It "spif%d: ccr timeout"
@@ -79,30 +81,23 @@ A timeout occurred while writing to one of the CD180 registers.
 Incoming characters were discarded because the application
 in control of the device did not read the input fast enough.
 .El
-.Sh FILES
-.Bl -tag -width /dev/tty[jkl][0-7] -compact
-.It /dev/tty[jkl][0-7]
-Serial ports
-.It /dev/sbpp[0-3]
-Parallel ports
-.El
 .Sh SEE ALSO
 .Xr intro 4 ,
 .Xr sbus 4 ,
 .Xr tty 4
-.Sh AUTHORS
-The driver was written by 
-.An Jason Wright Aq jason@thought.net ,
-and is heavily based on the
-.Xr magma 4
-driver written by
-.An Iain Hibbert Aq plunky@skate.demon.co.uk .
 .Sh HISTORY
 The
 .Nm
 driver was first supported in
 .Ox 3.1 .
+.Sh AUTHORS
+The driver was written by
+.An Jason Wright Aq jason@thought.net ,
+and is heavily based on the
+.Xr magma 4
+driver written by
+.An Iain Hibbert Aq plunky@skate.demon.co.uk .
 .Sh TODO
 The parallel port is not supported yet.
 .Pp
-Dialout (cua) devices are not yet supported.
+Dial-out (cua) devices are not yet supported.

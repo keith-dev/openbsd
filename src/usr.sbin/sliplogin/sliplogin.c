@@ -10,11 +10,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -39,7 +35,7 @@ char copyright[] =
 
 #ifndef lint
 /*static char sccsid[] = "from: @(#)sliplogin.c	5.6 (Berkeley) 3/2/91";*/
-static char rcsid[] = "$Id: sliplogin.c,v 1.21 2002/05/22 09:09:32 deraadt Exp $";
+static char rcsid[] = "$Id: sliplogin.c,v 1.23 2003/06/26 21:36:39 deraadt Exp $";
 #endif /* not lint */
 
 /*
@@ -106,8 +102,7 @@ char	loginfile[MAXPATHLEN];
 char	loginname[BUFSIZ];
 
 void
-findid(name)
-	char *name;
+findid(char *name)
 {
 	FILE *fp;
 	static char slopt[5][16];
@@ -164,8 +159,7 @@ findid(name)
 }
 
 const char *
-sigstr(s)
-	int s;
+sigstr(int s)
 {
 	if (s > 0 && s < NSIG)
 		return(sys_signame[s]);
@@ -179,16 +173,13 @@ sigstr(s)
 volatile sig_atomic_t die;
 
 void
-hup_handler(s)
-	int s;
+hup_handler(int s)
 {
 	die = 1;
 }
 
 int
-main(argc, argv)
-	int argc;
-	char *argv[];
+main(int argc, char *argv[])
 {
 	int fd, s, ldisc, odisc;
 	char *name;

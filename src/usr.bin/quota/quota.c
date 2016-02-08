@@ -1,4 +1,4 @@
-/*	$OpenBSD: quota.c,v 1.21 2003/03/15 19:16:10 deraadt Exp $	*/
+/*	$OpenBSD: quota.c,v 1.23 2003/06/10 22:20:49 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1980, 1990, 1993
@@ -15,11 +15,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -45,7 +41,7 @@ static const char copyright[] =
 #ifndef lint
 /*static char sccsid[] = "from: @(#)quota.c	8.1 (Berkeley) 6/6/93";*/
 static const char rcsid[] =
-"$OpenBSD: quota.c,v 1.21 2003/03/15 19:16:10 deraadt Exp $";
+"$OpenBSD: quota.c,v 1.23 2003/06/10 22:20:49 deraadt Exp $";
 #endif /* not lint */
 
 /*
@@ -109,9 +105,7 @@ int	qflag;
 int	vflag;
 
 int
-main(argc, argv)
-	int argc;
-	char *argv[];
+main(int argc, char *argv[])
 {
 	int ngroups; 
 	gid_t mygid, gidset[NGROUPS];
@@ -183,7 +177,7 @@ main(argc, argv)
 }
 
 void
-usage()
+usage(void)
 {
 
 	fprintf(stderr, "%s\n%s\n%s\n",
@@ -197,8 +191,7 @@ usage()
  * Print out quotas for a specified user identifier.
  */
 void
-showuid(uid)
-	uid_t uid;
+showuid(uid_t uid)
 {
 	struct passwd *pwd = getpwuid(uid);
 	uid_t myuid;
@@ -220,8 +213,7 @@ showuid(uid)
  * Print out quotas for a specified user name.
  */
 void
-showusrname(name)
-	const char *name;
+showusrname(const char *name)
 {
 	struct passwd *pwd = getpwnam(name);
 	uid_t myuid;
@@ -243,8 +235,7 @@ showusrname(name)
  * Print out quotas for a specified group identifier.
  */
 void
-showgid(gid)
-	gid_t gid;
+showgid(gid_t gid)
 {
 	struct group *grp = getgrgid(gid);
 	int ngroups;
@@ -278,8 +269,7 @@ showgid(gid)
  * Print out quotas for a specified group name.
  */
 void
-showgrpname(name)
-	const char *name;
+showgrpname(const char *name)
 {
 	struct group *grp = getgrnam(name);
 	int ngroups;
@@ -310,10 +300,7 @@ showgrpname(name)
 }
 
 void
-showquotas(type, id, name)
-	int type;
-	u_long id;
-	const char *name;
+showquotas(int type, u_long id, const char *name)
 {
 	struct quotause *qup;
 	struct quotause *quplist;
@@ -400,10 +387,7 @@ showquotas(type, id, name)
 }
 
 void
-heading(type, id, name, tag)
-	int type;
-	u_long id;
-	const char *name, *tag;
+heading(int type, u_long id, const char *name, const char *tag)
 {
 
 	printf("Disk quotas for %s %s (%cid %ld): %s\n", qfextension[type],
@@ -426,8 +410,7 @@ heading(type, id, name, tag)
  * Calculate the grace period and return a printable string for it.
  */
 char *
-timeprt(seconds)
-	time_t seconds;
+timeprt(time_t seconds)
 {
 	time_t hours, minutes;
 	static char buf[20];
@@ -458,9 +441,7 @@ timeprt(seconds)
  * Collect the requested quota information.
  */
 struct quotause *
-getprivs(id, quotatype)
-	long id;
-	int quotatype;
+getprivs(long id, int quotatype)
 {
 	struct quotause *qup, *quptail;
 	struct fstab *fs;
@@ -520,10 +501,7 @@ getprivs(id, quotatype)
  * Check to see if a particular quota is to be enabled.
  */
 int
-ufshasquota(fs, type, qfnamep)
-	struct fstab *fs;
-	int type;
-	char **qfnamep;
+ufshasquota(struct fstab *fs, int type, char **qfnamep)
 {
 	static char initname, usrname[100], grpname[100];
 	static char buf[BUFSIZ];
@@ -560,12 +538,8 @@ ufshasquota(fs, type, qfnamep)
 }
 
 int
-getufsquota(fst, fs, qup, id, quotatype)
-	struct statfs *fst;
-	struct fstab *fs;
-	struct quotause *qup;
-	long id;
-	int quotatype;
+getufsquota(struct statfs *fst, struct fstab *fs, struct quotause *qup,
+    long id, int quotatype)
 {
 	char *qfpathname;
 	int fd, qcmd;
@@ -601,12 +575,8 @@ getufsquota(fst, fs, qup, id, quotatype)
 }
 
 int
-getnfsquota(fst, fs, qup, id, quotatype)
-	struct statfs *fst;
-	struct fstab *fs; 
-	struct quotause *qup;
-	long id;
-	int quotatype;
+getnfsquota(struct statfs *fst, struct fstab *fs, struct quotause *qup,
+    long id, int quotatype)
 {
 	struct getquota_args gq_args;
 	struct getquota_rslt gq_rslt;
@@ -688,13 +658,8 @@ getnfsquota(fst, fs, qup, id, quotatype)
 }
  
 int
-callaurpc(host, prognum, versnum, procnum, inproc, in, outproc, out)
-	char *host;
-	int prognum, versnum, procnum;
-	xdrproc_t inproc;
-	void *in;
-	xdrproc_t outproc;
-	void *out;
+callaurpc(char *host, int prognum, int versnum, int procnum,
+    xdrproc_t inproc, void *in, xdrproc_t outproc, void *out)
 {
 	struct sockaddr_in server_addr;
 	enum clnt_stat clnt_stat;
@@ -728,8 +693,7 @@ callaurpc(host, prognum, versnum, procnum, inproc, in, outproc, out)
 }
 
 int
-alldigits(s)
-	char *s;
+alldigits(char *s)
 {
 	int c;
 

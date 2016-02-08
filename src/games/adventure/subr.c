@@ -1,4 +1,4 @@
-/*	$OpenBSD: subr.c,v 1.4 1998/09/02 06:36:07 pjanzen Exp $	*/
+/*	$OpenBSD: subr.c,v 1.8 2003/07/10 00:03:01 david Exp $	*/
 /*	$NetBSD: subr.c,v 1.2 1995/03/21 12:05:11 cgd Exp $	*/
 
 /*-
@@ -18,11 +18,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -43,13 +39,14 @@
 #if 0
 static char sccsid[] = "@(#)subr.c	8.1 (Berkeley) 5/31/93";
 #else
-static char rcsid[] = "$OpenBSD: subr.c,v 1.4 1998/09/02 06:36:07 pjanzen Exp $";
+static char rcsid[] = "$OpenBSD: subr.c,v 1.8 2003/07/10 00:03:01 david Exp $";
 #endif
 #endif /* not lint */
 
 /*	Re-coding of advent in C: subroutines from main			*/
 
 #include <stdio.h>
+#include <stdlib.h>
 #include "hdr.h"
 #include "extern.h"
 
@@ -555,11 +552,11 @@ trsay()				/* 9030			*/
 {
 	int i;
 
-	if (*wd2 != 0)
-		copystr(wd2, wd1);
+	if (wd2[0] != 0)
+		strlcpy(wd1, wd2, sizeof(wd1));
 	i = vocab(wd1, -1, 0);
 	if (i == 62 || i == 65 || i == 71 || i == 2025) {
-		*wd2 = 0;
+		wd2[0] = 0;
 		obj = 0;
 		return (2630);
 	}
@@ -833,7 +830,7 @@ trkill()				/* 9120				*/
 	rspeak(49);
 	verb = 0;
 	obj = 0;
-	getin(&wd1, &wd2);
+	getin(wd1, sizeof(wd1), wd2, sizeof(wd2));
 	if (!weq(wd1, "y") && !weq(wd1, "yes"))
 		return (2608);
 	pspeak(dragon, 1);

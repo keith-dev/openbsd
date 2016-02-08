@@ -152,6 +152,7 @@ main(int argc, char **argv)
     SIOUXSettings.autocloseonquit = 0;	/* Do we close the SIOUX window on program termination ... */
     SIOUXSettings.asktosaveonclose = 0;	/* Do we offer to save on a close ... */
 #endif
+    char *versionstr;
 
     init_program_name(argv);
 
@@ -165,9 +166,13 @@ main(int argc, char **argv)
 		"is not equal to block size (%d)\n",
 		sizeof(Block0), PBLOCK_SIZE);
     }
-    if (strcmp(VERSION, get_version_string()) != 0) {
-	fatal(-1, "Version string static form (%s) does not match dynamic form (%s)\n",
-		VERSION, get_version_string());
+    versionstr = (char *)get_version_string();
+    if (versionstr) {
+    	if (strcmp(VERSION, versionstr) != 0) {
+		fatal(-1, "Version string static form (%s) does not match dynamic form (%s)\n",
+		    VERSION, versionstr);
+    	}
+	free(versionstr);
     }
 
 #if defined(__linux__) || defined(__OpenBSD__)
@@ -1037,8 +1042,7 @@ do_display_block(partition_map_header *map, char *alt_name)
 		return;
 	    }
 	} else {
-	    name = malloc(strlen(alt_name)+1);
-	    strcpy(name, alt_name);
+	    name = strdup(alt_name);
 	}
 	m = open_pathname_as_media(name, O_RDONLY);
 	if (m == 0) {

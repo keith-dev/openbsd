@@ -1,4 +1,4 @@
-/* $OpenBSD: delete.h,v 1.1 1996/06/04 07:56:07 niklas Exp $ */
+/* $OpenBSD: delete.h,v 1.3 2003/08/21 20:24:56 espie Exp $ */
 
 /*
  * FreeBSD install - a package for the installation and maintainance
@@ -26,6 +26,8 @@
 extern char	*Prefix;
 extern Boolean	NoDeInstall;
 extern Boolean	CleanDirs;
+extern Boolean  CleanConf;
+extern Boolean  CheckMD5;
 extern Boolean	Force;
 extern char	*Directory;
 extern char	*PkgName;

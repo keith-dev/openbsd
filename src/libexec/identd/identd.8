@@ -1,4 +1,4 @@
-.\"	$OpenBSD: identd.8,v 1.20 2003/02/03 17:46:56 jmc Exp $
+.\"	$OpenBSD: identd.8,v 1.23 2003/06/07 19:30:07 henning Exp $
 .\"
 .\" Copyright (c) 1997, Jason Downs.  All rights reserved.
 .\"
@@ -10,13 +10,6 @@
 .\" 2. Redistributions in binary form must reproduce the above copyright
 .\"    notice, this list of conditions and the following disclaimer in the
 .\"    documentation and/or other materials provided with the distribution.
-.\" 3. All advertising materials mentioning features or use of this software
-.\"    must display the following acknowledgment:
-.\"      This product includes software developed by Jason Downs for the
-.\"      OpenBSD system.
-.\" 4. Neither the name(s) of the author(s) nor the name OpenBSD
-.\"    may be used to endorse or promote products derived from this software
-.\"    without specific prior written permission.
 .\"
 .\" THIS SOFTWARE IS PROVIDED BY THE AUTHOR(S) ``AS IS'' AND ANY EXPRESS
 .\" OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
@@ -110,8 +103,8 @@ This token is entered into the local system logs
 so that the administrator can later discover who the real user was.
 .It Fl H
 Hide information about non existing users (e.g., connections through NAT) as
-well as existing users. 
-Implies 
+well as existing users.
+Implies
 .Fl h .
 .It Fl t Ar seconds
 Specifies an idle timeout in seconds where a daemon running in
@@ -124,6 +117,14 @@ server should
 switch to after binding itself to the
 .Tn TCP/IP
 port if running as a stand-alone daemon.
+.Nm
+runs as user
+.Qq _identd
+by default and falls back to
+.Qq nobody
+if the
+.Qq _identd
+user does not exist.
 .It Fl g Ar gid
 Specify a group ID number or group name which the
 .Nm
@@ -182,7 +183,7 @@ check for a file
 .Pa .ident
 in the user's home directory.
 If this file is accessible, return
-the contents of the file 
+the contents of the file
 instead of the normal USERID response.
 .It Fl m
 Allow multiple requests to be processed per session.
@@ -223,6 +224,6 @@ files for use when running with the
 flag will need to be world accessible.
 The same applies for
 .Pa .noident
-files when running with the 
+files when running with the
 .Fl N
 flag.

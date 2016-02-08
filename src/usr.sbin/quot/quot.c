@@ -1,4 +1,4 @@
-/*	$OpenBSD: quot.c,v 1.11 2002/05/30 19:09:05 deraadt Exp $	*/
+/*	$OpenBSD: quot.c,v 1.14 2003/08/25 23:28:16 tedu Exp $	*/
 /*	$NetBSD: quot.c,v 1.7.4.1 1996/05/31 18:06:36 jtc Exp $	*/
 
 /*
@@ -33,7 +33,7 @@
  */
 
 #ifndef lint
-static char rcsid[] = "$Id: quot.c,v 1.11 2002/05/30 19:09:05 deraadt Exp $";
+static char rcsid[] = "$Id: quot.c,v 1.14 2003/08/25 23:28:16 tedu Exp $";
 #endif /* not lint */
 
 #include <sys/param.h>
@@ -57,7 +57,8 @@ static char rcsid[] = "$Id: quot.c,v 1.11 2002/05/30 19:09:05 deraadt Exp $";
 static char estimate;
 static char count;
 static char unused;
-static void (*func)();
+static void (*func)(int, struct fs *, char *);
+static int cmpusers(const void *, const void *);
 static long blocksize;
 static char *header;
 static int headerlen;
@@ -77,15 +78,12 @@ static int headerlen;
 #endif
 
 #define	INOCNT(fs)	((fs)->fs_ipg)
-#define	INOSZ(fs)	(sizeof(struct dinode) * INOCNT(fs))
+#define	INOSZ(fs)	(sizeof(struct ufs1_dinode) * INOCNT(fs))
 
-static struct dinode *
-get_inode(fd, super, ino)
-	int fd;
-	struct fs *super;
-	ino_t ino;
+static struct ufs1_dinode *
+get_inode(int fd, struct fs *super, ino_t ino)
 {
-	static struct dinode *ip;
+	static struct ufs1_dinode *ip;
 	static ino_t last;
 
 	if (fd < 0) {		/* flush cache */
@@ -97,7 +95,7 @@ get_inode(fd, super, ino)
 	}
 
 	if (!ip || ino < last || ino >= last + INOCNT(super)) {
-		if (!ip && !(ip = (struct dinode *)malloc(INOSZ(super))))
+		if (!ip && !(ip = (struct ufs1_dinode *)malloc(INOSZ(super))))
 			err(1, "allocate inodes");
 		last = (ino / INOCNT(super)) * INOCNT(super);
 		if (lseek(fd,
@@ -118,9 +116,7 @@ get_inode(fd, super, ino)
 #endif
 
 static int
-virtualblocks(super, ip)
-	struct fs *super;
-	struct dinode *ip;
+virtualblocks(struct fs *super, struct ufs1_dinode *ip)
 {
 	off_t nblk, sz;
 
@@ -152,8 +148,7 @@ virtualblocks(super, ip)
 }
 
 static int
-isfree(ip)
-	struct dinode *ip;
+isfree(struct ufs1_dinode *ip)
 {
 #ifdef	COMPAT
 	return (ip->di_mode&IFMT) == 0;
@@ -182,7 +177,7 @@ static struct user {
 static int nusers;
 
 static void
-inituser()
+inituser(void)
 {
 	int i;
 	struct user *usr;
@@ -202,7 +197,7 @@ inituser()
 }
 
 static void
-usrrehash()
+usrrehash(void)
 {
 	int i;
 	struct user *usr, *usrn;
@@ -224,8 +219,7 @@ usrrehash()
 }
 
 static struct user *
-user(uid)
-	uid_t uid;
+user(uid_t uid)
 {
 	int i;
 	struct passwd *pwd;
@@ -256,9 +250,10 @@ user(uid)
 }
 
 static int
-cmpusers(u1, u2)
-	struct user *u1, *u2;
+cmpusers(const void *v1, const void *v2)
 {
+	const struct user *u1 = v1, *u2 = v2;
+
 	return u2->space - u1->space;
 }
 
@@ -266,10 +261,7 @@ cmpusers(u1, u2)
 				    cmpusers))
 
 static void
-uses(uid, blks, act)
-	uid_t uid;
-	daddr_t blks;
-	time_t act;
+uses(uid_t uid, daddr_t blks, time_t act)
 {
 	static time_t today;
 	struct user *usr;
@@ -302,7 +294,7 @@ struct fsizes {
 } *fsizes;
 
 static void
-initfsizes()
+initfsizes(void)
 {
 	struct fsizes *fp;
 	int i;
@@ -316,13 +308,10 @@ initfsizes()
 }
 
 static void
-dofsizes(fd, super, name)
-	int fd;
-	struct fs *super;
-	char *name;
+dofsizes(int fd, struct fs *super, char *name)
 {
 	ino_t inode, maxino;
-	struct dinode *ip;
+	struct ufs1_dinode *ip;
 	daddr_t sz, ksz;
 	struct fsizes *fp, **fsp;
 	int i;
@@ -390,14 +379,11 @@ dofsizes(fd, super, name)
 }
 
 static void
-douser(fd, super, name)
-	int fd;
-	struct fs *super;
-	char *name;
+douser(int fd, struct fs *super, char *name)
 {
 	ino_t inode, maxino;
 	struct user *usr, *usrs;
-	struct dinode *ip;
+	struct ufs1_dinode *ip;
 	int n;
 
 	maxino = super->fs_ncg * super->fs_ipg - 1;
@@ -432,15 +418,12 @@ douser(fd, super, name)
 }
 
 static void
-donames(fd, super, name)
-	int fd;
-	struct fs *super;
-	char *name;
+donames(int fd, struct fs *super, char *name)
 {
 	int c;
 	ino_t inode, inode1;
 	ino_t maxino;
-	struct dinode *ip;
+	struct ufs1_dinode *ip;
 
 	maxino = super->fs_ncg * super->fs_ipg - 1;
 	/* first skip the name of the filesystem */
@@ -485,7 +468,7 @@ donames(fd, super, name)
 }
 
 static void
-usage()
+usage(void)
 {
 #ifdef	COMPAT
 	fprintf(stderr, "Usage: quot [-nfcvha] [filesystem ...]\n");
@@ -503,8 +486,7 @@ static char superblock[SBSIZE];
  * Stolen from <sys/lib/libsa/ufs.c>
  */
 static void
-ffs_oldfscompat(fs)
-	struct fs *fs;
+ffs_oldfscompat(struct fs *fs)
 {
 	int i;
 
@@ -526,12 +508,11 @@ ffs_oldfscompat(fs)
 }
 
 void
-quot(name, mp)
-	char *name, *mp;
+quot(char *name, char *mp)
 {
 	int fd;
 
-	get_inode(-1);		/* flush cache */
+	get_inode(-1, NULL, 0);		/* flush cache */
 	inituser();
 	initfsizes();
 	/*
@@ -551,19 +532,17 @@ quot(name, mp)
 		close(fd);
 		return;
 	}
-	ffs_oldfscompat(superblock);
+	ffs_oldfscompat((struct fs *)superblock);
 	printf("%s:", name);
 	if (mp)
 		printf(" (%s)", mp);
 	putchar('\n');
-	(*func)(fd, superblock, name);
+	(*func)(fd, (struct fs *)superblock, name);
 	close(fd);
 }
 
 int
-main(argc, argv)
-	int argc;
-	char **argv;
+main(int argc, char *argv[])
 {
 	int cnt, all, i;
 	char dev[MNAMELEN], *nm, *mountpoint, *cp;

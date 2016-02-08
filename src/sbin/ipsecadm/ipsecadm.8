@@ -1,4 +1,4 @@
-.\" $OpenBSD: ipsecadm.8,v 1.59 2003/03/06 20:29:24 jmc Exp $
+.\" $OpenBSD: ipsecadm.8,v 1.62 2003/07/24 08:03:19 itojun Exp $
 .\"
 .\" Copyright 1997 Niels Provos <provos@physnet.uni-hamburg.de>
 .\" All rights reserved.
@@ -35,7 +35,7 @@
 .Os
 .Sh NAME
 .Nm ipsecadm
-.Nd interface to setup IPsec
+.Nd interface to set up IPsec
 .Sh SYNOPSIS
 .Nm ipsecadm
 .Op command
@@ -423,7 +423,10 @@ and
 .Nm sha1
 for both old and new ah and also new esp.
 Also
-.Nm rmd160
+.Nm rmd160 ,
+.Nm sha2-256 ,
+.Nm sha2-384 ,
+.Nm sha2-512
 for both new ah and esp.
 .It Fl comp
 The compression algorithm to be used with the IPCA.
@@ -667,13 +670,13 @@ authentication:
 .Bd -literal
 # ipsecadm new esp -enc 3des -auth sha1 -spi 100a -dst 169.20.12.2 \\
 	-src 169.20.12.3 \\
-	-key 638063806380638063806380638063806380638063806380 \\ 
+	-key 638063806380638063806380638063806380638063806380 \\
 	-authkey 1234123412341234123412341234123412341234
 .Ed
 .Pp
 Set up an SA for authentication with old ah only:
 .Bd -literal
-# ipsecadm old ah -auth md5 -spi 10f2 -dst 169.20.12.2 -src 169.20.12.3 \\ 
+# ipsecadm old ah -auth md5 -spi 10f2 -dst 169.20.12.2 -src 169.20.12.3 \\
 	-key 12341234deadbeef
 .Ed
 .Pp

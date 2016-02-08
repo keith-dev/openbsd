@@ -1,4 +1,4 @@
-/*	$OpenBSD: showmount.c,v 1.10 2002/02/16 21:27:52 millert Exp $	*/
+/*	$OpenBSD: showmount.c,v 1.13 2003/06/10 22:20:51 deraadt Exp $	*/
 /*	$NetBSD: showmount.c,v 1.7 1996/05/01 18:14:10 cgd Exp $	*/
 
 /*
@@ -16,11 +16,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -47,7 +43,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)showmount.c	8.3 (Berkeley) 3/29/95";
 #endif
-static char rcsid[] = "$OpenBSD: showmount.c,v 1.10 2002/02/16 21:27:52 millert Exp $";
+static char rcsid[] = "$OpenBSD: showmount.c,v 1.13 2003/06/10 22:20:51 deraadt Exp $";
 #endif /* not lint */
 
 #include <sys/types.h>
@@ -109,9 +105,7 @@ int	xdr_exports(XDR *, struct exportslist **);
  * for detailed information on the protocol.
  */
 int
-main(argc, argv)
-	int argc;
-	char **argv;
+main(int argc, char *argv[])
 {
 	struct exportslist *exp;
 	struct grouplist *grp;
@@ -220,14 +214,15 @@ main(argc, argv)
 		printf("Exports list on %s:\n", host);
 		exp = exports;
 		while (exp) {
-			strvis(vp, exp->ex_dirp, VIS_CSTYLE);
+			strnvis(vp, exp->ex_dirp, sizeof vp, VIS_CSTYLE);
 			printf("%-35s", vp);
 			grp = exp->ex_groups;
 			if (grp == NULL) {
 				printf("Everyone\n");
 			} else {
 				while (grp) {
-					strvis(vn, grp->gr_name, VIS_CSTYLE);
+					strnvis(vn, grp->gr_name, sizeof vn,
+					    VIS_CSTYLE);
 					printf("%s ", vn);
 					grp = grp->gr_next;
 				}
@@ -244,9 +239,7 @@ main(argc, argv)
  * Xdr routine for retrieving the mount dump list
  */
 int
-xdr_mntdump(xdrsp, mlp)
-	XDR *xdrsp;
-	struct mountlist **mlp;
+xdr_mntdump(XDR *xdrsp, struct mountlist **mlp)
 {
 	struct mountlist *mp, **otp = NULL, *tp;
 	int bool, val, val2;
@@ -323,9 +316,7 @@ next:
  * Xdr routine to retrieve exports list
  */
 int
-xdr_exports(xdrsp, exp)
-	XDR *xdrsp;
-	struct exportslist **exp;
+xdr_exports(XDR *xdrsp, struct exportslist **exp)
 {
 	struct exportslist *ep;
 	struct grouplist *gp;
@@ -367,7 +358,7 @@ xdr_exports(xdrsp, exp)
 }
 
 void
-usage()
+usage(void)
 {
 
 	fprintf(stderr, "usage: showmount [-ade3] host\n");
@@ -378,8 +369,7 @@ usage()
  * Print the binary tree in inorder so that output is sorted.
  */
 void
-print_dump(mp)
-	struct mountlist *mp;
+print_dump(struct mountlist *mp)
 {
 	char	vn[(RPCMNT_NAMELEN+1)*4];
 	char	vp[(RPCMNT_PATHLEN+1)*4];

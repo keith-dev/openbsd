@@ -1,5 +1,5 @@
 /*	$OpenPackages$ */
-/*	$OpenBSD: dir.c,v 1.38 2002/05/27 03:14:21 deraadt Exp $ */
+/*	$OpenBSD: dir.c,v 1.40 2003/06/03 02:56:11 millert Exp $ */
 /*	$NetBSD: dir.c,v 1.14 1997/03/29 16:51:26 christos Exp $	*/
 
 /*
@@ -45,11 +45,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -573,9 +569,9 @@ DirExpandCurlyi(word, endw, path, expansions)
 				/* Keep track of nested braces. If we hit
 				 * the right brace with bracelevel == 0,
 				 * this is the end of the clause. */
-	size_t		otherLen;
-				/* The length of the non-curlied part of
-				 * the current expansion */
+	size_t		endLen;
+				/* The length of the ending non-curlied 
+				 * part of the current expansion */
 
 	/* End case: no curly left to expand */
 	brace = strchr(toexpand, '{');
@@ -602,7 +598,7 @@ DirExpandCurlyi(word, endw, path, expansions)
 		break;
 	}
 	end++;
-	otherLen = brace - toexpand + strlen(end);
+	endLen = strlen(end);
 
 	for (;;) {
 	    char	*file;	/* To hold current expansion */
@@ -618,12 +614,12 @@ DirExpandCurlyi(word, endw, path, expansions)
 	    }
 
 	    /* Build the current combination and enqueue it.  */
-	    file = emalloc(otherLen + cp - start + 1);
+	    file = emalloc((brace - toexpand) + (cp - start) + endLen + 1);
 	    if (brace != toexpand)
 	    	memcpy(file, toexpand, brace-toexpand);
 	    if (cp != start)
 	    	memcpy(file+(brace-toexpand), start, cp-start);
-	    strcpy(file+(brace-toexpand)+(cp-start), end);
+	    memcpy(file+(brace-toexpand)+(cp-start), end, endLen + 1);
 	    Lst_EnQueue(&curled, file);
 	    if (*cp == '}')
 	    	break;

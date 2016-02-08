@@ -1,4 +1,4 @@
-.\"	$OpenBSD: getcap.3,v 1.23 2002/06/28 01:10:48 millert Exp $
+.\"	$OpenBSD: getcap.3,v 1.26 2003/06/02 20:18:34 millert Exp $
 .\"
 .\" Copyright (c) 1992, 1993
 .\"	The Regents of the University of California.  All rights reserved.
@@ -14,11 +14,7 @@
 .\" 2. Redistributions in binary form must reproduce the above copyright
 .\"    notice, this list of conditions and the following disclaimer in the
 .\"    documentation and/or other materials provided with the distribution.
-.\" 3. All advertising materials mentioning features or use of this software
-.\"    must display the following acknowledgement:
-.\"	This product includes software developed by the University of
-.\"	California, Berkeley and its contributors.
-.\" 4. Neither the name of the University nor the names of its contributors
+.\" 3. Neither the name of the University nor the names of its contributors
 .\"    may be used to endorse or promote products derived from this software
 .\"    without specific prior written permission.
 .\"
@@ -266,10 +262,10 @@ has no effect.
 Note that it does not erase the buffer pushed by a call to
 .Fn cgetset ,
 nor does it free the buffer allocated by
-.Fn cgetent.
+.Fn cgetent .
 .Pp
 .Fn cgetusedb
-allows the user to specify whether use or ignore database files ending in
+allows the user to specify whether to use or ignore database files ending in
 .Dq .db .
 If
 .Ar usedb
@@ -327,7 +323,7 @@ database begins:
 giving four names that can be used to access the record.
 .Pp
 The remaining non-empty capabilities describe a set of (name, value)
-bindings, consisting of a names optionally followed by a typed values:
+bindings, consisting of a name optionally followed by a typed value:
 .Bl -column "nameTvalue"
 .It name Ta "typeless [boolean] capability"
 .Em name No "is present [true]"
@@ -490,7 +486,7 @@ of escape sequences:
 .Pp
 A
 .Sq \|\e
-may be followed by up to three octal digits directly specifies
+followed by up to three octal digits directly specifies
 the numeric code for a character.
 The use of
 .Tn ASCII

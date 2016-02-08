@@ -1,4 +1,4 @@
-.\"	$OpenBSD: printf.9,v 1.7 2003/03/06 04:03:40 david Exp $
+.\"	$OpenBSD: printf.9,v 1.10 2003/06/13 01:14:54 tedu Exp $
 .\"     $NetBSD: kprintf.9,v 1.6 1999/03/16 00:40:47 garbled Exp $
 .\"
 .\" Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -40,8 +40,9 @@
 .Os
 .Sh NAME
 .Nm printf ,
-.Nm sprintf ,
+.Nm snprintf ,
 .Nm vprintf ,
+.Nm vsnprintf ,
 .Nm uprintf ,
 .Nm ttyprintf ,
 .Nm db_printf
@@ -49,20 +50,28 @@
 .Sh SYNOPSIS
 .Fd #include <sys/types.h>
 .Fd #include <sys/systm.h>
-.Ft void
+.Ft int
 .Fo "printf"
 .Fa "const char *format"
 .Fa "..."
 .Fc
 .Ft int
-.Fo "sprintf"
+.Fo "snprintf"
 .Fa "char *buf"
+.Fa "size_t size"
 .Fa "const char *format"
 .Fa "..."
 .Fc
-.Ft void
+.Ft int
 .Fo "vprintf"
 .Fa "const char *format"
+.Fa "va_list ap"
+.Fc
+.Ft int
+.Fo "vsnprintf"
+.Fa "char *buf"
+.Fa "size_t size"
+.Fa "const char *fmt"
 .Fa "va_list ap"
 .Fc
 .Ft void
@@ -81,8 +90,9 @@
 .Sh DESCRIPTION
 The
 .Fn printf ,
-.Fn sprintf ,
+.Fn snprintf ,
 .Fn vprintf ,
+.Fn vsnprintf ,
 .Fn uprintf ,
 .Fn ttyprintf ,
 and
@@ -185,8 +195,12 @@ This format specifier is only available to
 .El
 .Sh RETURN VALUES
 The
-.Fn sprintf
-function returns the number of characters it placed in the buffer
+.Fn printf ,
+.Fn snprintf ,
+.Fn vprintf ,
+and
+.Fn vsnprintf
+functions return the number of characters they placed in the buffer
 .Fa buf .
 .Sh EXAMPLES
 Use of the
@@ -220,8 +234,6 @@ bail("descriptor %d is invalid.", 5)
 \(rA "bailing out: descriptor 5 is invalid"
 .Ed
 .Sh SEE ALSO
-.\" The following page has not been written, but I am including a cross-
-.\" reference to it in the hopes that it will inspire someone to write it.
 .Xr revoke 2 ,
 .Xr printf 3 ,
 .Xr ddb 4 ,

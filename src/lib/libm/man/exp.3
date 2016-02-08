@@ -1,4 +1,4 @@
-.\"	$OpenBSD: exp.3,v 1.12 2003/02/27 04:44:46 jason Exp $
+.\"	$OpenBSD: exp.3,v 1.16 2003/06/02 20:18:41 millert Exp $
 .\"
 .\" Copyright (c) 1985, 1991 Regents of the University of California.
 .\" All rights reserved.
@@ -11,11 +11,7 @@
 .\" 2. Redistributions in binary form must reproduce the above copyright
 .\"    notice, this list of conditions and the following disclaimer in the
 .\"    documentation and/or other materials provided with the distribution.
-.\" 3. All advertising materials mentioning features or use of this software
-.\"    must display the following acknowledgement:
-.\"	This product includes software developed by the University of
-.\"	California, Berkeley and its contributors.
-.\" 4. Neither the name of the University nor the names of its contributors
+.\" 3. Neither the name of the University nor the names of its contributors
 .\"    may be used to endorse or promote products derived from this software
 .\"    without specific prior written permission.
 .\"
@@ -83,7 +79,7 @@ function computes the exponential value of the given argument
 .Fa x .
 The
 .Fn expf
-function is a single precision version of 
+function is a single precision version of
 .Fn exp .
 .Pp
 The
@@ -134,7 +130,55 @@ The
 .Fn powf
 function is a single precision version of
 .Fn pow .
-.Sh ERROR (due to Roundoff etc.)
+.Sh RETURN VALUES
+These functions will return the appropriate computation unless an error
+occurs or an argument is out of range.
+The functions
+.Fn exp ,
+.Fn expm1
+and
+.Fn pow
+detect if the computed value will overflow,
+set the global variable
+.Va errno
+to
+.Er ERANGE
+and cause a reserved operand fault on a
+.Tn VAX
+or
+.Tn Tahoe .
+The function
+.Fn pow x y
+checks to see if
+.Fa x
+< 0 and
+.Fa y
+is not an integer, in the event this is true,
+the global variable
+.Va errno
+is set to
+.Er EDOM
+and on the
+.Tn VAX
+and
+.Tn Tahoe
+generate a reserved operand fault.
+On a
+.Tn VAX
+and
+.Tn Tahoe ,
+.Va errno
+is set to
+.Er EDOM
+and the reserved operand is returned
+by log unless
+.Fa x
+> 0, by
+.Fn log1p
+unless
+.Fa x
+> \-1.
+.Sh ERRORS (due to Roundoff etc.)
 exp(x), log(x), expm1(x) and log1p(x) are accurate to within
 an
 .Em ulp ,
@@ -179,53 +223,6 @@ is exact until it is bigger than 2**56 on a
 2**53 for
 .Tn IEEE
 754.
-.Sh RETURN VALUES
-These functions will return the appropriate computation unless an error
-occurs or an argument is out of range.
-The functions
-.Fn exp ,
-.Fn expm1
-and
-.Fn pow
-detect if the computed value will overflow,
-set the global variable
-.Va errno to
-.Er ERANGE
-and cause a reserved operand fault on a
-.Tn VAX
-or
-.Tn Tahoe .
-The function
-.Fn pow x y
-checks to see if
-.Fa x
-< 0 and
-.Fa y
-is not an integer, in the event this is true,
-the global variable
-.Va errno
-is set to
-.Er EDOM
-and on the
-.Tn VAX
-and
-.Tn Tahoe
-generate a reserved operand fault.
-On a
-.Tn VAX
-and
-.Tn Tahoe ,
-.Va errno
-is set to
-.Er EDOM
-and the reserved operand is returned
-by log unless
-.Fa x
-> 0, by
-.Fn log1p
-unless
-.Fa x
-> \-1.
 .Sh NOTES
 The functions exp(x)\-1 and log(1+x) are called
 expm1 and logp1 in
@@ -259,15 +256,16 @@ and
 .Em NaN
 (the reserved
 operand on a
-.Tn VAX ) .  Previous implementations of pow may
-have defined x**0 to be undefined in some or all of these
-cases.  Here are reasons for returning x**0 = 1 always:
+.Tn VAX ) .
+Previous implementations of pow may
+have defined x**0 to be undefined in some or all of these cases.
+Here are reasons for returning x**0 = 1 always:
 .Bl -enum -width indent
 .It
 Any program that already tests whether x is zero (or
 infinite or \*(Na) before computing x**0 cannot care
-whether 0**0 = 1 or not. Any program that depends
-upon 0**0 to be invalid is dubious anyway since that
+whether 0**0 = 1 or not.
+Any program that depends upon 0**0 to be invalid is dubious anyway since that
 expression's meaning and, if invalid, its consequences
 vary from one computer system to another.
 .It

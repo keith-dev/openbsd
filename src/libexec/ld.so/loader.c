@@ -1,4 +1,4 @@
-/*	$OpenBSD: loader.c,v 1.55 2003/02/15 22:43:06 drahn Exp $ */
+/*	$OpenBSD: loader.c,v 1.68 2003/09/04 19:33:48 drahn Exp $ */
 
 /*
  * Copyright (c) 1998 Per Fogelstrom, Opsycon AB
@@ -11,12 +11,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed under OpenBSD by
- *	Per Fogelstrom, Opsycon AB, Sweden.
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS
  * OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
@@ -37,20 +31,29 @@
 #include <sys/types.h>
 #include <sys/mman.h>
 #include <sys/exec.h>
+#include <sys/param.h>
+#include <sys/sysctl.h>
 #include <nlist.h>
 #include <string.h>
 #include <link.h>
+#include <dlfcn.h>
 
 #include "syscall.h"
 #include "archdep.h"
 #include "resolve.h"
 #include "sod.h"
+#include "stdlib.h"
 
 /*
  * Local decls.
  */
-static char *_dl_getenv(const char *var, char **env);
-static void _dl_unsetenv(const char *var, char **env);
+static char *_dl_getenv(const char *, char **);
+static void _dl_unsetenv(const char *, char **);
+unsigned long _dl_boot(const char **, char **, const long, long *);
+void _dl_debug_state(void);
+void _dl_setup_env(char **);
+void _dl_dtors(void);
+void _dl_boot_bind(const long, long *, Elf_Dyn *);
 
 const char *_dl_progname;
 int  _dl_pagesz;
@@ -61,6 +64,7 @@ char *_dl_bindnow;
 char *_dl_traceld;
 char *_dl_debug;
 char *_dl_showmap;
+char *_dl_norandom;
 
 struct r_debug *_dl_debug_map;
 
@@ -98,6 +102,7 @@ void
 _dl_dopreload(char *paths)
 {
 	char		*cp, *dp;
+	elf_object_t	*shlib;
 
 	dp = paths = _dl_strdup(paths);
 	if (dp == NULL) {
@@ -106,35 +111,27 @@ _dl_dopreload(char *paths)
 	}
 
 	while ((cp = _dl_strsep(&dp, ":")) != NULL) {
-		if (_dl_load_shlib(cp, _dl_objects, OBJTYPE_LIB) == 0) {
+		shlib = _dl_load_shlib(cp, _dl_objects, OBJTYPE_LIB,
+		DL_LAZY|RTLD_GLOBAL);
+		if (shlib == NULL) {
 			_dl_printf("%s: can't load library '%s'\n",
 			    _dl_progname, cp);
 			_dl_exit(4);
 		}
+		_dl_add_object(shlib);
+		_dl_link_sub(shlib, _dl_objects);
 	}
 	_dl_free(paths);
 	return;
 }
 
 /*
- * This is the dynamic loader entrypoint. When entering here, depending
- * on architecture type, the stack and registers are set up according
- * to the architectures ABI specification. The first thing required
- * to do is to dig out all information we need to accomplish our task.
+ * grab interesting environment variables, zap bad env vars if
+ * issetugid
  */
-unsigned long
-_dl_boot(const char **argv, char **envp, const long loff, long *dl_data)
+void
+_dl_setup_env(char **envp)
 {
-	struct elf_object *exe_obj;	/* Pointer to executable object */
-	struct elf_object *dyn_obj;	/* Pointer to executable object */
-	struct r_debug **map_link;	/* Where to put pointer for gdb */
-	struct r_debug *debug_map;
-	Elf_Dyn *dynp;
-	elf_object_t *dynobj;
-	Elf_Phdr *phdp;
-	char *us = "";
-	int n;
-
 	/*
 	 * Get paths to various things we are going to use.
 	 */
@@ -143,6 +140,7 @@ _dl_boot(const char **argv, char **envp, const long loff, long *dl_data)
 	_dl_bindnow = _dl_getenv("LD_BIND_NOW", envp);
 	_dl_traceld = _dl_getenv("LD_TRACE_LOADED_OBJECTS", envp);
 	_dl_debug = _dl_getenv("LD_DEBUG", envp);
+	_dl_norandom = _dl_getenv("LD_NORANDOM", envp);
 
 	/*
 	 * Don't allow someone to change the search paths if he runs
@@ -165,7 +163,34 @@ _dl_boot(const char **argv, char **envp, const long loff, long *dl_data)
 			_dl_debug = NULL;
 			_dl_unsetenv("LD_DEBUG", envp);
 		}
+		if (_dl_norandom) {
+			_dl_norandom = NULL;
+			_dl_unsetenv("LD_NORANDOM", envp);
+		}
 	}
+}
+
+/*
+ * This is the dynamic loader entrypoint. When entering here, depending
+ * on architecture type, the stack and registers are set up according
+ * to the architectures ABI specification. The first thing required
+ * to do is to dig out all information we need to accomplish our task.
+ */
+unsigned long
+_dl_boot(const char **argv, char **envp, const long loff, long *dl_data)
+{
+	struct elf_object *exe_obj;	/* Pointer to executable object */
+	struct elf_object *dyn_obj;	/* Pointer to executable object */
+	struct r_debug **map_link;	/* Where to put pointer for gdb */
+	struct r_debug *debug_map;
+	Elf_Dyn *dynp;
+	elf_object_t *dynobj;
+	Elf_Phdr *phdp;
+	char *us = "";
+	unsigned int i;
+	int libcnt = 0;
+
+	_dl_setup_env(envp);
 
 	_dl_progname = argv[0];
 	if (dl_data[AUX_pagesz] != 0)
@@ -174,8 +199,8 @@ _dl_boot(const char **argv, char **envp, const long loff, long *dl_data)
 		_dl_pagesz = 4096;
 
 	/*
-	 * now that GOT and PLT has been relocated, and we know page size 
-	 * protect it from modification 
+	 * now that GOT and PLT has been relocated, and we know
+	 * page size, protect it from modification
 	 */
 	{
 		extern char *__got_start;
@@ -187,18 +212,17 @@ _dl_boot(const char **argv, char **envp, const long loff, long *dl_data)
 
 		_dl_mprotect((void *)ELF_TRUNC((long)&__got_start, _dl_pagesz),
 		    ELF_ROUND((long)&__got_end,_dl_pagesz) -
-		        ELF_TRUNC((long)&__got_start, _dl_pagesz),
+		    ELF_TRUNC((long)&__got_start, _dl_pagesz),
 		    GOT_PERMS);
 
 #ifndef __i386__
 		/* only for DATA_PLT or BSS_PLT */
 		_dl_mprotect((void *)ELF_TRUNC((long)&__plt_start, _dl_pagesz),
 		    ELF_ROUND((long)&__plt_end,_dl_pagesz) -
-		        ELF_TRUNC((long)&__plt_start, _dl_pagesz),
+		    ELF_TRUNC((long)&__plt_start, _dl_pagesz),
 		    PROT_READ|PROT_EXEC);
 #endif
 	}
-	
 
 	DL_DEB(("rtld loading: '%s'\n", _dl_progname));
 
@@ -207,11 +231,12 @@ _dl_boot(const char **argv, char **envp, const long loff, long *dl_data)
 	 * Examine the user application and set up object information.
 	 */
 	phdp = (Elf_Phdr *)dl_data[AUX_phdr];
-	for (n = 0; n < dl_data[AUX_phnum]; n++) {
+	for (i = 0; i < dl_data[AUX_phnum]; i++) {
 		if (phdp->p_type == PT_DYNAMIC) {
-			exe_obj = _dl_add_object(argv[0],
+			exe_obj = _dl_finalize_object(argv[0],
 			    (Elf_Dyn *)phdp->p_vaddr, dl_data, OBJTYPE_EXE,
 			    0, 0);
+			_dl_add_object(exe_obj);
 		} else if (phdp->p_type == PT_INTERP) {
 			us = _dl_strdup((char *)phdp->p_vaddr);
 		}
@@ -222,28 +247,81 @@ _dl_boot(const char **argv, char **envp, const long loff, long *dl_data)
 		_dl_dopreload(_dl_preload);
 
 	/*
-	 * Now, pick up and 'load' all libraries requierd. Start
+	 * Now, pick up and 'load' all libraries required. Start
 	 * with the first on the list and then do whatever gets
 	 * added along the tour.
 	 */
 	dynobj = _dl_objects;
-	while (dynobj) {
+	for (dynobj = _dl_objects; dynobj != NULL; dynobj = dynobj->next) {
 		DL_DEB(("examining: '%s'\n", dynobj->load_name));
+		libcnt = 0;
 		for (dynp = dynobj->load_dyn; dynp->d_tag; dynp++) {
-			const char *libname;
-
-			if (dynp->d_tag != DT_NEEDED)
-				continue;
-			libname = dynobj->dyn.strtab;
-			libname += dynp->d_un.d_val;
-			DL_DEB(("needs: '%s'\n", libname));
-			if (_dl_load_shlib(libname, dynobj, OBJTYPE_LIB) == 0) {
-				_dl_printf("%s: can't load library '%s'\n",
-				    _dl_progname, libname);
-				_dl_exit(4);
+			if (dynp->d_tag == DT_NEEDED) {
+				libcnt++;
 			}
 		}
-		dynobj = dynobj->next;
+		if ( libcnt != 0) {
+			struct listent {
+				Elf_Dyn *dynp;
+				elf_object_t *dynobj;
+			} *liblist;
+			int *randomlist;
+
+			liblist = _dl_malloc(libcnt * sizeof(struct listent));
+			randomlist =  _dl_malloc(libcnt * sizeof(int));
+			if (liblist == NULL)
+				_dl_exit(5);
+
+			for (dynp = dynobj->load_dyn, i = 0;
+			    dynp->d_tag;
+			    dynp++) {
+				if (dynp->d_tag == DT_NEEDED) {
+					liblist[i++].dynp = dynp;
+				}
+
+			}
+			/* Randomize these */
+			for (i = 0; i < libcnt; i++)
+				randomlist[i] = i;
+
+			if (!_dl_norandom)
+				for (i = 1; i < libcnt; i++) {
+					unsigned int rnd;
+					int cur;
+
+					rnd = _dl_random();
+
+					rnd = rnd % (i+1);
+
+					cur = randomlist[rnd];
+					randomlist[rnd] = randomlist[i];
+					randomlist[i] = cur;
+				}
+
+			for (i = 0; i < libcnt; i++) {
+				elf_object_t *depobj;
+				const char *libname;
+
+				libname = dynobj->dyn.strtab;
+				libname +=
+				    liblist[randomlist[i]].dynp->d_un.d_val;
+				DL_DEB(("needs: '%s'\n", libname));
+				depobj = _dl_load_shlib(libname, dynobj,
+				    OBJTYPE_LIB, DL_LAZY|RTLD_GLOBAL);
+				if (depobj == 0) {
+					_dl_printf(
+					    "%s: can't load library '%s'\n",
+					    _dl_progname, libname);
+					_dl_exit(4);
+				}
+				liblist[randomlist[i]].dynobj = depobj;
+			}
+			for (i = 0; i < libcnt; i++) {
+				_dl_add_object(liblist[i].dynobj);
+				_dl_link_sub(liblist[i].dynobj, dynobj);
+			}
+			_dl_free(liblist);
+		}
 	}
 
 	/*
@@ -251,7 +329,9 @@ _dl_boot(const char **argv, char **envp, const long loff, long *dl_data)
 	 * so we can use the _dl_ code when serving dl.... calls.
 	 */
 	dynp = (Elf_Dyn *)((void *)_DYNAMIC);
-	dyn_obj = _dl_add_object(us, dynp, 0, OBJTYPE_LDR, dl_data[AUX_base], loff);
+	dyn_obj = _dl_finalize_object(us, dynp, 0, OBJTYPE_LDR,
+	    dl_data[AUX_base], loff);
+	_dl_add_object(dyn_obj);
 	dyn_obj->status |= STAT_RELOC_DONE;
 
 	/*
@@ -284,7 +364,7 @@ _dl_boot(const char **argv, char **envp, const long loff, long *dl_data)
 
 		sym = NULL;
 		ooff = _dl_find_symbol("atexit", _dl_objects, &sym,
-		    SYM_SEARCH_ALL|SYM_NOWARNNOTFOUND|SYM_PLT, 0, "");
+		    SYM_SEARCH_ALL|SYM_NOWARNNOTFOUND|SYM_PLT, 0, dyn_obj);
 		if (sym == NULL)
 			_dl_printf("cannot find atexit, destructors will not be run!\n");
 		else
@@ -330,6 +410,7 @@ _dl_boot(const char **argv, char **envp, const long loff, long *dl_data)
 		_dl_exit(0);
 
 	DL_DEB(("entry point: 0x%lx\n", dl_data[AUX_entry]));
+
 	/*
 	 * Return the entry point.
 	 */
@@ -337,7 +418,7 @@ _dl_boot(const char **argv, char **envp, const long loff, long *dl_data)
 }
 
 void
-_dl_boot_bind(const long sp, long *dl_data)
+_dl_boot_bind(const long sp, long *dl_data, Elf_Dyn *dynamicp)
 {
 	struct elf_object  dynld;	/* Resolver data for the loader */
 	AuxInfo		*auxstack;
@@ -387,14 +468,17 @@ _dl_boot_bind(const long sp, long *dl_data)
 
 #if defined(__alpha__)
 	dynp = (Elf_Dyn *)((long)_DYNAMIC);
+#elif defined(__sparc__) || defined(__sparc64__) || defined(__powerpc__)
+	dynp = dynamicp;
 #else
 	dynp = (Elf_Dyn *)((long)_DYNAMIC + loff);
 #endif
 	while (dynp != NULL && dynp->d_tag != DT_NULL) {
-		if (dynp->d_tag < DT_LOPROC)
+		if (dynp->d_tag < DT_NUM)
 			dynld.Dyn.info[dynp->d_tag] = dynp->d_un.d_val;
-		else if (dynp->d_tag >= DT_LOPROC && dynp->d_tag < DT_LOPROC + DT_NUM)
-			dynld.Dyn.info[dynp->d_tag + DT_NUM - DT_LOPROC] =
+		else if (dynp->d_tag >= DT_LOPROC &&
+		    dynp->d_tag < DT_LOPROC + DT_PROCNUM)
+			dynld.Dyn.info[dynp->d_tag - DT_LOPROC + DT_NUM] =
 			    dynp->d_un.d_val;
 		if (dynp->d_tag == DT_TEXTREL)
 			dynld.dyn.textrel = 1;
@@ -516,21 +600,50 @@ _dl_boot_bind(const long sp, long *dl_data)
 	 */
 }
 
+#define DL_SM_SYMBUF_CNT 512
+sym_cache _dl_sm_symcache_buffer[DL_SM_SYMBUF_CNT];
+
 void
 _dl_rtld(elf_object_t *object)
 {
+	size_t sz;
 	if (object->next)
 		_dl_rtld(object->next);
 
 	if (object->status & STAT_RELOC_DONE)
 		return;
 
+	sz = 0;
+	if (object->nchains < DL_SM_SYMBUF_CNT) {
+		_dl_symcache = _dl_sm_symcache_buffer;
+		DL_DEB(("using static buffer for %d entries\n",
+		    object->nchains));
+		_dl_memset(_dl_symcache, 0,
+		    sizeof (sym_cache) * object->nchains);
+	} else {
+		sz = ELF_ROUND(sizeof (sym_cache) * object->nchains,
+		    _dl_pagesz);
+		DL_DEB(("allocating symcache sz %x with mmap\n", sz));
+
+		_dl_symcache = (void *)_dl_mmap(0, sz, PROT_READ|PROT_WRITE,
+		    MAP_PRIVATE|MAP_ANON, -1, 0);
+		if (_dl_symcache == (void *)MAP_FAILED) {
+			sz = 0;
+			_dl_symcache = NULL;
+		}
+	}
 	/*
 	 * Do relocation information first, then GOT.
 	 */
 	_dl_md_reloc(object, DT_REL, DT_RELSZ);
 	_dl_md_reloc(object, DT_RELA, DT_RELASZ);
 	_dl_md_reloc_got(object, !(_dl_bindnow || object->dyn.bind_now));
+
+	if (_dl_symcache != NULL) {
+		if (sz != 0) 
+			_dl_munmap( _dl_symcache, sz);
+		_dl_symcache = NULL;
+	}
 	object->status |= STAT_RELOC_DONE;
 }
 
@@ -548,6 +661,7 @@ _dl_call_init(elf_object_t *object)
 	if (object->status & STAT_INIT_DONE)
 		return;
 
+	DL_DEB(("doing ctors: [%s]\n", object->load_name));
 	if (object->dyn.init)
 		(*object->dyn.init)();
 

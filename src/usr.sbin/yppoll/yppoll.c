@@ -1,8 +1,8 @@
-/*	$OpenBSD: yppoll.c,v 1.5 2002/07/19 03:16:24 deraadt Exp $ */
+/*	$OpenBSD: yppoll.c,v 1.9 2003/09/06 04:05:26 deraadt Exp $ */
 /*	$NetBSD: yppoll.c,v 1.5 1996/05/13 02:46:36 thorpej Exp $	*/
 
 /*
- * Copyright (c) 1992, 1993 Theo de Raadt <deraadt@fsa.ca>
+ * Copyright (c) 1992, 1993 Theo de Raadt <deraadt@openbsd.org>
  * Copyright (c) 1992, 1993 John Brezak
  * All rights reserved.
  *
@@ -36,13 +36,14 @@
  */
 
 #ifndef lint
-static char rcsid[] = "$Id: yppoll.c,v 1.5 2002/07/19 03:16:24 deraadt Exp $";
+static char rcsid[] = "$Id: yppoll.c,v 1.9 2003/09/06 04:05:26 deraadt Exp $";
 #endif /* not lint */
 
 #include <sys/param.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <time.h>
 #include <netdb.h>
 #include <unistd.h>
@@ -55,14 +56,14 @@ static char rcsid[] = "$Id: yppoll.c,v 1.5 2002/07/19 03:16:24 deraadt Exp $";
 #include <rpcsvc/yp_prot.h>
 #include <rpcsvc/ypclnt.h>
 
-void
+static void
 usage(void)
 {
 	fprintf(stderr, "Usage: yppoll [-h host] [-d domainname] mapname\n");
 	exit(1);
 }
 
-int
+static int
 get_remote_info(char *indomain, char *inmap, char *server, int *outorder,
     char **outname)
 {
@@ -140,7 +141,7 @@ main(int argc, char *argv[])
 
 	yp_get_default_domain(&domainname);
 
-	while ((c=getopt(argc, argv, "h:d:?")) != -1)
+	while ((c=getopt(argc, argv, "h:d:")) != -1)
 		switch (c) {
 		case 'd':
 			domainname = optarg;

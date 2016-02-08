@@ -1,4 +1,4 @@
-/*	$OpenBSD: util.c,v 1.13 2003/02/02 16:57:58 deraadt Exp $	*/
+/*	$OpenBSD: util.c,v 1.16 2003/07/06 20:03:58 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1998 Per Fogelstrom, Opsycon AB
@@ -11,12 +11,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed under OpenBSD by
- *	Per Fogelstrom, Opsycon AB, Sweden.
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS
  * OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
@@ -33,7 +27,9 @@
  */
 
 #include <sys/types.h>
+#include <sys/param.h>
 #include <sys/mman.h>
+#include <sys/sysctl.h>
 #include <string.h>
 #include "archdep.h"
 
@@ -43,6 +39,8 @@
  * this would end up dragging too much code from libc here.
  */
 long __guard[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+
+void __stack_smash_handler(char [], int);
 
 void
 __stack_smash_handler(char func[], int damaged)
@@ -121,3 +119,21 @@ _dl_free(void *p)
 	*t = (long)_dl_malloc_free;
 	_dl_malloc_free = p;
 }
+
+
+unsigned int
+_dl_random(void)
+{
+	int mib[2];
+	unsigned int rnd;
+	size_t len;
+
+	mib[0] = CTL_KERN;
+	mib[1] = KERN_ARND;
+	len = sizeof(rnd);
+	_dl_sysctl(mib, 2, &rnd, &len, NULL, 0);
+
+	return (rnd);
+}
+
+

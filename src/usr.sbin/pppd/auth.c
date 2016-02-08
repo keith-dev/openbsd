@@ -1,4 +1,4 @@
-/*	$OpenBSD: auth.c,v 1.26 2003/02/18 13:14:43 jmc Exp $	*/
+/*	$OpenBSD: auth.c,v 1.29 2003/04/16 07:44:04 tedu Exp $	*/
 
 /*
  * auth.c - PPP authentication and phase control.
@@ -77,7 +77,7 @@
 #if 0
 static char rcsid[] = "Id: auth.c,v 1.37 1998/03/26 04:46:03 paulus Exp $";
 #else
-static char rcsid[] = "$OpenBSD: auth.c,v 1.26 2003/02/18 13:14:43 jmc Exp $";
+static char rcsid[] = "$OpenBSD: auth.c,v 1.29 2003/04/16 07:44:04 tedu Exp $";
 #endif
 #endif
 
@@ -560,9 +560,9 @@ auth_check_options()
 
     /* Default our_name to hostname, and user to our_name */
     if (our_name[0] == 0 || usehostname)
-	strcpy(our_name, hostname);
+	strlcpy(our_name, hostname, MAXHOSTNAMELEN);
     if (user[0] == 0)
-	strcpy(user, our_name);
+	strlcpy(user, our_name, MAXNAMELEN);
 
     /* If authentication is required, ask peer for CHAP or PAP. */
     if (auth_required && !wo->neg_chap && !wo->neg_upap) {
@@ -1424,7 +1424,7 @@ scan_authfile(f, client, server, ipaddr, secret, addrs, filename)
 	 * Special syntax: @filename means read secret from file.
 	 */
 	if (word[0] == '@') {
-	    strcpy(atfile, word+1);
+	    strlcpy(atfile, word+1, sizeof atfile);
 	    if ((sf = fopen(atfile, "r")) == NULL) {
 		syslog(LOG_WARNING, "can't open indirect secret file %s",
 		       atfile);
@@ -1440,21 +1440,25 @@ scan_authfile(f, client, server, ipaddr, secret, addrs, filename)
 	    fclose(sf);
 	}
 	if (secret != NULL)
-	    strcpy(lsecret, word);
+	    strlcpy(lsecret, word, sizeof lsecret);
 
 	/*
 	 * Now read address authorization info and make a wordlist.
 	 */
 	alist = alast = NULL;
 	for (;;) {
+	    size_t wordlen;
+
 	    if (!getword(f, word, &newline, filename) || newline)
 		break;
-	    ap = (struct wordlist *) malloc(sizeof(struct wordlist)
-					    + strlen(word));
+	    wordlen = strlen(word);	/* NUL in struct wordlist */
+	    ap = (struct wordlist *) malloc(sizeof(struct wordlist) +
+		wordlen);
+
 	    if (ap == NULL)
 		novm("authorized addresses");
 	    ap->next = NULL;
-	    strcpy(ap->word, word);
+	    strlcpy(ap->word, word, wordlen + 1);
 	    if (alist == NULL)
 		alist = ap;
 	    else
@@ -1478,7 +1482,7 @@ scan_authfile(f, client, server, ipaddr, secret, addrs, filename)
 	    free_wordlist(addr_list);
 	addr_list = alist;
 	if (secret != NULL)
-	    strcpy(secret, lsecret);
+	    strlcpy(secret, lsecret, MAXWORDLEN);
 
 	if (!newline)
 	    break;
@@ -1525,10 +1529,10 @@ auth_script(script)
     if ((pw = getpwuid(getuid())) != NULL && pw->pw_name != NULL)
 	user_name = pw->pw_name;
     else {
-	sprintf(struid, "%u", getuid());
+	snprintf(struid, sizeof struid, "%u", getuid());
 	user_name = struid;
     }
-    sprintf(strspeed, "%d", baud_rate);
+    snprintf(strspeed, sizeof strspeed, "%d", baud_rate);
 
     argv[0] = script;
     argv[1] = ifname;

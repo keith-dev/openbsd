@@ -1,4 +1,4 @@
-/*	$OpenBSD: mkalias.c,v 1.12 2002/09/06 21:37:38 maja Exp $ */
+/*	$OpenBSD: mkalias.c,v 1.16 2003/07/18 22:58:56 david Exp $ */
 
 /*
  * Copyright (c) 1997 Mats O Jansson <moj@stacken.kth.se>
@@ -12,11 +12,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by Mats O Jansson
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS
  * OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
@@ -32,13 +27,14 @@
  */
 
 #ifndef LINT
-static char rcsid[] = "$OpenBSD: mkalias.c,v 1.12 2002/09/06 21:37:38 maja Exp $";
+static const char rcsid[] = "$OpenBSD: mkalias.c,v 1.16 2003/07/18 22:58:56 david Exp $";
 #endif
 
 #include <ctype.h>
 #include <fcntl.h>
 #include <netdb.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <sys/param.h>
@@ -49,7 +45,7 @@ static char rcsid[] = "$OpenBSD: mkalias.c,v 1.12 2002/09/06 21:37:38 maja Exp $
 #include "ypdb.h"
 #include "ypdef.h"
 
-void
+static void
 split_address(char *address, int len, char *user, char *host)
 {
 	char *c, *s, *r;
@@ -84,7 +80,7 @@ split_address(char *address, int len, char *user, char *host)
 	}
 }
 
-int
+static int
 check_host(char *address, char *host, int dflag, int uflag, int Eflag)
 {
 	u_char answer[PACKETSZ];
@@ -108,7 +104,7 @@ check_host(char *address, char *host, int dflag, int uflag, int Eflag)
 	return(status == -1);
 }
 
-void
+static void
 capitalize(char *name, int len)
 {
 	char last = ' ';
@@ -131,7 +127,7 @@ capitalize(char *name, int len)
 	}
 }
 
-void
+static void
 usage(void)
 {
 	fprintf(stderr,

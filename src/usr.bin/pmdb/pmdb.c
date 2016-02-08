@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmdb.c,v 1.12 2002/08/08 18:27:57 art Exp $	*/
+/*	$OpenBSD: pmdb.c,v 1.19 2003/08/18 17:55:57 jfb Exp $	*/
 /*
  * Copyright (c) 2002 Artur Grabowski <art@openbsd.org>
  * All rights reserved. 
@@ -36,6 +36,7 @@
 #include <err.h>
 #include <errno.h>
 #include <string.h>
+#include <paths.h>
 
 #include "pmdb.h"
 #include "symbol.h"
@@ -45,12 +46,14 @@
 
 static int cmd_show_registers(int, char **, void *);
 static int cmd_show_backtrace(int, char **, void *);
+static int cmd_examine(int, char **, void *);
 static int cmd_quit(int, char **, void *);
 
 struct clit cmds[] = {
 	/* debugging info commands. */
 	{ "regs", "show registers", 0, 0, cmd_show_registers, (void *)-1 },
 	{ "trace", "show backtrace", 0, 0, cmd_show_backtrace, (void *)-1 },
+	{ "x", "examine memory", 1, 16, cmd_examine, (void *)-1 },
 
 	/* Process handling commands. */
 	{ "run", "run process", 0, 0, cmd_process_run, (void *)-1 },
@@ -78,7 +81,7 @@ struct clit cmds[] = {
 #define NCMDS	sizeof(cmds)/sizeof(cmds[0])
 
 void
-usage()
+usage(void)
 {
 	extern char *__progname;
 
@@ -94,7 +97,7 @@ main(int argc, char **argv)
 	int i, c;
 	int status;
 	void *cm;
-	char *pmenv, *core, *perr;
+	char *pmenv, *core, *perr, execpath[MAXPATHLEN];
 	int level;
 	pid_t pid;
 
@@ -133,11 +136,19 @@ main(int argc, char **argv)
 		asprintf(&prompt_add, "(%d)", level);
 	asprintf(&pmenv, "%d", level);
 	setenv("IN_PMDB", pmenv, 1);
+	if (pmenv)
+		free(pmenv);
+
+	if (getexecpath(argv[0], execpath, sizeof(execpath)) == -1) {
+		err(1, "cannot find `%s'", argv[0]);
+	}
+	argv[0] = execpath;
+
+	memset(&ps, 0, sizeof(ps));
+	process_setargv(&ps, argc, argv);
 
 	ps.ps_pid = pid;
 	ps.ps_state = NONE;
-	ps.ps_argc = argc;
-	ps.ps_argv = argv;
 	ps.ps_flags = 0;
 	ps.ps_signum = 0;
 	ps.ps_npc = 1;
@@ -208,33 +219,6 @@ main(int argc, char **argv)
 	return (0);
 }
 
-/* XXX - move to some other file. */
-int
-read_from_pid(pid_t pid, off_t from, void *to, size_t size)
-{
-	struct ptrace_io_desc piod;
-
-	piod.piod_op = PIOD_READ_D;
-	piod.piod_offs = (void *)(long)from;
-	piod.piod_addr = to;
-	piod.piod_len = size;
-
-	return (ptrace(PT_IO, pid, (caddr_t)&piod, 0));
-}
-
-
-int
-write_to_pid(pid_t pid, off_t to, void *from, size_t size)
-{
-	struct ptrace_io_desc piod;
-
-	piod.piod_op = PIOD_WRITE_D;
-	piod.piod_offs = (void *)(long)to;
-	piod.piod_addr = from;
-	piod.piod_len = size;
-
-	return (ptrace(PT_IO, pid, (caddr_t)&piod, 0));
-}
 
 static int
 cmd_show_registers(int argc, char **argv, void *arg)
@@ -247,7 +231,7 @@ cmd_show_registers(int argc, char **argv, void *arg)
 	if (ps->ps_state != STOPPED) {
 		if (ps->ps_flags & PSF_CORE) {
 			/* dump registers from core */
-			core_printregs(ps->ps_core);
+			core_printregs(ps);
 			return (0);
 		}
 		fprintf(stderr, "process not stopped\n");
@@ -332,6 +316,36 @@ cmd_quit(int argc, char **argv, void *arg)
 	return (1);
 }
 
+static int
+cmd_examine(int argc, char **argv, void *arg)
+{
+	struct pstate *ps = arg;
+	char buf[256];
+	reg addr, val;
+	int i;
+
+	for (i = 1; argv[i]; i++) {
+
+		addr = strtoul(argv[i], NULL, 0);
+		if (!addr) {	/* assume it's a symbol */
+			if (sym_lookup(ps, argv[i], &addr)) {
+				warn( "Can't find: %s", argv[i]);
+				return (0);
+			}
+		}
+
+        	if (process_read(ps, addr, &val, sizeof(val)) < 0) {
+			warn("Can't read process contents at 0x%lx", addr);
+			return (0);
+		}
+
+		printf("%s:\t%s\n", argv[i],
+		    sym_print(ps, val, buf, sizeof(buf)));
+	}
+
+	return (0);
+}
+
 /*
  * Perform command completion.
  * Pretty simple. if there are spaces in "buf", the last string is a symbol
@@ -400,4 +414,58 @@ emalloc(size_t sz)
 	if ((ret = malloc(sz)) == NULL)
 		err(1, "malloc");
 	return (ret);
+}
+
+
+/*
+ * Find the first valid path to the executable whose name is <ename>.
+ * The resulting path is stored in <dst>, up to <dlen> - 1 bytes, and is
+ * NUL-terminated.  If <dst> is too small, the result will be truncated to
+ * fit, but getexecpath() will return -1.
+ * Returns 0 on success, -1 on failure.
+ */
+
+int
+getexecpath(const char *ename, char *dst, size_t dlen)
+{
+	char *envp, *pathenv, *pp, *pfp;
+	struct stat pstat;
+
+	if (stat(ename, &pstat) == 0) {
+		if (strlcpy(dst, ename, dlen) >= dlen)
+			return (-1);
+		return (0);
+	}
+
+	if (strchr(ename, '/') != NULL) {
+		/* don't bother looking in PATH */
+		return (-1);
+	}
+
+	envp = getenv("PATH");
+	if (envp == NULL)
+		envp = _PATH_DEFPATH;
+
+	pathenv = strdup(envp);
+	if (pathenv == NULL) {
+		warn("failed to allocate PATH buffer");
+		return (-1);
+	}
+
+	for (pp = pathenv; (pfp = strsep(&pp, ":")) != NULL; ) {
+		/* skip cwd, was already tested */
+		if (*pfp == '\0')
+			continue;
+
+		if (snprintf(dst, dlen, "%s/%s", pfp, ename) >= (int)dlen)
+			continue;
+
+		if (stat(dst, &pstat) != -1) {
+			free(pathenv);
+			return (0);
+		}
+	}
+
+	free(pathenv);
+	return (-1);
 }

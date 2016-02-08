@@ -1,4 +1,4 @@
-.\"	$OpenBSD: adduser.8,v 1.27 2003/01/29 16:53:36 jmc Exp $
+.\"	$OpenBSD: adduser.8,v 1.34 2003/09/02 18:56:35 jmc Exp $
 .\"
 .\" Copyright (c) 1995-1996 Wolfram Schneider <wosch@FreeBSD.org>. Berlin.
 .\" All rights reserved.
@@ -43,14 +43,15 @@
 .Op Ar password
 .Oc
 .Op Fl check_only
+.Op Fl class Ar login_class
 .Op Fl config_create
 .Op Fl dotdir Ar directory
 .Oo
 .Fl e
-.Ar method No \&| Fl encryption Ar method
+.Ar method | Fl encryption Ar method
 .Oc
 .Op Fl group Ar login_group
-.Op Fl h | help | ?
+.Op Fl h | help | \&?
 .Op Fl home Ar partition
 .Op Fl message Ar file
 .Op Fl noconfig
@@ -62,7 +63,8 @@
 .Op Fl unencrypted
 .Ek
 .Pp
-.Nm rmuser Op Ar username
+.Nm rmuser
+.Op Ar username
 .Sh DESCRIPTION
 The
 .Nm adduser
@@ -87,6 +89,13 @@ By default the password is assumed to already be properly encrypted.
 .It Fl check_only
 Check the passwd, group, and shells databases for consistency and problems
 then exit without performing any other operation.
+.It Fl class Ar login_class
+Use the specified
+.Ar login_class
+as the default user login class.
+See
+.Xr login.conf 5
+for further details.
 .It Fl config_create
 Create or edit default configuration information and message file before
 proceeding with the normal interactive adduser procedure.
@@ -107,16 +116,18 @@ their owner.
 Encrypt local passwords using
 .Ar method
 of encryption as described in
-.Xr passwd.conf 5 .
+.Xr login.conf 5 .
+If
+.Ar method
+is
+.Dq auto ,
+the encryption type will be derived from the user's login class.
 .It Fl group Ar login_group
 Specify the default login group.
 A value of
 .Ar USER
 means that the username is to be used as the login group.
-.It Xo
-.Fl help Ns No ,
-.Fl h Ns No , Fl ?
-.Xc
+.It Fl help , h , \&?
 Print a summary of options and exit.
 .It Fl home Ar partition
 Specify the default home partition where all users' home directories
@@ -143,7 +154,7 @@ Use UIDs from
 .Ar uid
 up when automatically generating UIDs.
 .It Fl uid_end Ar uid
-Do not use UIDs higher than 
+Do not use UIDs higher than
 .Ar uid
 when generating UIDs.
 .It Fl unencrypted
@@ -216,8 +227,11 @@ politely refuses to remove users whose UID is 0 (typically root).
 .Sh RESTRICTIONS
 .Bl -tag -width Ds
 .It Sy username
-Login names should contain only lowercase characters or digits.
-They should be no longer than 31 characters (see BUGS section of
+It is recommended that login names contain only lowercase characters
+and digits.
+They may also contain uppercase characters, non-leading hyphens,
+periods, and a trailing '$'.
+Login names may not be longer than 31 characters (see BUGS section of
 .Xr setlogin 2 ) .
 .\" The reasons for this limit are "Historical".
 .\" Given that people have traditionally wanted to break this
@@ -235,6 +249,10 @@ This should contain the user's first name and surname.
 The
 .Ql \&:
 is not permitted.
+.It Sy login_class
+The specified user login class
+must exist in
+.Pa /etc/login.conf .
 .It Sy shell
 Only valid entries from the
 .Xr shells 5
@@ -258,7 +276,7 @@ This value is generated automatically, but can be specified at the
 discretion of the person invoking the program.
 .It Sy password
 If not empty, the password is encrypted according to
-.Xr passwd.conf 5 .
+.Xr login.conf 5 .
 If empty, the account will be automatically disabled to prevent spurious
 access to it.
 .El
@@ -283,14 +301,13 @@ access to it.
 follows these steps to extract its configuration
 information:
 .Pp
-.Bl -tag -width Ds -compact
-.It Sy 1.
+.Bl -enum -offset indent -compact
+.It
 Read internal variables.
-.It Sy 2.
+.It
 Read configuration file
-.Po Ns Pa /etc/adduser.conf
-.Pc .
-.It Sy 3.
+.Pq Pa /etc/adduser.conf .
+.It
 Parse command-line options.
 .El
 .Pp
@@ -310,6 +327,28 @@ format is explained within that file and is quite straightforward.
 .\" Eval variables in this file. See /etc/adduser.message for more
 .\" details.
 .\" .El
+.Sh FILES
+.Bl -tag -width /etc/adduser.messageX -compact
+.It Pa /etc/master.passwd
+user database
+.It Pa /etc/group
+group database
+.It Pa /etc/shells
+shell database
+.It Pa /etc/ptmp
+lock file for the passwd database
+.It Pa /etc/adduser.conf
+configuration file for
+.Nm adduser
+.It Pa /etc/adduser.message
+message file for
+.Nm
+.It Pa /etc/skel
+skeletal login directory
+.It Pa /var/log/adduser
+log file for
+.Nm
+.El
 .Sh EXAMPLES
 # adduser
 .Pp
@@ -349,28 +388,6 @@ in login group
 Start the free UID search at 5000.
 No other groups, no realname, no password.
 Do not send a welcome message.
-.Sh FILES
-.Bl -tag -width /etc/adduser.messageX -compact
-.It Pa /etc/master.passwd
-user database
-.It Pa /etc/group
-group database
-.It Pa /etc/shells
-shell database
-.It Pa /etc/ptmp
-lock file for the passwd database
-.It Pa /etc/adduser.conf
-configuration file for
-.Nm adduser
-.It Pa /etc/adduser.message
-message file for
-.Nm
-.It Pa /etc/skel
-skeletal login directory
-.It Pa /var/log/adduser
-log file for
-.Nm
-.El
 .Sh SEE ALSO
 .Xr chpass 1 ,
 .Xr finger 1 ,
@@ -378,8 +395,8 @@ log file for
 .Xr setlogin 2 ,
 .Xr aliases 5 ,
 .Xr group 5 ,
+.Xr login.conf 5 ,
 .Xr passwd 5 ,
-.Xr passwd.conf 5 ,
 .Xr shells 5 ,
 .Xr nologin 8 ,
 .Xr pwd_mkdb 8 ,

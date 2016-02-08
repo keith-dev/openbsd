@@ -1,7 +1,7 @@
-#	$OpenBSD: Makefile,v 1.181 2003/03/24 18:15:27 drahn Exp $
+#	$OpenBSD: Makefile,v 1.184 2003/08/21 19:10:19 frantzen Exp $
 
 TZDIR=		/usr/share/zoneinfo
-LOCALTIME=	US/Pacific
+LOCALTIME=	Canada/Mountain
 
 NOOBJ=	oobj
 
@@ -78,6 +78,7 @@ distribution-etc-root-var: distrib-dirs
 	pwd_mkdb -p -d ${DESTDIR}/etc /etc/master.passwd
 	${INSTALL} -c -o root -g wheel -m 644 moduli ${DESTDIR}/etc
 	${INSTALL} -c -o root -g wheel -m 600 pf.conf ${DESTDIR}/etc
+	${INSTALL} -c -o root -g wheel -m 644 pf.os ${DESTDIR}/etc
 	${INSTALL} -c -o ${BINOWN} -g ${BINGRP} -m 555 \
 	    etc.${MACHINE}/MAKEDEV ${DESTDIR}/dev
 	cd root; \
@@ -103,17 +104,6 @@ distribution-etc-root-var: distrib-dirs
 		    ${DESTDIR}/etc/skel/.profile; \
 		${INSTALL} -c -o root -g wheel -m 600 dot.rhosts \
 		    ${DESTDIR}/etc/skel/.rhosts
-	cd kerberosIV; \
-		${INSTALL} -c -o root -g wheel -m 644 README \
-		    ${DESTDIR}/etc/kerberosIV; \
-		${INSTALL} -c -o root -g wheel -m 644 krb.conf \
-		    ${DESTDIR}/etc/kerberosIV; \
-		${INSTALL} -c -o root -g wheel -m 644 krb.realms \
-		    ${DESTDIR}/etc/kerberosIV; \
-		${INSTALL} -c -o root -g wheel -m 644 krb.extra \
-		    ${DESTDIR}/etc/kerberosIV; \
-		${INSTALL} -c -o root -g wheel -m 644 krb.equiv \
-		    ${DESTDIR}/etc/kerberosIV
 	cd kerberosV; \
 		${INSTALL} -c -o root -g wheel -m 644 README \
 		    ${DESTDIR}/etc/kerberosV; \

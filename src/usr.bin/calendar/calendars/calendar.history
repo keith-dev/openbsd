@@ -1,7 +1,7 @@
 /*
  * History
  *
- * $OpenBSD: calendar.history,v 1.25 2003/03/14 05:23:08 mickey Exp $
+ * $OpenBSD: calendar.history,v 1.27 2003/08/16 06:40:07 mickey Exp $
  */
 
 #ifndef _calendar_history_
@@ -253,8 +253,9 @@
 08/13	Berlin wall erected, 1961
 08/13	Li'l Abner debut, 1934
 08/14	Social Security begins in U.S., 1935
-08/15	Gandhi's movement obtains independence for Pakistan and India, 1947
+08/14	North-East American blackout, 2003
 08/15	Hurricane hits Plymouth Plantation, 1635
+08/15	Gandhi's movement obtains independence for Pakistan and India, 1947
 08/16	Roller Coaster patented, 1898
 08/17	First public bath opened in N.Y., 1891
 08/18	Anti-Cigarette League of America formed
@@ -339,7 +340,6 @@
 10/02	Thurgood Marshall sworn as the first black Supreme Court Justice, 1967
 10/04	Crimean war begins, 1853
 10/04	First space vehicle, Sputnik I, launched, 1957
-10/04	Sputnik 1, world's first orbiting satellite launched, 1957
 10/06	Antioch College is the first public school to admit men and women, 1853
 10/06	Egyptian President Anwar Sadat is assassinated in Cairo, 1981
 10/06	Israel is attacked by the alliance of Egypt and Syria, 1973

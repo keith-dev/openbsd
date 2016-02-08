@@ -1,4 +1,4 @@
-/*	$OpenBSD: main.c,v 1.11 2003/03/13 09:09:35 deraadt Exp $	*/
+/*	$OpenBSD: main.c,v 1.16 2003/06/25 21:09:37 deraadt Exp $	*/
 /*	$NetBSD: main.c,v 1.6 1995/05/21 16:54:10 mycroft Exp $	*/
 
 /*
@@ -13,11 +13,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -35,7 +31,7 @@
  */
 
 #ifndef lint
-static char copyright[] =
+static const char copyright[] =
 "@(#) Copyright (c) 1983, 1993\n\
 	The Regents of the University of California.  All rights reserved.\n";
 #endif /* not lint */
@@ -44,7 +40,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)main.c	8.1 (Berkeley) 6/6/93";
 #endif
-static char rcsid[] = "$OpenBSD: main.c,v 1.11 2003/03/13 09:09:35 deraadt Exp $";
+static const char rcsid[] = "$OpenBSD: main.c,v 1.16 2003/06/25 21:09:37 deraadt Exp $";
 #endif /* not lint */
 
 /* Many bug fixes are from Jim Guyton <guyton@rand-unix> */
@@ -89,7 +85,7 @@ int	margc;
 char	*margv[MAXARGV+1];
 char	*prompt = "tftp";
 jmp_buf	toplevel;
-void	intr();
+void	intr(int);
 struct	servent *sp;
 
 void	get(int, char **);
@@ -152,13 +148,11 @@ struct cmd cmdtab[] = {
 	{ NULL,		NULL,		NULL }
 };
 
-struct	cmd *getcmd();
-char	*tail();
+struct	cmd *getcmd(char *);
+char	*tail(char *);
 
 int
-main(argc, argv)
-	int argc;
-	char *argv[];
+main(int argc, char *argv[])
 {
 	struct sockaddr_in s_in;
 
@@ -188,9 +182,7 @@ main(argc, argv)
 char    hostname[MAXHOSTNAMELEN];
 
 void
-setpeer(argc, argv)
-	int argc;
-	char *argv[];
+setpeer(int argc, char *argv[])
 {
 	struct hostent *host;
 
@@ -249,9 +241,7 @@ struct	modes {
 };
 
 void
-modecmd(argc, argv)
-	int argc;
-	char *argv[];
+modecmd(int argc, char *argv[])
 {
 	struct modes *p;
 	char *sep;
@@ -284,26 +274,21 @@ modecmd(argc, argv)
 }
 
 void
-setbinary(argc, argv)
-	int argc;
-	char *argv[];
+setbinary(int argc, char *argv[])
 {
 
 	settftpmode("octet");
 }
 
 void
-setascii(argc, argv)
-	int argc;
-	char *argv[];
+setascii(int argc, char *argv[])
 {
 
 	settftpmode("netascii");
 }
 
 static void
-settftpmode(newmode)
-	char *newmode;
+settftpmode(char *newmode)
 {
 	strlcpy(mode, newmode, sizeof mode);
 	if (verbose)
@@ -315,9 +300,7 @@ settftpmode(newmode)
  * Send file(s).
  */
 void
-put(argc, argv)
-	int argc;
-	char *argv[];
+put(int argc, char *argv[])
 {
 	int fd;
 	int n;
@@ -379,10 +362,9 @@ put(argc, argv)
 	}
 				/* this assumes the target is a directory */
 				/* on a remote unix system.  hmmmm.  */
-	cp = strchr(targ, '\0');
-	*cp++ = '/';
 	for (n = 1; n < argc - 1; n++) {
-		strcpy(cp, tail(argv[n]));
+		if (asprintf(&cp, "%s/%s", targ, tail(argv[n])) == -1)
+			err(1, "asprintf");
 		fd = open(argv[n], O_RDONLY);
 		if (fd < 0) {
 			warn("open: %s", argv[n]);
@@ -390,15 +372,15 @@ put(argc, argv)
 		}
 		if (verbose)
 			printf("putting %s to %s:%s [%s]\n",
-				argv[n], hostname, targ, mode);
+				argv[n], hostname, cp, mode);
 		peeraddr.sin_port = port;
-		sendfile(fd, targ, mode);
+		sendfile(fd, cp, mode);
+		free(cp);
 	}
 }
 
 static void
-putusage(s)
-	char *s;
+putusage(char *s)
 {
 	printf("usage: %s file ... host:target, or\n", s);
 	printf("       %s file ... target (when already connected)\n", s);
@@ -408,9 +390,7 @@ putusage(s)
  * Receive file(s).
  */
 void
-get(argc, argv)
-	int argc;
-	char *argv[];
+get(int argc, char *argv[])
 {
 	int fd;
 	int n;
@@ -485,8 +465,7 @@ get(argc, argv)
 }
 
 static void
-getusage(s)
-	char *s;
+getusage(char *s)
 {
 	printf("usage: %s host:file host:file ... file, or\n", s);
 	printf("       %s file file ... file if connected\n", s);
@@ -495,9 +474,7 @@ getusage(s)
 int	rexmtval = TIMEOUT;
 
 void
-setrexmt(argc, argv)
-	int argc;
-	char *argv[];
+setrexmt(int argc, char *argv[])
 {
 	int t;
 
@@ -524,9 +501,7 @@ setrexmt(argc, argv)
 int	maxtimeout = 5 * TIMEOUT;
 
 void
-settimeout(argc, argv)
-	int argc;
-	char *argv[];
+settimeout(int argc, char *argv[])
 {
 	int t;
 
@@ -551,9 +526,7 @@ settimeout(argc, argv)
 }
 
 void
-status(argc, argv)
-	int argc;
-	char *argv[];
+status(int argc, char *argv[])
 {
 	if (connected)
 		printf("Connected to %s.\n", hostname);
@@ -566,7 +539,7 @@ status(argc, argv)
 }
 
 void
-intr()
+intr(int signo)
 {
 
 	signal(SIGALRM, SIG_IGN);
@@ -575,8 +548,7 @@ intr()
 }
 
 char *
-tail(filename)
-	char *filename;
+tail(char *filename)
 {
 	char *s;
 
@@ -595,7 +567,7 @@ tail(filename)
  * Command parser.
  */
 static __dead void
-command()
+command(void)
 {
 	struct cmd *c;
 
@@ -628,8 +600,7 @@ command()
 }
 
 struct cmd *
-getcmd(name)
-	char *name;
+getcmd(char *name)
 {
 	char *p, *q;
 	struct cmd *c, *found;
@@ -660,7 +631,7 @@ getcmd(name)
  * Slice a string up into argc/argv.
  */
 static int
-makeargv()
+makeargv(void)
 {
 	char *cp;
 	char **argp = margv;
@@ -690,9 +661,7 @@ makeargv()
 }
 
 void
-quit(argc, argv)
-	int argc;
-	char *argv[];
+quit(int argc, char *argv[])
 {
 
 	exit(0);
@@ -702,9 +671,7 @@ quit(argc, argv)
  * Help command.
  */
 void
-help(argc, argv)
-	int argc;
-	char *argv[];
+help(int argc, char *argv[])
 {
 	struct cmd *c;
 
@@ -728,18 +695,14 @@ help(argc, argv)
 }
 
 void
-settrace(argc, argv)
-	int argc;
-	char **argv;
+settrace(int argc, char *argv[])
 {
 	trace = !trace;
 	printf("Packet tracing %s.\n", trace ? "on" : "off");
 }
 
 void
-setverbose(argc, argv)
-	int argc;
-	char **argv;
+setverbose(int argc, char *argv[])
 {
 	verbose = !verbose;
 	printf("Verbose mode %s.\n", verbose ? "on" : "off");

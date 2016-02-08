@@ -1,4 +1,4 @@
-/*	$OpenBSD: getpar.c,v 1.9 2002/05/31 04:21:30 pjanzen Exp $	*/
+/*	$OpenBSD: getpar.c,v 1.12 2003/07/10 00:03:01 david Exp $	*/
 /*	$NetBSD: getpar.c,v 1.4 1995/04/24 12:25:57 cgd Exp $	*/
 
 /*
@@ -13,11 +13,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -38,11 +34,12 @@
 #if 0
 static char sccsid[] = "@(#)getpar.c	8.1 (Berkeley) 5/31/93";
 #else
-static char rcsid[] = "$OpenBSD: getpar.c,v 1.9 2002/05/31 04:21:30 pjanzen Exp $";
+static char rcsid[] = "$OpenBSD: getpar.c,v 1.12 2003/07/10 00:03:01 david Exp $";
 #endif
 #endif /* not lint */
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include "getpar.h"
 #include "trek.h"
@@ -157,8 +154,8 @@ getcodpar(s, tab)
 			c = 4;
 			for (r = tab; r->abrev; r++)
 			{
-				strcpy(input, r->abrev);
-				strcat(input, r->full);
+				strlcpy(input, r->abrev, sizeof input);
+				strlcat(input, r->full, sizeof input);
 				printf("%14.14s", input);
 				if (--c > 0)
 					continue;
@@ -215,7 +212,7 @@ getstrpar(s, r, l, t)
 
 	if (t == 0)
 		t = " \t\n;";
-	(void)sprintf(format, "%%%d[^%s]", l, t);
+	(void)snprintf(format, sizeof format, "%%%d[^%s]", l, t);
 	while (1)
 	{
 		if ((f = testnl()) && s)

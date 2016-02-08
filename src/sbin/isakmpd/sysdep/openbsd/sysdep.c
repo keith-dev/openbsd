@@ -1,4 +1,4 @@
-/*	$OpenBSD: sysdep.c,v 1.23 2002/09/11 09:50:44 ho Exp $	*/
+/*	$OpenBSD: sysdep.c,v 1.25 2003/06/03 14:53:11 ho Exp $	*/
 /*	$EOM: sysdep.c,v 1.9 2000/12/04 04:46:35 angelos Exp $	*/
 
 /*
@@ -12,11 +12,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by Ericsson Radio Systems.
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -44,6 +39,7 @@
 
 #include "sysdep.h"
 
+#include "monitor.h"
 #include "util.h"
 
 #ifdef NEED_SYSDEP_APP
@@ -192,24 +188,24 @@ sysdep_cleartext (int fd, int af)
    * receive key management datagrams in the clear.
    */
   level = IPSEC_LEVEL_BYPASS;
-  if (setsockopt (fd, optsw[sw].ip_proto, optsw[sw].auth_level, (char *)&level,
-		  sizeof level) == -1)
+  if (monitor_setsockopt (fd, optsw[sw].ip_proto, optsw[sw].auth_level,
+			  (char *)&level, sizeof level) == -1)
     {
       log_error ("sysdep_cleartext: "
 		 "setsockopt (%d, %d, IP_AUTH_LEVEL, ...) failed", fd,
 		 optsw[sw].ip_proto);
       return -1;
     }
-  if (setsockopt (fd, optsw[sw].ip_proto, optsw[sw].esp_trans_level,
-		  (char *)&level, sizeof level) == -1)
+  if (monitor_setsockopt (fd, optsw[sw].ip_proto, optsw[sw].esp_trans_level,
+			  (char *)&level, sizeof level) == -1)
     {
       log_error ("sysdep_cleartext: "
 		 "setsockopt (%d, %d, IP_ESP_TRANS_LEVEL, ...) failed", fd,
 		 optsw[sw].ip_proto);
       return -1;
     }
-  if (setsockopt (fd, optsw[sw].ip_proto, optsw[sw].esp_network_level,
-		  (char *)&level, sizeof level) == -1)
+  if (monitor_setsockopt (fd, optsw[sw].ip_proto, optsw[sw].esp_network_level,
+			  (char *)&level, sizeof level) == -1)
     {
       log_error("sysdep_cleartext: "
 		"setsockopt (%d, %d, IP_ESP_NETWORK_LEVEL, ...) failed", fd,
@@ -217,8 +213,8 @@ sysdep_cleartext (int fd, int af)
       return -1;
     }
   if (optsw[sw].ipcomp_level
-      && setsockopt (fd, optsw[sw].ip_proto, optsw[sw].ipcomp_level,
-		     (char *)&level, sizeof level) == -1
+      && monitor_setsockopt (fd, optsw[sw].ip_proto, optsw[sw].ipcomp_level,
+			     (char *)&level, sizeof level) == -1
       && errno != ENOPROTOOPT)
     {
       log_error("sysdep_cleartext: "

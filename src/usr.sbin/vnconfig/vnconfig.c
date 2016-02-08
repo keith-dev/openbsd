@@ -1,3 +1,4 @@
+/*	$OpenBSD: vnconfig.c,v 1.12 2003/06/24 23:26:58 millert Exp $	*/
 /*
  * Copyright (c) 1993 University of Utah.
  * Copyright (c) 1990, 1993
@@ -15,11 +16,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -43,13 +40,12 @@
 #include <sys/param.h>
 #include <sys/ioctl.h>
 #include <sys/mount.h>
-#include <sys/stat.h>
-#include <sys/fcntl.h>
 
 #include <dev/vndioctl.h>
 
 #include <err.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <pwd.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -62,13 +58,11 @@
 
 int verbose = 0;
 
-void usage(void);
+__dead void usage(void);
 int config(char *, char *, int, char *);
 
 int
-main(argc, argv)
-	int argc;
-	char **argv;
+main(int argc, char **argv)
 {
 	int ch, rv, action = VND_CONFIG;
 	char *key = NULL;
@@ -88,7 +82,6 @@ main(argc, argv)
 			key = getpass("Encryption key: ");
 			break;
 		default:
-		case '?':
 			usage();
 			/* NOTREACHED */
 		}
@@ -106,11 +99,7 @@ main(argc, argv)
 }
 
 int
-config(dev, file, action, key)
-	char *dev;
-	char *file;
-	int action;
-	char *key;
+config(char *dev, char *file, int action, char *key)
 {
 	struct vnd_ioctl vndio;
 	FILE *f;
@@ -159,12 +148,13 @@ config(dev, file, action, key)
 	return (rv < 0);
 }
 
-void
-usage()
+__dead void
+usage(void)
 {
+	extern char *__progname;
 
-	(void)fprintf(stderr, "%s%s",
-	    "usage: vnconfig [-c] [-vk] rawdev regular-file\n",
-	    "       vnconfig -u [-v] rawdev\n");
+	(void)fprintf(stderr,
+	    "usage: %s [-c] [-vk] rawdev regular-file\n"
+	    "       %s -u [-v] rawdev\n", __progname, __progname);
 	exit(1);
 }

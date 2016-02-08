@@ -1,4 +1,4 @@
-/*	$OpenBSD: dir.c,v 1.9 2003/01/08 06:54:16 deraadt Exp $	*/
+/*	$OpenBSD: dir.c,v 1.12 2003/06/11 21:09:50 deraadt Exp $	*/
 /*	$NetBSD: dir.c,v 1.9 1995/03/21 09:02:42 cgd Exp $	*/
 
 /*-
@@ -13,11 +13,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -38,7 +34,7 @@
 #if 0
 static char sccsid[] = "@(#)dir.c	8.1 (Berkeley) 5/31/93";
 #else
-static char rcsid[] = "$OpenBSD: dir.c,v 1.9 2003/01/08 06:54:16 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: dir.c,v 1.12 2003/06/11 21:09:50 deraadt Exp $";
 #endif
 #endif /* not lint */
 
@@ -73,12 +69,11 @@ static int dirflag = 0;
  * dinit - initialize current working directory
  */
 void
-dinit(hp)
-    Char   *hp;
+dinit(Char *hp)
 {
-    register char *tcp;
-    register Char *cp;
-    register struct directory *dp;
+    char *tcp;
+    Char *cp;
+    struct directory *dp;
     char    path[MAXPATHLEN];
     static char *emsg = "csh: Trying to start from \"%s\"\n";
 
@@ -139,14 +134,13 @@ dinit(hp)
 }
 
 static void
-dset(dp)
-Char *dp;
+dset(Char *dp)
 {
     /*
      * Don't call set() directly cause if the directory contains ` or
      * other junk characters glob will fail.
      */
-    register Char **vec = (Char **) xmalloc((size_t) (2 * sizeof(Char **)));
+    Char **vec = (Char **) xmalloc((size_t) (2 * sizeof(Char **)));
 
     vec[0] = Strsave(dp);
     vec[1] = 0;
@@ -159,9 +153,7 @@ Char *dp;
 #define DIR_LINE 4
 
 static void
-skipargs(v, str)
-    Char ***v;
-    char   *str;
+skipargs(Char ***v, char *str)
 {
     Char  **n = *v, *s;
 
@@ -190,9 +182,7 @@ skipargs(v, str)
  */
 void
 /*ARGSUSED*/
-dodirs(v, t)
-    Char **v;
-    struct command *t;
+dodirs(Char **v, struct command *t)
 {
     skipargs(&v, "");
 
@@ -202,9 +192,9 @@ dodirs(v, t)
 }
 
 static void
-printdirs()
+printdirs(void)
 {
-    register struct directory *dp;
+    struct directory *dp;
     Char   *s, *hp = value(STRhome);
     int     idx, len, cur;
 
@@ -240,8 +230,7 @@ printdirs()
 }
 
 void
-dtildepr(home, dir)
-    register Char *home, *dir;
+dtildepr(Char *home, Char *dir)
 {
 
     if (!eq(home, STRslash) && prefix(home, dir))
@@ -251,7 +240,7 @@ dtildepr(home, dir)
 }
 
 void
-dtilde()
+dtilde(void)
 {
     struct directory *d = dcwd;
 
@@ -270,8 +259,7 @@ dtilde()
  *	it depending on the symbolic link flags
  */
 Char   *
-dnormalize(cp)
-    Char   *cp;
+dnormalize(Char *cp)
 {
 
 #define UC (unsigned char)
@@ -338,12 +326,10 @@ dnormalize(cp)
  */
 void
 /*ARGSUSED*/
-dochngd(v, t)
-    Char **v;
-    struct command *t;
+dochngd(Char **v, struct command *t)
 {
-    register Char *cp;
-    register struct directory *dp;
+    Char *cp;
+    struct directory *dp;
 
     skipargs(&v, " [<dir>]");
     printd = 0;
@@ -385,13 +371,12 @@ dochngd(v, t)
 }
 
 static Char *
-dgoto(cp)
-    Char   *cp;
+dgoto(Char *cp)
 {
     Char   *dp;
 
     if (*cp != '/') {
-	register Char *p, *q;
+	Char *p, *q;
 	int     cwdlen;
 
 	for (p = dcwd->di_name; *p++;)
@@ -424,10 +409,9 @@ dgoto(cp)
  * dfollow - change to arg directory; fall back on cdpath if not valid
  */
 static Char *
-dfollow(cp)
-    register Char *cp;
+dfollow(Char *cp)
 {
-    register Char *dp;
+    Char *dp;
     struct varent *c;
     char    ebuf[MAXPATHLEN];
     int serrno;
@@ -451,7 +435,7 @@ dfollow(cp)
     if (cp[0] != '/' && !prefix(STRdotsl, cp) && !prefix(STRdotdotsl, cp)
 	&& (c = adrof(STRcdpath))) {
 	Char  **cdp;
-	register Char *p;
+	Char *p;
 	Char    buf[MAXPATHLEN];
 
 	for (cdp = c->vec; *cdp; cdp++) {
@@ -489,11 +473,9 @@ dfollow(cp)
  */
 void
 /*ARGSUSED*/
-dopushd(v, t)
-    Char **v;
-    struct command *t;
+dopushd(Char **v, struct command *t)
 {
-    register struct directory *dp;
+    struct directory *dp;
 
     skipargs(&v, " [<dir>|+<n>]");
     printd = 1;
@@ -525,7 +507,7 @@ dopushd(v, t)
 	    stderror(ERR_SYSTEM, tmp, strerror(errno));
     }
     else {
-	register Char *ccp;
+	Char *ccp;
 
 	ccp = dfollow(*v);
 	dp = (struct directory *) xcalloc(1, sizeof(struct directory));
@@ -543,12 +525,11 @@ dopushd(v, t)
  * dfind - find a directory if specified by numeric (+n) argument
  */
 static struct directory *
-dfind(cp)
-    register Char *cp;
+dfind(Char *cp)
 {
-    register struct directory *dp;
-    register int i;
-    register Char *ep;
+    struct directory *dp;
+    int i;
+    Char *ep;
 
     if (*cp++ != '+')
 	return (0);
@@ -574,11 +555,9 @@ dfind(cp)
  */
 void
 /*ARGSUSED*/
-dopopd(v, t)
-    Char **v;
-    struct command *t;
+dopopd(Char **v, struct command *t)
 {
-    register struct directory *dp, *p = NULL;
+    struct directory *dp, *p = NULL;
 
     skipargs(&v, " [+<n>]");
     printd = 1;
@@ -615,8 +594,7 @@ dopopd(v, t)
  * dfree - free the directory (or keep it if it still has ref count)
  */
 void
-dfree(dp)
-    register struct directory *dp;
+dfree(struct directory *dp)
 {
 
     if (dp->di_count != 0) {
@@ -634,11 +612,10 @@ dfree(dp)
  *	constructed (always have ..'s, directories have links)
  */
 Char   *
-dcanon(cp, p)
-    register Char *cp, *p;
+dcanon(Char *cp, Char *p)
 {
-    register Char *sp;
-    register Char *p1, *p2;	/* general purpose */
+    Char *sp;
+    Char *p1, *p2;	/* general purpose */
     bool    slash;
 
     Char    link[MAXPATHLEN];
@@ -706,8 +683,8 @@ dcanon(cp, p)
 	    if (sp != cp && !adrof(STRignore_symlinks) &&
 		(cc = readlink(short2str(cp), tlink,
 			       sizeof tlink-1)) >= 0) {
+		tlink[cc] = '\0';
 		(void) Strlcpy(link, str2short(tlink), sizeof link/sizeof(Char));
-		link[cc] = '\0';
 
 		if (slash)
 		    *p = '/';
@@ -925,8 +902,7 @@ dcanon(cp, p)
  * dnewcwd - make a new directory in the loop the current one
  */
 static void
-dnewcwd(dp)
-    register struct directory *dp;
+dnewcwd(struct directory *dp)
 {
     dcwd = dp;
     dset(dcwd->di_name);

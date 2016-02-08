@@ -1,4 +1,4 @@
-/*	$OpenBSD: fsck.c,v 1.12 2002/10/17 13:15:21 brad Exp $	*/
+/*	$OpenBSD: fsck.c,v 1.15 2003/07/29 20:26:23 millert Exp $	*/
 /*	$NetBSD: fsck.c,v 1.7 1996/10/03 20:06:30 christos Exp $	*/
 
 /*
@@ -14,11 +14,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -39,7 +35,7 @@
  *
  */
 
-static char rcsid[] = "$NetBSD: fsck.c,v 1.7 1996/10/03 20:06:30 christos Exp $";
+static const char rcsid[] = "$OpenBSD: fsck.c,v 1.15 2003/07/29 20:26:23 millert Exp $";
 
 #include <sys/param.h>
 #include <sys/mount.h>
@@ -99,7 +95,10 @@ main(int argc, char *argv[])
 
 	/* Increase our data size to the max */
 	if (getrlimit(RLIMIT_DATA, &rl) == 0) {
-		rl.rlim_cur = rl.rlim_max;
+		if (geteuid() == 0)
+			rl.rlim_cur = rl.rlim_max = RLIM_INFINITY;
+		else
+			rl.rlim_cur = rl.rlim_max;
 		if (setrlimit(RLIMIT_DATA, &rl) < 0)
 			warn("Can't get resource limit to max data size");
 	} else

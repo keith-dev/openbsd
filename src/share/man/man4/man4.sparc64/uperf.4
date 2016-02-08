@@ -1,4 +1,4 @@
-.\"     $OpenBSD: uperf.4,v 1.8 2003/03/12 07:30:27 jmc Exp $
+.\"     $OpenBSD: uperf.4,v 1.10 2003/06/06 10:29:42 jmc Exp $
 .\"
 .\" Copyright (c) 2002 Jason L. Wright (jason@thought.net)
 .\" All rights reserved.
@@ -11,11 +11,6 @@
 .\" 2. Redistributions in binary form must reproduce the above copyright
 .\"    notice, this list of conditions and the following disclaimer in the
 .\"    documentation and/or other materials provided with the distribution.
-.\" 3. All advertising materials mentioning features or use of this software
-.\"    must display the following acknowledgement:
-.\"      This product includes software developed by Jason L. Wright
-.\" 4. The name of the author may not be used to endorse or promote products
-.\"    derived from this software without specific prior written permission.
 .\"
 .\" THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
 .\" IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
@@ -140,7 +135,7 @@ contain the values fetched for the counters.
 Software using this interface should be prepared to handle the counters
 rolling over.
 .Pp
-The 
+The
 .Nm
 device responds to the following
 .Xr ioctl 2
@@ -188,11 +183,11 @@ and/or
 .Xr ebus 4 ,
 .Xr intro 4 ,
 .Xr sbus 4
-.Sh AUTHORS
-The driver was written by
-.An Jason Wright Aq jason@thought.net .
 .Sh HISTORY
 The
 .Nm
 driver was first supported in
 .Ox 3.1 .
+.Sh AUTHORS
+The driver was written by
+.An Jason Wright Aq jason@thought.net .

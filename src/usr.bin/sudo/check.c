@@ -30,6 +30,10 @@
  * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ *
+ * Sponsored in part by the Defense Advanced Research Projects
+ * Agency (DARPA) and Air Force Research Laboratory, Air Force
+ * Materiel Command, USAF, under agreement number F39502-99-1-0512.
  */
 
 #include "config.h"
@@ -57,6 +61,11 @@
 #ifdef HAVE_UNISTD_H
 # include <unistd.h>
 #endif /* HAVE_UNISTD_H */
+#ifdef HAVE_ERR_H
+# include <err.h>
+#else
+# include "emul/err.h"
+#endif /* HAVE_ERR_H */
 #include <errno.h>
 #include <fcntl.h>
 #include <signal.h>
@@ -67,7 +76,7 @@
 #include "sudo.h"
 
 #ifndef lint
-static const char rcsid[] = "$Sudo: check.c,v 1.210 2003/03/15 20:31:01 millert Exp $";
+static const char rcsid[] = "$Sudo: check.c,v 1.213 2003/04/16 00:42:09 millert Exp $";
 #endif /* lint */
 
 /* Status codes for timestamp_status() */
@@ -216,32 +225,35 @@ expand_prompt(old_prompt, user, host)
 
     if (subst) {
 	new_prompt = (char *) emalloc(++len);
-	*new_prompt = '\0';
-	endp = new_prompt + len - 1;
+	endp = new_prompt + len;
 	for (p = old_prompt, np = new_prompt; *p; p++) {
 	    if (p[0] =='%') {
 		switch (p[1]) {
 		    case 'h':
 			p++;
-			if ((n = strlcat(new_prompt, user_shost, len)) >= len)
+			n = strlcpy(np, user_shost, np - endp);
+			if (n >= np - endp)
 			    goto oflow;
 			np += n;
 			continue;
 		    case 'H':
 			p++;
-			if ((n = strlcat(new_prompt, user_host, len)) >= len)
+			n = strlcpy(np, user_host, np - endp);
+			if (n >= np - endp)
 			    goto oflow;
 			np += n;
 			continue;
 		    case 'u':
 			p++;
-			if ((n = strlcat(new_prompt, user_name, len)) >= len)
+			n = strlcpy(np, user_name, np - endp);
+			if (n >= np - endp)
 			    goto oflow;
 			np += n;
 			continue;
 		    case 'U':
 			p++;
-			if ((n = strlcat(new_prompt, *user_runas, len)) >= len)
+			n = strlcpy(np,  *user_runas, np - endp);
+			if (n >= np - endp)
 			    goto oflow;
 			np += n;
 			continue;
@@ -254,9 +266,9 @@ expand_prompt(old_prompt, user, host)
 			break;
 		}
 	    }
+	    *np++ = *p;
 	    if (np >= endp)
 		goto oflow;
-	    *np++ = *p;
 	}
 	*np = '\0';
     } else
@@ -266,9 +278,7 @@ expand_prompt(old_prompt, user, host)
 
 oflow:
     /* We pre-allocate enough space, so this should never happen. */
-    (void) fprintf(stderr, "%s: internal error, expand_prompt() overflow\n",
-	Argv[0]);
-    exit(1);
+    errx(1, "internal error, expand_prompt() overflow");
 }
 
 /*
@@ -540,15 +550,13 @@ remove_timestamp(remove)
 	    else
 		status = rmdir(timestampdir);
 	    if (status == -1 && errno != ENOENT) {
-		log_error(NO_EXIT, "can't remove %s (%s), will reset to epoch",
+		log_error(NO_EXIT, "can't remove %s (%s), will reset to Epoch",
 		    ts, strerror(errno));
 		remove = FALSE;
 	    }
 	}
-	if (!remove && touch(ts, 0) == -1) {
-	    (void) fprintf(stderr, "%s: can't reset %s to epoch: %s\n",
-		Argv[0], ts, strerror(errno));
-	}
+	if (!remove && touch(ts, 0) == -1)
+	    err(1, "can't reset %s to Epoch", ts);
     }
 
     free(timestampdir);

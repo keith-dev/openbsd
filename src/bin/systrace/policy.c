@@ -1,4 +1,4 @@
-/*	$OpenBSD: policy.c,v 1.24 2003/02/18 13:14:43 jmc Exp $	*/
+/*	$OpenBSD: policy.c,v 1.29 2003/07/19 11:48:58 sturm Exp $	*/
 /*
  * Copyright 2002 Niels Provos <provos@citi.umich.edu>
  * All rights reserved.
@@ -101,8 +101,6 @@ SPLAY_GENERATE(polnrtree, policy, nrnode, polnrcompare)
 extern int userpolicy;
 
 static char policydir[MAXPATHLEN];
-static char *groupnames[NGROUPS_MAX];
-static int ngroups;
 
 struct tmplqueue templates;
 
@@ -131,36 +129,14 @@ systrace_setupdir(char *path)
 		if (!(sb.st_mode & S_IFDIR))
 			errx(1, "Not a directory: \"%s\"", policydir);
 	} else if (mkdir(policydir, 0700) == -1)
-		err(1, "mdkdir(%s)", policydir);
+		err(1, "mkdir(%s)", policydir);
 }
 
 int
 systrace_initpolicy(char *file, char *path)
 {
-	gid_t groups[NGROUPS_MAX];
-	char gidbuf[10];
-	int i;
-
 	SPLAY_INIT(&policyroot);
 	SPLAY_INIT(&polnrroot);
-
-	/* Find out group names for current user */
-	if ((ngroups = getgroups(NGROUPS_MAX, groups)) == -1)
-		err(1, "getgroups");
-
-	for (i = 0; i < ngroups; i++) {
-		struct group *gr;
-
-		if ((gr = getgrgid(groups[i])) != NULL) {
-			if ((groupnames[i] = strdup(gr->gr_name)) == NULL)
-				err(1, "strdup(%s)", gr->gr_name);
-		} else {
-			snprintf(gidbuf, sizeof(gidbuf), "%u",
-			    groups[i]);
-			if ((groupnames[i] = strdup(gidbuf)) == NULL)
-				err(1, "strdup(%s)", gidbuf);
-		}
-	}
 
 	if (userpolicy) {
 		systrace_setupdir(path);
@@ -200,7 +176,7 @@ systrace_newpolicynr(int fd, struct policy *tmp)
 		return (-1);
 
 	if ((tmp->policynr = intercept_newpolicy(fd)) == -1) {
-		free(tmp);
+		/* XXX - maybe free policy structure here */
 		return (-1);
 	}
 
@@ -234,6 +210,47 @@ systrace_newpolicy(const char *emulation, const char *name)
 	TAILQ_INIT(&tmp->prefilters);
 
 	return (tmp);
+}
+
+void
+systrace_freepolicy(struct policy *policy)
+{
+	struct filter *filter;
+	struct policy_syscall *pflq;
+
+	if (policy->flags & POLICY_CHANGED) {
+		if (systrace_writepolicy(policy) == -1)
+			fprintf(stderr, "Failed to write policy for %s\n",
+			    policy->name);
+	}
+
+	while ((filter = TAILQ_FIRST(&policy->prefilters)) != NULL) {
+		TAILQ_REMOVE(&policy->prefilters, filter, policy_next);
+		filter_free(filter);
+	}
+
+	while ((filter = TAILQ_FIRST(&policy->filters)) != NULL) {
+		TAILQ_REMOVE(&policy->filters, filter, policy_next);
+		filter_free(filter);
+	}
+
+	while ((pflq = SPLAY_ROOT(&policy->pflqs)) != NULL) {
+		SPLAY_REMOVE(syscalltree, &policy->pflqs, pflq);
+
+		while ((filter = TAILQ_FIRST(&pflq->flq)) != NULL) {
+			TAILQ_REMOVE(&pflq->flq, filter, next);
+			filter_free(filter);
+		}
+
+		free(pflq);
+	}
+
+	SPLAY_REMOVE(policytree, &policyroot, policy);
+	if (policy->policynr != -1)
+		SPLAY_REMOVE(polnrtree, &polnrroot, policy);
+
+	free((char *)policy->name);
+	free(policy);
 }
 
 struct filterq *

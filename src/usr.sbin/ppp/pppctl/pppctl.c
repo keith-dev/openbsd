@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	$Id: pppctl.c,v 1.9 2002/07/02 16:09:05 brian Exp $
+ *	$Id: pppctl.c,v 1.14 2003/09/07 07:50:29 tedu Exp $
  */
 
 #include <sys/types.h>
@@ -47,6 +47,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <poll.h>
 #include <unistd.h>
 
 #define LINELEN 2048
@@ -124,7 +125,7 @@ Receive(int fd, int display)
                     /* password time */
                     if (!passwd)
                         passwd = getpass("Password: ");
-                    sprintf(Buffer, "passwd %s\n", passwd);
+                    snprintf(Buffer, sizeof Buffer, "passwd %s\n", passwd);
                     memset(passwd, '\0', strlen(passwd));
                     if (display & REC_VERBOSE)
                         write(1, Buffer, strlen(Buffer));
@@ -145,7 +146,7 @@ Receive(int fd, int display)
             else
                 flush = last - Buffer + 1;
             write(1, Buffer, flush);
-            strcpy(Buffer, Buffer + flush);
+            strlcpy(Buffer, Buffer + flush, sizeof Buffer);
             len -= flush;
         }
     }
@@ -160,15 +161,13 @@ static void
 check_fd(int sig)
 {
   if (data != -1) {
-    struct timeval t;
-    fd_set f;
+    struct pollfd pfd[1];
     static char buf[LINELEN];
     int len;
 
-    FD_ZERO(&f);
-    FD_SET(data, &f);
-    t.tv_sec = t.tv_usec = 0;
-    if (select(data+1, &f, NULL, NULL, &t) > 0) {
+    pfd[0].fd = data;
+    pfd[0].events = POLLIN;
+    if (poll(pfd, 1, 0) > 0) {
       len = read(data, buf, sizeof buf);
       if (len > 0)
         write(1, buf, len);
@@ -286,7 +285,7 @@ main(int argc, char **argv)
             return 1;
         }
         ifsun.sun_family = AF_LOCAL;
-        strcpy(ifsun.sun_path, argv[arg]);
+        strlcpy(ifsun.sun_path, argv[arg], sizeof ifsun.sun_path);
 
         if (fd = socket(AF_LOCAL, SOCK_STREAM, 0), fd < 0) {
             warnx("cannot create local domain socket");
@@ -379,8 +378,10 @@ main(int argc, char **argv)
     len = 0;
     Command[sizeof(Command)-1] = '\0';
     for (arg++; arg < argc; arg++) {
-        if (len && len < sizeof(Command)-1)
-            strcpy(Command+len++, " ");
+        if (len && len < sizeof(Command)-1) {
+            strlcpy(Command+len, " ", sizeof Command - len);
+	    len++;
+	}
         strncpy(Command+len, argv[arg], sizeof(Command)-len-1);
         len += strlen(Command+len);
     }
@@ -448,9 +449,9 @@ main(int argc, char **argv)
                         start++;
                     if (next)
                         *next = '\0';
-                    strcpy(Buffer, start);
+                    strlcpy(Buffer, start, sizeof Buffer);
                     Buffer[sizeof(Buffer)-2] = '\0';
-                    strcat(Buffer, "\n");
+                    strlcat(Buffer, "\n", sizeof Buffer);
                     if (verbose)
                         write(1, Buffer, strlen(Buffer));
                     write(fd, Buffer, strlen(Buffer));

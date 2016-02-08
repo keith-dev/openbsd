@@ -1,4 +1,4 @@
-/*	$OpenBSD: newfs.c,v 1.11 2002/05/22 08:21:02 deraadt Exp $	*/
+/*	$OpenBSD: newfs.c,v 1.14 2003/06/25 21:24:25 deraadt Exp $	*/
 /*	$NetBSD: newfs.c,v 1.5 1996/05/16 07:17:50 thorpej Exp $	*/
 
 /*-
@@ -13,11 +13,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -44,7 +40,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)newfs.c	8.5 (Berkeley) 5/24/95";
 #else
-static char rcsid[] = "$OpenBSD: newfs.c,v 1.11 2002/05/22 08:21:02 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: newfs.c,v 1.14 2003/06/25 21:24:25 deraadt Exp $";
 #endif
 #endif /* not lint */
 
@@ -285,9 +281,10 @@ main(argc, argv)
 	 */
 	special = argv[0];
 	if (strchr(special, '/') == NULL) {
-		(void)sprintf(device, "%sr%s", _PATH_DEV, special);
+		(void)snprintf(device, sizeof device, "%sr%s", _PATH_DEV, special);
 		if (stat(device, &st) == -1)
-			(void)sprintf(device, "%s%s", _PATH_DEV, special);
+			(void)snprintf(device, sizeof device, "%s%s",
+			    _PATH_DEV, special);
 		special = device;
 	}
 	if (!Nflag) {
@@ -349,7 +346,7 @@ getdisklabel(s, fd)
 	if (ioctl(fd, DIOCGDINFO, (char *)&lab) < 0) {
 #ifdef COMPAT
 		if (disktype) {
-			struct disklabel *lp, *getdiskbyname();
+			struct disklabel *lp;
 
 			unlabeled++;
 			lp = getdiskbyname(disktype);

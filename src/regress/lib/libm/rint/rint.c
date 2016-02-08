@@ -1,13 +1,15 @@
-/*	$OpenBSD: rint.c,v 1.1 2003/02/12 07:05:34 mickey Exp $	*/
+/*	$OpenBSD: rint.c,v 1.4 2003/09/02 23:52:17 david Exp $	*/
 
-/*	Copyright (c) 2003 Michael Shalayeff. Public domain.	*/
+/*	Written by Michael Shalayeff, 2003,  Public domain.	*/
 
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <signal.h>
 #include <unistd.h>
 #include <math.h>
 
-void
+static void
 sigfpe(int sig, siginfo_t *si, void *v)
 {
 	char buf[132];
@@ -21,7 +23,7 @@ sigfpe(int sig, siginfo_t *si, void *v)
 }
 
 int
-main()
+main(int argc, char *argv[])
 {
 	struct sigaction sa;
 

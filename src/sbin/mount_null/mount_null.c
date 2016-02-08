@@ -1,4 +1,4 @@
-/*	$OpenBSD: mount_null.c,v 1.7 2002/02/16 21:27:36 millert Exp $	*/
+/*	$OpenBSD: mount_null.c,v 1.11 2003/07/03 22:41:40 tedu Exp $	*/
 /*	$NetBSD: mount_null.c,v 1.3 1996/04/13 01:31:49 jtc Exp $	*/
 
 /*
@@ -16,11 +16,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -47,7 +43,7 @@ char copyright[] =
 #if 0
 static char sccsid[] = "@(#)mount_null.c	8.5 (Berkeley) 3/27/94";
 #else
-static char rcsid[] = "$OpenBSD: mount_null.c,v 1.7 2002/02/16 21:27:36 millert Exp $";
+static char rcsid[] = "$OpenBSD: mount_null.c,v 1.11 2003/07/03 22:41:40 tedu Exp $";
 #endif
 #endif /* not lint */
 
@@ -73,9 +69,7 @@ int	subdir(const char *, const char *);
 void	usage(void);
 
 int
-main(argc, argv)
-	int argc;
-	char *argv[];
+main(int argc, char *argv[])
 {
 	struct null_args args;
 	int ch, mntflags;
@@ -98,13 +92,13 @@ main(argc, argv)
 		usage();
 
 	if (realpath(argv[0], target) == 0)
-		err(1, "%s", target);
+		err(1, "realpath %s", target);
 
 	if (subdir(target, argv[1]) || subdir(argv[1], target))
 		errx(1, "%s (%s) and %s are not distinct paths",
 		    argv[0], target, argv[1]);
 
-	args.target = target;
+	args.la.target = target;
 
 	if (mount(MOUNT_NULL, argv[1], mntflags, &args)) {
 		if (errno == EOPNOTSUPP)
@@ -117,9 +111,7 @@ main(argc, argv)
 }
 
 int
-subdir(p, dir)
-	const char *p;
-	const char *dir;
+subdir(const char *p, const char *dir)
 {
 	int l;
 
@@ -134,7 +126,7 @@ subdir(p, dir)
 }
 
 void
-usage()
+usage(void)
 {
 	(void)fprintf(stderr,
 		"usage: mount_null [-o options] target_fs mount_point\n");

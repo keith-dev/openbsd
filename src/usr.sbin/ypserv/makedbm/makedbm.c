@@ -1,4 +1,4 @@
-/*	$OpenBSD: makedbm.c,v 1.19 2002/07/19 20:59:40 deraadt Exp $ */
+/*	$OpenBSD: makedbm.c,v 1.23 2003/07/18 22:58:56 david Exp $ */
 
 /*
  * Copyright (c) 1994-97 Mats O Jansson <moj@stacken.kth.se>
@@ -12,11 +12,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by Mats O Jansson
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS
  * OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
@@ -32,10 +27,11 @@
  */
 
 #ifndef LINT
-static char rcsid[] = "$OpenBSD: makedbm.c,v 1.19 2002/07/19 20:59:40 deraadt Exp $";
+static const char rcsid[] = "$OpenBSD: makedbm.c,v 1.23 2003/07/18 22:58:56 david Exp $";
 #endif
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <fcntl.h>
 #include <ctype.h>
 #include <sys/stat.h>
@@ -85,7 +81,7 @@ read_line(FILE *fp, char *buf, int size)
 	return done;
 }
 
-void
+static void
 add_record(DBM *db, char *str1, char *str2, int check)
 {
 	datum   key, val;
@@ -131,7 +127,7 @@ file_date(char *filename)
 	return datestr;
 }
 
-void
+static void
 list_database(char *database, int Uflag)
 {
 	DBM	*db;
@@ -161,7 +157,7 @@ list_database(char *database, int Uflag)
 	ypdb_close(db);
 }
 
-void
+static void
 create_database(char *infile, char *database, char *yp_input_file,
     char *yp_output_file, char *yp_master_name, char *yp_domain_name,
     int bflag, int lflag, int sflag)
@@ -294,7 +290,7 @@ create_database(char *infile, char *database, char *yp_input_file,
 
 }
 
-void
+static void
 usage(void)
 {
 	fprintf(stderr,"usage: makedbm [-u | -U] file\n"

@@ -1,4 +1,4 @@
-/*	$OpenBSD: lcmd2.c,v 1.5 2001/11/19 19:02:18 mpech Exp $	*/
+/*	$OpenBSD: lcmd2.c,v 1.9 2003/08/01 22:01:37 david Exp $	*/
 /*	$NetBSD: lcmd2.c,v 1.7 1995/09/29 00:44:04 cgd Exp $	*/
 
 /*
@@ -16,11 +16,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -41,7 +37,7 @@
 #if 0
 static char sccsid[] = "@(#)lcmd2.c	8.1 (Berkeley) 6/6/93";
 #else
-static char rcsid[] = "$OpenBSD: lcmd2.c,v 1.5 2001/11/19 19:02:18 mpech Exp $";
+static char rcsid[] = "$OpenBSD: lcmd2.c,v 1.9 2003/08/01 22:01:37 david Exp $";
 #endif
 #endif /* not lint */
 
@@ -53,6 +49,7 @@ static char rcsid[] = "$OpenBSD: lcmd2.c,v 1.5 2001/11/19 19:02:18 mpech Exp $";
 #include "alias.h"
 #include <sys/types.h>
 #include <sys/resource.h>
+#include <stdio.h>
 #include <string.h>
 
 /*ARGSUSED*/
@@ -161,7 +158,8 @@ struct timeval *t;
 	char *p = buf;
 
 	if (t->tv_sec > 60*60) {
-		(void) sprintf(p, "%ld:", t->tv_sec / (60*60));
+		(void) snprintf(p, buf + sizeof buf - p,
+			"%ld:", t->tv_sec / (60*60));
 		while (*p++)
 			;
 		p--;
@@ -169,14 +167,16 @@ struct timeval *t;
 		fill++;
 	}
 	if (t->tv_sec > 60) {
-		(void) sprintf(p, fill ? "%02ld:" : "%ld:", t->tv_sec / 60);
+		(void) snprintf(p, buf + sizeof buf - p,
+			fill ? "%02ld:" : "%ld:", t->tv_sec / 60);
 		while (*p++)
 			;
 		p--;
 		t->tv_sec %= 60;
 		fill++;
 	}
-	(void) sprintf(p, fill ? "%02ld.%02d" : "%ld.%02ld",
+	(void) snprintf(p, buf + sizeof buf - p,
+		fill ? "%02ld.%02d" : "%ld.%02ld",
 		t->tv_sec, t->tv_usec / 10000);
 	return buf;
 }
@@ -390,7 +390,7 @@ struct value *a;
 		return;
 	while (a->v_type != V_ERR) {
 		if (a->v_type == V_NUM) {
-			(void) sprintf(buf, "%d", a->v_num);
+			(void) snprintf(buf, sizeof(buf), "%d", a->v_num);
 			(void) wwwrite(w, buf, strlen(buf));
 		} else
 			(void) wwwrite(w, a->v_str, strlen(a->v_str));

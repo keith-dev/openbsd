@@ -1,4 +1,4 @@
-.\"	$OpenBSD: boot_config.8,v 1.17 2001/10/05 14:45:54 mpech Exp $
+.\"	$OpenBSD: boot_config.8,v 1.21 2003/09/02 18:37:08 jmc Exp $
 .\"
 .\" Copyright (c) 1996 Mats O Jansson
 .\" All rights reserved.
@@ -11,9 +11,6 @@
 .\" 2. Redistributions in binary form must reproduce the above copyright
 .\"    notice, this list of conditions and the following disclaimer in the
 .\"    documentation and/or other materials provided with the distribution.
-.\" 3. All advertising materials mentioning features or use of this software
-.\"    must display the following acknowledgement:
-.\"	This product includes software developed by Theo de Raadt.
 .\" 4. Neither the name of the author nor the names of its contributors
 .\"    may be used to endorse or promote products derived from this software
 .\"    without specific prior written permission.
@@ -31,7 +28,7 @@
 .\" SUCH DAMAGE.
 .\"
 .Dd December 13, 1998
-.Dt boot_config 8
+.Dt BOOT_CONFIG 8
 .Os
 .Sh NAME
 .Nm boot_config
@@ -50,7 +47,6 @@ The boot time configuration is invoked by the
 option when
 .Ox
 prompts for a kernel to boot:
-.Pp
 .Bd -literal
 >> OpenBSD BOOT 640/31744 k [1.29]
 use ? for file list, or carriage return for defaults
@@ -66,7 +62,7 @@ UKC>
 Changes made can be saved for the next reboot, by using
 .Xr config 8 .
 .Sh COMMANDS
-.Bl -tag -width "disable devno | dev" indent
+.Bl -tag -width "disable devno | dev"
 .It Ic add Ar dev
 Add a device through copying another.
 .It Ic base Ar 8 | 10 | 16
@@ -110,7 +106,6 @@ e.g. wrong IRQ in OpenBSD/i386.
 The ethernet card is supposed to use the
 .Xr ne 4
 driver.
-.Pp
 .Bd -literal
 .No UKC> Ic find ne
 24 ne0 at isa0 port 0x240 size 0 iomem 0xd8000 iosiz 0 irq 9 drq -1 drq2 -1 flags 0x0
@@ -126,19 +121,18 @@ So the irq on ne1 should be changed via the
 .Fa change
 command.
 The device can be specified by either name or number.
-.Pp
 .Bd -literal
 .No UKC> Ic change ne1
 25 ne1 at isa0 port 0x300 size 0 iomem -1 iosiz 0 irq 10 drq -1 drq2 -1 flags 0x0
-.No change (y/n) ? Ic y
-.No port [0x300] ?
-.No size [0] ?
-.No iomem [-1] ?
-.No iosiz [0] ?
-.No irq [10] ? Ic 5
-.No drq [-1] ?
-.No drq2 [-1] ?
-.No flags [0] ?
+.No change (y/n) \&? Ic y
+.No port [0x300] \&?
+.No size [0] \&?
+.No iomem [-1] \&?
+.No iosiz [0] \&?
+.No irq [10] \&? Ic 5
+.No drq [-1] \&?
+.No drq2 [-1] \&?
+.No flags [0] \&?
 25 ne1 changed
 25 ne1 at isa0 port 0x300 size 0 iomem -1 iosiz 0 irq 5 drq -1 drq2 -1 flags 0x0
 UKC>
@@ -149,7 +143,6 @@ device at the probed location.
 One known case is the Mitsumi
 CD-ROM in OpenBSD/i386.
 The simplest thing to solve that problem is to disable mcd0.
-.Pp
 .Bd -literal
 .No UKC> Ic find mcd0
  29 mcd0 at isa0 port 0x300 size 0 iomem -1 iosiz 0 irq 10 drq -1 drq2 -1 flags 0x0
@@ -181,7 +174,6 @@ UKC>
 It is possible to add new devices, but only devices that were linked into the
 kernel.
 If a new device is added, following devices will be renumbered.
-.Pp
 .Bd -literal
 .No UKC> Ic find ep
  11 ep0 at isa0 port -1 size 0 iomem -1 iosiz 0 irq -1 drq -1 drq2 -1 flags 0x0
@@ -193,15 +185,15 @@ If a new device is added, following devices will be renumbered.
  17 ep* at pci* dev -1 function -1 flags 0x0
  18 ep* at pcmcia* dev -1 irq -1 flags 0x0
 .No UKC> Ic add ep1
-.No "Clone Device (DevNo, 'q' or '?') ?" Ic 13
-.No "Insert before Device (DevNo, 'q' or '?')" Ic 14
+.No "Clone Device (DevNo, 'q' or '\&?') \&?" Ic 13
+.No "Insert before Device (DevNo, 'q' or '\&?')" Ic 14
  14 ep1 at pci* dev -1 function -1
 .No UKC> Ic change 14
  14 ep1 at pci* dev -1 function -1
-.No change (y/n) ? Ic y
-.No dev [-1] ? Ic 14
-.No function [-1] ?
-.No flags [0] ? 18
+.No change (y/n) \&? Ic y
+.No dev [-1] \&? Ic 14
+.No function [-1] \&?
+.No flags [0] \&? 18
  14 ep1 changed
  14 ep1 at pci* dev 14 function -1 flags 0x12
 UKC>
@@ -212,7 +204,6 @@ When configuration is completed, booting can proceed by issuing the
 or
 .Ic exit
 commands.
-.Pp
 .Bd -literal
 .No UKC> Ic quit
 Continuing...
@@ -220,9 +211,9 @@ mainbus0 (root)
 .Ed
 .Sh SEE ALSO
 .Xr config 8
+.Sh AUTHORS
+.An Mats O Jansson Aq moj@stacken.kth.se
 .Sh BUGS
 The
 .Ic add
 command is rather restricted, and might be expanded in the future.
-.Sh AUTHORS
-Mats O Jansson <moj@stacken.kth.se>

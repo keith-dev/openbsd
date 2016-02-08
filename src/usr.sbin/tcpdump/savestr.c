@@ -1,4 +1,4 @@
-/*	$OpenBSD: savestr.c,v 1.3 2000/10/03 14:31:59 ho Exp $	*/
+/*	$OpenBSD: savestr.c,v 1.5 2003/04/04 02:56:51 millert Exp $	*/
 
 /*
  * Copyright (c) 1997
@@ -23,7 +23,7 @@
 
 #ifndef lint
 static const char rcsid[] =
-    "@(#) $Header: /cvs/src/usr.sbin/tcpdump/savestr.c,v 1.3 2000/10/03 14:31:59 ho Exp $ (LBL)";
+    "@(#) $Header: /cvs/src/usr.sbin/tcpdump/savestr.c,v 1.5 2003/04/04 02:56:51 millert Exp $ (LBL)";
 #endif
 
 #include <sys/types.h>
@@ -43,10 +43,10 @@ static const char rcsid[] =
 char *
 savestr(register const char *str)
 {
-	register u_int size;
+	register size_t size;
 	register char *p;
 	static char *strptr = NULL;
-	static u_int strsize = 0;
+	static size_t strsize = 0;
 
 	size = strlen(str) + 1;
 	if (size > strsize) {
@@ -59,7 +59,7 @@ savestr(register const char *str)
 			exit(1);
 		}
 	}
-	(void)strcpy(strptr, str);
+	(void)strlcpy(strptr, str, size);
 	p = strptr;
 	strptr += size;
 	strsize -= size;

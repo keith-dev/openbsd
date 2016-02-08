@@ -1,4 +1,4 @@
-/*	$OpenBSD: emacs.c,v 1.18 2003/02/28 09:45:09 jmc Exp $	*/
+/*	$OpenBSD: emacs.c,v 1.27 2003/09/01 15:47:40 naddy Exp $	*/
 
 /*
  *  Emacs-like command line editing and history
@@ -25,7 +25,7 @@ static	Area	aedit;
 #define	CTRL(x)		((x) == '?' ? 0x7F : (x) & 0x1F)	/* ASCII */
 #define	UNCTRL(x)	((x) == 0x7F ? '?' : (x) | 0x40)	/* ASCII */
 #define	META(x)		((x) & 0x7f)
-#define	ISMETA(x)	(x_usemeta && ((x) & 0x80))
+#define	ISMETA(x)	(Flag(FEMACSUSEMETA) && ((x) & 0x80))
 
 
 /* values returned by keyboard functions */
@@ -101,7 +101,6 @@ static int	x_col;
 static int	x_displen;
 static int	x_arg;		/* general purpose arg */
 static int	x_arg_defaulted;/* x_arg not explicitly set; defaulted to 1 */
-static int	x_usemeta;	/* no 8-bit ascii, meta = ESC */
 
 static int	xlp_valid;
 /* end from 4.9 edit.h } */
@@ -122,7 +121,7 @@ static	char    *macroptr;
 static	int	prompt_skip;
 
 static int      x_ins       ARGS((char *cp));
-static void     x_delete    ARGS((int nc, int force_push));
+static void     x_delete    ARGS((int nc, int push));
 static int	x_bword     ARGS((void));
 static int	x_fword     ARGS((void));
 static void     x_goto      ARGS((char *cp));
@@ -438,6 +437,8 @@ x_ins_string(c)
 	return KSTD;
 }
 
+static int x_do_ins(const char *cp, int len);
+
 static int
 x_do_ins(cp, len)
 	const char *cp;
@@ -533,9 +534,9 @@ x_del_char(c)
 
 /* Delete nc chars to the right of the cursor (including cursor position) */
 static void
-x_delete(nc, force_push)
+x_delete(nc, push)
 	int nc;
-	int force_push;
+	int push;
 {
 	int	i,j;
 	char	*cp;
@@ -552,7 +553,7 @@ x_delete(nc, force_push)
 	/*
 	 * This lets us yank a word we have deleted.
 	 */
-	if (nc > 1 || force_push)
+	if (push)
 		x_push(nc);
 
 	xep -= nc;
@@ -593,7 +594,7 @@ static int
 x_del_bword(c)
 	int c;
 {
-	x_delete(x_bword(), FALSE);
+	x_delete(x_bword(), TRUE);
 	return KSTD;
 }
 
@@ -617,7 +618,7 @@ static int
 x_del_fword(c)
 	int c;
 {
-	x_delete(x_fword(), FALSE);
+	x_delete(x_fword(), TRUE);
 	return KSTD;
 }
 
@@ -886,9 +887,9 @@ x_load_hist(hp)
 	}
 	x_histp = hp;
 	oldsize = x_size_str(xbuf);
-	(void)strcpy(xbuf, *hp);
+	strlcpy(xbuf, *hp, xend - xbuf);
 	xbp = xbuf;
-	xep = xcp = xbuf + strlen(*hp);
+	xep = xcp = xbuf + strlen(xbuf);
 	xlp_valid = FALSE;
 	if (xep > x_lastcp())
 	  x_goto(xep);
@@ -1022,7 +1023,7 @@ x_del_line(c)
 	int	i, j;
 
 	*xep = 0;
-	i = xep- xbuf;
+	i = xep - xbuf;
 	j = x_size_str(xbuf);
 	xcp = xbuf;
 	x_push(i);
@@ -1262,7 +1263,9 @@ x_meta_yank(c)
 	int c;
 {
 	int	len;
-	if (x_last_command != XFUNC_yank && x_last_command != XFUNC_meta_yank) {
+	if ((x_last_command != XFUNC_yank && x_last_command != XFUNC_meta_yank)
+	    || killstack[killtp] == 0) {
+		killtp = killsp;
 		x_e_puts("\nyank something first");
 		x_redraw(-1);
 		return KSTD;
@@ -1530,8 +1533,10 @@ x_init_emacs()
 	 */
 	locale = setlocale(LC_CTYPE, NULL);
 	if (locale == NULL || !strcmp(locale, "C") || !strcmp(locale, "POSIX"))
-		x_usemeta = 1;
+		Flag(FEMACSUSEMETA) = 1;
 }
+
+static void bind_if_not_bound(int p, int k, int func);
 
 static void
 bind_if_not_bound(p, k, func)
@@ -1777,12 +1782,15 @@ x_expand(c)
 
 	x_goto(xbuf + start);
 	x_delete(end - start, FALSE);
-	for (i = 0; i < nwords; i++)
-		if (x_ins(words[i]) < 0 || (i < nwords - 1 && x_ins(space) < 0))
+	for (i = 0; i < nwords;) {
+		if (x_escape(words[i], strlen(words[i]), x_emacs_putbuf) < 0 ||
+		    (++i < nwords && x_ins(space) < 0))
 		{
 			x_e_putc(BEL);
 			return KSTD;
 		}
+	}
+	x_adjust();
 
 	return KSTD;
 }
@@ -1817,7 +1825,7 @@ do_complete(flags, type)
 	olen = end - start;
 	nlen = x_longest_prefix(nwords, words);
 	/* complete */
-	if (nlen > olen) {
+	if (nwords == 1 || nlen > olen) {
 		x_goto(xbuf + start);
 		x_delete(olen, FALSE);
 		x_escape(words[0], nlen, x_emacs_putbuf);

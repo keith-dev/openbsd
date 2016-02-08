@@ -1,4 +1,4 @@
-.\"	$OpenBSD: inet.3,v 1.14 2003/03/04 17:19:36 henning Exp $
+.\"	$OpenBSD: inet.3,v 1.18 2003/09/09 12:00:39 jmc Exp $
 .\"	$NetBSD: inet.3,v 1.7 1997/06/18 02:25:24 lukem Exp $
 .\"
 .\" Copyright (c) 1983, 1990, 1991, 1993
@@ -12,11 +12,7 @@
 .\" 2. Redistributions in binary form must reproduce the above copyright
 .\"    notice, this list of conditions and the following disclaimer in the
 .\"    documentation and/or other materials provided with the distribution.
-.\" 3. All advertising materials mentioning features or use of this software
-.\"    must display the following acknowledgement:
-.\"	This product includes software developed by the University of
-.\"	California, Berkeley and its contributors.
-.\" 4. Neither the name of the University nor the names of its contributors
+.\" 3. Neither the name of the University nor the names of its contributors
 .\"    may be used to endorse or promote products derived from this software
 .\"    without specific prior written permission.
 .\"
@@ -60,7 +56,7 @@
 .Ft in_addr_t
 .Fn inet_lnaof "struct in_addr in"
 .Ft struct in_addr
-.Fn inet_makeaddr "unsigned long net" "unsigned long lna"
+.Fn inet_makeaddr "in_addr_t net" "in_addr_t lna"
 .Ft in_addr_t
 .Fn inet_netof "struct in_addr in"
 .Ft in_addr_t
@@ -205,7 +201,7 @@ and
 .Xr getnameinfo 3
 are recommended rather than the functions presented here.
 .Pp
-The presentation format of an IPv6 address is given in [RFC1884 2.2]:
+The presentation format of an IPv6 address is given in RFC 2373:
 .Pp
 There are three conventional forms for representing IPv6 addresses as
 text strings:
@@ -227,8 +223,7 @@ Due to the method of allocating certain styles of IPv6
 addresses, it will be common for addresses to contain long
 strings of zero bits.
 In order to make writing addresses
-.Pp
-containing zero bits easier a special syntax is available to
+containing zero bits easier, a special syntax is available to
 compress the zeros.
 The use of
 .Dq \&:\&:
@@ -291,12 +286,22 @@ for malformed requests.
 .Xr inet_net 3 ,
 .Xr hosts 5 ,
 .Xr networks 5
+.Rs
+.%R RFC 2373
+.%D July 1998
+.%T "IP Version 6 Addressing Architecture"
+.Re
+.Rs
+.%R RFC 3493
+.%D February 2003
+.%T "Basic Socket Interface Extensions for IPv6"
+.Re
 .Sh STANDARDS
 The
 .Nm inet_ntop
 and
 .Nm inet_pton
-functions conforms to the IETF IPv6 BSD API and address formatting
+functions conform to the IETF IPv6 BSD API and address formatting
 specifications.
 Note that
 .Nm inet_pton

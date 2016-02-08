@@ -1,31 +1,24 @@
 #!/bin/ksh -
 #
-# $OpenBSD: spell.ksh,v 1.4 2003/02/08 10:19:30 pvalchev Exp $
+# $OpenBSD: spell.ksh,v 1.7 2003/07/10 02:25:38 millert Exp $
 #
-# Copyright (c) 2001 Todd C. Miller <Todd.Miller@courtesan.com>
-# All rights reserved.
+# Copyright (c) 2001, 2003 Todd C. Miller <Todd.Miller@courtesan.com>
 #
-# Redistribution and use in source and binary forms, with or without
-# modification, are permitted provided that the following conditions
-# are met:
-# 1. Redistributions of source code must retain the above copyright
-#    notice, this list of conditions and the following disclaimer.
-# 2. Redistributions in binary form must reproduce the above copyright
-#    notice, this list of conditions and the following disclaimer in the
-#    documentation and/or other materials provided with the distribution.
-# 3. The name of the author may not be used to endorse or promote products
-#    derived from this software without specific prior written permission.
+# Permission to use, copy, modify, and distribute this software for any
+# purpose with or without fee is hereby granted, provided that the above
+# copyright notice and this permission notice appear in all copies.
 #
-# THIS SOFTWARE IS PROVIDED ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES,
-# INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY
-# AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL
-# THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
-# EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
-# PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
-# OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
-# WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
-# OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
-# ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+# THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+# WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+# MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+# ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+# WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+# ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+# OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+#
+# Sponsored in part by the Defense Advanced Research Projects
+# Agency (DARPA) and Air Force Research Laboratory, Air Force
+# Materiel Command, USAF, under agreement number F39502-99-1-0512.
 #
 SPELLPROG=/usr/libexec/spellprog
 DICT=/usr/share/dict/words
@@ -44,6 +37,9 @@ TMP=`mktemp /tmp/spell.XXXXXXXX` || exit 1
 VTMP=
 USAGE="usage: spell [-biltvx] [-d list] [-h spellhist] [-s stop] [+extra_list] [file ...]"
 
+set -o posix		# set POSIX mode to prevent +foo in getopts
+OPTIND=1		# force getopts to reset itself
+
 trap "rm -f $TMP $VTMP; exit 0" 0
 
 # Use local word/stop lists if they exist
@@ -54,11 +50,7 @@ if [ -f $LOCAL_STOP ]; then
 	STOP="$STOP $LOCAL_STOP"
 fi
 
-# getopts will treat +foo the same as -foo so we have to make a copy
-# of the args and quit the loop when we find something starting with '+'
-set -A argv $0 "$@"
-while test "${argv[$OPTIND]#+}" = "${argv[$OPTIND]}" && \
-    getopts "biltvxd:h:m:s:" c; do
+while getopts "biltvxd:h:m:s:" c; do
 	case $c in
 	b)	LANG=$BRITISH
 		STOP_LANG=$AMERICAN

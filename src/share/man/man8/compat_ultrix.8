@@ -1,4 +1,4 @@
-.\"	$OpenBSD: compat_ultrix.8,v 1.12 2003/02/19 09:10:36 jmc Exp $
+.\"	$OpenBSD: compat_ultrix.8,v 1.16 2003/08/23 19:26:25 tedu Exp $
 .\"
 .\" Copyright (c) 1997 Jonathan Stone
 .\" All rights reserved.
@@ -37,11 +37,13 @@
 .Nm compat_ultrix
 .Nd setup for running Ultrix binaries under emulation
 .Sh DESCRIPTION
-OpenBSD/mips and OpenBSD/vax architectures can run Risc ULTRIX and Vax
+OpenBSD/mips and OpenBSD/vax architectures can run RISC ULTRIX and Vax
 ULTRIX executables, respectively.
 However, the user is responsible for
 the legal issues of ensuring that they have a right to use any ULTRIX
 binaries on their machine.
+Emulation is controlled by the kern.emul.ultrix
+.Xr sysctl 8 .
 .Pp
 Most executables will work.
 The exceptions include programs that use
@@ -61,16 +63,12 @@ or even SunOS 4.x equivalents, and may require incompatible
 configuration files.
 .Sh SYSTEM CONFIGURATION FILES
 Set up resolv.conf and svc.conf as below:
-.Pp
-.Bl -tag -width 123 -compact -offset indent
-.It # mkdir -p /emul/ultrix/etc
-.br
-.It # cd /emul/ultrix/etc
-.br
-.It # egrep 'domain|nameserver' /etc/resolv.conf  > ./resolv.conf
-.br
-.It # cp -p /usr/share/samples/emul/ultrix/etc/*	./
-.El
+.Bd -literal -offset indent
+# mkdir -p /emul/ultrix/etc
+# cd /emul/ultrix/etc
+# egrep 'domain|nameserver' /etc/resolv.conf > ./resolv.conf
+# cp -p /usr/share/samples/emul/ultrix/etc/* ./
+.Ed
 .Ss /etc/resolv.conf
 The Ultrix resolver library only understands
 .Sy domain
@@ -92,6 +90,8 @@ Create an
 .Pa /emul/ultrix/etc/svc.conf
 file specifying either
 local files or bind (DNS) lookups for all Ultrix name services.
+.Sh SEE ALSO
+.Xr resolv.conf 5
 .Sh BUGS
 RISC Ultrix YP(NIS) is known to not work.
 The Ultrix YP libraries have a consistent endian-ness bug.
@@ -116,5 +116,3 @@ in progress.
 .Pp
 A complete list of things which fail to work in Ultrix compatibility
 mode should be added here.
-.Sh SEE ALSO
-.Xr resolv.conf 5

@@ -1,4 +1,4 @@
-/*	$OpenBSD: term.c,v 1.7 2002/11/29 20:13:39 deraadt Exp $	*/
+/*	$OpenBSD: term.c,v 1.10 2003/06/02 20:18:40 millert Exp $	*/
 /*	$NetBSD: term.c,v 1.8 1997/01/23 14:02:49 mrg Exp $	*/
 
 /*-
@@ -16,11 +16,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -41,7 +37,7 @@
 #if 0
 static char sccsid[] = "@(#)term.c	8.1 (Berkeley) 6/4/93";
 #else
-static char rcsid[] = "$OpenBSD: term.c,v 1.7 2002/11/29 20:13:39 deraadt Exp $";
+static const char rcsid[] = "$OpenBSD: term.c,v 1.10 2003/06/02 20:18:40 millert Exp $";
 #endif
 #endif /* not lint && not SCCSID */
 
@@ -371,7 +367,7 @@ term_alloc(el, t, cap)
      * New string is shorter; no need to allocate space
      */
     if (clen <= tlen) {
-	(void)strcpy(*str, cap);
+	(void)strlcpy(*str, cap, tlen + 1);
 	return;
     }
 
@@ -379,7 +375,8 @@ term_alloc(el, t, cap)
      * New string is longer; see if we have enough space to append
      */
     if (el->el_term.t_loc + 3 < TC_BUFSIZE) {
-	(void)strcpy(*str = &el->el_term.t_buf[el->el_term.t_loc], cap);
+	tlen = TC_BUFSIZE - el->el_term.t_loc;
+	(void)strlcpy(*str = &el->el_term.t_buf[el->el_term.t_loc], cap, tlen);
 	el->el_term.t_loc += clen + 1;	/* one for \0 */
 	return;
     }
@@ -403,7 +400,8 @@ term_alloc(el, t, cap)
 	(void)fprintf(el->el_errfile, "Out of termcap string space.\n");
 	return;
     }
-    (void)strcpy(*str = &el->el_term.t_buf[el->el_term.t_loc], cap);
+    tlen = TC_BUFSIZE - el->el_term.t_loc;
+    (void)strlcpy(*str = &el->el_term.t_buf[el->el_term.t_loc], cap, tlen);
     el->el_term.t_loc += clen + 1;		/* one for \0 */
     return;
 } /* end term_alloc */

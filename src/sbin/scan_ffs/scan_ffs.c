@@ -1,4 +1,4 @@
-/*	$OpenBSD: scan_ffs.c,v 1.8 2002/07/03 22:32:33 deraadt Exp $	*/
+/*	$OpenBSD: scan_ffs.c,v 1.10 2003/07/02 21:44:58 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1998 Niklas Hallqvist, Tobias Weingartner
@@ -12,11 +12,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *    This product includes software developed by Tobias Weingartner.
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -49,7 +44,7 @@
 #define FLAG_SMART		2
 #define FLAG_LABELS		4
 
-int
+static int
 ufsscan(int fd, daddr_t beg, daddr_t end, int flags)
 {
 	static char lastmount[MAXMNTLEN];
@@ -117,7 +112,7 @@ ufsscan(int fd, daddr_t beg, daddr_t end, int flags)
 }
 
 
-void
+static void
 usage(int code)
 {
 	extern char *__progname;

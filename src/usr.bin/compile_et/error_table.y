@@ -45,6 +45,7 @@ long name2number(const char *str);
 void error_message(char *, ...);
 
 extern char *yytext;
+int yyparse(void);
 
 /* This is for bison */
 
@@ -106,9 +107,10 @@ statement	: INDEX NUMBER
 		}
 		| PREFIX STRING
 		{
-		    prefix = realloc(prefix, strlen($2) + 2);
-		    strcpy(prefix, $2);
-		    strcat(prefix, "_");
+		    size_t len = strlen($2) + 2;
+		    prefix = realloc(prefix, len);
+		    strlcpy(prefix, $2, len);
+		    strlcat(prefix, "_", len);
 		    free($2);
 		}
 		| PREFIX

@@ -78,7 +78,7 @@ int X509V3_add_value(const char *name, const char *value,
 	CONF_VALUE *vtmp = NULL;
 	char *tname = NULL, *tvalue = NULL;
 	if(name && !(tname = BUF_strdup(name))) goto err;
-	if(value && !(tvalue = BUF_strdup(value))) goto err;;
+	if(value && !(tvalue = BUF_strdup(value))) goto err;
 	if(!(vtmp = (CONF_VALUE *)OPENSSL_malloc(sizeof(CONF_VALUE)))) goto err;
 	if(!*extlist && !(*extlist = sk_CONF_VALUE_new_null())) goto err;
 	vtmp->section = NULL;
@@ -491,7 +491,7 @@ static STACK *get_email(X509_NAME *name, GENERAL_NAMES *gens)
 	i = -1;
 	/* First supplied X509_NAME */
 	while((i = X509_NAME_get_index_by_NID(name,
-					 NID_pkcs9_emailAddress, i)) > 0) {
+					 NID_pkcs9_emailAddress, i)) >= 0) {
 		ne = X509_NAME_get_entry(name, i);
 		email = X509_NAME_ENTRY_get_data(ne);
 		if(!append_ia5(&ret, email)) return NULL;

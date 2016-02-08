@@ -1,9 +1,9 @@
-/*	$OpenBSD: mod_vhost_alias.c,v 1.6 2002/08/15 16:06:11 henning Exp $ */
+/*	$OpenBSD: mod_vhost_alias.c,v 1.8 2003/08/21 13:11:37 henning Exp $ */
 
 /* ====================================================================
  * The Apache Software License, Version 1.1
  *
- * Copyright (c) 2000-2002 The Apache Software Foundation.  All rights
+ * Copyright (c) 2000-2003 The Apache Software Foundation.  All rights
  * reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -80,6 +80,7 @@
 #include "httpd.h"
 #include "http_config.h"
 #include "http_core.h"
+#include "http_main.h"
 
 
 module MODULE_VAR_EXPORT vhost_alias_module;

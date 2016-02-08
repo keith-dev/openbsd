@@ -1,4 +1,4 @@
-/*	$OpenBSD: sprint.c,v 1.6 2001/01/31 20:11:30 deraadt Exp $	*/
+/*	$OpenBSD: sprint.c,v 1.9 2003/07/10 00:06:50 david Exp $	*/
 
 /*
  * Copyright (c) 1989 The Regents of the University of California.
@@ -15,11 +15,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -38,7 +34,7 @@
 
 #ifndef lint
 /*static char sccsid[] = "from: @(#)sprint.c	5.8 (Berkeley) 12/4/90";*/
-static char rcsid[] = "$OpenBSD: sprint.c,v 1.6 2001/01/31 20:11:30 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: sprint.c,v 1.9 2003/07/10 00:06:50 david Exp $";
 #endif /* not lint */
 
 #include <sys/types.h>
@@ -46,12 +42,13 @@ static char rcsid[] = "$OpenBSD: sprint.c,v 1.6 2001/01/31 20:11:30 deraadt Exp 
 #include <tzfile.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <err.h>
 #include "finger.h"
 #include "extern.h"
 
 void
-sflag_print()
+sflag_print(void)
 {
 	PERSON *pn;
 	WHERE *w;
@@ -136,7 +133,7 @@ office:
 }
 
 PERSON **
-sort()
+sort(void)
 {
 	PERSON *pn, **lp;
 	PERSON **list;
@@ -150,15 +147,13 @@ sort()
 }
 
 int
-psort(p, t)
-	const void *p, *t;
+psort(const void *p, const void *t)
 {
 	return(strcmp((*(PERSON **)p)->name, (*(PERSON **)t)->name));
 }
 
 void
-stimeprint(w)
-	WHERE *w;
+stimeprint(WHERE *w)
 {
 	struct tm *delta;
 

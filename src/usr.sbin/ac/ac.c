@@ -14,7 +14,7 @@
  */
 
 #ifndef lint
-static char rcsid[] = "$Id: ac.c,v 1.13 2003/03/13 09:09:37 deraadt Exp $";
+static char rcsid[] = "$Id: ac.c,v 1.15 2003/07/20 19:39:35 mickey Exp $";
 #endif
 
 #include <sys/types.h>
@@ -99,8 +99,7 @@ void			usage(void);
  * open wtmp or die
  */
 FILE *
-file(name)
-	char *name;
+file(char *name)
 {
 	FILE *fp;
 
@@ -115,11 +114,10 @@ file(name)
 }
 
 struct tty_list *
-add_tty(name)
-	char *name;
+add_tty(char *name)
 {
 	struct tty_list *tp;
-	register char *rcp;
+	char *rcp;
 
 	Flags |= AC_T;
 
@@ -145,8 +143,7 @@ add_tty(name)
  * should we process the named tty?
  */
 int
-do_tty(name)
-	char *name;
+do_tty(char *name)
 {
 	struct tty_list *tp;
 	int def_ret = 0;
@@ -170,8 +167,7 @@ do_tty(name)
  * is someone logged in on Console?
  */
 int
-on_console(head)
-	struct utmp_list *head;
+on_console(struct utmp_list *head)
 {
 	struct utmp_list *up;
 
@@ -188,10 +184,7 @@ on_console(head)
  * update user's login time
  */
 struct user_list *
-update_user(head, name, secs)
-	struct user_list *head;
-	char	*name;
-	time_t	secs;
+update_user(struct user_list *head, char *name, time_t secs)
 {
 	struct user_list *up;
 
@@ -218,9 +211,7 @@ update_user(head, name, secs)
 }
 
 int
-main(argc, argv)
-	int	argc;
-	char	**argv;
+main(int argc, char *argv[])
 {
 	FILE *fp;
 	int c;
@@ -287,17 +278,14 @@ main(argc, argv)
  * print login time in decimal hours
  */
 void
-show(name, secs)
-	char *name;
-	time_t secs;
+show(char *name, time_t secs)
 {
 	(void)printf("\t%-*s %8.2f\n", UT_NAMESIZE, name,
 	    ((double)secs / 3600));
 }
 
 void
-show_users(list)
-	struct user_list *list;
+show_users(struct user_list *list)
 {
 	struct user_list *lp;
 
@@ -309,10 +297,7 @@ show_users(list)
  * print total login time for 24hr period in decimal hours
  */
 void
-show_today(users, logins, secs)
-	struct user_list *users;
-	struct utmp_list *logins;
-	time_t secs;
+show_today(struct user_list *users, struct utmp_list *logins, time_t secs)
 {
 	struct user_list *up;
 	struct utmp_list *lp;
@@ -345,9 +330,7 @@ show_today(users, logins, secs)
  * been shut down.
  */
 struct utmp_list *
-log_out(head, up)
-	struct utmp_list *head;
-	struct utmp *up;
+log_out(struct utmp_list *head, struct utmp *up)
 {
 	struct utmp_list *lp, *lp2, *tlp;
 	time_t secs;
@@ -387,9 +370,7 @@ log_out(head, up)
  * if do_tty says ok, login a user
  */
 struct utmp_list *
-log_in(head, up)
-	struct utmp_list *head;
-	struct utmp *up;
+log_in(struct utmp_list *head, struct utmp *up)
 {
 	struct utmp_list *lp;
 
@@ -453,18 +434,20 @@ log_in(head, up)
 }
 
 int
-ac(fp)
-	FILE	*fp;
+ac(FILE	*fp)
 {
 	struct utmp_list *lp, *head = NULL;
 	struct utmp usr;
 	struct tm *ltm;
-	time_t secs = 0;
+	time_t secs = 0, prev = 0;
 	int day = -1;
 
 	while (fread((char *)&usr, sizeof(usr), 1, fp) == 1) {
 		if (!FirstTime)
 			FirstTime = usr.ut_time;
+		if (usr.ut_time < prev)
+			continue;	/* broken record */
+		prev = usr.ut_time;
 		if (Flags & AC_D) {
 			ltm = localtime(&usr.ut_time);
 			if (day >= 0 && day != ltm->tm_yday) {
@@ -545,7 +528,7 @@ ac(fp)
 }
 
 void
-usage()
+usage(void)
 {
 	extern char *__progname;
 	(void)fprintf(stderr,

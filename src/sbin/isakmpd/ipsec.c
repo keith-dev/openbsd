@@ -1,4 +1,4 @@
-/*	$OpenBSD: ipsec.c,v 1.72 2002/11/21 12:09:20 ho Exp $	*/
+/*	$OpenBSD: ipsec.c,v 1.80 2003/09/02 18:15:55 ho Exp $	*/
 /*	$EOM: ipsec.c,v 1.143 2000/12/11 23:57:42 niklas Exp $	*/
 
 /*
@@ -14,11 +14,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by Ericsson Radio Systems.
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -336,7 +331,7 @@ ipsec_finalize_exchange (struct message *msg)
 		  /* Initiator is source, responder is destination.  */
 		  if (ipsec_set_network (ie->id_ci, ie->id_cr, isa))
 		    {
-		      log_error ("ipsec_finalize_exchange: "
+		      log_print ("ipsec_finalize_exchange: "
 				 "ipsec_set_network failed");
 		      return;
 		    }
@@ -346,7 +341,7 @@ ipsec_finalize_exchange (struct message *msg)
 		  /* Responder is source, initiator is destination.  */
 		  if (ipsec_set_network (ie->id_cr, ie->id_ci, isa))
 		    {
-		      log_error ("ipsec_finalize_exchange: "
+		      log_print ("ipsec_finalize_exchange: "
 				 "ipsec_set_network failed");
 		      return;
 		    }
@@ -419,6 +414,7 @@ static int
 ipsec_set_network (u_int8_t *src_id, u_int8_t *dst_id, struct ipsec_sa *isa)
 {
   int id;
+  char *v;
 
   /* Set source address/mask.  */
   id = GET_ISAKMP_ID_TYPE (src_id);
@@ -429,7 +425,7 @@ ipsec_set_network (u_int8_t *src_id, u_int8_t *dst_id, struct ipsec_sa *isa)
       isa->src_net =
 	(struct sockaddr *)calloc (1, sizeof (struct sockaddr_in));
       if (!isa->src_net)
-	return -1;
+	goto memfail;
       isa->src_net->sa_family = AF_INET;
 #ifndef USE_OLD_SOCKADDR
       isa->src_net->sa_len = sizeof (struct sockaddr_in);
@@ -438,7 +434,7 @@ ipsec_set_network (u_int8_t *src_id, u_int8_t *dst_id, struct ipsec_sa *isa)
       isa->src_mask =
 	(struct sockaddr *)calloc (1, sizeof (struct sockaddr_in));
       if (!isa->src_mask)
-	return -1;
+	goto memfail;
       isa->src_mask->sa_family = AF_INET;
 #ifndef USE_OLD_SOCKADDR
       isa->src_mask->sa_len = sizeof (struct sockaddr_in);
@@ -450,7 +446,7 @@ ipsec_set_network (u_int8_t *src_id, u_int8_t *dst_id, struct ipsec_sa *isa)
       isa->src_net =
 	(struct sockaddr *)calloc (1, sizeof (struct sockaddr_in6));
       if (!isa->src_net)
-	return -1;
+	goto memfail;
       isa->src_net->sa_family = AF_INET6;
 #ifndef USE_OLD_SOCKADDR
       isa->src_net->sa_len = sizeof (struct sockaddr_in6);
@@ -459,12 +455,23 @@ ipsec_set_network (u_int8_t *src_id, u_int8_t *dst_id, struct ipsec_sa *isa)
       isa->src_mask =
 	(struct sockaddr *)calloc (1, sizeof (struct sockaddr_in6));
       if (!isa->src_mask)
-	return -1;
+	goto memfail;
       isa->src_mask->sa_family = AF_INET6;
 #ifndef USE_OLD_SOCKADDR
       isa->src_mask->sa_len = sizeof (struct sockaddr_in6);
 #endif
       break;
+
+    case IPSEC_ID_IPV4_RANGE:
+    case IPSEC_ID_IPV6_RANGE:
+    case IPSEC_ID_DER_ASN1_DN:
+    case IPSEC_ID_DER_ASN1_GN:
+    case IPSEC_ID_KEY_ID:
+    default:
+      v = constant_lookup (ipsec_id_cst, id);
+      log_print ("ipsec_set_network: ID type %d (%s) not supported",
+		 id, v ? v : "<unknown>");
+      return -1;
     }
 
   /* Net */
@@ -499,7 +506,7 @@ ipsec_set_network (u_int8_t *src_id, u_int8_t *dst_id, struct ipsec_sa *isa)
       isa->dst_net =
 	(struct sockaddr *)calloc (1, sizeof (struct sockaddr_in));
       if (!isa->dst_net)
-	return -1;
+	goto memfail;
       isa->dst_net->sa_family = AF_INET;
 #ifndef USE_OLD_SOCKADDR
       isa->dst_net->sa_len = sizeof (struct sockaddr_in);
@@ -508,7 +515,7 @@ ipsec_set_network (u_int8_t *src_id, u_int8_t *dst_id, struct ipsec_sa *isa)
       isa->dst_mask =
 	(struct sockaddr *)calloc (1, sizeof (struct sockaddr_in));
       if (!isa->dst_mask)
-	return -1;
+	goto memfail;
       isa->dst_mask->sa_family = AF_INET;
 #ifndef USE_OLD_SOCKADDR
       isa->dst_mask->sa_len = sizeof (struct sockaddr_in);
@@ -520,7 +527,7 @@ ipsec_set_network (u_int8_t *src_id, u_int8_t *dst_id, struct ipsec_sa *isa)
       isa->dst_net =
 	(struct sockaddr *)calloc (1, sizeof (struct sockaddr_in6));
       if (!isa->dst_net)
-	return -1;
+	goto memfail;
       isa->dst_net->sa_family = AF_INET6;
 #ifndef USE_OLD_SOCKADDR
       isa->dst_net->sa_len = sizeof (struct sockaddr_in6);
@@ -529,7 +536,7 @@ ipsec_set_network (u_int8_t *src_id, u_int8_t *dst_id, struct ipsec_sa *isa)
       isa->dst_mask =
 	(struct sockaddr *)calloc (1, sizeof (struct sockaddr_in6));
       if (!isa->dst_mask)
-	return -1;
+	goto memfail;
       isa->dst_mask->sa_family = AF_INET6;
 #ifndef USE_OLD_SOCKADDR
       isa->dst_mask->sa_len = sizeof (struct sockaddr_in6);
@@ -562,6 +569,10 @@ ipsec_set_network (u_int8_t *src_id, u_int8_t *dst_id, struct ipsec_sa *isa)
   memcpy (&isa->dport, dst_id + ISAKMP_ID_DOI_DATA_OFF + IPSEC_ID_PORT_OFF,
 	  IPSEC_ID_PORT_LEN);
   return 0;
+
+ memfail:
+  log_error ("ipsec_set_network: calloc () failed");
+  return -1;
 }
 
 /* Free the DOI-specific exchange data pointed to by VIE.  */
@@ -769,7 +780,7 @@ ipsec_validate_id_information (u_int8_t type, u_int8_t *extra, u_int8_t *buf,
   u_int8_t proto = GET_IPSEC_ID_PROTO (extra);
   u_int16_t port = GET_IPSEC_ID_PORT (extra);
 
-  LOG_DBG ((LOG_MESSAGE, 0,
+  LOG_DBG ((LOG_MESSAGE, 40,
 	    "ipsec_validate_id_information: proto %d port %d type %d",
 	    proto, port, type));
   if (type < IPSEC_ID_IPV4_ADDR || type > IPSEC_ID_KEY_ID)
@@ -891,7 +902,8 @@ ipsec_validate_transform_id (u_int8_t proto, u_int8_t transform_id)
 	transform_id < IPSEC_AH_MD5 || transform_id > IPSEC_AH_DES ? -1 : 0;
     case IPSEC_PROTO_IPSEC_ESP:
       return transform_id < IPSEC_ESP_DES_IV64
-	|| (transform_id > IPSEC_ESP_AES && transform_id < IPSEC_ESP_AES_MARS)
+	|| (transform_id > IPSEC_ESP_AES_128_CTR
+	    && transform_id < IPSEC_ESP_AES_MARS)
 	|| transform_id > IPSEC_ESP_AES_TWOFISH ? -1 : 0;
     case IPSEC_PROTO_IPCOMP:
       return transform_id < IPSEC_IPCOMP_OUI
@@ -1044,6 +1056,7 @@ ipsec_responder (struct message *msg)
   struct exchange *exchange = msg->exchange;
   int (**script) (struct message *) = 0;
   struct payload *p;
+  char *tag;
   u_int16_t type;
 
   /* Check that a new exchange is coherent with the IKE rules.  */
@@ -1082,13 +1095,14 @@ ipsec_responder (struct message *msg)
       for (p = TAILQ_FIRST (&msg->payload[ISAKMP_PAYLOAD_NOTIFY]); p;
 	   p = TAILQ_NEXT (p, link))
 	{
-          type = GET_ISAKMP_NOTIFY_MSG_TYPE (p->p);
+	  type = GET_ISAKMP_NOTIFY_MSG_TYPE (p->p);
+	  tag = constant_lookup (isakmp_notify_cst, type);
 	  LOG_DBG ((LOG_EXCHANGE, 10,
 		    "ipsec_responder: got NOTIFY of type %s",
-		    constant_lookup (isakmp_notify_cst, type)));
+		    tag ? tag : "<unknown>"));
 
-          if (type == ISAKMP_NOTIFY_INVALID_SPI)
-              ipsec_invalid_spi (msg, p);
+	  if (type == ISAKMP_NOTIFY_INVALID_SPI)
+	    ipsec_invalid_spi (msg, p);
 
 	  p->flags |= PL_MARK;
 	}
@@ -1214,7 +1228,7 @@ ipsec_is_attribute_incompatible (u_int16_t type, u_int8_t *value,
 	    || decode_16 (value) > IPSEC_ENCAP_TRANSPORT;
 	case IPSEC_ATTR_AUTHENTICATION_ALGORITHM:
 	  return decode_16 (value) < IPSEC_AUTH_HMAC_MD5
-	    || decode_16 (value) > IPSEC_AUTH_KPDK;
+	    || decode_16 (value) > IPSEC_AUTH_HMAC_RIPEMD;
 	case IPSEC_ATTR_KEY_LENGTH:
 	  /* XXX Blowfish needs '0'. Others appear to disregard this attr?  */
 	  return 0;
@@ -1246,11 +1260,11 @@ ipsec_debug_attribute (u_int16_t type, u_int8_t *value, u_int16_t len,
 
   /* XXX Transient solution.  */
   if (len == 2)
-    snprintf (val, 20, "%d", decode_16 (value));
+    snprintf (val, sizeof val, "%d", decode_16 (value));
   else if (len == 4)
-    snprintf (val, 20, "%d", decode_32 (value));
+    snprintf (val, sizeof val, "%d", decode_32 (value));
   else
-    snprintf (val, 20, "unrepresentable");
+    snprintf (val, sizeof val, "unrepresentable");
 
   LOG_DBG ((LOG_MESSAGE, 50, "Attribute %s value %s",
 	    constant_name (msg->exchange->phase == 1
@@ -1495,7 +1509,7 @@ ipsec_g_x (struct message *msg, int peer, u_int8_t *buf)
       return -1;
     }
   memcpy (*g_x, buf, ie->g_x_len);
-  snprintf (header, 32, "ipsec_g_x: g^x%c", initiator ? 'i' : 'r');
+  snprintf (header, sizeof header, "ipsec_g_x: g^x%c", initiator ? 'i' : 'r');
   LOG_DBG_BUF ((LOG_MISC, 80, header, *g_x, ie->g_x_len));
   return 0;
 }
@@ -1703,6 +1717,7 @@ ipsec_esp_enckeylength (struct proto *proto)
         return 16;
       return iproto->keylen / 8;
     case IPSEC_ESP_AES:
+    case IPSEC_ESP_AES_128_CTR:
       if (!iproto->keylen)
 	return 16;
       /* Fallthrough */
@@ -1724,6 +1739,12 @@ ipsec_esp_authkeylength (struct proto *proto)
     case IPSEC_AUTH_HMAC_SHA:
     case IPSEC_AUTH_HMAC_RIPEMD:
       return 20;
+    case IPSEC_AUTH_HMAC_SHA2_256:
+      return 32;
+    case IPSEC_AUTH_HMAC_SHA2_384:
+      return 48;
+    case IPSEC_AUTH_HMAC_SHA2_512:
+      return 64;
     default:
       return 0;
     }
@@ -1740,6 +1761,12 @@ ipsec_ah_keylength (struct proto *proto)
     case IPSEC_AH_SHA:
     case IPSEC_AH_RIPEMD:
       return 20;
+    case IPSEC_AH_SHA2_256:
+      return 32;
+    case IPSEC_AH_SHA2_384:
+      return 48;
+    case IPSEC_AH_SHA2_512:
+      return 64;
     default:
       return -1;
     }
@@ -2243,8 +2270,8 @@ ipsec_fill_in_hash (struct message *msg)
   for (i = 2; i < msg->iovlen; i++)
     {
       /* XXX Misleading payload type printouts.  */
-      snprintf (header, 80, "ipsec_fill_in_hash: payload %d after HASH(1)",
-		i - 1);
+      snprintf (header, sizeof header,
+		"ipsec_fill_in_hash: payload %d after HASH(1)",	i - 1);
       LOG_DBG_BUF ((LOG_MISC, 90, header, msg->iov[i].iov_base,
 		    msg->iov[i].iov_len));
       prf->Update (prf->prfctx, msg->iov[i].iov_base, msg->iov[i].iov_len);

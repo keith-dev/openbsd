@@ -1,4 +1,4 @@
-.\"	$OpenBSD: crypto.9,v 1.21 2003/02/20 06:35:25 jason Exp $
+.\"	$OpenBSD: crypto.9,v 1.25 2003/07/11 13:47:41 jmc Exp $
 .\"
 .\" The author of this man page is Angelos D. Keromytis (angelos@cis.upenn.edu)
 .\"
@@ -46,7 +46,7 @@
 .Ft struct cryptop *
 .Fn crypto_getreq "int"
 .Ft void
-.Fn crypto_freereq "void"
+.Fn crypto_freereq "struct cryptop *"
 .Bd -literal
 
 #define EALG_MAX_BLOCK_LEN      16
@@ -79,7 +79,7 @@ struct cryptop {
 	caddr_t            crp_buf;
 	caddr_t            crp_opaque;
 	struct cryptodesc *crp_desc;
-	int              (*crp_callback) (struct cryptop *);
+	int              (*crp_callback)(struct cryptop *);
 	struct cryptop    *crp_next;
 	caddr_t            crp_mac;
 };
@@ -96,16 +96,12 @@ struct cryptkop {
         u_int              krp_status;     /* return status */
         u_short            krp_iparams;    /* # of input parameters */
         u_short            krp_oparams;    /* # of output parameters */
-        u_int              krp_pad1;
-        struct crparam     krp_param[CRK_MAXPARAM];
-        struct crparam     krp_kvp[CRK_MAXPARAM];
-
-        u_int32_t          krp_hid;
+	u_int32_t	   krp_hid;
+        struct crparam     krp_param[CRK_MAXPARAM];	  /* kvm */
         int               (*krp_callback)(struct cryptkop *);
         struct cryptkop   *krp_next;
 };
 .Ed
-.br
 .Sh DESCRIPTION
 .Nm
 is a framework for drivers of cryptographic hardware to register with
@@ -146,7 +142,6 @@ Errors are only returned to the invoking function if not
 enough information to call the callback is available (meaning, there
 was a fatal error in verifying the arguments).
 For session initialization and teardown there is no callback mechanism used.
-.br
 .Pp
 The
 .Fn crypto_newsession
@@ -157,7 +152,7 @@ On success, the first argument will contain the Session Identifier (SID).
 The second argument contains all the necessary information for
 the driver to establish the session.
 The third argument indicates whether a
-hardware driver (1) should be used or not (0).
+hardware driver should be used (1) or not (0).
 The various fields in the
 .Fa cryptoini
 structure are:
@@ -301,7 +296,7 @@ Each descriptor provides
 information about what type of cryptographic operation should be done
 on the input buffer.
 The various fields are:
-.Bl -tag -width=crd_inject
+.Bl -tag
 .It Fa crd_skip
 The offset in the input buffer where processing should start.
 .It Fa crd_len
@@ -407,20 +402,20 @@ structure are:
 Operation code, such as CRK_MOD_EXP.
 .It Fa krp_status
 Return code.
-This errno-style variable indicates whether lower level reasons
+This errno-style variable indicates whether there were lower level reasons
 for operation failure.
 .It Fa krp_iparams
-Number if input parameters to the specified operation.
-Note that each operation has a (typically hardwired) number of such parameters. 
+Number of input parameters to the specified operation.
+Note that each operation has a (typically hardwired) number of such parameters.
 .It Fa krp_oparams
-Number if output parameters from the specified operation.
-Note that each operation has a (typically hardwired) number of such parameters. 
+Number of output parameters from the specified operation.
+Note that each operation has a (typically hardwired) number of such parameters.
 .It Fa krp_kvp
 An array of kernel memory blocks containing the parameters.
 .It Fa krp_hid
 Identifier specifying which low-level driver is being used.
 .It Fa krp_callback
-Callback called on completion of a keying operation. 
+Callback called on completion of a keying operation.
 .El
 .Sh DRIVER-SIDE API
 The
@@ -438,7 +433,7 @@ Drivers must first use the
 function to acquire a driver identifier, specifying the
 .Fa cc_flags
 as an argument (normally 0, but software-only drivers should specify
-.Dv CRYPTOCAP_F_SOFTWARE Ns ).
+.Dv CRYPTOCAP_F_SOFTWARE ) .
 For each algorithm the driver supports, it must then call
 .Fn crypto_register .
 The first argument is the driver identifier.
@@ -503,7 +498,7 @@ field of the
 structure.
 When the request is completed, or an error is detected, the
 .Fn process
-routine should invoked
+routine should invoke
 .Fn crypto_done .
 Session migration may be performed, as mentioned previously.
 .Pp
@@ -520,7 +515,7 @@ field of the
 structure.
 When the request is completed, or an error is detected, the
 .Fn kprocess
-routine should invoked
+routine should invoke
 .Fn crypto_kdone .
 .Sh RETURN VALUES
 .Fn crypto_register ,
@@ -541,7 +536,7 @@ on failure.
 .Fn crypto_dispatch
 returns
 .Er EINVAL
-is its argument or the callback function was
+if its argument or the callback function was
 .Dv NULL ,
 and 0 otherwise.
 The callback is provided with an error code in case of failure, in the
@@ -560,7 +555,8 @@ most of the framework code
 .Sh HISTORY
 The cryptographic framework first appeared in
 .Ox 2.7
-and was written by Angelos D. Keromytis <angelos@openbsd.org>.
+and was written by
+.An Angelos D. Keromytis Aq angelos@openbsd.org .
 .Sh BUGS
 The framework currently assumes that all the algorithms in a
 .Fn crypto_newsession

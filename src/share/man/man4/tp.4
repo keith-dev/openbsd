@@ -1,4 +1,4 @@
-.\"	$OpenBSD: tp.4,v 1.15 2003/03/06 20:40:35 jmc Exp $
+.\"	$OpenBSD: tp.4,v 1.21 2003/06/06 10:29:41 jmc Exp $
 .\"	$NetBSD: tp.4,v 1.4 1994/11/30 16:22:38 jtc Exp $
 .\"
 .\" Copyright (c) 1990, 1991, 1993
@@ -12,11 +12,7 @@
 .\" 2. Redistributions in binary form must reproduce the above copyright
 .\"    notice, this list of conditions and the following disclaimer in the
 .\"    documentation and/or other materials provided with the distribution.
-.\" 3. All advertising materials mentioning features or use of this software
-.\"    must display the following acknowledgement:
-.\"	This product includes software developed by the University of
-.\"	California, Berkeley and its contributors.
-.\" 4. Neither the name of the University nor the names of its contributors
+.\" 3. Neither the name of the University nor the names of its contributors
 .\"    may be used to endorse or promote products derived from this software
 .\"    without specific prior written permission.
 .\"
@@ -63,7 +59,7 @@ protocol makes use of a standard
 address format,
 including a Network Service Access Point, and a Transport Service Entity
 Selector.
-Subclass 4 may make use of the internet
+Subclass 4 may make use of the
 Internet address format.
 .Pp
 Sockets utilizing the tp protocol are either
@@ -216,7 +212,7 @@ for the
 and
 .Dv TPOPT_CONN_DATA
 for
-.Va cmsg_type.
+.Va cmsg_type .
 .It Dv TPOPT_DISC_DATA \&#
 (char *) [none]
 .br
@@ -291,7 +287,7 @@ See the description of the flags below.
 .It Dv TPOPT_PARAMS
 .Ar struct tp_conn_param
 .br
-Used to get or set a group parameters for a connection.
+Used to get or set group parameters for a connection.
 The
 .Ar struct tp_conn_param
 is the argument used with the
@@ -308,7 +304,7 @@ structure are
 described below.
 .El
 .Pp
-.Em Values for TPOPT_PARAMS:
+.Em Values for TPOPT_PARAMS :
 .Bl -tag -width p_sendack_ticks
 .It Ar p_Nretrans
 nonzero short integer [1]
@@ -409,7 +405,7 @@ implementation places upper bounds of
 .It Ar p_ack_strat
 .Dv TPACK_EACH
 or
-.Dv TPACK_WINDOW.
+.Dv TPACK_WINDOW .
 .Bq Dv TPACK_WINDOW
 .br
 This parameter applies only to class 4.
@@ -563,7 +559,7 @@ Its meaning is as follows.
 The bit numbering used is that of the RT PC, which means that bit
 0 is the most significant bit, while bit 8 is the least significant bit.
 .sp 1
-.Em Values for TPOPT_FLAGS:
+.Em Values for TPOPT_FLAGS :
 .Bl -tag -width Bitsx
 .It Sy Bits
 .Sy Description [Default]
@@ -584,12 +580,12 @@ entity.
 Not used.
 .It \&3
 .Dv TPFLAG_XPD_PRES :
-set when expedited data are present
+set when expedited data are present.
 [0]
 .It 4\&..7
 Reserved.
 .El
-.Sh ERROR VALUES
+.Sh ERRORS
 The
 .Tn TP
 entity returns
@@ -598,13 +594,14 @@ error values as defined in
 .Aq Pa sys/errno.h
 and
 .Aq Pa netiso/iso_errno.h .
-User programs may print messages associated with these value by
-using an expanded version of
-.Xr perror 3
-found in the
-.Tn ISO
-library,
-.Pa libisodir.a .
+.\" User programs may print messages associated with these value by
+.\" using an expanded version of
+.\" .Xr perror 3
+.\" found in the
+.\" .Tn ISO
+.\" library,
+.\" .Pa libisodir.a .
+.br
 .Pp
 If the
 .Tn TP
@@ -624,7 +621,7 @@ system call, the system call may be interrupted,
 in which case the
 .Va errno
 value upon return from the system call is
-.Er EINTR.
+.Er EINTR .
 If the signal
 .Dv SIGURG
 is being handled by reading
@@ -638,7 +635,7 @@ because the
 call had not yet returned a
 legitimate socket descriptor when the signal was handled.
 .Dv ETIMEDOUT
-(or a some other
+(or some other
 .Va errno
 value appropriate to the type of error) is returned if
 .Dv SIGURG

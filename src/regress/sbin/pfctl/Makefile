@@ -1,4 +1,4 @@
-# $OpenBSD: Makefile,v 1.118 2003/03/19 14:03:52 henning Exp $
+# $OpenBSD: Makefile,v 1.163 2003/08/20 16:33:08 henning Exp $
 
 # TARGETS
 # pf: feed pfNN.in through pfctl and check wether the output matches pfNN.ok
@@ -12,18 +12,18 @@
 
 PFTESTS=1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27
 PFTESTS+=28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47 48 49 50
-PFTESTS+=51 52 53 54 55 56 57 58 59 60
+PFTESTS+=51 52 53 54 55 56 57 58 59 60 61 62 63 64 65 66 67 68 69 70 71 72 73
+PFTESTS+=74 75 76 77 78 79 80 81 82
 PFFAIL=1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27
-PFFAIL+=28 29 30 31 32
+PFFAIL+=28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46
 PFSIMPLE=1 2
-PFSETUP=1 2 3
+PFSETUP=1 2 3 4
 PFLOAD=1 2 3 4 5 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 23 24 25 26 27 28 29
-PFLOAD+=30 31 32 34 36 38 39 40 44 46 47 49 54 56 60
-PFALTQ=1 2 3 4 5 6
+PFLOAD+=30 31 32 34 36 38 39 40 44 46 47 48 49 54 56 60 61 65 66 67 68 69 70 71
+PFLOAD+=72 73 74 75 76 77 78 79 80 81 82
+PFALTQ=1 2 3 4 5 6 7 8 9 10 11 12 13 14
 # disabled; no altq in anchors
-# PFLOAD+=33 35 37 42 43 45 51 58 59
-# disabled; no table def in anchors
-# PFLOAD+=48
+# PFLOAD+=33 35 37 42 43 45 51 58 59 62 63 64
 # only testing parser, load test would be useless
 # PFLOAD+=6 22 41 50 52 53 55 57
 PFTABLE=1 2 3 4 5 6 7 8 9 10 11 12 13
@@ -128,8 +128,7 @@ pfr${n}-update:
 
 pfr:		${PFR_TARGETS}
 pfr-update:	${PFR_UPDATES}
-REGRESS_TARGETS+=pfr
-UPDATE_TARGETS+=pfr-update
+NODEFAULT_TARGETS+=pfr
 
 .for n in ${PFOPT}
 PFOPT_TARGETS+=pfopt${n}
@@ -171,10 +170,7 @@ pfsetup${n}-update:
 pfsetup:	${PFSETUP_TARGETS}
 pfsetup-update:	${PFSETUP_UPDATES}
 
-.ifdef DO_PFSETUP
-REGRESS_TARGETS+=pfsetup
-UPDATE_TARGETS+=pfsetup-update
-.endif
+NODEFAULT_TARGETS+=pfsetup
 
 .for n in ${PFALTQ}
 PFALTQ_TARGETS+=pfaltq${n}
@@ -200,7 +196,11 @@ pfaltq${n}-update:
 pfaltq:		${PFALTQ_TARGETS}
 pfaltq-update:	${PFALTQ_UPDATES}
 
+NODEFAULT_TARGETS+=pfaltq
+
 update:	${UPDATE_TARGETS}
+
+alltests: ${REGRESS_TARGETS} ${NODEFAULT_TARGETS}
 
 .PHONY: ${REGRESS_TARGETS}
 

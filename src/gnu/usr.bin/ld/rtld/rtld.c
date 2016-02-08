@@ -1,4 +1,4 @@
-/*	$OpenBSD: rtld.c,v 1.36 2003/01/19 23:35:02 espie Exp $	*/
+/*	$OpenBSD: rtld.c,v 1.38 2003/08/15 23:13:06 deraadt Exp $	*/
 /*	$NetBSD: rtld.c,v 1.43 1996/01/14 00:35:17 pk Exp $	*/
 /*
  * Copyright (c) 1993 Paul Kranenburg
@@ -46,6 +46,7 @@
 #include <dlfcn.h>
 #include <fcntl.h>
 #include <a.out.h>
+#include <limits.h>
 #include <stab.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -1227,54 +1228,42 @@ static char			*hint_search_path = "";
 static void
 maphints(void)
 {
-	caddr_t		addr;
+	struct stat	sb;
+	caddr_t		addr = MAP_FAILED;
 
-	if ((hfd = open(_PATH_LD_HINTS, O_RDONLY, 0)) == -1) {
-		hheader = (struct hints_header *)-1;
-		return;
-	}
+	if ((hfd = open(_PATH_LD_HINTS, O_RDONLY, 0)) < 0)
+		goto bad_hints;
 
-	hsize = PAGSIZ;
+	if (fstat(hfd, &sb) != 0 || !S_ISREG(sb.st_mode) ||
+	    sb.st_size < sizeof(struct hints_header) || sb.st_size > LONG_MAX)
+		goto bad_hints;
+
+	hsize = (long)sb.st_size;
 	addr = mmap(0, hsize, PROT_READ, MAP_COPY, hfd, 0);
-
-	if (addr == (caddr_t)MAP_FAILED) {
-		close(hfd);
-		hheader = (struct hints_header *)-1;
-		return;
-	}
+	if (addr == MAP_FAILED)
+		goto bad_hints;
 
 	hheader = (struct hints_header *)addr;
-	if (HH_BADMAG(*hheader)) {
-		munmap(addr, hsize);
-		close(hfd);
-		hheader = (struct hints_header *)-1;
-		return;
-	}
+	if (HH_BADMAG(*hheader) || hheader->hh_ehints > hsize)
+		goto bad_hints;
 
 	if (hheader->hh_version != LD_HINTS_VERSION_1 &&
-	    hheader->hh_version != LD_HINTS_VERSION_2) {
-		munmap(addr, hsize);
-		close(hfd);
-		hheader = (struct hints_header *)-1;
-		return;
-	}
-
-	if (hheader->hh_ehints > hsize) {
-		if (mmap(addr+hsize, hheader->hh_ehints - hsize,
-				PROT_READ, MAP_COPY|MAP_FIXED,
-				hfd, hsize) != (caddr_t)(addr+hsize)) {
-
-			munmap((caddr_t)hheader, hsize);
-			close(hfd);
-			hheader = (struct hints_header *)-1;
-			return;
-		}
-	}
+	    hheader->hh_version != LD_HINTS_VERSION_2)
+		goto bad_hints;
 
 	hbuckets = (struct hints_bucket *)(addr + hheader->hh_hashtab);
 	hstrtab = (char *)(addr + hheader->hh_strtab);
 	if (hheader->hh_version >= LD_HINTS_VERSION_2)
 		hint_search_path = hstrtab + hheader->hh_dirlist;
+
+	return;
+
+bad_hints:
+	if (addr != MAP_FAILED)
+		munmap(addr, hsize);
+	if (hfd != -1)
+		close(hfd);
+	hheader = (struct hints_header *)-1;
 }
 
 static void
@@ -1316,11 +1305,11 @@ findhint(char *name, int major, int minor, char *prefered_path)
 	while (1) {
 		/* Sanity check */
 		if (bp->hi_namex >= hheader->hh_strtab_sz) {
-			warnx("Bad name index: %#x\n", bp->hi_namex);
+			warnx("Bad name index: %#x", bp->hi_namex);
 			break;
 		}
 		if (bp->hi_pathx >= hheader->hh_strtab_sz) {
-			warnx("Bad path index: %#x\n", bp->hi_pathx);
+			warnx("Bad path index: %#x", bp->hi_pathx);
 			break;
 		}
 

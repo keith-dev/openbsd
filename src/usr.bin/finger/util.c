@@ -1,4 +1,4 @@
-/*	$OpenBSD: util.c,v 1.15 2001/01/15 18:16:06 deraadt Exp $	*/
+/*	$OpenBSD: util.c,v 1.19 2003/07/02 21:04:10 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1989 The Regents of the University of California.
@@ -16,11 +16,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -39,7 +35,7 @@
 
 #ifndef lint
 /*static char sccsid[] = "from: @(#)util.c	5.14 (Berkeley) 1/17/91";*/
-static char rcsid[] = "$OpenBSD: util.c,v 1.15 2001/01/15 18:16:06 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: util.c,v 1.19 2003/07/02 21:04:10 deraadt Exp $";
 #endif /* not lint */
 
 #include <sys/types.h>
@@ -60,11 +56,13 @@ static char rcsid[] = "$OpenBSD: util.c,v 1.15 2001/01/15 18:16:06 deraadt Exp $
 #include "finger.h"
 #include "extern.h"
 
-char *estrdup(char *);
+char	*estrdup(char *);
+WHERE	*walloc(PERSON *pn);
+void	find_idle_and_ttywrite(WHERE *);
+void	userinfo(PERSON *, struct passwd *);
 
 void
-find_idle_and_ttywrite(w)
-	WHERE *w;
+find_idle_and_ttywrite(WHERE *w)
 {
 	struct stat sb;
 
@@ -92,9 +90,7 @@ estrdup(char *s)
 }
 
 void
-userinfo(pn, pw)
-	PERSON *pn;
-	struct passwd *pw;
+userinfo(PERSON *pn, struct passwd *pw)
 {
 	char *p;
 	char *bp, name[1024];
@@ -135,9 +131,7 @@ userinfo(pn, pw)
 }
 
 int
-match(pw, user)
-	struct passwd *pw;
-	char *user;
+match(struct passwd *pw, char *user)
 {
 	char *p, *t;
 	char name[1024];
@@ -156,11 +150,7 @@ match(pw, user)
 
 /* inspired by usr.sbin/sendmail/util.c::buildfname */
 void
-expandusername(gecos, login, buf, buflen)
-	char *gecos;
-	char *login;
-	char *buf;
-	int buflen;
+expandusername(char *gecos, char *login, char *buf, int buflen)
 {
 	char *p, *bp;
 
@@ -190,8 +180,7 @@ expandusername(gecos, login, buf, buflen)
 }
 
 void
-enter_lastlog(pn)
-	PERSON *pn;
+enter_lastlog(PERSON *pn)
 {
 	WHERE *w;
 	static int opened, fd;
@@ -240,9 +229,7 @@ enter_lastlog(pn)
 }
 
 void
-enter_where(ut, pn)
-	struct utmp *ut;
-	PERSON *pn;
+enter_where(struct utmp *ut, PERSON *pn)
 {
 	WHERE *w = walloc(pn);
 
@@ -256,8 +243,7 @@ enter_where(ut, pn)
 }
 
 PERSON *
-enter_person(pw)
-	struct passwd *pw;
+enter_person(struct passwd *pw)
 {
 	PERSON *pn, **pp;
 
@@ -284,8 +270,7 @@ enter_person(pw)
 }
 
 PERSON *
-find_person(name)
-	char *name;
+find_person(char *name)
 {
 	PERSON *pn;
 
@@ -298,8 +283,7 @@ find_person(name)
 }
 
 int
-hash(name)
-	char *name;
+hash(char *name)
 {
 	int h, i;
 
@@ -311,7 +295,7 @@ hash(name)
 }
 
 PERSON *
-palloc()
+palloc(void)
 {
 	PERSON *p;
 
@@ -321,8 +305,7 @@ palloc()
 }
 
 WHERE *
-walloc(pn)
-	PERSON *pn;
+walloc(PERSON *pn)
 {
 	WHERE *w;
 
@@ -339,8 +322,7 @@ walloc(pn)
 }
 
 char *
-prphone(num)
-	char *num;
+prphone(char *num)
 {
 	char *p;
 	int len;
@@ -394,8 +376,7 @@ prphone(num)
  * The caller is responsible for free()'ing the returned string.
  */
 char *
-vs(src)
-	char *src;
+vs(char *src)
 {
 	char *dst;
 

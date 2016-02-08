@@ -1,4 +1,4 @@
-/*	$OpenBSD: paste.c,v 1.10 2002/02/16 21:27:51 millert Exp $	*/
+/*	$OpenBSD: paste.c,v 1.13 2003/07/10 00:06:51 david Exp $	*/
 
 /*
  * Copyright (c) 1989 The Regents of the University of California.
@@ -15,11 +15,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -44,10 +40,11 @@ char copyright[] =
 
 #ifndef lint
 /*static char sccsid[] = "from: @(#)paste.c	5.7 (Berkeley) 10/30/90";*/
-static char rcsid[] = "$OpenBSD: paste.c,v 1.10 2002/02/16 21:27:51 millert Exp $";
+static char rcsid[] = "$OpenBSD: paste.c,v 1.13 2003/07/10 00:06:51 david Exp $";
 #endif /* not lint */
 
 #include <sys/types.h>
+#include <err.h>
 #include <errno.h>
 #include <limits.h>
 #include <stdio.h>
@@ -64,9 +61,7 @@ void	parallel(char **);
 void	sequential(char **);
 
 int
-main(argc, argv)
-	int argc;
-	char **argv;
+main(int argc, char *argv[])
 {
 	extern char *optarg;
 	extern int optind;
@@ -108,8 +103,7 @@ typedef struct _list {
 } LIST;
 
 void
-parallel(argv)
-	char **argv;
+parallel(char **argv)
 {
 	LIST *lp;
 	int cnt;
@@ -190,8 +184,7 @@ parallel(argv)
 }
 
 void
-sequential(argv)
-	char **argv;
+sequential(char **argv)
 {
 	FILE *fp;
 	int cnt;
@@ -239,8 +232,7 @@ sequential(argv)
 }
 
 int
-tr(arg)
-	char *arg;
+tr(char *arg)
 {
 	int cnt;
 	char ch, *p;
@@ -271,7 +263,7 @@ tr(arg)
 }
 
 void
-usage()
+usage(void)
 {
 	(void)fprintf(stderr, "paste: [-s] [-d delimiters] file ...\n");
 	exit(1);

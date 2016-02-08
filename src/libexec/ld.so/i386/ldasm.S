@@ -1,7 +1,8 @@
-/*	$OpenBSD: ldasm.S,v 1.4 2003/02/02 16:57:58 deraadt Exp $ */
+/*	$OpenBSD: ldasm.S,v 1.7 2003/07/09 21:01:10 drahn Exp $ */
 
 /*
  * Copyright (c) 2002 Dale Rahn
+ * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -11,16 +12,10 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed under OpenBSD by
- *	Dale Rahn.
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS
  * OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
- * WsdfARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
  * ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY
  * DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
  * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
@@ -45,6 +40,7 @@ _dl_start:
 	movl	%esp,%eax		# save stack pointer for _rtld
 	pushl	%ebx			# save ps_strings
 	subl	$DL_DATA_SIZE,%esp	# allocate dl_data
+	pushl	$0			# push 0 for dynamicp (unused on i386)
 	movl	%esp,%ebx
 	movl	%ebx,%edi		# save dl_data arg for dl_boot
 	pushl	%ebx			# push dl_data for dl_boot_bind
@@ -72,7 +68,7 @@ _dl_start:
 
 	call	_dl_boot@PLT		# _dl_boot(argv,envp,loff,dl_data)
 
-	addl	$4*4,%esp			# pop args
+	addl	$5*4,%esp		# pop args
 
 	addl	$DL_DATA_SIZE,%esp	# return dl_data
 
@@ -206,6 +202,16 @@ _dl_fstat:
 	.type _dl_fcntl,@function
 _dl_fcntl:
 	mov	$SYS_fcntl, %eax
+	int	$0x80
+	jb	1f		 /* error: result = -errno */
+	ret
+
+	.section	".text"
+	.align		4
+	.global _dl_sysctl
+	.type _dl_sysctl,@function
+_dl_sysctl:
+	mov	$SYS___sysctl, %eax
 	int	$0x80
 	jb	1f		 /* error: result = -errno */
 	ret

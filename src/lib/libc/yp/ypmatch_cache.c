@@ -10,11 +10,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by Theo de Raadt.
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS
  * OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
@@ -30,7 +25,7 @@
  */
 
 #if defined(LIBC_SCCS) && !defined(lint)
-static char *rcsid = "$OpenBSD: ypmatch_cache.c,v 1.9 2002/07/31 22:28:32 deraadt Exp $";
+static char *rcsid = "$OpenBSD: ypmatch_cache.c,v 1.11 2003/06/25 21:51:56 marc Exp $";
 #endif /* LIBC_SCCS and not lint */
 
 #include <sys/param.h>
@@ -47,8 +42,18 @@ static char *rcsid = "$OpenBSD: ypmatch_cache.c,v 1.9 2002/07/31 22:28:32 deraad
 #include <rpc/xdr.h>
 #include <rpcsvc/yp.h>
 #include <rpcsvc/ypclnt.h>
-#define YPMATCHCACHE
 #include "ypinternal.h"
+
+static bool_t ypmatch_add(const char *, const char *, u_int, char *, u_int);
+static bool_t ypmatch_find(const char *, const char *, u_int, char **, u_int *);
+
+static struct ypmatch_ent {
+	struct ypmatch_ent	*next;
+	char			*map, *key;
+	char			*val;
+	int			 keylen, vallen;
+	time_t			 expire_t;
+} *ypmc;
 
 int _yplib_cache = 5;
 

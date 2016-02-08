@@ -1,4 +1,4 @@
-/*      $OpenBSD: pf_key_v2.c,v 1.122 2003/02/24 12:01:04 markus Exp $  */
+/*      $OpenBSD: pf_key_v2.c,v 1.136 2003/08/08 08:37:36 ho Exp $  */
 /*	$EOM: pf_key_v2.c,v 1.79 2000/12/12 00:33:19 niklas Exp $	*/
 
 /*
@@ -14,11 +14,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by Ericsson Radio Systems.
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -42,7 +37,12 @@
 #include <sys/socket.h>
 #include <sys/time.h>
 #include <sys/uio.h>
+
+#include "sysdep.h"
+
+#if !defined (LINUX_IPSEC)
 #include <net/pfkeyv2.h>
+#endif
 #include <netinet/in.h>
 #ifdef SADB_X_EXT_FLOW_TYPE
 #include <sys/mbuf.h>
@@ -56,8 +56,6 @@
 #include <errno.h>
 #include <bitstring.h>
 
-#include "sysdep.h"
-
 #include "cert.h"
 #include "conf.h"
 #include "exchange.h"
@@ -65,6 +63,7 @@
 #include "ipsec_num.h"
 #include "key.h"
 #include "log.h"
+#include "monitor.h"
 #include "pf_key_v2.h"
 #include "sa.h"
 #include "timer.h"
@@ -465,7 +464,7 @@ pf_key_v2_write (struct pf_key_v2_msg *pmsg)
 
   for (i = 0; i < cnt; i++)
     {
-      snprintf (header, 80, "pf_key_v2_write: iov[%d]", i);
+      snprintf (header, sizeof header, "pf_key_v2_write: iov[%d]", i);
       LOG_DBG_BUF ((LOG_SYSDEP, 80, header, (u_int8_t *)iov[i].iov_base,
 		    iov[i].iov_len));
     }
@@ -533,7 +532,7 @@ pf_key_v2_open (void)
 
   /* Open the socket we use to speak to IPsec. */
   pf_key_v2_socket = -1;
-  fd = socket (PF_KEY, SOCK_RAW, PF_KEY_V2);
+  fd = monitor_socket (PF_KEY, SOCK_RAW, PF_KEY_V2);
   if (fd == -1)
     {
       log_error ("pf_key_v2_open: "
@@ -823,7 +822,9 @@ pf_key_v2_setup_sockaddr (void *res, struct sockaddr *src,
     case AF_INET:
       ip4_sa = (struct sockaddr_in *)res;
       ip4_sa->sin_family = AF_INET;
+#ifndef USE_OLD_SOCKADDR
       ip4_sa->sin_len = sizeof *ip4_sa;
+#endif
       ip4_sa->sin_port = port;
       if (dst)
 	p = (u_int8_t *)(ingress
@@ -837,7 +838,9 @@ pf_key_v2_setup_sockaddr (void *res, struct sockaddr *src,
     case AF_INET6:
       ip6_sa = (struct sockaddr_in6 *)res;
       ip6_sa->sin6_family = AF_INET6;
+#ifndef USE_OLD_SOCKADDR
       ip6_sa->sin6_len = sizeof *ip6_sa;
+#endif
       ip6_sa->sin6_port = port;
       if (dst)
 	p = (u_int8_t *)(ingress
@@ -912,6 +915,7 @@ pf_key_v2_set_spi (struct sa *sa, struct proto *proto, int incoming,
 
 #ifdef SADB_X_EALG_AES
 	case IPSEC_ESP_AES:
+	/* case IPSEC_ESP_AES_128_CTR: */
 	  ssa.sadb_sa_encrypt = SADB_X_EALG_AES;
 	  break;
 #endif
@@ -957,9 +961,31 @@ pf_key_v2_set_spi (struct sa *sa, struct proto *proto, int incoming,
         case IPSEC_AUTH_HMAC_RIPEMD:
 #ifdef SADB_X_AALG_RIPEMD160HMAC96
 	  ssa.sadb_sa_auth = SADB_X_AALG_RIPEMD160HMAC96;
+#elif defined(SADB_X_AALG_RIPEMD160HMAC)
+	  ssa.sadb_sa_auth = SADB_X_AALG_RIPEMD160HMAC;
+#elif defined(SADB_X_AALG_RIPEMD160)
+	  ssa.sadb_sa_auth = SADB_X_AALG_RIPEMD160;
 #else
 	  ssa.sadb_sa_auth = SADB_AALG_RIPEMD160HMAC;
 #endif
+	  break;
+#endif
+
+#ifdef SADB_X_AALG_SHA2_256
+	case IPSEC_AUTH_HMAC_SHA2_256:
+	  ssa.sadb_sa_auth = SADB_X_AALG_SHA2_256;
+	  break;
+#endif
+
+#ifdef SADB_X_AALG_SHA2_384
+	case IPSEC_AUTH_HMAC_SHA2_384:
+	  ssa.sadb_sa_auth = SADB_X_AALG_SHA2_384;
+	  break;
+#endif
+
+#ifdef SADB_X_AALG_SHA2_512
+	case IPSEC_AUTH_HMAC_SHA2_512:
+	  ssa.sadb_sa_auth = SADB_X_AALG_SHA2_512;
 	  break;
 #endif
 
@@ -1004,9 +1030,31 @@ pf_key_v2_set_spi (struct sa *sa, struct proto *proto, int incoming,
 	case IPSEC_AH_RIPEMD:
 #ifdef SADB_X_AALG_RIPEMD160HMAC96
 	  ssa.sadb_sa_auth = SADB_X_AALG_RIPEMD160HMAC96;
+#elif defined(SADB_X_AALG_RIPEMD160HMAC)
+	  ssa.sadb_sa_auth = SADB_X_AALG_RIPEMD160HMAC;
+#elif defined(SADB_X_AALG_RIPEMD160)
+	  ssa.sadb_sa_auth = SADB_X_AALG_RIPEMD160;
 #else
 	  ssa.sadb_sa_auth = SADB_AALG_RIPEMD160HMAC;
 #endif
+	  break;
+#endif
+
+#ifdef SADB_X_AALG_SHA2_256
+	case IPSEC_AH_SHA2_256:
+	  ssa.sadb_sa_auth = SADB_X_AALG_SHA2_256;
+	  break;
+#endif
+
+#ifdef SADB_X_AALG_SHA2_384
+	case IPSEC_AH_SHA2_384:
+	  ssa.sadb_sa_auth = SADB_X_AALG_SHA2_384;
+	  break;
+#endif
+
+#ifdef SADB_X_AALG_SHA2_512
+	case IPSEC_AH_SHA2_512:
+	  ssa.sadb_sa_auth = SADB_X_AALG_SHA2_512;
 	  break;
 #endif
 
@@ -1083,7 +1131,14 @@ pf_key_v2_set_spi (struct sa *sa, struct proto *proto, int incoming,
   memset (&ssa2, 0, sizeof ssa2);
   ssa2.sadb_x_sa2_exttype = SADB_X_EXT_SA2;
   ssa2.sadb_x_sa2_len = sizeof ssa2 / PF_KEY_V2_CHUNK;
+#if defined (LINUX_IPSEC)
+  if (iproto->encap_mode == IPSEC_ENCAP_TUNNEL)
+    ssa2.sadb_x_sa2_mode = IPSEC_MODE_TUNNEL;
+  else
+    ssa2.sadb_x_sa2_mode = IPSEC_MODE_TRANSPORT;
+#else
   ssa2.sadb_x_sa2_mode = 0;
+#endif
   if (pf_key_v2_msg_add (update, (struct sadb_ext *)&ssa2, 0) == -1)
     goto cleanup;
 #endif
@@ -1674,7 +1729,8 @@ pf_key_v2_flow (struct sockaddr *laddr, struct sockaddr *lmask,
 		u_int8_t *spi, u_int8_t proto, struct sockaddr *dst,
 		struct sockaddr *src, int delete, int ingress,
 		u_int8_t srcid_type, u_int8_t *srcid, int srcid_len,
-		u_int8_t dstid_type, u_int8_t *dstid, int dstid_len)
+		u_int8_t dstid_type, u_int8_t *dstid, int dstid_len,
+		struct ipsec_proto *iproto)
 {
 #ifdef USE_DEBUG
   char *laddr_str, *lmask_str, *raddr_str, *rmask_str;
@@ -1986,9 +2042,17 @@ pf_key_v2_flow (struct sockaddr *laddr, struct sockaddr *lmask,
     goto cleanup;
   addr->sadb_address_exttype = SADB_EXT_ADDRESS_SRC;
   addr->sadb_address_len = len / PF_KEY_V2_CHUNK;
+#ifdef LINUX_IPSEC
+  addr->sadb_address_proto = tproto;
+#else
   addr->sadb_address_proto = IPSEC_ULPROTO_ANY;
+#endif
   addr->sadb_address_reserved = 0;
+#ifdef LINUX_IPSEC
+  pf_key_v2_setup_sockaddr (addr + 1, laddr, 0, sport, 0);
+#else
   pf_key_v2_setup_sockaddr (addr + 1, laddr, 0, IPSEC_PORT_ANY, 0);
+#endif
   switch (laddr->sa_family)
     {
     case AF_INET:
@@ -2013,9 +2077,17 @@ pf_key_v2_flow (struct sockaddr *laddr, struct sockaddr *lmask,
     goto cleanup;
   addr->sadb_address_exttype = SADB_EXT_ADDRESS_DST;
   addr->sadb_address_len = len / PF_KEY_V2_CHUNK;
+#ifdef LINUX_IPSEC
+  addr->sadb_address_proto = tproto;
+#else
   addr->sadb_address_proto = IPSEC_ULPROTO_ANY;
+#endif
   addr->sadb_address_reserved = 0;
+#ifdef LINUX_IPSEC
+  pf_key_v2_setup_sockaddr (addr + 1, raddr, 0, dport, 0);
+#else
   pf_key_v2_setup_sockaddr (addr + 1, raddr, 0, IPSEC_PORT_ANY, 0);
+#endif
   switch (raddr->sa_family)
     {
     case AF_INET:
@@ -2049,9 +2121,9 @@ pf_key_v2_flow (struct sockaddr *laddr, struct sockaddr *lmask,
   policy->sadb_x_policy_len = len / PF_KEY_V2_CHUNK;
   policy->sadb_x_policy_type = IPSEC_POLICY_IPSEC;
   if (ingress)
-  	policy->sadb_x_policy_dir = IPSEC_DIR_INBOUND;
+	policy->sadb_x_policy_dir = IPSEC_DIR_INBOUND;
   else
-  	policy->sadb_x_policy_dir = IPSEC_DIR_OUTBOUND;
+	policy->sadb_x_policy_dir = IPSEC_DIR_OUTBOUND;
   policy->sadb_x_policy_reserved = 0;
 
   /* Setup the IPSECREQUEST extension part.  */
@@ -2068,8 +2140,15 @@ pf_key_v2_flow (struct sockaddr *laddr, struct sockaddr *lmask,
     default:
       log_print ("pf_key_v2_flow: invalid proto %d", proto);
       goto cleanup;
-    }
+  }
+#if defined (LINUX_IPSEC)
+  if (iproto->encap_mode == IPSEC_ENCAP_TUNNEL)
+    ipsecrequest->sadb_x_ipsecrequest_mode = IPSEC_MODE_TUNNEL;
+  else
+    ipsecrequest->sadb_x_ipsecrequest_mode = IPSEC_MODE_TRANSPORT;
+#else
   ipsecrequest->sadb_x_ipsecrequest_mode = IPSEC_MODE_TUNNEL;	/* XXX */
+#endif
   ipsecrequest->sadb_x_ipsecrequest_level
     = ingress ? IPSEC_LEVEL_USE : IPSEC_LEVEL_REQUIRE;
   ipsecrequest->sadb_x_ipsecrequest_reqid = 0;	/* XXX */
@@ -2173,7 +2252,8 @@ pf_key_v2_convert_id (u_int8_t *id, int idlen, size_t *reslen, int *idtype)
       *reslen = idlen - ISAKMP_ID_DATA_OFF + ISAKMP_GEN_SZ;
       memcpy (res, id + ISAKMP_ID_DATA_OFF - ISAKMP_GEN_SZ, *reslen);
       *idtype = SADB_IDENTTYPE_FQDN;
-      LOG_DBG ((LOG_SYSDEP, 40, "pf_key_v2_convert_id: FQDN %s", res));
+      LOG_DBG ((LOG_SYSDEP, 40, "pf_key_v2_convert_id: FQDN %.*s",
+		   (int)*reslen, res));
       return res;
 
     case IPSEC_ID_USER_FQDN:
@@ -2185,7 +2265,8 @@ pf_key_v2_convert_id (u_int8_t *id, int idlen, size_t *reslen, int *idtype)
       *reslen = idlen - ISAKMP_ID_DATA_OFF + ISAKMP_GEN_SZ;
       memcpy (res, id + ISAKMP_ID_DATA_OFF - ISAKMP_GEN_SZ, *reslen);
       *idtype = SADB_IDENTTYPE_USERFQDN;
-      LOG_DBG ((LOG_SYSDEP, 40, "pf_key_v2_convert_id: UFQDN %s", res));
+      LOG_DBG ((LOG_SYSDEP, 40, "pf_key_v2_convert_id: UFQDN %.*s",
+		   (int)*reslen, res));
       return res;
 
     case IPSEC_ID_IPV4_ADDR: /* XXX CONNECTION ? */
@@ -2302,7 +2383,8 @@ pf_key_v2_enable_sa (struct sa *sa, struct sa *isakmp_sa)
   error = pf_key_v2_flow (isa->src_net, isa->src_mask, isa->dst_net,
 			  isa->dst_mask, isa->tproto, isa->sport, isa->dport,
 			  proto->spi[0], proto->proto, dst, src, 0, 0,
-			  sidtype, sid, sidlen, didtype, did, didlen);
+			  sidtype, sid, sidlen, didtype, did, didlen,
+			  proto->data);
   if (error)
     goto cleanup;
 
@@ -2312,13 +2394,17 @@ pf_key_v2_enable_sa (struct sa *sa, struct sa *isakmp_sa)
     {
     case AF_INET:
       ((struct sockaddr_in *)hostmask)->sin_family = AF_INET;
+#ifndef USE_OLD_SOCKADDR
       ((struct sockaddr_in *)hostmask)->sin_len = sizeof (struct in_addr);
+#endif
       memset (&((struct sockaddr_in *)hostmask)->sin_addr.s_addr, 0xff,
 	      sizeof (struct in_addr));
       break;
     case AF_INET6:
       ((struct sockaddr_in6 *)hostmask)->sin6_family = AF_INET6;
+#ifndef USE_OLD_SOCKADDR
       ((struct sockaddr_in6 *)hostmask)->sin6_len = sizeof (struct in6_addr);
+#endif
       memset (&((struct sockaddr_in6 *)hostmask)->sin6_addr.s6_addr, 0xff,
 	      sizeof (struct in6_addr));
       break;
@@ -2329,7 +2415,7 @@ pf_key_v2_enable_sa (struct sa *sa, struct sa *isakmp_sa)
     {
       error = pf_key_v2_flow (dst, hostmask, src, hostmask, 0, 0, 0,
 			      proto->spi[1], proto->proto, src, dst,
-			      0, 1, 0, 0, 0, 0, 0, 0);
+			      0, 1, 0, 0, 0, 0, 0, 0, proto->data);
       if (error)
 	goto cleanup;
       proto = TAILQ_NEXT (proto, link);
@@ -2339,7 +2425,8 @@ pf_key_v2_enable_sa (struct sa *sa, struct sa *isakmp_sa)
   error = pf_key_v2_flow (isa->dst_net, isa->dst_mask, isa->src_net,
 			  isa->src_mask, isa->tproto, isa->dport, isa->sport,
 			  proto->spi[1], proto->proto, src, dst, 0, 1,
-			  sidtype, sid, sidlen, didtype, did, didlen);
+			  sidtype, sid, sidlen, didtype, did, didlen,
+			  proto->data);
 
  cleanup:
 #if defined (SADB_X_EXT_FLOW_TYPE)
@@ -2367,7 +2454,7 @@ pf_key_v2_conf_refinc (int af, char *section)
   if (num == 0)
     return 0;
 
-  snprintf (conn, 22, "%d", num + 1);
+  snprintf (conn, sizeof conn, "%d", num + 1);
   conf_set (af, section, "Refcount", conn, 1, 0);
   return 0;
 }
@@ -2395,7 +2482,7 @@ pf_key_v2_conf_refhandle (int af, char *section)
   else
     if (num != 0)
       {
-	snprintf (conn, 22, "%d", num - 1);
+	snprintf (conn, sizeof conn, "%d", num - 1);
 	conf_set (af, section, "Refcount", conn, 1, 0);
       }
 
@@ -2488,7 +2575,7 @@ pf_key_v2_disable_sa (struct sa *sa, int incoming)
     return pf_key_v2_flow (isa->src_net, isa->src_mask, isa->dst_net,
 			   isa->dst_mask, isa->tproto, isa->sport, isa->dport,
 			   proto->spi[0], proto->proto, src, dst, 1, 0,
-			   0, 0, 0, 0, 0, 0);
+			   0, 0, 0, 0, 0, 0, proto->data);
   else
     {
 #if !defined (SADB_X_EXT_FLOW_TYPE)
@@ -2497,14 +2584,18 @@ pf_key_v2_disable_sa (struct sa *sa, int incoming)
 	{
 	case AF_INET:
 	  ((struct sockaddr_in *)hostmask)->sin_family = AF_INET;
+#ifndef USE_OLD_SOCKADDR
 	  ((struct sockaddr_in *)hostmask)->sin_len = sizeof (struct in_addr);
+#endif
 	  memset (&((struct sockaddr_in *)hostmask)->sin_addr.s_addr, 0xff,
 		  sizeof (struct in_addr));
 	  break;
 	case AF_INET6:
 	  ((struct sockaddr_in6 *)hostmask)->sin6_family = AF_INET6;
+#ifndef USE_OLD_SOCKADDR
 	  ((struct sockaddr_in6 *)hostmask)->sin6_len =
 	    sizeof (struct in6_addr);
+#endif
 	  memset (&((struct sockaddr_in6 *)hostmask)->sin6_addr.s6_addr, 0xff,
 		  sizeof (struct in6_addr));
 	  break;
@@ -2515,7 +2606,7 @@ pf_key_v2_disable_sa (struct sa *sa, int incoming)
 	{
           error = pf_key_v2_flow (dst, hostmask, src, hostmask, 0, 0, 0,
 				  proto->spi[1], proto->proto, src, dst,
-				  1, 1, 0, 0, 0, 0, 0, 0);
+				  1, 1, 0, 0, 0, 0, 0, 0, proto->data);
           if (error)
 	    return error;
           proto = TAILQ_NEXT (proto, link);
@@ -2525,7 +2616,7 @@ pf_key_v2_disable_sa (struct sa *sa, int incoming)
       return pf_key_v2_flow (isa->dst_net, isa->dst_mask, isa->src_net,
 			     isa->src_mask, isa->tproto, isa->dport,
 			     isa->sport, proto->spi[1], proto->proto,
-			     src, dst, 1, 1, 0, 0, 0, 0, 0, 0);
+			     src, dst, 1, 1, 0, 0, 0, 0, 0, 0, proto->data);
     }
 }
 
@@ -2873,6 +2964,7 @@ pf_key_v2_acquire (struct pf_key_v2_msg *pmsg)
   struct sadb_protocol *sproto;
   char ssflow[ADDRESS_MAX], sdflow[ADDRESS_MAX];
   char sdmask[ADDRESS_MAX], ssmask[ADDRESS_MAX];
+  char *sidtype = 0, *didtype = 0;
   char lname[100], dname[100], configname[30];
   int shostflag = 0, dhostflag = 0;
   struct pf_key_v2_node *ext;
@@ -2880,15 +2972,17 @@ pf_key_v2_acquire (struct pf_key_v2_msg *pmsg)
   u_int16_t sport = 0, dport = 0;
   u_int8_t tproto = 0;
   char tmbuf[sizeof sport * 3 + 1], *xform;
+  int connlen;
 #if defined (SADB_X_CREDTYPE_NONE)
   struct sadb_x_cred *cred = 0, *sauth = 0;
 #endif
 
   /* This needs to be dynamically allocated. */
-  conn = malloc (22);
+  connlen = 22;
+  conn = malloc (connlen);
   if (!conn)
     {
-      log_error ("pf_key_v2_acquire: malloc (22) failed");
+      log_error ("pf_key_v2_acquire: malloc (%d) failed", connlen);
       return;
     }
 
@@ -3001,6 +3095,8 @@ pf_key_v2_acquire (struct pf_key_v2_msg *pmsg)
   bzero (ssmask, sizeof ssmask);
   bzero (sdmask, sizeof sdmask);
 
+  sidtype = didtype = "IPV4_ADDR_SUBNET"; /* default */
+
   switch (sflow->sa_family)
     {
     case AF_INET:
@@ -3031,9 +3127,15 @@ pf_key_v2_acquire (struct pf_key_v2_msg *pmsg)
 	  goto fail;
 	}
       if (((struct sockaddr_in *)smask)->sin_addr.s_addr == INADDR_BROADCAST)
-	shostflag = 1;
+	{
+	  shostflag = 1;
+	  sidtype = "IPV4_ADDR";
+	}
       if (((struct sockaddr_in *)dmask)->sin_addr.s_addr == INADDR_BROADCAST)
-	dhostflag = 1;
+	{
+	  dhostflag = 1;
+	  didtype = "IPV4_ADDR";
+	}
       break;
 
     case AF_INET6:
@@ -3063,10 +3165,17 @@ pf_key_v2_acquire (struct pf_key_v2_msg *pmsg)
 	  log_print ("pf_key_v2_acquire: inet_ntop failed");
 	  goto fail;
 	}
+      sidtype = didtype = "IPV6_ADDR_SUBNET";
       if (IN6_IS_ADDR_FULL (&((struct sockaddr_in6 *)smask)->sin6_addr))
-	shostflag = 1;
+	{
+	  shostflag = 1;
+	  sidtype = "IPV6_ADDR";
+	}
       if (IN6_IS_ADDR_FULL (&((struct sockaddr_in6 *)dmask)->sin6_addr))
-	dhostflag = 1;
+	{
+	  dhostflag = 1;
+	  didtype = "IPV6_ADDR";
+	}
       break;
     }
 
@@ -3135,7 +3244,7 @@ pf_key_v2_acquire (struct pf_key_v2_msg *pmsg)
           break;
 
 	default:
-	  /* 
+	  /*
 	   * The kernel will pass an all '0' EXT_ADDRESS_SRC if it wasn't
 	   * specified for the flow. In that case, do NOT specify the srcaddr
 	   * in the Peer- name below
@@ -3484,8 +3593,9 @@ pf_key_v2_acquire (struct pf_key_v2_msg *pmsg)
   /* Get a new connection sequence number. */
   for (;; connection_seq++)
     {
-      snprintf (conn, 22, "Connection-%u", connection_seq);
-      snprintf (configname, 30, "Config-Phase2-%u", connection_seq);
+      snprintf (conn, connlen, "Connection-%u", connection_seq);
+      snprintf (configname, sizeof configname, "Config-Phase2-%u",
+		connection_seq);
 
       /* Does it exist ? */
       if (!conf_get_str (conn, "Phase")
@@ -3549,7 +3659,7 @@ pf_key_v2_acquire (struct pf_key_v2_msg *pmsg)
     }
 
   /* Set the sequence number. */
-  snprintf (lname, 100, "%u", msg->sadb_msg_seq);
+  snprintf (lname, sizeof lname, "%u", msg->sadb_msg_seq);
   if (conf_set (af, conn, "Acquire-ID", lname, 0, 0))
     {
       conf_end (af, 0);
@@ -3557,8 +3667,8 @@ pf_key_v2_acquire (struct pf_key_v2_msg *pmsg)
     }
 
   /* Set Phase 2 IDs -- this is the Local-ID section. */
-  snprintf (lname, 100, "Phase2-ID:%s/%s/%u/%u", ssflow, ssmask, tproto,
-	    sport);
+  snprintf (lname, sizeof lname, "Phase2-ID:%s/%s/%u/%u", ssflow, ssmask,
+	    tproto, sport);
   if (conf_set (af, conn, "Local-ID", lname, 0, 0))
     {
       conf_end (af, 0);
@@ -3575,7 +3685,7 @@ pf_key_v2_acquire (struct pf_key_v2_msg *pmsg)
 
       if (shostflag)
         {
-	  if (conf_set (af, lname, "ID-type", "IPV4_ADDR", 0, 0)
+	  if (conf_set (af, lname, "ID-type", sidtype, 0, 0)
 	      || conf_set (af, lname, "Address", ssflow, 0, 0))
 	    {
 	      conf_end (af, 0);
@@ -3584,7 +3694,7 @@ pf_key_v2_acquire (struct pf_key_v2_msg *pmsg)
 	}
       else
         {
-	  if (conf_set (af, lname, "ID-type", "IPV4_ADDR_SUBNET", 0, 0)
+	  if (conf_set (af, lname, "ID-type", sidtype, 0, 0)
 	      || conf_set (af, lname, "Network", ssflow, 0, 0)
 	      || conf_set (af, lname, "Netmask", ssmask, 0, 0))
 	    {
@@ -3616,8 +3726,8 @@ pf_key_v2_acquire (struct pf_key_v2_msg *pmsg)
     pf_key_v2_conf_refinc (af, lname);
 
   /* Set Remote-ID section. */
-  snprintf (dname, 100, "Phase2-ID:%s/%s/%u/%u", sdflow, sdmask, tproto,
-	    dport);
+  snprintf (dname, sizeof dname, "Phase2-ID:%s/%s/%u/%u", sdflow, sdmask,
+	    tproto, dport);
   if (conf_set (af, conn, "Remote-ID", dname, 0, 0))
     {
       conf_end (af, 0);
@@ -3634,7 +3744,7 @@ pf_key_v2_acquire (struct pf_key_v2_msg *pmsg)
 
       if (dhostflag)
         {
-	  if (conf_set (af, dname, "ID-type", "IPV4_ADDR", 0, 0)
+	  if (conf_set (af, dname, "ID-type", didtype, 0, 0)
 	      || conf_set (af, dname, "Address", sdflow, 0, 0))
 	    {
 	      conf_end (af, 0);
@@ -3643,7 +3753,7 @@ pf_key_v2_acquire (struct pf_key_v2_msg *pmsg)
 	}
       else
         {
-	  if (conf_set (af, dname, "ID-type", "IPV4_ADDR_SUBNET", 0, 0)
+	  if (conf_set (af, dname, "ID-type", didtype, 0, 0)
 	      || conf_set (af, dname, "Network", sdflow, 0, 0)
 	      || conf_set (af, dname, "Netmask", sdmask, 0, 0))
 	    {
@@ -3731,7 +3841,7 @@ pf_key_v2_acquire (struct pf_key_v2_msg *pmsg)
 	  goto fail;
 	}
 
-      snprintf (confname, 120, "ISAKMP-Configuration-%s", peer);
+      snprintf (confname, sizeof confname, "ISAKMP-Configuration-%s", peer);
       if (conf_set (af, peer, "Configuration", confname, 0, 0))
         {
 	  conf_end (af, 0);
@@ -3744,7 +3854,7 @@ pf_key_v2_acquire (struct pf_key_v2_msg *pmsg)
 	{
 	  struct cert_handler *handler = 0;
 	  void *cert;
-	  char num[10], *certprint;
+	  char num[12], *certprint;
 
 	  /* Convert to bytes in-place. */
 	  cred->sadb_x_cred_len *= PF_KEY_V2_CHUNK;
@@ -3760,11 +3870,11 @@ pf_key_v2_acquire (struct pf_key_v2_msg *pmsg)
 	  switch (cred->sadb_x_cred_type)
 	    {
 	    case SADB_X_CREDTYPE_X509:
-	      snprintf (num, 10, "%d", ISAKMP_CERTENC_X509_SIG);
+	      snprintf (num, sizeof num, "%d", ISAKMP_CERTENC_X509_SIG);
 	      handler = cert_get (ISAKMP_CERTENC_X509_SIG);
 	      break;
 	    case SADB_X_CREDTYPE_KEYNOTE:
-	      snprintf (num, 10, "%d", ISAKMP_CERTENC_KEYNOTE);
+	      snprintf (num, sizeof num, "%d", ISAKMP_CERTENC_KEYNOTE);
 	      handler = cert_get (ISAKMP_CERTENC_KEYNOTE);
 	      break;
 	    default:
@@ -4006,6 +4116,7 @@ void
 pf_key_v2_handler (int fd)
 {
   struct pf_key_v2_msg *msg;
+#if !defined (LINUX_IPSEC)
   int n;
 
   /*
@@ -4021,6 +4132,7 @@ pf_key_v2_handler (int fd)
     }
   if (!n)
     return;
+#endif /* LINUX_IPSEC */
 
   msg = pf_key_v2_read (0);
   if (msg)

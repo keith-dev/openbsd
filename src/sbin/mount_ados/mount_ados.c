@@ -1,4 +1,4 @@
-/*	$OpenBSD: mount_ados.c,v 1.9 2002/04/23 18:54:12 espie Exp $	*/
+/*	$OpenBSD: mount_ados.c,v 1.12 2003/07/03 22:41:40 tedu Exp $	*/
 /*	$NetBSD: mount_ados.c,v 1.5 1996/04/13 01:30:59 jtc Exp $	*/
 
 /*
@@ -32,7 +32,7 @@
  */
 
 #ifndef lint
-static char rcsid[] = "$OpenBSD: mount_ados.c,v 1.9 2002/04/23 18:54:12 espie Exp $";
+static char rcsid[] = "$OpenBSD: mount_ados.c,v 1.12 2003/07/03 22:41:40 tedu Exp $";
 #endif /* not lint */
 
 #include <sys/cdefs.h>
@@ -62,14 +62,12 @@ mode_t	a_mask(char *);
 void	usage(void);
 
 int
-main(argc, argv)
-	int argc;
-	char **argv;
+main(int argc, char *argv[])
 {
 	struct adosfs_args args;
 	struct stat sb;
 	int c, mntflags, set_gid, set_uid, set_mask;
-	char *dev, *dir, ndir[MAXPATHLEN+1];
+	char *dev, dir[MAXPATHLEN];
 
 	mntflags = set_gid = set_uid = set_mask = 0;
 	(void)memset(&args, '\0', sizeof(args));
@@ -102,16 +100,8 @@ main(argc, argv)
 		usage();
 
 	dev = argv[optind];
-	dir = argv[optind + 1];
-	if (dir[0] != '/') {
-		warnx("\"%s\" is a relative path.", dir);
-		if (getcwd(ndir, sizeof(ndir)) == NULL)
-			err(1, "getcwd");
-		strncat(ndir, "/", sizeof(ndir) - strlen(ndir));
-		strncat(ndir, dir, sizeof(ndir) - strlen(ndir));
-		dir = ndir;
-		warnx("using \"%s\" instead.", dir);
-	}
+	if (realpath(argv[optind + 1], dir) == NULL)
+		err(1, "realpath %s", dir);
 
 	args.fspec = dev;
 	args.export_info.ex_root = -2;	/* unchecked anyway on DOS fs */
@@ -141,8 +131,7 @@ main(argc, argv)
 }
 
 gid_t
-a_gid(s)
-	char *s;
+a_gid(char *s)
 {
 	struct group *gr;
 	char *gname;
@@ -161,8 +150,7 @@ a_gid(s)
 }
 
 uid_t
-a_uid(s)
-	char *s;
+a_uid(char *s)
 {
 	struct passwd *pw;
 	char *uname;
@@ -181,8 +169,7 @@ a_uid(s)
 }
 
 mode_t
-a_mask(s)
-	char *s;
+a_mask(char *s)
 {
 	int done, rv;
 	char *ep;
@@ -198,9 +185,10 @@ a_mask(s)
 }
 
 void
-usage()
+usage(void)
 {
 
-	fprintf(stderr, "usage: mount_ados [-o options] [-u user] [-g group] [-m mask] bdev dir\n");
+	fprintf(stderr,
+	    "usage: mount_ados [-o options] [-u user] [-g group] [-m mask] bdev dir\n");
 	exit(1);
 }

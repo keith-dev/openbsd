@@ -1,4 +1,4 @@
-/*	$OpenBSD: username.c,v 1.7 2002/07/15 17:20:36 deraadt Exp $	*/
+/* $OpenBSD: username.c,v 1.13 2003/07/07 21:36:52 deraadt Exp $	 */
 
 /*
  *  Top users/processes display for Unix
@@ -53,105 +53,83 @@
 #include <pwd.h>
 
 #include "top.local.h"
+#include "top.h"
 #include "utils.h"
 
 struct hash_el {
-    uid_t  uid;
-    char name[9];
+	uid_t	uid;
+	char	name[_PW_NAME_LEN + 1];
 };
 
-static int enter_user(uid_t, char *, int);
-static int get_user(uid_t);
+static int      enter_user(uid_t, char *, int);
+static int      get_user(uid_t);
 
-#define    is_empty_hash(x)	(hash_table[x].name[0] == 0)
+#define	is_empty_hash(x)	(hash_table[x].name[0] == 0)
 
-/* simple minded hashing function */
-/* Uid "nobody" is -2 results in hashit(-2) = -2 which is out of bounds for
-   the hash_table.  Applied abs() function to fix. 2/16/96 tpugh
-*/
-#define    hashit(i)	(abs(i) % Table_size)
+/*
+ * Simple minded hashing function, assumes i is unsigned.
+ */
+#define	hashit(i)	(i % Table_size)
 
-/* K&R requires that statically declared tables be initialized to zero. */
-/* We depend on that for hash_table and YOUR compiler had BETTER do it! */
-struct hash_el hash_table[Table_size];
+struct hash_el  hash_table[Table_size];
 
-void init_hash()
-
+char *
+username(uid_t uid)
 {
-    /*
-     *  There used to be some steps we had to take to initialize things.
-     *  We don't need to do that anymore, but we will leave this stub in
-     *  just in case future changes require initialization steps.
-     */
+	int hashindex;
+
+	hashindex = hashit(uid);
+	if (is_empty_hash(hashindex) || (hash_table[hashindex].uid != uid)) {
+		/* not here or not right -- get it out of passwd */
+		hashindex = get_user(uid);
+	}
+	return (hash_table[hashindex].name);
 }
 
-char *username(uid)
-
-uid_t uid;
-
+uid_t
+userid(char *username)
 {
-    int hashindex;
+	struct passwd *pwd;
 
-    hashindex = hashit(uid);
-    if (is_empty_hash(hashindex) || (hash_table[hashindex].uid != uid))
-    {
-	/* not here or not right -- get it out of passwd */
-	hashindex = get_user(uid);
-    }
-    return(hash_table[hashindex].name);
+	/*
+	 * Eventually we want this to enter everything in the hash table, but
+	 * for now we just do it simply and remember just the result.
+	 */
+	if ((pwd = getpwnam(username)) == NULL)
+		return ((uid_t)-1);
+
+	/* enter the result in the hash table */
+	enter_user(pwd->pw_uid, username, 1);
+
+	/* return our result */
+	return (pwd->pw_uid);
 }
 
-uid_t userid(username)
-
-char *username;
-
+/*
+ * wecare: 1 = enter it always, 0 = nice to have
+ */
+static int
+enter_user(uid_t uid, char *name, int wecare)
 {
-    struct passwd *pwd;
-
-    /* Eventually we want this to enter everything in the hash table,
-       but for now we just do it simply and remember just the result.
-     */
-
-    if ((pwd = getpwnam(username)) == NULL)
-    {
-	return(-1);
-    }
-
-    /* enter the result in the hash table */
-    enter_user(pwd->pw_uid, username, 1);
-
-    /* return our result */
-    return(pwd->pw_uid);
-}
-
-static int enter_user(uid, name, wecare)
-
-uid_t  uid;
-char *name;
-int wecare;		/* 1 = enter it always, 0 = nice to have */
-
-{
-    int hashindex;
+	int hashindex;
 
 #ifdef DEBUG
-    fprintf(stderr, "enter_hash(%u, %s, %d)\n", uid, name, wecare);
+	fprintf(stderr, "enter_hash(%u, %s, %d)\n", uid, name, wecare);
 #endif
 
-    hashindex = hashit(uid);
+	hashindex = hashit(uid);
 
-    if (!is_empty_hash(hashindex))
-    {
-	if (!wecare)
-	    return 0;		/* Don't clobber a slot for trash */
-	if (hash_table[hashindex].uid == uid)
-	    return(hashindex);	/* Fortuitous find */
-    }
-
-    /* empty or wrong slot -- fill it with new value */
-    hash_table[hashindex].uid = uid;
-    (void) strlcpy(hash_table[hashindex].name, name,
-               sizeof(hash_table[hashindex].name));
-    return(hashindex);
+	if (!is_empty_hash(hashindex)) {
+		if (!wecare)
+			return 0;	/* Don't clobber a slot for trash */
+		if (hash_table[hashindex].uid == uid)
+			return (hashindex);	/* Fortuitous find */
+	}
+	/* empty or wrong slot -- fill it with new value */
+	hash_table[hashindex].uid = uid;
+	(void) strlcpy(hash_table[hashindex].name, name,
+	    sizeof(hash_table[hashindex].name));
+	return (hashindex);
 }
 
 /*
@@ -160,51 +138,41 @@ int wecare;		/* 1 = enter it always, 0 = nice to have */
  * just handle this uid.  Otherwise we scan the passwd file
  * and cache any entries we pass over while looking.
  */
-
-static int get_user(uid)
-
-uid_t uid;
-
+static int
+get_user(uid_t uid)
 {
-    struct passwd *pwd;
+	struct passwd *pwd;
 
 #ifdef RANDOM_PW
-    /* no performance penalty for using getpwuid makes it easy */
-    if ((pwd = getpwuid(uid)) != NULL)
-    {
-	return(enter_user(pwd->pw_uid, pwd->pw_name, 1));
-    }
+	/* no performance penalty for using getpwuid makes it easy */
+	if ((pwd = getpwuid(uid)) != NULL)
+		return (enter_user(pwd->pw_uid, pwd->pw_name, 1));
 #else
 
-    int from_start = 0;
+	int from_start = 0;
 
-    /*
-     *  If we just called getpwuid each time, things would be very slow
-     *  since that just iterates through the passwd file each time.  So,
-     *  we walk through the file instead (using getpwent) and cache each
-     *  entry as we go.  Once the right record is found, we cache it and
-     *  return immediately.  The next time we come in, getpwent will get
-     *  the next record.  In theory, we never have to read the passwd file
-     *  a second time (because we cache everything we read).  But in
-     *  practice, the cache may not be large enough, so if we don't find
-     *  it the first time we have to scan the file a second time.  This
-     *  is not very efficient, but it will do for now.
-     */
-
-    while (from_start++ < 2)
-    {
-	while ((pwd = getpwent()) != NULL)
-	{
-	    if (pwd->pw_uid == uid)
-	    {
-		return(enter_user(pwd->pw_uid, pwd->pw_name, 1));
-	    }
-	    (void) enter_user(pwd->pw_uid, pwd->pw_name, 0);
+	/*
+	 *  If we just called getpwuid each time, things would be very slow
+	 *  since that just iterates through the passwd file each time.  So,
+	 *  we walk through the file instead (using getpwent) and cache each
+	 *  entry as we go.  Once the right record is found, we cache it and
+	 *  return immediately.  The next time we come in, getpwent will get
+	 *  the next record.  In theory, we never have to read the passwd file
+	 *  a second time (because we cache everything we read).  But in
+	 *  practice, the cache may not be large enough, so if we don't find
+	 *  it the first time we have to scan the file a second time.  This
+	 *  is not very efficient, but it will do for now.
+	 */
+	while (from_start++ < 2) {
+		while ((pwd = getpwent()) != NULL) {
+			if (pwd->pw_uid == uid)
+				return (enter_user(pwd->pw_uid, pwd->pw_name, 1));
+			(void) enter_user(pwd->pw_uid, pwd->pw_name, 0);
+		}
+		/* try again */
+		setpwent();
 	}
-	/* try again */
-	setpwent();
-    }
 #endif
-    /* if we can't find the name at all, then use the uid as the name */
-    return(enter_user(uid, itoa7(uid), 1));
+	/* if we can't find the name at all, then use the uid as the name */
+	return (enter_user(uid, format_uid(uid), 1));
 }

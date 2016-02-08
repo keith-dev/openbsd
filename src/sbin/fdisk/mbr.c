@@ -1,4 +1,4 @@
-/*	$OpenBSD: mbr.c,v 1.16 2002/06/09 08:13:05 todd Exp $	*/
+/*	$OpenBSD: mbr.c,v 1.19 2003/07/29 18:38:35 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1997 Tobias Weingartner
@@ -12,11 +12,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *    This product includes software developed by Tobias Weingartner.
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -49,9 +44,7 @@
 
 
 void
-MBR_init(disk, mbr)
-	disk_t *disk;
-	mbr_t *mbr;
+MBR_init(disk_t *disk, mbr_t *mbr)
 {
 	/* Fix up given mbr for this disk */
 	mbr->part[0].flag = 0;
@@ -95,12 +88,7 @@ MBR_init(disk, mbr)
 }
 
 void
-MBR_parse(disk, mbr_buf, offset, reloff, mbr)
-	disk_t *disk;
-	char *mbr_buf;
-	off_t offset;
-	off_t reloff;
-	mbr_t *mbr;
+MBR_parse(disk_t *disk, char *mbr_buf, off_t offset, off_t reloff, mbr_t *mbr)
 {
 	int i;
 
@@ -115,9 +103,7 @@ MBR_parse(disk, mbr_buf, offset, reloff, mbr)
 }
 
 void
-MBR_make(mbr, mbr_buf)
-	mbr_t *mbr;
-	char *mbr_buf;
+MBR_make(mbr_t *mbr, char *mbr_buf)
 {
 	int i;
 
@@ -130,9 +116,7 @@ MBR_make(mbr, mbr_buf)
 }
 
 void
-MBR_print(mbr, units)
-	mbr_t *mbr;
-	char *units;
+MBR_print(mbr_t *mbr, char *units)
 {
 	int i;
 
@@ -147,10 +131,7 @@ MBR_print(mbr, units)
 }
 
 int
-MBR_read(fd, where, buf)
-	int fd;
-	off_t where;
-	char *buf;
+MBR_read(int fd, off_t where, char *buf)
 {
 	off_t off;
 	int len;
@@ -166,10 +147,7 @@ MBR_read(fd, where, buf)
 }
 
 int
-MBR_write(fd, where, buf)
-	int fd;
-	off_t where;
-	char *buf;
+MBR_write(int fd, off_t where, char *buf)
 {
 	off_t off;
 	int len;
@@ -186,9 +164,7 @@ MBR_write(fd, where, buf)
 }
 
 void
-MBR_pcopy(disk, mbr)
-	disk_t *disk;
-	mbr_t *mbr;
+MBR_pcopy(disk_t *disk, mbr_t *mbr)
 {
 	/*
 	 * Copy partition table from the disk indicated
@@ -198,7 +174,7 @@ MBR_pcopy(disk, mbr)
 	int i, fd, offset = 0, reloff = 0;
 	mbr_t mbrd;
 	char mbr_disk[DEV_BSIZE];
-	
+
 	fd = DISK_open(disk->name, O_RDONLY);
 	MBR_read(fd, offset, mbr_disk);
 	DISK_close(fd);

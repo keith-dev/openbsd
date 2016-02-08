@@ -1,4 +1,4 @@
-/*	$OpenBSD: io.c,v 1.11 2002/02/18 06:38:42 deraadt Exp $	*/
+/*	$OpenBSD: io.c,v 1.13 2003/06/03 03:01:37 millert Exp $	*/
 /*	$NetBSD: io.c,v 1.3 1995/04/24 12:21:37 cgd Exp $	*/
 
 /*-
@@ -18,11 +18,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -43,7 +39,7 @@
 #if 0
 static char sccsid[] = "@(#)io.c	8.1 (Berkeley) 5/31/93";
 #else
-static char rcsid[] = "$OpenBSD: io.c,v 1.11 2002/02/18 06:38:42 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: io.c,v 1.13 2003/06/03 03:01:37 millert Exp $";
 #endif
 #endif /* not lint */
 
@@ -58,31 +54,32 @@ static char rcsid[] = "$OpenBSD: io.c,v 1.11 2002/02/18 06:38:42 deraadt Exp $";
 
 
 void
-getin(wrd1, wrd2)		/* get command from user	*/
-	char **wrd1, **wrd2;	/* no prompt, usually		*/
+getin(wrd1, siz1, wrd2, siz2)	/* get command from user	*/
+	char *wrd1; 		/* no prompt, usually		*/
+	size_t siz1;
+	char *wrd2;
+	size_t siz2;
 {
-	char   *s;
-	static char wd1buf[MAXSTR], wd2buf[MAXSTR];
-	int     first, numch;
+	char   *s, *slast;
+	int     ch, first;
 
-	*wrd1 = wd1buf;		/* return ptr to internal string*/
-	*wrd2 = wd2buf;
-	wd2buf[0] = 0;		/* in case it isn't set here	*/
-	for (s = wd1buf, first = 1, numch = 0;;) {
-		if ((*s = getchar()) >= 'A' && *s <= 'Z')
-			*s = *s - ('A' - 'a');
+	*wrd2 = 0;		/* in case it isn't set here	*/
+	for (s = wrd1, first = 1, slast = wrd1 + siz1 - 1;;) {
+		if ((ch = getchar()) >= 'A' && ch <= 'Z')
+			ch = ch - ('A' - 'a');
 		/* convert to upper case	*/
-		switch (*s) {	/* start reading from user	*/
+		switch (ch) {	/* start reading from user	*/
 		case '\n':
 			*s = 0;
 			return;
 		case ' ':
-			if (s == wd1buf || s == wd2buf)	/* initial blank  */
+			if (s == wrd1 || s == wrd2)	/* initial blank  */
 				continue;
 			*s = 0;
 			if (first) {		/* finished 1st wd; start 2nd */
-				first = numch = 0;
-				s = wd2buf;
+				first = 0;
+				s = wrd2;
+				slast = wrd2 + siz2 - 1;
 				break;
 			} else {		/* finished 2nd word */
 				FLUSHLINE;
@@ -93,13 +90,13 @@ getin(wrd1, wrd2)		/* get command from user	*/
 			printf("user closed input stream, quitting...\n");
 			exit(0);
 		default:
-			if (++numch >= MAXSTR) {	/* string too long */
+			if (s == slast) {	/* string too long */
 				printf("Give me a break!!\n");
-				wd1buf[0] = wd2buf[0] = 0;
+				*wrd1 = *wrd2 = 0;
 				FLUSHLINE;
 				return;
 			}
-			s++;
+			*s++ = ch;
 		}
 	}
 }

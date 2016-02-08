@@ -25,7 +25,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $OpenBSD: chap.c,v 1.36 2002/06/17 01:14:08 brian Exp $
+ * $OpenBSD: chap.c,v 1.39 2003/04/08 19:55:52 tedu Exp $
  */
 
 #include <sys/param.h>
@@ -596,17 +596,22 @@ chap_Failure(struct authinfo *authp)
 #endif
 #ifndef NODES
   if (authp->physical->link.lcp.want_authtype == 0x80) {
-    sprintf(buf, "E=691 R=1 M=Invalid!");
+    snprintf(buf, sizeof buf, "E=691 R=1 M=Invalid!");
     msg = buf;
   } else if (authp->physical->link.lcp.want_authtype == 0x81) {
     int i;
 
     ptr = buf;
-    ptr += sprintf(buf, "E=691 R=0 C=");
-    for (i=0; i<16; i++)
-      ptr += sprintf(ptr, "%02X", *(auth2chap(authp)->challenge.local+1+i));
+    snprintf(buf, sizeof(buf), "E=691 R=0 C=");
+    ptr += strlen(ptr);
+    for (i=0; i<16; i++) {
+      snprintf(ptr, buf + sizeof buf - ptr, "%02X", *(auth2chap(authp)->challenge.local+1+i));
+      ptr += strlen(ptr);
+      if (ptr > buf + sizeof buf)
+        break;
+    }
 
-    sprintf(ptr, " V=3 M=Invalid!");
+    snprintf(ptr, buf + sizeof buf - ptr, " V=3 M=Invalid!");
     msg = buf;
   } else
 #endif

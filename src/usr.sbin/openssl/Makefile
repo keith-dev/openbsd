@@ -1,10 +1,6 @@
+#	$OpenBSD: Makefile,v 1.13 2003/06/24 16:00:05 mickey Exp $
 
 PROG=	openssl
-
-BINOWN= root
-BINGRP= bin
-BINMODE= 555
-BINDIR= /usr/sbin
 LDADD=	-lssl -lcrypto
 MAN1=	openssl.1
 
@@ -30,7 +26,7 @@ CFLAGS+= -DB_ENDIAN
 
 CFLAGS+= -DMONOLITH -DOPENSSL_NO_IDEA -DTERMIOS -DANSI_SOURCE -DOPENSSL_NO_RC5
 CFLAGS+= -DOPENSSL_NO_MDC2
-CFLAGS+= -I/usr/include/ssl -I${SSLEAY_SRC_TOP}
+CFLAGS+= -I${SSLEAY_SRC_TOP}
 
 SRCS=	verify.c asn1pars.c req.c dgst.c dh.c enc.c passwd.c gendh.c errstr.c\
 	pkcs7.c crl2p7.c crl.c ca.c \
@@ -42,4 +38,4 @@ SRCS=	verify.c asn1pars.c req.c dgst.c dh.c enc.c passwd.c gendh.c errstr.c\
 
 .PATH:	${SSLEAY_SRC}
 
-.include<bsd.prog.mk>
+.include <bsd.prog.mk>

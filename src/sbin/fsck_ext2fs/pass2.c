@@ -1,4 +1,4 @@
-/*	$OpenBSD: pass2.c,v 1.7 2002/06/09 08:13:05 todd Exp $	*/
+/*	$OpenBSD: pass2.c,v 1.10 2003/06/11 06:22:13 deraadt Exp $	*/
 /*	$NetBSD: pass2.c,v 1.6 2000/01/28 16:01:46 bouyer Exp $	*/
 
 /*
@@ -14,11 +14,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -57,7 +53,7 @@ static int pass2check(struct inodesc *);
 static int blksort(const void *, const void *);
 
 void
-pass2()
+pass2(void)
 {
 	struct ext2fs_dinode *dp;
 	struct inoinfo **inpp, *inp;
@@ -135,7 +131,8 @@ pass2()
 				inodirty();
 			}
 		} else if ((inp->i_isize & (sblock.e2fs_bsize - 1)) != 0) {
-			getpathname(pathbuf, inp->i_number, inp->i_number);
+			getpathname(pathbuf, sizeof pathbuf, inp->i_number,
+			    inp->i_number);
 			pwarn("DIRECTORY %s: LENGTH %lu NOT MULTIPLE OF %d",
 			    pathbuf, (u_long)inp->i_isize, sblock.e2fs_bsize);
 			if (preen)
@@ -191,8 +188,7 @@ pass2()
 }
 
 static int
-pass2check(idesc)
-	struct inodesc *idesc;
+pass2check(struct inodesc *idesc)
 {
 	struct ext2fs_direct *dirp = idesc->id_dirp;
 	struct inoinfo *inp;
@@ -234,7 +230,7 @@ pass2check(idesc)
 		proto.e2d_type = EXT2_FT_DIR;
 	else
 		proto.e2d_type = 0;
-	(void)strcpy(proto.e2d_name, ".");
+	(void)strlcpy(proto.e2d_name, ".", sizeof proto.e2d_name);
 	entrysize = EXT2FS_DIRSIZ(proto.e2d_namlen);
 	if (fs2h32(dirp->e2d_ino) != 0 && strcmp(dirp->e2d_name, "..") != 0) {
 		pfatal("CANNOT FIX, FIRST ENTRY IN DIRECTORY CONTAINS %s\n",
@@ -269,7 +265,7 @@ chk1:
 		proto.e2d_type = EXT2_FT_DIR;
 	else
 		proto.e2d_type = 0;
-	(void)strcpy(proto.e2d_name, "..");
+	(void)strlcpy(proto.e2d_name, "..", sizeof proto.e2d_name);
 	entrysize = EXT2FS_DIRSIZ(2);
 	if (idesc->id_entryno == 0) {
 		n = EXT2FS_DIRSIZ(dirp->e2d_namlen);
@@ -386,10 +382,10 @@ again:
 		case DFOUND:
 			inp = getinoinfo(fs2h32(dirp->e2d_ino));
 			if (inp->i_parent != 0 && idesc->id_entryno > 2) {
-				getpathname(pathbuf, idesc->id_number,
-				    idesc->id_number);
-				getpathname(namebuf, fs2h32(dirp->e2d_ino),
-					fs2h32(dirp->e2d_ino));
+				getpathname(pathbuf, sizeof pathbuf,
+				    idesc->id_number, idesc->id_number);
+				getpathname(namebuf, sizeof namebuf,
+				    fs2h32(dirp->e2d_ino), fs2h32(dirp->e2d_ino));
 				pwarn("%s %s %s\n", pathbuf,
 				    "IS AN EXTRANEOUS HARD LINK TO DIRECTORY",
 				    namebuf);
@@ -434,8 +430,7 @@ again:
  * Routine to sort disk blocks.
  */
 static int
-blksort(inpp1, inpp2)
-	const void *inpp1, *inpp2;
+blksort(const void *inpp1, const void *inpp2)
 {
 	return ((* (struct inoinfo **) inpp1)->i_blks[0] -
 		(* (struct inoinfo **) inpp2)->i_blks[0]);

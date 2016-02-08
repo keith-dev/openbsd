@@ -1,15 +1,16 @@
-/*	$OpenBSD: pwrite.c,v 1.1 2002/02/08 20:58:02 art Exp $	*/
+/*	$OpenBSD: pwrite.c,v 1.3 2003/09/02 23:52:17 david Exp $	*/
 /*
  *	Written by Artur Grabowski <art@openbsd.org> 2002 Public Domain.
  */
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <unistd.h>
 #include <err.h>
 #include <fcntl.h>
 
 int
-main()
+main(int argc, char *argv[])
 {	
 	char temp[] = "/tmp/pwriteXXXXXXXXX";
 	const char magic[10] = "0123456789";

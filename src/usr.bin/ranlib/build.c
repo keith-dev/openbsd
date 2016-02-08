@@ -1,4 +1,4 @@
-/*	$OpenBSD: build.c,v 1.8 2001/11/19 19:02:15 mpech Exp $	*/
+/*	$OpenBSD: build.c,v 1.11 2003/06/12 20:58:10 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 1990 The Regents of the University of California.
@@ -15,11 +15,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -38,7 +34,7 @@
 
 #ifndef lint
 /*static char sccsid[] = "from: @(#)build.c	5.3 (Berkeley) 3/12/91";*/
-static char rcsid[] = "$OpenBSD: build.c,v 1.8 2001/11/19 19:02:15 mpech Exp $";
+static char rcsid[] = "$OpenBSD: build.c,v 1.11 2003/06/12 20:58:10 deraadt Exp $";
 #endif /* not lint */
 
 #include <sys/types.h>
@@ -78,7 +74,7 @@ static int rexec();
 static void symobj();
 
 int
-build()
+build(void)
 {
 	CF cf;
 	int afd, tfd;
@@ -140,9 +136,7 @@ build()
  *	out.
  */
 static int
-rexec(rfd, wfd)
-	int rfd;
-	int wfd;
+rexec(int rfd, int wfd)
 {
 	RLIB *rp;
 	long nsyms;
@@ -248,8 +242,7 @@ bad: 	if (nr < 0)
  *	writing.  Use the right format depending on mid.
  */
 static void
-symobj(mid)
-	int mid;
+symobj(int mid)
 {
 	RLIB *rp, *rnext;
 	struct ranlib rn;
@@ -284,7 +277,7 @@ symobj(mid)
 
 	/* Put out the ranlib archive file header. */
 #define	DEFMODE	(S_IRUSR|S_IWUSR|S_IRGRP|S_IWGRP|S_IROTH|S_IWOTH)
-	(void)sprintf(hb, HDR2, RANLIBMAG, 0L, uid, gid,
+	(void)snprintf(hb, sizeof hb, HDR2, RANLIBMAG, 0L, uid, gid,
 	    DEFMODE & ~umask(0), (off_t)ransize, ARFMAG);
 	if (!fwrite(hb, sizeof(struct ar_hdr), 1, fp))
 		error(tname);

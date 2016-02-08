@@ -10,11 +10,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -32,7 +28,7 @@
  */
 
 #if defined(LIBC_SCCS) && !defined(lint)
-static char rcsid[] = "$OpenBSD: nlist.c,v 1.43 2003/03/10 04:02:49 david Exp $";
+static char rcsid[] = "$OpenBSD: nlist.c,v 1.46 2003/08/27 17:16:00 mickey Exp $";
 #endif /* LIBC_SCCS and not lint */
 
 #include <sys/types.h>
@@ -55,6 +51,14 @@ static char rcsid[] = "$OpenBSD: nlist.c,v 1.43 2003/03/10 04:02:49 david Exp $"
 
 #ifdef _NLIST_DO_ECOFF
 #include <sys/exec_ecoff.h>
+#endif
+
+int	__fdnlist(int, struct nlist *);
+int	__aout_fdnlist(int, struct nlist *);
+int	__ecoff_fdnlist(int, struct nlist *);
+int	__elf_fdnlist(int, struct nlist *);
+#ifdef _NLIST_DO_ELF
+int	__elf_is_okay__(register Elf_Ehdr *ehdr);
 #endif
 
 #define	ISLAST(p)	(p->n_un.n_name == 0 || p->n_un.n_name[0] == 0)
@@ -452,7 +456,20 @@ __elf_fdnlist(fd, list)
 				/*	 is pretty rude. */
 				switch(ELF_ST_TYPE(s->st_info)) {
 				case STT_NOTYPE:
-					p->n_type = N_UNDF;
+					switch (s->st_shndx) {
+					case SHN_UNDEF:
+						p->n_type = N_UNDF;
+						break;
+					case SHN_ABS:
+						p->n_type = N_ABS;
+						break;
+					case SHN_COMMON:
+						p->n_type = N_COMM;
+						break;
+					default:
+						p->n_type = N_COMM | N_EXT;
+						break;
+					}
 					break;
 				case STT_OBJECT:
 					p->n_type = N_DATA;

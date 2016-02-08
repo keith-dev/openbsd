@@ -1,5 +1,5 @@
 /*	$NetBSD: create.c,v 1.11 1996/09/05 09:24:19 mycroft Exp $	*/
-/*	$OpenBSD: create.c,v 1.18 2002/03/14 17:01:16 millert Exp $	*/
+/*	$OpenBSD: create.c,v 1.20 2003/06/02 23:36:54 millert Exp $	*/
 
 /*-
  * Copyright (c) 1989, 1993
@@ -13,11 +13,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -38,7 +34,7 @@
 #if 0
 static const char sccsid[] = "@(#)create.c	8.1 (Berkeley) 6/6/93";
 #else
-static const char rcsid[] = "$OpenBSD: create.c,v 1.18 2002/03/14 17:01:16 millert Exp $";
+static const char rcsid[] = "$OpenBSD: create.c,v 1.20 2003/06/02 23:36:54 millert Exp $";
 #endif
 #endif /* not lint */
 
@@ -146,11 +142,13 @@ statf(indent, p)
 	u_int32_t len, val;
 	int fd, offset;
 	char *name, *escaped_name;
+	size_t esc_len;
 
-	escaped_name = malloc(p->fts_namelen * 4  +  1);
+	esc_len = p->fts_namelen * 4 + 1;
+	escaped_name = malloc(esc_len);
 	if (escaped_name == NULL)
 		error("statf: %s", strerror(errno));
-	strvis(escaped_name, p->fts_name, VIS_WHITE | VIS_OCTAL);
+ 	strnvis(escaped_name, p->fts_name, esc_len, VIS_WHITE | VIS_OCTAL);
 
 	if (iflag || S_ISDIR(p->fts_statp->st_mode))
 		offset = printf("%*s%s", indent, "", escaped_name);
@@ -237,10 +235,11 @@ statf(indent, p)
 	if (keys & F_SLINK &&
 	    (p->fts_info == FTS_SL || p->fts_info == FTS_SLNONE)) {
 		name = rlink(p->fts_accpath);
-		escaped_name = malloc(strlen(name) * 4  +  1);
+		esc_len = strlen(name) * 4 + 1;
+		escaped_name = malloc(esc_len);
 		if (escaped_name == NULL)
 			error("statf: %s", strerror(errno));
-		strvis(escaped_name, name, VIS_WHITE | VIS_OCTAL);
+		strnvis(escaped_name, name, esc_len, VIS_WHITE | VIS_OCTAL);
 		output(indent, &offset, "link=%s", escaped_name);
 		free(escaped_name);
 	}

@@ -1,4 +1,4 @@
-/*	$OpenBSD: extern.h,v 1.24 2002/10/18 15:38:11 millert Exp $	*/
+/*	$OpenBSD: extern.h,v 1.27 2003/06/26 00:10:17 deraadt Exp $	*/
 /*	$NetBSD: extern.h,v 1.5 1996/03/26 23:54:16 mrg Exp $	*/
 
 /*-
@@ -17,11 +17,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -117,7 +113,7 @@ int gid_name(char *, gid_t *);
  * cpio.c
  */
 int cpio_strd(void);
-int cpio_trail(ARCHD *);
+int cpio_trail(ARCHD *, char *, int, int *);
 int cpio_endwr(void);
 int cpio_id(char *, int);
 int cpio_rd(ARCHD *, char *);
@@ -226,6 +222,7 @@ extern int Lflag;
 extern int Xflag;
 extern int Yflag;
 extern int Zflag;
+extern int zeroflag;
 extern int vfpart;
 extern int patime;
 extern int pmtime;
@@ -283,7 +280,7 @@ u_int st_hash(char *, int, int);
 extern char *gnu_hack_string;
 int tar_endwr(void);
 off_t tar_endrd(void);
-int tar_trail(char *, int, int *);
+int tar_trail(ARCHD *, char *, int, int *);
 int tar_id(char *, int);
 int tar_opt(void);
 int tar_rd(ARCHD *, char *);

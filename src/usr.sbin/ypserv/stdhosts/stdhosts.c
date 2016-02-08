@@ -1,4 +1,4 @@
-/*	$OpenBSD: stdhosts.c,v 1.9 2003/02/11 01:08:27 maja Exp $ */
+/*	$OpenBSD: stdhosts.c,v 1.12 2003/07/18 22:58:56 david Exp $ */
 
 /*
  * Copyright (c) 1994 Mats O Jansson <moj@stacken.kth.se>
@@ -12,11 +12,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by Mats O Jansson
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS
  * OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
@@ -32,7 +27,7 @@
  */
 
 #ifndef LINT
-static char rcsid[] = "$OpenBSD: stdhosts.c,v 1.9 2003/02/11 01:08:27 maja Exp $";
+static const char rcsid[] = "$OpenBSD: stdhosts.c,v 1.12 2003/07/18 22:58:56 david Exp $";
 #endif
 
 #include <sys/types.h>
@@ -40,6 +35,7 @@ static char rcsid[] = "$OpenBSD: stdhosts.c,v 1.9 2003/02/11 01:08:27 maja Exp $
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
 #include <err.h>
@@ -90,7 +86,7 @@ main(int argc, char *argv[])
 
 	if (argc == 2) {
 		if ((data_file = fopen(argv[argc-1], "r")) == NULL)
-			err(1, "");
+			err(1, "error opening %s", argv[argc-1]);
 	} else
 		data_file = stdin;
 

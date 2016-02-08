@@ -1,4 +1,4 @@
-/*	$OpenBSD: board.c,v 1.5 2001/06/23 23:50:03 pjanzen Exp $	*/
+/*	$OpenBSD: board.c,v 1.7 2003/06/03 03:01:38 millert Exp $	*/
 
 /*
  * Copyright (c) 1980, 1993
@@ -12,11 +12,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -37,7 +33,7 @@
 #if 0
 static char sccsid[] = "@(#)board.c	8.1 (Berkeley) 5/31/93";
 #else
-static char rcsid[] = "$OpenBSD: board.c,v 1.5 2001/06/23 23:50:03 pjanzen Exp $";
+static char rcsid[] = "$OpenBSD: board.c,v 1.7 2003/06/03 03:01:38 millert Exp $";
 #endif
 #endif /* not lint */
 
@@ -61,7 +57,7 @@ wrboard()
 	goto lastline;
 	addstr("_____________________________________________________\n");
 	addstr(bl);
-	strcpy(ln, bl);
+	strlcpy(ln, bl, sizeof ln);
 	for (j = 1; j < 50; j += 4) {
 		k = j / 4 + (j > 24 ? 12 : 13);
 		ln[j + 1] = k % 10 + '0';
@@ -71,7 +67,7 @@ wrboard()
 	}
 	addstr(ln);
 	for (i = 0; i < 5; i++) {
-		strcpy(ln, sv);
+		strlcpy(ln, sv, sizeof ln);
 		for (j = 1; j < 50; j += 4) {
 			k = j / 4 + (j > 24 ? 12 : 13);
 			wrbsub();
@@ -101,12 +97,12 @@ wrboard()
 		ln[l] = '\0';
 		addstr(ln);
 	}
-	strcpy(ln, bl);
+	strlcpy(ln, bl, sizeof ln);
 	ln[25] = 'B';
 	ln[26] = 'A';
 	ln[27] = 'R';
 	addstr(ln);
-	strcpy(ln, sv);
+	strlcpy(ln, sv, sizeof ln);
 	for (i = 4; i > -1; i--) {
 		for (j = 1; j < 50; j += 4) {
 			k = ((j > 24 ? 53 : 49) - j) / 4;
@@ -137,7 +133,7 @@ wrboard()
 		ln[l] = '\0';
 		addstr(ln);
 	}
-	strcpy(ln, bl);
+	strlcpy(ln, bl, sizeof ln);
 	for (j = 1; j < 50; j += 4) {
 		k = ((j > 24 ? 53 : 49) - j) / 4;
 		ln[j + 1] = k % 10 + '0';

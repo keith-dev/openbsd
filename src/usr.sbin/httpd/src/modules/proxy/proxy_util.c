@@ -1,7 +1,7 @@
 /* ====================================================================
  * The Apache Software License, Version 1.1
  *
- * Copyright (c) 2000-2002 The Apache Software Foundation.  All rights
+ * Copyright (c) 2000-2003 The Apache Software Foundation.  All rights
  * reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -915,15 +915,19 @@ int ap_proxy_hex2sec(const char *x)
 /*
  * Converts a time integer to 16 hex digits
  */
-void ap_proxy_sec2hex(int t, char *y)
+int ap_proxy_sec2hex(int t, char *y, int len)
 {
     int i, ch;
     unsigned int j = t;
 
     if (-1 == t) {
-        strcpy(y, "FFFFFFFFFFFFFFFF");
-        return;
+        if (strlcpy(y, "FFFFFFFFFFFFFFFF", len) > len)
+		return (-1);
+        return (0);
     }
+
+    if (len < 17)
+	return (-1);
 
     for (i = 15; i >= 0; i--) {
         ch = j & 0xF;
@@ -934,6 +938,7 @@ void ap_proxy_sec2hex(int t, char *y)
             y[i] = ch + '0';
     }
     y[16] = '\0';
+    return (0);
 }
 
 

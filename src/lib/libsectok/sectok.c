@@ -1,4 +1,4 @@
-/* $Id: sectok.c,v 1.10 2001/08/02 17:02:05 rees Exp $ */
+/* $Id: sectok.c,v 1.12 2003/04/04 00:50:56 deraadt Exp $ */
 
 /*
 copyright 2000
@@ -411,7 +411,7 @@ lookupSym(void *handle, char *name)
 #else
     char undername[32];
 
-    sprintf(undername, "_%s", name);
+    snprintf(undername, sizeof undername, "_%s", name);
     return dlsym(handle, undername);
 #endif
 }
@@ -488,18 +488,18 @@ sectok_apdu(int fd, int cla, int ins, int p1, int p2,
 }
 
 void
-sectok_fmt_fid(char *fname, unsigned char *fid)
+sectok_fmt_fid(char *fname, size_t fnamelen, unsigned char *fid)
 {
     int f0 = fid[0], f1 = fid[1];
 
     if (f0 == 0x3f && f1 == 0)
-	sprintf(fname, "/");
+	snprintf(fname, fnamelen, "/");
     else if (myisprint(f0) && f1 == 0)
-	sprintf(fname, "%c", f0);
+	snprintf(fname, fnamelen, "%c", f0);
     else if (myisprint(f0) && myisprint(f1))
-	sprintf(fname, "%c%c", f0, f1);
+	snprintf(fname, fnamelen, "%c%c", f0, f1);
     else
-	sprintf(fname, "%02x%02x", f0, f1);
+	snprintf(fname, fnamelen, "%02x%02x", f0, f1);
 }
 
 int

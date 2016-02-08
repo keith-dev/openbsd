@@ -1,4 +1,4 @@
-/*	$OpenBSD: rtld_machine.c,v 1.11 2003/02/02 16:57:58 deraadt Exp $ */
+/*	$OpenBSD: rtld_machine.c,v 1.14 2003/09/02 15:17:51 drahn Exp $ */
 
 /*
  * Copyright (c) 1998-2002 Opsycon AB, Sweden.
@@ -11,11 +11,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by Opsycon AB, Sweden.
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS
  * OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
@@ -77,7 +72,7 @@ _dl_md_reloc(elf_object_t *object, int rel, int relsz)
 		    ELF32_ST_TYPE (sym->st_info) == STT_NOTYPE)) {
 			ooff = _dl_find_symbol(symn, _dl_objects, &this,
 			SYM_SEARCH_ALL | SYM_NOWARNNOTFOUND | SYM_PLT,
-			sym->st_size, object->load_name);
+			sym->st_size, object);
 			if (!this && ELF32_ST_BIND(sym->st_info) == STB_GLOBAL) {
 				_dl_printf("%s: can't resolve reference '%s'\n",
 				    _dl_progname, symn);
@@ -163,29 +158,25 @@ _dl_md_reloc_got(elf_object_t *object, int lazy)
 
 	this = NULL;
 	ooff = _dl_find_symbol("__got_start", object, &this,
-	    SYM_SEARCH_SELF|SYM_NOWARNNOTFOUND|SYM_PLT, SYM_NOTPLT,
-	    NULL);
+	    SYM_SEARCH_SELF|SYM_NOWARNNOTFOUND|SYM_PLT, 0, object);
 	if (this != NULL)
 		object->got_addr = ooff + this->st_value;
 
 	this = NULL;
 	ooff = _dl_find_symbol("__got_end", object, &this,
-	    SYM_SEARCH_SELF|SYM_NOWARNNOTFOUND|SYM_PLT, SYM_NOTPLT,
-	    NULL);
+	    SYM_SEARCH_SELF|SYM_NOWARNNOTFOUND|SYM_PLT, 0, object);
 	if (this != NULL)
 		object->got_size = ooff + this->st_value  - object->got_addr;
 
 	this = NULL;
 	ooff = _dl_find_symbol("__plt_start", object, &this,
-	    SYM_SEARCH_SELF|SYM_NOWARNNOTFOUND|SYM_PLT, SYM_NOTPLT,
-	    NULL);
+	    SYM_SEARCH_SELF|SYM_NOWARNNOTFOUND|SYM_PLT, 0, object);
 	if (this != NULL)
 		object->plt_addr = ooff + this->st_value;
 
 	this = NULL;
 	ooff = _dl_find_symbol("__plt_end", object, &this,
-	    SYM_SEARCH_SELF|SYM_NOWARNNOTFOUND|SYM_PLT, SYM_NOTPLT,
-	    NULL);
+	    SYM_SEARCH_SELF|SYM_NOWARNNOTFOUND|SYM_PLT, 0, object);
 	if (this != NULL)
 		object->plt_size = ooff + this->st_value  - object->plt_addr;
 
@@ -202,7 +193,7 @@ DL_DEB(("got: '%s' = %x\n", strt + symp->st_name, symp->st_value));
 				ooff = _dl_find_symbol(strt + symp->st_name,
 				    _dl_objects, &this,
 				    SYM_SEARCH_ALL|SYM_NOWARNNOTFOUND|SYM_PLT,
-				    symp->st_size, object->load_name);
+				    symp->st_size, object);
 				if (this)
 					*gotp = this->st_value + ooff;
 			} else
@@ -213,7 +204,7 @@ DL_DEB(("got: '%s' = %x\n", strt + symp->st_name, symp->st_value));
 			ooff = _dl_find_symbol(strt + symp->st_name,
 			    _dl_objects, &this,
 			    SYM_SEARCH_ALL|SYM_NOWARNNOTFOUND|SYM_PLT,
-			    symp->st_size, object->load_name);
+			    symp->st_size, object);
 			if (this)
 				*gotp = this->st_value + ooff;
 		} else if (ELF32_ST_TYPE(symp->st_info) == STT_FUNC) {

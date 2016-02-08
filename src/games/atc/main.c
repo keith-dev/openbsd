@@ -1,4 +1,4 @@
-/*	$OpenBSD: main.c,v 1.9 2002/12/06 21:48:50 millert Exp $	*/
+/*	$OpenBSD: main.c,v 1.11 2003/06/03 03:01:38 millert Exp $	*/
 /*	$NetBSD: main.c,v 1.4 1995/04/27 21:22:25 mycroft Exp $	*/
 
 /*-
@@ -16,11 +16,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -56,7 +52,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)main.c	8.1 (Berkeley) 5/31/93";
 #else
-static char rcsid[] = "$OpenBSD: main.c,v 1.9 2002/12/06 21:48:50 millert Exp $";
+static char rcsid[] = "$OpenBSD: main.c,v 1.11 2003/06/03 03:01:38 millert Exp $";
 #endif
 #endif /* not lint */
 
@@ -148,7 +144,7 @@ main(ac, av)
 	if (f_printpath) {
 		char	buf[256];
 
-		strcpy(buf, _PATH_GAMES);
+		strlcpy(buf, _PATH_GAMES, sizeof buf);
 		buf[strlen(buf) - 1] = '\0';
 		puts(buf);
 	}
@@ -262,8 +258,8 @@ default_game()
 	static char	file[256];
 	char		line[256], games[256];
 
-	strcpy(games, _PATH_GAMES);
-	strcat(games, GAMES);
+	strlcpy(games, _PATH_GAMES, sizeof games);
+	strlcat(games, GAMES, sizeof games);
 
 	if ((fp = fopen(games, "r")) == NULL) {
 		warn("fopen %s", games);
@@ -279,8 +275,8 @@ default_game()
 		warnx("default game name too long");
 		return (NULL);
 	}
-	strcpy(file, _PATH_GAMES);
-	strcat(file, line);
+	strlcpy(file, _PATH_GAMES, sizeof file);
+	strlcat(file, line, sizeof file);
 	return (file);
 }
 
@@ -293,8 +289,8 @@ okay_game(s)
 	const char	*ret = NULL;
 	char		line[256], games[256];
 
-	strcpy(games, _PATH_GAMES);
-	strcat(games, GAMES);
+	strlcpy(games, _PATH_GAMES, sizeof games);
+	strlcat(games, GAMES, sizeof games);
 
 	if ((fp = fopen(games, "r")) == NULL) {
 		warn("fopen %s", games);
@@ -307,8 +303,8 @@ okay_game(s)
 				warnx("game name too long");
 				return (NULL);
 			}
-			strcpy(file, _PATH_GAMES);
-			strcat(file, line);
+			strlcpy(file, _PATH_GAMES, sizeof file);
+			strlcat(file, line, sizeof file);
 			ret = file;
 			break;
 		}
@@ -331,8 +327,8 @@ list_games()
 	char		line[256], games[256];
 	int		num_games = 0;
 
-	strcpy(games, _PATH_GAMES);
-	strcat(games, GAMES);
+	strlcpy(games, _PATH_GAMES, sizeof games);
+	strlcat(games, GAMES, sizeof games);
 
 	if ((fp = fopen(games, "r")) == NULL) {
 		warn("fopen %s", games);

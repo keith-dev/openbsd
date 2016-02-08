@@ -1,4 +1,4 @@
-/*	$OpenBSD: getinfo.c,v 1.5 2002/02/16 21:27:44 millert Exp $	*/
+/*	$OpenBSD: getinfo.c,v 1.7 2003/06/10 22:20:45 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 1992, 1993
@@ -14,9 +14,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by SigmaSoft, Th.  Lockert.
  * 4. The name of the author may not be used to endorse or promote products
  *    derived from this software without specific prior written permission.
  *
@@ -33,7 +30,7 @@
  */
 
 #ifndef lint
-static char rcsid[] = "$OpenBSD: getinfo.c,v 1.5 2002/02/16 21:27:44 millert Exp $";
+static char rcsid[] = "$OpenBSD: getinfo.c,v 1.7 2003/06/10 22:20:45 deraadt Exp $";
 #endif /* not lint */
 
 #include <sys/types.h>
@@ -77,9 +74,7 @@ int	igetnext(char **, char **);
  * return NULL.
  */
 static char *
-igetcap(buf, cap, type)
-	char *buf, *cap;
-	int type;
+igetcap(char *buf, char *cap, int type)
 {
 	char *bp, *cp;
 
@@ -138,10 +133,7 @@ igetcap(buf, cap, type)
  *	  MAX_RECURSION.
  */
 static int
-getent(cap, len, db_array, fd, name, depth)
-	char **cap, **db_array, *name;
-	u_int *len;
-	int fd, depth;
+getent(char **cap, u_int *len, char **db_array, int fd, char *name, int depth)
 {
 	char *r_end, *rp, **db_p;
 	int myfd, eof, foundit;
@@ -467,8 +459,7 @@ getent(cap, len, db_array, fd, name, depth)
  * record buf, -1 if not.
  */
 static int
-igetmatch(buf, name)
-	char *buf, *name;
+igetmatch(char *buf, char *name)
 {
 	char *np, *bp;
 
@@ -510,7 +501,7 @@ static int slash;
 static char **dbp;
 
 static int
-igetclose()
+igetclose(void)
 {
 	if (pfp != NULL) {
 		(void)fclose(pfp);
@@ -527,9 +518,7 @@ igetclose()
  * upon returning an entry with more remaining, and -1 if an error occurs.
  */
 int
-igetnext(bp, db_array)
-        char **bp;
-	char **db_array;
+igetnext(char **bp, char **db_array)
 {
 	size_t len;
 	int status, done;

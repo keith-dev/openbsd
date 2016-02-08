@@ -1,4 +1,4 @@
-/*	$OpenBSD: rtld_machine.c,v 1.8 2003/02/15 22:39:13 drahn Exp $ */
+/*	$OpenBSD: rtld_machine.c,v 1.13 2003/09/04 19:37:07 drahn Exp $ */
 
 /*
  * Copyright (c) 2002 Dale Rahn
@@ -13,12 +13,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed under OpenBSD by
- *	Dale Rahn.
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS
  * OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
@@ -243,11 +237,12 @@ _dl_md_reloc(elf_object_t *object, int rel, int relsz)
 				value += loff;
 			} else {
 				this = NULL;
-				ooff = _dl_find_symbol(symn, _dl_objects,
+				ooff = _dl_find_symbol_bysym(object,
+				    ELF_R_SYM(rels->r_info), _dl_objects,
 				    &this, SYM_SEARCH_ALL|SYM_WARNNOTFOUND|
 				    ((type == R_TYPE(JUMP_SLOT))?
 					SYM_PLT:SYM_NOTPLT),
-				    sym->st_size, object->load_name);
+				    sym->st_size);
 				if (this == NULL) {
 resolve_failed:
 					_dl_printf("%s: %s: can't resolve "
@@ -276,7 +271,7 @@ resolve_failed:
 			soff = _dl_find_symbol(symn, object->next, &srcsym,
 			    SYM_SEARCH_ALL|SYM_WARNNOTFOUND|
 			    ((type == R_TYPE(JUMP_SLOT)) ? SYM_PLT:SYM_NOTPLT),
-			    size, object->load_name);
+			    size, object);
 			if (srcsym == NULL)
 				goto resolve_failed;
 
@@ -373,7 +368,7 @@ _dl_bind(elf_object_t *object, int index)
 	addr = (Elf_Word *)(object->load_offs + rel->r_offset);
 	this = NULL;
 	ooff = _dl_find_symbol(symn, _dl_objects, &this,
-	    SYM_SEARCH_ALL|SYM_WARNNOTFOUND|SYM_PLT, 0, object->load_name);
+	    SYM_SEARCH_ALL|SYM_WARNNOTFOUND|SYM_PLT, sym->st_size, object);
 	if (this == NULL) {
 		_dl_printf("lazy binding failed!\n");
 		*((int *)0) = 0;        /* XXX */
@@ -423,15 +418,13 @@ _dl_md_reloc_got(elf_object_t *object, int lazy)
 	object->got_size = 0;
 	this = NULL;
 	ooff = _dl_find_symbol("__got_start", object, &this,
-	    SYM_SEARCH_SELF|SYM_NOWARNNOTFOUND|SYM_PLT, SYM_NOTPLT,
-	    NULL);
+	    SYM_SEARCH_SELF|SYM_NOWARNNOTFOUND|SYM_PLT, 0, object);
 	if (this != NULL)
 		object->got_addr = ooff + this->st_value;
 
 	this = NULL;
 	ooff = _dl_find_symbol("__got_end", object, &this,
-	    SYM_SEARCH_SELF|SYM_NOWARNNOTFOUND|SYM_PLT, SYM_NOTPLT,
-	    NULL);
+	    SYM_SEARCH_SELF|SYM_NOWARNNOTFOUND|SYM_PLT, 0, object);
 	if (this != NULL)
 		object->got_size = ooff + this->st_value  - object->got_addr;
 
@@ -445,27 +438,28 @@ _dl_md_reloc_got(elf_object_t *object, int lazy)
 
 	if (!lazy) {
 		_dl_md_reloc(object, DT_JMPREL, DT_PLTRELSZ);
-		return;
-	}
+	} else {
+		rel = (Elf_Rel *)(object->Dyn.info[DT_JMPREL]);
+		num = (object->Dyn.info[DT_PLTRELSZ]);
+		for (llist = object->load_list; llist != NULL;
+		    llist = llist->next) {
+			if (!(llist->prot & PROT_WRITE))
+				_dl_mprotect(llist->start, llist->size,
+				    llist->prot|PROT_WRITE);
+		}
+		for (i = 0; i < num/sizeof(Elf_Rel); i++, rel++) {
+			Elf_Addr *where;
+			where = (Elf_Addr *)(rel->r_offset + object->load_offs);
+			*where += object->load_offs;
+		}
+		for (llist = object->load_list; llist != NULL;
+		    llist = llist->next) {
+			if (!(llist->prot & PROT_WRITE))
+				_dl_mprotect(llist->start, llist->size,
+				    llist->prot);
+		}
 
-	rel = (Elf_Rel *)(object->Dyn.info[DT_JMPREL]);
-	num = (object->Dyn.info[DT_PLTRELSZ]);
-	for (llist = object->load_list; llist != NULL; llist = llist->next) {
-		if (!(llist->prot & PROT_WRITE))
-			_dl_mprotect(llist->start, llist->size,
-			    llist->prot|PROT_WRITE);
 	}
-	for (i = 0; i < num/sizeof(Elf_Rel); i++, rel++) {
-		Elf_Addr *where;
-		where = (Elf_Addr *)(rel->r_offset + object->load_offs);
-		*where += object->load_offs;
-	}
-	for (llist = object->load_list; llist != NULL; llist = llist->next) {
-		if (!(llist->prot & PROT_WRITE))
-			_dl_mprotect(llist->start, llist->size,
-			    llist->prot);
-	}
-
 	/* PLT is already RO on i386, no point in mprotecting it, just GOT */
 	if (object->got_size != 0)
 		_dl_mprotect((void*)object->got_start, object->got_size,

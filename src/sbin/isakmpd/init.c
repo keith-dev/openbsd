@@ -1,9 +1,10 @@
-/*	$OpenBSD: init.c,v 1.20 2002/08/07 13:19:20 ho Exp $	*/
+/*	$OpenBSD: init.c,v 1.25 2003/06/04 07:31:16 ho Exp $	*/
 /*	$EOM: init.c,v 1.25 2000/03/30 14:27:24 ho Exp $	*/
 
 /*
  * Copyright (c) 1998, 1999, 2000 Niklas Hallqvist.  All rights reserved.
  * Copyright (c) 2000 Angelos D. Keromytis.  All rights reserved.
+ * Copyright (c) 2003 Håkan Olsson.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -13,11 +14,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by Ericsson Radio Systems.
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -65,7 +61,6 @@
 void
 init (void)
 {
-  log_init ();
   app_init ();
   doi_init ();
   exchange_init ();
@@ -101,7 +96,7 @@ init (void)
 void
 reinit (void)
 {
-  log_print ("reinitializing daemon");
+  log_print ("isakmpd: reinitializing daemon");
 
   /*
    * XXX Remove all(/some?) pending exchange timers? - they may not be
@@ -142,6 +137,7 @@ reinit (void)
    * XXX "These" (non-existant) reinitializations should not be done.
    *   cookie_reinit ();
    *   ui_reinit ();
-   *   sa_reinit ();
    */
+
+  sa_reinit ();
 }

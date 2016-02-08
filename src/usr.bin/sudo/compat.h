@@ -31,7 +31,11 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $Sudo: compat.h,v 1.65 2003/03/15 20:31:02 millert Exp $
+ * Sponsored in part by the Defense Advanced Research Projects
+ * Agency (DARPA) and Air Force Research Laboratory, Air Force
+ * Materiel Command, USAF, under agreement number F39502-99-1-0512.
+ *
+ * $Sudo: compat.h,v 1.67 2003/04/16 00:42:09 millert Exp $
  */
 
 #ifndef _SUDO_COMPAT_H
@@ -211,10 +215,10 @@ int sigprocmask __P((int, const sigset_t *, sigset_t *));
 # ifndef HAVE_SIGACTION_T
 typedef struct sigaction sigaction_t;
 # endif
-# ifndef SA_INTERRUPT 
+# ifndef SA_INTERRUPT
 #  define SA_INTERRUPT	0
 # endif
-# ifndef SA_RESTART 
+# ifndef SA_RESTART
 #  define SA_RESTART	0
 # endif
 #endif
@@ -226,5 +230,18 @@ typedef struct sigaction sigaction_t;
 #ifndef RLIM_INFINITY
 # define RLIM_INFINITY	(-1)
 #endif
+
+/*
+ * If we lack getprogname(), emulate with __progname if possible.
+ * Otherwise, add a prototype for use with our own getprogname.c.
+ */
+#ifndef HAVE_GETPROGNAME
+# ifdef HAVE___PROGNAME
+extern const char *__progname;
+#  define getprogname()          (__progname)
+# else
+const char *getprogname __P((void));
+#endif /* HAVE___PROGNAME */
+#endif /* !HAVE_GETPROGNAME */
 
 #endif /* _SUDO_COMPAT_H */

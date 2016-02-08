@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	$OpenBSD: cbcp.c,v 1.16 2002/06/15 08:02:00 brian Exp $
+ *	$OpenBSD: cbcp.c,v 1.19 2003/04/28 21:31:36 tdeval Exp $
  */
 
 #include <sys/param.h>
@@ -257,8 +257,8 @@ cbcp_SendReq(struct cbcp *cbcp)
 {
   struct cbcp_data data;
   struct cbcp_addr *addr;
-  char list[sizeof cbcp->fsm.phone], *next;
-  int len, max;
+  char list[sizeof cbcp->fsm.phone], *tok, *next;
+  size_t len, max;
 
   /* Only callees send REQs */
 
@@ -279,16 +279,17 @@ cbcp_SendReq(struct cbcp *cbcp)
 
     case CBCP_LISTNUM:
       addr = (struct cbcp_addr *)data.addr_start;
-      for (next = strtok(list, ","); next; next = strtok(NULL, ",")) {
-        len = strlen(next);
-        max = data.addr_start + sizeof data.addr_start - addr->addr - 1;
-        if (len <= max) {
+      for (next = list;;) {
+        if ((tok = strsep(&next, ",")) == NULL)
+          break;
+        max = data.addr_start + sizeof data.addr_start - addr->addr;
+        if ((len = strlcpy(addr->addr, tok, max)) < max) {
+          bzero(addr->addr + len, max - len);
           addr->type = CBCP_ADDR_PSTN;
-          strcpy(addr->addr, next);
           addr = (struct cbcp_addr *)((char *)addr + len + 2);
         } else
           log_Printf(LogWARN, "CBCP ADDR \"%s\" skipped - packet too large\n",
-                     next);
+                     tok);
       }
       data.length = (char *)addr - (char *)&data;
       break;
@@ -430,7 +431,7 @@ cbcp_AdjustResponse(struct cbcp *cbcp, struct cbcp_data *data)
           for (next = strtok(list, ","); next; next = strtok(NULL, ","))
             if (!strcmp(next, addr->addr)) {
               cbcp->fsm.type = CBCP_SERVERNUM;
-              strcpy(cbcp->fsm.phone, next);
+              strlcpy(cbcp->fsm.phone, next, sizeof cbcp->fsm.phone);
               return 1;
             }
         }
@@ -456,7 +457,7 @@ cbcp_AdjustResponse(struct cbcp *cbcp, struct cbcp_data *data)
             for (next = strtok(list, ","); next; next = strtok(NULL, ","))
               if (!strcmp(next, addr->addr)) {
                 cbcp->fsm.type = CBCP_LISTNUM;
-                strcpy(cbcp->fsm.phone, next);
+                strlcpy(cbcp->fsm.phone, next, sizeof cbcp->fsm.phone);
                 return 1;
               }
           } else
@@ -478,6 +479,7 @@ cbcp_SendResponse(struct cbcp *cbcp)
 {
   struct cbcp_data data;
   struct cbcp_addr *addr;
+  size_t len, max;
 
   /* Only callers send RESPONSEs */
 
@@ -491,8 +493,11 @@ cbcp_SendResponse(struct cbcp *cbcp)
     data.length = (char *)&data.delay - (char *)&data;
   else if (*cbcp->fsm.phone) {
     addr->type = CBCP_ADDR_PSTN;
-    strcpy(addr->addr, cbcp->fsm.phone);
-    data.length = (addr->addr + strlen(addr->addr) + 1) - (char *)&data;
+    max = data.addr_start + sizeof data.addr_start - addr->addr;
+    if ((len = strlcpy(addr->addr, cbcp->fsm.phone, max)) >= max)
+      len = max - 1;
+    bzero(addr->addr + len, max - len);
+    data.length = addr->addr + len + 1 - (char *)&data;
   } else
     data.length = data.addr_start - (char *)&data;
 
@@ -531,7 +536,7 @@ cbcp_CheckResponse(struct cbcp *cbcp, struct cbcp_data *data)
           log_Printf(LogPHASE, "CBCP: Unrecognised address type %d !\n",
                      addr->type);
         else {
-          strcpy(cbcp->fsm.phone, addr->addr);
+          strlcpy(cbcp->fsm.phone, addr->addr, sizeof cbcp->fsm.phone);
           cbcp->fsm.delay = data->delay;
           return CBCP_ACTION_ACK;
         }
@@ -554,7 +559,7 @@ cbcp_CheckResponse(struct cbcp *cbcp, struct cbcp_data *data)
           list[sizeof list - 1] = '\0';
           for (next = strtok(list, ","); next; next = strtok(NULL, ","))
             if (!strcmp(addr->addr, next)) {
-              strcpy(cbcp->fsm.phone, next);
+              strlcpy(cbcp->fsm.phone, next, sizeof cbcp->fsm.phone);
               cbcp->fsm.delay = data->delay;
               return CBCP_ACTION_ACK;
             }
@@ -583,6 +588,7 @@ cbcp_SendAck(struct cbcp *cbcp)
 {
   struct cbcp_data data;
   struct cbcp_addr *addr;
+  size_t len, max;
 
   /* Only callees send ACKs */
 
@@ -597,9 +603,12 @@ cbcp_SendAck(struct cbcp *cbcp)
     case CBCP_CLIENTNUM:
       addr = (struct cbcp_addr *)data.addr_start;
       addr->type = CBCP_ADDR_PSTN;
-      strcpy(addr->addr, cbcp->fsm.phone);
+      max = data.addr_start + sizeof data.addr_start - addr->addr;
+      if ((len = strlcpy(addr->addr, cbcp->fsm.phone, max)) >= max)
+        len = max - 1;
+      bzero(addr->addr + len, max - len);
       data.delay = cbcp->fsm.delay;
-      data.length = addr->addr + strlen(addr->addr) + 1 - (char *)&data;
+      data.length = addr->addr + len + 1 - (char *)&data;
       break;
     default:
       data.delay = cbcp->fsm.delay;

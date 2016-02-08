@@ -1,8 +1,8 @@
-/*	$OpenBSD: sysdep-os.h,v 1.3 2002/08/29 15:16:33 itojun Exp $	*/
+/*	$OpenBSD: sysdep-os.h,v 1.5 2003/08/06 11:20:00 markus Exp $	*/
 
 /*
  * Copyright (c) 1998, 1999 Niklas Hallqvist.  All rights reserved.
- * Copyright (c) 2000 H\xe5kan Olsson.  All rights reserved.
+ * Copyright (c) 2000 Håkan Olsson.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -12,8 +12,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -40,6 +38,14 @@
 #define CPI_RESERVED_MAX	255
 #define CPI_PRIVATE_MIN		61440
 #define CPI_PRIVATE_MAX		65536
+#endif
+
+#if !defined(SADB_X_EALG_CAST) && defined(SADB_X_EALG_CAST128CBC)
+#define SADB_X_EALG_CAST SADB_X_EALG_CAST128CBC
+#endif
+
+#if !defined(SADB_X_EALG_BLF) && defined(SADB_X_EALG_BLOWFISHCBC)
+#define SADB_X_EALG_BLF SADB_X_EALG_BLOWFISHCBC
 #endif
 
 #endif /* _SYSDEP_OS_H_ */

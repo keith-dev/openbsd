@@ -1,4 +1,4 @@
-/*	$OpenBSD: dlfcn.c,v 1.24 2003/02/02 16:57:58 deraadt Exp $ */
+/*	$OpenBSD: dlfcn.c,v 1.31 2003/09/04 19:33:48 drahn Exp $ */
 
 /*
  * Copyright (c) 1998 Per Fogelstrom, Opsycon AB
@@ -11,12 +11,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed under OpenBSD by
- *	Per Fogelstrom, Opsycon AB, Sweden.
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS
  * OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
@@ -48,9 +42,12 @@ int _dl_errno;
 
 static int _dl_real_close(void *handle);
 static void _dl_unload_deps(elf_object_t *object);
+static void _dl_thread_kern_stop(void);
+static void _dl_thread_kern_go(void);
+static void (*_dl_thread_fnc)(int) = NULL;
 
 void *
-dlopen(const char *libname, int how)
+dlopen(const char *libname, int flags)
 {
 	elf_object_t *object, *dynobj;
 	Elf_Dyn	*dynp;
@@ -60,9 +57,16 @@ dlopen(const char *libname, int how)
 
 	DL_DEB(("dlopen: loading: %s\n", libname));
 
-	object = _dl_load_shlib(libname, _dl_objects, OBJTYPE_DLO);
-	if (object == 0)
+	_dl_thread_kern_stop();
+	object = _dl_load_shlib(libname, _dl_objects, OBJTYPE_DLO, flags);
+	/* this add_object should not be here, XXX */
+	if (object == 0) {
+		_dl_thread_kern_go();
 		return((void *)0);
+	}
+	_dl_add_object(object);
+	_dl_link_sub(object, _dl_objects);
+	_dl_thread_kern_go();
 
 	if (object->refcount > 1)
 		return((void *)object);	/* Already loaded */
@@ -86,9 +90,15 @@ dlopen(const char *libname, int how)
 				continue;
 
 			libname = dynobj->dyn.strtab + dynp->d_un.d_val;
-			depobj = _dl_load_shlib(libname, dynobj, OBJTYPE_LIB);
+			_dl_thread_kern_stop();
+			depobj = _dl_load_shlib(libname, dynobj, OBJTYPE_LIB,
+				flags|RTLD_GLOBAL);
 			if (!depobj)
 				_dl_exit(4);
+			/* this add_object should not be here, XXX */
+			_dl_add_object(depobj);
+			_dl_link_sub(depobj, dynobj);
+			_dl_thread_kern_go();
 
 			tmpobj->dep_next = _dl_malloc(sizeof(elf_object_t));
 			tmpobj->dep_next->next = depobj;
@@ -102,9 +112,9 @@ dlopen(const char *libname, int how)
 
 	if (_dl_debug_map->r_brk) {
 		_dl_debug_map->r_state = RT_ADD;
-		(*((void (*)())_dl_debug_map->r_brk))();
+		(*((void (*)(void))_dl_debug_map->r_brk))();
 		_dl_debug_map->r_state = RT_CONSISTENT;
-		(*((void (*)())_dl_debug_map->r_brk))();
+		(*((void (*)(void))_dl_debug_map->r_brk))();
 	}
 	return((void *)object);
 }
@@ -128,7 +138,7 @@ dlsym(void *handle, const char *name)
 	}
 
 	retval = (void *)_dl_find_symbol(name, object, &sym,
-	    SYM_SEARCH_SELF|SYM_NOWARNNOTFOUND|SYM_NOTPLT, 0, "");
+	    SYM_SEARCH_SELF|SYM_NOWARNNOTFOUND|SYM_NOTPLT, 0, object);
 	if (sym != NULL)
 		retval += sym->st_value;
 	else
@@ -139,12 +149,20 @@ dlsym(void *handle, const char *name)
 int
 dlctl(void *handle, int command, void *data)
 {
+	int retval;
+
 	switch (command) {
+	case DL_SETTHREADLCK:
+		DL_DEB(("dlctl: _dl_thread_fnc set to %p\n", data));
+		_dl_thread_fnc = data;
+		retval = 0;
+		break;
 	default:
 		_dl_errno = DL_INVALID_CTL;
+		retval = -1;
 		break;
 	}
-	return(-1);
+	return (retval);
 }
 
 int
@@ -159,9 +177,9 @@ dlclose(void *handle)
 
 	if (_dl_debug_map->r_brk) {
 		_dl_debug_map->r_state = RT_DELETE;
-		(*((void (*)())_dl_debug_map->r_brk))();
+		(*((void (*)(void))_dl_debug_map->r_brk))();
 		_dl_debug_map->r_state = RT_CONSISTENT;
-		(*((void (*)())_dl_debug_map->r_brk))();
+		(*((void (*)(void))_dl_debug_map->r_brk))();
 	}
 	return (retval);
 }
@@ -286,4 +304,26 @@ _dl_show_objects(void)
 		    objtypename, object->refcount, object->load_name);
 		object = object->next;
 	}
+	{
+		extern int _dl_symcachestat_hits;
+		extern int _dl_symcachestat_lookups;
+	DL_DEB(("symcache lookups %d hits %d ratio %d% hits\n",
+	    _dl_symcachestat_lookups, _dl_symcachestat_hits,
+	    (_dl_symcachestat_hits * 100) / _dl_symcachestat_lookups));
+	}
 }
+
+static void
+_dl_thread_kern_stop(void)
+{
+	if (_dl_thread_fnc != NULL)
+		(*_dl_thread_fnc)(0);
+}
+
+static void
+_dl_thread_kern_go(void)
+{
+	if (_dl_thread_fnc != NULL)
+		(*_dl_thread_fnc)(1);
+}
+

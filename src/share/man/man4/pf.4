@@ -1,4 +1,4 @@
-.\"	$OpenBSD: pf.4,v 1.29 2003/02/14 09:41:42 henning Exp $
+.\"	$OpenBSD: pf.4,v 1.37 2003/08/28 09:41:22 jmc Exp $
 .\"
 .\" Copyright (C) 2001, Kjell Wooding.  All rights reserved.
 .\"
@@ -43,8 +43,8 @@ behavior of the packet filter through an
 .Xr ioctl 2
 interface.
 There are commands to enable and disable the filter, load rulesets,
-add and remove individual rules or retrieve state table entries and
-statistics.
+add and remove individual rules or state table entries,
+and retrieve statistics.
 The most commonly used functions are covered by
 .Xr pfctl 8 .
 .Pp
@@ -335,7 +335,7 @@ indicate which anchor and ruleset the operation applies to.
 .Va nr
 indicates the rule number against which PF_CHANGE_ADD_BEFORE,
 PF_CHANGE_ADD_AFTER or PF_CHANGE_REMOVE actions are applied.
-.It Dv DIOCCHANGEADDR  Fa "struct pfioc_addr"
+.It Dv DIOCCHANGEADDR  Fa "struct pfioc_pooladdr"
 Adds or removes a pool address
 .Va addr
 from a rule specified with
@@ -374,6 +374,7 @@ of tables deleted.
 struct pfioc_table {
         struct pfr_table         pfrio_table;
         void                    *pfrio_buffer;
+        int                      pfrio_esize;
         int                      pfrio_size;
         int                      pfrio_size2;
         int                      pfrio_nadd;
@@ -395,8 +396,11 @@ On entry, pfrio_buffer[pfrio_size] contains a table of pfr_table structures.
 On exit, pfrio_nadd contains the number of tables effectively created.
 .Bd -literal
 struct pfr_table {
+        char                     pfrt_anchor[PF_ANCHOR_NAME_SIZE];
+        char                     pfrt_ruleset[PF_RULESET_NAME_SIZE];
         char                     pfrt_name[PF_TABLE_NAME_SIZE];
         u_int32_t                pfrt_flags;
+        u_int8_t                 pfrt_fback;
 };
 .Ed
 .It Dv DIOCRDELTABLES Fa "struct pfioc_table"
@@ -412,7 +416,8 @@ If the buffer is too small, the kernel does not store anything but just
 returns the required buffer size, without error.
 .It Dv DIOCRGETTSTATS Fa "struct pfioc_table"
 Like
-.Dv DIOCRGETTABLES, but returns an array of pfr_tstats structures.
+.Dv DIOCRGETTABLES ,
+but returns an array of pfr_tstats structures.
 .Bd -literal
 struct pfr_tstats {
         struct pfr_table pfrts_t;
@@ -424,7 +429,7 @@ struct pfr_tstats {
         u_int64_t        pfrts_nomatch;
         long             pfrts_tzero;
         int              pfrts_cnt;
-        int              pfrts_refcnt;
+        int              pfrts_refcnt[PFR_REFCNT_MAX];
 };
 #define pfrts_name      pfrts_t.pfrt_name
 #define pfrts_flags     pfrts_t.pfrt_flags
@@ -473,7 +478,7 @@ On exit, pfrio_ndel, pfrio_nadd and pfrio_nchange contain the number of
 addresses deleted, added and changed by the kernel.
 If pfrio_size2 was set on
 entry, pfrio_size2 will point to the size of the buffer used, exactly like
-.Dv DIOCRGETADDRS.
+.Dv DIOCRGETADDRS .
 .It Dv DIOCRGETADDRS Fa "struct pfioc_table"
 Get all the addresses of a table.
 On entry, pfrio_table contains the table id and pfrio_buffer[pfrio_size]
@@ -483,7 +488,8 @@ If the buffer was too small, the kernel does not store anything but just
 return the required buffer size, without returning an error.
 .It Dv DIOCRGETASTATS Fa "struct pfioc_table"
 Like
-.Dv DIOCRGETADDRS, but returns an array of pfr_astats structures.
+.Dv DIOCRGETADDRS ,
+but returns an array of pfr_astats structures.
 .Bd -literal
 struct pfr_astats {
         struct pfr_addr  pfras_a;
@@ -540,6 +546,83 @@ A valid ticket must also be supplied to pfrio_ticket.
 On exit, pfrio_nadd contains 0 if the table was already defined in the
 inactive list, or 1 if a new table has been created.
 pfrio_naddr contains the number of addresses effectively put in the table.
+.It Dv DIOCFPFLUSH
+Flush the passive OS fingerprint table.
+.It Dv DIOCFPADD Fa "struct pf_osfp_ioctl"
+.Bd -literal
+struct pf_osfp_ioctl {
+	struct pf_osfp_entry {
+		SLIST_ENTRY(pf_osfp_entry) fp_entry;
+		pf_osfp_t		fp_os;
+		char			fp_class_nm[PF_OSFP_LEN];
+		char			fp_version_nm[PF_OSFP_LEN];
+		char			fp_subtype_nm[PF_OSFP_LEN];
+	} 			fp_os;
+	u_int16_t		fp_mss;
+	u_int16_t		fp_wsize;
+	u_int16_t		fp_psize;
+	u_int8_t		fp_ttl;
+	u_int8_t		fp_wscale;
+	u_int8_t		fp_flags;
+	int			fp_getnum;
+};
+.Ed
+.Pp
+Add a passive OS fingerprint to the table.
+Set
+.Va fp_os.fp_os
+to the packed fingerprint,
+.Va fp_os.fp_class_nm
+to the name of the class (Linux, Windows, etc),
+.Va fp_os.fp_version_nm
+to the name of the version (NT, 95, 98), and
+.Va fp_os.fp_subtype_nm
+to the name of the subtype or patchlevel.
+The members
+.Va fp_mss ,
+.Va fp_wsize ,
+.Va fp_psize ,
+.Va fp_ttl ,
+and
+.Va fp_wscale
+are set to the TCP MSS, the TCP window size, the IP length and the IP TTL of
+the TCP SYN packet respectively.
+The
+.Va fp_flags
+member is filled according to the net/pfvar.h include file PF_OSFP_* defines.
+The
+.Va fp_getnum
+is not used with this ioctl.
+.Pp
+The structure's slack space must be zeroed for correct operation; memset
+the whole structure to zero before filling and sending to the kernel.
+.It Dv DIOCFPGET Fa "struct pf_osfp_ioctl"
+.Bd -literal
+struct pf_osfp_ioctl {
+	struct pf_osfp_entry {
+		SLIST_ENTRY(pf_osfp_entry) fp_entry;
+		pf_osfp_t		fp_os;
+		char			fp_class_nm[PF_OSFP_LEN];
+		char			fp_version_nm[PF_OSFP_LEN];
+		char			fp_subtype_nm[PF_OSFP_LEN];
+	} 			fp_os;
+	u_int16_t		fp_mss;
+	u_int16_t		fp_wsize;
+	u_int16_t		fp_psize;
+	u_int8_t		fp_ttl;
+	u_int8_t		fp_wscale;
+	u_int8_t		fp_flags;
+	int			fp_getnum;
+};
+.Ed
+.Pp
+Get the passive OS fingerprint number
+.Va fp_getnum
+from the kernel's fingerprint list.
+The rest of the structure members will come back filled.
+Get the whole list by repeatedly incrementing the
+.Va fp_getnum
+number until the ioctl returns EBUSY.
 .El
 .Sh EXAMPLES
 The following example demonstrates how to use the DIOCNATLOOK command
@@ -552,7 +635,9 @@ to find the internal host/port of a NATed connection.
 #include <net/if.h>
 #include <netinet/in.h>
 #include <net/pfvar.h>
+#include <err.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 u_int32_t
 read_address(const char *s)

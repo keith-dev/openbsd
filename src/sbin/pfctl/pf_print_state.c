@@ -1,4 +1,4 @@
-/*	$OpenBSD: pf_print_state.c,v 1.23 2003/03/24 17:06:39 cedric Exp $	*/
+/*	$OpenBSD: pf_print_state.c,v 1.33 2003/07/06 22:01:28 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
@@ -50,11 +50,11 @@ void	print_name(struct pf_addr *, sa_family_t);
 void
 print_addr(struct pf_addr_wrap *addr, sa_family_t af, int verbose)
 {
-	char buf[48];
-
-	if (addr->type == PF_ADDR_DYNIFTL)
+	switch(addr->type) {
+	case PF_ADDR_DYNIFTL:
 		printf("(%s)", addr->v.ifname);
-	else if (addr->type == PF_ADDR_TABLE) {
+		break;
+	case PF_ADDR_TABLE:
 		if (verbose)
 			if (addr->p.tblcnt == -1)
 				printf("<%s:*>", addr->v.tblname);
@@ -64,11 +64,26 @@ print_addr(struct pf_addr_wrap *addr, sa_family_t af, int verbose)
 		else
 			printf("<%s>", addr->v.tblname);
 		return;
-	} else {
-		if (inet_ntop(af, &addr->v.a.addr, buf, sizeof(buf)) == NULL)
-			printf("?");
-		else
-			printf("%s", buf);
+	case PF_ADDR_ADDRMASK:
+		if (PF_AZERO(&addr->v.a.addr, AF_INET6) &&
+		    PF_AZERO(&addr->v.a.mask, AF_INET6))
+			printf("any");
+		else {
+			char buf[48];
+
+			if (inet_ntop(af, &addr->v.a.addr, buf,
+			    sizeof(buf)) == NULL)
+				printf("?");
+			else
+				printf("%s", buf);
+		}
+		break;
+	case PF_ADDR_NOROUTE:
+		printf("no-route");
+		return;
+	default:
+		printf("?");
+		return;
 	}
 	if (! PF_AZERO(&addr->v.a.mask, af)) {
 		int bits = unmask(&addr->v.a.mask, af);
@@ -123,7 +138,10 @@ print_host(struct pf_state_host *h, sa_family_t af, int opts)
 
 		memset(&aw, 0, sizeof(aw));
 		aw.v.a.addr = h->addr;
-		memset(&aw.v.a.mask, 0xff, sizeof(aw.v.a.mask));
+		if (af == AF_INET)
+			aw.v.a.mask.addr32[0] = 0xffffffff;
+		else
+			memset(&aw.v.a.mask, 0xff, sizeof(aw.v.a.mask));
 		print_addr(&aw, af, opts & PF_OPT_VERBOSE2);
 	}
 
@@ -181,12 +199,18 @@ print_state(struct pf_state *s, int opts)
 	printf("    ");
 	if (s->proto == IPPROTO_TCP) {
 		if (src->state <= TCPS_TIME_WAIT &&
-		    dst->state <= TCPS_TIME_WAIT) {
+		    dst->state <= TCPS_TIME_WAIT)
 			printf("   %s:%s\n", tcpstates[src->state],
 			    tcpstates[dst->state]);
-		} else {
-			printf("   <BAD STATE LEVELS>\n");
-		}
+		else if (src->state == PF_TCPS_PROXY_SRC ||
+		    dst->state == PF_TCPS_PROXY_SRC)
+			printf("   PROXY:SRC\n");
+		else if (src->state == PF_TCPS_PROXY_DST ||
+		    dst->state == PF_TCPS_PROXY_DST)
+			printf("   PROXY:DST\n");
+		else
+			printf("   <BAD STATE LEVELS %u:%u>\n",
+			    src->state, dst->state);
 		if (opts & PF_OPT_VERBOSE) {
 			printf("   ");
 			print_seq(src);
@@ -203,11 +227,13 @@ print_state(struct pf_state *s, int opts)
 	} else if (s->proto == IPPROTO_UDP && src->state < PFUDPS_NSTATES &&
 	    dst->state < PFUDPS_NSTATES) {
 		const char *states[] = PFUDPS_NAMES;
+
 		printf("   %s:%s\n", states[src->state], states[dst->state]);
 	} else if (s->proto != IPPROTO_ICMP && src->state < PFOTHERS_NSTATES &&
 	    dst->state < PFOTHERS_NSTATES) {
 		/* XXX ICMP doesn't really have state levels */
 		const char *states[] = PFOTHERS_NAMES;
+
 		printf("   %s:%s\n", states[src->state], states[dst->state]);
 	} else {
 		printf("   %u:%u\n", src->state, dst->state);
@@ -224,7 +250,10 @@ print_state(struct pf_state *s, int opts)
 		min = s->expire % 60;
 		s->expire /= 60;
 		printf(", expires in %.2u:%.2u:%.2u", s->expire, min, sec);
-		printf(", %u pkts, %u bytes", s->packets, s->bytes);
+		printf(", %u:%u pkts, %u:%u bytes",
+		    s->packets[0], s->packets[1], s->bytes[0], s->bytes[1]);
+		if (s->anchor.nr != -1)
+			printf(", anchor %u", s->anchor.nr);
 		if (s->rule.nr != -1)
 			printf(", rule %u", s->rule.nr);
 		printf("\n");
@@ -234,18 +263,14 @@ print_state(struct pf_state *s, int opts)
 int
 unmask(struct pf_addr *m, sa_family_t af)
 {
-	int i = 31, j = 0, b = 0, msize;
+	int i = 31, j = 0, b = 0;
 	u_int32_t tmp;
 
-	if (af == AF_INET)
-		msize = 1;
-	else
-		msize = 4;
-	while (j < msize && m->addr32[j] == 0xffffffff) {
+	while (j < 4 && m->addr32[j] == 0xffffffff) {
 		b += 32;
 		j++;
 	}
-	if (j < msize) {
+	if (j < 4) {
 		tmp = ntohl(m->addr32[j]);
 		for (i = 31; tmp & (1 << i); --i)
 			b++;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.5 1997/03/23 04:43:22 millert Exp $	*/
+/*	$OpenBSD: conf.c,v 1.8 2003/07/29 18:38:36 deraadt Exp $	*/
 /*	$NetBSD: conf.c,v 1.4 1995/04/23 10:33:19 cgd Exp $	*/
 
 /*
@@ -17,11 +17,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -74,8 +70,7 @@ static char *conf_file;		/* XXX for regerror */
  * just after (pred)
  */
 static void
-ins_que(elem, pred)
-	qelem *elem, *pred;
+ins_que(qelem *elem, qelem *pred)
 {
 	qelem *p = pred->q_forw;
 	elem->q_back = pred;
@@ -88,8 +83,7 @@ ins_que(elem, pred)
  * Remove an element from a 2-way list
  */
 static void
-rem_que(elem)
-	qelem *elem;
+rem_que(qelem *elem)
 {
 	qelem *p = elem->q_forw;
 	qelem *p2 = elem->q_back;
@@ -101,8 +95,7 @@ rem_que(elem)
  * Error checking malloc
  */
 static void *
-xmalloc(siz)
-	size_t siz;
+xmalloc(size_t siz)
 {
 	void *p = malloc(siz);
 	if (p)
@@ -119,9 +112,7 @@ xmalloc(siz)
  * and 1 is returned.
  */
 static int
-pinsert(p0, q0)
-	path *p0;
-	qelem *q0;
+pinsert(path *p0, qelem *q0)
 {
 	qelem *q;
 
@@ -135,13 +126,10 @@ pinsert(p0, q0)
 	}
 	ins_que(&p0->p_q, q0->q_back);
 	return (1);
-	
 }
 
 static path *
-palloc(cline, lno)
-	char *cline;
-	int lno;
+palloc(char *cline, int lno)
 {
 	int c;
 	char *s;
@@ -226,8 +214,7 @@ palloc(cline, lno)
  * Free a path structure
  */
 static void
-pfree(p)
-	path *p;
+pfree(path *p)
 {
 	free(p->p_args);
 	regfree(&(p->p_re));
@@ -240,9 +227,7 @@ pfree(p)
  * and add all the ones on xq.
  */
 static void
-preplace(q0, xq)
-	qelem *q0;
-	qelem *xq;
+preplace(qelem *q0, qelem *xq)
 {
 	/*
 	 * While the list is not empty,
@@ -266,9 +251,7 @@ preplace(q0, xq)
  * add them to the list of paths.
  */
 static void
-readfp(q0, fp)
-	qelem *q0;
-	FILE *fp;
+readfp(qelem *q0, FILE *fp)
 {
 	char cline[LINE_MAX];
 	int nread = 0;
@@ -304,9 +287,7 @@ readfp(q0, fp)
  * If the file is not readable, then no changes take place
  */
 void
-conf_read(q, conf)
-	qelem *q;
-	char *conf;
+conf_read(qelem *q, char *conf)
 {
 	FILE *fp = fopen(conf, "r");
 	if (fp) {
@@ -320,9 +301,8 @@ conf_read(q, conf)
 }
 
 
-char **conf_match(q0, key)
-qelem *q0;
-char *key;
+char **
+conf_match(qelem *q0, char *key)
 {
 	qelem *q;
 

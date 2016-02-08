@@ -52,13 +52,14 @@
 
 #ifndef lint
 static char rcsid[] =
-    "@(#) $Id: mtrace.c,v 1.16 2003/03/13 09:09:49 deraadt Exp $";
+    "@(#) $Id: mtrace.c,v 1.19 2003/08/19 22:19:07 itojun Exp $";
 #endif
 
 #include <netdb.h>
 #include <sys/time.h>
 #include <memory.h>
 #include <string.h>
+#include <poll.h>
 #include <ctype.h>
 #include <sys/ioctl.h>
 #include "defs.h"
@@ -67,6 +68,7 @@ static char rcsid[] =
 #ifdef SUNOS5
 #include <sys/systeminfo.h>
 #endif
+#include <ifaddrs.h>
 
 #define DEFAULT_TIMEOUT	3	/* How long to wait before retrying requests */
 #define DEFAULT_RETRIES 3	/* How many times to try */
@@ -131,7 +133,7 @@ u_int32_t tdst = 0;		/* Address where trace is sent (last-hop) */
 vifi_t  numvifs;		/* to keep loader happy */
 				/* (see kern.c) */
 #ifndef SYSV
-extern long random();
+extern long random(void);
 #endif
 extern int errno;
 
@@ -159,6 +161,7 @@ void			fixup_stats(struct resp_buf *base,
 int			print_stats(struct resp_buf *base,
 			    struct resp_buf *prev, struct resp_buf *new);
 void			check_vif_state(void);
+u_long			byteswap(u_long v);
 
 int			main(int argc, char *argv[]);
 
@@ -282,37 +285,31 @@ get_netmask(s, dst)
     int s;
     u_int32_t dst;
 {
-    unsigned int i;
-    char ifbuf[5000];
-    struct ifconf ifc;
-    struct ifreq *ifr;
     u_int32_t if_addr, if_mask;
     u_int32_t retval = 0xFFFFFFFF;
     int found = FALSE;
+    struct ifaddrs *ifap, *ifa;
 
-    ifc.ifc_buf = ifbuf;
-    ifc.ifc_len = sizeof(ifbuf);
-    if (ioctl(s, SIOCGIFCONF, (char *) &ifc) < 0) {
-	perror("ioctl (SIOCGIFCONF)");
+    if (getifaddrs(&ifap) != 0) {
+	perror("getifaddrs");
 	return (retval);
     }
-    for (i = 0; i < ifc.ifc_len; ) {
-	ifr = (struct ifreq *)((char *)ifc.ifc_req + i);
-	i += sizeof(ifr->ifr_name) + ifr->ifr_addr.sa_len;
-	if_addr = ((struct sockaddr_in *)&(ifr->ifr_addr))->sin_addr.s_addr;
-	if (ioctl(s, SIOCGIFNETMASK, (char *)ifr) >= 0) {
-	    if_mask = ((struct sockaddr_in *)&(ifr->ifr_addr))->sin_addr.s_addr;
-	    if ((dst & if_mask) == (if_addr & if_mask)) {
-		retval = if_mask;
-		if (lcl_addr == 0) lcl_addr = if_addr;
-	    }
+    for (ifa = ifap; ifa; ifa = ifa->ifa_next) {
+	if_addr = ((struct sockaddr_in *)ifa->ifa_addr)->sin_addr.s_addr;
+	if_mask = ((struct sockaddr_in *)ifa->ifa_netmask)->sin_addr.s_addr;
+	if ((dst & if_mask) == (if_addr & if_mask)) {
+	    retval = if_mask;
+	    if (lcl_addr == 0)
+		lcl_addr = if_addr;
 	}
-	if (lcl_addr == if_addr) found = TRUE;
+	if (lcl_addr == if_addr)
+	    found = TRUE;
     }
     if (!found && lcl_addr != 0) {
 	printf("Interface address is not valid\n");
 	exit(1);
     }
+    freeifaddrs(ifap);
     return (retval);
 }
 
@@ -386,7 +383,6 @@ send_recv(dst, type, code, tries, save)
     int type, code, tries;
     struct resp_buf *save;
 {
-    fd_set  fds;
     struct timeval tq, tr, tv;
     struct ip *ip;
     struct igmp *igmp;
@@ -394,6 +390,7 @@ send_recv(dst, type, code, tries, save)
     int ipdatalen, iphdrlen, igmpdatalen;
     u_int32_t local, group;
     int datalen;
+    struct pollfd pfd[1];
     int count, recvlen, dummy = 0;
     int len;
     int i;
@@ -455,22 +452,19 @@ send_recv(dst, type, code, tries, save)
 	/*
 	 * Wait for response, discarding false alarms
 	 */
+	pfd[0].fd = igmp_socket;
+	pfd[0].events = POLLIN;
 	while (TRUE) {
-	    FD_ZERO(&fds);
-	    if (igmp_socket >= FD_SETSIZE)
-		log(LOG_ERR, 0, "descriptor too big");
-	    FD_SET(igmp_socket, &fds);
 	    gettimeofday(&tv, 0);
 	    tv.tv_sec = tq.tv_sec + timeout - tv.tv_sec;
 	    tv.tv_usec = tq.tv_usec - tv.tv_usec;
 	    if (tv.tv_usec < 0) tv.tv_usec += 1000000L, --tv.tv_sec;
 	    if (tv.tv_sec < 0) tv.tv_sec = tv.tv_usec = 0;
 
-	    count = select(igmp_socket + 1, &fds, (fd_set *)0, (fd_set *)0,
-			   &tv);
+	    count = poll(pfd, 1, tv.tv_sec * 1000);
 
 	    if (count < 0) {
-		if (errno != EINTR) perror("select");
+		if (errno != EINTR) perror("poll");
 		continue;
 	    } else if (count == 0) {
 		printf("* ");
@@ -617,7 +611,7 @@ send_recv(dst, type, code, tries, save)
  * it just snoops on what traces it can.
  */
 void
-passive_mode()
+passive_mode(void)
 {
     struct timeval tr;
     struct ip *ip;

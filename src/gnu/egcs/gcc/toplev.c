@@ -770,7 +770,11 @@ int flag_instrument_function_entry_exit = 0;
    On SVR4 targets, it also controls whether or not to emit a
    string identifying the compiler.  */
 
+#ifdef OPENBSD_NATIVE
+int flag_no_ident = 1;
+#else
 int flag_no_ident = 0;
+#endif
 
 #if defined(STACK_PROTECTOR) && defined(STACK_GROWS_DOWNWARD)
 /* Nonzero means use propolice as a stack protection method */
@@ -1064,6 +1068,8 @@ documented_lang_options[] =
   { "-Wno-conversion", "" },
   { "-Wformat", "Warn about printf format anomalies" },
   { "-Wno-format", "" },
+  { "-Wbounded", "Warn about potential overruns in static buffers" },
+  { "-Wno-bounded", "" },
   { "-Wimplicit-function-declaration",
     "Warn about implicit function declarations" },
   { "-Wno-implicit-function-declaration", "" },

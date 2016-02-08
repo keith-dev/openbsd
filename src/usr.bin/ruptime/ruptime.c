@@ -1,4 +1,4 @@
-/*	$OpenBSD: ruptime.c,v 1.8 2002/05/27 03:14:22 deraadt Exp $	*/
+/*	$OpenBSD: ruptime.c,v 1.12 2003/08/04 17:06:45 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1983 The Regents of the University of California.
@@ -12,11 +12,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -41,7 +37,7 @@ char copyright[] =
 
 #ifndef lint
 /*static char sccsid[] = "from: @(#)ruptime.c	5.8 (Berkeley) 7/21/90";*/
-static char rcsid[] = "$OpenBSD: ruptime.c,v 1.8 2002/05/27 03:14:22 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: ruptime.c,v 1.12 2003/08/04 17:06:45 deraadt Exp $";
 #endif /* not lint */
 
 #include <sys/param.h>
@@ -66,14 +62,16 @@ struct	whod awhod;
 
 time_t now;
 int rflg = 1;
-int hscmp(), ucmp(), lcmp(), tcmp();
+int	hscmp(const void *, const void *);
+int	ucmp(const void *, const void *);
+int	lcmp(const void *, const void *);
+int	tcmp(const void *, const void *);
+char	*interval(time_t, char *);
 
 void morehosts(void);
 
 int
-main(argc, argv)
-	int argc;
-	char **argv;
+main(int argc, char *argv[])
 {
 	extern char *optarg;
 	extern int optind;
@@ -84,9 +82,7 @@ main(argc, argv)
 	struct dirent *dp;
 	int aflg, cc, ch, f, i, maxloadav;
 	char buf[sizeof(struct whod)];
-	int (*cmp)() = hscmp;
-	time_t time();
-	char *interval();
+	int (*cmp)(const void *, const void *) = hscmp;
 
 	aflg = 0;
 	while ((ch = getopt(argc, argv, "alrut")) != -1)
@@ -182,9 +178,7 @@ main(argc, argv)
 }
 
 char *
-interval(tval, updown)
-	time_t tval;
-	char *updown;
+interval(time_t tval, char *updown)
 {
 	static char resbuf[32];
 	int days, hours, minutes;
@@ -207,20 +201,18 @@ interval(tval, updown)
 
 /* alphabetical comparison */
 int
-hscmp(a1, a2)
-	void *a1, *a2;
+hscmp(const void *a1, const void *a2)
 {
-	struct hs *h1 = a1, *h2 = a2;
+	const struct hs *h1 = a1, *h2 = a2;
 
 	return(rflg * strcmp(h1->hs_wd->wd_hostname, h2->hs_wd->wd_hostname));
 }
 
 /* load average comparison */
 int
-lcmp(a1, a2)
-	void *a1, *a2;
+lcmp(const void *a1, const void *a2)
 {
-	struct hs *h1 = a1, *h2 = a2;
+	const struct hs *h1 = a1, *h2 = a2;
 
 	if (ISDOWN(h1))
 		if (ISDOWN(h2))
@@ -236,10 +228,9 @@ lcmp(a1, a2)
 
 /* number of users comparison */
 int
-ucmp(a1, a2)
-	void *a1, *a2;
+ucmp(const void *a1, const void *a2)
 {
-	struct hs *h1 = a1, *h2 = a2;
+	const struct hs *h1 = a1, *h2 = a2;
 
 	if (ISDOWN(h1))
 		if (ISDOWN(h2))
@@ -254,10 +245,9 @@ ucmp(a1, a2)
 
 /* uptime comparison */
 int
-tcmp(a1, a2)
-	void *a1, *a2;
+tcmp(const void *a1, const void *a2)
 {
-	struct hs *h1 = a1, *h2 = a2;
+	const struct hs *h1 = a1, *h2 = a2;
 
 	return(rflg * (
 		(ISDOWN(h2) ? h2->hs_wd->wd_recvtime - now
@@ -269,7 +259,7 @@ tcmp(a1, a2)
 }
 
 void
-morehosts()
+morehosts(void)
 {
 	hs = realloc((char *)hs, (hspace *= 2) * sizeof(*hs));
 	if (hs == NULL) {

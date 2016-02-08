@@ -1,4 +1,4 @@
-/*	$OpenBSD: pfctl.h,v 1.12 2003/03/06 12:50:40 henning Exp $ */
+/*	$OpenBSD: pfctl.h,v 1.25 2003/08/29 21:47:36 cedric Exp $ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
@@ -33,13 +33,25 @@
 #ifndef _PFCTL_H_
 #define _PFCTL_H_
 
+enum {	PFRB_TABLES = 1, PFRB_TSTATS, PFRB_ADDRS, PFRB_ASTATS, PFRB_MAX };
+struct pfr_buffer {
+	int	 pfrb_type;	/* type of content, see enum above */
+	int	 pfrb_size;	/* number of objects in buffer */
+	int	 pfrb_msize;	/* maximum number of objects in buffer */
+	void	*pfrb_caddr;	/* malloc'ated memory area */
+};
+#define PFRB_FOREACH(var, buf)				\
+	for ((var) = pfr_buf_next((buf), NULL);		\
+	    (var) != NULL;				\
+	    (var) = pfr_buf_next((buf), (var)))
+
 void	 pfr_set_fd(int);
 int	 pfr_get_fd(void);
-int	 pfr_clr_tables(int *, int);
+int	 pfr_clr_tables(struct pfr_table *, int *, int);
 int	 pfr_add_tables(struct pfr_table *, int, int *, int);
 int	 pfr_del_tables(struct pfr_table *, int, int *, int);
-int	 pfr_get_tables(struct pfr_table *, int *, int);
-int	 pfr_get_tstats(struct pfr_tstats *, int *, int);
+int	 pfr_get_tables(struct pfr_table *, struct pfr_table *, int *, int);
+int	 pfr_get_tstats(struct pfr_table *, struct pfr_tstats *, int *, int);
 int	 pfr_clr_tstats(struct pfr_table *, int, int *, int);
 int	 pfr_clr_addrs(struct pfr_table *, int *, int);
 int	 pfr_add_addrs(struct pfr_table *, struct pfr_addr *, int, int *, int);
@@ -51,14 +63,24 @@ int	 pfr_get_astats(struct pfr_table *, struct pfr_astats *, int *, int);
 int	 pfr_clr_astats(struct pfr_table *, struct pfr_addr *, int, int *, int);
 int	 pfr_tst_addrs(struct pfr_table *, struct pfr_addr *, int, int *, int);
 int	 pfr_set_tflags(struct pfr_table *, int, int, int, int *, int *, int);
-int	 pfr_ina_begin(int *, int *, int);
-int	 pfr_ina_commit(int, int *, int *, int);
+int	 pfr_ina_begin(struct pfr_table *, int *, int *, int);
+int	 pfr_ina_commit(struct pfr_table *, int, int *, int *, int);
 int	 pfr_ina_define(struct pfr_table *, struct pfr_addr *, int, int *,
 	    int *, int, int);
-int	 pfctl_clear_tables(int);
-int	 pfctl_show_tables(int);
-int	 pfctl_command_tables(int, char *[], char *, char *, char *, int);
+void	 pfr_buf_clear(struct pfr_buffer *);
+int	 pfr_buf_add(struct pfr_buffer *, const void *);
+void	*pfr_buf_next(struct pfr_buffer *, const void *);
+int	 pfr_buf_grow(struct pfr_buffer *, int);
+int	 pfr_buf_load(struct pfr_buffer *, char *, int,
+	    int (*)(struct pfr_buffer *, char *, int));
+char	*pfr_strerror(int);
+
+int	 pfctl_clear_tables(const char *, const char *, int);
+int	 pfctl_show_tables(const char *, const char *, int);
+int	 pfctl_command_tables(int, char *[], char *, const char *, char *,
+	    const char *, const char *, int);
 int	 pfctl_show_altq(int, int, int);
+void	 warn_namespace_collision(const char *);
 
 #ifndef DEFAULT_PRIORITY
 #define DEFAULT_PRIORITY	1
@@ -80,13 +102,7 @@ int		 check_commit_altq(int, int);
 void		 pfaltq_store(struct pf_altq *);
 void		 pfaltq_free(struct pf_altq *);
 struct pf_altq	*pfaltq_lookup(const char *);
-struct pf_altq	*qname_to_pfaltq(const char *, const char *);
-u_int32_t	 qname_to_qid(const char *);
-char		*qid_to_qname(u_int32_t, const char *);
 char		*rate2str(double);
-
-void	 print_altq(const struct pf_altq *, unsigned, u_int16_t);
-void	 print_queue(const struct pf_altq *, unsigned, u_int16_t);
 
 void	 print_addr(struct pf_addr_wrap *, sa_family_t, int);
 void	 print_host(struct pf_state_host *, sa_family_t, int);

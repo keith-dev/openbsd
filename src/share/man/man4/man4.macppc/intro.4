@@ -1,4 +1,4 @@
-.\"	$OpenBSD: intro.4,v 1.13 2003/03/08 21:59:54 jmc Exp $
+.\"	$OpenBSD: intro.4,v 1.17 2003/08/14 15:29:58 jason Exp $
 .\"
 .\" Copyright (c) 2001 Peter Valchev.
 .\" All rights reserved.
@@ -11,11 +11,6 @@
 .\" 2. Redistributions in binary form must reproduce the above copyright
 .\"    notice, this list of conditions and the following disclaimer in the
 .\"    documentation and/or other materials provided with the distribution.
-.\" 3. All advertising materials mentioning features or use of this software
-.\"    must display the following acknowledgement:
-.\"      This product includes software developed by Peter Valchev.
-.\" 4. The name of the author may not be used to endorse or promote products
-.\"    derived from this software without specific prior written permission
 .\"
 .\" THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
 .\" IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -36,7 +31,7 @@
 .Nm intro
 .Nd introduction to special files and hardware support
 .Sh DESCRIPTION
-The manual pages in section 4 describe the special files, 
+The manual pages in section 4 describe the special files,
 related driver functions, and networking support
 available in the system.
 In this part of the manual, the
@@ -118,6 +113,8 @@ Video capture driver.
 BMAC ethernet.
 .It Xr de 4
 DEC tulip-based ethernet cards.
+.It Xr eap 4
+Ensoniq AudioPCI based audio.
 .It Xr em 4
 Intel i82542, i82543, and i82544 Pro/1000 Gigabit ethernet.
 .It Xr fxp 4
@@ -134,6 +131,8 @@ National DP83840 ethernet cards.
 I2O adapter.
 .It Xr kue 4
 Kawasaki LSI KL5KUSB101B-based USB ethernet.
+.It Xr safe 4
+SafeNet SafeXcel 1141/1741.
 .It Xr siop 4
 LSI/Symbios Logic/NCR 53c8xx SCSI adapter boards.
 .It Xr ti 4

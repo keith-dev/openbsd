@@ -1,4 +1,4 @@
-.\"	$OpenBSD: queue.3,v 1.27 2003/03/09 17:18:44 millert Exp $
+.\"	$OpenBSD: queue.3,v 1.31 2003/06/02 23:30:12 millert Exp $
 .\"	$NetBSD: queue.3,v 1.4 1995/07/03 00:25:36 mycroft Exp $
 .\"
 .\" Copyright (c) 1993 The Regents of the University of California.
@@ -12,11 +12,7 @@
 .\" 2. Redistributions in binary form must reproduce the above copyright
 .\"    notice, this list of conditions and the following disclaimer in the
 .\"    documentation and/or other materials provided with the distribution.
-.\" 3. All advertising materials mentioning features or use of this software
-.\"    must display the following acknowledgement:
-.\"	This product includes software developed by the University of
-.\"	California, Berkeley and its contributors.
-.\" 4. Neither the name of the University nor the names of its contributors
+.\" 3. Neither the name of the University nor the names of its contributors
 .\"    may be used to endorse or promote products derived from this software
 .\"    without specific prior written permission.
 .\"
@@ -299,7 +295,7 @@ However:
 .Pp
 .Bl -enum -compact -offset indent
 .It
-Each elements requires two pointers rather than one.
+Each element requires two pointers rather than one.
 .It
 Code size and execution time of operations (except for removal) is about
 twice that of the singly-linked data-structures.
@@ -454,7 +450,7 @@ of the list pointed by
 .Fa head .
 .Pp
 The
-.Fn SLIST_FIRST ,
+.Fn SLIST_FIRST
 and
 .Fn SLIST_NEXT
 macros can be used to traverse the list:
@@ -561,7 +557,7 @@ with the new element
 .Fa elm2 .
 .Pp
 The
-.Fn LIST_FIRST ,
+.Fn LIST_FIRST
 and
 .Fn LIST_NEXT
 macros can be used to traverse the list:
@@ -680,13 +676,13 @@ macro removes the first element
 from the queue.
 .Pp
 The
-.Fn SIMPLEQ_FIRST ,
+.Fn SIMPLEQ_FIRST
 and
 .Fn SIMPLEQ_NEXT
 macros can be used to traverse the queue.
 The
 .Fn SIMPLEQ_FOREACH
-is used for queue traversal
+is used for queue traversal:
 .Bd -literal -offset indent
 SIMPLEQ_FOREACH(np, head, NAME)
 .Ed
@@ -715,7 +711,7 @@ SIMPLEQ_INSERT_TAIL(&head, n1, entries);
 for (np = SIMPLEQ_FIRST(&head); np != NULL; np = SIMPLEQ_NEXT(np, entries))
 	np-> ...
 					/* Delete. */
-while (SIMPLEQ_FIRST(&head) != NULL)		
+while ((n1 = SIMPLEQ_FIRST(&head)) != NULL)
 	SIMPLEQ_REMOVE_HEAD(&head, n1, entries);
 .Ed
 .Sh TAIL QUEUES
@@ -799,25 +795,27 @@ macro removes the element
 .Fa elm
 from the tail queue.
 .Pp
+.Fn TAILQ_FOREACH
+and
+.Fn TAILQ_FOREACH_REVERSE
+are used for traversing a tail queue.
+.Fn TAILQ_FOREACH
+starts at the first element and proceeds towards the last.
+.Fn TAILQ_FOREACH_REVERSE
+starts at the last element and proceeds towards the first.
+.Bd -literal -offset indent
+TAILQ_FOREACH(np, &head, NAME)
+TAILQ_FOREACH_REVERSE(np, &head, NAME, HEADNAME)
+.Ed
+.Pp
 The
 .Fn TAILQ_FIRST ,
 .Fn TAILQ_NEXT ,
 .Fn TAILQ_LAST
 and
 .Fn TAILQ_PREV
-macros can be used to traverse a tail queue.
-The
-.Fn TAILQ_FOREACH
-is used for tail queue traversal
-.Bd -literal -offset indent
-TAILQ_FOREACH(np, head, NAME)
-.Ed
-.Pp
-The
-.Fn TAILQ_FOREACH_REVERSE
-acts like
-.Fn TAILQ_FOREACH
-but traverses the tail queue in reverse.
+macros can be used to manually traverse a tail queue or an arbitrary part of
+one.
 .Pp
 The
 .Fn TAILQ_EMPTY
@@ -846,7 +844,10 @@ TAILQ_INSERT_AFTER(&head, n1, n2, entries);
 n2 = malloc(sizeof(struct entry));	/* Insert before. */
 TAILQ_INSERT_BEFORE(n1, n2, entries);
 					/* Forward traversal. */
-for (np = TAILQ_FIRST(&head); np != NULL; np = TAILQ_NEXT(np, entries))
+TAILQ_FOREACH(np, &head, entries)
+	np-> ...
+					/* Manual forward traversal */
+for (np = n2; np != NULL; np = TAILQ_NEXT(np, entries))
 	np-> ...
 					/* Delete. */
 while (np = TAILQ_FIRST(&head))
@@ -942,7 +943,7 @@ and
 macros can be used to traverse a circular queue.
 The
 .Fn CIRCLEQ_FOREACH
-is used for circular queue forward traversal
+is used for circular queue forward traversal:
 .Bd -literal -offset indent
 CIRCLEQ_FOREACH(np, head, NAME)
 .Ed

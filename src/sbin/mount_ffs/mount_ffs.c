@@ -1,4 +1,4 @@
-/*	$OpenBSD: mount_ffs.c,v 1.13 2002/04/23 18:54:12 espie Exp $	*/
+/*	$OpenBSD: mount_ffs.c,v 1.17 2003/07/03 22:41:40 tedu Exp $	*/
 /*	$NetBSD: mount_ffs.c,v 1.3 1996/04/13 01:31:19 jtc Exp $	*/
 
 /*-
@@ -13,11 +13,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -44,7 +40,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)mount_ufs.c	8.2 (Berkeley) 3/27/94";
 #else
-static char rcsid[] = "$OpenBSD: mount_ffs.c,v 1.13 2002/04/23 18:54:12 espie Exp $";
+static char rcsid[] = "$OpenBSD: mount_ffs.c,v 1.17 2003/07/03 22:41:40 tedu Exp $";
 #endif
 #endif /* not lint */
 
@@ -74,13 +70,11 @@ static const struct mntopt mopts[] = {
 };
 
 int
-main(argc, argv)
-	int argc;
-	char * const argv[];
+main(int argc, char *argv[])
 {
 	struct ufs_args args;		/* XXX ffs_args */
 	int ch, mntflags;
-	char *fs_name, *errcause;
+	char fs_name[MAXPATHLEN], *errcause;
 
 	mntflags = 0;
 	optind = optreset = 1;		/* Reset for parse of new argv. */
@@ -100,7 +94,8 @@ main(argc, argv)
 		ffs_usage();
 
         args.fspec = argv[0];		/* The name of the device file. */
-	fs_name = argv[1];		/* The mount point. */
+	if (realpath(argv[1], fs_name) == NULL) 	/* The mount point. */
+		err(1, "realpath %s", fs_name);
 
 #define DEFAULT_ROOTUID	-2
 	args.export_info.ex_root = DEFAULT_ROOTUID;
@@ -121,6 +116,10 @@ main(argc, argv)
 		case EOPNOTSUPP:
 			errcause = "filesystem not supported by kernel";
 			break;
+		case EROFS:
+			errcause =
+			    "filesystem must be mounted read-only; you may need to run fsck";
+			break;
 		default:
 			errcause = strerror(errno);
 			break;
@@ -131,7 +130,7 @@ main(argc, argv)
 }
 
 void
-ffs_usage()
+ffs_usage(void)
 {
 	(void)fprintf(stderr, "usage: mount_ffs [-o options] special node\n");
 	exit(1);

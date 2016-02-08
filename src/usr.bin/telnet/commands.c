@@ -1,4 +1,4 @@
-/*	$OpenBSD: commands.c,v 1.42 2002/06/12 06:07:16 mpech Exp $	*/
+/*	$OpenBSD: commands.c,v 1.45 2003/06/03 02:56:18 millert Exp $	*/
 /*	$NetBSD: commands.c,v 1.14 1996/03/24 22:03:48 jtk Exp $	*/
 
 /*
@@ -13,11 +13,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -101,7 +97,7 @@ makeargv()
     margc = 0;
     cp = line;
     if (*cp == '!') {		/* Special case shell escape */
-	strcpy(saveline, line);	/* save for shell command */
+	strlcpy(saveline, line, sizeof(saveline)); /* save for shell command */
 	*argp++ = "!";		/* No room in string to get this */
 	margc++;
 	cp++;
@@ -1680,8 +1676,7 @@ env_init()
 			hbuf[sizeof hbuf-1] = '\0';
 		}
 
-		asprintf (&cp, "%s%s", hbuf, cp2);
-		if (cp == NULL)
+		if (asprintf (&cp, "%s%s", hbuf, cp2) == -1)
 			err(1, "asprintf");
 
 		free(ep->value);
@@ -2293,7 +2288,7 @@ tn(argc, argv)
 	return 0;
     }
     if (argc < 2) {
-	(void) strcpy(line, "open ");
+	strlcpy(line, "open ", sizeof(line));
 	printf("(to) ");
 	(void) fgets(&line[strlen(line)], sizeof(line) - strlen(line), stdin);
 	makeargv();
@@ -2397,7 +2392,7 @@ tn(argc, argv)
 
 	    if (getnameinfo(res->ai_addr, res->ai_addrlen, hbuf, sizeof(hbuf),
 		    NULL, 0, niflags) != 0) {
-		strcpy(hbuf, "(invalid)");
+		strlcpy(hbuf, "(invalid)", sizeof(hbuf));
 	    }
 	    printf("Trying %s...\r\n", hbuf);
 	}
@@ -2457,7 +2452,7 @@ tn(argc, argv)
 
 	    if (getnameinfo(res->ai_addr, res->ai_addrlen, hbuf, sizeof(hbuf),
 		    NULL, 0, niflags) != 0) {
-		strcpy(hbuf, "(invalid)");
+		strlcpy(hbuf, "(invalid)", sizeof(hbuf));
 	    }
 	    fprintf(stderr, "telnet: connect to address %s: %s\n", hbuf,
 		strerror(errno));

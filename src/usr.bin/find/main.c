@@ -1,4 +1,4 @@
-/*	$OpenBSD: main.c,v 1.14 2002/05/17 15:04:32 millert Exp $	*/
+/*	$OpenBSD: main.c,v 1.16 2003/06/10 22:20:46 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 1990, 1993
@@ -12,11 +12,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -35,7 +31,7 @@
 
 #ifndef lint
 /*static char sccsid[] = "@(#)main.c	8.1 (Berkeley) 6/6/93";*/
-static char rcsid[] = "$OpenBSD: main.c,v 1.14 2002/05/17 15:04:32 millert Exp $";
+static char rcsid[] = "$OpenBSD: main.c,v 1.16 2003/06/10 22:20:46 deraadt Exp $";
 #endif /* not lint */
 
 #include <sys/types.h>
@@ -64,9 +60,7 @@ int isxargs;			/* don't permit xargs delimiting chars */
 static void usage(void);
 
 int
-main(argc, argv)
-	int argc;
-	char *argv[];
+main(int argc, char *argv[])
 {
 	struct sigaction sa;
 	char **p, **paths;
@@ -143,7 +137,7 @@ main(argc, argv)
 }
 
 static void
-usage()
+usage(void)
 {
 	(void)fprintf(stderr,
 	    "usage: find [-dHhLXxW] [-f file] file [...] [expression]\n");

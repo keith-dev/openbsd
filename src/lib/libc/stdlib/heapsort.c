@@ -13,11 +13,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -35,7 +31,7 @@
  */
 
 #if defined(LIBC_SCCS) && !defined(lint)
-static char *rcsid = "$OpenBSD: heapsort.c,v 1.3 2002/02/16 21:27:24 millert Exp $";
+static char *rcsid = "$OpenBSD: heapsort.c,v 1.6 2003/09/08 16:24:05 deraadt Exp $";
 #endif /* LIBC_SCCS and not lint */
 
 #include <sys/types.h>
@@ -72,7 +68,7 @@ static char *rcsid = "$OpenBSD: heapsort.c,v 1.3 2002/02/16 21:27:24 millert Exp
  * Build the list into a heap, where a heap is defined such that for
  * the records K1 ... KN, Kj/2 >= Kj for 1 <= j/2 <= j <= N.
  *
- * There two cases.  If j == nmemb, select largest of Ki and Kj.  If
+ * There are two cases.  If j == nmemb, select largest of Ki and Kj.  If
  * j < nmemb, select largest of Ki, Kj and Kj+1.
  */
 #define CREATE(initval, nmemb, par_i, child_i, par, child, size, count, tmp) { \
@@ -94,12 +90,12 @@ static char *rcsid = "$OpenBSD: heapsort.c,v 1.3 2002/02/16 21:27:24 millert Exp
  * Select the top of the heap and 'heapify'.  Since by far the most expensive
  * action is the call to the compar function, a considerable optimization
  * in the average case can be achieved due to the fact that k, the displaced
- * elememt, is ususally quite small, so it would be preferable to first
+ * element, is usually quite small, so it would be preferable to first
  * heapify, always maintaining the invariant that the larger child is copied
  * over its parent's record.
  *
  * Then, starting from the *bottom* of the heap, finding k's correct place,
- * again maintianing the invariant.  As a result of the invariant no element
+ * again maintaining the invariant.  As a result of the invariant no element
  * is 'lost' when k is assigned its correct place in the heap.
  *
  * The time savings from this optimization are on the order of 15-20% for the

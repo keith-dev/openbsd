@@ -1,4 +1,4 @@
-.\"	$OpenBSD: cgsix.4,v 1.8 2003/03/10 20:11:36 miod Exp $
+.\"	$OpenBSD: cgsix.4,v 1.10 2003/07/09 13:26:20 jmc Exp $
 .\"
 .\" Copyright (c) 2001 Jason L. Wright (jason@thought.net)
 .\" All rights reserved.
@@ -11,11 +11,6 @@
 .\" 2. Redistributions in binary form must reproduce the above copyright
 .\"    notice, this list of conditions and the following disclaimer in the
 .\"    documentation and/or other materials provided with the distribution.
-.\" 3. All advertising materials mentioning features or use of this software
-.\"    must display the following acknowledgement:
-.\"	This product includes software developed by Jason L. Wright
-.\" 4. The name of the author may not be used to endorse or promote products
-.\"    derived from this software without specific prior written permission.
 .\"
 .\" THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
 .\" IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
@@ -91,7 +86,7 @@ To change the default resolution, type the following:
 .Pp
 .Em \   ok
 setenv
-.Ev Em output-device
+.Em output-device
 screen:r1280x1024x76
 .Pp
 to change to a 76Hz 1280x1024 resolution.
@@ -100,7 +95,7 @@ If the
 .Nm
 frame buffer is a secondary display, or a serial console is used, the
 display resolution can not be changed without using an
-.Ev Em nvramrc
+.Em nvramrc
 OpenPROM script.
 Refer to the
 .Em Sun Frame Buffer FAQ

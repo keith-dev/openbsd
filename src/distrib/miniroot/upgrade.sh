@@ -1,5 +1,5 @@
 #!/bin/sh
-#	$OpenBSD: upgrade.sh,v 1.48 2002/12/08 19:30:40 krw Exp $
+#	$OpenBSD: upgrade.sh,v 1.54 2003/09/09 23:33:34 deraadt Exp $
 #	$NetBSD: upgrade.sh,v 1.2.4.5 1996/08/27 18:15:08 gwr Exp $
 #
 # Copyright (c) 1997-2002 Todd Miller, Theo de Raadt, Ken Westerback
@@ -69,35 +69,31 @@ if ! fsck -fp /dev/$ROOTDEV > /dev/null 2>&1; then
 fi
 echo	"OK."
 
-echo -n "Mounting root filesystem ... "
+echo -n "Mounting root filesystem..."
 if ! mount -o ro /dev/$ROOTDEV /mnt; then
 	echo	"ERROR: can't mount root filesystem!"
 	exit
 fi
-echo	"Done."
+echo	"done."
 
 # The fstab, hosts and myname files are required.
 for _file in fstab hosts myname; do
 	if [ ! -f /mnt/etc/$_file ]; then
-		echo "ERROR: no /etc/${_file}!"
+		echo "ERROR: no /mnt/etc/${_file}!"
 		exit
 	fi
 	cp /mnt/etc/$_file /tmp/$_file
 done
 hostname $(< /tmp/myname)
 
-# Start up the network in same/similar configuration as the installed system
-# uses.
 ask "Enable network using configuration stored on root filesystem?" y
 case $resp in
-y*|Y*)
-	if ! enable_network; then
-		echo "ERROR: can't enable network!"
-		exit
-	fi
-
-	manual_net_cfg
+y*|Y*) enable_network ;;
 esac
+
+# Offer the user the opportunity to tweak, repair, or create the network
+# configuration by hand.
+manual_net_cfg
 
 cat << __EOT
 
@@ -126,6 +122,22 @@ if ! umount /mnt; then
 	exit
 fi
 mount_fs
+
+# Prior to 3.4, ssl was a directory and openssl was a link to it, both in
+# /usr/include and /usr/libdata/perl5/site_perl/${ARCH}-openbsd. With 3.4,
+# openssl is the directory and ssl is the link. This change causes the upgrade
+# of base34 and comp34 to fail, so adjust a normal pre-3.4 setup to the new
+# setup.
+for _dir in /mnt/usr/include /mnt/usr/libdata/perl5/site_perl/*-openbsd; do
+	[[ -d $_dir ]] || continue
+	( cd $_dir
+	if [[ -d ssl && -L openssl ]]; then
+		rm openssl
+		mv ssl openssl
+		ln -s openssl ssl
+	fi
+	)
+done
 
 # Install sets.
 install_sets

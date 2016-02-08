@@ -1,4 +1,4 @@
-#	$OpenBSD: genconstants.sh,v 1.9 2002/06/09 08:13:06 todd Exp $
+#	$OpenBSD: genconstants.sh,v 1.11 2003/06/03 14:28:16 ho Exp $
 #	$EOM: genconstants.sh,v 1.6 1999/04/02 01:15:53 niklas Exp $
 
 #
@@ -12,11 +12,6 @@
 # 2. Redistributions in binary form must reproduce the above copyright
 #    notice, this list of conditions and the following disclaimer in the
 #    documentation and/or other materials provided with the distribution.
-# 3. All advertising materials mentioning features or use of this software
-#    must display the following acknowledgement:
-#	This product includes software developed by Ericsson Radio Systems.
-# 4. The name of the author may not be used to endorse or promote products
-#    derived from this software without specific prior written permission.
 #
 # THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
 # IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -108,7 +103,8 @@ BEGIN {
 }
 
 /^[ 	]/ && $1 {
-  printf ("  { %s_%s, \"%s\", %s }, \n", prefix, $1, $1, $3 ? $3 : 0)
+  printf ("  { %s_%s, \"%s\", %s }, \n", prefix, $1, $1,
+    ($3 && substr($3,1,1) != "#") ? $3 : 0)
   next
 }
 

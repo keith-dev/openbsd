@@ -1,4 +1,4 @@
-/*	$OpenBSD: strip.c,v 1.18 2002/08/21 15:53:12 espie Exp $	*/
+/*	$OpenBSD: strip.c,v 1.20 2003/06/10 22:20:52 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1988 Regents of the University of California.
@@ -12,11 +12,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -41,7 +37,7 @@ char copyright[] =
 
 #ifndef lint
 /*static char sccsid[] = "from: @(#)strip.c	5.8 (Berkeley) 11/6/91";*/
-static char rcsid[] = "$OpenBSD: strip.c,v 1.18 2002/08/21 15:53:12 espie Exp $";
+static char rcsid[] = "$OpenBSD: strip.c,v 1.20 2003/06/10 22:20:52 deraadt Exp $";
 #endif /* not lint */
 
 #include <sys/param.h>
@@ -76,9 +72,7 @@ void usage(void);
 int xflag = 0;
         
 int
-main(argc, argv)
-	int argc;
-	char *argv[];
+main(int argc, char *argv[])
 {
 	int fd;
 	EXEC *ep;
@@ -149,12 +143,7 @@ main(argc, argv)
 }
 
 int
-s_sym(fn, fd, ep, sp, sz)
-	const char *fn;
-	int fd;
-	EXEC *ep;
-	struct stat *sp;
-	off_t *sz;
+s_sym(const char *fn, int fd, EXEC *ep, struct stat *sp, off_t *sz)
 {
 	char *neweof;
 #if	0
@@ -216,12 +205,7 @@ s_sym(fn, fd, ep, sp, sz)
 }
 
 int
-s_stab(fn, fd, ep, sp, sz)
-	const char *fn;
-	int fd;
-	EXEC *ep;
-	struct stat *sp;
-	off_t *sz;
+s_stab(const char *fn, int fd, EXEC *ep, struct stat *sp, off_t *sz)
 {
 	int cnt, len;
 	char *nstr, *nstrbase=0, *used=0, *p, *strbase;
@@ -388,7 +372,7 @@ end:
 }
 
 void
-usage()
+usage(void)
 {
 	(void)fprintf(stderr, "usage: strip [-dx] file ...\n");
 	exit(1);

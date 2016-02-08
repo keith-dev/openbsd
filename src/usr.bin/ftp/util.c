@@ -1,5 +1,45 @@
-/*	$OpenBSD: util.c,v 1.31 2002/11/08 03:30:17 fgsch Exp $	*/
+/*	$OpenBSD: util.c,v 1.35 2003/06/03 02:56:08 millert Exp $	*/
 /*	$NetBSD: util.c,v 1.12 1997/08/18 10:20:27 lukem Exp $	*/
+
+/*-
+ * Copyright (c) 1997-1999 The NetBSD Foundation, Inc.
+ * All rights reserved.
+ *
+ * This code is derived from software contributed to The NetBSD Foundation
+ * by Luke Mewburn.
+ *
+ * This code is derived from software contributed to The NetBSD Foundation
+ * by Jason R. Thorpe of the Numerical Aerospace Simulation Facility,
+ * NASA Ames Research Center.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
+ * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+ * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE FOUNDATION OR CONTRIBUTORS
+ * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
+ */
 
 /*
  * Copyright (c) 1985, 1989, 1993, 1994
@@ -13,11 +53,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -35,7 +71,7 @@
  */
 
 #ifndef lint
-static char rcsid[] = "$OpenBSD: util.c,v 1.31 2002/11/08 03:30:17 fgsch Exp $";
+static char rcsid[] = "$OpenBSD: util.c,v 1.35 2003/06/03 02:56:08 millert Exp $";
 #endif /* not lint */
 
 /*
@@ -138,17 +174,22 @@ setpeer(argc, argv)
 		/*
 		 * Set up defaults for FTP.
 		 */
-		(void)strcpy(formname, "non-print"), form = FORM_N;
-		(void)strcpy(modename, "stream"), mode = MODE_S;
-		(void)strcpy(structname, "file"), stru = STRU_F;
-		(void)strcpy(bytename, "8"), bytesize = 8;
+		(void)strlcpy(formname, "non-print", sizeof formname);
+		form = FORM_N;
+		(void)strlcpy(modename, "stream", sizeof modename);
+		mode = MODE_S;
+		(void)strlcpy(structname, "file", sizeof structname);
+		stru = STRU_F;
+		(void)strlcpy(bytename, "8", sizeof bytename);
+		bytesize = 8;
+
 		/*
 		 * Set type to 0 (not specified by user),
 		 * meaning binary by default, but don't bother
 		 * telling server.  We can use binary
 		 * for text files unless changed by the user.
 		 */
-		(void)strcpy(typename, "binary");
+		(void)strlcpy(typename, "binary", sizeof typename);
 		curtype = TYPE_A;
 		type = 0;
 		if (autologin)
@@ -308,7 +349,7 @@ tryagain:
 	connected = -1;
 	for (n = 0; n < macnum; ++n) {
 		if (!strcmp("init", macros[n].mac_name)) {
-			(void)strcpy(line, "$init");
+			(void)strlcpy(line, "$init", sizeof line);
 			makeargv();
 			domacro(margc, margv);
 			break;
@@ -388,7 +429,7 @@ remglob(argv, doswitch, errbuf)
         if (ftemp == NULL) {
 		int len;
 
-		if ((cp = getenv("TMPDIR")) == NULL)
+		if ((cp = getenv("TMPDIR")) == NULL || *cp == '\0')
 		    cp = _PATH_TMP;
 		len = strlen(cp);
 		if (len + sizeof(TMPFILE) + (cp[len-1] != '/') > sizeof(temp)) {
@@ -397,10 +438,10 @@ remglob(argv, doswitch, errbuf)
 			return (NULL);
 		}
 
-		(void)strcpy(temp, cp);
+		(void)strlcpy(temp, cp, sizeof temp);
 		if (temp[len-1] != '/')
 			temp[len++] = '/';
-		(void)strcpy(&temp[len], TMPFILE);
+		(void)strlcpy(&temp[len], TMPFILE, sizeof temp - len);
                 if ((fd = mkstemp(temp)) < 0) {
                         warn("unable to create temporary file %s", temp);
                         return (NULL);

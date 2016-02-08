@@ -10,11 +10,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -32,7 +28,7 @@
  */
 
 #if defined(LIBC_SCCS) && !defined(lint)
-static char *rcsid = "$OpenBSD: strcat.c,v 1.4 1996/08/19 08:34:10 tholo Exp $";
+static char *rcsid = "$OpenBSD: strcat.c,v 1.6 2003/07/24 01:15:42 deraadt Exp $";
 #endif /* LIBC_SCCS and not lint */
 
 #ifndef _KERNEL
@@ -41,10 +37,13 @@ static char *rcsid = "$OpenBSD: strcat.c,v 1.4 1996/08/19 08:34:10 tholo Exp $";
 #include <lib/libkern/libkern.h>
 #endif
 
+#if defined(APIWARN)
+__warn_references(strcat,
+    "warning: strcat() is almost always misused, please use strlcat()");
+#endif
+
 char *
-strcat(s, append)
-	register char *s;
-	register const char *append;
+strcat(char *s, const char *append)
 {
 	char *save = s;
 

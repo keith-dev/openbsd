@@ -1,4 +1,4 @@
-/*	$OpenBSD: timedc.c,v 1.8 2002/05/17 00:21:19 deraadt Exp $	*/
+/*	$OpenBSD: timedc.c,v 1.11 2003/06/26 21:36:40 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 1985, 1993 The Regents of the University of California.
@@ -12,11 +12,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -131,7 +127,7 @@ main(int argc, char *argv[])
 				siginterrupt(SIGINT, 0);
 				continue;
 			}
-			quit();
+			quit(0, NULL);
 		}
 		siginterrupt(SIGINT, 0);
 
@@ -159,8 +155,7 @@ main(int argc, char *argv[])
 }
 
 void
-sigintr(signo)
-	int signo;
+sigintr(int signo)
 {
 	if (!fromatty)
 		_exit(0);
@@ -202,7 +197,7 @@ getcmd(char *name)
  * Slice a string up into argc/argv.
  */
 void
-makeargv()
+makeargv(void)
 {
 	char **argp = margv;
 	char *cp;
@@ -230,9 +225,7 @@ makeargv()
  * Help command.
  */
 void
-help(argc, argv)
-	int argc;
-	char *argv[];
+help(int argc, char *argv[])
 {
 	extern struct cmd cmdtab[];
 	struct cmd *c;

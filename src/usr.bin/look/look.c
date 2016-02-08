@@ -1,4 +1,4 @@
-/*	$OpenBSD: look.c,v 1.8 2002/03/01 00:51:08 millert Exp $	*/
+/*	$OpenBSD: look.c,v 1.10 2003/06/10 22:20:47 deraadt Exp $	*/
 /*	$NetBSD: look.c,v 1.7 1995/08/31 22:41:02 jtc Exp $	*/
 
 /*-
@@ -16,11 +16,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -47,7 +43,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)look.c	8.2 (Berkeley) 5/4/95";
 #endif
-static char rcsid[] = "$OpenBSD: look.c,v 1.8 2002/03/01 00:51:08 millert Exp $";
+static char rcsid[] = "$OpenBSD: look.c,v 1.10 2003/06/10 22:20:47 deraadt Exp $";
 #endif /* not lint */
 
 /*
@@ -99,9 +95,7 @@ void	 print_from(char *, char *, char *);
 void	 usage(void);
 
 int
-main(argc, argv)
-	int argc;
-	char *argv[];
+main(int argc, char *argv[])
 {
 	struct stat sb;
 	int ch, fd, termchar;
@@ -155,8 +149,7 @@ main(argc, argv)
 }
 
 int
-look(string, front, back)
-	char *string, *front, *back;
+look(char *string, char *front, char *back)
 {
 	int ch;
 	char *readp, *writep;
@@ -223,8 +216,7 @@ look(string, front, back)
 	while (p < back && *p++ != '\n');
 
 char *
-binary_search(string, front, back)
-	char *string, *front, *back;
+binary_search(char *string, char *front, char *back)
 {
 	char *p;
 
@@ -258,8 +250,7 @@ binary_search(string, front, back)
  *	o front is before or at the first line to be printed.
  */
 char *
-linear_search(string, front, back)
-	char *string, *front, *back;
+linear_search(char *string, char *front, char *back)
 {
 	while (front < back) {
 		switch (compare(string, front, back)) {
@@ -281,8 +272,7 @@ linear_search(string, front, back)
  * Print as many lines as match string, starting at front.
  */
 void 
-print_from(string, front, back)
-	char *string, *front, *back;
+print_from(char *string, char *front, char *back)
 {
 	for (; front < back && compare(string, front, back) == EQUAL; ++front) {
 		for (; front < back && *front != '\n'; ++front)
@@ -307,8 +297,7 @@ print_from(string, front, back)
  * "back" terminated).
  */
 int
-compare(s1, s2, back)
-	char *s1, *s2, *back;
+compare(char *s1, char *s2, char *back)
 {
 	int ch;
 
@@ -330,7 +319,7 @@ compare(s1, s2, back)
 }
 
 void
-usage()
+usage(void)
 {
 	(void)fprintf(stderr, "usage: look [-df] [-t char] string [file]\n");
 	exit(2);

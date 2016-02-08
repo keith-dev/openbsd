@@ -1,4 +1,4 @@
-/*	$OpenBSD: exec.c,v 1.4 2002/09/06 21:10:20 henning Exp $ */
+/*	$OpenBSD: exec.c,v 1.6 2003/08/16 14:45:46 henning Exp $ */
 
 /*
  * Copyright (c) 1999 Mats O Jansson.  All rights reserved.
@@ -11,11 +11,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by Mats O Jansson.
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -34,7 +29,7 @@
 #include <stdio.h>
 
 #ifndef LINT
-static char rcsid[] = "$OpenBSD: exec.c,v 1.4 2002/09/06 21:10:20 henning Exp $";
+static char rcsid[] = "$OpenBSD: exec.c,v 1.6 2003/08/16 14:45:46 henning Exp $";
 #endif
 
 #ifdef AOUT_SUPPORT
@@ -88,7 +83,6 @@ adjust(caddr_t x)
 #endif
 	default:
 		errx(1, "no supported exec type");
-		return(x);
 	}
 }
 
@@ -113,7 +107,6 @@ readjust(caddr_t x)
 #endif
 	default:
 		errx(1, "no supported exec type");
-		return(x);
 	}
 }
 

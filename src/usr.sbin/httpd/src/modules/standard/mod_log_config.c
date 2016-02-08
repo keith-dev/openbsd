@@ -1,9 +1,9 @@
-/*	$OpenBSD: mod_log_config.c,v 1.12 2002/07/19 21:31:16 henning Exp $ */
+/*	$OpenBSD: mod_log_config.c,v 1.14 2003/08/21 13:11:36 henning Exp $ */
 
 /* ====================================================================
  * The Apache Software License, Version 1.1
  *
- * Copyright (c) 2000-2002 The Apache Software Foundation.  All rights
+ * Copyright (c) 2000-2003 The Apache Software Foundation.  All rights
  * reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -185,6 +185,7 @@
 #include "http_config.h"
 #include "http_core.h"          /* For REMOTE_NAME */
 #include "http_log.h"
+#include "http_main.h"
 #include "fdcache.h"
 #include <limits.h>
 
@@ -1115,7 +1116,8 @@ static config_log_state *open_config_log(server_rec *s, pool *p,
 	if (ap_server_chroot_desired())
 	    cls->log_fd = fdcache_open(fname, xfer_flags, xfer_mode);
 	else
-	    cls->log_fd = ap_popenf(p, fname, xfer_flags, xfer_mode);
+	    cls->log_fd = ap_popenf_ex(p, fname, xfer_flags, xfer_mode, 1);
+
         if (cls->log_fd < 0) {
             ap_log_error(APLOG_MARK, APLOG_ERR, s,
                          "could not open transfer log file %s.", fname);

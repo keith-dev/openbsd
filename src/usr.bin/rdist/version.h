@@ -1,4 +1,4 @@
-/*	$OpenBSD: version.h,v 1.5 1998/06/26 21:21:24 millert Exp $	*/
+/*	$OpenBSD: version.h,v 1.7 2003/06/03 02:56:15 millert Exp $	*/
 
 /*
  * Copyright (c) 1983 Regents of the University of California.
@@ -12,11 +12,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -34,7 +30,7 @@
  */
 
 /*
- * $From: version.h,v 6.31 1998/03/15 22:25:55 mcooper Exp $
+ * $From: version.h,v 1.2 1999/11/01 00:19:36 christos Exp $
  */
 
 /*
@@ -46,15 +42,16 @@
 /*
  * Distribution version.  The major distribution number should match
  * the protocol version number (VERSION) defined above.
+ * This is not true anymore for freerdist
  */
-#define DISTVERSION		"6.1"
+#define DISTVERSION		"0.92"
 
 /*
  * Patch level
  */
-#define PATCHLEVEL 		4
+#define PATCHLEVEL 		0
 
 /*
  * Distribution status
  */
-#define DISTSTATUS		"RELEASE"
+#define DISTSTATUS		"BETA"

@@ -1,4 +1,4 @@
-/*	$OpenBSD: getNAME.c,v 1.10 2002/07/03 23:39:03 deraadt Exp $	*/
+/*	$OpenBSD: getNAME.c,v 1.13 2003/07/03 17:49:17 avsm Exp $	*/
 /*	$NetBSD: getNAME.c,v 1.7.2.1 1997/11/10 19:54:46 thorpej Exp $	*/
 
 /*-
@@ -13,11 +13,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -44,7 +40,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)getNAME.c	8.1 (Berkeley) 6/30/93";
 #else
-static char rcsid[] = "$OpenBSD: getNAME.c,v 1.10 2002/07/03 23:39:03 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: getNAME.c,v 1.13 2003/07/03 17:49:17 avsm Exp $";
 #endif
 #endif /* not lint */
 
@@ -159,11 +155,10 @@ getfrom(char *pathname)
 				break;
 		}
 		if (i != 0)
-			strncat(linbuf, " ", sizeof(linbuf) - strlen(linbuf)
-			    - 1);
+			strlcat(linbuf, " ", sizeof(linbuf));
 		i++;
 		trimln(headbuf);
-		strncat(linbuf, headbuf, sizeof(linbuf) - strlen(linbuf) - 1);
+		strlcat(linbuf, headbuf, sizeof(linbuf));
 		/* change the \- into (N) - */
 		if ((s = strstr(linbuf, "\\-")) != NULL) {
 			strlcpy(savebuf, s+1, sizeof savebuf);
@@ -176,8 +171,7 @@ getfrom(char *pathname)
 				*s++ = ' ';
 				*s++ = '\0';
 			}
-			strncat(linbuf, savebuf, sizeof(linbuf) -
-			    strlen(linbuf) - 1);
+			strlcat(linbuf, savebuf, sizeof(linbuf));
 		}
 	}
 	if (intro)
@@ -211,24 +205,22 @@ newman:
 				break;
 		}
 		if (i != 0)
-			strncat(linbuf, " ", sizeof(linbuf) - strlen(linbuf)
-			    - 1);
+			strlcat(linbuf, " ", sizeof(linbuf));
 		i++;
 		trimln(headbuf);
 		for (loc = strchr(headbuf, ' '); loc; loc = strchr(loc, ' '))
 			if (loc[1] == ',')
-				strcpy(loc, &loc[1]);
+				memmove(loc, &loc[1], strlen(&loc[1])+1);
 			else
 				loc++;
 		if (headbuf[0] != '.') {
-			strncat(linbuf, headbuf, sizeof(linbuf) -
-			    strlen(linbuf) - 1);
+			strlcat(linbuf, headbuf, sizeof(linbuf));
 		} else {
 			/*
 			 * Get rid of quotes in macros.
 			 */
 			for (loc = strchr(&headbuf[4], '"'); loc; ) {
-				strcpy(loc, &loc[1]);
+				memmove(loc, &loc[1], strlen(&loc[1])+1);
 				loc = strchr(loc, '"');
 			}
 			/*
@@ -248,21 +240,16 @@ newman:
 			 */
 			if (headbuf[1] == 'N' && headbuf[2] == 'd') {
 				if ((t = strchr(name, '.')) != NULL) {
-					strncat(linbuf, "(", sizeof(linbuf) -
-					    strlen(linbuf) - 1);
-					strncat(linbuf, t+1, sizeof(linbuf) -
-					    strlen(linbuf) - 1);
-					strncat(linbuf, ") ", sizeof(linbuf) -
-					    strlen(linbuf) - 1);
+					size_t len = strlen(linbuf);
+					snprintf(linbuf+len, sizeof(linbuf)-len,
+					    "(%s)", t+1);
 				}
-				strncat(linbuf, "- ", sizeof(linbuf) -
-				    strlen(linbuf) - 1);
+				strlcat(linbuf, "- ", sizeof(linbuf));
 			}
 			/*
 			 * Skip over macro names.
 			 */
-			strncat(linbuf, &headbuf[4], sizeof(linbuf) -
-			    strlen(linbuf) - 1);
+			strlcat(linbuf, &headbuf[4], sizeof(linbuf));
 		}
 	}
 	if (intro)

@@ -1,29 +1,22 @@
-.\" $OpenBSD: skey.5,v 1.2 2003/01/23 08:58:47 jmc Exp $
+.\" $OpenBSD: skey.5,v 1.5 2003/06/17 21:56:24 millert Exp $
 .\"
 .\" Copyright (c) 2002 Todd C. Miller <Todd.Miller@courtesan.com>
-.\" All rights reserved.
 .\"
-.\" Redistribution and use in source and binary forms, with or without
-.\" modification, are permitted provided that the following conditions
-.\" are met:
-.\" 1. Redistributions of source code must retain the above copyright
-.\"    notice, this list of conditions and the following disclaimer.
-.\" 2. Redistributions in binary form must reproduce the above copyright
-.\"    notice, this list of conditions and the following disclaimer in the
-.\"    documentation and/or other materials provided with the distribution.
-.\" 3. The name of the author may not be used to endorse or promote products
-.\"    derived from this software without specific prior written permission.
+.\" Permission to use, copy, modify, and distribute this software for any
+.\" purpose with or without fee is hereby granted, provided that the above
+.\" copyright notice and this permission notice appear in all copies.
 .\"
-.\" THIS SOFTWARE IS PROVIDED ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES,
-.\" INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY
-.\" AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL
-.\" THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
-.\" EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
-.\" PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
-.\" OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
-.\" WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
-.\" OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
-.\" ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+.\" THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+.\" WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+.\" MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+.\" ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+.\" WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+.\" ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+.\" OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+.\"
+.\" Sponsored in part by the Defense Advanced Research Projects
+.\" Agency (DARPA) and Air Force Research Laboratory, Air Force
+.\" Materiel Command, USAF, under agreement number F39502-99-1-0512.
 .\"
 .Dd May 16, 2002
 .Dt SKEY 5
@@ -45,7 +38,7 @@ For example,
 would hold root's S/Key record.
 .Pp
 The mode for
-.Pa /etc/skey  
+.Pa /etc/skey
 should be 01730 and it should be owned by root and group auth.
 Individual records within
 .Pa /etc/skey
@@ -74,6 +67,10 @@ and the six S/Key words.
 When the result matches this value, authentication is considered to have
 been successful.
 .El
+.Sh FILES
+.Bl -tag -width /etc/skey -compact
+.It Pa /etc/skey
+.El
 .Sh EXAMPLES
 Here is a sample
 .Pa /etc/skey
@@ -85,10 +82,6 @@ md5
 obsd36521
 1f4359a3764b675d
 .Ed
-.Sh FILES
-.Bl -tag -width /etc/skey -compact
-.It Pa /etc/skey
-.El
 .Sh SEE ALSO
 .Xr skey 1 ,
 .Xr skeyinit 1 ,

@@ -1,4 +1,4 @@
-/*	$OpenBSD: portmap.c,v 1.27 2003/01/20 19:51:36 deraadt Exp $	*/
+/*	$OpenBSD: portmap.c,v 1.30 2003/08/25 04:56:42 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 1996, 1997 Theo de Raadt (OpenBSD). All rights reserved.
@@ -13,11 +13,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -44,7 +40,7 @@ char copyright[] =
 #if 0
 static char sccsid[] = "from: @(#)portmap.c	5.4 (Berkeley) 4/19/91";
 #else
-static char rcsid[] = "$OpenBSD: portmap.c,v 1.27 2003/01/20 19:51:36 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: portmap.c,v 1.30 2003/08/25 04:56:42 deraadt Exp $";
 #endif
 #endif /* not lint */
 
@@ -105,7 +101,7 @@ static char sccsid[] = "@(#)portmap.c 1.32 87/08/06 Copyr 1984 Sun Micro";
 #include <arpa/inet.h>
 
 void reg_service(struct svc_req *, SVCXPRT *);
-void reap(void);
+void reap(int);
 void callit(struct svc_req *, SVCXPRT *);
 int check_callit(struct sockaddr_in *, u_long, u_long, u_long);
 
@@ -264,7 +260,7 @@ main(int argc, char *argv[])
 		exit(1);
 	}
 
-	(void)signal(SIGCHLD, (void (*)())reap);
+	(void)signal(SIGCHLD, (void (*)(int))reap);
 	svc_run();
 	syslog(LOG_ERR, "svc_run returned unexpectedly");
 	abort();
@@ -656,7 +652,7 @@ callit(struct svc_req *rqstp, SVCXPRT *xprt)
 }
 
 void
-reap()
+reap(int signo)
 {
 	int save_errno = errno;
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: dumpfs.c,v 1.16 2002/09/06 21:09:53 deraadt Exp $	*/
+/*	$OpenBSD: dumpfs.c,v 1.18 2003/06/25 21:23:53 deraadt Exp $	*/
 /*	$NetBSD: dumpfs.c,v 1.12 1997/04/26 05:41:33 lukem Exp $	*/
 
 /*
@@ -13,11 +13,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -44,7 +40,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)dumpfs.c	8.2 (Berkeley) 2/2/94";
 #else
-static char rcsid[] = "$OpenBSD: dumpfs.c,v 1.16 2002/09/06 21:09:53 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: dumpfs.c,v 1.18 2003/06/25 21:23:53 deraadt Exp $";
 #endif
 #endif /* not lint */
 
@@ -83,9 +79,7 @@ void	pbits(void *, int);
 void	usage(void);
 
 int
-main(argc, argv)
-	int argc;
-	char *argv[];
+main(int argc, char *argv[])
 {
 	struct fstab *fs;
 	int ch, eval;
@@ -111,8 +105,7 @@ main(argc, argv)
 }
 
 int
-dumpfs(name)
-	char *name;
+dumpfs(char *name)
 {
 	ssize_t n;
 	int fd, c, i, j, k, size;
@@ -262,9 +255,7 @@ err:	if (fd != -1)
 }
 
 int
-dumpcg(name, fd, c)
-	char *name;
-	int fd, c;
+dumpcg(char *name, int fd, int c)
 {
 	off_t cur;
 	int i, j;
@@ -329,9 +320,7 @@ dumpcg(name, fd, c)
 }
 
 void
-pbits(vp, max)
-	void *vp;
-	int max;
+pbits(void *vp, int max)
 {
 	int i;
 	char *p;
@@ -353,7 +342,7 @@ pbits(vp, max)
 }
 
 void
-usage()
+usage(void)
 {
 
 	(void)fprintf(stderr, "usage: dumpfs filesys | device\n");

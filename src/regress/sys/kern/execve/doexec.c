@@ -1,4 +1,4 @@
-/*	$OpenBSD: doexec.c,v 1.3 2001/01/29 02:05:55 niklas Exp $	*/
+/*	$OpenBSD: doexec.c,v 1.5 2003/09/02 23:52:17 david Exp $	*/
 /*	$NetBSD: doexec.c,v 1.3 1995/04/20 22:43:13 cgd Exp $	*/
 
 /*
@@ -33,13 +33,12 @@
 
 #include <errno.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
 int
-main(argc, argv)
-	int argc;
-	char *argv[];
+main(int argc, char *argv[])
 {
 	if (argc != 2) {
 		fprintf(stderr, "usage: %s <progname>\n", argv[0]);

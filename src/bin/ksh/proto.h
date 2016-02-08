@@ -1,4 +1,4 @@
-/*	$OpenBSD: proto.h,v 1.9 2001/02/19 09:49:54 camield Exp $	*/
+/*	$OpenBSD: proto.h,v 1.11 2003/05/16 19:58:57 jsyn Exp $	*/
 
 /*
  * prototypes for PD-KSH
@@ -62,7 +62,7 @@ char *	substitute	ARGS((const char *cp, int f));
 char **	eval		ARGS((char **ap, int f));
 char *	evalstr		ARGS((char *cp, int f));
 char *	evalonestr	ARGS((char *cp, int f));
-char	*debunk		ARGS((char *dp, const char *sp));
+char	*debunk		ARGS((char *dp, const char *sp, size_t dlen));
 void	expand		ARGS((char *cp, XPtrV *wp, int f));
 int glob_str		ARGS((char *cp, XPtrV *wp, int markdirs));
 /* exec.c */
@@ -189,7 +189,6 @@ void	change_flag	ARGS((enum sh_flag f, int what, int newval));
 int	parse_args	ARGS((char **argv, int what, int *setargsp));
 int 	getn		ARGS((const char *as, int *ai));
 int 	bi_getn		ARGS((const char *as, int *ai));
-char *	strerror	ARGS((int i));
 int 	gmatch		ARGS((const char *s, const char *p, int isfile));
 int	has_globbing	ARGS((const char *xp, const char *xpe));
 const unsigned char *pat_scan ARGS((const unsigned char *p,

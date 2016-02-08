@@ -33,7 +33,7 @@
 
 #include <sfvol_private.h>
 
-RCSID("$KTH: common.c,v 1.3 2000/10/03 00:18:41 lha Exp $");
+RCSID("$arla: common.c,v 1.3 2000/10/03 00:18:41 lha Exp $");
 
 /*
  * Translate the `opaque' to the `ino'.
@@ -170,7 +170,7 @@ local_create_file (struct dp_part *dp, onode_opaque *o,
     int fd, ret;
     struct stat sb;
     
-    snprintf(nodename, sizeof(nodename), "%s/inodeXXXXXX", DP_NAME(dp));
+    snprintf(nodename, sizeof(nodename), "%s/inodeXXXXXXXXXX", DP_NAME(dp));
     fd = mkstemp(nodename);
     if (fd == -1)
 	return errno;

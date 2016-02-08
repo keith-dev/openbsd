@@ -1,4 +1,4 @@
-.\"	$OpenBSD: pcmcia.4,v 1.28 2003/03/06 20:40:35 jmc Exp $
+.\"	$OpenBSD: pcmcia.4,v 1.35 2003/09/04 22:14:42 jmc Exp $
 .\"	$NetBSD: pcmcia.4,v 1.4 1998/06/07 09:10:30 enami Exp $
 .\"
 .\" Copyright (c) 1997 The NetBSD Foundation, Inc.
@@ -43,7 +43,7 @@
 .Cd "pcic0   at isa? port 0x3e0 iomem 0xd0000 iosiz 0x10000"
 .Cd "pcic1   at isa? port 0x3e2 iomem 0xe0000 iosiz 0x4000"
 .Cd "pcic2   at isa? port 0x3e4 iomem 0xe0000 iosiz 0x4000"
-.Cd "pcic*   at isapnp?
+.Cd "pcic*   at isapnp?"
 .Cd "pcic*   at pci? dev? function ?"
 .Cd "pcmcia* at pcic? controller ? socket ?"
 .Pp
@@ -51,7 +51,11 @@
 .Cd "tcic0   at isa? port 0x240 iomem 0xd0000 iosiz 0x10000"
 .Cd "pcmcia* at tcic? controller ? socket ?"
 .Pp
-.Cd "# sparc64"
+.Cd "# sparc"
+.Cd "tslot*  at sbus? slot ? offset ?"
+.Cd "pcmcia* at tslot? socket ?"
+.Pp
+.Cd "# sparc/sparc64"
 .Cd "stp*    at sbus? slot ? offset ?"
 .Cd "pcmcia* at stp? socket ?"
 .Pp
@@ -59,7 +63,7 @@
 .Cd "cbb*      at pci? dev? function ?"
 .Cd "cardslot* at cbb? flags 0x0000"
 .Cd "pcmcia*   at cardslot?"
-.Sh INTRODUCTION
+.Sh DESCRIPTION
 The
 .Nm
 subsystem provides machine-independent bus support and
@@ -69,17 +73,17 @@ devices.
 The following devices are supported, sorted by function
 and driver name:
 .Ss Miscellaneous
-.Bl -tag -width speaker -offset ind -compact
+.Bl -tag -width 12n -offset ind -compact
 .It Xr gpr 4
 GemPlus GPR400 smartcard reader.
 .El
 .Ss Serial interfaces and modems
-.Bl -tag -width speaker -offset ind -compact
+.Bl -tag -width 12n -offset ind -compact
 .It Xr com 4 , Xr pccom 4
 8250/16450/16550-compatible PCMCIA serial cards and modems.
 .El
 .Ss Network interfaces
-.Bl -tag -width speaker -offset ind -compact
+.Bl -tag -width 12n -offset ind -compact
 .It Xr an 4
 Aironet Communications 4500/4800 IEEE 802.11DS wireless controller.
 .It Xr awi 4
@@ -87,13 +91,13 @@ BayStack 650 wireless 802.11FH wireless controller.
 .It Xr cnw 4
 Xircom Creditcard Netwave cards.
 .It Xr ep 4
-3Com 3c556, 3c562, 3c574, and 3c589 Etherlink-III Ethernet cards.
+3Com 3c556, 3c562, 3c574, and 3c589 EtherLink III Ethernet cards.
 .It Xr ne 4
 NE2000 compatible cards.
 .It Xr ray 4
 Raytheon Raylink / WebGear Aviator IEEE 802.11FH 2Mbps wireless controller.
 .It Xr rln 4
-Proxim RangeLAN2 PC-Card
+Proxim RangeLAN2 PC-Card.
 .It Xr sm 4
 Megahertz Ethernet cards.
 .It Xr wi 4
@@ -102,15 +106,15 @@ WaveLAN/IEEE, PRISM-II and Spectrum24 IEEE 802.11DS cards.
 Xircom 16bit Ethernet cards.
 .El
 .Ss SCSI controllers
-.Bl -tag -width speaker -offset ind -compact
+.Bl -tag -width 12n -offset ind -compact
 .It Xr aic 4
 Adaptec APA-14[56]0 and NewMedia BusToaster SCSI controller cards.
 .El
 .Ss IDE controllers
-.Bl -tag -width speaker -offset ind -compact
+.Bl -tag -width 12n -offset ind -compact
 .It Xr wdc 4
 Devices which implement an ATA/IDE interface, such as mini disk drives,
-CDROMS.
+CDROMs.
 This includes Compact Flash cards which emulate a disk drive.
 .El
 .Pp
@@ -163,6 +167,7 @@ device may need to be decreased to avoid a conflict.
 .Xr an 4 ,
 .Xr awi 4 ,
 .Xr cardbus 4 ,
+.Xr cbb 4 ,
 .Xr cnw 4 ,
 .Xr com 4 ,
 .Xr eisa 4 ,
@@ -173,10 +178,14 @@ device may need to be decreased to avoid a conflict.
 .Xr isapnp 4 ,
 .Xr ne 4 ,
 .Xr pci 4 ,
+.Xr pcic 4 ,
 .Xr ray 4 ,
 .Xr rln 4 ,
 .Xr sbus 4 ,
 .Xr sm 4 ,
+.Xr stp 4 ,
+.Xr tcic 4 ,
+.Xr tslot 4 ,
 .Xr usb 4 ,
 .Xr wdc 4 ,
 .Xr wi 4 ,

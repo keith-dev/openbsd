@@ -1,6 +1,6 @@
 #!/bin/sh -
 #
-#	$OpenBSD: security,v 1.55 2002/12/30 13:59:54 millert Exp $
+#	$OpenBSD: security,v 1.64 2003/07/07 15:35:55 millert Exp $
 #	from: @(#)security	8.1 (Berkeley) 6/9/93
 #
 
@@ -8,7 +8,7 @@ PATH=/bin:/usr/bin:/sbin:/usr/sbin
 
 umask 077
 
-DIR=`mktemp -d /tmp/_secure.XXXXXX` || exit 1
+DIR=`mktemp -d /tmp/_secure.XXXXXXXXXX` || exit 1
 ERR=$DIR/_secure1
 TMP1=$DIR/_secure2
 TMP2=$DIR/_secure3
@@ -31,7 +31,7 @@ awk -F: '{
 		next;
 	if ($1 == "")
 		printf("Line %d has an empty login field:\n%s\n", NR, $0);
-	else if ($1 !~ /^[A-Za-z0-9_][A-Za-z0-9_-]*$/)
+	else if ($1 !~ /^[A-Za-z0-9_][A-Za-z0-9_\-\.]*\$?$/)
 		printf("Login %s has non-alphanumeric characters.\n", $1);
 	if (length($1) > 31)
 		printf("Login %s has more than 31 characters.\n", $1);
@@ -52,7 +52,7 @@ awk -F: '{
 		printf("Login %s has a negative user ID.\n", $1);
 	if ($4 < 0)
 		printf("Login %s has a negative group ID.\n", $1);
-	if ($7 != 0 && system("test "$7" -lt `date +%s`") == 0)
+	if (int($7) != 0 && system("test "$7" -lt `date +%s`") == 0)
 		printf("Login %s has expired.\n", $1);
 }' < $MP > $OUTPUT
 if [ -s $OUTPUT ] ; then
@@ -90,11 +90,11 @@ if [ -s $CUR ] ; then
 	else
 		cp -p $CUR $BACK
 		cp -p $MP $CUR
-		chown root.wheel $CUR
+		chown root:wheel $CUR
 	fi
 else
 	cp -p $MP $CUR
-	chown root.wheel $CUR
+	chown root:wheel $CUR
 fi
 
 # Check the group file syntax.
@@ -136,14 +136,17 @@ umaskset=no
 list="/etc/csh.cshrc /etc/csh.login ${rhome}/.cshrc ${rhome}/.login"
 for i in $list ; do
 	if [ -s $i ] ; then
-		if egrep umask $i > /dev/null ; then
+		if egrep -q '[[:space:]]*umask[[:space:]]' $i ; then
 			umaskset=yes
 		fi
-		egrep umask $i |
-		awk '$2 % 100 < 20 \
-			{ print "Root umask is group writable" }
-		     $2 % 10 < 2 \
-			{ print "Root umask is other writable" }' >> $OUTPUT
+		awk '{
+		    if ($1 == "umask") {
+			 if ($2 % 100 / 10 ~ /^[0145]/)
+			    print "Root umask is group writable";
+			 if ($2 % 10 ~ /^[0145]/)
+			    print "Root umask is other writable";
+		    }
+		}' < $i >> $OUTPUT
 		SAVE_PATH=$PATH
 		unset PATH
 		/bin/csh -f -s << end-of-csh > /dev/null 2>&1
@@ -595,7 +598,7 @@ fi
 # Create the mtree tree specifications using:
 #
 #	mtree -cx -pDIR -kcksum,gid,mode,nlink,size,link,time,uid > DIR.secure
-#	chown root.wheel DIR.secure
+#	chown root:wheel DIR.secure
 #	chmod 600 DIR.secure
 #
 # Note, this is not complete protection against Trojan horsed binaries, as
@@ -648,11 +651,11 @@ if [ -s /etc/changelist ] ; then
 					cat $OUTPUT
 					cp -p $CUR $BACK
 					cp -p $file $CUR
-					chown root.wheel $CUR $BACK
+					chown root:wheel $CUR $BACK
 				fi
 			else
 				cp -p $file $CUR
-				chown root.wheel $CUR
+				chown root:wheel $CUR
 			fi
 		fi
 	done
@@ -670,12 +673,12 @@ if [ -s /etc/changelist ] ; then
 					echo "NEW: $MD5_NEW"
 					cp -p $CUR $BACK
 					echo $MD5_NEW > $CUR
-					chown root.wheel $CUR $BACK
+					chown root:wheel $CUR $BACK
 					chmod 600 $CUR
 				fi
 			else
 				echo $MD5_NEW > $CUR
-				chown root.wheel $CUR
+				chown root:wheel $CUR
 				chmod 600 $CUR
 			fi
 		fi

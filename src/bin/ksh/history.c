@@ -1,4 +1,4 @@
-/*	$OpenBSD: history.c,v 1.17 2003/02/28 09:45:09 jmc Exp $	*/
+/*	$OpenBSD: history.c,v 1.22 2003/05/18 01:02:42 jsyn Exp $	*/
 
 /*
  * command history
@@ -64,7 +64,7 @@ static int	hist_replace ARGS((char **hp, const char *pat, const char *rep,
 				   int global));
 static char   **hist_get ARGS((const char *str, int approx, int allow_cur));
 static char   **hist_get_newest ARGS((int allow_cur));
-static char   **hist_get_oldest ARGS(());
+static char   **hist_get_oldest ARGS((void));
 static void	histbackup ARGS((void));
 
 static char   **current;	/* current position in history[] */
@@ -93,8 +93,9 @@ c_fc(wp)
 			if (strcmp(p, "-") == 0)
 				sflag++;
 			else {
-				editor = str_nsave(p, strlen(p) + 4, ATEMP);
-				strcat(editor, " $_");
+				size_t len = strlen(p) + 4;
+				editor = str_nsave(p, len, ATEMP);
+				strlcat(editor, " $_", len);
 			}
 			break;
 		  case 'g': /* non-at&t ksh */
@@ -861,7 +862,7 @@ hist_init(s)
 		 * check on its validity
 		 */
 		if (base == MAP_FAILED || *base != HMAGIC1 || base[1] != HMAGIC2) {
-			if (base != (unsigned char *)-1)
+			if (base != MAP_FAILED)
 				munmap((caddr_t)base, hsize);
 			hist_finish();
 			unlink(hname);
@@ -1017,8 +1018,8 @@ histload(s, base, bytes)
 	register int bytes;
 {
 	State state;
-	int	lno;
-	unsigned char	*line;
+	int	lno = 0;
+	unsigned char	*line = NULL;
 
 	for (state = shdr; bytes-- > 0; base++) {
 		switch (state) {
@@ -1095,7 +1096,7 @@ writehistfile(lno, cmd)
 	unsigned char	*base;
 	unsigned char	*new;
 	int	bytes;
-	char	hdr[5];
+	unsigned char	hdr[5];
 
 	(void) flock(histfd, LOCK_EX);
 	sizenow = lseek(histfd, 0L, SEEK_END);
@@ -1159,7 +1160,7 @@ static int
 sprinkle(fd)
 	int fd;
 {
-	static char mag[] = { HMAGIC1, HMAGIC2 };
+	static unsigned char mag[] = { HMAGIC1, HMAGIC2 };
 
 	return(write(fd, mag, 2) != 2);
 }

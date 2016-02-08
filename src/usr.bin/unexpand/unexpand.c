@@ -1,4 +1,4 @@
-/*	$OpenBSD: unexpand.c,v 1.5 2002/02/16 21:27:56 millert Exp $	*/
+/*	$OpenBSD: unexpand.c,v 1.9 2003/07/10 00:06:51 david Exp $	*/
 /*	$NetBSD: unexpand.c,v 1.5 1994/12/24 17:08:05 cgd Exp $	*/
 
 /*-
@@ -13,11 +13,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -44,13 +40,14 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)unexpand.c	8.1 (Berkeley) 6/6/93";
 #endif
-static char rcsid[] = "$OpenBSD: unexpand.c,v 1.5 2002/02/16 21:27:56 millert Exp $";
+static char rcsid[] = "$OpenBSD: unexpand.c,v 1.9 2003/07/10 00:06:51 david Exp $";
 #endif /* not lint */
 
 /*
  * unexpand - put tabs into a file replacing blanks
  */
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 char	genbuf[BUFSIZ];
@@ -60,9 +57,7 @@ int	all;
 void tabify(char);
 
 int
-main(argc, argv)
-	int argc;
-	char *argv[];
+main(int argc, char *argv[])
 {
 	char *cp;
 
@@ -96,16 +91,19 @@ main(argc, argv)
 }
 
 void
-tabify(c)
-	char c;
+tabify(char c)
 {
 	char *cp, *dp;
 	int dcol;
 	int ocol;
+	size_t len;
 
 	ocol = 0;
 	dcol = 0;
-	cp = genbuf, dp = linebuf;
+	cp = genbuf;
+	dp = linebuf;
+	len = sizeof linebuf;
+
 	for (;;) {
 		switch (*cp) {
 
@@ -122,20 +120,28 @@ tabify(c)
 			while (((ocol + 8) &~ 07) <= dcol) {
 				if (ocol + 1 == dcol)
 					break;
-				*dp++ = '\t';
+				if (len > 1) {
+					*dp++ = '\t';
+					len--;
+				}
 				ocol += 8;
 				ocol &= ~07;
 			}
 			while (ocol < dcol) {
-				*dp++ = ' ';
+				if (len > 1) {
+					*dp++ = ' ';
+					len--;
+				}
 				ocol++;
 			}
 			if (*cp == 0 || c == 0) {
-				strcpy(dp, cp);
+				strlcpy(dp, cp, len);
 				return;
 			}
 			*dp++ = *cp;
-			ocol++, dcol++;
+			len--;
+			ocol++;
+			dcol++;
 		}
 		cp++;
 	}

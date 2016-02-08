@@ -1,12 +1,12 @@
-.\"	$OpenBSD: bus_space.9,v 1.7 2002/10/09 21:14:36 deraadt Exp $ 
+.\"	$OpenBSD: bus_space.9,v 1.10 2003/06/06 20:56:32 jmc Exp $
 .\" $NetBSD: bus_space.9,v 1.15 2000/08/09 03:11:00 tv Exp $
 .\"
 .\" Copyright (c) 1997 The NetBSD Foundation, Inc.
 .\" All rights reserved.
-.\" 
+.\"
 .\" This code is derived from software contributed to The NetBSD Foundation
 .\" by Christopher G. Demetriou.
-.\" 
+.\"
 .\" Redistribution and use in source and binary forms, with or without
 .\" modification, are permitted provided that the following conditions
 .\" are met:
@@ -22,7 +22,7 @@
 .\" 4. Neither the name of The NetBSD Foundation nor the names of its
 .\"    contributors may be used to endorse or promote products derived
 .\"    from this software without specific prior written permission.
-.\" 
+.\"
 .\" THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
 .\" ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
 .\" TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
@@ -82,7 +82,7 @@
 .Nm bus_space_set_region_8 ,
 .Nm bus_space_subregion ,
 .Nm bus_space_unmap ,
-.\".Nm bus_space_vaddr ,
+.Nm bus_space_vaddr ,
 .Nm bus_space_write_1 ,
 .Nm bus_space_write_2 ,
 .Nm bus_space_write_4 ,
@@ -128,8 +128,8 @@
 .Ft void
 .Fn bus_space_free "bus_space_tag_t space" "bus_space_handle_t handle" \
 "bus_size_t size"
-.\".Ft void *
-.\".Fn bus_space_vaddr "bus_space_tag_t space" "bus_space_handle_t handle"
+.Ft void *
+.Fn bus_space_vaddr "bus_space_tag_t space" "bus_space_handle_t handle"
 .Ft u_int8_t
 .Fn bus_space_read_1 "bus_space_tag_t space" "bus_space_handle_t handle" \
 "bus_size_t offset"
@@ -340,7 +340,7 @@ functions exist to allow device drivers machine-independent access to
 bus memory and register areas.
 All of the functions and types described in this document can be used by
 including the
-.Pa Aq machine/bus.h
+.Aq Pa machine/bus.h
 header file.
 .Pp
 Many common devices are used on multiple architectures, but are accessed
@@ -372,7 +372,7 @@ versions of these interfaces, but may implement them as macros if
 appropriate.
 Machine-dependent types, variables, and functions should be marked
 clearly in
-.Pa Aq machine/bus.h
+.Aq Pa machine/bus.h
 to avoid confusion with the machine-independent types and functions,
 and, if possible, should be given names which make the
 machine-dependence clear.
@@ -461,7 +461,7 @@ specified
 is zero.
 .Sh TYPES
 Several types are defined in
-.Pa Aq machine/bus.h
+.Aq Pa machine/bus.h
 to facilitate use of the
 .Nm
 functions by drivers.
@@ -549,41 +549,42 @@ argument controls how the space is to be mapped.
 Supported flags include:
 .Bl -tag -width BUS_SPACE_MAP_CACHEABLE -offset indent
 .It Dv BUS_SPACE_MAP_CACHEABLE
-Try to map the space so that accesses can be cached by the system cache.
+Try to map the space so that access can be cached by the system cache.
 If this flag is not specified, the implementation should map the space
 so that it will not be cached.
 This mapping method will only be useful in very rare occasions.
 .Pp
 This flag must have a value of 1 on all implementations for backward
 compatibility.
-.\".It Dv BUS_SPACE_MAP_PREFETCHABLE
-.\"Try to map the space so that accesses can be prefetched by the system,
-.\"and writes can be buffered.
-.\"This means, accesses should be side effect free (idempotent).
-.\"The
-.\".Fn bus_space_barrier
-.\"methods will flush the write buffer or force actual read accesses.
-.\"If this flag is not specified, the
-.\"implementation should map the space so that it will not be prefetched
-.\"or delayed.
-.\".It Dv BUS_SPACE_MAP_LINEAR
-.\"Try to map the space so that its contents can be accessed linearly via
-.\"normal memory access methods (e.g. pointer dereferencing and structure
-.\"accesses). The
-.\".Fn bus_space_vaddr
-.\"method can be used to obtain the kernel virtual address of the mapped range.
-.\"This is useful when software wants to do direct access to a memory
-.\"device, e.g. a frame buffer.  If this flag is specified and linear
-.\"mapping is not possible, the
-.\".Fn bus_space_map
-.\"call should fail.
-.\"If this
-.\"flag is not specified, the system may map the space in whatever way is
-.\"most convenient.
-.\"Use of this mapping method is not encouraged for normal device access;
-.\"where linear access is not essential, use of the
-.\".Fn bus_space_read/write
-.\"methods is strongly recommended.
+.It Dv BUS_SPACE_MAP_PREFETCHABLE
+Try to map the space so that accesses can be prefetched by the system,
+and writes can be buffered.
+This means, accesses should be side effect free (idempotent).
+The
+.Fn bus_space_barrier
+methods will flush the write buffer or force actual read accesses.
+If this flag is not specified, the
+implementation should map the space so that it will not be prefetched
+or delayed.
+.It Dv BUS_SPACE_MAP_LINEAR
+Try to map the space so that its contents can be accessed linearly via
+normal memory access methods (e.g. pointer dereferencing and structure
+accesses).
+The
+.Fn bus_space_vaddr
+method can be used to obtain the kernel virtual address of the mapped range.
+This is useful when software wants to do direct access to a memory
+device, e.g. a frame buffer.
+If this flag is specified and linear mapping is not possible, the
+.Fn bus_space_map
+call should fail.
+If this
+flag is not specified, the system may map the space in whatever way is
+most convenient.
+Use of this mapping method is not encouraged for normal device access;
+where linear access is not essential, use of the
+.Fn bus_space_read/write
+methods is strongly recommended.
 .El
 .Pp
 .\"Not all combinations of flags make sense or are supported with all
@@ -591,18 +592,18 @@ compatibility.
 .\"For instance,
 .Dv BUS_SPACE_MAP_CACHEABLE
 may be meaningless when used on many systems' I/O port spaces.
-.\"and on some systems
-.\".Dv BUS_SPACE_MAP_LINEAR
-.\"without
-.\".Dv BUS_SPACE_MAP_PREFETCHABLE
-.\"may never work.
-.\"When the system hardware or firmware provides hints as to how spaces should be
-.\"mapped (e.g. the PCI memory mapping registers' "prefetchable" bit), those
-.\"hints should be followed for maximum compatibility.
-.\"On some systems,
-.\"requesting a mapping that cannot be satisfied (e.g. requesting a
-.\"non-prefetchable mapping when the system can only provide a prefetchable one)
-.\"will cause the request to fail.
+and on some systems
+.Dv BUS_SPACE_MAP_LINEAR
+without
+.Dv BUS_SPACE_MAP_PREFETCHABLE
+may never work.
+When the system hardware or firmware provides hints as to how spaces should be
+mapped (e.g. the PCI memory mapping registers' "prefetchable" bit), those
+hints should be followed for maximum compatibility.
+On some systems,
+requesting a mapping that cannot be satisfied (e.g. requesting a
+non-prefetchable mapping when the system can only provide a prefetchable one)
+will cause the request to fail.
 .Pp
 Some implementations may keep track of use of bus space for some or all
 bus spaces and refuse to allow duplicate allocations.
@@ -678,18 +679,19 @@ When
 or
 .Fn bus_space_free
 is called on a handle, all subregions of that handle become invalid.
-.\".Pp
-.\".It Fn bus_space_vaddr "tag" "handle"
-.\".Pp
-.\"This method returns the kernel virtual address of a mapped bus space if and
-.\"only if it was mapped with the
-.\".Dv BUS_SPACE_MAP_LINEAR
-.\"flag. The range can be accessed by normal (volatile) pointer dereferences.
-.\"If mapped with the
-.\".Dv BUS_SPACE_MAP_PREFETCHABLE
-.\"flag, the
-.\".Fn bus_space_barrier
-.\"method must be used to force a particular access order.
+.Pp
+.It Fn bus_space_vaddr "tag" "handle"
+.Pp
+This method returns the kernel virtual address of a mapped bus space if and
+only if it was mapped with the
+.Dv BUS_SPACE_MAP_LINEAR
+flag.
+The range can be accessed by normal (volatile) pointer dereferences.
+If mapped with the
+.Dv BUS_SPACE_MAP_PREFETCHABLE
+flag, the
+.Fn bus_space_barrier
+method must be used to force a particular access order.
 .El
 .Sh ALLOCATING AND FREEING BUS SPACE
 Some devices require or allow bus space to be allocated by the operating
@@ -1126,7 +1128,7 @@ used).
 All locations being read and written must lie within the bus space
 region specified by their respective handles.
 .Pp
-For portability, the starting addresses of the regions specified by the
+For portability, the starting addresses of the regions specified by
 each handle plus its respective offset should be a multiple of the size
 of data items being copied.
 On some systems, not obeying this requirement may cause incorrect data
@@ -1456,7 +1458,9 @@ would also ease translation of the
 functions into user space (since mapping in user space would look like
 it just used a different bus-specific mapping function).
 .El
-.\".Sh COMPATIBILITY
+.Sh SEE ALSO
+.Xr bus_dma 9
+.\".Sh STANDARDS
 .\".Pp
 .\"The current version of the
 .\".Nm
@@ -1505,5 +1509,3 @@ Chris Demetriou wrote this manual page.
 .Pp
 Niklas Hallqvist did the *_raw_* API for
 .Ox .
-.Sh SEE ALSO
-.Xr bus_dma 9

@@ -1,4 +1,4 @@
-/*	$OpenBSD: dlfcn_stubs.c,v 1.3 2001/12/26 02:27:13 pvalchev Exp $	*/
+/*	$OpenBSD: dlfcn_stubs.c,v 1.7 2003/07/15 02:56:14 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1998 Per Fogelstrom, Opsycon AB
@@ -11,12 +11,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed under OpenBSD by
- *	Per Fogelstrom, Opsycon AB, Sweden.
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS
  * OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
@@ -44,7 +38,7 @@ void	*dlopen(const char *libname, int how) __attribute__((weak));
 int	 dlclose(void *handle) __attribute__((weak));
 void	*dlsym(void *handle, const char *name) __attribute__((weak));
 int	 dlctl(void *handle, int command, void *data) __attribute__((weak));
-const char *	dlerror() __attribute__((weak));
+const char *	dlerror(void) __attribute__((weak));
 
 #include <stdio.h>
 
@@ -72,13 +66,11 @@ dlsym(void *handle, const char *name)
 int
 dlctl(void *handle, int command, void *data)
 {
-	printf("Wrong dl symbols!\n");
-	return 0;
+	return -1;
 }
 
 const char *
-dlerror()
+dlerror(void)
 {
-	printf("Wrong dl symbols!\n");
 	return "Wrong dl symbols!\n";
 }

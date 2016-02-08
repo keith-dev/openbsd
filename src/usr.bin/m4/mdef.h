@@ -1,4 +1,4 @@
-/*	$OpenBSD: mdef.h,v 1.22 2002/04/28 14:37:12 espie Exp $	*/
+/*	$OpenBSD: mdef.h,v 1.28 2003/06/30 22:13:33 espie Exp $	*/
 /*	$NetBSD: mdef.h,v 1.7 1996/01/13 23:25:27 pk Exp $	*/
 
 /*
@@ -16,11 +16,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -38,6 +34,12 @@
  *
  *	@(#)mdef.h	8.1 (Berkeley) 6/6/93
  */
+
+#ifdef __GNUC__
+# define UNUSED	__attribute__((__unused__))
+#else
+# define UNUSED
+#endif
 
 #define MACRTYPE        1
 #define DEFITYPE        2
@@ -83,6 +85,7 @@
 #define TRACEONTYPE	42
 #define TRACEOFFTYPE	43
 
+#define BUILTIN_MARKER	"__builtin_"
  
 #define TYPEMASK	63	/* Keep bits really corresponding to a type. */
 #define RECDEF		256	/* Pure recursive def, don't expand it */
@@ -133,21 +136,20 @@
  
 typedef struct ndblock *ndptr;
  
-struct ndblock {		/* hastable structure         */
-	char		*name;	/* entry name..               */
+struct macro_definition {
+	struct macro_definition *next;
 	char		*defn;	/* definition..               */
 	unsigned int	type;	/* type of the entry..        */
-	unsigned int 	hv;	/* hash function value..      */
-	ndptr		nxtptr;	/* link to next entry..       */
-};
- 
-#define nil     ((ndptr) 0)
- 
-struct keyblk {
-        char    *knam;          /* keyword name */
-        int     ktyp;           /* keyword type */
 };
 
+
+struct ndblock {			/* hashtable structure         */
+	unsigned int 		builtin_type;
+	unsigned int		trace_flags;
+	struct macro_definition *d;
+	char		name[1];	/* entry name..               */
+};
+ 
 typedef union {			/* stack structure */
 	int	sfra;		/* frame entry  */
 	char 	*sstr;		/* string entry */
@@ -219,7 +221,8 @@ struct input_file {
  *
  */
 #define PARLEV  (mstack[fp].sfra)
-#define CALTYP  (mstack[fp-1].sfra)
+#define CALTYP  (mstack[fp-2].sfra)
+#define TRACESTATUS (mstack[fp-1].sfra)
 #define PREVEP	(mstack[fp+3].sstr)
-#define PREVSP	(fp-3)
-#define PREVFP	(mstack[fp-2].sfra)
+#define PREVSP	(fp-4)
+#define PREVFP	(mstack[fp-3].sfra)

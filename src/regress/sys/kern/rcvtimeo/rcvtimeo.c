@@ -1,6 +1,6 @@
-/*	$OpenBSD: rcvtimeo.c,v 1.1 2002/11/26 18:31:59 mickey Exp $	*/
+/*	$OpenBSD: rcvtimeo.c,v 1.4 2003/09/02 23:52:17 david Exp $	*/
 
-/*	Copyright (c) 2002 Michael Shalayeff. Public Domain */
+/*	Written by Michael Shalayeff, 2002, Public Domain */
 
 #include <sys/param.h>
 #include <sys/socket.h>
@@ -10,12 +10,13 @@
 #include <signal.h>
 #include <unistd.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <errno.h>
 #include <err.h>
 
 volatile int back;
 
-void
+static void
 sigalarm(int sig, siginfo_t *sip, void *scp)
 {
 	if (!back)

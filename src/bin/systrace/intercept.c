@@ -1,4 +1,4 @@
-/*	$OpenBSD: intercept.c,v 1.38 2003/02/20 22:03:31 art Exp $	*/
+/*	$OpenBSD: intercept.c,v 1.42 2003/08/04 18:15:11 sturm Exp $	*/
 /*
  * Copyright 2002 Niels Provos <provos@citi.umich.edu>
  * All rights reserved.
@@ -73,12 +73,16 @@ static void sigusr1_handler(int);
 static SPLAY_HEAD(pidtree, intercept_pid) pids;
 static SPLAY_HEAD(sctree, intercept_syscall) scroot;
 
+static volatile int got_sigusr1 = 0;
+
 /* Generic callback functions */
 
 void (*intercept_newimagecb)(int, pid_t, int, const char *, const char *, void *) = NULL;
 void *intercept_newimagecbarg = NULL;
 short (*intercept_gencb)(int, pid_t, int, const char *, int, const char *, void *, int, void *) = NULL;
 void *intercept_gencbarg = NULL;
+void (*intercept_pfreecb)(int, void*);
+void *intercept_pfreearg = NULL;
 
 int
 sccompare(struct intercept_syscall *a, struct intercept_syscall *b)
@@ -225,10 +229,20 @@ intercept_register_execcb(void (*cb)(int, pid_t, int, const char *, const char *
 	return (0);
 }
 
+int
+intercept_register_pfreecb(void (*cb)(int, void *), void *arg)
+{
+	intercept_pfreecb = cb;
+	intercept_pfreearg = arg;
+
+	return (0);
+}
+
 static void
 sigusr1_handler(int signum)
 {                                                                              
 	/* all we need to do is pretend to handle it */
+	got_sigusr1 = 1;
 }
 
 void
@@ -238,8 +252,6 @@ intercept_setpid(struct intercept_pid *icpid, uid_t uid, gid_t gid)
 
 	icpid->uid = uid;
 	icpid->gid = gid;
-	if (getcwd(icpid->cwd, sizeof(icpid->cwd)) == NULL)
-		err(1, "getcwd");
 	if ((pw = getpwuid(icpid->uid)) == NULL) {
 		snprintf(icpid->username, sizeof(icpid->username),
 		    "unknown(%d)", icpid->uid);
@@ -294,6 +306,9 @@ intercept_run(int bg, int fd, uid_t uid, gid_t gid,
 
 		/* Sleep */
 		sigsuspend(&none);
+
+		if (!got_sigusr1)
+			errx(1, "wrong signal");
 
 		/*
 		 * Woken up, restore signal handling state.
@@ -570,18 +585,35 @@ intercept_get_string(int fd, pid_t pid, void *addr)
 char *
 intercept_filename(int fd, pid_t pid, void *addr, int userp)
 {
-	static char cwd[2*MAXPATHLEN];
-	struct intercept_pid *icpid;
 	char *name;
-	int havecwd = 0;
 
-	name = intercept_get_string(fd, pid, addr);
-	if (name == NULL)
+	if ((name = intercept_get_string(fd, pid, addr)) == NULL)
 		goto abort;
 
-	if (intercept.setcwd(fd, pid) == -1) {
+	if ((name = normalize_filename(fd, pid, name, userp)) == NULL)
+		goto abort;
+
+	return (name);
+
+ abort:
+	ic_abort = 1;
+	return (NULL);
+}
+
+/*
+ * Normalizes a pathname so that Systrace policies entries are
+ * invariant to symlinks.
+ */
+
+char *
+normalize_filename(int fd, pid_t pid, char *name, int userp)
+{
+	static char cwd[2*MAXPATHLEN];
+	int havecwd = 0;
+
+	if (fd != -1 && intercept.setcwd(fd, pid) == -1) {
 		if (errno == EBUSY)
-			goto abort;
+			return (NULL);
 	getcwderr:
 		if (strcmp(name, "/") == 0)
 			return (name);
@@ -595,13 +627,7 @@ intercept_filename(int fd, pid_t pid, void *addr, int userp)
 		havecwd = 1;
 	}
 
-	if (havecwd) {
-		/* Update cwd for process */
-		icpid = intercept_getpid(pid);
-		if (strlcpy(icpid->cwd, cwd, sizeof(icpid->cwd)) >= sizeof(icpid->cwd))
-			errx(1, "cwd too long");
-	}
-
+	/* Need concatenated path for simplifypath */
 	if (havecwd && name[0] != '/') {
 		if (strlcat(cwd, "/", sizeof(cwd)) >= sizeof(cwd))
 			goto error;
@@ -614,13 +640,17 @@ intercept_filename(int fd, pid_t pid, void *addr, int userp)
 
 	if (userp != ICLINK_NONE) {
 		static char rcwd[2*MAXPATHLEN];
+		char *base= basename(cwd);
 		int failed = 0;
 
-		if (userp == ICLINK_NOLAST) {
-			char *file = basename(cwd);
+		/* The dot maybe used by rmdir("/tmp/something/.") */
+		if (strcmp(base, ".") == 0)
+			goto nolast;
 
+		if (userp == ICLINK_NOLAST) {
 			/* Check if the last component has special meaning */
-			if (strcmp(file, ".") == 0 || strcmp(file, "..") == 0)
+			if (strcmp(base, "..") == 0 ||
+			    strcmp(base, "/") == 0)
 				userp = ICLINK_ALL;
 			else
 				goto nolast;
@@ -661,11 +691,11 @@ intercept_filename(int fd, pid_t pid, void *addr, int userp)
 			 * At this point, filename has to exist and has to
 			 * be a directory.
 			 */
-			if (lstat(rcwd, &st) == -1)
-				failed = 1;
-			else if (userp != ICLINK_NOLAST &&
-			    !(st.st_mode & S_IFDIR))
+			if (userp != ICLINK_NOLAST) {
+				if (lstat(rcwd, &st) == -1 ||
+				    !(st.st_mode & S_IFDIR))
 					failed = 1;
+			}
 		}
 	out:
 		if (failed)
@@ -679,7 +709,7 @@ intercept_filename(int fd, pid_t pid, void *addr, int userp)
 
 
 	/* Restore working directory and change root space after realpath */
-	if (intercept.restcwd(fd) == -1)
+	if (fd != -1 && intercept.restcwd(fd) == -1)
 		err(1, "%s: restcwd", __func__);
 
 	return (name);
@@ -687,10 +717,6 @@ intercept_filename(int fd, pid_t pid, void *addr, int userp)
  error:
 	errx(1, "%s: filename too long", __func__);
 	/* NOTREACHED */
-
- abort:
-	ic_abort = 1;
-	return (NULL);
 }
 
 void
@@ -707,7 +733,7 @@ intercept_syscall(int fd, pid_t pid, u_int16_t seqnr, int policynr,
 	flags = 0;
 
 	icpid = intercept_getpid(pid);
-		
+
 	/* Special handling for the exec call */
 	if (!strcmp(name, "execve")) {
 		void *addr;
@@ -861,7 +887,6 @@ intercept_child_info(pid_t opid, pid_t npid)
 	inpid->gid = ipid->gid;
 	strlcpy(inpid->username, ipid->username, sizeof(inpid->username));
 	strlcpy(inpid->home, ipid->home, sizeof(inpid->home));
-	strlcpy(inpid->cwd, ipid->cwd, sizeof(inpid->cwd));
 
 	/* XXX - keeps track of emulation */
 	intercept.clonepid(ipid, inpid);
@@ -902,4 +927,16 @@ intercept_isvalidsystemcall(char *emulation, char *name)
 	res = intercept.getsyscallnumber(emulation, name);
 
 	return (res != -1);
+}
+
+/*
+ * Call back when a user has exhausted the number of allowed policies
+ * in the kernel.  The kernel returns the policy number of a policy
+ * that has been purged.
+ */
+
+void
+intercept_policy_free(int policynr)
+{
+	(*intercept_pfreecb)(policynr, intercept_pfreearg);
 }

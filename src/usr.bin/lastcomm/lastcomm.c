@@ -1,4 +1,4 @@
-/*	$OpenBSD: lastcomm.c,v 1.10 2002/02/16 21:27:47 millert Exp $	*/
+/*	$OpenBSD: lastcomm.c,v 1.13 2003/06/26 21:59:11 deraadt Exp $	*/
 /*	$NetBSD: lastcomm.c,v 1.9 1995/10/22 01:43:42 ghudson Exp $	*/
 
 /*
@@ -13,11 +13,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -44,7 +40,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)lastcomm.c	8.2 (Berkeley) 4/29/95";
 #endif
-static char rcsid[] = "$OpenBSD: lastcomm.c,v 1.10 2002/02/16 21:27:47 millert Exp $";
+static char rcsid[] = "$OpenBSD: lastcomm.c,v 1.13 2003/06/26 21:59:11 deraadt Exp $";
 #endif /* not lint */
 
 #include <sys/param.h>
@@ -62,6 +58,7 @@ static char rcsid[] = "$OpenBSD: lastcomm.c,v 1.10 2002/02/16 21:27:47 millert E
 #include <tzfile.h>
 #include <unistd.h>
 #include <utmp.h>
+#include <pwd.h>
 #include "pathnames.h"
 
 time_t	 expand(u_int);
@@ -69,12 +66,9 @@ char	*flagbits(int);
 char	*getdev(dev_t);
 int	 requested(char *[], struct acct *);
 void	 usage(void);
-char	*user_from_uid();
 
 int
-main(argc, argv)
-	int argc;
-	char *argv[];
+main(int argc, char *argv[])
 {
 	char *p;
 	struct acct ab;
@@ -161,8 +155,7 @@ main(argc, argv)
 }
 
 time_t
-expand(t)
-	u_int t;
+expand(u_int t)
 {
 	time_t nt;
 
@@ -176,8 +169,7 @@ expand(t)
 }
 
 char *
-flagbits(f)
-	int f;
+flagbits(int f)
 {
 	static char flags[20] = "-";
 	char *p;
@@ -195,9 +187,7 @@ flagbits(f)
 }
 
 int
-requested(argv, acp)
-	char *argv[];
-	struct acct *acp;
+requested(char *argv[], struct acct *acp)
 {
 	do {
 		if (!strcmp(user_from_uid(acp->ac_uid, 0), *argv))
@@ -211,8 +201,7 @@ requested(argv, acp)
 }
 
 char *
-getdev(dev)
-	dev_t dev;
+getdev(dev_t dev)
 {
 	static dev_t lastdev = (dev_t)-1;
 	static char *lastname;
@@ -228,7 +217,7 @@ getdev(dev)
 }
 
 void
-usage()
+usage(void)
 {
 	(void)fprintf(stderr,
 	    "lastcomm [ -f file ] [command ...] [user ...] [tty ...]\n");

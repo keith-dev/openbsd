@@ -21,7 +21,7 @@ SOFTWARE.
 ************************************************************************/
 
 #ifndef lint
-static char rcsid[] = "$Id: bootpd.c,v 1.12 2002/09/08 08:06:40 deraadt Exp $";
+static char rcsid[] = "$Id: bootpd.c,v 1.14 2003/08/20 00:27:59 millert Exp $";
 #endif
 
 /*
@@ -60,6 +60,7 @@ static char rcsid[] = "$Id: bootpd.c,v 1.12 2002/09/08 08:06:40 deraadt Exp $";
 #include <stdlib.h>
 #include <signal.h>
 #include <stdio.h>
+#include <poll.h>
 #include <string.h>
 #include <errno.h>
 #include <ctype.h>
@@ -114,8 +115,6 @@ static char rcsid[] = "$Id: bootpd.c,v 1.12 2002/09/08 08:06:40 deraadt Exp $";
 #define P(args) ()
 #endif
 
-extern void dumptab P((char *));
-
 PRIVATE void catcher P((int));
 PRIVATE int chk_access P((char *, int32 *));
 #ifdef VEND_CMU
@@ -149,11 +148,6 @@ struct sockaddr_in send_addr;	/*  destination */
  * option defaults
  */
 int debug = 0;					/* Debugging flag (level) */
-struct timeval actualtimeout =
-{								/* fifteen minutes */
-	15 * 60L,					/* tv_sec */
-	0							/* tv_usec */
-};
 
 /*
  * General
@@ -186,18 +180,16 @@ char *bootpd_dump = DUMPTAB_FILE;
  */
 
 int
-main(argc, argv)
-	int argc;
-	char **argv;
+main(int argc, char *argv[])
 {
-	struct timeval *timeout;
 	struct bootp *bp;
 	struct servent *servp;
 	struct hostent *hep;
+	struct pollfd pfd[1];
 	char *stmp;
 	int n;
 	socklen_t ba_len, ra_len;
-	int nfound, readfds;
+	int nfound, timeout;
 	int standalone;
 
 	progname = strrchr(argv[0], '/');
@@ -254,7 +246,7 @@ main(argc, argv)
 	 * Set defaults that might be changed by option switches.
 	 */
 	stmp = NULL;
-	timeout = &actualtimeout;
+	timeout = 15 * 60 * 1000;		/* fifteen minutes */
 
 	/*
 	 * Read switches.
@@ -340,13 +332,15 @@ main(argc, argv)
 						"%s: invalid timeout specification\n", progname);
 				break;
 			}
-			actualtimeout.tv_sec = (int32) (60 * n);
 			/*
-			 * If the actual timeout is zero, pass a NULL pointer
-			 * to select so it blocks indefinitely, otherwise,
-			 * point to the actual timeout value.
+			 * If the actual timeout is zero, pass INFTIM
+			 * to poll so it blocks indefinitely, otherwise,
+			 * set to the actual timeout value.
 			 */
-			timeout = (n > 0) ? &actualtimeout : NULL;
+			if (n > 0)
+				timeout = n * 60 * 1000;
+			else
+				timeout = INFTIM;
 			break;
 
 		default:
@@ -408,7 +402,7 @@ main(argc, argv)
 		/*
 		 * Nuke any timeout value
 		 */
-		timeout = NULL;
+		timeout = INFTIM;
 
 	} /* if standalone (1st) */
 
@@ -494,12 +488,13 @@ main(argc, argv)
 	/*
 	 * Process incoming requests.
 	 */
+	pfd[0].fd = s;
+	pfd[0].events = POLLIN;
 	for (;;) {
-		readfds = 1 << s;
-		nfound = select(s + 1, (fd_set *)&readfds, NULL, NULL, timeout);
+		nfound = poll(pfd, 1, timeout);
 		if (nfound < 0) {
 			if (errno != EINTR) {
-				report(LOG_ERR, "select: %s", get_errmsg());
+				report(LOG_ERR, "poll: %s", get_errmsg());
 			}
 			/*
 			 * Call readtab() or dumptab() here to avoid the
@@ -515,10 +510,10 @@ main(argc, argv)
 			}
 			continue;
 		}
-		if (!(readfds & (1 << s))) {
+		if (!(pfd[0].revents & POLLIN)) {
 			if (debug > 1)
 				report(LOG_INFO, "exiting after %ld minutes of inactivity",
-					   actualtimeout.tv_sec / 60);
+					   timeout / (60 * 1000));
 			exit(0);
 		}
 		ra_len = sizeof(recv_addr);

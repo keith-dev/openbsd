@@ -1,4 +1,4 @@
-/*	$OpenBSD: mkswap.c,v 1.10 2002/05/29 09:45:39 deraadt Exp $	*/
+/*	$OpenBSD: mkswap.c,v 1.12 2003/06/28 04:55:07 deraadt Exp $	*/
 /*	$NetBSD: mkswap.c,v 1.5 1996/08/31 20:58:27 mycroft Exp $	*/
 
 /*
@@ -22,11 +22,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -59,7 +55,7 @@ static int mkoneswap(struct config *);
  * Make the various swap*.c files.  Nothing to do for generic swap.
  */
 int
-mkswap()
+mkswap(void)
 {
 	struct config *cf;
 
@@ -70,8 +66,7 @@ mkswap()
 }
 
 static char *
-mkdevstr(d)
-dev_t d;
+mkdevstr(dev_t d)
 {
 	static char buf[32];
 
@@ -84,13 +79,11 @@ dev_t d;
 }
 
 static int
-mkoneswap(cf)
-	struct config *cf;
+mkoneswap(struct config *cf)
 {
+	char fname[200], *mountroot;
 	struct nvlist *nv;
 	FILE *fp;
-	char fname[200];
-	char *mountroot;
 
 	(void)snprintf(fname, sizeof fname, "swap%s.c", cf->cf_name);
 	if ((fp = fopen(fname, "w")) == NULL) {

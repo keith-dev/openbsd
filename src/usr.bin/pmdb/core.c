@@ -1,4 +1,4 @@
-/*	$OpenBSD: core.c,v 1.3 2002/07/22 02:55:54 art Exp $	*/
+/*	$OpenBSD: core.c,v 1.6 2003/08/17 23:43:45 mickey Exp $	*/
 /*
  * Copyright (c) 2002 Jean-Francois Brousseau <krapht@secureops.com>
  * All rights reserved. 
@@ -38,6 +38,7 @@
 
 #include "core.h"
 #include "pmdb.h"
+#include "symbol.h"
 
 int
 read_core(const char *path, struct pstate *ps)
@@ -129,15 +130,18 @@ free_core(struct pstate *ps)
 }
 
 void
-core_printregs(struct corefile *cf)
+core_printregs(struct pstate *ps)
 {
+	struct corefile *cf = ps->ps_core;
 	reg *rg;
+	char buf[256];
 	int i;
 
 	rg = (reg *)cf->regs;
 	for (i = 0; i < md_def.nregs; i++)
-		printf("%s:\t0x%.*lx\n", md_def.md_reg_names[i],
-		    (int)(sizeof(reg) * 2), (long) rg[i]);
+		printf("%s:\t0x%.*lx\t%s\n", md_def.md_reg_names[i],
+		    (int)(sizeof(reg) * 2), (long) rg[i],
+		    sym_print(ps, rg[i], buf, sizeof(buf)));
 }
 
 
@@ -151,9 +155,13 @@ core_read(struct pstate *ps, off_t from, void *to, size_t size)
 
 	for (i = 0; i < ps->ps_core->chdr->c_nseg; i++) {
 		cs = ps->ps_core->segs[i];
-		if ((from >= cs->c_addr) && (from < (cs->c_addr + cs->c_size))) {
+		if ((from >= cs->c_addr) &&
+		    (from < (cs->c_addr + cs->c_size))) {
 			read = size;
-			fp = cs + sizeof(*cs) + ((u_long)from - cs->c_addr);
+			if ((from + size) > (cs->c_addr + cs->c_size))
+				read = (cs->c_addr + cs->c_size) - from;
+			fp = (void *)cs + sizeof(*cs) +
+			    ((u_long)from - cs->c_addr);
 			memcpy(to, fp, read);
 			return (read);
 		}
@@ -175,7 +183,7 @@ core_write(struct pstate *ps, off_t to, void *from, size_t size)
 		cs = ps->ps_core->segs[i];
 		if ((to > cs->c_addr) && (to < (cs->c_addr + cs->c_size))) {
 			written = size;
-			fp = cs + sizeof(*cs) + (to - cs->c_addr);
+			fp = (void *)cs + sizeof(*cs) + (to - cs->c_addr);
 			memcpy(fp, from, written);
 			return (written);
 		}

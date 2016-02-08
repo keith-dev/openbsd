@@ -1,4 +1,4 @@
-.\"	$OpenBSD: gem.4,v 1.4 2002/11/26 22:28:20 nate Exp $
+.\"	$OpenBSD: gem.4,v 1.8 2003/07/13 03:15:02 brad Exp $
 .\"
 .\" Copyright (c) 2001 Miodrag Vallat.
 .\" All rights reserved.
@@ -11,8 +11,6 @@
 .\" 2. Redistributions in binary form must reproduce the above copyright
 .\"    notice, this list of conditions and the following disclaimer in the
 .\"    documentation and/or other materials provided with the distribution.
-.\" 3. The name of the author may not be used to endorse or promote products
-.\"    derived from this software without specific prior written permission
 .\"
 .\" THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
 .\" IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -36,9 +34,8 @@
 .Cd "gem* at pci? dev ? function ?"
 .Cd "bmtphy* at mii? phy ?"
 .Cd "brgphy* at mii? phy ?"
+.Cd "eephy* at mii? phy ?"
 .Cd "lxtphy* at mii? phy ?"
-.\" .Cd "nsphy* at mii? phy ?"
-.\" .Cd "qsphy* at mii? phy ?"
 .Sh DESCRIPTION
 The
 .Nm
@@ -71,11 +68,11 @@ half duplex.
 .Pp
 The
 .Nm
-supports several media types, which are selected via the
+driver supports several media types, which are selected via the
 .Xr ifconfig 8
 command.
 The supported media types are:
-.Bl -tag -width "media autoselect" -offset indent
+.Bl -tag -width "media" -offset indent
 .It media autoselect
 Attempt to autoselect the media type (default)
 .\" Check and correct the gigabit modes. Are both copper and fiber supported?
@@ -100,19 +97,18 @@ Use 10baseT, half duplex
 .Sh SEE ALSO
 .Xr arp 4 ,
 .Xr bmtphy 4 ,
-.xr brgphy 4 ,
+.Xr brgphy 4 ,
+.Xr eephy 4 ,
 .Xr ifmedia 4 ,
 .Xr inet 4 ,
 .Xr intro 4 ,
 .Xr lxtphy 4 ,
 .Xr netintro 4 ,
-.\" .Xr nsphy 4
-.\" .Xr qsphy 4
 .Xr hostname.if 5 ,
 .Xr ifconfig 8
 .Sh HISTORY
 .Ox
-support for the
+support for
 .Nm
 first appeared in
 .Ox 3.0 .

@@ -1,4 +1,4 @@
-/* *	$OpenBSD: find.h,v 1.11 2002/02/16 21:27:46 millert Exp $*/
+/* *	$OpenBSD: find.h,v 1.13 2003/06/26 07:27:29 deraadt Exp $*/
 /*-
  * Copyright (c) 1990, 1993
  *	The Regents of the University of California.  All rights reserved.
@@ -14,11 +14,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -110,12 +106,12 @@ typedef struct _plandata {
 #define	e_len		p_un.ex._e_len
 
 typedef struct _option {
-	char *name;			/* option name */
-	enum ntype token;		/* token type */
-	PLAN *(*create)();		/* create function: DON'T PROTOTYPE! */
-#define	O_NONE		0x01		/* no call required */
-#define	O_ZERO		0x02		/* pass: nothing */
-#define	O_ARGV		0x04		/* pass: argv, increment argv */
+	char *name;				/* option name */
+	enum ntype token;			/* token type */
+	PLAN *(*create)(char *, char ***, int);	/* create function */
+#define	O_NONE		0x01			/* no call required */
+#define	O_ZERO		0x02			/* pass: nothing */
+#define	O_ARGV		0x04			/* pass: argv, increment argv */
 #define	O_ARGVP		0x08		/* pass: *argv, N_OK || N_EXEC || N_EXECDIR */
 	int flags;
 } OPTION;

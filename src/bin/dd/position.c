@@ -1,4 +1,4 @@
-/*	$OpenBSD: position.c,v 1.5 2002/10/28 18:06:39 millert Exp $	*/
+/*	$OpenBSD: position.c,v 1.7 2003/06/11 23:42:12 deraadt Exp $	*/
 /*	$NetBSD: position.c,v 1.4 1995/03/21 09:04:12 cgd Exp $	*/
 
 /*-
@@ -17,11 +17,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -42,7 +38,7 @@
 #if 0
 static char sccsid[] = "@(#)position.c	8.3 (Berkeley) 4/2/94";
 #else
-static char rcsid[] = "$OpenBSD: position.c,v 1.5 2002/10/28 18:06:39 millert Exp $";
+static char rcsid[] = "$OpenBSD: position.c,v 1.7 2003/06/11 23:42:12 deraadt Exp $";
 #endif
 #endif /* not lint */
 
@@ -67,7 +63,7 @@ static char rcsid[] = "$OpenBSD: position.c,v 1.5 2002/10/28 18:06:39 millert Ex
  * output.
  */
 void
-pos_in()
+pos_in(void)
 {
 	size_t bcnt;
 	ssize_t nr;
@@ -124,7 +120,7 @@ pos_in()
 }
 
 void
-pos_out()
+pos_out(void)
 {
 	struct mtop t_op;
 	off_t cnt;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: str.c,v 1.7 2003/01/08 06:54:16 deraadt Exp $	*/
+/*	$OpenBSD: str.c,v 1.13 2003/06/11 21:09:50 deraadt Exp $	*/
 /*	$NetBSD: str.c,v 1.6 1995/03/21 09:03:24 cgd Exp $	*/
 
 /*-
@@ -13,11 +13,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -38,7 +34,7 @@
 #if 0
 static char sccsid[] = "@(#)str.c	8.1 (Berkeley) 5/31/93";
 #else
-static char rcsid[] = "$OpenBSD: str.c,v 1.7 2003/01/08 06:54:16 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: str.c,v 1.13 2003/06/11 21:09:50 deraadt Exp $";
 #endif
 #endif /* not lint */
 
@@ -59,11 +55,10 @@ static char rcsid[] = "$OpenBSD: str.c,v 1.7 2003/01/08 06:54:16 deraadt Exp $";
 #ifdef SHORT_STRINGS
 
 Char  **
-blk2short(src)
-    register char **src;
+blk2short(char **src)
 {
     size_t     n;
-    register Char **sdst, **dst;
+    Char **sdst, **dst;
 
     /*
      * Count
@@ -79,11 +74,10 @@ blk2short(src)
 }
 
 char  **
-short2blk(src)
-    register Char **src;
+short2blk(Char **src)
 {
     size_t     n;
-    register char **sdst, **dst;
+    char **sdst, **dst;
 
     /*
      * Count
@@ -99,12 +93,11 @@ short2blk(src)
 }
 
 Char   *
-str2short(src)
-    register char *src;
+str2short(char *src)
 {
     static Char *sdst;
     static size_t dstsize = 0;
-    register Char *dst, *edst;
+    Char *dst, *edst;
 
     if (src == NULL)
 	return (NULL);
@@ -131,12 +124,11 @@ str2short(src)
 }
 
 char   *
-short2str(src)
-    register Char *src;
+short2str(Char *src)
 {
     static char *sdst = NULL;
     static size_t dstsize = 0;
-    register char *dst, *edst;
+    char *dst, *edst;
 
     if (src == NULL)
 	return (NULL);
@@ -161,27 +153,12 @@ short2str(src)
     return (sdst);
 }
 
-Char   *
-s_strcpy(dst, src)
-    register Char *dst, *src;
-{
-    register Char *sdst;
-
-    sdst = dst;
-    while ((*dst++ = *src++) != '\0')
-	continue;
-    return (sdst);
-}
-
 size_t
-s_strlcpy(dst, src, siz)
-        Char *dst;
-        const Char *src;
-        size_t siz;
+s_strlcpy(Char *dst, const Char *src, size_t siz)
 {
-        register Char *d = dst;
-        register const Char *s = src;
-        register size_t n = siz;
+        Char *d = dst;
+        const Char *s = src;
+        size_t n = siz;
 
         /* Copy as many bytes as will fit */
         if (n != 0 && --n != 0) {
@@ -203,14 +180,11 @@ s_strlcpy(dst, src, siz)
 }
 
 size_t
-s_strlcat(dst, src, siz)
-        Char *dst;
-        const Char *src;
-        size_t siz;
+s_strlcat(Char *dst, const Char *src, size_t siz)
 {
-        register Char *d = dst;
-        register const Char *s = src;
-        register size_t n = siz;
+        Char *d = dst;
+        const Char *s = src;
+        size_t n = siz;
         size_t dlen;
 
         /* Find the end of dst and adjust bytes left but don't go past end */
@@ -234,75 +208,7 @@ s_strlcat(dst, src, siz)
 }
 
 Char   *
-s_strncpy(dst, src, n)
-    register Char *dst, *src;
-    register size_t n;
-{
-    register Char *sdst;
-
-    if (n == 0)
-	return(dst);
-
-    sdst = dst;
-    do
-	if ((*dst++ = *src++) == '\0') {
-	    while (--n != 0)
-		*dst++ = '\0';
-	    return(sdst);
-	}
-    while (--n != 0)
-	;
-    return (sdst);
-}
-
-Char   *
-s_strcat(dst, src)
-    register Char *dst, *src;
-{
-    register short *sdst;
-
-    sdst = dst;
-    while (*dst++)
-	continue;
-    --dst;
-    while ((*dst++ = *src++) != '\0')
-	continue;
-    return (sdst);
-}
-
-#ifdef NOTUSED
-Char   *
-s_strncat(dst, src, n)
-    register Char *dst, *src;
-    register size_t n;
-{
-    register Char *sdst;
-
-    if (n == 0)
-	return (dst);
-
-    sdst = dst;
-
-    while (*dst++)
-	continue;
-    --dst;
-
-    do
-	if ((*dst++ = *src++) == '\0')
-	    return(sdst);
-    while (--n != 0)
-	continue;
-
-    *dst = '\0';
-    return (sdst);
-}
-
-#endif
-
-Char   *
-s_strchr(str, ch)
-    register Char *str;
-    int ch;
+s_strchr(Char *str, int ch)
 {
     do
 	if (*str == ch)
@@ -313,11 +219,9 @@ s_strchr(str, ch)
 }
 
 Char   *
-s_strrchr(str, ch)
-    register Char *str;
-    int ch;
+s_strrchr(Char *str, int ch)
 {
-    register Char *rstr;
+    Char *rstr;
 
     rstr = NULL;
     do
@@ -329,10 +233,9 @@ s_strrchr(str, ch)
 }
 
 size_t
-s_strlen(str)
-    register Char *str;
+s_strlen(Char *str)
 {
-    register size_t n;
+    size_t n;
 
     for (n = 0; *str++; n++)
 	continue;
@@ -340,8 +243,7 @@ s_strlen(str)
 }
 
 int
-s_strcmp(str1, str2)
-    register Char *str1, *str2;
+s_strcmp(Char *str1, Char *str2)
 {
     for (; *str1 && *str1 == *str2; str1++, str2++)
 	continue;
@@ -361,9 +263,7 @@ s_strcmp(str1, str2)
 }
 
 int
-s_strncmp(str1, str2, n)
-    register Char *str1, *str2;
-    register size_t n;
+s_strncmp(Char *str1, Char *str2, size_t n)
 {
     if (n == 0)
 	return (0);
@@ -390,11 +290,10 @@ s_strncmp(str1, str2, n)
 }
 
 Char   *
-s_strsave(s)
-    register Char *s;
+s_strsave(Char *s)
 {
     Char   *n;
-    register Char *p;
+    Char *p;
 
     if (s == 0)
 	s = STRNULL;
@@ -407,11 +306,10 @@ s_strsave(s)
 }
 
 Char   *
-s_strspl(cp, dp)
-    Char   *cp, *dp;
+s_strspl(Char *cp, Char *dp)
 {
     Char   *ep;
-    register Char *p, *q;
+    Char *p, *q;
 
     if (!cp)
 	cp = STRNULL;
@@ -431,8 +329,7 @@ s_strspl(cp, dp)
 }
 
 Char   *
-s_strend(cp)
-    register Char *cp;
+s_strend(Char *cp)
 {
     if (!cp)
 	return (cp);
@@ -442,12 +339,11 @@ s_strend(cp)
 }
 
 Char   *
-s_strstr(s, t)
-    register Char *s, *t;
+s_strstr(Char *s, Char *t)
 {
     do {
-	register Char *ss = s;
-	register Char *tt = t;
+	Char *ss = s;
+	Char *tt = t;
 
 	do
 	    if (*tt == '\0')
@@ -459,12 +355,11 @@ s_strstr(s, t)
 #endif				/* SHORT_STRINGS */
 
 char   *
-short2qstr(src)
-    register Char *src;
+short2qstr(Char *src)
 {
     static char *sdst = NULL;
     static size_t dstsize = 0;
-    register char *dst, *edst;
+    char *dst, *edst;
 
     if (src == NULL)
 	return (NULL);
@@ -503,8 +398,7 @@ short2qstr(src)
  * XXX: Should we worry about QUOTE'd chars?
  */
 char *
-vis_str(cp)
-    Char *cp;
+vis_str(Char *cp)
 {
     static char *sdst = NULL;
     static size_t dstsize = 0;
@@ -527,7 +421,7 @@ vis_str(cp)
      * XXX: When we are in AsciiOnly we want all characters >= 0200 to
      * be encoded, but currently there is no way in vis to do that.
      */
-    (void) strvis(sdst, short2str(cp), VIS_NOSLASH);
+    (void) strnvis(sdst, short2str(cp), dstsize, VIS_NOSLASH);
     return (sdst);
 }
 

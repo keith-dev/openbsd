@@ -1,4 +1,4 @@
-/*	$OpenBSD: exec_ecoff.c,v 1.6 2002/03/14 06:51:42 mpech Exp $ */
+/*	$OpenBSD: exec_ecoff.c,v 1.8 2003/06/28 04:55:07 deraadt Exp $ */
 
 /*
  * Copyright (c) 1999 Mats O Jansson.  All rights reserved.
@@ -11,11 +11,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by Mats O Jansson.
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -30,7 +25,7 @@
  */
 
 #ifndef LINT
-static char rcsid[] = "$OpenBSD: exec_ecoff.c,v 1.6 2002/03/14 06:51:42 mpech Exp $";
+static char rcsid[] = "$OpenBSD: exec_ecoff.c,v 1.8 2003/06/28 04:55:07 deraadt Exp $";
 #endif
 
 #include <err.h>
@@ -51,8 +46,7 @@ int		ecoff_psz = 0, ecoff_rsz = 0, ecoff_bsz = 0;
 struct ecoff_exechdr	ecoff_ex;
 
 caddr_t
-ecoff_adjust(x)
-	caddr_t x;
+ecoff_adjust(caddr_t x)
 {
 	unsigned long y;
 
@@ -62,8 +56,7 @@ ecoff_adjust(x)
 }
 
 caddr_t
-ecoff_readjust(x)
-	caddr_t x;
+ecoff_readjust(caddr_t x)
 {
 	unsigned long y;
 
@@ -73,8 +66,7 @@ ecoff_readjust(x)
 }
 
 int
-ecoff_check(file)
-	char *file;
+ecoff_check(char *file)
 {
 	int fd, ret = 1;
 
@@ -94,8 +86,7 @@ ecoff_check(file)
 }
 
 void
-ecoff_loadkernel(file)
-	char *file;
+ecoff_loadkernel(char *file)
 {
 	int fd;
 	off_t beg, cur, end;
@@ -138,8 +129,7 @@ ecoff_loadkernel(file)
 }
 
 void
-ecoff_savekernel(outfile)
-	char *outfile;
+ecoff_savekernel(char *outfile)
 {
 	int fd;
 

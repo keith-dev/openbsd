@@ -1,30 +1,22 @@
-/*	$OpenBSD: newsyslog.c,v 1.63 2003/02/12 19:17:36 millert Exp $	*/
+/*	$OpenBSD: newsyslog.c,v 1.75 2003/07/25 10:28:53 mpech Exp $	*/
 
 /*
  * Copyright (c) 1999, 2002, 2003 Todd C. Miller <Todd.Miller@courtesan.com>
- * All rights reserved.
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
- * 3. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
+ * Permission to use, copy, modify, and distribute this software for any
+ * purpose with or without fee is hereby granted, provided that the above
+ * copyright notice and this permission notice appear in all copies.
  *
- * THIS SOFTWARE IS PROVIDED ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES,
- * INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY
- * AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL
- * THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
- * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
- * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
- * OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
- * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
- * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
- * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+ * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+ * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+ * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+ * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ * Sponsored in part by the Defense Advanced Research Projects
+ * Agency (DARPA) and Air Force Research Laboratory, Air Force
+ * Materiel Command, USAF, under agreement number F39502-99-1-0512.
  */
 
 /*
@@ -38,13 +30,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *      This product includes software developed by Jason Downs for the
- *      OpenBSD system.
- * 4. Neither the name(s) of the author(s) nor the name OpenBSD
- *    may be used to endorse or promote products derived from this software
- *    without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR(S) ``AS IS'' AND ANY EXPRESS
  * OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
@@ -81,12 +66,12 @@
 
 /*
  *      newsyslog - roll over selected logs at the appropriate time,
- *              keeping the a specified number of backup files around.
+ *              keeping the specified number of backup files around.
  *
  */
 
 #ifndef lint
-static const char rcsid[] = "$OpenBSD: newsyslog.c,v 1.63 2003/02/12 19:17:36 millert Exp $";
+static const char rcsid[] = "$OpenBSD: newsyslog.c,v 1.75 2003/07/25 10:28:53 mpech Exp $";
 #endif /* not lint */
 
 #ifndef CONF
@@ -124,15 +109,16 @@ static const char rcsid[] = "$OpenBSD: newsyslog.c,v 1.63 2003/02/12 19:17:36 mi
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 
 #define CE_ROTATED	0x01		/* Log file has been rotated */
-#define CE_COMPACT	0x02		/* Compact the achived log files */
+#define CE_COMPACT	0x02		/* Compact the archived log files */
 #define CE_BINARY	0x04		/* Logfile is in binary, don't add */
 					/* status messages */
-#define CE_MONITOR	0x08		/* Monitory for changes */
+#define CE_MONITOR	0x08		/* Monitor for changes */
 #define CE_FOLLOW	0x10		/* Follow symbolic links */
-#define CE_TRIMAT	0x20		/* trim at a specific time */
+#define CE_TRIMAT	0x20		/* Trim at a specific time */
 
 #define	MIN_PID		4		/* Don't touch pids lower than this */
 #define	MIN_SIZE	256		/* Don't rotate if smaller (in bytes) */
@@ -153,7 +139,7 @@ struct conf_entry {
 	int	signal;		/* Signal to send (defaults to SIGHUP) */
 	int     flags;		/* Flags (CE_COMPACT & CE_BINARY)  */
 	char	*whom;		/* Whom to notify if logfile changes */
-	char	*pidfile;	/* Path to file containg pid to signal */
+	char	*pidfile;	/* Path to file containing pid to signal */
 	char	*runcmd;	/* Command to run instead of sending a signal */
 	struct conf_entry *next; /* Linked list pointer */
 };
@@ -170,32 +156,35 @@ int	monitormode = 0;	/* Don't do monitoring by default */
 int	force = 0;		/* Force the logs to be rotated */
 char	*conf = CONF;		/* Configuration file to use */
 time_t	timenow;
-char	hostname[MAXHOSTNAMELEN]; /* hostname */
+char	hostname[MAXHOSTNAMELEN]; /* Hostname */
 char	*daytime;		/* timenow in human readable form */
-char	*arcdir;		/* dir to put archives in (if it exists) */
+char	*arcdir;		/* Dir to put archives in (if it exists) */
 
-void do_entry(struct conf_entry *);
-void parse_args(int, char **);
-void usage(void);
-struct conf_entry *parse_file(int *);
-char *missing_field(char *, char *, int);
-void dotrim(struct conf_entry *);
-int log_trim(char *);
-void compress_log(struct conf_entry *);
-off_t sizefile(char *);
-int age_old_log(struct conf_entry *);
-char *sob(char *);
-char *son(char *);
-int isnumberstr(char *);
-int domonitor(struct conf_entry *);
-FILE *openmail(void);
-void child_killer(int);
-void run_command(char *);
-void send_signal(char *, int);
-char *lstat_log(char *, size_t, int);
-int stat_suffix(char *, size_t, char *, struct stat *, int (*)());
-time_t parse8601(char *);
-time_t parseDWM(char *);
+FILE   *openmail(void);
+char   *lstat_log(char *, size_t, int);
+char   *missing_field(char *, char *, int);
+char   *sob(char *);
+char   *son(char *);
+int	age_old_log(struct conf_entry *);
+int	domonitor(struct conf_entry *);
+int	isnumberstr(char *);
+int	log_trim(char *);
+int	movefile(char *, char *, uid_t, gid_t, int);
+int	stat_suffix(char *, size_t, char *, struct stat *,
+	    int (*)(const char *, struct stat *));
+off_t	sizefile(char *);
+struct conf_entry *
+	parse_file(int *);
+time_t	parse8601(char *);
+time_t	parseDWM(char *);
+void	child_killer(int);
+void	compress_log(struct conf_entry *);
+void	do_entry(struct conf_entry *);
+void	dotrim(struct conf_entry *);
+void	parse_args(int, char **);
+void	run_command(char *);
+void	send_signal(char *, int);
+void	usage(void);
 
 int
 main(int argc, char **argv)
@@ -334,7 +323,7 @@ do_entry(struct conf_entry *ent)
 				DPRINTF(("--> will trim at %s",
 				    ctime(&ent->trim_at)));
 				return;
-			} else if (verbose && ent->hours <= 0) {
+			} else if (ent->hours <= 0) {
 				DPRINTF(("--> time is up\n"));
 			}
 		}
@@ -381,7 +370,7 @@ send_signal(char *pidfile, int signal)
 	pid_t pid;
 	FILE *f;
 	char line[BUFSIZ], *ep, *err;
-	unsigned long ulval;
+	long lval;
 
 	if ((f = fopen(pidfile, "r")) == NULL) {
 		warn("can't open %s", pidfile);
@@ -392,17 +381,17 @@ send_signal(char *pidfile, int signal)
 	errno = 0;
 	err = NULL;
 	if (fgets(line, sizeof(line), f)) {
-		ulval = strtoul(line, &ep, 10);
+		lval = strtol(line, &ep, 10);
 		if (line[0] == '\0' || (*ep != '\0' && *ep != '\n'))
 			err = "invalid number in";
-		else if (errno == ERANGE && ulval == ULONG_MAX)
+		else if (lval < 0 || (errno == ERANGE && lval == LONG_MAX))
 			err = "out of range number in";
-		else if (ulval == 0)
+		else if (lval == 0)
 			err = "no number in";
-		else if (ulval < MIN_PID)
+		else if (lval < MIN_PID)
 			err = "preposterous process number in";
 		else
-			pid = ulval;
+			pid = (pid_t)lval;
 	} else {
 		if (errno == 0)
 			err = "empty";
@@ -488,7 +477,7 @@ parse_file(int *nentries)
 	FILE *f;
 	char line[BUFSIZ], *parse, *q, *errline, *group, *tmp, *ep;
 	int lineno;
-	unsigned long ul;
+	long l;
 	struct conf_entry *first = NULL;
 	struct conf_entry *working = NULL;
 	struct passwd *pwd;
@@ -501,7 +490,7 @@ parse_file(int *nentries)
 		err(1, "can't open %s", conf);
 
 	*nentries = 0;
-	for (lineno = 0; fgets(line, sizeof(line), f); lineno++) {
+	for (lineno = 1; fgets(line, sizeof(line), f); lineno++) {
 		tmp = sob(line);
 		if (*tmp == '\0' || *tmp == '#')
 			continue;
@@ -584,11 +573,11 @@ parse_file(int *nentries)
 		working->flags = 0;
 		q = parse = missing_field(sob(++parse), errline, lineno);
 		*(parse = son(parse)) = '\0';
-		ul = strtoul(q, &ep, 10);
-		if (ul > INT_MAX)
+		l = strtol(q, &ep, 10);
+		if (l < 0 || l >= INT_MAX)
 			errx(1, "%s:%d: interval out of range: %s", conf,
 			    lineno, q);
-		working->hours = (int)ul;
+		working->hours = (int)l;
 		switch (*ep) {
 		case '\0':
 			break;
@@ -783,8 +772,8 @@ dotrim(struct conf_entry *ent)
 	/* Move down log files */
 	while (numdays--) {
 		/*
-		 * If both the compressed archive or the non-compressed archive
-		 * exist, we one or the other based on the CE_COMPACT flag.
+		 * If both the compressed archive and the non-compressed archive
+		 * exist, we decide which to rotate based on the CE_COMPACT flag
 		 */
 		(void)snprintf(file1, sizeof(file1), "%s.%d", oldlog, numdays);
 		suffix = lstat_log(file1, sizeof(file1), ent->flags);
@@ -820,7 +809,7 @@ dotrim(struct conf_entry *ent)
 			err(1, "can't start '%s' log", file2);
 		if (ent->uid != (uid_t)-1 || ent->gid != (gid_t)-1)
 			if (fchown(fd, ent->uid, ent->gid))
-			    err(1, "can't chown '%s' log file", file2);
+				err(1, "can't chown '%s' log file", file2);
 		if (fchmod(fd, ent->permissions))
 			err(1, "can't chmod '%s' log file", file2);
 		(void)close(fd);
@@ -838,7 +827,8 @@ dotrim(struct conf_entry *ent)
 		(void)snprintf(file1, sizeof(file1), "%s.0", oldlog);
 		if (noaction)
 			printf("\tmv %s to %s\n", ent->log, file1);
-		else if (rename(ent->log, file1))
+		else if (movefile(ent->log, file1, ent->uid, ent->gid,
+		    ent->permissions))
 			warn("can't mv %s to %s", ent->log, file1);
 	}
 
@@ -1003,7 +993,7 @@ domonitor(struct conf_entry *ent)
 		goto cleanup;
 	}
 #ifdef QUAD_OFF_T
-	if (fscanf(fp, "%qd\n", &osize) != 1) {
+	if (fscanf(fp, "%lld\n", &osize) != 1) {
 #else
 	if (fscanf(fp, "%ld\n", &osize) != 1) {
 #endif	/* QUAD_OFF_T */
@@ -1060,9 +1050,9 @@ update:
 		goto cleanup;
 	}
 #ifdef QUAD_OFF_T
-	fprintf(fp, "%qd\n", sb.st_size);
+	fprintf(fp, "%lld\n", (long long)sb.st_size);
 #else
-	fprintf(fp, "%ld\n", sb.st_size);
+	fprintf(fp, "%ld\n", (long)sb.st_size);
 #endif	/* QUAD_OFF_T */
 	fclose(fp);
 
@@ -1079,8 +1069,7 @@ openmail(void)
 	FILE *ret;
 	char *cmdbuf = NULL;
 
-	asprintf(&cmdbuf, "%s -t", SENDMAIL);
-	if (cmdbuf) {
+	if (asprintf(&cmdbuf, "%s -t", SENDMAIL) != -1) {
 		ret = popen(cmdbuf, "w");
 		free(cmdbuf);
 		return (ret);
@@ -1100,7 +1089,8 @@ child_killer(int signo)
 }
 
 int
-stat_suffix(char *file, size_t size, char *suffix, struct stat *sp, int (*func)())
+stat_suffix(char *file, size_t size, char *suffix, struct stat *sp,
+    int (*func)(const char *, struct stat *))
 {
 	size_t n;
 
@@ -1112,7 +1102,7 @@ stat_suffix(char *file, size_t size, char *suffix, struct stat *sp, int (*func)(
 }
 
 /*
- * lstat() a log, possibily appending a suffix; order is based on flags.
+ * lstat() a log, possibly appending a suffix; order is based on flags.
  * Returns the suffix appended (may be empty string) or NULL if no file.
  */
 char *
@@ -1148,15 +1138,15 @@ parse8601(char *s)
 {
 	char *t;
 	struct tm tm, *tmp;
-	unsigned long ul;
+	long l;
 
 	tmp = localtime(&timenow);
 	tm = *tmp;
 
 	tm.tm_hour = tm.tm_min = tm.tm_sec = 0;
 
-	ul = strtoul(s, &t, 10);
-	if (*t != '\0' && *t != 'T')
+	l = strtol(s, &t, 10);
+	if (l < 0 || l >= INT_MAX || (*t != '\0' && *t != 'T'))
 		return (-1);
 
 	/*
@@ -1166,17 +1156,17 @@ parse8601(char *s)
 	 */
 	switch (t - s) {
 	case 8:
-		tm.tm_year = ((ul / 1000000) - 19) * 100;
-		ul = ul % 1000000;
+		tm.tm_year = ((l / 1000000) - 19) * 100;
+		l = l % 1000000;
 	case 6:
 		tm.tm_year -= tm.tm_year % 100;
-		tm.tm_year += ul / 10000;
-		ul = ul % 10000;
+		tm.tm_year += l / 10000;
+		l = l % 10000;
 	case 4:
-		tm.tm_mon = (ul / 100) - 1;
-		ul = ul % 100;
+		tm.tm_mon = (l / 100) - 1;
+		l = l % 100;
 	case 2:
-		tm.tm_mday = ul;
+		tm.tm_mday = l;
 	case 0:
 		break;
 	default:
@@ -1190,19 +1180,19 @@ parse8601(char *s)
 
 	if (*t != '\0') {
 		s = ++t;
-		ul = strtoul(s, &t, 10);
-		if (*t != '\0' && !isspace(*t))
+		l = strtol(s, &t, 10);
+		if (l < 0 || l >= INT_MAX || (*t != '\0' && !isspace(*t)))
 			return (-1);
 
 		switch (t - s) {
 		case 6:
-			tm.tm_sec = ul % 100;
-			ul /= 100;
+			tm.tm_sec = l % 100;
+			l /= 100;
 		case 4:
-			tm.tm_min = ul % 100;
-			ul /= 100;
+			tm.tm_min = l % 100;
+			l /= 100;
 		case 2:
-			tm.tm_hour = ul;
+			tm.tm_hour = l;
 		case 0:
 			break;
 		default:
@@ -1329,4 +1319,47 @@ parseDWM(char *s)
 			s = t;
 	}
 	return (mktime(&tm));
+}
+
+/*
+ * Move a file using rename(2) is possible and copying if not.
+ */
+int
+movefile(char *from, char *to, uid_t owner_uid, gid_t group_gid, int perm)
+{
+	FILE *src, *dst;
+	int i;
+
+	/* try rename(2) first */
+	i = rename(from, to);
+	if (i == 0 || errno != EXDEV)
+		return (i);
+
+	/* different filesystem, have to copy the file */
+	if ((src = fopen(from, "r")) == NULL)
+		err(1, "can't fopen %s for reading", from);
+	if ((dst = fopen(to, "w")) == NULL)
+		err(1, "can't fopen %s for writing", to);
+	if (owner_uid != (uid_t)-1 || group_gid != (gid_t)-1) {
+		if (fchown(fileno(dst), owner_uid, group_gid))
+			err(1, "can't fchown %s", to);
+	}
+	if (fchmod(fileno(dst), perm))
+		err(1, "can't fchmod %s", to);
+
+	while ((i = getc(src)) != EOF) {
+		if ((putc(i, dst)) == EOF)
+			err(1, "error writing to %s", to);
+	}
+
+	if (ferror(src))
+		err(1, "error reading from %s", from);
+	if ((fclose(src)) != 0)
+		err(1, "can't fclose %s", to);
+	if ((fclose(dst)) != 0)
+		err(1, "can't fclose %s", from);
+	if ((unlink(from)) != 0)
+		err(1, "can't unlink %s", from);
+
+	return (0);
 }

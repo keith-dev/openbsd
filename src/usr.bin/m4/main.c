@@ -1,4 +1,4 @@
-/*	$OpenBSD: main.c,v 1.54 2002/04/28 14:37:12 espie Exp $	*/
+/*	$OpenBSD: main.c,v 1.63 2003/06/30 22:13:32 espie Exp $	*/
 /*	$NetBSD: main.c,v 1.12 1997/02/08 23:54:49 cgd Exp $	*/
 
 /*-
@@ -16,11 +16,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -47,7 +43,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)main.c	8.1 (Berkeley) 6/6/93";
 #else
-static char rcsid[] = "$OpenBSD: main.c,v 1.54 2002/04/28 14:37:12 espie Exp $";
+static char rcsid[] = "$OpenBSD: main.c,v 1.63 2003/06/30 22:13:32 espie Exp $";
 #endif
 #endif /* not lint */
 
@@ -67,6 +63,7 @@ static char rcsid[] = "$OpenBSD: main.c,v 1.54 2002/04/28 14:37:12 espie Exp $";
 #include <string.h>
 #include <stddef.h>
 #include <stdlib.h>
+#include <ohash.h>
 #include <err.h>
 #include "mdef.h"
 #include "stdd.h"
@@ -92,6 +89,11 @@ char rquote[MAXCCHARS+1] = {RQUOTE};	/* right quote character (')   */
 char scommt[MAXCCHARS+1] = {SCOMMT};	/* start character for comment */
 char ecommt[MAXCCHARS+1] = {ECOMMT};	/* end character for comment   */
 int  synch_lines = 0;		/* line synchronisation for C preprocessor */
+
+struct keyblk {
+        char    *knam;          /* keyword name */
+        int     ktyp;           /* keyword type */
+};
 
 struct keyblk keywrds[] = {	/* m4 keywords to be installed */
 	{ "include",      INCLTYPE },
@@ -184,6 +186,7 @@ main(int argc, char *argv[])
 	if (signal(SIGINT, SIG_IGN) != SIG_IGN)
 		signal(SIGINT, onintr);
 
+	init_macros();
 	initkwds();
 	initspaces();
 	STACKMAX = INITSTACKMAX;
@@ -210,7 +213,7 @@ main(int argc, char *argv[])
 			addtoincludepath(optarg);
 			break;
 		case 'U':               /* undefine...       */
-			remhash(optarg, TOP);
+			macro_popdef(optarg);
 			break;
 		case 'g':
 			mimic_gnu = 1;
@@ -309,7 +312,7 @@ do_look_ahead(int t, const char *token)
  * macro - the work horse..
  */
 static void
-macro()
+macro(void)
 {
 	char token[MAXTOK+1];
 	int t, l;
@@ -320,24 +323,25 @@ macro()
 		t = gpbc();
 		if (t == '_' || isalpha(t)) {
 			p = inspect(t, token);
-			if (p != nil)
+			if (p != NULL)
 				putback(l = gpbc());
-			if (p == nil || (l != LPAREN && 
-			    (p->type & NEEDARGS) != 0))
+			if (p == NULL || (l != LPAREN && 
+			    (macro_getdef(p)->type & NEEDARGS) != 0))
 				outputstr(token);
 			else {
 		/*
 		 * real thing.. First build a call frame:
 		 */
 				pushf(fp);	/* previous call frm */
-				pushf(p->type); /* type of the call  */
+				pushf(macro_getdef(p)->type); /* type of the call  */
+				pushf(is_traced(p));
 				pushf(0);	/* parenthesis level */
 				fp = sp;	/* new frame pointer */
 		/*
 		 * now push the string arguments:
 		 */
-				pushs1(p->defn);	/* defn string */
-				pushs1(p->name);	/* macro name  */
+				pushs1(macro_getdef(p)->defn);	/* defn string */
+				pushs1((char *)macro_name(p));	/* macro name  */
 				pushs(ep);	      	/* start next..*/
 
 				if (l != LPAREN && PARLEV == 0)  {   
@@ -347,7 +351,7 @@ macro()
 					if (sp == STACKMAX)
 						errx(1, "internal stack overflow");
 					eval((const char **) mstack+fp+1, 2, 
-					    CALTYP);
+					    CALTYP, TRACESTATUS);
 
 					ep = PREVEP;	/* flush strspace */
 					sp = PREVSP;	/* previous sp..  */
@@ -446,7 +450,7 @@ macro()
 					errx(1, "internal stack overflow");
 
 				eval((const char **) mstack+fp+1, sp-fp, 
-				    CALTYP);
+				    CALTYP, TRACESTATUS);
 
 				ep = PREVEP;	/* flush strspace */
 				sp = PREVSP;	/* previous sp..  */
@@ -531,8 +535,7 @@ reallyputchar(int c)
 
 /*
  * build an input token..
- * consider only those starting with _ or A-Za-z. This is a
- * combo with lookup to speed things up.
+ * consider only those starting with _ or A-Za-z. 
  */
 static ndptr
 inspect(int c, char *tp) 
@@ -542,10 +545,10 @@ inspect(int c, char *tp)
 	ndptr p;
 	unsigned int h;
 	
-	h = *tp++ = c;
+	*tp++ = c;
 
 	while ((isalnum(c = gpbc()) || c == '_') && tp < etp)
-		h = (h << 5) + h + (*tp++ = c);
+		*tp++ = c;
 	if (c != EOF)
 		PUTBACK(c);
 	*tp = EOS;
@@ -560,12 +563,14 @@ inspect(int c, char *tp)
 				CHRSAVE(c);
 		}
 		*name = EOS;
-		return nil;
+		return NULL;
 	}
 
-	for (p = hashtab[h % HASHSIZE]; p != nil; p = p->nxtptr)
-		if (h == p->hv && STREQ(name, p->name))
-			break;
+	p = ohash_find(&macros, ohash_qlookupi(&macros, name, (const char **)&tp));
+	if (p == NULL)
+		return NULL;
+	if (macro_getdef(p) == NULL)
+		return NULL;
 	return p;
 }
 
@@ -577,47 +582,17 @@ inspect(int c, char *tp)
  * within keywrds block.
  */
 static void
-initkwds()
+initkwds(void)
 {
-	size_t i;
-	unsigned int h;
-	ndptr p;
+	unsigned int type;
+	int i;
 
 	for (i = 0; i < MAXKEYS; i++) {
-		h = hash(keywrds[i].knam);
-		p = (ndptr) xalloc(sizeof(struct ndblock));
-		p->nxtptr = hashtab[h % HASHSIZE];
-		hashtab[h % HASHSIZE] = p;
-		p->name = xstrdup(keywrds[i].knam);
-		p->defn = null;
-		p->hv = h;
-		p->type = keywrds[i].ktyp & TYPEMASK;
+		type = keywrds[i].ktyp & TYPEMASK;
 		if ((keywrds[i].ktyp & NOARGS) == 0)
-			p->type |= NEEDARGS;
+			type |= NEEDARGS;
+		setup_builtin(keywrds[i].knam, type);
 	}
-}
-
-/* Look up a builtin type, even if overridden by the user */
-int 
-builtin_type(const char *key)
-{
-	int i;
-
-	for (i = 0; i != MAXKEYS; i++)
-		if (STREQ(keywrds[i].knam, key))
-			return keywrds[i].ktyp;
-	return -1;
-}
-
-char *
-builtin_realname(int n)
-{
-	int i;
-
-	for (i = 0; i != MAXKEYS; i++)
-		if (((keywrds[i].ktyp ^ n) & TYPEMASK) == 0)
-			return keywrds[i].knam;
-	return NULL;
 }
 
 static void
@@ -646,7 +621,7 @@ dump_stack(struct position *t, int lev)
 
 
 static void 
-enlarge_stack()
+enlarge_stack(void)
 {
 	STACKMAX *= 2;
 	mstack = realloc(mstack, sizeof(stae) * STACKMAX);

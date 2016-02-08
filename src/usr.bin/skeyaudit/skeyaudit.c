@@ -1,30 +1,23 @@
-/*	$OpenBSD: skeyaudit.c,v 1.15 2003/03/14 04:29:04 millert Exp $	*/
+/*	$OpenBSD: skeyaudit.c,v 1.20 2003/06/03 01:52:41 millert Exp $	*/
 
 /*
- * Copyright (c) 1997, 2000 Todd C. Miller <Todd.Miller@courtesan.com>
- * All rights reserved.
+ * Copyright (c) 1997, 2000, 2003 Todd C. Miller <Todd.Miller@courtesan.com>
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
- * 3. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
+ * Permission to use, copy, modify, and distribute this software for any
+ * purpose with or without fee is hereby granted, provided that the above
+ * copyright notice and this permission notice appear in all copies.
  *
- * THIS SOFTWARE IS PROVIDED ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES,
- * INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY
- * AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL
- * THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
- * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
- * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
- * OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
- * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
- * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
- * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * THE SOFTWARE IS PROVIDED "AS IS" AND TODD C. MILLER DISCLAIMS ALL
+ * WARRANTIES WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES
+ * OF MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL TODD C. MILLER BE LIABLE
+ * FOR ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+ * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION
+ * OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN
+ * CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ *
+ * Sponsored in part by the Defense Advanced Research Projects
+ * Agency (DARPA) and Air Force Research Laboratory, Air Force
+ * Materiel Command, USAF, under agreement number F39502-99-1-0512.
  */
 
 #include <sys/param.h>
@@ -32,6 +25,7 @@
 
 #include <err.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <limits.h>
 #include <login_cap.h>
 #include <paths.h>
@@ -54,7 +48,7 @@ main(int argc, char **argv)
 	char *name;
 	int ch, left, aflag, iflag, limit;
 
-	left = aflag = iflag = 0;
+	aflag = iflag = 0;
 	limit = 12;
 	while ((ch = getopt(argc, argv, "ail:")) != -1)
 		switch(ch) {
@@ -79,12 +73,27 @@ main(int argc, char **argv)
 			usage();
 	}
 
+	/*
+	 * Make sure STDIN_FILENO, STDOUT_FILENO, and STDERR_FILENO are open.
+	 * If not, open /dev/null in their place or bail.
+	 * If we are in interactive mode, STDOUT_FILENO *must* be open.
+	 */
+	for (ch = STDIN_FILENO; ch <= STDERR_FILENO; ch++) {
+		if (fcntl(ch, F_GETFL, &left) == -1 && errno == EBADF) {
+			if (ch == STDOUT_FILENO && iflag)
+				exit(1);	/* need stdout for -i */
+			if (open(_PATH_DEVNULL, O_RDWR, 0644) == -1)
+				exit(1);	/* just bail */
+		}
+	}
+
 	if (argc - optind > 0)
 		usage();
 
 	/* Need key.keyfile zero'd at the very least */
 	(void)memset(&key, 0, sizeof(key));
 
+	left = 0;
 	if (aflag) {
 		while ((ch = skeygetnext(&key)) == 0) {
 			left = key.n - 1;
@@ -92,12 +101,12 @@ main(int argc, char **argv)
 				continue;
 			if (left >= limit)
 				continue;
+			(void)fclose(key.keyfile);
+			key.keyfile = NULL;
 			notify(pw, left, iflag);
 		}
 		if (ch == -1)
 			errx(-1, "cannot open %s", _PATH_SKEYDIR);
-		else
-			(void)fclose(key.keyfile);
 	} else {
 		if ((pw = getpwuid(getuid())) == NULL)
 			errx(1, "no passwd entry for uid %u", getuid());
@@ -162,9 +171,10 @@ pw->pw_name, hostname);
 	(void)fprintf(out,
 "Type \"skeyinit -s\" to reinitialize your sequence number.\n\n");
 
-	(void)fclose(out);
-	if (!interactive)
+	if (!interactive) {
+		(void)fclose(out);
 		(void)waitpid(pid, NULL, 0);
+	}
 }
 
 FILE *
@@ -188,7 +198,8 @@ runsendmail(struct passwd *pw, pid_t *pidp)
 		(void)close(pfd[0]);
 
 		/* Run sendmail as target user not root */
-		if (setusercontext(NULL, pw, pw->pw_uid, LOGIN_SETALL) != 0) {
+		if (getuid() == 0 &&
+		    setusercontext(NULL, pw, pw->pw_uid, LOGIN_SETALL) != 0) {
 			warn("cannot set user context");
 			_exit(127);
 		}
@@ -211,7 +222,7 @@ usage(void)
 {
 	extern char *__progname;
 
-	(void)fprintf(stderr, "Usage: %s [-i] [-l limit]\n",
+	(void)fprintf(stderr, "Usage: %s [-a] [-i] [-l limit]\n",
 	    __progname);
 	exit(1);
 }

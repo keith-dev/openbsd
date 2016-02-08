@@ -1,4 +1,4 @@
-/*	$OpenBSD: kbd_wscons.c,v 1.11 2003/02/16 02:08:02 miod Exp $ */
+/*	$OpenBSD: kbd_wscons.c,v 1.15 2003/07/10 00:00:57 david Exp $ */
 
 /*
  * Copyright (c) 2001 Mats O Jansson.  All rights reserved.
@@ -11,11 +11,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by Mats O Jansson.
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -42,6 +37,7 @@
 #include <limits.h>
 #include <nlist.h>
 #include <stdio.h>
+#include <string.h>
 #include <unistd.h>
 
 #define	NUM_KBD	10
@@ -97,6 +93,10 @@ struct nameint kbdvar_tab[] = {
 
 extern char *__progname;
 int rebuild = 0;
+
+void	kbd_show_enc(kvm_t *kd, int idx);
+void	kbd_list(void);
+void	kbd_set(char *name, int verbose);
 
 #ifndef NOKVM
 void
@@ -172,7 +172,7 @@ kbd_list(void)
 			fd = open(device, O_RDONLY);
 		if (fd >= 0) {
 			if (ioctl(fd, WSKBDIO_GTYPE, &kbtype) < 0)
-				err(1, "WDKBDIO_GTYPE");
+				err(1, "WSKBDIO_GTYPE");
 			if ((kbtype == WSKBD_TYPE_PC_XT) ||
 			    (kbtype == WSKBD_TYPE_PC_AT))
 				pc_kbd++;
@@ -228,10 +228,10 @@ kbd_list(void)
 	kvm_close(kd);
 
 	if (rebuild > 0) {
-		printf("Unknown encoding or variant. kbd(1) needs to be rebuild.\n");
+		printf("Unknown encoding or variant. kbd(1) needs to be rebuilt.\n");
 	}
 #else
-	printf("List not available, sorry.\n");
+	printf("List not available; sorry.\n");
 #endif
 }
 
@@ -293,7 +293,7 @@ kbd_set(char *name, int verbose)
 					    "%s: unsupported encoding %s on %s\n",
 					    __progname, name, device);
 				} else {
-					err(1, "WDKBDIO_SETENCODING: %s", device);
+					err(1, "WSKBDIO_SETENCODING: %s", device);
 				}
 				v--;
 			}

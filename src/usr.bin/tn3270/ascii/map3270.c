@@ -1,4 +1,4 @@
-/*	$OpenBSD: map3270.c,v 1.4 2001/11/19 19:02:16 mpech Exp $	*/
+/*	$OpenBSD: map3270.c,v 1.7 2003/06/03 02:56:19 millert Exp $	*/
 
 /*-
  * Copyright (c) 1988 The Regents of the University of California.
@@ -12,11 +12,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -35,7 +31,7 @@
 
 #ifndef lint
 /*static char sccsid[] = "from: @(#)map3270.c	4.2 (Berkeley) 4/26/91";*/
-static char rcsid[] = "$OpenBSD: map3270.c,v 1.4 2001/11/19 19:02:16 mpech Exp $";
+static char rcsid[] = "$OpenBSD: map3270.c,v 1.7 2003/06/03 02:56:19 millert Exp $";
 #endif /* not lint */
 
 /*	This program reads a description file, somewhat like /etc/termcap,
@@ -60,11 +56,8 @@ static char rcsid[] = "$OpenBSD: map3270.c,v 1.4 2001/11/19 19:02:16 mpech Exp $
 
 #include <stdio.h>
 #include <ctype.h>
-#if	defined(unix)
-#include <strings.h>
-#else	/* defined(unix) */
+#include <stdlib.h>
 #include <string.h>
-#endif	/* defined(unix) */
 
 #define	IsPrint(c)	((isprint(c) && !isspace(c)) || ((c) == ' '))
 
@@ -147,7 +140,7 @@ GetC()
 		char envname[9];
 		extern char *getenv();
 
-		(void) sprintf(envname, "MAP3270%c", suffix++);
+		(void) snprintf(envname, sizeof envname, "MAP3270%c", suffix++);
 		environPointer = getenv(envname);
 	    } else {
 		whichkey++;			/* default map */
@@ -476,9 +469,7 @@ static void
 FreeState(pState)
 state *pState;
 {
-    extern int free();
-
-    free((char *)pState);
+    free(pState);
 }
 
 
@@ -486,7 +477,6 @@ static state *
 GetState()
 {
     state *pState;
-    extern char *malloc();
 
     pState = (state *) malloc(sizeof (state));
 
@@ -827,21 +817,6 @@ char *keybdPointer;
     Return(0);
 }
 
-char *
-strsave(string)
-char *string;
-{
-    char *p;
-    extern char *malloc();
-
-    p = malloc((unsigned int)strlen(string)+1);
-    if (p != 0) {
-	strcpy(p, string);
-    }
-    return(p);
-}
-
-
 /*
  * InitControl - our interface to the outside.  What we should
  *  do is figure out keyboard (or terminal) type, set up file pointer
@@ -872,7 +847,7 @@ int	(*translator)();	/* Translates ascii string to integer */
 		     * out of a static area.  So, save the keyboard name.
 		     */
     if (keybdPointer) {
-        keybdPointer = strsave(keybdPointer);
+        keybdPointer = strdup(keybdPointer);
     }
     environPointer = getenv("MAP3270");
     if (environPointer

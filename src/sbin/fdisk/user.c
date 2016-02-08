@@ -1,4 +1,4 @@
-/*	$OpenBSD: user.c,v 1.19 2002/05/22 08:21:02 deraadt Exp $	*/
+/*	$OpenBSD: user.c,v 1.21 2003/06/11 06:22:12 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1997 Tobias Weingartner
@@ -12,11 +12,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *    This product includes software developed by Tobias Weingartner.
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -68,10 +63,7 @@ static cmd_table_t cmd_table[] = {
 
 
 int
-USER_init(disk, tt, preserve)
-	disk_t *disk;
-	mbr_t *tt;
-	int preserve;
+USER_init(disk_t *disk, mbr_t *tt, int preserve)
 {
 	int fd, yn;
 	char mbr_buf[DEV_BSIZE];
@@ -107,11 +99,7 @@ USER_init(disk, tt, preserve)
 int modified;
 
 int
-USER_modify(disk, tt, offset, reloff)
-	disk_t *disk;
-	mbr_t *tt;
-	off_t offset;
-	off_t reloff;
+USER_modify(disk_t *disk, mbr_t *tt, off_t offset, off_t reloff)
 {
 	static int editlevel;
 	char mbr_buf[DEV_BSIZE];
@@ -192,8 +180,7 @@ again:
 }
 
 int
-USER_print_disk(disk)
-	disk_t *disk;
+USER_print_disk(disk_t *disk)
 {
 	int fd, offset, firstoff, i;
 	char mbr_buf[DEV_BSIZE];

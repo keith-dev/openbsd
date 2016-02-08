@@ -1,4 +1,4 @@
-#	$OpenBSD: bsd.prog.mk,v 1.34 2002/11/10 23:03:55 mickey Exp $
+#	$OpenBSD: bsd.prog.mk,v 1.38 2003/08/29 00:04:41 jolan Exp $
 #	$NetBSD: bsd.prog.mk,v 1.55 1996/04/08 21:19:26 jtc Exp $
 #	@(#)bsd.prog.mk	5.26 (Berkeley) 6/25/91
 
@@ -17,7 +17,7 @@ CXXFLAGS+=     ${CXXDIAGFLAGS}
 CFLAGS+=	${COPTS}
 CXXFLAGS+=     ${CXXOPTS}
 
-.if (${ELF_TOOLCHAIN} == "yes")
+.if (${ELF_TOOLCHAIN:L} == "yes")
 CRTBEGIN?=       ${DESTDIR}/usr/lib/crtbegin.o
 CRTEND?=         ${DESTDIR}/usr/lib/crtend.o
 .endif
@@ -27,7 +27,6 @@ LIB45?=		${DESTDIR}/usr/lib/lib45.a
 LIBACL?=	${DESTDIR}/usr/lib/libacl.a
 LIBASN1?=	${DESTDIR}/usr/lib/libasn1.a
 LIBC?=		${DESTDIR}/usr/lib/libc.a
-LIBCOM_ERR?=	${DESTDIR}/usr/lib/libcom_err.a
 LIBCOMPAT?=	${DESTDIR}/usr/lib/libcompat.a
 LIBCRYPTO?=	${DESTDIR}/usr/lib/libcrypto.a
 LIBCURSES?=	${DESTDIR}/usr/lib/libcurses.a
@@ -35,6 +34,7 @@ LIBDES?=	${DESTDIR}/usr/lib/libdes.a
 LIBEDIT?=	${DESTDIR}/usr/lib/libedit.a
 LIBEVENT?=	${DESTDIR}/usr/lib/libevent.a
 LIBGCC?=	${DESTDIR}/usr/lib/libgcc.a
+LIBGSSAPI?=	${DESTDIR}/usr/lib/libgssapi.a
 LIBHDB?=	${DESTDIR}/usr/lib/libhdb.a
 LIBKADM?=	${DESTDIR}/usr/lib/libkadm.a
 LIBKADM5CLNT?=	${DESTDIR}/usr/lib/libkadm5clnt.a
@@ -153,9 +153,6 @@ realinstall:
 .if defined(PROG)
 	${INSTALL} ${INSTALL_COPY} ${INSTALL_STRIP} -o ${BINOWN} -g ${BINGRP} \
 	    -m ${BINMODE} ${PROG} ${DESTDIR}${BINDIR}
-.endif
-.if defined(HIDEGAME)
-	(cd ${DESTDIR}/usr/games; rm -f ${PROG}; ln -s dm ${PROG})
 .endif
 .endif
 

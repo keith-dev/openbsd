@@ -1,4 +1,4 @@
-/*	$OpenBSD: mkdir.c,v 1.14 2002/07/04 04:26:40 deraadt Exp $	*/
+/*	$OpenBSD: mkdir.c,v 1.16 2003/07/29 00:24:15 deraadt Exp $	*/
 /*	$NetBSD: mkdir.c,v 1.14 1995/06/25 21:59:21 mycroft Exp $	*/
 
 /*
@@ -13,11 +13,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -44,7 +40,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)mkdir.c	8.2 (Berkeley) 1/25/94";
 #else
-static char rcsid[] = "$OpenBSD: mkdir.c,v 1.14 2002/07/04 04:26:40 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: mkdir.c,v 1.16 2003/07/29 00:24:15 deraadt Exp $";
 #endif
 #endif /* not lint */
 
@@ -118,19 +114,19 @@ main(int argc, char *argv[])
 			if (mkdir(*argv, mode) < 0) {
 				warn("%s", *argv);
 				exitval = 1;
-		 	} else {
-                       		/*
-                 		 * The mkdir() and umask() calls both honor only the low
-                 		 * nine bits, so if you try to set a mode including the
-                 		 * sticky, setuid, setgid bits you lose them.  Don't do
-                 		 * this unless the user has specifically requested a mode
-                 		 * as chmod will (obviously) ignore the umask.
-                 		 */
+			} else {
+				/*
+				 * The mkdir() and umask() calls both honor only the low
+				 * nine bits, so if you try to set a mode including the
+				 * sticky, setuid, setgid bits you lose them.  Don't do
+				 * this unless the user has specifically requested a mode
+				 * as chmod will (obviously) ignore the umask.
+				 */
 				if (mode > 0777 && chmod(*argv, mode) == -1) {
 					warn("%s", *argv);
 					exitval = 1;
 				}
-			}	
+			}
 		}
 	}
 	exit(exitval);

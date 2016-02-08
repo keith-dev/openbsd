@@ -1,17 +1,18 @@
-/*	$OpenBSD: madness.c,v 1.1 2002/02/17 05:58:51 art Exp $	*/
+/*	$OpenBSD: madness.c,v 1.3 2003/08/02 01:24:36 david Exp $	*/
 /*
  *	Written by Artur Grabowski <art@openbsd.org>, 2002 Public Domain.
  */
 #include <sys/param.h>
 #include <stdio.h>
 #include <unistd.h>
+#include <signal.h>
 #include <stdlib.h>
 #include <err.h>
 
 volatile int step;
 
 int
-main()
+main(int argc, char *argv[])
 {
 	int fds[2], fd;
 	pid_t pid1, pid2, pid3;

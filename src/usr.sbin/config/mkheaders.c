@@ -1,4 +1,4 @@
-/*	$OpenBSD: mkheaders.c,v 1.15 2002/12/11 16:58:31 deraadt Exp $	*/
+/*	$OpenBSD: mkheaders.c,v 1.18 2003/06/28 04:55:07 deraadt Exp $	*/
 /*	$NetBSD: mkheaders.c,v 1.12 1997/02/02 21:12:34 thorpej Exp $	*/
 
 /*
@@ -22,11 +22,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -62,7 +58,7 @@ static char *cntname(const char *);
  * Make headers containing counts, as needed.
  */
 int
-mkheaders()
+mkheaders(void)
 {
 	struct files *fi;
 	struct nvlist *nv;
@@ -83,8 +79,7 @@ mkheaders()
 }
 
 static int
-emitcnt(head)
-	struct nvlist *head;
+emitcnt(struct nvlist *head)
 {
 	struct nvlist *nv;
 	FILE *fp;
@@ -127,13 +122,12 @@ writeit:
 }
 
 static int
-emitopt(nv)
-	struct nvlist *nv;
+emitopt(struct nvlist *nv)
 {
 	struct nvlist *option;
 	char new_contents[BUFSIZ], buf[BUFSIZ];
-	char fname[BUFSIZ], totlen;
-	int nlines;
+	char fname[BUFSIZ];
+	int totlen, nlines;
 	FILE *fp;
 
 	/*
@@ -193,10 +187,7 @@ writeit:
 }
 
 static int
-err(what, fname, fp)
-	const char *what;
-	char *fname;
-	FILE *fp;
+err(const char *what, char *fname, FILE *fp)
 {
 
 	(void)fprintf(stderr, "config: error %sing %s: %s\n",
@@ -207,8 +198,7 @@ err(what, fname, fp)
 }
 
 static char *
-cntname(src)
-	const char *src;
+cntname(const char *src)
 {
 	char *dst, c;
 	static char buf[100];

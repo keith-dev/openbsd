@@ -1,4 +1,4 @@
-/*	$OpenBSD: pread.c,v 1.4 2002/09/17 21:16:01 deraadt Exp $	*/
+/*	$OpenBSD: pread.c,v 1.6 2003/06/11 21:03:10 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1992, 1993
@@ -12,11 +12,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -34,7 +30,7 @@
  */
 
 #if defined(SYSLIBC_SCCS) && !defined(lint)
-static char rcsid[] = "$OpenBSD: pread.c,v 1.4 2002/09/17 21:16:01 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: pread.c,v 1.6 2003/06/11 21:03:10 deraadt Exp $";
 #endif /* SYSLIBC_SCCS and not lint */
 
 #include <sys/types.h>
@@ -46,11 +42,7 @@ static char rcsid[] = "$OpenBSD: pread.c,v 1.4 2002/09/17 21:16:01 deraadt Exp $
  * is not supplied by GCC 1.X but is supplied by GCC 2.X.
  */
 ssize_t
-pread(fd, buf, nbyte, offset)
-	int fd;
-	void *buf;
-	size_t nbyte;
-	off_t offset;
+pread(int fd, void *buf, size_t nbyte, off_t offset)
 {
 	extern off_t __syscall();
 	quad_t q;

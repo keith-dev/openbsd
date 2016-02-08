@@ -1,4 +1,4 @@
-/*	$OpenBSD: crt0.c,v 1.6 2003/02/28 18:05:51 deraadt Exp $	*/
+/*	$OpenBSD: crt0.c,v 1.8 2003/06/04 04:43:56 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2001 Michael Shalayeff
@@ -12,11 +12,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *      This product includes software developed by Michael Shalayeff.
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -35,16 +30,15 @@ int	global __asm ("$global$") = 0;
 int	sh_func_adrs __asm ("$$sh_func_adrs") = 0;
 
 #if defined(LIBC_SCCS) && !defined(lint)
-static const char rcsid[] = "$OpenBSD: crt0.c,v 1.6 2003/02/28 18:05:51 deraadt Exp $";
+static const char rcsid[] = "$OpenBSD: crt0.c,v 1.8 2003/06/04 04:43:56 deraadt Exp $";
 #endif /* LIBC_SCCS and not lint */
 
+#include <sys/param.h>
 #include <sys/syscall.h>
 #include <sys/fcntl.h>
 #include <sys/exec.h>
 #include <stdlib.h>
 #include <paths.h>
-
-#include "common.h"
 
 typedef char Obj_Entry;
 
@@ -67,6 +61,9 @@ extern unsigned char etext, eprol;
 void __start(char **, void (*)(void), const Obj_Entry *);
 static char *__strrchr(const char *p, char ch);
 
+char *__progname = "";
+char __progname_storage[NAME_MAX+1];
+
 void
 __start(sp, cleanup, obj)
 	char **sp;
@@ -84,7 +81,7 @@ __start(sp, cleanup, obj)
 	argv = arginfo->ps_argvstr;
 	environ = arginfo->ps_envstr;
 	if ((namep = argv[0]) != NULL) {	/* NULL ptr if argc = 0 */
-		if ((__progname = _strrchr(namep, '/')) == NULL)
+		if ((__progname = __strrchr(namep, '/')) == NULL)
 			__progname = namep;
 		else
 			__progname++;

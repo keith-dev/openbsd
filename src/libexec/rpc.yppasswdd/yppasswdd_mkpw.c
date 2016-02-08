@@ -1,4 +1,4 @@
-/*	$OpenBSD: yppasswdd_mkpw.c,v 1.23 2002/06/20 03:43:41 deraadt Exp $	*/
+/*	$OpenBSD: yppasswdd_mkpw.c,v 1.26 2003/07/06 21:57:27 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1994 Mats O Jansson <moj@stacken.kth.se>
@@ -12,11 +12,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by Mats O Jansson
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS
  * OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
@@ -32,7 +27,7 @@
  */
 
 #ifndef LINT
-static char rcsid[] = "$OpenBSD: yppasswdd_mkpw.c,v 1.23 2002/06/20 03:43:41 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: yppasswdd_mkpw.c,v 1.26 2003/07/06 21:57:27 deraadt Exp $";
 #endif
 
 #include <sys/param.h>
@@ -57,6 +52,11 @@ extern int nopw;
 extern int make;
 extern char make_arg[];
 extern char *dir;
+
+char *ok_shell(char *);
+int badchars(char *);
+int subst(char *, char, char);
+int make_passwd(yppasswd *);
 
 char *
 ok_shell(char *name)
@@ -113,7 +113,7 @@ make_passwd(yppasswd *argp)
 {
 	struct passwd pw;
 	int     pfd = -1, tfd;
-	char	buf[10], *bp = NULL, *p, *t;
+	char	buf[11], *bp = NULL, *p, *t;
 	int	n;
 	ssize_t cnt;
 	size_t	resid;

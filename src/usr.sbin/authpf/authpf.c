@@ -1,4 +1,4 @@
-/*	$OpenBSD: authpf.c,v 1.53 2003/02/19 00:03:22 deraadt Exp $	*/
+/*	$OpenBSD: authpf.c,v 1.68 2003/08/21 19:13:23 frantzen Exp $	*/
 
 /*
  * Copyright (C) 1998 - 2002 Bob Beck (beck@openbsd.org).
@@ -11,9 +11,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the author nor the names of contributors
- *    may be used to endorse or promote products derived from this software
- *    without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
  * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
@@ -242,7 +239,7 @@ main(int argc, char *argv[])
 		do_death(0);
 
 	openlog("authpf", LOG_PID | LOG_NDELAY, LOG_DAEMON);
-	if (config != NULL && read_config(config))
+	if (config == NULL || read_config(config))
 		do_death(0);
 
 	if (remove_stale_rulesets())
@@ -283,8 +280,8 @@ dogdeath:
 	printf("\r\n\r\nSorry, this service is currently unavailable due to ");
 	printf("technical difficulties\r\n\r\n");
 	print_message(PATH_PROBLEM);
-	printf("\r\nYour authentication process (pid %d) was unable to run\n",
-	    getpid());
+	printf("\r\nYour authentication process (pid %ld) was unable to run\n",
+	    (long)getpid());
 	sleep(180); /* them lusers read reaaaaal slow */
 die:
 	do_death(0);
@@ -379,11 +376,11 @@ print_message(char *filename)
 /*
  * allowed_luser checks to see if user "luser" is allowed to
  * use this gateway by virtue of being listed in an allowed
- * users file, namely /etc/authpf.allow .
+ * users file, namely /etc/authpf/authpf.allow .
  *
- * If /etc/authpf.allow does not exist, then we assume that
+ * If /etc/authpf/authpf.allow does not exist, then we assume that
  * all users who are allowed in by sshd(8) are permitted to
- * use this gateway. If /etc/authpf.allow does exist, then a
+ * use this gateway. If /etc/authpf/authpf.allow does exist, then a
  * user must be listed if the connection is to continue, else
  * the session terminates in the same manner as being banned.
  */
@@ -414,7 +411,7 @@ allowed_luser(char *luser)
 		return (0);
 	} else {
 		/*
-		 * /etc/authpf.allow exists, thus we do a linear
+		 * /etc/authpf/authpf.allow exists, thus we do a linear
 		 * search to see if they are allowed.
 		 * also, if username "*" exists, then this is a
 		 * "public" gateway, such as it is, so let
@@ -504,7 +501,7 @@ check_luser(char *luserdir, char *luser)
 		/* reuse tmp */
 		strlcpy(tmp, "\n\n-**- Sorry, you have been banned! -**-\n\n",
 		    sizeof(tmp));
-		while ((fputs(tmp, stdout) != EOF) && !feof(f)) {
+		while (fputs(tmp, stdout) != EOF && !feof(f)) {
 			if (fgets(tmp, sizeof(tmp), f) == NULL) {
 				fflush(stdout);
 				return (0);
@@ -520,7 +517,7 @@ check_luser(char *luserdir, char *luser)
  * died ungracefully or were terminated) and remove them.
  */
 static int
-remove_stale_rulesets()
+remove_stale_rulesets(void)
 {
 	struct pfioc_ruleset	 prs;
 	const int		 action[PF_RULESET_MAX] = { PF_SCRUB,
@@ -549,7 +546,7 @@ remove_stale_rulesets()
 		pid = strtoul(prs.name, &s, 10);
 		if (!prs.name[0] || errno || *s)
 			return (1);
-		if (kill(pid, 0)) {
+		if (kill(pid, 0) && errno != EPERM) {
 			int i;
 
 			for (i = 0; i < PF_RULESET_MAX; ++i) {
@@ -614,6 +611,11 @@ change_filter(int add, const char *luser, const char *ipsrc)
 		}
 	}
 
+	if (pfctl_load_fingerprints(dev, 0)) {
+		syslog(LOG_ERR, "unable to load kernel's OS fingerprints");
+		goto error;
+	}
+
 	memset(&pf, 0, sizeof(pf));
 	for (i = 0; i < PF_RULESET_MAX; ++i) {
 		memset(&pr[i], 0, sizeof(pr[i]));
@@ -642,6 +644,7 @@ change_filter(int add, const char *luser, const char *ipsrc)
 			goto error;
 		}
 
+		infile = NULL;
 		fclose(f);
 		f = NULL;
 	}
@@ -670,6 +673,8 @@ change_filter(int add, const char *luser, const char *ipsrc)
 error:
 	if (f != NULL)
 		fclose(f);
+
+	infile = NULL;
 	return (-1);
 }
 
@@ -681,7 +686,7 @@ error:
  * pfctl_kill_states from pfctl.
  */
 static void
-authpf_kill_states()
+authpf_kill_states(void)
 {
 	struct pfioc_state_kill	psk;
 	struct in_addr		target;
@@ -699,6 +704,7 @@ authpf_kill_states()
 		syslog(LOG_ERR, "DIOCKILLSTATES failed (%m)");
 
 	/* Kill all states to ipsrc */
+	psk.psk_af = AF_INET;
 	memset(&psk.psk_src, 0, sizeof(psk.psk_src));
 	psk.psk_dst.addr.v.a.addr.v4 = target;
 	memset(&psk.psk_dst.addr.v.a.mask, 0xff,
@@ -736,7 +742,7 @@ do_death(int active)
 }
 
 /*
- * callbacks for parse_rules()
+ * callbacks for parse_rules(void)
  */
 
 int
@@ -846,20 +852,20 @@ pfctl_set_limit(struct pfctl *pf, const char *opt, unsigned int limit)
 	return (1);
 }
 
-void
-pfctl_append_addr(char *addr, int net, int neg)
-{
-	/* appropriate message will be printed by following function */
-}
-
-void
-pfctl_append_file(char *file)
-{
-	/* appropriate message will be printed by following function */
-}
-
-void
-pfctl_define_table(char *name, int flags, int addrs, int noaction)
+int
+pfctl_define_table(char *name, int flags, int addrs, const char *anchor,
+    const char *ruleset, struct pfr_buffer *ab, u_int32_t ticket)
 {
 	fprintf(stderr, "table definitions not yet supported in authpf\n");
+	return (1);
 }
+
+int
+pfctl_rules(int dev, char *filename, int opts, char *anchorname,
+    char *rulesetname)
+{
+	/* never called, no anchors inside anchors, but we need the stub */
+	fprintf(stderr, "load anchor not supported from authpf\n");
+	return (1);
+}
+

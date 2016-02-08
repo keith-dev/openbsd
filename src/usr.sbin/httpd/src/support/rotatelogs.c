@@ -12,6 +12,10 @@
 #include <errno.h>
 #include <fcntl.h>
 
+#if defined(WIN32) || defined(OS2)
+#include <io.h>
+#endif
+
 #define BUFSIZE        65536
 #define ERRMSGSZ       82
 #ifndef MAX_PATH
@@ -67,6 +71,10 @@ int main (int argc, char **argv)
         exit(6);
     }
 
+#if defined(WIN32) || defined(OS2)
+    setmode(0, O_BINARY);
+#endif
+
     use_strftime = (strstr(szLogRoot, "%") != NULL);
     for (;;) {
         nRead = read(0, buf, sizeof buf);
@@ -88,7 +96,7 @@ int main (int argc, char **argv)
                 strftime(buf2, sizeof(buf2), szLogRoot, tm_now);
             }
             else {
-                sprintf(buf2, "%s.%010d", szLogRoot, (int) tLogStart);
+                snprintf(buf2, sizeof(buf2), "%s.%010d", szLogRoot, (int) tLogStart);
             }
             tLogEnd = tLogStart + tRotation;
             nLogFD = open(buf2, O_WRONLY | O_CREAT | O_APPEND, 0666);
@@ -102,7 +110,7 @@ int main (int argc, char **argv)
                 }
                 else {
                     nLogFD = nLogFDprev;
-                    sprintf(errbuf,
+                    snprintf(errbuf, sizeof(errbuf),
                             "Resetting log file due to error opening "
                             "new log file. %10d messages lost.\n",
                             nMessCount); 
@@ -125,7 +133,7 @@ int main (int argc, char **argv)
         } while (nWrite < 0 && errno == EINTR);
         if (nWrite != nRead) {
             nMessCount++;
-            sprintf(errbuf,
+            snprintf(errbuf, sizeof(errbuf),
                     "Error writing to log file. "
                     "%10d messages lost.\n",
                     nMessCount);

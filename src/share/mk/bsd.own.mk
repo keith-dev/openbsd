@@ -1,4 +1,4 @@
-#	$OpenBSD: bsd.own.mk,v 1.63 2002/12/07 22:31:00 millert Exp $
+#	$OpenBSD: bsd.own.mk,v 1.70 2003/09/06 18:20:23 miod Exp $
 #	$NetBSD: bsd.own.mk,v 1.24 1996/04/13 02:08:09 thorpej Exp $
 
 # Host-specific overrides
@@ -12,8 +12,6 @@
 WARNINGS?=	no
 # Set `SKEY' to `yes' to build with support for S/key authentication.
 SKEY?=		yes
-# Set `KERBEROS' to `yes' to build with support for Kerberos authentication.
-KERBEROS?=	yes
 # Set `KERBEROS5' to `yes' to build with support for Kerberos5 authentication.
 KERBEROS5?=	yes
 # Set `YP' to `yes' to build with support for NIS/YP.
@@ -32,7 +30,7 @@ DEBUGLIBS?=	no
 # Set toolchain to be able to know differences.
 .if (${MACHINE_ARCH} == "alpha" || ${MACHINE_ARCH} == "powerpc" || \
      ${MACHINE_ARCH} == "hppa" || ${MACHINE_ARCH} == "sparc64" || \
-     ${MACHINE_ARCH} == "sparc")
+     ${MACHINE_ARCH} == "sparc" || ${MACHINE_ARCH} == "i386")
 ELF_TOOLCHAIN?=	yes
 .else
 ELF_TOOLCHAIN?=	no
@@ -121,7 +119,7 @@ PICFLAG=-fPIC
 .endif
 .if (${MACHINE_ARCH} == "sparc64") || (${MACHINE_ARCH} == "sparc")
 ASPICFLAG=-KPIC
-.elif (${ELF_TOOLCHAIN} != "yes")
+.elif (${ELF_TOOLCHAIN:L} == "no")
 ASPICFLAG=-k
 .endif
 

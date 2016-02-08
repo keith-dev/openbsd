@@ -1,4 +1,4 @@
-/*	$OpenBSD: leave.c,v 1.8 2002/06/12 06:07:15 mpech Exp $	*/
+/*	$OpenBSD: leave.c,v 1.10 2003/06/10 22:20:47 deraadt Exp $	*/
 /*	$NetBSD: leave.c,v 1.4 1995/07/03 16:50:13 phil Exp $	*/
 
 /*
@@ -13,11 +13,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -44,7 +40,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)leave.c	8.1 (Berkeley) 6/6/93";
 #endif
-static char rcsid[] = "$OpenBSD: leave.c,v 1.8 2002/06/12 06:07:15 mpech Exp $";
+static char rcsid[] = "$OpenBSD: leave.c,v 1.10 2003/06/10 22:20:47 deraadt Exp $";
 #endif /* not lint */
 
 #include <sys/param.h>
@@ -65,9 +61,7 @@ void	doalarm(u_int secs);
  * It nags you like a mother hen.
  */
 int
-main(argc, argv)
-	int argc;
-	char **argv;
+main(int argc, char *argv[])
 {
 	u_int secs;
 	int hours, minutes;
@@ -129,8 +123,7 @@ main(argc, argv)
 }
 
 void
-doalarm(secs)
-	u_int secs;
+doalarm(u_int secs)
 {
 	int bother;
 	time_t daytime;
@@ -179,7 +172,7 @@ doalarm(secs)
 }
 
 void
-usage()
+usage(void)
 {
 	fprintf(stderr, "usage: leave [[+]hhmm]\n");
 	exit(1);

@@ -1,30 +1,23 @@
-/*	$OpenBSD: md5.c,v 1.19 2003/03/23 00:31:23 millert Exp $	*/
+/*	$OpenBSD: md5.c,v 1.26 2003/07/21 00:11:03 millert Exp $	*/
 
 /*
- * Copyright (c) 2001,2003 Todd C. Miller <Todd.Miller@courtesan.com>
- * All rights reserved.
+ * Copyright (c) 2001, 2003 Todd C. Miller <Todd.Miller@courtesan.com>
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
- * 3. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
+ * Permission to use, copy, modify, and distribute this software for any
+ * purpose with or without fee is hereby granted, provided that the above
+ * copyright notice and this permission notice appear in all copies.
  *
- * THIS SOFTWARE IS PROVIDED ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES,
- * INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY
- * AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL
- * THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
- * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
- * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
- * OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
- * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
- * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
- * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+ * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+ * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+ * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+ * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ *
+ * Sponsored in part by the Defense Advanced Research Projects
+ * Agency (DARPA) and Air Force Research Laboratory, Air Force
+ * Materiel Command, USAF, under agreement number F39502-99-1-0512.
  */
 
 #include <sys/param.h>
@@ -52,25 +45,38 @@ union ANY_CTX {
 struct hash_functions {
 	char *name;
 	int digestlen;
-	void (*init)();
-	void (*update)();
-	char * (*end)();
-	char * (*file)();
-	char * (*data)();
+	void (*init)(void *);
+	void (*update)(void *, const unsigned char *, unsigned int);
+	char * (*end)(void *, char *);
+	char * (*file)(char *, char *);
+	char * (*data)(const unsigned char *, unsigned int, char *);
 };
+
 struct hash_functions functions[] = {
 	{
 		"MD5",
 		32,
-		MD5Init, MD5Update, MD5End, MD5File, MD5Data
+		(void (*)(void *))MD5Init,
+		(void (*)(void *, const unsigned char *, unsigned int))MD5Update,
+		(char *(*)(void *, char *))MD5End,
+		(char *(*)(char *, char *))MD5File,
+		(char *(*)(const unsigned char *, unsigned int, char *))MD5Data
 	}, {
 		"SHA1",
 		40,
-		SHA1Init, SHA1Update, SHA1End, SHA1File, SHA1Data
+		(void (*)(void *))SHA1Init,
+		(void (*)(void *, const unsigned char *, unsigned int))SHA1Update,
+		(char *(*)(void *, char *))SHA1End,
+		(char *(*)(char *, char *))SHA1File,
+		(char *(*)(const unsigned char *, unsigned int, char *))SHA1Data
 	}, {
 		"RMD160",
 		40,
-		RMD160Init, RMD160Update, RMD160End, RMD160File, RMD160Data
+		(void (*)(void *))RMD160Init,
+		(void (*)(void *, const unsigned char *, unsigned int))RMD160Update,
+		(char *(*)(void *, char *))RMD160End,
+		(char *(*)(char *, char *))RMD160File,
+		(char *(*)(const unsigned char *, unsigned int, char *))RMD160Data
 	}, {
 		NULL,
 	},
@@ -149,7 +155,7 @@ main(int argc, char **argv)
 		while (argc--)
 			digest_file(*argv++, &functions[digest_type], 0);
 
-	exit(error ? EXIT_FAILURE : EXIT_SUCCESS);
+	return(error ? EXIT_FAILURE : EXIT_SUCCESS);
 }
 
 static void
@@ -157,7 +163,8 @@ digest_string(char *string, struct hash_functions *hf)
 {
 	char digest[MAX_DIGEST_LEN + 1];
 
-	(void)hf->data(string, strlen(string), digest);
+	(void)hf->data((unsigned char *)string, (unsigned int)strlen(string),
+	    digest);
 	(void)printf("%s (\"%s\") = %s\n", hf->name, string, digest);
 }
 
@@ -184,7 +191,7 @@ digest_file(char *file, struct hash_functions *hf, int echo)
 	while ((nread = read(fd, data, sizeof(data))) > 0) {
 		if (echo)
 			write(STDOUT_FILENO, data, (size_t)nread);
-		hf->update(&context, data, nread);
+		hf->update(&context, data, (unsigned int)nread);
 	}
 	if (nread == -1) {
 		warn("%s: read error", file);
@@ -267,7 +274,7 @@ digest_filelist(char *file)
 			continue;
 
 		filename = p + 2;
-		p = strchr(filename, ')');
+		p = strrchr(filename, ')');
 		if (p == NULL || strncmp(p + 1, " = ", (size_t)3) != 0)
 			continue;
 		*p = '\0';
@@ -297,7 +304,7 @@ digest_filelist(char *file)
 		found = 1;
 		hf->init(&context);
 		while ((nread = read(fd, data, sizeof(data))) > 0)
-			hf->update(&context, data, nread);
+			hf->update(&context, data, (unsigned int)nread);
 		if (nread == -1) {
 			warn("%s: read error", file);
 			error = 1;
@@ -362,7 +369,8 @@ digest_test(struct hash_functions *hf)
 {
 	union ANY_CTX context;
 	int i;
-	char digest[MAX_DIGEST_LEN + 1], buf[1000];
+	char digest[MAX_DIGEST_LEN + 1];
+	unsigned char buf[1000];
 	char *test_strings[] = {
 		"",
 		"a",
@@ -380,7 +388,8 @@ digest_test(struct hash_functions *hf)
 
 	for (i = 0; i < 8; i++) {
 		hf->init(&context);
-		hf->update(&context, test_strings[i], strlen(test_strings[i]));
+		hf->update((void *)&context, (unsigned char *)test_strings[i],
+		    (unsigned int)strlen(test_strings[i]));
 		(void)hf->end(&context, digest);
 		(void)printf("%s (\"%s\") = %s\n", hf->name, test_strings[i],
 		    digest);
@@ -390,14 +399,15 @@ digest_test(struct hash_functions *hf)
 	memset(buf, 'a', sizeof(buf));
 	hf->init(&context);
 	for (i = 0; i < 1000; i++)
-		hf->update(&context, buf, sizeof(buf));
+		hf->update(&context, (unsigned char *)buf,
+		    (unsigned int)sizeof(buf));
 	(void)hf->end(&context, digest);
 	(void)printf("%s (one million 'a' characters) = %s\n",
 	    hf->name, digest);
 }
 
 static void
-usage()
+usage(void)
 {
 	fprintf(stderr, "usage: %s [-p | -t | -x | -c [ checksum_file ... ]",
 	    __progname);

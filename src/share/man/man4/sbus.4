@@ -1,4 +1,4 @@
-.\"	$OpenBSD: sbus.4,v 1.11 2002/11/08 08:08:47 mpech Exp $
+.\"	$OpenBSD: sbus.4,v 1.22 2003/06/20 03:28:12 jason Exp $
 .\"	$NetBSD: sbus.4,v 1.5 2002/01/21 17:54:10 wiz Exp $
 .\"
 .\" Copyright (c) 2001 The NetBSD Foundation, Inc.
@@ -40,18 +40,18 @@
 .Os
 .Sh NAME
 .Nm sbus
-.Nd introduction to machine-independent sbus bus support and drivers
+.Nd introduction to sbus bus support and drivers
 .Sh SYNOPSIS
 .Cd "sbus* at mainbus?"
 .Cd "sbus* at iommu?"
 .Cd "sbus* at xbox?"
 .Pp
 These
-.Nm sbus
+.Nm
 attachments are specific to the sparc and sparc64 ports.
 .Sh DESCRIPTION
 .Nm
-is a I/O interconnect bus mostly found in
+is an I/O interconnect bus mostly found in
 .Tn SPARC
 workstations and small to medium server class systems.
 It supports both on-board peripherals and extension boards.
@@ -61,17 +61,17 @@ specifications define the bus protocol as well as the electrical and
 mechanical properties of the extension slots.
 .Sh HARDWARE
 .Ox
-includes machine-independent
+includes the following
 .Nm
 drivers, sorted by device type and driver name:
 .Ss Audio interfaces
 .Bl -tag -width 12n -offset ind -compact
 .It Xr audioamd 4
 .Tn AMD
-7990 codecs
+7990 codecs.
 .It Xr audiocs 4
 .Tn "Crystal Semiconductor"
-CS4231A codecs
+CS4231A codecs.
 .El
 .Ss SCSI interfaces
 .Bl -tag -width 12n -offset ind -compact
@@ -86,19 +86,24 @@ interfaces.
 .El
 .Ss Network interfaces
 .Bl -tag -width 12n -offset ind -compact
+.It Xr be 4
+.Dq Big Mac
+.Tn Ethernet
+board.
+.It Xr hme 4
+.Dq Happy Meal
+.Tn Ethernet
+interfaces.
 .It Xr le 4
 .Tn Lance
 7990 series
 .Tn Ethernet
 interfaces.
-.It Xr hme 4
-.Dq Happy Meal
+.It Xr lebuffer 4 , Xr ledma 4
+.Tn Lance
+7990 series
 .Tn Ethernet
-interfaces.
-.It Xr be 4
-.Dq Big Mac
-.Tn Ethernet
-board.
+DMA interfaces.
 .It Xr qe 4
 Quad Ethernet Controller
 board.
@@ -112,19 +117,41 @@ bridge.
 .El
 .Ss Graphics devices
 .Bl -tag -width 12n -offset ind -compact
+.It Xr agten 4
+Fujitsu AG-10e accelerated 24-bit color frame buffer.
 .It Xr bwtwo 4
-framebuffer device.
-.It Xr cgthree 4
-framebuffer device.
+Monochromatic frame buffer.
+.It Xr cgfourteen 4
+Accelerated 8/24-bit color frame buffer.
 .It Xr cgsix 4
-framebuffer device.
+Accelerated 8-bit color frame buffer.
+.It Xr cgthree 4
+8-bit color frame buffer.
+.It Xr cgtwelve 4
+Accelerated 24-bit color frame buffer.
+.It Xr mgx 4
+SMS MGX and MGXPlus accelerated 24-bit color frame buffers.
+.It Xr pninek 4
+Weitek Power9000 frame buffer found on Tadpole SPARCbook 3.
+.It Xr pnozz 4
+Weitek Power9100 frame buffer found on Tadpole SPARCbook 3GS, 3GX, 3TX and 3XP.
+.It Xr tcx 4
+Accelerated 8/24-bit color frame buffer.
+.It Xr tvtwo 4
+Accelerated 24-bit color frame buffer.
+.It Xr vigra 4
+8-bit SBus color frame buffer with VGA-compatible modes.
+.It Xr zx 4
+Accelerated 24-bit color frame buffer.
 .El
 .Ss Serial and parallel interfaces
 .Bl -tag -width 12n -offset ind -compact
-.It Xr apio 4 
+.It Xr apio 4
 Aurora Technologies pio1 parallel port card.
 .It Xr asio 4
 Aurora Technologies pio2 serial port card.
+.It Xr bpp 4
+Parallel port.
 .It Xr magma 4
 Magma LC series Serial/Parallel Interface cards.
 .It Xr spif 4
@@ -132,34 +159,53 @@ Sun Serial/Parallel Interface card.
 .El
 .Ss Miscellaneous devices
 .Bl -tag -width 12n -offset ind -compact
+.It Xr auxio 4
+Miscellaneous I/O controls.
+.It Xr presto 4
+Prestoserve battery-backed memory.
 .It Xr uperf 4
 Performance counters on the host bridge.
 .El
 .Sh SEE ALSO
+.Xr agten 4 ,
 .Xr apio 4 ,
 .Xr asio 4 ,
 .Xr audioamd 4 ,
 .Xr audiocs 4 ,
+.Xr auxio 4 ,
 .Xr be 4 ,
+.Xr bpp 4 ,
 .Xr bwtwo 4 ,
+.Xr cgfourteen 4 ,
 .Xr cgsix 4 ,
 .Xr cgthree 4 ,
+.Xr cgtwelve 4 ,
 .Xr esp 4 ,
 .Xr hme 4 ,
 .Xr intro 4 ,
 .Xr isp 4 ,
 .Xr le 4 ,
+.Xr lebuffer 4 ,
+.Xr ledma 4 ,
 .Xr magma 4 ,
+.Xr mgx 4 ,
+.Xr pnozz 4 ,
+.Xr presto 4 ,
 .Xr qe 4 ,
 .Xr qec 4 ,
 .Xr spif 4 ,
 .Xr stp 4 ,
+.Xr tcx 4 ,
+.Xr tvtwo 4 ,
 .Xr uperf 4 ,
-.Xr xbox 4
+.Xr vigra 4 ,
+.Xr xbox 4 ,
+.Xr zx 4
 .Sh HISTORY
 The machine-independent
 .Nm sbus
 subsystem appeared in
 .Nx 1.3 .
-.Ox support first appeared in
+.Ox
+support first appeared in
 .Ox 2.0 .

@@ -51,9 +51,9 @@
 ./etc/isakmpd
 ./etc/isakmpd/ca
 ./etc/isakmpd/certs
+./etc/isakmpd/crls
 ./etc/isakmpd/keynote
 ./etc/isakmpd/private
-./etc/kerberosIV
 ./etc/mail
 ./etc/mtree
 ./etc/ppp
@@ -86,6 +86,7 @@
 ./sbin/fsck_msdos
 ./sbin/fsdb
 ./sbin/fsirand
+./sbin/growfs
 ./sbin/halt
 ./sbin/ifconfig
 ./sbin/init
@@ -213,7 +214,6 @@
 ./usr/bin/encrypt
 ./usr/bin/env
 ./usr/bin/eqn
-./usr/bin/error
 ./usr/bin/ex
 ./usr/bin/expand
 ./usr/bin/false
@@ -391,7 +391,6 @@
 ./usr/bin/s2p
 ./usr/bin/scp
 ./usr/bin/script
-./usr/bin/sdiff
 ./usr/bin/sectok
 ./usr/bin/sed
 ./usr/bin/sendbug
@@ -1417,8 +1416,6 @@
 ./usr/libexec/auth/login_activ
 ./usr/libexec/auth/login_chpass
 ./usr/libexec/auth/login_crypto
-./usr/libexec/auth/login_krb4
-./usr/libexec/auth/login_krb4-or-pwd
 ./usr/libexec/auth/login_krb5
 ./usr/libexec/auth/login_krb5-or-pwd
 ./usr/libexec/auth/login_lchpass
@@ -1446,6 +1443,7 @@
 ./usr/libexec/cvs/contrib/rcs2log
 ./usr/libexec/cvs/contrib/rcslock
 ./usr/libexec/cvs/contrib/sccs2rcs
+./usr/libexec/diff3prog
 ./usr/libexec/fingerd
 ./usr/libexec/ftp-proxy
 ./usr/libexec/ftpd
@@ -1457,10 +1455,8 @@
 ./usr/libexec/ipropd-master
 ./usr/libexec/ipropd-slave
 ./usr/libexec/kadmind
-./usr/libexec/kauthd
 ./usr/libexec/kdc
 ./usr/libexec/kpasswdd
-./usr/libexec/kpropd
 ./usr/libexec/locate.bigram
 ./usr/libexec/locate.code
 ./usr/libexec/locate.concatdb
@@ -1557,7 +1553,6 @@
 ./usr/sbin/dig
 ./usr/sbin/editmap
 ./usr/sbin/edquota
-./usr/sbin/ext_srvtab
 ./usr/sbin/extattrctl
 ./usr/sbin/faithd
 ./usr/sbin/fs
@@ -1573,12 +1568,6 @@
 ./usr/sbin/inetd
 ./usr/sbin/iostat
 ./usr/sbin/kadmin
-./usr/sbin/kdb_destroy
-./usr/sbin/kdb_edit
-./usr/sbin/kdb_init
-./usr/sbin/kdb_util
-./usr/sbin/kprop
-./usr/sbin/ksrvutil
 ./usr/sbin/kstash
 ./usr/sbin/ktutil
 ./usr/sbin/kvm_mkdb
@@ -1647,7 +1636,6 @@
 ./usr/sbin/route6d
 ./usr/sbin/rpc.bootparamd
 ./usr/sbin/rpc.lockd
-./usr/sbin/rpc.pcnfsd
 ./usr/sbin/rpc.yppasswdd
 ./usr/sbin/rtadvd
 ./usr/sbin/rtsold
@@ -1742,6 +1730,7 @@
 ./usr/share/calendar/ru_RU.KOI8-R/calendar.msk
 ./usr/share/calendar/ru_RU.KOI8-R/calendar.orthodox
 ./usr/share/calendar/ru_RU.KOI8-R/calendar.pagan
+./usr/share/calendar/ru_RU.KOI8-R/calendar.primety
 ./usr/share/dict
 ./usr/share/dict/american
 ./usr/share/dict/british
@@ -2034,6 +2023,7 @@
 ./usr/share/misc/countrycodes
 ./usr/share/misc/eqnchar
 ./usr/share/misc/inter.phone
+./usr/share/misc/license.template
 ./usr/share/misc/mail.help
 ./usr/share/misc/mail.tildehelp
 ./usr/share/misc/man.template
@@ -2090,11 +2080,16 @@
 ./usr/share/nls/sv/libc.cat
 ./usr/share/pf
 ./usr/share/pf/ackpri
+./usr/share/pf/faq-example1
+./usr/share/pf/faq-example2
+./usr/share/pf/faq-example3
 ./usr/share/pf/queue1
 ./usr/share/pf/queue2
 ./usr/share/pf/queue3
+./usr/share/pf/spamd
 ./usr/share/sendmail
 ./usr/share/sendmail/README
+./usr/share/sendmail/TUNING
 ./usr/share/sendmail/cf
 ./usr/share/sendmail/cf/Makefile
 ./usr/share/sendmail/cf/chez.cs.mc
@@ -2109,7 +2104,6 @@
 ./usr/share/sendmail/cf/cs-sunos4.1.mc
 ./usr/share/sendmail/cf/cs-ultrix4.mc
 ./usr/share/sendmail/cf/cyrusproto.mc
-./usr/share/sendmail/cf/elbereth.mc
 ./usr/share/sendmail/cf/generic-bsd4.4.mc
 ./usr/share/sendmail/cf/generic-hpux10.mc
 ./usr/share/sendmail/cf/generic-hpux9.mc
@@ -4050,7 +4044,6 @@
 ./var/named
 ./var/named/dev
 ./var/named/etc
-./var/preserve
 ./var/quotas
 ./var/run
 ./var/rwho
@@ -4061,12 +4054,10 @@
 ./var/spool/ftp/etc
 ./var/spool/ftp/hidden
 ./var/spool/lock
-./var/spool/lpd
 ./var/spool/mqueue
 ./var/spool/output
 ./var/spool/uucp
 ./var/spool/uucppublic
-./var/ssyslog
 ./var/tmp
 ./var/tmp/vi.recover
 ./var/www

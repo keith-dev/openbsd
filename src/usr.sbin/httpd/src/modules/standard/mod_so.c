@@ -1,9 +1,9 @@
-/*	$OpenBSD: mod_so.c,v 1.8 2002/08/15 16:06:11 henning Exp $ */
+/*	$OpenBSD: mod_so.c,v 1.12 2003/08/21 13:11:37 henning Exp $ */
 
 /* ====================================================================
  * The Apache Software License, Version 1.1
  *
- * Copyright (c) 2000-2002 The Apache Software Foundation.  All rights
+ * Copyright (c) 2000-2003 The Apache Software Foundation.  All rights
  * reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -132,6 +132,7 @@
 #include "httpd.h"
 #include "http_config.h"
 #include "http_log.h"
+#include "http_main.h"
 
 module MODULE_VAR_EXPORT so_module;
 
@@ -245,6 +246,7 @@ static const char *load_module(cmd_parms *cmd, void *dummy,
     /*
      * Load the file into the Apache address space
      */
+    ap_server_strip_chroot(szModuleFile, 0);
     if (!(modhandle = ap_os_dso_load(szModuleFile))) {
 	const char *my_error = ap_os_dso_error();
 	return ap_pstrcat (cmd->pool, "Cannot load ", szModuleFile,
@@ -300,9 +302,9 @@ static const char *load_module(cmd_parms *cmd, void *dummy,
      * we do a restart (or shutdown) this cleanup will cause the
      * shared object to be unloaded.
      */
-/*    ap_register_cleanup(cmd->pool, modi, 
+    ap_register_cleanup(cmd->pool, modi, 
 		     (void (*)(void*))unload_module, ap_null_cleanup);
-*/
+
     /* 
      * Finally we need to run the configuration process for the module
      */

@@ -1,4 +1,4 @@
-/*	$OpenBSD: main.c,v 1.31 2002/02/16 21:27:33 millert Exp $	*/
+/*	$OpenBSD: main.c,v 1.36 2003/08/25 23:28:15 tedu Exp $	*/
 /*	$NetBSD: main.c,v 1.14 1997/06/05 11:13:24 lukem Exp $	*/
 
 /*-
@@ -13,11 +13,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -44,7 +40,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)main.c	8.4 (Berkeley) 4/15/94";
 #else
-static char rcsid[] = "$NetBSD: main.c,v 1.8 1996/03/15 22:39:32 scottr Exp $";
+static const char rcsid[] = "$OpenBSD: main.c,v 1.36 2003/08/25 23:28:15 tedu Exp $";
 #endif
 #endif /* not lint */
 
@@ -100,13 +96,11 @@ static void obsolete(int *, char **[]);
 static void usage(void);
 
 int
-main(argc, argv)
-	int argc;
-	char *argv[];
+main(int argc, char *argv[])
 {
 	ino_t ino;
 	int dirty;
-	struct dinode *dp;
+	struct ufs1_dinode *dp;
 	struct	fstab *dt;
 	char *map;
 	int ch;
@@ -560,7 +554,7 @@ main(argc, argv)
 }
 
 static void
-usage()
+usage(void)
 {
 	extern char *__progname;
 
@@ -576,9 +570,7 @@ usage()
  * range (except that a vmax of 0 means unlimited).
  */
 static long
-numarg(meaning, vmin, vmax)
-	char *meaning;
-	long vmin, vmax;
+numarg(char *meaning, long vmin, long vmax)
 {
 	char *p;
 	long val;
@@ -592,8 +584,7 @@ numarg(meaning, vmin, vmax)
 }
 
 void
-sig(signo)
-	int signo;
+sig(int signo)
 {
 	switch(signo) {
 	case SIGALRM:
@@ -619,8 +610,7 @@ sig(signo)
 }
 
 char *
-rawname(cp)
-	char *cp;
+rawname(char *cp)
 {
 	static char rawbuf[MAXPATHLEN];
 	char *dp = strrchr(cp, '/');
@@ -639,12 +629,11 @@ rawname(cp)
  *	getopt(3) will like.
  */
 static void
-obsolete(argcp, argvp)
-	int *argcp;
-	char **argvp[];
+obsolete(int *argcp, char **argvp[])
 {
 	int argc, flags;
 	char *ap, **argv, *flagsp, **nargv, *p;
+	size_t len;
 
 	/* Setup. */
 	argv = *argvp;
@@ -676,11 +665,12 @@ obsolete(argcp, argvp)
 				warnx("option requires an argument -- %c", *ap);
 				usage();
 			}
-			if ((nargv[0] = malloc(strlen(*argv) + 2 + 1)) == NULL)
+			len = 2 + strlen(*argv) + 1;
+			if ((nargv[0] = malloc(len)) == NULL)
 				err(1, NULL);
 			nargv[0][0] = '-';
 			nargv[0][1] = *ap;
-			(void)strcpy(&nargv[0][2], *argv);
+			(void)strlcpy(&nargv[0][2], *argv, len - 2);
 			++argv;
 			++nargv;
 			break;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: mset.c,v 1.3 2001/11/19 19:02:16 mpech Exp $	*/
+/*	$OpenBSD: mset.c,v 1.6 2003/07/10 00:06:51 david Exp $	*/
 
 /*-
  * Copyright (c) 1988 The Regents of the University of California.
@@ -12,11 +12,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -41,7 +37,7 @@ char copyright[] =
 
 #ifndef lint
 /*static char sccsid[] = "from: @(#)mset.c	4.2 (Berkeley) 4/26/91";*/
-static char rcsid[] = "$OpenBSD: mset.c,v 1.3 2001/11/19 19:02:16 mpech Exp $";
+static char rcsid[] = "$OpenBSD: mset.c,v 1.6 2003/07/10 00:06:51 david Exp $";
 #endif /* not lint */
 
 /*
@@ -52,6 +48,7 @@ static char rcsid[] = "$OpenBSD: mset.c,v 1.3 2001/11/19 19:02:16 mpech Exp $";
  */
 
 #include <stdio.h>
+#include <stdlib.h>
 #if	defined(unix)
 #include <strings.h>
 #else	/* defined(unix) */
@@ -221,7 +218,7 @@ char *begin, *tc_name;
     else {
 	printf("'");
     }
-    (void) strcpy(savename, tc_name);
+    (void) strlcpy(savename, tc_name, sizeof savename);
     while (st1 != string) {
 	if (toshell && numbchars >= 1016) { /* leave room for ctrl and delim */
 	   numbchars = 0;

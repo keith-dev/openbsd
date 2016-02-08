@@ -1,7 +1,8 @@
 #
-#	$OpenBSD: Makefile,v 1.4 2003/03/02 12:19:57 dhartmei Exp $
+#	$OpenBSD: Makefile,v 1.6 2003/08/22 15:25:50 henning Exp $
 #
-FILES=	queue1 queue2 queue3 ackpri
+FILES=	queue1 queue2 queue3 ackpri faq-example1 faq-example2 faq-example3
+FILES+= spamd
 NOOBJ=	noobj
 
 all clean cleandir depend lint tags:

@@ -1,4 +1,4 @@
-/*	$OpenBSD: newfs.c,v 1.36 2003/03/13 09:09:26 deraadt Exp $	*/
+/*	$OpenBSD: newfs.c,v 1.44 2003/07/16 18:02:36 tedu Exp $	*/
 /*	$NetBSD: newfs.c,v 1.20 1996/05/16 07:13:03 thorpej Exp $	*/
 
 /*
@@ -13,11 +13,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -44,7 +40,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)newfs.c	8.8 (Berkeley) 4/18/94";
 #else
-static char rcsid[] = "$OpenBSD: newfs.c,v 1.36 2003/03/13 09:09:26 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: newfs.c,v 1.44 2003/07/16 18:02:36 tedu Exp $";
 #endif
 #endif /* not lint */
 
@@ -56,7 +52,9 @@ static char rcsid[] = "$OpenBSD: newfs.c,v 1.36 2003/03/13 09:09:26 deraadt Exp 
 #include <sys/ioctl.h>
 #include <sys/disklabel.h>
 #include <sys/mount.h>
+#include <sys/resource.h>
 #include <sys/sysctl.h>
+#include <sys/wait.h>
 
 #include <ufs/ufs/dir.h>
 #include <ufs/ffs/fs.h>
@@ -71,6 +69,7 @@ static char rcsid[] = "$OpenBSD: newfs.c,v 1.36 2003/03/13 09:09:26 deraadt Exp 
 #include <string.h>
 #include <syslog.h>
 #include <unistd.h>
+#include <signal.h>
 #include <util.h>
 #include <err.h>
 
@@ -99,16 +98,16 @@ u_short	dkcksum(struct disklabel *);
  *	sectorsize <= DESFRAGSIZE <= DESBLKSIZE
  *	DESBLKSIZE / DESFRAGSIZE <= 8
  */
-#define	DFL_FRAGSIZE	1024
-#define	DFL_BLKSIZE	8192
+#define	DFL_FRAGSIZE	2048
+#define	DFL_BLKSIZE	16384
 
 /*
  * Cylinder groups may have up to many cylinders. The actual
  * number used depends upon how much information can be stored
- * on a single cylinder. The default is to use 16 cylinders
- * per group.
+ * on a single cylinder. The default is to use as many as
+ * possible.
  */
-#define	DESCPG		16	/* desired fs_cpg */
+#define	DESCPG		65536	/* desired fs_cpg */
 
 /*
  * ROTDELAY gives the minimum number of milliseconds to initiate
@@ -161,7 +160,7 @@ int	interleave;		/* hardware sector interleave */
 int	trackskew = -1;		/* sector 0 skew, per track */
 int	fsize = 0;		/* fragment size */
 int	bsize = 0;		/* block size */
-int	cpg = DESCPG;		/* cylinders/cylinder group */
+int	cpg;			/* cylinders/cylinder group */
 int	cpgflg;			/* cylinders/cylinder group flag was given */
 int	minfree = MINFREE;	/* free space threshold */
 int	opt = DEFAULTOPT;	/* optimization preference (space or time) */
@@ -187,22 +186,27 @@ int	unlabeled;
 char	device[MAXPATHLEN];
 
 extern	char *__progname;
+struct disklabel *getdisklabel(char *, int);
 
 int
-main(argc, argv)
-	int argc;
-	char *argv[];
+main(int argc, char *argv[])
 {
 	int ch;
 	struct partition *pp;
 	struct disklabel *lp;
 	struct disklabel mfsfakelabel;
-	struct disklabel *getdisklabel();
 	struct partition oldpartition;
 	struct stat st;
 	struct statfs *mp;
-	int fsi = -1, fso, len, n, maxpartitions;
-	char *cp, *s1, *s2, *special, *opstring, buf[BUFSIZ];
+	struct rlimit rl;
+	int fsi = -1, fso, len, n, ncyls, maxpartitions;
+	char *cp, *s1, *s2, *special, *opstring;
+#ifdef MFS
+	char mountfromname[BUFSIZ];
+	pid_t pid, res;
+	struct statfs sf;
+	int status;
+#endif
 	char *fstype = NULL;
 	char **saveargv = argv;
 	int ffs = 1;
@@ -299,7 +303,8 @@ main(argc, argv)
 				else if (strcmp(optarg, "time") == 0)
 					reqopt = opt = FS_OPTTIME;
 				else
-	fatal("%s: unknown optimization preference: use `space' or `time'.");
+					fatal("%s: unknown optimization "
+					    "preference: use `space' or `time'.");
 			}
 			break;
 		case 'p':
@@ -348,6 +353,12 @@ main(argc, argv)
 
 	if (ffs && argc - mfs != 1)
 		usage();
+
+	/* Increase our data size to the max */
+	if (getrlimit(RLIMIT_DATA, &rl) == 0) {
+		rl.rlim_cur = rl.rlim_max;
+		(void)setrlimit(RLIMIT_DATA, &rl);
+	}
 
 	special = argv[0];
 	if (!mfs) {
@@ -575,6 +586,16 @@ havelabel:
 		fssize *= blkpersec;
 		pp->p_size *= blkpersec;
 	}
+	ncyls = fssize / secpercyl;
+	if (ncyls == 0)
+		ncyls = 1;
+	if (cpg == 0)
+		cpg = DESCPG < ncyls ? DESCPG : ncyls;
+	else if (cpg > ncyls) {
+		cpg = ncyls;
+		printf("Number of cylinders restricts cylinders per group "
+		    "to %d.\n", cpg);
+	}
 	mkfs(pp, special, fsi, fso);
 	if (realsectorsize < DEV_BSIZE)
 		pp->p_size *= DEV_BSIZE / realsectorsize;
@@ -589,8 +610,60 @@ havelabel:
 	if (mfs) {
 		struct mfs_args args;
 
-		snprintf(buf, sizeof buf, "mfs:%ld", (long)getpid());
-		args.fspec = buf;
+		switch (pid = fork()) {
+		case -1:
+			perror("mfs");
+			exit(10);
+		case 0:
+			snprintf(mountfromname, sizeof(mountfromname),
+			    "mfs:%d", getpid());
+			break;
+		default:
+			snprintf(mountfromname, sizeof(mountfromname),
+			    "mfs:%d", pid);
+			for (;;) {
+				/*
+				 * spin until the mount succeeds
+				 * or the child exits
+				 */
+				usleep(1);
+
+				/*
+				 * XXX Here is a race condition: another process
+				 * can mount a filesystem which hides our
+				 * ramdisk before we see the success.
+				 */
+				if (statfs(argv[1], &sf) < 0)
+					err(88, "statfs %s", argv[1]);
+				if (!strcmp(sf.f_mntfromname, mountfromname) &&
+				    !strncmp(sf.f_mntonname, argv[1],
+					     MNAMELEN) &&
+				    !strcmp(sf.f_fstypename, "mfs"))
+					exit(0);
+
+				res = waitpid(pid, &status, WNOHANG);
+				if (res == -1)
+					err(11, "waitpid");
+				if (res != pid)
+					continue;
+				if (WIFEXITED(status)) {
+					if (WEXITSTATUS(status) == 0)
+						exit(0);
+					errx(1, "%s: mount: %s", argv[1],
+					     strerror(WEXITSTATUS(status)));
+				} else
+					errx(11, "abnormal termination");
+			}
+			/* NOTREACHED */
+		}
+
+		(void) setsid();
+		(void) close(0);
+		(void) close(1);
+		(void) close(2);
+		(void) chdir("/");
+
+		args.fspec = mountfromname;
 		args.export_info.ex_root = -2;
 		if (mntflags & MNT_RDONLY)
 			args.export_info.ex_flags = MNT_EXRDONLY;
@@ -599,7 +672,7 @@ havelabel:
 		args.base = membase;
 		args.size = fssize * sectorsize;
 		if (mount(MOUNT_MFS, argv[1], mntflags, &args) < 0)
-			fatal("%s: %s", argv[1], strerror(errno));
+			exit(errno); /* parent prints message */
 	}
 #endif
 	exit(0);
@@ -612,16 +685,14 @@ char lmsg[] = "%s: can't read disk label";
 #endif
 
 struct disklabel *
-getdisklabel(s, fd)
-	char *s;
-	int fd;
+getdisklabel(char *s, int fd)
 {
 	static struct disklabel lab;
 
 	if (ioctl(fd, DIOCGDINFO, (char *)&lab) < 0) {
 #ifdef COMPAT
 		if (disktype) {
-			struct disklabel *lp, *getdiskbyname();
+			struct disklabel *lp;
 
 			unlabeled++;
 			lp = getdiskbyname(disktype);
@@ -637,10 +708,7 @@ getdisklabel(s, fd)
 }
 
 void
-rewritelabel(s, fd, lp)
-	char *s;
-	int fd;
-	struct disklabel *lp;
+rewritelabel(char *s, int fd, struct disklabel *lp)
 {
 #ifdef COMPAT
 	if (unlabeled)
@@ -745,7 +813,7 @@ struct fsoptions {
 };
 
 void
-usage()
+usage(void)
 {
 	struct fsoptions *fsopt;
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: sa.c,v 1.65 2002/11/21 12:09:20 ho Exp $	*/
+/*	$OpenBSD: sa.c,v 1.73 2003/07/25 08:31:16 markus Exp $	*/
 /*	$EOM: sa.c,v 1.112 2000/12/12 00:22:52 niklas Exp $	*/
 
 /*
@@ -13,11 +13,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by Ericsson Radio Systems.
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -46,6 +41,7 @@
 
 #include "sysdep.h"
 
+#include "conf.h"
 #include "connection.h"
 #include "cookie.h"
 #include "doi.h"
@@ -460,7 +456,7 @@ sa_dump (int cls, int level, char *header, struct sa *sa)
       for (i = 0; i < 2; i++)
 	if (proto->spi[i])
 	  {
-	    snprintf (spi_header, 80, "%s: spi[%d]", header, i);
+	    snprintf (spi_header, sizeof spi_header, "%s: spi[%d]", header, i);
 	    LOG_DBG_BUF ((cls, level, spi_header, proto->spi[i],
 			  proto->spi_sz[i]));
 	  }
@@ -479,7 +475,7 @@ report_spi (FILE *fd, const u_int8_t *buf, size_t sz, int spi)
 
   for (i = j = 0; i < sz;)
     {
-      snprintf (s + j, SBUFSZ - j, "%02x", buf[i++]);
+      snprintf (s + j, sizeof s - j, "%02x", buf[i++]);
       j += 2;
       if (i % 4 == 0)
 	{
@@ -536,7 +532,11 @@ report_proto (FILE *fd, struct proto *proto)
 	  break;
 
 	case IPSEC_ESP_AES:
-	  fprintf (fd, "Rijndael-128/AES\n");
+	  fprintf (fd, "AES-128 (CBC)\n");
+	  break;
+
+	case IPSEC_ESP_AES_128_CTR:
+	  fprintf (fd, "AES-128 (CTR)\n");
 	  break;
 
 	case IPSEC_ESP_CAST:
@@ -564,6 +564,18 @@ report_proto (FILE *fd, struct proto *proto)
 
         case IPSEC_AUTH_HMAC_RIPEMD:
 	  fprintf (fd, "HMAC-RIPEMD-160\n");
+	  break;
+
+	case IPSEC_AUTH_HMAC_SHA2_256:
+	  fprintf (fd, "HMAC-SHA2-256\n");
+	  break;
+
+	case IPSEC_AUTH_HMAC_SHA2_384:
+	  fprintf (fd, "HMAC-SHA2-384\n");
+	  break;
+
+	case IPSEC_AUTH_HMAC_SHA2_512:
+	  fprintf (fd, "HMAC-SHA2-512\n");
 	  break;
 
 	case IPSEC_AUTH_DES_MAC:
@@ -596,6 +608,18 @@ report_proto (FILE *fd, struct proto *proto)
 
 	case IPSEC_AH_RIPEMD:
 	  fprintf (fd, "HMAC-RIPEMD-160\n");
+	  break;
+
+	case IPSEC_AH_SHA2_256:
+	  fprintf (fd, "HMAC-SHA2-256\n");
+	  break;
+
+	case IPSEC_AH_SHA2_384:
+	  fprintf (fd, "HMAC-SHA2-384\n");
+	  break;
+
+	case IPSEC_AH_SHA2_512:
+	  fprintf (fd, "HMAC-SHA2-512\n");
 	  break;
 
 	default:
@@ -787,8 +811,6 @@ sa_release (struct sa *sa)
     }
   if (sa->recv_key)
     key_free (sa->recv_keytype, ISAKMP_KEYTYPE_PUBLIC, sa->recv_key);
-  if (sa->sent_key)
-    key_free (sa->sent_keytype, ISAKMP_KEYTYPE_PRIVATE, sa->sent_key);
   if (sa->keynote_key)
     free (sa->keynote_key); /* This is just a string */
 #if defined (USE_POLICY) || defined (USE_KEYNOTE)
@@ -975,6 +997,31 @@ sa_hard_expire (void *v_sa)
     exchange_establish (sa->name, 0, 0);
 
   sa_delete (sa, 1);
+}
+
+void
+sa_reinit (void)
+{
+  struct sa *sa;
+  char *tag;
+  int i;
+
+  /* For now; only do this if we have the proper tag configured.  */
+  tag = conf_get_str ("General", "Renegotiate-on-HUP");
+  if (!tag)
+    return;
+
+  LOG_DBG ((LOG_SA, 30, "sa_reinit: renegotiating active connections"));
+
+  /* Get phase 2 SAs. Soft expire those without active exchanges.  */
+  for (i = 0; i <= bucket_mask; i++)
+    for (sa = LIST_FIRST (&sa_tab[i]); sa; sa = LIST_NEXT (sa, link))
+      if (sa->phase == 2)
+	if (exchange_lookup_by_name (sa->name, sa->phase) == 0)
+	  {
+	    timer_remove_event (sa->soft_death);
+	    sa_soft_expire (sa);
+	  }
 }
 
 /*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: archive.c,v 1.7 2002/12/14 18:14:35 millert Exp $	*/
+/*	$OpenBSD: archive.c,v 1.10 2003/06/12 20:58:08 deraadt Exp $	*/
 /*	$NetBSD: archive.c,v 1.7 1995/03/26 03:27:46 glass Exp $	*/
 
 /*-
@@ -16,11 +16,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -41,7 +37,7 @@
 #if 0
 static char sccsid[] = "@(#)archive.c	8.3 (Berkeley) 4/2/94";
 #else
-static char rcsid[] = "$OpenBSD: archive.c,v 1.7 2002/12/14 18:14:35 millert Exp $";
+static char rcsid[] = "$OpenBSD: archive.c,v 1.10 2003/06/12 20:58:08 deraadt Exp $";
 #endif
 #endif /* not lint */
 
@@ -65,8 +61,7 @@ typedef struct ar_hdr HDR;
 static char hb[sizeof(HDR) + 1];	/* real header */
 
 int
-open_archive(mode)
-	int mode;
+open_archive(int mode)
 {
 	int created, fd, nr;
 	char buf[SARMAG];
@@ -114,8 +109,7 @@ opened:	if (flock(fd, LOCK_EX|LOCK_NB) && errno != EOPNOTSUPP)
 }
 
 void
-close_archive(fd)
-	int fd;
+close_archive(int fd)
 {
 
 	(void)close(fd);			/* Implicit unlock. */
@@ -133,8 +127,7 @@ close_archive(fd)
  *	read the archive header for this member
  */
 int
-get_arobj(fd)
-	int fd;
+get_arobj(int fd)
 {
 	struct ar_hdr *hdr;
 	int len, nr;
@@ -201,9 +194,7 @@ static int already_written;
  *	Write an archive member to a file.
  */
 void
-put_arobj(cfp, sb)
-	CF *cfp;
-	struct stat *sb;
+put_arobj(CF *cfp, struct stat *sb)
 {
 	int lname;
 	char *name;
@@ -246,16 +237,19 @@ put_arobj(cfp, sb)
 				    name, OLDARMAXNAME, name);
 				(void)fflush(stderr);
 			}
-			(void)sprintf(hb, HDR3, name, (long int)sb->st_mtimespec.tv_sec,
+			(void)snprintf(hb, sizeof hb,
+			    HDR3, name, (long int)sb->st_mtimespec.tv_sec,
 			    uid, gid, sb->st_mode, sb->st_size, ARFMAG);
 			lname = 0;
 		} else if (lname > sizeof(hdr->ar_name) || strchr(name, ' '))
-			(void)sprintf(hb, HDR1, AR_EFMT1, lname,
+			(void)snprintf(hb, sizeof hb,
+			    HDR1, AR_EFMT1, lname,
 			    (long int)sb->st_mtimespec.tv_sec, uid, gid, sb->st_mode,
 			    sb->st_size + lname, ARFMAG);
 		else {
 			lname = 0;
-			(void)sprintf(hb, HDR2, name, (long int)sb->st_mtimespec.tv_sec,
+			(void)snprintf(hb, sizeof hb,
+			    HDR2, name, (long int)sb->st_mtimespec.tv_sec,
 			    uid, gid, sb->st_mode, sb->st_size, ARFMAG);
 		}
 		size = sb->st_size;
@@ -291,9 +285,7 @@ put_arobj(cfp, sb)
  *	have been ripped out long ago.
  */
 void
-copy_ar(cfp, size)
-	CF *cfp;
-	off_t size;
+copy_ar(CF *cfp, off_t size)
 {
 	static char pad = '\n';
 	off_t sz;
@@ -334,8 +326,7 @@ copy_ar(cfp, size)
  *	Skip over an object -- taking care to skip the pad bytes.
  */
 void
-skip_arobj(fd)
-	int fd;
+skip_arobj(int fd)
 {
 	off_t len;
 

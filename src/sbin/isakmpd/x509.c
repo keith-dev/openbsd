@@ -1,4 +1,4 @@
-/*	$OpenBSD: x509.c,v 1.78 2002/12/03 16:08:13 ho Exp $	*/
+/*	$OpenBSD: x509.c,v 1.82 2003/06/10 16:41:29 deraadt Exp $	*/
 /*	$EOM: x509.c,v 1.54 2001/01/16 18:42:16 ho Exp $	*/
 
 /*
@@ -14,11 +14,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by Ericsson Radio Systems.
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -174,7 +169,7 @@ x509_generate_kn (int id, X509 *cert)
       if (X509_STORE_get_by_subject (&csc, X509_LU_X509, issuer, &obj) !=
           X509_LU_X509)
 	{
-  	  X509_STORE_CTX_cleanup (&csc);
+	  X509_STORE_CTX_cleanup (&csc);
 	  LOG_DBG ((LOG_POLICY, 30,
 		    "x509_generate_kn: no certificate found for issuer"));
 	  return 0;
@@ -302,9 +297,9 @@ x509_generate_kn (int id, X509 *cert)
 
 	  /* Stupid UTC tricks.  */
 	  if (tm->data[0] < '5')
-	    snprintf (before, 15, "20%s", tm->data);
+	    snprintf (before, sizeof before, "20%s", tm->data);
 	  else
-	    snprintf (before, 15, "19%s", tm->data);
+	    snprintf (before, sizeof before, "19%s", tm->data);
 	}
       else
         { /* V_ASN1_GENERICTIME */
@@ -337,7 +332,7 @@ x509_generate_kn (int id, X509 *cert)
 	      return 0;
 	    }
 
-	  snprintf (before, 15, "%s", tm->data);
+	  snprintf (before, sizeof before, "%s", tm->data);
 	}
 
       /* Fix missing seconds.  */
@@ -418,9 +413,9 @@ x509_generate_kn (int id, X509 *cert)
 
 	  /* Stupid UTC tricks.  */
 	  if (tm->data[0] < '5')
-	    snprintf (after, 15, "20%s", tm->data);
+	    snprintf (after, sizeof after, "20%s", tm->data);
 	  else
-	    snprintf (after, 15, "19%s", tm->data);
+	    snprintf (after, sizeof after, "19%s", tm->data);
 	}
       else
         { /* V_ASN1_GENERICTIME */
@@ -453,7 +448,7 @@ x509_generate_kn (int id, X509 *cert)
 	      return 0;
 	    }
 
-	  snprintf (after, 15, "%s", tm->data);
+	  snprintf (after, sizeof after, "%s", tm->data);
         }
 
       /* Fix missing seconds.  */
@@ -933,7 +928,7 @@ x509_cert_init (void)
 int
 x509_crl_init (void)
 {
-  /* 
+  /*
    * XXX I'm not sure if the method to use CRLs in certificate validation
    * is valid for OpenSSL versions prior to 0.9.7. For now, simply do not
    * support it.
@@ -949,7 +944,7 @@ x509_crl_init (void)
 
   if (!x509_read_crls_from_dir (x509_cas, dirname))
     {
-      log_print ("x509_crl_init: x509_read_from_dir failed");
+      LOG_DBG ((LOG_MISC, 10, "x509_crl_init: x509_read_from_dir failed"));
       return 0;
     }
 #else
@@ -1371,7 +1366,7 @@ x509_cert_get_subjects (void *scert, int *cnt, u_int8_t ***id,
 	    case 16:
 	      SET_ISAKMP_ID_TYPE (buf, IPSEC_ID_IPV6_ADDR);
 	      break;
-	      
+
 	    default:
 	      log_print ("x509_cert_get_subject: "
 			 "invalid subjectAltName iPAdress length %d ", altlen);

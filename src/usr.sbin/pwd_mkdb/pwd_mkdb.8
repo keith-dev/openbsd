@@ -1,4 +1,4 @@
-.\"	$OpenBSD: pwd_mkdb.8,v 1.14 2001/08/16 18:22:04 millert Exp $
+.\"	$OpenBSD: pwd_mkdb.8,v 1.17 2003/06/12 12:59:52 jmc Exp $
 .\"
 .\" Copyright (c) 1991, 1993
 .\"	The Regents of the University of California.  All rights reserved.
@@ -11,11 +11,7 @@
 .\" 2. Redistributions in binary form must reproduce the above copyright
 .\"    notice, this list of conditions and the following disclaimer in the
 .\"    documentation and/or other materials provided with the distribution.
-.\" 3. All advertising materials mentioning features or use of this software
-.\"    must display the following acknowledgement:
-.\"	This product includes software developed by the University of
-.\"	California, Berkeley and its contributors.
-.\" 4. Neither the name of the University nor the names of its contributors
+.\" 3. Neither the name of the University nor the names of its contributors
 .\"    may be used to endorse or promote products derived from this software
 .\"    without specific prior written permission.
 .\"
@@ -84,11 +80,24 @@ flag.
 .It Fl d Ar directory
 Operate in a base directory other than the default of
 .Pa /etc .
+All absolute paths (including
+.Ar file )
+will be made relative to
+.Ar directory .
+Any directories specified as a part of
+.Ar file
+will be stripped off.
+This option is used to create password databases in directories
+other than
+.Pa etc ;
+for instance in a
+.Xr chroot 8
+jail.
 .It Fl u Ar username
-Only update the record for the specified user.  Utilities that
-operate on a single user can use this option to avoid the
-overhead of rebuilding the entire database.  This option must
-never be used if the line number of the user's record in
+Only update the record for the specified user.
+Utilities that operate on a single user can use this option to avoid the
+overhead of rebuilding the entire database.
+This option must never be used if the line number of the user's record in
 .Pa /etc/master.passwd
 has changed.
 .It Ar file
@@ -129,10 +138,10 @@ temporary file
 .Xr getpwent 3 ,
 .Xr passwd 5 ,
 .Xr vipw 8
-.Sh COMPATIBILITY
+.Sh STANDARDS
 Previous versions of the system had a program similar to
 .Nm pwd_mkdb ,
-.Xr mkpasswd 8 ,
+.Xr mkpasswd ,
 which built
 .Xr dbm 3
 style databases for the password file but depended on the calling programs
@@ -160,4 +169,3 @@ The front-ends to
 and
 .Xr vipw 8
 handle the locking necessary to avoid this problem.
-

@@ -1,4 +1,4 @@
-/*	$OpenBSD: touch.c,v 1.8 2003/01/10 11:42:00 henning Exp $	*/
+/*	$OpenBSD: touch.c,v 1.10 2003/06/10 22:20:53 deraadt Exp $	*/
 /*	$NetBSD: touch.c,v 1.11 1995/08/31 22:10:06 jtc Exp $	*/
 
 /*
@@ -13,11 +13,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -44,7 +40,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)touch.c	8.2 (Berkeley) 4/28/95";
 #endif
-static char rcsid[] = "$OpenBSD: touch.c,v 1.8 2003/01/10 11:42:00 henning Exp $";
+static char rcsid[] = "$OpenBSD: touch.c,v 1.10 2003/06/10 22:20:53 deraadt Exp $";
 #endif /* not lint */
 
 #include <sys/types.h>
@@ -69,9 +65,7 @@ void	stime_file(char *, struct timeval *);
 void	usage(void);
 
 int
-main(argc, argv)
-	int argc;
-	char *argv[];
+main(int argc, char *argv[])
 {
 	struct stat sb;
 	struct timeval tv[2];
@@ -191,9 +185,7 @@ main(argc, argv)
 #define	ATOI2(s)	((s) += 2, ((s)[-2] - '0') * 10 + ((s)[-1] - '0'))
 
 void
-stime_arg1(arg, tvp)
-	char *arg;
-	struct timeval *tvp;
+stime_arg1(char *arg, struct timeval *tvp)
 {
 	struct tm *t;
 	time_t tmptime;
@@ -252,10 +244,7 @@ terr:		errx(1,
 }
 
 void
-stime_arg2(arg, year, tvp)
-	char *arg;
-	int year;
-	struct timeval *tvp;
+stime_arg2(char *arg, int year, struct timeval *tvp)
 {
 	struct tm *t;
 	time_t tmptime;
@@ -288,9 +277,7 @@ stime_arg2(arg, year, tvp)
 }
 
 void
-stime_file(fname, tvp)
-	char *fname;
-	struct timeval *tvp;
+stime_file(char *fname, struct timeval *tvp)
 {
 	struct stat sb;
 
@@ -301,10 +288,7 @@ stime_file(fname, tvp)
 }
 
 int
-rw(fname, sbp, force)
-	char *fname;
-	struct stat *sbp;
-	int force;
+rw(char *fname, struct stat *sbp, int force)
 {
 	int fd, needed_chmod, rval;
 	u_char byte;
@@ -353,7 +337,7 @@ err:			rval = 1;
 }
 
 __dead void
-usage()
+usage(void)
 {
 	(void)fprintf(stderr,
 	    "usage: touch [-acfm] [-r file] [-t time] file ...\n");

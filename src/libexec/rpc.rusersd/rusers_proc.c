@@ -1,4 +1,4 @@
-/*	$OpenBSD: rusers_proc.c,v 1.17 2002/06/30 00:21:12 deraadt Exp $	*/
+/*	$OpenBSD: rusers_proc.c,v 1.19 2003/07/10 00:04:28 david Exp $	*/
 
 /*-
  *  Copyright (c) 1993 John Brezak
@@ -29,7 +29,7 @@
  */
 
 #ifndef lint
-static char rcsid[] = "$OpenBSD: rusers_proc.c,v 1.17 2002/06/30 00:21:12 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: rusers_proc.c,v 1.19 2003/07/10 00:04:28 david Exp $";
 #endif /* not lint */
 
 #include <sys/param.h>
@@ -40,6 +40,7 @@ static char rcsid[] = "$OpenBSD: rusers_proc.c,v 1.17 2002/06/30 00:21:12 deraad
 #include <paths.h>
 #include <utmp.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <syslog.h>
 #include <unistd.h>
 #include <string.h>
@@ -61,6 +62,13 @@ struct ru_utmp ru_utmp[MAXUSERS];
 ut_line_t line[MAXUSERS];
 ut_name_t name[MAXUSERS];
 ut_host_t host[MAXUSERS];
+
+int *rusers_num_svc(void *, struct svc_req *);
+struct utmpidlearr *rusersproc_names_2_svc(void *, struct svc_req *);
+struct utmpidlearr *rusersproc_allnames_2_svc(void *, struct svc_req *);
+struct utmparr *rusersproc_names_1_svc(void *, struct svc_req *);
+struct utmparr *rusersproc_allnames_1_svc(void *, struct svc_req *);
+void rusers_service(struct svc_req *, SVCXPRT *);
 
 extern int from_inetd;
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: tcpdump.c,v 1.30 2002/11/30 13:56:23 mickey Exp $	*/
+/*	$OpenBSD: tcpdump.c,v 1.33 2003/08/21 19:14:23 frantzen Exp $	*/
 
 /*
  * Copyright (c) 1988, 1989, 1990, 1991, 1992, 1993, 1994, 1995, 1996, 1997
@@ -26,7 +26,7 @@ static const char copyright[] =
     "@(#) Copyright (c) 1988, 1989, 1990, 1991, 1992, 1993, 1994, 1995, 1996, 1997\n\
 The Regents of the University of California.  All rights reserved.\n";
 static const char rcsid[] =
-    "@(#) $Header: /cvs/src/usr.sbin/tcpdump/tcpdump.c,v 1.30 2002/11/30 13:56:23 mickey Exp $ (LBL)";
+    "@(#) $Header: /cvs/src/usr.sbin/tcpdump/tcpdump.c,v 1.33 2003/08/21 19:14:23 frantzen Exp $ (LBL)";
 #endif
 
 /*
@@ -56,6 +56,13 @@ static const char rcsid[] =
 #include "setsignal.h"
 #include "gmt2local.h"
 
+#include <sys/socket.h>
+#include <net/if.h>
+#include <netinet/in.h>
+#include <net/pfvar.h>
+#include "pfctl.h"
+#include "pfctl_parser.h"
+
 int aflag;			/* translate network and broadcast addresses */
 int dflag;			/* print filter code */
 int eflag;			/* print ethernet header */
@@ -63,6 +70,7 @@ int fflag;			/* don't translate "foreign" IP address */
 int nflag;			/* leave addresses as numbers */
 int Nflag;			/* remove domains from printed host names */
 int Oflag = 1;			/* run filter code optimizer */
+int oflag;			/* print passive OS fingerprints */
 int pflag;			/* don't go promiscuous */
 int qflag;			/* quick (shorter) output */
 int Sflag;			/* print raw TCP sequence numbers */
@@ -80,6 +88,7 @@ int32_t thiszone;		/* seconds offset from gmt to local time */
 
 /* Externs */
 extern void bpf_dump(struct bpf_program *, int);
+extern int esp_init(char *);
 
 /* Forwards */
 RETSIGTYPE cleanup(int);
@@ -111,6 +120,7 @@ static struct printer printers[] = {
 	{ loop_if_print, 	DLT_LOOP },
 	{ enc_if_print, 	DLT_ENC },
 	{ pflog_if_print, 	DLT_PFLOG },
+	{ pflog_old_if_print, 	DLT_OLD_PFLOG },
 	{ pfsync_if_print, 	DLT_PFSYNC },
 	{ NULL,			0 },
 };
@@ -160,7 +170,7 @@ main(int argc, char **argv)
 		error("%s", ebuf);
 
 	opterr = 0;
-	while ((op = getopt(argc, argv, "ac:defF:i:lnNOpqr:s:StT:vw:xXY")) != -1)
+	while ((op = getopt(argc, argv, "ac:deE:fF:i:lnNOopqr:s:StT:vw:xXY")) != -1)
 		switch (op) {
 
 		case 'a':
@@ -211,6 +221,13 @@ main(int argc, char **argv)
 
 		case 'O':
 			Oflag = 0;
+			break;
+
+		case 'o':
+			pf_osfp_initialize();
+			if (pfctl_file_fingerprints(-1,
+			    PF_OPT_QUIET|PF_OPT_NOACTION, PF_OSFP_FILE) == 0)
+				oflag = 1;
 			break;
 
 		case 'p':
@@ -281,6 +298,11 @@ main(int argc, char **argv)
 		case 'X':
 			++Xflag;
 			if (xflag == 0) ++xflag;
+			break;
+
+		case 'E':
+			if (esp_init(optarg) < 0)
+				error("bad esp specification `%s'", optarg);
 			break;
 
 		default:
@@ -530,10 +552,11 @@ usage(void)
 	(void)fprintf(stderr, "%s version %s\n", program_name, version);
 	(void)fprintf(stderr, "libpcap version %s\n", pcap_version);
 	(void)fprintf(stderr,
-"Usage: %s [-adeflnNOpqStvxX] [-c count] [ -F file ]\n", program_name);
+"Usage: %s [-adeflnNOpqStvxX] [-c count] [-F file] [-i interface] [-r file]\n",
+	    program_name);
 	(void)fprintf(stderr,
-"\t\t[ -i interface ] [ -r file ] [ -s snaplen ]\n");
+"\t\t[-s snaplen] [-T type] [-w file] [-E [espalg:]espkey]\n");
 	(void)fprintf(stderr,
-"\t\t[ -T type ] [ -w file ] [ expression ]\n");
+"\t\t[expression]\n");
 	exit(1);
 }

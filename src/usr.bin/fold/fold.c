@@ -1,4 +1,4 @@
-/*	$OpenBSD: fold.c,v 1.6 2002/06/17 07:06:12 deraadt Exp $	*/
+/*	$OpenBSD: fold.c,v 1.9 2003/06/25 21:19:19 deraadt Exp $	*/
 /*	$NetBSD: fold.c,v 1.6 1995/09/01 01:42:44 jtc Exp $	*/
 
 /*-
@@ -16,11 +16,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -47,7 +43,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)fold.c	8.1 (Berkeley) 6/6/93";
 #endif
-static char rcsid[] = "$OpenBSD: fold.c,v 1.6 2002/06/17 07:06:12 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: fold.c,v 1.9 2003/06/25 21:19:19 deraadt Exp $";
 #endif /* not lint */
 
 #include <stdio.h>
@@ -58,15 +54,13 @@ static char rcsid[] = "$OpenBSD: fold.c,v 1.6 2002/06/17 07:06:12 deraadt Exp $"
 
 #define	DEFLINEWIDTH	80
 
-static void fold ();
-static int new_column_position ();
+static void fold(int);
+static int new_column_position(int, int);
 int count_bytes = 0;
 int split_words = 0;
 
 int
-main(argc, argv)
-	int argc;
-	char **argv;
+main(int argc, char *argv[])
 {
 	int ch;
 	int width;
@@ -129,8 +123,7 @@ main(argc, argv)
  * returns embedded in the input stream.
  */
 static void
-fold(width)
-	int width;
+fold(int width)
 {
 	static char *buf = NULL;
 	static int   buf_max = 0;
@@ -197,9 +190,7 @@ fold(width)
  * calculate the column position 
  */
 static int
-new_column_position(col, ch)
-	int col;
-	int ch;
+new_column_position(int col, int ch)
 {
 	if (!count_bytes) {
 		switch (ch) {

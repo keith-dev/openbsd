@@ -1,4 +1,4 @@
-/* $OpenBSD: netcat.c,v 1.57 2002/12/30 18:00:18 stevesk Exp $ */
+/* $OpenBSD: netcat.c,v 1.62 2003/07/25 21:35:16 millert Exp $ */
 /*
  * Copyright (c) 2001 Eric Jackson <ericj@monkey.org>
  *
@@ -76,7 +76,7 @@ int timeout = -1;
 int family = AF_UNSPEC;
 char *portlist[PORT_MAX];
 
-ssize_t	atomicio(ssize_t (*)(), int, void *, size_t);
+ssize_t	atomicio(ssize_t (*)(int, void *, size_t), int, void *, size_t);
 void	atelnet(int, unsigned char *, unsigned int);
 void	build_ports(char *);
 void	help(void);
@@ -219,7 +219,6 @@ main(int argc, char *argv[])
 		if (nflag)
 			hints.ai_flags |= AI_NUMERICHOST;
 	}
-
 
 	if (xflag) {
 		if (uflag)
@@ -377,7 +376,13 @@ unix_connect(char *path)
 
 	memset(&sun, 0, sizeof(struct sockaddr_un));
 	sun.sun_family = AF_UNIX;
-	strlcpy(sun.sun_path, path, sizeof(sun.sun_path));
+
+	if (strlcpy(sun.sun_path, path, sizeof(sun.sun_path)) >=
+	    sizeof(sun.sun_path)) {
+		close(s);
+		errno = ENAMETOOLONG;
+		return (-1);
+	}
 	if (connect(s, (struct sockaddr *)&sun, SUN_LEN(&sun)) < 0) {
 		close(s);
 		return (-1);
@@ -400,8 +405,16 @@ unix_listen(char *path)
 	if ((s = socket(AF_UNIX, SOCK_STREAM, 0)) < 0)
 		return (-1);
 
-	strlcpy(sun.sun_path, path, sizeof(sun.sun_path));
+	memset(&sun, 0, sizeof(struct sockaddr_un));
 	sun.sun_family = AF_UNIX;
+
+	if (strlcpy(sun.sun_path, path, sizeof(sun.sun_path)) >=
+	    sizeof(sun.sun_path)) {
+		close(s);
+		errno = ENAMETOOLONG;
+		return (-1);
+	}
+
 	if (bind(s, (struct sockaddr *)&sun, SUN_LEN(&sun)) < 0) {
 		close(s);
 		return (-1);
@@ -454,11 +467,8 @@ remote_connect(char *host, char *port, struct addrinfo hints)
 				errx(1, "getaddrinfo: %s", gai_strerror(error));
 
 			if (bind(s, (struct sockaddr *)ares->ai_addr,
-			    ares->ai_addrlen) < 0) {
+			    ares->ai_addrlen) < 0)
 				errx(1, "bind failed: %s", strerror(errno));
-				freeaddrinfo(ares);
-				continue;
-			}
 			freeaddrinfo(ares);
 		}
 
@@ -569,7 +579,9 @@ readwrite(int nfd)
 			} else {
 				if (tflag)
 					atelnet(nfd, buf, n);
-				if ((ret = atomicio(write, lfd, buf, n)) != n)
+				if ((ret = atomicio(
+				    (ssize_t (*)(int, void *, size_t))write,
+				    lfd, buf, n)) != n)
 					return;
 			}
 		}
@@ -582,7 +594,9 @@ readwrite(int nfd)
 				pfd[1].fd = -1;
 				pfd[1].events = 0;
 			} else {
-				if((ret = atomicio(write, nfd, buf, n)) != n)
+				if((ret = atomicio(
+				    (ssize_t (*)(int, void *, size_t))write,
+				    nfd, buf, n)) != n)
 					return;
 			}
 		}
@@ -614,7 +628,9 @@ atelnet(int nfd, unsigned char *buf, unsigned int size)
 			p++;
 			obuf[2] = *p;
 			obuf[3] = '\0';
-			if ((ret = atomicio(write , nfd, obuf, 3)) != 3)
+			if ((ret = atomicio(
+			    (ssize_t (*)(int, void *, size_t))write,
+			    nfd, obuf, 3)) != 3)
 				warnx("Write Error!");
 			obuf[0] = '\0';
 		}
@@ -707,7 +723,7 @@ udptest(int s)
 }
 
 void
-help()
+help(void)
 {
 	usage(0);
 	fprintf(stderr, "\tCommand Summary:\n\

@@ -1,4 +1,4 @@
-# $OpenBSD: Makefile,v 1.1 2001/05/25 08:18:53 hin Exp $
+# $OpenBSD: Makefile,v 1.3 2003/05/11 20:54:39 mho Exp $
 
 KRBDEPTH=../..
 .include <${.CURDIR}/../../Makefile.inc>
@@ -17,6 +17,7 @@ SRCS=	8003.c			\
 	add_oid_set_member.c	\
 	canonicalize_name.c	\
 	compare_name.c		\
+	compat.c		\
 	context_time.c		\
 	create_emtpy_oid_set.c	\
 	decapsulate.c		\

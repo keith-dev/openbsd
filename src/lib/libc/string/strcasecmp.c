@@ -1,4 +1,4 @@
-/*	$OpenBSD: strcasecmp.c,v 1.3 1997/08/20 04:13:57 millert Exp $	*/
+/*	$OpenBSD: strcasecmp.c,v 1.5 2003/06/11 21:08:16 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1987, 1993
@@ -12,11 +12,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -39,7 +35,7 @@
 #if 0
 static char sccsid[] = "@(#)strcasecmp.c	8.1 (Berkeley) 6/4/93";
 #else
-static char *rcsid = "$OpenBSD: strcasecmp.c,v 1.3 1997/08/20 04:13:57 millert Exp $";
+static char *rcsid = "$OpenBSD: strcasecmp.c,v 1.5 2003/06/11 21:08:16 deraadt Exp $";
 #endif
 #endif /* LIBC_SCCS and not lint */
 
@@ -86,12 +82,11 @@ static const u_char charmap[] = {
 };
 
 int
-strcasecmp(s1, s2)
-	const char *s1, *s2;
+strcasecmp(const char *s1, const char *s2)
 {
-	register const u_char *cm = charmap,
-			*us1 = (const u_char *)s1,
-			*us2 = (const u_char *)s2;
+	const u_char *cm = charmap;
+	const u_char *us1 = (const u_char *)s1;
+	const u_char *us2 = (const u_char *)s2;
 
 	while (cm[*us1] == cm[*us2++])
 		if (*us1++ == '\0')
@@ -100,14 +95,12 @@ strcasecmp(s1, s2)
 }
 
 int
-strncasecmp(s1, s2, n)
-	const char *s1, *s2;
-	register size_t n;
+strncasecmp(const char *s1, const char *s2, size_t n)
 {
 	if (n != 0) {
-		register const u_char *cm = charmap,
-				*us1 = (const u_char *)s1,
-				*us2 = (const u_char *)s2;
+		const u_char *cm = charmap;
+		const u_char *us1 = (const u_char *)s1;
+		const u_char *us2 = (const u_char *)s2;
 
 		do {
 			if (cm[*us1] != cm[*us2++])

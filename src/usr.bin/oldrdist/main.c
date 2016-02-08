@@ -1,4 +1,4 @@
-/*	$OpenBSD: main.c,v 1.15 2002/06/18 23:49:15 deraadt Exp $	*/
+/*	$OpenBSD: main.c,v 1.18 2003/06/03 02:56:14 millert Exp $	*/
 
 /*
  * Copyright (c) 1983, 1993
@@ -12,11 +12,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -41,7 +37,7 @@ static char copyright[] =
 
 #ifndef lint
 /* from: static char sccsid[] = "@(#)main.c	8.1 (Berkeley) 6/9/93"; */
-static char *rcsid = "$OpenBSD: main.c,v 1.15 2002/06/18 23:49:15 deraadt Exp $";
+static char *rcsid = "$OpenBSD: main.c,v 1.18 2003/06/03 02:56:14 millert Exp $";
 #endif /* not lint */
 
 #include <stdarg.h>
@@ -56,7 +52,7 @@ static char *rcsid = "$OpenBSD: main.c,v 1.15 2002/06/18 23:49:15 deraadt Exp $"
 
 char	*distfile = NULL;
 #define _RDIST_TMP	"rdistXXXXXXXXXX"
-char	tempfile[sizeof _PATH_TMP + sizeof _RDIST_TMP + 1];
+char	tempfile[sizeof _PATH_TMP + sizeof _RDIST_TMP - 1];
 char	*tempname;
 
 int	debug;		/* debugging flag */
@@ -67,10 +63,10 @@ int	iamremote;	/* act as remote server for transfering files */
 
 FILE	*fin = NULL;	/* input file pointer */
 int	rem = -1;	/* file descriptor to remote source/sink process */
-char	host[32];	/* host name */
+char	host[MAXHOSTNAMELEN]; /* host name */
 int	nerrs;		/* number of errors while sending/receiving */
-char	user[10];	/* user's name */
-char	homedir[128];	/* user's home directory */
+char	user[MAXLOGNAME]; /* user's name */
+char	homedir[MAXPATHLEN]; /* user's home directory */
 uid_t	userid;		/* user's user ID */
 gid_t	groupid;	/* user's group ID */
 
@@ -94,12 +90,12 @@ main(argc, argv)
 		fprintf(stderr, "%s: Who are you?\n", argv[0]);
 		exit(1);
 	}
-	strcpy(user, pw->pw_name);
-	strcpy(homedir, pw->pw_dir);
+	strlcpy(user, pw->pw_name, sizeof user);
+	strlcpy(homedir, pw->pw_dir, sizeof homedir);
 	groupid = pw->pw_gid;
 	gethostname(host, sizeof(host));
-	strcpy(tempfile, _PATH_TMP);
-	strcat(tempfile, _RDIST_TMP);
+	strlcpy(tempfile, _PATH_TMP, sizeof tempfile);
+	strlcat(tempfile, _RDIST_TMP, sizeof tempfile);
 	tempname = basename(tempfile);
 
 	while (--argc > 0) {

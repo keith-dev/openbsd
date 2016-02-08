@@ -1,4 +1,4 @@
-/*	$OpenBSD: fileio.c,v 1.34 2002/08/22 23:28:19 deraadt Exp $	*/
+/*	$OpenBSD: fileio.c,v 1.38 2003/08/15 23:23:18 vincent Exp $	*/
 
 /*
  *	POSIX fileio.c
@@ -14,6 +14,7 @@ static FILE	*ffp;
 #include <string.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <ctype.h>
 
 /*
  * Open a file for reading.
@@ -106,7 +107,7 @@ ffputbuf(BUFFER *bp)
 	lpend = bp->b_linep;
 	lp = lforw(lpend);
 	do {
-		cp = &ltext(lp)[0];		/* begining of line	 */
+		cp = &ltext(lp)[0];		/* beginning of line	 */
 		cpend = &cp[llength(lp)];	/* end of line		 */
 		while (cp != cpend) {
 			putc(*cp, ffp);
@@ -168,14 +169,15 @@ fbackupfile(const char *fn)
 	char		buf[BUFSIZ];
 	char		*nname;
 
+	if (stat(fn, &sb) == -1) {
+		ewprintf("Can't stat %s : %s", fn, strerror(errno));
+		return (FALSE);
+	}
+
 	if (asprintf(&nname, "%s~", fn) == -1) {
 		ewprintf("Can't allocate temp file name : %s",
 		    strerror(errno));
 		return (ABORT);
-	}
-	if (stat(fn, &sb) == -1) {
-		ewprintf("Can't stat %s : %s", fn, strerror(errno));
-		return (FALSE);
 	}
 
 	if ((from = open(fn, O_RDONLY)) == -1) {
@@ -398,9 +400,10 @@ dired_(char *dirname)
 		return NULL;
 	}
 	if (bclear(bp) != TRUE)
-		return FALSE;
+		return NULL;
 	bp->b_flag |= BFREADONLY;
-	if (snprintf(line, sizeof(line), "ls -al %s", dirname) >= sizeof(line)){
+	if (snprintf(line, sizeof(line), "ls -al %s", dirname)
+	    >= sizeof(line)) {
 		ewprintf("Path too long");
 		return NULL;
 	}
@@ -414,17 +417,18 @@ dired_(char *dirname)
 		(void) addline(bp, line);
 	}
 	if (pclose(dirpipe) == -1) {
-		ewprintf("Problem closing pipe to ls");
+		ewprintf("Problem closing pipe to ls : %s",
+		    strerror(errno));
 		return NULL;
 	}
 	bp->b_dotp = lforw(bp->b_linep);	/* go to first line */
 	(void) strlcpy(bp->b_fname, dirname, sizeof bp->b_fname);
-	if ((bp->b_modes[0] = name_mode("dired")) == NULL) {
+	if ((bp->b_modes[1] = name_mode("dired")) == NULL) {
 		bp->b_modes[0] = name_mode("fundamental");
 		ewprintf("Could not find mode dired");
 		return NULL;
 	}
-	bp->b_nmodes = 0;
+	bp->b_nmodes = 1;
 	return bp;
 }
 
@@ -434,20 +438,23 @@ int
 d_makename(LINE *lp, char *fn, int len)
 {
 	int i;
-	char *p, *np;
+	char *p, *ep;
 
 	strlcpy(fn, curbp->b_fname, len);
 	p = lp->l_text;
+	ep = lp->l_text + llength(lp);
 	for (i = 0; i < NAME_FIELD; i++) {
-		np = strpbrk(p, "\t ");
-		if (np == NULL)
-			return ABORT;
-		p = np + 1;
-		while (*p != '\0' && strchr("\t ", *p))
+		while (p < ep && isspace(*p))
 			p++;
+		while (p < ep && !isspace(*p))
+			p++;
+		while (p < ep && isspace(*p))
+			p++;
+		if (p == ep)
+			return (ABORT);
 	}
 	strlcat(fn, p, len);
-	return lgetc(lp, 2) == 'd';
+	return (lgetc(lp, 2) == 'd') ? TRUE : FALSE;
 }
 #endif				/* NO_DIRED */
 
@@ -495,7 +502,7 @@ make_file_list(char *buf)
 	} else
 		dir = adjustname(buf);
 	if (dir == NULL)
-		return (FALSE);
+		return (NULL);
 	/*
 	 * If the user typed a trailing / or the empty string
 	 * he wants us to use his file spec as a directory name.

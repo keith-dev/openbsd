@@ -1,4 +1,4 @@
-/*	$OpenBSD: def.h,v 1.45 2003/01/06 17:04:09 deraadt Exp $	*/
+/*	$OpenBSD: def.h,v 1.48 2003/08/15 23:23:18 vincent Exp $	*/
 
 #include <sys/queue.h>
 
@@ -21,7 +21,7 @@
 #endif
 #endif
 
-typedef int	(*PF)();	/* generally useful type */
+typedef int	(*PF)(int, int);	/* generally useful type */
 
 /*
  * Table sizes, etc.
@@ -325,6 +325,8 @@ int	 d_expunge(int, int);
 int	 d_copy(int, int);
 int	 d_del(int, int);
 int	 d_rename(int, int);
+int	 d_shell_command(int, int);
+int	 d_create_directory(int, int);
 
 /* file.c X */
 int	 fileinsert(int, int);
@@ -368,7 +370,7 @@ int	 delwind(int, int);
 MGWIN   *wpopup(void);
 
 /* buffer.c */
-int	 togglereadonly(void);
+int	 togglereadonly(int, int);
 BUFFER  *bfind(const char *, int);
 int	 poptobuffer(int, int);
 int	 killbuffer(int, int);
@@ -579,7 +581,7 @@ int	 cntnonmatchlines(int, int);
 
 /* undo.c X */
 void	 free_undo_record(struct undo_rec *);
-int	 undo_dump(void);
+int	 undo_dump(int, int);
 int	 undo_enable(int);
 int	 undo_add_custom(int, int, LINE *, int, void *, int);
 int	 undo_add_boundary(void);
@@ -592,6 +594,9 @@ int	 undo(int, int);
 int	 auto_execute(int, int);
 PF	*find_autoexec(const char *);
 int	 add_autoexec(const char *, const char *);
+
+/* mail.c X */
+void	 mail_init(void);
 
 /*
  * Externals.

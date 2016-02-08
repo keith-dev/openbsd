@@ -1,4 +1,4 @@
-/*	$OpenBSD: main.c,v 1.13 2002/12/06 21:48:51 millert Exp $	*/
+/*	$OpenBSD: main.c,v 1.16 2003/06/03 03:01:39 millert Exp $	*/
 /*
  * Copyright (c) 1994
  *	The Regents of the University of California.  All rights reserved.
@@ -14,11 +14,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -45,7 +41,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)main.c	8.4 (Berkeley) 5/4/95";
 #else
-static char rcsid[] = "$OpenBSD: main.c,v 1.13 2002/12/06 21:48:51 millert Exp $";
+static char rcsid[] = "$OpenBSD: main.c,v 1.16 2003/06/03 03:01:39 millert Exp $";
 #endif
 #endif /* not lint */
 
@@ -193,7 +189,7 @@ again:
 		else if (strcmp(buf, "white") == 0)
 			color = WHITE;
 		else {
-			sprintf(fmtbuf,
+			snprintf(fmtbuf, sizeof fmtbuf,
 			    "Huh?  Expected `black' or `white', got `%s'\n",
 			    buf);
 			panic(fmtbuf);
@@ -299,7 +295,8 @@ again:
 			break;
 		}
 		if (interactive) {
-			sprintf(fmtbuf, fmt[color], movenum, stoc(curmove));
+			snprintf(fmtbuf, sizeof fmtbuf,
+				fmt[color], movenum, stoc(curmove));
 			log(fmtbuf);
 		}
 		if ((i = makemove(color, curmove)) != MOVEOK)
@@ -397,7 +394,8 @@ top:
 		quit(0);
 	case 'd':		/* set debug level */
 		debug = fmtbuf[1] - '0';
-		sprintf(fmtbuf, "Debug set to %d", debug);
+		snprintf(fmtbuf, sizeof fmtbuf,
+			"Debug set to %d", debug);
 		dlog(fmtbuf);
 		sleep(1);
 	case 'c':
@@ -411,7 +409,8 @@ top:
 		goto top;
 	case 's':		/* suggest a move */
 		i = fmtbuf[1] == 'b' ? BLACK : WHITE;
-		sprintf(fmtbuf, "suggest %c %s", i == BLACK ? 'B' : 'W',
+		snprintf(fmtbuf, sizeof fmtbuf,
+			"suggest %c %s", i == BLACK ? 'B' : 'W',
 			stoc(pickmove(i)));
 		dlog(fmtbuf);
 		goto top;
@@ -459,24 +458,29 @@ top:
 				break;
 		n += sp->s_frame[d2] - frames;
 		str = fmtbuf;
-		sprintf(str, "overlap %s%c,", stoc(s1), pdir[d1]);
+		snprintf(str, fmtbuf + sizeof fmtbuf - str,
+		    "overlap %s%c,", stoc(s1), pdir[d1]);
 		str += strlen(str);
-		sprintf(str, "%s%c = %x", stoc(s2), pdir[d2], overlap[n]);
+		snprintf(str, fmtbuf + sizeof fmtbuf - str,
+		    "%s%c = %x", stoc(s2), pdir[d2], overlap[n]);
 		dlog(fmtbuf);
 		goto top;
 	case 'p':
 		sp = &board[i = ctos(fmtbuf + 1)];
-		sprintf(fmtbuf, "V %s %x/%d %d %x/%d %d %d %x", stoc(i),
+		snprintf(fmtbuf, sizeof fmtbuf,
+			"V %s %x/%d %d %x/%d %d %d %x", stoc(i),
 			sp->s_combo[BLACK].s, sp->s_level[BLACK],
 			sp->s_nforce[BLACK],
 			sp->s_combo[WHITE].s, sp->s_level[WHITE],
 			sp->s_nforce[WHITE], sp->s_wval, sp->s_flg);
 		dlog(fmtbuf);
-		sprintf(fmtbuf, "FB %s %x %x %x %x", stoc(i),
+		snprintf(fmtbuf, sizeof fmtbuf,
+			"FB %s %x %x %x %x", stoc(i),
 			sp->s_fval[BLACK][0].s, sp->s_fval[BLACK][1].s,
 			sp->s_fval[BLACK][2].s, sp->s_fval[BLACK][3].s);
 		dlog(fmtbuf);
-		sprintf(fmtbuf, "FW %s %x %x %x %x", stoc(i),
+		snprintf(fmtbuf, sizeof fmtbuf,
+			"FW %s %x %x %x %x", stoc(i),
 			sp->s_fval[WHITE][0].s, sp->s_fval[WHITE][1].s,
 			sp->s_fval[WHITE][2].s, sp->s_fval[WHITE][3].s);
 		dlog(fmtbuf);

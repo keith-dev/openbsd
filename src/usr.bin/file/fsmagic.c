@@ -1,4 +1,4 @@
-/*	$OpenBSD: fsmagic.c,v 1.7 2003/03/11 21:26:26 ian Exp $	*/
+/*	$OpenBSD: fsmagic.c,v 1.9 2003/06/13 18:31:14 deraadt Exp $	*/
 
 /*
  * fsmagic - magic based on filesystem info - directory, special files, etc.
@@ -16,11 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *    This product includes software developed by Ian F. Darwin and others.
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *  
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
  * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
@@ -61,7 +56,7 @@
 #include "file.h"
 
 #ifndef	lint
-static char *moduleid = "$OpenBSD: fsmagic.c,v 1.7 2003/03/11 21:26:26 ian Exp $";
+static char *moduleid = "$OpenBSD: fsmagic.c,v 1.9 2003/06/13 18:31:14 deraadt Exp $";
 #endif	/* lint */
 
 int
@@ -144,9 +139,11 @@ struct stat *sb;
 				ckfprintf(stdout, "name too long %s", fn);
 				return 1;
 			    } else {
-				strcpy (buf2, fn);  /* ok; take directory part */
+				/* ok; take directory part */
+				strlcpy (buf2, fn, sizeof buf2);
 				buf2[tmp-fn+1] = '\0';
-				strcat (buf2, buf); /* ok; plus (relative) symlink */
+				/* ok; plus (relative) symlink */
+				strlcat (buf2, buf, sizeof buf2);
 				tmp = buf2;
 			    }
 			    if (stat(tmp, &tstatbuf) < 0) {

@@ -1,4 +1,4 @@
-/*	$OpenBSD: trace.c,v 1.10 2003/03/13 09:09:27 deraadt Exp $	*/
+/*	$OpenBSD: trace.c,v 1.14 2003/07/03 02:47:03 avsm Exp $	*/
 /*	$NetBSD: trace.c,v 1.13 1995/06/20 22:28:03 christos Exp $	*/
 
 /*
@@ -13,11 +13,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -37,7 +33,7 @@
 #if !defined(lint)
 static char sccsid[] = "@(#)trace.c	8.1 (Berkeley) 6/5/93";
 #else
-static char rcsid[] = "$OpenBSD: trace.c,v 1.10 2003/03/13 09:09:27 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: trace.c,v 1.14 2003/07/03 02:47:03 avsm Exp $";
 #endif
 
 #define	RIPCMDS
@@ -59,7 +55,7 @@ u_int	tracelevel, new_tracelevel;
 FILE	*ftrace = stdout;		/* output trace file */
 static char *tracelevel_pat = "%s\n";
 
-char savetracename[MAXPATHLEN+1];
+char savetracename[MAXPATHLEN];
 
 static void trace_dump(void);
 
@@ -93,7 +89,8 @@ saddr_ntoa(struct sockaddr *sa)
 
 
 static char *
-ts(time_t secs) {
+ts(time_t secs)
+{
 	static char s[20];
 
 	secs += epoch.tv_sec;
@@ -191,8 +188,7 @@ trace_off(char *p, ...)
 
 
 void
-trace_on(char *filename,
-	 int trusted)
+trace_on(char *filename, int trusted)
 {
 	struct stat stbuf;
 	FILE *n_ftrace;
@@ -246,7 +242,7 @@ trace_on(char *filename,
 	tmsg("switch to trace file %s\n", filename);
 	trace_close();
 	if (filename != savetracename)
-		strncpy(savetracename, filename, sizeof(savetracename)-1);
+		strlcpy(savetracename, filename, sizeof(savetracename));
 	ftrace = n_ftrace;
 
 	fflush(stdout);
@@ -342,12 +338,14 @@ addrname(naddr	addr,			/* in network byte order */
 	} bufs[NUM_BUFS];
 	char *s, *sp;
 	naddr dmask;
+	size_t l;
 	int i;
 
 	strlcpy(bufs[bufno].str, naddr_ntoa(addr),
 	    sizeof bufs[bufno].str);
 	bufno = (bufno+1) % NUM_BUFS;
 	s = bufs[bufno].str;
+	l = sizeof(bufs[bufno].str);
 
 	if (force == 1 || (force == 0 && mask != std_mask(addr))) {
 		sp = &s[strlen(s)];
@@ -356,10 +354,10 @@ addrname(naddr	addr,			/* in network byte order */
 		if (mask + dmask == 0) {
 			for (i = 0; i != 32 && ((1<<i) & mask) == 0; i++)
 				continue;
-			(void)sprintf(sp, "/%d", 32-i);
+			(void)snprintf(sp, s + l - sp, "/%d", 32-i);
 
 		} else {
-			(void)sprintf(sp, " (mask %#x)", (u_int)mask);
+			(void)snprintf(sp, s + l - sp, " (mask %#x)", (u_int)mask);
 		}
 	}
 
@@ -438,9 +436,7 @@ static struct bits rs_bits[] = {
 
 
 static void
-trace_bits(struct bits *tbl,
-	   u_int field,
-	   int force)
+trace_bits(struct bits *tbl, u_int field, int force)
 {
 	int b;
 	char c;
@@ -479,16 +475,14 @@ trace_bits(struct bits *tbl,
 
 
 static char *
-trace_pair(naddr dst,
-	   naddr mask,
-	   char *gate)
+trace_pair(naddr dst, naddr mask, char *gate)
 {
 	static char buf[3*4+3+1+2+3	/* "xxx.xxx.xxx.xxx/xx-->" */
 			+3*4+3+1];	/* "xxx.xxx.xxx.xxx" */
 	int i;
 
 	i = snprintf(buf, sizeof buf, "%-16s-->", addrname(dst, mask, 0));
-	if (i >= sizeof buf)
+	if (i >= sizeof buf || i == -1)
 		return buf;
 	(void)snprintf(&buf[i], sizeof buf - i, "%-*s", 15+20-MAX(20,i), gate);
 	return buf;
@@ -496,8 +490,7 @@ trace_pair(naddr dst,
 
 
 void
-trace_if(char *act,
-	  struct interface *ifp)
+trace_if(char *act, struct interface *ifp)
 {
 	if (!TRACEACTIONS || ftrace == 0)
 		return;
@@ -519,14 +512,9 @@ trace_if(char *act,
 
 
 void
-trace_upslot(struct rt_entry *rt,
-	     struct rt_spare *rts,
-	     naddr	gate,
-	     naddr	router,
-	     struct interface *ifp,
-	     int	metric,
-	     u_short	tag,
-	     time_t	new_time)
+trace_upslot(struct rt_entry *rt, struct rt_spare *rts, naddr gate,
+    naddr router, struct interface *ifp, int metric, u_short tag,
+    time_t new_time)
 {
 	if (!TRACEACTIONS || ftrace == 0)
 		return;

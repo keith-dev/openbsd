@@ -1,4 +1,4 @@
-/*	$OpenBSD: systrace.c,v 1.42 2002/12/12 00:39:14 avsm Exp $	*/
+/*	$OpenBSD: systrace.c,v 1.45 2003/08/04 18:15:11 sturm Exp $	*/
 /*
  * Copyright 2002 Niels Provos <provos@citi.umich.edu>
  * All rights reserved.
@@ -44,6 +44,7 @@
 #include <string.h>
 #include <err.h>
 #include <errno.h>
+#include <grp.h>
 #include <pwd.h>
 
 #include "intercept.h"
@@ -71,6 +72,7 @@ void
 systrace_parameters(void)
 {
 	struct passwd *pw;
+	char *normcwd;
 	uid_t uid = getuid();
 
 	iamroot = getuid() == 0;
@@ -86,6 +88,10 @@ systrace_parameters(void)
 	/* Determine current working directory for filtering */
 	if (getcwd(cwd, sizeof(cwd)) == NULL)
 		err(1, "getcwd");
+	if ((normcwd = normalize_filename(-1, 0, cwd, ICLINK_ALL)) == NULL)
+		errx(1, "normalize_filename");
+	if (strlcpy(cwd, normcwd, sizeof(cwd)) >= sizeof(cwd))
+		errx(1, "cwd too long");
 }
 
 /*
@@ -124,7 +130,7 @@ make_output(char *output, size_t outlen, const char *binname,
 		if (line == NULL)
 			continue;
 
-		snprintf(p, size, ", %s: %s", tl->name, line);
+		snprintf(p, size, ", %s: %s", tl->name, strescape(line));
 		p = output + strlen(output);
 		size = outlen - strlen(output);
 
@@ -297,7 +303,7 @@ gen_cb(int fd, pid_t pid, int policynr, const char *name, int code,
 		goto out;
 	}
 
-	action = filter_ask(fd, NULL, NULL, policynr, emulation, name,
+	action = filter_ask(fd, NULL, pflq, policynr, emulation, name,
 	    output, &future, ipid);
 	if (future != ICPOLICY_ASK)
 		systrace_modifypolicy(fd, policynr, name, future);
@@ -377,6 +383,18 @@ execres_cb(int fd, pid_t pid, int policynr, const char *emulation,
 	fprintf(stderr, "Terminating %d: %s\n", pid, name);
 }
 
+void
+policyfree_cb(int policynr, void *arg)
+{
+	struct policy *policy;
+
+	if ((policy = systrace_findpolnr(policynr)) == NULL)
+		errx(1, "%s:%d: find %d", __func__, __LINE__,
+		    policynr);
+
+	systrace_freepolicy(policy);
+}
+
 static void
 child_handler(int sig)
 {
@@ -396,8 +414,8 @@ static void
 usage(void)
 {
 	fprintf(stderr,
-	    "Usage: systrace [-aAituU] [-d poldir] [-g gui] [-f policy]\n"
-	    "\t [-c uid:gid] [-p pid] command ...\n");
+	    "Usage: systrace [-AaitUu] [-c uid:gid] [-d policydir] [-f file]\n"
+	    "\t [-g gui] [-p pid] command ...\n");
 	exit(1);
 }
 
@@ -448,6 +466,54 @@ requestor_start(char *path)
 	return (0);
 }
 
+static int
+get_uid_gid(const char *argument, uid_t *uid, gid_t *gid)
+{
+	struct group *gp;
+	struct passwd *pw;
+	unsigned long ulval;
+	char uid_gid_str[128];
+	char *endp, *g, *u;
+
+	strlcpy(uid_gid_str, argument, sizeof(uid_gid_str));
+	g = uid_gid_str;
+	u = strsep(&g, ":");
+
+	if ((pw = getpwnam(u)) != NULL) {
+		memset(pw->pw_passwd, 0, strlen(pw->pw_passwd));
+		*uid = pw->pw_uid;
+		*gid = pw->pw_gid;
+		/* Ok if group not specified. */
+		if (g == NULL)
+			return (0);
+	} else {
+		errno = 0;
+		ulval = strtoul(u, &endp, 10);
+		if (u[0] == '\0' || *endp != '\0')
+			errx(1, "no such user '%s'", u);
+		if (errno == ERANGE && ulval == ULONG_MAX)
+			errx(1, "invalid uid %s", u);
+		*uid = (uid_t)ulval;
+	}
+
+	if (g == NULL)
+		return (-1);
+
+	if ((gp = getgrnam(g)) != NULL)
+		*gid = gp->gr_gid;
+	else {
+		errno = 0;
+		ulval = strtoul(g, &endp, 10);
+		if (g[0] == '\0' || *endp != '\0')
+			errx(1, "no such group '%s'", g);
+		if (errno == ERANGE && ulval == ULONG_MAX)
+			errx(1, "invalid gid %s", g);
+		*gid = (gid_t)ulval;
+	}
+
+	return (0);
+}
+
 int
 main(int argc, char **argv)
 {
@@ -455,7 +521,7 @@ main(int argc, char **argv)
 	char **args;
 	char *filename = NULL;
 	char *policypath = NULL;
-	char *guipath = _PATH_XSYSTRACE, *p;
+	char *guipath = _PATH_XSYSTRACE;
 	struct timeval tv, tv_wait = {60, 0};
 	pid_t pidattach = 0;
 	int usex11 = 1, count;
@@ -467,14 +533,8 @@ main(int argc, char **argv)
 	while ((c = getopt(argc, argv, "c:aAituUd:g:f:p:")) != -1) {
 		switch (c) {
 		case 'c':
-			p = strsep(&optarg, ":");
-			if (optarg == NULL || *optarg == '\0')
-				usage();
 			setcredentials = 1;
-			cr_uid = atoi(p);
-			cr_gid = atoi(optarg);
-
-			if (cr_uid <= 0 || cr_gid <= 0)
+			if (get_uid_gid(optarg, &cr_uid, &cr_gid) == -1)
 				usage();
 			break;
 		case 'a':

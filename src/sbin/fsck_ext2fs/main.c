@@ -1,4 +1,4 @@
-/*	$OpenBSD: main.c,v 1.9 2002/04/23 18:54:12 espie Exp $	*/
+/*	$OpenBSD: main.c,v 1.12 2003/07/29 18:38:35 deraadt Exp $	*/
 /*	$NetBSD: main.c,v 1.1 1997/06/11 11:21:50 bouyer Exp $	*/
 
 /*
@@ -14,11 +14,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -48,7 +44,7 @@ static char sccsid[] = "@(#)main.c	8.2 (Berkeley) 1/23/94";
 #if 0
 static char rcsid[] = "$NetBSD: main.c,v 1.1 1997/06/11 11:21:50 bouyer Exp $";
 #else
-static char rcsid[] = "$OpenBSD: main.c,v 1.9 2002/04/23 18:54:12 espie Exp $";
+static char rcsid[] = "$OpenBSD: main.c,v 1.12 2003/07/29 18:38:35 deraadt Exp $";
 #endif
 #endif
 #endif /* not lint */
@@ -80,9 +76,7 @@ static  void usage(void);
 
 
 int
-main(argc, argv)
-	int	argc;
-	char	*argv[];
+main(int argc, char *argv[])
 {
 	int ch;
 	int ret = 0;
@@ -152,10 +146,7 @@ main(argc, argv)
 }
 
 static int
-argtoi(flag, req, str, base)
-	int flag;
-	char *req, *str;
-	int base;
+argtoi(int flag, char *req, char *str, int base)
 {
 	char *cp;
 	int ret;
@@ -171,10 +162,7 @@ argtoi(flag, req, str, base)
  */
 /* ARGSUSED */
 static int
-checkfilesys(filesys, mntpt, auxdata, child)
-	char *filesys, *mntpt;
-	long auxdata;
-	int child;
+checkfilesys(char *filesys, char *mntpt, long auxdata, int child)
 {
 	daddr_t n_bfree;
 	struct dups *dp;
@@ -249,7 +237,7 @@ checkfilesys(filesys, mntpt, auxdata, child)
 	 * print out summary statistics
 	 */
 	n_bfree = sblock.e2fs.e2fs_fbcount;
-		
+
 	pwarn("%d files, %d used, %d free\n",
 	    n_files, n_blks, n_bfree);
 	if (debug &&
@@ -326,7 +314,7 @@ checkfilesys(filesys, mntpt, auxdata, child)
 }
 
 static void
-usage()
+usage(void)
 {
 	extern char *__progname;
 

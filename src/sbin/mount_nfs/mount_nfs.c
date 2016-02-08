@@ -1,4 +1,4 @@
-/*	$OpenBSD: mount_nfs.c,v 1.29 2002/06/09 08:13:08 todd Exp $	*/
+/*	$OpenBSD: mount_nfs.c,v 1.35 2003/07/29 18:38:36 deraadt Exp $	*/
 /*	$NetBSD: mount_nfs.c,v 1.12.4.1 1996/05/25 22:48:05 fvdl Exp $	*/
 
 /*
@@ -16,11 +16,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -121,7 +117,7 @@ const struct mntopt mopts[] = {
 	{ "tcp", 0, ALTF_TCP, 1 },
 	{ "port", 0, ALTF_PORT, 1 },
 	{ "nfsv2", 0, ALTF_NFSV2, 1 },
-	{ "noac", 0, ALTF_NOAC, 1 },
+	{ "ac", 1, ALTF_NOAC, 1 },
 	{ NULL }
 };
 
@@ -178,15 +174,13 @@ int	xdr_dir(XDR *, char *);
 int	xdr_fh(XDR *, struct nfhret *);
 
 int
-main(argc, argv)
-	int argc;
-	char *argv[];
+main(int argc, char *argv[])
 {
 	int c;
 	struct nfs_args *nfsargsp;
 	struct nfs_args nfsargs;
 	int mntflags, altflags, num;
-	char *name, *p, *spec;
+	char name[MAXPATHLEN], *p, *spec;
 
 	retrycnt = DEF_RETRY;
 
@@ -374,7 +368,8 @@ main(argc, argv)
 		usage();
 
 	spec = *argv++;
-	name = *argv;
+	if (realpath(*argv, name) == NULL)
+		err(1, "realpath %s", name);
 
 	if (!getnfsargs(spec, nfsargsp))
 		exit(1);
@@ -388,9 +383,7 @@ main(argc, argv)
 }
 
 int
-getnfsargs(spec, nfsargsp)
-	char *spec;
-	struct nfs_args *nfsargsp;
+getnfsargs(char *spec, struct nfs_args *nfsargsp)
 {
 	CLIENT *clp;
 	struct hostent *hp;
@@ -408,7 +401,10 @@ getnfsargs(spec, nfsargsp)
 	static struct nfhret nfhret;
 	static char nam[MNAMELEN + 1];
 
-	strlcpy(nam, spec, sizeof(nam));
+	if (strlcpy(nam, spec, sizeof(nam)) >= sizeof(nam)) {
+		errx(1, "hostname too long");
+	}
+
 	if ((delimp = strchr(spec, '@')) != NULL) {
 		hostp = delimp + 1;
 	} else if ((delimp = strchr(spec, ':')) != NULL) {
@@ -572,17 +568,13 @@ tryagain:
  * xdr routines for mount rpc's
  */
 int
-xdr_dir(xdrsp, dirp)
-	XDR *xdrsp;
-	char *dirp;
+xdr_dir(XDR *xdrsp, char *dirp)
 {
 	return (xdr_string(xdrsp, &dirp, RPCMNT_PATHLEN));
 }
 
 int
-xdr_fh(xdrsp, np)
-	XDR *xdrsp;
-	struct nfhret *np;
+xdr_fh(XDR *xdrsp, struct nfhret *np)
 {
 	int i;
 	long auth, authcnt, authfnd = 0;
@@ -622,12 +614,12 @@ xdr_fh(xdrsp, np)
 }
 
 __dead void
-usage()
+usage(void)
 {
 	(void)fprintf(stderr, "usage: mount_nfs %s\n%s\n%s\n%s\n",
-"[-23PTUbcdilqs] [-a maxreadahead] [-D deadthresh]",
-"\t[-I readdirsize] [-g maxgroups] [-L leaseterm] [-o options]",
-"\t[-R retrycnt] [-r readsize] [-t timeout] [-w writesize] [-x retrans]",
-"\trhost:path node");
+	    "[-23PTUbcdilqs] [-a maxreadahead] [-D deadthresh]",
+	    "\t[-I readdirsize] [-g maxgroups] [-L leaseterm] [-o options]",
+	    "\t[-R retrycnt] [-r readsize] [-t timeout] [-w writesize] [-x retrans]",
+	    "\trhost:path node");
 	exit(1);
 }

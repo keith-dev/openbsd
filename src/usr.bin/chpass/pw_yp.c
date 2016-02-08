@@ -1,4 +1,4 @@
-/*	$OpenBSD: pw_yp.c,v 1.16 2002/06/27 19:02:40 deraadt Exp $	*/
+/*	$OpenBSD: pw_yp.c,v 1.19 2003/07/02 21:04:09 deraadt Exp $	*/
 /*	$NetBSD: pw_yp.c,v 1.5 1995/03/26 04:55:33 glass Exp $	*/
 
 /*
@@ -13,11 +13,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -37,7 +33,7 @@
 #if 0
 static char sccsid[] = "@(#)pw_yp.c	1.0 2/2/93";
 #else
-static char rcsid[] = "$OpenBSD: pw_yp.c,v 1.16 2002/06/27 19:02:40 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: pw_yp.c,v 1.19 2003/07/02 21:04:09 deraadt Exp $";
 #endif
 #endif /* not lint */
 
@@ -58,6 +54,7 @@ static char rcsid[] = "$OpenBSD: pw_yp.c,v 1.16 2002/06/27 19:02:40 deraadt Exp 
 #define passwd yp_passwd_rec
 #include <rpcsvc/yppasswd.h>
 #undef passwd
+#include "chpass.h"
 
 extern char *__progname;
 
@@ -66,7 +63,7 @@ static char *domain;
 int
 pw_yp(struct passwd *pw, uid_t uid)
 {
-	char buf[10], *master, *p;
+	char buf[11], *master, *p;
 	int r, rpcport, status, alen;
 	struct yppasswd yppasswd;
 	struct timeval tv;

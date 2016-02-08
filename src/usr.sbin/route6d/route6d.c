@@ -1,4 +1,4 @@
-/*	$OpenBSD: route6d.c,v 1.33 2002/10/26 20:16:13 itojun Exp $	*/
+/*	$OpenBSD: route6d.c,v 1.38 2003/08/22 08:26:39 itojun Exp $	*/
 /*	$KAME: route6d.c,v 1.94 2002/10/26 20:08:55 itojun Exp $	*/
 
 /*
@@ -31,7 +31,7 @@
  */
 
 #if 0
-static char _rcsid[] = "$OpenBSD: route6d.c,v 1.33 2002/10/26 20:16:13 itojun Exp $";
+static char _rcsid[] = "$OpenBSD: route6d.c,v 1.38 2003/08/22 08:26:39 itojun Exp $";
 #endif
 
 #include <stdio.h>
@@ -515,7 +515,7 @@ sighandler(signo)
  */
 /* ARGSUSED */
 void
-rtdexit()
+rtdexit(void)
 {
 	struct	riprt *rrt;
 
@@ -542,7 +542,7 @@ rtdexit()
  */
 /* ARGSUSED */
 void
-ripalarm()
+ripalarm(void)
 {
 	struct	ifc *ifcp;
 	struct	riprt *rrt, *rrt_prev, *rrt_next;
@@ -582,18 +582,18 @@ ripalarm()
 }
 
 void
-init()
+init(void)
 {
 	int	i, error;
 	const int int0 = 0, int1 = 1, int255 = 255;
 	struct	addrinfo hints, *res;
-	char	port[10];
+	char	port[NI_MAXSERV];
 
 	ifc = (struct ifc *)NULL;
 	nifc = 0;
 	nindex2ifc = 0;	/*initial guess*/
 	index2ifc = NULL;
-	snprintf(port, sizeof(port), "%d", RIP6_PORT);
+	snprintf(port, sizeof(port), "%u", RIP6_PORT);
 
 	memset(&hints, 0, sizeof(hints));
 	hints.ai_family = PF_INET6;
@@ -1058,7 +1058,7 @@ sendpacket(sin6, len)
  * table if necessary.
  */
 void
-riprecv()
+riprecv(void)
 {
 	struct	ifc *ifcp, *ic;
 	struct	sockaddr_in6 fsock;
@@ -1114,7 +1114,7 @@ riprecv()
 	rp = (struct rip6 *)buf;
 	np = rp->rip6_nets;
 
-	if (rp->rip6_vers !=  RIP6_VERSION) {
+	if (rp->rip6_vers != RIP6_VERSION) {
 		trace(1, "Incorrect RIP version %d\n", rp->rip6_vers);
 		return;
 	}
@@ -1402,7 +1402,7 @@ riprequest(ifcp, np, nn, sin6)
  * Get information of each interface.
  */
 void
-ifconfig()
+ifconfig(void)
 {
 	struct ifaddrs *ifap, *ifa;
 	struct ifc *ifcp;
@@ -1555,7 +1555,7 @@ ifconfig1(name, sa, ifcp, s)
  * Update interface information as necesssary.
  */
 void
-rtrecv()
+rtrecv(void)
 {
 	char buf[BUFSIZ];
 	char *p, *q;
@@ -2606,6 +2606,8 @@ rt_entry(rtm, again)
 	rrt->rrt_t = time(NULL);
 	if (aflag == 0 && (rtm->rtm_flags & RTF_STATIC))
 		rrt->rrt_t = 0;	/* Don't age static routes */
+	if ((rtm->rtm_flags & (RTF_HOST|RTF_GATEWAY)) == RTF_HOST)
+		rrt->rrt_t = 0;	/* Don't age non-gateway host routes */
 	np->rip6_tag = 0;
 	np->rip6_metric = rtm->rtm_rmx.rmx_hopcount;
 	if (np->rip6_metric < 1)
@@ -3044,7 +3046,7 @@ rtdump(sig)
  * 		-O 5f09:c400::/32,ef0,ef1  (only when match)
  */
 void
-filterconfig()
+filterconfig(void)
 {
 	int i;
 	char *p, *ap, *iflp, *ifname, *ep;
@@ -3331,7 +3333,7 @@ allocopy(p)
 }
 
 char *
-hms()
+hms(void)
 {
 	static char buf[BUFSIZ];
 	time_t t;
@@ -3361,7 +3363,7 @@ ripinterval(timer)
 }
 
 time_t
-ripsuptrig()
+ripsuptrig(void)
 {
 	time_t t;
 
@@ -3431,7 +3433,7 @@ trace(int level, const char *fmt, ...)
 }
 
 unsigned int
-if_maxindex()
+if_maxindex(void)
 {
 	struct if_nameindex *p, *p0;
 	unsigned int max = 0;

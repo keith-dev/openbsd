@@ -1,4 +1,4 @@
-/* $OpenBSD: pgp_sign.c,v 1.2 2001/04/08 16:45:48 espie Exp $ */
+/* $OpenBSD: pgp_sign.c,v 1.5 2003/08/16 17:31:56 deraadt Exp $ */
 /*-
  * Copyright (c) 1999 Marc Espie.
  *
@@ -10,10 +10,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by Marc Espie for the OpenBSD
- * Project.
  *
  * THIS SOFTWARE IS PROVIDED BY THE OPENBSD PROJECT AND CONTRIBUTORS 
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT 
@@ -108,7 +104,7 @@ retrieve_pgp_signature(filename, sign, userid, envp)
 	if (orig == NULL)
 		return 0;
 	if (gzip_read_header(orig, &h, &old) == GZIP_NOT_GZIP) {
-		pwarnx("File %s is not a gzip file\n", filename);
+		pwarnx("File %s is not a gzip file", filename);
 		fclose(orig);
 		return 0;
 	}
@@ -255,10 +251,10 @@ handle_pgp_passphrase()
 		}
 	default:
 		{
-			char buf[10];
+			char buf[12];
 
 			(void)close(fd[1]);
-			(void)sprintf(buf, "%d", fd[0]);
+			(void)snprintf(buf, sizeof(buf), "%d", fd[0]);
 			(void)setenv("PGPPASSFD", buf, 1);
 		}
 	}

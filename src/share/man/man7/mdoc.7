@@ -1,4 +1,4 @@
-.\"	$OpenBSD: mdoc.7,v 1.24 2002/12/06 02:36:24 marc Exp $
+.\"	$OpenBSD: mdoc.7,v 1.29 2003/09/02 19:08:21 jmc Exp $
 .\"
 .\" Copyright (c) 1991, 1993
 .\"	The Regents of the University of California.  All rights reserved.
@@ -11,11 +11,7 @@
 .\" 2. Redistributions in binary form must reproduce the above copyright
 .\"    notice, this list of conditions and the following disclaimer in the
 .\"    documentation and/or other materials provided with the distribution.
-.\" 3. All advertising materials mentioning features or use of this software
-.\"    must display the following acknowledgement:
-.\"	This product includes software developed by the University of
-.\"	California, Berkeley and its contributors.
-.\" 4. Neither the name of the University nor the names of its contributors
+.\" 3. Neither the name of the University nor the names of its contributors
 .\"    may be used to endorse or promote products derived from this software
 .\"    without specific prior written permission.
 .\"
@@ -42,9 +38,10 @@
 .Nm \-mdoc
 macro package
 .Sh SYNOPSIS
-.Nm groff
-.Fl m Ns Ar doc
-.Ar files ...
+.Nm nroff
+.Fl T Ns Ar Name
+.Fl mandoc
+.Ar file
 .Sh DESCRIPTION
 The
 .Nm \-mdoc
@@ -102,33 +99,31 @@ All
 macros must be given an argument.
 .It Ar DESCRIPTION
 General description, including any options, operands, or other parameters.
-.It Ar EXAMPLES
-Examples and suggestions.
 .It Ar RETURN VALUES
 Sections two and three function calls.
-.It Ar ERRORS
-Sections two and three error and signal handling.
-.It Ar DIAGNOSTICS
-Section four device interface diagnostics.
 .It Ar ENVIRONMENT
 Describe environment variables.
 .It Ar FILES
 Files associated with the subject, with short descriptions.
+.It Ar EXAMPLES
+Examples and suggestions.
+.It Ar DIAGNOSTICS
+Section four device interface diagnostics.
+.It Ar ERRORS
+Sections two and three error and signal handling.
 .It Ar SEE ALSO
 Cross references and citations.
-.It Ar COMPATIBILITY
-Compatibility issues, i.e., deprecated options or parameters.
 .It Ar STANDARDS
 Conformance to standards if applicable.
-.It Ar AUTHORS
-Credit to the person or persons who wrote the code and/or documentation.
 .It Ar HISTORY
 A brief history of the subject, including where support first appeared.
-.It Ar BUGS
-Gotchas and caveats.
+.It Ar AUTHORS
+Credit to the person or persons who wrote the code and/or documentation.
 .It Ar CAVEATS
 Explanations of common misuses, i.e., security considerations for certain
 library functions.
+.It Ar BUGS
+Gotchas and caveats.
 .It Ar other
 Customized headers may be added at the author's discretion.
 .El
@@ -269,7 +264,7 @@ columns below.
 .Pp
 Unless stated, manual domain macros share a common syntax:
 .Pp
-.Dl \&.Va argument [\ .\ ,\ ;\ :\ (\ )\ [\ ]\ argument \...\ ]
+.Dl \&.Va argument [\ .\ ,\ ;\ :\ ?\ !\ (\ )\ [\ ]\ argument \...\ ]
 .Pp
 .Sy Note :
 Opening and closing
@@ -298,6 +293,7 @@ Produces
 .Bl -column "Name" "Parsed" "Callable" -compact
 .It Em Name	Parsed	Callable	Description
 .It Li \&Ad Ta Yes Ta Yes Ta Address. "(This macro may be deprecated.)"
+.It Li \&An Ta Yes Ta \&No Ta "Author name."
 .It Li \&Ar Ta Yes Ta Yes Ta "Command line argument."
 .It Li \&Cd Ta \&No Ta \&No Ta "Configuration declaration (section four only)."
 .It Li \&Cm Ta Yes Ta Yes Ta "Command line argument modifier."
@@ -306,8 +302,9 @@ Produces
 .It Li \&Ev Ta Yes Ta Yes Ta "Environment variable."
 .It Li \&Fa Ta Yes Ta Yes Ta "Function argument."
 .It Li \&Fd Ta \&No Ta \&No Ta "Function declaration."
-.It Li \&Ft Ta Yes Ta Yes Ta "Function type."
+.It Li \&Fl Ta Yes Ta Yes Ta "Flags."
 .It Li \&Fn Ta Yes Ta Yes Ta "Function call (also .Fo and .Fc)."
+.It Li \&Ft Ta Yes Ta Yes Ta "Function type."
 .It Li \&Ic Ta Yes Ta Yes Ta "Interactive command."
 .It Li \&Li Ta Yes Ta Yes Ta "Literal text."
 .It Li \&Nd Ta \&No Ta \&No Ta "Command description."
@@ -334,8 +331,8 @@ The known standards for the St macro are:
 .It Em "Name	Parsed	Callable	Description"
 .It Li \&%A Ta Yes Ta \&No Ta "Reference author."
 .It Li \&%B Ta Yes Ta Yes Ta "Reference book title."
-.It Li \&%\&C Ta \&No Ta \&No Ta "Reference place of publishing (city)."
 .It Li \&%\&D Ta \&No Ta \&No Ta "Reference date."
+.It Li \&%I Ta Yes Ta Yes Ta "Issuer/Publisher name."
 .It Li \&%J Ta Yes Ta Yes Ta "Reference journal title."
 .It Li \&%N Ta \&No Ta \&No Ta "Reference issue number."
 .It Li \&%\&O Ta \&No Ta \&No Ta "Reference optional information."
@@ -351,8 +348,8 @@ The known standards for the St macro are:
 .It Li \&Bf Ta \&No Ta \&No Ta "Begin font mode."
 .It Li \&Bo Ta Yes Ta Yes Ta "Bracket open quote."
 .It Li \&Bq Ta Yes Ta Yes Ta "Bracket quote."
-.It Li \&Bsx Ta Yes Ta Yes Ta "BSDI BSD/OS."
-.It Li \&Bx Ta Yes Ta Yes Ta BSD .
+.It Li \&Bsx Ta Yes Ta \&No Ta "BSDI BSD/OS."
+.It Li \&Bx Ta Yes Ta \&No Ta BSD .
 .It Li \&Db Ta \&No Ta \&No Ta "Debug (default is \\*qoff\\*q)."
 .It Li \&Dc Ta Yes Ta Yes Ta "Double close quote."
 .It Li \&Do Ta Yes Ta Yes Ta "Double open quote."
@@ -361,11 +358,12 @@ The known standards for the St macro are:
 .It Li \&Ef Ta \&No Ta \&No Ta "End font mode."
 .It Li \&Em Ta Yes Ta Yes Ta "Emphasis (traditional English)."
 .It Li \&Eo Ta Yes Ta Yes Ta "Enclose string open quote."
-.It Li \&Fx Ta Yes Ta Yes Ta FreeBSD .
+.It Li \&Fx Ta \&No Ta \&No Ta FreeBSD .
+.It Li \&Ms Ta Yes Ta \&No Ta "Mathematical symbol."
 .It Li \&No Ta Yes Ta Yes Ta "Normal text (no-op)."
 .It Li \&Ns Ta Yes Ta Yes Ta "No space."
-.It Li \&Nx Ta Yes Ta Yes Ta NetBSD .
-.It Li \&Ox Ta Yes Ta Yes Ta OpenBSD .
+.It Li \&Nx Ta \&No Ta \&No Ta NetBSD .
+.It Li \&Ox Ta \&No Ta \&No Ta OpenBSD .
 .It Li \&Pc Ta Yes Ta Yes Ta "Parenthesis close quote."
 .It Li \&Pf Ta Yes Ta \&No Ta "Prefix string."
 .It Li \&Po Ta Yes Ta Yes Ta "Parenthesis open quote."
@@ -383,7 +381,7 @@ The known standards for the St macro are:
 .It Li \&Sx Ta Yes Ta Yes Ta "Section Cross Reference."
 .It Li \&Sy Ta Yes Ta Yes Ta "Symbolic (traditional English)."
 .It Li \&Tn Ta Yes Ta Yes Ta "Trade or type name (small Caps)."
-.It Li \&Ux Ta Yes Ta Yes Ta UNIX .
+.It Li \&Ux Ta Yes Ta \&No Ta UNIX .
 .It Li \&Xc Ta Yes Ta Yes Ta "Extend argument list close."
 .It Li \&Xo Ta Yes Ta Yes Ta "Extend argument list open."
 .El

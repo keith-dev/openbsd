@@ -1,9 +1,7 @@
-/*	$OpenBSD: ypbind.c,v 1.47 2002/09/06 19:46:53 deraadt Exp $ */
+/*	$OpenBSD: ypbind.c,v 1.51 2003/08/19 22:10:08 deraadt Exp $ */
 
 /*
- * Copyright (c) 1997,1998 Theo de Raadt <deraadt@OpenBSD.org>
- * Copyright (c) 1996 Theo de Raadt <deraadt@theos.com>
- * Copyright (c) 1992, 1993 Theo de Raadt <deraadt@theos.com>
+ * Copyright (c) 1992, 1993, 1996, 1997, 1998 Theo de Raadt <deraadt@openbsd.org>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -14,12 +12,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by Theo de Raadt.
- * 4. The name of the author may not be used to endorse or promote
- *    products derived from this software without specific prior written
- *    permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS
  * OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
@@ -35,7 +27,7 @@
  */
 
 #ifndef LINT
-static char rcsid[] = "$OpenBSD: ypbind.c,v 1.47 2002/09/06 19:46:53 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: ypbind.c,v 1.51 2003/08/19 22:10:08 deraadt Exp $";
 #endif
 
 #include <sys/param.h>
@@ -89,10 +81,6 @@ struct _dom_binding {
 	FILE *dom_servlistfp;
 };
 
-extern bool_t xdr_domainname(), xdr_ypbind_resp();
-extern bool_t xdr_ypreq_key(), xdr_ypresp_val();
-extern bool_t xdr_ypbind_setdom();
-
 void rpc_received(char *dom, struct sockaddr_in *raddrp, int force);
 void checkwork(void);
 enum clnt_stat handle_replies(void);
@@ -135,7 +123,7 @@ u_int32_t unique_xid(struct _dom_binding *ypdb);
  * declare sun's interface insufficient and roll our own.
  */
 
-void *
+static void *
 ypbindproc_null_2x(SVCXPRT *transp, void *argp, CLIENT *clnt)
 {
 	static char res;
@@ -144,7 +132,7 @@ ypbindproc_null_2x(SVCXPRT *transp, void *argp, CLIENT *clnt)
 	return (void *)&res;
 }
 
-struct ypbind_resp *
+static struct ypbind_resp *
 ypbindproc_domain_2x(SVCXPRT *transp, domainname *argp, CLIENT *clnt)
 {
 	static struct ypbind_resp res;
@@ -226,7 +214,7 @@ ypbindproc_domain_2x(SVCXPRT *transp, domainname *argp, CLIENT *clnt)
 	return &res;
 }
 
-bool_t *
+static bool_t *
 ypbindproc_setdom_2x(SVCXPRT *transp, struct ypbind_setdom *argp, CLIENT *clnt)
 {
 	struct sockaddr_in *fromsin, bindsin;
@@ -273,26 +261,28 @@ ypbindproc_setdom_2x(SVCXPRT *transp, struct ypbind_setdom *argp, CLIENT *clnt)
 static void
 ypbindprog_2(struct svc_req *rqstp, SVCXPRT *transp)
 {
-	union {
+	union argument {
 		domainname ypbindproc_domain_2_arg;
 		struct ypbind_setdom ypbindproc_setdom_2_arg;
 	} argument;
 	struct authunix_parms *creds;
 	char *result;
-	bool_t (*xdr_argument)(), (*xdr_result)();
-	char *(*local)();
+	xdrproc_t xdr_argument, xdr_result;
+	char *(*local)(SVCXPRT *, union argument *, struct svc_req *);
 
 	switch (rqstp->rq_proc) {
 	case YPBINDPROC_NULL:
 		xdr_argument = xdr_void;
 		xdr_result = xdr_void;
-		local = (char *(*)()) ypbindproc_null_2x;
+		local = (char *(*)(SVCXPRT *, union argument *, struct svc_req *))
+		    ypbindproc_null_2x;
 		break;
 
 	case YPBINDPROC_DOMAIN:
 		xdr_argument = xdr_domainname;
 		xdr_result = xdr_ypbind_resp;
-		local = (char *(*)()) ypbindproc_domain_2x;
+		local = (char *(*)(SVCXPRT *, union argument *, struct svc_req *))
+		    ypbindproc_domain_2x;
 		break;
 
 	case YPBINDPROC_SETDOM:
@@ -311,7 +301,8 @@ ypbindprog_2(struct svc_req *rqstp, SVCXPRT *transp)
 
 		xdr_argument = xdr_ypbind_setdom;
 		xdr_result = xdr_void;
-		local = (char *(*)()) ypbindproc_setdom_2x;
+		local = (char *(*)(SVCXPRT *, union argument *, struct svc_req *))
+		    ypbindproc_setdom_2x;
 		break;
 
 	default:
@@ -330,7 +321,7 @@ ypbindprog_2(struct svc_req *rqstp, SVCXPRT *transp)
 	return;
 }
 
-void
+static void
 usage(void)
 {
 	fprintf(stderr, "usage: ypbind [-ypset] [-ypsetme] [-insecure]\n");
@@ -343,7 +334,8 @@ main(int argc, char *argv[])
 	char path[MAXPATHLEN];
 	struct sockaddr_in sin;
 	struct timeval tv;
-	fd_set fdsr;
+	fd_set *fdsrp = NULL;
+	int fdsrl = 0;
 	int width, lockfd, lsock;
 	socklen_t len;
 	int evil = 0, one = 1;
@@ -533,21 +525,34 @@ main(int argc, char *argv[])
 	checkwork();
 
 	while (1) {
-		fdsr = svc_fdset;
-		FD_SET(rpcsock, &fdsr);
-		FD_SET(pingsock, &fdsr);
+		extern int __svc_fdsetsize;
+		extern void *__svc_fdset;
 
-		width = svc_maxfd;
-		if (rpcsock > width)
-			width = rpcsock;
-		if (pingsock > width)
-			width = pingsock;
-		width++;
+		if (fdsrp == NULL || fdsrl != __svc_fdsetsize) {
+			if (fdsrp)
+				free(fdsrp);
+
+			fdsrl = __svc_fdsetsize;
+			width = __svc_fdsetsize;
+			if (rpcsock > __svc_fdsetsize)
+				width = rpcsock;
+			if (pingsock > __svc_fdsetsize)
+				width = pingsock;
+			fdsrp = (fd_set *)calloc(howmany(width+1, NFDBITS),
+			    sizeof(fd_mask));
+			if (fdsrp == NULL)
+				errx(1, "no memory");
+		}
+
+		bcopy(__svc_fdset, fdsrp, howmany(fdsrl+1, NFDBITS) *
+		    sizeof(fd_mask));
+		FD_SET(rpcsock, fdsrp);
+		FD_SET(pingsock, fdsrp);
 
 		tv.tv_sec = 1;
 		tv.tv_usec = 0;
 
-		switch (select(width, &fdsr, NULL, NULL, &tv)) {
+		switch (select(width+1, fdsrp, NULL, NULL, &tv)) {
 		case 0:
 			checkwork();
 			break;
@@ -555,11 +560,11 @@ main(int argc, char *argv[])
 			perror("select\n");
 			break;
 		default:
-			if (FD_ISSET(rpcsock, &fdsr))
+			if (FD_ISSET(rpcsock, fdsrp))
 				handle_replies();
-			if (FD_ISSET(pingsock, &fdsr))
+			if (FD_ISSET(pingsock, fdsrp))
 				handle_ping();
-			svc_getreqset(&fdsr);
+			svc_getreqset2(fdsrp, width);
 			if (check)
 				checkwork();
 			break;

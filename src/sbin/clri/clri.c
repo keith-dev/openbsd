@@ -1,4 +1,4 @@
-/*	$OpenBSD: clri.c,v 1.7 2002/07/03 22:32:32 deraadt Exp $	*/
+/*	$OpenBSD: clri.c,v 1.9 2003/08/25 23:28:15 tedu Exp $	*/
 /*	$NetBSD: clri.c,v 1.9 1995/03/18 14:54:33 cgd Exp $	*/
 
 /*
@@ -16,11 +16,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -47,7 +43,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)clri.c	8.2 (Berkeley) 9/23/93";
 #else
-static char rcsid[] = "$OpenBSD: clri.c,v 1.7 2002/07/03 22:32:32 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: clri.c,v 1.9 2003/08/25 23:28:15 tedu Exp $";
 #endif
 #endif /* not lint */
 
@@ -69,9 +65,9 @@ int
 main(int argc, char *argv[])
 {
 	struct fs *sbp;
-	struct dinode *ip;
+	struct ufs1_dinode *ip;
 	int fd;
-	struct dinode ibuf[MAXBSIZE / sizeof (struct dinode)];
+	struct ufs1_dinode ibuf[MAXBSIZE / sizeof (struct ufs1_dinode)];
 	int32_t generation;
 	off_t offset;
 	size_t bsize;

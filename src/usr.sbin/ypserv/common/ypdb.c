@@ -1,4 +1,4 @@
-/*	$OpenBSD: ypdb.c,v 1.9 2002/07/19 20:59:40 deraadt Exp $ */
+/*	$OpenBSD: ypdb.c,v 1.11 2003/07/15 06:10:46 deraadt Exp $ */
 
 /*
  * Copyright (c) 1990, 1993
@@ -19,11 +19,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -199,26 +195,6 @@ ypdb_setkey(DBM *db, datum key)
 		key.dsize = 0;
 	}
 	return (key);
-}
-
-/*
- * Returns:
- *	 0 on success
- *	<0 failure
- */
-int
-ypdb_delete(DBM *db, datum key)
-{
-	int status;
-	DBT nk;
-
-	nk.data = key.dptr;
-	nk.size = key.dsize;
-	status = (db->del)(db, &nk, 0);
-	if (status)
-		return (-1);
-	else
-		return (0);
 }
 
 /*

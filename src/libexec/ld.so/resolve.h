@@ -1,4 +1,4 @@
-/*	$OpenBSD: resolve.h,v 1.22 2003/02/15 22:39:13 drahn Exp $ */
+/*	$OpenBSD: resolve.h,v 1.29 2003/09/04 19:33:48 drahn Exp $ */
 
 /*
  * Copyright (c) 1998 Per Fogelstrom, Opsycon AB
@@ -11,12 +11,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed under OpenBSD by
- *	Per Fogelstrom, Opsycon AB, Sweden.
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS
  * OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
@@ -36,12 +30,15 @@
 #define _RESOLVE_H_
 
 #include <link.h>
+#include <dlfcn.h>
 
 struct load_list {
 	struct load_list *next;
-	char	*start;
-	size_t	size;
-	int	prot;
+	void		*start;
+	size_t		size;
+	int		prot;
+	Elf_Addr	moff;
+	long		foff;
 };
 
 /*
@@ -115,6 +112,7 @@ typedef struct elf_object {
 #define	OBJTYPE_EXE	2
 #define	OBJTYPE_LIB	3
 #define	OBJTYPE_DLO	4
+	int		obj_flags;
 
 	Elf_Word	*buckets;
 	u_int32_t	nbuckets;
@@ -133,20 +131,22 @@ struct dep_node {
 
 extern void _dl_rt_resolve(void);
 
-extern elf_object_t *_dl_add_object(const char *objname, Elf_Dyn *dynp,
-	    const u_long *, const int objtype,
-	    const long laddr, const long loff);
+void _dl_add_object(elf_object_t *object);
+extern elf_object_t *_dl_finalize_object(const char *objname, Elf_Dyn *dynp,
+    const u_long *, const int objtype, const long laddr, const long loff);
 extern void	_dl_remove_object(elf_object_t *object);
 
 extern elf_object_t *_dl_lookup_object(const char *objname);
-extern elf_object_t *_dl_load_shlib(const char *, elf_object_t *, int);
+extern elf_object_t *_dl_load_shlib(const char *, elf_object_t *, int, int);
 extern void	_dl_unload_shlib(elf_object_t *object);
 
 extern int  _dl_md_reloc(elf_object_t *object, int rel, int relsz);
 extern void _dl_md_reloc_got(elf_object_t *object, int lazy);
 
 Elf_Addr _dl_find_symbol(const char *name, elf_object_t *startlook,
-    const Elf_Sym **ref, int flags, int sym_size, const char *module_name);
+    const Elf_Sym **ref, int flags, int sym_size, elf_object_t *object);
+Elf_Addr _dl_find_symbol_bysym(elf_object_t *req_obj, unsigned int symidx,
+    elf_object_t *startlook, const Elf_Sym **ref, int flags, int req_size);
 /*
  * defines for _dl_find_symbol() flag field, three bits of meaning
  * myself	- clear: search all objects,	set: search only this object
@@ -172,6 +172,15 @@ Elf_Addr _dl_find_symbol(const char *name, elf_object_t *startlook,
 
 void _dl_rtld(elf_object_t *object);
 void _dl_call_init(elf_object_t *object);
+void _dl_link_sub(elf_object_t *dep, elf_object_t *p);
+
+void _dl_run_dtors(elf_object_t *object);
+
+Elf_Addr _dl_bind(elf_object_t *object, int index);
+
+int	_dl_match_file(struct sod *sodp, char *name, int namelen);
+char	*_dl_find_shlib(struct sod *sodp, const char *searchpath, int nohints);
+void	_dl_load_list_free(struct load_list *load_list);
 
 extern elf_object_t *_dl_objects;
 extern elf_object_t *_dl_last_object;
@@ -201,5 +210,14 @@ extern char *_dl_debug;
 
 #define ELF_ROUND(x,malign) (((x) + (malign)-1) & ~((malign)-1))
 #define ELF_TRUNC(x,malign) ((x) & ~((malign)-1))
+
+/* symbol lookup cache */
+typedef struct sym_cache {
+	const Elf_Sym	*sym;
+	Elf_Addr	offset;
+	int flags;
+} sym_cache;
+
+extern sym_cache *_dl_symcache;
 
 #endif /* _RESOLVE_H_ */

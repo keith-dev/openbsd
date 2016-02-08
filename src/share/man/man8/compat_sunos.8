@@ -1,4 +1,4 @@
-.\"	$OpenBSD: compat_sunos.8,v 1.12 2003/02/19 09:10:36 jmc Exp $
+.\"	$OpenBSD: compat_sunos.8,v 1.16 2003/08/23 19:26:25 tedu Exp $
 .\"	$NetBSD: compat_sunos.8,v 1.6 1995/06/11 23:05:17 pk Exp $
 .\"
 .\" Copyright (c) 1994 Theo de Raadt
@@ -12,12 +12,6 @@
 .\" 2. Redistributions in binary form must reproduce the above copyright
 .\"    notice, this list of conditions and the following disclaimer in the
 .\"    documentation and/or other materials provided with the distribution.
-.\" 3. All advertising materials mentioning features or use of this software
-.\"    must display the following acknowledgement:
-.\"	This product includes software developed by Theo de Raadt.
-.\" 4. Neither the name of the author nor the names of its contributors
-.\"    may be used to endorse or promote products derived from this software
-.\"    without specific prior written permission.
 .\"
 .\" THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND
 .\" ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
@@ -32,7 +26,7 @@
 .\" SUCH DAMAGE.
 .\"
 .Dd June 15, 1994
-.Dt compat_sunos 8
+.Dt COMPAT_SUNOS 8
 .Os
 .Sh NAME
 .Nm compat_sunos
@@ -45,7 +39,9 @@ Most executables will work.
 The SunOS compatibility feature is active
 for kernels compiled with the
 .Nm COMPAT_SUNOS
-option enabled.
+option and kern.emul.sunos
+.Xr sysctl 8
+enabled.
 .Pp
 Compatibility with SunOS version 5 and later, better known as Solaris,
 is
@@ -71,7 +67,7 @@ On the
 .Ox
 machine, do the following:
 .Pp
-.Bl -enum -inset -offset 123 -compact
+.Bl -enum -offset 123 -compact
 .It
 .Li mkdir -p /emul/sunos/usr/lib /emul/sunos/usr/5lib
 .fi
@@ -98,7 +94,7 @@ On the
 .Ox
 machine, do the following:
 .Pp
-.Bl -enum -inset -offset 123 -compact
+.Bl -enum -offset 123 -compact
 .Pp
 .It
 .Li mkdir -p /emul/sunos/usr

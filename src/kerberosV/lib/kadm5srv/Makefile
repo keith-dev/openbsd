@@ -1,4 +1,4 @@
-# $OpenBSD: Makefile,v 1.4 2001/06/23 00:20:06 hin Exp $
+# $OpenBSD: Makefile,v 1.6 2003/05/11 20:54:39 mho Exp $
 
 LIB=	kadm5srv
 

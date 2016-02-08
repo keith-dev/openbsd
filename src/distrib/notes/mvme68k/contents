@@ -1,4 +1,4 @@
-dnl	$OpenBSD: contents,v 1.20 2003/03/25 19:57:31 miod Exp $
+dnl	$OpenBSD: contents,v 1.22 2003/09/09 22:29:05 miod Exp $
 TopPart
 
 OpenBSDdistsets
@@ -18,24 +18,24 @@ OpenBSDrd
 				S-records format.
 		stboot		A VID tape block.
 
-These files can be used to make a boot tape suitable for installation.
+These files can be used to make a bootable tape suitable for installation.
 They can also be used to configure an NFS server to support installation
 "over the network".  See the section "Getting the OpenBSD system onto
 Useful Media" for more information.
 
 DistributionDescription(nine)
 
-OpenBSDbase(29.3,86.3,shared)
+OpenBSDbase(29.2,86.0,shared)
 
-OpenBSDcomp(15.3,46.7,shared)
+OpenBSDcomp(15.3,46.6,shared)
 
-OpenBSDetc(1.5,5.6)
+OpenBSDetc(1.6,6.0)
 
-OpenBSDgame(2.8,6.6)
+OpenBSDgame(2.6,6.3)
 
-OpenBSDman(6.1,21.6)
+OpenBSDman(6.0,22.5)
 
-OpenBSDmisc(1.9,6.3)
+OpenBSDmisc(2.0,6.5)
 
 OpenBSDxbase(7.1,20.8)
 

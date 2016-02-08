@@ -1,4 +1,4 @@
-/*	$OpenBSD: zopen.c,v 1.9 2002/12/08 16:07:54 mickey Exp $	*/
+/*	$OpenBSD: zopen.c,v 1.14 2003/08/03 01:26:46 deraadt Exp $	*/
 /*	$NetBSD: zopen.c,v 1.5 1995/03/26 09:44:53 glass Exp $	*/
 
 /*-
@@ -17,11 +17,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -44,7 +40,7 @@
 static char sccsid[] = "@(#)zopen.c	8.1 (Berkeley) 6/27/93";
 #else
 const char z_rcsid[] =
-	"$OpenBSD: zopen.c,v 1.9 2002/12/08 16:07:54 mickey Exp $";
+	"$OpenBSD: zopen.c,v 1.14 2003/08/03 01:26:46 deraadt Exp $";
 #endif
 
 /*-
@@ -108,7 +104,7 @@ struct s_zstate {
 	int zs_fd;			/* File stream for I/O */
 	char zs_mode;			/* r or w */
 	enum {
-		S_START, S_MIDDLE, S_EOF
+		S_START, S_MAGIC, S_MIDDLE, S_EOF
 	} zs_state;			/* State of computation */
 	int zs_n_bits;			/* Number of bits/code. */
 	int zs_maxbits;			/* User settable max # bits/code. */
@@ -127,7 +123,7 @@ struct s_zstate {
 	long zs_ratio;
 	count_int zs_checkpoint;
 	long zs_in_count;		/* Length of input. */
-	long zs_bytes_out;		/* Length of compressed output. */
+	long zs_bytes_out;		/* Length of output. */
 	long zs_out_count;		/* # of codes output (for debugging).*/
 	u_char zs_buf[ZBUFSIZ];		/* I/O buffer */
 	u_char *zs_bp;			/* Current I/O window in the zs_buf */
@@ -218,10 +214,7 @@ static int	output(struct s_zstate *, code_int);
  * questions about this implementation to ames!jaw.
  */
 int
-zwrite(cookie, wbp, num)
-	void *cookie;
-	const char *wbp;
-	int num;
+zwrite(void *cookie, const char *wbp, int num)
 {
 	code_int i;
 	int c, disp;
@@ -234,6 +227,8 @@ zwrite(cookie, wbp, num)
 	count = num;
 	bp = (u_char *)wbp;
 	switch (zs->zs_state) {
+	case S_MAGIC:
+		return -1;
 	case S_EOF:
 		return 0;
 	case S_START:
@@ -263,7 +258,7 @@ zwrite(cookie, wbp, num)
 
 		zs->zs_hshift = 0;
 		for (zs->zs_fcode = (long)zs->zs_hsize; zs->zs_fcode < 65536L;
-		     zs->zs_fcode *= 2L)
+		    zs->zs_fcode *= 2L)
 			zs->zs_hshift++;
 		/* Set hash code range bound. */
 		zs->zs_hshift = 8 - zs->zs_hshift;
@@ -277,7 +272,7 @@ zwrite(cookie, wbp, num)
 			c = *bp++;
 			zs->zs_in_count++;
 			zs->zs_fcode = (long)(((long)c << zs->zs_maxbits) +
-					      zs->zs_ent);
+			    zs->zs_ent);
 			/* Xor hashing. */
 			i = ((c << zs->zs_hshift) ^ zs->zs_ent);
 
@@ -318,8 +313,7 @@ nomatch:		if (output(zs, (code_int) zs->zs_ent) == -1)
 }
 
 int
-zclose(cookie)
-	void *cookie;
+z_close(void *cookie, struct z_info *info)
 {
 	struct s_zstate *zs;
 	int rval;
@@ -338,9 +332,24 @@ zclose(cookie)
 			return (-1);
 		}
 	}
+
+	if (info != NULL) {
+		info->mtime = 0;
+		info->crc = (u_int32_t)-1;
+		info->hlen = 0;
+		info->total_in = (off_t)zs->zs_in_count;
+		info->total_out = (off_t)zs->zs_bytes_out;
+	}
+
 	rval = close(zs->zs_fd);
 	free(zs);
 	return (rval);
+}
+
+static int
+zclose(void *cookie)
+{
+	return z_close(cookie, NULL);
 }
 
 /*-
@@ -364,9 +373,7 @@ static const u_char rmask[9] =
 	{0x00, 0x01, 0x03, 0x07, 0x0f, 0x1f, 0x3f, 0x7f, 0xff};
 
 static int
-output(zs, ocode)
-	struct s_zstate *zs;
-	code_int ocode;
+output(struct s_zstate *zs, code_int ocode)
 {
 	int bits;
 
@@ -407,10 +414,10 @@ output(zs, ocode)
 		 */
 		if (zs->zs_free_ent > zs->zs_maxcode ||
 		    (zs->zs_clear_flg > 0)) {
-		       /*
-			* Write the whole buffer, because the input side won't
-			* discover the size increase until after it has read it
-			*/
+			/*
+			 * Write the whole buffer, because the input side won't
+			 * discover the size increase until after it has read it
+			 */
 			if (zs->zs_offset > 0) {
 				zs->zs_bp += zs->zs_n_bits;
 				zs->zs_offset = 0;
@@ -462,10 +469,7 @@ output(zs, ocode)
  * compress() routine.  See the definitions above.
  */
 int
-zread(cookie, rbp, num)
-	void *cookie;
-	char *rbp;
-	int num;
+zread(void *cookie, char *rbp, int num)
 {
 	u_int count;
 	struct s_zstate *zs;
@@ -481,6 +485,16 @@ zread(cookie, rbp, num)
 	case S_START:
 		zs->zs_state = S_MIDDLE;
 		zs->zs_bp = zs->zs_buf;
+		header[0] = header[1] = header[2] = '\0';
+		read(zs->zs_fd, header, sizeof(header));
+		break;
+	case S_MAGIC:
+		zs->zs_state = S_MIDDLE;
+		zs->zs_bp = zs->zs_buf;
+		header[0] = z_magic[0];
+		header[1] = z_magic[1];
+		header[2] = '\0';
+		read(zs->zs_fd, &header[2], 1);
 		break;
 	case S_MIDDLE:
 		goto middle;
@@ -489,12 +503,12 @@ zread(cookie, rbp, num)
 	}
 
 	/* Check the magic number */
-	if (read(zs->zs_fd, header, sizeof(header)) != sizeof(header) ||
-	    memcmp(header, z_magic, sizeof(z_magic)) != 0) {
+	if (header[0] != z_magic[0] || header[1] != z_magic[1]) {
 		errno = EFTYPE;
 		return (-1);
 	}
 	zs->zs_maxbits = header[2];	/* Set -b from file. */
+	zs->zs_in_count += sizeof(header);
 	zs->zs_block_compress = zs->zs_maxbits & BLOCK_MASK;
 	zs->zs_maxbits &= BIT_MASK;
 	zs->zs_maxmaxcode = 1L << zs->zs_maxbits;
@@ -523,7 +537,7 @@ zread(cookie, rbp, num)
 
 		if ((zs->zs_code == CLEAR) && zs->zs_block_compress) {
 			for (zs->zs_code = 255; zs->zs_code >= 0;
-			     zs->zs_code--)
+			    zs->zs_code--)
 				tab_prefixof(zs->zs_code) = 0;
 			zs->zs_clear_flg = 1;
 			zs->zs_free_ent = FIRST - 1;
@@ -547,8 +561,10 @@ zread(cookie, rbp, num)
 
 		/* And put them out in forward order.  */
 middle:		do {
-			if (count-- == 0)
+			if (count-- == 0) {
+				zs->zs_bytes_out += num;
 				return (num);
+			}
 			*bp++ = *--zs->zs_stackp;
 		} while (zs->zs_stackp > de_stack);
 
@@ -563,6 +579,7 @@ middle:		do {
 		zs->zs_oldcode = zs->zs_incode;
 	}
 	zs->zs_state = S_EOF;
+	zs->zs_bytes_out += num - count;
 eof:	return (num - count);
 }
 
@@ -574,8 +591,7 @@ eof:	return (num - count);
  *	code or -1 is returned.
  */
 static code_int
-getcode(zs)
-	struct s_zstate *zs;
+getcode(struct s_zstate *zs)
 {
 	code_int gcode;
 	int r_off, bits;
@@ -592,9 +608,10 @@ getcode(zs)
 		 */
 		if (zs->zs_free_ent > zs->zs_maxcode) {
 			zs->zs_n_bits++;
-			if (zs->zs_n_bits == zs->zs_maxbits)	/* Won't get any bigger now. */
+			if (zs->zs_n_bits == zs->zs_maxbits) {
+				/* Won't get any bigger now. */
 				zs->zs_maxcode = zs->zs_maxmaxcode;
-			else
+			} else
 				zs->zs_maxcode = MAXCODE(zs->zs_n_bits);
 		}
 		if (zs->zs_clear_flg > 0) {
@@ -609,6 +626,7 @@ getcode(zs)
 			if ((bits = read(zs->zs_fd, bp, ZBUFSIZ -
 					 (bp - zs->zs_buf))) < 0)
 				return -1;
+			zs->zs_in_count += bits;
 			zs->zs_bp = zs->zs_buf;
 			zs->zs_ebp = bp + bits;
 		}
@@ -647,9 +665,9 @@ getcode(zs)
 	return (gcode);
 }
 
+/* Table clear for block compress. */
 static int
-cl_block(zs)			/* Table clear for block compress. */
-	struct s_zstate *zs;
+cl_block(struct s_zstate *zs)
 {
 	long rat;
 
@@ -661,8 +679,10 @@ cl_block(zs)			/* Table clear for block compress. */
 			rat = 0x7fffffff;
 		else
 			rat = zs->zs_in_count / rat;
-	} else
-		rat = (zs->zs_in_count << 8) / zs->zs_bytes_out;	/* 8 fractional bits. */
+	} else {
+		/* 8 fractional bits. */
+		rat = (zs->zs_in_count << 8) / zs->zs_bytes_out;
+	}
 	if (rat > zs->zs_ratio)
 		zs->zs_ratio = rat;
 	else {
@@ -676,10 +696,9 @@ cl_block(zs)			/* Table clear for block compress. */
 	return (0);
 }
 
+/* Reset code table. */
 static void
-cl_hash(zs, cl_hsize)			/* Reset code table. */
-	struct s_zstate *zs;
-	count_int cl_hsize;
+cl_hash(struct s_zstate *zs, count_int cl_hsize)
 {
 	count_int *htab_p;
 	long i, m1;
@@ -711,29 +730,24 @@ cl_hash(zs, cl_hsize)			/* Reset code table. */
 }
 
 FILE *
-zopen(name, mode, bits)
-	const char *name;
-	const char *mode;
-	int bits;
+zopen(const char *name, const char *mode, int bits)
 {
 	int fd;
 	void *cookie;
 	if ((fd = open(name, (*mode=='r'? O_RDONLY:O_WRONLY|O_CREAT),
-		       S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH)) == -1)
+	    S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH)) == -1)
 		return NULL;
-	if ((cookie = z_open(fd, mode, bits)) == NULL) {
+	if ((cookie = z_open(fd, mode, NULL, bits, 0, 0)) == NULL) {
 		close(fd);
 		return NULL;
 	}
 	return funopen(cookie, (*mode == 'r'?zread:NULL),
-		       (*mode == 'w'?zwrite:NULL), NULL, zclose);
+	    (*mode == 'w'?zwrite:NULL), NULL, zclose);
 }
 
 void *
-z_open(fd, mode, bits)
-	int fd;
-	const char *mode;
-	int bits;
+z_open(int fd, const char *mode, char *name, int bits,
+    u_int32_t mtime, int gotmagic)
 {
 	struct s_zstate *zs;
 
@@ -756,9 +770,9 @@ z_open(fd, mode, bits)
 	zs->zs_clear_flg = 0;
 	zs->zs_ratio = 0;
 	zs->zs_checkpoint = CHECK_GAP;
-	zs->zs_in_count = 1;		/* Length of input. */
+	zs->zs_in_count = 0;		/* Length of input. */
 	zs->zs_out_count = 0;		/* # of codes output (for debugging).*/
-	zs->zs_state = S_START;
+	zs->zs_state = gotmagic ? S_MAGIC : S_START;
 	zs->zs_offset = 0;
 	zs->zs_size = 0;
 	zs->zs_mode = mode[0];
@@ -766,22 +780,4 @@ z_open(fd, mode, bits)
 
 	zs->zs_fd = fd;
 	return zs;
-}
-
-int
-z_check_header(fd, sb, ofn)
-	int fd;
-	struct stat *sb;
-	const char *ofn;
-{
-	int f;
-	u_char buf[sizeof(z_magic)];
-	off_t off = lseek(fd, 0, SEEK_CUR);
-
-	f = (read(fd, buf, sizeof(buf)) == sizeof(buf) &&
-	     !memcmp(buf, z_magic, sizeof(buf)));
-
-	lseek (fd, off, SEEK_SET);
-
-	return f;
 }

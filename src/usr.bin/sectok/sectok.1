@@ -1,4 +1,4 @@
-.\"	$OpenBSD: sectok.1,v 1.9 2002/03/14 22:25:29 rees Exp $
+.\"	$OpenBSD: sectok.1,v 1.12 2003/09/02 18:50:06 jmc Exp $
 .\"
 .\" Copyright (C) 2001, Jakob Schlyter. All rights reserved.
 .\"
@@ -60,7 +60,6 @@ Set sleep (in milliseconds) between commands in the script.
 .El
 .Sh COMMANDS
 .Ss Non-card commands
-.Pp
 .Bl -tag -width Ds
 .It Xo
 .Cm help
@@ -73,7 +72,7 @@ List all commands.
 Show help for
 .Ar command .
 .It Xo
-.Cm ?
+.Cm \&?
 .Op command
 .Xc
 Show help for
@@ -109,7 +108,6 @@ Quit
 .Nm Li .
 .El
 .Ss ISO 7816-4 commands
-.Pp
 .Bl -tag -width Ds
 .It Xo
 .Cm apdu
@@ -125,7 +123,8 @@ Send APDU to smartcard.
 Select file or aid identified by
 .Ar fid/aid .
 .Ar fid/aid
-can be a numeric fid such as 3f00, a two character name, or an aid in hex or ascii.
+can be a numeric fid such as 3f00, a two character name, or an aid in hex or
+ASCII.
 .It Xo
 .Cm isearch
 .Xc
@@ -167,7 +166,6 @@ Verify CHV (PIN).
 Change CHV (PIN).
 .El
 .Ss Cyberflex commands
-.Pp
 .Bl -tag -width Ds
 .It Xo
 .Cm ls
@@ -265,12 +263,12 @@ use manufacturer's default AUT0 key
 .El
 .El
 .\"
+.Sh HISTORY
+.Nm
+first appeared in
+.Ox 3.0 .
 .Sh AUTHORS
 .Nm
 was written by Jim Rees and others at University of Michigan
 Center for Information Technology Integration (CITI).
 .\"
-.Sh HISTORY
-.Nm
-first appeared in
-.Ox 3.0 .

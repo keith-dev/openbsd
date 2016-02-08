@@ -1,4 +1,4 @@
-.\" $OpenBSD: ss.4,v 1.10 2002/09/26 07:55:40 miod Exp $
+.\" $OpenBSD: ss.4,v 1.14 2003/09/04 22:14:42 jmc Exp $
 .\"
 .\" Copyright (c) 1998 Kenneth Stailey and Ian Darwin
 .\"
@@ -38,7 +38,7 @@
 .Nm ss
 .Nd SCSI Scanner device
 .Sh SYNOPSIS
-.Nm ss* at scsibus? target ? lun ?
+.Cd "ss* at scsibus? target ? lun ?"
 .Sh DESCRIPTION
 The
 .Nm
@@ -51,9 +51,9 @@ includes HP Scanner Control Language (SCL) SCSI processor type
 scanners: Scanjet IIp, IIc, IIcx, 4p and 5p (others will probably work
 if the SCSI INQUIRY strings are added to the driver).
 Not recently tested but worked in the past true SCSI scanners: Mustek 600CX
-and 1200CX (these do not do SCSI disconnect-reconnect they will lock up
+and 1200CX (these do not do SCSI disconnect-reconnect; they will lock up
 the bus during operation.
-You can use a second controller.)
+A second controller can be used.)
 .Sh KERNEL CONFIGURATION
 Obviously a SCSI host adapter must be present in the config file before this
 device can be configured.
@@ -70,7 +70,7 @@ ioctls, which respectively get and set a series of parameters
 describing the scan to be performed upon subsequent reading of the scanner.
 The third argument is the address of a scan_io structure;
 details of this structure can be found in the header file
-.Nm scanio.h.
+.Aq Pa scanio.h .
 .Pp
 The
 .Nm SCIOCRESTART
@@ -94,6 +94,12 @@ ioctl(fd, SCIOCSET, &sp) to set the changed parms;
 ioctl(fd, SCIOCGET, &sp) to see if things got rounded or truncated
 read(fd, somebuf, sp.scan_window_size);
 write the data someplace where you want it.
+.Sh SEE ALSO
+.Xr intro 4 ,
+.Xr scsi 4 ,
+.Xr usscanner 4
+.Pp
+Documentation from the various scanner vendors.
 .Sh BUGS
 Image data should either be normalized to a particular format
 or some indication as to what the format is should be provided.
@@ -107,19 +113,13 @@ command.
 Back in March 1997 an attempt to deal with this via quirk
 tables was started.
 There exists some code for Ultima AT3 and A6000C
-Plus, Ricoh IS50, IS410, IBM 2456-001, UMAX UC630, and Fujitsu M3096Gm
-that use this approach but none of these scanners work yet.
-.Pp
-Provisional userland programs exist in the source tree in
-src/usr.sbin/ssio.
-Eventually a program similar to
-.Nm chio
-or
-.Nm mt
-will be written.
-.Sh SEE ALSO
-.Xr intro 4 ,
-.Xr scsi 4 ,
-.Xr usscanner 4
-.Pp
-Documentation from the various scanner vendors.
+Plus, Ricoh IS50, IS410, IBM 2456-001, UMAX UC630 and Fujitsu M3096Gm
+that use this approach, but none of these scanners work yet.
+.\" .Pp
+.\" Provisional userland programs exist in the source tree in
+.\" .Pa src/usr.sbin/ssio .
+.\" Eventually a program similar to
+.\" .Xr chio 1
+.\" or
+.\" .Xr mt 1
+.\" will be written.

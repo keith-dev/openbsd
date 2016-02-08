@@ -1,4 +1,4 @@
-/*	$OpenBSD: files.c,v 1.11 2002/03/14 16:44:24 mpech Exp $	*/
+/*	$OpenBSD: files.c,v 1.13 2003/06/28 04:55:07 deraadt Exp $	*/
 /*	$NetBSD: files.c,v 1.6 1996/03/17 13:18:17 cgd Exp $	*/
 
 /*
@@ -22,11 +22,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -77,7 +73,7 @@ static int	expr_eval(struct nvlist *,
 static void	expr_free(struct nvlist *);
 
 void
-initfiles()
+initfiles(void)
 {
 
 	basetab = ht_new();
@@ -88,11 +84,7 @@ initfiles()
 }
 
 void
-addfile(path, optx, flags, rule)
-	const char *path;
-	struct nvlist *optx;
-	int flags;
-	const char *rule;
+addfile(const char *path, struct nvlist *optx, int flags, const char *rule)
 {
 	struct files *fi;
 	const char *dotp, *tail;
@@ -158,10 +150,7 @@ bad:
 }
 
 void
-addobject(path, optx, flags)
-	const char *path;
-	struct nvlist *optx;
-	int flags;
+addobject(const char *path, struct nvlist *optx, int flags)
 {
 	struct objects *oi;
 
@@ -196,7 +185,7 @@ addobject(path, optx, flags)
  * depending on some machine-specific device.)
  */
 void
-checkfiles()
+checkfiles(void)
 {
 	struct files *fi, *last;
 
@@ -213,9 +202,7 @@ checkfiles()
  * We are not actually interested in the expression's value.
  */
 static int
-checkaux(name, context)
-	const char *name;
-	void *context;
+checkaux(const char *name, void *context)
 {
 	struct files *fi = context;
 
@@ -235,7 +222,7 @@ checkaux(name, context)
  * from the selected sources do not collide.
  */
 int
-fixfiles()
+fixfiles(void)
 {
 	struct files *fi, *ofi;
 	struct nvlist *flathead, **flatp;
@@ -295,7 +282,7 @@ fixfiles()
  * selection.
  */
 int
-fixobjects()
+fixobjects(void)
 {
 	struct objects *oi;
 	struct nvlist *flathead, **flatp;
@@ -331,9 +318,7 @@ fixobjects()
  * are called to eval each atom.
  */
 static int
-fixcount(name, context)
-	const char *name;
-	void *context;
+fixcount(const char *name, void *context)
 {
 	struct nvlist ***p = context;
 	struct devbase *dev;
@@ -354,9 +339,7 @@ fixcount(name, context)
  * file that will generate a .h with flags.  We will need the flat list.
  */
 static int
-fixfsel(name, context)
-	const char *name;
-	void *context;
+fixfsel(const char *name, void *context)
 {
 	struct nvlist ***p = context;
 	struct nvlist *nv;
@@ -373,9 +356,7 @@ fixfsel(name, context)
  * As for fixfsel above, but we do not need the flat list.
  */
 static int
-fixsel(name, context)
-	const char *name;
-	void *context;
+fixsel(const char *name, void *context)
 {
 
 	return (ht_lookup(selecttab, name) != NULL);
@@ -390,10 +371,7 @@ fixsel(name, context)
  * our mixing of C's bitwise & boolean here may give surprises).
  */
 static int
-expr_eval(expr, fn, context)
-	struct nvlist *expr;
-	int (*fn)(const char *, void *);
-	void *context;
+expr_eval(struct nvlist *expr, int (*fn)(const char *, void *), void *context)
 {
 	int lhs, rhs;
 
@@ -423,8 +401,7 @@ expr_eval(expr, fn, context)
  * Free an expression tree.
  */
 static void
-expr_free(expr)
-	struct nvlist *expr;
+expr_free(struct nvlist *expr)
 {
 	struct nvlist *rhs;
 
@@ -456,8 +433,7 @@ expr_free(expr)
  * Print expression tree.
  */
 void
-prexpr(expr)
-	struct nvlist *expr;
+prexpr(struct nvlist *expr)
 {
 	static void pr0();
 
@@ -468,8 +444,7 @@ prexpr(expr)
 }
 
 static void
-pr0(e)
-	struct nvlist *e;
+pr0(struct nvlist *e)
 {
 
 	switch (e->nv_int) {

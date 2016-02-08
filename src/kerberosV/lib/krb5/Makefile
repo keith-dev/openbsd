@@ -1,4 +1,4 @@
-# $OpenBSD: Makefile,v 1.21 2002/05/18 16:43:36 deraadt Exp $
+# $OpenBSD: Makefile,v 1.26 2003/05/14 08:01:02 mho Exp $
 
 KRBDEPTH=../..
 .include <${.CURDIR}/../../Makefile.inc>
@@ -238,21 +238,32 @@ SRCS+=	base64.c		\
 	getaddrinfo_hostspec.c	\
 	getarg.c		\
 	get_window_size.c	\
-	getprogname.c \
 	parse_time.c		\
 	parse_units.c		\
 	resolve.c		\
 	roken_gethostby.c	\
 	roken_net_write.c	\
 	roken_net_read.c	\
-	setprogname.c \
 	strupr.c 		\
 	strlwr.c		\
 	strsep_copy.c		\
 	warnerr.c
 
 # libkafs
-SRCS+=	afskrb5.c
+.PATH:	${.CURDIR}/../kafs ${KRB5SRC}/lib/kafs
+CFLAGS+=-I${KRB5SRC}/lib/kafs -DROKEN_RENAME
+SRCS+=	afskrb5.c \
+	afssys_openbsd.c \
+	common.c
+MAN+=	kafs.3
+MLINKS+=kafs.3 k_hasafs.3 \
+	kafs.3 k_pioctl.3 \
+	kafs.3 k_unlog.3 \
+	kafs.3 k_setpag.3 \
+	kafs.3 k_afs_cell_of_file.3 \
+	kafs.3 krb_afslog.3 \
+	kafs.3 krb_afslog_uid.3
+
 
 # There is a net_write.c and net_read.c both in lib/roken and lib/krb5.
 # This stinks.

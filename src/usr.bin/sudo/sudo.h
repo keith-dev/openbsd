@@ -31,7 +31,11 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $Sudo: sudo.h,v 1.192 2003/03/15 20:31:02 millert Exp $
+ * Sponsored in part by the Defense Advanced Research Projects
+ * Agency (DARPA) and Air Force Research Laboratory, Air Force
+ * Materiel Command, USAF, under agreement number F39502-99-1-0512.
+ *
+ * $Sudo: sudo.h,v 1.194 2003/04/16 00:42:10 millert Exp $
  */
 
 #ifndef _SUDO_SUDO_H
@@ -236,12 +240,10 @@ int pam_prep_user	__P((struct passwd *));
 YY_DECL;
 
 /* Only provide extern declarations outside of sudo.c. */
-#ifndef _SUDO_SUDO_C
+#ifndef _SUDO_MAIN
 extern struct sudo_user sudo_user;
 extern struct passwd *auth_pw;
 
-extern int Argc;
-extern char **Argv;
 extern FILE *sudoers_fp;
 extern int tgetpass_flags;
 extern uid_t timestamp_uid;

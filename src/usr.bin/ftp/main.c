@@ -1,4 +1,4 @@
-/*	$OpenBSD: main.c,v 1.50 2002/06/04 10:13:23 mpech Exp $	*/
+/*	$OpenBSD: main.c,v 1.54 2003/07/02 21:04:10 deraadt Exp $	*/
 /*	$NetBSD: main.c,v 1.24 1997/08/18 10:20:26 lukem Exp $	*/
 
 /*
@@ -42,11 +42,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -73,7 +69,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)main.c	8.6 (Berkeley) 10/9/94";
 #else
-static char rcsid[] = "$OpenBSD: main.c,v 1.50 2002/06/04 10:13:23 mpech Exp $";
+static char rcsid[] = "$OpenBSD: main.c,v 1.54 2003/07/02 21:04:10 deraadt Exp $";
 #endif
 #endif /* not lint */
 
@@ -98,9 +94,7 @@ static char rcsid[] = "$OpenBSD: main.c,v 1.50 2002/06/04 10:13:23 mpech Exp $";
 int family = PF_UNSPEC;
 
 int
-main(argc, argv)
-	volatile int argc;
-	char ** volatile argv;
+main(volatile int argc, char *argv[])
 {
 	int ch, top, rval;
 	struct passwd *pw = NULL;
@@ -111,7 +105,7 @@ main(argc, argv)
 	ftpport = "ftp";
 	httpport = "http";
 	gateport = getenv("FTPSERVERPORT");
-	if (gateport == NULL)
+	if (gateport == NULL || *gateport == '\0')
 		gateport = "ftpgate";
 	doglob = 1;
 	interactive = 1;
@@ -137,7 +131,7 @@ main(argc, argv)
 	epsv4bad = 0;
 
 	/* Set default operation mode based on FTPMODE environment variable */
-	if ((cp = getenv("FTPMODE")) != NULL) {
+	if ((cp = getenv("FTPMODE")) != NULL && *cp != '\0') {
 		if (strcmp(cp, "passive") == 0) {
 			passivemode = 1;
 			activefallback = 0;
@@ -167,7 +161,7 @@ main(argc, argv)
 	}
 
 	cp = getenv("TERM");
-	dumb_terminal = (cp == NULL || !strcmp(cp, "dumb") ||
+	dumb_terminal = (cp == NULL || *cp == '\0' || !strcmp(cp, "dumb") ||
 	    !strcmp(cp, "emacs") || !strcmp(cp, "su"));
 	fromatty = isatty(fileno(stdin));
 	if (fromatty) {
@@ -281,8 +275,8 @@ main(argc, argv)
 	if (pw == NULL)
 		pw = getpwuid(getuid());
 	if (pw != NULL) {
+		(void)strlcpy(homedir, pw->pw_dir, sizeof homedir);
 		home = homedir;
-		(void)strcpy(home, pw->pw_dir);
 	}
 
 	setttywidth(0);

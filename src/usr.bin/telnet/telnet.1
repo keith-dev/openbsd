@@ -1,4 +1,4 @@
-.\"	$OpenBSD: telnet.1,v 1.31 2003/01/15 15:05:36 deraadt Exp $
+.\"	$OpenBSD: telnet.1,v 1.36 2003/09/07 19:18:10 jmc Exp $
 .\"	$NetBSD: telnet.1,v 1.5 1996/02/28 21:04:12 thorpej Exp $
 .\"
 .\" Copyright (c) 1983, 1990, 1993
@@ -12,11 +12,7 @@
 .\" 2. Redistributions in binary form must reproduce the above copyright
 .\"    notice, this list of conditions and the following disclaimer in the
 .\"    documentation and/or other materials provided with the distribution.
-.\" 3. All advertising materials mentioning features or use of this software
-.\"    must display the following acknowledgement:
-.\"	This product includes software developed by the University of
-.\"	California, Berkeley and its contributors.
-.\" 4. Neither the name of the University nor the names of its contributors
+.\" 3. Neither the name of the University nor the names of its contributors
 .\"    may be used to endorse or promote products derived from this software
 .\"    without specific prior written permission.
 .\"
@@ -86,7 +82,7 @@ option on both input and output.
 .It Fl E
 Stops any character from being recognized as an escape character.
 .It Fl F
-If Kerberos 5 authentication is being used, the
+If Kerberos authentication is being used, the
 .Fl F
 option allows the local credentials to be forwarded
 to the remote system, including any credentials that
@@ -139,13 +135,13 @@ toggle to
 Sets the initial
 .Nm
 escape character to
-.Ar escapechar Ns .
+.Ar escapechar .
 If
 .Ar escapechar
 is omitted, then
 there will be no escape character.
 .It Fl f
-If Kerberos 5 authentication is being used, the
+If Kerberos authentication is being used, the
 .Fl f
 option allows the local credentials to be forwarded to the remote system.
 .It Fl k Ar realm
@@ -156,9 +152,7 @@ option requests that
 obtain tickets for the remote host in
 realm
 .Ar realm
-instead of the remote host's realm, as determined
-by
-.Xr krb_realmofhost 3 .
+instead of the remote host's realm.
 .It Fl l Ar user
 When connecting to the remote system, if the remote system
 understands the
@@ -188,7 +182,8 @@ unless modified by the
 .Fl e
 option.
 .It Fl x
-Turn on encryption of the data stream.  When this option is turned on,
+Turn on encryption of the data stream.
+When this option is turned on,
 .Nm
 will exit with an error if authentication cannot be negotiated or if
 encryption cannot be turned on.
@@ -202,7 +197,7 @@ If a number is not specified, the default
 port is used.
 .El
 .Pp
-When in rlogin mode, a line of the form ~.
+When in rlogin mode, a line of the form ~.\&
 disconnects from the
 remote host; ~ is the telnet escape character.
 Similarly, the line ~^Z suspends the telnet session.
@@ -333,14 +328,14 @@ Disables the specified
 .Ar type
 of authentication.
 To obtain a list of available types, use the
-.Ic auth disable \&?
+.Ic auth disable ?\&
 command.
 .It Ic enable Ar type
 Enables the specified
 .Ar type
 of authentication.
 To obtain a list of available types, use the
-.Ic auth enable \&?
+.Ic auth enable ?\&
 command.
 .It Ic status
 Lists the current status of the various types of
@@ -376,7 +371,7 @@ and
 both input and output
 are disabled.
 To obtain a list of available types, use the
-.Ic encrypt disable \&?
+.Ic encrypt disable ?\&
 command.
 .It Ic enable Ar type Ic [input|output]
 Enables the specified
@@ -389,7 +384,7 @@ and
 both input and output are
 enabled.
 To obtain a list of available types, use the
-.Ic encrypt enable \&?
+.Ic encrypt enable ?\&
 command.
 .It Ic input
 This is the same as the
@@ -415,7 +410,7 @@ and
 .Ic output ,
 both input and output are enabled.
 To obtain a list of available types, use the
-.Ic encrypt enable \&?
+.Ic encrypt enable ?\&
 command.
 .It Ic status
 Lists the current status of encryption.
@@ -737,7 +732,7 @@ command.
 can also be either
 .Ic help
 or
-.Ic \&?
+.Ic ?\&
 to print out help information, including
 a list of known symbolic names.
 .It Ic dont Ar cmd
@@ -754,7 +749,7 @@ command.
 can also be either
 .Ic help
 or
-.Ic \&?
+.Ic ?\&
 to print out help information, including
 a list of known symbolic names.
 .It Ic will Ar cmd
@@ -771,7 +766,7 @@ command.
 can also be either
 .Ic help
 or
-.Ic \&?
+.Ic ?\&
 to print out help information, including
 a list of known symbolic names.
 .It Ic wont Ar cmd
@@ -788,7 +783,7 @@ command.
 can also be either
 .Ic help
 or
-.Ic \&?
+.Ic ?\&
 to print out help information, including
 a list of known symbolic names.
 .It Ic \&?

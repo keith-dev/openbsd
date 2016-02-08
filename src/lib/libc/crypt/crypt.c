@@ -1,4 +1,4 @@
-/*	$OpenBSD: crypt.c,v 1.16 2002/04/29 06:26:50 pvalchev Exp $	*/
+/*	$OpenBSD: crypt.c,v 1.18 2003/08/12 01:22:17 deraadt Exp $	*/
 
 /*
  * FreeSec: libcrypt
@@ -44,27 +44,23 @@
  * pbox, and final permutations are inverted (this has been brought to the
  * attention of the author).  A list of errata for this book has been
  * posted to the sci.crypt newsgroup by the author and is available for FTP.
- *
- * NOTE:
- * This file has a static version of des_setkey() so that crypt.o exports
- * only the crypt() interface. This is required to make binaries linked
- * against crypt.o exportable or re-exportable from the USA.
  */
 
 #if defined(LIBC_SCCS) && !defined(lint)
-static char rcsid[] = "$OpenBSD: crypt.c,v 1.16 2002/04/29 06:26:50 pvalchev Exp $";
+static char rcsid[] = "$OpenBSD: crypt.c,v 1.18 2003/08/12 01:22:17 deraadt Exp $";
 #endif /* LIBC_SCCS and not lint */
 
 #include <sys/types.h>
 #include <sys/param.h>
 #include <pwd.h>
+#include <unistd.h>
 #include <string.h>
 
 #ifdef DEBUG
 # include <stdio.h>
 #endif
 
-static u_char	IP[64] = {
+static const u_char	IP[64] = {
 	58, 50, 42, 34, 26, 18, 10,  2, 60, 52, 44, 36, 28, 20, 12,  4,
 	62, 54, 46, 38, 30, 22, 14,  6, 64, 56, 48, 40, 32, 24, 16,  8,
 	57, 49, 41, 33, 25, 17,  9,  1, 59, 51, 43, 35, 27, 19, 11,  3,
@@ -73,19 +69,19 @@ static u_char	IP[64] = {
 
 static u_char	inv_key_perm[64];
 static u_char	u_key_perm[56];
-static u_char	key_perm[56] = {
+static u_char	const key_perm[56] = {
 	57, 49, 41, 33, 25, 17,  9,  1, 58, 50, 42, 34, 26, 18,
 	10,  2, 59, 51, 43, 35, 27, 19, 11,  3, 60, 52, 44, 36,
 	63, 55, 47, 39, 31, 23, 15,  7, 62, 54, 46, 38, 30, 22,
 	14,  6, 61, 53, 45, 37, 29, 21, 13,  5, 28, 20, 12,  4
 };
 
-static u_char	key_shifts[16] = {
+static const u_char	key_shifts[16] = {
 	1, 1, 2, 2, 2, 2, 2, 2, 1, 2, 2, 2, 2, 2, 2, 1
 };
 
 static u_char	inv_comp_perm[56];
-static u_char	comp_perm[48] = {
+static const u_char	comp_perm[48] = {
 	14, 17, 11, 24,  1,  5,  3, 28, 15,  6, 21, 10,
 	23, 19, 12,  4, 26,  8, 16,  7, 27, 20, 13,  2,
 	41, 52, 31, 37, 47, 55, 30, 40, 51, 45, 33, 48,
@@ -97,7 +93,7 @@ static u_char	comp_perm[48] = {
  */
 
 static u_char	u_sbox[8][64];
-static u_char	sbox[8][64] = {
+static const u_char	sbox[8][64] = {
 	{
 		14,  4, 13,  1,  2, 15, 11,  8,  3, 10,  6, 12,  5,  9,  0,  7,
 		 0, 15,  7,  4, 14,  2, 13,  1, 10,  6, 12, 11,  9,  5,  3,  8,
@@ -149,12 +145,12 @@ static u_char	sbox[8][64] = {
 };
 
 static u_char	un_pbox[32];
-static u_char	pbox[32] = {
+static const u_char	pbox[32] = {
 	16,  7, 20, 21, 29, 12, 28, 17,  1, 15, 23, 26,  5, 18, 31, 10,
 	 2,  8, 24, 14, 32, 27,  3,  9, 19, 13, 30,  6, 22, 11,  4, 25
 };
 
-static u_int32_t bits32[32] =
+const u_int32_t _des_bits32[32] =
 {
 	0x80000000, 0x40000000, 0x20000000, 0x10000000,
 	0x08000000, 0x04000000, 0x02000000, 0x01000000,
@@ -166,15 +162,15 @@ static u_int32_t bits32[32] =
 	0x00000008, 0x00000004, 0x00000002, 0x00000001
 };
 
-static u_char	bits8[8] = { 0x80, 0x40, 0x20, 0x10, 0x08, 0x04, 0x02, 0x01 };
+const u_char	_des_bits8[8] = { 0x80, 0x40, 0x20, 0x10, 0x08, 0x04, 0x02, 0x01 };
 
 static u_int32_t saltbits;
 static int32_t	old_salt;
-static u_int32_t *bits28, *bits24;
+static const u_int32_t *bits28, *bits24;
 static u_char	init_perm[64], final_perm[64];
 static u_int32_t en_keysl[16], en_keysr[16];
 static u_int32_t de_keysl[16], de_keysr[16];
-static int	des_initialised = 0;
+int	_des_initialised = 0;
 static u_char	m_sbox[4][4096];
 static u_int32_t psbox[4][256];
 static u_int32_t ip_maskl[8][256], ip_maskr[8][256];
@@ -189,8 +185,7 @@ static u_char	ascii64[] =
 /*	  0123456789012345678901234567890123456789012345678901234567890123 */
 
 static __inline int
-ascii_to_bin(ch)
-	char ch;
+ascii_to_bin(char ch)
 {
 	if (ch > 'z')
 		return(0);
@@ -207,8 +202,8 @@ ascii_to_bin(ch)
 	return(0);
 }
 
-static void
-des_init()
+void
+_des_init(void)
 {
 	int	i, j, b, k, inbit, obit;
 	u_int32_t	*p, *il, *ir, *fl, *fr;
@@ -216,7 +211,7 @@ des_init()
 	old_rawkey0 = old_rawkey1 = 0;
 	saltbits = 0;
 	old_salt = 0;
-	bits24 = (bits28 = bits32 + 4) + 4;
+	bits24 = (bits28 = _des_bits32 + 4) + 4;
 
 	/*
 	 * Invert the S-boxes, reordering the input bits.
@@ -276,15 +271,15 @@ des_init()
 			*(fr = &fp_maskr[k][i]) = 0;
 			for (j = 0; j < 8; j++) {
 				inbit = 8 * k + j;
-				if (i & bits8[j]) {
+				if (i & _des_bits8[j]) {
 					if ((obit = init_perm[inbit]) < 32)
-						*il |= bits32[obit];
+						*il |= _des_bits32[obit];
 					else
-						*ir |= bits32[obit-32];
+						*ir |= _des_bits32[obit-32];
 					if ((obit = final_perm[inbit]) < 32)
-						*fl |= bits32[obit];
+						*fl |= _des_bits32[obit];
 					else
-						*fr |= bits32[obit - 32];
+						*fr |= _des_bits32[obit - 32];
 				}
 			}
 		}
@@ -293,7 +288,7 @@ des_init()
 			*(ir = &key_perm_maskr[k][i]) = 0;
 			for (j = 0; j < 7; j++) {
 				inbit = 8 * k + j;
-				if (i & bits8[j + 1]) {
+				if (i & _des_bits8[j + 1]) {
 					if ((obit = inv_key_perm[inbit]) == 255)
 						continue;
 					if (obit < 28)
@@ -306,7 +301,7 @@ des_init()
 			*(ir = &comp_maskr[k][i]) = 0;
 			for (j = 0; j < 7; j++) {
 				inbit = 7 * k + j;
-				if (i & bits8[j + 1]) {
+				if (i & _des_bits8[j + 1]) {
 					if ((obit=inv_comp_perm[inbit]) == 255)
 						continue;
 					if (obit < 24)
@@ -329,17 +324,16 @@ des_init()
 		for (i = 0; i < 256; i++) {
 			*(p = &psbox[b][i]) = 0;
 			for (j = 0; j < 8; j++) {
-				if (i & bits8[j])
-					*p |= bits32[un_pbox[8 * b + j]];
+				if (i & _des_bits8[j])
+					*p |= _des_bits32[un_pbox[8 * b + j]];
 			}
 		}
 
-	des_initialised = 1;
+	_des_initialised = 1;
 }
 
-static void
-setup_salt(salt)
-	int32_t salt;
+void
+_des_setup_salt(int32_t salt)
 {
 	u_int32_t	obit, saltbit;
 	int	i;
@@ -359,15 +353,14 @@ setup_salt(salt)
 	}
 }
 
-static int
-des_setkey(key)
-	const char *key;
+int
+des_setkey(const char *key)
 {
 	u_int32_t k0, k1, rawkey0, rawkey1;
 	int	shifts, round;
 
-	if (!des_initialised)
-		des_init();
+	if (!_des_initialised)
+		_des_init();
 
 	rawkey0 = ntohl(*(u_int32_t *) key);
 	rawkey1 = ntohl(*(u_int32_t *) (key + 4));
@@ -440,10 +433,9 @@ des_setkey(key)
 	return(0);
 }
 
-static int
-do_des(l_in, r_in, l_out, r_out, count)
-	u_int32_t l_in, r_in, *l_out, *r_out;
-	int count;
+int
+_des_do_des(u_int32_t l_in, u_int32_t r_in, u_int32_t *l_out, u_int32_t *r_out,
+    int count)
 {
 	/*
 	 *	l_in, r_in, l_out, and r_out are in pseudo-"big-endian" format.
@@ -558,26 +550,22 @@ do_des(l_in, r_in, l_out, r_out, count)
 	return(0);
 }
 
-static int
-des_cipher(in, out, salt, count)
-	const char *in;
-	char *out;
-	int32_t salt;
-	int count;
+int
+des_cipher(const char *in, char *out, int32_t salt, int count)
 {
 	u_int32_t l_out, r_out, rawl, rawr;
 	u_int32_t x[2];
 	int	retval;
 
-	if (!des_initialised)
-		des_init();
+	if (!_des_initialised)
+		_des_init();
 
-	setup_salt(salt);
+	_des_setup_salt(salt);
 
 	memcpy(x, in, sizeof x);
 	rawl = ntohl(x[0]);
 	rawr = ntohl(x[1]);
-	retval = do_des(rawl, rawr, &l_out, &r_out, count);
+	retval = _des_do_des(rawl, rawr, &l_out, &r_out, count);
 
 	x[0] = htonl(l_out);
 	x[1] = htonl(r_out);
@@ -586,9 +574,7 @@ des_cipher(in, out, salt, count)
 }
 
 char *
-crypt(key, setting)
-	const char *key;
-	const char *setting;
+crypt(const char *key, const char *setting)
 {
 	int		i;
 	u_int32_t	count, salt, l, r0, r1, keybuf[2];
@@ -606,8 +592,8 @@ crypt(key, setting)
 		}
 	}
 
-	if (!des_initialised)
-		des_init();
+	if (!_des_initialised)
+		_des_init();
 
 	/*
 	 * Copy the key, shifting each character up by one bit
@@ -682,11 +668,12 @@ crypt(key, setting)
 
 		p = output + 2;
 	}
-	setup_salt(salt);
+	_des_setup_salt(salt);
+
 	/*
 	 * Do it.
 	 */
-	if (do_des(0, 0, &r0, &r1, count))
+	if (_des_do_des(0, 0, &r0, &r1, count))
 		return(NULL);
 	/*
 	 * Now encode the result...

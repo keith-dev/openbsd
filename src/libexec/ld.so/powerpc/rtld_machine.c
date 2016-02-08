@@ -1,4 +1,4 @@
-/*	$OpenBSD: rtld_machine.c,v 1.25 2003/03/10 03:57:57 david Exp $ */
+/*	$OpenBSD: rtld_machine.c,v 1.32 2003/09/04 19:37:07 drahn Exp $ */
 
 /*
  * Copyright (c) 1999 Dale Rahn
@@ -11,12 +11,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed under OpenBSD by
- *	Dale Rahn.
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS
  * OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
@@ -76,11 +70,13 @@ void _dl_syncicache(char *from, size_t len);
     ((((x) & 0xfe000000) == 0x00000000) || (((x) &  0xfe000000) == 0xfe000000))
 
 void _dl_bind_start(void); /* XXX */
+Elf_Addr _dl_bind(elf_object_t *object, int reloff);
 
 void
-_dl_bcopy(void *src, void *dest, int size)
+_dl_bcopy(const void *src, void *dest, int size)
 {
-	unsigned char *psrc = src, *pdest = dest;
+	unsigned const char *psrc = src;
+	unsigned char *pdest = dest;
 	int i;
 
 	for (i = 0; i < size; i++)
@@ -123,6 +119,7 @@ _dl_printf("object relocation size %x, numrela %x\n",
 	/* for plt relocation usage */
 	if (object->Dyn.info[DT_JMPREL] != 0) {
 		/* resolver stub not set up */
+		int nplt;
 
 		/* Need to construct table to do jumps */
 		pltresolve = (Elf32_Addr *)(object->Dyn.info[DT_PLTGOT]);
@@ -130,10 +127,15 @@ _dl_printf("object relocation size %x, numrela %x\n",
 		pltinfo = (Elf32_Addr *)(pltresolve) + PLT_INFO_OFFSET;
 		first_rela =  (Elf32_Addr *)(pltresolve) + PLT_1STRELA_OFFSET;
 
-		plttable = (Elf32_Addr *)
-		    ((Elf32_Addr)first_rela) + (2 *
-		    (object->Dyn.info[DT_PLTRELSZ]/sizeof(Elf32_Rela)));
+		nplt = object->Dyn.info[DT_PLTRELSZ]/sizeof(Elf32_Rela);
 
+		if (nplt >= (2<<12)) {
+			plttable = (Elf32_Addr *) ((Elf32_Addr)first_rela)
+			    + (2 * (2<<12)) + (4 * (nplt - (2<<12)));
+		} else {
+			plttable = (Elf32_Addr *) ((Elf32_Addr)first_rela)
+			    + (2 * nplt);
+		}
 
 		pltinfo[0] = (Elf32_Addr)plttable;
 
@@ -202,10 +204,11 @@ _dl_printf("object relocation size %x, numrela %x\n",
 		if (ELF32_R_SYM(relas->r_info) &&
 		    !(ELF32_ST_BIND(sym->st_info) == STB_LOCAL &&
 		    ELF32_ST_TYPE (sym->st_info) == STT_NOTYPE)) {
-			ooff = _dl_find_symbol(symn, _dl_objects, &this,
-			    SYM_SEARCH_ALL|SYM_NOWARNNOTFOUND|
+			ooff = _dl_find_symbol_bysym(object,
+			    ELF32_R_SYM(relas->r_info), _dl_objects,
+			    &this, SYM_SEARCH_ALL|SYM_NOWARNNOTFOUND|
 			    ((type == RELOC_JMP_SLOT) ? SYM_PLT:SYM_NOTPLT),
-			    sym->st_size, object->load_name);
+			    sym->st_size);
 
 			if (!this && ELF32_ST_BIND(sym->st_info) == STB_GLOBAL) {
 				_dl_printf("%s: %s :can't resolve reference '%s'\n",
@@ -260,7 +263,7 @@ _dl_printf(" ooff %x, sym val %x, addend %x"
 				/* if offset is > RELOC_24 deal with it */
 				index = (r_addr - first_rela) >> 1;
 
-				if (index > (2 << 14)) {
+				if (index >= (2 << 12)) {
 					/* addis r11,r11,.PLTtable@ha*/
 					r_addr[0] = ADDIS_R11_R0 | HA(index*4);
 					r_addr[1] = ADDI_R11_R11 | L(index*4);
@@ -391,12 +394,13 @@ _dl_printf(" symn [%s] val 0x%x\n", symn, val);
 			    cobj = cobj->next) {
 				if (object != cobj) {
 					/* only look in this object */
-					src_loff = _dl_find_symbol(symn, cobj,
-					    &cpysrc,
+					src_loff = _dl_find_symbol_bysym(object,
+					    ELF32_R_SYM(relas->r_info),
+					    cobj, &cpysrc,
 					    SYM_SEARCH_SELF|SYM_NOWARNNOTFOUND|
 					    ((type == RELOC_JMP_SLOT) ?
 					        SYM_PLT : SYM_NOTPLT),
-					    sym->st_size, object->load_name);
+					    sym->st_size);
 				}
 			}
 			if (cpysrc == NULL) {
@@ -466,15 +470,13 @@ _dl_md_reloc_got(elf_object_t *object, int lazy)
 	object->got_size = 0;
 	this = NULL;
 	ooff = _dl_find_symbol("__got_start", object, &this,
-	    SYM_SEARCH_SELF|SYM_NOWARNNOTFOUND|SYM_PLT, SYM_NOTPLT,
-	    NULL);
+	    SYM_SEARCH_SELF|SYM_NOWARNNOTFOUND|SYM_PLT, 0, object);
 	if (this != NULL)
 		object->got_addr = ooff + this->st_value;
 
 	this = NULL;
 	ooff = _dl_find_symbol("__got_end", object, &this,
-	    SYM_SEARCH_SELF|SYM_NOWARNNOTFOUND|SYM_PLT, SYM_NOTPLT,
-	    NULL);
+	    SYM_SEARCH_SELF|SYM_NOWARNNOTFOUND|SYM_PLT, 0, object);
 	if (this != NULL)
 		object->got_size = ooff + this->st_value  - object->got_addr;
 
@@ -482,15 +484,13 @@ _dl_md_reloc_got(elf_object_t *object, int lazy)
 	object->plt_size = 0;
 	this = NULL;
 	ooff = _dl_find_symbol("__plt_start", object, &this,
-	    SYM_SEARCH_SELF|SYM_NOWARNNOTFOUND|SYM_PLT, SYM_NOTPLT,
-	    NULL);
+	    SYM_SEARCH_SELF|SYM_NOWARNNOTFOUND|SYM_PLT, 0, object);
 	if (this != NULL)
 		plt_addr = ooff + this->st_value;
 
 	this = NULL;
 	ooff = _dl_find_symbol("__plt_end", object, &this,
-	    SYM_SEARCH_SELF|SYM_NOWARNNOTFOUND|SYM_PLT, SYM_NOTPLT,
-	    NULL);
+	    SYM_SEARCH_SELF|SYM_NOWARNNOTFOUND|SYM_PLT, 0, object);
 	if (this != NULL)
 		object->plt_size = ooff + this->st_value  - plt_addr;
 
@@ -508,36 +508,36 @@ _dl_md_reloc_got(elf_object_t *object, int lazy)
 		object->plt_size += plt_addr - object->plt_start;
 		object->plt_size = ELF_ROUND(object->plt_size, _dl_pagesz);
 	}
-		
-	
+
 	if (!lazy) {
 		_dl_md_reloc(object, DT_JMPREL, DT_PLTRELSZ);
-		return;
-	}
-	first_rela = (Elf32_Addr *)
-	    (((Elf32_Rela *)(object->Dyn.info[DT_JMPREL]))->r_offset +
-	    object->load_offs);
-	pltresolve = (Elf32_Addr *)(first_rela) - 18;
+	} else {
+		first_rela = (Elf32_Addr *)
+		    (((Elf32_Rela *)(object->Dyn.info[DT_JMPREL]))->r_offset +
+		    object->load_offs);
+		pltresolve = (Elf32_Addr *)(first_rela) - 18;
 
-	relas = (Elf32_Rela *)(object->Dyn.info[DT_JMPREL]);
-	numrela = object->Dyn.info[DT_PLTRELSZ] / sizeof(Elf32_Rela);
-	r_addr = (Elf32_Addr *)(relas->r_offset + object->load_offs);
+		relas = (Elf32_Rela *)(object->Dyn.info[DT_JMPREL]);
+		numrela = object->Dyn.info[DT_PLTRELSZ] / sizeof(Elf32_Rela);
+		r_addr = (Elf32_Addr *)(relas->r_offset + object->load_offs);
 
-	for (i = 0, index = 0; i < numrela; i++, r_addr+=2, index++) {
-		if (index > (2 << 14)) {
-			/* addis r11,r11,.PLTtable@ha*/
-			r_addr[0] = ADDIS_R11_R0 | HA(index*4);
-			r_addr[1] = ADDI_R11_R11 | L(index*4);
-			BR(r_addr[2], pltresolve);
-			/* only every other slot is used after 2^14 entries */
-			r_addr += 2;
-			index++;
-		} else {
-			r_addr[0] = LI_R11 | (index * 4);
-			BR(r_addr[1], pltresolve);
+		for (i = 0, index = 0; i < numrela; i++, r_addr+=2, index++) {
+			if (index >= (2 << 12)) {
+				/* addis r11,r0,.PLTtable@ha*/
+				r_addr[0] = ADDIS_R11_R0 | HA(index*4);
+				r_addr[1] = ADDI_R11_R11 | L(index*4);
+				BR(r_addr[2], pltresolve);
+				/* only every other slot is used after
+				 * index == 2^14
+				 */
+				r_addr += 2;
+			} else {
+				r_addr[0] = LI_R11 | (index * 4);
+				BR(r_addr[1], pltresolve);
+			}
+			_dl_dcbf(&r_addr[0]);
+			_dl_dcbf(&r_addr[2]);
 		}
-		_dl_dcbf(&r_addr[0]);
-		_dl_dcbf(&r_addr[2]);
 	}
 	if (object->got_size != 0) {
 
@@ -574,8 +574,7 @@ _dl_bind(elf_object_t *object, int reloff)
 	r_addr = (Elf_Addr *)(object->load_offs + relas->r_offset);
 	this = NULL;
 	ooff = _dl_find_symbol(symn, _dl_objects, &this,
-	    SYM_SEARCH_ALL|SYM_WARNNOTFOUND|SYM_PLT, SYM_NOTPLT,
-	    object->load_name);
+	    SYM_SEARCH_ALL|SYM_WARNNOTFOUND|SYM_PLT, sym->st_size, object);
 	if (this == NULL) {
 		_dl_printf("lazy binding failed!\n");
 		*((int *)0) = 0;	/* XXX */
@@ -611,7 +610,7 @@ _dl_bind(elf_object_t *object, int reloff)
 		plttable = (Elf32_Addr *)pltinfo[0];
 		plttable[index] = val;
 
-		if (index > (2 << 14)) {
+		if (index >= (2 << 12)) {
 			/* r_addr[0,1] is initialized to correct
 			 * value in reloc_got.
 			 */

@@ -1,4 +1,4 @@
-/*	$OpenBSD: tape.c,v 1.22 2003/03/13 05:00:44 deraadt Exp $	*/
+/*	$OpenBSD: tape.c,v 1.27 2003/07/29 18:38:36 deraadt Exp $	*/
 /*	$NetBSD: tape.c,v 1.26 1997/04/15 07:12:25 lukem Exp $	*/
 
 /*
@@ -18,11 +18,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -43,7 +39,7 @@
 #if 0
 static char sccsid[] = "@(#)tape.c	8.6 (Berkeley) 9/13/94";
 #else
-static char rcsid[] = "$NetBSD: tape.c,v 1.22 1996/11/30 18:31:29 cgd Exp $";
+static const char rcsid[] = "$OpenBSD: tape.c,v 1.27 2003/07/29 18:38:36 deraadt Exp $";
 #endif
 #endif /* not lint */
 
@@ -339,14 +335,16 @@ again:
 	fprintf(stderr, "Enter ``none'' if there are no more tapes\n");
 	fprintf(stderr, "otherwise enter tape name (default: %s) ", magtape);
 	(void)fflush(stderr);
-	(void)fgets(buf, TP_BSIZE, terminal);
-	if (feof(terminal))
+	if (fgets(buf, TP_BSIZE, terminal) == NULL || feof(terminal))
 		exit(1);
-	if (!strcmp(buf, "none\n")) {
+	i = strlen(buf);
+	if (i > 0 && buf[--i] == '\n')
+		buf[i] = '\0';
+	if (strcmp(buf, "none") == 0) {
 		terminateinput();
 		return;
 	}
-	if (buf[0] != '\n')
+	if (buf[0] != '\0')
 		(void)strlcpy(magtape, buf, sizeof magtape);
 
 #ifdef RRESTORE
@@ -743,7 +741,7 @@ xtrlnkfile(buf, size)
 	if (pathlen > MAXPATHLEN)
 		errx(1, "symbolic link name: %s->%s%s; too long %d",
 		    curfile.name, lnkbuf, buf, pathlen);
-	(void)strcat(lnkbuf, buf);
+	(void)strlcat(lnkbuf, buf, sizeof(lnkbuf));
 }
 
 /*
@@ -1258,7 +1256,7 @@ checksum(buf)
 			i += swabl(*buf++);
 		while (--j);
 	}
-			
+
 	if (i != CHECKSUM) {
 		fprintf(stderr, "Checksum error %o, inode %d file %s\n", i,
 			curfile.ino, curfile.name);
@@ -1322,7 +1320,7 @@ swabst(cp, sp)
 		case '5': case '6': case '7': case '8': case '9':
 			n = (n * 10) + (*cp++ - '0');
 			continue;
-		
+
 		case 's': case 'w': case 'h':
 			if (n == 0)
 				n = 1;

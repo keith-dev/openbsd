@@ -1,4 +1,4 @@
-/* *	$OpenBSD: indent_globs.h,v 1.7 2002/02/16 21:27:47 millert Exp $*/
+/* *	$OpenBSD: indent_globs.h,v 1.10 2003/06/25 21:24:53 deraadt Exp $*/
 /*
  * Copyright (c) 1985 Sun Microsystems, Inc.
  * Copyright (c) 1980, 1993
@@ -14,11 +14,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -57,7 +53,8 @@ FILE       *output;		/* the output file */
 
 #define CHECK_SIZE_CODE \
 	if (e_code >= l_code) { \
-	    register int nsize = l_code-s_code+400; \
+	    int nsize = l_code-s_code+400; \
+	\
 	    codebuf = (char *) realloc(codebuf, nsize); \
 	    if (codebuf == NULL) \
 		    err(1, NULL); \
@@ -67,7 +64,8 @@ FILE       *output;		/* the output file */
 	}
 #define CHECK_SIZE_COM \
 	if (e_com >= l_com) { \
-	    register int nsize = l_com-s_com+400; \
+	    int nsize = l_com-s_com+400; \
+	\
 	    combuf = (char *) realloc(combuf, nsize); \
 	    if (combuf == NULL) \
 		    err(1, NULL); \
@@ -77,7 +75,8 @@ FILE       *output;		/* the output file */
 	}
 #define CHECK_SIZE_LAB \
 	if (e_lab >= l_lab) { \
-	    register int nsize = l_lab-s_lab+400; \
+	    int nsize = l_lab-s_lab+400; \
+	\
 	    labbuf = (char *) realloc(labbuf, nsize); \
 	    if (labbuf == NULL) \
 		    err(1, NULL); \
@@ -87,7 +86,8 @@ FILE       *output;		/* the output file */
 	}
 #define CHECK_SIZE_TOKEN \
 	if (e_token >= l_token) { \
-	    register int nsize = l_token-s_token+400; \
+	    int nsize = l_token-s_token+400; \
+	\
 	    tokenbuf = (char *) realloc(tokenbuf, nsize); \
 	    if (tokenbuf == NULL) \
 		    err(1, NULL); \
@@ -206,7 +206,6 @@ struct fstate {
     char        size;
     int         allcaps:1;
 };
-char       *chfont();
 
 struct fstate
             keywordf,		/* keyword font */

@@ -1,4 +1,4 @@
-/*	$OpenBSD: rtld_machine.c,v 1.25 2003/02/15 22:39:14 drahn Exp $ */
+/*	$OpenBSD: rtld_machine.c,v 1.31 2003/09/04 19:37:08 drahn Exp $ */
 
 /*
  * Copyright (c) 1999 Dale Rahn
@@ -13,12 +13,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed under OpenBSD by
- *	Dale Rahn.
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS
  * OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
@@ -215,6 +209,7 @@ static long reloc_target_bitmask[] = {
 #define RELOC_VALUE_BITMASK(t)	(reloc_target_bitmask[t])
 
 void _dl_reloc_plt(Elf_Word *where, Elf_Addr value, Elf_RelA *rela);
+void _dl_install_plt(Elf_Word *pltgot, Elf_Addr proc);
 
 int
 _dl_md_reloc(elf_object_t *object, int rel, int relasz)
@@ -277,11 +272,13 @@ _dl_md_reloc(elf_object_t *object, int rel, int relasz)
 				value += loff;
 			} else {
 				this = NULL;
-				ooff = _dl_find_symbol(symn, _dl_objects,
-				    &this, SYM_SEARCH_ALL|SYM_WARNNOTFOUND|
-				    ((type == R_TYPE(JMP_SLOT))?
-					SYM_PLT:SYM_NOTPLT),
-				    sym->st_size, object->load_name);
+				ooff = _dl_find_symbol_bysym(object,
+				    ELF_R_SYM(relas->r_info),
+				    _dl_objects, &this,
+				    SYM_SEARCH_ALL|SYM_WARNNOTFOUND|
+				    ((type == R_TYPE(JMP_SLOT)) ?
+					SYM_PLT : SYM_NOTPLT),
+				    sym->st_size);
 				if (this == NULL) {
 resolve_failed:
 					_dl_printf("%s: %s: can't resolve "
@@ -309,7 +306,7 @@ resolve_failed:
 
 			soff = _dl_find_symbol(symn, object->next, &srcsym,
 			    SYM_SEARCH_ALL|SYM_WARNNOTFOUND|SYM_NOTPLT,
-			    size, object->load_name);
+			    size, object);
 			if (srcsym == NULL)
 				goto resolve_failed;
 
@@ -595,7 +592,7 @@ _dl_reloc_plt(Elf_Word *where, Elf_Addr value, Elf_RelA *rela)
 /*
  * Resolve a symbol at run-time.
  */
-void *
+Elf_Addr
 _dl_bind(elf_object_t *object, int index)
 {
 	Elf_RelA *rela;
@@ -637,7 +634,7 @@ _dl_bind(elf_object_t *object, int index)
 	addr = (Elf_Word *)(object->load_offs + rela->r_offset);
 	this = NULL;
 	ooff = _dl_find_symbol(symn, _dl_objects, &this,
-	    SYM_SEARCH_ALL|SYM_WARNNOTFOUND|SYM_PLT, 0, object->load_name);
+	    SYM_SEARCH_ALL|SYM_WARNNOTFOUND|SYM_PLT, sym->st_size, object);
 	if (this == NULL) {
 		_dl_printf("lazy binding failed!\n");
 		*((int *)0) = 0;	/* XXX */
@@ -660,7 +657,7 @@ _dl_bind(elf_object_t *object, int index)
 		_dl_sigprocmask(SIG_SETMASK, &omask, NULL);
 	}
 
-	return (void *)ooff + this->st_value;
+	return ooff + this->st_value;
 }
 
 /*
@@ -710,15 +707,13 @@ _dl_md_reloc_got(elf_object_t *object, int lazy)
 	object->got_size = 0;
 	this = NULL;
 	ooff = _dl_find_symbol("__got_start", object, &this,
-	    SYM_SEARCH_SELF|SYM_NOWARNNOTFOUND|SYM_PLT, SYM_NOTPLT,
-	    NULL);
+	    SYM_SEARCH_SELF|SYM_NOWARNNOTFOUND|SYM_PLT, 0, object);
 	if (this != NULL)
 		object->got_addr = ooff + this->st_value;
 
 	this = NULL;
 	ooff = _dl_find_symbol("__got_end", object, &this,
-	    SYM_SEARCH_SELF|SYM_NOWARNNOTFOUND|SYM_PLT, SYM_NOTPLT,
-	    NULL);
+	    SYM_SEARCH_SELF|SYM_NOWARNNOTFOUND|SYM_PLT, 0, object);
 	if (this != NULL)
 		object->got_size = ooff + this->st_value  - object->got_addr;
 
@@ -726,15 +721,13 @@ _dl_md_reloc_got(elf_object_t *object, int lazy)
 	object->plt_size = 0;
 	this = NULL;
 	ooff = _dl_find_symbol("__plt_start", object, &this,
-	    SYM_SEARCH_SELF|SYM_NOWARNNOTFOUND|SYM_PLT, SYM_NOTPLT,
-	    NULL);
+	    SYM_SEARCH_SELF|SYM_NOWARNNOTFOUND|SYM_PLT, 0, object);
 	if (this != NULL)
 		plt_addr = ooff + this->st_value;
 
 	this = NULL;
 	ooff = _dl_find_symbol("__plt_end", object, &this,
-	    SYM_SEARCH_SELF|SYM_NOWARNNOTFOUND|SYM_PLT, SYM_NOTPLT,
-	    NULL);
+	    SYM_SEARCH_SELF|SYM_NOWARNNOTFOUND|SYM_PLT, 0, object);
 	if (this != NULL)
 		object->plt_size = ooff + this->st_value  - plt_addr;
 
@@ -755,14 +748,12 @@ _dl_md_reloc_got(elf_object_t *object, int lazy)
 
 	if (!lazy) {
 		_dl_md_reloc(object, DT_JMPREL, DT_PLTRELSZ);
-		return;
+	} else {
+		_dl_install_plt(&entry[0], (Elf_Addr)&_dl_bind_start_0);
+		_dl_install_plt(&entry[8], (Elf_Addr)&_dl_bind_start_1);
+
+		pltgot[8] = (Elf_Addr)object;
 	}
-
-	_dl_install_plt(&entry[0], (Elf_Addr)&_dl_bind_start_0);
-	_dl_install_plt(&entry[8], (Elf_Addr)&_dl_bind_start_1);
-
-	pltgot[8] = (Elf_Addr)object;
-
 	if (object->got_size != 0)
 		_dl_mprotect((void*)object->got_addr, object->got_size,
 		    PROT_READ);

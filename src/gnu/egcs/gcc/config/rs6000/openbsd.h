@@ -39,7 +39,7 @@ Boston, MA 02111-1307, USA.  */
 #define LINKER_NAME "ld"
 
 #undef LINK_SPEC
-#define LINK_SPEC "-m elf32ppc %{shared:-shared} \
+#define LINK_SPEC "%{shared:-shared} \
   %{!shared: \
     %{!static: \
       %{rdynamic:-export-dynamic} \
@@ -88,4 +88,5 @@ Boston, MA 02111-1307, USA.  */
    default to using nm. */
 #undef OBJECT_FORMAT_COFF
 
-
+/* problems occur if we're too liberal in preserve_subexpressions_p */
+#define	BROKEN_PRESERVE_SUBEXPRESSIONS_P

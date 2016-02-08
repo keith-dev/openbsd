@@ -1,4 +1,4 @@
-/*	$OpenBSD: uniq.c,v 1.12 2002/12/08 22:43:54 millert Exp $	*/
+/*	$OpenBSD: uniq.c,v 1.14 2003/06/03 02:56:21 millert Exp $	*/
 /*	$NetBSD: uniq.c,v 1.7 1995/08/31 22:03:48 jtc Exp $	*/
 
 /*
@@ -16,11 +16,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -47,7 +43,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)uniq.c	8.3 (Berkeley) 5/4/95";
 #endif
-static char rcsid[] = "$OpenBSD: uniq.c,v 1.12 2002/12/08 22:43:54 millert Exp $";
+static char rcsid[] = "$OpenBSD: uniq.c,v 1.14 2003/06/03 02:56:21 millert Exp $";
 #endif /* not lint */
 
 #include <errno.h>
@@ -226,12 +222,12 @@ obsolete(char *argv[])
 		 * Digit signifies an old-style option.  Malloc space for dash,
 		 * new option and argument.
 		 */
-		len = strlen(ap);
-		if ((start = p = malloc(len + 3)) == NULL)
+		len = strlen(ap) + 3;
+		if ((start = p = malloc(len)) == NULL)
 			err(1, "malloc");
 		*p++ = '-';
 		*p++ = ap[0] == '+' ? 's' : 'f';
-		(void)strcpy(p, ap + 1);
+		(void)strlcpy(p, ap + 1, len - 2);
 		*argv = start;
 	}
 }

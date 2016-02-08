@@ -1,4 +1,4 @@
-/*	$OpenBSD: tape.c,v 1.15 2002/02/19 19:39:38 millert Exp $	*/
+/*	$OpenBSD: tape.c,v 1.20 2003/07/29 18:38:35 deraadt Exp $	*/
 /*	$NetBSD: tape.c,v 1.11 1997/06/05 11:13:26 lukem Exp $	*/
 
 /*-
@@ -13,11 +13,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -38,7 +34,7 @@
 #if 0
 static char sccsid[] = "@(#)tape.c	8.2 (Berkeley) 3/17/94";
 #else
-static char rcsid[] = "$OpenBSD: tape.c,v 1.15 2002/02/19 19:39:38 millert Exp $";
+static const char rcsid[] = "$OpenBSD: tape.c,v 1.20 2003/07/29 18:38:35 deraadt Exp $";
 #endif
 #endif /* not lint */
 
@@ -81,7 +77,7 @@ extern	int cartridge;
 extern	char *host;
 char	*nexttape;
 
-static	ssize_t atomic(ssize_t (*)(), int, char *, int);
+static	ssize_t atomic(ssize_t (*)(int, void *, size_t), int, char *, int);
 static	void doslave(int, int);
 static	void enslave(void);
 static	void flushtape(void);
@@ -131,7 +127,7 @@ static jmp_buf jmpbuf;	/* where to jump to if we are ready when the */
 			/* SIGUSR2 arrives from the previous slave */
 
 int
-alloctape()
+alloctape(void)
 {
 	int pgoff = getpagesize() - 1;
 	char *buf;
@@ -171,9 +167,7 @@ alloctape()
 }
 
 void
-writerec(dp, isspcl)
-	char *dp;
-	int isspcl;
+writerec(char *dp, int isspcl)
 {
 
 	slp->req[trecno].dblk = (daddr_t)0;
@@ -188,9 +182,7 @@ writerec(dp, isspcl)
 }
 
 void
-dumpblock(blkno, size)
-	daddr_t blkno;
-	int size;
+dumpblock(daddr_t blkno, int size)
 {
 	int avail, tpblks, dblkno;
 
@@ -211,8 +203,7 @@ dumpblock(blkno, size)
 int	nogripe = 0;
 
 void
-tperror(signo)
-	int signo;
+tperror(int signo)
 {
 
 	if (pipeout) {
@@ -233,8 +224,7 @@ tperror(signo)
 }
 
 void
-sigpipe(signo)
-	int signo;
+sigpipe(int signo)
 {
 
 	quit("Broken pipe\n");
@@ -245,7 +235,7 @@ sigpipe(signo)
  *	Update xferrate stats
  */
 time_t
-do_stats()
+do_stats(void)
 {
 	time_t tnow, ttaken;
 	int blocks;
@@ -271,8 +261,7 @@ do_stats()
  * XXX not safe
  */
 void
-statussig(notused)
-	int notused;
+statussig(int notused)
 {
 	time_t	tnow, deltat;
 	char	msgbuf[128];
@@ -293,7 +282,7 @@ statussig(notused)
 }
 
 static void
-flushtape()
+flushtape(void)
 {
 	int i, blks, got;
 	long lastfirstrec;
@@ -302,7 +291,8 @@ flushtape()
 
 	slp->req[trecno].count = 0;			/* Sentinel */
 
-	if (atomic(write, slp->fd, (char *)slp->req, siz) != siz)
+	if (atomic((ssize_t (*)(int, void *, size_t))write, slp->fd,
+	    (char *)slp->req, siz) != siz)
 		quit("error writing command pipe: %s\n", strerror(errno));
 	slp->sent = 1; /* we sent a request, read the response later */
 
@@ -370,7 +360,7 @@ flushtape()
 }
 
 void
-trewind()
+trewind(void)
 {
 	int f;
 	int got;
@@ -423,15 +413,12 @@ trewind()
 }
 
 void
-close_rewind()
+close_rewind(void)
 {
-	time_t tstart_changevol, tend_changevol;
-
 	trewind();
 	(void)do_stats();
 	if (nexttape)
 		return;
-	time(&tstart_changevol);
 	if (!nogripe) {
 		msg("Change Volumes: Mount volume #%d\n", tapeno+1);
 		broadcast("CHANGE DUMP VOLUMES!\7\7\n");
@@ -441,12 +428,10 @@ close_rewind()
 			dumpabort(0);
 			/*NOTREACHED*/
 		}
-	time(&tend_changevol);
-	tstart_writing += (tend_changevol - tstart_changevol);
 }
 
 void
-rollforward()
+rollforward(void)
 {
 	struct req *p, *q, *prev;
 	struct slave *tslp;
@@ -498,7 +483,8 @@ rollforward()
 			lastspclrec = savedtapea - 1;
 		}
 		size = (char *)ntb - (char *)q;
-		if (atomic(write, slp->fd, (char *)q, size) != size) {
+		if (atomic((ssize_t (*)(int, void *, size_t))write,
+		    slp->fd, (char *)q, size) != size) {
 			perror("  DUMP: error writing command pipe");
 			dumpabort(0);
 		}
@@ -561,8 +547,7 @@ rollforward()
  * everything continues as if nothing had happened.
  */
 void
-startnewtape(top)
-	int top;
+startnewtape(int top)
 {
 	int	parentpid;
 	int	childpid;
@@ -615,7 +600,7 @@ restore_check_point:
 			case X_FINOK:
 				msg("Child %d finishes X_FINOK\n", childpid);
 				break;
-			case X_ABORT:	
+			case X_ABORT:
 				msg("Child %d finishes X_ABORT\n", childpid);
 				break;
 			case X_REWRITE:
@@ -699,8 +684,7 @@ restore_check_point:
 }
 
 void
-dumpabort(signo)
-	int signo;
+dumpabort(int signo)
 {
 
 	if (master != 0 && master != getpid())
@@ -717,8 +701,7 @@ dumpabort(signo)
 }
 
 __dead void
-Exit(status)
-	int status;
+Exit(int status)
 {
 
 #ifdef TDEBUG
@@ -731,8 +714,7 @@ Exit(status)
  * proceed - handler for SIGUSR2, used to synchronize IO between the slaves.
  */
 void
-proceed(signo)
-	int signo;
+proceed(int signo)
 {
 
 	if (ready)
@@ -741,7 +723,7 @@ proceed(signo)
 }
 
 void
-enslave()
+enslave(void)
 {
 	int cmd[2];
 	int i, j;
@@ -776,17 +758,16 @@ enslave()
 			Exit(X_FINOK);
 		}
 	}
-	
+
 	for (i = 0; i < SLAVES; i++)
-		(void) atomic(write, slaves[i].fd,
-			      (char *) &slaves[(i + 1) % SLAVES].pid,
-		              sizeof(slaves[0].pid));
-		
+		(void) atomic((ssize_t (*)(int, void *, size_t))write,
+		    slaves[i].fd, (char *) &slaves[(i + 1) % SLAVES].pid,
+		    sizeof(slaves[0].pid));
 	master = 0;
 }
 
 void
-killall()
+killall(void)
 {
 	int i;
 
@@ -805,9 +786,7 @@ killall()
  * get the lock back for the next cycle by swapping descriptors.
  */
 static void
-doslave(cmd, slave_number)
-	int cmd;
-        int slave_number;
+doslave(int cmd, int slave_number)
 {
 	int nread;
 	int nextslave, size, eot_count;
@@ -905,7 +884,8 @@ doslave(cmd, slave_number)
 			 * pass size of write back to master
 			 * (for EOT handling)
 			 */
-			(void) atomic(write, cmd, (char *)&size, sizeof(size));
+			(void) atomic((ssize_t (*)(int, void *, size_t))write,
+			    cmd, (char *)&size, sizeof(size));
 		}
 
 		/*
@@ -924,11 +904,7 @@ doslave(cmd, slave_number)
  * loop until the count is satisfied (or error).
  */
 static ssize_t
-atomic(func, fd, buf, count)
-	ssize_t (*func)();
-	int fd;
-	char *buf;
-	int count;
+atomic(ssize_t (*func)(int, void *, size_t), int fd, char *buf, int count)
 {
 	ssize_t got, need = count;
 

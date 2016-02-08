@@ -1,4 +1,4 @@
-/*	$OpenBSD: mount_portal.c,v 1.22 2002/09/06 21:16:34 deraadt Exp $	*/
+/*	$OpenBSD: mount_portal.c,v 1.26 2003/07/29 18:38:36 deraadt Exp $	*/
 /*	$NetBSD: mount_portal.c,v 1.8 1996/04/13 01:31:54 jtc Exp $	*/
 
 /*
@@ -16,11 +16,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -47,7 +43,7 @@ char copyright[] =
 #if 0
 static char sccsid[] = "@(#)mount_portal.c	8.6 (Berkeley) 4/26/95";
 #else
-static char rcsid[] = "$OpenBSD: mount_portal.c,v 1.22 2002/09/06 21:16:34 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: mount_portal.c,v 1.26 2003/07/29 18:38:36 deraadt Exp $";
 #endif
 #endif /* not lint */
 
@@ -77,15 +73,14 @@ const struct mntopt mopts[] = {
 
 extern char *__progname;	/* from crt0.o */
 
-static char *mountpt;		/* made available to signal handler */
+static char mountpt[MAXPATHLEN];	/* made available to signal handler */
 
 static void usage(void);
 
 static volatile sig_atomic_t readcf;	/* Set when SIGHUP received */
 
 static void
-sigchld(sig)
-	int sig;
+sigchld(int sig)
 {
 	int save_errno = errno;
 	struct syslog_data sdata = SYSLOG_DATA_INIT;
@@ -99,16 +94,14 @@ sigchld(sig)
 }
 
 static void
-sighup(sig)
-	int sig;
+sighup(int sig)
 {
 
 	readcf = 1;
 }
 
 static void
-sigterm(sig)
-	int sig;
+sigterm(int sig)
 {
 	struct syslog_data sdata = SYSLOG_DATA_INIT;
 
@@ -119,9 +112,7 @@ sigterm(sig)
 }
 
 int
-main(argc, argv)
-	int argc;
-	char *argv[];
+main(int argc, char *argv[])
 {
 	struct portal_args args;
 	struct sockaddr_un un;
@@ -161,7 +152,8 @@ main(argc, argv)
 	 * Get config file and mount point
 	 */
 	conf = argv[optind];
-	mountpt = argv[optind+1];
+	if (realpath(argv[optind+1], mountpt) == NULL)
+		err(1, "realpath %s", mountpt);
 
 	/*
 	 * Construct the listening socket
@@ -241,7 +233,7 @@ main(argc, argv)
 			conf_read(&q, conf);
 			continue;
 		}
-	
+
 		/*
 		 * Accept a new connection
 		 * Will get EINTR if a signal has arrived, so just
@@ -300,7 +292,7 @@ main(argc, argv)
 }
 
 static void
-usage()
+usage(void)
 {
 	(void)fprintf(stderr,
 		"usage: %s [-o options] config mount-point\n", __progname);

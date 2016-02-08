@@ -1,4 +1,4 @@
-/*	$OpenBSD: socks.c,v 1.6 2002/12/30 17:55:25 stevesk Exp $	*/
+/*	$OpenBSD: socks.c,v 1.8 2003/07/07 21:36:23 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1999 Niklas Hallqvist.  All rights reserved.
@@ -11,11 +11,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by Niklas Hallqvist.
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -51,9 +46,12 @@
 #define SOCKS_MAXCMDSZ	10
 
 int	remote_connect(char *, char *, struct addrinfo);
+int	socks_connect(char *host, char *port, struct addrinfo hints,
+	    char *proxyhost, char *proxyport, struct addrinfo proxyhints,
+	    int socksv);
 
 static in_addr_t
-decode_addr (const char *s)
+decode_addr(const char *s)
 {
 	struct hostent *hp = gethostbyname (s);
 	struct in_addr retval;
@@ -66,7 +64,7 @@ decode_addr (const char *s)
 }
 
 static in_port_t
-decode_port (const char *s)
+decode_port(const char *s)
 {
 	struct servent *sp;
 	in_port_t port;
@@ -84,7 +82,7 @@ decode_port (const char *s)
 }
 
 int
-socks_connect (char *host, char *port, struct addrinfo hints,
+socks_connect(char *host, char *port, struct addrinfo hints,
     char *proxyhost, char *proxyport, struct addrinfo proxyhints,
     int socksv)
 {

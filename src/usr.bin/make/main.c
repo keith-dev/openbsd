@@ -1,5 +1,5 @@
 /*	$OpenPackages$ */
-/*	$OpenBSD: main.c,v 1.59 2002/12/30 22:12:38 millert Exp $ */
+/*	$OpenBSD: main.c,v 1.62 2003/06/03 02:56:11 millert Exp $ */
 /*	$NetBSD: main.c,v 1.34 1997/03/24 20:56:36 gwr Exp $	*/
 
 /*
@@ -19,11 +19,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -194,9 +190,7 @@ MainParseArgs(argc, argv)
 	int argc;
 	char **argv;
 {
-	extern int optind;
-	extern char *optarg;
-	int c;
+	int c, optend;
 	int forceJobs = 0;
 
 #define OPTFLAGS "BD:I:PSV:d:ef:ij:km:nqrst"
@@ -204,8 +198,19 @@ MainParseArgs(argc, argv)
 
 	optind = 1;	/* since we're called more than once */
 	optreset = 1;
+	optend = 0;
 	while (optind < argc) {
-		switch (c = getopt(argc, argv, OPTFLAGS)) {
+		if (!optend && argv[optind][0] == '-') {
+			if (argv[optind][1] == '\0')
+				optind++;	/* ignore "-" */
+			else if (argv[optind][1] == '-' &&
+			    argv[optind][2] == '\0') {
+				optind++;	/* ignore "--" */
+				optend++;	/* "--" denotes end of flags */
+			}
+		}
+		c = optend ? -1 : getopt(argc, argv, OPTFLAGS);
+		switch (c) {
 		case 'D':
 			Var_Set(optarg, "1", VAR_GLOBAL);
 			record_option(c, optarg);
@@ -304,8 +309,7 @@ MainParseArgs(argc, argv)
 			    !Parse_DoVar(argv[optind], VAR_CMD)) {
 				if (!*argv[optind])
 					Punt("illegal (null) argument.");
-				if (strcmp(argv[optind], "-") != 0)
-					Lst_AtEnd(create, estrdup(argv[optind]));
+				Lst_AtEnd(create, estrdup(argv[optind]));
 			}
 			optind++;	/* skip over non-option */
 			break;
@@ -346,6 +350,7 @@ Main_ParseArgLine(line)
 	char *buf;
 	char *argv0;
 	const char *s;
+	size_t len;
 
 
 	if (line == NULL)
@@ -367,8 +372,9 @@ Main_ParseArgLine(line)
 			break;
 	}
 	argv0 = Var_Value(".MAKE");
-	buf = emalloc(strlen(line) + strlen(argv0) + 2);
-	(void)sprintf(buf, "%s %s", argv0, line);
+	len = strlen(line) + strlen(argv0) + 2;
+	buf = emalloc(len);
+	(void)snprintf(buf, len, "%s %s", argv0, line);
 
 	argv = brk_string(buf, &argc, &args);
 	free(buf);

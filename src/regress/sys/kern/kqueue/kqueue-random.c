@@ -1,5 +1,5 @@
-/*	$OpenBSD: kqueue-random.c,v 1.1 2002/06/19 03:05:07 mickey Exp $	*/
-/*	Copyright (c) 2002 Michael Shalayeff, Public Domain	*/
+/*	$OpenBSD: kqueue-random.c,v 1.4 2003/07/31 21:48:08 deraadt Exp $	*/
+/*	Written by Michael Shalayeff, 2002, Public Domain	*/
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -13,10 +13,12 @@
 
 #include <dev/rndvar.h>
 
+int do_random(void);
+
 int
 do_random(void)
 {
-	int n, fd, kq, status;
+	int n, fd, kq;
 	struct timespec ts;
 	struct kevent ev;
 	u_int32_t buf[POOLWORDS];
@@ -55,7 +57,7 @@ do_random(void)
 		return (1);
 	}
 
-	n = MIN((ev.data + 31) / 32, sizeof(buf));
+	n = MIN((ev.data + 7) / 8, sizeof(buf));
 	if (read(fd, buf, n) < 1)
 		return (1);
 

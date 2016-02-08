@@ -1,4 +1,4 @@
-/*	$OpenBSD: fsutil.c,v 1.8 2002/09/06 21:16:16 deraadt Exp $	*/
+/*	$OpenBSD: fsutil.c,v 1.12 2003/07/29 18:38:35 deraadt Exp $	*/
 /*	$NetBSD: fsutil.c,v 1.2 1996/10/03 20:06:31 christos Exp $	*/
 
 /*
@@ -13,11 +13,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -34,7 +30,7 @@
  * SUCH DAMAGE.
  */
 #ifndef lint
-static char rcsid[] = "$NetBSD: fsutil.c,v 1.2 1996/10/03 20:06:31 christos Exp $";
+static const char rcsid[] = "$OpenBSD: fsutil.c,v 1.12 2003/07/29 18:38:35 deraadt Exp $";
 #endif /* not lint */
 
 #include <sys/param.h>
@@ -83,7 +79,7 @@ void
 errexit(const char *fmt, ...)
 {
 	va_list ap;
-	
+
 	va_start(ap, fmt);
 	(void) vfprintf(stderr, fmt, ap);
 	va_end(ap);
@@ -112,7 +108,7 @@ void
 pfatal(const char *fmt, ...)
 {
 	va_list ap;
-	
+
 	va_start(ap, fmt);
 	vmsg(1, fmt, ap);
 	va_end(ap);
@@ -123,7 +119,7 @@ void
 pwarn(const char *fmt, ...)
 {
 	va_list ap;
-	
+
 	va_start(ap, fmt);
 	vmsg(0, fmt, ap);
 	va_end(ap);
@@ -139,7 +135,7 @@ void
 panic(const char *fmt, ...)
 {
 	va_list ap;
-	
+
 	va_start(ap, fmt);
 	vmsg(1, fmt, ap);
 	va_end(ap);
@@ -160,7 +156,7 @@ unrawname(char *name)
 		return (name);
 	if (dp[1] != 'r')
 		return (name);
-	(void)strcpy(&dp[1], &dp[2]);
+	(void)memmove(&dp[1], &dp[2], strlen(&dp[2]) + 1);
 	return (name);
 }
 

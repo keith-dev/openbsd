@@ -1,4 +1,4 @@
-/*	$OpenBSD: sdl.c,v 1.6 2003/03/03 22:22:23 cloder Exp $ */
+/*	$OpenBSD: sdl.c,v 1.8 2003/08/22 21:50:34 david Exp $ */
 /*
  * Copyright (c) 2003 Bob Beck.  All rights reserved.
  *
@@ -47,6 +47,8 @@
 
 static void sdl_free(struct sdlist *);
 static void sdl_clear(struct sdlist *);
+int match_addr(struct sdaddr *a, struct sdaddr *m, struct sdaddr *b,
+    sa_family_t af);
 
 extern int debug;
 struct sdlist *blacklists = NULL;
@@ -99,7 +101,7 @@ sdl_add(char *sdname, char *sdstring, char ** addrs, int addrc)
 
 	/*
 	 * Cycle through addrs, converting. We assume they are correctly
-	 * formatted v4 and v6 addrs, if they don't all convert correcly, the
+	 * formatted v4 and v6 addrs, if they don't all convert correctly, the
 	 * add fails. Each address should be address/maskbits
 	 */
 	blacklists[index].addrs = malloc(addrc * sizeof(struct sdentry));

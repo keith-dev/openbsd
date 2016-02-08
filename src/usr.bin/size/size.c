@@ -1,4 +1,4 @@
-/*	$OpenBSD: size.c,v 1.14 2002/02/16 21:27:52 millert Exp $	*/
+/*	$OpenBSD: size.c,v 1.19 2003/06/10 22:20:51 deraadt Exp $	*/
 /*	$NetBSD: size.c,v 1.7 1996/01/14 23:07:12 pk Exp $	*/
 
 /*
@@ -13,11 +13,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -44,7 +40,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)size.c	8.2 (Berkeley) 12/9/93";
 #endif
-static char rcsid[] = "$OpenBSD: size.c,v 1.14 2002/02/16 21:27:52 millert Exp $";
+static char rcsid[] = "$OpenBSD: size.c,v 1.19 2003/06/10 22:20:51 deraadt Exp $";
 #endif /* not lint */
 
 #include <sys/param.h>
@@ -75,9 +71,7 @@ int	show_objfile(int, char *, FILE *);
 void	usage(void);
 
 int
-main(argc, argv)
-	int argc;
-	char *argv[];
+main(int argc, char *argv[])
 {
 	int ch, eval;
 
@@ -117,9 +111,7 @@ main(argc, argv)
  *	object files as input.
  */
 int
-process_file(count, fname)
-	int count;
-	char *fname;
+process_file(int count, char *fname)
 {
 	struct exec exec_head;
 	FILE *fp;
@@ -162,10 +154,7 @@ process_file(count, fname)
  *	show symbols in the given archive file
  */
 int
-show_archive(count, fname, fp)
-	int count;
-	char *fname;
-	FILE *fp;
+show_archive(int count, char *fname, FILE *fp)
 {
 	struct ar_hdr ar_head;
 	struct exec exec_head;
@@ -203,19 +192,21 @@ show_archive(count, fname, fp)
 		 * on each output line
 		 */
 		p = name;
-		if (count > 1)
-			p += sprintf(p, "%s:", fname);
+		if (count > 1) {
+			snprintf(name, baselen - 1, "%s:", fname);
+			p += strlen(name);
+		}
 #ifdef AR_EFMT1
 		/*
 		 * BSD 4.4 extended AR format: #1/<namelen>, with name as the
 		 * first <namelen> bytes of the file
 		 */
-		if (		(ar_head.ar_name[0] == '#') &&
-				(ar_head.ar_name[1] == '1') &&
-				(ar_head.ar_name[2] == '/') && 
-				(isdigit(ar_head.ar_name[3]))) {
-
+		if ((ar_head.ar_name[0] == '#') &&
+		    (ar_head.ar_name[1] == '1') &&
+		    (ar_head.ar_name[2] == '/') && 
+		    (isdigit(ar_head.ar_name[3]))) {
 			int len = atoi(&ar_head.ar_name[3]);
+
 			if (len > namelen) {
 				p -= (long)name;
 				if ((name = realloc(name, baselen+len)) == NULL)
@@ -272,10 +263,7 @@ skip:		if (fseek(fp, last_ar_off + even(atol(ar_head.ar_size)),
 }
 
 int
-show_objfile(count, name, fp)
-	int count;
-	char *name;
-	FILE *fp;
+show_objfile(int count, char *name, FILE *fp)
 {
 	static int first = 1;
 	struct exec head;
@@ -313,7 +301,7 @@ show_objfile(count, name, fp)
 }
 
 void
-usage()
+usage(void)
 {
 	(void)fprintf(stderr, "usage: size [-tw] [file ...]\n");
 	exit(1);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: displayq.c,v 1.22 2002/06/09 21:58:46 millert Exp $	*/
+/*	$OpenBSD: displayq.c,v 1.26 2003/06/02 23:36:53 millert Exp $	*/
 /*	$NetBSD: displayq.c,v 1.21 2001/08/30 00:51:50 itojun Exp $	*/
 
 /*
@@ -13,11 +13,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -38,7 +34,7 @@
 #if 0
 static const char sccsid[] = "@(#)displayq.c	8.4 (Berkeley) 4/28/95";
 #else
-static const char rcsid[] = "$OpenBSD: displayq.c,v 1.22 2002/06/09 21:58:46 millert Exp $";
+static const char rcsid[] = "$OpenBSD: displayq.c,v 1.26 2003/06/02 23:36:53 millert Exp $";
 #endif
 #endif /* not lint */
 
@@ -56,6 +52,7 @@ static const char rcsid[] = "$OpenBSD: displayq.c,v 1.22 2002/06/09 21:58:46 mil
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <vis.h>
 
 #include "lp.h"
 #include "lp.local.h"
@@ -112,6 +109,8 @@ displayq(int format)
 		    win.ws_col > 0)
 			termwidth = win.ws_col;
 	}
+	if (termwidth < 60)
+		termwidth = 60;
 
 	lflag = format;
 	totsize = 0;
@@ -271,7 +270,7 @@ displayq(int format)
 		}
 	}
 	if (cp-line < sizeof(line) - 1)
-		strcat(line, "\n");
+		strlcat(line, "\n", sizeof(line));
 	else
 		line[sizeof(line) - 2] = '\n';
 	fd = getport(RM, 0);
@@ -282,6 +281,7 @@ displayq(int format)
 	}
 	else {
 		struct sigaction osa, nsa;
+		char *visline;
 
 		i = strlen(line);
 		if (write(fd, line, i) != i)
@@ -292,12 +292,16 @@ displayq(int format)
 		nsa.sa_flags = 0;
 		(void)sigaction(SIGALRM, &nsa, &osa);
 		alarm(wait_time);
+		if ((visline = (char *)malloc(4 * sizeof(line) + 1)) == NULL)
+			fatal("Out of memory");
 		while ((i = read(fd, line, sizeof(line))) > 0) {
-			(void)fwrite(line, 1, i, stdout);
+			i = strvisx(visline, line, i, VIS_SAFE|VIS_NOSLASH);
+			(void)fwrite(visline, 1, i, stdout);
 			alarm(wait_time);
 		}
 		alarm(0);
 		(void)sigaction(SIGALRM, &osa, NULL);
+		free(visline);
 		(void)close(fd);
 	}
 }

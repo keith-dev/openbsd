@@ -1,4 +1,4 @@
-/*	$OpenBSD: optr.c,v 1.22 2002/02/21 16:16:26 millert Exp $	*/
+/*	$OpenBSD: optr.c,v 1.27 2003/07/29 18:38:35 deraadt Exp $	*/
 /*	$NetBSD: optr.c,v 1.11 1997/05/27 08:34:36 mrg Exp $	*/
 
 /*-
@@ -13,11 +13,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -38,7 +34,7 @@
 #if 0
 static char sccsid[] = "@(#)optr.c	8.2 (Berkeley) 1/6/94";
 #else
-static char rcsid[] = "$OpenBSD: optr.c,v 1.22 2002/02/21 16:16:26 millert Exp $";
+static const char rcsid[] = "$OpenBSD: optr.c,v 1.27 2003/07/29 18:38:35 deraadt Exp $";
 #endif
 #endif /* not lint */
 
@@ -79,15 +75,14 @@ static	int timeout;
 static	char *attnmessage;		/* attention message */
 
 int
-query(question)
-	char	*question;
+query(char *question)
 {
 	char	replybuffer[64];
 	int	back, errcount;
 	FILE	*mytty;
 	time_t	firstprompt, when_answered;
 
-	firstprompt = time(NULL);
+	(void) time(&firstprompt);
 
 	if ((mytty = fopen(_PATH_TTY, "r")) == NULL)
 		quit("fopen on %s fails: %s\n", _PATH_TTY, strerror(errno));
@@ -120,14 +115,14 @@ query(question)
 	if (signal(SIGALRM, sig) == SIG_IGN)
 		signal(SIGALRM, SIG_IGN);
 	(void) fclose(mytty);
-	when_answered = time(NULL);
+	(void) time(&when_answered);
 	/*
 	 * Adjust the base for time estimates to ignore time we spent waiting
 	 * for operator input.
 	 */
-	if (tstart_writing != 0)
-	    tstart_writing += (when_answered - firstprompt);
-	return(back);
+	if (when_answered - firstprompt > 0)
+		tstart_writing += (when_answered - firstprompt);
+	return (back);
 }
 
 char lastmsg[BUFSIZ];
@@ -138,8 +133,7 @@ char lastmsg[BUFSIZ];
  * XXX not safe
  */
 void
-alarmcatch(signo)
-	int signo;
+alarmcatch(int signo)
 {
 	int save_errno = errno;
 
@@ -168,8 +162,7 @@ alarmcatch(signo)
  *	Here if an inquisitive operator interrupts the dump program
  */
 void
-interrupt(signo)
-	int signo;
+interrupt(int signo)
 {
 	msg("Interrupt received.\n");
 	if (query("Do you want to abort dump?"))
@@ -180,8 +173,7 @@ interrupt(signo)
  *	We now use wall(1) to do the actual broadcasting.
  */
 void
-broadcast(message)
-	char	*message;
+broadcast(char *message)
 {
 	FILE *fp;
 	char buf[sizeof(_PATH_WALL) + sizeof(OPGRENT) + 3];
@@ -209,7 +201,7 @@ broadcast(message)
 time_t	tschedule = 0;
 
 void
-timeest()
+timeest(void)
 {
 	time_t	tnow, deltat;
 
@@ -217,7 +209,7 @@ timeest()
 	if (tnow >= tschedule) {
 		tschedule = tnow + 300;
 		if (blockswritten < 500)
-			return;	
+			return;
 		deltat = tstart_writing - tnow +
 			(1.0 * (tnow - tstart_writing))
 			/ blockswritten * tapesize;
@@ -279,8 +271,7 @@ quit(const char *fmt, ...)
  */
 
 struct fstab *
-allocfsent(fs)
-	struct fstab *fs;
+allocfsent(struct fstab *fs)
 {
 	struct fstab *new;
 
@@ -303,7 +294,7 @@ struct	pfstab {
 static	struct pfstab *table;
 
 void
-getfstab()
+getfstab(void)
 {
 	struct fstab *fs;
 	struct pfstab *pf;
@@ -343,8 +334,7 @@ getfstab()
  * The file name can omit the leading '/'.
  */
 struct fstab *
-fstabsearch(key)
-	char *key;
+fstabsearch(char *key)
 {
 	struct pfstab *pf;
 	struct fstab *fs;
@@ -372,10 +362,10 @@ fstabsearch(key)
 
 /*
  *	Tell the operator what to do
+ *	w ==> just what to do; W ==> most recent dumps
  */
 void
-lastdump(arg)
-	char	arg;	/* w ==> just what to do; W ==> most recent dumps */
+lastdump(int arg)
 {
 	int i;
 	struct fstab *dt;
@@ -417,8 +407,7 @@ lastdump(arg)
 }
 
 int
-datesort(a1, a2)
-	const void *a1, *a2;
+datesort(const void *a1, const void *a2)
 {
 	struct dumpdates *d1 = *(struct dumpdates **)a1;
 	struct dumpdates *d2 = *(struct dumpdates **)a2;

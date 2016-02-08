@@ -1,4 +1,4 @@
-/*	$OpenBSD: pthread_private.h,v 1.45 2003/02/14 03:58:42 marc Exp $	*/
+/*	$OpenBSD: pthread_private.h,v 1.48 2003/08/01 19:50:23 millert Exp $	*/
 /*
  * Copyright (c) 1995-1998 John Birrell <jb@cimlogic.com.au>.
  * All rights reserved.
@@ -169,7 +169,7 @@
 /*
  * Define the signals to be used for scheduling.
  */
-#if defined(_PTHREADS_COMPAT_SCHED)
+#if defined(_PTHREADS_COMPAT_SCHED) || defined(PROF)
 #define _ITIMER_SCHED_TIMER	ITIMER_VIRTUAL
 #define _SCHED_SIGNAL		SIGVTALRM
 #else
@@ -624,7 +624,6 @@ struct pthread {
 	 */
 	sigset_t	sigmask;
 	sigset_t	sigpend;
-	int		sigmask_seqno;
 
 	/* Thread state: */
 	enum pthread_state	state;
@@ -1095,6 +1094,7 @@ void	_thread_clear_pending(int, pthread_t);
 void	_thread_dump_data(const void *, int);
 void    _thread_dump_info(void);
 void    _thread_init(void);
+void	_thread_kern_lock(int);
 void    _thread_kern_sched(struct sigcontext *);
 void    _thread_kern_sched_state(enum pthread_state, const char *, int);
 void	_thread_kern_sched_state_unlock(enum pthread_state, spinlock_t *,

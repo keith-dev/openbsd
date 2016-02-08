@@ -1,4 +1,4 @@
-/*	$OpenBSD: tftp.c,v 1.10 2002/02/16 21:27:55 millert Exp $	*/
+/*	$OpenBSD: tftp.c,v 1.14 2003/06/25 15:45:10 deraadt Exp $	*/
 /*	$NetBSD: tftp.c,v 1.5 1995/04/29 05:55:25 cgd Exp $	*/
 
 /*
@@ -13,11 +13,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -38,7 +34,7 @@
 #if 0
 static char sccsid[] = "@(#)tftp.c	8.1 (Berkeley) 6/6/93";
 #endif
-static char rcsid[] = "$OpenBSD: tftp.c,v 1.10 2002/02/16 21:27:55 millert Exp $";
+static const char rcsid[] = "$OpenBSD: tftp.c,v 1.14 2003/06/25 15:45:10 deraadt Exp $";
 #endif /* not lint */
 
 /* Many bug fixes are from Jim Guyton <guyton@rand-unix> */
@@ -58,6 +54,7 @@ static char rcsid[] = "$OpenBSD: tftp.c,v 1.10 2002/02/16 21:27:55 millert Exp $
 #include <setjmp.h>
 #include <signal.h>
 #include <stdio.h>
+#include <stddef.h>
 #include <string.h>
 #include <unistd.h>
 #include <err.h>
@@ -91,18 +88,13 @@ static void tpacket(const char *, struct tftphdr *, int);
  * Send the requested file.
  */
 void
-sendfile(fd, name, mode)
-	int fd;
-	char *name;
-	char *mode;
+sendfile(int fd, char *name, char *mode)
 {
-	struct tftphdr *ap;	   /* data and ack packets */
-	struct tftphdr *r_init(), *dp;
-	int n;
+	struct tftphdr *dp, *ap;	   /* data and ack packets */
 	volatile int block, size, convert;
 	volatile unsigned long amount;
 	struct sockaddr_in from;
-	int fromlen;
+	int n, fromlen;
 	FILE *file;
 
 	startclock();		/* start stat's clock */
@@ -196,18 +188,13 @@ abort:
  * Receive a file.
  */
 void
-recvfile(fd, name, mode)
-	int fd;
-	char *name;
-	char *mode;
+recvfile(int fd, char *name, char *mode)
 {
-	struct tftphdr *ap;
-	struct tftphdr *dp, *w_init();
-	int n;
+	struct tftphdr *dp, *ap;
 	volatile int block, size, firsttrip;
 	volatile unsigned long amount;
 	struct sockaddr_in from;
-	int fromlen;
+	int n, fromlen;
 	FILE *file;
 	volatile int convert;		/* true if converting crlf -> lf */
 
@@ -305,23 +292,20 @@ abort:						/* ok to ack, since user */
 }
 
 static int
-makerequest(request, name, tp, mode)
-	int request;
-	const char *name;
-	struct tftphdr *tp;
-	const char *mode;
+makerequest(int request, const char *name, struct tftphdr *tp,
+    const char *mode)
 {
 	char *cp;
+	int len, pktlen;
 
 	tp->th_opcode = htons((u_short)request);
 	cp = tp->th_stuff;
-	strcpy(cp, name);
-	cp += strlen(name);
-	*cp++ = '\0';
-	strcpy(cp, mode);
-	cp += strlen(mode);
-	*cp++ = '\0';
-	return (cp - (char *)tp);
+	pktlen = PKTSIZE - offsetof(struct tftphdr, th_stuff);
+	len = strlen(name) + 1;
+	strlcpy(cp, name, pktlen);
+	strlcpy(cp + len, mode, pktlen - len);
+	len += strlen(mode) + 1;
+	return (cp + len - (char *)tp);
 }
 
 struct errmsg {
@@ -346,8 +330,7 @@ struct errmsg {
  * offset by 100.
  */
 static void
-nak(error)
-	int error;
+nak(int error)
 {
 	struct errmsg *pe;
 	struct tftphdr *tp;
@@ -374,10 +357,7 @@ nak(error)
 }
 
 static void
-tpacket(s, tp, n)
-	const char *s;
-	struct tftphdr *tp;
-	int n;
+tpacket(const char *s, struct tftphdr *tp, int n)
 {
 	static char *opcodes[] =
 	   { "#0", "RRQ", "WRQ", "DATA", "ACK", "ERROR" };
@@ -416,23 +396,21 @@ struct timeval tstart;
 struct timeval tstop;
 
 static void
-startclock()
+startclock(void)
 {
 
 	(void)gettimeofday(&tstart, NULL);
 }
 
 static void
-stopclock()
+stopclock(void)
 {
 
 	(void)gettimeofday(&tstop, NULL);
 }
 
 static void
-printstats(direction, amount)
-	const char *direction;
-	unsigned long amount;
+printstats(const char *direction, unsigned long amount)
 {
 	double delta;
 			/* compute delta in 1/10's second units */
@@ -446,8 +424,7 @@ printstats(direction, amount)
 }
 
 static void
-timer(sig)
-	int sig;
+timer(int sig)
 {
 	int save_errno = errno;
 

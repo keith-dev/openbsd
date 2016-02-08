@@ -1,4 +1,4 @@
-/*	$OpenBSD: lam.c,v 1.4 2002/02/16 21:27:47 millert Exp $	*/
+/*	$OpenBSD: lam.c,v 1.9 2003/06/10 22:20:47 deraadt Exp $	*/
 /*	$NetBSD: lam.c,v 1.2 1994/11/14 20:27:42 jtc Exp $	*/
 
 /*-
@@ -13,11 +13,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -44,7 +40,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)lam.c	8.1 (Berkeley) 6/6/93";
 #endif
-static char rcsid[] = "$OpenBSD: lam.c,v 1.4 2002/02/16 21:27:47 millert Exp $";
+static char rcsid[] = "$OpenBSD: lam.c,v 1.9 2003/06/10 22:20:47 deraadt Exp $";
 #endif /* not lint */
 
 /*
@@ -79,9 +75,7 @@ void	 getargs(char *[]);
 char	*pad(struct openfile *);
 
 int
-main(argc, argv)
-	int argc;
-	char *argv[];
+main(int argc, char *argv[])
 {
 	struct	openfile *ip;
 
@@ -102,8 +96,7 @@ main(argc, argv)
 }
 
 void
-getargs(av)
-	char *av[];
+getargs(char *av[])
 {
 	struct	openfile *ip = input;
 	char *p;
@@ -155,9 +148,10 @@ getargs(av)
 			F = (*c == 'F' ? 1 : 0);
 			if (*++p || (p = *++av)) {
 				fmtp += strlen(fmtp) + 1;
-				if (fmtp > fmtbuf + BUFSIZ)
+				if (fmtp >= fmtbuf + BUFSIZ)
 					error("No more format space", "");
-				sprintf(fmtp, "%%%ss", p);
+				snprintf(fmtp, fmtbuf + BUFSIZ - fmtp,
+				    "%%%ss", p);
 				ip->format = fmtp;
 			}
 			else
@@ -174,30 +168,29 @@ getargs(av)
 }
 
 char *
-pad(ip)
-	struct openfile *ip;
+pad(struct openfile *ip)
 {
-	char *p = ip->sepstring;
+	size_t n;
 	char *lp = linep;
 
-	while (*p)
-		*lp++ = *p++;
+	n = strlcpy(lp, ip->sepstring,  line + sizeof(line) - lp);
+	lp += (n < line + sizeof(line) - lp) ? n : strlen(lp);
 	if (ip->pad) {
-		sprintf(lp, ip->format, "");
-		lp += strlen(lp);
+		n = snprintf(lp, line + sizeof(line) - lp, ip->format, "");
+		lp += (n < line + sizeof(line) - lp) ? n : strlen(lp);
 	}
 	return (lp);
 }
 
 char *
-gatherline(ip)
-	struct openfile *ip;
+gatherline(struct openfile *ip)
 {
+	size_t n;
 	char s[BUFSIZ];
-	int c;
 	char *p;
 	char *lp = linep;
 	char *end = s + BUFSIZ;
+	int c;
 
 	if (ip->eof)
 		return (pad(ip));
@@ -212,17 +205,15 @@ gatherline(ip)
 		morefiles--;
 		return (pad(ip));
 	}
-	p = ip->sepstring;
-	while (*p)
-		*lp++ = *p++;
-	sprintf(lp, ip->format, s);
-	lp += strlen(lp);
+	n = strlcpy(lp, ip->sepstring, line + sizeof(line) - lp);
+	lp += (n < line + sizeof(line) - lp) ? n : strlen(lp);
+	n = snprintf(lp, line + sizeof line - lp, ip->format, s);
+	lp += (n < line + sizeof(line) - lp) ? n : strlen(lp);
 	return (lp);
 }
 
 void
-error(msg, s)
-	char *msg, *s;
+error(char *msg, char *s)
 {
 	fprintf(stderr, "lam: ");
 	fprintf(stderr, msg, s);

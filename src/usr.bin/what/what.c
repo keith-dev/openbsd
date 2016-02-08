@@ -1,4 +1,4 @@
-/*	$OpenBSD: what.c,v 1.7 2002/02/16 21:27:59 millert Exp $	*/
+/*	$OpenBSD: what.c,v 1.11 2003/07/10 00:06:52 david Exp $	*/
 /*	$NetBSD: what.c,v 1.4 1994/12/20 16:01:03 jtc Exp $	*/
 
 /*
@@ -13,11 +13,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -44,7 +40,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)what.c	8.1 (Berkeley) 6/6/93";
 #endif
-static char rcsid[] = "$OpenBSD: what.c,v 1.7 2002/02/16 21:27:59 millert Exp $";
+static char rcsid[] = "$OpenBSD: what.c,v 1.11 2003/07/10 00:06:52 david Exp $";
 #endif /* not lint */
 
 #include <sys/types.h>
@@ -52,42 +48,61 @@ static char rcsid[] = "$OpenBSD: what.c,v 1.7 2002/02/16 21:27:59 millert Exp $"
 #include <stdio.h>
 #include <ctype.h>
 #include <err.h>
+#include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
-void search(char *);
+static void search(char *);
+static void usage(void);
+
+static int matches;
+static int sflag;
+
+extern char *__progname;
 
 /*
  * what
  */
 /* ARGSUSED */
 int
-main(argc, argv)
-	int argc;
-	char **argv;
+main(int argc, char *argv[])
 {
 	struct utsname utsn;
 	char match[256];
+	int c;
+
+	matches = sflag = 0;
+	while ((c = getopt(argc, argv, "s")) != -1) {
+		switch (c) {
+		case 's':
+			sflag = 1;
+			break;
+		default:
+			usage();
+		}
+	}
+	argc -= optind;
+	argv += optind;
 
 	if (uname(&utsn) == -1)
 		err(1, "uname");
-	strncpy(match, utsn.sysname, sizeof match);
+	strlcpy(match, utsn.sysname, sizeof match);
 
-	if (!*++argv) 
-		search(match);
-	else do {
+	if (argc < 1) {
+		usage();
+	} else do {
 		if (!freopen(*argv, "r", stdin)) {
 			perror(*argv);
-			exit(1);
+			exit(matches ? 0 : 1);
 		}
 		printf("%s\n", *argv);
 		search(match);
 	} while(*++argv);
-	exit(0);
+	exit(matches ? 0 : 1);
 }
 
-void
-search(match)
-	char *match;
+static void
+search(char *match)
 {
 	int c;
 	int i;
@@ -101,6 +116,9 @@ loop:		if (c == '$') {
 			while (isprint(c = getchar()))
 				putchar(c);
 			putchar('\n');
+			matches++;
+			if (sflag)
+				break;
 			goto loop;
 		}
 		if (c != '@')
@@ -113,8 +131,19 @@ loop:		if (c == '$') {
 			goto loop;
 		putchar('\t');
 		while ((c = getchar()) != EOF && c && c != '"' &&
-		    c != '>' && c != '\n')
+		    c != '>' && c != '\n' && c != '\\')
 			putchar(c);
 		putchar('\n');
+		matches++;
+		if (sflag)
+			break;
 	}
+}
+
+static void
+usage(void)
+{
+
+	(void)fprintf(stderr, "usage: %s [-s] file ...\n", __progname);
+	exit(1);
 }

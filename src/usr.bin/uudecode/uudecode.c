@@ -1,4 +1,4 @@
-/*	$OpenBSD: uudecode.c,v 1.9 2001/11/19 19:02:17 mpech Exp $	*/
+/*	$OpenBSD: uudecode.c,v 1.12 2003/07/10 00:06:51 david Exp $	*/
 /*	$NetBSD: uudecode.c,v 1.6 1994/11/17 07:40:43 jtc Exp $	*/
 
 /*-
@@ -13,11 +13,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -42,7 +38,7 @@ char copyright[] =
 #if 0
 static char sccsid[] = "@(#)uudecode.c	8.2 (Berkeley) 4/2/94";
 #endif
-static char rcsid[] = "$OpenBSD: uudecode.c,v 1.9 2001/11/19 19:02:17 mpech Exp $";
+static char rcsid[] = "$OpenBSD: uudecode.c,v 1.12 2003/07/10 00:06:51 david Exp $";
 #endif /* not lint */
 
 /*
@@ -55,6 +51,7 @@ static char rcsid[] = "$OpenBSD: uudecode.c,v 1.9 2001/11/19 19:02:17 mpech Exp 
  * security at all.
  */
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <locale.h>
 #include <errno.h>
@@ -65,13 +62,11 @@ static char rcsid[] = "$OpenBSD: uudecode.c,v 1.9 2001/11/19 19:02:17 mpech Exp 
 #include <unistd.h>
 
 static int decode(int);
-static void usage();
+static void usage(void);
 char *filename;
 
 int
-main(argc, argv)
-	int argc;
-	char *argv[];
+main(int argc, char *argv[])
 {
 	int rval;
 	int ch;
@@ -210,7 +205,7 @@ decode(int tostdout)
 }
 
 static void
-usage()
+usage(void)
 {
 	(void)fprintf(stderr, "usage: uudecode [-p] [file ...]\n");
 	exit(1);

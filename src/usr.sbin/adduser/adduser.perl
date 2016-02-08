@@ -1,6 +1,6 @@
 #!/usr/bin/perl
 #
-#	$OpenBSD: adduser.perl,v 1.40 2003/03/11 04:45:54 david Exp $
+#	$OpenBSD: adduser.perl,v 1.47 2003/06/17 00:58:30 jsyn Exp $
 #
 # Copyright (c) 1995-1996 Wolfram Schneider <wosch@FreeBSD.org>. Berlin.
 # All rights reserved.
@@ -47,7 +47,7 @@ $SIG{'TERM'} = 'cleanup';
 &config_read(@ARGV);		# read variables from config-file
 &parse_arguments(@ARGV);	# parse arguments
 
-if (!$check_only &&  $#batch < 0) {
+if (!$check_only && $#batch < 0) {
     &hints;
 }
 
@@ -56,6 +56,7 @@ $changes = 0;
 &variable_check;		# check for valid variables
 &passwd_check;			# check for valid passwdb
 &shells_read;			# read /etc/shells
+&login_conf_read;		# read /etc/login.conf
 &passwd_read;			# read /etc/master.passwd
 &group_read;			# read /etc/group
 &group_check;			# check for incon*
@@ -87,20 +88,22 @@ sub variables {
     $etc_passwd = "/etc/master.passwd";
     $etc_ptmp = "/etc/ptmp";
     $group = "/etc/group";
-    $pwd_mkdb = "pwd_mkdb -p";	# program for building passwd database
-    $encryptionmethod = "blowfish";
-    $rcsid = '$OpenBSD: adduser.perl,v 1.40 2003/03/11 04:45:54 david Exp $';
+    $etc_login_conf = "/etc/login.conf";
+    @pwd_mkdb = ("pwd_mkdb", "-p");	# program for building passwd database
+    $encryptionmethod = "auto";
+    $rcsid = '$OpenBSD: adduser.perl,v 1.47 2003/06/17 00:58:30 jsyn Exp $';
 
     # List of directories where shells located
     @path = ('/bin', '/usr/bin', '/usr/local/bin');
     # common shells, first element has higher priority
     @shellpref = ('csh', 'sh', 'bash', 'tcsh', 'ksh');
 
-    @encryption_methods = ('blowfish', 'md5', 'des', 'old');
+    @encryption_methods = ('auto', 'blowfish', 'md5', 'des', 'old');
 
     $defaultshell = 'sh';	# defaultshell if not empty
     $group_uniq = 'USER';
     $defaultgroup = $group_uniq;# login groupname, $group_uniq means username
+    $defaultclass = 'default';  # default user login class
 
     $uid_start = 1000;		# new users get this uid
     $uid_end   = 2147483647;	# max. uid
@@ -127,7 +130,7 @@ sub variables {
 	$etc_shells = "./shells";
 	$etc_passwd = "./master.passwd";
 	$group = "./group";
-	$pwd_mkdb = "pwd_mkdb -p -d .";
+	@pwd_mkdb = ("pwd_mkdb", "-p", "-d", ".");
 	$config = "adduser.conf";
 	$send_message = "./adduser.message";
 	$logfile = "./log.adduser";
@@ -139,8 +142,27 @@ sub variables {
     @passwd_backup = ();
     @group_backup = ();
     @message_buffer = ();
+    @login_classes = ();
     @user_variable_list = ();	# user variables in /etc/adduser.conf
     $do_not_delete = '## DO NOT DELETE THIS LINE!';
+}
+
+sub login_conf_read {
+     local($cont);
+
+     print "Reading $etc_login_conf\n" if $verbose;
+     open(S, $etc_login_conf) || die "$etc_login_conf: $!\n";
+
+     $cont = 0;
+     while(<S>) {
+	chomp;
+	s/^\s*//;
+        next if m/^(#|$)/;
+	if (!$cont && /^([^:]+):/) {
+	    push(@login_classes, split(/\|/, $1));
+	}
+	$cont = /\\$/;
+    }
 }
 
 # read shell database, see also: shells(5)
@@ -239,7 +261,7 @@ sub shell_default_valid {
 }
 
 # return default home partition (f.e. "/home")
-# create base directory if necessary 
+# create base directory if necessary
 sub home_partition {
     local($home) = @_;
     $home = &stripdir($home);
@@ -285,7 +307,7 @@ sub home_partition_valid {
 
 # check for valid passwddb
 sub passwd_check {
-    system(split(/\s+/, "$pwd_mkdb -c $etc_passwd"));
+    system(@pwd_mkdb, "-c", $etc_passwd);
     die "\nInvalid $etc_passwd - cannot add any users!\n" if $?;
 }
 
@@ -333,7 +355,7 @@ sub group_read {
 	($g_groupname, $pw, $g_gid, $memb) = (split(/:/, $_))[0..3];
 
 	$groupmembers{$g_gid} = $memb;
-	warn "Groupname exists twice: $g_groupname:$g_gid ->  $g_groupname:$groupname{$g_groupname}\n"
+	warn "Groupname exists twice: $g_groupname:$g_gid -> $g_groupname:$groupname{$g_groupname}\n"
 	    if $groupname{$g_groupname} && $verbose;
 	$groupname{$g_groupname} = $g_gid;
 	warn "Groupid exists twice:   $g_groupname:$g_gid -> $gid{$g_gid}:$g_gid\n"
@@ -365,7 +387,7 @@ sub new_users_name {
     local($name);
 
     while(1) {
-	$name = &confirm_list("Enter username", 1, "a-z0-9_-", "");
+	$name = &confirm_list("Enter username", 1, "", "");
 	if (length($name) > 31) {
 	    warn "Username is longer than 31 characters\a\n";
 	    next;
@@ -378,9 +400,9 @@ sub new_users_name {
 sub new_users_name_valid {
     local($name) = @_;
 
-    if ($name !~ /^[a-z0-9_][a-z0-9_\-]*$/ || $name eq "a-z0-9_-") {
+    if ($name !~ /^[a-zA-Z0-9_\.][a-zA-Z0-9_\.\-]*\$?$/ || $name eq "") {
 	warn "Illegal username. " .
-	    "Please use only lowercase characters or digits\a\n";
+	    "Please see the restrictions section of the man page.\a\n";
 	return 0;
     } elsif ($username{$name}) {
 	warn "Username ``$name'' already exists!\a\n"; return 0;
@@ -418,6 +440,13 @@ sub new_users_shell {
     return $shell{$sh};
 }
 
+sub new_users_login_class {
+    local($log_cl);
+	
+    $log_cl = &confirm_list("Login class", 0, $defaultclass, @login_classes);
+    return($log_cl);
+}
+
 # return free uid and gid
 sub new_users_id {
     local($name) = @_;
@@ -453,10 +482,10 @@ sub add_group {
     $groupmembers{$gid} .= "$name";
 
     local(@l) = split(',', $groupmembers{$gid});
-    # group(5): A group cannot have more than 200 members. 
-    # The maximum line length of /etc/group is 1024 characters. 
-    # Longer lines will be skiped.
-    if ($#l >= 200 || 
+    # group(5): A group cannot have more than 200 members.
+    # The maximum line length of /etc/group is 1024 characters.
+    # Longer lines will be skipped.
+    if ($#l >= 200 ||
 	length($groupmembers{$gid}) > 1024 - 50) { # 50 is for group name
 	warn "WARNING, group line ``$gid{$gid}'' is either too long or has\n" .
 	    "too many users in the group, see group(5)\a\n";
@@ -586,14 +615,15 @@ sub new_users_ok {
 
     print <<EOF;
 
-Name:	  $name
-Password: ****
-Fullname: $fullname
-Uid:	  $u_id
-Gid:	  $g_id ($group_login)
-Groups:	  $group_login $new_groups
-HOME:	  $home/$name
-Shell:	  $sh
+Name:	     $name
+Password:    ****
+Fullname:    $fullname
+Uid:	     $u_id
+Gid:	     $g_id ($group_login)
+Groups:	     $group_login $new_groups
+Login Class: $log_cl
+HOME:	     $home/$name
+Shell:	     $sh
 EOF
 
     return &confirm_yn("OK?", "yes");
@@ -605,10 +635,10 @@ sub new_users_pwdmkdb {
     local($user);
 
     $user = (split(/:/, $last))[0];
-    system(split(/\s+/, "$pwd_mkdb  -u $user $etc_passwd"));
+    system(@pwd_mkdb, "-u", $user, $etc_passwd);
     if ($?) {
 	warn "$last\n";
-	warn "``$pwd_mkdb'' failed\n";
+	warn "``pwd_mkdb'' failed\n";
 	exit($? >> 8);
     }
 }
@@ -656,7 +686,7 @@ sub new_users_sendmessage {
 
     local($cc) =
 	&confirm_list("Send message to ``$name'' and:",
-		      1, "no", ("root", "second_mail_address", 
+		      1, "no", ("root", "second_mail_address",
 		      "no carbon copy"));
     local($e);
     $cc = "" if $cc eq "no";
@@ -742,7 +772,9 @@ sub new_users {
     # g_id: group id
     # group_login: groupname of g_id
     # new_groups: some other groups
-    local($name, $group_login, $fullname, $sh, $u_id, $g_id, $new_groups);
+    # log_cl: login class
+    local($name, $group_login, $fullname, $sh, $u_id, $g_id, $new_groups,
+	$log_cl);
     local($groupmembers_bak, $cryptpwd);
     local($new_users_ok) = 1;
 
@@ -760,6 +792,7 @@ sub new_users {
 	$g_id = $groupname{$group_login} if (defined($groupname{$group_login}));
 
 	$new_groups = &new_users_groups($name, $new_groups);
+	$log_cl = &new_users_login_class;
 	$password = &new_users_password;
 
 
@@ -768,10 +801,11 @@ sub new_users {
 
 	    $cryptpwd = "*";	# Locked by default
 	    $cryptpwd = encrypt($password, &salt) if ($password ne "");
+	    $log_cl = "" if ($log_cl eq "default");
 
 	    # obscure perl bug
 	    $new_entry = "$name\:" . "$cryptpwd" .
-		"\:$u_id\:$g_id\::0:0:$fullname:$home/$name:$sh";
+		"\:$u_id\:$g_id\:$log_cl:0:0:$fullname:$home/$name:$sh";
 	    &append_file($etc_passwd, "$new_entry");
 	    &new_users_pwdmkdb("$new_entry");
 	    &new_users_group_update;
@@ -807,6 +841,7 @@ sub batch {
     $g_id = $groupname{$group_login} if (defined($groupname{$group_login}));
     ($flag, $new_groups) = &new_users_groups_valid($groups);
     return 0 if $flag;
+    $log_cl = ($defaultclass eq "default") ? "" : $defaultclass;
 
     $cryptpwd = "*";	# Locked by default
     if ($password ne "" && $password ne "*") {
@@ -815,7 +850,7 @@ sub batch {
     }
     # obscure perl bug
     $new_entry = "$name\:" . "$cryptpwd" .
-	"\:$u_id\:$g_id\::0:0:$fullname:$home/$name:$sh";
+	"\:$u_id\:$g_id\:$log_cl:0:0:$fullname:$home/$name:$sh";
     &append_file($etc_passwd, "$new_entry");
     &new_users_pwdmkdb("$new_entry");
     &new_users_group_update;
@@ -849,6 +884,17 @@ sub encryption_default {
     return($m);
 }
 
+sub class_default {
+    local($c) = $defaultclass;
+
+    if ($verbose) {
+	$c = &confirm_list("Default login class:", 0,
+		$defaultclass, @login_classes);
+	$changes++ if $c ne $defaultclass;
+    }
+    return($c);
+}
+
 # Confirm that we have a valid encryption method
 sub encryption_check {
     local($m) = $_[0];
@@ -856,7 +902,7 @@ sub encryption_check {
     foreach $i (@encryption_methods) {
         if ($m eq $i) { return 1; }
     }
-    
+
     if ($m =~ /^blowfish,(\d+)$/) { return 1; }
     return 0;
 }
@@ -875,6 +921,7 @@ usage: adduser
     [-dotdir dotdir]
     [-e|-encryption method]
     [-group login_group]
+    [-class login_class]
     [-h|-help]
     [-home home]
     [-message message_file]
@@ -887,7 +934,8 @@ usage: adduser
     [-v|-verbose]
 
 home=$home shell=$defaultshell dotdir=$dotdir login_group=$defaultgroup
-message_file=$send_message uid_start=$uid_start uid_end=$uid_end
+login_class=$defaultclass message_file=$send_message uid_start=$uid_start
+uid_end=$uid_end
 USAGE
     exit 1;
 }
@@ -915,22 +963,22 @@ sub salt {
         warn "calculate salt\n" if $verbose > 1;
 
         for ($i = 0; $i < 8; $i++) {
-	    srand(time + $rand + $$); 
+	    srand(time + $rand + $$);
 	    $rand = rand(25*29*17 + $rand);
 	    $salt .=  $itoa64[$rand & $#itoa64];
         }
-    } elsif ($encryptionmethod eq "md5") {
+    } elsif ($encryptionmethod eq "md5" || $encryptionmethod eq "auto") {
         $salt = "";
     } elsif ($encryptionmethod =~ /^blowfish/ ) {
         ($encryptionmethod, $salt) = split(/\,/, $encryptionmethod);
-	if ($salt eq "") { $salt = 7; }	# default rounds inf unspecified
+	$salt = 7 unless $salt;		# default rounds if unspecified
     } else {
         warn "$encryptionmethod encryption method invalid\n" if ($verbose > 0);
 	warn "Falling back to blowfish,7...\n" if ($verbose > 0);
 	$encryptionmethod = "blowfish";
 	$salt = 7;
     }
-        
+
     warn "Salt is: $salt\n" if $verbose > 1;
 
     return $salt;
@@ -939,17 +987,19 @@ sub salt {
 # Encrypt a password using the selected method
 sub encrypt {
     local($pass, $salt) = ($_[0], $_[1]);
-    local($args, $crypt);
+    local(@args, $crypt);
 
     if ($encryptionmethod eq "des" || $encryptionmethod eq "old") {
-        $args = "-s $salt";
+        @args = ("-s", $salt);
     } elsif ($encryptionmethod eq "md5") {
-        $args = "-m";
+        @args = ("-m");
     } elsif ($encryptionmethod eq "blowfish") {
-        $args = "-b $salt";
+        @args = ("-b", $salt);
+    } elsif ($encryptionmethod eq "auto") {
+        @args = ("-c", $log_cl);
     }
 
-    open2(\*ENCRD, \*ENCWR, "/usr/bin/encrypt $args");
+    open2(\*ENCRD, \*ENCWR, "/usr/bin/encrypt", @args);
     print ENCWR "$pass\n";
     close ENCWR;
     $crypt = <ENCRD>;
@@ -980,6 +1030,7 @@ sub parse_arguments {
 	elsif (/^--?(h|help|\?)$/)	{ &usage }
 	elsif (/^--?(home)$/)	 { $home = $argv[0]; shift @argv }
 	elsif (/^--?(shell)$/)	 { $defaultshell = $argv[0]; shift @argv }
+	elsif (/^--?(class)$/)	 { $defaultclass = $argv[0]; shift @argv }
 	elsif (/^--?(dotdir)$/)	 { $dotdir = $argv[0]; shift @argv }
 	elsif (/^--?(uid_start)$/)	 { $uid_start = $argv[0]; shift @argv }
 	elsif (/^--?(uid_end)$/)	 { $uid_end = $argv[0]; shift @argv }
@@ -1041,6 +1092,8 @@ sub create_conf {
     &shells_read;			# Pull in /etc/shells info
     &shells_add;			# maybe add some new shells
     $defaultshell = &shell_default;	# enter default shell
+    &login_conf_read;			# read /etc/login.conf
+    $defaultclass = &class_default;	# default login.conf class
     $home = &home_partition($home);	# find HOME partition
     $dotdir = &dotdir_default;		# check $dotdir
     $send_message = &message_default;   # send message to new user
@@ -1085,7 +1138,7 @@ sub home_create {
     }
 
     if ($dotdir eq 'no') {
-	if (!mkdir("$homedir",0755)) {
+	if (!mkdir("$homedir", 0755)) {
 	    warn "mkdir $homedir: $!\n"; return 0;
 	}
 	system 'chown', "$name:$group", $homedir;
@@ -1453,6 +1506,7 @@ sub config_write {
     local($shpref) = "'" . join("', '", @shellpref) . "'";
     local($shpath) = "'" . join("', '", @path) . "'";
     local($user_var) = join('', @user_variable_list);
+    local($def_lc) = "'" . join("', '", @login_classes) . "'";
 
     print C <<EOF;
 #
@@ -1471,8 +1525,8 @@ verbose = $verbose
 # defaultpasswd =  yes | no
 defaultpasswd = $defaultpasswd
 
-# Default encryption method for user passwords 
-# Methods are all those listed in passwd.conf(5)
+# Default encryption method for user passwords
+# Methods are all those listed in login.conf(5)
 encryptionmethod = "$defaultencryption"
 
 # copy dotfiles from this dir ("/etc/skel" or "no")
@@ -1507,6 +1561,13 @@ defaultgroup = $defaultgroup
 # new users get this uid
 uid_start = $uid_start
 uid_end = $uid_end
+
+# default login.conf(5) login class
+defaultclass = $defaultclass
+
+# login classes available from login.conf(5)
+# login_classes = ('default', 'daemon', 'staff')
+login_classes = ($def_lc)
 
 $do_not_delete
 ## your own variables, see /etc/adduser.message

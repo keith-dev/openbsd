@@ -1,4 +1,4 @@
-/*	$OpenBSD: host_ops.c,v 1.10 2002/08/05 07:24:26 pvalchev Exp $	*/
+/*	$OpenBSD: host_ops.c,v 1.13 2003/06/02 23:36:51 millert Exp $	*/
 
 /*
  * Copyright (c) 1990 Jan-Simon Pendry
@@ -17,11 +17,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -72,7 +68,7 @@
  */
 #define MAKE_MNTPT(mntpt, ex, mf) { \
 			if (strcmp((ex)->ex_dir, "/") == 0) \
-				strcpy((mntpt), (mf)->mf_mount); \
+				strlcpy((mntpt), (mf)->mf_mount, sizeof((mntpt))); \
 			else \
 				snprintf((mntpt), sizeof(mntpt), "%s%s", (mf)->mf_mount, (ex)->ex_dir); \
 }
@@ -363,7 +359,7 @@ host_fmount(mntfs *mf)
 	for (j = 0; j < n_export; j++) {
 		ex = ep[j];
 		if (ex) {
-			strcpy(rfs_dir, ex->ex_dir);
+			strlcpy(rfs_dir, ex->ex_dir, fs_name + sizeof fs_name - rfs_dir);
 			MAKE_MNTPT(mntpt, ex, mf);
 			if (do_mount(&fp[j], mntpt, fs_name, mf->mf_mopts, mf) == 0)
 				ok = TRUE;

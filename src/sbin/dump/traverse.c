@@ -1,4 +1,4 @@
-/*	$OpenBSD: traverse.c,v 1.10 2002/03/14 20:41:50 mickey Exp $	*/
+/*	$OpenBSD: traverse.c,v 1.15 2003/08/25 23:28:15 tedu Exp $	*/
 /*	$NetBSD: traverse.c,v 1.17 1997/06/05 11:13:27 lukem Exp $	*/
 
 /*-
@@ -13,11 +13,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -38,7 +34,7 @@
 #if 0
 static char sccsid[] = "@(#)traverse.c	8.2 (Berkeley) 9/23/93";
 #else
-static char rcsid[] = "$OpenBSD: traverse.c,v 1.10 2002/03/14 20:41:50 mickey Exp $";
+static const char rcsid[] = "$OpenBSD: traverse.c,v 1.15 2003/08/25 23:28:15 tedu Exp $";
 #endif
 #endif /* not lint */
 
@@ -83,8 +79,7 @@ static	int searchdir(ino_t ino, daddr_t blkno, long size, off_t filesize);
  * hence the estimate may be high.
  */
 off_t
-blockest(dp)
-	struct dinode *dp;
+blockest(struct ufs1_dinode *dp)
 {
 	off_t blkest, sizeest;
 
@@ -132,13 +127,10 @@ blockest(dp)
  * Determine if given inode should be dumped
  */
 void
-mapfileino(ino, tapesize, dirskipped)
-	ino_t ino;
-	off_t *tapesize;
-	int *dirskipped;
+mapfileino(ino_t ino, off_t *tapesize, int *dirskipped)
 {
 	int mode;
-	struct dinode *dp;
+	struct ufs1_dinode *dp;
 
 	dp = getino(ino);
 	if ((mode = (dp->di_mode & IFMT)) == 0)
@@ -166,11 +158,7 @@ mapfileino(ino, tapesize, dirskipped)
  * the directories in the filesystem.
  */
 int
-mapfiles(maxino, tapesize, disk, dirv)
-	ino_t maxino;
-	off_t *tapesize;
-	char *disk;
-	char * const *dirv;
+mapfiles(ino_t maxino, off_t *tapesize, char *disk, char * const *dirv)
 {
 	int anydirskipped = 0;
 
@@ -185,7 +173,7 @@ mapfiles(maxino, tapesize, disk, dirv)
 			dumpabort(0);
 		}
 		if ((dirh = fts_open(dirv, FTS_PHYSICAL|FTS_SEEDOT|FTS_XDEV,
-				    (int (*)())NULL)) == NULL) {
+		    NULL)) == NULL) {
 			msg("fts_open failed: %s\n", strerror(errno));
 			dumpabort(0);
 		}
@@ -269,11 +257,9 @@ mapfiles(maxino, tapesize, disk, dirv)
  * pass using this algorithm.
  */
 int
-mapdirs(maxino, tapesize)
-	ino_t maxino;
-	off_t *tapesize;
+mapdirs(ino_t maxino, off_t *tapesize)
 {
-	struct	dinode *dp;
+	struct	ufs1_dinode *dp;
 	int i, isdir;
 	char *map;
 	ino_t ino;
@@ -326,11 +312,7 @@ mapdirs(maxino, tapesize)
  * require the directory to be dumped.
  */
 static int
-dirindir(ino, blkno, ind_level, filesize)
-	ino_t ino;
-	daddr_t blkno;
-	int ind_level;
-	off_t *filesize;
+dirindir(ino_t ino, daddr_t blkno, int ind_level, off_t *filesize)
 {
 	int ret = 0;
 	int i;
@@ -365,11 +347,7 @@ dirindir(ino, blkno, ind_level, filesize)
  * contains any subdirectories.
  */
 static int
-searchdir(ino, blkno, size, filesize)
-	ino_t ino;
-	daddr_t blkno;
-	long size;
-	off_t filesize;
+searchdir(ino_t ino, daddr_t blkno, long size, off_t filesize)
 {
 	struct direct *dp;
 	long loc;
@@ -414,9 +392,7 @@ searchdir(ino, blkno, size, filesize)
  * Dump the contents of an inode to tape.
  */
 void
-dumpino(dp, ino)
-	struct dinode *dp;
-	ino_t ino;
+dumpino(struct ufs1_dinode *dp, ino_t ino)
 {
 	int ind_level, cnt;
 	off_t size;
@@ -494,11 +470,7 @@ dumpino(dp, ino)
  * Read indirect blocks, and pass the data blocks to be dumped.
  */
 static void
-dmpindir(ino, blk, ind_level, size)
-	ino_t ino;
-	daddr_t blk;
-	int ind_level;
-	off_t *size;
+dmpindir(ino_t ino, daddr_t blk, int ind_level, off_t *size)
 {
 	int i, cnt;
 	daddr_t idblk[MAXNINDIR];
@@ -528,10 +500,7 @@ dmpindir(ino, blk, ind_level, size)
  * Collect up the data into tape record sized buffers and output them.
  */
 void
-blksout(blkp, frags, ino)
-	daddr_t *blkp;
-	int frags;
-	ino_t ino;
+blksout(daddr_t *blkp, int frags, ino_t ino)
 {
 	daddr_t *bp;
 	int i, j, count, blks, tbperdb;
@@ -606,12 +575,11 @@ writeheader(ino)
 	writerec((char *)&spcl, 1);
 }
 
-struct dinode *
-getino(inum)
-	ino_t inum;
+struct ufs1_dinode *
+getino(ino_t inum)
 {
 	static daddr_t minino, maxino;
-	static struct dinode inoblock[MAXINOPB];
+	static struct ufs1_dinode inoblock[MAXINOPB];
 
 	curino = inum;
 	if (inum >= minino && inum < maxino)
@@ -633,10 +601,7 @@ int	breaderrors = 0;
 #define	BREADEMAX 32
 
 void
-bread(blkno, buf, size)
-	daddr_t blkno;
-	char *buf;
-	int size;
+bread(daddr_t blkno, char *buf, int size)
 {
 	int cnt, i;
 
@@ -666,7 +631,7 @@ loop:
 		msg("short read error from %s: [block %d]: count=%d, got=%d\n",
 			disk, blkno, size, cnt);
 	if (++breaderrors > BREADEMAX) {
-		msg("More than %d block read errors from %d\n",
+		msg("More than %d block read errors from %s\n",
 			BREADEMAX, disk);
 		broadcast("DUMP IS AILING!\n");
 		msg("This is an unrecoverable error.\n");

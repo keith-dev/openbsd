@@ -1,4 +1,4 @@
-/*	$OpenBSD: pr.c,v 1.15 2002/04/30 01:59:47 deraadt Exp $	*/
+/*	$OpenBSD: pr.c,v 1.19 2003/08/04 17:06:45 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 1991 Keith Muller.
@@ -16,11 +16,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -45,7 +41,7 @@ static char copyright[] =
 
 #ifndef lint
 /* from: static char sccsid[] = "@(#)pr.c	8.1 (Berkeley) 6/6/93"; */
-static char *rcsid = "$OpenBSD: pr.c,v 1.15 2002/04/30 01:59:47 deraadt Exp $";
+static char *rcsid = "$OpenBSD: pr.c,v 1.19 2003/08/04 17:06:45 deraadt Exp $";
 #endif /* not lint */
 
 #include <sys/types.h>
@@ -150,9 +146,7 @@ int	beheaded = 0;	/* header / trailer link */
 char	digs[] = "0123456789";	/* page number translation map */
 
 int
-main(argc, argv)
-	int argc;
-	char *argv[];
+main(int argc, char *argv[])
 {
     int ret_val;
 
@@ -184,9 +178,7 @@ main(argc, argv)
  *        Line length is unlimited.
  */
 int
-onecol(argc, argv)
-    int argc;
-    char *argv[];
+onecol(int argc, char *argv[])
 {
     int off;
     int lrgln;
@@ -347,9 +339,7 @@ onecol(argc, argv)
  *		the general approach is to buffer a page of data, then print
  */
 int
-vertcol(argc, argv)
-	int argc;
-	char *argv[];
+vertcol(int argc, char *argv[])
 {
     char *ptbf;
     char **lstdat;
@@ -675,9 +665,7 @@ vertcol(argc, argv)
  * horzcol:    print files with more than one column of output across a page
  */
 int
-horzcol(argc, argv)
-	int argc;
-	char *argv[];
+horzcol(int argc, char *argv[])
 {
     char *ptbf;
     int pln;
@@ -835,7 +823,7 @@ struct ferrlist *ferrhead, *ferrtail;
  *        processing has completed
  */
 void
-flsh_errs()
+flsh_errs(void)
 {
     struct ferrlist *f;
 
@@ -845,7 +833,7 @@ flsh_errs()
     }
 }
 
-void
+static void
 ferrout(char *fmt, ...)
 {
     sigset_t block, oblock;
@@ -880,9 +868,7 @@ ferrout(char *fmt, ...)
  *        more than one file concurrently
  */
 int
-mulfile(argc, argv)
-    int argc;
-    char *argv[];
+mulfile(int argc, char *argv[])
 {
     char *ptbf;
     int j;
@@ -1118,14 +1104,7 @@ mulfile(argc, argv)
  *    mor:    set if more data in line (not truncated)
  */
 int
-inln(inf, buf, lim, cnt, cps, trnc, mor)
-    FILE *inf;
-    char *buf;
-    int lim;
-    int *cnt;
-    int *cps;
-    int trnc;
-    int *mor;
+inln(FILE *inf, char *buf, int lim, int *cnt, int *cps, int trnc, int *mor)
 {
     int col;
     int gap = ingap;
@@ -1239,12 +1218,7 @@ inln(inf, buf, lim, cnt, cps, trnc, mor)
  *        1 is more, 0 is complete, -1 is no \n's
  */
 int
-otln(buf, cnt, svips, svops, mor)
-    char *buf;
-    int cnt;
-    int *svops;
-    int *svips;
-    int mor;
+otln(char *buf, int cnt, int *svips, int *svops, int mor)
 {
     int ops;        /* last col output */
     int ips;        /* last col in buf examined */
@@ -1401,10 +1375,7 @@ otln(buf, cnt, svips, svops, mor)
  *    lncnt    number of lines per page
  */
 int
-inskip(inf, pgcnt, lncnt)
-    FILE *inf;
-    int pgcnt;
-    int lncnt;
+inskip(FILE *inf, int pgcnt, int lncnt)
 {
     int c;
     int cnt;
@@ -1433,12 +1404,7 @@ inskip(inf, pgcnt, lncnt)
  *    dt    if set skips the date processing (used with -m)
  */
 FILE *
-nxtfile(argc, argv, fname, buf, dt)
-    int argc;
-    char **argv;
-    char **fname;
-    char *buf;
-    int dt;
+nxtfile(int argc, char *argv[], char **fname, char *buf, int dt)
 {
     FILE *inf = NULL;
     struct timeval tv;
@@ -1571,10 +1537,7 @@ nxtfile(argc, argv, fname, buf, dt)
  *        numbers as part of the column so spaces may be replaced.
  */
 void
-addnum(buf, wdth, line)
-    char *buf;
-    int wdth;
-    int line;
+addnum(char *buf, int wdth, int line)
 {
     char *pt = buf + wdth;
 
@@ -1606,10 +1569,7 @@ addnum(buf, wdth, line)
  * the context each output mode, but we let the caller figure that out.
  */
 int
-prhead(buf, fname, pagcnt)
-    char *buf;
-    char *fname;
-    int pagcnt;
+prhead(char *buf, char *fname, int pagcnt)
 {
     int ips = 0;
     int ops = 0;
@@ -1655,9 +1615,7 @@ prhead(buf, fname, pagcnt)
  * we haven't printed a hearder, these no need for a trailer
  */
 int
-prtail(cnt, incomp)
-    int cnt;
-    int incomp;
+prtail(int cnt, int incomp)
 {
     /*
      * if were's skipping to page N or haven't put out anything yet just exit
@@ -1746,27 +1704,26 @@ prtail(cnt, incomp)
  * terminate():    when a SIGINT is recvd
  */
 void
-terminate(which_sig)
-    int which_sig;
+terminate(int which_sig)
 {
     flsh_errs();
     _exit(1);
 }
 
 void
-mfail()
+mfail(void)
 {
     ferrout("pr: memory allocation failed\n");
 }
 
 void
-pfail()
+pfail(void)
 {
     ferrout("pr: write failure, %s\n", strerror(errno));
 }
 
 void
-usage()
+usage(void)
 {
     ferrout(
      "usage: pr [+page] [-col] [-adfFmrt] [-e[ch][gap]] [-h header]\n");
@@ -1781,9 +1738,7 @@ usage()
  *        checks on options
  */
 int
-setup(argc, argv)
-    int argc;
-    char **argv;
+setup(int argc, char *argv[])
 {
     int c;
     int eflag = 0;

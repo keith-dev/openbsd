@@ -9,11 +9,7 @@
 .\" 2. Redistributions in binary form must reproduce the above copyright
 .\"    notice, this list of conditions and the following disclaimer in the
 .\"    documentation and/or other materials provided with the distribution.
-.\" 3. All advertising materials mentioning features or use of this software
-.\"    must display the following acknowledgement:
-.\"	This product includes software developed by the University of
-.\"	California, Berkeley and its contributors.
-.\" 4. Neither the name of the University nor the names of its contributors
+.\" 3. Neither the name of the University nor the names of its contributors
 .\"    may be used to endorse or promote products derived from this software
 .\"    without specific prior written permission.
 .\"
@@ -29,7 +25,7 @@
 .\" OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 .\" SUCH DAMAGE.
 .\"
-.\"	$OpenBSD: sigvec.3,v 1.21 2002/11/10 03:21:48 fgsch Exp $
+.\"	$OpenBSD: sigvec.3,v 1.25 2003/06/02 20:18:33 millert Exp $
 .\"
 .Dd April 29, 1991
 .Dt SIGVEC 3
@@ -117,9 +113,9 @@ must arrange to restore the previous context itself.
 When a signal is delivered to a process a new signal mask is
 installed for the duration of the process' signal handler
 (or until a
-.Xr sigblock
+.Xr sigblock 3
 or
-.Xr sigsetmask
+.Xr sigsetmask 3
 call is made).
 This mask is formed by taking the union of the current signal mask,
 the signal to be delivered, and
@@ -182,7 +178,7 @@ specified with
 If a signal is caught during the system calls listed below,
 the call may be restarted,
 the call may return with a data transfer shorter than requested,
-or the call may forced to terminate
+or the call may be forced to terminate
 with the error
 .Er EINTR .
 Interrupting of pending calls is requested
@@ -255,7 +251,7 @@ call (formerly
 .It Dv SIGIO No "	discard signal" Tn "	I/O"
 is possible on a descriptor (see
 .Xr fcntl 2 )
-.It Dv SIGXCPU No "	terminate process" "	cpu time limit exceeded (see"
+.It Dv SIGXCPU No "	terminate process" "	CPU time limit exceeded (see"
 .Xr setrlimit 2 )
 .It Dv SIGXFSZ No "	terminate process" "	file size limit exceeded (see"
 .Xr setrlimit 2 )
@@ -287,6 +283,9 @@ A 0 value indicated that the call succeeded.
 A \-1 return value indicates an error occurred and
 .Va errno
 is set to indicated the reason.
+.Sh EXAMPLES
+For an example of signal handler declarations, see
+.Xr sigaction 2 .
 .Sh ERRORS
 .Fn sigvec
 will fail and no new signal handler will be installed if one
@@ -308,9 +307,6 @@ An attempt is made to ignore or supply a handler for
 or
 .Dv SIGSTOP .
 .El
-.Sh EXAMPLES
-For an example of signal handler declarations, see
-.Xr sigaction 2 .
 .Sh SEE ALSO
 .Xr kill 1 ,
 .Xr kill 2 ,
@@ -326,5 +322,4 @@ For an example of signal handler declarations, see
 .Xr sigpause 3 ,
 .Xr sigsetmask 3 ,
 .Xr sigsetops 3 ,
-.Xr sigvec 3 ,
 .Xr tty 4

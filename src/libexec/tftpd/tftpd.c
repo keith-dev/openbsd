@@ -1,4 +1,4 @@
-/*	$OpenBSD: tftpd.c,v 1.26 2002/09/06 19:43:54 deraadt Exp $	*/
+/*	$OpenBSD: tftpd.c,v 1.30 2003/07/29 18:39:23 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1983 Regents of the University of California.
@@ -12,11 +12,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -41,7 +37,7 @@ char copyright[] =
 
 #ifndef lint
 /*static char sccsid[] = "from: @(#)tftpd.c	5.13 (Berkeley) 2/26/91";*/
-static char rcsid[] = "$OpenBSD: tftpd.c,v 1.26 2002/09/06 19:43:54 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: tftpd.c,v 1.30 2003/07/29 18:39:23 deraadt Exp $";
 #endif /* not lint */
 
 /*
@@ -99,9 +95,9 @@ int	sendfile(struct formats *pf);
 
 struct formats {
 	char	*f_mode;
-	int	(*f_validate)();
-	int	(*f_send)();
-	int	(*f_recv)();
+	int	(*f_validate)(char *, int);
+	int	(*f_send)(struct formats *);
+	int	(*f_recv)(struct formats *);
 	int	f_convert;
 } formats[] = {
 	{ "netascii",	validate_access,	sendfile,	recvfile, 1 },
@@ -158,7 +154,7 @@ main(int argc, char *argv[])
 		if (dirs == NULL) {
 			syslog(LOG_ERR, "malloc: %m");
 			exit(1);
-		}			
+		}
 		dirs[n++] = argv[optind];
 		dirs[n] = NULL;
 		ndirs++;
@@ -408,7 +404,7 @@ validate_access(char *filename, int mode)
 int	timeout;
 jmp_buf	timeoutbuf;
 
-void
+static void
 timer(int signo)
 {
 	/* XXX longjmp/signal resource leaks */
@@ -424,7 +420,7 @@ timer(int signo)
 int
 sendfile(struct formats *pf)
 {
-	struct tftphdr *dp, *r_init();
+	struct tftphdr *dp, *r_init(void);
 	struct tftphdr *ap;    /* ack packet */
 	volatile unsigned short block = 1;
 	int size, n;
@@ -462,7 +458,7 @@ send_data:
 
 			if (ap->th_opcode == ERROR)
 				goto abort;
-			
+
 			if (ap->th_opcode == ACK) {
 				if (ap->th_block == block) {
 					break;
@@ -482,7 +478,7 @@ abort:
 	return (1);
 }
 
-void
+static void
 justquit(int signo)
 {
 	_exit(0);
@@ -495,7 +491,7 @@ justquit(int signo)
 int
 recvfile(struct formats *pf)
 {
-	struct tftphdr *dp, *w_init();
+	struct tftphdr *dp, *w_init(void);
 	struct tftphdr *ap;    /* ack buffer */
 	volatile unsigned short block = 0;
 	int n, size;

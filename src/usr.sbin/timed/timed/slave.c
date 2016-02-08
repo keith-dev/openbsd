@@ -1,4 +1,4 @@
-/*	$OpenBSD: slave.c,v 1.7 2002/06/19 15:45:39 ericj Exp $	*/
+/*	$OpenBSD: slave.c,v 1.11 2003/08/19 19:41:21 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 1985, 1993 The Regents of the University of California.
@@ -12,11 +12,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -58,7 +54,7 @@ static void setmaster(struct tsp *);
 static void answerdelay(void);
 
 int
-slave()
+slave(void)
 {
 	int tries;
 	long electiontime, refusetime, looktime, looptime, adjtime;
@@ -73,7 +69,6 @@ slave()
 	struct timeval ntime, wait, tmptv;
 	time_t tmpt;
 	struct tsp *answer;
-	int timeout();
 	char olddate[32];
 	char newdate[32];
 	struct netinfo *ntp;
@@ -687,7 +682,6 @@ answerdelay(void)
 	timeout.tv_sec = 0;
 	timeout.tv_usec = casual(1, 100 * 1000);
 
-	(void)select(0, (fd_set *)NULL, (fd_set *)NULL, (fd_set *)NULL,
-	    &timeout);
+	(void)select(0, NULL, NULL, NULL, &timeout);
 	return;
 }

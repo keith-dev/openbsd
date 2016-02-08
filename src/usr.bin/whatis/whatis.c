@@ -1,4 +1,4 @@
-/*	$OpenBSD: whatis.c,v 1.7 2002/02/16 21:27:59 millert Exp $	*/
+/*	$OpenBSD: whatis.c,v 1.9 2003/06/10 22:20:54 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1987, 1993
@@ -12,11 +12,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -66,9 +62,7 @@ void usage(void);
 void whatis(char **, char *, int);
 
 int
-main(argc, argv)
-	int argc;
-	char *argv[];
+main(int argc, char *argv[])
 {
 	ENTRY *ep;
 	TAG *tp;
@@ -133,9 +127,7 @@ main(argc, argv)
 }
 
 void
-whatis(argv, path, buildpath)
-	char **argv, *path;
-	int buildpath;
+whatis(char **argv, char *path, int buildpath)
 {
 	char *end, *name, **p;
 	char buf[MAXLINELEN + 1], wbuf[MAXLINELEN + 1];
@@ -179,8 +171,7 @@ whatis(argv, path, buildpath)
  *	match a full word or a full string
  */
 int
-match(bp, str)
-	char *bp, *str;
+match(char *bp, char *str)
 {
 	int len;
 	char *start;
@@ -217,8 +208,7 @@ match(bp, str)
  *	truncate a string at " - "
  */
 void
-dashtrunc(from, to)
-	char *from, *to;
+dashtrunc(char *from, char *to)
 {
 	int ch;
 
@@ -233,7 +223,7 @@ dashtrunc(from, to)
  *	print usage message and die
  */
 void
-usage()
+usage(void)
 {
 
 	(void)fprintf(stderr,

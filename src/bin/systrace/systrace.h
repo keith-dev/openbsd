@@ -1,4 +1,4 @@
-/*	$OpenBSD: systrace.h,v 1.20 2002/12/09 07:24:56 itojun Exp $	*/
+/*	$OpenBSD: systrace.h,v 1.23 2003/07/19 11:48:58 sturm Exp $	*/
 /*
  * Copyright 2002 Niels Provos <provos@citi.umich.edu>
  * All rights reserved.
@@ -69,6 +69,9 @@ struct filter {
 #define PREDIC_UID	0x01
 #define PREDIC_GID	0x02
 #define PREDIC_NEGATIVE	0x10
+#define PREDIC_LESSER	0x20
+#define PREDIC_GREATER	0x30
+#define PREDIC_MASK	0x30
 		int p_flags;
 		uid_t p_uid;
 		gid_t p_gid;
@@ -126,6 +129,7 @@ TAILQ_HEAD(tmplqueue, template);
 #define PROCESS_INHERIT_POLICY	0x01	/* Process inherits policy */
 #define PROCESS_DETACH		0x02	/* Process gets detached */
 #define SYSCALL_LOG		0x04	/* Log this system call */
+#define PROCESS_PROMPT		0x08	/* Prompt but nothing else */
 
 void systrace_parameters(void);
 int systrace_initpolicy(char *, char *);
@@ -134,6 +138,7 @@ struct template *systrace_readtemplate(char *, struct policy *,
     struct template *);
 void systrace_initcb(void);
 struct policy *systrace_newpolicy(const char *, const char *);
+void systrace_freepolicy(struct policy *);
 int systrace_newpolicynr(int, struct policy *);
 int systrace_modifypolicy(int, int, const char *, short);
 struct policy *systrace_findpolicy(const char *);
@@ -211,6 +216,7 @@ short trans_cb(int, pid_t, int, const char *, int, const char *, void *,
 short gen_cb(int, pid_t, int, const char *, int, const char *, void *,
     int, void *);
 void execres_cb(int, pid_t, int, const char *, const char *, void *);
+void policyfree_cb(int, void *);
 
 extern struct intercept_translate ic_oflags;
 extern struct intercept_translate ic_modeflags;

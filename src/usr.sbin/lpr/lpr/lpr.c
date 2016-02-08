@@ -1,4 +1,4 @@
-/*	$OpenBSD: lpr.c,v 1.31 2003/03/25 02:15:21 millert Exp $ */
+/*	$OpenBSD: lpr.c,v 1.34 2003/06/02 23:36:53 millert Exp $ */
 /*	$NetBSD: lpr.c,v 1.19 2000/10/11 20:23:52 is Exp $	*/
 
 /*
@@ -19,11 +19,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -50,7 +46,7 @@ static const char copyright[] =
 #if 0
 static const char sccsid[] = "@(#)lpr.c	8.4 (Berkeley) 4/28/95";
 #else
-static const char rcsid[] = "$OpenBSD: lpr.c,v 1.31 2003/03/25 02:15:21 millert Exp $";
+static const char rcsid[] = "$OpenBSD: lpr.c,v 1.34 2003/06/02 23:36:53 millert Exp $";
 #endif
 #endif /* not lint */
 
@@ -68,7 +64,6 @@ static const char rcsid[] = "$OpenBSD: lpr.c,v 1.31 2003/03/25 02:15:21 millert 
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
-#include <a.out.h>
 #include <signal.h>
 #include <syslog.h>
 #include <pwd.h>
@@ -160,7 +155,7 @@ main(int argc, char **argv)
 	openlog("lpr", 0, LOG_LPR);
 
 	while ((ch = getopt(argc, argv,
-	    ":#:1:2:3:4:C:J:P:T:U:cdfghi:lnmprstvw:")) != -1) {
+	    ":#:1:2:3:4:C:J:P:T:U:cdfghi:lmnpqrstvw:")) != -1) {
 		switch (ch) {
 
 		case '#':		/* n copies */
@@ -580,7 +575,6 @@ cleanup(int signo)
 static int
 test(char *file)
 {
-	struct exec execb;
 	int fd;
 	char *cp;
 
@@ -604,13 +598,6 @@ test(char *file)
 		warnx("%s is an empty file", file);
 		goto bad;
  	}
-	if (read(fd, &execb, sizeof(execb)) == sizeof(execb) &&
-	    !N_BADMAG(execb)) {
-			warnx("%s is an executable program and is unprintable",
-				file);
-			(void)close(fd);
-			goto bad;
-	}
 	(void)close(fd);
 	if (rflag) {
 		if ((cp = strrchr(file, '/')) == NULL) {
@@ -740,7 +727,7 @@ usage(void)
 	extern char *__progname;
 
 	fprintf(stderr,
-	    "usage: %s [-cdfghlnmprstv] [-Pprinter] [-#num] [-C class] "
+	    "usage: %s [-cdfghlmnpqrstv] [-Pprinter] [-#num] [-C class] "
 	    "[-J job] [-T title]\n           [-U user] [-i [numcols]] "
 	    "[-1234 font] [-wnum] [name ...]\n", __progname);
 	exit(1);

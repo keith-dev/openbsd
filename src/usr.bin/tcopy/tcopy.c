@@ -1,4 +1,4 @@
-/*	$OpenBSD: tcopy.c,v 1.7 2002/02/16 21:27:54 millert Exp $	*/
+/*	$OpenBSD: tcopy.c,v 1.9 2003/06/10 22:20:53 deraadt Exp $	*/
 /*	$NetBSD: tcopy.c,v 1.5 1997/04/15 07:23:08 lukem Exp $	*/
 
 /*
@@ -13,11 +13,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -44,7 +40,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)tcopy.c	8.3 (Berkeley) 1/23/95";
 #endif
-static char rcsid[] = "$OpenBSD: tcopy.c,v 1.7 2002/02/16 21:27:54 millert Exp $";
+static char rcsid[] = "$OpenBSD: tcopy.c,v 1.9 2003/06/10 22:20:53 deraadt Exp $";
 #endif /* not lint */
 
 #include <sys/types.h>
@@ -77,9 +73,7 @@ void	 verify(int, int, char *);
 void	 writeop(int, int);
 
 int
-main(argc, argv)
-	int argc;
-	char *argv[];
+main(int argc, char *argv[])
 {
 	int ch, needeof, nw, inp, outp;
 	ssize_t lastnread, nread;
@@ -234,9 +228,7 @@ r1:		guesslen = 0;
 }
 
 void
-verify(inp, outp, outb)
-	int inp, outp;
-	char *outb;
+verify(int inp, int outp, char *outb)
 {
 	int eot, inmaxblk, inn, outmaxblk, outn;
 	char *inb;
@@ -290,8 +282,7 @@ r2:		if (inn != outn) {
 }
 
 void
-intr(signo)
-	int signo;
+intr(int signo)
 {
 	if (record) {
 		if (record - lastrec > 1)
@@ -305,8 +296,7 @@ intr(signo)
 }
 
 void *
-getspace(blk)
-	int blk;
+getspace(int blk)
 {
 	void *bp;
 
@@ -317,8 +307,7 @@ getspace(blk)
 }
 
 void
-writeop(fd, type)
-	int fd, type;
+writeop(int fd, int type)
 {
 	struct mtop op;
 
@@ -329,7 +318,7 @@ writeop(fd, type)
 }
 
 void
-usage()
+usage(void)
 {
 
 	fprintf(stderr, "usage: tcopy [-cvx] [-s maxblk] src [dest]\n");

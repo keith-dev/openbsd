@@ -1,4 +1,4 @@
-/*	$OpenBSD: getconf.c,v 1.6 2002/02/16 21:27:46 millert Exp $	*/
+/*	$OpenBSD: getconf.c,v 1.9 2003/07/10 00:06:51 david Exp $	*/
 
 /*-
  * Copyright (c) 1996 The NetBSD Foundation, Inc.
@@ -41,11 +41,12 @@
  */
 
 #ifndef lint
-static char rcsid[] = "$OpenBSD: getconf.c,v 1.6 2002/02/16 21:27:46 millert Exp $";
+static char rcsid[] = "$OpenBSD: getconf.c,v 1.9 2003/07/10 00:06:51 david Exp $";
 #endif /* not lint */
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <limits.h>
 #include <locale.h>
 #include <unistd.h>
@@ -85,7 +86,7 @@ const struct conf_variable conf_table[] =
   { "_POSIX_NAME_MAX",		CONSTANT,	_POSIX_NAME_MAX		},
   { "_POSIX_NGROUPS_MAX",	CONSTANT,	_POSIX_NGROUPS_MAX	},
   { "_POSIX_OPEN_MAX",		CONSTANT,	_POSIX_OPEN_MAX		},
-  { "_POSIX_PATH_MAX",		CONSTANT,	_POSIX_PIPE_BUF		},
+  { "_POSIX_PATH_MAX",		CONSTANT,	_POSIX_PATH_MAX		},
   { "_POSIX_PIPE_BUF",		CONSTANT,	_POSIX_PIPE_BUF		},
   { "_POSIX_SSIZE_MAX",		CONSTANT,	_POSIX_SSIZE_MAX	},
   { "_POSIX_STREAM_MAX",	CONSTANT,	_POSIX_STREAM_MAX	},
@@ -140,9 +141,7 @@ const struct conf_variable conf_table[] =
 
 
 int
-main(argc, argv)
-	int argc;
-	char **argv;
+main(int argc, char *argv[])
 {
 	int ch;
 	const struct conf_variable *cp;
@@ -232,7 +231,7 @@ main(argc, argv)
 
 
 static void
-usage()
+usage(void)
 {
 	extern char *__progname;
 

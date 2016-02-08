@@ -1,4 +1,4 @@
-/*	$OpenBSD: ftp.c,v 1.51 2003/03/11 04:01:29 itojun Exp $	*/
+/*	$OpenBSD: ftp.c,v 1.54 2003/08/11 21:23:58 millert Exp $	*/
 /*	$NetBSD: ftp.c,v 1.27 1997/08/18 10:20:23 lukem Exp $	*/
 
 /*
@@ -42,11 +42,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -67,7 +63,7 @@
 #if 0
 static char sccsid[] = "@(#)ftp.c	8.6 (Berkeley) 10/27/94";
 #else
-static char rcsid[] = "$OpenBSD: ftp.c,v 1.51 2003/03/11 04:01:29 itojun Exp $";
+static char rcsid[] = "$OpenBSD: ftp.c,v 1.54 2003/08/11 21:23:58 millert Exp $";
 #endif
 #endif /* not lint */
 
@@ -86,12 +82,13 @@ static char rcsid[] = "$OpenBSD: ftp.c,v 1.51 2003/03/11 04:01:29 itojun Exp $";
 #include <err.h>
 #include <errno.h>
 #include <netdb.h>
+#include <poll.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <utime.h>
-#include <stdarg.h>
 
 #include "ftp_var.h"
 
@@ -451,18 +448,6 @@ getreply(expecteof)
 			(*oldintr)(SIGINT);
 		return (n - '0');
 	}
-}
-
-int
-empty(mask, sec)
-	fd_set *mask;
-	int sec;
-{
-	struct timeval t;
-
-	t.tv_sec = (long) sec;
-	t.tv_usec = 0;
-	return (select(32, mask, (fd_set *) 0, (fd_set *) 0, &t));
 }
 
 jmp_buf	sendabort;
@@ -1663,15 +1648,15 @@ pswitch(flag)
 	ip->ntflg = ntflag;
 	ntflag = op->ntflg;
 	(void)strlcpy(ip->nti, ntin, sizeof(ip->nti));
-	(void)strcpy(ntin, op->nti);
+	(void)strlcpy(ntin, op->nti, sizeof ntin);
 	(void)strlcpy(ip->nto, ntout, sizeof(ip->nto));
-	(void)strcpy(ntout, op->nto);
+	(void)strlcpy(ntout, op->nto, sizeof ntout);
 	ip->mapflg = mapflag;
 	mapflag = op->mapflg;
 	(void)strlcpy(ip->mi, mapin, sizeof(ip->mi));
-	(void)strcpy(mapin, op->mi);
+	(void)strlcpy(mapin, op->mi, sizeof mapin);
 	(void)strlcpy(ip->mo, mapout, sizeof(ip->mo));
-	(void)strcpy(mapout, op->mo);
+	(void)strlcpy(mapout, op->mo, sizeof mapout);
 	(void)signal(SIGINT, oldintr);
 	if (abrtflag) {
 		abrtflag = 0;
@@ -1701,7 +1686,7 @@ proxtrans(cmd, local, remote)
 	int prox_type, nfnd;
 	volatile int secndflag;
 	char * volatile cmd2;
-	fd_set mask;
+	struct pollfd pfd[1];
 
 	oldintr = NULL;
 	secndflag = 0;
@@ -1795,12 +1780,11 @@ abort:
 		abort_remote(NULL);
 	pswitch(!proxy);
 	if (cpend) {
-		FD_ZERO(&mask);
-		FD_SET(fileno(cin), &mask);
-		if ((nfnd = empty(&mask, 10)) <= 0) {
-			if (nfnd < 0) {
+		pfd[0].fd = fileno(cin);
+		pfd[0].events = POLLIN;
+		if ((nfnd = poll(pfd, 1, 10 * 1000)) <= 0) {
+			if (nfnd < 0)
 				warn("abort");
-			}
 			if (ptabflg)
 				code = -1;
 			lostpeer();
@@ -1821,18 +1805,17 @@ reset(argc, argv)
 	int argc;
 	char *argv[];
 {
-	fd_set mask;
+	struct pollfd pfd[1];
 	int nfnd = 1;
 
-	FD_ZERO(&mask);
+	pfd[0].fd = fileno(cin);
+	pfd[0].events = POLLIN;
 	while (nfnd > 0) {
-		FD_SET(fileno(cin), &mask);
-		if ((nfnd = empty(&mask, 0)) < 0) {
+		if ((nfnd = poll(pfd, 1, 0)) < 0) {
 			warn("reset");
 			code = -1;
 			lostpeer();
-		}
-		else if (nfnd) {
+		} else if (nfnd) {
 			(void)getreply(0);
 		}
 	}
@@ -1856,7 +1839,7 @@ gunique(local)
 		warn("local: %s", local);
 		return ((char *) 0);
 	}
-	(void)strcpy(new, local);
+	(void)strlcpy(new, local, sizeof new);
 	cp = new + strlen(new);
 	*cp++ = '.';
 	while (!d) {
@@ -1890,7 +1873,7 @@ abort_remote(din)
 {
 	char buf[BUFSIZ];
 	int nfnd;
-	fd_set mask;
+	struct pollfd pfd[2];
 
 	if (cout == NULL) {
 		warnx("Lost control connection for abort.");
@@ -1909,20 +1892,22 @@ abort_remote(din)
 		warn("abort");
 	fprintf(cout, "%cABOR\r\n", DM);
 	(void)fflush(cout);
-	FD_ZERO(&mask);
-	FD_SET(fileno(cin), &mask);
+	pfd[0].fd = fileno(cin);
+	pfd[0].events = POLLIN;
+	nfnd = 1;
 	if (din) {
-		FD_SET(fileno(din), &mask);
+		pfd[1].fd = fileno(din);
+		pfd[1].events = POLLIN;
+		nfnd++;
 	}
-	if ((nfnd = empty(&mask, 10)) <= 0) {
-		if (nfnd < 0) {
+	if ((nfnd = poll(pfd, nfnd, 10 * 1000)) <= 0) {
+		if (nfnd < 0)
 			warn("abort");
-		}
 		if (ptabflg)
 			code = -1;
 		lostpeer();
 	}
-	if (din && FD_ISSET(fileno(din), &mask)) {
+	if (din && (pfd[1].revents & POLLIN)) {
 		while (read(fileno(din), buf, BUFSIZ) > 0)
 			/* LOOP */;
 	}

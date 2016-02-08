@@ -1,8 +1,8 @@
-/*	$OpenBSD: grep.c,v 1.2 2003/02/16 03:46:04 cloder Exp $	*/
+/*	$OpenBSD: grep.c,v 1.23 2003/09/07 19:40:54 millert Exp $	*/
 
 /*-
- * Copyright (c) 2000 Carson Harding. All rights reserved.
- * This code was written and contributed to OpenBSD by Carson Harding.
+ * Copyright (c) 1999 James Howard and Dag-Erling Coïdan Smørgrav
+ * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -12,9 +12,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the author, or the names of contributors may be 
- *    used to endorse or promote products derived from this software without
- *    specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
  * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
@@ -29,567 +26,438 @@
  * SUCH DAMAGE.
  */
 
-#ifndef lint
-static char rcsid[] = "$OpenBSD: grep.c,v 1.2 2003/02/16 03:46:04 cloder Exp $";
-#endif /* not lint */
-
 #include <sys/types.h>
+#include <sys/limits.h>
+#include <sys/stat.h>
+
+#include <ctype.h>
+#include <err.h>
+#include <errno.h>
+#include <getopt.h>
+#include <regex.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <unistd.h>
-#include <regex.h>
 #include <string.h>
-#include <ctype.h>
-#include <sys/param.h>
-#include <fts.h>
-#include <err.h>
+#include <unistd.h>
 
-extern	char *__progname;
+#include "grep.h"
 
+/* Flags passed to regcomp() and regexec() */
+int	 cflags;
+int	 eflags = REG_STARTEND;
 
-void	usage(void);
-void	err_regerror(int r, regex_t *rexp);
-int	grep_files(int regexc, regex_t *regexv, char **files);
-int	grep_tree(int regexc, regex_t *regexv, char **paths);
-int	grep_file(int regexc, regex_t *rexp, char *fname);
-void	arg_patt(char *s);
-char	*chop_patt(char *s, size_t *len);
-void	add_patt(char *s, size_t len);
-void	load_patt(char *fname);
-regex_t *regcomp_patt(int pattc, char *pattvp[], int cflags);
+int	 matchall;	/* shortcut */
+int	 patterns, pattern_sz;
+char   **pattern;
+regex_t	*r_pattern;
+fastgrep_t *fg_pattern;
 
+/* For regex errors  */
+char	 re_error[RE_ERROR_BUF + 1];
 
-int	f_bytecount;		/* -b prepend byte count */
-int	f_countonly;		/* -c return only count */
-int	f_nofname;		/* -h do not prepend filenames on multiple */
-int	f_fnameonly;		/* -l only print file name with match */
-int	f_suppress;		/* -s suppress error messages; 1/2 -q */
-int	f_lineno;		/* -n prepend with line numbers */
-int	f_quiet;		/* -q no output, only status */
-int	f_wmatch;		/* -w match words */
-int	f_xmatch;		/* -x match line */
-int	f_zerobyte;		/* -z NUL character after filename with -l */
-int	f_match;		/* = REG_MATCH; else = REG_NOMATCH for -v */
-int	f_multifile;		/* multiple files: prepend file names */
-int	f_matchall;		/* empty pattern, matches all input */
-int	f_error;		/* saw error; set exit status */
+/* Command-line flags */
+int	 Aflag;		/* -A x: print x lines trailing each match */
+int	 Bflag;		/* -B x: print x lines leading each match */
+int	 Eflag;		/* -E: interpret pattern as extended regexp */
+int	 Fflag;		/* -F: interpret pattern as list of fixed strings */
+int	 Gflag;		/* -G: interpret pattern as basic regexp */
+int	 Hflag;		/* -H: if -R, follow explicitly listed symlinks */
+int	 Lflag;		/* -L: only show names of files with no matches */
+int	 Pflag;		/* -P: if -R, no symlinks are followed */
+int	 Rflag;		/* -R: recursively search directory trees */
+int	 Sflag;		/* -S: if -R, follow all symlinks */
+int	 Vflag;		/* -V: display version information */
+#ifndef NOZ
+int	 Zflag;		/* -Z: decompress input before processing */
+#endif
+int	 bflag;		/* -b: show block numbers for each match */
+int	 cflag;		/* -c: only show a count of matching lines */
+int	 hflag;		/* -h: don't print filename headers */
+int	 iflag;		/* -i: ignore case */
+int	 lflag;		/* -l: only show names of files with matches */
+int	 nflag;		/* -n: show line numbers in front of matching lines */
+int	 oflag;		/* -o: always print file name */
+int	 qflag;		/* -q: quiet mode (don't output anything) */
+int	 sflag;		/* -s: silent mode (ignore errors) */
+int	 vflag;		/* -v: only show non-matching lines */
+int	 wflag;		/* -w: pattern must start and end on word boundaries */
+int	 xflag;		/* -x: pattern must match entire line */
 
-				/* default traversal flags */
-int	f_ftsflags = FTS_LOGICAL|FTS_NOCHDIR|FTS_NOSTAT;
+int binbehave = BIN_FILE_BIN;
 
-int	f_debug;		/* temporary debugging flag */
+enum {
+	BIN_OPT = CHAR_MAX + 1,
+	HELP_OPT,
+	MMAP_OPT
+};
 
-#define START_PATT_SZ	 8	/* start with room for 8 patterns */
-char	**pattv;		/* array of patterns from -e and -f */
-int	pattc;			/* patterns in pattern array */
-int	pattn;			/* patterns we have seen, including nulls */
+/* Housekeeping */
+int	 first;		/* flag whether or not this is our first match */
+int	 tail;		/* lines left to print */
+int	 lead;		/* number of lines in leading context queue */
+int	 boleol;	/* At least one pattern has a bol or eol */
+size_t	 maxPatternLen;	/* Longest length of all patterns */
 
-int
-main(int argc, char **argv)
-{
-	int	c;
-	int	ch;
-	int	cflags;		/* flags to regcomp() */
-	int	sawfile;	/* did we see a pattern file? */
-	regex_t *regexv;	/* start of array of compiled patterns */
+extern char *__progname;
 
-	int (*grepf)(int regexc, regex_t *regexv, char **argv);
-
-	sawfile = 0;
-	cflags	= REG_BASIC|REG_NEWLINE;
-	grepf	= grep_files;
-
-	if (*__progname == 'e')
-		cflags |= REG_EXTENDED;
-	else if (*__progname == 'f')
-		cflags |= REG_NOSPEC;
-
-	while ((ch = getopt(argc, argv, "DEFRHLPXabce:f:hilnqsvwxz")) != -1) {
-		switch(ch) {
-		case 'D':
-			f_debug = 1;
-			break;
-		case 'E':
-			cflags |= REG_EXTENDED;
-			break;
-		case 'F':
-			cflags |= REG_NOSPEC;
-			break;
-		case 'H':
-			f_ftsflags |= FTS_COMFOLLOW;
-			break;
-		case 'L':
-			f_ftsflags |= FTS_LOGICAL;
-			break;
-		case 'P':
-			f_ftsflags |= FTS_PHYSICAL;
-			break;
-		case 'R':
-			grepf = grep_tree;
-			/* 
-			 * If walking the tree we don't know how many files
-			 * we'll actually find. So assume multiple, if
-			 * you don't want names, there's always -h ....
-			 */
-			f_multifile = 1;
-			break;
-		case 'X':
-			f_ftsflags |= FTS_XDEV;
-			break;
-		case 'a':
-			/* 
-			 * Silently eat -a; we don't use the default
-			 * behaviour it toggles off in gnugrep.
-			 */
-			break;
-		case 'b':
-			f_bytecount = 1;
-			break;
-		case 'c':
-			f_countonly = 1;
-			break;
-		case 'e':
-			arg_patt(optarg);
-			break;
-		case 'f':
-			load_patt(optarg);
-			sawfile = 1;
-			break;
-		case 'h':
-			f_nofname = 1;
-			break;
-		case 'i':
-			cflags |= REG_ICASE;
-			break;
-		case 'l':
-			f_fnameonly = 1;
-			break;
-		case 'n':
-			f_lineno = 1;
-			break;
-		case 'q':
-			f_quiet = 1;
-			break;
-		case 's':
-			f_suppress = 1;
-			break;
-		case 'v':
-			f_match = REG_NOMATCH;
-			break;
-		case 'w':
-			f_wmatch = 1;
-			break;
-		case 'x':
-			f_xmatch = 1;
-			break;
-		case 'z':
-			f_zerobyte = 1;
-			break;
-		default:
-			usage();
-			break;
-		}
-	}
-
-	if ((cflags & REG_EXTENDED) && (cflags & REG_NOSPEC))
-		usage();
-
-	/*
-	 * If we read one or more pattern files, and still 
-	 * didn't end up with any pattern, any pattern file 
-	 * we read was empty. This is different than failing
-	 * to provide a pattern as an argument, and we fail
-	 * on this case as if we had searched and found
-	 * no matches. (At least this is what GNU grep and
-	 * Solaris's grep do.)
-	 */
-	if (!pattn && !argv[optind]) {
-		if (sawfile)
-			exit(1);
-		else usage();
-	}
-
-	if (!pattn) {
-		arg_patt(argv[optind]);
-		optind++;
-	}
-
-	/* why bother ... just do nothing sooner */
-	if (f_matchall && f_match == REG_NOMATCH)
-		exit(1);
-
-	regexv = regcomp_patt(pattc, pattv, cflags);
-
-	if (optind == argc) {
-		c = grep_file(pattc, regexv, NULL);
-	} else {
-		if (argc - optind > 1 && !f_nofname)
-			f_multifile = 1;
-		c = (*grepf)(pattc, regexv, &argv[optind]);
-	}
-
-	/* XX ugh */
-	if (f_error) {
-		if (c && f_quiet) 
-			exit(0);
-		else
-			exit(2);
-	} else if (c) 
-		exit(0);
-	else
-		exit(1);
-}
-
-void
+static void
 usage(void)
 {
-	fprintf(stderr, "usage: %s [-E|-F] [-abchilnqsvwx] [-RXH[-L|-P]]"
-	    " {patt | -e patt | -f patt_file} [files]\n", 
-	    __progname);
+	fprintf(stderr,
+#ifdef NOZ
+	    "usage: %s [-[AB] num] [-CEFGHILPRSUVabchilnoqsvwx]"
+#else
+	    "usage: %s [-[AB] num] [-CEFGHILPRSUVZabchilnoqsvwx]"
+#endif
+	    " [-e pattern] [-f file] [file ...]\n", __progname);
 	exit(2);
 }
 
-/*
- * Patterns as arguments may have embedded newlines.
- * When read from file, these are detected by fgetln();
- * in arguments we have to find and cut out the segments.
- */
-void
-arg_patt(char *s)
+#ifdef NOZ
+static char *optstr = "0123456789A:B:CEFGHILPSRUVabce:f:hilnoqrsuvwxy";
+#else
+static char *optstr = "0123456789A:B:CEFGHILPSRUVZabce:f:hilnoqrsuvwxy";
+#endif
+
+struct option long_options[] =
 {
+	{"binary-files",	required_argument,	NULL, BIN_OPT},
+	{"help",		no_argument,		NULL, HELP_OPT},
+	{"mmap",		no_argument,		NULL, MMAP_OPT},
+	{"after-context",	required_argument,	NULL, 'A'},
+	{"before-context",	required_argument,	NULL, 'B'},
+	{"context",		optional_argument,	NULL, 'C'},
+	{"devices",		required_argument,	NULL, 'D'},
+	{"extended-regexp",	no_argument,		NULL, 'E'},
+	{"fixed-strings",	no_argument,		NULL, 'F'},
+	{"basic-regexp",	no_argument,		NULL, 'G'},
+	{"binary",		no_argument,		NULL, 'U'},
+	{"version",		no_argument,		NULL, 'V'},
+	{"text",		no_argument,		NULL, 'a'},
+	{"byte-offset",		no_argument,		NULL, 'b'},
+	{"count",		no_argument,		NULL, 'c'},
+	{"regexp",		required_argument,	NULL, 'e'},
+	{"file",		required_argument,	NULL, 'f'},
+	{"no-filename",		no_argument,		NULL, 'h'},
+	{"ignore-case",		no_argument,		NULL, 'i'},
+	{"files-without-match",	no_argument,		NULL, 'L'},
+	{"files-with-matches",	no_argument,		NULL, 'l'},
+	{"line-number",		no_argument,		NULL, 'n'},
+	{"quiet",		no_argument,		NULL, 'q'},
+	{"silent",		no_argument,		NULL, 'q'},
+	{"recursive",		no_argument,		NULL, 'r'},
+	{"no-messages",		no_argument,		NULL, 's'},
+	{"revert-match",	no_argument,		NULL, 'v'},
+	{"word-regexp",		no_argument,		NULL, 'w'},
+	{"line-regexp",		no_argument,		NULL, 'x'},
+	{"unix-byte-offsets",	no_argument,		NULL, 'u'},
+#ifndef NOZ
+	{"decompress",		no_argument,		NULL, 'Z'},
+#endif
+	{NULL,			no_argument,		NULL, 0}
+};
+
+
+static void
+add_pattern(char *pat, size_t len)
+{
+	if (len == 0 || matchall) {
+		matchall = 1;
+		return;
+	}
+	if (patterns == pattern_sz) {
+		pattern_sz *= 2;
+		pattern = grep_realloc(pattern, ++pattern_sz * sizeof(*pattern));
+	}
+	if (pat[len - 1] == '\n')
+		--len;
+	pattern[patterns] = grep_malloc(len + 1);
+	/* pat may not be NUL-terminated */
+	memcpy(pattern[patterns], pat, len);
+	pattern[patterns][len] = '\0';
+	++patterns;
+
+	if (len > maxPatternLen)
+		maxPatternLen = len;
+}
+
+static void
+read_patterns(char *fn)
+{
+	FILE *f;
+	char *line;
 	size_t len;
-	char *sp;
+	int nl;
 
-	if (f_debug)
-		fprintf(stderr, "arg_patt(\"%s\")\n", s);
-
-	len = strlen(s);
-	if (!len) {		     /* got "" on the command-line */
-		add_patt(s, len);
-		return;
-	}
-	for (sp = chop_patt(s, &len); sp; sp = chop_patt(NULL, &len)) {
-		if (f_debug) {
-			fprintf(stderr, "adding pattern \"");
-			fwrite(sp, len, 1, stderr);
-			fprintf(stderr, "\", length %lu\n",(unsigned long)len);
-			if (pattc > 20) {
-				fprintf(stderr, "too many, exiting ...\n");
-				exit(2);
-			}
+	if ((f = fopen(fn, "r")) == NULL)
+		err(2, "%s", fn);
+	nl = 0;
+	while ((line = fgetln(f, &len)) != NULL) {
+		if (*line == '\n') {
+			++nl;
+			continue;
 		}
-		add_patt(sp, len);
-	}
-}
-
-/* 
- * Kind of like strtok; pass char *, then NULL for rest.
- * Call it memtok()... New size gets written into len.
- */
-char *
-chop_patt(char *s, size_t *len)
-{
-	char	*cp;
-	static	char *save_s;
-	static	int   save_n;
-
-	if (s)
-		save_n = *len;
-	else
-		s = save_s;
-
-	if (save_n <= 0) {
-		s = save_s = NULL;
-	} else if (s) {
-		if ((cp = memchr(s, '\n', save_n)) != NULL) {
-			*len = cp - s;	/* returned segment */
-			save_n -= *len;
-			save_s = ++cp;	/* adjust past newline */
-			save_n--;
-		} else {
-			*len = save_n;	/* else return the whole string */
-			save_n = 0;
+		if (nl) {
+			matchall = 1;
+			break;
 		}
+		nl = 0;
+		add_pattern(line, len);
 	}
-
-	return s;
+	if (ferror(f))
+		err(2, "%s", fn);
+	fclose(f);
 }
 
-/*
- * Start with an array for 8 patterns, and double it 
- * each time we outgrow it. If pattern is empty (0 length),
- * or if f_matchall is already set, set f_matchall and return.
- * No use adding a pattern if all input is going to match
- * anyhow.
- */
-void
-add_patt(char *s, size_t len)
+static void
+free_patterns(void)
 {
-	char	*p;
-	static	size_t	pattmax = START_PATT_SZ;
-	static size_t sumlen;
+	int i;
 
-	pattn++;
-	sumlen += len;
-
-	if (!len || f_matchall) {
-		f_matchall = 1;
-		return;
+	for (i = 0; i < patterns; i++) {
+		if (fg_pattern[i].pattern)
+			free(fg_pattern[i].pattern);
+		else
+			regfree(&r_pattern[i]);
+		free(pattern[i]);
 	}
 
-	if (!pattv) { 
-		pattv = malloc(START_PATT_SZ * sizeof(char *));
-		if (!pattv)
-			err(2, "malloc");
-		pattc = 0;
-	} else if (pattc >= pattmax) {
-		pattmax *= 2;
-		pattv = realloc(pattv, pattmax * sizeof(char *));
-		if (!pattv)
-			err(2, "realloc");
-	}
-	p = malloc(len+1);
-	if (!p) err(2, "malloc");
-	memmove(p, s, len);
-	p[len] = '\0';
-	pattv[pattc++] = p;
+	free(fg_pattern);
+	free(r_pattern);
+	free(pattern);
 }
 
-/*
- * Load patterns from file.
- */
-void
-load_patt(char *fname)
-{
-	char	*buf;
-	size_t	len;
-	FILE	*fr;
-
-	fr = fopen(fname, "r");
-	if (!fr)
-		err(2, "%s", fname);
-	while ((buf = fgetln(fr, &len)) != NULL) {
-		if (buf[len-1] == '\n')
-			buf[--len] = '\0';
-		add_patt(buf, len);
-	}
-	fclose(fr);
-}
-
-/*
- * Compile the collected pattern strings into an array
- * of regex_t.
- */
-regex_t *
-regcomp_patt(int lpattc, char *lpattv[], int cflags)
-{
-	int	i;
-	int	r;
-	regex_t *rxv;
-
-	if (f_matchall)
-		return NULL;
-
-	rxv = malloc(sizeof(regex_t) * lpattc);
-	if (!rxv)
-		err(2, "malloc");
-	for (i = 0; i < lpattc; i++) {
-		if ((r = regcomp(&rxv[i], lpattv[i], cflags)) != 0)
-			err_regerror(r, &rxv[i]);
-	}
-	return rxv;
-}
-
-/*
- * Print out regcomp error, and exit.
- */
-void
-err_regerror(int r, regex_t *rexp)
-{
-	size_t	n;
-	char	*buf;
-
-	n = regerror(r, rexp, NULL, 0);
-	buf = malloc(n);
-	if (!buf)
-		err(2, "malloc");
-	(void)regerror(r, rexp, buf, n);
-	errx(2, "%s", buf);
-}
-
-/* 
- * Little wrapper so we can use function pointer above.
- */
 int
-grep_files(int regexc, regex_t *regexv, char **files)
+main(int argc, char *argv[])
 {
-	int	c;
-	char	**fname;
+	int c, lastc, prevoptind, newarg, i;
+	long l;
+	char *ep;
 
-	c = 0;
-	for (fname = files; *fname; fname++)
-		c += grep_file(regexc, regexv, *fname);
-
-	return c;
-}
-
-/* 
- * Modified from James Howard and Dag-Erling Co?dan Sm?rgrav's grep:
- * add FTS_D to FTS_DP (especially since D was the one being used)
- * pass in regex_t array, and set fts flags above in main().
- */
-int 
-grep_tree(int regexc, regex_t *regexv, char **paths)
-{
-	int	c;
-	FTS	*fts;
-	FTSENT	*p;
-
-	c = 0;
-
-	if (!(fts = fts_open(paths, f_ftsflags, (int (*) ()) NULL)))
-		err(2, "fts_open");
-	while ((p = fts_read(fts)) != NULL) {
-		switch (p->fts_info) {
-		case FTS_D:
-		case FTS_DP:
-		case FTS_DNR:
+	switch (__progname[0]) {
+	case 'e':
+		Eflag++;
+		break;
+	case 'f':
+		Fflag++;
+		break;
+	case 'g':
+		Gflag++;
+		break;
+#ifndef NOZ
+	case 'z':
+		Zflag++;
+		switch(__progname[1]) {
+		case 'e':
+			Eflag++;
 			break;
-		case FTS_ERR:
-			errx(2, "%s: %s", p->fts_path, strerror(p->fts_errno));
+		case 'f':
+			Fflag++;
 			break;
+		case 'g':
+			Gflag++;
+			break;
+		}
+		break;
+#endif
+	}
+
+	lastc = '\0';
+	newarg = 1;
+	prevoptind = 1;
+	while ((c = getopt_long(argc, argv, optstr,
+				long_options, NULL)) != -1) {
+		switch (c) {
+		case '0': case '1': case '2': case '3': case '4':
+		case '5': case '6': case '7': case '8': case '9':
+			if (newarg || !isdigit(lastc))
+				Aflag = 0;
+			else if (Aflag > INT_MAX / 10)
+				errx(2, "context out of range");
+			Aflag = Bflag = (Aflag * 10) + (c - '0');
+			break;
+		case 'A':
+		case 'B':
+			l = strtol(optarg, &ep, 10);
+			if (ep == optarg || *ep != '\0' ||
+			    l <= 0 || l >= INT_MAX)
+				errx(2, "context out of range");
+			if (c == 'A')
+				Aflag = (int)l;
+			else
+				Bflag = (int)l;
+			break;
+		case 'C':
+			if (optarg == NULL)
+				Aflag = Bflag = 2;
+			else {
+				l = strtol(optarg, &ep, 10);
+				if (ep == optarg || *ep != '\0' ||
+				    l <= 0 || l >= INT_MAX)
+					errx(2, "context out of range");
+				Aflag = Bflag = (int)l;
+			}
+			break;
+		case 'E':
+			Fflag = Gflag = 0;
+			Eflag++;
+			break;
+		case 'F':
+			Eflag = Gflag = 0;
+			Fflag++;
+			break;
+		case 'G':
+			Eflag = Fflag = 0;
+			Gflag++;
+			break;
+		case 'H':
+			Hflag++;
+			break;
+		case 'I':
+			binbehave = BIN_FILE_SKIP;
+			break;
+		case 'L':
+			lflag = 0;
+			Lflag = qflag = 1;
+			break;
+		case 'P':
+			Pflag++;
+			break;
+		case 'S':
+			Sflag++;
+			break;
+		case 'R':
+		case 'r':
+			Rflag++;
+			oflag++;
+			break;
+		case 'U':
+			binbehave = BIN_FILE_BIN;
+			break;
+		case 'V':
+			fprintf(stderr, "grep version %u.%u\n", VER_MAJ, VER_MIN);
+			exit(0);
+			break;
+#ifndef NOZ
+		case 'Z':
+			Zflag++;
+			break;
+#endif
+		case 'a':
+			binbehave = BIN_FILE_TEXT;
+			break;
+		case 'b':
+			bflag = 1;
+			break;
+		case 'c':
+			cflag = 1;
+			break;
+		case 'e':
+			add_pattern(optarg, strlen(optarg));
+			break;
+		case 'f':
+			read_patterns(optarg);
+			break;
+		case 'h':
+			oflag = 0;
+			hflag = 1;
+			break;
+		case 'i':
+		case 'y':
+			iflag = 1;
+			cflags |= REG_ICASE;
+			break;
+		case 'l':
+			Lflag = 0;
+			lflag = qflag = 1;
+			break;
+		case 'n':
+			nflag = 1;
+			break;
+		case 'o':
+			hflag = 0;
+			oflag = 1;
+			break;
+		case 'q':
+			qflag = 1;
+			break;
+		case 's':
+			sflag = 1;
+			break;
+		case 'v':
+			vflag = 1;
+			break;
+		case 'w':
+			wflag = 1;
+			break;
+		case 'x':
+			xflag = 1;
+			break;
+		case BIN_OPT:
+			if (strcmp("binary", optarg) == 0)
+				binbehave = BIN_FILE_BIN;
+			else if (strcmp("without-match", optarg) == 0)
+				binbehave = BIN_FILE_SKIP;
+			else if (strcmp("text", optarg) == 0)
+				binbehave = BIN_FILE_TEXT;
+			else
+				errx(2, "Unknown binary-files option");
+			break;
+		case 'u':
+		case MMAP_OPT:
+			/* default, compatibility */
+			break;
+		case HELP_OPT:
 		default:
-			if (f_debug) 
-				printf("%s\n", p->fts_path);
-			c += grep_file(regexc, regexv, p->fts_path);
-			break;
+			usage();
 		}
+		lastc = c;
+		newarg = optind != prevoptind;
+		prevoptind = optind;
+	}
+	argc -= optind;
+	argv += optind;
+
+	if (argc == 0 && patterns == 0)
+		usage();
+
+	if (patterns == 0) {
+		add_pattern(*argv, strlen(*argv));
+		--argc;
+		++argv;
 	}
 
-	return c;
-}
-
-/*
- * Open and grep the named file. If fname is NULL, read
- * from stdin. 
- */
-
-#define isword(x) (isalnum(x) || (x) == '_')
-
-int
-grep_file(int regexc, regex_t *regexv, char *fname)
-{
-	int	i;
-	int	c;
-	int	n;
-	int	r;
-	int	match;
-	char	*buf;
-	size_t	b;
-	size_t	len;
-	FILE	*fr;
-	regmatch_t pmatch[1];
-	regoff_t   so, eo;
-
-	b = 0;		/* byte count */
-	c = 0;		/* match count */
-	n = 0;		/* line count */
-
-	if (!fname) {
-		fr = stdin;
-		fname = "(standard input)";
-	} else {
-		fr = fopen(fname, "r");
-		if (!fr) {
-			if (!f_suppress)
-				warn("%s", fname);
-			f_error = 1;
-			return 0;
-		}
-	}
-
-	while ((buf = fgetln(fr, &len)) != NULL) {
-		n++;
-		if (f_matchall)
-			goto printmatch;
-		match = 0;
-		for (i = 0; i < regexc; i++) {
-			pmatch[0].rm_so = 0;
-			pmatch[0].rm_eo = len-1;
-			r = regexec(&regexv[i], buf, 1, pmatch, REG_STARTEND);
-			if (r == f_match) {
-				/*
-				 * XX gnu grep allows both -w and -x;
-				 * XX but seems bizarre. sometimes -w seems
-				 * XX to override, at other times, not.
-				 * XX Need to figure that out.
-				 * XX It seems logical to go with the most
-				 * XX restrictive argument: -x, as -x is
-				 * XX a boundary case of -w anyhow. 
-				 */
-				if (f_xmatch) {
-					if (pmatch[0].rm_so != 0 ||
-					    pmatch[0].rm_eo != len-1)
-						continue;
-				} else if (f_wmatch) {
-					so = pmatch[0].rm_so;
-					eo = pmatch[0].rm_eo;
-					if (!((so == 0 || !isword(buf[so-1])) &&
-					    (eo == len || !isword(buf[eo]))))
-						continue;
-				} 
-				match = 1;
-				break;
+	if (Eflag)
+		cflags |= REG_EXTENDED;
+	else if (Fflag)
+		cflags |= REG_NOSPEC;
+	fg_pattern = grep_malloc(patterns * sizeof(*fg_pattern));
+	r_pattern = grep_malloc(patterns * sizeof(*r_pattern));
+	for (i = 0; i < patterns; ++i) {
+		/* Check if cheating is allowed */
+		if (fastcomp(&fg_pattern[i], pattern[i])) {
+			/* Fall back to full regex library */
+			if ((c = regcomp(&r_pattern[i], pattern[i], cflags))) {
+				regerror(c, &r_pattern[i], re_error,
+				    RE_ERROR_BUF);
+				errx(2, "%s", re_error);
 			}
-			/* XX test for regexec() errors ?? */
-		}
-		if (match) {
-printmatch:
-			c++;
-			if (f_fnameonly || f_quiet)
-				break;
-			if (f_countonly)
-				continue;
-			if (f_multifile && !f_nofname)
-				printf("%s:", fname);
-			if (f_lineno)
-				printf("%d:", n);
-			if (f_bytecount)
-				printf("%lu:", (unsigned long)b);
-			fwrite(buf, len, 1, stdout);
-		}
-		/* save position in stream before next line */
-		b += len;
-	}
-
-	if (!buf && ferror(fr)) {
-		warn("%s", fname);
-		f_error = 1;
-		/* 
-		 * XX or do we spit out what result we did have?
-		 */
-	} else if (!f_quiet) {
-		/*
-		 * XX test -c and -l together: gnu grep
-		 * XX allows (although ugly), do others?
-		 */
-		if (f_countonly) {
-			if (f_multifile)
-				printf("%s:", fname);
-			printf("%d\n", c);
-		}
-		if (c && f_fnameonly) {
-			fputs(fname, stdout);
-			if (f_zerobyte)
-				fputc('\0', stdout);
-			else 
-				fputc('\n', stdout);
 		}
 	}
 
-	if (fr != stdin)
-		fclose(fr);
+	if ((argc == 0 || argc == 1) && !oflag)
+		hflag = 1;
 
-	return c;
+	if (argc == 0)
+		exit(!procfile(NULL));
+
+	if (Rflag)
+		c = grep_tree(argv);
+	else
+		for (c = 0; argc--; ++argv)
+			c += procfile(*argv);
+
+	free_patterns();
+
+	exit(!c);
 }
-

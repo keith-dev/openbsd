@@ -1,4 +1,4 @@
-/*	$OpenBSD: worm.c,v 1.18 2002/12/06 21:48:51 millert Exp $	*/
+/*	$OpenBSD: worm.c,v 1.21 2003/06/03 03:01:42 millert Exp $	*/
 
 /*
  * Copyright (c) 1980, 1993
@@ -12,11 +12,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -43,7 +39,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)worm.c	8.1 (Berkeley) 5/31/93";
 #else
-static char rcsid[] = "$OpenBSD: worm.c,v 1.18 2002/12/06 21:48:51 millert Exp $";
+static char rcsid[] = "$OpenBSD: worm.c,v 1.21 2003/06/03 03:01:42 millert Exp $";
 #endif
 #endif /* not lint */
 
@@ -85,8 +81,8 @@ int visible_len;
 int lastch;
 char outbuf[BUFSIZ];
 
-int wantleave;
-int wantsuspend;
+volatile sig_atomic_t wantleave = 0;
+volatile sig_atomic_t wantsuspend = 0;
 
 void	crash(void);
 void	display(struct body *, char);
@@ -101,9 +97,7 @@ void	setup(void);
 void	suspend(int);
 
 int
-main(argc, argv)
-	int argc;
-	char **argv;
+main(int argc, char **argv)
 {
 	int retval;
 	struct timeval t, tod;
@@ -214,31 +208,26 @@ life()
 }
 
 void
-display(pos, chr)
-	struct body *pos;
-	char chr;
+display(struct body *pos, char chr)
 {
 	wmove(tv, pos->y, pos->x);
 	waddch(tv, chr);
 }
 
 void
-leave(dummy)
-	int dummy;
+leave(int dummy)
 {
 	wantleave = 1;
 }
 
 int
-rnd(range)
-	int range;
+rnd(int range)
 {
 	return random() % range;
 }
 
 void
-newpos(bp)
-	struct body * bp;
+newpos(struct body *bp)
 {
 	if (visible_len == (LINES-3) * (COLS-3) - 1) {
 		endwin();
@@ -264,8 +253,7 @@ prize()
 }
 
 void
-process(ch)
-	int ch;
+process(int ch)
 {
 	int x,y;
 	struct body *nh;
@@ -368,8 +356,7 @@ crash()
 }
 
 void
-suspend(dummy)
-	int dummy;
+suspend(int dummy)
 {
 	wantsuspend = 1;
 }

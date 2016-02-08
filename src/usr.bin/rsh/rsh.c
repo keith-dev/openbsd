@@ -1,4 +1,4 @@
-/*	$OpenBSD: rsh.c,v 1.30 2002/08/12 02:31:43 itojun Exp $	*/
+/*	$OpenBSD: rsh.c,v 1.34 2003/08/11 20:43:31 millert Exp $	*/
 
 /*-
  * Copyright (c) 1983, 1990 The Regents of the University of California.
@@ -12,11 +12,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -34,14 +30,14 @@
  */
 
 #ifndef lint
-char copyright[] =
+static const char copyright[] =
 "@(#) Copyright (c) 1983, 1990 The Regents of the University of California.\n\
  All rights reserved.\n";
 #endif /* not lint */
 
 #ifndef lint
-/*static char sccsid[] = "from: @(#)rsh.c	5.24 (Berkeley) 7/1/91";*/
-static char rcsid[] = "$OpenBSD: rsh.c,v 1.30 2002/08/12 02:31:43 itojun Exp $";
+/*static const char sccsid[] = "from: @(#)rsh.c	5.24 (Berkeley) 7/1/91";*/
+static const char rcsid[] = "$OpenBSD: rsh.c,v 1.34 2003/08/11 20:43:31 millert Exp $";
 #endif /* not lint */
 
 #include <sys/types.h>
@@ -50,16 +46,19 @@ static char rcsid[] = "$OpenBSD: rsh.c,v 1.30 2002/08/12 02:31:43 itojun Exp $";
 #include <sys/file.h>
 
 #include <netinet/in.h>
-#include <netdb.h>
 
+#include <err.h>
+#include <errno.h>
+#include <netdb.h>
+#include <poll.h>
 #include <pwd.h>
 #include <signal.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <unistd.h>
-#include <errno.h>
 #include <string.h>
-#include <stdarg.h>
+#include <unistd.h>
+
 #include "pathnames.h"
 
 #ifdef KERBEROS
@@ -184,21 +183,16 @@ main(int argc, char *argv[])
 				*argv = "telnet";
 			execv(_PATH_TELNET, argv);
 		}
-		(void)fprintf(stderr, "rsh: can't exec %s.\n", _PATH_TELNET);
-		exit(1);
+		errx(1, "can't exec %s", _PATH_TELNET);
 	}
 
 	argc -= optind;
 	argv += optind;
 
-	if (geteuid()) {
-		(void)fprintf(stderr, "rsh: must be setuid root.\n");
-		exit(1);
-	}
-	if (!(pw = getpwuid(uid = getuid()))) {
-		(void)fprintf(stderr, "rsh: unknown user id.\n");
-		exit(1);
-	}
+	if (geteuid() != 0)
+		errx(1, "must be setuid root");
+	if (!(pw = getpwuid(uid = getuid())))
+		errx(1, "unknown user ID %u", uid);
 	if (!user)
 		user = pw->pw_name;
 
@@ -223,10 +217,8 @@ main(int argc, char *argv[])
 #endif
 	if (sp == NULL)
 		sp = getservbyname("shell", "tcp");
-	if (sp == NULL) {
-		(void)fprintf(stderr, "rsh: shell/tcp: unknown service.\n");
-		exit(1);
-	}
+	if (sp == NULL)
+		errx(1, "shell/tcp: unknown service");
 
 	(void) unsetenv("RSH");		/* no tricks with rcmd(3) */
 
@@ -247,11 +239,8 @@ try_connect:
 		if (rem < 0) {
 			use_kerberos = 0;
 			sp = getservbyname("shell", "tcp");
-			if (sp == NULL) {
-				(void)fprintf(stderr,
-				    "rsh: unknown service shell/tcp.\n");
-				exit(1);
-			}
+			if (sp == NULL)
+				errx(1, "unknown service shell/tcp");
 			if (errno == ECONNREFUSED)
 				warning("remote host doesn't support Kerberos");
 			if (errno == ENOENT)
@@ -259,11 +248,8 @@ try_connect:
 			goto try_connect;
 		}
 	} else {
-		if (doencrypt) {
-			(void)fprintf(stderr,
-			    "rsh: the -x flag requires Kerberos authentication.\n");
-			exit(1);
-		}
+		if (doencrypt)
+			errx("the -x flag requires Kerberos authentication");
 		rem = rcmd_af(&host, sp->s_port, pw->pw_name, user, args,
 		    &rfd2, PF_UNSPEC);
 	}
@@ -275,19 +261,15 @@ try_connect:
 	if (rem < 0)
 		exit(1);
 
-	if (rfd2 < 0) {
-		(void)fprintf(stderr, "rsh: can't establish stderr.\n");
-		exit(1);
-	}
+	if (rfd2 < 0)
+		errx(1, "can't establish stderr");
 	if (dflag) {
 		if (setsockopt(rem, SOL_SOCKET, SO_DEBUG, &one,
 		    sizeof(one)) < 0)
-			(void)fprintf(stderr, "rsh: setsockopt: %s.\n",
-			    strerror(errno));
+			warn("setsockopt");
 		if (setsockopt(rfd2, SOL_SOCKET, SO_DEBUG, &one,
 		    sizeof(one)) < 0)
-			(void)fprintf(stderr, "rsh: setsockopt: %s.\n",
-			    strerror(errno));
+			warn("setsockopt");
 	}
 
 	(void)seteuid(uid);
@@ -305,12 +287,8 @@ try_connect:
 		(void)signal(SIGTERM, sendsig);
 
 	if (!nflag) {
-		pid = fork();
-		if (pid < 0) {
-			(void)fprintf(stderr,
-			    "rsh: fork: %s.\n", strerror(errno));
-			exit(1);
-		}
+		if ((pid = fork()) < 0)
+			err(1, "fork");
 	}
 
 #ifdef KERBEROS
@@ -334,31 +312,25 @@ talk(int nflag, sigset_t *omask, pid_t pid, int rem)
 {
 	int cc, wc;
 	char *bp;
-	fd_set readfrom, ready, rembits;
+	struct pollfd pfd[2];
 	char buf[BUFSIZ];
 
 	if (!nflag && pid == 0) {
 		(void)close(rfd2);
 
 reread:		errno = 0;
-		if ((cc = read(0, buf, sizeof buf)) <= 0)
+		if ((cc = read(STDIN_FILENO, buf, sizeof buf)) <= 0)
 			goto done;
 		bp = buf;
 
-rewrite:	FD_ZERO(&rembits);
-		if (rem >= FD_SETSIZE)
-			errx(1, "descriptor too large");
-                FD_SET(rem, &rembits);
-		if (select(rem + 1, 0, &rembits, 0, 0) < 0) {
-			if (errno != EINTR) {
-				(void)fprintf(stderr,
-				    "rsh: select: %s.\n", strerror(errno));
-				exit(1);
-			}
+		pfd[0].fd = rem;
+		pfd[0].events = POLLOUT;
+rewrite:
+		if (poll(pfd, 1, INFTIM) < 0) {
+			if (errno != EINTR)
+				err(1, "poll");
 			goto rewrite;
 		}
-		if (!FD_ISSET(rem, &rembits))
-			goto rewrite;
 #ifdef KERBEROS
 		if (doencrypt)
 			wc = des_write(rem, bp, cc);
@@ -381,24 +353,17 @@ done:
 	}
 
 	sigprocmask(SIG_SETMASK, omask, NULL);
-	FD_ZERO(&readfrom);
-	if (rfd2 >= FD_SETSIZE)
-		errx(1, "descriptor too large");
-	FD_SET(rfd2, &readfrom);
-	if (rem >= FD_SETSIZE)
-		errx(1, "descriptor too large");
-	FD_SET(rem, &readfrom);
+	pfd[1].fd = rfd2;
+	pfd[1].events = POLLIN;
+	pfd[0].fd = rem;
+	pfd[0].events = POLLIN;
 	do {
-		FD_COPY(&readfrom, &ready);
-		if (select(MAX(rfd2, rem) + 1, &ready, 0, 0, 0) < 0) {
-			if (errno != EINTR) {
-				(void)fprintf(stderr,
-				    "rsh: select: %s.\n", strerror(errno));
-				exit(1);
-			}
+		if (poll(pfd, 2, INFTIM) < 0) {
+			if (errno != EINTR)
+				err(1, "poll");
 			continue;
 		}
-		if (FD_ISSET(rfd2, &ready)) {
+		if (pfd[1].revents & POLLIN) {
 			errno = 0;
 #ifdef KERBEROS
 			if (doencrypt)
@@ -408,11 +373,11 @@ done:
 				cc = read(rfd2, buf, sizeof buf);
 			if (cc <= 0) {
 				if (errno != EWOULDBLOCK)
-					FD_CLR(rfd2, &readfrom);
+					pfd[1].revents = 0;
 			} else
-				(void)write(2, buf, cc);
+				(void)write(STDERR_FILENO, buf, cc);
 		}
-		if (FD_ISSET(rem, &ready)) {
+		if (pfd[0].revents & POLLIN) {
 			errno = 0;
 #ifdef KERBEROS
 			if (doencrypt)
@@ -422,11 +387,11 @@ done:
 				cc = read(rem, buf, sizeof buf);
 			if (cc <= 0) {
 				if (errno != EWOULDBLOCK)
-					FD_CLR(rem, &readfrom);
+					pfd[0].revents = 0;
 			} else
-				(void)write(1, buf, cc);
+				(void)write(STDOUT_FILENO, buf, cc);
 		}
-	} while (FD_ISSET(rem, &readfrom) || FD_ISSET(rfd2, &readfrom));
+	} while ((pfd[0].revents & POLLIN) || (pfd[1].revents & POLLIN));
 }
 
 void
@@ -465,20 +430,23 @@ char *
 copyargs(char **argv)
 {
 	char **ap, *p, *args;
-	int cc;
+	size_t cc, len;
 
 	cc = 0;
 	for (ap = argv; *ap; ++ap)
 		cc += strlen(*ap) + 1;
-	if (!(args = malloc((u_int)cc))) {
-		(void)fprintf(stderr, "rsh: %s.\n", strerror(ENOMEM));
-		exit(1);
-	}
+	if ((args = malloc(cc)) == NULL)
+		err(1, NULL);
 	for (p = args, ap = argv; *ap; ++ap) {
-		(void)strcpy(p, *ap);
-		for (p = strcpy(p, *ap); *p; ++p);
-		if (ap[1])
+		len = strlcpy(p, *ap, cc);
+		if (len >= cc)
+			errx(1, "copyargs overflow");
+		p += len;
+		cc -= len;
+		if (ap[1]) {
 			*p++ = ' ';
+			cc--;
+		}
 	}
 	return(args);
 }

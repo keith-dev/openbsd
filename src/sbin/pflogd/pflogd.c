@@ -1,4 +1,4 @@
-/*	$OpenBSD: pflogd.c,v 1.18 2003/03/11 02:35:34 kjc Exp $	*/
+/*	$OpenBSD: pflogd.c,v 1.21 2003/08/22 21:50:34 david Exp $	*/
 
 /*
  * Copyright (c) 2001 Theo de Raadt
@@ -46,7 +46,7 @@
 #include <fcntl.h>
 #include <util.h>
 
-#define DEF_SNAPLEN 96		/* default plus allow for larger header of pflog */
+#define DEF_SNAPLEN 116		/* default plus allow for larger header of pflog */
 #define PCAP_TO_MS 500		/* pcap read timeout (ms) */
 #define PCAP_NUM_PKTS 1000	/* max number of packets to process at each loop */
 #define PCAP_OPT_FIL 0		/* filter optimization */
@@ -179,8 +179,6 @@ init_pcap(void)
 		pcap_close(oldhpcap);
 
 	snaplen = pcap_snapshot(hpcap);
-	logmsg(LOG_NOTICE, "Listening on %s, logging to %s, snaplen %d",
-	    interface, filename, snaplen);
 	return (0);
 }
 
@@ -200,7 +198,7 @@ reset_dump(void)
 	}
 
 	/*
-	 * Basically reimpliment pcap_dump_open() because it truncates
+	 * Basically reimplement pcap_dump_open() because it truncates
 	 * files and duplicates headers and such.
 	 */
 	fp = fopen(filename, "a+");
@@ -253,10 +251,16 @@ reset_dump(void)
 	 */
 	(void) fseek(fp, 0L, SEEK_SET);
 	if (fread((char *)&hdr, sizeof(hdr), 1, fp) == 1) {
-		if (hdr.magic == TCPDUMP_MAGIC &&
-		    hdr.version_major == PCAP_VERSION_MAJOR &&
-		    hdr.version_minor == PCAP_VERSION_MINOR &&
-		    hdr.snaplen != snaplen) {
+		if (hdr.magic != TCPDUMP_MAGIC ||
+		    hdr.version_major != PCAP_VERSION_MAJOR ||
+		    hdr.version_minor != PCAP_VERSION_MINOR ||
+		    hdr.linktype != hpcap->linktype) {
+			logmsg(LOG_ERR,
+			    "Invalid/incompatible log file, move it away");
+			fclose(fp);
+			return (1);
+		    }
+		if (hdr.snaplen != snaplen) {
 			logmsg(LOG_WARNING,
 			    "Existing file specifies a snaplen of %u, using it",
 			    hdr.snaplen);

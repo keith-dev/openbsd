@@ -8,17 +8,18 @@
  */
 
 #if defined(LIBC_SCCS) && !defined(lint)
-static char rcsid[] = "$OpenBSD: mdXhl.c,v 1.10 2002/12/23 04:33:31 millert Exp $";
+static const char rcsid[] = "$OpenBSD: mdXhl.c,v 1.12 2003/05/09 16:46:30 millert Exp $";
 #endif /* LIBC_SCCS and not lint */
 
-#include <stdlib.h>
-#include <stdio.h>
+#include <sys/types.h>
+
 #include <errno.h>
 #include <fcntl.h>
-#include <sys/types.h>
-#include <sys/uio.h>
-#include <unistd.h>
 #include <mdX.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <string.h>
+#include <unistd.h>
 
 /* ARGSUSED */
 char *
@@ -36,6 +37,7 @@ MDXEnd(MDX_CTX *ctx, char *buf)
 	buf[i+i+1] = hex[digest[i] & 0x0f];
     }
     buf[i+i] = '\0';
+    memset(digest, 0, sizeof(digest));
     return(buf);
 }
 

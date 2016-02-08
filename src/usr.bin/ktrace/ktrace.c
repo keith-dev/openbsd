@@ -1,4 +1,4 @@
-/*	$OpenBSD: ktrace.c,v 1.15 2003/02/19 19:30:13 deraadt Exp $	*/
+/*	$OpenBSD: ktrace.c,v 1.17 2003/06/10 22:20:47 deraadt Exp $	*/
 /*	$NetBSD: ktrace.c,v 1.4 1995/08/31 23:01:44 jtc Exp $	*/
 
 /*-
@@ -13,11 +13,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -44,7 +40,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)ktrace.c	8.2 (Berkeley) 4/28/95";
 #endif
-static char *rcsid = "$OpenBSD: ktrace.c,v 1.15 2003/02/19 19:30:13 deraadt Exp $";
+static char *rcsid = "$OpenBSD: ktrace.c,v 1.17 2003/06/10 22:20:47 deraadt Exp $";
 #endif /* not lint */
 
 #include <sys/param.h>
@@ -69,9 +65,7 @@ static void no_ktrace(int);
 static void usage(void);
 
 int
-main(argc, argv)
-	int argc;
-	char **argv;
+main(int argc, char *argv[])
 {
 	enum { NOTSET, CLEAR, CLEARALL } clear;
 	int append, ch, fd, inherit, ops, pidset, trpoints;
@@ -175,8 +169,7 @@ main(argc, argv)
 }
 
 static int
-rpid(p)
-	const char *p;
+rpid(const char *p)
 {
 	static int first;
 
@@ -192,7 +185,7 @@ rpid(p)
 }
 
 static void
-usage()
+usage(void)
 {
 	(void)fprintf(stderr,
 "usage:\tktrace [-aCcdi] [-f trfile] [-g pgid] [-p pid] [-t [ceinsw]]\n\tktrace [-adi] [-f trfile] [-t [ceinsw]] command\n");
@@ -200,8 +193,7 @@ usage()
 }
 
 static void
-no_ktrace(sig)
-	int sig;
+no_ktrace(int signo)
 {
 	char buf[8192];
 

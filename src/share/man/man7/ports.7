@@ -23,7 +23,7 @@
 .\" (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
 .\" THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 .\"
-.\" $OpenBSD: ports.7,v 1.31 2003/03/16 16:36:47 avsm Exp $
+.\" $OpenBSD: ports.7,v 1.40 2003/09/03 09:10:30 jmc Exp $
 .\" $FreeBSD: ports.7,v 1.7 1998/06/23 04:38:50 hoek Exp $
 .\"
 .Dd January 25, 1998
@@ -118,6 +118,16 @@ Some of these targets work recursively through subdirectories, so that
 someone can, for examples, install all of the net
 ports.
 .Pp
+The variable
+.Ev SKIPDIR
+can hold a set of package directories to avoid during recursion.
+These are always specified relative to the root of the ports tree,
+and can contain a flavor or subpackage part
+.Po
+see
+.Xr packages-specs 7
+.Pc .
+.Pp
 In case of failure in a subdirectory, the shell fragment held in
 .Ev REPORT_PROBLEM
 is executed.
@@ -128,11 +138,17 @@ line, e.g., to avoid stopping after each problem.
 .Ed
 .Pp
 The targets that do this are
-.Ar build , checksum , clean , configure , extract , fake, fetch ,
-.Ar install , distclean , deinstall, reinstall, mirror-distfiles, obj ,
-.Ar package , cdrom-packages , link-categories, unlink-categories ,
+.Ar all , build , checksum , clean ,
+.Ar configure , extract , fake ,
+.Ar fetch , install , distclean ,
+.Ar deinstall , reinstall , package ,
+.Ar link-categories , unlink-categories ,
+.Ar describe , show , regress ,
+.Ar lib-depends-check , homepage-links , manpages-check ,
+.Ar license-check , all-dir-depends , build-dir-depends ,
+.Ar run-dir-depends
 and
-.Ar ftp-packages .
+.Ar readmes .
 .Pp
 Target names starting with _ are private to the ports infrastructure,
 should not be invoked directly, and are liable to change without notice.
@@ -191,13 +207,13 @@ Install
 .Pq or package if only compilation is necessary
 any dependencies of the current port.
 When called by the
-.Ar extract, install
+.Ar extract , install
 or
 .Ar fetch
 targets, this is run in scattered pieces as
-.Ar fetch-depends , lib-depends , build-depends , run-depends
+.Ar lib-depends , build-depends
 and
-.Ar misc-depends .
+.Ar run-depends .
 Defining
 .Ev NO_DEPENDS
 to
@@ -232,7 +248,7 @@ Install the resulting package.
 .Pp
 The following targets are not run during the normal install process.
 .Bl -tag -width fetch-list
-.It Ar depends-list package-depends
+.It Ar print-build-depends print-run-depends
 Print an ordered list of all the compile and run dependencies.
 .It Ar clean
 Remove the expanded source code.
@@ -264,14 +280,14 @@ If
 and
 .Ev BULK
 are set to
-.Sq Yes 
+.Sq Yes
 for a package build, some shortcuts are taken to allow cleaning up working
 directories on the fly.
 .Pp
 Some important caveats apply:
-the packages already built in the package repository are assumed to be 
-up-to-date (BIN_PACKAGES), the database of installed packages is assumed 
-to be accurate (TRUST_PACKAGES), and the bulk cookies are assumed to be 
+the packages already built in the package repository are assumed to be
+up-to-date (BIN_PACKAGES), the database of installed packages is assumed
+to be accurate (TRUST_PACKAGES), and the bulk cookies are assumed to be
 up-to-date (BULK).
 .Pp
 This means that newer iterations of package buildings should make sure
@@ -309,27 +325,27 @@ Go to this site first for all files.
 The
 .Ox
 ports tree comes with a mechanism called
-.Ic FLAVORS.
+.Ic FLAVORS .
 Thanks to this mechanism, users can select specific options provided by
 a given port.
 .Pp
-If a port is "flavored", there should be a terse description of 
+If a port is "flavored", there should be a terse description of
 available flavors in the
 .Pa pkg/DESCR
 file.
 .Pp
 For example, the shells/bash port comes with a flavor called
-.Ic static.
+.Ic static .
 This changes the building process so a statically compiled version of
-the program will be built. 
-To avoid confusion with other packages or flavors, 
+the program will be built.
+To avoid confusion with other packages or flavors,
 the package name will be extended with a dash-separated list of
 the selected flavors.
 .Pp
 In this instance, the corresponding package will be called
 .Ic bash-1.14.7p1-static .
 .Pp
-To build a port with a specific flavor, just pass 
+To build a port with a specific flavor, just pass
 .Ev FLAVOR
 in the environment of the
 .Xr make 1
@@ -355,10 +371,10 @@ Specifying a flavor that does not exist is an error.
 Additionally, some ports impose some further restrictions on flavor
 combinations, when such combinations do not make sense.
 .Pp
-Lots of ports can be built without X Windows requirement and accordingly
+Lots of ports can be built without X11 requirement and accordingly
 have a
 .Ic no_x11
-flavor. 
+flavor.
 .Pp
 Flavor settings are not propagated to dependencies.
 If a specific combination is needed, careful hand-building of the
@@ -381,7 +397,7 @@ should not be changed by the user, and are liable to change without notice.
 .It Ev PORTSDIR
 Location of the ports tree
 .Po
-usually 
+usually
 .Pa /usr/ports
 .Pc
 .It Ev DISTDIR
@@ -389,7 +405,7 @@ Where to find/put distfiles, normally
 .Pa distfiles/
 in
 .Ev PORTSDIR .
-.It Ev PACKAGES
+.It Ev PKGREPOSITORYBASE
 Used only for the
 .Ar package
 target; the base directory for the packages tree, normally
@@ -406,10 +422,10 @@ Directory to put the package in.
 The full path to the package.
 .El
 .It Ev BULK_COOKIES_DIR
-During bulk package building, used to store cookies for already built 
-packages to avoid rebuilding them, since the actual  
-working directory will already have been cleaned out. 
-Defaults to bulk/${MACHINE_ARCH} under 
+During bulk package building, used to store cookies for already built
+packages to avoid rebuilding them, since the actual
+working directory will already have been cleaned out.
+Defaults to bulk/${MACHINE_ARCH} under
 .Ev PORTSDIR .
 .It Ev LOCALBASE
 Where to install things in general
@@ -428,27 +444,29 @@ If set to
 let
 .Sq clean
 recurse to dependencies.
-.It Ev NOCLEANDEPENDS
-If defined, don't let
-.Sq clean
-recurse to dependencies (deprecated, use
-.Ev CLEANDEPENDS
-instead).
 .It Ev FETCH_CMD
 Command to use to fetch files.
 Normally
 .Xr ftp 1 .
-.It Ev FORCE_PKG_REGISTER
-If set, overwrite any existing package registration on the system.
-.Po
-Not recommended.
-.Pc
 .It Ev PATCH_DEBUG
 If defined, display verbose output when applying each patch.
 .It Ev INTERACTIVE
 If defined, only operate on a port if it requires interaction.
 .It Ev BATCH
 If defined, only operate on a port if it can be installed 100% automatically.
+.It Ev USE_SYSTRACE
+Set to
+.Sq Yes
+to protect the
+.Ar configure , build ,
+and
+.Ar fake
+targets with
+.Xr systrace 1 .
+This way it is ensured that ports do not make any network connections
+during build or write outside some well defined directories.
+The filter list is stored in
+.Pa ${PORTSDIR}/infrastructure/db/systrace.filter .
 .El
 .Sh USING A READ-ONLY PORTS TREE
 Select read-write partition(s) that can accommodate working directories, the
@@ -476,6 +494,10 @@ The ports main engine.
 Network configuration defaults.
 .It Pa /usr/ports/infrastructure/db/network.conf
 Local network configuration.
+.It Pa /usr/ports/infrastructure/db/systrace.filter
+Filter list for systrace.
+.It Pa /usr/ports/infrastructure/db/user.list
+List of users and groups created by ports.
 .El
 .Sh SEE ALSO
 .Xr make 1 ,
@@ -493,11 +515,6 @@ Ports Mechanism: http://www.openbsd.org/ports.html
 The
 .Ox
 Porting Checklist: http://www.openbsd.org/checklist.html
-.Sh AUTHORS
-This man page was originated by
-David O'Brien, from the
-.Fx
-project.
 .Sh HISTORY
 .Nm The Ports Collection
 appeared in
@@ -508,6 +525,11 @@ by Ejovi Nuwere, with much initial effort by Angelos D. Keromytis.
 Maintenance passed then to Marco S. Hyman, and then to Christopher Turan.
 It is currently managed by Marc Espie, Brad Smith, and Christian Weisgerber,
 along with a host of others found at ports@openbsd.org.
+.Sh AUTHORS
+This man page was originated by
+David O'Brien, from the
+.Fx
+project.
 .Sh BUGS
 Ports documentation is split over several places ---
 .Xr bsd.port.mk 5 ,

@@ -1,4 +1,4 @@
-/*	$OpenBSD: yppush.c,v 1.18 2002/11/21 21:01:11 deraadt Exp $ */
+/*	$OpenBSD: yppush.c,v 1.21 2003/07/15 06:10:46 deraadt Exp $ */
 
 /*
  * Copyright (c) 1995 Mats O Jansson <moj@stacken.kth.se>
@@ -12,11 +12,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by Mats O Jansson
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS
  * OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
@@ -32,7 +27,7 @@
  */
 
 #ifndef lint
-static char rcsid[] = "$OpenBSD: yppush.c,v 1.18 2002/11/21 21:01:11 deraadt Exp $";
+static const char rcsid[] = "$OpenBSD: yppush.c,v 1.21 2003/07/15 06:10:46 deraadt Exp $";
 #endif /* not lint */
 
 #include <sys/types.h>
@@ -68,14 +63,14 @@ char *master;
 extern void yppush_xfrrespprog_1(struct svc_req *request, SVCXPRT *xprt);
 extern bool_t xdr_ypreq_xfr(XDR *, struct ypreq_xfr *);
 
-void
+static void
 usage(void)
 {
 	fprintf(stderr, "usage: yppush [-d domainname] [-h host] [-v] mapname\n");
 	exit(1);
 }
 
-void
+static void
 _svc_run(void)
 {
 	fd_set *readfdsp = NULL;
@@ -115,7 +110,7 @@ _svc_run(void)
 	}
 }
 
-void
+static void
 req_xfr(pid_t pid, u_int prog, SVCXPRT *transp, char *host, CLIENT *client)
 {
 	struct ypreq_xfr request;
@@ -149,7 +144,7 @@ req_xfr(pid_t pid, u_int prog, SVCXPRT *transp, char *host, CLIENT *client)
 	}
 }
 
-void
+static void
 push(int inlen, char *indata)
 {
 	char host[MAXHOSTNAMELEN];
@@ -214,7 +209,7 @@ push(int inlen, char *indata)
 
 }
 
-int
+static int
 pushit(u_long instatus, char *inkey, int inkeylen, char *inval, int invallen,
     void *indata)
 {

@@ -1,4 +1,4 @@
-.\" $OpenBSD: deroff.1,v 1.3 2002/02/28 22:01:14 millert Exp $
+.\" $OpenBSD: deroff.1,v 1.5 2003/06/10 09:12:10 jmc Exp $
 .\"
 .\" Copyright (c) 1990, 1993
 .\"	The Regents of the University of California.  All rights reserved.
@@ -11,11 +11,7 @@
 .\" 2. Redistributions in binary form must reproduce the above copyright
 .\"    notice, this list of conditions and the following disclaimer in the
 .\"    documentation and/or other materials provided with the distribution.
-.\" 3. All advertising materials mentioning features or use of this software
-.\"    must display the following acknowledgement:
-.\"	This product includes software developed by the University of
-.\"	California, Berkeley and its contributors.
-.\" 4. Neither the name of the University nor the names of its contributors
+.\" 3. Neither the name of the University nor the names of its contributors
 .\"    may be used to endorse or promote products derived from this software
 .\"    without specific prior written permission.
 .\"
@@ -115,23 +111,23 @@ The
 option takes the following arguments:
 .Bl -tag -width Ds
 .It a
-recognize 
+recognize
 .Xr man 7
 macros.
 .It e
-recognize 
+recognize
 .Xr me 7
 macros.
 .It m
-recognize 
+recognize
 .Xr me 7
 macros.
 .It s
-recognize 
+recognize
 .Xr me 7
 macros.
 .It l
-recognize 
+recognize
 .Xr mm 7
 macros and delete
 .Xr mm 7
@@ -152,12 +148,13 @@ Normally, the output follows the original, with the deletions mentioned above.
 .Sh SEE ALSO
 .Xr eqn 1 ,
 .Xr nroff 1 ,
-.Xr troff 1 ,
 .Xr pic 1 ,
-.Xr tbl 1
+.Xr tbl 1 ,
+.Xr troff 1
 .Sh HISTORY
 .Nm
-appeared in Version 7 AT&T Unix.
+appeared in
+.At v7 .
 .Sh BUGS
 .Nm
 is not a complete

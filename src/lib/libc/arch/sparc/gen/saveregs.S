@@ -14,11 +14,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -37,7 +33,7 @@
 
 #if defined(LIBC_SCCS) 
 	.text
-	.asciz "$OpenBSD: saveregs.S,v 1.2 1996/08/19 08:17:43 tholo Exp $"
+	.asciz "$OpenBSD: saveregs.S,v 1.4 2003/06/02 20:18:32 millert Exp $"
 #endif /* LIBC_SCCS */
 
 /*
@@ -59,4 +55,4 @@ ENTRY(__builtin_saveregs)
 	st	%i3, [%fp + 0x50]	! fr->fr_argd[3]
 	st	%i4, [%fp + 0x54]	! fr->fr_argd[4]
 	retl
-	st	%i5, [%fp + 0x58]	! fr->fr_argd[5]
+	 st	%i5, [%fp + 0x58]	! fr->fr_argd[5]

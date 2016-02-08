@@ -1,4 +1,4 @@
-/*	$OpenBSD: nlist.c,v 1.30 2002/11/30 15:35:13 mickey Exp $	*/
+/*	$OpenBSD: nlist.c,v 1.34 2003/06/26 21:36:39 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 1990, 1993
@@ -12,11 +12,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -37,7 +33,7 @@
 #if 0
 static char sccsid[] = "from: @(#)nlist.c	8.1 (Berkeley) 6/6/93";
 #else
-static char *rcsid = "$OpenBSD: nlist.c,v 1.30 2002/11/30 15:35:13 mickey Exp $";
+static const char rcsid[] = "$OpenBSD: nlist.c,v 1.34 2003/06/26 21:36:39 deraadt Exp $";
 #endif
 #endif /* not lint */
 
@@ -83,10 +79,7 @@ static char *fmterr;
 static u_long get_kerntext(char *kfn, u_int magic);
 
 int
-__aout_knlist(fd, db, ksyms)
-	int fd;
-	DB *db;
-	int ksyms;
+__aout_knlist(int fd, DB *db, int ksyms)
 {
 	int nsyms;
 	struct exec ebuf;
@@ -171,12 +164,14 @@ __aout_knlist(fd, db, ksyms)
 		p = strtab + nbuf._strx - sizeof(int);
 		if (*p != '_') {
 			len = strlen(p) + 1;
-			if (len >= snamesize)
-				sname = realloc(sname, len + 1024);
+			if (len >= snamesize) {
+				snamesize = len + 1024;
+				sname = realloc(sname, snamesize);
+			}
 			if (sname == NULL)
 				errx(1, "cannot allocate memory");
 			*sname = '_';
-			strcpy(sname+1, p);
+			strlcpy(sname + 1, p, snamesize  - 1);
 			key.data = (u_char *)sname;
 			key.size = len;
 		} else {
@@ -271,9 +266,7 @@ __aout_knlist(fd, db, ksyms)
 #endif
 
 static u_long
-get_kerntext(name, magic)
-	char *name;
-	u_int magic;
+get_kerntext(char *name, u_int magic)
 {
 	NLIST nl[2];
 
@@ -290,10 +283,7 @@ get_kerntext(name, magic)
 
 #ifdef _NLIST_DO_ELF
 int
-__elf_knlist(fd, db, ksyms)
-	int fd;
-	DB *db;
-	int ksyms;
+__elf_knlist(int fd, DB *db, int ksyms)
 {
 	caddr_t strtab;
 	off_t symstroff, symoff;
@@ -448,11 +438,11 @@ __elf_knlist(fd, db, ksyms)
 			nbuf.n_type = N_FN;
 			break;
 		}
-		if(ELF_ST_BIND(sbuf.st_info) == STB_LOCAL)
+		if (ELF_ST_BIND(sbuf.st_info) == STB_LOCAL)
 			nbuf.n_type = N_EXT;
 
 		*buf = '_';
-		strcpy(buf + 1, strtab + sbuf.st_name);
+		strlcpy(buf + 1, strtab + sbuf.st_name, sizeof buf - 1);
 		key.data = (u_char *)buf;
 		key.size = strlen((char *)key.data);
 		if (db->put(db, &key, &data, 0))
@@ -541,10 +531,7 @@ __elf_knlist(fd, db, ksyms)
 				 (p) < (e)->a.data_start + (e)->a.dsize)
 
 int
-__ecoff_knlist(fd, db, ksyms)
-	int fd;
-	DB *db;
-	int ksyms;
+__ecoff_knlist(int fd, DB *db, int ksyms)
 {
 	struct ecoff_exechdr *exechdrp;
 	struct ecoff_symhdr *symhdrp;
@@ -606,12 +593,15 @@ __ecoff_knlist(fd, db, ksyms)
 	for (sname = NULL, i = 0; i < nesyms; i++) {
 		/* Need to prepend a '_' */
 		len = strlen(&mappedfile[extstroff + esyms[i].es_strindex]) + 1;
-		if (len >= snamesize)
-			sname = realloc(sname, len + 1024);
+		if (len >= snamesize) {
+			snamesize = len + 1024;
+			sname = realloc(sname, snamesize);
+		}
 		if (sname == NULL)
 			errx(1, "cannot allocate memory");
 		*sname = '_';
-		strcpy(sname+1, &mappedfile[extstroff + esyms[i].es_strindex]);
+		strlcpy(sname+1, &mappedfile[extstroff + esyms[i].es_strindex],
+		    snamesize - 1);
 
 		/* Fill in NLIST */
 		bzero(&nbuf, sizeof(nbuf));
@@ -676,10 +666,7 @@ static struct knlist_handlers {
 };
 
 int
-create_knlist(name, fd, db)
-	char *name;
-	int fd;
-	DB *db;
+create_knlist(char *name, int fd, DB *db)
 {
 	int i, error, ksyms;
 

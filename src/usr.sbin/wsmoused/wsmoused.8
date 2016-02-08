@@ -1,4 +1,4 @@
-.\"	$OpenBSD: wsmoused.8,v 1.8 2003/02/26 21:04:53 jmc Exp $
+.\"	$OpenBSD: wsmoused.8,v 1.11 2003/06/12 17:08:30 deraadt Exp $
 .\"
 .\" Copyright (c) 2001 Jean-Baptiste Marchand
 .\" All rights reserved.
@@ -12,11 +12,6 @@
 .\" 2. Redistributions in binary form must reproduce the above copyright
 .\"    notice, this list of conditions and the following disclaimer in the
 .\"    documentation and/or other materials provided with the distribution.
-.\" 3. All advertising materials mentioning features or use of this software
-.\"    must display the following acknowledgement:
-.\"	This product includes software developed by Jean-Baptiste Marchand.
-.\" 4. The name of the author may not be used to endorse or promote products
-.\"    derived from this software without specific prior written permission.
 .\"
 .\" THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
 .\" IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -166,16 +161,16 @@ Kensington ThinkingMouse protocol.
 Hitachi tablet protocol.
 .El
 .El
-
-.Nm 
-will happily coexist with X-Window, provided that the mouse device is 
-supported by 
-.Xr wsmouse 4 .
-Serial mice do not have a 
-.Xr wsmouse 4 
-compatible driver, so 
+.Pp
 .Nm
-has to be killed before starting X-Window.
+will happily coexist with the X Window System, provided that the mouse
+device is supported by
+.Xr wsmouse 4 .
+Serial mice do not have a
+.Xr wsmouse 4
+compatible driver, so
+.Nm
+has to be killed before starting the X Window System.
 .Sh SEE ALSO
 .Xr wscons 4 ,
 .Xr wsmouse 4
@@ -184,5 +179,6 @@ The
 .Nm
 daemon is a slightly modified version of the moused daemon from the
 .Fx
-project, written by Michael Smith <msmith@FreeBSD.org>.
+project, written by
+.An Michael Smith Aq msmith@FreeBSD.org .
 Both inherit code from the XFree Project.

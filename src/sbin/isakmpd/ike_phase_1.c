@@ -1,4 +1,4 @@
-/*	$OpenBSD: ike_phase_1.c,v 1.35 2002/09/11 09:50:43 ho Exp $	*/
+/*	$OpenBSD: ike_phase_1.c,v 1.39 2003/08/08 08:46:59 ho Exp $	*/
 /*	$EOM: ike_phase_1.c,v 1.31 2000/12/11 23:47:56 niklas Exp $	*/
 
 /*
@@ -14,11 +14,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by Ericsson Radio Systems.
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -826,8 +821,8 @@ ike_phase_1_send_ID (struct message *msg)
 	{
 	case IPSEC_ID_IPV4_ADDR:
 	case IPSEC_ID_IPV6_ADDR:
-      	  /* Already in network byteorder.  */
-      	  memcpy (buf + ISAKMP_ID_DATA_OFF, sockaddr_addrdata (src),
+	  /* Already in network byteorder.  */
+	  memcpy (buf + ISAKMP_ID_DATA_OFF, sockaddr_addrdata (src),
 		  sockaddr_addrlen (src));
 	  break;
 
@@ -874,7 +869,7 @@ ike_phase_1_send_ID (struct message *msg)
       return -1;
     }
   memcpy (*id, buf + ISAKMP_GEN_SZ, *id_len);
-  snprintf (header, 80, "ike_phase_1_send_ID: %s",
+  snprintf (header, sizeof header, "ike_phase_1_send_ID: %s",
 	    constant_name (ipsec_id_cst, GET_ISAKMP_ID_TYPE (buf)));
   LOG_DBG_BUF ((LOG_NEGOTIATION, 40, header, buf + ISAKMP_ID_DATA_OFF,
 		sz - ISAKMP_ID_DATA_OFF));
@@ -1031,7 +1026,7 @@ ike_phase_1_recv_ID (struct message *msg)
       return -1;
     }
   memcpy (*id, payload->p + ISAKMP_GEN_SZ, *id_len);
-  snprintf (header, 80, "ike_phase_1_recv_ID: %s",
+  snprintf (header, sizeof header, "ike_phase_1_recv_ID: %s",
 	    constant_name (ipsec_id_cst, GET_ISAKMP_ID_TYPE (payload->p)));
   LOG_DBG_BUF ((LOG_NEGOTIATION, 40, header, payload->p + ISAKMP_ID_DATA_OFF,
 		*id_len + ISAKMP_GEN_SZ - ISAKMP_ID_DATA_OFF));
@@ -1088,7 +1083,7 @@ ike_phase_1_recv_AUTH (struct message *msg)
   prf->Update (prf->prfctx, id, id_len);
   prf->Final (hash->digest, prf->prfctx);
   prf_free (prf);
-  snprintf (header, 80, "ike_phase_1_recv_AUTH: computed HASH_%c",
+  snprintf (header, sizeof header, "ike_phase_1_recv_AUTH: computed HASH_%c",
 	    initiator ? 'R' : 'I');
   LOG_DBG_BUF ((LOG_NEGOTIATION, 80, header, hash->digest, hashsize));
 
@@ -1212,7 +1207,7 @@ attribute_unacceptable (u_int16_t type, u_int8_t *value, u_int16_t len,
   struct conf_list *life_conf;
   struct conf_list_node *xf = vs->xf, *life;
   char *tag = constant_lookup (ike_attr_cst, type);
-  char *str;
+  char *tag2, *str;
   struct constant_map *map;
   struct attr_node *node;
   int rv;
@@ -1261,9 +1256,10 @@ attribute_unacceptable (u_int16_t type, u_int8_t *value, u_int16_t len,
 	  LIST_INSERT_HEAD (&vs->attrs, node, link);
 	  return 0;
 	}
+      tag2 = constant_lookup (map, decode_16 (value));
       LOG_DBG ((LOG_NEGOTIATION, 70,
 		"attribute_unacceptable: %s: got %s, expected %s", tag,
-		constant_lookup (map, decode_16 (value)), str));
+		tag2 ? tag2 : "<unknown>", str));
       return 1;
 
     case IKE_ATTR_GROUP_PRIME:

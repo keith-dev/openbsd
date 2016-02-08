@@ -1,16 +1,16 @@
-/*	$OpenBSD: theo.c,v 1.47 2003/03/13 15:09:36 grange Exp $	*/
+/*	$OpenBSD: theo.c,v 1.58 2003/08/16 00:24:51 deraadt Exp $	*/
 /*
  * Copyright (c) 2002 Artur Grabowski <art@openbsd.org>
- * All rights reserved. 
+ * All rights reserved.
  *
- * Redistribution and use in source and binary forms, with or without 
- * modification, are permitted provided that the following conditions 
- * are met: 
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- * 1. Redistributions of source code must retain the above copyright 
- *    notice, this list of conditions and the following disclaimer. 
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
  * 2. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission. 
+ *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES,
  * INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY
@@ -21,7 +21,7 @@
  * OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
  * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
- * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
+ * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
 #include "def.h"
@@ -130,7 +130,18 @@ static const char *talk[] = {
 	"We are not hackers. We are turd polishing craftsmen.",
 	"if ya break cvs, we hunt ya and break yer legs",
 	"who cares.  style(9) can bite my ass",
-	"The argument is totally Linux."
+	"The argument is totally Linux.",
+	"It'd be one fucking happy planet if it wasn't for what's under this fucking sticker.",
+	"noone is gonna add that thing to theo.c?  wow, i'm stunned.  no henning?",
+	"I would explain, but I am too drunk.",
+	"Take a picture of my butt, it's what everyone wants.",
+	"You guys are about four days behind on theo.c",
+	"I'm just talking.",
+	"Vegetarian my ass",
+	"Wait a minute, that's a McNally's!",
+	"Your connection is breaking up.",
+	"germans are not allowed to get involved there",
+	"gprs sucks camel dick dryer than the gobi desert"
 };
 
 static const int ntalk = sizeof(talk)/sizeof(talk[0]);

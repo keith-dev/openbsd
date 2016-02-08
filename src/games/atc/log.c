@@ -1,4 +1,4 @@
-/*	$OpenBSD: log.c,v 1.10 2002/06/23 03:01:12 deraadt Exp $	*/
+/*	$OpenBSD: log.c,v 1.12 2003/06/03 03:01:38 millert Exp $	*/
 /*	$NetBSD: log.c,v 1.3 1995/03/21 15:04:21 cgd Exp $	*/
 
 /*-
@@ -16,11 +16,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -50,7 +46,7 @@
 #if 0
 static char sccsid[] = "@(#)log.c	8.1 (Berkeley) 5/31/93";
 #else
-static char rcsid[] = "$OpenBSD: log.c,v 1.10 2002/06/23 03:01:12 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: log.c,v 1.12 2003/06/03 03:01:38 millert Exp $";
 #endif
 #endif /* not lint */
 
@@ -90,13 +86,14 @@ timestr(t)
 	static char	s[80];
 
 	if (DAY(t) > 0)
-		(void)sprintf(s, "%dd+%02dhrs", DAY(t), HOUR(t));
+		(void)snprintf(s, sizeof s, "%dd+%02dhrs", DAY(t), HOUR(t));
 	else if (HOUR(t) > 0)
-		(void)sprintf(s, "%d:%02d:%02d", HOUR(t), MINUTES(t), SEC(t));
+		(void)snprintf(s, sizeof s, "%d:%02d:%02d",
+		    HOUR(t), MINUTES(t), SEC(t));
 	else if (MINUTES(t) > 0)
-		(void)sprintf(s, "%d:%02d", MINUTES(t), SEC(t));
+		(void)snprintf(s, sizeof s, "%d:%02d", MINUTES(t), SEC(t));
 	else if (SEC(t) > 0)
-		(void)sprintf(s, ":%02d", SEC(t));
+		(void)snprintf(s, sizeof s, ":%02d", SEC(t));
 	else
 		*s = '\0';
 

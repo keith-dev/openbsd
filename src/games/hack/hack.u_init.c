@@ -1,4 +1,4 @@
-/*	$OpenBSD: hack.u_init.c,v 1.5 2003/03/16 21:22:36 camield Exp $	*/
+/*	$OpenBSD: hack.u_init.c,v 1.8 2003/07/06 02:07:45 avsm Exp $	*/
 
 /*
  * Copyright (c) 1985, Stichting Centrum voor Wiskunde en Informatica,
@@ -62,18 +62,16 @@
  */
 
 #ifndef lint
-static char rcsid[] = "$OpenBSD: hack.u_init.c,v 1.5 2003/03/16 21:22:36 camield Exp $";
+static const char rcsid[] = "$OpenBSD: hack.u_init.c,v 1.8 2003/07/06 02:07:45 avsm Exp $";
 #endif /* not lint */
 
-#include "hack.h"
+#include <ctype.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <signal.h>
-#define Strcpy	(void) strcpy
-#define	Strcat	(void) strcat
+#include "hack.h"
 #define	UNDEF_TYP	0
 #define	UNDEF_SPE	'\177'
-extern struct obj *addinv();
-extern char *eos();
 extern char plname[];
 
 struct you zerou;
@@ -156,19 +154,27 @@ struct trobj Wizard[] = {
 	{ 0, 0, 0, 0, 0 }
 };
 
-u_init(){
-register int i;
-char exper = 'y', pc;
-extern char readchar();
+static void ini_inv(struct trobj *);
+static int  role_index(char);
+#ifdef WIZARD
+static void wiz_inv(void);
+#endif
+
+void
+u_init()
+{
+	int i;
+	char exper = 'y', pc;
+
 	if(flags.female)	/* should have been set in HACKOPTIONS */
 		roles[4] = "Cave-woman";
 	for(i = 0; i < NR_OF_ROLES; i++)
 		rolesyms[i] = roles[i][0];
 	rolesyms[i] = 0;
 
-	if(pc = pl_character[0]) {
-		if(islower(pc)) pc = toupper(pc);
-		if((i = role_index(pc)) >= 0)
+	if ((pc = pl_character[0])) {
+		if (islower(pc)) pc = toupper(pc);
+		if ((i = role_index(pc)) >= 0)
 			goto got_suffix;	/* implies experienced */
 		printf("\nUnknown role: %c\n", pc);
 		pl_character[0] = pc = 0;
@@ -177,7 +183,7 @@ extern char readchar();
 	printf("\nAre you an experienced player? [ny] ");
 
 	while(!strchr("ynYN \n\004", (exper = readchar())))
-		bell();
+		hackbell();
 	if(exper == '\004')		/* Give him an opportunity to get out */
 		end_of_input();
 	printf("%c\n", exper);		/* echo */
@@ -199,7 +205,7 @@ extern char readchar();
 	}
 	printf("? [%s] ", rolesyms);
 
-	while(pc = readchar()) {
+	while ((pc = readchar())) {
 		if(islower(pc)) pc = toupper(pc);
 		if((i = role_index(pc)) >= 0) {
 			printf("%c\n", pc);	/* echo */
@@ -210,7 +216,7 @@ extern char readchar();
 			break;
 		if(pc == '\004')    /* Give him the opportunity to get out */
 			end_of_input();
-		bell();
+		hackbell();
 	}
 	if(pc == '\n')
 		pc = 0;
@@ -238,8 +244,7 @@ beginner:
 
 got_suffix:
 
-	(void) strncpy(pl_character, roles[i], PL_CSIZ-1);
-	pl_character[PL_CSIZ-1] = 0;
+	(void) strlcpy(pl_character, roles[i], sizeof pl_character);
 	flags.beginner = 1;
 	u = zerou;
 	u.usym = '@';
@@ -303,7 +308,7 @@ got_suffix:
 	}
 	find_ac();
 	if(!rn2(20)) {
-		register int d = rn2(7) - 2;	/* biased variation */
+		int d = rn2(7) - 2;	/* biased variation */
 		u.ustr += d;
 		u.ustrmax += d;
 	}
@@ -317,9 +322,11 @@ got_suffix:
 		u.ustr++, u.ustrmax++;
 }
 
-ini_inv(trop) register struct trobj *trop; {
-register struct obj *obj;
-extern struct obj *mkobj();
+static void
+ini_inv(struct trobj *trop)
+{
+	struct obj *obj;
+
 	while(trop->trolet) {
 		obj = mkobj(trop->trolet);
 		obj->known = trop->trknown;
@@ -373,11 +380,13 @@ extern struct obj *mkobj();
 }
 
 #ifdef WIZARD
-wiz_inv(){
-register struct trobj *trop = &Extra_objs[0];
-extern char *getenv();
-register char *ep = getenv("INVENT");
-register int type;
+static void
+wiz_inv()
+{
+	struct trobj *trop = &Extra_objs[0];
+	char *ep = getenv("INVENT");
+	int type;
+
 	while(ep && *ep) {
 		type = atoi(ep);
 		ep = strchr(ep, ',');
@@ -400,9 +409,12 @@ register int type;
 }
 #endif /* WIZARD */
 
-plnamesuffix() {
-register char *p;
-	if(p = strrchr(plname, '-')) {
+void
+plnamesuffix()
+{
+	char *p;
+
+	if ((p = strrchr(plname, '-'))) {
 		*p = 0;
 		pl_character[0] = p[1];
 		pl_character[1] = 0;
@@ -413,13 +425,14 @@ register char *p;
 	}
 }
 
-role_index(pc)
-char pc;
-{		/* must be called only from u_init() */
-		/* so that rolesyms[] is defined */
-	register char *cp;
+/* must be called only from u_init() */
+/* so that rolesyms[] is defined */
+static int
+role_index(char pc)
+{		
+	char *cp;
 
-	if(cp = strchr(rolesyms, pc))
+	if ((cp = strchr(rolesyms, pc)))
 		return(cp - rolesyms);
 	return(-1);
 }

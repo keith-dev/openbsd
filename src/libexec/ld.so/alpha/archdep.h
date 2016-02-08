@@ -1,4 +1,4 @@
-/*	$OpenBSD: archdep.h,v 1.9 2003/02/15 22:43:06 drahn Exp $ */
+/*	$OpenBSD: archdep.h,v 1.11 2003/07/09 21:01:10 drahn Exp $ */
 
 /*
  * Copyright (c) 1998 Per Fogelstrom, Opsycon AB
@@ -11,12 +11,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed under OpenBSD by
- *	Per Fogelstrom, Opsycon AB, Sweden.
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS
  * OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
@@ -57,12 +51,8 @@ RELOC_REL(Elf64_Rel *r, const Elf64_Sym *s, Elf64_Addr *p, unsigned long v)
 static inline void
 RELOC_RELA(Elf64_Rela *r, const Elf64_Sym *s, Elf64_Addr *p, unsigned long v)
 {
-	extern Elf_Addr  _GLOBAL_OFFSET_TABLE_[];
-
 	if (ELF64_R_TYPE(r->r_info) == RELOC_RELATIVE) {
-		if ((caddr_t)p < (caddr_t)_GLOBAL_OFFSET_TABLE_ ||
-		    (caddr_t)p >= (caddr_t)&_DYNAMIC)
-			*p += (Elf_Addr)v;
+		/* handled by _reloc_alpha_got */
 	} else if (ELF64_R_TYPE(r->r_info) == RELOC_JMP_SLOT) {
 		Elf64_Addr val = v + s->st_value + r->r_addend -
 			(Elf64_Addr)(p);

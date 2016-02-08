@@ -1,4 +1,4 @@
-/*	$OpenBSD: mtree.c,v 1.14 2002/02/16 21:28:05 millert Exp $	*/
+/*	$OpenBSD: mtree.c,v 1.18 2003/07/26 17:34:18 millert Exp $	*/
 /*	$NetBSD: mtree.c,v 1.7 1996/09/05 23:29:22 thorpej Exp $	*/
 
 /*-
@@ -13,11 +13,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -44,7 +40,7 @@ static const char copyright[] =
 #if 0
 static const char sccsid[] = "@(#)mtree.c	8.1 (Berkeley) 6/6/93";
 #else
-static const char rcsid[] = "$OpenBSD: mtree.c,v 1.14 2002/02/16 21:28:05 millert Exp $";
+static const char rcsid[] = "$OpenBSD: mtree.c,v 1.18 2003/07/26 17:34:18 millert Exp $";
 #endif
 #endif /* not lint */
 
@@ -68,9 +64,7 @@ char fullpath[MAXPATHLEN];
 static void usage(void);
 
 int
-main(argc, argv)
-	int argc;
-	char *argv[];
+main(int argc, char *argv[])
 {
 	extern int optind;
 	extern char *optarg;
@@ -129,6 +123,7 @@ main(argc, argv)
 			crc_total = ~strtol(optarg, &p, 0);
 			if (*p)
 				error("illegal seed value -- %s", optarg);
+			break;
 		case 't':
 			tflag = 1;
 			break;
@@ -166,13 +161,13 @@ main(argc, argv)
 		exit(0);
 	}
 	status = verify();
-	if (Uflag & (status == MISMATCHEXIT))
+	if (Uflag && (status == MISMATCHEXIT))
 		status = 0;
 	exit(status);
 }
 
 static void
-usage()
+usage(void)
 {
 	(void)fprintf(stderr,
 "usage: mtree [-cdeilnqrtUux] [-f spec] [-K key] [-k key] [-p path] [-s seed]\n");

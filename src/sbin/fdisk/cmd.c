@@ -1,4 +1,4 @@
-/*	$OpenBSD: cmd.c,v 1.31 2002/01/24 04:40:03 mickey Exp $	*/
+/*	$OpenBSD: cmd.c,v 1.33 2003/06/11 06:22:12 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1997 Tobias Weingartner
@@ -12,11 +12,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *    This product includes software developed by Tobias Weingartner.
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -46,12 +41,7 @@
 #define MAX(a, b) ((a) >= (b) ? (a) : (b))
 
 int
-Xreinit(cmd, disk, mbr, tt, offset)
-	cmd_t *cmd;
-	disk_t *disk;
-	mbr_t *mbr;
-	mbr_t *tt;
-	int offset;
+Xreinit(cmd_t *cmd, disk_t *disk, mbr_t *mbr, mbr_t *tt, int offset)
 {
 	char buf[DEV_BSIZE];
 
@@ -71,12 +61,7 @@ Xreinit(cmd, disk, mbr, tt, offset)
 }
 
 int
-Xdisk(cmd, disk, mbr, tt, offset)
-	cmd_t *cmd;
-	disk_t *disk;
-	mbr_t *mbr;
-	mbr_t *tt;
-	int offset;
+Xdisk(cmd_t *cmd, disk_t *disk, mbr_t *mbr, mbr_t *tt, int offset)
 {
 	int maxcyl  = 1024;
 	int maxhead = 256;
@@ -108,12 +93,7 @@ Xdisk(cmd, disk, mbr, tt, offset)
 }
 
 int
-Xedit(cmd, disk, mbr, tt, offset)
-	cmd_t *cmd;
-	disk_t *disk;
-	mbr_t *mbr;
-	mbr_t *tt;
-	int offset;
+Xedit(cmd_t *cmd, disk_t *disk, mbr_t *mbr, mbr_t *tt, int offset)
 {
 	int pn, num, ret;
 	prt_t *pp;
@@ -198,12 +178,7 @@ Xedit(cmd, disk, mbr, tt, offset)
 }
 
 int
-Xsetpid(cmd, disk, mbr, tt, offset)
-	cmd_t *cmd;
-	disk_t *disk;
-	mbr_t *mbr;
-	mbr_t *tt;
-	int offset;
+Xsetpid(cmd_t *cmd, disk_t *disk, mbr_t *mbr, mbr_t *tt, int offset)
 {
 	int pn, num, ret;
 	prt_t *pp;
@@ -238,12 +213,7 @@ Xsetpid(cmd, disk, mbr, tt, offset)
 	return (ret);
 }
 int
-Xselect(cmd, disk, mbr, tt, offset)
-	cmd_t *cmd;
-	disk_t *disk;
-	mbr_t *mbr;
-	mbr_t *tt;
-	int offset;
+Xselect(cmd_t *cmd, disk_t *disk, mbr_t *mbr, mbr_t *tt, int offset)
 {
 	static int firstoff = 0;
 	int off;
@@ -281,12 +251,7 @@ Xselect(cmd, disk, mbr, tt, offset)
 }
 
 int
-Xprint(cmd, disk, mbr, tt, offset)
-	cmd_t *cmd;
-	disk_t *disk;
-	mbr_t *mbr;
-	mbr_t *tt;
-	int offset;
+Xprint(cmd_t *cmd, disk_t *disk, mbr_t *mbr, mbr_t *tt, int offset)
 {
 
 	DISK_printmetrics(disk, cmd->args);
@@ -297,12 +262,7 @@ Xprint(cmd, disk, mbr, tt, offset)
 }
 
 int
-Xwrite(cmd, disk, mbr, tt, offset)
-	cmd_t *cmd;
-	disk_t *disk;
-	mbr_t *mbr;
-	mbr_t *tt;
-	int offset;
+Xwrite(cmd_t *cmd, disk_t *disk, mbr_t *mbr, mbr_t *tt, int offset)
 {
 	char mbr_buf[DEV_BSIZE];
 	int fd;
@@ -330,12 +290,7 @@ Xquit(cmd, disk, r, tt, offset)
 }
 
 int
-Xabort(cmd, disk, mbr, tt, offset)
-	cmd_t *cmd;
-	disk_t *disk;
-	mbr_t *mbr;
-	mbr_t *tt;
-	int offset;
+Xabort(cmd_t *cmd, disk_t *disk, mbr_t *mbr, mbr_t *tt, int offset)
 {
 	exit(0);
 
@@ -345,12 +300,7 @@ Xabort(cmd, disk, mbr, tt, offset)
 
 
 int
-Xexit(cmd, disk, mbr, tt, offset)
-	cmd_t *cmd;
-	disk_t *disk;
-	mbr_t *mbr;
-	mbr_t *tt;
-	int offset;
+Xexit(cmd_t *cmd, disk_t *disk, mbr_t *mbr, mbr_t *tt, int offset)
 {
 
 	/* Nothing to do here */
@@ -358,12 +308,7 @@ Xexit(cmd, disk, mbr, tt, offset)
 }
 
 int
-Xhelp(cmd, disk, mbr, tt, offset)
-	cmd_t *cmd;
-	disk_t *disk;
-	mbr_t *mbr;
-	mbr_t *tt;
-	int offset;
+Xhelp(cmd_t *cmd, disk_t *disk, mbr_t *mbr, mbr_t *tt, int offset)
 {
 	cmd_table_t *cmd_table = cmd->table;
 	int i;
@@ -375,12 +320,7 @@ Xhelp(cmd, disk, mbr, tt, offset)
 }
 
 int
-Xupdate(cmd, disk, mbr, tt, offset)
-	cmd_t *cmd;
-	disk_t *disk;
-	mbr_t *mbr;
-	mbr_t *tt;
-	int offset;
+Xupdate(cmd_t *cmd, disk_t *disk, mbr_t *mbr, mbr_t *tt, int offset)
 {
 
 	/* Update code */
@@ -390,12 +330,7 @@ Xupdate(cmd, disk, mbr, tt, offset)
 }
 
 int
-Xflag(cmd, disk, mbr, tt, offset)
-	cmd_t *cmd;
-	disk_t *disk;
-	mbr_t *mbr;
-	mbr_t *tt;
-	int offset;
+Xflag(cmd_t *cmd, disk_t *disk, mbr_t *mbr, mbr_t *tt, int offset)
 {
 	int i, pn = -1;
 
@@ -424,12 +359,7 @@ Xflag(cmd, disk, mbr, tt, offset)
 }
 
 int
-Xmanual(cmd, disk, mbr, tt, offset)
-	cmd_t *cmd;
-	disk_t *disk;
-	mbr_t *mbr;
-	mbr_t *tt;
-	int offset;
+Xmanual(cmd_t *cmd, disk_t *disk, mbr_t *mbr, mbr_t *tt, int offset)
 {
 	char *pager = "/usr/bin/less";
 	char *p;

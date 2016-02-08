@@ -1,4 +1,4 @@
-.\"	$OpenBSD: compat_ibcs2.8,v 1.10 2003/02/19 09:10:36 jmc Exp $
+.\"	$OpenBSD: compat_ibcs2.8,v 1.14 2003/08/23 19:26:25 tedu Exp $
 .\"
 .\" Copyright (c) 1998 Scott Bartram
 .\" Copyright (c) 1995 Frank van der Linden
@@ -47,6 +47,8 @@ Binaries are supported from SCO UNIX and other systems derived from UNIX
 System V Release 3.
 iBCS2 support is only well tested using SCO binaries.
 XENIX binaries are also supported although not as well tested.
+This option is controlled by the kern.emul.ibcs2
+.Xr sysctl 8 .
 SVR4 binaries are supported by the
 .Nm COMPAT_SVR4
 option.
@@ -55,17 +57,14 @@ iBCS2 supports COFF, ELF, and x.out (XENIX) binary formats.
 Binaries from SCO OpenServer (version 5.x) are the only ELF binaries
 that have been tested.
 Most programs should work, but not ones that use or depend on:
-.sp
+.Pp
 .Bl -tag -width 123 -compact -offset indent
 .It kernel internal data structures
-.br
 .It STREAMS drivers (other than TCP/IP sockets)
-.br
 .It local X displays (uses a STREAMS pipe)
-.br
 .It virtual 8086 mode
 .El
-.sp
+.Pp
 The iBCS2 compatibility feature is active for kernels compiled with
 the
 .Nm COMPAT_IBCS2
@@ -102,7 +101,7 @@ It is recommended that iBCS2 packages that include
 configuration files, etc., be installed under
 .Pa /emul/ibcs2 ,
 to avoid naming conflicts with possible
-.Ox 
+.Ox
 counterparts.
 Shared libraries should also be installed in the shadow tree.
 .Pp
@@ -123,33 +122,29 @@ possibilities.
 on the
 .Ox
 system to perform the necessary installation steps).
-.Pp
-.Bl -tag -width 123 -compact
+.Bl -tag -width 123
 .It 1. COFF binaries
 Simply copy all of the available shared libraries since they
 are fairly small in size.
 The COFF shared libraries are typically found in
 .Pa /shlib
 and can be obtained from the following sources:
-.sp
-.nf
+.Bd -unfilled -offset indent
 SCO UNIX version 3.x (aka ODT)
 SCO UNIX version 5.x (aka OpenServer)
 SCO UnixWare
 Many versions of SVR4.2/x86
-.fi
-.sp
+.Ed
+.Pp
 After copying the shared libraries, the following files should be
 present on the
 .Ox
 system:
-.Pp
-.nf
-.Pa /emul/ibcs2/shlib/libc_s
-.Pa /emul/ibcs2/shlib/libnsl_s
-.Pa /emul/ibcs2/shlib/protlib_s
-.fi
-.Pp
+.Bd -unfilled -offset indent
+/emul/ibcs2/shlib/libc_s
+/emul/ibcs2/shlib/libnsl_s
+/emul/ibcs2/shlib/protlib_s
+.Ed
 .It 2. ELF binaries
 Copy all of the available shared libraries from the
 source system or distribution, or use the `ldd-elf' program (in
@@ -159,15 +154,14 @@ After copying the shared libraries, the following files should be
 present on the
 .Ox
 system:
-.Pp
-.nf
-.Pa /emul/ibcs2/usr/lib/libc.so.1
-.Pa /emul/ibcs2/usr/lib/libcrypt.so
-.Pa /emul/ibcs2/usr/lib/libndbm.so
-.Pa /emul/ibcs2/usr/lib/libsocket.so.1
-.fi
-.Pp
+.Bd -unfilled -offset indent
+/emul/ibcs2/usr/lib/libc.so.1
+/emul/ibcs2/usr/lib/libcrypt.so
+/emul/ibcs2/usr/lib/libndbm.so
+/emul/ibcs2/usr/lib/libsocket.so.1
+.Ed
 .El
+.Pp
 If access to an SCO system is impossible, the extra files will need to be
 obtained from an SCO distribution.
 As of January 1998, SCO sells a copy of SCO OpenServer (iBCS2) and/or

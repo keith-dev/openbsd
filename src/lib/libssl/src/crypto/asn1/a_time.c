@@ -105,7 +105,10 @@ ASN1_TIME *ASN1_TIME_set(ASN1_TIME *s, time_t t)
 
 	ts=OPENSSL_gmtime(&t,&data);
 	if (ts == NULL)
+		{
+		ASN1err(ASN1_F_ASN1_TIME_SET, ASN1_R_ERROR_GETTING_TIME);
 		return NULL;
+		}
 	if((ts->tm_year >= 50) && (ts->tm_year < 150))
 					return ASN1_UTCTIME_set(s, t);
 	return ASN1_GENERALIZEDTIME_set(s,t);
@@ -125,6 +128,7 @@ ASN1_GENERALIZEDTIME *ASN1_TIME_to_generalizedtime(ASN1_TIME *t, ASN1_GENERALIZE
 	{
 	ASN1_GENERALIZEDTIME *ret;
 	char *str;
+	int newlen;
 
 	if (!ASN1_TIME_check(t)) return NULL;
 
@@ -147,12 +151,14 @@ ASN1_GENERALIZEDTIME *ASN1_TIME_to_generalizedtime(ASN1_TIME *t, ASN1_GENERALIZE
 	/* grow the string */
 	if (!ASN1_STRING_set(ret, NULL, t->length + 2))
 		return NULL;
+	/* ASN1_STRING_set() allocated 'len + 1' bytes. */
+	newlen = t->length + 2 + 1;
 	str = (char *)ret->data;
 	/* Work out the century and prepend */
-	if (t->data[0] >= '5') strcpy(str, "19");
-	else strcpy(str, "20");
+	if (t->data[0] >= '5') strlcpy(str, "19", newlen);
+	else strlcpy(str, "20", newlen);
 
-	strcat(str, (char *)t->data);
+	strlcat(str, (char *)t->data, newlen);
 
 	return ret;
 	}

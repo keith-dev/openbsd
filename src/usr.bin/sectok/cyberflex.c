@@ -1,4 +1,4 @@
-/*	$OpenBSD: cyberflex.c,v 1.23 2002/06/17 07:10:52 deraadt Exp $ */
+/*	$OpenBSD: cyberflex.c,v 1.25 2003/04/19 23:55:05 dhartmei Exp $ */
 
 /*
  * copyright 1999, 2000
@@ -365,7 +365,7 @@ print_acl(int isdir, u_char *acl)
 }
 
 void
-sectok_fmt_aidname(char *aidname, int aidlen, u_char *aid)
+sectok_fmt_aidname(char *aidname, int aidlen, u_char *aid, size_t len)
 {
 	int	i, istext = 1;
 
@@ -375,13 +375,16 @@ sectok_fmt_aidname(char *aidname, int aidlen, u_char *aid)
 			break;
 		}
 	if (istext) {
+		if (aidlen + 1 > len)
+			aidlen = len - 1;
 		memcpy(aidname, aid, aidlen);
 		aidname[aidlen] = '\0';
 		if (aid[0] == 0xfc)
 			aidname[0] = '#';
 	} else {
 		for (i = 0; i < aidlen; i++)
-			sprintf(&aidname[i * 2], "%02x", aid[i]);
+			snprintf(&aidname[i * 2], len - ( i * 2),
+			    "%02x", aid[i]);
 	}
 }
 
@@ -418,7 +421,7 @@ ls(int argc, char *argv[])
 			continue;
 
 		/* Format name */
-		sectok_fmt_fid(fname, &buf[4]);
+		sectok_fmt_fid(fname, sizeof fname, &buf[4]);
 
 		/* Format size */
 		fsize = (buf[2] << 8) | buf[3];
@@ -440,7 +443,8 @@ ls(int argc, char *argv[])
 					if (buflen > 23 && buf[23]) {
 						aidname[0] = ' ';
 						sectok_fmt_aidname(&aidname[1],
-						    buf[23], &buf[24]);
+						    buf[23], &buf[24],
+						    sizeof aidname - 1);
 					}
 				} else
 					snprintf(ftype, sizeof ftype,
@@ -679,8 +683,8 @@ jload(int argc, char *argv[])
 	if (!aut0_vfyd)
 		jaut(0, NULL);
 
-	sectok_fmt_fid(progname, progID);
-	sectok_fmt_fid(contname, contID);
+	sectok_fmt_fid(progname, sizeof progname, progID);
+	sectok_fmt_fid(contname, sizeof contname, contID);
 
 	if (vflag) {
 		printf("applet file             \"%s\"\n", filename);
@@ -869,8 +873,8 @@ junload(int argc, char *argv[])
 	if (!aut0_vfyd)
 		jaut(0, NULL);
 
-	sectok_fmt_fid(progname, progID);
-	sectok_fmt_fid(contname, contID);
+	sectok_fmt_fid(progname, sizeof progname, progID);
+	sectok_fmt_fid(contname, sizeof contname, contID);
 
 	if (vflag) {
 		printf("program ID              %s\n", progname);

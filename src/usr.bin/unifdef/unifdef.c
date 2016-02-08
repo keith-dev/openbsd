@@ -1,5 +1,6 @@
-/*	$OpenBSD: unifdef.c,v 1.9 2003/01/22 18:26:15 deraadt Exp $	*/
+/*	$OpenBSD: unifdef.c,v 1.11 2003/06/30 18:37:48 avsm Exp $	*/
 /*
+ * Copyright (c) 2002, 2003 Tony Finch <dot@dotat.at>
  * Copyright (c) 1985, 1993
  *	The Regents of the University of California.  All rights reserved.
  *
@@ -14,11 +15,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -43,7 +40,7 @@ static const char copyright[] =
 #if 0
 static char sccsid[] = "@(#)unifdef.c	8.1 (Berkeley) 6/6/93";
 #endif
-static const char rcsid[] = "$OpenBSD: unifdef.c,v 1.9 2003/01/22 18:26:15 deraadt Exp $";
+static const char rcsid[] = "$OpenBSD: unifdef.c,v 1.11 2003/06/30 18:37:48 avsm Exp $";
 #endif
 
 /*
@@ -220,7 +217,7 @@ main(int argc, char *argv[])
 {
 	int opt;
 
-	while ((opt = getopt(argc, argv, "i:D:U:cdeklst")) != -1)
+	while ((opt = getopt(argc, argv, "i:D:U:I:cdeklst")) != -1)
 		switch (opt) {
 		case 'i': /* treat stuff controlled by these symbols as text */
 			/*
@@ -241,6 +238,9 @@ main(int argc, char *argv[])
 			break;
 		case 'U': /* undef a symbol */
 			addsym(false, false, optarg);
+			break;
+		case 'I':
+			/* no-op for compatibility with cpp */
 			break;
 		case 'c': /* treat -D as -U and vice versa */
 			complement = true;
@@ -985,16 +985,18 @@ ifeval(const char **cpp)
 
 /*
  * Skip over comments and stop at the next character position that is
- * not whitespace. Between calls we keep the comment state in a global
- * variable, and we also make a note when we get a proper end-of-line.
+ * not whitespace. Between calls we keep the comment state in the
+ * global variable incomment, and we also adjust the global variable
+ * linestate when we see a newline.
  * XXX: doesn't cope with the buffer splitting inside a state transition.
  */
 static const char *
 skipcomment(const char *cp)
 {
 	if (text || ignoring[depth]) {
-		while (isspace((unsigned char)*cp))
-			cp += 1;
+		for (; isspace((unsigned char)*cp); cp++)
+			if (*cp == '\n')
+				linestate = LS_START;
 		return (cp);
 	}
 	while (*cp != '\0')

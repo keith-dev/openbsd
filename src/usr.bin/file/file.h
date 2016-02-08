@@ -1,4 +1,4 @@
-/*	$OpenBSD: file.h,v 1.12 2003/03/11 21:26:26 ian Exp $	*/
+/*	$OpenBSD: file.h,v 1.14 2003/07/02 21:04:10 deraadt Exp $	*/
 
 /*
  * file.h - definitions for file(1) program
@@ -16,11 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *    This product includes software developed by Ian F. Darwin and others.
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *  
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
  * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
@@ -151,5 +146,8 @@ extern char *sys_errlist[];
 #ifndef MAXPATHLEN
 #define	MAXPATHLEN	512
 #endif
+
+int	pipe2file(int, void *, size_t);
+void	error(const char *, ...);
 
 #endif /* __file_h__ */

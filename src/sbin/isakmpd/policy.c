@@ -1,4 +1,4 @@
-/*	$OpenBSD: policy.c,v 1.57 2002/11/14 16:38:05 ho Exp $	*/
+/*	$OpenBSD: policy.c,v 1.66 2003/07/25 08:31:16 markus Exp $	*/
 /*	$EOM: policy.c,v 1.49 2000/10/24 13:33:39 niklas Exp $ */
 
 /*
@@ -14,11 +14,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by Ericsson Radio Systems.
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -66,6 +61,7 @@
 #include "transport.h"
 #include "log.h"
 #include "message.h"
+#include "monitor.h"
 #include "util.h"
 #include "policy.h"
 #include "x509.h"
@@ -247,7 +243,7 @@ policy_callback (char *name)
 	pfs = "yes";
 
       is = policy_isakmp_sa->data;
-      snprintf (phase1_group, PMAX, "%u", is->group_desc);
+      snprintf (phase1_group, sizeof phase1_group, "%u", is->group_desc);
 
       for (proto = TAILQ_FIRST (&policy_sa->protos); proto;
 	   proto = TAILQ_NEXT (proto, link))
@@ -268,6 +264,18 @@ policy_callback (char *name)
 
 		case IPSEC_AH_RIPEMD:
 		  ah_hash_alg = "ripemd";
+		  break;
+
+		case IPSEC_AH_SHA2_256:
+		  ah_auth_alg = "sha2-256";
+		  break;
+
+		case IPSEC_AH_SHA2_384:
+		  ah_auth_alg = "sha2-384";
+		  break;
+
+		case IPSEC_AH_SHA2_512:
+		  ah_auth_alg = "sha2-512";
 		  break;
 
 		case IPSEC_AH_DES:
@@ -294,6 +302,7 @@ policy_callback (char *name)
 		  break;
 
 		case IPSEC_ESP_AES:
+		case IPSEC_ESP_AES_128_CTR:
 		  esp_enc_alg = "aes";
 		  break;
 
@@ -391,20 +400,20 @@ policy_callback (char *name)
 		      if (lifetype == IPSEC_DURATION_SECONDS)
 			{
 			  if (len == 2)
-			    snprintf (ah_life_seconds, PMAX, "%u",
-				      decode_16 (value));
+			    snprintf (ah_life_seconds, sizeof ah_life_seconds,
+				      "%u", decode_16 (value));
 			  else
-			    snprintf (ah_life_seconds, PMAX, "%u",
-				      decode_32 (value));
+			    snprintf (ah_life_seconds, sizeof ah_life_seconds,
+				      "%u", decode_32 (value));
 			}
 		      else
 			{
 			  if (len == 2)
-			    snprintf (ah_life_kbytes, PMAX, "%u",
-				      decode_16 (value));
+			    snprintf (ah_life_kbytes, sizeof ah_life_kbytes,
+				      "%u", decode_16 (value));
 			  else
-			    snprintf (ah_life_kbytes, PMAX, "%u",
-				      decode_32 (value));
+			    snprintf (ah_life_kbytes, sizeof ah_life_kbytes,
+				      "%u", decode_32 (value));
 			}
 
 		      break;
@@ -413,19 +422,23 @@ policy_callback (char *name)
 		      if (lifetype == IPSEC_DURATION_SECONDS)
 			{
 			  if (len == 2)
-			    snprintf (esp_life_seconds, PMAX, "%u",
+			    snprintf (esp_life_seconds,
+				      sizeof esp_life_seconds, "%u",
 				      decode_16 (value));
 			  else
-			    snprintf (esp_life_seconds, PMAX, "%u",
+			    snprintf (esp_life_seconds,
+				      sizeof esp_life_seconds, "%u",
 				      decode_32 (value));
 			}
 		      else
 			{
 			  if (len == 2)
-			    snprintf (esp_life_kbytes, PMAX, "%u",
+			    snprintf (esp_life_kbytes,
+				      sizeof esp_life_kbytes, "%u",
 				      decode_16 (value));
 			  else
-			    snprintf (esp_life_kbytes, PMAX, "%u",
+			    snprintf (esp_life_kbytes,
+				      sizeof esp_life_kbytes, "%u",
 				      decode_32 (value));
 			}
 
@@ -435,19 +448,23 @@ policy_callback (char *name)
 		      if (lifetype == IPSEC_DURATION_SECONDS)
 			{
 			  if (len == 2)
-			    snprintf (comp_life_seconds, PMAX, "%u",
+			    snprintf (comp_life_seconds,
+				      sizeof comp_life_seconds, "%u",
 				      decode_16 (value));
 			  else
-			    snprintf (comp_life_seconds, PMAX, "%u",
+			    snprintf (comp_life_seconds,
+				      sizeof comp_life_seconds, "%u",
 				      decode_32 (value));
 			}
 		      else
 			{
 			  if (len == 2)
-			    snprintf (comp_life_kbytes, PMAX, "%u",
+			    snprintf (comp_life_kbytes,
+				      sizeof comp_life_kbytes, "%u",
 				      decode_16 (value));
 			  else
-			    snprintf (comp_life_kbytes, PMAX, "%u",
+			    snprintf (comp_life_kbytes,
+				      sizeof comp_life_kbytes, "%u",
 				      decode_32 (value));
 			}
 
@@ -459,16 +476,17 @@ policy_callback (char *name)
 		  switch (proto->proto)
 		    {
 		    case IPSEC_PROTO_IPSEC_AH:
-		      snprintf (ah_group_desc, PMAX, "%u", decode_16 (value));
+		      snprintf (ah_group_desc, sizeof ah_group_desc, "%u",
+				decode_16 (value));
 		      break;
 
 		    case IPSEC_PROTO_IPSEC_ESP:
-		      snprintf (esp_group_desc, PMAX, "%u",
+		      snprintf (esp_group_desc, sizeof esp_group_desc, "%u",
 			       decode_16 (value));
 		      break;
 
 		    case IPSEC_PROTO_IPCOMP:
-		      snprintf (comp_group_desc, PMAX, "%u",
+		      snprintf (comp_group_desc, sizeof comp_group_desc, "%u",
 			       decode_16 (value));
 		      break;
 		    }
@@ -542,6 +560,18 @@ policy_callback (char *name)
 			  ah_auth_alg = "hmac-ripemd";
 			  break;
 
+			case IPSEC_AUTH_HMAC_SHA2_256:
+			  ah_auth_alg = "hmac-sha2-256";
+			  break;
+
+			case IPSEC_AUTH_HMAC_SHA2_384:
+			  ah_auth_alg = "hmac-sha2-384";
+			  break;
+
+			case IPSEC_AUTH_HMAC_SHA2_512:
+			  ah_auth_alg = "hmac-sha2-512";
+			  break;
+
 			case IPSEC_AUTH_DES_MAC:
 			  ah_auth_alg = "des-mac";
 			  break;
@@ -567,6 +597,18 @@ policy_callback (char *name)
 			  esp_auth_alg = "hmac-ripemd";
 			  break;
 
+			case IPSEC_AUTH_HMAC_SHA2_256:
+			  esp_auth_alg = "hmac-sha2-256";
+			  break;
+
+			case IPSEC_AUTH_HMAC_SHA2_384:
+			  esp_auth_alg = "hmac-sha2-384";
+			  break;
+
+			case IPSEC_AUTH_HMAC_SHA2_512:
+			  esp_auth_alg = "hmac-sha2-512";
+			  break;
+
 			case IPSEC_AUTH_DES_MAC:
 			  esp_auth_alg = "des-mac";
 			  break;
@@ -583,11 +625,12 @@ policy_callback (char *name)
 		  switch (proto->proto)
 		    {
 		    case IPSEC_PROTO_IPSEC_AH:
-		      snprintf (ah_key_length, PMAX, "%u", decode_16 (value));
+		      snprintf (ah_key_length, sizeof ah_key_length, "%u",
+				decode_16 (value));
 		      break;
 
 		    case IPSEC_PROTO_IPSEC_ESP:
-		      snprintf (esp_key_length, PMAX, "%u",
+		      snprintf (esp_key_length, sizeof esp_key_length, "%u",
 			       decode_16 (value));
 		      break;
 		    }
@@ -597,22 +640,25 @@ policy_callback (char *name)
 		  switch (proto->proto)
 		    {
 		    case IPSEC_PROTO_IPSEC_AH:
-		      snprintf (ah_key_rounds, PMAX, "%u", decode_16 (value));
+		      snprintf (ah_key_rounds, sizeof ah_key_rounds, "%u",
+				decode_16 (value));
 		      break;
 
 		    case IPSEC_PROTO_IPSEC_ESP:
-		      snprintf (esp_key_rounds, PMAX, "%u",
+		      snprintf (esp_key_rounds, sizeof esp_key_rounds, "%u",
 			       decode_16 (value));
 		      break;
 		    }
 		  break;
 
 		case IPSEC_ATTR_COMPRESS_DICTIONARY_SIZE:
-		  snprintf (comp_dict_size, PMAX, "%u", decode_16 (value));
+		  snprintf (comp_dict_size, sizeof comp_dict_size, "%u",
+			    decode_16 (value));
 		  break;
 
 		case IPSEC_ATTR_COMPRESS_PRIVATE_ALGORITHM:
-		  snprintf (comp_private_alg, PMAX, "%u", decode_16 (value));
+		  snprintf (comp_private_alg, sizeof comp_private_alg, "%u",
+			    decode_16 (value));
 		  break;
 		}
 	    }
@@ -670,7 +716,7 @@ policy_callback (char *name)
 			 sizeof remote_id_addr_lower - 1, 1);
 	  remote_id = strdup (remote_id_addr_upper);
 	  if (!remote_id)
-  	    {
+	    {
 	      log_error ("policy_callback: strdup (\"%s\") failed",
 			 remote_id_addr_upper);
 	      goto bad;
@@ -735,7 +781,7 @@ policy_callback (char *name)
 		   sizeof remote_id_addr_lower);
 	  remote_id = strdup (remote_id_addr_upper);
 	  if (!remote_id)
-  	    {
+	    {
 	      log_error ("policy_callback: strdup (\"%s\") failed",
 			 remote_id_addr_upper);
 	      goto bad;
@@ -907,13 +953,14 @@ policy_callback (char *name)
 	  break;
 #endif
 
- 	default:
-	  snprintf (remote_id_proto_num, 3, "%d", id[1]);
+	default:
+	  snprintf (remote_id_proto_num, sizeof remote_id_proto_num, "%d",
+		    id[1]);
 	  remote_id_proto = remote_id_proto_num;
 	  break;
 	}
 
-      snprintf (remote_id_port, sizeof remote_id_port - 1, "%u",
+      snprintf (remote_id_port, sizeof remote_id_port, "%u",
 		decode_16 (id + 2));
 
       if (policy_exchange->initiator)
@@ -1182,15 +1229,16 @@ policy_callback (char *name)
 	      break;
 #endif
 
- 	    default:
-	      snprintf (remote_filter_proto_num, 3, "%d",
-		       idremote[ISAKMP_GEN_SZ + 1]);
+	    default:
+	      snprintf (remote_filter_proto_num,
+			sizeof remote_filter_proto_num, "%d",
+			idremote[ISAKMP_GEN_SZ + 1]);
 	      remote_filter_proto = remote_filter_proto_num;
 	      break;
 	    }
 
-	  snprintf (remote_filter_port, sizeof remote_filter_port - 1,
-		    "%u", decode_16 (idremote + ISAKMP_GEN_SZ + 2));
+	  snprintf (remote_filter_port, sizeof remote_filter_port, "%u",
+		    decode_16 (idremote + ISAKMP_GEN_SZ + 2));
 	}
       else
         {
@@ -1474,15 +1522,15 @@ policy_callback (char *name)
 	      break;
 #endif
 
- 	    default:
-	      snprintf (local_filter_proto_num, 3, "%d",
-		       idlocal[ISAKMP_GEN_SZ + 1]);
+	    default:
+	      snprintf (local_filter_proto_num, sizeof local_filter_proto_num,
+			"%d", idlocal[ISAKMP_GEN_SZ + 1]);
 	      local_filter_proto = local_filter_proto_num;
 	      break;
 	    }
 
-	  snprintf (local_filter_port, sizeof local_filter_port - 1,
-		    "%u", decode_16 (idlocal + ISAKMP_GEN_SZ + 2));
+	  snprintf (local_filter_port, sizeof local_filter_port, "%u",
+		    decode_16 (idlocal + ISAKMP_GEN_SZ + 2));
 	}
       else
         {
@@ -1800,14 +1848,14 @@ policy_init (void)
   /* Get policy file from configuration.  */
   policy_file = conf_get_str ("General", "Policy-file");
   if (!policy_file)
-    policy_file = POLICY_FILE_DEFAULT;
+    policy_file = CONF_DFLT_POLICY_FILE;
 
   /* Check file modes and collect file size */
   if (check_file_secrecy (policy_file, &sz))
     log_fatal ("policy_init: cannot read %s", policy_file);
 
   /* Open policy file.  */
-  fd = open (policy_file, O_RDONLY);
+  fd = monitor_open (policy_file, O_RDONLY, 0);
   if (fd == -1)
     log_fatal ("policy_init: open (\"%s\", O_RDONLY) failed", policy_file);
 

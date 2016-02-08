@@ -1,4 +1,4 @@
-/*	$OpenBSD: ln.c,v 1.8 2002/07/04 04:26:40 deraadt Exp $	*/
+/*	$OpenBSD: ln.c,v 1.10 2003/06/02 23:32:08 millert Exp $	*/
 /*	$NetBSD: ln.c,v 1.10 1995/03/21 09:06:10 cgd Exp $	*/
 
 /*
@@ -13,11 +13,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -44,7 +40,7 @@ static const char copyright[] =
 #if 0
 static const char sccsid[] = "@(#)ln.c	8.2 (Berkeley) 3/31/94";
 #else
-static const char rcsid[] = "$OpenBSD: ln.c,v 1.8 2002/07/04 04:26:40 deraadt Exp $";
+static const char rcsid[] = "$OpenBSD: ln.c,v 1.10 2003/06/02 23:32:08 millert Exp $";
 #endif
 #endif /* not lint */
 
@@ -53,6 +49,7 @@ static const char rcsid[] = "$OpenBSD: ln.c,v 1.8 2002/07/04 04:26:40 deraadt Ex
 
 #include <err.h>
 #include <errno.h>
+#include <libgen.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -142,10 +139,10 @@ linkit(char *target, char *source, int isdir)
 
 	/* If the source is a directory, append the target's name. */
 	if (isdir || (!statf(source, &sb) && S_ISDIR(sb.st_mode))) {
-		if ((p = strrchr(target, '/')) == NULL)
-			p = target;
-		else
-			++p;
+		if ((p = basename(target)) == NULL) {
+			warn("%s", target);
+			return (1);
+		}
 		(void)snprintf(path, sizeof(path), "%s/%s", source, p);
 		source = path;
 	}

@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.13 2002/04/22 21:44:58 miod Exp $
+#	$OpenBSD: Makefile,v 1.15 2003/08/11 09:41:31 miod Exp $
 
 PROG=	ksh
 SRCS=	alloc.c c_ksh.c c_sh.c c_test.c c_ulimit.c edit.c emacs.c \

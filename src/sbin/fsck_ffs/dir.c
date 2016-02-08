@@ -1,4 +1,4 @@
-/*	$OpenBSD: dir.c,v 1.13 2002/08/23 09:09:04 gluk Exp $	*/
+/*	$OpenBSD: dir.c,v 1.16 2003/08/25 23:28:15 tedu Exp $	*/
 /*	$NetBSD: dir.c,v 1.20 1996/09/27 22:45:11 christos Exp $	*/
 
 /*
@@ -13,11 +13,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -38,7 +34,7 @@
 #if 0
 static char sccsid[] = "@(#)dir.c	8.5 (Berkeley) 12/8/94";
 #else
-static const char rcsid[] = "$OpenBSD: dir.c,v 1.13 2002/08/23 09:09:04 gluk Exp $";
+static const char rcsid[] = "$OpenBSD: dir.c,v 1.16 2003/08/25 23:28:15 tedu Exp $";
 #endif
 #endif /* not lint */
 
@@ -68,7 +64,7 @@ struct	odirtemplate odirhead = {
 	0, DIRBLKSIZ - 12, 2, ".."
 };
 
-static int expanddir(struct dinode *, char *);
+static int expanddir(struct ufs1_dinode *, char *);
 static void freedir(ino_t, ino_t);
 static struct direct *fsck_readdir(struct inodesc *);
 static struct bufarea *getdirblk(daddr_t, long);
@@ -277,13 +273,13 @@ direrror(ino_t ino, char *errmesg)
 void
 fileerror(ino_t cwd, ino_t ino, char *errmesg)
 {
-	struct dinode *dp;
+	struct ufs1_dinode *dp;
 	char pathbuf[MAXPATHLEN + 1];
 
 	pwarn("%s ", errmesg);
 	pinode(ino);
 	printf("\n");
-	getpathname(pathbuf, cwd, ino);
+	getpathname(pathbuf, sizeof pathbuf, cwd, ino);
 	if (ino < ROOTINO || ino > maxino) {
 		pfatal("NAME=%s\n", pathbuf);
 		return;
@@ -299,7 +295,7 @@ fileerror(ino_t cwd, ino_t ino, char *errmesg)
 void
 adjust(struct inodesc *idesc, short lcnt)
 {
-	struct dinode *dp;
+	struct ufs1_dinode *dp;
 
 	dp = ginode(idesc->id_number);
 	if (dp->di_nlink == lcnt) {
@@ -388,7 +384,7 @@ chgino(struct inodesc *idesc)
 int
 linkup(ino_t orphan, ino_t parentdir)
 {
-	struct dinode *dp;
+	struct ufs1_dinode *dp;
 	int lostdir;
 	ino_t oldlfdir;
 	struct inodesc idesc;
@@ -523,7 +519,7 @@ changeino(dir, name, newnum)
 int
 makeentry(ino_t parent, ino_t ino, char *name)
 {
-	struct dinode *dp;
+	struct ufs1_dinode *dp;
 	struct inodesc idesc;
 	char pathbuf[MAXPATHLEN + 1];
 
@@ -544,7 +540,7 @@ makeentry(ino_t parent, ino_t ino, char *name)
 	}
 	if ((ckinode(dp, &idesc) & ALTERED) != 0)
 		return (1);
-	getpathname(pathbuf, parent, parent);
+	getpathname(pathbuf, sizeof pathbuf, parent, parent);
 	dp = ginode(parent);
 	if (expanddir(dp, pathbuf) == 0)
 		return (0);
@@ -555,7 +551,7 @@ makeentry(ino_t parent, ino_t ino, char *name)
  * Attempt to expand the size of a directory
  */
 static int
-expanddir(struct dinode *dp, char *name)
+expanddir(struct ufs1_dinode *dp, char *name)
 {
 	daddr_t lastbn, newblk;
 	struct bufarea *bp;
@@ -614,7 +610,7 @@ allocdir(ino_t parent, ino_t request, int mode)
 {
 	ino_t ino;
 	char *cp;
-	struct dinode *dp;
+	struct ufs1_dinode *dp;
 	struct bufarea *bp;
 	struct dirtemplate *dirp;
 	struct inoinfo *inp;
@@ -670,7 +666,7 @@ allocdir(ino_t parent, ino_t request, int mode)
 static void
 freedir(ino_t ino, ino_t parent)
 {
-	struct dinode *dp;
+	struct ufs1_dinode *dp;
 
 	if (ino != parent) {
 		dp = ginode(parent);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: tran.c,v 1.8 2002/12/19 21:24:28 millert Exp $	*/
+/*	$OpenBSD: tran.c,v 1.10 2003/04/06 06:12:01 pvalchev Exp $	*/
 /****************************************************************
 Copyright (C) Lucent Technologies 1997
 All Rights Reserved
@@ -107,7 +107,7 @@ void arginit(int ac, char **av)	/* set up ARGV and ARGC */
 	ARGVtab = makesymtab(NSYMTAB);	/* could be (int) ARGC as well */
 	cp->sval = (char *) ARGVtab;
 	for (i = 0; i < ac; i++) {
-		sprintf(temp, "%d", i);
+		snprintf(temp, sizeof temp, "%d", i);
 		if (is_number(*av))
 			setsymtab(temp, *av, atof(*av), STR|NUM, ARGVtab);
 		else
@@ -372,9 +372,9 @@ Awkfloat getfval(Cell *vp)	/* get float val of a Cell */
 		if (freeable(vp))
 			xfree(vp->sval);
 		if (modf(vp->fval, &dtemp) == 0)	/* it's integral */
-			sprintf(s, "%.30g", vp->fval);
+			snprintf(s, sizeof(s), "%.30g", vp->fval);
 		else
-			sprintf(s, *fmt, vp->fval);
+			snprintf(s, sizeof(s), *fmt, vp->fval);
 		vp->sval = tostring(s);
 		vp->tval &= ~DONTFREE;
 		vp->tval |= STR;
@@ -396,13 +396,7 @@ char *getpssval(Cell *vp)     /* get string val of a Cell for print */
 
 char *tostring(const char *s)	/* make a copy of string s */
 {
-	char *p;
-
-	p = (char *) malloc(strlen(s)+1);
-	if (p == NULL)
-		FATAL("out of space in tostring on %s", s);
-	strcpy(p, s);
-	return(p);
+	return (strdup(s));
 }
 
 char *qstring(const char *is, int delim)	/* collect string up to next delim */

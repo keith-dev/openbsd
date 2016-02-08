@@ -13,11 +13,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -35,7 +31,7 @@
  */
 
 #if defined(LIBC_SCCS) && !defined(lint)
-static char *rcsid = "$OpenBSD: strxfrm.c,v 1.2 1996/08/19 08:34:29 tholo Exp $";
+static char *rcsid = "$OpenBSD: strxfrm.c,v 1.5 2003/09/06 22:43:12 tedu Exp $";
 #endif /* LIBC_SCCS and not lint */
 
 #include <string.h>
@@ -46,28 +42,13 @@ static char *rcsid = "$OpenBSD: strxfrm.c,v 1.2 1996/08/19 08:34:29 tholo Exp $"
  * on the original untransformed strings would return.
  */
 size_t
-strxfrm(dst, src, n)
-	register char *dst;
-	register const char *src;
-	register size_t n;
+strxfrm(char *dst, const char *src, size_t n)
 {
-	register size_t r = 0;
-	register int c;
 
 	/*
 	 * Since locales are unimplemented, this is just a copy.
 	 */
-	if (n != 0) {
-		while ((c = *src++) != 0) {
-			r++;
-			if (--n == 0) {
-				while (*src++ != 0)
-					r++;
-				break;
-			}
-			*dst++ = c;
-		}
-		*dst = 0;
-	}
-	return (r);
+	if (n == 0)
+		return (strlen(src));
+	return (strlcpy(dst, src, n));
 }

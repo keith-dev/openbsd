@@ -1,7 +1,7 @@
 /* ====================================================================
  * The Apache Software License, Version 1.1
  *
- * Copyright (c) 2000-2002 The Apache Software Foundation.  All rights
+ * Copyright (c) 2000-2003 The Apache Software Foundation.  All rights
  * reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -548,7 +548,7 @@ static int example_handler(request_rec *r)
 	    ap_get_server_version());
     ap_rputs("  <BR>\n", r);
     ap_rprintf(r, "  Server built: \"%s\"\n", ap_get_server_built());
-    ap_rputs("  </P>\n", r);;
+    ap_rputs("  </P>\n", r);
     ap_rputs("  <P>\n", r);
     ap_rputs("  The format for the callback trace is:\n", r);
     ap_rputs("  </P>\n", r);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: bdes.c,v 1.8 2002/07/03 23:13:02 deraadt Exp $	*/
+/*	$OpenBSD: bdes.c,v 1.12 2003/07/02 21:04:09 deraadt Exp $	*/
 /*	$NetBSD: bdes.c,v 1.2 1995/03/26 03:33:19 glass Exp $	*/
 
 /*-
@@ -20,11 +20,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -51,7 +47,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)bdes.c	8.1 (Berkeley) 6/6/93";
 #else
-static char rcsid[] = "$OpenBSD: bdes.c,v 1.8 2002/07/03 23:13:02 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: bdes.c,v 1.12 2003/07/02 21:04:09 deraadt Exp $";
 #endif
 #endif /* not lint */
 
@@ -94,7 +90,7 @@ static char rcsid[] = "$OpenBSD: bdes.c,v 1.8 2002/07/03 23:13:02 deraadt Exp $"
 #include <string.h>
 
 typedef char Desbuf[8];
-int 	tobinhexi(char, int);
+int 	tobinhex(char, int);
 void 	cvtkey(char *, char *);
 int 	setbits(char *, int);
 void 	makekey(Desbuf);
@@ -185,16 +181,14 @@ int pflag;				/* 1 to preserve parity bits */
 
 
 int
-main(ac, av)
-	int ac;				/* arg count */
-	char **av;			/* arg vector */
+main(int ac, char *av[])
 {
 	extern int optind;		/* option (argument) number */
 	extern char *optarg;		/* argument to option if any */
 	int i;				/* counter in a for loop */
 	char *p;			/* used to obtain the key */
 	Desbuf msgbuf;			/* I/O buffer */
-	int kflag;			/* command-line encryptiooon key */
+	int kflag;			/* command-line encryption key */
 	int argc;			/* the real arg count */
 	char **argv;			/* the real argument vector */
 
@@ -213,13 +207,13 @@ main(ac, av)
 	}
 	argv[argc] = NULL;
 
-	/* initialize the initialization vctor */
+	/* initialize the initialization vector */
 	MEMZERO(ivec, 8);
 
 	/* process the argument list */
 	kflag = 0;
 	while ((i = getopt(argc, argv, "abdF:f:k:m:o:pv:")) != -1)
-		switch(i) {
+		switch (i) {
 		case 'a':		/* key is ASCII */
 			keybase = KEY_ASCII;
 			break;
@@ -287,9 +281,9 @@ main(ac, av)
 	makekey(msgbuf);
 	inverse = (alg == ALG_CBC || alg == ALG_ECB) && mode == MODE_DECRYPT;
 
-	switch(alg) {
+	switch (alg) {
 	case ALG_CBC:
-		switch(mode) {
+		switch (mode) {
 		case MODE_AUTHENTICATE:	/* authenticate using CBC mode */
 			cbcauth();
 			break;
@@ -302,7 +296,7 @@ main(ac, av)
 		}
 		break;
 	case ALG_CFB:
-		switch(mode) {
+		switch (mode) {
 		case MODE_AUTHENTICATE:	/* authenticate using CFB mode */
 			cfbauth();
 			break;
@@ -315,7 +309,7 @@ main(ac, av)
 		}
 		break;
 	case ALG_CFBA:
-		switch(mode) {
+		switch (mode) {
 		case MODE_AUTHENTICATE:	/* authenticate using CFBA mode */
 			err(1, "can't authenticate with CFBA mode");
 			break;
@@ -328,7 +322,7 @@ main(ac, av)
 		}
 		break;
 	case ALG_ECB:
-		switch(mode) {
+		switch (mode) {
 		case MODE_AUTHENTICATE:	/* authenticate using ECB mode */
 			err(1, "can't authenticate with ECB mode");
 			break;
@@ -341,7 +335,7 @@ main(ac, av)
 		}
 		break;
 	case ALG_OFB:
-		switch(mode) {
+		switch (mode) {
 		case MODE_AUTHENTICATE:	/* authenticate using OFB mode */
 			err(1, "can't authenticate with OFB mode");
 			break;
@@ -361,11 +355,9 @@ main(ac, av)
  * map a hex character to an integer
  */
 int
-tobinhex(c, radix)
-	char c;			/* char to be converted */
-	int radix;		/* base (2 to 16) */
+tobinhex(char c, int radix)
 {
-	switch(c) {
+	switch (c) {
 	case '0':		return(0x0);
 	case '1':		return(0x1);
 	case '2':		return(radix > 2 ? 0x2 : -1);
@@ -393,9 +385,7 @@ tobinhex(c, radix)
  * convert the key to a bit pattern
  */
 void
-cvtkey(obuf, ibuf)
-	char *obuf;			/* bit pattern */
-	char *ibuf;			/* the key itself */
+cvtkey(char *obuf, char *ibuf)
 {
 	int i, j;			/* counter in a for loop */
 	int nbuf[64];			/* used for hex/key translation */
@@ -403,8 +393,8 @@ cvtkey(obuf, ibuf)
 	/*
 	 * just switch on the key base
 	 */
-	switch(keybase) {
-	case KEY_ASCII:			/* ascii to integer */
+	switch (keybase) {
+	case KEY_ASCII:			/* ASCII to integer */
 		(void)strncpy(obuf, ibuf, 8);
 		return;
 	case KEY_DEFAULT:		/* tell from context */
@@ -462,9 +452,7 @@ cvtkey(obuf, ibuf)
  * 3. must be a multiple of mult
  */
 int
-setbits(s, mult)
-	char *s;			/* the ASCII string */
-	int mult;			/* what it must be a multiple of */
+setbits(char *s, int mult)
 {
 	char *p;			/* pointer in a for loop */
 	int n = 0;			/* the integer collected */
@@ -505,8 +493,7 @@ setbits(s, mult)
  * DES ignores the low order bit of each character.
  */
 void
-makekey(buf)
-	Desbuf buf;				/* key block */
+makekey(Desbuf buf)
 {
 	int i, j;				/* counter in a for loop */
 	int par;				/* parity counter */
@@ -534,7 +521,7 @@ makekey(buf)
  * This encrypts using the Electronic Code Book mode of DES
  */
 void
-ecbenc()
+ecbenc(void)
 {
 	int n;			/* number of bytes actually read */
 	int bn;			/* block number */
@@ -563,7 +550,7 @@ ecbenc()
  * This decrypts using the Electronic Code Book mode of DES
  */
 void
-ecbdec()
+ecbdec(void)
 {
 	int n;			/* number of bytes actually read */
 	int c;			/* used to test for EOF */
@@ -595,7 +582,7 @@ ecbdec()
  * This encrypts using the Cipher Block Chaining mode of DES
  */
 void
-cbcenc()
+cbcenc(void)
 {
 	int n;			/* number of bytes actually read */
 	int bn;			/* block number */
@@ -629,7 +616,7 @@ cbcenc()
  * This decrypts using the Cipher Block Chaining mode of DES
  */
 void
-cbcdec()
+cbcdec(void)
 {
 	int n;			/* number of bytes actually read */
 	Desbuf msgbuf;		/* I/O buffer */
@@ -666,7 +653,7 @@ cbcdec()
  * This authenticates using the Cipher Block Chaining mode of DES
  */
 void
-cbcauth()
+cbcauth(void)
 {
 	int n, j;		/* number of bytes actually read */
 	Desbuf msgbuf;		/* I/O buffer */
@@ -711,7 +698,7 @@ cbcauth()
  * This encrypts using the Cipher FeedBack mode of DES
  */
 void
-cfbenc()
+cfbenc(void)
 {
 	int n;			/* number of bytes actually read */
 	int nbytes;		/* number of bytes to read */
@@ -753,7 +740,7 @@ cfbenc()
  * This decrypts using the Cipher Block Chaining mode of DES
  */
 void
-cfbdec()
+cfbdec(void)
 {
 	int n;			/* number of bytes actually read */
 	int c;			/* used to test for EOF */
@@ -799,7 +786,7 @@ cfbdec()
  * This encrypts using the alternative Cipher FeedBack mode of DES
  */
 void
-cfbaenc()
+cfbaenc(void)
 {
 	int n;			/* number of bytes actually read */
 	int nbytes;		/* number of bytes to read */
@@ -845,7 +832,7 @@ cfbaenc()
  * This decrypts using the alternative Cipher Block Chaining mode of DES
  */
 void
-cfbadec()
+cfbadec(void)
 {
 	int n;			/* number of bytes actually read */
 	int c;			/* used to test for EOF */
@@ -892,7 +879,7 @@ cfbadec()
  * This encrypts using the Output FeedBack mode of DES
  */
 void
-ofbenc()
+ofbenc(void)
 {
 	int n;			/* number of bytes actually read */
 	int c;			/* used to test for EOF */
@@ -938,7 +925,7 @@ ofbenc()
  * This decrypts using the Output Block Chaining mode of DES
  */
 void
-ofbdec()
+ofbdec(void)
 {
 	int n;			/* number of bytes actually read */
 	int c;			/* used to test for EOF */
@@ -987,7 +974,7 @@ ofbdec()
  * This authenticates using the Cipher FeedBack mode of DES
  */
 void
-cfbauth()
+cfbauth(void)
 {
 	int n, j;		/* number of bytes actually read */
 	int nbytes;		/* number of bytes to read */
@@ -1070,7 +1057,7 @@ compress(from, to)
  * message about usage
  */
 void
-usage()
+usage(void)
 {
 	(void)fprintf(stderr, "%s\n", 
 "usage: bdes [-abdp] [-F bit] [-f bit] [-k key] [-m bit] [-o bit] [-v vector]");

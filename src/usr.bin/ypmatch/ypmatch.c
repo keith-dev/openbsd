@@ -1,4 +1,4 @@
-/*	$OpenBSD: ypmatch.c,v 1.8 2002/07/19 03:22:39 deraadt Exp $ */
+/*	$OpenBSD: ypmatch.c,v 1.11 2003/07/10 00:06:52 david Exp $ */
 /*	$NetBSD: ypmatch.c,v 1.8 1996/05/07 01:24:52 jtc Exp $	*/
 
 /*
@@ -13,12 +13,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by Theo de Raadt.
- * 4. The name of the author may not be used to endorse or promote
- *    products derived from this software without specific prior written
- *    permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS
  * OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
@@ -34,13 +28,14 @@
  */
 
 #ifndef LINT
-static char rcsid[] = "$OpenBSD: ypmatch.c,v 1.8 2002/07/19 03:22:39 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: ypmatch.c,v 1.11 2003/07/10 00:06:52 david Exp $";
 #endif
 
 #include <sys/param.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <ctype.h>
@@ -49,6 +44,8 @@ static char rcsid[] = "$OpenBSD: ypmatch.c,v 1.8 2002/07/19 03:22:39 deraadt Exp
 #include <rpc/xdr.h>
 #include <rpcsvc/yp_prot.h>
 #include <rpcsvc/ypclnt.h>
+
+void	usage(void);
 
 struct ypalias {
 	char *alias, *name;

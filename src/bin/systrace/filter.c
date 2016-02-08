@@ -1,4 +1,4 @@
-/*	$OpenBSD: filter.c,v 1.24 2002/12/09 07:24:56 itojun Exp $	*/
+/*	$OpenBSD: filter.c,v 1.29 2003/08/04 18:15:11 sturm Exp $	*/
 /*
  * Copyright 2002 Niels Provos <provos@citi.umich.edu>
  * All rights reserved.
@@ -46,6 +46,7 @@
 #include "intercept.h"
 #include "systrace.h"
 #include "filter.h"
+#include "util.h"
 
 extern int allow;
 extern int noalias;
@@ -134,19 +135,36 @@ filter_match(struct intercept_pid *icpid, struct intercept_tlq *tls,
 int
 filter_predicate(struct intercept_pid *icpid, struct predicate *pdc)
 {
-	int negative;
+	int pidnr, pdcnr;
 	int res = 0;
 
 	if (!pdc->p_flags)
 		return (1);
 
-	negative = pdc->p_flags & PREDIC_NEGATIVE;
-	if (pdc->p_flags & PREDIC_UID)
-		res = icpid->uid == pdc->p_uid;
-	else if (pdc->p_flags & PREDIC_GID)
-		res = icpid->gid == pdc->p_gid;
+	if (pdc->p_flags & PREDIC_UID) {
+		pidnr = icpid->uid;
+		pdcnr = pdc->p_uid;
+	} else {
+		pidnr = icpid->gid;
+		pdcnr = pdc->p_gid;
+	}
 
-	return (negative ? !res : res);
+	switch (pdc->p_flags & PREDIC_MASK) {
+	case PREDIC_NEGATIVE:
+		res = pidnr != pdcnr;
+		break;
+	case PREDIC_LESSER:
+		res = pidnr < pdcnr;
+		break;
+	case PREDIC_GREATER:
+		res = pidnr > pdcnr;
+		break;
+	default:
+		res = pidnr == pdcnr;
+		break;
+	}
+
+	return (res);
 }
 
 short
@@ -154,7 +172,7 @@ filter_evaluate(struct intercept_tlq *tls, struct filterq *fls,
     struct intercept_pid *icpid)
 {
 	struct filter *filter, *last = NULL;
-	short action, laction = 0;
+	short action;
 
 	TAILQ_FOREACH(filter, fls, next) {
 		action = filter->match_action;
@@ -164,6 +182,7 @@ filter_evaluate(struct intercept_tlq *tls, struct filterq *fls,
 			/* Profile feedback optimization */
 			filter->match_count++;
 			if (last != NULL && last->match_action == action &&
+			    last->match_flags == filter->match_flags &&
 			    filter->match_count > last->match_count) {
 				TAILQ_REMOVE(fls, last, next);
 				TAILQ_INSERT_AFTER(fls, filter, last, next);
@@ -181,7 +200,6 @@ filter_evaluate(struct intercept_tlq *tls, struct filterq *fls,
 
 		/* Keep track of last processed filtered in a group */
 		last = filter;
-		laction = action;
 	}
 
 	return (ICPOLICY_ASK);
@@ -283,13 +301,11 @@ filter_policyrecord(struct policy *policy, struct filter *filter,
     const char *emulation, const char *name, char *rule)
 {
 	/* Record the filter in the policy */
-	if (filter == NULL) {
-		filter = calloc(1, sizeof(struct filter));
-		if (filter == NULL)
-			err(1, "%s:%d: calloc", __func__, __LINE__);
-		if ((filter->rule = strdup(rule)) == NULL)
-			err(1, "%s:%d: strdup", __func__, __LINE__);
-	}
+	filter = calloc(1, sizeof(struct filter));
+	if (filter == NULL)
+		err(1, "%s:%d: calloc", __func__, __LINE__);
+	if ((filter->rule = strdup(rule)) == NULL)
+		err(1, "%s:%d: strdup", __func__, __LINE__);
 
 	strlcpy(filter->name, name, sizeof(filter->name));
 	strlcpy(filter->emulation, emulation, sizeof(filter->emulation));
@@ -477,10 +493,9 @@ filter_ask(int fd, struct intercept_tlq *tls, struct filterq *fls,
 	struct filter *filter;
 	struct policy *policy;
 	short action;
-	int first = 1, isalias;
+	int first = 1, isalias, isprompt = 0;
 
 	*pfuture = ICPOLICY_ASK;
-	icpid->uflags = 0;
 
 	isalias = systrace_find_reverse(emulation, name) != NULL;
 
@@ -509,7 +524,7 @@ filter_ask(int fd, struct intercept_tlq *tls, struct filterq *fls,
 				    "%s%s eq \"%s\"",
 				    tl->name,
 				    lst && !strcmp(tl->name, lst) ? "[1]" : "",
-				    l);
+				    strescape(l));
 
 				lst = tl->name;
 
@@ -528,6 +543,11 @@ filter_ask(int fd, struct intercept_tlq *tls, struct filterq *fls,
 	}
 
 	while (1) {
+		/* Special policy active that allows only yes or no */
+		if (icpid->uflags & PROCESS_PROMPT) {
+			fprintf(stderr, "isprompt\n");
+			isprompt = 1;
+		}
 		filter = NULL;
 
 		if (!allow) {
@@ -541,7 +561,8 @@ filter_ask(int fd, struct intercept_tlq *tls, struct filterq *fls,
 				}
 			}
 
-			fgets(line, sizeof(line), stdin);
+			if (fgets(line, sizeof(line), stdin) == NULL)
+				errx(1, "EOF on policy input request");
 			p = line;
 			strsep(&p, "\n");
 		} else if (!first) {
@@ -592,6 +613,9 @@ filter_ask(int fd, struct intercept_tlq *tls, struct filterq *fls,
 		}
 
 		if (filter_parse_simple(line, &action, pfuture) != -1) {
+			/* Yes or no, no in-kernel policy allowed */
+			if (isprompt)
+				*pfuture = ICPOLICY_ASK;
 			if (*pfuture == ICPOLICY_ASK)
 				goto out;
 			/* We have a policy decision */
@@ -605,16 +629,32 @@ filter_ask(int fd, struct intercept_tlq *tls, struct filterq *fls,
 			snprintf(line, sizeof(line), "true then %s", compose);
 		}
 
+		if (isprompt) {
+			printf("Answer only \"permit\" or \"deny\". "
+			    "This is a prompt.\n");
+			continue;
+		}
+
 		if (fls == NULL) {
 			printf("Syntax error.\n");
 			continue;
 		}
 
-		if (filter_parse(line, &filter) == -1)
+		if (filter_parse(line, &filter) == -1) {
+			printf("Parse error.\n");
 			continue;
+		}
 
 		TAILQ_INSERT_TAIL(fls, filter, next);
 		action = filter_evaluate(tls, fls, icpid);
+
+		/* If we get a prompt flag here, we ask again */
+		if (icpid->uflags & PROCESS_PROMPT) {
+			filter_policyrecord(policy, filter, emulation, name, line);
+			printf("Answer only \"permit\" or \"deny\". "
+			    "This is a prompt.\n");
+			continue;
+		}
 		if (action == ICPOLICY_ASK) {
 			TAILQ_REMOVE(fls, filter, next);
 			printf("Filter unmatched. Freeing it\n");
@@ -658,13 +698,14 @@ filter_expand(char *data)
 char *
 filter_dynamicexpand(struct intercept_pid *icpid, char *data)
 {
+	extern char cwd[];
 	static char expand[2*MAXPATHLEN];
 
 	strlcpy(expand, data, sizeof(expand));
 
 	filter_replace(expand, sizeof(expand), "$HOME", icpid->home);
 	filter_replace(expand, sizeof(expand), "$USER", icpid->username);
-	filter_replace(expand, sizeof(expand), "$CWD", icpid->cwd);
+	filter_replace(expand, sizeof(expand), "$CWD", cwd);
 
 	return (expand);
 }

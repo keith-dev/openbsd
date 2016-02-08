@@ -1,5 +1,5 @@
-/* $OpenBSD: user.c,v 1.40 2002/12/10 20:49:28 millert Exp $ */
-/* $NetBSD: user.c,v 1.45 2001/08/17 08:29:00 joda Exp $ */
+/* $OpenBSD: user.c,v 1.52 2003/06/14 22:12:53 millert Exp $ */
+/* $NetBSD: user.c,v 1.69 2003/04/14 17:40:07 agc Exp $ */
 
 /*
  * Copyright (c) 1999 Alistair G. Crooks.  All rights reserved.
@@ -40,12 +40,17 @@
 #include <err.h>
 #include <fcntl.h>
 #include <grp.h>
+#ifdef EXTENSIONS
+#include <login_cap.h>
+#endif
 #include <paths.h>
 #include <pwd.h>
+#include <regex.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <syslog.h>
 #include <time.h>
 #include <unistd.h>
 #include <util.h>
@@ -64,21 +69,21 @@ typedef struct range_t {
 typedef struct user_t {
 	int		u_flags;		/* see below */
 	uid_t		u_uid;			/* uid of user */
-	char		*u_password;		/* encrypted password */
-	char		*u_comment;		/* comment field */
-	char		*u_home;		/* home directory */
-	char		*u_primgrp;		/* primary group */
+	char	       *u_password;		/* encrypted password */
+	char	       *u_comment;		/* comment field */
+	char	       *u_home;		/* home directory */
+	char	       *u_primgrp;		/* primary group */
 	int		u_groupc;		/* # of secondary groups */
-	char		*u_groupv[NGROUPS_MAX];	/* secondary groups */
-	char		*u_shell;		/* user's shell */
-	char		*u_basedir;		/* base directory for home */
-	char		*u_expire;		/* when password will expire */
-	int		u_inactive;		/* inactive */
-	char		*u_skeldir;		/* directory for startup files */
-	char		*u_class;		/* login class */
+	const char     *u_groupv[NGROUPS_MAX];	/* secondary groups */
+	char	       *u_shell;		/* user's shell */
+	char	       *u_basedir;		/* base directory for home */
+	char	       *u_expire;		/* when password will expire */
+	char	       *u_inactive;		/* when account will expire */
+	char	       *u_skeldir;		/* directory for startup files */
+	char	       *u_class;		/* login class */
 	unsigned int	u_rsize;		/* size of range array */
 	unsigned int	u_rc;			/* # of ranges */
-	range_t		*u_rv;			/* the ranges */
+	range_t	       *u_rv;			/* the ranges */
 	unsigned int	u_defrc;		/* # of ranges in defaults */
 	int		u_preserve;		/* preserve uids on deletion */
 } user_t;
@@ -154,9 +159,11 @@ enum {
 enum {
 	MaxShellNameLen = 256,
 	MaxFileNameLen = MAXPATHLEN,
-	MaxUserNameLen = MAXLOGNAME,
+	MaxUserNameLen = _PW_NAME_LEN,
 	MaxCommandLen = 2048,
 	PasswordLength = _PASSWORD_LEN,
+
+	DES_Len = 13,
 
 	LowGid = DEF_LOWUID,
 	HighGid = DEF_HIGHUID
@@ -171,6 +178,7 @@ enum {
 #define PAX		"/bin/pax"
 #define RM		"/bin/rm"
 
+#define UNSET_INACTIVE	"Null (unset)"
 #define UNSET_EXPIRY	"Null (unset)"
 
 static int asystem(const char *fmt, ...)
@@ -180,7 +188,7 @@ static int	verbose;
 
 /* if *cpp is non-null, free it, then assign `n' chars of `s' to it */
 static void
-memsave(char **cpp, char *s, size_t n)
+memsave(char **cpp, const char *s, size_t n)
 {
 	if (*cpp != NULL) {
 		FREE(*cpp);
@@ -255,7 +263,7 @@ static int
 is_number(char *s)
 {
 	for ( ; *s ; s++) {
-		if (!isdigit(*s)) {
+		if (!isdigit((unsigned char) *s)) {
 			return 0;
 		}
 	}
@@ -307,7 +315,7 @@ copydotfiles(char *skeldir, uid_t uid, gid_t gid, char *dir)
 
 /* create a group entry with gid `gid' */
 static int
-creategid(char *group, gid_t gid, char *name)
+creategid(char *group, gid_t gid, const char *name)
 {
 	struct stat	st;
 	FILE		*from;
@@ -322,7 +330,7 @@ creategid(char *group, gid_t gid, char *name)
 		return 0;
 	}
 	if ((from = fopen(_PATH_GROUP, "r")) == NULL) {
-		warn("can't create gid for %s: can't open %s", group,
+		warn("can't create gid for `%s': can't open `%s'", group,
 		    _PATH_GROUP);
 		return 0;
 	}
@@ -344,7 +352,7 @@ creategid(char *group, gid_t gid, char *name)
 		return 0;
 	}
 	while ((cc = fread(buf, sizeof(char), sizeof(buf), from)) > 0) {
-		if (fwrite(buf, cc, 1, to) <= 0) {
+		if (fwrite(buf, cc, 1, to) != 1) {
 			(void) fclose(from);
 			(void) fclose(to);
 			(void) unlink(f);
@@ -362,6 +370,7 @@ creategid(char *group, gid_t gid, char *name)
 		return 0;
 	}
 	(void) chmod(_PATH_GROUP, st.st_mode & 07777);
+	syslog(LOG_INFO, "new group added: name=%s, gid=%d", group, gid);
 	return 1;
 }
 
@@ -381,7 +390,7 @@ modify_gid(char *group, char *newent)
 	int		cc;
 
 	if ((from = fopen(_PATH_GROUP, "r")) == NULL) {
-		warn("can't create gid for %s: can't open %s", group,
+		warn("can't modify gid for `%s': can't open `%s'", group,
 		    _PATH_GROUP);
 		return 0;
 	}
@@ -392,24 +401,24 @@ modify_gid(char *group, char *newent)
 	(void) snprintf(f, sizeof(f), "%s.XXXXXXXX", _PATH_GROUP);
 	if ((fd = mkstemp(f)) < 0) {
 		(void) fclose(from);
-		warn("can't create gid: mkstemp failed");
+		warn("can't modify gid: mkstemp failed");
 		return 0;
 	}
 	if ((to = fdopen(fd, "w")) == NULL) {
 		(void) fclose(from);
 		(void) close(fd);
 		(void) unlink(f);
-		warn("can't create gid: fdopen `%s' failed", f);
+		warn("can't modify gid: fdopen `%s' failed", f);
 		return 0;
 	}
 	groupc = strlen(group);
 	while (fgets(buf, sizeof(buf), from) != NULL) {
 		cc = strlen(buf);
-		if (buf[cc - 1] != '\n') {
-			while (!feof(from) && fgetc(from) != '\n')
+		if (buf[cc - 1] != '\n' && !feof(from)) {
+			while (fgetc(from) != '\n' && !feof(from))
 				cc++;
-			warn("line `%s' too long (%d bytes), skipping", buf,
-			    cc);
+			warn("%s: line `%s' too long (%d bytes), skipping",
+			    _PATH_GROUP, buf, cc);
 			continue;
 		}
 		if ((colon = strchr(buf, ':')) == NULL) {
@@ -425,11 +434,11 @@ modify_gid(char *group, char *newent)
 				(void) strlcpy(buf, newent, sizeof(buf));
 			}
 		}
-		if (fwrite(buf, cc, 1, to) <= 0) {
+		if (fwrite(buf, cc, 1, to) != 1) {
 			(void) fclose(from);
 			(void) fclose(to);
 			(void) unlink(f);
-			warn("can't create gid: short write to `%s'", f);
+			warn("can't modify gid: short write to `%s'", f);
 			return 0;
 		}
 	}
@@ -437,16 +446,21 @@ modify_gid(char *group, char *newent)
 	(void) fclose(to);
 	if (rename(f, _PATH_GROUP) < 0) {
 		(void) unlink(f);
-		warn("can't create gid: can't rename `%s' to `%s'", f, _PATH_GROUP);
+		warn("can't modify gid: can't rename `%s' to `%s'", f, _PATH_GROUP);
 		return 0;
 	}
 	(void) chmod(_PATH_GROUP, st.st_mode & 07777);
+	if (newent == NULL) {
+		syslog(LOG_INFO, "group deleted: name=%s", group);
+	} else {
+		syslog(LOG_INFO, "group information modified: name=%s", group);
+	}
 	return 1;
 }
 
 /* modify the group entries for all `groups', by adding `user' */
 static int
-append_group(char *user, int ngroups, char **groups)
+append_group(char *user, int ngroups, const char **groups)
 {
 	struct group	*grp;
 	struct stat	st;
@@ -474,7 +488,7 @@ append_group(char *user, int ngroups, char **groups)
 		}
 	}
 	if ((from = fopen(_PATH_GROUP, "r")) == NULL) {
-		warn("can't append group for %s: can't open %s", user,
+		warn("can't append group for `%s': can't open `%s'", user,
 		    _PATH_GROUP);
 		return 0;
 	}
@@ -485,23 +499,23 @@ append_group(char *user, int ngroups, char **groups)
 	(void) snprintf(f, sizeof(f), "%s.XXXXXXXX", _PATH_GROUP);
 	if ((fd = mkstemp(f)) < 0) {
 		(void) fclose(from);
-		warn("can't create gid: mkstemp failed");
+		warn("can't append group: mkstemp failed");
 		return 0;
 	}
 	if ((to = fdopen(fd, "w")) == NULL) {
 		(void) fclose(from);
 		(void) close(fd);
 		(void) unlink(f);
-		warn("can't create gid: fdopen `%s' failed", f);
+		warn("can't append group: fdopen `%s' failed", f);
 		return 0;
 	}
 	while (fgets(buf, sizeof(buf), from) != NULL) {
 		cc = strlen(buf);
-		if (buf[cc - 1] != '\n') {
-			while (!feof(from) && fgetc(from) != '\n')
+		if (buf[cc - 1] != '\n' && !feof(from)) {
+			while (fgetc(from) != '\n' && !feof(from))
 				cc++;
-			warn("line `%s' too long (%d bytes), skipping", buf,
-			    cc);
+			warn("%s: line `%s' too long (%d bytes), skipping",
+			    _PATH_GROUP, buf, cc);
 			continue;
 		}
 		if ((colon = strchr(buf, ':')) == NULL) {
@@ -513,7 +527,7 @@ append_group(char *user, int ngroups, char **groups)
 				while (isspace(buf[cc - 1]))
 					cc--;
 				buf[(j = cc)] = '\0';
-				if (*(colon + 1) != '\0')
+				if (buf[strlen(buf) - 1] != ':')
 					strlcat(buf, ",", sizeof(buf));
 				cc = strlcat(buf, user, sizeof(buf)) + 1;
 				if (cc >= sizeof(buf)) {
@@ -526,11 +540,11 @@ append_group(char *user, int ngroups, char **groups)
 				buf[cc] = '\0';
 			}
 		}
-		if (fwrite(buf, cc, 1, to) <= 0) {
+		if (fwrite(buf, cc, 1, to) != 1) {
 			(void) fclose(from);
 			(void) fclose(to);
 			(void) unlink(f);
-			warn("can't create gid: short write to `%s'", f);
+			warn("can't append group: short write to `%s'", f);
 			return 0;
 		}
 	}
@@ -538,7 +552,7 @@ append_group(char *user, int ngroups, char **groups)
 	(void) fclose(to);
 	if (rename(f, _PATH_GROUP) < 0) {
 		(void) unlink(f);
-		warn("can't create gid: can't rename `%s' to `%s'", f, _PATH_GROUP);
+		warn("can't append group: can't rename `%s' to `%s'", f, _PATH_GROUP);
 		return 0;
 	}
 	(void) chmod(_PATH_GROUP, st.st_mode & 07777);
@@ -547,18 +561,22 @@ append_group(char *user, int ngroups, char **groups)
 
 /* return 1 if `login' is a valid login name */
 static int
-valid_login(char *login)
+valid_login(char *login_name)
 {
-	char	*cp;
+	unsigned char	*cp;
 
-	for (cp = login ; *cp ; cp++) {
+	/* The first character cannot be a hyphen */
+	if (*login_name == '-')
+		return 0;
+
+	for (cp = login_name ; *cp ; cp++) {
 		/* We allow '$' as the last character for samba */
 		if (!isalnum(*cp) && *cp != '.' && *cp != '_' && *cp != '-' &&
 		    !(*cp == '$' && *(cp + 1) == '\0')) {
 			return 0;
 		}
 	}
-	if (cp - login > MaxUserNameLen)
+	if ((char *)cp - login_name > MaxUserNameLen)
 		return 0;
 	return 1;
 }
@@ -567,15 +585,30 @@ valid_login(char *login)
 static int
 valid_group(char *group)
 {
-	char	*cp;
+	unsigned char	*cp;
 
 	for (cp = group ; *cp ; cp++) {
 		if (!isalnum(*cp) && *cp != '.' && *cp != '_' && *cp != '-') {
 			return 0;
 		}
 	}
+	if ((char *)cp - group > MaxUserNameLen)
+		return 0;
 	return 1;
 }
+
+#ifdef EXTENSIONS
+/* return 1 if `class' exists */
+static int
+valid_class(char *class)
+{
+	login_cap_t *lc;
+
+	if ((lc = login_getclass(class)) != NULL)
+		login_close(lc);
+	return lc != NULL;
+}
+#endif
 
 /* find the next gid in the range lo .. hi */
 static int
@@ -653,7 +686,7 @@ setdefaults(user_t *up)
 #ifdef EXTENSIONS
 	    fprintf(fp, "class\t\t%s\n", up->u_class) <= 0 ||
 #endif
-	    fprintf(fp, "inactive\t%d\n", up->u_inactive) <= 0 ||
+	    fprintf(fp, "inactive\t%s\n", (up->u_inactive == NULL) ? UNSET_INACTIVE : up->u_inactive) <= 0 ||
 	    fprintf(fp, "expire\t\t%s\n", (up->u_expire == NULL) ? UNSET_EXPIRY : up->u_expire) <= 0 ||
 	    fprintf(fp, "preserve\t%s\n", (up->u_preserve == 0) ? "false" : "true") <= 0) {
 		warn("can't write to `%s'", CONFFILE);
@@ -682,8 +715,8 @@ read_defaults(user_t *up)
 	size_t		lineno;
 	size_t		len;
 	FILE		*fp;
-	char		*cp;
-	char		*s;
+	unsigned char	*cp;
+	unsigned char	*s;
 
 	memsave(&up->u_primgrp, DEF_GROUP, strlen(DEF_GROUP));
 	memsave(&up->u_basedir, DEF_BASEDIR, strlen(DEF_BASEDIR));
@@ -735,7 +768,14 @@ read_defaults(user_t *up)
 			} else if (strncmp(s, "inactive", 8) == 0) {
 				for (cp = s + 8 ; *cp && isspace(*cp) ; cp++) {
 				}
-				up->u_inactive = atoi(cp);
+				if (strcmp(cp, UNSET_INACTIVE) == 0) {
+					if (up->u_inactive) {
+						FREE(up->u_inactive);
+					}
+					up->u_inactive = NULL;
+				} else {
+					memsave(&up->u_inactive, cp, strlen(cp));
+				}
 #ifdef EXTENSIONS
 			} else if (strncmp(s, "range", 5) == 0) {
 				for (cp = s + 5 ; *cp && isspace(*cp) ; cp++) {
@@ -792,14 +832,76 @@ getnextuid(int sync_uid_gid, uid_t *uid, uid_t low_uid, uid_t high_uid)
 	return 0;
 }
 
+/* structure which defines a password type */
+typedef struct passwd_type_t {
+	const char     *type;		/* optional type descriptor */
+	int		desc_length;	/* length of type descriptor */
+	int		length;		/* length of password */
+	const char     *regex;		/* regexp to output the password */
+	int		re_sub;		/* subscript of regexp to use */
+} passwd_type_t;
+
+static passwd_type_t	passwd_types[] = {
+	{ "$2a",	3,	54,	"\\$[^$]+\\$[^$]+\\$(.*)",	1 },	/* Blowfish */
+	{ "$1",		2,	34,	NULL,				0 },	/* MD5 */
+	{ "",		0,	DES_Len,NULL,				0 },	/* standard DES */
+	{ NULL,		-1,	-1,	NULL,				0 }	/* none - terminate search */
+};
+
+/* return non-zero if it's a valid password - check length for cipher type */
+static int
+valid_password_length(char *newpasswd)
+{
+	passwd_type_t  *pwtp;
+	regmatch_t	matchv[10];
+	regex_t		r;
+
+	for (pwtp = passwd_types ; pwtp->desc_length >= 0 ; pwtp++) {
+		if (strncmp(newpasswd, pwtp->type, pwtp->desc_length) == 0) {
+			if (pwtp->regex == NULL) {
+				return strlen(newpasswd) == pwtp->length;
+			}
+			(void) regcomp(&r, pwtp->regex, REG_EXTENDED);
+			if (regexec(&r, newpasswd, 10, matchv, 0) == 0) {
+				regfree(&r);
+				return (int)(matchv[pwtp->re_sub].rm_eo - matchv[pwtp->re_sub].rm_so + 1) == pwtp->length;
+			}
+			regfree(&r);
+		}
+	}
+	return 0;
+}
+
+/* look for a valid time, return 0 if it was specified but bad */
+static int
+scantime(time_t *tp, char *s)
+{
+	struct tm	tm;
+
+	*tp = 0;
+	if (s != NULL) {
+		(void) memset(&tm, 0, sizeof(tm));
+		if (strptime(s, "%c", &tm) != NULL) {
+			*tp = mktime(&tm);
+		} else if (strptime(s, "%B %d %Y", &tm) != NULL) {
+			*tp = mktime(&tm);
+		} else if (isdigit((unsigned char) s[0]) != NULL) {
+			*tp = atoi(s);
+		} else {
+			return 0;
+		}
+	}
+	return 1;
+}
+
 /* add a user */
 static int
-adduser(char *login, user_t *up)
+adduser(char *login_name, user_t *up)
 {
 	struct group	*grp;
 	struct stat	st;
-	struct tm	tm;
 	time_t		expire;
+	time_t		inactive;
 	char		password[PasswordLength + 1];
 	char		home[MaxFileNameLen];
 	char		buf[LINE_MAX];
@@ -810,9 +912,14 @@ adduser(char *login, user_t *up)
 	int		cc;
 	int		i;
 
-	if (!valid_login(login)) {
-		errx(EXIT_FAILURE, "`%s' is not a valid login name", login);
+	if (!valid_login(login_name)) {
+		errx(EXIT_FAILURE, "`%s' is not a valid login name", login_name);
 	}
+#ifdef EXTENSIONS
+	if (!valid_class(up->u_class)) {
+		errx(EXIT_FAILURE, "No such login class `%s'", up->u_class);
+	}
+#endif
 	if ((masterfd = open(_PATH_MASTERPASSWD, O_RDONLY)) < 0) {
 		err(EXIT_FAILURE, "can't open `%s'", _PATH_MASTERPASSWD);
 	}
@@ -887,43 +994,42 @@ adduser(char *login, user_t *up)
 		errx(EXIT_FAILURE, "group %s not found", up->u_primgrp);
 	}
 	/* check name isn't already in use */
-	if (!(up->u_flags & F_DUPUID) && getpwnam(login) != NULL) {
+	if (!(up->u_flags & F_DUPUID) && getpwnam(login_name) != NULL) {
 		(void) close(ptmpfd);
 		pw_abort();
-		errx(EXIT_FAILURE, "already a `%s' user", login);
+		errx(EXIT_FAILURE, "already a `%s' user", login_name);
 	}
 	if (up->u_flags & F_HOMEDIR) {
 		(void) strlcpy(home, up->u_home, sizeof(home));
 	} else {
 		/* if home directory hasn't been given, make it up */
-		(void) snprintf(home, sizeof(home), "%s/%s", up->u_basedir, login);
+		(void) snprintf(home, sizeof(home), "%s/%s", up->u_basedir,
+		    login_name);
 	}
-	expire = 0;
-	if (up->u_expire != NULL) {
-		(void) memset(&tm, 0, sizeof(tm));
-		if (strptime(up->u_expire, "%c", &tm) == NULL) {
-			warnx("invalid time format `%s'", optarg);
-		} else {
-			expire = mktime(&tm);
-		}
+	if (!scantime(&inactive, up->u_inactive)) {
+		warnx("Warning: inactive time `%s' invalid, account expiry off",
+				up->u_inactive);
+	}
+	if (!scantime(&expire, up->u_expire)) {
+		warnx("Warning: expire time `%s' invalid, password expiry off",
+				up->u_expire);
 	}
 	if (lstat(home, &st) < 0 && !(up->u_flags & F_MKDIR)) {
 		warnx("Warning: home directory `%s' doesn't exist, and -m was"
 		    " not specified", home);
 	}
-	if (up->u_password != NULL &&
-	    strlen(up->u_password) <= PasswordLength) {
+	if (up->u_password != NULL && valid_password_length(up->u_password)) {
 		(void) strlcpy(password, up->u_password, sizeof(password));
 	} else {
-		(void) strlcpy(password, "*", sizeof(password));
+		(void) memset(password, '*', DES_Len);
+		password[DES_Len] = 0;
 		if (up->u_password != NULL) {
 			warnx("Password `%s' is invalid: setting it to `%s'",
 				up->u_password, password);
 		}
 	}
-
-	if ((cc = snprintf(buf, sizeof(buf), "%s:%s:%u:%u:%s:%d:%ld:%s:%s:%s\n",
-	    login,
+	cc = snprintf(buf, sizeof(buf), "%s:%s:%d:%d:%s:%ld:%ld:%s:%s:%s\n",
+	    login_name,
 	    password,
 	    up->u_uid,
 	    gid,
@@ -932,13 +1038,14 @@ adduser(char *login, user_t *up)
 #else
 	    "",
 #endif
-	    up->u_inactive,
+	    (long) inactive,
 	    (long) expire,
 	    up->u_comment,
 	    home,
-	    up->u_shell)) >= sizeof(buf) || cc < 0 ||
-	    (strchr(up->u_comment, '&') != NULL &&
-	    cc + strlen(login) >= sizeof(buf))) {
+	    up->u_shell);
+	if (strchr(up->u_comment, '&') != NULL)
+		cc += strlen(login_name);
+	if (cc >= sizeof(buf)) {
 		(void) close(ptmpfd);
 		pw_abort();
 		errx(EXIT_FAILURE, "can't add `%s', line too long", buf);
@@ -963,33 +1070,157 @@ adduser(char *login, user_t *up)
 			(void) copydotfiles(up->u_skeldir, up->u_uid, gid, home);
 		}
 	}
-	if (strcmp(up->u_primgrp, "=uid") == 0 && getgrnam(login) == NULL &&
-	    !creategid(login, gid, login)) {
+	if (strcmp(up->u_primgrp, "=uid") == 0 &&
+	    getgrnam(login_name) == NULL &&
+	    !creategid(login_name, gid, login_name)) {
 		(void) close(ptmpfd);
 		pw_abort();
 		errx(EXIT_FAILURE, "can't create gid %d for login name %s",
-		    gid, login);
+		    gid, login_name);
 	}
-	if (up->u_groupc > 0 && !append_group(login, up->u_groupc, up->u_groupv)) {
+	if (up->u_groupc > 0 && !append_group(login_name, up->u_groupc, up->u_groupv)) {
 		(void) close(ptmpfd);
 		pw_abort();
-		errx(EXIT_FAILURE, "can't append `%s' to new groups", login);
+		errx(EXIT_FAILURE, "can't append `%s' to new groups", login_name);
 	}
 	(void) close(ptmpfd);
-	if (pw_mkdb(login, 0) < 0) {
+	if (pw_mkdb(login_name, 0) < 0) {
 		pw_abort();
 		err(EXIT_FAILURE, "pw_mkdb failed");
 	}
+	syslog(LOG_INFO, "new user added: name=%s, uid=%d, gid=%d, home=%s, shell=%s",
+		login_name, up->u_uid, gid, home, up->u_shell);
 	return 1;
+}
+
+/* remove a user from the groups file */
+static int
+rm_user_from_groups(char *login_name)
+{
+	struct stat	st;
+	regmatch_t	matchv[10];
+	regex_t		r;
+	FILE		*from;
+	FILE		*to;
+	char		line[LINE_MAX];
+	char		buf[LINE_MAX];
+	char		f[MaxFileNameLen];
+	int		fd;
+	int		cc;
+	int		sc;
+
+	(void) snprintf(line, sizeof(line), "(:|,)(%s)(,|$)", login_name);
+	if (regcomp(&r, line, REG_EXTENDED|REG_NEWLINE) != 0) {
+		warn("can't compile regular expression `%s'", line);
+		return 0;
+	}
+	if ((from = fopen(_PATH_GROUP, "r")) == NULL) {
+		warn("can't remove gid for `%s': can't open `%s'", login_name, _PATH_GROUP);
+		return 0;
+	}
+	if (flock(fileno(from), LOCK_EX | LOCK_NB) < 0) {
+		warn("can't lock `%s'", _PATH_GROUP);
+	}
+	(void) fstat(fileno(from), &st);
+	(void) snprintf(f, sizeof(f), "%s.XXXXXXXX", _PATH_GROUP);
+	if ((fd = mkstemp(f)) < 0) {
+		(void) fclose(from);
+		warn("can't create gid: mkstemp failed");
+		return 0;
+	}
+	if ((to = fdopen(fd, "w")) == NULL) {
+		(void) fclose(from);
+		(void) close(fd);
+		(void) unlink(f);
+		warn("can't create gid: fdopen `%s' failed", f);
+		return 0;
+	}
+	while (fgets(buf, sizeof(buf), from) > 0) {
+		cc = strlen(buf);
+		if (buf[cc - 1] != '\n' && !feof(from)) {
+			while (fgetc(from) != '\n' && !feof(from))
+				cc++;
+			warn("%s: line `%s' too long (%d bytes), skipping",
+			    _PATH_GROUP, buf, cc);
+			continue;
+		}
+		if (regexec(&r, buf, 10, matchv, 0) == 0) {
+			if (buf[(int)matchv[1].rm_so] == ',')
+				matchv[2].rm_so = matchv[1].rm_so;
+			else if (matchv[2].rm_eo != matchv[3].rm_eo)
+				matchv[2].rm_eo = matchv[3].rm_eo;
+			cc -= (int) matchv[2].rm_eo;
+			sc = (int) matchv[2].rm_so;
+			if (fwrite(buf, sc, 1, to) != 1 ||
+			    fwrite(&buf[(int)matchv[2].rm_eo], cc, 1, to) != 1) {
+				(void) fclose(from);
+				(void) close(fd);
+				(void) unlink(f);
+				warn("can't create gid: short write to `%s'", f);
+				return 0;
+			}
+		} else if (fwrite(buf, cc, 1, to) != 1) {
+			(void) fclose(from);
+			(void) close(fd);
+			(void) unlink(f);
+			warn("can't create gid: short write to `%s'", f);
+			return 0;
+		}
+	}
+	(void) fclose(from);
+	(void) fclose(to);
+	if (rename(f, _PATH_GROUP) < 0) {
+		(void) unlink(f);
+		warn("can't create gid: can't rename `%s' to `%s'", f, _PATH_GROUP);
+		return 0;
+	}
+	(void) chmod(_PATH_GROUP, st.st_mode & 07777);
+	return 1;
+}
+
+/* check that the user or group is local, not from YP/NIS */
+static int
+is_local(char *name, const char *file)
+{
+	regmatch_t	matchv[10];
+	regex_t		r;
+	FILE	       *fp;
+	char		buf[LINE_MAX];
+	char		re[LINE_MAX];
+	int		ret;
+	int		cc;
+
+	(void) snprintf(re, sizeof(re), "^%s:", name);
+	if (regcomp(&r, re, REG_EXTENDED) != 0) {
+		errx(EXIT_FAILURE, "can't compile regular expression `%s'", re);
+	}
+	if ((fp = fopen(file, "r")) == NULL) {
+		err(EXIT_FAILURE, "can't open `%s'", file);
+	}
+	for (ret = 0 ; fgets(buf, sizeof(buf), fp) != NULL ; ) {
+		cc = strlen(buf);
+		if (buf[cc - 1] != '\n' && !feof(fp)) {
+			while (fgetc(fp) != '\n' && !feof(fp))
+				cc++;
+			warn("%s: line `%s' too long (%d bytes), skipping",
+			    file, buf, cc);
+			continue;
+		}
+		if (regexec(&r, buf, 10, matchv, 0) == 0) {
+			ret = 1;
+			break;
+		}
+	}
+	(void) fclose(fp);
+	return ret;
 }
 
 /* modify a user */
 static int
-moduser(char *login, char *newlogin, user_t *up)
+moduser(char *login_name, char *newlogin, user_t *up)
 {
 	struct passwd	*pwp;
 	struct group	*grp;
-	struct tm	tm;
 	const char	*homedir;
 	char		buf[LINE_MAX];
 	size_t		colonc, len, loginc;
@@ -1002,10 +1233,13 @@ moduser(char *login, char *newlogin, user_t *up)
 	int		rval;
 
 	if (!valid_login(newlogin)) {
-		errx(EXIT_FAILURE, "`%s' is not a valid login name", login);
+		errx(EXIT_FAILURE, "`%s' is not a valid login name", login_name);
 	}
-	if ((pwp = getpwnam(login)) == NULL) {
-		errx(EXIT_FAILURE, "No such user `%s'", login);
+	if ((pwp = getpwnam(login_name)) == NULL) {
+		errx(EXIT_FAILURE, "No such user `%s'", login_name);
+	}
+	if (!is_local(login_name, _PATH_MASTERPASSWD)) {
+		errx(EXIT_FAILURE, "User `%s' must be a local user", login_name);
 	}
 	/* keep dir name in case we need it for '-m' */
 	homedir = pwp->pw_dir;
@@ -1030,7 +1264,7 @@ moduser(char *login, char *newlogin, user_t *up)
 	if (up != NULL) {
 		if (up->u_flags & F_USERNAME) {
 			/* if changing name, check new name isn't already in use */
-			if (strcmp(login, newlogin) != 0 && getpwnam(newlogin) != NULL) {
+			if (strcmp(login_name, newlogin) != 0 && getpwnam(newlogin) != NULL) {
 				(void) close(ptmpfd);
 				pw_abort();
 				errx(EXIT_FAILURE, "already a `%s' user", newlogin);
@@ -1048,8 +1282,15 @@ moduser(char *login, char *newlogin, user_t *up)
 			}
 		}
 		if (up->u_flags & F_PASSWORD) {
-			if (up->u_password != NULL && strlen(up->u_password) <= PasswordLength)
+			if (up->u_password != NULL) {
+				if (!valid_password_length(up->u_password)) {
+					(void) close(ptmpfd);
+					pw_abort();
+					errx(EXIT_FAILURE, "Invalid password: `%s'",
+						up->u_password);
+				}
 				pwp->pw_passwd = up->u_password;
+			}
 		}
 		if (up->u_flags & F_UID) {
 			/* check uid isn't already allocated */
@@ -1080,14 +1321,17 @@ moduser(char *login, char *newlogin, user_t *up)
 				errx(EXIT_FAILURE, "group %s not found", up->u_primgrp);
 			}
 		}
-		if (up->u_flags |= F_INACTIVE)
-			pwp->pw_change = up->u_inactive;
+		if (up->u_flags & F_INACTIVE) {
+			if (!scantime(&pwp->pw_change, up->u_inactive)) {
+				warnx("Warning: inactive time `%s' invalid, password expiry off",
+					up->u_inactive);
+			}
+		}
 		if (up->u_flags & F_EXPIRE) {
-			(void) memset(&tm, 0, sizeof(tm));
-			if (strptime(up->u_expire, "%c", &tm) == NULL)
-				warnx("invalid time format `%s'", optarg);
-			else
-				pwp->pw_expire = mktime(&tm);
+			if (!scantime(&pwp->pw_expire, up->u_expire)) {
+				warnx("Warning: expire time `%s' invalid, password expiry off",
+					up->u_expire);
+			}
 		}
 		if (up->u_flags & F_COMMENT)
 			pwp->pw_gecos = up->u_comment;
@@ -1096,18 +1340,25 @@ moduser(char *login, char *newlogin, user_t *up)
 		if (up->u_flags & F_SHELL)
 			pwp->pw_shell = up->u_shell;
 #ifdef EXTENSIONS
-		if (up->u_flags & F_CLASS)
+		if (up->u_flags & F_CLASS) {
+			if (!valid_class(up->u_class)) {
+				(void) close(ptmpfd);
+				pw_abort();
+				errx(EXIT_FAILURE,
+				    "No such login class `%s'", up->u_class);
+			}
 			pwp->pw_class = up->u_class;
+		}
 #endif
 	}
-	loginc = strlen(login);
+	loginc = strlen(login_name);
 	while ((line = fgetln(master, &len)) != NULL) {
 		if ((colon = strchr(line, ':')) == NULL) {
 			warnx("Malformed entry `%s'. Skipping", line);
 			continue;
 		}
 		colonc = (size_t)(colon - line);
-		if (strncmp(login, line, loginc) == 0 && loginc == colonc) {
+		if (strncmp(login_name, line, loginc) == 0 && loginc == colonc) {
 			if (up != NULL) {
 				if ((len = snprintf(buf, sizeof(buf),
 				    "%s:%s:%d:%d:%s:%ld:%ld:%s:%s:%s\n",
@@ -1164,15 +1415,23 @@ moduser(char *login, char *newlogin, user_t *up)
 		}
 	}
 	(void) close(ptmpfd);
-	if (up != NULL && strcmp(login, newlogin) == 0)
-		rval = pw_mkdb(login, 0);
+	if (up != NULL && strcmp(login_name, newlogin) == 0)
+		rval = pw_mkdb(login_name, 0);
 	else
 		rval = pw_mkdb(NULL, 0);
 	if (rval == -1) {
 		pw_abort();
 		err(EXIT_FAILURE, "pw_mkdb failed");
 	}
-
+	if (up == NULL) {
+		syslog(LOG_INFO, "user removed: name=%s", login_name);
+	} else if (strcmp(login_name, newlogin) == 0) {
+		syslog(LOG_INFO, "user information modified: name=%s, uid=%d, gid=%d, home=%s, shell=%s", 
+			login_name, pwp->pw_uid, pwp->pw_gid, pwp->pw_dir, pwp->pw_shell);
+	} else {
+		syslog(LOG_INFO, "user information modified: name=%s, new name=%s, uid=%d, gid=%d, home=%s, shell=%s", 
+			login_name, newlogin, pwp->pw_uid, pwp->pw_gid, pwp->pw_dir, pwp->pw_shell);
+	}
 	return 1;
 }
 
@@ -1318,7 +1577,7 @@ useradd(int argc, char **argv)
 			break;
 		case 'f':
 			defaultfield = 1;
-			u.u_inactive = atoi(optarg);
+			memsave(&u.u_inactive, optarg, strlen(optarg));
 			break;
 		case 'g':
 			defaultfield = 1;
@@ -1366,6 +1625,9 @@ useradd(int argc, char **argv)
 			verbose = 1;
 			break;
 #endif
+		default:
+			usermgmt_usage("useradd");
+			/* NOTREACHED */
 		}
 	}
 	if (bigD) {
@@ -1380,7 +1642,7 @@ useradd(int argc, char **argv)
 #ifdef EXTENSIONS
 		(void) printf("class\t\t%s\n", u.u_class);
 #endif
-		(void) printf("inactive\t%d\n", u.u_inactive);
+		(void) printf("inactive\t%s\n", (u.u_inactive == NULL) ? UNSET_INACTIVE : u.u_inactive);
 		(void) printf("expire\t\t%s\n", (u.u_expire == NULL) ? UNSET_EXPIRY : u.u_expire);
 #ifdef EXTENSIONS
 		for (i = 0 ; i < u.u_rc ; i++) {
@@ -1395,6 +1657,7 @@ useradd(int argc, char **argv)
 		usermgmt_usage("useradd");
 	}
 	checkeuid();
+	openlog("useradd", LOG_PID, LOG_USER);
 	return adduser(*argv, &u) ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 
@@ -1444,7 +1707,7 @@ usermod(int argc, char **argv)
 			u.u_flags |= F_EXPIRE;
 			break;
 		case 'f':
-			u.u_inactive = atoi(optarg);
+			memsave(&u.u_inactive, optarg, strlen(optarg));
 			u.u_flags |= F_INACTIVE;
 			break;
 		case 'g':
@@ -1490,6 +1753,9 @@ usermod(int argc, char **argv)
 			verbose = 1;
 			break;
 #endif
+		default:
+			usermgmt_usage("usermod");
+			/* NOTREACHED */
 		}
 	}
 	if ((u.u_flags & F_MKDIR) && !(u.u_flags & F_HOMEDIR) &&
@@ -1503,6 +1769,7 @@ usermod(int argc, char **argv)
 		usermgmt_usage("usermod");
 	}
 	checkeuid();
+	openlog("usermod", LOG_PID, LOG_USER);
 	return moduser(*argv, (have_new_user) ? newuser : *argv, &u) ?
 	    EXIT_SUCCESS : EXIT_FAILURE;
 }
@@ -1550,6 +1817,9 @@ userdel(int argc, char **argv)
 			verbose = 1;
 			break;
 #endif
+		default:
+			usermgmt_usage("userdel");
+			/* NOTREACHED */
 		}
 	}
 #ifdef EXTENSIONS
@@ -1577,11 +1847,17 @@ userdel(int argc, char **argv)
 	if (u.u_preserve) {
 		u.u_flags |= F_SHELL;
 		memsave(&u.u_shell, NOLOGIN, strlen(NOLOGIN));
-		(void) strlcpy(password, "*", sizeof(password));
-		memsave(&u.u_password, password, PasswordLength);
+		(void) memset(password, '*', DES_Len);
+		password[DES_Len] = 0;
+		memsave(&u.u_password, password, strlen(password));
 		u.u_flags |= F_PASSWORD;
+		openlog("userdel", LOG_PID, LOG_USER);
 		return moduser(*argv, *argv, &u) ? EXIT_SUCCESS : EXIT_FAILURE;
 	}
+	if (!rm_user_from_groups(*argv)) {
+		return 0;
+	}
+	openlog("userdel", LOG_PID, LOG_USER);
 	return moduser(*argv, *argv, NULL) ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 
@@ -1617,6 +1893,9 @@ groupadd(int argc, char **argv)
 			verbose = 1;
 			break;
 #endif
+		default:
+			usermgmt_usage("groupadd");
+			/* NOTREACHED */
 		}
 	}
 	argc -= optind;
@@ -1625,15 +1904,16 @@ groupadd(int argc, char **argv)
 		usermgmt_usage("groupadd");
 	}
 	checkeuid();
+	if (!valid_group(*argv)) {
+		errx(EXIT_FAILURE, "invalid group name `%s'", *argv);
+	}
 	if (gid < 0 && !getnextgid(&gid, LowGid, HighGid)) {
 		errx(EXIT_FAILURE, "can't add group: can't get next gid");
 	}
 	if (!dupgid && getgrgid((gid_t) gid) != NULL) {
 		errx(EXIT_FAILURE, "can't add group: gid %d is a duplicate", gid);
 	}
-	if (!valid_group(*argv)) {
-		warnx("warning - invalid group name `%s'", *argv);
-	}
+	openlog("groupadd", LOG_PID, LOG_USER);
 	if (!creategid(*argv, gid, "")) {
 		errx(EXIT_FAILURE, "can't add group: problems with %s file",
 		    _PATH_GROUP);
@@ -1660,6 +1940,9 @@ groupdel(int argc, char **argv)
 			verbose = 1;
 			break;
 #endif
+		default:
+			usermgmt_usage("groupdel");
+			/* NOTREACHED */
 		}
 	}
 	argc -= optind;
@@ -1668,6 +1951,7 @@ groupdel(int argc, char **argv)
 		usermgmt_usage("groupdel");
 	}
 	checkeuid();
+	openlog("groupdel", LOG_PID, LOG_USER);
 	if (getgrnam(*argv) == NULL) {
 		warnx("No such group: `%s'", *argv);
 		return EXIT_FAILURE;
@@ -1719,6 +2003,9 @@ groupmod(int argc, char **argv)
 			verbose = 1;
 			break;
 #endif
+		default:
+			usermgmt_usage("groupmod");
+			/* NOTREACHED */
 		}
 	}
 	argc -= optind;
@@ -1733,11 +2020,14 @@ groupmod(int argc, char **argv)
 	if (dupgid && gid < 0) {
 		errx(EXIT_FAILURE, "Duplicate which gid?");
 	}
+	if (!is_local(*argv, _PATH_GROUP)) {
+		errx(EXIT_FAILURE, "Group `%s' must be a local group", *argv);
+	}
 	if ((grp = getgrnam(*argv)) == NULL) {
 		errx(EXIT_FAILURE, "can't find group `%s' to modify", *argv);
 	}
 	if (newname != NULL && !valid_group(newname)) {
-		warnx("warning - invalid group name `%s'", newname);
+		errx(EXIT_FAILURE, "invalid group name `%s'", newname);
 	}
 	if ((cc = snprintf(buf, sizeof(buf), "%s:%s:%u:",
 	    (newname) ? newname : grp->gr_name, grp->gr_passwd,
@@ -1758,6 +2048,7 @@ groupmod(int argc, char **argv)
 	if (cc >= sizeof(buf))
 		errx(EXIT_FAILURE, "group `%s' entry too long", grp->gr_name);
 
+	openlog("groupmod", LOG_PID, LOG_USER);
 	if (!modify_gid(*argv, buf))
 		err(EXIT_FAILURE, "can't change %s file", _PATH_GROUP);
 	return EXIT_SUCCESS;
@@ -1783,6 +2074,9 @@ userinfo(int argc, char **argv)
 		case 'v':
 			verbose = 1;
 			break;
+		default:
+			usermgmt_usage("userinfo");
+			/* NOTREACHED */
 		}
 	}
 	argc -= optind;
@@ -1842,6 +2136,9 @@ groupinfo(int argc, char **argv)
 		case 'v':
 			verbose = 1;
 			break;
+		default:
+			usermgmt_usage("groupinfo");
+			/* NOTREACHED */
 		}
 	}
 	argc -= optind;

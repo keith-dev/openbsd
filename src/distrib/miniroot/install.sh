@@ -1,5 +1,5 @@
 #!/bin/sh
-#	$OpenBSD: install.sh,v 1.129 2002/12/14 15:33:34 krw Exp $
+#	$OpenBSD: install.sh,v 1.136 2003/08/17 18:18:50 krw Exp $
 #	$NetBSD: install.sh,v 1.5.2.8 1996/08/27 18:15:05 gwr Exp $
 #
 # Copyright (c) 1997-2002 Todd Miller, Theo de Raadt, Ken Westerback
@@ -13,12 +13,6 @@
 # 2. Redistributions in binary form must reproduce the above copyright
 #    notice, this list of conditions and the following disclaimer in the
 #    documentation and/or other materials provided with the distribution.
-# 3. All advertising materials mentioning features or use of this software
-#    must display the following acknowledgement:
-#	This product includes software developed by Todd Miller and
-#	Theo de Raadt
-# 4. The name of the author may not be used to endorse or promote products
-#    derived from this software without specific prior written permission.
 #
 # THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
 # IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -70,9 +64,11 @@
 #	In a perfect world, this would be a nice C program, with a reasonable
 #	user interface.
 
-# A list of devices holding filesystems and the associated mount points
-# is kept in the file named FILESYSTEMS.
+# The name of the file holding the list of configured filesystems.
 FILESYSTEMS=/tmp/filesystems
+
+# The name of the file holding the list of non-default configured swap devices.
+SWAPLIST=/tmp/swaplist
 
 # install.sub needs to know the MODE
 MODE=install
@@ -97,10 +93,15 @@ if [ ! -f /etc/fstab ]; then
 		if isin $ROOTDISK $_DKDEVS; then
 			resp=$ROOTDISK
 			rm -f /tmp/fstab
-			rm -f $FILESYSTEMS
+			# Make sure empty files exist so we don't have to
+			# keep checking for their existance before grep'ing.
+			cat /dev/null >$FILESYSTEMS
+			cat /dev/null >$SWAPLIST
 		else
-			ask_which "disk" "do you wish to initialize?" "$_DKDEVS"
-			[ "$resp" = "done" ] && break
+			# Force the user to think and type in a disk name by
+			# making 'done' the default choice.
+			ask_which "disk" "do you wish to initialize?" "$_DKDEVS" done "No more disks to initialize"
+			[[ $resp == done ]] && break
 		fi
 
 		DISK=$resp
@@ -109,24 +110,24 @@ if [ ! -f /etc/fstab ]; then
 		# and labeling additional disks. This is machine-dependent since
 		# some platforms may not be able to provide this functionality.
 		# /tmp/fstab.$DISK is created here with 'disklabel -f'.
-		rm -f /tmp/fstab.$DISK
+		rm -f /tmp/*.$DISK
 		md_prep_disklabel $DISK
 
-		# Get the list of BSD partitions and store sizes
-		# XXX - It would be nice to just pipe the output of sed to a
-		#       'while read _pp _ps' loop, but our 'sh' runs the last
-		#       element of a pipeline in a subshell and the required side
-		#       effects to _partitions, etc. would be lost.
+		# Get the lists of BSD and swap partitions.
 		unset _partitions _psizes _mount_points
 		_i=0
-		for _p in $(disklabel ${DISK} 2>&1 | sed -ne '/^ *\([a-p]\): *\([0-9][0-9]*\).*BSD.*/s//\1\2/p'); do
-			# All characters after the initial [a-p] are the partition size
-			_ps=${_p#?}
-			# Removing the partition size leaves us with the partition name
-			_pp=${DISK}${_p%${_ps}}
+		disklabel $DISK 2>&1 | sed -ne '/^ *[a-p]: /p' >/tmp/disklabel.$DISK
+		while read _dev _size _offset _type _rest; do
+			_pp=${DISK}${_dev%:}
+			_ps=$_size
 
 			if [[ $_pp == $ROOTDEV ]]; then
-				echo "$ROOTDEV /" > $FILESYSTEMS
+				echo "$ROOTDEV /" >$FILESYSTEMS
+				continue
+			elif [[ $_type == swap ]]; then
+				echo "$_pp" >>$SWAPLIST
+				continue
+			elif [[ $_type != *BSD ]]; then
 				continue
 			fi
 
@@ -138,7 +139,7 @@ if [ ! -f /etc/fstab ]; then
 				while read _pp _mp _rest; do
 					[[ $_pp == "/dev/${_partitions[$_i]}" ]] || continue
 					# Ignore mount points that have already been specified.
-					[[ -f $FILESYSTEMS && -n $(grep " $_mp\$" $FILESYSTEMS) ]] && break
+					[[ -n $(grep " $_mp\$" $FILESYSTEMS) ]] && break
 					isin $_mp ${_mount_points[*]} && break
 					# Ignore '/' for any partition but ROOTDEV. Check just
 					# in case ROOTDEV isn't first partition processed.
@@ -148,28 +149,32 @@ if [ ! -f /etc/fstab ]; then
 				done < /tmp/fstab.$DISK
 			fi
 			: $(( _i += 1 ))
-		done
+		done < /tmp/disklabel.$DISK
 
 		if [[ $DISK == $ROOTDISK ]]; then
 			# Ensure that ROOTDEV was configured.
-			if [[ -f $FILESYSTEMS && -n $(grep "^$ROOTDEV /$" $FILESYSTEMS) ]]; then
+			if [[ -n $(grep "^$ROOTDEV /$" $FILESYSTEMS) ]]; then
 				echo "The root filesystem will be mounted on $ROOTDEV."
 			else
 				echo "ERROR: Unable to mount the root filesystem on $ROOTDEV."
 				DISK=
 			fi
-			# Ensure that ${ROOTDISK}b was configured as swap space.
-			if [[ -n $(disklabel $ROOTDISK 2>&1 | sed -ne '/^ *\(b\):.*swap/s//\1/p') ]]; then
-				echo "${ROOTDISK}b will be used for swap space."
+			# Ensure that $SWAPDEV was configured as swap space.
+			if [[ -n $(grep "^$SWAPDEV" $SWAPLIST) ]]; then
+				echo "$SWAPDEV will be used for swap space."
+				# But we really don't want it in the installed
+				# /etc/fstab.
+				grep -v "^$SWAPDEV" $SWAPLIST > $SWAPLIST.tmp
+				mv $SWAPLIST.tmp $SWAPLIST
 			else
-				echo "ERROR: Unable to use ${ROOTDISK}b for swap space."
+				echo "ERROR: Unable to use $SWAPDEV for swap space."
 				DISK=
 			fi
 			[[ -n $DISK ]] || echo "You must reconfigure $ROOTDISK."
 		fi
 
 		# If there are no BSD partitions, or $DISK has been reset, go on to next disk.
-		[[ ${#_partitions[*]} > 0 && -n $DISK ]] || continue
+		[[ ${#_partitions[*]} -gt 0 && -n $DISK ]] || continue
 
 		# Now prompt the user for the mount points. Loop until "done" entered.
 		_i=0
@@ -186,19 +191,21 @@ if [ ! -f /etc/fstab ]; then
 				;;
 			done)	break
 				;;
-			/*)	_pp=`grep " $resp\$" $FILESYSTEMS | cutword 1`
-				if [ -z "$_pp" ]; then
-					# Mount point wasn't specified on a previous disk. Has it
-					# been specified on this one?
+			/*)	set -- $(grep " $resp\$" $FILESYSTEMS)
+				_pp=$1
+				if [[ -z $_pp ]]; then
+					# Mount point wasn't specified on a
+					# previous disk. Has it been specified
+					# on this one?
 					_j=0
 					for _pp in ${_partitions[*]} ""; do
-						if [ $_i -ne $_j ]; then
-							[ "$resp" = "${_mount_points[$_j]}" ] && break
+						if [[ $_i -ne $_j ]]; then
+							[[ $resp == ${_mount_points[$_j]} ]] && break
 						fi
 						: $(( _j += 1 ))
 					done
 				fi
-				if [ "$_pp" ]; then
+				if [[ -n $_pp ]]; then
 					echo "Invalid response: $_pp is already being mounted at $resp."
 					continue
 				fi
@@ -219,7 +226,7 @@ if [ ! -f /etc/fstab ]; then
 		_i=0
 		for _pp in ${_partitions[*]}; do
 			_mp=${_mount_points[$_i]}
-			[ "$_mp" ] && echo "$_pp $_mp" >> $FILESYSTEMS
+			[ "$_mp" ] && echo "$_pp $_mp" >>$FILESYSTEMS
 			: $(( _i += 1 ))
 		done
 	done
@@ -252,7 +259,7 @@ __EOT
 		_partitions[$_i]=$_pp
 		_mount_points[$_i]=$_mp
 		: $(( _i += 1 ))
-	done < $FILESYSTEMS
+	done <$FILESYSTEMS
 
 	# Write fstab entries to /tmp/fstab in mount point alphabetic
 	# order to enforce a rational mount order.
@@ -309,6 +316,11 @@ __EOT
 			: $(( _i += 1 ))
 		done
 	done >> /tmp/fstab
+
+	# Append all non-default swap devices to fstab.
+	while read _dev; do
+		echo "/dev/$_dev none swap sw 0 0" >>/tmp/fstab
+	done < $SWAPLIST
 
 	munge_fstab
 fi

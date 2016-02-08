@@ -1,4 +1,4 @@
-/*	$OpenBSD: openbsd-syscalls.c,v 1.18 2002/12/04 17:40:06 mickey Exp $	*/
+/*	$OpenBSD: openbsd-syscalls.c,v 1.21 2003/08/23 20:01:57 fgsch Exp $	*/
 /*
  * Copyright 2002 Niels Provos <provos@citi.umich.edu>
  * All rights reserved.
@@ -93,6 +93,7 @@ struct emulation {
 
 static struct emulation emulations[] = {
 	{ "native",	syscallnames,		SYS_MAXSYSCALL },
+	{ "aout",	syscallnames,		SYS_MAXSYSCALL },
 	{ "hpux",	hpux_syscallnames,	HPUX_SYS_MAXSYSCALL },
 	{ "ibcs2",	ibcs2_syscallnames,	IBCS2_SYS_MAXSYSCALL },
 	{ "linux",	linux_syscallnames,	LINUX_SYS_MAXSYSCALL },
@@ -352,7 +353,7 @@ obsd_translate_errno(int nerrno)
 }
 
 static int
-obsd_answer(int fd, pid_t pid, u_int32_t seqnr, short policy, int errno,
+obsd_answer(int fd, pid_t pid, u_int32_t seqnr, short policy, int nerrno,
     short flags, struct elevate *elevate)
 {
 	struct systrace_answer ans;
@@ -362,7 +363,7 @@ obsd_answer(int fd, pid_t pid, u_int32_t seqnr, short policy, int errno,
 	ans.stra_seqnr = seqnr;
 	ans.stra_policy = obsd_translate_policy(policy);
 	ans.stra_flags = obsd_translate_flags(flags);
-	ans.stra_error = obsd_translate_errno(errno);
+	ans.stra_error = obsd_translate_errno(nerrno);
 
 	if (elevate != NULL) {
 		if (elevate->e_flags & ELEVATE_UID) {
@@ -614,6 +615,11 @@ obsd_read(int fd)
 		intercept_child_info(msg.msg_pid,
 		    msg.msg_data.msg_child.new_pid);
 		break;
+#ifdef SYSTR_MSG_POLICYFREE
+	case SYSTR_MSG_POLICYFREE:
+		intercept_policy_free(msg.msg_policy);
+		break;
+#endif
 	}
 	return (0);
 }

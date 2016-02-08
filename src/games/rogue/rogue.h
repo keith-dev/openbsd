@@ -1,4 +1,4 @@
-/*	$OpenBSD: rogue.h,v 1.10 2003/03/11 04:47:39 david Exp $	*/
+/*	$OpenBSD: rogue.h,v 1.13 2003/06/03 03:01:41 millert Exp $	*/
 /*	$NetBSD: rogue.h,v 1.4 1995/04/24 12:25:04 cgd Exp $	*/
 
 /*
@@ -16,11 +16,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -605,7 +601,6 @@ void	messagef(boolean, const char *, ...)
 #endif
 		;
 void	mix_colors(void);
-void	mix_colors(void);
 void	mix_random_rooms(void);
 int	mon_can_go(object *, short, short);
 int	mon_damage(object *, short);
@@ -634,7 +629,6 @@ short	party_objects(int);
 void	place_at(object *, short, short);
 void	plant_gold(short, short, boolean);
 void	play_level(void);
-void	player_init(void);
 void	player_init(void);
 void	potion_heal(int);
 int	pr_com_id(int);
@@ -690,11 +684,9 @@ void	single_inv(short);
 void	special_hit(object *);
 void	srrandom(int);
 void	start_window(void);
-void	start_window(void);
 void	steal_gold(object *);
 void	steal_item(object *);
 void	sting(object *);
-void	stop_window(void);
 void	stop_window(void);
 void	take_a_nap(void);
 void	take_from_pack(object *, object *);

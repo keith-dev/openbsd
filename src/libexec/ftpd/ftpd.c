@@ -1,4 +1,4 @@
-/*	$OpenBSD: ftpd.c,v 1.140 2003/02/17 06:52:58 mpech Exp $	*/
+/*	$OpenBSD: ftpd.c,v 1.145 2003/07/29 18:39:22 deraadt Exp $	*/
 /*	$NetBSD: ftpd.c,v 1.15 1995/06/03 22:46:47 mycroft Exp $	*/
 
 /*
@@ -42,11 +42,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -74,7 +70,7 @@ static const char copyright[] =
 static const char sccsid[] = "@(#)ftpd.c	8.4 (Berkeley) 4/16/94";
 #else
 static const char rcsid[] = 
-    "$OpenBSD: ftpd.c,v 1.140 2003/02/17 06:52:58 mpech Exp $";
+    "$OpenBSD: ftpd.c,v 1.145 2003/07/29 18:39:22 deraadt Exp $";
 #endif
 #endif /* not lint */
 
@@ -248,7 +244,7 @@ static int	 receive_data(FILE *, FILE *);
 static void	 replydirname(const char *, const char *);
 static int	 send_data(FILE *, FILE *, off_t, off_t, int);
 static struct passwd *
-		 sgetpwnam(char *);
+		 sgetpwnam(char *, struct passwd *);
 static void	 reapchild(int);
 #if defined(TCPWRAPPERS)
 static int	 check_host(struct sockaddr *);
@@ -258,7 +254,7 @@ static void	 usage(void);
 void	 logxfer(char *, off_t, time_t);
 
 static char *
-curdir()
+curdir(void)
 {
 	static char path[MAXPATHLEN+1];	/* path + '/' */
 
@@ -273,7 +269,7 @@ curdir()
 char *argstr = "AdDhnlMSt:T:u:UvP46";
 
 static void
-usage()
+usage(void)
 {
 	syslog(LOG_ERR,
 	    "usage: ftpd [-AdDhlMPSU46] [-t timeout] [-T maxtimeout] [-u mask]");
@@ -281,10 +277,7 @@ usage()
 }
 
 int
-main(argc, argv, envp)
-	int argc;
-	char *argv[];
-	char **envp;
+main(int argc, char *argv[])
 {
 	socklen_t addrlen;
 	int ch, on = 1, tos;
@@ -626,8 +619,7 @@ main(argc, argv, envp)
  */
 
 static void
-lostconn(signo)
-	int signo;
+lostconn(int signo)
 {
 	struct syslog_data sdata = SYSLOG_DATA_INIT;
 
@@ -637,8 +629,7 @@ lostconn(signo)
 }
 
 static void
-sigquit(signo)
-	int signo;
+sigquit(int signo)
 {
 	struct syslog_data sdata = SYSLOG_DATA_INIT;
 
@@ -652,23 +643,23 @@ sigquit(signo)
  * (e.g., globbing).
  */
 static struct passwd *
-sgetpwnam(name)
-	char *name;
+sgetpwnam(char *name, struct passwd *pw)
 {
 	static struct passwd *save;
-	struct passwd *pw;
+	struct passwd *old;
 
-	if ((pw = getpwnam(name)) == NULL)
+	if (pw == NULL && (pw = getpwnam(name)) == NULL)
 		return (NULL);
-	if (save) {
-		memset(save->pw_passwd, 0, strlen(save->pw_passwd));
-		free(save);
-	}
+	old = save;
 	save = pw_dup(pw);
 	if (save == NULL) {
 		perror_reply(421, "Local resource failure: malloc");
 		dologout(1);
 		/* NOTREACHED */
+	}
+	if (old) {
+		memset(old->pw_passwd, 0, strlen(old->pw_passwd));
+		free(old);
 	}
 	return (save);
 }
@@ -689,8 +680,7 @@ static char curname[MAXLOGNAME];	/* current USER name */
  * _PATH_FTPUSERS to allow people such as root and uucp to be avoided.
  */
 void
-user(name)
-	char *name;
+user(char *name)
 {
 	char *cp, *shell, *style, *host;
 	char *class = NULL;
@@ -718,7 +708,7 @@ user(name)
 		if (checkuser(_PATH_FTPUSERS, "ftp") ||
 		    checkuser(_PATH_FTPUSERS, "anonymous"))
 			reply(530, "User %s access denied.", name);
-		else if ((pw = sgetpwnam("ftp")) != NULL) {
+		else if ((pw = sgetpwnam("ftp", NULL)) != NULL) {
 			guest = 1;
 			askpasswd = 1;
 			lc = login_getclass(pw->pw_class);
@@ -745,7 +735,7 @@ user(name)
 	}
 
 	shell = _PATH_BSHELL;
-	if ((pw = sgetpwnam(name))) {
+	if ((pw = sgetpwnam(name, NULL))) {
 		class = pw->pw_class;
 		if (pw->pw_shell != NULL && *pw->pw_shell != '\0')
 			shell = pw->pw_shell;
@@ -821,9 +811,7 @@ user(name)
  * Check if a user is in the file "fname"
  */
 static int
-checkuser(fname, name)
-	char *fname;
-	char *name;
+checkuser(char *fname, char *name)
 {
 	FILE *fp;
 	int found = 0;
@@ -850,27 +838,27 @@ checkuser(fname, name)
  * used when USER command is given or login fails.
  */
 static void
-end_login()
+end_login(void)
 {
 
 	sigprocmask (SIG_BLOCK, &allsigs, NULL);
 	if (logged_in) {
 		ftpdlogwtmp(ttyline, "", "");
 		if (doutmp)
-			logout(utmp.ut_line);
+			ftpd_logout(utmp.ut_line);
 	}
 	reply(530, "Please reconnect to work as another user");
 	exit(0);
 }
 
 void
-pass(passwd)
-	char *passwd;
+pass(char *passwd)
 {
 	int authok, flags;
 	FILE *fp;
 	static char homedir[MAXPATHLEN];
 	char *motd, *dir, rootdir[MAXPATHLEN];
+	size_t sz_pw_dir;
 
 	if (logged_in || askpasswd == 0) {
 		reply(503, "Login with USER first.");
@@ -957,7 +945,7 @@ pass(passwd)
 		(void)strncpy(utmp.ut_name, pw->pw_name, sizeof(utmp.ut_name));
 		(void)strncpy(utmp.ut_host, remotehost, sizeof(utmp.ut_host));
 		(void)strncpy(utmp.ut_line, ttyline, sizeof(utmp.ut_line));
-		login(&utmp);
+		ftpd_login(&utmp);
 	}
 
 	/* open stats file before chroot */
@@ -976,24 +964,18 @@ pass(passwd)
 			dologout(1);
 			/* NOTREACHED */
 		}
-		free(dir);
-		free(pw->pw_dir);
 		pw->pw_dir = newdir;
+		pw = sgetpwnam(NULL, pw);
+		free(dir);
+		free(newdir);
 	}
 
 	/* make sure pw->pw_dir is big enough to hold "/" */
-	if (strlen(pw->pw_dir) < 1) {
-		char *newdir;
-
-		newdir = malloc(2);
-		if (newdir == NULL) {
-			perror_reply(421, "Local resource failure: malloc");
-			dologout(1);
-			/* NOTREACHED */
-		}
-		strlcpy(newdir, pw->pw_dir, 2);
-		free(pw->pw_dir);
-		pw->pw_dir = newdir;
+	sz_pw_dir = strlen(pw->pw_dir) + 1;
+	if (sz_pw_dir < 2) {
+		pw->pw_dir = "/";
+		pw = sgetpwnam(NULL, pw);
+		sz_pw_dir = 2;
 	}
 
 	if (guest || dochroot) {
@@ -1020,7 +1002,7 @@ pass(passwd)
 			reply(550, "Can't set guest privileges.");
 			goto bad;
 		}
-		strcpy(pw->pw_dir, "/");
+		strlcpy(pw->pw_dir, "/", sz_pw_dir);
 		if (setenv("HOME", "/", 1) == -1) {
 			reply(550, "Can't setup environment.");
 			goto bad;
@@ -1030,7 +1012,7 @@ pass(passwd)
 			reply(550, "Can't change root.");
 			goto bad;
 		}
-		strcpy(pw->pw_dir, "/");
+		strlcpy(pw->pw_dir, "/", sz_pw_dir);
 		if (setenv("HOME", "/", 1) == -1) {
 			reply(550, "Can't setup environment.");
 			goto bad;
@@ -1116,8 +1098,7 @@ bad:
 }
 
 void
-retrieve(cmd, name)
-	char *cmd, *name;
+retrieve(char *cmd, char *name)
 {
 	FILE *fin, *dout;
 	struct stat st;
@@ -1190,9 +1171,7 @@ done:
 }
 
 void
-store(name, mode, unique)
-	char *name, *mode;
-	int unique;
+store(char *name, char *mode, int unique)
 {
 	FILE *fout, *din;
 	int (*closefunc)(FILE *);
@@ -1270,8 +1249,7 @@ done:
 }
 
 static FILE *
-getdatasock(mode)
-	char *mode;
+getdatasock(char *mode)
 {
 	int on = 1, s, t, tries;
 
@@ -1337,10 +1315,7 @@ bad:
 }
 
 static FILE *
-dataconn(name, size, mode)
-	char *name;
-	off_t size;
-	char *mode;
+dataconn(char *name, off_t size, char *mode)
 {
 	char sizebuf[32];
 	FILE *file;
@@ -1493,11 +1468,7 @@ dataconn(name, size, mode)
  * NB: Form isn't handled.
  */
 static int
-send_data(instr, outstr, blksize, filesize, isreg)
-	FILE *instr, *outstr;
-	off_t blksize;
-	off_t filesize;
-	int isreg;
+send_data(FILE *instr, FILE *outstr, off_t blksize, off_t filesize, int isreg)
 {
 	int c, cnt, filefd, netfd;
 	char *buf, *bp;
@@ -1614,8 +1585,7 @@ got_oob:
  * N.B.: Form isn't handled.
  */
 static int
-receive_data(instr, outstr)
-	FILE *instr, *outstr;
+receive_data(FILE *instr, FILE *outstr)
 {
 	int c;
 	int cnt;
@@ -1713,8 +1683,7 @@ got_oob:
 }
 
 void
-statfilecmd(filename)
-	char *filename;
+statfilecmd(char *filename)
 {
 	FILE *fin;
 	int c;
@@ -1750,7 +1719,7 @@ statfilecmd(filename)
 }
 
 void
-statcmd()
+statcmd(void)
 {
 	union sockunion *su;
 	u_char *a, *p;
@@ -1882,8 +1851,7 @@ printaddr:
 }
 
 void
-fatal(s)
-	char *s;
+fatal(char *s)
 {
 
 	reply(451, "Error in server: %s", s);
@@ -1938,16 +1906,14 @@ lreply(int n, const char *fmt, ...)
 }
 
 static void
-ack(s)
-	char *s;
+ack(char *s)
 {
 
 	reply(250, "%s command successful.", s);
 }
 
 void
-nack(s)
-	char *s;
+nack(char *s)
 {
 
 	reply(502, "%s command not implemented.", s);
@@ -1955,8 +1921,7 @@ nack(s)
 
 /* ARGSUSED */
 void
-yyerror(s)
-	char *s;
+yyerror(char *s)
 {
 	char *cp;
 
@@ -1966,8 +1931,7 @@ yyerror(s)
 }
 
 void
-delete(name)
-	char *name;
+delete(char *name)
 {
 	struct stat st;
 
@@ -1992,8 +1956,7 @@ done:
 }
 
 void
-cwd(path)
-	char *path;
+cwd(char *path)
 {
 	FILE *message;
 
@@ -2016,8 +1979,7 @@ cwd(path)
 }
 
 void
-replydirname(name, message)
-	const char *name, *message;
+replydirname(const char *name, const char *message)
 {
 	char *p, *ep;
 	char npath[MAXPATHLEN * 2];
@@ -2041,8 +2003,7 @@ replydirname(name, message)
 }
 
 void
-makedir(name)
-	char *name;
+makedir(char *name)
 {
 
 	LOGCMD("mkdir", name);
@@ -2053,8 +2014,7 @@ makedir(name)
 }
 
 void
-removedir(name)
-	char *name;
+removedir(char *name)
 {
 
 	LOGCMD("rmdir", name);
@@ -2065,7 +2025,7 @@ removedir(name)
 }
 
 void
-pwd()
+pwd(void)
 {
 	char path[MAXPATHLEN];
 
@@ -2076,8 +2036,7 @@ pwd()
 }
 
 char *
-renamefrom(name)
-	char *name;
+renamefrom(char *name)
 {
 	struct stat st;
 
@@ -2090,8 +2049,7 @@ renamefrom(name)
 }
 
 void
-renamecmd(from, to)
-	char *from, *to;
+renamecmd(char *from, char *to)
 {
 
 	LOGCMD2("rename", from, to);
@@ -2102,8 +2060,7 @@ renamecmd(from, to)
 }
 
 static void
-dolog(sa)
-	struct sockaddr *sa;
+dolog(struct sockaddr *sa)
 {
 	char hbuf[sizeof(remotehost)];
 
@@ -2125,8 +2082,7 @@ dolog(sa)
  *       use stdio (or call other functions that use stdio).
  */
 void
-dologout(status)
-	int status;
+dologout(int status)
 {
 
 	transflag = 0;
@@ -2135,22 +2091,21 @@ dologout(status)
 		sigprocmask(SIG_BLOCK, &allsigs, NULL);
 		ftpdlogwtmp(ttyline, "", "");
 		if (doutmp)
-			logout(utmp.ut_line);
+			ftpd_logout(utmp.ut_line);
 	}
 	/* beware of flushing buffers after a SIGPIPE */
 	_exit(status);
 }
 
 static void
-sigurg(signo)
-	int signo;
+sigurg(int signo)
 {
 
 	recvurg = 1;
 }
 
 static void
-myoob()
+myoob(void)
 {
 	char *cp;
 
@@ -2185,7 +2140,7 @@ myoob()
  *	with Rick Adams on 25 Jan 89.
  */
 void
-passive()
+passive(void)
 {
 	socklen_t len;
 	int on;
@@ -2326,7 +2281,7 @@ long_passive(char *cmd, int pf)
 
 		return;
 	}
- 		
+
 	if (pdata >= 0)
 		close(pdata);
 	/*
@@ -2536,9 +2491,7 @@ epsv_protounsupp(const char *message)
  * Generates failure reply on error.
  */
 static int
-guniquefd(local, nam)
-	char *local;
-	char **nam;
+guniquefd(char *local, char **nam)
 {
 	static char new[MAXPATHLEN];
 	struct stat st;
@@ -2576,9 +2529,7 @@ guniquefd(local, nam)
  * Format and send reply containing system error number.
  */
 void
-perror_reply(code, string)
-	int code;
-	char *string;
+perror_reply(int code, char *string)
 {
 
 	reply(code, "%s: %s.", string, strerror(errno));
@@ -2590,8 +2541,7 @@ static char *onefile[] = {
 };
 
 void
-send_file_list(whichf)
-	char *whichf;
+send_file_list(char *whichf)
 {
 	struct stat st;
 	DIR *dirp = NULL;
@@ -2729,8 +2679,7 @@ out:
 }
 
 static void
-reapchild(signo)
-	int signo;
+reapchild(int signo)
 {
 	int save_errno = errno;
 	int rval;
@@ -2742,10 +2691,7 @@ reapchild(signo)
 }
 
 void
-logxfer(name, size, start)
-	char *name;
-	off_t size;
-	time_t start;
+logxfer(char *name, off_t size, time_t start)
 {
 	char buf[400 + MAXHOSTNAMELEN*4 + MAXPATHLEN*4];
 	char dir[MAXPATHLEN], path[MAXPATHLEN], rpath[MAXPATHLEN];
@@ -2789,8 +2735,7 @@ logxfer(name, size, start)
 
 #if defined(TCPWRAPPERS)
 static int
-check_host(sa)
-	struct sockaddr *sa;
+check_host(struct sockaddr *sa)
 {
 	struct sockaddr_in *sin;
 	struct hostent *hp;
@@ -2824,9 +2769,7 @@ check_host(sa)
  * If 'dir' begins with a tilde (~), expand it.
  */
 char *
-copy_dir(dir, pw)
-	char *dir;
-	struct passwd *pw;
+copy_dir(char *dir, struct passwd *pw)
 {
 	char *cp;
 	char *newdir;
@@ -2864,7 +2807,7 @@ copy_dir(dir, pw)
 	} else {
 		dirsiz = strlen(cp) + strlen(pw->pw_dir) + 1;
 		if ((newdir = malloc(dirsiz)) == NULL) {
-			free(user);		
+			free(user);
 			return (NULL);
 		}
 		strlcpy(newdir, pw->pw_dir, dirsiz);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: biz22.c,v 1.8 2002/05/07 06:56:50 hugh Exp $	*/
+/*	$OpenBSD: biz22.c,v 1.11 2003/06/03 02:56:18 millert Exp $	*/
 /*	$NetBSD: biz22.c,v 1.6 1997/02/11 09:24:11 mrg Exp $	*/
 
 /*
@@ -13,11 +13,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -38,7 +34,7 @@
 #if 0
 static char sccsid[] = "@(#)biz22.c	8.1 (Berkeley) 6/6/93";
 #endif
-static const char rcsid[] = "$OpenBSD: biz22.c,v 1.8 2002/05/07 06:56:50 hugh Exp $";
+static const char rcsid[] = "$OpenBSD: biz22.c,v 1.11 2003/06/03 02:56:18 millert Exp $";
 #endif /* not lint */
 
 #include "tip.h"
@@ -74,7 +70,7 @@ biz_dialer(num, mod)
 		printf("can't initialize bizcomp...");
 		return (0);
 	}
-	(void)strcpy(cbuf, "\02.\r");
+	(void)strlcpy(cbuf, "\02.\r", sizeof cbuf);
 	cbuf[1] = *mod;
 	if (cmd(cbuf)) {
 		printf("can't set dialing mode...");
@@ -98,7 +94,7 @@ biz_dialer(num, mod)
 	if (timeout) {
 		char line[80];
 
-		(void)sprintf(line, "%ld second dial timeout",
+		(void)snprintf(line, sizeof line, "%ld second dial timeout",
 			number(value(DIALTIMEOUT)));
 		logent(value(HOST), num, "biz1022", line);
 	}
@@ -127,7 +123,7 @@ biz22f_dialer(num, acu)
 void
 biz22_disconnect()
 {
-	write(FD, DISCONNECT_CMD, 4);
+	write(FD, DISCONNECT_CMD, sizeof(DISCONNECT_CMD)-1);
 	sleep(2);
 	tcflush(FD, TCIOFLUSH);
 }

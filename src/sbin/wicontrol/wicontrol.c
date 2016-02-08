@@ -1,4 +1,4 @@
-/*	$OpenBSD: wicontrol.c,v 1.44 2002/12/12 04:21:18 deraadt Exp $	*/
+/*	$OpenBSD: wicontrol.c,v 1.47 2003/07/29 18:38:36 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998, 1999
@@ -69,7 +69,7 @@
 static const char copyright[] = "@(#) Copyright (c) 1997, 1998, 1999\
 	Bill Paul. All rights reserved.";
 static const char rcsid[] =
-	"@(#) $OpenBSD: wicontrol.c,v 1.44 2002/12/12 04:21:18 deraadt Exp $";
+	"@(#) $OpenBSD: wicontrol.c,v 1.47 2003/07/29 18:38:36 deraadt Exp $";
 #endif
 
 void wi_getval(char *, struct wi_req *);
@@ -95,6 +95,8 @@ __dead void usage(void);
 char *portid(char *);
 int  get_if_flags(int, const char *);
 int  set_if_flags(int, const char *, int);
+int	wi_hex2int(char c);
+void	wi_str2key(char *s, struct wi_key *k);
 
 const struct wi_card_ident wi_card_ident[] = {
 	WI_CARD_IDS
@@ -378,7 +380,7 @@ wi_printcardid(struct wi_req *wreq, u_int16_t chip_id)
 		    letoh16(wreq->wi_val[2]), letoh16(wreq->wi_val[3]),
 		    letoh16(wreq->wi_val[1]));
 	else
-		printf("[ %s, Firmware %d.%d variant %d ]", chip_name,
+		printf("[ %s, Firmware %d.%02d variant %d ]", chip_name,
 		    letoh16(wreq->wi_val[2]), letoh16(wreq->wi_val[3]),
 		    letoh16(wreq->wi_val[1]));
 }
@@ -659,7 +661,7 @@ wi_dumpinfo(char *iface)
 			break;
 		default:
 			break;
-		}	
+		}
 		printf("\n");
 	}
 
@@ -697,7 +699,7 @@ wi_dumpinfo(char *iface)
 				break;
 			default:
 				break;
-			}	
+			}
 			printf("\n");
 		}
 	}

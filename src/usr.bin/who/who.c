@@ -1,4 +1,4 @@
-/*	$OpenBSD: who.c,v 1.12 2002/02/16 21:27:59 millert Exp $	*/
+/*	$OpenBSD: who.c,v 1.16 2003/06/10 22:20:54 deraadt Exp $	*/
 /*	$NetBSD: who.c,v 1.4 1994/12/07 04:28:49 jtc Exp $	*/
 
 /*
@@ -16,11 +16,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -47,7 +43,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)who.c	8.1 (Berkeley) 6/6/93";
 #endif
-static char rcsid[] = "$OpenBSD: who.c,v 1.12 2002/02/16 21:27:59 millert Exp $";
+static char rcsid[] = "$OpenBSD: who.c,v 1.16 2003/06/10 22:20:54 deraadt Exp $";
 #endif /* not lint */
 
 #include <sys/types.h>
@@ -79,9 +75,7 @@ int show_quick;			/* quick, names only */
 #define HOST_WIDTH	32
 
 int
-main(argc, argv)
-	int argc;
-	char **argv;
+main(int argc, char *argv[])
 {
 	struct utmp usr;
 	FILE *ufp;
@@ -187,8 +181,7 @@ main(argc, argv)
 }
 
 void
-who_am_i(ufp)
-	FILE *ufp;
+who_am_i(FILE *ufp)
 {
 	struct utmp usr;
 	struct passwd *pw;
@@ -208,7 +201,7 @@ who_am_i(ufp)
 		/* well, at least we know what the tty is */
 		(void)strncpy(usr.ut_line, p, UT_LINESIZE);
 	} else
-		(void)strcpy(usr.ut_line, "tty??");
+		(void)strncpy(usr.ut_line, "tty??", UT_LINESIZE);
 
 	pw = getpwuid(getuid());
 	(void)strncpy(usr.ut_name, pw ? pw->pw_name : "?", UT_NAMESIZE);
@@ -218,8 +211,7 @@ who_am_i(ufp)
 }
 
 void
-output(up)
-	struct utmp *up;
+output(struct utmp *up)
 {
 	struct stat sb;
 	char line[sizeof(_PATH_DEV) + sizeof (up->ut_line)];
@@ -231,8 +223,9 @@ output(up)
 		if (now == 0)
 			time(&now);
 		
-		strcpy(line, _PATH_DEV);
-		strncat(line, up->ut_line, sizeof (up->ut_line));
+		memset(line, 0, sizeof line);
+		strlcpy(line, _PATH_DEV, sizeof line);
+		strlcat(line, up->ut_line, sizeof line);
 
 		if (stat(line, &sb) == 0) {
 			state = (sb.st_mode & 020) ? '+' : '-';
@@ -270,7 +263,7 @@ output(up)
 }
 
 void
-output_labels()
+output_labels(void)
 {
 	(void)printf("%-*.*s ", NAME_WIDTH, UT_NAMESIZE, "USER");
 
@@ -289,8 +282,7 @@ output_labels()
 }
 
 FILE *
-file(name)
-	char *name;
+file(char *name)
 {
 	FILE *ufp;
 
@@ -302,7 +294,7 @@ file(name)
 }
 
 void
-usage()
+usage(void)
 {
 	(void)fprintf(stderr, "usage: who [-mqTuH] [ file ]\n       who am i\n");
 	exit(1);

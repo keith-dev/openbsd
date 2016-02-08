@@ -1,4 +1,4 @@
-/*	$OpenBSD: rtsold.c,v 1.28 2003/03/13 22:26:52 millert Exp $	*/
+/*	$OpenBSD: rtsold.c,v 1.31 2003/07/07 00:18:30 deraadt Exp $	*/
 /*	$KAME: rtsold.c,v 1.57 2002/09/20 21:59:55 itojun Exp $	*/
 
 /*
@@ -95,6 +95,8 @@ static char *dumpfilename = "/var/run/rtsold.dump"; /* XXX: should be configurab
 #if 0
 static int ifreconfig(char *);
 #endif
+int ifconfig(char *ifname);
+void iflist_init(void);
 static int make_packet(struct ifinfo *);
 static struct timeval *rtsol_check_timer(void);
 static void TIMEVAL_ADD(struct timeval *, struct timeval *, struct timeval *);
@@ -104,9 +106,7 @@ static void rtsold_set_dump_file(int);
 static void usage(char *);
 
 int
-main(argc, argv)
-	int argc;
-	char **argv;
+main(int argc, char *argv[])
 {
 	int s, ch, once = 0;
 	struct timeval *timeout;
@@ -437,7 +437,7 @@ bad:
 }
 
 void
-iflist_init()
+iflist_init(void)
 {
 	struct ifinfo *ifi, *next;
 
@@ -528,7 +528,7 @@ make_packet(struct ifinfo *ifinfo)
 }
 
 static struct timeval *
-rtsol_check_timer()
+rtsol_check_timer(void)
 {
 	static struct timeval returnval;
 	struct timeval now, rtsol_timer;
@@ -781,11 +781,8 @@ warnmsg(int priority, const char *func, const char *msg, ...)
  * return a list of interfaces which is suitable to sending an RS.
  */
 char **
-autoifprobe()
+autoifprobe(void)
 {
-#ifndef HAVE_GETIFADDRS
-	errx(1, "-a is not available with the configuration");
-#else
 	static char **argv = NULL;
 	static int n = 0;
 	char **a;
@@ -856,5 +853,4 @@ autoifprobe()
 	}
 	freeifaddrs(ifap);
 	return argv;
-#endif
 }

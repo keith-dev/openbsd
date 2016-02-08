@@ -1,4 +1,4 @@
-/*	$OpenBSD: mknetid.c,v 1.9 2002/07/19 20:59:40 deraadt Exp $ */
+/*	$OpenBSD: mknetid.c,v 1.12 2003/07/15 06:10:46 deraadt Exp $ */
 
 /*
  * Copyright (c) 1996 Mats O Jansson <moj@stacken.kth.se>
@@ -12,11 +12,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by Mats O Jansson
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS
  * OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
@@ -32,7 +27,7 @@
  */
 
 #ifndef LINT
-static char rcsid[] = "$OpenBSD: mknetid.c,v 1.9 2002/07/19 20:59:40 deraadt Exp $";
+static const char rcsid[] = "$OpenBSD: mknetid.c,v 1.12 2003/07/15 06:10:46 deraadt Exp $";
 #endif
 
 #include <sys/param.h>
@@ -87,7 +82,7 @@ char *NetidFile = "/etc/netid";
 struct user *root = NULL, *tail = NULL;
 struct user *hroot[HASHMAX], *htail[HASHMAX];
 
-int
+static int
 read_line(FILE *fp, char *buf, int size)
 {
 	int done = 0;
@@ -119,7 +114,7 @@ read_line(FILE *fp, char *buf, int size)
 	return done;
 }
 
-int
+static int
 hashidx(char key)
 {
 	if (key < 'A')
@@ -133,7 +128,7 @@ hashidx(char key)
 	return (54);
 }
 
-void
+static void
 add_user(char *username, char *uid, char *gid)
 {
 	struct user *u;
@@ -166,7 +161,8 @@ add_user(char *username, char *uid, char *gid)
 	}
 }
 
-void add_group(char *username, char *gid)
+static void
+add_group(char *username, char *gid)
 {
 	struct user *u;
 	int idx, g;
@@ -189,7 +185,7 @@ void add_group(char *username, char *gid)
 	}
 }
 
-void
+static void
 read_passwd(FILE *pfile, char *fname)
 {
 	char  line[1024];
@@ -264,7 +260,7 @@ read_passwd(FILE *pfile, char *fname)
 	}
 }
 
-int
+static int
 isgsep(char ch)
 {
 	switch (ch)  {
@@ -278,7 +274,7 @@ isgsep(char ch)
 	}
 }
 
-void
+static void
 read_group(FILE *gfile, char *fname)
 {
 	char  line[2048];
@@ -361,7 +357,7 @@ read_group(FILE *gfile, char *fname)
 	}
 }
 
-void
+static void
 print_passwd_group(int qflag, char *domain)
 {
 	struct user *u, *p;
@@ -396,7 +392,7 @@ print_passwd_group(int qflag, char *domain)
 	}
 }
 
-void
+static void
 print_hosts(FILE *pfile, char *fname, char *domain)
 {
 	char  line[1024];
@@ -449,7 +445,7 @@ print_hosts(FILE *pfile, char *fname, char *domain)
 	}
 }
 
-void
+static void
 print_netid(FILE *mfile, char *fname)
 {
 	char  line[1024];
@@ -502,7 +498,7 @@ print_netid(FILE *mfile, char *fname)
 	}
 }
 
-void
+static void
 usage(void)
 {
 	fprintf(stderr,

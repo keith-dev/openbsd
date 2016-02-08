@@ -1,4 +1,4 @@
-/*	$OpenBSD: arp.c,v 1.26 2003/03/17 23:26:21 henric Exp $ */
+/*	$OpenBSD: arp.c,v 1.30 2003/06/27 22:11:39 deraadt Exp $ */
 /*	$NetBSD: arp.c,v 1.12 1995/04/24 13:25:18 cgd Exp $ */
 
 /*
@@ -16,11 +16,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -45,7 +41,7 @@ static char copyright[] =
 
 #ifndef lint
 /*static char sccsid[] = "from: @(#)arp.c	8.2 (Berkeley) 1/2/94";*/
-static char *rcsid = "$OpenBSD: arp.c,v 1.26 2003/03/17 23:26:21 henric Exp $";
+static char *rcsid = "$OpenBSD: arp.c,v 1.30 2003/06/27 22:11:39 deraadt Exp $";
 #endif /* not lint */
 
 /*
@@ -96,6 +92,8 @@ static int nflag;	/* no reverse dns lookups */
 static int aflag;	/* do it for all entries */
 static int s = -1;
 
+extern int h_errno;
+
 /* ROUNDUP() is nasty, but it is identical to what's in the kernel. */
 #define ROUNDUP(a)					\
 	((a) > 0 ? (1 + (((a) - 1) | (sizeof(long) - 1))) : sizeof(long))
@@ -107,9 +105,7 @@ static int s = -1;
 #define F_DELETE	4
 
 int
-main(argc, argv)
-	int argc;
-	char **argv;
+main(int argc, char *argv[])
 {
 	int ch, func, rtn;
 
@@ -187,8 +183,7 @@ main(argc, argv)
  * Process a file to set standard arp entries
  */
 int
-file(name)
-	char *name;
+file(char *name)
 {
 	char line[100], arg[5][50], *args[5];
 	int i, retval;
@@ -218,7 +213,7 @@ file(name)
 }
 
 void
-getsocket()
+getsocket(void)
 {
 	if (s >= 0)
 		return;
@@ -240,9 +235,7 @@ struct	{
  * Set an individual arp entry
  */
 int
-set(argc, argv)
-	int argc;
-	char **argv;
+set(int argc, char *argv[])
 {
 	struct sockaddr_inarp *sin;
 	struct sockaddr_dl *sdl;
@@ -342,8 +335,7 @@ overwrite:
  * Display an individual arp entry
  */
 int
-get(host)
-	const char *host;
+get(const char *host)
 {
 	struct sockaddr_inarp *sin;
 
@@ -364,9 +356,7 @@ get(host)
  * Delete an arp entry
  */
 int
-delete(host, info)
-	const char *host;
-	const char *info;
+delete(const char *host, const char *info)
 {
 	struct sockaddr_inarp *sin;
 	struct rt_msghdr *rtm;
@@ -421,11 +411,8 @@ delete:
  * Search the entire arp table, and do some action on matching entries.
  */
 void
-search(addr, action)
-	in_addr_t addr;
-	void (*action)(struct sockaddr_dl *sdl,
-		       struct sockaddr_inarp *sin,
-		       struct rt_msghdr *rtm);
+search(in_addr_t addr, void (*action)(struct sockaddr_dl *sdl,
+    struct sockaddr_inarp *sin, struct rt_msghdr *rtm))
 {
 	int mib[6];
 	size_t needed;
@@ -433,7 +420,6 @@ search(addr, action)
 	struct rt_msghdr *rtm;
 	struct sockaddr_inarp *sin;
 	struct sockaddr_dl *sdl;
-	extern int h_errno;
 
 	mib[0] = CTL_NET;
 	mib[1] = PF_ROUTE;
@@ -461,19 +447,17 @@ search(addr, action)
 		}
 		(*action)(sdl, sin, rtm);
 	}
+	free(buf);
 }
 
 /*
  * Display an arp entry
  */
 void
-print_entry(sdl, sin, rtm)
-	struct sockaddr_dl *sdl;
-	struct sockaddr_inarp *sin;
-	struct rt_msghdr *rtm;
+print_entry(struct sockaddr_dl *sdl, struct sockaddr_inarp *sin,
+    struct rt_msghdr *rtm)
 {
 	char *host;
-	extern int h_errno;
 	struct hostent *hp;
 	char ifname[IF_NAMESIZE];
 
@@ -517,10 +501,8 @@ print_entry(sdl, sin, rtm)
  * Nuke an arp entry
  */
 void
-nuke_entry(sdl, sin, rtm)
-	struct sockaddr_dl *sdl;
-	struct sockaddr_inarp *sin;
-	struct rt_msghdr *rtm;
+nuke_entry(struct sockaddr_dl *sdl, struct sockaddr_inarp *sin,
+    struct rt_msghdr *rtm)
 {
 	char ip[20];
 
@@ -538,7 +520,7 @@ ether_print(const char *scp)
 }
 
 void
-usage()
+usage(void)
 {
 	(void)fprintf(stderr, "usage: arp [-n] hostname\n");
 	(void)fprintf(stderr, "usage: arp [-n] -a\n");
@@ -551,11 +533,9 @@ usage()
 }
 
 int
-rtmsg(cmd)
-	int cmd;
+rtmsg(int cmd)
 {
 	static int seq;
-	int rlen;
 	struct rt_msghdr *rtm;
 	char *cp;
 	int l;
@@ -608,7 +588,7 @@ doit:
 	l = rtm->rtm_msglen;
 	rtm->rtm_seq = ++seq;
 	rtm->rtm_type = cmd;
-	if ((rlen = write(s, (char *)&m_rtmsg, l)) < 0) {
+	if (write(s, (char *)&m_rtmsg, l) < 0) {
 		if (errno != ESRCH || cmd != RTM_DELETE) {
 			warn("writing to routing socket");
 			return (-1);
@@ -623,9 +603,7 @@ doit:
 }
 
 int
-getinetaddr(host, inap)
-	const char *host;
-	struct in_addr *inap;
+getinetaddr(const char *host, struct in_addr *inap)
 {
 	struct hostent *hp;
 

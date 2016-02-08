@@ -1,4 +1,4 @@
-/*	$OpenBSD: fsplit.c,v 1.10 2002/02/25 00:04:09 deraadt Exp $	*/
+/*	$OpenBSD: fsplit.c,v 1.15 2003/06/26 21:42:11 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1983, 1993
@@ -15,11 +15,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -44,7 +40,7 @@ static char copyright[] =
 
 #ifndef lint
 /*static char sccsid[] = "from: @(#)fsplit.c	8.1 (Berkeley) 6/6/93";*/
-static char rcsid[] = "$OpenBSD: fsplit.c,v 1.10 2002/02/25 00:04:09 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: fsplit.c,v 1.15 2003/06/26 21:42:11 deraadt Exp $";
 #endif				/* not lint */
 
 #include <ctype.h>
@@ -57,9 +53,9 @@ static char rcsid[] = "$OpenBSD: fsplit.c,v 1.10 2002/02/25 00:04:09 deraadt Exp
 #include <sys/fcntl.h>
 #include <err.h>
 
-void badparms();
+void badparms(void);
 void get_name(char *, int);
-int lname(char *);
+int lname(char *, size_t);
 int getline(void);
 int lend(void);
 int scan_name(char *, char *);
@@ -94,7 +90,7 @@ int saveit(char *);
 char    buf[BSZ];
 FILE   *ifp;
 char    x[] = "zzz000.f", mainp[] = "main000.f", blkp[] = "blkdta000.f";
-char   *look(), *skiplab(), *functs();
+char   *look(char *, char *), *skiplab(char *), *functs(char *);
 
 #define TRUE 1
 #define FALSE 0
@@ -108,8 +104,7 @@ struct stat sbuf;
 #define trim(p)	while (*p == ' ' || *p == '\t') p++
 
 int
-main(argc, argv)
-	char  **argv;
+main(int argc, char *argv[])
 {
 	FILE *ofp;	/* output file */
 	int rv;	/* 1 if got card in output file, 0 otherwise */
@@ -183,7 +178,7 @@ main(argc, argv)
 			if (lend())	/* look for an 'end' statement */
 				break;
 			if (nflag == 0)	/* if no name yet, try and find one */
-				nflag = lname(name);
+				nflag = lname(name, sizeof name);
 		}
 		fclose(ofp);
 		if (rv == 0) {	/* no lines in file, forget the file */
@@ -222,15 +217,14 @@ main(argc, argv)
 }
 
 void
-badparms()
+badparms(void)
 {
 	fprintf(stderr, "usage:  fsplit [-e efile] ... [file]\n");
 	exit(1);
 }
 
 int
-saveit(name)
-	char   *name;
+saveit(char *name)
 {
 	int     i;
 	size_t 	n;
@@ -252,9 +246,7 @@ saveit(name)
 }
 
 void
-get_name(name, letters)
-	char   *name;
-	int     letters;
+get_name(char *name, int letters)
 {
 	char *ptr;
 
@@ -271,7 +263,7 @@ get_name(name, letters)
 }
 
 int
-getline()
+getline(void)
 {
 	int c;
 	char *ptr;
@@ -290,9 +282,10 @@ getline()
 	warnx("line truncated to %d characters", BSZ);
 	return (1);
 }
+
 /* return 1 for 'end' alone on card (up to col. 72),  0 otherwise */
 int
-lend()
+lend(void)
 {
 	char *p;
 
@@ -315,13 +308,14 @@ lend()
 		return (1);
 	return (0);
 }
-/*		check for keywords for subprograms
-		return 0 if comment card, 1 if found
-		name and put in arg string. invent name for unnamed
-		block datas and main programs.		*/
+
+/* check for keywords for subprograms
+ * return 0 if comment card, 1 if found
+ * name and put in arg string. invent name for unnamed
+ * block datas and main programs.
+ */
 int
-lname(s)
-	char   *s;
+lname(char *s, size_t len)
 {
 #define LINESIZE 80
 	char *ptr, *p;
@@ -356,34 +350,30 @@ lname(s)
 	    (ptr = functs(line)) != 0) {
 		if (scan_name(s, ptr))
 			return (1);
-		strcpy(s, x);
-	} else
-		if ((ptr = look(line, "program")) != 0) {
-			if (scan_name(s, ptr))
-				return (1);
-			get_name(mainp, 4);
-			strcpy(s, mainp);
-		} else
-			if ((ptr = look(line, "blockdata")) != 0) {
-				if (scan_name(s, ptr))
-					return (1);
-				get_name(blkp, 6);
-				strcpy(s, blkp);
-			} else
-				if ((ptr = functs(line)) != 0) {
-					if (scan_name(s, ptr))
-						return (1);
-					strcpy(s, x);
-				} else {
-					get_name(mainp, 4);
-					strcpy(s, mainp);
-				}
+		strlcpy(s, x, len);
+	} else if ((ptr = look(line, "program")) != 0) {
+		if (scan_name(s, ptr))
+			return (1);
+		get_name(mainp, 4);
+		strlcpy(s, mainp, len);
+	} else if ((ptr = look(line, "blockdata")) != 0) {
+		if (scan_name(s, ptr))
+			return (1);
+		get_name(blkp, 6);
+		strlcpy(s, blkp, len);
+	} else if ((ptr = functs(line)) != 0) {
+		if (scan_name(s, ptr))
+			return (1);
+		strlcpy(s, x, len);
+	} else {
+		get_name(mainp, 4);
+		strlcpy(s, mainp, len);
+	}
 	return (1);
 }
 
 int
-scan_name(s, ptr)
-	char   *s, *ptr;
+scan_name(char *s, char *ptr)
 {
 	char   *sptr;
 
@@ -406,8 +396,7 @@ scan_name(s, ptr)
 }
 
 char   *
-functs(p)
-	char   *p;
+functs(char *p)
 {
 	char *ptr;
 
@@ -430,12 +419,14 @@ functs(p)
 	} else
 		return (0);
 }
-/* 	if first 6 col. blank, return ptr to col. 7,
-	if blanks and then tab, return ptr after tab,
-	else return 0 (labelled statement, comment or continuation */
+
+/*
+ * if first 6 col. blank, return ptr to col. 7,
+ * if blanks and then tab, return ptr after tab,
+ * else return 0 (labelled statement, comment or continuation
+ */
 char   *
-skiplab(p)
-	char   *p;
+skiplab(char *p)
 {
 	char *ptr;
 
@@ -450,11 +441,13 @@ skiplab(p)
 	}
 	return (ptr);
 }
-/* 	return 0 if m doesn't match initial part of s;
-	otherwise return ptr to next char after m in s */
+
+/*
+ * return 0 if m doesn't match initial part of s;
+ * otherwise return ptr to next char after m in s
+ */
 char   *
-look(s, m)
-	char   *s, *m;
+look(char *s, char *m)
 {
 	char *sp, *mp;
 

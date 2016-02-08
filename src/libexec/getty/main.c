@@ -1,4 +1,4 @@
-/*	$OpenBSD: main.c,v 1.24 2002/07/03 23:39:03 deraadt Exp $	*/
+/*	$OpenBSD: main.c,v 1.28 2003/07/29 18:39:22 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 1980, 1993
@@ -12,11 +12,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -41,7 +37,7 @@ static char copyright[] =
 
 #ifndef lint
 /*static char sccsid[] = "from: @(#)main.c	8.1 (Berkeley) 6/20/93";*/
-static char rcsid[] = "$OpenBSD: main.c,v 1.24 2002/07/03 23:39:03 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: main.c,v 1.28 2003/07/29 18:39:22 deraadt Exp $";
 #endif /* not lint */
 
 #include <sys/param.h>
@@ -93,8 +89,7 @@ struct	utsname kerninfo;
 char	name[MAXLOGNAME];
 char	dev[] = _PATH_DEV;
 char	ttyn[32];
-char	*portselector();
-char	*ttyname();
+char	*portselector(void);
 
 #define	OBUFSIZ		128
 #define	TABBUFSIZ	512
@@ -150,7 +145,7 @@ interrupt(int signo)
 /*
  * Action to take when getty is running too long.
  */
-void
+static void
 timeoverrun(int signo)
 {
 	struct syslog_data sdata = SYSLOG_DATA_INIT;
@@ -199,7 +194,7 @@ main(int argc, char *argv[])
 	 * The following is a work around for vhangup interactions
 	 * which cause great problems getting window systems started.
 	 * If the tty line is "-", we do the old style getty presuming
-	 * that the file descriptors are already set up for us. 
+	 * that the file descriptors are already set up for us.
 	 * J. Gettys - MIT Project Athena.
 	 */
 	if (argc <= 2 || strcmp(argv[2], "-") == 0) {
@@ -269,8 +264,6 @@ main(int argc, char *argv[])
 			exit(1);
 		}
 		if (AB) {
-			extern char *autobaud();
-
 			tname = autobaud();
 			continue;
 		}

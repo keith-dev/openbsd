@@ -76,7 +76,7 @@
 
 #ifndef lint
 static char rcsid[] =
-    "@(#) $OpenBSD: mrinfo.c,v 1.15 2003/03/05 21:05:39 deraadt Exp $";
+    "@(#) $OpenBSD: mrinfo.c,v 1.17 2003/08/19 19:09:45 deraadt Exp $";
 /*  original rcsid:
     "@(#) Header: mrinfo.c,v 1.6 93/04/08 15:14:16 van Exp (LBL)";
 */
@@ -88,6 +88,7 @@ static char rcsid[] =
 #include "defs.h"
 #include <arpa/inet.h>
 #include <stdarg.h>
+#include <poll.h>
 #include <err.h>
 
 #define DEFAULT_TIMEOUT	4	/* How long to wait before retrying requests */
@@ -205,7 +206,8 @@ accept_neighbors(u_int32_t src, u_int32_t dst, u_char *p, int datalen,
 		thresh = *p++;
 		ncount = *p++;
 		while (--ncount >= 0) {
-			register u_int32_t neighbor;
+			u_int32_t neighbor;
+
 			GET_ADDR(neighbor);
 			neighbor = htonl(neighbor);
 			printf("  %s -> ", inet_fmt(laddr, s1));
@@ -418,12 +420,10 @@ main(int argc, char *argv[])
 			socklen_t dummy = 0;
 			struct igmp *igmp;
 			struct ip *ip;
-			fd_set  fds;
+			struct pollfd pfd[1];
 
-			FD_ZERO(&fds);
-			if (igmp_socket >= FD_SETSIZE)
-				log(LOG_ERR, 0, "descriptor too big");
-			FD_SET(igmp_socket, &fds);
+			pfd[0].fd = igmp_socket;
+			pfd[0].events = POLLIN;
 
 			gettimeofday(&now, 0);
 			tv.tv_sec = et.tv_sec - now.tv_sec;
@@ -436,7 +436,7 @@ main(int argc, char *argv[])
 			if (tv.tv_sec < 0)
 				tv.tv_sec = tv.tv_usec = 0;
 
-			count = select(igmp_socket + 1, &fds, 0, 0, &tv);
+			count = poll(pfd, 1, tv.tv_sec * 1000);
 
 			if (count < 0) {
 				if (errno != EINTR)

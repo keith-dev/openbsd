@@ -1,4 +1,4 @@
-/*	$OpenBSD: extern.h,v 1.6 2003/01/08 06:54:16 deraadt Exp $	*/
+/*	$OpenBSD: extern.h,v 1.14 2003/06/25 21:12:39 deraadt Exp $	*/
 /*	$NetBSD: extern.h,v 1.8 1996/10/31 23:50:54 christos Exp $	*/
 
 /*-
@@ -13,11 +13,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -134,7 +130,6 @@ void	dologin(Char **, struct command *);
 void	dologout(Char **, struct command *);
 void	donohup(Char **, struct command *);
 void	doonintr(Char **, struct command *);
-void	doprintf(Char **, struct command *);
 void	dorepeat(Char **, struct command *);
 void	dosetenv(Char **, struct command *);
 void	dosuspend(Char **, struct command *);
@@ -163,7 +158,7 @@ Char	 *globone(Char *, int);
 int	  Gmatch(Char *, Char *);
 void	  ginit(void);
 Char	**globall(Char **);
-void	  rscan(Char **, void (*)());
+void	  rscan(Char **, void (*)(int));
 void	  tglob(Char **);
 void	  trim(Char **);
 #ifdef FILEC
@@ -223,9 +218,6 @@ char	 *strspl(char *, char *);
 void	  udvar(Char *);
 
 #ifndef	SHORT_STRINGS
-# ifdef NOTUSED
-char	 *strstr(const char *, const char *);
-# endif /* NOTUSED */
 char	 *strend(char *);
 #endif
 
@@ -236,7 +228,6 @@ void	alias(struct wordent *);
 void	freesyn(struct command *);
 struct command *
 	syntax(struct wordent *, struct wordent *, int);
-
 
 /*
  * proc.c
@@ -316,14 +307,10 @@ void	showall(Char **, struct command *);
  * str.c:
  */
 #ifdef SHORT_STRINGS
+size_t	  s_strlcpy(Char *, const Char *, size_t);
+size_t	  s_strlcat(Char *, const Char *, size_t);
 Char	 *s_strchr(Char *, int);
 Char	 *s_strrchr(Char *, int);
-Char	 *s_strcat(Char *, Char *);
-#ifdef NOTUSED
-Char	 *s_strncat(Char *, Char *, size_t);
-#endif
-Char	 *s_strcpy(Char *, Char *);
-Char	 *s_strncpy(Char *, Char *, size_t);
 Char	 *s_strspl(Char *, Char *);
 size_t	  s_strlen(Char *);
 int	  s_strcmp(Char *, Char *);
@@ -335,6 +322,6 @@ Char	 *str2short(char *);
 Char	**blk2short(char **);
 char	 *short2str(Char *);
 char	**short2blk(Char **);
-#endif
+#endif /* SHORT_STRINGS */
 char	 *short2qstr(Char *);
 char	 *vis_str(Char *);

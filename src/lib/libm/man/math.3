@@ -1,4 +1,4 @@
-.\"	$OpenBSD: math.3,v 1.13 2003/03/01 21:10:53 millert Exp $
+.\"	$OpenBSD: math.3,v 1.18 2003/06/02 20:18:41 millert Exp $
 .\" Copyright (c) 1985 Regents of the University of California.
 .\" All rights reserved.
 .\"
@@ -10,11 +10,7 @@
 .\" 2. Redistributions in binary form must reproduce the above copyright
 .\"    notice, this list of conditions and the following disclaimer in the
 .\"    documentation and/or other materials provided with the distribution.
-.\" 3. All advertising materials mentioning features or use of this software
-.\"    must display the following acknowledgement:
-.\"	This product includes software developed by the University of
-.\"	California, Berkeley and its contributors.
-.\" 4. Neither the name of the University nor the names of its contributors
+.\" 3. Neither the name of the University nor the names of its contributors
 .\"    may be used to endorse or promote products derived from this software
 .\"    without specific prior written permission.
 .\"
@@ -75,9 +71,9 @@ Declarations for these functions may be obtained from the include file
 .It ilogb Ta ieee(3) Ta "exponent extraction" Ta 0
 .It isinf Ta isinf(3) Ta "check exceptions"
 .It isnan Ta isnan(3) Ta "check exceptions"
-.It j0 Ta j0(3) Ta "bessel function" Ta ???
-.It j1 Ta j0(3) Ta "bessel function" Ta ???
-.It jn Ta j0(3) Ta "bessel function" Ta ???
+.It j0 Ta j0(3) Ta "Bessel function" Ta ???
+.It j1 Ta j0(3) Ta "Bessel function" Ta ???
+.It jn Ta j0(3) Ta "Bessel function" Ta ???
 .It lgamma Ta lgamma(3) Ta "log gamma function" Ta ???
 .It log Ta exp(3) Ta "natural logarithm" Ta 1
 .It log10 Ta exp(3) Ta "logarithm to base 10" Ta 3
@@ -91,9 +87,9 @@ Declarations for these functions may be obtained from the include file
 .It sqrt Ta sqrt(3) Ta "square root" Ta 1
 .It tan Ta tan(3) Ta "trigonometric function" Ta 3
 .It tanh Ta tanh(3) Ta "hyperbolic function" Ta 3
-.It y0 Ta j0(3) Ta "bessel function" Ta ???
-.It y1 Ta j0(3) Ta "bessel function" Ta ???
-.It yn Ta j0(3) Ta "bessel function" Ta ???
+.It y0 Ta j0(3) Ta "Bessel function" Ta ???
+.It y1 Ta j0(3) Ta "Bessel function" Ta ???
+.It yn Ta j0(3) Ta "Bessel function" Ta ???
 .El
 .Sh NOTES
 In
@@ -150,17 +146,16 @@ double-precision format.
 The earlier
 .Tn DEC MicroVAXs
 have no D format, only G double-precision.
-(Why?  Why not?)
+(Why? Why not?)
 .Pp
 Properties of D_floating-point:
-.Bl -tag -width "Precision:"  -offset indent -compact
+.Bl -tag -width "Precision:" -offset indent -compact
 .It Wordsize:
 64 bits, 8 bytes.
 .It Radix:
 Binary.
 .It Precision:
 56 \*(Si bits, roughly 17 \*(Si decimal digits.
-.Bd -offset indent
 If x and x' are consecutive positive D_floating-point
 numbers (they differ by 1 \fIulp\fR), then
 .Li 1.3e-17 < 0.5**56 < (x'-x)/x \*(Le 0.5**55 < 2.8e-17.
@@ -169,7 +164,7 @@ Overflow threshold = 2.0**127 = 1.7e38.
 .br
 Underflow threshold = 0.5**128 = 2.9e-39.
 .br
-NOTE:  THIS RANGE IS COMPARATIVELY NARROW.
+NOTE: THIS RANGE IS COMPARATIVELY NARROW.
 .br
 Overflow customarily stops computation.
 .br
@@ -187,7 +182,7 @@ the hardware, only the obvious representation is ever produced.
 There is no -0 on a VAX.
 .It \*(If is not part of the VAX architecture.
 .It Reserved operands:
-of the 2**55 that the hardware
+Of the 2**55 that the hardware
 recognizes, only one of them is ever produced.
 Any floating-point operation upon a reserved
 operand, even a MOVF or MOVD, customarily stops
@@ -198,7 +193,7 @@ overflow are invalid operations that customarily
 stop computation or, in earlier machines, produce
 reserved operands that will stop computation.
 .It Rounding:
-Every rational operation  (+, -, \(**, /) on a
+Every rational operation (+, -, \(**, /) on a
 VAX (but not necessarily on a PDP-11), if not an
 over/underflow nor division by zero, is rounded to
 within half a \fIulp\fR, and when the rounding error is
@@ -272,7 +267,7 @@ This is the most widely adopted standard for computer arithmetic.
 VLSI chips that conform to some version of that standard have been
 produced by a host of manufacturers, among them:
 .Bl -column -offset indent -compact "Intel i8070, i80287" "Western Electric (AT&T) WE32106"
-.It "Intel i8087, i80287" Ta "National Semiconductor  32081"
+.It "Intel i8087, i80287" Ta "National Semiconductor 32081"
 .It "Motorola 68881" Ta "Weitek WTL-1032, ... , -1165"
 .It "Zilog Z8070" Ta "Western Electric (AT&T) WE32106"
 .El
@@ -364,7 +359,8 @@ rounding to the nearest integer multiple of 0.5**1074 = 4.9e-324.
 Its sign transforms correctly through multiplication or
 division, and is preserved by addition of zeros
 with like signs; but x-x yields +0 for every
-finite x.  The only operations that reveal zero's
+finite x.
+The only operations that reveal zero's
 sign are division by zero and copysign(x,\*(Pm0).
 In particular, comparison (x > y, x \*(Ge y, etc.)
 cannot be affected by the sign of zero; but if
@@ -432,10 +428,12 @@ listed below in declining order of probable importance.
 .It "Underflow" Ta "Gradual Underflow"
 .It "Inexact" Ta "Rounded value"
 .El
-NOTE:  An Exception is not an Error unless handled
-badly.  What makes a class of exceptions exceptional
+NOTE: An Exception is not an Error unless handled
+badly.
+What makes a class of exceptions exceptional
 is that no single default response can be satisfactory
-in every instance.  On the other hand, if a default
+in every instance.
+On the other hand, if a default
 response will serve most instances satisfactorily,
 the unsatisfactory instances cannot justify aborting
 computation every time the exception occurs.
@@ -462,12 +460,13 @@ since the program last reset its flag.
 .It 3)
 Test a result to see whether it is a value that only
 an exception could have produced.
-.Bd -filled 
+.Bd -filled
 CAUTION: The only reliable ways to discover
 whether Underflow has occurred are to test whether
 products or quotients lie closer to zero than the
 underflow threshold, or to test the Underflow
-flag.  (Sums and differences cannot underflow in
+flag.
+(Sums and differences cannot underflow in
 .St -ieee754 ;
 if x \*(Ne y then x-y is correct to
 full precision and certainly nonzero regardless of
@@ -582,19 +581,115 @@ the exact result would be nonzero but tinier than the underflow threshold.
 .It Inexact is signaled only when
 greater range or precision would be needed to represent the exact result.
 .El
-.Sh BUGS
-When signals are appropriate, they are emitted by certain
-operations within
-.Em libm ,
-so a subroutine-trace may be needed to identify the function with its
-signal in case method 5) above is in use.
-All the code in
-.Em libm
-takes the
+.Pp
+Properties of
 .St -ieee754
-defaults for granted; this means that a decision to
-trap all divisions by zero could disrupt a function that would
-otherwise get a correct result despite division by zero.
+Single-Precision:
+.Bl -tag -width "Precision:" -offset indent -compact
+.It Wordsize:
+32 bits, 4 bytes.
+.It Radix:
+Binary.
+.It Precision:
+24 \*(Si bits, roughly equivalent to 7 \*(Si decimals.
+.br
+If x and x' are consecutive positive Double-Precision
+numbers (they differ by 1 \fIulp\fR, then
+.br
+.Li 6.0e-8 < 0.5**24 < (x'-x)/x \*(Le 0.5**23 < 1.2e-7.
+.It Range:
+Overflow threshold = 2.0**128 = 3.4e38.
+.br
+Underflow threshold = 0.5**126 = 1.2e-38
+.br
+Overflow goes by default to a signed \*(If.
+.br
+Underflow is
+.Em Gradual ,
+rounding to the nearest integer multiple of 0.5**149 = 1.4e-45.
+.It Zero is represented ambiguously as +0 or -0.
+Its sign transforms correctly through multiplication or
+division, and is preserved by addition of zeros
+with like signs; but x-x yields +0 for every
+finite x.
+The only operations that reveal zero's
+sign are division by zero and copysign(x,\*(Pm0).
+In particular, comparison (x > y, x \*(Ge y, etc.)
+cannot be affected by the sign of zero; but if
+finite x = y then \*(If \&= 1/(x-y) \*(Ne -1/(y-x) = -\*(If.
+.It \*(If is signed.
+It persists when added to itself or to any finite number.
+Its sign transforms correctly through multiplication and division, and
+(finite)/\*(Pm\*(If \0=\0\*(Pm0 (nonzero)/0 = \*(Pm\*(If.
+But \*(If-\*(If, \*(If\(**0 and \*(If/\*(If are, like 0/0 and sqrt(-3),
+invalid operations that produce \*(Na.
+.It Reserved operands:
+There are 2**24-2 of them, all
+called \*(Na (\fIN\fRot \fIa N\fRumber).
+Some, called Signaling \*(Nas, trap any floating-point operation
+performed upon them; they are used to mark missing or uninitialized values,
+or nonexistent elements of arrays.
+The rest are Quiet \*(Nas; they are the default results of Invalid Operations,
+and propagate through subsequent arithmetic operations.
+If x \*(Ne x then x is \*(Na; every other predicate
+(x > y, x = y, x < y, ...) is FALSE if \*(Na is involved.
+.br
+.Bl -tag -width "NOTE:" -compact
+.It NOTE:
+Trichotomy is violated by \*(Na.
+Besides being FALSE, predicates that entail ordered
+comparison, rather than mere (in)equality,
+signal Invalid Operation when \*(Na is involved.
+.El
+.It Rounding:
+Every algebraic operation (+, -, \(**, /,
+.if n \
+sqrt)
+.if t \
+\(sr)
+is rounded by default to within half a \fIulp\fR, and
+when the rounding error is exactly half a \fIulp\fR then
+the rounded value's least \*(Si bit is zero.
+This kind of rounding is usually the best kind,
+sometimes provably so.
+For instance, for every
+x = 1.0, 2.0, 3.0, 4.0, ..., 2.0**52, we find
+(x/3.0)\(**3.0 == x and (x/10.0)\(**10.0 == x and ...
+despite that both the quotients and the products
+have been rounded.
+Only rounding like
+.St -ieee754
+can do that.
+But no single kind of rounding can be
+proved best for every circumstance, so
+.St -ieee754
+provides rounding towards zero or towards +\*(If or
+towards -\*(If at the programmer's discretion.
+The same kinds of rounding are specified for
+Binary-Decimal Conversions, at least for magnitudes
+between roughly 1.0e-10 and 1.0e37.
+.It Exceptions:
+.St -ieee754
+recognizes five kinds of floating-point exceptions,
+listed below in declining order of probable importance.
+.Bl -column -offset indent -compact "Invalid Operation" "Gradual Underflow"
+.It Em Exception Ta Em Default Result
+.It "Invalid Operation" Ta "\*(Na, or FALSE"
+.It "Overflow" Ta "\*(Pm\*(If"
+.It "Divide by Zero" Ta "\*(Pm\*(If"
+.It "Underflow" Ta "Gradual Underflow"
+.It "Inexact" Ta "Rounded value"
+.El
+NOTE: An Exception is not an Error unless handled
+badly.
+What makes a class of exceptions exceptional
+is that no single default response can be satisfactory
+in every instance.
+On the other hand, if a default
+response will serve most instances satisfactorily,
+the unsatisfactory instances cannot justify aborting
+computation every time the exception occurs.
+.El
 .Sh SEE ALSO
 An explanation of
 .St -ieee754
@@ -614,3 +709,16 @@ magazine COMPUTER vol. 14 no. 3 (Mar. 1981), and in the
 .Tn ACM SIGNUM
 Newsletter Special Issue of Oct. 1979, may be helpful although they pertain to
 superseded drafts of the standard.
+.Sh BUGS
+When signals are appropriate, they are emitted by certain
+operations within
+.Em libm ,
+so a subroutine-trace may be needed to identify the function with its
+signal in case method 5) above is in use.
+All the code in
+.Em libm
+takes the
+.St -ieee754
+defaults for granted; this means that a decision to
+trap all divisions by zero could disrupt a function that would
+otherwise get a correct result despite division by zero.

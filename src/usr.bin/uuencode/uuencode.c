@@ -1,4 +1,4 @@
-/*	$OpenBSD: uuencode.c,v 1.4 2001/11/19 19:02:17 mpech Exp $	*/
+/*	$OpenBSD: uuencode.c,v 1.6 2003/06/10 22:20:53 deraadt Exp $	*/
 /*	$NetBSD: uuencode.c,v 1.7 1994/11/17 07:41:15 jtc Exp $	*/
 
 /*-
@@ -13,11 +13,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -42,7 +38,7 @@ char copyright[] =
 #if 0
 static char sccsid[] = "@(#)uuencode.c	8.2 (Berkeley) 4/2/94";
 #endif
-static char rcsid[] = "$OpenBSD: uuencode.c,v 1.4 2001/11/19 19:02:17 mpech Exp $";
+static char rcsid[] = "$OpenBSD: uuencode.c,v 1.6 2003/06/10 22:20:53 deraadt Exp $";
 #endif /* not lint */
 
 /*
@@ -59,13 +55,11 @@ static char rcsid[] = "$OpenBSD: uuencode.c,v 1.4 2001/11/19 19:02:17 mpech Exp 
 #include <sys/stat.h>
 #include <unistd.h>
 
-static void encode();
-static __dead void usage();
+static void encode(void);
+static __dead void usage(void);
 
 int
-main(argc, argv)
-	int argc;
-	char *argv[];
+main(int argc, char *argv[])
 {
 	struct stat sb;
 	int mode;
@@ -114,7 +108,7 @@ main(argc, argv)
  * copy from in to out, encoding as you go along.
  */
 static void
-encode()
+encode(void)
 {
 	int ch, n;
 	char *p;
@@ -155,7 +149,7 @@ encode()
 }
 
 static void
-usage()
+usage(void)
 {
 	(void)fprintf(stderr,"usage: uuencode [infile] remotefile\n");
 	exit(1);

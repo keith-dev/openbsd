@@ -1,4 +1,4 @@
-/*	$OpenBSD: rpc.yppasswdd.c,v 1.12 2002/06/20 03:43:41 deraadt Exp $	*/
+/*	$OpenBSD: rpc.yppasswdd.c,v 1.16 2003/07/06 21:57:27 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1994 Mats O Jansson <moj@stacken.kth.se>
@@ -12,11 +12,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by Mats O Jansson
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS
  * OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
@@ -32,7 +27,7 @@
  */
 
 #ifndef LINT
-static char rcsid[] = "$OpenBSD: rpc.yppasswdd.c,v 1.12 2002/06/20 03:43:41 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: rpc.yppasswdd.c,v 1.16 2003/07/06 21:57:27 deraadt Exp $";
 #endif
 
 #include <sys/types.h>
@@ -53,8 +48,8 @@ static char rcsid[] = "$OpenBSD: rpc.yppasswdd.c,v 1.12 2002/06/20 03:43:41 dera
 
 #include "yppasswd.h"
 
-static void yppasswddprog_1();
-void    sig_child();
+static void yppasswddprog_1(struct svc_req *, SVCXPRT *);
+void    sig_child(int);
 
 int     noshell, nogecos, nopw, domake;
 char    make_arg[1024] = "make";
@@ -62,7 +57,7 @@ char   *progname = "yppasswdd";
 char   *tempname;
 char   *dir;
 
-void
+static void
 usage(void)
 {
 	fprintf(stderr,
@@ -148,10 +143,11 @@ yppasswddprog_1(struct svc_req *rqstp, SVCXPRT *transp)
 {
 	union {
 		yppasswd yppasswdproc_update_1_arg;
-	}       argument;
+	} argument;
 	char   *result;
-	bool_t(*xdr_argument) (), (*xdr_result) ();
-	char   *(*local) ();
+	bool_t (*xdr_argument)(XDR *, yppasswd *);
+	bool_t (*xdr_result)(XDR *, int *);
+	char   *(*local)(yppasswd *, struct svc_req *, SVCXPRT *);
 
 	switch (rqstp->rq_proc) {
 	case NULLPROC:
@@ -160,7 +156,8 @@ yppasswddprog_1(struct svc_req *rqstp, SVCXPRT *transp)
 	case YPPASSWDPROC_UPDATE:
 		xdr_argument = xdr_yppasswd;
 		xdr_result = xdr_int;
-		local = (char *(*) ()) yppasswdproc_update_1_svc;
+		local = (char *(*)(yppasswd *, struct svc_req *,
+		    SVCXPRT *)) yppasswdproc_update_1_svc;
 		break;
 	default:
 		svcerr_noproc(transp);
@@ -171,11 +168,12 @@ yppasswddprog_1(struct svc_req *rqstp, SVCXPRT *transp)
 		svcerr_decode(transp);
 		return;
 	}
-	result = (*local) (&argument, rqstp, transp);
+	result = (*local) (&argument.yppasswdproc_update_1_arg,
+	    rqstp, transp);
 }
 
 void
-sig_child(void)
+sig_child(int signo)
 {
 	int save_errno = errno;
 

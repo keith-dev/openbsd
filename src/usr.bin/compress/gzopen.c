@@ -1,4 +1,4 @@
-/*	$OpenBSD: gzopen.c,v 1.5 2002/12/08 16:07:54 mickey Exp $	*/
+/*	$OpenBSD: gzopen.c,v 1.14 2003/07/17 20:17:02 mickey Exp $	*/
 
 /*
  * Copyright (c) 1997 Michael Shalayeff
@@ -12,11 +12,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by Michael Shalayeff.
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
@@ -64,12 +59,14 @@
 */
 
 const char gz_rcsid[] =
-    "$OpenBSD: gzopen.c,v 1.5 2002/12/08 16:07:54 mickey Exp $";
+    "$OpenBSD: gzopen.c,v 1.14 2003/07/17 20:17:02 mickey Exp $";
 
-#include <sys/types.h>
+#include <sys/param.h>
 #include <sys/stat.h>
+#include <sys/uio.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <errno.h>
 #include <unistd.h>
 #include <zlib.h>
@@ -92,6 +89,8 @@ struct gz_stream {
 	z_stream z_stream;	/* libz stream */
 	int	z_eof;		/* set if end of input file */
 	u_char	z_buf[Z_BUFSIZE]; /* i/o buffer */
+	u_int32_t z_time;	/* timestamp (mtime) */
+	u_int32_t z_hlen;	/* length of the gz header */
 	u_int32_t z_crc;	/* crc32 of uncompressed data */
 	char	z_mode;		/* 'w' or 'r' */
 
@@ -101,32 +100,13 @@ static const u_char gz_magic[2] = {0x1f, 0x8b}; /* gzip magic header */
 
 static int put_int32(gz_stream *, u_int32_t);
 static u_int32_t get_int32(gz_stream *);
-static int get_header(gz_stream *);
+static int get_header(gz_stream *, char *, int);
+static int put_header(gz_stream *, char *, u_int32_t);
 static int get_byte(gz_stream *);
 
-int
-gz_check_header(fd, sb, ofn)
-	int fd;
-	struct stat *sb;
-	const char *ofn;
-{
-	int f;
-	u_char buf[sizeof(gz_magic)];
-	off_t off = lseek(fd, 0, SEEK_CUR);
-
-	f = (read(fd, buf, sizeof(buf)) == sizeof(buf) &&
-	     !memcmp(buf, gz_magic, sizeof(buf)));
-
-	lseek (fd, off, SEEK_SET);
-
-	return f;
-}
-
 void *
-gz_open (fd, mode, bits)
-	int fd;
-	const char *mode;
-	int  bits;
+gz_open(int fd, const char *mode, char *name, int bits,
+    u_int32_t mtime, int gotmagic)
 {
 	gz_stream *s;
 
@@ -149,6 +129,8 @@ gz_open (fd, mode, bits)
 	s->z_stream.avail_in = s->z_stream.avail_out = 0;
 	s->z_fd = 0;
 	s->z_eof = 0;
+	s->z_time = 0;
+	s->z_hlen = 0;
 	s->z_crc = crc32(0L, Z_NULL, 0);
 	s->z_mode = mode[0];
 
@@ -173,22 +155,15 @@ gz_open (fd, mode, bits)
 	s->z_fd = fd;
 
 	if (s->z_mode == 'w') {
-		u_char buf[10];
-		/* Write a very simple .gz header: */
-		buf[0] = gz_magic[0];
-		buf[1] = gz_magic[1];
-		buf[2] = Z_DEFLATED;
-		buf[3] = 0 /*flags*/;
-		buf[4] = buf[5] = buf[6] = buf[7] = 0 /*time*/;
-		buf[8] = 0 /*xflags*/;
-		buf[9] = OS_CODE;
-		if (write(fd, buf, sizeof(buf)) != sizeof(buf)) {
-			gz_close(s);
+		/* write the .gz header */
+		if (put_header(s, name, mtime) != 0) {
+			gz_close(s, NULL);
 			s = NULL;
 		}
 	} else {
-		if (get_header(s) != 0) { /* skip the .gz header */
-			gz_close (s);
+		/* read the .gz header */
+		if (get_header(s, name, gotmagic) != 0) {
+			gz_close(s, NULL);
 			s = NULL;
 		}
 	}
@@ -197,8 +172,7 @@ gz_open (fd, mode, bits)
 }
 
 int
-gz_close (cookie)
-	void *cookie;
+gz_close(void *cookie, struct z_info *info)
 {
 	gz_stream *s = (gz_stream*)cookie;
 	int err = 0;
@@ -207,8 +181,11 @@ gz_close (cookie)
 		return -1;
 
 	if (s->z_mode == 'w' && (err = gz_flush (s, Z_FINISH)) == Z_OK) {
-		if ((err = put_int32 (s, s->z_crc)) == Z_OK)
-			err = put_int32 (s, s->z_stream.total_in);
+		if ((err = put_int32 (s, s->z_crc)) == Z_OK) {
+			s->z_hlen += sizeof(int32_t);
+			if ((err = put_int32 (s, s->z_stream.total_in)) == Z_OK)
+				s->z_hlen += sizeof(int32_t);
+		}
 	}
 
 	if (!err && s->z_stream.state != NULL) {
@@ -218,15 +195,26 @@ gz_close (cookie)
 			err = inflateEnd(&s->z_stream);
 	}
 
+	if (info != NULL) {
+		info->mtime = s->z_time;
+		info->crc = s->z_crc;
+		info->hlen = s->z_hlen;
+		info->total_in = (off_t)s->z_stream.total_in;
+		info->total_out = (off_t)s->z_stream.total_out;
+	}
+
+	if (!err)
+		err = close(s->z_fd);
+	else
+		(void)close(s->z_fd);
+
 	free(s);
 
 	return err;
 }
 
 int
-gz_flush (cookie, flush)
-    void *cookie;
-    int flush;
+gz_flush(void *cookie, int flush)
 {
 	gz_stream *s = (gz_stream*)cookie;
 	size_t len;
@@ -264,27 +252,17 @@ gz_flush (cookie, flush)
 }
 
 static int
-put_int32 (s, x)
-	gz_stream *s;
-	u_int32_t x;
+put_int32(gz_stream *s, u_int32_t x)
 {
-	if (write(s->z_fd, &x, 1) != 1)
-		return Z_ERRNO;
-	x >>= 8;
-	if (write(s->z_fd, &x, 1) != 1)
-		return Z_ERRNO;
-	x >>= 8;
-	if (write(s->z_fd, &x, 1) != 1)
-		return Z_ERRNO;
-	x >>= 8;
-	if (write(s->z_fd, &x, 1) != 1)
+	u_int32_t y = htole32(x);
+
+	if (write(s->z_fd, &y, sizeof(y)) != sizeof(y))
 		return Z_ERRNO;
 	return 0;
 }
 
 static int
-get_byte(s)
-	gz_stream *s;
+get_byte(gz_stream *s)
 {
 	if (s->z_eof)
 		return EOF;
@@ -303,8 +281,7 @@ get_byte(s)
 }
 
 static u_int32_t
-get_int32 (s)
-	gz_stream *s;
+get_int32(gz_stream *s)
 {
 	u_int32_t x;
 
@@ -316,20 +293,22 @@ get_int32 (s)
 }
 
 static int
-get_header(s)
-	gz_stream *s;
+get_header(gz_stream *s, char *name, int gotmagic)
 {
 	int method; /* method byte */
 	int flags;  /* flags byte */
+	char *ep;
 	uInt len;
 	int c;
 
 	/* Check the gzip magic header */
-	for (len = 0; len < 2; len++) {
-		c = get_byte(s);
-		if (c != gz_magic[len]) {
-			errno = EFTYPE;
-			return -1;
+	if (!gotmagic) {
+		for (len = 0; len < 2; len++) {
+			c = get_byte(s);
+			if (c != gz_magic[len]) {
+				errno = EFTYPE;
+				return -1;
+			}
 		}
 	}
 
@@ -340,28 +319,49 @@ get_header(s)
 		return -1;
 	}
 
-	/* Discard time, xflags and OS code: */
-	for (len = 0; len < 6; len++)
-		(void)get_byte(s);
+	/* Stash timestamp (mtime) */
+	s->z_time = get_int32(s);
 
+	/* Discard xflags and OS code */
+	(void)get_byte(s);
+	(void)get_byte(s);
+
+	s->z_hlen = 10; /* magic, method, flags, time, xflags, OS code */
 	if ((flags & EXTRA_FIELD) != 0) { /* skip the extra field */
 		len  =  (uInt)get_byte(s);
 		len += ((uInt)get_byte(s))<<8;
+		s->z_hlen += 2;
 		/* len is garbage if EOF but the loop below will quit anyway */
 		while (len-- != 0 && get_byte(s) != EOF)
-			;
+			s->z_hlen++;
 	}
 
-	if ((flags & ORIG_NAME) != 0) { /* skip the original file name */
-		while ((c = get_byte(s)) != 0 && c != EOF) ;
+	if ((flags & ORIG_NAME) != 0) { /* read/save the original file name */
+		if ((ep = name) != NULL)
+			ep += MAXPATHLEN - 1;
+		while ((c = get_byte(s)) != EOF) {
+			s->z_hlen++;
+			if (c == '\0')
+				break;
+			if (name < ep)
+				*name++ = c;
+		}
+		if (name != NULL)
+			*name = '\0';
 	}
 
 	if ((flags & COMMENT) != 0) {   /* skip the .gz file comment */
-		while ((c = get_byte(s)) != 0 && c != EOF) ;
+		while ((c = get_byte(s)) != EOF) {
+			s->z_hlen++;
+			if (c == '\0')
+				break;
+		}
 	}
 
 	if ((flags & HEAD_CRC) != 0) {  /* skip the header crc */
-		for (len = 0; len < 2; len++) (void)get_byte(s);
+		(void)get_byte(s);
+		(void)get_byte(s);
+		s->z_hlen += 2;
 	}
 
 	if (s->z_eof) {
@@ -372,11 +372,38 @@ get_header(s)
 	return 0;
 }
 
+static int
+put_header(gz_stream *s, char *name, u_int32_t mtime)
+{
+	struct iovec iov[2];
+	u_char buf[10];
+
+	buf[0] = gz_magic[0];
+	buf[1] = gz_magic[1];
+	buf[2] = Z_DEFLATED;
+	buf[3] = name ? ORIG_NAME : 0;
+	buf[4] = mtime & 0xff;
+	buf[5] = (mtime >> 8) & 0xff;
+	buf[6] = (mtime >> 16) & 0xff;
+	buf[7] = (mtime >> 24) & 0xff;
+	buf[8] = 0 /* xflags */;
+	buf[9] = OS_CODE;
+	iov[0].iov_base = buf;
+	iov[0].iov_len = sizeof(buf);
+	s->z_hlen = sizeof(buf);
+
+	if (name != NULL) {
+		iov[1].iov_base = name;
+		iov[1].iov_len = strlen(name) + 1;
+		s->z_hlen += iov[1].iov_len;
+	}
+	if (writev(s->z_fd, iov, name ? 2 : 1) == -1)
+		return (-1);
+	return (0);
+}
+
 int
-gz_read(cookie, buf, len)
-	void *cookie;
-	char *buf;
-	int len;
+gz_read(void *cookie, char *buf, int len)
 {
 	gz_stream *s = (gz_stream*)cookie;
 	u_char *start = buf; /* starting point for crc computation */
@@ -390,7 +417,7 @@ gz_read(cookie, buf, len)
 
 			errno = 0;
 			if ((s->z_stream.avail_in =
-			     read(s->z_fd, s->z_buf, Z_BUFSIZE)) == 0)
+			    read(s->z_fd, s->z_buf, Z_BUFSIZE)) == 0)
 				s->z_eof = 1;
 			s->z_stream.next_in = s->z_buf;
 		}
@@ -398,29 +425,30 @@ gz_read(cookie, buf, len)
 		if (inflate(&(s->z_stream), Z_NO_FLUSH) == Z_STREAM_END) {
 			/* Check CRC and original size */
 			s->z_crc = crc32(s->z_crc, start,
-				       (uInt)(s->z_stream.next_out - start));
+			    (uInt)(s->z_stream.next_out - start));
 			start = s->z_stream.next_out;
 
-			if (get_int32(s) != s->z_crc ||
-			    get_int32(s) != s->z_stream.total_out) {
-			        errno = EIO;
+			if (get_int32(s) != s->z_crc) {
+				errno = EINVAL;
 				return -1;
 			}
+			if (get_int32(s) != s->z_stream.total_out) {
+				errno = EIO;
+				return -1;
+			}
+			s->z_hlen += 2 * sizeof(int32_t);
 			s->z_eof = 1;
 			break;
 		}
 	}
 	s->z_crc = crc32(s->z_crc, start,
-			 (uInt)(s->z_stream.next_out - start));
+	    (uInt)(s->z_stream.next_out - start));
 
 	return (int)(len - s->z_stream.avail_out);
 }
 
 int
-gz_write(cookie, buf, len)
-	void *cookie;
-	const char *buf;
-	int len;
+gz_write(void *cookie, const char *buf, int len)
 {
 	gz_stream *s = (gz_stream*)cookie;
 
@@ -428,9 +456,7 @@ gz_write(cookie, buf, len)
 	s->z_stream.avail_in = len;
 
 	while (s->z_stream.avail_in != 0) {
-
 		if (s->z_stream.avail_out == 0) {
-
 			if (write(s->z_fd, s->z_buf, Z_BUFSIZE) != Z_BUFSIZE)
 				break;
 			s->z_stream.next_out = s->z_buf;
@@ -443,4 +469,3 @@ gz_write(cookie, buf, len)
 
 	return (int)(len - s->z_stream.avail_in);
 }
-

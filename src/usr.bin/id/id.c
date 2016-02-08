@@ -1,4 +1,4 @@
-/*	$OpenBSD: id.c,v 1.11 2002/02/16 21:27:47 millert Exp $	*/
+/*	$OpenBSD: id.c,v 1.13 2003/06/10 22:20:47 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 1991, 1993
@@ -12,11 +12,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -41,7 +37,7 @@ static char copyright[] =
 
 #ifndef lint
 /*static char sccsid[] = "@(#)id.c	8.3 (Berkeley) 4/28/95";*/
-static char rcsid[] = "$OpenBSD: id.c,v 1.11 2002/02/16 21:27:47 millert Exp $";
+static char rcsid[] = "$OpenBSD: id.c,v 1.13 2003/06/10 22:20:47 deraadt Exp $";
 #endif /* not lint */
 
 #include <sys/param.h>
@@ -64,9 +60,7 @@ struct passwd *
 	who(char *);
 
 int
-main(argc, argv)
-	int argc;
-	char *argv[];
+main(int argc, char *argv[])
 {
 	struct group *gr;
 	struct passwd *pw;
@@ -149,8 +143,7 @@ main(argc, argv)
 }
 
 void
-pretty(pw)
-	struct passwd *pw;
+pretty(struct passwd *pw)
 {
 	struct group *gr;
 	uid_t eid, rid;
@@ -190,7 +183,7 @@ pretty(pw)
 }
 
 void
-current()
+current(void)
 {
 	struct group *gr;
 	struct passwd *pw;
@@ -232,8 +225,7 @@ current()
 }
 
 void
-user(pw)
-	struct passwd *pw;
+user(struct passwd *pw)
 {
 	struct group *gr;
 	char *fmt;
@@ -260,9 +252,7 @@ user(pw)
 }
 
 void
-group(pw, nflag)
-	struct passwd *pw;
-	int nflag;
+group(struct passwd *pw, int nflag)
 {
 	struct group *gr;
 	int cnt, id, lastid, ngroups;
@@ -297,8 +287,7 @@ group(pw, nflag)
 }
 
 struct passwd *
-who(u)
-	char *u;
+who(char *u)
 {
 	struct passwd *pw;
 	uid_t id;
@@ -318,7 +307,7 @@ who(u)
 }
 
 void
-usage()
+usage(void)
 {
 	(void)fprintf(stderr, "usage: id [user]\n"
 			      "       id -G [-n] [user]\n"

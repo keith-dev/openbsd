@@ -1,4 +1,4 @@
-/*	$OpenBSD: ndp.c,v 1.25 2002/07/17 13:49:03 itojun Exp $	*/
+/*	$OpenBSD: ndp.c,v 1.29 2003/06/26 21:33:33 deraadt Exp $	*/
 /*	$KAME: ndp.c,v 1.101 2002/07/17 08:46:33 itojun Exp $	*/
 
 /*
@@ -44,11 +44,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -99,17 +95,17 @@
 
 #include <arpa/inet.h>
 
-#include <netdb.h>
-#include <errno.h>
-#include <nlist.h>
 #include <stdio.h>
-#include <string.h>
-#include <paths.h>
-#include <err.h>
-#include <stdlib.h>
+#include <errno.h>
 #include <fcntl.h>
+#include <netdb.h>
+#include <nlist.h>
+#include <paths.h>
+#include <stdlib.h>
+#include <string.h>
 #include <unistd.h>
 #include <err.h>
+
 #include "gmt2local.h"
 
 /* packing rule for routing socket */
@@ -167,9 +163,7 @@ int mode = 0;
 char *arg = NULL;
 
 int
-main(argc, argv)
-	int argc;
-	char **argv;
+main(int argc, char *argv[])
 {
 	int ch;
 
@@ -319,8 +313,7 @@ main(argc, argv)
  * Process a file to set standard ndp entries
  */
 int
-file(name)
-	char *name;
+file(char *name)
 {
 	FILE *fp;
 	int i, retval;
@@ -352,12 +345,12 @@ file(name)
 }
 
 void
-getsocket()
+getsocket(void)
 {
 	if (s < 0) {
 		s = socket(PF_ROUTE, SOCK_RAW, 0);
 		if (s < 0) {
-			err(1, "ndp: socket");
+			err(1, "socket");
 			/* NOTREACHED */
 		}
 	}
@@ -376,13 +369,11 @@ struct	{
  * Set an individual neighbor cache entry
  */
 int
-set(argc, argv)
-	int argc;
-	char **argv;
+set(int argc, char **argv)
 {
-	register struct sockaddr_in6 *sin = &sin_m;
-	register struct sockaddr_dl *sdl;
-	register struct rt_msghdr *rtm = &(m_rtmsg.m_rtm);
+	struct sockaddr_in6 *sin = &sin_m;
+	struct sockaddr_dl *sdl;
+	struct rt_msghdr *rtm = &(m_rtmsg.m_rtm);
 	struct addrinfo hints, *res;
 	int gai_error;
 	u_char *ea;
@@ -460,8 +451,7 @@ overwrite:
  * Display an individual neighbor cache entry
  */
 void
-get(host)
-	char *host;
+get(char *host)
 {
 	struct sockaddr_in6 *sin = &sin_m;
 	struct addrinfo hints, *res;
@@ -497,11 +487,10 @@ get(host)
  * Delete a neighbor cache entry
  */
 int
-delete(host)
-	char *host;
+delete(char *host)
 {
 	struct sockaddr_in6 *sin = &sin_m;
-	register struct rt_msghdr *rtm = &m_rtmsg.m_rtm;
+	struct rt_msghdr *rtm = &m_rtmsg.m_rtm;
 	struct sockaddr_dl *sdl;
 	struct addrinfo hints, *res;
 	int gai_error;
@@ -575,9 +564,7 @@ delete:
  * Dump the entire neighbor cache
  */
 void
-dump(addr, cflag)
-	struct in6_addr *addr;
-	int cflag;
+dump(struct in6_addr *addr, int cflag)
 {
 	int mib[6];
 	size_t needed;
@@ -611,7 +598,7 @@ again:;
 		err(1, "sysctl(PF_ROUTE estimate)");
 	if (needed > 0) {
 		if ((buf = malloc(needed)) == NULL)
-			errx(1, "malloc");
+			err(1, "malloc");
 		if (sysctl(mib, 6, buf, &needed, NULL, 0) < 0)
 			err(1, "sysctl(PF_ROUTE, NET_RT_FLAGS)");
 		lim = buf + needed;
@@ -781,10 +768,7 @@ again:;
 }
 
 static struct in6_nbrinfo *
-getnbrinfo(addr, ifindex, warning)
-	struct in6_addr *addr;
-	int ifindex;
-	int warning;
+getnbrinfo(struct in6_addr *addr, int ifindex, int warning)
 {
 	static struct in6_nbrinfo nbi;
 	int s;
@@ -807,8 +791,7 @@ getnbrinfo(addr, ifindex, warning)
 }
 
 static char *
-ether_str(sdl)
-	struct sockaddr_dl *sdl;
+ether_str(struct sockaddr_dl *sdl)
 {
 	static char hbuf[NI_MAXHOST];
 	u_char *cp;
@@ -824,9 +807,7 @@ ether_str(sdl)
 }
 
 int
-ndp_ether_aton(a, n)
-	char *a;
-	u_char *n;
+ndp_ether_aton(char *a, u_char *n)
 {
 	int i, o[6];
 
@@ -842,7 +823,7 @@ ndp_ether_aton(a, n)
 }
 
 void
-usage()
+usage(void)
 {
 	printf("usage: ndp [-nt] hostname\n");
 	printf("       ndp [-nt] -a | -c | -p | -r | -H | -P | -R\n");
@@ -858,14 +839,13 @@ usage()
 }
 
 int
-rtmsg(cmd)
-	int cmd;
+rtmsg(int cmd)
 {
 	static int seq;
 	int rlen;
-	register struct rt_msghdr *rtm = &m_rtmsg.m_rtm;
-	register char *cp = m_rtmsg.m_space;
-	register int l;
+	struct rt_msghdr *rtm = &m_rtmsg.m_rtm;
+	char *cp = m_rtmsg.m_space;
+	int l;
 
 	errno = 0;
 	if (cmd == RTM_DELETE)
@@ -923,10 +903,7 @@ doit:
 }
 
 void
-ifinfo(ifname, argc, argv)
-	char *ifname;
-	int argc;
-	char **argv;
+ifinfo(char *ifname, int argc, char **argv)
 {
 	struct in6_ndireq nd;
 	int i, s;
@@ -1042,7 +1019,7 @@ ifinfo(ifname, argc, argv)
 #endif
 
 void
-rtrlist()
+rtrlist(void)
 {
 #ifdef ICMPV6CTL_ND6_DRLIST
 	int mib[] = { CTL_NET, PF_INET6, IPPROTO_ICMPV6, ICMPV6CTL_ND6_DRLIST };
@@ -1056,8 +1033,8 @@ rtrlist()
 		/*NOTREACHED*/
 	}
 	buf = malloc(l);
-	if (!buf) {
-		errx(1, "not enough core");
+	if (buf == NULL) {
+		err(1, "malloc");
 		/*NOTREACHED*/
 	}
 	if (sysctl(mib, sizeof(mib) / sizeof(mib[0]), buf, &l, NULL, 0) < 0) {
@@ -1135,7 +1112,7 @@ rtrlist()
 }
 
 void
-plist()
+plist(void)
 {
 #ifdef ICMPV6CTL_ND6_PRLIST
 	int mib[] = { CTL_NET, PF_INET6, IPPROTO_ICMPV6, ICMPV6CTL_ND6_PRLIST };
@@ -1153,8 +1130,8 @@ plist()
 		/*NOTREACHED*/
 	}
 	buf = malloc(l);
-	if (!buf) {
-		errx(1, "not enough core");
+	if (buf == NULL) {
+		err(1, "malloc");
 		/*NOTREACHED*/
 	}
 	if (sysctl(mib, sizeof(mib) / sizeof(mib[0]), buf, &l, NULL, 0) < 0) {
@@ -1421,7 +1398,7 @@ plist()
 }
 
 void
-pfx_flush()
+pfx_flush(void)
 {
 	char dummyif[IFNAMSIZ+8];
 	int s;
@@ -1434,7 +1411,7 @@ pfx_flush()
 }
 
 void
-rtr_flush()
+rtr_flush(void)
 {
 	char dummyif[IFNAMSIZ+8];
 	int s;
@@ -1449,7 +1426,7 @@ rtr_flush()
 }
 
 void
-harmonize_rtr()
+harmonize_rtr(void)
 {
 	char dummyif[IFNAMSIZ+8];
 	int s;
@@ -1465,8 +1442,7 @@ harmonize_rtr()
 
 #ifdef SIOCSDEFIFACE_IN6	/* XXX: check SIOCGDEFIFACE_IN6 as well? */
 static void
-setdefif(ifname)
-	char *ifname;
+setdefif(char *ifname)
 {
 	struct in6_ndifreq ndifreq;
 	unsigned int ifindex;
@@ -1491,7 +1467,7 @@ setdefif(ifname)
 }
 
 static void
-getdefif()
+getdefif(void)
 {
 	struct in6_ndifreq ndifreq;
 	char ifname[IFNAMSIZ+8];
@@ -1519,8 +1495,7 @@ getdefif()
 #endif
 
 static char *
-sec2str(total)
-	time_t total;
+sec2str(time_t total)
 {
 	static char result[256];
 	int days, hours, mins, secs;
@@ -1565,8 +1540,7 @@ sec2str(total)
  * from tcpdump/util.c
  */
 static void
-ts_print(tvp)
-	const struct timeval *tvp;
+ts_print(const struct timeval *tvp)
 {
 	int s;
 

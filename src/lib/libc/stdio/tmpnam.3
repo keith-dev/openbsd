@@ -1,4 +1,4 @@
-.\"	$OpenBSD: tmpnam.3,v 1.10 2003/03/06 19:54:52 jmc Exp $
+.\"	$OpenBSD: tmpnam.3,v 1.13 2003/06/02 20:18:37 millert Exp $
 .\"
 .\" Copyright (c) 1988, 1991, 1993
 .\"	The Regents of the University of California.  All rights reserved.
@@ -15,11 +15,7 @@
 .\" 2. Redistributions in binary form must reproduce the above copyright
 .\"    notice, this list of conditions and the following disclaimer in the
 .\"    documentation and/or other materials provided with the distribution.
-.\" 3. All advertising materials mentioning features or use of this software
-.\"    must display the following acknowledgement:
-.\"	This product includes software developed by the University of
-.\"	California, Berkeley and its contributors.
-.\" 4. Neither the name of the University nor the names of its contributors
+.\" 3. Neither the name of the University nor the names of its contributors
 .\"    may be used to endorse or promote products derived from this software
 .\"    without specific prior written permission.
 .\"
@@ -191,14 +187,15 @@ with the historic
 interface).
 First, there is an obvious race between file name selection and file
 creation and deletion: the program is typically written to call
-.Fn tmpnam Ns ,
-.Fn tmpname Ns , or
+.Fn tmpnam ,
+.Fn tmpname ,
+or
 .Xr mktemp 3 .
 Subsequently, the program calls
 .Xr open 2
 or
 .Xr fopen 3
-and erroneously opens a file (or symbolic link, or fifo or other
+and erroneously opens a file (or symbolic link, or FIFO or other
 device) that the attacker has placed in the expected file location.
 Hence
 .Xr mkstemp 3
@@ -208,7 +205,7 @@ Second, most historic implementations provide only a limited number
 of possible temporary file names (usually 26) before file names will
 start being recycled.
 Third, the System V implementations of these functions (and of
-.Xr mktemp )
+.Xr mktemp 3 )
 use the
 .Xr access 2
 function to determine whether or not the temporary file may be created.

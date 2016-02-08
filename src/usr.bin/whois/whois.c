@@ -1,4 +1,4 @@
-/*	$OpenBSD: whois.c,v 1.23 2003/01/15 23:16:29 millert Exp $	*/
+/*	$OpenBSD: whois.c,v 1.27 2003/06/10 22:20:54 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1980, 1993
@@ -12,11 +12,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -43,7 +39,7 @@ static const char copyright[] =
 #if 0
 static const char sccsid[] = "@(#)whois.c	8.1 (Berkeley) 6/6/93";
 #else
-static const char rcsid[] = "$OpenBSD: whois.c,v 1.23 2003/01/15 23:16:29 millert Exp $";
+static const char rcsid[] = "$OpenBSD: whois.c,v 1.27 2003/06/10 22:20:54 deraadt Exp $";
 #endif
 #endif /* not lint */
 
@@ -77,7 +73,7 @@ static const char rcsid[] = "$OpenBSD: whois.c,v 1.23 2003/01/15 23:16:29 miller
 #define	QNICHOST_TAIL	".whois-servers.net"
 
 #define	WHOIS_PORT	"whois"
-#define	WHOIS_SERVER_ID	"Whois Server: "
+#define	WHOIS_SERVER_ID	"Whois Server:"
 
 #define WHOIS_RECURSE		0x01
 #define WHOIS_QUICK		0x02
@@ -90,7 +86,7 @@ static int whois(const char *, const char *, const char *, int);
 static char *choose_server(const char *, const char *);
 
 int
-main(int argc, char **argv)
+main(int argc, char *argv[])
 {
 	int ch, flags, rval;
 	char *host, *name, *country, *server;
@@ -200,7 +196,7 @@ whois(const char *query, const char *server, const char *port, int flags)
 	}
 	if (s < 0) {
 		if (reason)
-			warn("%s", reason);
+			warn("%s: %s", server, reason);
 		else
 			warn("unknown error in connection attempt");
 		freeaddrinfo(res);
@@ -234,6 +230,8 @@ whois(const char *query, const char *server, const char *port, int flags)
 
 		if ((p = strstr(buf, WHOIS_SERVER_ID))) {
 			p += sizeof(WHOIS_SERVER_ID) - 1;
+			while (isblank(*p))
+				p++;
 			if ((len = strcspn(p, " \t\n\r"))) {
 				if ((nhost = malloc(len + 1)) == NULL)
 					err(1, "malloc");

@@ -1,9 +1,9 @@
-/*	$OpenBSD: mod_auth.c,v 1.9 2002/08/15 16:06:11 henning Exp $ */
+/*	$OpenBSD: mod_auth.c,v 1.11 2003/08/21 13:11:36 henning Exp $ */
 
 /* ====================================================================
  * The Apache Software License, Version 1.1
  *
- * Copyright (c) 2000-2002 The Apache Software Foundation.  All rights
+ * Copyright (c) 2000-2003 The Apache Software Foundation.  All rights
  * reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -76,6 +76,7 @@
 #include "http_config.h"
 #include "http_core.h"
 #include "http_log.h"
+#include "http_main.h"
 #include "http_protocol.h"
 
 typedef struct auth_config_struct {
@@ -286,7 +287,7 @@ static int check_user_access(request_rec *r)
 	if (strcmp(w, "file-owner") == 0) {
 #if defined(WIN32) || defined(NETWARE) || defined(OS2)
             ap_log_rerror(APLOG_MARK, APLOG_NOERRNO|APLOG_INFO, r,
-                          "'Require file-user' not supported "
+                          "'Require file-owner' not supported "
                           "on this platform, ignored");
             continue;
 #else

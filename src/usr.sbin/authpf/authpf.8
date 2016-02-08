@@ -1,4 +1,4 @@
-.\" $OpenBSD: authpf.8,v 1.26 2003/03/20 01:29:17 david Exp $
+.\" $OpenBSD: authpf.8,v 1.30 2003/08/17 23:24:47 henning Exp $
 .\"
 .\" Copyright (c) 2002 Bob Beck (beck@openbsd.org>.  All rights reserved.
 .\"
@@ -92,13 +92,12 @@ The following rules need to be added to the main ruleset
 in order to cause evaluation of any
 .Nm
 rules:
-.Bd -literal
+.Bd -literal -offset indent
 nat-anchor authpf
 rdr-anchor authpf
 binat-anchor authpf
 anchor authpf
 .Ed
-.Pp
 .Sh FILTER AND TRANSLATION RULES
 Filter and translation rules for
 .Nm
@@ -144,7 +143,7 @@ file is optional.
 Options are controlled by the
 .Pa /etc/authpf/authpf.conf
 file.
-If the file is empty or does not exist, defaults are used for all
+If the file is empty, defaults are used for all
 configuration options.
 The file consists of pairs of the form
 .Li name=value ,
@@ -310,7 +309,7 @@ can be used to fork the right shell.
 To make that happen,
 .Xr login.conf 5
 should have entries that look something like this:
-.Bd -literal
+.Bd -literal -offset indent
 shell-default:shell=/bin/csh
 
 default:\e
@@ -331,21 +330,21 @@ staff:\e
 Using a default password file, all users will get
 .Nm
 as their shell except for root who will get
-.Pa /bin/csh.
+.Pa /bin/csh .
 .Pp
 \fBSSH Configuration\fP - As stated earlier,
 .Xr sshd 8
 must be properly configured to detect and defeat network attacks.
 To that end, the following options should be added to
 .Xr sshd_config 5 :
-.Bd -literal
+.Bd -literal -offset indent
+Protocol 2
 ClientAliveInterval 15
 ClientAliveCountMax 3
 .Ed
 .Pp
 This ensures that unresponsive or spoofed sessions are terminated within a
 minute, since a hijacker should not be able to spoof ssh keepalive messages.
-.Pp
 .Pp
 \fBBanners\fP - Once authenticated, the user is shown the contents of
 .Pa /etc/authpf/authpf.message .
@@ -446,10 +445,12 @@ pass in quick proto esp from $user_ip to $ipsec_gw
 .Xr pf 4 ,
 .Xr pf.conf 5 ,
 .Xr ftp-proxy 8
-.Sh BUGS
+.Sh HISTORY
+The
 .Nm
-does not support binat translation rules.
-.Pp
+program first appeared in
+.Ox 3.1 .
+.Sh BUGS
 Configuration issues are tricky.
 The authenticating
 .Xr ssh 1
@@ -460,8 +461,3 @@ address.
 .Pp
 .Nm
 is not designed to prevent users from denying service to other users.
-.Sh HISTORY
-The
-.Nm
-program first appeared in
-.Ox 3.1 .

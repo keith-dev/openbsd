@@ -3,32 +3,24 @@
 # THIS FILE AUTOMATICALLY GENERATED.  DO NOT EDIT.
 # generated from:
 #
-#	OpenBSD: etc.sparc/MAKEDEV.md,v 1.16 2002/12/05 04:30:21 kjc Exp 
-#	OpenBSD: MAKEDEV.mi,v 1.56 2003/01/06 17:19:16 todd Exp 
-#	OpenBSD: MAKEDEV.sub,v 1.7 2002/02/16 01:19:52 deraadt Exp 
+#	OpenBSD: etc.sparc/MAKEDEV.md,v 1.19 2003/06/18 18:08:59 todd Exp 
+#	OpenBSD: MAKEDEV.mi,v 1.60 2003/06/18 18:08:59 todd Exp 
+#	OpenBSD: MAKEDEV.sub,v 1.8 2003/06/18 18:08:59 todd Exp 
 #
 #
-# Copyright (c) 2001,2002 Todd T. Fries <todd@OpenBSD.org>
-# All rights reserved.
+# Copyright (c) 2001,2002,2003 Todd T. Fries <todd@OpenBSD.org>
 #
-# Redistribution and use in source and binary forms, with or without
-# modification, are permitted provided that the following conditions
-# are met:
-# 1. Redistributions of source code must retain the above copyright
-#    notice, this list of conditions and the following disclaimer.
-# 2. The name of the author may not be used to endorse or promote products
-#    derived from this software without specific prior written permission.
+# Permission to use, copy, modify, and distribute this software for any
+# purpose with or without fee is hereby granted, provided that the above
+# copyright notice and this permission notice appear in all copies.
 #
-# THIS SOFTWARE IS PROVIDED ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES,
-# INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY
-# AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL
-# THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
-# EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
-# PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
-# OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
-# WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
-# OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
-# ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+# THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+# WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+# MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+# ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+# WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+# ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+# OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 #
 # Device "make" file.  Valid arguments:
 #	all	makes all known devices, including local devices.
@@ -49,6 +41,7 @@
 #	fd*	Floppy disk drives (3 1/2", 5 1/4")
 #	vnd*	"file" pseudo-disks
 #	ccd*	concatenated disk devices
+#	presto*	Prestoserve NVRAM memory
 # Pseudo terminals:
 #	tty*	set of 16 slave psuedo terminals
 #	pty*	set of 16 master pseudo terminals
@@ -75,6 +68,7 @@
 #	bppmag[mno]	magma parallel port device
 #	spif*	spif card (makes 8 tty and 1 bpp)
 #	bpp[jkl]	spif parallel port device
+#	bpp*	parallel port devices
 #	xfs*	XFS filesystem devices
 #	raid*	RAIDframe disk devices
 #	fd	makes fd/* for the fdescfs
@@ -139,7 +133,7 @@ dodisk()
 		M r$1$2$d	c $4 $(($n+$count)) 640
 		let count=count+1
 	done
-	MKlist="$MKlist;chown root.operator $1$2? r$1$2?"
+	MKlist="$MKlist;chown root:operator $1$2? r$1$2?"
 }
 
 dodisk2()
@@ -171,7 +165,7 @@ M() {
 	mklist="$mklist $1"
 	G=${6:-wheel}
 	[ "$7" ] && {
-		MKlist="$MKlist;chown $7.$G $1"
+		MKlist="$MKlist;chown $7:$G $1"
 	} || {
 		case $G in
 		wheel)g=0;;kmem)g=2;;operator)g=5;;tty)g=4;;dialer)g=117;;_lkm)g=61;;
@@ -232,6 +226,10 @@ fd)
 
 xfs*)
 	M xfs$U c 51 $U 600
+	;;
+
+bpp*)
+	M bpp$U c 104 $U 600
 	;;
 
 spif*)
@@ -467,17 +465,19 @@ local)
 	;;
 
 all)
-	R ccd0 ccd1 ccd2 ccd3 vnd0 vnd1 vnd2 vnd3 sd0 sd1 sd2 sd3 sd4
-	R cd0 cd1 rd0 xy0 xy1 xy2 xy3 tun0 tun1 tun2 tun3 bpf0 bpf1
-	R bpf2 bpf3 bpf4 bpf5 bpf6 bpf7 bpf8 bpf9 pty0 pty1 pty2 fd1
-	R fd1B fd1C fd1D fd1E fd1F fd1G fd1H fd0 fd0B fd0C fd0D fd0E
-	R fd0F fd0G fd0H xfs0 ss0 ss1 ch0 ses0 cuaa cuab cuac cuad
-	R ttya ttyb ttyc ttyd wscons audio0 uk0 random lkm pf systrace
-	R xd0 xd1 xd2 xd3 raid0 raid1 raid2 raid3 std st0 st1 fd
+	R presto0 bpp0 ccd0 ccd1 ccd2 ccd3 vnd0 vnd1 vnd2 vnd3 sd0
+	R sd1 sd2 sd3 sd4 cd0 cd1 rd0 xy0 xy1 xy2 xy3 tun0 tun1 tun2
+	R tun3 bpf0 bpf1 bpf2 bpf3 bpf4 bpf5 bpf6 bpf7 bpf8 bpf9 pty0
+	R pty1 pty2 fd1 fd1B fd1C fd1D fd1E fd1F fd1G fd1H fd0 fd0B
+	R fd0C fd0D fd0E fd0F fd0G fd0H xfs0 ss0 ss1 ch0 ses0 cuaa
+	R cuab cuac cuad ttya ttyb ttyc ttyd wscons audio0 uk0 random
+	R lkm pf systrace xd0 xd1 xd2 xd3 raid0 raid1 raid2 raid3 std
+	R st0 st1 fd
 	;;
 
-xd*|xy*|sd*|raid*|ccd*)
+presto*|xd*|xy*|sd*|raid*|ccd*)
 	case $i in
+	presto*) dodisk presto $U 26 25 $U 0;;
 	xd*) dodisk xd $U 10 42 $U 0;;
 	xy*) dodisk xy $U 3 9 $U 0;;
 	sd*) dodisk sd $U 7 17 $U 0;;

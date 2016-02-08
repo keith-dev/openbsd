@@ -1,4 +1,4 @@
-/*	$OpenBSD: activate.c,v 1.4 1998/08/06 22:15:29 csapuntz Exp $	*/
+/*	$OpenBSD: activate.c,v 1.6 2003/06/11 06:22:14 deraadt Exp $	*/
 /*	$NetBSD: activate.c,v 1.5 1995/04/23 10:33:18 cgd Exp $	*/
 
 /*
@@ -17,11 +17,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -61,12 +57,7 @@
  * appropriate function.
  */
 static int
-activate_argv(pcr, key, v, so, fdp)
-	struct portal_cred *pcr;
-	char *key;
-	char **v;
-	int so;
-	int *fdp;
+activate_argv(struct portal_cred *pcr, char *key, char **v, int so, int *fdp)
 {
 	provider *pr;
 
@@ -78,11 +69,7 @@ activate_argv(pcr, key, v, so, fdp)
 }
 
 static int
-get_request(so, pcr, key, klen)
-	int so;
-	struct portal_cred *pcr;
-	char *key;
-	int klen;
+get_request(int so, struct portal_cred *pcr, char *key, int klen)
 {
 	struct iovec iov[2];
 	struct msghdr msg;
@@ -111,10 +98,7 @@ get_request(so, pcr, key, klen)
 }
 
 static void
-send_reply(so, fd, error)
-	int so;
-	int fd;
-	int error;
+send_reply(int so, int fd, int error)
 {
 	int n;
 	struct iovec iov;
@@ -171,9 +155,7 @@ send_reply(so, fd, error)
 }
 
 void
-activate(q, so)
-	qelem *q;
-	int so;
+activate(qelem *q, int so)
 {
 	struct portal_cred pcred;
 	char key[MAXPATHLEN+1];

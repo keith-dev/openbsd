@@ -30,6 +30,10 @@
  * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ *
+ * Sponsored in part by the Defense Advanced Research Projects
+ * Agency (DARPA) and Air Force Research Laboratory, Air Force
+ * Materiel Command, USAF, under agreement number F39502-99-1-0512.
  */
 
 #include "config.h"
@@ -57,6 +61,11 @@
 #ifdef HAVE_UNISTD_H
 # include <unistd.h>
 #endif /* HAVE_UNISTD_H */
+#ifdef HAVE_ERR_H
+# include <err.h>
+#else
+# include "emul/err.h"
+#endif /* HAVE_ERR_H */
 #include <pwd.h>
 #include <signal.h>
 #include <time.h>
@@ -65,7 +74,7 @@
 #include "sudo.h"
 
 #ifndef lint
-static const char rcsid[] = "$Sudo: logging.c,v 1.158 2003/03/20 02:04:32 millert Exp $";
+static const char rcsid[] = "$Sudo: logging.c,v 1.161 2003/04/16 00:42:10 millert Exp $";
 #endif /* lint */
 
 static void do_syslog		__P((int, char *));
@@ -107,9 +116,9 @@ mysyslog(pri, fmt, va_alist)
     va_start(ap);
 #endif
 #ifdef LOG_NFACILITIES
-    openlog(Argv[0], 0, def_ival(I_LOGFAC));
+    openlog("sudo", 0, def_ival(I_LOGFAC));
 #else
-    openlog(Argv[0], 0);
+    openlog("sudo", 0);
 #endif
     vsnprintf(buf, sizeof(buf), fmt, ap);
 #ifdef BROKEN_SYSLOG
@@ -400,10 +409,10 @@ log_error(va_alist)
     /*
      * Tell the user.
      */
-    (void) fprintf(stderr, "%s: %s", Argv[0], message);
     if (flags & USE_ERRNO)
-	(void) fprintf(stderr, ": %s", strerror(serrno));
-    (void) fputc('\n', stderr);
+	warn("%s", message);
+    else
+	warnx("%s", message);
 
     /*
      * Send a copy of the error via mail.
@@ -438,7 +447,7 @@ send_mail(line)
 {
     FILE *mail;
     char *p;
-    int pfd[2], status;
+    int pfd[2];
     pid_t pid;
     sigset_t set, oset;
 #ifndef NO_ROOT_MAILER
@@ -459,18 +468,13 @@ send_mail(line)
     (void) sigaddset(&set, SIGCHLD);
     (void) sigprocmask(SIG_BLOCK, &set, &oset);
 
-    if (pipe(pfd) == -1) {
-	(void) fprintf(stderr, "%s: cannot open pipe: %s\n",
-	    Argv[0], strerror(errno));
-	exit(1);
-    }
+    if (pipe(pfd) == -1)
+	err(1, "cannot open pipe");
 
     switch (pid = fork()) {
 	case -1:
 	    /* Error. */
-	    (void) fprintf(stderr, "%s: cannot fork: %s\n",
-		Argv[0], strerror(errno));
-	    exit(1);
+	    err(1, "cannot fork");
 	    break;
 	case 0:
 	    {
@@ -588,10 +592,12 @@ reapchild(sig)
     int sig;
 {
     int status, serrno = errno;
-
 #ifdef sudo_waitpid
-    while (sudo_waitpid(-1, &status, WNOHANG) != -1 || errno == EINTR)
-	;
+    pid_t pid;
+
+    do {
+	pid = sudo_waitpid(-1, &status, WNOHANG);
+    } while (pid != 0 && (pid != -1 || errno == EINTR));
 #else
     (void) wait(&status);
 #endif

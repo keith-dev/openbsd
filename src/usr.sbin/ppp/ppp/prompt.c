@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	$OpenBSD: prompt.c,v 1.13 2002/06/15 08:02:01 brian Exp $
+ *	$OpenBSD: prompt.c,v 1.15 2003/04/07 23:58:53 deraadt Exp $
  */
 
 #include <sys/param.h>
@@ -114,7 +114,7 @@ prompt_Display(struct prompt *p)
     char *dot;
 
     if (gethostname(shostname, sizeof shostname) || *shostname == '\0')
-      strcpy(shostname, "localhost");
+      strlcpy(shostname, "localhost", sizeof shostname);
     else if ((dot = strchr(shostname, '.')))
       *dot = '\0';
   }
@@ -393,8 +393,8 @@ prompt_vPrintf(struct prompt *p, const char *fmt, va_list ap)
 
       if (len && len < sizeof nfmt - 1 && fmt[len-1] == '\n' &&
           (len == 1 || fmt[len-2] != '\r')) {
-        strcpy(nfmt, fmt);
-        strcpy(nfmt + len - 1, "\r\n");
+        strlcpy(nfmt, fmt, sizeof nfmt);
+        strlcpy(nfmt + len - 1, "\r\n", sizeof nfmt - (len - 1));
         pfmt = nfmt;
       } else
         pfmt = fmt;

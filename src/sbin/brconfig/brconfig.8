@@ -1,4 +1,4 @@
-.\"	$OpenBSD: brconfig.8,v 1.41 2003/03/07 06:30:38 david Exp $
+.\"	$OpenBSD: brconfig.8,v 1.46 2003/06/27 13:10:51 henning Exp $
 .\"
 .\" Copyright (c) 1999-2001 Jason L. Wright (jason@thought.net)
 .\" All rights reserved.
@@ -11,11 +11,6 @@
 .\" 2. Redistributions in binary form must reproduce the above copyright
 .\"    notice, this list of conditions and the following disclaimer in the
 .\"    documentation and/or other materials provided with the distribution.
-.\" 3. All advertising materials mentioning features or use of this software
-.\"    must display the following acknowledgement:
-.\"	This product includes software developed by Jason L. Wright
-.\" 4. The name of the author may not be used to endorse or promote products
-.\"    derived from this software without specific prior written permission.
 .\"
 .\" THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
 .\" IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
@@ -48,6 +43,7 @@
 .Ar interface-name
 .Op Ar src address
 .Op Ar dst address
+.Op Ar tag tagname
 .Sh DESCRIPTION
 The
 .Nm brconfig
@@ -213,9 +209,12 @@ Rules have a similar syntax to
 .Xr pf 4 .
 Rules can be used to selectively block or pass frames based on Ethernet
 MAC address.
+They can also tag packets for
+.Xr pf 4
+to filter on.
 Rules are processed in the order in which they were added
 to the interface, and the first rule matched takes the action (block or pass)
-of the rule.
+and, if given, the tag of the rule.
 If no source or destination address is specified, the
 rule will match all frames (good for creating a catchall policy).
 .It Cm rulefile Ar filename
@@ -290,8 +289,17 @@ The above commands will set up a filter so that 0:1:2:3:4:5 can send frames
 through fxp0 only to 5:4:3:2:1, and 5:4:3:2:1:0 can return frames through
 fxp0 to 0:1:2:3:4:5.
 All other traffic trying to go into and be sent from fxp0 will be blocked.
+.It Cm "# brconfig bridge0 rule pass in on fxp0 src 9:8:7:6:5:4 tag boss"
+.It Cm "# brconfig bridge0 rule pass out on fxp0 dst 9:8:7:6:5:4 tag boss"
+These commands will tag packets from and to 9:8:7:6:5:4 on fxp0 so that
+.Xr pf 4
+can refer to them using the
+.Ar tagged
+directive:
+.Pp
+.Dl pass tagged boss keep state queue q_med
 .El
-.Sh "IPSEC BRIDGE"
+.Sh IPSEC BRIDGE
 The bridge can also be used to tunnel ethernet frames over IPv4 or
 IPv6 by using the
 .Xr gif 4
@@ -354,7 +362,7 @@ bridge:
 	-enc 3des -auth md5 -keyfile keyfile2 -authkeyfile authkeyfile2
 .Ed
 .Pp
-Setup ingress flows so that traffic is allowed between the two bridges
+Set up ingress flows so that traffic is allowed between the two bridges
 for the above associations:
 .Bd -literal
 (on bridge1) # ipsecadm flow -dst 4.3.2.1 -out \\
@@ -419,20 +427,20 @@ commands are used to add and delete span ports to and from a bridge.
 .Xr ifconfig 8 ,
 .Xr ipsecadm 8 ,
 .Xr isakmpd 8
+.Sh HISTORY
+The
+.Nm brconfig
+command first appeared in
+.Ox 2.5 .
 .Sh AUTHORS
 The
-.Xr brconfig 8
+.Nm
 command and the
 .Xr bridge 4
 kernel interface were written by
 .An Jason L. Wright Aq jason@thought.net
 as part of an undergraduate independent study at the
 University of North Carolina at Greensboro.
-.Sh HISTORY
-The
-.Nm brconfig
-command first appeared in
-.Ox 2.5 .
 .Sh BUGS
 There are some rather special network interface chipsets which will
 not work in a bridge configuration.

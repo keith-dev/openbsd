@@ -1,4 +1,4 @@
-/* $OpenBSD: pwarnx.c,v 1.2 2001/06/06 20:56:35 espie Exp $ */
+/* $OpenBSD: pwarnx.c,v 1.4 2003/08/21 20:24:57 espie Exp $ */
 
 /*-
  * Copyright (c) 1993
@@ -12,11 +12,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -36,6 +32,7 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
+#include <errno.h>
 #include "lib.h"
 
 static char pkgname[60];
@@ -80,6 +77,28 @@ pwarnx(const char *fmt, ...)
 	    (void)fprintf(stderr, "%s(%s): ", __progname, pkgname);
 	if (fmt != NULL)
 		(void)vfprintf(stderr, fmt, ap);
+	(void)fprintf(stderr, "\n");
+	va_end(ap);
+}
+
+void 
+pwarn(const char *fmt, ...)
+{
+	va_list ap;
+	int sverrno;
+
+	sverrno = errno;
+	va_start(ap, fmt);
+
+	if (pkgname[0] == '\0')
+	    (void)fprintf(stderr, "%s: ", __progname);
+	else
+	    (void)fprintf(stderr, "%s(%s): ", __progname, pkgname);
+	if (fmt != NULL) {
+		(void)vfprintf(stderr, fmt, ap);
+		(void)fprintf(stderr, ": ");
+	}
+	(void)fprintf(stderr, "%s\n", strerror(sverrno));
 	(void)fprintf(stderr, "\n");
 	va_end(ap);
 }

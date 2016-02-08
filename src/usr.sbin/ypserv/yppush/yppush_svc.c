@@ -1,4 +1,4 @@
-/*	$OpenBSD: yppush_svc.c,v 1.8 2002/07/19 02:38:40 deraadt Exp $ */
+/*	$OpenBSD: yppush_svc.c,v 1.11 2003/07/15 06:10:46 deraadt Exp $ */
 
 /*
  * Copyright (c) 1996 Mats O Jansson <moj@stacken.kth.se>
@@ -12,11 +12,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by Mats O Jansson
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS
  * OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
@@ -32,10 +27,8 @@
  */
 
 #ifndef lint
-static char rcsid[] = "$OpenBSD: yppush_svc.c,v 1.8 2002/07/19 02:38:40 deraadt Exp $";
+static const char rcsid[] = "$OpenBSD: yppush_svc.c,v 1.11 2003/07/15 06:10:46 deraadt Exp $";
 #endif /* not lint */
-
-#include "yppush.h"
 
 #include <sys/types.h>
 #include <sys/ttycom.h>
@@ -46,6 +39,9 @@ static char rcsid[] = "$OpenBSD: yppush_svc.c,v 1.8 2002/07/19 02:38:40 deraadt 
 #include <netdb.h>
 #include <memory.h>
 #include <syslog.h>
+#include <rpcsvc/yp.h>
+
+#include "yppush.h"
 
 #ifdef DEBUG
 #define RPC_SVC_FG
@@ -72,25 +68,27 @@ void _msgout(char *msg)
 void
 yppush_xfrrespprog_1(struct svc_req *rqstp, SVCXPRT *transp)
 {
-	union {
+	union argument {
 		int fill;
 	} argument;
 	char *result;
-	bool_t (*xdr_argument)(), (*xdr_result)();
-	char *(*local)();
+	xdrproc_t xdr_argument, xdr_result;
+	char *(*local)(union argument *, struct svc_req *);
 
 	_rpcsvcdirty = 1;
 	switch (rqstp->rq_proc) {
 	case YPPUSHPROC_NULL:
 		xdr_argument = xdr_void;
 		xdr_result = xdr_void;
-		local = (char *(*)()) yppushproc_null_1_svc;
+		local = (char *(*)(union argument *, struct svc_req *))
+		    yppushproc_null_1_svc;
 		break;
 
 	case YPPUSHPROC_XFRRESP:
 		xdr_argument = xdr_yppushresp_xfr;
 		xdr_result = xdr_void;
-		local = (char *(*)()) yppushproc_xfrresp_1_svc;
+		local = (char *(*)(union argument *, struct svc_req *))
+		    yppushproc_xfrresp_1_svc;
 		break;
 
 	default:

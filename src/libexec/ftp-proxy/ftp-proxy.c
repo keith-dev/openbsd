@@ -1,4 +1,4 @@
-/*	$OpenBSD: ftp-proxy.c,v 1.29 2003/03/20 01:34:48 david Exp $ */
+/*	$OpenBSD: ftp-proxy.c,v 1.33 2003/08/22 21:50:34 david Exp $ */
 
 /*
  * Copyright (c) 1996-2001
@@ -119,7 +119,7 @@ int max_port = IPPORT_HILASTAUTO;
  * listening on.
  *
  * If the socket we are listening on gets a connection then we connect
- * to the other side's socket.  Similarily, if a connected socket is
+ * to the other side's socket.  Similarly, if a connected socket is
  * shutdown then we shutdown the other side's socket.
  */
 
@@ -160,8 +160,13 @@ typedef enum {
 
 connection_mode_t connection_mode;
 
-extern void debuglog(int debug_level, const char *fmt, ...);
-
+extern void	debuglog(int debug_level, const char *fmt, ...);
+double		wallclock_time(void);
+void		show_xfer_stats(void);
+void		log_control_command (char *cmd, int client);
+int		new_dataconn(int server);
+void		do_client_cmd(struct csiob *client, struct csiob *server);
+void		do_server_reply(struct csiob *server, struct csiob *client);
 static void
 usage(void)
 {
@@ -461,7 +466,7 @@ static void
 connect_pasv_backchannel(void)
 {
 	struct sockaddr_in listen_sa;
-	int salen;
+	socklen_t salen;
 
 	/*
 	 * We are about to accept a connection from the client.
@@ -504,7 +509,7 @@ static void
 connect_port_backchannel(void)
 {
 	struct sockaddr_in listen_sa;
-	int salen;
+	socklen_t salen;
 
 	/*
 	 * We are about to accept a connection from the server.
@@ -603,7 +608,7 @@ do_client_cmd(struct csiob *client, struct csiob *server)
 	    strlen("user ")) == 0) {
 		char *cp;
 
-		cp = client->line_buffer + strlen("user ");
+		cp = (char *) client->line_buffer + strlen("user ");
 		if ((strcasecmp(cp, "ftp\r\n") != 0) &&
 		    (strcasecmp(cp, "anonymous\r\n") != 0)) {
 			/*
@@ -624,7 +629,7 @@ do_client_cmd(struct csiob *client, struct csiob *server)
 			} while (j >= 0 && j < i);
 			sendbuf = NULL;
 		} else
-			sendbuf = client->line_buffer;
+			sendbuf = (char *)client->line_buffer;
 	} else if ((strncasecmp((char *)client->line_buffer, "eprt ",
 	    strlen("eprt ")) == 0)) {
 
@@ -634,7 +639,7 @@ do_client_cmd(struct csiob *client, struct csiob *server)
 		unsigned long proto;
 
 		j = 0;
-		line = strdup(client->line_buffer+strlen("eprt "));
+		line = strdup((char *)client->line_buffer+strlen("eprt "));
 		if (line == NULL) {
 			syslog(LOG_ERR, "insufficient memory");
 			exit(EX_UNAVAILABLE);
@@ -755,13 +760,11 @@ out:
 	} else if (strncasecmp((char *)client->line_buffer, "port ",
 	    strlen("port ")) == 0) {
 		unsigned int values[6];
-		int byte_number;
-		u_char *tailptr;
+		char *tailptr;
 
 		debuglog(1, "Got a PORT command");
 
-		tailptr = &client->line_buffer[strlen("port ")];
-		byte_number = 0;
+		tailptr = (char *)&client->line_buffer[strlen("port ")];
 		values[0] = 0;
 
 		i = sscanf(tailptr, "%u,%u,%u,%u,%u,%u", &values[0],
@@ -815,7 +818,7 @@ out:
 
 		sendbuf = tbuf;
 	} else
-		sendbuf = client->line_buffer;
+		sendbuf = (char *)client->line_buffer;
 
 	/*
 	 *send our (possibly modified) control command in sendbuf
@@ -858,6 +861,8 @@ do_server_reply(struct csiob *server, struct csiob *client)
 	 * Watch out for "227 Entering Passive Mode ..." replies
 	 */
 	code = strtol((char *)server->line_buffer, &p, 10);
+	if (isspace(server->line_buffer[0]))
+		code = 0;
 	if (!*(server->line_buffer) || (*p != ' ' && *p != '-')) {
 		if (continuing)
 			goto sendit;
@@ -876,13 +881,12 @@ do_server_reply(struct csiob *server, struct csiob *client)
 		continuing = 0;
 	if (code == 227 && !NatMode) {
 		unsigned int values[6];
-		u_char *tailptr;
-		int byte_number;
+		char *tailptr;
 
 		debuglog(1, "Got a PASV reply");
 		debuglog(1, "{%s}", (char *)server->line_buffer);
 
-		tailptr = strchr((char *)server->line_buffer, '(');
+		tailptr = (char *)strchr((char *)server->line_buffer, '(');
 		if (tailptr == NULL) {
 			tailptr = strrchr((char *)server->line_buffer, ' ');
 			if (tailptr == NULL) {
@@ -892,7 +896,6 @@ do_server_reply(struct csiob *server, struct csiob *client)
 		}
 		tailptr++; /* skip past space or ( */
 
-		byte_number = 0;
 		values[0] = 0;
 
 		i = sscanf(tailptr, "%u,%u,%u,%u,%u,%u", &values[0],
@@ -937,7 +940,7 @@ do_server_reply(struct csiob *server, struct csiob *client)
 		sendbuf = tbuf;
 	} else {
  sendit:
-		sendbuf = server->line_buffer;
+		sendbuf = (char *)server->line_buffer;
 	}
 
 	/*
@@ -961,7 +964,8 @@ main(int argc, char *argv[])
 {
 	struct csiob client_iob, server_iob;
 	struct sigaction new_sa, old_sa;
-	int sval, ch, salen, flags, i;
+	int sval, ch, flags, i;
+	socklen_t salen;
 	int one = 1;
 	long timeout_seconds = 0;
 	struct timeval tv;

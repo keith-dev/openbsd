@@ -1,8 +1,7 @@
-#	$OpenBSD: sftp-cmds.sh,v 1.2 2003/01/10 07:52:41 djm Exp $
+#	$OpenBSD: sftp-cmds.sh,v 1.5 2003/07/19 00:46:31 djm Exp $
 #	Placed in the Public Domain.
 
 # XXX - TODO: 
-# - globbed operations
 # - chmod / chown / chgrp
 # - -p flag for get & put
 
@@ -10,8 +9,14 @@ tid="sftp commands"
 
 DATA=/bin/ls
 COPY=${OBJ}/copy
+GLOBFILES=`(cd /bin;echo l*)`
 
-rm -rf ${COPY} ${COPY}.1 ${COPY}.2 ${COPY}.dd ${BATCH}.*
+# Path with embedded quote
+QUOTECOPY=${COPY}".\"blah\""
+QUOTECOPY_ARG=${COPY}'.\"blah\"'
+
+rm -rf ${COPY} ${COPY}.1 ${COPY}.2 ${COPY}.dd ${COPY}.dd2 ${BATCH}.*
+mkdir ${COPY}.dd
 
 verbose "$tid: lls"
 echo "lls ${OBJ}" | ${SFTP} -P ${SFTPSERVER} >/dev/null 2>&1 \
@@ -54,17 +59,85 @@ echo "get $DATA $COPY" | ${SFTP} -P ${SFTPSERVER} >/dev/null 2>&1 \
 	|| fail "get failed"
 cmp $DATA ${COPY} || fail "corrupted copy after get"
 
+rm -f ${COPY}.dd/*
+verbose "$tid: get to directory"
+echo "get $DATA ${COPY}.dd" | ${SFTP} -P ${SFTPSERVER} >/dev/null 2>&1 \
+        || fail "get failed"
+cmp $DATA ${COPY}.dd/ls || fail "corrupted copy after get"
+
+rm -f ${COPY}.dd/*
+verbose "$tid: glob get to directory"
+echo "get /bin/l* ${COPY}.dd" | ${SFTP} -P ${SFTPSERVER} >/dev/null 2>&1 \
+        || fail "get failed"
+for x in $GLOBFILES; do
+        cmp /bin/$x ${COPY}.dd/$x || fail "corrupted copy after get"
+done
+
+rm -f ${COPY}.dd/*
+verbose "$tid: get to local dir"
+echo "lcd ${COPY}.dd\nget $DATA" | ${SFTP} -P ${SFTPSERVER} >/dev/null 2>&1 \
+        || fail "get failed"
+cmp $DATA ${COPY}.dd/ls || fail "corrupted copy after get"
+
+rm -f ${COPY}.dd/*
+verbose "$tid: glob get to local dir"
+echo "lcd ${COPY}.dd\nget /bin/l*" | ${SFTP} -P ${SFTPSERVER} >/dev/null 2>&1 \
+        || fail "get failed"
+for x in $GLOBFILES; do
+        cmp /bin/$x ${COPY}.dd/$x || fail "corrupted copy after get"
+done
+
 rm -f ${COPY}
 verbose "$tid: put"
 echo "put $DATA $COPY" | ${SFTP} -P ${SFTPSERVER} >/dev/null 2>&1 \
 	|| fail "put failed"
 cmp $DATA ${COPY} || fail "corrupted copy after put"
 
+rm -f ${QUOTECOPY}
+verbose "$tid: put filename with quotes"
+echo "put $DATA \"$QUOTECOPY_ARG\"" | ${SFTP} -P ${SFTPSERVER} >/dev/null 2>&1 \
+	|| fail "put failed"
+cmp $DATA ${QUOTECOPY} || fail "corrupted copy after put with quotes"
+
+rm -f ${COPY}.dd/*
+verbose "$tid: put to directory"
+echo "put $DATA ${COPY}.dd" | ${SFTP} -P ${SFTPSERVER} >/dev/null 2>&1 \
+	|| fail "put failed"
+cmp $DATA ${COPY}.dd/ls || fail "corrupted copy after put"
+
+rm -f ${COPY}.dd/*
+verbose "$tid: glob put to directory"
+echo "put /bin/l* ${COPY}.dd" | ${SFTP} -P ${SFTPSERVER} >/dev/null 2>&1 \
+	|| fail "put failed"
+for x in $GLOBFILES; do
+	cmp /bin/$x ${COPY}.dd/$x || fail "corrupted copy after put"
+done
+
+rm -f ${COPY}.dd/*
+verbose "$tid: put to local dir"
+echo "cd ${COPY}.dd\nput $DATA" | ${SFTP} -P ${SFTPSERVER} >/dev/null 2>&1 \
+	|| fail "put failed"
+cmp $DATA ${COPY}.dd/ls || fail "corrupted copy after put"
+
+rm -f ${COPY}.dd/*
+verbose "$tid: glob put to local dir"
+echo "cd ${COPY}.dd\nput /bin/l*" | ${SFTP} -P ${SFTPSERVER} >/dev/null 2>&1 \
+	|| fail "put failed"
+for x in $GLOBFILES; do
+        cmp /bin/$x ${COPY}.dd/$x || fail "corrupted copy after put"
+done
+
 verbose "$tid: rename"
 echo "rename $COPY ${COPY}.1" | ${SFTP} -P ${SFTPSERVER} >/dev/null 2>&1 \
 	|| fail "rename failed"
 test -f ${COPY}.1 || fail "missing file after rename"
 cmp $DATA ${COPY}.1 >/dev/null 2>&1 || fail "corrupted copy after rename"
+
+verbose "$tid: rename directory"
+echo "rename ${COPY}.dd ${COPY}.dd2" | ${SFTP} -P ${SFTPSERVER} >/dev/null 2>&1 \
+	|| fail "rename directory failed"
+test -d ${COPY}.dd && fail "oldname exists after rename directory"
+test -d ${COPY}.dd2 || fail "missing newname after rename directory"
 
 verbose "$tid: ln"
 echo "ln ${COPY}.1 ${COPY}.2" | ${SFTP} -P ${SFTPSERVER} >/dev/null 2>&1 || fail "ln failed"
@@ -95,6 +168,6 @@ verbose "$tid: lchdir"
 echo "lchdir ${COPY}.dd" | ${SFTP} -P ${SFTPSERVER} >/dev/null 2>&1 \
 	|| fail "lchdir failed"
 
-rm -rf ${COPY} ${COPY}.1 ${COPY}.2 ${COPY}.dd ${BATCH}.*
+rm -rf ${COPY} ${COPY}.1 ${COPY}.2 ${COPY}.dd ${COPY}.dd2 ${BATCH}.*
 
 

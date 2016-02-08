@@ -1,4 +1,4 @@
-/*	$OpenBSD: sync.c,v 1.3 2002/02/19 19:39:36 millert Exp $	*/
+/*	$OpenBSD: sync.c,v 1.7 2003/07/06 02:03:13 avsm Exp $	*/
 /*	$NetBSD: sync.c,v 1.9 1998/08/30 09:19:40 veego Exp $	*/
 
 /*
@@ -13,11 +13,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -39,7 +35,7 @@
 #if 0
 static char sccsid[] = "@(#)sync.c	8.2 (Berkeley) 4/28/95";
 #else
-static char rcsid[] = "$OpenBSD: sync.c,v 1.3 2002/02/19 19:39:36 millert Exp $";
+static char rcsid[] = "$OpenBSD: sync.c,v 1.7 2003/07/06 02:03:13 avsm Exp $";
 #endif
 #endif /* not lint */
 
@@ -104,7 +100,7 @@ makesignal(struct ship *from, const char *fmt, struct ship *ship, ...)
 
 	va_start(ap, ship);
 	fmtship(format, sizeof(format), fmt, ship);
-	(void) vsprintf(message, format, ap);
+	(void) vsnprintf(message, sizeof message, format, ap);
 	va_end(ap);
 	Writestr(W_SIGNAL, from, message);
 }
@@ -116,7 +112,7 @@ makemsg(struct ship *from, const char *fmt, ...)
 	va_list ap;
 
 	va_start(ap, fmt);
-	(void) vsprintf(message, fmt, ap);
+	(void) vsnprintf(message, sizeof message, fmt, ap);
 	va_end(ap);
 	Writestr(W_SIGNAL, from, message);
 }
@@ -129,7 +125,7 @@ sync_exists(game)
 	struct stat s;
 	time_t t;
 
-	(void) sprintf(buf, SF, game);
+	(void) snprintf(buf, sizeof buf, SF, game);
 	(void) time(&t);
 	setegid(egid);
 	if (stat(buf, &s) < 0) {
@@ -138,7 +134,7 @@ sync_exists(game)
 	}
 	if (s.st_mtime < t - 60*60*2) {		/* 2 hours */
 		(void) unlink(buf);
-		(void) sprintf(buf, LF, game);
+		(void) snprintf(buf, sizeof buf, LF, game);
 		(void) unlink(buf);
 		setegid(gid);
 		return 0;
@@ -154,8 +150,8 @@ sync_open()
 
 	if (sync_fp != NULL)
 		(void) fclose(sync_fp);
-	(void) sprintf(sync_lock, LF, game);
-	(void) sprintf(sync_file, SF, game);
+	(void) snprintf(sync_lock, sizeof sync_lock, LF, game);
+	(void) snprintf(sync_file, sizeof sync_file, SF, game);
 	setegid(egid);
 	if (stat(sync_file, &tmp) < 0) {
 		mode_t omask = umask(002);
@@ -189,8 +185,9 @@ Write(type, ship, a, b, c, d)
 	struct ship *ship;
 	long a, b, c, d;
 {
-	(void) sprintf(sync_bp, "%d %d 0 %ld %ld %ld %ld\n",
-		       type, ship->file->index, a, b, c, d);
+	(void) snprintf(sync_bp, sync_buf + sizeof sync_buf - sync_bp,
+		"%d %d 0 %ld %ld %ld %ld\n",
+	       type, ship->file->index, a, b, c, d);
 	while (*sync_bp++)
 		;
 	sync_bp--;
@@ -205,8 +202,9 @@ Writestr(type, ship, a)
 	struct ship *ship;
 	const char *a;
 {
-	(void) sprintf(sync_bp, "%d %d 1 %s\n",
-		       type, ship->file->index, a);
+	(void) snprintf(sync_bp, sync_buf + sizeof sync_buf - sync_bp,
+		"%d %d 1 %s\n",
+		type, ship->file->index, a);
 	while (*sync_bp++)
 		;
 	sync_bp--;
@@ -395,9 +393,8 @@ sync_update(type, ship, astr, a, b, c, d)
 		break;
 		}
 	case W_CAPTAIN:
-		(void) strncpy(ship->file->captain, astr,
-			sizeof ship->file->captain - 1);
-		ship->file->captain[sizeof ship->file->captain - 1] = 0;
+		(void) strlcpy(ship->file->captain, astr,
+			sizeof ship->file->captain);
 		break;
 	case W_CAPTURED:
 		if (a < 0)
@@ -434,9 +431,8 @@ sync_update(type, ship, astr, a, b, c, d)
 		ship->specs->hull = a;
 		break;
 	case W_MOVE:
-		(void) strncpy(ship->file->movebuf, astr,
-			sizeof ship->file->movebuf - 1);
-		ship->file->movebuf[sizeof ship->file->movebuf - 1] = 0;
+		(void) strlcpy(ship->file->movebuf, astr,
+			sizeof ship->file->movebuf);
 		break;
 	case W_PCREW:
 		ship->file->pcrew = a;
@@ -497,7 +493,8 @@ sync_update(type, ship, astr, a, b, c, d)
 		windspeed = b;
 		break;
 	case W_BEGIN:
-		(void) strcpy(ship->file->captain, "begin");
+		(void) strlcpy(ship->file->captain, "begin",
+		    sizeof ship->file->captain);
 		people++;
 		break;
 	case W_END:

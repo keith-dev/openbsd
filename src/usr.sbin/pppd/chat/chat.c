@@ -1,4 +1,4 @@
-/*	$OpenBSD: chat.c,v 1.18 2002/07/02 22:22:56 millert Exp $	*/
+/*	$OpenBSD: chat.c,v 1.21 2003/04/25 23:23:50 deraadt Exp $	*/
 
 /*
  *	Chat -- a program for automatic session establishment (i.e. dial
@@ -83,7 +83,7 @@
 #if 0
 static char rcsid[] = "Id: chat.c,v 1.19 1998/03/24 23:57:48 paulus Exp $";
 #else
-static char rcsid[] = "$OpenBSD: chat.c,v 1.18 2002/07/02 22:22:56 millert Exp $";
+static char rcsid[] = "$OpenBSD: chat.c,v 1.21 2003/04/25 23:23:50 deraadt Exp $";
 #endif
 #endif
 
@@ -209,7 +209,7 @@ void break_sequence(void);
 void terminate(int status);
 void pack_array(char **array, int end);
 char *expect_strtok(char *, char *);
-int vfmtmsg(char *, int, const char *, va_list);	/* vsprintf++ */
+int vfmtmsg(char *, int, const char *, va_list);	/* vsnprintf++ */
 
 int main(int, char *[]);
 
@@ -971,11 +971,11 @@ int c;
     c &= 0x7F;
 
     if (c < 32)
-	sprintf(string, "%s^%c", meta, (int)c + '@');
+	snprintf(string, sizeof string, "%s^%c", meta, (int)c + '@');
     else if (c == 127)
-	sprintf(string, "%s^?", meta);
+	snprintf(string, sizeof string, "%s^?", meta);
     else
-	sprintf(string, "%s%c", meta, c);
+	snprintf(string, sizeof string, "%s%c", meta, c);
 
     return (string);
 }
@@ -1354,7 +1354,7 @@ register char *string;
 		    struct tm* tm_now = localtime (&time_now);
 
 		    strftime (report_buffer, 20, "%b %d %H:%M:%S ", tm_now);
-		    strcat (report_buffer, report_string[n]);
+		    strlcat (report_buffer, report_string[n], sizeof(report_buffer));
 
 		    report_string[n] = (char *) NULL;
 		    report_gathering = 1;
@@ -1492,7 +1492,7 @@ pack_array (array, end)
 }
 
 /*
- * vfmtmsg - format a message into a buffer.  Like vsprintf except we
+ * vfmtmsg - format a message into a buffer.  Like vsnprintf except we
  * also specify the length of the output buffer, and we handle the
  * %m (error message) format.
  * Doesn't do floating-point formats.

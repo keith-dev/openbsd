@@ -1,4 +1,4 @@
-/*	$OpenBSD: atrun.c,v 1.7 2003/03/15 00:39:01 millert Exp $	*/
+/*	$OpenBSD: atrun.c,v 1.10 2003/06/17 21:56:26 millert Exp $	*/
 
 /*
  * Copyright (c) 2002-2003 Todd C. Miller <Todd.Miller@courtesan.com>
@@ -7,17 +7,21 @@
  * purpose with or without fee is hereby granted, provided that the above
  * copyright notice and this permission notice appear in all copies.
  *
- * THE SOFTWARE IS PROVIDED "AS IS" AND TODD C. MILLER DISCLAIMS ALL
- * WARRANTIES WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES
- * OF MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL TODD C. MILLER BE LIABLE
- * FOR ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
- * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION
- * OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN
- * CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+ * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+ * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+ * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+ * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ *
+ * Sponsored in part by the Defense Advanced Research Projects
+ * Agency (DARPA) and Air Force Research Laboratory, Air Force
+ * Materiel Command, USAF, under agreement number F39502-99-1-0512.
  */
 
 #if !defined(lint) && !defined(LINT)
-static const char rcsid[] = "$OpenBSD: atrun.c,v 1.7 2003/03/15 00:39:01 millert Exp $";
+static const char rcsid[] = "$OpenBSD: atrun.c,v 1.10 2003/06/17 21:56:26 millert Exp $";
 #endif
 
 #include "cron.h"
@@ -235,6 +239,7 @@ run_job(atjob *job, char *atfile)
 	long nuid, ngid;
 	FILE *fp;
 	WAIT_T waiter;
+	size_t nread;
 	char *cp, *ep, mailto[MAX_UNAME], buf[BUFSIZ];
 	int fd, always_mail;
 	int output_pipe[2];
@@ -248,6 +253,10 @@ run_job(atjob *job, char *atfile)
 		return;
 	}
 	unlink(atfile);
+
+	/* We don't want the atjobs dir in the log messages. */
+	if ((cp = strrchr(atfile, '/')) != NULL)
+		atfile = cp + 1;
 
 	/* Fork so other pending jobs don't have to wait for us to finish. */
 	switch (fork()) {
@@ -373,18 +382,8 @@ run_job(atjob *job, char *atfile)
 		_exit(ERROR_EXIT);
 	}
 
-#ifdef CAPITALIZE_FOR_PS
-	/* mark ourselves as different to PS command watchers by upshifting
-	 * our program name.  This has no effect on some kernels.
-	 * XXX - really want to set proc title to at job name instead
-	 */
-	/*local*/{
-		char *pch;
-
-		for (pch = ProgramName; *pch; pch++)
-			*pch = MkUpper(*pch);
-	}
-#endif /* CAPITALIZE_FOR_PS */
+	/* mark ourselves as different to PS command watchers */
+	setproctitle("atrun %s", atfile);
 
 	pipe(output_pipe);	/* child's stdout/stderr */
 	
@@ -513,14 +512,17 @@ run_job(atjob *job, char *atfile)
 	Debug(DPROC, ("[%ld] child reading output from grandchild\n",
 	    (long)getpid()))
 
-	fp = fdopen(output_pipe[READ_PIPE], "r");
-	if (always_mail || !feof(fp)) {
+	if ((fp = fdopen(output_pipe[READ_PIPE], "r")) == NULL) {
+		perror("fdopen");
+		(void) _exit(ERROR_EXIT);
+	}
+	nread = fread(buf, 1, sizeof(buf), fp);
+	if (nread != 0 || always_mail) {
 		FILE	*mail;
-		int	bytes = 0;
+		size_t	bytes = 0;
 		int	status = 0;
 		char	mailcmd[MAX_COMMAND];
 		char	hostname[MAXHOSTNAMELEN];
-		size_t	nread;
 
 		Debug(DPROC|DEXT, ("[%ld] got data from grandchild\n",
 		    (long)getpid()))
@@ -547,10 +549,10 @@ run_job(atjob *job, char *atfile)
 		fprintf(mail, "\nproduced the following output:\n\n");
 
 		/* Pipe the job's output to sendmail. */
-		while ((nread = fread(buf, 1, sizeof(buf), fp)) > 0) {
+		do {
 			bytes += nread;
 			fwrite(buf, nread, 1, mail);
-		}
+		} while ((nread = fread(buf, 1, sizeof(buf), fp)) != 0);
 
 		/*
 		 * If the mailer exits with non-zero exit status, log
@@ -559,9 +561,9 @@ run_job(atjob *job, char *atfile)
 		Debug(DPROC, ("[%ld] closing pipe to mail\n",
 		    (long)getpid()))
 		if ((status = cron_pclose(mail)) != 0) {
-			snprintf(buf, sizeof(buf), "mailed %d byte%s of output"
-			    " but got status 0x%04x\n",
-			    bytes, (bytes == 1) ? "" : "s", status);
+			snprintf(buf, sizeof(buf), "mailed %lu byte%s of output"
+			    " but got status 0x%04x\n", (unsigned long)bytes,
+			    (bytes == 1) ? "" : "s", status);
 			log_it(pw->pw_name, getpid(), "MAIL", buf);
 		}
 	}

@@ -1,4 +1,4 @@
-/*	$OpenBSD: sem.c,v 1.12 2003/01/08 06:54:16 deraadt Exp $	*/
+/*	$OpenBSD: sem.c,v 1.15 2003/06/11 21:09:50 deraadt Exp $	*/
 /*	$NetBSD: sem.c,v 1.9 1995/09/27 00:38:50 jtc Exp $	*/
 
 /*-
@@ -13,11 +13,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -38,7 +34,7 @@
 #if 0
 static char sccsid[] = "@(#)sem.c	8.1 (Berkeley) 5/31/93";
 #else
-static char rcsid[] = "$OpenBSD: sem.c,v 1.12 2003/01/08 06:54:16 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: sem.c,v 1.15 2003/06/11 21:09:50 deraadt Exp $";
 #endif
 #endif /* not lint */
 
@@ -62,9 +58,7 @@ static void	 doio(struct command *t, int *, int *);
 static void	 chkclob(char *);
 
 void
-execute(t, wanttty, pipein, pipeout)
-    register struct command *t;
-    int     wanttty, *pipein, *pipeout;
+execute(struct command *t, int wanttty, int *pipein, int *pipeout)
 {
     bool    forked = 0;
     struct biltins *bifunc;
@@ -91,7 +85,8 @@ execute(t, wanttty, pipein, pipeout)
 
     case NODE_COMMAND:
 	if ((t->t_dcom[0][0] & (QUOTE | TRIM)) == QUOTE)
-	    (void) Strcpy(t->t_dcom[0], t->t_dcom[0] + 1); /* safe */
+	    (void) memmove(t->t_dcom[0], t->t_dcom[0] + 1,
+		(Strlen(t->t_dcom[0] + 1) + 1) * sizeof(Char));
 	if ((t->t_dflg & F_REPEAT) == 0)
 	    Dfix(t);		/* $ " ' \ */
 	if (t->t_dcom[0] == 0)
@@ -459,8 +454,7 @@ execute(t, wanttty, pipein, pipeout)
 }
 
 static void
-vffree(i)
-int i;
+vffree(int i)
 {
     _exit(i);
 }
@@ -481,9 +475,7 @@ int i;
  * code is present and the user can choose it by setting noambiguous
  */
 static Char *
-splicepipe(t, cp)
-    register struct command *t;
-    Char *cp;	/* word after < or > */
+splicepipe(struct command *t, Char *cp) /* word after < or > */
 {
     Char *blk[2];
 
@@ -524,13 +516,11 @@ splicepipe(t, cp)
  * We may or maynot be forked here.
  */
 static void
-doio(t, pipein, pipeout)
-    register struct command *t;
-    int    *pipein, *pipeout;
+doio(struct command *t, int *pipein, int *pipeout)
 {
-    register int fd;
-    register Char *cp;
-    register int flags = t->t_dflg;
+    int fd;
+    Char *cp;
+    int flags = t->t_dflg;
 
     if (didfds || (flags & F_REPEAT))
 	return;
@@ -618,8 +608,7 @@ doio(t, pipein, pipeout)
 }
 
 void
-mypipe(pv)
-    register int *pv;
+mypipe(int *pv)
 {
 
     if (pipe(pv) < 0)
@@ -633,8 +622,7 @@ oops:
 }
 
 static void
-chkclob(cp)
-    register char *cp;
+chkclob(char *cp)
 {
     struct stat stb;
 

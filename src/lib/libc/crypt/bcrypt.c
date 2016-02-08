@@ -1,4 +1,4 @@
-/*	$OpenBSD: bcrypt.c,v 1.16 2002/02/19 19:39:36 millert Exp $	*/
+/*	$OpenBSD: bcrypt.c,v 1.18 2003/08/07 00:28:45 deraadt Exp $	*/
 
 /*
  * Copyright 1997 Niels Provos <provos@physnet.uni-hamburg.de>
@@ -79,8 +79,7 @@ static char    error[] = ":";
 const static u_int8_t Base64Code[] =
 "./ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
 
-const static u_int8_t index_64[128] =
-{
+const static u_int8_t index_64[128] = {
 	255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
 	255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
 	255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
@@ -173,9 +172,7 @@ bcrypt_gensalt(u_int8_t log_rounds)
    i.e. $2$04$iwouldntknowwhattosayetKdJ6iFtacBqJdKe6aW7ou */
 
 char   *
-bcrypt(key, salt)
-	const char   *key;
-	const char   *salt;
+bcrypt(const char *key, const char *salt)
 {
 	blf_ctx state;
 	u_int32_t rounds, i, k;

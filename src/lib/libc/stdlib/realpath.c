@@ -13,11 +13,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -35,7 +31,7 @@
  */
 
 #if defined(LIBC_SCCS) && !defined(lint)
-static char *rcsid = "$OpenBSD: realpath.c,v 1.7 2002/05/24 21:22:37 deraadt Exp $";
+static char *rcsid = "$OpenBSD: realpath.c,v 1.10 2003/08/01 21:04:59 millert Exp $";
 #endif /* LIBC_SCCS and not lint */
 
 #include <sys/param.h>
@@ -60,7 +56,7 @@ realpath(path, resolved)
 	char *resolved;
 {
 	struct stat sb;
-	int fd, n, rootd, serrno;
+	int fd, n, needslash, serrno;
 	char *p, *q, wbuf[MAXPATHLEN];
 	int symlinks = 0;
 
@@ -134,18 +130,18 @@ loop:
 	 * happens if the last component is empty, or the dirname is root.
 	 */
 	if (resolved[0] == '/' && resolved[1] == '\0')
-		rootd = 1;
+		needslash = 0;
 	else
-		rootd = 0;
+		needslash = 1;
 
 	if (*wbuf) {
-		if (strlen(resolved) + strlen(wbuf) + rootd + 1 > MAXPATHLEN) {
+		if (strlen(resolved) + strlen(wbuf) + needslash >= MAXPATHLEN) {
 			errno = ENAMETOOLONG;
 			goto err1;
 		}
-		if (rootd == 0)
-			(void)strcat(resolved, "/");
-		(void)strcat(resolved, wbuf);
+		if (needslash)
+			strlcat(resolved, "/", MAXPATHLEN);
+		strlcat(resolved, wbuf, MAXPATHLEN);
 	}
 
 	/* Go back to where we came from. */

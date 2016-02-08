@@ -1,4 +1,4 @@
-/*	$OpenBSD: ldasm.S,v 1.11 2003/02/26 22:05:06 drahn Exp $ */
+/*	$OpenBSD: ldasm.S,v 1.13 2003/07/09 21:01:10 drahn Exp $ */
 
 /*
  * Copyright (c) 1999 Dale Rahn
@@ -11,12 +11,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed under OpenBSD by
- *	Dale Rahn.
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS
  * OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
@@ -30,15 +24,6 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- */
-
-/*
- * #ifdef blrl_never_causes_illegal_access
- * background for the else of this define
- * On the machine this code is being written, on a large portion
- * of the tims this code is executed the blrl instruct causes an
- * illegal instruction, hopefully by touching the page with a load
- * will prevent the execute access from faulting.
  */
 
 #define AUX_entry 9
@@ -59,13 +44,11 @@ ENTRY(_dl_start)
 	mr 22, 5	#envp
 	mr 23, 6	# ???
 
-	.local	.L___offset_sym
-	.type .L___offset_sym,@function
 	bl	1f
-.L___offset_sym:
 	# this instruction never gets executed but can be used
 	# to find the virtual address where the page is loaded.
 	bl _GLOBAL_OFFSET_TABLE_@local-4
+	bl _DYNAMIC@local
 1:
 	mflr	5		# this stores where we are (+4)
 	lwz	18, 0(5)	# load the instruction at offset_sym
@@ -100,21 +83,22 @@ ENTRY(_dl_start)
 	sync
 	isync
 
-	# calculate where we want to be (via the got)
-	bl _GLOBAL_OFFSET_TABLE_@local-4
-	mflr 28
+	/* This calculates the address of _DYNAMIC the same way
+	 * that the GLOBAL_OFFSET_TABLE was calculated.
+	 */
+	lwz	18, 4(5)
+	rlwinm	18,18,0,8,30	# mask off the offset portion of the instr.
+	add	8, 18, 5	# address of _DYNAMIC (arg6 for _dl_boot)
+	addi	18, 8, 4	# correction.
+	lwz	4, 4(28)	# load address of _DYNAMIC according to got.
+	sub	4, 18, 4	# determine load offset
 
-
-	lwz	4, .L___offset_sym@got(28)
-	mr	6, 4		# make copy of register for debugging
-
-
-	sub	4, 5, 4		# calculate offset (arg1 for _dl_boot)
-	mr	17, 4
+	mr	17, 4		# save for _dl_boot
 
 
 	subi	3, 21, 4	# Get stack pointer (arg0 for _dl_boot).
 	addi	4, 1, 8		# dl_data
+	mr	5, 18		# dynamicp
 
 	bl	_dl_boot_bind@local
 

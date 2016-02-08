@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile.inc,v 1.8 2002/09/23 18:31:03 markus Exp $
+#	$OpenBSD: Makefile.inc,v 1.11 2003/08/08 19:39:25 deraadt Exp $
 
 TOP=		${.CURDIR}/..
 
@@ -6,7 +6,6 @@ TOP=		${.CURDIR}/..
 IMAGE=		mr.fs
 CBIN?=		instbin
 CRUNCHCONF?=	${CBIN}.conf
-CRUNCHCONFS?=	${.CURDIR}/../common/crunch.conf
 LISTS?=		${.CURDIR}/../common/list
 UTILS?=		${.CURDIR}/../../miniroot
 
@@ -36,6 +35,7 @@ ${FS}:	bsd.gz
 	mount ${VND_DEV} ${MOUNT_POINT}
 	cp ${BOOT} ${.OBJDIR}/boot
 	strip ${.OBJDIR}/boot
+	strip -R .comment ${.OBJDIR}/boot
 	dd if=${.OBJDIR}/boot of=${MOUNT_POINT}/boot bs=512
 	dd if=bsd.gz of=${MOUNT_POINT}/bsd bs=512
 	/usr/mdec/installboot -v -s ${FLOPPYSECS} -h 2 ${MOUNT_POINT}/boot \
@@ -56,6 +56,7 @@ NEWFSARGS= -m 0 -o space -c 16 -i 4096
 bsd.gz: bsd.rd
 	cp bsd.rd bsd.strip
 	strip bsd.strip
+	strip -R .comment bsd.strip
 	gzip -c9 bsd.strip > bsd.gz
 
 bsd.rd:	${IMAGE} bsd rdsetroot
@@ -86,8 +87,8 @@ rd_teardown:
 	cp ${REALIMAGE} ${IMAGE}
 	rm ${REALIMAGE}
 
-rdsetroot:	${TOP}/../common/rdsetroot.c
-	${HOSTCC} -DDEBUG -o rdsetroot ${TOP}/../common/rdsetroot.c
+rdsetroot:	${TOP}/../common/elfrdsetroot.c
+	${HOSTCC} -DDEBUG -o rdsetroot ${TOP}/../common/elfrdsetroot.c
 
 unconfig:
 	-umount -f ${MOUNT_POINT}
@@ -102,14 +103,15 @@ install:
 	cp ${FS} ${DESTDIR}/snapshot/${FS}
 
 ${CBIN}.mk ${CBIN}.cache ${CBIN}.c: ${CRUNCHCONF}
-	crunchgen -D ${BSDSRCDIR} -L ${DESTDIR}/usr/lib \
+	crunchgen -E -D ${BSDSRCDIR} -L ${DESTDIR}/usr/lib \
 	-c ${CBIN}.c -e ${CBIN} -m ${CBIN}.mk ${CRUNCHCONF}
 
 ${CBIN}: ${CBIN}.mk ${CBIN}.cache ${CBIN}.c
 	make -f ${CBIN}.mk all
+	strip -R .comment ${CBIN}
 
 ${CRUNCHCONF}: ${LISTS}
-	awk -f ${UTILS}/makeconf.awk CBIN=${CBIN} ${LISTS} > ${CBIN}.conf
+	awk -f ${UTILS}/makeconf.awk CBIN=${CBIN} ${LISTS} > ${CRUNCHCONF}
 
 do_files:
 	mtree -def ${MTREE} -p ${MOUNT_POINT}/ -u

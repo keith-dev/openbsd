@@ -1,4 +1,4 @@
-# $OpenBSD: Makefile.bsd-wrapper,v 1.53 2003/03/08 18:28:55 beck Exp $
+# $OpenBSD: Makefile.bsd-wrapper,v 1.57 2003/08/10 20:44:27 espie Exp $
 #
 # Build wrapper for Perl 5.8.0
 #
@@ -474,11 +474,15 @@ INST_PROG='/usr/bin/install -cs'
 INST_PROG='/usr/bin/install -c'
 .endif
 
-MLINKS=		c2ph.1 pstruct.1 s2p.1 psed.1
+MLINKS=		c2ph.1 pstruct.1 s2p.1 psed.1 \
+		Getopt::Std.3p getopt.3p Getopt::Std.3p getopts.3p \
+		File::Basename.3p dirname.3p File::Basename.3p basename.3p \
+		File::Basename.3p fileparse.3p
 
 # NOTE: config.sh *must* be first
 GENERATED=	config.sh config.h cflags makeaperl makedepend makedir \
-		myconfig writemain Makefile Policy.sh x2p/Makefile x2p/cflags
+		myconfig writemain Makefile Policy.sh pod/Makefile \
+		x2p/Makefile x2p/cflags
 
 CLEANFILES=	config.sh Policy.sh ${MANALL} ${PSALL} ${MANSRCALL}
 
@@ -527,6 +531,9 @@ myconfig:
 writemain:
 	cd ${.OBJDIR} && exec /bin/sh writemain.SH
 
+pod/Makefile:
+	cd ${.OBJDIR}/pod && exec /bin/sh Makefile.SH
+
 x2p/Makefile:
 	cd ${.OBJDIR}/x2p && exec /bin/sh Makefile.SH
 
@@ -536,34 +543,6 @@ x2p/cflags:
 # Never try to regenerate perly.c or perly.h
 perly.c perly.h: perly.y
 	-@true
-
-# these dump the core on toke
-.if ${MACHINE} == "hppa"
-
-toke.o: toke.c
-	@echo "${COMPILE.c} ${.IMPSRC} -O0 -o ${.TARGET}"
-	@${COMPILE.c} ${.IMPSRC} -O0 -o ${.TARGET}.o
-	@${LD} -x -r ${.TARGET}.o -o ${.TARGET}
-	@rm -f ${.TARGET}.o
-
-toke.go: toke.c
-	@echo "${COMPILE.c} -g ${.IMPSRC} -O0 -o ${.TARGET}"
-	@${COMPILE.c} -g ${.IMPSRC} -O0 -o ${.TARGET}.o
-	@${LD} -X -r ${.TARGET}.o -o ${.TARGET}
-	@rm -f ${.TARGET}.o
-
-toke.po: toke.c
-	@echo "${COMPILE.c} -p ${.IMPSRC} -O0 -o ${.TARGET}"
-	@${COMPILE.c} -p ${.IMPSRC} -O0 -o ${.TARGET}.o
-	@${LD} -X -r ${.TARGET}.o -o ${.TARGET}
-	@rm -f ${.TARGET}.o
-
-toke.so: toke.c
-	@echo "${COMPILE.c} ${PICFLAG} -DPIC ${.IMPSRC} -O0 -o ${.TARGET}"
-	@${COMPILE.c} ${PICFLAG} -DPIC ${.IMPSRC} -O0 -o ${.TARGET}.o
-	@${LD} -x -r ${.TARGET}.o -o ${.TARGET}
-	@rm -f ${.TARGET}.o
-.endif
 
 .ifdef NOMAN
 maninstall:

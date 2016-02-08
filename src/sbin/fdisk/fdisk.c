@@ -1,4 +1,4 @@
-/*	$OpenBSD: fdisk.c,v 1.34 2001/12/15 02:12:26 kjell Exp $	*/
+/*	$OpenBSD: fdisk.c,v 1.37 2003/07/02 21:44:57 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1997 Tobias Weingartner
@@ -12,11 +12,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *    This product includes software developed by Tobias Weingartner.
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -47,11 +42,11 @@ static unsigned char builtin_mbr[] = {
 #include "mbrcode.h"
 };
 
-
-void
-usage()
+static void
+usage(void)
 {
 	extern char * __progname;
+
 	fprintf(stderr, "usage: %s "
 	    "[-ieu] [-f mbrboot] [-c cyl -h head -s sect] disk\n"
 	    "\t-i: initialize disk with virgin MBR\n"
@@ -66,9 +61,7 @@ usage()
 
 
 int
-main(argc, argv)
-	int argc;
-	char **argv;
+main(int argc, char *argv[])
 {
 	int ch, fd;
 	int i_flag = 0, m_flag = 0, u_flag = 0;

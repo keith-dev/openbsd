@@ -1,4 +1,4 @@
-/*	$OpenBSD: policy.h,v 1.10 2002/06/10 18:08:58 ho Exp $	*/
+/*	$OpenBSD: policy.h,v 1.12 2003/06/04 07:31:17 ho Exp $	*/
 /*	$EOM: policy.h,v 1.12 2000/09/28 12:53:27 niklas Exp $ */
 
 /*
@@ -13,11 +13,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by Ericsson Radio Systems.
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -37,10 +32,6 @@
 
 #ifndef _POLICY_H_
 #define _POLICY_H_
-
-#ifndef POLICY_FILE_DEFAULT
-#define POLICY_FILE_DEFAULT "/etc/isakmpd/isakmpd.policy"
-#endif /* POLICY_FILE_DEFAULT */
 
 #if defined (USE_KEYNOTE)
 #define CREDENTIAL_FILE "credentials"

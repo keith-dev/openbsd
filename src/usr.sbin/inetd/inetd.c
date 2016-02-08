@@ -1,4 +1,4 @@
-/*	$OpenBSD: inetd.c,v 1.108 2002/11/11 23:46:29 millert Exp $	*/
+/*	$OpenBSD: inetd.c,v 1.111 2003/06/26 19:47:08 deraadt Exp $	*/
 /*	$NetBSD: inetd.c,v 1.11 1996/02/22 11:14:41 mycroft Exp $	*/
 /*
  * Copyright (c) 1983,1991 The Regents of the University of California.
@@ -12,11 +12,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -41,7 +37,7 @@ char copyright[] =
 
 #ifndef lint
 /*static char sccsid[] = "from: @(#)inetd.c	5.30 (Berkeley) 6/3/91";*/
-static char rcsid[] = "$OpenBSD: inetd.c,v 1.108 2002/11/11 23:46:29 millert Exp $";
+static char rcsid[] = "$OpenBSD: inetd.c,v 1.111 2003/06/26 19:47:08 deraadt Exp $";
 #endif /* not lint */
 
 /*
@@ -1834,7 +1830,7 @@ void
 daytime_stream(int s, struct servtab *sep)
 {
 	char buffer[256];
-	time_t time(), clock;
+	time_t clock;
 
 	clock = time(NULL);
 
@@ -1848,7 +1844,7 @@ void
 daytime_dg(int s, struct servtab *sep)
 {
 	char buffer[256];
-	time_t time(), clock;
+	time_t clock;
 	struct sockaddr_storage ss;
 	socklen_t size;
 
@@ -1886,7 +1882,7 @@ print_service(char *action, struct servtab *sep)
 		fprintf(stderr, "proto=%s,", sep->se_proto);
 
 	fprintf(stderr,
-	    " wait.max=%hd.%d user:group=%s.%s builtin=%lx server=%s\n",
+	    " wait.max=%hd.%d user:group=%s:%s builtin=%lx server=%s\n",
 	    sep->se_wait, sep->se_max, sep->se_user,
 	    sep->se_group ? sep->se_group : "wheel",
 	    (long)sep->se_bi, sep->se_server);

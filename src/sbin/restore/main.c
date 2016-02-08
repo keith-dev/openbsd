@@ -1,4 +1,4 @@
-/*	$OpenBSD: main.c,v 1.11 2002/02/16 21:27:37 millert Exp $	*/
+/*	$OpenBSD: main.c,v 1.14 2003/07/28 06:13:26 tedu Exp $	*/
 /*	$NetBSD: main.c,v 1.13 1997/07/01 05:37:51 lukem Exp $	*/
 
 /*
@@ -13,11 +13,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -44,7 +40,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)main.c	8.3 (Berkeley) 9/13/94";
 #else
-static char rcsid[] = "$NetBSD: main.c,v 1.11 1996/03/15 22:39:39 scottr Exp $";
+static const char rcsid[] = "$OpenBSD: main.c,v 1.14 2003/07/28 06:13:26 tedu Exp $";
 #endif
 #endif /* not lint */
 
@@ -255,7 +251,7 @@ main(argc, argv)
 		extractdirs(0);
 		initsymtable(NULL);
 		while (argc--) {
-			canon(*argv++, name);
+			canon(*argv++, name, sizeof name);
 			ino = dirlookup(name);
 			if (ino == 0)
 				continue;
@@ -270,7 +266,7 @@ main(argc, argv)
 		extractdirs(1);
 		initsymtable(NULL);
 		while (argc--) {
-			canon(*argv++, name);
+			canon(*argv++, name, sizeof name);
 			ino = dirlookup(name);
 			if (ino == 0)
 				continue;
@@ -312,6 +308,7 @@ obsolete(argcp, argvp)
 {
 	int argc, flags;
 	char *ap, **argv, *flagsp, **nargv, *p;
+	size_t len;
 
 	/* Setup. */
 	argv = *argvp;
@@ -339,11 +336,12 @@ obsolete(argcp, argvp)
 				warnx("option requires an argument -- %c", *ap);
 				usage();
 			}
-			if ((nargv[0] = malloc(strlen(*argv) + 2 + 1)) == NULL)
+			len = strlen(*argv) + 2 + 1;
+			if ((nargv[0] = malloc(len)) == NULL)
 				err(1, NULL);
 			nargv[0][0] = '-';
 			nargv[0][1] = *ap;
-			(void)strcpy(&nargv[0][2], *argv);
+			(void)strlcpy(&nargv[0][2], *argv, len-2);
 			++argv;
 			++nargv;
 			break;

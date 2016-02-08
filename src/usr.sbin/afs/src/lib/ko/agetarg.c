@@ -33,7 +33,7 @@
 
 #ifdef HAVE_CONFIG_H
 #include <config.h>
-RCSID("$KTH: agetarg.c,v 1.8.2.3 2001/05/17 07:38:30 lha Exp $");
+RCSID("$arla: agetarg.c,v 1.13 2002/09/17 18:30:53 lha Exp $");
 #endif
 
 #include <stdio.h>
@@ -92,6 +92,7 @@ mandoc_template(struct agetargs *args,
     char timestr[64], cmd[64];
     const char *p;
     time_t t;
+    extern char *__progname;
 
     printf(".\\\" Things to fix:\n");
     printf(".\\\"   * correct section, and operating system\n");
@@ -428,6 +429,8 @@ arg_match_long(struct agetargs *args, int argc,
 	    current = partial;
 	else
 	    return AARG_ERR_NO_MATCH;
+
+	numarg = current - args;
     }
 
     if(*optarg == '\0' && !ISFLAG(current))
@@ -480,9 +483,8 @@ agetarg(struct agetargs *args,
 	    usedargs[swcount] = 1;
 	    i += j;
 	    swcount++;
-	} else if(argv[i][0] == '-' &&
-		  (argv[i][1] == '-' || 
-		   ((style & AARG_TRANSLONG) && argv[i][1] != 0))) {
+	} else if(argv[i][1] == '-' || 
+		  ((style & AARG_TRANSLONG) && argv[i][1] != 0)) {
 	    int k;
 
 	    if(argv[i][2] == 0 && !(style & AARG_TRANSLONG)){
@@ -560,8 +562,7 @@ agetarg(struct agetargs *args,
 		}
 	    }
 	out:;
-	} else
-	    break;
+	}
     }
     *optind = i;
 

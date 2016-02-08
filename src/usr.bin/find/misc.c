@@ -1,4 +1,4 @@
-/*	$OpenBSD: misc.c,v 1.7 2001/11/19 19:02:13 mpech Exp $	*/
+/*	$OpenBSD: misc.c,v 1.9 2003/06/26 07:27:29 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 1990, 1993
@@ -15,11 +15,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -38,11 +34,12 @@
 
 #ifndef lint
 /*static char sccsid[] = "from: @(#)misc.c	8.1 (Berkeley) 6/6/93";*/
-static char rcsid[] = "$OpenBSD: misc.c,v 1.7 2001/11/19 19:02:13 mpech Exp $";
+static char rcsid[] = "$OpenBSD: misc.c,v 1.9 2003/06/26 07:27:29 deraadt Exp $";
 #endif /* not lint */
 
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <sys/uio.h>
 
 #include <err.h>
 #include <errno.h>
@@ -59,9 +56,7 @@ static char rcsid[] = "$OpenBSD: misc.c,v 1.7 2001/11/19 19:02:13 mpech Exp $";
  *	Replace occurrences of {} in s1 with s2 and return the result string.
  */
 void
-brace_subst(orig, store, path, len)
-	char *orig, **store, *path;
-	int len;
+brace_subst(char *orig, char **store, char *path, int len)
 {
 	int plen;
 	char ch, *p;
@@ -86,8 +81,7 @@ brace_subst(orig, store, path, len)
  *	input. If the input is 'y' then 1 is returned.
  */
 int
-queryuser(argv)
-	char **argv;
+queryuser(char **argv)
 {
 	int ch, first, nl;
 
@@ -120,8 +114,7 @@ queryuser(argv)
  *	malloc with error checking.
  */
 void *
-emalloc(len)
-	u_int len;
+emalloc(u_int len)
 {
 	void *p;
 
@@ -136,16 +129,20 @@ emalloc(len)
  */
 /* ARGSUSED */
 void
-show_path(sig)
-	int sig;
+show_path(int signo)
 {
 	int save_errno = errno;
 	extern FTSENT *entry;
+	struct iovec iov[3];
 
 	if (entry != NULL) {
-		write(STDERR_FILENO, "find path: ", 11);
-		write(STDERR_FILENO, entry->fts_path, entry->fts_pathlen);
-		write(STDERR_FILENO, "\n", 1);
+		iov[0].iov_base = "find path: ";
+		iov[0].iov_len = strlen(iov[0].iov_base);
+		iov[1].iov_base = entry->fts_path;
+		iov[1].iov_len = entry->fts_pathlen;
+		iov[2].iov_base = "\n";
+		iov[2].iov_len = strlen(iov[2].iov_base);
+		writev(STDERR_FILENO, iov, 3);
 		errno = save_errno;
 	}
 }

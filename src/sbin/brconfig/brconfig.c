@@ -1,4 +1,4 @@
-/*	$OpenBSD: brconfig.c,v 1.23 2002/12/18 16:10:27 markus Exp $	*/
+/*	$OpenBSD: brconfig.c,v 1.26 2003/06/25 09:44:55 henning Exp $	*/
 
 /*
  * Copyright (c) 1999, 2000 Jason L. Wright (jason@thought.net)
@@ -12,11 +12,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by Jason L. Wright
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
@@ -739,12 +734,12 @@ int
 bridge_timeout(int s, char *brdg, char *arg)
 {
 	struct ifbrparam bp;
-	u_int32_t newtime;
+	int newtime;
 	char *endptr;
 
 	errno = 0;
-	newtime = strtoul(arg, &endptr, 0);
-	if (arg[0] == '\0' || endptr[0] != '\0' ||
+	newtime = strtol(arg, &endptr, 0);
+	if (arg[0] == '\0' || endptr[0] != '\0' || newtime < 0 ||
 	    (errno == ERANGE && newtime == ULONG_MAX)) {
 		printf("invalid arg for timeout: %s\n", arg);
 		return (EX_USAGE);
@@ -1160,6 +1155,8 @@ bridge_showrule(struct ifbrlreq *r, char *delim)
 		printf(" src %s", ether_ntoa(&r->ifbr_src));
 	if (r->ifbr_flags & BRL_FLAG_DSTVALID)
 		printf(" dst %s", ether_ntoa(&r->ifbr_dst));
+	if (r->ifbr_tagname[0])
+		printf(" tag %s", r->ifbr_tagname);
 
 	printf("\n");
 }
@@ -1182,6 +1179,7 @@ bridge_rule(int s, char *brdg, int targc, char **targv, int ln)
 		fprintf(stderr, "invalid rule\n");
 		return (EX_USAGE);
 	}
+	rule.ifbr_tagname[0] = 0;
 	rule.ifbr_flags = 0;
 	rule.ifbr_action = 0;
 	strlcpy(rule.ifbr_name, brdg, sizeof(rule.ifbr_name));
@@ -1228,6 +1226,21 @@ bridge_rule(int s, char *brdg, int targc, char **targv, int ln)
 				goto bad_rule;
 			rule.ifbr_flags |= BRL_FLAG_SRCVALID;
 			dea = &rule.ifbr_src;
+		} else if (strcmp(argv[0], "tag") == 0) {
+			if (argc < 2) {
+				fprintf(stderr, "missing tag name\n");
+				goto bad_rule;
+			}
+			if (rule.ifbr_tagname[0]) {
+				fprintf(stderr, "tag already defined\n");
+				goto bad_rule;
+			}
+			if (strlcpy(rule.ifbr_tagname, argv[1],
+			    PF_TAG_NAME_SIZE) > PF_TAG_NAME_SIZE) {
+				fprintf(stderr, "tag name too long\n");
+				goto bad_rule;
+			}
+			dea = NULL;
 		} else
 			goto bad_rule;
 
@@ -1235,12 +1248,14 @@ bridge_rule(int s, char *brdg, int targc, char **targv, int ln)
 
 		if (argc == 0)
 			goto bad_rule;
-		ea = ether_aton(argv[0]);
-		if (ea == NULL) {
-			warnx("Invalid address: %s", argv[0]);
-			return (EX_USAGE);
+		if (dea != NULL) {
+			ea = ether_aton(argv[0]);
+			if (ea == NULL) {
+				warnx("Invalid address: %s", argv[0]);
+				return (EX_USAGE);
+			}
+			bcopy(ea, dea, sizeof(*dea));
 		}
-		bcopy(ea, dea, sizeof(*dea));
 		argc--; argv++;
 	}
 

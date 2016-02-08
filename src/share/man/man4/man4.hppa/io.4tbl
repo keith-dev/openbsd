@@ -1,6 +1,6 @@
-.\" $OpenBSD: io.4tbl,v 1.2 2003/01/07 20:37:10 mickey Exp $
+.\" $OpenBSD: io.4tbl,v 1.7 2003/06/02 21:39:56 mickey Exp $
 .\"
-.\" Copyright (c) 2002 Paul Weissmann
+.\" Copyright (c) 2003 Paul Weissmann
 .\" All rights reserved.
 .\"
 .\" Redistribution and use in source and binary forms, with or without
@@ -11,11 +11,6 @@
 .\" 2. Redistributions in binary form must reproduce the above copyright
 .\"    notice, this list of conditions and the following disclaimer in the
 .\"    documentation and/or other materials provided with the distribution.
-.\" 3. All advertising materials mentioning features or use of this software
-.\"    must display the following acknowledgement:
-.\"      This product includes software developed by Paul Weissmann.
-.\" 3. The name of the author may not be used to endorse or promote products
-.\"    derived from this software without specific prior written permission
 .\"
 .\" THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
 .\" IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -39,7 +34,7 @@
 The following table lists the
 .Tn PA-RISC
 I/O subsystems and connected devices found in the supported
-.Tn HP9000/700
+.Tn HP 9000/700
 machines.
 .Pp
 .in +\n(dIu
@@ -52,35 +47,37 @@ Model:MBA:SCSI:Network:Video
 705:A:NCR53700 SE:i82596DX 10:?
 710:A:NCR53700 SE:i82596DX 10:?
 712:LW:NCR53710 SE:i82596CA 10  :Artist
-   :  :           :TR/9000 4/16:Artist
+   :  :           :[TR/9000 4/16]:
 715/33:A:NCR53700 SE:i82596DX 10:Stinger
 715/50:A:NCR53700 SE:i82596DX 10:Stinger
 715/64:LW:NCR53710 SE:i82596CA 10:Artist
 715/75:A:NCR53700 SE:i82596DX 10:Stinger
 715/80:LW:NCR53710 SE:i82596CA 10:Artist
 715/100:LW:NCR53710 SE:i82596CA 10:Artist
-720:A:NCR53700 SE:i82596DX 10:SGC
+720:A:NCR53700 SE:i82596DX 10:[SGC]
 725/50:A:NCR53700 SE:i82596DX 10:Stinger
 725/75:A:NCR53700 SE:i82596DX 10:Stinger
 725/64:LW:NCR53710 SE:i82596CA 10:Artist
 725/100:LW:NCR53710 SE:i82596CA 10:Artist
-730:A:NCR53700 SE:i82596DX 10:SGC
-735:A:NCR53700 SE:i82596DX 10:SGC
-   :   :NCR53720 FWD:Am78830 FDDI
-750:A:NCR53700 SE:i82596DX 10:SGC
-755:A:NCR53700 SE:i82596DX 10:SGC
-   :   :NCR53720 FWD:Am78830 FDDI
-J2x0:LW:NCR53710 SE:i82596CA 10:GSC
+730:A:NCR53700 SE:i82596DX 10:[SGC]
+735:A:NCR53700 SE:i82596DX 10:[SGC]
+   :   :NCR53720 FWD:[Am78830 FDDI]:
+745i:A:NCR53700 SE:i82596DX 10:Stinger
+747i:A:NCR53700 SE:i82596DX 10:Stinger
+750:A:NCR53700 SE:i82596DX 10:[SGC]
+755:A:NCR53700 SE:i82596DX 10:[SGC]
+   :   :NCR53720 FWD:[Am78830 FDDI]:
+J2x0:LW:NCR53710 SE:i82596CA 10:[GSC]
     :  :NCR53720 FWD:
-C1x0:LW:NCR53710 SE:i82596CA 10:GSC
+C1x0:LW:NCR53710 SE:i82596CA 10:[GSC]
     :  :NCR53720 FWD:
-A180:DL:NCR53710 SE:DC21142 100:PCI
+A180:DL:NCR53710 SE:DC21142 100:[PCI]
 B1xxL:DLW:NCR53710 SE:i82596CA 10:Visualize-EG
      :   :NCR53720 FWD:
 B1xxL+:DLW:NCR53710 SE:DC21142 100:Visualize-EG
-      :   :NCR53785 UW:
+      :   :NCR53875 UW:
 C1xxL:DLW:NCR53710 SE:DC21142 100:Visualize-EG
-     :   :NCR53785 UW:
+     :   :NCR53875 UW:
 .TE
 .in -\n(dIu
 .Pp
@@ -119,7 +116,7 @@ interface speed:
 .It 100
 10/100Mb/s,
 .It FDDI
-AMD FORMAC SAS FDDI
+AMD Formac+ FDDI
 .El
 .Pp
 .Sh SEE ALSO
@@ -129,8 +126,8 @@ AMD FORMAC SAS FDDI
 .Xr intro 4 ,
 .Xr lasi 4 ,
 .Xr osiop 4 ,
-.Xr siop 4 ,
-.Xr sti 4 .
+.Xr sti 4 ,
+.Xr wax 4
 .Sh HISTORY
 The
 hppa

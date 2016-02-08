@@ -1,4 +1,4 @@
-/*	$OpenBSD: minherit.c,v 1.1 2002/01/31 15:53:12 art Exp $	*/
+/*	$OpenBSD: minherit.c,v 1.3 2003/08/02 01:24:36 david Exp $	*/
 /*
  * Written by Artur Grabowski <art@openbsd.org> Public Domain.
  */
@@ -10,11 +10,12 @@
 #include <stdlib.h>
 #include <string.h>
 #include <err.h>
+#include <unistd.h>
 
 #define MAGIC "inherited"
 
 int
-main()
+main(int argc, char *argv[])
 {
 	void *map1, *map2;
 	int page_size;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: csh.h,v 1.9 2003/01/08 06:54:16 deraadt Exp $	*/
+/*	$OpenBSD: csh.h,v 1.15 2003/06/25 21:12:39 deraadt Exp $	*/
 /*	$NetBSD: csh.h,v 1.9 1995/03/21 09:02:40 cgd Exp $	*/
 
 /*-
@@ -13,11 +13,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -75,7 +71,7 @@ typedef char Char;
 #endif
 
 /*
- * Make sure a variable is not stored in a register by taking its address
+ * Make sure a variable is not stored in a by taking its address
  * This is used where variables might be clobbered by longjmp.
  */
 #define UNREGISTER(a)	(void) &a
@@ -209,7 +205,7 @@ sig_t parterm;			/* Parents terminate catch */
 #define	ASCII		0177
 #ifdef SHORT_STRINGS
 #define	CHAR		0377
-#define	QUOTE 		0100000	/* 16nth char bit used for 'ing */
+#define	QUOTE 		0100000U /* 16nth char bit used for 'ing */
 #define	TRIM		0077777	/* Mask to strip quote bit */
 #else
 #define	CHAR		0177
@@ -423,7 +419,7 @@ struct varent {
 #define v_right		v_link[1]
 #define v_parent	v_link[2]
 
-struct varent *adrof1();
+struct varent *adrof1(Char *, struct varent *);
 
 #define adrof(v)	adrof1(v, &shvhed)
 #define value(v)	value1(v, &shvhed)
@@ -489,10 +485,8 @@ Char    HISTSUB;		/* auto-substitute character */
 #ifndef SHORT_STRINGS
 #define Strchr(a, b)		strchr(a, b)
 #define Strrchr(a, b)		strrchr(a, b)
-#define Strcat(a, b)		strcat(a, b)
 #define Strlcat(a, b, l)	strlcat(a, b, l)
 #define Strncat(a, b, c) 	strncat(a, b, c)
-#define Strcpy(a, b)		strcpy(a, b)
 #define Strlcpy(a, b, l)	strlcpy(a, b, l)
 #define Strncpy(a, b, c) 	strncpy(a, b, c)
 #define Strlen(a)		strlen(a)
@@ -511,10 +505,8 @@ Char    HISTSUB;		/* auto-substitute character */
 #else
 #define Strchr(a, b)		s_strchr(a, b)
 #define Strrchr(a, b) 		s_strrchr(a, b)
-#define Strcat(a, b)		s_strcat(a, b)
 #define Strlcat(a, b, l)	s_strlcat(a, b, l)
 #define Strncat(a, b, c) 	s_strncat(a, b, c)
-#define Strcpy(a, b)		s_strcpy(a, b)
 #define Strlcpy(a, b, l)	s_strlcpy(a, b, l)
 #define Strncpy(a, b, c)	s_strncpy(a, b, c)
 #define Strlen(a)		s_strlen(a)

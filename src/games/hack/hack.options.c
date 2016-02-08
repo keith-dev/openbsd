@@ -1,4 +1,4 @@
-/*	$OpenBSD: hack.options.c,v 1.5 2003/03/16 21:22:36 camield Exp $	*/
+/*	$OpenBSD: hack.options.c,v 1.8 2003/07/06 02:07:45 avsm Exp $	*/
 
 /*
  * Copyright (c) 1985, Stichting Centrum voor Wiskunde en Informatica,
@@ -62,17 +62,21 @@
  */
 
 #ifndef lint
-static char rcsid[] = "$OpenBSD: hack.options.c,v 1.5 2003/03/16 21:22:36 camield Exp $";
+static const char rcsid[] = "$OpenBSD: hack.options.c,v 1.8 2003/07/06 02:07:45 avsm Exp $";
 #endif /* not lint */
 
+#include <ctype.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include "config.h"
 #include "hack.h"
-extern char *eos();
 
+static void parseoptions(char *, boolean);
+
+void
 initoptions()
 {
-	register char *opts;
-	extern char *getenv();
+	char *opts;
 
 	flags.time = flags.nonews = flags.notombstone = flags.end_own =
 	flags.standout = flags.nonull = FALSE;
@@ -82,28 +86,28 @@ initoptions()
 	flags.end_around = 4;
 	flags.female = FALSE;			/* players are usually male */
 
-	if(opts = getenv("HACKOPTIONS"))
+	if ((opts = getenv("HACKOPTIONS")))
 		parseoptions(opts,TRUE);
 }
 
-parseoptions(opts, from_env)
-register char *opts;
-boolean from_env;
+static void
+parseoptions(char *opts, boolean from_env)
 {
-	register char *op,*op2;
+	char *op,*op2;
 	unsigned num;
 	boolean negated;
 
-	if(op = strchr(opts, ',')) {
+	if ((op = strchr(opts, ','))) {
 		*op++ = 0;
 		parseoptions(op, from_env);
 	}
-	if(op = strchr(opts, ' ')) {
+	if ((op = strchr(opts, ' '))) {
 		op2 = op;
 		while(*op++)
 			if(*op != ' ') *op2++ = *op;
 	}
-	if(!*opts) return;
+	if (!*opts)
+		return;
 	negated = FALSE;
 	while((*opts == '!') || !strncmp(opts, "no", 2)) {
 		if(*opts == '!') opts++; else opts += 2;
@@ -167,8 +171,7 @@ boolean from_env;
 		}
 		op = strchr(opts,':');
 		if(!op) goto bad;
-		(void) strncpy(plname, op+1, sizeof(plname)-1);
-		plname[sizeof(plname)-1] = '\0';
+		(void) strlcpy(plname, op+1, sizeof(plname));
 		return;
 	}
 
@@ -179,9 +182,9 @@ boolean from_env;
 		op++;
 		while(*op) {
 			num = 1;
-			if(digit(*op)) {
+			if(isdigit(*op)) {
 				num = atoi(op);
-				while(digit(*op)) op++;
+				while(isdigit(*op)) op++;
 			} else
 			if(*op == '!') {
 				negated = !negated;
@@ -210,7 +213,7 @@ bad:
 		if(!strncmp(opts, "help", 4)) {
 			pline("%s%s%s",
 "To set options use `HACKOPTIONS=\"<options>\"' in your environment, or ",
-"give the command 'o' followed by the line `<options>' while playing. ",
+"give the command 'O' followed by the line `<options>' while playing. ",
 "Here <options> is a list of <option>s separated by commas." );
 			pline("%s%s%s",
 "Simple (boolean) options are rest_on_space, news, time, ",
@@ -225,7 +228,7 @@ bad:
 			return;
 		}
 		pline("Bad option: %s.", opts);
-		pline("Type `o help<cr>' for help.");
+		pline("Type `O help<cr>' for help.");
 		return;
 	}
 	puts("Bad syntax in HACKOPTIONS.");
@@ -236,6 +239,7 @@ bad:
 	getret();
 }
 
+int
 doset()
 {
 	char buf[BUFSZ];
@@ -243,21 +247,22 @@ doset()
 	pline("What options do you want to set? ");
 	getlin(buf);
 	if(!buf[0] || buf[0] == '\033') {
-	    (void) strcpy(buf,"HACKOPTIONS=");
-	    (void) strcat(buf, flags.female ? "female," : "male,");
-	    if(flags.standout) (void) strcat(buf,"standout,");
-	    if(flags.nonull) (void) strcat(buf,"nonull,");
-	    if(flags.nonews) (void) strcat(buf,"nonews,");
-	    if(flags.time) (void) strcat(buf,"time,");
-	    if(flags.notombstone) (void) strcat(buf,"notombstone,");
+	    (void) strlcpy(buf,"HACKOPTIONS=", sizeof buf);
+	    (void) strlcat(buf, flags.female ? "female," : "male,", sizeof buf);
+	    if(flags.standout) (void) strlcat(buf,"standout,", sizeof buf);
+	    if(flags.nonull) (void) strlcat(buf,"nonull,", sizeof buf);
+	    if(flags.nonews) (void) strlcat(buf,"nonews,", sizeof buf);
+	    if(flags.time) (void) strlcat(buf,"time,", sizeof buf);
+	    if(flags.notombstone) (void) strlcat(buf,"notombstone,", sizeof buf);
 	    if(flags.no_rest_on_space)
-		(void) strcat(buf,"!rest_on_space,");
+		(void) strlcat(buf,"!rest_on_space,", sizeof buf);
 	    if(flags.end_top != 5 || flags.end_around != 4 || flags.end_own){
-		(void) sprintf(eos(buf), "endgame: %u topscores/%u around me",
+		(void) snprintf(eos(buf), buf + sizeof buf - eos(buf),
+			"endgame: %u topscores/%u around me",
 			flags.end_top, flags.end_around);
-		if(flags.end_own) (void) strcat(buf, "/own scores");
+		if(flags.end_own) (void) strlcat(buf, "/own scores", sizeof buf);
 	    } else {
-		register char *eop = eos(buf);
+		char *eop = eos(buf);
 		if(*--eop == ',') *eop = 0;
 	    }
 	    pline(buf);

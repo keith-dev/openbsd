@@ -9,11 +9,7 @@
 .\" 2. Redistributions in binary form must reproduce the above copyright
 .\"    notice, this list of conditions and the following disclaimer in the
 .\"    documentation and/or other materials provided with the distribution.
-.\" 3. All advertising materials mentioning features or use of this software
-.\"    must display the following acknowledgement:
-.\"	This product includes software developed by the University of
-.\"	California, Berkeley and its contributors.
-.\" 4. Neither the name of the University nor the names of its contributors
+.\" 3. Neither the name of the University nor the names of its contributors
 .\"    may be used to endorse or promote products derived from this software
 .\"    without specific prior written permission.
 .\"
@@ -30,7 +26,7 @@
 .\" SUCH DAMAGE.
 .\"
 .\"     from: @(#)syslog.conf.5	8.1 (Berkeley) 6/9/93
-.\"     $OpenBSD: syslog.conf.5,v 1.9 2003/01/23 08:58:47 jmc Exp $
+.\"     $OpenBSD: syslog.conf.5,v 1.12 2003/06/26 18:28:00 jmc Exp $
 .\"	$NetBSD: syslog.conf.5,v 1.4 1996/01/02 17:41:46 perry Exp $
 .\"
 .Dd June 9, 1993
@@ -212,6 +208,13 @@ Selected messages are written to all logged-in users.
 Blank lines and lines whose first non-blank character is a hash
 .Pq Ql #
 character are ignored.
+.Sh FILES
+.Bl -tag -width /etc/syslog.conf -compact
+.It Pa /etc/syslog.conf
+The
+.Xr syslogd 8
+configuration file.
+.El
 .Sh EXAMPLES
 A configuration file might appear as follows:
 .Bd -literal
@@ -241,30 +244,12 @@ mail.*							/var/log/maillog
 
 # Save mail and news errors of level err and higher in a
 # special file.
-uucp,news.crit						/var/log/spoolerr
+mail,news.err						/var/log/spoolerr
 
 # Save ftpd transactions along with mail and news
 !ftpd
 *.*                                                     /var/log/spoolerr
 .Ed
-.Sh FILES
-.Bl -tag -width /etc/syslog.conf -compact
-.It Pa /etc/syslog.conf
-The
-.Xr syslogd 8
-configuration file.
-.El
-.Sh BUGS
-The effects of multiple selectors are sometimes not intuitive.
-For example
-.Dq mail.crit,*.err
-will select
-.Dq mail
-facility messages at the level of
-.Dq err
-or higher, not at the level of
-.Dq crit
-or higher.
 .Sh SEE ALSO
 .Xr syslog 3 ,
 .Xr syslogd 8
@@ -275,3 +260,14 @@ file appeared in
 .Bx 4.3 ,
 along with
 .Xr syslogd 8 .
+.Sh BUGS
+The effects of multiple selectors are sometimes not intuitive.
+For example
+.Dq mail.crit;*.err
+will select
+.Dq mail
+facility messages at the level of
+.Dq err
+or higher, not at the level of
+.Dq crit
+or higher.

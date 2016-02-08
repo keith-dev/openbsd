@@ -1,4 +1,4 @@
-.\"	$OpenBSD: audio.9,v 1.11 2003/03/08 23:17:18 jmc Exp $
+.\"	$OpenBSD: audio.9,v 1.14 2003/06/06 20:56:32 jmc Exp $
 .\"	$NetBSD: audio.9,v 1.14 2000/02/11 22:56:15 kleink Exp $
 .\"
 .\" Copyright (c) 1999, 2000 The NetBSD Foundation, Inc.
@@ -97,7 +97,7 @@ struct audio_hw_if {
 
 struct audio_params {
 	u_long	sample_rate;		/* sample rate */
-	u_int	encoding;		/* ulaw, linear, etc */
+	u_int	encoding;		/* mu-law, linear, etc */
 	u_int	precision;		/* bits/sample */
 	u_int	channels;		/* mono(1), stereo(2) */
 	/* Software en/decode functions, set if SW coding required by HW */
@@ -158,7 +158,7 @@ see
 and
 .Dv FFLAGS
 in
-.Pa sys/fcntl.h
+.Aq Pa sys/fcntl.h
 .Pc .
 It should initialize the hardware for I/O.
 Every successful call to
@@ -208,11 +208,11 @@ and
 .Va rec
 structures contain the encoding parameters that should be set.
 If the hardware requires software assistance with some encoding
-(e.g., it might be lacking mulaw support) it should fill the
+(e.g., it might be lacking mu-law support) it should fill the
 .Va sw_code
 and
 .Va factor
-fields of these structures. 
+fields of these structures.
 See
 .Pa /usr/src/sys/dev/auconv.h
 for available software support.
@@ -231,8 +231,9 @@ is copied into
 .Va rec
 after the call to
 .Va set_params .
-The mi audio driver does some preliminary parameter checking: it verifies
-that the precision is compatible with the encoding, and it translates
+The machine independent audio driver does some preliminary parameter checking:
+it verifies that the precision is compatible with the encoding,
+and it translates
 .Dv AUDIO_ENCODING_[US]LINEAR
 to
 .Dv AUDIO_ENCODING_[US]LINEAR_{LE,BE} .
@@ -305,7 +306,7 @@ should be called with the argument
 Calling
 .Va intr
 will normally initiate another call to
-.Va start_input.
+.Va start_input .
 Return 0 on success, otherwise an error code.
 .It Dv int halt_output(void *hdl)
 is called to abort the output transfer (started by
@@ -333,15 +334,15 @@ optional, is called when
 is used, but only if the device has AUDIO_PROP_FULLDUPLEX set.
 Return 0 on success, otherwise an error code.
 .It Dv int set_port(void *hdl, mixer_ctl_t *mc)
-is called in when
+is called when
 .Dv AUDIO_MIXER_WRITE
 is used.
 It should take data from the
 .Va mixer_ctl_t
-struct at set the corresponding mixer values.
+struct and set the corresponding mixer values.
 Return 0 on success, otherwise an error code.
 .It Dv int get_port(void *hdl, mixer_ctl_t *mc)
-is called in when
+is called when
 .Dv AUDIO_MIXER_READ
 is used.
 It should fill the
@@ -349,7 +350,7 @@ It should fill the
 struct.
 Return 0 on success, otherwise an error code.
 .It Dv int query_devinfo(void *hdl, mixer_devinfo_t *di)
-is called in when
+is called when
 .Dv AUDIO_MIXER_DEVINFO
 is used.
 It should fill the
@@ -374,7 +375,7 @@ Returns the address of the buffer, or 0 on failure.
 .It Dv void freem(void *hdl, void *addr, int type)
 optional, is called to free memory allocated by
 .Va allocm .
-If not supplied
+If not supplied,
 .Xr free 9
 is used.
 .It Dv size_t round_buffersize(void *hdl, int direction, size_t bufsize)

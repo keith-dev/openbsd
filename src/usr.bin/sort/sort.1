@@ -1,4 +1,4 @@
-.\"	$OpenBSD: sort.1,v 1.18 2002/11/09 02:22:33 fgsch Exp $
+.\"	$OpenBSD: sort.1,v 1.21 2003/07/14 12:56:07 jmc Exp $
 .\"
 .\" Copyright (c) 1991, 1993
 .\"	The Regents of the University of California.  All rights reserved.
@@ -14,11 +14,7 @@
 .\" 2. Redistributions in binary form must reproduce the above copyright
 .\"    notice, this list of conditions and the following disclaimer in the
 .\"    documentation and/or other materials provided with the distribution.
-.\" 3. All advertising materials mentioning features or use of this software
-.\"    must display the following acknowledgement:
-.\"	This product includes software developed by the University of
-.\"	California, Berkeley and its contributors.
-.\" 4. Neither the name of the University nor the names of its contributors
+.\" 3. Neither the name of the University nor the names of its contributors
 .\"    may be used to endorse or promote products derived from this software
 .\"    without specific prior written permission.
 .\"
@@ -48,7 +44,7 @@
 .Op Fl t Ar char
 .Op Fl R Ar char
 .Oo
-.Cm Fl k Ar field1[,field2]
+.Fl k Ar field1[,field2]
 .Oc
 .Ar ...
 .Op Fl T Ar dir
@@ -66,7 +62,7 @@ By default, if keys are not given,
 regards each input line as a single field.
 .Pp
 The options are as follows:
-.Bl -tag -width file Ds
+.Bl -tag -width Ds
 .It Fl c
 Check that the single input file is sorted.
 If the file is not sorted,
@@ -314,7 +310,7 @@ is omitted,
 .Fl k Ar v.x,w
 is synonymous with
 .Cm \(pl Ns Ar v-\&1.x-\&1
-.Fl Ns Ar w+1.0 .
+.Fl Ns Ar w\&.0 .
 The obsolescent
 .Cm \(pl Ns Ar pos1
 .Fl Ns Ar pos2

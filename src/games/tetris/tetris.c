@@ -1,4 +1,4 @@
-/*	$OpenBSD: tetris.c,v 1.15 2002/12/06 21:48:51 millert Exp $	*/
+/*	$OpenBSD: tetris.c,v 1.18 2003/06/03 03:01:41 millert Exp $	*/
 /*	$NetBSD: tetris.c,v 1.2 1995/04/22 07:42:47 cgd Exp $	*/
 
 /*-
@@ -16,11 +16,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -203,14 +199,14 @@ main(argc, argv)
 				errx(1, "duplicate command keys specified.");
 		}
 		if (keys[i] == ' ')
-			strcpy(key_write[i], "<space>");
+			strlcpy(key_write[i], "<space>", sizeof key_write[i]);
 		else {
 			key_write[i][0] = keys[i];
 			key_write[i][1] = '\0';
 		}
 	}
 
-	sprintf(key_msg,
+	snprintf(key_msg, sizeof key_msg,
 "%s - left   %s - rotate   %s - right   %s - drop   %s - pause   %s - quit",
 		key_write[0], key_write[1], key_write[2], key_write[3],
 		key_write[4], key_write[5]);

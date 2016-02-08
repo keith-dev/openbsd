@@ -1,4 +1,4 @@
-/*	$OpenBSD: util.h,v 1.12 2002/08/31 15:11:59 drahn Exp $	*/
+/*	$OpenBSD: util.h,v 1.16 2003/07/06 20:03:58 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1998 Todd C. Miller <Todd.Miller@courtesan.com>
@@ -13,12 +13,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed under OpenBSD by
- *	Per Fogelstrom, Opsycon AB, Sweden.
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS
  * OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
@@ -36,12 +30,22 @@
 
 #ifndef __DL_UTIL_H__
 #define __DL_UTIL_H__
+
+#include <stdarg.h>
+
 void *_dl_malloc(const size_t size);
 void _dl_free(void *);
 char *_dl_strdup(const char *);
 void _dl_printf(const char *fmt, ...);
+void _dl_vprintf(const char *fmt, va_list ap);
 void _dl_fdprintf(int, const char *fmt, ...);
 void _dl_show_objects(void);
+unsigned int _dl_random(void);
+ssize_t _dl_write(int fd, const char* buf, size_t len);
+
+void _dl_bcopy(const void *src, void *dest, int size);
+
+long _dl_strtol(const char *nptr, char **endptr, int base);
 
 /*
  *	The following functions are declared inline so they can
@@ -60,7 +64,7 @@ static inline void *
 _dl_memset(void *dst, const int c, size_t n)
 {
 	if (n != 0) {
-		register char *d = dst;
+		char *d = dst;
 
 		do
 			*d++ = c;

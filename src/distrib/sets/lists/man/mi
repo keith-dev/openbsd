@@ -1,6 +1,4 @@
 ./usr/share/doc/html
-./usr/share/doc/html/bind
-./usr/share/doc/html/curses
 ./usr/share/info/amdref.info
 ./usr/share/info/amdref.info-1
 ./usr/share/info/amdref.info-2
@@ -99,7 +97,6 @@
 ./usr/share/info/gdbint.info
 ./usr/share/info/gdbint.info-1
 ./usr/share/info/gdbint.info-2
-./usr/share/info/gzip.info
 ./usr/share/info/heimdal.info
 ./usr/share/info/history.info
 ./usr/share/info/info-stnd.info
@@ -107,10 +104,8 @@
 ./usr/share/info/info-stnd.info-2
 ./usr/share/info/info-stnd.info-3
 ./usr/share/info/info.info
-./usr/share/info/kth-krb.info
 ./usr/share/info/mmalloc.info
 ./usr/share/info/readline.info
-./usr/share/info/rluserman.info
 ./usr/share/info/stabs.info
 ./usr/share/info/stabs.info-1
 ./usr/share/info/stabs.info-2
@@ -214,7 +209,6 @@
 ./usr/share/man/cat1/encrypt.0
 ./usr/share/man/cat1/env.0
 ./usr/share/man/cat1/eqn.0
-./usr/share/man/cat1/error.0
 ./usr/share/man/cat1/ex.0
 ./usr/share/man/cat1/expand.0
 ./usr/share/man/cat1/expr.0
@@ -523,7 +517,6 @@
 ./usr/share/man/cat1/s2p.0
 ./usr/share/man/cat1/scp.0
 ./usr/share/man/cat1/script.0
-./usr/share/man/cat1/sdiff.0
 ./usr/share/man/cat1/sectok.0
 ./usr/share/man/cat1/sed.0
 ./usr/share/man/cat1/sendbug.0
@@ -929,6 +922,7 @@
 ./usr/share/man/cat3p/attrs.0
 ./usr/share/man/cat3p/autouse.0
 ./usr/share/man/cat3p/base.0
+./usr/share/man/cat3p/basename.0
 ./usr/share/man/cat3p/bigint.0
 ./usr/share/man/cat3p/bignum.0
 ./usr/share/man/cat3p/bigrat.0
@@ -937,9 +931,13 @@
 ./usr/share/man/cat3p/charnames.0
 ./usr/share/man/cat3p/constant.0
 ./usr/share/man/cat3p/diagnostics.0
+./usr/share/man/cat3p/dirname.0
 ./usr/share/man/cat3p/encoding.0
 ./usr/share/man/cat3p/fields.0
+./usr/share/man/cat3p/fileparse.0
 ./usr/share/man/cat3p/filetest.0
+./usr/share/man/cat3p/getopt.0
+./usr/share/man/cat3p/getopts.0
 ./usr/share/man/cat3p/if.0
 ./usr/share/man/cat3p/integer.0
 ./usr/share/man/cat3p/less.0
@@ -962,6 +960,7 @@
 ./usr/share/man/cat4
 ./usr/share/man/cat4/aac.0
 ./usr/share/man/cat4/ac97.0
+./usr/share/man/cat4/acphy.0
 ./usr/share/man/cat4/addcom.0
 ./usr/share/man/cat4/adv.0
 ./usr/share/man/cat4/advansys.0
@@ -1031,6 +1030,7 @@
 ./usr/share/man/cat4/cy.0
 ./usr/share/man/cat4/cz.0
 ./usr/share/man/cat4/dc.0
+./usr/share/man/cat4/dcphy.0
 ./usr/share/man/cat4/ddb.0
 ./usr/share/man/cat4/de.0
 ./usr/share/man/cat4/dpt.0
@@ -1110,12 +1110,15 @@
 ./usr/share/man/cat4/hppa/io.0
 ./usr/share/man/cat4/hppa/lasi.0
 ./usr/share/man/cat4/hppa/phantomas.0
+./usr/share/man/cat4/hppa/power.0
+./usr/share/man/cat4/hppa/wax.0
 ./usr/share/man/cat4/hsq.0
 ./usr/share/man/cat4/i386
 ./usr/share/man/cat4/i386/apm.0
 ./usr/share/man/cat4/i386/autoconf.0
 ./usr/share/man/cat4/i386/bios.0
 ./usr/share/man/cat4/i386/elansc.0
+./usr/share/man/cat4/i386/geodesc.0
 ./usr/share/man/cat4/i386/gus.0
 ./usr/share/man/cat4/i386/ie.0
 ./usr/share/man/cat4/i386/intro.0
@@ -1162,12 +1165,14 @@
 ./usr/share/man/cat4/ises.0
 ./usr/share/man/cat4/iso.0
 ./usr/share/man/cat4/isp.0
+./usr/share/man/cat4/it.0
 ./usr/share/man/cat4/keynote.0
 ./usr/share/man/cat4/ksyms.0
 ./usr/share/man/cat4/kue.0
 ./usr/share/man/cat4/lc.0
 ./usr/share/man/cat4/lge.0
 ./usr/share/man/cat4/lkm.0
+./usr/share/man/cat4/lm.0
 ./usr/share/man/cat4/lmc.0
 ./usr/share/man/cat4/lo.0
 ./usr/share/man/cat4/lofn.0
@@ -1195,7 +1200,9 @@
 ./usr/share/man/cat4/macppc/awacs.0
 ./usr/share/man/cat4/macppc/bm.0
 ./usr/share/man/cat4/macppc/intro.0
+./usr/share/man/cat4/macppc/kauaiata.0
 ./usr/share/man/cat4/macppc/kmem.0
+./usr/share/man/cat4/macppc/macobio.0
 ./usr/share/man/cat4/macppc/mem.0
 ./usr/share/man/cat4/macppc/zs.0
 ./usr/share/man/cat4/macppc/zsc.0
@@ -1204,6 +1211,7 @@
 ./usr/share/man/cat4/midi.0
 ./usr/share/man/cat4/mii.0
 ./usr/share/man/cat4/mpu.0
+./usr/share/man/cat4/mtd.0
 ./usr/share/man/cat4/mtdphy.0
 ./usr/share/man/cat4/mtio.0
 ./usr/share/man/cat4/mvme68k
@@ -1215,6 +1223,16 @@
 ./usr/share/man/cat4/mvme68k/mem.0
 ./usr/share/man/cat4/mvme68k/ssh.0
 ./usr/share/man/cat4/mvme88k
+./usr/share/man/cat4/mvme88k/autoconf.0
+./usr/share/man/cat4/mvme88k/bussw.0
+./usr/share/man/cat4/mvme88k/ie.0
+./usr/share/man/cat4/mvme88k/intro.0
+./usr/share/man/cat4/mvme88k/mem.0
+./usr/share/man/cat4/mvme88k/pcctwo.0
+./usr/share/man/cat4/mvme88k/ssh.0
+./usr/share/man/cat4/mvme88k/ve.0
+./usr/share/man/cat4/mvme88k/vme.0
+./usr/share/man/cat4/mvme88k/vs.0
 ./usr/share/man/cat4/mvmeppc
 ./usr/share/man/cat4/ncr.0
 ./usr/share/man/cat4/ne.0
@@ -1269,6 +1287,7 @@
 ./usr/share/man/cat4/rt.0
 ./usr/share/man/cat4/rtfps.0
 ./usr/share/man/cat4/rtii.0
+./usr/share/man/cat4/safe.0
 ./usr/share/man/cat4/sbus.0
 ./usr/share/man/cat4/scsi.0
 ./usr/share/man/cat4/scsibus.0
@@ -1280,6 +1299,7 @@
 ./usr/share/man/cat4/siop.0
 ./usr/share/man/cat4/sis.0
 ./usr/share/man/cat4/sk.0
+./usr/share/man/cat4/skc.0
 ./usr/share/man/cat4/sl.0
 ./usr/share/man/cat4/sm.0
 ./usr/share/man/cat4/sparc
@@ -1287,7 +1307,10 @@
 ./usr/share/man/cat4/sparc/audioamd.0
 ./usr/share/man/cat4/sparc/audiocs.0
 ./usr/share/man/cat4/sparc/autoconf.0
+./usr/share/man/cat4/sparc/auxreg.0
 ./usr/share/man/cat4/sparc/be.0
+./usr/share/man/cat4/sparc/bpp.0
+./usr/share/man/cat4/sparc/btcham.0
 ./usr/share/man/cat4/sparc/bwtwo.0
 ./usr/share/man/cat4/sparc/cgeight.0
 ./usr/share/man/cat4/sparc/cgfour.0
@@ -1311,8 +1334,11 @@
 ./usr/share/man/cat4/sparc/ledma.0
 ./usr/share/man/cat4/sparc/magma.0
 ./usr/share/man/cat4/sparc/mem.0
+./usr/share/man/cat4/sparc/mgx.0
 ./usr/share/man/cat4/sparc/openprom.0
+./usr/share/man/cat4/sparc/pninek.0
 ./usr/share/man/cat4/sparc/pnozz.0
+./usr/share/man/cat4/sparc/presto.0
 ./usr/share/man/cat4/sparc/qe.0
 ./usr/share/man/cat4/sparc/qec.0
 ./usr/share/man/cat4/sparc/scf.0
@@ -1321,6 +1347,7 @@
 ./usr/share/man/cat4/sparc/sw.0
 ./usr/share/man/cat4/sparc/tctrl.0
 ./usr/share/man/cat4/sparc/tcx.0
+./usr/share/man/cat4/sparc/tslot.0
 ./usr/share/man/cat4/sparc/tvtwo.0
 ./usr/share/man/cat4/sparc/vigra.0
 ./usr/share/man/cat4/sparc/xbox.0
@@ -1336,6 +1363,7 @@
 ./usr/share/man/cat4/sparc64/audioce.0
 ./usr/share/man/cat4/sparc64/audiocs.0
 ./usr/share/man/cat4/sparc64/autoconf.0
+./usr/share/man/cat4/sparc64/auxio.0
 ./usr/share/man/cat4/sparc64/be.0
 ./usr/share/man/cat4/sparc64/beeper.0
 ./usr/share/man/cat4/sparc64/bwtwo.0
@@ -1462,6 +1490,7 @@
 ./usr/share/man/cat4/vax/vsbus.0
 ./usr/share/man/cat4/vax/ze.0
 ./usr/share/man/cat4/vga.0
+./usr/share/man/cat4/viaenv.0
 ./usr/share/man/cat4/vlan.0
 ./usr/share/man/cat4/vnd.0
 ./usr/share/man/cat4/vr.0
@@ -1484,6 +1513,7 @@
 ./usr/share/man/cat4/zero.0
 ./usr/share/man/cat5
 ./usr/share/man/cat5/.rhosts.0
+./usr/share/man/cat5/AliasDB.0
 ./usr/share/man/cat5/CellServDB.0
 ./usr/share/man/cat5/DynRootDB.0
 ./usr/share/man/cat5/SuidCells.0
@@ -1541,10 +1571,6 @@
 ./usr/share/man/cat5/isakmpd.conf.0
 ./usr/share/man/cat5/isakmpd.policy.0
 ./usr/share/man/cat5/keynote.0
-./usr/share/man/cat5/krb.conf.0
-./usr/share/man/cat5/krb.equiv.0
-./usr/share/man/cat5/krb.extra.0
-./usr/share/man/cat5/krb.realms.0
 ./usr/share/man/cat5/krb5.conf.0
 ./usr/share/man/cat5/lastlog.0
 ./usr/share/man/cat5/link.0
@@ -1557,11 +1583,14 @@
 ./usr/share/man/cat5/man.conf.0
 ./usr/share/man/cat5/map3270.0
 ./usr/share/man/cat5/master.passwd.0
+./usr/share/man/cat5/mk.conf.0
 ./usr/share/man/cat5/moduli.0
 ./usr/share/man/cat5/motd.0
 ./usr/share/man/cat5/mvme68k
 ./usr/share/man/cat5/mvme88k
 ./usr/share/man/cat5/mvmeppc
+./usr/share/man/cat5/mygate.0
+./usr/share/man/cat5/myname.0
 ./usr/share/man/cat5/netgroup.0
 ./usr/share/man/cat5/netid.0
 ./usr/share/man/cat5/networks.0
@@ -1569,6 +1598,7 @@
 ./usr/share/man/cat5/passwd.0
 ./usr/share/man/cat5/passwd.conf.0
 ./usr/share/man/cat5/pf.conf.0
+./usr/share/man/cat5/pf.os.0
 ./usr/share/man/cat5/phones.0
 ./usr/share/man/cat5/portal.conf.0
 ./usr/share/man/cat5/printcap.0
@@ -1600,6 +1630,7 @@
 ./usr/share/man/cat5/ttys.0
 ./usr/share/man/cat5/types.0
 ./usr/share/man/cat5/tzfile.0
+./usr/share/man/cat5/usermgmt.conf.0
 ./usr/share/man/cat5/utmp.0
 ./usr/share/man/cat5/uuencode.0
 ./usr/share/man/cat5/vax
@@ -1680,6 +1711,7 @@
 ./usr/share/man/cat8/chown.0
 ./usr/share/man/cat8/chroot.0
 ./usr/share/man/cat8/clri.0
+./usr/share/man/cat8/compat_aout.0
 ./usr/share/man/cat8/compat_bsdos.0
 ./usr/share/man/cat8/compat_freebsd.0
 ./usr/share/man/cat8/compat_hpux.0
@@ -1696,6 +1728,7 @@
 ./usr/share/man/cat8/cryptoadm.0
 ./usr/share/man/cat8/cryptoinit.0
 ./usr/share/man/cat8/cvsbug.0
+./usr/share/man/cat8/daily.0
 ./usr/share/man/cat8/dev_mkdb.0
 ./usr/share/man/cat8/dhclient-script.0
 ./usr/share/man/cat8/dhclient.0
@@ -1709,7 +1742,6 @@
 ./usr/share/man/cat8/dumpfs.0
 ./usr/share/man/cat8/editmap.0
 ./usr/share/man/cat8/edquota.0
-./usr/share/man/cat8/ext_srvtab.0
 ./usr/share/man/cat8/extattrctl.0
 ./usr/share/man/cat8/faithd.0
 ./usr/share/man/cat8/faq.0
@@ -1732,6 +1764,7 @@
 ./usr/share/man/cat8/groupdel.0
 ./usr/share/man/cat8/groupinfo.0
 ./usr/share/man/cat8/groupmod.0
+./usr/share/man/cat8/growfs.0
 ./usr/share/man/cat8/halt.0
 ./usr/share/man/cat8/hp300
 ./usr/share/man/cat8/hp300/MAKEDEV.0
@@ -1779,18 +1812,9 @@
 ./usr/share/man/cat8/isakmpd.0
 ./usr/share/man/cat8/kadmin.0
 ./usr/share/man/cat8/kadmind.0
-./usr/share/man/cat8/kauthd.0
-./usr/share/man/cat8/kdb_destroy.0
-./usr/share/man/cat8/kdb_edit.0
-./usr/share/man/cat8/kdb_init.0
-./usr/share/man/cat8/kdb_util.0
 ./usr/share/man/cat8/kdc.0
 ./usr/share/man/cat8/kgmon.0
 ./usr/share/man/cat8/kpasswdd.0
-./usr/share/man/cat8/kprop.0
-./usr/share/man/cat8/kpropd.0
-./usr/share/man/cat8/ksrvutil.0
-./usr/share/man/cat8/kstash.0
 ./usr/share/man/cat8/ktutil.0
 ./usr/share/man/cat8/kvm_mkdb.0
 ./usr/share/man/cat8/lmccontrol.0
@@ -1798,8 +1822,6 @@
 ./usr/share/man/cat8/login_activ.0
 ./usr/share/man/cat8/login_chpass.0
 ./usr/share/man/cat8/login_crypto.0
-./usr/share/man/cat8/login_krb4-or-pwd.0
-./usr/share/man/cat8/login_krb4.0
 ./usr/share/man/cat8/login_krb5-or-pwd.0
 ./usr/share/man/cat8/login_krb5.0
 ./usr/share/man/cat8/login_lchpass.0
@@ -1844,6 +1866,7 @@
 ./usr/share/man/cat8/modload.0
 ./usr/share/man/cat8/modstat.0
 ./usr/share/man/cat8/modunload.0
+./usr/share/man/cat8/monthly.0
 ./usr/share/man/cat8/mopd.0
 ./usr/share/man/cat8/mount.0
 ./usr/share/man/cat8/mount_ados.0
@@ -1871,6 +1894,9 @@
 ./usr/share/man/cat8/mvme68k/boot_mvme68k.0
 ./usr/share/man/cat8/mvme68k/installboot.0
 ./usr/share/man/cat8/mvme88k
+./usr/share/man/cat8/mvme88k/MAKEDEV.0
+./usr/share/man/cat8/mvme88k/boot_mvme88k.0
+./usr/share/man/cat8/mvme88k/installboot.0
 ./usr/share/man/cat8/mvmeppc
 ./usr/share/man/cat8/named-checkconf.0
 ./usr/share/man/cat8/named-checkzone.0
@@ -1890,7 +1916,6 @@
 ./usr/share/man/cat8/nsupdate.0
 ./usr/share/man/cat8/ntalkd.0
 ./usr/share/man/cat8/pac.0
-./usr/share/man/cat8/pcnfsd.0
 ./usr/share/man/cat8/pfctl.0
 ./usr/share/man/cat8/pflogd.0
 ./usr/share/man/cat8/ping.0
@@ -1939,7 +1964,6 @@
 ./usr/share/man/cat8/routed.0
 ./usr/share/man/cat8/rpc.bootparamd.0
 ./usr/share/man/cat8/rpc.lockd.0
-./usr/share/man/cat8/rpc.pcnfsd.0
 ./usr/share/man/cat8/rpc.rquotad.0
 ./usr/share/man/cat8/rpc.rstatd.0
 ./usr/share/man/cat8/rpc.rusersd.0
@@ -2049,6 +2073,7 @@
 ./usr/share/man/cat8/vnconfig.0
 ./usr/share/man/cat8/vos.0
 ./usr/share/man/cat8/vpn.0
+./usr/share/man/cat8/weekly.0
 ./usr/share/man/cat8/wicontrol.0
 ./usr/share/man/cat8/yp.0
 ./usr/share/man/cat8/ypbind.0

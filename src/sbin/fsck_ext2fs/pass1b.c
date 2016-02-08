@@ -1,4 +1,4 @@
-/*	$OpenBSD: pass1b.c,v 1.5 2002/02/16 21:27:34 millert Exp $	*/
+/*	$OpenBSD: pass1b.c,v 1.7 2003/06/11 06:22:13 deraadt Exp $	*/
 /*	$NetBSD: pass1b.c,v 1.2 1997/09/14 14:27:26 lukem Exp $	*/
 
 /*
@@ -14,11 +14,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -48,7 +44,7 @@ static int	pass1bcheck(struct inodesc *);
 static  struct dups *duphead;
 
 void
-pass1b()
+pass1b(void)
 {
 	int c, i;
 	struct ext2fs_dinode *dp;
@@ -76,8 +72,7 @@ pass1b()
 }
 
 static int
-pass1bcheck(idesc)
-	struct inodesc *idesc;
+pass1bcheck(struct inodesc *idesc)
 {
 	struct dups *dlp;
 	int nfrags, res = KEEPON;

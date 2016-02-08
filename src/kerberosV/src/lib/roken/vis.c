@@ -13,11 +13,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -38,7 +34,7 @@
 #if 1
 #ifdef HAVE_CONFIG_H
 #include <config.h>
-RCSID("$KTH: vis.c,v 1.4 2001/07/03 19:22:01 assar Exp $");
+RCSID("$KTH: vis.c,v 1.5 2001/09/03 05:37:23 assar Exp $");
 #endif
 #include <roken.h>
 #ifndef _DIAGASSERT
@@ -164,7 +160,7 @@ do {									   \
 		if (c & 0200) {						   \
 			c &= 0177; *dst++ = 'M';			   \
 		}							   \
-		if (iscntrl(c)) {					   \
+		if (iscntrl((unsigned char)c)) {			   \
 			*dst++ = '^';					   \
 			if (c == 0177)					   \
 				*dst++ = '?';				   \

@@ -1,7 +1,7 @@
-/*	$OpenBSD: pl.c,v 1.7 2001/06/06 20:03:08 espie Exp $	*/
+/*	$OpenBSD: pl.c,v 1.11 2003/08/15 00:03:22 espie Exp $	*/
 
 #ifndef lint
-static const char *rcsid = "$OpenBSD: pl.c,v 1.7 2001/06/06 20:03:08 espie Exp $";
+static const char rcsid[] = "$OpenBSD: pl.c,v 1.11 2003/08/15 00:03:22 espie Exp $";
 #endif
 
 /*
@@ -59,7 +59,13 @@ check_list(char *home, package_t *pkg)
 				p = p->next;
 			break;
 		case PLIST_FILE:
-			(void) snprintf(name, sizeof(name), "%s/%s", there ? there : cwd, p->name);
+			if (BaseDir)
+				(void) snprintf(name, sizeof(name), 
+				    "%s/%s/%s", BaseDir, there ? there : cwd, 
+				    p->name);
+			else
+				(void) snprintf(name, sizeof(name), 
+				    "%s/%s", there ? there : cwd, p->name);
 			if ((cp = MD5File(name, buf)) != NULL) {
 				tmp = new_plist_entry();
 				tmp->name = copy_string(strconcat("MD5:", cp));
@@ -67,6 +73,8 @@ check_list(char *home, package_t *pkg)
 				tmp->next = p->next;
 				tmp->prev = p;
 				p->next = tmp;
+				if (pkg->tail == p)
+					pkg->tail = tmp;
 				p = tmp;
 			}
 			break;
@@ -98,14 +106,14 @@ trylink(const char *from, const char *to)
 #define TOOBIG(str) strlen(str) + 6 + strlen(home) + where_count > maxargs
 #define PUSHOUT() /* push out string */					\
 	if (where_count > sizeof(STARTSTRING)-1) {			\
-		    strcat(where_args, "|tar xpf -");			\
+		    strlcat(where_args, "|tar xpf -", maxargs);		\
 		    if (system(where_args)) {				\
 			cleanup(0);					\
 			errx(2, "can't invoke tar pipeline");		\
 		    }							\
 		    memset(where_args, 0, maxargs);			\
  		    last_chdir = NULL;					\
-		    strcpy(where_args, STARTSTRING);			\
+		    strlcpy(where_args, STARTSTRING, maxargs);		\
 		    where_count = sizeof(STARTSTRING)-1;		\
 	}
 
@@ -134,7 +142,7 @@ copy_plist(char *home, package_t *plist)
     }
 
     memset(where_args, 0, maxargs);
-    strcpy(where_args, STARTSTRING);
+    strlcpy(where_args, STARTSTRING, maxargs);
     where_count = sizeof(STARTSTRING)-1;
     last_chdir = 0;
 

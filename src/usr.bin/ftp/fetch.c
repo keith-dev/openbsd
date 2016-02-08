@@ -1,4 +1,4 @@
-/*	$OpenBSD: fetch.c,v 1.44 2003/03/10 06:20:10 itojun Exp $	*/
+/*	$OpenBSD: fetch.c,v 1.47 2003/08/15 23:13:06 deraadt Exp $	*/
 /*	$NetBSD: fetch.c,v 1.14 1997/08/18 10:20:20 lukem Exp $	*/
 
 /*-
@@ -38,7 +38,7 @@
  */
 
 #ifndef lint
-static char rcsid[] = "$OpenBSD: fetch.c,v 1.44 2003/03/10 06:20:10 itojun Exp $";
+static char rcsid[] = "$OpenBSD: fetch.c,v 1.47 2003/08/15 23:13:06 deraadt Exp $";
 #endif /* not lint */
 
 /*
@@ -233,7 +233,7 @@ url_get(origline, proxyenv, outfile)
 		progressmeter(-1);
 
 		if ((buf = malloc(4096)) == NULL)
-			errx(1, "Can't allocate memory for transfer buffer\n");
+			errx(1, "Can't allocate memory for transfer buffer");
 
 		/* Finally, suck down the file. */
 		i = 0;
@@ -497,7 +497,7 @@ again:
 
 	/* Finally, suck down the file. */
 	if ((buf = malloc(4096)) == NULL)
-		errx(1, "Can't allocate memory for transfer buffer\n");
+		errx(1, "Can't allocate memory for transfer buffer");
 	i = 0;
 	while ((len = fread(buf, sizeof(char), 4096, fin)) > 0) {
 		bytes += len;
@@ -630,8 +630,10 @@ auto_fetch(argc, argv, outfile)
 	(void)signal(SIGINT, (sig_t)intr);
 	(void)signal(SIGPIPE, (sig_t)lostpeer);
 
-	ftpproxy = getenv(FTP_PROXY);
-	httpproxy = getenv(HTTP_PROXY);
+	if ((ftpproxy = getenv(FTP_PROXY)) != NULL && *ftpproxy == '\0')
+		ftpproxy = NULL;
+	if ((httpproxy = getenv(HTTP_PROXY)) != NULL && *httpproxy == '\0')
+		httpproxy = NULL;
 
 	/*
 	 * Loop through as long as there's files to fetch.
@@ -781,7 +783,7 @@ bad_ftp_url:
 		if (strcmp(host, lasthost) != 0) {
 			int oautologin;
 
-			(void)strcpy(lasthost, host);
+			(void)strlcpy(lasthost, host, sizeof lasthost);
 			if (connected)
 				disconnect(0, NULL);
 			xargv[0] = __progname;

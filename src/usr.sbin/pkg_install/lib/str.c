@@ -1,7 +1,7 @@
-/*	$OpenBSD: str.c,v 1.6 2002/03/14 06:51:42 mpech Exp $	*/
+/*	$OpenBSD: str.c,v 1.11 2003/07/04 17:31:19 avsm Exp $	*/
 
 #ifndef lint
-static const char *rcsid = "$OpenBSD: str.c,v 1.6 2002/03/14 06:51:42 mpech Exp $";
+static const char rcsid[] = "$OpenBSD: str.c,v 1.11 2003/07/04 17:31:19 avsm Exp $";
 #endif
 
 /*
@@ -66,10 +66,9 @@ strconcat(char *s1, char *s2)
 {
     static char tmp[FILENAME_MAX];
 
-    tmp[0] = '\0';
-    strncpy(tmp, s1 ? s1 : s2, FILENAME_MAX);
+    strlcpy(tmp, s1 ? s1 : s2, sizeof(tmp));
     if (s1 && s2)
-	strncat(tmp, s2, FILENAME_MAX - strlen(tmp));
+	strlcat(tmp, s2, sizeof(tmp));
     return tmp;
 }
 
@@ -95,8 +94,7 @@ copy_string(char *str)
     if (!str)
 	ret = NULL;
     else {
-	ret = (char *)malloc(strlen(str) + 1);
-	strcpy(ret, str);
+	ret = strdup(str);
     }
     return ret;
 }
@@ -300,7 +298,7 @@ pmatch(const char *pattern, const char *pkg)
 /* let's hope there's only one ... - HF */
 /* returns -1 on error, 1 if found, 0 otherwise. */
 int
-findmatchingname(const char *dir, const char *pattern, matchfn f, char *data)
+findmatchingname(const char *dir, const char *pattern, matchfn f, char *data, int len)
 {
     struct dirent  *dp;
     DIR            *dirp;
@@ -318,7 +316,7 @@ findmatchingname(const char *dir, const char *pattern, matchfn f, char *data)
 	}
 	if (pmatch(pattern, dp->d_name)) {
 	    if(f)
-		f(dp->d_name, data);
+		f(dp->d_name, data, len);
 	    found=1;
 	}
     }
@@ -337,7 +335,7 @@ ispkgpattern(const char *pkg)
 
 /* auxiliary function called by findbestmatchingname() */
 static int
-findbestmatchingname_fn(const char *pkg, char *data)
+findbestmatchingname_fn(const char *pkg, char *data, int len)
 {
     /* if pkg > data */
     char *s1, *s2;
@@ -346,7 +344,7 @@ findbestmatchingname_fn(const char *pkg, char *data)
     s2=strrchr(data, '-')+1;
 
     if(data[0] == '\0' || deweycmp(s1, GT, s2))
-	strcpy(data, pkg);
+	strlcpy(data, pkg, len);
 
     return 0;
 }
@@ -361,23 +359,8 @@ findbestmatchingname(const char *dir, const char *pattern)
 	char buf[FILENAME_MAX];
 
 	buf[0]='\0';
-	if (findmatchingname(dir, pattern, findbestmatchingname_fn, buf) > 0
-	    && buf[0] != '\0') {
+	if (findmatchingname(dir, pattern, findbestmatchingname_fn, buf, sizeof(buf)) > 0 && buf[0] != '\0') {
 		return strdup(buf);
 	}
 	return NULL;
-}
-
-/* bounds-checking strncpy */
-char *
-strnncpy(char *to, size_t tosize, char *from, size_t cc)
-{
-	size_t	len;
-
-	if ((len = cc) >= tosize - 1) {
-		len = tosize - 1;
-	}
-	(void) strncpy(to, from, len);
-	to[len] = 0;
-	return to;
 }

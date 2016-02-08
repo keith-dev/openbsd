@@ -1,4 +1,4 @@
-.\" $OpenBSD: pfctl.8,v 1.92 2003/03/11 09:59:37 david Exp $
+.\" $OpenBSD: pfctl.8,v 1.101 2003/08/29 21:47:36 cedric Exp $
 .\"
 .\" Copyright (c) 2001 Kjell Wooding.  All rights reserved.
 .\"
@@ -29,7 +29,7 @@
 .Os
 .Sh NAME
 .Nm pfctl
-.Nd control the packet filter (PF) and network address translation (NAT) device
+.Nd "control the packet filter (PF) and network address translation (NAT) device"
 .Sh SYNOPSIS
 .Nm pfctl
 .Bk -words
@@ -118,6 +118,22 @@ For example, to show all filter rules inside anchor
 .Bd -literal -offset indent
 # pfctl -a foo -s rules
 .Ed
+.Pp
+Private tables can also be put inside subrulesets, either by having table
+statements in the
+.Xr pf.conf 5
+file that is loaded in the anchor, or by using regular table commands as in:
+.Bd -literal -offset indent
+# pfctl -a foo:bar -t mytable -T add 1.2.3.4 5.6.7.8
+.Ed
+.Pp
+When a rule referring to a table is loaded in an anchor, the rule will use the
+private table if one is defined, and then fallback to the table defined in the
+main ruleset, if there is one.
+This is similar to C rules for variables.
+It is possible to create distinct tables with the same name in the global
+ruleset and in an anchor, but this is often bad design and a warning will be
+issued in that case.
 .It Fl A
 Load only the queue rules present in the rule file.
 Other rules and options are ignored.
@@ -136,7 +152,7 @@ in the ruleset.
 Enable the packet filter.
 .It Fl f Ar file
 Load the rules contained in
-.Ar file.
+.Ar file .
 This
 .Ar file
 may contain macros, tables, options, and normalization, queueing,
@@ -160,6 +176,8 @@ Flush the state table (NAT and filter).
 Flush the filter information (statistics that are not bound to rules).
 .It Fl F Ar Tables
 Flush the tables.
+.It Fl F Ar osfp
+Flush the passive operating system fingerprints.
 .It Fl F Ar all
 Flush all of the above.
 .El
@@ -244,14 +262,21 @@ Show the contents of the state table.
 .It Fl s Ar info
 Show filter information (statistics and counters).
 .It Fl s Ar labels
-Show per-rule statistics (in terse format) of filter rules with labels,
-useful for accounting.
+Show per-rule statistics (label, evaluations, packets, bytes) of
+filter rules with labels, useful for accounting.
 .It Fl s Ar timeouts
 Show the current global timeouts.
 .It Fl s Ar memory
 Show the current pool memory hard limits.
 .It Fl s Ar Tables
 Show the list of tables.
+.It Fl s Ar osfp
+Show the list of operating system fingerprints.
+Can be used in combination with
+.Fl o Ar file
+to list the fingerprints in a
+.Xr pf.os 5
+file.
 .It Fl s Ar all
 Show all of the above.
 .El
@@ -333,7 +358,9 @@ Each table maintains a set of counters that can be retrieved using the
 flag of
 .Nm pfctl .
 For example, the following commands define a wide open firewall which will keep
-track of packets going to or coming from the OpenBSD ftp server.
+track of packets going to or coming from the
+.Ox
+ftp server.
 The following commands configure the firewall and send 10 pings to the ftp
 server:
 .Bd -literal -offset indent
@@ -370,11 +397,11 @@ the number of rules which reference the table, and the global
 packet statistics for the whole table:
 .Bd -literal -offset indent
 # pfctl -vvsTables
---a-r   test
+--a-r-  test
 \ \ \ \ Addresses: \ \ 1
-\ \ \ \ References: \ 1
 \ \ \ \ Cleared: \ \ \ \ Thu Feb 13 18:55:18 2003
-\ \ \ \ Evaluations: [\ NoMatch: 3496 \ \ \ \ Match: 1 \ \ \ \ \ \ \ ]
+\ \ \ \ References: \ [ Anchors: 0 \ \ \ \ \ \ \ Rules: 1 \ \ \ \ \ \ \ ]
+\ \ \ \ Evaluations: [ NoMatch: 3496 \ \ \ \ Match: 1 \ \ \ \ \ \ \ ]
 \ \ \ \ In/Block: \ \ \ [ Packets: 0 \ \ \ \ \ \ \ Bytes: 0 \ \ \ \ \ \ \ ]
 \ \ \ \ In/Pass: \ \ \ \ [ Packets: 10 \ \ \ \ \ \ Bytes: 840 \ \ \ \ \ ]
 \ \ \ \ In/XPass: \ \ \ [ Packets: 0 \ \ \ \ \ \ \ Bytes: 0 \ \ \ \ \ \ \ ]
@@ -386,8 +413,7 @@ packet statistics for the whole table:
 As we can see here, only one packet - the initial ping request - matched the
 table; but all packets passing as the result of the state are correctly
 accounted for.
-Reloading the table(s) will not affect packet accounting in any way; however,
-the state accounting will stop if the rules are reloaded or flushed.
+Reloading the table(s) or ruleset will not affect packet accounting in any way.
 The two
 .Ar XPass
 counters are incremented instead of the
@@ -408,7 +434,7 @@ The flags are defined as follows:
 For constant tables, which cannot be altered outside
 .Xr pf.conf 5 .
 .It p
-For persistant tables, which don't get automatically flushed when no rules
+For persistent tables, which don't get automatically flushed when no rules
 refer to them.
 .It a
 For tables which are part of the
@@ -426,12 +452,15 @@ This flag can only be witnessed briefly during the loading of
 .Xr pf.conf 5 .
 .It r
 For tables which are referenced (used) by rules.
+.It h
+This flag is set when a table in the main ruleset is hidden by one or more
+tables of the same name in sub-rulesets (anchors).
 .El
 .It Fl v
 Produce more verbose output.
 A second use of
 .Fl v
-will produce even more verbose output.
+will produce even more verbose output including ruleset warnings.
 See previous section for its effect on table commands.
 .It Fl x Ar level
 Set the debug
@@ -444,6 +473,8 @@ Don't generate debug messages.
 Generate debug messages only for serious errors.
 .It Fl x Ar misc
 Generate debug messages for various errors.
+.It Fl x Ar loud
+Generate debug messages for common conditions.
 .El
 .It Fl z
 Clear per-rule statistics.
@@ -456,6 +487,7 @@ Packet filter rules file.
 .Sh SEE ALSO
 .Xr pf 4 ,
 .Xr pf.conf 5 ,
+.Xr pf.os 5 ,
 .Xr sysctl.conf 5 ,
 .Xr ftp-proxy 8 ,
 .Xr rc 8 ,

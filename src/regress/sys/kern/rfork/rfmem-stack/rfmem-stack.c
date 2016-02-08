@@ -1,4 +1,4 @@
-/*	$OpenBSD: rfmem-stack.c,v 1.3 2002/02/22 01:06:58 art Exp $	*/
+/*	$OpenBSD: rfmem-stack.c,v 1.5 2003/08/02 01:24:37 david Exp $	*/
 /*
  * Written by Artur Grabowski <art@openbsd.org>, 2002 Public Domain.
  */
@@ -9,12 +9,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 #include <err.h>
 
 #define MAGIC "inherited"
 
 int
-main()
+main(int argc, char *argv[])
 {
 	char *map, *map2;
 	int status;

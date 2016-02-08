@@ -1,4 +1,4 @@
-/*	$OpenBSD: passwd.c,v 1.15 2002/06/28 22:28:17 deraadt Exp $	*/
+/*	$OpenBSD: passwd.c,v 1.18 2003/08/04 07:29:22 hin Exp $	*/
 
 /*
  * Copyright (c) 1988 The Regents of the University of California.
@@ -12,11 +12,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -41,16 +37,14 @@ char copyright[] =
 
 #ifndef lint
 /*static const char sccsid[] = "from: @(#)passwd.c	5.5 (Berkeley) 7/6/91";*/
-static const char rcsid[] = "$OpenBSD: passwd.c,v 1.15 2002/06/28 22:28:17 deraadt Exp $";
+static const char rcsid[] = "$OpenBSD: passwd.c,v 1.18 2003/08/04 07:29:22 hin Exp $";
 #endif /* not lint */
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <err.h>
-#ifdef KERBEROS
-#include <kerberosIV/krb.h>
-#endif
 
 /*
  * Note on configuration:
@@ -68,7 +62,6 @@ int force_yp;
 
 extern int local_passwd(char *, int);
 extern int yp_passwd(char *);
-extern int krb_passwd(int, char **);
 extern int krb5_passwd(int, char **);
 extern int _yp_check(char **);
 void usage(int retval);
@@ -83,7 +76,7 @@ main(int argc, char **argv)
 	int status = 0;
 #endif
 
-#if defined(KERBEROS) || defined(KERBEROS5)
+#if defined(KERBEROS5)
 	extern char realm[];
 
 	if (krb_get_lrealm(realm,1) == KSUCCESS)
@@ -94,22 +87,12 @@ main(int argc, char **argv)
 #endif
 
 	/* Process args and options */
-	while ((ch = getopt(argc, argv, "lykK")) != -1)
+	while ((ch = getopt(argc, argv, "lyK")) != -1)
 		switch (ch) {
 		case 'l':		/* change local password file */
 			use_kerberos = 0;
 			use_yp = 0;
 			break;
-		case 'k':		/* change Kerberos password */
-#if defined(KERBEROS)
-			use_kerberos = 1;
-			use_yp = 0;
-			exit(krb_passwd(argc, argv));
-			break;
-#else
-			fprintf(stderr, "passwd: Kerberos not compiled in\n");
-			exit(1);
-#endif
 		case 'K':
 #ifdef KRB5
 			/* Skip programname and '-K' option */
@@ -151,11 +134,11 @@ main(int argc, char **argv)
 	case 0:
 		break;
 	case 1:
-#if defined(KERBEROS) || defined(KERBEROS5)
+#if defined(KERBEROS5)
 		if (use_kerberos && strcmp(argv[0], username)) {
 			(void)fprintf(stderr, "passwd: %s\n\t%s\n%s\n",
 			    "to change another user's Kerberos password, do",
-			    "\"passwd -k -u <user>\";",
+			    "\"passwd -K -u <user>\";",
 			    "to change a user's local passwd, use \"passwd -l <user>\"");
 			exit(1);
 		}
@@ -165,11 +148,6 @@ main(int argc, char **argv)
 	default:
 		usage(1);
 	}
-
-#if defined(KERBEROS) || defined(KERBEROS5)
-	if (use_kerberos)
-		exit(krb_passwd(argc, argv));
-#endif
 
 #ifdef	YP
 	if (force_yp || ((status = local_passwd(username, 0)) && use_yp))

@@ -1,11 +1,11 @@
-/*	$OpenBSD: ike_auth.c,v 1.68 2003/03/13 13:24:48 ho Exp $	*/
+/*	$OpenBSD: ike_auth.c,v 1.79 2003/08/08 08:46:59 ho Exp $	*/
 /*	$EOM: ike_auth.c,v 1.59 2000/11/21 00:21:31 angelos Exp $	*/
 
 /*
  * Copyright (c) 1998, 1999, 2000, 2001 Niklas Hallqvist.  All rights reserved.
  * Copyright (c) 1999 Niels Provos.  All rights reserved.
  * Copyright (c) 1999 Angelos D. Keromytis.  All rights reserved.
- * Copyright (c) 2000, 2001 Håkan Olsson.  All rights reserved.
+ * Copyright (c) 2000, 2001, 2003 Håkan Olsson.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -15,11 +15,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by Ericsson Radio Systems.
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -68,6 +63,7 @@
 #include "libcrypto.h"
 #include "log.h"
 #include "message.h"
+#include "monitor.h"
 #include "prf.h"
 #include "transport.h"
 #include "util.h"
@@ -91,7 +87,6 @@ static int rsa_sig_encode_hash (struct message *);
 #endif
 
 #if defined (USE_RAWKEY)
-#define PUBKEY_DIR_DEFAULT "/etc/isakmpd/pubkeys"
 static int get_raw_key_from_file (int, u_int8_t *, size_t, RSA **);
 #endif
 
@@ -150,6 +145,7 @@ ike_auth_get_key (int type, char *id, char *local_id, size_t *keylen)
 #if defined (USE_X509)
   BIO *keyh;
   RSA *rsakey;
+  size_t fsize;
 #endif
 #endif
 
@@ -288,7 +284,7 @@ ike_auth_get_key (int type, char *id, char *local_id, size_t *keylen)
       /* Otherwise, try X.509 */
       keyfile = conf_get_str ("X509-certificates", "Private-key");
 
-      if (check_file_secrecy (keyfile, 0))
+      if (check_file_secrecy (keyfile, &fsize))
 	return 0;
 
       keyh = BIO_new (BIO_s_file ());
@@ -320,8 +316,8 @@ ike_auth_get_key (int type, char *id, char *local_id, size_t *keylen)
 	}
 
       return rsakey;
-#endif
-#endif
+#endif /* USE_X509 */
+#endif /* USE_X509 || USE_KEYNOTE */
 
     default:
       log_print ("ike_auth_get_key: unknown key type %d", type);
@@ -556,7 +552,7 @@ pre_shared_decode_hash (struct message *msg)
     }
 
   memcpy (*hash_p, payload->p + ISAKMP_HASH_DATA_OFF, hashsize);
-  snprintf (header, 80, "pre_shared_decode_hash: HASH_%c",
+  snprintf (header, sizeof header, "pre_shared_decode_hash: HASH_%c",
 	    initiator ? 'R' : 'I');
   LOG_DBG_BUF ((LOG_MISC, 80, header, *hash_p, hashsize));
 
@@ -586,6 +582,7 @@ rsa_sig_decode_hash (struct message *msg)
   u_int32_t *id_cert_len;
   size_t id_len;
   int found = 0, n, i, id_found;
+  char *tag;
 #if defined (USE_DNSSEC)
   u_int8_t *rawkey = 0;
   u_int32_t rawkeylen;
@@ -684,10 +681,11 @@ rsa_sig_decode_hash (struct message *msg)
       handler = cert_get (GET_ISAKMP_CERT_ENCODING (p->p));
       if (!handler)
 	{
+	  tag = constant_lookup (isakmp_certenc_cst,
+				 GET_ISAKMP_CERT_ENCODING (p->p));
 	  LOG_DBG ((LOG_MISC, 30,
 		    "rsa_sig_decode_hash: no handler for %s CERT encoding",
-		    constant_lookup (isakmp_certenc_cst,
-				     GET_ISAKMP_CERT_ENCODING (p->p))));
+		    tag ? tag : "<unknown>"));
 	  continue;
 	}
 
@@ -718,7 +716,7 @@ rsa_sig_decode_hash (struct message *msg)
 
 	  id_found = 0;
 	  for (i = 0; i < n; i++)
- 	    if (id_cert_len[i] == id_len
+	    if (id_cert_len[i] == id_len
 		&& id[0] == id_cert[i][0]
 		&& memcmp (id + 4, id_cert[i] + 4, id_len - 4) == 0)
 	      {
@@ -865,7 +863,8 @@ rsa_sig_decode_hash (struct message *msg)
       return -1;
     }
 
-  snprintf (header, 80, "rsa_sig_decode_hash: HASH_%c", initiator ? 'R' : 'I');
+  snprintf (header, sizeof header, "rsa_sig_decode_hash: HASH_%c",
+	    initiator ? 'R' : 'I');
   LOG_DBG_BUF ((LOG_MISC, 80, header, *hash_p, hashsize));
 
   p->flags |= PL_MARK;
@@ -891,7 +890,7 @@ pre_shared_encode_hash (struct message *msg)
   if (ike_auth_hash (exchange, buf + ISAKMP_HASH_DATA_OFF) == -1)
     return -1;
 
-  snprintf (header, 80, "pre_shared_encode_hash: HASH_%c",
+  snprintf (header, sizeof header, "pre_shared_encode_hash: HASH_%c",
 	    initiator ? 'I' : 'R');
   LOG_DBG_BUF ((LOG_MISC, 80, header, buf + ISAKMP_HASH_DATA_OFF, hashsize));
   return 0;
@@ -913,6 +912,7 @@ rsa_sig_encode_hash (struct message *msg)
   u_int8_t *id;
   size_t id_len;
   int idtype;
+  void *sent_key;
 
   id = initiator ? exchange->id_i : exchange->id_r;
   id_len = initiator ? exchange->id_i_len : exchange->id_r_len;
@@ -1022,40 +1022,8 @@ rsa_sig_encode_hash (struct message *msg)
 
  skipcert:
 
-  switch (id[ISAKMP_ID_TYPE_OFF - ISAKMP_GEN_SZ])
-    {
-    case IPSEC_ID_IPV4_ADDR:
-    case IPSEC_ID_IPV6_ADDR:
-      util_ntoa ((char **)&buf2,
-		 id[ISAKMP_ID_TYPE_OFF - ISAKMP_GEN_SZ] == IPSEC_ID_IPV4_ADDR
-		 ? AF_INET : AF_INET6,
-		 id + ISAKMP_ID_DATA_OFF - ISAKMP_GEN_SZ);
-      if (!buf2)
-	return 0;
-      break;
-
-    case IPSEC_ID_FQDN:
-    case IPSEC_ID_USER_FQDN:
-      buf2 = calloc (id_len - ISAKMP_ID_DATA_OFF + ISAKMP_GEN_SZ + 1,
-		     sizeof (char));
-      if (!buf2)
-        {
-	  log_print ("rsa_sig_encode_hash: malloc (%lu) failed",
-		     (unsigned long)id_len - ISAKMP_ID_DATA_OFF + ISAKMP_GEN_SZ + 1);
-	  return 0;
-	}
-      memcpy (buf2, id + ISAKMP_ID_DATA_OFF - ISAKMP_GEN_SZ,
-	      id_len - ISAKMP_ID_DATA_OFF + ISAKMP_GEN_SZ);
-      break;
-
-      /* XXX Support more ID types?  */
-    default:
-      buf2 = 0;
-      break;
-    }
-
   /* Again, we may have these from the kernel */
-  buf = (u_int8_t *)conf_get_str (exchange->name, "OKAuthentication");
+  buf = (u_int8_t *)conf_get_str (exchange->name, "PKAuthentication");
   if (buf)
     {
       key_from_printable (ISAKMP_KEY_RSA, ISAKMP_KEYTYPE_PRIVATE, (char *)buf,
@@ -1066,39 +1034,80 @@ rsa_sig_encode_hash (struct message *msg)
 	  return 0;
 	}
 
-      exchange->sent_keytype = ISAKMP_KEY_RSA;
-      exchange->sent_key = key_internalize (ISAKMP_KEY_RSA,
-					    ISAKMP_KEYTYPE_PRIVATE, data,
-					    datalen);
-      if (!exchange->sent_key)
+      sent_key = key_internalize (ISAKMP_KEY_RSA, ISAKMP_KEYTYPE_PRIVATE, data,
+				  datalen);
+      if (!sent_key)
 	{
 	  log_print ("rsa_sig_encode_hash: bad RSA private key from dynamic "
 		     "SA acquisition subsystem");
 	  return 0;
 	}
+#if defined (USE_PRIVSEP)
+      {
+	/* With USE_PRIVSEP, the sent_key should be a key number. */
+	void *key = sent_key;
+	sent_key = monitor_RSA_upload_key (key);
+      }
+#endif
     }
   else /* Try through the regular means.  */
     {
-      exchange->sent_key = ike_auth_get_key (IKE_AUTH_RSA_SIG, exchange->name,
-					     (char *)buf2, 0);
+      switch (id[ISAKMP_ID_TYPE_OFF - ISAKMP_GEN_SZ])
+	{
+	case IPSEC_ID_IPV4_ADDR:
+	case IPSEC_ID_IPV6_ADDR:
+	  util_ntoa ((char **)&buf2,
+		     id[ISAKMP_ID_TYPE_OFF - ISAKMP_GEN_SZ] == IPSEC_ID_IPV4_ADDR
+		     ? AF_INET : AF_INET6,
+		     id + ISAKMP_ID_DATA_OFF - ISAKMP_GEN_SZ);
+	  if (!buf2)
+	    return 0;
+	  break;
+
+	case IPSEC_ID_FQDN:
+	case IPSEC_ID_USER_FQDN:
+	  buf2 = calloc (id_len - ISAKMP_ID_DATA_OFF + ISAKMP_GEN_SZ + 1,
+			 sizeof (char));
+	  if (!buf2)
+	    {
+	      log_print ("rsa_sig_encode_hash: malloc (%lu) failed",
+			 (unsigned long)id_len - ISAKMP_ID_DATA_OFF + ISAKMP_GEN_SZ + 1);
+	      return 0;
+	    }
+	  memcpy (buf2, id + ISAKMP_ID_DATA_OFF - ISAKMP_GEN_SZ,
+		  id_len - ISAKMP_ID_DATA_OFF + ISAKMP_GEN_SZ);
+	  break;
+
+	  /* XXX Support more ID types?  */
+	default:
+	  buf2 = 0;
+	  return 0;
+	}
+
+#if defined (USE_PRIVSEP)
+      sent_key = monitor_RSA_get_private_key (exchange->name, (char *)buf2);
+#else
+      sent_key = ike_auth_get_key (IKE_AUTH_RSA_SIG, exchange->name,
+				   (char *)buf2, 0);
+#endif
       free (buf2);
 
       /* Did we find a key?  */
-      if (!exchange->sent_key)
+      if (!sent_key)
 	{
 	  log_print ("rsa_sig_encode_hash: could not get private key");
 	  return -1;
 	}
-
-      exchange->sent_keytype = ISAKMP_KEY_RSA;
     }
 
+#if !defined (USE_PRIVSEP)
   /* Enable RSA blinding.  */
-  if (RSA_blinding_on (exchange->sent_key, NULL) != 1)
+  if (RSA_blinding_on (sent_key, NULL) != 1)
     {
       log_error ("rsa_sig_encode_hash: RSA_blinding_on () failed.");
       return -1;
     }
+#endif
 
   /* XXX hashsize is not necessarily prf->blocksize.  */
   buf = malloc (hashsize);
@@ -1115,23 +1124,32 @@ rsa_sig_encode_hash (struct message *msg)
       return -1;
     }
 
-  snprintf (header, 80, "rsa_sig_encode_hash: HASH_%c", initiator ? 'I' : 'R');
+  snprintf (header, sizeof header, "rsa_sig_encode_hash: HASH_%c",
+	    initiator ? 'I' : 'R');
   LOG_DBG_BUF ((LOG_MISC, 80, header, buf, hashsize));
 
-  data = malloc (RSA_size (exchange->sent_key));
+#if !defined (USE_PRIVSEP)
+  data = malloc (RSA_size (sent_key));
   if (!data)
     {
       log_error ("rsa_sig_encode_hash: malloc (%d) failed",
-		 RSA_size (exchange->sent_key));
+		 RSA_size (sent_key));
       return -1;
     }
 
-  datalen = RSA_private_encrypt (hashsize, buf, data, exchange->sent_key,
+  datalen = RSA_private_encrypt (hashsize, buf, data, sent_key,
 				 RSA_PKCS1_PADDING);
+#else
+  datalen = monitor_RSA_private_encrypt (hashsize, buf, &data, sent_key,
+					 RSA_PKCS1_PADDING);
+#endif /* USE_PRIVSEP */
   if (datalen == -1)
     {
       log_print ("rsa_sig_encode_hash: RSA_private_encrypt () failed");
+      if (data)
+	free (data);
       free (buf);
+      monitor_RSA_free (sent_key);
       return -1;
     }
 
@@ -1147,7 +1165,8 @@ rsa_sig_encode_hash (struct message *msg)
     }
   memmove (buf + ISAKMP_SIG_SZ, buf, datalen);
 
-  snprintf (header, 80, "rsa_sig_encode_hash: SIG_%c", initiator ? 'I' : 'R');
+  snprintf (header, sizeof header, "rsa_sig_encode_hash: SIG_%c",
+	    initiator ? 'I' : 'R');
   LOG_DBG_BUF ((LOG_MISC, 80, header, buf + ISAKMP_SIG_DATA_OFF, datalen));
   if (message_add_payload (msg, ISAKMP_PAYLOAD_SIG, buf,
 			   ISAKMP_SIG_SZ + datalen, 1))
@@ -1217,7 +1236,7 @@ get_raw_key_from_file (int type, u_int8_t *id, size_t id_len, RSA **rsa)
 
   fstr = conf_get_str ("General", "Pubkey-directory");
   if (!fstr)
-    fstr = PUBKEY_DIR_DEFAULT;
+    fstr = CONF_DFLT_PUBKEY_DIR;
 
   if (snprintf (filename, sizeof filename, "%s/", fstr) > sizeof filename - 1)
     return -1;

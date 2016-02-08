@@ -1,4 +1,4 @@
-/*	$OpenBSD: mount_procfs.c,v 1.8 2002/02/16 21:27:36 millert Exp $	*/
+/*	$OpenBSD: mount_procfs.c,v 1.11 2003/07/03 22:41:40 tedu Exp $	*/
 /*	$NetBSD: mount_procfs.c,v 1.7 1996/04/13 01:31:59 jtc Exp $	*/
 
 /*
@@ -17,11 +17,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -48,7 +44,7 @@ char copyright[] =
 #if 0
 static char sccsid[] = "@(#)mount_procfs.c	8.3 (Berkeley) 3/27/94";
 #else
-static char rcsid[] = "$OpenBSD: mount_procfs.c,v 1.8 2002/02/16 21:27:36 millert Exp $";
+static char rcsid[] = "$OpenBSD: mount_procfs.c,v 1.11 2003/07/03 22:41:40 tedu Exp $";
 #endif
 #endif /* not lint */
 
@@ -75,12 +71,11 @@ const struct mntopt mopts[] = {
 void	usage(void);
 
 int
-main(argc, argv)
-	int argc;
-	char *argv[];
+main(int argc, char *argv[])
 {
 	int ch, mntflags, altflags;
 	struct procfs_args args;
+	char path[MAXPATHLEN];
 
 	mntflags = altflags = 0;
 	while ((ch = getopt(argc, argv, "o:")) != -1)
@@ -98,10 +93,13 @@ main(argc, argv)
 	if (argc != 2)
 		usage();
 
+	if (realpath(argv[1], path) == NULL)
+		err(1, "realpath %s", path);
+
 	args.version = PROCFS_ARGSVERSION;
 	args.flags = altflags;
 
-	if (mount(MOUNT_PROCFS, argv[1], mntflags, &args)) {
+	if (mount(MOUNT_PROCFS, path, mntflags, &args)) {
 		if (errno == EOPNOTSUPP)
 			errx(1, "%s: Filesystem not supported by kernel",
 			    argv[1]);
@@ -112,7 +110,7 @@ main(argc, argv)
 }
 
 void
-usage()
+usage(void)
 {
 	(void)fprintf(stderr,
 		"usage: mount_procfs [-o options] /proc mount_point\n");

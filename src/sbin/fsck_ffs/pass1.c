@@ -1,4 +1,4 @@
-/*	$OpenBSD: pass1.c,v 1.12 2002/08/23 09:09:04 gluk Exp $	*/
+/*	$OpenBSD: pass1.c,v 1.14 2003/08/25 23:28:15 tedu Exp $	*/
 /*	$NetBSD: pass1.c,v 1.16 1996/09/27 22:45:15 christos Exp $	*/
 
 /*
@@ -13,11 +13,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -38,7 +34,7 @@
 #if 0
 static char sccsid[] = "@(#)pass1.c	8.1 (Berkeley) 6/5/93";
 #else
-static const char rcsid[] = "$OpenBSD: pass1.c,v 1.12 2002/08/23 09:09:04 gluk Exp $";
+static const char rcsid[] = "$OpenBSD: pass1.c,v 1.14 2003/08/25 23:28:15 tedu Exp $";
 #endif
 #endif /* not lint */
 
@@ -118,7 +114,7 @@ pass1(void)
 static void
 checkinode(ino_t inumber, struct inodesc *idesc)
 {
-	struct dinode *dp;
+	struct ufs1_dinode *dp;
 	struct zlncnt *zlnp;
 	int ndb, j;
 	mode_t mode;

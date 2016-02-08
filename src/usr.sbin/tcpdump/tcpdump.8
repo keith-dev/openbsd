@@ -1,4 +1,4 @@
-.\"	$OpenBSD: tcpdump.8,v 1.32 2002/12/01 16:59:20 margarida Exp $
+.\"	$OpenBSD: tcpdump.8,v 1.41 2003/09/04 22:14:43 jmc Exp $
 .\"
 .\" Copyright (c) 1987, 1988, 1989, 1990, 1991, 1992, 1994, 1995, 1996
 .\"	The Regents of the University of California.  All rights reserved.
@@ -27,7 +27,7 @@
 .Nd dump traffic on a network
 .Sh SYNOPSIS
 .Nm tcpdump
-.Op Fl adeflnNOpqStvxX
+.Op Fl adeflnNoOpqStvxX
 .Op Fl c Ar count
 .Op Fl F Ar file
 .Op Fl i Ar interface
@@ -35,6 +35,7 @@
 .Op Fl s Ar snaplen
 .Op Fl T Ar type
 .Op Fl w Ar file
+.Op Fl E Oo Ar espalg: Oc Ar espkey
 .Op Ar expression
 .Sh DESCRIPTION
 .Nm
@@ -88,7 +89,8 @@ interface (excluding loopback).
 Ties are broken by choosing the earliest match.
 .It Fl l
 Make stdout line buffered.
-Useful if you want to see the data while capturing it. e.g.,
+Useful if you want to see the data while capturing it.
+E.g.,
 .Bd -ragged -offset indent
 .Nm
 .Fl l
@@ -114,6 +116,12 @@ will print
 .Dq nic
 instead of
 .Dq nic.ddn.mil .
+.It Fl o
+Print a guess of the possible operating system(s) of hosts that sent TCP SYN
+packets.
+See
+.Xr pf.os 5
+for a description of the passive operating system fingerprints.
 .It Fl O
 Do not run the packet-matching code optimizer.
 This is useful only if you suspect a bug in the optimizer.
@@ -192,6 +200,34 @@ No Selective Acknowledgements
 and
 .Cm wb
 .Pq distributed White Board .
+.It Xo
+.Fl E Oo Ar espalg: Oc Ar espkey
+.Xc
+Try to decrypt
+.Tn RFC 2406
+.Cm ESP
+traffic using the specified hex key
+.Ar espkey .
+Supported algorithms for
+.Ar espalg
+are:
+.Cm aes128 ,
+.Cm aes128-hmac96 ,
+.Cm blowfish ,
+.Cm blowfish-hmac96 ,
+.Cm cast ,
+.Cm cast-hmac96 ,
+.Cm des3 ,
+.Cm des3-hmac96 ,
+.Cm des
+and
+.Cm des-hmac96 .
+The algorithm defaults to
+.Cm aes128-hmac96 .
+This option should be used for debugging only, since
+the key will show up in
+.Xr ps 1
+output.
 .It Fl S
 Print absolute, rather than relative,
 .Tn TCP
@@ -316,7 +352,8 @@ E.g.,
 .Dq tcp port 21 .
 If there is
 no protocol qualifier, all protocols consistent with the type are
-assumed. e.g.,
+assumed.
+E.g.,
 .Dq src foo
 means
 .Do
@@ -410,15 +447,14 @@ expressions can be prepended with the keywords,
 or
 .Cm rarp
 as in:
-.Bd -literal -offset indent
-.Cm ip host Ar host
-.Ed
+.Pp
+.D1 Cm ip host Ar host
 .Pp
 which is equivalent to:
 .Bd -ragged -offset indent
 .Cm ether proto
 .Ar ip
-.Cm Cm and host
+.Cm and host
 .Ar host
 .Pp
 .Ed
@@ -527,9 +563,8 @@ Any of the above port expressions can be prepended with the keywords
 or
 .Cm udp ,
 as in:
-.Bd -literal -offset indent
-.Cm tcp src port Ar port
-.Ed
+.Pp
+.D1 Cm tcp src port Ar port
 .Pp
 which matches only
 .Tn TCP
@@ -539,17 +574,15 @@ packets whose source port is
 True if the packet has a length less than or equal to
 .Ar length .
 This is equivalent to:
-.Bd -literal -offset indent
-.Cm len \*(<= Ar length .
-.Ed
+.Pp
+.D1 Cm len \*(Le Ar length .
 .Pp
 .It Cm greater Ar length
 True if the packet has a length greater than or equal to
 .Ar length .
 This is equivalent to:
-.Bd -literal -offset indent
-.Cm len \*(>= Ar length .
-.Ed
+.Pp
+.D1 Cm len \*(Ge Ar length .
 .Pp
 .It Cm ip proto Ar proto
 True if the packet is an
@@ -656,22 +689,22 @@ source or destination address is
 .It Cm ifname Ar interface
 True if the packet was logged as coming from the specified interface (applies
 only to packets logged by
-.Xr pf 4 ).
+.Xr pf 4 ) .
 .It Cm on Ar interface
 Synonymous with the
 .Ar ifname
 modifier.
 .It Cm rnr Ar num
 True if the packet was logged as matching the specified PF rule number
-(applies only to packets logged by
-.Xr pf 4 ).
+in the main ruleset (applies only to packets logged by
+.Xr pf 4 ) .
 .It Cm rulenum Ar num
 Synonomous with the
 .Ar rnr
 modifier.
 .It Cm reason Ar code
-True if the packet was logged with the specified PF reason code.  The known
-codes are:
+True if the packet was logged with the specified PF reason code.
+The known codes are:
 .Ar match ,
 .Ar bad-offset ,
 .Ar fragment ,
@@ -680,15 +713,31 @@ codes are:
 and
 .Ar memory .
 (applies only to packets logged by
-.Xr pf 4 ).
+.Xr pf 4 ) .
+.It Cm rset Ar name
+True if the packet was logged as matching the specified PF ruleset
+name of an anchored ruleset (applies only to packets logged by
+.Xr pf 4 ) .
+.It Cm ruleset Ar name
+Synonomous with the
+.Ar rset
+modifier.
+.It Cm srnr Ar num
+True if the packet was logged as matching the specified PF rule number
+of an anchored ruleset (applies only to packets logged by
+.Xr pf 4 ) .
+.It Cm subrulenum Ar num
+Synonomous with the
+.Ar srnr
+modifier.
 .It Cm action Ar act
-True if PF took the specified action when the packet was logged.  Known actions
-are:
+True if PF took the specified action when the packet was logged.
+Known actions are:
 .Ar pass ,
 and
 .Ar block .
 (applies only to packets logged by
-.Xr pf 4 ).
+.Xr pf 4 ) .
 .It Xo Cm ip ,
 .Cm arp ,
 .Cm rarp ,
@@ -698,9 +747,8 @@ and
 .Cm mopdl
 .Xc
 Abbreviations for:
-.Bd -literal -offset indent
-.Cm ether proto Ar p
-.Ed
+.Pp
+.D1 Cm ether proto Ar p
 .Pp
 where
 .Ar p
@@ -785,7 +833,7 @@ catches only unfragmented datagrams and frag zero of fragmented datagrams.
 This check is implicitly applied to the
 .Cm tcp
 and
-.C, udp
+.Cm udp
 index operations.
 For instance,
 .Dq Cm tcp Ns [0]
@@ -804,7 +852,7 @@ Allowed primitives and operators are:
 .Bd -ragged -offset indent
 Negation
 .Po
-.Dq Cm !
+.Dq Cm \&!
 or
 .Dq Cm not
 .Pc
@@ -974,6 +1022,19 @@ packets that are not echo requests/replies (i.e., not ping packets):
 .Cm and icmp Ns [0] !\&= 0
 \&'
 .Ed
+.Pp
+To print and decrypt all
+.Tn ESP
+packets with
+.Tn SPI
+0x00001234:
+.Bd -ragged -offset indent
+.Nm
+-E des3-hmac96:ab...def
+\&'
+.Cm ip Ns [20:4] = 0x00001234
+\&'
+.Ed
 .El
 .Sh OUTPUT FORMAT
 The output of
@@ -1117,8 +1178,8 @@ arp reply csam is\&-at CSAM
 In this example, Ethernet addresses are in caps and internet
 addresses in lower case.
 The first line says that rtsg sent an arp packet asking
-for the Ethernet address of internet host csam. csam
-replies with its Ethernet address CSAM.
+for the Ethernet address of internet host csam.
+csam replies with its Ethernet address CSAM.
 .Pp
 This would look less redundant if we had done
 .Nm
@@ -1159,7 +1220,7 @@ will be of much use to you.
 The general format of a tcp protocol line is:
 .Bd -ragged -offset indent
 .Ar src No \&> Ar dst :
-.Ar flags data\&-seqno ack window urgent options
+.Ar flags src\&-os data\&-seqno ack window urgent options
 .Ed
 .Pp
 .Ar src
@@ -1186,6 +1247,11 @@ or
 or a single
 .Ql \&.
 .Pq no flags .
+.Ar src\&-os
+will list a guess of the source host's operating system if the
+.Fl o
+command line flag was passed to
+.Nm tcpdump .
 .Ar data\&-seqno
 describes the portion of sequence space covered
 by the data in this packet (see example below).
@@ -1331,7 +1397,7 @@ Name server requests are formatted as
 .Ar src
 >
 .Ar dst :
-.Ar id op Ns ?
+.Ar id op Ns ?\&
 .Ar flags qtype qclass name
 .Pq Ar len
 .Pp
@@ -1512,7 +1578,6 @@ requests and replies are printed as:
 .Ar dst Ns . Ns Ar xid :
 .Ns Ar reply stat len op results
 .Ed
-.Pp
 .Bd -literal -offset indent
 sushi.6709 > wrl.nfs: 112 readlink fh 21,24/10.73165
 wrl.nfs > sushi.6709: reply ok 40 readlink "../var"
@@ -1629,7 +1694,7 @@ If a reply does not closely follow the
 corresponding request, it might not be parsable.
 .Pp
 .Tn Em KIP AppleTalk
-.Em Pq Tn DDP No in Tn UDP
+.Pq Tn DDP No in Tn UDP
 .Pp
 AppleTalk
 .Tn DDP
@@ -1647,7 +1712,7 @@ The file
 .Pa /etc/atalk.names
 is used to translate AppleTalk net and node numbers to names.
 Lines in this file have the form
-.Bd -literal -offset indent
+.Bd -unfilled -offset indent
 .Ar number		name
 
 1.254		ether
@@ -1720,7 +1785,7 @@ and packet size.
 .Pp
 .Tn NBP
 packets are formatted like the following examples:
-.Bd -literal -offet indent
+.Bd -literal
 icsd-net.112.220 > jssmag.2: nbp-lkup 190: "=:LaserWriter@*"
 jssmag.209.2 > icsd-net.112.220: nbp-reply 190: "RM1140:LaserWriter@*" 250
 techpit.2 > icsd-net.112.220: nbp-reply 190: "techpit:LaserWriter@*" 186
@@ -1876,8 +1941,9 @@ serviced the
 interrupt.
 .Sh SEE ALSO
 .\" traffic(1C), nit(4P),
+.Xr pcap 3 ,
 .Xr bpf 4 ,
-.Xr pcap 3
+.Xr pf.os 5
 .Sh AUTHORS
 Van Jacobson
 .Pq van@ee.lbl.gov ,

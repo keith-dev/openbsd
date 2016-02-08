@@ -1,4 +1,4 @@
-dnl	$OpenBSD: hardware,v 1.111 2003/03/19 20:21:38 mickey Exp $
+dnl	$OpenBSD: hardware,v 1.129 2003/09/06 22:22:43 miod Exp $
 OpenBSD/MACHINE OSREV works across a broad range of standard PC's and
 clones, with a wide variety of processors and I/O bus architectures.  It
 can be expected to install and run with minimal difficulties on most
@@ -68,10 +68,10 @@ Supported hardware {:-include-:}:
 		Advanced Micro Devices 756, 766
 		CMD Tech PCI0640, PCI0643, PCI0646, PCI0648, PCI0649 and PCI0680
 		Contaq Microsytems/Cypress CY82C693
-		HighPoint HPT366, HPT370, HPT372, HPT374 (RAID mode is not
-		    supported)
+		HighPoint HPT366, HPT370, HPT372, HPT302, HPT371, HPT374
+		    (RAID mode is not supported)
 		Intel PIIX, PIIX3, and PIIX4
-		Intel 82801 (ICH/ICH0/ICH2/ICH3/ICH4)
+		Intel 82801 (ICH/ICH0/ICH2/ICH3/ICH4/ICH4-M/ICH5/ICH5R)
 		National Semiconductor PC87415
 		NVIDIA nForce/nForce2
 		Promise PDC20246, PDC20262, PDC20265, PDC20267, PDC20268,
@@ -83,6 +83,9 @@ Supported hardware {:-include-:}:
 		    VT8231, VT8366, VT8233, VT8235
 		(Other PCI IDE-compliant controllers should work, but
 		 those not listed above may not be capable of DMA modes)
+	SATA Controllers
+		Promise PDC20376 (only parallel ATA mode tested)
+		Silicon Image SiI3112
 	SCSI Host Adapters
 		Adaptec AHA-1540, AHA-154xA, AHA-154xB, AHA-1542C,
 		    AHA-1542CF, AHA-1542CP, AHA-1640 [B] [C]
@@ -105,7 +108,7 @@ Supported hardware {:-include-:}:
 		AdvanSys 'U', 'UW', 'U2W' and 'U160' PCI SCSI
 		    controllers including the ABP940U[AW],
 		    ASB3940U[AW]-00, ASB3940U2W-00 and ASB3950U160 [A] [B] [C]
-		AMD Am53c974 PCscsi-PCI SCSI controllers, including: [A] [C]
+		AMD Am53c974 PCscsi-PCI SCSI controllers, including: [A] [B] [C]
 		    Tekram DC-390
 		Buslogic BT-54x (Adaptec AHA-154x clones) [B] [C]
 		BusLogic 445, 74x, 9xx  (but not the new "FlashPoint" series
@@ -116,7 +119,7 @@ Supported hardware {:-include-:}:
 		    Initio INI-9100U/UW
 		    Iwill 2935UW
 		    DTC Domex 3194U Plus
-		QLogic PCI SCSI controllers [A]
+		QLogic PCI SCSI controllers [A] [C]
 		Seagate/Future Domain ISA SCSI adapter cards, including: [B] [C]
 		    ST01/02
 		    Future Domain TMC-885
@@ -149,7 +152,7 @@ Supported hardware {:-include-:}:
 		    Compaq SMART, SMART-2/E, SMART-2/P, SMART-2DH,
 		      SMART-2SL
 		DPT SmartCache and SmartRaid III/IV PCI/EISA adapters [A] [C]
-		Intel (and formerly ICP-Vortex) GDT series [A]
+		Intel (and formerly ICP-Vortex) GDT series [A] [C]
 		I2O (intelligent I/O) RAID controllers, including: [A] [C]
 		    Adaptec SCSI RAID (ASR-2100S, ASR-2110S, ASR-3200S,
 		      etc)
@@ -226,9 +229,19 @@ Supported hardware {:-include-:}:
 			port parallel)
 		    Moxa Technologies Co., Ltd. PCI I/O Card 4S (4 port
 			serial)
+		    Moxa Technologies Co., Ltd. C104H/PCI (4 port serial)
 		    NetMos 2S1P (2 port serial and 1 port parallel)
 		    Boca Research Turbo Serial 654 PCI (4 port serial)
 		    Boca Research Turbo Serial 658 PCI (8 port serial)
+		    SUNIX 400x (1 port parallel)
+		    SUNIX 401x (2 port parallel)
+		    SUNIX 402x (1 port serial)
+		    SUNIX 403x (2 port serial)
+		    SUNIX 405x (4 port serial)
+		    SUNIX 406x (8 port serial)
+		    SUNIX 407x (2 port serial and 1 port parallel)
+		    SUNIX 408x (2 port serial and 2 port parallel)
+		    SUNIX 409x (4 port serial and 2 port parallel)
 	Ethernet Adapters
 		3Com 3c501 [A] [B] [C]
 		3Com 3c503 [B]
@@ -300,7 +313,7 @@ Supported hardware {:-include-:}:
 		CATC USB-EL1210A-based USB adapters, including: [G]
 		    CATC Netmate and Netmate II
 		    Belkin F5U011/F5U111
-		Davicom DM9100, DM9102, and DM9102A based PCI adapters,
+		Davicom DM9009, DM9100, DM9102, and DM9102A based PCI adapters,
 		including:
 		    Jaton XpressNet
 		DEC EtherWORKS III adapters, including: [G]
@@ -361,6 +374,7 @@ Supported hardware {:-include-:}:
 		    Complex RL-100TX
 		    NDC Communications SOHOware SFA110A
 		    SVEC PN102-TX Fast Ethernet card
+		Myson Technologies MTD803 3-in-1 Fast Ethernet adapters
 		National Semiconductor DP83815-based PCI adapters,
 		  including: [B] [C]
 		    Netgear FA311/FA312
@@ -407,7 +421,7 @@ Supported hardware {:-include-:}:
 		    Addtron AEF-360TX
 		    Hawking PN102TX
 		    D-Link DFE530TX
-		Winbond W89C840F Ethernet adapters, including:
+		Winbond W89C840F Ethernet adapters, including: [A]
 		    Trendware TE100-PCIE
 		    Compex RL100-ATX 10/100baseTX
 	Wireless Ethernet Adapters
@@ -419,7 +433,7 @@ Supported hardware {:-include-:}:
 		    ACTIONTEC HWC01170 PCMCIA [A] [B] [C]
 		    Addtron AWP-100 PCMCIA [A] [B] [C]
 		    Agere Orinoco PCMCIA [A] [B] [C]
-		    Aironet 4500/4800 802.11DS PCMCIA and PCI [A] [B]
+		    Aironet 4500/4800 802.11DS ISA PnP, PCMCIA and PCI [A] [B]
 		    BUFFALO AirStation PCMCIA [A] [B] [C]
 		    Cabletron RoamAbout PCMCIA [A] [B] [C]
 		    Cisco 340/350 802.11DS PCMCIA and PCI [A] [B]
@@ -484,7 +498,7 @@ Supported hardware {:-include-:}:
 		    Netgear GA620 and GA620T
 		    SGI Tigon
 		Intel i82540, i82542, i82543, i82544, i82545, and i82546
-	       	based adapters, including: [A] [B] [C]
+	       	based adapters, including:
 		    Intel PRO/1000 Gigabit Server Adapter (SX Fiber)
 		      (PWLA8490)
 		    Intel PRO/1000F Gigabit Server Adapter (SX Fiber)
@@ -526,8 +540,18 @@ Supported hardware {:-include-:}:
 		Sundance/Tamarack TC9021 based PCI adapters, including: [G]
 		    D-Link DGE-550T (10/100/1000baseTX)
 		    Antares Microsystems Gigabit Ethernet board
-		SysKonnect SK-9841/9842/9843/9844 Gigabit Ethernet
-		  adapters [A] [B] [C]
+		SysKonnect and Marvell based adapters, including:
+		  [A] [B] [C]
+		    SysKonnect SK-9821 (1000baseT)
+		    SysKonnect SK-9822 (dual 1000baseT)
+		    SysKonnect SK-9841 (1000baseLX)
+		    SysKonnect SK-9842 (dual 1000baseLX)
+		    SysKonnect SK-9843 (1000baseSX)
+		    SysKonnect SK-9844 (dual 1000baseSX)
+		    SysKonnect SK-9521 v2.0 (1000baseT 32-bit)
+		    SysKonnect SK-9821 v2.0 (1000baseT)
+		    SysKonnect SK-9843 v2.0 (1000baseSX)
+		    3Com 3c940 (1000baseT)
 	ATM Adapters
 		Efficient Networks EN-155 and Adaptec ANA-590X ATM
 		interfaces [*]
@@ -538,7 +562,7 @@ Supported hardware {:-include-:}:
 		interfaces [G]
 	Cryptography Accelerators
 		Broadcom Bluesteelnet uBsec 5501, 5601, 5801, 5802, 5805,
-		  5820, 5821, 5822 [G]
+		  5820, 5821, 5822, 5823 [G]
 		Hifn 6500-based boards [G]
 		Hifn 7751-based boards, including: [G]
 		    Soekris Engineering vpn1201 and vpn1211
@@ -546,6 +570,7 @@ Supported hardware {:-include-:}:
 		    NetSec 7751
 		    Hifn 7751 and 9751 reference boards
 		    Invertex AEON
+		SafeNet SafeXcel 1141/1741 [G]
 	PC Cards (PCMCIA [B] and Carbus [B] [C])
 		ATA cards, including:
 		    ATA/IDE card drives
@@ -699,6 +724,12 @@ Supported hardware {:-include-:}:
 		    Intel Smart Video Recorder III
 		    IMS TV Turbo
 		    AVer Media TV/FM
+		Hardware monitoring sensors, including: [G]
+		    National Semiconductor LM78, LM78-J, LM79
+		    Winbond W83697HF, W83627HF, W83627THF, W83781D, W83782D
+		    VIA VT82C686A
+		    ITE IT8705F, IT8712F
+		    SiS SiS950
 	Many kinds of ISA Plug-and-Play cards
 		Nearly all SB-style audio cards
 		Nearly all joystick ports
@@ -921,5 +952,5 @@ Special care for PCI BIOS:
 
 	Try to gather dmesg output from the failing configuration, for
 	example by using serial console (see boot(8)) and send it to
-	<mickey@openbsd.org> along with descriptions of your hardware setup.
+	<mickey@OpenBSD.org> along with descriptions of your hardware setup.
 	Alternatively, dig in the code and fix problems.

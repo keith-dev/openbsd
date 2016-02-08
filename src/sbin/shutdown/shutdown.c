@@ -1,4 +1,4 @@
-/*	$OpenBSD: shutdown.c,v 1.27 2002/12/08 16:50:07 millert Exp $	*/
+/*	$OpenBSD: shutdown.c,v 1.30 2003/07/30 20:56:19 avsm Exp $	*/
 /*	$NetBSD: shutdown.c,v 1.9 1995/03/18 15:01:09 cgd Exp $	*/
 
 /*
@@ -13,11 +13,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -44,7 +40,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)shutdown.c	8.2 (Berkeley) 2/16/94";
 #else
-static char rcsid[] = "$OpenBSD: shutdown.c,v 1.27 2002/12/08 16:50:07 millert Exp $";
+static char rcsid[] = "$OpenBSD: shutdown.c,v 1.30 2003/07/30 20:56:19 avsm Exp $";
 #endif
 #endif /* not lint */
 
@@ -125,10 +121,8 @@ main(int argc, char *argv[])
 	int arglen, ch, len, readstdin;
 
 #ifndef DEBUG
-	if (geteuid()) {
-		(void)fprintf(stderr, "shutdown: NOT super-user\n");
-		exit(1);
-	}
+	if (geteuid())
+		errx(1, "NOT super-user");
 #endif
 	readstdin = 0;
 	while ((ch = getopt(argc, argv, "dfhknpr-")) != -1)
@@ -381,7 +375,7 @@ die_you_gravy_sucking_pig_dog(void)
 	if (doreboot) {
 		execle(_PATH_REBOOT, "reboot", "-l",
 		    (nosync ? "-n" : (dodump ? "-d" : NULL)),
-		    (dodump ? "-d" : NULL), NULL, NULL);
+		    (dodump ? "-d" : NULL), (char *)NULL, (char *)NULL);
 		syslog(LOG_ERR, "shutdown: can't exec %s: %m.", _PATH_REBOOT);
 		warn(_PATH_REBOOT);
 	}
@@ -389,7 +383,7 @@ die_you_gravy_sucking_pig_dog(void)
 		execle(_PATH_HALT, "halt", "-l",
 		    (dopower ? "-p" : (nosync ? "-n" : (dodump ? "-d" : NULL))),
 		    (nosync ? "-n" : (dodump ? "-d" : NULL)),
-		    (dodump ? "-d" : NULL), NULL, NULL);
+		    (dodump ? "-d" : NULL), (char *)NULL, (char *)NULL);
 		syslog(LOG_ERR, "shutdown: can't exec %s: %m.", _PATH_HALT);
 		warn(_PATH_HALT);
 	}
@@ -504,11 +498,8 @@ getoffset(char *timearg)
 		lt->tm_sec = 0;
 		if ((shuttime = mktime(lt)) == -1)
 			badtime();
-		if ((offset = shuttime - now) < 0) {
-			(void)fprintf(stderr,
-			    "shutdown: that time is already past.\n");
-			exit(1);
-		}
+		if ((offset = shuttime - now) < 0)
+			errx(1, "that time is already past.");
 		break;
 	default:
 		badtime();

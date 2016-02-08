@@ -1,4 +1,4 @@
-/*	$OpenBSD: lookup.c,v 1.10 2002/05/27 03:14:22 deraadt Exp $	*/
+/*	$OpenBSD: lookup.c,v 1.12 2003/06/03 02:56:14 millert Exp $	*/
 
 /*
  * Copyright (c) 1983 Regents of the University of California.
@@ -12,11 +12,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -33,23 +29,24 @@
  * SUCH DAMAGE.
  */
 
+#include "defs.h"
+
 #ifndef lint
 #if 0
-static char RCSid[] = 
-"$From: lookup.c,v 6.8 1996/07/19 16:49:55 michaelc Exp $";
+static char RCSid[] __attribute__((__unused__)) =
+"$From: lookup.c,v 1.4 1999/08/04 15:57:33 christos Exp $";
 #else
-static char RCSid[] = 
-"$OpenBSD: lookup.c,v 1.10 2002/05/27 03:14:22 deraadt Exp $";
+static char RCSid[] __attribute__((__unused__)) =
+"$OpenBSD: lookup.c,v 1.12 2003/06/03 02:56:14 millert Exp $";
 #endif
 
-static char sccsid[] = "@(#)lookup.c	5.1 (Berkeley) 6/6/85";
+static char sccsid[] __attribute__((__unused__)) =
+"@(#)lookup.c	5.1 (Berkeley) 6/6/85";
 
-static char copyright[] =
+static char copyright[] __attribute__((__unused__)) =
 "@(#) Copyright (c) 1983 Regents of the University of California.\n\
  All rights reserved.\n";
 #endif /* not lint */
-
-#include "defs.h"
 
 	/* symbol types */
 #define VAR	1
@@ -68,8 +65,7 @@ static struct syment *hashtab[HASHSIZE];
  * Define a variable from a command line argument.
  */
 void
-define(name)
-	char *name;
+define(char *name)
 {
 	char *cp, *s;
 	struct namelist *nl;
@@ -132,10 +128,7 @@ define(name)
  */
 
 struct namelist *
-lookup(name, action, value)	/* %% in name.  Ignore quotas in name */
-	char *name;
-	int action;
-	struct namelist *value;
+lookup(char *name, int action, struct namelist *value)
 {
 	unsigned int n;
 	char *cp;
@@ -155,7 +148,9 @@ lookup(name, action, value)	/* %% in name.  Ignore quotas in name */
 		if (action != LOOKUP) {
 			if (action != INSERT || s->s_type != CONST) {
 				(void) snprintf(ebuf, sizeof(ebuf),
-						"%s redefined", name);
+					        "%.*s redefined",
+					        (int)(sizeof(ebuf) - 
+					        sizeof(" redefined")), name);
 				yyerror(ebuf);
 			}
 		}
@@ -163,7 +158,9 @@ lookup(name, action, value)	/* %% in name.  Ignore quotas in name */
 	}
 
 	if (action == LOOKUP) {
-		(void) snprintf(ebuf, sizeof(ebuf), "%s undefined", name);
+		(void) snprintf(ebuf, sizeof(ebuf), "%.*s undefined",
+			        (int)(sizeof(ebuf) - sizeof(" undefined")),
+				name);
 		yyerror(ebuf);
 		return(NULL);
 	}

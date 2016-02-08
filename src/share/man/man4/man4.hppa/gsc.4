@@ -1,4 +1,4 @@
-.\"	$OpenBSD: gsc.4,v 1.12 2003/03/05 19:50:48 jmc Exp $
+.\"	$OpenBSD: gsc.4,v 1.17 2003/06/19 20:27:19 deraadt Exp $
 .\"
 .\"
 .\" Copyright (c) 1999 Michael Shalayeff
@@ -12,11 +12,6 @@
 .\" 2. Redistributions in binary form must reproduce the above copyright
 .\"    notice, this list of conditions and the following disclaimer in the
 .\"    documentation and/or other materials provided with the distribution.
-.\" 3. All advertising materials mentioning features or use of this software
-.\"    must display the following acknowledgement:
-.\"	This product includes software developed by Michael Shalayeff.
-.\" 4. The name of the author may not be used to endorse or promote products
-.\"    derived from this software without specific prior written permission.
 .\"
 .\" THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
 .\" IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -34,13 +29,15 @@
 .Os
 .Sh NAME
 .Nm gsc
-.Nd General System Connect bus on HP9000 series 700 workstations
+.Nd General System Connect bus on
+.Tn HP 9000/700
+machines
 .Sh SYNOPSIS
 .Cd "gsc* at lasi?"
 .Cd "gsc* at asp?"
 .Cd "gsc* at wax?"
 .Sh DESCRIPTION
-This is the core I/O bus for all HP9000/700 series workstations.
+This is the core I/O bus for all HP 9000/700 workstations.
 All I/O subsystems connect to this bus.
 The devices can be either on separate chips, expansion
 cards or on an integrated megacell, like the LASI MBA.
@@ -62,13 +59,13 @@ mostly has only one VLSI chip on it (in most cases LASI/WAX).
 Newer systems sometimes feature the "HSC formfactor", which is a 1U-VME
 card-like expansion card with a 100-pin male pin+socket connector.
 Mixing cards with different speeds is supported but downgrades
-the performance of the whole I/O-subsystem. 
-.Pp
+the performance of the whole I/O-subsystem.
 .Sh SUPPORTED DEVICES
 The system includes machine-dependent
 .Tn GSC
 drivers, sorted by driver name:
-.Bl -tag -width pcdisplay -offset indent
+.Pp
+.Bl -tag -width 12n -offset indent -compact
 .It Xr com 4
 RS-232 ports.
 .It Xr gsckbc 4
@@ -85,14 +82,13 @@ Centronics printer port.
 SCSI I/O processor.
 .El
 .Pp
-Some of these 
+Some of these
 .Tn GSC
 devices also have
-.Tn PCI
-,
-.Tn EISA 
+.Tn PCI ,
+.Tn EISA ,
 or
-.Tn ISA 
+.Tn ISA
 equivalents.
 These are listed in
 .Xr pci 4 ,
@@ -103,10 +99,11 @@ or
 .Xr asp 4 ,
 .Xr cpu 4 ,
 .Xr intro 4 ,
-.Xr lasi 4
+.Xr lasi 4 ,
+.Xr wax 4
 .Sh HISTORY
 The
 .Nm
 driver
 appeared in
-.Ox 2.4 .
+.Ox 2.6 .

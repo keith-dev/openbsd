@@ -1,4 +1,4 @@
-.\" $OpenBSD: pthread_attr_init.3,v 1.4 2003/02/20 18:59:12 jmc Exp $
+.\" $OpenBSD: pthread_attr_init.3,v 1.6 2003/05/18 13:06:33 jmc Exp $
 .\" Manual page derived from TOG's UNIX98 documentation.
 .\"
 .\"  David Leonard, 2000. Public Domain.
@@ -43,7 +43,7 @@ to an implementation-dependent
 invalid value.
 The behaviour of using the attribute after it has
 been destroyed is undefined.
-.Sh RETURN VALUE
+.Sh RETURN VALUES
 Upon successful completion,
 .Fn pthread_attr_init
 and
@@ -63,9 +63,9 @@ object.
 These functions will not return an error code of
 .Bq Er EINTR .
 .Sh SEE ALSO
+.Xr pthread_attr_setdetachstate 3 ,
 .Xr pthread_attr_setstackaddr 3 ,
 .Xr pthread_attr_setstacksize 3 ,
-.Xr pthread_attr_setdetachstate 3 ,
 .Xr pthread_create 3 ,
 .Xr pthreads 3
 .Sh STANDARDS

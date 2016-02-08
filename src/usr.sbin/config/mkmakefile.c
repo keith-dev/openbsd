@@ -1,4 +1,4 @@
-/*	$OpenBSD: mkmakefile.c,v 1.12 2002/05/29 09:45:39 deraadt Exp $	*/
+/*	$OpenBSD: mkmakefile.c,v 1.15 2003/06/28 04:55:07 deraadt Exp $	*/
 /*	$NetBSD: mkmakefile.c,v 1.34 1997/02/02 21:12:36 thorpej Exp $	*/
 
 /*
@@ -22,11 +22,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -70,7 +66,7 @@ static int emitrules(FILE *);
 static int emitload(FILE *);
 
 int
-mkmakefile()
+mkmakefile(void)
 {
 	FILE *ifp, *ofp;
 	int lineno;
@@ -155,8 +151,7 @@ bad:
  * get the .o from the obj-directory.
  */
 static const char *
-srcpath(fi)
-	struct files *fi;
+srcpath(struct files *fi)
 {
 #if 1
 	/* Always have source, don't support object dirs for kernel builds. */
@@ -176,8 +171,7 @@ srcpath(fi)
 }
 
 static int
-emitdefs(fp)
-	FILE *fp;
+emitdefs(FILE *fp)
 {
 	struct nvlist *nv;
 	char *sp;
@@ -224,8 +218,7 @@ emitdefs(fp)
 }
 
 static int
-emitobjs(fp)
-	FILE *fp;
+emitobjs(FILE *fp)
 {
 	struct files *fi;
 	struct objects *oi;
@@ -271,25 +264,21 @@ emitobjs(fp)
 }
 
 static int
-emitcfiles(fp)
-	FILE *fp;
+emitcfiles(FILE *fp)
 {
 
 	return (emitfiles(fp, 'c'));
 }
 
 static int
-emitsfiles(fp)
-	FILE *fp;
+emitsfiles(FILE *fp)
 {
 
 	return (emitfiles(fp, 's'));
 }
 
 static int
-emitfiles(fp, suffix)
-	FILE *fp;
-	int suffix;
+emitfiles(FILE *fp, int suffix)
 {
 	struct files *fi;
 	struct config *cf;
@@ -332,8 +321,7 @@ emitfiles(fp, suffix)
 		for (cf = allcf; cf != NULL; cf = cf->cf_next) {
 			if (cf->cf_root == NULL)
 				(void)snprintf(swapname, sizeof swapname,
-				    "$S/arch/%s/%s/swapgeneric.c",
-				    machine, machine);
+				    "$S/conf/swapgeneric.c");
 			else
 				(void)snprintf(swapname, sizeof swapname,
 				    "./swap%s.c", cf->cf_name);
@@ -359,8 +347,7 @@ emitfiles(fp, suffix)
  * Emit the make-rules.
  */
 static int
-emitrules(fp)
-	FILE *fp;
+emitrules(FILE *fp)
 {
 	struct files *fi;
 	const char *cp, *fpath;
@@ -396,8 +383,7 @@ emitrules(fp)
  * This function is not to be called `spurt'.
  */
 static int
-emitload(fp)
-	FILE *fp;
+emitload(FILE *fp)
 {
 	struct config *cf;
 	const char *nm, *swname;
@@ -422,19 +408,18 @@ emitload(fp)
 				return (1);
 			first = 0;
 		}
-		if (fprintf(fp, "\n\
-\t${SYSTEM_LD_HEAD}\n\
-\t${SYSTEM_LD} swap%s.o\n\
-\t${SYSTEM_LD_TAIL}\n\
-\n\
-swap%s.o: ", swname, swname) < 0)
+		if (fprintf(fp, "\n"
+		    "\t${SYSTEM_LD_HEAD}\n"
+		    "\t${SYSTEM_LD} swap%s.o\n"
+		    "\t${SYSTEM_LD_TAIL}\n"
+		    "\n"
+		    "swap%s.o: ", swname, swname) < 0)
 			return (1);
 		if (cf->cf_root != NULL) {
 			if (fprintf(fp, "swap%s.c\n", nm) < 0)
 				return (1);
 		} else {
-			if (fprintf(fp, "$S/arch/%s/%s/swapgeneric.c\n",
-			    machine, machine) < 0)
+			if (fprintf(fp, "$S/conf/swapgeneric.c\n") < 0)
 				return (1);
 		}
 		if (fputs("\t${NORMAL_C}\n\n", fp) < 0)

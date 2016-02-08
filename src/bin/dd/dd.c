@@ -1,4 +1,4 @@
-/*	$OpenBSD: dd.c,v 1.12 2002/02/16 21:27:06 millert Exp $	*/
+/*	$OpenBSD: dd.c,v 1.14 2003/06/11 23:42:12 deraadt Exp $	*/
 /*	$NetBSD: dd.c,v 1.6 1996/02/20 19:29:06 jtc Exp $	*/
 
 /*-
@@ -17,11 +17,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -48,7 +44,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)dd.c	8.5 (Berkeley) 4/2/94";
 #else
-static char rcsid[] = "$OpenBSD: dd.c,v 1.12 2002/02/16 21:27:06 millert Exp $";
+static char rcsid[] = "$OpenBSD: dd.c,v 1.14 2003/06/11 23:42:12 deraadt Exp $";
 #endif
 #endif /* not lint */
 
@@ -85,9 +81,7 @@ size_t	files_cnt = 1;		/* # of files to copy */
 const	u_char	*ctab;		/* conversion table */
 
 int
-main(argc, argv)
-	int argc;
-	char *argv[];
+main(int argc, char *argv[])
 {
 	jcl(argv);
 	setup();
@@ -107,7 +101,7 @@ main(argc, argv)
 }
 
 static void
-setup()
+setup(void)
 {
 	u_int cnt;
 
@@ -213,8 +207,7 @@ setup()
 }
 
 static void
-getfdtype(io)
-	IO *io;
+getfdtype(IO *io)
 {
 	struct mtget mt;
 	struct stat sb;
@@ -228,7 +221,7 @@ getfdtype(io)
 }
 
 static void
-dd_in()
+dd_in(void)
 {
 	ssize_t n;
 
@@ -327,7 +320,7 @@ dd_in()
  * is truncated.
  */
 static void
-dd_close()
+dd_close(void)
 {
 	if (cfunc == def)
 		def_close();
@@ -347,8 +340,7 @@ dd_close()
 }
 
 void
-dd_out(force)
-	int force;
+dd_out(int force)
 {
 	static int warned;
 	size_t cnt, n;

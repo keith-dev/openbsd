@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.46 2002/06/10 18:08:58 ho Exp $
+#	$OpenBSD: Makefile,v 1.50 2003/08/28 14:43:35 markus Exp $
 #	$EOM: Makefile,v 1.78 2000/10/15 21:33:42 niklas Exp $
 
 #
@@ -13,11 +13,6 @@
 # 2. Redistributions in binary form must reproduce the above copyright
 #    notice, this list of conditions and the following disclaimer in the
 #    documentation and/or other materials provided with the distribution.
-# 3. All advertising materials mentioning features or use of this software
-#    must display the following acknowledgement:
-#	This product includes software developed by Ericsson Radio Systems.
-# 4. The name of the author may not be used to endorse or promote products
-#    derived from this software without specific prior written permission.
 #
 # THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
 # IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -41,18 +36,20 @@
 # may provide this make variant as "pmake" or maybe "bsdmake".
 #
 
-# openbsd means OpenBSD 2.5 or newer. linux is the name for Linux with
+# openbsd means OpenBSD 2.5 or newer. freeswan is the name for Linux with
 # FreeS/WAN integrated, freebsd/netbsd means FreeBSD/NetBSD with KAME IPsec.
 OS=		openbsd
 #OS=		netbsd
 #OS=		freebsd
-#OS=		linux
+#OS=		freeswan
 #OS=		bsdi
 
 # Compile-time configuration of otherwise optional features
-#FEATURES=	tripledes des blowfish cast policy x509 ec aggressive debug gmp
-#FEATURES+=	rawkey isakmp_cfg dnssec
-FEATURES=	tripledes des blowfish cast policy x509 ec aggressive debug
+#FEATURES=	tripledes des blowfish cast aes
+#FEATURES+=	policy x509 ec aggressive debug gmp
+#FEATURES+=	rawkey isakmp_cfg dnssec privsep
+FEATURES=	tripledes des blowfish cast aes
+FEATURES+=	policy x509 ec aggressive debug
 FEATURES+=	rawkey isakmp_cfg
 
 .PATH:		${.CURDIR}/sysdep/${OS}
@@ -77,6 +74,7 @@ MAN=		isakmpd.8 isakmpd.conf.5 isakmpd.policy.5
 CFLAGS+=	-Wall -Wstrict-prototypes -Wmissing-prototypes \
 		-DNEED_SYSDEP_APP \
 		-I${.CURDIR} -I${.CURDIR}/sysdep/${OS} -I.
+#CFLAGS+=	-Wsign-compare -Werror
 
 # Different debugging & profiling suggestions
 
@@ -180,7 +178,7 @@ DPADD+=		${LIBDES}
 .endif
 
 SRCS+=		${IPSEC_SRCS} ${X509} ${POLICY} ${EC} ${AGGRESSIVE} ${DNSSEC} \
-		${ISAKMP_CFG}
+		${ISAKMP_CFG} ${PRIVSEP}
 CFLAGS+=	${IPSEC_CFLAGS} ${DNSSEC_CFLAGS}
 
 LDADD+=		${DESLIB} ${LWRESLIB}

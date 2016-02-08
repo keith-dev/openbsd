@@ -1,4 +1,4 @@
-.\" 	$OpenBSD: ftp.1,v 1.37 2003/03/18 08:37:35 jmc Exp $
+.\" 	$OpenBSD: ftp.1,v 1.41 2003/09/02 18:50:06 jmc Exp $
 .\" 	$NetBSD: ftp.1,v 1.22 1997/08/18 10:20:22 lukem Exp $
 .\"
 .\" Copyright (c) 1985, 1989, 1990, 1993
@@ -12,11 +12,7 @@
 .\" 2. Redistributions in binary form must reproduce the above copyright
 .\"    notice, this list of conditions and the following disclaimer in the
 .\"    documentation and/or other materials provided with the distribution.
-.\" 3. All advertising materials mentioning features or use of this software
-.\"    must display the following acknowledgement:
-.\"	This product includes software developed by the University of
-.\"	California, Berkeley and its contributors.
-.\" 4. Neither the name of the University nor the names of its contributors
+.\" 3. Neither the name of the University nor the names of its contributors
 .\"    may be used to endorse or promote products derived from this software
 .\"    without specific prior written permission.
 .\"
@@ -275,7 +271,7 @@ sequence to conform with the
 single linefeed record
 delimiter.
 Records on
-.Pf non\- Ns Ux
+non\-UNIX
 remote systems may contain single linefeeds;
 when an ASCII type transfer is made, these linefeeds may be
 distinguished from a record delimiter only when
@@ -578,7 +574,8 @@ If no local file is specified, or if
 .Ar local-file
 is
 .Dq - ,
-the output is sent to the terminal.  Note that on some servers, the
+the output is sent to the terminal.
+Note that on some servers, the
 .Ic nlist
 command will only return information on normal files (not directories
 or special files).
@@ -646,7 +643,7 @@ The sequence
 .Ql $0
 is replaced by the original filename.
 Additionally, the sequence
-.Ql Op Ar seq1 , Ar seq2
+.Sq Op Ar seq1 , Ar seq2
 is replaced by
 .Op Ar seq1
 if
@@ -831,7 +828,7 @@ command should be an
 .Ic open ,
 to establish the secondary control connection.
 Enter the command
-.Ic proxy ?
+.Ic proxy ?\&
 to see other ftp commands executable on the
 secondary connection.
 The following commands behave differently when prefaced by
@@ -1091,7 +1088,7 @@ if verbose is on, when a file transfer completes, statistics
 regarding the efficiency of the transfer are reported.
 By default,
 verbose is on.
-.It Ic ? Op Ar command
+.It Ic \&? Op Ar command
 A synonym for
 .Ic help .
 .El
@@ -1298,7 +1295,7 @@ and
 .Tn PDP Ns -20's
 mostly).
 .Nm
-supports the ascii and image types of file transfer,
+supports the ASCII and image types of file transfer,
 plus local byte size 8 for
 .Ic tenex
 mode transfers.
@@ -1483,11 +1480,11 @@ URL of FTP proxy to use when making FTP URL requests
 URL of HTTP proxy to use when making HTTP URL requests.
 .El
 .Sh PORT ALLOCATION
-For active mode data connections, 
+For active mode data connections,
 .Nm
 will listen to a random high tcp port.
 The interval of ports used are configurable using
-.Xr sysctl 8 
+.Xr sysctl 8
 variables
 .Li net.inet.ip.porthifirst
 and

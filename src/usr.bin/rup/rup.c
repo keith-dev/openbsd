@@ -1,4 +1,4 @@
-/*	$OpenBSD: rup.c,v 1.16 2002/05/27 03:14:07 deraadt Exp $	*/
+/*	$OpenBSD: rup.c,v 1.18 2003/08/04 17:06:45 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 1993, John Brezak
@@ -34,7 +34,7 @@
  */
 
 #ifndef lint
-static char rcsid[] = "$OpenBSD: rup.c,v 1.16 2002/05/27 03:14:07 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: rup.c,v 1.18 2003/08/04 17:06:45 deraadt Exp $";
 #endif /* not lint */
 
 #include <stdio.h>
@@ -65,9 +65,8 @@ struct host_list {
 void usage(void);
 int print_rup_data(char *, statstime *host_stat);
 
-int
-search_host(addr)
-	struct in_addr addr;
+static int
+search_host(struct in_addr addr)
 {
 	struct host_list *hp;
 	
@@ -81,9 +80,8 @@ search_host(addr)
 	return(0);
 }
 
-void
-remember_host(addr)
-	struct in_addr addr;
+static void
+remember_host(struct in_addr addr)
 {
 	struct host_list *hp;
 
@@ -97,7 +95,6 @@ remember_host(addr)
 }
 
 
-
 struct rup_data {
 	char *host;
 	struct statstime statstime;
@@ -106,7 +103,7 @@ struct rup_data *rup_data;
 int rup_data_idx = 0;
 int rup_data_max = 0;
 
-enum sort_type { 
+enum sort_type {
 	SORT_NONE,
 	SORT_HOST,
 	SORT_LDAV,
@@ -114,11 +111,12 @@ enum sort_type {
 };
 enum sort_type sort_type;
 
-int
-compare(d1, d2)
-	struct rup_data *d1;
-	struct rup_data *d2;
+static int
+compare(const void *v1, const void *v2)
 {
+	const struct rup_data *d1 = v1;
+	const struct rup_data *d2 = v2;
+
 	switch(sort_type) {
 	case SORT_HOST:
 		return strcmp(d1->host, d2->host);
@@ -126,7 +124,7 @@ compare(d1, d2)
 		return d1->statstime.avenrun[0]
 			- d2->statstime.avenrun[0];
 	case SORT_UPTIME:
-		return d1->statstime.boottime.tv_sec 
+		return d1->statstime.boottime.tv_sec
 			- d2->statstime.boottime.tv_sec;
 	default:
 		/* something's really wrong here */
@@ -134,14 +132,12 @@ compare(d1, d2)
 	}
 }
 
-void
-remember_rup_data(host, st)
-	char *host;
-	struct statstime *st;
+static void
+remember_rup_data(char *host, struct statstime *st)
 {
 	if (rup_data_idx >= rup_data_max) {
 		rup_data_max += 16;
-		rup_data = realloc(rup_data, 
+		rup_data = realloc(rup_data,
 		    rup_data_max * sizeof(struct rup_data));
 		if (rup_data == NULL) {
 			err(1, NULL);
@@ -155,10 +151,8 @@ remember_rup_data(host, st)
 }
 
 
-int
-rstat_reply(replyp, raddrp)
-	char *replyp;
-	struct sockaddr_in *raddrp;
+static int
+rstat_reply(char *replyp, struct sockaddr_in *raddrp)
 {
 	struct hostent *hp;
 	char *host;
@@ -185,9 +179,7 @@ rstat_reply(replyp, raddrp)
 
 
 int
-print_rup_data(host, host_stat)
-	char *host;
-	statstime *host_stat;
+print_rup_data(char *host, statstime *host_stat)
 {
 	unsigned int ups = 0, upm = 0, uph = 0, upd = 0;
 	struct tm *tmp_time, host_time;
@@ -243,9 +235,8 @@ print_rup_data(host, host_stat)
 }
 
 
-void
-onehost(host)
-	char *host;
+static void
+onehost(char *host)
 {
 	CLIENT *rstat_clnt;
 	statstime host_stat;
@@ -272,8 +263,8 @@ onehost(host)
 	clnt_destroy(rstat_clnt);
 }
 
-void
-allhosts()
+static void
+allhosts(void)
 {
 	statstime host_stat;
 	enum clnt_stat clnt_stat;
@@ -305,9 +296,7 @@ allhosts()
 }
 
 int
-main(argc, argv)
-	int argc;
-	char *argv[];
+main(int argc, char *argv[])
 {
 	int ch;
 	extern int optind;
@@ -346,7 +335,7 @@ main(argc, argv)
 
 
 void
-usage()
+usage(void)
 {
 	fprintf(stderr, "Usage: rup [-dhlt] [hosts ...]\n");
 	exit(1);

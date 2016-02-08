@@ -13,11 +13,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -33,7 +29,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	$OpenBSD: SYS.h,v 1.13 2002/10/06 23:24:13 art Exp $
+ *	$OpenBSD: SYS.h,v 1.15 2003/06/02 20:18:30 millert Exp $
  */
 
 #include <machine/asm.h>
@@ -71,6 +67,9 @@
 			int $0x80
 #endif /* ! __STDC__ */
 
+#define CERROR          _C_LABEL(__cerror)
+#define CURBRK          _C_LABEL(__curbrk)
+
 /* perform a syscall */
 #define	_SYSCALL_NOERROR(x,y)				\
 		SYSENTRY(x);				\
@@ -80,13 +79,25 @@
 		_SYSCALL_NOERROR(x,x)
 
 /* perform a syscall, set errno */
+#ifdef PIC
+#define	_SYSCALL(x,y)					\
+			.text;				\
+			.align 2;			\
+		2:	PIC_PROLOGUE;			\
+			movl PIC_GOT(CERROR), %ecx;	\
+			PIC_EPILOGUE;			\
+			jmp *%ecx;			\
+		_SYSCALL_NOERROR(x,y)			\
+			jc 2b
+#else
 #define	_SYSCALL(x,y)					\
 			.text;				\
 			.align 2;			\
 		2:					\
-			jmp PIC_PLT(__cerror);		\
+			jmp PIC_PLT(CERROR);		\
 		_SYSCALL_NOERROR(x,y)			\
 			jc 2b
+#endif
 
 #define	SYSCALL(x)					\
 		_SYSCALL(x,x)
@@ -105,4 +116,4 @@
 #define	RSYSCALL(x)					\
 			PSEUDO(x,x);
 
-	.globl	__cerror
+	.globl	CERROR

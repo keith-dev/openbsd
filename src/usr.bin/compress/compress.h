@@ -1,4 +1,4 @@
-/*	$OpenBSD: compress.h,v 1.3 2002/12/08 16:07:54 mickey Exp $	*/
+/*	$OpenBSD: compress.h,v 1.7 2003/09/05 04:46:35 tedu Exp $	*/
 
 /*
  * Copyright (c) 1997 Michael Shalayeff
@@ -12,11 +12,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by Michael Shalayeff.
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
@@ -32,32 +27,52 @@
  *
  */
 
+struct z_info {
+	u_int32_t mtime;	/* timestamp */
+	u_int32_t crc;		/* crc */
+	u_int32_t hlen;		/* header length */
+	u_int64_t total_in;	/* # bytes in */
+	u_int64_t total_out;	/* # bytes out */
+};
+
 /*
  * making it any bigger does not affect perfomance very much.
  * actually this value is just a little bit better than 8192.
  */
 #define Z_BUFSIZE 16384
 
-extern const char main_rcsid[], z_rcsid[], gz_rcsid[], pkzip_rcsid[],
-    pack_rcsid[], lzh_rcsid[];
+/*
+ * exit codes for compress
+ */
+#define	SUCCESS	0
+#define	FAILURE	1
+#define	WARNING	2
 
-extern int z_check_header(int, struct stat *, const char *);
-extern void *z_open(int, const char *, int);
+extern const char main_rcsid[], z_rcsid[], gz_rcsid[], pkzip_rcsid[],
+    pack_rcsid[], lzh_rcsid[], null_rcsid[];
+extern char null_magic[];
+
+extern void *z_open(int, const char *, char *, int, u_int32_t, int);
 extern FILE *zopen(const char *, const char *,int);
 extern int zread(void *, char *, int);
 extern int zwrite(void *, const char *, int);
-extern int zclose(void *);
+extern int z_close(void *, struct z_info *);
 
-extern int gz_check_header(int, struct stat *, const char *);
-extern void *gz_open(int, const char *, int);
+
+extern void *gz_open(int, const char *, char *, int, u_int32_t, int);
 extern int gz_read(void *, char *, int);
 extern int gz_write(void *, const char *, int);
-extern int gz_close(void *);
+extern int gz_close(void *, struct z_info *);
 extern int gz_flush(void *, int);
 
-extern int lzh_check_header(int, struct stat *, const char *);
-extern void *lzh_open(int, const char *, int);
+extern void *lzh_open(int, const char *, char *, int, u_int32_t, int);
 extern int lzh_read(void *, char *, int);
 extern int lzh_write(void *, const char *, int);
-extern int lzh_close(void *);
+extern int lzh_close(void *, struct z_info *);
 extern int lzh_flush(void *, int);
+
+extern void *null_open(int, const char *, char *, int, u_int32_t, int);
+extern int null_read(void *, char *, int);
+extern int null_write(void *, const char *, int);
+extern int null_close(void *, struct z_info *);
+extern int null_flush(void *, int);

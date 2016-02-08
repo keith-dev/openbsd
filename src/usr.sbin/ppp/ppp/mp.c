@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	$OpenBSD: mp.c,v 1.30 2002/05/16 01:13:39 brian Exp $
+ *	$OpenBSD: mp.c,v 1.32 2003/04/07 23:58:53 deraadt Exp $
  */
 
 #include <sys/param.h>
@@ -902,7 +902,7 @@ mp_Enddisc(u_char c, const char *address, int len)
 
   switch (c) {
     case ENDDISC_NULL:
-      sprintf(result, "Null Class");
+      snprintf(result, sizeof result, "Null Class");
       break;
 
     case ENDDISC_LOCAL:
@@ -914,7 +914,7 @@ mp_Enddisc(u_char c, const char *address, int len)
         snprintf(result, sizeof result, "IP %s",
                  inet_ntoa(*(const struct in_addr *)address));
       else
-        sprintf(result, "IP[%d] ???", len);
+        snprintf(result, sizeof result, "IP[%d] ???", len);
       break;
 
     case ENDDISC_MAC:
@@ -923,16 +923,17 @@ mp_Enddisc(u_char c, const char *address, int len)
         snprintf(result, sizeof result, "MAC %02x:%02x:%02x:%02x:%02x:%02x",
                  m[0], m[1], m[2], m[3], m[4], m[5]);
       } else
-        sprintf(result, "MAC[%d] ???", len);
+        snprintf(result, sizeof result, "MAC[%d] ???", len);
       break;
 
     case ENDDISC_MAGIC:
-      sprintf(result, "Magic: 0x");
+      snprintf(result, sizeof result, "Magic: 0x");
       header = strlen(result);
       if (len > sizeof result - header - 1)
         len = sizeof result - header - 1;
       for (f = 0; f < len; f++)
-        sprintf(result + header + 2 * f, "%02x", address[f]);
+        snprintf(result + header + 2 * f, sizeof result - (header + 2 * f),
+	  "%02x", address[f]);
       break;
 
     case ENDDISC_PSN:
@@ -940,12 +941,13 @@ mp_Enddisc(u_char c, const char *address, int len)
       break;
 
      default:
-      sprintf(result, "%d: ", (int)c);
+      snprintf(result, sizeof result, "%d: ", (int)c);
       header = strlen(result);
       if (len > sizeof result - header - 1)
         len = sizeof result - header - 1;
       for (f = 0; f < len; f++)
-        sprintf(result + header + 2 * f, "%02x", address[f]);
+        snprintf(result + header + 2 * f, sizeof result - (header + 2 * f),
+	  "%02x", address[f]);
       break;
   }
   return result;
@@ -980,7 +982,8 @@ mp_SetEnddisc(struct cmdargs const *arg)
   } else if (arg->argc > arg->argn) {
     if (!strcasecmp(arg->argv[arg->argn], "label")) {
       mp->cfg.enddisc.class = ENDDISC_LOCAL;
-      strcpy(mp->cfg.enddisc.address, arg->bundle->cfg.label);
+      strlcpy(mp->cfg.enddisc.address, arg->bundle->cfg.label,
+	sizeof mp->cfg.enddisc.address);
       mp->cfg.enddisc.len = strlen(mp->cfg.enddisc.address);
     } else if (!strcasecmp(arg->argv[arg->argn], "ip")) {
       if (arg->bundle->ncp.ipcp.my_ip.s_addr == INADDR_ANY)
@@ -1027,7 +1030,8 @@ mp_SetEnddisc(struct cmdargs const *arg)
     } else if (!strcasecmp(arg->argv[arg->argn], "psn")) {
       if (arg->argc > arg->argn+1) {
         mp->cfg.enddisc.class = ENDDISC_PSN;
-        strcpy(mp->cfg.enddisc.address, arg->argv[arg->argn+1]);
+        strlcpy(mp->cfg.enddisc.address, arg->argv[arg->argn+1],
+	  sizeof mp->cfg.enddisc.address);
         mp->cfg.enddisc.len = strlen(mp->cfg.enddisc.address);
       } else {
         log_Printf(LogWARN, "PSN endpoint requires additional data\n");

@@ -1,4 +1,4 @@
-/*	$OpenBSD: lndir.c,v 1.11 2002/09/23 04:10:14 millert Exp $	*/
+/*	$OpenBSD: lndir.c,v 1.14 2003/05/13 16:55:22 millert Exp $	*/
 /* $XConsortium: lndir.c /main/15 1995/08/30 10:56:18 gildea $ */
 
 /* 
@@ -47,15 +47,15 @@ in this Software without prior written authorization from the X Consortium.
 	%  lndir ../X
 */
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <sys/types.h>
-#include <sys/stat.h>
 #include <sys/param.h>
+#include <sys/stat.h>
+
+#include <dirent.h>
 #include <err.h>
 #include <errno.h>
-#include <dirent.h>
 #include <stdarg.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -134,15 +134,19 @@ main(int argc, char *argv[])
 int
 equivalent(char *lname, char *rname)
 {
-	char *s;
+	char *s, *ns;
 
-	if (!strcmp(lname, rname))
+	if (strcmp(lname, rname) == 0)
 		return(1);
 	for (s = lname; *s && (s = strchr(s, '/')); s++) {
-		while (s[1] == '/')
-			strcpy(s+1, s+2);
+		if (s[1] == '/') {
+			/* collapse multiple slashes in lname */
+			for (ns = s + 1; *ns == '/'; ns++)
+				;
+			memmove(s + 1, ns, strlen(ns) + 1);
+		}
 	}
-	return(!strcmp(lname, rname));
+	return(strcmp(lname, rname) == 0);
 }
 
 void
@@ -152,10 +156,10 @@ addexcept(char *name)
 
 	new = (struct except *)malloc(sizeof(struct except));
 	if (new == (struct except *)NULL)
-		err(1, "addexcept");
+		err(1, NULL);
 	new->name = strdup(name);
 	if (new->name == (char *)NULL)
-		err(1, "addexcept");
+		err(1, NULL);
 
 	new->next = exceptions;
 	exceptions = new;
@@ -184,15 +188,15 @@ dodir(char *fn, struct stat *fs, struct stat *ts, int rel)
 	DIR *df;
 
 	if (fs->st_dev == ts->st_dev && fs->st_ino == ts->st_ino) {
-		warn("%s: From and to directories are identical!", fn);
+		warnx("%s: From and to directories are identical!", fn);
 		return(1);
 	}
 
 	if (rel)
-		strlcpy(buf, "../", sizeof buf);
+		strlcpy(buf, "../", sizeof(buf));
 	else
 		buf[0] = '\0';
-	strlcat(buf, fn, sizeof buf);
+	strlcat(buf, fn, sizeof(buf));
     
 	if (!(df = opendir(buf))) {
 		warn("%s: Cannot opendir", buf);
@@ -203,14 +207,13 @@ dodir(char *fn, struct stat *fs, struct stat *ts, int rel)
 	*p++ = '/';
 	n_dirs = fs->st_nlink;
 	while ((dp = readdir(df))) {
-		if (dp->d_name[strlen(dp->d_name) - 1] == '~')
+		if (dp->d_namlen == 0 || dp->d_name[dp->d_namlen - 1] == '~')
 			continue;
-		for (cur = exceptions; cur != (struct except *)NULL;
-		    cur = cur->next) {
-			if (!strcmp (dp->d_name, cur->name))
+		for (cur = exceptions; cur != NULL; cur = cur->next) {
+			if (!strcmp(dp->d_name, cur->name))
 				goto next;	/* can't continue */
 		}
-		strcpy(p, dp->d_name);
+		strlcpy(p, dp->d_name, buf + sizeof(buf) - p);
 
 		if (n_dirs > 0) {
 			if (stat(buf, &sb) < 0) {
@@ -306,7 +309,7 @@ next:
 void
 usage(void)
 {
-	(void)fprintf(stderr, "usage: %s [-e except] [-si] fromdir todir\n",
+	(void)fprintf(stderr, "usage: %s [-e except] [-si] fromdir [todir]\n",
 	    __progname);
 	exit(1);
 }

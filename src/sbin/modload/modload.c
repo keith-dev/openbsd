@@ -1,4 +1,4 @@
-/* 	$OpenBSD: modload.c,v 1.38 2003/03/13 09:09:26 deraadt Exp $	*/
+/* 	$OpenBSD: modload.c,v 1.41 2003/08/06 20:37:25 millert Exp $	*/
 /*	$NetBSD: modload.c,v 1.30 2001/11/08 15:33:15 christos Exp $	*/
 
 /*
@@ -152,15 +152,12 @@ static int
 verify_entry(const char *entry, char *filename)
 {
 	struct	nlist	names[2];
-	int n, len;
+	int n;
 	char *s;
 
 	memset(names, 0, sizeof(names));
-	len = strlen(entry) + 2;
-	s = malloc(len);
-	if (s == NULL)
+	if (asprintf(&s, "_%s", entry) == -1)
 		err(1, "malloc");
-	snprintf(s, len, "_%s", entry);
 #ifdef	_AOUT_INCLUDE_
 	names[0].n_un.n_name = s;
 #else
@@ -170,6 +167,7 @@ verify_entry(const char *entry, char *filename)
 	n = nlist(filename, names);
 	if (n == -1)
 		err(1, "nlist %s", filename);
+	free(s);
 	return n;
 }
 
@@ -237,7 +235,7 @@ int
 main(int argc, char *argv[])
 {
 	int strtablen, c, noready = 0, old = 0;
-	char *kname = _PATH_UNIX;
+	const char *kname = _PATH_UNIX;
 	char *entry = DFLT_ENTRY;
 	char *post = NULL;
 	char *modobj;
@@ -316,17 +314,12 @@ main(int argc, char *argv[])
 		 * Try <modobj>_init if entry is DFLT_ENTRY.
 		 */
 		if (strcmp(entry, DFLT_ENTRY) == 0) {
-			int len;
-
 			if ((p = strrchr(modout, '/')))
 				p++;
 			else
 				p = modout;
-			len = strlen(p) + strlen(DFLT_ENTRYEXT) + 1;
-			entry = malloc(len);
-			if (entry == NULL)
-				err(1, "malloc");
-			snprintf(entry, len, "%s%s", p, DFLT_ENTRYEXT);
+			if (asprintf(&entry, "%s%s", p, DFLT_ENTRYEXT) == -1)
+				err(1, "asprintf");
 			if (verify_entry(entry, modobj))
 				errx(1, "entry point _%s not found in %s",
 				    entry, modobj);
@@ -457,7 +450,7 @@ main(int argc, char *argv[])
 	if (post) {
 		struct lmc_stat sbuf;
 		char name[MAXLKMNAME] = "";
-		char id[16], type[16], offset[16];
+		char id[16], type[32], offset[32];
 
 		sbuf.id = resrv.slot;
 		sbuf.name = name;

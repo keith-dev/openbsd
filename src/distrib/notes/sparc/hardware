@@ -1,4 +1,4 @@
-dnl	$OpenBSD: hardware,v 1.48 2003/03/09 02:41:19 miod Exp $
+dnl	$OpenBSD: hardware,v 1.58 2003/09/06 22:38:38 miod Exp $
 OpenBSD/MACHINE OSREV runs on the following classes of machines:
     * sun4: the VME series
 	- 4/100: Original sparc with VME. Many hardware bugs.
@@ -32,13 +32,13 @@ OpenBSD/MACHINE OSREV runs on the following classes of machines:
 	- SS20: Improved pizzabox mbus-based machine
 	- Sun Voyager
 
-    * As vell as faithful clones of the above Sun systems, such as:
+    * As well as faithful clones of the above Sun systems, such as:
 	- Aries Research Inc, Parrot II (SS2 clone)
 	- Axil 243 and 245 (and possibly other models) (SS5 clones)
 	- Axil 320 (SS20 clone)
 	- Opus 5000 (SS1 clone)
 	- Opus 5250 (SS1 clone)
-	- SPARCbook 3GX, 3GS and 3XP by Tadpole (MicroSPARC-2)
+	- SPARCbook 3, 3GS, 3GX, 3TX and 3XP by Tadpole (MicroSPARC-2)
 	- CPU5V: VME card by Force Computer (sun4m)
 	- TWS,SuperCOMPstation-20S (SS20 clone)
 	- Tatung micro COMPstation 5 (SS5 clone)
@@ -48,7 +48,7 @@ OpenBSD/MACHINE OSREV runs on the following classes of machines:
 	- DTKstation/Classic+
 	- Transtec SS5/170
 
-For sun4m machines, the following Mbus CPU modules are supported:
+For sun4m machines, the following mbus CPU modules are supported:
 	- SM30: 30 or 36 MHz SuperSPARC with no secondary cache
 	- SM40: 40 MHz SuperSPARC with no secondary cache
 	- SM41: 40 MHz SuperSPARC with 1MB of secondary cache
@@ -65,6 +65,7 @@ For sun4m machines, the following Mbus CPU modules are supported:
 	- Ross HyperSparc RT620/625 at 125 MHz, with 256KB of primary cache
 	- Ross HyperSparc RT620/625 at 150 MHz, with 512KB of primary cache
 	- Ross HyperSparc RT620/625 at 166 MHz, with 512KB of primary cache
+	- Ross HyperSparc RT620/625 at 180 MHz, with 512KB of primary cache
 
 The minimal configuration requires 4M of RAM and ~60M of disk space.
 To install the entire system requires much more disk space, and to run
@@ -107,15 +108,19 @@ Supported devices {:-include-:}:
 	  + cgfourteen - 8/24-bit color, accelerated (but the driver does
 	    not support hardware acceleration)
 	  + Fujitsu AG-10e (agten) - 24-bit color, accelerated (currently
-	    only supported in 8 bit unaccelerated mode)
+	    only supported in 8-bit unaccelerated mode)
 	  + Parallax XVideo and PowerVideo (tvtwo) - 24-bit color,
 	    accelerated (but the driver does not support hardware
 	    acceleration)
-	  + p9100 ("pnozz") framebuffer found in Tapdole SPARCbook 3GS and
-	    3GX (8, 16 or 32-bit unaccelerated)
+	  + Southland Media Systems MGX and MGXPlus (mgx) - 24-bit color,
+	    accelerated (currently only supported in 8-bit unaccelerated mode)
 	  + TCX - 8/24-bit color
-	  + Vigra VS10 and VS12 framebuffers (8 bit color, selectable
+	  + Vigra VS10, VS11 and VS12 framebuffers (8-bit color, selectable
 	    VGA-compatible modes and connector)
+	  + Weitek Power9000 (pninek) framebuffer found in Tadpole SPARCbook 3
+	    (8 bit accelerated)
+	  + Weitek Power9100 (pnozz) framebuffer found in Tadpole SPARCbook
+	    3GS, 3GX, 3TX and 3XP (8, 16 or 32-bit accelerated)
 	  + ZX (aka Leo) - 8/24-bit color, overlay planes, double-buffered,
 	    3-D acceleration
 	- 4/200 on-board bwtwo
@@ -158,12 +163,116 @@ Supported devices {:-include-:}:
 	- Xylogics 7053 VME SMD disk controller (xd)
 	- Xylogics 450/451 VME SMD disk controller (xy)
 
+    * PC Cards (PCMCIA):
+	- PCMCIA Controllers:
+	  + Sun SBus PCMCIA bridge (stp)
+	  + Tadpole PCMCIA controller (tslot)
+	- Wireless ethernet adapters (wi)
+	  + Compact Flash Adapters (will show up as PCMCIA adapters)
+	      Buffalo AirStation CF
+	      ELSA XI800 CF
+	  + PCMCIA Adapters
+	      3Com AirConnect 3CRWE737A PCMCIA
+	      ACTIONTEC HWC01170 PCMCIA
+	      Addtron AWP-100 PCMCIA
+	      Agere Orinoco PCMCIA
+	      BUFFALO AirStation PCMCIA
+	      Cabletron RoamAbout PCMCIA
+	      Compaq Agency NC5004 PCMCIA
+	      Contec FLEXLAN/FX-DS110-PCC PCMCIA
+	      Corega PCC-11 PCMCIA
+	      Corega PCCA-11 PCMCIA
+	      Corega PCCB-11 PCMCIA
+	      Corega CGWLPCIA11 PCMCIA
+	      Dlink DWL650 PCMCIA
+	      ELSA XI300 PCMCIA
+	      ELSA XI325 PCMCIA
+	      ELSA XI325H PCMCIA
+	      EMTAC A2424i PCMCIA
+	      Ericsson Wireless LAN CARD C11 PCMCIA
+	      Gemtek WL-311 PCMCIA
+	      Hawking Technology WE110P PCMCIA
+	      I-O DATA WN-B11/PCM PCMCIA
+	      Intel PRO/Wireless 2011 PCMCIA
+	      Intersil Prism II PCMCIA
+	      Linksys Instant Wireless WPC11 PCMCIA
+	      Linksys Instant Wireless WPC11 2.5 PCMCIA
+	      Linksys Instant Wireless WPC11 3.0 PCMCIA
+	      Lucent WaveLAN PCMCIA
+	      NANOSPEED ROOT-RZ2000 PCMCIA
+	      NEC CMZ-RT-WP PCMCIA
+	      Netgear MA401 PCMCIA
+	      Netgear MA401RA PCMCIA
+	      Nokia C020 Wireless LAN PCMCIA
+	      Nokia C110/C111 Wireless LAN PCMCIA
+	      NTT-ME 11Mbps Wireless LAN PCMCIA
+	      Proxim Harmony PCMCIA
+	      Proxim RangeLAN-DS PCMCIA
+	      Samsung MagicLAN SWL-2000N PCMCIA
+	      SMC 2632 EZ Connect PCMCIA
+	      Symbol Spectrum24 PCMCIA
+	      TDK LAK-CD011WL PCMCIA
+	      US Robotics 2410 PCMCIA
+	      US Robotics 2445 PCMCIA
+	- NE2000-based ethernet Adapters
+	    Accton EN2212, EN2216
+	    Allied Telesis LA-PCM
+	    AmbiCom AMB8002T
+	    Arowana FE
+	    Belkin F5D5020
+	    Billionton Systems LNT-10TN
+	    CNet NE2000
+	    Compex Linkport ENET-B
+	    Corega PCC-T, PCC-TD, EtherII PCC-T,
+	    Corega FastEther PCC-T, FastEther PCC-TX
+	    Corega FastEther PCC-TXD, FastEther PCC-TXF
+	    D-Link DE-650, DE-660, DE-660+, DFE-670TXD
+	    Dayna CommuniCard E
+	    Digital DEPCM-XX
+	    Dual NE2000
+	    Edimax NE2000
+	    Genius ME 3000II SE
+	    Grey Cell GCS2000 Gold II
+	    GVC NIC-2000p, NP0335
+	    Hawking PN650TX
+	    I-O DATA PCLA, PCLA/TE
+	    IC-Card
+	    Kingston KNE-PC2
+	    Linksys PCMPC100, EC2T Combo, EthernetCard
+	    Linksys Combo EthernetCard, Trust Combo EthernetCard
+	    Linksys Etherfast 10/100
+	    MACNICA ME1 for JEIDA
+	    Melco LPC3-TX
+	    National Semiconductor InfoMover
+	    NDC Instant-Link
+	    Netgear FA410TX, FA410TXC, FA411
+	    Network Everywhere NP10T
+	    New Media LiveWire 10/100
+	    Planet SmartCom 2000
+	    Planex FNW-3600-T, FNW-3700-T
+	    Premax PE-200
+	    RPTI EP-400, EP-401
+	    Seiko Epson EN10B
+	    SMC EZCard, 8041
+	    Socket Communications LP-CF, LP-E
+	    SVEC PN650TX, ComboCard, LANCard
+	    Synergy S21810
+	    Tamarack NE2000
+	    Telecom Device TCD-HPC100
+	    Wisecom T210CT, iPort
+	    Xircom CFE-10
+	- 3Com EtherLink LAN PC Cards
+	    3Com 3C556, 3C562
+	    3Com 3C574TX, 3C[CX]FE574BT
+	    3Com 3C589, 3C589B, 3C589C, 3C589D, 3C589E
+
     * Miscellaneous:
 	- SBus Expansion Subsystem (SUNW,xbox) (xbox)
 	- Force FGA5000 VME/SBus bridge (fga)
 	- Force system configuration registers (scf)
 	- Force flash memory (flash)
 	- Tadpole microcontroller (power/system control) (tctrl)
+	- Prestoserve NVRAM Sbus cards (limited support) (presto)
 
 OpenBSD/MACHINE OSREV does NOT run on these machines (yet):
 	- Sun 4/400
@@ -203,26 +312,6 @@ Hardware the we do NOT currently support, but get many questions about:
 	The FAS-only card is not supported. The HME+FAS card only supports
 	the HME part of the card.
     * SBus FDDI cards
-    * Tadpole PCMCIA bridge
 
 The supplied GENERIC kernel is the best attempt at a configuration that
-works on the widest range of machinery (sun4, sun4c, and sun4m).
-If you have problems with the OpenBSD OSREV kernel in this distribution,
-please visit the OpenBSD web page (http://www.openbsd.org) and the mailing
-lists to review the current status and check for updates and distribution
-errata.
-
-If you have Sparc hardware you can donate or make available at nominal
-cost, please mention this on the lists, many things aren't being tested
-or developed simply because developers usually have only a Sparcstation
-at hand, not an array of systems.  Donation or mid/long term loan of
-UltraSparc (sun4u) or HyperSparc (sun4m) systems would help ensure the
-long-term viability of OpenBSD on Sparc based systems.
-
-Your support in terms of documenting previously unknown problems with
-OpenBSD/MACHINE, helping debug known problems, implementing missing pieces,
-and testing OpenBSD on various architectures is actively encouraged.
-The OpenBSD mailing lists, web-pages and sendbug utility are your best
-tools for helping make OpenBSD/MACHINE a better release.
-
-
+works on the widest range of machines (sun4, sun4c, and sun4m).

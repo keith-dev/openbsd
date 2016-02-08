@@ -1,4 +1,4 @@
-.\"	$OpenBSD: getnameinfo.3,v 1.17 2001/11/15 06:53:09 itojun Exp $
+.\"	$OpenBSD: getnameinfo.3,v 1.27 2003/08/28 10:16:38 jmc Exp $
 .\"	$KAME: getnameinfo.3,v 1.20 2001/01/05 13:37:37 itojun Exp $
 .\"
 .\" Copyright (c) 1983, 1987, 1991, 1993
@@ -12,11 +12,7 @@
 .\" 2. Redistributions in binary form must reproduce the above copyright
 .\"    notice, this list of conditions and the following disclaimer in the
 .\"    documentation and/or other materials provided with the distribution.
-.\" 3. All advertising materials mentioning features or use of this software
-.\"    must display the following acknowledgement:
-.\"	This product includes software developed by the University of
-.\"	California, Berkeley and its contributors.
-.\" 4. Neither the name of the University nor the names of its contributors
+.\" 3. Neither the name of the University nor the names of its contributors
 .\"    may be used to endorse or promote products derived from this software
 .\"    without specific prior written permission.
 .\"
@@ -56,11 +52,11 @@ The
 function is defined for protocol-independent address-to-nodename translation.
 Its functionality is a reverse conversion of
 .Xr getaddrinfo 3 ,
-and implements similar functionality with
+and implements similar functionality to
 .Xr gethostbyaddr 3
 and
 .Xr getservbyport 3
-in more sophisticated manner.
+in a more sophisticated manner.
 .Pp
 This function looks up an IP address and port number provided by the
 caller in the DNS and system-specific database, and returns text
@@ -180,16 +176,16 @@ flags are defined in
 .Ss Extension for scoped IPv6 address
 The implementation allows experimental numeric IPv6 address notation with
 scope identifier.
-IPv6 link-local address will appear as string like
+IPv6 link-local address will appear as a string like
 .Dq Li fe80::1%ne0 .
 Refer to
 .Xr getaddrinfo 3
 for the notation.
 .\"
 .Sh EXAMPLES
-The following code tries to get numeric hostname, and service name,
+The following code tries to get a numeric hostname, and service name,
 for given socket address.
-Observe that there is no hardcoded reference to particular address family.
+Observe that there is no hardcoded reference to a particular address family.
 .Bd -literal -offset indent
 struct sockaddr *sa;	/* input */
 char hbuf[NI_MAXHOST], sbuf[NI_MAXSERV];
@@ -257,7 +253,7 @@ The error code can be found in errno.
 .%A J. Bound
 .%A W. Stevens
 .%T Basic Socket Interface Extensions for IPv6
-.%R RFC2553
+.%R RFC 2553
 .%D March 1999
 .Re
 .Rs
@@ -275,23 +271,78 @@ The error code can be found in errno.
 .%D June 2000
 .Re
 .\"
+.Sh STANDARDS
+The
+.Fn getnameinfo
+function is defined in IEEE POSIX 1003.1g draft specification,
+and documented in
+.Dq Basic Socket Interface Extensions for IPv6
+.Pq RFC 2553 .
+.\"
 .Sh HISTORY
 The implementation first appeared in WIDE Hydrangea IPv6 protocol stack kit.
 .\"
-.Sh STANDARDS
-The
-.Fn getaddrinfo
-function is defined IEEE POSIX 1003.1g draft specification,
-and documented in
-.Dq Basic Socket Interface Extensions for IPv6
-.Pq RFC2553 .
+.Sh CAVEATS
+.Fn getnameinfo
+returns both numeric and FQDN notation of the address specified in
+.Fa sa .
+There is no return value that indicates if the string returned in
+.Fa host
+is a result of binary to numeric-text translation (like
+.Xr inet_ntop 3 ) ,
+or the result of DNS reverse lookup.
+Therefore, malicious parties could set up a PTR record as below:
+.Bd -literal -offset indent
+1.0.0.127.in-addr.arpa. IN PTR  10.1.1.1
+.Ed
+.Pp
+and trick the caller of
+.Fn getnameinfo
+into believing that
+.Fa sa
+is
+.Li 10.1.1.1
+when it actually is
+.Li 127.0.0.1 .
+.Pp
+To prevent such attacks, the use of
+.Dv NI_NAMEREQD
+is recommended when you use the result of
+.Fn getnameinfo
+for access control purposes:
+.Bd -literal -offset indent
+struct sockaddr *sa;
+socklen_t salen;
+char addr[NI_MAXHOST];
+struct addrinfo hints, *res;
+int error;
+
+error = getnameinfo(sa, salen, addr, sizeof(addr),
+    NULL, 0, NI_NAMEREQD);
+if (error == 0) {
+	memset(&hints, 0, sizeof(hints));
+	hints.ai_socktype = SOCK_DGRAM;	/*dummy*/
+	hints.ai_flags = AI_NUMERICHOST;
+	if (getaddrinfo(addr, "0", &hints, &res) == 0) {
+		/* malicious PTR record */
+		freeaddrinfo(res);
+		printf("bogus PTR record\\n");
+		return -1;
+	}
+	/* addr is FQDN as a result of PTR lookup */
+} else {
+	/* addr is numeric string */
+	error = getnameinfo(sa, salen, addr, sizeof(addr),
+	    NULL, 0, NI_NUMERICHOST);
+}
+.Ed
 .\"
 .Sh BUGS
 The current implementation is not thread-safe.
 .Pp
-The text was shamelessly copied from RFC2553.
+The text was shamelessly copied from RFC 2553.
 .Pp
 .Ox
-intentionally uses different
+intentionally uses a different
 .Dv NI_MAXHOST
-value from what RFC2553 suggests, to avoid buffer length handling mistakes.
+value from what RFC 2553 suggests, to avoid buffer length handling mistakes.

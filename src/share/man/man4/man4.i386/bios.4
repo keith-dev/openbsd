@@ -1,4 +1,4 @@
-.\"	$OpenBSD: bios.4,v 1.5 2002/12/06 19:04:24 avsm Exp $
+.\"	$OpenBSD: bios.4,v 1.9 2003/06/06 10:29:42 jmc Exp $
 .\"
 .\" Copyright (c) 2001 Michael Shalayeff
 .\" All rights reserved.
@@ -11,11 +11,6 @@
 .\" 2. Redistributions in binary form must reproduce the above copyright
 .\"    notice, this list of conditions and the following disclaimer in the
 .\"    documentation and/or other materials provided with the distribution.
-.\" 3. All advertising materials mentioning features or use of this software
-.\"    must display the following acknowledgement:
-.\"	This product includes software developed by Michael Shalayeff.
-.\" 4. The name of the author may not be used to endorse or promote products
-.\"    derived from this software without specific prior written permission.
 .\"
 .\" THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
 .\" IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -38,7 +33,7 @@
 .Cd "bios0    at mainbus0 flags 0x0000"
 .Cd "apm0     at bios0 flags 0x0000"
 .Cd "pcibios0 at bios0 flags 0x0000"
-.Sh INTRODUCTION
+.Sh DESCRIPTION
 .Ox
 provides support for PC firmware, aka BIOS and some of its functions,
 currently: APM subsystem, BIOS 32 extensions, PCI BIOS subsystem.
@@ -47,13 +42,13 @@ The
 .Nm
 driver also identifies BIOS type (such as "AT/286+", which is
 almost always used in modern machines) and BIOS image date stamp,
-which is, presumably, the day bios image was compiled by vendor
+which is, presumably, the day the BIOS image was compiled by vendor
 and could be used as a crude BIOS version identification.
 The
 .Nm
 driver also scans the ISA memory hole at 640K-1M for optional
 ROM images and reserves the space from being used by various
-isa devices, for example
+ISA devices, for example
 .Xr pcic 4 .
 .Pp
 Flags is a bit mask each bit of which specifies which functions

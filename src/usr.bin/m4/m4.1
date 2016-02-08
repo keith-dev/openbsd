@@ -1,5 +1,5 @@
-.\"	@(#) $OpenBSD: m4.1,v 1.29 2003/02/18 07:43:36 jmc Exp $
-.\" 
+.\"	@(#) $OpenBSD: m4.1,v 1.34 2003/06/29 11:04:03 espie Exp $
+.\"
 .\" Copyright (c) 1989, 1993
 .\"	The Regents of the University of California.  All rights reserved.
 .\"
@@ -14,11 +14,7 @@
 .\" 2. Redistributions in binary form must reproduce the above copyright
 .\"    notice, this list of conditions and the following disclaimer in the
 .\"    documentation and/or other materials provided with the distribution.
-.\" 3. All advertising materials mentioning features or use of this software
-.\"    must display the following acknowledgement:
-.\"	This product includes software developed by the University of
-.\"	California, Berkeley and its contributors.
-.\" 4. Neither the name of the University nor the names of its contributors
+.\" 3. Neither the name of the University nor the names of its contributors
 .\"    may be used to endorse or promote products derived from this software
 .\"    without specific prior written permission.
 .\"
@@ -33,7 +29,7 @@
 .\" LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
 .\" OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 .\" SUCH DAMAGE.
-.\" 
+.\"
 .Dd January 26, 1993
 .Dt M4 1
 .Os
@@ -65,7 +61,7 @@ Macro calls have the form name(argument1[, argument2, ..., argumentN]).
 .Pp
 There cannot be any space following the macro name and the open
 parenthesis
-.Pq Ql ( .
+.Pq Sq ( .
 If the macro name is not followed by an open
 parenthesis it is processed with no arguments.
 .Pp
@@ -75,11 +71,12 @@ valid macro names match the pattern
 .Dq [a-zA-Z_][a-zA-Z0-9_]* .
 .Pp
 In arguments to macros, leading unquoted space, tab, and newline
-.Pq Ql \en
+.Pq Sq \en
 characters are ignored.
-To quote strings, use left and right single
-quotes (e.g.,
-.Ql "\ this is a string with a leading space" ) .
+To quote strings, use left and right single quotes
+.Po e.g.,\ \&
+.Sq "\ this is a string with a leading space"
+.Pc .
 You can change the quote characters with the
 .Ic changequote
 built-in macro.
@@ -105,7 +102,7 @@ Add directory
 to the include path.
 .It Fl d Ar "flags"
 Set trace flags.
-.Ar flags 
+.Ar flags
 may hold the following:
 .Bl -tag -width Ds
 .It Ar a
@@ -128,13 +125,13 @@ number macro expansions.
 turn on all options.
 .El
 .Pp
-By default, trace is set to 
+By default, trace is set to
 .Qq eq .
 .It Fl o Ar filename
 Send trace output to
 .Ar filename .
 .It Fl t Ar macro
-Turn tracing on for 
+Turn tracing on for
 .Ar macro .
 .It Fl g
 Activate GNU-m4 compatibility mode.
@@ -157,7 +154,7 @@ Calls a built-in by its name, overriding possible redefinitions.
 .It Ic changecom
 Change the start and end comment sequences.
 The default is the pound sign
-.Pq Ql #
+.Pq Sq #
 and the newline character.
 With no arguments comments are turned off.
 The maximum length for a comment marker is five characters.
@@ -173,22 +170,22 @@ The argument must be a valid numeric string.
 Define a new macro named by the first argument to have the
 value of the second argument.
 Each occurrence of
-.Ql $n
+.Sq $n
 (where
 .Ar n
 is 0 through 9) is replaced by the
 .Ar n Ns 'th
 argument.
-.Ql $0
+.Sq $0
 is the name of the calling macro.
 Undefined arguments are replaced by a null string.
-.Ql $#
+.Sq $#
 is replaced by the number of arguments;
-.Ql $*
+.Sq $*
 is replaced by all arguments comma separated;
-.Ql $@
+.Sq $@
 is the same as
-.Ql $*
+.Sq $*
 but all arguments are quoted against further expansion.
 .It Ic defn
 Returns the quoted definition for each argument.
@@ -216,7 +213,7 @@ Prints the first argument on the standard error output stream.
 .It Ic esyscmd
 Passes its first argument to a shell and returns the shell's standard output.
 Note that the shell shares its standard input and standard error with
-.Nm
+.Nm m4 .
 .It Ic eval
 Computes the first argument as an arithmetic expression using 32-bit
 arithmetic.
@@ -298,12 +295,12 @@ included.
 .It Ic patsubst
 Substitutes a regular expression in a string with a replacement string.
 Usual substitution patterns apply: an ampersand
-.Pq Ql &
+.Pq Sq \&&
 is replaced by the string matching the regular expression.
 The string
-.Ql \e# ,
+.Sq \e# ,
 where
-.Ql #
+.Sq #
 is a digit, is replaced by the corresponding back-reference.
 .It Ic popdef
 Restores the
@@ -368,10 +365,10 @@ Returns the current file's line number.
 .It Ic __file__
 Returns the current file's name.
 .El
-.Sh COMPATIBILITY
+.Sh STANDARDS
 .Nm
 follows the Single Unix 2 specification, along with a few extensions taken
-from 
+from
 .Nm gnu-m4 .
 .Pp
 The
@@ -388,15 +385,28 @@ Flags
 .Fl t
 are non-standard.
 .Pp
-The output format of tracing and of 
-.Ic dumpdef 
-are not specified in any standard, 
+The output format of tracing and of
+.Ic dumpdef
+are not specified in any standard,
 are likely to change and should not be relied upon.
-The current format of tracing is closely modelled on 
-.Nm gnu-m4 , 
+The current format of tracing is closely modelled on
+.Nm gnu-m4 ,
 to allow
-.Nm autoconf 
+.Nm autoconf
 to work.
+.Pp
+The built-ins
+.Ic pushdef
+and
+.Ic popdef
+handle macro definitions as a stack.
+However,
+.Ic define
+interacts with the stack in an undefined way.
+In this implementation,
+.Ic define
+replaces the top-most definition only.
+Other implementations may erase all definitions on the stack instead.
 .Pp
 For portability, one should not use the macros
 .Ic builtin ,
@@ -411,12 +421,16 @@ For portability, one should not use the macros
 .Ic __line__ ,
 .Ic __file__ .
 .Pp
-All builtins do expand without arguments in many other 
+All built-ins do expand without arguments in many other
 .Nm m4 .
 .Pp
 Many other
 .Nm
 have dire size limitations with respect to buffer sizes.
 .Sh AUTHORS
-Ozan Yigit <oz@sis.yorku.ca> and Richard A. O'Keefe (ok@goanna.cs.rmit.OZ.AU).
-GNU-m4 compatibility extensions by Marc Espie <espie@cvs.openbsd.org>.
+.An Ozan Yigit Aq oz@sis.yorku.ca
+and
+.An Richard A. O'Keefe Aq ok@goanna.cs.rmit.OZ.AU .
+.Pp
+GNU-m4 compatibility extensions by
+.An Marc Espie Aq espie@cvs.openbsd.org .

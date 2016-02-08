@@ -1,4 +1,4 @@
-.\"	$OpenBSD: sigaction.2,v 1.36 2003/03/06 20:04:06 jmc Exp $
+.\"	$OpenBSD: sigaction.2,v 1.39 2003/06/02 20:18:39 millert Exp $
 .\"	$NetBSD: sigaction.2,v 1.7 1995/10/12 15:41:16 jtc Exp $
 .\"
 .\" Copyright (c) 1980, 1990, 1993
@@ -12,11 +12,7 @@
 .\" 2. Redistributions in binary form must reproduce the above copyright
 .\"    notice, this list of conditions and the following disclaimer in the
 .\"    documentation and/or other materials provided with the distribution.
-.\" 3. All advertising materials mentioning features or use of this software
-.\"    must display the following acknowledgement:
-.\"	This product includes software developed by the University of
-.\"	California, Berkeley and its contributors.
-.\" 4. Neither the name of the University nor the names of its contributors
+.\" 3. Neither the name of the University nor the names of its contributors
 .\"    may be used to endorse or promote products derived from this software
 .\"    without specific prior written permission.
 .\"
@@ -124,7 +120,7 @@ must arrange to restore the previous context itself.
 When a signal is delivered to a process a new signal mask is
 installed for the duration of the process' signal handler
 (or until a
-.Xr sigprocmask
+.Xr sigprocmask 2
 call is made).
 This mask is formed by taking the union of the current signal mask set,
 the signal to be delivered, and the signal mask
@@ -327,7 +323,7 @@ call (formerly
 .It Dv SIGIO No "	discard signal" Tn "	I/O"
 is possible on a descriptor (see
 .Xr fcntl 2 )
-.It Dv SIGXCPU No "	terminate process" "	cpu time limit exceeded (see"
+.It Dv SIGXCPU No "	terminate process" "	CPU time limit exceeded (see"
 .Xr setrlimit 2 )
 .It Dv SIGXFSZ No "	terminate process" "	file size limit exceeded (see"
 .Xr setrlimit 2 )
@@ -544,6 +540,20 @@ An attempt is made to ignore or supply a handler for
 or
 .Dv SIGSTOP .
 .El
+.Sh SEE ALSO
+.Xr kill 1 ,
+.Xr kill 2 ,
+.Xr ptrace 2 ,
+.Xr sigaltstack 2 ,
+.Xr sigprocmask 2 ,
+.Xr sigsuspend 2 ,
+.Xr wait 2 ,
+.Xr setjmp 3 ,
+.Xr sigblock 3 ,
+.Xr sigpause 3 ,
+.Xr sigsetops 3 ,
+.Xr sigvec 3 ,
+.Xr tty 4
 .Sh STANDARDS
 The
 .Fn sigaction
@@ -694,7 +704,6 @@ Extension Interfaces:
 .Fn strlcat ,
 .Fn strlcpy .
 .Pp
-.Pp
 Most functions not in the above lists are considered to be unsafe
 with respect to signals.
 That is to say, the behaviour of such functions when called from
@@ -717,18 +726,3 @@ Safe if the
 .Va syslog_data
 struct is initialized as a local variable.
 .El
-.Pp
-.Sh SEE ALSO
-.Xr kill 1 ,
-.Xr kill 2 ,
-.Xr ptrace 2 ,
-.Xr sigaltstack 2 ,
-.Xr sigprocmask 2 ,
-.Xr sigsuspend 2 ,
-.Xr wait 2 ,
-.Xr setjmp 3 ,
-.Xr sigblock 3 ,
-.Xr sigpause 3 ,
-.Xr sigsetops 3 ,
-.Xr sigvec 3 ,
-.Xr tty 4

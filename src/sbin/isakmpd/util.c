@@ -1,4 +1,4 @@
-/*	$OpenBSD: util.c,v 1.32 2003/03/13 10:31:44 ho Exp $	*/
+/*	$OpenBSD: util.c,v 1.34 2003/06/03 14:28:16 ho Exp $	*/
 /*	$EOM: util.c,v 1.23 2000/11/23 12:22:08 niklas Exp $	*/
 
 /*
@@ -13,11 +13,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by Ericsson Radio Systems.
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -51,6 +46,7 @@
 
 #include "log.h"
 #include "message.h"
+#include "monitor.h"
 #include "sysdep.h"
 #include "transport.h"
 #include "util.h"
@@ -499,12 +495,12 @@ check_file_secrecy (char *name, size_t *file_size)
 {
   struct stat st;
 
-  if (stat (name, &st) == -1)
+  if (monitor_stat (name, &st) == -1)
     {
       log_error ("check_file_secrecy: stat (\"%s\") failed", name);
       return -1;
     }
-  if (st.st_uid != geteuid () && st.st_uid != getuid ())
+  if (st.st_uid != 0 && st.st_uid != getuid ())
     {
       log_print ("check_file_secrecy: "
 		 "not loading %s - file owner is not process user", name);

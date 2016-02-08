@@ -23,7 +23,7 @@
  */
 
 #include "includes.h"
-RCSID("$OpenBSD: compat.c,v 1.65 2002/09/27 10:42:09 mickey Exp $");
+RCSID("$OpenBSD: compat.c,v 1.69 2003/08/29 10:03:15 markus Exp $");
 
 #include "buffer.h"
 #include "packet.h"
@@ -79,16 +79,22 @@ compat_datafellows(const char *version)
 		{ "OpenSSH_2.5.3*",	SSH_BUG_NOREKEY|SSH_BUG_EXTEOF},
 		{ "OpenSSH_2.*,"
 		  "OpenSSH_3.0*,"
-		  "OpenSSH_3.1*",	SSH_BUG_EXTEOF},
+		  "OpenSSH_3.1*",	SSH_BUG_EXTEOF|SSH_BUG_GSSAPI_BER},
+		{ "OpenSSH_3.2*,"
+		  "OpenSSH_3.3*,"
+		  "OpenSSH_3.4*,"
+		  "OpenSSH_3.5*",	SSH_BUG_GSSAPI_BER},
 		{ "Sun_SSH_1.0*",	SSH_BUG_NOREKEY|SSH_BUG_EXTEOF},
 		{ "OpenSSH*",		0 },
 		{ "*MindTerm*",		0 },
 		{ "2.1.0*",		SSH_BUG_SIGBLOB|SSH_BUG_HMAC|
 					SSH_OLD_SESSIONID|SSH_BUG_DEBUG|
-					SSH_BUG_RSASIGMD5|SSH_BUG_HBSERVICE },
+					SSH_BUG_RSASIGMD5|SSH_BUG_HBSERVICE|
+					SSH_BUG_FIRSTKEX },
 		{ "2.1 *",		SSH_BUG_SIGBLOB|SSH_BUG_HMAC|
 					SSH_OLD_SESSIONID|SSH_BUG_DEBUG|
-					SSH_BUG_RSASIGMD5|SSH_BUG_HBSERVICE },
+					SSH_BUG_RSASIGMD5|SSH_BUG_HBSERVICE|
+					SSH_BUG_FIRSTKEX },
 		{ "2.0.13*,"
 		  "2.0.14*,"
 		  "2.0.15*,"
@@ -100,26 +106,28 @@ compat_datafellows(const char *version)
 					SSH_BUG_PKSERVICE|SSH_BUG_X11FWD|
 					SSH_BUG_PKOK|SSH_BUG_RSASIGMD5|
 					SSH_BUG_HBSERVICE|SSH_BUG_OPENFAILURE|
-					SSH_BUG_DUMMYCHAN },
+					SSH_BUG_DUMMYCHAN|SSH_BUG_FIRSTKEX },
 		{ "2.0.11*,"
 		  "2.0.12*",		SSH_BUG_SIGBLOB|SSH_BUG_HMAC|
 					SSH_OLD_SESSIONID|SSH_BUG_DEBUG|
 					SSH_BUG_PKSERVICE|SSH_BUG_X11FWD|
 					SSH_BUG_PKAUTH|SSH_BUG_PKOK|
 					SSH_BUG_RSASIGMD5|SSH_BUG_OPENFAILURE|
-					SSH_BUG_DUMMYCHAN },
+					SSH_BUG_DUMMYCHAN|SSH_BUG_FIRSTKEX },
 		{ "2.0.*",		SSH_BUG_SIGBLOB|SSH_BUG_HMAC|
 					SSH_OLD_SESSIONID|SSH_BUG_DEBUG|
 					SSH_BUG_PKSERVICE|SSH_BUG_X11FWD|
 					SSH_BUG_PKAUTH|SSH_BUG_PKOK|
 					SSH_BUG_RSASIGMD5|SSH_BUG_OPENFAILURE|
-					SSH_BUG_DERIVEKEY|SSH_BUG_DUMMYCHAN },
+					SSH_BUG_DERIVEKEY|SSH_BUG_DUMMYCHAN|
+					SSH_BUG_FIRSTKEX },
 		{ "2.2.0*,"
 		  "2.3.0*",		SSH_BUG_HMAC|SSH_BUG_DEBUG|
-					SSH_BUG_RSASIGMD5 },
-		{ "2.3.*",		SSH_BUG_DEBUG|SSH_BUG_RSASIGMD5 },
+					SSH_BUG_RSASIGMD5|SSH_BUG_FIRSTKEX },
+		{ "2.3.*",		SSH_BUG_DEBUG|SSH_BUG_RSASIGMD5|
+					SSH_BUG_FIRSTKEX },
 		{ "2.4",		SSH_OLD_SESSIONID },	/* Van Dyke */
-		{ "2.*",		SSH_BUG_DEBUG },
+		{ "2.*",		SSH_BUG_DEBUG|SSH_BUG_FIRSTKEX },
 		{ "3.0.*",		SSH_BUG_DEBUG },
 		{ "3.0 SecureCRT*",	SSH_OLD_SESSIONID },
 		{ "1.7 SecureFX*",	SSH_OLD_SESSIONID },
@@ -127,12 +135,9 @@ compat_datafellows(const char *version)
 		  "1.2.19*,"
 		  "1.2.20*,"
 		  "1.2.21*,"
-		  "1.2.22*",		SSH_BUG_IGNOREMSG|SSH_BUG_K5USER },
+		  "1.2.22*",		SSH_BUG_IGNOREMSG },
 		{ "1.3.2*",		/* F-Secure */
-					SSH_BUG_IGNOREMSG|SSH_BUG_K5USER },
-		{ "1.2.1*,"
-		  "1.2.2*,"
-		  "1.2.3*",		SSH_BUG_K5USER },
+					SSH_BUG_IGNOREMSG },
 		{ "*SSH Compatible Server*",			/* Netscreen */
 					SSH_BUG_PASSWORDPAD },
 		{ "*OSU_0*,"
@@ -184,7 +189,7 @@ proto_spec(const char *spec)
 			ret |= SSH_PROTO_2;
 			break;
 		default:
-			log("ignoring bad proto spec: '%s'.", p);
+			logit("ignoring bad proto spec: '%s'.", p);
 			break;
 		}
 	}

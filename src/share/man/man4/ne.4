@@ -1,4 +1,4 @@
-.\"	$OpenBSD: ne.4,v 1.12 2003/03/19 00:46:24 mickey Exp $
+.\"	$OpenBSD: ne.4,v 1.16 2003/06/29 16:38:28 miod Exp $
 .\"	$NetBSD: ne.4,v 1.4 1998/02/22 05:21:20 enami Exp $
 .\"
 .\" Copyright (c) 1997 The NetBSD Foundation, Inc.
@@ -49,7 +49,11 @@
 .Cd "ne* at isapnp?"
 .Cd "ne* at pci? dev ? function ?"
 .Cd "ne* at pcmcia? function ?"
-.Cd "ne* at zbus0"
+.Pp
+.Cd "bmtphy* at mii? phy ?"
+.Cd "lxtphy* at mii? phy ?"
+.Cd "nsphyter* at mii? phy ?"
+.Cd "ukphy* at mii? phy ?"
 .Sh DESCRIPTION
 The
 .Nm
@@ -85,7 +89,7 @@ cards, including:
 .It Li "KTI PCI Ethernet" Ta PCI
 .It Li "Linksys PCMPC100, EC2T Combo" Ta PCMCIA
 .It Li "Linksys EthernetCard, Combo EthernetCard" Ta PCMCIA
-.It Li "Linksys Trust Combo EthernetCard, Etherfast 10/100" Ta PCMCIA
+.It Li "Linksys Trust Combo EthernetCard, EtherFast 10/100" Ta PCMCIA
 .It Li "MACNICA ME1 for JEIDA" Ta PCMCIA
 .It Li "Melco LPC3-TX" Ta PCMCIA
 .It Li "National Semiconductor InfoMover" Ta PCMCIA
@@ -113,9 +117,8 @@ cards, including:
 .It Li "Wisecom T210CT, iPort" Ta PCMCIA
 .It Li "Xircom CFE-10" Ta PCMCIA
 .El
-.Pp
 .Sh MEDIA SELECTION
-The RealTek 8019 (ISA, ISAPnP, some PCMCIA) and RealTek 8029 (PCI)
+The Realtek 8019 (ISA, ISAPnP, some PCMCIA) and Realtek 8029 (PCI)
 NE2000-compatible Ethernet chips include support for software media
 selection.
 If one of these chips is detected by the driver, the list of supported media
@@ -132,13 +135,16 @@ The driver found the card, but was unable to make the card respond
 to complete the configuration sequence.
 .El
 .Sh SEE ALSO
+.Xr bmtphy 4 ,
 .Xr ifmedia 4 ,
 .Xr intro 4 ,
 .Xr isa 4 ,
 .Xr isapnp 4 ,
+.Xr lxtphy 4 ,
 .Xr netintro 4 ,
+.Xr nsphyter 4 ,
 .Xr pci 4 ,
 .Xr pcmcia 4 ,
-.\" no manpage .Xr zbus 4 ,
+.Xr ukphy 4 ,
 .Xr hostname.if 5 ,
 .Xr ifconfig 8

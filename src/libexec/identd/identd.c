@@ -1,4 +1,4 @@
-/*	$OpenBSD: identd.c,v 1.33 2002/09/13 01:31:39 djm Exp $	*/
+/*	$OpenBSD: identd.c,v 1.36 2003/07/29 18:39:23 deraadt Exp $	*/
 
 /*
  * This program is in the public domain and may be used freely by anyone
@@ -56,6 +56,9 @@ const  char *charset_sep = "";
 char   *charset_name = "";
 
 static pid_t child_pid;
+
+void		usage(void);
+char *		gethost(struct sockaddr_storage *ss);
 
 void
 usage(void)
@@ -138,7 +141,7 @@ alarm_handler(int notused)
 /*
  * Main entry point into this daemon
  */
-int 
+int
 main(int argc, char *argv[])
 {
 	struct sockaddr_storage sa, sa2;
@@ -158,6 +161,18 @@ main(int argc, char *argv[])
 	socklen_t len;
 
 	openlog(__progname, LOG_PID, LOG_DAEMON);
+
+	/* runs as _identd if possible, fallback to "nobody" */
+	if (getuid() == 0) {
+		if ((pwd = getpwnam(DEFAULT_UID)) == NULL)
+			pwd = getpwnam("nobody");
+		if (pwd == NULL)
+			ERROR1("no such user: neither %s nor nobody",
+			    DEFAULT_UID);
+		set_uid = pwd->pw_uid;
+		set_gid = pwd->pw_gid;
+	}
+
 	/*
 	 * Parse the command line arguments
 	 */

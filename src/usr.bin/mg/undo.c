@@ -1,4 +1,4 @@
-/* $OpenBSD: undo.c,v 1.14 2002/09/15 22:18:39 vincent Exp $ */
+/* $OpenBSD: undo.c,v 1.18 2003/06/26 23:04:10 vincent Exp $ */
 /*
  * Copyright (c) 2002 Vincent Labrecque
  * All rights reserved.
@@ -169,7 +169,7 @@ drop_oldest_undo_record(void)
 }
 
 static __inline__ int
-last_was_boundary()
+last_was_boundary(void)
 {
 	struct undo_rec *rec;
 
@@ -359,7 +359,7 @@ undo_add_change(LINE *lp, int offset, int size)
  * Show the undo records for the current buffer in a new buffer.
  */
 int
-undo_dump(void)
+undo_dump(int f, int n)
 {
 	struct undo_rec *rec;
 	BUFFER *bp;
@@ -401,9 +401,9 @@ undo_dump(void)
 			strlcat(buf, tmp, sizeof buf);
 			strlcat(buf, "\"", sizeof buf);
 		}
-		snprintf(tmp, sizeof buf, " [%d]", rec->region.r_size);
+		snprintf(tmp, sizeof tmp, " [%d]", rec->region.r_size);
 		strlcat(buf, tmp, sizeof buf);
-		addlinef(bp, buf);
+		addlinef(bp, "%s", buf);
 	}
 	return (TRUE);
 }

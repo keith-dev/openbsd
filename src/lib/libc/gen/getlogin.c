@@ -10,11 +10,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -32,7 +28,7 @@
  */
 
 #if defined(LIBC_SCCS) && !defined(lint)
-static char rcsid[] = "$OpenBSD: getlogin.c,v 1.7 2002/02/16 21:27:22 millert Exp $";
+static char rcsid[] = "$OpenBSD: getlogin.c,v 1.9 2003/06/11 21:03:10 deraadt Exp $";
 #endif /* LIBC_SCCS and not lint */
 
 #include <sys/param.h>
@@ -52,7 +48,7 @@ int	_getlogin(char *, size_t);
 int	_setlogin(const char *);
 
 char *
-getlogin()
+getlogin(void)
 {
 	_THREAD_PRIVATE_KEY(getlogin);
 	char * name = (char *)_THREAD_PRIVATE(getlogin, logname, NULL);
@@ -67,9 +63,7 @@ getlogin()
 }
 
 int
-getlogin_r(name, namelen)
-	char *name;
-	size_t namelen;
+getlogin_r(char *name, size_t namelen)
 {
 	int logname_size;
 
@@ -96,8 +90,7 @@ getlogin_r(name, namelen)
 }
 
 int
-setlogin(name)
-	const char *name;
+setlogin(const char *name)
 {
 	int ret;
 

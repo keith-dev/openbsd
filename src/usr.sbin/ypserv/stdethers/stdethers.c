@@ -1,4 +1,4 @@
-/*	$OpenBSD: stdethers.c,v 1.7 2003/03/13 09:09:51 deraadt Exp $ */
+/*	$OpenBSD: stdethers.c,v 1.11 2003/07/18 22:58:56 david Exp $ */
 
 /*
  * Copyright (c) 1995 Mats O Jansson <moj@stacken.kth.se>
@@ -12,11 +12,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by Mats O Jansson
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS
  * OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
@@ -32,7 +27,7 @@
  */
 
 #ifndef LINT
-static char rcsid[] = "$OpenBSD: stdethers.c,v 1.7 2003/03/13 09:09:51 deraadt Exp $";
+static const char rcsid[] = "$OpenBSD: stdethers.c,v 1.11 2003/07/18 22:58:56 david Exp $";
 #endif
 
 #include <sys/types.h>
@@ -41,6 +36,7 @@ static char rcsid[] = "$OpenBSD: stdethers.c,v 1.7 2003/03/13 09:09:51 deraadt E
 #include <netinet/in.h>
 #include <netinet/if_ether.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
 
@@ -57,7 +53,7 @@ extern char *ether_ntoa(struct ether_addr *);
    when asking YP but not when returning string from ether_ntoa.
  */
 
-char *
+static char *
 working_ntoa(u_char *e)
 {
 	static char a[] = "xx:xx:xx:xx:xx:xx";
@@ -101,7 +97,7 @@ read_line(FILE *fp, char *buf, int size)
 	return (done);
 }
 
-void
+static void
 usage(void)
 {
 	fprintf(stderr, "usage: stdethers [file]\n");

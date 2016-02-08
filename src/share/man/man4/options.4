@@ -1,4 +1,4 @@
-.\"	$OpenBSD: options.4,v 1.118 2003/03/18 12:53:57 david Exp $
+.\"	$OpenBSD: options.4,v 1.130 2003/08/08 09:51:53 jmc Exp $
 .\"	$NetBSD: options.4,v 1.21 1997/06/25 03:13:00 thorpej Exp $
 .\"
 .\" Copyright (c) 1998 Theo de Raadt
@@ -134,7 +134,7 @@ See
 .It Cd option COMPAT_HPUX
 On those architectures that support it, this enables binary
 compatibility with
-.Em HP/UX
+.Em HP-UX
 applications built for the same architecture.
 This option is available on some m68k architectures.
 See
@@ -164,6 +164,14 @@ applications built for the same architecture.
 This option is available on the alpha architecture.
 See
 .Xr compat_osf1 8 .
+.It Cd option COMPAT_AOUT
+On those ELF architectures that require it, this enables
+full compatibility with old a.out binaries, by allowing the
+a.out dynamic linking system to reside under
+.Pa /emul/a.out .
+This option is available on the i386 architecture.
+See
+.Xr compat_aout 8 .
 .It Cd option COMPAT_43
 Use of this option is discouraged.
 It enables compatibility with
@@ -222,12 +230,12 @@ flag causes
 to be built in addition to
 .Pa bsd .
 .Pa bsd.gdb
-is useful for debugging kernels and their crashdumps with gdb.
+is useful for debugging kernels and their crash dumps with gdb.
 Note that
 .Xr gdb 1 Ns 's
 .Fl k
 flag is obsolete and should not be used.
-Instead, a crashdump can be debugged by starting
+Instead, a crash dump can be debugged by starting
 .Xr gdb 1
 with the kernel name as an argument (no core file) and then use the
 .Xr gdb 1
@@ -257,6 +265,11 @@ structures is detected.
 Removes some optimizations from the kernel to reduce the size of the
 resulting kernel binary.
 This option can decrease system performance.
+.It Cd option NO_PROPOLICE
+Do not compile the kernel with the propolice stack protection.
+See
+.Xr gcc-local 1
+for more information about propolice.
 .It Cd option GPROF
 Adds code to the kernel for kernel profiling with
 .Xr kgmon 8 .
@@ -294,7 +307,7 @@ Most machines need this if they are not running diskless.
 .It Cd option ADOSFS
 Includes code implementing the AmigaDOS Fast File System
 .Em ( ADOSFS ) .
-Note that the Professional and Smart File Systems are 
+Note that the Professional and Smart File Systems are
 .Em not
 supported.
 See
@@ -361,6 +374,12 @@ See
 and
 .Xr fsck_msdos 8
 for details.
+.It Cd option NTFS
+Includes support for reading NTFS file systems.
+Experimental and read only.
+See
+.Xr mount_ntfs 8
+for details.
 .It Cd option FDESC
 Includes code for a file system which can be mounted on
 .Pa /dev/fd .
@@ -373,7 +392,7 @@ Note that this facility is redundant, and thus unneeded on most
 .Ox
 systems, since the
 .Xr fd 4
-pseudodevice driver already provides identical functionality.
+pseudo-device driver already provides identical functionality.
 On most systems, instances of
 .Xr fd 4
 are mknoded under
@@ -454,7 +473,7 @@ to allow metadata updates in FFS to happen asynchronously, increasing write
 performance significantly.
 Normally, the FFS filesystem writes metadata updates synchronously which exacts
 a performance penalty in favor of filesystem integrity.
-With soft updates, you gain the performance of asynchronous writes while
+With soft updates, the performance of asynchronous writes is gained while
 retaining the safety of synchronous metadata updates.
 .Pp
 Soft updates must be enabled on a per-filesystem basis.
@@ -535,15 +554,15 @@ Makes the boot process more verbose for PCMCIA peripherals.
 .It Cd option MACOBIOVERBOSE
 Makes the boot process more verbose for Mac OBIO peripherals.
 .It Cd option APERTURE
-Provide in-kernel support for controlling VGA framebuffer mapping 
+Provide in-kernel support for controlling VGA framebuffer mapping
 and PCI configuration registers by user-processes
 (such as an X Window System server).
-This option is supported on the 
-.Va alpha Ns ,
-.Va i386 Ns ,
-.Va macppc 
+This option is supported on the
+.Va alpha ,
+.Va i386 ,
+.Va macppc
 and
-.Va sparc64 
+.Va sparc64
 architectures.
 .It Cd option LKM
 Enables support for loadable kernel modules.
@@ -730,7 +749,9 @@ This option requires
 .Em INET
 at this moment, but it should not.
 .It Cd option ND6_DEBUG
-The option sets the default value of net.inet6.icmp6.nd6_debug to 1,
+The option sets the default value of
+.Em net.inet6.icmp6.nd6_debug
+to 1,
 for debugging IPv6 neighbor discovery protocol handling.
 See
 .Xr sysctl 3
@@ -802,7 +823,7 @@ information.
 This option can only be used together with
 .Em TCP_SACK .
 .It Cd option TCP_ECN
-Turns on Explicit Congestion Notification (RFC3168).
+Turns on Explicit Congestion Notification (RFC 3168).
 .Em ECN
 allows intermediate routers to use the Congestion Experienced
 codepoint in the IP header as an indication of congestion, and allows
@@ -877,7 +898,7 @@ See
 .Xr altq 9
 for details on ALTQ.
 .It Cd option ALTQ_RIO
-Enables ALTQ's RIO (RED with In/Oout) module.
+Enables ALTQ's RIO (RED with In/Out) module.
 The original RIO has 2 sets of RED parameters; one for in-profile
 packets and the other for out-of-profile packets.
 At the ingress of the network, profile meters tag packets as IN or
@@ -885,7 +906,7 @@ OUT based on contracted profiles for customers.
 Inside the network, IN packets receive preferential treatment by
 the RIO dropper.
 ALTQ/RIO has 3 drop precedence levels defined for the Assured Forwarding
-PHB of DiffServ (RFC2597).
+PHB of DiffServ (RFC 2597).
 .It Cd option ALTQ_NOPCC
 Disables use of processor cycle counter (e.g., Pentium TSC on i386 and
 PCC on alpha) to measure time in ALTQ.
@@ -944,15 +965,15 @@ Number of semaphore identifiers (also called semaphore handles
 and semaphore sets) available in the system.
 Default value is 10.
 The kernel allocates memory for the control structures at startup,
-so you should avoid arbitrarily large values. 
+so arbitrarily large values should be avoided.
 .It Cd option SEMMNS=value
 Maximum number of semaphores in all sets in the system.
 Default value is 60.
 .It Cd option SEMMNU=value
 Maximum number of semaphore undo structures in the system.
-Default value is 30. 
+Default value is 30.
 .It Cd option SEMUME=value
-Maximum number of per-process undo operation entries in the 
+Maximum number of per-process undo operation entries in the
 system.
 Semaphore undo operations are invoked by the kernel when
 .Xr semop 2
@@ -966,7 +987,7 @@ Default value is 10.
 Size of kernel mbuf cluster map,
 .Em mb_map ,
 in MCLBYTES-sized logical pages.
-Defaults to 2048 on i386, to 1024 on powerc and sparc64, and to 512 on
+Defaults to 2048 on i386, to 1024 on powerpc and sparc64, and to 512 on
 other architectures (doubled when using
 .Dq option GATEWAY
 except on i386).
@@ -1008,7 +1029,7 @@ Their default value is a machine dependent value, often calculated as
 between 5% and 10% of total available RAM.
 .It Cd option APM_NOPRINT
 This option is supported on the i386 architecture.
-When enabled kernel messages regarding the status of the automatic power
+When enabled, kernel messages regarding the status of the automatic power
 management system
 .Tn ( APM )
 are suppressed.
@@ -1022,7 +1043,7 @@ and/or
 indicates the timezone offset of hardware realtime clock device, in minutes,
 from UTC.
 It is useful when hardware realtime clock device is configured with local time,
-when you dual-boot
+when dual-booting
 .Ox
 with other operating systems on a single machine.
 For instance, if hardware realtime clock is set to Tokyo time,
@@ -1030,13 +1051,14 @@ For instance, if hardware realtime clock is set to Tokyo time,
 should be
 .Li \&-540
 as Tokyo local time is 9 hours ahead of UTC.
-Doublequote is needed when specifying a negative
+Double quotes are needed when specifying a negative
 .Ar value .
 .El
 .\" The following requests should be uncommented and used where appropriate.
 .\" .Sh FILES
 .\" .Sh EXAMPLES
 .Sh SEE ALSO
+.Xr gcc-local 1 ,
 .Xr gdb 1 ,
 .Xr ktrace 1 ,
 .Xr quota 1 ,

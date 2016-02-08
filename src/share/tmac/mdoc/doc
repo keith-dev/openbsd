@@ -1,4 +1,4 @@
-.\"	$OpenBSD: doc,v 1.5 2001/01/23 06:29:33 marc Exp $
+.\"	$OpenBSD: doc,v 1.11 2003/09/02 19:04:58 jmc Exp $
 .\"
 .\" Copyright (c) 1991, 1993
 .\"	The Regents of the University of California.  All rights reserved.
@@ -11,11 +11,7 @@
 .\" 2. Redistributions in binary form must reproduce the above copyright
 .\"    notice, this list of conditions and the following disclaimer in the
 .\"    documentation and/or other materials provided with the distribution.
-.\" 3. All advertising materials mentioning features or use of this software
-.\"    must display the following acknowledgement:
-.\"	This product includes software developed by the University of
-.\"	California, Berkeley and its contributors.
-.\" 4. Neither the name of the University nor the names of its contributors
+.\" 3. Neither the name of the University nor the names of its contributors
 .\"    may be used to endorse or promote products derived from this software
 .\"    without specific prior written permission.
 .\"
@@ -368,7 +364,7 @@
 .	el .as b1 \&\f\\n(cF\s\\n(cZ\\*(A\\n(aP\fP\s0
 .	ie \\n(aC==\\n(aP \{\
 .		if \\n(jM==4 .as b1 \&\|\-
-.		as b1 \&\fP\s0
+.		as b1 \fP\s0
 .		aZ
 .	\}
 .	el \{\
@@ -396,7 +392,7 @@
 .	ie \\n(jM==2 .as b1 \&\\*(A\\n(aP
 .	el .as b1 \&\f\\n(cF\s\\n(cZ\\*(A\\n(aP\fP\s0
 .	ie \\n(aC==\\n(aP \{\
-.		as b1 \&\f\\n(cF\s\\n(cZ
+.		as b1 \f\\n(cF\s\\n(cZ
 .		aZ
 .	\}
 .	el \{\
@@ -1151,7 +1147,7 @@
 .ds qL
 .eO \\$1 \\$2 \\$3 \\$4 \\$5 \\$6 \\$7 \\$8 \\$9
 ..
-.\" NS Xe macro - Extend close (end)
+.\" NS Xc macro - Extend close (end)
 .de Xc
 .\" .nr mN 0
 .if \\n(aC==0 .ds mN Xc
@@ -1678,7 +1674,7 @@
 .de Ed
 .ds mN Ed
 .br
-.if \\n(dP==0 .tm mdoc: Extraneous .Ed
+.if \\n(dP==0 .tm mdoc: Extraneous .Ed call (#\\n(.c)
 .if "\\*(d\\n(dP"dL" \{\
 .	ft \\n(cF
 .	fz \\n(cZ
@@ -1943,8 +1939,9 @@
 .	tm Usage .Bl -list-type [-width [string] | -compact | -offset [string]] (#\\n(.c)
 .	tm .It \\$1 \\$2 \\$3 \\$4 \\$5 \\$6 \\$7 \\$8
 .\}
+.br
+.if !\\n(cR .ne 3v
 .\" .tm Here is L[\\n(lC]==\\*(L\\n(lC
-.ne 3v
 .ie \\n(.$>0 \{\
 .	ds mN It
 .	ds b1
@@ -2207,7 +2204,7 @@
 .	rr o\\n(lC
 .\}
 .el 'in \\n(.iu-\\n(w\\n(lCu-\\n(lSu
-.if \\n(lC<=0 .tm Extraneous .El call (#\\n(.c)
+.if \\n(lC<=0 .tm mdoc: Extraneous .El call (#\\n(.c)
 .tZ
 .nr lC \\n(lC-1
 .tY
@@ -2427,9 +2424,7 @@
 .               ds A9 \\$9
 .		nr fV \\n(.$
 .		fV
-.		nr aP \\n(aP+1
-.		ie \\n(C\\n(aP==1 .\\*(A\\n(aP
-.		el .No
+.		No
 .	\}
 .\}
 .el \{\

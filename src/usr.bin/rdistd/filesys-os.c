@@ -1,4 +1,4 @@
-/*	$OpenBSD: filesys-os.c,v 1.6 1999/02/04 23:18:57 millert Exp $	*/
+/*	$OpenBSD: filesys-os.c,v 1.9 2003/06/03 02:56:15 millert Exp $	*/
 
 /*
  * Copyright (c) 1983 Regents of the University of California.
@@ -12,11 +12,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -33,18 +29,20 @@
  * SUCH DAMAGE.
  */
 
+#include "defs.h"
 #ifndef lint
 #if 0
-static char RCSid[] = 
-"$From: filesys-os.c,v 6.17 1996/01/17 21:02:45 mcooper Exp mcooper $";
+static char RCSid[] __attribute__((__unused__)) = 
+"$From: filesys-os.c,v 1.5 1999/08/04 15:57:33 christos Exp $";
 #else
-static char RCSid[] = 
-"$OpenBSD: filesys-os.c,v 1.6 1999/02/04 23:18:57 millert Exp $";
+static char RCSid[] __attribute__((__unused__)) = 
+"$OpenBSD: filesys-os.c,v 1.9 2003/06/03 02:56:15 millert Exp $";
 #endif
 
-static char sccsid[] = "@(#)filesys-os.c";
+static char sccsid[] __attribute__((__unused__)) =
+"@(#)filesys-os.c";
 
-static char copyright[] =
+static char copyright[] __attribute__((__unused__)) =
 "@(#) Copyright (c) 1983 Regents of the University of California.\n\
  All rights reserved.\n";
 #endif /* not lint */
@@ -53,16 +51,8 @@ static char copyright[] =
  * OS specific file system routines
  */
 
-#include "defs.h"
-#include "filesys.h"
-
 #if 	FSI_TYPE == FSI_GETFSSTAT
 static struct statfs   *mnt = NULL;
-#if	FSTYPENAME
-#define	f_type_eq(a, b) (! strcmp (((struct statfs *) (a))->f_fstypename, (b)))
-#else	/* !FSTYPENAME */
-#define	f_type_eq(a, b) (((struct statfs *) a)->f_type == (b))
-#endif	/* !FSTYPENAME */
 #endif	/* FSI_GETFSSTAT */
 
 #if	FSI_TYPE == FSI_MNTCTL
@@ -78,10 +68,8 @@ static int 		entries_left;
 /*
  * AIX version of setmountent()
  */
-FILE *setmountent(file, mode)
-	/*ARGSUSED*/
-	char *file;
-	char *mode;
+FILE *
+setmountent(const char *file, const char *mode)
 {
 	ulong size;
 
@@ -104,10 +92,8 @@ FILE *setmountent(file, mode)
 /*
  * getfsstat() version of get mount info routines.
  */
-FILE *setmountent(file, mode)
-	/*ARGSUSED*/
-	char *file;
-	char *mode;
+FILE *
+setmountent(const char *file, const char *mode)
 {
 	long size;
 
@@ -137,9 +123,8 @@ FILE *setmountent(file, mode)
 /*
  * Iterate over mount entries
  */
-mntent_t *getmountent(fptr)
-	/*ARGSUSED*/
-	FILE *fptr;
+mntent_t *
+getmountent(FILE *fptr)
 {
 	static mntent_t mntstruct;
 
@@ -172,9 +157,8 @@ mntent_t *getmountent(fptr)
 /*
  * getfsstat() version of getmountent()
  */
-mntent_t *getmountent(fptr)
-	/*ARGSUSED*/
-	FILE *fptr;
+mntent_t *
+getmountent(FILE *fptr)
 {
 	static mntent_t mntstruct;
 	static char remote_dev[MAXHOSTNAMELEN+MAXPATHLEN+1];
@@ -192,8 +176,14 @@ mntent_t *getmountent(fptr)
 	if (mnt->f_flags & M_RDONLY)
 		mntstruct.me_flags |= MEFLAG_READONLY;
 #endif
-	if (f_type_eq(mnt, MOUNT_NFS)) {
-		(void) sprintf(remote_dev, "%s", mnt->f_mntfromname);
+
+#ifdef HAVE_FSTYPENAME
+	if (strcmp(mnt->f_fstypename, "nfs") == 0)
+#else
+	if (mnt->f_type == MOUNT_NFS)
+#endif	/* HAVE_FSTYPENAME */
+	{
+		strlcpy(remote_dev, mnt->f_mntfromname, sizeof(remote_dev));
 		mntstruct.me_path = remote_dev;
 		mntstruct.me_type = METYPE_NFS;
 	} else {
@@ -212,9 +202,8 @@ mntent_t *getmountent(fptr)
 /*
  * Done with iterations
  */
-void endmountent(fptr)
-	/*ARGSUSED*/
-	FILE *fptr;
+void
+endmountent(FILE *fptr)
 {
 	mnt = NULL;
 
@@ -229,10 +218,8 @@ void endmountent(fptr)
 /*
  * Prepare to iterate over mounted filesystem list
  */
-FILE *setmountent(file, mode)
-	/*ARGSUSED*/
-	char *file;
-	char *mode;
+FILE *
+setmountent(const char *file, const char *mode)
 {
 	return(fopen(file, mode));
 }
@@ -240,9 +227,8 @@ FILE *setmountent(file, mode)
 /*
  * Done with iteration
  */
-void endmountent(fptr)
-	/*ARGSUSED*/
-	FILE *fptr;
+void
+endmountent(FILE *fptr)
 {
 	fclose(fptr);
 }
@@ -250,8 +236,8 @@ void endmountent(fptr)
 /*
  * Iterate over mount entries
  */
-mntent_t *getmountent(fptr)
-	FILE *fptr;
+mntent_t *
+getmountent(FILE *fptr)
 {
 	static mntent_t me;
 	static struct mnttab mntent;
@@ -287,10 +273,8 @@ mntent_t *getmountent(fptr)
 /*
  * Prepare to iterate over mounted filesystem list
  */
-FILE *setmountent(file, mode)
-	/*ARGSUSED*/
-	char *file;
-	char *mode;
+FILE *
+setmountent(const char *file, const char *mode)
 {
 	return(setmntent(file, mode));
 }
@@ -298,9 +282,8 @@ FILE *setmountent(file, mode)
 /*
  * Done with iteration
  */
-void endmountent(fptr)
-	/*ARGSUSED*/
-	FILE *fptr;
+void
+endmountent(FILE *fptr)
 {
 	endmntent(fptr);
 }
@@ -308,15 +291,15 @@ void endmountent(fptr)
 /*
  * Iterate over mount entries
  */
-mntent_t *getmountent(fptr)
-	FILE *fptr;
+mntent_t *
+getmountent(FILE *fptr)
 {
 	static mntent_t me;
 	struct mntent *mntent;
 
 	bzero((char *)&me, sizeof(mntent_t));
 
-	if (mntent = getmntent(fptr)) {
+	if ((mntent = getmntent(fptr)) != NULL) {
 		me.me_path = mntent->mnt_dir;
 		me.me_type = mntent->mnt_type;
 		if (mntent->mnt_opts && hasmntopt(mntent, MNTOPT_RO))
@@ -346,18 +329,15 @@ mntent_t *getmountent(fptr)
 
 static int startmounts = 0;
 
-FILE *setmountent(file, mode)
-	/*ARGSUSED*/
-	char *file;
-	char *mode;
+FILE *
+setmountent(const char *file, const char *mode)
 {
 	startmounts = 0;
-	return(stdin);		/* XXX - need to return something! */
+	return((FILE *) 1);
 }
 
-void endmountent(fptr)
-	/*ARGSUSED*/
-	FILE *fptr;
+void
+endmountent(FILE *fptr)
 {
 	/* NOOP */
 }
@@ -365,9 +345,8 @@ void endmountent(fptr)
 /*
  * Iterate over mounted filesystems using getmnt()
  */
-mntent_t *getmountent(fptr)
-	/*ARGSUSED*/
-	FILE *fptr;
+mntent_t *
+getmountent(FILE *fptr)
 {
 	struct fs_data fs_data;
 	static mntent_t me;
@@ -393,8 +372,8 @@ mntent_t *getmountent(fptr)
 /*
  * Make a new (copy) of a mntent structure.
  */
-mntent_t *newmountent(old)
-	mntent_t *old;
+mntent_t *
+newmountent(const mntent_t *old)
 {
 	mntent_t *new;
 

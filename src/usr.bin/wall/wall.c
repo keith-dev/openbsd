@@ -1,4 +1,4 @@
-/*	$OpenBSD: wall.c,v 1.17 2001/11/05 13:11:07 deraadt Exp $	*/
+/*	$OpenBSD: wall.c,v 1.20 2003/07/02 00:21:17 avsm Exp $	*/
 /*	$NetBSD: wall.c,v 1.6 1994/11/17 07:17:58 jtc Exp $	*/
 
 /*
@@ -13,11 +13,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -44,7 +40,7 @@ static const char copyright[] =
 #if 0
 static const char sccsid[] = "@(#)wall.c	8.2 (Berkeley) 11/16/93";
 #endif
-static const char rcsid[] = "$OpenBSD: wall.c,v 1.17 2001/11/05 13:11:07 deraadt Exp $";
+static const char rcsid[] = "$OpenBSD: wall.c,v 1.20 2003/07/02 00:21:17 avsm Exp $";
 #endif /* not lint */
 
 /*
@@ -163,14 +159,14 @@ makemsg(char *fname)
 	struct tm *lt;
 	struct passwd *pw;
 	struct stat sbuf;
-	time_t now, time();
+	time_t now;
 	FILE *fp;
 	int fd;
 	char *p, *whom, hostname[MAXHOSTNAMELEN], lbuf[100], tmpname[MAXPATHLEN];
 	char tmpbuf[5];
 	char *ttynam;
 
-	snprintf(tmpname, sizeof(tmpname), "%s/wall.XXXXXX", _PATH_TMP);
+	snprintf(tmpname, sizeof(tmpname), "%s/wall.XXXXXXXXXX", _PATH_TMP);
 	if ((fd = mkstemp(tmpname)) >= 0) {
 		(void)unlink(tmpname);
 		fp = fdopen(fd, "r+");

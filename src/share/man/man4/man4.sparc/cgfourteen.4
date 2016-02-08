@@ -1,4 +1,4 @@
-.\"	$OpenBSD: cgfourteen.4,v 1.22 2003/03/10 20:11:33 miod Exp $
+.\"	$OpenBSD: cgfourteen.4,v 1.28 2003/07/09 13:26:20 jmc Exp $
 .\"	$NetBSD: cgfourteen.4,v 1.3 1998/06/11 08:32:20 fair Exp $
 .\"
 .\" Copyright (c) 1996 The President and Fellows of Harvard College.
@@ -41,15 +41,15 @@
 .\" Based on tcx.4,
 .\"	NetBSD: tcx.4,v 1.2 1996/06/21 22:35:06 pk Exp
 .\"
-.Dd January 5, 2003
+.Dd April 6, 2003
 .Dt CGFOURTEEN 4 sparc
 .Os
 .Sh NAME
 .Nm cgfourteen
 .Nd accelerated 8/24-bit color frame buffer
 .Sh SYNOPSIS
-.Cd "cgfourteen0 at obio0 addr 0x9c000000 flags 0x0000" Pq "SS10SX and SS20"
-.Cd "cgfourteen1 at obio0 addr 0x90000000 flags 0x0000" Pq "SS10SX and SS20"
+.Cd "cgfourteen0 at obio0 addr 0x9c000000" Pq "SS10SX and SS20"
+.Cd "cgfourteen1 at obio0 addr 0x90000000" Pq "SS10SX and SS20"
 .Cd "wsdisplay* at cgfourteen?"
 .Sh DESCRIPTION
 The
@@ -73,18 +73,6 @@ It does not provide direct device driver entry points
 but makes its functions available via the internal
 .Xr wsdisplay 4
 interface.
-.Pp
-By default, the frame buffer will be initialized in 32 bit mode, if the
-display resolution allows it.
-By setting
-.Ar flags
-to
-.Ar 0x0001
-(via
-.Xr config 8
-or
-.Xr boot_config 8 )
-it can be forced to 8 bit mode, resulting in a faster console.
 .Sh DISPLAY RESOLUTION
 If the
 .Nm
@@ -94,7 +82,7 @@ To change the default resolution, type the following:
 .Pp
 .Em \   ok
 setenv
-.Ev Em output-device
+.Em output-device
 screen:r1280x1024x76
 .Pp
 to change to a 76Hz 1280x1024 resolution.
@@ -103,7 +91,7 @@ If the
 .Nm
 frame buffer is a secondary display, or a serial console is used, the
 display resolution can not be changed without using an
-.Ev Em nvramrc
+.Em nvramrc
 OpenPROM script.
 Refer to the
 .Em Sun Frame Buffer FAQ
@@ -113,7 +101,6 @@ The
 .Nm
 frame buffer accepts the following resolutions:
 .Ss Supported Video Modes
-.Pp
 .Bl -tag -width screen:r1280x1024x76m -compact
 .It screen:r1152x900x66
 Standard 1152x900, with a refresh rate of 66Hz.
@@ -123,7 +110,6 @@ This is the default setting.
 .It screen:r1280x1024x66
 High res 1280x1024, with a refresh rate of 66Hz.
 .El
-.Pp
 .Ss Unsupported Video Modes
 The following video modes are supported by the hardware, but not by
 .Tn Sun .
@@ -160,15 +146,15 @@ with 4MB VSIMM.
 .Xr cgtwelve 4 ,
 .Xr cgtwo 4 ,
 .Xr intro 4 ,
+.Xr mgx 4 ,
+.Xr pninek 4 ,
 .Xr pnozz 4 ,
 .Xr tcx 4 ,
 .Xr tvtwo 4 ,
 .Xr vigra 4 ,
 .Xr wscons 4 ,
 .Xr wsdisplay 4 ,
-.Xr zx 4 ,
-.Xr boot_config 8 ,
-.Xr config 8
+.Xr zx 4
 .Rs
 .%T Sun Frame Buffer FAQ
 .%O http://www.sunhelp.org/faq/FrameBuffer.html

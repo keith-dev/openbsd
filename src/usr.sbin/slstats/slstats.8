@@ -1,4 +1,4 @@
-.\"	$OpenBSD: slstats.8,v 1.11 2003/02/18 07:43:36 jmc Exp $
+.\"	$OpenBSD: slstats.8,v 1.13 2003/09/06 17:27:53 jmc Exp $
 .\"	$NetBSD: slstats.8,v 1.2.6.1 1996/06/07 01:42:24 thorpej Exp $
 .\"
 .\" Contributed by Van Jacobson (van@ee.lbl.gov), Dec 31, 1989.
@@ -29,7 +29,7 @@
 .\" LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
 .\" OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 .\" SUCH DAMAGE.
-.\" 
+.\"
 .Dd July 5, 1993
 .Dt SLSTATS 8
 .Os
@@ -39,7 +39,7 @@
 .Sh SYNOPSIS
 .Nm slstats
 .Op Fl v
-.Op Fl w Ar interval
+.Op Fl i Ar interval
 .Op Ar unit-number
 .Sh DESCRIPTION
 The
@@ -51,7 +51,7 @@ utility reports slip-related statistics for the
 .Sc
 interface.
 If the
-.Nm unit-number
+.Ar unit-number
 is unspecified, it defaults to 0.
 These statistics are displayed at regular intervals.
 .Pp
@@ -69,7 +69,7 @@ The options are as follows:
 Display additional statistics demonstrating the efficacy of VJ header
 compression and providing more explicit information on failure
 distribution.
-.It Fl w
+.It Fl i
 Specifies the interval between reports.
 The default interval is 5 seconds.
 .El
@@ -123,7 +123,7 @@ Only reported when the
 .Fl v
 option is specified.
 .El
-.Sh BUGS
-Should take an interface name and not a unit number.
 .Sh SEE ALSO
 .Xr sliplogin 8
+.Sh BUGS
+Should take an interface name and not a unit number.

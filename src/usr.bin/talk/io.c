@@ -1,4 +1,4 @@
-/*	$OpenBSD: io.c,v 1.11 2002/06/21 06:16:44 millert Exp $	*/
+/*	$OpenBSD: io.c,v 1.14 2003/08/11 21:10:54 deraadt Exp $	*/
 /*	$NetBSD: io.c,v 1.4 1994/12/09 02:14:20 jtc Exp $	*/
 
 /*
@@ -13,11 +13,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -38,7 +34,7 @@
 #if 0
 static char sccsid[] = "@(#)io.c	8.1 (Berkeley) 6/6/93";
 #endif
-static char rcsid[] = "$OpenBSD: io.c,v 1.11 2002/06/21 06:16:44 millert Exp $";
+static char rcsid[] = "$OpenBSD: io.c,v 1.14 2003/08/11 21:10:54 deraadt Exp $";
 #endif /* not lint */
 
 /*
@@ -51,10 +47,11 @@ static char rcsid[] = "$OpenBSD: io.c,v 1.11 2002/06/21 06:16:44 millert Exp $";
 #include <sys/ioctl.h>
 #include <sys/time.h>
 #include <stdio.h>
+#include <poll.h>
 #include <errno.h>
 #include <unistd.h>
 
-#define A_LONG_TIME 10000000
+#define A_LONG_TIME 1000000
 
 volatile sig_atomic_t gotwinch = 0;
 
@@ -62,13 +59,11 @@ volatile sig_atomic_t gotwinch = 0;
  * The routine to do the actual talking
  */
 void
-talk()
+talk(void)
 {
-	fd_set read_template, read_set;
-	int nb;
+	struct pollfd fds[2];
 	char buf[BUFSIZ];
-	struct timeval wait;
-	int maxfd = 0;
+	int nb;
 
 #if defined(NCURSES_VERSION) || defined(beep)
 	message("Connection established");
@@ -84,38 +79,31 @@ talk()
 	 * Wait on both the other process (sockt_mask) and
 	 * standard input ( STDIN_MASK )
 	 */
-	FD_ZERO(&read_template);
-	FD_SET(fileno(stdin), &read_template);
-	if (fileno(stdin) > maxfd)
-		maxfd = fileno(stdin);
-	FD_SET(sockt, &read_template);
-	if (sockt > maxfd)
-		maxfd = sockt;
+	fds[0].fd = fileno(stdin);
+	fds[0].events = POLLIN;
+	fds[1].fd = sockt;
+	fds[1].events = POLLIN;
+	
 	for (;;) {
-		read_set = read_template;
-		wait.tv_sec = A_LONG_TIME;
-		wait.tv_usec = 0;
-		nb = select(maxfd + 1, &read_set, 0, 0, &wait);
+		nb = poll(fds, 2, A_LONG_TIME * 1000);
 		if (gotwinch) {
 			resize_display();
 			gotwinch = 0;
 		}
 		if (nb <= 0) {
-			if (errno == EINTR) {
-				read_set = read_template;
+			if (errno == EINTR)
 				continue;
-			}
 			/* panic, we don't know what happened */
 			quit("Unexpected error from select", 1);
 		}
-		if (FD_ISSET(sockt, &read_set)) {
+		if (fds[1].revents & POLLIN) {
 			/* There is data on sockt */
 			nb = read(sockt, buf, sizeof buf);
 			if (nb <= 0)
 				quit("Connection closed.  Exiting", 0);
 			display(&his_win, buf, nb);
 		}
-		if (FD_ISSET(fileno(stdin), &read_set)) {
+		if (fds[0].revents & POLLIN) {
 			/*
 			 * We can't make the tty non_blocking, because
 			 * curses's output routines would screw up
@@ -133,8 +121,7 @@ talk()
  * Display string in the standard location
  */
 void
-message(string)
-	char *string;
+message(char *string)
 {
 	wmove(my_win.x_win, current_line % my_win.x_nlines, 0);
 	wprintw(my_win.x_win, "[%s]", string);

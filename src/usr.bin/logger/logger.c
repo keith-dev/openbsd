@@ -1,4 +1,4 @@
-/*	$OpenBSD: logger.c,v 1.5 2002/02/16 21:27:48 millert Exp $	*/
+/*	$OpenBSD: logger.c,v 1.7 2003/06/10 22:20:47 deraadt Exp $	*/
 /*	$NetBSD: logger.c,v 1.4 1994/12/22 06:27:00 jtc Exp $	*/
 
 /*
@@ -13,11 +13,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -44,7 +40,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)logger.c	8.1 (Berkeley) 6/6/93";
 #endif
-static char rcsid[] = "$OpenBSD: logger.c,v 1.5 2002/02/16 21:27:48 millert Exp $";
+static char rcsid[] = "$OpenBSD: logger.c,v 1.7 2003/06/10 22:20:47 deraadt Exp $";
 #endif /* not lint */
 
 #include <errno.h>
@@ -68,9 +64,7 @@ void	usage(void);
  *	log.
  */
 int
-main(argc, argv)
-	int argc;
-	char *argv[];
+main(int argc, char *argv[])
 {
 	int ch, logflags, pri;
 	char *tag, buf[1024];
@@ -142,8 +136,7 @@ main(argc, argv)
  *  Decode a symbolic name to a numeric value
  */
 int
-pencode(s)
-	char *s;
+pencode(char *s)
 {
 	char *save;
 	int fac, lev;
@@ -173,9 +166,7 @@ pencode(s)
 }
 
 int
-decode(name, codetab)
-	char *name;
-	CODE *codetab;
+decode(char *name, CODE *codetab)
 {
 	CODE *c;
 
@@ -190,7 +181,7 @@ decode(name, codetab)
 }
 
 void
-usage()
+usage(void)
 {
 	(void)fprintf(stderr,
 	    "logger: [-is] [-f file] [-p pri] [-t tag] [ message ... ]\n");

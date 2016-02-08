@@ -1,4 +1,4 @@
-/*	$OpenBSD: util.c,v 1.14 2003/01/23 23:15:16 djm Exp $ */
+/*	$OpenBSD: util.c,v 1.16 2003/06/28 01:04:57 deraadt Exp $ */
 
 /*
  * Copyright (c) 1996-2001
@@ -36,7 +36,6 @@
 #include <sys/ioctl.h>
 #include <sys/file.h>
 #include <netinet/in.h>
-#include <netinet/in.h>
 #include <netinet/in_systm.h>
 #include <net/if.h>
 #include <net/pfvar.h>
@@ -59,6 +58,8 @@
 
 int Debug_Level;
 int Use_Rdns;
+
+void		debuglog(int debug_level, const char *fmt, ...);
 
 void
 debuglog(int debug_level, const char *fmt, ...)

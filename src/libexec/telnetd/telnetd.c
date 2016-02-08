@@ -10,11 +10,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -362,14 +358,8 @@ main(int argc, char **argv)
 	    else
 		port = htons(atoi(*argv));
 	} else {
-#ifdef KRB5
-	    port = krb5_getportbyname (NULL, "telnet", "tcp", 23);
-#elif defined(KRB4)
-	    port = k_getportbyname("telnet", "tcp", htons(23));
-#else
 	    sp = getservbyname ("telnet", "tcp");
 	    port = sp ? sp->s_port : htons(23);
-#endif
 	}
 	mini_inetd (port);
     } else if (argc > 0) {
@@ -639,7 +629,7 @@ getterminaltype(char *name, size_t name_sz)
 		     */
 		    _gettermname();
 		    if (strncmp(first, terminaltype, sizeof(first)) != 0)
-			strcpy(terminaltype, first);
+			strlcpy(terminaltype, first, sizeof(terminaltype));
 		    break;
 		}
 	    }
@@ -783,7 +773,8 @@ show_issue(void)
 	f = fopen("/etc/issue", "r");
     if(f){
 	while(fgets(buf, sizeof(buf)-2, f)){
-	    strcpy(buf + strcspn(buf, "\r\n"), "\r\n");
+	    size_t off = strcspn(buf, "\r\n");  	
+	    strlcpy(buf + off, "\r\n", sizeof(buf) - off);
 	    writenet((unsigned char*)buf, strlen(buf));
 	}
 	fclose(f);

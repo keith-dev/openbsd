@@ -1,4 +1,4 @@
-/*	$OpenBSD: cdio.c,v 1.28 2003/02/18 09:42:33 jmc Exp $	*/
+/*	$OpenBSD: cdio.c,v 1.30 2003/06/10 22:20:45 deraadt Exp $	*/
 
 /*  Copyright (c) 1995 Serge V. Vakulenko
  * All rights reserved.
@@ -178,7 +178,7 @@ char 		*strstatus(int);
 int		cdid(void);
 
 void
-help()
+help(void)
 {
 	struct cmdtab *c;
 	char *s, n;
@@ -204,7 +204,7 @@ help()
 }
 
 void
-usage()
+usage(void)
 {
 	fprintf(stderr, "usage: %s [-sv] [-f device] [command args ...]\n",
 	    __progname);
@@ -263,18 +263,14 @@ main(int argc, char **argv)
 		int len;
 
 		for (p=buf; argc-->0; ++argv) {
-			len = strlen(*argv);
+			len = snprintf(p, buf + sizeof buf - p,
+			   "%s%s", (p > buf) ? " " : "", *argv);
 
-			if (p + len >= buf + sizeof (buf) - 1)
-				usage();
+			if (len >= buf + sizeof buf - p)
+				errx(1, "argument list too long.");
 
-			if (p > buf)
-				*p++ = ' ';
-
-			strcpy(p, *argv);	/* ok */
 			p += len;
 		}
-		*p = 0;
 		arg = parse(buf, &cmd);
 		return (run(cmd, arg));
 	}
@@ -936,7 +932,7 @@ pstatus(char *arg)
 }
 
 int
-cdid()
+cdid(void)
 {
 	unsigned long id;
 	struct ioc_toc_header h;

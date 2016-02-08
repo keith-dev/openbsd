@@ -1,4 +1,4 @@
-.\"	$OpenBSD: su.1,v 1.17 2002/11/14 02:57:28 deraadt Exp $
+.\"	$OpenBSD: su.1,v 1.20 2003/07/25 09:37:45 jmc Exp $
 .\"
 .\" Copyright (c) 1988, 1990 The Regents of the University of California.
 .\" All rights reserved.
@@ -11,11 +11,7 @@
 .\" 2. Redistributions in binary form must reproduce the above copyright
 .\"    notice, this list of conditions and the following disclaimer in the
 .\"    documentation and/or other materials provided with the distribution.
-.\" 3. All advertising materials mentioning features or use of this software
-.\"    must display the following acknowledgement:
-.\"	This product includes software developed by the University of
-.\"	California, Berkeley and its contributors.
-.\" 4. Neither the name of the University nor the names of its contributors
+.\" 3. Neither the name of the University nor the names of its contributors
 .\"    may be used to endorse or promote products derived from this software
 .\"    without specific prior written permission.
 .\"
@@ -94,7 +90,7 @@ If not using
 and the target login has a user ID of 0 then the
 .Ev PATH
 variable and umask value
-(see 
+(see
 .Xr umask 2 )
 are always set according to the
 .Pa /etc/login.conf
@@ -112,7 +108,7 @@ Specify an authentication type such as
 .Dq skey ,
 .Dq securid ,
 or
-.Dq krb4 .
+.Dq krb5 .
 .It Fl c
 Specify a login class.
 You may only override the default class if you're already root.
@@ -216,6 +212,24 @@ By default (unless the prompt is reset by a startup file) the superuser
 prompt is set to
 .Dq Sy \&#
 to remind one of its awesome power.
+.Sh ENVIRONMENT
+.Bl -tag -width LOGNAME
+.It Ev HOME
+Default home directory of real user ID unless modified as
+specified above.
+.It Ev LOGNAME
+The user ID is always the effective ID (the target user ID) after an
+.Nm
+unless the user ID is 0 (root).
+.It Ev PATH
+Default search path of real user ID unless modified as specified above.
+.It Ev TERM
+Provides terminal type which may be retained for the substituted
+user ID.
+.It Ev USER
+Same as
+.Ev LOGNAME .
+.El
 .Sh EXAMPLES
 .Bl -tag -width 5n -compact
 .It Li "$ su bin -c makewhatis"
@@ -236,27 +250,8 @@ Pretend a login for user
 .It Li "$ su -a skey -l foo"
 Same as above, but use S/Key for authentication.
 .El
-.Sh ENVIRONMENT
-.Bl -tag -width LOGNAME
-.It Ev HOME
-Default home directory of real user ID unless modified as
-specified above.
-.It Ev LOGNAME
-The user ID is always the effective ID (the target user ID) after an
-.Nm
-unless the user ID is 0 (root).
-.It Ev PATH
-Default search path of real user ID unless modified as specified above.
-.It Ev TERM
-Provides terminal type which may be retained for the substituted
-user ID.
-.It Ev USER
-Same as
-.Ev LOGNAME .
-.El
 .Sh SEE ALSO
 .Xr csh 1 ,
-.Xr kerberos 1 ,
 .Xr kinit 1 ,
 .Xr login 1 ,
 .Xr sh 1 ,

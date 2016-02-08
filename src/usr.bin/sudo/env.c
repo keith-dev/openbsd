@@ -30,6 +30,10 @@
  * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ *
+ * Sponsored in part by the Defense Advanced Research Projects
+ * Agency (DARPA) and Air Force Research Laboratory, Air Force
+ * Materiel Command, USAF, under agreement number F39502-99-1-0512.
  */
 
 #include "config.h"
@@ -56,13 +60,17 @@
 #ifdef HAVE_UNISTD_H
 # include <unistd.h>
 #endif /* HAVE_UNISTD_H */
+#ifdef HAVE_ERR_H
+# include <err.h>
+#else
+# include "emul/err.h"
+#endif /* HAVE_ERR_H */
 #include <pwd.h>
-#include <errno.h>
 
 #include "sudo.h"
 
 #ifndef lint
-static const char rcsid[] = "$Sudo: env.c,v 1.25 2003/03/15 20:31:01 millert Exp $";
+static const char rcsid[] = "$Sudo: env.c,v 1.27 2003/04/16 00:42:09 millert Exp $";
 #endif /* lint */
 
 /*
@@ -113,7 +121,7 @@ static const char *initial_badenv_table[] = {
 #endif
 #ifdef HAVE_KERB4
     "KRB_CONF*",
-    "KRBCONFDIR"
+    "KRBCONFDIR",
     "KRBTKFILE",
 #endif /* HAVE_KERB4 */
 #ifdef HAVE_KERB5
@@ -223,9 +231,8 @@ format_env(var, val)
     if (strlcpy(estring, var, esize) >= esize ||
 	strlcat(estring, "=", esize) >= esize ||
 	strlcat(estring, val, esize) >= esize) {
-	(void) fprintf(stderr, "%s: internal error, format_env() overflow\n",
-	    Argv[0]);
-	exit(1);
+
+	errx(1, "internal error, format_env() overflow");
     }
 
     return(estring);
@@ -243,8 +250,8 @@ insert_env(str, dupcheck)
     char **nep;
     size_t varlen;
 
-    /* Make sure there is room for the new entry. */
-    if (env_len + 1 > env_size) {
+    /* Make sure there is room for the new entry plus a NULL. */
+    if (env_len + 2 > env_size) {
 	env_size += 128;
 	new_environ = erealloc3(new_environ, env_size, sizeof(char *));
     }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: library.c,v 1.26 2003/02/02 16:57:58 deraadt Exp $ */
+/*	$OpenBSD: library.c,v 1.33 2003/09/02 15:17:51 drahn Exp $ */
 
 /*
  * Copyright (c) 2002 Dale Rahn
@@ -12,12 +12,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed under OpenBSD by
- *	Per Fogelstrom, Opsycon AB, Sweden.
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS
  * OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
@@ -57,7 +51,6 @@
 		   (((X) & PF_X) ? PROT_EXEC : 0))
 
 static elf_object_t *_dl_tryload_shlib(const char *libname, int type);
-static void _dl_link_sub(elf_object_t *dep, elf_object_t *p);
 
 /*
  * _dl_match_file()
@@ -91,16 +84,16 @@ _dl_match_file(struct sod *sodp, char *name, int namelen)
 	match = 0;
 	if ((_dl_strcmp((char *)lsod.sod_name, (char *)sodp->sod_name) == 0) &&
 	    (lsod.sod_library == sodp->sod_library) &&
-	    (sodp->sod_major == lsod.sod_major) &&
+	    ((sodp->sod_major == -1) || (sodp->sod_major == lsod.sod_major)) &&
 	    ((sodp->sod_minor == -1) ||
 	    (lsod.sod_minor >= sodp->sod_minor))) {
 		match = 1;
 
 		/* return version matched */
+		sodp->sod_major = lsod.sod_major;
 		sodp->sod_minor = lsod.sod_minor;
 	}
 	_dl_free((char *)lsod.sod_name);
-
 	return match;
 }
 
@@ -114,6 +107,7 @@ _dl_find_shlib(struct sod *sodp, const char *searchpath, int nohints)
 	const char *pp;
 	int match, len;
 	DIR *dd;
+	struct sod tsod, bsod;		/* transient and best sod */
 
 	/* if we are to search default directories, and hints
 	 * are not to be used, search the standard path from ldconfig
@@ -174,33 +168,46 @@ nohints:
 		if ((dd = _dl_opendir(lp)) != NULL) {
 			match = 0;
 			while ((dp = _dl_readdir(dd)) != NULL) {
-				if (_dl_match_file(sodp, dp->d_name,
+				tsod = *sodp;
+				if (_dl_match_file(&tsod, dp->d_name,
 				    dp->d_namlen)) {
 					/*
-					 * When a match is found, sodp is
-					 * updated with the minor found.
-					 * We continue looking at this
-					 * directory, thus this will find
-					 * the largest matching library
-					 * in this directory.
-					 * we save off the d_name now
-					 * so that it doesn't have to be
-					 * recreated from the hint.
+					 * When a match is found, tsod is
+					 * updated with the major+minor found.
+					 * This version is compared with the
+					 * largest so far (kept in bsod),
+					 * and saved if larger.
 					 */
-					match = 1;
-					len = _dl_strlcpy(_dl_hint_store, lp,
-					    MAXPATHLEN);
-					if (lp[len-1] != '/') {
-						_dl_hint_store[len] = '/';
-						len++;
+					if (!match ||
+					    tsod.sod_major == -1 ||
+					    tsod.sod_major > bsod.sod_major ||
+					    ((tsod.sod_major ==
+					    bsod.sod_major) &&
+					    tsod.sod_minor > bsod.sod_minor)) {
+						bsod = tsod;
+						match = 1;
+						len = _dl_strlcpy(
+						    _dl_hint_store, lp,
+						    MAXPATHLEN);
+						if (lp[len-1] != '/') {
+							_dl_hint_store[len] =
+							    '/';
+							len++;
+						}
+						_dl_strlcpy(
+						    &_dl_hint_store[len],
+						    dp->d_name,
+						    MAXPATHLEN-len);
+						if (tsod.sod_major == -1)
+							break;
 					}
-					_dl_strlcpy(&_dl_hint_store[len],
-					    dp->d_name, MAXPATHLEN-len);
 				}
 			}
 			_dl_closedir(dd);
-			if (match)
+			if (match) {
+				*sodp = bsod;
 				return (_dl_hint_store);
+			}
 		}
 
 		if (*pp)	/* Try curdir if ':' at end */
@@ -229,7 +236,7 @@ nohints:
  */
 
 elf_object_t *
-_dl_load_shlib(const char *libname, elf_object_t *parent, int type)
+_dl_load_shlib(const char *libname, elf_object_t *parent, int type, int flags)
 {
 	int try_any_minor, ignore_hints;
 	struct sod sod, req_sod;
@@ -241,7 +248,6 @@ _dl_load_shlib(const char *libname, elf_object_t *parent, int type)
 
 	if (_dl_strchr(libname, '/')) {
 		object = _dl_tryload_shlib(libname, type);
-		_dl_link_sub(object, parent);
 		return(object);
 	}
 
@@ -260,11 +266,11 @@ again:
 				    "minor version >= %d expected, "
 				    "using it anyway\n",
 				    sod.sod_name, sod.sod_major,
-				    sod.sod_minor, req_sod.sod_minor);
+				    req_sod.sod_minor, sod.sod_minor);
 			object = _dl_tryload_shlib(hint, type);
 			if (object != NULL) {
-				_dl_link_sub(object, parent);
 				_dl_free((char *)sod.sod_name);
+				object->obj_flags = flags;
 				return (object);
 			}
 		}
@@ -282,11 +288,11 @@ again:
 				    "minor version >= %d expected, "
 				    "using it anyway\n",
 				    sod.sod_name, sod.sod_major,
-				    sod.sod_minor, req_sod.sod_minor);
+				    req_sod.sod_minor, sod.sod_minor);
 			object = _dl_tryload_shlib(hint, type);
 			if (object != NULL) {
-				_dl_link_sub(object, parent);
 				_dl_free((char *)sod.sod_name);
+				object->obj_flags = flags;
 				return (object);
 			}
 		}
@@ -300,11 +306,11 @@ again:
 			    "minor version >= %d expected, "
 			    "using it anyway\n",
 			    sod.sod_name, sod.sod_major,
-			    sod.sod_minor, req_sod.sod_minor);
+			    req_sod.sod_minor, sod.sod_minor);
 		object = _dl_tryload_shlib(hint, type);
 		if (object != NULL) {
-			_dl_link_sub(object, parent);
 			_dl_free((char *)sod.sod_name);
+			object->obj_flags = flags;
 			return(object);
 		}
 	}
@@ -331,8 +337,6 @@ _dl_load_list_free(struct load_list *load_list)
 		load_list = next;
 	}
 }
-
-void _dl_run_dtors(elf_object_t *object);
 
 void
 _dl_unload_shlib(elf_object_t *object)
@@ -483,7 +487,7 @@ _dl_tryload_shlib(const char *libname, int type)
 	_dl_close(libfile);
 
 	dynp = (Elf_Dyn *)((unsigned long)dynp + loff);
-	object = _dl_add_object(libname, dynp, 0, type, libaddr, loff);
+	object = _dl_finalize_object(libname, dynp, 0, type, libaddr, loff);
 	if (object) {
 		object->load_size = maxva - minva;	/*XXX*/
 		object->load_list = load_list;
@@ -494,7 +498,7 @@ _dl_tryload_shlib(const char *libname, int type)
 	return(object);
 }
 
-static void
+void
 _dl_link_sub(elf_object_t *dep, elf_object_t *p)
 {
 	struct dep_node *n;

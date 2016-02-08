@@ -1,4 +1,4 @@
-/*	$OpenBSD: server.c,v 1.20 2002/06/23 03:07:21 deraadt Exp $	*/
+/*	$OpenBSD: server.c,v 1.24 2003/06/03 02:56:14 millert Exp $	*/
 
 /*
  * Copyright (c) 1983, 1993
@@ -12,11 +12,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -35,7 +31,7 @@
 
 #ifndef lint
 /* from: static char sccsid[] = "@(#)server.c	8.1 (Berkeley) 6/9/93"; */
-static char *rcsid = "$OpenBSD: server.c,v 1.20 2002/06/23 03:07:21 deraadt Exp $";
+static char *rcsid = "$OpenBSD: server.c,v 1.24 2003/06/03 02:56:14 millert Exp $";
 #endif /* not lint */
 
 #include <sys/wait.h>
@@ -216,7 +212,7 @@ server()
 			continue;
 
 		case 'L':  /* Log. save message in log file */
-			log(lfp, cp);
+			log(lfp, "%s", cp);
 			continue;
 #endif
 
@@ -251,7 +247,7 @@ install(src, dest, destdir, opts)
 	if (opts & WHOLE)
 		source[0] = '\0';
 	else
-		strcpy(source, src);
+		strlcpy(source, src, sizeof source);
 
 	if (dest == NULL) {
 		opts &= ~WHOLE; /* WHOLE mode only useful if renaming */
@@ -305,7 +301,7 @@ install(src, dest, destdir, opts)
 	 * hardlink info.
 	 */
 	if (destdir || (src && dest && strcmp(src, dest))) {
-		strcpy(destcopy, dest);
+		strlcpy(destcopy, dest, sizeof destcopy);
 		Tdest = destcopy;
 	}
 	sendf(rname, opts);
@@ -582,10 +578,10 @@ savelink(stp)
 		lp->inum = stp->st_ino;
 		lp->devnum = stp->st_dev;
 		lp->count = stp->st_nlink - 1;
-		strcpy(lp->pathname, target);
-		strcpy(lp->src, source);
+		strlcpy(lp->pathname, target, sizeof lp->pathname);
+		strlcpy(lp->src, source, sizeof lp->src);
 		if (Tdest)
-			strcpy(lp->target, Tdest);
+			strlcpy(lp->target, Tdest, sizeof lp->target);
 		else
 			*lp->target = 0;
 	}
@@ -841,7 +837,7 @@ recvf(cmd, type)
 		(void) snprintf(tp, sizeof(target) - (tp - target), "/%s", cp);
 	cp = strrchr(target, '/');
 	if (cp == NULL)
-		strcpy(new, tempname);
+		strlcpy(new, tempname, sizeof new);
 	else if (cp == target)
 		(void) snprintf(new, sizeof(new), "/%s", tempname);
 	else {

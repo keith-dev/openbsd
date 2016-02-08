@@ -1,28 +1,20 @@
 vers(__file__,
-	{-$OpenBSD: MAKEDEV.md,v 1.16 2002/12/05 04:30:21 kjc Exp $-},
+	{-$OpenBSD: MAKEDEV.md,v 1.19 2003/06/18 18:08:59 todd Exp $-},
 etc.MACHINE)dnl
 dnl
-dnl Copyright (c) 2001 Todd T. Fries <todd@OpenBSD.org>
-dnl All rights reserved.
+dnl Copyright (c) 2001,2002,2003 Todd T. Fries <todd@OpenBSD.org>
 dnl
-dnl Redistribution and use in source and binary forms, with or without
-dnl modification, are permitted provided that the following conditions
-dnl are met:
-dnl 1. Redistributions of source code must retain the above copyright
-dnl    notice, this list of conditions and the following disclaimer.
-dnl 2. The name of the author may not be used to endorse or promote products
-dnl    derived from this software without specific prior written permission.
+dnl Permission to use, copy, modify, and distribute this software for any
+dnl purpose with or without fee is hereby granted, provided that the above
+dnl copyright notice and this permission notice appear in all copies.
 dnl
-dnl THIS SOFTWARE IS PROVIDED ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES,
-dnl INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY
-dnl AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL
-dnl THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
-dnl EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
-dnl PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
-dnl OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
-dnl WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
-dnl OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
-dnl ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+dnl THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+dnl WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+dnl MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+dnl ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+dnl WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+dnl ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+dnl OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 dnl
 dnl
 dnl
@@ -52,6 +44,8 @@ _mkdev(s64_czs, cua[a-z], {-u=${i#cua*}
 	*) echo unknown cua device $i ;;
 	esac
 	M cua$u c major_s64_czs_c Add($n, 128) 660 dialer uucp-})dnl
+__devitem(presto, presto*, Prestoserve NVRAM memory)dnl
+disk_q(presto)dnl
 dnl
 dnl *** MAKEDEV itself
 dnl
@@ -73,6 +67,7 @@ _DEV(xd, 42, 10)
 _DEV(flo, 54, 16)
 _DEV(vnd, 110, 8)
 _DEV(ccd, 23, 9)
+_DEV(presto, 25, 26)
 _TITLE(pty)
 _DEV(tty, 20)
 _DEV(pty, 21)
@@ -99,6 +94,7 @@ _DEV(mag, 100)
 _DEV(bppmag, 101)
 _DEV(spif, 102)
 _DEV(bppsp, 103)
+_DEV(bpp, 104)
 _DEV(xfs, 51)
 _DEV(raid, 123, 25)
 _DEV(fdesc, 24)
@@ -137,6 +133,8 @@ target(all, cd, 0, 1)dnl
 target(all, sd, 0, 1, 2, 3, 4)dnl
 target(all, vnd, 0, 1, 2, 3)dnl
 target(all, ccd, 0, 1, 2, 3)dnl
+target(all, bpp, 0)dnl
+target(all, presto, 0)dnl
 target(ramd, fd, 0)dnl
 target(ramd, sd, 0, 1, 2, 3)dnl
 target(ramd, rd, 0)dnl

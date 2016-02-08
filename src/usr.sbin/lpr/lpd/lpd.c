@@ -1,4 +1,4 @@
-/*	$OpenBSD: lpd.c,v 1.38 2002/09/06 19:46:52 deraadt Exp $ */
+/*	$OpenBSD: lpd.c,v 1.40 2003/09/03 20:23:26 tedu Exp $ */
 /*	$NetBSD: lpd.c,v 1.33 2002/01/21 14:42:29 wiz Exp $	*/
 
 /*
@@ -14,11 +14,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -45,7 +41,7 @@ static const char copyright[] =
 #if 0
 static const char sccsid[] = "@(#)lpd.c	8.7 (Berkeley) 5/10/95";
 #else
-static const char rcsid[] = "$OpenBSD: lpd.c,v 1.38 2002/09/06 19:46:52 deraadt Exp $";
+static const char rcsid[] = "$OpenBSD: lpd.c,v 1.40 2003/09/03 20:23:26 tedu Exp $";
 #endif
 #endif /* not lint */
 
@@ -657,6 +653,8 @@ ckqueue(char *cap)
 	if (cgetstr(cap, "sd", &spooldir) == -1)
 		spooldir = _PATH_DEFSPOOL;
 	dirp = opendir(spooldir);
+	if (spooldir != _PATH_DEFSPOOL)
+		free(spooldir);
 	if (dirp == NULL)
 		return (-1);
 	while ((d = readdir(dirp)) != NULL) {

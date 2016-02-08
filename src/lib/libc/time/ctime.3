@@ -1,4 +1,4 @@
-.\"	$OpenBSD: ctime.3,v 1.25 2003/02/14 18:24:53 millert Exp $
+.\"	$OpenBSD: ctime.3,v 1.28 2003/07/07 15:38:38 jmc Exp $
 .\"
 .\"
 .Dd February 16, 1999
@@ -21,7 +21,8 @@
 .Sh SYNOPSIS
 .Fd #include <sys/types.h>
 .Fd #include <time.h>
-.Ft extern char *tzname[2];
+.Pp
+.Fd extern char *tzname[2];
 .Ft void
 .Fn tzset "void"
 .Ft "char *"
@@ -60,9 +61,8 @@ representing the time in seconds since
 and returns a pointer to a
 26-character string
 of the form
-.Bd -literal -offset indent
-Thu Nov 24 18:22:48 1986\en\0
-.Ed
+.Pp
+.Dl Thu Nov 24 18:22:48 1986\en
 .Pp
 All the fields have constant width.
 .Pp
@@ -98,7 +98,7 @@ After filling in the
 structure,
 .Fn localtime
 sets the
-.Fa tm_isdst Ns No 'th
+.Fa tm_isdst Ns 'th
 element of
 .Fa tzname
 to a pointer to an
@@ -115,7 +115,7 @@ and
 .Fn gmtime_r
 functions convert the calendar time pointed to by
 .Fa clock
-into a broken-down time in exactly the same was as their non-reentrant
+into a broken-down time in exactly the same way as their non-reentrant
 counterparts,
 .Fn localtime
 and
@@ -186,7 +186,7 @@ and
 are determined.
 .Fn mktime
 returns the specified calendar time;
-If the calendar time cannot be represented,
+if the calendar time cannot be represented,
 it returns \-1.
 .Pp
 .Fn timelocal
@@ -205,9 +205,7 @@ function.
 .Pp
 .Fn difftime
 returns the difference between two calendar times,
-.Pf ( Fa time1
--
-.Fa time0 ) ,
+.Pf ( Fa time1 No \- Fa time0 ) ,
 expressed in seconds.
 .Pp
 Declarations of all the functions and externals, and the
@@ -219,17 +217,17 @@ The structure (of type)
 .Li struct tm
 includes the following fields:
 .Bd -literal -offset indent
-	int tm_sec;	/\(** seconds (0 - 60) \(**/
-	int tm_min;	/\(** minutes (0 - 59) \(**/
-	int tm_hour;	/\(** hours (0 - 23) \(**/
-	int tm_mday;	/\(** day of month (1 - 31) \(**/
-	int tm_mon;	/\(** month of year (0 - 11) \(**/
-	int tm_year;	/\(** year \- 1900 \(**/
-	int tm_wday;	/\(** day of week (Sunday = 0) \(**/
-	int tm_yday;	/\(** day of year (0 - 365) \(**/
-	int tm_isdst;	/\(** is summer time in effect? \(**/
-	char \(**tm_zone;	/\(** abbreviation of timezone name \(**/
-	long tm_gmtoff;	/\(** offset from UTC in seconds \(**/
+	int tm_sec;	/* seconds (0 \- 60) */
+	int tm_min;	/* minutes (0 \- 59) */
+	int tm_hour;	/* hours (0 \- 23) */
+	int tm_mday;	/* day of month (1 \- 31) */
+	int tm_mon;	/* month of year (0 \- 11) */
+	int tm_year;	/* year \- 1900 */
+	int tm_wday;	/* day of week (Sunday = 0) */
+	int tm_yday;	/* day of year (0 \- 365) */
+	int tm_isdst;	/* is summer time in effect? */
+	char *tm_zone;	/* abbreviation of timezone name */
+	long tm_gmtoff;	/* offset from UTC in seconds */
 .Ed
 .Pp
 The
@@ -288,7 +286,7 @@ will also be overwritten at the next call
 .Fn tzset ) .
 .Pp
 The default system time zone may be set by running
-.Li Dq zic -l timezone
+.Dq Li zic -l timezone
 as the superuser.
 .Pp
 Avoid using out-of-range values with

@@ -1,9 +1,9 @@
-/*	$OpenBSD: mod_alias.c,v 1.8 2002/08/15 16:06:11 henning Exp $ */
+/*	$OpenBSD: mod_alias.c,v 1.10 2003/08/21 13:11:36 henning Exp $ */
 
 /* ====================================================================
  * The Apache Software License, Version 1.1
  *
- * Copyright (c) 2000-2002 The Apache Software Foundation.  All rights
+ * Copyright (c) 2000-2003 The Apache Software Foundation.  All rights
  * reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -70,6 +70,7 @@
 #include "http_core.h"
 #include "http_config.h"
 #include "http_log.h"
+#include "http_main.h"
 
 typedef struct {
     char *real;
@@ -415,6 +416,12 @@ static int fixup_redir(request_rec *r)
                               r->uri, ret);
             }
             else {
+                /* append requested query only, if the config didn't
+                 * supply its own.
+                 */
+                if (r->args && !strchr(ret, '?')) {
+                    ret = ap_pstrcat(r->pool, ret, "?", r->args, NULL);
+                }
                 ap_table_setn(r->headers_out, "Location", ret);
             }
         }

@@ -33,7 +33,7 @@
 
 #ifdef HAVE_CONFIG_H
 #include <config.h>
-RCSID("$KTH: sl.c,v 1.8 2000/03/07 22:08:48 assar Exp $");
+RCSID("$arla: sl.c,v 1.9 2003/02/01 19:19:01 lha Exp $");
 #endif
 
 #include "sl_locl.h"
@@ -64,6 +64,7 @@ mandoc_template(SL_cmd *cmds,
     char timestr[64], cmd[64];
     const char *p;
     time_t t;
+    extern char *__progname;
 
     printf(".\\\" Things to fix:\n");
     printf(".\\\"   * correct section, and operating system\n");

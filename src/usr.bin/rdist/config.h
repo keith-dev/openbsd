@@ -1,4 +1,4 @@
-/*	$OpenBSD: config.h,v 1.6 1998/06/26 21:21:05 millert Exp $	*/
+/*	$OpenBSD: config.h,v 1.8 2003/06/03 02:56:14 millert Exp $	*/
 
 /*
  * Copyright (c) 1993 Michael A. Cooper
@@ -13,11 +13,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -35,7 +31,7 @@
  */
 
 /*
- * $From: config.h,v 6.43 1998/03/24 01:05:27 michaelc Exp $
+ * $From: config.h,v 1.2 1997/01/05 04:23:35 kim Exp $
  * @(#)config.h
  */
 
@@ -50,12 +46,12 @@
 
 /*
  * Include system pathname header file.  Usually this is <paths.h>.  
- * If your system doesn't have such a file, use "paths.h"
+ * If your system doesn't have such a file, use "mypaths.h"
  */
 #if	defined(PATHS_H)
 #	include PATHS_H
 #else
-#	include "rdistpaths.h"
+#	include "mypaths.h"
 #endif
 
 /*
@@ -67,7 +63,7 @@
  * don't have the old rdist, then uncomment the "#undef" line.
  */
 #ifndef _PATH_OLDRDIST
-#define _PATH_OLDRDIST	"/usr/bin/oldrdist"	/* Enable compat */
+#define _PATH_OLDRDIST	"/usr/ucb/oldrdist"	/* Enable compat */
 #endif
 /*#undef  _PATH_OLDRDIST*/				/* Disable compat */
 

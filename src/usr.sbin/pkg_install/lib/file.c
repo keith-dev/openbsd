@@ -1,7 +1,7 @@
-/*	$OpenBSD: file.c,v 1.15 2001/07/09 07:05:03 deraadt Exp $	*/
+/*	$OpenBSD: file.c,v 1.26 2003/08/21 20:24:57 espie Exp $	*/
 
 #ifndef lint
-static const char *rcsid = "$OpenBSD: file.c,v 1.15 2001/07/09 07:05:03 deraadt Exp $";
+static const char rcsid[] = "$OpenBSD: file.c,v 1.26 2003/08/21 20:24:57 espie Exp $";
 #endif
 
 /*
@@ -54,7 +54,7 @@ ensure_tgz(char *name)
 		 strcmp(name+len-strlen(".tar"), ".tar") == 0)) 
 	  return name;
 	else {
-		snprintf(buffer, sizeof buffer, "%s%s", name, TGZ);
+		snprintf(buffer, sizeof(buffer), "%s%s", name, TGZ);
 		return buffer;
 	}
 }
@@ -105,7 +105,7 @@ ftpGetURL(char *url, int *retcode)
 
 /* Quick check to see if a file exists */
 Boolean
-fexists(char *fname)
+fexists(const char *fname)
 {
     struct stat dummy;
     if (!lstat(fname, &dummy))
@@ -115,7 +115,7 @@ fexists(char *fname)
 
 /* Quick check to see if something is a directory */
 Boolean
-isdir(char *fname)
+isdir(const char *fname)
 {
     struct stat sb;
 
@@ -127,7 +127,7 @@ isdir(char *fname)
 
 /* Check if something is a link to a directory */
 Boolean
-islinktodir(char *fname)
+islinktodir(const char *fname)
 {
     struct stat sb;
 
@@ -142,7 +142,7 @@ islinktodir(char *fname)
 
 /* Check to see if file is a dir, and is empty */
 Boolean
-isemptydir(char *fname)
+isemptydir(const char *fname)
 {
     if (isdir(fname) || islinktodir(fname)) {
 	DIR *dirp;
@@ -164,7 +164,7 @@ isemptydir(char *fname)
 }
 
 Boolean
-isfile(char *fname)
+isfile(const char *fname)
 {
     struct stat sb;
     if (stat(fname, &sb) != FAIL && S_ISREG(sb.st_mode))
@@ -175,7 +175,7 @@ isfile(char *fname)
 /* Check to see if file is a file and is empty. If nonexistent or not
    a file, say "it's empty", otherwise return TRUE if zero sized. */
 Boolean
-isemptyfile(char *fname)
+isemptyfile(const char *fname)
 {
     struct stat sb;
     if (stat(fname, &sb) != FAIL && S_ISREG(sb.st_mode)) {
@@ -187,7 +187,7 @@ isemptyfile(char *fname)
 
 /* Returns TRUE if file is a URL specification */
 Boolean
-isURL(char *fname)
+isURL(const char *fname)
 {
     /*
      * Hardcode url types... not perfect, but working.
@@ -289,42 +289,32 @@ fileGetURL(char *base, char *spec)
 	   to construct a composite one out of that and the basename we were
 	   handed as a dependency. */
 	if (base) {
-	    strlcpy(fname, base, sizeof fname);
+	    strlcpy(fname, base, sizeof(fname));
 	    /* OpenBSD packages are currently stored in a flat space, so
 	       we don't yet need to backup the category and switch to all.
 	     */
 	    cp = strrchr(fname, '/');
-#if 0
-	    if (cp) {
-		*cp = '\0';	/* chop name */
-		cp = strrchr(fname, '/');
-	    }
-#endif
 	    if (cp) {
 		*(cp + 1) = '\0';
-#if 0
-		strcat(cp, "All/");
-#endif
-		strlcat(cp, ensure_tgz(spec), sizeof fname);
+		strlcat(fname, ensure_tgz(spec), sizeof(fname));
 	    }
 	    else
 		return NULL;
 	}
 	else {
 	    /* Otherwise, we've been given an environment variable hinting at the right location from sysinstall */
-	    strlcpy(fname, hint, sizeof fname);
-	    strlcat(fname, spec, sizeof fname);
+	    snprintf(fname, sizeof(fname), "%s%s", hint, spec);
 	}
     }
     else
-	strlcpy(fname, spec, sizeof fname);
-    cp = fileURLHost(fname, host, MAXHOSTNAMELEN);
+	strlcpy(fname, spec, sizeof(fname));
+    cp = fileURLHost(fname, host, sizeof(host));
     if (!*cp) {
 	pwarnx("URL `%s' has bad host part!", fname);
 	return NULL;
     }
 
-    cp = fileURLFilename(fname, file, FILENAME_MAX);
+    cp = fileURLFilename(fname, file, sizeof(fname));
     if (!*cp) {
 	pwarnx("URL `%s' has bad filename part!", fname);
 	return NULL;
@@ -374,28 +364,24 @@ fileFindByPath(char *base, char *fname)
 
 	if (ispkgpattern(fname)) {
 		if ((cp=findbestmatchingname(".",fname)) != NULL) {
-			strcpy (tmp, cp);
+			strlcpy(tmp, cp, sizeof(tmp));
+			free(cp);
 			return tmp;
 		}
 	} else {
-		strlcpy(tmp, ensure_tgz(fname), sizeof tmp);
+		strlcpy(tmp, ensure_tgz(fname), sizeof(tmp));
 		if (fexists(tmp) && isfile(tmp)) {
 			return tmp;
 		}
 	}
     
 	if (base) {
-		strcpy(tmp, base);
+		strlcpy(tmp, base, sizeof(tmp));
 
 		cp = strrchr(tmp, '/');
 		if (cp) {
-			*cp = '\0';	/* chop name */
-			cp = strrchr(tmp, '/');
-		}
-		if (cp) {
 			*(cp + 1) = '\0';
-			strlcat(tmp, "All/", sizeof tmp);
-			strlcat(tmp, ensure_tgz(fname), sizeof tmp);
+			strlcat(tmp, ensure_tgz(fname), sizeof(tmp));
 			if (ispkgpattern(tmp)) {
 				cp=findbestmatchingname(dirname_of(tmp),
 							basename_of(tmp));
@@ -403,7 +389,9 @@ fileFindByPath(char *base, char *fname)
 					char *s;
 					s=strrchr(tmp,'/');
 					assert(s != NULL);
-					strcpy(s+1, cp);
+					strlcpy(s+1, cp,
+						tmp + sizeof(tmp) - (s+1));
+					free(cp);
 					return tmp;
 				}
 			} else {
@@ -415,11 +403,15 @@ fileFindByPath(char *base, char *fname)
 	}
 
 	cp = getenv("PKG_PATH");
+	/* Check for ftp://... paths */
+	if (isURL(cp)) {
+		snprintf(tmp, sizeof(tmp), "%s/%s", cp, ensure_tgz(fname));
+		return tmp;
+	}
 	while (cp) {
 		char *cp2 = strsep(&cp, ":");
 
-		snprintf(tmp, FILENAME_MAX, "%s/%s", cp2 ? cp2 : cp,
-		    ensure_tgz(fname));
+		snprintf(tmp, sizeof(tmp), "%s/%s", cp2, ensure_tgz(fname));
 		if (ispkgpattern(tmp)) {
 			char *s;
 			s = findbestmatchingname(dirname_of(tmp),
@@ -427,7 +419,8 @@ fileFindByPath(char *base, char *fname)
 			if (s){
 				char *t;
 				t=strrchr(tmp, '/');
-				strcpy(t+1, s);
+				strlcpy(t+1, s, tmp + sizeof(tmp) - (t+1));
+				free(s);
 				return tmp;
 			}
 		} else {
@@ -474,31 +467,28 @@ fileGetContents(char *fname)
 Boolean
 make_preserve_name(char *try, size_t max, char *name, char *file)
 {
-    int len, i;
+    char *p;
+    int i;
 
-    if ((len = strlen(file)) == 0)
+    i = strlcpy(try, file, max);
+    if (i == 0 || i >= max)
 	return FALSE;
+
+    /* Catch trailing slash early */
+    i--;
+    if (try[i] == '/')
+	try[i] = '\0';
+
+    p = strrchr(try, '/');
+    if (p == NULL)
+	p = try;
     else
-	i = len - 1;
-    strncpy(try, file, max);
-    if (try[i] == '/') /* Catch trailing slash early and save checking in the loop */
-	--i;
-    for (; i; i--) {
-	if (try[i] == '/') {
-	    try[i + 1]= '.';
-	    strncpy(&try[i + 2], &file[i + 1], max - i - 2);
-	    break;
-	}
-    }
-    if (!i) {
-	try[0] = '.';
-	strncpy(try + 1, file, max - 1);
-    }
-    /* I should probably be called rude names for these inline assignments */
-    strncat(try, ".",  max -= strlen(try));
-    strncat(try, name, max -= strlen(name));
-    strncat(try, ".",  max--);
-    strncat(try, "backup", max -= 6);
+	p++;
+
+    i = p - try;
+    if (snprintf(p, max - i, ".%s.%s.backup", file + i, name) >= (max - i))
+	return FALSE;
+
     return TRUE;
 }
 
@@ -531,10 +521,10 @@ copy_file(char *dir, char *fname, char *to)
     char cmd[FILENAME_MAX];
 
     if (fname[0] == '/')
-	snprintf(cmd, FILENAME_MAX, "cp -p -r %s %s", fname, to);
+	snprintf(cmd, sizeof(cmd), "cp -p -r %s %s", fname, to);
     else
-	snprintf(cmd, FILENAME_MAX, "cp -p -r %s/%s %s", dir, fname, to);
-    if (vsystem(cmd)) {
+	snprintf(cmd, sizeof(cmd), "cp -p -r %s/%s %s", dir, fname, to);
+    if (vsystem("%s", cmd)) {
 	cleanup(0);
 	errx(2, "could not perform '%s'", cmd);
     }
@@ -546,10 +536,10 @@ move_file(char *dir, char *fname, char *to)
     char cmd[FILENAME_MAX];
 
     if (fname[0] == '/')
-	snprintf(cmd, FILENAME_MAX, "mv %s %s", fname, to);
+	snprintf(cmd, sizeof(cmd), "mv %s %s", fname, to);
     else
-	snprintf(cmd, FILENAME_MAX, "mv %s/%s %s", dir, fname, to);
-    if (vsystem(cmd)) {
+	snprintf(cmd, sizeof(cmd), "mv %s/%s %s", dir, fname, to);
+    if (vsystem("%s", cmd)) {
 	cleanup(0);
 	errx(2, "could not perform '%s'", cmd);
     }
@@ -572,11 +562,11 @@ copy_hierarchy(char *dir, char *fname, Boolean to)
 	/* If absolute path, use it */
 	if (*fname == '/')
 	    dir = "/";
-	snprintf(cmd, FILENAME_MAX * 3, "tar cf - -C %s %s | tar xpf -",
+	snprintf(cmd, sizeof(cmd), "tar cf - -C %s %s | tar xpf -",
  		 dir, fname);
     }
     else
-	snprintf(cmd, FILENAME_MAX * 3, "tar cf - %s | tar xpf - -C %s",
+	snprintf(cmd, sizeof(cmd), "tar cf - %s | tar xpf - -C %s",
  		 fname, dir);
 #ifdef DEBUG
     printf("Using '%s' to copy trees.\n", cmd);
@@ -601,14 +591,14 @@ unpack(char *pkg, char *flist)
     if (strcmp(pkg, "-")) {
 	cp = strrchr(pkg, '.');
 	if (cp) {
-	    strcpy(suff, cp + 1);
+	    strlcpy(suff, cp + 1, sizeof(suff));
 	    if (strchr(suff, 'z') || strchr(suff, 'Z'))
-		strcpy(args, "-z");
+		strlcpy(args, "-z", sizeof(args));
 	}
     }
     else
-	strcpy(args, "z");
-    strcat(args, "xpf");
+	strlcpy(args, "z", sizeof(args));
+    strlcat(args, "xpf", sizeof(args));
     if (vsystem("tar %s %s %s", args, pkg, flist ? flist : "")) {
 	pwarnx("tar extract of %s failed!", pkg);
 	return 1;

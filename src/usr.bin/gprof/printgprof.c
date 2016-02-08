@@ -1,4 +1,4 @@
-/*	$OpenBSD: printgprof.c,v 1.6 2002/03/25 16:30:55 danh Exp $	*/
+/*	$OpenBSD: printgprof.c,v 1.9 2003/07/10 00:06:51 david Exp $	*/
 /*	$NetBSD: printgprof.c,v 1.5 1995/04/19 07:16:21 cgd Exp $	*/
 
 /*
@@ -13,11 +13,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -38,9 +34,11 @@
 #if 0
 static char sccsid[] = "@(#)printgprof.c	8.1 (Berkeley) 6/6/93";
 #else
-static char rcsid[] = "$OpenBSD: printgprof.c,v 1.6 2002/03/25 16:30:55 danh Exp $";
+static char rcsid[] = "$OpenBSD: printgprof.c,v 1.9 2003/07/10 00:06:51 david Exp $";
 #endif
 #endif /* not lint */
+
+#include <string.h>
 
 #include "gprof.h"
 #include "pathnames.h"
@@ -177,7 +175,7 @@ gprofline( np )
 {
     char	kirkbuffer[ BUFSIZ ];
 
-    sprintf( kirkbuffer , "[%d]" , np -> index );
+    snprintf(kirkbuffer, sizeof kirkbuffer, "[%d]" , np -> index );
     printf( "%-6.6s %5.1f %7.2f %11.2f" , kirkbuffer ,
 	    100 * ( np -> propself + np -> propchild ) / printtime ,
 	    np -> propself / hz , np -> propchild / hz );
@@ -472,7 +470,7 @@ printcycle( cyclep )
 {
     char	kirkbuffer[ BUFSIZ ];
 
-    sprintf(kirkbuffer , "[%d]" , cyclep->index);
+    snprintf(kirkbuffer, sizeof kirkbuffer, "[%d]" , cyclep->index);
     printf("%-6.6s %5.1f %7.2f %11.2f %7ld", kirkbuffer,
 	    100 * (cyclep->propself + cyclep->propchild) / printtime,
 	    cyclep->propself / hz, cyclep->propchild / hz, cyclep->npropcall);
@@ -705,15 +703,16 @@ printindex()
 	for ( j = i; j < todo ; j += index ) {
 	    nlp = namesortnlp[ j ];
 	    if ( nlp -> printflag ) {
-		sprintf( peterbuffer , "[%d]" , nlp -> index );
+		snprintf(peterbuffer, sizeof peterbuffer, "[%d]" , nlp -> index );
 	    } else {
-		sprintf( peterbuffer , "(%d)" , nlp -> index );
+		snprintf(peterbuffer, sizeof peterbuffer, "(%d)" , nlp -> index );
 	    }
 	    if ( j < nnames ) {
 		printf( "%6.6s %-19.19s" , peterbuffer , nlp -> name );
 	    } else {
 		printf( "%6.6s " , peterbuffer );
-		sprintf( peterbuffer , "<cycle %d>" , nlp -> cycleno );
+		snprintf(peterbuffer, sizeof peterbuffer, "<cycle %d>"
+		    , nlp -> cycleno );
 		printf( "%-19.19s" , peterbuffer );
 	    }
 	}

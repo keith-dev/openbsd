@@ -1,5 +1,5 @@
 /*
- *	$OpenBSD: locate.c,v 1.14 2002/07/07 09:02:30 jufi Exp $
+ *	$OpenBSD: locate.c,v 1.16 2003/07/07 21:36:16 deraadt Exp $
  *
  * Copyright (c) 1995 Wolfram Schneider <wosch@FreeBSD.org>. Berlin.
  * Copyright (c) 1989, 1993
@@ -16,11 +16,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *      This product includes software developed by the University of
- *      California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -36,7 +32,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *      $Id: locate.c,v 1.14 2002/07/07 09:02:30 jufi Exp $
+ *      $Id: locate.c,v 1.16 2003/07/07 21:36:16 deraadt Exp $
  */
 
 #ifndef lint
@@ -50,7 +46,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)locate.c    8.1 (Berkeley) 6/6/93";
 #else
-static char rcsid[] = "$OpenBSD: locate.c,v 1.14 2002/07/07 09:02:30 jufi Exp $";
+static char rcsid[] = "$OpenBSD: locate.c,v 1.16 2003/07/07 21:36:16 deraadt Exp $";
 #endif
 #endif /* not lint */
 
@@ -146,9 +142,7 @@ extern int      optind;
 
 
 int
-main(argc, argv)
-        int argc;
-        char **argv;
+main(int argc, char *argv[])
 {
         int ch;
         char **dbv = NULL;
@@ -234,9 +228,7 @@ main(argc, argv)
 
 
 void
-search_fopen(db, s)
-	char *db; /* database */
-	char **s; /* search strings */
+search_fopen(char *db, char **s)
 {
 	FILE *fp;
 #ifdef DEBUG
@@ -286,9 +278,7 @@ search_fopen(db, s)
 
 #ifdef MMAP
 void
-search_mmap(db, s)
-	char *db; /* database */
-	char **s; /* search strings */
+search_mmap(char *db, char **s)
 {
         struct stat sb;
         int fd;
@@ -331,7 +321,7 @@ search_mmap(db, s)
 
 #ifdef DEBUG
 unsigned long
-cputime ()
+cputime(void)
 {
 	struct rusage rus;
 
@@ -341,7 +331,7 @@ cputime ()
 #endif /* DEBUG */
 
 void
-usage ()
+usage(void)
 {
         (void)fprintf(stderr, "usage: locate [-Scims] [-l limit] ");
 	(void)fprintf(stderr, "[-d database] pattern ...\n");

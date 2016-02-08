@@ -1,4 +1,4 @@
-.\"	$OpenBSD: asp.4,v 1.9 2003/03/05 19:50:48 jmc Exp $
+.\"	$OpenBSD: asp.4,v 1.15 2003/08/31 20:53:33 jmc Exp $
 .\"
 .\"
 .\" Copyright (c) 1999 Michael Shalayeff
@@ -12,11 +12,6 @@
 .\" 2. Redistributions in binary form must reproduce the above copyright
 .\"    notice, this list of conditions and the following disclaimer in the
 .\"    documentation and/or other materials provided with the distribution.
-.\" 3. All advertising materials mentioning features or use of this software
-.\"    must display the following acknowledgement:
-.\"	This product includes software developed by Michael Shalayeff.
-.\" 4. The name of the author may not be used to endorse or promote products
-.\"    derived from this software without specific prior written permission.
 .\"
 .\" THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
 .\" IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -34,16 +29,17 @@
 .Os
 .Sh NAME
 .Nm asp
-.Nd "Core" bus controller as present on HP9000
-715/33/50/75, 725/50/75, 735/*, 755/*
-workstations
+.Nd core bus controller as present on older
+.Tn HP 9000/700
+machines
 .Sh SYNOPSIS
 .Cd "asp0    at mainbus? irq 28"
 .Cd "gsc* at asp?"
-.Sh INTRODUCTION
+.Sh DESCRIPTION
 The supported Core bus controllers are those present on older
 .Tn PA-RISC
 workstations, and include:
+.Pp
 .Bl -bullet -compact
 .It
 Core bus controller
@@ -59,17 +55,41 @@ Real Time Clock Interface
 RAM and EEPROM controllers
 .El
 .Pp
-The irq level supplied is hardwired to the cpu pin, so changing the value
+The irq level supplied is hardwired to the CPU pin, so changing the value
 would not produce any noticeable results (except lost interrupts for the whole
 I/O subsystem).
+.Sh MACHINES
+An incomplete list of machines that use the
+.Tn ASP
+bus controller:
+.Pp
+.Bl -bullet -compact
+.It
+705, 710
+.It
+715/{33,50,75}
+.It
+725/{50,75}
+.It
+720, 730, 750
+.It
+735/*
+.It
+745i/{50,75}
+.It
+747i/{50,75}
+.It
+755/*
+.El
 .Sh SEE ALSO
 .Xr gsc 4 ,
 .Xr intro 4 ,
 .Xr io 4
 .Rs
-"Hardball I/O Subsystem ERS" Revision 1.1, 30 September 1991
-.br
-Hewlett Packard
+.%T "Hardball I/O Subsystem ERS"
+.%N Revision 1.1
+.%D 30 September 1991
+.%Q Hewlett-Packard
 .Re
 .Sh HISTORY
 The

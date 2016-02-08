@@ -1,4 +1,4 @@
-/*	$OpenBSD: announce.c,v 1.16 2002/11/25 07:40:09 itojun Exp $	*/
+/*	$OpenBSD: announce.c,v 1.18 2003/06/11 14:24:46 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1983 Regents of the University of California.
@@ -12,11 +12,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -35,7 +31,7 @@
 
 #ifndef lint
 /*static char sccsid[] = "from: @(#)announce.c	5.9 (Berkeley) 2/26/91";*/
-static char rcsid[] = "$Id: announce.c,v 1.16 2002/11/25 07:40:09 itojun Exp $";
+static char rcsid[] = "$Id: announce.c,v 1.18 2003/06/11 14:24:46 deraadt Exp $";
 #endif /* not lint */
 
 #include <sys/param.h>
@@ -62,9 +58,7 @@ static void	print_mesg(FILE *,CTL_MSG *,char *);
  * accepting messages, announce that a talk is requested.
  */
 int
-announce(request, remote_machine)
-	CTL_MSG *request;
-	char *remote_machine;
+announce(CTL_MSG *request, char *remote_machine)
 {
 	char full_tty[MAXPATHLEN];
 	FILE *tf;
@@ -96,10 +90,7 @@ announce(request, remote_machine)
  * is in vi at the time
  */
 static void
-print_mesg(tf, request, remote_machine)
-	FILE *tf;
-	CTL_MSG *request;
-	char *remote_machine;
+print_mesg(FILE *tf, CTL_MSG *request, char *remote_machine)
 {
 	struct timeval clock;
 	time_t clocktime;

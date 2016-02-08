@@ -524,7 +524,7 @@ static char *ssl_ext_mp_new_connection(request_rec *r, BUFF *fb, char *peer)
 #endif
         errmsg = ap_psprintf(r->pool, "SSL proxy connect failed (%s): peer %s: %s",
                              cpVHostID, peer, ERR_reason_error_string(ERR_get_error()));
-        ssl_log(r->server, SSL_LOG_ERROR, errmsg);
+        ssl_log(r->server, SSL_LOG_ERROR, "%s", errmsg);
         SSL_free(ssl);
         ap_ctx_set(fb->ctx, "ssl", NULL);
         return errmsg;
@@ -624,7 +624,7 @@ static int ssl_ext_mp_clientcert_cb(SSL *ssl, X509 **x509, EVP_PKEY **pkey)
         ssl_log(s, SSL_LOG_DEBUG,
                 "SSL Proxy: (%s) no acceptable CA list, sending %s", 
                 servername, cp != NULL ? cp : "-unknown-");
-        free(cp);
+        OPENSSL_free(cp);
         /* export structures to the caller */
         *x509 = xi->x509;
         *pkey = xi->x_pkey->dec_pkey;
@@ -643,7 +643,7 @@ static int ssl_ext_mp_clientcert_cb(SSL *ssl, X509 **x509, EVP_PKEY **pkey)
                 cp = X509_NAME_oneline(X509_get_subject_name(xi->x509), NULL, 0);
                 ssl_log(s, SSL_LOG_DEBUG, "SSL Proxy: (%s) sending %s", 
                         servername, cp != NULL ? cp : "-unknown-");
-                free(cp);
+                OPENSSL_free(cp);
                 /* export structures to the caller */
                 *x509 = xi->x509;
                 *pkey = xi->x_pkey->dec_pkey;
@@ -717,8 +717,8 @@ static int ssl_ext_mp_verify_cb(int ok, X509_STORE_CTX *ctx)
             servername, peer != NULL ? peer : "-unknown-",
             errdepth, cp != NULL ? cp : "-unknown-", 
             cp2 != NULL ? cp2 : "-unknown");
-    free(cp);
-    free(cp2);
+    OPENSSL_free(cp);
+    OPENSSL_free(cp2);
 
     /*
      * If we already know it's not ok, log the real reason

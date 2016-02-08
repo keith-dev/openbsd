@@ -1,4 +1,4 @@
-.\"	$OpenBSD: mii.4,v 1.11 2002/09/26 07:55:40 miod Exp $
+.\"	$OpenBSD: mii.4,v 1.14 2003/08/31 19:53:42 jmc Exp $
 .\"	$NetBSD: mii.4,v 1.1 1998/11/04 05:21:50 thorpej Exp $
 .\"
 .\" Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -82,7 +82,8 @@ layer carry the
 .Dq mii
 autoconfiguration attribute.
 This allows kernel configuration files to simply specify PHYs as
-described above in the synopsis.
+described above in
+.Sx SYNOPSIS .
 .Pp
 The following is an example of the messages displayed when a network
 interface with an attached PHY is detected by the kernel:
@@ -97,10 +98,11 @@ These media types are valid media keywords for use with the
 .Xr ifconfig 8
 program.
 .Sh SEE ALSO
+.Xr acphy 4 ,
 .Xr amphy 4 ,
 .Xr bmtphy 4 ,
 .Xr brgphy 4 ,
-.\" no manpage .Xr dcphy 4 ,
+.Xr dcphy 4 ,
 .Xr eephy 4 ,
 .Xr exphy 4 ,
 .Xr icsphy 4 ,

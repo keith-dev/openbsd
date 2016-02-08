@@ -1030,7 +1030,7 @@ static /**/const char *const rcsid[] = { (const char *)rcsid, "\100(#)" msg }
 /* #undef HESIOD */
 
 /* Define if you have the krb4 package. */
-#define KRB4 1
+/* #undef KRB4 */
 
 /* Enable Kerberos 5 support in applications. */
 #define KRB5 1
@@ -1142,7 +1142,7 @@ static /**/const char *const rcsid[] = { (const char *)rcsid, "\100(#)" msg }
 /* #undef TM_IN_SYS_TIME */
 
 /* Version number of package */
-#define VERSION "0.4e"
+#define VERSION "0.6RC1"
 
 /* Define if signal handlers return void. */
 #define VOID_RETSIGTYPE 1

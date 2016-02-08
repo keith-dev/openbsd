@@ -1,4 +1,4 @@
-/*	$OpenBSD: xinstall.c,v 1.31 2002/02/16 21:27:59 millert Exp $	*/
+/*	$OpenBSD: xinstall.c,v 1.36 2003/07/02 00:21:17 avsm Exp $	*/
 /*	$NetBSD: xinstall.c,v 1.9 1995/12/20 10:25:17 jonathan Exp $	*/
 
 /*
@@ -13,11 +13,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -44,7 +40,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)xinstall.c	8.1 (Berkeley) 7/21/93";
 #endif
-static char rcsid[] = "$OpenBSD: xinstall.c,v 1.31 2002/02/16 21:27:59 millert Exp $";
+static char rcsid[] = "$OpenBSD: xinstall.c,v 1.36 2003/07/02 00:21:17 avsm Exp $";
 #endif /* not lint */
 
 #include <sys/param.h>
@@ -91,11 +87,10 @@ void	usage(void);
 int	create_newfile(char *, struct stat *);
 int	create_tempfile(char *, char *, size_t);
 int	file_write(int, char *, size_t, int *, int *, int);
+void	file_flush(int, int);
 
 int
-main(argc, argv)
-	int argc;
-	char *argv[];
+main(int argc, char *argv[])
 {
 	struct stat from_sb, to_sb;
 	mode_t *set;
@@ -193,7 +188,7 @@ main(argc, argv)
 
 	/* can't do file1 file2 directory/file */
 	if (argc != 2)
-		err(EX_OSERR, "Target: %s", argv[argc-1]);
+		errx(EX_OSERR, "Target: %s", argv[argc-1]);
 
 	if (!no_target) {
 		if (stat(*argv, &from_sb))
@@ -214,10 +209,7 @@ main(argc, argv)
  *	build a path name and install the file
  */
 void
-install(from_name, to_name, fset, flags)
-	char *from_name, *to_name;
-	u_long fset;
-	u_int flags;
+install(char *from_name, char *to_name, u_long fset, u_int flags)
 {
 	struct stat from_sb, to_sb;
 	struct utimbuf utb;
@@ -419,11 +411,8 @@ install(from_name, to_name, fset, flags)
  *	copy from one file to another
  */
 void
-copy(from_fd, from_name, to_fd, to_name, size, sparse)
-	int from_fd, to_fd;
-	char *from_name, *to_name;
-	off_t size;
-	int sparse;
+copy(int from_fd, char *from_name, int to_fd, char *to_name, off_t size,
+    int sparse)
 {
 	ssize_t nr, nw;
 	int serrno;
@@ -483,6 +472,8 @@ copy(from_fd, from_name, to_fd, to_name, size, sparse)
 				    to_name, strerror(nw > 0 ? EIO : serrno));
 			}
 		}
+		if (sparse)
+			file_flush(to_fd, isem);
 		if (nr != 0) {
 			serrno = errno;
 			(void)unlink(to_name);
@@ -496,13 +487,8 @@ copy(from_fd, from_name, to_fd, to_name, size, sparse)
  *	compare two files; non-zero means files differ
  */
 int
-compare(from_fd, from_name, from_len, to_fd, to_name, to_len)
-	int from_fd;
-	const char *from_name;
-	size_t from_len;
-	int to_fd;
-	const char *to_name;
-	size_t to_len;
+compare(int from_fd, const char *from_name, size_t from_len, int to_fd,
+    const char *to_name, size_t to_len)
 {
 	caddr_t p1, p2;
 	size_t length, remainder;
@@ -547,8 +533,7 @@ compare(from_fd, from_name, from_len, to_fd, to_name, to_len)
  *	use strip(1) to strip the target file
  */
 void
-strip(to_name)
-	char *to_name;
+strip(char *to_name)
 {
 	int serrno, status;
 	char * volatile path_strip;
@@ -576,8 +561,7 @@ strip(to_name)
  *	build directory heirarchy
  */
 void
-install_dir(path)
-        char *path;
+install_dir(char *path)
 {
 	char *p;
 	struct stat sb;
@@ -608,7 +592,7 @@ install_dir(path)
  *	print a usage message and die
  */
 void
-usage()
+usage(void)
 {
 	(void)fprintf(stderr, "\
 usage: install [-bCcpSs] [-B suffix] [-f flags] [-g group] [-m mode] [-o owner] file1 file2\n\
@@ -623,10 +607,7 @@ usage: install [-bCcpSs] [-B suffix] [-f flags] [-g group] [-m mode] [-o owner] 
  *	create a temporary file based on path and open it
  */
 int
-create_tempfile(path, temp, tsize)
-        char *path;
-        char *temp;
-	size_t tsize;
+create_tempfile(char *path, char *temp, size_t tsize)
 {
 	char *p;
 
@@ -636,7 +617,7 @@ create_tempfile(path, temp, tsize)
 		p++;
 	else
 		p = temp;
-	(void)strncpy(p, "INS@XXXXXX", &temp[tsize - 1] - p);
+	(void)strncpy(p, "INS@XXXXXXXXXX", &temp[tsize - 1] - p);
 	temp[tsize - 1] = '\0';
 
 	return(mkstemp(temp));
@@ -647,9 +628,7 @@ create_tempfile(path, temp, tsize)
  *	create a new file, overwriting an existing one if necessary
  */
 int
-create_newfile(path, sbp)
-        char *path;
-	struct stat *sbp;
+create_newfile(char *path, struct stat *sbp)
 {
 	char backup[MAXPATHLEN];
 
@@ -721,13 +700,7 @@ create_newfile(path, sbp)
  */
 
 int
-file_write(fd, str, cnt, rem, isempt, sz)
-	int fd;
-	char *str;
-	size_t cnt;
-	int *rem;
-	int *isempt;
-	int sz;
+file_write(int fd, char *str, size_t cnt, int *rem, int *isempt, int sz)
 {
 	char *pt;
 	char *end;
@@ -796,4 +769,35 @@ file_write(fd, str, cnt, rem, isempt, sz)
 		st += wcnt;
 	}
 	return(st - str);
+}
+
+/*
+ * file_flush()
+ *	when the last file block in a file is zero, many file systems will not
+ *	let us create a hole at the end. To get the last block with zeros, we
+ *	write the last BYTE with a zero (back up one byte and write a zero).
+ */
+void
+file_flush(int fd, int isempt)
+{
+	static char blnk[] = "\0";
+
+	/*
+	 * silly test, but make sure we are only called when the last block is
+	 * filled with all zeros.
+	 */
+	if (!isempt)
+		return;
+
+	/*
+	 * move back one byte and write a zero
+	 */
+	if (lseek(fd, (off_t)-1, SEEK_CUR) < 0) {
+		warn("Failed seek on file");
+		return;
+	}
+
+	if (write(fd, blnk, 1) < 0)
+		warn("Failed write to file");
+	return;
 }

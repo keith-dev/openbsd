@@ -39,7 +39,7 @@
 #endif
 #include "ss.h"
 
-RCSID("$KTH: ss.c,v 1.2 2000/06/17 03:14:59 assar Exp $");
+RCSID("$arla: ss.c,v 1.2 2000/06/17 03:14:59 assar Exp $");
 
 struct ss_subst {
     char *name;
@@ -112,12 +112,11 @@ ss_execute_line (int index, const char *line)
 int
 ss_listen (int index)
 {
-    char *prompt = malloc(strlen(subsystems[index].name) + 3);
-    if(prompt == NULL) {
+    char *prompt;
+
+    if (asprintf(&prompt, "%s: ", subsystems[index].name) == -1) {
 	abort();
     }
-    strcpy(prompt, subsystems[index].name);
-    strcat(prompt, ": ");
     sl_loop(subsystems[index].table, prompt);
     free(prompt);
     return 0;

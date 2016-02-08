@@ -1,4 +1,4 @@
-/* $OpenBSD: gnum4.c,v 1.18 2002/04/26 16:15:16 espie Exp $ */
+/* $OpenBSD: gnum4.c,v 1.25 2003/06/30 22:13:32 espie Exp $ */
 
 /*
  * Copyright (c) 1999 Marc Espie
@@ -159,23 +159,26 @@ fopen_trypath(struct input_file *i, const char *filename)
 void 
 doindir(const char *argv[], int argc)
 {
-	ndptr p;
+	ndptr n;
+	struct macro_definition *p;
 
-	p = lookup(argv[2]);
-	if (p == NULL)
+	n = lookup(argv[2]);
+	if (n == NULL || (p = macro_getdef(n)) == NULL)
 		errx(1, "undefined macro %s", argv[2]);
 	argv[1] = p->defn;
-	eval(argv+1, argc-1, p->type);
+	
+	eval(argv+1, argc-1, p->type, is_traced(n));
 }
 
 void 
 dobuiltin(const char *argv[], int argc)
 {
-	int n;
+	ndptr p;
+
 	argv[1] = NULL;
-	n = builtin_type(argv[2]);
-	if (n != -1)
-		eval(argv+1, argc-1, n);
+	p = macro_getbuiltin(argv[2]);
+	if (p != NULL)
+		eval(argv+1, argc-1, macro_builtin_type(p), is_traced(p));
 	else
 		errx(1, "unknown builtin %s", argv[2]);
 } 
@@ -250,7 +253,8 @@ exit_regerror(int er, regex_t *re)
 	errlen = regerror(er, re, NULL, 0);
 	errbuf = xalloc(errlen);
 	regerror(er, re, errbuf, errlen);
-	errx(1, "regular expression error: %s", errbuf);
+	errx(1, "%s at line %lu: regular expression error: %s", 
+	    CURRENT_NAME, CURRENT_LINE, errbuf);
 }
 
 static void
@@ -428,25 +432,39 @@ twiddle(const char *p)
 void
 dopatsubst(const char *argv[], int argc)
 {
-	int error;
-	regex_t re;
-	regmatch_t *pmatch;
-
 	if (argc <= 3) {
 		warnx("Too few arguments to patsubst");
 		return;
 	}
-	error = regcomp(&re, mimic_gnu ? twiddle(argv[3]) : argv[3], 
-	    REG_NEWLINE | REG_EXTENDED);
-	if (error != 0)
-		exit_regerror(error, &re);
-	
-	pmatch = xalloc(sizeof(regmatch_t) * (re.re_nsub+1));
-	do_subst(argv[2], &re, 
-	    argc != 4 && argv[4] != NULL ? argv[4] : "", pmatch);
+	/* special case: empty regexp */
+	if (argv[3][0] == '\0') {
+		const char *s;
+		size_t len;
+		if (argv[4] && argc > 4) 
+			len = strlen(argv[4]);
+		else
+			len = 0;
+		for (s = argv[2]; *s != '\0'; s++) {
+			addchars(argv[4], len);
+			addchar(*s);
+		}
+	} else {
+		int error;
+		regex_t re;
+		regmatch_t *pmatch;
+
+		error = regcomp(&re, mimic_gnu ? twiddle(argv[3]) : argv[3], 
+		    REG_NEWLINE | REG_EXTENDED);
+		if (error != 0)
+			exit_regerror(error, &re);
+		
+		pmatch = xalloc(sizeof(regmatch_t) * (re.re_nsub+1));
+		do_subst(argv[2], &re, 
+		    argc > 4 && argv[4] != NULL ? argv[4] : "", pmatch);
+		free(pmatch);
+		regfree(&re);
+	}
 	pbstr(getstring());
-	free(pmatch);
-	regfree(&re);
 }
 
 void

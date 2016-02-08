@@ -1,4 +1,4 @@
-/*	$OpenBSD: setup.c,v 1.9 2002/06/09 08:13:05 todd Exp $	*/
+/*	$OpenBSD: setup.c,v 1.12 2003/07/29 18:38:35 deraadt Exp $	*/
 /*	$NetBSD: setup.c,v 1.1 1997/06/11 11:22:01 bouyer Exp $	*/
 
 /*
@@ -14,11 +14,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *	notice, this list of conditions and the following disclaimer in the
  *	documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *	must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *	may be used to endorse or promote products derived from this software
  *	without specific prior written permission.
  *
@@ -64,8 +60,7 @@ static struct disklabel *getdisklabel(char *, int);
 static int readsb(int);
 
 int
-setup(dev)
-	char *dev;
+setup(char *dev)
 {
 	long cg, asked, i;
 	long bmapsize;
@@ -255,8 +250,7 @@ badsblabel:
  * Read in the super block and its summary info.
  */
 static int
-readsb(listerr)
-	int listerr;
+readsb(int listerr)
 {
 	daddr_t super = bflag ? bflag : SBOFF / dev_bsize;
 
@@ -267,7 +261,7 @@ readsb(listerr)
 
 	/* Copy the superblock in memory */
 	e2fs_sbload(sblk.b_un.b_fs, &sblock.e2fs);
-	
+
 	/*
 	 * run a few consistency checks of the super block
 	 */
@@ -371,8 +365,7 @@ readsb(listerr)
 }
 
 void
-copyback_sb(bp)
-	struct bufarea *bp;
+copyback_sb(struct bufarea *bp)
 {
 	/* Copy the in-memory superblock back to buffer */
 	bp->b_un.b_fs->e2fs_icount = fs2h32(sblock.e2fs.e2fs_icount);
@@ -404,9 +397,7 @@ copyback_sb(bp)
 }
 
 void
-badsb(listerr, s)
-	int listerr;
-	char *s;
+badsb(int listerr, char *s)
 {
 
 	if (!listerr)
@@ -424,10 +415,7 @@ badsb(listerr, s)
  */
 
 int
-calcsb(dev, devfd, fs)
-	char *dev;
-	int devfd;
-	struct m_ext2fs *fs;
+calcsb(char *dev, int devfd, struct m_ext2fs *fs)
 {
 	struct disklabel *lp;
 	struct partition *pp;
@@ -469,9 +457,7 @@ calcsb(dev, devfd, fs)
 }
 
 static struct disklabel *
-getdisklabel(s, fd)
-	char *s;
-	int	fd;
+getdisklabel(char *s, int fd)
 {
 	static struct disklabel lab;
 
@@ -485,8 +471,7 @@ getdisklabel(s, fd)
 }
 
 daddr_t
-cgoverhead(c)
-	int c;
+cgoverhead(int c)
 {
 	int overh;
 	overh =	1 /* block bitmap */ +

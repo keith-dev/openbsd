@@ -1,4 +1,4 @@
-/*	$OpenBSD: su.c,v 1.51 2002/12/17 19:52:02 millert Exp $	*/
+/*	$OpenBSD: su.c,v 1.54 2003/06/21 23:27:33 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1988 The Regents of the University of California.
@@ -12,11 +12,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -43,7 +39,7 @@ static const char copyright[] =
 #if 0
 static const char sccsid[] = "from: @(#)su.c	5.26 (Berkeley) 7/6/91";
 #else
-static const char rcsid[] = "$OpenBSD: su.c,v 1.51 2002/12/17 19:52:02 millert Exp $";
+static const char rcsid[] = "$OpenBSD: su.c,v 1.54 2003/06/21 23:27:33 deraadt Exp $";
 #endif
 #endif /* not lint */
 
@@ -68,7 +64,7 @@ static const char rcsid[] = "$OpenBSD: su.c,v 1.51 2002/12/17 19:52:02 millert E
 
 char   *getloginname(void);
 char   *ontty(void);
-int	chshell(char *);
+int	chshell(const char *);
 int	verify_user(char *, struct passwd *, char *, login_cap_t *,
 	    auth_session_t *);
 void	usage(void);
@@ -78,7 +74,7 @@ void	auth_errx(auth_session_t *, int, const char *, ...);
 int
 main(int argc, char **argv)
 {
-	int asme = 0, asthem = 0, ch, fastlogin = 0, emlogin = 0, flags, prio;
+	int asme = 0, asthem = 0, ch, fastlogin = 0, emlogin = 0, prio;
 	char *user, *shell = NULL, *avshell, *username, **np;
 	char *class = NULL, *style = NULL, *p;
 	enum { UNSET, YES, NO } iscsh = UNSET;
@@ -88,6 +84,7 @@ main(int argc, char **argv)
 	struct passwd *pwd;
 	login_cap_t *lc;
 	uid_t ruid;
+	u_int flags;
 
 	while ((ch = getopt(argc, argv, "a:c:fKLlm-")) != -1)
 		switch (ch) {
@@ -368,14 +365,20 @@ verify_user(char *from, struct passwd *pwd, char *style,
 }
 
 int
-chshell(char *sh)
+chshell(const char *sh)
 {
 	char *cp;
+	int found = 0;
 
-	while ((cp = getusershell()) != NULL)
-		if (strcmp(cp, sh) == 0)
-			return (1);
-	return (0);
+	setusershell();
+	while ((cp = getusershell()) != NULL) {
+		if (strcmp(cp, sh) == 0) {
+			found = 1;
+			break;
+		}
+	}
+	endusershell();
+	return (found);
 }
 
 char *

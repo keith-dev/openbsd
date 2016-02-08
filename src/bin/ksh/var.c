@@ -1,4 +1,4 @@
-/*	$OpenBSD: var.c,v 1.13 2003/03/13 09:03:07 deraadt Exp $	*/
+/*	$OpenBSD: var.c,v 1.16 2003/08/05 20:52:27 millert Exp $	*/
 
 #include "sh.h"
 #include "ksh_time.h"
@@ -125,6 +125,8 @@ initvar()
  * non-zero if this is an array, sets *valp to the array index, returns
  * the basename of the array.
  */
+const char *array_index_calc(const char *n, bool_t *arrayp, int *valp);
+
 const char *
 array_index_calc(n, arrayp, valp)
 	const char *n;
@@ -383,8 +385,7 @@ setstr(vq, s, error_ok)
 			export(vq, s);
 		else {
 			vq->val.s = str_save(s, vq->areap);
-			if (vq->val.s)		/* <sjg> don't lie */
-				vq->flag |= ALLOC;
+			vq->flag |= ALLOC;
 		}
 	} else			/* integer dest */
 		if (!v_evaluate(vq, s, error_ok))
@@ -1132,6 +1133,7 @@ arraysearch(vp, val)
 	int val;
 {
 	struct tbl *prev, *curr, *new;
+	size_t namelen = strlen(vp->name) + 1;
 
 	vp->flag |= ARRAY|DEFINED;
 
@@ -1152,9 +1154,9 @@ arraysearch(vp, val)
 		else
 			new = curr;
 	} else
-		new = (struct tbl *)alloc(sizeof(struct tbl)+strlen(vp->name)+1,
+		new = (struct tbl *)alloc(sizeof(struct tbl) + namelen,
 		    vp->areap);
-	strcpy(new->name, vp->name);
+	strlcpy(new->name, vp->name, namelen);
 	new->flag = vp->flag & ~(ALLOC|DEFINED|ISSET|SPECIAL);
 	new->type = vp->type;
 	new->areap = vp->areap;

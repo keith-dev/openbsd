@@ -1,4 +1,4 @@
-/*	$OpenBSD: init_disp.c,v 1.15 2002/06/21 06:16:44 millert Exp $	*/
+/*	$OpenBSD: init_disp.c,v 1.18 2003/07/10 00:06:51 david Exp $	*/
 /*	$NetBSD: init_disp.c,v 1.6 1994/12/09 02:14:17 jtc Exp $	*/
 
 /*
@@ -13,11 +13,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -38,7 +34,7 @@
 #if 0
 static char sccsid[] = "@(#)init_disp.c	8.2 (Berkeley) 2/16/94";
 #endif
-static char rcsid[] = "$OpenBSD: init_disp.c,v 1.15 2002/06/21 06:16:44 millert Exp $";
+static char rcsid[] = "$OpenBSD: init_disp.c,v 1.18 2003/07/10 00:06:51 david Exp $";
 #endif /* not lint */
 
 /*
@@ -50,6 +46,7 @@ static char rcsid[] = "$OpenBSD: init_disp.c,v 1.15 2002/06/21 06:16:44 millert 
 #include <sys/ioctl.h>
 #include <sys/ioctl_compat.h>
 #include <err.h>
+#include <stdlib.h>
 #include <termios.h>
 #include <unistd.h>
 
@@ -58,7 +55,7 @@ static char rcsid[] = "$OpenBSD: init_disp.c,v 1.15 2002/06/21 06:16:44 millert 
  * and build the various windows.
  */
 void
-init_display()
+init_display(void)
 {
 	struct sigaction sa;
 
@@ -106,7 +103,7 @@ init_display()
  * connection are the three edit characters.
  */
 void
-set_edit_chars()
+set_edit_chars(void)
 {
 	u_char buf[3];
 	int cc;
@@ -131,16 +128,14 @@ set_edit_chars()
 }
 
 void
-sig_sent(dummy)
-	int dummy;
+sig_sent(int dummy)
 {
 
 	quit("Connection closing.  Exiting", 0);
 }
 
 void
-sig_winch(dummy)
-	int dummy;
+sig_winch(int dummy)
 {
 
 	gotwinch = 1;
@@ -150,9 +145,7 @@ sig_winch(dummy)
  * All done talking...hang up the phone and reset terminal thingy's
  */
 void
-quit(warning, do_perror)
-	char *warning;
-	int do_perror;
+quit(char *warning, int do_perror)
 {
 
 	if (curses_initialized) {
@@ -176,7 +169,7 @@ quit(warning, do_perror)
  * If we get SIGWINCH, recompute both window sizes and refresh things.
  */
 void
-resize_display()
+resize_display(void)
 {
 	struct winsize ws;
 

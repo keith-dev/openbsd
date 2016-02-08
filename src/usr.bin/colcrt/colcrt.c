@@ -1,4 +1,4 @@
-/*	$OpenBSD: colcrt.c,v 1.4 2001/11/19 19:02:13 mpech Exp $	*/
+/*	$OpenBSD: colcrt.c,v 1.8 2003/07/02 21:04:09 deraadt Exp $	*/
 /*	$NetBSD: colcrt.c,v 1.3 1995/03/26 05:31:00 glass Exp $	*/
 
 /*
@@ -13,11 +13,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -44,7 +40,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)colcrt.c	8.1 (Berkeley) 6/6/93";
 #else
-static char rcsid[] = "$OpenBSD: colcrt.c,v 1.4 2001/11/19 19:02:13 mpech Exp $";
+static char rcsid[] = "$OpenBSD: colcrt.c,v 1.8 2003/07/02 21:04:09 deraadt Exp $";
 #endif
 #endif /* not lint */
 
@@ -53,6 +49,7 @@ static char rcsid[] = "$OpenBSD: colcrt.c,v 1.4 2001/11/19 19:02:13 mpech Exp $"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include <err.h>
 
 /*
  * colcrt - replaces col for crts with new nroff esp. when using tbl.
@@ -76,7 +73,6 @@ int	outcol;
 char	suppresul;
 char	printall;
 
-char	*progname;
 FILE	*f;
 
 void	pflush(int);
@@ -84,15 +80,14 @@ int	plus(char, char);
 void	move(int, int);
 
 int
-main(argc, argv)
-	int argc;
-	char *argv[];
+main(int argc, char *argv[])
 {
-	int c;
+	extern char *__progname;
 	char *cp, *dp;
+	int c;
 
 	argc--;
-	progname = *argv++;
+	argv++;
 	while (argc > 0 && argv[0][0] == '-') {
 		switch (argv[0][1]) {
 			case 0:
@@ -102,7 +97,9 @@ main(argc, argv)
 				printall = 1;
 				break;
 			default:
-				printf("usage: %s [ - ] [ -2 ] [ file ... ]\n", progname);
+				fprintf(stderr,
+				    "usage: %s [ - ] [ -2 ] [ file ... ]\n",
+				    __progname);
 				fflush(stdout);
 				exit(1);
 		}
@@ -114,8 +111,7 @@ main(argc, argv)
 			close(0);
 			if (!(f = fopen(argv[0], "r"))) {
 				fflush(stdout);
-				perror(argv[0]);
-				exit (1);
+				err(1, "fopen: %s", argv[0]);
 			}
 			argc--;
 			argv++;
@@ -198,8 +194,7 @@ main(argc, argv)
 }
 
 int
-plus(c, d)
-	char c, d;
+plus(char c, char d)
 {
 
 	return ((c == '|' && d == '-') || d == '_');
@@ -208,8 +203,7 @@ plus(c, d)
 int first;
 
 void
-pflush(ol)
-	int ol;
+pflush(int ol)
 {
 	int i;
 	char *cp;
@@ -243,8 +237,7 @@ pflush(ol)
 }
 
 void
-move(l, m)
-	int l, m;
+move(int l, int m)
 {
 	char *cp, *dp;
 

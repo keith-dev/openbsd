@@ -1,4 +1,4 @@
-.\"	$OpenBSD: passwd.5,v 1.24 2003/01/21 19:59:09 jmc Exp $
+.\"	$OpenBSD: passwd.5,v 1.27 2003/06/27 22:57:00 millert Exp $
 .\"	$NetBSD: passwd.5,v 1.4 1995/07/28 06:46:05 phil Exp $
 .\"
 .\" Copyright (c) 1988, 1991, 1993
@@ -13,11 +13,7 @@
 .\" 2. Redistributions in binary form must reproduce the above copyright
 .\"    notice, this list of conditions and the following disclaimer in the
 .\"    documentation and/or other materials provided with the distribution.
-.\" 3. All advertising materials mentioning features or use of this software
-.\"    must display the following acknowledgement:
-.\"	This product includes software developed by the University of
-.\"	California, Berkeley and its contributors.
-.\" 4. Neither the name of the University nor the names of its contributors
+.\" 3. Neither the name of the University nor the names of its contributors
 .\"    may be used to endorse or promote products derived from this software
 .\"    without specific prior written permission.
 .\"
@@ -99,13 +95,16 @@ and/or identical user IDs, it is usually a mistake to do so.
 Routines that manipulate these files will often return only one of the
 multiple entries, and that one by random selection.
 .Pp
+The login name may be up to 31 characters long.
+For compatibility with legacy software, a login name should start
+with a letter and consist solely of letters, numbers, dashes and
+underscores.
 The login name must never begin with a hyphen
 .Pq Ql \&- ;
 also, it is strongly
 suggested that neither uppercase characters nor dots
 .Pq Ql \&.
-be part
-of the name, as this tends to confuse mailers.
+be part of the name, as this tends to confuse mailers.
 No field may contain a colon
 as this has been used historically to separate the fields
 in the user database.
@@ -270,12 +269,7 @@ containing:
 .Pp
 .%T "Managing NFS and NIS"
 (O'Reilly & Associates)
-.Sh BUGS
-User information should (and eventually will) be stored elsewhere.
-.Pp
-Placing YP exclusions in the file after any inclusions will have
-unexpected results.
-.Sh COMPATIBILITY
+.Sh STANDARDS
 The password file format has changed since
 .Bx 4.3 .
 The following
@@ -305,3 +299,8 @@ file format appeared in
 .At v3 .
 .Pp
 The YP file format first appeared in SunOS.
+.Sh BUGS
+User information should (and eventually will) be stored elsewhere.
+.Pp
+Placing YP exclusions in the file after any inclusions will have
+unexpected results.

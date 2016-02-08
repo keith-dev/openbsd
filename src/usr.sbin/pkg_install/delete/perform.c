@@ -1,7 +1,7 @@
-/*	$OpenBSD: perform.c,v 1.11 2001/11/26 05:04:33 deraadt Exp $	*/
+/*	$OpenBSD: perform.c,v 1.16 2003/08/21 20:24:56 espie Exp $	*/
 
 #ifndef lint
-static const char *rcsid = "$OpenBSD: perform.c,v 1.11 2001/11/26 05:04:33 deraadt Exp $";
+static const char rcsid[] = "$OpenBSD: perform.c,v 1.16 2003/08/21 20:24:56 espie Exp $";
 #endif
 
 /*
@@ -32,8 +32,9 @@ static const char *rcsid = "$OpenBSD: perform.c,v 1.11 2001/11/26 05:04:33 deraa
 
 static int pkg_do(char *);
 static void sanity_check(char *);
-static int undepend(const char *, char *);
+static int undepend(const char *, char *, int);
 static char LogDir[FILENAME_MAX];
+extern Boolean CleanConf;
 
 
 int
@@ -192,6 +193,7 @@ try_again:
     }
 
     setenv(PKG_PREFIX_VNAME, p->name, 1);
+    setenv("PKG_DELETE_EXTRA", (CleanConf ? "Yes" : "No"), 1);
     if (fexists(REQUIRE_FNAME)) {
 	if (Verbose)
 	    printf("Executing 'require' script.\n");
@@ -221,7 +223,7 @@ try_again:
     }
     if (!Fake) {
 	/* Some packages aren't packed right, so we need to just ignore delete_package()'s status.  Ugh! :-( */
-	if (delete_package(FALSE, CleanDirs, &Plist) == FAIL)
+	if (delete_package(FALSE, CleanDirs, CleanConf, CheckMD5, &Plist) == FAIL)
 	    pwarnx(
 	"couldn't entirely delete package (perhaps the packing list is\n"
 	"incorrectly specified?)");
@@ -238,7 +240,7 @@ try_again:
 	if (Verbose)
 	    printf("Attempting to remove dependency on package `%s'\n", p->name);
 	if (!Fake)
-	    findmatchingname(dbdir, p->name, undepend, pkg);
+	    findmatchingname(dbdir, p->name, undepend, pkg, 0);
     }
     return 0;
 }
@@ -263,7 +265,7 @@ cleanup(int sig)
  * findmatchingname(), deppkgname is expanded from a (possible) pattern.
  */
 int
-undepend(const char *deppkgname, char *pkg2delname)
+undepend(const char *deppkgname, char *pkg2delname, int unused)
 {
      char fname[FILENAME_MAX], ftmp[FILENAME_MAX];
      char fbuf[FILENAME_MAX];
@@ -279,7 +281,7 @@ undepend(const char *deppkgname, char *pkg2delname)
 	 pwarnx("couldn't open dependency file `%s'", fname);
 	 return 0;
      }
-     (void) snprintf(ftmp, sizeof(ftmp), "%s.XXXXXX", fname);
+     (void) snprintf(ftmp, sizeof(ftmp), "%s.XXXXXXXXXX", fname);
      s = mkstemp(ftmp);
      if (s == -1) {
 	 fclose(fp);

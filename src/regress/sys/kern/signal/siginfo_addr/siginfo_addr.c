@@ -1,12 +1,13 @@
 #include <sys/types.h>
 #include <sys/signal.h>
+#include <signal.h>
 #include <stdio.h>
 #include <unistd.h>
 #include <string.h>
 
 #define FAULTADDR	0x123123
 
-void
+static void
 handler(int sig, siginfo_t *sip, void *scp)
 {
 	char buf[1024];
@@ -23,14 +24,12 @@ handler(int sig, siginfo_t *sip, void *scp)
 
 
 int
-main(argc, argv)
-	int argc;
-	char *argv[];
+main(int argc, char *argv[])
 {
 	struct sigaction sa;
 
 	memset(&sa, 0, sizeof sa);
-	sigfillset(&sa);
+	sigfillset(&sa.sa_mask);
 	sa.sa_sigaction = handler;
 	sa.sa_flags = SA_SIGINFO;
 

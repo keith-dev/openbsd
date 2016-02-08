@@ -1,4 +1,4 @@
-/*	$OpenBSD: savecore.c,v 1.31 2002/07/03 22:32:33 deraadt Exp $	*/
+/*	$OpenBSD: savecore.c,v 1.36 2003/07/29 18:38:36 deraadt Exp $	*/
 /*	$NetBSD: savecore.c,v 1.26 1996/03/18 21:16:05 leo Exp $	*/
 
 /*-
@@ -13,11 +13,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -44,7 +40,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)savecore.c	8.3 (Berkeley) 1/2/94";
 #else
-static char rcsid[] = "$OpenBSD: savecore.c,v 1.31 2002/07/03 22:32:33 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: savecore.c,v 1.36 2003/07/29 18:38:36 deraadt Exp $";
 #endif
 #endif /* not lint */
 
@@ -223,7 +219,7 @@ kmem_setup(void)
 	kvm_t	*kd_kern;
 	char	errbuf[_POSIX2_LINE_MAX];
 	int	i, hdrsz;
-	
+
 	/*
 	 * Some names we need for the currently running system, others for
 	 * the system that was running when the dump was made.  The values
@@ -240,7 +236,7 @@ kmem_setup(void)
 	if (kvm_nlist(kd_kern, current_nl) == -1)
 		syslog(LOG_ERR, "%s: kvm_nlist: %s", _PATH_UNIX,
 			kvm_geterr(kd_kern));
-	
+
 	for (i = 0; cursyms[i] != -1; i++)
 		if (current_nl[cursyms[i]].n_value == 0) {
 			syslog(LOG_ERR, "%s: %s not in namelist",
@@ -263,7 +259,7 @@ kmem_setup(void)
 	if (kernel == NULL) {
 		if (kvm_read(kd_kern, current_nl[X_VERSION].n_value,
 		    vers, sizeof(vers)) == -1) {
-			syslog(LOG_ERR, "%s: kvm_read: version misread", dump_sys);
+			syslog(LOG_ERR, "%s: kvm_read: version misread", _PATH_UNIX);
 			exit(1);
 		}
 		vers[sizeof(vers) - 1] = '\0';
@@ -346,8 +342,9 @@ check_kmem(void)
 			vislen = strlen(visout);
 			if (cp - panic_mesg + vislen >= sizeof(panic_mesg))
 				break;
-			strcat(cp, visout);
-			cp += vislen;
+			strlcat(cp, visout,
+			    panic_mesg + sizeof panic_mesg - cp);
+			cp += strlen(cp);
 		}
 	}
 }
@@ -616,7 +613,7 @@ check_space(void)
 		syslog(LOG_ERR, "%s: %m", dirn);
 		exit(1);
 	}
- 	spacefree = ((off_t)fsbuf.f_bavail * fsbuf.f_bsize) / 1024;
+	spacefree = ((off_t)fsbuf.f_bavail * fsbuf.f_bsize) / 1024;
 
 	(void)snprintf(path, sizeof(path), "%s/minfree", dirn);
 	if ((fp = fopen(path, "r")) == NULL)
@@ -630,7 +627,7 @@ check_space(void)
 	}
 
 	needed = (dumpsize + kernelsize) / 1024;
- 	if (minfree > 0 && spacefree - needed < minfree) {
+	if (minfree > 0 && spacefree - needed < minfree) {
 		syslog(LOG_WARNING,
 		    "no dump, not enough free space on device");
 		return (0);

@@ -1,13 +1,13 @@
-.\"	$OpenBSD: bus_dma.9,v 1.14 2003/01/11 06:14:35 wcobb Exp $ 
+.\"	$OpenBSD: bus_dma.9,v 1.18 2003/06/06 20:56:32 jmc Exp $
 .\" $NetBSD: bus_dma.9,v 1.14 2000/06/14 06:49:19 cgd Exp $
 .\"
 .\" Copyright (c) 1996, 1997, 1998 The NetBSD Foundation, Inc.
 .\" All rights reserved.
-.\" 
+.\"
 .\" This code is derived from software contributed to The NetBSD Foundation
 .\" by Jason R. Thorpe of the Numerical Aerospace Simulation Facility,
 .\" NASA Ames Research Center.
-.\" 
+.\"
 .\" Redistribution and use in source and binary forms, with or without
 .\" modification, are permitted provided that the following conditions
 .\" are met:
@@ -65,11 +65,11 @@ bus_dma_tag_t's are an opaque type, received from higher software
 layers and are never created, changed, deleted or even examined in
 this interface.
 .Pp
-The basic cycle to transfer data to/from a dma device is:
+The basic cycle to transfer data to/from a DMA device is:
 .Bd -literal
 bus_dmamap_create();         /* get a dmamap to load/unload          */
 
-for each dma xfer {
+for each DMA xfer {
         bus_dmamem_alloc();  /* allocate some DMA'able memory        */
         bus_dmamem_map();    /* map it into the kernel address space */
 
@@ -80,7 +80,7 @@ for each dma xfer {
          */
 
         bus_dmamap_load();   /* initialize the segments of dmamap    */
-        bus_dmamap_sync();   /* synchronize/flush any dma cache      */
+        bus_dmamap_sync();   /* synchronize/flush any DMA cache      */
 
         for (i=0; i<dm_nsegs; i++) {
                 /*
@@ -92,7 +92,7 @@ for each dma xfer {
                  */
         }
 
-        bus_dmamap_sync();   /* synchronize/flush any dma cache      */
+        bus_dmamap_sync();   /* synchronize/flush any DMA cache      */
         bus_dmamap_unload(); /* prepare dmamap for reuse             */
 
         /*
@@ -153,7 +153,6 @@ member indicates the number of segments in
 .Fa dm_segs .
 .El
 .Sh DMA MAPS
-.Bl -tag -width compact
 .nr nS 1
 .Ft int
 .Fn bus_dmamap_create "bus_dma_tag_t tag" "bus_size_t size" "int nsegments" \
@@ -320,7 +319,7 @@ Also refer to the use of this flag with the
 .Fn bus_dmamem_alloc
 function.
 .It Dv BUS_DMA_READ
-This is a hint to the machine-dependent back-end that indicates the  
+This is a hint to the machine-dependent back-end that indicates the
 mapping will be used only for a
 .Em "device -\*[Gt] memory"
 transaction.
@@ -411,7 +410,6 @@ This is to ensure that
 .Fn bus_dmamap_load
 will never block on resources if the handle was created with
 .Dv BUS_DMA_ALLOCNOW .
-.Pp
 .Sh SYNCHRONIZATION
 .nr nS 1
 .Ft void
@@ -435,7 +433,7 @@ This is the bus_dma_tag_t passed down from the parent driver via
 .It Fa dmam
 The DMA mapping to be synchronized.
 .It Fa ops
-One or more synchronization operation to perform.
+One or more synchronization operations to perform.
 The following DMA synchronization operations are defined:
 .Bl -tag -width BUS_DMASYNC_POSTWRITE -compact
 .It Dv BUS_DMASYNC_PREREAD
@@ -542,7 +540,7 @@ This function returns 0 on success, or an error code indicating mode of
 failure.
 .Pp
 The mapping of this memory is machine-dependent (or "opaque");
-machine-independent code is not to assume that the addresses returned
+machine-independent code should not assume that the addresses returned
 are valid in kernel virtual address space, or that the addresses
 returned are system physical addresses.
 The address value returned as part of
@@ -601,7 +599,7 @@ to conform to the platform-dependent requirements for the use of the
 flag with the
 .Fn bus_dmamap_load
 function.
-If the platform does not support the  
+If the platform does not support the
 .Dv BUS_DMA_STREAMING
 feature, or if the size, alignment, and boundary constraints
 would already satisfy the platform's requirements, this flag
@@ -780,6 +778,11 @@ above for a description of this flag.
 .El
 .Sh SEE ALSO
 .Xr bus_space 9
+.Sh HISTORY
+The
+.Nm
+interface appeared in
+.Nx 1.3 .
 .Sh AUTHORS
 The
 .Nm
@@ -789,8 +792,3 @@ Additional input on the
 .Nm
 design was provided by Chris Demetriou, Charles Hannum, Ross Harvey,
 Matthew Jacob, Jonathan Stone, and Matt Thomas.
-.Sh HISTORY
-The
-.Nm
-interface appeared in
-.Nx 1.3 .

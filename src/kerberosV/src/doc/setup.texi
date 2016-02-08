@@ -1,4 +1,4 @@
-@c $KTH: setup.texi,v 1.25 2001/08/24 05:24:33 assar Exp $
+@c $KTH: setup.texi,v 1.27 2003/03/30 21:43:00 lha Exp $
 
 @node Setting up a realm, Things in search for a better place, Building and Installing, Top
 
@@ -8,6 +8,7 @@
 * Configuration file::          
 * Creating the database::       
 * keytabs::                     
+* Serving Kerberos 4/524/kaserver::
 * Remote administration::       
 * Password changing::           
 * Testing clients and servers::  
@@ -30,7 +31,8 @@ To setup a realm you will first have to create a configuration file:
 @file{/etc/kerberosV/krb5.conf}. The @file{krb5.conf} file can contain many
 configuration options, some of which are described here.
 
-There is a sample @file{krb5.conf} supplied with the distribution.
+There is a sample @file{krb5.conf} supplied in
+@file{/etc/kerberosV/krb5.conf.sample}.
 
 The configuration file is a hierarchical structure consisting of
 sections, each containing a list of bindings (either variable
@@ -141,7 +143,7 @@ Verifying password - Password:
 Now start the KDC and try getting a ticket.
 
 @example
-# kdc &
+# /usr/libexec/kdc &
 # kinit me
 me@@MY.REALMS's Password:
 # klist
@@ -152,7 +154,10 @@ Credentials cache: /tmp/krb5cc_0
 Aug 25 07:25:55  Aug 25 17:25:55  krbtgt/MY.REALM@@MY.REALM
 @end example
 
-If you are curious you can use the @samp{dump} command to list all the
+You can start the KDC automatically at boot by enabling it in
+@file{/etc/rc.conf}.
+
+If you are curious you can use the @samp{dump} command of kadmin to list all the
 entries in the database.  It should look something similar to the
 following example (note that the entries here are truncated for
 typographical reasons):
@@ -165,7 +170,7 @@ krbtgt/MY.REALM@@MY.REALM 1:0:1:52b53b61c875ce16:-:0:7:c8943be ...
 kadmin/changepw@@MY.REALM 1:0:1:f48c8af2b340e9fb:-:0:7:e3e6088 ...
 @end smallexample
 
-@node keytabs, Remote administration, Creating the database, Setting up a realm
+@node keytabs, Serving Kerberos 4/524/kaserver, Creating the database, Setting up a realm
 @section keytabs
 
 To extract a service ticket from the database and put it in a keytab you
@@ -187,20 +192,22 @@ Version  Type             Principal
      1   des3-cbc-sha1    host/my.host.name@@MY.REALM
 @end example
 
-@node Remote administration, Password changing, keytabs, Setting up a realm
+@node Serving Kerberos 4/524/kaserver, Remote administration, keytabs, Setting up a realm
+@section Serving Kerberos 4/524/kaserver
+
+Support for Kerberos 4 has been removed in OpenBSD.
+
+@node Remote administration, Password changing, Serving Kerberos 4/524/kaserver, Setting up a realm
 @section Remote administration
 
-The administration server, @samp{kadmind}, can be started by
-@samp{inetd} (which isn't recommended) or run as a normal daemon. If you
-want to start it from @samp{inetd} you should add a line similar to the
-one below to your @file{/etc/inetd.conf}.
+The admin, @file{kadmin} is started automatically at boot by enabling it in
+@file{/etc/rc.conf}.
 
-@example
-kerberos-adm stream     tcp     nowait  root /usr/heimdal/libexec/kadmind kadmind
-@end example
+For testing purposes, you can start it manually by running:
 
-You might need to add @samp{kerberos-adm} to your @file{/etc/services}
-as 749/tcp.
+@smallexample
+# /usr/libexec/kadmind &
+@end smallexample
 
 Access to the admin server is controlled by an acl-file, (default
 @file{/var/heimdal/kadmind.acl}.) The lines in the access file, has the
@@ -241,11 +248,8 @@ mille/admin@@E.KTH.SE	change-password	*@@E.KTH.SE
 @node Password changing, Testing clients and servers, Remote administration, Setting up a realm
 @section Password changing
 
-To allow users to change their passwords, you should run @samp{kpasswdd}.
-It is not run from @samp{inetd}.
-
-You might need to add @samp{kpasswd} to your @file{/etc/services} as
-464/udp.
+To allow users to change their passwords, @samp{kpasswdd} is started
+automatically at boot if the master KDC is enabled in @file{/etc/rc.conf}.
 
 @subsection Password quality assurance
 
@@ -314,7 +318,7 @@ Every slave needs a keytab with a principal,
 @code{hpropd}, as follows:
 
 @example
-slave# ktutil get -p foo/admin host/`hostname`
+slave# ktutil get -p foo/admin hprop/`hostname`
 slave# hpropd
 @end example
 
@@ -434,8 +438,9 @@ Common types of salting includes
 @itemize @bullet
 @item @code{v4} (or @code{des:pw-salt:})
 
-The Kerberos 4 salting is using no salt att all. Reson there is colon
-that the end is that 
+The Kerberos 4 salting is using no salt att all. Reason there is colon
+that the end or the salt string is that it makes the salt the empty
+string (same as no salt).
 
 @item @code{v5} (or @code{pw-salt})
 

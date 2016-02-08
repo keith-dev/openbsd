@@ -1,4 +1,4 @@
-/*	$OpenBSD: termout.c,v 1.8 2001/11/19 19:02:17 mpech Exp $	*/
+/*	$OpenBSD: termout.c,v 1.12 2003/07/18 23:11:43 david Exp $	*/
 
 /*-
  * Copyright (c) 1988 The Regents of the University of California.
@@ -12,11 +12,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -35,7 +31,7 @@
 
 #ifndef lint
 /*static char sccsid[] = "from: @(#)termout.c	4.3 (Berkeley) 4/26/91";*/
-static char rcsid[] = "$OpenBSD: termout.c,v 1.8 2001/11/19 19:02:17 mpech Exp $";
+static char rcsid[] = "$OpenBSD: termout.c,v 1.12 2003/07/18 23:11:43 david Exp $";
 #endif /* not lint */
 
 #if defined(unix)
@@ -45,6 +41,7 @@ static char rcsid[] = "$OpenBSD: termout.c,v 1.8 2001/11/19 19:02:17 mpech Exp $
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 #include <curses.h>
 #include <term.h>
 #if	defined(ultrix)
@@ -156,7 +153,7 @@ int	where;		/* cursor address */
 {
 	char foo[100];
 
-	sprintf(foo, "ERR from %s at %d (%d, %d)\n",
+	snprintf(foo, sizeof foo, "ERR from %s at %d (%d, %d)\n",
 		from, where, ScreenLine(where), ScreenLineOffset(where));
 	OurExitString(foo, 1);
 	/* NOTREACHED */
@@ -683,16 +680,16 @@ InitTerminal()
 			 */
 	signal(SIGTSTP, SIG_DFL);
 	if ((myKS = tigetstr("smkx")) != 0) {
-	    myKS = strsave(myKS);
+	    myKS = strdup(myKS);
 	    StringToTerminal(myKS);
 	}
 	if ((myKE = tigetstr("rmkx")) != 0) {
-	    myKE = strsave(myKE);
+	    myKE = strdup(myKE);
 	}
 	/* XXX - why? */
 	if (tigetstr("bold") && tigetstr("sgr0")) {
-	   enter_standout_mode = strsave(tigetstr("bold"));
-	   exit_standout_mode = strsave(tigetstr("sgr0"));
+	   enter_standout_mode = strdup(tigetstr("bold"));
+	   exit_standout_mode = strdup(tigetstr("sgr0"));
 	}
 #endif
 	DoARefresh();

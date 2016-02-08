@@ -1,4 +1,4 @@
-/*	$OpenBSD: chpass.c,v 1.26 2002/07/31 22:08:41 millert Exp $	*/
+/*	$OpenBSD: chpass.c,v 1.28 2003/07/01 01:01:28 avsm Exp $	*/
 /*	$NetBSD: chpass.c,v 1.8 1996/05/15 21:50:43 jtc Exp $	*/
 
 /*-
@@ -13,11 +13,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -44,7 +40,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)chpass.c	8.4 (Berkeley) 4/2/94";
 #else
-static char rcsid[] = "$OpenBSD: chpass.c,v 1.26 2002/07/31 22:08:41 millert Exp $";
+static char rcsid[] = "$OpenBSD: chpass.c,v 1.28 2003/07/01 01:01:28 avsm Exp $";
 #endif
 #endif /* not lint */
 
@@ -57,6 +53,7 @@ static char rcsid[] = "$OpenBSD: chpass.c,v 1.26 2002/07/31 22:08:41 millert Exp
 #include <err.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <paths.h>
 #include <pwd.h>
 #include <signal.h>
 #include <stdio.h>
@@ -66,7 +63,6 @@ static char rcsid[] = "$OpenBSD: chpass.c,v 1.26 2002/07/31 22:08:41 millert Exp
 #include <util.h>
 
 #include "chpass.h"
-#include "pathnames.h"
 
 extern char *__progname;
 
@@ -177,7 +173,7 @@ main(int argc, char *argv[])
 
 	/* Edit the user passwd information if requested. */
 	if (op == EDITENTRY) {
-		char tempname[] = __CONCAT(_PATH_VARTMP,"pw.XXXXXXXX");
+		char tempname[] = __CONCAT(_PATH_VARTMP,"pw.XXXXXXXXXX");
 		int edit_status;
 
 		dfd = mkstemp(tempname);

@@ -1,7 +1,7 @@
-/*	$OpenBSD: extract.c,v 1.12 2001/04/08 16:45:46 espie Exp $	*/
+/*	$OpenBSD: extract.c,v 1.16 2003/07/04 17:31:19 avsm Exp $	*/
 
 #ifndef lint
-static const char *rcsid = "$OpenBSD: extract.c,v 1.12 2001/04/08 16:45:46 espie Exp $";
+static const char rcsid[] = "$OpenBSD: extract.c,v 1.16 2003/07/04 17:31:19 avsm Exp $";
 #endif
 
 /*
@@ -35,14 +35,14 @@ static const char *rcsid = "$OpenBSD: extract.c,v 1.12 2001/04/08 16:45:46 espie
 
 #define PUSHOUT(todir) /* push out string */				\
         if (where_count > sizeof(STARTSTRING)-1) {			\
-		    strcat(where_args, "|tar xpf - -C ");		\
-		    strcat(where_args, todir);				\
+		    strlcat(where_args, "|tar xpf - -C ", maxargs);	\
+		    strlcat(where_args, todir, maxargs);		\
 		    if (system(where_args)) {				\
 			cleanup(0);					\
 			errx(2, "can not invoke %lu byte tar pipeline: %s", \
 				(u_long)strlen(where_args), where_args); \
 		    }							\
-		    strcpy(where_args, STARTSTRING);			\
+		    strlcpy(where_args, STARTSTRING, maxargs);		\
 		    where_count = sizeof(STARTSTRING)-1;		\
 	}								\
 	if (perm_count) {						\
@@ -60,8 +60,8 @@ rollback(char *name, char *home, plist_t *start, plist_t *stop)
     dir = home;
     for (q = start; q != stop; q = q->next) {
 	if (q->type == PLIST_FILE) {
-	    snprintf(try, FILENAME_MAX, "%s/%s", dir, q->name);
-	    if (make_preserve_name(bup, FILENAME_MAX, name, try) && fexists(bup)) {
+	    snprintf(try, sizeof(try), "%s/%s", dir, q->name);
+	    if (make_preserve_name(bup, sizeof(bup), name, try) && fexists(bup)) {
 		(void)chflags(try, 0);
 		(void)unlink(try);
 		if (rename(bup, try))
@@ -114,7 +114,7 @@ extract_plist(char *home, package_t *pkg)
 	cleanup(0);
 	errx(2, "can't get argument list space");
     }
-    strcpy(where_args, STARTSTRING);
+    strlcpy(where_args, STARTSTRING, maxargs);
     where_count = sizeof(STARTSTRING)-1;
     perm_args[0] = 0;
 
@@ -151,7 +151,7 @@ extract_plist(char *home, package_t *pkg)
 		}
 		
 		/* first try to rename it into place */
-		snprintf(try, FILENAME_MAX, "%s/%s", Directory, p->name);
+		snprintf(try, sizeof(try), "%s/%s", Directory, p->name);
 		if (fexists(try)) {
 		    if (preserve(try) == -1) {
 		    	pwarnx("unable to back up %s, aborting pkg_add", try);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: script.c,v 1.17 2002/02/16 21:27:52 millert Exp $	*/
+/*	$OpenBSD: script.c,v 1.19 2003/06/10 22:20:50 deraadt Exp $	*/
 /*	$NetBSD: script.c,v 1.3 1994/12/21 08:55:43 jtc Exp $	*/
 
 /*
@@ -38,11 +38,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -69,7 +65,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)script.c	8.1 (Berkeley) 6/6/93";
 #endif
-static char rcsid[] = "$OpenBSD: script.c,v 1.17 2002/02/16 21:27:52 millert Exp $";
+static char rcsid[] = "$OpenBSD: script.c,v 1.19 2003/06/10 22:20:50 deraadt Exp $";
 #endif /* not lint */
 
 #include <sys/types.h>
@@ -112,9 +108,7 @@ void scriptflush(int);
 void handlesigwinch(int);
 
 int
-main(argc, argv)
-	int argc;
-	char *argv[];
+main(int argc, char *argv[])
 {
 	struct sigaction sa;
 	struct termios rtt;
@@ -202,8 +196,7 @@ main(argc, argv)
 }
 
 void
-finish(signo)
-	int signo;
+finish(int signo)
 {
 	int save_errno = errno;
 	int status, e = 1;
@@ -221,8 +214,7 @@ finish(signo)
 }
 
 void
-handlesigwinch(signo)
-	int signo;
+handlesigwinch(int signo)
 {
 	int save_errno = errno;
 	struct winsize win;
@@ -237,7 +229,7 @@ handlesigwinch(signo)
 }
 
 void
-dooutput()
+dooutput(void)
 {
 	struct sigaction sa;
 	struct itimerval value;
@@ -285,14 +277,13 @@ dooutput()
 }
 
 void
-scriptflush(signo)
-	int signo;
+scriptflush(int signo)
 {
 	flush = 1;
 }
 
 void
-doshell()
+doshell(void)
 {
 	char *shell;
 
@@ -309,7 +300,7 @@ doshell()
 }
 
 void
-fail()
+fail(void)
 {
 
 	(void)kill(0, SIGTERM);
@@ -317,8 +308,7 @@ fail()
 }
 
 void
-done(eval)
-	int eval;
+done(int eval)
 {
 	time_t tvec;
 

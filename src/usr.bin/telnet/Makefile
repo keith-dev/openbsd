@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.17 2002/05/11 00:20:20 espie Exp $
+#	$OpenBSD: Makefile,v 1.22 2003/07/16 19:10:14 deraadt Exp $
 #
 # Copyright (c) 1990 The Regents of the University of California.
 # All rights reserved.
@@ -11,11 +11,7 @@
 # 2. Redistributions in binary form must reproduce the above copyright
 #    notice, this list of conditions and the following disclaimer in the
 #    documentation and/or other materials provided with the distribution.
-# 3. All advertising materials mentioning features or use of this software
-#    must display the following acknowledgement:
-#	This product includes software developed by the University of
-#	California, Berkeley and its contributors.
-# 4. Neither the name of the University nor the names of its contributors
+# 3. Neither the name of the University nor the names of its contributors
 #    may be used to endorse or promote products derived from this software
 #    without specific prior written permission.
 #
@@ -37,25 +33,24 @@
 PROG=	telnet
 
 CFLAGS+=-DKLUDGELINEMODE -DUSE_TERMIO -DENV_HACK -DSKEY -Dunix
-CFLAGS+=-I${.CURDIR}/../../lib
-LDADD+=	-lcurses -ltelnet
-DPADD=	${LIBCURSES} ${LIBTELNET}
+CFLAGS+=-I${.CURDIR}/../../libexec/telnetd
+CFLAGS+= -DHAS_CGETENT -Wall -Wno-unused
+LDADD+=	-lcurses
+DPADD=	${LIBCURSES}
 
 SRCS=	authenc.c commands.c main.c network.c ring.c sys_bsd.c telnet.c \
-	terminal.c tn3270.c utilities.c
+	terminal.c tn3270.c utilities.c auth.c encrypt.c genget.c getent.c \
+	misc.c
+
+.PATH:	${.CURDIR}/../../libexec/telnetd
 
 .include <bsd.own.mk> # for KERBEROS
 
 .if (${KERBEROS5:L} == "yes")
-CFLAGS+=-DENCRYPTION -DAUTHENTICATION -DKRB5
-LDADD+= -lkrb5 -lasn1 -lcrypto -lcom_err -lkafs -ldes
-DPADD+= ${LIBKRB5} ${LIBASN1} ${LIBCRYPTO} ${LIBCOM_ERR} ${LIBKAFS} ${LIBDES}
-.endif
-
-.if (${KERBEROS:L} == "yes")
-CFLAGS+=-DENCRYPTION -DAUTHENTICATION -DKRB4
-LDADD+= -lkrb -lcrypto -ldes
-DPADD+= ${LIBDES} ${LIBKRB} ${LIBDES}
+CFLAGS+=-DENCRYPTION -DAUTHENTICATION -DKRB5 -DDES_ENCRYPTION
+DPADD+= ${LIBKRB5} ${LIBASN1} ${LIBCRYPTO} ${LIBDES}
+LDADD+= -lkrb5 -lasn1 -lcrypto -ldes
+SRCS+= kerberos5.c enc_des.c
 .endif
 
 .include <bsd.prog.mk>

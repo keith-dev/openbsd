@@ -1,4 +1,4 @@
-/*	$OpenBSD: popen.c,v 1.17 2002/07/02 18:09:54 danh Exp $	*/
+/*	$OpenBSD: popen.c,v 1.19 2003/06/11 14:24:46 deraadt Exp $	*/
 /*	$NetBSD: popen.c,v 1.5 1995/04/11 02:45:00 cgd Exp $	*/
 
 /*
@@ -16,11 +16,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -43,7 +39,7 @@
 static const char sccsid[] = "@(#)popen.c	8.3 (Berkeley) 4/6/94";
 #else
 static const char rcsid[] = 
-    "$OpenBSD: popen.c,v 1.17 2002/07/02 18:09:54 danh Exp $";
+    "$OpenBSD: popen.c,v 1.19 2003/06/11 14:24:46 deraadt Exp $";
 #endif
 #endif /* not lint */
 
@@ -74,8 +70,7 @@ static int fds;
 #define MAX_GARGV	1000
 
 FILE *
-ftpd_popen(program, type)
-	char *program, *type;
+ftpd_popen(char *program, char *type)
 {
 	char *cp;
 	FILE *iop;
@@ -181,8 +176,7 @@ pfree:	for (argc = 1; gargv[argc] != NULL; argc++)
 }
 
 int
-ftpd_pclose(iop)
-	FILE *iop;
+ftpd_pclose(FILE *iop)
 {
 	int fdes, status;
 	pid_t pid;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: dirs.c,v 1.20 2003/03/13 05:00:44 deraadt Exp $	*/
+/*	$OpenBSD: dirs.c,v 1.26 2003/08/25 23:28:16 tedu Exp $	*/
 /*	$NetBSD: dirs.c,v 1.26 1997/07/01 05:37:49 lukem Exp $	*/
 
 /*
@@ -18,11 +18,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -43,7 +39,7 @@
 #if 0
 static char sccsid[] = "@(#)dirs.c	8.5 (Berkeley) 8/31/94";
 #else
-static char rcsid[] = "$OpenBSD: dirs.c,v 1.20 2003/03/13 05:00:44 deraadt Exp $";
+static const char rcsid[] = "$OpenBSD: dirs.c,v 1.26 2003/08/25 23:28:16 tedu Exp $";
 #endif
 #endif /* not lint */
 
@@ -125,7 +121,7 @@ struct odirect {
 	char	d_name[ODIRSIZ];
 };
 
-static struct inotab	*allocinotab(ino_t, struct dinode *, long);
+static struct inotab	*allocinotab(ino_t, struct ufs1_dinode *, long);
 static void		 dcvt(struct odirect *, struct direct *);
 static void		 flushent(void);
 static struct inotab	*inotablookup(ino_t);
@@ -147,7 +143,7 @@ extractdirs(genmode)
 	int genmode;
 {
 	int i;
-	struct dinode *ip;
+	struct ufs1_dinode *ip;
 	struct inotab *itp;
 	struct direct nulldir;
 	int fd;
@@ -156,8 +152,7 @@ extractdirs(genmode)
 	(void)snprintf(dirfile, sizeof(dirfile), "%s/rstdir%d", tmpdir,
 	    dumpdate);
 	if (command != 'r' && command != 'R') {
-		strncat(dirfile, "-XXXXXXXXXX",
-		    sizeof(dirfile) - strlen(dirfile));
+		strlcat(dirfile, "-XXXXXXXXXX", sizeof(dirfile));
 		fd = mkstemp(dirfile);
 	} else
 		fd = open(dirfile, O_RDWR|O_CREAT|O_EXCL, 0666);
@@ -170,8 +165,7 @@ extractdirs(genmode)
 		(void)snprintf(modefile, sizeof(modefile), "%s/rstmode%d",
 		    tmpdir, dumpdate);
 		if (command != 'r' && command != 'R') {
-			strncat(modefile, "-XXXXXXXXXX",
-			    sizeof(modefile) - strlen(modefile));
+			strlcat(modefile, "-XXXXXXXXXX", sizeof(modefile));
 			fd = mkstemp(modefile);
 		} else
 			fd = open(modefile, O_RDWR|O_CREAT|O_EXCL, 0666);
@@ -281,7 +275,7 @@ treescan(pname, ino, todo)
 			fprintf(stderr, "%s%s: name exceeds %d char\n",
 				locname, dp->d_name, sizeof(locname) - 1);
 		} else {
-			(void)strncat(locname, dp->d_name, (int)dp->d_namlen);
+			(void)strlcat(locname, dp->d_name, sizeof(locname));
 			treescan(locname, dp->d_ino, todo);
 			rst_seekdir(dirp, bpt, itp->t_seekpt);
 		}
@@ -599,7 +593,7 @@ setdirmodes(flags)
 	struct modeinfo node;
 	struct entry *ep;
 	char *cp;
-	
+
 	Vprintf(stdout, "Set directory mode, owner, and times.\n");
 	if (command == 'r' || command == 'R')
 		(void)snprintf(modefile, sizeof(modefile), "%s/rstmode%d",
@@ -711,7 +705,7 @@ inodetype(ino)
 static struct inotab *
 allocinotab(ino, dip, seekpt)
 	ino_t ino;
-	struct dinode *dip;
+	struct ufs1_dinode *dip;
 	long seekpt;
 {
 	struct inotab	*itp;

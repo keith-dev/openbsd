@@ -1,4 +1,4 @@
-/*	$OpenBSD: extern.h,v 1.30 2002/04/28 14:37:12 espie Exp $	*/
+/*	$OpenBSD: extern.h,v 1.38 2003/06/30 22:13:32 espie Exp $	*/
 /*	$NetBSD: extern.h,v 1.3 1996/01/13 23:25:24 pk Exp $	*/
 
 /*-
@@ -16,11 +16,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -40,7 +36,7 @@
  */
 
 /* eval.c */
-extern void	eval(const char *[], int, int);
+extern void	eval(const char *[], int, int, int);
 extern void	dodefine(const char *, const char *);
 extern unsigned long expansion_id;
 
@@ -62,15 +58,32 @@ extern void doesyscmd(const char *);
  
 
 /* look.c */
-extern ndptr	addent(const char *);
-extern unsigned	hash(const char *);
+
+#define FLAG_UNTRACED 0
+#define FLAG_TRACED 1
+#define FLAG_NO_TRACE 2
+
+extern void	init_macros(void);
 extern ndptr	lookup(const char *);
-extern void	remhash(const char *, int);
+extern void mark_traced(const char *, int);
+extern struct ohash macros;
+
+extern struct macro_definition *lookup_macro_definition(const char *);
+extern void 	macro_define(const char *, const char *);
+extern void 	macro_pushdef(const char *, const char *);
+extern void 	macro_popdef(const char *);
+extern void 	macro_undefine(const char *);
+extern void 	setup_builtin(const char *, unsigned int);
+extern void 	macro_for_all(void (*)(const char *, struct macro_definition *));
+#define macro_getdef(p) 	((p)->d)
+#define macro_name(p)		((p)->name)
+#define macro_builtin_type(p)	((p)->builtin_type)
+#define is_traced(p) ((p)->trace_flags == FLAG_NO_TRACE ? (trace_flags & TRACE_ALL) : (p)->trace_flags)
+
+extern ndptr macro_getbuiltin(const char *);
 
 /* main.c */
 extern void outputstr(const char *);
-extern int builtin_type(const char *);
-extern char *builtin_realname(int);
 extern void do_emit_synchline(void);
 #define emit_synchline() do { if (synch_lines) do_emit_synchline(); } while(0)
 
@@ -119,12 +132,11 @@ extern char *endpbb;
 extern char *endest;
 
 /* trace.c */
-extern void mark_traced(const char *, int);
-extern int is_traced(const char *);
+extern unsigned int trace_flags;
+#define TRACE_ALL	512
 extern void trace_file(const char *);
 extern ssize_t trace(const char **, int, struct input_file *);
 extern void finish_trace(size_t);
-extern int traced_macros;
 extern void set_trace_flags(const char *);
 extern FILE *traceout;
 
@@ -153,3 +165,4 @@ extern char scommt[MAXCCHARS+1];/* start character for comment */
 extern int  synch_lines;	/* line synchronisation directives */
 
 extern int mimic_gnu;		/* behaves like gnu-m4 */
+

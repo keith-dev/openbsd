@@ -1,9 +1,9 @@
-/*	$OpenBSD: ap_config.h,v 1.15 2002/09/10 17:49:21 henning Exp $ */
+/*	$OpenBSD: ap_config.h,v 1.17 2003/08/21 13:11:35 henning Exp $ */
 
 /* ====================================================================
  * The Apache Software License, Version 1.1
  *
- * Copyright (c) 2000-2002 The Apache Software Foundation.  All rights
+ * Copyright (c) 2000-2003 The Apache Software Foundation.  All rights
  * reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -286,15 +286,19 @@ typedef int rlim_t;
 #define HAVE_FCNTL_SERIALIZED_ACCEPT
 #define HAVE_SYSVSEM_SERIALIZED_ACCEPT
 #define NEED_UNION_SEMUN
-#if !defined(USE_PTHREAD_SERIALIZED_ACCEPT)
+#if AIX >= 430
+#define HAVE_PTHREAD_SERIALIZED_ACCEPT
+#endif
 #define USE_FCNTL_SERIALIZED_ACCEPT
+#if AIX >= 432
+#define SINGLE_LISTEN_UNSERIALIZED_ACCEPT 
 #endif
 #ifdef USEBCOPY
 #define memmove(a,b,c) bcopy(b,a,c)
 #endif
-#if AIX >= 51
+#if AIX >= 510
 #define NET_SIZE_T socklen_t
-#elif AIX >= 42
+#elif AIX >= 420
 #define NET_SIZE_T size_t
 #endif
 
@@ -689,7 +693,8 @@ extern char *crypt();
 #define HAVE_MMAP 1
 #define USE_MMAP_SCOREBOARD
 #define USE_MMAP_FILES
-#if defined __OpenBSD__
+#define HAVE_FLOCK_SERIALIZED_ACCEPT
+#if defined(__OpenBSD__)
 #define HAVE_SYSVSEM_SERIALIZED_ACCEPT
 #define USE_SYSVSEM_SERIALIZED_ACCEPT
 #include <sys/param.h>
@@ -697,7 +702,6 @@ extern char *crypt();
 #define NET_SIZE_T socklen_t
 #endif
 #endif
-#define HAVE_FLOCK_SERIALIZED_ACCEPT
 #define SINGLE_LISTEN_UNSERIALIZED_ACCEPT
 
 #elif defined(UTS21)
@@ -964,10 +968,11 @@ typedef int rlim_t;
 #define NO_SETSID
 #define NO_SLACK
 #define NO_TIMES
+#ifndef TPF_HAVE_SIGACTION
 #define NO_USE_SIGACTION
+#endif
 #define USE_LONGJMP
 #define USE_SHMGET_SCOREBOARD
-/*#define USE_TPF_SCOREBOARD*/
 #define USE_TPF_ACCEPT
 #define HAVE_TPF_CORE_SERIALIZED_ACCEPT
 #define USE_TPF_SELECT
@@ -992,6 +997,7 @@ typedef int rlim_t;
 #define USE_MMAP_FILES
 #define NEED_UNION_SEMUN
 #define HAVE_SYSVSEM_SERIALIZED_ACCEPT
+#define HAVE_FCNTL_SERIALIZED_ACCEPT
 #define _POSIX_SOURCE
 #include <signal.h>
 #ifdef SIGDUMP  /* SIGDUMP is not defined by OS/390 v1r2 */
@@ -1026,7 +1032,7 @@ typedef int rlim_t;
 #define HAVE_FCNTL_SERIALIZED_ACCEPT
 #define HAVE_PTHREAD_SERIALIZED_ACCEPT
 #define SINGLE_LISTEN_UNSERIALIZED_ACCEPT
-#if !defined(USE_FNCTL_SERIALIZED_ACCEPT)
+#if !defined(USE_FCNTL_SERIALIZED_ACCEPT)
 #define USE_PTHREAD_SERIALIZED_ACCEPT
 #endif
 

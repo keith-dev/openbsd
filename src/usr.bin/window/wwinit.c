@@ -1,4 +1,4 @@
-/*	$OpenBSD: wwinit.c,v 1.11 2001/11/19 19:02:18 mpech Exp $	*/
+/*	$OpenBSD: wwinit.c,v 1.16 2003/08/01 22:01:37 david Exp $	*/
 /*	$NetBSD: wwinit.c,v 1.11 1996/02/08 21:49:07 mycroft Exp $	*/
 
 /*
@@ -16,11 +16,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -41,7 +37,7 @@
 #if 0
 static char sccsid[] = "@(#)wwinit.c	8.2 (Berkeley) 4/28/95";
 #else
-static char rcsid[] = "$OpenBSD: wwinit.c,v 1.11 2001/11/19 19:02:18 mpech Exp $";
+static char rcsid[] = "$OpenBSD: wwinit.c,v 1.16 2003/08/01 22:01:37 david Exp $";
 #endif
 #endif /* not lint */
 
@@ -50,6 +46,8 @@ static char rcsid[] = "$OpenBSD: wwinit.c,v 1.11 2001/11/19 19:02:18 mpech Exp $
 #include "tt.h"
 #include <sys/signal.h>
 #include <fcntl.h>
+#include <signal.h>
+#include <string.h>
 #include "char.h"
 
 wwinit()
@@ -279,42 +277,55 @@ wwinit()
 
 	kp = wwwintermcap;
 	if (wwavailmodes & WWM_REV)
-		wwaddcap1(WWT_REV, &kp);
+		wwaddcap1(WWT_REV, &kp, wwwintermcap + sizeof wwwintermcap -
+		    kp);
 	if (wwavailmodes & WWM_BLK)
-		wwaddcap1(WWT_BLK, &kp);
+		wwaddcap1(WWT_BLK, &kp, wwwintermcap + sizeof wwwintermcap -
+		    kp);
 	if (wwavailmodes & WWM_UL)
-		wwaddcap1(WWT_UL, &kp);
+		wwaddcap1(WWT_UL, &kp, wwwintermcap + sizeof wwwintermcap -
+		    kp);
 	if (wwavailmodes & WWM_GRP)
-		wwaddcap1(WWT_GRP, &kp);
+		wwaddcap1(WWT_GRP, &kp, wwwintermcap + sizeof wwwintermcap -
+		    kp);
 	if (wwavailmodes & WWM_DIM)
-		wwaddcap1(WWT_DIM, &kp);
+		wwaddcap1(WWT_DIM, &kp, wwwintermcap + sizeof wwwintermcap -
+		    kp);
 	if (wwavailmodes & WWM_USR)
-		wwaddcap1(WWT_USR, &kp);
+		wwaddcap1(WWT_USR, &kp, wwwintermcap + sizeof wwwintermcap -
+		    kp);
 	if (tt.tt_insline && tt.tt_delline || tt.tt_setscroll)
-		wwaddcap1(WWT_ALDL, &kp);
+		wwaddcap1(WWT_ALDL, &kp, wwwintermcap + sizeof wwwintermcap -
+		    kp);
 	if (tt.tt_inschar)
-		wwaddcap1(WWT_IMEI, &kp);
+		wwaddcap1(WWT_IMEI, &kp, wwwintermcap + sizeof wwwintermcap -
+		    kp);
 	if (tt.tt_insspace)
-		wwaddcap1(WWT_IC, &kp);
+		wwaddcap1(WWT_IC, &kp, wwwintermcap + sizeof wwwintermcap -
+		    kp);
 	if (tt.tt_delchar)
-		wwaddcap1(WWT_DC, &kp);
-	wwaddcap("kb", &kp);
-	wwaddcap("ku", &kp);
-	wwaddcap("kd", &kp);
-	wwaddcap("kl", &kp);
-	wwaddcap("kr", &kp);
-	wwaddcap("kh", &kp);
+		wwaddcap1(WWT_DC, &kp, wwwintermcap + sizeof wwwintermcap -
+		    kp);
+	wwaddcap("kb", &kp, wwwintermcap + sizeof wwwintermcap - kp);
+	wwaddcap("ku", &kp, wwwintermcap + sizeof wwwintermcap - kp);
+	wwaddcap("kd", &kp, wwwintermcap + sizeof wwwintermcap - kp);
+	wwaddcap("kl", &kp, wwwintermcap + sizeof wwwintermcap - kp);
+	wwaddcap("kr", &kp, wwwintermcap + sizeof wwwintermcap - kp);
+	wwaddcap("kh", &kp, wwwintermcap + sizeof wwwintermcap - kp);
 	if ((j = tgetnum("kn")) >= 0) {
 		char cap[32];
 
-		(void) sprintf(kp, "kn#%d:", j);
+		(void) snprintf(kp, wwwintermcap + sizeof wwwintermcap - kp,
+		    "kn#%d:", j);
 		for (; *kp; kp++)
 			;
 		for (i = 1; i <= j; i++) {
-			(void) sprintf(cap, "k%d", i);
-			wwaddcap(cap, &kp);
+			(void) snprintf(cap, sizeof(cap), "k%d", i);
+			wwaddcap(cap, &kp, wwwintermcap +
+			    sizeof wwwintermcap - kp);
 			cap[0] = 'l';
-			wwaddcap(cap, &kp);
+			wwaddcap(cap, &kp, wwwintermcap +
+			    sizeof wwwintermcap - kp);
 		}
 	}
 	/*
@@ -349,15 +360,22 @@ bad:
 	return -1;
 }
 
-wwaddcap(cap, kp)
+wwaddcap(cap, kp, len)
 	char *cap;
 	char **kp;
+	int len;
 {
-	char tbuf[512];
+	char tbuf[1024];	/* tgetstr(, &tp) does strlcpy(tp,, 1024) */
 	char *tp = tbuf;
 	char *str, *p;
 
 	if ((str = tgetstr(cap, &tp)) != 0) {
+		int need = strlen(cap) + 3;
+
+		for (p = str; *p; ++p)
+			need += strlen(unctrl(*p));
+		if (need > len)
+			return;
 		while (*(*kp)++ = *cap++)
 			;
 		(*kp)[-1] = '=';
@@ -371,10 +389,13 @@ wwaddcap(cap, kp)
 	}
 }
 
-wwaddcap1(cap, kp)
+wwaddcap1(cap, kp, len)
 	char *cap;
 	char **kp;
+	int len;
 {
+	if (strlen(cap) + 1 > len)
+		return;
 	while (*(*kp)++ = *cap++)
 		;
 	(*kp)--;

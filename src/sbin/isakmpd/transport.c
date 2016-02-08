@@ -1,4 +1,4 @@
-/*	$OpenBSD: transport.c,v 1.19 2003/03/14 14:49:08 ho Exp $	*/
+/*	$OpenBSD: transport.c,v 1.22 2003/06/20 09:14:14 ho Exp $	*/
 /*	$EOM: transport.c,v 1.43 2000/10/10 12:36:39 provos Exp $	*/
 
 /*
@@ -13,11 +13,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by Ericsson Radio Systems.
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -257,7 +252,7 @@ transport_send_messages (fd_set *fds)
 
 	  /* Prefer a message from the prioritized sendq.  */
 	  if (TAILQ_FIRST (&t->prio_sendq))
- 	    {
+	    {
 	      msg = TAILQ_FIRST (&t->prio_sendq);
 	      TAILQ_REMOVE (&t->prio_sendq, msg, link);
 	    }
@@ -299,9 +294,20 @@ transport_send_messages (fd_set *fds)
 	      if (msg->xmits > conf_get_num ("General", "retransmits",
 					     RETRANSMIT_DEFAULT))
 		{
-		  log_print ("transport_send_messages: "
-			     "giving up on message %p",
-			     msg);
+		  log_print ("transport_send_messages: giving up on "
+			     "message %p", msg);
+		  /* Be more verbose here.  */
+		  if (exchange->phase == 1)
+		    {
+		      log_print ("transport_send_messages: either this "
+				 "message did not reach the other peer");
+		      if (exchange->initiator)
+			log_print ("transport_send_messages: or the response"
+				   "message did not reach us back");
+		      else
+			log_print ("transport_send_messages: or this is "
+				   "an attempted IKE scan");
+		    }
 		  exchange->last_sent = 0;
 		}
 	      else

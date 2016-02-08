@@ -1,4 +1,4 @@
-/*	$OpenBSD: atactl.c,v 1.27 2003/02/20 21:47:27 millert Exp $	*/
+/*	$OpenBSD: atactl.c,v 1.30 2003/07/29 18:38:35 deraadt Exp $	*/
 /*	$NetBSD: atactl.c,v 1.4 1999/02/24 18:49:14 jwise Exp $	*/
 
 /*-
@@ -114,7 +114,7 @@ int	smart_cksum(u_int8_t *, int);
 char 	*sec_getpass(int, int);
 
 struct command commands[] = {
-	{ "dump",               device_dump },
+	{ "dump",		device_dump },
 	{ "identify",		device_identify },
 	{ "setidle",		device_setidle },
 	{ "setstandby",		device_setidle },
@@ -379,7 +379,7 @@ main(int argc, char *argv[])
 }
 
 __dead void
-usage()
+usage(void)
 {
 
 	fprintf(stderr, "usage: %s <device> <command> [arg [...]]\n",
@@ -505,6 +505,7 @@ device_identify(int argc, char *argv[])
 	struct ataparams *inqbuf;
 	struct atareq req;
 	char inbuf[DEV_BSIZE], *s;
+	u_int64_t capacity;
 
 	if (argc != 1)
 		goto usage;
@@ -566,12 +567,17 @@ device_identify(int argc, char *argv[])
 	       "ATAPI" : "ATA", inqbuf->atap_config & ATA_CFG_FIXED ? "fixed" :
 	       "removable");
 
-	if ((inqbuf->atap_config & WDC_CFG_ATAPI_MASK) == 0)
-		printf("Cylinders: %d, heads: %d, sec/track: %d, total "
-		    "sectors: %d\n", inqbuf->atap_cylinders,
-		    inqbuf->atap_heads, inqbuf->atap_sectors,
-		    (inqbuf->atap_capacity[1] << 16) |
-		    inqbuf->atap_capacity[0]);
+	if (inqbuf->atap_cmd2_en & ATAPI_CMD2_48AD)
+		capacity = ((u_int64_t)inqbuf->atap_max_lba[3] << 48) |
+		    ((u_int64_t)inqbuf->atap_max_lba[2] << 32) |
+		    ((u_int64_t)inqbuf->atap_max_lba[1] << 16) |
+		    (u_int64_t)inqbuf->atap_max_lba[0];
+	else
+		capacity = (inqbuf->atap_capacity[1] << 16) |
+		    inqbuf->atap_capacity[0];
+	printf("Cylinders: %d, heads: %d, sec/track: %d, total "
+	    "sectors: %llu\n", inqbuf->atap_cylinders,
+	    inqbuf->atap_heads, inqbuf->atap_sectors, capacity);
 
 	if ((inqbuf->atap_cmd_set2 & ATA_CMD2_RWQ) &&
 	    (inqbuf->atap_queuedepth & WDC_QUEUE_DEPTH_MASK))

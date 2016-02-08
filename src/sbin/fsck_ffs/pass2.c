@@ -1,4 +1,4 @@
-/*	$OpenBSD: pass2.c,v 1.14 2002/08/23 09:09:04 gluk Exp $	*/
+/*	$OpenBSD: pass2.c,v 1.18 2003/08/25 23:28:15 tedu Exp $	*/
 /*	$NetBSD: pass2.c,v 1.17 1996/09/27 22:45:15 christos Exp $	*/
 
 /*
@@ -13,11 +13,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -38,7 +34,7 @@
 #if 0
 static char sccsid[] = "@(#)pass2.c	8.6 (Berkeley) 10/27/94";
 #else
-static const char rcsid[] = "$OpenBSD: pass2.c,v 1.14 2002/08/23 09:09:04 gluk Exp $";
+static const char rcsid[] = "$OpenBSD: pass2.c,v 1.18 2003/08/25 23:28:15 tedu Exp $";
 #endif
 #endif /* not lint */
 
@@ -81,11 +77,11 @@ pass2_info2(char *buf, int buflen)
 void
 pass2(void)
 {
-	struct dinode *dp;
+	struct ufs1_dinode *dp;
 	struct inoinfo **inpp, *inp, *pinp;
 	struct inoinfo **inpend;
 	struct inodesc curino;
-	struct dinode dino;
+	struct ufs1_dinode dino;
 	char pathbuf[MAXPATHLEN + 1];
 
 	switch (statemap[ROOTINO]) {
@@ -172,7 +168,8 @@ pass2(void)
 				inodirty();
 			}
 		} else if ((inp->i_isize & (DIRBLKSIZ - 1)) != 0) {
-			getpathname(pathbuf, inp->i_number, inp->i_number);
+			getpathname(pathbuf, sizeof pathbuf,
+			    inp->i_number, inp->i_number);
 			if (usedsoftdep)
 			        pfatal("%s %s: LENGTH %ld NOT MULTIPLE of %d",
 				       "DIRECTORY", pathbuf, (long)inp->i_isize,
@@ -190,7 +187,7 @@ pass2(void)
 				inodirty();
 			}
 		}
-		memset(&dino, 0, sizeof(struct dinode));
+		memset(&dino, 0, sizeof(struct ufs1_dinode));
 		dino.di_mode = IFDIR;
 		dino.di_size = inp->i_isize;
 		memcpy(&dino.di_db[0], &inp->i_blks[0], (size_t)inp->i_numblks);
@@ -257,7 +254,7 @@ pass2check(struct inodesc *idesc)
 	struct direct *dirp = idesc->id_dirp;
 	struct inoinfo *inp;
 	int n, entrysize, ret = 0;
-	struct dinode *dp;
+	struct ufs1_dinode *dp;
 	char *errmsg;
 	struct direct proto;
 	char namebuf[MAXPATHLEN + 1];
@@ -297,7 +294,7 @@ pass2check(struct inodesc *idesc)
 	else
 		proto.d_type = 0;
 	proto.d_namlen = 1;
-	(void)strcpy(proto.d_name, ".");
+	(void)strlcpy(proto.d_name, ".", sizeof proto.d_name);
 #	if BYTE_ORDER == LITTLE_ENDIAN
 		if (!newinofmt) {
 			u_char tmp;
@@ -340,7 +337,7 @@ chk1:
 	else
 		proto.d_type = 0;
 	proto.d_namlen = 2;
-	(void)strcpy(proto.d_name, "..");
+	(void)strlcpy(proto.d_name, "..", sizeof proto.d_name);
 #	if BYTE_ORDER == LITTLE_ENDIAN
 		if (!newinofmt) {
 			u_char tmp;
@@ -466,9 +463,10 @@ again:
 		case DFOUND:
 			inp = getinoinfo(dirp->d_ino);
 			if (inp->i_parent != 0 && idesc->id_entryno > 2) {
-				getpathname(pathbuf, idesc->id_number,
-				    idesc->id_number);
-				getpathname(namebuf, dirp->d_ino, dirp->d_ino);
+				getpathname(pathbuf, sizeof pathbuf,
+				    idesc->id_number, idesc->id_number);
+				getpathname(namebuf, sizeof namebuf,
+				    dirp->d_ino, dirp->d_ino);
 				pwarn("%s %s %s\n", pathbuf,
 				    "IS AN EXTRANEOUS HARD LINK TO DIRECTORY",
 				    namebuf);

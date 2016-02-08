@@ -1,7 +1,7 @@
 /* ====================================================================
  * The Apache Software License, Version 1.1
  *
- * Copyright (c) 2000-2002 The Apache Software Foundation.  All rights
+ * Copyright (c) 2000-2003 The Apache Software Foundation.  All rights
  * reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -553,7 +553,7 @@ API_EXPORT(int) ap_scan_script_header_err_core(request_rec *r, char *buffer,
 	    char malformed[(sizeof MALFORMED_MESSAGE) + 1
 			   + MALFORMED_HEADER_LENGTH_TO_SHOW];
 
-	    strcpy(malformed, MALFORMED_MESSAGE);
+	    strlcpy(malformed, MALFORMED_MESSAGE, sizeof(malformed));
 	    strncat(malformed, w, MALFORMED_HEADER_LENGTH_TO_SHOW);
 
 	    if (!buffer) {

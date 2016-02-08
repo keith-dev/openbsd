@@ -1,4 +1,4 @@
-/*	$OpenBSD: main.c,v 1.12 2002/05/31 03:39:55 pjanzen Exp $	*/
+/*	$OpenBSD: main.c,v 1.17 2003/07/10 00:03:01 david Exp $	*/
 /*	$NetBSD: main.c,v 1.5 1996/05/21 21:53:09 mrg Exp $	*/
 
 /*-
@@ -18,11 +18,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -49,7 +45,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)main.c	8.1 (Berkeley) 6/2/93";
 #else
-static char rcsid[] = "$OpenBSD: main.c,v 1.12 2002/05/31 03:39:55 pjanzen Exp $";
+static char rcsid[] = "$OpenBSD: main.c,v 1.17 2003/07/10 00:03:01 david Exp $";
 #endif
 #endif /* not lint */
 
@@ -59,6 +55,7 @@ static char rcsid[] = "$OpenBSD: main.c,v 1.12 2002/05/31 03:39:55 pjanzen Exp $
 #include <err.h>
 #include <signal.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <unistd.h>
 #include "hdr.h"
 #include "extern.h"
@@ -169,11 +166,12 @@ l2600:		checkhints();		/* to 2600-2602		*/
 		wzdark = dark();	/* 2605			*/
 		if (knfloc > 0 && knfloc != loc)
 			knfloc = 1;
-		getin(&wd1, &wd2);
+		getin(wd1, sizeof(wd1), wd2, sizeof(wd2));
 		if (delhit) {		/* user typed a DEL	*/
 			delhit = 0;	/* reset counter	*/
-			copystr("quit", wd1);	/* pretend he's quitting */
-			*wd2 = 0;
+			/* pretend he's quitting */
+			strlcpy(wd1, "quit", sizeof(wd1));
+			wd2[0] = 0;
 		}
 l2608:		if ((foobar = -foobar) > 0)
 			foobar = 0;	/* 2608		*/
@@ -182,7 +180,7 @@ l2608:		if ((foobar = -foobar) > 0)
 		if (demo && turns >= SHORT)
 			done(1);	/* to 13000	*/
 
-		if (verb == say && *wd2 != 0)
+		if (verb == say && wd2[0] != 0)
 			verb = 0;
 		if (verb == say)
 			goto l4090;
@@ -244,7 +242,7 @@ l19999:		k = 43;
 		    || (!weq(wd2, "plant") && !weq(wd2, "door")))
 			goto l2610;
 		if (at(vocab(wd2, 1, 0)))
-			copystr("pour", wd2);
+			strlcpy(wd2, "pour", sizeof(wd2));
 
 l2610:		if (weq(wd1, "west"))
 			if (++iwest == 10)
@@ -279,16 +277,16 @@ l8:
 		default: bug(110);
 		}
 
-l2800:		copystr(wd2, wd1);
-		*wd2 = 0;
+l2800:		strlcpy(wd1, wd2, sizeof(wd1));
+		wd2[0] = 0;
 		goto l2610;
 
 l4000:		verb = k;
 		spk = actspk[verb];
-		if (*wd2 != 0 && verb != say)
+		if (wd2[0] != 0 && verb != say)
 			goto l2800;
 		if (verb == say)
-			obj= *wd2;
+			obj = wd2[0];
 		if (obj != 0)
 			goto l4090;
 l4080:
@@ -643,7 +641,7 @@ l5000:
 		obj = k;
 		if (fixed[k] != loc && !here(k))
 			goto l5100;
-l5010:		if (*wd2 != 0)
+l5010:		if (wd2[0] != 0)
 			goto l2800;
 		if (verb != 0)
 			goto l4090;
@@ -677,7 +675,7 @@ l5140:		if (obj != rod || !here(rod2))
 			goto l5190;
 		obj = rod2;
 		goto l5010;
-l5190:		if ((verb == find || verb == invent) && *wd2 == 0)
+l5190:		if ((verb == find || verb == invent) && wd2[0] == 0)
 			goto l5010;
 		printf("I see no %s here\n", wd1);
 		goto l2012;

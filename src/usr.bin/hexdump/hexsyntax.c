@@ -1,4 +1,4 @@
-/*	$OpenBSD: hexsyntax.c,v 1.6 2001/12/30 08:17:32 pvalchev Exp $	*/
+/*	$OpenBSD: hexsyntax.c,v 1.8 2003/06/12 20:58:09 deraadt Exp $	*/
 /*	$NetBSD: hexsyntax.c,v 1.8 1998/04/08 23:48:57 jeremy Exp $	*/
 
 /*-
@@ -13,11 +13,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -36,7 +32,7 @@
 
 #ifndef lint
 /*static char sccsid[] = "from: @(#)hexsyntax.c	5.2 (Berkeley) 5/8/90";*/
-static char rcsid[] = "$OpenBSD: hexsyntax.c,v 1.6 2001/12/30 08:17:32 pvalchev Exp $";
+static char rcsid[] = "$OpenBSD: hexsyntax.c,v 1.8 2003/06/12 20:58:09 deraadt Exp $";
 #endif /* not lint */
 
 #include <sys/types.h>
@@ -52,9 +48,7 @@ static char rcsid[] = "$OpenBSD: hexsyntax.c,v 1.6 2001/12/30 08:17:32 pvalchev 
 off_t skip;				/* bytes to skip */
 
 void
-newsyntax(argc, argvp)
-	int argc;
-	char ***argvp;
+newsyntax(int argc, char ***argvp)
 {
 	int ch;
 	char *p, **argv;
@@ -128,7 +122,7 @@ newsyntax(argc, argvp)
 }
 
 void
-usage()
+usage(void)
 {
 	extern char *__progname;
 	fprintf(stderr, "usage: %s [-bcCdovx] [-e fmt] [-f fmt_file] "

@@ -1,4 +1,4 @@
-/*	$OpenBSD: hack.shknam.c,v 1.4 2003/03/16 21:22:36 camield Exp $	*/
+/*	$OpenBSD: hack.shknam.c,v 1.7 2003/07/06 02:07:45 avsm Exp $	*/
 
 /*
  * Copyright (c) 1985, Stichting Centrum voor Wiskunde en Informatica,
@@ -62,7 +62,7 @@
  */
 
 #ifndef lint
-static char rcsid[] = "$OpenBSD: hack.shknam.c,v 1.4 2003/03/16 21:22:36 camield Exp $";
+static const char rcsid[] = "$OpenBSD: hack.shknam.c,v 1.7 2003/07/06 02:07:45 avsm Exp $";
 #endif /* not lint */
 
 #include "hack.h"
@@ -187,18 +187,23 @@ struct shk_nx {
 	{ 0,		shkgeneral }
 };
 
-findname(nampt, let) char *nampt; char let; {
-register struct shk_nx *p = shk_nx;
-register char **q;
-register int i;
+void
+findname(char *nampt, size_t len, char let)
+{
+	struct shk_nx *p = shk_nx;
+	char **q;
+	int i;
+
 	while(p->x && p->x != let) p++;
 	q = p->xn;
 	for(i=0; i<dlevel; i++) if(!q[i]){
 		/* Not enough names, try general name */
-		if(let) findname(nampt, 0);
-		else (void) strcpy(nampt, "Dirk");
+		if(let) findname(nampt, len, 0);
+		else {
+			(void) strlcpy(nampt, "Dirk", len);
+		}
 		return;
 	}
-	(void) strncpy(nampt, q[i], PL_NSIZ-1);
-	nampt[PL_NSIZ-1] = 0;
+	(void) strncpy(nampt, q[i], len-1);
+	nampt[len-1] = '\0';
 }

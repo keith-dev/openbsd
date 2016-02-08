@@ -1,4 +1,4 @@
-/*	$OpenBSD: apprentice.c,v 1.16 2003/03/11 21:26:26 ian Exp $	*/
+/*	$OpenBSD: apprentice.c,v 1.18 2003/06/13 18:31:14 deraadt Exp $	*/
 
 /*
  * apprentice - make one pass through /etc/magic, learning its secrets.
@@ -16,11 +16,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *    This product includes software developed by Ian F. Darwin and others.
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *  
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
  * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
@@ -44,7 +39,7 @@
 #include "file.h"
 
 #ifndef	lint
-static char *moduleid = "$OpenBSD: apprentice.c,v 1.16 2003/03/11 21:26:26 ian Exp $";
+static char *moduleid = "$OpenBSD: apprentice.c,v 1.18 2003/06/13 18:31:14 deraadt Exp $";
 #endif	/* lint */
 
 #define	EATAB {while (isascii((unsigned char) *l) && \
@@ -71,10 +66,12 @@ int check;			/* non-zero? checking-only run. */
 {
 	char *p, *mfn;
 	int file_err, errs = -1;
+	size_t len;
 
         maxmagic = MAXMAGIS;
 	magic = (struct magic *) calloc(maxmagic, sizeof(struct magic));
-	mfn = malloc(strlen(fn)+1);
+	len = strlen(fn)+1;
+	mfn = malloc(len);
 	if (magic == NULL || mfn == NULL) {
 		warn("malloc");
 		if (check)
@@ -82,8 +79,9 @@ int check;			/* non-zero? checking-only run. */
 		else
 			exit(1);
 	}
-	fn = strcpy(mfn, fn);	/* ok */
-  
+	strlcpy(mfn, fn, len);
+	fn = mfn;
+
 	while (fn) {
 		p = strchr(fn, ':');
 		if (p)

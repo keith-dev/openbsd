@@ -1,4 +1,4 @@
-/*	$OpenBSD: sa.h,v 1.29 2002/06/09 08:13:07 todd Exp $	*/
+/*	$OpenBSD: sa.h,v 1.32 2003/06/04 07:31:17 ho Exp $	*/
 /*	$EOM: sa.h,v 1.58 2000/10/10 12:39:01 provos Exp $	*/
 
 /*
@@ -13,11 +13,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by Ericsson Radio Systems.
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -166,11 +161,9 @@ struct sa {
    * Certificates or other information we used to authenticate to the peer,
    * Phase 1.
    */
-  int sent_certtype, sent_keytype;
+  int sent_certtype;
   /* Certificate (to be) sent to peer, native format.  */
   void *sent_cert;
-  /* Key we'll use to authenticate to peer, native format.  */
-  void *sent_key;
 
   /* DOI-specific opaque data.  */
   void *data;
@@ -222,6 +215,7 @@ extern struct sa *sa_find (int (*) (struct sa *, void *), void *);
 extern int sa_flag (char *);
 extern void sa_free (struct sa *);
 extern void sa_init (void);
+extern void sa_reinit (void);
 extern struct sa *sa_isakmp_lookup_by_peer (struct sockaddr *, socklen_t);
 extern void sa_isakmp_upgrade (struct message *);
 extern struct sa *sa_lookup (u_int8_t *, u_int8_t *);

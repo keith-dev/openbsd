@@ -13,11 +13,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -42,7 +38,7 @@ static char copyright[] =
 
 #ifndef lint
 /*static char sccsid[] = "from: @(#)repquota.c	8.1 (Berkeley) 6/6/93";*/
-static char *rcsid = "$Id: repquota.c,v 1.19 2002/09/06 21:49:21 deraadt Exp $";
+static char *rcsid = "$Id: repquota.c,v 1.25 2003/06/26 19:47:10 deraadt Exp $";
 #endif /* not lint */
 
 /*
@@ -58,6 +54,7 @@ static char *rcsid = "$Id: repquota.c,v 1.19 2002/09/06 21:49:21 deraadt Exp $";
 #include <unistd.h>
 #include <string.h>
 #include <errno.h>
+#include <stdlib.h>
 
 char *qfname = QUOTAFILENAME;
 char *qfextension[] = INITQFNAMES;
@@ -71,8 +68,8 @@ struct fileusage {
 };
 #define FUHASH 1024	/* must be power of two */
 struct fileusage *fuhead[MAXQUOTAS][FUHASH];
-struct fileusage *lookup();
-struct fileusage *addid();
+struct fileusage *lookup(uid_t, int);
+struct fileusage *addid(uid_t id, int type, char *name);
 uid_t highid[MAXQUOTAS];	/* highest addid()'ed identifier per type */
 
 int	vflag;			/* verbose */
@@ -84,9 +81,7 @@ int	hasquota(struct fstab *, int, char **);
 int	oneof(char *, char *[], int);
 
 int
-main(argc, argv)
-	int argc;
-	char **argv;
+main(int argc, char *argv[])
 {
 	struct fstab *fs;
 	struct passwd *pw;
@@ -167,7 +162,7 @@ main(argc, argv)
 }
 
 void
-usage()
+usage(void)
 {
 	fprintf(stderr, "Usage:\n\t%s\n\t%s\n",
 		"repquota [-v] [-g] [-u] -a",
@@ -176,16 +171,13 @@ usage()
 }
 
 int
-repquota(fs, type, qfpathname)
-	struct fstab *fs;
-	int type;
-	char *qfpathname;
+repquota(struct fstab *fs, int type, char *qfpathname)
 {
 	struct fileusage *fup;
 	FILE *qf;
 	uid_t id;
 	struct dqblk dqbuf;
-	char *timeprt();
+	char *timeprt(time_t);
 	static struct dqblk zerodqblk;
 	static int warned = 0;
 	static int multiple = 0;
@@ -260,9 +252,7 @@ repquota(fs, type, qfpathname)
  * Check to see if target appears in list of size cnt.
  */
 int
-oneof(target, list, cnt)
-	char *target, *list[];
-	int cnt;
+oneof(char *target, char *list[], int cnt)
 {
 	int i;
 
@@ -276,10 +266,7 @@ oneof(target, list, cnt)
  * Check to see if a particular quota is to be enabled.
  */
 int
-hasquota(fs, type, qfnamep)
-	struct fstab *fs;
-	int type;
-	char **qfnamep;
+hasquota(struct fstab *fs, int type, char **qfnamep)
 {
 	char *opt;
 	char *cp;
@@ -320,9 +307,7 @@ hasquota(fs, type, qfnamep)
  * Lookup an id of a specific type.
  */
 struct fileusage *
-lookup(id, type)
-	uid_t id;
-	int type;
+lookup(uid_t id, int type)
 {
 	struct fileusage *fup;
 
@@ -336,14 +321,10 @@ lookup(id, type)
  * Add a new file usage id if it does not already exist.
  */
 struct fileusage *
-addid(id, type, name)
-	uid_t id;
-	int type;
-	char *name;
+addid(uid_t id, int type, char *name)
 {
 	struct fileusage *fup, **fhp;
-	int len;
-	extern char *calloc();
+	size_t len;
 
 	if ((fup = lookup(id, type)))
 		return (fup);
@@ -364,7 +345,7 @@ addid(id, type, name)
 	if (name) {
 		bcopy(name, fup->fu_name, len + 1);
 	} else {
-		sprintf(fup->fu_name, "%u", id);
+		snprintf(fup->fu_name, len, "%u", id);
 	}
 	return (fup);
 }
@@ -373,8 +354,7 @@ addid(id, type, name)
  * Calculate the grace period and return a printable string for it.
  */
 char *
-timeprt(seconds)
-	time_t seconds;
+timeprt(time_t seconds)
 {
 	int hours, minutes;
 	static char buf[20];

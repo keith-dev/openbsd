@@ -1,4 +1,4 @@
-/*	$OpenBSD: msgs.c,v 1.24 2003/03/13 09:09:33 deraadt Exp $	*/
+/*	$OpenBSD: msgs.c,v 1.27 2003/06/10 22:20:48 deraadt Exp $	*/
 /*	$NetBSD: msgs.c,v 1.7 1995/09/28 06:57:40 tls Exp $	*/
 
 /*-
@@ -13,11 +13,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -44,7 +40,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)msgs.c	8.2 (Berkeley) 4/28/95";
 #else
-static char rcsid[] = "$OpenBSD: msgs.c,v 1.24 2003/03/13 09:09:33 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: msgs.c,v 1.27 2003/06/10 22:20:48 deraadt Exp $";
 #endif
 #endif /* not lint */
 
@@ -162,9 +158,7 @@ bool	lastcmd = NO;
 jmp_buf	tstpbuf;
 
 int
-main(argc, argv)
-	int argc;
-	char *argv[];
+main(int argc, char *argv[])
 {
 	bool newrc, already;
 	int rcfirst = 0;		/* first message to print (from .rc) */
@@ -638,8 +632,7 @@ cmnd:
 }
 
 void
-prmesg(length)
-int length;
+prmesg(int length)
 {
 	FILE *outf;
 	char *env_pager;
@@ -686,8 +679,7 @@ int length;
 }
 
 void
-onintr(unused)
-	int unused;
+onintr(int unused)
 {
 	signal(SIGINT, onintr);
 	if (mailing)
@@ -712,8 +704,7 @@ onintr(unused)
  * We have just gotten a susp.  Suspend and prepare to resume.
  */
 void
-onsusp(unused)
-	int unused;
+onsusp(int unused)
 {
 	sigset_t emptyset;
 
@@ -727,8 +718,7 @@ onsusp(unused)
 }
 
 int
-linecnt(f)
-	FILE *f;
+linecnt(FILE *f)
 {
 	off_t oldpos = ftell(f);
 	int l = 0;
@@ -742,9 +732,7 @@ linecnt(f)
 }
 
 int
-next(buf, len)
-	char *buf;
-	int len;
+next(char *buf, int len)
 {
 	int i;
 	sscanf(buf, "%d", &i);
@@ -753,8 +741,7 @@ next(buf, len)
 }
 
 void
-ask(prompt)
-	char *prompt;
+ask(char *prompt)
 {
 	char	inch;
 	int	n, cmsg, fd;
@@ -802,11 +789,11 @@ ask(prompt)
 				fname[n] = NULL;
 			}
 			else
-				strcpy(fname, "Messages");
+				strlcpy(fname, "Messages", sizeof fname);
 			fd = open(fname, O_RDWR|O_EXCL|O_CREAT|O_APPEND, 0666);
 		}
 		else {
-			strcpy(fname, _PATH_TMPFILE);
+			strlcpy(fname, _PATH_TMPFILE, sizeof fname);
 			fd = mkstemp(fname);
 			if (fd != -1) {
 				snprintf(cmdbuf, sizeof(cmdbuf), _PATH_MAIL, fname);
@@ -841,8 +828,7 @@ ask(prompt)
 }
 
 void
-gfrsub(infile)
-	FILE *infile;
+gfrsub(FILE *infile)
 {
 	off_t frompos;
 
@@ -920,8 +906,7 @@ gfrsub(infile)
 }
 
 char *
-nxtfld(s)
-	char *s;
+nxtfld(char *s)
 {
 	if (*s) while (*s && *s > ' ') s++;	/* skip over this field */
 	if (*s) while (*s && *s <= ' ') s++;	/* find start of next field */

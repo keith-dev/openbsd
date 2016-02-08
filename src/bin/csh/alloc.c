@@ -1,4 +1,4 @@
-/*	$OpenBSD: alloc.c,v 1.7 2002/02/19 19:39:35 millert Exp $	*/
+/*	$OpenBSD: alloc.c,v 1.9 2003/06/11 21:09:50 deraadt Exp $	*/
 /*	$NetBSD: alloc.c,v 1.6 1995/03/21 09:02:23 cgd Exp $	*/
 
 /*-
@@ -13,11 +13,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -38,7 +34,7 @@
 #if 0
 static char sccsid[] = "@(#)alloc.c	8.1 (Berkeley) 5/31/93";
 #else
-static char rcsid[] = "$OpenBSD: alloc.c,v 1.7 2002/02/19 19:39:35 millert Exp $";
+static char rcsid[] = "$OpenBSD: alloc.c,v 1.9 2003/06/11 21:09:50 deraadt Exp $";
 #endif
 #endif /* not lint */
 
@@ -54,8 +50,7 @@ char   *memtop = NULL;		/* PWP: top of current memory */
 char   *membot = NULL;		/* PWP: bottom of allocatable memory */
 
 ptr_t
-Malloc(n)
-    size_t  n;
+Malloc(size_t n)
 {
     ptr_t   ptr;
 
@@ -69,9 +64,7 @@ Malloc(n)
 }
 
 ptr_t
-Realloc(p, n)
-    ptr_t   p;
-    size_t  n;
+Realloc(ptr_t p, size_t n)
 {
     ptr_t   ptr;
 
@@ -85,8 +78,7 @@ Realloc(p, n)
 }
 
 ptr_t
-Calloc(s, n)
-    size_t  s, n;
+Calloc(size_t s, size_t n)
 {
     ptr_t   ptr;
 
@@ -101,8 +93,7 @@ Calloc(s, n)
 }
 
 void
-Free(p)
-    ptr_t   p;
+Free(ptr_t p)
 {
     if (p)
 	free(p);
@@ -117,9 +108,7 @@ Free(p)
  */
 void
 /*ARGSUSED*/
-showall(v, t)
-    Char **v;
-    struct command *t;
+showall(Char **v, struct command *t)
 {
     memtop = (char *) sbrk(0);
     (void) fprintf(cshout, "Allocated memory from 0x%lx to 0x%lx (%d).\n",

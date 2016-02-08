@@ -1,4 +1,4 @@
-.\"	$OpenBSD: tcpdmatch.8,v 1.11 2002/02/13 08:33:46 mpech Exp $
+.\"	$OpenBSD: tcpdmatch.8,v 1.14 2003/07/08 13:47:28 jmc Exp $
 .\"
 .\" Copyright (c) 1997, Jason Downs.  All rights reserved.
 .\"
@@ -10,13 +10,6 @@
 .\" 2. Redistributions in binary form must reproduce the above copyright
 .\"    notice, this list of conditions and the following disclaimer in the
 .\"    documentation and/or other materials provided with the distribution.
-.\" 3. All advertising materials mentioning features or use of this software
-.\"    must display the following acknowledgement:
-.\"      This product includes software developed by Jason Downs for the
-.\"      OpenBSD system.
-.\" 4. Neither the name(s) of the author(s) nor the name OpenBSD
-.\"    may be used to endorse or promote products derived from this software
-.\"    without specific prior written permission.
 .\"
 .\" THIS SOFTWARE IS PROVIDED BY THE AUTHOR(S) ``AS IS'' AND ANY EXPRESS
 .\" OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
@@ -34,7 +27,8 @@
 .Dt TCPDMATCH 8
 .Os
 .Sh NAME
-tcpdmatch \- tcp wrapper oracle
+.Nm tcpdmatch
+.Nd tcp wrapper oracle
 .Sh SYNOPSIS
 .Nm tcpdmatch
 .Op Fl d
@@ -138,32 +132,6 @@ Typically, a login name or a numeric user ID.
 The default user name is
 .Dq unknown .
 .El
-.Sh EXAMPLES
-To predict how
-.Xr tcpd 8
-would handle a telnet request from the local system:
-.Pp
-.Bd -unfilled -offset indent
-$ tcpdmatch telnetd localhost
-.Ed
-.Pp
-The same request, pretending that hostname lookup failed:
-.Pp
-.Bd -unfilled -offset indent
-$ tcpdmatch telnetd 127.0.0.1
-.Ed
-.Pp
-To predict what
-.Xr tcpd 8
-would do when the client name does not match the client address:
-.Pp
-.Bd -unfilled -offset indent
-$ tcpdmatch telnetd paranoid
-.Ed
-.\" .Pp
-.\" On some systems, daemon names have no `in.' prefix, or
-.\" .Nm tcpdmatch\
-.\" may need some help to locate the inetd configuration file.
 .Sh FILES
 The default locations of the
 .Xr tcpd 8
@@ -175,6 +143,26 @@ access control table (allow list)
 .It Pa /etc/hosts.deny
 access control table (deny list)
 .El
+.Sh EXAMPLES
+To predict how
+.Xr tcpd 8
+would handle a telnet request from the local system:
+.Pp
+.Dl $ tcpdmatch telnetd localhost
+.Pp
+The same request, pretending that hostname lookup failed:
+.Pp
+.Dl $ tcpdmatch telnetd 127.0.0.1
+.Pp
+To predict what
+.Xr tcpd 8
+would do when the client name does not match the client address:
+.Pp
+.Dl $ tcpdmatch telnetd paranoid
+.\" .Pp
+.\" On some systems, daemon names have no `in.' prefix, or
+.\" .Nm tcpdmatch\
+.\" may need some help to locate the inetd configuration file.
 .Sh SEE ALSO
 .Xr hosts_access 5 ,
 .Xr hosts_options 5 ,
@@ -188,4 +176,4 @@ Eindhoven University of Technology
 Den Dolech 2, P.O. Box 513,
 5600 MB Eindhoven, The Netherlands
 .Ed
-\" @(#) tcpdmatch.8 1.5 96/02/11 17:01:35
+.\" @(#) tcpdmatch.8 1.5 96/02/11 17:01:35

@@ -1,4 +1,4 @@
-/*	$OpenBSD: utilities.c,v 1.17 2002/08/23 09:09:04 gluk Exp $	*/
+/*	$OpenBSD: utilities.c,v 1.20 2003/08/25 23:28:15 tedu Exp $	*/
 /*	$NetBSD: utilities.c,v 1.18 1996/09/27 22:45:20 christos Exp $	*/
 
 /*
@@ -13,11 +13,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -38,7 +34,7 @@
 #if 0
 static char sccsid[] = "@(#)utilities.c	8.1 (Berkeley) 6/5/93";
 #else
-static const char rcsid[] = "$OpenBSD: utilities.c,v 1.17 2002/08/23 09:09:04 gluk Exp $";
+static const char rcsid[] = "$OpenBSD: utilities.c,v 1.20 2003/08/25 23:28:15 tedu Exp $";
 #endif
 #endif /* not lint */
 
@@ -67,7 +63,7 @@ long	diskreads, totalreads;	/* Disk cache statistics */
 static void rwerror(char *, daddr_t);
 
 int
-ftypeok(struct dinode *dp)
+ftypeok(struct ufs1_dinode *dp)
 {
 	switch (dp->di_mode & IFMT) {
 
@@ -417,7 +413,7 @@ freeblk(daddr_t blkno, long frags)
  * Find a pathname
  */
 void
-getpathname(char *namebuf, ino_t curdir, ino_t ino)
+getpathname(char *namebuf, size_t namebuflen, ino_t curdir, ino_t ino)
 {
 	int len;
 	char *cp;
@@ -425,12 +421,12 @@ getpathname(char *namebuf, ino_t curdir, ino_t ino)
 	static int busy = 0;
 
 	if (curdir == ino && ino == ROOTINO) {
-		(void)strcpy(namebuf, "/");
+		(void)strlcpy(namebuf, "/", namebuflen);
 		return;
 	}
 	if (busy ||
 	    (statemap[curdir] != DSTATE && statemap[curdir] != DFOUND)) {
-		(void)strcpy(namebuf, "?");
+		(void)strlcpy(namebuf, "?", namebuflen);
 		return;
 	}
 	busy = 1;

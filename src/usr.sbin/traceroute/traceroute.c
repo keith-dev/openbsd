@@ -1,4 +1,4 @@
-/*	$OpenBSD: traceroute.c,v 1.53 2002/11/18 04:45:11 itojun Exp $	*/
+/*	$OpenBSD: traceroute.c,v 1.60 2003/08/27 08:17:34 jmc Exp $	*/
 /*	$NetBSD: traceroute.c,v 1.10 1995/05/21 15:50:45 mycroft Exp $	*/
 
 /*-
@@ -16,11 +16,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -47,7 +43,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)traceroute.c	8.1 (Berkeley) 6/6/93";*/
 #else
-static char rcsid[] = "$OpenBSD: traceroute.c,v 1.53 2002/11/18 04:45:11 itojun Exp $";
+static char rcsid[] = "$OpenBSD: traceroute.c,v 1.60 2003/08/27 08:17:34 jmc Exp $";
 #endif
 #endif /* not lint */
 
@@ -254,7 +250,7 @@ static char rcsid[] = "$OpenBSD: traceroute.c,v 1.53 2002/11/18 04:45:11 itojun 
  */
 struct packetdata {
 	u_char seq;		/* sequence number of this packet */
-	u_char ttl;		/* ttl packet left with */
+	u_int8_t ttl;		/* ttl packet left with */
 	u_int32_t sec;		/* time packet left */
 	u_int32_t usec;
 };
@@ -267,7 +263,7 @@ int32_t usec_perturb;
 u_char packet[512], *outpacket;	/* last inbound (icmp) packet */
 
 int wait_for_reply(int, struct sockaddr_in *, struct timeval *);
-void send_probe(int, int, int, struct sockaddr_in *);
+void send_probe(int, u_int8_t, int, struct sockaddr_in *);
 int packet_ok(u_char *, int, struct sockaddr_in *, int, int);
 void print(u_char *, int, struct sockaddr_in *);
 char *inetname(struct in_addr);
@@ -284,12 +280,12 @@ char *source = 0;
 char *hostname;
 
 int nprobes = 3;
-int max_ttl = IPDEFTTL;
-int first_ttl = 1;
+u_int8_t max_ttl = IPDEFTTL;
+u_int8_t first_ttl = 1;
 u_short ident;
 u_short port = 32768+666;	/* start udp dest port # for probe packets */
 u_char	proto = IPPROTO_UDP;
-u_char  icmp_type = ICMP_ECHO; /* default ICMP code/type */
+u_int8_t  icmp_type = ICMP_ECHO; /* default ICMP code/type */
 u_char  icmp_code = 0;
 int options;			/* socket options */
 int verbose;
@@ -302,15 +298,16 @@ main(int argc, char *argv[])
 {
 	struct hostent *hp;
 	struct sockaddr_in from, to;
-	int ch, i, lsrr, on, probe, seq, tos, ttl;
+	int ch, i, lsrr, on, probe, seq, tos;
 	int ttl_flag, incflag = 1, protoset = 0;
 	struct ip *ip;
 	u_int32_t tmprnd;
 	int sump = 0;
 	int mib[4] = { CTL_NET, PF_INET, IPPROTO_IP, IPCTL_DEFTTL };
 	size_t size = sizeof(max_ttl);
-	unsigned long l;
+	long l;
 	char *ep;
+	u_int8_t ttl;
 
 	if ((s = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP)) < 0)
 		err(5, "icmp socket");
@@ -336,10 +333,10 @@ main(int argc, char *argv[])
 		case 'f':
 			errno = 0;
 			ep = NULL;
-			l = strtoul(optarg, &ep, 10);
+			l = strtol(optarg, &ep, 10);
 			if (errno || !*optarg || *ep || l < 1 || l > max_ttl)
-				errx(1, "min ttl must be 1 to %d.", max_ttl);
-			first_ttl = (int)l;
+				errx(1, "min ttl must be 1 to %u.", max_ttl);
+			first_ttl = (u_int8_t)l;
 			break;
 		case 'c':
 			incflag = 0;
@@ -375,12 +372,12 @@ main(int argc, char *argv[])
 		case 'm':
 			errno = 0;
 			ep = NULL;
-			l = strtoul(optarg, &ep, 10);
+			l = strtol(optarg, &ep, 10);
 			if (errno || !*optarg || *ep || l < first_ttl ||
 			    l > MAXTTL)
-				errx(1, "max ttl must be %d to %d.", first_ttl,
+				errx(1, "max ttl must be %u to %u.", first_ttl,
 				    MAXTTL);
-			max_ttl = (int)l;
+			max_ttl = (u_int8_t)l;
 			break;
 		case 'n':
 			nflag++;
@@ -388,7 +385,7 @@ main(int argc, char *argv[])
 		case 'p':
 			errno = 0;
 			ep = NULL;
-			l = strtoul(optarg, &ep, 10);
+			l = strtol(optarg, &ep, 10);
 			if (errno || !*optarg || *ep || l <= 0 || l >= 65536)
 				errx(1, "port must be >0, <65536.");
 			port = (int)l;
@@ -399,7 +396,7 @@ main(int argc, char *argv[])
 			protoset = 1;
 			errno = 0;
 			ep = NULL;
-			l = strtoul(optarg, &ep, 10);
+			l = strtol(optarg, &ep, 10);
 			if (errno || !*optarg || *ep || l < 1 ||
 			    l >= IPPROTO_MAX) {
 				struct protoent *pent;
@@ -415,7 +412,7 @@ main(int argc, char *argv[])
 		case 'q':
 			errno = 0;
 			ep = NULL;
-			l = strtoul(optarg, &ep, 10);
+			l = strtol(optarg, &ep, 10);
 			if (errno || !*optarg || *ep || l < 1 || l > INT_MAX)
 				errx(1, "nprobes must be >0.");
 			nprobes = (int)l;
@@ -433,7 +430,7 @@ main(int argc, char *argv[])
 		case 't':
 			errno = 0;
 			ep = NULL;
-			l = strtoul(optarg, &ep, 10);
+			l = strtol(optarg, &ep, 10);
 			if (errno || !*optarg || *ep || l < 0 || l > 255)
 				errx(1, "tos must be 0 to 255.");
 			tos = (int)l;
@@ -444,7 +441,7 @@ main(int argc, char *argv[])
 		case 'w':
 			errno = 0;
 			ep = NULL;
-			l = strtoul(optarg, &ep, 10);
+			l = strtol(optarg, &ep, 10);
 			if (errno || !*optarg || *ep || l <= 1 || l > INT_MAX)
 				errx(1, "wait must be >1 sec.");
 			waittime = (int)l;
@@ -479,8 +476,8 @@ main(int argc, char *argv[])
 	if (*++argv) {
 		errno = 0;
 		ep = NULL;
-		l = strtoul(*argv, &ep, 10);
-		if (errno || !*argv || *ep || datalen > INT_MAX)
+		l = strtol(*argv, &ep, 10);
+		if (errno || !*argv || *ep || l < 0 || l > INT_MAX)
 			errx(1, "datalen out of range");
 		datalen = (int)l;
 	}
@@ -520,8 +517,10 @@ main(int argc, char *argv[])
 		*p++ = lsrrlen - 1;
 		*p++ = IPOPT_MINOFF;
 		gateway[lsrr] = to.sin_addr;
-		for (i = 1; i <= lsrr; i++)
-			*((struct in_addr *)p)++ = gateway[i];
+		for (i = 1; i <= lsrr; i++) {
+			memcpy(p, &gateway[i], sizeof(struct in_addr));
+			p += sizeof(struct in_addr);
+		}
 		ip->ip_dst = gateway[0];
 	} else
 		ip->ip_dst = to.sin_addr;
@@ -577,11 +576,11 @@ main(int argc, char *argv[])
 		inet_ntoa(to.sin_addr));
 	if (source)
 		fprintf(stderr, " from %s", source);
-	fprintf(stderr, ", %d hops max, %d byte packets\n", max_ttl, datalen);
+	fprintf(stderr, ", %u hops max, %d byte packets\n", max_ttl, datalen);
 	(void) fflush(stderr);
 
 	if (first_ttl > 1)
-		printf("Skipping %d intermediate hops\n", first_ttl - 1);
+		printf("Skipping %u intermediate hops\n", first_ttl - 1);
 
 	for (ttl = first_ttl; ttl <= max_ttl; ++ttl) {
 		in_addr_t lastaddr = 0;
@@ -591,7 +590,7 @@ main(int argc, char *argv[])
 		quad_t dt;
 		int loss;
 
-		printf("%2d ", ttl);
+		printf("%2u ", ttl);
 		for (probe = 0, loss = 0; probe < nprobes; ++probe) {
 			int cc;
 			struct timeval t1, t2;
@@ -621,7 +620,7 @@ main(int argc, char *argv[])
 				printf(" ms");
 				ip = (struct ip *)packet;
 				if (ttl_flag)
-					printf(" (%d)", ip->ip_ttl);
+					printf(" (%u)", ip->ip_ttl);
 				if (i == -2) {
 #ifndef ARCHAIC
 					ip = (struct ip *)packet;
@@ -760,7 +759,7 @@ dump_packet(void)
 }
 
 void
-send_probe(int seq, int ttl, int iflag, struct sockaddr_in *to)
+send_probe(int seq, u_int8_t ttl, int iflag, struct sockaddr_in *to)
 {
 	struct ip *ip = (struct ip *)outpacket;
 	u_char *p = (u_char *)(ip + 1);
@@ -842,7 +841,7 @@ send_probe(int seq, int ttl, int iflag, struct sockaddr_in *to)
  * Convert an ICMP "type" field to a printable string.
  */
 char *
-pr_type(u_char t)
+pr_type(u_int8_t t)
 {
 	static char *ttab[] = {
 	"Echo Reply",	"ICMP 1",	"ICMP 2",	"Dest Unreachable",
@@ -862,8 +861,9 @@ pr_type(u_char t)
 int
 packet_ok(u_char *buf, int cc, struct sockaddr_in *from, int seq, int iflag)
 {
-	register struct icmp *icp;
-	u_char type, code;
+	struct icmp *icp;
+	u_char code;
+	u_int8_t type;
 	int hlen;
 #ifndef ARCHAIC
 	struct ip *ip;
@@ -929,7 +929,7 @@ packet_ok(u_char *buf, int cc, struct sockaddr_in *from, int seq, int iflag)
 
 		printf("\n%d bytes from %s", cc, inet_ntoa(from->sin_addr));
 		printf(" to %s", inet_ntoa(ip->ip_dst));
-		printf(": icmp type %d (%s) code %d\n", type, pr_type(type),
+		printf(": icmp type %u (%s) code %d\n", type, pr_type(type),
 		    icp->icmp_code);
 		for (i = 4; i < cc ; i += sizeof(in_addr_t))
 			printf("%2d: x%8.8lx\n", i, (unsigned long)*lp++);
@@ -965,10 +965,10 @@ print(u_char *buf, int cc, struct sockaddr_in *from)
 u_short
 in_cksum(u_short *addr, int len)
 {
-	register int nleft = len;
-	register u_short *w = addr;
-	register u_short answer;
-	register int sum = 0;
+	int nleft = len;
+	u_short *w = addr;
+	u_short answer;
+	int sum = 0;
 
 	/*
 	 *  Our algorithm is simple, using a 32 bit accumulator (sum),
@@ -1002,8 +1002,8 @@ in_cksum(u_short *addr, int len)
 char *
 inetname(struct in_addr in)
 {
-	register char *cp;
-	register struct hostent *hp;
+	char *cp;
+	struct hostent *hp;
 	static int first = 1;
 	static char domain[MAXHOSTNAMELEN], line[MAXHOSTNAMELEN];
 
@@ -1033,8 +1033,8 @@ usage(void)
 	extern char *__progname;
 
 	fprintf(stderr,
-	    "usage: %s [-SDIdnrvc] [-g gateway_addr] ... [-m max_ttl] [-p port#]\n"
-	    "\t[-P proto] [-q nqueries] [-s src_addr] [-t tos]\n"
-	    "\t[-w wait] [-f first_ttl] host [data size]\n", __progname);
+	    "usage: %s [-cdDIlnrSv] [-f first_ttl] [-g gateway_addr] [-m max_ttl]\n"
+	    "\t[-p port] [-P proto] [-q nqueries] [-s src_addr] [-t tos]\n"
+	    "\t[-w waittime] host [packetsize]\n", __progname);
 	exit(1);
 }

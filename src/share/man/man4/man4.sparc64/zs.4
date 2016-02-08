@@ -1,4 +1,4 @@
-.\"	$OpenBSD: zs.4,v 1.7 2003/01/28 21:20:56 miod Exp $
+.\"	$OpenBSD: zs.4,v 1.9 2003/05/05 13:51:58 jmc Exp $
 .\"
 .\" Copyright (c) 1998, 2002 The OpenBSD Project
 .\" All rights reserved.
@@ -20,7 +20,7 @@
 .Sh DESCRIPTION
 The
 .Nm
-is a Zilog 8530 serial interface chip used in SBus-based ULTRAsparc
+is a Zilog 8530 serial interface chip used in SBus-based UltraSPARC
 .Tn Sun
 workstations.
 The Zilog 8530 provides two input/output channels per instance.
@@ -143,7 +143,7 @@ the KB_NODEAD (
 This switches off the
 .Dq dead accents .
 .Sh EXAMPLES
-To set a german keyboard layout, use
+To set a German keyboard layout, use
 .Ic wsconsctl -w keyboard.encoding=de .
 To set it at kernel build time, add
 .Em option SUNKBD_LAYOUT="KB_DE"

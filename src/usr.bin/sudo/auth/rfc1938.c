@@ -30,6 +30,10 @@
  * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ *
+ * Sponsored in part by the Defense Advanced Research Projects
+ * Agency (DARPA) and Air Force Research Laboratory, Air Force
+ * Materiel Command, USAF, under agreement number F39502-99-1-0512.
  */
 
 #include "config.h"
@@ -55,6 +59,11 @@
 #ifdef HAVE_UNISTD_H
 # include <unistd.h>
 #endif /* HAVE_UNISTD_H */
+#ifdef HAVE_ERR_H
+# include <err.h>
+#else
+# include "emul/err.h"
+#endif /* HAVE_ERR_H */
 #include <pwd.h>
 
 #if defined(HAVE_SKEY)
@@ -77,7 +86,7 @@
 #include "sudo_auth.h"
 
 #ifndef lint
-static const char rcsid[] = "$Sudo: rfc1938.c,v 1.12 2003/03/16 02:18:34 millert Exp $";
+static const char rcsid[] = "$Sudo: rfc1938.c,v 1.14 2003/04/16 00:42:10 millert Exp $";
 #endif /* lint */
 
 int
@@ -121,9 +130,7 @@ rfc1938_setup(pw, promptp, auth)
      */
     if (rfc1938challenge(&rfc1938, pw->pw_name, challenge, sizeof(challenge))) {
 	if (IS_ONEANDONLY(auth)) {
-	    (void) fprintf(stderr,
-			   "%s: You do not exist in the %s database.\n",
-			   Argv[0], auth->name);
+	    warnx("you do not exist in the %s database", auth->name);
 	    return(AUTH_FATAL);
 	} else {
 	    return(AUTH_FAILURE);

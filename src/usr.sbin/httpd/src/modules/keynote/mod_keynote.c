@@ -12,11 +12,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by Ericsson Radio Systems.
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -28,6 +23,10 @@
  * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ *
+ * Effort sponsored in part by the Defense Advanced Research Projects
+ * Agency (DARPA) and Air Force Research Laboratory, Air Force
+ * Materiel Command, USAF, under agreement number F39502-99-1-0512.
  */
 
 #include <mod_ssl.h>
@@ -262,7 +261,7 @@ keynote_add_authorizer(request_rec *r, int sessid, X509 *cert)
 }
 
 static int
-keynote_get_valid_times(request_rec *r, X509 *cert, char *before, char **timecomp, char *after, char **timecomp2)
+keynote_get_valid_times(request_rec *r, X509 *cert, char *before, size_t beforelen, char **timecomp, char *after, size_t afterlen, char **timecomp2)
 {
     ASN1_TIME *tm;
     time_t tt;
@@ -318,9 +317,9 @@ keynote_get_valid_times(request_rec *r, X509 *cert, char *before, char **timecom
 
 	    /* Stupid UTC tricks.  */
 	    if (tm->data[0] < '5')
-		sprintf(before, "20%s", tm->data);
+		snprintf(before, beforelen, "20%s", tm->data);
 	    else
-		sprintf(before, "19%s", tm->data);
+		snprintf(before, beforelen, "19%s", tm->data);
 	} else {
 	    /* V_ASN1_GENERICTIME */
 	    if (tm->length < 12 || tm->length > 15) {
@@ -346,7 +345,7 @@ keynote_get_valid_times(request_rec *r, X509 *cert, char *before, char **timecom
 		    "Invalid value in certificate's NotValidBefore time field");
 	        return(-1);
 	    }
-	    sprintf(before, "%s", tm->data);
+	    snprintf(before, beforelen, "%s", tm->data);
 	}
 
 	/* Fix missing seconds.  */
@@ -410,9 +409,9 @@ keynote_get_valid_times(request_rec *r, X509 *cert, char *before, char **timecom
 
 	    /* Stupid UTC tricks.  */
 	    if (tm->data[0] < '5')
-	      sprintf(after, "20%s", tm->data);
+	      snprintf(after, afterlen, "20%s", tm->data);
 	    else
-	      sprintf(after, "19%s", tm->data);
+	      snprintf(after, afterlen, "19%s", tm->data);
 	} else {
 	    /* V_ASN1_GENERICTIME */
 	    if (tm->length < 12 || tm->length > 15) {
@@ -438,7 +437,7 @@ keynote_get_valid_times(request_rec *r, X509 *cert, char *before, char **timecom
 		    "Invalid value in certificate's NotValidAfter time field");
 		return(-1);
 	    }
-	    sprintf(after, "%s", tm->data);
+	    snprintf(after, afterlen, "%s", tm->data);
         }
 
 	/* Fix missing seconds.  */
@@ -536,7 +535,7 @@ keynote_fake_assertion(request_rec *r, int sessid, X509 *cert, EVP_PKEY *pkey, X
     } else
 	ikey = NULL;
 
-    if (keynote_get_valid_times(r, cert, before, &timecomp, after, &timecomp2) == -1) {
+    if (keynote_get_valid_times(r, cert, before, sizeof(before), &timecomp, after, sizeof(after), &timecomp2) == -1) {
 	free(akey);
 	if (ikey)
 	    free(ikey);

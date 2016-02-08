@@ -1,4 +1,4 @@
-/*	$OpenBSD: msg.c,v 1.11 2002/06/12 06:07:16 mpech Exp $	*/
+/*	$OpenBSD: msg.c,v 1.14 2003/04/25 23:44:08 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 1991, 1993, 1994
@@ -167,8 +167,8 @@ retry:		FREE_SPACE(sp, bp, blen);
 	/*
 	 * Nvi should run on machines that don't support the numbered argument
 	 * specifications (%[digit]*$).  We do this by reformatting the string
-	 * so that we can hand it to vsprintf(3) and it will use the arguments
-	 * in the right order.  When vsprintf returns, we put the string back
+	 * so that we can hand it to vsnprintf(3) and it will use the arguments
+	 * in the right order.  When vsnprintf returns, we put the string back
 	 * into the right order.  It's undefined, according to SVID III, to mix
 	 * numbered argument specifications with the standard style arguments,
 	 * so this should be safe.
@@ -506,12 +506,13 @@ msgq_status(sp, lno, flags)
 	size_t blen, len;
 	int cnt, needsep;
 	const char *t;
-	char **ap, *bp, *np, *p, *s;
+	char **ap, *bp, *np, *p, *s, *ep;
 
 	/* Get sufficient memory. */
 	len = strlen(sp->frp->name);
 	GET_SPACE_GOTO(sp, bp, blen, len * MAX_CHARACTER_COLUMNS + 128);
 	p = bp;
+	ep = bp + blen;
 
 	/* Copy in the filename. */
 	for (p = bp, t = sp->frp->name; *t != '\0'; ++t) {
@@ -527,7 +528,7 @@ msgq_status(sp, lno, flags)
 	if (F_ISSET(sp, SC_STATUS_CNT) && sp->argv != NULL) {
 		for (cnt = 0, ap = sp->argv; *ap != NULL; ++ap, ++cnt);
 		if (cnt > 1) {
-			(void)sprintf(p,
+			(void)snprintf(p, ep - p,
 			    msg_cat(sp, "317|%d files to edit", NULL), cnt);
 			p += strlen(p);
 			*p++ = ':';
@@ -602,16 +603,17 @@ msgq_status(sp, lno, flags)
 			p += len;
 		} else {
 			t = msg_cat(sp, "027|line %lu of %lu [%ld%%]", &len);
-			(void)sprintf(p, t, lno, last, (lno * 100) / last);
+			(void)snprintf(p, ep - p, t, lno, last,
+			    (lno * 100) / last);
 			p += strlen(p);
 		}
 	} else {
 		t = msg_cat(sp, "029|line %lu", &len);
-		(void)sprintf(p, t, lno);
+		(void)snprintf(p, ep - p, t, lno);
 		p += strlen(p);
 	}
 #ifdef DEBUG
-	(void)sprintf(p, " (pid %ld)", (long)getpid());
+	(void)snprintf(p, ep - p, " (pid %ld)", (long)getpid());
 	p += strlen(p);
 #endif
 	*p++ = '\n';

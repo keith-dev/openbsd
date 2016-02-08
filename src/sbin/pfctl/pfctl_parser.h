@@ -1,4 +1,4 @@
-/*	$OpenBSD: pfctl_parser.h,v 1.50 2003/03/07 12:55:37 henning Exp $ */
+/*	$OpenBSD: pfctl_parser.h,v 1.67 2003/08/21 19:12:09 frantzen Exp $ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
@@ -33,6 +33,8 @@
 #ifndef _PFCTL_PARSER_H_
 #define _PFCTL_PARSER_H_
 
+#define PF_OSFP_FILE		"/etc/pf.os"
+
 #define PF_OPT_DISABLE		0x0001
 #define PF_OPT_ENABLE		0x0002
 #define PF_OPT_VERBOSE		0x0004
@@ -60,11 +62,15 @@ struct pfctl {
 	int dev;
 	int opts;
 	int loadopt;
+	u_int32_t tticket;		/* table ticket */
+	int tdirty;			/* kernel dirty */
 	u_int32_t rule_nr;
 	struct pfioc_pooladdr paddr;
 	struct pfioc_rule *prule[PF_RULESET_MAX];
 	struct pfioc_altq *paltq;
 	struct pfioc_queue *pqueue;
+	const char *anchor;
+	const char *ruleset;
 };
 
 enum pfctl_iflookup_mode {
@@ -93,6 +99,52 @@ struct node_host {
 	struct node_host	*tail;
 };
 
+struct node_os {
+	char			*os;
+	pf_osfp_t		 fingerprint;
+	struct node_os		*next;
+	struct node_os		*tail;
+};
+
+struct node_queue_bw {
+	u_int32_t	bw_absolute;
+	u_int16_t	bw_percent;
+};
+
+struct node_hfsc_sc {
+	struct node_queue_bw	m1;	/* slope of 1st segment; bps */
+	u_int			d;	/* x-projection of m1; msec */
+	struct node_queue_bw	m2;	/* slope of 2nd segment; bps */
+	u_int8_t		used;
+};
+
+struct node_hfsc_opts {
+	struct node_hfsc_sc	realtime;
+	struct node_hfsc_sc	linkshare;
+	struct node_hfsc_sc	upperlimit;
+	int			flags;
+};
+
+struct node_queue_opt {
+	int			 qtype;
+	union {
+		struct cbq_opts		cbq_opts;
+		struct priq_opts	priq_opts;
+		struct node_hfsc_opts	hfsc_opts;
+	}			 data;
+};
+
+SIMPLEQ_HEAD(node_tinithead, node_tinit);
+struct node_tinit {	/* table initializer */
+	SIMPLEQ_ENTRY(node_tinit)	 entries;
+	struct node_host		*host;
+	char				*file;
+};
+
+struct pfr_buffer;	/* forward definition */
+
+int	pfctl_rules(int, char *, int, char *, char *);
+
 int	pfctl_add_rule(struct pfctl *, struct pf_rule *);
 int	pfctl_add_altq(struct pfctl *, struct pf_altq *);
 int	pfctl_add_pool(struct pfctl *, struct pf_pool *, sa_family_t);
@@ -105,31 +157,41 @@ int	pfctl_set_logif(struct pfctl *, char *);
 
 int	parse_rules(FILE *, struct pfctl *);
 int	parse_flags(char *);
+int	pfctl_load_anchors(int, int);
 
-void	print_filter(struct pf_rule *, int);
 void	print_pool(struct pf_pool *, u_int16_t, u_int16_t, sa_family_t, int);
 void	print_rule(struct pf_rule *, int);
-void	print_nat(struct pf_rule *, int);
-void	print_binat(struct pf_rule *, int);
-void	print_rdr(struct pf_rule *, int);
+void	print_tabledef(const char *, int, int, struct node_tinithead *);
 void	print_status(struct pf_status *);
 
-int	eval_pfaltq(struct pfctl *, struct pf_altq *, u_int32_t, u_int16_t);
-int	eval_pfqueue(struct pfctl *, struct pf_altq *, u_int32_t, u_int16_t);
+int	eval_pfaltq(struct pfctl *, struct pf_altq *, struct node_queue_bw *,
+	    struct node_queue_opt *);
+int	eval_pfqueue(struct pfctl *, struct pf_altq *, struct node_queue_bw *,
+	    struct node_queue_opt *);
 
-void	pfctl_begin_table(void);
-void	pfctl_append_addr(char *, int, int);
-void	pfctl_append_file(char *);
-void	pfctl_define_table(char *, int, int, int);
-void	pfctl_commit_table(void);
+void	 print_altq(const struct pf_altq *, unsigned, struct node_queue_bw *,
+	     struct node_queue_opt *);
+void	 print_queue(const struct pf_altq *, unsigned, struct node_queue_bw *,
+	     int, struct node_queue_opt *);
+
+int	pfctl_define_table(char *, int, int, const char *, const char *,
+	    struct pfr_buffer *, u_int32_t);
+
+void		 pfctl_clear_fingerprints(int, int);
+int		 pfctl_file_fingerprints(int, int, const char *);
+pf_osfp_t	 pfctl_get_fingerprint(const char *);
+int		 pfctl_load_fingerprints(int, int);
+char		*pfctl_lookup_fingerprint(pf_osfp_t, char *, size_t);
+void		 pfctl_show_fingerprints(int);
+
 
 struct icmptypeent {
-	char *name;
+	const char *name;
 	u_int8_t type;
 };
 
 struct icmpcodeent {
-	char *name;
+	const char *name;
 	u_int8_t type;
 	u_int8_t code;
 };
@@ -144,7 +206,6 @@ struct pf_timeout {
 	int		 timeout;
 };
 
-#define PFCTL_FLAG_ALL		0x01
 #define PFCTL_FLAG_FILTER	0x02
 #define PFCTL_FLAG_NAT		0x04
 #define PFCTL_FLAG_OPTION	0x08
@@ -154,9 +215,14 @@ struct pf_timeout {
 extern const struct pf_timeout pf_timeouts[];
 
 void			 set_ipmask(struct node_host *, u_int8_t);
+int			 check_netmask(struct node_host *, sa_family_t);
 void			 ifa_load(void);
 struct node_host	*ifa_exists(const char *);
 struct node_host	*ifa_lookup(const char *, enum pfctl_iflookup_mode);
-struct node_host	*host(const char *, int);
+struct node_host	*host(const char *);
+
+int			 append_addr(struct pfr_buffer *, char *, int);
+int			 append_addr_host(struct pfr_buffer *,
+			    struct node_host *, int, int);
 
 #endif /* _PFCTL_PARSER_H_ */

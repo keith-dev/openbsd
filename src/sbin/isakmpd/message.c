@@ -1,4 +1,4 @@
-/*	$OpenBSD: message.c,v 1.57 2002/09/11 09:50:44 ho Exp $	*/
+/*	$OpenBSD: message.c,v 1.61 2003/09/02 18:14:52 ho Exp $	*/
 /*	$EOM: message.c,v 1.156 2000/10/10 12:36:39 provos Exp $	*/
 
 /*
@@ -14,11 +14,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by Ericsson Radio Systems.
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -1222,6 +1217,14 @@ message_recv (struct message *msg)
       && (flags & ISAKMP_FLAGS_COMMIT))
     msg->exchange->flags |= EXCHANGE_FLAG_HE_COMMITTED;
 
+  /* Require encryption for any phase 2 message. XXX Always?  */
+  if (msg->exchange->phase == 2 && (flags & ISAKMP_FLAGS_ENC) == 0)
+    {
+      log_print ("message_recv: cleartext phase 2 message");
+      message_drop (msg, ISAKMP_NOTIFY_INVALID_FLAGS, 0, 1, 1);
+      return -1;
+    }
+
   /* OK let the exchange logic do the rest.  */
   exchange_run (msg);
 
@@ -1343,10 +1346,10 @@ message_add_payload (struct message *msg, u_int8_t payload, u_int8_t *buf,
   struct iovec *new_iov;
   struct payload *payload_node;
 
-  payload_node = malloc (sizeof *payload_node);
+  payload_node = calloc (1, sizeof *payload_node);
   if (!payload_node)
     {
-      log_error ("message_add_payload: malloc (%lu) failed",
+      log_error ("message_add_payload: calloc (1, %lu) failed",
 		 (unsigned long)sizeof *payload_node);
       return -1;
     }
@@ -1594,7 +1597,7 @@ message_dump_raw (char *header, struct message *msg, int class)
   for (i = 0; i < msg->iovlen; i++)
     for (j = 0; j < msg->iov[i].iov_len; j++)
       {
-	snprintf (p, 80 - (int)(p - buf), "%02x",
+	snprintf (p, sizeof buf - (int)(p - buf), "%02x",
 		  ((u_int8_t *)msg->iov[i].iov_base)[j]);
 	p += 2;
 	if (++k % 32 == 0)

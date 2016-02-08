@@ -1,4 +1,4 @@
-/*	$OpenBSD: aucat.c,v 1.5 2002/12/09 00:45:38 millert Exp $	*/
+/*	$OpenBSD: aucat.c,v 1.8 2003/07/10 00:06:50 david Exp $	*/
 /*
  * Copyright (c) 1997 Kenneth Stailey.  All rights reserved.
  *
@@ -33,6 +33,7 @@
 #include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <unistd.h>
 #include <err.h>
 
@@ -40,14 +41,14 @@
  * aucat: concatinate and play Sun 8-bit .au files
  */
 
+int	playfile(int, char *);
+
 /* function playfile: given a file which is positioned at the beginning
  * of what is assumed to be an .au data stream copy it out to the audio
  * device.  Return 0 on success, -1 on failure.
  */
 int
-playfile(fd, dev)
-	int fd;
-	char *dev;
+playfile(int fd, char *dev)
 {
 	static int afd = -1;
 	int rd;
@@ -67,9 +68,7 @@ playfile(fd, dev)
 }
 
 int
-main(argc, argv)
-	int argc;
-	char **argv;
+main(int argc, char *argv[])
 {
 	int fd, ch;
 	unsigned long data;

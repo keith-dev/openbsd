@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999-2001 Todd C. Miller <Todd.Miller@courtesan.com>
+ * Copyright (c) 1999-2001, 2003 Todd C. Miller <Todd.Miller@courtesan.com>
  * All rights reserved.
  *
  * This code is derived from software contributed by Spider Boardman
@@ -32,6 +32,10 @@
  * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ *
+ * Sponsored in part by the Defense Advanced Research Projects
+ * Agency (DARPA) and Air Force Research Laboratory, Air Force
+ * Materiel Command, USAF, under agreement number F39502-99-1-0512.
  */
 
 #include "config.h"
@@ -64,7 +68,7 @@
 #include "sudo_auth.h"
 
 #ifndef lint
-static const char rcsid[] = "$Sudo: sia.c,v 1.10 2001/12/14 19:52:53 millert Exp $";
+static const char rcsid[] = "$Sudo: sia.c,v 1.12 2003/04/16 00:42:10 millert Exp $";
 #endif /* lint */
 
 static int sudo_collect	__P((int, int, uchar_t *, int, prompt_t *));
@@ -111,6 +115,8 @@ sia_setup(pw, promptp, auth)
     sudo_auth *auth;
 {
     SIAENTITY *siah = NULL;
+    extern int Argc;
+    extern char **Argv;
 
     if (sia_ses_init(&siah, Argc, Argv, NULL, pw->pw_name, ttyname(0), 1, NULL)
 	!= SIASUCCESS) {

@@ -1,4 +1,4 @@
-/*	$OpenBSD: main.c,v 1.15 2002/02/16 21:28:00 millert Exp $	*/
+/*	$OpenBSD: main.c,v 1.18 2003/06/19 16:34:53 pvalchev Exp $	*/
 /*	$NetBSD: main.c,v 1.5 1996/03/19 03:21:38 jtc Exp $	*/
 
 /*
@@ -16,11 +16,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -47,7 +43,7 @@ char copyright[] =
 #if 0
 static char sccsid[] = "@(#)main.c	5.5 (Berkeley) 5/24/93";
 #else
-static char rcsid[] = "$OpenBSD: main.c,v 1.15 2002/02/16 21:28:00 millert Exp $";
+static char rcsid[] = "$OpenBSD: main.c,v 1.18 2003/06/19 16:34:53 pvalchev Exp $";
 #endif
 #endif /* not lint */
 
@@ -67,7 +63,6 @@ char vflag;
 
 char *symbol_prefix;
 char *file_prefix = "y";
-char *temp_form = "yacc.XXXXXXXXXXX";
 
 int lineno;
 int outline;
@@ -126,8 +121,7 @@ void open_files(void);
 volatile sig_atomic_t sigdie;
 
 void
-done(k)
-int k;
+done(int k)
 {
     if (action_file)
 	unlink(action_file_name);
@@ -142,8 +136,7 @@ int k;
 
 
 void
-onintr(signo)
-	int signo;
+onintr(int signo)
 {
     sigdie = 1;
     done(1);
@@ -151,7 +144,7 @@ onintr(signo)
 
 
 void
-set_signals()
+set_signals(void)
 {
 #ifdef SIGINT
     if (signal(SIGINT, SIG_IGN) != SIG_IGN)
@@ -169,7 +162,7 @@ set_signals()
 
 
 void
-usage()
+usage(void)
 {
     fprintf(stderr, "usage: %s [-dlrtv] [-b file_prefix] [-o outputfile] [-p symbol_prefix] filename\n", __progname);
     exit(1);
@@ -177,9 +170,7 @@ usage()
 
 
 void
-getargs(argc, argv)
-int argc;
-char *argv[];
+getargs(int argc, char *argv[])
 {
     int i;
     char *s;
@@ -292,8 +283,7 @@ no_more_options:;
 
 
 char *
-allocate(n)
-unsigned n;
+allocate(unsigned int n)
 {
     char *p;
 
@@ -306,67 +296,38 @@ unsigned n;
     return (p);
 }
 
+#define TEMPNAME(s, c, d, l)	\
+	(asprintf(&(s), "%.*s/yacc.%xXXXXXXXXXX", (int)(l), (d), (c)))
+
 void
-create_file_names()
+create_file_names(void)
 {
-    int i, len;
+    size_t len;
     char *tmpdir;
 
-    if (!(tmpdir = getenv("TMPDIR")))
+    if ((tmpdir = getenv("TMPDIR")) == NULL || *tmpdir == '\0')
 	tmpdir = _PATH_TMP;
 
     len = strlen(tmpdir);
-    i = len + strlen(temp_form) + 1;
-    if (len && tmpdir[len-1] != '/')
-	++i;
+    if (tmpdir[len-1] == '/')
+	len--;
 
-    action_file_name = MALLOC(i);
-    if (action_file_name == 0) no_space();
-    text_file_name = MALLOC(i);
-    if (text_file_name == 0) no_space();
-    union_file_name = MALLOC(i);
-    if (union_file_name == 0) no_space();
+    if (TEMPNAME(action_file_name, 'a', tmpdir, len) == -1 ||
+	TEMPNAME(text_file_name, 'r', tmpdir, len) == -1 ||
+	TEMPNAME(union_file_name, 'u', tmpdir, len) == -1)
+	no_space();
 
-    strcpy(action_file_name, tmpdir);
-    strcpy(text_file_name, tmpdir);
-    strcpy(union_file_name, tmpdir);
-
-    if (len && tmpdir[len - 1] != '/')
+    if (output_file_name == NULL)
     {
-	action_file_name[len] = '/';
-	text_file_name[len] = '/';
-	union_file_name[len] = '/';
-	++len;
-    }
-
-    strcpy(action_file_name + len, temp_form);
-    strcpy(text_file_name + len, temp_form);
-    strcpy(union_file_name + len, temp_form);
-
-    action_file_name[len + 5] = 'a';
-    text_file_name[len + 5] = 't';
-    union_file_name[len + 5] = 'u';
-
-    len = strlen(file_prefix);
-
-    if (!output_file_name)
-    {
-        output_file_name = MALLOC(len + 7);
-        if (output_file_name == 0)
+	if (asprintf(&output_file_name, "%s%s", file_prefix, OUTPUT_SUFFIX)
+	    == -1)
 	    no_space();
-        strcpy(output_file_name, file_prefix);
-        strcpy(output_file_name + len, OUTPUT_SUFFIX);
     }
 
-    if (rflag)
-    {
-	code_file_name = MALLOC(len + 8);
-	if (code_file_name == 0)
+    if (rflag) {
+	if (asprintf(&code_file_name, "%s%s", file_prefix, CODE_SUFFIX) == -1)
 	    no_space();
-	strcpy(code_file_name, file_prefix);
-	strcpy(code_file_name + len, CODE_SUFFIX);
-    }
-    else
+    } else
 	code_file_name = output_file_name;
 
     if (dflag)
@@ -375,10 +336,9 @@ create_file_names()
 	{
 	    char *suffix;
 
-	    defines_file_name = MALLOC(strlen(output_file_name)+1);
+	    defines_file_name = strdup(output_file_name);
 	    if (defines_file_name == 0)
 	        no_space();
-	    strcpy(defines_file_name, output_file_name);
 
             /* does the output_file_name have a known suffix */
             if ((suffix = strrchr(output_file_name, '.')) != 0 &&
@@ -403,29 +363,23 @@ create_file_names()
 	}
 	else
 	{
-	    defines_file_name = MALLOC(len + 7);
-	    if (defines_file_name == 0)
+	    if (asprintf(&defines_file_name, "%s%s", file_prefix,
+		DEFINES_SUFFIX) == -1)
 	        no_space();
-	    strcpy(defines_file_name, file_prefix);
-	    strcpy(defines_file_name + len, DEFINES_SUFFIX);
 	}
     }
 
     if (vflag)
     {
-	verbose_file_name = MALLOC(len + 8);
-	if (verbose_file_name == 0)
+	if (asprintf(&verbose_file_name, "%s%s", file_prefix,
+	    VERBOSE_SUFFIX) == -1)
 	    no_space();
-	strcpy(verbose_file_name, file_prefix);
-	strcpy(verbose_file_name + len, VERBOSE_SUFFIX);
     }
 }
 
 
 FILE *
-fsopen(name, mode)
-    char *name;
-    char *mode;
+fsopen(char *name, char *mode)
 {
     FILE *fp = NULL;
     int fd, mod = O_RDONLY;
@@ -441,7 +395,7 @@ fsopen(name, mode)
 }
 
 void
-open_files()
+open_files(void)
 {
     int fd;
 
@@ -495,9 +449,7 @@ open_files()
 
 
 int
-main(argc, argv)
-int argc;
-char *argv[];
+main(int argc, char *argv[])
 {
     set_signals();
     getargs(argc, argv);

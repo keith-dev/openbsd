@@ -1,5 +1,4 @@
-/*	$OpenBSD: mkpar.c,v 1.9 2002/06/19 03:24:56 deraadt Exp $	*/
-
+/*	$OpenBSD: mkpar.c,v 1.11 2003/06/19 16:34:53 pvalchev Exp $	*/
 /*	$NetBSD: mkpar.c,v 1.4 1996/03/19 03:21:39 jtc Exp $	*/
 
 /*
@@ -17,11 +16,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -78,7 +73,7 @@ void defreds(void);
 
 
 void
-make_parser()
+make_parser(void)
 {
     int i;
 
@@ -95,8 +90,7 @@ make_parser()
 
 
 action *
-parse_actions(stateno)
-int stateno;
+parse_actions(int stateno)
 {
     action *actions;
 
@@ -107,8 +101,7 @@ int stateno;
 
 
 action *
-get_shifts(stateno)
-int stateno;
+get_shifts(int stateno)
 {
     action *actions, *temp;
     shifts *sp;
@@ -142,9 +135,7 @@ int stateno;
 }
 
 action *
-add_reductions(stateno, actions)
-int stateno;
-action *actions;
+add_reductions(int stateno, action *actions)
 {
     int i, j, m, n;
     int ruleno, tokensetsize;
@@ -168,9 +159,7 @@ action *actions;
 
 
 action *
-add_reduce(actions, ruleno, symbol)
-action *actions;
-int ruleno, symbol;
+add_reduce(action *actions, int ruleno, int symbol)
 {
     action *temp, *prev, *next;
 
@@ -209,7 +198,7 @@ int ruleno, symbol;
 
 
 void
-find_final_state()
+find_final_state(void)
 {
     int goal, i;
     short *to_state;
@@ -227,7 +216,7 @@ find_final_state()
 
 
 void
-unused_rules()
+unused_rules(void)
 {
     int i;
     action *p;
@@ -262,7 +251,7 @@ unused_rules()
 
 
 void
-remove_conflicts()
+remove_conflicts(void)
 {
     int i;
     int symbol;
@@ -338,7 +327,7 @@ remove_conflicts()
 
 
 void
-total_conflicts()
+total_conflicts(void)
 {
     /* Warn if s/r != expect or if any r/r */
     if ((SRtotal != SRexpect) || RRtotal)
@@ -361,8 +350,7 @@ total_conflicts()
 
 
 int
-sole_reduction(stateno)
-int stateno;
+sole_reduction(int stateno)
 {
     int count, ruleno;
     action *p;
@@ -390,7 +378,7 @@ int stateno;
 
 
 void
-defreds()
+defreds(void)
 {
     int i;
 
@@ -400,8 +388,7 @@ defreds()
 }
  
 void
-free_action_row(p)
-action *p;
+free_action_row(action *p)
 {
   action *q;
 
@@ -414,7 +401,7 @@ action *p;
 }
 
 void
-free_parser()
+free_parser(void)
 {
   int i;
 

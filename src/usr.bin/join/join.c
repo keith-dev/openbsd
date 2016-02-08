@@ -1,4 +1,4 @@
-/* $OpenBSD: join.c,v 1.14 2002/02/16 21:27:47 millert Exp $	*/
+/* $OpenBSD: join.c,v 1.16 2003/06/10 22:20:47 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 1991, 1993, 1994
@@ -16,11 +16,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -45,7 +41,7 @@ static char copyright[] =
 
 #ifndef lint
 /*static char sccsid[] = "@(#)join.c	8.6 (Berkeley) 5/4/95"; */
-static char rcsid[] = "$OpenBSD: join.c,v 1.14 2002/02/16 21:27:47 millert Exp $";
+static char rcsid[] = "$OpenBSD: join.c,v 1.16 2003/06/10 22:20:47 deraadt Exp $";
 #endif /* not lint */
 
 #include <sys/param.h>
@@ -115,9 +111,7 @@ void slurpit(INPUT *);
 void usage(void);
 
 int
-main(argc, argv)
-	int argc;
-	char *argv[];
+main(int argc, char *argv[])
 {
 	INPUT *F1, *F2;
 	int aflag, ch, cval, vflag;
@@ -287,8 +281,7 @@ main(argc, argv)
 }
 
 /* wrapper around slurpit() to keep track of what field we are on */
-void slurp(F)
-	INPUT *F;
+void slurp(INPUT *F)
 {
 	long fpos;
 	u_long cfieldc;
@@ -309,8 +302,7 @@ void slurp(F)
 }	
 
 void
-slurpit(F)
-	INPUT *F;
+slurpit(INPUT *F)
 {
 	LINE *lp, *lastlp, tmp;
 	size_t len;
@@ -403,9 +395,7 @@ slurpit(F)
 }
 
 int
-cmp(lp1, fieldno1, lp2, fieldno2)
-	LINE *lp1, *lp2;
-	u_long fieldno1, fieldno2;
+cmp(LINE *lp1, u_long fieldno1, LINE *lp2, u_long fieldno2)
 {
 	if (lp1->fieldcnt <= fieldno1)
 		return (-1);
@@ -415,8 +405,7 @@ cmp(lp1, fieldno1, lp2, fieldno2)
 }
 
 void
-joinlines(F1, F2)
-	INPUT *F1, *F2;
+joinlines(INPUT *F1, INPUT *F2)
 {
 	int cnt1, cnt2;
 
@@ -436,9 +425,7 @@ joinlines(F1, F2)
 }
 
 void
-outoneline(F, lp)
-	INPUT *F;
-	LINE *lp;
+outoneline(INPUT *F, LINE *lp)
 {
 	int cnt;
 
@@ -464,9 +451,7 @@ outoneline(F, lp)
 }
 
 void
-outtwoline(F1, lp1, F2, lp2)
-	INPUT *F1, *F2;
-	LINE *lp1, *lp2;
+outtwoline(INPUT *F1, LINE *lp1, INPUT *F2, LINE *lp2)
 {
 	int cnt;
 
@@ -497,10 +482,7 @@ outtwoline(F1, lp1, F2, lp2)
 }
 
 void
-outfield(lp, fieldno, out_empty)
-	LINE *lp;
-	u_long fieldno;
-	int out_empty;
+outfield(LINE *lp, u_long fieldno, int out_empty)
 {
 	if (needsep++)
 		putchar((int)*tabchar);
@@ -523,8 +505,7 @@ outfield(lp, fieldno, out_empty)
  * fields.
  */
 void
-fieldarg(option)
-	char *option;
+fieldarg(char *option)
 {
 	u_long fieldno;
 	char *end, *token;
@@ -552,8 +533,7 @@ fieldarg(option)
 }
 
 void
-obsolete(argv)
-	char **argv;
+obsolete(char **argv)
 {
 	int len;
 	char **p, *ap, *t;
@@ -632,7 +612,7 @@ jbad:				errx(1, "illegal option -- %s", ap);
 }
 
 void
-usage()
+usage(void)
 {
 	(void)fprintf(stderr, "%s%s\n",
 	    "usage: join [-a fileno | -v fileno ] [-e string] [-1 field] ",

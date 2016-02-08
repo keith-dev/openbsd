@@ -1,4 +1,4 @@
-.\"	$OpenBSD: disk.9,v 1.19 2002/12/20 19:27:07 millert Exp $
+.\"	$OpenBSD: disk.9,v 1.21 2003/06/06 20:56:32 jmc Exp $
 .\"	$NetBSD: disk.9,v 1.2 1996/04/08 20:41:25 jtc Exp $
 .\"
 .\" Copyright (c) 1995, 1996 Jason R. Thorpe.
@@ -107,9 +107,9 @@ may grow or shrink over time as disks are dynamically added and removed
 from the system.
 Drivers which currently make use of the detachment
 capability of the framework are the
-.Nm ccd
+.Xr ccd 4
 and
-.Nm vnd
+.Xr vnd 4
 pseudo-device drivers.
 .Pp
 The following is a brief description of each function in the framework:
@@ -355,22 +355,16 @@ and
 .Pp
 The
 .Ox
-.Nm ccd ,
-.Nm raid ,
+.Xr ccd 4 ,
+.Xr raid 4
 and
-.Nm vnd
+.Xr vnd 4
 drivers utilize the detachment capability of the framework.
 They are located in
 .Pa sys/dev/ccd.c ,
 .Pa sys/dev/raidframe/ ,
 and
 .Pa sys/dev/vnd.c .
-.Sh AUTHORS
-The
-.Ox
-generic disk framework was architected and implemented within
-.Nx
-by Jason R. Thorpe <thorpej@NetBSD.ORG>.
 .Sh SEE ALSO
 .Xr ccd 4 ,
 .Xr raid 4 ,
@@ -381,3 +375,10 @@ The
 .Ox
 generic disk framework first appeared in
 .Nx 1.2 .
+.Sh AUTHORS
+The
+.Ox
+generic disk framework was architected and implemented within
+.Nx
+by
+.An Jason R. Thorpe Aq thorpej@NetBSD.ORG .

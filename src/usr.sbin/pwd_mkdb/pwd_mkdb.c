@@ -1,4 +1,4 @@
-/*	$OpenBSD: pwd_mkdb.c,v 1.32 2002/11/21 22:13:20 millert Exp $	*/
+/*	$OpenBSD: pwd_mkdb.c,v 1.37 2003/06/28 20:37:29 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 1991, 1993, 1994
@@ -14,11 +14,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -36,16 +32,16 @@
  */
 
 #ifndef lint
-static char copyright[] =
+static const char copyright[] =
 "@(#) Copyright (c) 1991, 1993, 1994\n\
 	The Regents of the University of California.  All rights reserved.\n";
 #endif /* not lint */
 
 #ifndef lint
 #if 0
-static char sccsid[] = "from: @(#)pwd_mkdb.c	8.5 (Berkeley) 4/20/94";
+static const char sccsid[] = "from: @(#)pwd_mkdb.c	8.5 (Berkeley) 4/20/94";
 #else
-static char *rcsid = "$OpenBSD: pwd_mkdb.c,v 1.32 2002/11/21 22:13:20 millert Exp $";
+static const char rcsid[] = "$OpenBSD: pwd_mkdb.c,v 1.37 2003/06/28 20:37:29 deraadt Exp $";
 #endif
 #endif /* not lint */
 
@@ -102,9 +98,7 @@ char	*changedir(char *path, char *dir);
 void	db_store(FILE *, FILE *, DB *, DB *,struct passwd *, int, char *, uid_t);
 
 int
-main(argc, argv)
-	int argc;
-	char *argv[];
+main(int argc, char **argv)
 {
 	DB *dp, *edp;
 	DBT data, key;
@@ -138,6 +132,8 @@ main(argc, argv)
 			break;
 		case 'u':			/* only update this record */
 			username = optarg;
+			if (strlen(username) > _PW_NAME_LEN)
+				errx(1, "username too long");
 			break;
 		case 'v':			/* backward compatible */
 			break;
@@ -172,10 +168,11 @@ main(argc, argv)
 	/* We don't care what the user wants. */
 	(void)umask(0);
 
-	if (**argv != '/')
+	if (**argv != '/' && basedir == NULL)
 		errx(1, "%s must be specified as an absolute path", *argv);
 
-	pname = strdup(changedir(*argv, basedir));
+	if ((pname = strdup(changedir(*argv, basedir))) == NULL)
+		err(1, NULL);
 	/* Open the original password file */
 	if (!(fp = fopen(pname, "r")))
 		error(pname);
@@ -293,7 +290,7 @@ main(argc, argv)
 
 	/*
 	 * Write the .db files.
-	 * We do this three times, one per key type (for getpw{name,uid,ent}).
+	 * We do this three times, one per key type (for getpw{nam,uid,ent}).
 	 * The first time through we also check for YP, issue warnings
 	 * and save the V7 format passwd file if necessary.
 	 */
@@ -354,10 +351,7 @@ main(argc, argv)
 }
 
 int
-scan(fp, pw, flags)
-	FILE *fp;
-	struct passwd *pw;
-	int *flags;
+scan(FILE *fp, struct passwd *pw, int *flags)
 {
 	static int lcnt;
 	static char line[LINE_MAX];
@@ -454,7 +448,7 @@ errorx(name)
 }
 
 void
-cleanup()
+cleanup(void)
 {
 	char buf[MAXPATHLEN];
 
@@ -475,7 +469,7 @@ cleanup()
 }
 
 void
-usage()
+usage(void)
 {
 
 	(void)fprintf(stderr,
@@ -484,8 +478,7 @@ usage()
 }
 
 char *
-changedir(path, dir)
-	char *path, *dir;
+changedir(char *path, char *dir)
 {
 	static char fixed[MAXPATHLEN];
 	char *p;
@@ -493,25 +486,15 @@ changedir(path, dir)
 	if (!dir)
 		return (path);
 
-	p = strrchr(path, '/');
-	strlcpy(fixed, dir, sizeof fixed);
-	if (p) {
-		strlcat(fixed, "/", sizeof fixed);
-		strlcat(fixed, p + 1, sizeof fixed);
-	}
+	if ((p = strrchr(path, '/')) != NULL)
+		path = p + 1;
+	snprintf(fixed, sizeof(fixed), "%s/%s", dir, path);
 	return (fixed);
 }
 
 void
-db_store(fp, oldfp, edp, dp, pw, keytype, username, olduid)
-	FILE *fp;
-	FILE *oldfp;
-	DB *edp;
-	DB *dp;
-	struct passwd *pw;
-	int keytype;
-	char *username;
-	uid_t olduid;
+db_store(FILE *fp, FILE *oldfp, DB *edp, DB *dp, struct passwd *pw,
+	 int keytype, char *username, uid_t olduid)
 {
 	int flags = 0;
 	int dbmode, found = 0;

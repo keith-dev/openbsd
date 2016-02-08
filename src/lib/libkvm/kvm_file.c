@@ -1,4 +1,4 @@
-/*	$OpenBSD: kvm_file.c,v 1.7 2002/11/29 20:15:43 deraadt Exp $ */
+/*	$OpenBSD: kvm_file.c,v 1.9 2003/06/26 16:34:53 deraadt Exp $ */
 /*	$NetBSD: kvm_file.c,v 1.5 1996/03/18 22:33:18 thorpej Exp $	*/
 
 /*-
@@ -13,11 +13,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -38,7 +34,7 @@
 #if 0
 static char sccsid[] = "@(#)kvm_file.c	8.1 (Berkeley) 6/4/93";
 #else
-static char *rcsid = "$OpenBSD: kvm_file.c,v 1.7 2002/11/29 20:15:43 deraadt Exp $";
+static char *rcsid = "$OpenBSD: kvm_file.c,v 1.9 2003/06/26 16:34:53 deraadt Exp $";
 #endif
 #endif /* LIBC_SCCS and not lint */
 
@@ -73,10 +69,13 @@ static char *rcsid = "$OpenBSD: kvm_file.c,v 1.7 2002/11/29 20:15:43 deraadt Exp
 #define KREAD(kd, addr, obj) \
 	(kvm_read(kd, addr, obj, sizeof(*obj)) != sizeof(*obj))
 
+static int kvm_deadfiles(kvm_t *kd, int op, int arg, long filehead_o,
+    int nfiles);
+
 /*
  * Get file structures.
  */
-static
+static int
 kvm_deadfiles(kd, op, arg, filehead_o, nfiles)
 	kvm_t *kd;
 	int op, arg, nfiles;

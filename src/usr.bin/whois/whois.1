@@ -1,4 +1,4 @@
-.\"	$OpenBSD: whois.1,v 1.19 2003/01/07 17:24:08 millert Exp $
+.\"	$OpenBSD: whois.1,v 1.22 2003/09/02 18:50:07 jmc Exp $
 .\"	$NetBSD: whois.1,v 1.5 1995/08/31 21:51:32 jtc Exp $
 .\"
 .\" Copyright (c) 1985, 1990, 1993
@@ -12,11 +12,7 @@
 .\" 2. Redistributions in binary form must reproduce the above copyright
 .\"    notice, this list of conditions and the following disclaimer in the
 .\"    documentation and/or other materials provided with the distribution.
-.\" 3. All advertising materials mentioning features or use of this software
-.\"    must display the following acknowledgement:
-.\"	This product includes software developed by the University of
-.\"	California, Berkeley and its contributors.
-.\" 4. Neither the name of the University nor the names of its contributors
+.\" 3. Neither the name of the University nor the names of its contributors
 .\"    may be used to endorse or promote products derived from this software
 .\"    without specific prior written permission.
 .\"
@@ -53,7 +49,7 @@ The
 .Nm
 utility looks up records in the databases maintained by several
 Network Information Centers
-.Pq Tn NICs Ns .
+.Pq Tn NICs .
 .Pp
 The options are as follows:
 .Bl -tag -width Ds
@@ -85,11 +81,11 @@ option with an argument of
 .It Fl d
 Use the US Department of Defense database.
 It contains points of contact for subdomains of
-.Tn \&.MIL Ns .
+.Tn \&.MIL .
 .It Fl g
 Use the US non-military federal government database, which contains points of
 contact for subdomains of
-.Tn \&.GOV Ns .
+.Tn \&.GOV .
 .It Fl h Ar host
 Use the specified host instead of the default NIC
 (whois.crsnic.net).
@@ -106,7 +102,7 @@ automatically for a large number of
 .Tn TLDs .
 .Pp
 In the event that an IP
-address is specified, the whois server will default to the American   
+address is specified, the whois server will default to the American
 Registry for Internet Numbers
 .Pq Tn ARIN .
 If a query to
@@ -143,15 +139,15 @@ Also, note that the
 database
 .Pq Pa whois.internic.net
 is no longer handled by Network Solutions, Inc.
-For details, see 
+For details, see
 .Pa http://www.internic.net/ .
 .Pp
 (Hint: Contact information, identified by the term
 .Em handle ,
 can be looked up by prefixing
-.Qq Li "!"
+.Qq Li \&!
 or
-.Qq Li "handle\ "
+.Qq Li handle\ \&
 to the
 .Tn NIC
 handle in the query.)
@@ -160,7 +156,7 @@ Use the Latin American and Caribbean IP address Regional Registry
 .Pq Tn LACNIC
 database.
 It contains network numbers used in much of Latin America and the
-Caribbean. 
+Caribbean.
 .It Fl m
 Use the Route Arbiter Database
 .Pq Tn RADB
@@ -196,9 +192,9 @@ Use the Russia Network Information Center
 database.
 It contains network numbers and domain contact information
 for subdomains of
-.Tn \&.RU Ns .
+.Tn \&.RU .
 This option is deprecated; use the
-.Fl c   
+.Fl c
 option with an argument of
 .Qq Li RU
 instead.
@@ -222,7 +218,7 @@ the special name
 .Dq help .
 .Ss Special cases
 Queries beginning with an exclamation point
-.Ql !
+.Ql \&!
 are assumed to be
 .Tn NSI
 contact handles.
@@ -288,7 +284,7 @@ a whois server using a non-standard port, where
 .Dq Li query-data
 is the query to be sent to
 .Dq Li whois.example.com
-on port    
+on port
 .Dq Li rwhois
 (written numerically as 4321).
 .Pp

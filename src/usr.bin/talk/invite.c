@@ -1,4 +1,4 @@
-/*	$OpenBSD: invite.c,v 1.8 2002/06/21 06:16:44 millert Exp $	*/
+/*	$OpenBSD: invite.c,v 1.10 2003/06/10 22:20:52 deraadt Exp $	*/
 /*	$NetBSD: invite.c,v 1.3 1994/12/09 02:14:18 jtc Exp $	*/
 
 /*
@@ -13,11 +13,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -38,7 +34,7 @@
 #if 0
 static char sccsid[] = "@(#)invite.c	8.1 (Berkeley) 6/6/93";
 #endif
-static char rcsid[] = "$OpenBSD: invite.c,v 1.8 2002/06/21 06:16:44 millert Exp $";
+static char rcsid[] = "$OpenBSD: invite.c,v 1.10 2003/06/10 22:20:52 deraadt Exp $";
 #endif /* not lint */
 
 #include "talk.h"
@@ -68,7 +64,7 @@ int	local_id, remote_id;
 jmp_buf invitebuf;
 
 void
-invite_remote()
+invite_remote(void)
 {
 	int new_sockt;
 	struct itimerval itimer;
@@ -147,8 +143,7 @@ invite_remote()
  * Routine called on interupt to re-invite the callee
  */
 void
-re_invite(dummy)
-	int dummy;
+re_invite(int dummy)
 {
 	message("Ringing your party again");
 	/* force a re-announce */
@@ -174,7 +169,7 @@ static	char *answers[] = {
  * Transmit the invitation and process the response
  */
 void
-announce_invite()
+announce_invite(void)
 {
 	CTL_RESPONSE response;
 
@@ -192,7 +187,7 @@ announce_invite()
  * Tell the daemon to remove your invitation
  */
 void
-send_delete()
+send_delete(void)
 {
 
 	msg.type = DELETE;

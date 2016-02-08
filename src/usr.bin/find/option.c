@@ -1,4 +1,4 @@
-/*	$OpenBSD: option.c,v 1.14 2002/02/16 21:27:46 millert Exp $	*/
+/*	$OpenBSD: option.c,v 1.17 2003/07/02 21:04:10 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 1990, 1993
@@ -15,11 +15,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -38,7 +34,7 @@
 
 #ifndef lint
 /*static char sccsid[] = "from: @(#)option.c	8.1 (Berkeley) 6/6/93";*/
-static char rcsid[] = "$OpenBSD: option.c,v 1.14 2002/02/16 21:27:46 millert Exp $";
+static char rcsid[] = "$OpenBSD: option.c,v 1.17 2003/07/02 21:04:10 deraadt Exp $";
 #endif /* not lint */
 
 #include <sys/types.h>
@@ -51,6 +47,9 @@ static char rcsid[] = "$OpenBSD: option.c,v 1.14 2002/02/16 21:27:46 millert Exp
 #include <string.h>
 
 #include "find.h"
+#include "extern.h"
+
+int typecompare(const void *, const void *);
 
 /* NB: the following table must be sorted lexically. */
 static OPTION options[] = {
@@ -109,8 +108,7 @@ static OPTION options[] = {
  *	this switch stuff.
  */
 PLAN *
-find_create(argvp)
-	char ***argvp;
+find_create(char ***argvp)
 {
 	OPTION *p;
 	PLAN *new;
@@ -129,13 +127,13 @@ find_create(argvp)
 		new = NULL;
 		break;
 	case O_ZERO:
-		new = (p->create)();
+		new = (p->create)(NULL, NULL, 0);
 		break;
 	case O_ARGV:
-		new = (p->create)(*argv++);
+		new = (p->create)(*argv++, NULL, 0);
 		break;
 	case O_ARGVP:
-		new = (p->create)(&argv, p->token == N_OK);
+		new = (p->create)(NULL, &argv, p->token == N_OK);
 		break;
 	default:
 		abort();
@@ -145,11 +143,9 @@ find_create(argvp)
 }
 
 OPTION *
-option(name)
-	char *name;
+option(char *name)
 {
 	OPTION tmp;
-	int typecompare(const void *, const void *);
 
 	tmp.name = name;
 	return ((OPTION *)bsearch(&tmp, options,
@@ -157,8 +153,7 @@ option(name)
 }
 
 int
-typecompare(a, b)
-	const void *a, *b;
+typecompare(const void *a, const void *b)
 {
 	return (strcmp(((OPTION *)a)->name, ((OPTION *)b)->name));
 }

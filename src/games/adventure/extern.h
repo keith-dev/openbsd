@@ -1,4 +1,4 @@
-/*	$OpenBSD: extern.h,v 1.4 2002/02/16 21:27:08 millert Exp $	*/
+/*	$OpenBSD: extern.h,v 1.6 2003/04/07 18:19:37 millert Exp $	*/
 /*	$NetBSD: extern.h,v 1.3 1997/10/11 01:55:27 lukem Exp $	*/
 
 /*
@@ -50,7 +50,7 @@ void trapdel(int);
 void startup(void);
 
 /* io.c */
-void getin(char **, char **);
+void getin(char *, size_t, char *, size_t);
 int yes(int, int, int);
 int yesm(int, int, int);
 int next(void);
@@ -121,7 +121,6 @@ int vocab(const char *, int, int);
 void prht(void);
 
 /* These three used to be functions in vocab.c */
-#define copystr(src, dest)	strcpy((dest), (src))
 #define weq(str1, str2)		(!strncmp((str1), (str2), 5))
 #define length(str)			(strlen((str)) + 1)
 

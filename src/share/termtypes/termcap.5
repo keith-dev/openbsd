@@ -1,4 +1,4 @@
-.\"	$OpenBSD: termcap.5,v 1.10 2000/09/08 17:44:49 aaron Exp $
+.\"	$OpenBSD: termcap.5,v 1.14 2003/07/11 13:53:47 jmc Exp $
 .\"
 .\" Copyright (c) 1985, 1991 The Regents of the University of California.
 .\" All rights reserved.
@@ -11,11 +11,7 @@
 .\" 2. Redistributions in binary form must reproduce the above copyright
 .\"    notice, this list of conditions and the following disclaimer in the
 .\"    documentation and/or other materials provided with the distribution.
-.\" 3. All advertising materials mentioning features or use of this software
-.\"    must display the following acknowledgement:
-.\"	This product includes software developed by the University of
-.\"	California, Berkeley and its contributors.
-.\" 4. Neither the name of the University nor the names of its contributors
+.\" 3. Neither the name of the University nor the names of its contributors
 .\"    may be used to endorse or promote products derived from this software
 .\"    without specific prior written permission.
 .\"
@@ -84,7 +80,6 @@ in 132-column mode would be
 .Dq vt100-w .
 .Pp
 The following suffixes should be used where possible:
-.Pp
 .Bd -filled
 .Bl -column indent "With automatic margins (usually default)xx"
 .Sy Suffix	Meaning	Example
@@ -103,7 +98,6 @@ The characters in the
 function
 field in the table have the following meanings
 (more than one may apply to a capability):
-.Pp
 .Bd -unfilled
 N	Indicates numeric parameter(s).
 P	Indicates that padding may be specified.
@@ -117,7 +111,6 @@ capabilities have no
 equivalents, since they were considered useless,
 or are subsumed by other capabilities.
 New software should not rely on them at all.
-.Pp
 .Bl -column indent indent indent
 .Sy Name	Type	Notes	Description
 .It "ae	str	(P)	End alternate character set."
@@ -301,7 +294,7 @@ version 2 only).
 .It "nw	str	(P)	Newline (behaves like"
 .Sy \&cr
 followed by
-.Sy \&do Ns ).
+.Sy \&do ) .
 .It "OP	bool	(o)	Odd parity."
 .It "os	bool		Terminal overstrikes."
 .It "pb	num		Lowest baud where delays are required."
@@ -325,7 +318,7 @@ bytes.
 .It "po	str		Turn on the printer."
 .It "ps	str		Print contents of the screen."
 .It "pt	bool	(o)	Has hardware tabs (may need to be set with"
-.Sy \&is ).
+.Sy \&is ) .
 .It "px	str		Program function key"
 .Em n
 to transmit string
@@ -414,9 +407,8 @@ char (Teleray 1061).
 .Ss A Sample Entry
 The following entry, which describes the Concept\-100, is among the more
 complex entries in the
-.Nm 
+.Nm
 file as of this writing.
-.Pp
 .Bd -literal
 ca\||\|concept100\||\|c100\||\|concept\||\|c104\||\|concept100-4p\||\|HDS Concept\-100:\e
 	:al=3*\eE^R:am:bl=^G:cd=16*\eE^C:ce=16\eE^U:cl=2*^L:cm=\eEa%+ %+ :\e
@@ -461,8 +453,8 @@ Hence the description of the Concept includes
 .Pp
 Boolean capabilities are defined by their name,
 .Sy \&fo .
-They have no argument. The presens of a boolean capability name sets its
-value to
+They have no argument.
+The presence of a boolean capability name sets its value to
 .Sy \&true .
 A capability value will be reverted to
 .Sy \&false ,
@@ -636,8 +628,7 @@ give this as
 .Sy \&cr .
 (Normally this will be carriage-return,
 .Sy \&^M . )
-If there is a code to produce an audible signal (bell, beep,
-etc. ) ,
+If there is a code to produce an audible signal (bell, beep, etc.),
 give this as
 .Sy \&bl .
 .Pp
@@ -719,8 +710,7 @@ for example.
 If the terminal has switch-selectable automatic margins,
 the
 .Nm
-description usually assumes that this feature is on,
-.Em i.e . ,
+description usually assumes that this feature is on, i.e.
 .Sy \&am .
 If the terminal has a command
 that moves to the first column of the next line,
@@ -800,8 +790,8 @@ no output
 .It "%r	reverse order of two parameters, no output"
 .It "%i	increment by one, no output"
 .It "%n	exclusive-or all parameters with 0140 (Datamedia 2500)"
-.It "%B" Ta Tn BCD No "(16*(value/10)) + (value%10), no output"
-.It "%D	Reverse coding (value \- 2*(value%16)), no output (Delta Data)."
+.It "\&%B" Ta Tn BCD No "(16*(value/10)) + (value%10), no output"
+.It "\&%D" Ta "Reverse coding (value \- 2*(value%16)), no output (Delta Data)."
 .El
 .Pp
 Consider the Hewlett-Packard 2645, which, to get to row 3 and column 12, needs
@@ -856,8 +846,7 @@ Sometimes these are shorter than the more general two-parameter sequence
 (as with the Hewlett-Packard 2645) and can be used in preference to
 .Sy \&cm .
 If there are parameterized local motions
-.Pf ( Em e.g . ,
-move
+(e.g., move
 .Ar n
 positions to the right)
 these can be given as
@@ -871,7 +860,6 @@ These are primarily useful if the terminal does not have
 .Sy \&cm ,
 such as the Tektronix 4025.
 .Ss Cursor Motions
-.Pp
 If the terminal has a fast way to home the cursor
 (to the very upper left corner of the screen), this can be given as
 .Sy \&ho .
@@ -1066,9 +1054,7 @@ times.
 .Pp
 It is occasionally necessary to move around while in insert mode
 to delete characters on the same line
-.Pf ( Em e.g . ,
-if there is a tab after
-the insertion position).
+(e.g., if there is a tab after the insertion position).
 If your terminal allows motion while in
 insert mode, you can give the capability
 .Sy \&mi
@@ -1100,7 +1086,7 @@ to enter and exit delete mode
 (which is any mode the terminal needs to be placed in for
 .Sy \&dc
 to work).
-.Ss Highlighting, Underlining, and Visible  Bells
+.Ss Highlighting, Underlining, and Visible Bells
 If your terminal has one or more kinds of display attributes,
 these can be represented in a number of different ways.
 You should choose one display form as
@@ -1387,7 +1373,7 @@ and
 the name of a file containing long initialization strings.
 These strings are expected to set the terminal into modes
 consistent with the rest of the
-.Nm 
+.Nm
 description.
 They are normally sent to the terminal by the
 .Xr tset
@@ -1559,8 +1545,7 @@ A string that turns off the status line (or otherwise erases its contents)
 should be given as
 .Sy \&ds .
 The status line is normally assumed to be the same width as the
-rest of the screen,
-.Em i.e . ,
+rest of the screen, i.e.
 .Sy \&co .
 If the status line is a different width (possibly because the terminal
 does not allow an entire line to be loaded), then its width in columns
@@ -1817,6 +1802,11 @@ Hash database file containing terminal descriptions (see
 .Xr printf 3 ,
 .Xr termcap 3 ,
 .Xr term 7
+.Sh HISTORY
+The
+.Nm
+file format appeared in
+.Bx 3 .
 .Sh CAVEATS AND BUGS
 The
 .Em Note :
@@ -1845,8 +1835,3 @@ The total length of a single entry (excluding only escaped newlines)
 may not exceed 1024.
 .Pp
 Not all programs support all entries.
-.Sh HISTORY
-The
-.Nm
-file format appeared in
-.Bx 3 .

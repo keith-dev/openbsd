@@ -1,4 +1,4 @@
-/*	$OpenBSD: part.c,v 1.31 2003/03/13 22:41:03 miod Exp $	*/
+/*	$OpenBSD: part.c,v 1.36 2003/07/29 18:38:35 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1997 Tobias Weingartner
@@ -12,11 +12,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *    This product includes software developed by Tobias Weingartner.
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -44,6 +39,7 @@
 #include "misc.h"
 #include "mbr.h"
 
+int	PRT_check_chs(prt_t *partn);
 
 static const struct part_type {
 	int	type;
@@ -142,31 +138,29 @@ static const struct part_type {
 };
 
 void
-PRT_printall()
+PRT_printall(void)
 {
 	int i, idrows;
 
-        idrows = ((sizeof(part_types)/sizeof(struct part_type))+3)/4;
+	idrows = ((sizeof(part_types)/sizeof(struct part_type))+3)/4;
 
 	printf("Choose from the following Partition id values:\n");
 	for (i = 0; i < idrows; i++) {
-		printf("%02X %s   %02X %s   %02X %s"
-                      , part_types[i         ].type, part_types[i         ].sname
-                      , part_types[i+idrows  ].type, part_types[i+idrows  ].sname
-                      , part_types[i+idrows*2].type, part_types[i+idrows*2].sname
-                      );
-                if ((i+idrows*3) < (sizeof(part_types)/sizeof(struct part_type))) {
-		       printf("   %02X %s\n"
-                             , part_types[i+idrows*3].type, part_types[i+idrows*3].sname );
-                }
-		else
-		        printf( "\n" );
+		printf("%02X %s   %02X %s   %02X %s",
+		    part_types[i].type, part_types[i].sname,
+		    part_types[i+idrows].type, part_types[i+idrows].sname,
+		    part_types[i+idrows*2].type, part_types[i+idrows*2].sname);
+		if ((i+idrows*3) < (sizeof(part_types)/sizeof(struct part_type))) {
+			printf("   %02X %s\n",
+			    part_types[i+idrows*3].type,
+			    part_types[i+idrows*3].sname);
+		} else
+			printf( "\n" );
 	}
 }
 
 const char *
-PRT_ascii_id(id)
-	int id;
+PRT_ascii_id(int id)
 {
 	static char unknown[] = "<Unknown ID>";
 	int i;
@@ -180,13 +174,8 @@ PRT_ascii_id(id)
 }
 
 void
-PRT_parse(disk, prt, offset, reloff, partn, pn)
-	disk_t *disk;
-	void *prt;
-	off_t offset;
-	off_t reloff;
-	prt_t *partn;
-	int pn;
+PRT_parse(disk_t *disk, void *prt, off_t offset, off_t reloff,
+    prt_t *partn, int pn)
 {
 	unsigned char *p = prt;
 	off_t off;
@@ -216,8 +205,7 @@ PRT_parse(disk, prt, offset, reloff, partn, pn)
 }
 
 int
-PRT_check_chs(partn)
-	prt_t *partn;
+PRT_check_chs(prt_t *partn)
 {
 	if ( (partn->shead > 255) ||
 		(partn->ssect >63) ||
@@ -231,11 +219,7 @@ PRT_check_chs(partn)
 	return 1;
 }
 void
-PRT_make(partn, offset, reloff, prt)
-	prt_t *partn;
-	off_t offset;
-	off_t reloff;
-	void *prt;
+PRT_make(prt_t *partn, off_t offset, off_t reloff, void *prt)
 {
 	unsigned char *p = prt;
 	int ecsave, scsave;
@@ -288,10 +272,7 @@ PRT_make(partn, offset, reloff, prt)
 }
 
 void
-PRT_print(num, partn, units)
-	int num;
-	prt_t *partn;
-	char *units;
+PRT_print(int num, prt_t *partn, char *units)
 {
 	double size;
 	int i;
@@ -304,22 +285,19 @@ PRT_print(num, partn, units)
 	} else {
 		size = (double)partn->ns * DEV_BSIZE /
 		    unit_types[i].conversion;
-		printf("%c%1d: %.2X %4d %3d %2d - %4d %3d %2d [%12d:%12.f%s] %s\n",
+		printf("%c%1d: %.2X %4d %3d %2d - %4d %3d %2d [%12d:%12.0f%s] %s\n",
 			(partn->flag == 0x80)?'*':' ',
 			num, partn->id,
-		        partn->scyl, partn->shead, partn->ssect,
+			partn->scyl, partn->shead, partn->ssect,
 			partn->ecyl, partn->ehead, partn->esect,
 			partn->bs, size,
-		        unit_types[i].abbr,
+			unit_types[i].abbr,
 			PRT_ascii_id(partn->id));
 	}
 }
 
 void
-PRT_fix_BN(disk, part, pn)
-	disk_t *disk;
-	prt_t *part;
-	int pn;
+PRT_fix_BN(disk_t *disk, prt_t *part, int pn)
 {
 	int spt, tpc, spc;
 	int start = 0;
@@ -353,10 +331,7 @@ PRT_fix_BN(disk, part, pn)
 }
 
 void
-PRT_fix_CHS(disk, part, pn)
-	disk_t *disk;
-	prt_t *part;
-	int pn;
+PRT_fix_CHS(disk_t *disk, prt_t *part, int pn)
 {
 	int spt, tpc, spc;
 	int start, end, size;

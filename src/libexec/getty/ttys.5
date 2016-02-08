@@ -1,4 +1,4 @@
-.\"	$OpenBSD: ttys.5,v 1.7 2001/11/13 14:06:10 mpech Exp $
+.\"	$OpenBSD: ttys.5,v 1.9 2003/06/02 19:38:24 millert Exp $
 .\" Copyright (c) 1985, 1991, 1993
 .\"	The Regents of the University of California.  All rights reserved.
 .\"
@@ -10,11 +10,7 @@
 .\" 2. Redistributions in binary form must reproduce the above copyright
 .\"    notice, this list of conditions and the following disclaimer in the
 .\"    documentation and/or other materials provided with the distribution.
-.\" 3. All advertising materials mentioning features or use of this software
-.\"    must display the following acknowledgement:
-.\"	This product includes software developed by the University of
-.\"	California, Berkeley and its contributors.
-.\" 4. Neither the name of the University nor the names of its contributors
+.\" 3. Neither the name of the University nor the names of its contributors
 .\"    may be used to endorse or promote products derived from this software
 .\"    without specific prior written permission.
 .\"
@@ -128,6 +124,10 @@ may be followed by a quoted command string which
 will execute
 .Em before
 starting the command specified by the second field.
+.Sh FILES
+.Bl -tag -width /etc/ttys -compact
+.It Pa /etc/ttys
+.El
 .Sh EXAMPLES
 .Bd -literal
 # root login on console at 1200 baud
@@ -144,10 +144,6 @@ ttyv0	"/usr/new/xterm -L :0"		vs100	on window="/usr/new/Xvs100 0"
 ttyp0	none	network
 ttyp1	none	network	off
 .Ed
-.Sh FILES
-.Bl -tag -width /etc/ttys -compact
-.It Pa /etc/ttys
-.El
 .Sh SEE ALSO
 .Xr login 1 ,
 .Xr getttyent 3 ,

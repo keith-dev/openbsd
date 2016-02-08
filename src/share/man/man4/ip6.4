@@ -1,4 +1,4 @@
-.\"	$OpenBSD: ip6.4,v 1.13 2003/01/18 23:53:49 deraadt Exp $
+.\"	$OpenBSD: ip6.4,v 1.16 2003/08/08 09:51:53 jmc Exp $
 .\"	$KAME: ip6.4,v 1.12 2000/06/08 21:19:39 itojun Exp $
 .\"
 .\" Copyright (C) 1999 WIDE Project.
@@ -39,11 +39,7 @@
 .\" 2. Redistributions in binary form must reproduce the above copyright
 .\"    notice, this list of conditions and the following disclaimer in the
 .\"    documentation and/or other materials provided with the distribution.
-.\" 3. All advertising materials mentioning features or use of this software
-.\"    must display the following acknowledgement:
-.\"	This product includes software developed by the University of
-.\"	California, Berkeley and its contributors.
-.\" 4. Neither the name of the University nor the names of its contributors
+.\" 3. Neither the name of the University nor the names of its contributors
 .\"    may be used to endorse or promote products derived from this software
 .\"    without specific prior written permission.
 .\"
@@ -91,9 +87,9 @@ There are several
 .Xr setsockopt 2 / Ns Xr getsockopt 2
 options.
 They are separated into the basic IPv6 sockets API
-.Pq defined in RFC2553 ,
+.Pq defined in RFC 2553 ,
 and the advanced API
-.Pq defined in RFC2292 .
+.Pq defined in RFC 2292 .
 The basic API looks very similar to the API presented in
 .Xr ip 4 .
 Advanced API uses ancillary data and can handle more complex cases.
@@ -106,7 +102,7 @@ To specify some socket options, a certain level of privilege
 may be used to set the hoplimit field in the
 .Tn IPv6
 header.
-As the symbol name suggests, the option controls the hoplimit field 
+As the symbol name suggests, the option controls the hoplimit field
 on unicast packets.
 If -1 is specified, the kernel will use a default value.
 If a value of 0 to 255 is specified, the packet will have the specified
@@ -126,7 +122,7 @@ multicasting is supported only on
 sockets of type
 .Dv SOCK_DGRAM
 and
-.Dv SOCK_RAW,
+.Dv SOCK_RAW ,
 and only on networks where the interface driver supports multicasting.
 .Pp
 The
@@ -560,7 +556,7 @@ discarding the packet if the checksum is in error.
 This option prevents applications from having to perform source
 address selection on the packets they send.
 The checksum will
-incorporate the IPv6 pseudo-header, defined in Section 8.1 of RFC2460.
+incorporate the IPv6 pseudo-header, defined in Section 8.1 of RFC 2460.
 This new socket option also specifies an integer offset into
 the user data of where the checksum is located.
 .Bd -literal -offset indent
@@ -570,7 +566,7 @@ setsockopt(fd, IPPROTO_IPV6, IPV6_CHECKSUM, &offset, sizeof(offset));
 .Pp
 By default, this socket option is disabled.
 Setting the offset to -1 also disables the option.
-By disabled we mean (1) the kernel will 
+By disabled we mean (1) the kernel will
 not calculate and store a checksum for outgoing packets, and (2) the
 kernel will not verify a checksum for received packets.
 .Pp
@@ -610,9 +606,9 @@ The ancillary data items were improperly formed, or option name was unknown.
 .\"
 .Sh SEE ALSO
 .Xr getsockopt 2 ,
+.Xr recv 2 ,
 .Xr send 2 ,
 .Xr setsockopt 2 ,
-.Xr recv 2 ,
 .Xr inet6_option_space 3 ,
 .Xr inet6_rthdr_space 3 ,
 .Xr icmp6 4 ,
@@ -620,16 +616,14 @@ The ancillary data items were improperly formed, or option name was unknown.
 .Rs
 .%A W. Stevens
 .%A M. Thomas
-.%R RFC
-.%N 2292
+.%R RFC 2292
 .%D February 1998
 .%T "Advanced Sockets API for IPv6"
 .Re
 .Rs
 .%A S. Deering
 .%A R. Hinden
-.%R RFC
-.%N 2460
+.%R RFC 2460
 .%D December 1998
 .%T "Internet Protocol, Version 6 (IPv6) Specification"
 .Re
@@ -638,15 +632,14 @@ The ancillary data items were improperly formed, or option name was unknown.
 .%A S. Thomson
 .%A J. Bound
 .%A W. Stevens
-.%R RFC
-.%N 2553
+.%R RFC 2553
 .%D March 1999
 .%T "Basic Socket Interface Extensions for IPv6"
 .Re
 .\"
 .Sh STANDARDS
 Most of the socket options are defined in
-RFC2292 and/or RFC2553.
+RFC 2292 and/or RFC 2553.
 .Dv IPV6_PORTRANGE
 and conflict resolution rule
 is not defined in the RFCs and should be considered implementation dependent.
@@ -657,7 +650,7 @@ The implementation is based on KAME stack
 which is a descendant of WIDE hydrangea IPv6 stack kit
 .Pc .
 .Pp
-Part of the document was shamelessly copied from RFC2553 and RFC2292.
+Part of the document was shamelessly copied from RFC 2553 and RFC 2292.
 .\"
 .Sh BUGS
 The

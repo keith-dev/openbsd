@@ -1,4 +1,4 @@
-/*	$OpenBSD: tail.c,v 1.8 2002/02/16 21:27:54 millert Exp $	*/
+/*	$OpenBSD: tail.c,v 1.11 2003/06/10 22:20:52 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 1991, 1993
@@ -15,11 +15,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -46,7 +42,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)tail.c	8.1 (Berkeley) 6/6/93";
 #endif
-static char rcsid[] = "$OpenBSD: tail.c,v 1.8 2002/02/16 21:27:54 millert Exp $";
+static char rcsid[] = "$OpenBSD: tail.c,v 1.11 2003/06/10 22:20:52 deraadt Exp $";
 #endif /* not lint */
 
 #include <sys/types.h>
@@ -69,9 +65,7 @@ static void obsolete(char **);
 static void usage(void);
 
 int
-main(argc, argv)
-	int argc;
-	char *argv[];
+main(int argc, char *argv[])
 {
 	struct stat sb;
 	FILE *fp;
@@ -222,8 +216,7 @@ main(argc, argv)
  * the option argument for a -b, -c or -n option gets converted.
  */
 static void
-obsolete(argv)
-	char *argv[];
+obsolete(char *argv[])
 {
 	char *ap, *p, *t;
 	int len;
@@ -244,7 +237,7 @@ obsolete(argv)
 
 			/* Malloc space for dash, new option and argument. */
 			len = strlen(*argv);
-			if ((start = p = malloc(len + 3)) == NULL)
+			if ((start = p = malloc(len + 4)) == NULL)
 				err(1, NULL);
 			*p++ = '-';
 
@@ -278,7 +271,7 @@ obsolete(argv)
 				errx(1, "illegal option -- %s", *argv);
 			}
 			*p++ = *argv[0];
-			(void)strcpy(p, ap);
+			(void)strlcpy(p, ap, start + len + 4 - p);
 			*argv = start;
 			continue;
 
@@ -305,7 +298,7 @@ obsolete(argv)
 }
 
 static void
-usage()
+usage(void)
 {
 	(void)fprintf(stderr,
 	    "usage: tail [-f | -r] [-b # | -c # | -n #] [file ...]\n");

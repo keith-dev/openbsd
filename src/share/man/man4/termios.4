@@ -1,4 +1,4 @@
-.\"	$OpenBSD: termios.4,v 1.18 2002/05/06 23:33:46 millert Exp $
+.\"	$OpenBSD: termios.4,v 1.25 2003/08/28 16:58:28 jmc Exp $
 .\"	$NetBSD: termios.4,v 1.5 1994/11/30 16:22:36 jtc Exp $
 .\"
 .\" Copyright (c) 1991, 1992, 1993
@@ -12,11 +12,7 @@
 .\" 2. Redistributions in binary form must reproduce the above copyright
 .\"    notice, this list of conditions and the following disclaimer in the
 .\"    documentation and/or other materials provided with the distribution.
-.\" 3. All advertising materials mentioning features or use of this software
-.\"    must display the following acknowledgement:
-.\"	This product includes software developed by the University of
-.\"	California, Berkeley and its contributors.
-.\" 4. Neither the name of the University nor the names of its contributors
+.\" 3. Neither the name of the University nor the names of its contributors
 .\"    may be used to endorse or promote products derived from this software
 .\"    without specific prior written permission.
 .\"
@@ -50,7 +46,7 @@ When a terminal file is opened, it normally causes the process to wait
 until a connection is established.
 For most hardware, the presence of a connection is indicated by the assertion
 of the hardware
-.Dv CARRIER line.
+.Dv CARRIER line .
 If the termios structure associated with the terminal file has the
 .Dv CLOCAL
 flag set in the cflag, or if the
@@ -88,7 +84,7 @@ The grouping at a higher layer into sessions is to restrict
 the job control related signals and system calls to within processes
 resulting from a particular instance of a "login".
 Typically, a session is created when a user logs in, and the login terminal
-is setup to be the controlling terminal; all processes spawned from that
+is set up to be the controlling terminal; all processes spawned from that
 login shell are in the same session, and inherit the controlling
 terminal.
 A job control shell
@@ -178,13 +174,13 @@ the process's group
 unless one of the
 following special cases apply: If the reading process is ignoring or
 blocking the
-.Dv SIGTTIN signal, or if the process group of the reading
-process is orphaned, the
+.Dv SIGTTIN
+signal, or if the process group of the reading process is orphaned, the
 .Xr read 2
 returns -1 with
 .Va errno
 set to
-.Er Dv EIO
+.Er EIO
 and no
 signal is sent.
 The default action of the
@@ -197,7 +193,8 @@ terminal, write operations are allowed.
 Attempts by a process in a background process group to write to its
 controlling terminal will cause the process group to be sent a
 .Dv SIGTTOU
-signal unless one of the following special cases apply:  If
+signal unless one of the following special cases apply:
+If
 .Dv TOSTOP
 is not
 set, or if
@@ -218,7 +215,7 @@ the
 returns -1 with
 .Va errno
 set to
-.Er Dv EIO
+.Er EIO
 and no signal is sent.
 .Pp
 Certain calls that set terminal parameters are treated in the same
@@ -342,7 +339,7 @@ characters (see the
 is received.
 This processing affects data in the input queue that has not yet been
 delimited by a newline
-.Dv NL,
+.Dv NL ,
 .Dv EOF ,
 or
 .Dv EOL
@@ -675,7 +672,7 @@ Secondary
 .Dv EOL
 character.
 Same function as
-.Dv EOL.
+.Dv EOL .
 .It Dv WERASE
 Special character on input and is recognized if the
 .Dv ICANON
@@ -737,7 +734,7 @@ causes the kernel to write a status message to the terminal
 that displays the current load average, the name of the
 command in the foreground, its process ID, the symbolic
 wait channel, the number of user and system seconds used,
-the percentage of cpu the process is getting, and the resident
+the percentage of CPU the process is getting, and the resident
 set size of the process.
 .El
 .Pp
@@ -748,12 +745,12 @@ and
 characters cannot be changed.
 The values for all the remaining characters can be set and are
 described later in the document under
-Special Control Characters.
+.Sx Special Control Characters .
 .Pp
 Special
 character functions associated with changeable special control characters
 can be disabled individually by setting their value to
-.Dv {_POSIX_VDISABLE};
+.Dv {_POSIX_VDISABLE} ;
 see
 .Sx "Special Control Characters" .
 .Pp
@@ -1049,15 +1046,15 @@ and are composed of the following masks:
 /* enable following output processing */
 .It Dv ONLCR
 /* map NL to CR-NL (ala
-.Dv CRMOD)
+.Dv CRMOD )
 */
 .It Dv OXTABS
 /* expand tabs to spaces */
 .It Dv ONOEOT
 /* discard
 .Dv EOT Ns 's
-.Ql \&^D
-on output) */
+.Pq ^D
+on output */
 .It Dv OCRNL
 /* map CR to NL */
 .It Dv OLCUC
@@ -1065,7 +1062,7 @@ on output) */
 .It Dv ONOCR
 /* No CR output at column 0 */
 .It Dv ONLRET
-/* NL performs CR function */
+/* NL performs the CR function */
 .El
 .Pp
 If
@@ -1370,10 +1367,10 @@ If
 is set, canonical processing is enabled.
 This enables the erase and kill edit functions, and the assembly of input
 characters into lines delimited by
-.Dv NL,
+.Dv NL ,
 .Dv EOF ,
 and
-.Dv EOL,
+.Dv EOL ,
 as described in
 .Sx "Canonical Mode Input Processing" .
 .Pp
@@ -1445,7 +1442,7 @@ associated with the
 and
 .Dv SUSP
 characters
-are not be done.
+is not done.
 .Pp
 If
 .Dv XCASE

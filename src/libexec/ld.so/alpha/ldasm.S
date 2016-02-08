@@ -1,4 +1,4 @@
-/*	$OpenBSD: ldasm.S,v 1.12 2003/01/17 20:41:07 drahn Exp $ */
+/*	$OpenBSD: ldasm.S,v 1.15 2003/07/09 21:01:10 drahn Exp $ */
 
 /*
  * Copyright (c) 2001 Niklas Hallqvist
@@ -11,12 +11,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed under OpenBSD by
- *	Niklas Hallqvist.
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS
  * OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
@@ -101,6 +95,7 @@ L2:	ldiq	s3, L2		/* get where the linker thought we were */
 	mov	a5, s5
 	lda	s2, 0(sp)
 	mov	s2, a1
+	mov	0,  a2		/* dynamicp is unused on alpha */
 	CALL(_dl_boot_bind)
 	mov	s3, a0		/* **argv  */
 	mov	s4, a1		/* **envp  */
@@ -305,3 +300,9 @@ LEAF_NOPROFILE(_dl_sigprocmask, 4)
 1:	mov	zero, v0
 	RET
 END(_dl_sigprocmask)
+
+LEAF_NOPROFILE(_dl_sysctl, 4)
+	ldiq	v0, SYS___sysctl
+	call_pal PAL_OSF1_callsys
+	RET
+END(_dl_sysctl)

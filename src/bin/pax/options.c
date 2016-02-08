@@ -1,4 +1,4 @@
-/*	$OpenBSD: options.c,v 1.56 2003/02/03 09:06:43 jmc Exp $	*/
+/*	$OpenBSD: options.c,v 1.59 2003/06/26 00:10:17 deraadt Exp $	*/
 /*	$NetBSD: options.c,v 1.6 1996/03/26 23:54:18 mrg Exp $	*/
 
 /*-
@@ -17,11 +17,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -42,7 +38,7 @@
 #if 0
 static const char sccsid[] = "@(#)options.c	8.2 (Berkeley) 4/18/94";
 #else
-static const char rcsid[] = "$OpenBSD: options.c,v 1.56 2003/02/03 09:06:43 jmc Exp $";
+static const char rcsid[] = "$OpenBSD: options.c,v 1.59 2003/06/26 00:10:17 deraadt Exp $";
 #endif
 #endif /* not lint */
 
@@ -198,7 +194,7 @@ pax_options(int argc, char **argv)
 	/*
 	 * process option flags
 	 */
-	while ((c=getopt(argc,argv,"ab:cdf:iklno:p:rs:tuvwx:zB:DE:G:HLPT:U:XYZ"))
+	while ((c=getopt(argc,argv,"ab:cdf:iklno:p:rs:tuvwx:zB:DE:G:HLPT:U:XYZ0"))
 	    != -1) {
 		switch (c) {
 		case 'a':
@@ -508,6 +504,14 @@ pax_options(int argc, char **argv)
 			 */
 			Zflag = 1;
 			flg |= CZF;
+			break;
+		case '0':
+			/*
+			 * Use \0 as pathname terminator.
+			 * (For use with the -print0 option of find(1).)
+			 */
+			zeroflag = 1;
+			flg |= C0F;
 			break;
 		default:
 			pax_usage();
@@ -974,6 +978,8 @@ tar_options(int argc, char **argv)
 			arcname = _PATH_DEFTAPE;
 	}
 }
+
+int mkpath(char *);
 
 int
 mkpath(path)

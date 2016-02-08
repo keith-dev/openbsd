@@ -1,4 +1,4 @@
-/*	$OpenBSD: rwho.c,v 1.13 2001/09/27 18:38:58 millert Exp $	*/
+/*	$OpenBSD: rwho.c,v 1.15 2003/06/03 02:56:15 millert Exp $	*/
 
 /*
  * Copyright (c) 1983 The Regents of the University of California.
@@ -12,11 +12,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -43,7 +39,7 @@ static const char copyright[] =
 #if 0
 static const char sccsid[] = "from: @(#)rwho.c	5.5 (Berkeley) 6/1/90";
 #else
-static const char rcsid[] = "$OpenBSD: rwho.c,v 1.13 2001/09/27 18:38:58 millert Exp $";
+static const char rcsid[] = "$OpenBSD: rwho.c,v 1.15 2003/06/03 02:56:15 millert Exp $";
 #endif
 #endif /* not lint */
 
@@ -174,11 +170,12 @@ main(int argc, char **argv)
 	}
 	mp = myutmp;
 	for (i = 0; i < nusers; i++) {
-		char buf[BUFSIZ], vis_user[4 * sizeof(mp->myutmp.out_name)];
+		char buf[BUFSIZ], vis_user[4 * sizeof(mp->myutmp.out_name) + 1];
 
 		(void)snprintf(buf, sizeof(buf), "%s:%s", mp->myhost,
 		    mp->myutmp.out_line);
-		strvis(vis_user, mp->myutmp.out_name, VIS_CSTYLE);
+		strnvis(vis_user, mp->myutmp.out_name, sizeof vis_user,
+		    VIS_CSTYLE);
 		printf("%-*.*s %-*s %.12s",
 		   UT_NAMESIZE, UT_NAMESIZE, vis_user, width, buf,
 		   ctime((time_t *)&mp->myutmp.out_time)+4);

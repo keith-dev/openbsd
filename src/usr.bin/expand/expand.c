@@ -1,4 +1,4 @@
-/*	$OpenBSD: expand.c,v 1.4 2001/11/19 19:02:13 mpech Exp $	*/
+/*	$OpenBSD: expand.c,v 1.7 2003/07/03 03:09:39 deraadt Exp $	*/
 /*	$NetBSD: expand.c,v 1.5 1995/09/02 06:19:46 jtc Exp $	*/
 
 /*
@@ -13,11 +13,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -44,7 +40,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)expand.c	8.1 (Berkeley) 6/9/93";
 #endif
-static char rcsid[] = "$OpenBSD: expand.c,v 1.4 2001/11/19 19:02:13 mpech Exp $";
+static char rcsid[] = "$OpenBSD: expand.c,v 1.7 2003/07/03 03:09:39 deraadt Exp $";
 #endif /* not lint */
 
 #include <stdio.h>
@@ -58,13 +54,11 @@ static char rcsid[] = "$OpenBSD: expand.c,v 1.4 2001/11/19 19:02:13 mpech Exp $"
 int	nstops;
 int	tabstops[100];
 
-static void getstops();
-static void usage();
+static void getstops(char *);
+static void usage(void);
 
 int
-main(argc, argv)
-	int argc;
-	char *argv[];
+main(int argc, char *argv[])
 {
 	int c, column;
 	int n;
@@ -112,7 +106,8 @@ main(argc, argv)
 					do {
 						putchar(' ');
 						column++;
-					} while (((column - 1) % tabstops[0]) != (tabstops[0] - 1));
+					} while (((column - 1) %
+					    tabstops[0]) != (tabstops[0] - 1));
 					continue;
 				}
 				for (n = 0; n < nstops; n++)
@@ -151,8 +146,7 @@ main(argc, argv)
 }
 
 static void
-getstops(cp)
-	char *cp;
+getstops(char *cp)
 {
 	int i;
 
@@ -178,7 +172,7 @@ bad:
 }
 
 static void
-usage()
+usage(void)
 {
 	(void)fprintf (stderr, "usage: expand [-t tablist] [file ...]\n");
 	exit(1);

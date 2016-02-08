@@ -1,4 +1,4 @@
-/*    $OpenBSD: func.c,v 1.15 2002/06/09 05:47:27 todd Exp $       */
+/*    $OpenBSD: func.c,v 1.20 2003/06/25 21:12:39 deraadt Exp $       */
 /*    $NetBSD: func.c,v 1.11 1996/02/09 02:28:29 christos Exp $       */
 
 /*-
@@ -13,11 +13,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -38,7 +34,7 @@
 #if 0
 static char sccsid[] = "@(#)func.c	8.1 (Berkeley) 5/31/93";
 #else
-static char rcsid[] = "$OpenBSD: func.c,v 1.15 2002/06/09 05:47:27 todd Exp $";
+static char rcsid[] = "$OpenBSD: func.c,v 1.20 2003/06/25 21:12:39 deraadt Exp $";
 #endif
 #endif /* not lint */
 
@@ -70,11 +66,10 @@ static void	xecho(int, Char **);
 static void	Unsetenv(Char *);
 
 struct biltins *
-isbfunc(t)
-    struct command *t;
+isbfunc(struct command *t)
 {
-    register Char *cp = t->t_dcom[0];
-    register struct biltins *bp, *bp1, *bp2;
+    Char *cp = t->t_dcom[0];
+    struct biltins *bp, *bp1, *bp2;
     static struct biltins label = {"", dozip, 0, 0};
     static struct biltins foregnd = {"%job", dofg1, 0, 0};
     static struct biltins backgnd = {"%job &", dobg1, 0, 0};
@@ -97,7 +92,7 @@ isbfunc(t)
      * one past the end.
      */
     for (bp1 = bfunc, bp2 = bfunc + nbfunc; bp1 < bp2;) {
-	register int i;
+	int i;
 
 	bp = bp1 + ((bp2 - bp1) >> 1);
 	if ((i = *cp - *bp->bname) == 0 &&
@@ -112,9 +107,7 @@ isbfunc(t)
 }
 
 void
-func(t, bp)
-    register struct command *t;
-    register struct biltins *bp;
+func(struct command *t, struct biltins *bp)
 {
     int     i;
 
@@ -130,12 +123,10 @@ func(t, bp)
 
 void
 /*ARGSUSED*/
-doonintr(v, t)
-    Char **v;
-    struct command *t;
+doonintr(Char **v, struct command *t)
 {
-    register Char *cp;
-    register Char *vv = v[1];
+    Char *cp;
+    Char *vv = v[1];
     sigset_t sigset;
 
     if (parintr == SIG_IGN)
@@ -166,9 +157,7 @@ doonintr(v, t)
 
 void
 /*ARGSUSED*/
-donohup(v, t)
-    Char **v;
-    struct command *t;
+donohup(Char **v, struct command *t)
 {
     if (intty)
 	stderror(ERR_NAME | ERR_TERMINAL);
@@ -179,27 +168,23 @@ donohup(v, t)
 
 void
 /*ARGSUSED*/
-dozip(v, t)
-    Char **v;
-    struct command *t;
+dozip(Char **v, struct command *t)
 {
     ;
 }
 
 void
-prvars()
+prvars(void)
 {
     plist(&shvhed);
 }
 
 void
 /*ARGSUSED*/
-doalias(v, t)
-    Char **v;
-    struct command *t;
+doalias(Char **v, struct command *t)
 {
-    register struct varent *vp;
-    register Char *p;
+    struct varent *vp;
+    Char *p;
 
     v++;
     p = *v++;
@@ -223,18 +208,14 @@ doalias(v, t)
 
 void
 /*ARGSUSED*/
-unalias(v, t)
-    Char **v;
-    struct command *t;
+unalias(Char **v, struct command *t)
 {
     unset1(v, &aliases);
 }
 
 void
 /*ARGSUSED*/
-dologout(v, t)
-    Char **v;
-    struct command *t;
+dologout(Char **v, struct command *t)
 {
     islogin();
     goodbye();
@@ -242,9 +223,7 @@ dologout(v, t)
 
 void
 /*ARGSUSED*/
-dologin(v, t)
-    Char **v;
-    struct command *t;
+dologin(Char **v, struct command *t)
 {
     islogin();
     rechist();
@@ -255,7 +234,7 @@ dologin(v, t)
 }
 
 static void
-islogin()
+islogin(void)
 {
     if (chkstop == 0 && setintr)
 	panystop(0);
@@ -265,12 +244,10 @@ islogin()
 }
 
 void
-doif(v, kp)
-    Char  **v;
-    struct command *kp;
+doif(Char **v, struct command *kp)
 {
-    register int i;
-    register Char **vv;
+    int i;
+    Char **vv;
 
     v++;
     i = expr(&v);
@@ -305,8 +282,7 @@ doif(v, kp)
  * to redo i/o redirection, which is already set up.
  */
 static void
-reexecute(kp)
-    register struct command *kp;
+reexecute(struct command *kp)
 {
     kp->t_dflg &= F_SAVE;
     kp->t_dflg |= F_REPEAT;
@@ -320,18 +296,14 @@ reexecute(kp)
 
 void
 /*ARGSUSED*/
-doelse(v, t)
-    Char **v;
-    struct command *t;
+doelse(Char **v, struct command *t)
 {
     search(T_ELSE, 0, NULL);
 }
 
 void
 /*ARGSUSED*/
-dogoto(v, t)
-    Char **v;
-    struct command *t;
+dogoto(Char **v, struct command *t)
 {
     Char   *lp;
 
@@ -340,10 +312,9 @@ dogoto(v, t)
 }
 
 void
-gotolab(lab)
-    Char *lab;
+gotolab(Char *lab)
 {
-    register struct whyle *wp;
+    struct whyle *wp;
     /*
      * While we still can, locate any unknown ends of existing loops. This
      * obscure code is the WORST result of the fact that we don't really parse.
@@ -365,11 +336,9 @@ gotolab(lab)
 
 void
 /*ARGSUSED*/
-doswitch(v, t)
-    Char **v;
-    struct command *t;
+doswitch(Char **v, struct command *t)
 {
-    register Char *cp, *lp;
+    Char *cp, *lp;
 
     v++;
     if (!*v || *(*v++) != '(')
@@ -385,9 +354,7 @@ doswitch(v, t)
 
 void
 /*ARGSUSED*/
-dobreak(v, t)
-    Char **v;
-    struct command *t;
+dobreak(Char **v, struct command *t)
 {
     if (whyles)
 	toend();
@@ -397,9 +364,7 @@ dobreak(v, t)
 
 void
 /*ARGSUSED*/
-doexit(v, t)
-    Char **v;
-    struct command *t;
+doexit(Char **v, struct command *t)
 {
     if (chkstop == 0 && (intty || intact) && evalvec == 0)
 	panystop(0);
@@ -419,12 +384,10 @@ doexit(v, t)
 
 void
 /*ARGSUSED*/
-doforeach(v, t)
-    Char **v;
-    struct command *t;
+doforeach(Char **v, struct command *t)
 {
-    register Char *cp, *sp;
-    register struct whyle *nwp;
+    Char *cp, *sp;
+    struct whyle *nwp;
 
     v++;
     sp = cp = strip(*v);
@@ -463,12 +426,10 @@ doforeach(v, t)
 
 void
 /*ARGSUSED*/
-dowhile(v, t)
-    Char **v;
-    struct command *t;
+dowhile(Char **v, struct command *t)
 {
-    register int status;
-    register bool again = whyles != 0 && SEEKEQ(&whyles->w_start, &lineloc) &&
+    int status;
+    bool again = whyles != 0 && SEEKEQ(&whyles->w_start, &lineloc) &&
     whyles->w_fename == 0;
 
     v++;
@@ -483,7 +444,7 @@ dowhile(v, t)
     if (*v)
 	stderror(ERR_NAME | ERR_EXPRESSION);
     if (!again) {
-	register struct whyle *nwp =
+	struct whyle *nwp =
 	(struct whyle *) xcalloc(1, sizeof(*nwp));
 
 	nwp->w_start = lineloc;
@@ -507,7 +468,7 @@ dowhile(v, t)
 }
 
 static void
-preread()
+preread(void)
 {
     sigset_t sigset;
 
@@ -526,9 +487,7 @@ preread()
 
 void
 /*ARGSUSED*/
-doend(v, t)
-    Char **v;
-    struct command *t;
+doend(Char **v, struct command *t)
 {
     if (!whyles)
 	stderror(ERR_NAME | ERR_NOTWHILE);
@@ -538,9 +497,7 @@ doend(v, t)
 
 void
 /*ARGSUSED*/
-docontin(v, t)
-    Char **v;
-    struct command *t;
+docontin(Char **v, struct command *t)
 {
     if (!whyles)
 	stderror(ERR_NAME | ERR_NOTWHILE);
@@ -548,7 +505,7 @@ docontin(v, t)
 }
 
 static void
-doagain()
+doagain(void)
 {
     /* Repeating a while is simple */
     if (whyles->w_fename == 0) {
@@ -569,11 +526,9 @@ doagain()
 }
 
 void
-dorepeat(v, kp)
-    Char  **v;
-    struct command *kp;
+dorepeat(Char **v, struct command *kp)
 {
-    register int i;
+    int i;
     sigset_t sigset;
 
     i = getn(v[1]);
@@ -596,19 +551,16 @@ dorepeat(v, kp)
 
 void
 /*ARGSUSED*/
-doswbrk(v, t)
-    Char **v;
-    struct command *t;
+doswbrk(Char **v, struct command *t)
 {
     search(T_BRKSW, 0, NULL);
 }
 
 int
-srchx(cp)
-    register Char *cp;
+srchx(Char *cp)
 {
-    register struct srch *sp, *sp1, *sp2;
-    register int i;
+    struct srch *sp, *sp1, *sp2;
+    int i;
 
     /*
      * Binary search Sp1 is the beginning of the current search range. Sp2 is
@@ -632,14 +584,11 @@ static Char *Sgoal;
 
 /*VARARGS2*/
 static void
-search(type, level, goal)
-    int     type;
-    register int level;
-    Char   *goal;
+search(int type, int level, Char *goal)
 {
     Char    wordbuf[BUFSIZ];
-    register Char *aword = wordbuf;
-    register Char *cp;
+    Char *aword = wordbuf;
+    Char *cp;
 
     Stype = type;
     Sgoal = goal;
@@ -733,11 +682,10 @@ search(type, level, goal)
 }
 
 static int
-getword(wp)
-    register Char *wp;
+getword(Char *wp)
 {
-    register int found = 0;
-    register int c, d;
+    int found = 0;
+    int c, d;
     int     kwd = 0;
     Char   *owp = wp;
 
@@ -825,8 +773,7 @@ past:
  */
 
 static int
-keyword(wp)
-    Char   *wp;
+keyword(Char *wp)
 {
     static Char STRif[] = {'i', 'f', '\0'};
     static Char STRwhile[] = {'w', 'h', 'i', 'l', 'e', '\0'};
@@ -843,7 +790,7 @@ keyword(wp)
 }
 
 static void
-toend()
+toend(void)
 {
     if (whyles->w_end.type == F_SEEK && whyles->w_end.f_seek == 0) {
 	search(T_BREAK, 0, NULL);
@@ -856,7 +803,7 @@ toend()
 }
 
 void
-wfree()
+wfree(void)
 {
     struct Ain    o;
     struct whyle *nwp;
@@ -864,7 +811,7 @@ wfree()
     btell(&o);
 
     for (; whyles; whyles = nwp) {
-	register struct whyle *wp = whyles;
+	struct whyle *wp = whyles;
 	nwp = wp->w_next;
 
 	/*
@@ -894,29 +841,23 @@ wfree()
 
 void
 /*ARGSUSED*/
-doecho(v, t)
-    Char **v;
-    struct command *t;
+doecho(Char **v, struct command *t)
 {
     xecho(' ', v);
 }
 
 void
 /*ARGSUSED*/
-doglob(v, t)
-    Char **v;
-    struct command *t;
+doglob(Char **v, struct command *t)
 {
     xecho(0, v);
     (void) fflush(cshout);
 }
 
 static void
-xecho(sep, v)
-    int    sep;
-    register Char **v;
+xecho(int sep, Char **v)
 {
-    register Char *cp;
+    Char *cp;
     int     nonl = 0;
     sigset_t sigset;
 
@@ -941,7 +882,7 @@ xecho(sep, v)
     if (sep == ' ' && *v && eq(*v, STRmn))
 	nonl++, v++;
     while ((cp = *v++) != NULL) {
-	register int c;
+	int c;
 
 	while ((c = *cp++) != '\0')
 	    (void) vis_fputc(c | QUOTE, cshout);
@@ -961,16 +902,14 @@ xecho(sep, v)
 
 void
 /*ARGSUSED*/
-dosetenv(v, t)
-    Char **v;
-    struct command *t;
+dosetenv(Char **v, struct command *t)
 {
     Char   *vp, *lp;
     sigset_t sigset;
 
     v++;
     if ((vp = *v++) == 0) {
-	register Char **ep;
+	Char **ep;
 
 	if (setintr) {
 	    sigemptyset(&sigset);
@@ -1005,9 +944,7 @@ dosetenv(v, t)
 
 void
 /*ARGSUSED*/
-dounsetenv(v, t)
-    Char **v;
-    struct command *t;
+dounsetenv(Char **v, struct command *t)
 {
     Char  **ep, *p, *n;
     int     i, maxi;
@@ -1060,14 +997,12 @@ dounsetenv(v, t)
 }
 
 void
-Setenv(name, val)
-    Char   *name, *val;
+Setenv(Char *name, Char *val)
 {
-    register Char **ep = STR_environ;
-    register Char *cp, *dp;
+    Char **ep = STR_environ;
+    Char *cp, *dp;
     Char   *blk[2];
     Char  **oep = ep;
-
 
     for (; *ep; ep++) {
 	for (cp = name, dp = *ep; *cp && *cp == *dp; cp++, dp++)
@@ -1093,11 +1028,10 @@ Setenv(name, val)
 }
 
 static void
-Unsetenv(name)
-    Char   *name;
+Unsetenv(Char *name)
 {
-    register Char **ep = STR_environ;
-    register Char *cp, *dp;
+    Char **ep = STR_environ;
+    Char *cp, *dp;
     Char  **oep = ep;
 
     for (; *ep; ep++) {
@@ -1118,12 +1052,10 @@ Unsetenv(name)
 
 void
 /*ARGSUSED*/
-doumask(v, t)
-    Char **v;
-    struct command *t;
+doumask(Char **v, struct command *t)
 {
-    register Char *cp = v[1];
-    register int i;
+    Char *cp = v[1];
+    int i;
 
     if (cp == 0) {
 	i = umask(0);
@@ -1166,10 +1098,9 @@ static void plim(struct limits *, Char);
 static int setlim(struct limits *, Char, RLIM_TYPE);
 
 static struct limits *
-findlim(cp)
-    Char   *cp;
+findlim(Char *cp)
 {
-    register struct limits *lp, *res;
+    struct limits *lp, *res;
 
     res = NULL;
     for (lp = limits; lp->limconst >= 0; lp++)
@@ -1187,12 +1118,10 @@ findlim(cp)
 
 void
 /*ARGSUSED*/
-dolimit(v, t)
-    Char **v;
-    struct command *t;
+dolimit(Char **v, struct command *t)
 {
-    register struct limits *lp;
-    register RLIM_TYPE limit;
+    struct limits *lp;
+    RLIM_TYPE limit;
     char    hard = 0;
 
     v++;
@@ -1216,12 +1145,9 @@ dolimit(v, t)
 }
 
 static  RLIM_TYPE
-getval(lp, v)
-    register struct limits *lp;
-    Char  **v;
+getval(struct limits *lp, Char **v)
 {
-    register float f;
-    double  atof();
+    float f;
     Char   *cp = *v++;
 
     f = atof(short2str(cp));
@@ -1287,9 +1213,7 @@ badscal:
 }
 
 static void
-limtail(cp, str)
-    Char   *cp;
-    char   *str;
+limtail(Char *cp, char *str)
 {
     while (*cp && *cp == *str)
 	cp++, str++;
@@ -1297,12 +1221,9 @@ limtail(cp, str)
 	stderror(ERR_BADSCALE, str);
 }
 
-
 /*ARGSUSED*/
 static void
-plim(lp, hard)
-    register struct limits *lp;
-    Char    hard;
+plim(struct limits *lp, Char hard)
 {
     struct rlimit rlim;
     RLIM_TYPE limit;
@@ -1324,11 +1245,9 @@ plim(lp, hard)
 
 void
 /*ARGSUSED*/
-dounlimit(v, t)
-    Char **v;
-    struct command *t;
+dounlimit(Char **v, struct command *t)
 {
-    register struct limits *lp;
+    struct limits *lp;
     int     lerr = 0;
     Char    hard = 0;
 
@@ -1353,10 +1272,7 @@ dounlimit(v, t)
 }
 
 static int
-setlim(lp, hard, limit)
-    register struct limits *lp;
-    Char    hard;
-    RLIM_TYPE limit;
+setlim(struct limits *lp, Char hard, RLIM_TYPE limit)
 {
     struct rlimit rlim;
 
@@ -1380,13 +1296,11 @@ setlim(lp, hard, limit)
 
 void
 /*ARGSUSED*/
-dosuspend(v, t)
-    Char **v;
-    struct command *t;
+dosuspend(Char **v, struct command *t)
 {
     int     ctpgrp;
 
-    void    (*old) ();
+    void    (*old) (int);
 
     if (loginsh)
 	stderror(ERR_SUSPLOG);
@@ -1423,12 +1337,12 @@ retry:
  *   Otherwise, under stty tostop, processes will stop in the wrong
  *   pgrp, with no way for the shell to get them going again.  -IAN!
  */
+
 static Char **gv = NULL;
+
 void
 /*ARGSUSED*/
-doeval(v, t)
-    Char **v;
-    struct command *t;
+doeval(Char **v, struct command *t)
 {
     Char  **oevalvec;
     Char   *oevalp;
@@ -1500,37 +1414,5 @@ doeval(v, t)
     resexit(osetexit);
     gv = savegv;
     if (my_reenter)
-	stderror(ERR_SILENT);
-}
-
-void
-/*ARGSUSED*/
-doprintf(v, t)
-    Char **v;
-    struct command *t;
-{
-    Char **newv;
-    char **c;
-    extern int progprintf(int, char **);
-    int ret;
-
-    gflag = 0;
-    tglob(v);
-    if (gflag) {
-	newv = globall(v);
-	if (newv == 0) {
-	    stderror(ERR_NAME | ERR_NOMATCH);
-	    return;
-	}
-	v = newv;
-	gargv = 0;
-    }
-
-    ret = progprintf(blklen(v), c = short2blk(v));
-    (void) fflush(cshout);
-    (void) fflush(csherr);
-
-    blkfree((Char **) c);
-    if (ret)
 	stderror(ERR_SILENT);
 }

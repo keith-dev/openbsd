@@ -1,4 +1,4 @@
-/*	$OpenBSD: nlist.c,v 1.11 2003/03/21 15:56:55 drahn Exp $	*/
+/*	$OpenBSD: nlist.c,v 1.14 2003/06/11 23:42:12 deraadt Exp $	*/
 /*	$NetBSD: nlist.c,v 1.11 1995/03/21 09:08:03 cgd Exp $	*/
 
 /*-
@@ -13,11 +13,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -38,7 +34,7 @@
 #if 0
 static char sccsid[] = "@(#)nlist.c	8.4 (Berkeley) 4/2/94";
 #else
-static char rcsid[] = "$OpenBSD: nlist.c,v 1.11 2003/03/21 15:56:55 drahn Exp $";
+static char rcsid[] = "$OpenBSD: nlist.c,v 1.14 2003/06/11 23:42:12 deraadt Exp $";
 #endif
 #endif /* not lint */
 
@@ -83,7 +79,7 @@ extern int kvm_sysctl_only;
 	kvm_read(kd, psnl[x].n_value, &v, sizeof v) != sizeof(v)
 
 int
-donlist()
+donlist(void)
 {
 	int rval, mib[2];
 	size_t siz;
@@ -113,8 +109,7 @@ donlist()
 			warnx("maxslp: %s", kvm_geterr(kd));
 			eval = rval = 1;
 		}
-	}
-	else {
+	} else {
 		siz = sizeof (fscale);
 		mib[0] = CTL_KERN;
 		mib[1] = KERN_FSCALE;
@@ -126,7 +121,7 @@ donlist()
 		mib[0] = CTL_HW;
 		mib[1] = HW_PHYSMEM;
 		if (sysctl(mib, 2, &mempages, &siz, NULL, 0) < 0) {
-			warnx("avail_start: failed to get hw.physmem");
+			warnx("physmem: failed to get hw.physmem");
 			eval = rval = 1;
 		}
 		mempages /= getpagesize(); /* translate bytes into page count */
@@ -149,8 +144,7 @@ donlist()
 }
 
 void
-nlisterr(nl)
-	struct nlist nl[];
+nlisterr(struct nlist nl[])
 {
 	int i;
 

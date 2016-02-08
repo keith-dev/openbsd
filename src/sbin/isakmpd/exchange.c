@@ -1,4 +1,4 @@
-/*	$OpenBSD: exchange.c,v 1.78 2003/03/06 13:32:42 ho Exp $	*/
+/*	$OpenBSD: exchange.c,v 1.84 2003/08/08 08:46:59 ho Exp $	*/
 /*	$EOM: exchange.c,v 1.143 2000/12/04 00:02:25 angelos Exp $	*/
 
 /*
@@ -14,11 +14,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by Ericsson Radio Systems.
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -1023,7 +1018,7 @@ exchange_setup_p1 (struct message *msg, u_int32_t doi)
   struct conf_list *flags;
   struct conf_list_node *flag;
 #endif
-  char *name = 0, *policy = 0, *str;
+  char *name = 0, *policy = 0, *str, *tag;
   u_int32_t want_doi;
   u_int8_t type;
 
@@ -1103,11 +1098,12 @@ exchange_setup_p1 (struct message *msg, u_int32_t doi)
 	}
       if (type != GET_ISAKMP_HDR_EXCH_TYPE (msg->iov[0].iov_base))
 	{
+	  tag = constant_lookup (isakmp_exch_cst,
+				 GET_ISAKMP_HDR_EXCH_TYPE (msg->iov[0]
+							   .iov_base));
 	  log_print ("exchange_setup_p1: expected exchange type %s got %s",
-		     str,
-		     constant_lookup (isakmp_exch_cst,
-				      GET_ISAKMP_HDR_EXCH_TYPE (msg->iov[0]
-								.iov_base)));
+		     str, tag ? tag : "<unknown>");
+		     
 	  return 0;
 	}
     }
@@ -1299,9 +1295,6 @@ exchange_free_aux (void *v_exch)
   if (exchange->recv_key)
     key_free (exchange->recv_keytype, ISAKMP_KEYTYPE_PUBLIC,
 	      exchange->recv_key);
-  if (exchange->sent_key)
-    key_free (exchange->sent_keytype, ISAKMP_KEYTYPE_PRIVATE,
-	      exchange->sent_key);
   if (exchange->keynote_key)
     free (exchange->keynote_key); /* This is just a string */
 
@@ -1404,6 +1397,25 @@ exchange_finalize (struct message *msg)
   exchange_dump ("exchange_finalize", exchange);
 #endif
 
+  /* Copy the ID from phase 1 to exchange or phase 2 SA.  */
+  if (msg->isakmp_sa)
+    {
+      if (exchange->id_i && exchange->id_r)
+	{
+	  ipsec_clone_id (&msg->isakmp_sa->id_i, &msg->isakmp_sa->id_i_len,
+			  exchange->id_i, exchange->id_i_len);
+	  ipsec_clone_id (&msg->isakmp_sa->id_r, &msg->isakmp_sa->id_r_len,
+			  exchange->id_r, exchange->id_r_len);
+	}
+      else if (msg->isakmp_sa->id_i && msg->isakmp_sa->id_r)
+	{
+	  ipsec_clone_id (&exchange->id_i, &exchange->id_i_len,
+			  msg->isakmp_sa->id_i, msg->isakmp_sa->id_i_len);
+	  ipsec_clone_id (&exchange->id_r, &exchange->id_r_len,
+			  msg->isakmp_sa->id_r, msg->isakmp_sa->id_r_len);
+	}
+    }
+
   /*
    * Walk over all the SAs and noting them as ready.  If we set the
    * COMMIT bit, tell the peer each SA is connected.
@@ -1471,13 +1483,10 @@ exchange_finalize (struct message *msg)
       msg->isakmp_sa->recv_certtype = exchange->recv_certtype;
       msg->isakmp_sa->sent_certtype = exchange->sent_certtype;
       msg->isakmp_sa->recv_keytype = exchange->recv_keytype;
-      msg->isakmp_sa->sent_keytype = exchange->sent_keytype;
       msg->isakmp_sa->recv_key = exchange->recv_key;
-      msg->isakmp_sa->sent_key = exchange->sent_key;
       msg->isakmp_sa->keynote_key = exchange->keynote_key;
       /* Reset.  */
       exchange->recv_key = 0;
-      exchange->sent_key = 0;
       exchange->keynote_key = 0;
       msg->isakmp_sa->policy_id = exchange->policy_id;
       exchange->policy_id = -1;
@@ -1510,25 +1519,6 @@ exchange_finalize (struct message *msg)
 		? "<no transport>"
 		: msg->isakmp_sa->transport->vtbl->decode_ids (msg->isakmp_sa
 							       ->transport)));
-    }
-
-  /* Copy the ID from phase 1 to exchange or phase 2 SA.  */
-  if (msg->isakmp_sa)
-    {
-      if (exchange->id_i && exchange->id_r)
-	{
-	  ipsec_clone_id (&msg->isakmp_sa->id_i, &msg->isakmp_sa->id_i_len,
-			  exchange->id_i, exchange->id_i_len);
-	  ipsec_clone_id (&msg->isakmp_sa->id_r, &msg->isakmp_sa->id_r_len,
-			  exchange->id_r, exchange->id_r_len);
-	}
-      else if (msg->isakmp_sa->id_i && msg->isakmp_sa->id_r)
-	{
-	  ipsec_clone_id (&exchange->id_i, &exchange->id_i_len,
-			  msg->isakmp_sa->id_i, msg->isakmp_sa->id_i_len);
-	  ipsec_clone_id (&exchange->id_r, &exchange->id_r_len,
-			  msg->isakmp_sa->id_r, msg->isakmp_sa->id_r_len);
-	}
     }
 
   exchange->doi->finalize_exchange (msg);
@@ -1583,7 +1573,8 @@ exchange_nonce (struct exchange *exchange, int peer, size_t nonce_sz,
       return -1;
     }
   memcpy (*nonce, buf, nonce_sz);
-  snprintf (header, 32, "exchange_nonce: NONCE_%c", initiator ? 'i' : 'r');
+  snprintf (header, sizeof header, "exchange_nonce: NONCE_%c",
+	    initiator ? 'i' : 'r');
   LOG_DBG_BUF ((LOG_EXCHANGE, 80, header, *nonce, nonce_sz));
   return 0;
 }
@@ -1684,8 +1675,8 @@ exchange_add_certs (struct message *msg)
   id_len = exchange->initiator ? exchange->id_r_len : exchange->id_i_len;
 
   /*
-   * Without IDs we cannot handle this yet. Keep the aca_list around for 
-   * a later step/retry to see if we got the ID by then. 
+   * Without IDs we cannot handle this yet. Keep the aca_list around for
+   * a later step/retry to see if we got the ID by then.
    * Note: A 'return -1' breaks X509-auth interop in the responder case
    *       with some IPsec clients that send CERTREQs early (ex SSH Sentinel).
    */

@@ -1649,7 +1649,8 @@ parse_unitstring(char *str, isc_resourcevalue_t *valuep) {
 static void
 print_uint64(cfg_printer_t *pctx, cfg_obj_t *obj) {
 	char buf[32];
-	sprintf(buf, "%" ISC_PRINT_QUADFORMAT "u", obj->value.uint64);
+	snprintf(buf, sizeof(buf), "%" ISC_PRINT_QUADFORMAT "u",
+		 obj->value.uint64);
 	print_cstr(pctx, buf);
 }
 
@@ -2770,9 +2771,9 @@ token_addr(cfg_parser_t *pctx, unsigned int flags, isc_netaddr_t *na) {
 			char buf[64];
 			int i;
 
-			strcpy(buf, s);
+			strlcpy(buf, s, sizeof(buf));
 			for (i = 0; i < 3; i++) {
-				strcat(buf, ".0");
+				strlcat(buf, ".0", sizeof(buf));
 				if (inet_pton(AF_INET, buf, &in4a) == 1) {
 					isc_netaddr_fromin(na, &in4a);
 					return (ISC_R_SUCCESS);
@@ -3646,13 +3647,16 @@ parser_complain(cfg_parser_t *pctx, isc_boolean_t is_warning,
 	static char message[2048];
 	int level = ISC_LOG_ERROR;
 	const char *prep = "";
+	size_t len;
 
 	if (is_warning)
 		level = ISC_LOG_WARNING;
 
-	sprintf(where, "%s:%u: ", current_file(pctx), pctx->line);
+	snprintf(where, sizeof(where), "%s:%u: ",
+		 current_file(pctx), pctx->line);
 
-	if ((unsigned int)vsprintf(message, format, args) >= sizeof message)
+	len = vsnprintf(message, sizeof(message), format, args);
+	if (len >= sizeof(message))
 		FATAL_ERROR(__FILE__, __LINE__,
 			    "error message would overflow");
 

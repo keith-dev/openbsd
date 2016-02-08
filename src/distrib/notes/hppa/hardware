@@ -1,4 +1,4 @@
-dnl	$OpenBSD: hardware,v 1.7 2003/02/17 23:38:29 miod Exp $
+dnl	$OpenBSD: hardware,v 1.9 2003/08/20 21:28:54 mickey Exp $
 OpenBSD/MACHINE OSREV runs on the following classes of HP9000 machines:
 dnl - PA7000-based
 dnl	705, 710, 720, 730, 750
@@ -17,6 +17,8 @@ dnl	705, 710, 720, 730, 750
 - PA7200-based
 	J200, J210, J210XC
 	C100, C110
+- PA7300LC-based
+	C160L (RDI PrecisionBook)
 
 Supported devices {:-include-:}:
 - Ethernet Controller
@@ -32,11 +34,12 @@ Supported devices {:-include-:}:
 	on-board parallel port (lpt)
 - Audio devices:
 	Harmony CS4215/AD1849 LASI audio (harmony)
-- Miscellaneous devices:
-	battery-backed real time clock
 - Input devices:
 	PS/2 keyboard (gsckbd) and mouse (pms)
 	HIL keyboard (hilkbd), mouse and tablets (hilms)
+- Miscellaneous devices:
+	battery-backed real time clock
+	``soft'' power button as available on some models (power)
 
 If your hardware is not listed above, there is currently no support for it
 in this release.

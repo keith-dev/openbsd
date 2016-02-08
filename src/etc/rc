@@ -1,4 +1,4 @@
-#	$OpenBSD: rc,v 1.225 2003/03/23 18:45:34 marc Exp $
+#	$OpenBSD: rc,v 1.228 2003/07/29 17:52:17 henning Exp $
 
 # System startup script run by init on autoboot
 # or after single-user.
@@ -120,6 +120,7 @@ ttyflags -a
 
 if [ "X${pf}" != X"NO" ]; then
 	RULES="block all"
+	RULES="$RULES\npass on lo0"
 	RULES="$RULES\npass in proto tcp from any to any port 22 keep state"
 	RULES="$RULES\npass out proto { tcp, udp } from any to any port 53 keep state"
 	RULES="$RULES\npass out inet proto icmp all icmp-type echoreq keep state"
@@ -328,7 +329,7 @@ dev_mkdb
 echo "."
 
 chmod 666 /dev/tty[pqrstuvwxyzPQRST]*
-chown root.wheel /dev/tty[pqrstuvwxyzPQRST]*
+chown root:wheel /dev/tty[pqrstuvwxyzPQRST]*
 
 # check the password temp/lock file
 if [ -f /etc/ptmp ]; then
@@ -428,12 +429,9 @@ fi
 
 echo -n starting network daemons:
 
-# $gated and $routed_flags are imported from /etc/rc.conf.
-# If $gated == YES, gated is used; otherwise routed.
+# $routed_flags are imported from /etc/rc.conf.
 # If $routed_flags == NO, routed isn't run.
-if [ X${gated} = X"YES" -a -e /etc/gated.conf ]; then
-	echo -n ' gated';		/usr/local/sbin/gated $gated_flags
-elif [ "X${routed_flags}" != X"NO" ]; then
+if [ "X${routed_flags}" != X"NO" ]; then
 	echo -n ' routed';		routed $routed_flags
 fi
 

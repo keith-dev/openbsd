@@ -1,4 +1,4 @@
-/*	$OpenBSD: vacation.c,v 1.18 2003/03/13 09:09:36 deraadt Exp $	*/
+/*	$OpenBSD: vacation.c,v 1.21 2003/08/09 23:47:32 millert Exp $	*/
 /*	$NetBSD: vacation.c,v 1.7 1995/04/29 05:58:27 cgd Exp $	*/
 
 /*
@@ -13,11 +13,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -44,7 +40,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)vacation.c	8.2 (Berkeley) 1/26/94";
 #endif
-static char rcsid[] = "$OpenBSD: vacation.c,v 1.18 2003/03/13 09:09:36 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: vacation.c,v 1.21 2003/08/09 23:47:32 millert Exp $";
 #endif /* not lint */
 
 /*
@@ -102,9 +98,7 @@ void setreply(void);
 void usage(void);
 
 int
-main(argc, argv)
-	int argc;
-	char **argv;
+main(int argc, char *argv[])
 {
 	struct passwd *pw;
 	struct stat sb;
@@ -207,7 +201,7 @@ main(argc, argv)
  *	read mail headers
  */
 void
-readheaders()
+readheaders(void)
 {
 	ALIAS *cur;
 	char *p;
@@ -224,7 +218,7 @@ readheaders()
 				for (p = buf + 5; *p && *p != ' '; ++p)
 					;
 				*p = '\0';
-				(void)strlcpy(from, buf + 5, sizeof from);
+				(void)strlcpy(from, buf + 5, sizeof(from));
 				if ((p = strchr(from, '\n')))
 					*p = '\0';
 				if (junkmail())
@@ -240,7 +234,7 @@ readheaders()
 				break;
 			for (p = buf + 12; *p && isspace(*p); ++p)
 				;
-			if (strlcpy(from, p, sizeof from ) > sizeof from) {
+			if (strlcpy(from, p, sizeof(from)) >= sizeof(from)) {
 				syslog(LOG_NOTICE,
 				       "Return-Path %s exceeds limits", p);
 				exit(1);
@@ -276,7 +270,7 @@ readheaders()
 				break;
 			for (p = buf + 8; *p && isspace(*p); ++p)
 				;
-			if (strlcpy(subj, p, sizeof subj ) > sizeof subj) {
+			if (strlcpy(subj, p, sizeof(subj)) >= sizeof(subj)) {
 				syslog(LOG_NOTICE,
 				       "Subject %s exceeds limits", p);
 				exit(1);
@@ -317,8 +311,7 @@ findme:			for (cur = names; !tome && cur; cur = cur->next)
  *	do a nice, slow, search of a string for a substring.
  */
 int
-nsearch(name, str)
-	char *name, *str;
+nsearch(char *name, char *str)
 {
 	int len;
 
@@ -333,7 +326,7 @@ nsearch(name, str)
  *	read the header and return if automagic/junk/bulk/list mail
  */
 int
-junkmail()
+junkmail(void)
 {
 	static struct ignore {
 		char	*name;
@@ -383,7 +376,7 @@ junkmail()
  *	use bcopy for machines with alignment restrictions
  */
 int
-recent()
+recent(void)
 {
 	DBT key, data;
 	time_t then, next;
@@ -413,8 +406,7 @@ recent()
  *	store the reply interval
  */
 void
-setinterval(interval)
-	time_t interval;
+setinterval(time_t interval)
 {
 	DBT key, data;
 
@@ -430,7 +422,7 @@ setinterval(interval)
  *	store that this user knows about the vacation.
  */
 void
-setreply()
+setreply(void)
 {
 	DBT key, data;
 	time_t now;
@@ -448,8 +440,7 @@ setreply()
  *	exec sendmail to send the vacation file to sender
  */
 void
-sendmessage(myname)
-	char *myname;
+sendmessage(char *myname)
 {
 	FILE *mfp, *sfp;
 	int i;
@@ -499,7 +490,7 @@ sendmessage(myname)
 }
 
 void
-usage()
+usage(void)
 {
 	syslog(LOG_NOTICE, "uid %u: usage: vacation [-i] [-a alias] login",
 	    getuid());

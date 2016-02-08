@@ -1,4 +1,4 @@
-/*	$OpenBSD: biz31.c,v 1.6 2001/10/24 18:38:58 millert Exp $	*/
+/*	$OpenBSD: biz31.c,v 1.9 2003/06/03 02:56:18 millert Exp $	*/
 /*	$NetBSD: biz31.c,v 1.5 1997/02/11 09:24:14 mrg Exp $	*/
 
 /*
@@ -13,11 +13,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -38,7 +34,7 @@
 #if 0
 static char sccsid[] = "@(#)biz31.c	8.1 (Berkeley) 6/6/93";
 #endif
-static char rcsid[] = "$OpenBSD: biz31.c,v 1.6 2001/10/24 18:38:58 millert Exp $";
+static char rcsid[] = "$OpenBSD: biz31.c,v 1.9 2003/06/03 02:56:18 millert Exp $";
 #endif /* not lint */
 
 #include "tip.h"
@@ -91,7 +87,7 @@ biz_dialer(num, mod)
 	if (timeout) {
 		char line[80];
 
-		(void)sprintf(line, "%ld second dial timeout",
+		(void)snprintf(line, sizeof line, "%ld second dial timeout",
 			number(value(DIALTIMEOUT)));
 		logent(value(HOST), num, "biz", line);
 	}
@@ -122,7 +118,7 @@ biz31f_dialer(num, acu)
 biz31_disconnect()
 {
 
-	write(FD, DISCONNECT_CMD, 4);
+	write(FD, DISCONNECT_CMD, sizeof(DISCONNECT_CMD)-1);
 	sleep(2);
 	tcflush(FD, TCIOFLUSH);
 }

@@ -1,4 +1,4 @@
-# $OpenBSD: Makefile,v 1.29 2003/01/31 14:05:35 deraadt Exp $
+# $OpenBSD: Makefile,v 1.31 2003/06/02 08:45:58 markus Exp $
 
 LIB=	crypto
 
@@ -34,7 +34,8 @@ CFLAGS+= -DOPENSSL_NO_HW_SUREWARE -DOPENSSL_NO_HW_4758_CCA
 CFLAGS+= -I${.CURDIR}/../${SSLEAYDIST}
 CFLAGS+= -I${LCRYPTO_SRC}
 SRCS+= o_time.c
-SRCS+=	cryptlib.c ex_data.c cpt_err.c mem.c mem_dbg.c tmdiff.c cversion.c uid.c
+SRCS+=	cryptlib.c ex_data.c cpt_err.c mem.c mem_dbg.c mem_clr.c
+SRCS+=	tmdiff.c cversion.c uid.c
 SRCS+=	md2_dgst.c md2_one.c 					
 SRCS+=	md5_dgst.c md5_one.c 					
 SRCS+=	sha_dgst.c sha1dgst.c sha_one.c sha1_one.c	
@@ -215,29 +216,23 @@ HDRS_GEN=\
 	${.OBJDIR}/obj_mac.h
 
 includes: obj_mac.h
-	@test -d ${DESTDIR}/usr/include/ssl || mkdir ${DESTDIR}/usr/include/ssl
-	@d=`mktemp -d /tmp/libsslXXXXXXXXXX`; \
+	@test -d ${DESTDIR}/usr/include/openssl || \
+	    mkdir ${DESTDIR}/usr/include/openssl
+	@cd ${SSL_SRC}; \
 	for i in $(HDRS); do \
-		f=`basename $$i`; \
-		j="sed 's/<openssl/<ssl/' \
-		       ${SSL_SRC}/$$i >$$d/$$f && \
-		(cmp -s $$d/$$f ${DESTDIR}/usr/include/ssl/$$f || \
-		${INSTALL} ${INSTALL_COPY} -o ${BINOWN} -g ${BINGRP} -m 444 \
-			   $$d/$$f ${DESTDIR}/usr/include/ssl)"; \
-		echo $$j; \
-		eval "$$j"; \
+	    j="cmp -s $$i ${DESTDIR}/usr/include/openssl/`basename $$i` || \
+	    ${INSTALL} ${INSTALL_COPY} -o ${BINOWN} -g ${BINGRP} -m 444 $$i\
+		${DESTDIR}/usr/include/openssl"; \
+	    echo $$j; \
+	    eval "$$j"; \
 	done; \
 	for i in $(HDRS_GEN); do \
-		f=`basename $$i`; \
-		j="sed 's/<openssl/<ssl/' \
-		       $$i >$$d/$$f && \
-		(cmp -s $$d/$$f ${DESTDIR}/usr/include/ssl/$$f || \
-		${INSTALL} ${INSTALL_COPY} -o ${BINOWN} -g ${BINGRP} -m 444 \
-			   $$d/$$f ${DESTDIR}/usr/include/ssl)"; \
-		echo $$j; \
-		eval "$$j"; \
-	done; \
-	rm -rf $$d
+	    j="cmp -s $$i ${DESTDIR}/usr/include/openssl/`basename $$i` || \
+	    ${INSTALL} ${INSTALL_COPY} -o ${BINOWN} -g ${BINGRP} -m 444 $$i\
+		${DESTDIR}/usr/include/openssl"; \
+	    echo $$j; \
+	    eval "$$j"; \
+	done;
 
 # generated
 CFLAGS+= -I${.OBJDIR}

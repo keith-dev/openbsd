@@ -1,5 +1,5 @@
 %{
-/*	$OpenBSD: gram.y,v 1.14 2002/05/30 07:36:44 deraadt Exp $	*/
+/*	$OpenBSD: gram.y,v 1.17 2003/06/28 04:55:07 deraadt Exp $	*/
 /*	$NetBSD: gram.y,v 1.14 1997/02/02 21:12:32 thorpej Exp $	*/
 
 /*
@@ -23,11 +23,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -255,7 +251,7 @@ atname:
 	ROOT				{ $$ = NULL; };
 
 devbase:
-	WORD				{ $$ = getdevbase($1); };
+	WORD				{ $$ = getdevbase((char *)$1); };
 
 devattach_opt:
 	WITH WORD			{ $$ = getdevattach($2); } |
@@ -421,8 +417,7 @@ flags_opt:
 %%
 
 void
-yyerror(s)
-	const char *s;
+yyerror(const char *s)
 {
 
 	error("%s", s);
@@ -433,10 +428,10 @@ yyerror(s)
  * allocated during parsing the current line.
  */
 static void
-cleanup()
+cleanup(void)
 {
-	register struct nvlist **np;
-	register int i;
+	struct nvlist **np;
+	int i;
 
 	for (np = alloc, i = adepth; --i >= 0; np++)
 		nvfree(*np);
@@ -444,9 +439,7 @@ cleanup()
 }
 
 static void
-setmachine(mch, mcharch)
-	const char *mch;
-	const char *mcharch;
+setmachine(const char *mch, const char *mcharch)
 {
 	char buf[MAXPATHLEN];
 
@@ -470,7 +463,7 @@ setmachine(mch, mcharch)
 }
 
 static void
-check_maxpart()
+check_maxpart(void)
 {
 	if (maxpartitions <= 0) {
 		stop("cannot proceed without maxpartitions specifier");

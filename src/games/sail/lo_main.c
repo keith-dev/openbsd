@@ -1,4 +1,4 @@
-/*	$OpenBSD: lo_main.c,v 1.3 2001/03/09 08:36:24 pjanzen Exp $	*/
+/*	$OpenBSD: lo_main.c,v 1.6 2003/07/10 00:03:01 david Exp $	*/
 /*	$NetBSD: lo_main.c,v 1.3 1995/04/22 10:36:59 cgd Exp $	*/
 
 /*
@@ -13,11 +13,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -38,7 +34,7 @@
 #if 0
 static char sccsid[] = "@(#)lo_main.c	8.2 (Berkeley) 4/28/95";
 #else
-static char rcsid[] = "$OpenBSD: lo_main.c,v 1.3 2001/03/09 08:36:24 pjanzen Exp $";
+static char rcsid[] = "$OpenBSD: lo_main.c,v 1.6 2003/07/10 00:03:01 david Exp $";
 #endif
 #endif /* not lint */
 
@@ -50,6 +46,7 @@ static char rcsid[] = "$OpenBSD: lo_main.c,v 1.3 2001/03/09 08:36:24 pjanzen Exp
 #include <sys/param.h>
 #include <sys/types.h>
 #include <pwd.h>
+#include <stdlib.h>
 #include "extern.h"
 #include "pathnames.h"
 
@@ -86,10 +83,10 @@ lo_main()
 	while (fread((char *)&log, sizeof log, 1, fp) == 1 &&
 	       log.l_name[0] != '\0') {
 		if (longfmt && (pass = getpwuid(log.l_uid)) != NULL)
-			(void) sprintf(sbuf, "%10.10s (%s)",
+			(void) snprintf(sbuf, sizeof sbuf, "%10.10s (%s)",
 				log.l_name, pass->pw_name);
 		else
-			(void) sprintf(sbuf, "%20.20s", log.l_name);
+			(void) snprintf(sbuf, sizeof sbuf, "%20.20s", log.l_name);
 		ship = &scene[log.l_gamenum].ship[log.l_shipnum];
 		printf("%-10s %21s of the %15s %3d points, %5.2f equiv\n",
 			title[n++], sbuf, ship->shipname, log.l_netpoints,

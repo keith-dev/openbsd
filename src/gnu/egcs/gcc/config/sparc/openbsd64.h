@@ -33,12 +33,11 @@ Boston, MA 02111-1307, USA.  */
 #undef TARGET_VERSION
 #define TARGET_VERSION fprintf (stderr, " (sparc64 OpenBSD ELF)")
 
-/* A 64 but v9 complier in a Medium/Mid code model.  */
+/* A 64 bit v9 compiler in a Medium/Mid code model.  */
 
-/* XXX - do we really want HARD_QUAD? */
 #undef TARGET_DEFAULT
 #define TARGET_DEFAULT \
-(MASK_V9 + MASK_PTR64 + MASK_64BIT + MASK_HARD_QUAD \
+(MASK_V9 + MASK_PTR64 + MASK_64BIT /* + MASK_HARD_QUAD */ \
  + MASK_APP_REGS + MASK_EPILOGUE + MASK_FPU + MASK_STACK_BIAS)
 
 #undef SPARC_DEFAULT_CMODEL
@@ -46,7 +45,9 @@ Boston, MA 02111-1307, USA.  */
 
 /* Run-time target specifications.  */
 #undef CPP_PREDEFINES
-#define CPP_PREDEFINES "-D__unix__ -D__sparc__ -D__sparc64__ -D__sparcv9__ -D__sparc_v9__ -D__arch64__ -D__ELF__ -D__OpenBSD__ -Asystem(unix) -Asystem(OpenBSD) -Acpu(sparc) -Amachine(sparc)"
+#define CPP_PREDEFINES "-D__unix__ -D__sparc__ -D__sparc64__ -D__sparcv9__ \
+-D__sparc_v9__ -D__arch64__ -D__LP64__ -D_LP64 -D__ELF__ -D__OpenBSD__ \
+-Asystem(unix) -Asystem(OpenBSD) -Acpu(sparc) -Amachine(sparc)"
 
 #undef CPP_SUBTARGET_SPEC
 #define CPP_SUBTARGET_SPEC ""
@@ -114,3 +115,5 @@ Boston, MA 02111-1307, USA.  */
     fprintf ((FILE), "\n");						\
   } while (0)
 
+/* problems occur if we're too liberal in preserve_subexpressions_p */
+#define	BROKEN_PRESERVE_SUBEXPRESSIONS_P

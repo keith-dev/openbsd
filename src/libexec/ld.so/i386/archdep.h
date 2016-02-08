@@ -1,4 +1,4 @@
-/*	$OpenBSD: archdep.h,v 1.3 2003/02/15 22:43:06 drahn Exp $ */
+/*	$OpenBSD: archdep.h,v 1.8 2003/06/09 16:10:03 deraadt Exp $ */
 
 /*
  * Copyright (c) 1998 Per Fogelstrom, Opsycon AB
@@ -11,12 +11,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed under OpenBSD by
- *	Per Fogelstrom, Opsycon AB, Sweden.
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS
  * OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
@@ -55,6 +49,15 @@ _dl_mmap(void *addr, unsigned int len, unsigned int prot,
 	return((void *)_dl__syscall((quad_t)SYS_mmap, addr, len, prot,
 		flags, fd, 0, offset));
 }
+
+static inline void *
+_dl_mquery(void *addr, unsigned int len, unsigned int prot,
+	unsigned int flags, int fd, off_t offset)
+{
+	return((void *)_dl__syscall((quad_t)SYS_mquery, addr, len, prot,
+		flags, fd, 0, offset));
+}
+
 
 static inline void
 RELOC_REL(Elf32_Rel *r, const Elf32_Sym *s, Elf32_Addr *p, unsigned long v)

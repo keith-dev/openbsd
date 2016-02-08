@@ -1,4 +1,4 @@
-.\"	$OpenBSD: eisa.4,v 1.5 2002/11/08 08:08:47 mpech Exp $
+.\"	$OpenBSD: eisa.4,v 1.10 2003/08/31 20:34:16 jmc Exp $
 .\"	$NetBSD: eisa.4,v 1.10 2001/09/11 22:52:52 wiz Exp $
 .\"
 .\" Copyright (c) 1997 Jonathan Stone
@@ -34,7 +34,7 @@
 .Os
 .Sh NAME
 .Nm eisa
-.Nd Introduction to EISA bus machine-independent drivers and support
+.Nd introduction to EISA bus machine-independent drivers and support
 .Sh SYNOPSIS
 Machine-dependent; depends on the bus topology and
 .Tn EISA
@@ -50,7 +50,7 @@ bridge.
 See the
 .Xr intro 4
 documentation for your system for details.
-.Sh INTRODUCTION
+.Sh DESCRIPTION
 .Ox
 includes a machine-independent
 .Tn EISA
@@ -74,14 +74,14 @@ includes machine-independent
 drivers, sorted by device type
 and driver name:
 .Ss Disk and tape controllers
-.Bl -tag -width pcdisplay -offset indent
+.Bl -tag -width 12n -offset ind -compact
 .It Xr cac 4
 Compaq array controllers.
 .It Xr dpt 4
 DPT SmartCache/SmartRAID controllers.
 .El
 .Ss SCSI interfaces
-.Bl -tag -width pcdisplay -offset indent
+.Bl -tag -width 12n -offset ind -compact
 .It Xr ahb 4
 Adaptec 174x
 .Tn SCSI
@@ -95,12 +95,12 @@ BusLogic BT-74x
 .Tn SCSI
 interfaces.
 .It Xr uha 4
-Ulrastor 24f
+Ultrastor 24f
 .Tn SCSI
 interfaces.
 .El
 .Ss Network interfaces
-.Bl -tag -width pcdisplay -offset indent
+.Bl -tag -width 12n -offset ind -compact
 .It Xr ep 4
 3Com 3c579 and 3c592 10Mbit
 .Tn Ethernet ,
@@ -118,7 +118,7 @@ Digital DEFEA FDDI interfaces.
 .\" .Tn Ethernet
 .\" interfaces.
 .El
-.Pp[B
+.Pp
 Note that most or all
 .Tn EISA
 devices also have
@@ -143,7 +143,7 @@ supported bus variants.
 .Xr ep 4 ,
 .Xr fea 4 ,
 .Xr intro 4 ,
-.Xr uha 4 ,
+.Xr uha 4
 .Sh HISTORY
 The machine-independent
 .Tn EISA

@@ -1,4 +1,4 @@
-/*	$OpenBSD: rpc_svcout.c,v 1.15 2002/07/05 05:39:42 deraadt Exp $	*/
+/*	$OpenBSD: rpc_svcout.c,v 1.21 2003/08/16 23:09:40 deraadt Exp $	*/
 /*	$NetBSD: rpc_svcout.c,v 1.7 1995/06/24 14:59:59 pk Exp $	*/
 /*
  * Sun RPC is a product of Sun Microsystems, Inc. and is provided for
@@ -64,14 +64,12 @@ static void write_timeout_func(void);
 static void write_pm_most(char *, int);
 static void write_caller_func(void);
 static void write_rpc_svc_fg(char *, char *);
-static void write_msg_out();
+static void write_msg_out(void);
 static void open_log_file(char *, char *);
 int nullproc(proc_list *proc);
 
 static void
-p_xdrfunc(rname, typename)
-char *rname;
-char *typename;
+p_xdrfunc(char *rname, char *typename)
 {
 	if (Cflag)
 		fprintf(fout, "\t\txdr_%s = (xdrproc_t) xdr_%s;\n",
@@ -306,7 +304,7 @@ write_real_program(def)
 				fprintf(fout, "(");
 				/* arg name */
 				if (proc->arg_num > 1)
-					fprintf(fout, proc->args.argname);
+					fprintf(fout, "%s", proc->args.argname);
 				else
 					ptype(proc->args.decls->decl.prefix,
 					    proc->args.decls->decl.type, 0);
@@ -356,16 +354,29 @@ write_program(def, storage)
 		fprintf(fout, "\n");
 		if (storage != NULL)
 			fprintf(fout, "%s ", storage);
+		fprintf(fout, "void\t");
+		pvname(def->def_name, vp->vers_num);
+
+		if (Cflag) {
+			fprintf(fout, "(struct svc_req *%s, ", RQSTP);
+			fprintf(fout, "SVCXPRT *%s);\n", TRANSP);
+		} else {
+			fprintf(fout, "();\n");
+		}
+		fprintf(fout, "\n");
+
+		if (storage != NULL)
+			fprintf(fout, "%s ", storage);
 		fprintf(fout, "void\n");
 		pvname(def->def_name, vp->vers_num);
 
 		if (Cflag) {
 			fprintf(fout, "(struct svc_req *%s, ", RQSTP);
-			fprintf(fout, "register SVCXPRT *%s)\n", TRANSP);
+			fprintf(fout, "SVCXPRT *%s)\n", TRANSP);
 		} else {
 			fprintf(fout, "(%s, %s)\n", RQSTP, TRANSP);
-			fprintf(fout, "	struct svc_req *%s;\n", RQSTP);
-			fprintf(fout, "	register SVCXPRT *%s;\n", TRANSP);
+			fprintf(fout, "    struct svc_req *%s;\n", RQSTP);
+			fprintf(fout, "    SVCXPRT *%s;\n", TRANSP);
 		}
 		fprintf(fout, "{\n");
 
@@ -515,7 +526,7 @@ static void
 write_inetmost(infile)
 	char *infile;
 {
-	fprintf(fout, "\tregister SVCXPRT *%s;\n", TRANSP);
+	fprintf(fout, "\tSVCXPRT *%s;\n", TRANSP);
 	fprintf(fout, "\tint sock;\n");
 	fprintf(fout, "\tint proto;\n");
 	fprintf(fout, "\tstruct sockaddr_in saddr;\n");
@@ -831,7 +842,7 @@ write_rpc_svc_fg(infile, sp)
 	else {
 		fprintf(fout, "%si = open(\"/dev/tty\", 2);\n", sp);
 		fprintf(fout, "%sif (i >= 0) {\n", sp);
-		fprintf(fout, "%s\t(void) ioctl(i, TIOCNOTTY, (char *)NULL);\n", sp);;
+		fprintf(fout, "%s\t(void) ioctl(i, TIOCNOTTY, (char *)NULL);\n", sp);
 		fprintf(fout, "%s\t(void) close(i);\n", sp);
 		fprintf(fout, "%s}\n", sp);
 	}

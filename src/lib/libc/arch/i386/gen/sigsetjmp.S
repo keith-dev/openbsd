@@ -13,11 +13,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -38,7 +34,7 @@
 
 #if defined(LIBC_SCCS)
 	.text
-	.asciz "$OpenBSD: sigsetjmp.S,v 1.4 2001/11/01 07:02:13 mickey Exp $"
+	.asciz "$OpenBSD: sigsetjmp.S,v 1.6 2003/06/02 20:18:30 millert Exp $"
 #endif
 
 ENTRY(sigsetjmp)
@@ -47,6 +43,8 @@ ENTRY(sigsetjmp)
 	movl	%eax,28(%ecx)
 	testl	%eax,%eax
 	jz	1f
+
+	PIC_PROLOGUE
 	pushl	$0
 #ifdef PIC
 	call	PIC_PLT(_C_LABEL(sigblock))
@@ -54,6 +52,8 @@ ENTRY(sigsetjmp)
 	call	_C_LABEL(sigblock)
 #endif
 	addl	$4,%esp
+	PIC_EPILOGUE
+
 	movl	4(%esp),%ecx
 	movl	%eax,24(%ecx)
 1:	movl	0(%esp),%edx
@@ -70,6 +70,8 @@ ENTRY(siglongjmp)
 	movl	4(%esp),%edx
 	cmpl	$0,28(%edx)
 	jz	1f
+
+	PIC_PROLOGUE
 	pushl	24(%edx)
 #ifdef PIC
 	call	PIC_PLT(_C_LABEL(sigsetmask))
@@ -77,6 +79,8 @@ ENTRY(siglongjmp)
 	call	_C_LABEL(sigsetmask)
 #endif
 	addl	$4,%esp
+	PIC_EPILOGUE
+
 1:	movl	4(%esp),%edx
 	movl	8(%esp),%eax
 	movl	0(%edx),%ecx

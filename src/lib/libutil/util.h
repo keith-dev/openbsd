@@ -1,4 +1,4 @@
-/*	$OpenBSD: util.h,v 1.22 2002/06/21 16:37:11 millert Exp $	*/
+/*	$OpenBSD: util.h,v 1.24 2003/06/02 20:18:42 millert Exp $	*/
 /*	$NetBSD: util.h,v 1.2 1996/05/16 07:00:22 thorpej Exp $	*/
 
 /*-
@@ -14,11 +14,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -71,6 +67,11 @@
 #define UU_LOCK_OWNER_ERR (-7)
 
 /*
+ * fmt_scaled(3) specific flags.
+ */
+#define	FMT_SCALED_STRSIZE	7	/* minus sign, 4 digits, suffix, null byte */
+
+/*
  * stub struct definitions.
  */
 struct __sFILE;
@@ -113,6 +114,8 @@ const char *uu_lockerr(int _uu_lockresult);
 int     uu_lock(const char *_ttyname);
 int	uu_lock_txfr(const char *_ttyname, pid_t _pid);
 int     uu_unlock(const char *_ttyname);
+int	fmt_scaled(long long number, char *result);
+int	scan_scaled(char *scaled, long long *result);
 __END_DECLS
 
 #endif /* !_UTIL_H_ */

@@ -1,7 +1,7 @@
-/*	$OpenBSD: perform.c,v 1.22 2001/11/26 05:04:33 deraadt Exp $	*/
+/*	$OpenBSD: perform.c,v 1.32 2003/08/21 20:24:56 espie Exp $	*/
 
 #ifndef lint
-static const char *rcsid = "$OpenBSD: perform.c,v 1.22 2001/11/26 05:04:33 deraadt Exp $";
+static const char rcsid[] = "$OpenBSD: perform.c,v 1.32 2003/08/21 20:24:56 espie Exp $";
 #endif
 
 /*
@@ -61,9 +61,9 @@ static char *Home;
 /* called to see if pkg is already installed as some other version */
 /* note found version in "note" */
 static int
-check_if_installed(const char *found, char *note)
+check_if_installed(const char *found, char *note, int len)
 {
-    strcpy(note, found);
+    strlcpy(note, found, len);
     return 0;
 }
 
@@ -90,7 +90,7 @@ pkg_do(char *pkg)
     code = 0;
     zapLogDir = 0;
     LogDir[0] = '\0';
-    strcpy(playpen, FirstPen);
+    strlcpy(playpen, FirstPen, sizeof(playpen));
     dbdir = (tmp = getenv(PKG_DBDIR)) ? tmp : DEF_LOG_DIR;
 
     snprintf(solve_deps, sizeof solve_deps, "pkg%s dependencies solve %s",
@@ -127,7 +127,7 @@ pkg_do(char *pkg)
 		return 1;
 	    }
 	    where_to = Home;
-	    strcpy(pkg_fullname, pkg);
+	    strlcpy(pkg_fullname, pkg, sizeof(pkg_fullname));
 	    system(solve_deps);
 	    cfile = fopen(CONTENTS_FNAME, "r");
 	    if (!cfile) {
@@ -139,7 +139,7 @@ pkg_do(char *pkg)
 	    read_plist(&Plist, cfile);
 	    fclose(cfile);
 	} else {
-	    strlcpy(pkg_fullname, ensure_tgz(pkg), sizeof pkg_fullname);
+	    strlcpy(pkg_fullname, ensure_tgz(pkg), sizeof(pkg_fullname));
 	    if (strcmp(pkg, "-")) {
 		if (!ispkgpattern(pkg_fullname)
 		    && stat(pkg_fullname, &sb) == FAIL) {
@@ -227,7 +227,11 @@ pkg_do(char *pkg)
 
     setenv(PKG_PREFIX_VNAME, (p = find_plist(&Plist, PLIST_CWD)) ? p->name : ".", 1);
     /* Protect against old packages with bogus @name fields */
-    PkgName = (p = find_plist(&Plist, PLIST_NAME)) ? p->name : "anonymous";
+    PkgName = (p = find_plist(&Plist, PLIST_NAME)) ? p->name : NULL;
+    if (PkgName == NULL) {
+	pwarnx("package name not set in package file");
+	goto bomb;
+    }
 
     /* See if we're already registered */
     (void) snprintf(LogDir, sizeof(LogDir), "%s/%s", dbdir, PkgName);
@@ -244,7 +248,7 @@ pkg_do(char *pkg)
 	char *s;
 
 	if ((s=strrchr(PkgName, '-')) != NULL){
-	    strcpy(buf, PkgName);
+	    strlcpy(buf, PkgName, sizeof(buf));
 	    /* try to find a better version number */
 	    if (!isdigit(s[1])) {
 	    	char *t;
@@ -254,9 +258,9 @@ pkg_do(char *pkg)
 				break;
 			}
 	    }
-	    strcpy(buf+(s-PkgName+1), isdigit(s[1]) ? "[0-9]*" : "*");
+	    strlcpy(buf+(s-PkgName+1), isdigit(s[1]) ? "[0-9]*" : "*", sizeof(buf)-(s-PkgName+1));
 
-            if (findmatchingname(dbdir, buf, check_if_installed, installed)) {
+            if (findmatchingname(dbdir, buf, check_if_installed, installed, sizeof(installed))) {
 		pwarnx("other version '%s' already installed", installed);
 	    	if (find_plist_option(&Plist, "no-default-conflict") != NULL) {
 		    pwarnx("proceeding with installation anyway");
@@ -279,8 +283,8 @@ pkg_do(char *pkg)
 	
 	/* was: */
         /* if (!vsystem("/usr/sbin/pkg_info -qe '%s'", p->name)) {*/
-	if(findmatchingname(dbdir, p->name, check_if_installed, installed)){
-	    pwarnx("Conflicting package installed, please use\n\t\"pkg_delete %s\" first to remove it!\n",  installed); 
+	if(findmatchingname(dbdir, p->name, check_if_installed, installed, sizeof(installed))){
+	    pwarnx("Conflicting package installed, please use\n\t\"pkg_delete %s\" first to remove it!",  installed); 
 	    ++code;
 	}
     }
@@ -294,14 +298,14 @@ pkg_do(char *pkg)
 	if (Verbose)
 	    printf("Package `%s' depends on `%s'\n", PkgName, p->name);
 	/* if (vsystem("/usr/sbin/pkg_info -qe '%s'", p->name)) { */
-	if (!findmatchingname(dbdir, p->name, check_if_installed, installed)) {
+	if (!findmatchingname(dbdir, p->name, check_if_installed, installed, sizeof(installed))) {
 	    char path[FILENAME_MAX], *cp = NULL;
 
 	    if (!Fake) {
 		if (!isURL(pkg) && !getenv("PKG_ADD_BASE")) {
 		    /* install depending pkg from local disk */
 		    
-		    snprintf(path, FILENAME_MAX, "%s/%s", Home, ensure_tgz(p->name));
+		    snprintf(path, sizeof(path), "%s/%s", Home, ensure_tgz(p->name));
 		    if (fexists(path))
 			cp = path;
 		    else
@@ -363,6 +367,7 @@ pkg_do(char *pkg)
 			    printf("\t`%s' loaded successfully\n", p->name);
 			/* Nuke the temporary playpen */
 			leave_playpen(cp);
+			free(cp);
 
 			restore_dirs(saved_Current, saved_Previous);
 		    }
@@ -506,14 +511,15 @@ pkg_do(char *pkg)
 		if (s != NULL) {
 		    char *t;
 		    t=strrchr(contents, '/');
-		    strcpy(t+1, s);
+		    strlcpy(t+1, s, contents + sizeof(contents) - (t+1));
+		    free(s);
 		}else{
 		    errx(1,"Where did our dependency go?!");
 		    /* this shouldn't happen... X-) */
 		}
 	    }
-	    strcat(contents, "/");
-	    strcat(contents, REQUIRED_BY_FNAME);
+	    strlcat(contents, "/", sizeof(contents));
+	    strlcat(contents, REQUIRED_BY_FNAME, sizeof(contents));
  
 	    cfile = fopen(contents, "a");
 	    if (!cfile)
@@ -552,7 +558,7 @@ pkg_do(char *pkg)
  fail:
     /* Nuke the whole (installed) show, XXX but don't clean directories */
     if (!Fake)
-	delete_package(FALSE, FALSE, &Plist);
+	delete_package(FALSE, FALSE, FALSE, FALSE, &Plist);
 
  success:
     /* delete the packing list contents */

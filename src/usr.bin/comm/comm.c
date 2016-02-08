@@ -1,4 +1,4 @@
-/*	$OpenBSD: comm.c,v 1.5 2002/02/16 21:27:45 millert Exp $	*/
+/*	$OpenBSD: comm.c,v 1.7 2003/06/10 22:20:45 deraadt Exp $	*/
 /*	$NetBSD: comm.c,v 1.10 1995/09/05 19:57:43 jtc Exp $	*/
 
 /*
@@ -16,11 +16,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -47,7 +43,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)comm.c	8.4 (Berkeley) 5/4/95";
 #endif
-static char rcsid[] = "$OpenBSD: comm.c,v 1.5 2002/02/16 21:27:45 millert Exp $";
+static char rcsid[] = "$OpenBSD: comm.c,v 1.7 2003/06/10 22:20:45 deraadt Exp $";
 #endif /* not lint */
 
 #include <err.h>
@@ -67,9 +63,7 @@ void	show(FILE *, char *, char *);
 void	usage(void);
 
 int
-main(argc, argv)
-	int argc;
-	char **argv;
+main(int argc, char *argv[])
 {
 	int comp, file1done, file2done, read1, read2;
 	int ch, flag1, flag2, flag3;
@@ -170,17 +164,14 @@ main(argc, argv)
 }
 
 void
-show(fp, offset, buf)
-	FILE *fp;
-	char *offset, *buf;
+show(FILE *fp, char *offset, char *buf)
 {
 	while (printf("%s%s", offset, buf) >= 0 && fgets(buf, MAXLINELEN, fp))
 		;
 }
 
 FILE *
-file(name)
-	const char *name;
+file(const char *name)
 {
 	FILE *fp;
 
@@ -192,7 +183,7 @@ file(name)
 }
 
 void
-usage()
+usage(void)
 {
 	(void)fprintf(stderr, "usage: comm [-123f] file1 file2\n");
 	exit(1);

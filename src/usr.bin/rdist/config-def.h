@@ -1,4 +1,4 @@
-/*	$OpenBSD: config-def.h,v 1.4 1998/06/26 21:21:03 millert Exp $	*/
+/*	$OpenBSD: config-def.h,v 1.6 2003/06/03 02:56:14 millert Exp $	*/
 
 /*
  * Copyright (c) 1993 Michael A. Cooper
@@ -13,11 +13,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -35,7 +31,7 @@
  */
 
 /*
- * $From: config-def.h,v 6.12 1994/03/31 04:30:42 mcooper Exp $
+ * $From: config-def.h,v 1.1.1.1 1995/05/20 23:35:17 christos Exp $
  * @(#)configdef.h
  */
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ctl.c,v 1.6 2002/06/02 22:29:19 deraadt Exp $	*/
+/*	$OpenBSD: ctl.c,v 1.8 2003/06/10 22:20:52 deraadt Exp $	*/
 /*	$NetBSD: ctl.c,v 1.3 1994/12/09 02:14:10 jtc Exp $	*/
 
 /*
@@ -13,11 +13,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -38,7 +34,7 @@
 #if 0
 static char sccsid[] = "@(#)ctl.c	8.1 (Berkeley) 6/6/93";
 #endif
-static char rcsid[] = "$OpenBSD: ctl.c,v 1.6 2002/06/02 22:29:19 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: ctl.c,v 1.8 2003/06/10 22:20:52 deraadt Exp $";
 #endif /* not lint */
 
 /*
@@ -68,7 +64,7 @@ int	invitation_waiting = 0;
 CTL_MSG msg;
 
 void
-open_sockt()
+open_sockt(void)
 {
 	int length;
 
@@ -86,7 +82,7 @@ open_sockt()
 
 /* open the ctl socket */
 void
-open_ctl()
+open_ctl(void)
 {
 	int length;
 
@@ -106,8 +102,7 @@ open_ctl()
 
 /* print_addr is a debug print routine */
 void
-print_addr(addr)
-	struct sockaddr_in addr;
+print_addr(struct sockaddr_in addr)
 {
 	int i;
 

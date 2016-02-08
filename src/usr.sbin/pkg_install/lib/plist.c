@@ -1,6 +1,6 @@
-/*	$OpenBSD: plist.c,v 1.13 2001/11/07 20:57:24 espie Exp $	*/
+/*	$OpenBSD: plist.c,v 1.17 2003/08/21 20:24:57 espie Exp $	*/
 #ifndef lint
-static const char *rcsid = "$OpenBSD: plist.c,v 1.13 2001/11/07 20:57:24 espie Exp $";
+static const char rcsid[] = "$OpenBSD: plist.c,v 1.17 2003/08/21 20:24:57 espie Exp $";
 #endif
 
 /*
@@ -55,8 +55,12 @@ static cmd_t	cmdv[] = {
 	{	"option",	PLIST_OPTION,		1	},
 	{	"newdepend",	PLIST_NEWDEP,		1	},
 	{	"libdepend",	PLIST_LIBDEP,		1	},
+	{	"extra",	PLIST_EXTRA,		1	},
+	{	"extraunexec",	PLIST_EXTRAUNEXEC,	1	},
 	{	NULL,		FAIL,			0	}
 };
+
+static void delete_files(const char *);
 
 /* Add an item to the end of a packing list */
 void
@@ -210,7 +214,7 @@ plist_cmd(char *s, char **arg)
 	char	*cp;
 	char	*sp;
 
-	(void) strcpy(cmd, s);
+	(void) strlcpy(cmd, s, sizeof(cmd));
 	str_lowercase(cmd);
 	for (cp = cmd, sp = s ; *cp ; cp++, sp++) {
 		if (isspace(*cp)) {
@@ -290,7 +294,8 @@ write_plist(package_t *pkg, FILE *fp)
  * run it too in cases of failure.
  */
 int
-delete_package(Boolean ign_err, Boolean nukedirs, package_t *pkg)
+delete_package(Boolean ign_err, Boolean nukedirs, Boolean remove_config, 
+    Boolean check_md5, package_t *pkg)
 {
     plist_t *p;
     char *Where = ".", *last_file = "";
@@ -313,6 +318,10 @@ delete_package(Boolean ign_err, Boolean nukedirs, package_t *pkg)
 		printf("Change working directory to %s\n", Where);
 	    break;
 
+	case PLIST_EXTRAUNEXEC:
+	    if (!remove_config)
+	    	break;
+	    /*FALLTHRU*/
 	case PLIST_UNEXEC:
 	    if (!format_cmd(tmp, sizeof(tmp), p->name, Where, last_file)) {
 	    	pwarnx("unexec command `%s' could not expand", p->name);
@@ -335,7 +344,7 @@ delete_package(Boolean ign_err, Boolean nukedirs, package_t *pkg)
 	   "this packing list is incorrect - ignoring delete request", tmp);
 	    }
 	    else {
-		if (p->next && p->next->type == PLIST_COMMENT && !strncmp(p->next->name, "MD5:", 4)) {
+		if (check_md5 && p->next && p->next->type == PLIST_COMMENT && !strncmp(p->next->name, "MD5:", 4)) {
 		    char *cp, buf[LegibleChecksumLen];
 
 		    if ((cp = MD5File(tmp, buf)) != NULL) {
@@ -359,6 +368,18 @@ delete_package(Boolean ign_err, Boolean nukedirs, package_t *pkg)
 	    }
 	    break;
 
+	case PLIST_EXTRA:
+	    if (!remove_config)
+	    	break;
+	    if (!p->name)
+	    	break;
+	    if (p->name[0] == '/')
+	    	delete_files(p->name);
+	    else {
+		(void) snprintf(tmp, sizeof(tmp), "%s/%s", Where, p->name);
+		delete_files(tmp);
+	    }
+	    break;
 	case PLIST_DIR_RM:
 	    (void) snprintf(tmp, sizeof(tmp), "%s/%s", Where, p->name);
 	    if (!isdir(tmp)) {
@@ -440,4 +461,39 @@ delete_hierarchy(char *dir, Boolean ign_err, Boolean nukedirs)
 	}
     }
     return 0;
+}
+
+static void
+delete_files(const char *fname)
+{
+	size_t len;
+	Boolean b;
+
+	len = strlen(fname);
+	if (len == 0) {
+		pwarnx("empty extra file");
+		return;
+	}
+	/* don't warn if stuff does not exist */
+	if (!fexists(fname))
+		return;
+
+	b = isdir(fname);
+	if (fname[len-1] == '/') {
+		if (b) {
+			if (rmdir(fname) == -1)
+				pwarn("problem removing directory %s", 
+				    fname);
+		} else {
+			pwarnx("extra directory %s is not a directory", 
+			    fname);
+		}
+	} else {
+		if (b) {
+			pwarnx("extra file %s is a directory", fname);
+		} else {
+			if (unlink(fname) == -1)
+				pwarn("problem removing %s", fname);
+		}
+	}
 }

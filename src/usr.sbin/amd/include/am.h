@@ -1,4 +1,4 @@
-/*	$OpenBSD: am.h,v 1.8 2002/08/05 07:24:26 pvalchev Exp $	*/
+/*	$OpenBSD: am.h,v 1.10 2003/06/17 18:00:24 millert Exp $	*/
 
 /*
  * Copyright (c) 1990 Jan-Simon Pendry
@@ -17,11 +17,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -266,7 +262,7 @@ extern char	*inet_dquad(char *, size_t, u_int32_t);
 extern void	 init_map(am_node *, char *);
 extern void	 insert_am(am_node *, am_node *);
 extern void	 ins_que(qelem *, qelem *);
-extern int	 islocalnet(u_int32_t);
+extern int	 islocalnet(in_addr_t);
 extern int	 make_nfs_auth(void);
 extern void	 make_root_node(void);
 extern int	 make_rpc_packet(char *, int, u_long, struct rpc_msg *,

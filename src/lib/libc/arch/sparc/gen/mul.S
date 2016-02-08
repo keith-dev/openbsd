@@ -14,11 +14,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -37,7 +33,7 @@
 
 #if defined(LIBC_SCCS) 
 	.text
-	.asciz "$OpenBSD: mul.S,v 1.3 2002/11/23 19:04:39 drahn Exp $"
+	.asciz "$OpenBSD: mul.S,v 1.5 2003/06/02 20:18:32 millert Exp $"
 #endif /* LIBC_SCCS */
 
 /*
@@ -110,7 +106,7 @@ FUNC(.mul)
 	! %o0 was indeed negative; fix upper 32 bits of result by subtracting 
 	! %o1 (i.e., return %o4 - %o1 in %o1).
 	retl
-	sub	%o4, %o1, %o1
+	 sub	%o4, %o1, %o1
 
 1:
 	retl
@@ -155,4 +151,4 @@ Lmul_shortway:
 	srl	%o5, 20, %o5	! shift low bits right 20, zero fill at left
 	or	%o5, %o0, %o0	! construct low part of result
 	retl
-	sra	%o4, 20, %o1	! ... and extract high part of result
+	 sra	%o4, 20, %o1	! ... and extract high part of result

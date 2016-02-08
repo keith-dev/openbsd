@@ -1,6 +1,6 @@
-.\"	$OpenBSD: ie.4,v 1.7 2003/03/05 19:50:48 jmc Exp $
+.\"	$OpenBSD: ie.4,v 1.10 2003/06/06 10:29:42 jmc Exp $
 .\"
-.\" Copyright (c) 2001 Paul Weissmann
+.\" Copyright (c) 2003 Paul Weissmann
 .\" All rights reserved.
 .\"
 .\"
@@ -12,12 +12,6 @@
 .\" 2. Redistributions in binary form must reproduce the above copyright
 .\"    notice, this list of conditions and the following disclaimer in the
 .\"    documentation and/or other materials provided with the distribution.
-.\" 3. All advertising materials mentioning features or use of this software
-.\"    must display the following acknowledgement:
-.\"	This product includes software developed by Paul Weissmann
-.\" 4. Neither the name of the University nor the names of its contributors
-.\"    may be used to endorse or promote products derived from this software
-.\"    without specific prior written permission.
 .\"
 .\" THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
 .\" ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
@@ -36,7 +30,9 @@
 .Os
 .Sh NAME
 .Nm ie
-.Nd Intel i82596 DX/CA LAN coprocessor as found in HP9000 workstations
+.Nd Intel i82596 DX/CA LAN coprocessor as found in
+.Tn HP 9000/700
+machines
 .Sh SYNOPSIS
 .Cd "ie0 at gsc? irq 8"
 .Sh DESCRIPTION
@@ -44,7 +40,7 @@ The
 .Nm
 interface provides access to the 10 Mb/s
 .Tn Ethernet
-network via the 
+network via the
 .Tn Intel
 i82596 DX/CA 32-bit
 Local Area Network Coprocessor for Ethernet.
@@ -71,9 +67,9 @@ the back.
 On the models with both you usually have to switch a big
 jumper-block on the mainboard to choose which one to activate.
 .It i82596CA
-Systems with LASI MBA, e.g. 712/*, 715/100 have the i82596CA 
+Systems with LASI MBA, e.g. 712/*, 715/100 have the i82596CA
 integrated on the LASI macrochip.
-They usually have TP and AUI 
+They usually have TP and AUI
 connectors and autodetect to which one the network is connected to.
 .El
 .Pp
@@ -98,9 +94,10 @@ Use the BNC connector
 .Xr intro 4 ,
 .Xr io 4
 .Rs
-"82596DX AND 82596SX High-Performance 32-bit Local Area Network Coprocessor"
-.br
-"82596CA High-Performance 32-bit Local Area Network Coprocessor"
-.br
-Intel
-
+.%T 82596DX AND 82596SX High-Performance 32-bit Local Area Network Coprocessor
+.%Q Intel
+.Re
+.Rs
+.%T 82596CA High-Performance 32-bit Local Area Network Coprocessor
+.%Q Intel
+.Re

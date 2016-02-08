@@ -1,17 +1,17 @@
-.\"	$OpenBSD: pmap.9,v 1.3 2002/09/10 20:54:21 wcobb Exp $
+.\"	$OpenBSD: pmap.9,v 1.7 2003/07/11 13:47:41 jmc Exp $
 .\"
-.\" Copyright (c) 2001, 2002 CubeSoft Communications, Inc.
+.\" Copyright (c) 2001, 2002, 2003 CubeSoft Communications, Inc.
 .\" <http://www.csoft.org>
 .\"
 .\" Redistribution and use in source and binary forms, with or without
 .\" modification, are permitted provided that the following conditions
 .\" are met:
-.\" 1. Redistribution of source code must retain the above copyright
+.\" 1. Redistributions of source code must retain the above copyright
 .\"    notice, this list of conditions and the following disclaimer.
-.\" 2. Neither the name of CubeSoft Communications, nor the names of its
-.\"    contributors may be used to endorse or promote products derived from
-.\"    this software without specific prior written permission.
-.\" 
+.\" 2. Redistributions in binary form must reproduce the above copyright
+.\"    notice, this list of conditions and the following disclaimer in the
+.\"    documentation and/or other materials provided with the distribution.
+.\"
 .\" THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
 .\" IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
 .\" WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
@@ -120,7 +120,7 @@ in the target physical map
 .Fa pmap
 with protection specified by
 .Fa prot :
-.Bl -tag -width "VM_PROT_EXECUTE" -indent
+.Bl -tag -width "VM_PROT_EXECUTE"
 .It VM_PROT_READ
 The mapping must allow reading.
 .It VM_PROT_WRITE
@@ -142,7 +142,7 @@ faults on platforms that track modified/referenced information in
 software.
 Other information provided by
 .Fa flags :
-.Bl -tag -width "PMAP_CANFAIL" -indent
+.Bl -tag -width "PMAP_CANFAIL"
 .It PMAP_WIRED
 The mapping being created is a wired mapping.
 .It PMAP_CANFAIL
@@ -169,7 +169,7 @@ the page being faulted in.
 If
 .Fn pmap_enter
 is called to enter a mapping at a virtual address for which a mapping
-already exists, the previous mapping must in invalidated.
+already exists, the previous mapping must be invalidated.
 .Fn pmap_enter
 is sometimes called to change the protection for a pre-existing mapping,
 or to change the
@@ -331,7 +331,7 @@ The
 .Fn pmap_destroy
 function decrements the reference count on physical map
 .Fa pmap
-and retire it from service if the count drops to zero, assuming
+and retires it from service if the count drops to zero, assuming
 it contains no valid mappings.
 .Sh OPTIONAL FUNCTIONS
 .nr nS 1
@@ -400,11 +400,6 @@ mappings.
 .Sh SEE ALSO
 .Xr fork 2 ,
 .Xr uvm 9
-.Sh BUGS
-Ifdefs must be documented.
-.Pp
-.Fn pmap_update
-should be mandatory.
 .Sh HISTORY
 The
 .Bx 4.4
@@ -415,3 +410,8 @@ The introduction of
 left the
 .Nm
 interface unchanged for the most part.
+.Sh BUGS
+Ifdefs must be documented.
+.Pp
+.Fn pmap_update
+should be mandatory.

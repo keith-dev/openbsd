@@ -1,4 +1,4 @@
-.\"	$OpenBSD: vipw.8,v 1.6 2000/03/19 17:57:17 aaron Exp $
+.\"	$OpenBSD: vipw.8,v 1.8 2003/06/14 22:45:11 millert Exp $
 .\"	$NetBSD: vipw.8,v 1.4 1995/01/20 19:19:56 mycroft Exp $
 .\"
 .\" Copyright (c) 1983, 1991, 1993
@@ -12,11 +12,7 @@
 .\" 2. Redistributions in binary form must reproduce the above copyright
 .\"    notice, this list of conditions and the following disclaimer in the
 .\"    documentation and/or other materials provided with the distribution.
-.\" 3. All advertising materials mentioning features or use of this software
-.\"    must display the following acknowledgement:
-.\"	This product includes software developed by the University of
-.\"	California, Berkeley and its contributors.
-.\" 4. Neither the name of the University nor the names of its contributors
+.\" 3. Neither the name of the University nor the names of its contributors
 .\"    may be used to endorse or promote products derived from this software
 .\"    without specific prior written permission.
 .\"
@@ -79,7 +75,7 @@ and the new information is not available to programs.
 .Pp
 Which type of cipher is used to encrypt the password information
 depends on the configuration in
-.Xr passwd.conf 5 .
+.Xr login.conf 5 .
 .Sh ENVIRONMENT
 If the following environment variable exists it will be utilized by
 .Nm vipw :
@@ -94,7 +90,7 @@ will be invoked instead of the default editor
 .Xr chpass 1 ,
 .Xr passwd 1 ,
 .Xr passwd 5 ,
-.Xr passwd.conf 5 ,
+.Xr login.conf 5 ,
 .Xr adduser 8 ,
 .Xr pwd_mkdb 8
 .Sh HISTORY

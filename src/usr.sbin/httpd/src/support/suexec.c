@@ -1,7 +1,7 @@
 /* ====================================================================
  * The Apache Software License, Version 1.1
  *
- * Copyright (c) 2000-2002 The Apache Software Foundation.  All rights
+ * Copyright (c) 2000-2003 The Apache Software Foundation.  All rights
  * reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -91,6 +91,10 @@
 
 #include <stdarg.h>
 
+#if defined(USE_SETUSERCONTEXT)
+#include <login_cap.h>
+#endif
+
 #include "suexec.h"
 
 /*
@@ -111,6 +115,11 @@ int initgroups(const char *name, gid_t basegid)
 }
 #endif
 
+#if defined(NEED_STRERROR)
+extern char *sys_errlist[];
+#define strerror(x) sys_errlist[(x)]
+#endif
+
 #if defined(PATH_MAX)
 #define AP_MAXPATH PATH_MAX
 #elif defined(MAXPATHLEN)
@@ -126,45 +135,53 @@ static FILE *log = NULL;
 
 char *safe_env_lst[] =
 {
-    "AUTH_TYPE",
-    "CONTENT_LENGTH",
-    "CONTENT_TYPE",
-    "DATE_GMT",
-    "DATE_LOCAL",
-    "DOCUMENT_NAME",
-    "DOCUMENT_PATH_INFO",
-    "DOCUMENT_ROOT",
-    "DOCUMENT_URI",
-    "FILEPATH_INFO",
-    "GATEWAY_INTERFACE",
-    "LAST_MODIFIED",
-    "PATH_INFO",
-    "PATH_TRANSLATED",
-    "QUERY_STRING",
-    "QUERY_STRING_UNESCAPED",
-    "REMOTE_ADDR",
-    "REMOTE_HOST",
-    "REMOTE_IDENT",
-    "REMOTE_PORT",
-    "REMOTE_USER",
-    "REDIRECT_QUERY_STRING",
-    "REDIRECT_STATUS",
-    "REDIRECT_URL",
-    "REQUEST_METHOD",
-    "REQUEST_URI",
-    "SCRIPT_FILENAME",
-    "SCRIPT_NAME",
-    "SCRIPT_URI",
-    "SCRIPT_URL",
-    "SERVER_ADMIN",
-    "SERVER_NAME",
-    "SERVER_ADDR",
-    "SERVER_PORT",
-    "SERVER_PROTOCOL",
-    "SERVER_SOFTWARE",
-    "UNIQUE_ID",
-    "USER_NAME",
-    "TZ",
+    /* variable name starts with */
+    "HTTP_",
+#ifdef MOD_SSL
+    "HTTPS_",
+    "SSL_",
+#endif
+
+    /* variable name is */
+    "AUTH_TYPE=",
+    "CONTENT_LENGTH=",
+    "CONTENT_TYPE=",
+    "DATE_GMT=",
+    "DATE_LOCAL=",
+    "DOCUMENT_NAME=",
+    "DOCUMENT_PATH_INFO=",
+    "DOCUMENT_ROOT=",
+    "DOCUMENT_URI=",
+    "FILEPATH_INFO=",
+    "GATEWAY_INTERFACE=",
+    "LAST_MODIFIED=",
+    "PATH_INFO=",
+    "PATH_TRANSLATED=",
+    "QUERY_STRING=",
+    "QUERY_STRING_UNESCAPED=",
+    "REMOTE_ADDR=",
+    "REMOTE_HOST=",
+    "REMOTE_IDENT=",
+    "REMOTE_PORT=",
+    "REMOTE_USER=",
+    "REDIRECT_QUERY_STRING=",
+    "REDIRECT_STATUS=",
+    "REDIRECT_URL=",
+    "REQUEST_METHOD=",
+    "REQUEST_URI=",
+    "SCRIPT_FILENAME=",
+    "SCRIPT_NAME=",
+    "SCRIPT_URI=",
+    "SCRIPT_URL=",
+    "SERVER_ADMIN=",
+    "SERVER_NAME=",
+    "SERVER_ADDR=",
+    "SERVER_PORT=",
+    "SERVER_PROTOCOL=",
+    "SERVER_SOFTWARE=",
+    "UNIQUE_ID=",
+    "USER_NAME=",
+    "TZ=",
     NULL
 };
 
@@ -217,37 +234,35 @@ static void clean_env(void)
     int cidx = 0;
     int idx;
 
+    /* While cleaning the environment, the environment should be clean.
+     * (e.g. malloc() may get the name of a file for writing debugging info.
+     * Bad news if MALLOC_DEBUG_FILE is set to /etc/passwd.  Sprintf() may be
+     * susceptible to bad locale settings....)
+     * (from PR 2790)
+     */
+    char **envp = environ;
+    char *empty_ptr = NULL;
+
+    environ = &empty_ptr; /* VERY safe environment */
 
     if ((cleanenv = (char **) calloc(AP_ENVBUF, sizeof(char *))) == NULL) {
         log_err("emerg: failed to malloc memory for environment\n");
 	exit(120);
     }
 
-    sprintf(pathbuf, "PATH=%s", SAFE_PATH);
+    snprintf(pathbuf, sizeof(pathbuf), "PATH=%s", SAFE_PATH);
     cleanenv[cidx] = strdup(pathbuf);
     cidx++;
 
-    for (ep = environ; *ep && cidx < AP_ENVBUF-1; ep++) {
-#ifdef MOD_SSL
-	if (!strncmp(*ep, "HTTP_", 5) || 
-	    !strncmp(*ep, "HTTPS", 5) ||
-	    !strncmp(*ep, "SSL_", 4)) {
-#else
-	if (!strncmp(*ep, "HTTP_", 5)) {
-#endif
-	    cleanenv[cidx] = *ep;
-	    cidx++;
-	}
-	else {
-	    for (idx = 0; safe_env_lst[idx]; idx++) {
-		if (!strncmp(*ep, safe_env_lst[idx],
-			     strlen(safe_env_lst[idx]))) {
-		    cleanenv[cidx] = *ep;
-		    cidx++;
-		    break;
-		}
-	    }
-	}
+    for (ep = envp; *ep && cidx < AP_ENVBUF-1; ep++) {
+        for (idx = 0; safe_env_lst[idx]; idx++) {
+            if (!strncmp(*ep, safe_env_lst[idx],
+                         strlen(safe_env_lst[idx]))) {
+		cleanenv[cidx] = *ep;
+		cidx++;
+                break;
+            }
+        }
     }
 
     cleanenv[cidx] = NULL;
@@ -274,6 +289,11 @@ int main(int argc, char *argv[])
     struct stat dir_info;	/* directory info holder     */
     struct stat prg_info;	/* program info holder       */
 
+    /*
+     * Start with a "clean" environment
+     */
+    clean_env();
+
     prog = argv[0];
     /*
      * Check existence/validity of the UID of the user
@@ -281,7 +301,7 @@ int main(int argc, char *argv[])
      */
     uid = getuid();
     if ((pw = getpwuid(uid)) == NULL) {
-	log_err("crit: invalid uid: (%ld)\n", uid);
+	log_err("crit: invalid uid: (%u)\n", uid);
 	exit(102);
     }
     /*
@@ -302,7 +322,7 @@ int main(int argc, char *argv[])
         fprintf(stderr, " -D DOC_ROOT=\"%s\"\n", DOC_ROOT);
 #endif
 #ifdef GID_MIN
-        fprintf(stderr, " -D GID_MID=%d\n", GID_MIN);
+        fprintf(stderr, " -D GID_MIN=%d\n", GID_MIN);
 #endif
 #ifdef HTTPD_USER
         fprintf(stderr, " -D HTTPD_USER=\"%s\"\n", HTTPD_USER);
@@ -317,7 +337,7 @@ int main(int argc, char *argv[])
         fprintf(stderr, " -D SUEXEC_UMASK=%03o\n", SUEXEC_UMASK);
 #endif
 #ifdef UID_MIN
-        fprintf(stderr, " -D UID_MID=%d\n", UID_MIN);
+        fprintf(stderr, " -D UID_MIN=%d\n", UID_MIN);
 #endif
 #ifdef USERDIR_SUFFIX
         fprintf(stderr, " -D USERDIR_SUFFIX=\"%s\"\n", USERDIR_SUFFIX);
@@ -407,7 +427,7 @@ int main(int argc, char *argv[])
      * Initialize BS2000 user environment
      */
     {
-	pid_t pid;
+	pid_t pid, reaped;
 	int status;
 
 	switch (pid = ufork(target_uname))
@@ -420,7 +440,8 @@ int main(int argc, char *argv[])
 	case 0:	/* Child */
 	    break;
 	default:	/* Father */
-	    while (pid != waitpid(pid, &status, 0))
+	    while (pid != (reaped = waitpid(pid, &status, 0))
+		   && (reaped != -1 || errno != ECHILD))
 		;
 	    /* @@@ FIXME: should we deal with STOP signals as well? */
 	    if (WIFSIGNALED(status)) {
@@ -452,7 +473,7 @@ int main(int argc, char *argv[])
      * a UID less than UID_MIN.  Tsk tsk.
      */
     if ((uid == 0) || (uid < UID_MIN)) {
-	log_err("crit: cannot run as forbidden uid (%d/%s)\n", uid, cmd);
+	log_err("crit: cannot run as forbidden uid (%u/%s)\n", uid, cmd);
 	exit(107);
     }
 
@@ -461,10 +482,17 @@ int main(int argc, char *argv[])
      * or as a GID less than GID_MIN.  Tsk tsk.
      */
     if ((gid == 0) || (gid < GID_MIN)) {
-	log_err("crit: cannot run as forbidden gid (%d/%s)\n", gid, cmd);
+	log_err("crit: cannot run as forbidden gid (%u/%s)\n", gid, cmd);
 	exit(108);
     }
 
+#if defined(USE_SETUSERCONTEXT)
+    if (setusercontext(NULL, pw, uid,
+	LOGIN_SETALL & ~(LOGIN_SETLOGIN | LOGIN_SETPATH)) != 0) {
+	log_err("emerg: failed to setusercontext (%u: %s)\n", uid, cmd);
+	exit(110);
+    }
+#else
     /*
      * Change UID/GID here so that the following tests work over NFS.
      *
@@ -472,7 +500,7 @@ int main(int argc, char *argv[])
      * and setgid() to the target group. If unsuccessful, error out.
      */
     if (((setgid(gid)) != 0) || (initgroups(actual_uname, gid) != 0)) {
-	log_err("emerg: failed to setgid (%ld: %s)\n", gid, cmd);
+	log_err("emerg: failed to setgid (%u: %s)\n", gid, cmd);
 	exit(109);
     }
 
@@ -480,9 +508,10 @@ int main(int argc, char *argv[])
      * setuid() to the target user.  Error out on fail.
      */
     if ((setuid(uid)) != 0) {
-	log_err("emerg: failed to setuid (%ld: %s)\n", uid, cmd);
+	log_err("emerg: failed to setuid (%u: %s)\n", uid, cmd);
 	exit(110);
     }
+#endif
 
     /*
      * Get the current working directory, as well as the proper
@@ -569,8 +598,8 @@ int main(int argc, char *argv[])
 	(gid != dir_info.st_gid) ||
 	(uid != prg_info.st_uid) ||
 	(gid != prg_info.st_gid)) {
-	log_err("error: target uid/gid (%ld/%ld) mismatch "
-		"with directory (%ld/%ld) or program (%ld/%ld)\n",
+	log_err("error: target uid/gid (%u/%u) mismatch "
+		"with directory (%u/%u) or program (%u/%u)\n",
 		uid, gid,
 		dir_info.st_uid, dir_info.st_gid,
 		prg_info.st_uid, prg_info.st_gid);
@@ -596,7 +625,6 @@ int main(int argc, char *argv[])
     }
     umask(SUEXEC_UMASK);
 #endif /* SUEXEC_UMASK */
-    clean_env();
 
     /* 
      * Be sure to close the log file so the CGI can't

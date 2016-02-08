@@ -1,4 +1,4 @@
-/*	$OpenBSD: rmail.c,v 1.14 2003/03/13 09:09:24 deraadt Exp $	*/
+/*	$OpenBSD: rmail.c,v 1.17 2003/07/29 00:24:16 deraadt Exp $	*/
 /*	$NetBSD: rmail.c,v 1.8 1995/09/07 06:51:50 jtc Exp $	*/
 
 /*
@@ -13,11 +13,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -44,7 +40,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)rmail.c	8.3 (Berkeley) 5/15/95";
 #else
-static char rcsid[] = "$OpenBSD: rmail.c,v 1.14 2003/03/13 09:09:24 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: rmail.c,v 1.17 2003/07/29 00:24:16 deraadt Exp $";
 #endif
 #endif /* not lint */
 
@@ -241,8 +237,9 @@ main(int argc, char *argv[])
 
 	i = 0;
 	args[i++] = _PATH_SENDMAIL;	/* Build sendmail's argument list. */
+	args[i++] = "-G";		/* Relay submission. */
 	args[i++] = "-oee";		/* No errors, just status. */
-	args[i++] = "-odq";		/* Queue it, don't try to deliver. */
+	args[i++] = "-odi";		/* Deliver in foreground. */
 	args[i++] = "-oi";		/* Ignore '.' on a line by itself. */
 
 	/* set from system and protocol used */
@@ -361,6 +358,6 @@ void
 usage(void)
 {
 	(void)fprintf(stderr, "usage: %s [-T] [-D domain] user ...\n",
-            __progname);
+	    __progname);
 	exit(EX_USAGE);
 }

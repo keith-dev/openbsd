@@ -1,4 +1,4 @@
-/*	$OpenBSD: edit.c,v 1.15 2002/06/09 05:47:27 todd Exp $	*/
+/*	$OpenBSD: edit.c,v 1.18 2003/08/22 18:17:10 fgsch Exp $	*/
 
 /*
  * Command line editing - common code
@@ -630,6 +630,8 @@ struct path_order_info {
 	int path_order;
 };
 
+static int path_order_cmp(const void *aa, const void *bb);
+
 /* Compare routine used in x_command_glob() */
 static int
 path_order_cmp(aa, bb)
@@ -770,7 +772,7 @@ x_locate_word(buf, buflen, pos, startp, is_commandp)
 		;
 	/* Go forwards to end of word */
 	for (end = start; end < buflen && IS_WORDC(buf[end]); end++) {
-		if (buf[end] == '\\' && (end+1) < buflen && buf[end+1] == ' ')
+		if (buf[end] == '\\' && (end+1) < buflen)
 			end++;
 	}
 
@@ -1058,7 +1060,7 @@ x_escape(s, len, putbuf_func)
 	int rval=0;
 
 	for (add = 0, wlen = len; wlen - add > 0; add++) {
-		if (strchr("\\$(){}*&;#|<>\"'", s[add]) || strchr(ifs, s[add])) {
+		if (strchr("\\$(){}*&;#|<>\"'`", s[add]) || strchr(ifs, s[add])) {
 			if (putbuf_func(s, add) != 0) {
 				rval = -1;
 				break;

@@ -1,9 +1,9 @@
-/*	$OpenBSD: mod_mime.c,v 1.10 2002/08/15 16:06:11 henning Exp $ */
+/*	$OpenBSD: mod_mime.c,v 1.13 2003/08/21 13:11:37 henning Exp $ */
 
 /* ====================================================================
  * The Apache Software License, Version 1.1
  *
- * Copyright (c) 2000-2002 The Apache Software Foundation.  All rights
+ * Copyright (c) 2000-2003 The Apache Software Foundation.  All rights
  * reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -70,6 +70,7 @@
 #include "httpd.h"
 #include "http_config.h"
 #include "http_log.h"
+#include "http_main.h"
 
 /*
  * isascii(c) isn't universal, and even those places where it is
@@ -716,11 +717,12 @@ static int find_ct(request_rec *r)
     if (r->content_type) {
 	content_type *ctp;
 	char *ct;
+	size_t ctlen;
 	int override = 0;
 
-	ct = (char *) ap_palloc(r->pool,
-				sizeof(char) * (strlen(r->content_type) + 1));
-	strcpy(ct, r->content_type);
+	ctlen = sizeof(char) * (strlen(r->content_type) + 1);
+	ct = (char *) ap_palloc(r->pool, ctlen);
+	strlcpy(ct, r->content_type, ctlen);
 
 	if ((ctp = analyze_ct(r->pool, ct))) {
 	    param *pp = ctp->param;
