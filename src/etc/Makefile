@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.96 1999/03/17 18:26:07 deraadt Exp $
+#	$OpenBSD: Makefile,v 1.103 1999/10/08 11:33:51 espie Exp $
 
 TZDIR=		/usr/share/zoneinfo
 LOCALTIME=	US/Pacific
@@ -18,8 +18,8 @@ BIN1=	aliases bootptab changelist ccd.conf csh.cshrc csh.login csh.logout \
 	ipf.rules ksh.kshrc locate.rc man.conf monthly motd mrouted.conf \
 	myname ipnat.rules netstart networks newsyslog.conf passwd.conf \
 	phones printcap protocols rbootd.conf rc rc.conf rc.local \
-	rc.securelevel remote rpc security services shells syslog.conf weekly \
-	etc.${MACHINE}/disktab dhclient.conf
+	rc.securelevel rc.shutdown remote rpc security services shells \
+	syslog.conf weekly etc.${MACHINE}/disktab dhclient.conf mailer.conf
 
 # -rw-rw-r--
 BIN2=	motd
@@ -138,6 +138,8 @@ distribution-etc-root-var: distrib-dirs
 		    ${DESTDIR}/etc/afs; \
 		${INSTALL} -c -o root -g wheel -m 644 CellServDB \
 		    ${DESTDIR}/etc/afs; \
+		${INSTALL} -c -o root -g wheel -m 644 SuidCells \
+		    ${DESTDIR}/etc/afs; \
 		${INSTALL} -c -o root -g wheel -m 644 README \
 		    ${DESTDIR}/etc/afs)
 	(cd namedb; \
@@ -198,7 +200,8 @@ distribution-etc-root-var: distrib-dirs
 .endif
 	(cd ../usr.sbin/sendmail/cf/cf; ${MAKE} distribution)
 	(cd ../usr.sbin/ypserv/ypinit; ${MAKE} distribution)
-	(cd ../usr.sbin/httpd; ${MAKE} distribution)
+	(cd ../usr.bin/ssh; ${MAKE} distribution)
+	(cd ../usr.sbin/httpd; ${MAKE} -f Makefile.bsd-wrapper distribution)
 	(cd ../lib/libssl; ${MAKE} -f Makefile.bsd-wrapper distribution)
 	(cd ../gnu/usr.bin/lynx; ${MAKE} -f Makefile.bsd-wrapper distribution)
 	(cd ../usr.bin/mail; ${MAKE} distribution)
@@ -234,6 +237,14 @@ release: distribution snap_pre snap_md
 		md5 bsd!(*.gz) *boot* *BOOT* INSTALL.* *.fs *.gz > MD5
 	-cd ${RELEASEDIR}; \
 		cksum bsd!(*.gz) *boot* *BOOT* INSTALL.* *.fs *.gz > CKSUM
+.if defined(MACHINE_HAS_TOOLS)
+	mkdir -p ${RELEASEDIR}/tools
+	cp ${DESTDIR}/snapshot/tools/* ${RELEASEDIR}/tools
+	cd ${RELEASEDIR} && md5 tools/* >>MD5
+	cd ${RELEASEDIR} && cksum tools/* >>CKSUM
+.endif
+	-cd ${RELEASEDIR} && sort -o MD5 MD5
+	-cd ${RELEASEDIR} && sort -o CKSUM -k 3 CKSUM
 .endif
 
 snapshot: distribution snap_pre snap_tar snap_md

@@ -1,4 +1,4 @@
-/*	$OpenBSD: mdef.h,v 1.4 1997/12/10 20:24:16 deraadt Exp $	*/
+/*	$OpenBSD: mdef.h,v 1.7 1999/09/14 08:35:17 espie Exp $	*/
 /*	$NetBSD: mdef.h,v 1.7 1996/01/13 23:25:27 pk Exp $	*/
 
 /*
@@ -96,16 +96,16 @@
  * other important constants
  */
 
-#define EOS             (char) 0
-#define MAXINP          10              /* maximum include files   */
-#define MAXOUT          10              /* maximum # of diversions */
-#define MAXSTR          512             /* maximum size of string  */
-#define BUFSIZE         4096            /* size of pushback buffer */
-#define STACKMAX        1024            /* size of call stack      */
-#define STRSPMAX        4096            /* size of string space    */
-#define MAXTOK          MAXSTR          /* maximum chars in a tokn */
-#define HASHSIZE        199             /* maximum size of hashtab */
-#define MAXCCHARS	5		/* max size of comment/quote delim */
+#define EOS             '\0'
+#define MAXINP          10              /* maximum include files   	    */
+#define MAXOUT          10              /* maximum # of diversions 	    */
+#define MAXSTR          512             /* maximum size of string  	    */
+#define BUFSIZE         4096            /* starting size of pushback buffer */
+#define STACKMAX        4096            /* size of call stack      	    */
+#define STRSPMAX        4096            /* starting size of string space    */
+#define MAXTOK          MAXSTR          /* maximum chars in a tokn 	    */
+#define HASHSIZE        199             /* maximum size of hashtab 	    */
+#define MAXCCHARS	5		/* max size of comment/quote delim  */
  
 #define ALL             1
 #define TOP             0
@@ -177,6 +177,6 @@ typedef short pbent;		/* pushback entry; needs to hold chars + EOF */
  */
 #define PARLEV  (mstack[fp].sfra)
 #define CALTYP  (mstack[fp-1].sfra)
-#define PREVEP	(mstack[fp+3].sstr)
+#define PREVEP	compute_prevep() 
 #define PREVSP	(fp-3)
 #define PREVFP	(mstack[fp-2].sfra)

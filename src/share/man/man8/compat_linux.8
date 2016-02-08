@@ -31,7 +31,7 @@
 .\"
 .Dd March 2, 1995
 .Dt compat_linux 8
-.Os BSD 4
+.Os
 .Sh NAME
 .Nm compat_linux
 .Nd setup procedure for running Linux binaries under emulation
@@ -40,9 +40,9 @@ OpenBSD supports running Linux binaries. This only applies to i386 systems
 for now. Both the a.out and ELF binary formats are supported. Most programs
 should work, including the ones that use the Linux SVGAlib. Additionally,
 OSS audio is emulated, so Linux bins can access the native audio
-transparently. Programs that will not work include the Linux /proc filesystem
-(which is different from the optional OpenBSD /proc filesystem), and
-i386-specific calls, such as enabling virtual 8086 mode.
+transparently. Programs that will not work include those that use the Linux
+/proc filesystem (which is different from the optional OpenBSD /proc
+filesystem), and i386-specific calls, such as enabling virtual 8086 mode.
 .Pp
 The Linux compatibility feature is active
 for kernels compiled with the
@@ -354,7 +354,6 @@ Only the DSP device is emulated, the following link should be created:
 CD-ROM support requires a link to your cdrom device, similar to:
 .Pp
 .nf
-/emul/linux/dev/cdrom -> /dev/acd0a  (first atapi cdrom)
 /emul/linux/dev/cdrom -> /dev/cd0a   (first scsi cdrom)
 .fi
 .Pp

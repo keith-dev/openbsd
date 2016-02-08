@@ -1,4 +1,4 @@
-/*	$OpenBSD: lib_setup.c,v 1.3 1999/03/02 06:23:29 millert Exp $	*/
+/*	$OpenBSD: lib_setup.c,v 1.6 1999/08/22 17:42:37 millert Exp $	*/
 
 /****************************************************************************
  * Copyright (c) 1998 Free Software Foundation, Inc.                        *
@@ -51,7 +51,7 @@
 
 #include <term.h>	/* lines, columns, cur_term */
 
-MODULE_ID("$From: lib_setup.c,v 1.51 1999/02/27 22:13:00 tom Exp $")
+MODULE_ID("$From: lib_setup.c,v 1.55 1999/08/21 23:06:08 tom Exp $")
 
 /****************************************************************************
  *
@@ -243,6 +243,12 @@ static int grab_entry(const char *const tn, TERMTYPE *const tp)
 	char	filename[PATH_MAX];
 	int	status;
 
+	/*
+	 * $TERM shouldn't contain pathname delimiters.
+	 */
+	if (strchr(tn, '/'))
+		return 0;
+
 	if ((status = _nc_read_entry(tn, filename, tp)) != 1) {
 
 #ifndef PURE_TERMINFO
@@ -291,7 +297,7 @@ int setupterm(NCURSES_CONST char *tname, int Filedes, int *errret)
 struct term	*term_ptr;
 int status;
 
-	T((T_CALLED("setupterm(\"%s\",%d,%p)"), tname, Filedes, errret));
+	T((T_CALLED("setupterm(%s,%d,%p)"), _nc_visbuf(tname), Filedes, errret));
 
 	if (tname == 0) {
 		tname = getenv("TERM");
@@ -336,6 +342,24 @@ int status;
 	else if (status == 0)
 	{
 		ret_error(0, "'%s': unknown terminal type.\n", tname);
+	}
+
+	/*
+	 * Improve on SVr4 curses.  If an application mixes curses and termcap
+	 * calls, it may call both initscr and tgetent.  This is not really a
+	 * good thing to do, but can happen if someone tries using ncurses with
+	 * the readline library.  The problem we are fixing is that when
+	 * tgetent calls setupterm, the resulting Ottyb struct in cur_term is
+	 * zeroed.  A subsequent call to endwin uses the zeroed terminal
+	 * settings rather than the ones saved in initscr.  So we check if
+	 * cur_term appears to contain terminal settings for the same output
+	 * file as our current call - and copy those terminal settings.  (SVr4
+	 * curses does not do this, however applications that are working
+	 * around the problem will still work properly with this feature).
+	 */
+	if (cur_term != 0) {
+		if (cur_term->Filedes == Filedes)
+			term_ptr->Ottyb = cur_term->Ottyb;
 	}
 
 	set_curterm(term_ptr);

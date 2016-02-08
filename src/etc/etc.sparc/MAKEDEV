@@ -1,5 +1,5 @@
 #!/bin/sh -
-#	$OpenBSD: MAKEDEV,v 1.56 1999/02/01 00:35:53 jason Exp $
+#	$OpenBSD: MAKEDEV,v 1.60 1999/09/04 03:28:04 jason Exp $
 #
 # Copyright (c) 1990 The Regents of the University of California.
 # All rights reserved.
@@ -55,6 +55,7 @@
 #	fd*	Floppy disk drives (3 1/2", 5 1/4")
 #	vnd*	"file" pseudo-disks
 #	ccd*	concatenated disk devices
+#	raid*	RAIDframe disk devices
 #
 # Pseudo terminals:
 #	pty*	set of 16 master and slave pseudo terminals
@@ -201,6 +202,7 @@ all)
 	sh $this ss0 ss1
 	sh $this pty0 vnd0 vnd1 vnd2 vnd3 audio tun0 tun1 tun2 tun3
 	sh $this ccd0 ccd1 ccd2 ccd3
+	sh $this raid0 raid1 raid2 raid3
 	sh $this bpf0 bpf1 bpf2 bpf3 bpf4 bpf5 bpf6 bpf7 bpf8 bpf9
 	sh $this ipl
 	sh $this bwtwo0 cgtwo0 cgthree0 cgfour0 cgsix0
@@ -307,6 +309,10 @@ audio*)
 	mknod $audioctl	c $major `add $unit 192`
 	chown root.wheel $audio $sound $mixer $audioioctl
 	chmod 666 $audio $sound $mixer $audioctl
+	[ -e audio ] || ln -s $audio audio
+	[ -e mixer ] || ln -s $mixer mixer
+	[ -e sound ] || ln -s $sound sound
+	[ -e audioctl ] || ln -s $audioctl audioctl
 	;;
 
 xfs*)
@@ -404,7 +410,7 @@ fd*)
 	umask 77
 	;;
 
-ccd*|sd*|xd*|xy*|cd*)
+ccd*|sd*|xd*|xy*|cd*|raid*)
 	umask 2
 	unit=`unt $i`
 	if [ 0$unit -gt 15 ]
@@ -414,6 +420,7 @@ ccd*|sd*|xd*|xy*|cd*)
 	fi
 	case $i in
 	ccd*) name=ccd; blk=9; chr=23;;
+	raid*) name=raid; blk=25; chr=123;;
 	sd*) name=sd; blk=7; chr=17;;
 	xd*) name=xd; blk=10; chr=42;;
 	xy*) name=xy; blk=3; chr=9;;
@@ -550,7 +557,8 @@ tty[a-z])
 	*) echo unknown tty device $i ;;
 	esac
 	mknod tty$unit c 12 $n
-	chown uucp.wheel tty$unit
+	chown uucp.dialer tty$unit
+	chmod 660 tty$unit
 	;;
 
 cua[a-z])
@@ -564,7 +572,8 @@ cua[a-z])
 	*) echo unknown cua device $i ;;
 	esac
 	mknod cua$unit c 12 `add $n 128`
-	chown uucp.wheel cua$unit
+	chown uucp.dialer cua$unit
+	chmod 660 cua$unit
 	;;
 
 pty*)
@@ -618,7 +627,8 @@ spif*)
 	do
 		name=$nam`hex $n`
 		mknod tty$name c 102 `add $offset $n`
-		chown uucp.wheel tty$name
+		chown uucp.dialer tty$name
+		chmod 660 tty$name
 		n=`add $n 1`
 	done
 	mknod bpps${unit}0 c 103 `add $offset 0`
@@ -638,7 +648,8 @@ magma*)
 	do
 		name=$nam`hex $n`
 		mknod tty$name c 100 `add $offset $n`
-		chown uucp.wheel tty$name
+		chown uucp.dialer tty$name
+		chmod 660 tty$name
 		n=`add $n 1`
 	done
 	mknod bppm${unit}0 c 101 `add $offset 0`
@@ -648,6 +659,42 @@ magma*)
 bpp*)
 	unit=`expr $i : 'bpp\(.*\)'`
 	mknod bpp${unit} c 104 `add $unit 0`
+	;;
+
+fga*)
+	unit=`expr $i : 'fga\(.*\)'`
+	if [ "$unit" != 0 ]; then
+		echo "bad unit $unit for $i"
+		exit 127
+	fi
+	rm -f fga$unit
+	mknod fga$unit c 98 $unit
+	chmod 600 fga$unit
+	chown root.wheel fga$unit
+	;;
+
+scf*)
+	unit=`expr $i : 'scf\(.*\)'`
+	if [ "$unit" != 0 ]; then
+		echo "bad unit $unit for $i"
+		exit 127
+	fi
+	rm -f scf$unit
+	mknod scf$unit c 107 $unit
+	chmod 600 scf$unit
+	chown root.wheel scf$unit
+	;;
+
+flash*)
+	unit=`expr $i : 'flash\(.*\)'`
+	if [ "$unit" != 0 ]; then
+		echo "bad unit $unit for $i"
+		exit 127
+	fi
+	rm -f flash$unit
+	mknod flash$unit c 108 $unit
+	chmod 600 flash$unit
+	chown root.wheel flash$unit
 	;;
 
 random|srandom|urandom|prandom|arandom)

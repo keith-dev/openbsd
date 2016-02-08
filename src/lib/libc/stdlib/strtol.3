@@ -33,7 +33,7 @@
 .\" OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 .\" SUCH DAMAGE.
 .\"
-.\"	$OpenBSD: strtol.3,v 1.3 1996/08/19 08:33:51 tholo Exp $
+.\"	$OpenBSD: strtol.3,v 1.6 1999/09/14 03:59:55 pjanzen Exp $
 .\"
 .Dd June 25, 1992
 .Dt STRTOL 3
@@ -59,7 +59,7 @@ function
 converts the string in
 .Fa nptr
 to a
-.Em long
+.Li long
 value.
 The
 .Fn strtoq
@@ -67,12 +67,12 @@ function
 converts the string in
 .Fa nptr
 to a
-.Em quad_t
+.Li quad_t
 value.
 The conversion is done according to the given
 .Fa base ,
-which must be between 2 and 36 inclusive,
-or be the special value 0.
+which must be a number between 2 and 36 inclusive
+or the special value 0.
 .Pp
 The string may begin with an arbitrary amount of white space
 (as determined by
@@ -95,7 +95,7 @@ is taken as 10 (decimal) unless the next character is
 in which case it is taken as 8 (octal).
 .Pp
 The remainder of the string is converted to a
-.Em long
+.Li long
 value in the obvious manner,
 stopping at the first character which is not a valid digit
 in the given base.
@@ -147,6 +147,68 @@ In both cases,
 .Va errno
 is set to
 .Er ERANGE .
+.Sh EXAMPLES
+Ensuring that a string is a valid number (i.e., in range and containing no
+trailing characters) requires clearing
+.Va errno
+beforehand explicitly since
+.Va errno
+is not changed on a successful call to
+.Fn strtol ,
+and the return value of
+.Fn strtol
+cannot be used unambiguously to signal an error:
+.Bd -literal -offset indent
+char *ep;
+long lval;
+
+\&...
+
+errno = 0;
+lval = strtol(buf, &ep, 10);
+if (buf[0] == '\e0' || *ep != '\e0')
+	goto not_a_number;
+if (errno == ERANGE && (lval == LONG_MAX || lval == LONG_MIN))
+	goto out_of_range;
+.Ed
+.Pp
+This example will accept
+.Dq 12
+but not
+.Dq 12foo
+or
+.Dq 12\en .
+If trailing whitespace is acceptable, further checks must be done on
+.Va *ep ;
+alternately, use
+.Xr sscanf 3 .
+.Pp
+If
+.Fn strtol
+is being used instead of
+.Xr atoi 3 ,
+error checking is further complicated because the desired return value is an
+.Li int
+rather than a
+.Li long ;
+however, on some architectures integers and long integers are the same
+size.  Thus the following is necessary:
+.Bd -literal -offset indent
+char *ep;
+int ival;
+long lval;
+
+\&...
+
+errno = 0;
+lval = strtol(buf, &ep, 10);
+if (buf[0] == '\e0' || *ep != '\e0')
+     goto not_a_number;
+if ((errno == ERANGE && (lval == LONG_MAX || lval == LONG_MIN)) ||
+    (lval > INT_MAX || lval < INT_MIN))
+     goto out_of_range;
+ival = lval;
+.Ed
 .Sh ERRORS
 .Bl -tag -width Er
 .It Bq Er ERANGE
@@ -156,6 +218,7 @@ The given string was out of range; the value converted has been clamped.
 .Xr atof 3 ,
 .Xr atoi 3 ,
 .Xr atol 3 ,
+.Xr sscanf 3 ,
 .Xr strtod 3 ,
 .Xr strtoul 3
 .Sh STANDARDS

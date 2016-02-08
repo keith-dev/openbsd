@@ -15,21 +15,22 @@
  * IMPLIED WARRANTIES, INCLUDING, WITHOUT LIMITATION, THE IMPLIED
  * WARRANTIES OF MERCHANTIBILITY AND FITNESS FOR A PARTICULAR PURPOSE.
  *
- * $Id: defs.h,v 1.6 1999/02/26 21:28:21 brian Exp $
+ * $Id: defs.h,v 1.10 1999/08/05 10:32:13 brian Exp $
  *
  *	TODO:
  */
 
 /* Check the following definitions for your machine environment */
 #ifdef __FreeBSD__
-# define  MODEM_LIST	"/dev/cuaa1, /dev/cuaa0"	/* name of tty device */
+# define  MODEM_LIST	"/dev/cuaa1\0/dev/cuaa0"	/* name of tty device */
 #else
 # ifdef __OpenBSD__
-#  define MODEM_LIST	"/dev/cua01, /dev/cua00"	/* name of tty device */
+#  define MODEM_LIST	"/dev/cua01\0/dev/cua00"	/* name of tty device */
 # else
-#  define MODEM_LIST	"/dev/tty01, /dev/tty00"	/* name of tty device */
+#  define MODEM_LIST	"/dev/tty01\0/dev/tty00"	/* name of tty device */
 # endif
 #endif
+#define NMODEMS		2
 
 #define _PATH_PPP	"/etc/ppp"
 
@@ -42,8 +43,9 @@
 #define	RECONNECT_TIMEOUT 3	/* Default timer for carrier loss */
 #define	DIAL_TIMEOUT	30	/* Default and Max random time to redial */
 #define	DIAL_NEXT_TIMEOUT 3	/* Default Hold time to next number redial */
-#define SCRIPT_LEN 512		/* Size of login scripts */
-#define LINE_LEN SCRIPT_LEN 	/* Size of login scripts */
+#define SCRIPT_LEN 512		/* Size of login/dial/hangup scripts */
+#define LINE_LEN SCRIPT_LEN 	/* Size of lines */
+#define DEVICE_LEN SCRIPT_LEN	/* Size of individual devices */
 #define AUTHLEN 100 		/* Size of authname/authkey */
 #define CHAPDIGESTLEN 100	/* Maximum chap digest */
 #define CHAPCHALLENGELEN 48	/* Maximum chap challenge */
@@ -51,7 +53,6 @@
 #define NCP_IDLE_TIMEOUT 180	/* Drop all links */
 #define CHOKED_TIMEOUT 120	/* Delete queued packets w/ blocked tun */
 
-#define LINK_MINWEIGHT 20
 #define MIN_LQRPERIOD 2		/* Minimum LQR frequency */
 #define DEF_LQRPERIOD 30	/* Default LQR frequency */
 #define MIN_FSMRETRY 3		/* Minimum FSM retry frequency */
@@ -95,3 +96,6 @@ extern ssize_t fullread(int, void *, size_t);
 extern const char *mode2Nam(int);
 extern int Nam2mode(const char *);
 extern struct in_addr GetIpAddr(const char *);
+extern int SpeedToInt(speed_t);
+extern speed_t IntToSpeed(int);
+extern int MakeArgs(char *, char **, int);

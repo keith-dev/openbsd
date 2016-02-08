@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1990, 1991, 1992, 1993, 1994, 1995, 1996
+ * Copyright (c) 1990, 1991, 1992, 1993, 1994, 1995, 1996, 1997
  *	The Regents of the University of California.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -23,7 +23,7 @@
  */
 #ifndef lint
 static const char rcsid[] =
-    "@(#) $Header: /cvs/src/usr.sbin/tcpdump/addrtoname.c,v 1.6 1997/07/25 20:12:20 mickey Exp $ (LBL)";
+    "@(#) $Header: /cvs/src/usr.sbin/tcpdump/addrtoname.c,v 1.9 1999/10/06 01:46:40 deraadt Exp $ (LBL)";
 #endif
 
 #include <sys/types.h>
@@ -45,6 +45,7 @@ struct rtentry;
 #include <netdb.h>
 #include <pcap.h>
 #include <pcap-namedb.h>
+#include <memory.h>
 #include <signal.h>
 #include <stdio.h>
 #include <string.h>
@@ -54,6 +55,8 @@ struct rtentry;
 #include "interface.h"
 #include "addrtoname.h"
 #include "llc.h"
+#include "savestr.h"
+#include "setsignal.h"
 
 /* Forwards */
 static RETSIGTYPE nohostname(int);
@@ -173,7 +176,7 @@ getname(const u_char *ap)
 		break;
 
 	case 2:
-#ifdef WORDS_BIGENDIAN
+#if BYTE_ORDER == BIG_ENDIAN
 		addr = ((u_int32_t)*(u_short *)ap << 16) |
 			(u_int32_t)*(u_short *)(ap + 2);
 #else
@@ -183,7 +186,7 @@ getname(const u_char *ap)
 		break;
 
 	default:
-#ifdef WORDS_BIGENDIAN
+#if BYTE_ORDER == BIG_ENDIAN
 		addr = ((u_int32_t)ap[0] << 24) |
 			((u_int32_t)ap[1] << 16) |
 			((u_int32_t)ap[2] << 8) |
@@ -208,16 +211,18 @@ getname(const u_char *ap)
 	/*
 	 * Only print names when:
 	 *	(1) -n was not given.
-	 *	(2) Address is foreign and -f was given.  If -f was not
-	 *	    present, f_netmask and f_local are 0 and the second
-	 *	    test will succeed.
-	 *	(3) The host portion is not 0 (i.e., a network address).
-	 *	(4) The host portion is not broadcast.
+	 *      (2) Address is foreign and -f was given. (If -f was not
+	 *	    give, f_netmask and f_local are 0 and the test
+	 *	    evaluates to true)
+	 *      (3) -a was given or the host portion is not all ones
+	 *          nor all zeros (i.e. not a network or broadcast address)
 	 */
-	if (!nflag && (addr & f_netmask) == f_localnet
-	    && (addr &~ netmask) != 0 && (addr | netmask) != 0xffffffff) {
+	if (!nflag &&
+	    (addr & f_netmask) == f_localnet &&
+	    (aflag ||
+	    !((addr & ~netmask) == 0 || (addr | netmask) == 0xffffffff))) {
 		if (!setjmp(getname_env)) {
-			(void)signal(SIGALRM, nohostname);
+			(void)setsignal(SIGALRM, nohostname);
 			(void)alarm(20);
 			hp = gethostbyaddr((char *)&addr, 4, AF_INET);
 			(void)alarm(0);
@@ -307,7 +312,7 @@ lookup_nsap(register const u_char *nsap)
 	tp->e_nsap = (u_char *)malloc(nlen + 1);
 	if (tp->e_nsap == NULL)
 		error("lookup_nsap: malloc");
-	memcpy(tp->e_nsap, nsap, nlen + 1);
+	memcpy((char *)tp->e_nsap, (char *)nsap, nlen + 1);
 	tp->e_nxt = (struct enamemem *)calloc(1, sizeof(*tp));
 	if (tp->e_nxt == NULL)
 		error("lookup_nsap: calloc");
@@ -696,7 +701,7 @@ init_llcsaparray(void)
  * of the local network.  mask is its subnet mask.
  */
 void
-init_addrtoname(int fflag, u_int32_t localnet, u_int32_t mask)
+init_addrtoname(u_int32_t localnet, u_int32_t mask)
 {
 	netmask = mask;
 	if (fflag) {

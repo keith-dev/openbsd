@@ -1,8 +1,8 @@
-/*	$OpenBSD: conf.h,v 1.6 1999/03/02 15:35:12 niklas Exp $	*/
-/*	$EOM: conf.h,v 1.7 1999/03/02 15:33:19 niklas Exp $	*/
+/*	$OpenBSD: conf.h,v 1.9 1999/08/05 22:41:08 niklas Exp $	*/
+/*	$EOM: conf.h,v 1.10 1999/08/05 14:57:59 niklas Exp $	*/
 
 /*
- * Copyright (c) 1998 Niklas Hallqvist.  All rights reserved.
+ * Copyright (c) 1998, 1999 Niklas Hallqvist.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -41,7 +41,7 @@
 #include <sys/queue.h>
 #include <stdio.h>
 
-#define CONFIG_FILE "/etc/isakmpd.conf"
+#define CONFIG_FILE "/etc/isakmpd/isakmpd.conf"
 
 struct conf_list_node {
   TAILQ_ENTRY (conf_list_node) link;
@@ -55,7 +55,9 @@ struct conf_list {
 
 extern char *conf_path;
 
+extern int conf_begin (void);
 extern int conf_decode_base64 (u_int8_t *out, u_int32_t *len, u_char *buf);
+extern int conf_end (int, int);
 extern void conf_free_list (struct conf_list *);
 extern int conf_get_line (FILE *, char *, u_int32_t);
 extern struct conf_list *conf_get_list (char *, char *);
@@ -64,5 +66,9 @@ extern int conf_get_num (char *, char *, int);
 extern char *conf_get_str (char *, char *);
 extern void conf_init (void);
 extern int conf_match_num (char *, char *, int);
+extern void conf_reinit (void);
+extern int conf_remove (int, char *, char *);
+extern int conf_remove_section (int, char *);
+extern int conf_set (int, char *, char *, char *, int);
 
 #endif /* _CONF_H_ */

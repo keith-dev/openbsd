@@ -1,21 +1,21 @@
-.\"	$OpenBSD: scsi.8,v 1.8 1998/12/15 01:20:44 aaron Exp $
+.\"	$OpenBSD: scsi.8,v 1.13 1999/07/23 06:00:05 deraadt Exp $
 .\"	$FreeBSD: scsi.8,v 1.5 1995/05/05 20:41:58 dufault Exp $
 .\"
 .\" Written By Julian ELischer
 .\" Copyright julian Elischer 1993.
 .\" Permission is granted to use or redistribute this file in any way as long
-.\" as this notice remains. Julian Elischer does not guarantee that this file 
-.\" is totally correct for any given task and users of this file must 
+.\" as this notice remains. Julian Elischer does not guarantee that this file
+.\" is totally correct for any given task and users of this file must
 .\" accept responsibility for any damage that occurs from the application of
 .\" this file.
-.\" 
+.\"
 .\" (julian@tfs.com julian@dialix.oz.au)
 .\" User SCSI hooks added by Peter Dufault:
-.\" 
+.\"
 .\" Copyright (c) 1994 HD Associates
 .\" (contact: dufault@hda.com)
 .\" All rights reserved.
-.\" 
+.\"
 .\" Redistribution and use in source and binary forms, with or without
 .\" modification, are permitted provided that the following conditions
 .\" are met:
@@ -27,7 +27,7 @@
 .\" 3. The name of HD Associates
 .\"    may not be used to endorse or promote products derived from this software
 .\"    without specific prior written permission.
-.\" 
+.\"
 .\" THIS SOFTWARE IS PROVIDED BY HD ASSOCIATES ``AS IS'' AND
 .\" ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
 .\" IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
@@ -79,28 +79,27 @@
 .Fl o Ar count out_fmt
 .Op Ar arg ...
 .Fl i Ar count in_fmt
-.Pp
-.in -\\n(iSu
-.Ar out_fmt
-can be
-.Sq -
-to read output data from stdin;
-.Ar in_fmt
-can be
-.Sq -
-to write input data to stdout.
-.Pp
-If debugging is not compiled in the kernel,
-.Fl d
-will have no effect.
 .Sh DESCRIPTION
 The
 .Nm
 program is used to send commands to a SCSI device. It is also
 a sample usage of the user-level SCSI commands.
+.Ar out_fmt
+can be
+.Ql -
+to read output data from stdin;
+.Ar in_fmt
+can be
+.Ql -
+to write input data to stdout.
 .Pp
 The following options are available:
 .Bl -tag -width Ds
+.It Fl f Ar device
+Specifies the
+.Ar device
+that should be opened, ie.
+.Pa /dev/rsd0c .
 .It Fl d Ar debug_level
 Sets the SCSI kernel debug level.  The kernel must have been compiled
 with the SCSIDEBUG
@@ -139,7 +138,7 @@ fields are
 Permits you to edit the fields.  It will use the editor specified
 by your
 .Ev EDITOR
-environment variable.  To store changes permanently, 
+environment variable.  To store changes permanently,
 edit page control 3 using the
 .Fl P
 flag.
@@ -205,7 +204,7 @@ bytes of data. The data out is built up using the facilities described in
 using the provided arguments to fill in any integer variables.
 .Ar out_fmt
 can be specified as a hyphen
-.Pq Sq -
+.Pq Ql -
 to indicate that the
 .Ar count
 bytes of data should be read from the standard input.
@@ -221,10 +220,11 @@ using the facilities described in
 and displayed on the standard output.
 .Ar in_fmt
 can be specified as a hyphen
-.Pq Sq -
+.Pq Ql -
 to indicate that the
 .Ar count
 bytes of data input should be written to the standard output.
+.El
 .Sh EXAMPLES
 To verify that the device type for the disk /dev/rsd0c is 0
 (direct access device):
@@ -243,7 +243,6 @@ drive (set AWRE and ARRE to 1 to enable bad block remapping):
 .Bd -literal -offset
 root# scsi -f /dev/rsd2c -m 1 -e -P 3
 .Ed
-.Pp
 .Sh ENVIRONMENT
 The
 .Ev SU_DEBUG_OUTPUT

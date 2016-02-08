@@ -1,4 +1,4 @@
-.\"	$OpenBSD: boot_config.8,v 1.6 1998/12/13 22:39:58 millert Exp $
+.\"	$OpenBSD: boot_config.8,v 1.9 1999/07/09 13:35:36 aaron Exp $
 .\"
 .\" Copyright (c) 1996 Mats O Jansson
 .\" All rights reserved.
@@ -32,7 +32,7 @@
 .\"
 .Dd December 13, 1998
 .Dt boot_config 8
-.Os OpenBSD
+.Os
 .Sh NAME
 .Nm boot_config
 .Nd how to change kernel configuration at boot
@@ -50,7 +50,7 @@ option when OpenBSD prompts for a kernel to boot:
 use ? for file list, or carriage return for defaults
 use hd(1,a)/bsd to boot sd0 when sd0 is also installed
 .No "Boot: [[[wd(0,a)]/bsd][-abcdrs]] :" Ic -c
-Booting... 
+Booting...
 avail mem = 28188672
 using 430 buffers containing 1761280 bytes of memory
 User Kernel Config
@@ -86,6 +86,8 @@ Show all devices for which attribute
 .Ar attr
 has the value
 .Ar val .
+.It Ic verbose
+Toggle the autoconfig verbose variable.
 .El
 .Pp
 .Sh EXAMPLES
@@ -161,7 +163,7 @@ an attribute.
 UKC>
 .Ed
 .Pp
-It is possible to add new devices, but only devices that were linked into the 
+It is possible to add new devices, but only devices that were linked into the
 kernel. If a new device is added, following devices will be renumbered.
 .Pp
 .Bd -literal

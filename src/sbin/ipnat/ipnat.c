@@ -1,4 +1,4 @@
-/*    $OpenBSD: ipnat.c,v 1.26 1999/02/05 05:58:48 deraadt Exp $    */
+/*    $OpenBSD: ipnat.c,v 1.31 1999/07/25 19:14:43 hugh Exp $    */
 /*
  * Copyright (C) 1993-1998 by Darren Reed.
  *
@@ -67,7 +67,7 @@ extern	char	*sys_errlist[];
 
 #if !defined(lint)
 static const char sccsid[] ="@(#)ipnat.c	1.9 6/5/96 (C) 1993 Darren Reed";
-static const char rcsid[] = "@(#)$Id: ipnat.c,v 1.26 1999/02/05 05:58:48 deraadt Exp $";
+static const char rcsid[] = "@(#)$Id: ipnat.c,v 1.31 1999/07/25 19:14:43 hugh Exp $";
 #endif
 
 
@@ -76,6 +76,7 @@ static const char rcsid[] = "@(#)$Id: ipnat.c,v 1.26 1999/02/05 05:58:48 deraadt
 #endif
 
 extern	char	*optarg;
+char	*nlistf = NULL, *memf = NULL;
 
 ipnat_t	*parse __P((char *));
 u_32_t	hostnum __P((char *, int *));
@@ -515,16 +516,17 @@ char	*msk;
 
 #if defined(__OpenBSD__)
 /*
- * get_if_addr():
+ * if_addr():
  *	given a string containing an interface name (e.g. "ppp0")
- *	return the IP address it represents as an unsigned int
+ *	return the IP address it represents
  *
  * The OpenBSD community considers this feature to be quite useful and
  * suggests inclusion into other platforms. The closest alternative is
  * to define /etc/networks with suitable values.
  */
-u_32_t  if_addr(name)
-char   *name;
+int	if_addr(name, ap)
+char		*name;
+struct in_addr	*ap;
 {
 	struct ifconf ifc;
 	struct ifreq ifreq, *ifr;
@@ -533,7 +535,7 @@ char   *name;
 
 	if ((s = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
 		warn("socket");
-		return INADDR_NONE;
+		return 0;
 	}
 
 	while (1) {
@@ -567,14 +569,15 @@ char   *name;
 			close(s);
 			free(inbuf);
 			sin = (struct sockaddr_in *)&ifr->ifr_addr;
-			return (sin->sin_addr.s_addr);
+			*ap = sin->sin_addr;
+			return (1);
 		}
 	}
 
 if_addr_lose:
 	close(s);
 	free(inbuf);
-	return INADDR_NONE;
+	return 0;
 }
 #endif
 
@@ -590,22 +593,22 @@ int	*resolved;
 	struct	hostent	*hp;
 	struct	netent	*np;
 #if defined(__OpenBSD__)
-	u_32_t		addr;
+	struct in_addr	addr;
 #endif
 
 	*resolved = 0;
 	if (!strcasecmp("any", host))
 		return 0L;
-	if (isdigit(*host))
-		return inet_addr(host);
+	if (inet_aton(host, &addr))
+		return (u_32_t)addr.s_addr;
 
+#if defined(__OpenBSD__)
+	/* attempt a map from interface name to address */
+	if (if_addr(host, &addr))
+		return (u_32_t)addr.s_addr;
+#endif
 	if (!(hp = gethostbyname(host))) {
 		if (!(np = getnetbyname(host))) {
-#if defined(__OpenBSD__)
-			/* attempt a map from interface name to address */
-			if ((addr = if_addr(host)) != INADDR_NONE)
-				return addr;
-#endif
 			*resolved = -1;
 			fprintf(stderr, "can't resolve hostname: %s\n", host);
 			return 0;
@@ -938,14 +941,16 @@ int opts;
 			if (*line)
 				fprintf(stderr, "%d: syntax error in \"%s\"\n",
 					linenum, line);
-		} else if (!(opts & OPT_NODO)) {
+		} else {
 			if ((opts & OPT_VERBOSE) && np)
 				printnat(np, opts &  OPT_VERBOSE, NULL);
-			if (opts & OPT_REM) {
-				if (ioctl(fd, SIOCADNAT, np) == -1)
-					perror("ioctl(SIOCADNAT)");
-			} else if (ioctl(fd, SIOCRMNAT, np) == -1)
-				perror("ioctl(SIOCRMNAT)");
+			if (!(opts & OPT_NODO)) {
+				if (opts & OPT_REM) {
+					if (ioctl(fd, SIOCADNAT, np) == -1)
+						perror("ioctl(SIOCADNAT)");
+				} else if (ioctl(fd, SIOCRMNAT, np) == -1)
+					perror("ioctl(SIOCRMNAT)");
+			}
 		}
 		linenum++;
 	}

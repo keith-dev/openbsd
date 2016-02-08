@@ -1,4 +1,4 @@
-.\"	$OpenBSD: err.3,v 1.4 1997/08/08 23:14:51 millert Exp $
+.\"	$OpenBSD: err.3,v 1.9 1999/10/06 02:30:43 aaron Exp $
 .\"
 .\" Copyright (c) 1993
 .\"	The Regents of the University of California.  All rights reserved.
@@ -31,9 +31,9 @@
 .\" OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 .\" SUCH DAMAGE.
 .\"
-.Dd August, 8, 1997
+.Dd August 8, 1997
 .Dt ERR 3
-.Os BSD 4
+.Os
 .Sh NAME
 .Nm err ,
 .Nm verr ,
@@ -69,14 +69,14 @@ and
 .Fn warn
 family of functions display a formatted error message on the standard
 error output.
-In all cases, the last component of the program name, a colon character,
-and a space are output.
-If the
-.Va fmt
-argument is not NULL, the formatted error message, a colon character,
-and a space are output.  The
-.Va fmt
-argument (and associated arguments) may be any format allowed by
+In all cases, the last component of the program name, followed by
+a colon
+.Pq Sq \&:
+character and a space, are output.
+The text that follows depends on the function being called.
+The
+.Fa fmt
+specification (and associated arguments) may be any format allowed by
 .Xr printf 3
 or a simple string.
 .Pp
@@ -88,8 +88,25 @@ and
 .Fn vwarn
 functions only, the error message string affiliated with the current value of
 the global variable
-.Va errno 
-is output.
+.Va errno
+is output (see
+.Xr strerror 3 ) ;
+that is, the output is as follows:
+.Bd -literal -offset indent
+progname: fmt: error message string
+.Ed
+.Pp
+The counterpart functions,
+.Fn errx ,
+.Fn verrx ,
+.Fn warnx ,
+and
+.Fn vwarnx ,
+do not output the error message string, so the output looks like the following:
+.Bd -literal -offset indent
+progname: fmt
+.Ed
+.Pp
 In all cases, the output is followed by a newline character.
 .Pp
 The
@@ -135,5 +152,5 @@ The
 .Fn err
 and
 .Fn warn
-functions first appeared in 
+functions first appeared in
 .Bx 4.4 .

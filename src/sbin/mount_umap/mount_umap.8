@@ -1,4 +1,4 @@
-.\"	$OpenBSD: mount_umap.8,v 1.8 1998/12/15 01:20:39 aaron Exp $
+.\"	$OpenBSD: mount_umap.8,v 1.12 1999/07/21 01:07:56 deraadt Exp $
 .\"	$NetBSD: mount_umap.8,v 1.4 1996/03/05 02:36:42 thorpej Exp $
 .\"
 .\" Copyright (c) 1992, 1993, 1994
@@ -38,9 +38,9 @@
 .\"
 .\"	@(#)mount_umap.8	8.3 (Berkeley) 3/27/94
 .\"
-.Dd March, 27, 1994
+.Dd March 27, 1994
 .Dt MOUNT_UMAP 8
-.Os BSD 4.4
+.Os
 .Sh NAME
 .Nm mount_umap
 .Nd sample file system layer
@@ -64,7 +64,7 @@ foreign location that uses a different password file.
 .Pp
 The options are as follows:
 .Bl -tag -width indent
-.It Fl o
+.It Fl o Ar options
 Options are specified with a
 .Fl o
 flag followed by a comma separated string of options.
@@ -83,39 +83,39 @@ UID 2000 in the local environment.  The
 .Nm
 command allows the subtree from smith's original environment to be
 mapped in such a way that all files with owner UID 1000 look like
-they are actually owned by UID 2000.  
+they are actually owned by UID 2000.
 .Pp
-.Em target 
+.Em target
 should be the current location of the subtree in the
-local system's name space.  
-.Ar mount_point 
+local system's name space.
+.Ar mount_point
 should be a directory
-where the mapped subtree is to be placed.  
-.Em uid-mapfile 
+where the mapped subtree is to be placed.
+.Em uid-mapfile
 and
-.Em gid-mapfile 
+.Em gid-mapfile
 describe the mappings to be made between identifiers.
 Briefly, the format of these files is a count of the number of
 mappings on the first line, with each subsequent line containing
 a single mapping.  Each of these mappings consists of an ID from
 the original environment and the corresponding ID in the local environment,
-separated by white space.  
-.Em uid-mapfile 
+separated by white space.
+.Em uid-mapfile
 should contain all UID
-mappings, and 
-.Em gid-mapfile 
+mappings, and
+.Em gid-mapfile
 should contain all GID mappings.
-Any UIDs not mapped in 
-.Em uid-mapfile 
+Any UIDs not mapped in
+.Em uid-mapfile
 will be treated as user NOBODY,
-and any GIDs not mapped in 
-.Em gid-mapfile 
+and any GIDs not mapped in
+.Em gid-mapfile
 will be treated as group
 NULLGROUP.  At most 64 UIDs can be mapped for a given subtree, and
 at most 16 groups can be mapped by a given subtree.
 .Pp
 The mapfiles can be located anywhere in the file hierarchy, but they
-must be owned by root, and they must be writable only by root.  
+must be owned by root, and they must be writable only by root.
 .Nm
 will refuse to map the subtree if the ownership or permissions on
 these files are improper.  It will also balk if the count of mappings

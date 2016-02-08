@@ -1,5 +1,5 @@
-/*	$OpenBSD: ike_quick_mode.c,v 1.12 1999/04/06 17:08:53 niklas Exp $	*/
-/*	$EOM: ike_quick_mode.c,v 1.81 1999/04/06 14:11:35 niklas Exp $	*/
+/*	$OpenBSD: ike_quick_mode.c,v 1.22 1999/10/01 14:07:16 niklas Exp $	*/
+/*	$EOM: ike_quick_mode.c,v 1.100 1999/10/01 13:44:21 niklas Exp $	*/
 
 /*
  * Copyright (c) 1998, 1999 Niklas Hallqvist.  All rights reserved.
@@ -37,10 +37,15 @@
 #include <stdlib.h>
 #include <string.h>
 
+#if defined (USE_KEYNOTE) || defined (HAVE_DLOPEN)
+#include <keynote.h>
+#endif
+
 #include "sysdep.h"
 
 #include "attribute.h"
 #include "conf.h"
+#include "connection.h"
 #include "dh.h"
 #include "doi.h"
 #include "exchange.h"
@@ -50,9 +55,11 @@
 #include "log.h"
 #include "math_group.h"
 #include "message.h"
+#include "policy.h"
 #include "prf.h"
 #include "sa.h"
 #include "transport.h"
+#include "x509.h"
 
 static void gen_g_xy (struct message *);
 static int initiator_send_HASH_SA_NONCE (struct message *);
@@ -62,6 +69,10 @@ static void post_quick_mode (struct message *);
 static int responder_recv_HASH_SA_NONCE (struct message *);
 static int responder_send_HASH_SA_NONCE (struct message *);
 static int responder_recv_HASH (struct message *);
+
+#if defined (USE_KEYNOTE) || defined (HAVE_DLOPEN)
+static int check_policy (struct exchange *, struct sa *, struct sa *);
+#endif
 
 int (*ike_quick_mode_initiator[]) (struct message *) = {
   initiator_send_HASH_SA_NONCE,
@@ -75,6 +86,125 @@ int (*ike_quick_mode_responder[]) (struct message *) = {
   responder_recv_HASH
 };
 
+#if defined (USE_KEYNOTE) || defined (HAVE_DLOPEN)
+
+/* Policy session ID and other necessary globals.  XXX Why not in policy.h?  */
+extern int keynote_sessid;
+extern struct exchange *policy_exchange;
+extern struct sa *policy_sa;
+extern struct sa *policy_isakmp_sa;
+
+/* How many return values will policy handle -- true/false for now */
+#define RETVALUES_NUM 2
+
+/*
+ * Given an exchange and our policy, check whether the SA and IDs are
+ * acceptable.
+ */
+static int
+check_policy (struct exchange *exchange, struct sa *sa, struct sa *isakmp_sa)
+{
+  char *return_values[RETVALUES_NUM];
+  struct keynote_deckey dc;
+  char *principal = NULL;
+  int result;
+  RSA *key;
+
+  /* If there is no policy setup, everything fails.  */
+  if (keynote_sessid < 0)
+    return 0;
+
+  /* Initialize -- we'll let the callback do all the work.  */
+  policy_exchange = exchange;
+  policy_sa = sa;
+  policy_isakmp_sa = isakmp_sa;
+
+  /* Set the return values; true/false for now at least.  */
+  return_values[0] = "false"; /* Order of values in array is important.  */
+  return_values[1] = "true";
+
+  /* Create a principal (authorizer) for the SA/ID request.  */
+  switch (isakmp_sa->recv_certtype)
+    {
+    case ISAKMP_CERTENC_NONE:
+      /* For shared keys, just duplicate the passphrase.  */
+      principal = calloc (isakmp_sa->recv_certlen + 1, sizeof (char));
+      if (principal == NULL)
+	return 0;
+      memcpy (principal, isakmp_sa->recv_cert, isakmp_sa->recv_certlen);
+      break;
+
+    case ISAKMP_CERTENC_X509_SIG:
+      /* Retrieve key from certificate.  */
+      if (!x509_cert_get_key (isakmp_sa->recv_cert, &key))
+	{
+	  log_print ("check_policy: failed to get key from X509 cert");
+	  return 0;
+	}
+
+      /* XXX RSA-specific.  */
+      dc.dec_algorithm = KEYNOTE_ALGORITHM_RSA;
+      dc.dec_key = (void *) key;
+      principal = LK (kn_encode_key, (&dc, INTERNAL_ENC_PKCS1, ENCODING_HEX,
+				      KEYNOTE_PUBLIC_KEY));
+      if (LKV (keynote_errno) == ERROR_MEMORY)
+	log_fatal ("check_policy: failed to get memory for public key");
+      if (principal == NULL)
+	return 0;
+      LC (RSA_free, (key));
+      break;
+	
+    /* XXX Eventually handle these.  */
+    case ISAKMP_CERTENC_PKCS:
+    case ISAKMP_CERTENC_PGP:	
+    case ISAKMP_CERTENC_DNS:
+    case ISAKMP_CERTENC_X509_KE:
+    case ISAKMP_CERTENC_KERBEROS:
+    case ISAKMP_CERTENC_CRL:
+    case ISAKMP_CERTENC_ARL:
+    case ISAKMP_CERTENC_SPKI:
+    case ISAKMP_CERTENC_X509_ATTR:
+#if 0
+    case ISAKMP_CERTENC_KEYNOTE:
+#endif
+    default:
+      log_print ("check_policy: "
+		 "unknown/unsupported certificate/authentication method %d",
+		 isakmp_sa->recv_certtype);
+      return 0;
+    }
+
+  /* 
+   * Add the authorizer (who is requesting the SA/ID);
+   * this may be a public or a secret key, depending on
+   * what mode of authentication we used in Phase 1.
+   */
+  if (LK (kn_add_authorizer, (keynote_sessid, principal)) == -1)
+    return 0;
+
+  /* Ask policy.  */
+  result = LK (kn_do_query, (keynote_sessid, return_values, RETVALUES_NUM));
+
+  /* Remove authorizer from the session.  */
+  LK (kn_remove_authorizer, (keynote_sessid, principal));
+  free (principal);
+
+  /* Check what policy said.  */
+  if (result < 0)
+    {
+      log_debug (LOG_MISC, 40, "check_policy: kn_do_query returned %d",
+		 result);
+      return 0;
+    }
+
+  /*
+   * Given that we have only 2 return values from policy (true/false)
+   * we can just return the query result directly (no pre-processing needed).
+   */
+  return result;
+}
+#endif /* USE_KEYNOTE */
+
 /*
  * Offer several sets of transforms to the responder.
  * XXX Split this huge function up and look for common code with main mode.
@@ -85,22 +215,14 @@ initiator_send_HASH_SA_NONCE (struct message *msg)
   struct exchange *exchange = msg->exchange;
   struct doi *doi = exchange->doi;
   struct ipsec_exch *ie = exchange->data;
-  struct sa *isakmp_sa = msg->isakmp_sa;
-  struct ipsec_sa *isa = isakmp_sa->data;
   u_int8_t ***transform = 0, ***new_transform;
   u_int8_t **proposal = 0, **new_proposal;
-  u_int8_t *sa_buf = 0, *attr, *saved_nextp_sa, *saved_nextp_prop;
-  u_int8_t *buf, *id;
-  u_int8_t *spi;
+  u_int8_t *sa_buf = 0, *attr, *saved_nextp_sa, *saved_nextp_prop, *id, *spi;
   size_t spi_sz, sz;
-  struct prf *prf;
-  struct hash *hash = hash_get (isa->hash);
-  size_t hashsize = hash->hashsize;
   size_t proposal_len = 0, proposals_len = 0, sa_len;
   size_t **transform_len = 0, **new_transform_len;
   size_t *transforms_len = 0, *new_transforms_len;
   int *transform_cnt = 0, *new_transform_cnt;
-  char header[80];
   int i, suite_no, prop_no, prot_no, xf_no, value, update_nextp, protocol_num;
   int prop_cnt = 0;
   struct proto *proto;
@@ -110,22 +232,11 @@ initiator_send_HASH_SA_NONCE (struct message *msg)
   char *protocol_id, *transform_id;
   char *local_id, *remote_id;
   int group_desc = -1, new_group_desc;
+  struct ipsec_sa *isa = msg->isakmp_sa->data;
+  struct hash *hash = hash_get (isa->hash);
 
-  /* We want a HASH payload to start with.  XXX Share with ike_main_mode.c?  */
-  buf = malloc (ISAKMP_HASH_SZ + hashsize);
-  if (!buf)
-    {
-      log_error ("initiator_send_HASH_SA_NONCE: malloc (%d) failed",
-		 ISAKMP_HASH_SZ + hashsize);
-      return -1;
-    }
-
-  if (message_add_payload (msg, ISAKMP_PAYLOAD_HASH, buf,
-			   ISAKMP_HASH_SZ + hashsize, 1))
-    {
-      free (buf);
-      return -1;
-    }
+  if (!ipsec_add_hash_payload (msg, hash->hashsize))
+    return -1;
     
   /* Get the list of protocol suites.  */
   suite_conf = conf_get_list (exchange->policy, "Suites");
@@ -484,10 +595,7 @@ initiator_send_HASH_SA_NONCE (struct message *msg)
    * XXX I want a better way to specify the nonce's size.
    */
   if (exchange_gen_nonce (msg, 16))
-    {
-      /* XXX Log?  */
-      return -1;
-    }
+    return -1;
 
   /* Generate optional KEY_EXCH payload.  */
   if (group_desc)
@@ -497,7 +605,6 @@ initiator_send_HASH_SA_NONCE (struct message *msg)
 
       if (ipsec_gen_g_x (msg))
 	{
-	  /* XXX Log?  */
 	  group_free (ie->group);
 	  ie->group = 0;
 	  return -1;
@@ -541,35 +648,8 @@ initiator_send_HASH_SA_NONCE (struct message *msg)
 	       "Remote-ID given without Local-ID for \"%s\"",
 	       exchange->name);
 
-  /* Allocate the prf and start calculating our HASH(1).  XXX Share?  */
-  log_debug_buf (LOG_MISC, 90, "initiator_send_HASH_SA_NONCE: SKEYID_a",
-		 isa->skeyid_a, isa->skeyid_len);
-  prf = prf_alloc (isa->prf_type, hash->type, isa->skeyid_a, isa->skeyid_len);
-  if (!prf)
-    {
-      /* XXX Log?  */
-      return -1;
-    }
-  prf->Init (prf->prfctx);
-  log_debug_buf (LOG_MISC, 90, "initiator_send_HASH_SA_NONCE: message_id",
-		 exchange->message_id, ISAKMP_HDR_MESSAGE_ID_LEN);
-  prf->Update (prf->prfctx, exchange->message_id, ISAKMP_HDR_MESSAGE_ID_LEN);
-
-  /* Loop over all payloads after HASH(1).  */
-  for (i = 2; i < msg->iovlen; i++)
-    {
-      /* XXX Misleading payload type printouts.  */
-      snprintf (header, 80,
-		"initiator_send_HASH_SA_NONCE: payload %d after HASH(1)",
-		i - 1);
-      log_debug_buf (LOG_MISC, 90, header, msg->iov[i].iov_base,
-		     msg->iov[i].iov_len);
-      prf->Update (prf->prfctx, msg->iov[i].iov_base, msg->iov[i].iov_len);
-    }
-  prf->Final (buf + ISAKMP_HASH_DATA_OFF, prf->prfctx);
-  prf_free (prf);
-  log_debug_buf (LOG_MISC, 80, "initiator_send_HASH_SA_NONCE: HASH(1)",
-		 buf + ISAKMP_HASH_DATA_OFF, hashsize);
+  if (ipsec_fill_in_hash (msg))
+    goto bail_out;
 
   conf_free_list (suite_conf);
   for (i = 0; i < prop_no; i++)
@@ -646,9 +726,7 @@ initiator_recv_HASH_SA_NONCE (struct message *msg)
   if (TAILQ_NEXT (sa_p, link))
     {
       log_print ("initiator_recv_HASH_SA_NONCE: "
-		 "multiple SA payloads in quick mode");
-      /* XXX Is there a better notification type?  */
-      message_drop (msg, ISAKMP_NOTIFY_PAYLOAD_MALFORMED, 0, 0, 0);
+		 "multiple SA payloads in quick mode not supported yet");
       return -1;
     }
 
@@ -664,10 +742,7 @@ initiator_recv_HASH_SA_NONCE (struct message *msg)
        */
 
       if (sa_add_transform (sa, xf, exchange->initiator, &proto))
-	{
-	  /* XXX Log?  */
-	  return -1;
-	}
+	return -1;
 
       /* XXX Check that the chosen transform matches an offer.  */
 
@@ -690,10 +765,8 @@ initiator_recv_HASH_SA_NONCE (struct message *msg)
 		 isa->skeyid_a, isa->skeyid_len);
   prf = prf_alloc (isa->prf_type, hash->type, isa->skeyid_a, isa->skeyid_len);
   if (!prf)
-    {
-      /* XXX Log?  */
-      return -1;
-    }
+    return -1;
+
   prf->Init (prf->prfctx);
   log_debug_buf (LOG_MISC, 90, "initiator_recv_HASH_SA_NONCE: message_id",
 		 exchange->message_id, ISAKMP_HDR_MESSAGE_ID_LEN);
@@ -715,8 +788,7 @@ initiator_recv_HASH_SA_NONCE (struct message *msg)
 		 hash->digest, hashsize);
   if (memcmp (hashp->p + ISAKMP_HASH_DATA_OFF, hash->digest, hashsize) != 0)
     {
-      log_print ("initiator_recv_HASH_SA_NONCE: bad hash");
-      /* XXX Notify?  */
+      message_drop (msg, ISAKMP_NOTIFY_INVALID_HASH_INFORMATION, 0, 1, 0);
       return -1;
     }
   /* Mark the HASH as handled.  */
@@ -732,27 +804,33 @@ initiator_recv_HASH_SA_NONCE (struct message *msg)
 
   /* Copy out the initiator's nonce.  */
   if (exchange_save_nonce (msg))
-    {
-      /* XXX Notify peer?  */
-      return -1;
-    }
+    return -1;
 
   /* Handle the optional KEY_EXCH payload.  */
   if (kep && ipsec_save_g_x (msg))
-    {
-      /* XXX Notify peer?  */
-      return -1;
-    }
+    return -1;
 
   /* Handle optional client ID payloads.  */
   idp = TAILQ_FIRST (&msg->payload[ISAKMP_PAYLOAD_ID]);
   if (idp)
     {
+      /* If IDci is there, IDcr must be too.  */
+      if (!TAILQ_NEXT (idp, link))
+	{
+	  /* XXX Is this a good notify type?  */
+	  message_drop (msg, ISAKMP_NOTIFY_PAYLOAD_MALFORMED, 0, 1, 0);
+	  return -1;
+	}
+	  
       /* XXX We should really compare, not override.  */
       ie->id_ci_sz = GET_ISAKMP_GEN_LENGTH (idp->p);
       ie->id_ci = malloc (ie->id_ci_sz);
       if (!ie->id_ci)
-	return -1;
+	{
+	  log_error ("initiator_recv_HASH_SA_NONCE: malloc (%d) failed",
+		     ie->id_ci_sz);
+	  return -1;
+	}
       memcpy (ie->id_ci, idp->p, ie->id_ci_sz);
       idp->flags |= PL_MARK;
       log_debug_buf (LOG_MISC, 90,
@@ -760,20 +838,19 @@ initiator_recv_HASH_SA_NONCE (struct message *msg)
 		     ie->id_ci + ISAKMP_GEN_SZ, ie->id_ci_sz - ISAKMP_GEN_SZ);
 
       idp = TAILQ_NEXT (idp, link);
-      /* XXX Is IDci without IDcr valid?  */
-      if (idp)
+      ie->id_cr_sz = GET_ISAKMP_GEN_LENGTH (idp->p);
+      ie->id_cr = malloc (ie->id_cr_sz);
+      if (!ie->id_cr)
 	{
-	  ie->id_cr_sz = GET_ISAKMP_GEN_LENGTH (idp->p);
-	  ie->id_cr = malloc (ie->id_cr_sz);
-	  if (!ie->id_cr)
-	    return -1;
-	  memcpy (ie->id_cr, idp->p, ie->id_cr_sz);
-	  idp->flags |= PL_MARK;
-	  log_debug_buf (LOG_MISC, 90,
-			 "initiator_recv_HASH_SA_NONCE: IDcr",
-			 ie->id_cr + ISAKMP_GEN_SZ,
-			 ie->id_cr_sz - ISAKMP_GEN_SZ);
+	  log_error ("initiator_recv_HASH_SA_NONCE: malloc (%d) failed",
+		     ie->id_cr_sz);
+	  return -1;
 	}
+      memcpy (ie->id_cr, idp->p, ie->id_cr_sz);
+      idp->flags |= PL_MARK;
+      log_debug_buf (LOG_MISC, 90,
+		     "initiator_recv_HASH_SA_NONCE: IDcr",
+		     ie->id_cr + ISAKMP_GEN_SZ, ie->id_cr_sz - ISAKMP_GEN_SZ);
     }
 
   return 0;
@@ -811,10 +888,7 @@ initiator_send_HASH (struct message *msg)
 		 isa->skeyid_len);
   prf = prf_alloc (isa->prf_type, isa->hash, isa->skeyid_a, isa->skeyid_len);
   if (!prf)
-    {
-      /* XXX Log?  */
-      return -1;
-    }
+    return -1;
   prf->Init (prf->prfctx);
   prf->Update (prf->prfctx, "\0", 1);
   log_debug_buf (LOG_MISC, 90, "initiator_send_HASH: message_id",
@@ -834,7 +908,6 @@ initiator_send_HASH (struct message *msg)
   if (ie->group)
     message_register_post_send (msg, gen_g_xy);
   sa_reference (msg->isakmp_sa);
-  exchange_reference (exchange);
   message_register_post_send (msg, post_quick_mode);
 
   return 0;
@@ -850,7 +923,7 @@ post_quick_mode (struct message *msg)
   struct prf *prf;
   struct sa *sa;
   struct proto *proto;
-  struct ipsec_proto *iproto = proto->data;
+  struct ipsec_proto *iproto;
   u_int8_t *keymat;
   int i;
 
@@ -890,7 +963,10 @@ post_quick_mode (struct message *msg)
 			   / prf->blocksize) * prf->blocksize);
 	      if (!iproto->keymat[i])
 		{
-		  /* XXX What to do?  */
+		  log_error ("post_quick_mode: malloc (%d) failed",
+			     ((ie->keymat_len + prf->blocksize - 1)
+			      / prf->blocksize) * prf->blocksize);
+		  /* XXX What more to do?  */
 		  free (prf);
 		  continue;
 		}
@@ -942,7 +1018,6 @@ post_quick_mode (struct message *msg)
 	}
     }
   sa_release (isakmp_sa);
-  exchange_release (exchange);
 }
 
 /*
@@ -966,6 +1041,9 @@ responder_recv_HASH_SA_NONCE (struct message *msg)
   u_int8_t group_desc = 0;
   int retval = -1;
   struct proto *proto;
+  struct sockaddr *src, *dst;
+  socklen_t srclen, dstlen;
+  char *name;
 
   hashp = TAILQ_FIRST (&msg->payload[ISAKMP_PAYLOAD_HASH]);
   hash = hashp->p;
@@ -975,7 +1053,7 @@ responder_recv_HASH_SA_NONCE (struct message *msg)
   if (hash != pkt + ISAKMP_HDR_SZ)
     {
       /* XXX Is there a better notification type?  */
-      message_drop (msg, ISAKMP_NOTIFY_PAYLOAD_MALFORMED, 0, 0, 0);
+      message_drop (msg, ISAKMP_NOTIFY_PAYLOAD_MALFORMED, 0, 1, 0);
       goto cleanup;
     }
   hash_len = GET_ISAKMP_GEN_LENGTH (hash);
@@ -987,15 +1065,15 @@ responder_recv_HASH_SA_NONCE (struct message *msg)
       goto cleanup;
     }
 
-  /* Check the payload's integrity.  */
+  /*
+   * Check the payload's integrity.
+   * XXX Share with ipsec_fill_in_hash?
+   */
   log_debug_buf (LOG_MISC, 90, "responder_recv_HASH_SA_NONCE: SKEYID_a",
 		 isa->skeyid_a, isa->skeyid_len);
   prf = prf_alloc (isa->prf_type, isa->hash, isa->skeyid_a, isa->skeyid_len);
   if (!prf)
-    {
-      /* XXX Log?  */
-      goto cleanup;
-    }
+    goto cleanup;
   prf->Init (prf->prfctx);
   log_debug_buf (LOG_MISC, 90, "responder_recv_HASH_SA_NONCE: message_id",
 		 exchange->message_id, ISAKMP_HDR_MESSAGE_ID_LEN);
@@ -1013,80 +1091,26 @@ responder_recv_HASH_SA_NONCE (struct message *msg)
 		 hash_len - ISAKMP_GEN_SZ);
   if (memcmp (hash + ISAKMP_GEN_SZ, my_hash, hash_len - ISAKMP_GEN_SZ) != 0)
     {
-      /* XXX Is there a better notification type?  */
-      message_drop (msg, ISAKMP_NOTIFY_INVALID_HASH_INFORMATION, 0, 0, 0);
+      message_drop (msg, ISAKMP_NOTIFY_INVALID_HASH_INFORMATION, 0, 1, 0);
       goto cleanup;
     }
   free (my_hash);
   my_hash = 0;
 
-  if (message_negotiate_sa (msg, 0))
-    goto cleanup;
-
   kep = TAILQ_FIRST (&msg->payload[ISAKMP_PAYLOAD_KEY_EXCH]);
-  
-  for (sa = TAILQ_FIRST (&exchange->sa_list); sa; sa = TAILQ_NEXT (sa, next))
-    {
-      for (proto = TAILQ_FIRST (&sa->protos); proto;
-	   proto = TAILQ_NEXT (proto, link))
-	/* XXX we need to have some attributes per proto, not all per SA.  */
-	ipsec_decode_transform (msg, sa, proto, proto->chosen->p);
-
-      isa = sa->data;
-
-      /* Check the SA for reasonableness.  */
-
-      /* The group description is mandatory if we got a KEY_EXCH payload.  */
-      if (kep)
-	{
-	  if (!isa->group_desc)
-	    {
-	      message_drop (msg, ISAKMP_NOTIFY_NO_PROPOSAL_CHOSEN, 0, 0, 0);
-	      continue;
-	    }
-
-	  /* Also, all SAs must have equal groups.  */
-	  if (!group_desc)
-	    group_desc = isa->group_desc;
-	  else if (group_desc != isa->group_desc)
-	    {
-	      message_drop (msg, ISAKMP_NOTIFY_NO_PROPOSAL_CHOSEN, 0, 0, 0);
-	      continue;
-	    }
-	}
-
-      /* At least one SA was accepted.  */
-      retval = 0;
-    }
-
-  if (kep)
-    {
-      ie->group = group_get (group_desc);
-      if (!ie->group)
-	{
-	  /* XXX Notify peer?  */
-	  goto cleanup;
-	}
-    }
-
-  /* Copy out the initiator's nonce.  */
-  if (exchange_save_nonce (msg))
-    {
-      /* XXX Notify peer?  */
-      goto cleanup;
-    }
-
-  /* Handle the optional KEY_EXCH payload.  */
-  if (kep && ipsec_save_g_x (msg))
-    {
-      /* XXX Notify peer?  */
-      goto cleanup;
-    }
 
   /* Handle optional client ID payloads.  */
   idp = TAILQ_FIRST (&msg->payload[ISAKMP_PAYLOAD_ID]);
   if (idp)
     {
+      /* If IDci is there, IDcr must be too.  */
+      if (!TAILQ_NEXT (idp, link))
+	{
+	  /* XXX Is this a good notify type?  */
+	  message_drop (msg, ISAKMP_NOTIFY_PAYLOAD_MALFORMED, 0, 1, 0);
+	  return -1;
+	}
+	  
       ie->id_ci_sz = GET_ISAKMP_GEN_LENGTH (idp->p);
       ie->id_ci = malloc (ie->id_ci_sz);
       if (!ie->id_ci)
@@ -1102,25 +1126,187 @@ responder_recv_HASH_SA_NONCE (struct message *msg)
 		     ie->id_ci + ISAKMP_GEN_SZ, ie->id_ci_sz - ISAKMP_GEN_SZ);
 
       idp = TAILQ_NEXT (idp, link);
-      /* XXX Is IDci without IDcr valid?  */
-      if (idp)
+      ie->id_cr_sz = GET_ISAKMP_GEN_LENGTH (idp->p);
+      ie->id_cr = malloc (ie->id_cr_sz);
+      if (!ie->id_cr)
 	{
-	  ie->id_cr_sz = GET_ISAKMP_GEN_LENGTH (idp->p);
-	  ie->id_cr = malloc (ie->id_cr_sz);
-	  if (!ie->id_cr)
+	  log_error ("responder_recv_HASH_SA_NONCE: malloc (%d) failed",
+		     ie->id_cr_sz);
+	  goto cleanup;
+	}
+      memcpy (ie->id_cr, idp->p, ie->id_cr_sz);
+      idp->flags |= PL_MARK;
+      log_debug_buf (LOG_MISC, 90,
+		     "responder_recv_HASH_SA_NONCE: IDcr",
+		     ie->id_cr + ISAKMP_GEN_SZ, ie->id_cr_sz - ISAKMP_GEN_SZ);
+    }
+  else
+    {
+      /*
+       * If client identifiers are not present in the exchange,
+       * we fake them. RFC 2409 states:
+       *    The identities of the SAs negotiated in Quick Mode are
+       *    implicitly assumed to be the IP addresses of the ISAKMP
+       *    peers, without any constraints on the protocol or port
+       *    numbers allowed, unless client identifiers are specified
+       *    in Quick Mode.
+       *
+       * -- Michael Paddon (mwp@aba.net.au)
+       */
+
+      ie->flags = IPSEC_EXCH_FLAG_NO_ID;
+
+      /* Get initiator address.  */
+      msg->transport->vtbl->get_dst (msg->transport, &dst, &dstlen);
+      ie->id_ci_sz = ISAKMP_ID_DATA_OFF
+	+ sizeof ((struct sockaddr_in *)dst)->sin_addr.s_addr;
+      ie->id_ci = malloc (ie->id_ci_sz);
+      if (!ie->id_ci)
+	{
+	  log_error ("responder_recv_HASH_SA_NONCE: malloc (%d) failed",
+		     ie->id_ci_sz);
+	  goto cleanup;
+	}
+      SET_ISAKMP_ID_TYPE (ie->id_ci, IPSEC_ID_IPV4_ADDR);
+      memcpy (ie->id_ci + ISAKMP_ID_DATA_OFF,
+	      &((struct sockaddr_in *)dst)->sin_addr.s_addr,
+	      sizeof ((struct sockaddr_in *)dst)->sin_addr.s_addr);
+
+      /* Get responder address.  */
+      msg->transport->vtbl->get_src (msg->transport, &src, &srclen);
+      ie->id_cr_sz = ISAKMP_ID_DATA_OFF
+	+ sizeof ((struct sockaddr_in *)dst)->sin_addr.s_addr;
+      ie->id_cr = malloc (ie->id_cr_sz);
+      if (!ie->id_cr)
+	{
+	  log_error ("responder_recv_HASH_SA_NONCE: malloc (%d) failed",
+		     ie->id_cr_sz);
+	  goto cleanup;
+	}
+      SET_ISAKMP_ID_TYPE (ie->id_cr, IPSEC_ID_IPV4_ADDR);
+      memcpy (ie->id_cr + ISAKMP_ID_DATA_OFF,
+	      &((struct sockaddr_in *)src)->sin_addr.s_addr,
+	      sizeof ((struct sockaddr_in *)src)->sin_addr.s_addr);
+    }
+
+#if defined (USE_KEYNOTE)
+  if (message_negotiate_sa (msg, check_policy))
+    goto cleanup;
+#elif defined (HAVE_DLOPEN)
+  if (message_negotiate_sa (msg, libkeynote ? check_policy : 0))
+    goto cleanup;
+#else
+  if (message_negotiate_sa (msg, 0))
+    goto cleanup;
+#endif
+
+  for (sa = TAILQ_FIRST (&exchange->sa_list); sa; sa = TAILQ_NEXT (sa, next))
+    {
+      for (proto = TAILQ_FIRST (&sa->protos); proto;
+	   proto = TAILQ_NEXT (proto, link))
+	{
+	  /* XXX we need to have some attributes per proto, not all per SA.  */
+	  ipsec_decode_transform (msg, sa, proto, proto->chosen->p);
+	  if (proto->proto == IPSEC_PROTO_IPSEC_AH
+	      && !((struct ipsec_proto *)proto->data)->auth)
 	    {
-	      log_error ("responder_recv_HASH_SA_NONCE: malloc (%d) failed",
-			 ie->id_cr_sz);
-	      goto cleanup;
+	      log_print ("responder_recv_HASH_SA_NONCE: "
+			 "AH proposed without an algorithm attribute");
+	      message_drop (msg, ISAKMP_NOTIFY_NO_PROPOSAL_CHOSEN, 0, 1, 0);
+	      goto next_sa;
 	    }
-	  memcpy (ie->id_cr, idp->p, ie->id_cr_sz);
-	  idp->flags |= PL_MARK;
-	  log_debug_buf (LOG_MISC, 90,
-			 "responder_recv_HASH_SA_NONCE: IDcr",
-			 ie->id_cr + ISAKMP_GEN_SZ,
-			 ie->id_cr_sz - ISAKMP_GEN_SZ);
+	}
+
+      isa = sa->data;
+
+      /* The group description is mandatory if we got a KEY_EXCH payload.  */
+      if (kep)
+	{
+	  if (!isa->group_desc)
+	    {
+	      log_print ("responder_recv_HASH_SA_NONCE: "
+			 "KEY_EXCH payload without a group desc. attribute");
+	      message_drop (msg, ISAKMP_NOTIFY_NO_PROPOSAL_CHOSEN, 0, 1, 0);
+	      continue;
+	    }
+
+	  /* Also, all SAs must have equal groups.  */
+	  if (!group_desc)
+	    group_desc = isa->group_desc;
+	  else if (group_desc != isa->group_desc)
+	    {
+	      log_print ("responder_recv_HASH_SA_NONCE: "
+			 "differing group descriptions in one QM");
+	      message_drop (msg, ISAKMP_NOTIFY_NO_PROPOSAL_CHOSEN, 0, 1, 0);
+	      continue;
+	    }
+	}
+
+      /* At least one SA was accepted.  */
+      retval = 0;
+
+    next_sa:
+    }
+
+  if (kep)
+    {
+      ie->group = group_get (group_desc);
+      if (!ie->group)
+	{
+	  /*
+	   * XXX If the error was due to an out-of-range group description
+	   * we should notify our peer, but this should probably be done
+	   * by the attribute validation.  Is it?
+	   */
+	  goto cleanup;
 	}
     }
+
+  /* Copy out the initiator's nonce.  */
+  if (exchange_save_nonce (msg))
+    goto cleanup;
+
+  /* Handle the optional KEY_EXCH payload.  */
+  if (kep && ipsec_save_g_x (msg))
+    goto cleanup;
+
+  /*
+   * Try to find and set the connection name on the exchange.
+   */
+
+  /*
+   * Check for accepted identities as well as lookup the connection
+   * name and set it on the exchange.
+   */
+  name = connection_passive_lookup_by_ids (ie->id_ci, ie->id_cr);
+  if (name)
+    {
+      exchange->name = strdup (name);
+      if (!exchange->name)
+	{
+	  log_error ("responder_recv_HASH_SA_NONCE: strdup (\"%s\") failed", 
+		     name);
+	  goto cleanup;
+	}
+    }
+#ifndef USE_KEYNOTE
+#ifdef HAVE_DLOPEN
+  else if (!libkeynote)
+#else
+  else
+#endif
+    {
+      /*
+       * This code is no longer necessary, as policy determines acceptance
+       * of IDs/SAs. (angelos@openbsd.org)
+       *
+       * XXX Keep it if not USE_KEYNOTE for now, though. 
+       */
+
+      /* XXX Notify peer and log.  */
+      goto cleanup;
+    }
+#endif /* USE_KEYNOTE */
 
   return retval;
 
@@ -1170,27 +1356,18 @@ responder_send_HASH_SA_NONCE (struct message *msg)
     
   /* Add the SA payload(s) with the transform(s) that was/were chosen.  */
   if (message_add_sa_payload (msg))
-    {
-      /* XXX Log?  */
-      return -1;
-    }
+    return -1;
 
   /* Generate a nonce, and add it to the message.  */
   if (exchange_gen_nonce (msg, nonce_sz))
-    {
-      /* XXX Log?  */
-      return -1;
-    }
+    return -1;
 
   /* Generate optional KEY_EXCH payload.  This is known as PFS.  */
   if (ie->group && ipsec_gen_g_x (msg))
-    {
-      /* XXX Log?  */
-      return -1;
-    }
+    return -1;
 
   /* If the initiator client ID's were acceptable, just mirror them back.  */
-  if (ie->id_ci)
+  if (!(ie->flags & IPSEC_EXCH_FLAG_NO_ID))
     {
       sz = ie->id_ci_sz;
       id = malloc (sz);
@@ -1232,10 +1409,7 @@ responder_send_HASH_SA_NONCE (struct message *msg)
 		 isa->skeyid_a, isa->skeyid_len);
   prf = prf_alloc (isa->prf_type, hash->type, isa->skeyid_a, isa->skeyid_len);
   if (!prf)
-    {
-      /* XXX Log?  */
-      return -1;
-    }
+    return -1;
   prf->Init (prf->prfctx);
   log_debug_buf (LOG_MISC, 90, "responder_send_HASH_SA_NONCE: message_id",
 		 exchange->message_id, ISAKMP_HDR_MESSAGE_ID_LEN);
@@ -1277,11 +1451,15 @@ gen_g_xy (struct message *msg)
   ie->g_xy = malloc (ie->g_x_len);
   if (!ie->g_xy)
     {
-      /* XXX How to log and notify peer?  */
+      log_error ("gen_g_xy: malloc (%d) failed", ie->g_x_len);
       return;
     }
-  dh_create_shared (ie->group, ie->g_xy,
-		    exchange->initiator ? ie->g_xr : ie->g_xi);
+  if (dh_create_shared (ie->group, ie->g_xy,
+			exchange->initiator ? ie->g_xr : ie->g_xi))
+    {
+      log_print ("gen_g_xy: dh_create_shared failed");
+      return;
+    }
   log_debug_buf (LOG_MISC, 80, "gen_g_xy: g^xy", ie->g_xy, ie->g_x_len);
 }
 
@@ -1316,10 +1494,7 @@ responder_recv_HASH (struct message *msg)
 		 isa->skeyid_len);
   prf = prf_alloc (isa->prf_type, isa->hash, isa->skeyid_a, isa->skeyid_len);
   if (!prf)
-    {
-      /* XXX Log?  */
-      goto cleanup;
-    }
+    goto cleanup;
   prf->Init (prf->prfctx);
   prf->Update (prf->prfctx, "\0", 1);
   log_debug_buf (LOG_MISC, 90, "responder_recv_HASH: message_id",
@@ -1338,14 +1513,12 @@ responder_recv_HASH (struct message *msg)
 		 hash_len - ISAKMP_GEN_SZ);
   if (memcmp (hash + ISAKMP_GEN_SZ, my_hash, hash_len - ISAKMP_GEN_SZ) != 0)
     {
-      /* XXX Is there a better notification type?  */
-      message_drop (msg, ISAKMP_NOTIFY_INVALID_HASH_INFORMATION, 0, 0, 0);
+      message_drop (msg, ISAKMP_NOTIFY_INVALID_HASH_INFORMATION, 0, 1, 0);
       goto cleanup;
     }
   free (my_hash);
 
   sa_reference (msg->isakmp_sa);
-  exchange_reference (exchange);
   post_quick_mode (msg);
 
   return 0;

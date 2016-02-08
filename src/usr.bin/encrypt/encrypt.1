@@ -1,4 +1,4 @@
-.\"	$OpenBSD: encrypt.1,v 1.9 1998/11/11 23:01:42 aaron Exp $
+.\"	$OpenBSD: encrypt.1,v 1.12 1999/07/04 11:53:53 aaron Exp $
 .\"
 .\" Copyright (c) 1996, Jason Downs.  All rights reserved.
 .\"
@@ -23,9 +23,9 @@
 .\" OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 .\" SUCH DAMAGE.
 .\"
-.Dd August 7, 1996
+.Dd May 18, 1999
 .Dt ENCRYPT 1
-.Os OpenBSD
+.Os
 .Sh NAME
 .Nm encrypt
 .Nd encrypt passwords from the command line or standard input
@@ -35,10 +35,10 @@
 .Op Fl b Ar rounds
 .Op Fl m
 .Op Fl s Ar salt
-.Op Ar string
+.Op Fl p | Ar string
 .Nm makekey
 .Sh DESCRIPTION
-.Nm encrypt
+.Nm
 prints the encrypted form of
 .Ar string
 to the standard output.  This is mostly useful for encrypting passwords
@@ -57,6 +57,8 @@ Encrypt the string using Blowfish hashing with the specified
 .Ar rounds .
 .It Fl m
 Encrypt the string using MD5.
+.It Fl p
+Prompt for a single string with echo turned off.
 .It Fl s Ar salt
 Encrypt the string using DES, with the specified
 .Ar salt .
@@ -65,7 +67,7 @@ Encrypt the string using DES, with the specified
 If no
 .Ar string
 is specified,
-.Nm encrypt
+.Nm
 reads one string per line from standard input, encrypting each one
 with the chosen algorithm from above. In case that no specific algorithm
 was given as a command line option, the default will be looked up from
@@ -74,7 +76,7 @@ was given as a command line option, the default will be looked up from
 For MD5 and Blowfish a new random salt is automatically generated for each
 password.
 .Pp
-Specifying the 
+Specifying the
 .Ar string
 on the command line should be discouraged; using the
 standard input is more secure.
@@ -87,11 +89,11 @@ standard input is more secure.
 .Xr pw_getconf 3 ,
 .Xr passwd.conf 5
 .Sh HISTORY
-.Nm encrypt
+.Nm
 first appeared in
 .Ox 1.2 .
 .Pp
 A
 .Nm makekey
-command appeared in 
+command appeared in
 .At v7 .

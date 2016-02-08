@@ -1,8 +1,8 @@
-/*	$OpenBSD: isakmpd.c,v 1.9 1999/03/24 14:43:37 niklas Exp $	*/
-/*	$EOM: isakmpd.c,v 1.28 1999/03/24 11:01:06 niklas Exp $	*/
+/*	$OpenBSD: isakmpd.c,v 1.15 1999/10/01 14:09:20 niklas Exp $	*/
+/*	$EOM: isakmpd.c,v 1.38 1999/09/20 19:57:50 angelos Exp $	*/
 
 /*
- * Copyright (c) 1998 Niklas Hallqvist.  All rights reserved.
+ * Copyright (c) 1998, 1999 Niklas Hallqvist.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -46,23 +46,24 @@
 
 #include "app.h"
 #include "conf.h"
+#include "connection.h"
 #include "init.h"
 #include "log.h"
 #include "timer.h"
 #include "transport.h"
 #include "udp.h"
 #include "ui.h"
+#include "util.h"
+
+#if defined (USE_KEYNOTE) || defined (HAVE_DLOPEN)
+#include "policy.h"
+#endif
 
 /*
  * Set if -d is given, currently just for running in the foreground and log
  * to stderr instead of syslog.
  */
 int debug = 0;
-
-/*
- * Use -r seed to initalize random numbers to a deterministic sequence.
- */
-extern int regrand;
 
 /*
  * If we receive a SIGHUP signal, this flag gets set to show we need to
@@ -77,6 +78,13 @@ static int sighupped = 0;
  */
 static int sigusr1ed = 0;
 static char *report_file = "/var/run/isakmpd.report";
+
+/*
+ * If we receive a USR2 signal, this flag gets set to show we need to
+ * rehash our SA soft expiration timers to a uniform distribution.
+ * XXX Perhaps this is a really bad idea?
+ */
+static int sigusr2ed = 0;
 
 static void
 usage ()
@@ -104,7 +112,15 @@ parse_args (int argc, char *argv[])
       break;
     case 'D':
       if (sscanf (optarg, "%d=%d", &cls, &level) != 2)
-	log_print ("parse_args: -D argument unparseable: %s", optarg);
+	{
+	    if (sscanf (optarg, "A=%d", &level) == 1)
+	      {
+		  for (cls = 0; cls < LOG_ENDCLASS; cls++)
+		    log_debug_cmd (cls, level);
+	      }  
+	    else
+	      log_print ("parse_args: -D argument unparseable: %s", optarg);
+	}
       else
 	log_debug_cmd (cls, level);
       break;
@@ -125,7 +141,7 @@ parse_args (int argc, char *argv[])
 	exit (1);
       break;
     case 'r':
-      srandom (strtoul (optarg, NULL, 0));
+      srandom (strtoul (optarg, 0, 0));
       regrand = 1;
       break;
     case 'R':
@@ -144,10 +160,43 @@ parse_args (int argc, char *argv[])
 static void
 reinit (void)
 {
-  /* Reread config file.  */
-  conf_init ();
+  log_print ("SIGHUP recieved, reinitializing daemon.");
 
-  /* XXX Rescan interfaces.  */
+  /* 
+   * XXX Remove all(/some?) pending exchange timers? - they may not be 
+   *     possible to complete after we've re-read the config file.
+   *     User-initiated SIGHUP's maybe "authorizes" a wait until
+   *     next connection-check.
+   * XXX This means we discard exchange->last_msg, is this really ok?
+   */
+
+  /* Reinitialize PRNG if we are in deterministic mode.  */
+  if (regrand)
+    srandom (strtoul (optarg, 0, 0));
+
+  /* Reread config file. */
+  conf_reinit ();
+
+#if defined (USE_KEYNOTE) || defined (HAVE_DLOPEN)
+  /* Reread the policies. */
+  policy_init ();
+#endif
+
+  /* Reinitalize our connection list. */
+  connection_reinit ();
+
+  /*
+   * XXX Rescan interfaces.
+   *   transport_reinit (); 
+   *   udp_reinit ();
+   */
+
+  /*
+   * XXX "These" (non-existant) reinitializations should not be done.
+   *   cookie_reinit();
+   *   ui_reinit ();
+   *   sa_reinit ();
+   */
 
   sighupped = 0;
 }
@@ -187,13 +236,33 @@ sigusr1 (int sig)
   sigusr1ed = 1;
 }
 
+/* Rehash soft expiration timers on SIGUSR2.  */
+static void
+rehash_timers (void)
+{
+#if 0
+  /* XXX - not yet */
+  log_print ("SIGUSR2 received, rehasing soft expiration timers.");
+  
+  timer_rehash_timers ();
+#endif
+
+  sigusr2ed = 0;
+}
+
+static void
+sigusr2 (int sig)
+{
+  sigusr2ed = 1;
+}
+
 int
 main (int argc, char *argv[])
 {
   fd_set *rfds, *wfds;
   int n, m;
   size_t mask_size;
-  struct timeval tv, *timeout = &tv;
+  struct timeval tv, *timeout;
 
   parse_args (argc, argv);
   init ();
@@ -210,6 +279,9 @@ main (int argc, char *argv[])
 
   /* Report state on USR1 reception.  */
   signal (SIGUSR1, sigusr1);
+
+  /* Rehash soft expiration timers on USR2 reception.  */
+  signal (SIGUSR2, sigusr2);
 
   /* Allocate the file descriptor sets just big enough.  */
   n = getdtablesize ();
@@ -231,6 +303,10 @@ main (int argc, char *argv[])
       if (sigusr1ed)
 	report ();
 
+      /* and if someone sent SIGUSR2, do a timer rehash.  */
+      if (sigusr2ed)
+	rehash_timers ();
+      
       /* Setup the descriptors to look for incoming messages at.  */
       memset (rfds, 0, mask_size);
       n = transport_fd_set (rfds);
@@ -256,6 +332,7 @@ main (int argc, char *argv[])
 	n = m;
 
       /* Find out when the next timed event is.  */
+      timeout = &tv;
       timer_next_event (&timeout);
 
       n = select (n, rfds, wfds, 0, timeout);

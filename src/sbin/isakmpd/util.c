@@ -1,8 +1,8 @@
-/*	$OpenBSD: util.c,v 1.4 1999/02/26 03:52:40 niklas Exp $	*/
-/*	$EOM: util.c,v 1.13 1999/02/25 11:39:27 niklas Exp $	*/
+/*	$OpenBSD: util.c,v 1.6 1999/08/05 22:40:37 niklas Exp $	*/
+/*	$EOM: util.c,v 1.15 1999/08/05 15:00:04 niklas Exp $	*/
 
 /*
- * Copyright (c) 1998 Niklas Hallqvist.  All rights reserved.
+ * Copyright (c) 1998, 1999 Niklas Hallqvist.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -44,6 +44,12 @@
 #include "sysdep.h"
 #include "transport.h"
 #include "util.h"
+
+/*
+ * This is set to true in case of regression-test mode, when it will
+ * cause predictable random numbers be generated.
+ */
+int regrand = 0;
 
 /*
  * XXX These might be turned into inlines or macros, maybe even

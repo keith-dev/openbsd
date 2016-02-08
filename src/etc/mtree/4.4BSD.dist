@@ -1,4 +1,4 @@
-#	$OpenBSD: 4.4BSD.dist,v 1.70 1999/03/16 07:15:43 beck Exp $
+#	$OpenBSD: 4.4BSD.dist,v 1.84 1999/09/30 21:41:52 beck Exp $
 
 /set type=dir uname=root gname=wheel mode=0755
 # .
@@ -41,6 +41,27 @@ amd
 # ./etc/disklabels
 disklabels
 # ./etc/disklabels
+..
+
+# ./etc/isakmpd
+isakmpd
+
+# ./etc/isakmpd/ca
+ca
+# ./etc/isakmpd/ca
+..
+
+# ./etc/isakmpd/certs
+certs
+# ./etc/isakmpd/certs
+..
+
+# ./etc/isakmpd/private
+private		uname=root mode=0700
+# ./etc/isakmpd/private
+..
+
+# ./etc/isakmpd
 ..
 
 # ./etc/kerberosIV
@@ -195,6 +216,30 @@ ssl		gname=bin uname=root mode=0755
 
 # ./usr/lib
 lib
+
+# ./usr/lib/apache
+apache		gname=bin uname=root mode=0755
+
+
+# ./usr/lib/apache/modules
+modules		gname=bin uname=root mode=0755
+# ./usr/lib/apache/modules
+..
+
+# ./usr/lib/apache/include
+include		gname=bin uname=root mode=0755
+
+# ./usr/lib/apache/include/xml
+xml		gname=bin uname=root mode=0755
+# ./usr/lib/apache/include/xml
+..
+
+# ./usr/lib/apache/include
+..
+
+# ./usr/lib/apache
+..
+
 # ./usr/lib
 ..
 
@@ -206,6 +251,17 @@ lint
 # ./usr/libdata/lint
 ..
 
+# ./usr/libdata/perl5
+perl5
+
+# ./usr/libdata/perl5/site_perl
+site_perl
+# ./usr/libdata/perl5/site_perl
+..
+
+# ./usr/libdata/perl5
+..
+
 # ./usr/libdata
 ..
 
@@ -215,6 +271,11 @@ libexec
 # ./usr/libexec/lpr
 lpr
 # ./usr/libexec/lpr
+..
+
+# ./libexec/sendmail
+sendmail	type=dir uname=root gname=wheel mode=0755
+# ./libexec/sendmail
 ..
 
 # ./usr/libexec/uucp
@@ -245,6 +306,18 @@ lib
 
 # ./usr/local/libdata
 libdata
+
+# ./usr/local/libdata/perl5
+perl5
+
+# ./usr/local/libdata/perl5/site_perl
+site_perl
+# ./usr/local/libdata/perl5/site_perl
+..
+
+# ./usr/local/libdata/perl5
+..
+
 # ./usr/local/libdata
 ..
 
@@ -263,8 +336,8 @@ cat1
 
 # ./usr/local/man/cat2
 cat2
-# ./usr/local/man/cat2
 ..
+# ./usr/local/man/cat2
 
 # ./usr/local/man/cat3
 cat3
@@ -369,7 +442,7 @@ mdec
 ..
 
 # ./usr/obj		XXX
-obj
+obj		gname=wsrc mode=0775
 # ./usr/obj		XXX
 ..
 
@@ -944,12 +1017,24 @@ cat1
 
 # ./usr/share/man/cat2
 cat2
+
+# ./usr/share/man/cat2/i386
+i386
+
+# ./usr/share/man/cat2/i386
+..
+
 # ./usr/share/man/cat2
 ..
 
 # ./usr/share/man/cat3
 cat3
 # ./usr/share/man/cat3
+..
+
+# ./usr/share/man/cat3p
+cat3p
+# ./usr/share/man/cat3p
 ..
 
 # ./usr/share/man/cat4
@@ -1151,6 +1236,12 @@ wgrisc
 
 # ./usr/share/man/cat9
 cat9
+
+# ./usr/share/man/cat9/i386
+i386
+# ./usr/share/man/cat9/i386
+..
+
 # ./usr/share/man/cat9
 ..
 
@@ -1167,6 +1258,11 @@ man2
 # ./usr/share/man/man3
 man3
 # ./usr/share/man/man3
+..
+
+# ./usr/share/man/man3p
+man3p
+# ./usr/share/man/man3p
 ..
 
 # ./usr/share/man/man4
@@ -1522,7 +1618,7 @@ US               gname=bin uname=root mode=0555
 ..
 
 # ./usr/src
-#src
+#src		gname=wsrc mode=0775
 # ./usr/src
 #..
 
@@ -1724,7 +1820,7 @@ hidden           mode=0111
 ..
 
 # ./var/spool/lock
-lock		uname=uucp gname=daemon
+lock		uname=uucp gname=dialer mode=1775
 # ./var/spool/lock
 ..
 
@@ -1823,6 +1919,11 @@ vhosts  type=dir uname=root gname=daemon mode=755
 #./www/htdocs/manual/misc
 misc  type=dir uname=root gname=daemon mode=755
 #./www/htdocs/manual/misc
+..
+
+#./www/htdocs/manual/search
+search  type=dir uname=root gname=daemon mode=755
+#./www/htdocs/manual/search
 ..
 
 #./www/htdocs/manual

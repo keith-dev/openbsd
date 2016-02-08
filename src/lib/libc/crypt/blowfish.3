@@ -1,4 +1,4 @@
-.\" $OpenBSD: blowfish.3,v 1.2 1998/08/10 18:40:58 provos Exp $
+.\" $OpenBSD: blowfish.3,v 1.6 1999/09/23 04:12:00 alex Exp $
 .\" Copyright 1997 Niels Provos <provos@physnet.uni-hamburg.de>
 .\" All rights reserved.
 .\"
@@ -31,7 +31,7 @@
 .\"
 .Dd February 13, 1997
 .Dt BLOWFISH 3
-.Os "OpenBSD 2.0"
+.Os
 .Sh NAME
 .Nm blf_key,
 .Nm blf_enc,
@@ -65,7 +65,7 @@ function initializes the 4 8bit S-boxes and the 18 Subkeys with
 the hexadecimal digits of Pi. The key is used for further randomization.
 The first argument to
 .Fn blf_enc
-is the initalized state derived from
+is the initialized state derived from
 .Fn blf_key .
 The stream of 32-bit words is encrypted in Electronic Codebook
 Mode (ECB) and
@@ -74,15 +74,15 @@ must be even.
 .Fn blf_dec
 is used for decrypting Blowfish encrypted blocks.
 .Pp
-The functions 
+The functions
 .Fn blf_ecb_encrypt
 and
-.Fn blf_ecb_decrypt 
+.Fn blf_ecb_decrypt
 are used for encrypting and decrypting octet streams in ECB mode.
-The functions 
+The functions
 .Fn blf_cbc_encrypt
 and
-.Fn blf_cbc_decrypt 
+.Fn blf_cbc_decrypt
 are used for encrypting and decrypting octet streams in
 Cipherblock Chaining Mode (CBC).
 .Pp
@@ -97,8 +97,8 @@ are used for customization of the
 .Pa Blowfish
 cipher, e.g. for the blowfish password hashing function.
 .Sh SEE ALSO
-.Xr crypt 3 ,
 .Xr passwd 1 ,
+.Xr crypt 3 ,
 .Xr passwd 5
 .Sh AUTHOR
 Niels Provos <provos@physnet.uni-hamburg.de>

@@ -1,4 +1,4 @@
-/*	$OpenBSD: main.c,v 1.10 1998/06/02 20:46:40 deraadt Exp $	*/
+/*	$OpenBSD: main.c,v 1.17 1999/09/14 08:35:16 espie Exp $	*/
 /*	$NetBSD: main.c,v 1.12 1997/02/08 23:54:49 cgd Exp $	*/
 
 /*-
@@ -47,7 +47,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)main.c	8.1 (Berkeley) 6/6/93";
 #else
-static char rcsid[] = "$OpenBSD: main.c,v 1.10 1998/06/02 20:46:40 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: main.c,v 1.17 1999/09/14 08:35:16 espie Exp $";
 #endif
 #endif /* not lint */
 
@@ -64,32 +64,24 @@ static char rcsid[] = "$OpenBSD: main.c,v 1.10 1998/06/02 20:46:40 deraadt Exp $
 #include <stdio.h>
 #include <ctype.h>
 #include <string.h>
+#include <stddef.h>
+#include <err.h>
 #include "mdef.h"
 #include "stdd.h"
 #include "extern.h"
 #include "pathnames.h"
 
 ndptr hashtab[HASHSIZE];	/* hash table for macros etc.  */
-pbent buf[BUFSIZE];		/* push-back buffer	       */
-pbent *bufbase = buf;		/* the base for current ilevel */
-pbent *bbase[MAXINP];		/* the base for each ilevel    */
-pbent *bp = buf; 		/* first available character   */
-pbent *endpbb = buf+BUFSIZE;	/* end of push-back buffer     */
 stae mstack[STACKMAX+1]; 	/* stack of m4 machine         */
-char strspace[STRSPMAX+1];	/* string space for evaluation */
-char *ep = strspace;		/* first free char in strspace */
-char *endest= strspace+STRSPMAX;/* end of string space	       */
 int sp; 			/* current m4  stack pointer   */
 int fp; 			/* m4 call frame pointer       */
 FILE *infile[MAXINP];		/* input file stack (0=stdin)  */
 FILE *outfile[MAXOUT];		/* diversion array(0=bitbucket)*/
 FILE *active;			/* active output file pointer  */
-char *m4temp;			/* filename for diversions     */
 int ilevel = 0; 		/* input file stack pointer    */
 int oindex = 0; 		/* diversion index..	       */
 char *null = "";                /* as it says.. just a null..  */
 char *m4wraps = "";             /* m4wrap string default..     */
-char *progname;			/* name of this program        */
 char lquote[MAXCCHARS+1] = {LQUOTE};	/* left quote character  (`)   */
 char rquote[MAXCCHARS+1] = {RQUOTE};	/* right quote character (')   */
 char scommt[MAXCCHARS+1] = {SCOMMT};	/* start character for comment */
@@ -148,26 +140,24 @@ extern char *optarg;
 
 void macro();
 void initkwds();
-extern int getopt();
 
 int
 main(argc,argv)
 	int argc;
 	char *argv[];
 {
-	register int c;
-	register int n;
+	int c;
+	int n;
 	char *p;
-	register FILE *ifp;
-
-	progname = basename(argv[0]);
+	FILE *ifp;
 
 	if (signal(SIGINT, SIG_IGN) != SIG_IGN)
 		signal(SIGINT, onintr);
 
 	initkwds();
+	initspaces();
 
-	while ((c = getopt(argc, argv, "tD:U:o:")) != -1)
+	while ((c = getopt(argc, argv, "tD:U:o:I:")) != -1)
 		switch(c) {
 
 		case 'D':               /* define something..*/
@@ -177,6 +167,9 @@ main(argc,argv)
 			if (*p)
 				*p++ = EOS;
 			dodefine(optarg, p);
+			break;
+		case 'I':
+			addtoincludepath(optarg);
 			break;
 		case 'U':               /* undefine...       */
 			remhash(optarg, TOP);
@@ -190,9 +183,6 @@ main(argc,argv)
         argv += optind;
 
 	active = stdout;		/* default active output     */
-					/* filename for diversions   */
-	m4temp = mktemp(xstrdup(_PATH_DIVNAME));
-
 	bbase[0] = bufbase;
         if (!argc) {
  		sp = -1;		/* stack pointer initialized */
@@ -202,10 +192,10 @@ main(argc,argv)
 	} else
 		for (; argc--; ++argv) {
 			p = *argv;
-			if (p[0] == '-' && p[1] == '\0')
+			if (p[0] == '-' && p[1] == EOS)
 				ifp = stdin;
-			else if ((ifp = fopen(p, "r")) == NULL)
-				oops("%s: %s", p, strerror(errno));
+			else if ((ifp = fopen_trypath(p)) == NULL)
+				err(1, "%s", p);
 			sp = -1;
 			fp = 0; 
 			infile[0] = ifp;
@@ -230,12 +220,6 @@ main(argc,argv)
 					/* remove bitbucket if used  */
 	if (outfile[0] != NULL) {
 		(void) fclose(outfile[0]);
-		m4temp[UNIQUE] = '0';
-#ifdef vms
-		(void) remove(m4temp);
-#else
-		(void) unlink(m4temp);
-#endif
 	}
 
 	return 0;
@@ -258,7 +242,7 @@ do_look_ahead(t, token)
 	int i;
 
 	if (t != token[0])
-		oops("internal error", "");
+		errx(1, "internal error");
 
 	for (i = 1; *++token; i++) {
 		t = gpbc();
@@ -279,12 +263,13 @@ do_look_ahead(t, token)
  * macro - the work horse..
  */
 void
-macro() {
+macro()
+{
 	char token[MAXTOK], chars[2];
-	register char *s;
-	register int t, l;
-	register ndptr p;
-	register int  nlpar;
+	char *s;
+	int t, l;
+	ndptr p;
+	int  nlpar;
 
 	cycle {
 		t = gpbc();
@@ -323,7 +308,7 @@ macro() {
 		}
 		else if (t == EOF) {
 			if (sp > -1)
-				oops("unexpected end of input", "");
+				errx(1, "unexpected end of input");
 			if (ilevel <= 0)
 				break;			/* all done thanks.. */
 			--ilevel;
@@ -346,11 +331,14 @@ macro() {
 				} else if (LOOK_AHEAD(l,lquote)) {
 					nlpar++;
 					s = lquote;
-				} else if (l == EOF)
-					oops("missing right quote", "");
-				else {
+				} else if (l == EOF) {
+					if (nlpar == 1)
+						errx(1, "missing right quote.");
+					else
+						errx(1, "missing %d right quotes.", nlpar);
+				} else {
 					chars[0] = l;
-					chars[1] = '\0';
+					chars[1] = EOS;
 					s = chars;
 				}
 				if (nlpar > 0) {
@@ -406,7 +394,7 @@ macro() {
 				chrsave(EOS);
 
 				if (sp == STACKMAX)
-					oops("internal stack overflow", "");
+					errx(1, "internal stack overflow");
 
 				if (CALTYP == MACRTYPE)
 					expand((char **) mstack+fp+1, sp-fp);
@@ -444,19 +432,19 @@ macro() {
  */
 ndptr
 inspect(tp) 
-register char *tp;
+	char *tp;
 {
-	register char c;
-	register char *name = tp;
-	register char *etp = tp+MAXTOK;
-	register ndptr p;
-	register unsigned long h = 0;
+	char c;
+	char *name = tp;
+	char *etp = tp+MAXTOK;
+	ndptr p;
+	unsigned long h = 0;
 
 	while ((isalnum(c = gpbc()) || c == '_') && tp < etp)
 		h = (h << 5) + h + (*tp++ = c);
 	putback(c);
 	if (tp == etp)
-		oops("token too long", "");
+		errx(1, "token too long");
 
 	*tp = EOS;
 
@@ -470,14 +458,15 @@ register char *tp;
  * initkwds - initialise m4 keywords as fast as possible. 
  * This very similar to install, but without certain overheads,
  * such as calling lookup. Malloc is not used for storing the 
- * keyword strings, since we simply use the static  pointers
+ * keyword strings, since we simply use the static pointers
  * within keywrds block.
  */
 void
-initkwds() {
-	register int i;
-	register int h;
-	register ndptr p;
+initkwds()
+{
+	size_t i;
+	int h;
+	ndptr p;
 
 	for (i = 0; i < MAXKEYS; i++) {
 		h = hash(keywrds[i].knam);
@@ -489,3 +478,4 @@ initkwds() {
 		p->type = keywrds[i].ktyp | STATIC;
 	}
 }
+

@@ -1,6 +1,6 @@
 #!./perl
 
-# $RCSfile: term.t,v $$Revision: 1.2 $$Date: 1997/11/30 08:00:09 $
+# $RCSfile: term.t,v $$Revision: 1.3 $$Date: 1999/04/29 22:52:27 $
 
 # tests that aren't important enough for base.term
 

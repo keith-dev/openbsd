@@ -1,8 +1,8 @@
 #!./perl
 
-# $RCSfile: split.t,v $$Revision: 1.2 $$Date: 1997/11/30 08:05:42 $
+# $RCSfile: split.t,v $$Revision: 1.3 $$Date: 1999/04/29 22:52:38 $
 
-print "1..20\n";
+print "1..25\n";
 
 $FS = ':';
 
@@ -90,3 +90,24 @@ print $_ eq "Z" ? "ok 19\n" : "#$_\nnot ok 19\n";
 $_ = join('|', split(/.?/,  '',-1), 'Z');
 print $_ eq "Z" ? "ok 20\n" : "#$_\nnot ok 20\n";
 
+
+# Are /^/m patterns scanned?
+$_ = join '|', split(/^a/m, "a b a\na d a", 20);
+print $_ eq "| b a\n| d a" ? "ok 21\n" : "not ok 21\n# `$_'\n";
+
+# Are /$/m patterns scanned?
+$_ = join '|', split(/a$/m, "a b a\na d a", 20);
+print $_ eq "a b |\na d |" ? "ok 22\n" : "not ok 22\n# `$_'\n";
+
+# Are /^/m patterns scanned?
+$_ = join '|', split(/^aa/m, "aa b aa\naa d aa", 20);
+print $_ eq "| b aa\n| d aa" ? "ok 23\n" : "not ok 23\n# `$_'\n";
+
+# Are /$/m patterns scanned?
+$_ = join '|', split(/aa$/m, "aa b aa\naa d aa", 20);
+print $_ eq "aa b |\naa d |" ? "ok 24\n" : "not ok 24\n# `$_'\n";
+
+# Greedyness:
+$_ = "a : b :c: d";
+@ary = split(/\s*:\s*/);
+if (($res = join(".",@ary)) eq "a.b.c.d") {print "ok 25\n";} else {print "not ok 25\n# res=`$res' != `a.b.c.d'\n";}

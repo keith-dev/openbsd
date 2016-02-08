@@ -30,6 +30,7 @@
 .\"
 .Dd July 2, 1997
 .Dt KPROP 8
+.Os
 .Sh NAME
 .Nm kprop
 .Nd network utility for Kerberos database propagation
@@ -43,7 +44,7 @@ database to the Kerberos slaves, where it is received by the waiting
 .Xr kpropd 8
 daemon.
 .Pp
-The first parameter, 
+The first parameter,
 .Nm database ,
 is the name of the file out of which data is
 extracted.  This file is not the db-formatted Kerberos database,
@@ -55,7 +56,7 @@ information.  The database is a file created by the
 .Nm kdb_util slave dump
 command.  It is an ASCII representation of the Kerberos database.
 .Pp
-The second parameter that must be supplied is 
+The second parameter that must be supplied is
 .Nm slaves_file ,
 the name of the
 file on the Kerberos master that lists the Kerberos slaves to which kprop
@@ -125,5 +126,5 @@ and
 options are not implemented.
 .Sh SEE ALSO
 .Xr kerberos 1 ,
-.Xr kpropd 8 ,
-.Xr kdb_util 8
+.Xr kdb_util 8 ,
+.Xr kpropd 8

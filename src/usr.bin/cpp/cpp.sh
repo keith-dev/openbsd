@@ -1,5 +1,5 @@
 #!/bin/sh
-#	$OpenBSD: cpp.sh,v 1.3 1998/02/18 15:16:48 niklas Exp $
+#	$OpenBSD: cpp.sh,v 1.5 1999/06/17 23:27:17 espie Exp $
 
 #
 # Copyright (c) 1990 The Regents of the University of California.
@@ -44,7 +44,7 @@
 #	doesn't search gcc-include
 #
 PATH=/usr/bin:/bin
-ALST="-traditional -D__GNUC__ -$ "
+ALST="-traditional -$ -D__GNUC__"
 NSI=no
 OPTS=""
 INCS="-nostdinc"
@@ -74,7 +74,7 @@ do
 		INCS="$INCS $A"
 		;;
 	-U__GNUC__)
-		ALST=`echo $ALST | sed -e 's/-D__GNUC__//'`
+		ALST=`echo $ALST | sed -e s/-D__GNUC__//`
 		;;
 	-imacros|-include|-idirafter|-iprefix|-iwithprefix)
 		INCS="$INCS '$A' '$1'"

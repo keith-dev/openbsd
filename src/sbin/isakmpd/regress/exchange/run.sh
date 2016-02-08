@@ -1,9 +1,9 @@
 #!/bin/sh
-#	$OpenBSD: run.sh,v 1.4 1999/02/26 03:28:05 niklas Exp $
-#	$EOM: run.sh,v 1.4 1999/01/31 01:26:55 niklas Exp $
+#	$OpenBSD: run.sh,v 1.6 1999/08/05 22:40:47 niklas Exp $
+#	$EOM: run.sh,v 1.6 1999/08/05 15:02:33 niklas Exp $
 
 #
-# Copyright (c) 1998 Niklas Hallqvist.  All rights reserved.
+# Copyright (c) 1998, 1999 Niklas Hallqvist.  All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -42,7 +42,7 @@ FIFO=test.fifo
 TIMEOUT=2
 
 NC=${NC:-/usr/bin/nc}
-ISAKMPD=${ISAKMPD:-/usr/sbin/isakmpd}
+ISAKMPD=${ISAKMPD:-/sbin/isakmpd}
 
 progname=`basename $0`
 indent=`echo -n $progname |sed 's/./ /g'`

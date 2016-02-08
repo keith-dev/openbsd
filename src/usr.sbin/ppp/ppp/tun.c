@@ -23,12 +23,14 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	$Id: tun.c,v 1.3 1999/02/06 03:22:49 brian Exp $
+ *	$Id: tun.c,v 1.7 1999/08/05 10:32:14 brian Exp $
  */
 
 #include <sys/param.h>
+#ifdef __OpenBSD__
 #include <sys/socket.h>		/* For IFF_ defines */
 #include <net/if.h>		/* For IFF_ defines */
+#endif
 #include <netinet/in.h>
 #include <net/if_types.h>
 #include <net/if_tun.h>
@@ -36,10 +38,16 @@
 #include <netinet/ip.h>
 #include <sys/un.h>
 
+#include <errno.h>
 #include <string.h>
 #include <sys/ioctl.h>
-#include <sys/errno.h>
+#include <termios.h>
+#ifdef __NetBSD__
+#include <stdio.h>
+#include <unistd.h>
+#endif
 
+#include "layer.h"
 #include "mbuf.h"
 #include "log.h"
 #include "timer.h"
@@ -66,24 +74,37 @@
 void
 tun_configure(struct bundle *bundle, int mtu)
 {
+#ifdef __NetBSD__
+  struct ifreq ifr;
+  int s;
+  
+  s = socket(AF_INET, SOCK_DGRAM, 0);
+  
+  if (s < 0) {
+    log_Printf(LogERROR, "tun_configure: socket(): %s\n", strerror(errno));
+    return;
+  }
+
+  sprintf(ifr.ifr_name, "tun%d", bundle->unit);
+  ifr.ifr_mtu = mtu;
+  if (ioctl(s, SIOCSIFMTU, &ifr) < 0)
+      log_Printf(LogERROR, "tun_configure: ioctl(SIOCSIFMTU): %s\n",
+             strerror(errno));
+
+  close(s);
+#else
   struct tuninfo info;
 
   memset(&info, '\0', sizeof info);
   info.type = IFT_PPP;
-#ifndef NORADIUS
-  if (bundle->radius.valid && bundle->radius.mtu && bundle->radius.mtu < mtu) {
-    log_Printf(LogLCP, "Reducing MTU to radius value %lu\n",
-               bundle->radius.mtu);
-    info.mtu = bundle->radius.mtu;
-  } else
-#endif
-    info.mtu = mtu;
+  info.mtu = mtu;
   
-  info.baudrate = bundle->ifSpeed;
-#ifdef __OpenBSD__                                           
+  info.baudrate = bundle->bandwidth;
+#ifdef __OpenBSD__
   info.flags = IFF_UP|IFF_POINTOPOINT;                             
 #endif
   if (ioctl(bundle->dev.fd, TUNSIFINFO, &info) < 0)
     log_Printf(LogERROR, "tun_configure: ioctl(TUNSIFINFO): %s\n",
 	      strerror(errno));
+#endif
 }

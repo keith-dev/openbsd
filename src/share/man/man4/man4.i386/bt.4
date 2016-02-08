@@ -1,4 +1,4 @@
-.\"	$OpenBSD: bt.4,v 1.5 1998/07/12 09:55:14 downsj Exp $
+.\"	$OpenBSD: bt.4,v 1.7 1999/06/05 13:18:35 aaron Exp $
 .\"
 .\" Copyright (c) 1994 James A. Jegers
 .\" All rights reserved.
@@ -10,7 +10,7 @@
 .\"    notice, this list of conditions and the following disclaimer.
 .\" 2. The name of the author may not be used to endorse or promote products
 .\"    derived from this software without specific prior written permission
-.\" 
+.\"
 .\" THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
 .\" IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
 .\" OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
@@ -24,7 +24,7 @@
 .\"
 .Dd November 29, 1994
 .Dt BT 4 i386
-.Os 
+.Os
 .Sh NAME
 .Nm bt
 .Nd Buslogic SCSI adapter driver
@@ -33,7 +33,7 @@
 .Cd "scsibus* at bt?"
 .Sh DESCRIPTION
 The
-.Nm bt
+.Nm
 driver supports the following Buslogic SCSI adapters:
 .Pp
 .Bl -tag -width -offset indent -compact
@@ -50,8 +50,8 @@ to be set to the value "Primary" or "Alternate".  Some cards have
 an option called "Set host adapter IO port address as default" instead;
 for those boards you should set the value to "false".
 .Sh SEE ALSO
+.Xr cd 4 ,
+.Xr ch 4 ,
 .Xr intro 4 ,
 .Xr sd 4 ,
-.Xr st 4 ,
-.Xr cd 4 ,
-.Xr ch 4  
+.Xr st 4

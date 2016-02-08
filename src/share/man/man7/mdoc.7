@@ -1,4 +1,4 @@
-.\"	$OpenBSD: mdoc.7,v 1.8 1998/12/02 07:21:02 deraadt Exp $
+.\"	$OpenBSD: mdoc.7,v 1.12 1999/09/02 17:42:27 aaron Exp $
 .\"
 .\" Copyright (c) 1991, 1993
 .\"	The Regents of the University of California.  All rights reserved.
@@ -34,8 +34,8 @@
 .\"	@(#)mdoc.7	8.2 (Berkeley) 12/30/93
 .\"
 .Dd December 30, 1993
-.Os
 .Dt MDOC 7
+.Os
 .Sh NAME
 .Nm mdoc
 .Nd quick reference guide for the
@@ -294,6 +294,7 @@ Produces
 .It Li \&Ev Ta Yes Ta Yes Ta "Environment variable."
 .It Li \&Fa Ta Yes Ta Yes Ta "Function argument."
 .It Li \&Fd Ta Yes Ta Yes Ta "Function declaration."
+.It Li \&Ft Ta Yes Ta Yes Ta "Function type."
 .It Li \&Fn Ta Yes Ta Yes Ta "Function call (also .Fo and .Fc)."
 .It Li \&Ic Ta Yes Ta Yes Ta "Interactive command."
 .It Li \&Li Ta Yes Ta Yes Ta "Literal text."
@@ -328,6 +329,7 @@ Produces
 .It Li \&Bf Ta \&No Ta \&No Ta "Begin font mode."
 .It Li \&Bo Ta Yes Ta Yes Ta "Bracket open quote."
 .It Li \&Bq Ta Yes Ta Yes Ta "Bracket quote."
+.It Li \&Bsx Ta Yes Ta Yes Ta "BSDI BSD/OS."
 .It Li \&Bx Ta Yes Ta Yes Ta BSD .
 .It Li \&Db Ta \&No Ta \&No Ta "Debug (default is \\*qoff\\*q)"
 .It Li \&Dc Ta Yes Ta Yes Ta "Double close quote."
@@ -337,6 +339,7 @@ Produces
 .It Li \&Ef Ta \&No Ta \&No Ta "End font mode."
 .It Li \&Em Ta Yes Ta Yes Ta "Emphasis (traditional English)."
 .It Li \&Eo Ta Yes Ta Yes Ta "Enclose string open quote."
+.It Li \&Fx Ta Yes Ta Yes Ta FreeBSD .
 .It Li \&No Ta Yes Ta Yes Ta "Normal text (no-op)."
 .It Li \&Ns Ta Yes Ta Yes Ta "No space."
 .It Li \&Nx Ta Yes Ta Yes Ta NetBSD .
@@ -345,10 +348,10 @@ Produces
 .It Li \&Pf Ta Yes Ta \&No Ta "Prefix string."
 .It Li \&Po Ta Yes Ta Yes Ta "Parenthesis open quote."
 .It Li \&Pq Ta Yes Ta Yes Ta "Parentheses quote."
-.It Li \&Qc Ta Yes Ta Yes Ta "Strait Double close quote."
+.It Li \&Qc Ta Yes Ta Yes Ta "Straight double close quote."
 .It Li \&Ql Ta Yes Ta Yes Ta "Quoted literal."
-.It Li \&Qo Ta Yes Ta Yes Ta "Strait Double open quote."
-.It Li \&Qq Ta Yes Ta Yes Ta "Strait Double quote."
+.It Li \&Qo Ta Yes Ta Yes Ta "Straight double open quote."
+.It Li \&Qq Ta Yes Ta Yes Ta "Straight double quote."
 .It Li \&Re Ta \&No Ta \&No Ta "Reference end."
 .It Li \&Rs Ta \&No Ta \&No Ta "Reference start."
 .It Li \&Sc Ta Yes Ta Yes Ta "Single close quote."

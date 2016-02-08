@@ -39,7 +39,7 @@ char copyright[] =
 
 #ifndef lint
 /*static char sccsid[] = "from: @(#)sliplogin.c	5.6 (Berkeley) 3/2/91";*/
-static char rcsid[] = "$Id: sliplogin.c,v 1.9 1998/07/10 08:06:55 deraadt Exp $";
+static char rcsid[] = "$Id: sliplogin.c,v 1.11 1999/08/06 20:41:08 deraadt Exp $";
 #endif /* not lint */
 
 /*
@@ -104,7 +104,7 @@ static char *restricted_environ[] = {
 
 int	unit;
 int	speed;
-int	uid;
+uid_t	uid;
 char	loginargs[BUFSIZ];
 char	loginfile[MAXPATHLEN];
 char	loginname[BUFSIZ];
@@ -227,8 +227,8 @@ main(argc, argv)
 	s = getdtablesize();
 	for (fd = 3 ; fd < s ; fd++)
 		(void) close(fd);
-	if (strlen(argv[0]) > MAXLOGNAME)
-		errx(1, "login %s too long", argv[0]);
+	if (argc > 1 && strlen(argv[1]) > MAXLOGNAME)
+		errx(1, "login %s too long", argv[1]);
 	openlog(name, LOG_PID, LOG_DAEMON);
 	uid = getuid();
 	if (argc > 1) {

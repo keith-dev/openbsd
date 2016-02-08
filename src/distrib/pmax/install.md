@@ -1,4 +1,4 @@
-#	$OpenBSD: install.md,v 1.11 1999/04/01 21:30:41 deraadt Exp $
+#	$OpenBSD: install.md,v 1.14 1999/10/12 06:02:01 maja Exp $
 #	$NetBSD: install.md,v 1.3.2.5 1996/08/26 15:45:28 gwr Exp $
 #
 #
@@ -45,8 +45,7 @@ TMPWRITEABLE=/tmp/writeable
 KERNFSMOUNTED=/tmp/kernfsmounted
 
 # Machine-dependent install sets
-MDSETS=""
-# TTT MDSETS="xbin xman xinc xcon"
+MDSETS=kernel
 
 md_set_term() {
 	if [ ! -z "$TERM" ]; then
@@ -115,11 +114,20 @@ md_get_cddevs() {
 	grep "^rz[0-6] " < /kern/msgbuf | cut -d" " -f1 | sort -u
 }
 
+md_get_ifdevs() {
+	# return available network devices
+	grep "^le[0-9] " < /kern/msgbuf | cut -d" " -f1 | sort -u
+}
+
 md_get_partition_range() {
     # return range of valid partition letters
     echo "[a-p]"
 }
 
+
+md_questions() {
+	:
+}
 
 md_installboot() {
 	# $1 is the root disk
@@ -194,12 +202,6 @@ __md_prep_disklabel_1
 
 	disklabel -W ${_disk}
 	disklabel -f /tmp/fstab.${_disk} -E ${_disk}
-}
-
-md_copy_kernel() {
-	echo -n "Copying kernel..."
-	cp -p /bsd /mnt/bsd
-	echo "done."
 }
 
 md_welcome_banner() {

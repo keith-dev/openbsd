@@ -30,14 +30,15 @@
 .\" SUCH DAMAGE.
 .\"
 .\"     from: @(#)tan.3	5.1 (Berkeley) 5/2/91
-.\"	$Id: tan.3,v 1.2 1995/10/28 00:57:02 deraadt Exp $
+.\"	$Id: tan.3,v 1.5 1999/07/09 13:35:27 aaron Exp $
 .\"
 .Dd May 2, 1991
 .Dt TAN 3
 .Os
 .Sh NAME
-.Nm tan
-.Nd tangent function
+.Nm tan ,
+.Nm tanf
+.Nd tangent functions
 .Sh SYNOPSIS
 .Fd #include <math.h>
 .Ft double
@@ -47,7 +48,7 @@
 .Sh DESCRIPTION
 The
 .Fn tan
-and 
+and
 .Fn tanf
 functions compute the tangent of
 .Fa x
@@ -67,10 +68,10 @@ function returns the tangent value.
 .Xr atan2 3 ,
 .Xr cos 3 ,
 .Xr cosh 3 ,
+.Xr math 3 ,
 .Xr sin 3 ,
 .Xr sinh 3 ,
-.Xr tanh 3 ,
-.Xr math 3
+.Xr tanh 3
 .Sh STANDARDS
 The
 .Fn tan

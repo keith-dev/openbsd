@@ -1,4 +1,4 @@
-.\"	$OpenBSD: stdio.3,v 1.5 1998/03/09 06:36:30 deraadt Exp $
+.\"	$OpenBSD: stdio.3,v 1.10 1999/07/09 13:35:23 aaron Exp $
 .\"
 .\" Copyright (c) 1990, 1991, 1993
 .\"	The Regents of the University of California.  All rights reserved.
@@ -33,7 +33,7 @@
 .\"
 .Dd April 19, 1994
 .Dt STDIO 3
-.Os BSD 4
+.Os
 .Sh NAME
 .Nm stdio
 .Nd standard input/output library functions
@@ -111,10 +111,10 @@ At program startup, three streams are predefined and need not be
 opened explicitly:
 .Bl -bullet -compact -offset indent
 .It
-.Em standard input 
+.Em standard input
 (for reading conventional input),
 .It
-.Em standard output 
+.Em standard output
 (for writing conventional output), and
 .It
 .Em standard error
@@ -134,7 +134,7 @@ device, as determined by the
 function.
 In fact,
 .Em all
-freshly-opened streams that refer to terminal devices
+freshly opened streams that refer to terminal devices
 default to line buffering, and
 pending output to such streams is written automatically
 whenever such an input stream is read.
@@ -156,10 +156,7 @@ The
 .Nm stdio
 library is a part of the library
 .Xr libc
-and routines are automatically loaded as needed by the compilers
-.Xr cc 1
-and
-.Xr pc 1 .
+and routines are automatically loaded as needed by the compiler.
 The
 .Tn SYNOPSIS
 sections of the following manual pages indicate which include files
@@ -208,8 +205,8 @@ and
 exist and will be used if the macro
 definitions are explicitly removed.
 .Sh SEE ALSO
-.Xr open 2 ,
 .Xr close 2 ,
+.Xr open 2 ,
 .Xr read 2 ,
 .Xr write 2
 .Sh BUGS

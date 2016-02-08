@@ -1,4 +1,4 @@
-.\"	$OpenBSD: aucat.1,v 1.4 1998/09/23 04:32:34 aaron Exp $
+.\"	$OpenBSD: aucat.1,v 1.7 1999/07/04 11:53:51 aaron Exp $
 .\"
 .\" Copyright (c) 1997 Kenneth Stailey.  All rights reserved.
 .\"
@@ -34,27 +34,31 @@
 .\" SUCH DAMAGE.
 .\"
 .\"
-.Dd Jan 2, 1997
+.Dd January 2, 1997
 .Dt AUCAT 1
-.Os OpenBSD 2.0
+.Os
 .Sh NAME
 .Nm aucat
-.Nd concatenate and play audio files 
+.Nd concatenate and play audio files
 .Sh SYNOPSIS
 .Nm aucat
 .Op Ar
 .Sh DESCRIPTION
 The
-.Nm aucat
-utility reads files sequentially, writing them to /dev/audio.
+.Nm
+utility reads files sequentially, writing them to
+.Pa /dev/audio .
 The
 .Ar file
 operands are processed in command line order.  If a Sun .au header is
-detected it is skipped over and not copied to /dev/audio. Otherwise, the
-entire file is copied to /dev/audio.
+detected it is skipped over and not copied to
+.Pa /dev/audio .
+Otherwise, the
+entire file is copied to
+.Pa /dev/audio .
 .Pp
 The
-.Nm aucat
+.Nm
 utility exits 0 on success or >0 if an error occurred.
 .Sh SEE ALSO
 .Xr audio 4

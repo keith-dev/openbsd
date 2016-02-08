@@ -1,4 +1,4 @@
-.\"	$OpenBSD: boot_pmax.8,v 1.10 1998/11/28 19:56:32 aaron Exp $
+.\"	$OpenBSD: boot_pmax.8,v 1.14 1999/07/08 19:58:30 deraadt Exp $
 .\"	$NetBSD: boot_pmax.8,v 1.1 1995/04/25 23:55:11 mellon Exp $
 .\"
 .\" Copyright (c) 1990, 1991 The Regents of the University of California.
@@ -37,15 +37,16 @@
 .\" SUCH DAMAGE.
 .\"
 .Dd July 23, 1991
-.Dt BOOT_PMAX 8
+.Dt BOOT_PMAX 8 pmax
 .Os
 .Sh NAME
 .Nm boot
 .Nd
+.Tn sparc-specific
 system bootstrapping procedures
 .Sh DESCRIPTION
 The
-.Tn OpenBSD
+.Ox
 kernel is started by placing it at the beginning of physical memory
 and transferring to the entry point.
 Since the system is not reenterable,
@@ -59,7 +60,7 @@ and unless this fails, the system will resume multi-user operations.
 .Pp
 .Ss Cold starts
 At power up, all DECstation ROMs consult the
-.Ev haltaction
+.Nm haltaction
 environment
 variable in EEPROM to determine whether or not to attempt an automatic
 boot.  If this
@@ -73,7 +74,7 @@ the ROM attempts to autoboot.
 On the DECstation 2100 and 3100, the path used for automatic booting is
 stored in the
 .Nm bootpath
-environment variable.  The path is made up of a 
+environment variable.  The path is made up of a
 device type specifier (e.g., rz, tz, mop or tftp), followed by
 a triplet in the form (x,y,z), followed by a filename to load.
 .Pp
@@ -99,20 +100,17 @@ must be specified.  Generally, the kernel is named
 An example
 .Nm bootpath
 setting would be:
-.nf
-.sp 1
-.ce 1
-setenv bootpath rz(0,1,0)bsd
-.fi
+.Pp
+.Dl setenv bootpath rz(0,1,0)bsd
 .Pp
 For automatic boots, the ROM automatically passes a
 .Fl a
 argument to the bootloader,
 requesting that
-.Tn OpenBSD
+.Ox
 attempt to come up to multi-user mode.  At the boot ROM prompt,
 the user may boot
-.Tn OpenBSD
+.Ox
 with either the
 .Nm auto
 or the
@@ -125,7 +123,7 @@ argument is passed to the kernel, requesting a multi-user boot; otherwise
 the
 .Fl s
 argument is passed, requesting that
-.Tn OpenBSD
+.Ox
 boot to single user mode.
 .Pp
 When either the
@@ -139,9 +137,8 @@ with the
 .Fl f
 flag, followed by the path of the kernel to boot, as described above.
 For example:
-.sp 1
-.ce 1
-boot -f rz(0,4,0)bsd.new
+.Pp
+.Dl boot -f rz(0,4,0)bsd.new
 .Pp
 On TurboChannel machines (all DECstation 5000 models), the bootpath
 is specified in the
@@ -153,11 +150,8 @@ when setting the
 .Nm boot
 environment variable, the filename and arguments
 must be enclosed in quotes.  For example:
-.nf
-.sp 1
-.ce 1
-setenv boot "3/rz4/bsd -a"
-.fi
+.Pp
+.Dl setenv boot "3/rz4/bsd -a"
 .Pp
 The device from which to boot is specified as the TurboChannel slot
 number, a TurboChannel-option-specific device name, and a path to the
@@ -181,7 +175,7 @@ devices, the option-specific protocol identifier is either mop or tftp.
 Filename requirements are as for the DECstation 2100 and 3100.
 .Pp
 To start
-.Tn OpenBSD
+.Ox
 from the boot prompt, the
 .Nm boot
 command must be used.  With no arguments, this simply boots the default
@@ -193,9 +187,8 @@ If no
 environment variable is set, or if an alternate kernel is to be
 booted, the path of that kernel may be specified after the boot command as
 described above, and any arguments may be passed similarly.  For example:
-.sp 1
-.ce 1
-boot 3/rz4/bsd.new -a
+.Pp
+.Dl boot 3/rz4/bsd.new -a
 .Sh SEE ALSO
 .Xr crash 8 ,
 .Xr fsck 8 ,
@@ -203,11 +196,6 @@ boot 3/rz4/bsd.new -a
 .Xr init 8 ,
 .Xr newfs 8 ,
 .Xr rc 8 ,
+.Xr reboot 8 ,
 .Xr shutdown 8 ,
-.Xr syslogd 8 ,
-.Xr reboot 8
-.Sh HISTORY
-The
-.Nm
-command is
-.Ud .
+.Xr syslogd 8

@@ -17,10 +17,8 @@
  * IMPLIED WARRANTIES, INCLUDING, WITHOUT LIMITATION, THE IMPLIED
  * WARRANTIES OF MERCHANTIBILITY AND FITNESS FOR A PARTICULAR PURPOSE.
  *
- * $Id: lcp.c,v 1.10 1999/03/29 08:20:44 brian Exp $
+ * $Id: lcp.c,v 1.16 1999/06/09 20:32:37 brian Exp $
  *
- * TODO:
- *	o Limit data field length by MRU
  */
 
 #include <sys/param.h>
@@ -36,6 +34,7 @@
 #include <termios.h>
 #include <unistd.h>
 
+#include "layer.h"
 #include "ua.h"
 #include "defs.h"
 #include "command.h"
@@ -46,7 +45,7 @@
 #include "iplist.h"
 #include "lcp.h"
 #include "throughput.h"
-#include "lcpproto.h"
+#include "proto.h"
 #include "descriptor.h"
 #include "lqr.h"
 #include "hdlc.h"
@@ -425,20 +424,23 @@ LcpSendConfigReq(struct fsm *fp)
   }
 
   mp = &lcp->fsm.bundle->ncp.mp;
-  if (mp->cfg.enddisc.class != 0 && !REJECTED(lcp, TY_ENDDISC)) {
+  if (mp->cfg.enddisc.class != 0 && IsEnabled(mp->cfg.negenddisc) &&
+      !REJECTED(lcp, TY_ENDDISC)) {
     *o->data = mp->cfg.enddisc.class;
     memcpy(o->data+1, mp->cfg.enddisc.address, mp->cfg.enddisc.len);
     INC_LCP_OPT(TY_ENDDISC, mp->cfg.enddisc.len + 3, o);
   }
 
-  fsm_Output(fp, CODE_CONFIGREQ, fp->reqid, buff, (u_char *)o - buff);
+  fsm_Output(fp, CODE_CONFIGREQ, fp->reqid, buff, (u_char *)o - buff,
+             MB_LCPOUT);
 }
 
 void
 lcp_SendProtoRej(struct lcp *lcp, u_char *option, int count)
 {
   /* Don't understand `option' */
-  fsm_Output(&lcp->fsm, CODE_PROTOREJ, lcp->fsm.reqid, option, count);
+  fsm_Output(&lcp->fsm, CODE_PROTOREJ, lcp->fsm.reqid, option, count,
+             MB_LCPOUT);
 }
 
 static void
@@ -456,7 +458,7 @@ LcpSendTerminateAck(struct fsm *fp, u_char id)
   if (p && p->dl->state == DATALINK_CBCP)
     cbcp_ReceiveTerminateReq(p);
 
-  fsm_Output(fp, CODE_TERMACK, id, NULL, 0);
+  fsm_Output(fp, CODE_TERMACK, id, NULL, 0, MB_LCPOUT);
 }
 
 static void
@@ -645,42 +647,14 @@ LcpDecodeConfig(struct fsm *fp, u_char *cp, int plen, int mode_type,
       switch (mode_type) {
       case MODE_REQ:
 	lcp->his_accmap = accmap;
-        if ((lcp->want_accmap | accmap) != lcp->want_accmap) {
-          lcp->want_accmap |= accmap;	/* restrict our requested map */
-          lcp->fsm.reqid++;		/* Invalidate the current REQ */
-          /*
-           * If we've already sent a REQ, we want to make sure that
-           * we don't end up sending out a new REQ that doesn't contain
-           * the data that the last one with the same id contained.
-           * This also means that we ignore the peers response to our
-           * last REQ due to an invalid fsm id (even though it's really
-           * correct), probably resulting in a REQ timeout and a resend
-           * with the new accmap and the new id.
-           * If we're already in ST_ACKRCVD at this point, we simply end
-           * up thinking that we negotiated the new accmap - which is ok
-           * as we just end up escaping stuff that the peer probably
-           * can't receive anyway.
-           */
-        }
-        if (lcp->want_accmap == accmap) {
-	  memcpy(dec->ackend, cp, 6);
-	  dec->ackend += 6;
-        } else {
-          /* NAK with what we now want */
-          *dec->nakend++ = *cp;
-          *dec->nakend++ = 6;
-          ua_htonl(&lcp->want_accmap, dec->nakend);
-          dec->nakend += 4;
-        }
+	memcpy(dec->ackend, cp, 6);
+	dec->ackend += 6;
 	break;
       case MODE_NAK:
-	lcp->want_accmap |= accmap;
+	lcp->want_accmap = accmap;
 	break;
       case MODE_REJ:
-        if (lcp->want_accmap)
-          log_Printf(LogWARN, "Peer is rejecting our ACCMAP.... bad news !\n");
-        else
-	  lcp->his_reject |= (1 << type);
+	lcp->his_reject |= (1 << type);
 	break;
       }
       break;
@@ -903,9 +877,7 @@ LcpDecodeConfig(struct fsm *fp, u_char *cp, int plen, int mode_type,
 	  dec->ackend += 2;
 	} else {
 #ifdef OLDMST
-	  /*
-	   * MorningStar before v1.3 needs NAK
-	   */
+	  /* MorningStar before v1.3 needs NAK */
 	  memcpy(dec->nakend, cp, 2);
 	  dec->nakend += 2;
 #else
@@ -931,9 +903,7 @@ LcpDecodeConfig(struct fsm *fp, u_char *cp, int plen, int mode_type,
 	  dec->ackend += 2;
 	} else {
 #ifdef OLDMST
-	  /*
-	   * MorningStar before v1.3 needs NAK
-	   */
+	  /* MorningStar before v1.3 needs NAK */
 	  memcpy(dec->nakend, cp, 2);
 	  dec->nakend += 2;
 #else
@@ -1083,6 +1053,7 @@ LcpDecodeConfig(struct fsm *fp, u_char *cp, int plen, int mode_type,
       break;
 
     case TY_ENDDISC:
+      mp = &lcp->fsm.bundle->ncp.mp;
       log_Printf(LogLCP, "%s %s\n", request,
                 mp_Enddisc(cp[2], cp + 3, length - 3));
       switch (mode_type) {
@@ -1090,7 +1061,9 @@ LcpDecodeConfig(struct fsm *fp, u_char *cp, int plen, int mode_type,
         if (!p) {
           log_Printf(LogLCP, " ENDDISC rejected - not a physical link\n");
 	  goto reqreject;
-        } else if (length-3 < sizeof p->dl->peer.enddisc.address &&
+        } else if (!IsAccepted(mp->cfg.negenddisc))
+	  goto reqreject;
+        else if (length-3 < sizeof p->dl->peer.enddisc.address &&
                    cp[2] <= MAX_ENDDISC_CLASS) {
           p->dl->peer.enddisc.class = cp[2];
           p->dl->peer.enddisc.len = length-3;
@@ -1110,7 +1083,7 @@ LcpDecodeConfig(struct fsm *fp, u_char *cp, int plen, int mode_type,
         }
 	break;
 
-      case MODE_NAK:	/* Treat this as a REJ, we don't vary our disc */
+      case MODE_NAK:	/* Treat this as a REJ, we don't vary our disc (yet) */
       case MODE_REJ:
 	lcp->his_reject |= (1 << type);
 	break;
@@ -1177,9 +1150,11 @@ reqreject:
   }
 }
 
-void
-lcp_Input(struct lcp *lcp, struct mbuf *bp)
+extern struct mbuf *
+lcp_Input(struct bundle *bundle, struct link *l, struct mbuf *bp)
 {
   /* Got PROTO_LCP from link */
-  fsm_Input(&lcp->fsm, bp);
+  mbuf_SetType(bp, MB_LCPIN);
+  fsm_Input(&l->lcp.fsm, bp);
+  return NULL;
 }

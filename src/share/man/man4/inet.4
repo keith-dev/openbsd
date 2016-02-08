@@ -35,7 +35,7 @@
 .\"
 .Dd June 5, 1993
 .Dt INET 4
-.Os BSD 4.2
+.Os
 .Sh NAME
 .Nm inet
 .Nd Internet protocol family
@@ -82,7 +82,7 @@ Sockets may be created with the local address
 .Dv INADDR_ANY
 to effect
 .Dq wildcard
-matching on incoming messages. 
+matching on incoming messages.
 The address in a
 .Xr connect 2
 or
@@ -157,11 +157,11 @@ Get interface network mask.
 .Sh SEE ALSO
 .Xr ioctl 2 ,
 .Xr socket 2 ,
+.Xr icmp 4 ,
+.Xr ip 4 ,
 .Xr netintro 4 ,
 .Xr tcp 4 ,
-.Xr udp 4 ,
-.Xr ip 4 ,
-.Xr icmp 4
+.Xr udp 4
 .Rs
 .%T "An Introductory 4.3 BSD Interprocess Communication Tutorial"
 .%B PS1

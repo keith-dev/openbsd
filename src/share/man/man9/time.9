@@ -1,3 +1,4 @@
+.\"	$OpenBSD: time.9,v 1.6 1999/09/02 17:28:07 espie Exp $
 .\"	$NetBSD: time.9,v 1.1 1995/11/25 21:24:53 perry Exp $
 .\"
 .\" Copyright (c) 1994 Christopher G. Demetriou
@@ -31,7 +32,7 @@
 .\"
 .Dd November 13, 1995
 .Dt TIME 9
-.Os OpenBSD
+.Os
 .Sh NAME
 .Nm boottime ,
 .Nm mono_time ,
@@ -70,7 +71,7 @@ The
 .Va runtime
 variable holds the time that the system switched to the
 current process.
-It is set after each context switch, 
+It is set after each context switch,
 and is updated when the system time is adjusted with
 .Xr settimeofday 2 .
 Because
@@ -105,11 +106,11 @@ and
 .Va runtime
 may be read and written without special precautions.
 .Sh SEE ALSO
-.Xr hz 9 ,
+.Xr settimeofday 2 ,
 .Xr hardclock 9 ,
+.Xr hz 9 ,
 .Xr inittodr 9 ,
-.Xr microtime 9 ,
-.Xr settimeofday 2
+.Xr microtime 9
 .Sh BUGS
 .Va Runtime
 should not be updated when the system time is

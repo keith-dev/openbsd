@@ -1,4 +1,4 @@
-/*	$OpenBSD: man.c,v 1.12 1998/11/16 06:28:32 deraadt Exp $	*/
+/*	$OpenBSD: man.c,v 1.15 1999/10/18 01:46:36 aaron Exp $	*/
 /*	$NetBSD: man.c,v 1.7 1995/09/28 06:05:34 tls Exp $	*/
 
 /*
@@ -44,7 +44,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)man.c	8.17 (Berkeley) 1/31/95";
 #else
-static char rcsid[] = "$OpenBSD: man.c,v 1.12 1998/11/16 06:28:32 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: man.c,v 1.15 1999/10/18 01:46:36 aaron Exp $";
 #endif
 #endif /* not lint */
 
@@ -100,7 +100,7 @@ main(argc, argv)
 	if (argv[1] == NULL && strcmp(basename(__progname), "help") == 0) {
 		static char *nargv[3];
 		nargv[0] = "man";
-		nargv[1] = "man";
+		nargv[1] = "help";
 		nargv[2] = NULL;
 		argv = nargv;
 		argc = 2;
@@ -163,7 +163,7 @@ main(argc, argv)
 	if (!f_cat && !f_how && !f_where)
 		if (!isatty(1))
 			f_cat = 1;
-		else if ((pager = getenv("PAGER")) != NULL)
+		else if ((pager = getenv("PAGER")) != NULL && (*pager != '\0'))
 			pager = check_pager(pager);
 		else
 			pager = _PATH_PAGER;
@@ -691,7 +691,7 @@ check_pager(name)
 		save = name;
 		/* allocate space to add the "-s" */
 		if (!(name =
-		    malloc((u_int)(strlen(save) + sizeof("-s") + 1))))
+		    malloc((u_int)(strlen(save) + 1 + sizeof("-s")))))
 			err(1, NULL);
 		(void)sprintf(name, "%s %s", save, "-s");
 	}

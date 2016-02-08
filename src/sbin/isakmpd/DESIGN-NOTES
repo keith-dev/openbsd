@@ -1,5 +1,5 @@
-$OpenBSD: DESIGN-NOTES,v 1.8 1999/04/05 21:03:12 niklas Exp $
-$EOM: DESIGN-NOTES,v 1.40 1999/04/02 01:08:54 niklas Exp $
+$OpenBSD: DESIGN-NOTES,v 1.15 1999/08/26 22:30:46 niklas Exp $
+$EOM: DESIGN-NOTES,v 1.48 1999/08/12 22:34:25 niklas Exp $
 
 General coding conventions
 --------------------------
@@ -31,15 +31,17 @@ TOC
 ---
 app.c		Application support.
 asn.c		ASN.1 utilities.
-asn_useful.c	ASN.1. useful structure defintions.
+asn_useful.c	ASN.1 useful structure defintions.
 cert.c		Dispatching certificate related functions to the according
 		module based on the encoding.
 conf.c		Interface to isakmpd configuration.
-constants.c	Value to name map of constants..
+connection.c	Handle the high-level connection concept.
+constants.c	Value to name map of constants.
 cookie.c	Cookie generation.
 crypto.c	Generic cryptography.
 dh.c		Diffie-Hellman exchange logic.
 doi.c		Generic handling of different DOIs.
+dyn.c		Support for dynamic loading of executable code.
 exchange.c	Exchange state machinery.
 exchange_num.cst
 		Some constants used for exhange scripts.
@@ -51,7 +53,10 @@ gmp_util.c	Utilities to ease interfaceing to GMP.
 hash.c		Generic hash handling.
 if.c		Network interface details.
 ike_auth.c	IKE authentication method abstraction.
+ike_aggressive.c
+		IKE's aggressive mode exchange logic.
 ike_main_mode.c	IKE's main mode exchange logic.
+ike_phase_1.c	Common parts IKE's main & aggressive modes' exchange logic.
 ike_quick_mode.c
 		IKE's quick mode logic.
 init.c		Initialization of all modules (might be autogenned in the 
@@ -63,6 +68,7 @@ isakmp_doi.c	The ISAKMP pseudo-DOI.
 isakmp_fld.fld	Generic packet layout.
 isakmp_num.cst	ISAKMP constants.
 isakmpd.c	Main loop.
+libcrypto.c	Deal with both statically and dynamically loaded libcrypto.
 log.c		Logging of exceptional or informational messages.
 math_2n.c	Polynomial math.
 math_ec2n.c	Elliptic curve math.
@@ -71,6 +77,7 @@ message.c	Generic message handling.
 pf_encap.c	Interface with PF_ENCAP sockets (for use with IPSEC).
 pf_key_v2.c	Interface with PF_KEY sockets (for use with IPSEC).
 pkcs.c		PKCS#1: RSA Encryption Standard.
+policy.c	Keynote glue.
 prf.c		Pseudo random functions.
 sa.c		Handling of Security Associations (SAs).
 sysdep/*/sysdep.c
@@ -85,6 +92,7 @@ x509.c		Encoding/Decoding X509 Certificates and related structures.
 Central datatypes
 -----------------
 
+struct connection	Persistent connections.
 struct constant_map	A map from constants to their ASCII names.
 struct crypto_xf	A crypto class
 struct doi		The DOI function switch
@@ -129,7 +137,7 @@ Phase 2 exchange	Cookie pair + message ID.
 Generic SA		Cookie pair + message ID + SPI. 
 
 However it would be really nice to have a name of any SA that is natural
-to use for human beings, for things like deleteing SAs manually.  The simplest
+to use for human beings, for things like deleting SAs manually.  The simplest
 ID would be the struct sa address.  Another idea would be some kind of sequence
 number, either global or per-destination.  Right now I have introduced a name
 for SAs, non-unique, that binds together SAs and their configuration
@@ -202,12 +210,14 @@ User control
 
 In order to control the daemon you send commands through a FIFO called
 isakmpd.fifo.  The commands are one-letter codes followed by arguments.
-For now, only three commands are planned:
+For now, only five such commands are implemented:
 
-c	connect		Establish a named SA with a peer
-d	delete		Delete a SA
-D	debug		Toggle some debug flag
+c	connect		Establish a connection with a peer
+C	configure	Add or remove configuration entries.
+d	delete		Delete an SA given cookies and message-IDs
+D	debug		Change logging level for a debug class
 r	report		Report status information of the daemon
+t	teardown	Teardown a connection
 
 For example you can do:
 
@@ -223,7 +233,27 @@ D 0 99
 The report command is just an "r", and results in a list of active exchanges
 and security associations.
 
+The "C" command takes 3 subcommands: set, rm and rms, for adding and removing
+entries + remove complete sections respectively.  Examples:
+
+C set [Net-A]:Address=192.168.0.0
+C rm [Net-A]:Address
+C rms [Net-A]
+
+All these commands are atomic, i.e. they are not collected into larger
+transactions, which there should be a way to do, but currently isn't.
+
 I am thinking about adding a "q" command for quit.
+
+In addition to giving commands over the FIFO, you may send signals to the
+daemon. Currently two such signals are implemented:
+         
+SIGHUP 	  Re-initialize isakmpd (not fully implemented yet)
+SIGUSR1   Generate a report, much as the "r" FIFO command.
+
+For example, to generate a report, you do: 
+
+unix# kill -USR1 <PID of isakmpd process>
 
 The constant descriptions
 -------------------------
@@ -282,12 +312,36 @@ case RECORD_A_SZ == RECORD_B_FIELD_F_OFF.  All this data are collected
 in struct field arrays which makes it possible to symbolically print out
 entire payloads in readable form via field_dump_payload.
 
+Configuration
+-------------
+
+Internally isakmpd uses a section-tag-value triplet database for
+configuration.  Currently this happen to map really well to the
+configuration file format, which on the other hand does not map
+equally well to humans.  It is envisioned that the configuration
+database should be dynamically modifiable, and through a lot of
+differnet mechanisms.  Therefore we have designed an API for this
+purpose.
+
+int conf_begin ();
+int conf_set (int transaction, char *section, char *tag, char *value,
+	      int override);
+int conf_remove (int transaction, char *section, char *tag);
+int conf_remove_section (int transaction, char *section);
+int conf_end (int transaction, int commit);
+
+The caller will always be responsible for the memory management of the
+passed strings, conf_set will copy the values, and not use the original
+strings after it has returned.  Return value will be zero on success and
+non-zero otherwise.  Note that the conf_remove* functions consider not
+finding anything to remove as failure.
+
 Identification
 --------------
 
 ISAKMP supports a lot of identity types, and we should too of course.
 
-* Main mode
+* Phase 1, Main mode or Aggressive mode
 
 Today when we connect we do it based on the peer's IP address.  That does not
 automatically mean we should do policy decision based on IPs, rather we should
@@ -311,11 +365,39 @@ Accept=		yes
 Which means niklas.hallqvist.se is allowed to negotiate SAs with us, but
 noone else.
 
-* Quick mode
+* Phase 2, Quick mode
 
 In quick mode the identities are implicitly the IP addresses of the peers,
 which must mean the IP addresses actually used for the ISAKMP tunnel.
 Otherwise we today support IPV4_ADDR & IPV4_ADDR_SUBNET as ID types.
+
+X509-Certificates
+-----------------
+To use RSA Signature mode you are required to generate certificates.
+This can be done with ssleay, see man ssl. But the X509 certificates
+require a subjectAltname extension that can either be an IPV4 address,
+a User-FQDN or just FQDN.  ssleay can not create those extension,
+insead use the x509test program in regress/x509 to modify an existing
+certificate.  It will insert the subjectAltname extension and sign it
+with the provided private Key.  The resulting certificate then needs
+to be stored in the directory pointed to by "Certs-directory" in
+section "X509-certificates".
+
+Dynamic loading
+---------------
+
+There is some rudimentary support to dynamically load executable code.
+What you need to do in order to load code, is to make sure that your
+system supports dlopen(3) and then you write scripts like this:
+
+static struct dynload_script my_script[] = {
+  { LOAD, "libmine.so", &libmine },
+  { SYM, "MySymbol", &MySymbol }
+};
+
+and then call dyn_load (my_script).  Then libmine.so will be loaded, and
+external references resolved, and then the specified symbols will be looked
+up and their value put in the given pointer.
 
 License to use
 --------------

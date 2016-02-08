@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.2 1998/10/13 23:09:52 marc Exp $
+#	$OpenBSD: Makefile,v 1.4 1999/10/05 22:34:45 espie Exp $
 LIB=	install
 SRCS=	file.c plist.c str.c exec.c global.c pen.c
 CFLAGS+= ${DEBUG}

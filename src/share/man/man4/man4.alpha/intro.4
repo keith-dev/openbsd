@@ -1,4 +1,4 @@
-.\"     $OpenBSD: intro.4,v 1.2 1998/03/10 04:50:51 millert Exp $
+.\"     $OpenBSD: intro.4,v 1.4 1999/07/09 13:35:44 aaron Exp $
 .\"
 .\" Copyright (c) 1998 The OpenBSD Project
 .\" All Rights Reserved.
@@ -64,12 +64,12 @@ The autoconfiguration system is described in
 .Xr autoconf 4 .
 A list of the supported devices is given below.
 .Sh SEE ALSO
+.Xr autoconf 4 ,
 .Xr cd 4 ,
 .Xr sd 4 ,
 .Xr ss 4 ,
 .Xr st 4 ,
-.Xr autoconf 4 ,
-.Xr config 8 .
+.Xr config 8
 .Sh SUPPORTED SYSTEMS
 The following Alpha system architectures and models are supported:
 .Bl -tag -width speaker
@@ -77,13 +77,13 @@ The following Alpha system architectures and models are supported:
 .It AlphaStation 200/250/255/400/500 and AXPpci systems.
 .El
 .Pp
-The DECpc AXP 150 systems (EISA-bus PC-like systems), 
+The DECpc AXP 150 systems (EISA-bus PC-like systems),
 Alpha "server" systems (other than perhaps the AlphaServer 400, which
 might actually be an AlphaStation 400 in disguise), and multiprocessor
 Alpha systems are not supported.
 .Sh HISTORY
 The
 Alpha
-.Nm 
+.Nm
 first appeared with
 .Ox 2.3 .

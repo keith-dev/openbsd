@@ -1,4 +1,4 @@
-.\"	$OpenBSD: getrusage.2,v 1.4 1999/02/27 21:56:23 deraadt Exp $
+.\"	$OpenBSD: getrusage.2,v 1.6 1999/06/29 14:10:01 aaron Exp $
 .\"
 .\" Copyright (c) 1985, 1991, 1993
 .\"	The Regents of the University of California.  All rights reserved.
@@ -35,7 +35,7 @@
 .\"
 .Dd June 4, 1993
 .Dt GETRUSAGE 2
-.Os BSD 4
+.Os
 .Sh NAME
 .Nm getrusage
 .Nd get information about resource utilization
@@ -133,16 +133,16 @@ priority process becoming runnable or because the current process
 exceeded its time slice.
 .El
 .Sh NOTES
-The numbers 
+The numbers
 .Fa ru_inblock
-and 
+and
 .Fa ru_oublock
 account only for real
 I/O; data supplied by the caching mechanism is charged only
 to the first process to read or write the data.
 .Sh ERRORS
 .Fn getrusage
-returns -1 on error.
+returns \-1 on error.
 The possible errors are:
 .Bl -tag -width Er
 .It Bq Er EINVAL

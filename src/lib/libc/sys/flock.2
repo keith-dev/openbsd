@@ -1,4 +1,4 @@
-.\"	$OpenBSD: flock.2,v 1.8 1999/02/27 21:56:15 deraadt Exp $
+.\"	$OpenBSD: flock.2,v 1.11 1999/06/29 14:09:54 aaron Exp $
 .\"	$NetBSD: flock.2,v 1.5 1995/02/27 12:32:32 cgd Exp $
 .\"
 .\" Copyright (c) 1983, 1991, 1993
@@ -36,7 +36,7 @@
 .\"
 .Dd December 11, 1993
 .Dt FLOCK 2
-.Os BSD 4.2
+.Os
 .Sh NAME
 .Nm flock
 .Nd "apply or remove an advisory lock on an open file"
@@ -82,7 +82,7 @@ locks and
 locks.
 At any time multiple shared locks may be applied to a file,
 but at no time are multiple exclusive, or both shared and exclusive,
-locks allowed simultaneously on a file.  
+locks allowed simultaneously on a file.
 .Pp
 A shared lock may be
 .Em upgraded
@@ -115,7 +115,7 @@ lose its lock.
 Processes blocked awaiting a lock may be awakened by signals.
 .Sh RETURN VALUES
 Zero is returned if the operation was successful;
-on an error a -1 is returned and an error code is left in
+on an error a \-1 is returned and an error code is left in
 the global location
 .Va errno .
 .Sh ERRORS
@@ -139,12 +139,12 @@ have an invalid value.
 The referenced descriptor is not of the correct type.
 .El
 .Sh SEE ALSO
-.Xr open 2 ,
 .Xr close 2 ,
 .Xr dup 2 ,
 .Xr execve 2 ,
 .Xr fcntl 2 ,
-.Xr fork 2
+.Xr fork 2 ,
+.Xr open 2
 .Sh HISTORY
 The
 .Fn flock

@@ -1,4 +1,4 @@
-.\" $OpenBSD: vpn.8,v 1.14 1999/03/15 15:35:36 deraadt Exp $
+.\" $OpenBSD: vpn.8,v 1.26 1999/10/07 20:50:30 angelos Exp $
 .\" Copyright 1998 Niels Provos <provos@physnet.uni-hamburg.de>
 .\" All rights reserved.
 .\"
@@ -29,7 +29,7 @@
 .\"
 .\" Manual page, using -mandoc macros
 .\"
-.Dd Feb 9, 1999
+.Dd February 9, 1999
 .Dt VPN 8
 .Os
 .Sh NAME
@@ -42,20 +42,21 @@ linked via a cryptographically secured tunnel to the security gateway of
 the other subnet.
 .Xr ipsec 4
 is used to provide the necessary network-layer cryptographic services.
-This document describes the configuration process for setting up a 
+This document describes the configuration process for setting up a
 .Nm VPN .
 .Pp
-Briefly, creating a VPN consists of the following steps
+Briefly, creating a VPN consists of the following steps:
+.Pp
 .Bl -enum -compact
 .It
-Choose a key exchange method: manual keyed or 
-.Xr photurisd 8
+Choose a key exchange method: manual keyed or
+.Xr photurisd 8 .
 .It
-Create a Security Association (SA) for each endpoint
+Create a Security Association (SA) for each endpoint.
 .It
-Create the appropriate IPSec flows
-.It 
-Configure your firewall rules appropriately
+Create the appropriate IPSec flows.
+.It
+Configure your firewall rules appropriately.
 .El
 .Ss Choosing a key exchange method
 There are currently two key exchange methods available:
@@ -67,17 +68,20 @@ manual (symmetric shared secret)
 .Xr photurisd 8
 .El
 .Pp
-At present VPNs between private networks must use manual keying.
+At present VPNs between private (RFC 1918) networks must use
+manual keying, as
 .Xr photurisd 8
-may only be used in situations where both
-security gateways are within their protected network ranges.
+can only be used if the IP address of the security gateway actually
+falls within the range of addresses being tunnelled to.
+This can clearly never occur if the addresses being tunnelled to
+are non-routable private networks.
 .Ss Generating Manual Keys
 The shared secret symmetric keys used to create a VPN can
-be any hexadecimal value, so long as both sides of the connection use 
-the same values. Since the security of the VPN is based on these keys 
+be any hexadecimal value, so long as both sides of the connection use
+the same values. Since the security of the VPN is based on these keys
 being unguessable, it is very important that the keys be chosen using a
 strong random source. One practical method of generating them
-is by using the 
+is by using the
 .Xr random 4
 device. To produce 160 bits of randomness, for example, do a:
 .Bd -literal
@@ -100,9 +104,25 @@ Use of DES or SKIPJACK as an encryption algorithm is not recommended
 Furthermore, recent attacks on SKIPJACK have shown severe weaknesses
 in its structure.
 .Pp
-Note that when using DES (or 3DES), the most significant bit of each
-byte is ignored. This means that 8 bytes are required to form a 56-bit
-DES key, and 24 bytes are required to form a 168 bit 3DES key.
+Note that DES requires 8 bytes to form a 56-bit key and 3DES requires 24 bytes
+to form its 168-bit key. This is because the most significant bit of each byte
+is ignored by both algorithms.
+.Ss Enabling the Appropriate Kernel Operations
+.Xr ipsec 4
+operations must be first enabled using
+.Xr sysctl 8 .
+Before creating security associations, or performing
+encryption (ESP) or authentication (AH) operation, ensure the appropriate
+kernel operation has been enabled:
+.Bd -literal
+sysctl -w net.inet.esp.enable=1
+sysctl -w net.inet.ah.enable=1
+.Ed
+.Pp
+For more permanent operation, these options should be enabled in your
+.Xr sysctl.conf 5 .
+.Pp
+
 .Ss Creating Security Associations
 Before the IPSec flows can be defined, two Security Associations (SAs)
 must be defined on each end of the VPN, e.g.:
@@ -111,7 +131,7 @@ ipsecadm new esp -spi SPI_OUT -src A_EXTERNAL_IP
          -dst B_EXTERNAL_IP -forcetunnel
          -enc 3des -auth sha1
          -key ENCRYPTION_KEY -authkey AUTHENTICATION_KEY
-   
+
 ipsecadm new esp -spi SPI_IN -src B_EXTERNAL_IP
          -dst A_EXTERNAL_IP -forcetunnel
          -enc 3des -auth sha1
@@ -121,7 +141,7 @@ ipsecadm new esp -spi SPI_IN -src B_EXTERNAL_IP
 .Ss Creating IPSec Flows
 Both IPsec gateways need to configure
 .Xr ipsec 4
-routes with the 
+routes with the
 .Xr ipsecadm 8
 tool:
 .Pp
@@ -157,58 +177,58 @@ ipsecadm flow -dst A_EXTERNAL_IP -spi SPI_OUT -proto esp
                A_EXTERNAL_IP 255.255.255.255
 .Ed
 .Pp
-Furthermore, unless manual keying is used, 
+Furthermore, unless manual keying is used,
 both security gateways need to start the
 .Xr photurisd 8
 key management daemon with the
 .Fl v
-flag and make sure it is configured properly on both sides to 
+flag and make sure it is configured properly on both sides to
 provide the required security services (typically, encryption and
 authentication).
 .Ss Configuring Firewall Rules
 .Xr ipf 8
 needs to be configured such that all packets from the outside are blocked
-by default. Only successfully IPSec-processed packets (from the 
-.Nm enc0 
-interface), or 
-key management packets (for 
-.Xr photurisd 8 , 
+by default. Only successfully IPSec-processed packets (from the
+.Xr enc0 4
+interface), or
+key management packets (for
+.Xr photurisd 8 ,
 .Tn UDP
 packets with source and destination ports of 468) should be allowed to pass.
-.Pp 
+.Pp
 The
 .Xr ipf 5
-rules for a tunnel which uses encryption (the ESP IPsec protocol) and 
+rules for a tunnel which uses encryption (the ESP IPsec protocol) and
 .Xr photurisd 8
 on security gateway A might look like this:
 .Bd -literal
-# ed0 is the only interface going to the outside.
-block in log on ed0 from any to any
-block out log on ed0 from any to any
+# ne0 is the only interface going to the outside.
+block in log on ne0 from any to any
+block out log on ne0 from any to any
 block in log on enc0 from any to any
 
 # Passing in encrypted traffic from security gateways
-pass in proto sipp-esp from gatewB/32 to gatewA/32
-pass out proto sipp-esp from gatewA/32 to gatewB/32
+pass in proto esp from gatewB/32 to gatewA/32
+pass out proto esp from gatewA/32 to gatewB/32
 
 # Passing in traffic from the designated subnets.
 pass in on enc0 from netB/netBmask to netA/netAmask
 
 # Passing in Photuris traffic from the security gateways
-pass in on ed0 proto udp from gatewB/32 port = 468 to gatewA/32 port = 468
-pass out on ed0 proto udp from gatewA/32 port = 468 to gatewB/32 port = 468
+pass in on ne0 proto udp from gatewB/32 port = 468 to gatewA/32 port = 468
+pass out on ne0 proto udp from gatewA/32 port = 468 to gatewB/32 port = 468
 .Ed
 .Pp
 If there are no other
 .Xr ipf 5
 rules, the "quick" clause can be added to the last three rules.
 .Sh EXAMPLES
-To create a manual keyed VPN between two class C networks using 
+To create a manual keyed VPN between two class C networks using
 3DES encryption and the following IP addresses:
 .Pp
 .Bd -literal
  A_INTERNAL_IP = 10.0.50.1
- A_EXTERNAL_IP = 192.168.1.254 
+ A_EXTERNAL_IP = 192.168.1.254
  B_EXTERNAL_IP = 192.168.2.1
  B_INTERNAL_IP = 10.0.99.1
 .Ed
@@ -232,12 +252,12 @@ c9fff55b501206a6607fb45c392c5e1568db2aaf
 Create the Security Associations (on both endpoints):
 .Pp
 .Bd -literal
-# /sbin/ipsecadm new esp -src 198.168.2.1 -dst 198.168.1.254 \e\ 
+# /sbin/ipsecadm new esp -src 192.168.2.1 -dst 192.168.1.254 \e\ 
    -forcetunnel -spi 1000 -enc 3des -auth sha1 \e\ 
    -key 596a96cc7bf9108cd896f33c44aedc8aa8acf0b8c74acd62 \e\ 
    -authkey c9fff55b501206a6607fb45c392c5e1568db2aaf
 
-# /sbin/ipsecadm new esp -src 198.168.1.254 -dst 198.168.2.1  \e\ 
+# /sbin/ipsecadm new esp -src 192.168.1.254 -dst 192.168.2.1  \e\ 
    -forcetunnel -spi 1001 -enc 3des -auth sha1 \e\ 
    -key 596a96cc7bf9108cd896f33c44aedc8aa8acf0b8c74acd62 \e\ 
    -authkey c9fff55b501206a6607fb45c392c5e1568db2aaf
@@ -281,14 +301,14 @@ Create the ipsec flow on machine B:
 .It
 Configure the firewall rules on machine A:
 .Bd -literal
-# ed0 is the only interface going to the outside.
-block in log on ed0 from any to any
-block out log on ed0 from any to any
+# ne0 is the only interface going to the outside.
+block in log on ne0 from any to any
+block out log on ne0 from any to any
 block in log on enc0 from any to any
 
 # Passing in encrypted traffic from security gateways
-pass in proto sipp-esp from 192.168.2.1/32 to 192.168.1.254/32
-pass out proto sipp-esp from 192.168.1.254/32 to 192.168.2.1/32
+pass in proto esp from 192.168.2.1/32 to 192.168.1.254/32
+pass out proto esp from 192.168.1.254/32 to 192.168.2.1/32
 
 # Passing in traffic from the designated subnets.
 pass in quick on enc0 from 10.0.99.0/24 to 10.0.50.0/24
@@ -296,14 +316,14 @@ pass in quick on enc0 from 10.0.99.0/24 to 10.0.50.0/24
 .It
 Configure the firewall rules on machine B:
 .Bd -literal
-# ed0 is the only interface going to the outside.
-block in log on ed0 from any to any
-block out log on ed0 from any to any
+# ne0 is the only interface going to the outside.
+block in log on ne0 from any to any
+block out log on ne0 from any to any
 block in log on enc0 from any to any
 
 # Passing in encrypted traffic from security gateways
-pass in proto sipp-esp from 192.168.1.254/32 to 192.168.2.1/32
-pass out proto sipp-esp from 192.168.2.1/32 to 192.168.1.254/32
+pass in proto esp from 192.168.1.254/32 to 192.168.2.1/32
+pass out proto esp from 192.168.2.1/32 to 192.168.1.254/32
 
 # Passing in traffic from the designated subnets.
 pass in quick on enc0 from 10.0.50.0/24 to 10.0.99.0/24
@@ -319,18 +339,18 @@ Photuris configuration file
 Firewall configuration file
 .El
 .Sh BUGS
-When using 
 .Xr photurisd 8
-in VPN mode, both of the security gateways IP addresses must fall within
-their protected netranges.
-In situations where the gateway IP is outside the desired netrange, such 
-as with private networks (RFC 1597), manual keying must be used.
+can not be used in VPN mode unless both of the security gateway IP addresses
+lie within the network ranges being tunnelled to.
+In situations where the gateway IP is outside the desired netrange, such
+as with private (RFC 1918) networks, manual keying must be used.
 This should be fixed in the next release.
 .Sh SEE ALSO
-.Xr ipf 8 ,
-.Xr ipsecadm 8 ,
+.Xr enc 4 ,
 .Xr ipsec 4 ,
-.Xr isakmpd 8 ,
 .Xr options 4 ,
 .Xr ipf 5 ,
+.Xr ipf 8 ,
+.Xr ipsecadm 8 ,
+.Xr isakmpd 8 ,
 .Xr photurisd 8

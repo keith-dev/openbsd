@@ -1,4 +1,4 @@
-.\"	$OpenBSD: sleep.3,v 1.4 1997/04/25 18:45:24 kstailey Exp $
+.\"	$OpenBSD: sleep.3,v 1.7 1999/08/31 16:52:34 aaron Exp $
 .\"
 .\" Copyright (c) 1986, 1991, 1993
 .\"	The Regents of the University of California.  All rights reserved.
@@ -59,15 +59,15 @@ A similar but less compatible function can be obtained with a single
 .Xr select 2 ;
 such a function would not restart after signals, and also does not interfere
 with other uses of
-.Xr setitimer
+.Xr setitimer 2
 (not that
 .Fn sleep
-interferes with interval timers anymore.)
-.Sh RETURN VALUE
-If the 
+interferes with interval timers anymore).
+.Sh RETURN VALUES
+If the
 .Fn sleep
 function returns because the requested time has elapsed, the value
-returned will be zero.  If the 
+returned will be zero.  If the
 .Fn sleep
 function returns due to the delivery of a signal, the value returned
 will be the unslept amount (the request time minus the time actually
@@ -82,9 +82,9 @@ slept) in seconds.
 .Xr pause 3 ,
 .Xr usleep 3
 .Sh STANDARDS
-The 
-.Fn sleep 
-function conforms to 
+The
+.Fn sleep
+function conforms to
 .St -p1003.1-90 .
 .Sh HISTORY
 A

@@ -92,12 +92,18 @@ httpd \- Apache hypertext transfer protocol server
 [
 .B \-S
 ] 
+[
+.B \-t
+] 
+[
+.B \-T
+]
 
 .SH DESCRIPTION
 .B httpd
 is the Apache HyperText Transfer Protocol (HTTP) server program. It is
 designed to be run as a standalone daemon process. When used like this
-is will create a pool of child processes to handle requests. To stop
+it will create a pool of child processes to handle requests. To stop
 it, send a TERM signal to the initial (parent) process. The PID of
 this process is written to a file as given in the configuration file.
 Alternatively 
@@ -163,6 +169,11 @@ virtualhost settings).
 Run syntax tests for configuration files only. The program immediately exits
 after these syntax parsing with either a return code of 0 (Syntax OK) or
 return code not equal to 0 (Syntax Error).
+.TP
+.B \-T
+Same as option 
+.B \-t
+but does not check the configured document roots. 
 .TP
 .B \-X
 Run in single-process mode, for internal debugging purposes only; the daemon

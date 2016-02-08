@@ -124,7 +124,7 @@ crash recovery process.
 .PP
 BOOTP support is also provided by this server.  Unlike DHCP, the BOOTP
 protocol does not provides a protocol for recovering
-dynamically-assigned addresses once they are no longer needed.   It is
+dynamically assigned addresses once they are no longer needed.   It is
 still possible to dynamically assign addresses to BOOTP clients, but
 some administrative process for reclaiming addresses is required.   By
 default, leases are granted to BOOTP clients in perpetuity, although
@@ -157,7 +157,7 @@ broadcasts may be specified on the command line.  This should be done
 on systems where dhcpd is unable to identify non-broadcast interfaces,
 but should not be required on other systems.  If no interface names
 are specified on the command line dhcpd will identify all network
-interfaces which are up, elimininating non-broadcast interfaces if
+interfaces which are up, eliminating non-broadcast interfaces if
 possible, and listen for DHCP broadcasts on each interface.
 .PP
 If dhcpd should listen on a port other than the standard (port 67),
@@ -195,7 +195,7 @@ startup.   To avoid printing this message, the
 .B -q
 flag may be specified.
 .SH CONFIGURATION
-The syntax of the dhcpd.conf(5) file is discussed seperately.   This
+The syntax of the dhcpd.conf(5) file is discussed separately.   This
 section should be used as an overview of the configuration process,
 and the dhcpd.conf(5) documentation should be consulted for detailed
 reference information.

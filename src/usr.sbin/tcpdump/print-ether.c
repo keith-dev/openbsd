@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1988, 1989, 1990, 1991, 1992, 1993, 1994, 1995, 1996
+ * Copyright (c) 1988, 1989, 1990, 1991, 1992, 1993, 1994, 1995, 1996, 1997
  *	The Regents of the University of California.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -20,14 +20,14 @@
  */
 #ifndef lint
 static const char rcsid[] =
-    "@(#) $Header: /cvs/src/usr.sbin/tcpdump/print-ether.c,v 1.7 1997/07/27 01:34:34 denny Exp $ (LBL)";
+    "@(#) $Header: /cvs/src/usr.sbin/tcpdump/print-ether.c,v 1.9 1999/09/16 17:06:48 brad Exp $ (LBL)";
 #endif
 
 #include <sys/param.h>
 #include <sys/time.h>
 #include <sys/socket.h>
 
-#if __STDC__
+#ifdef __STDC__
 struct mbuf;
 struct rtentry;
 #endif
@@ -116,7 +116,7 @@ ether_if_print(u_char *user, const struct pcap_pkthdr *h, const u_char *p)
 	 * Is it (gag) an 802.3 encapsulation?
 	 */
 	extracted_ethertype = 0;
-	if (ether_type < ETHERMTU) {
+	if (ether_type <= ETHERMTU) {
 		/* Try to print the LLC-layer header & higher layers */
 		if (llc_print(p, length, caplen, ESRC(ep), EDST(ep)) == 0) {
 			/* ether_type not known, print raw packet */

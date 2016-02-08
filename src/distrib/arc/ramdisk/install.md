@@ -1,4 +1,4 @@
-#	$OpenBSD: install.md,v 1.10 1999/04/01 21:30:24 deraadt Exp $
+#	$OpenBSD: install.md,v 1.14 1999/09/23 21:33:44 aaron Exp $
 #
 #
 # Copyright rc) 1996 The NetBSD Foundation, Inc.
@@ -71,12 +71,16 @@ md_get_diskdevs() {
 
 md_get_cddevs() {
 	# return available CDROM devices
-	cat /kern/msgbuf | egrep "^a?cd[0-9] " | cut -d" " -f1 | sort -u
+	cat /kern/msgbuf | egrep "^cd[0-9] " | cut -d" " -f1 | sort -u
 }
 
 md_get_partition_range() {
     # return range of valid partition letters
     echo "[a-p]"
+}
+
+md_questions() {
+	:
 }
 
 md_installboot() {
@@ -130,7 +134,7 @@ md_init_mbr() {
 	# $1 is the disk to init
 	echo
 	echo "You will now be asked if you want to initialize the disk with a 5Mb"
-	echo "MSDOS partition. This is the recomended setup and will allow you to"
+	echo "MSDOS partition. This is the recommended setup and will allow you to"
 	echo "store about three to four different bootable kernels on the disk."
 	echo "If you want to have a different setup, exit 'install' now and do"
 	echo "the MBR initialization by hand using the 'fdisk' program. You may"
@@ -144,13 +148,13 @@ md_init_mbr() {
 		exit 0;;
 	*)
 		echo
-		echo "A MBR record with an OpenBSD usable partition table will now be copied"
+		echo "An MBR record with an OpenBSD usable partition table will now be copied"
 		echo "to your disk. Unless you have special requirements you will not need"
 		echo "to edit this MBR. After the MBR is copied an empty 5Mb MSDOS partition"
 		echo "will be created on the disk. You *MUST* setup the OpenBSD disklabel"
 		echo "to have a partition covering this MSDOS partition."
 		echo "You will probably see a few '...: no disk label' messages"
-		echo "It's completly normal. The disk has no label yet."
+		echo "It's completely normal. The disk has no label yet."
 		echo "This will take a minute or two..."
 		sleep 2
 		dd if=/usr/mdec/mbr of=/dev/r$1c >/dev/null 2>&1
@@ -170,13 +174,13 @@ md_checkfordisklabel() {
 	;;
 	*)
 		echo
-		echo "ARC systems need a MBR and MSDOS partition on the bootable disk."
+		echo "ARC systems need an MBR and MSDOS partition on the bootable disk."
 		echo "This is necessary because the BIOS doesn't know nothing about"
-		echo "OpenBSD and have to boot the system from a file stored in the"
+		echo "OpenBSD and has to boot the system from a file stored in the"
 		echo "MSDOS partition. Install will put a bootable kernel with the"
 		echo "name 'bsd' in there that you later should use to boot OpenBSD. "
 		echo
-		echo -n "Have this disk previously been used with DOS or Windows? [n]"
+		echo -n "Has this disk previously been used with DOS or Windows? [n]"
 		getresp "n"
 		case "$resp" in
 		n*|N*)
@@ -190,7 +194,7 @@ md_checkfordisklabel() {
 			echo "Also note that the boot partition must be included as partition"
 			echo "'i' in the OpenBSD disklabel."
 			echo
-			echo -n "Do You want to keep the current MSDOS partition setup? [y]"
+			echo -n "Do you want to keep the current MSDOS partition setup? [y]"
 			getresp "y"
 			case "$resp" in
 			n*|N*)
@@ -226,8 +230,8 @@ md_prep_fdisk()
 	echo "This disk has not previously been used with OpenBSD. You may share"
 	echo "this disk with other operating systems (probably Windows/NT or"
 	echo "maybe Linux/Mips etc.) Anyhow, to be able to boot the system you"
-	echo "will need a small DOS partition in the begining of the disk to"
-	echo "hold the bootable kernel. This has been taken care of if you choosed"
+	echo "will need a small DOS partition in the beginning of the disk to"
+	echo "hold the bootable kernel. This has been taken care of if you chose"
 	echo "to do that initialization just before."
 	echo
 	echo "WARNING: Wrong information in the BIOS partition table might"
@@ -347,10 +351,6 @@ __md_prep_disklabel_1
 	disklabel -r -R ${_disk} /tmp/label.$$
 	rm -f /tmp/label.$$
 	disklabel -f /tmp/fstab.${_disk} -E ${_disk}
-}
-
-md_copy_kernel() {
-	check_kernel
 }
 
 md_welcome_banner() {

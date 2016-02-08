@@ -1,4 +1,4 @@
-.\"	$OpenBSD: cp.1,v 1.8 1999/03/10 02:39:59 pjanzen Exp $
+.\"	$OpenBSD: cp.1,v 1.13 1999/09/23 19:27:35 aaron Exp $
 .\"	$NetBSD: cp.1,v 1.9 1995/07/25 19:36:45 jtc Exp $
 .\"
 .\" Copyright (c) 1989, 1990, 1993, 1994
@@ -39,7 +39,7 @@
 .\"
 .Dd April 18, 1994
 .Dt CP 1
-.Os BSD 4
+.Os
 .Sh NAME
 .Nm cp
 .Nd copy files
@@ -77,6 +77,17 @@ detects an attempt to copy a file to itself, the copy will fail.
 .Pp
 The options are as follows:
 .Bl -tag -width flag
+.It Fl R
+If
+.Ar source_file
+designates a directory,
+.Nm
+copies the directory and the entire subtree connected at that point.
+This option also causes symbolic links to be copied, rather than
+followed, and
+special files to be created, rather than being copied as normal files.
+Created directories have the same mode as the corresponding source
+directory, unmodified by the process's umask.
 .It Fl H
 If the
 .Fl R
@@ -90,17 +101,6 @@ option is also specified, all symbolic links are followed.
 If the
 .Fl R
 option is also specified, no symbolic links are followed.
-.It Fl R
-If
-.Ar source_file
-designates a directory,
-.Nm
-copies the directory and the entire subtree connected at that point.
-This option also causes symbolic links to be copied, rather than
-followed, and
-special files to be created, rather than being copied as normal files.
-Created directories have the same mode as the corresponding source
-directory, unmodified by the process's umask.
 .It Fl f
 For each existing destination pathname, remove it and
 create a new file, without prompting for confirmation,
@@ -135,12 +135,12 @@ For each destination file that already exists, its contents are
 overwritten if permissions allow, but its mode, user ID, and group
 ID are unchanged.
 .Pp
-In the second synopsis form, 
-.Ar target_directory 
+In the second synopsis form,
+.Ar target_directory
 must exist unless there is only one named
 .Ar source_file
-which is a directory and the 
-.Fl R 
+which is a directory and the
+.Fl R
 flag is specified.
 .Pp
 If the destination file does not exist, the mode of the source file is
@@ -159,12 +159,12 @@ conditions must be fulfilled or both bits are removed.
 .Pp
 Appropriate permissions are required for file creation or overwriting.
 .Pp
-Symbolic links are always followed unless the 
-.Fl R 
+Symbolic links are always followed unless the
+.Fl R
 flag is set, in which case symbolic links are not followed, by default.
 The
 .Fl H
-or 
+or
 .Fl L
 flags (in conjunction with the
 .Fl R
@@ -183,6 +183,27 @@ command's actions are determined by the last one specified.
 The
 .Nm
 utility exits 0 on success or >0 if an error occurred.
+.Sh EXAMPLES
+Make a copy of file
+.Pa foo
+named
+.Pa bar :
+.Pp
+.D1 Ic cp foo bar
+.Pp
+Copy a group of files to the
+.Pa /tmp
+directory:
+.Pp
+.D1 Ic cp *.txt /tmp
+.Pp
+Copy the directory
+.Pa junk ,
+and all of its contents (including any subdirectories) to the
+.Pa /tmp
+directory:
+.Pp
+.D1 Ic cp -R junk /tmp
 .Sh COMPATIBILITY
 Historic versions of the
 .Nm
@@ -191,11 +212,12 @@ utility had a
 option.
 This implementation supports that option; however, its use is strongly
 discouraged, as it does not correctly copy special files, symbolic links
-or FIFOs.
+or
+.Tn FIFO Ns s.
 .Sh SEE ALSO
 .Xr mv 1 ,
 .Xr rcp 1 ,
-.Xr umask 2 , 
+.Xr umask 2 ,
 .Xr fts 3 ,
 .Xr symlink 7
 .Sh STANDARDS

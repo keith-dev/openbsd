@@ -1,4 +1,4 @@
-/* $RCSfile: walk.c,v $$Revision: 1.2 $$Date: 1997/11/30 08:07:12 $
+/* $RCSfile: walk.c,v $$Revision: 1.3 $$Date: 1999/04/29 22:52:59 $
  *
  *    Copyright (c) 1991-1997, Larry Wall
  *
@@ -6,8 +6,8 @@
  *    License or the Artistic License, as specified in the README file.
  *
  * $Log: walk.c,v $
- * Revision 1.2  1997/11/30 08:07:12  millert
- * perl 5.004_04
+ * Revision 1.3  1999/04/29 22:52:59  millert
+ * perl5.005_03 (stock)
  *
  */
 
@@ -40,12 +40,12 @@ STR * walk _(( int useval, int level, int node, int *numericptr, int minprec ));
 
 
 STR *
-walk(useval,level,node,numericptr,minprec)
-int useval;
-int level;
-register int node;
-int *numericptr;
-int minprec;			/* minimum precedence without parens */
+walk(int useval, int level, register int node, int *numericptr, int minprec)
+           
+          
+                  
+                
+            			/* minimum precedence without parens */
 {
     register int len;
     register STR *str;
@@ -136,7 +136,7 @@ int minprec;			/* minimum precedence without parens */
 	    if (saw_FS && !const_FS)
 		do_chop = TRUE;
 	    if (do_chop) {
-		str_cat(str,"chop;\t# strip record separator\n");
+		str_cat(str,"chomp;\t# strip record separator\n");
 		tab(str,level);
 	    }
 	    if (do_split)
@@ -193,7 +193,7 @@ int minprec;			/* minimum precedence without parens */
 		    i = 0;
 		    if (do_chop) {
 			i++;
-			str_cat(str,"chop;\t# strip record separator\n");
+			str_cat(str,"chomp;\t# strip record separator\n");
 			tab(str,level);
 		    }
 		    if (do_split && !(len & 1)) {
@@ -1559,9 +1559,7 @@ sub Pick {\n\
 }
 
 static void
-tab(str,lvl)
-register STR *str;
-register int lvl;
+tab(register STR *str, register int lvl)
 {
     while (lvl > 1) {
 	str_cat(str,"\t");
@@ -1572,9 +1570,7 @@ register int lvl;
 }
 
 static void
-fixtab(str,lvl)
-register STR *str;
-register int lvl;
+fixtab(register STR *str, register int lvl)
 {
     register char *s;
 
@@ -1592,8 +1588,7 @@ register int lvl;
 }
 
 static void
-addsemi(str)
-register STR *str;
+addsemi(register STR *str)
 {
     register char *s;
 
@@ -1605,9 +1600,7 @@ register STR *str;
 }
 
 static void
-emit_split(str,level)
-register STR *str;
-int level;
+emit_split(register STR *str, int level)
 {
     register int i;
 
@@ -1640,11 +1633,7 @@ int level;
 }
 
 int
-prewalk(numit,level,node,numericptr)
-int numit;
-int level;
-register int node;
-int *numericptr;
+prewalk(int numit, int level, register int node, int *numericptr)
 {
     register int len;
     register int type;
@@ -2061,8 +2050,7 @@ int *numericptr;
 }
 
 static void
-numericize(node)
-register int node;
+numericize(register int node)
 {
     register int len;
     register int type;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: editor.c,v 1.63 1999/04/07 22:57:26 millert Exp $	*/
+/*	$OpenBSD: editor.c,v 1.66 1999/07/14 23:16:26 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1997-1999 Todd C. Miller <Todd.Miller@courtesan.com>
@@ -28,7 +28,7 @@
  */
 
 #ifndef lint
-static char rcsid[] = "$OpenBSD: editor.c,v 1.63 1999/04/07 22:57:26 millert Exp $";
+static char rcsid[] = "$OpenBSD: editor.c,v 1.66 1999/07/14 23:16:26 deraadt Exp $";
 #endif /* not lint */
 
 #include <sys/types.h>
@@ -309,7 +309,7 @@ editor(lp, f, dev, fstabfile)
 			char *pager;
 			extern char manpage[];
 
-			if ((pager = getenv("PAGER")) == NULL)
+			if ((pager = getenv("PAGER")) == NULL || *pager == '\0')
 				pager = _PATH_LESS;
 			if ((fp = popen(pager, "w")) != NULL) {
 				(void) fwrite(manpage, strlen(manpage), 1, fp);
@@ -1863,7 +1863,7 @@ editor_help(arg)
 		break;
 	case 'n':
 		puts(
-"The 'm' command is used to set the mount point for a partition (ie: name it).\n"
+"The 'n' command is used to set the mount point for a partition (ie: name it).\n"
 "It takes as an optional argument the partition letter to name.  If you do\n"
 "not specify a partition letter, you will be prompted for one.  This option\n"
 "is only valid if disklabel was invoked with the -F flag.\n");
@@ -2054,6 +2054,11 @@ get_offset(lp, partno)
 			    "at sector %u, you tried to add a partition at %u."
 			    "  You can use the 'b' command to change the size "
 			    "of the OpenBSD portion.\n", ending_sector, ui);
+#ifdef AAT0
+		else if (partno == 0 && ui != 0)
+			fprintf(stderr, "This architecture requires that "
+			    "partition 'a' start at sector 0.");
+#endif
 		else
 			break;
 	}

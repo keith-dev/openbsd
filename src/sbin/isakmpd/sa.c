@@ -1,5 +1,5 @@
-/*	$OpenBSD: sa.c,v 1.13 1999/04/05 20:59:05 niklas Exp $	*/
-/*	$EOM: sa.c,v 1.76 1999/04/05 18:32:11 niklas Exp $	*/
+/*	$OpenBSD: sa.c,v 1.23 1999/08/26 22:27:51 niklas Exp $	*/
+/*	$EOM: sa.c,v 1.97 1999/08/18 00:44:57 angelos Exp $	*/
 
 /*
  * Copyright (c) 1998, 1999 Niklas Hallqvist.  All rights reserved.
@@ -50,6 +50,7 @@
 #include "timer.h"
 #include "transport.h"
 #include "util.h"
+#include "cert.h"
 
 /* Initial number of bits from the cookies used as hash.  */
 #define INITIAL_BUCKET_BITS 6
@@ -62,6 +63,8 @@
 #define MAX_BUCKET_BITS 16
 
 static void sa_dump (char *, struct sa *);
+static void sa_soft_expire (void *);
+static void sa_hard_expire (void *);
 
 static LIST_HEAD (sa_list, sa) *sa_tab;
 
@@ -84,7 +87,7 @@ sa_init ()
  
 }
 
-/* XXX Ww don't yet resize.  */
+/* XXX We don't yet resize.  */
 void
 sa_resize ()
 {
@@ -112,13 +115,18 @@ sa_find (int (*check) (struct sa *, void *), void *arg)
   int i;
   struct sa *sa;
 
-  for (i = 0; i < bucket_mask; i++)
+  for (i = 0; i <= bucket_mask; i++)
     for (sa = LIST_FIRST (&sa_tab[i]); sa; sa = LIST_NEXT (sa, link))
       if (check (sa, arg))
+      {
+	log_debug (LOG_SA, 90, "sa_find: return SA %p", sa);
 	return sa;
+      }
+  log_debug (LOG_SA, 90, "sa_find: no SA matched query");
   return 0;
 }
 
+/* Check if SA is an ISAKMP SA with an initiar cookie equal to ICOOKIE.  */
 static int
 sa_check_icookie (struct sa *sa, void *icookie)
 {
@@ -138,6 +146,7 @@ struct name_phase_arg {
   u_int8_t phase;
 };
 
+/* Check if SA has the name and phase given by V_ARG.  */
 static int
 sa_check_name_phase (struct sa *sa, void *v_arg)
 {
@@ -154,6 +163,52 @@ sa_lookup_by_name (char *name, int phase)
   struct name_phase_arg arg = { name, phase };
 
   return sa_find (sa_check_name_phase, &arg);
+}
+
+struct addr_arg
+{
+  struct sockaddr *addr;
+  socklen_t len;
+  int phase;
+  int flags;
+};
+
+/*
+ * Check if SA is ready and has a peer with an address equal the one given
+ * by V_ADDR.  Furthermore if we are searching for a specific phase, check
+ * that too.
+ */
+static int
+sa_check_peer (struct sa *sa, void *v_addr)
+{
+  struct addr_arg *addr = v_addr;
+  struct sockaddr *dst;
+  socklen_t dstlen;
+
+  if (!sa->transport || (sa->flags & SA_FLAG_READY) == 0
+      || (addr->phase && addr->phase != sa->phase))
+    return 0;
+
+  sa->transport->vtbl->get_dst (sa->transport, &dst, &dstlen);
+  return dstlen == addr->len && memcmp (dst, addr->addr, dstlen) == 0;
+}
+
+/* Lookup a ready SA by the peer's address.  */
+struct sa *
+sa_lookup_by_peer (struct sockaddr *dst, socklen_t dstlen)
+{
+  struct addr_arg arg = { dst, dstlen, 0 };
+
+  return sa_find (sa_check_peer, &arg);
+}
+
+/* Lookup a ready ISAKMP SA given its peer address.  */
+struct sa *
+sa_isakmp_lookup_by_peer (struct sockaddr *dst, socklen_t dstlen)
+{
+  struct addr_arg arg = { dst, dstlen, 1 };
+
+  return sa_find (sa_check_peer, &arg);
 }
 
 int
@@ -179,6 +234,7 @@ sa_enter (struct sa *sa)
     }
   bucket &= bucket_mask;
   LIST_INSERT_HEAD (&sa_tab[bucket], sa, link);
+  log_debug (LOG_SA, 70, "sa_enter: SA %p added to SA list", sa);
   return 1;
 }
 
@@ -239,7 +295,7 @@ sa_lookup (u_int8_t *cookies, u_int8_t *message_id)
   return sa;
 }
 
-/* Create a SA.  */
+/* Create an SA.  */
 int
 sa_create (struct exchange *exchange, struct transport *t)
 {
@@ -256,6 +312,8 @@ sa_create (struct exchange *exchange, struct transport *t)
       return -1;
     }
   sa->transport = t;
+  if (t)
+    transport_reference (t);
   sa->phase = exchange->phase;
   memcpy (sa->cookies, exchange->cookies, ISAKMP_HDR_COOKIES_LEN);
   memcpy (sa->message_id, exchange->message_id, ISAKMP_HDR_MESSAGE_ID_LEN);
@@ -279,13 +337,17 @@ sa_create (struct exchange *exchange, struct transport *t)
   TAILQ_INSERT_TAIL (&exchange->sa_list, sa, next);
   sa_reference (sa);
 
-  log_debug (LOG_MISC, 90,
+  log_debug (LOG_SA, 60,
 	     "sa_create: sa %p phase %d added to exchange %p (%s)", sa,
 	     sa->phase, exchange,
 	     exchange->name ? exchange->name : "<unnamed>");
   return 0;
 }
 
+/*
+ * Dump the internal state of SA to the report channel, with HEADER
+ * prepended to each line.
+ */
 static void
 sa_dump (char *header, struct sa *sa)
 {
@@ -293,21 +355,21 @@ sa_dump (char *header, struct sa *sa)
   char spi_header[80];
   int i;
 
-  log_debug (LOG_MISC, 10, "%s: %p %s phase %d doi %d flags 0x%x",
-	     header, sa, sa->name ? sa->name : "<unnamed>", sa->phase,
+  log_debug (LOG_REPORT, 0, "%s: %p %s phase %d doi %d flags 0x%x", 
+	     header, sa, sa->name ? sa->name : "<unnamed>", sa->phase, 
 	     sa->doi->id, sa->flags);
-  log_debug (LOG_MISC, 10,
+  log_debug (LOG_REPORT, 0, 
 	     "%s: icookie %08x%08x rcookie %08x%08x", header,
 	     decode_32 (sa->cookies), decode_32 (sa->cookies + 4),
 	     decode_32 (sa->cookies + 8), decode_32 (sa->cookies + 12));
-  log_debug (LOG_MISC, 10, "%s: msgid %08x", header,
-	     decode_32 (sa->message_id));
+  log_debug (LOG_REPORT, 0, "%s: msgid %08x refcnt %d", header, 
+	     decode_32 (sa->message_id), sa->refcnt);
   for (proto = TAILQ_FIRST (&sa->protos); proto;
        proto = TAILQ_NEXT (proto, link))
     {
-      log_debug (LOG_MISC, 10,
+      log_debug (LOG_REPORT, 0, 
 		 "%s: suite %d proto %d", header, proto->no, proto->proto);
-      log_debug (LOG_MISC, 10,
+      log_debug (LOG_REPORT, 0, 
 		 "%s: spi_sz[0] %d spi[0] %p spi_sz[1] %d spi[1] %p", header,
 		 proto->spi_sz[0], proto->spi[0], proto->spi_sz[1],
 		 proto->spi[1]);
@@ -315,23 +377,25 @@ sa_dump (char *header, struct sa *sa)
 	if (proto->spi[i])
 	  {
 	    snprintf (spi_header, 80, "%s: spi[%d]", header, i);
-	    log_debug_buf (LOG_MISC, 10, spi_header, proto->spi[i],
+	    log_debug_buf (LOG_REPORT, 0, spi_header, proto->spi[i], 
 			   proto->spi_sz[i]);
 	  }
     }
 }
 
+/* Report all the SAs to the report channel.  */
 void
 sa_report (void)
 {
   int i;
   struct sa *sa;
 
-  for (i = 0; i < bucket_mask; i++)
+  for (i = 0; i <= bucket_mask; i++)
     for (sa = LIST_FIRST (&sa_tab[i]); sa; sa = LIST_NEXT (sa, link))
       sa_dump ("sa_report", sa);
 }
 
+/* Free the protocol structure pointed to by PROTO.  */
 void
 proto_free (struct proto *proto)
 {
@@ -353,6 +417,7 @@ proto_free (struct proto *proto)
       free (proto->data);
     }
 
+  /* XXX Use class LOG_SA instead?  */
   log_debug (LOG_MISC, 90, "proto_free: freeing %p", proto);
 
   free (proto);
@@ -373,12 +438,8 @@ sa_free (struct sa *sa)
 void
 sa_free_aux (struct sa *sa)
 {
-  if (sa->last_sent_in_setup)
-    {
-      exchange_release (sa->last_sent_in_setup->exchange);
-      message_free (sa->last_sent_in_setup);
-    }
   LIST_REMOVE (sa, link);
+  log_debug (LOG_SA, 70, "sa_free_aux: SA %p removed from SA list", sa);
   sa_release (sa);
 }
 
@@ -387,6 +448,8 @@ void
 sa_reference (struct sa *sa)
 {
   sa->refcnt++;
+  log_debug (LOG_SA, 80, "sa_reference: SA %p now has %d references",
+	     sa, sa->refcnt);
 }
 
 /* Release a reference to SA.  */
@@ -394,11 +457,15 @@ void
 sa_release (struct sa *sa)
 {
   struct proto *proto;
+  struct cert_handler *handler;
+  
+  log_debug (LOG_SA, 80, "sa_release: SA %p had %d references",
+	     sa, sa->refcnt);
 
   if (--sa->refcnt)
     return;
 
-  log_debug (LOG_MISC, 80, "sa_release: freeing SA %p", sa);
+  log_debug (LOG_SA, 60, "sa_release: freeing SA %p", sa);
 
   while ((proto = TAILQ_FIRST (&sa->protos)) != 0)
     proto_free (proto);
@@ -408,10 +475,24 @@ sa_release (struct sa *sa)
 	sa->doi->free_sa_data (sa->data);
       free (sa->data);
     }
+  if (sa->id_i)
+    free (sa->id_i);
+  if (sa->id_r)
+    free (sa->id_r);
+  if (sa->recv_cert)
+    {
+	handler = cert_get (sa->recv_certtype);
+	if (handler)
+	  handler->cert_free (sa->recv_cert);
+	else if (sa->recv_certtype == ISAKMP_CERTENC_NONE)
+	  free (sa->recv_cert);
+    }
   if (sa->name)
     free (sa->name);
   if (sa->keystate)
     free (sa->keystate);
+  if (sa->transport)
+    transport_release (sa->transport);
   free (sa);
 }
 
@@ -427,11 +508,13 @@ sa_isakmp_upgrade (struct message *msg)
   LIST_REMOVE (sa, link);
   GET_ISAKMP_HDR_RCOOKIE (msg->iov[0].iov_base,
 			  sa->cookies + ISAKMP_HDR_ICOOKIE_LEN);
+
   /*
-   *  We don't install a transport in the initiator case as we don't know
+   * We don't install a transport in the initiator case as we don't know
    * what local address will be chosen.  Do it now instead.
    */
   sa->transport = msg->transport;
+  transport_reference (sa->transport);
   sa_enter (sa);
 }
 
@@ -496,7 +579,7 @@ sa_add_transform (struct sa *sa, struct payload *xf, int initiator,
   if (sa->doi->proto_init)
     sa->doi->proto_init (proto, 0);
 
-  log_debug (LOG_MISC, 80,
+  log_debug (LOG_SA, 80,
 	     "sa_add_transform: proto %p no %d proto %d chosen %p sa %p id %d",
 	     proto, proto->no, proto->proto, proto->chosen, proto->sa,
 	     proto->id);
@@ -514,92 +597,51 @@ sa_add_transform (struct sa *sa, struct payload *xf, int initiator,
   return -1;
 }
 
-/* Lookup an ISAKMP SA given its peer address.  */
-struct sa *
-sa_isakmp_lookup_by_peer (struct sockaddr *addr, size_t addr_len)
-{
-  int i;
-  struct sa *sa;
-  struct sockaddr *taddr;
-  int taddr_len;
-
-  for (i = 0; i < bucket_mask; i++)
-    for (sa = LIST_FIRST (&sa_tab[i]); sa; sa = LIST_NEXT (sa, link))
-      /*
-       * XXX We check the transport because it can be NULL until we fix
-       * the initiator case to set the transport always.
-       */
-      if (sa->phase == 1 && (sa->flags & SA_FLAG_READY) && sa->transport)
-	{
-	  sa->transport->vtbl->get_dst (sa->transport, &taddr, &taddr_len);
-	  if (taddr_len == addr_len && memcmp (taddr, addr, addr_len) == 0)
-	    return sa;
-	}
-  return 0;
-}
-
 /* Delete an SA.  Tell the peer if NOTIFY is set.  */
 void
 sa_delete (struct sa *sa, int notify)
 {
-  /* XXX we do not send DELETE payloads just yet.  */
-
+  message_send_delete (sa);
   sa_free (sa);
 }
 
 /*
  * This function will get called when we are closing in on the death time of SA
  */
-void
-sa_soft_expire (struct sa *sa)
+static void
+sa_soft_expire (void *v_sa)
 {
+  struct sa *sa = v_sa;
   sa->soft_death = 0;
 
   if ((sa->flags & (SA_FLAG_STAYALIVE | SA_FLAG_REPLACED))
       == SA_FLAG_STAYALIVE)
-    {
-      /* If we are already renegotiating, don't start over.  */
-      if (!exchange_lookup_by_name (sa->name, 1))
-	{
-	  sa_reference (sa);
-	  exchange_establish (sa->name,
-			      (void (*) (void *, int))sa_mark_replaced, sa);
-	}
-    }
+    exchange_establish (sa->name, 0, 0);
   else
-    {
-      /*
-       * Start to watch the use of this SA, so a renegotiation can
-       * happen as soon as it is shown to be alive.
-       */
-      sa->flags |= SA_FLAG_FADING;
-    }
+    /*
+     * Start to watch the use of this SA, so a renegotiation can
+     * happen as soon as it is shown to be alive.
+     */
+    sa->flags |= SA_FLAG_FADING;
 }
 
 /* SA has passed its best before date.  */
-void
-sa_hard_expire (struct sa *sa)
+static void
+sa_hard_expire (void *v_sa)
 {
+  struct sa *sa = v_sa;
+
   sa->death = 0;
 
   if ((sa->flags & (SA_FLAG_STAYALIVE | SA_FLAG_REPLACED))
       == SA_FLAG_STAYALIVE)
-    {
-      /* If we are already renegotiating, don't start over.  */
-      if (!exchange_lookup_by_name (sa->name, 1))
-	{
-	  sa_reference (sa);
-	  exchange_establish (sa->name,
-			      (void (*) (void *, int))sa_mark_replaced, sa);
-	}
-    }
+    exchange_establish (sa->name, 0, 0);
 
   sa_delete (sa, 1);
 }
 
 /*
- * Get a SA attribute's flag value out of textual description.
- * XXX Kind of overkill for just one attribute, maybe simplify?
+ * Get an SA attribute's flag value out of textual description.
  */
 int
 sa_flag (char *attr)
@@ -608,25 +650,81 @@ sa_flag (char *attr)
     char *name;
     int flag;
   } sa_flag_map[] = {
-    { "stayalive", SA_FLAG_STAYALIVE }
+    { "active-only", SA_FLAG_ACTIVE_ONLY }
   };
   int i;
 
   for (i = 0; i < sizeof sa_flag_map / sizeof sa_flag_map[0]; i++)
     if (strcasecmp (attr, sa_flag_map[i].name) == 0)
       return sa_flag_map[i].flag;
-  log_print (LOG_MISC, 10, "sa_flag: attribute \"%s\" unknown", attr);
+  log_print ("sa_flag: attribute \"%s\" unknown", attr);
   return 0;
 }
 
 /* Mark SA as replaced.  */
 void
-sa_mark_replaced (struct sa *sa, int fail)
+sa_mark_replaced (struct sa *sa)
 {
-  if (!fail)
+  log_debug (LOG_SA, 60, "sa_mark_replaced: SA %p marked as replaced", sa);
+  sa->flags |= SA_FLAG_REPLACED;
+}
+
+/*
+ * Setup expiration timers for SA.  This is used for ISAKMP SAs, but also
+ * possible to use for application SAs if the application does not deal
+ * with expirations itself.  An example is the Linux FreeS/WAN KLIPS IPsec
+ * stack.
+ */
+int
+sa_setup_expirations (struct sa *sa)
+{
+  u_int64_t seconds = sa->seconds;
+  struct timeval expiration;
+
+  /* 
+   * Set the soft timeout to a random percentage between 85 & 95 of
+   * the negotiated lifetime to break strictly synchronized
+   * renegotiations.  This works better when the randomization is on the
+   * order of processing plus network-roundtrip times, or larger.
+   * I.e. it depends on configuration and negotiated lifetimes.
+   * It is not good to do the decrease on the hard timeout, because then
+   * we may drop our SA before our peer.
+   * XXX Better scheme to come?
+   */
+  if (!sa->soft_death)
     {
-      log_debug (LOG_MISC, 90, "SA %p marked as replaced", sa);
-      sa->flags |= SA_FLAG_REPLACED;
+      gettimeofday (&expiration, 0);
+      /* XXX This should probably be configuration controlled somehow.  */
+      seconds = sa->seconds * (850 + sysdep_random () % 100) / 1000;
+      log_debug (LOG_TIMER, 95,
+		 "sa_setup_expirations: SA %p soft timeout in %qd seconds",
+		 seconds);
+      expiration.tv_sec += seconds;
+      sa->soft_death
+	= timer_add_event ("sa_soft_expire", sa_soft_expire, sa, &expiration);
+      if (!sa->soft_death)
+	{
+	  /* If we don't give up we might start leaking... */
+	  sa_delete (sa, 1);
+	  return -1;
+	}
     }
-  sa_release (sa);
+
+  if (!sa->death)
+    {
+      gettimeofday(&expiration, 0);
+      log_debug (LOG_TIMER, 95,
+		 "sa_setup_expirations: SA %p hard timeout in %qd seconds",
+		 sa->seconds);
+      expiration.tv_sec += sa->seconds;
+      sa->death
+	= timer_add_event ("sa_hard_expire", sa_hard_expire, sa, &expiration);
+      if (!sa->death)
+	{
+	  /* If we don't give up we might start leaking... */
+	  sa_delete (sa, 1);
+	  return -1;
+	}
+    }
+  return 0;
 }

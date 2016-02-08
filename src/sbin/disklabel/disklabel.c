@@ -1,5 +1,4 @@
-/*	$OpenBSD: disklabel.c,v 1.63 1999/04/07 22:57:25 millert Exp $	*/
-/*	$NetBSD: disklabel.c,v 1.30 1996/03/14 19:49:24 ghudson Exp $	*/
+/*	$OpenBSD: disklabel.c,v 1.68 1999/08/17 09:13:14 millert Exp $	*/
 
 /*
  * Copyright (c) 1987, 1993
@@ -44,11 +43,10 @@ static char copyright[] =
 #endif /* not lint */
 
 #ifndef lint
-static char rcsid[] = "$OpenBSD: disklabel.c,v 1.63 1999/04/07 22:57:25 millert Exp $";
+static char rcsid[] = "$OpenBSD: disklabel.c,v 1.68 1999/08/17 09:13:14 millert Exp $";
 #endif /* not lint */
 
 #include <sys/param.h>
-#include <sys/file.h>
 #include <sys/ioctl.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
@@ -60,6 +58,7 @@ static char rcsid[] = "$OpenBSD: disklabel.c,v 1.63 1999/04/07 22:57:25 millert 
 #include <ctype.h>
 #include <err.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <signal.h>
 #include <string.h>
 #include <stdio.h>
@@ -107,6 +106,7 @@ enum {
 	UNSPEC, EDIT, EDITOR, READ, RESTORE, SETWRITEABLE, WRITE, WRITEBOOT
 } op = UNSPEC;
 
+int	cflag;
 int	dflag;
 int	rflag;
 int	tflag;
@@ -150,7 +150,7 @@ main(argc, argv)
 	struct disklabel *lp;
 	FILE *t;
 
-	while ((ch = getopt(argc, argv, "BEFf:NRWb:denrs:tvw")) != -1)
+	while ((ch = getopt(argc, argv, "BEFf:NRWb:cdenrs:tvw")) != -1)
 		switch (ch) {
 #if NUMBOOT > 0
 		case 'B':
@@ -181,6 +181,9 @@ main(argc, argv)
 				usage();
 			writeable = 1;
 			op = SETWRITEABLE;
+			break;
+		case 'c':
+			++cflag;
 			break;
 		case 'd':
 			++dflag;
@@ -236,7 +239,8 @@ main(argc, argv)
 		op = READ;
 #endif
 
-	if (argc < 1 || (rflag && dflag) || (fstabfile && op != EDITOR))
+	if (argc < 1 || (rflag && cflag + dflag > 0) ||
+	    (fstabfile && op != EDITOR))
 		usage();
 
 	dkname = argv[0];
@@ -536,7 +540,7 @@ writelabel(f, boot, lp)
 			}
 		}
 	}
-#ifdef vax
+#ifdef __vax__
 	if (lp->d_type == DTYPE_SMD && lp->d_flags & D_BADSECT) {
 		daddr_t alt;
 		int i;
@@ -730,14 +734,18 @@ readlabel(f)
 		}
 		warnx(msg);
 		return(NULL);
-	} else if (dflag) {
-		lp = &lab;
-		if (ioctl(f, DIOCGPDINFO, lp) < 0)
-			err(4, "ioctl DIOCGPDINFO");
 	} else {
-		lp = &lab;
-		if (ioctl(f, DIOCGDINFO, lp) < 0)
-			err(4, "ioctl DIOCGDINFO");
+		if (cflag && ioctl(f, DIOCRLDINFO) < 0)
+			err(4, "ioctl DIOCRLDINFO");
+		if (dflag) {
+			lp = &lab;
+			if (ioctl(f, DIOCGPDINFO, lp) < 0)
+				err(4, "ioctl DIOCGPDINFO");
+		} else {
+			lp = &lab;
+			if (ioctl(f, DIOCGDINFO, lp) < 0)
+				err(4, "ioctl DIOCGDINFO");
+		}
 	}
 	return (lp);
 }
@@ -777,7 +785,7 @@ makebootarea(boot, dp, f)
 	 * clobber the existing boot.
 	 */
 	if (!installboot) {
-#ifndef i386
+#ifndef __i386__
 		if (rflag) {
 			if (read(f, boot, BBSIZE) < BBSIZE)
 				err(4, "%s", specname);
@@ -1112,9 +1120,9 @@ display(f, lp)
 	fprintf(f, "interleave: %ld\n", (long)lp->d_interleave);
 	fprintf(f, "trackskew: %ld\n", (long)lp->d_trackskew);
 	fprintf(f, "cylinderskew: %ld\n", (long)lp->d_cylskew);
-	fprintf(f, "headswitch: %ld\t\t# milliseconds\n",
+	fprintf(f, "headswitch: %ld\t\t# microseconds\n",
 	    (long)lp->d_headswitch);
-	fprintf(f, "track-to-track seek: %ld\t# milliseconds\n",
+	fprintf(f, "track-to-track seek: %ld\t# microseconds\n",
 	    (long)lp->d_trkseek);
 	fprintf(f, "drivedata: ");
 	for (i = NDDATA - 1; i >= 0; i--)
@@ -1641,6 +1649,13 @@ checklabel(lp)
 			warnx("warning, partition %c: offset %% cylinder-size != 0",
 			    part);
 #endif
+#ifdef AAT0
+		if (i == 0 && pp->p_size != 0 && pp->p_offset != 0) {
+			warnx("this architecture requires partition 'a' to "
+			    "start at sector 0");
+			errors++;
+		}
+#endif
 		if (pp->p_offset > lp->d_secperunit) {
 			warnx("partition %c: offset past end of unit", part);
 			errors++;
@@ -1741,14 +1756,14 @@ usage()
 
 	fprintf(stderr, "usage:\n");
 	fprintf(stderr,
-	    "  disklabel [-nv] [-r|-d] [-t] disk%s      (read)\n",
+	    "  disklabel [-nv] [-r|-cd] [-t] disk%s     (read)\n",
 	    blank);
 	fprintf(stderr,
-	    "  disklabel [-nv] [-r|-d] -e disk%s        (edit)\n",
+	    "  disklabel [-nv] [-r|-cd] -e disk%s       (edit)\n",
 	    blank);
 	fprintf(stderr,
-	    "  disklabel [-nv] [-r|-d] [-f temp] -E disk%.*s  (simple editor)\n",
-	    strlen(blank) - 4, blank);
+	    "  disklabel [-nv] [-r|-cd] [-f temp] -E disk%.*s  (simple editor)\n",
+	    strlen(blank) - 5, blank);
 	fprintf(stderr,
 	    "  disklabel [-nv] [-r]%s -R disk proto     (restore)\n",
 	    boot);

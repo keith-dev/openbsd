@@ -1,5 +1,5 @@
-/*	$OpenBSD: pf_key_v2.c,v 1.6 1999/04/05 20:59:22 niklas Exp $	*/
-/*	$EOM: pf_key_v2.c,v 1.9 1999/04/05 20:36:45 niklas Exp $	*/
+/*	$OpenBSD: pf_key_v2.c,v 1.15 1999/07/16 00:44:49 niklas Exp $	*/
+/*	$EOM: pf_key_v2.c,v 1.19 1999/07/16 00:29:11 niklas Exp $	*/
 
 /*
  * Copyright (c) 1999 Niklas Hallqvist.  All rights reserved.
@@ -38,6 +38,7 @@
 #include <sys/ioctl.h>
 #include <sys/queue.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <sys/uio.h>
 #include <net/pfkeyv2.h>
 #include <netinet/in.h>
@@ -45,6 +46,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+
+#include "sysdep.h"
 
 #include "conf.h"
 #include "exchange.h"
@@ -56,10 +59,6 @@
 #include "timer.h"
 #include "transport.h"
 
-/* Rounding needed for PF_ROUTE.  XXX Really OpenBSD-specific.  */
-#define ROUNDUP(a) \
-  ((a) > 0 ? (1 + (((a) - 1) | (sizeof (long) - 1))) : sizeof (long))
-
 /*
  * PF_KEY v2 always work with 64-bit entities and aligns on 64-bit boundaries.
  */
@@ -67,8 +66,8 @@
 #define PF_KEY_V2_ROUND(x)						\
   (((x) + PF_KEY_V2_CHUNK - 1) & ~(PF_KEY_V2_CHUNK - 1))
 
-/* How often should we check that connections we require to be up, are up?  */
-#define PF_KEY_V2_CHECK_FREQ 60
+/* How many microseconds we will wait for a reply from the PF_KEY socket.  */
+#define PF_KEY_REPLY_TIMEOUT 1000
 
 struct pf_key_v2_node {
   TAILQ_ENTRY (pf_key_v2_node) link;
@@ -179,10 +178,45 @@ pf_key_v2_read (u_int32_t seq)
   struct sadb_msg *msg;
   struct sadb_msg hdr;
   struct sadb_ext *ext;
-  struct timeval now;
+  struct timeval tv;
+  fd_set *fds;
 
   while (1)
     {
+      /*
+       * If this is a read of a reply we should actually expect the reply to
+       * get lost as PF_KEY is an unreliable service per the specs.
+       * Currently we do this by setting a short timeout, and if it is not
+       * readable in that time, we fail the read.
+       */
+      if (seq)
+	{
+	  fds = calloc (howmany (pf_key_v2_socket + 1, NFDBITS),
+			sizeof (fd_mask));
+	  if (!fds)
+	    {
+	      log_error ("pf_key_v2_read: calloc (%d, %d) failed",
+			 howmany (pf_key_v2_socket + 1, NFDBITS),
+			 sizeof (fd_mask));
+	      goto cleanup;
+	    }
+	  FD_SET (pf_key_v2_socket, fds);
+	  tv.tv_sec = 0;
+	  tv.tv_usec = PF_KEY_REPLY_TIMEOUT;
+	  n = select (pf_key_v2_socket + 1, fds, 0, 0, &tv);
+	  free (fds);
+	  if (n == -1)
+	    {
+	      log_error ("pf_key_v2_read: select (%d, fds, 0, 0, &tv) failed",
+			 pf_key_v2_socket + 1);
+	      goto cleanup;
+	    }
+	  if (!n)
+	    {
+	      log_print ("pf_key_v2_read: no reply from PF_KEY");
+	      goto cleanup;
+	    }
+	}
       n = recv (pf_key_v2_socket, &hdr, sizeof hdr, MSG_PEEK);
       if (n == -1)
 	{
@@ -260,9 +294,9 @@ pf_key_v2_read (u_int32_t seq)
       /* If the message is not the one we are waiting for, queue it up.  */
       if (seq && (msg->sadb_msg_pid != getpid () || msg->sadb_msg_seq != seq))
 	{
-	  gettimeofday (&now, 0);
+	  gettimeofday (&tv, 0);
 	  timer_add_event ("pf_key_v2_notify",
-			   (void (*) (void *))pf_key_v2_notify, ret, &now);
+			   (void (*) (void *))pf_key_v2_notify, ret, &tv);
 	  ret = 0;
 	  continue;
 	}
@@ -623,15 +657,15 @@ pf_key_v2_set_spi (struct sa *sa, struct proto *proto, int incoming)
 	  ssa.sadb_sa_encrypt = SADB_EALG_3DESCBC;
 	  break;
 
-#ifdef SADB_EALG_X_CAST
+#ifdef SADB_X_EALG_CAST
 	case IPSEC_ESP_CAST:
-	  ssa.sadb_sa_encrypt = SADB_EALG_X_CAST;
+	  ssa.sadb_sa_encrypt = SADB_X_EALG_CAST;
 	  break;
 #endif
 
-#ifdef SADB_EALG_X_BLF
+#ifdef SADB_X_EALG_BLF
 	case IPSEC_ESP_BLOWFISH:
-	  ssa.sadb_sa_encrypt = SADB_EALG_X_BLF;
+	  ssa.sadb_sa_encrypt = SADB_X_EALG_BLF;
 	  break;
 #endif
 
@@ -698,7 +732,12 @@ pf_key_v2_set_spi (struct sa *sa, struct proto *proto, int incoming)
   ssa.sadb_sa_replay
     = conf_get_str ("General", "Shared-SADB") ? 0 : iproto->replay_window;
   ssa.sadb_sa_state = SADB_SASTATE_MATURE;
+#ifdef SADB_X_SAFLAGS_TUNNEL
+  ssa.sadb_sa_flags
+    = iproto->encap_mode == IPSEC_ENCAP_TUNNEL ? SADB_X_SAFLAGS_TUNNEL : 0;
+#else
   ssa.sadb_sa_flags = 0;
+#endif
   if (pf_key_v2_msg_add (update, (struct sadb_ext *)&ssa, 0) == -1)
     goto cleanup;
 
@@ -741,7 +780,7 @@ pf_key_v2_set_spi (struct sa *sa, struct proto *proto, int incoming)
       life->sadb_lifetime_bytes = sa->kilobytes * 1024 * 9 / 10;
       /*
        * XXX I am not sure which one is best in security respect.  Maybe the
-       * RFCs actually mandate what a lifetime reaaly is.
+       * RFCs actually mandate what a lifetime really is.
        */
 #if 0
       life->sadb_lifetime_addtime = 0;
@@ -851,19 +890,22 @@ pf_key_v2_set_spi (struct sa *sa, struct proto *proto, int incoming)
     goto cleanup;
   key = 0;
 
-  len = sizeof *key + PF_KEY_V2_ROUND (keylen);
-  key = malloc (len);
-  if (!key)
-    goto cleanup;
-  key->sadb_key_exttype = SADB_EXT_KEY_ENCRYPT;
-  key->sadb_key_len = len / PF_KEY_V2_CHUNK;
-  key->sadb_key_bits = keylen * 8;
-  key->sadb_key_reserved = 0;
-  memcpy (key + 1, iproto->keymat[incoming], keylen);
-  if (pf_key_v2_msg_add (update, (struct sadb_ext *)key,
-			 PF_KEY_V2_NODE_MALLOCED) == -1)
-    goto cleanup;
-  key = 0;
+  if (keylen)
+    {
+      len = sizeof *key + PF_KEY_V2_ROUND (keylen);
+      key = malloc (len);
+      if (!key)
+	goto cleanup;
+      key->sadb_key_exttype = SADB_EXT_KEY_ENCRYPT;
+      key->sadb_key_len = len / PF_KEY_V2_CHUNK;
+      key->sadb_key_bits = keylen * 8;
+      key->sadb_key_reserved = 0;
+      memcpy (key + 1, iproto->keymat[incoming], keylen);
+      if (pf_key_v2_msg_add (update, (struct sadb_ext *)key,
+			     PF_KEY_V2_NODE_MALLOCED) == -1)
+	goto cleanup;
+      key = 0;
+    }
 
   /* XXX Here can identity and sensitivity extensions be setup.  */
 
@@ -872,6 +914,14 @@ pf_key_v2_set_spi (struct sa *sa, struct proto *proto, int incoming)
 	     msg.sadb_msg_satype,
 	     inet_ntoa (((struct sockaddr_in *)dst)->sin_addr),
 	     ntohl (ssa.sadb_sa_spi));
+
+  /*
+   * Although PF_KEY knows about expirations, it is unreliable per the specs
+   * thus we need to do them inside isakmpd as well.
+   */
+  if (sa->seconds)
+    if (sa_setup_expirations (sa))
+      goto cleanup;
 
   ret = pf_key_v2_call (update);
   pf_key_v2_msg_free (update);
@@ -962,9 +1012,9 @@ pf_key_v2_flow (in_addr_t laddr, in_addr_t lmask, in_addr_t raddr,
    * XXX The LOCALFLOW flag should only be set if this machine is part of the
    * source subnet.
    */
-  ssa.sadb_sa_flags = SADB_SAFLAGS_X_LOCALFLOW;
+  ssa.sadb_sa_flags = SADB_X_SAFLAGS_LOCALFLOW;
   if (!delete)
-    ssa.sadb_sa_flags |= SADB_SAFLAGS_X_REPLACEFLOW;
+    ssa.sadb_sa_flags |= SADB_X_SAFLAGS_REPLACEFLOW;
   if (pf_key_v2_msg_add (flow, (struct sadb_ext *)&ssa, 0) == -1)
     goto cleanup;
 
@@ -1001,7 +1051,7 @@ pf_key_v2_flow (in_addr_t laddr, in_addr_t lmask, in_addr_t raddr,
   addr = malloc (len);
   if (!addr)
     goto cleanup;
-  addr->sadb_address_exttype = SADB_EXT_X_SRC_FLOW;
+  addr->sadb_address_exttype = SADB_X_EXT_SRC_FLOW;
   addr->sadb_address_len = len / PF_KEY_V2_CHUNK;
 #if 0
   addr->sadb_address_proto = 0;
@@ -1021,7 +1071,7 @@ pf_key_v2_flow (in_addr_t laddr, in_addr_t lmask, in_addr_t raddr,
   addr = malloc (len);
   if (!addr)
     goto cleanup;
-  addr->sadb_address_exttype = SADB_EXT_X_SRC_MASK;
+  addr->sadb_address_exttype = SADB_X_EXT_SRC_MASK;
   addr->sadb_address_len = len / PF_KEY_V2_CHUNK;
 #if 0
   addr->sadb_address_proto = 0;
@@ -1041,7 +1091,7 @@ pf_key_v2_flow (in_addr_t laddr, in_addr_t lmask, in_addr_t raddr,
   addr = malloc (len);
   if (!addr)
     goto cleanup;
-  addr->sadb_address_exttype = SADB_EXT_X_DST_FLOW;
+  addr->sadb_address_exttype = SADB_X_EXT_DST_FLOW;
   addr->sadb_address_len = len / PF_KEY_V2_CHUNK;
 #if 0
   addr->sadb_address_proto = 0;
@@ -1061,7 +1111,7 @@ pf_key_v2_flow (in_addr_t laddr, in_addr_t lmask, in_addr_t raddr,
   addr = malloc (len);
   if (!addr)
     goto cleanup;
-  addr->sadb_address_exttype = SADB_EXT_X_DST_MASK;
+  addr->sadb_address_exttype = SADB_X_EXT_DST_MASK;
   addr->sadb_address_len = len / PF_KEY_V2_CHUNK;
 #if 0
   addr->sadb_address_proto = 0;
@@ -1161,7 +1211,7 @@ pf_key_v2_delete_spi (struct sa *sa, struct proto *proto, int incoming)
   struct pf_key_v2_msg *delete = 0, *ret = 0;
 
   /*
-   * If the SA was incoming and it has not yet been replaced, remove the
+   * If the SA was outbound and it has not yet been replaced, remove the
    * flow associated with it.
    * We ignore any errors from the disabling of the flow, it does not matter.
    */
@@ -1275,7 +1325,7 @@ pf_key_v2_delete_spi (struct sa *sa, struct proto *proto, int incoming)
 }
 
 static void
-pf_key_v2_stayalive (void *vconn, int fail)
+pf_key_v2_stayalive (struct exchange *exchange, void *vconn, int fail)
 {
   char *conn = vconn;
   struct sa *sa;
@@ -1286,54 +1336,19 @@ pf_key_v2_stayalive (void *vconn, int fail)
     sa->flags |= SA_FLAG_STAYALIVE;
 }
 
-/* Establish the connection in VCONN and set the stayalive flag for it.  */
+/* Check if a connection CONN exists, otherwise establish it.  */
 void
-pf_key_v2_checker (void *vconn)
+pf_key_v2_connection_check (char *conn)
 {
-  struct timeval now;
-  char *conn = vconn;
-
-  gettimeofday (&now, 0);
-  now.tv_sec += PF_KEY_V2_CHECK_FREQ;
-  if (!timer_add_event ("pf_key_v2_checker", pf_key_v2_checker, conn, &now))
-    log_print ("pf_key_v2_checker: could not add timer event");
   if (!sa_lookup_by_name (conn, 2))
     {
-      log_debug (LOG_SYSDEP, 70, "pf_key_v2_checker: SA for %s missing", conn);
-      exchange_establish (conn, pf_key_v2_stayalive, vconn);
+      log_debug (LOG_SYSDEP, 70,
+		 "pf_key_v2_connection_check: SA for %s missing", conn);
+      exchange_establish (conn, pf_key_v2_stayalive, conn);
     }
   else
-    log_debug (LOG_SYSDEP, 70, "pf_key_v2_checker: SA for %s exists", conn);
-}
-
-/*
- * Establish a connection CONN that should be available from now,
- * XXX Should establish a keying route that will generate ACQUIRE messages on
- * use.
- * XXX This is not really belonging in the PF_KEYv2 glue, it should be moved
- * to sysdep.c
- */
-int
-pf_key_v2_connection (char *conn)
-{
-  struct timeval now;
-  char *conn_copy;
-
-  /*
-   * As we do not have ACQUIRE notifications just yet, we actually establish
-   * the connection as soon as possible.
-   */
-  gettimeofday (&now, 0);
-  conn_copy = strdup (conn);
-  if (!conn_copy)
-    {
-      log_error ("pf_key_v2_connection: strdup(\"%s\") failed", conn);
-      return -1;
-    }
-  if (!timer_add_event ("pf_key_v2_checker", pf_key_v2_checker, conn_copy,
-			&now))
-    log_print ("pf_key_v2_connection: could not add timer event");
-  return 0;
+    log_debug (LOG_SYSDEP, 70, "pf_key_v2_connection_check: SA for %s exists",
+	       conn);
 }
 
 /* Handle a PF_KEY lifetime expiration message PMSG.  */
@@ -1393,15 +1408,7 @@ pf_key_v2_expire (struct pf_key_v2_msg *pmsg)
    */
   if ((sa->flags & (SA_FLAG_STAYALIVE | SA_FLAG_REPLACED))
       == SA_FLAG_STAYALIVE)
-    {
-      /* If we are already renegotiating, don't start over.  */
-      if (!exchange_lookup_by_name (sa->name, 2))
-	{
-	  sa_reference (sa);
-	  exchange_establish (sa->name,
-			      (void (*) (void *, int))sa_mark_replaced, sa);
-	}
-    }
+    exchange_establish (sa->name, 0, 0);
 
   if (life->sadb_lifetime_exttype == SADB_EXT_LIFETIME_HARD)
     {
@@ -1511,7 +1518,7 @@ pf_key_v2_group_spis (struct sa *sa, struct proto *proto1,
   if (pf_key_v2_msg_add (grpspis, (struct sadb_ext *)&sa1, 0) == -1)
     goto cleanup;
 
-  sa2.sadb_sa_exttype = SADB_EXT_X_SA2;
+  sa2.sadb_sa_exttype = SADB_X_EXT_SA2;
   sa2.sadb_sa_len = sizeof sa2 / PF_KEY_V2_CHUNK;
   memcpy (&sa2.sadb_sa_spi, proto2->spi[incoming], sizeof sa2.sadb_sa_spi);
   sa2.sadb_sa_replay = 0;
@@ -1552,7 +1559,7 @@ pf_key_v2_group_spis (struct sa *sa, struct proto *proto1,
   addr = malloc (len);
   if (!addr)
     goto cleanup;
-  addr->sadb_address_exttype = SADB_EXT_X_DST2;
+  addr->sadb_address_exttype = SADB_X_EXT_DST2;
   addr->sadb_address_len = len / PF_KEY_V2_CHUNK;
 #if 0
   addr->sadb_address_proto = 0;
@@ -1567,7 +1574,7 @@ pf_key_v2_group_spis (struct sa *sa, struct proto *proto1,
   addr = 0;
 
   /* Setup the PROTOCOL extension.  */
-  protocol.sadb_protocol_exttype = SADB_EXT_X_PROTOCOL;
+  protocol.sadb_protocol_exttype = SADB_X_EXT_PROTOCOL;
   protocol.sadb_protocol_len = sizeof protocol / PF_KEY_V2_CHUNK;
   switch (proto2->proto)
     {

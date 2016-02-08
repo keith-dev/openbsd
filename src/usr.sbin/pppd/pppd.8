@@ -1,4 +1,4 @@
-.\" $OpenBSD: pppd.8,v 1.15 1998/06/15 17:56:17 mickey Exp $
+.\" $OpenBSD: pppd.8,v 1.19 1999/09/23 04:12:11 alex Exp $
 .\" manual page [] for pppd 2.3
 .\" Id: pppd.8,v 1.27 1998/03/31 04:31:08 paulus Exp $
 .\" SH section heading
@@ -43,8 +43,7 @@ used.
 .TP
 .I <speed>
 Set the baud rate to <speed> (a decimal number).  On systems such as
-.Bx 4.4
-and OpenBSD, any speed can be specified.  Other systems
+4.4BSD and OpenBSD, any speed can be specified.  Other systems
 (e.g. SunOS) allow only a limited set of speeds.
 .TP
 .B active-filter \fIfilter-expression
@@ -142,7 +141,7 @@ bytes of data).
 Set the MTU [Maximum Transmit Unit] value to \fIn\fR.  Unless the
 peer requests a smaller value via MRU negotiation, pppd will
 request that the kernel networking code send data packets of no more
-than \fIn\fR bytes through the PPP network interface. 
+than \fIn\fR bytes through the PPP network interface.
 .TP
 .B passive
 Enables the "passive" option in the LCP.  With this option, pppd will
@@ -423,7 +422,9 @@ control, as for the \fIcrtscts\fR option.
 Use the modem control lines during the chat script.  The default is
 to ignore the state of the CD (Carrier Detect) signal from the modem
 during the chat script.  If you are using a cua device (as opposed to
-a tty device) you should set this option.
+a tty device) you should set this option.  You should not use
+this option with a dialback setup as it will cause the chat script
+to exit when carrier drops.
 .TP
 .B ms-dns \fI<addr>
 If pppd is acting as a server for Microsoft Windows clients, this
@@ -528,7 +529,7 @@ default unless the \fIpersist\fR or \fIdemand\fR option has been
 specified.
 .TP
 .B nopredictor1
-Do not accept or agree to Predictor-1 comprssion.
+Do not accept or agree to Predictor-1 compression.
 .TP
 .B noproxyarp
 Disable the \fIproxyarp\fR option.  The system administrator who
@@ -594,7 +595,7 @@ supports Predictor-1 compression.
 Add an entry to this system's ARP [Address Resolution Protocol] table
 with the IP address of the peer and the Ethernet address of this
 system.  This will have the effect of making the peer appear to other
-systems to be on the local ethernet.
+systems to be on the local Ethernet.
 .TP
 .B remotename \fIname
 Set the assumed name of the remote system for authentication purposes
@@ -1035,7 +1036,7 @@ executed with the parameters
 .IP
 \fIinterface-name tty-device speed network-number local-IPX-node-address
 remote-IPX-node-address local-IPX-routing-protocol remote-IPX-routing-protocol
-local-IPX-router-name remote-IPX-router-name ipparam pppd-pid\fR 
+local-IPX-router-name remote-IPX-router-name ipparam pppd-pid\fR
 .IP
 The local-IPX-routing-protocol and remote-IPX-routing-protocol field
 may be one of the following:

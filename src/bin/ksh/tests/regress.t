@@ -1076,3 +1076,16 @@ expected-stdout:
 	parent last
 	parent exit
 ---
+
+name: regression-62
+description:
+	Check if test -nt/-ot succeeds if second(first) file is missing.
+stdin:
+	touch a
+	test a -nt b && echo nt OK || echo nt BAD
+	test b -ot a && echo ot OK || echo ot BAD
+expected-stdout: 
+	nt OK
+	ot OK
+---
+

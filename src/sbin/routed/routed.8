@@ -1,4 +1,4 @@
-.\"	$OpenBSD: routed.8,v 1.21 1999/03/16 02:46:51 deraadt Exp $
+.\"	$OpenBSD: routed.8,v 1.27 1999/10/07 18:58:37 wvdputte Exp $
 .\"
 .\" Copyright (c) 1983, 1991, 1993
 .\"	The Regents of the University of California.  All rights reserved.
@@ -35,7 +35,7 @@
 .\"
 .Dd June 1, 1996
 .Dt ROUTED 8
-.Os BSD 4.4
+.Os
 .Sh NAME
 .Nm routed
 .Nd network RIP and router discovery routing daemon
@@ -50,7 +50,7 @@
 .Op Fl P Ar parms
 .Sh DESCRIPTION
 .Nm
-is a dameon invoked at boot time to manage the network
+is a daemon invoked at boot time to manage the network
 routing tables.
 It uses Routing Information Protocol, RIPv1 (RFC\ 1058),
 RIPv2 (RFC\ 1723),
@@ -272,7 +272,7 @@ loop than to solve problems.
 Causes host or point-to-point routes to not be advertised,
 provided there is a network route going the same direction.
 That is a limited kind of aggregation.
-This option is useful on gateways to ethernets that have other gateway
+This option is useful on gateways to Ethernets that have other gateway
 machines connected with point-to-point links such as SLIP.
 .It Fl m
 Causes the machine to advertise a host or point-to-point route to
@@ -452,7 +452,7 @@ specified in "dot" notation (see
 or
 .Pa /etc/hosts ,
 or
-.Xr named 8 
+.Xr named 8
 must have been started before
 .Nm routed Ns .)
 .Pp
@@ -544,7 +544,7 @@ multicast when possible.
 .It Cm no_rdisc
 Disables the Internet Router Discovery Protocol.
 .It Cm no_solicit
-Disables the tranmission of Router Discovery Solicitations.
+Disables the transmission of Router Discovery Solicitations.
 .It Cm send_solicit
 Specifies that Router Discovery solicitations should be sent,
 even on point-to-point links,
@@ -584,7 +584,6 @@ Note that the netmask associated with point-to-point links (such as SLIP
 or PPP, with the IFF_POINTOPOINT flag) is used by
 .Nm
 to infer the netmask used by the remote system when RIPv1 is used.
-.Pp
 .Sh FILES
 .Bl -tag -width /etc/gateways -compact
 .It Pa /etc/gateways
@@ -593,7 +592,6 @@ for distant gateways
 .Sh SEE ALSO
 .Xr icmp 4 ,
 .Xr udp 4 ,
-.Xr gated 8 ,
 .Xr rtquery 8
 .Rs
 .%T Internet Transport Protocols

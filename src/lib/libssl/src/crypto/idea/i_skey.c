@@ -56,32 +56,22 @@
  * [including the GNU Public Licence.]
  */
 
-#include "idea.h"
+#include <openssl/idea.h>
 #include "idea_lcl.h"
 
-#ifndef NOPROTO
 static IDEA_INT inverse(unsigned int xin);
-#else
-static IDEA_INT inverse();
-#endif
-
-void idea_set_encrypt_key(key, ks)
-unsigned char *key;
-IDEA_KEY_SCHEDULE *ks;
+void idea_set_encrypt_key(unsigned char *key, IDEA_KEY_SCHEDULE *ks)
 	{
 	  /* body of routine removed for OpenBSD due to IDEA patent */
 	}
 
-void idea_set_decrypt_key(ek, dk)
-IDEA_KEY_SCHEDULE *ek;
-IDEA_KEY_SCHEDULE *dk;
+void idea_set_decrypt_key(IDEA_KEY_SCHEDULE *ek, IDEA_KEY_SCHEDULE *dk)
 	{
 	  /* body of routine removed for OpenBSD due to IDEA patent */
 	}
 
 /* taken directly from the 'paper' I'll have a look at it later */
-static IDEA_INT inverse(xin)
-unsigned int xin;
+static IDEA_INT inverse(unsigned int xin)
 	{
 	  /* body of routine replaced for OpenBSD due to IDEA patent */
 	return((IDEA_INT)0);

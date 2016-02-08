@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.10 1999/01/10 17:55:01 millert Exp $
+#	$OpenBSD: Makefile,v 1.12 1999/09/28 02:18:30 smurph Exp $
 
 PROG=	ksh
 SRCS=	alloc.c c_ksh.c c_sh.c c_test.c c_ulimit.c edit.c emacs.c \
@@ -9,6 +9,10 @@ SRCS=	alloc.c c_ksh.c c_sh.c c_test.c c_ulimit.c edit.c emacs.c \
 DEFS=	-DHAVE_CONFIG_H -Wall -Wno-unused
 CFLAGS+=${DEFS} -I. -I${.CURDIR} -DKSH
 MAN=	ksh.1 sh.1
+
+.if (${MACHINE_ARCH} == "m88k")
+CFLAGS+=-O0
+.endif
 
 CLEANFILES+=	siglist.out emacs.out
 
@@ -26,5 +30,8 @@ siglist.out: config.h sh.h siglist.in siglist.sh
 
 emacs.out: emacs.c
 	/bin/sh ${.CURDIR}/emacs-gen.sh ${.CURDIR}/emacs.c > emacs.out
+
+check test:
+	/bin/sh ${.CURDIR}/tests/th.sh ${.CURDIR}/tests/th -s ${.CURDIR}/tests -p ./ksh -C pdksh,sh,ksh,posix,posix-upu
 
 .include <bsd.prog.mk>

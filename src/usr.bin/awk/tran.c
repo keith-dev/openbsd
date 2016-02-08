@@ -1,4 +1,4 @@
-/*	$OpenBSD: tran.c,v 1.3 1997/08/25 16:17:14 kstailey Exp $	*/
+/*	$OpenBSD: tran.c,v 1.5 1999/04/20 17:31:31 millert Exp $	*/
 /****************************************************************
 Copyright (C) Lucent Technologies 1997
 All Rights Reserved
@@ -108,7 +108,7 @@ void arginit(int ac, char **av)	/* set up ARGV and ARGC */
 	cp->sval = (char *) ARGVtab;
 	for (i = 0; i < ac; i++) {
 		sprintf(temp, "%d", i);
-		if (isnumber(*av))
+		if (is_number(*av))
 			setsymtab(temp, *av, atof(*av), STR|NUM, ARGVtab);
 		else
 			setsymtab(temp, *av, 0.0, STR, ARGVtab);
@@ -128,7 +128,7 @@ void envinit(char **envp)	/* set up ENVIRON variable */
 		if ((p = strchr(*envp, '=')) == NULL)
 			continue;
 		*p++ = 0;	/* split into two strings at = */
-		if (isnumber(p))
+		if (is_number(p))
 			setsymtab(*envp, p, atof(p), STR|NUM, ENVtab);
 		else
 			setsymtab(*envp, p, 0.0, STR, ENVtab);
@@ -262,11 +262,11 @@ void rehash(Array *tp)	/* rehash items in small table into big one */
 
 Cell *lookup(char *s, Array *tp)	/* look for s in tp */
 {
-	Cell *p, *prev = NULL;
+	Cell *p;
 	int h;
 
 	h = hash(s, tp->size);
-	for (p = tp->tab[h]; p != NULL; prev = p, p = p->cnext)
+	for (p = tp->tab[h]; p != NULL; p = p->cnext)
 		if (strcmp(s, p->nval) == 0)
 			return(p);	/* found it */
 	return(NULL);			/* not found */
@@ -288,6 +288,8 @@ Awkfloat setfval(Cell *vp, Awkfloat f)	/* set float val of a Cell */
 		donefld = 0;	/* mark $1... invalid */
 		donerec = 1;
 	}
+	if (freeable(vp))
+		xfree(vp->sval); /* free any previous string */
 	vp->tval &= ~STR;	/* mark string invalid */
 	vp->tval |= NUM;	/* mark number ok */
 	   dprintf( ("setfval %p: %s = %g, t=%o\n", vp, vp->nval, f, vp->tval) );
@@ -342,7 +344,7 @@ Awkfloat getfval(Cell *vp)	/* get float val of a Cell */
 		recbld();
 	if (!isnum(vp)) {	/* not a number */
 		vp->fval = atof(vp->sval);	/* best guess */
-		if (isnumber(vp->sval) && !(vp->tval&CON))
+		if (is_number(vp->sval) && !(vp->tval&CON))
 			vp->tval |= NUM;	/* make NUM only sparingly */
 	}
 	   dprintf( ("getfval %p: %s = %g, t=%o\n", vp, vp->nval, vp->fval, vp->tval) );

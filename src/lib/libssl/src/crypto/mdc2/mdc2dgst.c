@@ -59,8 +59,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "des.h"
-#include "mdc2.h"
+#include <openssl/des.h>
+#include <openssl/mdc2.h>
 
 #undef c2l
 #define c2l(c,l)	(l =((DES_LONG)(*((c)++)))    , \
@@ -74,14 +74,8 @@
 			*((c)++)=(unsigned char)(((l)>>16L)&0xff), \
 			*((c)++)=(unsigned char)(((l)>>24L)&0xff))
 
-#ifndef NOPROTO
 static void mdc2_body(MDC2_CTX *c, unsigned char *in, unsigned int len);
-#else
-static void mdc2_body();
-#endif
-
-void MDC2_Init(c)
-MDC2_CTX *c;
+void MDC2_Init(MDC2_CTX *c)
 	{
 	c->num=0;
 	c->pad_type=1;
@@ -89,10 +83,7 @@ MDC2_CTX *c;
 	memset(&(c->hh[0]),0x25,MDC2_BLOCK);
 	}
 
-void MDC2_Update(c,in,len)
-MDC2_CTX *c;
-register unsigned char *in;
-unsigned long len;
+void MDC2_Update(MDC2_CTX *c, register unsigned char *in, unsigned long len)
 	{
 	int i,j;
 
@@ -127,52 +118,45 @@ unsigned long len;
 		}
 	}
 
-static void mdc2_body(c,in,len)
-MDC2_CTX *c;
-unsigned char *in;
-unsigned int len;
+static void mdc2_body(MDC2_CTX *c, unsigned char *in, unsigned int len)
 	{
 	register DES_LONG tin0,tin1;
 	register DES_LONG ttin0,ttin1;
 	DES_LONG d[2],dd[2];
-	des_cblock *h,*hh;
 	des_key_schedule k;
 	unsigned char *p;
 	unsigned int i;
-
-	h= (des_cblock *)&(c->h[0]);
-	hh= (des_cblock *)&(c->hh[0]);
 
 	for (i=0; i<len; i+=8)
 		{
 		c2l(in,tin0); d[0]=dd[0]=tin0;
 		c2l(in,tin1); d[1]=dd[1]=tin1;
-		(*h)[0]=((*h)[0]&0x9f)|0x40;
-		(*hh)[0]=((*hh)[0]&0x9f)|0x20;
+		c->h[0]=(c->h[0]&0x9f)|0x40;
+		c->hh[0]=(c->hh[0]&0x9f)|0x20;
 
-		des_set_key(h,k);
-		des_encrypt((DES_LONG *)d,k,1);
+		des_set_odd_parity(&c->h);
+		des_set_key(&c->h,k);
+		des_encrypt(d,k,1);
 
-		des_set_key(hh,k);
-		des_encrypt((DES_LONG *)dd,k,1);
+		des_set_odd_parity(&c->hh);
+		des_set_key(&c->hh,k);
+		des_encrypt(dd,k,1);
 
 		ttin0=tin0^dd[0];
 		ttin1=tin1^dd[1];
 		tin0^=d[0];
 		tin1^=d[1];
 
-		p=(unsigned char *)h;
+		p=c->h;
 		l2c(tin0,p);
 		l2c(ttin1,p);
-		p=(unsigned char *)hh;
+		p=c->hh;
 		l2c(ttin0,p);
 		l2c(tin1,p);
 		}
 	}
 
-void MDC2_Final(md,c)
-unsigned char *md;
-MDC2_CTX *c;
+void MDC2_Final(unsigned char *md, MDC2_CTX *c)
 	{
 	int i,j;
 

@@ -1,5 +1,5 @@
 #  $NetBSD: Makefile,v 1.28 1995/11/20 22:06:19 jtc Exp $
-#  $OpenBSD: Makefile,v 1.17 1999/03/08 19:14:28 millert Exp $
+#  $OpenBSD: Makefile,v 1.22 1999/07/18 19:12:59 deraadt Exp $
 #
 #  @(#)Makefile 5.1beta 93/09/24 
 # 
@@ -13,7 +13,6 @@
 #  ====================================================
 # 
 # 
-
 #
 # There are two options in making libm at fdlibm compile time:
 # 	_IEEE_LIBM 	--- IEEE libm; smaller, and somewhat faster
@@ -47,6 +46,10 @@
 .include <bsd.own.mk>
 
 CFLAGS+= -D__LIBM_PRIVATE -D_USE_WRITE
+
+.if (${MACHINE_ARCH} == "sparc")
+CFLAGS+= -O0
+.endif
 
 .if (${MACHINE_ARCH} == "i386")
 .PATH:	${.CURDIR}/arch/i387
@@ -157,16 +160,73 @@ MLINKS+=j0.3 j1.3 j0.3 jn.3 j0.3 y0.3 j0.3 y1.3 j0.3 yn.3
 MLINKS+=lgamma.3 gamma.3
 MLINKS+=sqrt.3 cbrt.3
 
-.if (${MACHINE_ARCH} == "i386")
-LINKS=	${LIBDIR}/libm.a ${LIBDIR}/libm_i387.a
-.if !defined(NOPROFILE)
-LINKS+=	${LIBDIR}/libm_p.a ${LIBDIR}/libm_i387_p.a
-.endif
-.if !defined(NOPIC)
-LINKS+= ${LIBDIR}/libm.so.${SHLIB_MAJOR}.${SHLIB_MINOR} \
-	${LIBDIR}/libm_i387.so.${SHLIB_MAJOR}.${SHLIB_MINOR}
-LINKS+= ${LIBDIR}/libm_pic.a ${LIBDIR}/libm_i387_pic.a
-.endif
-.endif
+# float versions
+MLINKS+=acos.3 acosf.3
+MLINKS+=acosh.3 acoshf.3
+MLINKS+=asin.3 asinf.3
+MLINKS+=asinh.3 asinhf.3
+MLINKS+=atan.3 atanf.3
+MLINKS+=atan2.3 atan2f.3
+MLINKS+=atanh.3 atanhf.3
+MLINKS+=ceil.3 ceilf.3
+MLINKS+=cos.3 cosf.3
+MLINKS+=cosh.3 coshf.3
+MLINKS+=erf.3 erfcf.3
+MLINKS+=erf.3 erff.3
+MLINKS+=exp.3 expf.3
+MLINKS+=exp.3 expm1f.3
+MLINKS+=exp.3 log10f.3
+MLINKS+=exp.3 log1pf.3
+MLINKS+=exp.3 logf.3
+MLINKS+=exp.3 powf.3
+MLINKS+=fabs.3 fabsf.3
+MLINKS+=floor.3 floorf.3
+MLINKS+=fmod.3 fmodf.3
+MLINKS+=hypot.3 cabsf.3
+MLINKS+=hypot.3 hypotf.3
+MLINKS+=ieee.3 copysignf.3
+MLINKS+=ieee.3 finitef.3
+MLINKS+=ieee.3 ieeef.3
+MLINKS+=ieee.3 ilogbf.3
+MLINKS+=ieee.3 nextafterf.3
+MLINKS+=ieee.3 remainderf.3
+MLINKS+=ieee.3 scalbnf.3
+MLINKS+=ieee_test.3 ieee_testf.3
+MLINKS+=ieee_test.3 logbf.3
+MLINKS+=ieee_test.3 scalbf.3
+MLINKS+=ieee_test.3 significandf.3
+MLINKS+=j0.3 j0f.3
+MLINKS+=j0.3 j1f.3
+MLINKS+=j0.3 jnf.3
+MLINKS+=j0.3 y0f.3
+MLINKS+=j0.3 y1f.3
+MLINKS+=j0.3 ynf.3
+MLINKS+=lgamma.3 gammaf.3
+MLINKS+=lgamma.3 lgammaf.3
+MLINKS+=math.3 mathf.3
+MLINKS+=rint.3 rintf.3
+MLINKS+=sin.3 sinf.3
+MLINKS+=sinh.3 sinhf.3
+MLINKS+=sqrt.3 cbrtf.3
+MLINKS+=sqrt.3 sqrtf.3
+MLINKS+=tan.3 tanf.3
+MLINKS+=tanh.3 tanhf.3
+
+#.if (${MACHINE_ARCH} == "i386")
+#LINKS=	${LIBDIR}/libm.a ${LIBDIR}/libm_i387.a
+#.if !defined(NOPROFILE)
+#LINKS+=	${LIBDIR}/libm_p.a ${LIBDIR}/libm_i387_p.a
+#.endif
+#.if !defined(NOPIC)
+#LINKS+= ${LIBDIR}/libm.so.${SHLIB_MAJOR}.${SHLIB_MINOR} \
+#	${LIBDIR}/libm_i387.so.${SHLIB_MAJOR}.${SHLIB_MINOR}
+#LINKS+= ${LIBDIR}/libm_pic.a ${LIBDIR}/libm_i387_pic.a
+#.endif
+#.endif
+
+#e_acos.o: 
+#	cpp  -D__LIBM_PRIVATE -D_USE_WRITE -D_MULTI_LIBM -D_POSIX_MODE \
+#	/usr/src/lib/libm/arch/mc68881/e_acos.S |  as -o e_acos.o
+
 
 .include <bsd.lib.mk>

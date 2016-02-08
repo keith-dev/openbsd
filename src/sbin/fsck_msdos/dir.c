@@ -1,4 +1,4 @@
-/*	$OpenBSD: dir.c,v 1.9 1998/01/11 20:40:31 provos Exp $	*/
+/*	$OpenBSD: dir.c,v 1.11 1999/09/06 12:40:52 espie Exp $	*/
 /*	$NetBSD: dir.c,v 1.11 1997/10/17 11:19:35 ws Exp $	*/
 
 /*
@@ -37,7 +37,7 @@
 
 
 #ifndef lint
-static char rcsid[] = "$OpenBSD: dir.c,v 1.9 1998/01/11 20:40:31 provos Exp $";
+static char rcsid[] = "$OpenBSD: dir.c,v 1.11 1999/09/06 12:40:52 espie Exp $";
 #endif /* not lint */
 
 #include <stdio.h>
@@ -174,20 +174,23 @@ fullpath(dir)
 	char *cp, *np;
 	int nl;
 
-	cp = namebuf + sizeof namebuf - 1;
-	*cp = '\0';
-	do {
+	cp = namebuf + sizeof namebuf;
+	*--cp = '\0';
+	for(;;) {
 		np = dir->lname[0] ? dir->lname : dir->name;
 		nl = strlen(np);
-		if ((cp -= nl) <= namebuf + 1)
+			/* cf dosDirEntry, sizeof(lname) < MAXPATHLEN, so test is safe */
+		if (cp <= namebuf + 1 + nl) {
+			*--cp = '?';
 			break;
+		}
+		cp -= nl;
 		(void)memcpy(cp, np, nl);
+		dir = dir->parent;
+		if (!dir)
+			break;
 		*--cp = '/';
-	} while ((dir = dir->parent) != NULL);
-	if (dir != NULL && dir->parent != NULL)
-		*--cp = '?';
-	else
-		cp++;
+	}
 	return (cp);
 }
 
@@ -942,7 +945,7 @@ reconnect(dosfs, boot, fat, head)
 	struct dosDirEntry d;
 	u_char *p;
 
-	if (ask(1, "Reconnect"))
+	if (!ask(1, "Reconnect"))
 		return FSERROR;
 
 	if (!lostDir) {

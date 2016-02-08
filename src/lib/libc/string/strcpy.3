@@ -33,13 +33,14 @@
 .\" OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 .\" SUCH DAMAGE.
 .\"
-.\"	$OpenBSD: strcpy.3,v 1.5 1999/03/06 23:36:27 millert Exp $
+.\"	$OpenBSD: strcpy.3,v 1.9 1999/06/29 18:01:33 aaron Exp $
 .\"
 .Dd June 29, 1991
 .Dt STRCPY 3
-.Os BSD 4
+.Os
 .Sh NAME
-.Nm strcpy
+.Nm strcpy ,
+.Nm strncpy
 .Nd copy strings
 .Sh SYNOPSIS
 .Fd #include <string.h>
@@ -61,7 +62,6 @@ to
 .Ql \e0
 character).
 .Pp
-The
 .Fn strncpy
 copies not more than
 .Fa len
@@ -92,37 +92,39 @@ return
 .Fa dst .
 .Sh EXAMPLES
 The following sets
-.Dq Li chararray
+.Va chararray
 to
-.Dq Li abc\e0\e0\e0 :
+.Dq abc\e0\e0\e0 :
 .Bd -literal -offset indent
 (void)strncpy(chararray, "abc", 6);
 .Ed
 .Pp
 The following sets
-.Dq Li chararray
+.Va chararray
 to
-.Dq Li abcdef
+.Dq abcdef
 and does
 .Em not
-NUL-terminate chararray because the source string is >= the length parameter.
+null terminate
+.Va chararray
+because the source string is >= the length parameter.
 .Fn strncpy
 .Em only
-NUL-terminates the destination string when then length of the source
+null terminates the destination string when then length of the source
 string is less than the length parameter.
 .Bd -literal -offset indent
 (void)strncpy(chararray, "abcdefgh", 6);
 .Ed
 .Pp
 The following copies as many characters from
-.Dq Li input
+.Va input
 to
-.Dq Li buf
-as will fit and NUL-terminates the result.  Because
+.Va buf
+as will fit and null terminates the result.  Because
 .Fn strncpy
 does
 .Em not
-guarantee to NUL-terminate the string itself, we must do this by hand.
+guarantee to null terminate the string itself, we must do this by hand.
 .Bd -literal -offset indent
 char buf[BUFSIZ];
 
@@ -143,7 +145,7 @@ is simply:
 .Xr memccpy 3 ,
 .Xr memcpy 3 ,
 .Xr memmove 3 ,
-.Xr strlcpy 3 
+.Xr strlcpy 3
 .Sh STANDARDS
 The
 .Fn strcpy

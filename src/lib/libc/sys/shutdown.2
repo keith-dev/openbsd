@@ -1,4 +1,4 @@
-.\"	$OpenBSD: shutdown.2,v 1.6 1999/02/15 21:48:57 millert Exp $
+.\"	$OpenBSD: shutdown.2,v 1.8 1999/06/29 14:10:21 aaron Exp $
 .\"	$NetBSD: shutdown.2,v 1.5 1995/02/27 12:37:11 cgd Exp $
 .\"
 .\" Copyright (c) 1983, 1991, 1993
@@ -36,7 +36,7 @@
 .\"
 .Dd June 4, 1993
 .Dt SHUTDOWN 2
-.Os BSD 4.2
+.Os
 .Sh NAME
 .Nm shutdown
 .Nd shut down part of a full-duplex connection
@@ -68,7 +68,7 @@ is
 .Ar SHUT_RDWR ,
 further sends and receives will be disallowed.
 .Sh RETURN VALUES
-A 0 is returned if the call succeeds, -1 if it fails.
+A 0 is returned if the call succeeds, \-1 if it fails.
 .Sh ERRORS
 The call succeeds unless:
 .Bl -tag -width Er

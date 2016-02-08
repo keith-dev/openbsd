@@ -56,7 +56,7 @@
  * [including the GNU Public Licence.]
  */
 
-#include "idea.h"
+#include <openssl/idea.h>
 #include "idea_lcl.h"
 
 /* The input and output encrypted as though 64bit cfb mode is being
@@ -64,20 +64,17 @@
  * 64bit block we have used is contained in *num;
  */
 
-void idea_cfb64_encrypt(in, out, length, schedule, ivec, num, encrypt)
-unsigned char *in;
-unsigned char *out;
-long length;
-IDEA_KEY_SCHEDULE *schedule;
-unsigned char *ivec;
-int *num;
-int encrypt;
+void idea_cfb64_encrypt(unsigned char *in, unsigned char *out, long length,
+	     IDEA_KEY_SCHEDULE *schedule, unsigned char *ivec, int *num,
+	     int encrypt)
 	{
 	  /* body of routine replaced for OpenBSD due to IDEA patent */
 
 	  /* this sucks, but since these routines don't have a failure mode
 	   * then we have to do this, which "fails" but guarantees we
 	   * don't give anything away if we are accidentally compiled in.
+	   * this shouldn't matter much anyway, since we always compile
+	   * with NO_IDEA - there are plenty of good (free) alternatives.
 	   */
 	  memset (out, 0, length);  
 	}

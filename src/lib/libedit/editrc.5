@@ -1,4 +1,4 @@
-.\"	$OpenBSD: editrc.5,v 1.4 1998/12/15 01:20:50 aaron Exp $
+.\"	$OpenBSD: editrc.5,v 1.9 1999/09/23 04:12:01 alex Exp $
 .\"	$NetBSD: editrc.5,v 1.4 1997/04/24 20:20:31 christos Exp $
 .\"
 .\" Copyright (c) 1997 The NetBSD Foundation, Inc.
@@ -35,8 +35,8 @@
 .\" POSSIBILITY OF SUCH DAMAGE.
 .\"
 .Dd January 11, 1997
-.Os BSD 4.4
 .Dt EDITRC 5
+.Os
 .Sh NAME
 .Nm editrc
 .Nd configuration file for editline library
@@ -57,12 +57,12 @@ or
 .Ar command
 is one of the
 .Xr editline 3
-builtin commands.
+built-in commands.
 Refer to
-.Sx BUILTIN COMMANDS
+.Sx BUILT-IN COMMANDS
 for more information.
 .Pp
-.Ar prog 
+.Ar prog
 is the program name string that a program defines when it calls
 .Xr el_init 3
 to setup
@@ -80,16 +80,16 @@ style
 regular expression, in which case
 .Ar command
 will be executed for any program that matches the regular expression.
-.Sh BUILTIN COMMANDS
+.Sh BUILT-IN COMMANDS
 The
 .Nm editline
-library has some builtin commands, which affect the way
+library has some built-in commands, which affect the way
 that the line editing and history functions operate.
-These are based on similar named builtins present in the
+These are based on similarly named built-in commands present in the
 .Xr tcsh 1
 shell.
 .Pp
-The following builtin commands are available:
+The following built-in commands are available:
 .Bl -tag -width 4n
 .It Ic bind Xo
 .Op Fl a
@@ -118,11 +118,11 @@ Options include:
 .It Fl e
 Bind all keys to the standard GNU Emacs-like bindings.
 .It Fl v
-Bind all keys to the standard 
+Bind all keys to the standard
 .Xr vi 1 -like
 bindings.
 .It Fl a
-List or change key bindings in the 
+List or change key bindings in the
 .Xr vi 1
 mode alternate (command mode) key map.
 .It Fl k
@@ -214,7 +214,7 @@ or
 indicating that the terminal does or does not have that capability.
 .Pp
 .Fl s
-returns an emptry string for non-existant capabilities, rather than
+returns an emptry string for non-existent capabilities, rather than
 causing an error.
 .Fl v
 causes messages to be verbose.

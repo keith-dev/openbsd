@@ -1,6 +1,6 @@
 #! /bin/sh
 #
-# $Id: configure.gnu,v 1.1 1997/11/30 07:48:25 millert Exp $
+# $Id: configure.gnu,v 1.2 1999/04/29 22:50:57 millert Exp $
 #
 # GNU configure-like front end to metaconfig's Configure.
 #
@@ -16,8 +16,8 @@
 # include this script in your own package.
 #
 # $Log: configure.gnu,v $
-# Revision 1.1  1997/11/30 07:48:25  millert
-# perl 5.004_04
+# Revision 1.2  1999/04/29 22:50:57  millert
+# perl5.005_03 (stock)
 #
 # Revision 3.0.1.1  1995/07/25  14:16:21  ram
 # patch56: created

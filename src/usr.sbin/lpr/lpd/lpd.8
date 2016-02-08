@@ -1,4 +1,4 @@
-.\"	$OpenBSD: lpd.8,v 1.5 1997/07/17 07:43:07 deraadt Exp $
+.\"	$OpenBSD: lpd.8,v 1.9 1999/10/17 19:59:44 aaron Exp $
 .\"
 .\" Copyright (c) 1983, 1991, 1993
 .\"	The Regents of the University of California.  All rights reserved.
@@ -35,7 +35,7 @@
 .\"
 .Dd April 19, 1994
 .Dt LPD 8
-.Os BSD 4.4
+.Os
 .Sh NAME
 .Nm lpd
 .Nd line printer spooler daemon
@@ -43,7 +43,7 @@
 .Nm lpd
 .Op Fl l
 .Sh DESCRIPTION
-.Nm Lpd
+.Nm
 is the line printer daemon (spool area handler) and is normally invoked
 at boot time from the
 .Xr rc 8
@@ -59,13 +59,11 @@ transfer files to the spooling area, display the queue,
 or remove jobs from the queue.  In each case, it forks a child to handle
 the request so the parent can continue to listen for more requests.
 .Pp
-Available options:
+The options are as follows:
 .Bl -tag -width Ds
 .It Fl l
-The
-.Fl l
-flag causes
-.Nm lpd
+Cause
+.Nm
 to log valid requests received from the network. This can be useful
 for debugging purposes.
 .El
@@ -76,7 +74,7 @@ one of the machines listed in the file
 or
 .Pa /etc/hosts.lpd .
 Second, if the
-.Li rs
+.Dq rs
 capability is specified in the
 .Xr printcap
 entry for the printer being accessed,
@@ -96,7 +94,7 @@ The daemon begins processing files
 after it has successfully set the lock for exclusive
 access (described a bit later),
 and scans the spool directory
-for files beginning with 
+for files beginning with
 .Em cf .
 Lines in each
 .Em cf
@@ -117,19 +115,21 @@ Title.  String to be used as the title for
 .Xr pr 1 .
 .It H
 Host Name.  Name of the machine where
-.Xr lpr
+.Xr lpr 1
 was invoked.
 .It P
 Person.  Login name of the person who invoked
-.Xr lpr .
+.Xr lpr 1 .
 This is used to verify ownership by
-.Xr lprm .
+.Xr lprm 1 .
 .It M
 Send mail to the specified user when the current print job completes.
 .It f
 Formatted File.  Name of a file to print which is already formatted.
 .It l
-Like ``f'' but passes control characters and does not make page breaks.
+Like
+.Dq f
+but passes control characters and does not make page breaks.
 .It p
 Name of a file to print using
 .Xr pr 1
@@ -175,22 +175,22 @@ Indent.  The number of characters to indent the output by (in ascii).
 Unlink.  Name of file to remove upon completion of printing.
 .It N
 File name.  The name of the file which is being printed, or a blank
-for the standard input (when 
-.Xr lpr
+for the standard input (when
+.Xr lpr 1
 is invoked in a pipeline).
 .El
 .Pp
 If a file cannot be opened, a message will be logged via
 .Xr syslog 3
 using the
-.Em LOG_LPR
+.Dv LOG_LPR
 facility.
-.Nm Lpd
+.Nm
 will try up to 20 times
 to reopen a file it expects to be there, after which it will
 skip the file to be printed.
 .Pp
-.Nm Lpd
+.Nm
 uses
 .Xr flock 2
 to provide exclusive access to the lock file and to prevent multiple
@@ -200,10 +200,10 @@ The lock file is kept in a readable
 .Tn ASCII
 form
 and contains two lines.
-The first is the process id of the daemon and the second is the control
+The first is the process ID of the daemon and the second is the control
 file name of the current job being printed.  The second line is updated to
 reflect the current status of
-.Nm lpd
+.Nm
 for the programs
 .Xr lpq 1
 and
@@ -224,20 +224,21 @@ socket for local requests
 lists machine names allowed printer access
 .It Pa /etc/hosts.lpd
 lists machine names allowed printer access,
-but not under same administrative control.
+but not under same administrative control
 .El
 .Sh SEE ALSO
-.Xr lpc 8 ,
-.Xr pac 8 ,
-.Xr lpr 1 ,
 .Xr lpq 1 ,
+.Xr lpr 1 ,
 .Xr lprm 1 ,
 .Xr syslog 3 ,
-.Xr printcap 5
+.Xr printcap 5 ,
+.Xr lpc 8 ,
+.Xr pac 8
 .Rs
 .%T "BSD 4.3 Line printer manual"
 .Re
 .Sh HISTORY
 An
 .Nm
-daemon appeared in Version 6 AT&T UNIX.
+daemon appeared in
+.At v6 .

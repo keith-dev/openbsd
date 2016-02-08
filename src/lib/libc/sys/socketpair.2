@@ -1,4 +1,4 @@
-.\"	$OpenBSD: socketpair.2,v 1.4 1998/06/08 17:24:01 deraadt Exp $
+.\"	$OpenBSD: socketpair.2,v 1.10 1999/07/06 18:21:04 deraadt Exp $
 .\"	$NetBSD: socketpair.2,v 1.5 1995/02/27 12:38:00 cgd Exp $
 .\"
 .\" Copyright (c) 1983, 1991, 1993
@@ -36,7 +36,7 @@
 .\"
 .Dd June 4, 1993
 .Dt SOCKETPAIR 2
-.Os BSD 4.2
+.Os
 .Sh NAME
 .Nm socketpair
 .Nd create a pair of connected sockets
@@ -62,7 +62,7 @@ and
 .Fa sv Ns [1] .
 The two sockets are indistinguishable.
 .Sh RETURN VALUES
-A 0 is returned if the call succeeds, -1 if it fails.
+A 0 is returned if the call succeeds, \-1 if it fails.
 .Sh ERRORS
 The call succeeds unless:
 .Bl -tag -width Er
@@ -72,17 +72,20 @@ Too many descriptors are in use by this process.
 The specified address family is not supported on this machine.
 .It Bq Er EPROTONOSUPPORT
 The specified protocol is not supported on this machine.
-.It Bq Er EOPNOSUPPORT
+.It Bq Er EOPNOTSUPP
 The specified protocol does not support creation of socket pairs.
 .It Bq Er EFAULT
 The address
 .Fa sv
 does not specify a valid part of the
 process address space.
+.It Bq Er ENFILE
+The system file table is full.
+.El
 .Sh SEE ALSO
+.Xr pipe 2 ,
 .Xr read 2 ,
-.Xr write 2 ,
-.Xr pipe 2
+.Xr write 2
 .Sh BUGS
 This call is currently implemented only for the
 .Tn LOCAL

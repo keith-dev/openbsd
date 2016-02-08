@@ -1,4 +1,4 @@
-/*	$OpenBSD: parse.c,v 1.17 1998/12/05 00:06:29 espie Exp $	*/
+/*	$OpenBSD: parse.c,v 1.21 1999/10/05 22:08:07 espie Exp $	*/
 /*	$NetBSD: parse.c,v 1.29 1997/03/10 21:20:04 christos Exp $	*/
 
 /*
@@ -43,7 +43,7 @@
 #if 0
 static char sccsid[] = "@(#)parse.c	8.3 (Berkeley) 3/19/94";
 #else
-static char rcsid[] = "$OpenBSD: parse.c,v 1.17 1998/12/05 00:06:29 espie Exp $";
+static char rcsid[] = "$OpenBSD: parse.c,v 1.21 1999/10/05 22:08:07 espie Exp $";
 #endif
 #endif /* not lint */
 
@@ -112,7 +112,9 @@ static char rcsid[] = "$OpenBSD: parse.c,v 1.17 1998/12/05 00:06:29 espie Exp $"
 #define	CONTINUE	1
 #define	DONE		0
 static Lst     	    targets;	/* targets we're working on */
+#ifdef CLEANUP
 static Lst     	    targCmds;	/* command lines for targets */
+#endif
 static Boolean	    inLine;	/* true if currently in a dependency
 				 * line or its commands */
 typedef struct {
@@ -251,7 +253,7 @@ static int ParseAddDir __P((ClientData, ClientData));
 static int ParseClearPath __P((ClientData, ClientData));
 static void ParseDoDependency __P((char *));
 static int ParseAddCmd __P((ClientData, ClientData));
-static int ParseReadc __P((void));
+static int __inline ParseReadc __P((void));
 static void ParseUnreadc __P((int));
 static void ParseHasCommands __P((ClientData));
 static void ParseDoInclude __P((char *));
@@ -811,11 +813,34 @@ ParseDoDependency (line)
 
     do {
 	for (cp = line;
-	     *cp && !isspace (*cp) &&
-	     (*cp != '!') && (*cp != ':') && (*cp != '(');
+	     *cp && !isspace (*cp) && (*cp != '(');
 	     cp++)
 	{
-	    if (*cp == '$') {
+	    /*
+	     * We don't want to end a word on ':' or '!' if there is a
+	     * better match later on in the string.  By "better" I mean
+	     * one that is followed by whitespace.  This allows the user
+	     * to have targets like:
+	     *    fie::fi:fo: fum
+	     * where "fie::fi:fo" is the target.  In real life this is used
+	     * for perl5 library man pages where "::" separates an object
+	     * from its class.  Ie: "File::Spec::Unix".  This behaviour
+	     * is also consistent with other versions of make.
+	     */
+	    if (*cp == '!' || *cp == ':') {
+		char *p = cp + 1;
+
+		if (*p == '\0')
+		    break;			/* no chance, not enough room */
+		/*
+		 * Only end the word on ':' or '!' if there is not
+		 * a match later on followed by whitespace.
+		 */
+		while ((p = strchr(p + 1, *cp)) && !isspace(*(p + 1)))
+		    ;
+		if (!p || !isspace(*(p + 1)))
+		    break;
+	    } else if (*cp == '$') {
 		/*
 		 * Must be a dynamic source (would have been expanded
 		 * otherwise), so call the Var module to parse the puppy
@@ -2033,7 +2058,7 @@ ParseEOF (opened)
  * Side Effects:
  *---------------------------------------------------------------------
  */
-static int
+static int __inline
 ParseReadc()
 {
     if (curFILE)
@@ -2491,7 +2516,9 @@ Parse_File(name, stream)
 			 * commands of all targets in the dependency spec
 			 */
 			Lst_ForEach (targets, ParseAddCmd, cp);
+#ifdef CLEANUP
 			Lst_AtEnd(targCmds, (ClientData) line);
+#endif
 			continue;
 		    } else {
 			Parse_Error (PARSE_FATAL,
@@ -2614,18 +2641,22 @@ Parse_Init ()
     parseIncPath = Lst_Init (FALSE);
     sysIncPath = Lst_Init (FALSE);
     includes = Lst_Init (FALSE);
+#ifdef CLEANUP
     targCmds = Lst_Init (FALSE);
+#endif
 }
 
 void
 Parse_End()
 {
+#ifdef CLEANUP
     Lst_Destroy(targCmds, (void (*) __P((ClientData))) free);
     if (targets)
 	Lst_Destroy(targets, NOFREE);
     Lst_Destroy(sysIncPath, Dir_Destroy);
     Lst_Destroy(parseIncPath, Dir_Destroy);
     Lst_Destroy(includes, NOFREE);	/* Should be empty now */
+#endif
 }
 
 

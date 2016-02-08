@@ -1,4 +1,4 @@
-/*	$OpenBSD: encrypt.c,v 1.7 1997/06/17 21:03:40 kstailey Exp $	*/
+/*	$OpenBSD: encrypt.c,v 1.11 1999/09/03 18:13:37 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1996, Jason Downs.  All rights reserved.
@@ -33,6 +33,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <pwd.h>
+#include <ctype.h>
 
 /*
  * Very simple little program, for encrypting passwords from the command
@@ -52,7 +53,9 @@ char buffer[_PASSWORD_LEN];
 
 void usage()
 {
-    errx(1, "usage: %s [-k] [-b rounds] [-m] [-s salt] [string]", progname);
+    fprintf(stderr, "usage: %s [-k] [-b rounds] [-m] [-s salt] [-p | string]\n",
+	progname);
+    exit(1);
 }
 
 char *trim(line)
@@ -75,8 +78,8 @@ void print_passwd(char *string, int operation, void *extra)
 {
      char msalt[3], *salt;
      struct passwd pwd;
-     extern char *bcrypt_gensalt __P((int));
-     extern pwd_gensalt __P((char *, int, struct passwd *, char));
+     extern int pwd_gensalt __P((char *, int, struct passwd *, char));
+     extern void to64 __P((char *, int32_t, int n));
 
      switch(operation) {
      case DO_MAKEKEY:
@@ -125,6 +128,7 @@ int main(argc, argv)
 {
     int opt;
     int operation = -1;
+    int prompt = 0;
     int rounds;
     void *extra;                       /* Store salt or number of rounds */
 
@@ -136,7 +140,7 @@ int main(argc, argv)
     if (strcmp(progname, "makekey") == 0)
 	 operation = DO_MAKEKEY;
 
-    while ((opt = getopt(argc, argv, "kms:b:")) != -1) {
+    while ((opt = getopt(argc, argv, "kmps:b:")) != -1) {
     	switch (opt) {
 	case 'k':                       /* Stdin/Stdout Unix crypt */
 	    if (operation != -1)
@@ -144,9 +148,14 @@ int main(argc, argv)
 	    operation = DO_MAKEKEY;
 	    break;
 	case 'm':                       /* MD5 password hash */
-	    if (operation != -1)
+	    if (operation != -1 || prompt)
 		 usage();
 	    operation = DO_MD5;
+	    break;
+	case 'p':
+	    if (operation != -1)
+		 usage();
+	    prompt = 1;
 	    break;
 	case 's':                       /* Unix crypt (DES) */
 	    if (operation != -1)
@@ -171,23 +180,33 @@ int main(argc, argv)
     if (((argc - optind) < 1) || operation == DO_MAKEKEY) {
     	char line[BUFSIZ], *string;
 
-    	/* Encrypt stdin to stdout. */
-	while (!feof(stdin) && (fgets(line, sizeof(line), stdin) != NULL)) {
-	    /* Kill the whitesapce. */
-	    string = trim(line);
-	    if (*string == '\0')
-	    	continue;
-	    
+	if (prompt) {
+	    string = getpass("Enter string: ");
 	    print_passwd(string, operation, extra);
-
-	    if (operation == DO_MAKEKEY) {
-	        fflush(stdout);
-		break;
-	    }
 	    fputc('\n', stdout);
+	} else {
+	    /* Encrypt stdin to stdout. */
+	    while (!feof(stdin) && (fgets(line, sizeof(line), stdin) != NULL)) {
+		/* Kill the whitesapce. */
+		string = trim(line);
+		if (*string == '\0')
+		    continue;
+		
+		print_passwd(string, operation, extra);
+
+		if (operation == DO_MAKEKEY) {
+		    fflush(stdout);
+		    break;
+		}
+		fputc('\n', stdout);
+	    }
 	}
     } else {
     	char *string;
+
+	/* can't combine -p with a supplied string */
+	if (prompt)
+	    usage();
 
     	/* Perhaps it isn't worth worrying about, but... */
     	string = strdup(argv[optind]);

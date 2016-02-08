@@ -1,4 +1,4 @@
-.\"	$OpenBSD: glob.3,v 1.7 1998/02/03 18:25:55 millert Exp $
+.\"	$OpenBSD: glob.3,v 1.13 1999/09/02 15:54:29 aaron Exp $
 .\"
 .\" Copyright (c) 1989, 1991, 1993, 1994
 .\"	The Regents of the University of California.  All rights reserved.
@@ -44,7 +44,7 @@
 .Fd #include <glob.h>
 .Ft int
 .Fn glob "const char *pattern" "int flags" "const int (*errfunc)(const char *, int)" "glob_t *pglob"
-.Ft void 
+.Ft void
 .Fn globfree "glob_t *pglob"
 .Sh DESCRIPTION
 The
@@ -54,9 +54,9 @@ is a pathname generator that implements the rules for file name pattern
 matching used by the shell.
 .Pp
 The include file
-.Pa glob.h
+.Aq Pa glob.h
 defines the structure type
-.Fa glob_t ,
+.Li glob_t ,
 which contains at least the following fields:
 .Bd -literal
 typedef struct {
@@ -71,9 +71,7 @@ typedef struct {
 The argument
 .Fa pattern
 is a pointer to a pathname pattern to be expanded.
-The
 .Fn glob
-argument
 matches all accessible pathnames against the pattern and creates
 a list of the pathnames that match.
 In order to have access to a pathname,
@@ -87,16 +85,13 @@ that contains any of the special characters
 or
 .Ql [ .
 .Pp
-The
-.Fn glob
-argument
-stores the number of matched pathnames into the
+The number of matched pathnames is stored in the
 .Fa gl_pathc
-field, and a pointer to a list of pointers to pathnames into the
+field, and a pointer to a list of pointers to pathnames in the
 .Fa gl_pathv
 field.
 The first pointer after the last pathname is
-.Dv NULL . 
+.Dv NULL .
 If the pattern does not match any pathnames, the returned number of
 matched paths is set to zero.
 .Pp
@@ -118,7 +113,7 @@ is the bitwise inclusive
 .Tn OR
 of any of the following
 values defined in
-.Pa glob.h :
+.Aq Pa glob.h :
 .Bl -tag -width GLOB_ALTDIRFUNC
 .It Dv GLOB_APPEND
 Append pathnames generated to the ones from a previous call (or calls)
@@ -146,8 +141,7 @@ field.
 If this flag is set,
 .Fa gl_offs
 is used to specify how many
-.Dv NULL
-pointers to prepend to the beginning
+null pointers to prepend to the beginning
 of the
 .Fa gl_pathv
 field.
@@ -155,13 +149,10 @@ In other words,
 .Fa gl_pathv
 will point to
 .Fa gl_offs
-.Dv NULL
-pointers,
+null pointers,
 followed by
 .Fa gl_pathc
-pathname pointers, followed by a
-.Dv NULL
-pointer.
+pathname pointers, followed by a null pointer.
 .It Dv GLOB_ERR
 Causes
 .Fn glob
@@ -208,8 +199,12 @@ however, they are non-standard extensions to
 .St -p1003.2 .
 .Bl -tag -width GLOB_ALTDIRFUNC
 .It Dv GLOB_ALTDIRFUNC
-The following additional fields in the pglob structure have been
-initialized with alternate functions for glob to use to open, read,
+The following additional fields in the
+.Fa pglob
+structure have been
+initialized with alternate functions for
+.Fn glob
+to use to open, read,
 and close directories and to get stat information on names found
 in those directories.
 .Bd -literal
@@ -224,33 +219,37 @@ This extension is provided to allow programs such as
 .Xr restore 8
 to provide globbing from directories stored on tape.
 .It Dv GLOB_BRACE
-Pre-process the pattern string to expand 
-.Ql {pat,pat,...} 
-strings like 
+Pre-process the pattern string to expand
+.Ql {pat,pat,...}
+strings like
 .Xr csh 1 .
-The pattern 
+The pattern
 .Ql {}
 is left unexpanded for historical reasons.
-.Xr (Csh 1 
-does the same thing to 
+.Xr (csh 1
+does the same thing to
 ease typing
-of 
-.Xr find 1 
+of
+.Xr find 1
 patterns.)
 .It Dv GLOB_MAGCHAR
 Set by the
 .Fn glob
 function if the pattern included globbing characters.
-See the description of the usage of the 
+See the description of the usage of the
 .Fa gl_matchc
 structure member for more details.
 .It Dv GLOB_NOMAGIC
-Is the same as 
-.Dv GLOB_NOCHECK 
+Is the same as
+.Dv GLOB_NOCHECK
 but it only appends the
 .Fa pattern
-if it does not contain any of the special characters ``*'', ``?'' or ``[''.
-.Dv GLOB_NOMAGIC 
+if it does not contain any of the special characters
+.Ql * ,
+.Ql ? ,
+or
+.Ql [ .
+.Dv GLOB_NOMAGIC
 is provided to simplify implementing the historic
 .Xr csh 1
 globbing behavior and should probably not be used anywhere else.
@@ -266,25 +265,24 @@ to user name home directories.
 If, during the search, a directory is encountered that cannot be opened
 or read and
 .Fa errfunc
-is
-.Pf non- Dv NULL , 
+is non-null,
 .Fn glob
 calls
 .Fa (*errfunc)(path, errno) .
 This may be unintuitive: a pattern like
-.Ql */Makefile
+.Dq */Makefile
 will try to
 .Xr stat 2
-.Ql foo/Makefile
+.Dq foo/Makefile
 even if
-.Ql foo
+.Dq foo
 is not a directory, resulting in a
 call to
 .Fa errfunc .
 The error routine can suppress this action by testing for
-.Dv ENOENT
+.Er ENOENT
 and
-.Dv ENOTDIR ; 
+.Er ENOTDIR ;
 however, the
 .Dv GLOB_ERR
 flag will still cause an immediate
@@ -333,27 +331,30 @@ In addition the fields of
 contain the values described below:
 .Bl -tag -width GLOB_NOCHECK
 .It Fa gl_pathc
-contains the total number of matched pathnames so far.
-This includes other matches from previous invocations of 
+Contains the total number of matched pathnames so far.
+This includes other matches from previous invocations of
 .Fn glob
-if 
+if
 .Dv GLOB_APPEND
 was specified.
 .It Fa gl_matchc
-contains the number of matched pathnames in the current invocation of
+Contains the number of matched pathnames in the current invocation of
 .Fn glob .
 .It Fa gl_flags
-contains a copy of the 
+Contains a copy of the
 .Fa flags
 parameter with the bit
 .Dv GLOB_MAGCHAR
 set if
 .Fa pattern
-contained any of the special characters ``*'', ``?'' or ``['', cleared
-if not.
+contained any of the special characters
+.Ql * ,
+.Ql ? ,
+or
+.Ql [ ,
+cleared if not.
 .It Fa gl_pathv
-contains a pointer to a
-.Dv NULL Ns -terminated 
+Contains a pointer to a null-terminated
 list of matched pathnames.
 However, if
 .Fa gl_pathc
@@ -364,9 +365,9 @@ are undefined.
 .Pp
 If
 .Fn glob
-terminates due to an error, it sets 
-.Va errno 
-and returns one of the following non-zero constants, which are defined 
+terminates due to an error, it sets
+.Va errno
+and returns one of the following non-zero constants, which are defined
 in the include file
 .Aq Pa glob.h :
 .Bl -tag -width GLOB_NOCHECK
@@ -420,15 +421,15 @@ and
 .St -xpg4.2 .
 Note, however, that the flags
 .Dv GLOB_ALTDIRFUNC,
-.Dv GLOB_BRACE
+.Dv GLOB_BRACE,
 .Dv GLOB_MAGCHAR,
 .Dv GLOB_NOMAGIC,
 .Dv GLOB_QUOTE,
 and
 .Dv GLOB_TILDE,
-and the fields 
+and the fields
 .Fa gl_matchc
-and 
+and
 .Fa gl_flags
 should not be used by applications striving for strict
 standards conformance.
@@ -437,7 +438,7 @@ The
 .Fn glob
 and
 .Fn globfree
-functions first appeared in 
+functions first appeared in
 .Bx 4.4 .
 .Sh BUGS
 Patterns longer than
@@ -446,8 +447,8 @@ may cause unchecked errors.
 .Pp
 The
 .Fn glob
-function may fail and set 
-.Va errno 
+function may fail and set
+.Va errno
 for any of the errors specified for the library routines
 .Xr stat 2 ,
 .Xr closedir 3 ,

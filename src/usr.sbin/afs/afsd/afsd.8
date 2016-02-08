@@ -1,4 +1,4 @@
-.\"	$OpenBSD: afsd.8,v 1.4 1998/12/15 01:20:49 aaron Exp $
+.\"	$OpenBSD: afsd.8,v 1.6 1999/10/11 21:12:20 aaron Exp $
 .\"
 .Dd September  5, 1998
 .Dt AFSD 8
@@ -35,12 +35,12 @@
 .Op Fl -help
 .Op Ar device
 .Sh DESCRIPTION
-.Nm afsd
+.Nm
 runs on AFS client machines. It is used to manage the file cache, fetch files
 from AFS servers, handle callbacks and manage the authentication information
 for users. In normal cases you will not need to run it by yourself. It is
 automatically started when
-.Nm mount_afs
+.Xr mount_xfs 8
 is run.
 .Pp
 Available options are as follows:
@@ -113,7 +113,7 @@ Cache directory
 .Pc .
 .It Xo
 .Fl -version
-.Xc 
+.Xc
 Print version information.
 .It Xo
 .Fl -help
@@ -136,10 +136,10 @@ It is highly recommended that the default cache directory be a separate
 filesystem. When enough memory is available this could be a mfs to
 drastically improve performance.
 .Sh SEE ALSO
-.Xr mount_afs 8
+.Xr mount_xfs 8
 .Sh BUGS
 This code is still in the experimental stage and some bugs are present. If
-.Nm afsd
+.Nm
 happens to crash, it's recommended to restart it with the
 .Fl z
 flag. Otherwise a corrupted cache can be reused.

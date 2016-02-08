@@ -1,12 +1,12 @@
 #!./perl
 
-# $RCSfile: flip.t,v $$Revision: 1.2 $$Date: 1997/11/30 08:05:20 $
+# $RCSfile: flip.t,v $$Revision: 1.3 $$Date: 1999/04/29 22:52:35 $
 
 print "1..9\n";
 
 @a = (1,2,3,4,5,6,7,8,9,10,11,12);
 
-while ($_ = shift(a)) {
+while ($_ = shift(@a)) {
     if ($x = /4/../8/) { $z = $x; print "ok ", $x + 0, "\n"; }
     $y .= /1/../2/;
 }

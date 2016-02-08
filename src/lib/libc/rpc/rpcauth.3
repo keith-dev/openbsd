@@ -1,4 +1,4 @@
-.\"	$OpenBSD: rpcauth.3,v 1.1 1998/03/11 18:55:42 deraadt Exp $
+.\"	$OpenBSD: rpcauth.3,v 1.6 1999/07/02 20:58:00 aaron Exp $
 .\" Mostly converted to mandoc by Theo de Raadt, Tue Feb 24 04:04:46 MST 1998
 .\"
 .Dd February 16, 1988
@@ -11,7 +11,7 @@
 .Nm authunix_create_default
 .Nd library routines for remote procedure calls
 .Sh SYNOPSIS
-.Fd #include <rpc.h>
+.Fd #include <rpc/rpc.h>
 .Ft void
 .Fn auth_destroy "AUTH *auth"
 .Ft AUTH *
@@ -40,24 +40,22 @@ creates and returns an
 authentication handle that passes nonusable authentication
 information with each remote procedure call. This is the
 default authentication used by
-.Tn RPC.
+.Tn RPC .
 .Pp
 .Fn authunix_create
 creates and returns an
 .Tn RPC
 authentication handle that contains
-.UX
+.Ux
 authentication information.
 The parameter
 .Fa host
 is the name of the machine on which the information was
 created;
 .Fa uid
-is the user's user
-.Tn ID ;
+is the user's user ID;
 .Fa gid
-is the user's current group
-.Tn ID ;
+is the user's current group ID;
 .Fa len
 and
 .Fa aup_gids
@@ -68,28 +66,26 @@ It is easy to impersonate a user.
 calls
 .Fn authunix_create
 with the appropriate parameters.
-.Pp
 .Sh SEE ALSO
 .\"Xr rpc_secure 3 ,
-.Xr rpc 3 ,
-.Xr getrpcport 3 ,
-.Xr portmap 8 ,
-.Xr rpc 5 ,
 .Xr rpcgen 1 ,
 .Xr select 2 ,
-.Xr xdr 3 .
-.br
-The following manuals:
-.RS
-.ft I
-Remote Procedure Calls: Protocol Specification
-.br
-Remote Procedure Call Programming Guide
-.br
-rpcgen Programming Guide
-.br
-.ft R
-.RE
-.Fa "RPC: Remote Procedure Call Protocol Specification" ,
-.Tn RFC1050, Sun Microsystems, Inc.,
-.Tn USC-ISI.
+.Xr getrpcport 3 ,
+.Xr rpc 3 ,
+.Xr xdr 3 ,
+.Xr rpc 5 ,
+.Xr portmap 8
+.Rs
+.%T "Remote Procedure Calls: Protocol Specification"
+.Re
+.Rs
+.%T "Remote Procedure Call Programming Guide"
+.Re
+.Rs
+.%T "rpcgen Programming Guide"
+.Re
+.Rs
+.%A "Sun Microsystems, Inc."
+.%T "RPC: Remote Procedure Call Protocol Specification"
+.%R "RFC1050, USC-ISI"
+.Re

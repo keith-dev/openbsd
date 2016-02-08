@@ -196,7 +196,4 @@ else	{ \
 #endif
 
 /* this macro body removed for OpenBSD due to IDEA patent */
-#define E_IDEA(num) 
-
-
-
+#define E_IDEA(num)

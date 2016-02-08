@@ -1,4 +1,4 @@
-/*	$OpenBSD: curses.priv.h,v 1.17 1999/03/16 15:25:08 millert Exp $	*/
+/*	$OpenBSD: curses.priv.h,v 1.20 1999/07/04 12:43:22 millert Exp $	*/
 
 /****************************************************************************
  * Copyright (c) 1998 Free Software Foundation, Inc.                        *
@@ -35,7 +35,7 @@
 
 
 /*
- * $From: curses.priv.h,v 1.139 1999/03/16 01:45:35 tom Exp $
+ * $From: curses.priv.h,v 1.142 1999/07/04 01:21:35 tom Exp $
  *
  *	curses.priv.h
  *
@@ -339,6 +339,10 @@ struct screen {
 	chtype          _xmc_triggers;  /* attributes to process if xmc      */
 	chtype          _acs_map[ACS_LEN];
 
+	/* used in lib_vidattr.c */
+	bool            _use_rmso;	/* true if we may use 'rmso'         */
+	bool            _use_rmul;	/* true if we may use 'rmul'         */
+
 	/*
 	 * These data correspond to the state of the idcok() and idlok()
 	 * functions.  A caveat is in order here:  the XSI and SVr4
@@ -417,6 +421,10 @@ typedef	struct {
 #endif
 
 /* usually in <unistd.h> */
+#ifndef STDIN_FILENO
+#define STDIN_FILENO 0
+#endif
+
 #ifndef STDOUT_FILENO
 #define STDOUT_FILENO 1
 #endif
@@ -666,6 +674,11 @@ extern int _nc_scrolln(int, int, int, int);
 extern void _nc_screen_init(void);
 extern void _nc_screen_resume(void);
 extern void _nc_screen_wrap(void);
+
+#if !HAVE_STRSTR
+#define strstr _nc_strstr
+extern char *_nc_strstr(const char *, const char *);
+#endif
 
 /* lib_mouse.c */
 extern int _nc_has_mouse(void);

@@ -17,7 +17,7 @@
  * IMPLIED WARRANTIES, INCLUDING, WITHOUT LIMITATION, THE IMPLIED
  * WARRANTIES OF MERCHANTIBILITY AND FITNESS FOR A PARTICULAR PURPOSE.
  *
- * $Id: main.c,v 1.10 1999/03/30 00:45:30 brian Exp $
+ * $Id: main.c,v 1.14 1999/08/09 23:01:36 brian Exp $
  *
  *	TODO:
  */
@@ -37,14 +37,16 @@
 #include <sys/time.h>
 #include <termios.h>
 #include <unistd.h>
+#include <sys/stat.h>
 
 #ifndef NOALIAS
-#ifdef __OpenBSD__
-#include "alias.h"
-#else
+#ifdef __FreeBSD__
 #include <alias.h>
+#else
+#include "alias.h"
 #endif
 #endif
+#include "layer.h"
 #include "probe.h"
 #include "mbuf.h"
 #include "log.h"
@@ -133,6 +135,7 @@ static pid_t BGPid = 0;
 static void
 KillChild(int signo)
 {
+  signal(signo, SIG_IGN);
   log_Printf(LogPHASE, "Parent: Signal %d\n", signo);
   kill(BGPid, SIGINT);
 }
@@ -303,7 +306,9 @@ main(int argc, char **argv)
 
     snprintf(conf, sizeof conf, "%s/%s", _PATH_PPP, CONFFILE);
     do {
-      if (!access(conf, W_OK)) {
+      struct stat sb;
+
+      if (stat(conf, &sb) == 0 && sb.st_mode & S_IWOTH) {
         log_Printf(LogALERT, "ppp: Access violation: Please protect %s\n",
                    conf);
         return -1;
@@ -571,7 +576,6 @@ DoLoop(struct bundle *bundle)
         t.tv_usec = 100000;
         select(0, NULL, NULL, NULL, &t);
       }
-
   } while (bundle_CleanDatalinks(bundle), !bundle_IsDead(bundle));
 
   log_Printf(LogDEBUG, "DoLoop done.\n");

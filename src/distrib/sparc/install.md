@@ -1,4 +1,4 @@
-#	$OpenBSD: install.md,v 1.27 1999/04/02 05:17:37 millert Exp $
+#	$OpenBSD: install.md,v 1.30 1999/10/13 02:47:42 jason Exp $
 #	$NetBSD: install.md,v 1.3.2.5 1996/08/26 15:45:28 gwr Exp $
 #
 #
@@ -44,10 +44,7 @@
 # Machine-dependent install sets
 MSGBUF=/kern/msgbuf
 HOSTNAME=/kern/hostname
-MDSETS="xbin xman xinc xcon"
-if [ ! -f /bsd ]; then
-	MDSETS="kernel ${MDSETS}"
-fi
+MDSETS="kernel xbin xman xinc xcon"
 
 # an alias for hostname(1)
 hostname() {
@@ -123,6 +120,10 @@ md_get_cddevs() {
 md_get_partition_range() {
     # return range of valid partition letters
     echo [a-p]
+}
+
+md_questions() {
+	:
 }
 
 md_installboot() {
@@ -202,10 +203,6 @@ just split the space into a root and swap partition for now.
 __EOT
 	disklabel -W ${_disk}
 	disklabel -f /tmp/fstab.${_disk} -E ${_disk}
-}
-
-md_copy_kernel() {
-	check_kernel
 }
 
 md_welcome_banner() {

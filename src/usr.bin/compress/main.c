@@ -1,4 +1,4 @@
-/*	$OpenBSD: main.c,v 1.10 1998/09/10 06:44:41 deraadt Exp $	*/
+/*	$OpenBSD: main.c,v 1.12 1999/09/26 17:35:49 mickey Exp $	*/
 
 /*-
  * Copyright (c) 1992, 1993
@@ -41,7 +41,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)compress.c	8.2 (Berkeley) 1/7/94";
 #else
-static char rcsid[] = "$OpenBSD: main.c,v 1.10 1998/09/10 06:44:41 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: main.c,v 1.12 1999/09/26 17:35:49 mickey Exp $";
 #endif
 #endif /* not lint */
 
@@ -331,7 +331,7 @@ compress(in, out, method, bits)
 	register int ifd;
 	int ofd;
 	register void *cookie;
-	register size_t nr;
+	register ssize_t nr;
 	u_char buf[Z_BUFSIZE];
 	int error;
 
@@ -408,7 +408,7 @@ decompress(in, out, method, bits)
 	int ifd;
 	register int ofd;
 	register void *cookie;
-	register size_t nr;
+	register ssize_t nr;
 	u_char buf[Z_BUFSIZE];
 	int error;
 

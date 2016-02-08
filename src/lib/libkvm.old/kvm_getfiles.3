@@ -1,4 +1,4 @@
-.\"	$OpenBSD: kvm_getfiles.3,v 1.2 1998/08/06 21:26:13 kstailey Exp $
+.\"	$OpenBSD: kvm_getfiles.3,v 1.4 1999/07/02 21:13:05 aaron Exp $
 .\"
 .\" Copyright (c) 1992, 1993
 .\"	The Regents of the University of California.  All rights reserved.
@@ -72,16 +72,17 @@ subsequent kvm library calls.  Data should be copied out if it needs to be
 saved.
 .Sh RETURN VALUES
 .Fn kvm_getfiles
-will return NULL on failure.
-.Pp
+will return
+.Dv NULL
+on failure.
 .Sh BUGS
 This routine does not belong in the kvm interface.
 .Sh SEE ALSO
 .Xr kvm 3 ,
+.Xr kvm_close 3 ,
+.Xr kvm_geterr 3 ,
+.Xr kvm_nlist 3 ,
 .Xr kvm_open 3 ,
 .Xr kvm_openfiles 3 ,
-.Xr kvm_close 3 ,
 .Xr kvm_read 3 ,
-.Xr kvm_write 3 ,
-.Xr kvm_nlist 3 ,
-.Xr kvm_geterr 3
+.Xr kvm_write 3

@@ -1,4 +1,4 @@
-/*	$OpenBSD: tree.h,v 1.5 1999/01/19 20:41:56 millert Exp $	*/
+/*	$OpenBSD: tree.h,v 1.7 1999/07/14 13:37:24 millert Exp $	*/
 
 /*
  * command trees for compile/execute
@@ -25,8 +25,10 @@ struct op {
 	struct op *left, *right; 	/* descendents */
 	char   *str;			/* word for case; identifier for for,
 					 * select, and functions;
-					 * path to execute for TEXEC
+					 * path to execute for TEXEC;
+					 * time hook for TCOM.
 					 */
+	int	lineno;			/* TCOM/TFUNC: LINENO for this */
 };
 
 /* Tree.type values */
@@ -76,8 +78,9 @@ struct op {
 struct ioword {
 	int	unit;	/* unit affected */
 	int	flag;	/* action (below) */
-	char	*name;	/* file name */
+	char	*name;	/* file name (unused if heredoc) */
 	char	*delim;	/* delimiter for <<,<<- */
+	char	*heredoc;/* content of heredoc */
 };
 
 /* ioword.flag - type of redirection */
@@ -106,7 +109,8 @@ struct ioword {
 #define	XCCLOSE	BIT(7)		/* exchild: close close_fd in child */
 #define XERROK	BIT(8)		/* non-zero exit ok (for set -e) */
 #define XCOPROC BIT(9)		/* starting a co-process */
-#define XINTACT BIT(10)		/* OS2: proc started from interactive session */
+#define XTIME	BIT(10)		/* timeing TCOM command */
+#define XINTACT BIT(11)		/* OS2: proc started from interactive session */
 
 /*
  * flags to control expansion of words (assumed by t->evalflags to fit

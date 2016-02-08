@@ -1,4 +1,4 @@
-.\"     $OpenBSD: spif.4,v 1.2 1999/02/04 04:08:55 jason Exp $
+.\"     $OpenBSD: spif.4,v 1.4 1999/09/23 04:12:06 alex Exp $
 .\"
 .\" Copyright (c) 1999 Jason L. Wright (jason@thought.net)
 .\" All rights reserved.
@@ -20,7 +20,7 @@
 .\" THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
 .\" IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
 .\" WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
-.\" DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, 
+.\" DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT,
 .\" INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
 .\" (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
 .\" SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
@@ -40,7 +40,7 @@
 .Cd "stty* at spif?                                " Pq "sun4c/sun4m"
 .Cd "sbpp* at spif?                                " Pq "sun4c/sun4m"
 .Sh DESCRIPTION
-The 
+The
 .Nm spif
 driver provides support for the Sun Serial/Parallel Interface card
 (Sun part number 501-1931)
@@ -74,7 +74,7 @@ well as automatic hardware (RTS/CTS) flow control.
 .Sh DIAGNOSTICS
 .Bl -diag
 .It "spif%d: ccr timeout"
-A timeout occured while writing to one of the CD180 registers.
+A timeout occurred while writing to one of the CD180 registers.
 .It "stty%d-%d: fifo overflow"
 Incoming characters were discarded because the driver's interrupt
 routine could not read them fast enough from the card.
@@ -90,7 +90,7 @@ Serial ports
 Parallel ports
 .El
 .Sh SEE ALSO
-.Xr read 2 , 
+.Xr read 2 ,
 .Xr termios 4 ,
 .Xr tty 4
 .Sh AUTHORS

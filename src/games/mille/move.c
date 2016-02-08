@@ -1,4 +1,4 @@
-/*	$OpenBSD: move.c,v 1.4 1998/09/22 04:08:24 pjanzen Exp $	*/
+/*	$OpenBSD: move.c,v 1.6 1999/09/30 03:23:59 pjanzen Exp $	*/
 /*	$NetBSD: move.c,v 1.4 1995/03/24 05:01:57 cgd Exp $	*/
 
 /*
@@ -38,7 +38,7 @@
 #if 0
 static char sccsid[] = "@(#)move.c	8.1 (Berkeley) 5/31/93";
 #else
-static char rcsid[] = "$OpenBSD: move.c,v 1.4 1998/09/22 04:08:24 pjanzen Exp $";
+static char rcsid[] = "$OpenBSD: move.c,v 1.6 1999/09/30 03:23:59 pjanzen Exp $";
 #endif
 #endif /* not lint */
 
@@ -49,21 +49,12 @@ static char rcsid[] = "$OpenBSD: move.c,v 1.4 1998/09/22 04:08:24 pjanzen Exp $"
 #include <termios.h>
 #include	"mille.h"
 
-# ifdef	attron
-#	include	<term.h>
-#	define	_tty	cur_term->Nttyb
-# endif	attron
-
 /*
  * @(#)move.c	1.2 (Berkeley) 3/28/83
  */
 
 #undef	CTRL
 #define	CTRL(c)		(c - 'A' + 1)
-
-char	*Movenames[] = {
-		"M_DISCARD", "M_DRAW", "M_PLAY", "M_ORDER"
-	};
 
 void
 domove()
@@ -260,6 +251,8 @@ mustpick:
 		    && !isrepair(pp->battle))
 			return error("cannot play \"Go\" on a \"%s\"",
 			    C_name[pp->battle]);
+		if (pp->safety[S_RIGHT_WAY] == S_PLAYED)
+			return error("\"Go\" implied by \"Right of Way\"");
 		pp->battle = C_GO;
 		pp->can_go = TRUE;
 		break;
@@ -330,10 +323,12 @@ protected:
 				pp->speed = C_INIT;
 			if (pp->battle == C_STOP || pp->battle == C_INIT) {
 				pp->can_go = TRUE;
-				pp->battle = C_INIT;
+				pp->battle = C_GO;
 			}
-			if (!pp->can_go && isrepair(pp->battle))
+			if (!pp->can_go && isrepair(pp->battle)) {
 				pp->can_go = TRUE;
+				pp->battle = C_GO;
+			}
 		}
 		Next = -1;
 		break;
@@ -488,7 +483,7 @@ ret:
  */
 int
 haspicked(pp)
-	PLAY	*pp;
+	const PLAY	*pp;
 {
 	int	card;
 
@@ -536,7 +531,7 @@ void
 prompt(promptno)
 	int	promptno;
 {
-	static char	*names[] = {
+	static const char	*const names[] = {
 				">>:Move:",
 				"Really?",
 				"Another hand?",

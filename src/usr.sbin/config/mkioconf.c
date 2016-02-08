@@ -1,4 +1,4 @@
-/*	$OpenBSD: mkioconf.c,v 1.13 1998/05/11 09:59:40 niklas Exp $	*/
+/*	$OpenBSD: mkioconf.c,v 1.15 1999/10/02 07:38:20 deraadt Exp $	*/
 /*	$NetBSD: mkioconf.c,v 1.41 1996/11/11 14:18:49 mycroft Exp $	*/
 
 /*
@@ -117,7 +117,7 @@ emithdr(ofp)
 	register FILE *ofp;
 {
 	register FILE *ifp;
-	register int n;
+	register size_t n;
 	char ifn[200], buf[BUFSIZ];
 
 	if (fprintf(ofp, "\
@@ -187,7 +187,14 @@ static int loc[%d] = {", locators.used) < 0)
 	for (i = 0; i < locators.used; i++)
 		if (fprintf(fp, "%s%s,", SEP(i, 8), locators.vec[i]) < 0)
 			return (1);
-	return (fprintf(fp, "\n};\n") < 0);
+	if (fprintf(fp, "\n};\n") < 0)
+		return(1);
+	return (fprintf(fp, "\n#ifndef MAXEXTRALOC\n\
+#define MAXEXTRALOC 32\n\
+#endif\n\
+int extraloc[MAXEXTRALOC];\n\
+int nextraloc = MAXEXTRALOC;\n\
+int uextraloc = 0;\n") < 0);
 }
 
 static int nlocnames, maxlocnames = 8;

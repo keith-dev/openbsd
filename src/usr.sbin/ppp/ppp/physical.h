@@ -16,11 +16,38 @@
  * IMPLIED WARRANTIES, INCLUDING, WITHOUT LIMITATION, THE IMPLIED
  * WARRANTIES OF MERCHANTIBILITY AND FITNESS FOR A PARTICULAR PURPOSE.
  *
- *  $Id: physical.h,v 1.4 1999/02/16 00:18:03 brian Exp $
+ *  $Id: physical.h,v 1.13 1999/07/15 02:10:32 brian Exp $
  *
  */
 
+struct datalink;
 struct bundle;
+struct iovec;
+struct physical;
+struct bundle;
+struct ccp;
+struct cmdargs;
+
+#define TTY_DEVICE	1
+#define TCP_DEVICE	2
+#define UDP_DEVICE	3
+#define EXEC_DEVICE	4
+
+struct device {
+  int type;
+  const char *name;
+
+  int (*raw)(struct physical *);
+  void (*offline)(struct physical *);
+  void (*cooked)(struct physical *);
+  void (*stoptimer)(struct physical *);
+  void (*destroy)(struct physical *);
+  ssize_t (*read)(struct physical *, void *, size_t);
+  ssize_t (*write)(struct physical *, const void *, size_t);
+  void (*device2iov)(struct device *, struct iovec *, int *, int, pid_t);
+  int (*speed)(struct physical *);
+  const char *(*openinfo)(struct physical *);
+};
 
 struct physical {
   struct link link;
@@ -29,37 +56,37 @@ struct physical {
   struct async async;          /* Our async state */
   struct hdlc hdlc;            /* Our hdlc state */
   int fd;                      /* File descriptor for this device */
-  int mbits;                   /* Current DCD status */
-  unsigned isatty : 1;
   struct mbuf *out;            /* mbuf that suffered a short write */
   int connect_count;
   struct datalink *dl;         /* my owner */
 
   struct {
-    char full[40];
+    u_char buf[MAX_MRU];       /* Our input data buffer */
+    size_t sz;
+  } input;
+
+  struct {
+    char full[DEVICE_LEN];     /* Our current device name */
     char *base;
   } name;
 
-  unsigned Utmp : 1;           /* Are we in utmp ? */
+  unsigned Utmp : 1;           /* Are we in utmp ? (move to ttydevice ?) */
   pid_t session_owner;         /* HUP this when closing the link */
 
-  /* XXX-ML Most of the below is device specific, and probably do not
-      belong in the generic physical struct. It comes from modem.c. */
+  struct device *handler;      /* device specific handler */
 
   struct {
-    unsigned rts_cts : 1;      /* Is rts/cts enabled? */
-    unsigned parity;           /* What parity is enabled? (TTY flags) */
-    unsigned speed;            /* Modem speed */
-    char devlist[LINE_LEN];    /* Comma-separated list of devices */
+    unsigned rts_cts : 1;      /* Is rts/cts enabled ? */
+    unsigned parity;           /* What parity is enabled? (tty flags) */
+    unsigned speed;            /* tty speed */
+
+    char devlist[LINE_LEN];    /* NUL separated list of devices */
+    int ndev;                  /* number of devices in list */
     struct {
       unsigned required : 1;   /* Is cd *REQUIRED* on this device */
       int delay;               /* Wait this many seconds after login script */
     } cd;
   } cfg;
-
-  struct termios ios;          /* To be able to reset from raw mode */
-
-  struct pppTimer Timer;       /* CD checks */
 };
 
 #define field2phys(fp, name) \
@@ -71,32 +98,42 @@ struct physical {
 #define descriptor2physical(d) \
   ((d)->type == PHYSICAL_DESCRIPTOR ? field2phys(d, desc) : NULL)
 
-extern int physical_GetFD(struct physical *);
+#define PHYSICAL_NOFORCE	1
+#define PHYSICAL_FORCE_ASYNC	2
+#define PHYSICAL_FORCE_SYNC	3
+
+extern struct physical *physical_Create(struct datalink *, int);
+extern int physical_Open(struct physical *, struct bundle *);
+extern int physical_Raw(struct physical *);
+extern int physical_GetSpeed(struct physical *);
+extern int physical_SetSpeed(struct physical *, int);
+extern int physical_SetParity(struct physical *, const char *);
+extern int physical_SetRtsCts(struct physical *, int);
+extern void physical_SetSync(struct physical *);
+extern int physical_ShowStatus(struct cmdargs const *);
+extern void physical_Offline(struct physical *);
+extern void physical_Close(struct physical *);
+extern void physical_Destroy(struct physical *);
+extern struct physical *iov2physical(struct datalink *, struct iovec *, int *,
+                                     int, int);
+extern int physical2iov(struct physical *, struct iovec *, int *, int, pid_t);
+extern void physical_ChangedPid(struct physical *, pid_t);
+
 extern int physical_IsSync(struct physical *);
 extern const char *physical_GetDevice(struct physical *);
 extern void physical_SetDeviceList(struct physical *, int, const char *const *);
-extern int physical_SetSpeed(struct physical *, int);
-
-/*
- * XXX-ML I'm not certain this is the right way to handle this, but we
- * can solve that later.
- */
-extern void physical_SetSync(struct physical *);
-
-/*
- * Can this be set?  (Might not be a relevant attribute for this
- * device, for instance)
- */
-extern int physical_SetRtsCts(struct physical *, int);
+extern void physical_SetDevice(struct physical *, const char *);
 
 extern ssize_t physical_Read(struct physical *, void *, size_t);
 extern ssize_t physical_Write(struct physical *, const void *, size_t);
-extern int physical_UpdateSet(struct descriptor *, fd_set *, fd_set *,
-                              fd_set *, int *, int);
+extern int physical_doUpdateSet(struct descriptor *, fd_set *, fd_set *,
+                                fd_set *, int *, int);
 extern int physical_IsSet(struct descriptor *, const fd_set *);
 extern void physical_Login(struct physical *, const char *);
-extern void physical_Logout(struct physical *);
 extern int physical_RemoveFromSet(struct physical *, fd_set *, fd_set *,
                                   fd_set *);
 extern int physical_SetMode(struct physical *, int);
 extern void physical_DeleteQueue(struct physical *);
+extern void physical_SetupStack(struct physical *, const char *, int);
+extern void physical_StopDeviceTimer(struct physical *);
+extern int physical_MaxDeviceSize(void);

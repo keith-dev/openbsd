@@ -1,4 +1,4 @@
-.\"	$OpenBSD: fstat.1,v 1.10 1998/09/26 19:54:46 aaron Exp $
+.\"	$OpenBSD: fstat.1,v 1.14 1999/10/17 20:24:34 aaron Exp $
 .\" Copyright (c) 1987, 1991, 1993
 .\"	The Regents of the University of California.  All rights reserved.
 .\"
@@ -34,7 +34,7 @@
 .\"
 .Dd February 25, 1994
 .Dt FSTAT 1
-.Os BSD 4
+.Os
 .Sh NAME
 .Nm fstat
 .Nd file status
@@ -56,7 +56,7 @@ If no options are specified,
 .Nm fstat
 reports on all open files in the system.
 .Pp
-Options:
+The options are as follows:
 .Bl -tag -width Ds
 .It Fl f
 Restrict examination to files open in the same filesystems as
@@ -67,11 +67,11 @@ directory
 .Pa /usr/src
 resides, type
 .Dq Li fstat -f /usr/src .
-.It Fl M
+.It Fl M Ar core
 Extract values associated with the name list from the specified core
 instead of the default
 .Pa /dev/kmem .
-.It Fl N
+.It Fl N Ar system
 Extract the name list from the specified system instead of the default
 .Pa /bsd .
 .It Fl n
@@ -82,9 +82,9 @@ device number that the special device refers to rather than the filename
 in
 .Pa /dev ;
 and print the mode of the file in octal instead of symbolic form.
-.It Fl p
+.It Fl p pid
 Report all files open by the specified process.
-.It Fl u
+.It Fl u user
 Report all files open by the specified user.
 .It Fl v
 Verbose mode.  Print error messages upon failures to locate particular
@@ -179,7 +179,7 @@ the name printed may not be the actual
 name that the process originally used to open that file.
 .El
 .Sh SOCKETS
-The formating of open sockets depends on the protocol domain.
+The formatting of open sockets depends on the protocol domain.
 In all cases the first field is the domain name, the second field
 is the socket type (stream, dgram, etc), and the third is the socket
 flags field (in hex).
@@ -188,7 +188,7 @@ For TCP, it is the address of the tcpcb, and for UDP, the inpcb (socket pcb).
 For Unix domain sockets, it's the address of the socket pcb and the address
 of the connected pcb (if connected).
 Otherwise the protocol number and address of the socket itself are printed.
-The attempt is to make enough information available to 
+The attempt is to make enough information available to
 permit further analysis without duplicating
 .Xr netstat 1 .
 .Pp

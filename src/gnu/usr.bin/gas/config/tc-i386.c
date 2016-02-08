@@ -1,4 +1,4 @@
-/*	$OpenBSD: tc-i386.c,v 1.5 1999/01/23 00:18:15 espie Exp $	*/
+/*	$OpenBSD: tc-i386.c,v 1.7 1999/06/15 10:28:49 espie Exp $	*/
 
 /* i386.c -- Assemble code for the Intel 80386
    Copyright (C) 1989, 1991, 1992 Free Software Foundation.
@@ -27,7 +27,7 @@
   */
 
 #ifndef lint
-static char rcsid[] = "$OpenBSD: tc-i386.c,v 1.5 1999/01/23 00:18:15 espie Exp $";
+static char rcsid[] = "$OpenBSD: tc-i386.c,v 1.7 1999/06/15 10:28:49 espie Exp $";
 #endif
 
 #include "as.h"
@@ -35,11 +35,8 @@ static char rcsid[] = "$OpenBSD: tc-i386.c,v 1.5 1999/01/23 00:18:15 espie Exp $
 #include "obstack.h"
 #include "opcode/i386.h"
 
-#ifdef KLUDGE
+/* real name for the assembler, translate from C _GLOBAL_OFFSET_TABLE_ */
 #define GLOBAL_OFFSET_TABLE_NAME "__GLOBAL_OFFSET_TABLE_"
-#else
-#define GLOBAL_OFFSET_TABLE_NAME "_GLOBAL_OFFSET_TABLE_"
-#endif
 
 /* one more argument for fix_new */
 #ifdef PIC
@@ -1369,6 +1366,7 @@ static int i386_operand (operand_string)
 char *operand_string;
 {
 	register char *op_string = operand_string;
+	char *tmpbuf = 0;
 	
 	/* Address of '\0' at end of operand_string. */
 	char * end_of_operand_string = operand_string + strlen(operand_string);
@@ -1644,7 +1642,7 @@ char *operand_string;
 			register char *cp;
 			if (picmode &&
 				(cp = strchr(input_line_pointer,'@'))) {
-				char tmpbuf[BUFSIZ];
+				tmpbuf= xmalloc(strlen(input_line_pointer));
 
 				if (strncmp(cp+1, "PLT", 3) == 0) {
 					i.disp_reloc[this_operand] = RELOC_JMP_TBL;
@@ -1679,6 +1677,8 @@ char *operand_string;
 			    as_bad("Ignoring junk '%s' after expression",input_line_pointer);
 			RESTORE_END_STRING (displacement_string_end);
 			input_line_pointer = save_input_line_pointer;
+			free(tmpbuf);
+			tmpbuf = 0;
 			switch (exp_seg) {
 			case SEG_ABSENT:
 				/* missing expr becomes absolute 0 */
@@ -2259,16 +2259,18 @@ symbolS *
 char *name;
 {
 #ifdef PIC
-#ifdef KLUDGE
-	/* HACK:
-	 * Sun's ld expects __GLOBAL_OFFSET_TABLE_,
-	 * gcc generates _GLOBAL_OFFSET_TABLE_
-	 * should probably fix ld - new SVR4 style??
+	/* gcc bug work-around:
+	 * old versions of gcc don't heed YES_UNDERSCORES,
+	 * and always generate _GLOBAL_OFFSET_TABLE_.
+	 * On OpenBSD, this is a bug, as this collides with
+	 * the user namespace.
+	 *
+	 * This code will no longer be needed once the switch to a recent 
+	 * egcs is complete.
 	 */
 	if (*name == '_' && *(name+1) == 'G' &&
 				strcmp(name, "_GLOBAL_OFFSET_TABLE_") == 0)
-		return symbol_find("__GLOBAL_OFFSET_TABLE_");
-#endif
+		return symbol_find(GLOBAL_OFFSET_TABLE_NAME);
 #endif
 	return 0;
 }

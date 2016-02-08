@@ -1,4 +1,4 @@
-/*	$OpenBSD: out.c,v 1.2 1998/08/19 07:41:52 pjanzen Exp $	*/
+/*	$OpenBSD: out.c,v 1.4 1999/09/26 05:45:42 deraadt Exp $	*/
 /*	$NetBSD: out.c,v 1.3 1995/04/22 10:59:16 cgd Exp $	*/
 
 /*
@@ -38,11 +38,12 @@
 #if 0
 static char sccsid[] = "@(#)out.c	8.1 (Berkeley) 5/31/93";
 #else
-static char rcsid[] = "$OpenBSD: out.c,v 1.2 1998/08/19 07:41:52 pjanzen Exp $";
+static char rcsid[] = "$OpenBSD: out.c,v 1.4 1999/09/26 05:45:42 deraadt Exp $";
 #endif
 #endif /* not lint */
 
 #include <stdio.h>
+#include <string.h>
 #include "trek.h"
 
 /*
@@ -53,7 +54,7 @@ void
 out(dev)
 	int	dev;
 {
-	register struct device	*d;
+	const struct device	*d;
 
 	d = &Device[dev];
 	printf("%s reports %s ", d->person, d->name);

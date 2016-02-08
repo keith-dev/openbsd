@@ -2,6 +2,7 @@
 
 use Config;
 use File::Basename qw(&basename &dirname);
+use Cwd;
 
 # List explicitly here the variables you want Configure to
 # generate.  Metaconfig only looks for shell variables, so you
@@ -12,6 +13,7 @@ use File::Basename qw(&basename &dirname);
 
 # This forces PL files to create target in same directory as PL file.
 # This is so that make depend always knows where to find PL derivatives.
+$origdir = cwd;
 chdir dirname($0);
 $file = basename($0, '.PL');
 $file .= '.com' if $^O eq 'VMS';
@@ -254,7 +256,7 @@ Anyway, here it is.  Should run on perl v4 or greater.  Maybe less.
 
 =cut
 
-$RCSID = '$Id: c2ph.PL,v 1.2 1997/11/30 08:06:01 millert Exp $';
+$RCSID = '$Id: c2ph.PL,v 1.3 1999/04/29 22:52:42 millert Exp $';
 
 
 ######################################################################
@@ -1398,3 +1400,4 @@ if (defined $Config{d_link}) {
   File::Copy::syscopy('c2ph', 'pstruct');
 }
 exec("$Config{'eunicefix'} $file") if $Config{'eunicefix'} ne ':';
+chdir $origdir;

@@ -1,4 +1,4 @@
-.\"	$OpenBSD: select.2,v 1.11 1999/03/11 01:35:01 pjanzen Exp $
+.\"	$OpenBSD: select.2,v 1.15 1999/09/23 04:12:00 alex Exp $
 .\"	$NetBSD: select.2,v 1.5 1995/06/27 22:32:28 cgd Exp $
 .\"
 .\" Copyright (c) 1983, 1991, 1993
@@ -36,7 +36,7 @@
 .\"
 .Dd March 25, 1994
 .Dt SELECT 2
-.Os BSD 4.2
+.Os
 .Sh NAME
 .Nm select
 .Nd synchronous I/O multiplexing
@@ -104,12 +104,12 @@ to the maximum number of descriptors supported by the system.
 .Pp
 If
 .Fa timeout
-is a non-nil pointer, it specifies a maximum interval to wait for the
-selection to complete.  If 
+is a non-null pointer, it specifies a maximum interval to wait for the
+selection to complete.  If
 .Fa timeout
-is a nil pointer, the select blocks indefinitely.  To effect a poll, the
+is a null pointer, the select blocks indefinitely.  To effect a poll, the
 .Fa timeout
-argument should be non-nil, pointing to a zero-valued timeval structure.
+argument should be non-null, pointing to a zero-valued timeval structure.
 .Fa timeout
 is not changed by
 .Fn select ,
@@ -122,12 +122,12 @@ Any of
 .Fa writefds ,
 and
 .Fa exceptfds
-may be given as nil pointers if no descriptors are of interest.
+may be given as null pointers if no descriptors are of interest.
 .Sh RETURN VALUES
 .Fn select
 returns the number of ready descriptors that are contained in
 the descriptor sets,
-or -1 if an error occurred.
+or \-1 if an error occurred.
 If the time limit expires,
 .Fn select
 returns 0.
@@ -160,13 +160,13 @@ negative or too large.
 .Sh SEE ALSO
 .Xr accept 2 ,
 .Xr connect 2 ,
-.Xr getdtablesize 3 ,
 .Xr gettimeofday 2 ,
 .Xr poll 2 ,
 .Xr read 2 ,
 .Xr recv 2 ,
 .Xr send 2 ,
-.Xr write 2
+.Xr write 2 ,
+.Xr getdtablesize 3
 .Sh BUGS
 Although the provision of
 .Xr getdtablesize 3
@@ -230,7 +230,7 @@ Even though some systems stupidly act in this different way, it is
 unlikely this semantic will ever be commonly implemented, as the
 change causes massive source code compatibility problems.
 Furthermore, recent new standards have dictated the current behaviour.
-In general, due to the existance of those brain-damaged
+In general, due to the existence of those brain-damaged
 non-conforming systems, it is unwise to assume that the timeout
 value will be unmodified by the
 .Fn select

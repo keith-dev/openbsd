@@ -1,4 +1,4 @@
-.\"	$OpenBSD: mdoc.samples.7,v 1.9 1999/03/11 01:35:05 pjanzen Exp $
+.\"	$OpenBSD: mdoc.samples.7,v 1.19 1999/07/09 13:35:37 aaron Exp $
 .\"	$NetBSD: mdoc.samples.7,v 1.5 1996/04/03 20:17:34 jtc Exp $
 .\"
 .\" Copyright (c) 1990, 1993
@@ -39,8 +39,8 @@
 .\" for an already extremely slow package.
 .\"
 .Dd December 30, 1993
-.Os
 .Dt MDOC.SAMPLES 7
+.Os
 .Sh NAME
 .Nm mdoc.samples
 .Nd tutorial sampler for writing
@@ -309,7 +309,7 @@ manual
 .Xr mdoc 7 .
 This is a technical
 .Em faux pas
-as almost all of the macros in 
+as almost all of the macros in
 .Nm \-mdoc
 are parsed, but as it was cumbersome to constantly refer to macros
 as being callable and being able to call other macros,
@@ -446,8 +446,8 @@ template found in the file:
 \&.\e" /usr/share/misc/mdoc.template:
 \&.\e" The following six lines are required.
 \&.Dd Month day, year
-\&.Os OPERATING_SYSTEM [version/release]
 \&.Dt DOCUMENT_TITLE [section number] [volume]
+\&.Os OPERATING_SYSTEM [version/release]
 \&.Sh NAME
 \&.Sh SYNOPSIS
 \&.Sh DESCRIPTION
@@ -474,14 +474,14 @@ template found in the file:
 .Ed
 .Pp
 The first items in the template are the macros
-.Pq Li \&.Dd , \&.Os , \&.Dt ;
+.Pq Li \&.Dd , \&.Dt , \&.Os ;
 the document date,
-the operating system the man page or subject source is developed
-or modified for,
-and the man page title
+the man page title
 .Pq Em in upper case
 along with the section of the manual the page
-belongs in.
+belongs in,
+and the operating system the man page or subject source is developed or
+modified for.
 These macros identify the page,
 and are discussed below in
 .Sx TITLE MACROS .
@@ -514,6 +514,10 @@ and the date of authorship.
 These macros are one called once at the very beginning of the document
 and are used to construct the headers and footers only.
 .Bl -tag -width 6n
+.It Li \&.Dd month day, year
+The date should be written formally:
+.Pp
+.Dl January 25, 1989
 .It Li \&.Dt DOCUMENT_TITLE section# [volume]
 The document title is the
 subject of the man page and must be in
@@ -579,11 +583,6 @@ Note, if the
 .Ql \&.Os
 macro is not present, the bottom left corner of the page
 will be ugly.
-.It Li \&.Dd month day, year
-The date should be written formally:
-.Pp
-.ne 5
-.Dl January 25, 1989
 .El
 .Sh MANUAL DOMAIN
 .Ss What's in a name...
@@ -1130,12 +1129,12 @@ This macro is intended for the
 .Sx SYNOPSIS
 section.
 It may be used
-anywhere else in the man page without problems, but its main purpose
-is to present the function type in kernel normal form for the
+anywhere else in the man page without problems, but in the
 .Sx SYNOPSIS
-of sections two and three
-(it causes a page break allowing the function name to appear
-on the next line).
+section it causes a line break after its use. Its main purpose
+is to present the function type in kernel normal form
+of a section two or three man page by forcing the
+function name to appear on the next line.
 .Pp
 .Dl Usage: .Ft type ... \*(Pu
 .Bl -tag -width "\&.Ft struct stat" -offset 14n -compact
@@ -1151,7 +1150,7 @@ The
 .Ql \&.Ic
 macro designates an interactive or internal command.
 .Pp
-.Dl Usage: .Li argument ... \*(Pu
+.Dl Usage: .Ic argument ... \*(Pu
 .Bl -tag -width ".Ic setenv , unsetenvxx" -compact -offset 14n
 .It Li \&.Ic :wq
 .Ic :wq
@@ -1519,7 +1518,7 @@ This is to make short strings more visible where the font change
 to literal (constant width) is less noticeable.
 .It Li \&.Pf
 The prefix macro is not callable, but it is parsed:
-.Bl -tag -width "(namexx" -offset indent
+.Bl -tag -width ".Pf ( Fa name2" -offset indent
 .It Li ".Pf ( Fa name2"
 becomes
 .Pf ( Fa name2 .
@@ -1967,6 +1966,16 @@ Cross references
 are specified using the
 .Ql \&.Xr
 macro.
+Cross references in the
+.Sx SEE ALSO
+section should be sorted by section number, and then
+placed in alphabetical order and comma separated.  For example:
+.Pp
+.Xr ls 1 ,
+.Xr ps 1 ,
+.Xr group 5 ,
+.Xr passwd 5
+.Pp
 At this time
 .Xr refer 1
 style references are not accommodated.
@@ -2011,9 +2020,10 @@ for example, this section was set with:
 .It \&.Pp
 The \&.Pp paragraph command may
 be used to specify a line space where necessary.
-The macro is not necessary after a
+The macro is not necessary before or after
 .Ql \&.Sh
-or
+macros,
+after a
 .Ql \&.Ss
 macro or before
 a
@@ -2191,7 +2201,7 @@ This macro is parsed, but it is not callable.
 .Dl Fl ldghfstru
 .Pp
 The above was produced by:
-.Li \&.Dl Fl ldghfstru .
+.Li \&.Dl \&Fl ldghfstru .
 .It Li \&.Dl
 (D-ell)
 Display one line of indented
@@ -2210,7 +2220,7 @@ It is not callable however.
 .Pp
 .Dl % ls -ldg /usr/local/bin
 .Pp
-The above was produced by
+The above was produced by:
 .Li \&.Dl % ls -ldg /usr/local/bin .
 .It Li \&.Bd
 Begin-display.
@@ -2475,7 +2485,7 @@ by the process to pages not loaded in core.
 .It UID
 numerical user-id of process owner
 .It PPID
-numerical id of parent of process process priority
+numerical ID of parent of process process priority
 (non-positive when in non-interruptible wait)
 .El
 .Pp
@@ -2492,7 +2502,7 @@ The raw text:
 \&.It UID
 \&numerical user-id of process owner
 \&.It PPID
-\&numerical id of parent of process process priority
+\&numerical ID of parent of process process priority
 \&(non-positive when in non-interruptible wait)
 \&.El
 .Ed
@@ -2767,9 +2777,9 @@ manual macro package
 template for writing a man page
 .El
 .Sh SEE ALSO
-.Xr mdoc 7 ,
 .Xr man 1 ,
-.Xr troff 1
+.Xr troff 1 ,
+.Xr mdoc 7
 .Sh BUGS
 Undesirable hyphenation on the dash of a flag
 argument is not yet resolved, and causes
@@ -2799,7 +2809,7 @@ breaks (other than the initial header and footer) when using
 nroff occasionally places an unsightly partially filled line (blank)
 at the would be bottom of the page.
 .Pp
-The list and display macros to not do any keeps
+The list and display macros do not do any keeps
 and certainly should be able to.
 .\" Note what happens if the parameter list overlaps a newline
 .\" boundary.

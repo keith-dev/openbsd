@@ -1,4 +1,4 @@
-/*	$OpenBSD: server.h,v 1.2 1999/02/01 06:53:56 d Exp $	*/
+/*	$OpenBSD: server.h,v 1.4 1999/08/30 23:38:11 d Exp $	*/
 /*	$NetBSD: hunt.h,v 1.5 1998/09/13 15:27:28 hubertf Exp $	*/
 
 /*
@@ -9,6 +9,10 @@
 
 #include <stdio.h>
 #include <sys/socket.h>
+
+#ifndef __GNUC__
+#define __attribute__(x)
+#endif
 
 /*
  * Choose MAXPL and MAXMON carefully.  The screen is assumed to be
@@ -163,7 +167,7 @@ struct spawn {
 	int		fd;
 	int		state;
 	struct sockaddr source;
-	int 		sourcelen;
+	socklen_t	sourcelen;
 	u_int32_t	uid;
 	char		name[NAMELEN+1];
 	u_int8_t	team;

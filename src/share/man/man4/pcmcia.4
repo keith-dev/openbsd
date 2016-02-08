@@ -1,4 +1,4 @@
-.\"	$OpenBSD: pcmcia.4,v 1.1 1998/09/26 22:42:53 fgsch Exp $	
+.\"	$OpenBSD: pcmcia.4,v 1.8 1999/08/23 21:42:59 fgsch Exp $
 .\"	$NetBSD: pcmcia.4,v 1.4 1998/06/07 09:10:30 enami Exp $
 .\" Copyright (c) 1997 The NetBSD Foundation, Inc.
 .\" All rights reserved.
@@ -23,7 +23,7 @@
 .\" THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
 .\" ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
 .\" TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
-.\" PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE FOUNDATION OR CONTRIBUTORS 
+.\" PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE FOUNDATION OR CONTRIBUTORS
 .\" BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
 .\" CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
 .\" SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
@@ -34,7 +34,7 @@
 .\"
 .Dd September 11, 1998
 .Dt PCMCIA 4
-.Os OpenBSD
+.Os
 .Sh NAME
 .Nm pcmcia
 .Nd introduction to PCMCIA (PC Card) support
@@ -45,56 +45,68 @@
 .Cd "xx*     at pcmcia? function ?"
 .Pp
 .Sh INTRODUCTION
-.Nx
-provides machine-independent bus support and
-drivers for PCMCIA (PC Card, Card Bus)
+The
+.Nm pcmcia
+subsystem provides machine-independent bus support and
+drivers for PCMCIA (PC Card)
 devices.
 .Sh SUPPORTED DEVICES
-.Nx
-includes the following machine-independent PCMCIA
-drivers, sorted by function and driver name:
+The following devices are supported, sorted by function
+and driver name:
 .Pp
 .Ss Serial interfaces and modems
 .Bl -tag -width speaker -offset indent -compact
+.It com
+8250/16450/16550-compatible PCMCIA serial cards and modems.
 .It pccom
 8250/16450/16550-compatible PCMCIA serial cards and modems.
+i386-specific driver.
 .El
-.\"
 .Pp
 .Ss Network interfaces
 .Bl -tag -width speaker -offset indent -compact
+.It cnw
+Xircom Creditcard Netwave cards.
 .It ep
-3com 3c589 Etherlink-III Ethernet card.
-.\".It mbe
-.\"Ethernet card based on the Fujitsu MB86960A/MB86965A chipset.
+3com 3c589 Etherlink-III ethernet cards.
 .It ne
 NE2000 compatible cards.
+.It rln
+Proxim RangeLAN2 PC-Card
 .It sm
-Megahertz Ethernet card.
+Megahertz ethernet cards.
+.It xe
+Xircom 16bit ethernet cards.
+.It wi
+WaveLAN IEEE 802.11-compatible cards.
 .El
-.\"
 .Pp
 .Ss SCSI controllers
 .Bl -tag -width speaker -offset indent -compact
 .It aic
-Adaptec APA-14[56]0 SCSI controller card.
+Adaptec APA-14[56]0 and NewMedia BusToaster SCSI controller cards.
 .El
-.\".Ss IDE controllers
-.\".Bl -tag -width speaker -offset indent -compact
-.\".It wdc
-.\"Digital Hinote Ultra Mobile Media Adapter
-.\".El
-.\"
+.Ss IDE controllers
+.Bl -tag -width speaker -offset indent -compact
+.It wdc
+Devices which implement an ATA/IDE interface, such as mini disk drives,
+CDROMS.  This includes flash cards which emulate a disk drive.
+.El
 .Pp
 The supported PCMCIA controllers are those that are i82365 compatible.
 .Sh SEE ALSO
-.Xr intro 4 ,
 .Xr aic 4 ,
+.Xr com 4 ,
+.Xr cnw 4 ,
 .Xr ep 4 ,
+.Xr intro 4 ,
 .Xr isa 4 ,
 .Xr ne 4 ,
 .Xr pccom 4 ,
-.Xr sm 4
+.Xr sm 4 ,
+.Xr wdc 4 ,
+.Xr wi 4 ,
+.Xr xe 4
 .Sh HISTORY
 The
 .Nm

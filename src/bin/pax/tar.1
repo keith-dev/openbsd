@@ -27,7 +27,7 @@
 .\" (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
 .\" THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 .\"
-.\"	$OpenBSD: tar.1,v 1.20 1998/12/15 01:20:25 aaron Exp $
+.\"	$OpenBSD: tar.1,v 1.23 1999/08/16 18:40:03 aaron Exp $
 .\"
 .Dd June 11, 1996
 .Dt TAR 1
@@ -38,17 +38,14 @@
 .Sh SYNOPSIS
 .Nm tar
 .Sm off
-.Oo \&- Oc {crtux} Op Fl befhmopvwzHLOPXZ014578
+.Oo \&- Oc {crtux} Op Fl befhmopqvwzHLOPXZ014578
 .Sm on
 .Op Ar archive
 .Op Ar blocksize
 .\" XXX how to do this right?
-.No [-C
-.Ar directory
-.No ]
-.No [-s
-.Ar replstr
-.No ]
+.Op Fl C Ar directory
+.Op Fl T Ar file
+.Op Fl s Ar replstr
 .Ar file1
 .Op Ar file2 ...
 .Sh DESCRIPTION
@@ -121,6 +118,14 @@ The setuid and setgid bits are only preserved if the user is
 the superuser.  Only meaningful in conjunction with the
 .Fl x
 flag.
+.It Fl q
+Select the first archive member that matches each
+.Ar pattern
+operand.
+No more than one archive member is matched for each
+.Ar pattern .
+When members of type directory are matched, the file hierarchy rooted at that
+directory is also matched.
 .It Fl s Ar replstr
 Modify the file or archive member names specified by the
 .Ar pattern
@@ -189,6 +194,9 @@ Do not strip leading slashes
 .Pq Sq /
 from pathnames.
 The default is to strip leading slashes.
+.It Fl T Ar file
+This is a positional argument which reads the names of files to archive or
+extract from the given file.
 .It Fl X
 Do not cross mount points in the file system.
 .It Fl Z

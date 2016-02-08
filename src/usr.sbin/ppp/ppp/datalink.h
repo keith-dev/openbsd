@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	$Id: datalink.h,v 1.3 1999/03/04 17:42:25 brian Exp $
+ *	$Id: datalink.h,v 1.5 1999/07/15 02:10:32 brian Exp $
  */
 
 #define DATALINK_CLOSED  (0)

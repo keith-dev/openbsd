@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1988, 1989, 1990, 1991, 1992, 1993, 1994, 1995, 1996
+ * Copyright (c) 1988, 1989, 1990, 1991, 1992, 1993, 1994, 1995, 1996, 1997
  *	The Regents of the University of California.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -21,7 +21,7 @@
 
 #ifndef lint
 static const char rcsid[] =
-    "@(#) $Header: /cvs/src/usr.sbin/tcpdump/print-tcp.c,v 1.6 1998/09/22 22:03:01 provos Exp $ (LBL)";
+    "@(#) $Header: /cvs/src/usr.sbin/tcpdump/print-tcp.c,v 1.8 1999/09/16 17:59:50 brad Exp $ (LBL)";
 #endif
 
 #include <sys/param.h>
@@ -75,6 +75,15 @@ static const char rcsid[] =
 #define TCPOPT_CCECHO		13	/* T/TCP CC options (rfc1644) */
 #endif
 
+/* Definitions required for ECN
+   for use if the OS running tcpdump does not have ECN */
+#ifndef TH_ECNECHO
+#define TH_ECNECHO		0x40	/* ECN Echo in tcp header */
+#endif
+#ifndef TH_CWR
+#define TH_CWR			0x80	/* ECN Cwnd Reduced in tcp header*/
+#endif
+
 struct tha {
 	struct in_addr src;
 	struct in_addr dst;
@@ -95,6 +104,7 @@ struct tcp_seq_hash {
 
 static struct tcp_seq_hash tcp_seq_hash[TSEQ_HASHSIZE];
 
+#define NETBIOS_SSN_PORT 139
 
 void
 tcp_print(register const u_char *bp, register u_int length,
@@ -134,7 +144,8 @@ tcp_print(register const u_char *bp, register u_int length,
 		(void)printf("tcp %d", length - tp->th_off * 4);
 		return;
 	}
-	if ((flags = tp->th_flags) & (TH_SYN|TH_FIN|TH_RST|TH_PUSH)) {
+	if ((flags = tp->th_flags) & (TH_SYN|TH_FIN|TH_RST|TH_PUSH|
+				      TH_ECNECHO|TH_CWR)) {
 		if (flags & TH_SYN)
 			putchar('S');
 		if (flags & TH_FIN)
@@ -143,6 +154,10 @@ tcp_print(register const u_char *bp, register u_int length,
 			putchar('R');
 		if (flags & TH_PUSH)
 			putchar('P');
+		if (flags & TH_CWR)
+			putchar('W');	/* congestion _W_indow reduced (ECN) */
+		if (flags & TH_ECNECHO)
+			putchar('E');	/* ecn _E_cho sent (ECN) */
 	} else
 		putchar('.');
 
@@ -283,7 +298,7 @@ tcp_print(register const u_char *bp, register u_int length,
 					LENCHECK (i + TCPOLEN_SACK);
 					s = EXTRACT_32BITS(cp + i);
 					e = EXTRACT_32BITS(cp + i + 4);
-					if (!Sflag)
+					if (!Sflag) {
 						if (rev) {
 							s -= th->seq;
 							e -= th->seq;
@@ -292,6 +307,7 @@ tcp_print(register const u_char *bp, register u_int length,
 							e -= th->ack;
 						}
 					(void) printf("{%u:%u} ", s, e);
+					}
 				}
 				break;
 			}

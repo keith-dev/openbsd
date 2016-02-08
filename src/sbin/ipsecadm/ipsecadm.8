@@ -1,4 +1,4 @@
-.\" $OpenBSD: ipsecadm.8,v 1.5 1999/03/30 03:29:03 provos Exp $
+.\" $OpenBSD: ipsecadm.8,v 1.14 1999/10/07 20:54:42 angelos Exp $
 .\" Copyright 1997 Niels Provos <provos@physnet.uni-hamburg.de>
 .\" All rights reserved.
 .\"
@@ -39,10 +39,26 @@
 .Nm ipsecadm
 .Op command
 .Ar modifiers ...
+.Sh NOTE
+Before
+.Xr ipsecadm 8
+can be used, IPSec must be enabled by setting one or more of the following
+.Xr sysctl 3
+variables:
+.Bl -tag -width xxxxxxxxxxxxxxxxxxxxx
+.It net.inet.esp.enable
+Enable the ESP IPSec protocol
+.It net.inet.ah.enable
+Enable the AH IPSec protocol
+.El
+.Pp
+To enable these operations across reboots, see
+.Pa /etc/sysctl.conf .
+.Pp
 .Sh DESCRIPTION
 The
 .Nm ipsecadm
-utility allows sets up security associations in the kernel
+utility sets up security associations in the kernel
 to be used with
 .Xr ipsec 4 .
 It can be used to specify the encryption and authentication
@@ -77,7 +93,7 @@ encryption algorithms can be applied. Allowed modifiers are:
 .Fl spi ,
 .Fl enc ,
 .Fl halfiv ,
-.Fl forcetunnel , 
+.Fl forcetunnel ,
 and
 .Fl key .
 .It new ah
@@ -123,7 +139,7 @@ Allowed modifiers are:
 and
 .Fl chain .
 .It group
-Group two SA's together. Allowed modifiers are:
+Group two SAs together. Allowed modifiers are:
 .Fl dst ,
 .Fl spi ,
 .Fl proto ,
@@ -141,13 +157,13 @@ Association. Allowed modifiers are:
 .Fl transport ,
 .Fl sport ,
 .Fl dport ,
-.FL local ,
+.Fl local ,
 .Fl delete .
 The
 .Xr netstat 1
 command shows the existing flows.
 .It bind
-Associate an incoming Security Assoication with and outgoing Security
+Associate an incoming Security Association with an outgoing Security
 Association. When a socket receives packets secured by the incoming
 SA all responses will be processed by the outgoing SA. Allowed modifiers
 are:
@@ -164,6 +180,17 @@ and
 .Fl dst .
 This can be useful while travelling where the IP address of potential
 clients is not known.
+.It flush
+Flush SAs from from kernel. This includes flushing any flows and 
+routing entries associated with the SAs. Allowed modifiers are:
+.Fl ah ,
+.Fl esp ,
+.Fl oldah ,
+.Fl oldesp ,
+and
+.Fl ip4 .
+Default action is to flush all types of security associations 
+from the kernel.
 .El
 .Pp
 If no command is given
@@ -223,7 +250,7 @@ at your own risk.
 We suggest using 3DES instead. DES support is kept for interoperability
 (with old implementations) purposes only.  See
 .Xr des_cipher 3 .
-.It Nm 3des 
+.It Nm 3des
 This is available for both old and new esp.  It is considered
 more secure than straight DES, since it uses larger keys.
 .It Nm blf
@@ -264,7 +291,7 @@ should be chosen in random (ideally, using some true-random source like
 coin flipping). It is very important that the key is not guessable. One
 practical way of generating keys is by using the
 .Xr random 4
-device (e.g. dd if=/dev/urandom bs=1024 count=1 | sha1)
+device (e.g., dd if=/dev/urandom bs=1024 count=1 | sha1)
 .It authkey
 The secret key material used for authentication
 if additional authentication in new esp mode is required. For
@@ -278,7 +305,7 @@ should be chosen in random (ideally, using some true-random source like
 coin flipping). It is very important that the key is not guessable. One
 practical way of generating keys is by using the
 .Xr random 4
-device (e.g. dd if=/dev/urandom bs=1024 count=1 | sha1)
+device (e.g., dd if=/dev/urandom bs=1024 count=1 | sha1)
 .It iv
 This option has been deprecated. The argument is ignored. When applicable,
 it has the same behaviour as the
@@ -290,7 +317,7 @@ may only be used with old ESP.
 .It proto
 The security protocol needed by
 .Nm delspi ,
-.Nm flow , 
+.Nm flow ,
 .Nm group
 or
 .Nm bind
@@ -347,11 +374,31 @@ can be used.
 .It local
 The
 .Nm flow
-command also creates a flow which matches local packets. This is aquivalent
+command also creates a flow which matches local packets. This is equivalent
 to using a source address of 0.0.0.0 and a source network mask of
-255.255.255.0.
+255.255.255.255.
 .It delete
 Instead of creating a flow, an existing flow is deleted.
+.It ah
+For
+.Nm flush ,
+only flush SAs of type ah.
+.It esp
+For
+.Nm flush ,
+only flush SAs of type esp.
+.It oldah
+For
+.Nm flush ,
+only flush SAs of type old ah.
+.It oldesp
+For
+.Nm flush ,
+only flush SAs of type old esp.
+.It ip4
+For
+.Nm flush ,
+only flush SAs of type ip4.
 .El
 .Sh EXAMPLE
 Setup a SA which uses new esp with 3des encryption and HMAC-SHA1
@@ -368,11 +415,17 @@ Setup a SA for authentication with old ah only:
 ipsecadm old ah -auth md5 -spi 1001 -dst 169.20.12.2 -src 169.20.12.3 \e\ 
 	-key 12341234deadbeef
 .Ed
+.Pp
+Delete all esp SAs and their flows and routing information:
+.Bd -literal
+ipsecadm flush -esp
+.Ed
 .Sh SEE ALSO
-.Xr services 5 ,
-.Xr protocols 5 ,
 .Xr netstat 1 ,
-.Xr isakmpd 8 ,
+.Xr enc 4 ,
 .Xr ipsec 4 ,
-.Xr vpn 8 ,
-.Xr photurisd 8
+.Xr protocols 5 ,
+.Xr services 5 ,
+.Xr isakmpd 8 ,
+.Xr photurisd 8 ,
+.Xr vpn 8

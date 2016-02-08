@@ -29,11 +29,11 @@
 .\" OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 .\" SUCH DAMAGE.
 .\"
-.\"	$OpenBSD: sigvec.3,v 1.10 1999/02/27 21:54:54 deraadt Exp $
+.\"	$OpenBSD: sigvec.3,v 1.15 1999/09/23 04:11:59 alex Exp $
 .\"
 .Dd April 29, 1991
 .Dt SIGVEC 3
-.Os BSD 4
+.Os
 .Sh NAME
 .Nm sigvec
 .Nd software signal facilities
@@ -117,7 +117,7 @@ or
 .Xr sigsetmask
 call is made).
 This mask is formed by taking the union of the current signal mask,
-the signal to be delivered, and 
+the signal to be delivered, and
 the signal mask associated with the handler to be invoked.
 .Pp
 .Fn sigvec
@@ -227,7 +227,7 @@ with names as in the include file
 .It Dv SIGQUIT No "	create core image" "	quit program"
 .It Dv SIGILL No "	create core image" "	illegal instruction"
 .It Dv SIGTRAP No "	create core image" "	trace trap"
-.It Dv SIGABRT No "	create core image" Xr 	abort 2
+.It Dv SIGABRT No "	create core image" Xr 	abort 3
 call (formerly
 .Dv SIGIOT )
 .It Dv SIGEMT No "	create core image" "	emulate instruction executed"
@@ -303,22 +303,22 @@ or
 .Dv SIGSTOP .
 .El
 .Sh EXAMPLE
-For an example of signal handler declerations, see
+For an example of signal handler declarations, see
 .Xr sigaction 2 .
 .Sh SEE ALSO
 .Xr kill 1 ,
 .Xr kill 2 ,
 .Xr ptrace 2 ,
-.Xr setjmp 3 ,
 .Xr sigaction 2 ,
 .Xr sigaltstack 2 ,
-.Xr sigblock 3 ,
-.Xr siginterrupt 3 ,
 .Xr sigpause 2 ,
 .Xr sigprocmask 2 ,
-.Xr sigsetmask 3 ,
-.Xr sigsetops 3 ,
 .Xr sigstack 2 ,
 .Xr sigsuspend 2 ,
+.Xr setjmp 3 ,
+.Xr sigblock 3 ,
+.Xr siginterrupt 3 ,
+.Xr sigsetmask 3 ,
+.Xr sigsetops 3 ,
 .Xr sigvec 3 ,
 .Xr tty 4

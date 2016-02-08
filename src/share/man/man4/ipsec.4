@@ -1,4 +1,4 @@
-.\" $OpenBSD: ipsec.4,v 1.19 1999/03/11 01:35:04 pjanzen Exp $
+.\" $OpenBSD: ipsec.4,v 1.26 1999/10/07 21:48:34 angelos Exp $
 .\" Copyright 1997 Niels Provos <provos@physnet.uni-hamburg.de>
 .\" All rights reserved.
 .\"
@@ -35,11 +35,24 @@
 .Sh NAME
 .Tn IPsec
 .Nd IP Security Protocol
+.Sh NOTE
+.Tn IPSec
+is enabled with the following
+.Xr sysctl 3
+variables in
+.Pa /etc/sysctl.conf :
+.Bl -tag -width xxxxxxxxxxxxxxxxxxxxx
+.It net.inet.esp.enable
+Enable the ESP IPSec protocol
+.It net.inet.ah.enable
+Enable the AH IPSec protocol
+.El
+.Pp
 .Sh DESCRIPTION
 .Tn IPSec
 is a pair of protocols,
 .Tn ESP
-(for Encapsulting Security
+(for Encapsulating Security
 Payload) and
 .Tn AH
 (for Authentication Header), which provide
@@ -264,7 +277,7 @@ packets that have been successfully processed by
 .Pp
 Security Associations can be set up manually with the
 .Xr ipsecadm 1
-utility or automatically with the 
+utility or automatically with the
 .Xr photurisd 8
 or
 .Xr isakmpd 8
@@ -290,7 +303,7 @@ Specifies the use of encryption in tunnel mode.
 .El
 .Pp
 For each of the categories there are five possible levels which
-specify the security policy to use in that catagory:
+specify the security policy to use in that category:
 .Bl -tag -width IPSEC_LEVEL_REQUIRE
 .It IPSEC_LEVEL_BYPASS
 Bypass the default system security policy. This option can only be used
@@ -349,13 +362,14 @@ There's a lot more to be said on this subject. This is just a beginning.
 .Br
 At the moment the socket options are not fully implemented.
 .Sh SEE ALSO
-.Xr ip 4 ,
-.Xr netintro 4 ,
+.Xr enc 4 ,
+.Xr icmp 4 ,
 .Xr inet 4 ,
+.Xr ip 4 ,
+.Xr isakmpd 8 ,
+.Xr netintro 4 ,
 .Xr tcp 4 ,
 .Xr udp 4 ,
-.Xr icmp 4 ,
-.Xr isakmpd 4 ,
 .Xr ipsecadm 8 ,
 .Xr photurisd 8 ,
 .Xr vpn 8 .

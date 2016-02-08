@@ -17,7 +17,7 @@
  * IMPLIED WARRANTIES, INCLUDING, WITHOUT LIMITATION, THE IMPLIED
  * WARRANTIES OF MERCHANTIBILITY AND FITNESS FOR A PARTICULAR PURPOSE.
  *
- * $Id: arp.c,v 1.3 1999/02/06 03:22:30 brian Exp $
+ * $Id: arp.c,v 1.5 1999/05/08 11:06:33 brian Exp $
  *
  */
 
@@ -37,13 +37,15 @@
 #include <netinet/ip.h>
 #include <sys/un.h>
 
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/errno.h>
 #include <sys/sysctl.h>
+#include <termios.h>
 #include <unistd.h>
 
+#include "layer.h"
 #include "mbuf.h"
 #include "log.h"
 #include "id.h"

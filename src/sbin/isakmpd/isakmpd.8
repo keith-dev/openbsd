@@ -1,7 +1,7 @@
-.\" $OpenBSD: isakmpd.8,v 1.6 1998/12/21 01:02:25 niklas Exp $
-.\" $EOM: isakmpd.8,v 1.13 1998/12/21 00:09:36 niklas Exp $
+.\" $OpenBSD: isakmpd.8,v 1.14 1999/10/17 19:35:23 aaron Exp $
+.\" $EOM: isakmpd.8,v 1.17 1999/09/20 19:57:50 angelos Exp $
 .\"
-.\" Copyright (c) 1998 Niklas Hallqvist.  All rights reserved.
+.\" Copyright (c) 1998, 1999 Niklas Hallqvist.  All rights reserved.
 .\"
 .\" Redistribution and use in source and binary forms, with or without
 .\" modification, are permitted provided that the following conditions
@@ -53,9 +53,9 @@
 The
 .Nm
 daemon establishes security associations for encrypted
-and/or authenticated network traffic. 
+and/or authenticated network traffic.
 .Pp
-The daemon listens to a named pipe 
+The daemon listens to a named pipe
 .Pa isakmpd.fifo
 for user requests and on a
 .Dv PF_ENCAP
@@ -64,14 +64,10 @@ socket for kernel requests.
 The options are as follows:
 .Bl -tag -width Ds
 .It Fl c Ar config-file
-If given, the
-.Fl c
-option specifies an alternate configuration file instead of
-.Pa /etc/isakmpd.conf .
+Specifies an alternate configuration file instead of the default
+.Pa /etc/isakmpd/isakmpd.conf .
 .It Fl d
-The
-.Fl d
-option is used to make the daemon run in the foreground, logging to stderr.
+Cause the daemon run in the foreground, logging to stderr.
 .It Xo Fl D
 .Ar debug-class Ns No = Ns Ar level
 .Xc
@@ -88,25 +84,27 @@ denotes a debugging class, and
 .Ar level
 the level you want that debugging class to
 limit debug printouts at (i.e., all debug printouts above the level specified
-will not output anything).
+will not output anything). If
+.Ar class
+is set to
+.Sq A ,
+then all debugging classes are set to the specified level.
 .It Fl f Ar fifo
-The
-.Fl f
-option specifies the FIFO (a.k.a. named pipe) where the daemon listens for
+Specifies the
+.Tn FIFO
+(a.k.a. named pipe) where the daemon listens for
 user requests.  If the path given is a dash
 .Pq Sq \&- ,
 .Nm
 will listen to stdin instead.
 .It Fl n
-When the
-.Fl n
-option is given, the kernel will not take part in the negotiations.
+Cause the kernel to not take part in the negotiations.
 This is a non-destructive mode so to say, in that it won't alter any
-SAs in the IPSEC stack.
+SAs in the IPsec stack.
 .It Fl p Ar listen-port
-The
-.Fl p
-option specifies the listen port the daemon will bind to.
+Specifies the port
+.Nm
+will bind to.
 .It Fl P Ar local-port
 On the other hand, the port specified to capital
 .Fl P
@@ -117,28 +115,29 @@ This is useful for setting up regression tests.
 .It Fl R Ar report-file
 When you signal
 .Nm
-a SIGUSR1 it will report its internal state to a report file,
-normally
+a
+.Dv SIGUSR1
+it will report its internal state to a report file, normally
 .Pa /var/run/isakmpd.report ,
 but this can be changed by feeding
 the file name as an argument to the
 .Fl R
 flag.
 .El
-.Pp
 .Sh BUGS
 The
 .Fl P
 flag does not do what we document, rather it does nothing.
 .Sh FILES
-.Bl -tag -width /var/run/isakmpd.report
-.It Pa /etc/isakmpd.conf
-The configuration file
+.Bl -tag -width /etc/isakmpd/isakmpd.conf -compact
+.It Pa /etc/isakmpd/isakmpd.conf
+configuration file
 .It Pa /var/run/isakmpd.fifo
-The FIFO used to manually control
+FIFO used to manually control
 .Nm isakmpd
 .It Pa /var/run/isakmpd.report
-The report file
+report file
+.El
 .Sh SEE ALSO
 .Xr ipsec 4 ,
 .Xr isakmpd.conf 5 ,

@@ -30,11 +30,11 @@
 .\" SUCH DAMAGE.
 .\"
 .\"     from: @(#)termcap.5	6.11 (Berkeley) 3/6/93
-.\"	$Id: termcap.5,v 1.1 1998/12/07 18:23:36 millert Exp $
+.\"	$Id: termcap.5,v 1.7 1999/09/23 04:12:07 alex Exp $
 .\"
 .Dd March 6, 1993
 .Dt TERMCAP 5
-.Os BSD 3
+.Os
 .Sh NAME
 .Nm termcap
 .Nd terminal capability data base
@@ -100,7 +100,6 @@ The following suffixes should be used where possible:
 .Ed
 .Sh CAPABILITIES
 The characters in the
-The
 .Em Notes
 function
 field in the table have the following meanings
@@ -292,7 +291,7 @@ version 2 only).
 .It "mo	str		Turn off"
 .Dq meta mode .
 .It "mp	str		Turn on protected attribute."
-.It "mr	str		Turn on reverse-video attibute."
+.It "mr	str		Turn on reverse-video attribute."
 .It "ms	bool		Safe to move in standout modes."
 .It "mu	str	(o)	Memory unlock (turn off memory lock)."
 .It "nc	bool	(o)	No correctly-working"
@@ -734,7 +733,7 @@ that command can be given as
 .Sy \&nw
 (newline).
 It is permissible for this to clear the remainder of the current line,
-so if the terminal has no correctly-working
+so if the terminal has no correctly working
 .Tn \&CR
 and
 .Tn \&LF
@@ -1809,12 +1808,12 @@ user preferences.
 .It Pa /usr/share/misc/termcap
 File containing terminal descriptions.
 .It Pa /usr/share/misc/termcap.db
-Hash database file containing terminal descriptions (see 
+Hash database file containing terminal descriptions (see
 .Xr cap_mkdb 1 ) .
 .El
 .Sh SEE ALSO
-.Xr \&ex 1 ,
 .Xr cap_mkdb 1 ,
+.Xr \&ex 1 ,
 .Xr more 1 ,
 .Xr tset 1 ,
 .Xr \&ul 1 ,

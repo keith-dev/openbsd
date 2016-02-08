@@ -1,4 +1,4 @@
-/*	$OpenBSD: m_item_new.c,v 1.4 1998/07/24 16:39:01 millert Exp $	*/
+/*	$OpenBSD: m_item_new.c,v 1.6 1999/05/17 03:04:24 millert Exp $	*/
 
 /****************************************************************************
  * Copyright (c) 1998 Free Software Foundation, Inc.                        *
@@ -29,7 +29,7 @@
  ****************************************************************************/
 
 /****************************************************************************
- *   Author: Juergen Pfeifer <Juergen.Pfeifer@T-Online.de> 1995,1997        *
+ *   Author: Juergen Pfeifer <juergen.pfeifer@gmx.net> 1995,1997            *
  ****************************************************************************/
 
 /***************************************************************************
@@ -40,7 +40,7 @@
 
 #include "menu.priv.h"
 
-MODULE_ID("$From: m_item_new.c,v 1.8 1998/02/11 12:13:50 tom Exp $")
+MODULE_ID("$From: m_item_new.c,v 1.11 1999/05/16 17:28:49 juergen Exp $")
 
 /*---------------------------------------------------------------------------
 |   Facility      :  libnmenu  
@@ -180,7 +180,8 @@ int set_menu_mark(MENU * menu, const char * mark)
 	  if (menu->mark)
 	    {
 	      strcpy(menu->mark, mark);
-	      menu->status |= _MARK_ALLOCATED;
+	      if (menu != &_nc_Default_Menu)
+		menu->status |= _MARK_ALLOCATED;
 	    }
 	  else
 	    {

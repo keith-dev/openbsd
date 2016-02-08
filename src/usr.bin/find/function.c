@@ -1,4 +1,4 @@
-/*	$OpenBSD: function.c,v 1.13 1999/03/17 17:36:30 espie Exp $	*/
+/*	$OpenBSD: function.c,v 1.16 1999/10/04 21:26:10 millert Exp $	*/
 
 /*-
  * Copyright (c) 1990, 1993
@@ -38,7 +38,7 @@
 
 #ifndef lint
 /*static char sccsid[] = "from: @(#)function.c	8.1 (Berkeley) 6/6/93";*/
-static char rcsid[] = "$OpenBSD: function.c,v 1.13 1999/03/17 17:36:30 espie Exp $";
+static char rcsid[] = "$OpenBSD: function.c,v 1.16 1999/10/04 21:26:10 millert Exp $";
 #endif /* not lint */
 
 #include <sys/param.h>
@@ -50,6 +50,7 @@ static char rcsid[] = "$OpenBSD: function.c,v 1.13 1999/03/17 17:36:30 espie Exp
 #include <dirent.h>
 #include <err.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <fnmatch.h>
 #include <fts.h>
 #include <grp.h>
@@ -442,8 +443,20 @@ f_execdir(plan, entry)
 {
 	register int cnt;
 	pid_t pid;
-	int status;
+	int status, fd;
 	char base[MAXPATHLEN];
+
+	/* fts(3) does not chdir for the root level so we do it ourselves. */
+	if (entry->fts_level == FTS_ROOTLEVEL) {
+		if ((fd = open(".", O_RDONLY)) == -1) {
+			warn("cannot open \".\"");
+			return (0);
+		}
+		if (chdir(entry->fts_accpath)) {
+			(void) close(fd);
+			return (0);
+		}
+	}
 
 	/* Substitute basename(path) for {} since cwd is it's parent dir */
 	(void)strncpy(base, basename(entry->fts_path), sizeof(base) - 1);
@@ -466,6 +479,17 @@ f_execdir(plan, entry)
 		warn("%s", plan->e_argv[0]);
 		_exit(1);
 	}
+
+	/* Undo the above... */
+	if (entry->fts_level == FTS_ROOTLEVEL) {
+		if (fchdir(fd) == -1) {
+			warn("unable to chdir back to starting directory");
+			(void) close(fd);
+			return (0);
+		}
+		(void) close(fd);
+	}
+
 	pid = waitpid(pid, &status, 0);
 	return (pid != -1 && WIFEXITED(status) && !WEXITSTATUS(status));
 }
@@ -486,7 +510,6 @@ c_execdir(argvp)
 	register char **argv, **ap, *p;
 
 	ftsoptions &= ~FTS_NOSTAT;
-	ftsoptions |= FTS_CHDIRROOT;
 	isoutput = 1;
     
 	new = palloc(N_EXECDIR, f_execdir);

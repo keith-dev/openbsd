@@ -1,6 +1,6 @@
 #!./perl
 
-# $RCSfile: chop.t,v $$Revision: 1.2 $$Date: 1997/11/30 08:05:15 $
+# $RCSfile: chop.t,v $$Revision: 1.3 $$Date: 1999/04/29 22:52:34 $
 
 print "1..28\n";
 

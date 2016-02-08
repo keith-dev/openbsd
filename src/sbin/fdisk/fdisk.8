@@ -1,4 +1,4 @@
-.\"	$OpenBSD: fdisk.8,v 1.21 1999/03/18 11:04:50 aaron Exp $
+.\"	$OpenBSD: fdisk.8,v 1.28 1999/09/23 23:23:30 aaron Exp $
 .\"
 .\" Copyright (c) 1997 Tobias Weingartner
 .\" All rights reserved.
@@ -30,7 +30,7 @@
 .\"
 .Dd April 4, 1993
 .Dt FDISK 8
-.Os OpenBSD
+.Os
 .Sh NAME
 .Nm fdisk
 .Nd DOS partition maintenance program
@@ -38,9 +38,9 @@
 .Nm fdisk
 .Op Fl ie
 .Op Fl f Ar mbrname
-.Op Fl c Ar cyls
+.Op Fl c Ar cylinders
 .Op Fl h Ar heads
-.Op Fl s Ar sects
+.Op Fl s Ar sectors
 .Ar device
 .Sh DESCRIPTION
 In order for the BIOS to boot the kernel, certain conventions must be
@@ -58,14 +58,20 @@ is found, the boot block from that partition is loaded and executed in
 place of the original (MBR) boot block.
 .Pp
 The following options are available:
-.Bl -tag -width "-f mbrname"
+.Pp
+.Bl -tag -width "-c cylinders" -compact
 .It Fl i
 Initialize the MBR sector.
+.Pp
 .It Fl e
 Edit existing MBR sectors.
+.Pp
 .It Fl f Ar mbrname
 Specifies an alternate MBR template file.
-.It Fl c,h,s
+.Pp
+.It Fl c Ar cylinders
+.It Fl h Ar heads
+.It Fl s Ar sectors
 Specifies an alternate BIOS geometry for
 .Nm
 to use.
@@ -75,7 +81,7 @@ The DOS
 .Nm
 program can be used to divide space on the disk into partitions and set
 one active.
-This 
+This
 .Nm
 program serves a similar purpose to the DOS program.
 When called with no special flags, it prints the MBR partition
@@ -99,7 +105,7 @@ has been selected using the
 .Fl h ,
 and
 .Fl s
-options. 
+options.
 .Pp
 This disk is divided into two partitions that happen to fill the disk.
 The first partition overlaps the third partition.  (Used for debugging
@@ -111,7 +117,7 @@ Number of partition table entry.  A
 denotes the bootable partition.
 .It Em "id"
 System identifier.
-.oS
+.Os
 reserves the
 magic number 166 decimal (A6 in hex).
 If no 166 partition is found, it will use an older FreeBSD partition
@@ -141,7 +147,7 @@ will completely overwrite the primary MBR, and start with a fresh one using
 a default template, or one given by the
 .Fl f
 flag.  It will set up partition number 3 to be an
-.oS
+.Os
 partition, that will start at cylinder 0, head 1, sector 1, and extend
 to the end of the disk.
 This mode is designed to initialize an MBR the very first time,
@@ -178,6 +184,8 @@ explanations are given below.
 Display a list of commands that
 .Nm
 understands in the interactive edit mode.
+.It Em manual
+Display this manual page.
 .It Em reinit
 Initialize the currently selected, in-memory copy of the
 boot block.
@@ -224,7 +232,6 @@ it does write the modified block out.
 .It Em abort
 Quit program without saving current changes.
 .El
-.Pp
 .Sh NOTES
 The automatic calculation of starting cylinder etc. uses
 a set of figures that represent what the BIOS thinks is the
@@ -240,7 +247,7 @@ that use geometry translation under a potentially different BIOS.
 .Pp
 If you hand craft your disk layout,
 please make sure that the
-.oS
+.Os
 partition starts on a cylinder boundary.
 (This restriction may be changed in the future.)
 .Pp
@@ -261,6 +268,10 @@ default MBR template
 .Xr boot_i386 8 ,
 .Xr disklabel 8
 .Sh BUGS
-There are subtleties that the program detects that are not explained in
-this manual page.  Also, chances are that some of the subtleties it should
-detect are being steamrolled.  Caveat Emperor.
+There are subtleties
+.Nm
+detects that are not explained in this manual page.
+As well, chances are that some of the subtleties it should detect are being
+steamrolled.
+Caveat Emptor.
+

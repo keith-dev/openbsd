@@ -1,4 +1,4 @@
-.\"	$OpenBSD: shmget.2,v 1.4 1999/03/02 15:40:37 aaron Exp $
+.\"	$OpenBSD: shmget.2,v 1.8 1999/09/23 04:12:00 alex Exp $
 .\"	$NetBSD: shmget.2,v 1.2 1997/03/27 08:20:39 mikel Exp $
 .\"
 .\" Copyright (c) 1995 Frank van der Linden
@@ -46,22 +46,25 @@
 .Fn shmget
 returns the shared memory identifier associated with the key
 .Fa key .
-
+.Pp
 A shared memory segment is created if either
 .Fa key
-is equal to IPC_PRIVATE, or
+is equal to
+.Dv IPC_PRIVATE ,
+or
 .Fa key
-does not have a shared memory segment identifier associated with it, and the IPC_CREAT
+does not have a shared memory segment identifier associated with it, and the
+.Dv IPC_CREAT
 bit is set in
-.Fa shmflg.
-
+.Fa shmflg .
+.Pp
 If a new shared memory segment is created, the data structure associated with it (the
 .Va shmid_ds
 structure, see
 .Xr shmctl 2 )
 is initialized as follows:
 .Bl -bullet
-.It 
+.It
 .Va shm_perm.cuid
 and
 .Va shm_perm.uid
@@ -79,7 +82,7 @@ is set to the lower 9 bits of
 .Va shm_lpid ,
 .Va shm_nattch ,
 .Va shm_atime ,
-and 
+and
 .Va shm_dtime
 are set to 0
 .It
@@ -92,7 +95,7 @@ is set to the value of
 .El
 .Sh RETURN VALUES
 Upon successful completion a positive shared memory segment identifier is returned.
-Otherwise, -1 is returned and the global variable
+Otherwise, \-1 is returned and the global variable
 .Va errno
 is set to indicate the error.
 .Sh ERRORS
@@ -102,15 +105,20 @@ A shared memory segment is already associated with
 .Fa key
 and the caller has no permission to access it.
 .It Bq Er EEXIST
-Both IPC_CREAT and IPC_EXCL are set in
+Both
+.Dv IPC_CREAT
+and
+.Dv IPC_EXCL
+are set in
 .Fa shmflg ,
 and a shared memory segment is already associated with
 .Fa key .
 .It Bq Er ENOSPC
-A new shared memory indentifier could not be created because the system limit
+A new shared memory identifier could not be created because the system limit
 for the number of shared memory identifiers has been reached.
 .It Bq Er ENOENT
-IPC_CREAT was not set in
+.Dv IPC_CREAT
+was not set in
 .Fa shmflg
 and no shared memory segment associated with
 .Fa key

@@ -1,4 +1,4 @@
-/*	$OpenBSD: fstat.c,v 1.21 1998/11/30 10:19:02 deraadt Exp $	*/
+/*	$OpenBSD: fstat.c,v 1.24 1999/07/02 19:23:50 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 1988, 1993
@@ -41,7 +41,7 @@ static char copyright[] =
 
 #ifndef lint
 /*static char sccsid[] = "from: @(#)fstat.c	8.1 (Berkeley) 6/6/93";*/
-static char *rcsid = "$OpenBSD: fstat.c,v 1.21 1998/11/30 10:19:02 deraadt Exp $";
+static char *rcsid = "$OpenBSD: fstat.c,v 1.24 1999/07/02 19:23:50 deraadt Exp $";
 #endif /* not lint */
 
 #include <sys/param.h>
@@ -57,13 +57,14 @@ static char *rcsid = "$OpenBSD: fstat.c,v 1.21 1998/11/30 10:19:02 deraadt Exp $
 #include <sys/unpcb.h>
 #include <sys/sysctl.h>
 #include <sys/filedesc.h>
+#include <sys/mount.h>
 #define	_KERNEL
 #include <sys/file.h>
 #include <ufs/ufs/quota.h>
 #include <ufs/ufs/inode.h>
+#include <miscfs/nullfs/null.h>
 #undef _KERNEL
 #define NFS
-#include <sys/mount.h>
 #include <nfs/nfsproto.h>
 #include <nfs/rpcv2.h>
 #include <nfs/nfs.h>
@@ -80,6 +81,10 @@ static char *rcsid = "$OpenBSD: fstat.c,v 1.21 1998/11/30 10:19:02 deraadt Exp $
 
 #include <arpa/inet.h>
 
+#define PIPE_NODIRECT		/* XXX - define here, since it's not defined
+				   outside _KERNEL */
+#include <sys/pipe.h>
+
 #include <ctype.h>
 #include <errno.h>
 #include <kvm.h>
@@ -91,6 +96,7 @@ static char *rcsid = "$OpenBSD: fstat.c,v 1.21 1998/11/30 10:19:02 deraadt Exp $
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <netdb.h>
 #include <err.h>
 #include "fstat.h"
 
@@ -144,6 +150,7 @@ void socktrans __P((struct socket *, int));
 void usage __P((void));
 void vtrans __P((struct vnode *, int, int));
 int getfname __P((char *));
+void pipetrans __P((struct pipe *, int));
 
 int
 main(argc, argv)
@@ -350,8 +357,10 @@ dofiles(kp)
 		else if (file.f_type == DTYPE_SOCKET) {
 			if (checkfile == 0)
 				socktrans((struct socket *)file.f_data, i);
-		}
-		else {
+		} else if (file.f_type == DTYPE_PIPE) {
+			if (checkfile == 0)
+				pipetrans((struct pipe *)file.f_data, i);
+		} else {
 			dprintf("unknown file type %d for file %d of pid %d",
 				file.f_type, i, Pid);
 		}
@@ -405,6 +414,10 @@ vtrans(vp, i, flag)
 			if (!xfs_filestat(&vn, &fst))
 				badtype = "error";
 			break;
+		case VT_NULL:
+			if (!null_filestat(&vn, &fst))
+				badtype = "error";
+			break;		
 		default: {
 			static char unknown[30];
 			sprintf(badtype = unknown, "?(%x)", vn.v_tag);
@@ -597,6 +610,82 @@ xfs_filestat(vp, fsp)
 	return 1;
 }
 
+int
+null_filestat(vp, fsp)
+	struct vnode *vp;
+	struct filestat *fsp;
+{
+	struct null_node node;
+	struct filestat fst;
+	struct vnode vn;
+	int fail = 1;
+
+	memset(&fst, 0, sizeof fst);
+
+	if (!KVM_READ(VTONULL(vp), &node, sizeof (node))) {
+		dprintf("can't read node at %p for pid %d", VTONULL(vp), Pid);
+		return 0;
+	}
+
+	/*
+	 * Attempt to find information that might be useful.
+	 */
+	if (node.null_lowervp) {
+		if (!KVM_READ(node.null_lowervp, &vn, sizeof (vn))) {
+			dprintf("can't read vnode at %p for pid %d",
+			    node.null_lowervp, Pid);
+			return 0;
+		}
+
+		fail = 0;
+		if (vn.v_type == VNON || vn.v_tag == VT_NON)
+			fail = 1;
+		else if (vn.v_type == VBAD)
+			fail = 1;
+		else
+			switch (vn.v_tag) {
+			case VT_UFS:
+			case VT_MFS:
+				if (!ufs_filestat(&vn, &fst))
+					fail = 1;
+				break;
+			case VT_NFS:
+				if (!nfs_filestat(&vn, &fst))
+					fail = 1;
+				break;
+			case VT_EXT2FS:
+				if (!ext2fs_filestat(&vn, &fst))
+					fail = 1;
+				break;
+			case VT_ISOFS:
+				if (!isofs_filestat(&vn, &fst))
+					fail = 1;
+				break;
+			case VT_MSDOSFS:
+				if (!msdos_filestat(&vn, &fst))
+					fail = 1;
+				break;
+			case VT_XFS:
+				if (!xfs_filestat(&vn, &fst))
+					fail = 1;
+				break;
+			default:
+				break;
+			}
+	}
+
+	fsp->fsid = (long)node.null_vnode;
+	if (fail)
+		fsp->fileid = (long)node.null_lowervp;
+	else
+		fsp->fileid = fst.fileid; 
+	fsp->mode = fst.mode;
+	fsp->size = fst.mode;
+	fsp->rdev = fst.mode;
+
+	return 1;
+}
+
 char *
 getmnton(m)
 	struct mount *m;
@@ -623,6 +712,43 @@ getmnton(m)
 	mt->next = mhead;
 	mhead = mt;
 	return (mt->mntonname);
+}
+
+void
+pipetrans(pipe, i)
+	struct pipe *pipe;
+	int i;
+{
+	struct pipe pi;
+	void *maxaddr;
+
+	PREFIX(i);
+
+	printf(" ");
+
+	/* fill in socket */
+	if (!KVM_READ(pipe, &pi, sizeof(struct pipe))) {
+		dprintf("can't read pipe at %p", pipe);
+		goto bad;
+	}
+
+	/*
+	 * We don't have enough space to fit both peer and own address, so
+	 * we select the higher address so both ends of the pipe have the
+	 * same visible addr. (it's the higher address because when the other
+	 * end closes, it becomes 0)
+	 */
+	maxaddr = MAX(pipe, pi.pipe_peer);
+
+	printf("pipe %p state: %s%s%s", maxaddr,
+	       (pi.pipe_state & PIPE_WANTR) ? "R" : "",
+	       (pi.pipe_state & PIPE_WANTW) ? "W" : "",
+	       (pi.pipe_state & PIPE_EOF) ? "E" : "");
+	
+	printf("\n");
+	return;
+bad:
+	printf("* error\n");
 }
 
 void
@@ -779,32 +905,15 @@ void
 getinetproto(number)
 	int number;
 {
-	char *cp;
+	static int isopen;
+	register struct protoent *pe;
 
-	switch(number) {
-	case IPPROTO_IP:
-		cp = "ip"; break;
-	case IPPROTO_ICMP:
-		cp ="icmp"; break;
-	case IPPROTO_GGP:
-		cp ="ggp"; break;
-	case IPPROTO_TCP:
-		cp ="tcp"; break;
-	case IPPROTO_EGP:
-		cp ="egp"; break;
-	case IPPROTO_PUP:
-		cp ="pup"; break;
-	case IPPROTO_UDP:
-		cp ="udp"; break;
-	case IPPROTO_IDP:
-		cp ="idp"; break;
-	case IPPROTO_RAW:
-		cp ="raw"; break;
-	default:
+	if (!isopen)
+		setprotoent(++isopen);
+	if ((pe = getprotobynumber(number)) != NULL)
+		printf(" %s", pe->p_name);
+	else
 		printf(" %d", number);
-		return;
-	}
-	printf(" %s", cp);
 }
 
 int

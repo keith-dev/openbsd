@@ -3,7 +3,7 @@
 .\" Copyright (c) 1989, 1991, 1993
 .\"	The Regents of the University of California.  All rights reserved.
 .\"
-.\" 
+.\"
 .\" This code is derived from software contributed to Berkeley by
 .\" Ken Arnold.
 .\"
@@ -39,7 +39,7 @@
 .\"
 .Dd June 9, 1993
 .Dt STRFILE 8
-.Os BSD 4
+.Os
 .Sh NAME
 .Nm strfile ,
 .Nm unstr
@@ -117,7 +117,7 @@ u_int8_t	str_pad[3];	/* padding */
 .Ed
 .Pp
 All fields are written in network byte order.  Each field is also
-written independantly so as to avoid structure padding problems on
+written independently so as to avoid structure padding problems on
 some architectures.
 .Pp
 The purpose of

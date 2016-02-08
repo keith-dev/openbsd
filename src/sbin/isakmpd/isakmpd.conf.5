@@ -1,7 +1,7 @@
-.\" $OpenBSD: isakmpd.conf.5,v 1.14 1999/04/01 00:37:50 niklas Exp $
-.\" $EOM: isakmpd.conf.5,v 1.16 1999/04/01 00:37:37 niklas Exp $
+.\" $OpenBSD: isakmpd.conf.5,v 1.27 1999/10/01 14:09:58 niklas Exp $
+.\" $EOM: isakmpd.conf.5,v 1.34 1999/10/01 14:00:23 niklas Exp $
 .\"
-.\" Copyright (c) 1998 Niklas Hallqvist.  All rights reserved.
+.\" Copyright (c) 1998, 1999 Niklas Hallqvist.  All rights reserved.
 .\"
 .\" Redistribution and use in source and binary forms, with or without
 .\" modification, are permitted provided that the following conditions
@@ -69,7 +69,7 @@ Then the comment goes on to the end of the line.
 Often the right-hand side values consist of other section names.
 This results in a tree structure.
 Some values are treated as a list of several scalar values, such lists always
-use comma as the separator.  Some values are formated like this: X,Y:Z, which
+use comma as the separator.  Some values are formatted like this: X,Y:Z, which
 is an offer/accept syntax, where X is a value we offer and Y:Z is a range of
 accepted values, inclusive.
 .Pp
@@ -78,8 +78,14 @@ accepted values, inclusive.
 .It Em General
 Generic global configuration parameters
 .Bl -tag -width 12n
+.It Em Policy-File
+The name of the file that contains
+.Xr KeyNote 4
+policies.
 .It Em Retransmits
 How many times should a message be retransmitted before giving up.
+.It Em Check-interval
+The interval between watchdog checks of connections we want up at all times.
 .It Em Exchange-max-time
 How many seconds should an exchange maximally take to setup
 before we give up.
@@ -87,7 +93,7 @@ before we give up.
 A list of IP-addresses OK to listen on.  This list is used as
 a filter for the set of addresses the interfaces configured
 provides.  This means that we won't see if an address given
-here does not exist on this host, thus no error is given for
+here does not exist on this host, and thus no error is given for
 that case.
 .It Em Shared-SADB
 If this tag is defined, whatever the value is, some semantics of
@@ -113,6 +119,34 @@ A list of directed IPSec "connection" names that should be brought up
 automatically, either on first use if the system supports it, or at
 startup of the daemon.  These names are section names where further
 information can be found.  Look at <IPSec-connection> below.
+Normally any connection mentioned here are treated as part of the
+"Passive-connection" list we present below, however there is a
+flag: "Active-only" that disables this behaviour.  This too is
+mentioned in the <IPSec-connection> section, in the "Flags" tag.
+.It Em Passive-connections
+A list of IPSec "connection" names we recognize and accept initiations for.
+These names are section names where further information can be found.  Look
+at <IPSec-connection> below.  Currently only the Local-ID and Remote-ID tags
+are looked at in those sections, as they are matched against the IDs given
+by the initiator.
+.El
+.It Em X509-Certificates
+.Bl -tag -width 12n
+.It Em Ca-directory
+A directory containing PEM certificates of certification authorities
+that we trust to sign other certificates.
+.It Em Cert-directory
+A directory containing PEM certificates that we trust to be valid.  
+These certificates are used in preference to those passed in messages and
+are required to have a SubjectAltName extension.
+.It Em Accept-self-signed
+If this tag is defined, whatever the value is, certificates that
+do not originate from a trusted CA but are self-signed will be
+accepted.
+.It Em Private-key
+The private key matching the public key of our certificate (which should be
+in the "Cert-directory", and have a subjectAltName matching our ID, so far
+that is our IP-address).
 .El
 .El
 .Ss Referred-to sections
@@ -141,12 +175,49 @@ The name of the ISAKMP-configuration section to use.  Look at
 .It Em Authentication
 Authentication data for this specific peer.  In the case of
 preshared key, this is the key value itself.
+.It Em ID
+If existent, the name of the section that describes the
+local client ID that we should present to our peer. If not present, it
+defaults to the address of the local interface we are sending packets
+over to the remote daemon. Look at <Phase1-ID> below.
 .It Em Flags
 A comma-separated list of flags controlling the further
-handling of the IPSec SA.  Currently only one flag is defined:
-.Dv Stayalive ,
-which means that after the expiration of an ISAKMP SA, the initiator
-side will automatically renegotiate for a new SA of the same name.
+handling of the ISAKMP SA.  Currently there are no specific
+ISAKMP SA flags defined.
+.It Em Next-hop
+A Linux FreeS/WAN specific value which should be the IP address of the
+next hop along the path to reach the peer, usually a router.
+.El
+.It Em <Phase1-ID>
+.Bl -tag -width 12n
+.It Em ID-type
+The ID type as given by the RFCs.  For Phase 1 this is currently
+.Li IPV4_ADDR ,
+.Li IPV4_ADDR_SUBNET ,
+.Li FQDN , 
+or
+.Li USER_FQDN .
+.It Em Address
+If the ID-type is
+.Li IPV4_ADDR ,
+this tag should exist and be an IP-address.
+.It Em Network
+If the ID-type is
+.Li IPV4_ADDR_SUBNET
+this tag should exist and
+be a network address.
+.It Em Netmask
+If the ID-type is
+.Li IPV4_ADDR_SUBNET
+this tag should exist and
+be a network subnet mask.
+.It Em Name
+If the ID-type is
+.Li FQDN
+or
+.Li USER_FQDN ,
+this tag should exist and contain a domain name or a user@domain
+string respectively.
 .El
 .It Em <ISAKMP-configuration>
 .Bl -tag -width 12n
@@ -155,7 +226,9 @@ The domain of interpretation as given by the RFCs.  Normally
 .Li IPSEC .
 .It Em EXCHANGE_TYPE
 The exchange type as given by the RFCs.  For main mode this is
-.Li ID_PROT .
+.Li ID_PROT
+and for aggressive mode it is
+.Li AGGRESSIVE .
 .It Em Transforms
 A list of proposed transforms to use for protecting the
 ISAKMP traffic.  These are actually names for sections
@@ -165,25 +238,30 @@ below.
 .It Em <ISAKMP-transform>
 .Bl -tag -width 12n
 .It Em ENCRYPTION_ALGORITHM
-The encryption algorithm as the RFCs name it.
+The encryption algorithm as the RFCs name it, or ANY to denote that any
+encryption algorithm proposed will be accepted.
 .It Em KEY_LENGTH
 For encryption algorithms with variable key length, this is
 where the offered/accepted keylengths are described.  The
 value is of the offer-accept kind described above.
 .It Em HASH_ALGORITHM
-The hash algorithm as the RFCs name it.
+The hash algorithm as the RFCs name it, or ANY.
 .It Em AUTHENTICATION_METHOD
-The authentication method as the RFCs name it.
+The authentication method as the RFCs name it, or ANY.
 .It Em GROUP_DESCRIPTION
-The group used for Diffie-Hellman exponentiations.  The
+The group used for Diffie-Hellman exponentiations, or ANY.  The
 name are symbolic, like
 .Li MODP_768 , MODP_1024 , EC_155
 and
 .Li EC_185 .
+.It Em PRF
+The algorithm to use for the keyed pseudo-random function (used for key
+derivation and authentication in Phase 1), or ANY.
 .It Em Life
-A list of lifetime descriptions.  Each element is in itself
-a name of the section that defines the lifetime.  Look at
-<Lifetime> below.
+A list of lifetime descriptions, or ANY. In the former case, each
+element is in itself a name of the section that defines the lifetime.
+Look at <Lifetime> below. If it is set to ANY, then any type of
+proposed lifetime type and value will be accepted.
 .El
 .It Em <Lifetime>
 .Bl -tag -width 12n
@@ -191,9 +269,10 @@ a name of the section that defines the lifetime.  Look at
 .Li SECONDS
 or
 .Li BYTES
-depending on the type of the duration.
+depending on the type of the duration. Notice that this field may NOT
+be set to ANY.
 .It Em LIFE_DURATION
-An offer/accept kind of value, see above.
+An offer/accept kind of value, see above. Can also be set to ANY.
 .El
 .It Em <IPSec-connection>
 .Bl -tag -width 12n
@@ -212,17 +291,24 @@ The name of the IPSec-configuration section to use.  Look at
 .It Em Local-ID
 If existent, the name of the section that describes the
 optional local client ID that we should present to our peer.
+It is also used when we act as responders to find out what
+<IPSec-connection> we are dealing with.
 Look at <IPSec-ID> below.
 .It Em Remote-ID
 If existent, the name of the section that describes the
 optional remote client ID that we should present to our peer.
+It is also used  when we act as responders to find out what
+<IPSec-connection> we are dealing with.
 Look at <IPSec-ID> below.
 .It Em Flags
 A comma-separated list of flags controlling the further
 handling of the IPSec SA.  Currently only one flag is defined:
-.Dv Stayalive ,
-which means that after the expiration of an IPSec SA, the initiator
-side will automatically renegotiate for a new SA of the same name.
+.Bl -tag -width 12n
+.It Em Active-only
+If this flag is given and this <IPSec-connection> is part of the phase 2
+connections we automatically keep up, it will not automatically be used for
+accepting connections from the peer.
+.El
 .El
 .It Em <IPSec-configuration>
 .Bl -tag -width 12n
@@ -311,6 +397,7 @@ An example of a configuration file:
 # A configuration sample for the isakmpd ISAKMP/Oakley (aka IKE) daemon.
 
 [General]
+Policy-File=		/etc/isakmpd/policy
 Retransmits=		5
 Exchange-max-time=	120
 Listen-on=		10.1.0.2
@@ -361,6 +448,12 @@ Netmask=		255.255.255.0
 DOI=			IPSEC
 EXCHANGE_TYPE=		ID_PROT
 Transforms=		3DES-SHA
+
+# Certificates stored in PEM format
+[X509-certificates]
+CA-directory=           /etc/isakmpd/ca/
+Cert-directory=         /etc/isakmpd/certs/
+Private-key=		/etc/isakmpd/private/local.key
 
 # Main mode transforms
 ######################
@@ -615,13 +708,8 @@ LIFE_DURATION=		32768,16384:65536
 [LIFE_4.5_GB]
 LIFE_TYPE=		KILOBYTES
 LIFE_DURATION=		4608000,4096000:8192000
-
-[RSA_SIG]
-CERT=			/etc/isakmpd_cert
-PRIVKEY=		/etc/isakmpd_key
-PUBKEY=			/etc/isakmpd_key.pub
 .Ed
-.Pp
 .Sh SEE ALSO
-.Xr isakmpd 8 ,
-.Xr ipsec 4 .
+.Xr ipsec 4 ,
+.Xr keynote 4 ,
+.Xr isakmpd 8

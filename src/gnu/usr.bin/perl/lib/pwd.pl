@@ -1,10 +1,10 @@
 ;# pwd.pl - keeps track of current working directory in PWD environment var
 ;#
-;# $RCSfile: pwd.pl,v $$Revision: 1.2 $$Date: 1997/11/30 07:57:07 $
+;# $RCSfile: pwd.pl,v $$Revision: 1.3 $$Date: 1999/04/29 22:51:48 $
 ;#
 ;# $Log: pwd.pl,v $
-;# Revision 1.2  1997/11/30 07:57:07  millert
-;# perl 5.004_04
+;# Revision 1.3  1999/04/29 22:51:48  millert
+;# perl5.005_03 (stock)
 ;#
 ;#
 ;# Usage:

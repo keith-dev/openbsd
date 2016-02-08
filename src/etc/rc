@@ -1,4 +1,4 @@
-#	$OpenBSD: rc,v 1.95 1998/12/28 06:58:30 deraadt Exp $
+#	$OpenBSD: rc,v 1.123 1999/10/18 01:46:24 deraadt Exp $
 
 # System startup script run by init on autoboot
 # or after single-user.
@@ -16,10 +16,33 @@ HOME=/; export HOME
 PATH=/sbin:/bin:/usr/sbin:/usr/bin
 export PATH
 
+if [ $1x = shutdownx ]; then
+	dd if=/dev/urandom of=/var/db/host.random bs=1024 count=64 >/dev/null 2>&1
+	chmod 600 /var/db/host.random >/dev/null 2>&1
+	if [ $? -eq 0 -a -f /etc/rc.shutdown ]; then
+		echo /etc/rc.shutdown in progress...
+		. /etc/rc.shutdown
+		echo /etc/rc.shutdown complete.
+		if [ "X${powerdown}" = X"YES" ]; then
+			exit 2
+		fi
+	else
+		echo single user: not running /etc/rc.shutdown
+	fi
+	exit 0
+fi
+
 # Configure ccd devices.
 if [ -f /etc/ccd.conf ]; then
 	ccdconfig -C
 fi
+
+# Configure raid devices.
+for dev in 0 1 2 3; do
+	if [ -f /etc/raid$dev.conf ]; then
+		raidctl -c /etc/raid$dev.conf raid$dev
+	fi
+done
 
 if [ -e /fastboot ]; then
 	echo "Fast boot: skipping disk checks."
@@ -70,10 +93,16 @@ rm -f /fastboot		# XXX (root now writeable)
 echo 'setting tty flags'
 ttyflags -a
 
-# if there's no /etc/host.random, make one through /dev/urandom
-if [ ! -f /etc/host.random ]; then
-	dd if=/dev/urandom of=/etc/host.random bs=1024 count=64 >/dev/null 2>&1
-	chmod 600 /etc/host.random
+# if there's no /var/db/host.random, make one through /dev/urandom
+if [ ! -f /var/db/host.random ]; then
+	dd if=/dev/urandom of=/var/db/host.random bs=1024 count=64 \
+		>/dev/null 2>&1
+	chmod 600 /var/db/host.random >/dev/null 2>&1
+else
+	dd if=/var/db/host.random of=/dev/urandom bs=1024 count=64 \
+	    > /dev/null 2>&1
+	dd if=/var/db/host.random of=/dev/arandom bs=1024 count=64 \
+	    > /dev/null 2>&1
 fi
 
 # set hostname, turn on network
@@ -88,6 +117,9 @@ rm -f /etc/nologin
 rm -f /var/spool/lock/LCK.*
 rm -f /var/spool/uucp/STST/*
 (cd /var/run && { rm -rf -- *; install -c -m 664 -g utmp /dev/null utmp; })
+
+# save a copy of the boot messages
+dmesg >/var/run/dmesg.boot
 
 echo 'starting system logger'
 rm -f /dev/log
@@ -208,8 +240,8 @@ fi
 
 if [ X${amd} = X"YES" -a -d ${amd_dir} -a -e ${amd_master} ]; then
 	echo -n ' amd'
-	amd -l syslog -x error,noinfo,nostats -p \
-	    -a ${amd_dir} `cat ${amd_master}` > /var/run/amd.pid
+	(cd /etc/amd; amd -l syslog -x error,noinfo,nostats -p \
+	    -a ${amd_dir} `cat ${amd_master}` > /var/run/amd.pid )
 fi
 
 # $timed_flags is imported from /etc/rc.conf;
@@ -249,7 +281,8 @@ echo -n " dev"
 dev_mkdb
 echo "."
 
-chmod 666 /dev/tty[pqrs]*
+chmod 666 /dev/tty[pqrstuvwxyzPQRST]*
+chown root.wheel /dev/tty[pqrstuvwxyzPQRST]*
 
 # check the password temp/lock file
 if [ -f /etc/ptmp ]; then
@@ -263,7 +296,7 @@ echo clearing /tmp
 # (not needed with mfs /tmp, but doesn't hurt there...)
 (cd /tmp && rm -rf [a-km-pr-zA-Z]* &&
     find . ! -name . ! -name lost+found ! -name quota.user \
-	! -name quota.group -exec rm -rf -- {} \; -type d -prune)
+	! -name quota.group -execdir rm -rf -- {} \; -type d -prune)
 
 if [ -f /etc/sysctl.conf ]; then
 (
@@ -286,51 +319,42 @@ fi
 if [ ! -f /etc/motd ]; then
 	install -c -o root -g wheel -m 664 /dev/null /etc/motd
 fi
-T=/tmp/_motd
-rm -f $T
-sysctl -n kern.version | sed 1q > $T
-echo "" >> $T
-sed '1,/^$/d' < /etc/motd >> $T
-cmp -s $T /etc/motd || cp $T /etc/motd
-rm -f $T
+T=`mktemp /tmp/_motd.XXXXXXXXXX` 
+if [ $? -eq 0 ]; then
+	sysctl -n kern.version | sed 1q > $T
+	echo "" >> $T
+	sed '1,/^$/d' < /etc/motd >> $T
+	cmp -s $T /etc/motd || cp $T /etc/motd
+	rm -f $T
+fi
 
-# nvi file recovery
-if [ ! -d /var/tmp/vi.recover ]; then
-	if [ -e /var/tmp/vi.recover ]; then
-		echo "Warning!  /var/tmp/vi.recover is not a directory!"
-	else
-		mkdir /var/tmp/vi.recover
-		chmod 1777 /var/tmp/vi.recover
-	fi
-fi
-vibackup=/var/tmp/vi.recover/vi.*
-if [ "$vibackup" != "/var/tmp/vi.recover/vi.*" ]; then
-	for i in $vibackup; do
-		# Unmodified nvi editor backup files either have the
-		# execute bit set or are zero length.  Delete them.
-		if [ -x $i -o ! -s $i ]; then
-			rm $i
-		fi
-	done
-fi
-virecovery=/var/tmp/vi.recover/recover.*
-if [ "$virecovery" != "/var/tmp/vi.recover/recover.*" ]; then
-	echo preserving editor files
-	for i in $virecovery; do
-		# Delete any recovery files that are zero length, corrupted,
-		# or that have no corresponding backup file.  Else send mail
-		# to the user.
-		recfile=`awk '/^X-vi-recover-path:/{print $2}' < $i`
-		if [ -n "$recfile" -a -s "$recfile" ]; then
-			sendmail -t < $i
-		else
-			rm $i
-		fi
-	done
+if [ -x /usr/libexec/vi.recover ]; then
+	echo 'preserving editor files';	/usr/libexec/vi.recover
 fi
 
 if [ -f /var/account/acct ]; then
 	echo 'turning on accounting';	accton /var/account/acct
+fi
+
+if [ -f /sbin/ldconfig ]; then
+	echo 'creating runtime link editor directory cache.'
+	if [ -d /usr/local/lib ]; then
+		shlib_dirs="$shlib_dirs /usr/local/lib"
+	fi
+	if [ -d /usr/X11R6/lib ]; then
+		shlib_dirs="$shlib_dirs /usr/X11R6/lib"
+	fi
+	ldconfig $shlib_dirs
+fi
+
+if [ ! -f /etc/ssh_host_key -a -x /usr/bin/ssh-keygen ]; then
+	umask 022
+	echo -n "ssh-keygen: generating new host key... "
+	if /usr/bin/ssh-keygen -q -b 1024 -f /etc/ssh_host_key -N ''; then
+		echo done.
+	else
+		echo failed.
+	fi
 fi
 
 echo -n starting network daemons:
@@ -426,26 +450,21 @@ if [ "X${mopd_flags}" != X"NO" -a -d /tftpboot/mop ]; then
 	echo -n ' mopd';		mopd ${mopd_flags}
 fi
 
-if [ -x /usr/sbin/screenblank ]; then
-	echo -n ' screenblank';	/usr/sbin/screenblank
+if [ X"${sshd}" == X"YES" ]; then
+	if test -x /usr/sbin/sshd && /usr/sbin/sshd -Q ; then
+		echo -n ' sshd';
+		#echo -n ' sshd(2022)';	/usr/sbin/sshd -p 2022
+	elif [ -x /usr/local/sbin/sshd ]; then
+		/usr/local/sbin/sshd
+		echo -n ' sshd';
+		#echo -n ' sshd(2022)';	/usr/local/sbin/sshd -p 2022
+	fi
 fi
 
 echo '.'
 
 if [ -f /sbin/kbd -a -f /etc/kbdtype ]; then
 	kbd `cat /etc/kbdtype`
-fi
-
-if [ -f /sbin/ldconfig ]; then
-	echo 'creating runtime link editor directory cache.'
-	_LIBS=
-	if [ -d /usr/local/lib ]; then
-		_LIBS="$_LIBS /usr/local/lib"
-	fi
-	if [ -d /usr/X11R6/lib ]; then
-		_LIBS="$_LIBS /usr/X11R6/lib"
-	fi
-	ldconfig $_LIBS
 fi
 
 # Kerberos runs ONLY on the Kerberos servers
@@ -471,6 +490,10 @@ echo -n standard daemons:
 # don't run daemon if $apmd_flags == NO or /usr/sbin/apmd doesn't exist
 if [ "X${apmd_flags}" != X"NO" -a -x /usr/sbin/apmd ]; then
         echo -n ' apmd';        /usr/sbin/apmd ${apmd_flags}
+fi
+
+if [ -x /usr/sbin/screenblank ]; then
+	echo -n ' screenblank';	/usr/sbin/screenblank
 fi
 
 echo -n ' cron';		cron

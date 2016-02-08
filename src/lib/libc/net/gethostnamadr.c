@@ -52,7 +52,7 @@
  */
 
 #if defined(LIBC_SCCS) && !defined(lint)
-static char rcsid[] = "$OpenBSD: gethostnamadr.c,v 1.31 1998/11/20 11:18:44 d Exp $";
+static char rcsid[] = "$OpenBSD: gethostnamadr.c,v 1.37 1999/09/03 18:12:31 deraadt Exp $";
 #endif /* LIBC_SCCS and not lint */
 
 #include <sys/param.h>
@@ -249,6 +249,11 @@ getanswer(answer, anslen, qname, qtype)
  		cp += INT16SZ + INT32SZ;	/* class, TTL */
 		n = _getshort(cp);
 		cp += INT16SZ;			/* len */
+		if (type == T_SIG) {
+			/* XXX - ignore signatures as we don't use them yet */
+			cp += n;
+			continue;
+		}
 		if (class != C_IN) {
 			/* XXX - debug? syslog? */
 			cp += n;
@@ -282,7 +287,11 @@ getanswer(answer, anslen, qname, qtype)
 		}
 		if (qtype == T_PTR && type == T_CNAME) {
 			n = dn_expand(answer->buf, eom, cp, tbuf, sizeof tbuf);
+#ifdef USE_RESOLV_NAME_OK
 			if ((n < 0) || !res_hnok(tbuf)) {
+#else
+			if ((n < 0) || !_hokchar(tbuf)) {
+#endif
 				had_error++;
 				continue;
 			}
@@ -316,7 +325,11 @@ getanswer(answer, anslen, qname, qtype)
 				continue;	/* XXX - had_error++ ? */
 			}
 			n = dn_expand(answer->buf, eom, cp, bp, buflen);
+#ifdef USE_RESOLV_NAME_OK
 			if ((n < 0) || !res_hnok(bp)) {
+#else
+			if ((n < 0) || !_hokchar(bp)) {
+#endif
 				had_error++;
 				break;
 			}
@@ -425,9 +438,9 @@ getanswer(answer, anslen, qname, qtype)
 	return (NULL);
 }
 
-#ifndef notyet
+#ifdef notyet
 /*
- * XXX This is an extremely bogus implementations.
+ * XXX This is an extremely bogus implementation.
  *
  * FreeBSD has this interface:
  *    int gethostbyaddr_r(const char *addr, int len, int type,
@@ -453,7 +466,7 @@ gethostbyname_r(name, hp, buf, buflen, errorp)
 }
 
 /*
- * XXX This is an extremely bogus implementations.
+ * XXX This is an extremely bogus implementation.
  */
 struct hostent *
 gethostbyaddr_r(addr, len, af, he, buf, buflen, errorp)
@@ -996,7 +1009,7 @@ _yp_gethtbyaddr(addr)
 	struct hostent *hp = (struct hostent *)NULL;
 	static char *__ypcurrent;
 	int __ypcurrentlen, r;
-	char name[sizeof("xxx.xxx.xxx.xxx") + 1];
+	char name[sizeof("xxx.xxx.xxx.xxx")];
 	
 	if (!__ypdomain) {
 		if (_yp_check(&__ypdomain) == 0)

@@ -1,4 +1,4 @@
-.\"	$OpenBSD: msync.2,v 1.10 1998/07/10 07:06:18 deraadt Exp $
+.\"	$OpenBSD: msync.2,v 1.15 1999/06/29 14:10:10 aaron Exp $
 .\"	$NetBSD: msync.2,v 1.8 1995/10/12 15:41:09 jtc Exp $
 .\"
 .\" Copyright (c) 1991, 1993
@@ -74,7 +74,7 @@ are unpredictable except after an
 The
 .Fa flags
 argument is formed by
-.Em or Ns 'ing
+.Tn OR Ns 'ing
 the following values
 .Pp
 .Bd -literal -offset indent -compact
@@ -85,7 +85,7 @@ MS_INVALIDATE	Invalidate cached data after writing.
 .Sh RETURN VALUES
 Upon successful completion,
 a value of 0 is returned.
-Otherwise, a value of -1 is returned and
+Otherwise, a value of \-1 is returned and
 .Va errno
 is set to indicate the error.
 .Sh ERRORS
@@ -111,16 +111,17 @@ for the address space of the process, or specify one or more pages
 which are unmapped.
 .It Bq Er EIO
 An I/O error occurred while writing.
+.El
 .Sh BUGS
 Writes are currently done synchronously even if the
 .Dv MS_ASYNC
 flag is specified.
 .Sh SEE ALSO
 .Xr madvise 2 ,
+.Xr mincore 2 ,
 .Xr minherit 2 ,
-.Xr munmap 2 ,
 .Xr mprotect 2 ,
-.Xr mincore 2
+.Xr munmap 2
 .Sh HISTORY
 The
 .Fn msync

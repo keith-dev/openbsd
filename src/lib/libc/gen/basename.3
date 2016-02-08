@@ -24,41 +24,46 @@
 .\" OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 .\" ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 .\"
-.\" $OpenBSD: basename.3,v 1.4 1998/07/04 08:52:35 deraadt Exp $
+.\" $OpenBSD: basename.3,v 1.11 1999/06/04 01:30:10 aaron Exp $
 .\"
 .Dd August 17, 1997
 .Dt BASENAME 3
 .Os
 .Sh NAME
 .Nm basename
-.Nd extract the base portition of a pathname
+.Nd extract the base portion of a pathname
 .Sh SYNOPSIS
 .Fd #include <libgen.h>
 .Ft char *
-.Fn basename "char *path"
+.Fn basename "const char *path"
 .Sh DESCRIPTION
 The
 .Fn basename
 function
-returns the last componenent from the pathname pointed to by
+returns the last component from the pathname pointed to by
 .Ar path ,
-deleting any trailing '/' characters.  If
+deleting any trailing
+.Sq \&/
+characters.  If
 .Ar path
-consists entirely of '/' characters, a pointer to the string "/"
+consists entirely of
+.Sq \&/
+characters, a pointer to the string
+.Qq \&/
 is returned.  If
 .Ar path
-is a NULL pointer or the empty string, a pointer to the string "."
+is a null pointer or the empty string, a pointer to the string
+.Qq \&.
 is returned.
 .Sh RETURN VALUES
 On successful completion,
 .Fn basename
 returns a pointer to the last component of
-.Ar path.
-.Pp
+.Ar path .
 .Pp
 If
 .Fn basename
-fails, a NULL pointer is returned and the global variable
+fails, a null pointer is returned and the global variable
 .Va errno
 is set to indicate the error.
 .Sh ERRORS
@@ -66,8 +71,9 @@ The following error codes may be set in
 .Va errno :
 .Bl -tag -width Er
 .It Bq Er ENAMETOOLONG
-the path component to be returned was larger than
-.Va MANPATHLEN .
+The path component to be returned was larger than
+.Dv MAXPATHLEN .
+.El
 .Sh WARNINGS
 .Fn basename
 returns a pointer to internal static storage space that will be overwritten
@@ -75,8 +81,7 @@ by subsequent calls.
 .Sh SEE ALSO
 .Xr basename 1 ,
 .Xr dirname 1 ,
-.Xr dirname 3 ,
-.Xr dirname 1
+.Xr dirname 3
 .Sh STANDARDS
 The
 .Fn basename
@@ -88,6 +93,4 @@ The
 function first appeared in
 .Ox 2.2 .
 .Sh AUTHOR
-.nf
 Todd C. Miller <Todd.Miller@courtesan.com>
-.fi

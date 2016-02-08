@@ -1,4 +1,4 @@
-/* *	$OpenBSD: md.h,v 1.3 1998/03/26 19:47:35 niklas Exp $*/
+/* *	$OpenBSD: md.h,v 1.5 1999/05/24 23:22:02 espie Exp $*/
 /*
  * Copyright (c) 1993 Paul Kranenburg
  * All rights reserved.
@@ -34,6 +34,9 @@
  * SPARC machine dependent definitions
  */
 
+#if defined(CROSS_LINKER) && defined(XHOST) && XHOST==i386
+#define NEED_SWAP
+#endif
 
 #define	MAX_ALIGNMENT	(sizeof (double))
 
@@ -124,6 +127,7 @@
 			PIC_TYPE_SMALL : \
 			PIC_TYPE_NONE) )
 
+#define ALLOW_SPARC_MIX
 #define CHECK_GOT_RELOC(r) \
 	((r)->r_type == RELOC_PC10 || (r)->r_type == RELOC_PC22)
 

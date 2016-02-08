@@ -1,4 +1,4 @@
-.\"	$OpenBSD: isalpha.3,v 1.2 1996/08/19 08:24:28 tholo Exp $
+.\"	$OpenBSD: isalpha.3,v 1.6 1999/07/09 13:35:17 aaron Exp $
 .\"
 .\" Copyright (c) 1991 The Regents of the University of California.
 .\" All rights reserved.
@@ -43,7 +43,7 @@
 .Nd alphabetic character test
 .Sh SYNOPSIS
 .Fd #include <ctype.h>
-.Ft int 
+.Ft int
 .Fn isalpha "int c"
 .Sh DESCRIPTION
 The
@@ -61,9 +61,7 @@ for which none of
 or
 .Xr isspace 3
 is true.
-In the 
-.Em ``C''
-locale,
+In the C locale,
 .Fn isalpha
 returns true only for the characters for which
 .Xr isupper 3
@@ -73,8 +71,8 @@ is true.
 .Sh RETURN VALUES
 The
 .Fn isalpha
-macro returns zero if the character tests false and
-returns non-zero if the character tests true.
+macro returns zero if the character tests false or
+non-zero if the character tests true.
 .Sh SEE ALSO
 .Xr isalnum 3 ,
 .Xr isascii 3 ,
@@ -88,10 +86,10 @@ returns non-zero if the character tests true.
 .Xr isspace 3 ,
 .Xr isupper 3 ,
 .Xr isxdigit 3 ,
+.Xr stdio 3 ,
 .Xr toascii 3 ,
 .Xr tolower 3 ,
 .Xr toupper 3 ,
-.Xr stdio 3 ,
 .Xr ascii 7
 .Sh STANDARDS
 The

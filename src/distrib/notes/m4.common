@@ -1,5 +1,5 @@
 dnl
-dnl	$OpenBSD: m4.common,v 1.5 1999/04/11 18:24:14 todd Exp $
+dnl	$OpenBSD: m4.common,v 1.8 1999/10/10 22:55:56 deraadt Exp $
 dnl
 dnl simulate an include path with a macro 'includeit'.
 define(`includeit',`sinclude('INCLUDE/`$1)sinclude('INCLUDE/../`$1)')dnl
@@ -153,8 +153,17 @@ dnl
 dnl floppy stuff
 dnl
 define({:-OpenBSDfloppy-:},
-{:-		floppy{:--:}OSrev.fs	 The MACHINE boot and installation
-				 floppy; see below.-:})dnl
+{:-		floppy{:--:}OSrev.fs	The standard MACHINE boot and installation
+				floppy; see below.-:})dnl
+define({:-OpenBSDfloppyB-:},
+{:-		floppyB{:--:}OSrev.fs	The MACHINE boot and installation floppy;
+				this removes all scsi drivers in floppy{:--:}OSrev.fs,
+				and replaces them with OTHERS; see below.-:})dnl
+define({:-OpenBSDcdrom-:},
+{:-		cdrom{:--:}OSrev.fs	The MACHINE boot and installation
+				2.88mb floppy image that contains all drivers
+				from floppy{:--:}OSrev.fs and floppyB{:--:}OSrev.fs
+				above; see below.-:})dnl
 dnl
 define({:-OpenBSDfloppydesc-:},
 {:-In summary, there is one MACHINE floppy image called "floppy{:--:}OSrev.fs" (which
@@ -457,11 +466,12 @@ dnl
 define({:-OpenBSDCongratulations-:},
 {:-Congratulations, you have successfully installed OpenBSD OSREV.  When you
 reboot into OpenBSD, you should log in as "root" at the login prompt.
-There is no initial password, but if you're using the machine in a
-networked environment, you should create yourself an account and
-protect it and the "root" account with good passwords.  You should have
-got a mail from the install program we recommend you to read.  This you
-can do by running
+You should create yourself an account and protect it and the "root" account 
+with good passwords.  You should have got a mail from the install program we 
+recommend you to read, it contains answers to basic questions you might
+have about OpenBSD (like setting up your system, installing packages, getting
+more information about OpenBSD, sending in your dmesg output and more).
+This you can do by running
 
 	mail
 

@@ -1,4 +1,4 @@
-.\" $OpenBSD: newfs_msdos.8,v 1.8 1998/12/15 01:20:40 aaron Exp $
+.\" $OpenBSD: newfs_msdos.8,v 1.12 1999/07/07 10:50:11 aaron Exp $
 .\"
 .\" Copyright (c) 1995, 1996 Joerg Wunsch
 .\"
@@ -28,14 +28,14 @@
 .\"
 .\"
 .Dd November 5, 1995
-.Os
 .Dt NEWFS_MSDOS 1
+.Os
 .Sh NAME
 .Nm newfs_msdos
 .Nd create an MS-DOS (FAT) file system
 .Sh SYNOPSIS
 .Nm newfs_msdos
-.Bq Fl s Ar kilobytes 
+.Bq Fl s Ar kilobytes
 .Bq Fl L Ar vollabel
 .Ar device
 .Sh DESCRIPTION
@@ -102,6 +102,7 @@ in its size.
 .Nm
 initializes it to empty, and enters a volume label record into the
 very first directory slot.
+.El
 .Sh DIAGNOSTICS
 An exit status of 0 is returned upon successful operation. Exit status
 1 is returned on any errors during file system creation, and an exit status
@@ -127,9 +128,6 @@ utility.
 .Sh HISTORY
 .Nm
 appeared in
-.Em FreeBSD 2.2 .
+.Fx 2.2 .
 .Sh AUTHOR
-The program has been contributed by
-.if n Joerg Wunsch,
-.if t J\(:org Wunsch,
-Dresden.
+The program has been contributed by Joerg Wunsch, Dresden.

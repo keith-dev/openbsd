@@ -1,4 +1,4 @@
-.\"	$OpenBSD: mount_fdesc.8,v 1.6 1998/12/15 01:20:35 aaron Exp $
+.\"	$OpenBSD: mount_fdesc.8,v 1.9 1999/07/21 01:07:54 deraadt Exp $
 .\"	$NetBSD: mount_fdesc.8,v 1.6 1995/12/17 18:50:19 ghudson Exp $
 .\"
 .\" Copyright (c) 1992, 1993, 1994
@@ -39,7 +39,7 @@
 .\"
 .Dd March 27, 1994
 .Dt MOUNT_FDESC 8
-.Os BSD 4.4
+.Os
 .Sh NAME
 .Nm mount_fdesc
 .Nd mount the file-descriptor file system
@@ -64,7 +64,7 @@ at boot time.
 .Pp
 The options are as follows:
 .Bl -tag -width indent
-.It Fl o
+.It Fl o Ar options
 Options are specified with a
 .Fl o
 flag followed by a comma separated string of options.
@@ -77,7 +77,7 @@ The contents of the mount point are
 .Pa fd ,
 .Pa stderr ,
 .Pa stdin ,
-.Pa stdout 
+.Pa stdout
 and
 .Pa tty .
 .Pp
@@ -123,7 +123,7 @@ fd = fcntl(STDERR_FILENO, F_DUPFD, 0);
 Flags to the
 .Xr open 2
 call other than
-.Dv O_RDONLY , 
+.Dv O_RDONLY ,
 .Dv O_WRONLY
 and
 .Dv O_RDWR

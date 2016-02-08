@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1988, 1989, 1990, 1991, 1992, 1993, 1994, 1995, 1996
+ * Copyright (c) 1988, 1989, 1990, 1991, 1992, 1993, 1994, 1995, 1996, 1997
  *	The Regents of the University of California.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -18,7 +18,7 @@
  * WARRANTIES, INCLUDING, WITHOUT LIMITATION, THE IMPLIED WARRANTIES OF
  * MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE.
  *
- * @(#) $Header: /cvs/src/usr.sbin/tcpdump/interface.h,v 1.10 1998/09/22 22:03:00 provos Exp $ (LBL)
+ * @(#) $Header: /cvs/src/usr.sbin/tcpdump/interface.h,v 1.12 1999/09/16 19:59:01 brad Exp $ (LBL)
  */
 
 #ifndef tcpdump_interface_h
@@ -34,8 +34,10 @@ struct tok {
 	char *s;		/* string */
 };
 
+extern int aflag;		/* translate network and broadcast addresses */
 extern int dflag;		/* print filter code */
 extern int eflag;		/* print ethernet header */
+extern int fflag;		/* don't translate "foreign" IP address */
 extern int nflag;		/* leave addresses as numbers */
 extern int Nflag;		/* remove domains from printed host names */
 extern int qflag;		/* quick (shorter) output */
@@ -50,7 +52,7 @@ extern int packettype;		/* as specified by -T */
 #define PT_RPC		3	/* Remote Procedure Call */
 #define PT_RTP		4	/* Real-Time Applications protocol */
 #define PT_RTCP		5	/* Real-Time Applications control protocol */
-#define	PT_CNFP		6	/* Cisco NetFlow protocol */
+#define PT_CNFP		6	/* Cisco NetFlow protocol */
 
 #ifndef min
 #define min(a,b) ((a)>(b)?(b):(a))
@@ -132,13 +134,11 @@ struct timeval;
 #endif
 
 extern void ts_print(const struct timeval *);
-extern int32_t gmt2local(void);
 
 extern int fn_print(const u_char *, const u_char *);
 extern int fn_printn(const u_char *, u_int, const u_char *);
 extern const char *tok2str(const struct tok *, const char *, int);
 extern char *dnaddr_string(u_short);
-extern char *savestr(const char *);
 
 extern void wrapup(int);
 
@@ -177,6 +177,7 @@ extern void default_print(const u_char *, u_int);
 extern void default_print_unaligned(const u_char *, u_int);
 extern void dvmrp_print(const u_char *, u_int);
 extern void egp_print(const u_char *, u_int, const u_char *);
+extern void enc_if_print(u_char *, const struct pcap_pkthdr *, const u_char *);
 extern void ether_if_print(u_char *, const struct pcap_pkthdr *,
 	const u_char *);
 extern void fddi_if_print(u_char *, const struct pcap_pkthdr *, const u_char *);
@@ -196,12 +197,17 @@ extern void null_if_print(u_char *, const struct pcap_pkthdr *, const u_char *);
 extern void ospf_print(const u_char *, u_int, const u_char *);
 extern void pim_print(const u_char *, u_int);
 extern void ppp_if_print(u_char *, const struct pcap_pkthdr *, const u_char *);
-extern void enc_if_print(u_char *, const struct pcap_pkthdr *, const u_char *);
+extern void raw_if_print(u_char *, const struct pcap_pkthdr *, const u_char *);
 extern void rip_print(const u_char *, u_int);
 extern void sl_if_print(u_char *, const struct pcap_pkthdr *, const u_char *);
+extern void sl_bsdos_if_print(u_char *, const struct pcap_pkthdr *,
+    const u_char *);
 extern void snmp_print(const u_char *, u_int);
 extern void sunrpcrequest_print(const u_char *, u_int, const u_char *);
 extern void tcp_print(const u_char *, u_int, const u_char *);
 extern void tftp_print(const u_char *, u_int);
 extern void udp_print(const u_char *, u_int, const u_char *);
 extern void wb_print(const void *, u_int);
+extern void esp_print(const u_char *, u_int, const u_char *);
+extern void radius_print(const u_char *, u_int);
+

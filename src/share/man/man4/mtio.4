@@ -1,4 +1,4 @@
-.\"	$OpenBSD: mtio.4,v 1.2 1998/09/05 17:41:48 deraadt Exp $
+.\"	$OpenBSD: mtio.4,v 1.5 1999/07/09 13:35:46 aaron Exp $
 .\"	$NetBSD: mtio.4,v 1.4 1996/03/03 17:13:54 thorpej Exp $
 .\"
 .\" Copyright (c) 1983, 1991 The Regents of the University of California.
@@ -39,9 +39,7 @@
 .Os
 .Sh NAME
 .Nm mtio
-.Nd
-.Tn OpenBSD
-magtape interface
+.Nd magtape interface
 .Sh DESCRIPTION
 This interface concerns devices which are typical tape block devices,
 see
@@ -62,7 +60,7 @@ When the device last number is between
 .Em 0-7
 the device will operate at 800
 .Tn BPI
-(or its lowest density), between 
+(or its lowest density), between
 .Em 8-15
 it will operate at 1600
 .Tn BPI
@@ -179,7 +177,6 @@ struct	mtget	{
 #define	T_BADBPI	030		/* undefined selection */
 #endif
 .Ed
-.Pp
 .Sh FILES
 .Bl -tag -width /dev/rmt? -compact
 .It Pa /dev/mt?
@@ -190,13 +187,13 @@ struct	mtget	{
 .Xr tar 1 ,
 .Xr tp 1 ,
 .Xr ht 4 ,
+.Xr mt 4 ,
 .Xr tm 4 ,
 .Xr ts 4 ,
-.Xr mt 4 ,
 .Xr ut 4
 .Sh HISTORY
 The
-.Nm mtio
+.Nm
 manual appeared in
 .Bx 4.2 .
 .Sh BUGS

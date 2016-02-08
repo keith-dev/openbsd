@@ -1,4 +1,4 @@
-#       $OpenBSD: install.md,v 1.2 1999/04/01 21:30:34 deraadt Exp $
+#       $OpenBSD: install.md,v 1.4 1999/09/03 18:55:32 deraadt Exp $
 # Copyright (c) 1996 The NetBSD Foundation, Inc.
 # All rights reserved.
 #
@@ -42,26 +42,6 @@
 TMPWRITEABLE=/tmp/writeable
 KERNFSMOUNTED=/tmp/kernfsmounted
 
-md_copy_kernel() {
-	if [ ! -s /mnt/bsd ]; then
-		echo	""
-		echo	"Warning, no kernel installed!"
-		echo	"You did not unpack a file set containing a kernel."
-		echo	"This is needed to boot.  Please note that the install"
-		echo	"install kernel is not suitable for general use."
-		echo -n	"Escape to shell add /mnt/bsd by hand? [y] "
-		getresp "y"
-		case "$resp" in
-			y*|Y*)
-				echo "Type 'exit' to return to install."
-				sh
-				;;
-			*)
-				;;
-		esac
-	fi
-}
-
 md_set_term() {
 	if [ ! -z "$TERM" ]; then
 		return
@@ -92,6 +72,10 @@ md_get_ifdevs() {
 md_get_partition_range() {
 	# return range of valid partition letters
 	echo "[a-p]"
+}
+
+md_questions() {
+	:
 }
 
 md_installboot() {

@@ -1,4 +1,4 @@
-/*	$OpenBSD: extern.h,v 1.4 1997/12/10 20:24:12 deraadt Exp $	*/
+/*	$OpenBSD: extern.h,v 1.10 1999/09/14 08:35:16 espie Exp $	*/
 /*	$NetBSD: extern.h,v 1.3 1996/01/13 23:25:24 pk Exp $	*/
 
 /*-
@@ -39,7 +39,6 @@
  *	@(#)extern.h	8.1 (Berkeley) 6/6/93
  */
 
-char	*basename __P((char *));
 char	*xalloc __P((unsigned long));
 int	expr __P((char *));
 ndptr	addent __P((char *));
@@ -61,17 +60,18 @@ void	expand __P((char *[], int));
 void	getdiv __P((int));
 char	*xstrdup __P((const char *));
 int	hash __P((char *));
-int	indx __P((char *, char *));
+ptrdiff_t	indx __P((const char *, const char *));
 void	killdiv __P((void));
 ndptr	lookup __P((char *));
 void	map __P((char *, char *, char *, char *));
 void	onintr __P((int));
-void	oops __P((const char *, ...));
 void	pbnum __P((int));
 void	pbstr __P((char *));
 void	putback __P((int));
 void	remhash __P((char *, int));
 void	usage __P((void));
+void initspaces __P((void));
+char *compute_prevep __P((void));
 
 extern ndptr hashtab[];		/* hash table for macros etc. */
 extern stae mstack[];		/* stack of m4 machine */
@@ -83,17 +83,17 @@ extern int ilevel;		/* input file stack pointer */
 extern int oindex;		/* diversion index. */
 extern int sp;			/* current m4 stack pointer */
 extern pbent *bp;		/* first available character */
-extern pbent buf[];		/* push-back buffer */
+extern pbent *buf;		/* push-back buffer */
 extern pbent *bufbase;		/* buffer base for this ilevel */
 extern pbent *bbase[];		/* buffer base per ilevel */
 extern char ecommt[];		/* end character for comment */
-extern char *endest;		/* end of string space */
-extern pbent *endpbb;		/* end of push-back buffer */
 extern char *ep;		/* first free char in strspace */
 extern char lquote[];		/* left quote character (`) */
-extern char *m4temp;		/* filename for diversions */
 extern char *m4wraps;		/* m4wrap string default. */
 extern char *null;		/* as it says.. just a null. */
-extern char *progname;		/* program name */
 extern char rquote[];		/* right quote character (') */
 extern char scommt[];		/* start character for comment */
+
+/* gnum4.c */
+extern FILE *fopen_trypath __P((const char *filename));
+extern void addtoincludepath __P((const char *dirname));

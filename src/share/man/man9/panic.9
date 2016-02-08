@@ -1,4 +1,4 @@
-.\"	$OpenBSD: panic.9,v 1.1 1997/05/29 15:14:50 kstailey Exp $
+.\"	$OpenBSD: panic.9,v 1.4 1999/09/05 16:23:11 espie Exp $
 .\"     $NetBSD: panic.9,v 1.2 1996/10/09 17:20:04 explorer Exp $
 .\"
 .\" Copyright (c) 1996 Michael Graff.
@@ -47,11 +47,11 @@ The
 function makes the OpenBSD system terminate.  The message
 .Fa fmt
 is a
-.Xr printf 3
+.Xr printf 9
 style format string.  The message is printed to the console and the location
 pointed to by the global char pointer
-.Fa panicstr 
-is set to the address of the message text for retrival from the OS
+.Fa panicstr
+is set to the address of the message text for retrieval from the OS
 core dump.
 .Pp
 If the kernel debugger is installed control is passed to it, otherwise
@@ -66,3 +66,7 @@ rebooted without syncing the disks.
 The
 .Fn panic
 function does not return.
+.Sh SEE ALSO
+.Xr printf 3 ,
+.Xr boot 9 ,
+.Xr printf 9

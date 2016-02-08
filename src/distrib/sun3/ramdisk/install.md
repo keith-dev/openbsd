@@ -1,6 +1,6 @@
 #!/bin/sh
 #
-#	$OpenBSD: install.md,v 1.5 1998/11/09 04:00:10 millert Exp $
+#	$OpenBSD: install.md,v 1.7 1999/09/03 18:55:40 deraadt Exp $
 #	$NetBSD: install.md,v 1.1.2.4 1996/08/26 15:45:14 gwr Exp $
 #
 # Copyright (c) 1996 The NetBSD Foundation, Inc.
@@ -124,6 +124,10 @@ md_get_cddevs() {
 md_get_partition_range() {
 	# return range of valid partition letters
 	echo "[a-p]"
+}
+
+md_questions() {
+	:
 }
 
 md_installboot() {
@@ -331,10 +335,6 @@ __md_prep_disklabel_1
 
 	disklabel -W ${_disk}
 	disklabel -E ${_disk}
-}
-
-md_copy_kernel() {
-	check_kernel
 }
 
 # Note, while they might not seem machine-dependent, the

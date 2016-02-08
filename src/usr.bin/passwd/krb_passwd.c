@@ -1,4 +1,4 @@
-/*	$OpenBSD: krb_passwd.c,v 1.10 1998/03/09 22:17:32 art Exp $	*/
+/*	$OpenBSD: krb_passwd.c,v 1.12 1999/08/16 19:51:26 art Exp $	*/
 /* $KTH: kpasswd.c,v 1.25 1997/05/02 14:28:51 assar Exp $ */
 
 /*
@@ -58,6 +58,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <com_err.h>
 
 char realm[REALM_SZ];
 
@@ -84,7 +85,7 @@ krb_passwd(int argc, char **argv)
 			       default_principal.instance,
 			       default_principal.realm);
 
-    while ((c = getopt(argc, argv, "u:n:i:r:h")) != EOF) {
+    while ((c = getopt(argc, argv, "u:n:i:r:h")) != -1) {
 	switch (c) {
 	case 'u':
 	    status = krb_parse_name (optarg, &principal);

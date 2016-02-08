@@ -30,6 +30,7 @@
 .\"
 .Dd July 2, 1997
 .Dt KPROPD 8
+.Os
 .Sh NAME
 .Nm kpropd
 .Nd network utility for Kerberos database propagation
@@ -93,7 +94,7 @@ This utility does not support the transfer of encrypted data.
 .Pp
 If the
 .Nm -P
-or 
+or
 .Nm -p
 options are not specified and the PATH environment variable does not
 contain the directory with
@@ -101,5 +102,5 @@ contain the directory with
 this program will fail.
 .Sh SEE ALSO
 .Xr kerberos 1 ,
-.Xr kprop 8 ,
-.Xr kdb_util 8
+.Xr kdb_util 8 ,
+.Xr kprop 8

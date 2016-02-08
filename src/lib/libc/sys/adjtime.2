@@ -1,4 +1,4 @@
-.\"	$OpenBSD: adjtime.2,v 1.5 1999/02/27 21:56:07 deraadt Exp $
+.\"	$OpenBSD: adjtime.2,v 1.8 1999/06/29 14:09:50 aaron Exp $
 .\"	$NetBSD: adjtime.2,v 1.5 1995/10/12 15:40:44 jtc Exp $
 .\"
 .\" Copyright (c) 1980, 1991, 1993
@@ -36,7 +36,7 @@
 .\"
 .Dd June 4, 1993
 .Dt ADJTIME 2
-.Os BSD 4.3
+.Os
 .Sh NAME
 .Nm adjtime
 .Nd "correct the time to allow synchronization of the system clock"
@@ -70,7 +70,7 @@ may not be finished when
 is called again.
 If
 .Fa olddelta
-is non-nil,
+is non-null,
 the structure pointed to will contain, upon return, the
 number of microseconds still to be corrected
 from the earlier call.
@@ -80,12 +80,12 @@ of computers in a local area network.
 Such time servers would slow down the clocks of some machines
 and speed up the clocks of others to bring them to the average network time.
 .Pp
-The call 
+The call
 .Fn adjtime
 is restricted to the super-user.
 .Sh RETURN VALUES
 A return value of 0 indicates that the call succeeded.
-A return value of -1 indicates that an error occurred, and in this
+A return value of \-1 indicates that an error occurred, and in this
 case an error code is stored in the global variable
 .Va errno .
 .Sh ERRORS
@@ -93,7 +93,7 @@ case an error code is stored in the global variable
 will fail if:
 .Bl -tag -width Er
 .It Bq Er EFAULT
-An argument points outside the process's allocated address space.
+Either of the arguments point outside the process's allocated address space.
 .It Bq Er EPERM
 The process's effective user ID is not that of the super-user.
 .El

@@ -1,5 +1,5 @@
-/*	$OpenBSD: udp.c,v 1.10 1999/04/05 21:00:08 niklas Exp $	*/
-/*	$EOM: udp.c,v 1.34 1999/04/05 08:09:56 niklas Exp $	*/
+/*	$OpenBSD: udp.c,v 1.16 1999/10/01 14:08:05 niklas Exp $	*/
+/*	$EOM: udp.c,v 1.42 1999/09/30 12:59:27 niklas Exp $	*/
 
 /*
  * Copyright (c) 1998, 1999 Niklas Hallqvist.  All rights reserved.
@@ -35,7 +35,9 @@
  */
 
 #include <sys/types.h>
+#include <sys/ioctl.h>
 #include <sys/socket.h>
+#include <sys/sockio.h>
 #include <net/if.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -78,6 +80,8 @@ struct udp_transport {
 static struct transport *udp_clone (struct udp_transport *,
 				    struct sockaddr_in *);
 static struct transport *udp_create (char *);
+static void udp_remove (struct transport *);
+static void udp_report (struct transport *);
 static int udp_fd_set (struct transport *, fd_set *, int);
 static int udp_fd_isset (struct transport *, fd_set *);
 static void udp_handle_message (struct transport *);
@@ -89,6 +93,8 @@ static void udp_get_src (struct transport *, struct sockaddr **, int *);
 static struct transport_vtbl udp_transport_vtbl = {
   { 0 }, "udp",
   udp_create,
+  udp_remove,
+  udp_report,
   udp_fd_set,
   udp_fd_isset,
   udp_handle_message,
@@ -174,9 +180,10 @@ udp_make (struct sockaddr_in *laddr)
 
   memset (&t->dst, 0, sizeof t->dst);
   t->s = s;
-  transport_add ((struct transport *)t);
+  transport_add (&t->transport);
+  transport_reference (&t->transport);
   t->transport.flags |= TRANSPORT_LISTEN;
-  return (struct transport *)t;
+  return &t->transport;
 
 err:
   if (s != -1)
@@ -195,7 +202,10 @@ udp_clone (struct udp_transport *u, struct sockaddr_in *raddr)
 
   t = malloc (sizeof *u);
   if (!t)
-    return 0;
+    {
+      log_error ("udp_clone: malloc (%d) failed", sizeof *u);
+      return 0;
+    }
   u2 = (struct udp_transport *)t;
 
   memcpy (u2, u, sizeof *u);
@@ -241,9 +251,11 @@ udp_bind_if (struct ifreq *ifrp, void *arg)
   struct conf_list_node *address;
   struct in_addr addr;
   struct transport *t;
+  struct ifreq flags_ifr;
+  int s;
 
   /*
-   * Well UDP is an internet protocol after all so drop other ifreqs.
+   * Well, UDP is an internet protocol after all so drop other ifreqs.
    * XXX IPv6 support is missing.
    */
 #ifdef USE_OLD_SOCKADDR
@@ -252,6 +264,32 @@ udp_bind_if (struct ifreq *ifrp, void *arg)
   if (ifrp->ifr_addr.sa_family != AF_INET
       || ifrp->ifr_addr.sa_len != sizeof (struct sockaddr_in))
 #endif
+    return;
+
+  /*
+   * These special addresses are not useable as they have special meaning
+   * in the IP stack.
+   */
+  if (((struct sockaddr_in *)&ifrp->ifr_addr)->sin_addr.s_addr == INADDR_ANY
+      || (((struct sockaddr_in *)&ifrp->ifr_addr)->sin_addr.s_addr
+	  == INADDR_NONE))
+    return;
+
+  /* Don't bother with interfaces that are down.  */
+  s = socket (AF_INET, SOCK_DGRAM, 0);
+  if (s == -1)
+    {
+      log_error ("udp_bind_if: socket (AF_INET, SOCK_DGRAM, 0) failed");
+      return;
+    }
+  strncpy (flags_ifr.ifr_name, ifrp->ifr_name, sizeof flags_ifr.ifr_name - 1);
+  if (ioctl (s, SIOCGIFFLAGS, (caddr_t)&flags_ifr) == -1)
+    {
+      log_error ("udp_bind_if: ioctl (%d, SIOCGIFFLAGS, ...) failed", s);
+      return;
+    }
+  close (s);
+  if (!(flags_ifr.ifr_flags & IFF_UP))
     return;
 
   /*
@@ -341,7 +379,17 @@ udp_create (char *name)
 
   addr_str = conf_get_str (name, "Local-address");
   if (!addr_str)
-    return udp_clone ((struct udp_transport *)default_transport, &dst);
+    addr_str = conf_get_str ("General", "Listen-on");
+  if (!addr_str)
+    {
+      if (!default_transport)
+	{
+	  log_print ("udp_create: no default transport");
+	  return 0;
+	}
+      else
+	return udp_clone ((struct udp_transport *)default_transport, &dst);
+    }
 
   addr = inet_addr (addr_str);
   if (addr == INADDR_NONE)
@@ -357,6 +405,24 @@ udp_create (char *name)
       return 0;
     } 
   return udp_clone (u, &dst);
+}
+
+void
+udp_remove (struct transport *t)
+{
+  free (t);
+}
+
+/* Report transport-method specifics of the T transport.  */
+void
+udp_report (struct transport *t)
+{
+  struct udp_transport *u = (struct udp_transport *)t;
+  char src[16], dst[16];
+
+  snprintf (src, 16, "%s", inet_ntoa (u->src.sin_addr));
+  snprintf (dst, 16, "%s", inet_ntoa (u->dst.sin_addr));
+  log_debug (LOG_REPORT, 0, "udp_report: fd %d src %s dst %s", u->s, src, dst);
 }
 
 /*
@@ -434,8 +500,6 @@ udp_fd_isset (struct transport *t, fd_set *fds)
  * clone it into a double-ended transport which we will use from now on.
  * Package the message as we want it and continue processing in the message
  * module.
- * XXX We will be leaking transports unless we kill them after last
- * probable use, i.e. when ISAKMP SA's gets torn down.
  */
 static void
 udp_handle_message (struct transport *t)
@@ -466,7 +530,7 @@ udp_handle_message (struct transport *t)
 
   msg = message_alloc (t, buf, n);
   if (!msg)
-    /* XXX Log.  */
+    /* XXX Log?  */
     return;
   message_recv (msg);
 }

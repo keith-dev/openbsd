@@ -1,7 +1,7 @@
-.\"	$OpenBSD: ctime.3,v 1.11 1999/02/16 23:43:11 deraadt Exp $
+.\"	$OpenBSD: ctime.3,v 1.15 1999/07/07 14:22:25 aaron Exp $
 .\"
 .\"
-.Dd Feb 16, 1999
+.Dd February 16, 1999
 .Dt CTIME 3
 .Os
 .Sh NAME
@@ -24,7 +24,7 @@
 .Fn difftime "time_t time1" "time_t time0"
 .Ft "char *"
 .Fn asctime "const struct tm *tm"
-.Fn "struct tm *"
+.Ft "struct tm *"
 .Fn localtime "const time_t *clock"
 .Ft "struct tm *"
 .Fn gmtime "const time_t *clock"
@@ -127,7 +127,7 @@ are determined.
 .Fn mktime
 returns the specified calendar time;
 If the calendar time cannot be represented,
-it returns -1.
+it returns \-1.
 .Pp
 .Fn difftime
 returns the difference between two calendar times,
@@ -196,8 +196,8 @@ UTC leap seconds are loaded from
 .Sh SEE ALSO
 .Xr getenv 3 ,
 .Xr strftime 3 ,
-.Xr tzset 3 ,
 .Xr time 3 ,
+.Xr tzset 3 ,
 .Xr tzfil 5
 .Sh NOTES
 The return values point to static data;

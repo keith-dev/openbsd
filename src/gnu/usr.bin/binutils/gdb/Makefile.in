@@ -84,7 +84,7 @@ INCLUDE_DIR =  $(srcdir)/../include
 INCLUDE_CFLAGS = -I$(INCLUDE_DIR)
 
 # Where is the "-liberty" library?  Typically in ../libiberty.
-LIBIBERTY = ../libiberty/libiberty.a
+LIBIBERTY = -liberty
 
 # Where is the MMALLOC library?  Typically in ../mmalloc.
 # Note that mmalloc can still be used on systems without mmap().
@@ -246,6 +246,8 @@ ANNOTATE_OBS = annotate.o
 # End of host and target-dependent makefile fragments
 
 FLAGS_TO_PASS = \
+	"infodir=$(infodir)" \
+	"bindir=$(bindir)" \
 	"prefix=$(prefix)" \
 	"exec_prefix=$(exec_prefix)" \
 	"against=$(against)" \

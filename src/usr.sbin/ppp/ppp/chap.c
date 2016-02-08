@@ -17,7 +17,7 @@
  * IMPLIED WARRANTIES, INCLUDING, WITHOUT LIMITATION, THE IMPLIED
  * WARRANTIES OF MERCHANTIBILITY AND FITNESS FOR A PARTICULAR PURPOSE.
  *
- * $Id: chap.c,v 1.9 1999/02/20 01:15:12 brian Exp $
+ * $Id: chap.c,v 1.17 1999/08/17 15:00:38 brian Exp $
  *
  *	TODO:
  */
@@ -35,18 +35,20 @@
 #include <md5.h>
 #include <paths.h>
 #include <signal.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/wait.h>
 #include <termios.h>
 #include <unistd.h>
 
+#include "layer.h"
 #include "mbuf.h"
 #include "log.h"
 #include "defs.h"
 #include "timer.h"
 #include "fsm.h"
-#include "lcpproto.h"
+#include "proto.h"
 #include "lcp.h"
 #include "lqr.h"
 #include "hdlc.h"
@@ -92,7 +94,7 @@ ChapOutput(struct physical *physical, u_int code, u_int id,
   lh.code = code;
   lh.id = id;
   lh.length = htons(plen);
-  bp = mbuf_Alloc(plen, MB_FSM);
+  bp = mbuf_Alloc(plen, MB_CHAPOUT);
   memcpy(MBUF_CTOP(bp), &lh, sizeof(struct fsmheader));
   if (count)
     memcpy(MBUF_CTOP(bp) + sizeof(struct fsmheader), ptr, count);
@@ -101,7 +103,8 @@ ChapOutput(struct physical *physical, u_int code, u_int id,
     log_Printf(LogPHASE, "Chap Output: %s\n", chapcodes[code]);
   else
     log_Printf(LogPHASE, "Chap Output: %s (%s)\n", chapcodes[code], text);
-  hdlc_Output(&physical->link, PRI_LINK, PROTO_CHAP, bp);
+  link_PushPacket(&physical->link, bp, physical->dl->bundle,
+                  PRI_LINK, PROTO_CHAP);
 }
 
 static char *
@@ -195,6 +198,7 @@ chap_StartChild(struct chap *chap, char *prog, const char *name)
   char *argv[MAXARGS], *nargv[MAXARGS];
   int argc, fd;
   int in[2], out[2];
+  pid_t pid;
 
   if (chap->child.fd != -1) {
     log_Printf(LogWARN, "Chap: %s: Program already running\n", prog);
@@ -213,6 +217,7 @@ chap_StartChild(struct chap *chap, char *prog, const char *name)
     return;
   }
 
+  pid = getpid();
   switch ((chap->child.pid = fork())) {
     case -1:
       log_Printf(LogERROR, "Chap: fork: %s\n", strerror(errno));
@@ -227,30 +232,25 @@ chap_StartChild(struct chap *chap, char *prog, const char *name)
       timer_TermService();
       close(in[1]);
       close(out[0]);
-      if (out[1] == STDIN_FILENO) {
-        fd = dup(out[1]);
-        close(out[1]);
-        out[1] = fd;
-      }
+      if (out[1] == STDIN_FILENO)
+        out[1] = dup(out[1]);
       dup2(in[0], STDIN_FILENO);
       dup2(out[1], STDOUT_FILENO);
-      if ((fd = open(_PATH_DEVNULL, O_RDWR)) == -1) {
+      close(STDERR_FILENO);
+      if (open(_PATH_DEVNULL, O_RDWR) != STDERR_FILENO) {
         log_Printf(LogALERT, "Chap: Failed to open %s: %s\n",
                   _PATH_DEVNULL, strerror(errno));
         exit(1);
       }
-      dup2(fd, STDERR_FILENO);
-      fcntl(3, F_SETFD, 1);		/* Set close-on-exec flag */
-
+      for (fd = getdtablesize(); fd > STDERR_FILENO; fd--)
+        fcntl(fd, F_SETFD, 1);
       setuid(geteuid());
       argc = command_Interpret(prog, strlen(prog), argv);
       command_Expand(nargv, argc, (char const *const *)argv,
-                     chap->auth.physical->dl->bundle, 0);
+                     chap->auth.physical->dl->bundle, 0, pid);
       execvp(nargv[0], nargv);
-
-      log_Printf(LogWARN, "exec() of %s failed: %s\n",
-                nargv[0], strerror(errno));
-      exit(255);
+      printf("exec() of %s failed: %s\n", nargv[0], strerror(errno));
+      _exit(255);
 
     default:
       close(in[0]);
@@ -259,7 +259,7 @@ chap_StartChild(struct chap *chap, char *prog, const char *name)
       chap->child.buf.len = 0;
       write(in[1], chap->auth.in.name, strlen(chap->auth.in.name));
       write(in[1], "\n", 1);
-      write(in[1], chap->challenge + 1, *chap->challenge);
+      write(in[1], chap->challenge.peer + 1, *chap->challenge.peer);
       write(in[1], "\n", 1);
       write(in[1], name, strlen(name));
       write(in[1], "\n", 1);
@@ -288,7 +288,7 @@ chap_Cleanup(struct chap *chap, int sig)
     else if (WIFEXITED(status) && WEXITSTATUS(status))
       log_Printf(LogERROR, "Chap: Child exited %d\n", WEXITSTATUS(status));
   }
-  *chap->challenge = 0;
+  *chap->challenge.local = *chap->challenge.peer = '\0';
 #ifdef HAVE_DES
   chap->peertries = 0;
 #endif
@@ -303,7 +303,7 @@ chap_Respond(struct chap *chap, char *name, char *key, u_char type
 {
   u_char *ans;
 
-  ans = chap_BuildAnswer(name, key, chap->auth.id, chap->challenge, type
+  ans = chap_BuildAnswer(name, key, chap->auth.id, chap->challenge.peer, type
 #ifdef HAVE_DES
                          , lm
 #endif
@@ -418,9 +418,9 @@ chap_Challenge(struct authinfo *authp)
 
   len = strlen(authp->physical->dl->bundle->cfg.auth.name);
 
-  if (!*chap->challenge) {
+  if (!*chap->challenge.local) {
     randinit();
-    cp = chap->challenge;
+    cp = chap->challenge.local;
 
 #ifndef NORADIUS
     if (*authp->physical->dl->bundle->radius.cfg.file) {
@@ -437,13 +437,13 @@ chap_Challenge(struct authinfo *authp)
       else
 #endif
         *cp++ = random() % (CHAPCHALLENGELEN-16) + 16;
-      for (i = 0; i < *chap->challenge; i++)
+      for (i = 0; i < *chap->challenge.local; i++)
         *cp++ = random() & 0xff;
     }
     memcpy(cp, authp->physical->dl->bundle->cfg.auth.name, len);
   }
-  ChapOutput(authp->physical, CHAP_CHALLENGE, authp->id, chap->challenge,
-	     1 + *chap->challenge + len, NULL);
+  ChapOutput(authp->physical, CHAP_CHALLENGE, authp->id, chap->challenge.local,
+	     1 + *chap->challenge.local + len, NULL);
 }
 
 static void
@@ -499,7 +499,7 @@ chap_HaveAnotherGo(struct chap *chap)
 {
   if (++chap->peertries < 3) {
     /* Give the peer another shot */
-    *chap->challenge = '\0';
+    *chap->challenge.local = '\0';
     chap_Challenge(&chap->auth);
     return 1;
   }
@@ -519,7 +519,7 @@ chap_Init(struct chap *chap, struct physical *p)
   chap->child.pid = 0;
   chap->child.fd = -1;
   auth_Init(&chap->auth, p, chap_Challenge, chap_Success, chap_Failure);
-  *chap->challenge = 0;
+  *chap->challenge.local = *chap->challenge.peer = '\0';
 #ifdef HAVE_DES
   chap->NTRespSent = 0;
   chap->peertries = 0;
@@ -532,9 +532,10 @@ chap_ReInit(struct chap *chap)
   chap_Cleanup(chap, SIGTERM);
 }
 
-void
-chap_Input(struct physical *p, struct mbuf *bp)
+struct mbuf *
+chap_Input(struct bundle *bundle, struct link *l, struct mbuf *bp)
 {
+  struct physical *p = link2physical(l);
   struct chap *chap = &p->dl->chap;
   char *name, *key, *ans;
   int len, nlen;
@@ -543,6 +544,20 @@ chap_Input(struct physical *p, struct mbuf *bp)
   int lanman;
 #endif
 
+  if (p == NULL) {
+    log_Printf(LogERROR, "chap_Input: Not a physical link - dropped\n");
+    mbuf_Free(bp);
+    return NULL;
+  }
+
+  if (bundle_Phase(bundle) != PHASE_NETWORK &&
+      bundle_Phase(bundle) != PHASE_AUTHENTICATE) {
+    log_Printf(LogPHASE, "Unexpected chap input - dropped !\n");
+    mbuf_Free(bp);
+    return NULL;
+  }
+
+  mbuf_SetType(bp, MB_CHAPIN);
   if ((bp = auth_ReadHeader(&chap->auth, bp)) == NULL &&
       ntohs(chap->auth.in.hdr.length) == 0)
     log_Printf(LogWARN, "Chap Input: Truncated header !\n");
@@ -555,13 +570,13 @@ chap_Input(struct physical *p, struct mbuf *bp)
 
     if (chap->auth.in.hdr.code != CHAP_CHALLENGE &&
         chap->auth.id != chap->auth.in.hdr.id &&
-        Enabled(p->dl->bundle, OPT_IDCHECK)) {
+        Enabled(bundle, OPT_IDCHECK)) {
       /* Wrong conversation dude ! */
       log_Printf(LogPHASE, "Chap Input: %s dropped (got id %d, not %d)\n",
                  chapcodes[chap->auth.in.hdr.code], chap->auth.in.hdr.id,
                  chap->auth.id);
       mbuf_Free(bp);
-      return;
+      return NULL;
     }
     chap->auth.id = chap->auth.in.hdr.id;	/* We respond with this id */
 
@@ -575,10 +590,10 @@ chap_Input(struct physical *p, struct mbuf *bp)
         if (len < 0) {
           log_Printf(LogERROR, "Chap Input: Truncated challenge !\n");
           mbuf_Free(bp);
-          return;
+          return NULL;
         }
-        *chap->challenge = alen;
-        bp = mbuf_Read(bp, chap->challenge + 1, alen);
+        *chap->challenge.peer = alen;
+        bp = mbuf_Read(bp, chap->challenge.peer + 1, alen);
         bp = auth_ReadName(&chap->auth, bp, len);
 #ifdef HAVE_DES
         lanman = p->link.lcp.his_authtype == 0x80 &&
@@ -594,12 +609,12 @@ chap_Input(struct physical *p, struct mbuf *bp)
         if (len < 0) {
           log_Printf(LogERROR, "Chap Input: Truncated response !\n");
           mbuf_Free(bp);
-          return;
+          return NULL;
         }
         if ((ans = malloc(alen + 2)) == NULL) {
           log_Printf(LogERROR, "Chap Input: Out of memory !\n");
           mbuf_Free(bp);
-          return;
+          return NULL;
         }
         *ans = chap->auth.id;
         bp = mbuf_Read(bp, ans + 1, alen);
@@ -616,7 +631,7 @@ chap_Input(struct physical *p, struct mbuf *bp)
         if ((ans = malloc(len + 1)) == NULL) {
           log_Printf(LogERROR, "Chap Input: Out of memory !\n");
           mbuf_Free(bp);
-          return;
+          return NULL;
         }
         bp = mbuf_Read(bp, ans, len);
         ans[len] = '\0';
@@ -658,12 +673,12 @@ chap_Input(struct physical *p, struct mbuf *bp)
 
     switch (chap->auth.in.hdr.code) {
       case CHAP_CHALLENGE:
-        if (*p->dl->bundle->cfg.auth.key == '!')
-          chap_StartChild(chap, p->dl->bundle->cfg.auth.key + 1,
-                          p->dl->bundle->cfg.auth.name);
+        if (*bundle->cfg.auth.key == '!')
+          chap_StartChild(chap, bundle->cfg.auth.key + 1,
+                          bundle->cfg.auth.name);
         else
-          chap_Respond(chap, p->dl->bundle->cfg.auth.name,
-                       p->dl->bundle->cfg.auth.key, p->link.lcp.his_authtype
+          chap_Respond(chap, bundle->cfg.auth.name,
+                       bundle->cfg.auth.key, p->link.lcp.his_authtype
 #ifdef HAVE_DES
                        , lanman
 #endif
@@ -674,14 +689,19 @@ chap_Input(struct physical *p, struct mbuf *bp)
         name = chap->auth.in.name;
         nlen = strlen(name);
 #ifndef NORADIUS
-        if (*p->dl->bundle->radius.cfg.file) {
-          chap->challenge[*chap->challenge+1] = '\0';
-          radius_Authenticate(&p->dl->bundle->radius, &chap->auth,
-                              chap->auth.in.name, ans, chap->challenge + 1);
+        if (*bundle->radius.cfg.file) {
+          u_char end;
+
+          end = chap->challenge.local[*chap->challenge.local+1];
+          chap->challenge.local[*chap->challenge.local+1] = '\0';
+          radius_Authenticate(&bundle->radius, &chap->auth,
+                              chap->auth.in.name, ans,
+                              chap->challenge.local + 1);
+          chap->challenge.local[*chap->challenge.local+1] = end;
         } else
 #endif
         {
-          key = auth_GetSecret(p->dl->bundle, name, nlen, p);
+          key = auth_GetSecret(bundle, name, nlen, p);
           if (key) {
             char *myans;
 #ifdef HAVE_DES
@@ -700,7 +720,7 @@ chap_Input(struct physical *p, struct mbuf *bp)
 #endif
             {
               myans = chap_BuildAnswer(name, key, chap->auth.id,
-                                       chap->challenge,
+                                       chap->challenge.local,
                                        p->link.lcp.want_authtype
 #ifdef HAVE_DES
                                        , lanman
@@ -750,4 +770,5 @@ chap_Input(struct physical *p, struct mbuf *bp)
   }
 
   mbuf_Free(bp);
+  return NULL;
 }

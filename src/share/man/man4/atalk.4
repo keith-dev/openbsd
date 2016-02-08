@@ -1,4 +1,4 @@
-.\"	$OpenBSD: atalk.4,v 1.2 1998/09/05 17:41:48 deraadt Exp $
+.\"	$OpenBSD: atalk.4,v 1.6 1999/09/23 04:12:04 alex Exp $
 .\"
 .\" This file is derived from the atalk.4 man page in the Netatlk 1.4b2
 .\" distribution. That distribution is covered by the following copyright:
@@ -26,7 +26,7 @@
 .\"	Ann Arbor, Michigan
 .\"	+1-313-764-2278
 .\"	netatalk@umich.edu
-.\" 
+.\"
 .Dd November 14, 1997
 .Dt ATALK 4
 .Os
@@ -37,7 +37,7 @@
 .Fd #include <sys/types.h>
 .Fd #include <netatalk/at.h>
 .Sh DESCRIPTION
-The 
+The
 .Tn AppleTalk
 Protocol Family provides presentation layer support for the AppleTalk
 Datagram Delivery Protocol (DDP), using the SOCK_DGRAM socket type.
@@ -51,7 +51,7 @@ AppleTalk Remote Access
 .Pq Tn ARA
 or
 .Tn PPP
-).   Currently, this AppleTalk implementataion supports only
+).   Currently, this AppleTalk implementation supports only
 Ethernet.
 .\" and Token Ring?
 .Pp
@@ -59,7 +59,6 @@ AppleTalk packets are encapsulated on the ethernet using the EtherTalk
 Link Access Protocol (ELAP).   Local network address resolution is
 handled using the AppleTalk Address Resolution Protocol (AARP).
 Neither of these protocols is exposed to user-mode applications.
-.Pp
 .Sh ADDRESSING
 AppleTalk addresses are three byte quantities, stored in network
 byte order. The include file
@@ -101,7 +100,7 @@ configured).
 .\"causes the address in outgoing packets to be determined when a packet
 .\"is sent, i.e. determined late.
 .\".Dv ATADDR_LATENET
-.\"is equivalent to opening one socket for each network interface. 
+.\"is equivalent to opening one socket for each network interface.
 The port of a socket and
 .\"either
 the primary address
@@ -131,12 +130,11 @@ and Zone Information Protocol
 .Pq Tn ZIP .
 .Pp
 .Tn DDP
-is implemented in the kernel as 
+is implemented in the kernel as
 .Dv SOCK_DGRAM
 sockets in the
 .Dv AF_APPLETALK
-address family. 
-.Nx
+address family.
 All other
 .Tn AppleTalk
 protocols implemented using the
@@ -152,7 +150,7 @@ client.
 .Tn NBP ,
 and
 .Tn ZIP
-services are provided by the 
+services are provided by the
 .Tn atalkd
 daemon.
 .Tn ASP
@@ -163,7 +161,6 @@ services are provided by a user library.
 and
 .Tn AFP
 services are provided by user programs and daemons.
-.Pp
 .Sh SEE ALSO
 .\" .BR ddp (4P),
 .\" .BR atp (3N),

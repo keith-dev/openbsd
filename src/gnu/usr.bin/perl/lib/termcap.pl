@@ -1,4 +1,4 @@
-;# $RCSfile: termcap.pl,v $$Revision: 1.2 $$Date: 1997/11/30 07:57:11 $
+;# $RCSfile: termcap.pl,v $$Revision: 1.3 $$Date: 1999/04/29 22:51:48 $
 ;#
 ;# Usage:
 ;#	require 'ioctl.pl';

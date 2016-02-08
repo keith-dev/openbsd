@@ -1,13 +1,23 @@
 #!./perl
 
-# $RCSfile: term.t,v $$Revision: 1.2 $$Date: 1997/11/30 07:59:53 $
+# $RCSfile: term.t,v $$Revision: 1.3 $$Date: 1999/04/29 22:52:25 $
+
+BEGIN {
+    chdir 't' if -d 't';
+    @INC = '../lib';
+}
+
+use Config;
 
 print "1..7\n";
 
 # check "" interpretation
 
 $x = "\n";
-if ($x eq chr(10)) {print "ok 1\n";} else {print "not ok 1\n";}
+# 10 is ASCII/Iso Latin, 21 is EBCDIC.
+if ($x eq chr(10) ||
+    ($Config{ebcdic} eq 'define' && $x eq chr(21))) {print "ok 1\n";}
+else {print "not ok 1\n";}
 
 # check `` processing
 

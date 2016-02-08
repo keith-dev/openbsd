@@ -1,4 +1,4 @@
-;# $RCSfile: getopt.pl,v $$Revision: 1.2 $$Date: 1997/11/30 07:56:59 $
+;# $RCSfile: getopt.pl,v $$Revision: 1.3 $$Date: 1999/04/29 22:51:46 $
 
 ;# Process single-character switches with switch clustering.  Pass one argument
 ;# which is a string containing all switches that take an argument.  For each

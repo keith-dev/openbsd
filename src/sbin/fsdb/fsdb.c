@@ -1,4 +1,4 @@
-/*	$OpenBSD: fsdb.c,v 1.5 1998/08/08 20:56:28 deraadt Exp $	*/
+/*	$OpenBSD: fsdb.c,v 1.7 1999/08/06 20:41:06 deraadt Exp $	*/
 /*	$NetBSD: fsdb.c,v 1.7 1997/01/11 06:50:53 lukem Exp $	*/
 
 /*-
@@ -86,7 +86,8 @@ ino_t curinum;
 static void 
 usage()
 {
-	errx(1, "usage: %s [-d] -f <fsname>", __progname);
+	fprintf(stderr, "usage: %s [-d] -f <fsname>\n", __progname);
+	exit(1);
 }
 
 /*
@@ -765,7 +766,7 @@ CMDFUNCSTART(linkcount)
 CMDFUNCSTART(chowner)
 {
     int rval = 1;
-    unsigned long uid;
+    uid_t uid;
     char *cp;
     struct passwd *pwd;
 
@@ -792,7 +793,7 @@ CMDFUNCSTART(chowner)
 CMDFUNCSTART(chgroup)
 {
     int rval = 1;
-    unsigned long gid;
+    gid_t gid;
     char *cp;
     struct group *grp;
 

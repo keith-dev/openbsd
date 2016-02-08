@@ -1,4 +1,4 @@
-.\"	$OpenBSD: listen.2,v 1.4 1999/02/27 21:56:28 deraadt Exp $
+.\"	$OpenBSD: listen.2,v 1.7 1999/06/29 14:10:05 aaron Exp $
 .\"	$NetBSD: listen.2,v 1.7 1996/02/16 20:38:45 phil Exp $
 .\"
 .\" Copyright (c) 1983, 1991, 1993
@@ -36,7 +36,7 @@
 .\"
 .Dd December 11, 1993
 .Dt LISTEN 2
-.Os BSD 4.2
+.Os
 .Sh NAME
 .Nm listen
 .Nd listen for connections on a socket
@@ -60,7 +60,7 @@ The
 call applies only to sockets of type
 .Dv SOCK_STREAM
 or
-.Dv SOCK_SEQPACKET.
+.Dv SOCK_SEQPACKET .
 .Pp
 The
 .Fa backlog
@@ -73,7 +73,7 @@ receive an error with an indication of
 or, if the underlying protocol supports retransmission,
 the request may be ignored so that retries may succeed.
 .Sh RETURN VALUES
-A 0 return value indicates success; -1 indicates an error.
+A 0 return value indicates success; \-1 indicates an error.
 .Sh ERRORS
 .Fn listen
 will fail if:

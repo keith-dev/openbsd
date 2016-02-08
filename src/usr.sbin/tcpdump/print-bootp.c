@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1990, 1991, 1993, 1994, 1995, 1996
+ * Copyright (c) 1990, 1991, 1993, 1994, 1995, 1996, 1997
  *	The Regents of the University of California.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -22,7 +22,7 @@
  */
 #ifndef lint
 static const char rcsid[] =
-    "@(#) $Header: /cvs/src/usr.sbin/tcpdump/print-bootp.c,v 1.7 1998/07/08 22:32:03 deraadt Exp $ (LBL)";
+    "@(#) $Header: /cvs/src/usr.sbin/tcpdump/print-bootp.c,v 1.9 1999/09/16 20:58:46 brad Exp $ (LBL)";
 #endif
 
 #include <sys/param.h>
@@ -39,6 +39,7 @@ struct rtentry;
 #include <netinet/if_ether.h>
 
 #include <ctype.h>
+#include <memory.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -145,6 +146,7 @@ bootp_print(register const u_char *cp, u_int length,
 			fputs(tstr + 1, stdout);
 			return;
 		}
+		putchar('"');
 	}
 	TCHECK2(bp->bp_file[0], 1);		/* check first char only */
 	if (*bp->bp_file) {
@@ -154,6 +156,7 @@ bootp_print(register const u_char *cp, u_int length,
 			fputs(tstr + 1, stdout);
 			return;
 		}
+		putchar('"');
 	}
 
 	/* Decode the vendor buffer */

@@ -1,4 +1,4 @@
-.\"	$OpenBSD: getprotoent.3,v 1.2 1996/08/19 08:28:50 tholo Exp $
+.\"	$OpenBSD: getprotoent.3,v 1.5 1999/07/05 04:40:59 aaron Exp $
 .\"
 .\" Copyright (c) 1983, 1991, 1993
 .\"	The Regents of the University of California.  All rights reserved.
@@ -33,7 +33,7 @@
 .\"
 .Dd June 4, 1993
 .Dt GETPROTOENT 3
-.Os BSD 4.2
+.Os
 .Sh NAME
 .Nm getprotoent ,
 .Nm getprotobynumber ,
@@ -44,13 +44,15 @@
 .Sh SYNOPSIS
 .Fd #include <netdb.h>
 .Ft struct protoent *
-.Fn getprotoent 
+.Fn getprotoent "void"
 .Ft struct protoent *
 .Fn getprotobyname "char *name"
 .Ft struct protoent *
 .Fn getprotobynumber "int proto"
+.Ft void
 .Fn setprotoent "int stayopen"
-.Fn endprotoent 
+.Ft void
+.Fn endprotoent "void"
 .Sh DESCRIPTION
 The
 .Fn getprotoent ,
@@ -77,7 +79,7 @@ The members of this structure are:
 .It Fa p_name
 The official name of the protocol.
 .It Fa p_aliases
-A zero terminated list of alternate names for the protocol.
+A zero-terminated list of alternate names for the protocol.
 .It Fa p_proto
 The protocol number.
 .El
@@ -93,7 +95,7 @@ function
 opens and rewinds the file.  If the
 .Fa stayopen
 flag is non-zero,
-the net data base will not be closed after each call to 
+the net data base will not be closed after each call to
 .Fn getprotobyname
 or
 .Fn getprotobynumber .
@@ -134,11 +136,10 @@ The
 .Fn setprotoent ,
 and
 .Fn endprotoent
-functions appeared in 
+functions appeared in
 .Bx 4.2 .
 .Sh BUGS
 These functions use a static data space;
 if the data is needed for future use, it should be
 copied before any subsequent calls overwrite it.
-Only the Internet
-protocols are currently understood.
+Only the Internet protocols are currently understood.

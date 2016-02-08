@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1988, 1989, 1990, 1991, 1992, 1993, 1994, 1995, 1996
+ * Copyright (c) 1988, 1989, 1990, 1991, 1992, 1993, 1994, 1995, 1996, 1997
  *	The Regents of the University of California.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -21,7 +21,7 @@
 
 #ifndef lint
 static const char rcsid[] =
-    "@(#) $Header: /cvs/src/usr.sbin/tcpdump/print-ip.c,v 1.5 1996/12/12 16:22:35 bitblt Exp $ (LBL)";
+    "@(#) $Header: /cvs/src/usr.sbin/tcpdump/print-ip.c,v 1.8 1999/10/06 01:46:40 deraadt Exp $ (LBL)";
 #endif
 
 #include <sys/param.h>
@@ -55,6 +55,15 @@ static const char rcsid[] =
 #define IN_CLASSD(i) (((int32_t)(i) & 0xf0000000) == 0xe0000000)
 #endif
 
+/* Definitions required for ECN
+   for use if the OS running tcpdump does not have ECN */
+#ifndef IPTOS_ECT
+#define IPTOS_ECT	0x02	/* ECN Capable Transport in IP header*/
+#endif
+#ifndef IPTOS_CE
+#define IPTOS_CE	0x01	/* ECN Cong. Experienced in IP header*/
+#endif
+
 /* (following from ipmulti/mrouted/prune.h) */
 
 /*
@@ -64,7 +73,7 @@ struct tr_query {
 	u_int  tr_src;			/* traceroute source */
 	u_int  tr_dst;			/* traceroute destination */
 	u_int  tr_raddr;		/* traceroute response address */
-#ifdef WORDS_BIGENDIAN
+#if BYTE_ORDER == BIG_ENDIAN
 	struct {
 		u_int   ttl : 8;	/* traceroute response ttl */
 		u_int   qid : 24;	/* traceroute query id */
@@ -463,6 +472,20 @@ ip_print(register const u_char *bp, register u_int length)
   			}
   			break;
 
+#ifndef IPPROTO_ESP
+#define IPPROTO_ESP 50
+#endif
+		case IPPROTO_ESP:
+			esp_print(cp, len, (const u_char *)ip);
+			break;
+
+#ifndef IPPROTO_AH
+#define IPPROTO_AH 51
+#endif
+		case IPPROTO_AH:
+			ah_print(cp, len, (const u_char *)ip);
+			break;
+
 		default:
 			(void)printf("%s > %s:", ipaddr_string(&ip->ip_src),
 				ipaddr_string(&ip->ip_dst));
@@ -489,8 +512,23 @@ ip_print(register const u_char *bp, register u_int length)
 	} else if (off & IP_DF)
 		(void)printf(" (DF)");
 
-	if (ip->ip_tos)
-		(void)printf(" [tos 0x%x]", (int)ip->ip_tos);
+	if (ip->ip_tos) {
+		(void)printf(" [tos 0x%x", (int)ip->ip_tos);
+		if (ip->ip_tos & (IPTOS_CE|IPTOS_ECT)) {
+			(void)printf(" (");
+			if (ip->ip_tos & IPTOS_ECT) {
+				/* ECN-capable transport */
+				putchar('E');
+			}
+			if (ip->ip_tos & IPTOS_CE) {
+				/* _C_ongestion experienced (ECN) */
+				putchar('C'); 
+			}
+			(void)printf(")");
+  		}
+		(void)printf("]");
+	}
+
 	if (ip->ip_ttl <= 1)
 		(void)printf(" [ttl %d]", (int)ip->ip_ttl);
 

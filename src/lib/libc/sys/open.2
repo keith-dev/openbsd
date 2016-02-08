@@ -1,4 +1,4 @@
-.\"	$OpenBSD: open.2,v 1.7 1999/02/27 21:56:37 deraadt Exp $
+.\"	$OpenBSD: open.2,v 1.13 1999/06/29 14:10:11 aaron Exp $
 .\"	$NetBSD: open.2,v 1.8 1995/02/27 12:35:14 cgd Exp $
 .\"
 .\" Copyright (c) 1980, 1991, 1993
@@ -36,7 +36,7 @@
 .\"
 .Dd November 16, 1993
 .Dt OPEN 2
-.Os BSD 4
+.Os
 .Sh NAME
 .Nm open
 .Nd open or create a file for reading or writing
@@ -65,7 +65,7 @@ and modified by the process' umask value (see
 .Xr umask 2 ) .
 .Pp
 The flags specified are formed by
-.Em or Ns 'ing
+.Tn OR Ns 'ing
 the following values
 .Pp
 .Bd -literal -offset indent -compact
@@ -131,7 +131,7 @@ the request for the lock will never fail
 If successful,
 .Fn open
 returns a non-negative integer, termed a file descriptor.
-It returns -1 on failure.
+It returns \-1 on failure.
 The file pointer used to mark the current position within the
 file is set to the beginning of the file.
 .Pp
@@ -155,9 +155,9 @@ The named file is opened unless:
 .It Bq Er ENOTDIR
 A component of the path prefix is not a directory.
 .It Bq Er ENAMETOOLONG
-A component of a pathname exceeded 
+A component of a pathname exceeded
 .Dv {NAME_MAX}
-characters, or an entire path name exceeded 
+characters, or an entire path name exceeded
 .Dv {PATH_MAX}
 characters.
 .It Bq Er ENOENT
@@ -250,7 +250,12 @@ were specified and the file exists.
 .It Bq Er EOPNOTSUPP
 An attempt was made to open a socket (not currently implemented).
 .It Bq Er EAGAIN
-O_NONBLOCK and either O_EXLOCK or O_SHLOCK are set and the file
+.Dv O_NONBLOCK
+and either
+.Dv O_EXLOCK
+or
+.Dv O_SHLOCK
+are set and the file
 is already locked.
 .El
 .Sh SEE ALSO
@@ -258,13 +263,13 @@ is already locked.
 .Xr close 2 ,
 .Xr dup 2 ,
 .Xr flock 2 ,
-.Xr getdtablesize 3 ,
 .Xr lseek 2 ,
 .Xr read 2 ,
+.Xr umask 2 ,
 .Xr write 2 ,
-.Xr umask 2
+.Xr getdtablesize 3
 .Sh HISTORY
 An
 .Fn open
-function call appeared in 
+function call appeared in
 .At v6 .

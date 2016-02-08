@@ -1,4 +1,4 @@
-/*	$OpenBSD: worm.c,v 1.7 1998/09/16 00:44:37 pjanzen Exp $	*/
+/*	$OpenBSD: worm.c,v 1.9 1999/09/03 09:35:24 hugh Exp $	*/
 
 /*
  * Copyright (c) 1980, 1993
@@ -43,7 +43,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)worm.c	8.1 (Berkeley) 5/31/93";
 #else
-static char rcsid[] = "$OpenBSD: worm.c,v 1.7 1998/09/16 00:44:37 pjanzen Exp $";
+static char rcsid[] = "$OpenBSD: worm.c,v 1.9 1999/09/03 09:35:24 hugh Exp $";
 #endif
 #endif /* not lint */
 
@@ -291,8 +291,10 @@ process(ch)
 	nh->x = x;
 	display(nh, HEAD);
 	head = nh;
-	if (!(slow && running))
+	if (!(slow && running)) {
+		wmove(tv, head->y, head->x);
 		wrefresh(tv);
+	}
 	if (!running)
 		alarm(1);
 }
@@ -328,7 +330,7 @@ suspend(dummy)
 	refresh();
 	endwin();
 	fflush(stdout);
-	kill(getpid(), SIGTSTP);
+	kill(getpid(), SIGSTOP);
 	signal(SIGTSTP, suspend);
 	crmode();
 	noecho();

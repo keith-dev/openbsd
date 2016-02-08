@@ -1,4 +1,4 @@
-.\"	$OpenBSD: rmd160.3,v 1.5 1998/06/21 22:13:42 millert Exp $
+.\"	$OpenBSD: rmd160.3,v 1.11 1999/08/11 03:06:06 deraadt Exp $
 .\"
 .\" Copyright (c) 1997 Todd C. Miller <Todd.Miller@courtesan.com>
 .\" All rights reserved.
@@ -30,6 +30,7 @@
 .\"
 .Dd July 16, 1997
 .Dt RMD160 3
+.Os
 .Sh NAME
 .Nm RMD160Init ,
 .Nm RMD160Update ,
@@ -63,7 +64,7 @@ of a message called a message digest.  The algorithm takes a
 message less than 2^64 bits as input and produces a 160-bit digest
 suitable for use as a digital signature.
 .Pp
-The RMD160 functions are considered to be more secure than the 
+The RMD160 functions are considered to be more secure than the
 .Xr md4 3
 and
 .Xr md5 3
@@ -86,7 +87,7 @@ function adds
 of length
 .Ar nbytes
 to the RMD160_CTX specified by
-.Ar context.
+.Ar context .
 .Fn RMD160Final
 is called when all data has been added via
 .Fn RMD160Update
@@ -95,7 +96,7 @@ and stores a message digest in the
 parameter.
 When a null pointer is passed to
 .Fn RMD160Final
-as first argument only the final padding will be applied and the 
+as first argument only the final padding will be applied and the
 current context can still be used with
 .Fn RMD160Update .
 .Pp
@@ -167,7 +168,7 @@ RMD160Final(results, &rmd);
 /* Print the digest as one long hex value */
 printf("0x");
 for (n = 0; n < 20; n++)
-	printf("%x", results[n]);
+	printf("%02x", results[n]);
 putchar('\\n');
 .Ed
 .Pp
@@ -177,7 +178,7 @@ RMD160_CTX rmd;
 u_char output[41];
 char *buf = "abc";
 
-printf("0x%s", RMD160Data(buf, strlen(buf), output));
+printf("0x%s\en", RMD160Data(buf, strlen(buf), output));
 .Ed
 .Sh CAVEATS
 If a message digest is to be copied to a multi-byte type (ie:
@@ -186,7 +187,7 @@ perform byte swapping on little endian machines such as the i386, alpha,
 and vax.
 .Sh AUTHOR
 This implementation of RMD-160 was written by Antoon Bosselaers.
-.br
+.Pp
 The
 .Fn RMD160End ,
 .Fn RMD160File ,

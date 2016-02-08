@@ -1,4 +1,4 @@
-.\"	$OpenBSD: mount.8,v 1.15 1999/03/24 22:31:09 millert Exp $
+.\"	$OpenBSD: mount.8,v 1.18 1999/07/21 01:07:54 deraadt Exp $
 .\"	$NetBSD: mount.8,v 1.11 1995/07/12 06:23:21 cgd Exp $
 .\"
 .\" Copyright (c) 1980, 1989, 1991, 1993
@@ -36,14 +36,14 @@
 .\"
 .Dd March 27, 1994
 .Dt MOUNT 8
-.Os BSD 4
+.Os
 .Sh NAME
 .Nm mount
 .Nd mount file systems
 .Sh SYNOPSIS
 .Nm mount
 .Op Fl Aadfruvw
-.Op Fl t Ar type 
+.Op Fl t Ar type
 .Nm mount
 .Op Fl dfruvw
 .Ar special | node
@@ -109,7 +109,7 @@ command is trying to do.
 .It Fl f
 Forces the revocation of write access when trying to downgrade
 a filesystem mount status from read-write to read-only.
-.It Fl o
+.It Fl o Ar options
 Options are specified with a
 .Fl o
 flag followed by a comma separated string of options.

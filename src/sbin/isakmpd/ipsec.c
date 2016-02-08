@@ -1,5 +1,5 @@
-/*	$OpenBSD: ipsec.c,v 1.12 1999/04/05 20:57:50 niklas Exp $	*/
-/*	$EOM: ipsec.c,v 1.92 1999/04/05 18:28:10 niklas Exp $	*/
+/*	$OpenBSD: ipsec.c,v 1.22 1999/07/13 15:46:43 niklas Exp $	*/
+/*	$EOM: ipsec.c,v 1.114 1999/07/13 15:43:21 niklas Exp $	*/
 
 /*
  * Copyright (c) 1998, 1999 Niklas Hallqvist.  All rights reserved.
@@ -51,6 +51,7 @@
 #include "doi.h"
 #include "exchange.h"
 #include "hash.h"
+#include "ike_aggressive.h"
 #include "ike_auth.h"
 #include "ike_main_mode.h"
 #include "ike_quick_mode.h"
@@ -75,20 +76,34 @@ struct ipsec_decode_arg {
   struct proto *proto;
 };
 
+/* These variables hold the contacted peers ADT state.  */
+struct contact {
+  struct sockaddr *addr;
+  socklen_t len;
+} *contacts = 0;
+int contact_cnt = 0, contact_limit = 0;
+
+static int addr_cmp (const void *, const void *);
+static int ipsec_add_contact (struct message *msg);
+static int ipsec_contacted (struct message *msg);
 static int ipsec_debug_attribute (u_int16_t, u_int8_t *, u_int16_t, void *);
 static void ipsec_delete_spi (struct sa *, struct proto *, int);
 static u_int16_t *ipsec_exchange_script (u_int8_t);
 static void ipsec_finalize_exchange (struct message *);
-static void ipsec_set_network (u_int8_t *, u_int8_t *, struct ipsec_sa *);
 static void ipsec_free_exchange_data (void *);
 static void ipsec_free_proto_data (void *);
 static void ipsec_free_sa_data (void *);
 static struct keystate *ipsec_get_keystate (struct message *);
 static u_int8_t *ipsec_get_spi (size_t *, u_int8_t, struct message *);
+static int ipsec_handle_leftover_payload (struct message *, u_int8_t,
+					  struct payload *);
+static int ipsec_informational_post_hook (struct message *);
+static int ipsec_informational_pre_hook (struct message *);
 static int ipsec_initiator (struct message *);
 static void ipsec_proto_init (struct proto *, char *);
 static int ipsec_responder (struct message *);
 static void ipsec_setup_situation (u_int8_t *);
+static void ipsec_set_network (u_int8_t *, u_int8_t *, struct ipsec_sa *);
 static size_t ipsec_situation_size (void);
 static u_int8_t ipsec_spi_size (u_int8_t);
 static int ipsec_validate_attribute (u_int16_t, u_int8_t *, u_int16_t, void *);
@@ -114,6 +129,9 @@ static struct doi ipsec_doi = {
   ipsec_free_sa_data,
   ipsec_get_keystate,
   ipsec_get_spi,
+  ipsec_handle_leftover_payload,
+  ipsec_informational_post_hook,
+  ipsec_informational_pre_hook,
   ipsec_is_attribute_incompatible,
   ipsec_proto_init,
   ipsec_setup_situation,
@@ -207,6 +225,7 @@ ipsec_sa_lookup (in_addr_t dst, u_int32_t spi, u_int8_t proto)
 /*
  * Check if SA matches the flow of another SA in V_ARG.  It has to
  * be a finished non-replaced phase 2 SA.
+ * XXX At some point other selectors will matter here too.
  */
 static int
 ipsec_sa_check_flow (struct sa *sa, void *v_arg)
@@ -235,20 +254,16 @@ ipsec_finalize_exchange (struct message *msg)
   struct ipsec_exch *ie = exchange->data;
   struct sa *sa = 0, *old_sa;
   struct proto *proto, *last_proto = 0;
-  struct timeval expiration;
-  struct sockaddr *addr;
-  int len;
 
   switch (exchange->phase)
     {
     case 1:
-      isakmp_sa = msg->isakmp_sa;
-      isa = isakmp_sa->data;
-
       switch (exchange->type)
 	{
 	case ISAKMP_EXCH_ID_PROT:
 	case ISAKMP_EXCH_AGGRESSIVE:
+	  isakmp_sa = msg->isakmp_sa;
+	  isa = isakmp_sa->data;
 	  isa->hash = ie->hash->type;
 	  isa->prf_type = ie->prf_type;
 	  isa->skeyid_len = ie->skeyid_len;
@@ -256,37 +271,11 @@ ipsec_finalize_exchange (struct message *msg)
 	  isa->skeyid_a = ie->skeyid_a;
 	  /* Prevents early free of SKEYID_*.  */
 	  ie->skeyid_a = ie->skeyid_d = 0;
+
+	  /* If a lifetime was negotiated setup the expiration timers.  */
+	  if (isakmp_sa->seconds)
+	    sa_setup_expirations (isakmp_sa);
 	  break;
-	}
-
-      /* If a lifetime was negotiated setup the expiration timers.  */
-      if (isakmp_sa->seconds)
-	{
-	  gettimeofday(&expiration, 0);
-	  expiration.tv_sec += isakmp_sa->seconds * 9 / 10;
-	  isakmp_sa->soft_death
-	    = timer_add_event ("sa_soft_expire",
-			       (void (*) (void *))sa_soft_expire, isakmp_sa,
-			       &expiration);
-	  if (!isakmp_sa->soft_death)
-	    {
-	      /* If we don't give up we might start leaking... */
-	      sa_delete (isakmp_sa, 1);
-	      return;
-	    }
-
-	  gettimeofday(&expiration, 0);
-	  expiration.tv_sec += isakmp_sa->seconds;
-	  isakmp_sa->death
-	    = timer_add_event ("sa_hard_expire",
-			       (void (*) (void *))sa_hard_expire, isakmp_sa,
-			       &expiration);
-	  if (!isakmp_sa->death)
-	    {
-	      /* If we don't give up we might start leaking... */
-	      sa_delete (isakmp_sa, 1);
-	      return;
-	    }
 	}
       break;
 
@@ -318,37 +307,14 @@ ipsec_finalize_exchange (struct message *msg)
 
 	      isa = sa->data;
 
-	      /*
-	       * If client identifiers are not present in the exchange,
-	       * we fake them. RFC 2409 states:
-	       *    The identities of the SAs negotiated in Quick Mode are
-	       *    implicitly assumed to be the IP addresses of the ISAKMP
-	       *    peers, without any constraints on the protocol or port
-	       *    numbers allowed, unless client identifiers are specified
-	       *    in Quick Mode.
-	       *
-	       * -- Michael Paddon (mwp@aba.net.au)
-	       */
-	      if (!ie->id_ci || !ie->id_cr)
-		{
-		  /* Get source address.  */
-		  msg->transport->vtbl->get_src (msg->transport, &addr, &len);
-		  isa->src_net = ((struct sockaddr_in *)addr)->sin_addr.s_addr;
-		  isa->src_mask = htonl (0xffffffff);
-
-		  /* Get destination address.  */
-		  msg->transport->vtbl->get_dst (msg->transport, &addr, &len);
-		  isa->dst_net = ((struct sockaddr_in *)addr)->sin_addr.s_addr;
-		  isa->dst_mask = htonl (0xffffffff);
-		}
-	      else if (exchange->initiator)
+	      if (exchange->initiator)
 		/* Initiator is source, responder is destination.  */
 		ipsec_set_network (ie->id_ci, ie->id_cr, isa);
 	      else
 		/* Responder is source, initiator is destination.  */
 		ipsec_set_network (ie->id_cr, ie->id_ci, isa);
 
-	      log_debug (LOG_MISC, 50,
+	      log_debug (LOG_EXCHANGE, 50,
 			 "ipsec_finalize_exchange: src %x %x dst %x %x",
 			 ntohl (isa->src_net), ntohl (isa->src_mask),
 			 ntohl (isa->dst_net), ntohl (isa->dst_mask));
@@ -359,10 +325,7 @@ ipsec_finalize_exchange (struct message *msg)
 
 	      /* Mark elder SAs with the same flow information as replaced.  */
 	      while ((old_sa = sa_find (ipsec_sa_check_flow, sa)) != 0)
-		{
-		  sa_reference (old_sa);
-		  sa_mark_replaced (old_sa, 0);
-		}
+		sa_mark_replaced (old_sa);
 	    }
 	  break;
 	}
@@ -706,12 +669,12 @@ ipsec_initiator (struct message *msg)
   struct exchange *exchange = msg->exchange;
   int (**script) (struct message *msg) = 0;
 
-  /* XXX Mostly not implemented yet.  */
-  
   /* Check that the SA is coherent with the IKE rules.  */
   if ((exchange->phase == 1 && exchange->type != ISAKMP_EXCH_ID_PROT
+       && exchange->type != ISAKMP_EXCH_AGGRESSIVE
        && exchange->type != ISAKMP_EXCH_INFO)
-      || (exchange->phase == 2 && exchange->type != IKE_EXCH_QUICK_MODE))
+      || (exchange->phase == 2 && exchange->type != IKE_EXCH_QUICK_MODE
+	  && exchange->type != ISAKMP_EXCH_INFO))
     {
       log_print ("ipsec_initiator: unsupported exchange type %d in phase %d",
 		 exchange->type, exchange->phase);
@@ -730,10 +693,10 @@ ipsec_initiator (struct message *msg)
 		 exchange->type);
       return -1;
     case ISAKMP_EXCH_AGGRESSIVE:
+      script = ike_aggressive_initiator;
       break;
     case ISAKMP_EXCH_INFO:
-      message_send_info (msg);
-      break;
+      return message_send_info (msg);
     case IKE_EXCH_QUICK_MODE:
       script = ike_quick_mode_initiator;
       break;
@@ -753,14 +716,16 @@ ipsec_responder (struct message *msg)
 {
   struct exchange *exchange = msg->exchange;
   int (**script) (struct message *msg) = 0;
+  struct payload *p;
 
   /* Check that a new exchange is coherent with the IKE rules.  */
   if (exchange->step == 0
       && ((exchange->phase == 1 && exchange->type != ISAKMP_EXCH_ID_PROT
+	   && exchange->type != ISAKMP_EXCH_AGGRESSIVE
 	   && exchange->type != ISAKMP_EXCH_INFO)
 	  || (exchange->phase == 2 && exchange->type == ISAKMP_EXCH_ID_PROT)))
     {
-      message_drop (msg, ISAKMP_NOTIFY_UNSUPPORTED_EXCHANGE_TYPE, 0, 0, 0);
+      message_drop (msg, ISAKMP_NOTIFY_UNSUPPORTED_EXCHANGE_TYPE, 0, 1, 0);
       return -1;
     }
     
@@ -771,7 +736,7 @@ ipsec_responder (struct message *msg)
     {
     case ISAKMP_EXCH_BASE:
     case ISAKMP_EXCH_AUTH_ONLY:
-      message_drop (msg, ISAKMP_NOTIFY_UNSUPPORTED_EXCHANGE_TYPE, 0, 0, 0);
+      message_drop (msg, ISAKMP_NOTIFY_UNSUPPORTED_EXCHANGE_TYPE, 0, 1, 0);
       return -1;
 
     case ISAKMP_EXCH_ID_PROT:
@@ -779,12 +744,26 @@ ipsec_responder (struct message *msg)
       break;
 
     case ISAKMP_EXCH_AGGRESSIVE:
-      /* XXX Not implemented yet.  */
+      script = ike_aggressive_responder;
       break;
 
     case ISAKMP_EXCH_INFO:
-      /* XXX Not implemented yet.  */
-      break;
+      for (p = TAILQ_FIRST (&msg->payload[ISAKMP_PAYLOAD_NOTIFY]); p;
+	   p = TAILQ_NEXT (p, link))
+	{
+	  log_debug (LOG_EXCHANGE, 10,
+		     "ipsec_responder: got NOTIFY of type %s",
+		     constant_lookup (isakmp_notify_cst,
+				      GET_ISAKMP_NOTIFY_MSG_TYPE (p->p)));
+	  p->flags |= PL_MARK;
+	}
+
+      /*
+       * If any DELETEs are in here, let the logic of leftover payloads deal
+       * with them.
+       */
+
+      return 0;
 
     case IKE_EXCH_QUICK_MODE:
       script = ike_quick_mode_responder;
@@ -804,7 +783,7 @@ ipsec_responder (struct message *msg)
    */
   if (TAILQ_FIRST (&msg->payload[ISAKMP_PAYLOAD_SA]))
     {
-      message_drop (msg, ISAKMP_NOTIFY_NO_PROPOSAL_CHOSEN, 0, 0, 0);
+      message_drop (msg, ISAKMP_NOTIFY_NO_PROPOSAL_CHOSEN, 0, 1, 0);
       return -1;
     }
   return 0;
@@ -828,6 +807,11 @@ static enum transform from_ike_crypto (u_int16_t crypto)
   return crypto;
 }
 
+/*
+ * Find out whether the attribute of type TYPE with a LEN length value
+ * pointed to by VALUE is incompatible with what we can handle.
+ * VMSG is a pointer to the current message.
+ */
 int
 ipsec_is_attribute_incompatible (u_int16_t type, u_int8_t *value,
 				 u_int16_t len, void *vmsg)
@@ -846,7 +830,7 @@ ipsec_is_attribute_incompatible (u_int16_t type, u_int8_t *value,
 	  return !ike_auth_get (decode_16 (value));
 	case IKE_ATTR_GROUP_DESCRIPTION:
 	  return decode_16 (value) < IKE_GROUP_DESC_MODP_768
-	    || decode_16 (value) > IKE_GROUP_DESC_EC2N_185;
+	    || decode_16 (value) > IKE_GROUP_DESC_MODP_1536;
 	case IKE_ATTR_GROUP_TYPE:
 	  return 1;
 	case IKE_ATTR_GROUP_PRIME:
@@ -889,7 +873,7 @@ ipsec_is_attribute_incompatible (u_int16_t type, u_int8_t *value,
 	  return 0;
 	case IPSEC_ATTR_GROUP_DESCRIPTION:
 	  return decode_16 (value) < IKE_GROUP_DESC_MODP_768
-	    || decode_16 (value) > IKE_GROUP_DESC_EC2N_185;
+	    || decode_16 (value) > IKE_GROUP_DESC_MODP_1536;
 	case IPSEC_ATTR_ENCAPSULATION_MODE:
 	  return decode_16 (value) < IPSEC_ENCAP_TUNNEL
 	    || decode_16 (value) > IPSEC_ENCAP_TRANSPORT;
@@ -910,6 +894,10 @@ ipsec_is_attribute_incompatible (u_int16_t type, u_int8_t *value,
   return 1;
 }
 
+/*
+ * Log the attribute of TYPE with a LEN length value pointed to by VALUE
+ * in human-readable form.  VMSG is a pointer to the current message.
+ */
 int
 ipsec_debug_attribute (u_int16_t type, u_int8_t *value, u_int16_t len,
 		       void *vmsg)
@@ -932,6 +920,11 @@ ipsec_debug_attribute (u_int16_t type, u_int8_t *value, u_int16_t len,
   return 0;
 }
 
+/*
+ * Decode the attribute of type TYPE with a LEN length value pointed to by
+ * VALUE.  VIDA is a pointer to a context structure where we can find the
+ * current message, SA and protocol.
+ */
 int
 ipsec_decode_attribute (u_int16_t type, u_int8_t *value, u_int16_t len,
 			void *vida)
@@ -963,9 +956,7 @@ ipsec_decode_attribute (u_int16_t type, u_int8_t *value, u_int16_t len,
 	  ie->ike_auth = ike_auth_get (decode_16 (value));
 	  break;
 	case IKE_ATTR_GROUP_DESCRIPTION:
-	  ie->group = group_get (decode_16 (value));
-	  if (!ie->group)
-	    return -1;
+	  isa->group_desc = decode_16 (value);
 	  break;
 	case IKE_ATTR_GROUP_TYPE:
 	  break;
@@ -1141,6 +1132,10 @@ ipsec_delete_spi (struct sa *sa, struct proto *proto, int incoming)
   sysdep_ipsec_delete_spi (sa, proto, incoming);
 }
 
+/*
+ * Store BUF into the g^x entry of the exchange that message MSG belongs to.
+ * PEER is non-zero when the value is our peer's, and zero when it is ours.
+ */
 static int
 ipsec_g_x (struct message *msg, int peer, u_int8_t *buf)
 {
@@ -1186,7 +1181,12 @@ ipsec_gen_g_x (struct message *msg)
       return -1;
     }
 
-  dh_create_exchange (ie->group, buf + ISAKMP_KE_DATA_OFF);
+  if (dh_create_exchange (ie->group, buf + ISAKMP_KE_DATA_OFF))
+    {
+      log_print ("ipsec_gen_g_x: dh_create_exchange failed");
+      free (buf);
+      return -1;
+    }
   return ipsec_g_x (msg, 0, buf + ISAKMP_KE_DATA_OFF);
 }
 
@@ -1206,7 +1206,7 @@ ipsec_save_g_x (struct message *msg)
   if (ie->g_x_len != dh_getlen (ie->group))
     {
       /* XXX Is this a good notify type?  */
-      message_drop (msg, ISAKMP_NOTIFY_PAYLOAD_MALFORMED, 0, 0, 0);
+      message_drop (msg, ISAKMP_NOTIFY_PAYLOAD_MALFORMED, 0, 1, 0);
       return -1;
     }
 
@@ -1239,6 +1239,51 @@ ipsec_get_spi (size_t *sz, u_int8_t proto, struct message *msg)
     }
 }
 
+/*
+ * We have gotten a payload PAYLOAD of type TYPE, which did not get handled
+ * by the logic of the exchange MSG takes part in.  Now is the time to deal
+ * with such a payload if we know how to, if we don't, return -1, otherwise
+ * 0.
+ */
+int
+ipsec_handle_leftover_payload (struct message *msg, u_int8_t type,
+			       struct payload *payload)
+{
+  struct sockaddr *dst;
+  socklen_t dstlen;
+  struct sa *sa;
+
+  /* So far, the only thing we handle is an INITIAL-CONTACT NOTIFY.  */
+  switch (type)
+    {
+    case ISAKMP_PAYLOAD_NOTIFY:
+      switch (GET_ISAKMP_NOTIFY_MSG_TYPE (payload->p))
+	{
+	case IPSEC_NOTIFY_INITIAL_CONTACT:
+	  /*
+	   * Find out who is sending this and then delete every SA that is
+	   * ready.  Exchanges will timeout themselves and then the
+	   * non-ready SAs will disappear too.
+	   */
+	  msg->transport->vtbl->get_dst (msg->transport, &dst, &dstlen);
+	  while ((sa = sa_lookup_by_peer (dst, dstlen)) != 0)
+	    {
+	      log_debug (LOG_SA, 30,
+			 "ipsec_handle_leftover_payload: "
+			 "INITIAL-CONTACT made us delete SA %p",
+			 sa);
+	      sa_delete (sa, 0);
+	    }
+
+	  payload->flags |= PL_MARK;
+	  return 0;
+	  break;
+	}
+    }
+  return -1;
+}
+
+/* Return the encryption keylength in octets of the ESP protocol PROTO.  */
 int
 ipsec_esp_enckeylength (struct proto *proto)
 {
@@ -1262,6 +1307,7 @@ ipsec_esp_enckeylength (struct proto *proto)
     }
 }
 
+/* Return the authentication keylength in octets of the ESP protocol PROTO.  */
 int
 ipsec_esp_authkeylength (struct proto *proto)
 {
@@ -1278,6 +1324,7 @@ ipsec_esp_authkeylength (struct proto *proto)
     }
 }
 
+/* Return the authentication keylength in octets of the AH protocol PROTO.  */
 int
 ipsec_ah_keylength (struct proto *proto)
 {
@@ -1292,6 +1339,7 @@ ipsec_ah_keylength (struct proto *proto)
     }
 }
 
+/* Return the total keymaterial length of the protocol PROTO.  */
 int
 ipsec_keymat_length (struct proto *proto)
 {
@@ -1480,4 +1528,252 @@ ipsec_proto_init (struct proto *proto, char *section)
   if (proto->sa->phase == 2 && section)
     iproto->replay_window
       = conf_get_num (section, "ReplayWindow", DEFAULT_REPLAY_WINDOW);
+}
+
+/*
+ * Add a notification payload of type INITIAL CONTACT to MSG if this is
+ * the first contact we have made to our peer.
+ */
+int
+ipsec_initial_contact (struct message *msg)
+{
+  u_int8_t *buf;
+
+  if (ipsec_contacted (msg))
+    return 0;
+
+  buf = malloc (ISAKMP_NOTIFY_SZ + ISAKMP_HDR_COOKIES_LEN);
+  if (!buf)
+    {
+      log_error ("ike_phase_1_initial_contact: malloc (%d) failed",
+		 ISAKMP_NOTIFY_SZ + ISAKMP_HDR_COOKIES_LEN);
+      return -1;
+    }
+  SET_ISAKMP_NOTIFY_DOI (buf, IPSEC_DOI_IPSEC);
+  SET_ISAKMP_NOTIFY_PROTO (buf, ISAKMP_PROTO_ISAKMP);
+  SET_ISAKMP_NOTIFY_SPI_SZ (buf, ISAKMP_HDR_COOKIES_LEN);
+  SET_ISAKMP_NOTIFY_MSG_TYPE (buf, IPSEC_NOTIFY_INITIAL_CONTACT);
+  memcpy (buf + ISAKMP_NOTIFY_SPI_OFF, msg->isakmp_sa->cookies,
+	  ISAKMP_HDR_COOKIES_LEN);
+  if (message_add_payload (msg, ISAKMP_PAYLOAD_NOTIFY, buf,
+			   ISAKMP_NOTIFY_SZ + ISAKMP_HDR_COOKIES_LEN, 1))
+    {
+      free (buf);
+      return -1;
+    }
+
+  return ipsec_add_contact (msg);
+}
+
+/*
+ * Compare the two contacts pointed to by A and B.  Return negative if
+ * *A < *B, 0 if they are equal, and positive if *A is the largest of them.
+ */
+static int
+addr_cmp (const void *a, const void *b)
+{
+  const struct contact *x = a, *y = b;
+  int minlen = MIN (x->len, y->len);
+  int rv = memcmp (x->addr, y->addr, minlen);
+
+  return rv ? rv : (x->len - y->len);
+}
+
+/*
+ * Add the peer that MSG is bound to as an address we don't want to send
+ * INITIAL CONTACT too from now on.  Do not call this function with a
+ * specific address duplicate times. We want fast lookup, speed of insertion
+ * is unimportant, if this is to scale.
+ */
+static int
+ipsec_add_contact (struct message *msg)
+{
+  struct contact *new_contacts;
+  struct sockaddr *dst, *addr;
+  socklen_t dstlen;
+  int cnt;
+
+  if (contact_cnt == contact_limit)
+    {
+      cnt = contact_limit ? 2 * contact_limit : 64;
+      new_contacts = realloc (contacts, cnt * sizeof contacts[0]);
+      if (!new_contacts)
+	{
+	  log_error ("ipsec_add_contact: realloc (%p, %d) failed", contacts,
+		     cnt * sizeof contacts[0]);
+	  return -1;
+	}
+      contact_limit = cnt;
+      contacts = new_contacts;
+    }
+  msg->transport->vtbl->get_dst (msg->transport, &dst, &dstlen);
+  addr = malloc (dstlen);
+  if (!addr)
+    {
+      log_error ("ipsec_add_contact: malloc (%d) failed", dstlen);
+      return -1;
+    }
+  memcpy (addr, dst, dstlen);
+  contacts[contact_cnt].addr = addr;
+  contacts[contact_cnt++].len = dstlen;
+
+  /*
+   * XXX There are better algorithms for already mostly-sorted data like
+   * this, but only qsort is standard.  I will someday do this inline.
+   */
+  qsort (contacts, contact_cnt, sizeof *contacts, addr_cmp);
+  return 0;
+}
+
+/* Return true if the recipient of MSG has already been contacted.  */
+static int
+ipsec_contacted (struct message *msg)
+{
+  struct contact contact;
+
+  msg->transport->vtbl->get_dst (msg->transport, &contact.addr, &contact.len);
+  return contacts
+    ? (bsearch (&contact, contacts, contact_cnt, sizeof *contacts, addr_cmp)
+       != 0)
+    : 0;
+}
+
+/* Add a HASH for to MSG.  */
+u_int8_t *
+ipsec_add_hash_payload (struct message *msg, size_t hashsize)
+{
+  u_int8_t *buf;
+
+  buf = malloc (ISAKMP_HASH_SZ + hashsize);
+  if (!buf)
+    {
+      log_error ("ipsec_add_hash_payload: malloc (%d) failed",
+		 ISAKMP_HASH_SZ + hashsize);
+      return 0;
+    }
+
+  if (message_add_payload (msg, ISAKMP_PAYLOAD_HASH, buf,
+			   ISAKMP_HASH_SZ + hashsize, 1))
+    {
+      free (buf);
+      return 0;
+    }
+
+  return buf;
+}
+
+/* Fill in the HASH payload of MSG.  */
+int
+ipsec_fill_in_hash (struct message *msg)
+{
+  struct exchange *exchange = msg->exchange;
+  struct sa *isakmp_sa = msg->isakmp_sa;
+  struct ipsec_sa *isa = isakmp_sa->data;
+  struct hash *hash = hash_get (isa->hash);
+  size_t hashsize = hash->hashsize;
+  struct prf *prf;
+  struct payload *payload;
+  u_int8_t *buf;
+  int i;
+  char header[80];
+
+  /* If no SKEYID_a, we need not do anything.  */
+  if (!isa->skeyid_a)
+    return 0;
+
+  payload = TAILQ_FIRST (&msg->payload[ISAKMP_PAYLOAD_HASH]);
+  if (!payload)
+    {
+      log_print ("ipsec_fill_in_hash: no HASH payload found");
+      return -1;
+    }
+  buf = payload->p;
+
+  /* Allocate the prf and start calculating our HASH(1).  */
+  log_debug_buf (LOG_MISC, 90, "ipsec_fill_in_hash: SKEYID_a", isa->skeyid_a,
+		 isa->skeyid_len);
+  prf = prf_alloc (isa->prf_type, hash->type, isa->skeyid_a, isa->skeyid_len);
+  if (!prf)
+    return -1;
+
+  prf->Init (prf->prfctx);
+  log_debug_buf (LOG_MISC, 90, "ipsec_fill_in_hash: message_id",
+		 exchange->message_id, ISAKMP_HDR_MESSAGE_ID_LEN);
+  prf->Update (prf->prfctx, exchange->message_id, ISAKMP_HDR_MESSAGE_ID_LEN);
+
+  /* Loop over all payloads after HASH(1).  */
+  for (i = 2; i < msg->iovlen; i++)
+    {
+      /* XXX Misleading payload type printouts.  */
+      snprintf (header, 80, "ipsec_fill_in_hash: payload %d after HASH(1)",
+		i - 1);
+      log_debug_buf (LOG_MISC, 90, header, msg->iov[i].iov_base,
+		     msg->iov[i].iov_len);
+      prf->Update (prf->prfctx, msg->iov[i].iov_base, msg->iov[i].iov_len);
+    }
+  prf->Final (buf + ISAKMP_HASH_DATA_OFF, prf->prfctx);
+  prf_free (prf);
+  log_debug_buf (LOG_MISC, 80, "ipsec_fill_in_hash: HASH(1)",
+		 buf + ISAKMP_HASH_DATA_OFF, hashsize);
+
+  return 0;
+}
+
+/* Add a HASH payload to MSG, if we have an ISAKMP SA we're protected by.  */
+static int
+ipsec_informational_pre_hook (struct message *msg)
+{
+  struct sa *isakmp_sa = msg->isakmp_sa;
+  struct ipsec_sa *isa;
+  struct hash *hash;
+
+  if (!isakmp_sa)
+    return 0;
+  isa = isakmp_sa->data;
+  hash = hash_get (isa->hash);
+  return ipsec_add_hash_payload (msg, hash->hashsize) == 0;
+}
+
+/*
+ * Fill in the HASH payload in MSG, if we have an ISAKMP SA we're protected by.
+ */
+static int
+ipsec_informational_post_hook (struct message *msg)
+{
+  if (!msg->isakmp_sa)
+    return 0;
+  return ipsec_fill_in_hash (msg);
+}
+
+ssize_t
+ipsec_id_size (char *section, u_int8_t *id)
+{
+  char *type, *data;
+
+  type = conf_get_str (section, "ID-type");
+  if (!type)
+    {
+      log_print ("ipsec_id_size: section %s has no \"ID-type\" tag", section);
+      return -1;
+    }
+
+  *id = constant_value (ipsec_id_cst, type);
+  switch (*id)
+    {
+    case IPSEC_ID_IPV4_ADDR:
+      return sizeof (in_addr_t);
+    case IPSEC_ID_IPV4_ADDR_SUBNET:
+      return 2 * sizeof (in_addr_t);
+    case IPSEC_ID_FQDN:
+    case IPSEC_ID_USER_FQDN:
+      data = conf_get_str (section, "Name");
+      if (!data)
+	{
+	  log_print ("ipsec_id_size: section %s has no \"Name\" tag", section);
+	  return -1;
+	}
+      return strlen (data);
+    }
+  log_print ("ipsec_id_size: unrecognized ID-type %d (%s)", *id, type);
+  return -1;
 }

@@ -1,4 +1,4 @@
-.\"	$OpenBSD: gus.4,v 1.6 1998/05/12 09:29:47 provos Exp $
+.\"	$OpenBSD: gus.4,v 1.9 1999/07/21 12:18:11 deraadt Exp $
 .\"	$NetBSD: gus.4,v 1.7 1997/10/08 21:59:55 jtc Exp $
 .\"
 .\" Copyright (c) 1996 The NetBSD Foundation, Inc.
@@ -37,17 +37,18 @@
 .\"
 .Dd November 4, 1995
 .Dt GUS 4 i386
-.Os 
+.Os
 .Sh NAME
 .Nm gus
 .Nd
 Gravis UltraSound/UltraSound MAX device driver
 .Sh SYNOPSIS
 .Cd "gus0 at isa? port 0xPPP irq X drq Y drq2 Z"
+.Cd "gus* at isapnp?"
 .Cd "audio* at gus?"
 .Sh DESCRIPTION
 The
-.Nm gus
+.Nm
 driver provides support for the Gravis UltraSound (GUS) and GUS MAX
 audio cards.  Both cards have on-board memory which is used for
 seamless playback of samples.  They can play back 8- or 16-bit samples
@@ -88,8 +89,13 @@ The joystick and MIDI port interfaces are not supported.
 .Sh REFERENCES
 Gravis UltraSound Low-Level Toolkit, Revision 2.01, 20 May 1993,
 published by Advanced Gravis and Forte Technologies.
+.Pp
+If you wish to use
+.Xr wdc 4
+on the ISAPNP version of the card, and it comes up as DISABLED,
+Gravis has a PNPCFG.EXE program which re-enables it.
 .Sh HISTORY
 The
-.Nm gus
+.Nm
 device driver appeared in
 .Nx 1.1 .

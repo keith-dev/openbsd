@@ -1,4 +1,4 @@
-/*	$OpenBSD: shutdown.c,v 1.14 1998/04/25 04:45:38 millert Exp $	*/
+/*	$OpenBSD: shutdown.c,v 1.17 1999/09/03 18:11:51 deraadt Exp $	*/
 /*	$NetBSD: shutdown.c,v 1.9 1995/03/18 15:01:09 cgd Exp $	*/
 
 /*
@@ -44,7 +44,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)shutdown.c	8.2 (Berkeley) 2/16/94";
 #else
-static char rcsid[] = "$OpenBSD: shutdown.c,v 1.14 1998/04/25 04:45:38 millert Exp $";
+static char rcsid[] = "$OpenBSD: shutdown.c,v 1.17 1999/09/03 18:11:51 deraadt Exp $";
 #endif
 #endif /* not lint */
 
@@ -55,6 +55,7 @@ static char rcsid[] = "$OpenBSD: shutdown.c,v 1.14 1998/04/25 04:45:38 millert E
 
 #include <ctype.h>
 #include <fcntl.h>
+#include <sys/termios.h>
 #include <pwd.h>
 #include <setjmp.h>
 #include <signal.h>
@@ -395,15 +396,35 @@ die_you_gravy_sucking_pig_dog()
 		syslog(LOG_ERR, "shutdown: can't exec %s: %m.", _PATH_HALT);
 		warn(_PATH_HALT);
 	}
-	if (access(_PATH_RCSHUTDOWN, R_OK) != -1) {
+	if (access(_PATH_RC, R_OK) != -1) {
 		pid_t pid;
+		struct termios t;
+		int fd;
 
 		switch ((pid = fork())) {
 		case -1:
 			break;
 		case 0:
-			execl(_PATH_BSHELL, "sh", _PATH_RCSHUTDOWN, NULL);
-			exit(1);
+			if (revoke(_PATH_CONSOLE) == -1)
+				perror("revoke");
+			if (setsid() == -1)
+				perror("setsid");
+			fd = open(_PATH_CONSOLE, O_RDWR);
+			if (fd == -1)
+				perror("open");
+			dup2(fd, 0);
+			dup2(fd, 1);
+			dup2(fd, 2);
+			if (fd > 2)
+				close(fd);
+
+			/* At a minimum... */
+			tcgetattr(0, &t);
+			t.c_oflag |= (ONLCR | OPOST);
+			tcsetattr(0, TCSANOW, &t);
+
+			execl(_PATH_BSHELL, "sh", _PATH_RC, "shutdown", NULL);
+			_exit(1);
 		default:
 			waitpid(pid, NULL, 0);
 		}
@@ -422,6 +443,7 @@ getoffset(timearg)
 	register struct tm *lt;
 	register char *p;
 	time_t now;
+	int this_year;
 
 	if (!strcasecmp(timearg, "now")) {		/* now */
 		offset = 0;
@@ -453,7 +475,17 @@ getoffset(timearg)
 
 	switch(strlen(timearg)) {
 	case 10:
+		this_year = lt->tm_year;
 		lt->tm_year = ATOI2(timearg);
+		/*
+		 * check if the specified year is in the next century.
+		 * allow for one year of user error as many people will
+		 * enter n - 1 at the start of year n.
+		 */
+		if (lt->tm_year < (this_year % 100) - 1)
+			lt->tm_year += 100;
+		/* adjust for the year 2000 and beyond */
+		lt->tm_year += (this_year - (this_year % 100));
 		/* FALLTHROUGH */
 	case 8:
 		lt->tm_mon = ATOI2(timearg);

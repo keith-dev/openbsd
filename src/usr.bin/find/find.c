@@ -1,4 +1,4 @@
-/*	$OpenBSD: find.c,v 1.5 1997/06/30 23:54:07 millert Exp $	*/
+/*	$OpenBSD: find.c,v 1.7 1999/10/04 21:17:32 millert Exp $	*/
 
 /*-
  * Copyright (c) 1991, 1993
@@ -38,7 +38,7 @@
 
 #ifndef lint
 /*static char sccsid[] = "from: @(#)find.c	8.1 (Berkeley) 6/6/93";*/
-static char rcsid[] = "$OpenBSD: find.c,v 1.5 1997/06/30 23:54:07 millert Exp $";
+static char rcsid[] = "$OpenBSD: find.c,v 1.7 1999/10/04 21:17:32 millert Exp $";
 #endif /* not lint */
 
 #include <sys/types.h>
@@ -163,7 +163,7 @@ find_execute(plan, paths)
 		err(1, "ftsopen");
 
 	while ((entry = fts_read(tree))) {
-		switch(entry->fts_info) {
+		switch (entry->fts_info) {
 		case FTS_D:
 			if (isdepth)
 				continue;
@@ -185,13 +185,14 @@ find_execute(plan, paths)
 			warnx("%s: illegal path", entry->fts_path);
 			continue;
 		}
-		 
+
 		/*
-		 * call all the functions in the execution plan until one is
+		 * Call all the functions in the execution plan until one is
 		 * false or all have been executed.  This is where we do all
 		 * the work specified by the user on the command line.
 		 */
-		for (p = plan; p && (p->eval)(p, entry); p = p->next);
+		for (p = plan; p && (p->eval)(p, entry); p = p->next)
+		    ;
 	}
 	(void)fts_close(tree);
 }

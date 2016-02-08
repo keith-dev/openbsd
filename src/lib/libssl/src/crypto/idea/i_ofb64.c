@@ -56,26 +56,23 @@
  * [including the GNU Public Licence.]
  */
 
-#include "idea.h"
+#include <openssl/idea.h>
 #include "idea_lcl.h"
 
 /* The input and output encrypted as though 64bit ofb mode is being
  * used.  The extra state information to record how much of the
  * 64bit block we have used is contained in *num;
  */
-void idea_ofb64_encrypt(in, out, length, schedule, ivec, num)
-unsigned char *in;
-unsigned char *out;
-long length;
-IDEA_KEY_SCHEDULE *schedule;
-unsigned char *ivec;
-int *num;
+void idea_ofb64_encrypt(unsigned char *in, unsigned char *out, long length,
+	     IDEA_KEY_SCHEDULE *schedule, unsigned char *ivec, int *num)
 	{
 	  /* body of routine replaced for OpenBSD due to IDEA patent */
 
 	  /* this sucks, but since these routines don't have a failure mode
 	   * then we have to do this, which "fails" but guarantees we
 	   * don't give anything away if we are accidentally compiled in.
+	   * this shouldn't matter much anyway, since we always compile
+	   * with NO_IDEA - there are plenty of good (free) alternatives.
 	   */
 	  memset (out, 0, length);  
 	}

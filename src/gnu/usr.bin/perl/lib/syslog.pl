@@ -2,8 +2,8 @@
 # syslog.pl
 #
 # $Log: syslog.pl,v $
-# Revision 1.2  1997/11/30 07:57:11  millert
-# perl 5.004_04
+# Revision 1.3  1999/04/29 22:51:48  millert
+# perl5.005_03 (stock)
 #
 # 
 # tom christiansen <tchrist@convex.com>

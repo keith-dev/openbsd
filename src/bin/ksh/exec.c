@@ -1,4 +1,4 @@
-/*	$OpenBSD: exec.c,v 1.16 1999/01/19 20:41:52 millert Exp $	*/
+/*	$OpenBSD: exec.c,v 1.21 1999/07/15 20:35:33 millert Exp $	*/
 
 /*
  * execute command tree
@@ -21,7 +21,7 @@ static int	comexec	 ARGS((struct op *t, struct tbl *volatile tp, char **ap,
 static void	scriptexec ARGS((struct op *tp, char **ap));
 static int	call_builtin ARGS((struct tbl *tp, char **wp));
 static int	iosetup ARGS((struct ioword *iop, struct tbl *tp));
-static int	herein ARGS((char *hname, int sub));
+static int	herein ARGS((const char *content, int sub));
 #ifdef KSH
 static char 	*do_selectargs ARGS((char **ap, bool_t print_menu));
 #endif /* KSH */
@@ -96,7 +96,7 @@ execute(t, flags)
 	}
 	 */
 	if ((flags&XFORK) && !(flags&XEXEC) && t->type != TPIPE)
-		return exchild(t, flags, -1); /* run in sub-process */
+		return exchild(t, flags & ~XTIME, -1); /* run in sub-process */
 
 	newenv(E_EXEC);
 	if (trap)
@@ -108,10 +108,15 @@ execute(t, flags)
 		 */
 		subst_exstat = 0;
 
+		current_lineno = t->lineno;	/* for $LINENO */
+
 		/* POSIX says expand command words first, then redirections,
 		 * and assignments last..
 		 */
 		ap = eval(t->args, t->u.evalflags | DOBLANK | DOGLOB | DOTILDE);
+		if (flags & XTIME)
+			/* Allow option parsing (bizarre, but POSIX) */
+			timex_hook(t, &ap);
 		if (Flag(FXTRACE) && ap[0]) {
 			shf_fprintf(shl_out, "%s",
 				PS4_SUBSTITUTE(str_val(global("PS4"))));
@@ -123,6 +128,7 @@ execute(t, flags)
 		if (ap[0])
 			tp = findcom(ap[0], FC_BI|FC_FUNC);
 	}
+	flags &= ~XTIME;
 
 	if (t->ioact != NULL || t->type == TPIPE || t->type == TCOPROC) {
 		e->savefd = (short *) alloc(sizeofN(short, NUFILE), ATEMP);
@@ -320,36 +326,20 @@ execute(t, flags)
 		}
 		rv = 0; /* in case of a continue */
 		if (t->type == TFOR) {
-			struct tbl *vq;
-
 			while (*ap != NULL) {
-				vq = global(t->str);
-				if (vq->flag & RDONLY)
-					errorf("%s is read only", t->str);
-				/* SETSTR: fail (put readonly check in setstr,
-				 * controlled by a flag?)
-				 */
-				setstr(vq, *ap++);
+				setstr(global(t->str), *ap++, KSH_UNWIND_ERROR);
 				rv = execute(t->left, flags & XERROK);
 			}
 		}
 #ifdef KSH
 		else { /* TSELECT */
-			struct tbl *vq;
-
 			for (;;) {
 				if (!(cp = do_selectargs(ap, is_first))) {
 					rv = 1;
 					break;
 				}
 				is_first = FALSE;
-				vq = global(t->str);
-				if (vq->flag & RDONLY)
-					errorf("%s is read only", t->str);
-				/* SETSTR: fail (put readonly check in setstr,
-				 * controlled by a flag?)
-				 */
-				setstr(vq, cp);
+				setstr(global(t->str), cp, KSH_UNWIND_ERROR);
 				rv = execute(t->left, flags & XERROK);
 			}
 		}
@@ -409,7 +399,10 @@ execute(t, flags)
 		break;
 
 	  case TTIME:
-		rv = timex(t, flags);
+		/* Clear XEXEC so nested execute() call doesn't exit
+		 * (allows "ls -l | time grep foo").
+		 */
+		rv = timex(t, flags & ~XEXEC);
 		break;
 
 	  case TEXEC:		/* an eval'd TCOM */
@@ -478,8 +471,9 @@ comexec(t, tp, ap, flags)
 	if (!Flag(FSH) && Flag(FTALKING) && *(lastp = ap)) {
 		while (*++lastp)
 			;
-		/* SETSTR: can't fail */
-		setstr(typeset("_", LOCAL, 0, INTEGER, 0), *--lastp);
+		/* setstr() can't fail here */
+		setstr(typeset("_", LOCAL, 0, INTEGER, 0), *--lastp,
+		       KSH_RETURN_ERROR);
 	}
 #endif /* KSH */
 
@@ -724,8 +718,9 @@ comexec(t, tp, ap, flags)
 #ifdef KSH
 		if (!Flag(FSH)) {
 			/* set $_ to program's full path */
-			/* SETSTR: can't fail */
-			setstr(typeset("_", LOCAL|EXPORT, 0, 0, 0), tp->val.s);
+			/* setstr() can't fail here */
+			setstr(typeset("_", LOCAL|EXPORT, 0, INTEGER, 0),
+			       tp->val.s, KSH_RETURN_ERROR);
 		}
 #endif /* KSH */
 
@@ -886,8 +881,8 @@ shcomexec(wp)
 struct tbl *
 findfunc(name, h, create)
 	const char *name;
-	unsigned int	h;
-	int	create;
+	unsigned int h;
+	int create;
 {
 	struct block *l;
 	struct tbl *tp = (struct tbl *) 0;
@@ -948,7 +943,7 @@ define(name, t)
 	tp->val.t = tcopy(t->left, tp->areap);
 	tp->flag |= (ISSET|ALLOC);
 	if (t->u.ksh_func)
-	    tp->flag |= FKSH;
+		tp->flag |= FKSH;
 
 	return 0;
 }
@@ -1329,6 +1324,9 @@ iosetup(iop, tp)
 
 	  case IOWRITE:
 		flags = O_WRONLY | O_CREAT | O_TRUNC;
+		/* The stat() is here to allow redirections to
+		 * things like /dev/null without error.
+		 */
 		if (Flag(FNOCLOBBER) && !(iop->flag & IOCLOB)
 		    && (stat(cp, &statb) < 0 || S_ISREG(statb.st_mode)))
 			flags |= O_EXCL;
@@ -1341,7 +1339,7 @@ iosetup(iop, tp)
 	  case IOHERE:
 		do_open = 0;
 		/* herein() returns -2 if error has been printed */
-		u = herein(cp, iop->flag & IOEVAL);
+		u = herein(iop->heredoc, iop->flag & IOEVAL);
 		/* cp may have wrong name */
 		break;
 
@@ -1385,13 +1383,19 @@ iosetup(iop, tp)
 		return -1;
 	}
 	/* Do not save if it has already been redirected (i.e. "cat >x >y"). */
-	if (e->savefd[iop->unit] == 0)
-		/* c_exec() assumes e->savefd[fd] set for any redirections.
-		 * Ask savefd() not to close iop->unit - allows error messages
-		 * to be seen if iop->unit is 2; also means we can't lose
-		 * the fd (eg, both dup2 below and dup2 in restfd() failing).
-		 */
-		e->savefd[iop->unit] = savefd(iop->unit, 1);
+	if (e->savefd[iop->unit] == 0) {
+		/* If these are the same, it means unit was previously closed */
+		if (u == iop->unit)
+			e->savefd[iop->unit] = -1;
+		else
+			/* c_exec() assumes e->savefd[fd] set for any
+			 * redirections.  Ask savefd() not to close iop->unit;
+			 * this allows error messages to be seen if iop->unit
+			 * is 2; also means we can't lose the fd (eg, both
+			 * dup2 below and dup2 in restfd() failing).
+			 */
+			e->savefd[iop->unit] = savefd(iop->unit, 1);
+	}
 
 	if (do_close)
 		close(iop->unit);
@@ -1429,67 +1433,64 @@ iosetup(iop, tp)
  * if unquoted here, expand here temp file into second temp file.
  */
 static int
-herein(hname, sub)
-	char *hname;
+herein(content, sub)
+	const char *content;
 	int sub;
 {
-	int fd;
+	volatile int fd = -1;
+	struct source *s, *volatile osource;
+	struct shf *volatile shf;
+	struct temp *h;
+	int i;
 
 	/* ksh -c 'cat << EOF' can cause this... */
-	if (hname == (char *) 0) {
+	if (content == (char *) 0) {
 		warningf(TRUE, "here document missing");
 		return -2; /* special to iosetup(): don't print error */
 	}
-	if (sub) {
-		char *cp;
-		struct source *s, *volatile osource = source;
-		struct temp *h;
-		struct shf *volatile shf;
-		int i;
 
-		/* must be before newenv() 'cause shf uses ATEMP */
-		shf = shf_open(hname, O_RDONLY, 0, SHF_MAPHI|SHF_CLEXEC);
-		if (shf == NULL)
-			return -1;
-		newenv(E_ERRH);
-		i = ksh_sigsetjmp(e->jbuf, 0);
-		if (i) {
-			if (shf)
-				shf_close(shf);
-			source = osource;
-			quitenv(); /* after shf_close() due to alloc */
-			return -2; /* special to iosetup(): don't print error */
-		}
-		/* set up yylex input from here file */
-		s = pushs(SFILE, ATEMP);
-		s->u.shf = shf;
+	/* Create temp file to hold content (done before newenv so temp
+	 * doesn't get removed too soon).
+	 */
+	h = maketemp(ATEMP, TT_HEREDOC_EXP, &e->temps);
+	if (!(shf = h->shf) || (fd = open(h->name, O_RDONLY, 0)) < 0) {
+		warningf(TRUE, "can't %s temporary file %s: %s",
+			!shf ? "create" : "open",
+			h->name, strerror(errno));
+		if (shf)
+			shf_close(shf);
+		return -2 /* special to iosetup(): don't print error */;
+	}
+
+	osource = source;
+	newenv(E_ERRH);
+	i = ksh_sigsetjmp(e->jbuf, 0);
+	if (i) {
+		source = osource;
+		quitenv();
+		shf_close(shf);	/* after quitenv */
+		close(fd);
+		return -2; /* special to iosetup(): don't print error */
+	}
+	if (sub) {
+		/* Do substitutions on the content of heredoc */
+		s = pushs(SSTRING, ATEMP);
+		s->start = s->str = content;
 		source = s;
 		if (yylex(ONEWORD) != LWORD)
 			internal_errorf(1, "herein: yylex");
-		shf_close(shf);
-		shf = (struct shf *) 0;
-		cp = evalstr(yylval.cp, 0);
+		source = osource;
+		shf_puts(evalstr(yylval.cp, 0), shf);
+	} else
+		shf_puts(content, shf);
 
-		/* write expanded input to another temp file */
-		h = maketemp(ATEMP);
-		h->next = e->temps; e->temps = h;
-		if (!(shf = h->shf) || (fd = open(h->name, O_RDONLY, 0)) < 0)
-			/* shf closeed by error handler */
-			errorf("%s: %s", h->name, strerror(errno));
-		shf_puts(cp, shf);
-		if (shf_close(shf) == EOF) {
-			close(fd);
-			shf = (struct shf *) 0;
-			errorf("error writing %s: %s", h->name,
-				strerror(errno));
-		}
-		shf = (struct shf *) 0;
+	quitenv();
 
-		quitenv();
-	} else {
-		fd = open(hname, O_RDONLY, 0);
-		if (fd < 0)
-			return -1;
+	if (shf_close(shf) == EOF) {
+		close(fd);
+		warningf(TRUE, "error writing %s: %s", h->name,
+			strerror(errno));
+		return -2; /* special to iosetup(): don't print error */
 	}
 
 	return fd;

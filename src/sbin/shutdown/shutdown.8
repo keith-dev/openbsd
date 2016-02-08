@@ -1,4 +1,4 @@
-.\"	$OpenBSD: shutdown.8,v 1.11 1998/12/15 01:20:45 aaron Exp $
+.\"	$OpenBSD: shutdown.8,v 1.15 1999/10/07 06:01:59 ericj Exp $
 .\"	$NetBSD: shutdown.8,v 1.6 1995/03/18 15:01:07 cgd Exp $
 .\"
 .\" Copyright (c) 1988, 1991, 1993
@@ -36,13 +36,13 @@
 .\"
 .Dd June 5, 1993
 .Dt SHUTDOWN 8
-.Os BSD 4
+.Os
 .Sh NAME
 .Nm shutdown
 .Nd "close down the system at a given time"
 .Sh SYNOPSIS
 .Nm shutdown
-.Op Fl 
+.Op Fl
 .Op Fl dfhkrnp
 .Ar time
 .Op Ar warning-message ...
@@ -83,7 +83,7 @@ system multi-user with logins disabled (for all but super-user).
 Prevent the normal
 .Xr sync 2
 before stopping.
-.It Fl r 
+.It Fl r
 .Nm
 execs
 .Xr reboot 8
@@ -95,7 +95,7 @@ The
 flag is passed on to
 .Xr halt 8 ,
 causing machines which support automatic power down to do so after halting.
-(Currently supported on some i386 and sparc platforms.)
+(Currently supported on some i386, sparc, and mac68k platforms.)
 .It Ar time
 .Ar time
 is the time at which
@@ -162,7 +162,6 @@ not to run fsck when rebooting
 .Sh SEE ALSO
 .Xr login 1 ,
 .Xr wall 1 ,
-.Xr fastboot 8 ,
 .Xr halt 8 ,
 .Xr reboot 8
 .Sh BACKWARD COMPATIBILITY

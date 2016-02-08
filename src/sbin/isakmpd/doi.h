@@ -1,8 +1,8 @@
-/*	$OpenBSD: doi.h,v 1.4 1999/02/26 03:36:34 niklas Exp $	*/
-/*	$EOM: doi.h,v 1.24 1999/02/25 10:21:29 niklas Exp $	*/
+/*	$OpenBSD: doi.h,v 1.7 1999/05/02 19:20:31 niklas Exp $	*/
+/*	$EOM: doi.h,v 1.27 1999/05/02 12:48:54 niklas Exp $	*/
 
 /*
- * Copyright (c) 1998 Niklas Hallqvist.  All rights reserved.
+ * Copyright (c) 1998, 1999 Niklas Hallqvist.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -43,6 +43,7 @@
 struct exchange;
 struct keystate;
 struct message;
+struct payload;
 struct proto;
 struct sa;
 
@@ -69,6 +70,10 @@ struct doi {
   void (*free_sa_data) (void *);
   struct keystate *(*get_keystate) (struct message *);
   u_int8_t *(*get_spi) (size_t *, u_int8_t, struct message *);
+  int (*handle_leftover_payload) (struct message *, u_int8_t,
+				  struct payload *);
+  int (*informational_post_hook) (struct message *);
+  int (*informational_pre_hook) (struct message *);
   int (*is_attribute_incompatible) (u_int16_t, u_int8_t *, u_int16_t, void *);
   void (*proto_init) (struct proto *, char *);
   void (*setup_situation) (u_int8_t *);

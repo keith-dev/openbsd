@@ -4,6 +4,7 @@
 ./etc/afs
 ./etc/afs/CellServDB
 ./etc/afs/README
+./etc/afs/SuidCells
 ./etc/afs/ThisCell
 ./etc/afs/afsd.conf
 ./etc/aliases
@@ -45,6 +46,7 @@
 ./etc/lynx.cfg
 ./etc/magic
 ./etc/mail.rc
+./etc/mailer.conf
 ./etc/man.conf
 ./etc/master.passwd
 ./etc/monthly
@@ -85,6 +87,7 @@
 ./etc/rc.conf
 ./etc/rc.local
 ./etc/rc.securelevel
+./etc/rc.shutdown
 ./etc/remote
 ./etc/rmt
 ./etc/rpc
@@ -96,10 +99,12 @@
 ./etc/sliphome/slip.hosts
 ./etc/sliphome/slip.login
 ./etc/spwd.db
+./etc/ssh_config
+./etc/sshd_config
 ./etc/ssl
-./etc/ssl/private
 ./etc/ssl/lib
-./etc/ssl/lib/ssleay.cnf
+./etc/ssl/openssl.cnf
+./etc/ssl/private
 ./etc/sysctl.conf
 ./etc/syslog.conf
 ./etc/ttys

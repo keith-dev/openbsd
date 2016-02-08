@@ -56,29 +56,24 @@
  * [including the GNU Public Licence.]
  */
 
-#include "idea.h"
+#include <openssl/idea.h>
 #include "idea_lcl.h"
 
-void idea_cbc_encrypt(in, out, length, ks, iv, encrypt)
-unsigned char *in;
-unsigned char *out;
-long length;
-IDEA_KEY_SCHEDULE *ks;
-unsigned char *iv;
-int encrypt;
+void idea_cbc_encrypt(unsigned char *in, unsigned char *out, long length,
+	     IDEA_KEY_SCHEDULE *ks, unsigned char *iv, int encrypt)
 	{
 	  /* body of routine replaced for OpenBSD due to IDEA patent */
 
 	  /* this sucks, but since these routines don't have a failure mode
 	   * then we have to do this, which "fails" but guarantees we
 	   * don't give anything away if we are accidentally compiled in.
+	   * this shouldn't matter much anyway, since we always compile
+	   * with NO_IDEA - there are plenty of good (free) alternatives.
 	   */
 	  memset (out, 0, length);  
 	}
 
-void idea_encrypt(d,key)
-unsigned long *d;
-IDEA_KEY_SCHEDULE *key;
+void idea_encrypt(unsigned long *d, IDEA_KEY_SCHEDULE *key)
 	{
 	  /* routine body removed for OpenBSD due to IDEA patent. */
 	}

@@ -1,4 +1,4 @@
-.\"	$OpenBSD: vacation.1,v 1.5 1999/02/12 05:51:39 marc Exp $
+.\"	$OpenBSD: vacation.1,v 1.12 1999/10/17 20:24:33 aaron Exp $
 .\"	$NetBSD: vacation.1,v 1.5 1995/08/31 21:57:08 jtc Exp $
 .\"
 .\" Copyright (c) 1985, 1987, 1990, 1991, 1993
@@ -36,7 +36,7 @@
 .\"
 .Dd April 28, 1995
 .Dt VACATION 1
-.Os BSD 4.3
+.Os
 .Sh NAME
 .Nm vacation
 .Nd return ``I am not here'' indication
@@ -58,13 +58,14 @@ file might have:
 .Bd -literal -offset indent
 \eeric, "|/usr/bin/vacation -a allman eric"
 .Ed
+.Pp
 which would send messages to you (assuming your login name was eric) and
 reply to any messages for
 .Dq eric
 or
 .Dq allman .
 .Pp
-Available options:
+The options are as follows:
 .Bl -tag -width Ds
 .It Fl a Ar alias
 Handle messages for
@@ -113,7 +114,8 @@ or
 .Dq MAILER-DAEMON
 will be replied to (where these strings are
 case insensitive) nor is a notification sent if a
-.Dq Precedence: bulk
+.Dq Precedence: bulk ,
+.Dq Precedence: list ,
 or
 .Dq Precedence: junk
 line is included in the mail headers.
@@ -141,6 +143,14 @@ please contact Keith Bostic <bostic@CS.Berkeley.EDU>.
 --eric
 .Ed
 .Pp
+Any occurrence of the string
+.Li $SUBJECT
+in
+.Pa .vacation.msg
+will be replaced by the subject of the message that triggered the
+.Nm vacation
+program.
+.Pp
 .Nm vacation
 reads the incoming message from standard input, checking the message
 headers for either the
@@ -166,8 +176,8 @@ database file
 message to send
 .El
 .Sh SEE ALSO
-.Xr sendmail 8 ,
-.Xr syslog 3
+.Xr syslog 3 ,
+.Xr sendmail 8
 .Sh HISTORY
 The
 .Nm vacation

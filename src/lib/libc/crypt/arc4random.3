@@ -1,4 +1,4 @@
-.\" $OpenBSD: arc4random.3,v 1.4 1998/09/07 16:44:34 aaron Exp $
+.\" $OpenBSD: arc4random.3,v 1.11 1999/07/09 13:35:15 aaron Exp $
 .\" Copyright 1997 Niels Provos <provos@physnet.uni-hamburg.de>
 .\" All rights reserved.
 .\"
@@ -31,12 +31,12 @@
 .\"
 .Dd April 15, 1997
 .Dt ARC4RANDOM 3
-.Os "OpenBSD 2.0"
+.Os
 .Sh NAME
 .Nm arc4random,
 .Nm arc4random_stir,
 .Nm arc4random_addrandom
-.Nd arc4 random number generator.
+.Nd arc4 random number generator
 .Sh SYNOPSIS
 .Fd #include <stdlib.h>
 .Ft u_int32_t
@@ -47,37 +47,39 @@
 .Fn arc4random_addrandom "u_char *dat" "int datlen"
 .Sh DESCRIPTION
 The
-.Fn arc4random 
+.Fn arc4random
 function uses the key stream generator employed by the
 arc4 cipher, which uses 8*8 8 bit S-Boxes. The S-Boxes
-can be in about 
-.if t 2\u\s71700\s10\d
-.if n (2**1700)
-states.
+can be in about (2**1700) states.
 .Pp
 The
 .Fn arc4random_stir
-function reads data from 
+function reads data from
 .Pa /dev/arandom
-and uses it to permutate the S-Boxes via
+and uses it to permute the S-Boxes via
 .Fn arc4random_addrandom .
 .Pp
-There is no need to call 
+There is no need to call
 .Fn arc4random_stir
 before using
 .Fn arc4random ,
 since
 .Fn arc4random
-automatically initalizes itself.
+automatically initializes itself.
 .Sh SEE ALSO
-.Xr rand48 3 ,
 .Xr rand 3 ,
+.Xr rand48 3 ,
 .Xr random 3
 .Sh HISTORY
-.Pa RC4 
-has been designed by RSA Data Security, Inc. It was posted anonymously
-to the USENET and was confirmed to be equivalent by several sources who
-had access to the original cipher. Since 
+An algorithm call
 .Pa RC4
-used to be a trade secret, the cipher is now referred to as 
+was designed by RSA Data Security, Inc.  It was considered a trade secret,
+but not trademarked.
+A clone of this was posted anonymously to the USENET and was confirmed to
+be equivalent by several sources who had access to the original cipher.
+Because of the trade secret situation, RSA Data Security, Inc. can do
+nothing about the situation.
+Since
+.Pa RC4
+used to be a trade secret, the cipher is now referred to as
 .Pa ARC4 .

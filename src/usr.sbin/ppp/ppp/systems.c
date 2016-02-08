@@ -17,7 +17,7 @@
  * IMPLIED WARRANTIES, INCLUDING, WITHOUT LIMITATION, THE IMPLIED
  * WARRANTIES OF MERCHANTIBILITY AND FITNESS FOR A PARTICULAR PURPOSE.
  *
- * $Id: systems.c,v 1.6 1999/03/09 20:37:39 brian Exp $
+ * $Id: systems.c,v 1.9 1999/05/24 09:05:39 brian Exp $
  *
  *  TODO:
  */
@@ -28,6 +28,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <termios.h>
 #include <unistd.h>
 
 #include "defs.h"
@@ -52,7 +53,7 @@ OpenSecret(const char *file)
 }
 
 void
-CloseSecret(FILE * fp)
+CloseSecret(FILE *fp)
 {
   fclose(fp);
 }
@@ -328,10 +329,12 @@ ReadSystem(struct bundle *bundle, const char *name, const char *file,
             continue;
 
           if (!indent) {    /* start of next section */
-            wp = strchr(cp, ':');
-            if ((how == SYSTEM_EXEC) && (wp == NULL || wp[1] != '\0'))
-	      log_Printf(LogWARN, "Unindented command (%s line %d) - ignored\n",
-		         filename, linenum);
+            if (*cp != '!') {
+              wp = strchr(cp, ':');
+              if ((how == SYSTEM_EXEC) && (wp == NULL || wp[1] != '\0'))
+	        log_Printf(LogWARN, "Unindented command (%s line %d) -"
+                           " ignored\n", filename, linenum);
+            }
             break;
           }
 

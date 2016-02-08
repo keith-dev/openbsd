@@ -1,8 +1,8 @@
-/*	$OpenBSD: ui.c,v 1.6 1999/03/24 15:00:17 niklas Exp $	*/
-/*	$EOM: ui.c,v 1.28 1999/03/08 00:39:28 niklas Exp $	*/
+/*	$OpenBSD: ui.c,v 1.11 1999/08/26 22:29:57 niklas Exp $	*/
+/*	$EOM: ui.c,v 1.36 1999/08/20 12:54:51 ho Exp $	*/
 
 /*
- * Copyright (c) 1998 Niklas Hallqvist.  All rights reserved.
+ * Copyright (c) 1998, 1999 Niklas Hallqvist.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -40,15 +40,18 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <errno.h>
 
 #include "sysdep.h"
 
 #include "conf.h"
+#include "connection.h"
 #include "doi.h"
 #include "exchange.h"
 #include "isakmp.h"
 #include "log.h"
 #include "sa.h"
+#include "timer.h"
 #include "transport.h"
 #include "ui.h"
 #include "util.h"
@@ -62,11 +65,21 @@ int ui_socket;
 void
 ui_init ()
 {
+  struct stat st;
+
   /* -f- means control messages comes in via stdin.  */
   if (strcmp (ui_fifo, "-") == 0)
     ui_socket = 0;
   else
     {
+      /* Don't overwrite a file, i.e '-f /etc/isakmpd/isakmpd.conf'.  */
+      if (lstat (ui_fifo, &st) == 0)
+	if ((st.st_mode & S_IFMT) == S_IFREG)
+	  {
+	    errno = EEXIST;
+	    log_fatal ("could not create FIFO \"%s\"", ui_fifo);
+	  }
+
       /* No need to know about errors.  */
       unlink (ui_fifo);
       if (mkfifo (ui_fifo, 0600) == -1)
@@ -79,7 +92,10 @@ ui_init ()
     }
 }
 
-/* New style connect.  */
+/*
+ * Setup a phase 2 connection.
+ * XXX Maybe phase 1 works too, but teardown won't work then, fix?
+ */
 static void
 ui_connect (char *cmd)
 {
@@ -90,7 +106,70 @@ ui_connect (char *cmd)
       log_print ("ui_connect: command \"%s\" malformed", cmd);
       return;
     }
-  exchange_establish (name, 0, 0);
+  connection_setup (name);
+}
+
+/* Tear down a phase 2 connection.  */
+static void
+ui_teardown (char *cmd)
+{
+  char name[81];
+  struct sa *sa;
+
+  if (sscanf (cmd, "t %80s", name) != 1)
+    {
+      log_print ("ui_teardown: command \"%s\" malformed", cmd);
+      return;
+    }
+  connection_teardown (name);
+  while ((sa = sa_lookup_by_name (name, 2)) != 0)
+    sa_delete (sa, 1);
+}
+
+/*
+ * Call the configuration API.
+ * XXX Error handling!  How to do multi-line transactions?  Too short arbitrary
+ * limit on the parameters?
+ */
+static void
+ui_config (char *cmd)
+{
+  char subcmd[81], section[81], tag[81], value[81];
+  int override, trans = 0;
+
+  if (sscanf (cmd, "C %80s", subcmd) != 1)
+    goto fail;
+
+  trans = conf_begin ();
+  if (strcasecmp (subcmd, "set") == 0)
+    {
+      if (sscanf (cmd, "C %*s [%80[^]]]:%80[^=]=%80s %d", section, tag, value,
+		  &override) != 4)
+	goto fail;
+      conf_set (trans, section, tag, value, override);
+    }
+  else if (strcasecmp (cmd, "rm") == 0)
+    {
+      if (sscanf (cmd, "C %*s [%80[^]]]:%80s", section, tag) != 2)
+	goto fail;
+      conf_remove (trans, section, tag);
+    }
+  else if (strcasecmp (cmd, "rms") == 0)
+    {
+      if (sscanf (cmd, "C %*s [%80[^]]]", section) != 1)
+	goto fail;
+      conf_remove_section (trans, section);
+    }
+  else
+    goto fail;
+
+  conf_end (trans, 1);
+  return;
+
+    fail:
+  if (trans)
+    conf_end (trans, 0);
+  log_print ("ui_config: command \"%s\" malformed", cmd);
 }
 
 static void
@@ -147,8 +226,12 @@ ui_debug (char *cmd)
 void
 ui_report (char *cmd)
 {
+  /* XXX Skip 'cmd' as arg? */
   sa_report ();
   exchange_report ();
+  transport_report ();
+  connection_report ();
+  timer_report ();
 }
 
 /*
@@ -165,6 +248,10 @@ ui_handle_command (char *line)
       ui_connect (line);
       break;
 
+    case 'C':
+      ui_config (line);
+      break;
+
     case 'd':
       ui_delete (line);
       break;
@@ -175,6 +262,10 @@ ui_handle_command (char *line)
 
     case 'r':
       ui_report (line);
+      break;
+
+    case 't':
+      ui_teardown (line);
       break;
 
     default:

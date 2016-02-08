@@ -15,7 +15,7 @@
  * IMPLIED WARRANTIES, INCLUDING, WITHOUT LIMITATION, THE IMPLIED
  * WARRANTIES OF MERCHANTIBILITY AND FITNESS FOR A PARTICULAR PURPOSE.
  *
- * $Id: chap.h,v 1.5 1999/02/18 19:46:19 brian Exp $
+ * $Id: chap.h,v 1.7 1999/05/08 11:06:34 brian Exp $
  *
  *	TODO:
  */
@@ -39,7 +39,10 @@ struct chap {
     } buf;
   } child;
   struct authinfo auth;
-  u_char challenge[CHAPCHALLENGELEN + AUTHLEN];
+  struct {
+    u_char local[CHAPCHALLENGELEN + AUTHLEN];	/* I invented this one */
+    u_char peer[CHAPCHALLENGELEN + AUTHLEN];	/* Peer gave us this one */
+  } challenge;
 #ifdef HAVE_DES
   unsigned NTRespSent : 1;		/* Our last response */
   int peertries;
@@ -52,4 +55,4 @@ struct chap {
 
 extern void chap_Init(struct chap *, struct physical *);
 extern void chap_ReInit(struct chap *);
-extern void chap_Input(struct physical *, struct mbuf *);
+extern struct mbuf *chap_Input(struct bundle *, struct link *, struct mbuf *);

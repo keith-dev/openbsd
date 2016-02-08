@@ -3,7 +3,7 @@ static char yysccsid[] = "@(#)yaccpar 1.8 (Berkeley) 01/20/91";
 #endif
 #define YYBYACC 1
 #line 2 "a2p.y"
-/* $RCSfile: a2p.c,v $$Revision: 1.2 $$Date: 1997/11/30 08:06:59 $
+/* $RCSfile: a2p.c,v $$Revision: 1.3 $$Date: 1999/04/29 22:52:56 $
  *
  *    Copyright (c) 1991-1997, Larry Wall
  *
@@ -11,8 +11,8 @@ static char yysccsid[] = "@(#)yaccpar 1.8 (Berkeley) 01/20/91";
  *    License or the Artistic License, as specified in the README file.
  *
  * $Log: a2p.c,v $
- * Revision 1.2  1997/11/30 08:06:59  millert
- * perl 5.004_04
+ * Revision 1.3  1999/04/29 22:52:56  millert
+ * perl5.005_03 (stock)
  *
  */
 
@@ -2017,7 +2017,9 @@ yyparse()
     register int yym, yyn, yystate;
 #if YYDEBUG
     register char *yys;
+#ifndef __cplusplus
     extern char *getenv();
+#endif
 
     if (yys = getenv("YYDEBUG"))
     {

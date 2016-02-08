@@ -1,4 +1,4 @@
-/*	$OpenBSD: wump.c,v 1.8 1998/08/19 07:42:27 pjanzen Exp $	*/
+/*	$OpenBSD: wump.c,v 1.12 1999/09/25 15:52:21 pjanzen Exp $	*/
 
 /*
  * Copyright (c) 1989, 1993
@@ -47,7 +47,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)wump.c	8.1 (Berkeley) 5/31/93";
 #else
-static char rcsid[] = "$OpenBSD: wump.c,v 1.8 1998/08/19 07:42:27 pjanzen Exp $";
+static char rcsid[] = "$OpenBSD: wump.c,v 1.12 1999/09/25 15:52:21 pjanzen Exp $";
 #endif
 #endif /* not lint */
 
@@ -58,10 +58,14 @@ static char rcsid[] = "$OpenBSD: wump.c,v 1.8 1998/08/19 07:42:27 pjanzen Exp $"
  */
 
 #include <sys/types.h>
-#include <sys/file.h>
+#include <sys/wait.h>
+#include <err.h>
+#include <fcntl.h>
+#include <paths.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 #include "pathnames.h"
 
@@ -255,8 +259,10 @@ quiver holds %d custom super anti-evil Wumpus arrows.  Good luck.\n",
 		} while (!take_action());
 		(void)fpurge(stdin); 
 
-		if (!getans("\nCare to play another game? (y-n) "))
+		if (!getans("\nCare to play another game? (y-n) ")) {
+			(void)printf("\n");
 			exit(0);
+		}
 		clear_things_in_cave();
 		if (!getans("In the same cave? (y-n) "))
 			cave_init();
@@ -267,7 +273,7 @@ quiver holds %d custom super anti-evil Wumpus arrows.  Good luck.\n",
 void
 display_room_stats()
 {
-	register int i;
+	int i;
 
 	/*
 	 * Routine will explain what's going on with the current room, as well
@@ -550,9 +556,8 @@ into room %d!\n", arrow_location, next, cave[arrow_location].tunnel[link]);
 void
 cave_init()
 {
-	register int i, j, k, link;
-	int delta, int_compare();
-	time_t time();
+	int i, j, k, link;
+	int delta;
 
 	/*
 	 * This does most of the interesting work in this program actually!
@@ -639,7 +644,7 @@ try_again:		link = (random() % room_num) + 1;
 void
 clear_things_in_cave()
 {
-	register int i;
+	int i;
 
 	/*
 	 * remove bats and pits from the current cave in preparation for us
@@ -652,7 +657,7 @@ clear_things_in_cave()
 void
 initialize_things_in_cave()
 {
-	register int i, loc;
+	int i, loc;
 
 	/* place some bats, pits, the wumpus, and the player. */
 	for (i = 0; i < bat_num; ++i) {
@@ -725,7 +730,7 @@ getans(prompt)
 int
 bats_nearby()
 { 
-	register int i;
+	int i;
 
 	/* check for bats in the immediate vicinity */
 	for (i = 0; i < link_num; ++i)
@@ -737,7 +742,7 @@ bats_nearby()
 int
 pit_nearby()
 { 
-	register int i;
+	int i;
 
 	/* check for pits in the immediate vicinity */
 	for (i = 0; i < link_num; ++i)
@@ -749,7 +754,7 @@ pit_nearby()
 int
 wump_nearby()
 {
-	register int i, j;
+	int i, j;
 
 	/* check for a wumpus within TWO caves of where we are */
 	for (i = 0; i < link_num; ++i) {
@@ -777,13 +782,16 @@ int
 int_compare(a, b)
 	const void *a, *b;
 {
-	return(*(int *)a < *(int *)b ? -1 : 1);
+	return(*(const int *)a < *(const int *)b ? -1 : 1);
 }
 
 void
 instructions()
 {
-	char buf[120], *p, *getenv();
+	const char *pager;
+	pid_t pid;
+	int status;
+	int fd;
 
 	/*
 	 * read the instructions file, if needed, and show the user how to
@@ -792,19 +800,34 @@ instructions()
 	if (!getans("Instructions? (y-n) "))
 		return;
 
-	if (access(_PATH_WUMPINFO, R_OK)) {
+	if ((fd = open(_PATH_WUMPINFO, O_RDONLY)) == -1) {
 		(void)printf(
 "Sorry, but the instruction file seems to have disappeared in a\n\
 puff of greasy black smoke! (poof)\n");
 		return;
 	}
 
-	if (!(p = getenv("PAGER")) ||
-	    strlen(p) > sizeof(buf) + strlen(_PATH_WUMPINFO) + 5)
-		p = _PATH_PAGER;
-
-	(void)sprintf(buf, "%s %s", p, _PATH_WUMPINFO);
-	(void)system(buf);
+	if (!isatty(1))
+		pager = "/bin/cat";
+	else {
+		if (!(pager = getenv("PAGER")) || (*pager == 0))
+			pager = _PATH_PAGER;
+	}
+	switch (pid = fork()) {
+	case 0: /* child */
+		if (dup2(fd, 0) == -1)
+			err(1, "dup2");
+		(void)execl(_PATH_BSHELL, "sh", "-c", pager, NULL);
+		err(1, "exec sh -c %s", pager);
+		/* NOT REACHED */
+	case -1:
+		err(1, "fork");
+		/* NOT REACHED */
+	default:
+		(void)waitpid(pid, &status, 0);
+		close(fd);
+		break;
+	}
 }
 
 void

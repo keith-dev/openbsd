@@ -1,4 +1,4 @@
-.\"	$OpenBSD: MAKEDEV.8,v 1.5 1997/07/27 18:17:57 downsj Exp $
+.\"	$OpenBSD: MAKEDEV.8,v 1.12 1999/09/23 04:12:07 alex Exp $
 .\"
 .\" Copyright (c) 1997, Jason Downs.  All rights reserved.
 .\"
@@ -65,7 +65,7 @@
 .\"
 .Dd July 27, 1997
 .Dt MAKEDEV 8
-.Os OpenBSD
+.Os
 .Sh NAME
 .Nm MAKEDEV
 .Nd create system and device special files
@@ -111,8 +111,6 @@ pccons console or pcvt screen 0
 pcvt console screens
 .It Ar tty#
 standard PC COM ports
-.It Ar acd#
-ATAPI CD-ROM drives
 .It Ar cd#
 SCSI CD-ROM drives
 .It Ar mcd#
@@ -138,7 +136,7 @@ pseudo-disks
 .Dq ramdisk
 pseudo-disks
 .It Ar ccd#
-contatenated disk devices
+concatenated disk devices
 .It Ar mms#
 Microsoft bus mouse
 .It Ar lms#
@@ -172,6 +170,10 @@ inkernel random number generator
 devices
 .It Ar ss#
 SCSI scanners
+.It Ar bktr#
+Brooktree 848 driver
+.It Ar wdt#
+watchdog timer
 .El
 .Pp
 .Sh FILES
@@ -180,7 +182,7 @@ SCSI scanners
 The special file directory.
 .El
 .Sh SEE ALSO
-.Xr mknod 8 , 
 .Xr intro 4 ,
 .Xr config 8 ,
-.Xr special 8 .
+.Xr mknod 8 ,
+.Xr special 8

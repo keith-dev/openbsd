@@ -17,7 +17,7 @@
 
 /* config.h - configurables for Vixie Cron
  *
- * $Id: config.h,v 1.2 1998/03/30 06:59:41 deraadt Exp $
+ * $Id: config.h,v 1.4 1999/08/29 08:51:55 millert Exp $
  */
 
 #if !defined(_PATH_SENDMAIL)
@@ -42,12 +42,14 @@
 			 */
 
 #define MAILCMD _PATH_SENDMAIL					/*-*/
-#define MAILARGS "%s -FCronDaemon -odi -oem -oi -or0s -t"	/*-*/
+#define MAILARGS "%s -FCronDaemon -odi -oem -oi -t"		/*-*/
 			/* -Fx	 = set full-name of sender
 			 * -odi	 = Option Deliverymode Interactive
 			 * -oem	 = Option Errors Mailedtosender
-			 * -or0s = Option Readtimeout -- don't time out
 			 * -t    = read recipient from header of message
+			 * NOTE: since this runs as the user, not root you must
+			 *       not specify any args that will cause sendmail
+			 *       to drop its suidness (see op.me for a list).
 			 */
 
 /* #define MAILCMD "/bin/mail"			-*/

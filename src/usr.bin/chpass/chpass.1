@@ -1,4 +1,4 @@
-.\"	$OpenBSD: chpass.1,v 1.9 1998/09/23 04:32:36 aaron Exp $
+.\"	$OpenBSD: chpass.1,v 1.13 1999/08/21 19:34:40 niklas Exp $
 .\"	$NetBSD: chpass.1,v 1.7 1996/05/15 21:50:40 jtc Exp $
 .\"
 .\" Copyright (c) 1988, 1990, 1993
@@ -42,11 +42,12 @@
 .Nd add or change user database information
 .Sh SYNOPSIS
 .Nm chpass
+.Op Fl ly
 .Op Fl a Ar list
 .Op Fl s Ar newshell
 .Op Ar user
 .Sh DESCRIPTION
-.Nm chpass
+.Nm
 allows editing of the user database information associated
 with
 .Ar user ,
@@ -54,6 +55,9 @@ or, by default, the current user.
 The information is formatted and supplied to an editor for changes.
 .Pp
 Only the information that the user is allowed to change is displayed.
+.Pp
+If YP in enabled change requests are first tried in the local database,
+and then in the YP database, if there was no entry to change locally.
 .Pp
 The options are as follows:
 .Bl -tag -width Ds
@@ -66,9 +70,19 @@ This argument must be a colon
 .Pq Sq \&:
 separated list of all the
 user database fields, although they may be empty.
+In YP environments this operation is not supported, only local additions
+can be done and that requires use of the
+.Fl l
+flag.
+.It Fl l
+In environments where YP is enabled, always alter local information as
+opposed to information in YP.
 .It Fl s Ar newshell
 Attempts to change the user's shell to
 .Ar newshell .
+.It Fl y
+In environments where YP is enabled, always change the YP entry, even if this
+is a modification request and there is a local entry for the specified user.
 .El
 .Pp
 Possible display items are as follows:
@@ -187,7 +201,7 @@ and
 numbers.
 .Pp
 Once the information has been verified,
-.Nm chpass
+.Nm
 uses
 .Xr pwd_mkdb 8
 to update the user database.
@@ -216,8 +230,8 @@ temporary copy of the user passwd information
 list of approved shells
 .El
 .Sh SEE ALSO
-.Xr login 1 ,
 .Xr finger 1 ,
+.Xr login 1 ,
 .Xr passwd 1 ,
 .Xr getusershell 3 ,
 .Xr passwd 5 ,
@@ -233,5 +247,5 @@ User information should (and eventually will) be stored elsewhere.
 .Sh HISTORY
 The
 .Nm
-command appeared in 
+command appeared in
 .Bx 4.3 Reno .

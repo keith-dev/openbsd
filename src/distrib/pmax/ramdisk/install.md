@@ -1,4 +1,4 @@
-#       $OpenBSD: install.md,v 1.3 1999/04/01 21:30:44 deraadt Exp $
+#       $OpenBSD: install.md,v 1.6 1999/09/03 18:55:34 deraadt Exp $
 #
 # Copyright (c) 1996 The NetBSD Foundation, Inc.
 # All rights reserved.
@@ -49,10 +49,6 @@ md_machine_arch() {
 	cat /kern/machine
 }
 
-md_copy_kernel() {
-	check_kernel
-}
-
 md_set_term() {
 	if [ ! -z "$TERM" ]; then
 		return
@@ -81,13 +77,17 @@ md_get_diskdevs() {
 
 md_get_cddevs() {
 	# XXX - how do we detect a CDROM (need to hook one up and see)
-	#md_get_msgbuf | egrep "^a?cd[0-9]+ " | cutword 1
+	#md_get_msgbuf | egrep "^cd[0-9]+ " | cutword 1
 	echo ""
 }
 
 md_get_partition_range() {
 	# return range of valid partition letters
 	echo "[a-p]"
+}
+
+md_questions() {
+	:
 }
 
 md_installboot() {

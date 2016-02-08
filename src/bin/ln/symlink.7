@@ -1,4 +1,4 @@
-.\"	$OpenBSD: symlink.7,v 1.5 1997/01/26 23:34:54 downsj Exp $
+.\"	$OpenBSD: symlink.7,v 1.9 1999/07/09 13:35:58 aaron Exp $
 .\"	$NetBSD: symlink.7,v 1.4 1996/04/25 15:44:56 mycroft Exp $
 .\"
 .\" Copyright (c) 1992, 1993, 1994
@@ -51,7 +51,7 @@ file.
 Hard links may not refer to directories and may not reference files
 on different file systems.
 A symbolic link contains the name of the file to which it is linked,
-i.e. it is a pointer to another name, and not to an underlying object.
+i.e., it is a pointer to another name, and not to an underlying object.
 For this reason, symbolic links may reference directories and may span
 file systems.
 .Pp
@@ -82,12 +82,12 @@ exceeded.)
 .Pp
 There are three separate areas that need to be discussed.
 They are as follows:
-.sp
+.Pp
 .Bl -enum -compact -offset indent
 .It
 Symbolic links used as file name arguments for system calls.
 .It
-Symbolic links specified as command line arguments to utilities that
+Symbolic links specified as command-line arguments to utilities that
 are not traversing a file tree.
 .It
 Symbolic links encountered by utilities that are traversing a file tree
@@ -133,12 +133,12 @@ system call was added later when the limitations of the new
 .Xr chown 2
 became apparent.
 .Ss Commands not traversing a file tree.
-The second area is symbolic links, specified as command line file
+The second area is symbolic links, specified as command-line file
 name arguments, to commands which are not traversing a file tree.
 .Pp
-Except as noted below, commands follow symbolic links named as command
-line arguments.
-For example, if there were a symbolic link 
+Except as noted below, commands follow symbolic links named as
+command-line arguments.
+For example, if there were a symbolic link
 .Dq Li slink
 which pointed to a file named
 .Dq Li afile ,
@@ -148,7 +148,7 @@ would display the contents of the file
 .Dq Li afile .
 .Pp
 It is important to realize that this rule includes commands which may
-optionally traverse file trees, e.g. the command
+optionally traverse file trees, e.g., the command
 .Dq Li "chown file"
 is included in this rule, while the command
 .Dq Li "chown -R file"
@@ -189,7 +189,7 @@ The
 command is also an exception to this rule.
 For compatibility with historic systems (when
 .Nm ls
-is not doing a tree walk, i.e. the
+is not doing a tree walk, i.e., the
 .Fl R
 option is not specified),
 the
@@ -208,7 +208,7 @@ options are not specified.
 option is specified,
 .Nm ls
 always follows symbolic links.
-.Nm Ls
+.Nm ls
 is the only command where the
 .Fl L
 option affects its behavior even though it is not doing a walk of
@@ -239,7 +239,7 @@ and
 .Pp
 It is important to realize that the following rules apply equally to
 symbolic links encountered during the file tree traversal and symbolic
-links listed as command line arguments.
+links listed as command-line arguments.
 .Pp
 The first rule applies to symbolic links that reference files that are
 not of type directory.
@@ -284,11 +284,11 @@ walk (where symbolic links referencing directories are followed).
 As consistently as possible, you can make commands doing a file tree
 walk follow any symbolic links named on the command line, regardless
 of the type of file they reference, by specifying the
-.Fl H 
+.Fl H
 (for
 .Dq half\-logical )
 flag.
-This flag is intended to make the command line name space look
+This flag is intended to make the command-line name space look
 like the logical name space.
 (Note, for commands that do not always do file tree traversals, the
 .Fl H

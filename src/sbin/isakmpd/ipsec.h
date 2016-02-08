@@ -1,8 +1,8 @@
-/*	$OpenBSD: ipsec.h,v 1.6 1999/03/31 14:27:37 niklas Exp $	*/
-/*	$EOM: ipsec.h,v 1.33 1999/03/31 14:19:52 niklas Exp $	*/
+/*	$OpenBSD: ipsec.h,v 1.11 1999/08/05 22:41:31 niklas Exp $	*/
+/*	$EOM: ipsec.h,v 1.38 1999/07/25 09:12:36 niklas Exp $	*/
 
 /*
- * Copyright (c) 1998 Niklas Hallqvist.  All rights reserved.
+ * Copyright (c) 1998, 1999 Niklas Hallqvist.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -54,6 +54,7 @@ struct sa;
  * for phase 2 parameters.
  */
 struct ipsec_exch {
+  u_int flags;
   struct hash *hash;
   struct ike_auth *ike_auth;
   struct group *group;
@@ -93,6 +94,8 @@ struct ipsec_exch {
   size_t id_cr_sz;
 };
 
+#define IPSEC_EXCH_FLAG_NO_ID 1
+
 struct ipsec_sa {
   /* Phase 1.  */
   u_int8_t hash;
@@ -125,6 +128,7 @@ struct ipsec_proto {
   u_int8_t *keymat[2];
 };
 
+extern u_int8_t *ipsec_add_hash_payload (struct message *msg, size_t);
 extern int ipsec_ah_keylength (struct proto *);
 extern u_int8_t *ipsec_build_id (char *, size_t *);
 extern int ipsec_decode_attribute (u_int16_t, u_int8_t *, u_int16_t, void *);
@@ -132,9 +136,12 @@ extern void ipsec_decode_transform (struct message *, struct sa *,
 				    struct proto *, u_int8_t *);
 extern int ipsec_esp_authkeylength (struct proto *);
 extern int ipsec_esp_enckeylength (struct proto *);
+extern int ipsec_fill_in_hash (struct message *msg);
 extern int ipsec_gen_g_x (struct message *);
 extern int ipsec_get_id (char *, int *, struct in_addr *, struct in_addr *);
+extern ssize_t ipsec_id_size (char *, u_int8_t *);
 extern void ipsec_init (void);
+extern int ipsec_initial_contact (struct message *msg);
 extern int ipsec_is_attribute_incompatible (u_int16_t, u_int8_t *, u_int16_t,
 					    void *);
 extern int ipsec_keymat_length (struct proto *);

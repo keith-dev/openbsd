@@ -38,7 +38,7 @@
 .\"
 .Dd June 6, 1993
 .Dt TRACEROUTE 8
-.Os BSD 4.3
+.Os
 .Sh NAME
 .Nm traceroute
 .Nd print the route packets take to network host
@@ -91,7 +91,7 @@ to the list of addresses in the IP Loose Source Record Route (LSRR)
 option.  If no gateways are specified, the LSRR option is omitted.
 .It Fl l
 Display the ttl value of the returned packet.  This is useful for
-checking for assymetric routing.
+checking for asymmetric routing.
 .It Fl m Ar max_ttl
 Set the max time-to-live (max number of hops) used in outgoing probe
 packets.  The default is 30 hops (the same default used for
@@ -134,7 +134,7 @@ Set the number of probes per ``ttl'' to
 .It Fl r
 Bypass the normal routing tables and send directly to a host on an attached
 network.
-If the host is not on a directly-attached network,
+If the host is not on a directly attached network,
 an error is returned.
 This option can be used to ping a local host through an interface
 that has no route through it (e.g., after the interface was dropped by

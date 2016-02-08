@@ -1,4 +1,4 @@
-.\"	$OpenBSD: symlink.2,v 1.6 1999/02/27 21:56:55 deraadt Exp $
+.\"	$OpenBSD: symlink.2,v 1.10 1999/06/29 14:10:26 aaron Exp $
 .\"	$NetBSD: symlink.2,v 1.7 1995/02/27 12:38:34 cgd Exp $
 .\"
 .\" Copyright (c) 1983, 1991, 1993
@@ -36,7 +36,7 @@
 .\"
 .Dd June 4, 1993
 .Dt SYMLINK 2
-.Os BSD 4.2
+.Os
 .Sh NAME
 .Nm symlink
 .Nd make symbolic link to a file
@@ -56,12 +56,14 @@ file created,
 is the string
 used in creating the symbolic link).
 Either name may be an arbitrary path name; the files need not
-be on the same file system.
+be on the same file system, and the file specified by
+.Fa name1
+need not exist at all.
 .Sh RETURN VALUES
 Upon successful completion, a zero value is returned.
 If an error occurs, the error code is stored in
 .Va errno
-and a -1 value is returned.
+and a \-1 value is returned.
 .Sh ERRORS
 The symbolic link succeeds unless:
 .Bl -tag -width Er
@@ -70,9 +72,9 @@ A component of the
 .Fa name2
 prefix is not a directory.
 .It Bq Er ENAMETOOLONG
-A component of a pathname exceeded 
+A component of a pathname exceeded
 .Dv {NAME_MAX}
-characters, or an entire path name exceeded 
+characters, or an entire path name exceeded
 .Dv {PATH_MAX}
 characters.
 .It Bq Er ENOENT
@@ -131,8 +133,8 @@ points outside the process's allocated address space.
 .Sh SEE ALSO
 .Xr ln 1 ,
 .Xr link 2 ,
-.Xr unlink 2 ,
 .Xr readlink 2 ,
+.Xr unlink 2 ,
 .Xr symlink 7
 .Sh HISTORY
 The

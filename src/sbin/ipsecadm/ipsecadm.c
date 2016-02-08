@@ -1,4 +1,4 @@
-/* $OpenBSD: ipsecadm.c,v 1.16 1999/03/29 04:52:53 provos Exp $ */
+/* $OpenBSD: ipsecadm.c,v 1.24 1999/09/07 12:35:27 ho Exp $ */
 /*
  * The authors of this code are John Ioannidis (ji@tla.org),
  * Angelos D. Keromytis (kermit@csd.uch.gr) and 
@@ -73,6 +73,7 @@
 #define GRP_SPI		0x40
 #define FLOW		0x50
 #define BINDSA		0x60
+#define FLUSH		0x70
 #define ENC_IP		0x80
 
 #define CMD_MASK	0xf0
@@ -88,14 +89,14 @@ typedef struct {
 transform xf[] = {
     {"des", SADB_EALG_DESCBC,   XF_ENC |ESP_OLD|ESP_NEW},
     {"3des", SADB_EALG_3DESCBC, XF_ENC |ESP_OLD|ESP_NEW},
-    {"blf", SADB_EALG_X_BLF,   XF_ENC |        ESP_NEW},
-    {"cast", SADB_EALG_X_CAST, XF_ENC |        ESP_NEW},
-    {"skipjack", SADB_EALG_X_SKIPJACK, XF_ENC |        ESP_NEW},
+    {"blf", SADB_X_EALG_BLF,   XF_ENC |        ESP_NEW},
+    {"cast", SADB_X_EALG_CAST, XF_ENC |        ESP_NEW},
+    {"skipjack", SADB_X_EALG_SKIPJACK, XF_ENC |        ESP_NEW},
     {"md5", SADB_AALG_MD5HMAC96,  XF_AUTH|AH_NEW|ESP_NEW},
     {"sha1", SADB_AALG_SHA1HMAC96,XF_AUTH|AH_NEW|ESP_NEW},
-    {"md5", SADB_AALG_X_MD5,  XF_AUTH|AH_OLD},
-    {"sha1", SADB_AALG_X_SHA1,XF_AUTH|AH_OLD},
-    {"rmd160", SADB_AALG_X_RIPEMD160HMAC96, XF_AUTH|AH_NEW|ESP_NEW},
+    {"md5", SADB_X_AALG_MD5,  XF_AUTH|AH_OLD},
+    {"sha1", SADB_X_AALG_SHA1,XF_AUTH|AH_OLD},
+    {"rmd160", SADB_X_AALG_RIPEMD160HMAC96, XF_AUTH|AH_NEW|ESP_NEW},
 };
 
 void
@@ -178,7 +179,7 @@ usage()
 {
     fprintf(stderr, "usage: ipsecadm [command] <modifier...>\n"
 	    "\tCommands: new esp, old esp, new ah, old ah, group, delspi, ip4\n"
-	    "\t\t  flow, bind\n"
+	    "\t\t  flow, bind, flush\n"
 	    "\tPossible modifiers:\n"
 	    "\t  -enc <alg>\t\t\t encryption algorithm\n"
 	    "\t  -auth <alg>\t\t\t authentication algorithm\n"
@@ -196,6 +197,9 @@ usage()
 	    "\t  -addr <ip> <net> <ip> <net>\t subnets for flow\n"
 	    "\t  -delete\t\t\t delete specified flow\n"
 	    "\t  -local\t\t\t also create a local flow\n"
+	    "\t  -sport\t\t\t source port for flow\n"
+	    "\t  -dport\t\t\t destination port for flow\n"
+	    "\t  -[ah|esp|oldah|oldesp|ip4]\t to flush a particular protocol\n"
 	    "\talso: dst2, spi2, proto2\n"
 	);
 }
@@ -205,8 +209,8 @@ main(int argc, char **argv)
 {
     int auth = 0, enc = 0, klen = 0, alen = 0, mode = ESP_NEW, i = 0;
     int proto = IPPROTO_ESP, proto2 = IPPROTO_AH;
-    int dport = -1, sport = -1, tproto = -1;
-    u_int32_t spi = 0, spi2 = 0;
+    int dport = -1, sport = -1, tproto = -1, setmask = 0;
+    u_int32_t spi = SPI_RESERVED_MIN, spi2 = SPI_RESERVED_MIN;
     union sockaddr_union src, dst, dst2, osrc, odst, osmask, odmask, proxy;
     int srcset = 0, dstset = 0, dst2set = 0;
     u_char *keyp = NULL, *authp = NULL;
@@ -269,7 +273,7 @@ main(int argc, char **argv)
     sa.sadb_sa_state = SADB_SASTATE_MATURE;
 
     /* Initialize */
-    sa2.sadb_sa_exttype = SADB_EXT_X_SA2;
+    sa2.sadb_sa_exttype = SADB_X_EXT_SA2;
     sa2.sadb_sa_len = sizeof(sa2) / 8;
     sa2.sadb_sa_replay = 0;
     sa2.sadb_sa_state = SADB_SASTATE_MATURE;
@@ -315,14 +319,14 @@ main(int argc, char **argv)
 	  {
 	      mode = ESP_OLD;
 	      smsg.sadb_msg_type = SADB_ADD;
-	      smsg.sadb_msg_satype = SADB_SATYPE_X_ESP_OLD;
+	      smsg.sadb_msg_satype = SADB_X_SATYPE_ESP_OLD;
 	  }
 	  else
 	    if (!strcmp(argv[2], "ah"))
 	    {
 		mode = AH_OLD;
 		smsg.sadb_msg_type = SADB_ADD;
-		smsg.sadb_msg_satype = SADB_SATYPE_X_AH_OLD;
+		smsg.sadb_msg_satype = SADB_X_SATYPE_AH_OLD;
 	    }
 	    else
 	    {
@@ -366,18 +370,28 @@ main(int argc, char **argv)
 		  i++;
 	      }
 	      else
-		if (!strcmp(argv[1], "ip4"))
+		if (!strcmp(argv[1], "flush"))
 		{
-		    mode = ENC_IP;
-		    smsg.sadb_msg_type = SADB_ADD;
-		    smsg.sadb_msg_satype = SADB_SATYPE_X_IPIP;
+		    mode = FLUSH;
+		    smsg.sadb_msg_type = SADB_FLUSH;
+		    smsg.sadb_msg_satype = SADB_SATYPE_UNSPEC;
 		    i++;
 		}
-		else
-		{
-		    fprintf(stderr, "%s: unknown command: %s", argv[0], argv[1]);
-		    exit(1);
-		}
+		else 
+		  if (!strcmp(argv[1], "ip4"))
+		  {
+		      mode = ENC_IP;
+		      smsg.sadb_msg_type = SADB_ADD;
+		      smsg.sadb_msg_satype = SADB_X_SATYPE_IPIP;
+		      i++;
+		  }
+		  else
+		  {
+		      fprintf(stderr, "%s: unknown command: %s\n", argv[0], 
+			      argv[1]);
+		      usage();
+		      exit(1);
+		  }
     
     for (i++; i < argc; i++)
     {
@@ -463,15 +477,43 @@ main(int argc, char **argv)
 
 	    if (mode & ESP_OLD)
 	      if (strlen(argv[i + 2]) == 4)
-		sa.sadb_sa_flags |= SADB_SAFLAGS_X_HALFIV;
+		sa.sadb_sa_flags |= SADB_X_SAFLAGS_HALFIV;
 
 	    i++;
 	    continue;
 	}
 
-	if (!strcmp(argv[i] + 1, "spi") && spi == 0 && (i + 1 < argc))
+	if (iscmd(mode, FLUSH) && smsg.sadb_msg_satype == SADB_SATYPE_UNSPEC)
 	{
-	    if ((spi = htonl(strtoul(argv[i + 1], NULL, 16))) == 0)
+	    if(!strcmp(argv[i] + 1, "esp"))
+	        smsg.sadb_msg_satype = SADB_SATYPE_ESP;
+	    else 
+	      if(!strcmp(argv[i] + 1, "ah"))
+	          smsg.sadb_msg_satype = SADB_SATYPE_AH;
+	      else 
+		if(!strcmp(argv[i] + 1, "oldesp"))
+		    smsg.sadb_msg_satype = SADB_X_SATYPE_ESP_OLD;
+		else 
+		  if(!strcmp(argv[i] + 1, "oldah"))
+		      smsg.sadb_msg_satype = SADB_X_SATYPE_AH_OLD;
+		  else 
+		    if(!strcmp(argv[i] + 1, "ip4"))
+		        smsg.sadb_msg_satype = SADB_X_SATYPE_IPIP;
+		    else
+		    {
+		      fprintf(stderr, "%s: invalid SA type %s\n", argv[0],
+			      argv[i + 1]);
+		      exit(1);
+		    }
+	    i++;
+	    continue;
+	}
+
+	if (!strcmp(argv[i] + 1, "spi") && spi == SPI_RESERVED_MIN &&
+	    (i + 1 < argc))
+	{
+	    spi = htonl(strtoul(argv[i + 1], NULL, 16));
+	    if (spi >= SPI_RESERVED_MIN && spi <= SPI_RESERVED_MAX)
 	    {
 		fprintf(stderr, "%s: invalid spi %s\n", argv[0], argv[i + 1]);
 		exit(1);
@@ -482,10 +524,12 @@ main(int argc, char **argv)
 	    continue;
 	}
 
-	if (!strcmp(argv[i] + 1, "spi2") && spi2 == 0 && 
+	if (!strcmp(argv[i] + 1, "spi2") && spi2 == SPI_RESERVED_MIN && 
 	    (iscmd(mode, GRP_SPI) || iscmd(mode, BINDSA)) && (i + 1 < argc))
 	{
-	    if ((spi2 = htonl(strtoul(argv[i + 1], NULL, 16))) == 0)
+	    spi2 = htonl(strtoul(argv[i + 1], NULL, 16));
+	    if (spi2 == SPI_LOCAL_USE ||
+		(spi2 >= SPI_RESERVED_MIN && spi2 <= SPI_RESERVED_MAX))
 	    {
 		fprintf(stderr, "%s: invalid spi2 %s\n", argv[0], argv[i + 1]);
 		exit(1);
@@ -511,7 +555,12 @@ main(int argc, char **argv)
 	{
 	    proxy.sin.sin_family = AF_INET;
 	    proxy.sin.sin_len = sizeof(struct sockaddr_in);
-	    proxy.sin.sin_addr.s_addr = inet_addr(argv[i + 1]);
+	    if (!inet_aton(argv[i + 1], &proxy.sin.sin_addr)) {
+		fprintf(stderr,
+		    "%s: Warning: proxy address %s is not valid\n", argv[0],
+		    argv[i + 1]);
+		exit(1);
+	    }
 	    sad3.sadb_address_exttype = SADB_EXT_ADDRESS_PROXY;
 	    sad3.sadb_address_len = 1 + sizeof(struct sockaddr_in) / 8;
 	    i++;
@@ -528,7 +577,7 @@ main(int argc, char **argv)
 
 	if (!strcmp(argv[i] + 1, "forcetunnel") && isencauth(mode))
 	{
-	    sa.sadb_sa_flags |= SADB_SAFLAGS_X_TUNNEL;
+	    sa.sadb_sa_flags |= SADB_X_SAFLAGS_TUNNEL;
 	    continue;
 	}
 
@@ -542,7 +591,7 @@ main(int argc, char **argv)
 		exit(1);
 	    }
 
-	    sa.sadb_sa_flags |= SADB_SAFLAGS_X_HALFIV;
+	    sa.sadb_sa_flags |= SADB_X_SAFLAGS_HALFIV;
 	    continue;
 	}
 
@@ -554,7 +603,7 @@ main(int argc, char **argv)
 
 	if (!strcmp(argv[i] + 1, "local") && iscmd(mode, FLOW))
 	{
-	    sa.sadb_sa_flags |= SADB_SAFLAGS_X_LOCALFLOW;
+	    sa.sadb_sa_flags |= SADB_X_SAFLAGS_LOCALFLOW;
 	    continue;
 	}
 
@@ -562,17 +611,17 @@ main(int argc, char **argv)
 	    (isencauth(mode) || mode == ENC_IP) && ( i + 2 < argc))
 	{
 	    i += 2;
-	    sa.sadb_sa_flags |= SADB_SAFLAGS_X_TUNNEL;
+	    sa.sadb_sa_flags |= SADB_X_SAFLAGS_TUNNEL;
 	    continue;
 	}
 
 	if (!strcmp(argv[i] + 1, "addr") && iscmd(mode, FLOW) &&
 	    (i + 4 < argc))
 	{
-	    sad4.sadb_address_exttype = SADB_EXT_X_SRC_FLOW;
-	    sad5.sadb_address_exttype = SADB_EXT_X_DST_FLOW;
-	    sad6.sadb_address_exttype = SADB_EXT_X_SRC_MASK;
-	    sad7.sadb_address_exttype = SADB_EXT_X_DST_MASK;
+	    sad4.sadb_address_exttype = SADB_X_EXT_SRC_FLOW;
+	    sad5.sadb_address_exttype = SADB_X_EXT_DST_FLOW;
+	    sad6.sadb_address_exttype = SADB_X_EXT_SRC_MASK;
+	    sad7.sadb_address_exttype = SADB_X_EXT_DST_MASK;
 
 	    sad4.sadb_address_len = (sizeof(sad4) +
 				     sizeof(struct sockaddr_in)) / 8;
@@ -588,11 +637,32 @@ main(int argc, char **argv)
 	    osrc.sin.sin_len = odst.sin.sin_len = sizeof(struct sockaddr_in);
 	    osmask.sin.sin_len = sizeof(struct sockaddr_in);
 	    odmask.sin.sin_len = sizeof(struct sockaddr_in);
-	    
-	    osrc.sin.sin_addr.s_addr = inet_addr(argv[i + 1]); i++;
-	    osmask.sin.sin_addr.s_addr = inet_addr(argv[i + 1]); i++;
-	    odst.sin.sin_addr.s_addr = inet_addr(argv[i + 1]); i++;
-	    odmask.sin.sin_addr.s_addr = inet_addr(argv[i + 1]); i++;
+	    setmask = 1;
+
+	    if (!inet_aton(argv[i + 1], &osrc.sin.sin_addr)) {
+		fprintf(stderr, "%s: source address %s is not valid\n", argv[0],
+		    argv[i + 1]);
+	        exit(1);
+	    }
+	    i++;
+	    if (!inet_aton(argv[i + 1], &osmask.sin.sin_addr)) {
+		fprintf(stderr, "%s: source netmask %s is not valid\n", argv[0],
+		    argv[i + 1]);
+	        exit(1);
+	    }
+	    i++;
+	    if (!inet_aton(argv[i + 1], &odst.sin.sin_addr)) {
+		fprintf(stderr, "%s: destination address %s is not valid\n", argv[0],
+		    argv[i + 1]);
+	        exit(1);
+	    }
+	    i++;
+	    if (!inet_aton(argv[i + 1], &odmask.sin.sin_addr)) {
+		fprintf(stderr, "%s: destination netmask %s is not valid\n", argv[0],
+		    argv[i + 1]);
+	        exit(1);
+	    }
+	    i++;
 	    continue;
 	}
 
@@ -623,7 +693,7 @@ main(int argc, char **argv)
 	    }
 
 	    sprotocol.sadb_protocol_len = 1;
-	    sprotocol.sadb_protocol_exttype = SADB_EXT_X_PROTOCOL;
+	    sprotocol.sadb_protocol_exttype = SADB_X_EXT_PROTOCOL;
 	    sprotocol.sadb_protocol_proto = tproto;
 	    i++;
 	    continue;
@@ -695,7 +765,7 @@ main(int argc, char **argv)
 	{
 	    sad8.sadb_address_len = (sizeof(sad8) +
 				     sizeof(struct sockaddr_in)) / 8;
-	    sad8.sadb_address_exttype = SADB_EXT_X_DST2;
+	    sad8.sadb_address_exttype = SADB_X_EXT_DST2;
 	    dst2.sin.sin_family = AF_INET;
 	    dst2.sin.sin_len = sizeof(struct sockaddr_in);
 	    dst2set = inet_aton(argv[i + 1], &dst2.sin.sin_addr) != -1 ? 1 : 0;
@@ -723,7 +793,7 @@ main(int argc, char **argv)
 		  else
 		    if (!strcasecmp(argv[i + 1], "ip4"))
 		    {
-			smsg.sadb_msg_satype = SADB_SATYPE_X_IPIP;
+			smsg.sadb_msg_satype = SADB_X_SATYPE_IPIP;
 			proto = IPPROTO_IPIP;
 		    }
 		    else
@@ -753,7 +823,7 @@ main(int argc, char **argv)
 		    smsg.sadb_msg_satype = SADB_SATYPE_AH;
 		  else
 		    if (proto == IPPROTO_IPIP)
-		      smsg.sadb_msg_satype = SADB_SATYPE_X_IPIP;
+		      smsg.sadb_msg_satype = SADB_X_SATYPE_IPIP;
 	    }
 	    
 	    i++;
@@ -761,7 +831,7 @@ main(int argc, char **argv)
 	}
 	
 	if (!strcmp(argv[i] + 1, "proto2") && 
-	    iscmd(mode, GRP_SPI) && (i + 1 < argc))
+	    (iscmd(mode, BINDSA) || iscmd(mode, GRP_SPI)) && (i + 1 < argc))
 	{
 	    if (isalpha(argv[i + 1][0]))
 	    {
@@ -779,7 +849,7 @@ main(int argc, char **argv)
 		  else
 		    if (!strcasecmp(argv[i + 1], "ip4"))
 		    {
-			sprotocol.sadb_protocol_proto = SADB_SATYPE_X_IPIP;
+			sprotocol.sadb_protocol_proto = SADB_X_SATYPE_IPIP;
 			proto2 = IPPROTO_IPIP;
 		    }
 		    else
@@ -810,20 +880,20 @@ main(int argc, char **argv)
 		    sprotocol.sadb_protocol_proto = SADB_SATYPE_AH;
 		  else
 		    if (proto2 == IPPROTO_IPIP)
-		      sprotocol.sadb_protocol_proto = SADB_SATYPE_X_IPIP;
+		      sprotocol.sadb_protocol_proto = SADB_X_SATYPE_IPIP;
 	    }
 
-	    sprotocol.sadb_protocol_exttype = SADB_EXT_X_PROTOCOL;
+	    sprotocol.sadb_protocol_exttype = SADB_X_EXT_PROTOCOL;
 	    sprotocol.sadb_protocol_len = 1;
 	    i++;
 	    continue;
 	}
 
 	if (!strcmp(argv[i] + 1, "chain") &&
-	    !(sa.sadb_sa_flags & SADB_SAFLAGS_X_CHAINDEL) &&
+	    !(sa.sadb_sa_flags & SADB_X_SAFLAGS_CHAINDEL) &&
 	    iscmd(mode, DEL_SPI))
 	{
-	    sa.sadb_sa_flags |= SADB_SAFLAGS_X_CHAINDEL;
+	    sa.sadb_sa_flags |= SADB_X_SAFLAGS_CHAINDEL;
 	    continue;
 	}
 
@@ -860,13 +930,14 @@ main(int argc, char **argv)
 	exit(1);
     }
 
-    if (spi == 0)
+    if (spi == SPI_RESERVED_MIN && !iscmd(mode, FLUSH))
     {
 	fprintf(stderr, "%s: no SPI specified\n", argv[0]);
 	exit(1);
     }
 
-    if ((iscmd(mode, GRP_SPI) || iscmd(mode, BINDSA)) && spi2 == 0)
+    if ((iscmd(mode, GRP_SPI) || iscmd(mode, BINDSA)) &&
+	spi2 == SPI_RESERVED_MIN)
     {
 	fprintf(stderr, "%s: no SPI2 specified\n", argv[0]);
 	exit(1);
@@ -896,17 +967,14 @@ main(int argc, char **argv)
 	exit(1);
     }
 
-    if (!dstset)
+    if (!dstset && !iscmd(mode, FLUSH))
     {
 	fprintf(stderr, "%s: no destination address for the SA specified\n", 
 		argv[0]);
 	exit(1);
     } 
 
-    if (iscmd(mode, FLOW) && (odst.sin.sin_addr.s_addr == 0 &&
-			      odmask.sin.sin_addr.s_addr == 0 && 
-			      osrc.sin.sin_addr.s_addr == 0 &&
-			      osmask.sin.sin_addr.s_addr == 0))
+    if (iscmd(mode, FLOW) && !setmask)
     {
 	fprintf(stderr,	"%s: no subnets for flow specified\n", argv[0]);
 	exit(1);
@@ -1148,10 +1216,14 @@ main(int argc, char **argv)
 		 iov[cnt++].iov_len = sizeof(struct sockaddr_in);
 		 smsg.sadb_msg_len += sad7.sadb_address_len;
 		 break;
+
+	    case FLUSH:
+		 /* No more work needed. */
+		 break;
+	  
 	}
     }
 
     xf_set(iov, cnt, smsg.sadb_msg_len * 8);
     exit (0);
 }
-

@@ -1,8 +1,8 @@
-/*	$OpenBSD: message.h,v 1.6 1999/02/26 03:48:04 niklas Exp $	*/
-/*	$EOM: message.h,v 1.39 1999/02/06 15:03:40 niklas Exp $	*/
+/*	$OpenBSD: message.h,v 1.11 1999/08/26 22:27:51 niklas Exp $	*/
+/*	$EOM: message.h,v 1.48 1999/08/18 00:44:57 angelos Exp $	*/
 
 /*
- * Copyright (c) 1998 Niklas Hallqvist.  All rights reserved.
+ * Copyright (c) 1998, 1999 Niklas Hallqvist.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -108,7 +108,7 @@ struct message {
    * A segmented buffer structure holding the messages raw contents.  On input
    * only segment 0 will be filled, holding all of the message.  On output, as
    * long as the message body is unencrypted each segment will be one payload,
-   * after encryption segment 0 will be the unencryptd header, and segment 1
+   * after encryption segment 0 will be the unencrypted header, and segment 1
    * will be the encrypted payloads, all of them.
    */
   struct iovec *iov;
@@ -147,17 +147,18 @@ struct message {
 
 /* Message flags.  */
 
-/* Don't retransmit this message, ever.  */
-#define MSG_NO_RETRANS	1
-
-/* Don't free message after sending */
-#define MSG_KEEP	2
+/*
+ * This is the last message of an exchange, meaning it should not be
+ * retransmitted other than if we see duplicates from our peer's last
+ * message.
+ */
+#define MSG_LAST	1
 
 /* The message has already been encrypted.  */
-#define MSG_ENCRYPTED	4
+#define MSG_ENCRYPTED	2
 
 /* The message is on the send queue.  */
-#define MSG_IN_TRANSIT	8
+#define MSG_IN_TRANSIT	4
 
 extern int message_add_payload (struct message *, u_int8_t, u_int8_t *,
 				size_t, int);
@@ -168,16 +169,19 @@ extern u_int8_t *message_copy (struct message *, size_t, size_t *);
 extern void message_drop (struct message *, int, struct proto *, int, int);
 extern void message_free (struct message *);
 extern int message_negotiate_sa (struct message *,
-				 int (*) (struct exchange *, struct sa *));
+				 int (*) (struct exchange *, struct sa *,
+					  struct sa *));
 extern int message_recv (struct message *);
 extern int message_register_post_send (struct message *,
 				       void (*) (struct message *));
 extern void message_post_send (struct message *);
 extern void message_send (struct message *);
-extern void message_send_info (struct message *);
+extern void message_send_delete (struct sa *);
+extern int message_send_info (struct message *);
 extern void message_send_notification (struct message *, struct sa *,
 				       u_int16_t, struct proto *, int);
 extern void message_setup_header (struct message *, u_int8_t, u_int8_t,
 				  u_int8_t *);
+extern void message_dump_raw (char *, struct message *, int);
 
 #endif /* _MESSAGE_H_ */

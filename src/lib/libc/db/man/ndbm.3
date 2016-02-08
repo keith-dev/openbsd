@@ -1,8 +1,8 @@
 .\" David Leonard, 1998. Placed in the public domain.
-.\" $OpenBSD: ndbm.3,v 1.4 1999/02/15 05:11:25 millert Exp $
+.\" $OpenBSD: ndbm.3,v 1.9 1999/07/09 13:35:15 aaron Exp $
 .Dd May 13, 1998
-.Os OpenBSD
 .Dt NDBM 3
+.Os
 .Sh NAME
 .Nm ndbm
 .Nd database access methods
@@ -75,7 +75,7 @@ data with the key
 When storing, the
 .Fa store_mode
 parameter must be one of:
-.Bl -tag -width DBM_REPLACE -offset indent 
+.Bl -tag -width DBM_REPLACE -offset indent
 .It Dv DBM_INSERT
 Only insert new keys into the database. Existing key/content pairs
 are untouched.
@@ -158,7 +158,7 @@ Routines that return a
 .Ft datum
 indicate errors by setting the
 .Va dptr
-field set to
+field to
 .Dv NULL .
 .Pp
 The
@@ -186,6 +186,6 @@ If an error occurs, the error can be retrieved with
 and corresponds to those errors described in
 .Xr db 3 .
 .Sh SEE ALSO
+.Xr open 2 ,
 .Xr db 3 ,
-.Xr hash 3 ,
-.Xr open 2
+.Xr hash 3

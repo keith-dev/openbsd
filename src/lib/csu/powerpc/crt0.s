@@ -1,4 +1,4 @@
-
+#	$OpenBSD: crt0.s,v 1.6 1999/08/20 14:11:36 niklas Exp $
 	
 	.section ".data"
 	.comm	environ, 4
@@ -10,8 +10,6 @@ L1:	.long 0		# null string plus padding
 	
 
 	.section ".text"
-	.globl start
-start:	
 	.globl _start
 	.type	_start,@function
 _start:	

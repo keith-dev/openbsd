@@ -1,11 +1,11 @@
-.\" $OpenBSD: sigwait.3,v 1.5 1999/03/22 04:20:05 d Exp $
+.\" $OpenBSD: sigwait.3,v 1.8 1999/09/23 04:12:00 alex Exp $
 .\" David Leonard <d@openbsd.org>, 1998. Public domain.
 .Dd August 20, 1998
-.Os
 .Dt SIGWAIT 3
+.Os
 .Sh NAME
 .Nm sigwait
-.Nd synchonously accept a signal
+.Nd synchronously accept a signal
 .Sh SYNOPSIS
 .Fd #include <signal.h>
 .Ft int
@@ -49,7 +49,7 @@ if more than a single thread is waiting is unspecified.
 .Sh RETURN VALUES
 Upon successful completion,
 .Fn sigwait
-stores the signal number of the recived signal at the location referenced by
+stores the signal number of the received signal at the location referenced by
 .Fa sig
 and returns zero.
 .Sh ERRORS
@@ -63,12 +63,12 @@ The
 argument contains an invalid or unsupported signal number
 .El
 .Sh SEE ALSO
-.Xr pause 3 ,
 .Xr sigaction 2 ,
 .Xr sigpending 2 ,
 .Xr sigsuspend 2 ,
-.Xr pthreads 3 ,
-.Xr pthread_sigmask 3
+.Xr pause 3 ,
+.Xr pthread_sigmask 3 ,
+.Xr pthreads 3
 .Sh STANDARDS
 .Fn sigwait
 conforms to ISO/IEC 9945-1 ANSI/IEEE

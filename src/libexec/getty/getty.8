@@ -30,17 +30,17 @@
 .\" SUCH DAMAGE.
 .\"
 .\"     from: @(#)getty.8	8.1 (Berkeley) 6/4/93
-.\"	$Id: getty.8,v 1.2 1998/10/20 21:38:22 angelos Exp $
+.\"	$Id: getty.8,v 1.5 1999/07/09 13:35:50 aaron Exp $
 .\"
 .Dd June 4, 1993
 .Dt GETTY 8
-.Os BSD 4
+.Os
 .Sh NAME
 .Nm getty
 .Nd set terminal mode
 .Sh SYNOPSIS
 .Nm getty
-.Oo 
+.Oo
 .Ar type
 .Op Ar tty
 .Oc
@@ -115,12 +115,12 @@ does not exist.
 .It Pa /etc/gettytab
 .El
 .Sh SEE ALSO
-.Xr gettytab 5 ,
-.Xr init 8 ,
 .Xr login 1 ,
 .Xr ioctl 2 ,
 .Xr tty 4 ,
-.Xr ttys 5
+.Xr gettytab 5 ,
+.Xr ttys 5 ,
+.Xr init 8
 .Sh HISTORY
 A
 .Nm getty

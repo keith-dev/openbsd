@@ -1,4 +1,4 @@
-/* $RCSfile: util.h,v $$Revision: 1.2 $$Date: 1997/11/30 08:07:11 $
+/* $RCSfile: util.h,v $$Revision: 1.3 $$Date: 1999/04/29 22:52:59 $
  *
  *    Copyright (c) 1991-1997, Larry Wall
  *
@@ -6,8 +6,8 @@
  *    License or the Artistic License, as specified in the README file.
  *
  * $Log: util.h,v $
- * Revision 1.2  1997/11/30 08:07:11  millert
- * perl 5.004_04
+ * Revision 1.3  1999/04/29 22:52:59  millert
+ * perl5.005_03 (stock)
  *
  */
 
@@ -31,15 +31,9 @@ void growstr _(( char **strptr, int *curlen, int newlen ));
 char * instr _(( char *big, char *little ));
 char * safecpy _(( char *to, char *from, int len ));
 char * savestr _(( char *str ));
-#if defined(I_STDARG) && defined(HAS_VPRINTF)
 void croak _(( char *pat, ... ));
 void fatal _(( char *pat, ... ));
 void warn  _(( char *pat, ... ));
-#else /* defined(I_STDARG) && defined(HAS_VPRINTF) */
-void croak _(( char *pat, int a1, int a2, int a3, int a4 ));
-void Myfatal ();
-void warn ();
-#endif /* defined(I_STDARG) && defined(HAS_VPRINTF) */
 int prewalk _(( int numit, int level, int node, int *numericptr ));
 
 Malloc_t safemalloc _((MEM_SIZE nbytes));

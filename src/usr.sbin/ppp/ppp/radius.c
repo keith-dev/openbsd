@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	$Id: radius.c,v 1.2 1999/03/03 23:01:12 brian Exp $
+ *	$Id: radius.c,v 1.4 1999/05/08 11:06:39 brian Exp $
  *
  */
 
@@ -42,6 +42,7 @@
 #include <sys/time.h>
 #include <termios.h>
 
+#include "layer.h"
 #include "defs.h"
 #include "log.h"
 #include "descriptor.h"
@@ -80,7 +81,8 @@ radius_Process(struct radius *r, int got)
 {
   char *argv[MAXARGS], *nuke;
   struct bundle *bundle;
-  int len, argc, addrs;
+  int argc, addrs;
+  size_t len;
   struct in_range dest;
   struct in_addr gw;
   const void *data;

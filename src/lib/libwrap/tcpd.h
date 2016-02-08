@@ -1,4 +1,4 @@
-/*	$OpenBSD: tcpd.h,v 1.4 1997/06/30 06:06:00 deraadt Exp $	*/
+/*	$OpenBSD: tcpd.h,v 1.7 1999/07/21 18:27:41 form Exp $	*/
 
 /*
  * Copyright (c) 1997, Jason Downs.  All rights reserved.
@@ -104,14 +104,18 @@ __END_DECLS
 
 __BEGIN_DECLS
 extern int hosts_access __P((struct request_info *));
+extern int hosts_ctl __P((char *, char *, char *, char *));
 extern void shell_cmd __P((char *));
 extern char *percent_m __P((char *, char *));
 extern char *percent_x __P((char *, int, char *, struct request_info *));
 extern void rfc931 __P((struct sockaddr_in *, struct sockaddr_in *, char *));
 extern void clean_exit __P((struct request_info *));
 extern void refuse __P((struct request_info *));
+#ifdef _STDIO_H_
 extern char *xgets __P((char *, int, FILE *));
+#endif	/* _STDIO_H_ */
 extern char *split_at __P((char *, int));
+extern int dot_quad_addr_new __P((char *, in_addr_t *));
 extern in_addr_t dot_quad_addr __P((char *));
 
 /* Global variables. */

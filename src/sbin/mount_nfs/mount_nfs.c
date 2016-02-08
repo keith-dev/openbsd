@@ -1,4 +1,4 @@
-/*	$OpenBSD: mount_nfs.c,v 1.15 1998/05/16 06:28:00 deraadt Exp $	*/
+/*	$OpenBSD: mount_nfs.c,v 1.17 1999/06/17 20:53:28 millert Exp $	*/
 /*	$NetBSD: mount_nfs.c,v 1.12.4.1 1996/05/25 22:48:05 fvdl Exp $	*/
 
 /*

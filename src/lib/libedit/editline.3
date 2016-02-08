@@ -1,4 +1,4 @@
-.\"	$OpenBSD: editline.3,v 1.4 1999/02/27 21:57:22 deraadt Exp $
+.\"	$OpenBSD: editline.3,v 1.9 1999/07/09 13:35:25 aaron Exp $
 .\"	$NetBSD: editline.3,v 1.4 1997/01/14 04:17:23 lukem Exp $
 .\"
 .\" Copyright (c) 1997 The NetBSD Foundation, Inc.
@@ -35,8 +35,8 @@
 .\" POSSIBILITY OF SUCH DAMAGE.
 .\"
 .Dd January 11, 1997
-.Os BSD 4.4
 .Dt EDITLINE 3
+.Os
 .Sh NAME
 .Nm editline ,
 .Nm el_init ,
@@ -148,7 +148,7 @@ if no characters were read or if an error occurred.
 Read a character from the tty.
 .Fa ch
 is modified to contain the character read.
-Returns the number of characters read if successful, -1 otherwise.
+Returns the number of characters read if successful, \-1 otherwise.
 .It Fn el_push
 Pushes
 .Fa str
@@ -166,7 +166,7 @@ Parses the
 array (which is
 .Fa argc
 elements in size)
-to execute builtin
+to execute built-in
 .Nm
 commands.
 If the command is prefixed with
@@ -180,7 +180,7 @@ matches the
 argument supplied to
 .Fn el_init .
 The return value is
--1 if the command is unknown,
+\-1 if the command is unknown,
 0 if there was no error or
 .Dq prog
 didn't match, or
@@ -195,7 +195,7 @@ may be modified by
 .Fn el_parse .
 The colon between
 .Dq prog
-and the command, 
+and the command,
 .Ar command ,
 will be replaced with a NUL
 .Po
@@ -257,8 +257,8 @@ Otherwise, the current signal handlers will be used.
 .Xc
 Perform the
 .Ic bind
-builtin command.
-Refer to 
+built-in command.
+Refer to
 .Xr editrc 5
 for more information.
 .It Dv EL_ECHOTC , Xo
@@ -268,8 +268,8 @@ for more information.
 .Xc
 Perform the
 .Ic echotc
-builtin command.
-Refer to 
+built-in command.
+Refer to
 .Xr editrc 5
 for more information.
 .It Dv EL_SETTC , Xo
@@ -279,8 +279,8 @@ for more information.
 .Xc
 Perform the
 .Ic settc
-builtin command.
-Refer to 
+built-in command.
+Refer to
 .Xr editrc 5
 for more information.
 .It Dv EL_SETTY , Xo
@@ -290,8 +290,8 @@ for more information.
 .Xc
 Perform the
 .Ic setty
-builtin command.
-Refer to 
+built-in command.
+Refer to
 .Xr editrc 5
 for more information.
 .It Dv EL_TELLTC , Xo
@@ -301,8 +301,8 @@ for more information.
 .Xc
 Perform the
 .Ic telltc
-builtin command.
-Refer to 
+built-in command.
+Refer to
 .Xr editrc 5
 for more information.
 .It Dv EL_ADDFN , Xo
@@ -362,7 +362,7 @@ should be the value returned by
 .It Fn el_source
 Initialise
 .Nm
-by reading the contents of 
+by reading the contents of
 .Fa file .
 .Fn el_parse
 is called for each line in
@@ -404,7 +404,7 @@ typedef struct lineinfo {
 Insert
 .Fa str
 into the line at the cursor.
-Returns -1 if
+Returns \-1 if
 .Fa str
 is empty or won't fit, and 0 otherwise.
 .It Fn el_deletestr
@@ -483,7 +483,7 @@ if there isn't one.
 .It Dv H_ENTER , Fa "const char *str"
 Add
 .Fa str
-as a new element to the history, and, if necessary, 
+as a new element to the history, and, if necessary,
 removing the oldest entry to keep the list to the created size.
 .It Dv H_PREV_STR , Fa "const char *str"
 Return the closest previous event that starts with
@@ -508,10 +508,10 @@ Save the history list to
 .\"XXX.Sh EXAMPLES
 .\"XXX: provide some examples
 .Sh SEE ALSO
-.Xr editrc 5 ,
 .Xr sh 1 ,
 .Xr signal 3 ,
-.Xr termcap 3
+.Xr termcap 3 ,
+.Xr editrc 5
 .Sh HISTORY
 The
 .Nm

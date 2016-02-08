@@ -1,4 +1,4 @@
-/*	$OpenBSD: msgs.c,v 1.12 1998/06/23 23:30:19 deraadt Exp $	*/
+/*	$OpenBSD: msgs.c,v 1.15 1999/08/17 09:13:16 millert Exp $	*/
 /*	$NetBSD: msgs.c,v 1.7 1995/09/28 06:57:40 tls Exp $	*/
 
 /*-
@@ -44,7 +44,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)msgs.c	8.2 (Berkeley) 4/28/95";
 #else
-static char rcsid[] = "$OpenBSD: msgs.c,v 1.12 1998/06/23 23:30:19 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: msgs.c,v 1.15 1999/08/17 09:13:16 millert Exp $";
 #endif
 #endif /* not lint */
 
@@ -76,11 +76,11 @@ static char rcsid[] = "$OpenBSD: msgs.c,v 1.12 1998/06/23 23:30:19 deraadt Exp $
 
 #include <sys/param.h>
 #include <sys/ioctl.h>
-#include <sys/file.h>
 #include <sys/stat.h>
 #include <dirent.h>
 #include <ctype.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <pwd.h>
 #include <setjmp.h>
 #include <signal.h>
@@ -256,8 +256,18 @@ main(argc, argv)
 	bounds = fopen(fname, "r");
 
 	if (bounds == NULL) {
-		perror(fname);
-		exit(1);
+		if (errno == ENOENT) {
+			if ((bounds = fopen(fname, "w+")) == NULL) {
+				perror(fname);
+				exit(1);
+			}
+			fprintf(bounds, "1 0\n");
+			rewind(bounds);
+		}
+		else {
+			perror(fname);
+			exit(1);
+		}
 	}
 
 	fscanf(bounds, "%d %d\n", &firstmsg, &lastmsg);
@@ -632,7 +642,7 @@ int length;
 	if (use_pager && length > Lpp) {
 		signal(SIGPIPE, SIG_IGN);
 		signal(SIGQUIT, SIG_IGN);
-		if ((env_pager = getenv("PAGER")) == NULL) {
+		if ((env_pager = getenv("PAGER")) == NULL || *env_pager == '\0') {
 			snprintf(cmdbuf, sizeof(cmdbuf), _PATH_PAGER, Lpp);
 		} else {
 			snprintf(cmdbuf, sizeof(cmdbuf), env_pager);

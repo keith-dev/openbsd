@@ -1,13 +1,12 @@
-#	$OpenBSD: Makefile,v 1.2 1999/02/16 21:51:39 niklas Exp $
-#	$NetBSD: Makefile,v 1.4 1999/02/04 14:50:31 oster Exp $
+#	$OpenBSD: Makefile,v 1.4 1999/07/30 14:45:31 peter Exp $
+#	$NetBSD: Makefile,v 1.5 1999/03/26 00:46:05 oster Exp $
 PROG=	raidctl 
 SRCS=	rf_configure.c rf_layout.c rf_strutils.c raidctl.c
 MAN=	raidctl.8
 
 LOOKHERE = ${.CURDIR}/../../sys/dev/raidframe
 
-COPTS+= -DCSRG_BASED -DNARROWPROTO -DRF_UTILITY=1 -DSIMULATE=1
-CPPFLAGS+= -I${LOOKHERE}
+CPPFLAGS+= -DRF_UTILITY=1 -I${LOOKHERE}
 .PATH:    ${LOOKHERE}
 
 DPADD=  ${LIBUTIL}

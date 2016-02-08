@@ -1,4 +1,4 @@
-.\"	$OpenBSD: dbopen.3,v 1.7 1999/03/10 21:25:25 pjanzen Exp $
+.\"	$OpenBSD: dbopen.3,v 1.13 1999/07/07 14:22:24 aaron Exp $
 .\"	$NetBSD: dbopen.3,v 1.6 1995/02/27 13:23:25 cgd Exp $
 .\"
 .\" Copyright (c) 1997, Phillip F Knaack. All rights reserved.
@@ -37,8 +37,8 @@
 .\"	@(#)dbopen.3	8.5 (Berkeley) 1/2/94
 .\"
 .Dd January 2, 1994
-.Os OpenBSD
 .Dt DBOPEN 3
+.Os
 .Sh NAME
 .Nm dbopen
 .Nd database access methods
@@ -115,7 +115,9 @@ is not possible.)
 .Pp
 The
 .Fa type
-argument is of type DBTYPE (as defined in the <db.h> include file) and
+argument is of type
+.Fa DBTYPE
+(as defined in the <db.h> include file) and
 may be set to
 .Dv DB_BTREE ,
 .Dv DB_HASH
@@ -141,7 +143,7 @@ and contains at least the following fields:
 .Pp
 .Bl -item -compact
 typedef struct {
-.It.
+.It
 .Bl -item -compact -inset -offset indent
 .It
 DBTYPE type;
@@ -167,7 +169,7 @@ int (*seq)(const DB *db, DBT *key, DBT *data, u_int flags);
 These elements describe a database type and a set of functions performing
 various actions.
 These functions take a pointer to a structure as returned by
-.Nm ,
+.Nm dbopen ,
 and sometimes one or more pointers to key/data structures and a flag value.
 .Pp
 .Bl -tag -width XXXXX -offset indent
@@ -183,7 +185,7 @@ or
 .Fa sync
 function may result in inconsistent or lost information.
 .Fa close
-routines return -1 on error (setting
+routines return \-1 on error (setting
 .Va errno )
 and 0 on success.
 .It del
@@ -199,7 +201,7 @@ The cursor must have previously been initialized.
 .El
 .Pp
 .Fa delete
-routines return -1 on error (setting
+routines return \-1 on error (setting
 .Va errno ) ,
 0 on success, and 1 if the specified
 .Fa key
@@ -222,7 +224,7 @@ The file descriptor is not necessarily associated with any of the
 underlying files used by the access method.
 No file descriptor is available for in memory databases.
 .Fa fd
-routines return -1 on error (setting
+routines return \-1 on error (setting
 .Va errno ) ,
 and the file descriptor on success.
 .It get
@@ -233,7 +235,7 @@ The address and length of the data associated with the specified
 are returned in the structure referenced by
 .Fa data .
 .Fa get
-routines return -1 on error (setting
+routines return \-1 on error (setting
 .Va errno ) ,
 0 on success, and 1 if the
 .Fa key
@@ -288,7 +290,7 @@ routines is to enter the new key/data pair, replacing any previously
 existing key.
 .Pp
 .Fa put
-routines return -1 on error (setting
+routines return \-1 on error (setting
 .Va errno ) ,
 0 on success, and 1 if the R_NOOVERWRITE
 .Fa flag
@@ -351,7 +353,7 @@ access methods because they each imply that the keys have an inherent
 order which does not change.
 .Pp
 .Fa seq
-routines return -1 on error (setting
+routines return \-1 on error (setting
 .Va errno ) ,
 0 on success and 1 if there are no key/data pairs less than or greater
 than the specified or current key.
@@ -380,9 +382,10 @@ manual page for more information.)
 .El
 .Pp
 .Fa sync
-routines return -1 on error (setting
+routines return \-1 on error (setting
 .Va errno )
 and 0 on success.
+.El
 .Sh KEY/DATA PAIRS
 Access to all file types is based on key/data pairs.
 Both keys and data are represented by the following data structure:
@@ -474,7 +477,7 @@ routines may fail and set
 .Va errno
 for any of the errors specified for the library routine
 .Xr fsync 2 .
-.Sh "SEE ALSO"
+.Sh SEE ALSO
 .Xr btree 3 ,
 .Xr hash 3 ,
 .Xr mpool 3 ,

@@ -35,7 +35,7 @@
 .\"
 .Dd April 19, 1994
 .Dt TERMIOS 4
-.Os BSD 4
+.Os
 .Sh NAME
 .Nm termios
 .Nd general terminal line discipline
@@ -1105,7 +1105,7 @@ is set, two stop bits are used, otherwise one stop bit.  For example, at
 If
 .Dv CREAD
 is set, the receiver is enabled.  Otherwise, no character is
-received. 
+received.
 Not all hardware supports this bit.  In fact, this flag
 is pretty silly and if it were not part of the
 .Nm termios
