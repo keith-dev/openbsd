@@ -1,6 +1,6 @@
 #!./perl
 
-# $RCSfile: array.t,v $$Revision: 1.1.1.1 $$Date: 1996/08/19 10:13:16 $
+# $RCSfile: array.t,v $$Revision: 1.2 $$Date: 1997/11/30 08:05:13 $
 
 print "1..36\n";
 

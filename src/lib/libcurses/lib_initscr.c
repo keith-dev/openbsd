@@ -1,3 +1,5 @@
+/*	$OpenBSD: lib_initscr.c,v 1.3 1997/12/03 05:21:20 millert Exp $	*/
+
 
 /***************************************************************************
 *                            COPYRIGHT NOTICE                              *
@@ -26,37 +28,39 @@
 **
 */
 
-#include "curses.priv.h"
-#include <stdlib.h>
-#include <string.h>
+#include <curses.priv.h>
+
+#if HAVE_SYS_TERMIO_H
+#include <sys/termio.h>	/* needed for ISC */
+#endif
+
+MODULE_ID("Id: lib_initscr.c,v 1.19 1997/06/28 17:41:12 tom Exp $")
 
 WINDOW *initscr(void)
 {
-char	*name = getenv("TERM");
+static	bool initialized = FALSE;
+const char *name;
 
-	if (name == 0)
-		name = "unknown";
-  	if (newterm(name, stdout, stdin) == NULL) {
-  		fprintf(stderr, "Error opening terminal: %s.\n", name);
-  		exit(1);
+	T((T_CALLED("initscr()")));
+	/* Portable applications must not call initscr() more than once */
+	if (!initialized) {
+		initialized = TRUE;
+
+		if ((name = getenv("TERM")) == 0)
+			name = "unknown";
+		if (newterm(name, stdout, stdin) == 0) {
+			fprintf(stderr, "Error opening terminal: %s.\n", name);
+			exit(EXIT_FAILURE);
+		}
+
+		/* allow user to set maximum escape delay from the environment */
+		if ((name = getenv("ESCDELAY")) != 0)
+			ESCDELAY = atoi(getenv("ESCDELAY"));
+
+		/* def_shell_mode - done in newterm/_nc_setupscreen */
+		def_prog_mode();
 	}
-
-	/* allow user to set maximum escape delay from the environment */
-	if ((name = getenv("ESCDELAY")))
-	    ESCDELAY = atoi(getenv("ESCDELAY"));
-
-	def_shell_mode();
-
-	/* follow the XPG4 requirement to turn echo off at this point */
-	noecho();
-
-#ifdef _XOPEN_SOURCE_EXTENDED
-	/* for extended XPG4 conformance requires cbreak() at this point */
-	cbreak();
-#endif /* _XOPEN_SOURCE_EXTENDED */
-
-	def_prog_mode();
-	return(stdscr);
+	returnWin(stdscr);
 }
 
 char *termname(void)
@@ -66,10 +70,9 @@ static char	ret[15];
 
 	T(("termname() called"));
 
-	if (term == (char *)NULL)
-		return(char *)NULL;
-	else {
+	if (term != 0) {
 		(void) strncpy(ret, term, sizeof(ret) - 1);
-		return(ret);
+		term = ret;
 	}
+	return term;
 }

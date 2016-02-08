@@ -754,7 +754,10 @@ fncmp (const char *n1, const char *n2)
    rather than "canonical form").  The idea is that files we create
    would get thusly munged, but CVS can cope with their names being
    different the same way that the NT port copes with it if the user
-   renames a file from "foo" to "FOO".  */
+   renames a file from "foo" to "FOO".
+
+   Alternately, this kind of handling could/should go into CVS_FOPEN
+   and friends (if we want to do it like the Mac port, anyway).  */
 void
 fnfold (char *filename)
 {
@@ -804,7 +807,7 @@ last_component (path)
 {
     char *last = strrchr (path, '/');
 
-    if (last)
+    if (last && (last != path))
         return last + 1;
     else
         return path;

@@ -1,4 +1,4 @@
-/* $OpenBSD: ipsecadm.c,v 1.10 1997/09/24 18:45:26 angelos Exp $ */
+/* $OpenBSD: ipsecadm.c,v 1.14 1998/04/04 22:48:28 provos Exp $ */
 /*
  * The author of this code is John Ioannidis, ji@tla.org,
  * 	(except when noted otherwise).
@@ -61,6 +61,7 @@
 #define XF_AUTH   0x20
 #define DEL_SPI   0x30
 #define GRP_SPI   0x40
+#define ENC_IP    0x80
 
 #define CMD_MASK  0xf0
 
@@ -73,7 +74,8 @@ typedef struct {
 }       transform;
 
 int xf_esp_new __P((struct in_addr, struct in_addr, u_int32_t, int, int, 
-		    u_char *, u_char *, struct in_addr, struct in_addr, int));
+		    u_char *, u_char *, u_char *, struct in_addr, 
+		    struct in_addr, int));
 int xf_esp_old __P((struct in_addr, struct in_addr, u_int32_t, int, u_char *,
 		    u_char *, struct in_addr, struct in_addr)); 
 int xf_ah_new __P((struct in_addr, struct in_addr, u_int32_t, int, u_char *,
@@ -83,12 +85,17 @@ int xf_ah_old __P((struct in_addr, struct in_addr, u_int32_t, int, u_char *,
 
 int xf_delspi __P((struct in_addr, u_int32_t, int, int));
 int xf_grp __P((struct in_addr, u_int32_t, int, struct in_addr, u_int32_t, int));
+int xf_ip4 __P((struct in_addr, struct in_addr, u_int32_t, 
+		struct in_addr, struct in_addr));
 
 transform xf[] = {
 	{"des", ALG_ENC_DES,   XF_ENC |ESP_OLD|ESP_NEW},
 	{"3des", ALG_ENC_3DES, XF_ENC |ESP_OLD|ESP_NEW},
+	{"blf", ALG_ENC_BLF,   XF_ENC |        ESP_NEW},
+	{"cast", ALG_ENC_CAST, XF_ENC |        ESP_NEW},
 	{"md5", ALG_AUTH_MD5,  XF_AUTH|AH_OLD|AH_NEW|ESP_NEW},
 	{"sha1", ALG_AUTH_SHA1,XF_AUTH|AH_OLD|AH_NEW|ESP_NEW},
+	{"rmd160", ALG_AUTH_RMD160, XF_AUTH|AH_NEW|ESP_NEW},
 };
 
 char    buf[1024];
@@ -123,7 +130,7 @@ void
 usage()
 {
      fprintf( stderr, "usage: ipsecadm [command] <modifier...>\n"
-	      "\tCommands: new esp, old esp, new ah, old ah, group, delspi\n"
+	      "\tCommands: new esp, old esp, new ah, old ah, group, delspi, ip4\n"
 	      "\tPossible modifiers:\n"
 	      "\t\t-enc <alg>\t encryption algorithm\n"
 	      "\t\t-auth <alg>\t authentication algorithm\n"
@@ -132,10 +139,11 @@ usage()
 	      "\t\t-dst <ip>\t destination address to be used\n"
 	      "\t\t-spi <val>\t SPI to be used\n"
 	      "\t\t-key <val>\t key material to be used\n"
+	      "\t\t-authkey <val>\t key material for auth in new esp\n"
 	      "\t\t-iv <val>\t iv to be used\n"
 	      "\t\t-proto <val>\t security protocol\n"
 	      "\t\t-chain\t\t SPI chain delete\n"
-	      "\t\t-oldpadding\told style padding for new ESP\n"
+	      "\t\t-newpadding\t new style padding for new ESP\n"
 	      "\talso: dst2, spi2, proto2\n"
 	  );
 }
@@ -146,13 +154,13 @@ main(argc, argv)
 	char  **argv;
 {
 	int i;
-	int mode = ESP_NEW, new = 1, flag = 0, oldpadding = 0;
-	int auth = 0, enc = 0, ivlen = 0, klen = 0;
+	int mode = ESP_NEW, new = 1, flag = 0, newpadding = 0;
+	int auth = 0, enc = 0, ivlen = 0, klen = 0, alen = 0;
 	int proto = IPPROTO_ESP, proto2 = IPPROTO_AH;
 	int chain = 0; 
 	u_int32_t spi = 0, spi2 = 0;
 	struct in_addr src, dst, dst2, osrc, odst;
-	u_char *ivp = NULL, *keyp = NULL;
+	u_char *ivp = NULL, *keyp = NULL, *authp = NULL;
 
 	osrc.s_addr = odst.s_addr = src.s_addr = dst.s_addr = dst2.s_addr = 0;
 
@@ -180,6 +188,9 @@ main(argc, argv)
 	     } else if (!strcmp(argv[i], "group") && flag < 2) {
 		  flag = 2;
 		  mode = GRP_SPI;
+	     } else if (!strcmp(argv[i], "ip4") && flag < 2) {
+		  flag = 2;
+		  mode = ENC_IP;
 	     } else if (argv[i][0] == '-') {
 		  break;
 	     } else {
@@ -210,6 +221,14 @@ main(argc, argv)
 	     } else if (!strcmp(argv[i]+1, "key") && keyp == NULL && i+1 < argc) {
 		  keyp = argv[++i];
 		  klen = strlen(keyp);
+	     } else if (!strcmp(argv[i]+1, "authkey") && authp == NULL && i+1 < argc) {
+		  if (!(mode & ESP_NEW)) {
+		       fprintf(stderr, "%s: Invalid option %s for selected mode\n",
+			       argv[0], argv[i]);
+		       exit(1);
+		  }
+		  authp = argv[++i];
+		  alen = strlen(authp);
 	     } else if (!strcmp(argv[i]+1, "iv") && ivp == NULL && i+1 < argc) {
 		  if (mode & (AH_OLD|AH_NEW)) {
 		       fprintf(stderr, "%s: Invalid option %s with auth\n",
@@ -236,8 +255,8 @@ main(argc, argv)
 	     } else if (!strcmp(argv[i]+1, "src") && i+1 < argc) {
 		  src.s_addr = inet_addr(argv[i+1]);
 		  i++;
-	     } else if (!strcmp(argv[i]+1, "oldpadding")) {
-		  oldpadding = 1;
+	     } else if (!strcmp(argv[i]+1, "newpadding")) {
+		  newpadding = 1;
 	     } else if (!strcmp(argv[i]+1, "tunnel") && i+2 < argc) {
 		  osrc.s_addr = inet_addr(argv[i+1]);
 		  i++;
@@ -279,13 +298,17 @@ main(argc, argv)
 	} else if (isencauth(mode) && keyp == NULL) {
 	     fprintf(stderr, "%s: No key material specified\n", argv[0]);
 	     exit(1);
+	} else if ((mode & ESP_NEW) && auth & authp == NULL) {
+	     fprintf(stderr, "%s: No auth key material specified\n", argv[0]);
+	     exit(1);
 	} else if (spi == 0) {
 	     fprintf(stderr, "%s: No SPI specified\n", argv[0]);
 	     exit(1);
 	} else if (iscmd(mode, GRP_SPI) && spi2 == 0) {
 	     fprintf(stderr, "%s: No SPI2 specified\n", argv[0]);
 	     exit(1);
-	} else if (isencauth(mode) && src.s_addr == 0) {
+	} else if ((isencauth(mode) || iscmd(mode, ENC_IP)) && 
+		    src.s_addr == 0) {
 	     fprintf(stderr, "%s: No source address specified\n", argv[0]);
 	     exit(1);
 	} else if ((iscmd(mode, DEL_SPI) || iscmd(mode, GRP_SPI)) 
@@ -299,6 +322,11 @@ main(argc, argv)
 	     fprintf(stderr, "%s: No destination address specified\n", 
 		     argv[0]);
 	     exit(1);
+	} else if (iscmd(mode, ENC_IP) && 
+		   (odst.s_addr == 0 || osrc.s_addr == 0)) {
+	     fprintf(stderr, "%s: No tunnel addresses specified\n", 
+		     argv[0]);
+	     exit(1);
 	} else if (iscmd(mode, GRP_SPI) && dst2.s_addr == 0) {
 	     fprintf(stderr, "%s: No destination address2 specified\n", 
 		     argv[0]);
@@ -309,8 +337,8 @@ main(argc, argv)
 	if (isencauth(mode)) {
 	     switch(mode) {
 	     case ESP_NEW:
-		  xf_esp_new(src, dst, spi, enc, auth, ivp, keyp, osrc, odst,
-			     oldpadding);
+		  xf_esp_new(src, dst, spi, enc, auth, ivp, keyp, authp, 
+			     osrc, odst, newpadding);
 		  break;
 	     case ESP_OLD:
 		  xf_esp_old(src, dst, spi, enc, ivp, keyp, osrc, odst);
@@ -329,6 +357,9 @@ main(argc, argv)
 		  break;
 	     case DEL_SPI:
 		  xf_delspi(dst, spi, proto, chain);
+		  break;
+	     case ENC_IP:
+		  xf_ip4(src, dst, spi, osrc, odst);
 		  break;
 	     }
 	}

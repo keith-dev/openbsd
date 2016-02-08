@@ -1,3 +1,5 @@
+/*	$OpenBSD: lib_data.c,v 1.3 1997/12/03 05:21:14 millert Exp $	*/
+
 
 /***************************************************************************
 *                            COPYRIGHT NOTICE                              *
@@ -26,11 +28,13 @@
 **
 */
 
-#include "curses.priv.h"
+#include <curses.priv.h>
 
-#include <stdlib.h>
+MODULE_ID("Id: lib_data.c,v 1.10 1997/09/03 15:27:09 Alexander.V.Lukyanov Exp $")
 
 WINDOW *stdscr, *curscr, *newscr;
+
+SCREEN *_nc_screen_chain;
 
 /*
  * The variable 'SP' will be defined as a function on systems that cannot link
@@ -52,7 +56,7 @@ SCREEN *_nc_screen(void)
 
 int _nc_alloc_screen(void)
 {
-	return ((my_screen = (SCREEN *) calloc(sizeof(*SP), 1)) != NULL);
+	return ((my_screen = typeCalloc(SCREEN, 1)) != 0);
 }
 
 void _nc_set_screen(SCREEN *sp)

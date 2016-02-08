@@ -13,8 +13,8 @@ This is difficult to get set up correctly the first time, but easy to
 use afterwards.  (see `Installing using a diskless setup' below).
 
 It is also possible to install OpenBSD "manually" from a running SunOS
-system, using SunOS tools and gnu tar and gunzip (see `Installing from
-SunOS' below).
+system, using SunOS tools and gnu tar and gunzip (see `Installing from SunOS' 
+below).
 
 
 This section of the install document is really broken into several parts:
@@ -40,13 +40,13 @@ useful, but outside the bounds of simple "how two" instructions.
 About the "new" and "old" Install Scripts:
 
 The OpenBSD/sparc floppies come in two varieties, a newer single floppy
-version that is not well tested and the older multi-floppy set.  Both
-accomplish the same thing, but the install/upgrade scripts and procedures
-are quite different between the old and new version.
+"ramdisk" version and the older multi-floppy set.  Both accomplish the 
+same thing, but the install/upgrade scripts and procedures are quite 
+different between the old and new version.
 
 The other difference between the the two forms are in their bootblocks,
-and filesystems.  The "floppy22.fs" image is the compressed ramdisk form,
-the "kc22.fs" paired with either "inst22.fs" or "upgr22.fs" comprise a
+and filesystems.  The "floppy23.fs" image is the compressed ramdisk form,
+the "kc23.fs" paired with either "inst23.fs" or "upgr23.fs" comprise a
 bootable kernel floppy and associated install/upgrade filesystem floppy.
 
 The CD-ROM, miniroot and netboot install scripts are essentially the
@@ -61,8 +61,8 @@ does not necessarily wipe out all the partitions on the hard disk, errors
 during the install process can have unforeseen consequences and you will
 probably render the system unbootable if you start, but do not complete
 the installation.  Have the installation media for the prior installation,
-be it a SunOS CD-ROM or *BSD install diskettes is good insurance if you
-want to be able to "go back" for some reason.
+be it a SunOS or OpenBSD CD-ROM or OpenBSD install diskettes is good insurance 
+if you want to be able to "go back" for some reason.
 
 After taking care of all that, bring your system down gracefully using
 the shutdown(8) and/or halt(8) commands.  This will get you to the monitor
@@ -70,7 +70,7 @@ prompt.  Sun PROM monitor commands and setup differ considerably depending
 on the system architecture and age, you may needed to reference the PROM
 monitor manual for your system for details.
 
-There are three main cases:
+There are four main cases:
 
 	sun4 (older servers, deskside workstations):
 		prompt is a ">", boot command is "b", uses sd(c,s,p) syntax
@@ -80,6 +80,12 @@ There are three main cases:
 		with s defined as scsi-unit.
 	OpenBoot Version 2 (newer servers, desktop workstations):
 		prompt is "ok", boot command is "boot" uses diskn:p syntax.
+        OpenBoot Version 2 (certain newer desktop workstations):
+		prompt is "ok", boot command is "boot" uses diskn syntax 
+		unless booting from a non-standard partition, in which case:
+		boot /sbus/esp/sd@t,0:p bsd  (where "t" is the scsi target, 
+		and "p" is the partition.  examples would be t="3" and p="b")
+
 	
 If you expect your workstation to have an OpenBoot Prom but get a ">", 
 enter then "n" command to enter the "new command mode".  You can set this
@@ -117,7 +123,7 @@ Booting From CD-ROM installation media:
 If the boot is successful, you will get a loader version message,
 executable sizes and then the Kernel copyright and device probe
 messages.  Boot failure modes are typically a lot of CD-ROM drive
-action, but no messages or complaints about magic numbers,
+activity, but no messages or complaints about magic numbers,
 checksums or formats.
 
 Not all sparc systems support bootable CDROMS and the current
@@ -134,9 +140,11 @@ Booting from SCSI disk (miniroot or floppy image)
 
 Boot the miniroot by typing the appropriate command at the PROM:
 
-	> b sd(,,1)bsd 		# for sun4 monitors
-	ok boot sd(,,1)bsd 	# for version 1 OpenBOOT ROMs
-	ok boot disk:b bsd 	# for version 2 OpenBOOT ROMs
+	> b sd(,,1)bsd 			# for sun4 monitors
+	ok boot sd(,,1)bsd 		# for version 1 OpenBOOT ROMs
+	ok boot disk:b bsd 		# for version 2 OpenBOOT ROMs
+	ok boot /sbus/esp/sd@3,0:b bsd  # for version 2 OpenBOOT ROMs 
+					# that won't take disk:p syntax.
 
 If you've loaded the miniroot onto some other disk than the default
 drive 0, modify the boot specifier accordingly, keeping in mind the
@@ -145,6 +153,9 @@ drive vs. scsi-id shuffling and partition a=0, b=1...
         > b sd(0,10,1)bsd       # example - scsi target 2 on sun4 monitors*
 	ok boot sd(0,3,1)bsd	# example - scsi target 0 on V1 OpenBOOT ROM
 	ok boot disk3:b bsd     # example - scsi target 0 on v2 OpenBOOT ROM
+	ok boot /sbus/esp/sd@0,0:b bsd  # example - scsi target 0 on v2  
+					# OpenBOOT ROM that won't take 
+					# disk:p syntax.
 
 (*) for sun4 this is scsi-target*8+scsi-lun (usually 0) expressed in hex...
 
@@ -334,11 +345,11 @@ may be a better option.
 		       ftp if you are using a proxy.
 		    3) The IP address (or hostname if you enabled
 		       DNS earlier in the install) of an ftp server
-		       carrying the OpenBSD 2.2 distribution.
+		       carrying the OpenBSD 2.3 distribution.
 		       If you don't know, just hit return when
 		       asked if you want to see a list of such hosts.
 		    4) The ftp directory holding the distribution sets.
-		       The default value of pub/OpenBSD/2.2/sparc
+		       The default value of pub/OpenBSD/2.3/sparc
 		       is almost always correct.
 		    5) The login and password for the ftp account.
 		       The default will be correct unless you are
@@ -357,7 +368,7 @@ may be a better option.
 		       (assuming you have a proxy available to use).
 		    3) The IP address (or hostname if you enabled
 		       DNS earlier in the install) of an http server
-		       carrying the OpenBSD 2.2 distribution.
+		       carrying the OpenBSD 2.3 distribution.
 		       If you don't know, just hit return when
 		       asked if you want to see a list of such hosts.
 		    4) The directory holding the distribution sets.
@@ -401,7 +412,7 @@ may be a better option.
 
 		You will also have to provide the relative path to the
 		directory on the CD which holds the distribution, for the
-		sparc this is "2.2/sparc".
+		sparc this is "2.3/sparc".
 
 		For instructions on how to complete the installation from
 		the CD-ROM distribution, see the section named "Common
@@ -493,7 +504,7 @@ may be a better option.
 	using, all the device nodes needed by the installed system will
 	be created for you and the file systems will be unmounted.  For
 	this to work properly, it is expected that you have installed
-	at least the "base22" and "etc22" distribution sets.
+	at least the "base23" and "etc23" distribution sets.
 
 
 
@@ -553,13 +564,13 @@ On version 2 OpenBOOT ROMs:
 On sun4 systems, you may not need to specify the boot file, as 
 the OpenBSD boot blocks will look for "bsd" on the boot device by default.
 
-Congratulations, you have successfully installed OpenBSD 2.2.  When you
+Congratulations, you have successfully installed OpenBSD 2.3.  When you
 reboot into OpenBSD, you should log in as "root" at the login prompt.
 There is no initial password, but if you're using the machine in a
 networked environment, you should create yourself an account and
 protect it and the "root" account with good passwords.
 
-Some of the files in the OpenBSD 2.2 distribution might need to be
+Some of the files in the OpenBSD 2.3 distribution might need to be
 tailored for your site.  In particular, the /etc/sendmail.cf file will
 almost definitely need to be adjusted, and other files in /etc will
 probably need to be modified.  If you will be running your OpenBSD 
@@ -652,10 +663,10 @@ The installboot man page says to do something like this:
 You can now extract the provided "*.tar.gz files onto your disk.
 
     sunos# ls -FC
-    base22.tar.gz      etc22.tar.gz       man22.tar.gz       secr22.tar.gz
-    comp22.tar.gz      games22.tar.gz     misc22.tar.gz      text22.tar.gz
+    base23.tar.gz      etc23.tar.gz       man23.tar.gz       secr23.tar.gz
+    comp23.tar.gz      games23.tar.gz     misc23.tar.gz      text23.tar.gz
     bsd                bsd.scsi3
-    sunos# gunzip < base22.tar.gz | (cd /mnt; gtar xvpf -)
+    sunos# gunzip < base23.tar.gz | (cd /mnt; gtar xvpf -)
     [...] for each set
 
 And finally copy an OpenBSD kernel (either bsd or bsd.scsi3) onto your disk.
@@ -734,7 +745,7 @@ handle corresponding to the root filesystem. If successful, the boot
 program starts reading from the remote root filesystem in search of the
 kernel which is then read into memory.
 
-You will want export the miniroot22.fs filesystem to the client.  You
+You will want export the miniroot23.fs filesystem to the client.  You
 can dd this filesystem image to some spare partition, mount and export
 tat partition or use tar to copy the contents to a more convenient spot.
 

@@ -1,8 +1,15 @@
 #!./perl
 
-# $RCSfile: exec.t,v $$Revision: 1.1.1.1 $$Date: 1996/08/19 10:13:17 $
+# $RCSfile: exec.t,v $$Revision: 1.2 $$Date: 1997/11/30 08:05:19 $
 
 $| = 1;				# flush stdout
+
+if ($^O eq 'MSWin32') {
+    print "# exec is unsupported on Win32\n";
+    print "1..0\n";
+    exit(0);
+}
+
 print "1..8\n";
 
 print "not ok 1\n" if system "echo ok \\1";	# shell interpreted

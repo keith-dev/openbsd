@@ -2,9 +2,8 @@
 # syslog.pl
 #
 # $Log: syslog.pl,v $
-# Revision 1.1.1.1  1996/08/19 10:12:37  downsj
-# Import of Perl 5.003 into the tree.  Makefile.bsd-wrapper and
-# config.sh.OpenBSD are the only local changes.
+# Revision 1.2  1997/11/30 07:57:11  millert
+# perl 5.004_04
 #
 # 
 # tom christiansen <tchrist@convex.com>
@@ -41,7 +40,7 @@ if ($] >= 5) {
 
 require 'syslog.ph';
 
- eval 'use Socket' 			||
+ eval 'use Socket; 1' 			||
      eval { require "socket.ph" } 	||
      require "sys/socket.ph";
 
@@ -144,10 +143,10 @@ sub main'syslog {
 
 sub xlate {
     local($name) = @_;
-    $name =~ y/a-z/A-Z/;
+    $name = uc $name;
     $name = "LOG_$name" unless $name =~ /^LOG_/;
     $name = "syslog'$name";
-    eval(&$name) || -1;
+    defined &$name ? &$name : -1;
 }
 
 sub connect {

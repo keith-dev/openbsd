@@ -1,3 +1,5 @@
+/*	$OpenBSD: lib_addch.c,v 1.4 1997/12/14 23:15:46 millert Exp $	*/
+
 
 /***************************************************************************
 *                            COPYRIGHT NOTICE                              *
@@ -22,60 +24,32 @@
 /*
 **	lib_addch.c
 **
-**	The routines waddch(), wattr_on(), wattr_off(), wchgat().
+**	The routines waddch(), wchgat().
 **
 */
 
-#include "curses.priv.h"
+#include <curses.priv.h>
 #include <ctype.h>
-#include "unctrl.h"
 
-#define ALL_BUT_COLOR ((chtype)~(A_COLOR))
+MODULE_ID("Id: lib_addch.c,v 1.37 1997/12/02 20:17:46 Alexander.V.Lukyanov Exp $")
 
-int wattr_on(WINDOW *win, const attr_t at)
-{
-	T(("wattr_on(%p,%s) current = %s", win, _traceattr(at), _traceattr(win->_attrs)));
-	if (PAIR_NUMBER(at) > 0x00) {
-		win->_attrs = (win->_attrs & ALL_BUT_COLOR) | at ;
-		T(("new attribute is %s", _traceattr(win->_attrs)));
-	} else {
-		win->_attrs |= at;
-		T(("new attribute is %s", _traceattr(win->_attrs)));
-	}
-	return OK;
-}
-
-int wattr_off(WINDOW *win, const attr_t at)
-{
-#define IGNORE_COLOR_OFF FALSE
-
-	T(("wattr_off(%p,%s) current = %s", win, _traceattr(at), _traceattr(win->_attrs)));
-	if (IGNORE_COLOR_OFF == TRUE) {
-		if (PAIR_NUMBER(at) == 0xff) /* turn off color */
-			win->_attrs &= ~at;
-		else /* leave color alone */
-			win->_attrs &= ~(at|ALL_BUT_COLOR);
-	} else {
-		if (PAIR_NUMBER(at) > 0x00) /* turn off color */
-			win->_attrs &= ~at;
-		else /* leave color alone */
-			win->_attrs &= ~(at|ALL_BUT_COLOR);
-	}
-	T(("new attribute is %s", _traceattr(win->_attrs)));
-	return OK;
-}
-
-int wchgat(WINDOW *win, int n, attr_t attr, short color, const void *opts)
+int wchgat(WINDOW *win, int n, attr_t attr, short color, const void *opts GCC_UNUSED)
 {
     int	i;
 
-    for (i = win->_curx; i <= win->_maxx && (n == -1 || (n-- > 0)); i++)
-	win->_line[win->_cury].text[i]
-	    = (win->_line[win->_cury].text[i] & A_CHARTEXT)
-		| attr
-		| COLOR_PAIR(color);
+    T((T_CALLED("wchgat(%p,%d,%s,%d)"), win, n, _traceattr(attr), color));
 
-    return OK;
+    if (win) {
+      toggle_attr_on(attr,COLOR_PAIR(color));
+
+      for (i = win->_curx; i <= win->_maxx && (n == -1 || (n-- > 0)); i++)
+	win->_line[win->_cury].text[i]
+	  = TextOf(win->_line[win->_cury].text[i]) | attr;
+
+      returnCode(OK);
+    }
+    else
+      returnCode(ERR);
 }
 
 /*
@@ -88,147 +62,193 @@ int wchgat(WINDOW *win, int n, attr_t attr, short color, const void *opts)
  * window sync hook, for use by string-put functions.
  */
 
-static __inline chtype render_char(WINDOW *win, chtype oldch, chtype newch)
+/* Return bit mask for clearing color pair number if given ch has color */
+#define COLOR_MASK(ch) (~(chtype)((ch)&A_COLOR?A_COLOR:0))
+
+static inline chtype render_char(WINDOW *win, chtype ch)
 /* compute a rendition of the given char correct for the current context */
 {
-	if ((oldch & A_CHARTEXT) == ' ')
-		newch |= win->_bkgd;
-	else if (!(newch & A_ATTRIBUTES))
-		newch |= (win->_bkgd & A_ATTRIBUTES);
-	TR(TRACE_VIRTPUT, ("bkg = %lx -> ch = %lx", win->_bkgd, newch));
+	chtype a = win->_attrs;
+	
+	if (ch == ' ')
+	{
+		/* color in attrs has precedence over bkgd */
+		ch = a | (win->_bkgd & COLOR_MASK(a));
+	}
+	else
+	{
+		/* color in attrs has precedence over bkgd */
+		a |= (win->_bkgd & A_ATTRIBUTES) & COLOR_MASK(a);
+		/* color in ch has precedence */
+		ch |= (a & COLOR_MASK(ch));
+	}
 
-	return(newch);
+	TR(TRACE_VIRTPUT, ("bkg = %lx, attrs = %lx -> ch = %lx", win->_bkgd,
+		win->_attrs, ch));
+
+	return(ch);
 }
 
-chtype _nc_render(WINDOW *win, chtype oldch, chtype newch)
+chtype _nc_background(WINDOW *win)
 /* make render_char() visible while still allowing us to inline it below */
 {
-    return(render_char(win, oldch, newch));
+	return (win->_bkgd);
 }
 
-/* actions needed to process a newline within addch_nosync() */
-#define DO_NEWLINE	x = 0; \
-			win->_flags &= ~_NEED_WRAP; \
-			y++; \
-			if (y > win->_regbottom) { \
-				y--; \
-				if (win->_scroll) \
-					scroll(win); \
-			}
+chtype _nc_render(WINDOW *win, chtype ch)
+/* make render_char() visible while still allowing us to inline it below */
+{
+	return render_char(win, ch);
+}
 
 /* check if position is legal; if not, return error */
+#ifndef NDEBUG			/* treat this like an assertion */
 #define CHECK_POSITION(win, x, y) \
-	if (y > win->_maxy || x > win->_maxx || y < 0 || x < 0) { \
+	if (y > win->_maxy \
+	 || x > win->_maxx \
+	 || y < 0 \
+	 || x < 0) { \
 		TR(TRACE_VIRTPUT, ("Alert! Win=%p _curx = %d, _cury = %d " \
 				   "(_maxx = %d, _maxy = %d)", win, x, y, \
 				   win->_maxx, win->_maxy)); \
-	  	win->_curx = win->_cury = 0; \
-		win->_flags &= ~_NEED_WRAP; \
-	    	return(ERR); \
+		return(ERR); \
 	}
+#else
+#define CHECK_POSITION(win, x, y) /* nothing */
+#endif
 
-static __inline
+static inline
 int waddch_literal(WINDOW *win, chtype ch)
 {
-register int x, y;
+	int x;
+	struct ldat *line;
 
 	x = win->_curx;
-	y = win->_cury;
 
-	CHECK_POSITION(win, x, y);
-
-	if (win->_flags & _NEED_WRAP) {
-		TR(TRACE_MOVE, ("new char when NEED_WRAP set at %d,%d",y,x));
-		DO_NEWLINE
-	}
+	CHECK_POSITION(win, x, win->_cury);
 
 	/*
-	 * We used to pass in
-	 *	win->_line[y].text[x]
-	 * as a second argument, but the value of the old character
-	 * is not relevant here.
+	 * If we're trying to add a character at the lower-right corner more
+	 * than once, fail.  (Moving the cursor will clear the flag).
 	 */
-	ch = render_char(win, 0, ch);
+	if (win->_flags & _WRAPPED) {
+		if (x >= win->_maxx)
+			return (ERR);
+		win->_flags &= ~_WRAPPED;
+	}
 
+	ch = render_char(win, ch);
 	TR(TRACE_VIRTPUT, ("win attr = %s", _traceattr(win->_attrs)));
-	ch |= win->_attrs;
 
-	if (win->_line[y].text[x] != ch) {
-		if (win->_line[y].firstchar == _NOCHANGE)
-			win->_line[y].firstchar = win->_line[y].lastchar = x;
-		else if (x < win->_line[y].firstchar)
-			win->_line[y].firstchar = x;
-		else if (x > win->_line[y].lastchar)
-			win->_line[y].lastchar = x;
+	line = win->_line+win->_cury;
+	
+	if (line->firstchar == _NOCHANGE)
+		line->firstchar = line->lastchar = x;
+	else if (x < line->firstchar)
+		line->firstchar = x;
+	else if (x > line->lastchar)
+		line->lastchar = x;
 
-	}
-
-	win->_line[y].text[x++] = ch;
-	TR(TRACE_VIRTPUT, ("(%d, %d) = %s | %s", 
-			   y, x,
-			   _tracechar((unsigned char)(ch & A_CHARTEXT)),
-			   _traceattr((ch & (chtype)A_ATTRIBUTES))));
+	line->text[x++] = ch;
+	
+	TR(TRACE_VIRTPUT, ("(%d, %d) = %s", win->_cury, x, _tracechtype(ch)));
 	if (x > win->_maxx) {
-		TR(TRACE_MOVE, ("NEED_WRAP set at %d,%d",y,x));
-		win->_flags |= _NEED_WRAP;
-		x--;
+		/*
+		 * The _WRAPPED flag is useful only for telling an application
+		 * that we've just wrapped the cursor.  We don't do anything
+		 * with this flag except set it when wrapping, and clear it
+		 * whenever we move the cursor.  If we try to wrap at the
+		 * lower-right corner of a window, we cannot move the cursor
+		 * (since that wouldn't be legal).  So we return an error
+		 * (which is what SVr4 does).  Unlike SVr4, we can successfully
+		 * add a character to the lower-right corner.
+		 */
+		win->_flags |= _WRAPPED;
+		if (++win->_cury > win->_regbottom) {
+			win->_cury = win->_regbottom;
+			win->_curx = win->_maxx;
+			if (!win->_scroll)
+				return (ERR);
+			scroll(win);
+		}
+		win->_curx = 0;
+		return (OK);
 	}
-
 	win->_curx = x;
-	win->_cury = y;
-
 	return OK;
 }
 
-static __inline
-int waddch_nosync(WINDOW *win, const chtype c)
+static inline
+int waddch_nosync(WINDOW *win, const chtype ch)
 /* the workhorse function -- add a character to the given window */
 {
-register chtype	ch = c;
-register int	x, y;
-int		newx;
+	int	x, y;
+	int	t;
+	const char *s;
+
+	if ((ch & A_ALTCHARSET)
+	    || ((t = TextOf(ch)) > 127)
+	    || ((s = unctrl(t))[1] == 0))
+		return waddch_literal(win, ch);
 
 	x = win->_curx;
 	y = win->_cury;
 
-	CHECK_POSITION(win, x, y);
+	switch (t) {
+	case '\t':
+		x += (TABSIZE-(x%TABSIZE));
 
-	if (ch & A_ALTCHARSET)
-		goto noctrl;
-
-	switch ((int)(ch&A_CHARTEXT)) {
-    	case '\t':
-		if (win->_flags & _NEED_WRAP) {
-		  	x = 0;
-			newx = min(TABSIZE, win->_maxx+1);
-		} else
-			newx = min(x + (TABSIZE-(x%TABSIZE)), win->_maxx+1);
-		while (win->_curx < newx) {
-	    		if (waddch_literal(win, ' ' | (ch&A_ATTRIBUTES)) == ERR)
-				return(ERR);
+		/*
+		 * Space-fill the tab on the bottom line so that we'll get the
+		 * "correct" cursor position.
+		 */
+		if ((! win->_scroll && (y == win->_regbottom))
+		 || (x <= win->_maxx)) {
+			chtype blank = (' ' | AttrOf(ch));
+			while (win->_curx < x) {
+				if (waddch_literal(win, blank) == ERR)
+					return(ERR);
+			}
+			break;
+		} else {
+			wclrtoeol(win);
+			win->_flags |= _WRAPPED;
+			if (++y > win->_regbottom) {
+				x = win->_maxx;
+				y--;
+				if (win->_scroll) {
+					scroll(win);
+					x = 0;
+				}
+			} else {
+				x = 0;
+			}
 		}
-		return(OK);
-    	case '\n':
+		break;
+	case '\n':
 		wclrtoeol(win);
-		DO_NEWLINE
-		break;
-    	case '\r':
-		x = 0;
-		win->_flags &= ~_NEED_WRAP;
-		break;
-    	case '\b':
-		if (win->_flags & _NEED_WRAP)
-			win->_flags &= ~_NEED_WRAP;
-		else if (--x < 0)
-			x = 0;
-		break;
-    	default:
-		if (is7bits(ch & A_CHARTEXT) && iscntrl(ch & A_CHARTEXT))
-		    	return(waddstr(win, unctrl((unsigned char)ch)));
-
+		if (++y > win->_regbottom) {
+			y--;
+			if (win->_scroll)
+				scroll(win);
+			else
+				return (ERR);
+		}
 		/* FALLTHRU */
-        noctrl:
-		waddch_literal(win, ch);
+	case '\r':
+		x = 0;
+		win->_flags &= ~_WRAPPED;
+		break;
+	case '\b':
+		if (x == 0)
+			return (OK);
+		x--;
+		win->_flags &= ~_WRAPPED;
+		break;
+	default:
+		while (*s)
+			if (waddch_literal(win, (*s++)|AttrOf(ch)) == ERR)
+				return ERR;
 		return(OK);
 	}
 
@@ -237,8 +257,6 @@ int		newx;
 
 	return(OK);
 }
-
-#undef DO_NEWLINE
 
 int _nc_waddch_nosync(WINDOW *win, const chtype c)
 /* export copy of waddch_nosync() so the string-put functions can use it */
@@ -256,32 +274,34 @@ int _nc_waddch_nosync(WINDOW *win, const chtype c)
 
 int waddch(WINDOW *win, const chtype ch)
 {
-	TR(TRACE_VIRTPUT, ("waddch(%p, %s | %s) called", win,
-			  _tracechar((unsigned char)(ch & A_CHARTEXT)),
-			  _traceattr((ch & (chtype)A_ATTRIBUTES))));
+	int code = ERR;
 
-	if (waddch_nosync(win, ch) == ERR)
-		return(ERR);
-	else
+	TR(TRACE_VIRTPUT|TRACE_CCALLS, (T_CALLED("waddch(%p, %s)"), win, _tracechtype(ch)));
+
+	if (win && (waddch_nosync(win, ch) != ERR))
 	{
 		_nc_synchook(win);
-		TR(TRACE_VIRTPUT, ("waddch() is done"));
-		return(OK);
+		code = OK;
 	}
+
+	TR(TRACE_VIRTPUT|TRACE_CCALLS, (T_RETURN("%d"), code));
+	return(code);
 }
 
 int wechochar(WINDOW *win, const chtype ch)
 {
-	TR(TRACE_VIRTPUT, ("wechochar(%p,%s (%s)) called", win,
-			  _tracechar((unsigned char)(ch & A_CHARTEXT)),
-			  _traceattr((ch & (chtype)A_ATTRIBUTES))));
+	int code = ERR;
 
-	if (waddch_literal(win, ch) == ERR)
-		return(ERR);
-	else
+	TR(TRACE_VIRTPUT|TRACE_CCALLS, (T_CALLED("wechochar(%p, %s)"), win, _tracechtype(ch)));
+
+	if (win && (waddch_nosync(win, ch) != ERR))
 	{
+		bool	save_immed = win->_immed;
+		win->_immed = TRUE;
 		_nc_synchook(win);
-		TR(TRACE_VIRTPUT, ("wechochar() is done"));
-		return(OK);
+		win->_immed = save_immed;
+		code = OK;
 	}
+	TR(TRACE_VIRTPUT|TRACE_CCALLS, (T_RETURN("%d"), code));
+	return(code);
 }

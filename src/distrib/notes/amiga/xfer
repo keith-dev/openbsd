@@ -1,7 +1,7 @@
 Installation is supported from several media types, including:
 
-	AmigaDOS partitions
-	FFS partitions
+	AmigaDOS Fast file system partitions
+	Berkeley FFS partitions
 	Tape
 	Remote NFS partition
 	FTP
@@ -24,16 +24,16 @@ partition, optionally you must also get the miniroot image there
 for later transfer to your swap partition as explained elsewhere.
 For ramdisk installs you need to get both the bsd and bsd.rd
 kernel images, and for miniroot installs you need bsd and the
-miniroot22.fs image.
+miniroot23.fs image.
 
 To prepare for installing via an AmigaDOS partition:
 
 	To install OpenBSD from an AmigaDOS partition, you need to
 	get the OpenBSD distribution sets you wish to install
-	on your system on to an AmigaDOS partition.  All of the
-	set_name.tar.gz pieces can be placed in a single directory
-	instead of separate ones for each distribution set.  This
-	will also simplify the installation work later on.
+	on your system on to an AmigaDOS fast file system partition.
+	All of the set_name.tar.gz pieces can be placed in a single
+	directory instead of separate ones for each distribution set.
+	This will also simplify the installation work later on.
 
 	Note where you place the files, you will need this later.
 	Also, it might be a good idea to type down the AmigaDOS
@@ -104,7 +104,7 @@ following:
 	Place the distribution sets you wish to upgrade somewhere in
 	your current file system tree.  At a bare minimum, you must
 	upgrade the "base" binary distribution, and so must put the
-	"base22.tar.gz" set somewhere in your file system.  If you wish,
+	"base23.tar.gz" set somewhere in your file system.  If you wish,
 	you can do the other sets, as well, but you should NOT upgrade
 	the "etc" distribution; the "etc" distribution contains system
 	configuration files that you should review and update by hand.

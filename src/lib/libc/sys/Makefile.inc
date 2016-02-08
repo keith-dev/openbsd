@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile.inc,v 1.23 1997/05/30 21:53:10 kstailey Exp $
+#	$OpenBSD: Makefile.inc,v 1.25 1998/02/08 22:45:14 tholo Exp $
 #	$NetBSD: Makefile.inc,v 1.35 1995/10/16 23:49:07 jtc Exp $
 #	@(#)Makefile.inc	8.1 (Berkeley) 6/17/93
 
@@ -9,6 +9,15 @@
 SRCS+=	Ovfork.S brk.S cerror.S exect.S fork.S pipe.S ptrace.S \
 	sbrk.S setlogin.S sigpending.S sigprocmask.S sigreturn.S \
 	sigsuspend.S syscall.S
+
+LSRCS+=	Lint_Ovfork.c Lint_brk.c Lint_exect.c Lint_fork.c \
+	Lint_pipe.c Lint_ptrace.c Lint_sbrk.c Lint_setlogin.c \
+	Lint_sigpending.c Lint_sigprocmask.c Lint_sigreturn.c \
+	Lint_sigsuspend.c Lint_syscall.c
+DPSRCS+= Lint_Ovfork.c Lint_brk.c Lint_exect.c Lint_fork.c \
+	Lint_pipe.c Lint_ptrace.c Lint_sbrk.c Lint_setlogin.c \
+	Lint_sigpending.c Lint_sigprocmask.c Lint_sigreturn.c \
+	Lint_sigsuspend.c Lint_syscall.c
 
 # glue to provide compatibility between GCC 1.X and 2.X and for compat
 # with old syscall interfaces.
@@ -25,6 +34,7 @@ ASM=	accept.o access.o acct.o adjtime.o bind.o chdir.o chflags.o chmod.o \
 	getfh.o getfsstat.o getgid.o getgroups.o getitimer.o getpeername.o \
 	getpgid.o \
 	getpgrp.o getpid.o getppid.o getpriority.o getrlimit.o getrusage.o \
+	getsid.o \
 	getsockname.o getsockopt.o gettimeofday.o getuid.o issetugid.o \
 	ioctl.o kill.o \
 	ktrace.o lchown.o lfs_bmapv.o lfs_markv.o lfs_segclean.o lfs_segwait.o \
@@ -106,17 +116,38 @@ ${PSEUDO}: ${.CURDIR}/arch/${MACHINE_ARCH}/SYS.h /usr/include/sys/syscall.h
 	@${LD} -X -r ${.TARGET}.o -o ${.TARGET}
 	@rm -f ${.TARGET}.o
 
-LSRCS+=	protolib.c
+# Lint stubs for all automatically-generated assembly stubs (GENERATED)
+#LSRCS+=	LintSysNormal.c LintSysNoerr.c LintSysPseudoNoerr.c
+#DPSRCS+= LintSysNormal.c LintSysNoerr.c LintSysPseudoNoerr.c
+LSRCS+=	LintSysNormal.c
+DPSRCS+= LintSysNormal.c
 
-protolib.ln:
-	${LINT} ${LINTFLAGS} ${CFLAGS:M-[IDU]*} ${AINC} -i ${.IMPSRC}
+CLEANFILES+= LintSysNormal.c LintSysNoerr.c LintSysPseudo.c
+
+LintSysNormal.c: ${.CURDIR}/sys/makelintstub.sh \
+    ${DESTDIR}/usr/include/sys/syscall.h
+	@echo creating ${.TARGET}
+	@sh ${.CURDIR}/sys/makelintstub.sh -o ${.TARGET} \
+	    -s ${DESTDIR}/usr/include/sys/syscall.h ${ASM}
+
+LintSysNoerr.c: ${.CURDIR}/sys/makelintstub.sh \
+    ${DESTDIR}/usr/include/sys/syscall.h
+	@echo creating ${.TARGET}
+	@sh ${.CURDIR}/sys/makelintstub.sh -o ${.TARGET} -n \
+	    -s ${DESTDIR}/usr/include/sys/syscall.h ${NOERR}
+
+LintSysPseudoNoerr.c: ${.CURDIR}/sys/makelintstub.sh \
+    ${DESTDIR}/usr/include/sys/syscall.h
+	@echo creating ${.TARGET}
+	@sh ${.CURDIR}/sys/makelintstub.sh -o ${.TARGET} -p \
+	    -s ${DESTDIR}/usr/include/sys/syscall.h ${PSEUDONOERR}
 
 MAN+=	accept.2 access.2 acct.2 adjtime.2 bind.2 brk.2 chdir.2 chflags.2 \
 	chmod.2 chown.2 chroot.2 clock_gettime.2 close.2 connect.2 dup.2 \
 	execve.2 _exit.2 fcntl.2 flock.2 fork.2 fsync.2 getdirentries.2 \
 	getfh.2 getfsstat.2 \
 	getgid.2 getgroups.2 getitimer.2 getlogin.2 getpeername.2 getpgrp.2 \
-	getpid.2 getpriority.2 getrlimit.2 getrusage.2 getsockname.2 \
+	getpid.2 getpriority.2 getrlimit.2 getrusage.2 getsid.2 getsockname.2 \
 	getsockopt.2 gettimeofday.2 getuid.2 intro.2 issetugid.2 ioctl.2 \
 	kill.2 ktrace.2 link.2 \
 	listen.2 lseek.2 mkdir.2 mkfifo.2 mknod.2 madvise.2 mincore.2 \

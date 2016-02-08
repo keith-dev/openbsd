@@ -1,3 +1,4 @@
+/*	$OpenBSD: ftpcmd.y,v 1.15 1998/02/03 22:21:21 downsj Exp $	*/
 /*	$NetBSD: ftpcmd.y,v 1.7 1996/04/08 19:03:11 jtc Exp $	*/
 
 /*
@@ -46,7 +47,7 @@
 #if 0
 static char sccsid[] = "@(#)ftpcmd.y	8.3 (Berkeley) 4/6/94";
 #else
-static char rcsid[] = "$NetBSD: ftpcmd.y,v 1.7 1996/04/08 19:03:11 jtc Exp $";
+static char rcsid[] = "$OpenBSD: ftpcmd.y,v 1.15 1998/02/03 22:21:21 downsj Exp $";
 #endif
 #endif /* not lint */
 
@@ -88,6 +89,8 @@ extern	char proctitle[];
 extern	int usedefault;
 extern  int transflag;
 extern  char tmpline[];
+extern	int portcheck;
+extern	struct sockaddr_in his_addr;
 
 off_t	restart_point;
 
@@ -128,6 +131,7 @@ char	*fromname;
 %type	<i> check_login octal_number byte_size
 %type	<i> struct_code mode_code type_code form_code
 %type	<s> pathstring pathname password username
+%type	<i> host_port
 
 %start	cmd_list
 
@@ -158,12 +162,30 @@ cmd
 	| PORT check_login SP host_port CRLF
 		{
 			if ($2) {
-				usedefault = 0;
-				if (pdata >= 0) {
-					(void) close(pdata);
-					pdata = -1;
+				if ($4) {
+					usedefault = 1;
+					reply(500,	
+					    "Illegal PORT rejected (range errors).");
+				} else if (portcheck &&
+				    ntohs(data_dest.sin_port) < IPPORT_RESERVED) {
+					usedefault = 1;
+					reply(500,
+					    "Illegal PORT rejected (reserved port).");
+				} else if (portcheck &&
+				    memcmp(&data_dest.sin_addr,
+				    &his_addr.sin_addr,
+				    sizeof data_dest.sin_addr)) {
+					usedefault = 1;
+					reply(500,
+					    "Illegal PORT rejected (address wrong).");
+				} else {
+					usedefault = 0;
+					if (pdata >= 0) {
+						(void) close(pdata);
+						pdata = -1;
+					}
+					reply(200, "PORT command successful.");
 				}
-				reply(200, "PORT command successful.");
 			}
 		}
 	| PASV check_login CRLF
@@ -592,12 +614,19 @@ host_port
 		{
 			char *a, *p;
 
-			data_dest.sin_len = sizeof(struct sockaddr_in);
-			data_dest.sin_family = AF_INET;
-			p = (char *)&data_dest.sin_port;
-			p[0] = $9; p[1] = $11;
-			a = (char *)&data_dest.sin_addr;
-			a[0] = $1; a[1] = $3; a[2] = $5; a[3] = $7;
+			if ($1 < 0 || $1 > 255 || $3 < 0 || $3 > 255 ||
+			    $5 < 0 || $5 > 255 || $7 < 0 || $7 > 255 ||
+			    $9 < 0 || $9 > 255 || $11 < 0 || $11 > 255) {
+				$$ = 1;
+			} else {
+				data_dest.sin_len = sizeof(struct sockaddr_in);
+				data_dest.sin_family = AF_INET;
+				p = (char *)&data_dest.sin_port;
+				p[0] = $9; p[1] = $11;
+				a = (char *)&data_dest.sin_addr;
+				a[0] = $1; a[1] = $3; a[2] = $5; a[3] = $7;
+				$$ = 0;
+			}
 		}
 	;
 
@@ -697,13 +726,24 @@ pathname
 			 * processing, but only gives a 550 error reply.
 			 * This is a valid reply in some cases but not in others.
 			 */
-			if (logged_in && $1 && *$1 == '~') {
+			if (logged_in && $1 && strchr($1, '~') != NULL) {
 				glob_t gl;
 				int flags =
 				 GLOB_BRACE|GLOB_NOCHECK|GLOB_QUOTE|GLOB_TILDE;
+				char *pptr = $1;
+
+				/*
+				 * glob() will only find a leading ~, but
+				 * Netscape kindly puts a slash in front of
+				 * it for publish URLs.  There needs to be
+				 * a flag for glob() that expands tildes
+				 * anywhere in the string.
+				 */
+				if ((pptr[0] == '/') && (pptr[1] == '~'))
+					pptr++;
 
 				memset(&gl, 0, sizeof(gl));
-				if (glob($1, flags, NULL, &gl) ||
+				if (glob(pptr, flags, NULL, &gl) ||
 				    gl.gl_pathc == 0) {
 					reply(550, "not found");
 					$$ = NULL;

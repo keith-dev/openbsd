@@ -1,14 +1,13 @@
-/* $RCSfile: walk.c,v $$Revision: 1.1.1.1 $$Date: 1996/08/19 10:13:37 $
+/* $RCSfile: walk.c,v $$Revision: 1.2 $$Date: 1997/11/30 08:07:12 $
  *
- *    Copyright (c) 1991, Larry Wall
+ *    Copyright (c) 1991-1997, Larry Wall
  *
  *    You may distribute under the terms of either the GNU General Public
  *    License or the Artistic License, as specified in the README file.
  *
  * $Log: walk.c,v $
- * Revision 1.1.1.1  1996/08/19 10:13:37  downsj
- * Import of Perl 5.003 into the tree.  Makefile.bsd-wrapper and
- * config.sh.OpenBSD are the only local changes.
+ * Revision 1.2  1997/11/30 08:07:12  millert
+ * perl 5.004_04
  *
  */
 
@@ -149,7 +148,7 @@ int minprec;			/* minimum precedence without parens */
 	    if (saw_FNR)
 		str_cat(str,"continue {\n    $FNRbase = $. if eof;\n}\n");
 	}
-	else
+	else if (old_awk)
 	    str_cat(str,"while (<>) { }		# (no line actions)\n");
 	if (ops[node+4].ival) {
 	    realexit = TRUE;

@@ -1,20 +1,22 @@
-/* $RCSfile: a2p.h,v $$Revision: 1.1.1.1 $$Date: 1996/08/19 10:13:34 $
+/* $RCSfile: a2p.h,v $$Revision: 1.2 $$Date: 1997/11/30 08:07:00 $
  *
- *    Copyright (c) 1991, Larry Wall
+ *    Copyright (c) 1991-1997, Larry Wall
  *
  *    You may distribute under the terms of either the GNU General Public
  *    License or the Artistic License, as specified in the README file.
  *
  * $Log: a2p.h,v $
- * Revision 1.1.1.1  1996/08/19 10:13:34  downsj
- * Import of Perl 5.003 into the tree.  Makefile.bsd-wrapper and
- * config.sh.OpenBSD are the only local changes.
+ * Revision 1.2  1997/11/30 08:07:00  millert
+ * perl 5.004_04
  *
  */
 
-#include "../embed.h"
 #define VOIDUSED 1
-#include "../config.h"
+#ifdef VMS
+#  include "config.h"
+#else
+#  include "../config.h"
+#endif
 
 #if defined(__STDC__) || defined(vax11c) || defined(_AIX) || defined(__stdc__) || defined(__cplusplus)
 # define STANDARD_C 1
@@ -35,14 +37,28 @@
 #  include <sys/types.h>
 #endif
 
+#ifdef USE_NEXT_CTYPE
 
-#ifdef USE_NEXT_CTYPE 
+#if NX_CURRENT_COMPILER_RELEASE >= 400
+#include <objc/NXCType.h>
+#else /*  NX_CURRENT_COMPILER_RELEASE < 400 */
 #include <appkit/NXCType.h>
-#else
+#endif /*  NX_CURRENT_COMPILER_RELEASE >= 400 */
+
+#else /* !USE_NEXT_CTYPE */
 #include <ctype.h>
-#endif
+#endif /* USE_NEXT_CTYPE */
 
 #define MEM_SIZE Size_t
+
+#ifdef STANDARD_C
+#   include <stdlib.h>
+#else
+    Malloc_t malloc _((MEM_SIZE nbytes));
+    Malloc_t calloc _((MEM_SIZE elements, MEM_SIZE size));
+    Malloc_t realloc _((Malloc_t where, MEM_SIZE nbytes));
+    Free_t   free _((Malloc_t where));
+#endif
 
 #if defined(I_STRING) || defined(__cplusplus)
 #   include <string.h>
@@ -91,7 +107,8 @@
 # endif
 #else
 # if defined(VMS)
-#   include "../vmsish.h"
+#   define NO_PERL_TYPEDEFS
+#   include "vmsish.h"
 # endif
 #endif
 
@@ -103,7 +120,15 @@ char *strchr(), *strrchr();
 char *strcpy(), *strcat();
 #endif /* ! STANDARD_C */
 
-#include "handy.h"
+#ifdef VMS
+#  include "handy.h"
+#else 
+#  include "../handy.h"
+#endif
+
+#undef Nullfp
+#define Nullfp Null(FILE*)
+
 #define Nullop 0
 
 #define OPROG		1
@@ -393,6 +418,7 @@ EXT bool nomemok INIT(FALSE);
 EXT char const_FS INIT(0);
 EXT char *namelist INIT(Nullch);
 EXT char fswitch INIT(0);
+EXT bool old_awk INIT(0);
 
 EXT int saw_FS INIT(0);
 EXT int maxfld INIT(0);

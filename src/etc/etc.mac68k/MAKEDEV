@@ -1,6 +1,6 @@
 #!/bin/sh -
 #
-#	$OpenBSD: MAKEDEV,v 1.20 1997/09/16 06:01:00 deraadt Exp $
+#	$OpenBSD: MAKEDEV,v 1.23 1998/01/26 04:19:42 dgregor Exp $
 #
 # Copyright (c) 1990 The Regents of the University of California.
 # All rights reserved.
@@ -131,7 +131,7 @@ fd)
 	rm -f fd/*
 	mkdir fd > /dev/null 2>&1
 	n=0
-	(cd fd && while [ $n -lt 64 ]; do mknod $n c 24 $n; n=`add $n 1`; done)
+	(cd fd && while [ $n -lt 64 ]; do mknod $n c 21 $n; n=`add $n 1`; done)
 	chown -R root.wheel fd
 	chmod 555 fd
 	chmod 666 fd/*
@@ -300,7 +300,7 @@ ch*)
 	rm -f $name$unit
 	case $unit in
 	0|1|2|3|4|5|6)
-		mknod ${name}${unit}	c $chr `expr $unit '*' 16 + 0`
+		mknod ${name}${unit}	c $chr $unit
 		chown root.operator ${name}${unit}
 		chmod 640 ${name}${unit}
 		;;
@@ -366,9 +366,11 @@ bpf*)
 	;;
 
 ipl)
-	rm -f ipl
+	rm -f ipl ipnat ipstate 
 	mknod ipl c 35 0
-	chown root.wheel ipl
+	mknod ipnat c 35 1
+	mknod ipstate c 35 2
+	chown root.wheel ipl ipnat ipstate 
 	;;
 
 tun*)

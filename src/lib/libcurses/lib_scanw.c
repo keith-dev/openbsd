@@ -1,3 +1,5 @@
+/*	$OpenBSD: lib_scanw.c,v 1.3 1997/12/03 05:21:29 millert Exp $	*/
+
 
 /***************************************************************************
 *                            COPYRIGHT NOTICE                              *
@@ -28,8 +30,9 @@
 **
 */
 
-#include "curses.priv.h"
-#include <stdio.h>
+#include <curses.priv.h>
+
+MODULE_ID("Id: lib_scanw.c,v 1.5 1997/08/30 23:49:19 tom Exp $")
 
 #if !HAVE_VSSCANF
 extern int vsscanf(const char *str, const char *format, ...);
@@ -39,50 +42,56 @@ int vwscanw(WINDOW *win, const char *fmt, va_list argp)
 {
 char buf[BUFSIZ];
 
-	if (wgetstr(win, buf) == ERR)
+	if (wgetnstr(win, buf, sizeof(buf)-1) == ERR)
 	    return(ERR);
-	
+
 	return(vsscanf(buf, fmt, argp));
 }
 
 int scanw(const char *fmt, ...)
 {
+int code;
 va_list ap;
 
 	T(("scanw(\"%s\",...) called", fmt));
 
 	va_start(ap, fmt);
-	return(vwscanw(stdscr, fmt, ap));
+	code = vwscanw(stdscr, fmt, ap);
+	va_end(ap);
+	return (code);
 }
 
 int wscanw(WINDOW *win, const char *fmt, ...)
 {
+int code;
 va_list ap;
 
 	T(("wscanw(%p,\"%s\",...) called", win, fmt));
 
 	va_start(ap, fmt);
-	return(vwscanw(win, fmt, ap));
+	code = vwscanw(win, fmt, ap);
+	va_end(ap);
+	return (code);
 }
-
-
 
 int mvscanw(int y, int x, const char *fmt, ...)
 {
+int code;
 va_list ap;
 
 	va_start(ap, fmt);
-	return(move(y, x) == OK ? vwscanw(stdscr, fmt, ap) : ERR);
+	code = (move(y, x) == OK) ? vwscanw(stdscr, fmt, ap) : ERR;
+	va_end(ap);
+	return (code);
 }
-
-
 
 int mvwscanw(WINDOW *win, int y, int x, const char *fmt, ...)
 {
+int code;
 va_list ap;
 
 	va_start(ap, fmt);
-	return(wmove(win, y, x) == OK ? vwscanw(win, fmt, ap) : ERR);
+	code = (wmove(win, y, x) == OK) ? vwscanw(win, fmt, ap) : ERR;
+	va_end(ap);
+	return (code);
 }
-
-

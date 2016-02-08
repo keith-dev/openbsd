@@ -1,4 +1,5 @@
-#       $OpenBSD: install.md,v 1.15 1997/10/30 21:14:41 niklas Exp $
+#       $OpenBSD: install.md,v 1.21 1998/03/29 19:57:51 millert Exp $
+#
 # Copyright (c) 1996 The NetBSD Foundation, Inc.
 # All rights reserved.
 #
@@ -91,11 +92,11 @@ md_get_msgbuf() {
 }
 
 md_get_diskdevs() {
-	md_get_msgbuf | egrep "^sd[0-9] "
+	md_get_msgbuf | egrep "^[sw]d[0-9]+ " | sed 's/ .*//'
 }
 
 md_get_cddevs() {
-	md_get_msgbuf | egrep "^cd[0-9] "
+	md_get_msgbuf | egrep "^a?cd[0-9]+ " | sed 's/ .*//'
 }
 
 md_get_ifdevs() {
@@ -183,19 +184,15 @@ __md_prep_disklabel_1
 md_welcome_banner() {
 {
 	if [ "$MODE" = "install" ]; then
-		echo ""
 		echo "Welcome to the OpenBSD/alpha ${VERSION_MAJOR}.${VERSION_MINOR} installation program."
 		cat << \__welcome_banner_1
 
-This program is designed to help you put OpenBSD on your disk, in a
-simple and rational way.  You'll be asked several questions, and it
-would probably be useful to have your disk's hardware manual, the
-installation notes, and a calculator handy.
+This program is designed to help you put OpenBSD on your system in a
+simple and rational way.
 __welcome_banner_1
 
 	else
-		echo ""
-		echo "Welcome to the OpenBSD/alpha ${VERSION} upgrade program."
+		echo "Welcome to the OpenBSD/alpha ${VERSION_MAJOR}.${VERSION_MINOR} upgrade program."
 		cat << \__welcome_banner_2
 
 This program is designed to help you upgrade your OpenBSD system in a

@@ -1,6 +1,6 @@
 #!/bin/sh -
 #
-#	$OpenBSD: security,v 1.23 1997/10/05 11:49:14 deraadt Exp $
+#	$OpenBSD: security,v 1.27 1998/03/22 03:39:11 marc Exp $
 #	from: @(#)security	8.1 (Berkeley) 6/9/93
 #
 
@@ -22,7 +22,7 @@ if ! mkdir $DIR ; then
 	exit 1
 fi
 
-trap 'rm -rf $DIR' 0 1 15
+trap 'rm -rf $DIR; exit 1' 0 1 2 3 13 15
 
 # Check the master password file syntax.
 MP=/etc/master.passwd
@@ -45,7 +45,7 @@ awk -F: '{
 		printf("Login %s has no password.\n", $1);
 	if ($2 != "" && length($2) != 13 && ($10 ~ /.*sh$/ || $10 == "") &&
            ($2 !~ /^\$[0-9a-f]+\$/) && ($2 != "skey")) {
-		if (system("grep -q \"^"$1" \" /etc/skeykeys") == 0)
+		if (system("test -s /etc/skeykeys && grep -q \"^"$1" \" /etc/skeykeys") == 0)
 			printf("Login %s is off but still has a valid shell and an entry in /etc/skeykeys.\n", $1);
 		if (system("test -d "$9" -a ! -r "$9"") == 0)
 			printf("Login %s if off but still has valid shell and home directory is unreadable\n\t by root; cannot check for existance of alternate access files.\n", $1);
@@ -224,6 +224,47 @@ if [ $umaskset = "no" -o -s $OUTPUT ] ; then
 	fi
 fi
 
+# A good .kshrc will not have a umask or path, that being set in .profile
+# check anyway.
+> $OUTPUT
+rhome=/root
+list="/etc/ksh.kshrc ${rhome}/.kshrc"
+for i in $list; do
+	if [ -s $i ] ; then
+		egrep umask $i |
+		awk '$2 % 100 < 20 \
+			{ print "Root umask is group writeable" } \
+		     $2 % 10 < 2 \
+			{ print "Root umask is other writeable" }' >> $OUTPUT
+		if egrep PATH= $i > /dev/null ; then
+			SAVE_PATH=$PATH
+			unset PATH
+			/bin/ksh << end-of-sh > /dev/null 2>&1
+				. $i
+				list=\`echo \$PATH | /usr/bin/sed -e 's/:/ /g'\`
+				/bin/ls -ldgT \$list > $TMP1
+end-of-sh
+			PATH=$SAVE_PATH
+			awk '{
+				if ($10 ~ /^\.$/) {
+					print "The root path includes .";
+					next;
+				}
+			    }
+			    $1 ~ /^d....w/ \
+		{ print "Root path directory " $10 " is group writeable." } \
+			    $1 ~ /^d.......w/ \
+		{ print "Root path directory " $10 " is other writeable." }' \
+			< $TMP1 >> $OUTPUT
+		fi
+
+	fi
+done
+if [ -s $OUTPUT ] ; then
+	printf "\nChecking root ksh paths, umask values:\n$list\n"
+	cat $OUTPUT
+fi
+
 # Root and uucp should both be in /etc/ftpusers.
 if egrep root /etc/ftpusers > /dev/null ; then
 	:
@@ -337,7 +378,7 @@ awk '$1 != $5 && $5 != "root" \
 
 # Files that should not be owned by someone else or writeable.
 list=".bashrc .cshrc .emacs .exrc .forward .klogin .login .logout \
-      .profile .tcshrc"
+      .profile .tcshrc .kshrc .xsession"
 awk -F: '/^[^+-]/ { print $1 " " $6 }' /etc/passwd | \
 while read uid homedir; do
 	for f in $list ; do
@@ -572,7 +613,7 @@ fi
 # file is expected to have two backups, /var/backups/file.{current,backup}.
 # Any changes cause the files to rotate.
 if [ -s /etc/changelist ] ; then
-	for file in `cat /etc/changelist`; do
+	for file in `egrep -v "^#|$MP" /etc/changelist`; do
 		CUR=/var/backups/`basename $file`.current
 		BACK=/var/backups/`basename $file`.backup
 		if [ -s $file ] ; then

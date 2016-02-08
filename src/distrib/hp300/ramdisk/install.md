@@ -1,6 +1,6 @@
 #!/bin/sh
 #
-#	$OpenBSD: install.md,v 1.7 1997/10/31 05:41:28 downsj Exp $
+#	$OpenBSD: install.md,v 1.10 1998/03/29 19:58:14 millert Exp $
 #	$NetBSD: install.md,v 1.1.2.4 1996/08/26 15:45:14 gwr Exp $
 #
 # Copyright (c) 1996 The NetBSD Foundation, Inc.
@@ -43,7 +43,7 @@
 #
 
 # Machine-dependent install sets
-MDSETS=""
+MDSETS="kernel"
 
 TMPWRITEABLE=/tmp/writeable
 KERNFSMOUNTED=/tmp/kernfsmounted
@@ -85,6 +85,7 @@ __rd0_failed_1
 		exit
 	fi
 
+	# Bleh.  Give mount_mfs a chance to DTRT.
 	sleep 2
 	> ${TMPWRITEABLE}
 
@@ -142,17 +143,19 @@ md_installboot() {
 
 md_checkfordisklabel() {
 	# $1 is the disk to check
+	local rval
 
 	disklabel -r $1 > /dev/null 2> /tmp/checkfordisklabel
 	if grep "no disk label" /tmp/checkfordisklabel; then
-		rval="1"
+		rval=1
 	elif grep "disk label corrupted" /tmp/checkfordisklabel; then
-		rval="2"
+		rval=2
 	else
-		rval="0"
+		rval=0
 	fi
 
 	rm -f /tmp/checkfordisklabel
+	return $rval
 }
 
 hp300_init_label_scsi_disk() {
@@ -371,7 +374,7 @@ md_labeldisk() {
 	# If so, we can just edit it.  If not, we must first install
 	# a default label.
 	md_checkfordisklabel $1
-	case "$rval" in
+	case $? in
 		0)
 			# Go ahead and just edit the disklabel.
 			disklabel -W $1
@@ -424,108 +427,92 @@ md_prep_disklabel()
 
 	_disk=$1
 	md_checkfordisklabel $_disk
-	case "$rval" in
+	case $? in
 	0)
-		echo -n "Do you wish to edit the disklabel on $_disk? [y] "
 		;;
 	1)
-		echo "WARNING: Disk $_disk has no label"
-		echo -n "Do you want to create one with the disklabel editor? [y] "
+		echo "WARNING: Disk $_disk has no label. You will be creating a new one."
+		echo
 		;;
 	2)
-		echo "WARNING: Label on disk $_disk is corrupted"
-		echo -n "Do you want to try and repair the damage using the disklabel editor? [y] "
+		echo "WARNING: Label on disk $_disk is corrupted. You will be repairing."
+		echo
 		;;
-	esac
-
-	getresp "y"
-	case "$resp" in
-	y*|Y*) ;;
-	*)	return ;;
 	esac
 
 	# display example
 	cat << \__md_prep_disklabel_1
 
-Here is an example of what the partition information will look like once
-you have entered the disklabel editor. Disk partition sizes and offsets
-are in sector (most likely 512 bytes) units. Make sure these size/offset
-pairs are on cylinder boundaries (the number of sector per cylinder is
-given in the `sectors/cylinder' entry, which is not shown here).
-
-For the boot disk, partition `a' must be offset one cylinder (the number
-of sectors per cylinder should be given as the offset) and partition
-`c' must have an fstype of `unused'.  Non-boot disks may start filesystems
-at offset 0.
-
-If there is no existing label on the disk, you MUST EDIT THE DISK GEOMETRY.
-Please have information on your disk at hand in order to do so.  Failure
-to correct the disk geometry will result in your system being unable to
-boot from the disk you are installing on to.  Be sure `cylinders',
-`total sectors' and `rpm' are set to something reasonable; this may be
-accomplished with the `e' command from within the disklabel editor.
-
-[Example]
-16 partitions:
-#        size   offset    fstype   [fsize bsize   cpg]
-  a:    50176     1574    4.2BSD     1024  8192    16   # (Cyl.    1 - 111)
-  b:    64512    50176      swap                        # (Cyl.  112 - 255)
-  c:   640192        0      boot                        # (Cyl.    0 - 1428)
-  d:   525504   114688    4.2BSD     1024  8192    16   # (Cyl.  256 - 1428)
-[End of example]
-
+If you are unsure of how to use multiple partitions properly
+(ie. seperating /, /usr, /tmp, /var, /usr/local, and other things)
+just split the space into a root and swap partition for now.
 __md_prep_disklabel_1
-	echo -n "Press [Enter] to continue "
-	getresp ""
+
 	disklabel -W ${_disk}
 	disklabel -E ${_disk}
-
-	# We need to edit the disklabel, again, due to problems with using
-	# disklabel -E (currently) on this arch.  XXX
-	disklabel ${_disk} | sed -e 's/interleave: 0/interleave: 1/' \
-	    -e 's/rpm: 0/rpm: 3600/' > /tmp/disklabelfixup
-	disklabel -R ${_disk} /tmp/disklabelfixup
-	rm /tmp/disklabelfixup
 }
 
 md_copy_kernel() {
+	if [ ! -s /mnt/bsd ]; then
+		echo    ""
+		echo    "Warning, no kernel installed!"
+		echo    "You did not unpack a file set containing a kernel."
+		echo    "This is needed to boot.  Please note that the install"
+		echo    "install kernel is not suitable for general use."
+		echo -n "Escape to shell add /mnt/bsd by hand? [y] "
+		getresp "y"
+		case "$resp" in
+			y*|Y*)
+				echo "Type 'exit' to return to install."
+				sh
+				;;
+			*)
+				;;
+		esac
+	fi
 }
 
-	# Note, while they might not seem machine-dependent, the
-	# welcome banner and the punt message may contain information
-	# and/or instructions specific to the type of machine.
+# Note, while they might not seem machine-dependent, the
+# welcome banner and the punt message may contain information
+# and/or instructions specific to the type of machine.
 
 md_welcome_banner() {
 (
-	echo	""
-	echo	"Welcome to the OpenBSD/hp300 ${VERSION_MAJOR}.${VERSION_MINOR} installation program."
-	cat << \__welcome_banner_1
+	if [ "$MODE" = "install" ]; then
+		echo "Welcome to the OpenBSD/hp300 ${VERSION_MAJOR}.${VERSION_MINOR} installation program."
+		cat << \__welcome_banner_1
 
-This program is designed to help you install OpenBSD on your system in a
-simple and rational way.  You'll be asked several questions, and it would
-probably be useful to have your disk's hardware manual, the installation
-notes, and a calculator handy.
+This program is designed to help you put OpenBSD on your system in a
+simple and rational way.
+__welcome_banner_1
 
-In particular, you will need to know some reasonably detailed
-information about your disk's geometry.  This program can determine
-some limited information about certain specific types of HP-IB disks.
-If you have SCSI disks, however, prior knowledge of disk geometry
-is absolutely essential.  The kernel will attempt to display geometry
-information for SCSI disks during boot, if possible.  If you did not
-make it note of it before, you may wish to reboot and jot down your
-disk's geometry before proceeding.
+	else
+		echo "Welcome to the OpenBSD/alpha ${VERSION_MAJOR}.${VERSION_MINOR} upgrade program."
+		cat << \__welcome_banner_2
 
-As with anything which modifies your hard disk's contents, this
-program can cause SIGNIFICANT data loss, and you are advised
-to make sure your hard drive is backed up before beginning the
-installation process.
+This program is designed to help you upgrade your OpenBSD system in a
+simple and rational way.
 
-Default answers are displyed in brackets after the questions.
-You can hit Control-C at any time to quit, but if you do so at a
-prompt, you may have to hit return.  Also, quitting in the middle of
+As a reminder, installing the `etc' binary set is NOT recommended.
+Once the rest of your system has been upgraded, you should manually
+merge any changes to files in the `etc' set into those files which
+already exist on your system.
+
+__welcome_banner_2
+	fi
+
+cat << \__welcome_banner_3
+
+As with anything which modifies your disk's contents, this program can
+cause SIGNIFICANT data loss, and you are advised to make sure your
+data is backed up before beginning the installation process.
+
+Default answers are displayed in brackets after the questions.  You
+can hit Control-C at any time to quit, but if you do so at a prompt,
+you may have to hit return.  Also, quitting in the middle of
 installation may leave your system in an inconsistent state.
 
-__welcome_banner_1
+__welcome_banner_3
 ) | less -E
 }
 

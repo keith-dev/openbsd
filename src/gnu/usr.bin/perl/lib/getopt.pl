@@ -1,4 +1,4 @@
-;# $RCSfile: getopt.pl,v $$Revision: 1.1.1.1 $$Date: 1996/08/19 10:12:34 $
+;# $RCSfile: getopt.pl,v $$Revision: 1.2 $$Date: 1997/11/30 07:56:59 $
 
 ;# Process single-character switches with switch clustering.  Pass one argument
 ;# which is a string containing all switches that take an argument.  For each
@@ -24,10 +24,10 @@ sub Getopt {
 		shift(@ARGV);
 		$rest = shift(@ARGV);
 	    }
-	    eval "\$opt_$first = \$rest;";
+	    ${"opt_$first"} = $rest;
 	}
 	else {
-	    eval "\$opt_$first = 1;";
+	    ${"opt_$first"} = 1;
 	    if ($rest ne '') {
 		$ARGV[0] = "-$rest";
 	    }

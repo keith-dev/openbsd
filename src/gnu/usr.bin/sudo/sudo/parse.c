@@ -1,5 +1,7 @@
+/*	$OpenBSD: parse.c,v 1.7 1998/03/31 06:41:05 millert Exp $	*/
+
 /*
- *  CU sudo version 1.5.3
+ *  CU sudo version 1.5.5
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -25,7 +27,7 @@
  */
 
 #ifndef lint
-static char rcsid[] = "$Id: parse.c,v 1.2 1996/11/17 16:34:01 millert Exp $";
+static char rcsid[] = "Id: parse.c,v 1.88 1998/03/31 05:05:40 millert Exp $";
 #endif /* lint */
 
 #include "config.h"
@@ -105,17 +107,13 @@ static int has_meta	__P((char *));
 int validate(check_cmnd)
     int check_cmnd;
 {
-    FILE *sudoers_fp;
     int return_code;
 
     /* become sudoers file owner */
     set_perms(PERM_SUDOERS, 0);
 
-    if ((sudoers_fp = fopen(_PATH_SUDO_SUDOERS, "r")) == NULL) {
-	perror(_PATH_SUDO_SUDOERS);
-	log_error(NO_SUDOERS_FILE);
-	exit(1);
-    }
+    /* we opened _PATH_SUDO_SUDOERS in check_sudoers() so just rewind it */
+    rewind(sudoers_fp);
     yyin = sudoers_fp;
     yyout = stdout;
 
@@ -134,6 +132,7 @@ int validate(check_cmnd)
      * Don't need to keep this open...
      */
     (void) fclose(sudoers_fp);
+    sudoers_fp = NULL;
 
     /* relinquish extra privs */
     set_perms(PERM_USER, 0);
@@ -218,7 +217,7 @@ int command_matches(cmnd, user_args, path, sudoers_args)
     static char *c;
 
     /* don't bother with pseudo commands like "validate" */
-    if (*cmnd != '/')
+    if (strchr(cmnd, '/') == NULL)
 	return(FALSE);
 
     /* only need to stat cmnd once since it never changes */

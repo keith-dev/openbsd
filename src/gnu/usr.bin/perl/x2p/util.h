@@ -1,14 +1,13 @@
-/* $RCSfile: util.h,v $$Revision: 1.1.1.1 $$Date: 1996/08/19 10:13:37 $
+/* $RCSfile: util.h,v $$Revision: 1.2 $$Date: 1997/11/30 08:07:11 $
  *
- *    Copyright (c) 1991, Larry Wall
+ *    Copyright (c) 1991-1997, Larry Wall
  *
  *    You may distribute under the terms of either the GNU General Public
  *    License or the Artistic License, as specified in the README file.
  *
  * $Log: util.h,v $
- * Revision 1.1.1.1  1996/08/19 10:13:37  downsj
- * Import of Perl 5.003 into the tree.  Makefile.bsd-wrapper and
- * config.sh.OpenBSD are the only local changes.
+ * Revision 1.2  1997/11/30 08:07:11  millert
+ * perl 5.004_04
  *
  */
 
@@ -28,10 +27,22 @@ int	makedir();
 
 char * cpy2 _(( char *to, char *from, int delim ));
 char * cpytill _(( char *to, char *from, int delim ));
-void croak _(( char *pat, int a1, int a2, int a3, int a4 ));
 void growstr _(( char **strptr, int *curlen, int newlen ));
 char * instr _(( char *big, char *little ));
-void Myfatal ();
 char * safecpy _(( char *to, char *from, int len ));
 char * savestr _(( char *str ));
+#if defined(I_STDARG) && defined(HAS_VPRINTF)
+void croak _(( char *pat, ... ));
+void fatal _(( char *pat, ... ));
+void warn  _(( char *pat, ... ));
+#else /* defined(I_STDARG) && defined(HAS_VPRINTF) */
+void croak _(( char *pat, int a1, int a2, int a3, int a4 ));
+void Myfatal ();
 void warn ();
+#endif /* defined(I_STDARG) && defined(HAS_VPRINTF) */
+int prewalk _(( int numit, int level, int node, int *numericptr ));
+
+Malloc_t safemalloc _((MEM_SIZE nbytes));
+Malloc_t safecalloc _((MEM_SIZE elements, MEM_SIZE size));
+Malloc_t saferealloc _((Malloc_t where, MEM_SIZE nbytes));
+Free_t   safefree _((Malloc_t where));

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1995, 1996 Theo de Raadt.  All rights reserved.
+ * Copyright (c) 1995, 1996, 1998 Theo de Raadt.  All rights reserved.
  * Copyright (c) 1983, 1993, 1994
  *	The Regents of the University of California.  All rights reserved.
  *
@@ -34,7 +34,7 @@
  */
 
 #if defined(LIBC_SCCS) && !defined(lint)
-static char *rcsid = "$OpenBSD: rcmd.c,v 1.26 1997/07/09 01:08:47 millert Exp $";
+static char *rcsid = "$OpenBSD: rcmd.c,v 1.31 1998/03/19 00:30:05 millert Exp $";
 #endif /* LIBC_SCCS and not lint */
 
 #include <sys/param.h>
@@ -402,40 +402,41 @@ __ivaliduser(hostf, raddrl, luser, ruser)
 	const char *luser, *ruser;
 {
 	register char *user, *p;
-	int ch;
-	char buf[MAXHOSTNAMELEN + 128];		/* host + login */
+	char *buf;
 	const char *auser, *ahost;
 	int hostok, userok;
 	char *rhost = (char *)-1;
 	char domain[MAXHOSTNAMELEN];
 	u_int32_t raddr = (u_int32_t)raddrl;
+	size_t buflen;
 
 	getdomainname(domain, sizeof(domain));
 
-	while (fgets(buf, sizeof(buf), hostf)) {
+	while ((buf = fgetln(hostf, &buflen))) {
 		p = buf;
-		/* Skip lines that are too long. */
-		if (strchr(p, '\n') == NULL) {
-			while ((ch = getc(hostf)) != '\n' && ch != EOF)
-				;
-			continue;
-		}
 		if (*p == '#')
 			continue;
-		while (*p != '\n' && *p != ' ' && *p != '\t' && *p != '\0') {
+		while (*p != '\n' && *p != ' ' && *p != '\t' && p < buf + buflen) {
 			if (!isprint(*p))
 				goto bail;
 			*p = isupper(*p) ? tolower(*p) : *p;
 			p++;
 		}
+		if (p >= buf + buflen)
+			continue;
 		if (*p == ' ' || *p == '\t') {
 			*p++ = '\0';
-			while (*p == ' ' || *p == '\t')
+			while ((*p == ' ' || *p == '\t') && p < buf + buflen)
 				p++;
+			if (p >= buf + buflen)
+				continue;
 			user = p;
 			while (*p != '\n' && *p != ' ' &&
-			    *p != '\t' && *p != '\0')
+			    *p != '\t' && p < buf + buflen) {
+				if (!isprint(*p))
+					goto bail;
 				p++;
+			}
 		} else
 			user = p;
 		*p = '\0';
@@ -445,6 +446,9 @@ __ivaliduser(hostf, raddrl, luser, ruser)
 
 		auser = *user ? user : luser;
 		ahost = buf;
+
+		if (strlen(ahost) >= MAXHOSTNAMELEN)
+			continue;
 
 		/*
 		 * innetgr() must lookup a hostname (we do not attempt

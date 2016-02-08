@@ -1,4 +1,4 @@
-/*	$OpenBSD: rnusers.x,v 1.6 1997/08/19 07:54:49 niklas Exp $	*/
+/*	$OpenBSD: rnusers.x,v 1.8 1998/02/11 04:40:40 deraadt Exp $	*/
 
 /*
  * Sun RPC is a product of Sun Microsystems, Inc. and is provided for
@@ -37,7 +37,7 @@
 %#ifndef lint
 %/*static char sccsid[] = "from: @(#)rnusers.x 1.2 87/09/20 Copyr 1987 Sun Micro";*/
 %/*static char sccsid[] = "from: @(#)rnusers.x	2.1 88/08/01 4.0 RPCSRC";*/
-%static char rcsid[] = "$OpenBSD: rnusers.x,v 1.6 1997/08/19 07:54:49 niklas Exp $";
+%static char rcsid[] = "$OpenBSD: rnusers.x,v 1.8 1998/02/11 04:40:40 deraadt Exp $";
 %#endif /* not lint */
 #endif
 

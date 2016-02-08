@@ -1,4 +1,4 @@
-.\"	$OpenBSD: glob.3,v 1.4 1997/09/01 18:40:32 millert Exp $
+.\"	$OpenBSD: glob.3,v 1.7 1998/02/03 18:25:55 millert Exp $
 .\"
 .\" Copyright (c) 1989, 1991, 1993, 1994
 .\"	The Regents of the University of California.  All rights reserved.
@@ -184,9 +184,16 @@ consisting of only
 .Fa pattern ,
 with the number of total pathnames is set to 1, and the number of matched
 pathnames set to 0.
-If
-.Dv GLOB_QUOTE
-is set, its effect is present in the pattern returned.
+.It Dv GLOB_NOESCAPE
+Normally, every occurrence of a backslash
+.Pq Ql \e
+followed by a character in
+.Fa pattern
+is replaced by that character.
+This is done to negate any special meaning for the character.
+If the
+.Dv GLOB_NOESCAPE
+flag is set, a backslash character is treated as an ordinary character.
 .It Dv GLOB_NOSORT
 By default, the pathnames are sorted in ascending
 .Tn ASCII
@@ -248,11 +255,8 @@ is provided to simplify implementing the historic
 .Xr csh 1
 globbing behavior and should probably not be used anywhere else.
 .It Dv GLOB_QUOTE
-Use the backslash
-.Pq Ql \e
-character for quoting: every occurrence of
-a backslash followed by a character in the pattern is replaced by that
-character, avoiding any special interpretation of the character.
+This option has no effect and is included for backwards
+compatibility with older sources.
 .It Dv GLOB_TILDE
 Expand patterns that start with
 .Ql ~
@@ -410,10 +414,11 @@ execvp("ls", g.gl_pathv);
 .Sh STANDARDS
 The
 .Fn glob
-function is expected to be
+function is expected to conform to
 .St -p1003.2
-compatible with the exception
-that the flags
+and
+.St -xpg4.2 .
+Note, however, that the flags
 .Dv GLOB_ALTDIRFUNC,
 .Dv GLOB_BRACE
 .Dv GLOB_MAGCHAR,
@@ -426,8 +431,7 @@ and the fields
 and 
 .Fa gl_flags
 should not be used by applications striving for strict
-.Tn POSIX
-conformance.
+standards conformance.
 .Sh HISTORY
 The
 .Fn glob
@@ -452,10 +456,3 @@ for any of the errors specified for the library routines
 .Xr malloc 3 ,
 and
 .Xr free 3 .
-.Sh STANDARDS
-The
-.Fn basename                                                           
-and
-.Fn dirname
-functions conform to
-.St -xpg4.2 .

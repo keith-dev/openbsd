@@ -1,4 +1,4 @@
-/*	$OpenBSD: var.c,v 1.6 1997/04/01 07:28:28 millert Exp $	*/
+/*	$OpenBSD: var.c,v 1.8 1998/03/30 06:59:39 deraadt Exp $	*/
 /*	$NetBSD: var.c,v 1.18 1997/03/18 19:24:46 christos Exp $	*/
 
 /*
@@ -43,7 +43,7 @@
 #if 0
 static char sccsid[] = "@(#)var.c	8.3 (Berkeley) 3/19/94";
 #else
-static char rcsid[] = "$OpenBSD: var.c,v 1.6 1997/04/01 07:28:28 millert Exp $";
+static char rcsid[] = "$OpenBSD: var.c,v 1.8 1998/03/30 06:59:39 deraadt Exp $";
 #endif
 #endif /* not lint */
 
@@ -839,16 +839,17 @@ VarSYSVMatch (word, addSpace, buf, patp)
     char *ptr;
     VarPattern 	  *pat = (VarPattern *) patp;
 
-    if (addSpace)
-	Buf_AddByte(buf, (Byte)' ');
+    if (*word) {
+	    if (addSpace)
+		Buf_AddByte(buf, (Byte)' ');
 
-    addSpace = TRUE;
+	    addSpace = TRUE;
 
-    if ((ptr = Str_SYSVMatch(word, pat->lhs, &len)) != NULL)
-	Str_SYSVSubst(buf, pat->rhs, ptr, len);
-    else
-	Buf_AddBytes(buf, strlen(word), (Byte *) word);
-
+	    if ((ptr = Str_SYSVMatch(word, pat->lhs, &len)) != NULL)
+		Str_SYSVSubst(buf, pat->rhs, ptr, len);
+	    else
+		Buf_AddBytes(buf, strlen(word), (Byte *) word);
+    }
     return(addSpace);
 }
 #endif
@@ -1149,7 +1150,6 @@ VarRESubstitute(word, addSpace, buf, patternp)
 	    else if ((*rp == '&') || ((*rp == '\\') && isdigit(rp[1]))) {
 		int n;
 		char *subbuf;
-		char zsub;
 		int sublen;
 		char errstr[3];
 

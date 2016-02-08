@@ -1,4 +1,4 @@
-#	$OpenBSD: rc,v 1.51 1997/10/15 16:28:29 millert Exp $
+#	$OpenBSD: rc,v 1.71 1998/04/07 06:11:52 deraadt Exp $
 
 # System startup script run by init on autoboot
 # or after single-user.
@@ -63,6 +63,7 @@ swapon -a
 
 umount -a >/dev/null 2>&1
 mount -a -t nonfs
+mount -uw /		# root on nfs requires this, others aren't hurt
 rm -f /fastboot		# XXX (root now writeable)
 
 # set flags on ttys.  (do early, in case they use tty for SLIP in netstart)
@@ -75,6 +76,22 @@ echo 'starting network'
 
 mount /usr >/dev/null 2>&1
 mount /var >/dev/null 2>&1
+
+# clean up left-over files
+rm -f /etc/nologin
+rm -f /var/spool/lock/LCK.*
+rm -f /var/spool/uucp/STST/*
+(cd /var/run && { rm -rf -- *; install -c -m 664 -g utmp /dev/null utmp; })
+
+echo 'starting system logger'
+rm -f /dev/log
+syslogd ${syslogd_flags}
+
+# $named_flags is imported from /etc/rc.conf;
+# if $named_flags != NO, named is run.
+if [ "X${named_flags}" != X"NO" ]; then
+	echo 'starting named';		named $named_flags
+fi
 
 # /etc/ifaliases, if it exists, contains the names of additional IP
 # addresses for each interface. It is formatted as a series of lines
@@ -96,26 +113,16 @@ if [ X"${ipfilter}" = X"YES" -a X"${ipmon_flags}" != X"NO" ]; then
 	echo 'starting ipmon';		ipmon ${ipmon_flags}
 fi
 
-if [ X"${rfc1323}" = X"NO" ]; then
-	echo 'disabling rfc1323'; 	sysctl -w net.inet.tcp.rfc1323=0
-fi
-
-# $photurisd_flags is imported from /etc/netstart;
+# $photurisd_flags is imported from /etc/rc.conf;
 # If $photurisd_flags == NO or /etc/photuris/photuris.conf doesn't exist, then
 # photurisd isn't run.
 if [ "X${photurisd_flags}" != X"NO" -a -e /etc/photuris/photuris.conf ]; then
 	echo 'starting photurisd';	photurisd ${photurisd_flags}
 fi
 
-# clean up left-over files
-rm -f /etc/nologin
-rm -f /var/spool/lock/LCK.*
-rm -f /var/spool/uucp/STST/*
-(cd /var/run && { rm -rf -- *; install -c -m 664 -g utmp /dev/null utmp; })
-
 echo -n 'starting rpc daemons:'
 
-# $portmap is imported from /etc/netstart;
+# $portmap is imported from /etc/rc.conf;
 # if $portmap == YES, the portmapper is started.
 if [ X"${portmap}" = X"YES" ]; then
 	echo -n ' portmap';		portmap
@@ -150,11 +157,11 @@ if [ -d /var/yp/binding ]; then
 	fi
 fi
 
-# $nfs_server is imported from /etc/netstart;
+# $nfs_server is imported from /etc/rc.conf;
 # if $nfs_server == YES, the machine is setup for being an nfs server
-if [ X${nfs_server} = X"YES" -a -r /etc/exports -a \
+if [ X${nfs_server} = X"YES" -a -s /etc/exports -a \
     `cat /etc/exports | sed -e '/^#/d' | wc -l` -ne 0 ]; then
-	rm -f /var/db/mountdtab	
+	rm -f /var/db/mountdtab
 	echo -n > /var/db/mountdtab
 	echo -n ' mountd';		mountd
 	echo -n ' nfsd';		nfsd ${nfsd_flags}
@@ -163,36 +170,30 @@ if [ X${nfs_server} = X"YES" -a -r /etc/exports -a \
 	fi
 fi
 
-# $nfs_client is imported from /etc/netstart;
+# $nfs_client is imported from /etc/rc.conf;
 # if $nfs_client == YES, the machine is setup for being an nfs client
 if [ X${nfs_client} = X"YES" ]; then
-	echo -n ' nfsiod';		nfsiod -n 4
+	echo -n ' nfsiod';		nfsiod ${nfsiod_flags}
 fi
 
-if [ X${amd} = X"YES" -a -d ${amd_dir} -a -r ${amd_master} ]; then
+if [ X${amd} = X"YES" -a -d ${amd_dir} -a -e ${amd_master} ]; then
 	echo -n ' amd'
 	amd -l syslog -x error,noinfo,nostats -p \
 	    -a ${amd_dir} `cat ${amd_master}` > /var/run/amd.pid
 fi
 
-echo '.'
-mount -a -t nfs
-
-echo -n 'starting system logger'
-rm -f /dev/log
-syslogd
-
-# $timed_flags is imported from /etc/netstart;
+# $timed_flags is imported from /etc/rc.conf;
 # if $timed_flags == NO, timed isn't run.
 if [ "X${timed_flags}" != X"NO" ]; then
-	echo -n ', time daemon'; timed $timed_flags
+	echo -n ' timed'; timed $timed_flags
 fi
 echo '.'
+
+mount -a -t nfs
 
 # /var/crash should be a directory or a symbolic link
 # to the crash directory if core dumps are to be saved.
 if [ -d /var/crash ]; then
-	echo checking for core dump...
 	savecore /var/crash
 fi
 
@@ -223,6 +224,17 @@ echo clearing /tmp
 (cd /tmp && rm -rf [a-km-pr-zA-Z]* &&
     find . ! -name . ! -name lost+found ! -name quota.user \
 	! -name quota.group -exec rm -rf -- {} \; -type d -prune)
+
+if [ -f /etc/sysctl.conf ]; then
+(
+	# delete comments and blank lines
+	set -- `sed -e 's/#.*$//' /etc/sysctl.conf | grep -v '^$'`
+	while [ $# -ge 1 ] ; do
+		sysctl -w $1
+		shift 1
+	done
+)
+fi
 
 test -f /etc/rc.securelevel && . /etc/rc.securelevel
 if [ X${securelevel} != X"" ]; then
@@ -287,29 +299,22 @@ echo '.'
 
 echo -n starting network daemons:
 
-# $gated and $routed_flags are imported from /etc/netstart.
+# $gated and $routed_flags are imported from /etc/rc.conf.
 # If $gated == YES, gated is used; otherwise routed.
 # If $routed_flags == NO, routed isn't run.
-if [ X${gated} = X"YES" -a -r /etc/gated.conf ]; then
+if [ X${gated} = X"YES" -a -e /etc/gated.conf ]; then
 	echo -n ' gated';		gated $gated_flags
 elif [ "X${routed_flags}" != X"NO" ]; then
 	echo -n ' routed';		routed $routed_flags
 fi
 
-# $mrouted_flags is imported from /etc/netstart;
+# $mrouted_flags is imported from /etc/rc.conf;
 # If $mrouted_flags == NO, then mrouted isn't run.
 if [ "X${mrouted_flags}" != X"NO" ]; then
 	echo -n ' mrouted';		mrouted $mrouted_flags
 fi
 
-# $named_flags is imported from /etc/netstart;
-# if $named_flags != NO, named is run.
-if [ "X${named_flags}" != X"NO" ]; then
-	echo -n ' named';		named $named_flags
-fi
-mount -a -t nfs		# do again, in case DNS hostnames are used..
-
-# $rwhod is imported from /etc/netstart;
+# $rwhod is imported from /etc/rc.conf;
 # if $rwhod == YES, rwhod is run.
 if [ X${rwhod} = X"YES" ]; then
 	echo -n ' rwhod';		rwhod
@@ -320,37 +325,55 @@ if [ X${lpd} = X"YES" ]; then
 	echo -n ' printer';		lpd
 fi
 
-# $sendmail_flags is imported from /etc/netstart;
+# $sendmail_flags is imported from /etc/rc.conf;
 # If $sendmail_flags == NO or /etc/sendmail.cf doesn't exist, then
 # sendmail isn't run.  We call sendmail with a full path so that
 # SIGHUP works.
-if [ "X${sendmail_flags}" != X"NO" -a -r /etc/sendmail.cf ]; then
+if [ "X${sendmail_flags}" != X"NO" -a -s /etc/sendmail.cf ]; then
 	echo -n ' sendmail';		/usr/sbin/sendmail ${sendmail_flags}
 fi
+
+if [ "X${httpd_flags}" != X"NO"  ]; then
+	echo -n ' httpd';		/usr/sbin/httpd ${httpd_flags}
+fi
+
+# $smtpfwdd_flags is imported from /etc/rc.conf;
+# If $smtpfwdd_flags == NO, smtpfwdd isn't run.
+if [ "X${smtpfwdd_flags}" != X"NO" ]; then
+	echo -n ' smtpfwdd';	/usr/libexec/smtpfwdd ${smtpfwdd_flags}
+fi
+
 
 if [ X${inetd} = X"YES" ]; then
 	echo -n ' inetd';		inetd
 fi
 
-# $rarpd_flags is imported from /etc/netstart;
+# $rarpd_flags is imported from /etc/rc.conf;
 # If $rarpd_flags == NO or /etc/ethers doesn't exist, then
 # rarpd isn't run.
-if [ "X${rarpd_flags}" != X"NO" -a -r /etc/ethers ]; then
+if [ "X${rarpd_flags}" != X"NO" -a -s /etc/ethers ]; then
 	echo -n ' rarpd';		rarpd ${rarpd_flags}
 fi
 
-# $bootparamd_flags is imported from /etc/netstart;
+# $bootparamd_flags is imported from /etc/rc.conf;
 # If $bootparamd_flags == NO or /etc/bootparams doesn't exist, then
 # bootparamd isn't run.
-if [ "X${bootparamd_flags}" != X"NO" -a -r /etc/bootparams ]; then
+if [ "X${bootparamd_flags}" != X"NO" -a -s /etc/bootparams ]; then
 	echo -n ' rpc.bootparamd';	rpc.bootparamd ${bootparamd_flags}
 fi
 
-# $rbootd_flags is imported from /etc/netstart;
+# $rbootd_flags is imported from /etc/rc.conf;
 # If $rbootd_flags == NO or /etc/rbootd.conf doesn't exist, then
 # rbootd isn't run.
-if [ "X${rbootd_flags}" != X"NO" -a -r /etc/rbootd.conf ]; then
+if [ "X${rbootd_flags}" != X"NO" -a -s /etc/rbootd.conf ]; then
 	echo -n ' rbootd';		rbootd ${rbootd_flags}
+fi
+
+# $mopd_flags is imported from /etc/rc.conf;
+# If $mopd_flags == NO or /tftpboot/mop doesn't exist, then
+# mopd isn't run.
+if [ "X${mopd_flags}" != X"NO" -a -d /tftpboot/mop ]; then
+	echo -n ' mopd';		mopd ${mopd_flags}
 fi
 
 if [ -x /usr/sbin/screenblank ]; then
@@ -373,16 +396,30 @@ if [ -f /sbin/ldconfig ]; then
 		_LIBS="$_LIBS /usr/X11R6/lib"
 	fi
 	ldconfig $_LIBS
-fi 
+fi
 
-# Kerberos runs ONLY on the Kerberos server machine
+# Kerberos runs ONLY on the Kerberos servers
+# Kadmin is runs only on the main server
 if [ X${kerberos_server} = X"YES" ]; then
 	echo 'kerberos server'
-	kerberos >> /var/log/kerberos.log &
-	kadmind -n >> /var/log/kadmind.log &
+	/usr/libexec/kerberos >> /var/log/kerberos.log &
+	/usr/libexec/kadmind -n >> /var/log/kadmind.log &
+fi
+
+# Kpropd runs only on Kerberos slave servers
+if [ X${kerberos_slave} = X"YES" ]; then
+	echo 'kerberos slave server'
+	/usr/libexec/kerberos -s >> /var/log/kerberos.log &
+	/usr/libexec/kpropd -i &
 fi
 
 . /etc/rc.local
 
 date
+
+# Alternatively, on some architectures, xdm may be started in /etc/ttys.
+if [ "X${xdm_flags}" != X"NO" ]; then
+	echo 'starting xdm...';		/usr/X11R6/bin/xdm
+fi
+
 exit 0

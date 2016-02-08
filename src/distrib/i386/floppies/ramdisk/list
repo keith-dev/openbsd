@@ -1,4 +1,4 @@
-#	$OpenBSD: list,v 1.11 1997/09/06 03:53:59 millert Exp $
+#	$OpenBSD: list,v 1.15 1998/03/30 20:47:25 deraadt Exp $
 
 # copy the crunched binary, link to it, and kill it
 COPY	${OBJDIR}/instbin	instbin
@@ -17,7 +17,7 @@ LINK	instbin			bin/mkdir
 LINK	instbin			bin/mv
 LINK	instbin			bin/pwd
 LINK	instbin			bin/rm
-LINK	instbin			bin/sh bin/pdksh
+LINK	instbin			bin/sh bin/ksh
 LINK	instbin			bin/sleep
 LINK	instbin			bin/stty
 LINK	instbin			bin/sync
@@ -51,7 +51,6 @@ LINK	instbin			usr/bin/less usr/bin/more
 LINK	instbin			usr/bin/rsh
 LINK	instbin			usr/bin/sed
 LINK	instbin			usr/bin/sort
-LINK	instbin			usr/bin/vi
 LINK	instbin			usr/sbin/chat
 LINK	instbin			usr/sbin/chown usr/sbin/chgrp
 LINK	instbin			usr/sbin/pppd
@@ -70,10 +69,6 @@ SPECIAL	/bin/rm dev/MAKEDEV
 COPY	${DESTDIR}/usr/mdec/biosboot	usr/mdec/biosboot
 COPY	${DESTDIR}/usr/mdec/mbr		usr/mdec/mbr
 COPY	${DESTDIR}/usr/mdec/boot	usr/mdec/boot
-COPY	${DESTDIR}/usr/mdec/bootsd	usr/mdec/bootsd
-COPY	${DESTDIR}/usr/mdec/sdboot	usr/mdec/sdboot
-LINK	usr/mdec/bootsd			usr/mdec/bootwd
-LINK	usr/mdec/sdboot			usr/mdec/wdboot
 
 # various files that we need in /etc for the install
 COPY	${DESTDIR}/etc/group		etc/group
@@ -98,4 +93,4 @@ COPY	install.md			install.md
 COPY	${CURDIR}/../../../miniroot/install.sh		install
 COPY	${CURDIR}/../../../miniroot/upgrade.sh		upgrade
 SPECIAL sed "/^VERSION=/s/=.*/=${REV}/" < ${CURDIR}/../../../miniroot/install.sub > install.sub
-SPECIAL	chmod 755 install
+SPECIAL	chmod 755 install upgrade

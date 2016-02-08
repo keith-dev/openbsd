@@ -8,7 +8,7 @@
  */
 
 #ifndef lint
-static char rcsid[] = "$Id: pair.c,v 1.1.1.1 1996/08/19 10:12:13 downsj Exp $";
+static char rcsid[] = "$Id: pair.c,v 1.2 1997/11/30 07:55:48 millert Exp $";
 #endif
 
 #include "config.h"
@@ -231,7 +231,7 @@ register int siz;
 
 	for (i = 1; i < n; i += 2) {
 		if (siz == off - ino[i] &&
-		    memcmp(key, pag + ino[i], siz) == 0)
+		    memEQ(key, pag + ino[i], siz))
 			return i;
 		off = ino[i + 1];
 	}

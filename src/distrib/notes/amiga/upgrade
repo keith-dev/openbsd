@@ -1,13 +1,13 @@
-The upgrade to OpenBSD 2.2 is a binary upgrade; it would be prohibitive
-to make users upgrade by compiling and installing the 2.2 sources, and
+The upgrade to OpenBSD 2.3 is a binary upgrade; it would be prohibitive
+to make users upgrade by compiling and installing the 2.3 sources, and
 it would be very difficult to even compile a set of instructions that
 allowed them to do so.
 
 To do the upgrade, and if you are using the miniroot installation, you
 must have the OpenBSD kernel on AmigaDOS and you must transfer the root
-filesystem miniroot22.fs onto the swap partition of the OpenBSD hard disk.
+filesystem miniroot23.fs onto the swap partition of the OpenBSD hard disk.
 If you are using the ramdisk installation, the bsd.rd kernel is enough.
-You must also have at least the "base22" binary distribution set available,
+You must also have at least the "base23" binary distribution set available,
 so that you can upgrade with it, using one of the upgrade methods described
 above.  Finally, you must have sufficient disk space available to install
 the new binaries.  Since the old binaries are being overwritten in place,
@@ -32,7 +32,7 @@ To upgrade your system, follow the following instructions:
 	partition used by OpenBSD for swapping, as described in the
 	"Preparing your System for OpenBSD Installation" section above.
 
-	Now boot up OpenBSD using the 2.2 kernel using the loadbsd
+	Now boot up OpenBSD using the 2.3 kernel using the loadbsd
 	command:
 
 		loadbsd -b bsd
@@ -48,7 +48,7 @@ To upgrade your system, follow the following instructions:
 
 	Ramdisk installation:
 
-	Now boot up OpenBSD using the 2.2 kernel using the loadbsd
+	Now boot up OpenBSD using the 2.3 kernel using the loadbsd
 	command:
 
 		loadbsd bsd.rd
@@ -76,7 +76,7 @@ To upgrade your system, follow the following instructions:
 	However, if you hit it at an inopportune moment, your system
 	may be left in an inconsistent (and possibly unusable) state.
 
-	The upgrade program will then chack & mount your root filesystem
+	The upgrade program will then check & mount your root filesystem
 	under /mnt and grab some configuration info from it for the
 	continued upgrade process.  You'll be asked if the network
 	should be enabled at this point.  After that is done the rest
@@ -95,14 +95,14 @@ To upgrade your system, follow the following instructions:
 	After the software has been transferred to the machine (or
 	mounted, in the case of upgrading via NFS).
 
-Your system has now been upgraded to OpenBSD 2.2.
+Your system has now been upgraded to OpenBSD 2.3.
 
-	After all this, your machine is a complete OpenBSD 2.2 system.
+	After all this, your machine is a complete OpenBSD 2.3 system.
 	However, that doesn't mean that you're finished with the upgrade
 	process.  There are several things that you should do, or might
 	have to do, to insure that the system works properly.
 
-	First, you will probably want to get the etc22.tar.gz distribution,
+	First, you will probably want to get the etc23.tar.gz distribution,
 	extract it, and compare its contents with those in your /etc/
 	directory.  You will probably want to replace some of your
 	system configuration files, or incorporate some of the changes

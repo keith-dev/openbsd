@@ -1,4 +1,4 @@
-/*	$OpenBSD: rarpd.c,v 1.15 1997/09/18 08:05:47 deraadt Exp $ */
+/*	$OpenBSD: rarpd.c,v 1.17 1998/03/23 04:18:41 deraadt Exp $ */
 /*	$NetBSD: rarpd.c,v 1.12 1996/03/21 18:28:23 jtc Exp $	*/
 
 /*
@@ -28,7 +28,7 @@ char    copyright[] =
 #endif				/* not lint */
 
 #ifndef lint
-static char rcsid[] = "$OpenBSD: rarpd.c,v 1.15 1997/09/18 08:05:47 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: rarpd.c,v 1.17 1998/03/23 04:18:41 deraadt Exp $";
 #endif
 
 
@@ -108,20 +108,13 @@ main(argc, argv)
 	char  **argv;
 {
 	int     op, pid, devnull, f;
-	char   *ifname, *hostname, *name;
-
+	char   *ifname, *hostname;
+	extern char *__progname;
 	extern char *optarg;
 	extern int optind, opterr;
 
-	if ((name = strrchr(argv[0], '/')))
-		++name;
-	else
-		name = argv[0];
-	if (*name == '-')
-		++name;
-
 	/* All error reporting is done through syslogs. */
-	openlog(name, LOG_PID | LOG_CONS, LOG_DAEMON);
+	openlog(__progname, LOG_PID | LOG_CONS, LOG_DAEMON);
 
 	opterr = 0;
 	while ((op = getopt(argc, argv, "adf")) != -1) {
@@ -399,11 +392,11 @@ rarp_check(p, len)
 		err(NONFATAL, "request fails sanity check");
 		return 0;
 	}
-	if (bcmp((char *) &ep->ether_shost, (char *) &ap->arp_sha, 6) != 0) {
+	if (memcmp((char *) &ep->ether_shost, (char *) &ap->arp_sha, 6) != 0) {
 		err(NONFATAL, "ether/arp sender address mismatch");
 		return 0;
 	}
-	if (bcmp((char *) &ap->arp_sha, (char *) &ap->arp_tha, 6) != 0) {
+	if (memcmp((char *) &ap->arp_sha, (char *) &ap->arp_tha, 6) != 0) {
 		err(NONFATAL, "ether/arp target address mismatch");
 		return 0;
 	}
@@ -419,7 +412,8 @@ rarp_loop()
 {
 	u_char *buf, *bp, *ep;
 	int     cc, fd;
-	fd_set  fds, listeners;
+	fd_set  *fdsp, *lfdsp;
+	int	fdsn;
 	int     bufsize, maxfd = 0;
 	struct if_info *ii;
 
@@ -440,22 +434,30 @@ rarp_loop()
          * Find the highest numbered file descriptor for select().
          * Initialize the set of descriptors to listen to.
          */
-	FD_ZERO(&fds);
-	for (ii = iflist; ii; ii = ii->ii_next) {
-		FD_SET(ii->ii_fd, &fds);
+	for (ii = iflist; ii; ii = ii->ii_next)
 		if (ii->ii_fd > maxfd)
 			maxfd = ii->ii_fd;
-	}
+
+	fdsn = howmany(maxfd+1, NFDBITS) * sizeof(fd_mask);
+	if ((fdsp = (fd_set *)malloc(fdsn)) == NULL)
+		err(1, "malloc");
+	if ((lfdsp = (fd_set *)malloc(fdsn)) == NULL)
+		err(1, "malloc");
+
+	memset(fdsp, 0, fdsn);
+	for (ii = iflist; ii; ii = ii->ii_next)
+		FD_SET(ii->ii_fd, fdsp);
+
 	while (1) {
-		listeners = fds;
-		if (select(maxfd + 1, &listeners, (struct fd_set *) 0,
+		memcpy(lfdsp, fdsp, fdsn);
+		if (select(maxfd + 1, lfdsp, (struct fd_set *) 0,
 			(struct fd_set *) 0, (struct timeval *) 0) < 0) {
 			err(FATAL, "select: %s", strerror(errno));
 			/* NOTREACHED */
 		}
 		for (ii = iflist; ii; ii = ii->ii_next) {
 			fd = ii->ii_fd;
-			if (!FD_ISSET(fd, &listeners))
+			if (!FD_ISSET(fd, lfdsp))
 				continue;
 	again:
 			cc = read(fd, (char *) buf, bufsize);
@@ -489,6 +491,8 @@ rarp_loop()
 			}
 		}
 	}
+	free(fdsp);
+	free(lfdsp);
 }
 
 #ifdef REQUIRE_TFTPBOOT
@@ -644,7 +648,7 @@ lookup_eaddr(ifname, eaddr)
 		    sdl->sdl_alen != 6)
 			continue;
 		if (!strncmp(ifr->ifr_name, ifname, sizeof(ifr->ifr_name))) {
-			bcopy((caddr_t)LLADDR(sdl), (caddr_t)eaddr, 6);
+			memcpy((caddr_t)eaddr, (caddr_t)LLADDR(sdl), 6);
 			if (dflag)
 				fprintf(stderr, "%s: %x:%x:%x:%x:%x:%x\n",
 				    ifr->ifr_name, eaddr[0], eaddr[1],
@@ -723,7 +727,7 @@ update_arptab(ep, ipaddr)
 	   because AF_UNSPEC is zero and the kernel assumes that a zero
 	   sa_family means that the real sa_family value is in sa_len.  */
 	request.arp_ha.sa_len = 16; /* XXX */
-	bcopy((char *) ep, (char *) request.arp_ha.sa_data, 6);
+	memcpy((char *) request.arp_ha.sa_data, (char *) ep, 6);
 
 	s = socket(AF_INET, SOCK_DGRAM, 0);
 	if (ioctl(s, SIOCSARP, (caddr_t) & request) < 0) {
@@ -786,13 +790,13 @@ rarp_reply(ii, ep, ipaddr)
 	ap->ea_hdr.ar_pro = htons(ETHERTYPE_IP);
 	ap->arp_op = htons(ARPOP_REVREPLY);
 
-	bcopy((char *) &ap->arp_sha, (char *) &ep->ether_dhost, 6);
-	bcopy((char *) ii->ii_eaddr, (char *) &ep->ether_shost, 6);
-	bcopy((char *) ii->ii_eaddr, (char *) &ap->arp_sha, 6);
+	memcpy((char *) &ep->ether_dhost, (char *) &ap->arp_sha, 6);
+	memcpy((char *) &ep->ether_shost, (char *) ii->ii_eaddr, 6);
+	memcpy((char *) &ap->arp_sha, (char *) ii->ii_eaddr, 6);
 
-	bcopy((char *) &ipaddr, (char *) ap->arp_tpa, 4);
+	memcpy((char *) ap->arp_tpa, (char *) &ipaddr, 4);
 	/* Target hardware is unchanged. */
-	bcopy((char *) &ii->ii_ipaddr, (char *) ap->arp_spa, 4);
+	memcpy((char *) ap->arp_spa, (char *) &ii->ii_ipaddr, 4);
 
 	len = sizeof(*ep) + sizeof(*ap);
 	n = write(ii->ii_fd, (char *) ep, len);

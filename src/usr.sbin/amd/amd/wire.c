@@ -36,7 +36,7 @@
  * SUCH DAMAGE.
  *
  *	from: @(#)wire.c	8.1 (Berkeley) 6/6/93
- *	$Id: wire.c,v 1.2 1997/01/31 14:42:03 graichen Exp $
+ *	$Id: wire.c,v 1.4 1998/03/20 03:04:00 angelos Exp $
  */
 
 /*
@@ -161,6 +161,7 @@ char *getwire()
 		/*
 		 * Get the netmask of this interface
 		 */
+		((struct sockaddr_in *)&ifr->ifr_addr)->sin_addr.s_addr = address;
 		if (ioctl(sk, SIOCGIFNETMASK, (caddr_t) ifr) < 0)
 			continue;
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: unistd.h,v 1.13 1997/06/20 04:10:20 millert Exp $ */
+/*	$OpenBSD: unistd.h,v 1.19 1998/02/16 09:46:03 deraadt Exp $ */
 /*	$NetBSD: unistd.h,v 1.26.4.1 1996/05/28 02:31:51 mrg Exp $	*/
 
 /*-
@@ -54,7 +54,7 @@
 __BEGIN_DECLS
 __dead void	 _exit __P((int)) __attribute__((noreturn));
 int	 access __P((const char *, int));
-unsigned alarm __P((unsigned));
+unsigned int alarm __P((unsigned int));
 int	 chdir __P((const char *));
 int	 chown __P((const char *, uid_t, gid_t));
 int	 close __P((int));
@@ -92,7 +92,7 @@ int	 setgid __P((gid_t));
 int	 setpgid __P((pid_t, pid_t));
 pid_t	 setsid __P((void));
 int	 setuid __P((uid_t));
-unsigned sleep __P((unsigned));
+unsigned int sleep __P((unsigned int));
 long	 sysconf __P((int));
 pid_t	 tcgetpgrp __P((int));
 int	 tcsetpgrp __P((int, pid_t));
@@ -131,7 +131,6 @@ char	*getwd __P((char *));			/* obsoleted by getcwd() */
 int	 initgroups __P((const char *, gid_t));
 int	 iruserok __P((u_int32_t, int, const char *, const char *));
 int	 lchown __P((const char *, uid_t, gid_t));
-int	 mknod __P((const char *, mode_t, dev_t));
 char	*mkdtemp __P((char *));
 int	 mkstemp __P((char *));
 char	*mktemp __P((char *));
@@ -139,7 +138,7 @@ int	 nfssvc __P((int, void *));
 int	 nice __P((int));
 void	 psignal __P((unsigned int, const char *));
 extern __const char *__const sys_siglist[];
-int	 profil __P((char *, size_t, u_long, u_int));
+int	 profil __P((char *, size_t, unsigned long, unsigned int));
 int	 rcmd __P((char **, int, const char *,
 		const char *, const char *, int *));
 int	 rcmdsh __P((char **, int, const char *,
@@ -154,7 +153,9 @@ int	 rresvport __P((int *));
 int	 ruserok __P((const char *, int, const char *, const char *));
 int	 quotactl __P((const char *, int, int, char *));
 char	*sbrk __P((int));
+#ifndef _XOPEN_SOURCE
 int	 select __P((int, fd_set *, fd_set *, fd_set *, struct timeval *));
+#endif
 int	 setdomainname __P((const char *, int));
 int	 setegid __P((gid_t));
 int	 seteuid __P((uid_t));
@@ -170,15 +171,16 @@ int	 setreuid __P((int, int));
 int	 setrgid __P((gid_t));
 int	 setruid __P((uid_t));
 void	 setusershell __P((void));
+void	 swab __P((const void *, void *, size_t));
 int	 swapon __P((const char *));
 int	 symlink __P((const char *, const char *));
 void	 sync __P((void));
 int	 syscall __P((int, ...));
 int	 truncate __P((const char *, off_t));
 int	 ttyslot __P((void));
-u_int	 ualarm __P((u_int, u_int));
+unsigned int	 ualarm __P((unsigned int, unsigned int));
 int	 undelete __P((const char *));
-void	 usleep __P((u_int));
+int	 usleep __P((useconds_t));
 void	*valloc __P((size_t));			/* obsoleted by malloc() */
 pid_t	 vfork __P((void));
 int	 issetugid __P((void));
@@ -192,6 +194,16 @@ extern	 int optreset;
 int	 getsubopt __P((char **, char * const *, char **));
 extern	 char *suboptarg;		/* getsubopt(3) external variable */
 #endif /* !_POSIX_SOURCE */
+
+#if (!defined(_POSIX_SOURCE) && !defined(_POSIX_C_SOURCE) && \
+     !defined(_XOPEN_SOURCE)) || \
+    (defined(_XOPEN_SOURCE) && _XOPEN_SOURCE_EXTENDED - 0 == 1)
+#define F_ULOCK         0
+#define F_LOCK          1
+#define F_TLOCK         2
+#define F_TEST          3
+int     lockf __P((int, int, off_t));
+#endif /* (!defined(_POSIX_SOURCE) && !defined(_XOPEN_SOURCE)) || ... */
 __END_DECLS
 
 #endif /* !_UNISTD_H_ */

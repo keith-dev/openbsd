@@ -1,4 +1,4 @@
-/*	$OpenBSD: private.h,v 1.6 1997/01/14 03:16:48 millert Exp $	*/
+/*	$OpenBSD: private.h,v 1.10 1998/01/23 19:33:51 millert Exp $	*/
 
 #ifndef PRIVATE_H
 
@@ -13,9 +13,11 @@
 #define TM_GMTOFF		tm_gmtoff
 #define TM_ZONE			tm_zone
 #define PCTS			1
+#define XPG4_1994_04_09		1
 #define STD_INSPIRED		1
 #define HAVE_LONG_DOUBLE	1
 #define HAVE_STRERROR		1
+#define NO_RUN_TIME_WARNINGS_ABOUT_YEAR_2000_PROBLEMS_THANK_YOU	1
 
 /*
 ** This header is for use ONLY with the time conversion code.
@@ -32,7 +34,7 @@
 #if 0
 #ifndef lint
 #ifndef NOID
-static char	privatehid[] = "@(#)private.h	7.44";
+static char	privatehid[] = "@(#)private.h	7.46";
 #endif /* !defined NOID */
 #endif /* !defined lint */
 #endif
@@ -66,9 +68,11 @@ static char	privatehid[] = "@(#)private.h	7.44";
 #define HAVE_UTMPX_H		0
 #endif /* !defined HAVE_UTMPX_H */
 
+#if 0
 #ifndef LOCALE_HOME
-#define LOCALE_HOME		"/usr/lib/locale"
+#define LOCALE_HOME		"/usr/share/locale"
 #endif /* !defined LOCALE_HOME */
+#endif
 
 /*
 ** Nested includes
@@ -185,6 +189,19 @@ extern int	unlink P((const char * filename));
 extern int errno;
 #endif /* !defined errno */
 #endif
+
+/*
+** Private function declarations.
+*/
+char *	icalloc P((int nelem, int elsize));
+char *	icatalloc P((char * old, const char * new));
+char *	icpyalloc P((const char * string));
+char *	imalloc P((int n));
+void *	irealloc P((void * pointer, int size));
+void	icfree P((char * pointer));
+void	ifree P((char * pointer));
+char *	scheck P((const char *string, const char *format));
+
 
 /*
 ** Finally, some convenience items.

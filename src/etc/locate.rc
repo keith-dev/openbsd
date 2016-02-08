@@ -1,8 +1,7 @@
-#	$OpenBSD: locate.rc,v 1.2 1997/04/03 00:57:37 michaels Exp $
+#	$OpenBSD: locate.rc,v 1.4 1998/04/10 22:42:19 todd Exp $
 #
 # /etc/locate.rc -  command script for updatedb(8)
 #
-# $Id: locate.rc,v 1.2 1997/04/03 00:57:37 michaels Exp $
 
 # temp directory
 TMPDIR="/tmp"
@@ -20,5 +19,5 @@ PRUNEPATHS="/tmp /usr/tmp /var/tmp"
 # and is the SEARCHPATHS starts in such a filesystem locate will build
 # an empty database
 #
-# be carefully if you add 'nfs'
+# be careful if you add 'nfs'
 FILESYSTEMS="ffs ufs"

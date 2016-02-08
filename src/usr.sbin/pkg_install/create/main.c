@@ -1,7 +1,7 @@
-/*	$OpenBSD: main.c,v 1.4 1997/01/15 23:44:10 millert Exp $	*/
+/*	$OpenBSD: main.c,v 1.6 1998/04/07 04:17:49 deraadt Exp $	*/
 
 #ifndef lint
-static const char *rcsid = "$OpenBSD: main.c,v 1.4 1997/01/15 23:44:10 millert Exp $";
+static const char *rcsid = "$OpenBSD: main.c,v 1.6 1998/04/07 04:17:49 deraadt Exp $";
 #endif
 
 /*
@@ -155,28 +155,13 @@ usage(const char *name, const char *fmt, ...)
     if (fmt) {
 	fprintf(stderr, "%s: ", name);
 	vfprintf(stderr, fmt, args);
-	fprintf(stderr, "\n\n");
+	fprintf(stderr, "\n");
     }
     va_end(args);
-    fprintf(stderr, "Usage: %s [args] pkg\n\n", name);
-    fprintf(stderr, "Where args are one or more of:\n\n");
-
-    fprintf(stderr, "-c [-]file Get one-line comment from file (-or arg)\n");
-    fprintf(stderr, "-d [-]file Get description from file (-or arg)\n");
-    fprintf(stderr, "-f file    get list of files from file (- for stdin)\n");
-    fprintf(stderr, "-h         follow symbolic links\n");
-    fprintf(stderr, "-i script  install script\n");
-    fprintf(stderr, "-k script  de-install script\n");
-    fprintf(stderr, "-D file    install notice\n");
-    fprintf(stderr, "-m file    mtree spec for directories\n");
-    fprintf(stderr, "-P pkgs    set package dependency list to pkgs\n");
-    fprintf(stderr, "-p prefix  install prefix will be arg\n");
-    fprintf(stderr, "-r script  pre/post requirements script\n");
-    fprintf(stderr, "-t temp    use temp as template for mktemp()\n");
-    fprintf(stderr, "-X file    exclude files listed in file\n");
-    fprintf(stderr, "-v         verbose\n");
-    fprintf(stderr, "-Y         assume `yes' answer to all questions\n");
-    fprintf(stderr, "-N         assume `no' answer to all questions\n");
-    fprintf(stderr, "-O         print a revised packing list and exit\n");
+    fprintf(stderr,
+	"usage: %s [-YNOhv] [-P pkgs] [-p prefix] [-f contents] [-i iscript]\n"
+	"       [-k dscript] [-r rscript] [-t template] [-X excludefile]\n"
+	"       [-D displayfile] [-m mtreefile] -d description -f packlist] pkg\n",
+	name);
     exit(1);
 }

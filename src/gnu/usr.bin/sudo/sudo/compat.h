@@ -1,5 +1,7 @@
+/*	$OpenBSD: compat.h,v 1.5 1998/03/31 06:40:50 millert Exp $	*/
+
 /*
- *  CU sudo version 1.5.3
+ *  CU sudo version 1.5.5
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -17,7 +19,7 @@
  *
  *  Please send bugs, changes, problems to sudo-bugs@courtesan.com
  *
- *  $Id: compat.h,v 1.2 1996/11/17 16:33:56 millert Exp $
+ *  Id: compat.h,v 1.36 1998/03/31 05:05:29 millert Exp $
  */
 
 #ifndef _SUDO_COMPAT_H
@@ -138,7 +140,7 @@
 #  ifdef __hpux
 #    define seteuid(_EUID)	(setresuid(UID_NO_CHANGE, _EUID, UID_NO_CHANGE))
 #  else
-#    define seteuid(_EUID)	(setresuid(UID_NO_CHANGE, _EUID))
+#    define seteuid(_EUID)	(setreuid(UID_NO_CHANGE, _EUID))
 #  endif /* __hpux */
 #endif /* HAVE_SETEUID */
 

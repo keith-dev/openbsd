@@ -1,4 +1,4 @@
-/*	$OpenBSD: w.c,v 1.20 1997/07/25 14:36:24 kstailey Exp $	*/
+/*	$OpenBSD: w.c,v 1.24 1998/02/03 19:18:22 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 1980, 1991, 1993, 1994
@@ -40,7 +40,11 @@ static char copyright[] =
 #endif /* not lint */
 
 #ifndef lint
+#if 0
 static char sccsid[] = "@(#)w.c	8.4 (Berkeley) 4/16/94";
+#else
+static char *rcsid = "$OpenBSD: w.c,v 1.24 1998/02/03 19:18:22 deraadt Exp $";
+#endif
 #endif /* not lint */
 
 /*
@@ -345,13 +349,19 @@ pr_args(kp)
 	char **argv, *str;
 	int left;
 
-	if (kp == 0)
+	if (kp == NULL)
 		goto nothing;
 	left = argwidth;
 	argv = kvm_getargv(kd, kp, argwidth+60);  /*+60 for ftpd snip */
-	if (argv == 0)
+	if (argv == NULL)
 		goto nothing;
 
+	if (*argv == NULL || **argv == '\0') {
+		/* Process has zeroed argv[0], display executable name. */
+		fmt_putc('(', &left);
+		fmt_puts(kp->kp_proc.p_comm, &left);
+		fmt_putc(')', &left);
+	}
 	while (*argv) {
 		/* ftp is a special case... */
 		if (strncmp(*argv, "ftpd:", 5) == 0) {
@@ -469,6 +479,6 @@ usage(wcmd)
 		(void)fprintf(stderr,
 		    "usage: w: [-hia] [-M core] [-N system] [user]\n");
 	else
-		(void)fprintf(stderr, "uptime\n");
+		(void)fprintf(stderr, "usage: uptime\n");
 	exit (1);
 }

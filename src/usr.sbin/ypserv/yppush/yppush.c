@@ -1,4 +1,4 @@
-/*	$OpenBSD: yppush.c,v 1.7 1997/05/01 22:14:46 niklas Exp $ */
+/*	$OpenBSD: yppush.c,v 1.11 1998/02/24 04:29:06 deraadt Exp $ */
 
 /*
  * Copyright (c) 1995 Mats O Jansson <moj@stacken.kth.se>
@@ -32,7 +32,7 @@
  */
 
 #ifndef lint
-static char rcsid[] = "$OpenBSD: yppush.c,v 1.7 1997/05/01 22:14:46 niklas Exp $";
+static char rcsid[] = "$OpenBSD: yppush.c,v 1.11 1998/02/24 04:29:06 deraadt Exp $";
 #endif /* not lint */
 
 #include <sys/types.h>
@@ -48,6 +48,7 @@ static char rcsid[] = "$OpenBSD: yppush.c,v 1.7 1997/05/01 22:14:46 niklas Exp $
 #include <sys/resource.h>
 #include <sys/signal.h>
 #include <netdb.h>
+#include <string.h>
 #include <errno.h>
 #include <fcntl.h>
 
@@ -172,10 +173,15 @@ char *indata;
 		fprintf(stderr, "yppush: Cannot create callback transport.\n");
 		return;
 	}
+	if (transp->xp_port >= IPPORT_RESERVED) {
+		SVC_DESTROY(transp);
+		fprintf(stderr, "yppush: Cannot allocate reserved port.\n");
+		return;
+	}
 
 	for (prog=0x40000000; prog<0x5fffffff; prog++) {
 		if (sts = svc_register(transp, prog, 1,
-				       yppush_xfrrespprog_1, IPPROTO_UDP))
+		    yppush_xfrrespprog_1, IPPROTO_UDP))
 			break;
 	}
 
@@ -193,12 +199,13 @@ char *indata;
 		exit(0);
 	default:
 		close(transp->xp_sock);
+		transp->xp_sock = -1;
 		req_xfr(pid, prog, transp, host, client);
 		wait4(pid, &status, 0, &res);
 		svc_unregister(prog, 1);
-		if (client != NULL) {
-		  	clnt_destroy(client);
-		}
+		if (client != NULL)
+			clnt_destroy(client);
+		/* XXX transp leak? */
 	}
 
 }

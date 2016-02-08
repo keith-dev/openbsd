@@ -1,15 +1,14 @@
 %{
-/* $RCSfile: a2p.y,v $$Revision: 1.1.1.1 $$Date: 1996/08/19 10:13:34 $
+/* $RCSfile: a2p.y,v $$Revision: 1.2 $$Date: 1997/11/30 08:07:03 $
  *
- *    Copyright (c) 1991, Larry Wall
+ *    Copyright (c) 1991-1997, Larry Wall
  *
  *    You may distribute under the terms of either the GNU General Public
  *    License or the Artistic License, as specified in the README file.
  *
  * $Log: a2p.y,v $
- * Revision 1.1.1.1  1996/08/19 10:13:34  downsj
- * Import of Perl 5.003 into the tree.  Makefile.bsd-wrapper and
- * config.sh.OpenBSD are the only local changes.
+ * Revision 1.2  1997/11/30 08:07:03  millert
+ * perl 5.004_04
  *
  */
 
@@ -137,6 +136,8 @@ expr	: term
 		{ $$ = $1; }
 	| expr term
 		{ $$ = oper2(OCONCAT,$1,$2); }
+	| expr '?' expr ':' expr
+		{ $$ = oper3(OCOND,$1,$3,$5); }
 	| variable ASGNOP cond
 		{ $$ = oper3(OASSIGN,$2,$1,$3);
 			if ((ops[$1].ival & 255) == OFLD)
@@ -166,8 +167,6 @@ term	: variable
 		{ $$ = oper2(OPOW,$1,$3); }
 	| term IN VAR
 		{ $$ = oper2(ODEFINED,aryrefarg($3),$1); }
-	| cond '?' expr ':' expr
-		{ $$ = oper3(OCOND,$1,$3,$5); }
 	| variable INCR
 		{ $$ = oper1(OPOSTINCR,$1); }
 	| variable DECR
@@ -397,4 +396,7 @@ compound
 	;
 
 %%
+
+int yyparse _((void));
+
 #include "a2py.c"

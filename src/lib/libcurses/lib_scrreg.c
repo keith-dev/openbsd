@@ -1,3 +1,5 @@
+/*	$OpenBSD: lib_scrreg.c,v 1.3 1997/12/03 05:21:30 millert Exp $	*/
+
 
 /***************************************************************************
 *                            COPYRIGHT NOTICE                              *
@@ -28,20 +30,23 @@
 **
 */
 
-#include "curses.priv.h"
+#include <curses.priv.h>
+
+MODULE_ID("Id: lib_scrreg.c,v 1.6 1997/09/20 15:02:34 juergen Exp $")
 
 int wsetscrreg(WINDOW *win, int top, int bottom)
 {
-	T(("wsetscrreg(%p,%d,%d) called", win, top, bottom));
+	T((T_CALLED("wsetscrreg(%p,%d,%d)"), win, top, bottom));
 
-    	if (top >= 0  && top <= win->_maxy &&
-		bottom >= 0  &&  bottom <= win->_maxy &&
-		bottom > top)
-	{
-	    	win->_regtop    = (short)top;
-	    	win->_regbottom = (short)bottom;
-
-	    	return(OK);
-	} else
-	    	return(ERR);
+	if (win &&
+	    top >= 0  && top <= win->_maxy &&
+	    bottom >= 0  &&  bottom <= win->_maxy &&
+	    bottom > top)
+	  {
+	    win->_regtop	= (short)top;
+	    win->_regbottom = (short)bottom;
+	    
+	    returnCode(OK);
+	  } else
+	    returnCode(ERR);
 }

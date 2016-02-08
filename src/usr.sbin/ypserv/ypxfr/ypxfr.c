@@ -1,4 +1,4 @@
-/*	$OpenBSD: ypxfr.c,v 1.22 1997/07/30 12:07:02 maja Exp $ */
+/*	$OpenBSD: ypxfr.c,v 1.24 1998/02/14 10:05:27 maja Exp $ */
 
 /*
  * Copyright (c) 1994 Mats O Jansson <moj@stacken.kth.se>
@@ -32,7 +32,7 @@
  */
 
 #ifndef LINT
-static char rcsid[] = "$OpenBSD: ypxfr.c,v 1.22 1997/07/30 12:07:02 maja Exp $";
+static char rcsid[] = "$OpenBSD: ypxfr.c,v 1.24 1998/02/14 10:05:27 maja Exp $";
 #endif
 
 #include <sys/types.h>
@@ -183,15 +183,23 @@ u_int32_t *rordernum;
 	return status;
 }
 
-void
+int
 get_map(client,domain,map,incallback)
 CLIENT *client;
 char *domain;
 char *map;
 struct ypall_callback *incallback;
 {
-	(void)yp_all_host(client, domain, map, incallback);
-		
+	int	status;
+
+	status = yp_all_host(client, domain, map, incallback);
+	if ((status == 0) || (status == YPERR_NOMORE)) {
+		status = YPPUSH_SUCC;
+	} else {
+		status = YPPUSH_YPERR;
+	}
+
+	return(status);
 }
 
 DBM *
@@ -340,7 +348,7 @@ DBM *db;
 	status = yp_match_host(client, domain, map,
 			       k.dptr, k.dsize, &value, &vallen);
 	
-	if(status > 0) {
+	if(status == 0 && value) {
 		v.dptr = value;
 		v.dsize = vallen;
 		
@@ -596,7 +604,7 @@ char *argv[];
 		
 		if(status > 0) {
 			callback.foreach=ypxfr_foreach;
-			get_map(client,domain,map,&callback);
+			status = get_map(client,domain,map,&callback);
 		}
 		
 		/* Close db */

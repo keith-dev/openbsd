@@ -1,6 +1,6 @@
-/*	$OpenBSD: ipnat.c,v 1.18 1997/09/22 05:11:43 millert Exp $	*/
+/*    $OpenBSD: ipnat.c,v 1.22 1998/03/21 22:42:13 millert Exp $    */
 /*
- * (C)opyright 1993,1994,1995 by Darren Reed.
+ * Copyright (C) 1993-1997 by Darren Reed.
  *
  * Redistribution and use in source and binary forms are permitted
  * provided that this notice is preserved and due credit is given
@@ -20,12 +20,13 @@
 #include <stdio.h>
 #include <string.h>
 #include <fcntl.h>
+#include <sys/types.h>
 #if !defined(__SVR4) && !defined(__svr4__)
 #include <strings.h>
 #else
 #include <sys/byteorder.h>
 #endif
-#include <sys/types.h>
+#include <sys/time.h>
 #include <sys/param.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -41,29 +42,40 @@
 #include <netinet/ip.h>
 #include <netinet/tcp.h>
 #include <net/if.h>
-#include "ip_fil_compat.h"
-#include "ip_fil.h"		/* XXX needed? */
 #include <netdb.h>
 #include <arpa/nameser.h>
 #include <arpa/inet.h>
 #include <resolv.h>
-#include "ip_nat.h"
 #include <ctype.h>
+#include "ip_fil_compat.h"
+#include "ip_fil.h"
+#include "ip_proxy.h"
+#include "ip_nat.h"
+#include "kmem.h"
 
-
-#if !defined(lint) && defined(LIBC_SCCS)
-static  char    sccsid[] ="@(#)ipnat.c	1.9 6/5/96 (C) 1993 Darren Reed";
-static	char	rcsid[] = "$DRId: ipnat.c,v 2.0.1.8 1997/02/16 21:23:40 darrenr Exp $";
+#if !defined(lint)
+static const char sccsid[] ="@(#)ipnat.c	1.9 6/5/96 (C) 1993 Darren Reed";
+static const char rcsid[] = "@(#)$Id: ipnat.c,v 1.22 1998/03/21 22:42:13 millert Exp $";
 #endif
+
 
 #if	SOLARIS
 #define	bzero(a,b)	memset(a,0,b)
 #endif
 
 extern	char	*optarg;
-extern	int	kmemcpy();
 
-void	dostats(), printnat(), parsefile(), flushtable();
+ipnat_t	*parse __P((char *));
+u_int	hostnum __P((char *, int *));
+u_int	hostmask __P((char *));
+u_short	portnum __P((char *, char *));
+void	dostats __P((int, int)), flushtable __P((int, int));
+void	printnat __P((ipnat_t *, int, void *));
+void	parsefile __P((int, char *, int));
+void	usage __P((char *));
+int	countbits __P((u_int));
+char	*getnattype __P((ipnat_t *));
+int	main __P((int, char*[]));
 
 #define	OPT_REM		1
 #define	OPT_NODO	2
@@ -86,8 +98,8 @@ int main(argc, argv)
 int argc;
 char *argv[];
 {
-	char	*file = NULL, c;
-	int	fd, opts = 1;
+	char	*file = NULL;
+	int	fd = -1, opts = 1, c;
 
 	while ((c = getopt(argc, argv, "CFf:lnrsv")) != -1)
 		switch (c)
@@ -120,9 +132,9 @@ char *argv[];
 			usage(argv[0]);
 		}
 
-	if (!(opts & OPT_NODO) && ((fd = open(IPL_NAME, O_RDWR)) == -1) &&
-	    ((fd = open(IPL_NAME, O_RDONLY)) == -1)) {
-		perror("open");
+	if (!(opts & OPT_NODO) && ((fd = open(IPL_NAT, O_RDWR)) == -1) &&
+	    ((fd = open(IPL_NAT, O_RDONLY)) == -1)) {
+		perror("open "IPL_NAT);
 		exit(-1);
 	}
 
@@ -171,9 +183,27 @@ int verbose;
 void *ptr;
 {
 	int	bits;
+	struct	protoent	*pr;
+
+	switch (np->in_redir)
+	{
+	case NAT_REDIRECT :
+		printf("rdr ");
+		break;
+	case NAT_MAP :
+		printf("map ");
+		break;
+	case NAT_BIMAP :
+		printf("bimap ");
+		break;
+	default :
+		fprintf(stderr, "unknown value for in_redir: %#x\n",
+			np->in_redir);
+		break;
+	}
 
 	if (np->in_redir == NAT_REDIRECT) {
-		printf("rdr %s %s", np->in_ifname, inet_ntoa(np->in_out[0]));
+		printf("%s %s", np->in_ifname, inet_ntoa(np->in_out[0]));
 		bits = countbits(np->in_out[1].s_addr);
 		if (bits != -1)
 			printf("/%d ", bits);
@@ -184,11 +214,11 @@ void *ptr;
 		printf("-> %s", inet_ntoa(np->in_in[0]));
 		if (np->in_pnext)
 			printf(" port %d", ntohs(np->in_pnext));
-		if (np->in_flags & IPN_TCPUDP)
+		if ((np->in_flags & IPN_TCPUDP) == IPN_TCPUDP)
 			printf(" tcp/udp");
-		else if (np->in_flags & IPN_TCP)
+		else if ((np->in_flags & IPN_TCP) == IPN_TCP)
 			printf(" tcp");
-		else if (np->in_flags & IPN_UDP)
+		else if ((np->in_flags & IPN_UDP) == IPN_UDP)
 			printf(" udp");
 		printf("\n");
 		if (verbose)
@@ -197,7 +227,7 @@ void *ptr;
 			       np->in_use);
 	} else {
 		np->in_nextip.s_addr = htonl(np->in_nextip.s_addr);
-		printf("map %s %s/", np->in_ifname, inet_ntoa(np->in_in[0]));
+		printf("%s %s/", np->in_ifname, inet_ntoa(np->in_in[0]));
 		bits = countbits(np->in_in[1].s_addr);
 		if (bits != -1)
 			printf("%d ", bits);
@@ -209,7 +239,17 @@ void *ptr;
 			printf("%d ", bits);
 		else
 			printf("%s", inet_ntoa(np->in_out[1]));
-		if (np->in_pmin || np->in_pmax) {
+		if (*np->in_plabel) {
+			printf(" proxy port");
+			if (np->in_dport)
+				printf(" %hu", ntohs(np->in_dport));
+			printf(" %.*s/", (int)sizeof(np->in_plabel),
+				np->in_plabel);
+			if ((pr = getprotobynumber(np->in_p)))
+				fputs(pr->p_name, stdout);
+			else
+				printf("%d", np->in_p);
+		} else if (np->in_pmin || np->in_pmax) {
 			printf(" portmap");
 			if ((np->in_flags & IPN_TCPUDP) == IPN_TCPUDP)
 				printf(" tcp/udp");
@@ -235,12 +275,29 @@ void *ptr;
 char *getnattype(ipnat)
 ipnat_t *ipnat;
 {
+	char *which;
 	ipnat_t ipnatbuff;
 
-	if (ipnat && kmemcpy(&ipnatbuff, ipnat, sizeof(ipnatbuff)))
+	if (ipnat && kmemcpy((char *)&ipnatbuff, (long)ipnat,
+			     sizeof(ipnatbuff)))
 		return "???";
 
-	return (ipnatbuff.in_redir == NAT_MAP) ? "MAP" : "RDR";
+	switch (ipnatbuff.in_redir)
+	{
+	case NAT_MAP :
+		which = "MAP";
+		break;
+	case NAT_REDIRECT :
+		which = "RDR";
+		break;
+	case NAT_BIMAP :
+		which = "BIMAP";
+		break;
+	default :
+		which = "unknown";
+		break;
+	}
+	return which;
 }
 
 
@@ -264,14 +321,15 @@ int fd, opts;
 			ns.ns_mapped[0], ns.ns_mapped[1]);
 		printf("added\t%lu\texpired\t%lu\n",
 			ns.ns_added, ns.ns_expire);
-		printf("inuse\t%lu\n", ns.ns_inuse);
+		printf("inuse\t%lu\nrules\t%lu\n", ns.ns_inuse, ns.ns_rules);
 		if (opts & OPT_VERBOSE)
 			printf("table %p list %p\n", ns.ns_table, ns.ns_list);
 	}
 	if (opts & OPT_LIST) {
 		printf("List of active MAP/Redirect filters:\n");
 		while (ns.ns_list) {
-			if (kmemcpy(&ipn, ns.ns_list, sizeof(ipn))) {
+			if (kmemcpy((char *)&ipn, (long)ns.ns_list,
+				    sizeof(ipn))) {
 				perror("kmemcpy");
 				break;
 			}
@@ -280,7 +338,8 @@ int fd, opts;
 		}
 
 		nt[0] = (nat_t **)malloc(sizeof(*nt) * NAT_SIZE);
-		if (kmemcpy(nt[0], ns.ns_table[0], sizeof(**nt) * NAT_SIZE)) {
+		if (kmemcpy((char *)nt[0], (long)ns.ns_table[0],
+			    sizeof(**nt) * NAT_SIZE)) {
 			perror("kmemcpy");
 			return;
 		}
@@ -289,7 +348,8 @@ int fd, opts;
 
 		for (i = 0; i < NAT_SIZE; i++)
 			for (np = nt[0][i]; np; np = nat.nat_hnext[0]) {
-				if (kmemcpy(&nat, np, sizeof(nat)))
+				if (kmemcpy((char *)&nat, (long)np,
+					    sizeof(nat)))
 					break;
 
 				printf("%s %-15s %-5hu <- ->",
@@ -301,7 +361,7 @@ int fd, opts;
 					ntohs(nat.nat_outport));
 				printf(" [%s %hu]", inet_ntoa(nat.nat_oip),
 					ntohs(nat.nat_oport));
-				printf(" %d %hu %lx", nat.nat_age,
+				printf(" %ld %hu %lx", nat.nat_age,
 					nat.nat_use, nat.nat_sumd);
 #if SOLARIS
 				printf(" %lx", nat.nat_ipsumd);
@@ -414,8 +474,10 @@ char	*name;
 			     sizeof(ifr->ifr_name)))
 			continue;
 		ifreq = *ifr;
-		if (ioctl(s, SIOCGIFADDR, (caddr_t)ifr) < 0)
-			continue;
+		if (ioctl(s, SIOCGIFADDR, (caddr_t)ifr) < 0) {
+			warn("SIOCGIFADDR");
+			goto if_addr_lose;
+		}
 		if (ifr->ifr_addr.sa_family != AF_INET)
 			continue;
 		if (!strcmp(name, ifr->ifr_name)) {
@@ -458,15 +520,16 @@ int	*resolved;
 			fprintf(stderr, "can't resolve hostname: %s\n", host);
 			return 0;
 		}
-		return np->n_net;
+		return htonl(np->n_net);
 	}
-	return *(u_int32_t *)hp->h_addr;
+	return *(u_32_t *)hp->h_addr;
 }
 
 
 ipnat_t *parse(line)
 char *line;
 {
+	struct protoent *pr;
 	static ipnat_t ipn;
 	char *s, *t;
 	char *shost, *snetm, *dhost, *proto;
@@ -486,9 +549,11 @@ char *line;
 		ipn.in_redir = NAT_MAP;
 	else if (!strcasecmp(s, "rdr"))
 		ipn.in_redir = NAT_REDIRECT;
+	else if (!strcasecmp(s, "bimap"))
+		ipn.in_redir = NAT_BIMAP;
 	else {
 		(void)fprintf(stderr,
-			      "expected \"map\" or \"rdr\", got \"%s\"\n", s);
+			      "expected map/rdr/bimap, got \"%s\"\n", s);
 		return NULL;
 	}
 
@@ -556,7 +621,7 @@ char *line;
 	}
         dhost = s;
 
-        if (ipn.in_redir == NAT_MAP) {
+        if (ipn.in_redir & NAT_MAP) {
 		if (!(s = strtok(NULL, " \t"))) {
 			dnetm = strrchr(dhost, '/');
 			if (!dnetm) {
@@ -565,7 +630,8 @@ char *line;
 				return NULL;
 			}
 		}
-		if (!s || !strcasecmp(s, "portmap")) {
+		if (!s || !strcasecmp(s, "portmap") ||
+		    !strcasecmp(s, "proxy")) {
 			dnetm = strrchr(dhost, '/');
 			if (!dnetm) {
 				fprintf(stderr,
@@ -610,7 +676,7 @@ char *line;
 	if (*snetm == '/')
 		*snetm++ = '\0';
 
-	if (ipn.in_redir == NAT_MAP) {
+	if (ipn.in_redir & NAT_MAP) {
 		ipn.in_inip = hostnum(shost, &resolved);
 		if (resolved == -1)
 			return NULL;
@@ -664,6 +730,55 @@ char *line;
 	if (!s)
 		return &ipn;
 
+	if (ipn.in_redir == NAT_BIMAP) {
+		fprintf(stderr, "extra words at the end of bimap line: %s\n",
+			s);
+		return NULL;
+	}
+	if (!strcasecmp(s, "proxy")) {
+		if (!(s = strtok(NULL, " \t"))) {
+			fprintf(stderr, "missing parameter for \"proxy\"\n");
+			return NULL;
+		}
+		dport = NULL;
+
+		if (!strcasecmp(s, "port")) {
+			if (!(s = strtok(NULL, " \t"))) {
+				fprintf(stderr,
+					"missing parameter for \"port\"\n");
+				return NULL;
+			}
+
+			dport = s;
+
+			if (!(s = strtok(NULL, " \t"))) {
+				fprintf(stderr,
+					"missing parameter for \"proxy\"\n");
+				return NULL;
+			}
+		}
+		if ((proto = index(s, '/'))) {
+			*proto++ = '\0';
+			if ((pr = getprotobyname(proto)))
+				ipn.in_p = pr->p_proto;
+			else
+				ipn.in_p = atoi(proto);
+			if (dport)
+				ipn.in_dport = portnum(dport, proto);
+		} else {
+			ipn.in_p = 0;
+			if (dport)
+				ipn.in_dport = portnum(dport, NULL);
+		}
+
+		(void) strncpy(ipn.in_plabel, s, sizeof(ipn.in_plabel));
+		if ((s = strtok(NULL, " \t"))) {
+			fprintf(stderr, "too many parameters for \"proxy\"\n");
+			return NULL;
+		}
+		return &ipn;
+		
+	}
 	if (strcasecmp(s, "portmap")) {
 		fprintf(stderr, "expected \"portmap\" - got \"%s\"\n", s);
 		return NULL;
@@ -709,9 +824,9 @@ int opts;
 	int	linenum = 1;
 
 	if (strcmp(file, "-")) {
-		if ((fp = fopen(file, "r")) == NULL) {
-			perror("fopen");
-			exit(-1);
+		if (!(fp = fopen(file, "r"))) {
+			perror(file);
+			exit(1);
 		}
 	} else
 		fp = stdin;
@@ -735,7 +850,8 @@ int opts;
 		}
 		linenum++;
 	}
-	fclose(stdin);
+	if (fp != stdin)
+		fclose(fp);
 }
 
 

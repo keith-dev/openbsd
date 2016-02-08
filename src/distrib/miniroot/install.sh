@@ -1,6 +1,35 @@
 #!/bin/sh
-#	$OpenBSD: install.sh,v 1.17 1997/10/30 05:23:44 millert Exp $
+#	$OpenBSD: install.sh,v 1.23 1998/04/11 09:47:27 deraadt Exp $
 #	$NetBSD: install.sh,v 1.5.2.8 1996/08/27 18:15:05 gwr Exp $
+#
+# Copyright (c) 1997,1998 Todd Miller, Theo de Raadt
+# All rights reserved.
+#
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions
+# are met:
+# 1. Redistributions of source code must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+# 2. Redistributions in binary form must reproduce the above copyright
+#    notice, this list of conditions and the following disclaimer in the
+#    documentation and/or other materials provided with the distribution.
+# 3. All advertising materials mentioning features or use of this software
+#    must display the following acknowledgement:
+#	This product includes software developed by Todd Miller and
+#	Theo de Raadt
+# 4. The name of the author may not be used to endorse or promote products
+#    derived from this software without specific prior written permission.
+#
+# THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
+# IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+# OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+# IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
+# INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
+# NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+# DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+# THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
+# THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
 # Copyright (c) 1996 The NetBSD Foundation, Inc.
 # All rights reserved.
@@ -77,6 +106,7 @@ THESETS="$ALLSETS $MDSETS"
 
 if [ "`df /`" = "`df /mnt`" ]; then
 	# Good {morning,afternoon,evening,night}.
+	echo ==================================================
 	md_welcome_banner
 	echo -n "Proceed with installation? [n] "
 else
@@ -124,82 +154,100 @@ if [ "`df /`" = "`df /mnt`" ]; then
 		cp /etc/disktab.shadow /tmp/disktab.shadow
 	fi
 
-	while [ "X${ROOTDISK}" = "X" ]; do
-		getrootdisk
-	done
+	while : ; do
+		if [ "X${ROOTDISK}" = "X" ]; then
+			while [ "X${ROOTDISK}" = "X" ]; do
+				getrootdisk
+			done
+			DISK=$ROOTDISK
+		else
+			DISK=""
+			while [ "X${DISK}" = "X" ]; do
+				getanotherdisk
+			done
+			if [ "${DISK}" = "done" ]; then
+				break
+			fi
+		fi
 
-	# Deal with disklabels, including editing the root disklabel
-	# and labeling additional disks.  This is machine-dependent since
-	# some platforms may not be able to provide this functionality.
-	md_prep_disklabel ${ROOTDISK}
+		# Deal with disklabels, including editing the root disklabel
+		# and labeling additional disks.  This is machine-dependent since
+		# some platforms may not be able to provide this functionality.
+		md_prep_disklabel ${DISK}
 
-	# Assume partition 'a' of $ROOTDISK is for the root filesystem.
-	# Loop and get the rest.
-	# XXX ASSUMES THAT THE USER DOESN'T PROVIDE BOGUS INPUT.
-	cat << __get_filesystems_1
+		# Assume partition 'a' of $ROOTDISK is for the root filesystem.
+		# Loop and get the rest.
+		# XXX ASSUMES THAT THE USER DOESN'T PROVIDE BOGUS INPUT.
+		cat << __get_filesystems_1
 
-You will now have the opportunity to enter filesystem information.  You will be
-prompted for the mount point (full path, including the prepending '/' character)
-for each BSD partition on ${ROOTDISK}.  Enter "none" to skip a partition or
-"done" when you are finished.
+You will now have the opportunity to enter filesystem information for ${DISK}.
+You will be prompted for the mount point (full path, including the prepending
+'/' character) for each BSD partition on ${DISK}.  Enter "none" to skip a
+partition or "done" when you are finished.
 __get_filesystems_1
 
-	echo	"The following will be used for the root filesystem and swap:"
-	echo	"	${ROOTDISK}a	/"
-	echo	"	${ROOTDISK}b	swap"
+		if [ "${DISK}" = "${ROOTDISK}" ]; then
+			echo
+			echo	"The following partitions will be used for the root filesystem and swap:"
+			echo	"	${ROOTDISK}a	/"
+			echo	"	${ROOTDISK}b	swap"
 
-	echo	"${ROOTDISK}a /" > ${FILESYSTEMS}
+			echo	"${ROOTDISK}a /" > ${FILESYSTEMS}
+		fi
 
-	# XXX - allow the user to name mount points on disks other than ROOTDISK
-	#	also allow a way to enter non-BSD partitions (but don't newfs!)
-	# Get the list of BSD partitions and store sizes
-	_npartitions=0
-	for _p in `disklabel ${ROOTDISK} 2>&1 | grep '^ *[a-p]:.*BSD' | sed 's/^ *\([a-p]\): *\([0-9][0-9]*\) .*/\1\2/'`; do
-		case $_p in
-			a*)	# We already have an 'a'
-				;;
-			*)	_pp=`firstchar ${_p}`
-				_ps=`echo ${_p} | sed 's/^.//'`
-				_partitions[${_npartitions}]=${_pp}
-				_psizes[${_npartitions}]=${_ps}
-				_npartitions=$(( ${_npartitions} + 1 ))
-				;;
-		esac
-	done
-
-	# Now prompt the user for the mount points.  Loop until "done"
-	echo	""
-	_i=0
-	resp="X"
-	while [ $_npartitions -gt 0 -a X${resp} != X"done" ]; do
-		_pp=${_partitions[${_i}]}
-		_ps=$(( ${_psizes[${_i}]} / 2 ))
-		_mp=${_mount_points[${_i}]}
-
-		# Get the mount point from the user
-		while : ; do
-			echo -n "Mount point for ${ROOTDISK}${_pp} (size=${_ps}k) [$_mp]? "
-			getresp "$_mp"
-			case "X${resp}" in
-				X/*)	_mount_points[${_i}]=$resp
-					break ;;
-				Xdone|Xnone|X)	break ;;
-				*)	echo "mount point must be an absolute path!";;
-			esac
+		# XXX - allow the user to name mount points on disks other than ROOTDISK
+		#	also allow a way to enter non-BSD partitions (but don't newfs!)
+		# Get the list of BSD partitions and store sizes
+		_npartitions=0
+		for _p in `disklabel ${DISK} 2>&1 | grep '^ *[a-p]:.*BSD' | sed 's/^ *\([a-p]\): *\([0-9][0-9]*\) .*/\1\2/'`; do
+			_pp=`firstchar ${_p}`
+			if [ "${DISK}" = "${ROOTDISK}" -a "$_pp" = "a" ]; then
+				continue
+			fi
+			_ps=`echo ${_p} | sed 's/^.//'`
+			_partitions[${_npartitions}]=${_pp}
+			_psizes[${_npartitions}]=${_ps}
+			_npartitions=$(( ${_npartitions} + 1 ))
 		done
-		_i=$(( ${_i} + 1 ))
-		if [ $_i -ge $_npartitions ]; then
-			_i=0
-		fi
-	done
 
-	# Now write it out
-	_i=0
-	while test $_i -lt $_npartitions; do
-		if [ -n "${_mount_points[${_i}]}" ]; then
-			echo "${ROOTDISK}${_partitions[${_i}]} ${_mount_points[${_i}]}" >> ${FILESYSTEMS}
-		fi
-		_i=$(( ${_i} + 1 ))
+		# Now prompt the user for the mount points.  Loop until "done"
+		echo	""
+		_i=0
+		resp="X"
+		while [ $_npartitions -gt 0 -a X${resp} != X"done" ]; do
+			_pp=${_partitions[${_i}]}
+			_ps=$(( ${_psizes[${_i}]} / 2 ))
+			_mp=${_mount_points[${_i}]}
+
+			# Get the mount point from the user
+			while : ; do
+				echo -n "Mount point for ${DISK}${_pp} (size=${_ps}k) [$_mp, RET, none, or done]? "
+				getresp "$_mp"
+				case "X${resp}" in
+					X/*)	_mount_points[${_i}]=$resp
+						break ;;
+					Xdone|X)
+						break ;;
+					Xnone)	_mount_points[${_i}]=
+						break;;
+					*)	echo "mount point must be an absolute path!";;
+				esac
+			done
+			_i=$(( ${_i} + 1 ))
+			if [ $_i -ge $_npartitions ]; then
+				_i=0
+			fi
+		done
+
+		# Now write it out
+		_i=0
+		while test $_i -lt $_npartitions; do
+			if [ -n "${_mount_points[${_i}]}" ]; then
+				echo "${DISK}${_partitions[${_i}]} ${_mount_points[${_i}]}" >> ${FILESYSTEMS}
+				_mount_points[${_i}]=""
+			fi
+			_i=$(( ${_i} + 1 ))
+		done
 	done
 
 	echo	""
@@ -319,6 +367,7 @@ case "$resp" in
 			echo "domain $FQDN" > /tmp/resolv.conf
 			echo "nameserver $resp" >> /tmp/resolv.conf
 			echo "search $FQDN" >> /tmp/resolv.conf
+			echo "lookup file bind" >> /tmp/resolv.conf
 
 			echo -n "Would you like to use the nameserver now? [y] "
 			getresp "y"
@@ -338,11 +387,12 @@ case "$resp" in
 			echo "The host table is as follows:"
 			echo ""
 			cat /tmp/hosts
-			echo ""
-			echo "You may want to edit the host table in the event that"
-			echo "you are doing an NFS installation or an FTP installation"
-			echo "without a name server and want to refer to the server by"
-			echo "name rather than by its numeric ip address."
+		cat << __hosts_table_1
+
+You may want to edit the host table in the event that you are doing an
+NFS installation or an FTP installation without a name server and want
+to refer to the server by name rather than by its numeric ip address.
+__hosts_table_1
 			echo -n "Would you like to edit the host table with ${EDITOR}? [n] "
 			getresp "n"
 			case "$resp" in
@@ -436,6 +486,28 @@ mount | while read line; do
 	fi
 done
 
+resp=""		# force one iteration
+echo
+echo 'Please enter the initial password that the root acount will have.'
+while [ "X${resp}" = X"" ]; do
+	echo -n "Password (will not echo): "
+	stty -echo
+	getresp "${_password}"
+	stty echo
+	echo ""
+	_password=$resp
+
+	echo -n "Password (again): "
+	stty -echo
+	getresp "${_password}"
+	stty echo
+	echo ""
+	if [ "${_password}" != "${resp}" ]; then
+		echo "Passwords do not match, try again."
+		resp=""
+	fi
+done
+
 install_sets $THESETS
 
 # Copy in configuration information and make devices in target root.
@@ -490,6 +562,12 @@ sh MAKEDEV all
 #kill $pid
 echo "done."
 cd /
+
+_encr=`echo ${_password} | /mnt/usr/bin/encrypt -b 7`
+echo "1,s@^root::@root:${_encr}:@
+w
+q" | ed /mnt/etc/master.passwd 2> /dev/null
+/mnt/usr/sbin/pwd_mkdb -p -d /mnt/etc /etc/master.passwd
 
 unmount_fs /tmp/fstab.shadow
 

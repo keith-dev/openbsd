@@ -8,7 +8,7 @@
  */
 
 #ifndef lint
-static char rcsid[] = "$Id: sdbm.c,v 1.1.1.1 1996/08/19 10:12:14 downsj Exp $";
+static char rcsid[] = "$Id: sdbm.c,v 1.2 1997/11/30 07:55:51 millert Exp $";
 #endif
 
 #include "config.h"
@@ -32,6 +32,7 @@ static char rcsid[] = "$Id: sdbm.c,v 1.1.1.1 1996/08/19 10:12:14 downsj Exp $";
 /*
  * externals
  */
+#ifndef WIN32
 #ifndef sun
 extern int errno;
 #endif
@@ -39,6 +40,7 @@ extern int errno;
 extern Malloc_t malloc proto((MEM_SIZE));
 extern Free_t free proto((Malloc_t));
 extern Off_t lseek();
+#endif
 
 /*
  * forward
@@ -135,7 +137,7 @@ int mode;
  * open the files in sequence, and stat the dirfile.
  * If we fail anywhere, undo everything, return NULL.
  */
-#	ifdef OS2
+#if defined(OS2) || defined(MSDOS) || defined(WIN32)
 	flags |= O_BINARY;
 #	endif
 	if ((db->pagf = open(pagname, flags, mode)) > -1) {

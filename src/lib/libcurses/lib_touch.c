@@ -1,3 +1,5 @@
+/*	$OpenBSD: lib_touch.c,v 1.3 1997/12/03 05:21:35 millert Exp $	*/
+
 
 /***************************************************************************
 *                            COPYRIGHT NOTICE                              *
@@ -29,36 +31,47 @@
 **
 */
 
-#include "curses.priv.h"
+#include <curses.priv.h>
+
+MODULE_ID("Id: lib_touch.c,v 1.4 1997/09/19 22:16:33 juergen Exp $")
 
 int is_linetouched(WINDOW *win, int line)
 {
-	if (line > win->_maxy || line < 0)
-		return ERR;
-	if (win->_line[line].firstchar != _NOCHANGE) return TRUE;
-	return FALSE;
+	T((T_CALLED("is_linetouched(%p,%d)"), win, line));
+
+	/* XSI doesn't define any error */
+	if (!win || (line > win->_maxy) || (line < 0))
+		returnCode(ERR);
+
+	returnCode(win->_line[line].firstchar != _NOCHANGE ? TRUE : FALSE);
 }
 
 int is_wintouched(WINDOW *win)
 {
 int i;
 
-	for (i = 0; i <= win->_maxy; i++)
-		if (win->_line[i].firstchar != _NOCHANGE)
-			return TRUE;
-	return FALSE;
+	T((T_CALLED("is_wintouched(%p)"), win));
+
+	if (win)
+	        for (i = 0; i <= win->_maxy; i++)
+		        if (win->_line[i].firstchar != _NOCHANGE)
+			        returnCode(TRUE);
+	returnCode(FALSE);
 }
 
 int wtouchln(WINDOW *win, int y, int n, int changed)
 {
 int i;
 
-	T(("wtouchln(%p,%d,%d,%d)", win, y, n, changed));
+	T((T_CALLED("wtouchln(%p,%d,%d,%d)"), win, y, n, changed));
+
+	if (!win || (n<0) || (y<0) || (y>win->_maxy))
+	  returnCode(ERR);
 
 	for (i = y; i < y+n; i++) {
+	        if (i>win->_maxy) break;
 		win->_line[i].firstchar = changed ? 0 : _NOCHANGE;
 		win->_line[i].lastchar = changed ? win->_maxx : _NOCHANGE;
 	}
-	return OK;
+	returnCode(OK);
 }
-

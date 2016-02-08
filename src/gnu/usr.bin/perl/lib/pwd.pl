@@ -1,11 +1,10 @@
 ;# pwd.pl - keeps track of current working directory in PWD environment var
 ;#
-;# $RCSfile: pwd.pl,v $$Revision: 1.1.1.1 $$Date: 1996/08/19 10:12:36 $
+;# $RCSfile: pwd.pl,v $$Revision: 1.2 $$Date: 1997/11/30 07:57:07 $
 ;#
 ;# $Log: pwd.pl,v $
-;# Revision 1.1.1.1  1996/08/19 10:12:36  downsj
-;# Import of Perl 5.003 into the tree.  Makefile.bsd-wrapper and
-;# config.sh.OpenBSD are the only local changes.
+;# Revision 1.2  1997/11/30 07:57:07  millert
+;# perl 5.004_04
 ;#
 ;#
 ;# Usage:

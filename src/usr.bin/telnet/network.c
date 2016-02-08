@@ -1,4 +1,4 @@
-/*	$OpenBSD: network.c,v 1.3 1996/12/12 11:35:59 robin Exp $	*/
+/*	$OpenBSD: network.c,v 1.5 1998/03/12 04:57:36 art Exp $	*/
 /*	$NetBSD: network.c,v 1.5 1996/02/28 21:04:06 thorpej Exp $	*/
 
 /*
@@ -34,28 +34,7 @@
  * SUCH DAMAGE.
  */
 
-#ifndef lint
-#if 0
-static char sccsid[] = "@(#)network.c	8.2 (Berkeley) 12/15/93";
-static char rcsid[] = "$NetBSD: network.c,v 1.5 1996/02/28 21:04:06 thorpej Exp $";
-#else
-static char rcsid[] = "$OpenBSD: network.c,v 1.3 1996/12/12 11:35:59 robin Exp $";
-#endif
-#endif /* not lint */
-
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <sys/time.h>
-#include <unistd.h>
-#include <errno.h>
-
-#include <arpa/telnet.h>
-
-#include "ring.h"
-
-#include "defines.h"
-#include "externs.h"
-#include "fdset.h"
+#include "telnet_locl.h"
 
 Ring		netoring, netiring;
 unsigned char	netobuf[2*BUFSIZ], netibuf[BUFSIZ];
@@ -86,23 +65,31 @@ init_network()
 stilloob()
 {
     static struct timeval timeout = { 0 };
-    fd_set	excepts;
+    fd_set *fdsp;
+    int fdsn;
     int value;
 
+    fdsn = howmany(net+1, NFDBITS) * sizeof(fd_mask);
+    if ((fdsp = (fd_set *)malloc(fdsn)) == NULL)
+	err(1, "malloc");
+
     do {
-	FD_ZERO(&excepts);
-	FD_SET(net, &excepts);
-	value = select(net+1, (fd_set *)0, (fd_set *)0, &excepts, &timeout);
+	memset(fdsp, 0, fdsn);
+	FD_SET(net, fdsp);
+	value = select(net+1, (fd_set *)0, (fd_set *)0, fdsp, &timeout);
     } while ((value == -1) && (errno == EINTR));
 
     if (value < 0) {
 	perror("select");
+	free(fdsp);
 	(void) quit();
 	/* NOTREACHED */
     }
-    if (FD_ISSET(net, &excepts)) {
+    if (FD_ISSET(net, fdsp)) {
+	free(fdsp);
 	return 1;
     } else {
+   	free(fdsp);
 	return 0;
     }
 }
@@ -136,6 +123,10 @@ netflush()
 {
     register int n, n1;
 
+#if    defined(ENCRYPTION)
+    if (encrypt_output)
+	ring_encrypt(&netoring, encrypt_output);
+#endif
     if ((n1 = n = ring_full_consecutive(&netoring)) > 0) {
 	if (!ring_at_mark(&netoring)) {
 	    n = send(net, (char *)netoring.consume, n, 0); /* normal write */

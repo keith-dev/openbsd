@@ -1,6 +1,7 @@
-/*	$OpenBSD: ypbind.c,v 1.29 1997/06/18 23:50:12 deraadt Exp $ */
+/*	$OpenBSD: ypbind.c,v 1.34 1998/03/23 06:18:38 deraadt Exp $ */
 
 /*
+ * Copyright (c) 1997,1998 Theo de Raadt <deraadt@OpenBSD.org>
  * Copyright (c) 1996 Theo de Raadt <deraadt@theos.com>
  * Copyright (c) 1992, 1993 Theo de Raadt <deraadt@theos.com>
  * All rights reserved.
@@ -34,7 +35,7 @@
  */
 
 #ifndef LINT
-static char rcsid[] = "$OpenBSD: ypbind.c,v 1.29 1997/06/18 23:50:12 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: ypbind.c,v 1.34 1998/03/23 06:18:38 deraadt Exp $";
 #endif
 
 #include <sys/param.h>
@@ -183,11 +184,11 @@ ypbindproc_domain_2x(transp, argp, clnt)
 		ypdb->dom_vers = YPVERS;
 		ypdb->dom_alive = 0;
 		ypdb->dom_lockfd = -1;
-		sprintf(path, "%s/%s.%d", BINDINGDIR,
+		snprintf(path, sizeof path, "%s/%s.%d", BINDINGDIR,
 		    ypdb->dom_domain, (int)ypdb->dom_vers);
 		unlink(path);
-		sprintf(ypdb->dom_servlist, "%s/%s",
-		    SERVERSDIR, ypdb->dom_domain);
+		snprintf(ypdb->dom_servlist, sizeof ypdb->dom_servlist,
+		    "%s/%s", SERVERSDIR, ypdb->dom_domain);
 		ypdb->dom_servlistfp = fopen(ypdb->dom_servlist, "r");
 		ypdb->dom_xid = unique_xid(ypdb);
 		ypdb->dom_pnext = ypbindlist;
@@ -518,10 +519,13 @@ main(argc, argv)
 	strncpy(ypbindlist->dom_domain, domain, sizeof ypbindlist->dom_domain-1);
 	ypbindlist->dom_domain[sizeof (ypbindlist->dom_domain)-1] = '\0';
 	ypbindlist->dom_vers = YPVERS;
+	snprintf(ypbindlist->dom_servlist, sizeof ypbindlist->dom_servlist,
+	    "%s/%s", SERVERSDIR, ypbindlist->dom_domain);
+	ypbindlist->dom_servlistfp = fopen(ypbindlist->dom_servlist, "r");
 	ypbindlist->dom_alive = 0;
 	ypbindlist->dom_lockfd = -1;
 	ypbindlist->dom_xid = unique_xid(ypbindlist);
-	sprintf(path, "%s/%s.%d", BINDINGDIR,
+	snprintf(path, sizeof path, "%s/%s.%d", BINDINGDIR,
 	    ypbindlist->dom_domain, (int)ypbindlist->dom_vers);
 	(void)unlink(path);
 
@@ -714,7 +718,7 @@ pings(ypdb)
 	if (ypdb->dom_lockfd != -1) {
 		close(ypdb->dom_lockfd);
 		ypdb->dom_lockfd = -1;
-		sprintf(path, "%s/%s.%d", BINDINGDIR,
+		snprintf(path, sizeof path, "%s/%s.%d", BINDINGDIR,
 		    ypdb->dom_domain, (int)ypdb->dom_vers);
 		unlink(path);
 	}
@@ -802,11 +806,13 @@ broadcast(ypdb, buf, outlen)
 
 		ifreq.ifr_flags &= (IFF_LOOPBACK | IFF_BROADCAST);
 		if (ifreq.ifr_flags == IFF_BROADCAST) {
+			ifreq.ifr_addr = ifr->ifr_addr;
 			if (ioctl(sock, SIOCGIFBRDADDR, &ifreq) < 0) {
 				perror("ioctl(SIOCGIFBRDADDR)");
 				continue;
 			}
 		} else if (ifreq.ifr_flags == IFF_LOOPBACK) {
+			ifreq.ifr_addr = ifr->ifr_addr;
 			if (ioctl(sock, SIOCGIFADDR, &ifreq) < 0) {
 				perror("ioctl(SIOCGIFADDR)");
 				continue;
@@ -1061,7 +1067,7 @@ int force;
 	if (ypdb->dom_lockfd != -1)
 		close(ypdb->dom_lockfd);
 
-	sprintf(path, "%s/%s.%d", BINDINGDIR,
+	snprintf(path, sizeof path, "%s/%s.%d", BINDINGDIR,
 	    ypdb->dom_domain, (int)ypdb->dom_vers);
 #ifdef O_SHLOCK
 	if ((fd = open(path, O_CREAT|O_SHLOCK|O_RDWR|O_TRUNC, 0644)) == -1) {

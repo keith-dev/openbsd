@@ -1,3 +1,5 @@
+/*	$OpenBSD: lib_refresh.c,v 1.4 1998/01/17 16:27:35 millert Exp $	*/
+
 
 /***************************************************************************
 *                            COPYRIGHT NOTICE                              *
@@ -24,40 +26,62 @@
 /*
  *	lib_refresh.c
  *
- *	The routines wredrawln(), wrefresh() and wnoutrefresh().
+ *	The routines wrefresh() and wnoutrefresh().
  *
  */
 
-#include "curses.priv.h"
+#include <curses.priv.h>
 
-int wredrawln(WINDOW *win, int beg, int num)
-{
-	T(("wredrawln(%p,%d,%d) called", win, beg, num));
-	touchline(win, beg, num);
-	wrefresh(win);
-	return OK;
-}
+MODULE_ID("Id: lib_refresh.c,v 1.18 1997/12/19 17:04:06 xtang Exp $")
 
 int wrefresh(WINDOW *win)
 {
-	T(("wrefresh(%p) called", win));
+int code;
 
-	if (win == curscr)
-	    	curscr->_clear = TRUE;
-	else
-	    	wnoutrefresh(win);
-	return(doupdate());
+	T((T_CALLED("wrefresh(%p)"), win));
+
+	if (win == curscr) {
+		curscr->_clear = TRUE;
+		code = doupdate();
+	} else if ((code = wnoutrefresh(win)) == OK) {
+		if (win->_clear)
+			newscr->_clear = TRUE;
+		code = doupdate();
+		/*
+		 * Reset the clearok() flag in case it was set for the special
+		 * case in hardscroll.c (if we don't reset it here, we'll get 2
+		 * refreshes because the flag is copied from stdscr to newscr).
+		 * Resetting the flag shouldn't do any harm, anyway.
+		 */
+		win->_clear = FALSE;
+	}
+	returnCode(code);
 }
 
 int wnoutrefresh(WINDOW *win)
 {
 short	i, j;
-short	begx = win->_begx;
-short	begy = win->_begy;
+short	begx;
+short	begy;
 short	m, n;
 bool	wide;
 
-	T(("wnoutrefresh(%p) called", win));
+	T((T_CALLED("wnoutrefresh(%p)"), win));
+#ifdef TRACE
+	if (_nc_tracing & TRACE_UPDATE)
+	    _tracedump("...win", win);
+#endif /* TRACE */
+
+	/*
+	 * This function will break badly if we try to refresh a pad.
+	 */
+	if ((win == 0)
+	 || (win->_flags & _ISPAD))
+		returnCode(ERR);
+
+	/* put them here so "win == 0" won't break our code */
+	begx = win->_begx;
+	begy = win->_begy;
 
 	/*
 	 * If 'newscr' has a different background than the window that we're
@@ -67,6 +91,7 @@ bool	wide;
 		touchwin(win);
 		newscr->_bkgd = win->_bkgd;
 	}
+	newscr->_attrs = win->_attrs;
 
 	/* merge in change information from all subwindows of this window */
 	wsyncdown(win);
@@ -95,47 +120,61 @@ bool	wide;
 	 * common-subexpression chunking to make it really tense,
 	 * so we'll force the issue.
 	 */
-	for (i = 0, m = begy; i <= win->_maxy && m <= newscr->_maxy; i++, m++) {
+	for (i = 0, m = begy + win->_yoffset;
+	     i <= win->_maxy && m <= newscr->_maxy;
+	     i++, m++) {
 		register struct ldat	*nline = &newscr->_line[m];
 		register struct ldat	*oline = &win->_line[i];
 
 		if (oline->firstchar != _NOCHANGE) {
+			int last = oline->lastchar;
 
-			for (j = oline->firstchar, n = j + begx; j <= oline->lastchar; j++, n++) {
-		    		if (oline->text[j] != nline->text[n]) {
+			/* limit(j) */
+			if (last > win->_maxx)
+				last = win->_maxx;
+			/* limit(n) */
+			if (last > newscr->_maxx - begx)
+				last = newscr->_maxx - begx;
+
+			for (j = oline->firstchar, n = j + begx; j <= last; j++, n++) {
+				if (oline->text[j] != nline->text[n]) {
 					nline->text[n] = oline->text[j];
 
 					if (nline->firstchar == _NOCHANGE)
-			   			nline->firstchar = nline->lastchar = n;
+						nline->firstchar = nline->lastchar = n;
 					else if (n < nline->firstchar)
-			   			nline->firstchar = n;
+						nline->firstchar = n;
 					else if (n > nline->lastchar)
-			   			nline->lastchar = n;
-		    		}
+						nline->lastchar = n;
+				}
 			}
 
 		}
 
+#if USE_SCROLL_HINTS
 		if (wide) {
 		    int	oind = oline->oldindex;
 
-		    nline->oldindex = (oind == _NEWINDEX) ? _NEWINDEX : begy + oind;
+		    nline->oldindex = (oind == _NEWINDEX) ? _NEWINDEX : begy + oind + win->_yoffset;
 		}
+#endif /* USE_SCROLL_HINTS */
 
 		oline->firstchar = oline->lastchar = _NOCHANGE;
-		oline->oldindex = i;
+		if_USE_SCROLL_HINTS(oline->oldindex = i);
 	}
 
 	if (win->_clear) {
-	   	win->_clear = FALSE;
-#if 0
-	   	newscr->_clear = TRUE;
-#endif
+		win->_clear = FALSE;
+		newscr->_clear = TRUE;
 	}
 
 	if (! win->_leaveok) {
-	   	newscr->_cury = win->_cury + win->_begy;
-	   	newscr->_curx = win->_curx + win->_begx;
+		newscr->_cury = win->_cury + win->_begy + win->_yoffset;
+		newscr->_curx = win->_curx + win->_begx;
 	}
-	return(OK);
+#ifdef TRACE
+	if (_nc_tracing & TRACE_UPDATE)
+	    _tracedump("newscr", newscr);
+#endif /* TRACE */
+	returnCode(OK);
 }

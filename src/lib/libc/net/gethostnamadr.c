@@ -52,7 +52,7 @@
  */
 
 #if defined(LIBC_SCCS) && !defined(lint)
-static char rcsid[] = "$OpenBSD: gethostnamadr.c,v 1.26 1997/07/09 01:08:26 millert Exp $";
+static char rcsid[] = "$OpenBSD: gethostnamadr.c,v 1.30 1998/03/16 05:06:55 millert Exp $";
 #endif /* LIBC_SCCS and not lint */
 
 #include <sys/param.h>
@@ -193,7 +193,7 @@ getanswer(answer, anslen, qname, qtype)
 #endif
 		break;
 	default:
-		return (NULL);	/* XXX should be abort(); */
+		return (NULL);
 	}
 	/*
 	 * find first satisfactory answer
@@ -388,8 +388,6 @@ getanswer(answer, anslen, qname, qtype)
 			buflen -= n;
 			cp += n;
 			break;
-		default:
-			abort();
 		}
 		if (!had_error)
 			haveanswer++;
@@ -648,8 +646,6 @@ gethostbyaddr(addr, len, af)
 		}
 		strcpy(qp, "ip6.int");
 		break;
-	default:
-		abort();
 	}
 
 	bcopy(_res.lookups, lookups, sizeof lookups);
@@ -725,22 +721,28 @@ _gethtent()
 {
 	char *p;
 	register char *cp, **q;
-	int af, len;
+	int af;
+	size_t len;
 
 	if (!hostf && !(hostf = fopen(_PATH_HOSTS, "r" ))) {
 		h_errno = NETDB_INTERNAL;
 		return (NULL);
 	}
  again:
-	if (!(p = fgets(hostbuf, sizeof hostbuf, hostf))) {
+	if ((p = fgetln(hostf, &len)) == NULL) {
 		h_errno = HOST_NOT_FOUND;
 		return (NULL);
 	}
+	if (p[len-1] == '\n')
+		len--;
+	if (len >= sizeof(hostbuf) || len == 0)
+		goto again;
+	p = memcpy(hostbuf, p, len);
+	hostbuf[len] = '\0';
 	if (*p == '#')
 		goto again;
-	if (!(cp = strpbrk(p, "#\n")))
-		goto again;
-	*cp = '\0';
+	if ((cp = strchr(p, '#')))
+		*cp = '\0';
 	if (!(cp = strpbrk(p, " \t")))
 		goto again;
 	*cp++ = '\0';
@@ -957,6 +959,8 @@ _yp_gethtbyname(name)
 	static char *__ypcurrent;
 	int __ypcurrentlen, r;
 
+	if (strlen(name) >= MAXHOSTNAMELEN)
+		return (NULL);
 	if (!__ypdomain) {
 		if (_yp_check(&__ypdomain) == 0)
 			return (hp);
@@ -1021,6 +1025,12 @@ map_v4v6_hostent(hp, bpp, lenp)
 		*bpp += IN6ADDRSZ;
 		*lenp -= IN6ADDRSZ;
 	}
+}
+
+struct hostent *
+gethostent()
+{
+	return (_gethtent());
 }
 
 #ifdef RESOLVSORT

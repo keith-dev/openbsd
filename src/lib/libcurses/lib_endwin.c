@@ -1,3 +1,5 @@
+/*	$OpenBSD: lib_endwin.c,v 1.4 1997/12/03 05:21:16 millert Exp $	*/
+
 
 /***************************************************************************
 *                            COPYRIGHT NOTICE                              *
@@ -27,31 +29,22 @@
 **
 */
 
-#include "curses.priv.h"
-#include "term.h"
+#include <curses.priv.h>
+#include <term.h>
+
+MODULE_ID("Id: lib_endwin.c,v 1.13 1997/10/11 22:05:27 tom Exp $")
 
 int
 endwin(void)
 {
-	T(("endwin() called"));
+	T((T_CALLED("endwin()")));
 
-	SP->_endwin = TRUE;
+	if (SP) {
+	  SP->_endwin = TRUE;
+	  SP->_mouse_wrap(SP);
+	  _nc_screen_wrap();
+	  _nc_mvcur_wrap();	/* wrap up cursor addressing */
+	}
 
-	_nc_mouse_wrap(SP);
-
-	mvcur(-1, -1, screen_lines - 1, 0);
-
-	curs_set(1);	/* set cursor to normal mode */
-
-	if (SP->_coloron == TRUE && orig_pair)
-		putp(orig_pair);
-
- 	_nc_mvcur_wrap();	/* wrap up cursor addressing */
-
-	if (curscr  &&  (curscr->_attrs != A_NORMAL)) 
-	    vidattr(curscr->_attrs = A_NORMAL);
-
-	fflush(SP->_ofp);
-
-	return(reset_shell_mode());
+	returnCode(reset_shell_mode());
 }

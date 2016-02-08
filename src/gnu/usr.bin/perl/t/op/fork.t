@@ -1,6 +1,16 @@
 #!./perl
 
-# $RCSfile: fork.t,v $$Revision: 1.1.1.1 $$Date: 1996/08/19 10:13:18 $
+# $RCSfile: fork.t,v $$Revision: 1.2 $$Date: 1997/11/30 08:05:21 $
+
+BEGIN {
+    chdir 't' if -d 't';
+    @INC = '../lib';
+    require Config; import Config;
+    unless ($Config{'d_fork'}) {
+	print "1..0\n";
+	exit 0;
+    }
+}
 
 $| = 1;
 print "1..2\n";

@@ -1,3 +1,5 @@
+/*	$OpenBSD: lib_options.c,v 1.4 1998/01/17 16:27:34 millert Exp $	*/
+
 
 /***************************************************************************
 *                            COPYRIGHT NOTICE                              *
@@ -27,125 +29,384 @@
 **
 */
 
-#include "curses.priv.h"
-#include <stdlib.h>
-#include "term.h"	/* keypad_xmit, keypad_local, meta_on, meta_off */
+#include <curses.priv.h>
+
+#include <term.h>	/* keypad_xmit, keypad_local, meta_on, meta_off */
 			/* cursor_visible,cursor_normal,cursor_invisible */
+
+MODULE_ID("Id: lib_options.c,v 1.26 1997/09/20 15:02:34 juergen Exp $")
+
+static void add_to_try(char *, short);
 
 int has_ic(void)
 {
-	T(("has_ic() called"));
-	return (insert_character || parm_ich)
-		&& (delete_character || parm_dch);
+	T((T_CALLED("has_ic()")));
+	returnCode((insert_character || parm_ich
+	   ||  (enter_insert_mode && exit_insert_mode))
+	   &&  (delete_character || parm_dch));
 }
 
 int has_il(void)
 {
-	T(("has_il() called"));
-	return (insert_line || parm_insert_line)
-		&& (delete_line || parm_delete_line);
+	T((T_CALLED("has_il()")));
+	returnCode((insert_line || parm_insert_line)
+		&& (delete_line || parm_delete_line));
 }
 
 int idlok(WINDOW *win,  bool flag)
 {
-	T(("idlok(%p,%d) called", win, flag));
+	T((T_CALLED("idlok(%p,%d)"), win, flag));
 
-   	win->_idlok = flag && (has_il() || change_scroll_region);
-	return OK; 
+	if (win) {
+	  _nc_idlok = win->_idlok = flag && (has_il() || change_scroll_region);
+	  returnCode(OK);
+	}
+	else
+	  returnCode(ERR);
 }
 
 
-int idcok(WINDOW *win, bool flag)
+void idcok(WINDOW *win, bool flag)
 {
-	T(("idcok(%p,%d) called", win, flag));
+	T((T_CALLED("idcok(%p,%d)"), win, flag));
 
-	win->_idcok = flag && has_ic();
+	if (win)
+	  _nc_idcok = win->_idcok = flag && has_ic();
 
-	return OK; 
+	returnVoid;
 }
 
 
 int clearok(WINDOW *win, bool flag)
 {
-	T(("clearok(%p,%d) called", win, flag));
+	T((T_CALLED("clearok(%p,%d)"), win, flag));
 
-   	if (win == curscr)
-	    newscr->_clear = flag;
+	if (win) {
+	  win->_clear = flag;
+	  returnCode(OK);
+	}
 	else
-	    win->_clear = flag;
-	return OK; 
+	  returnCode(ERR);
 }
 
 
-int immedok(WINDOW *win, bool flag)
+void immedok(WINDOW *win, bool flag)
 {
-	T(("immedok(%p,%d) called", win, flag));
+	T((T_CALLED("immedok(%p,%d)"), win, flag));
 
-   	win->_immed = flag;
-	return OK; 
+	if (win)
+	  win->_immed = flag;
+
+	returnVoid;
 }
 
 int leaveok(WINDOW *win, bool flag)
 {
-	T(("leaveok(%p,%d) called", win, flag));
+	T((T_CALLED("leaveok(%p,%d)"), win, flag));
 
-   	win->_leaveok = flag;
-   	if (flag == TRUE)
-   		curs_set(0);
-   	else
-   		curs_set(1);
-	return OK; 
+	if (win) {
+	  win->_leaveok = flag;
+	  if (flag == TRUE)
+	    curs_set(0);
+	  else
+	    curs_set(1);
+	  returnCode(OK);
+	}
+	else
+	  returnCode(ERR);
 }
 
 
 int scrollok(WINDOW *win, bool flag)
 {
-	T(("scrollok(%p,%d) called", win, flag));
+	T((T_CALLED("scrollok(%p,%d)"), win, flag));
 
-   	win->_scroll = flag;
-	return OK; 
+	if (win) {
+	  win->_scroll = flag;
+	  returnCode(OK);
+	}
+	else
+	  returnCode(ERR);
 }
 
 int halfdelay(int t)
 {
-	T(("halfdelay(%d) called", t));
+	T((T_CALLED("halfdelay(%d)"), t));
 
 	if (t < 1 || t > 255)
-		return ERR;
+		returnCode(ERR);
 
 	cbreak();
 	SP->_cbreak = t+1;
-	return OK;
+	returnCode(OK);
 }
 
 int nodelay(WINDOW *win, bool flag)
 {
-	T(("nodelay(%p,%d) called", win, flag));
+	T((T_CALLED("nodelay(%p,%d)"), win, flag));
 
-   	if (flag == TRUE)
-		win->_delay = 0;
-	else win->_delay = -1;
-	return OK;
+	if (win) {
+	  if (flag == TRUE)
+	    win->_delay = 0;
+	  else win->_delay = -1;
+	  returnCode(OK);
+	}
+	else
+	  returnCode(ERR);
 }
 
 int notimeout(WINDOW *win, bool f)
 {
-	T(("notimout(%p,%d) called", win, f));
+	T((T_CALLED("notimout(%p,%d)"), win, f));
 
-	win->_notimeout = f;
-	return OK;
+	if (win) {
+	  win->_notimeout = f;
+	  returnCode(OK);
+	}
+	else
+	  returnCode(ERR);
 }
 
 int wtimeout(WINDOW *win, int delay)
 {
-	T(("wtimeout(%p,%d) called", win, delay));
+	T((T_CALLED("wtimeout(%p,%d)"), win, delay));
 
-	win->_delay = delay;
-	return OK;
+	if (win) {
+	  win->_delay = delay;
+	  returnCode(OK);
+	}
+	else
+	  returnCode(ERR);
 }
 
-static void init_keytry(void);
-static void add_to_try(char *, short);
+int keypad(WINDOW *win, bool flag)
+{
+	T((T_CALLED("keypad(%p,%d)"), win, flag));
+
+	if (win) {
+	  win->_use_keypad = flag;
+	  returnCode(_nc_keypad(flag));
+	}
+	else
+	  returnCode(ERR);
+}
+
+
+int meta(WINDOW *win GCC_UNUSED, bool flag)
+{
+	/* Ok, we stay relaxed and don't signal an error if win is NULL */
+	T((T_CALLED("meta(%p,%d)"), win, flag));
+
+	SP->_use_meta = flag;
+
+	if (flag  &&  meta_on)
+	{
+	    TPUTS_TRACE("meta_on");
+	    putp(meta_on);
+	}
+	else if (! flag  &&  meta_off)
+	{
+	    TPUTS_TRACE("meta_off");
+	    putp(meta_off);
+	}
+	returnCode(OK);
+}
+
+/* curs_set() moved here to narrow the kernel interface */
+
+int curs_set(int vis)
+{
+int cursor = SP->_cursor;
+
+	T((T_CALLED("curs_set(%d)"), vis));
+
+	if (vis < 0 || vis > 2)
+		returnCode(ERR);
+
+	if (vis == cursor)
+		returnCode(cursor);
+
+	switch(vis) {
+	case 2:
+		if (cursor_visible)
+		{
+			TPUTS_TRACE("cursor_visible");
+			putp(cursor_visible);
+		}
+		else
+			returnCode(ERR);
+		break;
+	case 1:
+		if (cursor_normal)
+		{
+			TPUTS_TRACE("cursor_normal");
+			putp(cursor_normal);
+		}
+		else
+			returnCode(ERR);
+		break;
+	case 0:
+		if (cursor_invisible)
+		{
+			TPUTS_TRACE("cursor_invisible");
+			putp(cursor_invisible);
+		}
+		else
+			returnCode(ERR);
+		break;
+	}
+	SP->_cursor = vis;
+	(void) fflush(SP->_ofp);
+
+	returnCode(cursor==-1 ? 1 : cursor);
+}
+
+int typeahead(int fd)
+{
+	T((T_CALLED("typeahead(%d)"), fd));
+	SP->_checkfd = fd;
+	returnCode(OK);
+}
+
+/*
+**      has_key()
+**
+**      Return TRUE if the current terminal has the given key
+**
+*/
+
+
+static int has_key_internal(int keycode, struct tries *tp)
+{
+    if (tp == 0)
+        return(FALSE);
+    else if (tp->value == keycode)
+        return(TRUE);
+    else
+        return(has_key_internal(keycode, tp->child)
+               || has_key_internal(keycode, tp->sibling));
+}
+
+int has_key(int keycode)
+{
+    T((T_CALLED("has_key(%d)"), keycode));
+    returnCode(has_key_internal(keycode, SP->_keytry));
+}
+
+/*
+**      init_keytry()
+**
+**      Construct the try for the current terminal's keypad keys.
+**
+*/
+
+
+static struct  tries *newtry;
+
+static void init_keytry(void)
+{
+	newtry = 0;
+
+/* LINT_PREPRO
+#if 0*/
+#include <keys.tries>
+/* LINT_PREPRO
+#endif*/
+
+	SP->_keytry = newtry;
+}
+
+
+static void add_to_try(char *str, short code)
+{
+static bool     out_of_memory = FALSE;
+struct tries    *ptr, *savedptr;
+
+	if (! str  ||  out_of_memory)
+		return;
+
+	if (newtry != 0) {
+		ptr = savedptr = newtry;
+
+		for (;;) {
+			while (ptr->ch != (unsigned char) *str
+			       &&  ptr->sibling != 0)
+				ptr = ptr->sibling;
+	
+			if (ptr->ch == (unsigned char) *str) {
+				if (*(++str)) {
+					if (ptr->child != 0)
+						ptr = ptr->child;
+					else
+						break;
+				} else {
+					ptr->value = code;
+					return;
+				}
+			} else {
+				if ((ptr->sibling = typeCalloc(struct tries,1)) == 0) {
+					out_of_memory = TRUE;
+					return;
+				}
+
+				savedptr = ptr = ptr->sibling;
+				if (*str == '\200')
+					ptr->ch = '\0';
+				else
+					ptr->ch = (unsigned char) *str;
+				str++;
+				ptr->value = 0;
+
+				break;
+			}
+		} /* end for (;;) */
+	} else {   /* newtry == 0 :: First sequence to be added */
+		savedptr = ptr = newtry = typeCalloc(struct tries,1);
+
+		if (ptr == 0) {
+			out_of_memory = TRUE;
+				return;
+		}
+
+		if (*str == '\200')
+			ptr->ch = '\0';
+		else
+			ptr->ch = (unsigned char) *str;
+		str++;
+		ptr->value = 0;
+	}
+
+	    /* at this point, we are adding to the try.  ptr->child == 0 */
+
+	while (*str) {
+		ptr->child = typeCalloc(struct tries,1);
+
+		ptr = ptr->child;
+
+		if (ptr == 0) {
+			out_of_memory = TRUE;
+
+			ptr = savedptr;
+			while (ptr != 0) {
+				savedptr = ptr->child;
+				free(ptr);
+				ptr = savedptr;
+			}
+
+			return;
+		}
+
+		if (*str == '\200')
+			ptr->ch = '\0';
+		else
+			ptr->ch = (unsigned char) *str;
+		str++;
+		ptr->value = 0;
+	}
+
+	ptr->value = code;
+	return;
+}
 
 /* Turn the keypad on/off
  *
@@ -168,197 +429,8 @@ int _nc_keypad(bool flag)
 	    putp(keypad_local);
 	    (void) fflush(SP->_ofp);
 	}
-	    
+
 	if (SP->_keytry == UNINITIALISED)
 	    init_keytry();
-	return OK; 
+	return(OK);
 }
-
-int keypad(WINDOW *win, bool flag)
-{
-	T(("keypad(%p,%d) called", win, flag));
-
-   	win->_use_keypad = flag;
-	return (_nc_keypad(flag));
-}
-
-
-int meta(WINDOW *win, bool flag)
-{
-	T(("meta(%p,%d) called", win, flag));
-
-	SP->_use_meta = flag;
-
-	if (flag  &&  meta_on)
-	{
-	    TPUTS_TRACE("meta_on");
-	    putp(meta_on);
-	}
-	else if (! flag  &&  meta_off)
-	{
-	    TPUTS_TRACE("meta_off");
-	    putp(meta_off);
-	}
-	return OK; 
-}
-
-/* curs_set() moved here to narrow the kernel interface */
-
-int curs_set(int vis)
-{
-int cursor = SP->_cursor;
-
-	T(("curs_set(%d)", vis));
-
-	if (vis < 0 || vis > 2)
-		return ERR;
-
-	switch(vis) {
-	case 2:
-		if (cursor_visible)
-		{
-			TPUTS_TRACE("cursor_visible");
-			putp(cursor_visible);
-		}
-		break;
-	case 1:
-		if (cursor_normal)
-		{
-			TPUTS_TRACE("cursor_normal");
-			putp(cursor_normal);
-		}
-		break;
-	case 0:
-		if (cursor_invisible)
-		{
-			TPUTS_TRACE("cursor_invisible");
-			putp(cursor_invisible);
-		}
-		break;
-	}
-	SP->_cursor = vis;
-	return cursor;	
-}
-
-/*
-**      init_keytry()
-**
-**      Construct the try for the current terminal's keypad keys.
-**
-*/
-
-
-static struct  try *newtry;
-
-static void init_keytry(void)
-{
-    newtry = NULL;
-	
-#include "keys.tries"
-
-	SP->_keytry = newtry;
-}
-
-
-static void add_to_try(char *str, short code)
-{
-static bool     out_of_memory = FALSE;
-struct try      *ptr, *savedptr;
-
-	if (! str  ||  out_of_memory)
-	    	return;
-	
-	if (newtry != NULL)    {
-    	ptr = savedptr = newtry;
-	    
-       	for (;;) {
-	       	while (ptr->ch != (unsigned char) *str
-		       &&  ptr->sibling != NULL)
-	       		ptr = ptr->sibling;
-	    
-	       	if (ptr->ch == (unsigned char) *str) {
-	    		if (*(++str)) {
-	           		if (ptr->child != NULL)
-	           			ptr = ptr->child;
-               		else
-	           			break;
-	    		} else {
-	        		ptr->value = code;
-					return;
-	   			}
-			} else {
-	    		if ((ptr->sibling = (struct try *) malloc(sizeof *ptr)) == NULL) {
-	        		out_of_memory = TRUE;
-					return;
-	    		}
-		    
-	    		savedptr = ptr = ptr->sibling;
-	    		ptr->child = ptr->sibling = NULL;
-			if (*str == '\200')
-				ptr->ch = '\0';
-			else
-				ptr->ch = (unsigned char) *str; 
-	    		str++;
-	    		ptr->value = (short) NULL;
-	    
-           		break;
-	       	}
-	   	} /* end for (;;) */  
-	} else {   /* newtry == NULL :: First sequence to be added */
-	    	savedptr = ptr = newtry = (struct try *) malloc(sizeof *ptr);
-	    
-	    	if (ptr == NULL) {
-	        	out_of_memory = TRUE;
-				return;
-	    	}
-	    
-	    	ptr->child = ptr->sibling = NULL;
-		if (*str == '\200')
-			ptr->ch = '\0';
-		else
-			ptr->ch = (unsigned char) *str; 
-	    	str++;
-	    	ptr->value = (short) NULL;
-	}
-	
-	    /* at this point, we are adding to the try.  ptr->child == NULL */
-	    
-	while (*str) {
-	   	ptr->child = (struct try *) malloc(sizeof *ptr);
-	    
-	   	ptr = ptr->child;
-	   
-	   	if (ptr == NULL) {
-	       	out_of_memory = TRUE;
-		
-			ptr = savedptr;
-			while (ptr != NULL) {
-		    	savedptr = ptr->child;
-		    	free(ptr);
-		    	ptr = savedptr;
-			}
-		
-			return;
-		}
-	    
-	   	ptr->child = ptr->sibling = NULL;
-		if (*str == '\200')
-			ptr->ch = '\0';
-		else
-			ptr->ch = (unsigned char) *str; 
-	    	str++;
-	   	ptr->value = (short) NULL;
-	}
-	
-	ptr->value = code;
-	return;
-}
-
-int typeahead(int fd)
-{
-
-	T(("typeahead(%d) called", fd));
-	SP->_checkfd = fd;
-	return OK;
-}
-

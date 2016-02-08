@@ -1,6 +1,6 @@
-#	$OpenBSD: Makefile,v 1.10 1997/10/01 22:13:01 deraadt Exp $
+#	$OpenBSD: Makefile,v 1.12 1998/03/30 07:15:22 deraadt Exp $
 
-REV=		22
+REV=		23
 
 ARCHDIR=	${.CURDIR}/../${MACHINE}/simpleroot
 
@@ -18,6 +18,7 @@ IMAGEDIR?=	/var/tmp
 REALIMAGE!=	echo ${IMAGEDIR}/image.${PID}
 IMAGE?=		${IMAGEDIR}/simpleroot${REV}.fs
 NEWFSOPTS?=
+GZIP?=
 
 LIST=		${ARCHDIR}/list
 

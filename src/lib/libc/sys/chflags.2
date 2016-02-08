@@ -44,9 +44,9 @@
 .Fd #include <sys/stat.h>
 .Fd #include <unistd.h>
 .Ft int
-.Fn chflags "const char *path"  "int flags"
+.Fn chflags "const char *path"  "unsigned int flags"
 .Ft int
-.Fn fchflags "int fd" "int flags"
+.Fn fchflags "int fd" "unsigned int flags"
 .Sh DESCRIPTION
 The file whose name
 is given by
@@ -139,6 +139,8 @@ The descriptor is not valid.
 .It Bq Er EINVAL
 .Fa Fd
 refers to a socket, not to a file.
+.It Bq Er EINVAL
+The flags value is invalid.
 .It Bq Er EPERM
 The effective user ID does not match the owner of the file and
 the effective user ID is not the super-user.

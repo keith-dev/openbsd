@@ -1,14 +1,13 @@
-/* $RCSfile: hash.c,v $$Revision: 1.1.1.1 $$Date: 1996/08/19 10:13:36 $
+/* $RCSfile: hash.c,v $$Revision: 1.2 $$Date: 1997/11/30 08:07:06 $
  *
- *    Copyright (c) 1991, Larry Wall
+ *    Copyright (c) 1991-1997, Larry Wall
  *
  *    You may distribute under the terms of either the GNU General Public
  *    License or the Artistic License, as specified in the README file.
  *
  * $Log: hash.c,v $
- * Revision 1.1.1.1  1996/08/19 10:13:36  downsj
- * Import of Perl 5.003 into the tree.  Makefile.bsd-wrapper and
- * config.sh.OpenBSD are the only local changes.
+ * Revision 1.2  1997/11/30 08:07:06  millert
+ * perl 5.004_04
  *
  */
 

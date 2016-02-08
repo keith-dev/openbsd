@@ -1,5 +1,7 @@
+/*	$OpenBSD: ins_goons.h,v 1.5 1998/03/31 06:40:59 millert Exp $	*/
+
 /*
- *  CU sudo version 1.5.3
+ *  CU sudo version 1.5.5
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -17,7 +19,7 @@
  *
  *  Please send bugs, changes, problems to sudo-bugs@courtesan.com
  *
- *  $Id: ins_goons.h,v 1.2 1996/11/17 16:33:59 millert Exp $
+ *  Id: ins_goons.h,v 1.18 1998/03/31 05:05:36 millert Exp $
  */
 
 #ifndef _SUDO_INS_GOONS_H

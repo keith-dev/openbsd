@@ -1,13 +1,13 @@
 #!./perl
 
-# $RCSfile: term.t,v $$Revision: 1.1.1.1 $$Date: 1996/08/19 10:13:09 $
+# $RCSfile: term.t,v $$Revision: 1.2 $$Date: 1997/11/30 07:59:53 $
 
-print "1..6\n";
+print "1..7\n";
 
 # check "" interpretation
 
 $x = "\n";
-if ($x lt ' ') {print "ok 1\n";} else {print "not ok 1\n";}
+if ($x eq chr(10)) {print "ok 1\n";} else {print "not ok 1\n";}
 
 # check `` processing
 
@@ -27,16 +27,19 @@ if ($#x == '1') {print "ok 3\n";} else {print "not ok 3\n";}
 $x = 1;
 if ($x == '1') {print "ok 4\n";} else {print "not ok 4\n";}
 
+$x = '1E2';
+if (($x | 1) == 101) {print "ok 5\n";} else {print "not ok 5\n";}
+
 # check <> pseudoliteral
 
 open(try, "/dev/null") || open(try,"nla0:") || (die "Can't open /dev/null.");
 if (<try> eq '') {
-    print "ok 5\n";
+    print "ok 6\n";
 }
 else {
-    print "not ok 5\n";
+    print "not ok 6\n";
     die "/dev/null IS NOT A CHARACTER SPECIAL FILE!!!!\n" unless -c '/dev/null';
 }
 
 open(try, "../Configure") || (die "Can't open ../Configure.");
-if (<try> ne '') {print "ok 6\n";} else {print "not ok 6\n";}
+if (<try> ne '') {print "ok 7\n";} else {print "not ok 7\n";}

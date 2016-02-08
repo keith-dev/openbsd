@@ -1,5 +1,7 @@
+/*	$OpenBSD: check.c,v 1.9 1998/04/08 02:53:00 millert Exp $	*/
+
 /*
- * CU sudo version 1.5.3 (based on Root Group sudo version 1.1)
+ * CU sudo version 1.5.5 (based on Root Group sudo version 1.1)
  *
  * This software comes with no waranty whatsoever, use at your own risk.
  *
@@ -36,7 +38,7 @@
  */
 
 #ifndef lint
-static char rcsid[] = "$Id: check.c,v 1.4 1996/11/23 17:33:54 mickey Exp $";
+static char rcsid[] = "Id: check.c,v 1.133 1998/03/31 05:05:28 millert Exp $";
 #endif /* lint */
 
 #include "config.h"
@@ -440,7 +442,7 @@ static void check_passwd()
     struct SD_CLIENT sd_dat, *sd;		/* SecurID data block */
     register int counter = TRIES_FOR_PASSWORD;
 
-    (void) memset ((VOID *)&sd_dat, 0, sizeof(sd_dat));
+    (void) memset((VOID *)&sd_dat, 0, sizeof(sd_dat));
     sd = &sd_dat;
 
     /* Initialize SecurID. */
@@ -487,6 +489,10 @@ static void check_passwd()
 #if defined(HAVE_KERB4) && defined(USE_GETPASS)
     char kpass[_PASSWD_LEN + 1];
 #endif /* HAVE_KERB4 && USE_GETPASS */
+#ifdef HAVE_AUTHENTICATE
+    char *message;
+    int reenter;
+#endif /* HAVE_AUTHENTICATE */
 
 #ifdef HAVE_SKEY
     (void) memset((VOID *)&skey, 0, sizeof(skey));
@@ -500,40 +506,51 @@ static void check_passwd()
      */
     while (counter > 0) {
 
-#ifdef HAVE_SKEY
+#ifdef HAVE_AUTHENTICATE
+	/* use AIX authenticate() function */
+#  ifdef USE_GETPASS
+	pass = (char *) getpass(prompt);
+#  else
+	pass = tgetpass(prompt, PASSWORD_TIMEOUT * 60, user_name, shost);
+#  endif /* USE_GETPASS */
+	reenter = 1;
+	if (authenticate(user_name, pass, &reenter, &message) == 0)
+	    return;		/* valid password */
+#else
+#  ifdef HAVE_SKEY
 	/* rewrite the prompt if using s/key since the challenge can change */
 	set_perms(PERM_ROOT, 0);
 	prompt = sudo_skeyprompt(&skey, prompt);
 	set_perms(PERM_USER, 0);
-#endif /* HAVE_SKEY */
-#ifdef HAVE_OPIE
+#  endif /* HAVE_SKEY */
+#  ifdef HAVE_OPIE
 	/* rewrite the prompt if using OPIE since the challenge can change */
 	set_perms(PERM_ROOT, 0);
 	prompt = sudo_opieprompt(&opie, prompt);
 	set_perms(PERM_USER, 0);
-#endif /* HAVE_OPIE */
+#  endif /* HAVE_OPIE */
 
 	/* get a password from the user */
-#ifdef USE_GETPASS
-#  ifdef HAVE_KERB4
+#  ifdef USE_GETPASS
+#    ifdef HAVE_KERB4
 	(void) des_read_pw_string(kpass, sizeof(kpass) - 1, prompt, 0);
 	pass = kpass;
-#  else
+#    else
 	pass = (char *) getpass(prompt);
-#  endif /* HAVE_KERB4 */
-#else
+#    endif /* HAVE_KERB4 */
+#  else
 	pass = tgetpass(prompt, PASSWORD_TIMEOUT * 60, user_name, shost);
-#endif /* USE_GETPASS */
+#  endif /* USE_GETPASS */
 
 	/* Exit loop on nil password */
 	if (!pass || *pass == '\0') {
 	    if (counter == TRIES_FOR_PASSWORD)
-		exit(0);
+		exit(1);
 	    else
 		break;
 	}
 
-#ifdef HAVE_SKEY
+#  ifdef HAVE_SKEY
 	/* Only check s/key db if the user exists there */
 	if (skey.keyfile) {
 	    set_perms(PERM_ROOT, 0);
@@ -543,8 +560,8 @@ static void check_passwd()
 	    }
 	    set_perms(PERM_USER, 0);
 	}
-#endif /* HAVE_SKEY */
-#ifdef HAVE_OPIE
+#  endif /* HAVE_SKEY */
+#  ifdef HAVE_OPIE
 	/* Only check OPIE db if the user exists there */
 	if (opie.opie_flags) {
 	    set_perms(PERM_ROOT, 0);
@@ -554,58 +571,58 @@ static void check_passwd()
 	    }
 	    set_perms(PERM_USER, 0);
 	}
-#endif /* HAVE_OPIE */
-#if !defined(HAVE_SKEY) || !defined(SKEY_ONLY)
+#  endif /* HAVE_OPIE */
+#  if !defined(HAVE_SKEY) || !defined(SKEY_ONLY)
 	/*
 	 * If we use shadow passwords with a different crypt(3)
 	 * check that here, else use standard crypt(3).
 	 */
-#  if (SHADOW_TYPE != SPW_NONE) && (SHADOW_TYPE != SPW_BSD)
-#    if (SHADOW_TYPE == SPW_ULTRIX4)
+#    if (SHADOW_TYPE != SPW_NONE) && (SHADOW_TYPE != SPW_BSD)
+#      if (SHADOW_TYPE == SPW_ULTRIX4)
 	if (!strcmp(user_passwd, (char *) crypt16(pass, user_passwd)))
 	    return;		/* if the passwd is correct return() */
-#    endif /* ULTRIX4 */
-#    if (SHADOW_TYPE == SPW_SECUREWARE) && !defined(__alpha)
-#      ifdef HAVE_BIGCRYPT
+#      endif /* ULTRIX4 */
+#      if (SHADOW_TYPE == SPW_SECUREWARE) && !defined(__alpha)
+#        ifdef HAVE_BIGCRYPT
 	if (strcmp(user_passwd, (char *) bigcrypt(pass, user_passwd)) == 0)
 	    return;           /* if the passwd is correct return() */
-#      else
+#        else
 	if (strcmp(user_passwd, crypt(pass, user_passwd)) == 0)
 	    return;           /* if the passwd is correct return() */
-#      endif /* HAVE_BIGCRYPT */
-#    endif /* SECUREWARE && !__alpha */
-#    if (SHADOW_TYPE == SPW_SECUREWARE) && defined(__alpha)
+#        endif /* HAVE_BIGCRYPT */
+#      endif /* SECUREWARE && !__alpha */
+#      if (SHADOW_TYPE == SPW_SECUREWARE) && defined(__alpha)
 	if (crypt_type == AUTH_CRYPT_BIGCRYPT) {
 	    if (!strcmp(user_passwd, bigcrypt(pass, user_passwd)))
 		return;             /* if the passwd is correct return() */
 	} else if (crypt_type == AUTH_CRYPT_CRYPT16) {
 	    if (!strcmp(user_passwd, crypt16(pass, user_passwd)))
 		return;             /* if the passwd is correct return() */
-#ifdef AUTH_CRYPT_OLDCRYPT
+#        ifdef AUTH_CRYPT_OLDCRYPT
 	} else if (crypt_type == AUTH_CRYPT_OLDCRYPT ||
 		   crypt_type == AUTH_CRYPT_C1CRYPT) {
 	    if (!strcmp(user_passwd, crypt(pass, user_passwd)))
 		return;             /* if the passwd is correct return() */
-#endif
+#        endif
 	} else {
 	    (void) fprintf(stderr,
                     "%s: Sorry, I don't know how to deal with crypt type %d.\n",
                     Argv[0], crypt_type);
 	    exit(1);
 	}
-#    endif /* SECUREWARE && __alpha */
-#  endif /* SHADOW_TYPE != SPW_NONE && SHADOW_TYPE != SPW_BSD */
+#      endif /* SECUREWARE && __alpha */
+#    endif /* SHADOW_TYPE != SPW_NONE && SHADOW_TYPE != SPW_BSD */
 
 	/* Normal UN*X password check */
 	if (!strcmp(user_passwd, (char *) crypt(pass, user_passwd)))
 	    return;		/* if the passwd is correct return() */
 
-#  ifdef HAVE_KERB4
+#    ifdef HAVE_KERB4
 	if (user_uid && sudo_krb_validate_user(user_pw_ent, pass) == 0)
 	    return;
-#  endif /* HAVE_KERB4 */
+#    endif /* HAVE_KERB4 */
 
-#  ifdef HAVE_AFS
+#    ifdef HAVE_AFS
 	if (ka_UserAuthenticateGeneral(KA_USERAUTH_VERSION,
                                        user_name,	/* name */
                                        NULL,		/* instance */
@@ -615,16 +632,17 @@ static void check_passwd()
                                        0, 0,		/* spare */
                                        NULL) == 0)	/* reason */
 	    return;
-#  endif /* HAVE_AFS */
-#  ifdef HAVE_DCE
+#    endif /* HAVE_AFS */
+#    ifdef HAVE_DCE
 	/* 
 	 * consult the DCE registry for password validation
 	 * note that dce_pwent trashes pass upon return...
 	 */
 	if (dce_pwent(user_name, pass))
 	    return;
-#  endif /* HAVE_DCE */
-#endif /* !HAVE_SKEY || !SKEY_ONLY */
+#    endif /* HAVE_DCE */
+#  endif /* !HAVE_SKEY || !SKEY_ONLY */
+#endif /* HAVE_AUTHENTICATE */
 
 	--counter;		/* otherwise, try again  */
 #ifdef USE_INSULTS
@@ -662,9 +680,9 @@ static int sudo_krb_validate_user(pw_ent, pass)
     char tkfile[sizeof(_PATH_SUDO_TIMEDIR) + 4 + MAX_UID_T_LEN];
     int k_errno;
 
-    /* Get the local realm */
+    /* Get the local realm, or retrun failure (no krb.conf) */
     if (krb_get_lrealm(realm, 1) != KSUCCESS)
-	(void) fprintf(stderr, "Warning: Unable to get local kerberos realm\n");
+	return(-1);
 
     /*
      * Set the ticket file to be in sudo sudo timedir so we don't
@@ -868,7 +886,7 @@ static void reminder()
     (void) fprintf(stderr, "\n%s\n%s\n\n%s\n%s\n\n",
 #else
     (void) fprintf(stderr, "\n%s\n%s\n%s\n%s\n\n%s\n%s\n\n%s\n%s\n\n",
-	"    CU sudo version 1.5.3, based on Root Group sudo version 1.1",
+	"    CU sudo version 1.5.5, based on Root Group sudo version 1.1",
 	"    sudo version 1.1, Copyright (C) 1991 The Root Group, Inc.",
 	"    sudo comes with ABSOLUTELY NO WARRANTY.  This is free software,",
 	"    and you are welcome to redistribute it under certain conditions.",
@@ -878,7 +896,5 @@ static void reminder()
 	"        #1) Respect the privacy of others.",
 	"        #2) Think before you type."
     );
-    
-    (void) fflush(stderr);
 }
 #endif /* NO_MESSAGE */

@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.77 1997/10/24 15:57:13 deraadt Exp $
+#	$OpenBSD: Makefile,v 1.85 1998/04/07 23:24:06 ryker Exp $
 
 TZDIR=		/usr/share/zoneinfo
 LOCALTIME=	US/Pacific
@@ -15,10 +15,11 @@ BINGRP= wheel
 BIN1=	aliases bootptab changelist ccd.conf csh.cshrc csh.login csh.logout \
 	daily dm.conf exports ftpusers ftpchroot gettytab group hosts \
 	hosts.lpd ifaliases inetd.conf ipf.rules ksh.kshrc \
-	locate.rc man.conf monthly motd mrouted.conf myname nat.rules \
+	locate.rc man.conf monthly motd mrouted.conf myname ipnat.rules \
 	netstart networks newsyslog.conf passwd.conf phones printcap \
-	protocols rbootd.conf rc rc.conf rc.local rc.securelevel remote rpc security \
-	services shells syslog.conf weekly etc.${MACHINE}/disktab
+	protocols rbootd.conf rc rc.conf rc.local rc.securelevel remote rpc \
+	security services shells sysctl.conf syslog.conf weekly \
+	etc.${MACHINE}/disktab
 
 # -rw-rw-r--
 BIN2=	motd
@@ -117,6 +118,14 @@ distribution-etc-root-var: distrib-dirs
 		${INSTALL} -c -o root -g wheel -m 600 chatscript.sample \
 		    ${DESTDIR}/etc/ppp; \
 		${INSTALL} -c -o root -g wheel -m 600 pap-secrets \
+		    ${DESTDIR}/etc/ppp; \
+		${INSTALL} -c -o root -g wheel -m 644 ppp.conf.sample \
+		    ${DESTDIR}/etc/ppp; \
+		${INSTALL} -c -o root -g wheel -m 644 ppp.linkup.sample \
+		    ${DESTDIR}/etc/ppp; \
+		${INSTALL} -c -o root -g wheel -m 644 ppp.linkdown.sample \
+		    ${DESTDIR}/etc/ppp; \
+		${INSTALL} -c -o root -g wheel -m 644 ppp.secret.sample \
 		    ${DESTDIR}/etc/ppp)
 	cd namedb; ${INSTALL} -c -o ${BINOWN} -g ${BINGRP} -m 644 ${NAMEDB} \
 	    ${DESTDIR}/etc/namedb
@@ -173,8 +182,12 @@ distribution-etc-root-var: distrib-dirs
 .endif
 	(cd ../usr.sbin/sendmail/cf/cf; ${MAKE} distribution)
 	(cd ../usr.sbin/ypserv/ypinit; ${MAKE} distribution)
+	(cd ../usr.sbin/httpd; ${MAKE} distribution)
+	(cd ../gnu/usr.bin/lynx; ${MAKE} -f Makefile.bsd-wrapper distribution)
 	(cd ../usr.bin/mail; ${MAKE} distribution)
 	/usr/sbin/sendmail -C${DESTDIR}/etc/sendmail.cf -bi -O AliasFile=${DESTDIR}/etc/aliases
+	${INSTALL} -c -o root -g wheel -m 600 root/root.mail \
+		${DESTDIR}/var/mail/root
 
 distribution: distribution-etc-root-var
 	(cd ..; ${MAKE} install)
@@ -200,8 +213,10 @@ release: distribution snap_pre snap_md
 	-cp ${DESTDIR}/snapshot/*BOOT* ${RELEASEDIR}
 	-cp ${DESTDIR}/snapshot/INSTALL.* ${RELEASEDIR}
 	-cp ${DESTDIR}/snapshot/*.fs ${DESTDIR}/snapshot/*.fs.gz ${RELEASEDIR}
-	-cd ${RELEASEDIR}; md5 bsd* *boot* *BOOT* INSTALL.* *.fs *.gz > MD5
-	-cd ${RELEASEDIR}; cksum bsd* *boot* *BOOT* INSTALL.* *.fs *.gz > CKSUM
+	-cd ${RELEASEDIR}; \
+		md5 bsd!(*.gz) *boot* *BOOT* INSTALL.* *.fs *.gz > MD5
+	-cd ${RELEASEDIR}; \
+		cksum bsd!(*.gz) *boot* *BOOT* INSTALL.* *.fs *.gz > CKSUM
 .endif
 
 snapshot: distribution snap_pre snap_tar snap_md

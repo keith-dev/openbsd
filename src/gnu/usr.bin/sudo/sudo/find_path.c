@@ -1,5 +1,7 @@
+/*	$OpenBSD: find_path.c,v 1.5 1998/03/31 06:40:53 millert Exp $	*/
+
 /*
- *  CU sudo version 1.5.3
+ *  CU sudo version 1.5.5
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -29,7 +31,7 @@
  */
 
 #ifndef lint
-static char rcsid[] = "$Id: find_path.c,v 1.2 1996/11/17 16:33:56 millert Exp $";
+static char rcsid[] = "Id: find_path.c,v 1.72 1998/03/31 05:05:31 millert Exp $";
 #endif /* lint */
 
 #include "config.h"

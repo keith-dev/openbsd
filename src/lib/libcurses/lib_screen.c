@@ -1,3 +1,5 @@
+/*	$OpenBSD: lib_screen.c,v 1.4 1998/01/17 16:27:36 millert Exp $	*/
+
 
 /***************************************************************************
 *                            COPYRIGHT NOTICE                              *
@@ -20,54 +22,57 @@
 ***************************************************************************/
 
 
-#include "curses.priv.h"
+#include <curses.priv.h>
 
-#include <stdio.h>
-#include <sys/types.h>
 #include <sys/stat.h>
 #include <time.h>
-#include "term.h"	/* exit_ca_mode, non_rev_rmcup */
+#include <term.h>	/* exit_ca_mode, non_rev_rmcup */
+
+MODULE_ID("Id: lib_screen.c,v 1.10 1997/12/27 19:48:58 tom Exp $")
 
 static time_t	dumptime;
 
 WINDOW *getwin(FILE *filep)
 {
-	WINDOW	try, *nwin;
+	WINDOW	tmp, *nwin;
 	int	n;
 
-	(void) fread(&try, sizeof(WINDOW), 1, filep);
-	if (ferror(filep))
-		return (WINDOW *)NULL;
+	T((T_CALLED("getwin(%p)"), filep));
 
-	if ((nwin = newwin(try._maxy+1, try._maxx+1, 0, 0)) == (WINDOW *)NULL)
-		return (WINDOW *)NULL;
+	(void) fread(&tmp, sizeof(WINDOW), 1, filep);
+	if (ferror(filep))
+		returnWin(0);
+
+	if ((nwin = newwin(tmp._maxy+1, tmp._maxx+1, 0, 0)) == 0)
+		returnWin(0);
 
 	/*
 	 * We deliberately do not restore the _parx, _pary, or _parent
 	 * fields, because the window hierarchy within which they
 	 * made sense is probably gone.
 	 */
-	nwin->_curx       = try._curx;
-	nwin->_cury       = try._cury;
-	nwin->_maxy       = try._maxy;
-	nwin->_maxx       = try._maxx;       
-	nwin->_begy       = try._begy;
-	nwin->_begx       = try._begx;
-	nwin->_flags      = try._flags;
+	nwin->_curx       = tmp._curx;
+	nwin->_cury       = tmp._cury;
+	nwin->_maxy       = tmp._maxy;
+	nwin->_maxx       = tmp._maxx;
+	nwin->_begy       = tmp._begy;
+	nwin->_begx       = tmp._begx;
+	nwin->_yoffset    = tmp._yoffset;
+	nwin->_flags      = tmp._flags & ~(_SUBWIN|_ISPAD);
 
-	nwin->_attrs      = try._attrs;
-	nwin->_bkgd	  = try._bkgd; 
+	nwin->_attrs      = tmp._attrs;
+	nwin->_bkgd       = tmp._bkgd;
 
-	nwin->_clear      = try._clear;
-	nwin->_scroll     = try._scroll;
-	nwin->_leaveok    = try._leaveok;
-	nwin->_use_keypad = try._use_keypad;
-	nwin->_delay   	  = try._delay;
-	nwin->_immed	  = try._immed;
-	nwin->_sync	  = try._sync;
+	nwin->_clear      = tmp._clear;
+	nwin->_scroll     = tmp._scroll;
+	nwin->_leaveok    = tmp._leaveok;
+	nwin->_use_keypad = tmp._use_keypad;
+	nwin->_delay      = tmp._delay;
+	nwin->_immed      = tmp._immed;
+	nwin->_sync       = tmp._sync;
 
-	nwin->_regtop     = try._regtop;
-	nwin->_regbottom  = try._regbottom;
+	nwin->_regtop     = tmp._regtop;
+	nwin->_regbottom  = tmp._regbottom;
 
 	for (n = 0; n < nwin->_maxy + 1; n++)
 	{
@@ -76,45 +81,52 @@ WINDOW *getwin(FILE *filep)
 		if (ferror(filep))
 		{
 			delwin(nwin);
-			return((WINDOW *)NULL);
+			returnWin(0);
 		}
 	}
 	touchwin(nwin);
 
-	return nwin;
+	returnWin(nwin);
 }
 
 int putwin(WINDOW *win, FILE *filep)
 {
-	int	n;
+        int code = ERR; 
+	int n;
 
-	(void) fwrite(win, sizeof(WINDOW), 1, filep);
-	if (ferror(filep))
-		return ERR;
+	T((T_CALLED("putwin(%p,%p)"), win, filep));
 
-	for (n = 0; n < win->_maxy + 1; n++)
-	{
-		(void) fwrite(win->_line[n].text,
-			      sizeof(chtype), (size_t)(win->_maxx + 1), filep);
-		if (ferror(filep))
-			return(ERR);
+	if (win) {
+	  (void) fwrite(win, sizeof(WINDOW), 1, filep);
+	  if (ferror(filep))
+	    returnCode(code);
+
+	  for (n = 0; n < win->_maxy + 1; n++)
+	    {
+	      (void) fwrite(win->_line[n].text,
+			    sizeof(chtype), (size_t)(win->_maxx + 1), filep);
+	      if (ferror(filep))
+		returnCode(code);
+	    }
+	  code = OK;
 	}
-
-	return(OK);
+	returnCode(code);
 }
 
 int scr_restore(const char *file)
 {
 	FILE	*fp;
 
-	if ((fp = fopen(file, "r")) == (FILE *)NULL)
-	    return ERR;
+	T((T_CALLED("scr_restore(%s)"), _nc_visbuf(file)));
+
+	if ((fp = fopen(file, "r")) == 0)
+	    returnCode(ERR);
 	else
 	{
 	    delwin(newscr);
 	    newscr = getwin(fp);
 	    (void) fclose(fp);
-	    return OK;
+	    returnCode(OK);
 	}
 }
 
@@ -122,14 +134,16 @@ int scr_dump(const char *file)
 {
 	FILE	*fp;
 
-	if ((fp = fopen(file, "w")) == (FILE *)NULL)
-	    return ERR;
+	T((T_CALLED("scr_dump(%s)"), _nc_visbuf(file)));
+
+	if ((fp = fopen(file, "w")) == 0)
+	    returnCode(ERR);
 	else
 	{
 	    (void) putwin(newscr, fp);
 	    (void) fclose(fp);
 	    dumptime = time((time_t *)0);
-	    return OK;
+	    returnCode(OK);
 	}
 }
 
@@ -138,34 +152,36 @@ int scr_init(const char *file)
 	FILE	*fp;
 	struct stat	stb;
 
+	T((T_CALLED("scr_init(%s)"), _nc_visbuf(file)));
+
 #ifdef exit_ca_mode
 	if (exit_ca_mode && non_rev_rmcup)
-	    return(ERR);
+	    returnCode(ERR);
 #endif /* exit_ca_mode */
 
-	if ((fp = fopen(file, "r")) == (FILE *)NULL)
-	    return ERR;
+	if ((fp = fopen(file, "r")) == 0)
+	    returnCode(ERR);
 	else if (fstat(STDOUT_FILENO, &stb) || stb.st_mtime > dumptime)
-	    return ERR;
+	    returnCode(ERR);
 	else
 	{
 	    delwin(curscr);
 	    curscr = getwin(fp);
 	    (void) fclose(fp);
-	    return OK;
+	    returnCode(OK);
 	}
 }
 
 int scr_set(const char *file)
 {
+    T((T_CALLED("scr_set(%s)"), _nc_visbuf(file)));
+
     if (scr_init(file) == ERR)
-	return(ERR);
+	returnCode(ERR);
     else
     {
 	delwin(newscr);
 	newscr = dupwin(curscr);
-	return(OK);
+	returnCode(OK);
     }
 }
-
-

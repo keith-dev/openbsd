@@ -1,6 +1,6 @@
 #!./perl
 
-# $RCSfile: goto.t,v $$Revision: 1.1.1.1 $$Date: 1996/08/19 10:13:18 $
+# $RCSfile: goto.t,v $$Revision: 1.2 $$Date: 1997/11/30 08:05:22 $
 
 # "This IS structured code.  It's just randomly structured."
 
@@ -31,7 +31,8 @@ label4:
 print "#2\t:$foo: == 4\n";
 if ($foo == 4) {print "ok 2\n";} else {print "not ok 2\n";}
 
-$x = `./perl -e 'goto foo;' 2>&1`;
+$PERL = ($^O eq 'MSWin32') ? '.\perl' : './perl';
+$x = `$PERL -e "goto foo;" 2>&1`;
 if ($x =~ /DCL-W-NOCOMD/) { $x = `\$ mcr sys\$disk:[]perl. -e "goto foo;"`; }
 
 if ($x =~ /label/) {print "ok 3\n";} else {print "not ok 3\n";}

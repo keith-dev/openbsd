@@ -1,4 +1,4 @@
-/*	$OpenBSD: telnetd.c,v 1.7 1997/07/14 01:40:39 millert Exp $	*/
+/*	$OpenBSD: telnetd.c,v 1.9 1998/03/25 18:43:49 art Exp $	*/
 /*	$NetBSD: telnetd.c,v 1.6 1996/03/20 04:25:57 tls Exp $	*/
 
 /*
@@ -45,7 +45,7 @@ static char copyright[] =
 static char sccsid[] = "@(#)telnetd.c	8.4 (Berkeley) 5/30/95";
 static char rcsid[] = "$NetBSD: telnetd.c,v 1.5 1996/02/28 20:38:23 thorpej Exp $";
 #else
-static char rcsid[] = "$OpenBSD: telnetd.c,v 1.7 1997/07/14 01:40:39 millert Exp $";
+static char rcsid[] = "$OpenBSD: telnetd.c,v 1.9 1998/03/25 18:43:49 art Exp $";
 #endif
 #endif /* not lint */
 
@@ -91,6 +91,10 @@ struct	socket_security ss;
 #if	defined(AUTHENTICATION)
 #include <libtelnet/auth.h>
 int	auth_level = 0;
+#endif
+#if	defined(ENCRYPTION)
+#include <libtelnet/encrypt.h>
+#include <libtelnet/misc-proto.h>
 #endif
 #if	defined(SecurID)
 int	require_SecurID = 0;
@@ -189,11 +193,19 @@ main(argc, argv)
 	int tos = -1;
 #endif
 
+#ifdef ENCRYPTION
+	extern int des_check_key;
+	des_check_key = 1; /* Kludge for Mac NCSA telnet 2.6 /bg */
+#endif
+
 	pfrontp = pbackp = ptyobuf;
 	netip = netibuf;
 	nfrontp = nbackp = netobuf;
 
 	progname = *argv;
+#ifdef ENCRYPTION
+	nclearto = 0;
+#endif
 
 #ifdef CRAY
 	/*
@@ -212,7 +224,6 @@ main(argc, argv)
 			 * Check for required authentication level
 			 */
 			if (strcmp(optarg, "debug") == 0) {
-				extern int auth_debug_mode;
 				auth_debug_mode = 1;
 			} else if (strcasecmp(optarg, "none") == 0) {
 				auth_level = 0;
@@ -532,6 +543,7 @@ main(argc, argv)
 	net = 0;
 	doit(&from);
 	/* NOTREACHED */
+	return (0);
 }  /* end of main */
 
 	void
@@ -610,12 +622,19 @@ getterminaltype(name)
     }
 #endif
 
+#ifdef ENCRYPTION
+    send_will(TELOPT_ENCRYPT, 1);
+    send_do(TELOPT_ENCRYPT, 1);        /* esc@magic.fi */
+#endif
     send_do(TELOPT_TTYPE, 1);
     send_do(TELOPT_TSPEED, 1);
     send_do(TELOPT_XDISPLOC, 1);
     send_do(TELOPT_NEW_ENVIRON, 1);
     send_do(TELOPT_OLD_ENVIRON, 1);
     while (
+#ifdef ENCRYPTION
+	   his_do_dont_is_changing(TELOPT_ENCRYPT) ||
+#endif
 	   his_will_wont_is_changing(TELOPT_TTYPE) ||
 	   his_will_wont_is_changing(TELOPT_TSPEED) ||
 	   his_will_wont_is_changing(TELOPT_XDISPLOC) ||
@@ -623,6 +642,15 @@ getterminaltype(name)
 	   his_will_wont_is_changing(TELOPT_OLD_ENVIRON)) {
 	ttloop();
     }
+#ifdef ENCRYPTION
+    /*
+     * Wait for the negotiation of what type of encryption we can
+     * send with.  If autoencrypt is not set, this will just return.
+     */
+    if (his_state_is_will(TELOPT_ENCRYPT)) {
+	encrypt_wait();
+    }
+#endif
     if (his_state_is_will(TELOPT_TSPEED)) {
 	static unsigned char sb[] =
 			{ IAC, SB, TELOPT_TSPEED, TELQUAL_SEND, IAC, SE };
@@ -787,7 +815,7 @@ extern void telnet P((int, int, char *));
 doit(who)
 	struct sockaddr_in *who;
 {
-	char *host, *inet_ntoa();
+	char *host = NULL, *inet_ntoa();
 	struct hostent *hp;
 	int level;
 	int ptynum;

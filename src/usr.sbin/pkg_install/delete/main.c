@@ -1,7 +1,7 @@
-/*	$OpenBSD: main.c,v 1.4 1997/06/14 05:46:40 deraadt Exp $	*/
+/*	$OpenBSD: main.c,v 1.6 1998/04/07 04:17:51 deraadt Exp $	*/
 
 #ifndef lint
-static char *rcsid = "$OpenBSD: main.c,v 1.4 1997/06/14 05:46:40 deraadt Exp $";
+static char *rcsid = "$OpenBSD: main.c,v 1.6 1998/04/07 04:17:51 deraadt Exp $";
 #endif
 
 /*
@@ -109,17 +109,9 @@ usage(const char *name, const char *fmt, ...)
     if (fmt) {
 	fprintf(stderr, "%s: ", name);
 	vfprintf(stderr, fmt, args);
-	fprintf(stderr, "\n\n");
+	fprintf(stderr, "\n");
     }
     va_end(args);
-    fprintf(stderr, "Usage: %s [args] pkg [ .. pkg ]\n", name);
-    fprintf(stderr, "Where args are one or more of:\n\n");
-    fprintf(stderr, "-v         verbose\n");
-    fprintf(stderr, "-p arg     override prefix with arg\n");
-    fprintf(stderr, "-d         delete empty directories when deinstalling\n");
-    fprintf(stderr, "-f         force delete even if dependencies exist\n");
-    fprintf(stderr, "           or deinstall/requirement checks fail\n");
-    fprintf(stderr, "-D         don't execute pkg de-install script, if any\n");
-    fprintf(stderr, "-n         don't actually de-install, just show steps\n");
+    fprintf(stderr, "usage: %s [-vDdnf] [-p prefix] pkg ...\n", name);
     exit(1);
 }

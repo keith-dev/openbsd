@@ -1,5 +1,7 @@
+/*	$OpenBSD: sudo.h,v 1.5 1998/03/31 06:41:12 millert Exp $	*/
+
 /*
- * CU sudo version 1.5.3 (based on Root Group sudo version 1.1)
+ * CU sudo version 1.5.5 (based on Root Group sudo version 1.1)
  *
  * This software comes with no waranty whatsoever, use at your own risk.
  *
@@ -25,7 +27,7 @@
  *  along with this program; if not, write to the Free Software
  *  Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  *
- *  $Id: sudo.h,v 1.2 1996/11/17 16:34:05 millert Exp $
+ *  Id: sudo.h,v 1.122 1998/03/31 05:05:45 millert Exp $
  */
 
 #ifndef _SUDO_SUDO_H
@@ -230,6 +232,7 @@ extern int Argc;
 extern char **Argv;
 extern int NewArgc;
 extern char **NewArgv;
+extern FILE *sudoers_fp;
 #endif
 extern int errno;
 

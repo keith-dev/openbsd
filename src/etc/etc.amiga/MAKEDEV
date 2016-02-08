@@ -1,6 +1,6 @@
 #!/bin/sh -
 #
-#	$OpenBSD: MAKEDEV,v 1.29 1997/10/16 07:29:56 niklas Exp $
+#	$OpenBSD: MAKEDEV,v 1.33 1998/02/22 23:35:37 niklas Exp $
 #	$NetBSD: MAKEDEV,v 1.21 1996/05/19 21:03:49 veego Exp $
 #
 # Copyright (c) 1990 The Regents of the University of California.
@@ -116,7 +116,7 @@ all)
 	sh MAKEDEV std fd st0 st1 ttye0 ttye1 ttye2 ttye3 ttye4 ttye5 ttye6
 	sh MAKEDEV mouse0 mouse1 tty00 ttyA0 ttyA1
 	sh MAKEDEV ttyB0 ttyB1 ttyB2 ttyB3 ttyB4 ttyB5 ttyB6 ttyB7 ttyB8 ttyB9
-	sh MAKEDEV grf0 grf1 grf2 grf3 grf4 grf5
+	sh MAKEDEV grf0 grf1 grf2 grf3 grf4 grf5 grf6
 	sh MAKEDEV kbd sd0 sd1 sd2 sd3 sd4 sd5 sd6 sd7 sd8 sd9
 	sh MAKEDEV vnd0 vnd1 vnd2 vnd3 vnd4 vnd5 vnd6 cd0 cd1 fd0 fd1 fd2 fd3
 	sh MAKEDEV bpf0 bpf1 bpf2 bpf3 bpf4 bpf5 bpf6 bpf7 bpf8 bpf9
@@ -321,7 +321,7 @@ ch*)
 	ch*) name=ch;  chr=40;;
 	esac
 	rm -f $name$unit
-	mknod $name$unit	c $chr `expr $unit '*' 16 + 0`
+	mknod $name$unit	c $chr $unit
 	chown root.operator $name$unit
 	chmod 640 $name$unit
 	umask 77
@@ -357,10 +357,10 @@ tty0*|ttyA*)
 	case $type in
 	0)	case $unit in
 		0)	
-			rm -f tty0${unit} ttym${unit}
+			rm -f tty0${unit} cua0${unit}
 			mknod tty0${unit} c 12 0
-			mknod ttym${unit} c 12 128
-			chown uucp.wheel tty0${unit} ttym${unit}
+			mknod cua0${unit} c 12 128
+			chown uucp.wheel tty0${unit} cua0${unit}
 			;;
 		*)
 			echo bad unit for tty0 in: $i
@@ -527,9 +527,11 @@ lpt*|lpa*)
 	;;
 
 ipl)
-	rm -f ipl
+	rm -f ipl ipnat ipstate 
 	mknod ipl c 34 0
-	chown root.wheel ipl
+	mknod ipnat c 34 1
+	mknod ipstate c 34 2
+	chown root.wheel ipl ipnat ipstate
 	;;
 
 tun*)

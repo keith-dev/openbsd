@@ -32,7 +32,7 @@
  */
 
 #if defined(LIBC_SCCS) && !defined(lint)
-static char rcsid[] = "$OpenBSD: nlist.c,v 1.21 1997/07/23 21:04:06 kstailey Exp $";
+static char rcsid[] = "$OpenBSD: nlist.c,v 1.24 1998/01/20 22:10:48 deraadt Exp $";
 #endif /* LIBC_SCCS and not lint */
 
 #include <sys/types.h>
@@ -65,7 +65,7 @@ __aout_fdnlist(fd, list)
 	register struct nlist *list;
 {
 	register struct nlist *p, *s;
-	register caddr_t strtab;
+	register void *strtab;
 	register off_t stroff, symoff;
 	register u_long symsize;
 	register int nent, cc;
@@ -95,8 +95,9 @@ __aout_fdnlist(fd, list)
 	 * (i.e., munmap will return it to the system).
 	 */
 	strsize = st.st_size - stroff;
-	strtab = mmap(NULL, (size_t)strsize, PROT_READ, 0, fd, stroff);
-	if (strtab == (char *)-1)
+	strtab = mmap(NULL, (size_t)strsize, PROT_READ, MAP_COPY|MAP_FILE,
+	    fd, stroff);
+	if (strtab == MAP_FAILED)
 		return (-1);
 	/*
 	 * clean out any left-over information for all valid entries.
@@ -130,7 +131,7 @@ __aout_fdnlist(fd, list)
 			if (soff == 0 || (s->n_type & N_STAB) != 0)
 				continue;
 			for (p = list; !ISLAST(p); p++)
-				if (!strcmp(&strtab[soff], p->n_un.n_name)) {
+				if (!strcmp(&((char *)strtab)[soff], p->n_un.n_name)) {
 					p->n_value = s->n_value;
 					p->n_type = s->n_type;
 					p->n_desc = s->n_desc;
@@ -176,8 +177,9 @@ __ecoff_fdnlist(fd, list)
 		BAD;
 	}
 	mappedsize = st.st_size;
-	mappedfile = mmap(NULL, mappedsize, PROT_READ, 0, fd, 0);
-	if (mappedfile == (char *)-1)
+	mappedfile = mmap(NULL, mappedsize, PROT_READ, MAP_COPY|MAP_FILE,
+	    fd, 0);
+	if (mappedfile == MAP_FAILED)
 		BAD;
 
 	if (check(0, sizeof *exechdrp))
@@ -314,8 +316,8 @@ __elf_fdnlist(fd, list)
 	}
 
 	/* mmap section header table */
-	shdr = (Elf32_Shdr *)mmap(NULL, (size_t)shdr_size,
-				  PROT_READ, 0, fd, (off_t) ehdr.e_shoff);
+	shdr = (Elf32_Shdr *)mmap(NULL, (size_t)shdr_size, PROT_READ,
+	    MAP_COPY|MAP_FILE, fd, (off_t) ehdr.e_shoff);
 	if (shdr == (Elf32_Shdr *)-1)
 		return (-1);
 
@@ -350,7 +352,8 @@ __elf_fdnlist(fd, list)
 	 * making the memory allocation permanent as with malloc/free
 	 * (i.e., munmap will return it to the system).
 	 */
-	strtab = mmap(NULL, (size_t)symstrsize, PROT_READ, 0, fd, (off_t) symstroff);
+	strtab = mmap(NULL, (size_t)symstrsize, PROT_READ, MAP_COPY|MAP_FILE,
+	    fd, (off_t) symstroff);
 	if (strtab == (char *)-1)
 		return (-1);
 	/*
@@ -376,7 +379,7 @@ __elf_fdnlist(fd, list)
 	/* ELFism - dunno if stripped by looking at header */
 	if (symoff == 0)
 		goto done;
-		
+
 	if (lseek(fd, (off_t) symoff, SEEK_SET) == -1) {
 		nent = -1;
 		goto done;
@@ -408,18 +411,18 @@ __elf_fdnlist(fd, list)
 					/* XXX - type conversion */
 					/*	 is pretty rude. */
 					switch(ELF32_ST_TYPE(s->st_info)) {
-						case STT_NOTYPE:
-							p->n_type = N_UNDF;
-							break;
-						case STT_OBJECT:
-							p->n_type = N_DATA;
-							break;
-						case STT_FUNC:
-							p->n_type = N_TEXT;
-							break;
-						case STT_FILE:
-							p->n_type = N_FN;
-							break;
+					case STT_NOTYPE:
+						p->n_type = N_UNDF;
+						break;
+					case STT_OBJECT:
+						p->n_type = N_DATA;
+						break;
+					case STT_FUNC:
+						p->n_type = N_TEXT;
+						break;
+					case STT_FILE:
+						p->n_type = N_FN;
+						break;
 					}
 					if (ELF32_ST_BIND(s->st_info) ==
 					    STB_LOCAL)
@@ -432,9 +435,8 @@ __elf_fdnlist(fd, list)
 			}
 		}
 	}
-  done:
+done:
 	munmap(strtab, symstrsize);
-
 	return (nent);
 }
 #endif /* _NLIST_DO_ELF */

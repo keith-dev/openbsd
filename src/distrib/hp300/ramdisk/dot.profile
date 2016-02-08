@@ -1,5 +1,5 @@
 #
-#	$OpenBSD: dot.profile,v 1.5 1997/10/20 22:24:06 millert Exp $
+#	$OpenBSD: dot.profile,v 1.7 1998/04/14 17:29:45 millert Exp $
 #	$NetBSD: dot.profile,v 1.1 1995/07/18 04:13:09 briggs Exp $
 #
 # Copyright (c) 1994 Christopher G. Demetriou
@@ -47,8 +47,8 @@ if [ "X${DONEPROFILE}" = "X" ]; then
 	export DONEPROFILE
 
 	# set up some sane defaults
-	echo 'erase ^?, werase ^W, kill ^U, intr ^C'
-	stty newcrt werase ^W intr ^C kill ^U erase ^? 9600
+	echo 'erase ^H, werase ^W, kill ^U, intr ^C'
+	stty newcrt werase ^W intr ^C kill ^U erase ^H 9600
 	echo ''
 
 	echo 'Remounting /dev/rd0a as root...'
@@ -56,11 +56,31 @@ if [ "X${DONEPROFILE}" = "X" ]; then
 
 	# tell install.md we've done it
 	> ${TMPWRITEABLE}
+
+	# pull in the functions that people will use from the shell prompt.
+	. /.commonutils
+	. /.instutils
+
+	# Installing or upgrading?
+	_forceloop=""
+	while [ "X$_forceloop" = X"" ]; do
+		echo -n '(I)nstall, (U)pgrade, or (S)hell? '
+		read _forceloop
+		case "$_forceloop" in
+			i*|I*)
+				/install
+				;;
+
+			u*|U*)
+				/upgrade
+				;;
+
+			s*|S*)
+				;;
+
+			*)
+				_forceloop=""
+				;;
+		esac
+	done
 fi
-
-# pull in the function definitions that people will use from the shell prompt.
-. /.commonutils
-. /.instutils
-
-# run the installation script.
-install

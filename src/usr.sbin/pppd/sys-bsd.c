@@ -1,4 +1,4 @@
-/*	$OpenBSD: sys-bsd.c,v 1.9 1997/09/28 21:44:37 millert Exp $	*/
+/*	$OpenBSD: sys-bsd.c,v 1.13 1998/03/20 03:10:03 angelos Exp $	*/
 
 /*
  * sys-bsd.c - System-dependent procedures for setting up
@@ -24,9 +24,9 @@
 
 #ifndef lint
 #if 0
-static char rcsid[] = "Id: sys-bsd.c,v 1.28 1997/04/30 05:57:46 paulus Exp";
+static char rcsid[] = "Id: sys-bsd.c,v 1.29 1997/11/27 06:10:04 paulus Exp $";
 #else
-static char rcsid[] = "$OpenBSD: sys-bsd.c,v 1.9 1997/09/28 21:44:37 millert Exp $";
+static char rcsid[] = "$OpenBSD: sys-bsd.c,v 1.13 1998/03/20 03:10:03 angelos Exp $";
 #endif
 #endif
 
@@ -39,6 +39,7 @@ static char rcsid[] = "$OpenBSD: sys-bsd.c,v 1.9 1997/09/28 21:44:37 millert Exp
 #include <string.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <err.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <termios.h>
@@ -323,7 +324,6 @@ sipxfaddr(unit, network, node)
 {
 	int    skfd; 
 	int    result = 1;
-	struct sockaddr_ipx  ipx_addr;
 	struct ifreq         ifr;
 	struct sockaddr_ipx *sipx = (struct sockaddr_ipx *) &ifr.ifr_addr;
 
@@ -375,7 +375,6 @@ cipxfaddr(unit)
 {
 	int    skfd; 
 	int    result = 1;
-	struct sockaddr_ipx  ipx_addr;
 	struct ifreq         ifr;
 	struct sockaddr_ipx *sipx = (struct sockaddr_ipx *) &ifr.ifr_addr;
 
@@ -488,7 +487,7 @@ set_up_tty(fd, local)
     }
 
     tios.c_cflag &= ~(CSIZE | CSTOPB | PARENB | CLOCAL);
-    if (crtscts > 0 && !local)
+    if (crtscts > 0 && modem)
 	tios.c_cflag |= CRTSCTS;
     else if (crtscts < 0)
 	tios.c_cflag &= ~CRTSCTS;
@@ -662,16 +661,23 @@ void
 wait_input(timo)
     struct timeval *timo;
 {
-    fd_set ready;
+    fd_set *fdsp = NULL;
+    int fdsn;
     int n;
 
-    FD_ZERO(&ready);
-    FD_SET(ttyfd, &ready);
-    n = select(ttyfd+1, &ready, NULL, &ready, timo);
+    fdsn = howmany(ttyfd+1, NFDBITS) * sizeof(fd_mask);
+    if ((fdsp = (fd_set *)malloc(fdsn)) == NULL)
+	err(1, "malloc");
+    memset(fdsp, 0, fdsn);
+    FD_SET(ttyfd, fdsp);
+
+    n = select(ttyfd+1, fdsp, NULL, fdsp, timo);
     if (n < 0 && errno != EINTR) {
 	syslog(LOG_ERR, "select: %m");
+	free(fdsp);
 	die(1);
     }
+    free(fdsp);
 }
 
 
@@ -684,16 +690,23 @@ void
 wait_loop_output(timo)
     struct timeval *timo;
 {
-    fd_set ready;
+    fd_set *fdsp = NULL;
+    int fdsn;
     int n;
 
-    FD_ZERO(&ready);
-    FD_SET(loop_master, &ready);
-    n = select(loop_master + 1, &ready, NULL, &ready, timo);
+    fdsn = howmany(loop_master+1, NFDBITS) * sizeof(fd_mask);
+    if ((fdsp = (fd_set *)malloc(fdsn)) == NULL)
+	err(1, "malloc");
+    memset(fdsp, 0, fdsn);
+    FD_SET(loop_master, fdsp);
+
+    n = select(loop_master + 1, fdsp, NULL, fdsp, timo);
     if (n < 0 && errno != EINTR) {
 	syslog(LOG_ERR, "select: %m");
+	free(fdsp);
 	die(1);
     }
+    free(fdsp);
 }
 
 
@@ -1402,6 +1415,7 @@ get_ether_addr(ipaddr, hwaddr)
 	    /*
 	     * Get its netmask and check that it's on the right subnet.
 	     */
+	    ifreq.ifr_addr = ifr->ifr_addr;
 	    if (ioctl(sockfd, SIOCGIFNETMASK, &ifreq) < 0)
 		continue;
 	    mask = ((struct sockaddr_in *) &ifreq.ifr_addr)->sin_addr.s_addr;
@@ -1497,6 +1511,7 @@ GetMask(addr)
 	/*
 	 * Get its netmask and OR it into our mask.
 	 */
+	ifreq.ifr_addr = ifr->ifr_addr;
 	if (ioctl(sockfd, SIOCGIFNETMASK, &ifreq) < 0)
 	    continue;
 	mask |= ((struct sockaddr_in *)&ifreq.ifr_addr)->sin_addr.s_addr;

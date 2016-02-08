@@ -1,4 +1,4 @@
-/*	$OpenBSD: editor.c,v 1.24 1997/10/24 02:49:55 millert Exp $	*/
+/*	$OpenBSD: editor.c,v 1.34 1998/04/14 20:02:48 millert Exp $	*/
 
 /*
  * Copyright (c) 1997 Todd C. Miller <Todd.Miller@courtesan.com>
@@ -31,7 +31,7 @@
  */
 
 #ifndef lint
-static char rcsid[] = "$OpenBSD: editor.c,v 1.24 1997/10/24 02:49:55 millert Exp $";
+static char rcsid[] = "$OpenBSD: editor.c,v 1.34 1998/04/14 20:02:48 millert Exp $";
 #endif /* not lint */
 
 #include <sys/types.h>
@@ -72,6 +72,7 @@ void	editor_modify __P((struct disklabel *, u_int32_t *, char *));
 void	editor_delete __P((struct disklabel *, u_int32_t *, char *));
 void	editor_display __P((struct disklabel *, u_int32_t *, char));
 void	editor_change __P((struct disklabel *, u_int32_t *, char *));
+void	editor_countfree __P((struct disklabel *, u_int32_t *));
 char	*getstring __P((struct disklabel *, char *, char *, char *));
 u_int32_t getuint __P((struct disklabel *, int, char *, char *, u_int32_t, u_int32_t, int));
 int	has_overlap __P((struct disklabel *, u_int32_t *, int));
@@ -81,7 +82,7 @@ int	partition_cmp __P((const void *, const void *));
 struct partition **sort_partitions __P((struct disklabel *, u_int16_t *));
 void	getdisktype __P((struct disklabel *, char *));
 void	find_bounds __P((struct disklabel *));
-void	set_bounds __P((struct disklabel *));
+void	set_bounds __P((struct disklabel *, u_int32_t *));
 struct diskchunk *free_chunks __P((struct disklabel *));
 
 static u_int32_t starting_sector;
@@ -115,7 +116,6 @@ editor(lp, f)
 	u_int32_t freesectors;
 	FILE *fp;
 	char buf[BUFSIZ], *cmd, *arg;
-	int i;
 
 	/* Don't allow disk type of "unknown" */
 	getdisktype(&label, "You need to specify a disk type for this disk.");
@@ -124,13 +124,7 @@ editor(lp, f)
 	find_bounds(&label);
 
 	/* Set freesectors based on bounds and initial label */
-	freesectors = ending_sector - starting_sector;
-	for (i = 0; i < label.d_npartitions; i++) {
-		pp = &label.d_partitions[i];
-		if (pp->p_fstype != FS_UNUSED && pp->p_fstype != FS_BOOT &&
-		    pp->p_size > 0 && pp->p_offset + pp->p_size <= ending_sector)
-			freesectors -= pp->p_size;
-	}
+	editor_countfree(&label, &freesectors);
 
 	/* Make sure there is no partition overlap. */
 	if (has_overlap(&label, &freesectors, 1))
@@ -154,10 +148,17 @@ editor(lp, f)
 
 #if defined(OLD_SCSI)
 	/* Some ports use the old scsi system that doesn't get the geom right */
-	if (strcmp(label.d_typename, "fictitious") == 0)
+	if (strcmp(label.d_packname, "fictitious") == 0)
 		puts("Warning, driver-generated label.  Disk parameters may be "
 		    "incorrect.");
 #endif
+	/* Set d_bbsize and d_sbsize as neccesary */
+	if (strcmp(label.d_packname, "fictitious") == 0) {
+		if (label.d_bbsize == 0)
+			label.d_bbsize = BBSIZE;
+		if (label.d_sbsize == 0)
+			label.d_sbsize = SBSIZE;
+	}
 
 	puts("\nInitial label editor (enter '?' for help at any prompt)");
 	lastlabel = label;
@@ -187,6 +188,7 @@ editor(lp, f)
 			puts("\tc [part]   - change partition size.");
 			puts("\td [part]   - delete partition.");
 			puts("\tm [part]   - modify existing partition.");
+			puts("\tr          - recalculate free space.");
 			puts("\tu          - undo last change.");
 			puts("\ts [path]   - save label to file.");
 			puts("\tw          - write label to disk.");
@@ -207,7 +209,7 @@ editor(lp, f)
 		case 'b':
 			tmplabel = lastlabel;
 			lastlabel = label;
-			set_bounds(&label);
+			set_bounds(&label, &freesectors);
 			if (memcmp(&label, &lastlabel, sizeof(label)) == 0)
 				lastlabel = tmplabel;
 			break;
@@ -273,6 +275,12 @@ editor(lp, f)
 			/* NOTREACHED */
 			break;
 
+		case 'r':
+		    /* Recalculate free space */
+		    editor_countfree(&label, &freesectors);
+		    puts("Recalculated free space.");
+		    break;
+
 		case 's':
 			if (arg == NULL) {
 				arg = getstring(lp, "Filename",
@@ -296,6 +304,8 @@ editor(lp, f)
 				tmplabel = label;
 				label = lastlabel;
 				lastlabel = tmplabel;
+				/* Recalculate free space */
+				editor_countfree(&label, &freesectors);
 				puts("Last change undone.");
 			}
 			break;
@@ -1281,7 +1291,8 @@ has_overlap(lp, freep, resolve)
 {
 	struct partition **spp;
 	u_int16_t npartitions;
-	int c, i, j, rval = 0;
+	int c, i, j;
+	char buf[BUFSIZ];
 
 	/* Get a sorted list of the partitions */
 	spp = sort_partitions(lp, &npartitions);
@@ -1319,27 +1330,30 @@ has_overlap(lp, freep, resolve)
 					return(1);
 				}
 
-				printf("Disable which one? [%c %c] ",
-				    'a' + i, 'a' + j);
-				/* XXX - make less gross */
-				while ((c = getchar()) != EOF && c != '\n') {
-					c -= 'a';
-					if (c == i || c == j)
-						break;
-				}
-				putchar('\n');
-				/* Mark the selected one as unused or... */
-				if (c == i || c == j) {
-					lp->d_partitions[c].p_fstype = FS_UNUSED;
-					*freep += lp->d_partitions[c].p_size;
-				} else
-					rval = 1;	/* still has overlap */
-			    }
+				/* Get partition to disable or ^D */
+				do {
+					printf("Disable which one? (^D to abort) [%c %c] ",
+					    'a' + i, 'a' + j);
+					buf[0] = '\0';
+					if (!fgets(buf, sizeof(buf), stdin)) {
+						putchar('\n');
+						return(1);	/* ^D */
+					}
+					c = buf[0] - 'a';
+				} while (buf[1] != '\n' && buf[1] != '\0' &&
+				    c != i && c != j);
+
+				/* Mark the selected one as unused */
+				lp->d_partitions[c].p_fstype = FS_UNUSED;
+				*freep += lp->d_partitions[c].p_size;
+				(void)free(spp);
+				return(has_overlap(lp, freep, resolve));
+			}
 		}
 	}
 
 	(void)free(spp);
-	return(rval);
+	return(0);
 }
 
 void
@@ -1356,15 +1370,18 @@ edit_parms(lp, freep)
 	/* disk type */
 	for (;;) {
 		p = getstring(lp, "disk type",
-		    "What kind of disk is this?  Usually SCSI, ST506, or "
-		    "floppy (use ST506 for IDE).", dktypenames[lp->d_type]);
+		    "What kind of disk is this?  Usually SCSI, ESDI, ST506, or "
+		    "floppy (use ESDI for IDE).", dktypenames[lp->d_type]);
 		if (p == NULL) {
 			fputs("Command aborted\n", stderr);
 			return;
 		}
-		for (ui = 1; ui < DKMAXTYPES && strcasecmp(p, dktypenames[ui]);
-		    ui++)
-			;
+		if (strcasecmp(p, "IDE") == 0)
+			ui = DTYPE_ESDI;
+		else
+			for (ui = 1; ui < DKMAXTYPES &&
+			    strcasecmp(p, dktypenames[ui]); ui++)
+				;
 		if (ui < DKMAXTYPES) {
 			break;
 		} else {
@@ -1571,6 +1588,7 @@ getdisktype(lp, banner)
 	if (lp->d_type > DKMAXTYPES || lp->d_type == 0) {
 		puts(banner);
 		puts("Possible values are:");
+		printf("\"IDE\", ");
 		for (i = 1; i < DKMAXTYPES; i++) {
 			printf("\"%s\"", dktypenames[i]);
 			if (i < DKMAXTYPES - 1)
@@ -1580,10 +1598,16 @@ getdisktype(lp, banner)
 
 		for (;;) {
 			s = getstring(lp, "Disk type",
-			    "What kind of disk is this?  Usually SCSI, ST506, or floppy (use ST506 for IDE).",
+			    "What kind of disk is this?  Usually SCSI, ESDI, "
+			    "ST506, or floppy (use ESDI for IDE).",
 			    "SCSI");
 			if (s == NULL)
 				continue;
+			if (strcasecmp(s, "IDE") == 0) {
+				lp->d_type = DTYPE_ESDI;
+				putchar('\n');
+				return;
+			}
 			for (i = 1; i < DKMAXTYPES; i++)
 				if (strcasecmp(s, dktypenames[i]) == 0) {
 					lp->d_type = i;
@@ -1608,8 +1632,9 @@ getdisktype(lp, banner)
  * XXX - should mention MBR values if DOSLABEL
  */
 void
-set_bounds(lp)
+set_bounds(lp, freep)
 	struct disklabel *lp;
+	u_int32_t *freep;
 {
 	u_int32_t ui, start_temp;
 
@@ -1638,6 +1663,9 @@ set_bounds(lp)
 	} while (ui > lp->d_secperunit - start_temp);
 	ending_sector = start_temp + ui;
 	starting_sector = start_temp;
+	
+	/* Recalculate the free sectors */
+	editor_countfree(lp, freep);
 }
 
 /*
@@ -1711,9 +1739,11 @@ find_bounds(lp)
 	ending_sector = lp->d_secperunit;
 
 #ifdef DOSLABEL
-	/* If we have an MBR, use values from the OpenBSD/386BSD parition. */
-	if (dosdp && pp->p_size && (dosdp->dp_typ == DOSPTYP_OPENBSD ||
-	    dosdp->dp_typ == DOSPTYP_386BSD)) {
+	/* If we have an MBR, use values from the OpenBSD/FreeBSD parition. */
+	if (dosdp && pp->p_size &&
+	    (dosdp->dp_typ == DOSPTYP_OPENBSD ||
+	    dosdp->dp_typ == DOSPTYP_FREEBSD ||
+	    dosdp->dp_typ == DOSPTYP_NETBSD)) {
 		starting_sector = get_le(&dosdp->dp_start);
 		ending_sector = starting_sector + get_le(&dosdp->dp_size);
 		printf("Treating sectors %u-%u as the OpenBSD portion of the "
@@ -1725,4 +1755,26 @@ find_bounds(lp)
 		 */
 	}
 #endif
+}
+
+/*
+ * Calculate free space.
+ */
+void
+editor_countfree(lp, freep)
+    struct disklabel *lp;
+    u_int32_t *freep;
+{
+    struct partition *pp;
+    int i;
+
+    *freep = ending_sector - starting_sector;
+    for (i = 0; i < lp->d_npartitions; i++) {
+	pp = &lp->d_partitions[i];
+	if (pp->p_fstype != FS_UNUSED && pp->p_fstype != FS_BOOT &&
+	    pp->p_size > 0 && 
+	    pp->p_offset + pp->p_size <= ending_sector &&
+	    pp->p_offset >= starting_sector)
+	    *freep -= pp->p_size;
+    }
 }

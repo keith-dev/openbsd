@@ -32,7 +32,7 @@
  */
 
 #if defined(LIBC_SCCS) && !defined(lint)
-static char rcsid[] = "$OpenBSD: mktemp.c,v 1.10 1997/10/07 22:21:34 millert Exp $";
+static char rcsid[] = "$OpenBSD: mktemp.c,v 1.12 1998/04/14 19:25:11 deraadt Exp $";
 #endif /* LIBC_SCCS and not lint */
 
 #include <sys/types.h>
@@ -115,13 +115,14 @@ _gettemp(path, doopen, domkdir)
 			c = (pid - 26) + 'a';
 		*trv-- = c;
 	}
+	start = trv + 1;
 
 	/*
 	 * check the target directory; if you have six X's and it
 	 * doesn't exist this runs for a *very* long time.
 	 */
 	if (doopen || domkdir) {
-		for (start = trv + 1;; --trv) {
+		for (;; --trv) {
 			if (trv <= path)
 				break;
 			if (*trv == '/') {
@@ -158,11 +159,13 @@ _gettemp(path, doopen, domkdir)
 		for (trv = start;;) {
 			if (!*trv)
 				return(0);
-			if (*trv == 'z')
+			if (*trv == 'Z')
 				*trv++ = 'a';
 			else {
 				if (isdigit(*trv))
 					*trv = 'a';
+				else if (*trv == 'z')	/* inc from z to A */
+					*trv = 'A';
 				else
 					++*trv;
 				break;

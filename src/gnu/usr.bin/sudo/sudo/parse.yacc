@@ -1,7 +1,9 @@
 %{
 
+/*	$OpenBSD: parse.yacc,v 1.9 1998/03/31 06:41:08 millert Exp $	*/
+
 /*
- *  CU sudo version 1.5.3
+ *  CU sudo version 1.5.5
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -27,7 +29,7 @@
  */
 
 #ifndef lint
-static char rcsid[] = "$Id: parse.yacc,v 1.5 1996/11/17 16:34:03 millert Exp $";
+static char rcsid[] = "$Id: parse.yacc,v 1.9 1998/03/31 06:41:08 millert Exp $";
 #endif /* lint */
 
 #include "config.h"
@@ -48,6 +50,9 @@ static char rcsid[] = "$Id: parse.yacc,v 1.5 1996/11/17 16:34:03 millert Exp $";
 #if defined(HAVE_MALLOC_H) && !defined(STDC_HEADERS)
 #include <malloc.h>
 #endif /* HAVE_MALLOC_H && !STDC_HEADERS */
+#if defined(YYBISON) && defined(HAVE_ALLOCA_H) && !defined(__GNUC__)
+#include <alloca.h>
+#endif /* YYBISON && HAVE_ALLOCA_H && !__GNUC__ */
 #ifdef HAVE_LSEARCH
 #include <search.h>
 #endif /* HAVE_LSEARCH */
@@ -87,7 +92,7 @@ int top = 0, stacksize = 0;
 
 #define push \
     { \
-	if (top > stacksize) { \
+	if (top >= stacksize) { \
 	    while ((stacksize += STACKINCREMENT) < top); \
 	    match = (struct matchstack *) realloc(match, sizeof(struct matchstack) * stacksize); \
 	    if (match == NULL) { \
@@ -680,13 +685,13 @@ static int add_alias(alias, type)
     (void) strcpy(ai.name, alias);
     if (lfind((VOID *)&ai, (VOID *)aliases, &naliases, sizeof(ai),
 	aliascmp) != NULL) {
-	(void) sprintf(s, "Alias `%.*s' already defined", sizeof(s) - 25,
+	(void) sprintf(s, "Alias `%.*s' already defined", (int) sizeof(s) - 25,
 		       alias);
 	yyerror(s);
     } else {
 	if (naliases >= nslots && !more_aliases()) {
 	    (void) sprintf(s, "Out of memory defining alias `%.*s'",
-			   sizeof(s) - 32, alias);
+			   (int) sizeof(s) - 32, alias);
 	    yyerror(s);
 	}
 
@@ -697,7 +702,7 @@ static int add_alias(alias, type)
 	    ok = TRUE;
 	} else {
 	    (void) sprintf(s, "Aliases corrupted defining alias `%.*s'",
-			   sizeof(s) - 36, alias);
+			   (int) sizeof(s) - 36, alias);
 	    yyerror(s);
 	}
     }

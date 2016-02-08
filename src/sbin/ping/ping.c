@@ -1,4 +1,4 @@
-/*	$OpenBSD: ping.c,v 1.25 1997/08/06 01:45:24 deraadt Exp $	*/
+/*	$OpenBSD: ping.c,v 1.30 1998/04/03 11:27:58 deraadt Exp $	*/
 /*	$NetBSD: ping.c,v 1.20 1995/08/11 22:37:58 cgd Exp $	*/
 
 /*
@@ -47,7 +47,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)ping.c	8.1 (Berkeley) 6/5/93";
 #else
-static char rcsid[] = "$OpenBSD: ping.c,v 1.25 1997/08/06 01:45:24 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: ping.c,v 1.30 1998/04/03 11:27:58 deraadt Exp $";
 #endif
 #endif /* not lint */
 
@@ -438,9 +438,7 @@ main(argc, argv)
 	 * ethernet, or just want to fill the arp cache to get some stuff for
 	 * /etc/ethers.
 	 */
-	hold = 48 * 1024;
-	(void)setsockopt(s, SOL_SOCKET, SO_RCVBUF, (char *)&hold,
-	    sizeof(hold));
+	(void)setsockopt(s, SOL_SOCKET, SO_RCVBUF, &packlen, sizeof(packlen));
 
 	if (to->sin_family == AF_INET)
 		(void)printf("PING %s (%s): %d data bytes\n", hostname,
@@ -469,6 +467,7 @@ main(argc, argv)
 		struct sockaddr_in from;
 		register int cc;
 		int fromlen;
+		sigset_t omask, nmask;
 
 		if (options & F_FLOOD) {
 			pinger();
@@ -488,7 +487,11 @@ main(argc, argv)
 			perror("ping: recvfrom");
 			continue;
 		}
+		sigemptyset(&nmask);
+		sigaddset(&nmask, SIGALRM);
+		sigprocmask(SIG_BLOCK, &nmask, &omask);
 		pr_pack((char *)packet, cc, &from);
+		sigprocmask(SIG_SETMASK, &omask, NULL);
 		if (npackets && nreceived >= npackets)
 			break;
 	}
@@ -614,8 +617,8 @@ pr_pack(buf, cc, from)
 {
 	register struct icmp *icp;
 	register in_addr_t l;
-	register int i, j;
-	register u_char *cp,*dp;
+	register u_int i, j;
+	register u_char *cp, *dp;
 	static int old_rrlen;
 	static char old_rr[MAX_IPOPTLEN];
 	struct ip *ip, *ip2;
@@ -729,7 +732,8 @@ pr_pack(buf, cc, from)
 			hlen -= 2;
 			j = *++cp;
 			++cp;
-			if (j > IPOPT_MINOFF)
+			i = 0;
+			if (j > IPOPT_MINOFF) {
 				for (;;) {
 					l = *++cp;
 					l = (l<<8) + *++cp;
@@ -737,13 +741,20 @@ pr_pack(buf, cc, from)
 					l = (l<<8) + *++cp;
 					if (l == 0)
 						(void)printf("\t0.0.0.0");
-				else
-					(void)printf("\t%s", pr_addr(ntohl(l)));
-				hlen -= 4;
-				j -= 4;
-				if (j <= IPOPT_MINOFF)
-					break;
-				(void)putchar('\n');
+					else
+						(void)printf("\t%s",
+						    pr_addr(ntohl(l)));
+					hlen -= 4;
+					j -= 4;
+					i += 4;
+					if (j <= IPOPT_MINOFF)
+						break;
+					if (i >= MAX_IPOPTLEN) {
+						(void)printf("\t(truncated route)");
+						break;
+					}
+					(void)putchar('\n');
+				}
 			}
 			break;
 		case IPOPT_RR:
@@ -765,9 +776,14 @@ pr_pack(buf, cc, from)
 				cp += i;
 				break;
 			}
-			old_rrlen = i;
-			memcpy(old_rr, cp, i);
+			if (i < MAX_IPOPTLEN) {
+				old_rrlen = i;
+				memcpy(old_rr, cp, i);
+			} else
+				old_rrlen = 0;
+
 			(void)printf("\nRR: ");
+			j = 0;
 			for (;;) {
 				l = *++cp;
 				l = (l<<8) + *++cp;
@@ -779,8 +795,13 @@ pr_pack(buf, cc, from)
 					(void)printf("\t%s", pr_addr(ntohl(l)));
 				hlen -= 4;
 				i -= 4;
+				j += 4;
 				if (i <= 0)
 					break;
+				if (j >= MAX_IPOPTLEN) {
+					(void)printf("\t(truncated route)");
+					break;
+				}
 				(void)putchar('\n');
 			}
 			break;
@@ -789,6 +810,8 @@ pr_pack(buf, cc, from)
 			break;
 		default:
 			(void)printf("\nunknown option %x", *cp);
+			hlen = hlen + cp[1] - 1;
+			cp = cp + cp[1] - 1;
 			break;
 		}
 	if (!(options & F_FLOOD)) {

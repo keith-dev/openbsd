@@ -1,4 +1,4 @@
-/*	$OpenBSD: arp.c,v 1.8 1997/09/12 04:07:16 millert Exp $ */
+/*	$OpenBSD: arp.c,v 1.10 1997/11/28 05:34:41 art Exp $ */
 /*	$NetBSD: arp.c,v 1.12 1995/04/24 13:25:18 cgd Exp $ */
 
 /*
@@ -215,6 +215,8 @@ set(argc, argv)
 	if (getinetaddr(host, &sin->sin_addr) == -1)
 		return (1);
 	ea = ether_aton(eaddr);
+	if (ea == NULL) 
+	  errx(1, "invalid ethernet address: %s\n", eaddr);
 	memcpy(LLADDR(&sdl_m), ea, sizeof (*ea));
 	sdl_m.sdl_alen = 6;
 	doing_proxy = flags = export_only = expire_time = 0;
@@ -373,6 +375,8 @@ dump(addr)
 	mib[5] = RTF_LLINFO;
 	if (sysctl(mib, 6, NULL, &needed, NULL, 0) < 0)
 		err(1, "route-sysctl-estimate");
+	if (needed == 0)
+		return;
 	if ((buf = malloc(needed)) == NULL)
 		err(1, "malloc");
 	if (sysctl(mib, 6, buf, &needed, NULL, 0) < 0)

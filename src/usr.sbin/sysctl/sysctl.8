@@ -1,4 +1,4 @@
-.\"	$OpenBSD: sysctl.8,v 1.12 1997/08/19 06:42:42 millert Exp $
+.\"	$OpenBSD: sysctl.8,v 1.17 1998/03/18 19:03:05 jason Exp $
 .\"	$NetBSD: sysctl.8,v 1.4 1995/09/30 07:12:49 thorpej Exp $
 .\"
 .\" Copyright (c) 1993
@@ -32,9 +32,9 @@
 .\" OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 .\" SUCH DAMAGE.
 .\"
-.\"	@(#)sysctl.8	8.1 (Berkeley) 6/6/93
+.\"	@(#)sysctl.8	8.2 (Berkeley) 5/9/95
 .\"
-.Dd June, 6, 1993
+.Dd May 9, 1995
 .Dt SYSCTL 8
 .Os
 .Sh NAME
@@ -200,7 +200,30 @@ privilege can change the value.
 .It ddb.max_width	integer	yes
 .It ddb.max_line	integer	yes
 .It ddb.tab_stop_width	integer	yes
+.It ddb.panic	integer	yes
+.It ddb.console	integer	yes
 .El
+.Pp
+The
+.Nm sysctl
+program can get or set debugging variables
+that have been identified for its display.
+This information can be obtained by using the command:
+.Bd -literal -offset indent
+sysctl debug
+.Ed
+In addition,
+.Nm sysctl
+can extract information about the filesystems that have been compiled
+into the running system.
+This information can be obtained by using the command:
+.Bd -literal -offset indent
+sysctl vfs
+.Ed
+By default, only filesystems that are actively being used are listed.
+Use of the
+.Fl A
+flag lists all the filesystems compiled into the running kernel.
 .Sh EXAMPLES
 .Pp
 For example, to retrieve the maximum number of processes allowed
@@ -223,6 +246,14 @@ sysctl kern.clockrate
 Information about the load average history may be obtained with
 .Bd -literal -offset indent -compact
 sysctl vm.loadavg
+.Ed
+.Pp
+To make the
+.Xr chown 2
+system call use traditional BSD semantics (don't clear setuid/setgid bits),
+one would do the following:
+.Bd -literal -offset indent -compact
+sysctl -w fs.posix.setuid=0
 .Ed
 .Pp
 Set the list of reserved TCP ports that should not be allocated

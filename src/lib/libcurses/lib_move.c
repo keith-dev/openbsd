@@ -1,3 +1,5 @@
+/*	$OpenBSD: lib_move.c,v 1.3 1997/12/03 05:21:23 millert Exp $	*/
+
 
 /***************************************************************************
 *                            COPYRIGHT NOTICE                              *
@@ -27,22 +29,25 @@
 **
 */
 
-#include "curses.priv.h"
+#include <curses.priv.h>
+
+MODULE_ID("Id: lib_move.c,v 1.7 1997/09/20 15:02:34 juergen Exp $")
 
 int
 wmove(WINDOW *win, int y, int x)
 {
-	T(("wmove(%p,%d,%d) called", win, y, x));
+	T((T_CALLED("wmove(%p,%d,%d)"), win, y, x));
 
-	if (x >= 0  &&  x <= win->_maxx  &&
-		y >= 0  &&  y <= win->_maxy)
+	if (win && 
+	    x >= 0  &&  x <= win->_maxx  &&
+	    y >= 0  &&  y <= win->_maxy)
 	{
 		win->_curx = (short)x;
 		win->_cury = (short)y;
 
-		win->_flags &= ~_NEED_WRAP;
+		win->_flags &= ~_WRAPPED;
 		win->_flags |= _HASMOVED;
-		return(OK);
+		returnCode(OK);
 	} else
-		return(ERR);
+		returnCode(ERR);
 }

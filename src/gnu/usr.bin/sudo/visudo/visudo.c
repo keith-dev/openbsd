@@ -1,5 +1,7 @@
+/*	$OpenBSD: visudo.c,v 1.7 1998/03/31 06:41:20 millert Exp $	*/
+
 /*
- *  CU sudo version 1.5.3
+ *  CU sudo version 1.5.5
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -26,7 +28,7 @@
  */
 
 #ifndef lint
-static char rcsid[] = "$Id: visudo.c,v 1.4 1997/04/12 07:18:57 millert Exp $";
+static char rcsid[] = "$Id: visudo.c,v 1.7 1998/03/31 06:41:20 millert Exp $";
 #endif /* lint */
 
 #include "config.h"

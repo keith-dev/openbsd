@@ -1,3 +1,5 @@
+/*	$OpenBSD: lib_insdel.c,v 1.3 1997/12/03 05:21:20 millert Exp $	*/
+
 
 /***************************************************************************
 *                            COPYRIGHT NOTICE                              *
@@ -19,33 +21,32 @@
 *                                                                          *
 ***************************************************************************/
 
-
-
 /*
 **	lib_insdel.c
 **
 **	The routine winsdelln(win, n).
 **  positive n insert n lines above current line
-**  negative n delete n lines starting from current line 
+**  negative n delete n lines starting from current line
 **
 */
 
-#include "curses.priv.h"
-#include <stdlib.h>
+#include <curses.priv.h>
+
+MODULE_ID("Id: lib_insdel.c,v 1.7 1997/09/20 15:02:34 juergen Exp $")
 
 int
 winsdelln(WINDOW *win, int n)
 {
-	T(("winsdel(%p,%d) called", win, n));
+int code = ERR;
 
-	if (n == 0)
-		return OK;
+	T((T_CALLED("winsdel(%p,%d)"), win, n));
 
-	_nc_scroll_window(win, -n, win->_cury, win->_maxy);
-	touchline(win, win->_cury, win->_maxy - win->_cury + 1);
-
-	_nc_synchook(win);
-    	return OK;
+	if (win) {
+	  if (n != 0) {
+	    _nc_scroll_window(win, -n, win->_cury, win->_maxy, _nc_background(win));	  
+	    _nc_synchook(win);
+	  }
+	  code = OK;
+	}
+	returnCode(code);
 }
-
-

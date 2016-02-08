@@ -1,4 +1,4 @@
-/*	$OpenBSD: paths.h,v 1.9 1997/08/29 18:05:38 mickey Exp $	*/
+/*	$OpenBSD: paths.h,v 1.11 1998/03/31 00:55:48 deraadt Exp $	*/
 /*	$NetBSD: paths.h,v 1.7 1994/10/26 00:56:12 cgd Exp $	*/
 
 /*
@@ -40,9 +40,9 @@
 #define	_PATHS_H_
 
 /* Default search path. */
-#define	_PATH_DEFPATH	"/usr/bin:/bin"
+#define	_PATH_DEFPATH	"/usr/bin:/bin:/usr/X11R6/bin:/usr/local/bin"
 /* All standard utilities path. */
-#define	_PATH_STDPATH	"/usr/bin:/bin:/usr/sbin:/sbin"
+#define	_PATH_STDPATH	"/usr/bin:/bin:/usr/sbin:/sbin:/usr/X11R6/bin:/usr/local/bin"
 
 #define	_PATH_BSHELL	"/bin/sh"
 #define	_PATH_CONSOLE	"/dev/console"
@@ -71,6 +71,7 @@
 #define _PATH_BOOTDIR	"/usr/mdec/"
 #define	_PATH_DEV	"/dev/"
 #define	_PATH_TMP	"/tmp/"
+#define	_PATH_UUCPLOCK	"/var/spool/lock/"
 #define	_PATH_VARDB	"/var/db/"
 #define	_PATH_VARRUN	"/var/run/"
 #define	_PATH_VARTMP	"/var/tmp/"

@@ -1,4 +1,4 @@
-/*	$OpenBSD: yppasswdd_mkpw.c,v 1.15 1997/08/19 07:00:51 niklas Exp $	*/
+/*	$OpenBSD: yppasswdd_mkpw.c,v 1.17 1998/01/28 21:20:37 maja Exp $	*/
 
 /*
  * Copyright (c) 1994 Mats O Jansson <moj@stacken.kth.se>
@@ -32,7 +32,7 @@
  */
 
 #ifndef LINT
-static char rcsid[] = "$OpenBSD: yppasswdd_mkpw.c,v 1.15 1997/08/19 07:00:51 niklas Exp $";
+static char rcsid[] = "$OpenBSD: yppasswdd_mkpw.c,v 1.17 1998/01/28 21:20:37 maja Exp $";
 #endif
 
 #include <sys/param.h>
@@ -57,6 +57,23 @@ extern int nopw;
 extern int make;
 extern char make_arg[];
 extern char *dir;
+
+char *
+ok_shell(name)
+	char *name;
+{
+	char *p, *sh;
+
+	setusershell();
+	while (sh = getusershell()) {
+		if (!strcmp(name, sh))
+			return (name);
+		/* allow just shell name, but use "real" path */
+		if ((p = strrchr(sh, '/')) && strcmp(name, p + 1) == 0)
+			return (sh);
+	}
+	return (NULL);
+}
 
 int
 badchars(base)
@@ -169,6 +186,8 @@ make_passwd(argp)
 		goto fail;
 	if (!nogecos && badchars(argp->newpw.pw_shell))
 		goto fail;
+	if (!ok_shell(argp->newpw.pw_shell) || !ok_shell(pw.pw_shell))
+		goto fail;
 
 	/*
 	 * Get the new password.  Reset passwd change time to zero; when
@@ -201,6 +220,9 @@ make_passwd(argp)
 	}
 
 	tfd = pw_lock(0);
+	if (tfd < 0)
+		goto fail;
+
 	pw_copy(pfd, tfd, &pw);
 	pw_mkdb();
 	free(bp);

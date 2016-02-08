@@ -1,9 +1,9 @@
-#	$OpenBSD: Makefile,v 1.15 1997/04/19 21:26:27 millert Exp $
+#	$OpenBSD: Makefile,v 1.18 1998/03/09 09:00:42 deraadt Exp $
 
 .include <bsd.own.mk>
 
 PROG=	passwd
-SRCS=	local_passwd.c yp_passwd.c passwd.c getpwent.c pwd_gensalt.c
+SRCS=	local_passwd.c yp_passwd.c passwd.c pwd_gensalt.c getpwent.c
 .PATH:  ${.CURDIR}/../../lib/libc/gen
 DPADD+= ${LIBRPCSVC} ${LIBUTIL}
 LDADD+= -lrpcsvc -lutil
@@ -22,16 +22,16 @@ DPADD+=	${LIBKRB5} ${LIBCRYPTO}
 LDADD+=	-lkrb5 -lcrypto
 .elif (${KERBEROS} == "yes")
 .PATH:  ${.CURDIR}/../rlogin
-SRCS+= krb_passwd.c des_rw.c
+SRCS+= new_pwd.c krb_passwd.c des_rw.c
 CFLAGS+= -DKERBEROS
 DPADD+=	${LIBKRB} ${LIBDES}
-LDADD+=	-lkrb -ldes
+LDADD+=	-lkadm -lkrb -ldes -lcom_err
 .endif
 
 BINMODE=4555
-BINOWN=	root
-
-.include <bsd.prog.mk>
+BINOWN=root
 
 getpwent.o: getpwent.c
 	${COMPILE.c} -UYP ${.IMPSRC}
+
+.include <bsd.prog.mk>

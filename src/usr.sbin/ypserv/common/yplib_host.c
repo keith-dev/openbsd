@@ -1,4 +1,4 @@
-/*	$OpenBSD: yplib_host.c,v 1.7 1997/06/23 01:11:12 deraadt Exp $ */
+/*	$OpenBSD: yplib_host.c,v 1.9 1998/02/14 10:05:26 maja Exp $ */
 
 /*
  * Copyright (c) 1992, 1993 Theo de Raadt <deraadt@theos.com>
@@ -32,7 +32,7 @@
  */
 
 #ifndef LINT
-static char *rcsid = "$OpenBSD: yplib_host.c,v 1.7 1997/06/23 01:11:12 deraadt Exp $";
+static char *rcsid = "$OpenBSD: yplib_host.c,v 1.9 1998/02/14 10:05:26 maja Exp $";
 #endif
 
 #include <sys/param.h>
@@ -307,7 +307,6 @@ struct ypall_callback *incallback;
 
 	(void) clnt_call(client, YPPROC_ALL,
 		xdr_ypreq_nokey, &yprnk, xdr_ypresp_all_seq, &status, tv);
-	xdr_free(xdr_ypresp_all_seq, (char *)&status);	/* not really needed... */
 
 	if(status != YP_FALSE)
 		return ypprot_err(status);
@@ -393,7 +392,7 @@ struct ypmaplist **outmaplist;
 	memset(&ypml, 0, sizeof ypml);
 
 	r = clnt_call(client, YPPROC_MAPLIST,
-		xdr_domainname, indomain, xdr_ypresp_maplist, &ypml, tv);
+		xdr_domainname, &indomain, xdr_ypresp_maplist, &ypml, tv);
 	if (r != RPC_SUCCESS) {
 		clnt_perror(client, "yp_maplist: clnt_call");
 	}

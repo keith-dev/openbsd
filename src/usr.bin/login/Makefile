@@ -1,9 +1,10 @@
-#	$OpenBSD: Makefile,v 1.10 1997/09/21 11:49:39 deraadt Exp $
+#	$OpenBSD: Makefile,v 1.13 1998/03/26 23:47:29 deraadt Exp $
 
 PROG=	login
 SRCS=	login.c failedlogin.c
 LDADD=	-lutil
 DPADD=	${LIBUTIL}
+CFLAGS+= -Wall -Wno-unused
 
 .include <bsd.own.mk>	# For SKEY, KERBEROS and KERBEROS5
 
@@ -21,8 +22,8 @@ DPADD+=	${LIBKRB5} ${LIBCRYPTO}
 .elif (${KERBEROS} == "yes")
 CFLAGS+= -DKERBEROS
 SRCS+=	klogin.c
-LDADD+=	-lkrb -ldes
-DPADD+=	${LIBKRB} ${LIBDES}
+LDADD+=	-lkrb -ldes -lkafs
+DPADD+=	${LIBKRB} ${LIBDES} ${LIBKAFS}
 .endif
 
 BINOWN=	root

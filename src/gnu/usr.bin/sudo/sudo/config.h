@@ -1,6 +1,8 @@
+/*	$OpenBSD: config.h,v 1.4 1998/03/31 06:40:51 millert Exp $	*/
+
 /* config.h.  Generated automatically by configure.  */
 /*
- *  CU sudo version 1.5.2
+ *  CU sudo version 1.5.5
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -18,7 +20,7 @@
  *
  *  Please send bugs, changes, problems to sudo-bugs@courtesan.com
  *
- *  $Id: config.h,v 1.1 1996/10/14 05:14:44 millert Exp $
+ *  Id: config.h.in,v 1.87 1998/03/31 05:05:30 millert Exp $
  */
 
 /*
@@ -91,6 +93,9 @@
 
 /* Define if you use SecurID.  */
 /* #undef HAVE_SECURID */
+
+/* Define if you use AIX general authentication.  */
+/* #undef HAVE_AUTHENTICATE */
 
 /* Define if you use Kerberos.  */
 /* #undef HAVE_KERB4 */
@@ -194,7 +199,7 @@
 #define HAVE_SETEUID 1
 
 /* Define if you have the <malloc.h> header file.  */
-#define HAVE_MALLOC_H 1
+/* #undef HAVE_MALLOC_H */
 
 /* Define if you have the <alloca.h> header file.  */
 /* #undef HAVE_ALLOCA_H */

@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.10 1997/06/29 14:54:18 provos Exp $
+#	$OpenBSD: Makefile,v 1.24 1998/03/16 03:07:47 deraadt Exp $
 #	from @(#)Makefile	5.1 (Berkeley) 6/25/90
 
 SUBDIR=
@@ -9,11 +9,17 @@ SUBDIR+=include
 
 SUBDIR+=acl krb kadm kafs kdb
 
-SUBDIR+=ext_srvtab kadmin kadmind kdb_destroy kdb_edit kdb_init kdb_util \
-	kdestroy kerberos kinit klist kpasswdd kprop kpropd ksrvtgt ksrvutil \
-	kstash make_keypair register registerd
+SUBDIR+=ext_srvtab kadmin kadmind kdb_destroy kdb_init kdb_edit \
+	kdb_util kdestroy kerberos kinit klist kprop kpropd ksrvtgt \
+	ksrvutil kstash kauth kauthd
 
-SUBDIR+=man
+SUBDIR+=man doc
+
+.include <bsd.own.mk> # for AFS
+
+.if (${AFS} == "yes")
+SUBDIR+=afslog
+.endif
 
 build:
 	(cd ${.CURDIR}/include && ${MAKE} includes)

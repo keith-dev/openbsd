@@ -1,3 +1,5 @@
+/*	$OpenBSD: lib_box.c,v 1.3 1997/12/03 05:21:12 millert Exp $	*/
+
 
 /***************************************************************************
 *                            COPYRIGHT NOTICE                              *
@@ -24,14 +26,13 @@
 /*
 **	lib_box.c
 **
-**	line drawing routines:
-**	wborder()
-**	whline()
-**	wvline()
+**	The routine wborder().
 **
 */
 
-#include "curses.priv.h"
+#include <curses.priv.h>
+
+MODULE_ID("Id: lib_box.c,v 1.9 1997/10/08 09:38:17 jtc Exp $")
 
 int wborder(WINDOW *win, chtype ls, chtype rs, chtype ts,
 	chtype bs, chtype tl, chtype tr, chtype bl, chtype br)
@@ -39,7 +40,19 @@ int wborder(WINDOW *win, chtype ls, chtype rs, chtype ts,
 short i;
 short endx, endy;
 
-    T(("wborder() called"));
+    T((T_CALLED("wborder(%p,%s,%s,%s,%s,%s,%s,%s,%s)"),
+	win,
+	_tracechtype2(1,ls),
+	_tracechtype2(2,rs),
+	_tracechtype2(3,ts),
+	_tracechtype2(4,bs),
+	_tracechtype2(5,tl),
+	_tracechtype2(6,tr),
+	_tracechtype2(7,bl),
+	_tracechtype2(8,br)));
+
+        if (!win)
+          returnCode(ERR);
 
 	if (ls == 0) ls = ACS_VLINE;
 	if (rs == 0) rs = ACS_VLINE;
@@ -50,23 +63,23 @@ short endx, endy;
 	if (bl == 0) bl = ACS_LLCORNER;
 	if (br == 0) br = ACS_LRCORNER;
 
-	ls |= (win->_attrs ? win->_attrs : (win->_bkgd & A_ATTRIBUTES));
-	rs |= (win->_attrs ? win->_attrs : (win->_bkgd & A_ATTRIBUTES));
-	ts |= (win->_attrs ? win->_attrs : (win->_bkgd & A_ATTRIBUTES));
-	bs |= (win->_attrs ? win->_attrs : (win->_bkgd & A_ATTRIBUTES));
-	tl |= (win->_attrs ? win->_attrs : (win->_bkgd & A_ATTRIBUTES));
-	tr |= (win->_attrs ? win->_attrs : (win->_bkgd & A_ATTRIBUTES));
-	bl |= (win->_attrs ? win->_attrs : (win->_bkgd & A_ATTRIBUTES));
-	br |= (win->_attrs ? win->_attrs : (win->_bkgd & A_ATTRIBUTES));
+	ls = _nc_render(win, ls);
+	rs = _nc_render(win, rs);
+	ts = _nc_render(win, ts);
+	bs = _nc_render(win, bs);
+	tl = _nc_render(win, tl);
+	tr = _nc_render(win, tr);
+	bl = _nc_render(win, bl);
+	br = _nc_render(win, br);
 
-	T(("using %lx, %lx, %lx, %lx, %lx, %lx, %lx, %lx", ls, rs, ts, bs, tl, tr, bl, br));
+	T(("using %#lx, %#lx, %#lx, %#lx, %#lx, %#lx, %#lx, %#lx", ls, rs, ts, bs, tl, tr, bl, br));
 
 	endx = win->_maxx;
 	endy = win->_maxy;
 
 	for (i = 0; i <= endx; i++) {
-		win->_line[0].text[i] = ts; 
-		win->_line[endy].text[i] = bs; 
+		win->_line[0].text[i] = ts;
+		win->_line[endy].text[i] = bs;
 	}
 	win->_line[endy].firstchar = win->_line[0].firstchar = 0;
 	win->_line[endy].lastchar = win->_line[0].lastchar = endx;
@@ -83,64 +96,5 @@ short endx, endy;
 	win->_line[endy].text[endx] = br;
 
 	_nc_synchook(win);
-	return OK;
+	returnCode(OK);
 }
-
-int whline(WINDOW *win, chtype ch, int n)
-{
-short line;
-short start;
-short end;
-
-	T(("whline(%p,%lx,%d) called", win, ch, n));
-
-	line = win->_cury;
-	start = win->_curx;
-	end = start + n - 1;
-	if (end > win->_maxx) 
-		end = win->_maxx;
-
-	if (win->_line[line].firstchar == _NOCHANGE || win->_line[line].firstchar > start) 
-		win->_line[line].firstchar = start;
-	if (win->_line[line].lastchar == _NOCHANGE || win->_line[line].lastchar < start) 
-		win->_line[line].lastchar = end;
-
-	if (ch == 0)
-		ch = ACS_HLINE;
-	while ( end >= start) {
-		win->_line[line].text[end] = ch | win->_attrs;
-		end--;
-	}
-
-	return OK;
-}
-
-int wvline(WINDOW *win, chtype ch, int n)
-{
-short row, col;
-short end;
-
-	T(("wvline(%p,%lx,%d) called", win, ch, n));
-
-	row = win->_cury;
-	col = win->_curx;
-	end = row + n - 1;
-	if (end > win->_maxy) 
-		end = win->_maxy;
-
-	if (ch == 0)
-		ch = ACS_VLINE;
-
-	while(end >= row) {
-		win->_line[end].text[col] = ch | win->_attrs;
-		if (win->_line[end].firstchar == _NOCHANGE || win->_line[end].firstchar > col) 
-			win->_line[end].firstchar = col;
-		if (win->_line[end].lastchar == _NOCHANGE || win->_line[end].lastchar < col) 
-			win->_line[end].lastchar = col;
-		end--;
-	}
-
-	_nc_synchook(win);
-	return OK;
-}
-	

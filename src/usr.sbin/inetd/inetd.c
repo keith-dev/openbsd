@@ -1,4 +1,4 @@
-/*	$OpenBSD: inetd.c,v 1.40 1997/09/19 12:21:27 deraadt Exp $	*/
+/*	$OpenBSD: inetd.c,v 1.46 1998/03/12 00:19:16 deraadt Exp $	*/
 /*	$NetBSD: inetd.c,v 1.11 1996/02/22 11:14:41 mycroft Exp $	*/
 /*
  * Copyright (c) 1983,1991 The Regents of the University of California.
@@ -41,7 +41,7 @@ char copyright[] =
 
 #ifndef lint
 /*static char sccsid[] = "from: @(#)inetd.c	5.30 (Berkeley) 6/3/91";*/
-static char rcsid[] = "$OpenBSD: inetd.c,v 1.40 1997/09/19 12:21:27 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: inetd.c,v 1.46 1998/03/12 00:19:16 deraadt Exp $";
 #endif /* not lint */
 
 /*
@@ -167,7 +167,7 @@ static char rcsid[] = "$OpenBSD: inetd.c,v 1.40 1997/09/19 12:21:27 deraadt Exp 
 #include <rpc/pmap_clnt.h>
 #include "pathnames.h"
 
-#define	TOOMANY		40		/* don't start more than TOOMANY */
+#define	TOOMANY		256		/* don't start more than TOOMANY */
 #define	CNT_INTVL	60		/* servers in CNT_INTVL sec. */
 #define	RETRYTIME	(60*10)		/* retry after bind or server fail */
 
@@ -183,6 +183,7 @@ void	goaway __P((int));
 int	debug = 0;
 int	nsock, maxsock;
 fd_set	allsock;
+int	toomany = TOOMANY;
 int	options;
 int	timingout;
 struct	servent *sp;
@@ -299,7 +300,7 @@ main(argc, argv, envp)
 	register struct passwd *pwd;
 	register struct group *grp = NULL;
 	register int tmpint;
-	struct sigvec sv;
+	struct sigaction sa, sapipe;
 	int ch, dofork;
 	pid_t pid;
 	char buf[50];
@@ -314,15 +315,30 @@ main(argc, argv, envp)
 	progname = strrchr(argv[0], '/');
 	progname = progname ? progname + 1 : argv[0];
 
-	while ((ch = getopt(argc, argv, "d")) != -1)
+	while ((ch = getopt(argc, argv, "dR:")) != -1)
 		switch(ch) {
 		case 'd':
 			debug = 1;
 			options |= SO_DEBUG;
 			break;
 		case '?':
+		case 'R': {	/* invocation rate */
+			char *p;
+			int val;
+
+			val = strtoul(optarg, &p, 0);
+			if (val >= 1 && p == NULL) {
+				toomany = val;
+				break;
+			}
+			syslog(LOG_ERR,
+		            "-R %s: bad value for service invocation rate",
+			    optarg);
+			break;
+		}
 		default:
-			fprintf(stderr, "usage: %s [-d] [conf]", progname);
+			fprintf(stderr, "usage: %s [-R rate] [-d] [conf]",
+			    progname);
 			exit(1);
 		}
 	argc -= optind;
@@ -365,21 +381,21 @@ main(argc, argv, envp)
 	}
 #endif
 
-	memset((char *)&sv, 0, sizeof(sv));
-	sv.sv_mask = SIGBLOCK;
-	sv.sv_handler = retry;
-	sigvec(SIGALRM, &sv, NULL);
+	memset((char *)&sa, 0, sizeof(sa));
+	sa.sa_mask = SIGBLOCK;
+	sa.sa_handler = retry;
+	sigaction(SIGALRM, &sa, NULL);
 	config(0);
-	sv.sv_handler = config;
-	sigvec(SIGHUP, &sv, NULL);
-	sv.sv_handler = reapchild;
-	sigvec(SIGCHLD, &sv, NULL);
-	sv.sv_handler = goaway;
-	sigvec(SIGTERM, &sv, NULL);
-	sv.sv_handler = goaway;
-	sigvec(SIGINT, &sv, NULL);
-	sv.sv_handler = SIG_IGN;
-	sigvec(SIGPIPE, &sv, NULL);
+	sa.sa_handler = config;
+	sigaction(SIGHUP, &sa, NULL);
+	sa.sa_handler = reapchild;
+	sigaction(SIGCHLD, &sa, NULL);
+	sa.sa_handler = goaway;
+	sigaction(SIGTERM, &sa, NULL);
+	sa.sa_handler = goaway;
+	sigaction(SIGINT, &sa, NULL);
+	sa.sa_handler = SIG_IGN;
+	sigaction(SIGPIPE, &sa, &sapipe);
 
 	{
 		/* space for daemons to overwrite environment for ps */
@@ -569,6 +585,7 @@ main(argc, argv, envp)
 				closelog();
 				for (tmpint = rlim_ofile_cur-1; --tmpint > 2; )
 					(void)close(tmpint);
+				sigaction(SIGPIPE, &sapipe, NULL);
 				execv(sep->se_server, sep->se_argv);
 				if (sep->se_socktype != SOCK_STREAM)
 					recv(0, buf, sizeof (buf), 0);
@@ -728,7 +745,7 @@ config(sig)
 						syslog(LOG_ERR,
 						    "%s: unknown rpc service",
 						    sep->se_service);
-						continue;
+						goto serv_unknown;
 					}
 					sep->se_rpcprog = rp->r_number;
 				}
@@ -746,7 +763,7 @@ config(sig)
 						syslog(LOG_ERR,
 						    "%s/%s: unknown service",
 						    sep->se_service, sep->se_proto);
-						continue;
+						goto serv_unknown;
 					}
 					port = sp->s_port;
 				}
@@ -763,6 +780,7 @@ config(sig)
 					setup(sep);
 			}
 		}
+	serv_unknown:
 		if (cp->se_next != NULL) {
 			struct servtab *tmp = cp;
 
@@ -950,7 +968,8 @@ register_rpc(sep)
 			    ntohs(sin.sin_port));
 		(void)pmap_unset(sep->se_rpcprog, n);
 		if (!pmap_set(sep->se_rpcprog, n, pp->p_proto, ntohs(sin.sin_port)))
-			syslog(LOG_ERR, "pmap_set: %u %u %u %u: %m",
+			syslog(LOG_ERR, "%s %s: pmap_set: %u %u %u %u: %m",
+			    sep->se_service, sep->se_proto,
 			    sep->se_rpcprog, n, pp->p_proto,
 			    ntohs(sin.sin_port));
 	}
@@ -1195,7 +1214,7 @@ more:
 			*s++ = '\0';
 			sep->se_max = atoi(s);
 		} else
-			sep->se_max = TOOMANY;
+			sep->se_max = toomany;
 	}
 	sep->se_wait = strcmp(arg, "wait") == 0;
 	sep->se_user = newstr(skip(&cp));
@@ -1750,12 +1769,15 @@ machtime_dg(s, sep)
 {
 	u_int result;
 	struct sockaddr sa;
+	struct sockaddr_in *sin;
 	int size;
 
 	size = sizeof(sa);
 	if (recvfrom(s, (char *)&result, sizeof(result), 0, &sa, &size) < 0)
 		return;
-	if (dg_badinput((struct sockaddr_in *)&sa))
+	sin = (struct sockaddr_in *)&sa;
+	if (sin->sin_addr.s_addr == htonl(INADDR_BROADCAST) || 
+	    ntohs(sin->sin_port) < IPPORT_RESERVED/2)
 		return;
 	result = machtime();
 	(void) sendto(s, (char *) &result, sizeof(result), 0, &sa, sizeof(sa));

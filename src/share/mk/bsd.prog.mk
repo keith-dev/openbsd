@@ -1,4 +1,4 @@
-#	$OpenBSD: bsd.prog.mk,v 1.13 1997/04/27 21:38:34 millert Exp $
+#	$OpenBSD: bsd.prog.mk,v 1.15 1998/03/26 23:47:33 deraadt Exp $
 #	$NetBSD: bsd.prog.mk,v 1.55 1996/04/08 21:19:26 jtc Exp $
 #	@(#)bsd.prog.mk	5.26 (Berkeley) 6/25/91
 
@@ -8,7 +8,7 @@
 
 .include <bsd.own.mk>
 
-.SUFFIXES: .out .o .c .cc .C .y .l .s .8 .7 .6 .5 .4 .3 .2 .1 .0
+.SUFFIXES: .out .o .c .cc .C .cxx .y .l .s .8 .7 .6 .5 .4 .3 .2 .1 .0
 
 CFLAGS+=	${COPTS}
 
@@ -27,6 +27,7 @@ LIBEDIT?=	${DESTDIR}/usr/lib/libedit.a
 LIBGCC?=	${DESTDIR}/usr/lib/libgcc.a
 LIBKDB?=	${DESTDIR}/usr/lib/libkdb.a
 LIBKRB?=	${DESTDIR}/usr/lib/libkrb.a
+LIBKAFS?=	${DESTDIR}/usr/lib/libkafs.a
 LIBKVM?=	${DESTDIR}/usr/lib/libkvm.a
 LIBL?=		${DESTDIR}/usr/lib/libl.a
 LIBM?=		${DESTDIR}/usr/lib/libm.a
@@ -63,6 +64,12 @@ CLEANFILES+=strings
 	@mv -f x.c x.C
 	@${CXX} ${CXXFLAGS} -c x.C -o ${.TARGET}
 	@rm -f x.C
+
+.cxx.o:
+	${CXX} -E ${CXXFLAGS} ${.IMPSRC} | xstr -c -
+	@mv -f x.c x.cxx
+	@${CXX} ${CXXFLAGS} -c x.cxx -o ${.TARGET}
+	@rm -f x.cxx
 .endif
 
 

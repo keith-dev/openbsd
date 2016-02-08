@@ -1,4 +1,4 @@
-.\"	$OpenBSD: doc-syms,v 1.11 1997/10/20 02:04:45 etheisen Exp $
+.\"	$OpenBSD: doc-syms,v 1.14 1998/03/09 01:10:24 millert Exp $
 .\"
 .\" Copyright (c) 1991, 1993
 .\"	The Regents of the University of California.  All rights reserved.
@@ -167,17 +167,22 @@
 .nr cF \\n(.f
 .nr cZ \\n(.s
 .ds aa \&\f\\n(cF\s\\n(cZ
+.if \\n(aC==0 \{\
+.       if \\n(.$==0 \&\\*(tNOpenBSD\\*(aa
+.\}
 .if \\n(.$==2 \{\
 .	if "\\$1"1.2"  \&\\*(tNOpenBSD\\*(aa 1.2\\*(aa\\$2
 .	if "\\$1"2.0"  \&\\*(tNOpenBSD\\*(aa 2.0\\*(aa\\$2
 .	if "\\$1"2.1"  \&\\*(tNOpenBSD\\*(aa 2.1\\*(aa\\$2
 .	if "\\$1"2.2"  \&\\*(tNOpenBSD\\*(aa 2.2\\*(aa\\$2
+.	if "\\$1"2.3"  \&\\*(tNOpenBSD\\*(aa 2.3\\*(aa\\$2
 .\}
 .if \\n(.$==1 \{\
 .	if "\\$1"1.2"  \&\\*(tNOpenBSD\\*(aa 1.2\\*(aa
 .	if "\\$1"2.0"  \&\\*(tNOpenBSD\\*(aa 2.0\\*(aa
 .	if "\\$1"2.1"  \&\\*(tNOpenBSD\\*(aa 2.1\\*(aa
 .	if "\\$1"2.2"  \&\\*(tNOpenBSD\\*(aa 2.2\\*(aa
+.	if "\\$1"2.3"  \&\\*(tNOpenBSD\\*(aa 2.3\\*(aa
 .	if "\\$1"."    \&\\*(tNOpenBSD\\$1\\*(aa
 .	if "\\$1","    \&\\*(tNOpenBSD\\$1\\*(aa
 .\}
@@ -396,11 +401,11 @@
 .       if "\\*(A\\n(aP"-xpg4.2" \{\
 .		ie \\n(sT==1 \{\
 .			ds b1 \&\\*(tNX/Open Portability Guide Issue 4.2\\*(aa\\*(sV
-.			as b1 (``\\*(tNXPG4\\*(aa'')
+.			as b1 (``\\*(tNXPG4.2\\*(aa'')
 .		\}
 .		el \{\
 .			ds b1 \&\\*(tNX/Open Portability Guide Issue 4.2\\*(aa\\*(sV
-.			as b1 (``\\*(tNXPG4\\*(aa'')
+.			as b1 (``\\*(tNXPG4.2\\*(aa'')
 .		\}
 .       \}
 .	ie \\n(aC>\\n(aP \{\

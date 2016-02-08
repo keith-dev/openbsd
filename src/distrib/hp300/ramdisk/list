@@ -1,4 +1,4 @@
-#	$OpenBSD: list,v 1.7 1997/10/21 00:35:32 downsj Exp $
+#	$OpenBSD: list,v 1.10 1998/04/14 20:07:29 millert Exp $
 
 COPY	${OBJDIR}/raminst		raminst
 LINK	raminst			bin/cat
@@ -16,7 +16,6 @@ LINK	raminst			bin/mkdir
 LINK	raminst			bin/mv
 LINK	raminst			bin/pwd
 LINK	raminst			bin/rm
-#COPY	${OBJDIR}/sh		bin/sh
 LINK	raminst			bin/sh
 LINK	bin/sh			bin/-sh
 LINK	raminst			bin/sleep
@@ -87,8 +86,10 @@ COPY	${TOPDIR}/common/termcap.hp-vt	usr/share/misc/termcap
 # and the installation tools
 COPY	dot.profile			.profile
 COPY	dot.instutils			.instutils
-COPY	install.sh			install
 COPY	install.md			install.md
-COPY	install.sub			install.sub
-
+COPY	${CURDIR}/../../miniroot/install.sh	install
+SPECIAL	sed -e "/^VERSION=/s/=.*/=${REV}/" < ${CURDIR}/../../miniroot/install.sub > install.sub
 SPECIAL	chmod 755 install
+
+# so DNS can work
+SYMLINK /tmp/resolv.conf.shadow		etc/resolv.conf

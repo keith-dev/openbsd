@@ -28,7 +28,7 @@
  */
 
 #if defined(LIBC_SCCS) && !defined(lint)
-static char *rcsid = "$OpenBSD: clnt_raw.c,v 1.5 1996/12/14 06:49:41 tholo Exp $";
+static char *rcsid = "$OpenBSD: clnt_raw.c,v 1.8 1998/03/19 00:27:18 millert Exp $";
 #endif /* LIBC_SCCS and not lint */
 
 /*
@@ -42,6 +42,7 @@ static char *rcsid = "$OpenBSD: clnt_raw.c,v 1.5 1996/12/14 06:49:41 tholo Exp $
  * any interference from the kernal.
  */
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <rpc/rpc.h>
 
@@ -170,8 +171,14 @@ call_again:
 	msg.acpted_rply.ar_verf = _null_auth;
 	msg.acpted_rply.ar_results.where = resultsp;
 	msg.acpted_rply.ar_results.proc = xresults;
-	if (! xdr_replymsg(xdrs, &msg))
+	if (! xdr_replymsg(xdrs, &msg)) {
+		/* xdr_replymsg() may have left some things allocated */
+		int op = xdrs->x_op;
+		xdrs->x_op = XDR_FREE;
+		xdr_replymsg(xdrs, &msg);
+		xdrs->x_op = op;
 		return (RPC_CANTDECODERES);
+	}
 	_seterr_reply(&msg, &error);
 	status = error.re_status;
 

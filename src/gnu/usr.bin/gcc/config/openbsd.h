@@ -1,4 +1,4 @@
-/*	$OpenBSD: openbsd.h,v 1.5 1997/09/17 08:06:47 deraadt Exp $	*/
+/*	$OpenBSD: openbsd.h,v 1.8 1998/03/18 04:51:23 marc Exp $	*/
 
 /* OPENBSD_NATIVE is defined when gcc is integrated into the OpenBSD
    source tree so it can be configured appropriately when using the
@@ -8,14 +8,20 @@
 
 #ifdef OPENBSD_NATIVE
 
+#undef GPLUSPLUS_INCLUDE_DIR
+#define GPLUSPLUS_INCLUDE_DIR "/usr/include/g++"
+
+#undef GCC_INCLUDE_DIR
+#define GCC_INCLUDE_DIR "/usr/include"
+
 /* Look for the include files in the system-defined places.  */
 
 #undef INCLUDE_DEFAULTS
-#define INCLUDE_DEFAULTS		\
-  {					\
-    { GPLUSPLUS_INCLUDE_DIR, 1, 1 },	\
-    { STANDARD_INCLUDE_DIR, 0, 0 },	\
-    { 0, 0, 0 }				\
+#define INCLUDE_DEFAULTS			\
+  {						\
+    { GPLUSPLUS_INCLUDE_DIR, "G++", 1, 1 },	\
+    { GCC_INCLUDE_DIR, "GCC", 0, 0 },		\
+    { 0, 0, 0, 0 }				\
   }
 
 /* Under OpenBSD, the normal location of the various *crt*.o files is the
@@ -53,8 +59,13 @@
 
 #undef LINK_SPEC
 #define LINK_SPEC \
-  "%{!nostdlib:%{!r*:%{!e*:-e start}}} -dc -dp %{static:-Bstatic} %{assert*}"
+  "%{!nostdlib:%{!r*:%{!e*:-e start}}} -dc -dp %{R*} %{static:-Bstatic} %{assert*}"
 
+/* This defines which switch letters take arguments. */
+#undef SWITCH_TAKES_ARG
+#define SWITCH_TAKES_ARG(CHAR) \
+  (DEFAULT_SWITCH_TAKES_ARG(CHAR) \
+   || (CHAR) == 'R')
 
 /* We have atexit(3).  */
 

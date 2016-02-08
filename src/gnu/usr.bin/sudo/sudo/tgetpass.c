@@ -1,5 +1,7 @@
+/*	$OpenBSD: tgetpass.c,v 1.8 1998/03/31 06:41:16 millert Exp $	*/
+
 /*
- *  CU sudo version 1.5.3
+ *  CU sudo version 1.5.5
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -27,7 +29,7 @@
  */
 
 #ifndef lint
-static char rcsid[] = "$Id: tgetpass.c,v 1.3 1997/02/21 17:10:08 millert Exp $";
+static char rcsid[] = "Id: tgetpass.c,v 1.60 1998/03/31 05:05:48 millert Exp $";
 #endif /* lint */
 
 #include "config.h"
@@ -114,7 +116,7 @@ char * tgetpass(prompt, timeout, user, host)
     int n, echo;
     FILE *input, *output;
     static char buf[_PASSWD_LEN + 1];
-    fd_set readfds;
+    fd_set *readfds;
     struct timeval tv;
     char *p;
 
@@ -137,37 +139,13 @@ char * tgetpass(prompt, timeout, user, host)
     if ((input = fopen(_PATH_TTY, "r+")) == NULL) {
 	input = stdin;
 	output = stderr;
-	(void) fflush(output);
     } else {
 	output = input;
     }
 
     /*
-     * turn off echo
+     * print the prompt
      */
-#ifdef HAVE_TERMIOS_H
-    (void) tcgetattr(fileno(input), &term);
-    if ((echo = (term.c_lflag & ECHO))) {
-	term.c_lflag &= ~ECHO;
-	(void) tcsetattr(fileno(input), TCSAFLUSH|TCSASOFT, &term);
-    }
-#else
-#ifdef HAVE_TERMIO_H
-    (void) ioctl(fileno(input), TCGETA, &term);
-    if ((echo = (term.c_lflag & ECHO))) {
-	term.c_lflag &= ~ECHO;
-	(void) ioctl(fileno(input), TCSETA, &term);
-    }
-#else
-    (void) ioctl(fileno(input), TIOCGETP, &ttyb);
-    if ((echo = (ttyb.sg_flags & ECHO))) {
-	ttyb.sg_flags &= ~ECHO;
-	(void) ioctl(fileno(input), TIOCSETP, &ttyb);
-    }
-#endif /* HAVE_TERMIO_H */
-#endif /* HAVE_TERMIOS_H */
-
-    /* print the prompt */
     if (prompt) {
 	p = (char *) prompt;
 	do {
@@ -195,12 +173,43 @@ char * tgetpass(prompt, timeout, user, host)
     }
 
     /*
+     * turn off echo
+     */
+#ifdef HAVE_TERMIOS_H
+    (void) tcgetattr(fileno(input), &term);
+    if ((echo = (term.c_lflag & ECHO))) {
+	term.c_lflag &= ~ECHO;
+	(void) tcsetattr(fileno(input), TCSAFLUSH|TCSASOFT, &term);
+    }
+#else
+#ifdef HAVE_TERMIO_H
+    (void) ioctl(fileno(input), TCGETA, &term);
+    if ((echo = (term.c_lflag & ECHO))) {
+	term.c_lflag &= ~ECHO;
+	(void) ioctl(fileno(input), TCSETA, &term);
+    }
+#else
+    (void) ioctl(fileno(input), TIOCGETP, &ttyb);
+    if ((echo = (ttyb.sg_flags & ECHO))) {
+	ttyb.sg_flags &= ~ECHO;
+	(void) ioctl(fileno(input), TIOCSETP, &ttyb);
+    }
+#endif /* HAVE_TERMIO_H */
+#endif /* HAVE_TERMIOS_H */
+
+    /*
      * Timeout of <= 0 means no timeout
      */
     if (timeout > 0) {
 	/* setup for select(2) */
-	FD_ZERO(&readfds);
-	FD_SET(fileno(input), &readfds);
+	n = howmany(fileno(input) + 1, NFDBITS) * sizeof(fd_mask);
+	if ((readfds = (fd_set *) malloc(n)) == NULL) {
+	    (void) fprintf(stderr, "Cannot allocate memory: ");
+	    perror("");
+	    return(NULL);
+	}
+	(void) memset((VOID *)readfds, 0, n);
+	FD_SET(fileno(input), readfds);
 
 	/* set timeout for select */
 	tv.tv_sec = timeout;
@@ -210,12 +219,13 @@ char * tgetpass(prompt, timeout, user, host)
 	 * get password or return empty string if nothing to read by timeout
 	 */
 	buf[0] = '\0';
-	if (select(fileno(input) + 1, &readfds, 0, 0, &tv) > 0 &&
+	if (select(fileno(input) + 1, readfds, 0, 0, &tv) > 0 &&
 	    fgets(buf, sizeof(buf), input)) {
 	    n = strlen(buf);
 	    if (buf[n - 1] == '\n')
 		buf[n - 1] = '\0';
 	}
+	(void) free(readfds);
     } else {
 	buf[0] = '\0';
 	if (fgets(buf, sizeof(buf), input)) {

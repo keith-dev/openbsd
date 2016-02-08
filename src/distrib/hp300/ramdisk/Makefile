@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.10 1997/10/31 05:41:27 downsj Exp $
+#	$OpenBSD: Makefile,v 1.12 1998/03/28 23:40:47 millert Exp $
 #	$NetBSD: Makefile,v 1.1 1995/07/18 04:13:06 briggs Exp $
 
 TOP=		${.CURDIR}/..
@@ -6,7 +6,7 @@ TOP=		${.CURDIR}/..
 .include "${TOP}/Makefile.inc"
 IMAGE=		ramdisk-${REV}.fs
 CRUNCHCONF?=    ${.CURDIR}/${CBIN}.conf
-BASE=miniroot
+BASE=		ramdisk
 
 MOUNT_POINT=	/mnt
 
@@ -16,6 +16,9 @@ VND_RDEV=	/dev/r${VND}a
 VND_CRDEV=	/dev/r${VND}c
 PID!=		echo $$$$
 REALIMAGE!=	echo /var/tmp/image.${PID}
+
+GZIP?=		gzip
+GZIPFLAGS?=	-9f
 
 all: ${CBIN} ${IMAGE} bsd.rd
 	@echo "all done"
@@ -32,13 +35,13 @@ NEWFSARGS= -m 0 -o space -c 16 -i 3072
 
 bsd.rd: ${IMAGE} bsd rdsetroot
 	${.OBJDIR}/rdsetroot bsd < ${IMAGE}
-	gzip -c9 bsd > bsd.rd
+	${GZIP} -c ${GZIPFLAGS} bsd > bsd.rd
 	rm bsd
 
 bsd:
 	cd ${.CURDIR}/../../../sys/arch/hp300/conf && config RAMDISK
 	cd ${.CURDIR}/../../../sys/arch/hp300/compile/RAMDISK && \
-	    make clean && make
+	    make clean && make depend && make
 	cp ${.CURDIR}/../../../sys/arch/hp300/compile/RAMDISK/bsd bsd
 
 ${IMAGE}: ${CBIN} rd_setup do_files rd_teardown
@@ -67,5 +70,3 @@ unconfig:
 	-/bin/rm -f ${IMAGE}
 
 .PRECIOUS:	${IMAGE}
-
-

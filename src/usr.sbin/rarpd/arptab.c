@@ -68,6 +68,8 @@ static char sccsid[] = "@(#)arp.c	8.2 (Berkeley) 1/2/94";
 #include <errno.h>
 #include <nlist.h>
 #include <stdio.h>
+#include <unistd.h>
+#include <stdlib.h>
 #include <paths.h>
 #include <syslog.h>
 
@@ -78,12 +80,10 @@ static int s = -1;
 void
 getsocket()
 {
+	s = socket(PF_ROUTE, SOCK_RAW, 0);
 	if (s < 0) {
-		s = socket(PF_ROUTE, SOCK_RAW, 0);
-		if (s < 0) {
-			perror("arp: socket");
-			exit(1);
-		}
+		perror("arp: socket");
+		exit(1);
 	}
 }
 
@@ -96,24 +96,30 @@ struct	{
 	char	m_space[512];
 }	m_rtmsg;
 
+int	arptab_set __P((u_char *, u_int32_t));
+int	rtmsg __P((int));
+
 /*
  * Set an individual arp entry
  */
+int
 arptab_set(eaddr, host)
 	u_char *eaddr;
-	u_long host;
+	u_int32_t host;
 {
 	register struct sockaddr_inarp *sin = &sin_m;
 	register struct sockaddr_dl *sdl;
 	register struct rt_msghdr *rtm = &(m_rtmsg.m_rtm);
 	struct timeval time;
+	int rt;
 
 	getsocket();
 	pid = getpid();
+
 	sdl_m = blank_sdl;
 	sin_m = blank_sin;
 	sin->sin_addr.s_addr = host;
-	bcopy((char *)eaddr, (u_char *)LLADDR(&sdl_m), 6);
+	memcpy((u_char *)LLADDR(&sdl_m), (char *)eaddr, 6);
 	sdl_m.sdl_alen = 6;
 	doing_proxy = flags = export_only = expire_time = 0;
 	gettimeofday(&time, 0);
@@ -122,6 +128,8 @@ arptab_set(eaddr, host)
 tryagain:
 	if (rtmsg(RTM_GET) < 0) {
 		syslog(LOG_ERR,"%s: %m", inet_ntoa(sin->sin_addr));
+		close(s);
+		s = -1;
 		return (1);
 	}
 	sin = (struct sockaddr_inarp *)(rtm + 1);
@@ -137,11 +145,15 @@ tryagain:
 		if (doing_proxy == 0) {
 			syslog(LOG_ERR, "arptab_set: can only proxy for %s\n",
 			    inet_ntoa(sin->sin_addr));
+			close(s);
+			s = -1;
 			return (1);
 		}
 		if (sin_m.sin_other & SIN_PROXY) {
 			syslog(LOG_ERR,
 			    "arptab_set: proxy entry exists for non 802 device\n");
+			close(s);
+			s = -1;
 			return(1);
 		}
 		sin_m.sin_other = SIN_PROXY;
@@ -153,14 +165,21 @@ overwrite:
 		syslog(LOG_ERR,
 		    "arptab_set: cannot intuit interface index and type for %s\n",
 		    inet_ntoa(sin->sin_addr));
+		close(s);
+		s = -1;
 		return (1);
 	}
 	sdl_m.sdl_type = sdl->sdl_type;
 	sdl_m.sdl_index = sdl->sdl_index;
-	return (rtmsg(RTM_ADD));
+	rt = rtmsg(RTM_ADD);
+	close(s);
+	s = -1;
+	return (rt);
 }
 
+int
 rtmsg(cmd)
+	int cmd;
 {
 	static int seq;
 	int rlen;
@@ -171,13 +190,13 @@ rtmsg(cmd)
 	errno = 0;
 	if (cmd == RTM_DELETE)
 		goto doit;
-	bzero((char *)&m_rtmsg, sizeof(m_rtmsg));
+	memset((char *)&m_rtmsg, 0, sizeof(m_rtmsg));
 	rtm->rtm_flags = flags;
 	rtm->rtm_version = RTM_VERSION;
 
 	switch (cmd) {
 	default:
-		syslog(LOG_ERR, "arptap_set: internal wrong cmd\n");
+		syslog(LOG_ERR, "arptab_set: internal wrong cmd\n");
 		exit(1);
 	case RTM_ADD:
 		rtm->rtm_addrs |= RTA_GATEWAY;
@@ -199,7 +218,9 @@ rtmsg(cmd)
 	}
 #define NEXTADDR(w, s) \
 	if (rtm->rtm_addrs & (w)) { \
-		bcopy((char *)&s, cp, sizeof(s)); cp += sizeof(s);}
+		memcpy(cp, (char *)&s, sizeof(s)); \
+		cp += sizeof(s); \
+	}
 
 	NEXTADDR(RTA_DST, sin_m);
 	NEXTADDR(RTA_GATEWAY, sdl_m);

@@ -1,4 +1,4 @@
-#	$OpenBSD: install.md,v 1.26 1997/10/29 21:43:22 deraadt Exp $
+#	$OpenBSD: install.md,v 1.35 1998/04/15 16:10:34 deraadt Exp $
 #
 #
 # Copyright rc) 1996 The NetBSD Foundation, Inc.
@@ -62,12 +62,12 @@ md_machine_arch() {
 
 md_get_diskdevs() {
 	# return available disk devices
-	cat /kern/msgbuf | egrep "^[sw]d[0-9] " | cut -d" " -f1 | sort -u
+	cat /kern/msgbuf | egrep "^[sw]d[0-9]+ " | cut -d" " -f1 | sort -u
 }
 
 md_get_cddevs() {
 	# return available CDROM devices
-	cat /kern/msgbuf | egrep "^a?cd[0-9] " | cut -d" " -f1 | sort -u
+	cat /kern/msgbuf | egrep "^a?cd[0-9]+ " | cut -d" " -f1 | sort -u
 }
 
 md_get_ifdevs() {
@@ -85,6 +85,22 @@ md_installboot() {
 	cp /usr/mdec/boot /mnt/boot
 	sync; sync; sync
 	/usr/mdec/installboot -v /mnt/boot /usr/mdec/biosboot ${1}
+
+	echo
+	echo -n "Do you expect to run any accelerated X servers on this machine? [n] "
+	getresp "n"
+	case "$resp" in
+		y*|Y*)
+			echo "Enabling machdep.allowaperture. Read xf86(4) for more information."
+			echo '1,$s/^#machdep\.allowaperture=1/machdep\.allowaperture=1	/
+w
+q' | ed /mnt/etc/sysctl.conf 2> /dev/null
+
+			;;
+		*)
+			;;
+	esac
+	echo
 }
 
 md_native_fstype() {
@@ -122,13 +138,13 @@ md_prep_fdisk()
 	_done=0
 	echo
 	cat << \__md_prep_fdisk_1
-A single OpenBSD partition with id 'A6' should exist in the MBR.  All of your
-OpenBSD partitions will be contained _within_ this partition, including your
-swap space.  In the normal case it should be the only partition marked as
-active.  (Unless you are using a multiple-OS booter, but you can adjust that
-later.)  Furthermore, the MBR partitions must NOT overlap each other.
-[If this is a new install, you are most likely going to want to type the
-following fdisk commands: reinit, update, write, quit. Use the 'manual'
+A single OpenBSD partition with id 'A6' ('OpenBSD') should exist in the MBR.
+All of your OpenBSD partitions will be contained _within_ this partition,
+including your swap space.  In the normal case it should be the only partition
+marked as active.  (Unless you are using a multiple-OS booter, but you can
+adjust that later.)  Furthermore, the MBR partitions must NOT overlap each
+other.  [If this is a new install, you are most likely going to want to type
+the following fdisk commands: reinit, update, write, quit. Use the 'manual'
 command to read a full description.]  The current partition information is:
 
 __md_prep_fdisk_1
@@ -149,13 +165,16 @@ md_prep_disklabel()
 	_disk=$1
 	md_prep_fdisk ${_disk}
 
-	echo "Inside the BIOS 'A6' partition you just created, there resides an OpenBSD"
-	echo "partition table which defines how this BIOS partition is to be split up."
-	echo "This table declares the offsets and sizes of your / partition, your swap"
-	echo "space, and any other partitions you might create.  (NOTE: The OpenBSD"
-	echo "disk label offsets are absolute, ie. relative to the start of the disk..."
-	echo "NOT relative to the start of the BIOS 'A6' partition)."
-	echo
+	cat << \__md_prep_disklabel_1
+
+Inside the BIOS 'A6' ('OpenBSD') partition you just created, there resides an
+OpenBSD partition table which defines how this BIOS partition is to be split
+up. This table declares the offsets and sizes of your / partition, your swap
+space, and any other partitions you might create.  (NOTE: The OpenBSD disk
+label offsets are absolute, ie. relative to the start of the disk... NOT
+relative to the start of the BIOS 'A6' partition).
+
+__md_prep_disklabel_1
 
 	md_checkfordisklabel $_disk
 	case $? in
@@ -175,11 +194,11 @@ md_prep_disklabel()
 	cat << \__md_prep_disklabel_1
 If this disk is shared with other operating systems, those operating systems
 should have a BIOS partition entry that spans the space they occupy completely.
-For safety, also make sure all OpenBSD file systems within the offset and size
-specified in the 'A6' BIOS partition table.  (By default, the disklabel editor
-will try to enforce this).  If you are unsure of how to use multiple partitions
-properly (ie. seperating /,  /usr, /tmp, /var, /usr/local, and other things)
-just split the space into a root and swap partition for now.
+For safety, also make sure all OpenBSD file systems are within the offset and
+size specified in the 'A6' BIOS partition table.  (By default, the disklabel
+editor will try to enforce this).  If you are unsure of how to use multiple
+partitions properly (ie. seperating /,  /usr, /tmp, /var, /usr/local, and other
+things) just split the space into a root and swap partition for now.
 
 __md_prep_disklabel_1
 	disklabel -E ${_disk}
@@ -194,14 +213,11 @@ md_copy_kernel() {
 md_welcome_banner() {
 {
 	if [ "$MODE" = "install" ]; then
-		echo ""
 		echo "Welcome to the OpenBSD/i386 ${VERSION_MAJOR}.${VERSION_MINOR} installation program."
 		cat << \__welcome_banner_1
 
-This program is designed to help you put OpenBSD on your disk, in a simple
-and rational way.  You'll be asked several questions, and it would probably
-be useful to have your disk's hardware manual, the installation notes, and a
-calculator handy.
+This program is designed to help you put OpenBSD on your disk in a simple and
+rational way.
 __welcome_banner_1
 
 	else

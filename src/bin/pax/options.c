@@ -1,4 +1,4 @@
-/*	$OpenBSD: options.c,v 1.30 1997/09/01 18:29:54 deraadt Exp $	*/
+/*	$OpenBSD: options.c,v 1.33 1998/03/31 17:14:21 millert Exp $	*/
 /*	$NetBSD: options.c,v 1.6 1996/03/26 23:54:18 mrg Exp $	*/
 
 /*-
@@ -42,7 +42,7 @@
 #if 0
 static char sccsid[] = "@(#)options.c	8.2 (Berkeley) 4/18/94";
 #else
-static char rcsid[] = "$OpenBSD: options.c,v 1.30 1997/09/01 18:29:54 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: options.c,v 1.33 1998/03/31 17:14:21 millert Exp $";
 #endif
 #endif /* not lint */
 
@@ -672,13 +672,10 @@ tar_options(argc, argv)
 			break;
 		case 'p':
 			/*
-			 * preserve user id, group id, file
-			 * mode, access/modification times
+			 * preserve uid/gid and file mode, regardless of umask
 			 */
-			pids = 1;
 			pmode = 1;
-			patime = 1;
-			pmtime = 1;
+			pids = 1;
 			break;
 		case 'r':
 		case 'u':
@@ -716,9 +713,11 @@ tar_options(argc, argv)
 			break;
 		case 'x':
 			/*
-			 * write an archive
+			 * extract an archive, preserving mode,
+			 * and mtime if possible.
 			 */
 			act = EXTRACT;
+			pmtime = 1;
 			break;
 		case 'z':
 			/*

@@ -1,7 +1,7 @@
-#	$OpenBSD: Makefile.inc,v 1.17 1997/10/25 19:46:55 mickey Exp $
+#	$OpenBSD: Makefile.inc,v 1.21 1998/04/20 13:25:00 deraadt Exp $
 
-CFLAGS=-O2 -Wall -Werror
-CPPFLAGS=-I${S} -I${SADIR}/libsa -I. -I${.CURDIR}
+CFLAGS=${DEBUG} -O2 -Wall -Werror
+CPPFLAGS+=-I${S} -I${SADIR}/libsa -I. -I${.CURDIR}
 SACFLAGS=-nostdinc -fno-builtin -fpack-struct
 SACFLAGS+=-D_STANDALONE
 # CPPFLAGS+=-DSAVE_MEMORY

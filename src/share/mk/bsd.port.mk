@@ -1,6 +1,6 @@
 #-*- mode: Fundamental; tab-width: 4; -*-
 # ex:ts=4
-#	$OpenBSD: bsd.port.mk,v 1.14 1997/09/21 10:58:41 niklas Exp $
+#	$OpenBSD: bsd.port.mk,v 1.28 1998/04/06 21:46:00 marc Exp $
 #	$NetBSD: $
 #
 #	bsd.port.mk - 940820 Jordan K. Hubbard.
@@ -24,7 +24,7 @@
 # mailing list, and any correspondece should be directed there.
 #
 FreeBSD_MAINTAINER=	asami@FreeBSD.ORG
-OpenBSD_MAINTAINER=	imp@OpenBSD.ORG
+OpenBSD_MAINTAINER=	joey@OpenBSD.ORG
 
 # Supported Variables and their behaviors:
 #
@@ -51,11 +51,14 @@ OpenBSD_MAINTAINER=	imp@OpenBSD.ORG
 # MASTER_SITE_BACKUP - Backup location(s) for distribution files and patch
 #				  files if not found locally and ${MASTER_SITES}/${PATCH_SITES}
 #				  (default:
+#				  ftp://ftp.openbsd.org/pub/OpenBSD/distfiles/${DIST_SUBDIR}/
 #				  ftp://ftp.freebsd.org/pub/FreeBSD/distfiles/${DIST_SUBDIR}/)
 # MASTER_SITE_OVERRIDE - If set, override the MASTER_SITES setting with this
 #				  value.
-# MASTER_SITE_FREEBSD - If set, only use ${MASTER_SITE_BACKUP} for
-#				  MASTER_SITES.
+# MASTER_SITE_OPENBSD - If set, only use ftp.openbsd.org as the
+#				  MASTER_SITE_OVERRIDE.
+# MASTER_SITE_FREEBSD - If set, only use ftp.freebsd.org as the
+#				  MASTER_SITE_OVERRIDE.
 # PACKAGES		- A top level directory where all packages go (rather than
 #				  going locally to each port). (default: ${PORTSDIR}/packages).
 # GMAKE			- Set to path of GNU make if not in $PATH (default: gmake).
@@ -115,6 +118,10 @@ OpenBSD_MAINTAINER=	imp@OpenBSD.ORG
 # MTREE_FILE	- The name of the mtree file (default: /etc/mtree/BSD.x11.dist
 #				  if USE_IMAKE or USE_X11 is set, /etc/mtree/BSD.local.dist
 #				  otherwise.)
+# COMES_WITH	- The first version that a port was made part of the
+#				  standard OpenBSD distribution.  If the current OpenBSD
+#				  version is >= this version then a notice will be
+#				  displayed instead the port being generated.
 #
 # NO_BUILD		- Use a dummy (do-nothing) build target.
 # NO_CONFIGURE	- Use a dummy (do-nothing) configure target.
@@ -284,16 +291,16 @@ __ARCH_OK=	1
 .if !defined(__ARCH_OK)
 .MAIN:	all
 
-fetch fetch-list extract patch configure build install reinstall package describe checkpatch checksum makesum all:
+fetch fetch-list extract patch clean clean-depends configure build install reinstall package describe checkpatch checksum makesum all:
 	@echo "This port is only for ${ONLY_FOR_ARCHS},"
 	@echo "and you are running ${MACHINE}."
 .else
 
-# Get the architecture
-ARCH!=	uname -m
-
 # Get the operating system type
 OPSYS!=	uname -s
+
+# Get the architecture
+ARCH!=	uname -m
 
 .if exists(${.CURDIR}/../Makefile.inc)
 .include "${.CURDIR}/../Makefile.inc"
@@ -403,10 +410,11 @@ RUN_DEPENDS+=	${EXEC_DEPENDS}
 .if defined(USE_GMAKE)
 BUILD_DEPENDS+=		gmake:${PORTSDIR}/devel/gmake
 .endif
-.if defined(USE_PERL5)
-BUILD_DEPENDS+=		perl5.00401:${PORTSDIR}/lang/perl5
-RUN_DEPENDS+=		perl5.00401:${PORTSDIR}/lang/perl5
-.endif
+# OpenBSD has perl5 in-tree
+#.if defined(USE_PERL5)
+#BUILD_DEPENDS+=		perl5.00401:${PORTSDIR}/lang/perl5
+#RUN_DEPENDS+=		perl5.00401:${PORTSDIR}/lang/perl5
+#.endif
 
 .if exists(${PORTSDIR}/../Makefile.inc)
 .include "${PORTSDIR}/../Makefile.inc"
@@ -573,14 +581,16 @@ GUNZIP_CMD?=	/usr/bin/gunzip -f
 GZCAT?=		/usr/bin/gzcat
 GZIP?=		-9
 GZIP_CMD?=	/usr/bin/gzip -nf ${GZIP}
-LDCONFIG?=	/sbin/ldconfig
+LDCONFIG?=	[ ! -x /sbin/ldconfig ] || /sbin/ldconfig
 LN?=		/bin/ln
 MKDIR?=		/bin/mkdir -p
 MV?=		/bin/mv
+READLINK?=	/usr/bin/readlink
 RM?=		/bin/rm
 RMDIR?=		/bin/rmdir
 SED?=		/usr/bin/sed
-SETENV?=	/usr/bin/env
+PORTSPATH?=	${PATH}:${X11BASE}/bin:${LOCALBASE}/bin
+SETENV?=	/usr/bin/env PATH=${PORTSPATH}
 SH?=		/bin/sh
 TR?=		/usr/bin/tr
 
@@ -623,16 +633,36 @@ PATCH_SITES?=
 MASTER_SITES:=	${MASTER_SITES:S/%SUBDIR%/${MASTER_SITE_SUBDIR}/}
 PATCH_SITES:=	${PATCH_SITES:S/%SUBDIR%/${PATCH_SITE_SUBDIR}/}
 
-# The primary backup site.
-MASTER_SITE_BACKUP?=	\
+# Two backup master sites, First one at ftp.openbsd.org
+#
+_MASTER_SITE_OPENBSD?=	\
+	ftp://ftp.openbsd.org/pub/OpenBSD/distfiles/${DIST_SUBDIR}/
+
+# The second backup master site is ftp.freebsd.org
+#
+_MASTER_SITE_FREEBSD?=	\
 	ftp://ftp.freebsd.org/pub/FreeBSD/distfiles/${DIST_SUBDIR}/
 
+# set the backup master sites.
+#
+MASTER_SITE_BACKUP?=	\
+	${_MASTER_SITE_OPENBSD} ${_MASTER_SITE_FREEBSD}
+
+# If the user has this set, go to the OpenBSD repository for everything.
+#
+.if defined(MASTER_SITE_OPENBSD)
+MASTER_SITE_OVERRIDE=  ${_MASTER_SITE_OPENBSD}
+.endif
+
 # If the user has this set, go to the FreeBSD repository for everything.
+#
 .if defined(MASTER_SITE_FREEBSD)
-MASTER_SITE_OVERRIDE=  ${MASTER_SITE_BACKUP}
+MASTER_SITE_OVERRIDE=  ${_MASTER_SITE_FREEBSD}
 .endif
 
 # Where to put distfiles that don't have any other master site
+# ;;; This is referenced in a few Makefiles -- I'd like to get rid of it
+#
 MASTER_SITE_LOCAL?= \
 	ftp://ftp.freebsd.org/pub/FreeBSD/distfiles/LOCAL_PORTS/
 
@@ -646,6 +676,10 @@ MASTER_SITES:=	${MASTER_SITE_OVERRIDE} ${MASTER_SITES}
 PATCH_SITES:=	${MASTER_SITE_OVERRIDE} ${PATCH_SITES}
 .endif
 
+# The following is a FreeBSD construct that dopes not work in OpenBSD.
+# Since OpenBSD does not put packages in /cdrom/ports/packages it
+# is safe to leave (but I may remove it in the future).
+#
 # Search CDROM first if mounted, symlink instead of copy if
 # FETCH_SYMLINK_DISTFILES is set
 .if exists(/cdrom/ports/distfiles)
@@ -653,6 +687,21 @@ MASTER_SITES:=	file:/cdrom/ports/distfiles/${DIST_SUBDIR}/ ${MASTER_SITES}
 PATCH_SITES:=	file:/cdrom/ports/distfiles/${DIST_SUBDIR}/ ${PATCH_SITES}
 .if defined(FETCH_SYMLINK_DISTFILES)
 FETCH_BEFORE_ARGS+=	-l
+.endif
+.endif
+
+# OpenBSD code to handle ports distfiles on a CDROM.  The distfiles
+# are located in /cdrom/distfiles/${DIST_SUBDIR}/ (assuming that the
+# CDROM is mounted on /cdrom).
+#
+.if exists(/cdrom/distfiles)
+CDROM_SITE:=	/cdrom/distfiles/${DIST_SUBDIR}
+.if defined(FETCH_SYMLINK_DISTFILES)
+CDROM_COPY:=	${LN}
+CDROM_OPT=		-s
+.else
+CDROM_COPY:=	${CP}
+CDROM_OPT=		-f
 .endif
 .endif
 
@@ -782,6 +831,8 @@ _MANPAGES:=	${_MANPAGES:S/$/.gz/}
 # into that.
 #
 # Don't build a port if it's broken.
+#
+# Don't build a port if it comes with the base system.
 ################################################################
 
 .if !defined(NO_IGNORE)
@@ -801,6 +852,11 @@ IGNORE=	"is restricted: ${RESTRICTED}"
 IGNORE=	"uses X11, but ${X11BASE} not found"
 .elif defined(BROKEN)
 IGNORE=	"is marked as broken: ${BROKEN}"
+.elif defined(COMES_WITH)
+OS_VER!=	uname -r
+.if ( ${OS_VER} >= ${COMES_WITH} )
+IGNORE= "comes with ${OPSYS} as of release ${COMES_WITH}"
+.endif
 .endif
 
 .if defined(IGNORE)
@@ -940,6 +996,11 @@ do-fetch:
 				${ECHO_MSG} ">> Please correct this problem and try again."; \
 				exit 1; \
 			fi ; \
+			if [ ! -z ${CDROM_COPY} ]; then \
+				if ${CDROM_COPY} ${CDROM_OPT} ${CDROM_SITE}/$$file .; then \
+					continue; \
+				fi ; \
+			fi ; \
 			${ECHO_MSG} ">> $$file doesn't seem to exist on this system."; \
 			for site in ${MASTER_SITES}; do \
 			    ${ECHO_MSG} ">> Attempting to fetch from $${site}."; \
@@ -984,10 +1045,13 @@ do-extract:
 .if !defined(NO_WRKDIR)
 .if defined(WRKOBJDIR)
 	@${RM} -rf ${WRKOBJDIR}/${PORTSUBDIR}
-	@${MKDIR} -p ${WRKOBJDIR}/${PORTSUBDIR}
-	@echo "${WRKDIR} -> ${WRKOBJDIR}/${PORTSUBDIR}"
-	@# XXX whatif a build is going on right now?  Is this wise?
-	@${LN} -sf ${WRKOBJDIR}/${PORTSUBDIR} ${WRKDIR}
+	@${MKDIR} ${WRKOBJDIR}/${PORTSUBDIR}
+	@if [ ! -L ${WRKDIR} ] || \
+	  [ X`${READLINK} ${WRKDIR}` != X${WRKOBJDIR}/${PORTSUBDIR} ]; then \
+		echo "${WRKDIR} -> ${WRKOBJDIR}/${PORTSUBDIR}"; \
+		${RM} -f ${WRKDIR}; \
+		${LN} -sf ${WRKOBJDIR}/${PORTSUBDIR} ${WRKDIR}; \
+	fi
 .else
 	@${RM} -rf ${WRKDIR}
 	@${MKDIR} ${WRKDIR}
@@ -1062,7 +1126,7 @@ do-configure:
 	    ${CONFIGURE_ENV} ./${CONFIGURE_SCRIPT} ${CONFIGURE_ARGS})
 .endif
 .if defined(USE_IMAKE)
-	@(cd ${WRKSRC} && ${XMKMF})
+	@(cd ${WRKSRC} && ${SETENV} ${XMKMF})
 .endif
 .endif
 
@@ -1529,7 +1593,7 @@ DEPENDS_TMP+=	${RUN_DEPENDS}
 _DEPENDS_USE:	.USE
 .if defined(DEPENDS_TMP)
 .if !defined(NO_DEPENDS)
-	@for i in ${DEPENDS_TMP}; do \
+	@PATH=${PORTSPATH}; for i in ${DEPENDS_TMP}; do \
 		prog=`${ECHO} $$i | ${SED} -e 's/:.*//'`; \
 		dir=`${ECHO} $$i | ${SED} -e 's/[^:]*://'`; \
 		if expr "$$dir" : '.*:' > /dev/null; then \
@@ -1577,6 +1641,32 @@ run-depends:	_DEPENDS_USE
 lib-depends:
 .if defined(LIB_DEPENDS)
 .if !defined(NO_DEPENDS)
+.if (${MACHINE_ARCH} == "alpha")
+	@for i in ${LIB_DEPENDS}; do \
+		lib=`${ECHO} $$i | ${SED} -e 's/\\\.[0-9][0-9]*\\\.[0-9]*:.*//'`; \
+		dir=`${ECHO} $$i | ${SED} -e 's/[^:]*://'`; \
+		if expr "$$dir" : '.*:' > /dev/null; then \
+			target=`${ECHO} $$dir | ${SED} -e 's/.*://'`; \
+			dir=`${ECHO} $$dir | ${SED} -e 's/:.*//'`; \
+		else \
+			target=${DEPENDS_TARGET}; \
+		fi; \
+		tmp=`mktemp /tmp/bpmXXXXXXXXXX`; \
+		if ${LD} -r -o $$tmp -l$$lib; then \
+			${ECHO_MSG} "===>  ${PKGNAME} depends on library: $$lib - found"; \
+		else \
+			${ECHO_MSG} "===>  ${PKGNAME} depends on library: $$lib - not found"; \
+			${ECHO_MSG} "===>  Verifying $$target for $$lib in $$dir"; \
+			if [ ! -d "$$dir" ]; then \
+				${ECHO_MSG} ">> No directory for $$lib.  Skipping.."; \
+			else \
+				(cd $$dir; ${MAKE} ${.MAKEFLAGS} $$target) ; \
+				${ECHO_MSG} "===>  Returning to build of ${PKGNAME}"; \
+			fi; \
+		fi; \
+		${RM} -f $$tmp; \
+	done
+.else
 	@for i in ${LIB_DEPENDS}; do \
 		lib=`${ECHO} $$i | ${SED} -e 's/:.*//'`; \
 		dir=`${ECHO} $$i | ${SED} -e 's/[^:]*://'`; \
@@ -1599,6 +1689,7 @@ lib-depends:
 			fi; \
 		fi; \
 	done
+.endif
 .endif
 .else
 	@${DO_NADA}
