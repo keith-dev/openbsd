@@ -1,4 +1,4 @@
-/*	$OpenBSD: exchange.c,v 1.70 2002/09/11 09:50:43 ho Exp $	*/
+/*	$OpenBSD: exchange.c,v 1.78 2003/03/06 13:32:42 ho Exp $	*/
 /*	$EOM: exchange.c,v 1.143 2000/12/04 00:02:25 angelos Exp $	*/
 
 /*
@@ -715,6 +715,7 @@ exchange_add_finalization (struct exchange *exchange,
   exchange->finalize_arg = node;
 }
 
+#ifdef USE_ISAKMP_CFG
 static void
 exchange_establish_transaction (struct exchange *exchange, void *arg, int fail)
 {
@@ -729,6 +730,7 @@ exchange_establish_transaction (struct exchange *exchange, void *arg, int fail)
 
   free (node);
 }
+#endif /* USE_ISAKMP_CFG */
 
 /* Establish a phase 1 exchange.  */
 void
@@ -739,8 +741,10 @@ exchange_establish_p1 (struct transport *t, u_int8_t type, u_int32_t doi,
 {
   struct exchange *exchange;
   struct message *msg;
+#ifdef USE_ISAKMP_CFG
   struct conf_list *flags;
   struct conf_list_node *flag;
+#endif
   char *tag = 0;
   char *str;
 
@@ -755,19 +759,8 @@ exchange_establish_p1 (struct transport *t, u_int8_t type, u_int32_t doi,
 	  tag = conf_get_str (name, "Configuration");
 	  if (!tag)
 	    {
-	      /* Use default setting */
-	      tag = conf_get_str ("Phase 1", "Default");
-	      if (!tag)
-		{
-		  log_print ("exchange_establish_p1: "
-			     "no \"Default\" tag in [Phase 1] section");
-		  return;
-		}
-#if 0
-	      log_print ("exchange_establish_p1: "
-			 "no configuration found for peer \"%s\"",
-			 name);
-#endif
+	      /* Use default setting.  */
+	      tag = CONF_DFLT_TAG_PHASE1_CONFIG;
 	    }
 
 	  /* Figure out the DOI.  XXX Factor out?  */
@@ -793,7 +786,7 @@ exchange_establish_p1 (struct transport *t, u_int8_t type, u_int32_t doi,
 	  type = constant_value (isakmp_exch_cst, str);
 	  if (!type)
 	    {
-	      log_print ("exchange_establish_p1: unknown exchange type %s",
+	      log_print ("exchange_setup_p1: unknown exchange type %s",
 			 str);
 	      return;
 	    }
@@ -820,8 +813,9 @@ exchange_establish_p1 (struct transport *t, u_int8_t type, u_int32_t doi,
 
   exchange->policy = name ? conf_get_str (name, "Configuration") : 0;
   if (!exchange->policy && name)
-    exchange->policy = conf_get_str ("Phase 1", "Default");
+    exchange->policy = CONF_DFLT_TAG_PHASE1_CONFIG;
 
+#ifdef USE_ISAKMP_CFG
   if (name)
     {
       flags = conf_get_list (name, "Flags");
@@ -854,6 +848,8 @@ exchange_establish_p1 (struct transport *t, u_int8_t type, u_int32_t doi,
 	  conf_free_list (flags);
 	}
     }
+#endif /* USE_ISAKMP_CFG */
+
   exchange_add_finalization (exchange, finalize, arg);
   cookie_gen (t, exchange, exchange->cookies, ISAKMP_HDR_ICOOKIE_LEN);
   exchange_enter (exchange);
@@ -862,6 +858,12 @@ exchange_establish_p1 (struct transport *t, u_int8_t type, u_int32_t doi,
 #endif
 
   msg = message_alloc (t, 0, ISAKMP_HDR_SZ);
+  if (!msg)
+    {
+      log_print ("exchange_establish_p1: message_alloc () failed");
+      exchange_free (exchange);
+      return;
+    }
   msg->exchange = exchange;
 
   /* Do not create SA for an information or transaction exchange.  */
@@ -878,6 +880,7 @@ exchange_establish_p1 (struct transport *t, u_int8_t type, u_int32_t doi,
       if (!msg->isakmp_sa)
 	{
 	  /* XXX Do something more here?  */
+	  message_free (msg);
 	  exchange_free (exchange);
 	  return;
 	}
@@ -1016,6 +1019,10 @@ exchange_setup_p1 (struct message *msg, u_int32_t doi)
   struct transport *t = msg->transport;
   struct exchange *exchange;
   struct sockaddr *dst;
+#ifdef USE_ISAKMP_CFG
+  struct conf_list *flags;
+  struct conf_list_node *flag;
+#endif
   char *name = 0, *policy = 0, *str;
   u_int32_t want_doi;
   u_int8_t type;
@@ -1060,11 +1067,7 @@ exchange_setup_p1 (struct message *msg, u_int32_t doi)
 
       policy = conf_get_str (name, "Configuration");
       if (!policy)
-	{
-	  log_print ("exchange_setup_p1: no configuration for peer \"%s\"",
-		     name);
-	  return 0;
-	}
+	policy = CONF_DFLT_TAG_PHASE1_CONFIG;
 
       /* Figure out the DOI.  */
       str = conf_get_str (policy, "DOI");
@@ -1121,6 +1124,41 @@ exchange_setup_p1 (struct message *msg, u_int32_t doi)
       return 0;
     }
   exchange->policy = policy;
+
+#ifdef USE_ISAKMP_CFG
+  if (name)
+    {
+      flags = conf_get_list (name, "Flags");
+      if (flags)
+	{
+	  for (flag = TAILQ_FIRST (&flags->fields); flag;
+	       flag = TAILQ_NEXT (flag, link))
+	    if (strcasecmp (flag->field, "ikecfg") == 0)
+	      {
+		struct exchange_finalization_node *node;
+
+		node = calloc (1, (unsigned long)sizeof *node);
+		if (!node)
+		  {
+		    log_print ("exchange_establish_p1: calloc (1, %lu) failed",
+			       (unsigned long)sizeof (*node));
+		    exchange_free (exchange);
+		    return 0;
+		  }
+
+		/* Insert this finalization inbetween the original.  */
+		node->first = 0;
+		node->first_arg = 0;
+		node->second_arg = name;
+		exchange_add_finalization (exchange,
+					   exchange_establish_transaction,
+					   node);
+	      }
+	  conf_free_list (flags);
+	}
+    }
+#endif
+
   cookie_gen (msg->transport, exchange,
 	      exchange->cookies + ISAKMP_HDR_ICOOKIE_LEN,
 	      ISAKMP_HDR_RCOOKIE_LEN);
@@ -1506,7 +1544,7 @@ exchange_finalize (struct message *msg)
    */
   while (TAILQ_FIRST (&exchange->sa_list))
     {
-      struct sa *sa = TAILQ_FIRST (&exchange->sa_list);
+      sa = TAILQ_FIRST (&exchange->sa_list);
 
       if (exchange->id_i && exchange->id_r)
 	{
@@ -1649,7 +1687,7 @@ exchange_add_certs (struct message *msg)
    * Without IDs we cannot handle this yet. Keep the aca_list around for 
    * a later step/retry to see if we got the ID by then. 
    * Note: A 'return -1' breaks X509-auth interop in the responder case
-   *       with some IPSec clients that send CERTREQs early (ex SSH Sentinel).
+   *       with some IPsec clients that send CERTREQs early (ex SSH Sentinel).
    */
   if (!id)
     return 0;
@@ -1795,14 +1833,10 @@ exchange_establish (char *name,
 	   * finalization routine; otherwise, call it directly.
 	   */
 	  if (exchange)
-	    {
-	      exchange_add_finalization (exchange, finalize, arg);
-	    }
+	    exchange_add_finalization (exchange, finalize, arg);
 	  else
-	    {
-	      finalize (0, arg, 1); /* Indicate failure */
-	    }
-      return;
+	    finalize (0, arg, 1); /* Indicate failure */
+	  return;
 	}
       else
 	exchange_establish_p2 (isakmp_sa, 0, name, 0, finalize, arg);

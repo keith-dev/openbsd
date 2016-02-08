@@ -1,4 +1,4 @@
-/*	$OpenBSD: read_entry.c,v 1.12 2001/01/22 18:01:55 millert Exp $	*/
+/*	$OpenBSD: read_entry.c,v 1.14 2003/03/18 16:55:54 millert Exp $	*/
 
 /****************************************************************************
  * Copyright (c) 1998,1999,2000 Free Software Foundation, Inc.              *
@@ -158,6 +158,7 @@ read_termtype(int fd, TERMTYPE * ptr)
 {
     int name_size, bool_count, num_count, str_count, str_size;
     int i;
+    size_t bsize;
     char buf[MAX_ENTRY_SIZE];
 
     TR(TRACE_DATABASE, ("READ termtype header @%d", tell(fd)));
@@ -202,11 +203,12 @@ read_termtype(int fd, TERMTYPE * ptr)
     /* grab the name (a null-terminate string) */
     read(fd, buf, min(MAX_NAME_SIZE, (unsigned) name_size));
     buf[MAX_NAME_SIZE] = '\0';
-    ptr->term_names = typeCalloc(char, strlen(buf) + 1);
+    bsize = strlen(buf) + 1;
+    ptr->term_names = typeCalloc(char, bsize);
     if (ptr->term_names == NULL) {
 	return (0);
     }
-    (void) strcpy(ptr->term_names, buf);
+    (void) strlcpy(ptr->term_names, buf, bsize);
     if (name_size > MAX_NAME_SIZE)
 	lseek(fd, (off_t) (name_size - MAX_NAME_SIZE), 1);
 
@@ -414,7 +416,7 @@ _nc_read_tic_entry(char *const filename,
 
     if (strlen(dir) > MAX_TPATH)
 	return 0;
-    (void) sprintf(filename, "%s/%s", dir, ttn);
+    (void) snprintf(filename, MAX_TPATH + 1, "%s/%s", dir, ttn);
     return _nc_read_file_entry(filename, tp);
 }
 
@@ -478,7 +480,7 @@ _nc_read_entry
 #endif /* __OpenBSD__ */
 
     /* truncate the terminal name to prevent dangerous buffer airline */
-    (void) sprintf(ttn, "%c/%.*s", *tn, MAX_ALIAS, tn);
+    (void) snprintf(ttn, sizeof(ttn), "%c/%.*s", *tn, MAX_ALIAS, tn);
 
     /* This is System V behavior, in conjunction with our requirements for
      * writing terminfo entries.

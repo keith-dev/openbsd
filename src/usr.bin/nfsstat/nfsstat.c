@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfsstat.c,v 1.13 2002/02/16 21:27:50 millert Exp $	*/
+/*	$OpenBSD: nfsstat.c,v 1.17 2003/01/15 22:57:42 millert Exp $	*/
 /*	$NetBSD: nfsstat.c,v 1.7 1996/03/03 17:21:30 thorpej Exp $	*/
 
 /*
@@ -48,7 +48,7 @@ static char copyright[] =
 static char sccsid[] = "from: @(#)nfsstat.c	8.1 (Berkeley) 6/6/93";
 static char *rcsid = "$NetBSD: nfsstat.c,v 1.7 1996/03/03 17:21:30 thorpej Exp $";
 #else
-static char *rcsid = "$OpenBSD: nfsstat.c,v 1.13 2002/02/16 21:27:50 millert Exp $";
+static char *rcsid = "$OpenBSD: nfsstat.c,v 1.17 2003/01/15 22:57:42 millert Exp $";
 #endif
 #endif /* not lint */
 
@@ -151,7 +151,7 @@ main(argc, argv)
 		if (kvm_nlist(kd, nl) != 0)
 			errx(1, "kvm_nlist: can't get names");
 	} else {
-		int mib[3];
+		int mib[4];
 		size_t len;
 
 		mib[0] = CTL_VFS;
@@ -161,7 +161,7 @@ main(argc, argv)
 		if (sysctl(mib, 3, &nfs_id, &len, NULL, 0))
 			err(1, "sysctl: VFS_MAXTYPENUM");
 
-		while (nfs_id--) {
+		for (; nfs_id; nfs_id--) {
 			struct vfsconf vfsc;
 
 			mib[0] = CTL_VFS;
@@ -176,8 +176,7 @@ main(argc, argv)
 			if (!strcmp(vfsc.vfc_name, MOUNT_NFS))
 				break;
 		}
-
-		if (nfs_id < 0)
+		if (nfs_id == 0)
 			errx(1, "cannot find nfs filesystem id");
 	}
 
@@ -334,13 +333,6 @@ intpr(display)
 		       nfsstats.srvcache_idemdonehits,
 		       nfsstats.srvcache_nonidemdonehits,
 		       nfsstats.srvcache_misses);
-		printf("Server Lease Stats:\n");
-		printf("%9.9s %9.9s %9.9s\n",
-		       "Leases", "PeakL", "GLeases");
-		printf("%9d %9d %9d\n",
-		       nfsstats.srvnqnfs_leases,
-		       nfsstats.srvnqnfs_maxleases,
-		       nfsstats.srvnqnfs_getleases);
 		printf("Server Write Gathering:\n");
 		printf("%9.9s %9.9s %9.9s\n",
 		       "WriteOps", "WriteRPC", "Opsaved");

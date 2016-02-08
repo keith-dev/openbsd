@@ -1,7 +1,7 @@
 /*
  * dl_beos.xs, by Tom Spindler
  * based on dl_dlopen.xs, by Paul Marquess
- * $Id: dl_beos.xs,v 1.4 2001/05/24 18:35:09 millert Exp $
+ * $Id: dl_beos.xs,v 1.5 2002/10/27 22:25:22 millert Exp $
  */
 
 #include "EXTERN.h"
@@ -110,7 +110,8 @@ dl_install_xsub(perl_name, symref, filename="$Package")
 char *
 dl_error()
     CODE:
-    RETVAL = LastError ;
+    dMY_CXT;
+    RETVAL = dl_last_error ;
     OUTPUT:
     RETVAL
 

@@ -1,35 +1,31 @@
-dnl	$OpenBSD: xfer,v 1.33 2002/07/25 19:29:32 miod Exp $
+dnl	$OpenBSD: xfer,v 1.36 2003/03/24 11:33:57 miod Exp $
 Installation is supported from several media types, including:
 
 	CD-ROM
-dnl put back after 3.2
-dnl	FFS partitions
+	FFS partitions
 	Tape
-	Remote NFS partition
 	FTP
 	HTTP
 
 Not all methods are supported on all Sparc Systems and some of them
 work only with the floppy or the miniroot installation.
 
-If you have the OpenBSD CD-ROM distribution (and a CD-ROM drive), you
-may be able boot from it.  Not all sparc systems support booting from
-CD-ROM and the current boot image is only known to work on sun4c and
-some sun4m architecture workstations.  If you can boot from the CD-ROM,
-you are home free and can proceed to the installation steps.  If not,
-you will need to do some setup work to prepare a bootable image, either
-a floppy, hard drive, tape, or compatible net boot server.
+If you have the OpenBSD CD-ROM distribution (and a CD-ROM drive), you may be
+able boot from it, or from the supplied bootable CD-ROM mini image. However,
+not all sparc systems support booting from CD-ROM, and the current boot
+image is only known to work on sun4c and sun4m architecture workstations.
+If you can boot from the CD-ROM, you are home free and can proceed to the
+installation steps.  If not, you will need to do some setup work to prepare
+a bootable image, either a floppy, hard drive, tape, or compatible net boot
+server.
 
 In addition to the bootable image, you also need to consider how to
-access the binary distribution sets to actually install the system.  If
-you have the OpenBSD CD-ROM distribution you can either access the
-CD-ROM directly from the bootable image or remotely mounted on another
-system via NFS.
+access the binary distribution sets to actually install the system.
 
 Although you can access the distribution sets directly from the CD-ROM or
 from one of the FTP mirrors over the internet, you may wish to transfer
-the sets to a local FTP or NFS server, or copy them to a partition on
-the target system's disk or onto a SCSI tape.
+the sets to a local FTP server, or copy them to a partition on the target
+system's disk or onto a SCSI tape.
 
 
 OpenBSDXferFloppyFromDOS
@@ -144,8 +140,4 @@ OpenBSDXferPrelude
 
 OpenBSDXferBootTape(xbase xfont xserv xshare,bsd.rd obs=8k conv=sync,boot obs=8k conv=sync)
 
-dnl OpenBSDXferNFS
-OpenBSDXferNFS(noupgrade)
-dnl put back after 3.2
-dnl
-dnl OpenBSDXferFFS
+OpenBSDXferFFS

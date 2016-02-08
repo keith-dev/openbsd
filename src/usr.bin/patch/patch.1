@@ -1,4 +1,24 @@
-.\"	$OpenBSD: patch.1,v 1.4 1999/06/05 01:21:36 aaron Exp $	-*- nroff -*-
+.\"	$OpenBSD: patch.1,v 1.6 2003/02/18 07:57:49 jmc Exp $	-*- nroff -*-
+.\" Copyright 1986, Larry Wall
+.\"
+.\" Redistribution and use in source and binary forms, with or without
+.\" modification, are permitted provided that the following condition
+.\" is met:
+.\"  1. Redistributions of source code must retain the above copyright
+.\"     notice, this condition and the following disclaimer.
+.\" 
+.\" THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
+.\" ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+.\" IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+.\" ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
+.\" FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+.\" DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+.\" OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+.\" HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+.\" LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+.\" OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+.\" SUCH DAMAGE.
+.\"
 .rn '' }`
 .de Sh
 .br
@@ -65,7 +85,7 @@ or
 switches.
 The extension used for making backup files may also be specified in the
 .B SIMPLE_BACKUP_SUFFIX
-environment variable, which is overridden by above switches.
+environment variable, which is overridden by the above switches.
 .PP
 If the backup file already exists,
 .B patch
@@ -302,7 +322,7 @@ causes the next argument to be interpreted as the output file name.
 .B \-p<number> or \-\-strip <number>
 sets the pathname strip count,
 which controls how pathnames found in the patch file are treated, in case
-the you keep your files in a different directory than the person who sent
+you keep your files in a different directory than the person who sent
 out the patch.
 The strip count specifies how many slashes are to be stripped from
 the front of the pathname.

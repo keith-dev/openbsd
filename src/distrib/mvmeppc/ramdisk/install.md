@@ -1,4 +1,4 @@
-#	$OpenBSD: install.md,v 1.14 2002/05/20 16:53:57 krw Exp $
+#	$OpenBSD: install.md,v 1.16 2002/12/04 13:11:23 miod Exp $
 #
 #
 # Copyright (c) 1996 The NetBSD Foundation, Inc.
@@ -39,8 +39,6 @@
 # machine dependent section of installation/upgrade script.
 #
 
-# Machine-dependent install sets
-MDSETS=kernel
 MDTERM=vt100
 MDFSTYPE=msdos
 ARCH=ARCH
@@ -69,7 +67,7 @@ md_init_mbr() {
 	# $1 is the disk to init
 	echo
 	echo "You will now be asked if you want to initialize the disk with a 1MB"
-	echo "MSDOS partition. This is the recomended setup and will allow you to"
+	echo "MSDOS partition. This is the recommended setup and will allow you to"
 	echo "store the boot and other interesting things here."
 	echo
 	echo "If you want to have a different setup, exit 'install' now and do"

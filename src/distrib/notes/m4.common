@@ -1,6 +1,17 @@
 dnl
-dnl	$OpenBSD: m4.common,v 1.37 2002/07/25 19:29:29 miod Exp $
+dnl	$OpenBSD: m4.common,v 1.43 2003/03/24 11:33:52 miod Exp $
 dnl
+dnl a simple MACHINE->MACHINE_ARCH converter.
+define(`MACHINE_ARCH',
+`ifelse(
+MACHINE,amiga,m68k,
+MACHINE,hp300,m68k,
+MACHINE,mac68k,m68k,
+MACHINE,macppc,powerpc,
+MACHINE,mvme68k,m68k,
+MACHINE,mvmeppc,powerpc,
+MACHINE,sun3,m68k,
+MACHINE)')dnl
 dnl simulate an include path with a macro 'includeit'.
 define(`includeit',`sinclude('INCLUDE/`$1)sinclude('INCLUDE/../`$1)')dnl
 dnl
@@ -100,12 +111,12 @@ dnl
 define({:-OpenBSDetc-:},
 {:-	etc{:--:}OSrev	 This distribution set contains the system configuration
 		 files that reside in /etc and in several other places.
-		 This set MUST be installed if you are installing the
+		 This set MUST be installed{:--:}ifelse(X$3,X,{:- if you are installing the
 		 system from scratch, but should NOT be used if you are
-		 upgrading.{:--:}ifelse(X$3,X,{:-(If you are upgrading, it's recommended that
+		 upgrading. (If you are upgrading, it's recommended that
 		 you get a copy of this set and CAREFULLY upgrade your
 		 configuration files by hand, see the section named "Upgrading
-		 a previously-installed OpenBSD System" below.)-:})showsize($1,$2)-:})dnl
+		 a previously-installed OpenBSD System" below.)-:},.)showsize($1,$2)-:})dnl
 dnl
 dnl
 dnl OpenBSDgame( compressed size, uncompressed size )
@@ -168,10 +179,11 @@ dnl
 define({:-OpenBSDfloppy-:},
 {:-		floppy{:--:}OSrev.fs	The standard MACHINE boot and installation
 				floppy; see below.-:})dnl
-define({:-OpenBSDcdrom-:},
-{:-		cdrom{:--:}OSrev.fs	The MACHINE boot and installation
-				2.88mb floppy image that contains almost all
-				OpenBSD drivers; see below.-:})dnl
+dnl
+define({:-OpenBSDcd-:},
+{:-		cd{:--:}OSrev.iso	A miniroot filesystem image suitable to be used
+				as a bootable CD-ROM image; otherwise similar
+				to the bsd.rd image above.-:})dnl
 dnl
 dnl OpenBSDfloppydesc(number of floppies, Article, plural)
 dnl
@@ -459,12 +471,12 @@ define({:-OpenBSDCDROMInstall-:},
 
 		Next you will have to identify the file system type that
 		has been used to create the distribution on the CD-ROM,
-		this can be either FFS or ISO CD9660.  The OpenBSD CD
+		this can be either FFS or ISO CD9660.  The OpenBSD CD-ROM
 		distribution uses the CD9660 format.
 
 		You will also have to provide the relative path to the
-		directory on the CD which holds the distribution, for the
-		MACHINE this is "OSREV/MACHINE".
+		directory on the CD-ROM which holds the distribution, for
+		the MACHINE this is "OSREV/MACHINE".
 
 		For instructions on how to complete the installation from
 		the CD-ROM distribution, see the section named "Common
@@ -532,11 +544,13 @@ define({:-OpenBSDDISKInstall-:},
 		For instructions on how to complete the installation from
 		the a local disk partition, see the next section.-:})dnl
 dnl
+dnl For arches where you can install from NFS, $1 should be set to "NFS",
+dnl otherwise there should be no parameter.
 define({:-OpenBSDCommonFS-:},
 {:-	Common file system installations:
 		The following instructions are common to installations
-		from local disk partitions, NFS mounted directories and
-		CD-ROMs.
+		from mounted disk partitions{:--:}ifelse(X$1,XNFS,{:-, NFS mounted directories and
+		CD-ROMs-:},{:- and CD-ROMs-:}).
 
 		A list of available distribution sets will be listed.
 		You may individually select distribution sets to install
@@ -700,10 +714,11 @@ define({:-OpenBSDXferFloppyFromDOS-:},
 	image copy and boot process is not especially tolerant of read
 	errors.
 
-	Note that if you are using NT to write the images to disk, you
-	will need to use ntrw.exe instead.  It is also available in the
-	"tools" directory.  Grab it and run in with the correct
-	arguments like this "ntrw <image> <drive>:"
+	Note that if you are using NT, 2000, or XP to write the
+	images to disk, you will need to use ntrw.exe instead.  It
+	is also available in the "tools" directory.  Grab it and
+	run in with the correct arguments like this "ntrw <image>
+	<drive>:"
 
 	Note that, when installing, the boot floppy can be write-protected
 	(i.e  read-only).-:})dnl

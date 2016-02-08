@@ -1,4 +1,4 @@
-/*	$OpenBSD: loader.c,v 1.49 2002/08/23 23:02:48 drahn Exp $ */
+/*	$OpenBSD: loader.c,v 1.55 2003/02/15 22:43:06 drahn Exp $ */
 
 /*
  * Copyright (c) 1998 Per Fogelstrom, Opsycon AB
@@ -95,8 +95,7 @@ _dl_dtors(void)
 }
 
 void
-_dl_dopreload(paths)
-	char		*paths;
+_dl_dopreload(char *paths)
 {
 	char		*cp, *dp;
 
@@ -174,6 +173,33 @@ _dl_boot(const char **argv, char **envp, const long loff, long *dl_data)
 	else
 		_dl_pagesz = 4096;
 
+	/*
+	 * now that GOT and PLT has been relocated, and we know page size 
+	 * protect it from modification 
+	 */
+	{
+		extern char *__got_start;
+		extern char *__got_end;
+#ifndef __i386__
+		extern char *__plt_start;
+		extern char *__plt_end;
+#endif
+
+		_dl_mprotect((void *)ELF_TRUNC((long)&__got_start, _dl_pagesz),
+		    ELF_ROUND((long)&__got_end,_dl_pagesz) -
+		        ELF_TRUNC((long)&__got_start, _dl_pagesz),
+		    GOT_PERMS);
+
+#ifndef __i386__
+		/* only for DATA_PLT or BSS_PLT */
+		_dl_mprotect((void *)ELF_TRUNC((long)&__plt_start, _dl_pagesz),
+		    ELF_ROUND((long)&__plt_end,_dl_pagesz) -
+		        ELF_TRUNC((long)&__plt_start, _dl_pagesz),
+		    PROT_READ|PROT_EXEC);
+#endif
+	}
+	
+
 	DL_DEB(("rtld loading: '%s'\n", _dl_progname));
 
 	exe_obj = NULL;
@@ -186,9 +212,9 @@ _dl_boot(const char **argv, char **envp, const long loff, long *dl_data)
 			exe_obj = _dl_add_object(argv[0],
 			    (Elf_Dyn *)phdp->p_vaddr, dl_data, OBJTYPE_EXE,
 			    0, 0);
-		}
-		if (phdp->p_type == PT_INTERP)
+		} else if (phdp->p_type == PT_INTERP) {
 			us = _dl_strdup((char *)phdp->p_vaddr);
+		}
 		phdp++;
 	}
 
@@ -242,8 +268,10 @@ _dl_boot(const char **argv, char **envp, const long loff, long *dl_data)
 	 * the shared libraries which follow.
 	 * Do not run init code if run from ldd.
 	 */
-	if ((_dl_traceld == NULL) && (_dl_objects->next != NULL))
-		_dl_call_init(_dl_objects->next);
+	if ((_dl_traceld == NULL) && (_dl_objects->next != NULL)) {
+		_dl_objects->status |= STAT_INIT_DONE;
+		_dl_call_init(_dl_objects);
+	}
 
 	/*
 	 * Schedule a routine to be run at shutdown, by using atexit.
@@ -256,19 +284,20 @@ _dl_boot(const char **argv, char **envp, const long loff, long *dl_data)
 
 		sym = NULL;
 		ooff = _dl_find_symbol("atexit", _dl_objects, &sym,
-		    SYM_SEARCH_ALL|SYM_NOWARNNOTFOUND|SYM_PLT, 0);
-		if (sym == NULL) {
+		    SYM_SEARCH_ALL|SYM_NOWARNNOTFOUND|SYM_PLT, 0, "");
+		if (sym == NULL)
 			_dl_printf("cannot find atexit, destructors will not be run!\n");
-		} else {
-			(*(void (*)(Elf_Addr))(sym->st_value + ooff))((Elf_Addr)_dl_dtors);
-		}
+		else
+			(*(void (*)(Elf_Addr))(sym->st_value + ooff))
+			    ((Elf_Addr)_dl_dtors);
 	}
 
 	/*
 	 * Finally make something to help gdb when poking around in the code.
 	 */
 #ifdef __mips__
-	map_link = (struct r_debug **)(exe_obj->Dyn.info[DT_MIPS_RLD_MAP - DT_LOPROC + DT_NUM]);
+	map_link = (struct r_debug **)(exe_obj->Dyn.info[DT_MIPS_RLD_MAP -
+	    DT_LOPROC + DT_NUM]);
 #else
 	map_link = NULL;
 	for (dynp = exe_obj->load_dyn; dynp->d_tag; dynp++) {
@@ -277,9 +306,8 @@ _dl_boot(const char **argv, char **envp, const long loff, long *dl_data)
 			break;
 		}
 	}
-	if (dynp->d_tag != DT_DEBUG) {
+	if (dynp->d_tag != DT_DEBUG)
 		DL_DEB(("failed to mark DTDEBUG\n"));
-	}
 #endif
 	if (map_link) {
 		debug_map = (struct r_debug *)_dl_malloc(sizeof(*debug_map));
@@ -309,16 +337,15 @@ _dl_boot(const char **argv, char **envp, const long loff, long *dl_data)
 }
 
 void
-_dl_boot_bind(const long sp, long loff, Elf_Dyn *dynamicp, long *dl_data)
+_dl_boot_bind(const long sp, long *dl_data)
 {
+	struct elf_object  dynld;	/* Resolver data for the loader */
 	AuxInfo		*auxstack;
 	long		*stack;
 	Elf_Dyn		*dynp;
-	int		n;
-	int argc;
-	char **argv;
-	char **envp;
-	struct elf_object  dynld;	/* Resolver data for the loader */
+	int		n, argc;
+	char **argv, **envp;
+	long loff;
 
 	/*
 	 * Scan argument and environment vectors. Find dynamic
@@ -348,9 +375,7 @@ _dl_boot_bind(const long sp, long loff, Elf_Dyn *dynamicp, long *dl_data)
 			continue;
 		dl_data[auxstack->au_id] = auxstack->au_v;
 	}
-#if defined(__sparc64__) || defined(__sparc__) || defined(__i386__)
-	loff = dl_data[AUX_base];
-#endif
+	loff = dl_data[AUX_base];	/* XXX assumes linked at 0x0 */
 
 	/*
 	 * We need to do 'selfreloc' in case the code weren't
@@ -360,10 +385,8 @@ _dl_boot_bind(const long sp, long loff, Elf_Dyn *dynamicp, long *dl_data)
 	 * Cache the data for easier access.
 	 */
 
-#if defined(__sparc64__) || defined(__sparc__)
-	dynp = (Elf_Dyn *)((long)_DYNAMIC + loff);
-#elif defined(__powerpc__) || defined(__alpha__)
-	dynp = dynamicp;
+#if defined(__alpha__)
+	dynp = (Elf_Dyn *)((long)_DYNAMIC);
 #else
 	dynp = (Elf_Dyn *)((long)_DYNAMIC + loff);
 #endif
@@ -411,7 +434,6 @@ _dl_boot_bind(const long sp, long loff, Elf_Dyn *dynamicp, long *dl_data)
 			if (dynld.Dyn.info[val] != 0)
 				dynld.Dyn.info[val] += loff;
 		}
-
 	}
 
 	{
@@ -444,7 +466,6 @@ _dl_boot_bind(const long sp, long loff, Elf_Dyn *dynamicp, long *dl_data)
 			RELOC_REL(rp, sp, ra, loff);
 			rp++;
 		}
-
 	}
 
 	for (n = 0; n < 2; n++) {
@@ -486,6 +507,9 @@ _dl_boot_bind(const long sp, long loff, Elf_Dyn *dynamicp, long *dl_data)
 			rp++;
 		}
 	}
+
+	RELOC_GOT(&dynld, loff);
+
 	/*
 	 * we have been fully relocated here, so most things no longer
 	 * need the loff adjustment
@@ -513,56 +537,21 @@ _dl_rtld(elf_object_t *object)
 void
 _dl_call_init(elf_object_t *object)
 {
-	Elf_Addr ooff;
-	const Elf_Sym *sym;
+	struct dep_node *n;
 
-	if (object->next)
-		_dl_call_init(object->next);
+	for (n = object->first_child; n; n = n->next_sibling) {
+		if (n->data->status & STAT_INIT_DONE)
+			continue;
+		_dl_call_init(n->data);
+	}
 
 	if (object->status & STAT_INIT_DONE)
 		return;
 
-#ifndef __mips__
 	if (object->dyn.init)
 		(*object->dyn.init)();
-/*
- * XXX We perform relocation of DTOR/CTOR. This is a ld bug problem
- * XXX that should be fixed.
- */
-	sym = NULL;
-	ooff = _dl_find_symbol("__CTOR_LIST__", object, &sym,
-	    SYM_SEARCH_SELF|SYM_WARNNOTFOUND|SYM_PLT, 0);
-	if (sym != NULL) {
-		int i = *(int *)(sym->st_value + ooff);
-		while (i--)
-			*(int *)(sym->st_value + ooff + 4 + 4 * i) += ooff;
-	}
-	sym = NULL;
-	ooff = _dl_find_symbol("__DTOR_LIST__", object, &sym,
-	    SYM_SEARCH_SELF|SYM_WARNNOTFOUND|SYM_PLT, 0);
-	if (sym != NULL) {
-		int i = *(int *)(sym->st_value + ooff);
-		while (i--)
-			*(int *)(sym->st_value + ooff + 4 + 4 * i) += ooff;
-	}
 
-/*
- * XXX We should really call any code which resides in the .init segment
- * XXX but at the moment this functionality is not provided by the toolchain.
- * XXX Instead we rely on a symbol named '.init' and call it if it exists.
- */
-	sym = NULL;
-	ooff = _dl_find_symbol(".init", object, &sym,
-	    SYM_SEARCH_SELF|SYM_WARNNOTFOUND|SYM_PLT, 0);
-	if (sym != NULL) {
-		DL_DEB(("calling .init in '%s'\n",object->load_name));
-		(*(void(*)(void))(sym->st_value + ooff))();
-	}
-#if 0 /*XXX*/
-	if (object->dyn.init)
-		(*object->dyn.init)();
-#endif
-#endif /* __mips__ */
+	/* What about loops? */
 	object->status |= STAT_INIT_DONE;
 }
 
@@ -605,5 +594,4 @@ _dl_unsetenv(const char *var, char **env)
 		}
 		env++;
 	}
-
 }

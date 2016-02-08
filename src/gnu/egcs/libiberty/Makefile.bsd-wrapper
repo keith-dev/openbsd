@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile.bsd-wrapper,v 1.10 2002/05/11 13:05:08 fgsch Exp $
+#	$OpenBSD: Makefile.bsd-wrapper,v 1.12 2002/12/04 19:43:13 millert Exp $
 
 LIB=		iberty
 CPPFLAGS+=	-DHAVE_CONFIG_H -I$(.CURDIR) -I$(.CURDIR)/../include -I$(.OBJDIR)

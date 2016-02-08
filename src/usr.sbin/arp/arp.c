@@ -1,4 +1,4 @@
-/*	$OpenBSD: arp.c,v 1.24 2002/09/06 18:33:16 deraadt Exp $ */
+/*	$OpenBSD: arp.c,v 1.26 2003/03/17 23:26:21 henric Exp $ */
 /*	$NetBSD: arp.c,v 1.12 1995/04/24 13:25:18 cgd Exp $ */
 
 /*
@@ -45,7 +45,7 @@ static char copyright[] =
 
 #ifndef lint
 /*static char sccsid[] = "from: @(#)arp.c	8.2 (Berkeley) 1/2/94";*/
-static char *rcsid = "$OpenBSD: arp.c,v 1.24 2002/09/06 18:33:16 deraadt Exp $";
+static char *rcsid = "$OpenBSD: arp.c,v 1.26 2003/03/17 23:26:21 henric Exp $";
 #endif /* not lint */
 
 /*
@@ -95,6 +95,10 @@ static pid_t pid;
 static int nflag;	/* no reverse dns lookups */
 static int aflag;	/* do it for all entries */
 static int s = -1;
+
+/* ROUNDUP() is nasty, but it is identical to what's in the kernel. */
+#define ROUNDUP(a)					\
+	((a) > 0 ? (1 + (((a) - 1) | (sizeof(long) - 1))) : sizeof(long))
 
 /* which function we're supposed to do */
 #define F_GET		1
@@ -299,7 +303,7 @@ tryagain:
 		return (1);
 	}
 	sin = (struct sockaddr_inarp *)(rtm + 1);
-	sdl = (struct sockaddr_dl *)(sin->sin_len + (char *)sin);
+	sdl = (struct sockaddr_dl *)(ROUNDUP(sin->sin_len) + (char *)sin);
 	if (sin->sin_addr.s_addr == sin_m.sin_addr.s_addr) {
 		if (sdl->sdl_family == AF_LINK &&
 		    (rtm->rtm_flags & RTF_LLINFO) &&
@@ -383,7 +387,7 @@ tryagain:
 		return (1);
 	}
 	sin = (struct sockaddr_inarp *)(rtm + 1);
-	sdl = (struct sockaddr_dl *)(sin->sin_len + (char *)sin);
+	sdl = (struct sockaddr_dl *)(ROUNDUP(sin->sin_len) + (char *)sin);
 	if (sin->sin_addr.s_addr == sin_m.sin_addr.s_addr) {
 		if (sdl->sdl_family == AF_LINK &&
 		    (rtm->rtm_flags & RTF_LLINFO) &&
@@ -471,6 +475,7 @@ print_entry(sdl, sin, rtm)
 	char *host;
 	extern int h_errno;
 	struct hostent *hp;
+	char ifname[IF_NAMESIZE];
 
 	if (nflag == 0)
 		hp = gethostbyaddr((caddr_t)&(sin->sin_addr),
@@ -489,6 +494,8 @@ print_entry(sdl, sin, rtm)
 		ether_print(LLADDR(sdl));
 	else
 		(void)printf("(incomplete)");
+	if (if_indextoname(sdl->sdl_index, ifname) != NULL)
+		printf(" on %s", ifname);
 	if (rtm->rtm_flags & RTF_PERMANENT_ARP)
 		(void)printf(" permanent");
 	if (rtm->rtm_rmx.rmx_expire == 0)
@@ -497,11 +504,11 @@ print_entry(sdl, sin, rtm)
 		(void)printf(" published (proxy only)");
 	if (rtm->rtm_addrs & RTA_NETMASK) {
 		sin = (struct sockaddr_inarp *)
-			(sdl->sdl_len + (char *)sdl);
+			(ROUNDUP(sdl->sdl_len) + (char *)sdl);
 		if (sin->sin_addr.s_addr == 0xffffffff)
 			(void)printf(" published");
 		if (sin->sin_len != 8)
-			(void)printf("(weird)");
+			(void)printf("(weird %d)", sin->sin_len);
 	}
 	printf("\n");
 }
@@ -585,9 +592,12 @@ rtmsg(cmd)
 	case RTM_GET:
 		rtm->rtm_addrs |= RTA_DST;
 	}
-#define NEXTADDR(w, s) \
-	if (rtm->rtm_addrs & (w)) { \
-		(void)memcpy(cp, &s, sizeof(s)); cp += sizeof(s);}
+
+#define NEXTADDR(w, s)					\
+	if (rtm->rtm_addrs & (w)) {			\
+		(void)memcpy(cp, &s, sizeof(s));	\
+		cp += ROUNDUP(sizeof(s));		\
+	}
 
 	NEXTADDR(RTA_DST, sin_m);
 	NEXTADDR(RTA_GATEWAY, sdl_m);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: resolve.c,v 1.13 2002/08/23 22:57:03 drahn Exp $ */
+/*	$OpenBSD: resolve.c,v 1.17 2003/02/02 16:57:58 deraadt Exp $ */
 
 /*
  * Copyright (c) 1998 Per Fogelstrom, Opsycon AB
@@ -46,12 +46,12 @@ elf_object_t *_dl_objects;
 elf_object_t *_dl_last_object;
 
 /*
- *	Initialize and add a new dynamic object to the object list.
- *	Perform necessary relocations of pointers.
+ * Initialize and add a new dynamic object to the object list.
+ * Perform necessary relocations of pointers.
  */
 elf_object_t *
 _dl_add_object(const char *objname, Elf_Dyn *dynp, const u_long *dl_data,
-	const int objtype, const long laddr, const long loff)
+    const int objtype, const long laddr, const long loff)
 {
 	elf_object_t *object;
 #if 0
@@ -132,6 +132,8 @@ _dl_add_object(const char *objname, Elf_Dyn *dynp, const u_long *dl_data,
 	object->load_offs = loff;
 	object->load_name = _dl_strdup(objname);
 	object->refcount = 1;
+	object->first_child = NULL;
+	object->last_child = NULL;
 	return(object);
 }
 
@@ -175,14 +177,14 @@ _dl_lookup_object(const char *name)
 
 Elf_Addr
 _dl_find_symbol(const char *name, elf_object_t *startlook,
-    const Elf_Sym **ref, int flags, int req_size)
+    const Elf_Sym **ref, int flags, int req_size, const char *module_name)
 {
-	const Elf_Sym *weak_sym = 0;
-	const char *weak_symn = ""; /* remove warning */
+	const Elf_Sym *weak_sym = NULL;
+	const char *weak_symn = NULL; /* remove warning */
 	Elf_Addr weak_offs = 0;
 	unsigned long h = 0;
 	const char *p = name;
-	elf_object_t *object;
+	elf_object_t *object, *weak_object = NULL;
 
 	while (*p) {
 		unsigned long g;
@@ -192,8 +194,7 @@ _dl_find_symbol(const char *name, elf_object_t *startlook,
 		h &= ~g;
 	}
 
-	for (object = startlook;
-	    object;
+	for (object = startlook; object;
 	    object = ((flags & SYM_SEARCH_SELF) ? 0 : object->next)) {
 		const Elf_Sym	*symt = object->dyn.symtab;
 		const char	*strt = object->dyn.strtab;
@@ -213,8 +214,7 @@ _dl_find_symbol(const char *name, elf_object_t *startlook,
 				continue;
 
 			symn = strt + sym->st_name;
-			if (sym != *ref &&
-			    _dl_strcmp(symn, name))
+			if (sym != *ref && _dl_strcmp(symn, name))
 				continue;
 
 			/* allow this symbol if we are referring to a function
@@ -224,11 +224,10 @@ _dl_find_symbol(const char *name, elf_object_t *startlook,
 			 * if flags has SYM_PLT set, we must have actual
 			 * symbol, so this symbol is skipped.
 			 */
-			if (sym->st_shndx == SHN_UNDEF)  {
+			if (sym->st_shndx == SHN_UNDEF) {
 				if ((flags & SYM_PLT) || sym->st_value == 0 ||
-				    ELF_ST_TYPE(sym->st_info) != STT_FUNC) {
+				    ELF_ST_TYPE(sym->st_info) != STT_FUNC)
 					continue;
-				}
 			}
 
 			if (ELF_ST_BIND(sym->st_info) == STB_GLOBAL) {
@@ -248,25 +247,23 @@ _dl_find_symbol(const char *name, elf_object_t *startlook,
 					weak_sym = sym;
 					weak_symn = symn;
 					weak_offs = object->load_offs;
+					weak_object = object;
 				}
 			}
 		}
 	}
-	if (flags & SYM_WARNNOTFOUND) {
-		if (!weak_sym && *ref &&
-		    ELF_ST_BIND((*ref)->st_info) != STB_WEAK) {
-			_dl_printf("%s: undefined symbol '%s'\n",
-			    _dl_progname, name);
-		}
+	if (flags & SYM_WARNNOTFOUND && weak_sym == NULL) {
+		_dl_printf("%s:%s: undefined symbol '%s'\n",
+		    _dl_progname, module_name, name);
 	}
 	*ref = weak_sym;
-	if (weak_sym && req_size != weak_sym->st_size &&
+	if (weak_sym != NULL && req_size != weak_sym->st_size &&
 	    req_size != 0 && (ELF_ST_TYPE(weak_sym->st_info) != STT_FUNC)) {
-		_dl_printf("%s: %s : WARNING: "
+		_dl_printf("%s:%s: %s : WARNING: "
 		    "symbol(%s) size mismatch ",
-		    _dl_progname, object->load_name,
+		    _dl_progname, module_name, weak_object->load_name,
 		    weak_symn);
 		_dl_printf("relink your program\n");
 	}
-	return(weak_offs);
+	return (weak_offs);
 }

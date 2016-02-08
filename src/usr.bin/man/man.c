@@ -1,4 +1,4 @@
-/*	$OpenBSD: man.c,v 1.21 2002/09/17 19:37:39 deraadt Exp $	*/
+/*	$OpenBSD: man.c,v 1.24 2003/03/13 09:09:32 deraadt Exp $	*/
 /*	$NetBSD: man.c,v 1.7 1995/09/28 06:05:34 tls Exp $	*/
 
 /*
@@ -44,7 +44,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)man.c	8.17 (Berkeley) 1/31/95";
 #else
-static char rcsid[] = "$OpenBSD: man.c,v 1.21 2002/09/17 19:37:39 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: man.c,v 1.24 2003/03/13 09:09:32 deraadt Exp $";
 #endif
 #endif /* not lint */
 
@@ -109,7 +109,7 @@ main(int argc, char *argv[])
 	machine = sflag = NULL;
 	f_cat = f_how = 0;
 	conffile = p_add = p_path = NULL;
-	while ((ch = getopt(argc, argv, "-aC:cfhkM:m:P:s:S:w")) != -1)
+	while ((ch = getopt(argc, argv, "aC:cfhkM:m:P:s:S:w-")) != -1)
 		switch (ch) {
 		case 'a':
 			f_all = 1;
@@ -138,8 +138,8 @@ main(int argc, char *argv[])
 			machine = optarg;
 			break;
 		/*
-		 * The -f and -k options are backward compatible,
-		 * undocumented ways of calling whatis(1) and apropos(1).
+		 * The -f and -k options are backward compatible
+		 * ways of calling whatis(1) and apropos(1).
 		 */
 		case 'f':
 			jump(argv, "-f", "whatis");
@@ -696,6 +696,7 @@ static char *
 check_pager(char *name)
 {
 	char *p, *save;
+	int len;
 
 	/*
 	 * if the user uses "more", we make it "more -s"; watch out for
@@ -712,10 +713,10 @@ check_pager(char *name)
 	if (!strncmp(p, "more", 4) && (!p[4] || isspace(p[4]))){
 		save = name;
 		/* allocate space to add the "-s" */
-		if (!(name =
-		    malloc(strlen(save) + 1 + sizeof("-s"))))
+		len = strlen(save) + 1 + sizeof("-s");
+		if (!(name =malloc(len)))
 			err(1, NULL);
-		(void)sprintf(name, "%s %s", save, "-s");
+		(void)snprintf(name, len, "%s %s", save, "-s");
 	}
 	return(name);
 }

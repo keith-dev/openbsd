@@ -1,4 +1,4 @@
-.\"	$OpenBSD: mg.1,v 1.14 2002/09/28 01:14:02 deraadt Exp $
+.\"	$OpenBSD: mg.1,v 1.16 2003/01/06 17:04:09 deraadt Exp $
 .\"
 .Dd February 25, 2000
 .Dt MG 1
@@ -8,7 +8,8 @@
 .Nd emacs-like text editor
 .Sh SYNOPSIS
 .Nm mg
-.Op Ar
+.Op Ar options files
+.Op Ar ...
 .Sh DESCRIPTION
 .Nm
 is intended to be a small, fast, and portable editor for
@@ -19,6 +20,14 @@ editor.
 It is compatible with emacs because there shouldn't
 be any reason to learn more editor types than emacs or
 .Xr vi 1 .
+.Pp
+At present time only one option is supported:
+.Pp
+.Bl -tag -width xxxxx -compact
+.It Ar +number
+Go to the line specified by number (do not insert
+a space between the "+" sign and the number).
+.El
 .Pp
 Normal editing commands are very similar to Gnu Emacs.
 In the following examples, ^X means control-X, and M-X means Meta-X,
@@ -110,7 +119,7 @@ and
 .Pa .mg-TERM .
 Here,
 .Ev TERM
-represents the name of you terminal type; e.g., if your terminal type
+represents the name of your terminal type; e.g., if your terminal type
 is set to
 .Dq vt100 ,
 .Nm
@@ -137,7 +146,7 @@ blink-matching-paren
 set-default-mode blink
 .Ed
 .Pp
-More complicated key mappings are also possible, though there are are some
+More complicated key mappings are also possible, though there are some
 internal limitations compared to regular emacs.  An example of how to map
 control characters and sequences follows, illustrating the Gosling-like
 line scrolling characters.

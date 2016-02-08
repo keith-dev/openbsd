@@ -1,4 +1,4 @@
-/* $OpenBSD: user.c,v 1.36 2002/07/25 15:41:39 millert Exp $ */
+/* $OpenBSD: user.c,v 1.40 2002/12/10 20:49:28 millert Exp $ */
 /* $NetBSD: user.c,v 1.45 2001/08/17 08:29:00 joda Exp $ */
 
 /*
@@ -381,7 +381,8 @@ modify_gid(char *group, char *newent)
 	int		cc;
 
 	if ((from = fopen(_PATH_GROUP, "r")) == NULL) {
-		warn("can't create gid for %s: can't open %s", group, _PATH_GROUP);
+		warn("can't create gid for %s: can't open %s", group,
+		    _PATH_GROUP);
 		return 0;
 	}
 	if (flock(fileno(from), LOCK_EX | LOCK_NB) < 0) {
@@ -504,7 +505,7 @@ append_group(char *user, int ngroups, char **groups)
 			continue;
 		}
 		if ((colon = strchr(buf, ':')) == NULL) {
-			warn("badly formed entry `%s'", buf);
+			warnx("badly formed entry `%s'", buf);
 			continue;
 		}
 		for (i = 0 ; i < ngroups ; i++) {
@@ -551,7 +552,9 @@ valid_login(char *login)
 	char	*cp;
 
 	for (cp = login ; *cp ; cp++) {
-		if (!isalnum(*cp) && *cp != '.' && *cp != '_' && *cp != '-') {
+		/* We allow '$' as the last character for samba */
+		if (!isalnum(*cp) && *cp != '.' && *cp != '_' && *cp != '-' &&
+		    !(*cp == '$' && *(cp + 1) == '\0')) {
 			return 0;
 		}
 	}
@@ -567,7 +570,7 @@ valid_group(char *group)
 	char	*cp;
 
 	for (cp = group ; *cp ; cp++) {
-		if (!isalnum(*cp)) {
+		if (!isalnum(*cp) && *cp != '.' && *cp != '_' && *cp != '-') {
 			return 0;
 		}
 	}
@@ -825,7 +828,7 @@ adduser(char *login, user_t *up)
 		if (write(ptmpfd, buf, (size_t)(cc)) != cc) {
 			(void) close(masterfd);
 			(void) close(ptmpfd);
-			(void) pw_abort();
+			pw_abort();
 			err(EXIT_FAILURE, "short write to /etc/ptmp (not %d chars)", cc);
 		}
 	}
@@ -838,7 +841,7 @@ adduser(char *login, user_t *up)
 		 * Look for a free UID in the command line ranges (if any).
 		 * These start after the ranges specified in the config file.
 		 */
-		for (i = up->u_defrc; got_id == 0 && i < up->u_rc ; i++){ 
+		for (i = up->u_defrc; got_id == 0 && i < up->u_rc ; i++) { 
 			got_id = getnextuid(sync_uid_gid, &up->u_uid,
 			    up->u_rv[i].r_from, up->u_rv[i].r_to);
 	 	}
@@ -855,21 +858,21 @@ adduser(char *login, user_t *up)
 		}
 		if (got_id == 0) {
 			(void) close(ptmpfd);
-			(void) pw_abort();
+			pw_abort();
 			errx(EXIT_FAILURE, "can't get next uid for %u", up->u_uid);
 		}
 	}
 	/* check uid isn't already allocated */
 	if (!(up->u_flags & F_DUPUID) && getpwuid((uid_t)(up->u_uid)) != NULL) {
 		(void) close(ptmpfd);
-		(void) pw_abort();
+		pw_abort();
 		errx(EXIT_FAILURE, "uid %u is already in use", up->u_uid);
 	}
 	/* if -g=uid was specified, check gid is unused */
 	if (sync_uid_gid) {
 		if (getgrgid((gid_t)(up->u_uid)) != NULL) {
 			(void) close(ptmpfd);
-			(void) pw_abort();
+			pw_abort();
 			errx(EXIT_FAILURE, "gid %u is already in use", up->u_uid);
 		}
 		gid = up->u_uid;
@@ -880,13 +883,13 @@ adduser(char *login, user_t *up)
 		gid = grp->gr_gid;
 	} else {
 		(void) close(ptmpfd);
-		(void) pw_abort();
+		pw_abort();
 		errx(EXIT_FAILURE, "group %s not found", up->u_primgrp);
 	}
 	/* check name isn't already in use */
 	if (!(up->u_flags & F_DUPUID) && getpwnam(login) != NULL) {
 		(void) close(ptmpfd);
-		(void) pw_abort();
+		pw_abort();
 		errx(EXIT_FAILURE, "already a `%s' user", login);
 	}
 	if (up->u_flags & F_HOMEDIR) {
@@ -937,24 +940,24 @@ adduser(char *login, user_t *up)
 	    (strchr(up->u_comment, '&') != NULL &&
 	    cc + strlen(login) >= sizeof(buf))) {
 		(void) close(ptmpfd);
-		(void) pw_abort();
+		pw_abort();
 		errx(EXIT_FAILURE, "can't add `%s', line too long", buf);
 	}
 	if (write(ptmpfd, buf, (size_t) cc) != cc) {
 		(void) close(ptmpfd);
-		(void) pw_abort();
+		pw_abort();
 		err(EXIT_FAILURE, "can't add `%s'", buf);
 	}
 	if (up->u_flags & F_MKDIR) {
 		if (lstat(home, &st) == 0) {
 			(void) close(ptmpfd);
-			(void) pw_abort();
+			pw_abort();
 			errx(EXIT_FAILURE, "home directory `%s' already exists",
 			    home);
 		} else {
 			if (asystem("%s -p %s", MKDIR, home) != 0) {
 				(void) close(ptmpfd);
-				(void) pw_abort();
+				pw_abort();
 				err(EXIT_FAILURE, "can't mkdir `%s'", home);
 			}
 			(void) copydotfiles(up->u_skeldir, up->u_uid, gid, home);
@@ -963,17 +966,18 @@ adduser(char *login, user_t *up)
 	if (strcmp(up->u_primgrp, "=uid") == 0 && getgrnam(login) == NULL &&
 	    !creategid(login, gid, login)) {
 		(void) close(ptmpfd);
-		(void) pw_abort();
+		pw_abort();
 		errx(EXIT_FAILURE, "can't create gid %d for login name %s",
 		    gid, login);
 	}
 	if (up->u_groupc > 0 && !append_group(login, up->u_groupc, up->u_groupv)) {
 		(void) close(ptmpfd);
-		(void) pw_abort();
+		pw_abort();
 		errx(EXIT_FAILURE, "can't append `%s' to new groups", login);
 	}
 	(void) close(ptmpfd);
 	if (pw_mkdb(login, 0) < 0) {
+		pw_abort();
 		err(EXIT_FAILURE, "pw_mkdb failed");
 	}
 	return 1;
@@ -1020,7 +1024,7 @@ moduser(char *login, char *newlogin, user_t *up)
 	if ((master = fdopen(masterfd, "r")) == NULL) {
 		(void) close(masterfd);
 		(void) close(ptmpfd);
-		(void) pw_abort();
+		pw_abort();
 		err(EXIT_FAILURE, "can't fdopen fd for %s", _PATH_MASTERPASSWD);
 	}
 	if (up != NULL) {
@@ -1028,7 +1032,7 @@ moduser(char *login, char *newlogin, user_t *up)
 			/* if changing name, check new name isn't already in use */
 			if (strcmp(login, newlogin) != 0 && getpwnam(newlogin) != NULL) {
 				(void) close(ptmpfd);
-				(void) pw_abort();
+				pw_abort();
 				errx(EXIT_FAILURE, "already a `%s' user", newlogin);
 			}
 			pwp->pw_name = newlogin;
@@ -1051,7 +1055,7 @@ moduser(char *login, char *newlogin, user_t *up)
 			/* check uid isn't already allocated */
 			if (!(up->u_flags & F_DUPUID) && getpwuid((uid_t)(up->u_uid)) != NULL) {
 				(void) close(ptmpfd);
-				(void) pw_abort();
+				pw_abort();
 				errx(EXIT_FAILURE, "uid %u is already in use", up->u_uid);
 			}
 			pwp->pw_uid = up->u_uid;
@@ -1061,7 +1065,7 @@ moduser(char *login, char *newlogin, user_t *up)
 			if (strcmp(up->u_primgrp, "=uid") == 0) {
 				if (getgrgid((gid_t)(up->u_uid)) != NULL) {
 					(void) close(ptmpfd);
-					(void) pw_abort();
+					pw_abort();
 					errx(EXIT_FAILURE, "gid %u is already in use", up->u_uid);
 				}
 				pwp->pw_gid = up->u_uid;
@@ -1072,7 +1076,7 @@ moduser(char *login, char *newlogin, user_t *up)
 				pwp->pw_gid = grp->gr_gid;
 			} else {
 				(void) close(ptmpfd);
-				(void) pw_abort();
+				pw_abort();
 				errx(EXIT_FAILURE, "group %s not found", up->u_primgrp);
 			}
 		}
@@ -1124,21 +1128,21 @@ moduser(char *login, char *newlogin, user_t *up)
 				    (strchr(up->u_comment, '&') != NULL &&
 				    len + strlen(newlogin) >= sizeof(buf))) {
 					(void) close(ptmpfd);
-					(void) pw_abort();
+					pw_abort();
 					errx(EXIT_FAILURE, "can't add `%s',
 					    line too long (%d bytes)", buf,
 					    len + strlen(newlogin));
 				}
 				if (write(ptmpfd, buf, len) != len) {
 					(void) close(ptmpfd);
-					(void) pw_abort();
+					pw_abort();
 					err(EXIT_FAILURE, "can't add `%s'", buf);
 				}
 			}
 		} else if ((cc = write(ptmpfd, line, len)) != len) {
 			(void) close(masterfd);
 			(void) close(ptmpfd);
-			(void) pw_abort();
+			pw_abort();
 			err(EXIT_FAILURE, "short write to /etc/ptmp (%lld not %lld chars)",
 			    (long long)cc, (long long)len);
 		}
@@ -1147,15 +1151,15 @@ moduser(char *login, char *newlogin, user_t *up)
 		if ((up->u_flags & F_MKDIR) &&
 		    asystem("%s %s %s", MV, homedir, pwp->pw_dir) != 0) {
 			(void) close(ptmpfd);
-			(void) pw_abort();
+			pw_abort();
 			err(EXIT_FAILURE, "can't move `%s' to `%s'",
 			    homedir, pwp->pw_dir);
 		}
 		if (up->u_groupc > 0 &&
 		    !append_group(newlogin, up->u_groupc, up->u_groupv)) {
 			(void) close(ptmpfd);
-			 (void) pw_abort();
-			 errx(EXIT_FAILURE, "can't append `%s' to new groups",
+			pw_abort();
+			errx(EXIT_FAILURE, "can't append `%s' to new groups",
 			    newlogin);
 		}
 	}
@@ -1164,8 +1168,10 @@ moduser(char *login, char *newlogin, user_t *up)
 		rval = pw_mkdb(login, 0);
 	else
 		rval = pw_mkdb(NULL, 0);
-	if (rval == -1)
+	if (rval == -1) {
+		pw_abort();
 		err(EXIT_FAILURE, "pw_mkdb failed");
+	}
 
 	return 1;
 }
@@ -1620,7 +1626,7 @@ groupadd(int argc, char **argv)
 	}
 	checkeuid();
 	if (gid < 0 && !getnextgid(&gid, LowGid, HighGid)) {
-		err(EXIT_FAILURE, "can't add group: can't get next gid");
+		errx(EXIT_FAILURE, "can't add group: can't get next gid");
 	}
 	if (!dupgid && getgrgid((gid_t) gid) != NULL) {
 		errx(EXIT_FAILURE, "can't add group: gid %d is a duplicate", gid);
@@ -1662,6 +1668,10 @@ groupdel(int argc, char **argv)
 		usermgmt_usage("groupdel");
 	}
 	checkeuid();
+	if (getgrnam(*argv) == NULL) {
+		warnx("No such group: `%s'", *argv);
+		return EXIT_FAILURE;
+	}
 	if (!modify_gid(*argv, NULL)) {
 		err(EXIT_FAILURE, "can't change %s file", _PATH_GROUP);
 	}
@@ -1718,26 +1728,26 @@ groupmod(int argc, char **argv)
 	}
 	checkeuid();
 	if (gid < 0 && newname == NULL) {
-		err(EXIT_FAILURE, "Nothing to change");
+		errx(EXIT_FAILURE, "Nothing to change");
 	}
 	if (dupgid && gid < 0) {
-		err(EXIT_FAILURE, "Duplicate which gid?");
+		errx(EXIT_FAILURE, "Duplicate which gid?");
 	}
 	if ((grp = getgrnam(*argv)) == NULL) {
-		err(EXIT_FAILURE, "can't find group `%s' to modify", *argv);
+		errx(EXIT_FAILURE, "can't find group `%s' to modify", *argv);
 	}
 	if (newname != NULL && !valid_group(newname)) {
-		warn("warning - invalid group name `%s'", newname);
+		warnx("warning - invalid group name `%s'", newname);
 	}
 	if ((cc = snprintf(buf, sizeof(buf), "%s:%s:%u:",
 	    (newname) ? newname : grp->gr_name, grp->gr_passwd,
 	    (gid < 0) ? grp->gr_gid : gid)) >= sizeof(buf) || cc < 0)
-		err(EXIT_FAILURE, "group `%s' entry too long", grp->gr_name);
+		errx(EXIT_FAILURE, "group `%s' entry too long", grp->gr_name);
 
 	for (cpp = grp->gr_mem ; *cpp ; cpp++) {
 		cc = strlcat(buf, *cpp, sizeof(buf)) + 1;
 		if (cc >= sizeof(buf))
-			err(EXIT_FAILURE, "group `%s' entry too long",
+			errx(EXIT_FAILURE, "group `%s' entry too long",
 			    grp->gr_name);
 		if (cpp[1] != NULL) {
 			buf[cc - 1] = ',';
@@ -1746,7 +1756,7 @@ groupmod(int argc, char **argv)
 	}
 	cc = strlcat(buf, "\n", sizeof(buf));
 	if (cc >= sizeof(buf))
-		err(EXIT_FAILURE, "group `%s' entry too long", grp->gr_name);
+		errx(EXIT_FAILURE, "group `%s' entry too long", grp->gr_name);
 
 	if (!modify_gid(*argv, buf))
 		err(EXIT_FAILURE, "can't change %s file", _PATH_GROUP);

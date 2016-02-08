@@ -1,4 +1,4 @@
-/*	$OpenBSD: rtld.c,v 1.29 2002/09/07 01:25:34 marc Exp $	*/
+/*	$OpenBSD: rtld.c,v 1.36 2003/01/19 23:35:02 espie Exp $	*/
 /*	$NetBSD: rtld.c,v 1.43 1996/01/14 00:35:17 pk Exp $	*/
 /*
  * Copyright (c) 1993 Paul Kranenburg
@@ -59,6 +59,18 @@
 
 #include "ld.h"
 
+/*
+ * Stack protector dummies.
+ * Ideally, a scheme to compile these stubs from libc should be used, but
+ * this would end up dragging too much code from libc here.
+ */
+long __guard[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+void
+__stack_smash_handler(char func[], int damaged)
+{
+	_exit(127);
+}
+
 #ifndef MAP_ANON
 #define MAP_ANON	0
 #define anon_open() do {					\
@@ -85,11 +97,19 @@ struct somap_private {
 #define RTLD_MAIN	1
 #define RTLD_RTLD	2
 #define RTLD_DL		4
+#define RTLD_INITED	8
 	size_t		spd_size;
 
 #ifdef SUN_COMPAT
 	long		spd_offset;	/* Correction for Sun main programs */
 #endif
+	struct dep_node	*first_child;
+	struct dep_node	*last_child;
+};
+
+struct dep_node {
+	struct dep_node *next_sibling;
+	struct so_map *data;
 };
 
 #define LM_PRIVATE(smp)	((struct somap_private *)(smp)->som_spd)
@@ -346,6 +366,23 @@ rtld(int version, struct crt_ldso *crtp, struct _dynamic *dp)
 	return 0;
 }
 
+static void
+link_sub(struct so_map *dep, struct so_map *p)
+{
+	struct dep_node *n;
+	struct somap_private *pp;
+
+	n = xmalloc(sizeof *n);
+	n->data = dep;
+	n->next_sibling = NULL;
+	pp = LM_PRIVATE(p);
+	if (pp->first_child) {
+		pp->last_child->next_sibling = n;
+		pp->last_child = n;
+	} else {
+		pp->first_child = pp->last_child = n;
+	}
+}
 
 static int
 load_subs(struct so_map	*smp)
@@ -368,16 +405,35 @@ load_subs(struct so_map	*smp)
 
 			if ((newmap = map_object(sodp, smp)) == NULL) {
 				if (!ld_tracing) {
-					char *fmt = sodp->sod_library ?
-						"%s: lib%s.so.%d.%d" :
-						"%s: %s";
-					err(1, fmt, main_progname,
+				    if (smp != main_map)
+					if (sodp->sod_library)
+					    err(1, "%s(%s): lib%s.so.%d.%d",
+						main_progname,
+						smp->som_path,
 						sodp->sod_name+LM_LDBASE(smp),
 						sodp->sod_major,
 						sodp->sod_minor);
+					else
+					    err(1, "%s(%s): %s",
+						main_progname,
+						smp->som_path,
+						sodp->sod_name+LM_LDBASE(smp));
+				    else
+					if (sodp->sod_library)
+					    err(1, "%s: lib%s.so.%d.%d",
+						main_progname,
+						sodp->sod_name+LM_LDBASE(smp),
+						sodp->sod_major,
+						sodp->sod_minor);
+					else
+					    err(1, "%s: %s",
+						main_progname,
+						sodp->sod_name+LM_LDBASE(smp));
 				}
 				newmap = alloc_link_map(NULL, sodp, smp,
 				    0, 0, 0);
+			} else {
+				link_sub(newmap, smp);
 			}
 			LM_PRIVATE(newmap)->spd_refcount++;
 			next = sodp->sod_next;
@@ -499,6 +555,8 @@ alloc_link_map(char *path, struct sod *sodp, struct so_map *parent,
 	smpp->spd_flags = 0;
 	smpp->spd_parent = parent;
 	smpp->spd_size = size;
+	smpp->first_child = NULL;
+	smpp->last_child = NULL;
 
 #ifdef SUN_COMPAT
 	smpp->spd_offset =
@@ -539,7 +597,7 @@ map_object(struct sod *sodp, struct so_map *smp)
 	char		*name;
 	struct _dynamic	*dp;
 	char		*path, *ipath;
-	int		fd;
+	int		fd, sverrno;
 	caddr_t		addr;
 	struct exec	hdr;
 	int		usehints = 0;
@@ -564,6 +622,16 @@ again:
 				 sodp->sod_minor, &usehints, ipath);
 		if (ipath)
 			remove_search_path(ipath);
+
+		if (path == NULL && smp != main_map && main_map != NULL &&
+		    !no_intern_search && 
+		    LD_PATHS(main_map->som_dynamic) != 0) {
+		    	ipath = LM_PATHS(main_map);
+			add_search_path(ipath);
+			path = rtfindlib(name, sodp->sod_major,
+			     sodp->sod_minor, &usehints, ipath);
+			remove_search_path(ipath);
+		}
 
 		if (path == NULL) {
 			errno = ENOENT;
@@ -594,8 +662,9 @@ again:
 	}
 
 	if (read(fd, &hdr, sizeof(hdr)) != sizeof(hdr)) {
+		sverrno = errno;
 		(void)close(fd);
-		/*errno = x;*/
+		errno = sverrno;
 		return NULL;
 	}
 
@@ -607,8 +676,10 @@ again:
 
 	if ((addr = mmap(0, hdr.a_text + hdr.a_data + hdr.a_bss,
 	    PROT_READ|PROT_EXEC,
-	    MAP_COPY, fd, 0)) == (caddr_t)-1) {
+	    MAP_COPY, fd, 0)) == (caddr_t)MAP_FAILED) {
+		sverrno = errno;
 		(void)close(fd);
+		errno = sverrno;
 		return NULL;
 	}
 
@@ -618,15 +689,19 @@ again:
 
 	if (mprotect(addr + hdr.a_text, hdr.a_data,
 	    PROT_READ|PROT_WRITE|PROT_EXEC) != 0) {
+		sverrno = errno;
 		(void)close(fd);
+		errno = sverrno;
 		return NULL;
 	}
 
 	if (mmap(addr + hdr.a_text + hdr.a_data, hdr.a_bss,
 	    PROT_READ|PROT_WRITE,
 	    MAP_ANON|MAP_COPY|MAP_FIXED,
-	    anon_fd, 0) == (caddr_t)-1) {
+	    anon_fd, 0) == (caddr_t)MAP_FAILED) {
+		sverrno = errno;
 		(void)close(fd);
+		errno = sverrno;
 		return NULL;
 	}
 
@@ -671,6 +746,23 @@ unmap_object(struct so_map *smp)
 	(void)munmap(smp->som_addr, LM_PRIVATE(smp)->spd_size);
 }
 
+void init_dependent_before_main(struct so_map *smp)
+{
+	struct dep_node *n;
+
+	LM_PRIVATE(smp)->spd_flags |= RTLD_INITED;
+
+	for (n = LM_PRIVATE(smp)->first_child; n; n = n->next_sibling) {
+		if (LM_PRIVATE(n->data)->spd_flags & RTLD_INITED)
+			continue;
+		init_dependent_before_main(n->data);
+	}
+
+	call_map(smp, ".init");
+	call_map(smp, "__init");
+	call_map(smp, "__GLOBAL__DI");
+}
+
 void
 init_maps(struct so_map *head)
 {
@@ -694,9 +786,9 @@ init_maps(struct so_map *head)
 	for (smp = head; smp; smp = smp->som_next) {
 		if (LM_PRIVATE(smp)->spd_flags & RTLD_RTLD)
 			continue;
-		call_map(smp, ".init");
-		call_map(smp, "__init");
-		call_map(smp, "__GLOBAL__DI");
+		if (LM_PRIVATE(smp)->spd_flags & RTLD_INITED)
+			continue;
+		init_dependent_before_main(smp);
 	}
 }
 
@@ -1145,7 +1237,7 @@ maphints(void)
 	hsize = PAGSIZ;
 	addr = mmap(0, hsize, PROT_READ, MAP_COPY, hfd, 0);
 
-	if (addr == (caddr_t)-1) {
+	if (addr == (caddr_t)MAP_FAILED) {
 		close(hfd);
 		hheader = (struct hints_header *)-1;
 		return;
@@ -1510,15 +1602,17 @@ xprintf("dlclose(%s): refcount = %d\n", smp->som_path, LM_PRIVATE(smp)->spd_refc
 static void *
 __dlsym(void *fd, const char *sym)
 {
-	struct so_map	*smp = (struct so_map *)fd, *src_map = NULL;
+	struct so_map	*smp, *src_map = NULL;
 	struct nzlist	*np;
 	long		addr;
 
 	/*
 	 * Restrict search to passed map if dlopen()ed.
 	 */
-	if (LM_PRIVATE(smp)->spd_flags & RTLD_DL)
-		src_map = smp;
+	if (fd == NULL)
+		smp = link_map_head;
+	else
+		src_map = smp = (struct so_map *)fd;
 
 	np = lookup(sym, &src_map, 1);
 	if (np == NULL) {

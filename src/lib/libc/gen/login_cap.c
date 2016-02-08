@@ -1,4 +1,4 @@
-/*	$OpenBSD: login_cap.c,v 1.12 2002/06/27 10:21:35 deraadt Exp $	*/
+/*	$OpenBSD: login_cap.c,v 1.15 2002/12/15 13:27:06 henning Exp $	*/
 
 /*-
  * Copyright (c) 1995,1997 Berkeley Software Design, Inc. All rights reserved.
@@ -298,7 +298,7 @@ login_getcaptime(lc, cap, def, e)
 	q = 0;
 	sres = res;
 	while (*res) {
-		r = strtoq(res, &ep, 0);
+		r = strtoll(res, &ep, 0);
 		if (!ep || ep == res ||
 		    ((r == QUAD_MIN || r == QUAD_MAX) && errno == ERANGE)) {
 invalid:
@@ -387,7 +387,7 @@ login_getcapnum(lc, cap, def, e)
 		return (RLIM_INFINITY);
 	}
 
-    	q = strtoq(res, &ep, 0);
+    	q = strtoll(res, &ep, 0);
 	if (!ep || ep == res || ep[0] ||
 	    ((q == QUAD_MIN || q == QUAD_MAX) && errno == ERANGE)) {
 		free(res);
@@ -523,8 +523,8 @@ gsetrl(lc, what, name, type)
 	if (lc->lc_cap == NULL)
 		return (0);
 
-	sprintf(name_cur, "%s-cur", name);
-	sprintf(name_max, "%s-max", name);
+	snprintf(name_cur, sizeof name_cur, "%s-cur", name);
+	snprintf(name_max, sizeof name_max, "%s-max", name);
 
 	if (getrlimit(what, &r)) {
 		syslog(LOG_ERR, "getting resource limit: %m");
@@ -762,7 +762,7 @@ strtosize(str, endptr, radix)
 	char *expr, *expr2;
 
 	errno = 0;
-	num = strtouq(str, &expr, radix);
+	num = strtoull(str, &expr, radix);
 	if (errno || expr == str) {
 		if (endptr)
 			*endptr = expr;
@@ -947,7 +947,7 @@ secure_path(char *path)
 		syslog(LOG_ERR, "%s: not owned by root", path);
 		return (-1);
 	} else if (sb.st_mode & (S_IWGRP | S_IWOTH)) {
-		syslog(LOG_ERR, "%s: writeable by non-root", path);
+		syslog(LOG_ERR, "%s: writable by non-root", path);
 		return (-1);
 	}
 	return (0);

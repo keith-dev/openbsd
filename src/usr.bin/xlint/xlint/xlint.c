@@ -1,4 +1,4 @@
-/*	$OpenBSD: xlint.c,v 1.10 2002/06/12 06:07:17 mpech Exp $	*/
+/*	$OpenBSD: xlint.c,v 1.12 2003/01/06 11:33:28 miod Exp $	*/
 /*	$NetBSD: xlint.c,v 1.3 1995/10/23 14:29:30 jpo Exp $	*/
 
 /*
@@ -33,7 +33,7 @@
  */
 
 #ifndef lint
-static char rcsid[] = "$OpenBSD: xlint.c,v 1.10 2002/06/12 06:07:17 mpech Exp $";
+static char rcsid[] = "$OpenBSD: xlint.c,v 1.12 2003/01/06 11:33:28 miod Exp $";
 #endif
 
 #include <sys/param.h>
@@ -130,7 +130,7 @@ static	void	cat(char *const *, const char *);
 
 /*
  * Some functions to deal with lists of strings.
- * Take care that we get no surprises in case of asyncron signals.
+ * Take care that we get no surprises in case of asynchronous signals.
  */
 static void
 appstrg(lstp, s)
@@ -357,11 +357,6 @@ main(argc, argv)
 	(void)signal(SIGTERM, terminate);
 
 	while (argc > optind) {
-
-		argc -= optind;
-		argv += optind;
-		optind = 0;
-
 		c = getopt(argc, argv, "abceghil:no:prstuvxzC:D:FHI:L:U:V");
 
 		switch (c) {
@@ -482,12 +477,13 @@ main(argc, argv)
 
 		case -1:
 			/* filename */
-			fname(argv[0], argc == 1);
+			fname(argv[optind++], argc == 1);
 			first = 0;
-			optind = 1;
 		}
 
 	}
+	argc -= optind;
+	argv += optind;
 
 	if (first)
 		usage();

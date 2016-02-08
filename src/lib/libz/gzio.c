@@ -1,4 +1,4 @@
-/*	$OpenBSD: gzio.c,v 1.8 2002/07/06 00:11:40 millert Exp $	*/
+/*	$OpenBSD: gzio.c,v 1.10 2003/02/27 17:29:35 millert Exp $	*/
 /* gzio.c -- IO on .gz files
  * Copyright (C) 1995-2002 Jean-loup Gailly.
  * For conditions of distribution and use, see copyright notice in zlib.h
@@ -231,7 +231,7 @@ int ZEXPORT gzsetparams (file, level, strategy)
 /* ===========================================================================
      Read a byte from a gz_stream; update next_in and avail_in. Return EOF
    for end of file.
-   IN assertion: the stream s has been sucessfully opened for reading.
+   IN assertion: the stream s has been successfully opened for reading.
 */
 local int get_byte(s)
     gz_stream *s;
@@ -256,7 +256,7 @@ local int get_byte(s)
     mode to transparent if the gzip magic header is not present; set s->err
     to Z_DATA_ERROR if the magic header is present but the rest of the header
     is incorrect.
-    IN assertion: the stream s has already been created sucessfully;
+    IN assertion: the stream s has already been created successfully;
        s->stream.avail_in is zero for the first time, but may be non-zero
        for concatenated .gz files.
 */
@@ -530,13 +530,13 @@ int ZEXPORTVA gzprintf (gzFile file, const char *format, /* args */ ...)
 
     va_start(va, format);
 #ifdef HAS_vsnprintf
-    (void)vsnprintf(buf, sizeof(buf), format, va);
+    len = vsnprintf(buf, sizeof(buf), format, va);
 #else
     (void)vsprintf(buf, format, va);
+    len = strlen(buf); /* some *sprintf don't return the nb of bytes written */
 #endif
     va_end(va);
-    len = strlen(buf); /* some *sprintf don't return the nb of bytes written */
-    if (len <= 0) return 0;
+    if (len <= 0 || len >= sizeof(buf)) return 0;
 
     return gzwrite(file, buf, (unsigned)len);
 }
@@ -553,14 +553,14 @@ int ZEXPORTVA gzprintf (file, format, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10,
     int len;
 
 #ifdef HAS_snprintf
-    snprintf(buf, sizeof(buf), format, a1, a2, a3, a4, a5, a6, a7, a8,
+    len = snprintf(buf, sizeof(buf), format, a1, a2, a3, a4, a5, a6, a7, a8,
 	     a9, a10, a11, a12, a13, a14, a15, a16, a17, a18, a19, a20);
 #else
     sprintf(buf, format, a1, a2, a3, a4, a5, a6, a7, a8,
 	    a9, a10, a11, a12, a13, a14, a15, a16, a17, a18, a19, a20);
-#endif
     len = strlen(buf); /* old sprintf doesn't return the nb of bytes written */
-    if (len <= 0) return 0;
+#endif
+    if (len <= 0 || len >= sizeof(buf)) return 0;
 
     return gzwrite(file, buf, len);
 }

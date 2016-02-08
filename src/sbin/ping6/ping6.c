@@ -1,5 +1,5 @@
-/*	$OpenBSD: ping6.c,v 1.49 2002/09/08 14:31:28 itojun Exp $	*/
-/*	$KAME: ping6.c,v 1.160 2002/09/08 14:28:18 itojun Exp $	*/
+/*	$OpenBSD: ping6.c,v 1.52 2002/12/05 02:08:28 itojun Exp $	*/
+/*	$KAME: ping6.c,v 1.163 2002/10/25 02:19:06 itojun Exp $	*/
 
 /*
  * Copyright (C) 1995, 1996, 1997, and 1998 WIDE Project.
@@ -126,6 +126,9 @@ static char sccsid[] = "@(#)ping.c	8.1 (Berkeley) 6/5/93";
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#ifdef HAVE_POLL_H
+#include <poll.h>
+#endif
 
 #ifdef IPSEC
 #include <netinet6/ah.h>
@@ -283,17 +286,28 @@ main(argc, argv)
 {
 	struct itimerval itimer;
 	struct sockaddr_in6 from;
+#ifdef HAVE_POLL_H
+	int timeout;
+#else
 	struct timeval timeout, *tv;
+#endif
 	struct addrinfo hints;
+#ifdef HAVE_POLL_H
+	struct pollfd fdmaskp[1];
+#else
 	fd_set *fdmaskp;
 	int fdmasks;
+#endif
 	int cc, i;
 	int ch, hold, packlen, preload, optval, ret_ga;
 	u_char *datap, *packet;
 	char *e, *target, *ifname = NULL, *gateway = NULL;
 	int ip6optlen = 0;
 	struct cmsghdr *scmsgp = NULL;
+#if defined(SO_SNDBUF) && defined(SO_RCVBUF)
+	u_long lsockbufsize;
 	int sockbufsize = 0;
+#endif
 	int usepktinfo = 0;
 	struct in6_pktinfo *pktinfo = NULL;
 #ifdef USE_RFC2292BIS
@@ -310,8 +324,8 @@ main(argc, argv)
 #endif
 
 	/* just to be sure */
-	memset(&smsghdr, 0, sizeof(&smsghdr));
-	memset(&smsgiov, 0, sizeof(&smsgiov));
+	memset(&smsghdr, 0, sizeof(smsghdr));
+	memset(&smsgiov, 0, sizeof(smsgiov));
 
 	preload = 0;
 	datap = &outpack[ICMP6ECHOLEN + ICMP6ECHOTMLEN];
@@ -373,7 +387,13 @@ main(argc, argv)
 		}
 		case 'b':
 #if defined(SO_SNDBUF) && defined(SO_RCVBUF)
-			sockbufsize = atoi(optarg);
+			errno = 0;
+			e = NULL;
+			lsockbufsize = strtoul(optarg, &e, 10);
+			sockbufsize = lsockbufsize;
+			if (errno || !*optarg || *e ||
+			    sockbufsize != lsockbufsize)
+				errx(1, "invalid socket buffer size");
 #else
 			errx(1,
 "-b option ignored: SO_SNDBUF/SO_RCVBUF socket options not supported");
@@ -1036,9 +1056,11 @@ main(argc, argv)
 			retransmit();
 	}
 
+#ifndef HAVE_POLL_H
 	fdmasks = howmany(s + 1, NFDBITS) * sizeof(fd_mask);
 	if ((fdmaskp = malloc(fdmasks)) == NULL)
 		err(1, "malloc");
+#endif
 
 	seenalrm = seenint = 0;
 #ifdef SIGINFO
@@ -1072,17 +1094,36 @@ main(argc, argv)
 
 		if (options & F_FLOOD) {
 			(void)pinger();
+#ifdef HAVE_POLL_H
+			timeout = 10;
+#else
 			timeout.tv_sec = 0;
 			timeout.tv_usec = 10000;
 			tv = &timeout;
-		} else
+#endif
+		} else {
+#ifdef HAVE_POLL_H
+			timeout = INFTIM;
+#else
 			tv = NULL;
+#endif
+		}
+#ifdef HAVE_POLL_H
+		fdmaskp[0].fd = s;
+		fdmaskp[0].events = POLLIN;
+		cc = poll(fdmaskp, 1, timeout);
+#else
 		memset(fdmaskp, 0, fdmasks);
 		FD_SET(s, fdmaskp);
 		cc = select(s + 1, fdmaskp, NULL, NULL, tv);
+#endif
 		if (cc < 0) {
 			if (errno != EINTR) {
+#ifdef HAVE_POLL_H
+				warn("poll");
+#else
 				warn("select");
+#endif
 				sleep(1);
 			}
 			continue;

@@ -1,4 +1,4 @@
-/* *	$OpenBSD: SYS.h,v 1.5 2002/02/19 22:12:36 millert Exp $*/
+/*	$OpenBSD: SYS.h,v 1.9 2003/01/16 20:48:41 miod Exp $*/
 /*-
  * Copyright (c) 1990 The Regents of the University of California.
  * All rights reserved.
@@ -42,44 +42,51 @@
 #include <machine/asm.h>
 
 #ifdef __STDC__
+#define	__ENTRY(p,x)	ENTRY(p##x)
+#define	__SYSCALLNAME(p,x)	p##x
+#define	__ALIAS(prefix,name)	WEAK_ALIAS(name,prefix##name)
+#else
+#define	__ENTRY(p,x)	ENTRY(p/**/x)
+#define	__SYSCALLNAME(p,x)	p/**/x
+#define	__ALIAS(prefix,name)	WEAK_ALIAS(name,prefix/**/name)
+#endif
 
-#define	_SYSCALL(x,y)	align 8; \
-			ENTRY(x); \
-			ld r10,r31,32; \
-			ld r11,r31,36; \
-			ld r12,r31,40; \
-			or r13,r0, SYS_ ## y; \
-			tb0 0, r0, 128; \
-			br cerror
-#define	SYSCALL(x)	_SYSCALL(x,x)
-#define	RSYSCALL(x)	SYSCALL(x) ;\
-			jmp r1
-#define	PSEUDO(x,y)	_SYSCALL(x,y); \
-			jmp r1
-#define	PSEUDO_NOERROR(x,y)	ENTRY(x); ;\
-			or r13,r0, SYS_ ## y; \
-			tb0 0,r0,128; or r0,r0,r0;jmp r1
+#define	__DO_SYSCALL(x)							\
+	ld r10,r31,32;							\
+	ld r11,r31,36;							\
+	ld r12,r31,40;							\
+	or r13,r0,__SYSCALLNAME(SYS_,x);				\
+	tb0 0, r0, 128
 
-#else /* !__STDC__ */
+#define	__SYSCALL__NOERROR(p,x,y)					\
+	__ENTRY(p,x);							\
+	__ALIAS(p,x);							\
+	__DO_SYSCALL(y)
 
-#define	_SYSCALL(x,y)	align 8; \
-			ENTRY(x); \
-			ld r10,r31,32; \
-			ld r11,r31,36; \
-			ld r12,r31,40; \
-			or r13,r0, SYS_/**/y; \
-			tb0 0, r0, 128; \
-			br cerror
-#define	SYSCALL(x)	_SYSCALL(x,x)
-#define	RSYSCALL(x)	SYSCALL(x); \
-			jmp r1
-#define	PSEUDO(x,y)	_SYSCALL(x,y); \
-			jmp r1
-#define	PSEUDO_NOERROR(x,y)	ENTRY(x); \
-			or r13,r0, SYS_/**/y; \
-			tb0 0,r0,128; or r0,r0,r0; jmp r1
-#endif /* !__STDC__ */
+#define	__SYSCALL(p,x,y)						\
+	__SYSCALL__NOERROR(p,x,y);					\
+	br __cerror
+
+#define	__PSEUDO_NOERROR(p,x,y)						\
+	__SYSCALL__NOERROR(p,x,y);					\
+	jmp r1
+
+#define	__PSEUDO(p,x,y)							\
+	__SYSCALL(p,x,y);						\
+	jmp r1
+
+/*
+ * System calls entry points are really named _thread_sys_{syscall},
+ * and weakly aliased to the name {syscall}. This allows the thread
+ * library to replace system calls at link time.
+ */
+#define	SYSCALL(x)		__SYSCALL(_thread_sys_,x,x)
+#define	RSYSCALL(x)		__PSEUDO(_thread_sys_,x,x)
+#define	PSEUDO(x,y)		__PSEUDO(_thread_sys_,x,y)
+#define	PSEUDO_NOERROR(x,y)	__PSEUDO_NOERROR(_thread_sys_,x,y)
+#define	SYSENTRY(x)		__ENTRY(_thread_sys_,x);		\
+				__ALIAS(_thread_sys_,x)
 
 #define	ASMSTR		.asciz
 
-	.globl	cerror
+	.globl	__cerror

@@ -1,4 +1,4 @@
-/*	$OpenBSD: cache.c,v 1.10 2002/02/19 19:39:35 millert Exp $	*/
+/*	$OpenBSD: cache.c,v 1.13 2003/03/10 03:50:13 david Exp $	*/
 /*	$NetBSD: cache.c,v 1.4 1995/03/21 09:07:10 cgd Exp $	*/
 
 /*-
@@ -40,9 +40,9 @@
 
 #ifndef lint
 #if 0
-static char sccsid[] = "@(#)cache.c	8.1 (Berkeley) 5/31/93";
+static const char sccsid[] = "@(#)cache.c	8.1 (Berkeley) 5/31/93";
 #else
-static char rcsid[] = "$OpenBSD: cache.c,v 1.10 2002/02/19 19:39:35 millert Exp $";
+static const char rcsid[] = "$OpenBSD: cache.c,v 1.13 2003/03/10 03:50:13 david Exp $";
 #endif
 #endif /* not lint */
 
@@ -76,7 +76,7 @@ static GIDC **grptb = NULL;	/* group name to gid cache */
 
 /*
  * uidtb_start
- *	creates an an empty uidtb
+ *	creates an empty uidtb
  * Return:
  *	0 if ok, -1 otherwise
  */
@@ -100,7 +100,7 @@ uidtb_start(void)
 
 /*
  * gidtb_start
- *	creates an an empty gidtb
+ *	creates an empty gidtb
  * Return:
  *	0 if ok, -1 otherwise
  */
@@ -124,7 +124,7 @@ gidtb_start(void)
 
 /*
  * usrtb_start
- *	creates an an empty usrtb
+ *	creates an empty usrtb
  * Return:
  *	0 if ok, -1 otherwise
  */
@@ -148,7 +148,7 @@ usrtb_start(void)
 
 /*
  * grptb_start
- *	creates an an empty grptb
+ *	creates an empty grptb
  * Return:
  *	0 if ok, -1 otherwise
  */
@@ -181,8 +181,8 @@ grptb_start(void)
 char *
 name_uid(uid_t uid, int frc)
 {
-	register struct passwd *pw;
-	register UIDC *ptr;
+	struct passwd *pw;
+	UIDC *ptr;
 
 	if ((uidtb == NULL) && (uidtb_start() < 0))
 		return("");
@@ -247,8 +247,8 @@ name_uid(uid_t uid, int frc)
 char *
 name_gid(gid_t gid, int frc)
 {
-	register struct group *gr;
-	register GIDC *ptr;
+	struct group *gr;
+	GIDC *ptr;
 
 	if ((gidtb == NULL) && (gidtb_start() < 0))
 		return("");
@@ -312,9 +312,9 @@ name_gid(gid_t gid, int frc)
 int
 uid_name(char *name, uid_t *uid)
 {
-	register struct passwd *pw;
-	register UIDC *ptr;
-	register int namelen;
+	struct passwd *pw;
+	UIDC *ptr;
+	int namelen;
 
 	/*
 	 * return -1 for mangled names
@@ -375,9 +375,9 @@ uid_name(char *name, uid_t *uid)
 int
 gid_name(char *name, gid_t *gid)
 {
-	register struct group *gr;
-	register GIDC *ptr;
-	register int namelen;
+	struct group *gr;
+	GIDC *ptr;
+	int namelen;
 
 	/*
 	 * return -1 for mangled names

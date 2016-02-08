@@ -1,4 +1,4 @@
-/*	$OpenBSD: tar.c,v 1.25 2002/02/19 19:39:35 millert Exp $	*/
+/*	$OpenBSD: tar.c,v 1.29 2002/10/18 15:38:11 millert Exp $	*/
 /*	$NetBSD: tar.c,v 1.5 1995/03/21 09:07:49 cgd Exp $	*/
 
 /*-
@@ -40,9 +40,9 @@
 
 #ifndef lint
 #if 0
-static char sccsid[] = "@(#)tar.c	8.2 (Berkeley) 4/18/94";
+static const char sccsid[] = "@(#)tar.c	8.2 (Berkeley) 4/18/94";
 #else
-static char rcsid[] = "$OpenBSD: tar.c,v 1.25 2002/02/19 19:39:35 millert Exp $";
+static const char rcsid[] = "$OpenBSD: tar.c,v 1.29 2002/10/18 15:38:11 millert Exp $";
 #endif
 #endif /* not lint */
 
@@ -62,11 +62,11 @@ static char rcsid[] = "$OpenBSD: tar.c,v 1.25 2002/02/19 19:39:35 millert Exp $"
  * Routines for reading, writing and header identify of various versions of tar
  */
 
-static u_long tar_chksm(register char *, register int);
-static char *name_split(register char *, register int);
-static int ul_oct(u_long, register char *, register int, int);
+static u_long tar_chksm(char *, int);
+static char *name_split(char *, int);
+static int ul_oct(u_long, char *, int, int);
 #ifndef LONG_OFF_T
-static int uqd_oct(u_quad_t, register char *, register int, int);
+static int uqd_oct(u_quad_t, char *, int, int);
 #endif
 
 /*
@@ -74,6 +74,7 @@ static int uqd_oct(u_quad_t, register char *, register int, int);
  */
 
 static int tar_nodir;			/* do not write dirs under old tar */
+char *gnu_hack_string;			/* GNU ././@LongLink hackery */
 
 /*
  * tar_endwr()
@@ -113,9 +114,9 @@ tar_endrd(void)
  */
 
 int
-tar_trail(register char *buf, register int in_resync, register int *cnt)
+tar_trail(char *buf, int in_resync, int *cnt)
 {
-	register int i;
+	int i;
 
 	/*
 	 * look for all zero, trailer is two consecutive blocks of zero
@@ -156,9 +157,9 @@ tar_trail(register char *buf, register int in_resync, register int *cnt)
  */
 
 static int
-ul_oct(u_long val, register char *str, register int len, int term)
+ul_oct(u_long val, char *str, int len, int term)
 {
-	register char *pt;
+	char *pt;
 
 	/*
 	 * term selects the appropriate character(s) for the end of the string
@@ -211,9 +212,9 @@ ul_oct(u_long val, register char *str, register int len, int term)
  */
 
 static int
-uqd_oct(u_quad_t val, register char *str, register int len, int term)
+uqd_oct(u_quad_t val, char *str, int len, int term)
 {
-	register char *pt;
+	char *pt;
 
 	/*
 	 * term selects the appropriate character(s) for the end of the string
@@ -257,7 +258,7 @@ uqd_oct(u_quad_t val, register char *str, register int len, int term)
 /*
  * tar_chksm()
  *	calculate the checksum for a tar block counting the checksum field as
- *	all blanks (BLNKSUM is that value pre-calculated, the sume of 8 blanks).
+ *	all blanks (BLNKSUM is that value pre-calculated, the sum of 8 blanks).
  *	NOTE: we use len to short circuit summing 0's on write since we ALWAYS
  *	pad headers with 0.
  * Return:
@@ -265,10 +266,10 @@ uqd_oct(u_quad_t val, register char *str, register int len, int term)
  */
 
 static u_long
-tar_chksm(register char *blk, register int len)
+tar_chksm(char *blk, int len)
 {
-	register char *stop;
-	register char *pt;
+	char *stop;
+	char *pt;
 	u_long chksm = BLNKSUM;	/* initial value is checksum field sum */
 
 	/*
@@ -306,10 +307,10 @@ tar_chksm(register char *blk, register int len)
  */
 
 int
-tar_id(register char *blk, int size)
+tar_id(char *blk, int size)
 {
-	register HD_TAR *hd;
-	register HD_USTAR *uhd;
+	HD_TAR *hd;
+	HD_USTAR *uhd;
 
 	if (size < BLKMULT)
 		return(-1);
@@ -329,6 +330,7 @@ tar_id(register char *blk, int size)
 		return(-1);
 	if (asc_ul(hd->chksum,sizeof(hd->chksum),OCT) != tar_chksm(blk,BLKMULT))
 		return(-1);
+	force_one_volume = 1;
 	return(0);
 }
 
@@ -377,10 +379,10 @@ tar_opt(void)
  */
 
 int
-tar_rd(register ARCHD *arcn, register char *buf)
+tar_rd(ARCHD *arcn, char *buf)
 {
-	register HD_TAR *hd;
-	register char *pt;
+	HD_TAR *hd;
+	char *pt;
 
 	/*
 	 * we only get proper sized buffers passed to us
@@ -395,7 +397,14 @@ tar_rd(register ARCHD *arcn, register char *buf)
 	 * copy out the name and values in the stat buffer
 	 */
 	hd = (HD_TAR *)buf;
-	arcn->nlen = strlcpy(arcn->name, hd->name, sizeof(arcn->name));
+	if (gnu_hack_string) {
+		arcn->nlen = strlcpy(arcn->name, gnu_hack_string,
+		    sizeof(arcn->name));
+		free(gnu_hack_string);
+		gnu_hack_string = NULL;
+	} else {
+		arcn->nlen = strlcpy(arcn->name, hd->name, sizeof(arcn->name));
+	}
 	arcn->sb.st_mode = (mode_t)(asc_ul(hd->mode,sizeof(hd->mode),OCT) &
 	    0xfff);
 	arcn->sb.st_uid = (uid_t)asc_ul(hd->uid, sizeof(hd->uid), OCT);
@@ -442,6 +451,21 @@ tar_rd(register ARCHD *arcn, register char *buf)
 		 */
 		arcn->sb.st_mode |= S_IFREG;
 		break;
+	case LONGLINKTYPE:
+		arcn->type = PAX_GLL;
+		/* FALLTHROUGH */
+	case LONGNAMETYPE:
+		/*
+		 * GNU long link/file; we tag these here and let the
+		 * pax internals deal with it -- too ugly otherwise.
+		 */
+		if (hd->linkflag != LONGLINKTYPE)
+			arcn->type = PAX_GLF;
+		arcn->pad = TAR_PAD(arcn->sb.st_size);
+		arcn->skip = arcn->sb.st_size;
+		arcn->ln_name[0] = '\0';
+		arcn->ln_nlen = 0;
+		break;
 	case DIRTYPE:
 		/*
 		 * It is a directory, set the mode for -v printing
@@ -470,7 +494,7 @@ tar_rd(register ARCHD *arcn, register char *buf)
 		} else {
 			/*
 			 * have a file that will be followed by data. Set the
-			 * skip value to the size field and caluculate the size
+			 * skip value to the size field and calculate the size
 			 * of the padding.
 			 */
 			arcn->type = PAX_REG;
@@ -504,9 +528,9 @@ tar_rd(register ARCHD *arcn, register char *buf)
  */
 
 int
-tar_wr(register ARCHD *arcn)
+tar_wr(ARCHD *arcn)
 {
-	register HD_TAR *hd;
+	HD_TAR *hd;
 	int len;
 	char hdblk[sizeof(HD_TAR)];
 
@@ -694,7 +718,7 @@ ustar_stwr(void)
 int
 ustar_id(char *blk, int size)
 {
-	register HD_USTAR *hd;
+	HD_USTAR *hd;
 
 	if (size < BLKMULT)
 		return(-1);
@@ -724,11 +748,11 @@ ustar_id(char *blk, int size)
  */
 
 int
-ustar_rd(register ARCHD *arcn, register char *buf)
+ustar_rd(ARCHD *arcn, char *buf)
 {
-	register HD_USTAR *hd;
-	register char *dest;
-	register int cnt = 0;
+	HD_USTAR *hd;
+	char *dest;
+	int cnt = 0;
 	dev_t devmajor;
 	dev_t devminor;
 
@@ -754,7 +778,14 @@ ustar_rd(register ARCHD *arcn, register char *buf)
 		*dest++ = '/';
 		cnt++;
 	}
-	arcn->nlen = cnt + strlcpy(dest, hd->name, sizeof(arcn->name) - cnt);
+	if (gnu_hack_string) {
+		arcn->nlen = strlcpy(dest, gnu_hack_string,
+		    sizeof(arcn->name) - cnt);
+		free(gnu_hack_string);
+		gnu_hack_string = NULL;
+	} else {
+		arcn->nlen = strlcpy(dest, hd->name, sizeof(arcn->name) - cnt);
+	}
 
 	/*
 	 * follow the spec to the letter. we should only have mode bits, strip
@@ -848,6 +879,19 @@ ustar_rd(register ARCHD *arcn, register char *buf)
 		arcn->ln_nlen = strlcpy(arcn->ln_name, hd->linkname,
 			sizeof(arcn->ln_name));
 		break;
+	case LONGLINKTYPE:
+	case LONGNAMETYPE:
+		/*
+		 * GNU long link/file; we tag these here and let the
+		 * pax internals deal with it -- too ugly otherwise.
+		 */
+		arcn->type =
+		    hd->typeflag == LONGLINKTYPE ? PAX_GLL : PAX_GLF;
+		arcn->pad = TAR_PAD(arcn->sb.st_size);
+		arcn->skip = arcn->sb.st_size;
+		arcn->ln_name[0] = '\0';
+		arcn->ln_nlen = 0;
+		break;
 	case CONTTYPE:
 	case AREGTYPE:
 	case REGTYPE:
@@ -878,10 +922,10 @@ ustar_rd(register ARCHD *arcn, register char *buf)
  */
 
 int
-ustar_wr(register ARCHD *arcn)
+ustar_wr(ARCHD *arcn)
 {
-	register HD_USTAR *hd;
-	register char *pt;
+	HD_USTAR *hd;
+	char *pt;
 	char hdblk[sizeof(HD_USTAR)];
 
 	/*
@@ -1050,9 +1094,9 @@ ustar_wr(register ARCHD *arcn)
  */
 
 static char *
-name_split(register char *name, register int len)
+name_split(char *name, int len)
 {
-	register char *start;
+	char *start;
 
 	/*
 	 * check to see if the file name is small enough to fit in the name
@@ -1065,7 +1109,7 @@ name_split(register char *name, register int len)
 
 	/*
 	 * we start looking at the biggest sized piece that fits in the name
-	 * field. We walk foward looking for a slash to split at. The idea is
+	 * field. We walk forward looking for a slash to split at. The idea is
 	 * to find the biggest piece to fit in the name field (or the smallest
 	 * prefix we can find)
 	 */

@@ -1,4 +1,4 @@
-/*	$OpenBSD: util.c,v 1.13 2002/07/25 19:01:15 miod Exp $ */
+/*	$OpenBSD: util.c,v 1.19 2003/02/12 01:44:09 miod Exp $ */
 /*	$NetBSD: util.c,v 1.8 2000/03/14 08:11:53 sato Exp $ */
 
 /*-
@@ -62,11 +62,13 @@ static const struct nameint kbtype_tab[] = {
 	{ WSKBD_TYPE_PC_XT,	"pc-xt" },
 	{ WSKBD_TYPE_PC_AT,	"pc-at" },
 	{ WSKBD_TYPE_USB,	"usb" },
+	{ WSKBD_TYPE_NEXT,	"NeXT" },
 	{ WSKBD_TYPE_HPC_KBD,	"hpc-kbd" },
 	{ WSKBD_TYPE_HPC_BTN,	"hpc-btn" },
 	{ WSKBD_TYPE_ADB,	"adb" },
 	{ WSKBD_TYPE_SUN,	"sun" },
 	{ WSKBD_TYPE_SUN5,	"sun5" },
+	{ WSKBD_TYPE_HIL,	"hil" }
 };
 
 static const struct nameint mstype_tab[] = {
@@ -78,7 +80,8 @@ static const struct nameint mstype_tab[] = {
 	{ WSMOUSE_TYPE_TPANEL,	"touch-pannel" },
 	{ WSMOUSE_TYPE_NEXT,	"NeXT" },
 	{ WSMOUSE_TYPE_ARCHIMEDES, "archimedes" },
-	{ WSMOUSE_TYPE_ADB,	"adb" }
+	{ WSMOUSE_TYPE_ADB,	"adb" },
+	{ WSMOUSE_TYPE_HIL,	"hil" }
 };
 
 static const struct nameint dpytype_tab[] = {
@@ -108,7 +111,8 @@ static const struct nameint dpytype_tab[] = {
 	{ WSDISPLAY_TYPE_EGA,		"ega" },
 	{ WSDISPLAY_TYPE_DCPVR,		"powervr" },
 	{ WSDISPLAY_TYPE_SUN24,		"sun24" },
-	{ WSDISPLAY_TYPE_SUNBW,		"sunbw" }
+	{ WSDISPLAY_TYPE_SUNBW,		"sunbw" },
+	{ WSDISPLAY_TYPE_STI,		"hp-sti" }
 };
 
 static const struct nameint kbdenc_tab[] = {
@@ -124,9 +128,7 @@ int name2int(char *, const struct nameint *, int);
 void print_kmap(struct wskbd_map_data *);
 
 struct field *
-field_by_name(field_tab, name)
-	struct field *field_tab;
-	char *name;
+field_by_name(struct field *field_tab, char *name)
 {
 	const char *p = strchr(name, '.');
 
@@ -141,9 +143,7 @@ field_by_name(field_tab, name)
 }
 
 struct field *
-field_by_value(field_tab, addr)
-	struct field *field_tab;
-	void *addr;
+field_by_value(struct field *field_tab, void *addr)
 {
 	for (; field_tab->name; field_tab++)
 		if (field_tab->valp == addr)
@@ -153,9 +153,7 @@ field_by_value(field_tab, addr)
 }
 
 char *
-int2name(val, uflag, tab, len)
-	int val, uflag, len;
-	const struct nameint *tab;
+int2name(int val, int uflag, const struct nameint *tab, int len)
 {
 	static char tmp[20];
 	int i;
@@ -172,10 +170,7 @@ int2name(val, uflag, tab, len)
 }
 
 int
-name2int(val, tab, len)
-	char *val;
-	const struct nameint *tab;
-	int len;
+name2int(char *val, const struct nameint *tab, int len)
 {
 	int i;
 
@@ -186,15 +181,12 @@ name2int(val, tab, len)
 }
 
 void
-pr_field(pre, f, sep)
-	const char *pre;
-	struct field *f;
-	const char *sep;
+pr_field(const char *pre, struct field *f, const char *sep)
 {
 	struct field_pc *pc;
 	u_int flags;
-	char *p;
 	int i, n;
+	char *p;
 
 	if (sep)
 		printf("%s.%s%s", pre, f->name, sep);
@@ -202,6 +194,9 @@ pr_field(pre, f, sep)
 	switch (f->format) {
 	case FMT_UINT:
 		printf("%u", *((u_int *) f->valp));
+		break;
+	case FMT_INT:
+		printf("%d", *((int *) f->valp));
 		break;
 	case FMT_BOOL:
 		printf("%s", *((u_int *) f->valp)? "on" : "off");
@@ -253,16 +248,13 @@ pr_field(pre, f, sep)
 }
 
 void
-rd_field(f, val, merge)
-	struct field *f;
-	char *val;
-	int merge;
+rd_field(struct field *f, char *val, int merge)
 {
+	struct wscons_keymap *mp;
 	struct field_pc *pc;
-	int i;
 	u_int u, r, fr;
 	char *p;
-	struct wscons_keymap *mp;
+	int i;
 
 	switch (f->format) {
 	case FMT_UINT:
@@ -272,6 +264,14 @@ rd_field(f, val, merge)
 			*((u_int *) f->valp) += u;
 		else
 			*((u_int *) f->valp) = u;
+		break;
+	case FMT_INT:
+		if (sscanf(val, "%d", &i) != 1)
+			errx(1, "%s: not a number", val);
+		if (merge)
+			*((int *) f->valp) += i;
+		else
+			*((int *) f->valp) = i;
 		break;
 	case FMT_BOOL:
 		if (*val != 'o' || (val[1] != 'n' &&
@@ -347,11 +347,10 @@ rd_field(f, val, merge)
 }
 
 void
-print_kmap(map)
-	struct wskbd_map_data *map;
+print_kmap(struct wskbd_map_data *map)
 {
-	int i;
 	struct wscons_keymap *mp;
+	int i;
 
 	for (i = 0; i < map->maplen; i++) {
 		mp = map->map + i;

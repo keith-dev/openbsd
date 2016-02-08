@@ -1,4 +1,4 @@
-/*      $OpenBSD: pf_key_v2.c,v 1.117 2002/09/11 09:50:44 ho Exp $  */
+/*      $OpenBSD: pf_key_v2.c,v 1.122 2003/02/24 12:01:04 markus Exp $  */
 /*	$EOM: pf_key_v2.c,v 1.79 2000/12/12 00:33:19 niklas Exp $	*/
 
 /*
@@ -1659,7 +1659,7 @@ pf_key_v2_mask6_to_bits (u_int8_t *mask)
 {
   int n;
   bit_ffc (mask, 128, &n);
-  return n;
+  return n == -1 ? 128 : n;
 }
 
 /*
@@ -2101,9 +2101,9 @@ pf_key_v2_flow (struct sockaddr *laddr, struct sockaddr *lmask,
     rmask_str = 0;
 
   LOG_DBG ((LOG_SYSDEP, 50, "pf_key_v2_flow: src %s %s dst %s %s",
-	    laddr_str ? laddr_str : "<??\?>", lmask_str ? laddr_str : "<??\?>",
-	    raddr_str ? laddr_str : "<??\?>",
-	    rmask_str ? laddr_str : "<??\?>"));
+	    laddr_str ? laddr_str : "<??\?>", lmask_str ? lmask_str : "<??\?>",
+	    raddr_str ? raddr_str : "<??\?>",
+	    rmask_str ? rmask_str : "<??\?>"));
 
   if (laddr_str)
     free (laddr_str);
@@ -2879,7 +2879,7 @@ pf_key_v2_acquire (struct pf_key_v2_msg *pmsg)
   struct passwd *pwd = 0;
   u_int16_t sport = 0, dport = 0;
   u_int8_t tproto = 0;
-  char tmbuf[sizeof sport * 3 + 1];
+  char tmbuf[sizeof sport * 3 + 1], *xform;
 #if defined (SADB_X_CREDTYPE_NONE)
   struct sadb_x_cred *cred = 0, *sauth = 0;
 #endif
@@ -3074,6 +3074,16 @@ pf_key_v2_acquire (struct pf_key_v2_msg *pmsg)
   bzero (dstbuf, sizeof dstbuf);
   bzero (srcbuf, sizeof srcbuf);
 
+  if (dstaddr->sa_family == 0)
+    {
+      /* Destination was not specified in the flow -- can we derive it? */
+      if (dhostflag == 0)
+	{
+          log_print("pf_key_v2_acquire: Cannot determine precise destination");
+          goto fail;
+        }
+      dstaddr = dflow;
+    }
   switch (dstaddr->sa_family)
     {
     case AF_INET:
@@ -3122,6 +3132,16 @@ pf_key_v2_acquire (struct pf_key_v2_msg *pmsg)
 	      log_print ("pf_key_v2_acquire: inet_ntop failed");
 	      goto fail;
 	    }
+          break;
+
+	default:
+	  /* 
+	   * The kernel will pass an all '0' EXT_ADDRESS_SRC if it wasn't
+	   * specified for the flow. In that case, do NOT specify the srcaddr
+	   * in the Peer- name below
+	   */
+	  srcbuf[0] = 0;
+	  srcaddr = NULL;
 	  break;
 	}
     }
@@ -3675,10 +3695,10 @@ pf_key_v2_acquire (struct pf_key_v2_msg *pmsg)
       goto fail;
     }
 
-  if (conf_get_str ("General", "Default-Phase-2-Suites"))
+  if (conf_get_str ("General", "Default-phase-2-suites"))
     {
       if (conf_set (af, configname, "Suites",
-		    conf_get_str ("General", "Default-Phase-2-Suites"), 0, 0))
+		    conf_get_str ("General", "Default-phase-2-suites"), 0, 0))
         {
 	  conf_end (af, 0);
 	  goto fail;
@@ -3895,12 +3915,16 @@ pf_key_v2_acquire (struct pf_key_v2_msg *pmsg)
 	    }
 	  else /* Fall through */
 #endif /* SADB_X_EXT_LOCAL_AUTH */
-	  /* XXX Default transform set should be settable. */
-	  if (conf_set (af, confname, "Transforms", "3DES-SHA-RSA_SIG", 0, 0))
-	    {
-	      conf_end (af, 0);
-	      goto fail;
-	    }
+	  {
+	    xform = conf_get_str ("Default-phase-1-configuration",
+				  "Transforms");
+	    if (conf_set (af, confname, "Transforms",
+			  xform ? xform : "3DES-SHA-RSA_SIG", 0, 0))
+	      {
+		conf_end (af, 0);
+		goto fail;
+	      }
+	  }
 
 	  if (conf_set (af, confname, "Exchange_Type", "ID_PROT", 0, 0)
 	      || conf_set (af, confname, "DOI", "IPSEC", 0, 0)

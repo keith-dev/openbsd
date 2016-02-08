@@ -38,12 +38,12 @@
 
 #if defined(SYSLIBC_SCCS)
 	.text
-	.asciz "$OpenBSD: brk.S,v 1.3 1997/09/17 17:23:38 weingart Exp $"
+	.asciz "$OpenBSD: brk.S,v 1.5 2002/10/06 23:31:41 art Exp $"
 #endif /* SYSLIB_SCCS */
 
 	.globl	_end
 	.globl	minbrk
-	.globl	curbrk
+	.globl	__curbrk
 
 	.data
 minbrk:	.long	_end
@@ -64,13 +64,13 @@ ENTRY(brk)
 	int	$0x80
 	jc	err
 	PIC_PROLOGUE
-	movl	PIC_GOT(curbrk),%edx	# set up GOT addressing
+	movl	PIC_GOT(__curbrk),%edx	# set up GOT addressing
 	PIC_EPILOGUE
 	xorl	%eax,%eax
 	movl	%ecx,(%edx)
 	ret
 err:
-	jmp	PIC_PLT(cerror)
+	jmp	PIC_PLT(__cerror)
 
 #else
 
@@ -84,8 +84,8 @@ err:
 	int	$0x80
 	jc	err
 	xorl	%eax,%eax
-	movl	%ecx,curbrk
+	movl	%ecx,__curbrk
 	ret
 err:
-	jmp	cerror
+	jmp	__cerror
 #endif

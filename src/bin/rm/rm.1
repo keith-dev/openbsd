@@ -1,4 +1,4 @@
-.\"	$OpenBSD: rm.1,v 1.19 2002/09/18 07:33:47 deraadt Exp $
+.\"	$OpenBSD: rm.1,v 1.21 2003/03/12 20:12:36 deraadt Exp $
 .\"	$NetBSD: rm.1,v 1.8 1995/07/25 19:37:30 jtc Exp $
 .\"
 .\" Copyright (c) 1990, 1993, 1994
@@ -89,6 +89,7 @@ then
 and then
 .Li 0xff
 again, before they are deleted.
+Files with multiple links will not be overwritten.
 .It Fl R
 Attempt to remove the file hierarchy rooted in each file argument.
 The
@@ -138,15 +139,15 @@ If an error occurs,
 .Nm
 exits with a value >0.
 .Sh EXAMPLES
-.Cm $ rm -rf foobar
+.Li $ rm -rf foobar
 .Pp
 Recursively remove all files contained within the
 .Pa foobar
 directory hierarchy.
 .Pp
-.Cm $ rm -- -f
+.Li $ rm -- -f
 .br
-.Cm $ rm ./-f
+.Li $ rm ./-f
 .Pp
 Either of these commands will remove the file
 .Pa -f .

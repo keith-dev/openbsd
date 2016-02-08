@@ -1,4 +1,4 @@
-.\"	$OpenBSD: isa.4,v 1.19 2002/09/26 07:55:40 miod Exp $
+.\"	$OpenBSD: isa.4,v 1.22 2003/03/20 07:26:33 jmc Exp $
 .\"	$NetBSD: isa.4,v 1.19 2000/03/18 16:54:37 augustss Exp $
 .\"
 .\" Copyright (c) 2000 Theo de Raadt.  All rights reserved.
@@ -46,10 +46,6 @@
 .Cd "isa* at pceb?"
 .Cd "isa* at sio?"
 .Pp
-.Cd "# amiga:"
-.Cd "isa* at ggbus?"
-.Cd "isa* at cross?"
-.Pp
 Attachments are machine-dependent and depend on the bus topology and
 .Tn ISA
 bus interface of your system.
@@ -68,7 +64,7 @@ Your system may support additional
 devices.
 Drivers for
 .Tn ISA
-device not listed here are machine-dependent.
+devices not listed here are machine-dependent.
 Consult your system's
 .Xr intro 4
 for additional information.
@@ -218,6 +214,8 @@ Soundblaster, Soundblaster 16, and Soundblaster Pro sound cards.
 .It Xr wss 4
 Windows Sound System-compatible sound cards based on the AD1848 and
 compatible chips.
+.It Xr mpu 4
+Roland/Yamaha generic MIDI UART devices.
 .El
 .Ss Radio receiver devices
 .Bl -tag -width sf2r -offset ind
@@ -286,8 +284,8 @@ These are listed in
 .Xr sb 4 ,
 .Xr sea 4 ,
 .Xr sf2r 4 ,
-.Xr sm 4 ,
 .Xr sfr 4 ,
+.Xr sm 4 ,
 .Xr uha 4 ,
 .Xr usb 4 ,
 .Xr wdc 4 ,

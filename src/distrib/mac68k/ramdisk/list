@@ -1,4 +1,7 @@
-#	$OpenBSD: list,v 1.17 2002/05/01 19:21:28 mickey Exp $
+#	$OpenBSD: list,v 1.19 2003/02/25 01:44:39 miod Exp $
+
+SRCDIRS distrib/special
+SRCDIRS gnu/usr.bin usr.bin bin sbin usr.sbin
 
 # copy the crunched binary, link to it, and kill it
 COPY	${OBJDIR}/instbin			instbin
@@ -58,10 +61,13 @@ SYMLINK	/tmp/resolv.conf.shadow			etc/resolv.conf
 SYMLINK	/tmp/hosts				etc/hosts
 TERMCAP	vt100,vt220,dumb			usr/share/misc/termcap
 
+# dhcp things
+SCRIPT    ${DESTDIR}/sbin/dhclient-script	sbin/dhclient-script
+
 # and the installation tools
 SCRIPT	${CURDIR}/../../miniroot/dot.profile	.profile
 SCRIPT	${CURDIR}/install.md			install.md
 SCRIPT	${CURDIR}/../../miniroot/install.sh	install
 SCRIPT	${CURDIR}/../../miniroot/upgrade.sh	upgrade
 SCRIPT	${CURDIR}/../../miniroot/install.sub	install.sub
-SPECIAL	chmod 755 install upgrade
+SPECIAL	chmod 755 install upgrade sbin/dhclient-script

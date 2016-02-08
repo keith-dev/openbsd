@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile.inc,v 1.10 2002/07/20 17:30:26 millert Exp $
+#	$OpenBSD: Makefile.inc,v 1.12 2003/02/27 21:22:14 millert Exp $
 
 .include <bsd.own.mk>
 .include <bsd.obj.mk>
@@ -45,24 +45,20 @@ LDFLAGS+=-L${.CURDIR}/../libsm
 .endif
 .endif
 
-.if defined(WANT_LIBMILTER)
-ENVDEF+=-DMILTER -D_FFR_MILTER_ROOT_UNSAFE
-LDADD+= -lmilter
-.if exists(${.CURDIR}/../libmilter/${__objdir})
-DPADD+= ${.CURDIR}/../libmilter/${__objdir}/libmilter.a
-LDFLAGS+=-L${.CURDIR}/../libmilter/${__objdir}
-.else
-DPADD+= ${.CURDIR}/../libmilter/libmilter.a
-LDFLAGS+=-L${.CURDIR}/../libmilter
-.endif
-.endif
-
 .if defined(WANT_LIBWRAP)
 .if (${TCP_WRAPPERS:L} == "yes")
 ENVDEF+=-DTCPWRAPPERS
 DPADD+= ${LIBWRAP}
 LDADD+= -lwrap
 .endif
+.endif
+
+# To build with LDAP map support define WANT_LDAP in /etc/mk.conf (unsupported)
+.if defined(WANT_LDAP)
+ENVDEF+= -DLDAPMAP
+LDADD+=-lldap -llber
+CFLAGS+=-I/usr/local/include
+LDFLAGS+=-L/usr/local/lib
 .endif
 
 CFLAGS+=${ENVDEF} -I${.CURDIR}/../sendmail -I${.CURDIR}/../include

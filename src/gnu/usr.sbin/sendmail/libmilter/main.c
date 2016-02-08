@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 1999-2002 Sendmail, Inc. and its suppliers.
+ *  Copyright (c) 1999-2003 Sendmail, Inc. and its suppliers.
  *	All rights reserved.
  *
  * By using this file, you agree to the terms and conditions set
@@ -9,7 +9,7 @@
  */
 
 #include <sm/gen.h>
-SM_RCSID("@(#)$Sendmail: main.c,v 8.64 2002/06/04 02:32:32 geir Exp $")
+SM_RCSID("@(#)$Sendmail: main.c,v 8.64.2.10 2003/01/23 22:34:24 ca Exp $")
 
 #define _DEFINE	1
 #include "libmilter.h"
@@ -98,13 +98,13 @@ static int backlog = MI_SOMAXCONN;
 #if _FFR_SMFI_OPENSOCKET
 /*
 **  SMFI_OPENSOCKET -- try the socket setup to make sure we'll be
-**                     able to start up
+**		able to start up
 **
-**  	Parameters:
-**  		None.
+**	Parameters:
+**		None.
 **
-**  	Return:
-**  		MI_SUCCESS/MI_FAILURE
+**	Return:
+**		MI_SUCCESS/MI_FAILURE
 */
 
 int
@@ -236,6 +236,6 @@ smfi_main()
 	/* Startup the listener */
 	if (mi_listener(conn, dbg, smfi, timeout, backlog) != MI_SUCCESS)
 		r = MI_FAILURE;
-
 	return r;
 }
+

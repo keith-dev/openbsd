@@ -1,4 +1,4 @@
-#	$OpenBSD: install.md,v 1.12 2002/09/22 22:42:25 krw Exp $
+#	$OpenBSD: install.md,v 1.17 2003/01/26 15:58:39 krw Exp $
 #
 #
 # Copyright (c) 1996 The NetBSD Foundation, Inc.
@@ -39,10 +39,8 @@
 # machine dependent section of installation/upgrade script.
 #
 
-# Machine-dependent install sets
-MDSETS=kernel
 MDFSTYPE=msdos
-MDFSOPTS=-l
+MDFSOPTS=-s
 MDXAPERTURE=2
 ARCH=ARCH
 
@@ -61,9 +59,9 @@ md_set_term() {
 	while : ; do
 		ask "Select your keyboard type: (P)C-AT/XT, (U)SB or 'done'" P
 		case $resp in
-		P*|p*)  _tables="be de dk es fr it jp lt no pt ru sf sg sv ua uk us"
+		P*|p*)  _tables="be br de dk es fr it jp lt no pt ru sf sg sv ua uk us"
 			;;
-		U*|u*)	_tables="de dk es fr it jp no sf sg sv uk us"
+		U*|u*)	_tables="br de dk es fr it jp no sf sg sv uk us"
 			;;
 		done)	;;
 		*)	echo "'$resp' is not a valid keyboard type."
@@ -141,7 +139,7 @@ __EOT
 	# Manually configure the MBR.
 	cat << __EOT
 
-Your will now create a single MBR partition to contain your OpenBSD data. This
+You will now create a single MBR partition to contain your OpenBSD data. This
 partition must have an id of 'A6'; must *NOT* overlap other partitions; and
 must be marked as the only active partition.
 
@@ -172,7 +170,7 @@ md_prep_disklabel()
 
 You will now create an OpenBSD disklabel inside the OpenBSD MBR
 partition. The disklabel defines how OpenBSD splits up the MBR partition
-into OpenBSD partitions in which filesystems and swap space are created. 
+into OpenBSD partitions in which filesystems and swap space are created.
 
 The offsets used in the disklabel are ABSOLUTE, i.e. relative to the
 start of the disk, NOT the start of the OpenBSD MBR partition.

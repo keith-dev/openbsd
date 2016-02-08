@@ -1,6 +1,45 @@
-.\" $OpenBSD: pppd.8,v 1.22 2002/05/19 20:47:52 deraadt Exp $
+.\" $OpenBSD: pppd.8,v 1.26 2003/03/16 16:20:05 jmc Exp $
 .\" manual page [] for pppd 2.3
 .\" Id: pppd.8,v 1.27 1998/03/31 04:31:08 paulus Exp $
+.\"
+.\" Copyright (c) 1984-2000 Carnegie Mellon University. All rights reserved.
+.\"
+.\" Redistribution and use in source and binary forms, with or without
+.\" modification, are permitted provided that the following conditions
+.\" are met:
+.\"
+.\" 1. Redistributions of source code must retain the above copyright
+.\"    notice, this list of conditions and the following disclaimer.
+.\"
+.\" 2. Redistributions in binary form must reproduce the above copyright
+.\"    notice, this list of conditions and the following disclaimer in
+.\"    the documentation and/or other materials provided with the
+.\"    distribution.
+.\"
+.\" 3. The name "Carnegie Mellon University" must not be used to
+.\"    endorse or promote products derived from this software without
+.\"    prior written permission. For permission or any legal
+.\"    details, please contact
+.\"      Office of Technology Transfer
+.\"      Carnegie Mellon University
+.\"      5000 Forbes Avenue
+.\"      Pittsburgh, PA  15213-3890
+.\"      (412) 268-4387, fax: (412) 268-7395
+.\"      tech-transfer@andrew.cmu.edu
+.\"
+.\" 4. Redistributions of any form whatsoever must retain the following
+.\"    acknowledgment:
+.\"    "This product includes software developed by Computing Services
+.\"     at Carnegie Mellon University (http://www.cmu.edu/computing/)."
+.\"
+.\" CARNEGIE MELLON UNIVERSITY DISCLAIMS ALL WARRANTIES WITH REGARD TO
+.\" THIS SOFTWARE, INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY
+.\" AND FITNESS, IN NO EVENT SHALL CARNEGIE MELLON UNIVERSITY BE LIABLE
+.\" FOR ANY SPECIAL, INDIRECT OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+.\" WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN
+.\" AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
+.\" OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+.\" 
 .\" SH section heading
 .\" SS subsection heading
 .\" LP paragraph
@@ -232,7 +271,7 @@ When this is completed, pppd will commence passing data packets
 The \fIdemand\fR option implies the \fIpersist\fR option.  If this
 behaviour is not desired, use the \fInopersist\fR option after the
 \fIdemand\fR option.  The \fIidle\fR and \fIholdoff\fR
-options are also useful in conjuction with the \fIdemand\fR option.
+options are also useful in conjunction with the \fIdemand\fR option.
 .TP
 .B domain \fId
 Append the domain name \fId\fR to the local host name for authentication
@@ -347,7 +386,7 @@ Set the maximum number of IPXCP NAK frames which the local system will
 send before it rejects the options. The default value is 3.
 .TP
 .B ipxcp-max-terminate \fIn
-Set the maximum nuber of IPXCP terminate request frames before the
+Set the maximum number of IPXCP terminate request frames before the
 local system considers that the peer is not listening to them. The
 default value is 3.
 .TP
@@ -506,8 +545,8 @@ from pppd for IPCP negotiation.
 Disables the default behaviour when no local IP address is specified,
 which is to determine (if possible) the local IP address from the
 hostname.  With this option, the peer will have to supply the local IP
-address during IPCP negotiation (unless it specified explicitly on the
-command line or in an options file).
+address during IPCP negotiation (unless it was specified explicitly
+on the command line or in an options file).
 .TP
 .B noipx
 Disable the IPXCP and IPX protocols.  This option should only be
@@ -744,7 +783,7 @@ the client, the name of the server, and the secret.  These fields may
 be followed by a list of the IP addresses that the specified client
 may use when connecting to the specified server.
 .LP
-A secrets file is parsed into words as for a options file, so the
+A secrets file is parsed into words as for an options file, so the
 client name, server name and secrets fields must each be one word,
 with any embedded spaces or other special characters quoted or
 escaped.  Any following words on the same line are taken to be a list

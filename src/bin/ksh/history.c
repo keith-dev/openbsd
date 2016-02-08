@@ -1,4 +1,4 @@
-/*	$OpenBSD: history.c,v 1.14 2002/09/06 19:45:14 deraadt Exp $	*/
+/*	$OpenBSD: history.c,v 1.17 2003/02/28 09:45:09 jmc Exp $	*/
 
 /*
  * command history
@@ -67,7 +67,7 @@ static char   **hist_get_newest ARGS((int allow_cur));
 static char   **hist_get_oldest ARGS(());
 static void	histbackup ARGS((void));
 
-static char   **current;	/* current postition in history[] */
+static char   **current;	/* current position in history[] */
 static int	curpos;		/* current index in history[] */
 static char    *hname;		/* current name of history file */
 static int	hstarted;	/* set after hist_init() called */
@@ -239,10 +239,8 @@ c_fc(wp)
 		return 1;
 	}
 
-	if (!Flag(FSH)) {
-		/* Ignore setstr errors here (arbitrary) */
-		setstr(local("_", FALSE), tf->name, KSH_RETURN_ERROR);
-	}
+	/* Ignore setstr errors here (arbitrary) */
+	setstr(local("_", FALSE), tf->name, KSH_RETURN_ERROR);
 
 	/* XXX: source should not get trashed by this.. */
 	{
@@ -495,7 +493,7 @@ histnum(n)
 }
 
 /*
- * This will become unecessary if hist_get is modified to allow
+ * This will become unnecessary if hist_get is modified to allow
  * searching from positions other than the end, and in either
  * direction.
  */
@@ -863,7 +861,7 @@ hist_init(s)
 		 * check on its validity
 		 */
 		if (base == MAP_FAILED || *base != HMAGIC1 || base[1] != HMAGIC2) {
-			if ((int)base !=  -1)
+			if (base != (unsigned char *)-1)
 				munmap((caddr_t)base, hsize);
 			hist_finish();
 			unlink(hname);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: args.c,v 1.9 2002/02/16 21:27:47 millert Exp $	*/
+/*	$OpenBSD: args.c,v 1.11 2002/10/07 13:57:10 mickey Exp $	*/
 
 /*
  * Copyright (c) 1980, 1993
@@ -38,7 +38,7 @@
 
 #ifndef lint
 /*static char sccsid[] = "@(#)args.c	8.1 (Berkeley) 6/6/93";*/
-static char rcsid[] = "$OpenBSD: args.c,v 1.9 2002/02/16 21:27:47 millert Exp $";
+static char rcsid[] = "$OpenBSD: args.c,v 1.11 2002/10/07 13:57:10 mickey Exp $";
 #endif /* not lint */
 
 /*
@@ -293,8 +293,7 @@ found:
 	    break;
 
 	default:
-	    errx(1, "set_option: internal error: p_special %d",
-	        p->p_special);
+	    errx(1, "set_option: internal error: p_special %d", p->p_special);
 	}
 	break;
 
@@ -308,10 +307,12 @@ found:
     case PRO_INT:
 	if (!isdigit(*param_start)) {
     need_param:
-	    errx(1, "%s: ``%s'' requires a parameter",
-		    option_source, arg - 1);
+	    errx(1, "%s: ``%s'' requires a parameter", option_source, arg - 1);
 	}
 	*p->p_obj = atoi(param_start);
+	if (*p->p_name == 'i' && *p->p_obj <= 0)
+		errx(1, "%s: ``%s must be greater of zero''",
+		    option_source, arg - 1);
 	break;
 
     case PRO_FONT:
@@ -319,7 +320,6 @@ found:
 	break;
 
     default:
-	errx(1, "set_option: internal error: p_type %d",
-		p->p_type);
+	errx(1, "set_option: internal error: p_type %d", p->p_type);
     }
 }

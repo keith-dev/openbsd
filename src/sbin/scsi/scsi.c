@@ -1,4 +1,4 @@
-/*	$OpenBSD: scsi.c,v 1.8 2001/07/07 18:26:21 deraadt Exp $	*/
+/*	$OpenBSD: scsi.c,v 1.10 2003/03/13 05:00:45 deraadt Exp $	*/
 /*	$FreeBSD: scsi.c,v 1.11 1996/04/06 11:00:28 joerg Exp $	*/
 
 /*
@@ -391,7 +391,7 @@ do_cmd(int fd, char *fmt, int argc, char **argv)
 		if (strcmp(data_fmt, "-") == 0)	/* stdout */
 		{
 			bp = (char *)scsireq->databuf;
-			while (count > 0 && (amount = write(1, bp, count)) > 0)
+			while (count > 0 && (amount = write(STDOUT_FILENO, bp, count)) > 0)
 			{
 				count -= amount;
 				bp += amount;
@@ -651,7 +651,7 @@ edit_init(void)
 	int fd;
 
 	edit_rewind();
-	strcpy(edit_name, "/var/tmp/scXXXXXXXX");
+	strlcpy(edit_name, "/var/tmp/scXXXXXXXX", sizeof edit_name);
 	if ((fd = mkstemp(edit_name)) == -1) {
 		perror("mkstemp failed");
 		exit(errno);
@@ -745,8 +745,7 @@ edit_edit(void)
 
 	fclose(edit_file);
 
-	system_line = malloc(strlen(editor) + strlen(edit_name) + 6);
-	sprintf(system_line, "%s %s", editor, edit_name);
+	asprintf(&system_line, "%s %s", editor, edit_name);
 	system(system_line);
 	free(system_line);
 

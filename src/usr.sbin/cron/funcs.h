@@ -1,4 +1,4 @@
-/*	$OpenBSD: funcs.h,v 1.8 2002/07/15 19:13:29 millert Exp $	*/
+/*	$OpenBSD: funcs.h,v 1.10 2003/02/20 20:38:08 millert Exp $	*/
 
 /*
  * Copyright (c) 1997,2000 by Internet Software Consortium, Inc.
@@ -39,6 +39,7 @@ void		set_cron_uid(void),
 		skip_comments(FILE *),
 		log_it(const char *, int, const char *, const char *),
 		log_close(void),
+		poke_daemon(const char *, unsigned char),
 		atrun(at_db *, double, time_t);
 
 int		job_runqueue(void),
@@ -51,7 +52,7 @@ int		job_runqueue(void),
 		cron_pclose(FILE *),
 		glue_strings(char *, size_t, const char *, const char *, char),
 		strcmp_until(const char *, const char *, char),
-		allowed(const char *),
+		allowed(const char *, const char *, const char *),
 		strdtb(char *),
 		open_socket(void),
 		safe_p(const char *, const char *),

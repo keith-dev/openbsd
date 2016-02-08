@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpio.c,v 1.10 2002/06/09 02:35:27 itojun Exp $	*/
+/*	$OpenBSD: cpio.c,v 1.14 2003/02/03 09:06:43 jmc Exp $	*/
 /*	$NetBSD: cpio.c,v 1.5 1995/03/21 09:07:13 cgd Exp $	*/
 
 /*-
@@ -40,9 +40,9 @@
 
 #ifndef lint
 #if 0
-static char sccsid[] = "@(#)cpio.c	8.1 (Berkeley) 5/31/93";
+static const char sccsid[] = "@(#)cpio.c	8.1 (Berkeley) 5/31/93";
 #else
-static char rcsid[] = "$OpenBSD: cpio.c,v 1.10 2002/06/09 02:35:27 itojun Exp $";
+static const char rcsid[] = "$OpenBSD: cpio.c,v 1.14 2003/02/03 09:06:43 jmc Exp $";
 #endif
 #endif /* not lint */
 
@@ -58,9 +58,9 @@ static char rcsid[] = "$OpenBSD: cpio.c,v 1.10 2002/06/09 02:35:27 itojun Exp $"
 #include "cpio.h"
 #include "extern.h"
 
-static int rd_nm(register ARCHD *, int);
-static int rd_ln_nm(register ARCHD *);
-static int com_rd(register ARCHD *);
+static int rd_nm(ARCHD *, int);
+static int rd_ln_nm(ARCHD *);
+static int com_rd(ARCHD *);
 
 /*
  * Routines which support the different cpio versions
@@ -96,7 +96,7 @@ cpio_strd(void)
  */
 
 int
-cpio_trail(register ARCHD *arcn)
+cpio_trail(ARCHD *arcn)
 {
 	/*
 	 * look for trailer id in file we are about to process
@@ -114,7 +114,7 @@ cpio_trail(register ARCHD *arcn)
  */
 
 static int
-com_rd(register ARCHD *arcn)
+com_rd(ARCHD *arcn)
 {
 	arcn->skip = 0;
 	arcn->pat = NULL;
@@ -186,7 +186,7 @@ cpio_endwr(void)
  */
 
 static int
-rd_nm(register ARCHD *arcn, int nsz)
+rd_nm(ARCHD *arcn, int nsz)
 {
 	/*
 	 * do not even try bogus values
@@ -216,7 +216,7 @@ rd_nm(register ARCHD *arcn, int nsz)
  */
 
 static int
-rd_ln_nm(register ARCHD *arcn)
+rd_ln_nm(ARCHD *arcn)
 {
 	/*
 	 * check the length specified for bogus values
@@ -284,10 +284,10 @@ cpio_id(char *blk, int size)
  */
 
 int
-cpio_rd(register ARCHD *arcn, register char *buf)
+cpio_rd(ARCHD *arcn, char *buf)
 {
-	register int nsz;
-	register HD_CPIO *hd;
+	int nsz;
+	HD_CPIO *hd;
 
 	/*
 	 * check that this is a valid header, if not return -1
@@ -388,10 +388,10 @@ cpio_stwr(void)
  */
 
 int
-cpio_wr(register ARCHD *arcn)
+cpio_wr(ARCHD *arcn)
 {
-	register HD_CPIO *hd;
-	register int nsz;
+	HD_CPIO *hd;
+	int nsz;
 	char hdblk[sizeof(HD_CPIO)];
 
 	/*
@@ -566,12 +566,12 @@ crc_strd(void)
  */
 
 int
-vcpio_rd(register ARCHD *arcn, register char *buf)
+vcpio_rd(ARCHD *arcn, char *buf)
 {
-	register HD_VCPIO *hd;
+	HD_VCPIO *hd;
 	dev_t devminor;
 	dev_t devmajor;
-	register int nsz;
+	int nsz;
 
 	/*
 	 * during the id phase it was determined if we were using CRC, use the
@@ -625,7 +625,7 @@ vcpio_rd(register ARCHD *arcn, register char *buf)
 		return(-1);
 
 	/*
-	 * skip padding. header + filename is aligned to 4 byte boundries
+	 * skip padding. header + filename is aligned to 4 byte boundaries
 	 */
 	if (rd_skip((off_t)(VCPIO_PAD(sizeof(HD_VCPIO) + nsz))) < 0)
 		return(-1);
@@ -695,9 +695,9 @@ crc_stwr(void)
  */
 
 int
-vcpio_wr(register ARCHD *arcn)
+vcpio_wr(ARCHD *arcn)
 {
-	register HD_VCPIO *hd;
+	HD_VCPIO *hd;
 	unsigned int nsz;
 	char hdblk[sizeof(HD_VCPIO)];
 
@@ -880,10 +880,10 @@ bcpio_id(char *blk, int size)
  */
 
 int
-bcpio_rd(register ARCHD *arcn, register char *buf)
+bcpio_rd(ARCHD *arcn, char *buf)
 {
-	register HD_BCPIO *hd;
-	register int nsz;
+	HD_BCPIO *hd;
+	int nsz;
 
 	/*
 	 * check the header
@@ -895,7 +895,7 @@ bcpio_rd(register ARCHD *arcn, register char *buf)
 	hd = (HD_BCPIO *)buf;
 	if (swp_head) {
 		/*
-		 * header has swapped bytes on 16 bit boundries
+		 * header has swapped bytes on 16 bit boundaries
 		 */
 		arcn->sb.st_dev = (dev_t)(RSHRT_EXT(hd->h_dev));
 		arcn->sb.st_ino = (ino_t)(RSHRT_EXT(hd->h_ino));
@@ -940,7 +940,7 @@ bcpio_rd(register ARCHD *arcn, register char *buf)
 		return(-1);
 
 	/*
-	 * header + file name are aligned to 2 byte boundries, skip if needed
+	 * header + file name are aligned to 2 byte boundaries, skip if needed
 	 */
 	if (rd_skip((off_t)(BCPIO_PAD(sizeof(HD_BCPIO) + nsz))) < 0)
 		return(-1);
@@ -987,18 +987,18 @@ bcpio_endrd(void)
  * bcpio_wr()
  *	copy the data in the ARCHD to buffer in old binary cpio format
  *	There is a real chance of field overflow with this critter. So we
- *	always check the conversion is ok. nobody in his their right mind
- *	should write an achive in this format...
+ *	always check the conversion is ok. nobody in their right mind
+ *	should write an archive in this format...
  * Return
  *      0 if file has data to be written after the header, 1 if file has NO
  *	data to write after the header, -1 if archive write failed
  */
 
 int
-bcpio_wr(register ARCHD *arcn)
+bcpio_wr(ARCHD *arcn)
 {
-	register HD_BCPIO *hd;
-	register int nsz;
+	HD_BCPIO *hd;
+	int nsz;
 	char hdblk[sizeof(HD_BCPIO)];
 	off_t t_offt;
 	int t_int;

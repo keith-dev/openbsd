@@ -1,33 +1,42 @@
-/*	$OpenBSD: file.c,v 1.8 2002/02/16 21:27:46 millert Exp $	*/
+/*	$OpenBSD: file.c,v 1.11 2003/03/11 21:26:26 ian Exp $	*/
 
 /*
  * file - find type of a file or files - main program.
  *
- * Copyright (c) Ian F. Darwin, 1987.
- * Written by Ian F. Darwin.
- *
- * This software is not subject to any license of the American Telephone
- * and Telegraph Company or of the Regents of the University of California.
- *
- * Permission is granted to anyone to use this software for any purpose on
- * any computer system, and to alter it and redistribute it freely, subject
- * to the following restrictions:
- *
- * 1. The author is not responsible for the consequences of use of this
- *    software, no matter how awful, even if they arise from flaws in it.
- *
- * 2. The origin of this software must not be misrepresented, either by
- *    explicit claim or by omission.  Since few users ever read sources,
- *    credits must appear in the documentation.
- *
- * 3. Altered versions must be plainly marked as such, and must not be
- *    misrepresented as being the original software.  Since few users
- *    ever read sources, credits must appear in the documentation.
- *
- * 4. This notice may not be removed or altered.
+ * Copyright (c) Ian F. Darwin 1986-1995.
+ * Software written by Ian F. Darwin and others;
+ * maintained 1995-present by Christos Zoulas and others.
+ * 
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice immediately at the beginning of the file, without modification,
+ *    this list of conditions, and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *    This product includes software developed by Ian F. Darwin and others.
+ * 4. The name of the author may not be used to endorse or promote products
+ *    derived from this software without specific prior written permission.
+ *  
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED. IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE FOR
+ * ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
  */
+
 #ifndef	lint
-static char *moduleid = "$OpenBSD: file.c,v 1.8 2002/02/16 21:27:46 millert Exp $";
+static char *moduleid = "$OpenBSD: file.c,v 1.11 2003/03/11 21:26:26 ian Exp $";
 #endif	/* lint */
 
 #include <stdio.h>
@@ -55,9 +64,9 @@ static char *moduleid = "$OpenBSD: file.c,v 1.8 2002/02/16 21:27:46 millert Exp 
 #include "file.h"
 
 #ifdef S_IFLNK
-# define USAGE  "Usage: %s [-vczL] [-f namefile] [-m magicfiles] file...\n"
+# define USAGE  "Usage: %s [-vbczL] [-f namefile] [-m magicfiles] file...\n"
 #else
-# define USAGE  "Usage: %s [-vcz] [-f namefile] [-m magicfiles] file...\n"
+# define USAGE  "Usage: %s [-vbcz] [-f namefile] [-m magicfiles] file...\n"
 #endif
 
 #ifndef MAGIC
@@ -66,6 +75,7 @@ static char *moduleid = "$OpenBSD: file.c,v 1.8 2002/02/16 21:27:46 millert Exp 
 
 int 			/* Global command-line options 		*/
 	debug = 0, 	/* debugging 				*/
+	bflag = 0,	/* Don't print filename			*/
 	lflag = 0,	/* follow Symlinks (BSD only) 		*/
 	zflag = 0;	/* follow (uncompress) compressed files */
 
@@ -100,12 +110,15 @@ char *argv[];
 	if (!(magicfile = getenv("MAGIC")))
 		magicfile = MAGIC;
 
-	while ((c = getopt(argc, argv, "vcdf:Lm:z")) != -1)
+	while ((c = getopt(argc, argv, "bvcdf:Lm:z")) != -1)
 		switch (c) {
 		case 'v':
 			(void) printf("%s-%d.%d\n", __progname,
 				       FILE_VERSION_MAJOR, patchlevel);
 			return 1;
+		case 'b':
+			++bflag;
+			break;
 		case 'c':
 			++check;
 			break;
@@ -297,7 +310,7 @@ int wid;
 		inname = stdname;
 	}
 
-	if (wid > 0)
+	if (wid > 0 && !bflag)
 	     (void) printf("%s:%*s ", inname, 
 			   (int) (wid - strlen(inname)), "");
 
@@ -312,7 +325,7 @@ int wid;
 
 	    if ((fd = open(inname, O_RDONLY)) < 0) {
 		    /* We can't open it, but we were able to stat it. */
-		    if (sb.st_mode & 0002) ckfputs("writeable, ", stdout);
+		    if (sb.st_mode & 0002) ckfputs("writable, ", stdout);
 		    if (sb.st_mode & 0111) ckfputs("executable, ", stdout);
 		    ckfprintf(stdout, "can't read `%s' (%s).\n",
 			inname, strerror(errno));

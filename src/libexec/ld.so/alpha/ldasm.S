@@ -1,4 +1,4 @@
-/*	$OpenBSD: ldasm.S,v 1.9 2002/08/11 18:41:17 drahn Exp $ */
+/*	$OpenBSD: ldasm.S,v 1.12 2003/01/17 20:41:07 drahn Exp $ */
 
 /*
  * Copyright (c) 2001 Niklas Hallqvist
@@ -69,27 +69,28 @@
 /* Not really a leaf... but we are special.  */
 LEAF_NOPROFILE(_dl_start, 0)
 	.set	noreorder
-	lda	sp, (-8 - ((AUX_entry) * 8))(sp)
 	br	pv, L1
 L1:
 	LDGP(pv)
-	ldiq	t2, L1
-	subq	pv, t2, t2
-	lda	t0, _GLOBAL_OFFSET_TABLE_
-	addq	t0, t2, t0
-	lda	t1, _DYNAMIC
-	addq	t1, t2, t1
-L2:	cmpult	t0, t1, t3
-	beq	t3, L3
-	ldq	t3, 0(t0)
-	addq	t3, t2, t3
-	stq	t3, 0(t0)
-	lda	t0, 8(t0)
-	br	L2
-L3:
-	mov	a0, s0
-	mov	t2, a1		/* relocation displacement */
-	mov	a1, s1
+
+	mov	a0, s0		/* save arg */
+
+	/* relocate ourself. */
+	br	s2, L2		/* get our PC */
+L2:	ldiq	s3, L2		/* get where the linker thought we were */
+
+	subq	s2, s3, s2
+	mov	s2, a1
+	lda	t5, _DYNAMIC
+	addq	s2, t5, a0
+
+	bsr	ra, _reloc_alpha_got
+
+	/* allocate stack */
+	lda	sp, (-8 - ((AUX_entry) * 8))(sp)
+
+	mov	s0, a0
+	mov	s2, s1		/* relocation displacement */
 	ldq	a2, 0(a0)	/* argc */
 	lda	a3, 8(a0)	/* argv */
 	mov	a3, s3
@@ -97,10 +98,9 @@ L3:
 	sll	t3, 3, t3
 	addq	a3, t3, a4	/* envp */
 	mov	a4, s4
-	mov	t1, a2		/* dynamic */
 	mov	a5, s5
 	lda	s2, 0(sp)
-	mov	s2, a3
+	mov	s2, a1
 	CALL(_dl_boot_bind)
 	mov	s3, a0		/* **argv  */
 	mov	s4, a1		/* **envp  */
@@ -292,3 +292,16 @@ LEAF_NOPROFILE(_dl_getdirentries, 4)
 	call_pal PAL_OSF1_callsys
 	RET
 END(_dl_getdirentries)
+
+/* _dl_sigprocmask does not support NULL new mask */
+LEAF_NOPROFILE(_dl_sigprocmask, 4)
+	mov	a2, a5
+	ldl     a1, 0(a1)               /* load the set from *set */
+	ldiq	v0, SYS_sigprocmask
+	call_pal PAL_OSF1_callsys
+	/* What about syscalls failing? */
+	beq	a5, 1f
+	stl	v0, 0(a5)
+1:	mov	zero, v0
+	RET
+END(_dl_sigprocmask)

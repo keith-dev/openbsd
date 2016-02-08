@@ -2,8 +2,8 @@
 # syslog.pl
 #
 # $Log: syslog.pl,v $
-# Revision 1.5  2001/05/24 18:35:26  millert
-# merge in perl 5.6.1 with our local changes
+# Revision 1.6  2002/10/27 22:25:26  millert
+# Resolve conflicts, remove old files, merge local changes
 #
 # 
 # tom christiansen <tchrist@convex.com>

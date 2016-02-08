@@ -1,4 +1,4 @@
-/*	$OpenBSD: rtld_machine.c,v 1.8 2002/09/01 23:55:01 drahn Exp $ */
+/*	$OpenBSD: rtld_machine.c,v 1.14 2003/02/15 22:39:13 drahn Exp $ */
 
 /*
  * Copyright (c) 1999 Dale Rahn
@@ -38,9 +38,13 @@
 #include <sys/types.h>
 #include <sys/cdefs.h>
 #include <sys/mman.h>
+#include <sys/param.h>
+#include <sys/sysctl.h>
+#include <machine/cpu.h>
 
 #include <nlist.h>
 #include <link.h>
+#include <signal.h>
 
 #include "syscall.h"
 #include "archdep.h"
@@ -258,7 +262,7 @@ _dl_md_reloc(elf_object_t *object, int rel, int relasz)
 				    SYM_SEARCH_ALL|SYM_WARNNOTFOUND|
 				    ((type == R_TYPE(JMP_SLOT)) ?
 					SYM_PLT : SYM_NOTPLT),
-				    sym->st_size);
+				    sym->st_size, object->load_name);
 				if (this == NULL) {
 resolve_failed:
 					_dl_printf("%s: %s: can't resolve "
@@ -283,7 +287,7 @@ resolve_failed:
 			soff = _dl_find_symbol(symn, object->next, &srcsym,
 			    SYM_SEARCH_ALL|SYM_WARNNOTFOUND|
 			    ((type == R_TYPE(JMP_SLOT)) ? SYM_PLT : SYM_NOTPLT),
-			    size);
+			    size, object->load_name);
 			if (srcsym == NULL)
 				goto resolve_failed;
 
@@ -332,6 +336,7 @@ _dl_bind(elf_object_t *object, Elf_Word reloff)
 	const char *symn;
 	Elf_Addr value;
 	Elf_RelA *rela;
+	sigset_t omask, nmask;
 
 	rela = (Elf_RelA *)(object->Dyn.info[DT_JMPREL] + reloff);
 
@@ -342,7 +347,7 @@ _dl_bind(elf_object_t *object, Elf_Word reloff)
 	addr = (Elf_Addr *)(object->load_offs + rela->r_offset);
 	this = NULL;
 	ooff = _dl_find_symbol(symn, _dl_objects, &this,
-	    SYM_SEARCH_ALL|SYM_WARNNOTFOUND|SYM_PLT, 0);
+	    SYM_SEARCH_ALL|SYM_WARNNOTFOUND|SYM_PLT, 0, object->load_name);
 	if (this == NULL) {
 		_dl_printf("lazy binding failed!\n");
 		*((int *)0) = 0;	/* XXX */
@@ -350,7 +355,24 @@ _dl_bind(elf_object_t *object, Elf_Word reloff)
 
 	value = ooff + this->st_value;
 
+	/* if PLT is protected, allow the write */
+	if (object->plt_size != 0) {
+		sigfillset(&nmask);
+		_dl_sigprocmask(SIG_BLOCK, &nmask, &omask);
+		/* mprotect the actual modified region, not the whole plt */
+		_dl_mprotect((void*)addr,sizeof (Elf_Addr) * 3,
+		    PROT_READ|PROT_WRITE|PROT_EXEC);
+	}
+
 	_dl_reloc_plt(addr, value);
+
+	/* if PLT is (to be protected, change back to RO/X */
+	if (object->plt_size != 0) {
+		/* mprotect the actual modified region, not the whole plt */
+		_dl_mprotect((void*)addr,sizeof (Elf_Addr) * 3,
+		    PROT_READ|PROT_EXEC);
+		_dl_sigprocmask(SIG_SETMASK, &omask, NULL);
+	}
 
 	return (value);
 }
@@ -360,6 +382,9 @@ _dl_md_reloc_got(elf_object_t *object, int lazy)
 {
 	Elf_Addr *pltgot;
 	extern void _dl_bind_start(void);	/* XXX */
+	Elf_Addr ooff;
+	const Elf_Sym *this;
+	Elf_Addr plt_addr;
 
 	pltgot = (Elf_Addr *)object->Dyn.info[DT_PLTGOT];
 
@@ -390,9 +415,139 @@ _dl_md_reloc_got(elf_object_t *object, int lazy)
 		__asm __volatile("nop;nop;nop;nop;nop");
 	}
 
+	object->got_addr = NULL;
+	object->got_size = 0;
+	this = NULL;
+	ooff = _dl_find_symbol("__got_start", object, &this,
+	    SYM_SEARCH_SELF|SYM_NOWARNNOTFOUND|SYM_PLT, SYM_NOTPLT,
+	    NULL);
+	if (this != NULL)
+		object->got_addr = ooff + this->st_value;
+
+	this = NULL;
+	ooff = _dl_find_symbol("__got_end", object, &this,
+	    SYM_SEARCH_SELF|SYM_NOWARNNOTFOUND|SYM_PLT, SYM_NOTPLT,
+	    NULL);
+	if (this != NULL)
+		object->got_size = ooff + this->st_value  - object->got_addr;
+
+	plt_addr = 0;
+	object->plt_size = 0;
+	this = NULL;
+	ooff = _dl_find_symbol("__plt_start", object, &this,
+	    SYM_SEARCH_SELF|SYM_NOWARNNOTFOUND|SYM_PLT, SYM_NOTPLT,
+	    NULL);
+	if (this != NULL)
+		plt_addr = ooff + this->st_value;
+
+	this = NULL;
+	ooff = _dl_find_symbol("__plt_end", object, &this,
+	    SYM_SEARCH_SELF|SYM_NOWARNNOTFOUND|SYM_PLT, SYM_NOTPLT,
+	    NULL);
+	if (this != NULL)
+		object->plt_size = ooff + this->st_value  - plt_addr;
+
+	if (object->got_addr == NULL)
+		object->got_start = NULL;
+	else {
+		object->got_start = ELF_TRUNC(object->got_addr, _dl_pagesz);
+		object->got_size += object->got_addr - object->got_start;
+		object->got_size = ELF_ROUND(object->got_size, _dl_pagesz);
+	}
+	if (plt_addr == NULL)
+		object->plt_start = NULL;
+	else {
+		object->plt_start = ELF_TRUNC(plt_addr, _dl_pagesz);
+		object->plt_size += plt_addr - object->plt_start;
+		object->plt_size = ELF_ROUND(object->plt_size, _dl_pagesz);
+	}
+
 	if (object->obj_type == OBJTYPE_LDR || !lazy || pltgot == NULL) {
 		_dl_md_reloc(object, DT_JMPREL, DT_PLTRELSZ);
 		return;
 	}
 
+	if (object->got_size != 0)
+		_dl_mprotect((void*)object->got_addr, object->got_size,
+		    PROT_READ);
+	if (object->plt_size != 0)
+		_dl_mprotect((void*)object->plt_start, object->plt_size,
+		    PROT_READ|PROT_EXEC);
+}
+
+
+void __mul(void);
+void _mulreplace_end(void);
+void _mulreplace(void);
+void __umul(void);
+void _umulreplace_end(void);
+void _umulreplace(void);
+
+void __div(void);
+void _divreplace_end(void);
+void _divreplace(void);
+void __udiv(void);
+void _udivreplace_end(void);
+void _udivreplace(void);
+
+void __rem(void);
+void _remreplace_end(void);
+void _remreplace(void);
+void __urem(void);
+void _uremreplace_end(void);
+void _uremreplace(void);
+
+void
+_dl_mul_fixup()
+{
+	int mib[2], v8mul;
+	size_t len;
+
+
+        mib[0] = CTL_MACHDEP;
+	mib[1] = CPU_V8MUL;
+	len = sizeof(v8mul);
+	_dl_sysctl(mib, 2, &v8mul, &len, NULL, 0);
+
+
+	if (!v8mul)
+		return;
+
+	_dl_mprotect(&__mul, _mulreplace_end-_mulreplace,
+	    PROT_READ|PROT_WRITE|PROT_EXEC);
+	_dl_bcopy(_mulreplace, __mul, _mulreplace_end-_mulreplace);
+	_dl_mprotect(&__mul, _mulreplace_end-_mulreplace,
+	    PROT_READ|PROT_EXEC);
+
+	_dl_mprotect(&__umul, _umulreplace_end-_umulreplace,
+	    PROT_READ|PROT_WRITE|PROT_EXEC);
+	_dl_bcopy(_umulreplace, __umul, _umulreplace_end-_umulreplace);
+	_dl_mprotect(&__umul, _umulreplace_end-_umulreplace,
+	    PROT_READ|PROT_EXEC);
+
+
+	_dl_mprotect(&__div, _divreplace_end-_divreplace,
+	    PROT_READ|PROT_WRITE|PROT_EXEC);
+	_dl_bcopy(_divreplace, __div, _divreplace_end-_divreplace);
+	_dl_mprotect(&__div, _divreplace_end-_divreplace,
+	    PROT_READ|PROT_EXEC);
+
+	_dl_mprotect(&__udiv, _udivreplace_end-_udivreplace,
+	    PROT_READ|PROT_WRITE|PROT_EXEC);
+	_dl_bcopy(_udivreplace, __udiv, _udivreplace_end-_udivreplace);
+	_dl_mprotect(&__udiv, _udivreplace_end-_udivreplace,
+	    PROT_READ|PROT_EXEC);
+
+
+	_dl_mprotect(&__rem, _remreplace_end-_remreplace,
+	    PROT_READ|PROT_WRITE|PROT_EXEC);
+	_dl_bcopy(_remreplace, __rem, _remreplace_end-_remreplace);
+	_dl_mprotect(&__rem, _remreplace_end-_remreplace,
+	    PROT_READ|PROT_EXEC);
+
+	_dl_mprotect(&__urem, _uremreplace_end-_uremreplace,
+	    PROT_READ|PROT_WRITE|PROT_EXEC);
+	_dl_bcopy(_uremreplace, __urem, _uremreplace_end-_uremreplace);
+	_dl_mprotect(&__urem, _uremreplace_end-_uremreplace,
+	    PROT_READ|PROT_EXEC);
 }

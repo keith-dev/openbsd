@@ -1,4 +1,4 @@
-/*	$OpenBSD: print-ip.c,v 1.17 2002/09/18 08:51:17 jakob Exp $	*/
+/*	$OpenBSD: print-ip.c,v 1.19 2003/02/20 23:39:20 jason Exp $	*/
 
 /*
  * Copyright (c) 1988, 1989, 1990, 1991, 1992, 1993, 1994, 1995, 1996, 1997
@@ -23,7 +23,7 @@
 
 #ifndef lint
 static const char rcsid[] =
-    "@(#) $Header: /cvs/src/usr.sbin/tcpdump/print-ip.c,v 1.17 2002/09/18 08:51:17 jakob Exp $ (LBL)";
+    "@(#) $Header: /cvs/src/usr.sbin/tcpdump/print-ip.c,v 1.19 2003/02/20 23:39:20 jason Exp $ (LBL)";
 #endif
 
 #include <sys/param.h>
@@ -539,6 +539,13 @@ ip_print(register const u_char *bp, register u_int length)
 			etherip_print(cp, len, (const u_char *)ip);
 			break;
 
+#ifndef	IPPROTO_IPCOMP
+#define	IPPROTO_IPCOMP	108
+#endif
+		case IPPROTO_IPCOMP:
+			ipcomp_print(cp, len, (const u_char *)ip);
+			break;
+
 #ifndef IPPROTO_VRRP  
 #define IPPROTO_VRRP 112
 #endif
@@ -573,7 +580,8 @@ ip_print(register const u_char *bp, register u_int length)
 		(void)printf(" (frag %d:%d@%d%s)", ntohs(ip->ip_id), len,
 			(off & 0x1fff) * 8,
 			(off & IP_MF)? "+" : "");
-	} else if (off & IP_DF)
+	} 
+	if (off & IP_DF)
 		(void)printf(" (DF)");
 
 	if (ip->ip_tos) {

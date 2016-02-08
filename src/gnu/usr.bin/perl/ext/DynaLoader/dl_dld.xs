@@ -7,14 +7,14 @@
  *    You may distribute under the terms of either the GNU General Public
  *    License or the Artistic License, as specified in the README file.
  *
- * $Date: 2001/05/24 18:35:09 $
+ * $Date: 2002/10/27 22:25:22 $
  * $Source: /cvs/src/gnu/usr.bin/perl/ext/DynaLoader/dl_dld.xs,v $
- * $Revision: 1.5 $
+ * $Revision: 1.6 $
  * $State: Exp $
  *
  * $Log: dl_dld.xs,v $
- * Revision 1.5  2001/05/24 18:35:09  millert
- * merge in perl 5.6.1 with our local changes
+ * Revision 1.6  2002/10/27 22:25:22  millert
+ * Resolve conflicts, remove old files, merge local changes
  *
  * Removed implicit link against libc.  1994/09/14 William Setzer.
  *
@@ -45,31 +45,41 @@
 #include <dld.h>	/* GNU DLD header file */
 #include <unistd.h>
 
+typedef struct {
+    AV *	x_resolve_using;
+    AV *	x_require_symbols;
+} my_cxtx_t;		/* this *must* be named my_cxtx_t */
+
+#define DL_CXT_EXTRA	/* ask for dl_cxtx to be defined in dlutils.c */
 #include "dlutils.c"	/* for SaveError() etc */
 
-static AV *dl_resolve_using   = Nullav;
-static AV *dl_require_symbols = Nullav;
+#define dl_resolve_using	(dl_cxtx.x_resolve_using)
+#define dl_require_symbols	(dl_cxtx.x_require_symbols)
 
 static void
 dl_private_init(pTHX)
 {
-    int dlderr;
     dl_generic_private_init(aTHX);
-    dl_resolve_using   = get_av("DynaLoader::dl_resolve_using", GV_ADDMULTI);
-    dl_require_symbols = get_av("DynaLoader::dl_require_symbols", GV_ADDMULTI);
+    {
+	int dlderr;
+	dMY_CXT;
+
+	dl_resolve_using   = get_av("DynaLoader::dl_resolve_using", GV_ADDMULTI);
+	dl_require_symbols = get_av("DynaLoader::dl_require_symbols", GV_ADDMULTI);
 #ifdef __linux__
-    dlderr = dld_init("/proc/self/exe");
-    if (dlderr) {
+	dlderr = dld_init("/proc/self/exe");
+	if (dlderr) {
 #endif
-        dlderr = dld_init(dld_find_executable(PL_origargv[0]));
-        if (dlderr) {
-            char *msg = dld_strerror(dlderr);
-            SaveError(aTHX_ "dld_init(%s) failed: %s", PL_origargv[0], msg);
-            DLDEBUG(1,PerlIO_printf(Perl_debug_log, "%s", LastError));
-        }
+	    dlderr = dld_init(dld_find_executable(PL_origargv[0]));
+	    if (dlderr) {
+		char *msg = dld_strerror(dlderr);
+		SaveError(aTHX_ "dld_init(%s) failed: %s", PL_origargv[0], msg);
+		DLDEBUG(1,PerlIO_printf(Perl_debug_log, "%s", dl_last_error));
+	    }
 #ifdef __linux__
+	}
+#endif
     }
-#endif
 }
 
 
@@ -86,6 +96,7 @@ dl_load_file(filename, flags=0)
     PREINIT:
     int dlderr,x,max;
     GV *gv;
+    dMY_CXT;
     CODE:
     RETVAL = filename;
     DLDEBUG(1,PerlIO_printf(Perl_debug_log, "dl_load_file(%s,%x):\n", filename,flags));
@@ -172,8 +183,10 @@ dl_install_xsub(perl_name, symref, filename="$Package")
 
 char *
 dl_error()
+    PREINIT:
+    dMY_CXT;
     CODE:
-    RETVAL = LastError ;
+    RETVAL = dl_last_error ;
     OUTPUT:
     RETVAL
 

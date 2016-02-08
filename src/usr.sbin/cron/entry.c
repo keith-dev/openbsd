@@ -1,4 +1,5 @@
-/*	$OpenBSD: entry.c,v 1.15 2002/08/10 20:28:51 millert Exp $	*/
+/*	$OpenBSD: entry.c,v 1.24 2003/03/12 18:15:55 millert Exp $	*/
+
 /*
  * Copyright 1988,1990,1993,1994 by Paul Vixie
  * All rights reserved
@@ -22,7 +23,7 @@
  */
 
 #if !defined(lint) && !defined(LINT)
-static char const rcsid[] = "$OpenBSD: entry.c,v 1.15 2002/08/10 20:28:51 millert Exp $";
+static char const rcsid[] = "$OpenBSD: entry.c,v 1.24 2003/03/12 18:15:55 millert Exp $";
 #endif
 
 /* vix 26jan87 [RCS'd; rest of log is in RCS file]
@@ -55,7 +56,7 @@ static const char *ecodes[] =
 
 static char	get_list(bitstr_t *, int, int, const char *[], char, FILE *),
 		get_range(bitstr_t *, int, int, const char *[], char, FILE *),
-		get_number(int *, int, const char *[], char, FILE *);
+		get_number(int *, int, const char *[], char, FILE *, const char *);
 static int	set_element(bitstr_t *, int, int, int);
 
 void
@@ -73,7 +74,7 @@ entry *
 load_entry(FILE *file, void (*error_func)(), struct passwd *pw, char **envp) {
 	/* this function reads one crontab entry -- the next -- from a file.
 	 * it skips any leading blank lines, ignores comments, and returns
-	 * EOF if for any reason the entry can't be read and parsed.
+	 * NULL if for any reason the entry can't be read and parsed.
 	 *
 	 * the entry is also parsed here.
 	 *
@@ -164,7 +165,7 @@ load_entry(FILE *file, void (*error_func)(), struct passwd *pw, char **envp) {
 		 * username/command.
 		 */
 		Skip_Blanks(ch, file);
-		if (ch == EOF) {
+		if (ch == EOF || ch == '\n') {
 			ecode = e_cmd;
 			goto eof;
 		}
@@ -233,6 +234,12 @@ load_entry(FILE *file, void (*error_func)(), struct passwd *pw, char **envp) {
 		bit_set(e->dow, 7);
 	}
 
+	/* check for permature EOL and catch a common typo */
+	if (ch == '\n' || ch == '*') {
+		ecode = e_cmd;
+		goto eof;
+	}
+
 	/* ch is the first character of a command, or a username */
 	unget_char(ch, file);
 
@@ -240,23 +247,21 @@ load_entry(FILE *file, void (*error_func)(), struct passwd *pw, char **envp) {
 		char		*username = cmd;	/* temp buffer */
 
 		Debug(DPARS, ("load_entry()...about to parse username\n"))
-		ch = get_string(username, MAX_COMMAND, file, " \t");
+		ch = get_string(username, MAX_COMMAND, file, " \t\n");
 
 		Debug(DPARS, ("load_entry()...got %s\n",username))
-		if (ch == EOF) {
+		if (ch == EOF || ch == '\n' || ch == '*') {
 			ecode = e_cmd;
 			goto eof;
 		}
 
-		if ((pw = getpwnam(username)) == NULL) {
+		pw = getpwnam(username);
+		if (pw == NULL) {
 			ecode = e_username;
 			goto eof;
 		}
 		Debug(DPARS, ("load_entry()...uid %ld, gid %ld\n",
-			      (long)e->pwd->pw_uid, (long)e->pwd->pw_gid))
-	} else if (ch == '*') {
-		ecode = e_cmd;
-		goto eof;
+			      (long)pw->pw_uid, (long)pw->pw_gid))
 	}
 
 	if ((e->pwd = pw_dup(pw)) == NULL) {
@@ -294,7 +299,8 @@ load_entry(FILE *file, void (*error_func)(), struct passwd *pw, char **envp) {
 		} else
 			log_it("CRON", getpid(), "error", "can't set HOME");
 	}
-#ifdef LOGIN_CAP
+#ifndef LOGIN_CAP
+	/* If login.conf is in use we will get the default PATH later. */
 	if (!env_get("PATH", e->envp)) {
 		if (glue_strings(envstr, sizeof envstr, "PATH",
 				 _PATH_DEFPATH, '=')) {
@@ -316,7 +322,7 @@ load_entry(FILE *file, void (*error_func)(), struct passwd *pw, char **envp) {
 		e->envp = tenvp;
 	} else
 		log_it("CRON", getpid(), "error", "can't set LOGNAME");
-#if defined(BSD)
+#if defined(BSD) || defined(__linux)
 	if (glue_strings(envstr, sizeof envstr, "USER",
 			 pw->pw_name, '=')) {
 		if ((tenvp = env_set(e->envp, envstr)) == NULL) {
@@ -343,6 +349,10 @@ load_entry(FILE *file, void (*error_func)(), struct passwd *pw, char **envp) {
 			goto eof;
 		}
 		Skip_Blanks(ch, file)
+		if (ch == EOF || ch == '\n') {
+			ecode = e_cmd;
+			goto eof;
+		}
 	}
 	unget_char(ch, file);
 
@@ -380,10 +390,10 @@ load_entry(FILE *file, void (*error_func)(), struct passwd *pw, char **envp) {
 	if (e->cmd)
 		free(e->cmd);
 	free(e);
+	while (ch != '\n' && !feof(file))
+		ch = get_char(file);
 	if (ecode != e_none && error_func)
 		(*error_func)(ecodes[(int)ecode]);
-	while (ch != EOF && ch != '\n')
-		ch = get_char(file);
 	return (NULL);
 }
 
@@ -412,7 +422,8 @@ get_list(bitstr_t *bits, int low, int high, const char *names[],
 	 */
 	done = FALSE;
 	while (!done) {
-		ch = get_range(bits, low, high, names, ch, file);
+		if (EOF == (ch = get_range(bits, low, high, names, ch, file)))
+			return (EOF);
 		if (ch == ',')
 			ch = get_char(file);
 		else
@@ -450,14 +461,17 @@ get_range(bitstr_t *bits, int low, int high, const char *names[],
 		if (ch == EOF)
 			return (EOF);
 	} else {
-		if (EOF == (ch = get_number(&num1, low, names, ch, file)))
+		ch = get_number(&num1, low, names, ch, file, ",- \t\n");
+		if (ch == EOF)
 			return (EOF);
 
 		if (ch != '-') {
 			/* not a range, it's a single number.
 			 */
-			if (EOF == set_element(bits, low, high, num1))
+			if (EOF == set_element(bits, low, high, num1)) {
+				unget_char(ch, file);
 				return (EOF);
+			}
 			return (ch);
 		} else {
 			/* eat the dash
@@ -468,8 +482,8 @@ get_range(bitstr_t *bits, int low, int high, const char *names[],
 
 			/* get the number following the dash
 			 */
-			ch = get_number(&num2, low, names, ch, file);
-			if (ch == EOF)
+			ch = get_number(&num2, low, names, ch, file, "/, \t\n");
+			if (ch == EOF || num1 > num2)
 				return (EOF);
 		}
 	}
@@ -488,8 +502,8 @@ get_range(bitstr_t *bits, int low, int high, const char *names[],
 		 * element id, it's a step size.  'low' is
 		 * sent as a 0 since there is no offset either.
 		 */
-		ch = get_number(&num3, 0, PPC_NULL, ch, file);
-		if (ch == EOF)
+		ch = get_number(&num3, 0, PPC_NULL, ch, file, ", \t\n");
+		if (ch == EOF || num3 == 0)
 			return (EOF);
 	} else {
 		/* no step.  default==1.
@@ -503,57 +517,63 @@ get_range(bitstr_t *bits, int low, int high, const char *names[],
 	 * designed then implemented by paul vixie).
 	 */
 	for (i = num1;  i <= num2;  i += num3)
-		if (EOF == set_element(bits, low, high, i))
+		if (EOF == set_element(bits, low, high, i)) {
+			unget_char(ch, file);
 			return (EOF);
+		}
 
 	return (ch);
 }
 
 static char
-get_number(int *numptr, int low, const char *names[], char ch, FILE *file) {
+get_number(int *numptr, int low, const char *names[], char ch, FILE *file,
+    const char *terms) {
 	char temp[MAX_TEMPSTR], *pc;
-	int len, i, all_digits;
+	int len, i;
 
-	/* collect alphanumerics into our fixed-size temp array
-	 */
 	pc = temp;
 	len = 0;
-	all_digits = TRUE;
-	while (isalnum(ch)) {
+
+	/* first look for a number */
+	while (isdigit((unsigned char)ch)) {
 		if (++len >= MAX_TEMPSTR)
-			return (EOF);
-
+			goto bad;
 		*pc++ = ch;
-
-		if (!isdigit(ch))
-			all_digits = FALSE;
-
 		ch = get_char(file);
 	}
 	*pc = '\0';
-
-	/* try to find the name in the name list
-	 */
-	if (names) {
-		for (i = 0;  names[i] != NULL;  i++) {
-			Debug(DPARS|DEXT,
-				("get_num, compare(%s,%s)\n", names[i], temp))
-			if (!strcasecmp(names[i], temp)) {
-				*numptr = i+low;
-				return (ch);
-			}
-		}
-	}
-
-	/* no name list specified, or there is one and our string isn't
-	 * in it.  either way: if it's all digits, use its magnitude.
-	 * otherwise, it's an error.
-	 */
-	if (all_digits) {
+	if (len != 0) {
+		/* got a number, check for valid terminator */
+		if (!strchr(terms, ch))
+			goto bad;
 		*numptr = atoi(temp);
 		return (ch);
 	}
 
+	/* no numbers, look for a string if we have any */
+	if (names) {
+		while (isalpha((unsigned char)ch)) {
+			if (++len >= MAX_TEMPSTR)
+				goto bad;
+			*pc++ = ch;
+			ch = get_char(file);
+		}
+		*pc = '\0';
+		if (len != 0 && strchr(terms, ch)) {
+			for (i = 0;  names[i] != NULL;  i++) {
+				Debug(DPARS|DEXT,
+					("get_num, compare(%s,%s)\n", names[i],
+					temp))
+				if (!strcasecmp(names[i], temp)) {
+					*numptr = i+low;
+					return (ch);
+				}
+			}
+		}
+	}
+
+bad:
+	unget_char(ch, file);
 	return (EOF);
 }
 

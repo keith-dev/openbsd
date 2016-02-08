@@ -1,6 +1,8 @@
-#	$OpenBSD: Makefile,v 1.17 2002/06/03 17:25:46 millert Exp $
+#	$OpenBSD: Makefile,v 1.21 2003/03/10 21:08:44 millert Exp $
 
 PROG=	sendmail
+
+.include <bsd.own.mk>
 
 WANT_LIBWRAP=1
 WANT_LIBSM=1
@@ -11,15 +13,18 @@ ENVDEF+= -DSTARTTLS
 LDADD+= -lssl -lcrypto
 DPADD=	${LIBSSL} ${LIBCRYPTO}
 
-# To build with Cyrus SASL support (untested)
-#ENVDEF+= -DSASL
-#LDADD+= -lsasl
+# To build with SASL support define WANT_SMTPAUTH in /etc/mk.conf (unsupported)
+.if defined(WANT_SMTPAUTH)
+ENVDEF+= -DSASL
+CFLAGS+= -I/usr/local/include/sasl
+LDADD+= -lsasl2
+LDFLAGS+=-L/usr/local/lib
+.endif
 
-# To build with mail filter support (untested)
-#WANT_LIBMILTER=1
-#ENVDEF+= -DMILTER
-#CPPFLAGS+= -pthread
-#LDFLAGS+= -pthread
+# To build milter support define WANT_LIBMILTER in /etc/mk.conf (unsupported)
+.if defined(WANT_LIBMILTER)
+ENVDEF+= -DMILTER
+.endif
 
 # Since we have random PIDs we need to be careful to avoid filename collisions
 ENVDEF+= -DFAST_PID_RECYCLE
@@ -56,8 +61,6 @@ beforeinstall:
 	fi
 	${INSTALL} ${INSTALL_COPY} -o ${BINOWN} -g wheel -m 444 \
 	    ${.CURDIR}/helpfile ${DESTDIR}/etc/mail/helpfile
-	${INSTALL} ${INSTALL_COPY} -o ${BINOWN} -g wheel -m 644 \
-	    /dev/null ${DESTDIR}/var/log/sendmail.st
 
 .include "../../Makefile.inc"
 .include <bsd.prog.mk>

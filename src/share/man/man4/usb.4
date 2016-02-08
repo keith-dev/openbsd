@@ -1,4 +1,4 @@
-.\"	$OpenBSD: usb.4,v 1.18 2002/09/26 22:09:53 miod Exp $
+.\"	$OpenBSD: usb.4,v 1.23 2002/11/30 19:36:58 nate Exp $
 .\"	$NetBSD: usb.4,v 1.15 1999/07/29 14:20:32 augustss Exp $
 .\"
 .\" Copyright (c) 1999 The NetBSD Foundation, Inc.
@@ -113,15 +113,15 @@ includes machine-independent
 .Tn USB
 drivers, sorted by device type and driver name:
 .Ss Storage devices
-.Bl -tag -width 10n -offset ind -compact
+.Bl -tag -width 12n -offset ind -compact
 .It Xr umass 4
 .Tn USB
 Mass Storage Devices, e.g., external disk drives.
 .El
 .Ss Ethernet adapters
-.Bl -tag -width 10n -offset ind -compact
+.Bl -tag -width 12n -offset ind -compact
 .It Xr aue 4
-AN986 Pegasus-based Ethernet interfaces.
+ADMtek AN986 / ADM8511 Pegasus family USB Ethernet.
 .It Xr cue 4
 CATC USB-EL1201A-based Ethernet interfaces.
 .It Xr kue 4
@@ -130,7 +130,9 @@ Kawasaki LSI KL5KUSB101B-based Ethernet interfaces.
 Realtek RTL8150L-based Ethernet interfaces.
 .El
 .Ss Serial and parallel interfaces
-.Bl -tag -width 10n -offset ind -compact
+.Bl -tag -width 12n -offset ind -compact
+.It Xr ubsa 4
+Belkin serial adapters.
 .It Xr ucom 4
 Serial port-like devices.
 .It Xr uftdi 4
@@ -145,9 +147,11 @@ MCT USB-RS232 serial adapters.
 Modems.
 .It Xr uplcom 4
 Prolific PL-2303 serial adapters.
+.It Xr uvscom 4
+SUNTAC Slipper U VS-10U serial adapters.
 .El
 .Ss Audio devices
-.Bl -tag -width 10n -offset ind -compact
+.Bl -tag -width 12n -offset ind -compact
 .It Xr uaudio 4
 Audio devices.
 .It Xr umidi 4
@@ -157,12 +161,12 @@ MIDI devices.
 Diamond Multimedia Rio MP3 players.
 .El
 .Ss Radio receiver devices
-.Bl -tag -width 10n -offset ind -compact
-.It udsbr
-driver for D-Link DSB-R100 USB radio.
+.Bl -tag -width 12n -offset ind -compact
+.It Xr udsbr 4
+D-Link DSB-R100 USB radio.
 .El
 .Ss Human Interface Devices
-.Bl -tag -width 10n -offset ind -compact
+.Bl -tag -width 12n -offset ind -compact
 .It Xr uhid 4
 Generic driver for Human Interface Devices.
 .It Xr uhidev 4
@@ -175,7 +179,7 @@ keyboards that follow the boot protocol.
 mouse devices.
 .El
 .Ss Miscellaneous devices
-.Bl -tag -width 10n -offset ind -compact
+.Bl -tag -width 12n -offset ind -compact
 .It Xr ugen 4
 Generic driver for unknown
 .Tn USB
@@ -418,6 +422,7 @@ Human Interface Devices
 .Xr pci 4 ,
 .Xr pcmcia 4 ,
 .Xr uaudio 4 ,
+.Xr ubsa 4 ,
 .Xr ucom 4 ,
 .Xr udsbr 4 ,
 .Xr uftdi 4 ,
@@ -439,6 +444,7 @@ Human Interface Devices
 .Xr uscanner 4 ,
 .Xr usscanner 4 ,
 .Xr uvisor 4 ,
+.Xr uvscom 4 ,
 .Xr uyap 4 ,
 .Xr usbdevs 8
 .Pp

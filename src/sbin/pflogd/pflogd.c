@@ -1,4 +1,4 @@
-/*	$OpenBSD: pflogd.c,v 1.13 2002/09/03 18:28:49 deraadt Exp $	*/
+/*	$OpenBSD: pflogd.c,v 1.18 2003/03/11 02:35:34 kjc Exp $	*/
 
 /*
  * Copyright (c) 2001 Theo de Raadt
@@ -65,40 +65,47 @@ volatile sig_atomic_t gotsig_close, gotsig_alrm, gotsig_hup;
 
 char *filename = PFLOGD_LOG_FILE;
 char *interface = PFLOGD_DEFAULT_IF;
-char *filter = 0;
+char *filter = NULL;
 
 char errbuf[PCAP_ERRBUF_SIZE];
 
 int log_debug = 0;
-int delay = FLUSH_DELAY;
+unsigned int delay = FLUSH_DELAY;
 
 char *copy_argv(char * const *argv);
-void logmsg(int priority, const char *message, ...);
+int   init_pcap(void);
+void  logmsg(int priority, const char *message, ...);
+int   reset_dump(void);
+void  sig_alrm(int);
+void  sig_close(int);
+void  sig_hup(int);
+void  usage(void);
+
 
 char *
 copy_argv(char * const *argv)
 {
-	int len = 0, n;
+	size_t len = 0, n;
 	char *buf;
 
 	if (argv == NULL)
-		return NULL;
+		return (NULL);
 
 	for (n = 0; argv[n]; n++)
 		len += strlen(argv[n])+1;
-	if (len <= 0)
-		return NULL;
+	if (len == 0)
+		return (NULL);
 
 	buf = malloc(len);
 	if (buf == NULL)
-		return NULL;
+		return (NULL);
 
 	strlcpy(buf, argv[0], len);
 	for (n = 1; argv[n]; n++) {
 		strlcat(buf, " ", len);
 		strlcat(buf, argv[n], len);
 	}
-	return buf;
+	return (buf);
 }
 
 void
@@ -107,14 +114,15 @@ logmsg(int pri, const char *message, ...)
 	va_list ap;
 	va_start(ap, message);
 
-	if (log_debug)
+	if (log_debug) {
 		vfprintf(stderr, message, ap);
-	else
+		fprintf(stderr, "\n");
+	} else
 		vsyslog(pri, message, ap);
 	va_end(ap);
 }
 
-void
+__dead void
 usage(void)
 {
 	fprintf(stderr, "usage: pflogd [-D] [-d delay] [-f filename] ");
@@ -123,19 +131,19 @@ usage(void)
 }
 
 void
-sig_close(int signal)
+sig_close(int sig)
 {
 	gotsig_close = 1;
 }
 
 void
-sig_hup(int signal)
+sig_hup(int sig)
 {
 	gotsig_hup = 1;
 }
 
 void
-sig_alrm(int signal)
+sig_alrm(int sig)
 {
 	gotsig_alrm = 1;
 }
@@ -148,20 +156,20 @@ init_pcap(void)
 
 	hpcap = pcap_open_live(interface, snaplen, 1, PCAP_TO_MS, errbuf);
 	if (hpcap == NULL) {
-		logmsg(LOG_ERR, "Failed to initialize: %s\n", errbuf);
+		logmsg(LOG_ERR, "Failed to initialize: %s", errbuf);
 		hpcap = oldhpcap;
 		return (-1);
 	}
 
-	if (filter) {
-		if (pcap_compile(hpcap, &bprog, filter, PCAP_OPT_FIL, 0) < 0)
-			logmsg(LOG_WARNING, "%s\n", pcap_geterr(hpcap));
-		else if (pcap_setfilter(hpcap, &bprog) < 0)
-			logmsg(LOG_WARNING, "%s\n", pcap_geterr(hpcap));
-	}
+	if (pcap_compile(hpcap, &bprog, filter, PCAP_OPT_FIL, 0) < 0)
+		logmsg(LOG_WARNING, "%s", pcap_geterr(hpcap));
+	else if (pcap_setfilter(hpcap, &bprog) < 0)
+		logmsg(LOG_WARNING, "%s", pcap_geterr(hpcap));
+	if (filter != NULL)
+		free(filter);
 
 	if (pcap_datalink(hpcap) != DLT_PFLOG) {
-		logmsg(LOG_ERR, "Invalid datalink type\n");
+		logmsg(LOG_ERR, "Invalid datalink type");
 		pcap_close(hpcap);
 		hpcap = oldhpcap;
 		return (-1);
@@ -171,8 +179,8 @@ init_pcap(void)
 		pcap_close(oldhpcap);
 
 	snaplen = pcap_snapshot(hpcap);
-	logmsg(LOG_NOTICE, "Listening on %s, logging to %s, snaplen %d\n",
-		interface, filename, snaplen);
+	logmsg(LOG_NOTICE, "Listening on %s, logging to %s, snaplen %d",
+	    interface, filename, snaplen);
 	return (0);
 }
 
@@ -185,7 +193,7 @@ reset_dump(void)
 	FILE *fp;
 
 	if (hpcap == NULL)
-		return 1;
+		return (1);
 	if (dpcap) {
 		pcap_dump_close(dpcap);
 		dpcap = 0;
@@ -199,14 +207,14 @@ reset_dump(void)
 	if (fp == NULL) {
 		snprintf(hpcap->errbuf, PCAP_ERRBUF_SIZE, "%s: %s",
 		    filename, pcap_strerror(errno));
-		logmsg(LOG_ERR, "Error: %s\n", pcap_geterr(hpcap));
-		return 1;
+		logmsg(LOG_ERR, "Error: %s", pcap_geterr(hpcap));
+		return (1);
 	}
 	if (fstat(fileno(fp), &st) == -1) {
 		snprintf(hpcap->errbuf, PCAP_ERRBUF_SIZE, "%s: %s",
 		    filename, pcap_strerror(errno));
-		logmsg(LOG_ERR, "Error: %s\n", pcap_geterr(hpcap));
-		return 1;
+		logmsg(LOG_ERR, "Error: %s", pcap_geterr(hpcap));
+		return (1);
 	}
 
 	dpcap = (pcap_dumper_t *)fp;
@@ -215,11 +223,11 @@ reset_dump(void)
 
 	if (st.st_size == 0) {
 		if (snaplen != pcap_snapshot(hpcap)) {
-			logmsg(LOG_NOTICE, "Using snaplen %d\n", snaplen);
+			logmsg(LOG_NOTICE, "Using snaplen %d", snaplen);
 			if (init_pcap()) {
-				logmsg(LOG_ERR, "Failed to initialize\n");
+				logmsg(LOG_ERR, "Failed to initialize");
 				if (hpcap == NULL) return (-1);
-				logmsg(LOG_NOTICE, "Using old settings\n");
+				logmsg(LOG_NOTICE, "Using old settings");
 			}
 		}
 		hdr.magic = TCPDUMP_MAGIC;
@@ -250,17 +258,17 @@ reset_dump(void)
 		    hdr.version_minor == PCAP_VERSION_MINOR &&
 		    hdr.snaplen != snaplen) {
 			logmsg(LOG_WARNING,
-			    "Existing file specifies a snaplen of %d, using it",
+			    "Existing file specifies a snaplen of %u, using it",
 			    hdr.snaplen);
 			tmpsnap = snaplen;
 			snaplen = hdr.snaplen;
 			if (init_pcap()) {
-				logmsg(LOG_ERR, "Failed to re-initialize\n");
+				logmsg(LOG_ERR, "Failed to re-initialize");
 				if (hpcap == 0)
 					return (-1);
 				logmsg(LOG_NOTICE,
-					"Using old settings, offset: %d\n",
-					st.st_size);
+					"Using old settings, offset: %llu",
+					(unsigned long long)st.st_size);
 			}
 			snaplen = tmpsnap;
 		}
@@ -308,7 +316,7 @@ main(int argc, char **argv)
 		openlog("pflogd", LOG_PID | LOG_CONS, LOG_DAEMON);
 		if (daemon(0, 0)) {
 			logmsg(LOG_WARNING, "Failed to become daemon: %s",
-				strerror(errno));
+			    strerror(errno));
 		}
 		pidfile(NULL);
 	}
@@ -324,17 +332,17 @@ main(int argc, char **argv)
 
 	if (argc) {
 		filter = copy_argv(argv);
-		if (filter == 0)
+		if (filter == NULL)
 			logmsg(LOG_NOTICE, "Failed to form filter expression");
 	}
 
 	if (init_pcap()) {
-		logmsg(LOG_ERR, "Exiting, init failure\n");
+		logmsg(LOG_ERR, "Exiting, init failure");
 		exit(1);
 	}
 
 	if (reset_dump()) {
-		logmsg(LOG_ERR, "Failed to open log file %s\n", filename);
+		logmsg(LOG_ERR, "Failed to open log file %s", filename);
 		pcap_close(hpcap);
 		exit(1);
 	}
@@ -342,39 +350,47 @@ main(int argc, char **argv)
 	while (1) {
 		np = pcap_dispatch(hpcap, PCAP_NUM_PKTS, pcap_dump, (u_char *)dpcap);
 		if (np < 0)
-			logmsg(LOG_NOTICE, "%s\n", pcap_geterr(hpcap));
+			logmsg(LOG_NOTICE, "%s", pcap_geterr(hpcap));
 
 		if (gotsig_close)
 			break;
 		if (gotsig_hup) {
 			if (reset_dump()) {
-				logmsg(LOG_ERR, "Failed to open log file!\n");
+				logmsg(LOG_ERR, "Failed to open log file!");
 				break;
 			}
-			logmsg(LOG_NOTICE, "Reopened logfile\n");
+			logmsg(LOG_NOTICE, "Reopened logfile");
 			gotsig_hup = 0;
 		}
 
 		if (gotsig_alrm) {
-			if (dpcap)
-				fflush((FILE *)dpcap);		/* XXX */
+			/* XXX pcap_dumper is an incomplete type which libpcap
+			 * casts to a FILE* currently.  For now it is safe to
+			 * make the same assumption, however this may change
+			 * in the future.
+			 */
+			if (dpcap) {
+				if (fflush((FILE *)dpcap) == EOF) {
+					break;
+				}
+			}
 			gotsig_alrm = 0;
 			alarm(delay);
 		}
 	}
 
-	logmsg(LOG_NOTICE, "Exiting due to signal\n");
+	logmsg(LOG_NOTICE, "Exiting due to signal");
 	if (dpcap)
 		pcap_dump_close(dpcap);
 
 	if (pcap_stats(hpcap, &pstat) < 0)
-		logmsg(LOG_WARNING, "Reading stats: %s\n", pcap_geterr(hpcap));
+		logmsg(LOG_WARNING, "Reading stats: %s", pcap_geterr(hpcap));
 	else
-		logmsg(LOG_NOTICE, "%d packets received, %d dropped\n",
+		logmsg(LOG_NOTICE, "%u packets received, %u dropped",
 		    pstat.ps_recv, pstat.ps_drop);
 
 	pcap_close(hpcap);
 	if (!Debug)
 		closelog();
-	return 0;
+	return (0);
 }

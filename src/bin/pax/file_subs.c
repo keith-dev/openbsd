@@ -1,4 +1,4 @@
-/*	$OpenBSD: file_subs.c,v 1.17 2002/02/19 19:39:35 millert Exp $	*/
+/*	$OpenBSD: file_subs.c,v 1.22 2003/02/03 09:06:43 jmc Exp $	*/
 /*	$NetBSD: file_subs.c,v 1.4 1995/03/21 09:07:18 cgd Exp $	*/
 
 /*-
@@ -40,29 +40,29 @@
 
 #ifndef lint
 #if 0
-static char sccsid[] = "@(#)file_subs.c	8.1 (Berkeley) 5/31/93";
+static const char sccsid[] = "@(#)file_subs.c	8.1 (Berkeley) 5/31/93";
 #else
-static char rcsid[] = "$OpenBSD: file_subs.c,v 1.17 2002/02/19 19:39:35 millert Exp $";
+static const char rcsid[] = "$OpenBSD: file_subs.c,v 1.22 2003/02/03 09:06:43 jmc Exp $";
 #endif
 #endif /* not lint */
 
-#include <sys/types.h>
+#include <sys/param.h>
 #include <sys/time.h>
 #include <sys/stat.h>
-#include <unistd.h>
-#include <sys/param.h>
-#include <fcntl.h>
-#include <string.h>
-#include <stdio.h>
-#include <errno.h>
 #include <sys/uio.h>
+#include <err.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
 #include "pax.h"
 #include "options.h"
 #include "extern.h"
 
 static int
-mk_link(register char *,register struct stat *,register char *, int);
+mk_link(char *, struct stat *, char *, int);
 
 /*
  * routines that deal with file operations such as: creating, removing;
@@ -81,19 +81,19 @@ mk_link(register char *,register struct stat *,register char *, int);
  */
 
 int
-file_creat(register ARCHD *arcn)
+file_creat(ARCHD *arcn)
 {
 	int fd = -1;
 	mode_t file_mode;
 	int oerrno;
 
 	/*
-	 * assume file doesn't exist, so just try to create it, most times this
+	 * Assume file doesn't exist, so just try to create it, most times this
 	 * works. We have to take special handling when the file does exist. To
 	 * detect this, we use O_EXCL. For example when trying to create a
 	 * file and a character device or fifo exists with the same name, we
-	 * can accidently open the device by mistake (or block waiting to open)
-	 * If we find that the open has failed, then figure spend the effore to
+	 * can accidently open the device by mistake (or block waiting to open).
+	 * If we find that the open has failed, then spend the effort to
 	 * figure out why. This strategy was found to have better average
 	 * performance in common use than checking the file (and the path)
 	 * first with lstat.
@@ -138,7 +138,7 @@ file_creat(register ARCHD *arcn)
  */
 
 void
-file_close(register ARCHD *arcn, int fd)
+file_close(ARCHD *arcn, int fd)
 {
 	int res = 0;
 
@@ -178,7 +178,7 @@ file_close(register ARCHD *arcn, int fd)
  */
 
 int
-lnk_creat(register ARCHD *arcn)
+lnk_creat(ARCHD *arcn)
 {
 	struct stat sb;
 
@@ -212,12 +212,12 @@ lnk_creat(register ARCHD *arcn)
  */
 
 int
-cross_lnk(register ARCHD *arcn)
+cross_lnk(ARCHD *arcn)
 {
 	/*
-	 * try to make a link to orginal file (-l flag in copy mode). make sure
-	 * we do not try to link to directories in case we are running as root
-	 * (and it might succeed).
+	 * try to make a link to orginal file (-l flag in copy mode). make
+	 * sure we do not try to link to directories in case we are running as
+	 * root (and it might succeed).
 	 */
 	if (arcn->type == PAX_DIR)
 		return(1);
@@ -236,7 +236,7 @@ cross_lnk(register ARCHD *arcn)
  */
 
 int
-chk_same(register ARCHD *arcn)
+chk_same(ARCHD *arcn)
 {
 	struct stat sb;
 
@@ -273,8 +273,7 @@ chk_same(register ARCHD *arcn)
  */
 
 static int
-mk_link(register char *to, register struct stat *to_sb, register char *from,
-	int ign)
+mk_link(char *to, struct stat *to_sb, char *from, int ign)
 {
 	struct stat sb;
 	int oerrno;
@@ -346,12 +345,12 @@ mk_link(register char *to, register struct stat *to_sb, register char *from,
  */
 
 int
-node_creat(register ARCHD *arcn)
+node_creat(ARCHD *arcn)
 {
-	register int res;
-	register int ign = 0;
-	register int oerrno;
-	register int pass = 0;
+	int res;
+	int ign = 0;
+	int oerrno;
+	int pass = 0;
 	mode_t file_mode;
 	struct stat sb;
 	char target[MAXPATHLEN];
@@ -536,7 +535,7 @@ badlink:
  */
 
 int
-unlnk_exist(register char *name, register int type)
+unlnk_exist(char *name, int type)
 {
 	struct stat sb;
 
@@ -587,9 +586,9 @@ unlnk_exist(register char *name, register int type)
  */
 
 int
-chk_path( register char *name, uid_t st_uid, gid_t st_gid)
+chk_path(char *name, uid_t st_uid, gid_t st_gid)
 {
-	register char *spt = name;
+	char *spt = name;
 	struct stat sb;
 	int retval = -1;
 
@@ -601,7 +600,7 @@ chk_path( register char *name, uid_t st_uid, gid_t st_gid)
 
 	for(;;) {
 		/*
-		 * work foward from the first / and check each part of the path
+		 * work forward from the first / and check each part of the path
 		 */
 		spt = strchr(spt, '/');
 		if (spt == NULL)
@@ -642,7 +641,7 @@ chk_path( register char *name, uid_t st_uid, gid_t st_gid)
 			(void)set_ids(name, st_uid, st_gid);
 
 		/*
-		 * make sure the user doen't have some strange umask that
+		 * make sure the user doesn't have some strange umask that
 		 * causes this newly created directory to be unusable. We fix
 		 * the modes and restore them back to the creation default at
 		 * the end of pax
@@ -660,8 +659,8 @@ chk_path( register char *name, uid_t st_uid, gid_t st_gid)
 
 /*
  * set_ftime()
- *	Set the access time and modification time for a named file. If frc is
- *	non-zero we force these times to be set even if the user did not
+ *	Set the access time and modification time for a named file. If frc
+ *	is non-zero we force these times to be set even if the user did not
  *	request access and/or modification time preservation (this is also
  *	used by -t to reset access times).
  *	When ign is zero, only those times the user has asked for are set, the
@@ -782,11 +781,11 @@ set_pmode(char *fnm, mode_t mode)
  *	uses lseek whenever it detects the input data is all 0 within that
  *	file block. In more detail, the strategy is as follows:
  *	While the input is all zero keep doing an lseek. Keep track of when we
- *	pass over file block boundries. Only write when we hit a non zero
+ *	pass over file block boundaries. Only write when we hit a non zero
  *	input. once we have written a file block, we continue to write it to
  *	the end (we stop looking at the input). When we reach the start of the
  *	next file block, start checking for zero blocks again. Working on file
- *	block boundries significantly reduces the overhead when copying files
+ *	block boundaries significantly reduces the overhead when copying files
  *	that are NOT very sparse. This overhead (when compared to a write) is
  *	almost below the measurement resolution on many systems. Without it,
  *	files with holes cannot be safely copied. It does has a side effect as
@@ -812,13 +811,13 @@ set_pmode(char *fnm, mode_t mode)
  */
 
 int
-file_write(int fd, char *str, register int cnt, int *rem, int *isempt, int sz,
+file_write(int fd, char *str, int cnt, int *rem, int *isempt, int sz,
 	char *name)
 {
-	register char *pt;
-	register char *end;
-	register int wcnt;
-	register char *st = str;
+	char *pt;
+	char *end;
+	int wcnt;
+	char *st = str;
 
 	/*
 	 * while we have data to process
@@ -859,7 +858,8 @@ file_write(int fd, char *str, register int cnt, int *rem, int *isempt, int sz,
 				/*
 				 * skip, buf is empty so far
 				 */
-				if (lseek(fd, (off_t)wcnt, SEEK_CUR) < 0) {
+				if (fd > -1 &&
+				    lseek(fd, (off_t)wcnt, SEEK_CUR) < 0) {
 					syswarn(1,errno,"File seek on %s",
 					    name);
 					return(-1);
@@ -876,7 +876,18 @@ file_write(int fd, char *str, register int cnt, int *rem, int *isempt, int sz,
 		/*
 		 * have non-zero data in this file system block, have to write
 		 */
-		if (write(fd, st, wcnt) != wcnt) {
+		if (fd == -1) {
+			/* GNU hack */
+			if (gnu_hack_string)
+				err(1, "WARNING! Major Internal Error! GNU hack Failing!");
+			gnu_hack_string = malloc(wcnt + 1);
+			if (gnu_hack_string == NULL) {
+				paxwarn(1, "Out of memory");
+				return(-1);
+			}
+			memcpy(gnu_hack_string, st, wcnt);
+			gnu_hack_string[wcnt] = '\0';
+		} else if (write(fd, st, wcnt) != wcnt) {
 			syswarn(1, errno, "Failed write to file %s", name);
 			return(-1);
 		}
@@ -924,7 +935,7 @@ file_flush(int fd, char *fname, int isempt)
  */
 
 void
-rdfile_close(register ARCHD *arcn, register int *fd)
+rdfile_close(ARCHD *arcn, int *fd)
 {
 	/*
 	 * make sure the file is open
@@ -954,10 +965,10 @@ rdfile_close(register ARCHD *arcn, register int *fd)
  */
 
 int
-set_crc(register ARCHD *arcn, register int fd)
+set_crc(ARCHD *arcn, int fd)
 {
-	register int i;
-	register int res;
+	int i;
+	int res;
 	off_t cpcnt = 0L;
 	u_long size;
 	unsigned long crc = 0L;

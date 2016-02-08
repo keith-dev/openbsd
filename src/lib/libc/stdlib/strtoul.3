@@ -33,7 +33,7 @@
 .\" OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 .\" SUCH DAMAGE.
 .\"
-.\"	$OpenBSD: strtoul.3,v 1.10 2002/06/29 00:20:11 millert Exp $
+.\"	$OpenBSD: strtoul.3,v 1.12 2003/03/06 18:19:26 kjell Exp $
 .\"
 .Dd June 25, 1992
 .Dt STRTOUL 3
@@ -162,10 +162,8 @@ to
 The
 .Fn strtoull
 function has identical return values except that
-.Dv ULLONG_MIN
-and
 .Dv ULLONG_MAX
-are used to indicate underflow and overflow respectively.
+is used to indicate overflow.
 .Pp
 There is no way to determine if
 .Fn strtoul
@@ -219,7 +217,14 @@ The given string was out of range; the value converted has been clamped.
 .Sh STANDARDS
 The
 .Fn strtoul
-function conforms to
-.St -ansiC .
+and
+.Fn strtoull
+functions conform to
+.St -ansiC-99 .
+The
+.Fn strtouq
+function is a
+.Bx
+extension and is provided for backwards compatibility with legacy programs.
 .Sh BUGS
 Ignores the current locale.

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ar_subs.c,v 1.18 2002/02/19 19:39:35 millert Exp $	*/
+/*	$OpenBSD: ar_subs.c,v 1.23 2003/02/03 09:06:43 jmc Exp $	*/
 /*	$NetBSD: ar_subs.c,v 1.5 1995/03/21 09:07:06 cgd Exp $	*/
 
 /*-
@@ -40,9 +40,9 @@
 
 #ifndef lint
 #if 0
-static char sccsid[] = "@(#)ar_subs.c	8.2 (Berkeley) 4/18/94";
+static const char sccsid[] = "@(#)ar_subs.c	8.2 (Berkeley) 4/18/94";
 #else
-static char rcsid[] = "$OpenBSD: ar_subs.c,v 1.18 2002/02/19 19:39:35 millert Exp $";
+static const char rcsid[] = "$OpenBSD: ar_subs.c,v 1.23 2003/02/03 09:06:43 jmc Exp $";
 #endif
 #endif /* not lint */
 
@@ -60,9 +60,9 @@ static char rcsid[] = "$OpenBSD: ar_subs.c,v 1.18 2002/02/19 19:39:35 millert Ex
 #include "pax.h"
 #include "extern.h"
 
-static void wr_archive(register ARCHD *, int is_app);
+static void wr_archive(ARCHD *, int is_app);
 static int get_arc(void);
-static int next_head(register ARCHD *);
+static int next_head(ARCHD *);
 extern sigset_t s_mask;
 
 /*
@@ -82,8 +82,8 @@ u_long flcnt;				/* number of files processed */
 void
 list(void)
 {
-	register ARCHD *arcn;
-	register int res;
+	ARCHD *arcn;
+	int res;
 	ARCHD archd;
 	time_t now;
 
@@ -108,6 +108,16 @@ list(void)
 	 * step through the archive until the format says it is done
 	 */
 	while (next_head(arcn) == 0) {
+		if (arcn->type == PAX_GLL || arcn->type == PAX_GLF) {
+			/*
+			 * we need to read, to get the real filename
+			 */
+			off_t cnt;
+			if (!(*frmt->rd_data)(arcn, -1, &cnt));
+				(void)rd_skip(cnt + arcn->pad);
+			continue;
+		}
+
 		/*
 		 * check for pattern, and user specified options match.
 		 * When all patterns are matched we are done.
@@ -159,8 +169,8 @@ list(void)
 void
 extract(void)
 {
-	register ARCHD *arcn;
-	register int res;
+	ARCHD *arcn;
+	int res;
 	off_t cnt;
 	ARCHD archd;
 	struct stat sb;
@@ -191,6 +201,14 @@ extract(void)
 	 * says it is done
 	 */
 	while (next_head(arcn) == 0) {
+		if (arcn->type == PAX_GLL || arcn->type == PAX_GLF) {
+			/*
+			 * we need to read, to get the real filename
+			 */
+			if (!(*frmt->rd_data)(arcn, -1, &cnt));
+				(void)rd_skip(cnt + arcn->pad);
+			continue;
+		}
 
 		/*
 		 * check for pattern, and user specified options match. When
@@ -210,7 +228,7 @@ extract(void)
 
 		/*
 		 * with -u or -D only extract when the archive member is newer
-		 * than the file with the same name in the file system (nos
+		 * than the file with the same name in the file system (no
 		 * test of being the same type is required).
 		 * NOTE: this test is done BEFORE name modifications as
 		 * specified by pax. this operation can be confusing to the
@@ -251,7 +269,7 @@ extract(void)
 		}
 
 		/*
-		 * Non standard -Y and -Z flag. When the exisiting file is
+		 * Non standard -Y and -Z flag. When the existing file is
 		 * same age or newer skip
 		 */
 		if ((Yflag || Zflag) && ((lstat(arcn->name, &sb) == 0))) {
@@ -363,11 +381,11 @@ extract(void)
  */
 
 static void
-wr_archive(register ARCHD *arcn, int is_app)
+wr_archive(ARCHD *arcn, int is_app)
 {
-	register int res;
-	register int hlk;
-	register int wr_one;
+	int res;
+	int hlk;
+	int wr_one;
 	off_t cnt;
 	int (*wrf)();
 	int fd = -1;
@@ -395,7 +413,8 @@ wr_archive(register ARCHD *arcn, int is_app)
 		return;
 
 	/*
-	 * if this not append, and there are no files, we do no write a trailer
+	 * if this is not append, and there are no files, we do not write a 
+	 * trailer
 	 */
 	wr_one = is_app;
 
@@ -527,7 +546,7 @@ wr_archive(register ARCHD *arcn, int is_app)
 	}
 
 	/*
-	 * tell format to write trailer; pad to block boundry; reset directory
+	 * tell format to write trailer; pad to block boundary; reset directory
 	 * mode/access times, and check if all patterns supplied by the user
 	 * were matched. block off signals to avoid chance for multiple entry
 	 * into the cleanup code
@@ -568,8 +587,8 @@ wr_archive(register ARCHD *arcn, int is_app)
 void
 append(void)
 {
-	register ARCHD *arcn;
-	register int res;
+	ARCHD *arcn;
+	int res;
 	ARCHD archd;
 	FSUB *orgfrmt;
 	int udev;
@@ -580,7 +599,7 @@ append(void)
 
 	/*
 	 * Do not allow an append operation if the actual archive is of a
-	 * different format than the user specified foramt.
+	 * different format than the user specified format.
 	 */
 	if (get_arc() < 0)
 		return;
@@ -676,7 +695,7 @@ append(void)
 	lnk_end();
 
 	/*
-	 * try to postion for write, if this fails quit. if any error occurs,
+	 * try to position for write, if this fails quit. if any error occurs,
 	 * we will refuse to write
 	 */
 	if (appnd_start(tlen) < 0)
@@ -730,12 +749,12 @@ archive(void)
 void
 copy(void)
 {
-	register ARCHD *arcn;
-	register int res;
-	register int fddest;
-	register char *dest_pt;
-	register int dlen;
-	register int drem;
+	ARCHD *arcn;
+	int res;
+	int fddest;
+	char *dest_pt;
+	int dlen;
+	int drem;
 	int fdsrc = -1;
 	struct stat sb;
 	ARCHD archd;
@@ -858,7 +877,7 @@ copy(void)
 		}
 
 		/*
-		 * Non standard -Y and -Z flag. When the exisiting file is
+		 * Non standard -Y and -Z flag. When the existing file is
 		 * same age or newer skip
 		 */
 		if ((Yflag || Zflag) && ((lstat(arcn->name, &sb) == 0))) {
@@ -975,14 +994,14 @@ copy(void)
  */
 
 static int
-next_head(register ARCHD *arcn)
+next_head(ARCHD *arcn)
 {
-	register int ret;
-	register char *hdend;
-	register int res;
-	register int shftsz;
-	register int hsz;
-	register int in_resync = 0;	/* set when we are in resync mode */
+	int ret;
+	char *hdend;
+	int res;
+	int shftsz;
+	int hsz;
+	int in_resync = 0;		/* set when we are in resync mode */
 	int cnt = 0;			/* counter for trailer function */
 	int first = 1;			/* on 1st read, EOF isn't premature. */
 
@@ -1129,10 +1148,10 @@ next_head(register ARCHD *arcn)
 static int
 get_arc(void)
 {
-	register int i;
-	register int hdsz = 0;
-	register int res;
-	register int minhd = BLKMULT;
+	int i;
+	int hdsz = 0;
+	int res;
+	int minhd = BLKMULT;
 	char *hdend;
 	int notice = 0;
 

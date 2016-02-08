@@ -1,3 +1,74 @@
+/*	$OpenBSD: rtld_machine.c,v 1.8 2003/02/15 22:39:13 drahn Exp $ */
+
+/*
+ * Copyright (c) 2002 Dale Rahn
+ * Copyright (c) 2001 Niklas Hallqvist
+ * Copyright (c) 2001 Artur Grabowski
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed under OpenBSD by
+ *	Dale Rahn.
+ * 4. The name of the author may not be used to endorse or promote products
+ *    derived from this software without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS
+ * OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+ * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY
+ * DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ */
+/*-
+ * Copyright (c) 2000 Eduardo Horvath.
+ * Copyright (c) 1999 The NetBSD Foundation, Inc.
+ * All rights reserved.
+ *
+ * This code is derived from software contributed to The NetBSD Foundation
+ * by Paul Kranenburg.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. All advertising materials mentioning features or use of this software
+ *    must display the following acknowledgement:
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
+ * 4. Neither the name of The NetBSD Foundation nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
+ * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+ * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE FOUNDATION OR CONTRIBUTORS
+ * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
+ */
+
 #define _DYN_LOADER
 
 #include <sys/types.h>
@@ -6,6 +77,7 @@
 
 #include <nlist.h>
 #include <link.h>
+#include <signal.h>
 
 #include "syscall.h"
 #include "archdep.h"
@@ -175,7 +247,7 @@ _dl_md_reloc(elf_object_t *object, int rel, int relsz)
 				    &this, SYM_SEARCH_ALL|SYM_WARNNOTFOUND|
 				    ((type == R_TYPE(JUMP_SLOT))?
 					SYM_PLT:SYM_NOTPLT),
-				    sym->st_size);
+				    sym->st_size, object->load_name);
 				if (this == NULL) {
 resolve_failed:
 					_dl_printf("%s: %s: can't resolve "
@@ -204,7 +276,7 @@ resolve_failed:
 			soff = _dl_find_symbol(symn, object->next, &srcsym,
 			    SYM_SEARCH_ALL|SYM_WARNNOTFOUND|
 			    ((type == R_TYPE(JUMP_SLOT)) ? SYM_PLT:SYM_NOTPLT),
-			    size);
+			    size, object->load_name);
 			if (srcsym == NULL)
 				goto resolve_failed;
 
@@ -261,6 +333,7 @@ resolve_failed:
 	return (fails);
 }
 
+#if 0
 struct jmpslot {
 	u_short opcode;
 	u_short addr[2];
@@ -268,6 +341,7 @@ struct jmpslot {
 #define JMPSLOT_RELOC_MASK              0xffff
 };
 #define JUMP    0xe990          /* NOP + JMP opcode */
+#endif
 
 void
 _dl_reloc_plt(Elf_Addr *where, Elf_Addr value)
@@ -286,6 +360,7 @@ _dl_bind(elf_object_t *object, int index)
 	const Elf_Sym *sym, *this;
 	const char *symn;
 	Elf_Addr ooff;
+	sigset_t omask, nmask;
 
 	rel = (Elf_Rel *)(object->Dyn.info[DT_JMPREL]);
 
@@ -298,13 +373,28 @@ _dl_bind(elf_object_t *object, int index)
 	addr = (Elf_Word *)(object->load_offs + rel->r_offset);
 	this = NULL;
 	ooff = _dl_find_symbol(symn, _dl_objects, &this,
-	    SYM_SEARCH_ALL|SYM_WARNNOTFOUND|SYM_PLT, 0);
+	    SYM_SEARCH_ALL|SYM_WARNNOTFOUND|SYM_PLT, 0, object->load_name);
 	if (this == NULL) {
 		_dl_printf("lazy binding failed!\n");
 		*((int *)0) = 0;        /* XXX */
 	}
 
+	/* if GOT is protected, allow the write */
+	if (object->got_size != 0) {
+		sigfillset(&nmask);
+		_dl_sigprocmask(SIG_BLOCK, &nmask, &omask);
+		_dl_mprotect((void*)object->got_start, object->got_size,
+		    PROT_READ|PROT_WRITE);
+	}
+
 	_dl_reloc_plt(addr, ooff + this->st_value);
+
+	/* put the GOT back to RO */
+	if (object->got_size != 0) {
+		_dl_mprotect((void*)object->got_start, object->got_size,
+		    PROT_READ);
+		_dl_sigprocmask(SIG_SETMASK, &omask, NULL);
+	}
 
 	return((Elf_Addr)ooff + this->st_value);
 }
@@ -317,12 +407,41 @@ _dl_md_reloc_got(elf_object_t *object, int lazy)
 	int i, num;
 	Elf_Rel *rel;
 	struct load_list *llist;
+	Elf_Addr ooff;
+	const Elf_Sym *this;
+
+	if (pltgot == NULL)
+		return; /* it is possible to have no PLT/GOT relocations */
 
 	pltgot[1] = (Elf_Addr)object;
 	pltgot[2] = (Elf_Addr)&_dl_bind_start;
 
 	if (object->Dyn.info[DT_PLTREL] != DT_REL)
 		return;
+
+	object->got_addr = NULL;
+	object->got_size = 0;
+	this = NULL;
+	ooff = _dl_find_symbol("__got_start", object, &this,
+	    SYM_SEARCH_SELF|SYM_NOWARNNOTFOUND|SYM_PLT, SYM_NOTPLT,
+	    NULL);
+	if (this != NULL)
+		object->got_addr = ooff + this->st_value;
+
+	this = NULL;
+	ooff = _dl_find_symbol("__got_end", object, &this,
+	    SYM_SEARCH_SELF|SYM_NOWARNNOTFOUND|SYM_PLT, SYM_NOTPLT,
+	    NULL);
+	if (this != NULL)
+		object->got_size = ooff + this->st_value  - object->got_addr;
+
+	if (object->got_addr == NULL)
+		object->got_start = NULL;
+	else {
+		object->got_start = ELF_TRUNC(object->got_addr, _dl_pagesz);
+		object->got_size += object->got_addr - object->got_start;
+		object->got_size = ELF_ROUND(object->got_size, _dl_pagesz);
+	}
 
 	if (!lazy) {
 		_dl_md_reloc(object, DT_JMPREL, DT_PLTRELSZ);
@@ -346,6 +465,9 @@ _dl_md_reloc_got(elf_object_t *object, int lazy)
 			_dl_mprotect(llist->start, llist->size,
 			    llist->prot);
 	}
+
+	/* PLT is already RO on i386, no point in mprotecting it, just GOT */
+	if (object->got_size != 0)
+		_dl_mprotect((void*)object->got_start, object->got_size,
+		    PROT_READ);
 }
-
-

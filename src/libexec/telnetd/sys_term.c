@@ -1328,15 +1328,8 @@ start_login(const char *host, int autologin, char *name)
 #ifdef AUTHENTICATION
     if (auth_level < 0 || autologin != AUTH_VALID) {
 	if(!no_warn) {
-	    printf("User not authenticated. ");
-	    if (require_otp)
-		printf("Using one-time password\r\n");
-	    else
-		printf("Using plaintext username and password\r\n");
-	}
-	if (require_otp) {
-	    addarg(&argv, "-a");
-	    addarg(&argv, "otp");
+	    printf("User not authenticated. "
+		"Using plaintext username and password\r\n");
 	}
 	if(log_unauth) 
 	    syslog(LOG_INFO, "unauthenticated access from %s (%s)", 
@@ -1812,6 +1805,11 @@ cleantmp(wtp)
     return(ret);
 }
 
+/*
+ *	jobend
+ *		Assumes that if path is not NULL, then user is also
+ * 		not NULL.
+ */
 int
 jobend(jid, path, user)
      int jid;
@@ -1841,10 +1839,10 @@ jobend(jid, path, user)
     }
 
     if (path) {
-	strncpy(saved_path, path, sizeof(wtmp.ut_tpath));
-	strncpy(saved_user, user, sizeof(wtmp.ut_user));
-	saved_path[sizeof(saved_path)] = '\0';
-	saved_user[sizeof(saved_user)] = '\0';
+	strncpy(saved_path, path, sizeof(saved_path) - 1);
+	strncpy(saved_user, path, sizeof(saved_user) - 1);
+	saved_path[sizeof(saved_path) - 1] = '\0';
+	saved_user[sizeof(saved_user) - 1] = '\0';
     }
     if (saved_jid == 0) {
 	saved_jid = jid;

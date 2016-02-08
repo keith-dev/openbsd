@@ -1,4 +1,4 @@
-/*	$OpenBSD: lpr.c,v 1.28 2002/06/19 01:24:14 deraadt Exp $ */
+/*	$OpenBSD: lpr.c,v 1.31 2003/03/25 02:15:21 millert Exp $ */
 /*	$NetBSD: lpr.c,v 1.19 2000/10/11 20:23:52 is Exp $	*/
 
 /*
@@ -50,7 +50,7 @@ static const char copyright[] =
 #if 0
 static const char sccsid[] = "@(#)lpr.c	8.4 (Berkeley) 4/28/95";
 #else
-static const char rcsid[] = "$OpenBSD: lpr.c,v 1.28 2002/06/19 01:24:14 deraadt Exp $";
+static const char rcsid[] = "$OpenBSD: lpr.c,v 1.31 2003/03/25 02:15:21 millert Exp $";
 #endif
 #endif /* not lint */
 
@@ -132,11 +132,20 @@ main(int argc, char **argv)
 	int i, f, ch;
 	struct stat stb;
 
-	effective_uid = geteuid();
+	/*
+	 * Simulate setuid daemon w/ PRIV_END called.
+	 * We don't want lpr to actually be setuid daemon since that
+	 * requires that the lpr binary be owned by user daemon, which
+	 * is potentially unsafe.
+	 */
+	if ((pw = getpwuid(DEFUID)) == NULL)
+		errx(1, "daemon uid (%u) not in password file", DEFUID);
+	effective_uid = pw->pw_uid;
 	real_uid = getuid();
-	effective_gid = getegid();
+	effective_gid = pw->pw_gid;
 	real_gid = getgid();
-	PRIV_END;	/* be safe */
+	setresgid(real_gid, real_gid, effective_gid);
+	setresuid(real_uid, real_uid, effective_uid);
 
 	if (signal(SIGHUP, SIG_IGN) != SIG_IGN)
 		signal(SIGHUP, cleanup);
@@ -297,7 +306,7 @@ main(int argc, char **argv)
 	tfd = nfile(tfname);
 	card('H', host);
 	card('P', person);
-	if (hdr) {
+	if (hdr && !SH) {
 		if (jobname == NULL) {
 			if (argc == 0)
 				jobname = "stdin";
@@ -666,6 +675,7 @@ chkprinter(char *s)
 	if (cgetnum(bp, "du", &DU) < 0)
 		DU = DEFUID;
 	SC = (cgetcap(bp, "sc", ':') != NULL);
+	SH = (cgetcap(bp, "sh", ':') != NULL);
 }
 
 /*

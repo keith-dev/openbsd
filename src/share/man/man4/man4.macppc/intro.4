@@ -1,4 +1,4 @@
-.\"	$OpenBSD: intro.4,v 1.10 2002/10/01 21:08:41 miod Exp $
+.\"	$OpenBSD: intro.4,v 1.13 2003/03/08 21:59:54 jmc Exp $
 .\"
 .\" Copyright (c) 2001 Peter Valchev.
 .\" All rights reserved.
@@ -30,7 +30,7 @@
 .\"
 .\"
 .Dd August 3, 2001
-.Dt INTRO 4 MacPPC
+.Dt INTRO 4 macppc
 .Os
 .Sh NAME
 .Nm intro
@@ -112,12 +112,16 @@ Aironet Communications 4500/4800 IEEE 802.11DS wireless network adapter.
 ADMtek AN986-based USB Ethernet adapters.
 .It Xr awacs 4
 Apple audio device.
+.It Xr bktr 4
+Video capture driver.
 .It Xr bm 4
 BMAC ethernet.
 .It Xr de 4
 DEC tulip-based ethernet cards.
 .It Xr em 4
 Intel i82542, i82543, and i82544 Pro/1000 Gigabit ethernet.
+.It Xr fxp 4
+Intel EtherExpress PRO/100 Ethernet driver.
 .It Xr gem 4
 GMAC ethernet.
 .It Xr gpio 4
@@ -132,6 +136,8 @@ I2O adapter.
 Kawasaki LSI KL5KUSB101B-based USB ethernet.
 .It Xr siop 4
 LSI/Symbios Logic/NCR 53c8xx SCSI adapter boards.
+.It Xr ti 4
+Alteon Networks Tigon I and II Gigabit Ethernet driver.
 .It Xr uaudio 4
 USB audio devices.
 .It Xr ukbd 4
@@ -145,13 +151,15 @@ USB mouse.
 .It Xr uplcom 4
 I/O Data USB-RSAQ2 USB serial adapters.
 .It Xr uscanner 4
-USB scanners
+USB scanners.
 .It Xr usscanner 4
 SCSI-over-USB scanners.
 .It Xr vgafb 4
 PCI VGA graphics.
 .It Xr wi 4
 WaveLAN/IEEE and PRISM-II 802.11DS wireless network adapters.
+.It Xr xl 4
+3Com EtherLink XL and Fast EtherLink XL Ethernet driver.
 .It Xr zs 4
 Zilog 8530 serial controller.
 .El

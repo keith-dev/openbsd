@@ -1,4 +1,4 @@
-dnl	$OpenBSD: install,v 1.20 2002/06/09 05:53:54 todd Exp $
+dnl	$OpenBSD: install,v 1.22 2003/03/24 11:33:56 miod Exp $
 OpenBSDInstallPrelude
 
 The installation can be broken down into four basic steps:
@@ -82,7 +82,7 @@ If you are installing onto a single root partition, proceed to the
 Installation of base files:
 
 	Select the "Install" menu item from the "File" menu and install
-	base{:--:}OSrev.tgz, bsd-generic.tgz, comp{:--:}OSrev.tgz, and any other
+	base{:--:}OSrev.tgz, bsd.tgz, comp{:--:}OSrev.tgz, and any other
 	packages you wish to install at this time (see the contents section
 	for information about what's in each package).  The installer will
 	print out the filename of each file as it is installed and will
@@ -128,7 +128,7 @@ the root password using the passwd(1) command.
 
 To set up basic networking, you will need to create or edit the following
 files, all of which are in the /etc directory:
-	myname		the computers name (without domain).
+	myname		the computers name (with a fully-qualified domain name).
 	mygate		the IP address of the default gateway.
 	hostname.if	Configuration of the host adapter (actual name will
 			be something like hostname.sn0 or hostname.ae0, see

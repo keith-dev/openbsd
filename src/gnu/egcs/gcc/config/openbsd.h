@@ -80,10 +80,9 @@ Boston, MA 02111-1307, USA.  */
    have subspecs.  */
 #define OBSD_CPP_SPEC "%{posix:-D_POSIX_SOURCE} %{pthread:-D_POSIX_THREADS}"
 
-/* LIB_SPEC appropriate for OpenBSD.  Select the appropriate libc, 
-   depending on profiling and threads.  Basically, 
-   -lc(_r)?(_p)?, select _r for threads, and _p for p or pg.  */
-#define OBSD_LIB_SPEC "%{!shared:-lc%{pthread:_r}%{p:_p}%{!p:%{pg:_p}}}"
+/* LIB_SPEC appropriate for OpenBSD.  Include -lpthread if -pthread is
+   specified on the command line. */
+#define OBSD_LIB_SPEC "%{!shared:%{pthread:-lpthread%{p:_p}%{!p:%{pg:_p}}}} %{!shared:-lc%{p:_p}%{!p:%{pg:_p}}}"
 
 #ifndef OBSD_HAS_CORRECT_SPECS
 

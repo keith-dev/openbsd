@@ -1,4 +1,5 @@
-/*	$OpenBSD: misc.c,v 1.23 2002/08/08 18:17:50 millert Exp $	*/
+/*	$OpenBSD: misc.c,v 1.26 2003/02/20 20:38:08 millert Exp $	*/
+
 /* Copyright 1988,1990,1993,1994 by Paul Vixie
  * All rights reserved
  */
@@ -21,7 +22,7 @@
  */
 
 #if !defined(lint) && !defined(LINT)
-static char const rcsid[] = "$OpenBSD: misc.c,v 1.23 2002/08/08 18:17:50 millert Exp $";
+static char const rcsid[] = "$OpenBSD: misc.c,v 1.26 2003/02/20 20:38:08 millert Exp $";
 #endif
 
 /* vix 26jan87 [RCS has the rest of the log]
@@ -29,8 +30,7 @@ static char const rcsid[] = "$OpenBSD: misc.c,v 1.23 2002/08/08 18:17:50 millert
  */
 
 #include "cron.h"
-#include <sys/socket.h>
-#include <sys/un.h>
+#include <limits.h>
 
 #if defined(SYSLOG) && defined(LOG_FILE)
 # undef LOG_FILE
@@ -114,7 +114,7 @@ strdtb(char *s) {
 	 * or the last non-blank in the string, whichever comes first.
 	 */
 	do	{x--;}
-	while (x >= s && isspace(*x));
+	while (x >= s && isspace((unsigned char)*x));
 
 	/* one character beyond where we stopped above is where the null
 	 * goes.
@@ -208,12 +208,16 @@ set_cron_uid(void) {
 void
 set_cron_cwd(void) {
 	struct stat sb;
+	struct group *grp = NULL;
 
+#ifdef CRON_GROUP
+	grp = getgrnam(CRON_GROUP);
+#endif
 	/* first check for CRONDIR ("/var/cron" or some such)
 	 */
 	if (stat(CRONDIR, &sb) < OK && errno == ENOENT) {
 		perror(CRONDIR);
-		if (OK == mkdir(CRONDIR, 0700)) {
+		if (OK == mkdir(CRONDIR, 0710)) {
 			fprintf(stderr, "%s: created\n", CRONDIR);
 			stat(CRONDIR, &sb);
 		} else {
@@ -222,7 +226,7 @@ set_cron_cwd(void) {
 			exit(ERROR_EXIT);
 		}
 	}
-	if ((sb.st_mode & S_IFDIR) == 0) {
+	if (!S_ISDIR(sb.st_mode)) {
 		fprintf(stderr, "'%s' is not a directory, bailing out.\n",
 			CRONDIR);
 		exit(ERROR_EXIT);
@@ -246,10 +250,41 @@ set_cron_cwd(void) {
 			exit(ERROR_EXIT);
 		}
 	}
-	if ((sb.st_mode & S_IFDIR) == 0) {
+	if (!S_ISDIR(sb.st_mode)) {
 		fprintf(stderr, "'%s' is not a directory, bailing out.\n",
 			SPOOL_DIR);
 		exit(ERROR_EXIT);
+	}
+	if (grp != NULL) {
+		if (sb.st_gid != grp->gr_gid)
+			chown(SPOOL_DIR, -1, grp->gr_gid);
+		if (sb.st_mode != 01730)
+			chmod(SPOOL_DIR, 01730);
+	}
+
+	/* finally, look at AT_DIR ("atjobs" or some such)
+	 */
+	if (stat(AT_DIR, &sb) < OK && errno == ENOENT) {
+		perror(AT_DIR);
+		if (OK == mkdir(AT_DIR, 0700)) {
+			fprintf(stderr, "%s: created\n", AT_DIR);
+			stat(AT_DIR, &sb);
+		} else {
+			fprintf(stderr, "%s: ", AT_DIR);
+			perror("mkdir");
+			exit(ERROR_EXIT);
+		}
+	}
+	if (!S_ISDIR(sb.st_mode)) {
+		fprintf(stderr, "'%s' is not a directory, bailing out.\n",
+			AT_DIR);
+		exit(ERROR_EXIT);
+	}
+	if (grp != NULL) {
+		if (sb.st_gid != grp->gr_gid)
+			chown(AT_DIR, -1, grp->gr_gid);
+		if (sb.st_mode != 01770)
+			chmod(AT_DIR, 01770);
 	}
 }
 
@@ -423,58 +458,35 @@ in_file(const char *string, FILE *file, int error)
 			if (*endp != '\n')
 				return (error);
 			*endp = '\0';
+			if (0 == strcmp(line, string))
+				return (TRUE);
 		}
-		if (0 == strcmp(line, string))
-			return (TRUE);
 	}
 	if (ferror(file))
 		return (error);
 	return (FALSE);
 }
 
-/* int allowed(const char *username)
- *	returns TRUE if (ALLOW_FILE exists and user is listed)
- *	or (DENY_FILE exists and user is NOT listed)
- *	or (neither file exists but user=="root" so it's okay)
+/* int allowed(const char *username, const char *allow_file, const char *deny_file)
+ *	returns TRUE if (allow_file exists and user is listed)
+ *	or (deny_file exists and user is NOT listed).
+ *	root is always allowed.
  */
 int
-allowed(const char *username) {
-	FILE	*allow = NULL;
-	FILE	*deny = NULL;
+allowed(const char *username, const char *allow_file, const char *deny_file) {
+	FILE	*fp;
 	int	isallowed;
 
-#if defined(ALLOW_FILE) && defined(DENY_FILE)
+	if (strcmp(username, ROOT_USER) == 0)
+		return (TRUE);
 	isallowed = FALSE;
-	allow = fopen(ALLOW_FILE, "r");
-	if (allow == NULL && errno != ENOENT)
-		goto out;
-	deny = fopen(DENY_FILE, "r");
-	if (deny == NULL && errno != ENOENT)
-		goto out;
-	Debug(DMISC, ("allow/deny enabled, %d/%d\n", !!allow, !!deny))
-
-	if (allow) {
-		isallowed = in_file(username, allow, FALSE);
-		goto out;
+	if ((fp = fopen(allow_file, "r")) != NULL) {
+		isallowed = in_file(username, fp, FALSE);
+		fclose(fp);
+	} else if ((fp = fopen(deny_file, "r")) != NULL) {
+		isallowed = !in_file(username, fp, FALSE);
+		fclose(fp);
 	}
-	if (deny) {
-		isallowed = !in_file(username, deny, TRUE);
-		goto out;
-	}
-#endif
-
-#if defined(ALLOW_ONLY_ROOT)
-	isallowed = strcmp(username, ROOT_USER) == 0;
-#else
-	isallowed = TRUE;
-#endif
-
-out:
-	if (allow)
-		fclose(allow);
-	if (deny)
-		fclose(deny);
-
 	return (isallowed);
 }
 
@@ -685,16 +697,21 @@ arpadate(clock)
 }
 #endif /*MAIL_DATE*/
 
-#ifdef HAVE_SAVED_GIDS
+#ifdef HAVE_SAVED_UIDS
 static gid_t save_egid;
 int swap_gids() { save_egid = getegid(); return (setegid(getgid())); }
 int swap_gids_back() { return (setegid(save_egid)); }
-#else /*HAVE_SAVED_GIDS*/
+#else /*HAVE_SAVED_UIDS*/
 int swap_gids() { return (setregid(getegid(), getgid())); }
 int swap_gids_back() { return (swap_gids()); }
-#endif /*HAVE_SAVED_GIDS*/
+#endif /*HAVE_SAVED_UIDS*/
 
-/* Return the offset from GMT in seconds (algorithm taken from sendmail). */
+/* Return the offset from GMT in seconds (algorithm taken from sendmail).
+ *
+ * warning:
+ *	clobbers the static storage space used by localtime() and gmtime().
+ *	If the local pointer is non-NULL it *must* point to a local copy.
+ */
 #ifndef HAVE_TM_GMTOFF
 long get_gmtoff(time_t *clock, struct tm *local)
 {
@@ -731,7 +748,7 @@ open_socket()
 {
 	int		   sock;
 	mode_t		   omask;
-	struct sockaddr_un sun;
+	struct sockaddr_un s_un;
 
 	sock = socket(AF_UNIX, SOCK_STREAM, 0);
 	if (sock == -1) {
@@ -740,18 +757,20 @@ open_socket()
 		log_it("CRON", getpid(), "DEATH", "can't create socket");
 		exit(ERROR_EXIT);
 	}
-	if (!glue_strings(sun.sun_path, sizeof sun.sun_path, SPOOL_DIR,
+	if (!glue_strings(s_un.sun_path, sizeof s_un.sun_path, SPOOL_DIR,
 	    CRONSOCK, '/')) {
 		fprintf(stderr, "%s/%s: path too long\n", SPOOL_DIR, CRONSOCK);
 		log_it("CRON", getpid(), "DEATH", "path too long");
 		exit(ERROR_EXIT);
 	}
-	unlink(sun.sun_path);
-	sun.sun_len = strlen(sun.sun_path);
-	sun.sun_family = AF_UNIX;
+	unlink(s_un.sun_path);
+	s_un.sun_family = AF_UNIX;
+#ifdef SUN_LEN
+	s_un.sun_len = SUN_LEN(&s_un);
+#endif
 
 	omask = umask(007);
-	if (bind(sock, (struct sockaddr *)&sun, sizeof(sun))) {
+	if (bind(sock, (struct sockaddr *)&s_un, sizeof(s_un))) {
 		fprintf(stderr, "%s: can't bind socket: %s\n",
 		    ProgramName, strerror(errno));
 		log_it("CRON", getpid(), "DEATH", "can't bind socket");
@@ -763,8 +782,38 @@ open_socket()
 		log_it("CRON", getpid(), "DEATH", "can't listen on socket");
 		exit(ERROR_EXIT);
 	}
-	chmod(sun.sun_path, 0660);
+	chmod(s_un.sun_path, 0660);
 	umask(omask);
 
 	return(sock);
+}
+
+void
+poke_daemon(const char *spool_dir, unsigned char cookie) {
+	int sock = -1;
+	struct sockaddr_un s_un;
+
+	if (utime(spool_dir, NULL) < 0) {
+		fprintf(stderr, "%s: unable to update mtime on %s\n",
+		    ProgramName, spool_dir);
+		return;
+	}
+
+	if (glue_strings(s_un.sun_path, sizeof s_un.sun_path, SPOOL_DIR,
+	    CRONSOCK, '/')) {
+		s_un.sun_family = AF_UNIX;
+#ifdef SUN_LEN
+		s_un.sun_len = SUN_LEN(&s_un);
+#endif
+		(void) signal(SIGPIPE, SIG_IGN);
+		if ((sock = socket(AF_UNIX, SOCK_STREAM, 0)) >= 0 &&
+		    connect(sock, (struct sockaddr *)&s_un, sizeof(s_un)) == 0)
+			write(sock, &cookie, 1);
+		else
+			fprintf(stderr, "%s: warning, cron does not appear to be "
+			    "running.\n", ProgramName);
+		if (sock >= 0)
+			close(sock);
+		(void) signal(SIGPIPE, SIG_DFL);
+	}
 }

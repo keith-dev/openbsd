@@ -1,4 +1,4 @@
-/*	$OpenBSD: io.c,v 1.19 2001/11/19 19:02:13 mpech Exp $	*/
+/*	$OpenBSD: io.c,v 1.22 2003/03/13 09:09:29 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1989, 1993, 1994
@@ -43,7 +43,7 @@ static const char copyright[] =
 #if 0
 static const char sccsid[] = "@(#)calendar.c  8.3 (Berkeley) 3/25/94";
 #else
-static char rcsid[] = "$OpenBSD: io.c,v 1.19 2001/11/19 19:02:13 mpech Exp $";
+static char rcsid[] = "$OpenBSD: io.c,v 1.22 2003/03/13 09:09:29 deraadt Exp $";
 #endif
 #endif /* not lint */
 
@@ -82,7 +82,7 @@ struct iovec header[] = {
 
 
 void
-cal()
+cal(void)
 {
 	int printing;
 	char *p;
@@ -178,10 +178,11 @@ cal()
 					if (m->bodun && prefix) {
 						int l1 = strlen(prefix);
 						int l2 = strlen(p);
+						int len = l1 + l2 + 2;
 						if ((cur_evt->ldesc =
-						    malloc(l1 + l2)) == NULL)
+						    malloc(len)) == NULL)
 							err(1, "malloc");
-						sprintf(cur_evt->ldesc,
+						snprintf(cur_evt->ldesc, len,
 						    "\t%s %s", prefix, p + 1);
 					} else if ((cur_evt->ldesc =
 					    strdup(p)) == NULL)
@@ -315,13 +316,14 @@ getfield(p, endp, flags)
 
 
 FILE *
-opencal()
+opencal(void)
 {
-	int pdes[2];
-	int fdin;
+	int pdes[2], fdin;
+	struct stat st;
 
 	/* open up calendar file as stdin */
-	if ((fdin = open(calendarFile, O_RDONLY)) == -1) {
+	if ((fdin = open(calendarFile, O_RDONLY)) == -1 ||
+	    fstat(fdin, &st) == -1 || !S_ISREG(st.st_mode)) {
 		if (!doall) {
 			char *home = getenv("HOME");
 			if (home == NULL || *home == '\0')
@@ -333,6 +335,7 @@ opencal()
 				    calendarFile, calendarHome, calendarFile);
 		}
 	}
+
 	if (pipe(pdes) < 0)
 		return (NULL);
 	switch (vfork()) {
@@ -348,7 +351,8 @@ opencal()
 			(void)close(pdes[1]);
 		}
 		(void)close(pdes[0]);
-		/* Set stderr to /dev/null.  Necessary so that cron does not
+		/* 
+		 * Set stderr to /dev/null.  Necessary so that cron does not
 		 * wait for cpp to finish if it's running calendar -a.
 		 */
 		if (doall) {

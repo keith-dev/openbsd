@@ -1,7 +1,8 @@
-.\"	$OpenBSD: httpd.8,v 1.8 2002/09/18 15:34:45 henning Exp $
+.\"	$OpenBSD: httpd.8,v 1.14 2003/03/23 21:54:27 henning Exp $
 .\" Copyright (c) 1995-1997 David Robinson. All rights reserved.
 .\" Copyright (c) 1997-1999 The Apache Group. All rights reserved.
 .\" Copyright (c) 1998-1999 Bob Beck. All rights reserved.
+.\" Copyright (c) 2002-2003 Henning Brauer. All rights reserved.
 .\"
 .\" Redistribution and use in source and binary forms, with or without
 .\" modification, are permitted provided that the following conditions
@@ -49,8 +50,8 @@
 .\" Supercomputing Applications, University of Illinois, Urbana-Champaign.
 .\" For more information on the Apache Group and the Apache HTTP server
 .\" project, please see <http://www.apache.org/>.
-.Dd Sep 18, 2002
-.Dt HTTPD 1
+.Dd September 18, 2002
+.Dt HTTPD 8
 .Os
 .Sh NAME
 .Nm httpd
@@ -68,12 +69,14 @@
 .Nm
 is the Apache HyperText Transfer Protocol (HTTP) server program. It is
 designed to be run as a standalone daemon process. When used like this
-is will create a pool of child processes to handle requests. To stop
+it will create a pool of child processes to handle requests. To stop
 it, send a TERM signal to the initial (parent) process. The PID of
 this process is written to a file as given in the configuration file.
 Alternatively
 .Nm
-may be invoked by the Internet daemon inetd(8) each
+may be invoked by the Internet daemon
+.Xr inetd 8
+each
 time a connection to the HTTP service is made.
 .Pp
 Normally this service can be enabled for startup on OpenBSD
@@ -84,13 +87,17 @@ The
 option is of particular importance.
 .Pp
 This manual page only lists the command line arguments. For details
-of the directives necessary to configure httpd see the Apache manual,
+of the directives necessary to configure
+.Nm
+see the Apache manual,
 which is part of the Apache distribution or can be found at
-.Pa http://www.apache.org/ ,
+.Pa http://httpd.apache.org/docs/ ,
 or in
 .Pa /var/www/htdocs/manual .
 Paths in this manual page reflect those
-compiled into httpd by default with OpenBSD.
+compiled into
+.Nm
+by default with OpenBSD.
 .Sh OPTIONS
 .Bl -tag -width Ds
 .It Fl u
@@ -103,7 +110,7 @@ to the
 path.
 The
 .Fl u
-option disabled this behaviour, and returns
+option disables this behaviour, and returns
 .Nm
 to the expanded "unsecure" behaviour.
 .Pp
@@ -127,7 +134,7 @@ For this to work, pathnames inside the
 file do not need adjustment relative to
 .Va ServerRoot .
 For this option to remain secure, it is important that no files or directories
-writeable by user
+writable by user
 .Ar www
 or group
 .Ar www
@@ -187,11 +194,11 @@ Show the settings as parsed from the config file (currently only shows the
 virtualhost settings).
 .It Fl t
 Run syntax tests for configuration files only, including DocumentRoot checks.
-The program immediately exits after these syntax parsing with either a return 
+The program immediately exits after this syntax parsing with either a return 
 code of 0 (Syntax OK) or return code not equal to 0 (Syntax Error).
 .It Fl T
 Run syntax tests for configuration files only, without DocumentRoot checks.
-The program immediately exits after these syntax parsing with either a return 
+The program immediately exits after this syntax parsing with either a return 
 code of 0 (Syntax OK) or return code not equal to 0 (Syntax Error).
 .It Fl X
 Run in single-process mode, for internal debugging purposes only; the daemon
@@ -219,15 +226,19 @@ They must, however, be readable by this user.
 .Sh FILES
 .Bl -tag -width /etc/passwd -compact
 .It Pa /var/www/conf/httpd.conf
-.It Pa /var/www/conf/srm.conf
-.It Pa /var/www/conf/access.conf
 .It Pa /var/www/conf/mime.types
+.It Pa /var/www/conf/magic
 .It Pa /var/www/logs/error_log
 .It Pa /var/www/logs/access_log
 .It Pa /var/www/logs/httpd.pid
+.It Pa /var/www/logs/etag-state
+.It Pa /var/www/logs/ssl_engine_log
+.It Pa /var/www/logs/ssl_request_log
+.It Pa /var/www/logs/ssl_scache.db
 .It Pa /etc/rc.conf
 .El
 .Sh SEE ALSO
 .Xr chroot 2 ,
 .Xr inetd 8 ,
 .Xr rc 8
+

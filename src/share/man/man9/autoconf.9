@@ -1,4 +1,4 @@
-.\"     $OpenBSD: autoconf.9,v 1.1 2002/08/27 01:15:34 wcobb Exp $
+.\"     $OpenBSD: autoconf.9,v 1.3 2003/03/08 23:17:18 jmc Exp $
 .\"     $NetBSD: autoconf.9,v 1.9 2002/02/13 08:18:35 ross Exp $
 .\"
 .\" Copyright (c) 2001 The NetBSD Foundation, Inc.
@@ -73,7 +73,7 @@ For a description of the
 device definition
 .Dc
 language, see
-.Xr config 9 .
+.Xr files.conf 5 .
 .Pp
 Each device must have a name consisting of an alphanumeric string that
 ends with a unit number.
@@ -89,7 +89,6 @@ giving a unique address for each instance.
 The
 .Fn config_init
 function initializes autoconfiguration data structures.
-.Pp
 .Sh INDIRECT CONFIGURATION
 .nr nS 1
 .Ft "void *"

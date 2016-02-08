@@ -1,4 +1,4 @@
-/*	$OpenBSD: buf_subs.c,v 1.11 2002/02/19 19:39:35 millert Exp $	*/
+/*	$OpenBSD: buf_subs.c,v 1.16 2003/02/03 09:06:43 jmc Exp $	*/
 /*	$NetBSD: buf_subs.c,v 1.5 1995/03/21 09:07:08 cgd Exp $	*/
 
 /*-
@@ -40,9 +40,9 @@
 
 #ifndef lint
 #if 0
-static char sccsid[] = "@(#)buf_subs.c	8.2 (Berkeley) 4/18/94";
+static const char sccsid[] = "@(#)buf_subs.c	8.2 (Berkeley) 4/18/94";
 #else
-static char rcsid[] = "$OpenBSD: buf_subs.c,v 1.11 2002/02/19 19:39:35 millert Exp $";
+static const char rcsid[] = "$OpenBSD: buf_subs.c,v 1.16 2003/02/03 09:06:43 jmc Exp $";
 #endif
 #endif /* not lint */
 
@@ -191,13 +191,13 @@ cp_start(void)
  *	the start of the header of the first file added to the archive. The
  *	format specific end read function tells us how many bytes to move
  *	backwards in the archive to be positioned BEFORE the trailer. Two
- *	different postions have to be adjusted, the O.S. file offset (e.g. the
+ *	different position have to be adjusted, the O.S. file offset (e.g. the
  *	position of the tape head) and the write point within the data we have
  *	stored in the read (soon to become write) buffer. We may have to move
  *	back several records (the number depends on the size of the archive
  *	record and the size of the format trailer) to read up the record where
  *	the first byte of the trailer is recorded. Trailers may span (and
- *	overlap) record boundries.
+ *	overlap) record boundaries.
  *	We first calculate which record has the first byte of the trailer. We
  *	move the OS file offset back to the start of this record and read it
  *	up. We set the buffer write pointer to be at this byte (the byte where
@@ -205,9 +205,9 @@ cp_start(void)
  *	start of this record so a flush of this buffer will replace the record
  *	in the archive.
  *	A major problem is rewriting this last record. For archives stored
- *	on disk files, this is trival. However, many devices are really picky
+ *	on disk files, this is trivial. However, many devices are really picky
  *	about the conditions under which they will allow a write to occur.
- *	Often devices restrict the conditions where writes can be made writes,
+ *	Often devices restrict the conditions where writes can be made,
  *	so it may not be feasable to append archives stored on all types of
  *	devices.
  * Return:
@@ -217,7 +217,7 @@ cp_start(void)
 int
 appnd_start(off_t skcnt)
 {
-	register int res;
+	int res;
 	off_t cnt;
 
 	if (exit_val != 0) {
@@ -316,8 +316,8 @@ appnd_start(off_t skcnt)
 int
 rd_sync(void)
 {
-	register int errcnt = 0;
-	register int res;
+	int errcnt = 0;
+	int res;
 
 	/*
 	 * if the user says bail out on first fault, we are out of here...
@@ -374,7 +374,7 @@ rd_sync(void)
  * pback()
  *	push the data used during the archive id phase back into the I/O
  *	buffer. This is required as we cannot be sure that the header does NOT
- *	overlap a block boundry (as in the case we are trying to recover a
+ *	overlap a block boundary (as in the case we are trying to recover a
  *	flawed archived). This was not designed to be used for any other
  *	purpose. (What software engineering, HA!)
  *	WARNING: do not even THINK of pback greater than BLKMULT, unless the
@@ -391,7 +391,7 @@ pback(char *pt, int cnt)
 
 /*
  * rd_skip()
- *	skip foward in the archive during a archive read. Used to get quickly
+ *	skip forward in the archive during a archive read. Used to get quickly
  *	past file data and padding for files the user did NOT select.
  * Return:
  *	0 if ok, -1 failure, and 1 when EOF on the archive volume was detected.
@@ -405,7 +405,7 @@ rd_skip(off_t skcnt)
 	off_t skipped = 0;
 
 	/*
-	 * consume what data we have in the buffer. If we have to move foward
+	 * consume what data we have in the buffer. If we have to move forward
 	 * whole records, we call the low level skip function to see if we can
 	 * move within the archive without doing the expensive reads on data we
 	 * do not want.
@@ -488,9 +488,9 @@ wr_fin(void)
  */
 
 int
-wr_rdbuf(register char *out, register int outcnt)
+wr_rdbuf(char *out, int outcnt)
 {
-	register int cnt;
+	int cnt;
 
 	/*
 	 * while there is data to copy copy into the write buffer. when the
@@ -524,11 +524,11 @@ wr_rdbuf(register char *out, register int outcnt)
  */
 
 int
-rd_wrbuf(register char *in, register int cpcnt)
+rd_wrbuf(char *in, int cpcnt)
 {
-	register int res;
-	register int cnt;
-	register int incnt = cpcnt;
+	int res;
+	int cnt;
+	int incnt = cpcnt;
 
 	/*
 	 * loop until we fill the buffer with the requested number of bytes
@@ -562,7 +562,7 @@ rd_wrbuf(register char *in, register int cpcnt)
 
 /*
  * wr_skip()
- *	skip foward during a write. In other words add padding to the file.
+ *	skip forward during a write. In other words add padding to the file.
  *	we add zero filled padding as it makes flawed archives much easier to
  *	recover from. the caller tells us how many bytes of padding to add
  *	This routine was not designed to add HUGE amount of padding, just small
@@ -574,7 +574,7 @@ rd_wrbuf(register char *in, register int cpcnt)
 int
 wr_skip(off_t skcnt)
 {
-	register int cnt;
+	int cnt;
 
 	/*
 	 * loop while there is more padding to add
@@ -612,9 +612,9 @@ wr_skip(off_t skcnt)
 int
 wr_rdfile(ARCHD *arcn, int ifd, off_t *left)
 {
-	register int cnt;
-	register int res = 0;
-	register off_t size = arcn->sb.st_size;
+	int cnt;
+	int res = 0;
+	off_t size = arcn->sb.st_size;
 	struct stat sb;
 
 	/*
@@ -673,10 +673,10 @@ wr_rdfile(ARCHD *arcn, int ifd, off_t *left)
 int
 rd_wrfile(ARCHD *arcn, int ofd, off_t *left)
 {
-	register int cnt = 0;
-	register off_t size = arcn->sb.st_size;
-	register int res = 0;
-	register char *fnm = arcn->name;
+	int cnt = 0;
+	off_t size = arcn->sb.st_size;
+	int res = 0;
+	char *fnm = arcn->name;
 	int isem = 1;
 	int rem;
 	int sz = MINFBSZ;
@@ -687,7 +687,9 @@ rd_wrfile(ARCHD *arcn, int ofd, off_t *left)
 	 * pass the blocksize of the file being written to the write routine,
 	 * if the size is zero, use the default MINFBSZ
 	 */
-	if (fstat(ofd, &sb) == 0) {
+	if (ofd == -1)
+		sz = PAXPATHLEN + 1;		/* GNU tar long link/file */
+	else if (fstat(ofd, &sb) == 0) {
 		if (sb.st_blksize > 0)
 			sz = (int)sb.st_blksize;
 	} else
@@ -730,7 +732,7 @@ rd_wrfile(ARCHD *arcn, int ofd, off_t *left)
 	/*
 	 * if the last block has a file hole (all zero), we must make sure this
 	 * gets updated in the file. We force the last block of zeros to be
-	 * written. just closing with the file offset moved foward may not put
+	 * written. just closing with the file offset moved forward may not put
 	 * a hole at the end of the file.
 	 */
 	if (isem && (arcn->sb.st_size > 0L))
@@ -761,11 +763,11 @@ rd_wrfile(ARCHD *arcn, int ofd, off_t *left)
 void
 cp_file(ARCHD *arcn, int fd1, int fd2)
 {
-	register int cnt;
-	register off_t cpcnt = 0L;
-	register int res = 0;
-	register char *fnm = arcn->name;
-	register int no_hole = 0;
+	int cnt;
+	off_t cpcnt = 0L;
+	int res = 0;
+	char *fnm = arcn->name;
+	int no_hole = 0;
 	int isem = 1;
 	int rem;
 	int sz = MINFBSZ;
@@ -822,7 +824,7 @@ cp_file(ARCHD *arcn, int fd1, int fd2)
 	/*
 	 * if the last block has a file hole (all zero), we must make sure this
 	 * gets updated in the file. We force the last block of zeros to be
-	 * written. just closing with the file offset moved foward may not put
+	 * written. just closing with the file offset moved forward may not put
 	 * a hole at the end of the file.
 	 */
 	if (!no_hole && isem && (arcn->sb.st_size > 0L))
@@ -842,7 +844,7 @@ cp_file(ARCHD *arcn, int fd1, int fd2)
 int
 buf_fill(void)
 {
-	register int cnt;
+	int cnt;
 	static int fini = 0;
 
 	if (fini)
@@ -885,11 +887,11 @@ buf_fill(void)
  */
 
 int
-buf_flush(register int bufcnt)
+buf_flush(int bufcnt)
 {
-	register int cnt;
-	register int push = 0;
-	register int totcnt = 0;
+	int cnt;
+	int push = 0;
+	int totcnt = 0;
 
 	/*
 	 * if we have reached the user specified byte count for each archive

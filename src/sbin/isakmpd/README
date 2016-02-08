@@ -1,4 +1,4 @@
-$OpenBSD: README,v 1.17 2001/06/27 03:31:39 angelos Exp $
+$OpenBSD: README,v 1.19 2003/02/22 06:57:07 kjell Exp $
 $EOM: README,v 1.28 1999/10/10 22:53:24 angelos Exp $
 
 This is isakmpd, a BSD-licensed ISAKMP/Oakley (a.k.a. IKE)
@@ -9,7 +9,7 @@ http://www.openbsd.org/ for details on how to get OpenBSD source.
 
 Isakmpd is being developed under OpenBSD, with OpenBSD as its primary
 target, however, it is ported to Linux with FreeS/WAN IPsec.  The
-makefile support assumes a BSD environment noneheless as it is not too
+makefile support assumes a BSD environment nonetheless as it is not too
 hard to get such an environment to work under other operating systems.
 For example, Red Hat 5.2 shipped with pmake installed.  Read sysdep/README
 for further details about this issue.  Other systems isakmpd has been
@@ -29,7 +29,7 @@ under gdb with args similar to:
 	-d -n -p5000 -DA=99 -f/tmp/isakmpd.fifo -csamples/VPN-east.conf
 
 That will run isakmpd in the foreground, not connected to any application
-(like an IPsec implementation) logging to stderr with full debugging ouput,
+(like an IPsec implementation) logging to stderr with full debugging output,
 listening on UDP port 5000, accepting control commands via the named pipe
 called /tmp/isakmpd.fifo and reading its configuration from the
 VPN-east.conf file (found in the isakmpd/samples directory).

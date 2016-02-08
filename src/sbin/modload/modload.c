@@ -1,4 +1,4 @@
-/* 	$OpenBSD: modload.c,v 1.35 2002/07/11 21:23:28 deraadt Exp $	*/
+/* 	$OpenBSD: modload.c,v 1.38 2003/03/13 09:09:26 deraadt Exp $	*/
 /*	$NetBSD: modload.c,v 1.30 2001/11/08 15:33:15 christos Exp $	*/
 
 /*
@@ -40,6 +40,7 @@
 #include <sys/lkm.h>
 #include <sys/stat.h>
 #include <sys/file.h>
+
 #include <err.h>
 #include <errno.h>
 #include <stdio.h>
@@ -47,12 +48,12 @@
 #include <string.h>
 #include <unistd.h>
 #include <nlist.h>
+
+#include "modload.h"
 #include "pathnames.h"
 
 #define TRUE 1
 #define FALSE 0
-
-#include "modload.h"
 
 #ifndef DFLT_ENTRY
 #define	DFLT_ENTRY	"xxxinit"
@@ -71,17 +72,14 @@ static	void	cleanup(void);
 
 /* prelink the module */
 static int
-prelink(const char *kernel,
-	const char *entry,
-	const char *outfile,
-	const void *address,
-	const char *object)
+prelink(const char *kernel, const char *entry, const char *outfile,
+    const void *address, const char *object)
 {
 	char cmdbuf[1024];
 	int error = 0;
 
 	linkcmd(cmdbuf, sizeof(cmdbuf),
-		kernel, entry, outfile, address, object);
+	    kernel, entry, outfile, address, object);
 
 	if (debug)
 		fprintf(stderr, "%s\n", cmdbuf);
@@ -105,7 +103,6 @@ prelink(const char *kernel,
 		error = 1;
 		break;
 	}
-
 	return error;
 }
 
@@ -115,7 +112,7 @@ usage(void)
 	extern char *__progname;
 
 	fprintf(stderr, "usage: %s [-dnsvS] [-A system] [-e entry]\n",
-		__progname);
+	    __progname);
 	fprintf(stderr, "\t[-p postinstall] [-o outputfile] <input file>\n");
 	exit(1);
 }
@@ -155,14 +152,15 @@ static int
 verify_entry(const char *entry, char *filename)
 {
 	struct	nlist	names[2];
-	int n;
+	int n, len;
 	char *s;
 
 	memset(names, 0, sizeof(names));
-	s = malloc(strlen(entry) + 2);
+	len = strlen(entry) + 2;
+	s = malloc(len);
 	if (s == NULL)
 		err(1, "malloc");
-	sprintf(s, "_%s", entry);	/* safe */
+	snprintf(s, len, "_%s", entry);
 #ifdef	_AOUT_INCLUDE_
 	names[0].n_un.n_name = s;
 #else
@@ -185,7 +183,7 @@ loadbuf(void *buf, size_t len)
 	struct lmc_loadbuf ldbuf;
 	size_t n;
 	char *p = buf;
-	
+
 	while (len) {
 		n = MIN(len, MODIOBUF);
 		ldbuf.cnt = n;
@@ -222,7 +220,7 @@ loadsym(void *buf, size_t len)
 	struct lmc_loadbuf ldbuf;
 	size_t n;
 	char *p = buf;
-	
+
 	while (len) {
 		n = MIN(len, MODIOBUF);
 		ldbuf.cnt = n;
@@ -236,19 +234,17 @@ loadsym(void *buf, size_t len)
 
 /* Transfer some empty space. */
 int
-main(int argc, char **argv)
+main(int argc, char *argv[])
 {
-	int c;
+	int strtablen, c, noready = 0, old = 0;
 	char *kname = _PATH_UNIX;
 	char *entry = DFLT_ENTRY;
 	char *post = NULL;
 	char *modobj;
 	char modout[80], *p;
 	struct stat stb;
-	int strtablen;
 	size_t modsize;	/* XXX */
 	void* modentry;	/* XXX */
-	int noready = 0, old = 0;
 
 	while ((c = getopt(argc, argv, "dnvsA:Se:p:o:")) != -1) {
 		switch (c) {
@@ -299,7 +295,7 @@ main(int argc, char **argv)
 	 * kernel).
 	 */
 	if ((devfd = open(_PATH_LKM, O_RDWR, 0)) == -1)
-		err(3, _PATH_LKM);
+		err(3, "%s", _PATH_LKM);
 	fileopen |= DEV_OPEN;
 
 	strncpy(modout, modobj, sizeof(modout) - 1);
@@ -320,14 +316,17 @@ main(int argc, char **argv)
 		 * Try <modobj>_init if entry is DFLT_ENTRY.
 		 */
 		if (strcmp(entry, DFLT_ENTRY) == 0) {
+			int len;
+
 			if ((p = strrchr(modout, '/')))
 				p++;
 			else
 				p = modout;
-			entry = malloc(strlen(p) + strlen(DFLT_ENTRYEXT) + 1);
+			len = strlen(p) + strlen(DFLT_ENTRYEXT) + 1;
+			entry = malloc(len);
 			if (entry == NULL)
 				err(1, "malloc");
-			sprintf(entry, "%s%s", p, DFLT_ENTRYEXT); /* safe */
+			snprintf(entry, len, "%s%s", p, DFLT_ENTRYEXT);
 			if (verify_entry(entry, modobj))
 				errx(1, "entry point _%s not found in %s",
 				    entry, modobj);
@@ -344,9 +343,9 @@ main(int argc, char **argv)
 	if (Sflag == 0)
 		fileopen |= OUTFILE_CREAT;
 
- 	/*
- 	 * Pre-open the 0-linked module to get the size information
- 	 */
+	/*
+	 * Pre-open the 0-linked module to get the size information
+	 */
 	if ((modfd = open(out, O_RDONLY, 0)) == -1)
 		err(4, "%s", out);
 	fileopen |= MOD_OPEN;
@@ -387,10 +386,10 @@ main(int argc, char **argv)
 			    "symbol table loading");
 		}
 	doold:
-	    symtab = 0;
-	    if (ioctl(devfd, LMRESERV_O, &resrv) == -1)
-		err(9, "can't reserve memory");
-	    old = TRUE;
+		symtab = 0;
+		if (ioctl(devfd, LMRESERV_O, &resrv) == -1)
+			err(9, "can't reserve memory");
+		old = TRUE;
 	}
 	fileopen |= PART_RESRV;
 
@@ -399,7 +398,7 @@ main(int argc, char **argv)
 	 */
 	if (prelink(kname, entry, out, (void*)resrv.addr, modobj))
 		errx(1, "can't link `%s' creating `%s' bound to %p",
-		     modobj, out, (void*)resrv.addr);
+		    modobj, out, (void*)resrv.addr);
 
 	/*
 	 * Open the relinked module to load it...

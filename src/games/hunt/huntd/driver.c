@@ -1,4 +1,4 @@
-/*	$OpenBSD: driver.c,v 1.12 2002/05/31 03:40:00 pjanzen Exp $	*/
+/*	$OpenBSD: driver.c,v 1.14 2003/03/11 04:47:39 david Exp $	*/
 /*	$NetBSD: driver.c,v 1.5 1997/10/20 00:37:16 lukem Exp $	*/
 /*
  *  Hunt
@@ -128,7 +128,7 @@ again:
 			/*
 			 * Nothing was ready. We do some work now
 			 * to see if the simulation has any pending work
-			 * to do, and decide if we need to to block 
+			 * to do, and decide if we need to block 
 			 * indefinitely or just timeout.
 			 */
 			do {
@@ -434,7 +434,7 @@ init()
 		Num_fds = Server_socket + 1;
 
 	/* Initialise the random seed: */
-	srandom(getpid() + time((time_t *) NULL));
+	srandomdev();
 
 	/* Dig the maze: */
 	makemaze();

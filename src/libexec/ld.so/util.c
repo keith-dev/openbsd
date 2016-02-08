@@ -1,4 +1,4 @@
-/*	$OpenBSD: util.c,v 1.9 2002/07/24 04:11:10 deraadt Exp $	*/
+/*	$OpenBSD: util.c,v 1.13 2003/02/02 16:57:58 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1998 Per Fogelstrom, Opsycon AB
@@ -38,6 +38,19 @@
 #include "archdep.h"
 
 /*
+ * Stack protector dummies.
+ * Ideally, a scheme to compile these stubs from libc should be used, but
+ * this would end up dragging too much code from libc here.
+ */
+long __guard[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+
+void
+__stack_smash_handler(char func[], int damaged)
+{
+	_dl_exit(127);
+}
+
+/*
  * Static vars usable after bootstrapping.
  */
 static void *_dl_malloc_base;
@@ -57,14 +70,13 @@ _dl_strdup(const char *orig)
 }
 
 /*
- *  The following malloc/free code is a very simplified implementation
- *  of a malloc function. However, we do not need to be very complex here
- *  because we only free memory when 'dlclose()' is called and we can
- *  reuse at least the memory allocated for the object descriptor. We have
- *  one dynamic string allocated, the library name and it is likely that
- *  we can reuse that one to without a lot of complex colapsing code.
+ * The following malloc/free code is a very simplified implementation
+ * of a malloc function. However, we do not need to be very complex here
+ * because we only free memory when 'dlclose()' is called and we can
+ * reuse at least the memory allocated for the object descriptor. We have
+ * one dynamic string allocated, the library name and it is likely that
+ * we can reuse that one to without a lot of complex colapsing code.
  */
-
 void *
 _dl_malloc(size_t size)
 {

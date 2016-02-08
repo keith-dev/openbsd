@@ -1,4 +1,4 @@
-/*	$OpenBSD: tables.c,v 1.15 2002/02/19 19:39:35 millert Exp $	*/
+/*	$OpenBSD: tables.c,v 1.19 2003/02/03 09:06:43 jmc Exp $	*/
 /*	$NetBSD: tables.c,v 1.4 1995/03/21 09:07:45 cgd Exp $	*/
 
 /*-
@@ -40,9 +40,9 @@
 
 #ifndef lint
 #if 0
-static char sccsid[] = "@(#)tables.c	8.1 (Berkeley) 5/31/93";
+static const char sccsid[] = "@(#)tables.c	8.1 (Berkeley) 5/31/93";
 #else
-static char rcsid[] = "$OpenBSD: tables.c,v 1.15 2002/02/19 19:39:35 millert Exp $";
+static const char rcsid[] = "$OpenBSD: tables.c,v 1.19 2003/02/03 09:06:43 jmc Exp $";
 #endif
 #endif /* not lint */
 
@@ -71,7 +71,7 @@ static char rcsid[] = "$OpenBSD: tables.c,v 1.15 2002/02/19 19:39:35 millert Exp
  * large archives. These database routines carefully combine memory usage and
  * temporary file storage in ways which will not significantly impact runtime
  * performance while allowing the largest possible archives to be handled.
- * Trying to force the fit to the posix databases routines was not considered
+ * Trying to force the fit to the posix database routines was not considered
  * time well spent.
  */
 
@@ -134,11 +134,11 @@ lnk_start(void)
  */
 
 int
-chk_lnk(register ARCHD *arcn)
+chk_lnk(ARCHD *arcn)
 {
-	register HRDLNK *pt;
-	register HRDLNK **ppt;
-	register u_int indx;
+	HRDLNK *pt;
+	HRDLNK **ppt;
+	u_int indx;
 
 	if (ltab == NULL)
 		return(-1);
@@ -220,11 +220,11 @@ chk_lnk(register ARCHD *arcn)
  */
 
 void
-purg_lnk(register ARCHD *arcn)
+purg_lnk(ARCHD *arcn)
 {
-	register HRDLNK *pt;
-	register HRDLNK **ppt;
-	register u_int indx;
+	HRDLNK *pt;
+	HRDLNK **ppt;
+	u_int indx;
 
 	if (ltab == NULL)
 		return;
@@ -276,9 +276,9 @@ purg_lnk(register ARCHD *arcn)
 void
 lnk_end(void)
 {
-	register int i;
-	register HRDLNK *pt;
-	register HRDLNK *ppt;
+	int i;
+	HRDLNK *pt;
+	HRDLNK *ppt;
 
 	if (ltab == NULL)
 		return;
@@ -313,14 +313,14 @@ lnk_end(void)
  * An append with an -u must read the archive and store the modification time
  * for every file on that archive before starting the write phase. It is clear
  * that this is one HUGE database. To save memory space, the actual file names
- * are stored in a scatch file and indexed by an in memory hash table. The
+ * are stored in a scratch file and indexed by an in-memory hash table. The
  * hash table is indexed by hashing the file path. The nodes in the table store
  * the length of the filename and the lseek offset within the scratch file
- * where the actual name is stored. Since there are never any deletions to this
- * table, fragmentation of the scratch file is never a issue. Lookups seem to
- * not exhibit any locality at all (files in the database are rarely
- * looked up more than once...). So caching is just a waste of memory. The
- * only limitation is the amount of scatch file space available to store the
+ * where the actual name is stored. Since there are never any deletions from
+ * this table, fragmentation of the scratch file is never a issue. Lookups 
+ * seem to not exhibit any locality at all (files in the database are rarely
+ * looked up more than once...), so caching is just a waste of memory. The
+ * only limitation is the amount of scratch file space available to store the
  * path names.
  */
 
@@ -372,11 +372,11 @@ ftime_start(void)
  */
 
 int
-chk_ftime(register ARCHD *arcn)
+chk_ftime(ARCHD *arcn)
 {
-	register FTM *pt;
-	register int namelen;
-	register u_int indx;
+	FTM *pt;
+	int namelen;
+	u_int indx;
 	char ckname[PAXPATHLEN+1];
 
 	/*
@@ -475,7 +475,7 @@ chk_ftime(register ARCHD *arcn)
  * Interactive rename table routines
  *
  * The interactive rename table keeps track of the new names that the user
- * assignes to files from tty input. Since this map is unique for each file
+ * assigns to files from tty input. Since this map is unique for each file
  * we must store it in case there is a reference to the file later in archive
  * (a link). Otherwise we will be unable to find the file we know was
  * extracted. The remapping of these files is stored in a memory based hash
@@ -512,10 +512,10 @@ name_start(void)
  */
 
 int
-add_name(register char *oname, int onamelen, char *nname)
+add_name(char *oname, int onamelen, char *nname)
 {
-	register NAMT *pt;
-	register u_int indx;
+	NAMT *pt;
+	u_int indx;
 
 	if (ntab == NULL) {
 		/*
@@ -580,10 +580,10 @@ add_name(register char *oname, int onamelen, char *nname)
  */
 
 void
-sub_name(register char *oname, int *onamelen, size_t onamesize)
+sub_name(char *oname, int *onamelen, size_t onamesize)
 {
-	register NAMT *pt;
-	register u_int indx;
+	NAMT *pt;
+	u_int indx;
 
 	if (ntab == NULL)
 		return;
@@ -685,7 +685,7 @@ dev_start(void)
  */
 
 int
-add_dev(register ARCHD *arcn)
+add_dev(ARCHD *arcn)
 {
 	if (chk_dev(arcn->sb.st_dev, 1) == NULL)
 		return(-1);
@@ -697,7 +697,7 @@ add_dev(register ARCHD *arcn)
  *	check for a device value in the device table. If not found and the add
  *	flag is set, it is added. This does NOT assign any mapping values, just
  *	adds the device number as one that need to be remapped. If this device
- *	is alread mapped, just return with a pointer to that entry.
+ *	is already mapped, just return with a pointer to that entry.
  * Return:
  *	pointer to the entry for this device in the device map table. Null
  *	if the add flag is not set and the device is not in the table (it is
@@ -708,8 +708,8 @@ add_dev(register ARCHD *arcn)
 static DEVT *
 chk_dev(dev_t dev, int add)
 {
-	register DEVT *pt;
-	register u_int indx;
+	DEVT *pt;
+	u_int indx;
 
 	if (dtab == NULL)
 		return(NULL);
@@ -764,10 +764,10 @@ chk_dev(dev_t dev, int add)
  */
 
 int
-map_dev(register ARCHD *arcn, u_long dev_mask, u_long ino_mask)
+map_dev(ARCHD *arcn, u_long dev_mask, u_long ino_mask)
 {
-	register DEVT *pt;
-	register DLIST *dpt;
+	DEVT *pt;
+	DLIST *dpt;
 	static dev_t lastdev = 0;	/* next device number to try */
 	int trc_ino = 0;
 	int trc_dev = 0;
@@ -884,14 +884,14 @@ map_dev(register ARCHD *arcn, u_long dev_mask, u_long ino_mask)
 /*
  * directory access/mod time reset table routines (for directories READ by pax)
  *
- * The pax -t flag requires that access times of archive files to be the same
+ * The pax -t flag requires that access times of archive files be the same
  * before being read by pax. For regular files, access time is restored after
  * the file has been copied. This database provides the same functionality for
  * directories read during file tree traversal. Restoring directory access time
  * is more complex than files since directories may be read several times until
  * all the descendants in their subtree are visited by fts. Directory access
  * and modification times are stored during the fts pre-order visit (done
- * before any descendants in the subtree is visited) and restored after the
+ * before any descendants in the subtree are visited) and restored after the
  * fts post-order visit (after all the descendants have been visited). In the
  * case of premature exit from a subtree (like from the effects of -n), any
  * directory entries left in this database are reset during final cleanup
@@ -928,8 +928,8 @@ atdir_start(void)
 void
 atdir_end(void)
 {
-	register ATDIR *pt;
-	register int i;
+	ATDIR *pt;
+	int i;
 
 	if (atab == NULL)
 		return;
@@ -959,8 +959,8 @@ atdir_end(void)
 void
 add_atdir(char *fname, dev_t dev, ino_t ino, time_t mtime, time_t atime)
 {
-	register ATDIR *pt;
-	register u_int indx;
+	ATDIR *pt;
+	u_int indx;
 
 	if (atab == NULL)
 		return;
@@ -970,7 +970,7 @@ add_atdir(char *fname, dev_t dev, ino_t ino, time_t mtime, time_t atime)
 	 * return (the older entry always has the correct time). The only
 	 * way this will happen is when the same subtree can be traversed by
 	 * different args to pax and the -n option is aborting fts out of a
-	 * subtree before all the post-order visits have been made).
+	 * subtree before all the post-order visits have been made.
 	 */
 	indx = ((unsigned)ino) % A_TAB_SZ;
 	if ((pt = atab[indx]) != NULL) {
@@ -1021,9 +1021,9 @@ add_atdir(char *fname, dev_t dev, ino_t ino, time_t mtime, time_t atime)
 int
 get_atdir(dev_t dev, ino_t ino, time_t *mtime, time_t *atime)
 {
-	register ATDIR *pt;
-	register ATDIR **ppt;
-	register u_int indx;
+	ATDIR *pt;
+	ATDIR **ppt;
+	u_int indx;
 
 	if (atab == NULL)
 		return(-1);
@@ -1233,13 +1233,13 @@ proc_dir(void)
 u_int
 st_hash(char *name, int len, int tabsz)
 {
-	register char *pt;
-	register char *dest;
-	register char *end;
-	register int i;
-	register u_int key = 0;
-	register int steps;
-	register int res;
+	char *pt;
+	char *dest;
+	char *end;
+	int i;
+	u_int key = 0;
+	int steps;
+	int res;
 	u_int val;
 
 	/*

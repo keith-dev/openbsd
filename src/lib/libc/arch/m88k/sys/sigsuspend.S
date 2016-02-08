@@ -1,4 +1,4 @@
-/*	$OpenBSD: sigsuspend.S,v 1.2 2000/03/01 17:31:22 todd Exp $	*/
+/*	$OpenBSD: sigsuspend.S,v 1.6 2003/03/10 04:02:49 david Exp $	*/
 
 /*-
  * Copyright (c) 1990 The Regents of the University of California.
@@ -37,26 +37,24 @@
  * SUCH DAMAGE.
  */
 
-#if defined(LIBC_SCCS) && !defined(lint)
+#if defined(LIBC_SCCS)
 	.data
-	/*.asciz "from: @(#)sigsuspend.s	5.2 (Berkeley) 6/6/90"*/
-	.asciz "$OpenBSD: sigsuspend.S,v 1.2 2000/03/01 17:31:22 todd Exp $"
-	.text
-#endif /* LIBC_SCCS and not lint */
+	.string "$OpenBSD: sigsuspend.S,v 1.6 2003/03/10 04:02:49 david Exp $"
+#endif /* LIBC_SCCS */
 
 #include "SYS.h"
 
 /*
- * Sigsuspend actually expects a pointer to the the mask. To save
+ * Sigsuspend actually expects a pointer to the mask. To save
  * a copyin in the kernel, we do the dereference here and pass it.
  * This will be fail if we ever have more than 32 signals ie. sizeof
  * sigset_t != sizeof int.
  */
 
-ENTRY(sigsuspend)
+SYSENTRY(sigsuspend)
 	ld	r2,r2,0			/* dereference the pointer mask */
 	or	r13,r0,SYS_sigsuspend
 	tb0	0,r0,128
-	br	cerror
+	br	__cerror
 	jmp.n	r1
-	or	r2,r0,0
+	 or	r2,r0,0

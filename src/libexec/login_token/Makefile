@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.2 2002/03/11 11:47:51 mpech Exp $
+#	$OpenBSD: Makefile,v 1.4 2002/11/21 22:14:51 millert Exp $
 
 PROG=	login_token
 SRCS=	login_token.c init.c token.c tokendb.c
@@ -20,8 +20,8 @@ afterinstall:
 	done
 
 BINOWN=	root
-BINGRP=	auth
-BINMODE=4555
+BINGRP=	_token
+BINMODE=2555
 BINDIR=	/usr/libexec/auth
 
 .include <bsd.prog.mk>

@@ -1,4 +1,4 @@
-/*	$OpenBSD: openbsd-syscalls.c,v 1.13 2002/08/28 03:54:35 itojun Exp $	*/
+/*	$OpenBSD: openbsd-syscalls.c,v 1.18 2002/12/04 17:40:06 mickey Exp $	*/
 /*
  * Copyright 2002 Niels Provos <provos@citi.umich.edu>
  * All rights reserved.
@@ -127,13 +127,14 @@ static int obsd_syscall_number(const char *, const char *);
 static short obsd_translate_policy(short);
 static short obsd_translate_flags(short);
 static int obsd_translate_errno(int);
-static int obsd_answer(int, pid_t, u_int32_t, short, int, short);
+static int obsd_answer(int, pid_t, u_int32_t, short, int, short,
+    struct elevate *);
 static int obsd_newpolicy(int);
 static int obsd_assignpolicy(int, pid_t, int);
 static int obsd_modifypolicy(int, int, int, short);
 static int obsd_replace(int, pid_t, struct intercept_replace *);
 static int obsd_io(int, pid_t, int, void *, u_char *, size_t);
-static char *obsd_getcwd(int, pid_t, char *, size_t);
+static int obsd_setcwd(int, pid_t);
 static int obsd_restcwd(int);
 static int obsd_argument(int, void *, int, void **);
 static int obsd_read(int);
@@ -183,8 +184,8 @@ obsd_open(void)
 		return (-1);
 	}
 
-	if (ioctl(fd, SYSTR_CLONE, &cfd) == -1) {
-		warn("ioctl(SYSTR_CLONE)");
+	if (ioctl(fd, STRIOCCLONE, &cfd) == -1) {
+		warn("ioctl(STRIOCCLONE)");
 		goto out;
 	}
 
@@ -351,16 +352,28 @@ obsd_translate_errno(int nerrno)
 }
 
 static int
-obsd_answer(int fd, pid_t pid, u_int32_t seqnr, short policy, int nerrno,
-    short flags)
+obsd_answer(int fd, pid_t pid, u_int32_t seqnr, short policy, int errno,
+    short flags, struct elevate *elevate)
 {
 	struct systrace_answer ans;
 
+	memset(&ans, 0, sizeof(ans));
 	ans.stra_pid = pid;
 	ans.stra_seqnr = seqnr;
 	ans.stra_policy = obsd_translate_policy(policy);
 	ans.stra_flags = obsd_translate_flags(flags);
-	ans.stra_error = obsd_translate_errno(nerrno);
+	ans.stra_error = obsd_translate_errno(errno);
+
+	if (elevate != NULL) {
+		if (elevate->e_flags & ELEVATE_UID) {
+			ans.stra_flags |= SYSTR_FLAGS_SETEUID;
+			ans.stra_seteuid = elevate->e_uid;
+		}
+		if (elevate->e_flags & ELEVATE_GID) {
+			ans.stra_flags |= SYSTR_FLAGS_SETEGID;
+			ans.stra_setegid = elevate->e_gid;
+		}
+	}
 
 	if (ioctl(fd, STRIOCANSWER, &ans) == -1)
 		return (-1);
@@ -478,19 +491,10 @@ obsd_io(int fd, pid_t pid, int op, void *addr, u_char *buf, size_t size)
 	return (0);
 }
 
-static char *
-obsd_getcwd(int fd, pid_t pid, char *buf, size_t size)
+static int
+obsd_setcwd(int fd, pid_t pid)
 {
-	char *path;
-
-	if (ioctl(fd, STRIOCGETCWD, &pid) == -1)
-		return (NULL);
-
-	path = getcwd(buf, size);
-	if (path == NULL)
-		obsd_restcwd(fd);
-
-	return (path);
+	return (ioctl(fd, STRIOCGETCWD, &pid));
 }
 
 static int
@@ -591,10 +595,21 @@ obsd_read(int fd)
 			break;
 		}
 
-		if (obsd_answer(fd, pid, seqnr, 0, 0, 0) == -1)
+		if (obsd_answer(fd, pid, seqnr, 0, 0, 0, NULL) == -1)
 			err(1, "%s:%d: answer", __func__, __LINE__);
 		break;
 
+	case SYSTR_MSG_UGID: {
+		struct str_msg_ugid *msg_ugid;
+		
+		msg_ugid = &msg.msg_data.msg_ugid;
+
+		intercept_ugid(icpid, msg_ugid->uid, msg_ugid->uid);
+
+		if (obsd_answer(fd, pid, seqnr, 0, 0, 0, NULL) == -1)
+			err(1, "%s:%d: answer", __func__, __LINE__);
+		break;
+	}
 	case SYSTR_MSG_CHILD:
 		intercept_child_info(msg.msg_pid,
 		    msg.msg_data.msg_child.new_pid);
@@ -612,7 +627,7 @@ struct intercept_system intercept = {
 	obsd_report,
 	obsd_read,
 	obsd_syscall_number,
-	obsd_getcwd,
+	obsd_setcwd,
 	obsd_restcwd,
 	obsd_io,
 	obsd_argument,

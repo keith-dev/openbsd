@@ -131,7 +131,7 @@ BOOTP client, permanently assigning an address to each client.
 Whenever changes are made to the dhcpd.conf file, dhcpd must be
 restarted.   To restart dhcpd, send a SIGTERM (signal 15) to the
 process ID contained in
-.IR RUNDIR/dhcpd.pid ,
+.IR /var/run/dhcpd.pid ,
 and then re-invoke dhcpd.  Because the DHCP server database is not as
 lightweight as a BOOTP database, dhcpd does not automatically restart
 itself when it sees a change to the dhcpd.conf file.
@@ -144,7 +144,7 @@ they can be better spent elsewhere.   So please don't complain about
 this on the mailing list unless you're prepared to fund a project to
 implement this feature, or prepared to do it yourself.
 .PP
-DHCP traffic always bypass IPsec, otherwise there can come up situations
+DHCP traffic always bypasses IPsec, otherwise there could be situations
 when a server has an IPsec SA for the client, and sends replies over that,
 which a potentially newly booted client cannot grasp.
 .SH COMMAND LINE
@@ -154,7 +154,7 @@ broadcasts may be specified on the command line.  This should be done
 on systems where dhcpd is unable to identify non-broadcast interfaces,
 but should not be required on other systems.  If no interface names
 are specified on the command line dhcpd will identify all network
-interfaces which are up, elimininating non-broadcast interfaces if
+interfaces which are up, eliminating non-broadcast interfaces if
 possible, and listen for DHCP broadcasts on each interface.
 .PP
 If dhcpd should listen on a port other than the standard (port 67),
@@ -204,7 +204,7 @@ startup.   To avoid printing this message, the
 .B -q
 flag may be specified.
 .SH CONFIGURATION
-The syntax of the dhcpd.conf(5) file is discussed seperately.   This
+The syntax of the dhcpd.conf(5) file is discussed separately.   This
 section should be used as an overview of the configuration process,
 and the dhcpd.conf(5) documentation should be consulted for detailed
 reference information.
@@ -260,7 +260,7 @@ to the subnet command:
 	  range 239.252.197.10 239.252.197.107;
 	  default-lease-time 600;
 	  max-lease-time 7200;
-	|
+	}
 .fi
 .PP
 This particular subnet declaration specifies a default lease time of
@@ -329,10 +329,10 @@ use a different name server might be declared as follows:
 A more complete description of the dhcpd.conf file syntax is provided
 in dhcpd.conf(5).
 .SH FILES
-.B ETCDIR/dhcpd.conf, DBDIR/dhcpd.leases, RUNDIR/dhcpd.pid,
-.B DBDIR/dhcpd.leases~.
+.B /etc/dhcpd.conf, /var/db/dhcpd.leases, /var/run/dhcpd.pid,
+.B /var/db/dhcpd.leases~.
 .SH SEE ALSO
-dhclient(8), dhcrelay(8), dhcpd.conf(5), dhcpd.leases(5)
+dhcpd.conf(5), dhcpd.leases(5), dhclient(8), dhcp(8), dhcrelay(8)
 .SH AUTHOR
 .B dhcpd(8)
 was written by Ted Lemon <mellon@vix.com>

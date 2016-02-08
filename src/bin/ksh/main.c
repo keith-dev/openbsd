@@ -1,4 +1,4 @@
-/*	$OpenBSD: main.c,v 1.21 2002/06/09 05:47:27 todd Exp $	*/
+/*	$OpenBSD: main.c,v 1.23 2003/03/10 03:48:16 david Exp $	*/
 
 /*
  * startup, main loop, environments and error handling
@@ -180,7 +180,7 @@ main(argc, argv)
 
 
 	/* Turn on nohup by default for how - will change to off
-	 * by default once people are aware of its existance
+	 * by default once people are aware of its existence
 	 * (at&t ksh does not have a nohup option - it always sends
 	 * the hup).
 	 */
@@ -759,7 +759,7 @@ cleanup_parents_env()
 
 	/* Don't clean up temporary files - parent will probably need them.
 	 * Also, can't easily reclaim memory since variables, etc. could be
-	 * anywyere.
+	 * anywhere.
 	 */
 
 	/* close all file descriptors hiding in savefd */

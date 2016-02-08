@@ -1,5 +1,5 @@
 #!/bin/sh
-#	$OpenBSD: upgrade.sh,v 1.43 2002/10/03 00:56:44 krw Exp $
+#	$OpenBSD: upgrade.sh,v 1.48 2002/12/08 19:30:40 krw Exp $
 #	$NetBSD: upgrade.sh,v 1.2.4.5 1996/08/27 18:15:08 gwr Exp $
 #
 # Copyright (c) 1997-2002 Todd Miller, Theo de Raadt, Ken Westerback
@@ -50,12 +50,6 @@ MODE=upgrade
 # include common subroutines and initialization code
 . install.sub
 
-# Remove 'etc' set from THESETS. It should be installed
-# manually, after the upgrade. Note that etc should not
-# be the first or last set in THESETS, or this won't
-# work!
-THESETS=`echo $THESETS | sed -e 's/ etc / /'`
-
 # Have the user confirm that $ROOTDEV is the root filesystem.
 resp=
 while [ -z "$resp" ]; do
@@ -90,15 +84,7 @@ for _file in fstab hosts myname; do
 	fi
 	cp /mnt/etc/$_file /tmp/$_file
 done
-
-# Set the FQDN and system hostname (short form).
-HOSTNAME=`cat /tmp/myname`
-FQDN=$HOSTNAME
-HOSTNAME=${HOSTNAME%%.*}
-FQDN=${FQDN#${HOSTNAME}}
-FQDN=${FQDN#.}
-[[ -n $FQDN ]] || get_resolv_fqdn /mnt/etc/resolv.conf
-hostname $HOSTNAME.$FQDN
+hostname $(< /tmp/myname)
 
 # Start up the network in same/similar configuration as the installed system
 # uses.
@@ -110,34 +96,23 @@ y*|Y*)
 		exit
 	fi
 
-	ask "Do you want to do more, manual, network configuration?" n
-	case $resp in
-	y*|Y*)	echo "Type 'exit' to return to upgrade."
-		sh
-		;;
-	esac
-	;;
+	manual_net_cfg
 esac
 
 cat << __EOT
 
 The fstab is configured as follows:
 
-$(</tmp/fstab)
+$(< /tmp/fstab)
 
-You can edit the fstab now, before it is used, but the edited fstab will
-only be used during the upgrade. It will not be copied back to disk.
+For the ${MODE}, filesystems in the fstab will be automatically mounted if the
+'noauto' option is absent, and /sbin/mount_<fstype> is found, and the fstype is
+not nfs. Non-ffs filesystems will be mounted read-only.
 
-Filesystems in the fstab will be mounted only if the 'noauto' option is
-absent, /sbin/mount_<fstype> is found, and the fstype is not nfs. Only
-filesystems with a fstype of ffs will be mounted read-write.
-
+You can edit the fstab now, before it is used, but the edited fstab will only
+be used during the upgrade. It will not be copied back to disk.
 __EOT
-ask "Edit the fstab with ${EDITOR}?" n
-case $resp in
-y*|Y*)	${EDITOR} /tmp/fstab
-	;;
-esac
+edit_tmp_file fstab
 
 # Create /etc/fstab.
 munge_fstab
@@ -153,7 +128,7 @@ fi
 mount_fs
 
 # Install sets.
-install_sets $THESETS
+install_sets
 
 # Perform final steps common to both an install and an upgrade.
 finish_up

@@ -1,4 +1,4 @@
-/*	$OpenBSD: options.c,v 1.51 2002/09/06 18:17:30 deraadt Exp $	*/
+/*	$OpenBSD: options.c,v 1.56 2003/02/03 09:06:43 jmc Exp $	*/
 /*	$NetBSD: options.c,v 1.6 1996/03/26 23:54:18 mrg Exp $	*/
 
 /*-
@@ -40,9 +40,9 @@
 
 #ifndef lint
 #if 0
-static char sccsid[] = "@(#)options.c	8.2 (Berkeley) 4/18/94";
+static const char sccsid[] = "@(#)options.c	8.2 (Berkeley) 4/18/94";
 #else
-static char rcsid[] = "$OpenBSD: options.c,v 1.51 2002/09/06 18:17:30 deraadt Exp $";
+static const char rcsid[] = "$OpenBSD: options.c,v 1.56 2003/02/03 09:06:43 jmc Exp $";
 #endif
 #endif /* not lint */
 
@@ -77,11 +77,11 @@ static void printflg(unsigned int);
 static int c_frmt(const void *, const void *);
 static off_t str_offt(char *);
 static char *getline(FILE *fp);
-static void pax_options(register int, register char **);
+static void pax_options(int, char **);
 static void pax_usage(void);
-static void tar_options(register int, register char **);
+static void tar_options(int, char **);
 static void tar_usage(void);
-static void cpio_options(register int, register char **);
+static void cpio_options(int, char **);
 static void cpio_usage(void);
 
 /* errors from getline */
@@ -142,7 +142,7 @@ FSUB fsub[] = {
 
 /*
  * ford is the archive search order used by get_arc() to determine what kind
- * of archive we are dealing with. This helps to properly id  archive formats
+ * of archive we are dealing with. This helps to properly id archive formats
  * some formats may be subsets of others....
  */
 int ford[] = {5, 4, 3, 2, 1, 0, -1 };
@@ -154,7 +154,7 @@ int ford[] = {5, 4, 3, 2, 1, 0, -1 };
  */
 
 void
-options(register int argc, register char **argv)
+options(int argc, char **argv)
 {
 
 	/*
@@ -186,13 +186,13 @@ options(register int argc, register char **argv)
  */
 
 static void
-pax_options(register int argc, register char **argv)
+pax_options(int argc, char **argv)
 {
-	register int c;
-	register int i;
+	int c;
+	int i;
 	unsigned int flg = 0;
 	unsigned int bflg = 0;
-	register char *pt;
+	char *pt;
 	FSUB tmp;
 
 	/*
@@ -310,7 +310,7 @@ pax_options(register int argc, register char **argv)
 					break;
 				case 'p':
 					/*
-					 * preserver file mode bits
+					 * preserve file mode bits
 					 */
 					pmode = 1;
 					break;
@@ -451,6 +451,12 @@ pax_options(register int argc, register char **argv)
 			Lflag = 1;
 			flg |= CLF;
 			break;
+		case 'O':
+			/*
+			 * Force one volume.  Non standard option.
+			 */
+			force_one_volume = 1;
+			break;
 		case 'P':
 			/*
 			 * do NOT follow symlinks (default)
@@ -584,9 +590,9 @@ pax_options(register int argc, register char **argv)
  */
 
 static void
-tar_options(register int argc, register char **argv)
+tar_options(int argc, char **argv)
 {
-	register int c;
+	int c;
 	int fstdin = 0;
 	int Oflag = 0;
 	int nincfiles = 0;
@@ -974,7 +980,7 @@ mkpath(path)
 	char *path;
 {
 	struct stat sb;
-	register char *slash;
+	char *slash;
 	int done = 0;
 
 	slash = path;
@@ -1009,9 +1015,9 @@ mkpath(path)
  */
 
 static void
-cpio_options(register int argc, register char **argv)
+cpio_options(int argc, char **argv)
 {
-	register int c, i;
+	int c, i;
 	char *str;
 	FSUB tmp;
 	FILE *fp;
@@ -1322,7 +1328,7 @@ opt_next(void)
 int
 bad_opt(void)
 {
-	register OPLIST *opt;
+	OPLIST *opt;
 
 	if (ophead == NULL)
 		return(0);
@@ -1340,28 +1346,29 @@ bad_opt(void)
  * opt_add()
  *	breaks the value supplied to -o into a option name and value. options
  *	are given to -o in the form -o name-value,name=value
- *	mulltiple -o may be specified.
+ *	multiple -o may be specified.
  * Return:
  *	0 if format in name=value format, -1 if -o is passed junk
  */
 
 int
-opt_add(register char *str)
+opt_add(const char *str)
 {
-	register OPLIST *opt;
-	register char *frpt;
-	register char *pt;
-	register char *endpt;
+	OPLIST *opt;
+	char *frpt;
+	char *pt;
+	char *endpt;
+	char *dstr;
 
 	if ((str == NULL) || (*str == '\0')) {
 		paxwarn(0, "Invalid option name");
 		return(-1);
 	}
-	if ((str = strdup(str)) == NULL) {
+	if ((dstr = strdup(str)) == NULL) {
 		paxwarn(0, "Unable to allocate space for option list");
 		return(-1);
 	}
-	frpt = endpt = str;
+	frpt = endpt = dstr;
 
 	/*
 	 * break into name and values pieces and stuff each one into a
@@ -1373,12 +1380,12 @@ opt_add(register char *str)
 			*endpt = '\0';
 		if ((pt = strchr(frpt, '=')) == NULL) {
 			paxwarn(0, "Invalid options format");
-			free(str);
+			free(dstr);
 			return(-1);
 		}
 		if ((opt = (OPLIST *)malloc(sizeof(OPLIST))) == NULL) {
 			paxwarn(0, "Unable to allocate space for option list");
-			free(str);
+			free(dstr);
 			return(-1);
 		}
 		*pt++ = '\0';
@@ -1520,25 +1527,25 @@ no_op(void)
 void
 pax_usage(void)
 {
-	(void)fputs("usage: pax [-cdnvz] [-E limit] [-f archive] ", stderr);
+	(void)fputs("usage: pax [-cdnvzO] [-E limit] [-f archive] ", stderr);
 	(void)fputs("[-s replstr] ... [-U user] ...", stderr);
 	(void)fputs("\n           [-G group] ... ", stderr);
 	(void)fputs("[-T [from_date][,to_date]] ... ", stderr);
 	(void)fputs("[pattern ...]\n", stderr);
-	(void)fputs("       pax -r [-cdiknuvzDYZ] [-E limit] ", stderr);
+	(void)fputs("       pax -r [-cdiknuvzDOYZ] [-E limit] ", stderr);
 	(void)fputs("[-f archive] [-o options] ... \n", stderr);
 	(void)fputs("           [-p string] ... [-s replstr] ... ", stderr);
 	(void)fputs("[-U user] ... [-G group] ...\n	      ", stderr);
 	(void)fputs("[-T [from_date][,to_date]] ... ", stderr);
 	(void)fputs(" [pattern ...]\n", stderr);
-	(void)fputs("       pax -w [-dituvzHLPX] [-b blocksize] ", stderr);
+	(void)fputs("       pax -w [-dituvzHLOPX] [-b blocksize] ", stderr);
 	(void)fputs("[ [-a] [-f archive] ] [-x format] \n", stderr);
 	(void)fputs("           [-B bytes] [-s replstr] ... ", stderr);
 	(void)fputs("[-o options] ... [-U user] ...", stderr);
 	(void)fputs("\n           [-G group] ... ", stderr);
 	(void)fputs("[-T [from_date][,to_date][/[c][m]]] ... ", stderr);
 	(void)fputs("[file ...]\n", stderr);
-	(void)fputs("       pax -r -w [-diklntuvDHLPXYZ] ", stderr);
+	(void)fputs("       pax -r -w [-diklntuvDHLOPXYZ] ", stderr);
 	(void)fputs("[-p string] ... [-s replstr] ...", stderr);
 	(void)fputs("\n           [-U user] ... [-G group] ... ", stderr);
 	(void)fputs("[-T [from_date][,to_date][/[c][m]]] ... ", stderr);

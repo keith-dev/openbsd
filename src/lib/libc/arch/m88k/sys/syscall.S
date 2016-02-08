@@ -1,4 +1,4 @@
-/*	$OpenBSD: syscall.S,v 1.2 2000/03/01 17:31:22 todd Exp $	*/
+/*	$OpenBSD: syscall.S,v 1.5 2003/01/07 22:01:35 miod Exp $	*/
 
 /*-
  * Copyright (c) 1990 The Regents of the University of California.
@@ -37,20 +37,18 @@
  * SUCH DAMAGE.
  */
 
-#if defined(LIBC_SCCS) && !defined(lint)
+#if defined(LIBC_SCCS)
 	.data
-	/*.asciz "from: @(#)syscall.s	5.1 (Berkeley) 5/12/90"*/
-	.asciz "$OpenBSD: syscall.S,v 1.2 2000/03/01 17:31:22 todd Exp $"
-	.text
-#endif /* LIBC_SCCS and not lint */
+	.string "$OpenBSD: syscall.S,v 1.5 2003/01/07 22:01:35 miod Exp $"
+#endif /* LIBC_SCCS */
 
 #include "SYS.h"
 
-ENTRY(syscall)
+SYSENTRY(syscall)
 	ld	r10,r31,32
 	ld	r11,r31,36
 	ld	r12,r31,40
 	or	r9,r0,0
 	tb0	0,r0,128
-	br	cerror
+	br	__cerror
 	jmp	r1

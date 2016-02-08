@@ -1,4 +1,4 @@
-/*	$OpenBSD: captoinfo.c,v 1.9 2001/01/22 18:01:50 millert Exp $	*/
+/*	$OpenBSD: captoinfo.c,v 1.11 2003/03/18 16:55:54 millert Exp $	*/
 
 /****************************************************************************
  * Copyright (c) 1998,1999,2000 Free Software Foundation, Inc.              *
@@ -128,14 +128,16 @@ save_string(char *d, const char *const s)
 {
     size_t have = (d - my_string);
     size_t need = have + strlen(s) + 2;
+    size_t copied;
     if (need > my_length) {
 	my_string = (char *) realloc(my_string, my_length = (need + need));
 	if (my_string == 0)
 	    _nc_err_abort("Out of memory");
 	d = my_string + have;
     }
-    (void) strcpy(d, s);
-    return d + strlen(d);
+    if ((copied = strlcpy(d, s, my_length - have)) >= my_length - have)
+	_nc_err_abort("Buffer overflow");
+    return d + copied;
 }
 
 static inline char *
@@ -579,7 +581,7 @@ bcd_expression(const char *str)
 	{
 	    char buffer[80];
 	    int tst;
-	    sprintf(buffer, fmt, ch1, ch2);
+	    snprintf(buffer, sizeof(buffer), fmt, ch1, ch2);
 	    tst = strlen(buffer) - 1;
 	    assert(len == tst);
 	}
@@ -599,9 +601,9 @@ save_tc_char(char *bufptr, int c1)
 	bufptr = save_char(bufptr, c1);
     } else {
 	if (c1 == (c1 & 0x1f))	/* iscntrl() returns T on 255 */
-	    (void) strcpy(temp, unctrl((chtype) c1));
+	    (void) strlcpy(temp, unctrl((chtype) c1), sizeof(temp));
 	else
-	    (void) sprintf(temp, "\\%03o", c1);
+	    (void) snprintf(temp, sizeof(temp), "\\%03o", c1);
 	bufptr = save_string(bufptr, temp);
     }
     return bufptr;

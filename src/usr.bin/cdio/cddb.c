@@ -1,4 +1,4 @@
-/* $OpenBSD: cddb.c,v 1.4 2002/04/18 22:17:04 espie Exp $ */
+/* $OpenBSD: cddb.c,v 1.7 2003/03/13 09:32:06 espie Exp $ */
 /*
  * Copyright (c) 2002 Marc Espie.
  *
@@ -46,7 +46,7 @@ int		parse_connect_to(const char *, const char *);
 char *		get_line(FILE *);
 char *		get_answer(FILE *);
 void		verify_track_names(char **, int, struct cd_toc_entry *);
-char *		safe_copy(const char *);
+void		safe_copy(char **, const char *);
 
 unsigned long
 cddb_sum(unsigned long v)
@@ -79,7 +79,7 @@ send_hello(FILE *cout)
 	char hostname[MAXHOSTNAMELEN];
 
 	if (gethostname(hostname, sizeof(hostname)) == -1)
-		strcpy(hostname, "unknown");
+		strlcpy(hostname, "unknown", sizeof hostname);
 	fprintf(cout, "CDDB HELLO %s %s cdio " VERSION "\r\n",
 	    getlogin(), hostname);
 	fflush(cout);
@@ -99,11 +99,21 @@ send_query(FILE *f, int n, struct cd_toc_entry *e)
 #define MAXSIZE 256
 char copy_buffer[MAXSIZE];
 
-char *
-safe_copy(const char *title)
+void
+safe_copy(char **p, const char *title)
 {
 	strnvis(copy_buffer, title, MAXSIZE-1, VIS_TAB|VIS_NL);
-	return strdup(copy_buffer);
+	if (*p == NULL)
+		*p = strdup(copy_buffer);
+	else {
+		size_t len = strlen(*p) + strlen(copy_buffer) + 1;
+		char *n = malloc(len);
+		if (n == NULL)
+			return;
+		snprintf(n, len, "%s%s", *p, copy_buffer);
+		free(*p);
+		*p = n;
+	}
 }
 
 int
@@ -342,7 +352,7 @@ cddb(const char *host_port, int n, struct cd_toc_entry *e, char *arg)
 			continue;
 		if (k >= n)
 			continue;
-		result[k] = safe_copy(end);
+		safe_copy(&result[k], end);
 	}
 	fprintf(cout, "QUIT\r\n");
 	verify_track_names(result, n, e);

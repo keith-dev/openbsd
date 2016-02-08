@@ -1,10 +1,11 @@
-dnl	$OpenBSD: install,v 1.54 2002/07/25 19:29:32 miod Exp $
+dnl	$OpenBSD: install,v 1.58 2003/03/24 11:33:57 miod Exp $
 OpenBSDInstallPrelude
 
 There are several ways to install OpenBSD onto a disk. The easiest way
 in terms of preliminary setup is to use the OpenBSD miniroot that can
-be booted off your local disk's swap partition.   The normal way is to
-use the OpenBSD installation floppy, or an installation tape.
+be booted off your local disk's swap partition. The normal way is to
+use the OpenBSD CD-ROM, or the bootable CD-ROM mini image, or an
+installation floppy, or an installation tape, depending on your hardware.
 
 If your Sparc is hooked up in a network and you can find a server to
 arrange for a diskless setup, which is a convenient way to install on a
@@ -84,7 +85,7 @@ messages.  Boot failure modes are typically a lot of CD-ROM drive
 activity, but no messages or complaints about magic numbers,
 checksums or formats.
 
-Not all MACHINE systems support bootable CDROMS and the current
+Not all MACHINE systems support bootable CD-ROM and the current
 boot image is only known to work on sun4c and sun4m architectures.
 If it does not work, you'll have to create a boot floppy or bootable
 hard disk using the instructions under preparing boot media.
@@ -186,26 +187,13 @@ OpenBSDBootMsgs
 	you should choose the terminal type from amongst those listed.
 	(If your terminal type is xterm, just use vt100).
 
-dnl put this back for 3.3
-dnl OpenBSDInstallPart3
-	After entering the terminal type you will be asked whether you
-	wish to do an "(I)nstall".  Enter 'I' for a fresh installation.
-	Note that you cannot upgrade a previous OpenBSD installation
-	to 3.2.
-
-	You will be presented with a welcome message and asked if
-	you really want to continue. Assuming you answered yes, the
-	install program will then tell you which disks of that type
-	it can install on, and ask you which it should use.  The name
-	of the disk is typically "sd0" for SCSI drives.
-	Reply with the name of your disk.
-dnl end put this back
+OpenBSDInstallPart3
 
 OpenBSDInstallPart4
 
 OpenBSDInstallPart5(sd0)
 
-OpenBSDInstallNet({:-CD-ROM, NFS, -:},nofloppy)
+OpenBSDInstallNet({:-CD-ROM, -:},nofloppy)
 
 OpenBSDFTPInstall
 
@@ -215,8 +203,6 @@ OpenBSDTAPEInstall(3)
 
 OpenBSDCDROMInstall
 		
-OpenBSDNFSInstall
-
 OpenBSDDISKInstall(,{:-only -:})
 
 OpenBSDCommonFS
@@ -510,9 +496,7 @@ filesystem for `/usr' with your diskless setup, make sure the "./usr" base
 files in base{:--:}OSrev.tgz end up in the correct location. One way to do this is
 to temporarily use a loopback mount on the server, re-routing <root>/usr to
 your server's exported OpenBSD "/usr" directory. Also put the kernel and
-dnl put back after 3.2
-dnl the install/upgrade scripts into the root directory.
-the install script into the root directory.
+the install/upgrade scripts into the root directory.
 
 A few configuration files need to be edited:
 
@@ -529,7 +513,7 @@ A few configuration files need to be edited:
 			server:/export/root/client       /     nfs  rw 0 0
 			server:/export/exec/sun4.OpenBSD /usr  nfs  rw 0 0
 
-Now you must populate the the `/dev' directory for your client. If you server
+Now you must populate the `/dev' directory for your client. If the server
 runs SunOS 4.x, you can simply change your working directory to `<root>/dev'
 and run the MAKEDEV script: `sh MAKEDEV all' (this might require the edition
 of MAKEDEV to change the PATH for it to work properly).

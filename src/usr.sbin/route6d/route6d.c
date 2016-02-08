@@ -1,5 +1,5 @@
-/*	$OpenBSD: route6d.c,v 1.31 2002/08/21 16:30:29 itojun Exp $	*/
-/*	$KAME: route6d.c,v 1.88 2002/08/21 16:24:25 itojun Exp $	*/
+/*	$OpenBSD: route6d.c,v 1.33 2002/10/26 20:16:13 itojun Exp $	*/
+/*	$KAME: route6d.c,v 1.94 2002/10/26 20:08:55 itojun Exp $	*/
 
 /*
  * Copyright (C) 1995, 1996, 1997, and 1998 WIDE Project.
@@ -31,7 +31,7 @@
  */
 
 #if 0
-static char _rcsid[] = "$OpenBSD: route6d.c,v 1.31 2002/08/21 16:30:29 itojun Exp $";
+static char _rcsid[] = "$OpenBSD: route6d.c,v 1.33 2002/10/26 20:16:13 itojun Exp $";
 #endif
 
 #include <stdio.h>
@@ -47,6 +47,9 @@ static char _rcsid[] = "$OpenBSD: route6d.c,v 1.31 2002/08/21 16:30:29 itojun Ex
 #include <errno.h>
 #include <err.h>
 #include <util.h>
+#ifdef HAVE_POLL_H
+#include <poll.h>
+#endif
 
 #include <sys/types.h>
 #include <sys/param.h>
@@ -135,12 +138,16 @@ int	nifc;		/* number of valid ifc's */
 struct	ifc **index2ifc;
 int	nindex2ifc;
 struct	ifc *loopifcp = NULL;	/* pointing to loopback */
+#ifdef HAVE_POLL_H
+struct	pollfd set[2];
+#else
 fd_set	*sockvecp;	/* vector to select() for receiving */
 fd_set	*recvecp;
 int	fdmasks;
+int	maxfd;		/* maximum fd for select() */
+#endif
 int	rtsock;		/* the routing socket */
 int	ripsock;	/* socket to send/receive RIP datagram */
-int	maxfd;		/* maximum fd for select() */
 
 struct	rip6 *ripbuf;	/* packet buffer for sending */
 
@@ -442,8 +449,13 @@ main(argc, argv)
 			continue;
 		}
 
+#ifdef HAVE_POLL_H
+		switch (poll(set, 2, INFTIM))
+#else
 		memcpy(recvecp, sockvecp, fdmasks);
-		switch (select(maxfd + 1, recvecp, 0, 0, 0)) {
+		switch (select(maxfd + 1, recvecp, 0, 0, 0))
+#endif
+		{
 		case -1:
 			if (errno != EINTR) {
 				fatal("select");
@@ -453,12 +465,22 @@ main(argc, argv)
 		case 0:
 			continue;
 		default:
-			if (FD_ISSET(ripsock, recvecp)) {
+#ifdef HAVE_POLL_H
+			if (set[0].revents & POLLIN)
+#else
+			if (FD_ISSET(ripsock, recvecp))
+#endif
+			{
 				sigprocmask(SIG_BLOCK, &mask, &omask);
 				riprecv();
 				sigprocmask(SIG_SETMASK, &omask, NULL);
 			}
-			if (FD_ISSET(rtsock, recvecp)) {
+#ifdef HAVE_POLL_H
+			if (set[1].revents & POLLIN)
+#else
+			if (FD_ISSET(rtsock, recvecp))
+#endif
+			{
 				sigprocmask(SIG_BLOCK, &mask, &omask);
 				rtrecv();
 				sigprocmask(SIG_SETMASK, &omask, NULL);
@@ -562,7 +584,8 @@ ripalarm()
 void
 init()
 {
-	int	i, int0, int255, error;
+	int	i, error;
+	const int int0 = 0, int1 = 1, int255 = 255;
 	struct	addrinfo hints, *res;
 	char	port[10];
 
@@ -586,10 +609,14 @@ init()
 		/*NOTREACHED*/
 	}
 
-	int0 = 0; int255 = 255;
 	ripsock = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
 	if (ripsock < 0) {
 		fatal("rip socket");
+		/*NOTREACHED*/
+	}
+	if (setsockopt(ripsock, IPPROTO_IPV6, IPV6_V6ONLY,
+	    &int1, sizeof(int1)) < 0) {
+		fatal("rip IPV6_V6ONLY");
 		/*NOTREACHED*/
 	}
 	if (bind(ripsock, res->ai_addr, res->ai_addrlen) < 0) {
@@ -636,18 +663,34 @@ init()
 	}
 	memcpy(&ripsin, res->ai_addr, res->ai_addrlen);
 
+#ifdef HAVE_POLL_H
+	set[0].fd = ripsock;
+	set[0].events = POLLIN;
+#else
 	maxfd = ripsock;
+#endif
 
 	if (nflag == 0) {
 		if ((rtsock = socket(PF_ROUTE, SOCK_RAW, 0)) < 0) {
 			fatal("route socket");
 			/*NOTREACHED*/
 		}
+#ifdef HAVE_POLL_H
+		set[1].fd = rtsock;
+		set[1].events = POLLIN;
+#else
 		if (rtsock > maxfd)
 			maxfd = rtsock;
-	} else
+#endif
+	} else {
+#ifdef HAVE_POLL_H
+		set[1].fd = -1;
+#else
 		rtsock = -1;	/*just for safety */
+#endif
+	}
 
+#ifndef HAVE_POLL_H
 	fdmasks = howmany(maxfd + 1, NFDBITS) * sizeof(fd_mask);
 	if ((sockvecp = malloc(fdmasks)) == NULL) {
 		fatal("malloc");
@@ -661,6 +704,7 @@ init()
 	FD_SET(ripsock, sockvecp);
 	if (rtsock >= 0)
 		FD_SET(rtsock, sockvecp);
+#endif
 }
 
 #define	RIPSIZE(n) \
@@ -2706,16 +2750,16 @@ addroute(rrt, gw, ifcp)
 
 	if (errno == EEXIST) {
 		trace(0, "ADD: Route already exists %s/%d gw %s\n",
-			inet6_n2p(&np->rip6_dest), np->rip6_plen, buf1);
+		    inet6_n2p(&np->rip6_dest), np->rip6_plen, buf1);
 		if (rtlog)
 			fprintf(rtlog, "ADD: Route already exists %s/%d gw %s\n",
-				inet6_n2p(&np->rip6_dest), np->rip6_plen, buf1);
+			    inet6_n2p(&np->rip6_dest), np->rip6_plen, buf1);
 	} else {
 		trace(0, "Can not write to rtsock (addroute): %s\n",
-			strerror(errno));
+		    strerror(errno));
 		if (rtlog)
 			fprintf(rtlog, "\tCan not write to rtsock: %s\n",
-				strerror(errno));
+			    strerror(errno));
 	}
 	return -1;
 }
@@ -2773,16 +2817,16 @@ delroute(np, gw)
 
 	if (errno == ESRCH) {
 		trace(0, "RTDEL: Route does not exist: %s/%d gw %s\n",
-			inet6_n2p(&np->rip6_dest), np->rip6_plen, buf2);
+		    inet6_n2p(&np->rip6_dest), np->rip6_plen, buf2);
 		if (rtlog)
 			fprintf(rtlog, "RTDEL: Route does not exist: %s/%d gw %s\n",
-				inet6_n2p(&np->rip6_dest), np->rip6_plen, buf2);
+			    inet6_n2p(&np->rip6_dest), np->rip6_plen, buf2);
 	} else {
 		trace(0, "Can not write to rtsock (delroute): %s\n",
-			strerror(errno));
+		    strerror(errno));
 		if (rtlog)
 			fprintf(rtlog, "\tCan not write to rtsock: %s\n",
-				strerror(errno));
+			    strerror(errno));
 	}
 	return -1;
 }
@@ -3003,13 +3047,14 @@ void
 filterconfig()
 {
 	int i;
-	char *p, *ap, *iflp, *ifname;
+	char *p, *ap, *iflp, *ifname, *ep;
 	struct iff ftmp, *iff_obj;
 	struct ifc *ifcp;
 	struct riprt *rrt;
 #if 0
 	struct in6_addr gw;
 #endif
+	u_long plen;
 
 	for (i = 0; i < nfilter; i++) {
 		ap = filter[i];
@@ -3032,7 +3077,14 @@ filterconfig()
 			fatal("invalid prefix specified for '%s'", ap);
 			/*NOTREACHED*/
 		}
-		ftmp.iff_plen = atoi(p);
+		errno = 0;
+		ep = NULL;
+		plen = strtoul(p, &ep, 10);
+		if (errno || !*p || *ep || plen > sizeof(ftmp.iff_addr) * 8) {
+			fatal("invalid prefix length specified for '%s'", ap);
+			/*NOTREACHED*/
+		}
+		ftmp.iff_plen = plen;
 		ftmp.iff_next = NULL;
 		applyplen(&ftmp.iff_addr, ftmp.iff_plen);
 ifonly:
@@ -3330,7 +3382,10 @@ fatal(const char *fmt, ...)
 	vsnprintf(buf, sizeof(buf), fmt, ap);
 	va_end(ap);
 	perror(buf);
-	syslog(LOG_ERR, "%s: %s", buf, strerror(errno));
+	if (errno)
+		syslog(LOG_ERR, "%s: %s", buf, strerror(errno));
+	else
+		syslog(LOG_ERR, "%s", buf);
 	rtdexit();
 }
 

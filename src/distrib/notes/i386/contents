@@ -1,3 +1,4 @@
+dnl	$OpenBSD: contents,v 1.43 2003/03/25 19:57:31 miod Exp $
 TopPart
 
 OpenBSDfloppy
@@ -11,13 +12,17 @@ OpenBSDfloppy
 				this one features most of the cardbus and
 				pcmcia drivers; see below.
 
-OpenBSDcdrom
+		cdrom{:--:}OSrev.fs	The MACHINE boot and installation
+				2.88mb floppy image that contains almost all
+				OpenBSD drivers; see below.
 
 OpenBSDdistsets
 
 OpenBSDbsd
 
 OpenBSDrd
+
+OpenBSDcd
 
 As well you may be interested in
 
@@ -34,22 +39,22 @@ useful for the installation.
 
 DistributionDescription(ten)
 
-OpenBSDbase(23.9,69.1,shared)
+OpenBSDbase(31.0,88.8,shared)
 
-OpenBSDcomp(16.4,48.8,shared)
+OpenBSDcomp(16.6,49.9,shared)
 
-OpenBSDetc(1.2,3.9)
+OpenBSDetc(1.5,5.5)
 
-OpenBSDgame(2.8,6.5)
+OpenBSDgame(2.6,6.1)
 
-OpenBSDman(5.5,19.9)
+OpenBSDman(6.1,21.6)
 
-OpenBSDmisc(1.7,5.6)
+OpenBSDmisc(1.9,6.2)
 
-OpenBSDxbase(8.7,24.0)
+OpenBSDxbase(9.3,26.4)
 
 OpenBSDxfont(31.4,34.6)
 
-OpenBSDxserv(19.8,49.1)
+OpenBSDxserv(15.3,38.4)
 
-OpenBSDxshare(1.9,9.4)
+OpenBSDxshare(1.6,7.8)

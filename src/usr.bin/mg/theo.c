@@ -1,4 +1,28 @@
-/*	$OpenBSD: theo.c,v 1.33 2002/09/24 08:37:49 henning Exp $	*/
+/*	$OpenBSD: theo.c,v 1.47 2003/03/13 15:09:36 grange Exp $	*/
+/*
+ * Copyright (c) 2002 Artur Grabowski <art@openbsd.org>
+ * All rights reserved. 
+ *
+ * Redistribution and use in source and binary forms, with or without 
+ * modification, are permitted provided that the following conditions 
+ * are met: 
+ *
+ * 1. Redistributions of source code must retain the above copyright 
+ *    notice, this list of conditions and the following disclaimer. 
+ * 2. The name of the author may not be used to endorse or promote products
+ *    derived from this software without specific prior written permission. 
+ *
+ * THIS SOFTWARE IS PROVIDED ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES,
+ * INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY
+ * AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL
+ * THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+ * EXEMPLARY, OR CONSEQUENTIAL  DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+ * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+ * OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+ * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+ * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+ * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
+ */
 
 #include "def.h"
 #include "kbd.h"
@@ -95,7 +119,18 @@ static const char *talk[] = {
 	"feature requests come from idiots",
 	"henning and darren / sitting in a tree / t o k i n g / a joint or three",
 	"KICK ASS. TIME FOR A JASON LOVE IN!  WE CAN ALL GET LOST IN HIS HAIR!",
-	"shame on you for following my rules."
+	"shame on you for following my rules.",
+	"altq's parser sucks dead whale farts through the finest chemistry pipette's",
+	"screw this operating system shit, i just want to drive!",
+	"That is the most stupid thing I have heard all week.",
+	"Search for fuck.  Anytime you see that word, you have a paragraph to write.",
+	"what I'm doing [...] is hell. it's kind of fun.",
+	"Yes, but the ports people are into S&M.",
+	"Buttons are for idiots.",
+	"We are not hackers. We are turd polishing craftsmen.",
+	"if ya break cvs, we hunt ya and break yer legs",
+	"who cares.  style(9) can bite my ass",
+	"The argument is totally Linux."
 };
 
 static const int ntalk = sizeof(talk)/sizeof(talk[0]);

@@ -1,7 +1,7 @@
-/*	$OpenBSD: hppa.c,v 1.4 2002/07/22 02:54:23 art Exp $	*/
+/*	$OpenBSD: hppa.c,v 1.7 2003/03/14 22:18:24 mickey Exp $	*/
 
 /*
- * Copyright (c) 2002 Michael Shalayeff
+ * Copyright (c) 2002-2003 Michael Shalayeff
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -40,7 +40,7 @@ static const char *md_reg_names[] = {
 	"%pc", "%npc"
 };
 
-struct md_def md_def = { md_reg_names, 34, 0 };
+struct md_def md_def = { md_reg_names, 34, 32 };
 
 void
 md_def_init(void)
@@ -59,19 +59,16 @@ md_getframe(struct pstate *ps, int frame, struct md_frame *fram)
 	if (process_getregs(ps, &r))
 		return (-1);
 
-	if (frame == 0) {
-		fram->pc = r.r_pc;
-		fram->fp = r.r_reg[3];
-		return (0);
-	}
-
-	rp = r.r_reg[2];
-	fp = r.r_reg[3];
+	rp = r.r_regs[2];
+	fp = r.r_regs[3];
 	pc = r.r_pc;
 
-	for (i = 1; i < frame; i++) {
+	for (i = 0; i < frame; i++) {
 
-		if (process_read(ps, fp-60, &fr, sizeof(fr)) < 0)
+		if (!fp)
+			return (-1);
+
+		if (process_read(ps, fp-15*4, &fr, sizeof(fr)) < 0)
 			return (-1);
 
 		pc = rp;
@@ -81,11 +78,13 @@ md_getframe(struct pstate *ps, int frame, struct md_frame *fram)
 	fram->pc = pc;
 	fram->fp = fp;
 
-	fram->nargs = 4;		/* XXX real number is in the symtab */
-	fram->args[0] = fr.r_arg0;
-	fram->args[1] = fr.r_arg1;
-	fram->args[2] = fr.r_arg2;
-	fram->args[3] = fr.r_arg3;
+	if (frame != 0) {
+		fram->nargs = 4;	/* XXX real number is in the symtab */
+		fram->args[3] = fr[3];
+		fram->args[2] = fr[4];
+		fram->args[1] = fr[5];
+		fram->args[0] = fr[6];
+	}
 
 	return (0);
 }
@@ -99,11 +98,7 @@ md_getregs(struct pstate *ps, reg *regs)
 	if (process_getregs(ps, &r))
 		return (-1);
 
-	regs[0] = r.r_pc;
-	regs[1] = r.r_npc;
-
-	for (i = 0; i < 32; i++)
-		regs[2 + i] = r.r_out[i];
+	memcpy(regs, &r, sizeof(r));
 
 	return (0);
 }

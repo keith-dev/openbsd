@@ -100,10 +100,13 @@ gld${EMULATION_NAME}_search_dir (dirname, filename)
   force_maj = -1;
   force_min = -1;
   dot = strchr (filename, '.');
+#ifdef DO_FORCE_VERS
   if (dot == NULL)
     {
+#endif /* DO_FORCE_VERS */
       len = strlen (filename);
       alc = NULL;
+#ifdef DO_FORCE_VERS
     }
   else
     {
@@ -119,6 +122,7 @@ gld${EMULATION_NAME}_search_dir (dirname, filename)
       if (dot != NULL)
 	force_min = atoi (dot + 1);
     }
+#endif /* DO_FORCE_VERS */
 
   found = NULL;
   max_maj = max_min = 0;
@@ -392,7 +396,7 @@ gld${EMULATION_NAME}_try_needed (name, force)
      int force;
 {
   bfd *abfd;
-  const char *soname;
+  char *soname;
 
   abfd = bfd_openr (name, bfd_get_target (output_bfd));
   if (abfd == NULL)
@@ -478,7 +482,7 @@ cat >>e${EMULATION_NAME}.c <<EOF
     einfo ("%F%P:%B: bfd_stat failed: %E\n", abfd);
 
   /* First strip off everything before the last '/'.  */
-  soname = basename (abfd->filename);
+  soname = xstrdup (basename (abfd->filename));
 
   if (trace_file_tries)
     info_msg (_("found %s at %s\n"), soname, name);
@@ -489,6 +493,7 @@ cat >>e${EMULATION_NAME}.c <<EOF
     {
       /* Return true to indicate that we found the file, even though
          we aren't going to do anything with it.  */
+      free (soname);
       return true;
     }
 
@@ -1454,6 +1459,8 @@ echo '  ; else if (link_info.shared) return'		   >> e${EMULATION_NAME}.c
 sed $sc ldscripts/${EMULATION_NAME}.xs                     >> e${EMULATION_NAME}.c
 fi
 
+echo '  ; else if (config.data_bss_contig == true) return'   >> e${EMULATION_NAME}.c
+sed $sc ldscripts/${EMULATION_NAME}.xz                     >> e${EMULATION_NAME}.c
 echo '  ; else return'                                     >> e${EMULATION_NAME}.c
 sed $sc ldscripts/${EMULATION_NAME}.x                      >> e${EMULATION_NAME}.c
 echo '; }'                                                 >> e${EMULATION_NAME}.c
@@ -1475,6 +1482,8 @@ cat >>e${EMULATION_NAME}.c <<EOF
     return "ldscripts/${EMULATION_NAME}.xn";
   else if (link_info.shared)
     return "ldscripts/${EMULATION_NAME}.xs";
+  else if (config.data_bss_contig == true)
+    return "ldscripts/${EMULATION_NAME}.xz";
   else
     return "ldscripts/${EMULATION_NAME}.x";
 }

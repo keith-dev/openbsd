@@ -1,4 +1,4 @@
-/*	$OpenBSD: resolve.h,v 1.17 2002/08/23 22:57:03 drahn Exp $ */
+/*	$OpenBSD: resolve.h,v 1.22 2003/02/15 22:39:13 drahn Exp $ */
 
 /*
  * Copyright (c) 1998 Per Fogelstrom, Opsycon AB
@@ -61,6 +61,11 @@ typedef struct elf_object {
 	struct load_list *load_list;
 
 	u_int32_t  load_size;
+	Elf_Addr	got_addr;
+	Elf_Addr	got_start;
+	size_t		got_size;
+	Elf_Addr	plt_start;
+	size_t		plt_size;
 
 	union {
 		u_long		info[DT_NUM + DT_PROCNUM];
@@ -117,7 +122,14 @@ typedef struct elf_object {
 	u_int32_t	nchains;
 	Elf_Dyn	*dynamic;
 
+	struct dep_node *first_child;
+	struct dep_node *last_child;
 } elf_object_t;
+
+struct dep_node {
+	struct dep_node *next_sibling;
+	elf_object_t *data;
+};
 
 extern void _dl_rt_resolve(void);
 
@@ -134,11 +146,11 @@ extern int  _dl_md_reloc(elf_object_t *object, int rel, int relsz);
 extern void _dl_md_reloc_got(elf_object_t *object, int lazy);
 
 Elf_Addr _dl_find_symbol(const char *name, elf_object_t *startlook,
-    const Elf_Sym **ref, int flags, int sym_size);
+    const Elf_Sym **ref, int flags, int sym_size, const char *module_name);
 /*
  * defines for _dl_find_symbol() flag field, three bits of meaning
- * myself 	- clear: search all objects,	set: search only this object
- * warnnotfound - clear: no warning, 		set: warn if not found
+ * myself	- clear: search all objects,	set: search only this object
+ * warnnotfound - clear: no warning,		set: warn if not found
  * inplt	- clear: possible plt ref	set: real matching function.
  *
  * inplt - due to how ELF handles function addresses in shared libraries
@@ -186,5 +198,8 @@ extern char *_dl_debug;
 #define	DL_NO_SYMBOL		6
 #define	DL_INVALID_HANDLE	7
 #define	DL_INVALID_CTL		8
+
+#define ELF_ROUND(x,malign) (((x) + (malign)-1) & ~((malign)-1))
+#define ELF_TRUNC(x,malign) ((x) & ~((malign)-1))
 
 #endif /* _RESOLVE_H_ */

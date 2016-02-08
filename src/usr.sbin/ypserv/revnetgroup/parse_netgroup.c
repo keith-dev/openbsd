@@ -1,4 +1,4 @@
-/* $OpenBSD: parse_netgroup.c,v 1.5 2002/07/19 02:38:40 deraadt Exp $ */
+/* $OpenBSD: parse_netgroup.c,v 1.7 2003/03/13 09:09:51 deraadt Exp $ */
 /*
  * Copyright (c) 1992, 1993
  *	The Regents of the University of California.  All rights reserved.
@@ -51,7 +51,7 @@
 #include "hash.h"
 
 #ifndef lint
-static const char rcsid[] = "$OpenBSD: parse_netgroup.c,v 1.5 2002/07/19 02:38:40 deraadt Exp $";
+static const char rcsid[] = "$OpenBSD: parse_netgroup.c,v 1.7 2003/03/13 09:09:51 deraadt Exp $";
 #endif
 
 /*
@@ -204,7 +204,7 @@ parse_netgrp(char *group)
 #ifdef DEBUG
 		/*
 		 * This error message is largely superflous since the
-		 * code handles the error condition sucessfully, and
+		 * code handles the error condition successfully, and
 		 * spewing it out from inside libc can actually hose
 		 * certain programs.
 		 */
@@ -298,7 +298,7 @@ read_for_group(char *group)
 	char *data = NULL;
 
 	data = lookup (gtable, group);
-	sprintf(line, "%s %s", group, data);
+	snprintf(line, sizeof line, "%s %s", group, data);
 	pos = (char *)&line;
 #ifdef CANT_HAPPEN
 	if (*pos == '#')

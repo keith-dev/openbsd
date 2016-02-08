@@ -1,4 +1,4 @@
-/* $OpenBSD: netcat.c,v 1.52 2002/07/04 04:42:25 vincent Exp $ */
+/* $OpenBSD: netcat.c,v 1.57 2002/12/30 18:00:18 stevesk Exp $ */
 /*
  * Copyright (c) 2001 Eric Jackson <ericj@monkey.org>
  *
@@ -55,7 +55,8 @@
 	(sizeof(*(su)) - sizeof((su)->sun_path) + strlen((su)->sun_path))
 #endif
 
-#define PORT_MAX 65535
+#define PORT_MAX	65535
+#define PORT_MAX_LEN	6
 
 /* Command Line Options */
 int	iflag;					/* Interval Flag */
@@ -275,11 +276,11 @@ main(int argc, char *argv[])
 				rv = recvfrom(s, buf, sizeof(buf), MSG_PEEK,
 				    (struct sockaddr *)&z, &len);
 				if (rv < 0)
-					errx(1, "%s", strerror(errno));
+					err(1, "recvfrom");
 
 				rv = connect(s, (struct sockaddr *)&z, len);
 				if (rv < 0)
-					errx(1, "%s", strerror(errno));
+					err(1, "connect");
 
 				connfd = s;
 			} else {
@@ -425,7 +426,7 @@ remote_connect(char *host, char *port, struct addrinfo hints)
 	int s, error;
 
 	if ((error = getaddrinfo(host, port, &hints, &res)))
-		errx(1, "%s", gai_strerror(error));
+		errx(1, "getaddrinfo: %s", gai_strerror(error));
 
 	res0 = res;
 	do {
@@ -450,7 +451,7 @@ remote_connect(char *host, char *port, struct addrinfo hints)
 			ahints.ai_protocol = uflag ? IPPROTO_UDP : IPPROTO_TCP;
 			ahints.ai_flags = AI_PASSIVE;
 			if ((error = getaddrinfo(sflag, pflag, &ahints, &ares)))
-				errx(1, "%s", gai_strerror(error));
+				errx(1, "getaddrinfo: %s", gai_strerror(error));
 
 			if (bind(s, (struct sockaddr *)ares->ai_addr,
 			    ares->ai_addrlen) < 0) {
@@ -496,7 +497,7 @@ local_listen(char *host, char *port, struct addrinfo hints)
 		hints.ai_family = AF_INET;
 
 	if ((error = getaddrinfo(host, port, &hints, &res)))
-                errx(1, "%s", gai_strerror(error));
+                errx(1, "getaddrinfo: %s", gai_strerror(error));
 
 	res0 = res;
 	do {
@@ -518,7 +519,7 @@ local_listen(char *host, char *port, struct addrinfo hints)
 
 	if (!uflag && s != -1) {
 		if (listen(s, 1) < 0)
-			errx(1, "%s", strerror(errno));
+			err(1, "listen");
 	}
 
 	freeaddrinfo(res);
@@ -546,7 +547,7 @@ readwrite(int nfd)
 	pfd[1].fd = wfd;
 	pfd[1].events = POLLIN;
 
-	while (pfd[0].fd != -1 || pfd[1].fd != -1) {
+	while (pfd[0].fd != -1) {
 		if (iflag)
 			sleep(iflag);
 
@@ -655,8 +656,10 @@ build_ports(char *p)
 
 		/* Load ports sequentially */
 		for (cp = lo; cp <= hi; cp++) {
-			portlist[x] = calloc(1, PORT_MAX);
-			snprintf(portlist[x], PORT_MAX, "%d", cp);
+			portlist[x] = calloc(1, PORT_MAX_LEN);
+			if (portlist[x] == NULL)
+				err(1, NULL);
+			snprintf(portlist[x], PORT_MAX_LEN, "%d", cp);
 			x++;
 		}
 
@@ -676,7 +679,9 @@ build_ports(char *p)
 		hi = (int)strtoul(p, &endp, 10);
 		if (hi <= 0 || hi > PORT_MAX || *endp != '\0')
 			errx(1, "port range not valid");
-		portlist[0] = calloc(1, PORT_MAX);
+		portlist[0] = calloc(1, PORT_MAX_LEN);
+		if (portlist[0] == NULL)
+			err(1, NULL);
 		portlist[0] = p;
 	}
 }
@@ -709,6 +714,7 @@ help()
 	\t-4		Use IPv4\n\
 	\t-6		Use IPv6\n\
 	\t-U		Use UNIX domain socket\n\
+	\t-X vers\t	SOCKS version (4 or 5)\n\
 	\t-h		This help text\n\
 	\t-i secs\t	Delay interval for lines sent, ports scanned\n\
 	\t-k		Keep inbound sockets open for multiple connects\n\
@@ -721,7 +727,7 @@ help()
 	\t-u		UDP mode\n\
 	\t-v		Verbose\n\
 	\t-w secs\t	Timeout for connects and final net reads\n\
-	\t-x addr[:port]\tSpecify socks5 proxy address and port\n\
+	\t-x addr[:port]\tSpecify socks proxy address and port\n\
 	\t-z		Zero-I/O mode [used for scanning]\n\
 	Port numbers can be individual or ranges: lo-hi [inclusive]\n");
 	exit(1);
@@ -731,7 +737,7 @@ void
 usage(int ret)
 {
 	fprintf(stderr, "usage: nc [-46Uhklnrtuvz] [-i interval] [-p source port]\n");
-	fprintf(stderr, "\t  [-s ip address] [-w timeout] [-x proxy address [:port]]\n");
+	fprintf(stderr, "\t  [-s ip address] [-w timeout] [-X vers] [-x proxy address [:port]]\n");
 	fprintf(stderr, "\t  [hostname] [port[s...]]\n");
 	if (ret)
 		exit(1);

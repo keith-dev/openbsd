@@ -1,4 +1,4 @@
-.\"	$OpenBSD: hostname.if.5,v 1.29 2002/09/26 22:12:43 miod Exp $
+.\"	$OpenBSD: hostname.if.5,v 1.31 2003/03/10 09:26:27 deraadt Exp $
 .\"	$NetBSD: hosts.5,v 1.4 1994/11/30 19:31:20 jtc Exp $
 .\"
 .\" Copyright (c) 1983, 1991, 1993
@@ -60,24 +60,36 @@ The following three formats are valid for
 files.
 .Pp
 Regular ipv4 network setup:
-.Bd -literal -offset xxxx
-.Va addr_family [ alias ] addr netmask broadcast_addr options
-.Li dest Va dest_addr
+.Bd -ragged -offset indent
+.Va addr_family
+.Op Va alias
+.Va addr
+.Va netmask
+.Va broadcast_addr
+.Va options
+.br
+.Li dest
+.Va dest_addr
 .Ed
 .Pp
 Regular ipv6 network setup:
-.Bd -literal -offset xxxx
-.Va addr_family [ alias ] addr prefixlen options
+.Bd -ragged -offset indent
+.Va addr_family
+.Op Va alias
+.Va addr
+.Va prefixlen
+.Va options
 .Ed
 .Pp
 Other network setup:
-.Bd -literal -offset xxxx
-.Va addr_family Va options
+.Bd -ragged -offset indent
+.Va addr_family
+.Va options
 .Ed
 .Pp
 A typical file contains only one line, but more extensive files are possible,
 for example:
-.Bd -literal -offset xxxx
+.Bd -literal -offset indent
 inet 10.0.1.12 255.255.255.0 10.0.1.255 media 100baseTX
 inet alias 10.0.1.13 255.255.255.255 10.0.1.13
 inet alias 10.0.1.14 255.255.255.255 NONE
@@ -90,7 +102,7 @@ inet6 alias fec0::2 64 anycast
 .Ed
 .Pp
 The above formats have the following field values:
-.Bl -tag -width indent -offset xxxx
+.Bl -tag -width indent -offset indent
 .It Va addr_family
 The address family of the interface, generally
 .Dq inet
@@ -101,8 +113,8 @@ The optional address that belongs to the interface, such as
 190.191.192.1 or fe80:2::1 .
 It is also feasible to use a hostname as specified in
 .Pa /etc/hosts .
-It is recommended that an address be used instead of symbolic information
-which might activate
+It is recommended that an address be used instead of symbolic information,
+since the latter might activate
 .Xr resolver 3
 library routines.
 .Pp
@@ -138,10 +150,10 @@ library routines.
 .It Va prefixlen
 The prefixlen number, or number of bits in the netmask, to be set on
 the interface, such as 64.
-.It Va #
+.It Li #
 Comments are allowed.
 Anything following a comment character is treated as a comment.
-.It Va ! Ar command-line
+.It Li ! Ns Ar command-line
 Arbitrary shell commands can be executed using this directive.
 Useful for doing interface specific configuration using commands like
 .Xr wicontrol 8 ,
@@ -155,18 +167,18 @@ in a command line will be replaced by the interface name.
 .El
 .Pp
 A DHCP-configured network interface setup consists of
-.Pp
-.Bd -literal -offset xxxx
-.Li dhcp Va options
+.Bd -ragged -offset indent
+.Li dhcp
+.Va options
 .Ed
 .Pp
 For example,
-.Bd -literal -offset xxxx
+.Bd -literal -offset indent
 dhcp media 100baseTX mediaopt full-duplex
 .Ed
 .Pp
 The above format has the following field values:
-.Bl -tag -width indent -offset xxxx
+.Bl -tag -width indent -offset indent
 .It Li dhcp
 The literal string
 .Dq dhcp
@@ -182,13 +194,13 @@ Optional miscellaneous options to set on the interface, i.e.,
 .El
 .Pp
 IPv6 stateless address autoconfiguration:
-.Pp
-.Bd -literal -offset xxxx
-.Li rtsol Va options
+.Bd -ragged -offset indent
+.Li rtsol
+.Va options
 .Ed
 .Pp
 The above format has the following field values:
-.Bl -tag -width indent -offset xxxx
+.Bl -tag -width indent -offset indent
 .It Li rtsol
 The literal string
 .Dq rtsol
@@ -201,9 +213,9 @@ Also note that the kernel must be configured to accept IPv6
 router advertisement, and configured as a host (ie. non-router).
 Add the following lines into
 .Xr sysctl.conf 5 :
-.Bd -literal -offset xxxx
-.Li net.inet6.ip6.forwarding=0
-.Li net.inet6.ip6.accept_rtadv=1
+.Bd -literal -offset indent
+net.inet6.ip6.forwarding=0
+net.inet6.ip6.accept_rtadv=1
 .Ed
 .It Va options
 Optional miscellaneous options to set on the interface, e.g.,
@@ -215,13 +227,13 @@ An addressless network interface setup (useful for
 member interfaces and interfaces to be used with
 .Xr pppoe 8 )
 consists of
-.Pp
-.Bd -literal -offset xxxx
-.Li up Va options
+.Bd -ragged -offset indent
+.Li up
+.Va options
 .Ed
 .Pp
 The above format has the following field values:
-.Bl -tag -width indent -offset xxxx
+.Bl -tag -width indent -offset indent
 .It Li up
 The literal string
 .Dq up
@@ -235,15 +247,16 @@ The final file format only applies to
 .Nm bridgename.bridge*
 files.
 A bridge interface setup consists of
-.Pp
-.Bd -literal -offset xxxx
+.Bd -ragged -offset indent
 .Va brconfig-arguments
+.br
 .Va brconfig-arguments
+.br
 \&...
 .Ed
 .Pp
 For example,
-.Bd -literal -offset xxxx
+.Bd -literal -offset indent
 add fxp0
 add ep1
 -learn fxp0
@@ -255,7 +268,7 @@ up    # and finally enable it
 .Ed
 .Pp
 The options are as follows:
-.Bl -tag -width indent -offset xxxx
+.Bl -tag -width indent -offset indent
 .It Va brconfig-arguments
 .Xr brconfig 8
 is called for each successive line.

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ike_auth.c,v 1.66 2002/09/11 09:50:43 ho Exp $	*/
+/*	$OpenBSD: ike_auth.c,v 1.68 2003/03/13 13:24:48 ho Exp $	*/
 /*	$EOM: ike_auth.c,v 1.59 2000/11/21 00:21:31 angelos Exp $	*/
 
 /*
@@ -164,7 +164,7 @@ ike_auth_get_key (int type, char *id, char *local_id, size_t *keylen)
       if (!key)
         {
 	  log_print ("ike_auth_get_key: "
-		     "no key found for peer \"%s\"or local ID \"%s\"",
+		     "no key found for peer \"%s\" or local ID \"%s\"",
 		     id, local_id);
 	  return 0;
 	}
@@ -1091,6 +1091,13 @@ rsa_sig_encode_hash (struct message *msg)
 	}
 
       exchange->sent_keytype = ISAKMP_KEY_RSA;
+    }
+
+  /* Enable RSA blinding.  */
+  if (RSA_blinding_on (exchange->sent_key, NULL) != 1)
+    {
+      log_error ("rsa_sig_encode_hash: RSA_blinding_on () failed.");
+      return -1;
     }
 
   /* XXX hashsize is not necessarily prf->blocksize.  */

@@ -1,7 +1,7 @@
-/*	$OpenBSD: newsyslog.c,v 1.57 2002/09/21 23:19:43 millert Exp $	*/
+/*	$OpenBSD: newsyslog.c,v 1.63 2003/02/12 19:17:36 millert Exp $	*/
 
 /*
- * Copyright (c) 1999, 2002 Todd C. Miller <Todd.Miller@courtesan.com>
+ * Copyright (c) 1999, 2002, 2003 Todd C. Miller <Todd.Miller@courtesan.com>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -86,7 +86,7 @@
  */
 
 #ifndef lint
-static const char rcsid[] = "$OpenBSD: newsyslog.c,v 1.57 2002/09/21 23:19:43 millert Exp $";
+static const char rcsid[] = "$OpenBSD: newsyslog.c,v 1.63 2003/02/12 19:17:36 millert Exp $";
 #endif /* not lint */
 
 #ifndef CONF
@@ -132,9 +132,10 @@ static const char rcsid[] = "$OpenBSD: newsyslog.c,v 1.57 2002/09/21 23:19:43 mi
 					/* status messages */
 #define CE_MONITOR	0x08		/* Monitory for changes */
 #define CE_FOLLOW	0x10		/* Follow symbolic links */
+#define CE_TRIMAT	0x20		/* trim at a specific time */
 
 #define	MIN_PID		4		/* Don't touch pids lower than this */
-#define	MIN_SIZE	512		/* Don't rotate if smaller than this */
+#define	MIN_SIZE	256		/* Don't rotate if smaller (in bytes) */
 
 #define	DPRINTF(x)	do { if (verbose) printf x ; } while (0)
 
@@ -145,8 +146,9 @@ struct conf_entry {
 	uid_t   uid;		/* Owner of log */
 	gid_t   gid;		/* Group of log */
 	int     numlogs;	/* Number of logs to keep */
-	int     size;		/* Size cutoff to trigger trimming the log */
+	off_t   size;		/* Size cutoff to trigger trimming the log */
 	int     hours;		/* Hours between log trimming */
+	time_t  trim_at;	/* Specific time at which to do trimming */
 	int     permissions;	/* File permissions on the log */
 	int	signal;		/* Signal to send (defaults to SIGHUP) */
 	int     flags;		/* Flags (CE_COMPACT & CE_BINARY)  */
@@ -176,22 +178,24 @@ void do_entry(struct conf_entry *);
 void parse_args(int, char **);
 void usage(void);
 struct conf_entry *parse_file(int *);
-char *missing_field(char *, char *);
+char *missing_field(char *, char *, int);
 void dotrim(struct conf_entry *);
 int log_trim(char *);
 void compress_log(struct conf_entry *);
-int sizefile(char *);
+off_t sizefile(char *);
 int age_old_log(struct conf_entry *);
 char *sob(char *);
 char *son(char *);
 int isnumberstr(char *);
-void domonitor(char *, char *);
+int domonitor(struct conf_entry *);
 FILE *openmail(void);
 void child_killer(int);
 void run_command(char *);
 void send_signal(char *, int);
 char *lstat_log(char *, size_t, int);
 int stat_suffix(char *, size_t, char *, struct stat *, int (*)());
+time_t parse8601(char *);
+time_t parseDWM(char *);
 
 int
 main(int argc, char **argv)
@@ -226,10 +230,10 @@ main(int argc, char **argv)
 					break;
 				}
 			if (q == NULL)
-				warnx("%s is not listed in %s", *av, conf);
+				warnx("%s: %s not found", conf, *av);
 		}
 		if (x == NULL)
-			errx(1, "no specified log files found in %s", conf);
+			errx(1, "%s: no specified log files", conf);
 		y->next = NULL;
 		p = x;
 	}
@@ -301,7 +305,8 @@ main(int argc, char **argv)
 void
 do_entry(struct conf_entry *ent)
 {
-	int modtime, size;
+	int modtime;
+	off_t size;
 	struct stat sb;
 
 	if (lstat(ent->log, &sb) != 0)
@@ -312,24 +317,37 @@ do_entry(struct conf_entry *ent)
 		return;
 	}
 
-	DPRINTF(("%s <%d%s%s%s>: ", ent->log, ent->numlogs,
+	DPRINTF(("%s <%d%s%s%s%s>: ", ent->log, ent->numlogs,
 	    (ent->flags & CE_COMPACT) ? "Z" : "",
 	    (ent->flags & CE_BINARY) ? "B" : "",
-	    (ent->flags & CE_FOLLOW) ? "F" : ""));
+	    (ent->flags & CE_FOLLOW) ? "F" : "",
+	    (ent->flags & CE_MONITOR) && monitormode ? "M" : ""));
 
 	size = sizefile(ent->log);
 	modtime = age_old_log(ent);
 	if (size < 0) {
 		DPRINTF(("does not exist.\n"));
 	} else {
+		if (ent->flags & CE_TRIMAT && !force) {
+			if (timenow < ent->trim_at ||
+			    difftime(timenow, ent->trim_at) >= 60 * 60) {
+				DPRINTF(("--> will trim at %s",
+				    ctime(&ent->trim_at)));
+				return;
+			} else if (verbose && ent->hours <= 0) {
+				DPRINTF(("--> time is up\n"));
+			}
+		}
 		if (ent->size > 0)
-			DPRINTF(("size (Kb): %d [%d] ", size, ent->size));
+			DPRINTF(("size (KB): %.2f [%d] ", size / 1024.0,
+			    (int)(ent->size / 1024)));
 		if (ent->hours > 0)
 			DPRINTF(("age (hr): %d [%d] ", modtime, ent->hours));
-		if (monitormode && ent->flags & CE_MONITOR)
-			domonitor(ent->log, ent->whom);
-		if (!monitormode && (force ||
-		    (ent->size > 0 && size >= ent->size) ||
+		if (monitormode && (ent->flags & CE_MONITOR) && domonitor(ent))
+			DPRINTF(("--> monitored\n"));
+		else if (!monitormode &&
+		    (force || (ent->size > 0 && size >= ent->size) ||
+		    (ent->hours <= 0 && (ent->flags & CE_TRIMAT)) ||
 		    (ent->hours > 0 && (modtime >= ent->hours || modtime < 0)
 		    && ((ent->flags & CE_BINARY) || size >= MIN_SIZE)))) {
 			DPRINTF(("--> trimming log....\n"));
@@ -468,7 +486,9 @@ struct conf_entry *
 parse_file(int *nentries)
 {
 	FILE *f;
-	char line[BUFSIZ], *parse, *q, *errline, *group, *tmp;
+	char line[BUFSIZ], *parse, *q, *errline, *group, *tmp, *ep;
+	int lineno;
+	unsigned long ul;
 	struct conf_entry *first = NULL;
 	struct conf_entry *working = NULL;
 	struct passwd *pwd;
@@ -481,7 +501,7 @@ parse_file(int *nentries)
 		err(1, "can't open %s", conf);
 
 	*nentries = 0;
-	while (fgets(line, sizeof(line), f)) {
+	for (lineno = 0; fgets(line, sizeof(line), f); lineno++) {
 		tmp = sob(line);
 		if (*tmp == '\0' || *tmp == '#')
 			continue;
@@ -501,7 +521,7 @@ parse_file(int *nentries)
 			working = working->next;
 		}
 
-		q = parse = missing_field(sob(line), errline);
+		q = parse = missing_field(sob(line), errline, lineno);
 		*(parse = son(line)) = '\0';
 		working->log = strdup(q);
 		if (working->log == NULL)
@@ -510,14 +530,16 @@ parse_file(int *nentries)
 		if ((working->logbase = strrchr(working->log, '/')) != NULL)
 			working->logbase++;
 
-		q = parse = missing_field(sob(++parse), errline);
+		q = parse = missing_field(sob(++parse), errline, lineno);
 		*(parse = son(parse)) = '\0';
-		if ((group = strchr(q, '.')) != NULL) {
+		if ((group = strchr(q, ':')) != NULL ||
+		    (group = strrchr(q, '.')) != NULL)  {
 			*group++ = '\0';
 			if (*q) {
 				if (!(isnumberstr(q))) {
 					if ((pwd = getpwnam(q)) == NULL)
-						errx(1, "Error in config file; unknown user: %s", q);
+						errx(1, "%s:%d: unknown user: %s",
+						    conf, lineno, q);
 					working->uid = pwd->pw_uid;
 				} else
 					working->uid = atoi(q);
@@ -528,14 +550,16 @@ parse_file(int *nentries)
 			if (*q) {
 				if (!(isnumberstr(q))) {
 					if ((grp = getgrnam(q)) == NULL)
-						errx(1, "Error in config file; unknown group: %s", q);
+
+						errx(1, "%s:%d: unknown group: %s",
+						    conf, lineno, q);
 					working->gid = grp->gr_gid;
 				} else
 					working->gid = atoi(q);
 			} else
 				working->gid = (gid_t)-1;
 			
-			q = parse = missing_field(sob(++parse), errline);
+			q = parse = missing_field(sob(++parse), errline, lineno);
 			*(parse = son(parse)) = '\0';
 		} else {
 			working->uid = (uid_t)-1;
@@ -543,28 +567,52 @@ parse_file(int *nentries)
 		}
 
 		if (!sscanf(q, "%o", &working->permissions))
-			errx(1, "Error in config file; bad permissions: %s", q);
+			errx(1, "%s:%d: bad permissions: %s", conf, lineno, q);
 
-		q = parse = missing_field(sob(++parse), errline);
+		q = parse = missing_field(sob(++parse), errline, lineno);
 		*(parse = son(parse)) = '\0';
 		if (!sscanf(q, "%d", &working->numlogs) || working->numlogs < 0)
-			errx(1, "Error in config file; bad number: %s", q);
+			errx(1, "%s:%d: bad number: %s", conf, lineno, q);
 
-		q = parse = missing_field(sob(++parse), errline);
+		q = parse = missing_field(sob(++parse), errline, lineno);
 		*(parse = son(parse)) = '\0';
 		if (isdigit(*q))
-			working->size = atoi(q);
+			working->size = atoi(q) * 1024;
 		else
 			working->size = -1;
 		
-		q = parse = missing_field(sob(++parse), errline);
-		*(parse = son(parse)) = '\0';
-		if (isdigit(*q))
-			working->hours = atoi(q);
-		else
-			working->hours = -1;
-
 		working->flags = 0;
+		q = parse = missing_field(sob(++parse), errline, lineno);
+		*(parse = son(parse)) = '\0';
+		ul = strtoul(q, &ep, 10);
+		if (ul > INT_MAX)
+			errx(1, "%s:%d: interval out of range: %s", conf,
+			    lineno, q);
+		working->hours = (int)ul;
+		switch (*ep) {
+		case '\0':
+			break;
+		case '@':
+			working->trim_at = parse8601(ep + 1);
+			if (working->trim_at == (time_t) - 1)
+				errx(1, "%s:%d: bad time: %s", conf, lineno, q);
+			working->flags |= CE_TRIMAT;
+			break;
+		case '$':
+			working->trim_at = parseDWM(ep + 1);
+			if (working->trim_at == (time_t) - 1)
+				errx(1, "%s:%d: bad time: %s", conf, lineno, q);
+			working->flags |= CE_TRIMAT;
+			break;
+		case '*':
+			if (q == ep)
+				break;
+			/* FALLTHROUGH */
+		default:
+			errx(1, "%s:%d: bad interval/at: %s", conf, lineno, q);
+			break;
+		}
+
 		q = sob(++parse);	/* Optional field */
 		if (*q == 'Z' || *q == 'z' || *q == 'B' || *q == 'b' ||
 		    *q == 'M' || *q == 'm') {
@@ -588,7 +636,8 @@ parse_file(int *nentries)
 					working->flags |= CE_FOLLOW;
 					break;
 				default:
-					errx(1, "Illegal flag in config file: %c", *q);
+					errx(1, "%s:%d: illegal flag: `%c'",
+					    conf, lineno, *q);
 					break;
 				}
 				q++;
@@ -596,19 +645,10 @@ parse_file(int *nentries)
 		} else
 			parse--;	/* no flags so undo */
 
-		working->whom = NULL;
-		if (working->flags & CE_MONITOR) {	/* Optional field */
-			q = parse = sob(++parse);
-			*(parse = son(parse)) = '\0';
-
-			working->whom = strdup(q);
-			if (working->log == NULL)
-				err(1, "strdup");
-		}
-
 		working->pidfile = PIDFILE;
 		working->signal = SIGHUP;
 		working->runcmd = NULL;
+		working->whom = NULL;
 		for (;;) {
 			q = parse = sob(++parse);	/* Optional field */
 			if (q == NULL || *q == '\0')
@@ -616,7 +656,8 @@ parse_file(int *nentries)
 			if (*q == '/') {
 				*(parse = son(parse)) = '\0';
 				if (strlen(q) >= MAXPATHLEN)
-					errx(1, "%s: pathname too long", q);
+					errx(1, "%s:%d: pathname too long: %s",
+					    conf, lineno, q);
 				working->pidfile = strdup(q);
 				if (working->pidfile == NULL)
 					err(1, "strdup");
@@ -640,11 +681,22 @@ parse_file(int *nentries)
 					}
 				}
 				if (i == NSIG)
-					errx(1, "unknown signal: %s", q);
+					errx(1, "%s:%d: unknown signal: %s",
+					    conf, lineno, q);
+			} else if (working->flags & CE_MONITOR) {
+				*(parse = son(parse)) = '\0';
+				working->whom = strdup(q);
+				if (working->whom == NULL)
+					err(1, "strdup");
 			} else
-				errx(1, "unrecognized field: %s", q);
+				errx(1, "%s:%d: unrecognized field: %s",
+				    conf, lineno, q);
 		}
 		free(errline);
+
+		if ((working->flags & CE_MONITOR) && working->whom == NULL)
+			errx(1, "%s:%d: missing monitor notification field",
+			    conf, lineno);
 
 		/* If there is an arcdir, set working->backdir. */
 		if (arcdir != NULL && working->logbase != NULL) {
@@ -674,12 +726,14 @@ parse_file(int *nentries)
 			if (snprintf(line, sizeof(line), "%s/%s.%d%s",
 			    working->backdir, working->logbase,
 			    working->numlogs, COMPRESS_POSTFIX) >= MAXPATHLEN)
-				errx(1, "%s: pathname too long", working->log);
+				errx(1, "%s:%d: pathname too long: %s",
+				    conf, lineno, q);
 		} else {
 			if (snprintf(line, sizeof(line), "%s.%d%s",
 			    working->log, working->numlogs, COMPRESS_POSTFIX)
 			    >= MAXPATHLEN)
-				errx(1, "%s: pathname too long", working->log);
+				errx(1, "%s:%d: pathname too long: %s",
+				    conf, lineno, working->log);
 		}
 	}
 	if (working)
@@ -689,10 +743,10 @@ parse_file(int *nentries)
 }
 
 char *
-missing_field(char *p, char *errline)
+missing_field(char *p, char *errline, int lineno)
 {
-	if (!p || !*p) {
-		warnx("Missing field in config file line:");
+	if (p == NULL || *p == '\0') {
+		warnx("%s:%d: missing field", conf, lineno);
 		fputs(errline, stderr);
 		exit(1);
 	}
@@ -785,14 +839,14 @@ dotrim(struct conf_entry *ent)
 		if (noaction)
 			printf("\tmv %s to %s\n", ent->log, file1);
 		else if (rename(ent->log, file1))
-			warn("can't to mv %s to %s", ent->log, file1);
+			warn("can't mv %s to %s", ent->log, file1);
 	}
 
 	/* Now move the new log file into place */
 	if (noaction)
 		printf("\tmv %s to %s\n", file2, ent->log);
 	else if (rename(file2, ent->log))
-		warn("can't to mv %s to %s", file2, ent->log);
+		warn("can't mv %s to %s", file2, ent->log);
 }
 
 /* Log the fact that the logs were turned over */
@@ -842,14 +896,19 @@ compress_log(struct conf_entry *ent)
 }
 
 /* Return size in kilobytes of a file */
-int
+off_t
 sizefile(char *file)
 {
 	struct stat sb;
 
 	if (stat(file, &sb) < 0)
 		return (-1);
-	return (sb.st_blocks / (1024.0 / DEV_BSIZE));
+
+	/* For sparse files, return the size based on number of blocks used. */
+	if (sb.st_size / DEV_BSIZE > sb.st_blocks)
+		return (sb.st_blocks * DEV_BSIZE);
+	else
+		return (sb.st_size);
 }
 
 /* Return the age (in hours) of old log file (file.0), or -1 if none */
@@ -905,8 +964,8 @@ isnumberstr(char *string)
 	return (1);
 }
 
-void
-domonitor(char *log, char *whom)
+int
+domonitor(struct conf_entry *ent)
 {
 	struct stat sb, tsb;
 	char fname[MAXPATHLEN], *flog, *p, *rb = NULL;
@@ -914,10 +973,16 @@ domonitor(char *log, char *whom)
 	off_t osize;
 	int rd;
 
-	if (stat(log, &sb) < 0)
-		return;
+	if (stat(ent->log, &sb) < 0)
+		return (0);
 
-	flog = strdup(log);
+	if (noaction) {
+		if (!verbose)
+			printf("%s: monitored\n", ent->log);
+		return (1);
+	}
+
+	flog = strdup(ent->log);
 	if (flog == NULL)
 		err(1, "strdup");
 
@@ -959,9 +1024,9 @@ domonitor(char *log, char *whom)
 			err(1, "malloc");
 
 		/* Open logfile, seek. */
-		fp = fopen(log, "r");
+		fp = fopen(ent->log, "r");
 		if (fp == NULL) {
-			warn("%s", log);
+			warn("%s", ent->log);
 			goto cleanup;
 		}
 		fseek(fp, osize, SEEK_SET);
@@ -981,7 +1046,7 @@ domonitor(char *log, char *whom)
 			goto cleanup;
 		}
 		fprintf(fp, "To: %s\nSubject: LOGFILE NOTIFICATION: %s\n\n\n",
-		    whom, log);
+		    ent->whom, ent->log);
 		fwrite(rb, 1, rd, fp);
 		fputs("\n\n", fp);
 
@@ -1005,6 +1070,7 @@ cleanup:
 	free(flog);
 	if (rb != NULL)
 		free(rb);
+	return (1);
 }
 
 FILE *
@@ -1067,4 +1133,200 @@ lstat_log(char *file, size_t size, int flags)
 
 	}
 	return (NULL);
+}
+
+/*
+ * Parse a limited subset of ISO 8601. The specific format is as follows:
+ *
+ * [CC[YY[MM[DD]]]][THH[MM[SS]]]	(where `T' is the literal letter)
+ *
+ * We don't accept a timezone specification; missing fields (including timezone)
+ * are defaulted to the current date but time zero.
+ */
+time_t
+parse8601(char *s)
+{
+	char *t;
+	struct tm tm, *tmp;
+	unsigned long ul;
+
+	tmp = localtime(&timenow);
+	tm = *tmp;
+
+	tm.tm_hour = tm.tm_min = tm.tm_sec = 0;
+
+	ul = strtoul(s, &t, 10);
+	if (*t != '\0' && *t != 'T')
+		return (-1);
+
+	/*
+	 * Now t points either to the end of the string (if no time was
+	 * provided) or to the letter `T' which separates date and time in
+	 * ISO 8601.  The pointer arithmetic is the same for either case.
+	 */
+	switch (t - s) {
+	case 8:
+		tm.tm_year = ((ul / 1000000) - 19) * 100;
+		ul = ul % 1000000;
+	case 6:
+		tm.tm_year -= tm.tm_year % 100;
+		tm.tm_year += ul / 10000;
+		ul = ul % 10000;
+	case 4:
+		tm.tm_mon = (ul / 100) - 1;
+		ul = ul % 100;
+	case 2:
+		tm.tm_mday = ul;
+	case 0:
+		break;
+	default:
+		return (-1);
+	}
+
+	/* sanity check */
+	if (tm.tm_year < 70 || tm.tm_mon < 0 || tm.tm_mon > 12
+	    || tm.tm_mday < 1 || tm.tm_mday > 31)
+		return (-1);
+
+	if (*t != '\0') {
+		s = ++t;
+		ul = strtoul(s, &t, 10);
+		if (*t != '\0' && !isspace(*t))
+			return (-1);
+
+		switch (t - s) {
+		case 6:
+			tm.tm_sec = ul % 100;
+			ul /= 100;
+		case 4:
+			tm.tm_min = ul % 100;
+			ul /= 100;
+		case 2:
+			tm.tm_hour = ul;
+		case 0:
+			break;
+		default:
+			return (-1);
+		}
+
+		/* sanity check */
+		if (tm.tm_sec < 0 || tm.tm_sec > 60 || tm.tm_min < 0
+		    || tm.tm_min > 59 || tm.tm_hour < 0 || tm.tm_hour > 23)
+			return (-1);
+	}
+	return (mktime(&tm));
+}
+
+/*-
+ * Parse a cyclic time specification, the format is as follows:
+ *
+ *	[Dhh] or [Wd[Dhh]] or [Mdd[Dhh]]
+ *
+ * to rotate a logfile cyclic at
+ *
+ *	- every day (D) within a specific hour (hh)	(hh = 0...23)
+ *	- once a week (W) at a specific day (d)     OR	(d = 0..6, 0 = Sunday)
+ *	- once a month (M) at a specific day (d)	(d = 1..31,l|L)
+ *
+ * We don't accept a timezone specification; missing fields
+ * are defaulted to the current date but time zero.
+ */
+time_t
+parseDWM(char *s)
+{
+	char *t;
+	struct tm tm, *tmp;
+	long l;
+	int nd;
+	static int mtab[] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+	int WMseen = 0;
+	int Dseen = 0;
+
+	tmp = localtime(&timenow);
+	tm = *tmp;
+
+	/* set no. of days per month */
+
+	nd = mtab[tm.tm_mon];
+
+	if (tm.tm_mon == 1) {
+		if (((tm.tm_year + 1900) % 4 == 0) &&
+		    ((tm.tm_year + 1900) % 100 != 0) &&
+		    ((tm.tm_year + 1900) % 400 == 0)) {
+			nd++;	/* leap year, 29 days in february */
+		}
+	}
+	tm.tm_hour = tm.tm_min = tm.tm_sec = 0;
+
+	for (;;) {
+		switch (*s) {
+		case 'D':
+			if (Dseen)
+				return (-1);
+			Dseen++;
+			s++;
+			l = strtol(s, &t, 10);
+			if (l < 0 || l > 23)
+				return (-1);
+			tm.tm_hour = l;
+			break;
+
+		case 'W':
+			if (WMseen)
+				return (-1);
+			WMseen++;
+			s++;
+			l = strtol(s, &t, 10);
+			if (l < 0 || l > 6)
+				return (-1);
+			if (l != tm.tm_wday) {
+				int save;
+
+				if (l < tm.tm_wday) {
+					save = 6 - tm.tm_wday;
+					save += (l + 1);
+				} else {
+					save = l - tm.tm_wday;
+				}
+
+				tm.tm_mday += save;
+
+				if (tm.tm_mday > nd) {
+					tm.tm_mon++;
+					tm.tm_mday = tm.tm_mday - nd;
+				}
+			}
+			break;
+
+		case 'M':
+			if (WMseen)
+				return (-1);
+			WMseen++;
+			s++;
+			if (tolower(*s) == 'l') {
+				tm.tm_mday = nd;
+				s++;
+				t = s;
+			} else {
+				l = strtol(s, &t, 10);
+				if (l < 1 || l > 31)
+					return (-1);
+
+				if (l > nd)
+					return (-1);
+				tm.tm_mday = l;
+			}
+			break;
+
+		default:
+			return (-1);
+			break;
+		}
+
+		if (*t == '\0' || isspace(*t))
+			break;
+		else
+			s = t;
+	}
+	return (mktime(&tm));
 }

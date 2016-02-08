@@ -1,4 +1,4 @@
-/*	$OpenBSD: wump.c,v 1.19 2002/07/30 05:35:22 pjanzen Exp $	*/
+/*	$OpenBSD: wump.c,v 1.21 2003/03/11 04:47:39 david Exp $	*/
 
 /*
  * Copyright (c) 1989, 1993
@@ -47,7 +47,7 @@ static const char copyright[] =
 #if 0
 static char sccsid[] = "@(#)wump.c	8.1 (Berkeley) 5/31/93";
 #else
-static const char rcsid[] = "$OpenBSD: wump.c,v 1.19 2002/07/30 05:35:22 pjanzen Exp $";
+static const char rcsid[] = "$OpenBSD: wump.c,v 1.21 2003/03/11 04:47:39 david Exp $";
 #endif
 #endif /* not lint */
 
@@ -219,8 +219,8 @@ main(int argc, char **argv)
 		errx(1,
 "too many tunnels!  The cave collapsed!\n(Fortunately, the wumpus escaped!)");
 
+	srandomdev();
 	if (level == HARD) {
-		srandom((int)time((time_t *)0));
 		if (room_num / 2 - bat_num)
 			bat_num += (random() % (room_num / 2 - bat_num));
 		if (room_num / 2 - pit_num)
@@ -471,7 +471,7 @@ shoot(char *room_list)
 		}
 		if (roomcnt > 5) {
 			(void)printf(
-"The arrow wavers in its flight and and can go no further than room %d!\n",
+"The arrow wavers in its flight and can go no further than room %d!\n",
 					arrow_location);
 			break;
 		}
@@ -488,7 +488,7 @@ The arrow is weakly shot and can go no further than room %d!\n",arrow_location);
 			break;
 		} else if (roomcnt == 5 && chance < 6) {
 			(void)printf(
-"The arrow wavers in its flight and and can go no further than room %d!\n",
+"The arrow wavers in its flight and can go no further than room %d!\n",
 					arrow_location);
 			break;
 		}
@@ -595,7 +595,6 @@ cave_init()
 	 * exits.  It's being kept in case cave_init ever gets reworked into
 	 * something more traditional.
 	 */
-	srandom((int)time((time_t *)0));
 
 	/* initialize the cave first off. */
 	for (i = 1; i <= room_num; ++i)
@@ -697,7 +696,6 @@ dodecahedral_cave_init()
 		errx(1, "wrong parameters for dodecahedron");
 	for (i = 0; i < 20; i++)
 		loc[i] = i;
-	srandom((int)time((time_t *)0));
 	for (i = 0; i < 20; i++) {
 		j = random() % (20 - i);
 		if (j) {

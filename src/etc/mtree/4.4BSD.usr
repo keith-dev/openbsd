@@ -1,4 +1,4 @@
-#	$OpenBSD: 4.4BSD.usr,v 1.16 2002/05/23 18:43:00 deraadt Exp $
+#	$OpenBSD: 4.4BSD.usr,v 1.20 2003/03/17 07:38:13 deraadt Exp $
 #	$NetBSD: 4.4BSD.usr,v 1.3 1996/05/12 23:30:37 thorpej Exp $
 #
 #	   user: bostic
@@ -963,12 +963,6 @@ vax             type=dir uname=root gname=wheel mode=0775
 ..
 
 
-# ./share/doc/smm/10.named
-10.named        type=dir uname=root gname=wheel mode=0775
-# ./share/doc/smm/10.named
-..
-
-
 # ./share/doc/smm/11.timedop
 /set type=file gname=bin uname=root mode=0444
 11.timedop      type=dir uname=root gname=wheel mode=0775
@@ -1233,13 +1227,6 @@ usd             type=dir
 ..
 
 
-# ./share/doc/usd/30.rogue
-/set type=file gname=bin uname=root mode=0444
-30.rogue        type=dir uname=root gname=wheel mode=0775
-# ./share/doc/usd/30.rogue
-..
-
-
 # ./share/doc/usd/31.trek
 /set type=file gname=bin uname=root mode=0444
 31.trek         type=dir uname=root gname=wheel mode=0775
@@ -1271,24 +1258,10 @@ boggle          type=dir uname=root gname=wheel mode=0775
 ..
 
 
-# ./share/games/ching
-/set type=file gname=bin uname=games mode=0444
-ching           type=dir uname=root gname=wheel mode=0755
-# ./share/games/ching
-..
-
-
 # ./share/games/fortune
 /set type=file gname=bin uname=root mode=0444
 fortune         type=dir uname=root gname=wheel mode=0755
 # ./share/games/fortune
-..
-
-
-# ./share/games/larn
-/set type=file gname=bin uname=games mode=0444
-larn            type=dir uname=root gname=wheel mode=0755
-# ./share/games/larn
 ..
 
 

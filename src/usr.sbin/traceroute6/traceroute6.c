@@ -1,5 +1,5 @@
-/*	$OpenBSD: traceroute6.c,v 1.29 2002/09/08 01:31:46 itojun Exp $	*/
-/*	$KAME: traceroute6.c,v 1.61 2002/09/08 01:28:05 itojun Exp $	*/
+/*	$OpenBSD: traceroute6.c,v 1.34 2003/01/21 08:55:14 itojun Exp $	*/
+/*	$KAME: traceroute6.c,v 1.63 2002/10/24 12:53:25 itojun Exp $	*/
 
 /*
  * Copyright (C) 1995, 1996, 1997, and 1998 WIDE Project.
@@ -311,7 +311,7 @@ int	wait_for_reply(int, struct msghdr *);
 int	setpolicy(int so, char *policy);
 #endif
 #endif
-void	send_probe(int, int);
+void	send_probe(int, u_long);
 struct udphdr *get_udphdr(struct ip6_hdr *, u_char *);
 int	get_hoplim(struct msghdr *);
 double	deltaT(struct timeval *, struct timeval *);
@@ -331,7 +331,7 @@ int rcvhlim;
 struct in6_pktinfo *rcvpktinfo;
 
 struct sockaddr_in6 Src, Dst, Rcv;
-int datalen;			/* How much data */
+u_long datalen;			/* How much data */
 #define	ICMP6ECHOLEN	8
 /* XXX: 2064 = 127(max hops in type 0 rthdr) * sizeof(ip6_hdr) + 16(margin) */
 char rtbuf[2064];
@@ -343,9 +343,9 @@ struct cmsghdr *cmsg;
 char *source = 0;
 char *hostname;
 
-int nprobes = 3;
-int first_hop = 1;
-int max_hops = 30;
+u_long nprobes = 3;
+u_long first_hop = 1;
+u_long max_hops = 30;
 u_int16_t srcport;
 u_int16_t port = 32768+666;	/* start udp dest port # for probe packets */
 u_int16_t ident;
@@ -364,12 +364,13 @@ main(argc, argv)
 	struct hostent *hp;
 	int error;
 	struct addrinfo hints, *res;
-	int ch, i, on, probe, seq, hops, rcvcmsglen;
+	int ch, i, on, seq, rcvcmsglen;
+	u_long probe, hops;
 	static u_char *rcvcmsgbuf;
 	char hbuf[NI_MAXHOST], src0[NI_MAXHOST];
 	char *ep;
 	int mib[4] = { CTL_NET, PF_INET6, IPPROTO_IPV6, IPV6CTL_DEFHLIM };
-	size_t size = sizeof(max_hops);
+	size_t size;
 	u_long lport;
 	int minlen;
 
@@ -385,8 +386,9 @@ main(argc, argv)
 	seteuid(getuid());
 	setuid(getuid());
 
-	(void) sysctl(mib, sizeof(mib)/sizeof(mib[0]), &max_hops, &size,
-	    NULL, 0);
+	size = sizeof(i);
+	(void) sysctl(mib, sizeof(mib)/sizeof(mib[0]), &i, &size, NULL, 0);
+	max_hops = i;
 
 	/* set a minimum set of socket options */
 	on = 1;
@@ -421,16 +423,11 @@ main(argc, argv)
 			break;
 		case 'f':
 			ep = NULL;
+			errno = 0;
 			first_hop = strtoul(optarg, &ep, 0);
-			if (!*argv || *ep) {
+			if (errno || !*optarg || *ep|| first_hop > 255) {
 				fprintf(stderr,
 				    "traceroute6: invalid min hoplimit.\n");
-				exit(1);
-			}
-			if (first_hop > max_hops) {
-				fprintf(stderr,
-				    "traceroute6: min hoplimit must be <= %d.\n",
-				    max_hops);
 				exit(1);
 			}
 			break;
@@ -479,16 +476,11 @@ main(argc, argv)
 			break;
 		case 'm':
 			ep = NULL;
+			errno = 0;
 			max_hops = strtoul(optarg, &ep, 0);
-			if (!*argv || *ep) {
+			if (errno || !*optarg || *ep || max_hops > 255) {
 				fprintf(stderr,
 				    "traceroute6: invalid max hoplimit.\n");
-				exit(1);
-			}
-			if (max_hops < first_hop) {
-				fprintf(stderr,
-				    "traceroute6: max hoplimit must be >= %d.\n",
-				    first_hop);
 				exit(1);
 			}
 			break;
@@ -497,9 +489,10 @@ main(argc, argv)
 			break;
 		case 'p':
 			ep = NULL;
+			errno = 0;
 			lport = strtoul(optarg, &ep, 0);
-			if (!*argv || *ep) {
-				fprintf(stderr, "traceroute6: port.\n");
+			if (errno || !*optarg || *ep) {
+				fprintf(stderr, "traceroute6: invalid port.\n");
 				exit(1);
 			}
 			if (lport == 0 || lport != (lport & 0xffff)) {
@@ -511,8 +504,9 @@ main(argc, argv)
 			break;
 		case 'q':
 			ep = NULL;
+			errno = 0;
 			nprobes = strtoul(optarg, &ep, 0);
-			if (!*argv || *ep) {
+			if (errno || !*optarg || *ep) {
 				fprintf(stderr,
 				    "traceroute6: invalid nprobes.\n");
 				exit(1);
@@ -538,8 +532,9 @@ main(argc, argv)
 			break;
 		case 'w':
 			ep = NULL;
+			errno = 0;
 			waittime = strtoul(optarg, &ep, 0);
-			if (!*argv || *ep) {
+			if (errno || !*optarg || *ep) {
 				fprintf(stderr,
 				    "traceroute6: invalid wait time.\n");
 				exit(1);
@@ -555,6 +550,12 @@ main(argc, argv)
 		}
 	argc -= optind;
 	argv += optind;
+
+	if (max_hops < first_hop) {
+		fprintf(stderr,
+		    "traceroute6: max hoplimit must be larger than first hoplimit.\n");
+		exit(1);
+	}
 
 	if (argc < 1 || argc > 2)
 		usage();
@@ -597,8 +598,9 @@ main(argc, argv)
 
 	if (*++argv) {
 		ep = NULL;
+		errno = 0;
 		datalen = strtoul(*argv, &ep, 0);
-		if (!*argv || *ep) {
+		if (errno || !*argv || *ep) {
 			fprintf(stderr,
 			    "traceroute6: invalid packet length.\n");
 			exit(1);
@@ -690,8 +692,9 @@ main(argc, argv)
 		}
 	}
 #ifdef SO_SNDBUF
-	if (setsockopt(sndsock, SOL_SOCKET, SO_SNDBUF, (char *)&datalen,
-	    sizeof(datalen)) < 0) {
+	i = datalen;
+	if (setsockopt(sndsock, SOL_SOCKET, SO_SNDBUF, (char *)&i,
+	    sizeof(i)) < 0) {
 		perror("setsockopt(SO_SNDBUF)");
 		exit(6);
 	}
@@ -840,12 +843,12 @@ main(argc, argv)
 	fprintf(stderr, " to %s (%s)", hostname, hbuf);
 	if (source)
 		fprintf(stderr, " from %s", source);
-	fprintf(stderr, ", %d hops max, %d byte packets\n",
+	fprintf(stderr, ", %lu hops max, %lu byte packets\n",
 	    max_hops, datalen);
 	(void) fflush(stderr);
 
 	if (first_hop > 1)
-		printf("Skipping %d intermediate hops\n", first_hop - 1);
+		printf("Skipping %lu intermediate hops\n", first_hop - 1);
 
 	/*
 	 * Main loop
@@ -855,7 +858,7 @@ main(argc, argv)
 		int got_there = 0;
 		int unreachable = 0;
 
-		printf("%2d ", hops);
+		printf("%2lu ", hops);
 		bzero(&lastaddr, sizeof(lastaddr));
 		for (probe = 0; probe < nprobes; ++probe) {
 			int cc;
@@ -976,12 +979,14 @@ setpolicy(so, policy)
 
 void
 send_probe(seq, hops)
-	int seq, hops;
+	int seq;
+	u_long hops;
 {
 	int i;
 
+	i = hops;
 	if (setsockopt(sndsock, IPPROTO_IPV6, IPV6_UNICAST_HOPS,
-	    (char *)&hops, sizeof(hops)) < 0) {
+	    (char *)&i, sizeof(i)) < 0) {
 		perror("setsockopt IPV6_UNICAST_HOPS");
 	}
 
@@ -1013,7 +1018,7 @@ send_probe(seq, hops)
 	if (i < 0 || i != datalen)  {
 		if (i<0)
 			perror("sendto");
-		printf("traceroute6: wrote %s %d chars, ret=%d\n",
+		printf("traceroute6: wrote %s %lu chars, ret=%d\n",
 		    hostname, datalen, i);
 		(void) fflush(stdout);
 	}

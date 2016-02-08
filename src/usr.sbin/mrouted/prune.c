@@ -41,7 +41,7 @@ extern int phys_vif;
 			default:  y = 0; \
 		} \
 	}
-			    
+
 struct gtable *kernel_table;		/* ptr to list of kernel grp entries*/
 static struct gtable *kernel_no_route;	/* list of grp entries w/o routes   */
 struct gtable *gtp;			/* pointer for kernel rt entries    */
@@ -62,20 +62,19 @@ static void		send_graft_ack(u_int32_t src, u_int32_t dst,
 static void		update_kernel(struct gtable *g);
 static char *		scaletime(u_long t);
 
-/* 
+/*
  * Updates the ttl values for each vif.
  */
 static void
-prun_add_ttls(gt)
-    struct gtable *gt;
+prun_add_ttls(struct gtable *gt)
 {
     struct uvif *v;
     vifi_t vifi;
-    
+
     for (vifi = 0, v = uvifs; vifi < numvifs; ++vifi, ++v) {
 	if (VIFM_ISSET(vifi, gt->gt_grpmems))
 	    gt->gt_ttls[vifi] = v->uv_threshold;
-	else 
+	else
 	    gt->gt_ttls[vifi] = 0;
     }
 }
@@ -92,9 +91,7 @@ prun_add_ttls(gt)
 	}
 
 int
-scoped_addr(vifi, addr)
-    vifi_t vifi;
-    u_int32_t addr;
+scoped_addr(vifi_t vifi, u_int32_t addr)
 {
     struct vif_acl *acl;
 
@@ -105,23 +102,21 @@ scoped_addr(vifi, addr)
     return 0;
 }
 
-/* 
+/*
  * Determine if mcastgrp has a listener on vifi
  */
 int
-grplst_mem(vifi, mcastgrp)
-    vifi_t vifi;
-    u_int32_t mcastgrp;
+grplst_mem(vifi_t vifi, u_int32_t mcastgrp)
 {
     register struct listaddr *g;
     register struct uvif *v;
-    
+
     v = &uvifs[vifi];
-    
+
     for (g = v->uv_groups; g != NULL; g = g->al_next)
-	if (mcastgrp == g->al_addr) 
+	if (mcastgrp == g->al_addr)
 	    return 1;
-    
+
     return 0;
 }
 
@@ -136,10 +131,7 @@ grplst_mem(vifi, mcastgrp)
  * head of the list.
  */
 int
-find_src_grp(src, mask, grp)
-   u_int32_t src;
-   u_int32_t mask;
-   u_int32_t grp;
+find_src_grp(u_int32_t src, u_int32_t mask, u_int32_t grp)
 {
     struct gtable *gt;
 
@@ -169,9 +161,7 @@ find_src_grp(src, mask, grp)
  * Check if the neighbor supports pruning
  */
 static int
-pruning_neighbor(vifi, addr)
-    vifi_t vifi;
-    u_int32_t addr;
+pruning_neighbor(vifi_t vifi, u_int32_t addr)
 {
     struct listaddr *n = neighbor_info(vifi, addr);
     int vers;
@@ -194,9 +184,7 @@ pruning_neighbor(vifi, addr)
  * Can the neighbor in question handle multicast traceroute?
  */
 static int
-can_mtrace(vifi, addr)
-    vifi_t	vifi;
-    u_int32_t	addr;
+can_mtrace(vifi_t vifi, u_int32_t addr)
 {
     struct listaddr *n = neighbor_info(vifi, addr);
     int vers;
@@ -219,9 +207,7 @@ can_mtrace(vifi, addr)
  * Returns the prune entry of the router, or NULL if none exists
  */
 static struct ptable *
-find_prune_entry(vr, pt)
-    u_int32_t vr;
-    struct ptable *pt;
+find_prune_entry(u_int32_t vr, struct ptable *pt)
 {
     while (pt) {
 	if (pt->pt_router == vr)
@@ -239,8 +225,7 @@ find_prune_entry(vr, pt)
  * Record an entry that a prune was sent for this group
  */
 static void
-send_prune(gt)
-    struct gtable *gt;
+send_prune(struct gtable *gt)
 {
     struct ptable *pt;
     char *p;
@@ -249,11 +234,11 @@ send_prune(gt)
     u_int32_t src;
     u_int32_t dst;
     u_int32_t tmp;
-    
+
     /* Don't process any prunes if router is not pruning */
     if (pruning == 0)
 	return;
-    
+
     /* Can't process a prune if we don't have an associated route */
     if (gt->gt_route == NULL)
 	return;
@@ -261,16 +246,16 @@ send_prune(gt)
     /* Don't send a prune to a non-pruning router */
     if (!pruning_neighbor(gt->gt_route->rt_parent, gt->gt_route->rt_gateway))
 	return;
-    
-    /* 
+
+    /*
      * sends a prune message to the router upstream.
      */
     src = uvifs[gt->gt_route->rt_parent].uv_lcl_addr;
     dst = gt->gt_route->rt_gateway;
-    
+
     p = send_buf + MIN_IP_HEADER_LEN + IGMP_MINLEN;
     datalen = 0;
-    
+
     /*
      * determine prune lifetime
      */
@@ -278,7 +263,7 @@ send_prune(gt)
     for (pt = gt->gt_pruntbl; pt; pt = pt->pt_next)
 	if (pt->pt_timer < gt->gt_prsent_timer)
 	    gt->gt_prsent_timer = pt->pt_timer;
-    
+
     /*
      * If we have a graft pending, cancel graft retransmission
      */
@@ -292,10 +277,10 @@ send_prune(gt)
     for (i = 0; i < 4; i++)
 	*p++ = ((char *)&(tmp))[i];
     datalen += 12;
-    
+
     send_igmp(src, dst, IGMP_DVMRP, DVMRP_PRUNE,
 	      htonl(MROUTED_LEVEL), datalen);
-    
+
     log(LOG_DEBUG, 0, "sent prune for (%s %s)/%d on vif %d to %s",
       inet_fmts(gt->gt_route->rt_origin, gt->gt_route->rt_originmask, s1),
       inet_fmt(gt->gt_mcastgrp, s2),
@@ -306,13 +291,12 @@ send_prune(gt)
 /*
  * a prune was sent upstream
  * so, a graft has to be sent to annul the prune
- * set up a graft timer so that if an ack is not 
+ * set up a graft timer so that if an ack is not
  * heard within that time, another graft request
  * is sent out.
  */
 static void
-send_graft(gt)
-    struct gtable *gt;
+send_graft(struct gtable *gt)
 {
     register char *p;
     register int i;
@@ -323,19 +307,19 @@ send_graft(gt)
     /* Can't send a graft without an associated route */
     if (gt->gt_route == NULL)
 	return;
-    
+
     src = uvifs[gt->gt_route->rt_parent].uv_lcl_addr;
     dst = gt->gt_route->rt_gateway;
-    
+
     p = send_buf + MIN_IP_HEADER_LEN + IGMP_MINLEN;
     datalen = 0;
-    
+
     for (i = 0; i < 4; i++)
 	*p++ = ((char *)&(gt->gt_route->rt_origin))[i];
     for (i = 0; i < 4; i++)
 	*p++ = ((char *)&(gt->gt_mcastgrp))[i];
     datalen += 8;
-    
+
     if (datalen != 0) {
 	send_igmp(src, dst, IGMP_DVMRP, DVMRP_GRAFT,
 		  htonl(MROUTED_LEVEL), datalen);
@@ -350,11 +334,7 @@ send_graft(gt)
  * Send an ack that a graft was received
  */
 static void
-send_graft_ack(src, dst, origin, grp)
-    u_int32_t src;
-    u_int32_t dst;
-    u_int32_t origin;
-    u_int32_t grp;
+send_graft_ack(u_int32_t src, u_int32_t dst, u_int32_t origin, u_int32_t grp)
 {
     register char *p;
     register int i;
@@ -362,13 +342,13 @@ send_graft_ack(src, dst, origin, grp)
 
     p = send_buf + MIN_IP_HEADER_LEN + IGMP_MINLEN;
     datalen = 0;
-    
+
     for (i = 0; i < 4; i++)
 	*p++ = ((char *)&(origin))[i];
     for (i = 0; i < 4; i++)
 	*p++ = ((char *)&(grp))[i];
     datalen += 8;
-    
+
     send_igmp(src, dst, IGMP_DVMRP, DVMRP_GRAFT_ACK,
 	      htonl(MROUTED_LEVEL), datalen);
 
@@ -380,8 +360,7 @@ send_graft_ack(src, dst, origin, grp)
  * Update the kernel cache with all the routes hanging off the group entry
  */
 static void
-update_kernel(g)
-    struct gtable *g;
+update_kernel(struct gtable *g)
 {
     struct stable *st;
 
@@ -401,15 +380,14 @@ update_kernel(g)
  * Find a specific group entry in the group table
  */
 struct gtable *
-find_grp(grp)
-   u_long grp;
+find_grp(u_long grp)
 {
    struct gtable *gt;
 
    for (gt = kernel_table; gt; gt = gt->gt_gnext) {
       if (ntohl(grp) < ntohl(gt->gt_mcastgrp))
-      	 break;
-      if (gt->gt_mcastgrp == grp) 
+	 break;
+      if (gt->gt_mcastgrp == grp)
          return gt;
    }
    return NULL;
@@ -420,9 +398,7 @@ find_grp(grp)
  * entry
  */
 struct stable *
-find_grp_src(gt, src)
-   struct gtable *gt;
-   u_long src;
+find_grp_src(struct gtable *gt, u_long src)
 {
    struct stable *st;
    u_long grp = gt->gt_mcastgrp;
@@ -436,16 +412,14 @@ find_grp_src(gt, src)
    return NULL;
 }
 
-/* 
- * Find next entry > specification 
+/*
+ * Find next entry > specification
+ * gtpp: ordered by group
+ * stpp: ordered by source
  */
 int
-next_grp_src_mask(gtpp, stpp, grp, src, mask)
-   struct gtable **gtpp;   /* ordered by group  */
-   struct stable **stpp;   /* ordered by source */
-   u_long grp;
-   u_long src;
-   u_long mask;
+next_grp_src_mask(struct gtable *gtpp, struct gtable *stpp, u_long grp,
+    u_long src, u_long mask)
 {
    struct gtable *gt, *gbest = NULL;
    struct stable *st, *sbest = NULL;
@@ -454,9 +428,9 @@ next_grp_src_mask(gtpp, stpp, grp, src, mask)
    (*gtpp) = kernel_table;
    while ((*gtpp) && ntohl((*gtpp)->gt_mcastgrp) < ntohl(grp))
       (*gtpp)=(*gtpp)->gt_gnext;
-   if (!(*gtpp)) 
+   if (!(*gtpp))
       return 0; /* no more groups */
-   
+
    for (gt = kernel_table; gt; gt=gt->gt_gnext) {
       /* Since grps are ordered, we can stop when group changes from gbest */
       if (gbest && gbest->gt_mcastgrp != gt->gt_mcastgrp)
@@ -465,13 +439,13 @@ next_grp_src_mask(gtpp, stpp, grp, src, mask)
 
          /* Among those entries > spec, find "lowest" one */
          if (((ntohl(gt->gt_mcastgrp)> ntohl(grp))
-           || (ntohl(gt->gt_mcastgrp)==ntohl(grp) 
+           || (ntohl(gt->gt_mcastgrp)==ntohl(grp)
               && ntohl(st->st_origin)> ntohl(src))
-           || (ntohl(gt->gt_mcastgrp)==ntohl(grp) 
+           || (ntohl(gt->gt_mcastgrp)==ntohl(grp)
               && ntohl(st->st_origin)==src && 0xFFFFFFFF>ntohl(mask)))
-          && (!gbest 
+          && (!gbest
            || (ntohl(gt->gt_mcastgrp)< ntohl(gbest->gt_mcastgrp))
-           || (ntohl(gt->gt_mcastgrp)==ntohl(gbest->gt_mcastgrp) 
+           || (ntohl(gt->gt_mcastgrp)==ntohl(gbest->gt_mcastgrp)
               && ntohl(st->st_origin)< ntohl(sbest->st_origin)))) {
                gbest = gt;
                sbest = st;
@@ -485,15 +459,12 @@ next_grp_src_mask(gtpp, stpp, grp, src, mask)
 
 /*
  * Ensure that sg contains current information for the given group,source.
- * This is fetched from the kernel as a unit so that counts for the entry 
- * are consistent, i.e. packet and byte counts for the same entry are 
+ * This is fetched from the kernel as a unit so that counts for the entry
+ * are consistent, i.e. packet and byte counts for the same entry are
  * read at the same time.
  */
 void
-refresh_sg(sg, gt, st)
-   struct sioc_sg_req *sg;
-   struct gtable *gt;
-   struct stable *st;
+refresh_sg(struct sioc_sg_req *sg, struct gtable *gt, struct gtable *st)
 {
    static   int lastq = -1;
 
@@ -511,8 +482,7 @@ refresh_sg(sg, gt, st)
  * function from find_route() which modifies rtp.
  */
 struct rtentry *
-snmp_find_route(src, mask)
-    register u_long src, mask;
+snmp_find_route(u_long src, u_long mask)
 {
     register struct rtentry *rt;
 
@@ -524,20 +494,17 @@ snmp_find_route(src, mask)
 }
 
 /*
- * Find next route entry > specification 
+ * Find next route entry > specification
  */
 int
-next_route(rtpp, src, mask)
-   struct rtentry **rtpp;
-   u_long src;
-   u_long mask;
+next_route(struct rtentry **rtpp, u_long src, u_long mask)
 {
    struct rtentry *rt, *rbest = NULL;
 
    /* Among all entries > spec, find "lowest" one in order */
    for (rt = routing_table; rt; rt=rt->rt_next) {
-      if ((ntohl(rt->rt_origin) > ntohl(src) 
-          || (ntohl(rt->rt_origin) == ntohl(src) 
+      if ((ntohl(rt->rt_origin) > ntohl(src)
+          || (ntohl(rt->rt_origin) == ntohl(src)
              && ntohl(rt->rt_originmask) > ntohl(mask)))
        && (!rbest || (ntohl(rt->rt_origin) < ntohl(rbest->rt_origin))
           || (ntohl(rt->rt_origin) == ntohl(rbest->rt_origin)
@@ -550,13 +517,10 @@ next_route(rtpp, src, mask)
 
 /*
  * Given a routing table entry, and a vifi, find the next vifi/entry
+ * vifi: vif at which to start looking
  */
 int
-next_route_child(rtpp, src, mask, vifi)
-   struct rtentry **rtpp;
-   u_long    src;
-   u_long    mask;
-   vifi_t   *vifi;     /* vif at which to start looking */
+next_route_child(struct rtentry **rtpp, u_long src, u_long mask, vifi_t vifi)
 {
    struct rtentry *rt;
 
@@ -579,15 +543,11 @@ next_route_child(rtpp, src, mask, vifi)
 /*
  * Given a routing table entry, and a vifi, find the next entry
  * equal to or greater than those
+ * vifi: vif at which to start looking
  */
 int
-next_child(gtpp, stpp, grp, src, mask, vifi)
-   struct gtable **gtpp;
-   struct stable **stpp;
-   u_long    grp;
-   u_long    src;
-   u_long    mask;
-   vifi_t   *vifi;     /* vif at which to start looking */
+next_child(struct gtable *gtpp, struct gtable *stpp, u_long grp,
+    u_long src, u_long mask, vifi_t *vifi)
 {
    struct stable *st;
 
@@ -604,7 +564,7 @@ next_child(gtpp, stpp, grp, src, mask, vifi)
          if (VIFM_ISSET(*vifi, (*gtpp)->gt_route->rt_children))
             return 1;
       *vifi = 0;
-   } while (next_grp_src_mask(gtpp, stpp, (*gtpp)->gt_mcastgrp, 
+   } while (next_grp_src_mask(gtpp, stpp, (*gtpp)->gt_mcastgrp,
 		(*stpp)->st_origin, 0xFFFFFFFF) );
 
    return 0;
@@ -615,20 +575,18 @@ next_child(gtpp, stpp, grp, src, mask, vifi)
  * Initialize the kernel table structure
  */
 void
-init_ktable()
+init_ktable(void)
 {
-    kernel_table 	= NULL;
+    kernel_table	= NULL;
     kernel_no_route	= NULL;
     kroutes		= 0;
 }
 
-/* 
+/*
  * Add a new table entry for (origin, mcastgrp)
  */
 void
-add_table_entry(origin, mcastgrp)
-    u_int32_t origin;
-    u_int32_t mcastgrp;
+add_table_entry(u_int32_t origin, u_int32_t mcastgrp)
 {
     struct rtentry *r;
     struct gtable *gt,**gtnp,*prev_gt;
@@ -638,7 +596,7 @@ add_table_entry(origin, mcastgrp)
 #ifdef DEBUG_MFC
     md_log(MD_MISS, origin, mcastgrp);
 #endif
-    
+
     r = determine_route(origin);
     prev_gt = NULL;
     if (r == NULL) {
@@ -667,7 +625,7 @@ add_table_entry(origin, mcastgrp)
 	    log(LOG_ERR, 0, "ran out of memory");
 
 	gt->gt_mcastgrp	    = mcastgrp;
-	gt->gt_timer   	    = CACHE_LIFETIME(cache_lifetime);
+	gt->gt_timer	    = CACHE_LIFETIME(cache_lifetime);
 	time(&gt->gt_ctime);
 	gt->gt_grpmems	    = 0;
 	gt->gt_scope	    = 0;
@@ -757,7 +715,7 @@ add_table_entry(origin, mcastgrp)
 #endif
 	log(LOG_WARNING, 0, "kernel entry already exists for (%s %s)",
 		inet_fmt(origin, s1), inet_fmt(mcastgrp, s2));
-	/* XXX Doing this should cause no harm, and may ensure 
+	/* XXX Doing this should cause no harm, and may ensure
 	 * kernel<>mrouted synchronization */
 	k_add_rg(origin, gt);
 	return;
@@ -770,10 +728,10 @@ add_table_entry(origin, mcastgrp)
 	inet_fmt(origin, s1),
 	inet_fmt(mcastgrp, s2),
 	gt->gt_grpmems, r ? r->rt_parent : -1);
-    
+
     /* If there are no leaf vifs
      * which have this group, then
-     * mark this src-grp as a prune candidate. 
+     * mark this src-grp as a prune candidate.
      */
     if (!gt->gt_prsent_timer && !gt->gt_grpmems && r && r->rt_gateway)
 	send_prune(gt);
@@ -784,15 +742,13 @@ add_table_entry(origin, mcastgrp)
  * Forward on that interface immediately
  */
 void
-reset_neighbor_state(vifi, addr)
-    vifi_t vifi;
-    u_int32_t addr;
+reset_neighbor_state(vifi_t vifi, u_int32_t addr)
 {
     struct rtentry *r;
     struct gtable *g;
     struct ptable *pt, **ptnp;
     struct stable *st;
-    
+
     for (g = kernel_table; g; g = g->gt_gnext) {
 	r = g->gt_route;
 
@@ -842,14 +798,14 @@ reset_neighbor_state(vifi, addr)
 	     * And see if we want to forward again.
 	     */
 	    if (!VIFM_ISSET(vifi, g->gt_grpmems)) {
-		if (VIFM_ISSET(vifi, r->rt_children) && 
+		if (VIFM_ISSET(vifi, r->rt_children) &&
 		    !(VIFM_ISSET(vifi, r->rt_leaves)))
 		    VIFM_SET(vifi, g->gt_grpmems);
-		
-		if (VIFM_ISSET(vifi, r->rt_leaves) && 
+
+		if (VIFM_ISSET(vifi, r->rt_leaves) &&
 		    grplst_mem(vifi, g->gt_mcastgrp))
 		    VIFM_SET(vifi, g->gt_grpmems);
-		
+
 		g->gt_grpmems &= ~g->gt_scope;
 		prun_add_ttls(g);
 
@@ -873,15 +829,12 @@ reset_neighbor_state(vifi, addr)
  * del_flag determines how many entries to delete
  */
 void
-del_table_entry(r, mcastgrp, del_flag)
-    struct rtentry *r;
-    u_int32_t mcastgrp;
-    u_int  del_flag;
+del_table_entry(struct rtentry *r, u_int32_t mcastgrp, u_int del_flag)
 {
     struct gtable *g, *prev_g;
     struct stable *st, *prev_st;
     struct ptable *pt, *prev_pt;
-    
+
     if (del_flag == DEL_ALL_ROUTES) {
 	g = r->rt_groups;
 	while (g) {
@@ -929,8 +882,8 @@ del_table_entry(r, mcastgrp, del_flag)
 	}
 	r->rt_groups = NULL;
     }
-    
-    /* 
+
+    /*
      * Dummy routine - someday this may be needed, so it is just there
      */
     if (del_flag == DEL_RTE_GROUP) {
@@ -994,8 +947,7 @@ del_table_entry(r, mcastgrp, del_flag)
  * update kernel table entry when a route entry changes
  */
 void
-update_table_entry(r)
-    struct rtentry *r;
+update_table_entry(struct rtentry *r)
 {
     struct gtable *g;
     struct ptable *pt, *prev_pt;
@@ -1014,10 +966,10 @@ update_table_entry(r)
 
 	/* obtain the multicast group membership list */
 	for (i = 0; i < numvifs; i++) {
-	    if (VIFM_ISSET(i, r->rt_children) && 
+	    if (VIFM_ISSET(i, r->rt_children) &&
 		!(VIFM_ISSET(i, r->rt_leaves)))
 		VIFM_SET(i, g->gt_grpmems);
-	    
+
 	    if (VIFM_ISSET(i, r->rt_leaves) && grplst_mem(i, g->gt_mcastgrp))
 		VIFM_SET(i, g->gt_grpmems);
 	}
@@ -1056,16 +1008,14 @@ update_table_entry(r)
  * set the forwarding flag for all mcastgrps on this vifi
  */
 void
-update_lclgrp(vifi, mcastgrp)
-    vifi_t vifi;
-    u_int32_t mcastgrp;
+update_lclgrp(vifi_t vifi, u_int32_t mcastgrp)
 {
     struct rtentry *r;
     struct gtable *g;
-    
+
     log(LOG_DEBUG, 0, "group %s joined on vif %d",
 	inet_fmt(mcastgrp, s1), vifi);
-    
+
     for (g = kernel_table; g; g = g->gt_gnext) {
 	if (ntohl(mcastgrp) < ntohl(g->gt_mcastgrp))
 	    break;
@@ -1097,16 +1047,14 @@ update_lclgrp(vifi, mcastgrp)
  * reset forwarding flag for all mcastgrps on this vifi
  */
 void
-delete_lclgrp(vifi, mcastgrp)
-    vifi_t vifi;
-    u_int32_t mcastgrp;
+delete_lclgrp(vifi_t vifi, u_int32_t mcastgrp)
 {
     struct rtentry *r;
     struct gtable *g;
-    
+
     log(LOG_DEBUG, 0, "group %s left on vif %d",
 	inet_fmt(mcastgrp, s1), vifi);
-    
+
     for (g = kernel_table; g; g = g->gt_gnext) {
 	if (ntohl(mcastgrp) < ntohl(g->gt_mcastgrp))
 	    break;
@@ -1164,34 +1112,30 @@ delete_lclgrp(vifi, mcastgrp)
  * Determines if a corresponding prune message has to be generated
  */
 void
-accept_prune(src, dst, p, datalen)
-    u_int32_t src;
-    u_int32_t dst;
-    char *p;
-    int datalen;
+accept_prune(u_int32_t src, u_int32_t dst, char *p, int datalen)
 {
     u_int32_t prun_src;
     u_int32_t prun_grp;
     u_int32_t prun_tmr;
     vifi_t vifi;
     int i;
-    int stop_sending; 
+    int stop_sending;
     struct rtentry *r;
     struct gtable *g;
     struct ptable *pt;
     struct listaddr *vr;
-    
+
     /* Don't process any prunes if router is not pruning */
     if (pruning == 0)
 	return;
-    
+
     if ((vifi = find_vif(src, dst)) == NO_VIF) {
 	log(LOG_INFO, 0,
-    	    "ignoring prune report from non-neighbor %s",
+	    "ignoring prune report from non-neighbor %s",
 	    inet_fmt(src, s1));
 	return;
     }
-    
+
     /* Check if enough data is present */
     if (datalen < 12)
 	{
@@ -1200,7 +1144,7 @@ accept_prune(src, dst, p, datalen)
 		inet_fmt(src, s1));
 	    return;
 	}
-    
+
     for (i = 0; i< 4; i++)
 	((char *)&prun_src)[i] = *p++;
     for (i = 0; i< 4; i++)
@@ -1208,7 +1152,7 @@ accept_prune(src, dst, p, datalen)
     for (i = 0; i< 4; i++)
 	((char *)&prun_tmr)[i] = *p++;
     prun_tmr = ntohl(prun_tmr);
-    
+
     log(LOG_DEBUG, 0, "%s on vif %d prunes (%s %s)/%d",
 	inet_fmt(src, s1), vifi,
 	inet_fmt(prun_src, s2), inet_fmt(prun_grp, s3), prun_tmr);
@@ -1218,7 +1162,7 @@ accept_prune(src, dst, p, datalen)
      */
     if (find_src_grp(prun_src, 0, prun_grp)) {
 	g = gtp ? gtp->gt_gnext : kernel_table;
-    	r = g->gt_route;
+	r = g->gt_route;
 
 	if (!VIFM_ISSET(vifi, r->rt_children)) {
 	    log(LOG_WARNING, 0, "prune received from non-child %s for (%s %s)",
@@ -1250,7 +1194,7 @@ accept_prune(src, dst, p, datalen)
 	    pt = (struct ptable *)(malloc(sizeof(struct ptable)));
 	    if (pt == NULL)
 	      log(LOG_ERR, 0, "pt: ran out of memory");
-		
+
 	    pt->pt_vifi = vifi;
 	    pt->pt_router = src;
 	    pt->pt_timer = prun_tmr;
@@ -1265,7 +1209,7 @@ accept_prune(src, dst, p, datalen)
 	    g->gt_timer = prun_tmr;
 
 	/*
-	 * check if any more packets need to be sent on the 
+	 * check if any more packets need to be sent on the
 	 * vif which sent this message
 	 */
 	stop_sending = 1;
@@ -1291,7 +1235,7 @@ accept_prune(src, dst, p, datalen)
 
 	/*
 	 * check if all the child routers have expressed no interest
-	 * in this group and if this group does not exist in the 
+	 * in this group and if this group does not exist in the
 	 * interface
 	 * Send a prune message then upstream
 	 */
@@ -1317,9 +1261,7 @@ accept_prune(src, dst, p, datalen)
  * If so and if a prune was sent, it sends a graft upwards
  */
 void
-chkgrp_graft(vifi, mcastgrp)
-    vifi_t	vifi;
-    u_int32_t	mcastgrp;
+chkgrp_graft(vifi_t vifi, u_int32_t mcastgrp)
 {
     struct rtentry *r;
     struct gtable *g;
@@ -1343,14 +1285,14 @@ chkgrp_graft(vifi, mcastgrp)
 
 		/* set the flag for graft retransmission */
 		g->gt_grftsnt = 1;
-	    
+
 		/* send graft upwards */
 		send_graft(g);
-	    
+
 		/* reset the prune timer and update cache timer*/
 		g->gt_prsent_timer = 0;
 		g->gt_timer = max_prune_lifetime;
-	    
+
 		log(LOG_DEBUG, 0, "chkgrp graft (%s %s) gm:%x",
 		    inet_fmts(r->rt_origin, r->rt_originmask, s1),
 		    inet_fmt(g->gt_mcastgrp, s2), g->gt_grpmems);
@@ -1366,55 +1308,51 @@ chkgrp_graft(vifi, mcastgrp)
 }
 
 /* determine the multicast group and src
- * 
- * if it does, then determine if a prune was sent 
+ *
+ * if it does, then determine if a prune was sent
  * upstream.
  * if prune sent upstream, send graft upstream and send
  * ack downstream.
- * 
+ *
  * if no prune sent upstream, change the forwarding bit
  * for this interface and send ack downstream.
  *
  * if no entry exists for this group send ack downstream.
  */
 void
-accept_graft(src, dst, p, datalen)
-    u_int32_t 	src;
-    u_int32_t	dst;
-    char	*p;
-    int		datalen;
+accept_graft(u_int32_t src, u_int32_t dst, char *p, int datalen)
 {
-    vifi_t 	vifi;
-    u_int32_t 	graft_src;
+    vifi_t	vifi;
+    u_int32_t	graft_src;
     u_int32_t	graft_grp;
-    int 	i;
+    int		i;
     struct rtentry *r;
     struct gtable *g;
     struct ptable *pt, **ptnp;
-    
+
     if ((vifi = find_vif(src, dst)) == NO_VIF) {
 	log(LOG_INFO, 0,
-    	    "ignoring graft from non-neighbor %s",
+	    "ignoring graft from non-neighbor %s",
 	    inet_fmt(src, s1));
 	return;
     }
-    
+
     if (datalen < 8) {
 	log(LOG_WARNING, 0,
 	    "received non-decipherable graft from %s",
 	    inet_fmt(src, s1));
 	return;
     }
-    
+
     for (i = 0; i< 4; i++)
 	((char *)&graft_src)[i] = *p++;
     for (i = 0; i< 4; i++)
 	((char *)&graft_grp)[i] = *p++;
-    
+
     log(LOG_DEBUG, 0, "%s on vif %d grafts (%s %s)",
 	inet_fmt(src, s1), vifi,
 	inet_fmt(graft_src, s2), inet_fmt(graft_grp, s3));
-    
+
     /*
      * Find the subnet for the graft
      */
@@ -1446,7 +1384,7 @@ accept_graft(src, dst, p, datalen)
 		/* Send route change notification to reservation protocol. */
 		rsrr_cache_send(g,1);
 #endif /* RSRR */
-		break;				
+		break;
 	    } else {
 		ptnp = &pt->pt_next;
 	    }
@@ -1455,7 +1393,7 @@ accept_graft(src, dst, p, datalen)
 	/* send ack downstream */
 	send_graft_ack(dst, src, graft_src, graft_grp);
 	g->gt_timer = max_prune_lifetime;
-	    
+
 	if (g->gt_prsent_timer) {
 	    /* set the flag for graft retransmission */
 	    g->gt_grftsnt = 1;
@@ -1483,49 +1421,45 @@ accept_graft(src, dst, p, datalen)
 }
 
 /*
- * find out which group is involved first of all 
+ * find out which group is involved first of all
  * then determine if a graft was sent.
  * if no graft sent, ignore the message
- * if graft was sent and the ack is from the right 
- * source, remove the graft timer so that we don't 
+ * if graft was sent and the ack is from the right
+ * source, remove the graft timer so that we don't
  * have send a graft again
  */
 void
-accept_g_ack(src, dst, p, datalen)
-    u_int32_t 	src;
-    u_int32_t	dst;
-    char	*p;
-    int		datalen;
+accept_g_ack(u_int32_t src, u_int32_t dst, char *p, int datalen)
 {
     struct gtable *g;
-    vifi_t 	vifi;
-    u_int32_t 	grft_src;
+    vifi_t	vifi;
+    u_int32_t	grft_src;
     u_int32_t	grft_grp;
-    int 	i;
-    
+    int		i;
+
     if ((vifi = find_vif(src, dst)) == NO_VIF) {
 	log(LOG_INFO, 0,
-    	    "ignoring graft ack from non-neighbor %s",
+	    "ignoring graft ack from non-neighbor %s",
 	    inet_fmt(src, s1));
 	return;
     }
-    
+
     if (datalen < 0  || datalen > 8) {
 	log(LOG_WARNING, 0,
 	    "received non-decipherable graft ack from %s",
 	    inet_fmt(src, s1));
 	return;
     }
-    
+
     for (i = 0; i< 4; i++)
 	((char *)&grft_src)[i] = *p++;
     for (i = 0; i< 4; i++)
 	((char *)&grft_grp)[i] = *p++;
-    
+
     log(LOG_DEBUG, 0, "%s on vif %d acks graft (%s, %s)",
 	inet_fmt(src, s1), vifi,
 	inet_fmt(grft_src, s2), inet_fmt(grft_grp, s3));
-    
+
     /*
      * Find the subnet for the graft ack
      */
@@ -1549,7 +1483,7 @@ accept_g_ack(src, dst, p, datalen)
  * about to call MRT_DONE which does that anyway.
  */
 void
-free_all_prunes()
+free_all_prunes(void)
 {
     register struct rtentry *r;
     register struct gtable *g, *prev_g;
@@ -1603,8 +1537,7 @@ free_all_prunes()
  * them is easier, and letting the kernel re-request them.
  */
 void
-steal_sources(rt)
-    struct rtentry *rt;
+steal_sources(struct rtentry *rt)
 {
     register struct rtentry *rp;
     register struct gtable *gt, **gtnp;
@@ -1674,16 +1607,16 @@ steal_sources(rt)
  * remove these entries from the kernel cache.
  */
 void
-age_table_entry()
+age_table_entry(void)
 {
     struct rtentry *r;
     struct gtable *gt, **gtnptr;
     struct stable *st, **stnp;
     struct ptable *pt, **ptnp;
     struct sioc_sg_req sg_req;
-    
+
     log(LOG_DEBUG, 0, "ageing entries");
-    
+
     gtnptr = &kernel_table;
     while ((gt = *gtnptr) != NULL) {
 	r = gt->gt_route;
@@ -1718,7 +1651,7 @@ age_table_entry()
 	ptnp = &gt->gt_pruntbl;
 	while ((pt = *ptnp) != NULL) {
 	    if ((pt->pt_timer -= ROUTE_MAX_REPORT_DELAY) <= 0) {
-		log(LOG_DEBUG, 0, "expire prune (%s %s) from %s on vif %d", 
+		log(LOG_DEBUG, 0, "expire prune (%s %s) from %s on vif %d",
 		    inet_fmts(r->rt_origin, r->rt_originmask, s1),
 		    inet_fmt(gt->gt_mcastgrp, s2),
 		    inet_fmt(pt->pt_router, s3),
@@ -1793,7 +1726,7 @@ age_table_entry()
 	    log(LOG_DEBUG, 0, "timeout cache entry (%s, %s)",
 		inet_fmts(r->rt_origin, r->rt_originmask, s1),
 		inet_fmt(gt->gt_mcastgrp, s2));
-	    
+
 	    if (gt->gt_prev)
 		gt->gt_prev->gt_next = gt->gt_next;
 	    else
@@ -1863,9 +1796,7 @@ age_table_entry()
  * have expired.
  */
 static void
-expire_prune(vifi, gt)
-     vifi_t vifi;
-     struct gtable *gt;
+expire_prune(vifi_t vifi, struct gtable *gt)
 {
     /*
      * No need to send a graft, any prunes that we sent
@@ -1896,8 +1827,7 @@ expire_prune(vifi, gt)
 
 
 static char *
-scaletime(t)
-    u_long t;
+scaletime(u_long t)
 {
     static char buf1[5];
     static char buf2[5];
@@ -1938,8 +1868,7 @@ scaletime(t)
  * Print the contents of the cache table on file 'fp2'.
  */
 void
-dump_cache(fp2)
-    FILE *fp2;
+dump_cache(FILE *fp2)
 {
     register struct rtentry *r;
     register struct gtable *gt;
@@ -1950,7 +1879,7 @@ dump_cache(fp2)
     fprintf(fp2,
 	    "Multicast Routing Cache Table (%d entries)\n%s", kroutes,
     " Origin             Mcast-group     CTmr  Age Ptmr IVif Forwvifs\n");
-    
+
     for (gt = kernel_no_route; gt; gt = gt->gt_next) {
 	if (gt->gt_srctbl) {
 	    fprintf(fp2, " %-18s %-15s %-4s %-4s    - -1\n",
@@ -2001,15 +1930,11 @@ dump_cache(fp2)
 /*
  * Traceroute function which returns traceroute replies to the requesting
  * router. Also forwards the request to downstream routers.
+ * NOTE: u_int no is narrowed to u_char
  */
 void
-accept_mtrace(src, dst, group, data, no, datalen)
-    u_int32_t src;
-    u_int32_t dst;
-    u_int32_t group;
-    char *data;
-    u_int no;	/* promoted u_char */
-    int datalen;
+accept_mtrace(u_int32_t src, u_int32_t dst, u_int32_t group,
+    char *data, u_int no, int datalen)
 {
     u_char type;
     struct rtentry *rt;
@@ -2082,7 +2007,7 @@ accept_mtrace(src, dst, group, data, no, datalen)
 	log(LOG_DEBUG, 0, "...no route");
 
     /*
-     * Query type packet - check if rte exists 
+     * Query type packet - check if rte exists
      * Check if the query destination is a vif connected to me.
      * and if so, whether I should start response back
      */
@@ -2109,7 +2034,7 @@ accept_mtrace(src, dst, group, data, no, datalen)
 		return;
 	}
 	vifi = find_vif(qry->tr_dst, 0);
-	
+
 	if (vifi == NO_VIF) {
 	    /* The traceroute destination is not on one of my subnet vifs. */
 	    log(LOG_DEBUG, 0, "Destination %s not an interface",
@@ -2135,20 +2060,20 @@ accept_mtrace(src, dst, group, data, no, datalen)
 	    log(LOG_DEBUG, 0, "Wrong interface for packet");
 	    errcode = TR_WRONG_IF;
 	}
-    }   
-    
+    }
+
     /* Now that we've decided to send a response, save the qid */
     oqid = qry->tr_qid;
 
     log(LOG_DEBUG, 0, "Sending traceroute response");
-    
+
     /* copy the packet to the sending buffer */
     p = send_buf + MIN_IP_HEADER_LEN + IGMP_MINLEN;
-    
+
     bcopy(data, p, datalen);
-    
+
     p += datalen;
-    
+
     /*
      * If there is no room to insert our reply, coopt the previous hop
      * error indication to relay this fact.
@@ -2167,7 +2092,7 @@ accept_mtrace(src, dst, group, data, no, datalen)
     bzero(resp, sizeof(struct tr_resp));
     datalen += RLEN;
 
-    resp->tr_qarr    = htonl((tp.tv_sec + JAN_1970) << 16) + 
+    resp->tr_qarr    = htonl((tp.tv_sec + JAN_1970) << 16) +
 				((tp.tv_usec >> 4) & 0xffff);
 
     resp->tr_rproto  = PROTO_DVMRP;

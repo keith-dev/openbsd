@@ -1,4 +1,4 @@
-/*	$OpenBSD: systrace-translate.c,v 1.11 2002/09/30 03:45:39 itojun Exp $	*/
+/*	$OpenBSD: systrace-translate.c,v 1.14 2002/12/09 07:24:56 itojun Exp $	*/
 /*
  * Copyright 2002 Niels Provos <provos@citi.umich.edu>
  * All rights reserved.
@@ -32,6 +32,7 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <sys/tree.h>
+#include <sys/socket.h>
 #include <inttypes.h>
 #include <limits.h>
 #include <stdlib.h>
@@ -58,7 +59,8 @@ static int linux_print_oflags(char *, size_t, struct intercept_translate *);
 static int print_modeflags(char *, size_t, struct intercept_translate *);
 static int print_number(char *, size_t, struct intercept_translate *);
 static int print_uname(char *, size_t, struct intercept_translate *);
-static int print_uname(char *, size_t, struct intercept_translate *);
+static int print_pidname(char *, size_t, struct intercept_translate *);
+static int print_signame(char *, size_t, struct intercept_translate *);
 static int get_argv(struct intercept_translate *, int, pid_t, void *);
 static int print_argv(char *, size_t, struct intercept_translate *);
 
@@ -171,6 +173,78 @@ print_number(char *buf, size_t buflen, struct intercept_translate *tl)
 }
 
 static int
+print_sockdom(char *buf, size_t buflen, struct intercept_translate *tl)
+{
+	int domain = (intptr_t)tl->trans_addr;
+	char *what = NULL;
+
+	switch (domain) {
+	case AF_UNIX:
+		what = "AF_UNIX";
+		break;
+	case AF_INET:
+		what = "AF_INET";
+		break;
+	case AF_INET6:
+		what = "AF_INET6";
+		break;
+	case AF_ISO:
+		what = "AF_ISO";
+		break;
+	case AF_NS:
+		what = "AF_NS";
+		break;
+	case AF_IPX:
+		what = "AF_IPX";
+		break;
+	case AF_IMPLINK:
+		what = "AF_IMPLINK";
+		break;
+	default:
+		snprintf(buf, buflen, "AF_UNKNOWN(%d)", domain);
+		break;
+	}
+
+	if (what != NULL)
+		strlcpy(buf, what, buflen);
+
+	return (0);
+}
+
+static int
+print_socktype(char *buf, size_t buflen, struct intercept_translate *tl)
+{
+	int type = (intptr_t)tl->trans_addr;
+	char *what = NULL;
+
+	switch (type) {
+	case SOCK_STREAM:
+		what = "SOCK_STREAM";
+		break;
+	case SOCK_DGRAM:
+		what = "SOCK_DGRAM";
+		break;
+	case SOCK_RAW:
+		what = "SOCK_RAW";
+		break;
+	case SOCK_SEQPACKET:
+		what = "SOCK_SEQPACKET";
+		break;
+	case SOCK_RDM:
+		what = "SOCK_RDM";
+		break;
+	default:
+		snprintf(buf, buflen, "SOCK_UNKNOWN(%d)", type);
+		break;
+	}
+
+	if (what != NULL)
+		strlcpy(buf, what, buflen);
+
+	return (0);
+}
+
+static int
 print_uname(char *buf, size_t buflen, struct intercept_translate *tl)
 {
 	struct passwd *pw;
@@ -179,6 +253,118 @@ print_uname(char *buf, size_t buflen, struct intercept_translate *tl)
 	pw = getpwuid(uid);
 	snprintf(buf, buflen, "%s", pw != NULL ? pw->pw_name : "<unknown>");
 
+	return (0);
+}
+
+static int
+print_pidname(char *buf, size_t buflen, struct intercept_translate *tl)
+{
+	struct intercept_pid *icpid;
+	pid_t pid = (intptr_t)tl->trans_addr;
+
+	icpid = intercept_getpid(pid);
+	snprintf(buf, buflen, "%s",
+	    icpid->name != NULL ? icpid->name : "<unknown>");
+
+	if (icpid->name == NULL)
+		intercept_freepid(pid);
+
+	return (0);
+}
+
+static int
+print_signame(char *buf, size_t buflen, struct intercept_translate *tl)
+{
+	int sig = (intptr_t)tl->trans_addr;
+	char *name;
+
+	switch (sig) {
+	case SIGHUP: 
+		name = "SIGHUP"; 
+		break;
+	case SIGINT: 
+		name = "SIGINT"; 
+		break;
+	case SIGQUIT: 
+		name = "SIGQUIT"; 
+		break;
+	case SIGILL: 
+		name = "SIGILL"; 
+		break;
+	case SIGABRT: 
+		name = "SIGABRT"; 
+		break;
+	case SIGFPE: 
+		name = "SIGFPE"; 
+		break;
+	case SIGKILL: 
+		name = "SIGKILL"; 
+		break;
+	case SIGBUS: 
+		name = "SIGBUS"; 
+		break;
+	case SIGSEGV: 
+		name = "SIGSEGV"; 
+		break;
+	case SIGSYS: 
+		name = "SIGSYS"; 
+		break;
+	case SIGPIPE: 
+		name = "SIGPIPE"; 
+		break;
+	case SIGALRM: 
+		name = "SIGALRM"; 
+		break;
+	case SIGTERM: 
+		name = "SIGTERM"; 
+		break;
+	case SIGURG: 
+		name = "SIGURG"; 
+		break;
+	case SIGSTOP: 
+		name = "SIGSTOP"; 
+		break;
+	case SIGTSTP: 
+		name = "SIGTSTP"; 
+		break;
+	case SIGCONT: 
+		name = "SIGCONT"; 
+		break;
+	case SIGCHLD: 
+		name = "SIGCHLD"; 
+		break;
+	case SIGTTIN: 
+		name = "SIGTTIN"; 
+		break;
+	case SIGTTOU: 
+		name = "SIGTTOU"; 
+		break;
+	case SIGIO: 
+		name = "SIGIO"; 
+		break;
+	case SIGPROF: 
+		name = "SIGPROF"; 
+		break;
+	case SIGWINCH: 
+		name = "SIGWINCH"; 
+		break;
+#ifndef __linux__
+	case SIGINFO: 
+		name = "SIGINFO"; 
+		break;
+#endif /* !__linux__ */
+	case SIGUSR1: 
+		name = "SIGUSR1"; 
+		break;
+	case SIGUSR2: 
+		name = "SIGUSR2"; 
+		break;
+	default:
+		snprintf(buf, buflen, "<unknown>: %d", sig);
+		return (0);
+	}
+
+	snprintf(buf, buflen, "%s", name);
 	return (0);
 }
 
@@ -233,42 +419,62 @@ print_argv(char *buf, size_t buflen, struct intercept_translate *tl)
 	return (0);
 }
 
-struct intercept_translate trargv = {
+struct intercept_translate ic_trargv = {
 	"argv",
 	get_argv, print_argv,
 };
 
-struct intercept_translate oflags = {
+struct intercept_translate ic_oflags = {
 	"oflags",
 	NULL, print_oflags,
 };
 
-struct intercept_translate linux_oflags = {
+struct intercept_translate ic_linux_oflags = {
 	"oflags",
 	NULL, linux_print_oflags,
 };
 
-struct intercept_translate modeflags = {
+struct intercept_translate ic_modeflags = {
 	"mode",
 	NULL, print_modeflags,
 };
 
-struct intercept_translate uidt = {
+struct intercept_translate ic_uidt = {
 	"uid",
 	NULL, print_number,
 };
 
-struct intercept_translate uname = {
+struct intercept_translate ic_uname = {
 	"uname",
 	NULL, print_uname,
 };
 
-struct intercept_translate gidt = {
+struct intercept_translate ic_gidt = {
 	"gid",
 	NULL, print_number,
 };
 
-struct intercept_translate fdt = {
+struct intercept_translate ic_fdt = {
 	"fd",
 	NULL, print_number,
+};
+
+struct intercept_translate ic_sockdom = {
+	"sockdom",
+	NULL, print_sockdom,
+};
+
+struct intercept_translate ic_socktype = {
+	"socktype",
+	NULL, print_socktype,
+};
+
+struct intercept_translate ic_pidname = {
+	"pidname",
+	NULL, print_pidname,
+};
+
+struct intercept_translate ic_signame = {
+	"signame",
+	NULL, print_signame,
 };

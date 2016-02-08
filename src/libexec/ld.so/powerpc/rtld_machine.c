@@ -1,4 +1,4 @@
-/*	$OpenBSD: rtld_machine.c,v 1.15 2002/09/09 19:06:18 drahn Exp $ */
+/*	$OpenBSD: rtld_machine.c,v 1.25 2003/03/10 03:57:57 david Exp $ */
 
 /*
  * Copyright (c) 1999 Dale Rahn
@@ -39,11 +39,13 @@
 
 #include <nlist.h>
 #include <link.h>
+#include <signal.h>
 
 #include "syscall.h"
 #include "archdep.h"
 #include "resolve.h"
 
+void _dl_syncicache(char *from, size_t len);
 
 /* relocation bits */
 #define HA(x) (((Elf_Addr)(x) >> 16) + (((Elf_Addr)(x) & 0x00008000) >> 15))
@@ -64,7 +66,7 @@
 	lval &= ~0xfc000000; \
 	lval |= 0x48000000; \
 	(from) = lval; \
-}while(0)
+} while (0)
 
 /* these are structures/functions offset from PLT region */
 #define PLT_CALL_OFFSET		6
@@ -168,8 +170,9 @@ _dl_printf("object relocation size %x, numrela %x\n",
 	 */
 	load_list = object->load_list;
 	while (load_list != NULL) {
-		_dl_mprotect(load_list->start, load_list->size,
-		    load_list->prot|PROT_WRITE);
+		if ((load_list->prot & PROT_WRITE) == 0)
+			_dl_mprotect(load_list->start, load_list->size,
+			    load_list->prot|PROT_WRITE);
 		load_list = load_list->next;
 	}
 
@@ -202,7 +205,7 @@ _dl_printf("object relocation size %x, numrela %x\n",
 			ooff = _dl_find_symbol(symn, _dl_objects, &this,
 			    SYM_SEARCH_ALL|SYM_NOWARNNOTFOUND|
 			    ((type == RELOC_JMP_SLOT) ? SYM_PLT:SYM_NOTPLT),
-			    sym->st_size);
+			    sym->st_size, object->load_name);
 
 			if (!this && ELF32_ST_BIND(sym->st_info) == STB_GLOBAL) {
 				_dl_printf("%s: %s :can't resolve reference '%s'\n",
@@ -246,7 +249,7 @@ _dl_printf("rel1 r_addr %x val %x loff %x ooff %x addend %x\n", r_addr,
 			    relas->r_addend;
 			Elf32_Addr val = target - (Elf32_Addr)r_addr;
 
-			if(!B24_VALID_RANGE(val)){
+			if (!B24_VALID_RANGE(val)){
 				int index;
 #ifdef DL_PRINTF_DEBUG
 _dl_printf(" ooff %x, sym val %x, addend %x"
@@ -294,7 +297,7 @@ _dl_printf(" symn [%s] val 0x%x\n", symn, val);
 		    {
 			Elf32_Addr val = ooff + this->st_value +
 			    relas->r_addend - (Elf32_Addr)r_addr;
-			if(!B24_VALID_RANGE(val)){
+			if (!B24_VALID_RANGE(val)){
 				/* invalid offset */
 				_dl_exit(20);
 			}
@@ -393,7 +396,7 @@ _dl_printf(" symn [%s] val 0x%x\n", symn, val);
 					    SYM_SEARCH_SELF|SYM_NOWARNNOTFOUND|
 					    ((type == RELOC_JMP_SLOT) ?
 					        SYM_PLT : SYM_NOTPLT),
-					    sym->st_size);
+					    sym->st_size, object->load_name);
 				}
 			}
 			if (cpysrc == NULL) {
@@ -429,7 +432,9 @@ _dl_printf(" found other symbol at %x size %d\n",
 	}
 	load_list = object->load_list;
 	while (load_list != NULL) {
-		_dl_mprotect(load_list->start, load_list->size, load_list->prot);
+		if ((load_list->prot & PROT_WRITE) == 0)
+			_dl_mprotect(load_list->start, load_list->size,
+			    load_list->prot);
 		load_list = load_list->next;
 	}
 	return(fails);
@@ -443,17 +448,68 @@ _dl_printf(" found other symbol at %x size %d\n",
 void
 _dl_md_reloc_got(elf_object_t *object, int lazy)
 {
-	Elf32_Addr *pltresolve;
-	Elf32_Addr *first_rela;
-	Elf32_Rela  *relas;
+	Elf_Addr *pltresolve;
+	Elf_Addr *first_rela;
+	Elf_RelA *relas;
+	Elf_Addr  plt_addr;
 	int	numrela;
 	int i;
 	int index;
 	Elf32_Addr *r_addr;
+	Elf_Addr ooff;
+	const Elf_Sym *this;
 
 	if (object->Dyn.info[DT_PLTREL] != DT_RELA)
 		return;
 
+	object->got_addr = NULL;
+	object->got_size = 0;
+	this = NULL;
+	ooff = _dl_find_symbol("__got_start", object, &this,
+	    SYM_SEARCH_SELF|SYM_NOWARNNOTFOUND|SYM_PLT, SYM_NOTPLT,
+	    NULL);
+	if (this != NULL)
+		object->got_addr = ooff + this->st_value;
+
+	this = NULL;
+	ooff = _dl_find_symbol("__got_end", object, &this,
+	    SYM_SEARCH_SELF|SYM_NOWARNNOTFOUND|SYM_PLT, SYM_NOTPLT,
+	    NULL);
+	if (this != NULL)
+		object->got_size = ooff + this->st_value  - object->got_addr;
+
+	plt_addr = 0;
+	object->plt_size = 0;
+	this = NULL;
+	ooff = _dl_find_symbol("__plt_start", object, &this,
+	    SYM_SEARCH_SELF|SYM_NOWARNNOTFOUND|SYM_PLT, SYM_NOTPLT,
+	    NULL);
+	if (this != NULL)
+		plt_addr = ooff + this->st_value;
+
+	this = NULL;
+	ooff = _dl_find_symbol("__plt_end", object, &this,
+	    SYM_SEARCH_SELF|SYM_NOWARNNOTFOUND|SYM_PLT, SYM_NOTPLT,
+	    NULL);
+	if (this != NULL)
+		object->plt_size = ooff + this->st_value  - plt_addr;
+
+	if (object->got_addr == NULL)
+		object->got_start = NULL;
+	else {
+		object->got_start = ELF_TRUNC(object->got_addr, _dl_pagesz);
+		object->got_size += object->got_addr - object->got_start;
+		object->got_size = ELF_ROUND(object->got_size, _dl_pagesz);
+	}
+	if (plt_addr == NULL)
+		object->plt_start = NULL;
+	else {
+		object->plt_start = ELF_TRUNC(plt_addr, _dl_pagesz);
+		object->plt_size += plt_addr - object->plt_start;
+		object->plt_size = ELF_ROUND(object->plt_size, _dl_pagesz);
+	}
+		
+	
 	if (!lazy) {
 		_dl_md_reloc(object, DT_JMPREL, DT_PLTRELSZ);
 		return;
@@ -483,6 +539,15 @@ _dl_md_reloc_got(elf_object_t *object, int lazy)
 		_dl_dcbf(&r_addr[0]);
 		_dl_dcbf(&r_addr[2]);
 	}
+	if (object->got_size != 0) {
+
+		_dl_mprotect((void*)object->got_start, object->got_size,
+		    PROT_READ|PROT_EXEC); /* only PPC is PROT_EXE */
+		_dl_syncicache((void*)object->got_addr, 4);
+	}
+	if (object->plt_size != 0)
+		_dl_mprotect((void*)object->plt_start, object->plt_size,
+		    PROT_READ|PROT_EXEC);
 }
 
 Elf_Addr
@@ -493,6 +558,12 @@ _dl_bind(elf_object_t *object, int reloff)
 	const char *symn;
 	Elf_Addr value;
 	Elf_RelA *relas;
+	Elf32_Addr val;
+	Elf32_Addr *pltresolve;
+	Elf32_Addr *pltcall;
+	Elf32_Addr *pltinfo;
+	Elf32_Addr *plttable;
+	sigset_t omask, nmask;
 
 	relas = ((Elf_RelA *)object->Dyn.info[DT_JMPREL]) + (reloff>>2);
 
@@ -503,66 +574,74 @@ _dl_bind(elf_object_t *object, int reloff)
 	r_addr = (Elf_Addr *)(object->load_offs + relas->r_offset);
 	this = NULL;
 	ooff = _dl_find_symbol(symn, _dl_objects, &this,
-	    SYM_SEARCH_ALL|SYM_WARNNOTFOUND|SYM_PLT, 0);
+	    SYM_SEARCH_ALL|SYM_WARNNOTFOUND|SYM_PLT, SYM_NOTPLT,
+	    object->load_name);
 	if (this == NULL) {
 		_dl_printf("lazy binding failed!\n");
 		*((int *)0) = 0;	/* XXX */
 	}
 
-	value = ooff + this->st_value;
-
-	{
-		Elf32_Addr val = value - (Elf32_Addr)r_addr;
-
-		Elf32_Addr *pltresolve;
-		Elf32_Addr *pltcall;
-		Elf32_Addr *pltinfo;
-		Elf32_Addr *plttable;
-
-		pltresolve = (Elf32_Addr *)
-		    (Elf32_Rela *)(object->Dyn.info[DT_PLTGOT]);
-		pltcall = (Elf32_Addr *)(pltresolve) + PLT_CALL_OFFSET;
-
-		if (!B24_VALID_RANGE(val)) {
-			int index;
-			/* if offset is > RELOC_24 deal with it */
-			index = reloff >> 2;
-
-			/* update plttable before pltcall branch, to make
-			 * this a safe race for threads
-			 */
-			val = ooff + this->st_value + relas->r_addend;
-
-			pltinfo = (Elf32_Addr *)(pltresolve) + PLT_INFO_OFFSET;
-			plttable = (Elf32_Addr *)pltinfo[0];
-			plttable[index] = val;
-
-			if (index > (2 << 14)) {
-				/* r_addr[0,1] is initialized to correct
-				 * value in reloc_got.
-				 */
-				BR(r_addr[2], pltcall);
-				_dl_dcbf(&r_addr[2]);
-			} else {
-				/* r_addr[0] is initialized to correct
-				 * value in reloc_got.
-				 */
-				BR(r_addr[1], pltcall);
-				_dl_dcbf(&r_addr[1]);
-			}
-		} else {
-			/* if the offset is small enough,
-			 * branch directly to the dest
-			 */
-			BR(r_addr[0], value);
-			_dl_dcbf(&r_addr[0]);
-		}
+	/* if PLT is protected, allow the write */
+	if (object->plt_size != 0)  {
+		sigfillset(&nmask);
+		_dl_sigprocmask(SIG_BLOCK, &nmask, &omask);
+		_dl_mprotect((void*)object->plt_start, object->plt_size,
+		    PROT_READ|PROT_WRITE|PROT_EXEC);
 	}
 
+	value = ooff + this->st_value;
+
+	val = value - (Elf32_Addr)r_addr;
+
+	pltresolve = (Elf32_Addr *)
+	    (Elf32_Rela *)(object->Dyn.info[DT_PLTGOT]);
+	pltcall = (Elf32_Addr *)(pltresolve) + PLT_CALL_OFFSET;
+
+	if (!B24_VALID_RANGE(val)) {
+		int index;
+		/* if offset is > RELOC_24 deal with it */
+		index = reloff >> 2;
+
+		/* update plttable before pltcall branch, to make
+		 * this a safe race for threads
+		 */
+		val = ooff + this->st_value + relas->r_addend;
+
+		pltinfo = (Elf32_Addr *)(pltresolve) + PLT_INFO_OFFSET;
+		plttable = (Elf32_Addr *)pltinfo[0];
+		plttable[index] = val;
+
+		if (index > (2 << 14)) {
+			/* r_addr[0,1] is initialized to correct
+			 * value in reloc_got.
+			 */
+			BR(r_addr[2], pltcall);
+			_dl_dcbf(&r_addr[2]);
+		} else {
+			/* r_addr[0] is initialized to correct
+			 * value in reloc_got.
+			 */
+			BR(r_addr[1], pltcall);
+			_dl_dcbf(&r_addr[1]);
+		}
+	} else {
+		/* if the offset is small enough,
+		 * branch directly to the dest
+		 */
+		BR(r_addr[0], value);
+		_dl_dcbf(&r_addr[0]);
+	}
+
+	/* if PLT is (to be protected, change back to RO/X */
+	if (object->plt_size != 0) {
+		_dl_mprotect((void*)object->plt_start, object->plt_size,
+		    PROT_READ|PROT_EXEC); /* only PPC is PROT_EXE */
+		_dl_sigprocmask(SIG_SETMASK, &omask, NULL);
+	}
 	return (value);
 }
 
-/* should not be defined here, but is is 32 for all powerpc 603-G4 */
+/* should not be defined here, but it is 32 for all powerpc 603-G4 */
 #define CACHELINESIZE 32
 void
 _dl_syncicache(char *from, size_t len)

@@ -1,4 +1,4 @@
-/*	$OpenBSD: fetch.c,v 1.39 2002/05/30 06:51:46 deraadt Exp $	*/
+/*	$OpenBSD: fetch.c,v 1.44 2003/03/10 06:20:10 itojun Exp $	*/
 /*	$NetBSD: fetch.c,v 1.14 1997/08/18 10:20:20 lukem Exp $	*/
 
 /*-
@@ -38,7 +38,7 @@
  */
 
 #ifndef lint
-static char rcsid[] = "$OpenBSD: fetch.c,v 1.39 2002/05/30 06:51:46 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: fetch.c,v 1.44 2003/03/10 06:20:10 itojun Exp $";
 #endif /* not lint */
 
 /*
@@ -66,14 +66,15 @@ static char rcsid[] = "$OpenBSD: fetch.c,v 1.39 2002/05/30 06:51:46 deraadt Exp 
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <util.h>
 
 #include "ftp_var.h"
 
 static int	url_get(const char *, const char *, const char *);
 void		aborthttp(int);
 void		abortfile(int);
-char    	hextochar(const char *);
-char   		*urldecode(const char *);
+char		hextochar(const char *);
+char		*urldecode(const char *);
 
 #define	FTP_URL		"ftp://"	/* ftp URL prefix */
 #define	HTTP_URL	"http://"	/* http URL prefix */
@@ -102,23 +103,29 @@ url_get(origline, proxyenv, outfile)
 {
 	struct addrinfo hints, *res0, *res;
 	int error;
-	int i, isftpurl, isfileurl;
+	int i, isftpurl, isfileurl, isredirect;
 	volatile int s, out;
 	size_t len;
-	char c, *cp, *ep, *portnum, *path, buf[4096];
-	char pbuf[NI_MAXSERV];
+	char *cp, *ep, *portnum, *path;
+	char pbuf[NI_MAXSERV], hbuf[NI_MAXHOST];
 	const char * volatile savefile;
-	char *line, *host, *port;
+	char *line, *host, *port, *buf;
 	char * volatile proxy;
 	char *hosttail;
 	volatile sig_t oldintr;
 	off_t hashbytes;
 	char *cause = "unknown";
+	FILE *fin;
+	int rval;
 
 	s = -1;
 	proxy = NULL;
+	fin = NULL;
+	buf = NULL;
 	isftpurl = 0;
 	isfileurl = 0;
+	isredirect = 0;
+	rval = -1;
 
 	line = strdup(origline);
 	if (line == NULL)
@@ -183,7 +190,7 @@ url_get(origline, proxyenv, outfile)
 		}
 		*--path = '/';			/* add / back to real path */
 		path = strchr(host, '/');	/* remove trailing / on host */
-		if (! EMPTYSTRING(path))
+		if (!EMPTYSTRING(path))
 			*path++ = '\0';
 		path = line;
 	}
@@ -220,14 +227,17 @@ url_get(origline, proxyenv, outfile)
 			goto cleanup_url_get;
 		}
 		oldintr = signal(SIGINT, abortfile);
-	
+
 		bytes = 0;
 		hashbytes = mark;
 		progressmeter(-1);
-	
+
+		if ((buf = malloc(4096)) == NULL)
+			errx(1, "Can't allocate memory for transfer buffer\n");
+
 		/* Finally, suck down the file. */
 		i = 0;
-		while ((len = read(s, buf, sizeof(buf))) > 0) {
+		while ((len = read(s, buf, 4096)) > 0) {
 			bytes += len;
 			for (cp = buf; len > 0; len -= i, cp += i) {
 				if ((i = write(out, cp, len)) == -1) {
@@ -259,14 +269,9 @@ url_get(origline, proxyenv, outfile)
 		if (verbose)
 			fputs("Successfully retrieved file.\n", ttyout);
 		(void)signal(SIGINT, oldintr);
-	
-		close(s);
-		if (out != fileno(stdout))
-			close(out);
-		if (proxy)
-			free(proxy);
-		free(line);
-		return (0);
+
+		rval = 0;
+		goto cleanup_url_get;
 	}
 
 	if (*host == '[' && (hosttail = strrchr(host, ']')) != NULL &&
@@ -294,8 +299,6 @@ url_get(origline, proxyenv, outfile)
 		 * If the services file is corrupt/missing, fall back
 		 * on our hard-coded defines.
 		 */
-		char pbuf[NI_MAXSERV];
-
 		snprintf(pbuf, sizeof(pbuf), "%d", HTTP_PORT);
 		error = getaddrinfo(host, pbuf, &hints, &res0);
 	}
@@ -306,9 +309,11 @@ url_get(origline, proxyenv, outfile)
 
 	s = -1;
 	for (res = res0; res; res = res->ai_next) {
-		getnameinfo(res->ai_addr, res->ai_addrlen, buf, sizeof(buf),
-			NULL, 0, NI_NUMERICHOST);
-		fprintf(ttyout, "Trying %s...\n", buf);
+		if (getnameinfo(res->ai_addr, res->ai_addrlen, hbuf,
+		    sizeof(hbuf), NULL, 0, NI_NUMERICHOST) != 0)
+			strlcpy(hbuf, "(unknown)", sizeof(hbuf));
+		if (verbose)
+			fprintf(ttyout, "Trying %s...\n", hbuf);
 
 		s = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
 		if (s == -1) {
@@ -341,9 +346,10 @@ again:
 		goto cleanup_url_get;
 	}
 
+	fin = fdopen(s, "r+");
+
 	/*
-	 * Construct and send the request.  We're expecting a return
-	 * status of "200". Proxy requests don't want leading /.
+	 * Construct and send the request. Proxy requests don't want leading /.
 	 */
 	if (proxy) {
 		/*
@@ -353,7 +359,7 @@ again:
 		if (verbose)
 			fprintf(ttyout, "Requesting %s (via %s)\n",
 			    origline, proxyenv);
-		snprintf(buf, sizeof(buf), "GET %s HTTP/1.0\r\n%s\r\n\r\n", path, HTTP_USER_AGENT);
+		fprintf(fin, "GET %s HTTP/1.0\r\n%s\r\n\r\n", path, HTTP_USER_AGENT);
 	} else {
 		if (verbose)
 			fprintf(ttyout, "Requesting %s\n", origline);
@@ -372,49 +378,48 @@ again:
 			 * send them the port number.
 			 */
 			if (port && strcmp(port, "80") != 0)
-				snprintf(buf, sizeof(buf),
-				    "GET /%s HTTP/1.0\r\nHost: [%s]:%s\r\n%s\r\n\r\n", 
+				fprintf(fin,
+				    "GET /%s HTTP/1.0\r\nHost: [%s]:%s\r\n%s\r\n\r\n",
 				    path, h, port, HTTP_USER_AGENT);
 			else
-				snprintf(buf, sizeof(buf),
-				    "GET /%s HTTP/1.0\r\nHost: [%s]\r\n%s\r\n\r\n", 
+				fprintf(fin,
+				    "GET /%s HTTP/1.0\r\nHost: [%s]\r\n%s\r\n\r\n",
 				    path, h, HTTP_USER_AGENT);
 			free(h);
 		} else {
 			if (port && strcmp(port, "80") != 0)
-				snprintf(buf, sizeof(buf),
-				    "GET /%s HTTP/1.0\r\nHost: %s:%s\r\n%s\r\n\r\n", 
+				fprintf(fin,
+				    "GET /%s HTTP/1.0\r\nHost: %s:%s\r\n%s\r\n\r\n",
 				    path, host, port, HTTP_USER_AGENT);
 			else
-				snprintf(buf, sizeof(buf),
-				    "GET /%s HTTP/1.0\r\nHost: %s\r\n%s\r\n\r\n", 
+				fprintf(fin,
+				    "GET /%s HTTP/1.0\r\nHost: %s\r\n%s\r\n\r\n",
 				    path, host, HTTP_USER_AGENT);
 		}
 	}
-	len = strlen(buf);
-	if (debug)
-		fprintf(ttyout, "Sending request:\n%s", buf);
-	if (write(s, buf, len) < len) {
+	if (fflush(fin) == EOF) {
 		warn("Writing HTTP request");
 		goto cleanup_url_get;
 	}
-	memset(buf, 0, sizeof(buf));
-	for (cp = buf; cp < buf + sizeof(buf); ) {
-		if (read(s, cp, 1) != 1)
-			goto improper;
-		if (*cp == '\r')
-			continue;
-		if (*cp == '\n')
-			break;
-		cp++;
+
+	if ((buf = fparseln(fin, &len, NULL, "\0\0\0", 0)) == NULL) {
+		warn("Receiving HTTP reply");
+		goto cleanup_url_get;
 	}
-	buf[sizeof(buf) - 1] = '\0';		/* sanity */
+
+	while (len > 0 && (buf[len-1] == '\r' || buf[len-1] == '\n'))
+		buf[--len] = '\0';
+	if (debug)
+		fprintf(ttyout, "received '%s'\n", buf);
+
 	cp = strchr(buf, ' ');
 	if (cp == NULL)
 		goto improper;
 	else
 		cp++;
-	if (strncmp(cp, "200", 3)) {
+	if (strncmp(cp, "301", 3) == 0 || strncmp(cp, "302", 3) == 0) {
+		isredirect++;
+	} else if (strncmp(cp, "200", 3)) {
 		warnx("Error retrieving file: %s", cp);
 		goto cleanup_url_get;
 	}
@@ -422,39 +427,48 @@ again:
 	/*
 	 * Read the rest of the header.
 	 */
-	memset(buf, 0, sizeof(buf));
-	c = '\0';
-	for (cp = buf; cp < buf + sizeof(buf); ) {
-		if (read(s, cp, 1) != 1)
-			goto improper;
-		if (*cp == '\r')
-			continue;
-		if (*cp == '\n' && c == '\n')
-			break;
-		c = *cp;
-		cp++;
-	}
-	buf[sizeof(buf) - 1] = '\0';		/* sanity */
+	free(buf);
+	filesize = -1;
 
-	/* Look for the "Content-length: " header.  */
-#define CONTENTLEN "Content-Length: "
-	for (cp = buf; *cp != '\0'; cp++) {
-		if (tolower(*cp) == 'c' &&
-		    strncasecmp(cp, CONTENTLEN, sizeof(CONTENTLEN) - 1) == 0)
+	while (1) {
+		if ((buf = fparseln(fin, &len, NULL, "\0\0\0", 0)) == NULL) {
+			warn("Receiving HTTP reply");
+			goto cleanup_url_get;
+		}
+		while (len > 0 && (buf[len-1] == '\r' || buf[len-1] == '\n'))
+			buf[--len] = '\0';
+		if (len == 0)
 			break;
+		if (debug)
+			fprintf(ttyout, "received '%s'\n", buf);
+
+		/* Look for some headers */
+		cp = buf;
+#define CONTENTLEN "Content-Length: "
+		if (strncasecmp(cp, CONTENTLEN, sizeof(CONTENTLEN) - 1) == 0) {
+			cp += sizeof(CONTENTLEN) - 1;
+			filesize = strtol(cp, &ep, 10);
+			if (filesize < 1 || *ep != '\0')
+				goto improper;
+#define LOCATION "Location: "
+		} else if (isredirect &&
+		    strncasecmp(cp, LOCATION, sizeof(LOCATION) - 1) == 0) {
+			cp += sizeof(LOCATION) - 1;
+			if (verbose)
+				fprintf(ttyout, "Redirected to %s\n", cp);
+			if (fin != NULL)
+				fclose(fin);
+			else if (s != -1)
+				close(s);
+			if (proxy)
+				free(proxy);
+			free(line);
+			rval = url_get(cp, proxyenv, outfile);
+			if (buf)
+				free(buf);
+			return (rval);
+		}
 	}
-	if (*cp != '\0') {
-		cp += sizeof(CONTENTLEN) - 1;
-		ep = strchr(cp, '\n');
-		if (ep == NULL)
-			goto improper;
-		else
-			*ep = '\0';
-		filesize = strtol(cp, &ep, 10);
-		if (filesize < 1 || *ep != '\0')
-			goto improper;
-	} else
-		filesize = -1;
 
 	/* Open the output file.  */
 	if (strcmp(savefile, "-") != 0) {
@@ -479,9 +493,13 @@ again:
 	hashbytes = mark;
 	progressmeter(-1);
 
+	free(buf);
+
 	/* Finally, suck down the file. */
+	if ((buf = malloc(4096)) == NULL)
+		errx(1, "Can't allocate memory for transfer buffer\n");
 	i = 0;
-	while ((len = read(s, buf, sizeof(buf))) > 0) {
+	while ((len = fread(buf, sizeof(char), 4096, fin)) > 0) {
 		bytes += len;
 		for (cp = buf; len > 0; len -= i, cp += i) {
 			if ((i = write(out, cp, len)) == -1) {
@@ -520,13 +538,8 @@ again:
 		fputs("Successfully retrieved file.\n", ttyout);
 	(void)signal(SIGINT, oldintr);
 
-	close(s);
-	if (out != fileno(stdout))
-		close(out);
-	if (proxy)
-		free(proxy);
-	free(line);
-	return (0);
+	rval = 0;
+	goto cleanup_url_get;
 
 noftpautologin:
 	warnx(
@@ -537,12 +550,16 @@ improper:
 	warnx("Improper response from %s", host);
 
 cleanup_url_get:
-	if (s != -1)
+	if (fin != NULL)
+		fclose(fin);
+	else if (s != -1)
 		close(s);
+	if (buf)
+		free(buf);
 	if (proxy)
 		free(proxy);
 	free(line);
-	return (-1);
+	return (rval);
 }
 
 /*
@@ -670,11 +687,11 @@ auto_fetch(argc, argv, outfile)
 				host = passend + 1;
 				*userend = *passend = '\0';
 				passagain = strchr(host, '@');
-				if (strchr(pass, '@') != NULL || 
+				if (strchr(pass, '@') != NULL ||
 				    (passagain != NULL && passagain < dir)) {
 					warnx(at_encoding_warning);
 					goto bad_ftp_url;
-				}	
+				}
 
 				if (EMPTYSTRING(user) || EMPTYSTRING(pass)) {
 bad_ftp_url:
@@ -743,7 +760,7 @@ bad_ftp_url:
 		/*
 		 * Extract the file and (if present) directory name.
 		 */
-		if (! EMPTYSTRING(dir)) {
+		if (!EMPTYSTRING(dir)) {
 			cp = strrchr(dir, '/');
 			if (cp != NULL) {
 				*cp++ = '\0';
@@ -754,7 +771,8 @@ bad_ftp_url:
 			}
 		}
 		if (debug)
-			fprintf(ttyout, "user %s:%s host %s port %s dir %s file %s\n",
+			fprintf(ttyout,
+			    "user %s:%s host %s port %s dir %s file %s\n",
 			    user, pass, host, portnum, dir, file);
 
 		/*
@@ -770,7 +788,7 @@ bad_ftp_url:
 			xargv[1] = host;
 			xargv[2] = NULL;
 			xargc = 2;
-			if (! EMPTYSTRING(portnum)) {
+			if (!EMPTYSTRING(portnum)) {
 				xargv[2] = portnum;
 				xargv[3] = NULL;
 				xargc = 3;
@@ -781,7 +799,7 @@ bad_ftp_url:
 			setpeer(xargc, xargv);
 			autologin = oautologin;
 			if ((connected == 0) ||
-			    ((connected == 1) && !login(host, user, pass))) {
+			    ((connected == 1) && !ftp_login(host, user, pass))) {
 				warnx("Can't connect or login to host `%s'",
 				    host);
 				rval = argpos + 1;
@@ -796,28 +814,28 @@ bad_ftp_url:
 		xargv[1] = "/";
 		xargv[2] = NULL;
 		cd(2, xargv);
-		if (! dirchange) {
+		if (!dirchange) {
 			rval = argpos + 1;
 			continue;
 		}
 
 		dirhasglob = filehasglob = 0;
 		if (doglob) {
-			if (! EMPTYSTRING(dir) &&
+			if (!EMPTYSTRING(dir) &&
 			    strpbrk(dir, "*?[]{}") != NULL)
 				dirhasglob = 1;
-			if (! EMPTYSTRING(file) &&
+			if (!EMPTYSTRING(file) &&
 			    strpbrk(file, "*?[]{}") != NULL)
 				filehasglob = 1;
 		}
 
 		/* Change directories, if necessary. */
-		if (! EMPTYSTRING(dir) && !dirhasglob) {
+		if (!EMPTYSTRING(dir) && !dirhasglob) {
 			xargv[0] = "cd";
 			xargv[1] = dir;
 			xargv[2] = NULL;
 			cd(2, xargv);
-			if (! dirchange) {
+			if (!dirchange) {
 				rval = argpos + 1;
 				continue;
 			}
@@ -867,14 +885,14 @@ bad_ftp_url:
 }
 
 char *
-urldecode(str) 
+urldecode(str)
         const char *str;
 {
         char *ret;
         char c;
         int i, reallen;
 
-        if (str == NULL) 
+        if (str == NULL)
                 return NULL;
         if ((ret = malloc(strlen(str)+1)) == NULL)
                 err(1, "Can't allocate memory for URL decoding");

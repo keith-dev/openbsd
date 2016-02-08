@@ -1,4 +1,4 @@
-.\" $OpenBSD: login_radius.8,v 1.4 2002/03/13 22:37:08 marc Exp $
+.\" $OpenBSD: login_radius.8,v 1.7 2003/03/11 08:11:08 jmc Exp $
 .\"
 .\" Copyright (c) 1996 Berkeley Software Design, Inc. All rights reserved.
 .\"
@@ -48,7 +48,7 @@
 The
 .Nm
 utility contacts the
-.Xr radiusd 8
+.Xr radiusd
 daemon to authenticate a
 .Ar user .
 If no
@@ -59,7 +59,7 @@ When executed as the name
 .Pa login_ Ns Ar style ,
 .Nm
 will request
-.Xr radiusd 8
+.Xr radiusd
 use the authentication specified by
 .Ar style .
 .Pp
@@ -89,7 +89,7 @@ server shared_secret
 .Pp
 It is expected that rather than requesting the radius style directly
 (in which case the
-.Xr radiusd 8
+.Xr radiusd
 server uses a default style)
 that
 .Nm
@@ -105,7 +105,7 @@ to both of those names.
 Now when the user requests one of those authentication styles,
 .Nm
 will automatically forward the request to the remote
-.Xr radiusd 8
+.Xr radiusd
 and request it do the requested style of authentication.
 .Sh LOGIN.CONF VARIABLES
 The
@@ -150,3 +150,15 @@ list of radius servers and their associated shared secrets
 does not ship with a radius server in the default install, however
 several are available via
 .Xr packages 7 .
+.Pp
+For
+.Nm
+to function, the
+.Pa /etc/raddb
+directory must be owned by group
+.Dq _radius
+and have group-execute permissions.
+Likewise, the
+.Pa /etc/raddb/servers
+file must be readable by group
+.Dq _radius .

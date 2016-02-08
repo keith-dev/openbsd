@@ -1,3 +1,4 @@
+/*	$OpenBSD: http_protocol.c,v 1.21 2003/02/21 18:41:09 henning Exp $ */
 /* ====================================================================
  * The Apache Software License, Version 1.1
  *
@@ -76,6 +77,7 @@
 #include "util_date.h"          /* For parseHTTPdate and BAD_DATE */
 #include <stdarg.h>
 #include "http_conf_globals.h"
+#include "ap_sha1.h"
 
 #define SET_BYTES_SENT(r) \
   do { if (r->sent_bodyct) \
@@ -123,25 +125,33 @@ static const char *make_content_type(request_rec *r, const char *type) {
 	"text/html",
 	NULL };
     char **pcset;
-    core_dir_config *conf = (core_dir_config *)ap_get_module_config(
-	r->per_dir_config, &core_module);
-    if (!type) type = ap_default_type(r);
-    if (conf->add_default_charset != ADD_DEFAULT_CHARSET_ON) return type;
+    core_dir_config *conf;
+
+    conf = (core_dir_config *)ap_get_module_config(r->per_dir_config,
+                                                   &core_module);
+    if (!type) {
+        type = ap_default_type(r);
+    }
+    if (conf->add_default_charset != ADD_DEFAULT_CHARSET_ON) {
+        return type;
+    }
 
     if (ap_strcasestr(type, "charset=") != NULL) {
 	/* already has parameter, do nothing */
 	/* XXX we don't check the validity */
 	;
-    } else {
+    }
+    else {
     	/* see if it makes sense to add the charset. At present,
 	 * we only add it if the Content-type is one of needcset[]
 	 */
-	for (pcset = needcset; *pcset ; pcset++)
+	for (pcset = needcset; *pcset ; pcset++) {
 	    if (ap_strcasestr(type, *pcset) != NULL) {
 		type = ap_pstrcat(r->pool, type, "; charset=", 
-		    conf->add_default_charset_name, NULL);
+                                  conf->add_default_charset_name, NULL);
 		break;
 	    }
+        }
     }
     return type;
 }
@@ -276,7 +286,10 @@ static int byterange_boundary(request_rec *r, long start, long end, int output)
 API_EXPORT(int) ap_set_byterange(request_rec *r)
 {
     const char *range, *if_range, *match;
+    char *bbuf, *b;
+    u_int32_t rbuf[12]; /* 48 bytes yields 64 base64 chars */
     long length, start, end, one_start = 0, one_end = 0;
+    size_t u;
     int ranges, empty;
     
     if (!r->clength || r->assbackwards)
@@ -322,8 +335,20 @@ API_EXPORT(int) ap_set_byterange(request_rec *r)
      * caller will perform if we return 1.
      */
     r->range = range;
-    r->boundary = ap_psprintf(r->pool, "%lx%lx",
-			      r->request_time, (long) getpid());
+    for (u = 0; u < sizeof(rbuf)/sizeof(rbuf[0]); u++)
+        rbuf[u] = htonl(arc4random());
+
+    bbuf = ap_palloc(r->pool, ap_base64encode_len(sizeof(rbuf)));
+    ap_base64encode(bbuf, (const unsigned char *)rbuf, sizeof(rbuf));
+    for (b = bbuf; *b != '\0'; b++) {
+        if (((b - bbuf) + 1) % 7 == 0)
+            *b = '-';
+        else if (!isalnum(*b))
+            *b = 'a';
+    }
+
+    r->boundary = bbuf;
+
     length = 0;
     ranges = 0;
     empty = 1;
@@ -646,7 +671,7 @@ API_EXPORT(int) ap_meets_conditions(request_rec *r)
  * could be modified again in as short an interval.  We rationalize the
  * modification time we're given to keep it from being in the future.
  */
-API_EXPORT(char *) ap_make_etag(request_rec *r, int force_weak)
+API_EXPORT(char *) ap_make_etag_orig(request_rec *r, int force_weak)
 {
     char *etag;
     char *weak;
@@ -729,6 +754,11 @@ API_EXPORT(void) ap_set_etag(request_rec *r)
 
     if (!r->vlist_validator) {
         etag = ap_make_etag(r, 0);
+
+        /* If we get a blank etag back, don't set the header. */
+        if (!etag[0]) {
+            return;
+        }
     }
     else {
         /* If we have a variant list validator (vlv) due to the
@@ -752,8 +782,12 @@ API_EXPORT(void) ap_set_etag(request_rec *r)
                
         variant_etag = ap_make_etag(r, vlv_weak);
 
-        /* merge variant_etag and vlv into a structured etag */
+        /* If we get a blank etag back, don't append vlv and stop now. */
+        if (!variant_etag[0]) {
+            return;
+        }
 
+        /* merge variant_etag and vlv into a structured etag */
         variant_etag[strlen(variant_etag) - 1] = '\0';
         if (vlv_weak)
             vlv += 3;
@@ -983,7 +1017,8 @@ static int read_request_line(request_rec *r)
     const char *uri;
     conn_rec *conn = r->connection;
     unsigned int major = 1, minor = 0;   /* Assume HTTP/1.0 if non-"HTTP" protocol */
-    int len, n;
+    int len = 0;
+    int valid_protocol = 1;
 
     /* Read past empty lines until we get a real request line,
      * a read error, the connection closes (EOF), or we timeout.
@@ -1045,26 +1080,44 @@ static int read_request_line(request_rec *r)
     r->assbackwards = (ll[0] == '\0');
     r->protocol = ap_pstrdup(r->pool, ll[0] ? ll : "HTTP/0.9");
 
-    if (2 == sscanf(r->protocol, "HTTP/%u.%u%n", &major, &minor, &n)
-      && minor < HTTP_VERSION(1,0))	/* don't allow HTTP/0.1000 */
-	r->proto_num = HTTP_VERSION(major, minor);
+    /* Avoid sscanf in the common case */
+    if (strlen(r->protocol) == 8
+        && r->protocol[0] == 'H' && r->protocol[1] == 'T'
+	&& r->protocol[2] == 'T' && r->protocol[3] == 'P'
+        && r->protocol[4] == '/' && ap_isdigit(r->protocol[5])
+	&& r->protocol[6] == '.' && ap_isdigit(r->protocol[7])) {
+        r->proto_num = HTTP_VERSION(r->protocol[5] - '0', r->protocol[7] - '0');
+    }
     else {
-	r->proto_num = HTTP_VERSION(1,0);
-	n = 0;
+        char *lint;
+        char http[5];
+	lint = ap_palloc(r->pool, strlen(r->protocol)+1);
+	if (3 == sscanf(r->protocol, "%4s/%u.%u%s", http, &major, &minor, lint)
+            && (strcasecmp("http", http) == 0)
+	    && (minor < HTTP_VERSION(1,0)) ) /* don't allow HTTP/0.1000 */
+	    r->proto_num = HTTP_VERSION(major, minor);
+	else {
+	    r->proto_num = HTTP_VERSION(1,0);
+	    valid_protocol = 0;
+	}
     }
 
     /* Check for a valid protocol, and disallow everything but whitespace
-     * after the protocol string */
-    while (ap_isspace(r->protocol[n]))
-        ++n;
-    if (r->protocol[n] != '\0') {
-        r->status    = HTTP_BAD_REQUEST;
-        r->proto_num = HTTP_VERSION(1,0);
-        r->protocol  = ap_pstrdup(r->pool, "HTTP/1.0");
-        ap_table_setn(r->notes, "error-notes",
-                      "The request line contained invalid characters "
-                      "following the protocol string.<P>\n");
-        return 0;
+     * after the protocol string. A protocol string of nothing but
+     * whitespace is considered valid */
+    if (ap_protocol_req_check && !valid_protocol) {
+        int n = 0;
+	while (ap_isspace(r->protocol[n]))
+	    ++n;
+	if (r->protocol[n] != '\0') {
+	    r->status    = HTTP_BAD_REQUEST;
+	    r->proto_num = HTTP_VERSION(1,0);
+	    r->protocol  = ap_pstrdup(r->pool, "HTTP/1.0");
+	    ap_table_setn(r->notes, "error-notes",
+                     "The request line contained invalid characters "
+                     "following the protocol string.<P>\n");
+	    return 0;
+	}
     }
 
     return 1;
@@ -1995,19 +2048,25 @@ API_EXPORT(int) ap_setup_client_block(request_rec *r, int read_policy)
         const char *pos = lenp;
         int conversion_error = 0;
 
-        while (ap_isdigit(*pos) || ap_isspace(*pos))
+        while (ap_isspace(*pos))
             ++pos;
 
         if (*pos == '\0') {
+            /* special case test - a C-L field NULL or all blanks is
+             * assumed OK and defaults to 0. Otherwise, we do a
+             * strict check of the field */
+            r->remaining = 0;
+        }
+        else {
             char *endstr;
             errno = 0;
             r->remaining = ap_strtol(lenp, &endstr, 10);
-            if (errno || (endstr && *endstr)) {
+            if (errno || (endstr && *endstr) || (r->remaining < 0)) {
                 conversion_error = 1;
             }
         }
 
-        if (*pos != '\0' || conversion_error) {
+        if (conversion_error) {
             ap_log_rerror(APLOG_MARK, APLOG_NOERRNO|APLOG_ERR, r,
                         "Invalid Content-Length");
             return HTTP_BAD_REQUEST;
@@ -2060,6 +2119,15 @@ API_EXPORT(int) ap_should_client_block(request_rec *r)
     return 1;
 }
 
+/**
+ * Parse a chunk extension, detect overflow.
+ * There are two error cases:
+ *  1) If the conversion would require too many bits, a -1 is returned.
+ *  2) If the conversion used the correct number of bits, but an overflow
+ *     caused only the sign bit to flip, then that negative number is
+ *     returned.
+ * In general, any negative number can be considered an overflow error.
+ */
 API_EXPORT(long) ap_get_chunk_size(char *b)
 {
     long chunksize = 0;
@@ -2803,7 +2871,13 @@ API_EXPORT(void) ap_send_error_response(request_rec *r, int recursive_error)
         r->content_languages = NULL;
         r->content_encoding = NULL;
         r->clength = 0;
-        r->content_type = "text/html; charset=iso-8859-1";
+        if (ap_table_get(r->subprocess_env,
+                         "suppress-error-charset") != NULL) {
+            r->content_type = "text/html";
+        }
+        else {
+            r->content_type = "text/html; charset=iso-8859-1";
+        }
 
         if ((status == METHOD_NOT_ALLOWED) || (status == NOT_IMPLEMENTED))
             ap_table_setn(r->headers_out, "Allow", make_allow(r));
@@ -3106,4 +3180,164 @@ API_EXPORT(void) ap_send_error_response(request_rec *r, int recursive_error)
     ap_kill_timeout(r);
     ap_finalize_request_protocol(r);
     ap_rflush(r);
+}
+
+/*
+ * The shared hash context, copies of which are used by all children for
+ * etag generation.  ap_init_etag() must be called once before all the
+ * children are created.  We use a secret hash initialization value
+ * so that people can't brute-force inode numbers.
+ */
+static AP_SHA1_CTX baseCtx;
+
+int ap_create_etag_state(pool *pconf)
+{
+    u_int32_t rnd;
+    unsigned int u;
+    int fd;
+    const char* filename;
+
+    filename = ap_server_root_relative(pconf, "logs/etag-state");
+    ap_server_strip_chroot(filename, 0);
+
+    if ((fd = open(filename, O_CREAT|O_WRONLY|O_TRUNC|O_NOFOLLOW, 0640)) ==
+      -1) {
+        ap_log_error(APLOG_MARK, APLOG_CRIT, NULL,
+          "could not create %s", filename);
+        exit(-1);
+    }
+
+    if (fchown(fd, -1, ap_group_id) == -1) {
+        ap_log_error(APLOG_MARK, APLOG_CRIT, NULL,
+          "could not chown %s", filename);
+        exit(-1);
+    }
+
+    /* generate random bytes and write them */
+    for (u = 0; u < 4; u++) {
+        rnd = arc4random();
+        if (write(fd, &rnd, sizeof(rnd)) == -1) {
+            ap_log_error(APLOG_MARK, APLOG_CRIT, NULL,
+              "could not write to %s", filename);
+            exit(-1);
+        }
+    }
+
+    close (fd);
+}
+
+API_EXPORT(void) ap_init_etag(pool *pconf)
+{
+    if (ap_read_etag_state(pconf) == -1) {
+        ap_create_etag_state(pconf);
+        if (ap_read_etag_state(pconf) == -1) {
+            ap_log_error(APLOG_MARK, APLOG_CRIT, NULL,
+              "could not initialize etag state");
+            exit(-1);
+        }
+    }			
+}
+
+int ap_read_etag_state(pool *pconf)
+{
+    struct stat st;
+    u_int32_t rnd;
+    unsigned int u;
+    int fd;
+    const char* filename;
+
+    ap_SHA1Init(&baseCtx);
+
+    filename = ap_server_root_relative(pconf, "logs/etag-state");
+    ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_NOTICE, NULL,
+      "Initializing etag from %s", filename);
+
+    ap_server_strip_chroot(filename, 0);
+
+    if ((fd = open(filename, O_RDONLY|O_NOFOLLOW, 0640)) == -1)
+	return (-1);
+
+    fchmod(fd, S_IRUSR|S_IWUSR|S_IRGRP);
+    fchown(fd, -1, ap_group_id);
+
+    if (fstat(fd, &st) == -1) {
+        ap_log_error(APLOG_MARK, APLOG_CRIT, NULL,
+          "could not fstat %s", filename);
+        exit(-1);
+    }
+
+    if (st.st_size != sizeof(rnd)*4) {
+	return (-1);
+    }
+
+    /* read 4 random 32-bit uints from file and update the hash context */
+    for (u = 0; u < 4; u++) {
+        if (read(fd, &rnd, sizeof(rnd)) < sizeof(rnd))
+            return (-1);
+
+        ap_SHA1Update_binary(&baseCtx, (const unsigned char *)&rnd,
+          sizeof(rnd));
+    }
+
+    if (close(fd) == -1) {
+        ap_log_error(APLOG_MARK, APLOG_CRIT, NULL,
+          "could not properly close %s", filename);
+        exit(-1);
+    }
+}
+
+API_EXPORT(char *) ap_make_etag(request_rec *r, int force_weak)
+{
+    AP_SHA1_CTX hashCtx;
+    core_dir_config *cfg;
+    etag_components_t etag_bits;
+    int weak;
+    unsigned char md[SHA_DIGESTSIZE];
+    unsigned int i;
+    
+    memcpy(&hashCtx, &baseCtx, sizeof(hashCtx));
+    
+    cfg = (core_dir_config *)ap_get_module_config(r->per_dir_config,
+      &core_module);
+    etag_bits = (cfg->etag_bits & (~ cfg->etag_remove)) | cfg->etag_add;
+    if (etag_bits == ETAG_UNSET)
+        etag_bits = ETAG_BACKWARD;
+    
+    weak = ((r->request_time - r->mtime <= 1) || force_weak);
+    
+    if (r->finfo.st_mode != 0) {
+        if (etag_bits & ETAG_NONE) {
+            ap_table_setn(r->notes, "no-etag", "omit");
+            return "";
+        }
+        if (etag_bits & ETAG_INODE) {
+            ap_SHA1Update_binary(&hashCtx,
+              (const unsigned char *)&r->finfo.st_dev,
+              sizeof(r->finfo.st_dev));
+            ap_SHA1Update_binary(&hashCtx,
+              (const unsigned char *)&r->finfo.st_ino,
+              sizeof(r->finfo.st_ino));
+        }
+        if (etag_bits & ETAG_SIZE)
+            ap_SHA1Update_binary(&hashCtx,
+              (const unsigned char *)&r->finfo.st_size,
+              sizeof(r->finfo.st_size));
+        if (etag_bits & ETAG_MTIME)
+            ap_SHA1Update_binary(&hashCtx,
+              (const unsigned char *)&r->mtime,
+              sizeof(r->mtime));
+    }
+    else {
+        weak = 1;
+        ap_SHA1Update_binary(&hashCtx, (const unsigned char *)&r->mtime,
+          sizeof(r->mtime));
+    }
+    ap_SHA1Final(md, &hashCtx);
+    return ap_psprintf(r->pool, "%s\""
+      "%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x"
+        "%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x"
+        "\"", weak ? "W/" : "",
+      md[0], md[1], md[2], md[3], md[4], md[5], md[6], md[7],
+      md[8], md[9], md[10], md[11], md[12], md[13], md[14], md[15],
+      md[16], md[17], md[18], md[19]);
 }

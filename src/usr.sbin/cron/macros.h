@@ -1,4 +1,4 @@
-/*	$OpenBSD: macros.h,v 1.3 2002/07/15 19:13:29 millert Exp $	*/
+/*	$OpenBSD: macros.h,v 1.5 2003/02/28 16:32:09 mpech Exp $	*/
 
 /*
  * Copyright (c) 1997,2000 by Internet Software Consortium, Inc.
@@ -80,7 +80,7 @@
 
 #if DEBUGGING
 # define Debug(mask, message) \
-			if ( (DebugFlags & (mask) ) == (mask) ) \
+			if (DebugFlags & (mask)) \
 				printf message;
 #else /* !DEBUGGING */
 # define Debug(mask, message) \
@@ -94,14 +94,14 @@
 			}
 
 /* Data values used on cron socket */
-#define RELOAD_CRON	0x2
-#define RELOAD_AT	0x4
+#define	RELOAD_CRON	0x2
+#define	RELOAD_AT	0x4
 
 #ifdef HAVE_TM_GMTOFF
-#define get_gmtoff(c, t)        (t->tm_gmtoff)
+#define	get_gmtoff(c, t)        ((t)->tm_gmtoff)
 #endif
 
-#define SECONDS_PER_MINUTE	60
+#define	SECONDS_PER_MINUTE	60
 
 #define	FIRST_MINUTE	0
 #define	LAST_MINUTE	59
@@ -123,9 +123,3 @@
 #define	FIRST_DOW	0
 #define	LAST_DOW	7
 #define	DOW_COUNT	(LAST_DOW - FIRST_DOW + 1)
-
-			/* each user's crontab will be held as a list of
-			 * the following structure.
-			 *
-			 * These are the cron commands.
-			 */

@@ -1,4 +1,4 @@
-/* $OpenBSD: ssl_engine_init.c,v 1.19 2002/07/19 21:31:16 henning Exp $ */
+/* $OpenBSD: ssl_engine_init.c,v 1.22 2003/03/19 15:13:26 henning Exp $ */
 
 /*                      _             _
 **  _ __ ___   ___   __| |    ___ ___| |  mod_ssl
@@ -239,11 +239,17 @@ void ssl_init_Module(server_rec *s, pool *p)
 #ifdef SHARED_MODULE
     ssl_log(s, SSL_LOG_INFO, "Init: %snitializing %s library",
             mc->nInitCount == 1 ? "I" : "Rei", SSL_LIBRARY_NAME);
+#ifdef SSL_EXPERIMENTAL_ENGINE
+    ssl_init_Engine(s, p);
+#endif
     ssl_init_SSLLibrary();
 #else
     if (mc->nInitCount <= 2) {
         ssl_log(s, SSL_LOG_INFO, "Init: %snitializing %s library",
                 mc->nInitCount == 1 ? "I" : "Rei", SSL_LIBRARY_NAME);
+#ifdef SSL_EXPERIMENTAL_ENGINE
+        ssl_init_Engine(s, p);
+#endif
         ssl_init_SSLLibrary();
     }
 #endif
@@ -472,6 +478,10 @@ void ssl_init_TmpKeysHandle(int action, server_rec *s, pool *p)
                 ssl_log(s, SSL_LOG_ERROR, "Init: Failed to load temporary 512 bit RSA private key");
                 ssl_die();
             }
+	    if (RSA_blinding_on ((RSA *)mc->pTmpKeys[SSL_TKPIDX_RSA512], NULL) != 1) {
+		ssl_log(s, SSL_LOG_ERROR, "Init: Failed to add blinding for temporary 512 bit RSA private key");
+                ssl_die();
+	    }
         }
 
         /* allocate 1024 bit RSA key */
@@ -486,6 +496,10 @@ void ssl_init_TmpKeysHandle(int action, server_rec *s, pool *p)
                 ssl_log(s, SSL_LOG_ERROR, "Init: Failed to load temporary 1024 bit RSA private key");
                 ssl_die();
             }
+	    if (RSA_blinding_on ((RSA *)mc->pTmpKeys[SSL_TKPIDX_RSA1024], NULL) != 1) {
+		ssl_log(s, SSL_LOG_ERROR, "Init: Failed to add blinding for temporary 1024 bit RSA private key");
+                ssl_die();
+	    }
         }
 
         ssl_log(s, SSL_LOG_INFO, "Init: Configuring temporary DH parameters (512/1024 bits)");
@@ -815,6 +829,12 @@ void ssl_init_ConfigureServer(server_rec *s, pool *p, SSLSrvConfigRec *sc)
              d2i_PrivateKey(EVP_PKEY_RSA, NULL, &ucp, asn1->nData)) == NULL) {
             ssl_log(s, SSL_LOG_ERROR|SSL_ADD_SSLERR,
                     "Init: (%s) Unable to import RSA server private key",
+                    cpVHostID);
+            ssl_die();
+        }
+        if (!RSA_blinding_on(sc->pPrivateKey[SSL_AIDX_RSA]->pkey.rsa, NULL)) {
+            ssl_log(s, SSL_LOG_ERROR|SSL_ADD_SSLERR,
+                    "Init: (%s) Unable to enable RSA blinding (probably PRNG failure)",
                     cpVHostID);
             ssl_die();
         }

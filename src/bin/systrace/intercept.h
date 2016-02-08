@@ -1,4 +1,4 @@
-/*	$OpenBSD: intercept.h,v 1.11 2002/08/04 04:15:50 provos Exp $	*/
+/*	$OpenBSD: intercept.h,v 1.16 2003/02/20 22:03:31 art Exp $	*/
 /*
  * Copyright 2002 Niels Provos <provos@citi.umich.edu>
  * All rights reserved.
@@ -31,10 +31,12 @@
 
 #ifndef _INTERCEPT_H_
 #define _INTERCEPT_H_
+#include <sys/param.h>
 #include <sys/queue.h>
 
 struct intercept_pid;
 struct intercept_replace;
+struct elevate;
 
 struct intercept_system {
 	char *name;
@@ -45,11 +47,12 @@ struct intercept_system {
 	int (*report)(int, pid_t);
 	int (*read)(int);
 	int (*getsyscallnumber)(const char *, const char *);
-	char *(*getcwd)(int, pid_t, char *, size_t);
+	int (*setcwd)(int, pid_t);
 	int (*restcwd)(int);
 	int (*io)(int, pid_t, int, void *, u_char *, size_t);
 	int (*getarg)(int, void *, int, void **);
-	int (*answer)(int, pid_t, u_int32_t, short, int, short);
+	int (*answer)(int, pid_t, u_int32_t, short, int, short,
+	    struct elevate *);
 	int (*newpolicy)(int);
 	int (*assignpolicy)(int, pid_t, int);
 	int (*policy)(int, int, int, short);
@@ -72,6 +75,15 @@ struct intercept_system {
 
 #define ICFLAGS_RESULT	1
 
+/* Privilege elevation */
+struct elevate {
+#define ELEVATE_UID	0x01
+#define ELEVATE_GID	0x02
+	int e_flags;
+	uid_t e_uid;
+	gid_t e_gid;
+};
+
 struct intercept_pid {
 	SPLAY_ENTRY(intercept_pid) next;
 	pid_t pid;
@@ -83,16 +95,17 @@ struct intercept_pid {
 	char *name;		/* name of current process image */
 	char *newname;		/* image name to be committed by execve */
 
-#define ICFLAGS_UIDKNOWN	0x01
-#define ICFLAGS_GIDKNOWN	0x02
-	int flags;
-
 	uid_t uid;		/* current uid */
 	gid_t gid;		/* current gid */
+
+	char username[MAXLOGNAME];
+	char home[MAXPATHLEN];	/* current home dir for uid */
+	char cwd[MAXPATHLEN];	/* current working directory */
 
 	void *data;
 
 	int uflags;	/* Flags that can be used by external application */
+	struct elevate *elevate;	/* privilege elevation request */
 };
 
 #define INTERCEPT_MAXSYSCALLARGS	10
@@ -122,7 +135,7 @@ struct intercept_replace {
 TAILQ_HEAD(intercept_tlq, intercept_translate);
 
 int intercept_init(void);
-pid_t intercept_run(int, int, char *, char * const *);
+pid_t intercept_run(int, int, uid_t, gid_t, char *, char * const *);
 int intercept_open(void);
 int intercept_attach(int, pid_t);
 int intercept_attachpid(int, pid_t, char *);
@@ -165,6 +178,7 @@ extern struct intercept_translate ic_translate_unlinkname;
 extern struct intercept_translate ic_translate_connect;
 
 void intercept_freepid(pid_t);
+struct intercept_pid *intercept_findpid(pid_t);
 struct intercept_pid *intercept_getpid(pid_t);
 int intercept_existpids(void);
 
@@ -174,5 +188,9 @@ void intercept_syscall(int, pid_t, u_int16_t, int, const char *, int,
     const char *, void *, int);
 void intercept_syscall_result(int, pid_t, u_int16_t, int, const char *, int,
     const char *, void *, int, int, void *);
+void intercept_ugid(struct intercept_pid *, uid_t, gid_t);
+void intercept_setpid(struct intercept_pid *, uid_t, gid_t);
+
+int intercept_isvalidsystemcall(char *, char *);
 
 #endif /* _INTERCEPT_H_ */

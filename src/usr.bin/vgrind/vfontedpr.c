@@ -1,5 +1,5 @@
-/*	$OpenBSD: vfontedpr.c,v 1.6 2002/02/16 21:27:56 millert Exp $	*/
-/*	$NetBSD: vfontedpr.c,v 1.4 1996/03/21 18:08:30 jtc Exp $	*/
+/*	$OpenBSD: vfontedpr.c,v 1.8 2003/02/19 07:38:49 deraadt Exp $	*/
+/*	$NetBSD: vfontedpr.c,v 1.7 1998/12/19 23:41:53 christos Exp $	*/
 
 /*
  * Copyright (c) 1980, 1993
@@ -44,7 +44,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)vfontedpr.c	8.1 (Berkeley) 6/6/93";
 #endif
-static char rcsid[] = "$OpenBSD: vfontedpr.c,v 1.6 2002/02/16 21:27:56 millert Exp $";
+static char rcsid[] = "$OpenBSD: vfontedpr.c,v 1.8 2003/02/19 07:38:49 deraadt Exp $";
 #endif /* not lint */
 
 #include <sys/types.h>
@@ -132,9 +132,7 @@ char	*language = "c";	/* the language indicator */
 #define	ps(x)	printf("%s", x)
 
 int
-main(argc, argv)
-    int argc;
-    char *argv[];
+main(int argc, char *argv[])
 {
     char *fname = "";
     struct stat stbuf;
@@ -289,7 +287,7 @@ main(argc, argv)
 	incomm = FALSE;
 	instr = FALSE;
 	inchr = FALSE;
-	_escaped = FALSE;
+	x_escaped = FALSE;
 	blklevel = 0;
 	for (psptr=0; psptr<PSMAX; psptr++) {
 	    pstack[psptr][0] = NULL;
@@ -353,8 +351,7 @@ main(argc, argv)
 #define isidchr(c) (isalnum(c) || (c) == '_')
 
 static void
-putScp(os)
-    char *os;
+putScp(char *os)
 {
     char *s = os;			/* pointer to unmatched string */
     char dummy[BUFSIZ];			/* dummy to be used by expmatch */
@@ -365,8 +362,8 @@ putScp(os)
     char *blksptr;			/* end of a lexical block start */
     char *blkeptr;			/* end of a lexical block end */
 
-    _start = os;			/* remember the start for expmatch */
-    _escaped = FALSE;
+    x_start = os;			/* remember the start for expmatch */
+    x_escaped = FALSE;
     if (nokeyw || incomm || instr)
 	goto skip;
     if (isproc(s)) {
@@ -534,10 +531,7 @@ skip:
 }
 
 static void
-putKcp (start, end, force)
-    char	*start;		/* start of string to write */
-    char	*end;		/* end of string to write */
-    boolean	force;		/* true if we should force nokeyw */
+putKcp(char *start, char *end, boolean force)
 {
     int i;
     int xfld = 0;
@@ -559,14 +553,14 @@ putKcp (start, end, force)
 	if (*start == '\t') {
 	    while (*start == '\t')
 		start++;
-	    i = tabs(_start, start) - margin / 8;
+	    i = tabs(x_start, start) - margin / 8;
 	    printf("\\h'|%dn'", i * 10 + 1 - margin % 8);
 	    continue;
 	}
 
 	if (!nokeyw && !force)
 	    if ((*start == '#' || isidchr(*start)) 
-	    && (start == _start || !isidchr(start[-1]))) {
+	    && (start == x_start || !isidchr(start[-1]))) {
 		i = iskw(start);
 		if (i > 0) {
 		    ps("\\*(+K");
@@ -584,16 +578,14 @@ putKcp (start, end, force)
 
 
 static int
-tabs(s, os)
-    char *s, *os;
+tabs(char *s, char *os)
 {
 
     return (width(s, os) / 8);
 }
 
 static int
-width(s, os)
-	char *s, *os;
+width(char *s, char *os)
 {
 	int i = 0;
 
@@ -613,8 +605,7 @@ width(s, os)
 }
 
 static void
-putcp(c)
-	int c;
+putcp(int c)
 {
 
 	switch(c) {
@@ -678,8 +669,7 @@ putcp(c)
  *	look for a process beginning on this line
  */
 static boolean
-isproc(s)
-    char *s;
+isproc(char *s)
 {
     pname[0] = NULL;
     if (!l_toplex || blklevel == 0)
@@ -694,8 +684,7 @@ isproc(s)
  */
 
 static int
-iskw(s)
-	char *s;
+iskw(char *s)
 {
 	char **ss = l_keywds;
 	int i = 1;

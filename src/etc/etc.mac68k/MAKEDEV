@@ -3,8 +3,8 @@
 # THIS FILE AUTOMATICALLY GENERATED.  DO NOT EDIT.
 # generated from:
 #
-#	OpenBSD: etc.mac68k/MAKEDEV.md,v 1.8 2002/05/16 21:11:20 miod Exp 
-#	OpenBSD: MAKEDEV.mi,v 1.49 2002/06/18 00:53:45 fgsch Exp 
+#	OpenBSD: etc.mac68k/MAKEDEV.md,v 1.10 2002/12/05 04:30:21 kjc Exp 
+#	OpenBSD: MAKEDEV.mi,v 1.56 2003/01/06 17:19:16 todd Exp 
 #	OpenBSD: MAKEDEV.sub,v 1.7 2002/02/16 01:19:52 deraadt Exp 
 #
 #
@@ -58,7 +58,6 @@
 #	bpf*	Berkeley Packet Filter
 #	tun*	network tunnel driver
 #	pf*	Packet Filter
-#	altq/	ALTQ control interface
 #	lkm	loadable kernel modules interface
 #	*random	inkernel random data source
 #	uk*	SCSI Unknown device
@@ -161,7 +160,7 @@ M() {
 		MKlist="$MKlist;chown $7.$G $1"
 	} || {
 		case $G in
-		wheel)g=0;;kmem)g=2;;operator)g=5;;tty)g=4;;dialer)g=117;;
+		wheel)g=0;;kmem)g=2;;operator)g=5;;tty)g=4;;dialer)g=117;;_lkm)g=61;;
 		esac
 		[ "${grplist[$g]}" ] && {
 			grplist[$g]="${grplist[$g]} $1"
@@ -275,15 +274,7 @@ uk*)
 	;;
 
 lkm)
-	M lkm c 25 0 640 kmem
-	;;
-
-altq)
-	RMlist="mkdir -p altq;$RMlist"
-	for d in altq cbq wfq afm fifoq red rio localq hfsc cdnr blue priq; do
-		M altq/$d c 52 $U 644
-		U=$(($U+1))
-	done
+	M lkm c 25 0 640 _lkm
 	;;
 
 pf*)
@@ -344,8 +335,8 @@ st*)
 	;;
 
 ramdisk)
-	R bpf0 std pty0 tty00 tty01 asc0 adb rd0 rd1 st0 st1 sd0 sd1
-	R sd2 sd3
+	R pty0 tty00 tty01 asc0 adb rd0 rd1 st0 st1 sd0 sd1 sd2 sd3
+	R bpf0 std
 	;;
 
 local)
@@ -363,7 +354,7 @@ all)
 	R bpf1 bpf2 bpf3 bpf4 bpf5 bpf6 bpf7 bpf8 bpf9 pty0 pty1 pty2
 	R xfs0 ss0 ss1 ch0 vnd0 vnd1 vnd2 vnd3 sd0 sd1 sd2 sd3 sd4
 	R local grf0 grf1 grf2 grf3 adb asc0 uk0 random lkm ttye0
-	R tty00 tty01 pf altq systrace std st0 st1 fd
+	R tty00 tty01 pf systrace std st0 st1 fd
 	;;
 
 sd*|ccd*)

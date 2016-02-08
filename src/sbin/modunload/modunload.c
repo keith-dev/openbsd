@@ -1,4 +1,4 @@
-/*	$OpenBSD: modunload.c,v 1.10 2002/01/09 22:22:56 ericj Exp $	*/
+/*	$OpenBSD: modunload.c,v 1.12 2003/01/18 23:30:20 deraadt Exp $	*/
 /*	$NetBSD: modunload.c,v 1.9 1995/05/28 05:23:05 jtc Exp $	*/
 
 /*
@@ -38,6 +38,7 @@
 #include <sys/conf.h>
 #include <sys/mount.h>
 #include <sys/lkm.h>
+
 #include <a.out.h>
 #include <err.h>
 #include <errno.h>
@@ -46,12 +47,13 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+
 #include "pathnames.h"
 
 static int devfd;
 
 static void
-usage()
+usage(void)
 {
 	extern char *__progname;
 
@@ -61,15 +63,13 @@ usage()
 }
 
 void
-cleanup()
+cleanup(void)
 {
 	(void)close(devfd);
 }
 
 int
-main(argc, argv)
-	int argc;
-	char *argv[];
+main(int argc, char *argv[])
 {
 	int c;
 	long modnum = -1;
@@ -107,7 +107,7 @@ main(argc, argv)
 	 * to ioctl() to retrive the loaded module(s) status).
 	 */
 	if ((devfd = open(_PATH_LKM, O_RDWR, 0)) == -1)
-		err(2, _PATH_LKM);
+		err(2, "%s", _PATH_LKM);
 
 	atexit(cleanup);
 

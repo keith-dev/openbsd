@@ -1,4 +1,4 @@
-/*	$OpenBSD: regexp.c,v 1.4 2002/02/16 21:27:56 millert Exp $	*/
+/*	$OpenBSD: regexp.c,v 1.6 2003/02/19 07:38:49 deraadt Exp $	*/
 /*	$NetBSD: regexp.c,v 1.3 1994/11/17 08:28:02 jtc Exp $	*/
 
 /*
@@ -45,7 +45,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)regexp.c	8.1 (Berkeley) 6/6/93";
 #endif
-static char rcsid[] = "$OpenBSD: regexp.c,v 1.4 2002/02/16 21:27:56 millert Exp $";
+static char rcsid[] = "$OpenBSD: regexp.c,v 1.6 2003/02/19 07:38:49 deraadt Exp $";
 #endif /* not lint */
 
 #include <ctype.h>
@@ -59,8 +59,8 @@ static char rcsid[] = "$OpenBSD: regexp.c,v 1.4 2002/02/16 21:27:56 millert Exp 
 
 static void	expconv(void);
 
-boolean	 _escaped;	/* true if we are currently _escaped */
-char	*_start;	/* start of string */
+boolean	 x_escaped;	/* true if we are currently x_escaped */
+char	*x_start;	/* start of string */
 boolean	 l_onecase;	/* true if upper and lower equivalent */
 
 #define makelower(c) (isupper((c)) ? tolower((c)) : (c))
@@ -71,9 +71,7 @@ boolean	 l_onecase;	/* true if upper and lower equivalent */
  */
 
 int
-STRNCMP(s1, s2, len)
-	char *s1,*s2;
-	int len;
+STRNCMP(char *s1, char *s2, int len)
 {
 	if (l_onecase) {
 	    do
@@ -101,14 +99,14 @@ STRNCMP(s1, s2, len)
  *	internal format.
  *
  *	Either meta symbols (\a \d or \p) or character strings or
- *	operations ( alternation or perenthesizing ) can be
+ *	operations ( alternation or parenthesizing ) can be
  *	specified.  Each starts with a descriptor byte.  The descriptor
  *	byte has STR set for strings, META set for meta symbols
  *	and OPER set for operations.
  *	The descriptor byte can also have the OPT bit set if the object
  *	defined is optional.  Also ALT can be set to indicate an alternation.
  *
- *	For metasymbols the byte following the descriptor byte identities
+ *	For metasymbols the byte following the descriptor byte identifies
  *	the meta symbol (containing an ascii 'a', 'd', 'p', '|', or '(').  For
  *	strings the byte after the descriptor is a character count for
  *	the string:
@@ -153,8 +151,7 @@ static char *ccre;	/* pointer to current position in converted exp*/
 static char *ure;	/* pointer current position in unconverted exp */
 
 char *
-convexp(re)
-    char *re;		/* unconverted irregular expression */
+convexp(char *re)
 {
     char *cre;		/* pointer to converted regular expression */
 
@@ -179,11 +176,11 @@ convexp(re)
 }
 
 static void
-expconv()
+expconv(void)
 {
     char *cs;		/* pointer to current symbol in converted exp */
     char c;		/* character being processed */
-    char *acs;		/* pinter to last alternate */
+    char *acs;		/* pointer to last alternate */
     int temp;
 
     /* let the conversion begin */
@@ -269,7 +266,7 @@ expconv()
 	    OCNT(cs) = ccre - cs;		/* offset to next symbol */
 	    break;
 
-	/* reurn from a recursion */
+	/* return from a recursion */
 	case ')':
 	    if (acs != NIL) {
 		do {
@@ -301,7 +298,7 @@ expconv()
 	    acs = cs;	/* remember that the pointer is to be filles */
 	    break;
 
-	/* if its not a metasymbol just build a scharacter string */
+	/* if its not a metasymbol just build a character string */
 	default:
 	    if (cs == NIL || (*cs & STR) == 0) {
 		cs = ccre;
@@ -324,11 +321,11 @@ expconv()
     }
     return;
 }
-/* end of convertre */
+/* end of converter */
 
 
 /*
- *	The following routine recognises an irregular expresion
+ *	The following routine recognises an irregular expression
  *	with the following special characters:
  *
  *		\?	-	means last match was optional
@@ -350,10 +347,7 @@ expconv()
  */
 
 char *
-expmatch (s, re, mstring)
-    char *s;			/* string to check for a match in */
-    char *re;			/* a converted irregular expression */
-    char *mstring;		/* where to put whatever matches a \p */
+expmatch(char *s, char *re, char *mstring)
 {
     char *cs;			/* the current symbol */
     char *ptr,*s1;		/* temporary pointer */
@@ -457,7 +451,7 @@ expmatch (s, re, mstring)
 			return (ptr);
 		    } else if (ptr != NIL && (*cs & OPT)) {
 
-			/* it was aoptional so no match is ok */
+			/* it was optional so no match is ok */
 			return (ptr);
 		    } else if (ptr != NIL) {
 
@@ -467,9 +461,9 @@ expmatch (s, re, mstring)
 		    if (!isalnum(*s1) && *s1 != '_')
 			return (NIL);
 		    if (*s1 == '\\')
-			_escaped = _escaped ? FALSE : TRUE;
+			x_escaped = x_escaped ? FALSE : TRUE;
 		    else
-			_escaped = FALSE;
+			x_escaped = FALSE;
 		} while (*s1++);
 		return (NIL);
 
@@ -489,7 +483,7 @@ expmatch (s, re, mstring)
 			return (ptr);
 		    } else if (ptr != NIL && (*cs & OPT)) {
 
-			/* it was aoptional so no match is ok */
+			/* it was optional so no match is ok */
 			return (ptr);
 		    } else if (ptr != NIL) {
 
@@ -497,15 +491,15 @@ expmatch (s, re, mstring)
 			return (NIL);
 		    }
 		    if (*s1 == '\\')
-			_escaped = _escaped ? FALSE : TRUE;
+			x_escaped = x_escaped ? FALSE : TRUE;
 		    else
-			_escaped = FALSE;
+			x_escaped = FALSE;
 		} while (*s1++);
 		return (NIL);
 
-	    /* fail if we are currently _escaped */
+	    /* fail if we are currently x_escaped */
 	    case 'e':
-		if (_escaped)
+		if (x_escaped)
 		    return(NIL);
 		cs = MNEXT(cs); 
 		break;
@@ -515,7 +509,7 @@ expmatch (s, re, mstring)
 		ptr = s;
 		while (*s == ' ' || *s == '\t')
 		    s++;
-		if (s != ptr || s == _start) {
+		if (s != ptr || s == x_start) {
 
 		    /* match, be happy */
 		    matched = 1;
@@ -567,7 +561,7 @@ expmatch (s, re, mstring)
 
 	    /* check for start of line */
 	    case '^':
-		if (s == _start) {
+		if (s == x_start) {
 
 		    /* match, be happy */
 		    matched = 1;

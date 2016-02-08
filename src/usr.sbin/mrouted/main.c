@@ -30,7 +30,7 @@
 
 #ifndef lint
 static char rcsid[] =
-	"@(#) $Id: main.c,v 1.10 2002/08/09 02:27:16 itojun Exp $";
+	"@(#) $Id: main.c,v 1.13 2003/03/12 22:55:01 deraadt Exp $";
 #endif
 
 extern char *configfilename;
@@ -40,8 +40,8 @@ static char dumpfilename[] = _PATH_MROUTED_DUMP;
 static char cachefilename[] = _PATH_MROUTED_CACHE;
 static char genidfilename[] = _PATH_MROUTED_GENID;
 
-int cache_lifetime 	= DEFAULT_CACHE_LIFETIME;
-int max_prune_lifetime 	= DEFAULT_CACHE_LIFETIME * 2;
+int cache_lifetime	= DEFAULT_CACHE_LIFETIME;
+int max_prune_lifetime	= DEFAULT_CACHE_LIFETIME * 2;
 
 int debug = 0;
 u_char pruning = 1;	/* Enable pruning by default */
@@ -71,13 +71,8 @@ static void timer(void);
 static void cleanup(void);
 static void resetlogging(void *);
 
-/* To shut up gcc -Wstrict-prototypes */
-int main(int argc, char **argv);
-
 int
-register_input_handler(fd, func)
-    int fd;
-    ihfunc_t func;
+register_input_handler(int fd, ihfunc_t func)
 {
     if (nhandlers >= NHANDLERS)
 	return -1;
@@ -89,9 +84,7 @@ register_input_handler(fd, func)
 }
 
 int
-main(argc, argv)
-    int argc;
-    char *argv[];
+main(int argc, char *argv[])
 {
     register int recvlen;
     int dummy;
@@ -144,7 +137,7 @@ main(argc, argv)
     }
 
     if (argc > 0) {
-usage:	fprintf(stderr, 
+usage:	fprintf(stderr,
 		"usage: mrouted [-p] [-c configfile] [-d [debug_level]]\n");
 	exit(1);
     }
@@ -186,7 +179,7 @@ usage:	fprintf(stderr,
 #else
     (void)openlog("mrouted", LOG_PID);
 #endif
-    sprintf(versionstring, "mrouted version %d.%d",
+    snprintf(versionstring, sizeof versionstring, "mrouted version %d.%d",
 			PROTOCOL_VERSION, MROUTED_VERSION);
 
     log(LOG_NOTICE, 0, "%s", versionstring);
@@ -198,7 +191,7 @@ usage:	fprintf(stderr,
 #endif
 
     /*
-     * Get generation id 
+     * Get generation id
      */
     gettimeofday(&tv, 0);
     dvmrp_genid = tv.tv_sec;
@@ -332,9 +325,9 @@ usage:	fprintf(stderr,
 	snmp_select_info(&nfds, &rfds, tvp, &block);
 	if (block == 1)
 		tvp = NULL; /* block without timeout */
-	if ((n = select(nfds, &rfds, NULL, NULL, tvp)) < 0) 
+	if ((n = select(nfds, &rfds, NULL, NULL, tvp)) < 0)
 #else
-	if ((n = select(nfds, &rfds, NULL, NULL, NULL)) < 0) 
+	if ((n = select(nfds, &rfds, NULL, NULL, NULL)) < 0)
 #endif
    {
             if (errno != EINTR) /* SIGALRM is expected */
@@ -364,7 +357,7 @@ usage:	fprintf(stderr,
 	}
 
 #ifdef SNMP
-	snmp_read(&rfds); 
+	snmp_read(&rfds);
 	snmp_timeout(); /* poll */
 #endif
     }
@@ -379,8 +372,7 @@ usage:	fprintf(stderr,
  * do all the other time-based processing.
  */
 static void
-fasttimer(i)
-    int i;
+fasttimer(int i)
 {
     static unsigned int tlast;
     static unsigned int nsent;
@@ -413,7 +405,7 @@ fasttimer(i)
 	timer();
 
     age_callout_queue();/* Advance the timer for the callout queue
-				for groups */	
+				for groups */
     alarm(1);
 }
 
@@ -443,7 +435,7 @@ static u_long virtual_time = 0;
  * virtual interface data structures.
  */
 static void
-timer()
+timer(void)
 {
     age_routes();	/* Advance the timers in the route entries     */
     age_vifs();		/* Advance the timers for neighbors */
@@ -495,8 +487,7 @@ timer()
  * On termination, let everyone know we're going away.
  */
 static void
-done(i)
-    int i;
+done(int i)
 {
     log(LOG_NOTICE, 0, "%s exiting", versionstring);
     cleanup();
@@ -504,7 +495,7 @@ done(i)
 }
 
 static void
-cleanup()
+cleanup(void)
 {
     static in_cleanup = 0;
 
@@ -524,8 +515,7 @@ cleanup()
  * Dump internal data structures to stderr.
  */
 static void
-dump(i)
-    int i;
+dump(int i)
 {
     dump_vifs(stderr);
     dump_routes(stderr);
@@ -536,8 +526,7 @@ dump(i)
  * Dump internal data structures to a file.
  */
 static void
-fdump(i)
-    int i;
+fdump(int i)
 {
     FILE *fp;
 
@@ -554,14 +543,13 @@ fdump(i)
  * Dump local cache contents to a file.
  */
 static void
-cdump(i)
-    int i;
+cdump(int i)
 {
     FILE *fp;
 
     fp = fopen(cachefilename, "w");
     if (fp != NULL) {
-	dump_cache(fp); 
+	dump_cache(fp);
 	(void) fclose(fp);
     }
 }
@@ -571,8 +559,7 @@ cdump(i)
  * Restart mrouted
  */
 static void
-restart(i)
-    int i;
+restart(int i)
 {
     sigset_t mask, omask;
 
@@ -613,8 +600,7 @@ restart(i)
 static int log_nmsgs = 0;
 
 static void
-resetlogging(arg)
-    void *arg;
+resetlogging(void *arg)
 {
     int nxttime = 60;
     void *narg = NULL;
@@ -648,7 +634,7 @@ log(int severity, int syserr, char *format, ...)
     time_t t;
 
     va_start(ap, format);
-    vsprintf(&fmt[10], format, ap);
+    vsnprintf(&fmt[10], sizeof fmt - 10, format, ap);
     va_end(ap);
     msg = (severity == LOG_WARNING) ? fmt : &fmt[10];
 
@@ -686,9 +672,7 @@ log(int severity, int syserr, char *format, ...)
 
 #ifdef DEBUG_MFC
 void
-md_log(what, origin, mcastgrp)
-    int what;
-    u_int32_t origin, mcastgrp;
+md_log(int what, u_int32_t origin, u_int32_t mcastgrp)
 {
     static FILE *f = NULL;
     struct timeval tv;

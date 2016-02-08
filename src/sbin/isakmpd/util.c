@@ -1,4 +1,4 @@
-/*	$OpenBSD: util.c,v 1.28 2002/06/09 08:13:07 todd Exp $	*/
+/*	$OpenBSD: util.c,v 1.32 2003/03/13 10:31:44 ho Exp $	*/
 /*	$EOM: util.c,v 1.23 2000/11/23 12:22:08 niklas Exp $	*/
 
 /*
@@ -291,6 +291,8 @@ text2sockaddr (char *address, char *port, struct sockaddr **sa)
       free (*sa);
       return -1;
     }
+  if (!port)
+    return 0;
   sp = getservbyname (port, "udp");
   if (!sp)
     {
@@ -398,10 +400,14 @@ sockaddr2text (struct sockaddr *sa, char **address, int zflag)
 	  return -1;
 
 	for (i = 0, j = 0; i < 8; i++)
-	  j += snprintf ((*address) + j, addrlen - j, "%02x%02x:",
-			 ((struct sockaddr_in6 *)sa)->sin6_addr.s6_addr[2 * i],
-			 ((struct sockaddr_in6 *)sa)->sin6_addr.s6_addr[2 * i + 1]);
-	(*address)[j - 1] = '\0';
+	  {
+	    snprintf ((*address) + j, addrlen - j, "%02x%02x",
+		      ((struct sockaddr_in6 *)sa)->sin6_addr.s6_addr[2 * i],
+		      ((struct sockaddr_in6 *)sa)->sin6_addr.s6_addr[2 * i + 1]);
+	    j += 4;
+	    (*address)[j] = (j < (addrlen - 1)) ? ':' : '\0';
+	    j++;
+	  }
 	break;
 
       default:

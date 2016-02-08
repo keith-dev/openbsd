@@ -308,7 +308,7 @@ static char *ssl_var_lookup_ssl(pool *p, conn_rec *c, char *var)
     }
     else if (ssl != NULL && strlen(var) > 18 && strcEQn(var, "CLIENT_CERT_CHAIN_", 18)) {
         sk = SSL_get_peer_cert_chain(ssl);
-        result = ssl_var_lookup_ssl_cert_chain(p, sk, var+17);
+        result = ssl_var_lookup_ssl_cert_chain(p, sk, var+18);
     }
     else if (ssl != NULL && strcEQ(var, "CLIENT_VERIFY")) {
         result = ssl_var_lookup_ssl_cert_verify(p, c);
@@ -390,10 +390,6 @@ static char *ssl_var_lookup_ssl_cert(pool *p, X509 *xs, char *var)
         result = ap_pstrdup(p, result);
     return result;
 }
-
-#ifndef NID_uniqueIdentifier
-#define NID_uniqueIdentifier             102
-#endif
 
 static const struct {
     char *name;

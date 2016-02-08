@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1994-1996,1998-2001 Todd C. Miller <Todd.Miller@courtesan.com>
+ * Copyright (c) 1994-1996,1998-2003 Todd C. Miller <Todd.Miller@courtesan.com>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -65,7 +65,7 @@
 #include "sudo.h"
 
 #ifndef lint
-static const char rcsid[] = "$Sudo: logging.c,v 1.153 2002/01/16 21:28:25 millert Exp $";
+static const char rcsid[] = "$Sudo: logging.c,v 1.158 2003/03/20 02:04:32 millert Exp $";
 #endif /* lint */
 
 static void do_syslog		__P((int, char *));
@@ -137,7 +137,7 @@ do_syslog(pri, msg)
     int pri;
     char *msg;
 {
-    int count;
+    size_t count;
     char *p;
     char *tmp;
     char save;
@@ -188,9 +188,10 @@ do_logfile(msg)
     char *beg, *oldend, *end;
     FILE *fp;
     mode_t oldmask;
-    int maxlen = def_ival(I_LOGLINELEN);
+    size_t maxlen;
 
     oldmask = umask(077);
+    maxlen = def_ival(I_LOGLINELEN) > 0 ? def_ival(I_LOGLINELEN) : 0;
     fp = fopen(def_str(I_LOGFILE), "a");
     (void) umask(oldmask);
     if (fp == NULL) {
@@ -365,7 +366,7 @@ log_error(va_alist)
 
     /* Become root if we are not already to avoid user control */
     if (geteuid() != 0)
-	set_perms(PERM_ROOT, 0);
+	set_perms(PERM_ROOT);
 
     /* Expand printf-style format + args. */
     evasprintf(&message, fmt, ap);
@@ -508,10 +509,10 @@ send_mail(line)
 		 * (so user cannot kill it) or as the user (for the paranoid).
 		 */
 #ifndef NO_ROOT_MAILER
-		set_perms(PERM_FULL_ROOT, 0);
+		set_perms(PERM_FULL_ROOT);
 		execve(mpath, argv, root_envp);
 #else
-		set_perms(PERM_FULL_USER, 0);
+		set_perms(PERM_FULL_USER);
 		execv(mpath, argv);
 #endif /* NO_ROOT_MAILER */
 		_exit(127);
@@ -546,10 +547,8 @@ send_mail(line)
 	get_timestr(), user_name, line);
     fclose(mail);
 
-    /* If mailer is done, wait for it now.  If not reapchild will get it.  */
-#ifdef sudo_waitpid
-    (void) sudo_waitpid(pid, &status, WNOHANG);
-#endif
+    /* If mailer is done, wait for it now.  If not, we'll get it later.  */
+    reapchild(SIGCHLD);
     (void) sigprocmask(SIG_SETMASK, &oset, NULL);
 }
 
@@ -591,7 +590,7 @@ reapchild(sig)
     int status, serrno = errno;
 
 #ifdef sudo_waitpid
-    while (sudo_waitpid(-1, &status, WNOHANG) != -1 && errno == EINTR)
+    while (sudo_waitpid(-1, &status, WNOHANG) != -1 || errno == EINTR)
 	;
 #else
     (void) wait(&status);

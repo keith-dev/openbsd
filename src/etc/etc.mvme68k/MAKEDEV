@@ -3,8 +3,8 @@
 # THIS FILE AUTOMATICALLY GENERATED.  DO NOT EDIT.
 # generated from:
 #
-#	OpenBSD: etc.mvme68k/MAKEDEV.md,v 1.6 2002/08/21 22:07:43 miod Exp 
-#	OpenBSD: MAKEDEV.mi,v 1.50 2002/08/12 10:45:04 miod Exp 
+#	OpenBSD: etc.mvme68k/MAKEDEV.md,v 1.7 2002/12/05 04:30:21 kjc Exp 
+#	OpenBSD: MAKEDEV.mi,v 1.56 2003/01/06 17:19:16 todd Exp 
 #	OpenBSD: MAKEDEV.sub,v 1.7 2002/02/16 01:19:52 deraadt Exp 
 #
 #
@@ -63,7 +63,6 @@
 #	pf*	Packet Filter
 #	lkm	loadable kernel modules interface
 #	*random	inkernel random data source
-#	altq/	ALTQ control interface
 #	xfs*	XFS filesystem devices
 #	sram0	static memory access
 #	nvram0	non-volatile memory access
@@ -165,7 +164,7 @@ M() {
 		MKlist="$MKlist;chown $7.$G $1"
 	} || {
 		case $G in
-		wheel)g=0;;kmem)g=2;;operator)g=5;;tty)g=4;;dialer)g=117;;
+		wheel)g=0;;kmem)g=2;;operator)g=5;;tty)g=4;;dialer)g=117;;_lkm)g=61;;
 		esac
 		[ "${grplist[$g]}" ] && {
 			grplist[$g]="${grplist[$g]} $1"
@@ -229,14 +228,6 @@ xfs*)
 	M xfs$U c 51 $U 600
 	;;
 
-altq)
-	RMlist="mkdir -p altq;$RMlist"
-	for d in altq cbq wfq afm fifoq red rio localq hfsc cdnr blue priq; do
-		M altq/$d c 52 $U 644
-		U=$(($U+1))
-	done
-	;;
-
 *random)
 	n=0
 	for pre in " " s u p a
@@ -247,7 +238,7 @@ altq)
 	;;
 
 lkm)
-	M lkm c 24 0 640 kmem
+	M lkm c 24 0 640 _lkm
 	;;
 
 pf*)
@@ -397,7 +388,7 @@ all)
 	R vnd2 vnd3 sd0 sd1 sd2 sd3 sd4 cd0 cd1 rd0 tun0 tun1 tun2
 	R tun3 bpf0 bpf1 bpf2 bpf3 bpf4 bpf5 bpf6 bpf7 bpf8 bpf9 pty0
 	R pty1 pty2 xfs0 ss0 ss1 vmel0 vmes0 flash0 nvram0 sram0 uk0
-	R random lkm pf altq systrace std st0 st1 fd
+	R random lkm pf systrace std st0 st1 fd
 	;;
 
 sd*|ccd*)

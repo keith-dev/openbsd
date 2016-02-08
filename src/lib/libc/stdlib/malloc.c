@@ -8,7 +8,7 @@
  */
 
 #if defined(LIBC_SCCS) && !defined(lint)
-static char rcsid[] = "$OpenBSD: malloc.c,v 1.48 2002/05/27 03:13:23 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: malloc.c,v 1.54 2003/01/14 02:27:16 millert Exp $";
 #endif /* LIBC_SCCS and not lint */
 
 /*
@@ -46,7 +46,10 @@ static char rcsid[] = "$OpenBSD: malloc.c,v 1.48 2002/05/27 03:13:23 deraadt Exp
 #include <string.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <errno.h>
+
+#include "thread_private.h"
 
 /*
  * The basic parameters you can tweak.
@@ -66,39 +69,6 @@ static char rcsid[] = "$OpenBSD: malloc.c,v 1.48 2002/05/27 03:13:23 deraadt Exp
 #if defined(__OpenBSD__) && defined(__sparc__)
 #   define    malloc_pageshift	13U
 #endif /* __OpenBSD__ */
-
-#ifdef _THREAD_SAFE
-# include "thread_private.h"
-# if 0
-   /* kernel threads */
-#  include <pthread.h>
-   static pthread_mutex_t malloc_lock;
-#  define THREAD_LOCK()		pthread_mutex_lock(&malloc_lock)
-#  define THREAD_UNLOCK()	pthread_mutex_unlock(&malloc_lock)
-#  define THREAD_LOCK_INIT()	pthread_mutex_init(&malloc_lock, 0);
-# else
-   /* user threads */
-#  include "spinlock.h"
-   static spinlock_t malloc_lock = _SPINLOCK_INITIALIZER;
-#  define THREAD_LOCK()		if (__isthreaded) _SPINLOCK(&malloc_lock)
-#  define THREAD_UNLOCK()	if (__isthreaded) _SPINUNLOCK(&malloc_lock)
-#  define THREAD_LOCK_INIT()
-   /*
-    * Malloc can't use the wrapped write() if it fails very early, so
-    * we use the unwrapped syscall _thread_sys_write()
-    */
-#  define write _thread_sys_write
-   ssize_t write(int, const void *, size_t);
-#   undef malloc
-#   undef realloc
-#   undef free
-# endif
-#else
-  /* no threads */
-# define THREAD_LOCK()
-# define THREAD_UNLOCK()
-# define THREAD_LOCK_INIT()
-#endif
 
 /*
  * No user serviceable parts behind this point.
@@ -395,9 +365,9 @@ malloc_exit()
     char *q = "malloc() warning: Couldn't dump stats.\n";
     if (fd) {
         malloc_dump(fd);
-	fclose(fd);
+        fclose(fd);
     } else
-	write(2, q, strlen(q));
+        write(STDERR_FILENO, q, strlen(q));
 }
 #endif /* MALLOC_STATS */
 
@@ -407,12 +377,19 @@ malloc_exit()
  */
 static void *
 map_pages(pages)
-    int pages;
+    size_t pages;
 {
     caddr_t result, tail;
 
     result = (caddr_t)pageround((u_long)sbrk(0));
-    tail = result + (pages << malloc_pageshift);
+    pages <<= malloc_pageshift;
+    if (pages > SIZE_T_MAX - (size_t)result) {
+#ifdef MALLOC_EXTRA_SANITY
+	wrterror("(ES): overflow in map_pages fails\n");
+#endif /* MALLOC_EXTRA_SANITY */
+	return 0;
+    }
+    tail = result + pages;
 
     if (brk(tail)) {
 #ifdef MALLOC_EXTRA_SANITY
@@ -494,7 +471,7 @@ malloc_init ()
     int i, j;
     int save_errno = errno;
 
-    THREAD_LOCK_INIT();
+    _MALLOC_LOCK_INIT();
 
     INIT_MMAP();
 
@@ -565,8 +542,8 @@ malloc_init ()
 	malloc_junk=1;
 
 #ifdef MALLOC_STATS
-    if (malloc_stats)
-	atexit(malloc_exit);
+    if (malloc_stats && (atexit(malloc_exit) == -1))
+		wrtwarning("atexit(2) failed.  Will not be able to dump malloc stats on exit.\n");
 #endif /* MALLOC_STATS */
 
     /* Allocate one page for the page directory */
@@ -924,10 +901,12 @@ irealloc(ptr, size)
 	for (osize = malloc_pagesize; *++mp == MALLOC_FOLLOW;)
 	    osize += malloc_pagesize;
 
-        if (!malloc_realloc &&			/* unless we have to, */
+        if (!malloc_realloc &&			/* Unless we have to, */
 	  size <= osize &&			/* .. or are too small, */
 	  size > (osize - malloc_pagesize)) {	/* .. or can free a page, */
-	    return ptr;				/* don't do anything. */
+	    if (malloc_junk)
+		memset((char *)ptr + size, SOME_JUNK, osize-size);
+	    return ptr;				/* ..don't do anything else. */
 	}
 
     } else if (*mp >= MALLOC_MAGIC) {		/* Chunk allocation */
@@ -950,10 +929,12 @@ irealloc(ptr, size)
 	osize = (*mp)->size;
 
 	if (!malloc_realloc &&		/* Unless we have to, */
-	  size < osize &&		/* ..or are too small, */
+	  size <= osize &&		/* ..or are too small, */
 	  (size > osize/2 ||		/* ..or could use a smaller size, */
 	  osize == malloc_minsize)) {	/* ..(if there is one) */
-	    return ptr;			/* ..Don't do anything */
+	    if (malloc_junk)
+		memset((char *)ptr + size, SOME_JUNK, osize-size);
+	    return ptr;			/* ..don't do anything else. */
 	}
 
     } else {
@@ -1101,10 +1082,11 @@ free_pages(ptr, index, info)
 	malloc_brk = pf->end;
 
 	index = ptr2index(pf->end);
-	last_index = index - 1;
 
 	for(i=index;i <= last_index;)
 	    page_dir[i++] = MALLOC_NOT_MINE;
+
+	last_index = index - 1;
 
 	/* XXX: We could realloc/shrink the pagedir here I guess. */
     }
@@ -1244,17 +1226,17 @@ malloc(size_t size)
     register void *r;
 
     malloc_func = " in malloc():";
-    THREAD_LOCK();
+    _MALLOC_LOCK();
     if (malloc_active++) {
 	wrtwarning("recursive call.\n");
         malloc_active--;
-	THREAD_UNLOCK();
+	_MALLOC_UNLOCK();
 	return (0);
     }
     r = imalloc(size);
     UTRACE(0, size, r);
     malloc_active--;
-    THREAD_UNLOCK();
+    _MALLOC_UNLOCK();
     if (malloc_xmalloc && !r)
 	wrterror("out of memory.\n");
     return (r);
@@ -1264,17 +1246,17 @@ void
 free(void *ptr)
 {
     malloc_func = " in free():";
-    THREAD_LOCK();
+    _MALLOC_LOCK();
     if (malloc_active++) {
 	wrtwarning("recursive call.\n");
         malloc_active--;
-	THREAD_UNLOCK();
+	_MALLOC_UNLOCK();
 	return;
     }
     ifree(ptr);
     UTRACE(ptr, 0, 0);
     malloc_active--;
-    THREAD_UNLOCK();
+    _MALLOC_UNLOCK();
     return;
 }
 
@@ -1284,11 +1266,11 @@ realloc(void *ptr, size_t size)
     register void *r;
 
     malloc_func = " in realloc():";
-    THREAD_LOCK();
+    _MALLOC_LOCK();
     if (malloc_active++) {
 	wrtwarning("recursive call.\n");
         malloc_active--;
-	THREAD_UNLOCK();
+	_MALLOC_UNLOCK();
 	return (0);
     }
     if (!ptr) {
@@ -1298,7 +1280,7 @@ realloc(void *ptr, size_t size)
     }
     UTRACE(ptr, size, r);
     malloc_active--;
-    THREAD_UNLOCK();
+    _MALLOC_UNLOCK();
     if (malloc_xmalloc && !r)
 	wrterror("out of memory.\n");
     return (r);

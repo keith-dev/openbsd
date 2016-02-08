@@ -1,5 +1,5 @@
 /*
-** Copyright (c) 1999-2002 Sendmail, Inc. and its suppliers.
+** Copyright (c) 1999-2003 Sendmail, Inc. and its suppliers.
 **	All rights reserved.
 **
 ** By using this file, you agree to the terms and conditions set
@@ -8,7 +8,7 @@
 */
 
 #include <sm/gen.h>
-SM_RCSID("@(#)$Sendmail: smdb2.c,v 8.72 2002/05/24 23:09:11 gshapiro Exp $")
+SM_RCSID("@(#)$Sendmail: smdb2.c,v 8.72.2.6 2003/01/23 22:21:39 ca Exp $")
 
 #include <fcntl.h>
 #include <stdlib.h>
@@ -523,7 +523,9 @@ smdb_db_open_internal(db_name, db_type, db_flags, db_params, db)
 		}
 	}
 
-	result = (*db)->open(*db, db_name, NULL, db_type, db_flags, DBMMODE);
+	result = (*db)->open(*db,
+			     DBTXN	/* transaction for DB 4.1 */
+			     db_name, NULL, db_type, db_flags, DBMMODE);
 	if (result != 0)
 	{
 		(void) (*db)->close(*db, 0);
@@ -633,9 +635,7 @@ smdb_db_open(database, db_name, mode, mode_mask, sff, type, user_info, db_params
 		db_flags |= DB_TRUNCATE;
 	if (mode == O_RDONLY)
 		db_flags |= DB_RDONLY;
-# if !HASFLOCK && defined(DB_FCNTL_LOCKING)
-	db_flags |= DB_FCNTL_LOCKING;
-# endif /* !HASFLOCK && defined(DB_FCNTL_LOCKING) */
+	SM_DB_FLAG_ADD(db_flags);
 
 	result = smdb_db_open_internal(db_file_name, db_type,
 				       db_flags, db_params, &db);

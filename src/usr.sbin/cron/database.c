@@ -1,4 +1,5 @@
-/*	$OpenBSD: database.c,v 1.11 2002/08/10 20:28:51 millert Exp $	*/
+/*	$OpenBSD: database.c,v 1.13 2003/03/15 00:39:01 millert Exp $	*/
+
 /* Copyright 1988,1990,1993,1994 by Paul Vixie
  * All rights reserved
  */
@@ -21,7 +22,7 @@
  */
 
 #if !defined(lint) && !defined(LINT)
-static char const rcsid[] = "$OpenBSD: database.c,v 1.11 2002/08/10 20:28:51 millert Exp $";
+static char const rcsid[] = "$OpenBSD: database.c,v 1.13 2003/03/15 00:39:01 millert Exp $";
 #endif
 
 /* vix 26jan87 [RCS has the log]
@@ -105,9 +106,8 @@ load_database(cron_db *old_db) {
 		if (dp->d_name[0] == '.')
 			continue;
 
-		if (strlen(dp->d_name) >= sizeof fname)
+		if (strlcpy(fname, dp->d_name, sizeof fname) >= sizeof fname)
 			continue;	/* XXX log? */
-		(void) strcpy(fname, dp->d_name);
 		
 		if (!glue_strings(tabname, sizeof tabname, SPOOL_DIR,
 				  fname, '/'))
@@ -212,7 +212,7 @@ process_crontab(const char *uname, const char *fname, const char *tabname,
 		log_it(fname, getpid(), "BAD FILE MODE", tabname);
 		goto next_crontab;
 	}
-	if (statbuf->st_uid != 0 && (pw == NULL ||
+	if (statbuf->st_uid != ROOT_UID && (pw == NULL ||
 	    statbuf->st_uid != pw->pw_uid || strcmp(uname, pw->pw_name) != 0)) {
 		log_it(fname, getpid(), "WRONG FILE OWNER", tabname);
 		goto next_crontab;

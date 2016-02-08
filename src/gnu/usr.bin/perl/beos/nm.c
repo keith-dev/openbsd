@@ -3,7 +3,7 @@
  * This software is covered under perl's Artistic license.
  */
 
-/* $Id: nm.c,v 1.4 2001/05/24 18:35:02 millert Exp $ */
+/* $Id: nm.c,v 1.5 2002/10/27 22:25:20 millert Exp $ */
 
 #include <be/kernel/image.h>
 #include <malloc.h>

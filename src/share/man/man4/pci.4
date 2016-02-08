@@ -1,4 +1,4 @@
-.\"	$OpenBSD: pci.4,v 1.69 2002/09/26 07:55:40 miod Exp $
+.\"	$OpenBSD: pci.4,v 1.72 2003/03/18 13:01:36 david Exp $
 .\"	$NetBSD: pci.4,v 1.29 2000/04/01 00:32:23 tsarna Exp $
 .\"
 .\" Copyright (c) 2000 Theo de Raadt.  All rights reserved.
@@ -57,6 +57,7 @@
 .Cd "pci* at schizo?"
 .Pp
 .Cd "# all architectures"
+.Cd "ppb* at pci? dev ? function ?"
 .Cd "pci* at ppb? bus ?"
 .Sh DESCRIPTION
 The system includes a machine-independent
@@ -228,7 +229,7 @@ RealTek 8129/8139 Ethernet interfaces.
 Adaptec AIC-6915 "Starfire" Ethernet interfaces.
 .It Xr sis 4
 SiS 900, SiS 7016, and NS DP83815 Ethernet interfaces.
-.It Xr skc 4
+.It Xr sk 4
 SysKonnect SK-984x Gigabit Ethernet interfaces.
 .It Xr ste 4
 Sundance Technologies ST201 Ethernet interfaces.
@@ -398,8 +399,8 @@ The
 configuration register the user would like to access.
 .It pi_width
 The width, in bytes, of the data the user would like to read.
-This value may be either 1, 2, or 4.  3-byte reads and reads larger than
-4 bytes are not supported.
+This value may be either 1, 2, or 4.
+3-byte reads and reads larger than 4 bytes are not supported.
 .It pi_data
 The data returned by the kernel.
 .El
@@ -501,7 +502,7 @@ driver.
 .Xr sf 4 ,
 .Xr siop 4 ,
 .Xr sis 4 ,
-.Xr skc 4 ,
+.Xr sk 4 ,
 .Xr ste 4 ,
 .Xr stge 4 ,
 .Xr sv 4 ,

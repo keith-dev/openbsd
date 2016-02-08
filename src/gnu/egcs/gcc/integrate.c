@@ -2298,6 +2298,8 @@ integrate_decl_tree (let, level, map)
 	}
       /* These args would always appear unused, if not for this.  */
       TREE_USED (d) = 1;
+      if (flag_propolice_protection && TREE_CODE (d) == VAR_DECL)
+	DECL_INLINE (d) = 1;
 
       if (DECL_LANG_SPECIFIC (d))
 	copy_lang_decl (d);
@@ -2421,6 +2423,10 @@ copy_rtx_and_substitute (orig, map)
 
 	      seq = gen_sequence ();
 	      end_sequence ();
+#ifdef FRAME_GROWS_DOWNWARD
+	      if (flag_propolice_protection && GET_CODE (seq) == SET)
+		RTX_INTEGRATED_P (SET_SRC (seq)) = 1;
+#endif
 	      emit_insn_after (seq, map->insns_at_start);
 	      return temp;
 	    }

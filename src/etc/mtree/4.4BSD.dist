@@ -1,4 +1,4 @@
-#	$OpenBSD: 4.4BSD.dist,v 1.135 2002/09/06 21:30:22 deraadt Exp $
+#	$OpenBSD: 4.4BSD.dist,v 1.149 2003/03/17 07:38:13 deraadt Exp $
 
 /set type=dir uname=root gname=wheel mode=0755
 # .
@@ -128,11 +128,6 @@ lib
 # ./etc/systrace
 systrace
 # ./etc/systrace
-..
-
-# ./etc/tcfs
-tcfs
-# ./etc/tcfs
 ..
 
 # ./etc
@@ -489,11 +484,6 @@ sbin
 # ./usr/share
 share
 
-# ./usr/share/altq
-altq
-# ./usr/share/altq
-..
-
 # ./usr/share/calendar
 calendar
 # ./usr/share/calendar
@@ -530,6 +520,12 @@ keystrokes
 ..
 
 # ./usr/share/doc/html/lynx_help
+..
+
+# ./usr/share/doc/html/bind
+bind
+
+# ./usr/share/doc/html/bind
 ..
 
 # ./usr/share/doc/html/curses
@@ -698,11 +694,6 @@ smm
 # ./usr/share/doc/smm/09.sendmail
 09.sendmail
 # ./usr/share/doc/smm/09.sendmail
-..
-
-# ./usr/share/doc/smm/10.named
-10.named
-# ./usr/share/doc/smm/10.named
 ..
 
 # ./usr/share/doc/smm/11.timedop
@@ -901,11 +892,6 @@ usd
 # ./usr/share/doc/usd/29.diction
 ..
 
-# ./usr/share/doc/usd/30.rogue
-30.rogue
-# ./usr/share/doc/usd/30.rogue
-..
-
 # ./usr/share/doc/usd/31.trek
 31.trek
 # ./usr/share/doc/usd/31.trek
@@ -930,19 +916,9 @@ boggle
 # ./usr/share/games/boggle
 ..
 
-# ./usr/share/games/ching
-ching
-# ./usr/share/games/ching
-..
-
 # ./usr/share/games/fortune
 fortune
 # ./usr/share/games/fortune
-..
-
-# ./usr/share/games/larn
-larn
-# ./usr/share/games/larn
 ..
 
 # ./usr/share/games/quiz.db
@@ -1061,8 +1037,6 @@ cat1
 
 alpha
 ..
-amiga
-..
 hp300
 ..
 hppa
@@ -1082,8 +1056,6 @@ mvmeppc
 sparc
 ..
 sparc64
-..
-sun3
 ..
 vax
 ..
@@ -1112,8 +1084,6 @@ cat3
 
 alpha
 ..
-amiga
-..
 hp300
 ..
 hppa
@@ -1133,8 +1103,6 @@ mvmeppc
 sparc
 ..
 sparc64
-..
-sun3
 ..
 vax
 ..
@@ -1152,8 +1120,6 @@ cat4
 
 alpha
 ..
-amiga
-..
 hp300
 ..
 hppa
@@ -1173,8 +1139,6 @@ mvmeppc
 sparc
 ..
 sparc64
-..
-sun3
 ..
 vax
 ..
@@ -1187,8 +1151,6 @@ cat5
 
 alpha
 ..
-amiga
-..
 hp300
 ..
 hppa
@@ -1208,8 +1170,6 @@ mvmeppc
 sparc
 ..
 sparc64
-..
-sun3
 ..
 vax
 ..
@@ -1232,8 +1192,6 @@ cat8
 
 alpha
 ..
-amiga
-..
 hp300
 ..
 hppa
@@ -1253,8 +1211,6 @@ mvmeppc
 sparc
 ..
 sparc64
-..
-sun3
 ..
 vax
 ..
@@ -1267,8 +1223,6 @@ cat9
 
 alpha
 ..
-amiga
-..
 hp300
 ..
 hppa
@@ -1288,8 +1242,6 @@ mvmeppc
 sparc
 ..
 sparc64
-..
-sun3
 ..
 vax
 ..
@@ -1302,8 +1254,6 @@ ps1
 
 alpha
 ..
-amiga
-..
 hp300
 ..
 hppa
@@ -1324,8 +1274,6 @@ sparc
 ..
 sparc64
 ..
-sun3
-..
 vax
 ..
 
@@ -1334,6 +1282,12 @@ vax
 
 # ./usr/share/man/ps2
 ps2
+
+# ./usr/share/man/ps2/alpha
+alpha
+
+# ./usr/share/man/ps2/alpha
+..
 
 # ./usr/share/man/ps2/i386
 i386
@@ -1349,8 +1303,6 @@ ps3
 
 alpha
 ..
-amiga
-..
 hp300
 ..
 hppa
@@ -1370,8 +1322,6 @@ mvmeppc
 sparc
 ..
 sparc64
-..
-sun3
 ..
 vax
 ..
@@ -1389,8 +1339,6 @@ ps4
 
 alpha
 ..
-amiga
-..
 hp300
 ..
 hppa
@@ -1410,8 +1358,6 @@ mvmeppc
 sparc
 ..
 sparc64
-..
-sun3
 ..
 vax
 ..
@@ -1424,8 +1370,6 @@ ps5
 
 alpha
 ..
-amiga
-..
 hp300
 ..
 hppa
@@ -1445,8 +1389,6 @@ mvmeppc
 sparc
 ..
 sparc64
-..
-sun3
 ..
 vax
 ..
@@ -1469,8 +1411,6 @@ ps8
 
 alpha
 ..
-amiga
-..
 hp300
 ..
 hppa
@@ -1490,8 +1430,6 @@ mvmeppc
 sparc
 ..
 sparc64
-..
-sun3
 ..
 vax
 ..
@@ -1504,8 +1442,6 @@ ps9
 
 alpha
 ..
-amiga
-..
 hp300
 ..
 hppa
@@ -1525,8 +1461,6 @@ mvmeppc
 sparc
 ..
 sparc64
-..
-sun3
 ..
 vax
 ..
@@ -1539,8 +1473,6 @@ man1
 
 alpha
 ..
-amiga
-..
 hp300
 ..
 hppa
@@ -1560,8 +1492,6 @@ mvmeppc
 sparc
 ..
 sparc64
-..
-sun3
 ..
 vax
 ..
@@ -1589,8 +1519,6 @@ man4
 
 alpha
 ..
-amiga
-..
 hp300
 ..
 hppa
@@ -1610,8 +1538,6 @@ mvmeppc
 sparc
 ..
 sparc64
-..
-sun3
 ..
 vax
 ..
@@ -1639,8 +1565,6 @@ man8
 
 alpha
 ..
-amiga
-..
 hp300
 ..
 hppa
@@ -1660,8 +1584,6 @@ mvmeppc
 sparc
 ..
 sparc64
-..
-sun3
 ..
 vax
 ..
@@ -1690,6 +1612,11 @@ mk
 # ./usr/share/nls
 nls
 # ./usr/share/nls
+..
+
+# ./usr/share/pf
+pf
+# ./usr/share/pf
 ..
 
 # ./usr/share/sendmail
@@ -1842,18 +1769,13 @@ authpf		uname=root gname=authpf mode=0770
 
 # ./var/empty
 empty		mode=0755
+
+# ./var/empty/dev
+dev		mode=0555
+# ./var/empty/dev
+..
+
 # ./var/empty
-..
-
-# ./var/at
-at		gname=daemon
-
-# ./var/at/jobs
-jobs		gname=crontab mode=01770
-# ./var/at/jobs
-..
-
-# ./var/at
 ..
 
 # ./var/backups
@@ -1874,8 +1796,15 @@ crash		mode=770
 # ./var/cron
 cron		mode=0555
 
+# ./var/cron/atjobs
+atjobs		gname=crontab mode=01770
+
 # ./var/cron/tabs
-tabs		gname=crontab mode=1730
+..
+
+# ./var/cron/tabs
+tabs		gname=crontab mode=01730
+
 # ./var/cron/tabs
 ..
 
@@ -1917,11 +1846,6 @@ save		uname=root gname=games mode=0775
 # ./var/games/hackdir/save		XXX
 ..
 
-# ./var/games/larn
-larn             uname=root gname=games mode=0775
-# ./var/games/larn
-..
-
 # ./var/games/phantasia
 phantasia        uname=root gname=games mode=0775
 # ./var/games/phantasia
@@ -1960,13 +1884,23 @@ dev
 ..
 
 # ./var/named/etc
-etc
+etc		uname=root gname=named mode=0750
 # ./var/named/etc
 ..
 
-# ./var/named/namedb
-namedb		uname=named gname=bin mode=0755
-# ./var/named/namedb
+# ./var/named/master
+master
+# ./var/named/master
+..
+
+# ./var/named/slave
+slave		uname=root gname=named mode=0775
+# ./var/named/slave
+..
+
+# ./var/named/standard
+standard
+# ./var/named/standard
 ..
 
 # ./var/named
@@ -2056,19 +1990,13 @@ output		gname=daemon mode=0775
 # ./var/spool/sockets
 #..
 
-/set uname=uucp gname=daemon
-# ./var/spool/smtpd
-smtpd
-# ./var/spool/smtpd
-..
-
 # ./var/spool/uucp
-uucp
+uucp		uname=uucp gname=daemon
 # ./var/spool/uucp
 ..
 
 # ./var/spool/uucppublic
-uucppublic       mode=01775
+uucppublic	uname=uucp gname=daemon mode=01775
 # ./var/spool/uucppublic
 ..
 

@@ -1,4 +1,4 @@
-.\" $OpenBSD: gre.4,v 1.13 2002/06/10 23:08:41 itojun Exp $
+.\" $OpenBSD: gre.4,v 1.16 2003/03/16 10:18:44 jmc Exp $
 .\" $NetBSD: gre.4,v 1.10 1999/12/22 14:55:49 kleink Exp $
 .\"
 .\" Copyright 1998 (c) The NetBSD Foundation, Inc.
@@ -35,7 +35,7 @@
 .\" ARISING IN ANY WAY  OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 .\" POSSIBILITY OF SUCH DAMAGE.
 .\"
-.Dd 13 September 1998
+.Dd September 13, 1998
 .Dt GRE 4
 .Os
 .Sh NAME
@@ -69,7 +69,7 @@ the Mobile-IP (RFC 2004) encapsulation protocols.
 This driver currently supports the following modes of operation:
 .Bl -tag -width abc
 .It GRE encapsulation (IP protocol number 47).
-Encapsulated datagrams are prepended by a outer datagram and a GRE header.
+Encapsulated datagrams are prepended by an outer datagram and a GRE header.
 The GRE header specifies the type of the encapsulated datagram
 and thus allows for tunneling other protocols than IP like
 e.g. AppleTalk.
@@ -182,7 +182,8 @@ option to
 .Xr sysctl 8 .
 .Pp
 The GRE interface will accept WCCPv1-style GRE encapsulated packets
-from a Cisco router.  Some magic with the packet filter configuration
+from a Cisco router.
+Some magic with the packet filter configuration
 and a caching proxy like squid are needed to do anything useful with
 these packets.
 .Sh SEE ALSO
@@ -200,7 +201,8 @@ A description of GRE encapsulation can be found in RFC 1701, RFC 1702.
 A description of MOBILE encapsulation can be found in RFC 2004.
 .Pp
 A description of WCCPv1 can be found in draft-ietf-wrec-web-pro-00.txt,
-and WCCPv2 in draft-wilson-wrec-wccp-v2-00.txt.  Both of these documents
+and WCCPv2 in draft-wilson-wrec-wccp-v2-00.txt.
+Both of these documents
 can be found at http://www.wrec.org/ (at the time of this writing).
 .Sh BUGS
 The compute_route() code in net/if_gre.c toggles the last bit of the
@@ -212,7 +214,9 @@ To avoid the address munging described above, turn on the link1 flag
 on the ifconfig command line.
 This implies that the GRE packet destination and the remote host are not
 the same IP addresses, and that the GRE destination does not route over
-the greX interface itself.
+the
+.Sy gre Ns Ar X
+interface itself.
 .Pp
 GRE RFC not yet fully implemented (no GRE options).
 .Pp

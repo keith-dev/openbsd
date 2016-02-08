@@ -1,4 +1,4 @@
-/*	$OpenBSD: eval.c,v 1.10 2002/06/09 05:47:27 todd Exp $	*/
+/*	$OpenBSD: eval.c,v 1.12 2003/03/10 03:48:16 david Exp $	*/
 
 /*
  * Expansion - quoting, separation, substitution, globbing
@@ -169,7 +169,7 @@ expand(cp, wp, f)
 	XString ds;		/* destination string */
 	register char *dp, *sp;	/* dest., source */
 	int fdo, word;		/* second pass flags; have word */
-	int doblank;		/* field spliting of parameter/command subst */
+	int doblank;		/* field splitting of parameter/command subst */
 	Expand x;		/* expansion variables */
 	SubType st_head, *st;
 	int UNINITIALIZED(newlines); /* For trailing newlines in COMSUB */
@@ -445,7 +445,7 @@ expand(cp, wp, f)
 				c = *sp++ + 0x80;
 				break;
 
-			  case SPAT: /* pattern seperator (|) */
+			  case SPAT: /* pattern separator (|) */
 				make_magic = 1;
 				c = '|';
 				break;
@@ -898,7 +898,7 @@ trimsub(str, pat, how)
 	register char *p, c;
 
 	switch (how&0xff) {	/* UCHAR_MAX maybe? */
-	  case '#':		/* shortest at begining */
+	  case '#':		/* shortest at beginning */
 		for (p = str; p <= end; p++) {
 			c = *p; *p = '\0';
 			if (gmatch(str, pat, FALSE)) {
@@ -908,7 +908,7 @@ trimsub(str, pat, how)
 			*p = c;
 		}
 		break;
-	  case '#'|0x80:	/* longest match at begining */
+	  case '#'|0x80:	/* longest match at beginning */
 		for (p = end; p >= str; p--) {
 			c = *p; *p = '\0';
 			if (gmatch(str, pat, FALSE)) {
@@ -957,7 +957,7 @@ glob(cp, wp, markdirs)
 }
 
 #define GF_NONE		0
-#define GF_EXCHECK	BIT(0)		/* do existance check on file */
+#define GF_EXCHECK	BIT(0)		/* do existence check on file */
 #define GF_GLOBBED	BIT(1)		/* some globbing has been done */
 #define GF_MARKDIR	BIT(2)		/* add trailing / to directories */
 

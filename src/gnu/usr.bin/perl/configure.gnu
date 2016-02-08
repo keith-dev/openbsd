@@ -1,6 +1,6 @@
 #! /bin/sh
 #
-# $Id: configure.gnu,v 1.4 2001/05/24 18:34:46 millert Exp $
+# $Id: configure.gnu,v 1.5 2002/10/27 22:25:17 millert Exp $
 #
 # GNU configure-like front end to metaconfig's Configure.
 #
@@ -16,8 +16,8 @@
 # include this script in your own package.
 #
 # $Log: configure.gnu,v $
-# Revision 1.4  2001/05/24 18:34:46  millert
-# merge in perl 5.6.1 with our local changes
+# Revision 1.5  2002/10/27 22:25:17  millert
+# Resolve conflicts, remove old files, merge local changes
 #
 # Revision 3.0.1.1  1995/07/25  14:16:21  ram
 # patch56: created

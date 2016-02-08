@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.171 2002/09/06 21:30:22 deraadt Exp $
+#	$OpenBSD: Makefile,v 1.181 2003/03/24 18:15:27 drahn Exp $
 
 TZDIR=		/usr/share/zoneinfo
 LOCALTIME=	US/Pacific
@@ -16,11 +16,11 @@ BIN1=	bootptab changelist ccd.conf csh.cshrc csh.login csh.logout \
 	daily dhcpd.conf dhcpd.interfaces exports ftpusers \
 	ftpchroot gettytab group hosts hosts.lpd inetd.conf \
 	ksh.kshrc locate.rc man.conf monthly motd mrouted.conf \
-	myname netstart networks newsyslog.conf pf.conf \
+	myname netstart networks newsyslog.conf \
 	phones printcap protocols rbootd.conf rc rc.conf rc.local \
 	rc.securelevel rc.shutdown remote rpc security services \
-	shells syslog.conf weekly etc.${MACHINE}/disktab dhclient.conf \
-	mailer.conf
+	shells spamd.conf syslog.conf weekly etc.${MACHINE}/disktab \
+	dhclient.conf mailer.conf
 
 .if (${MACHINE} == "alpha" || ${MACHINE} == "hppa" || \
      ${MACHINE} == "i386" || ${MACHINE} == "macppc" || \
@@ -77,6 +77,7 @@ distribution-etc-root-var: distrib-dirs
 	${INSTALL} -c -o root -g wheel -m 600 master.passwd ${DESTDIR}/etc
 	pwd_mkdb -p -d ${DESTDIR}/etc /etc/master.passwd
 	${INSTALL} -c -o root -g wheel -m 644 moduli ${DESTDIR}/etc
+	${INSTALL} -c -o root -g wheel -m 600 pf.conf ${DESTDIR}/etc
 	${INSTALL} -c -o ${BINOWN} -g ${BINGRP} -m 555 \
 	    etc.${MACHINE}/MAKEDEV ${DESTDIR}/dev
 	cd root; \
@@ -167,11 +168,21 @@ distribution-etc-root-var: distrib-dirs
 		    ${DESTDIR}/etc/systrace; \
 		${INSTALL} -c -o root -g wheel -m 600 usr_sbin_named \
 		    ${DESTDIR}/etc/systrace;
-	cd namedb; \
-	    ${INSTALL} -c -o root -g ${BINGRP} -m 644 named.boot \
-		${DESTDIR}/var/named; \
-	    ${INSTALL} -c -o named -g ${BINGRP} -m 644 ${NAMEDB} \
-		${DESTDIR}/var/named/namedb
+	cd bind; \
+		${INSTALL} -c -o root -g named -m 640 named-simple.conf \
+		    ${DESTDIR}/var/named/etc/named.conf; \
+		${INSTALL} -c -o root -g named -m 640 named-*.conf \
+		    ${DESTDIR}/var/named/etc; \
+		${INSTALL} -c -o root -g wheel -m 644 db.localhost \
+		    ${DESTDIR}/var/named/standard/localhost; \
+		${INSTALL} -c -o root -g wheel -m 644 db.loopback \
+		    ${DESTDIR}/var/named/standard/loopback; \
+		${INSTALL} -c -o root -g wheel -m 644 db.loopback6.arpa \
+		    ${DESTDIR}/var/named/standard/loopback6.arpa; \
+		${INSTALL} -c -o root -g wheel -m 644 db.loopback6.int \
+		    ${DESTDIR}/var/named/standard/loopback6.int; \
+		${INSTALL} -c -o root -g wheel -m 644 root.hint \
+		    ${DESTDIR}/var/named/standard; \
 	/bin/rm -f ${DESTDIR}/etc/localtime
 	ln -s ${TZDIR}/${LOCALTIME} ${DESTDIR}/etc/localtime
 	/bin/rm -f ${DESTDIR}/etc/rmt
@@ -181,7 +192,9 @@ distribution-etc-root-var: distrib-dirs
 	${INSTALL} -c -o ${BINOWN} -g operator -m 664 /dev/null \
 		${DESTDIR}/etc/dumpdates
 	${INSTALL} -c -o root -g crontab -m 660 /dev/null \
-		${DESTDIR}/var/at/at.deny
+		${DESTDIR}/var/cron/at.deny
+	${INSTALL} -c -o root -g crontab -m 660 /dev/null \
+		${DESTDIR}/var/cron/cron.deny
 	${INSTALL} -c -o root -g wheel -m 600 /dev/null \
 		${DESTDIR}/var/cron/log
 	${INSTALL} -c -o root -g wheel -m 444 /dev/null \
@@ -190,6 +203,8 @@ distribution-etc-root-var: distrib-dirs
 		${DESTDIR}/var/log/authlog
 	${INSTALL} -c -o ${BINOWN} -g wheel -m 640 /dev/null \
 		${DESTDIR}/var/log/daemon
+	${INSTALL} -c -o ${BINOWN} -g wheel -m 600 /dev/null \
+		${DESTDIR}/var/log/failedlogin
 	${INSTALL} -c -o ${BINOWN} -g wheel -m 640 /dev/null \
 		${DESTDIR}/var/log/ftpd
 	${INSTALL} -c -o ${BINOWN} -g wheel -m 644 /dev/null \
@@ -198,10 +213,12 @@ distribution-etc-root-var: distrib-dirs
 		${DESTDIR}/var/log/lpd-errs
 	${INSTALL} -c -o ${BINOWN} -g wheel -m 600 /dev/null \
 		${DESTDIR}/var/log/maillog
-	${INSTALL} -c -o ${BINOWN} -g wheel -m 640 /dev/null \
+	${INSTALL} -c -o ${BINOWN} -g wheel -m 644 /dev/null \
 		${DESTDIR}/var/log/messages
 	${INSTALL} -c -o ${BINOWN} -g wheel -m 600 /dev/null \
 		${DESTDIR}/var/log/secure
+	${INSTALL} -c -o ${BINOWN} -g wheel -m 664 /dev/null \
+		${DESTDIR}/var/log/sendmail.st
 	${INSTALL} -c -o ${BINOWN} -g wheel -m 644 /dev/null \
 		${DESTDIR}/var/log/wtmp
 	${INSTALL} -c -o ${BINOWN} -g wheel -m 640 /dev/null \
@@ -258,12 +275,15 @@ release: distribution snap_pre snap_md
 	-cp ${DESTDIR}/snapshot/bsd* ${RELEASEDIR}
 	-cp ${DESTDIR}/snapshot/*boot* ${RELEASEDIR}
 	-cp ${DESTDIR}/snapshot/*BOOT* ${RELEASEDIR}
+	-cp ${DESTDIR}/snapshot/cd*.iso ${RELEASEDIR}
 	-cp ${DESTDIR}/snapshot/INSTALL.* ${RELEASEDIR}
 	-cp ${DESTDIR}/snapshot/*.fs ${DESTDIR}/snapshot/*.fs.gz ${RELEASEDIR}
 	-cd ${RELEASEDIR}; \
-		md5 bsd!(*.gz) *boot* *BOOT* INSTALL.* *.fs *.gz *.tgz > MD5
+		md5 bsd!(*.gz) *boot* *BOOT* INSTALL.* *.fs *.iso *.gz *.tgz \
+		    > MD5
 	-cd ${RELEASEDIR}; \
-		cksum bsd!(*.gz) *boot* *BOOT* INSTALL.* *.fs *.gz *.tgz > CKSUM
+		cksum bsd!(*.gz) *boot* *BOOT* INSTALL.* *.fs *.iso *.gz *.tgz \
+		    > CKSUM
 .if defined(MACHINE_HAS_TOOLS)
 	mkdir -p ${RELEASEDIR}/tools
 	cp ${DESTDIR}/snapshot/tools/* ${RELEASEDIR}/tools
@@ -319,7 +339,6 @@ snap_md:
 .endif	# DESTDIR check
 
 MAKEDEVARCHS+= alpha
-MAKEDEVARCHS+= amiga
 MAKEDEVARCHS+= hp300
 MAKEDEVARCHS+= hppa
 MAKEDEVARCHS+= i386
@@ -330,7 +349,6 @@ MAKEDEVARCHS+= mvme88k
 #MAKEDEVARCHS+= mvmeppc
 MAKEDEVARCHS+= sparc
 MAKEDEVARCHS+= sparc64
-MAKEDEVARCHS+= sun3
 #MAKEDEVARCHS+= vax
 
 clean:

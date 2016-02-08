@@ -38,21 +38,21 @@
 
 #if defined(SYSLIBC_SCCS)
 	.text
-	.asciz "$OpenBSD: sbrk.S,v 1.3 1997/07/23 20:55:22 kstailey Exp $"
+	.asciz "$OpenBSD: sbrk.S,v 1.5 2002/10/06 23:31:41 art Exp $"
 #endif /* SYSLIBC_SCCS */
 
 	.globl	_end
-	.globl	curbrk
+	.globl	__curbrk
 
 	.data
-curbrk:	.long	_end
+__curbrk:	.long	_end
 	.text
 
 ENTRY(sbrk)
 #ifdef PIC
 	movl	4(%esp),%ecx
 	PIC_PROLOGUE
-	movl	PIC_GOT(curbrk),%edx
+	movl	PIC_GOT(__curbrk),%edx
 	PIC_EPILOGUE
 	movl	(%edx),%eax
 	addl	%eax,4(%esp)
@@ -60,25 +60,25 @@ ENTRY(sbrk)
 	int	$0x80
 	jc	err
 	PIC_PROLOGUE
-	movl	PIC_GOT(curbrk),%edx
+	movl	PIC_GOT(__curbrk),%edx
 	PIC_EPILOGUE
 	movl	(%edx),%eax
 	addl	%ecx,(%edx)
 	ret
 err:
-	jmp	PIC_PLT(cerror)
+	jmp	PIC_PLT(__cerror)
 
 #else
 
 	movl	4(%esp),%ecx
-	movl	curbrk,%eax
+	movl	__curbrk,%eax
 	addl	%eax,4(%esp)
 	movl	$(SYS_break),%eax
 	int	$0x80
 	jc	err
-	movl	curbrk,%eax
-	addl	%ecx,curbrk
+	movl	__curbrk,%eax
+	addl	%ecx,__curbrk
 	ret
 err:
-	jmp	cerror
+	jmp	__cerror
 #endif

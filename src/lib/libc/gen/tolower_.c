@@ -4,11 +4,12 @@
  */
 
 #if defined(LIBC_SCCS) && !defined(lint)
-static char rcsid[] = "$OpenBSD: tolower_.c,v 1.3 2001/06/27 07:17:08 pjanzen Exp $";
+static char rcsid[] = "$OpenBSD: tolower_.c,v 1.6 2002/12/13 23:16:38 millert Exp $";
 #endif /* LIBC_SCCS and not lint */
 
-#include <stdio.h>
+#define _ANSI_LIBRARY
 #include <ctype.h>
+#include <stdio.h>
 
 const short _C_tolower_[1 + 256] = {
 	EOF,
@@ -53,7 +54,7 @@ int
 tolower(c)
 	int c;
 {
-	if (c != (unsigned char) c)
+	if ((unsigned int)c > 0177)
 		return(c);
 	return((_tolower_tab_ + 1)[c]);
 }

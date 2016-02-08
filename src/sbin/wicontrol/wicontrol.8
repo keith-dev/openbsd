@@ -1,4 +1,4 @@
-.\"	$OpenBSD: wicontrol.8,v 1.40 2002/06/09 08:13:09 todd Exp $
+.\"	$OpenBSD: wicontrol.8,v 1.46 2003/02/17 07:24:33 jmc Exp $
 .\"
 .\" Copyright (c) 1997, 1998, 1999
 .\"	Bill Paul <wpaul@ctr.columbia.edu> All rights reserved.
@@ -40,10 +40,12 @@
 .Nd configure WaveLAN/IEEE devices
 .Sh SYNOPSIS
 .Nm wicontrol
+.Bk -words
 .Op Ar interface
 .Op Fl olL
 .Op Fl e Ar 0|1
 .Op Fl k Ar key "[ -v 1|2|3|4 ]"
+.Op Fl x Ar 0|1
 .Op Fl t Ar tx rate
 .Op Fl n Ar network name
 .Op Fl s Ar station name
@@ -63,6 +65,7 @@
 .Op Fl R Ar 1|3
 .Op Fl S Ar max sleep duration
 .Op Fl T Ar 1|2|3|4
+.Ek
 .Sh DESCRIPTION
 The
 .Nm
@@ -145,6 +148,10 @@ keys, in which case WEP encryption will simply fail to work.
 .It Fl T Ar 1|2|3|4
 Specify which of the four WEP encryption keys will be used to encrypt
 transmitted packets.
+.It Fl x Ar 0|1
+[Prism2/Symbol only]
+Select between firmware-based (0) and software-based (1) WEP.
+Firmware-based WEP is the default.
 .It Fl t Ar tx rate
 Set the transmit rate of the specified interface.
 The legal values
@@ -189,7 +196,7 @@ for the specified interface.
 The
 .Ar station name
 is used for diagnostic purposes.
-The Lucent WaveMANAGER sofware can poll the names of remote hosts.
+The Lucent WaveMANAGER software can poll the names of remote hosts.
 .It Fl c Ar 0|1
 Allow the station to create a service set (IBSS).
 Permitted values are 0 (do not create IBSS) and 1 (enable creation of IBSS).
@@ -388,7 +395,7 @@ If no service set is specified via the
 flag, the NIC will associate with whichever access point has the
 strongest signal.
 In general, it is a good idea to specify a service set to prevent
-possible hijacking of your connection.
+possible hijacking of the association.
 .It ad-hoc mode
 More accurately known as
 .Dq ad-hoc demo mode .
@@ -430,11 +437,11 @@ Note that there are bugs in Host AP mode in Prism firmware revisions
 prior to 0.8.3.
 .El
 .Sh SEE ALSO
-.Xr awi 4 ,
 .Xr an 4 ,
-.Xr ancontrol 8 ,
+.Xr awi 4 ,
 .Xr wi 4 ,
-.Xr hostname.if 8 ,
+.Xr hostname.if 5 ,
+.Xr ancontrol 8 ,
 .Xr ifconfig 8
 .Sh HISTORY
 The

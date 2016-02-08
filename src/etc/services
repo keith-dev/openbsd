@@ -1,4 +1,4 @@
-#	$OpenBSD: services,v 1.45 2002/08/13 02:21:40 millert Exp $
+#	$OpenBSD: services,v 1.50 2003/03/09 19:22:25 beck Exp $
 #
 # Network services, Internet style
 #
@@ -124,6 +124,8 @@ imap3		220/tcp				# Interactive Mail Access
 imap3		220/udp				# Protocol v3
 ulistserv	372/tcp				# UNIX Listserv
 ulistserv	372/udp
+ldap		389/tcp				# Lightweight Directory Access
+ldap		389/udp
 svrloc		427/tcp				# Server Location
 svrloc		427/udp
 nnsp		433/tcp		usenet		# Network News Transfer
@@ -133,9 +135,12 @@ kpasswd		464/udp				# Kerberos 5 password changing
 photuris	468/tcp				# Photuris Key Management
 photuris	468/udp
 isakmp		500/udp				# ISAKMP key management
+klogin		543/tcp				# Kerberos authenticated rlogin
 kshell		544/tcp		krcmd		# Kerberos remote shell
 ekshell		545/tcp				# Kerberos encrypted shell
 submission	587/tcp		msa		# mail message submission
+ldaps		636/tcp				# LDAP over SSL
+ldaps		636/udp
 submission	587/udp		msa		# mail message submission
 imaps		993/tcp				# imap4 protocol over TLS/SSL
 imaps		993/udp				# imap4 protocol over TLS/SSL
@@ -163,6 +168,8 @@ netnews		532/tcp		readnews
 netwall		533/udp				# -for emergency broadcasts
 uucp		540/tcp		uucpd		# uucp daemon
 remotefs	556/tcp		rfs_server rfs	# Brunhoff remote filesystem
+silc		706/tcp				# Secure Live Internet Conferencing
+silc		706/udp
 kerberos-adm	749/udp				# Kerberos 5 kadmin
 kerberos-adm	749/tcp				# Kerberos 5 kadmin
 kerberos-iv	750/udp		kdc		# Kerberos authentication--udp
@@ -170,6 +177,7 @@ kerberos-iv	750/tcp		kdc		# Kerberos authentication--tcp
 kerberos_master 751/udp				# Kerberos 4 kadmin
 kerberos_master 751/tcp				# Kerberos 4 kadmin
 krb_prop	754/tcp		hprop		# Kerberos slave propagation
+krbupdate	760/tcp		kreg		# BSD Kerberos registration
 #
 # From ``Assigned Numbers'':
 #
@@ -186,13 +194,15 @@ krb_prop	754/tcp		hprop		# Kerberos slave propagation
 #> community.
 #
 socks		1080/tcp		# Socks
-kpop		1109/tcp			# Pop with Kerberos
+kpop		1109/tcp		# Pop with Kerberos
 ingreslock	1524/tcp
 ingreslock	1524/udp
 prospero-np	1525/tcp		# Prospero non-privileged
 prospero-np	1525/udp
 pptp		1723/tcp		# Point-to-Point Tunneling Protocol
 pptp		1723/udp		# Point-to-Point Tunneling Protocol
+ssdp		1900/tcp		# SSDP
+ssdp		1900/udp		# SSDP
 nfsd		2049/udp	nfs	# NFS server
 nfsd		2049/tcp	nfs	# NFS server
 eklogin		2105/tcp		# Kerberos encrypted rlogin
@@ -208,29 +218,6 @@ rfe		5002/tcp		# Radio Free Ethernet
 rfe		5002/udp		# Actually uses UDP only
 sip		5060/tcp		# SIP
 sip		5060/udp		# SIP
-#
-# Kerberos (Project Athena/MIT) services
-# Note that these are for Kerberos v4, and are unofficial.
-#
-kerberos-sec	88/udp				# Kerberos secondary port UDP
-kerberos-sec	88/tcp				# Kerberos secondary port TCP
-klogin		543/tcp				# Kerberos authenticated rlogin
-kshell		544/tcp		krcmd		# and remote shell
-ekshell		545/tcp		     # Kerberos encrypted remote shell -kfall
-ekshell2	2106/tcp	     # What U of Colorado @ Boulder uses?
-kerberos-adm	749/tcp				# Kerberos `kadmin' (v5)
-kerberos-iv	750/udp		kdc kerberos	# Kerberos authentication--udp
-kerberos-iv	750/tcp		kdc kerberos	# Kerberos authentication--tcp
-kerberos_master	751/udp		kerberos-master	# Kerberos authentication
-kerberos_master	751/tcp		kerberos-master # Kerberos authentication
-krb_prop	754/tcp				# Kerberos slave propagation
-krbupdate	760/tcp		kreg		# BSD Kerberos registration
-kpop		1109/tcp			# Pop with Kerberos
-eklogin		2105/tcp			# Kerberos encrypted rlogin
-rkinit		2108/tcp			# Kerberos remote kinit
-kx		2111/tcp			# X over kerberos
-kip		2112/tcp			# IP over kerberos
-kauth		2120/tcp			# Remote kauth
 #
 # AFS Services
 #
@@ -255,6 +242,7 @@ datametrics	1645/udp
 sa-msg-port	1646/udp
 radius		1812/udp		# radius authentication
 radacct		1813/udp		# radius accounting
+ekshell2	2106/tcp		# Encrypted kshell - UColorado, Boulder
 cvspserver	2401/tcp		# cvs pserver
 webster		2627/tcp		# Network dictionary
 webster		2627/udp
@@ -262,6 +250,8 @@ mysql		3306/tcp		# MySQL
 postgresql	5432/tcp		# PostgreSQL
 canna		5680/tcp		# Kana->Kanji server
 icb		7326/tcp		# Internet Citizen's Band
+spamd		8025/tcp		# spamd(8)
+spamd-cfg	8026/tcp		# spamd(8) configuration
 hunt		26740/udp		# hunt(6)
 #
 # Appletalk

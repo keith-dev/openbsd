@@ -1,4 +1,4 @@
-.\"	$OpenBSD: pcmcia.4,v 1.26 2002/09/27 22:40:28 millert Exp $
+.\"	$OpenBSD: pcmcia.4,v 1.28 2003/03/06 20:40:35 jmc Exp $
 .\"	$NetBSD: pcmcia.4,v 1.4 1998/06/07 09:10:30 enami Exp $
 .\"
 .\" Copyright (c) 1997 The NetBSD Foundation, Inc.
@@ -39,7 +39,7 @@
 .Nm pcmcia
 .Nd introduction to PCMCIA (PC Card) support
 .Sh SYNOPSIS
-.Cd "# amiga/i386"
+.Cd "# i386"
 .Cd "pcic0   at isa? port 0x3e0 iomem 0xd0000 iosiz 0x10000"
 .Cd "pcic1   at isa? port 0x3e2 iomem 0xe0000 iosiz 0x4000"
 .Cd "pcic2   at isa? port 0x3e4 iomem 0xe0000 iosiz 0x4000"
@@ -144,7 +144,7 @@ card BIOS mapped in the same memory space the
 driver is configured to use (this is often the case with ethernet
 card boot ROMs).
 The output from
-.Xr dmesg 1
+.Xr dmesg 8
 should contain a line beginning with
 .Dq bios0
 that lists the memory address and size of mapped regions.

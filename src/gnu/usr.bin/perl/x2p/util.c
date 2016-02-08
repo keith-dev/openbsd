@@ -1,16 +1,13 @@
-/* $RCSfile: util.c,v $$Revision: 1.6 $$Date: 2001/09/05 22:32:30 $
+/* $RCSfile: util.c,v $$Revision: 1.7 $$Date: 2002/10/27 22:25:40 $
  *
- *    Copyright (c) 1991-2001, Larry Wall
+ *    Copyright (c) 1991-2002, Larry Wall
  *
  *    You may distribute under the terms of either the GNU General Public
  *    License or the Artistic License, as specified in the README file.
  *
  * $Log: util.c,v $
- * Revision 1.6  2001/09/05 22:32:30  deraadt
- * make sure that va_start() has matching va_end()
- *
- * Revision 1.5  2001/05/24 18:36:41  millert
- * merge in perl 5.6.1 with our local changes
+ * Revision 1.7  2002/10/27 22:25:40  millert
+ * Resolve conflicts, remove old files, merge local changes
  *
  */
 

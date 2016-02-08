@@ -1,4 +1,4 @@
-/*	$OpenBSD: sigprocmask.S,v 1.2 2000/03/01 17:31:22 todd Exp $	*/
+/*	$OpenBSD: sigprocmask.S,v 1.5 2003/01/07 22:01:35 miod Exp $	*/
 
 /*-
  * Copyright (c) 1990 The Regents of the University of California.
@@ -37,27 +37,25 @@
  * SUCH DAMAGE.
  */
 
-#if defined(LIBC_SCCS) && !defined(lint)
+#if defined(LIBC_SCCS)
 	.data
-	/*.asciz "from: @(#)sigprocmask.s	5.2 (Berkeley) 6/6/90"*/
-	.asciz "$OpenBSD: sigprocmask.S,v 1.2 2000/03/01 17:31:22 todd Exp $"
-	.text
-#endif /* LIBC_SCCS and not lint */
+	.string "$OpenBSD: sigprocmask.S,v 1.5 2003/01/07 22:01:35 miod Exp $"
+#endif /* LIBC_SCCS */
 
 #include "SYS.h"
 
-ENTRY(sigprocmask)
-	bcnd	ne0,r3,L1		/* if new sigset pointer is null */
+SYSENTRY(sigprocmask)
+	bcnd	ne0,r3,1f		/* if new sigset pointer is null */
 	or	r2,r0,1			/* how = SIG_BLOCK and do it */
-	br	L2
-L1:
+	br	2f
+1:
 	ld	r3,r3,0			/* else load set from *set and do it */
-L2:
+2:
 	or	r13,r0,SYS_sigprocmask
 	tb0	0,r0,128
-	br	cerror
-	bcnd	eq0,r4,out		/* if old mask not requested, done */
+	br	__cerror
+	bcnd	eq0,r4,3f		/* if old mask not requested, done */
 	st	r2,r4,0			/* otherwise, set it */
-out:
+3:
 	jmp.n	r1
-	or	r2,r0,0
+	 or	r2,r0,0

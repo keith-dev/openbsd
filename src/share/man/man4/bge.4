@@ -1,4 +1,4 @@
-.\" $OpenBSD: bge.4,v 1.8 2002/09/26 07:55:39 miod Exp $
+.\" $OpenBSD: bge.4,v 1.11 2003/02/25 08:51:31 jmc Exp $
 .\" Copyright (c) 2001 Wind River Systems
 .\" Copyright (c) 1997, 1998, 1999, 2000, 2001
 .\"	Bill Paul <wpaul@windriver.com>. All rights reserved.
@@ -49,17 +49,23 @@ following:
 .Pp
 .Bl -bullet -compact
 .It
-3Com 3c996-T (10/100/1000baseTX)
+3Com 3c996-T
 .It
-3Com 3c996-SX (1000baseSX)
+3Com 3c996-SX
 .It
-3Com 3c996B-T (10/100/1000baseTX)
+3Com 3c996B-T
 .It
-Dell PowerEdge 2550 integrated BCM5700 NIC (10/100/1000baseTX)
+Dell PowerEdge 2550 integrated BCM5700 NIC
 .It
-SysKonnect SK-9D21 (10/100/1000baseTX)
+IBM xSeries 235 integrated BCM5703X NIC
 .It
-SysKonnect SK-9D41 (1000baseSX)
+IBM xSeries 305 integrated BCM5703X NIC
+.It
+Netgear GA302T
+.It
+SysKonnect SK-9D21
+.It
+SysKonnect SK-9D41
 .El
 .Pp
 All of these NICs are capable of 10, 100 and 1000Mbps speeds over CAT5
@@ -68,7 +74,7 @@ copper cable, except for the SysKonnect SK-9D41 which supports only
 It has two R4000 CPU cores and is PCI v2.2 and PCI-X v1.0 compliant.
 It supports
 .\"IP, TCP
-.\"and UDP checksum checksum offload for both receive and transmit,
+.\"and UDP checksum offload for both receive and transmit,
 multiple RX and TX DMA rings for QoS applications, rules-based
 receive filtering, and VLAN tag stripping/insertion as well as
 a 256-bit multicast hash filter.
@@ -93,7 +99,7 @@ full or half duplex.
 The
 .Nm
 driver supports the following media types:
-.Bl -tag -width 1000baseTX
+.Bl -tag -width 1000baseSX
 .It Cm autoselect
 Enable autoselection of the media type and options.
 The user can manually override
@@ -120,8 +126,8 @@ option can also be used to select either
 or
 .Cm half-duplex
 modes.
-.It Cm 1000baseTX
-Set 1000baseTX operation over twisted pair.
+.It Cm 1000baseT
+Set 1000baseT operation over twisted pair.
 .Cm full-duplex
 and
 .Cm half-duplex
@@ -147,10 +153,10 @@ Force half duplex operation.
 .Pp
 The
 .Nm
-driver also supports one special link option for 1000baseTX cards:
+driver also supports one special link option for 1000baseT cards:
 .Bl -tag -width link0
 .It Cm link0
-With 1000baseTX cards, establishing a link between two ports requires
+With 1000baseT cards, establishing a link between two ports requires
 that one port be configured as a master and the other a slave.
 With autonegotiation,
 the master/slave settings will be chosen automatically.

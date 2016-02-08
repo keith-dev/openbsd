@@ -1,4 +1,4 @@
-/*	$OpenBSD: getnetnamadr.c,v 1.18 2002/08/27 08:53:13 itojun Exp $	*/
+/*	$OpenBSD: getnetnamadr.c,v 1.20 2003/01/28 04:58:00 marc Exp $	*/
 
 /*
  * Copyright (c) 1997, Jason Downs.  All rights reserved.
@@ -77,7 +77,7 @@ static char sccsid[] = "@(#)getnetbyaddr.c	8.1 (Berkeley) 6/4/93";
 static char sccsid_[] = "from getnetnamadr.c	1.4 (Coimbra) 93/06/03";
 static char rcsid[] = "$From: getnetnamadr.c,v 8.7 1996/08/05 08:31:35 vixie Exp $";
 #else
-static char rcsid[] = "$OpenBSD: getnetnamadr.c,v 1.18 2002/08/27 08:53:13 itojun Exp $";
+static char rcsid[] = "$OpenBSD: getnetnamadr.c,v 1.20 2003/01/28 04:58:00 marc Exp $";
 #endif
 #endif /* LIBC_SCCS and not lint */
 
@@ -95,6 +95,8 @@ static char rcsid[] = "$OpenBSD: getnetnamadr.c,v 1.18 2002/08/27 08:53:13 itoju
 #include <errno.h>
 #include <string.h>
 #include <stdlib.h>
+
+#include "thread_private.h"
 
 extern int h_errno;
 
@@ -133,7 +135,7 @@ getnetanswer(answer, anslen, net_i)
 	int type, class, ancount, qdcount, haveanswer, i, nchar;
 	char aux1[MAXHOSTNAMELEN], aux2[MAXHOSTNAMELEN], ans[MAXHOSTNAMELEN];
 	char *in, *st, *pauxt, *bp, **ap, *ep;
-	char *paux1 = &aux1[0], *paux2 = &aux2[0], flag = 0;
+	char *paux1 = &aux1[0], *paux2 = &aux2[0];
 	static	struct netent net_entry;
 	static	char *net_aliases[MAXALIASES], netbuf[BUFSIZ+1];
 
@@ -165,8 +167,14 @@ getnetanswer(answer, anslen, net_i)
 			h_errno = TRY_AGAIN;
 		return (NULL);
 	}
-	while (qdcount-- > 0)
-		cp += __dn_skipname(cp, eom) + QFIXEDSZ;
+	while (qdcount-- > 0) {
+		n = __dn_skipname(cp, eom);
+		if (n < 0 || (cp + n + QFIXEDSZ) > eom) {
+			h_errno = NO_RECOVERY;
+			return(NULL);
+		}
+		cp += n + QFIXEDSZ;
+	}
 	ap = net_aliases;
 	*ap = NULL;
 	net_entry.n_aliases = net_aliases;
@@ -198,11 +206,13 @@ getnetanswer(answer, anslen, net_i)
 				return (NULL);
 			}
 			cp += n; 
-			*ap++ = bp;
-			bp += strlen(bp) + 1;
-			net_entry.n_addrtype =
-				(class == C_IN) ? AF_INET : AF_UNSPEC;
-			haveanswer++;
+			if ((ap + 2) < &net_aliases[MAXALIASES]) {
+				*ap++ = bp;
+				bp += strlen(bp) + 1;
+				net_entry.n_addrtype =
+					(class == C_IN) ? AF_INET : AF_UNSPEC;
+				haveanswer++;
+			}
 		}
 	}
 	if (haveanswer) {
@@ -213,25 +223,32 @@ getnetanswer(answer, anslen, net_i)
 			net_entry.n_net = 0L;
 			break;
 		case BYNAME:
-			in = *net_entry.n_aliases;
-			net_entry.n_name = &ans[0];
+			ap = net_entry.n_aliases;
+		next_alias:
+			in = *ap++;
+			if (in == NULL) {
+				h_errno = HOST_NOT_FOUND;
+				return (NULL);
+			}
+			net_entry.n_name = ans;
 			aux2[0] = '\0';
 			for (i = 0; i < 4; i++) {
 				for (st = in, nchar = 0;
-				     *st != '.';
+				     isdigit((unsigned char)*st);
 				     st++, nchar++)
 					;
-				if (nchar != 1 || *in != '0' || flag) {
-					flag = 1;
-					strlcpy(paux1, 
-						(i==0) ? in : in-1, 
-						(i==0) ? nchar+1 : nchar+2);
-					pauxt = paux2;
-					paux2 = strcat(paux1, paux2);
-					paux1 = pauxt;
-				}
+				if (*st != '.' || nchar == 0 || nchar > 3)
+					goto next_alias;
+				if (i != 0)
+					nchar++;
+				strlcpy(paux1, in, nchar+1);
+				pauxt = paux2;
+				paux2 = strcat(paux1, paux2);
+				paux1 = pauxt;
 				in = ++st;
 			}		  
+			if (strcasecmp(in, "IN-ADDR.ARPA") != 0)
+				goto next_alias;
 			net_entry.n_net = inet_network(paux2);
 			break;
 		}
@@ -247,6 +264,7 @@ getnetbyaddr(net, net_type)
 	register in_addr_t net;
 	register int net_type;
 {
+	struct __res_state *_resp = _THREAD_PRIVATE(_res, _res, &_res);
 	unsigned int netbr[4];
 	int nn, anslen;
 	querybuf *buf;
@@ -256,10 +274,10 @@ getnetbyaddr(net, net_type)
 	char lookups[MAXDNSLUS];
 	int i;
 
-	if ((_res.options & RES_INIT) == 0 && res_init() == -1)
+	if ((_resp->options & RES_INIT) == 0 && res_init() == -1)
 		return(_getnetbyaddr(net, net_type));
 
-	bcopy(_res.lookups, lookups, sizeof lookups);
+	bcopy(_resp->lookups, lookups, sizeof lookups);
 	if (lookups[0] == '\0')
 		strlcpy(lookups, "bf", sizeof lookups);
 
@@ -305,7 +323,7 @@ getnetbyaddr(net, net_type)
 			if (anslen < 0) {
 				free(buf);
 #ifdef DEBUG
-				if (_res.options & RES_DEBUG)
+				if (_resp->options & RES_DEBUG)
 					printf("res_query failed\n");
 #endif
 				break;
@@ -337,6 +355,7 @@ struct netent *
 getnetbyname(net)
 	register const char *net;
 {
+	struct __res_state *_resp = _THREAD_PRIVATE(_res, _res, &_res);
 	int anslen;
 	querybuf *buf;
 	char qbuf[MAXDNAME];
@@ -344,10 +363,10 @@ getnetbyname(net)
 	char lookups[MAXDNSLUS];
 	int i;
 
-	if ((_res.options & RES_INIT) == 0 && res_init() == -1)
+	if ((_resp->options & RES_INIT) == 0 && res_init() == -1)
 		return (_getnetbyname(net));
 
-	bcopy(_res.lookups, lookups, sizeof lookups);
+	bcopy(_resp->lookups, lookups, sizeof lookups);
 	if (lookups[0] == '\0')
 		strlcpy(lookups, "bf", sizeof lookups);
 
@@ -368,7 +387,7 @@ getnetbyname(net)
 			if (anslen < 0) {
 				free(buf);
 #ifdef DEBUG
-				if (_res.options & RES_DEBUG)
+				if (_resp->options & RES_DEBUG)
 					printf("res_query failed\n");
 #endif
 				break;

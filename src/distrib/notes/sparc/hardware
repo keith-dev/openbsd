@@ -1,4 +1,4 @@
-dnl	$OpenBSD: hardware,v 1.43 2002/09/02 08:00:21 miod Exp $
+dnl	$OpenBSD: hardware,v 1.48 2003/03/09 02:41:19 miod Exp $
 OpenBSD/MACHINE OSREV runs on the following classes of machines:
     * sun4: the VME series
 	- 4/100: Original sparc with VME. Many hardware bugs.
@@ -30,7 +30,7 @@ OpenBSD/MACHINE OSREV runs on the following classes of machines:
 	  170MHz
 	- SS10: Pizzabox mbus-based machine
 	- SS20: Improved pizzabox mbus-based machine
-	- Sun Voyager (untested)
+	- Sun Voyager
 
     * As vell as faithful clones of the above Sun systems, such as:
 	- Aries Research Inc, Parrot II (SS2 clone)
@@ -106,11 +106,18 @@ Supported devices {:-include-:}:
 	    driver does not support hardware acceleration)
 	  + cgfourteen - 8/24-bit color, accelerated (but the driver does
 	    not support hardware acceleration)
+	  + Fujitsu AG-10e (agten) - 24-bit color, accelerated (currently
+	    only supported in 8 bit unaccelerated mode)
+	  + Parallax XVideo and PowerVideo (tvtwo) - 24-bit color,
+	    accelerated (but the driver does not support hardware
+	    acceleration)
 	  + p9100 ("pnozz") framebuffer found in Tapdole SPARCbook 3GS and
 	    3GX (8, 16 or 32-bit unaccelerated)
 	  + TCX - 8/24-bit color
 	  + Vigra VS10 and VS12 framebuffers (8 bit color, selectable
 	    VGA-compatible modes and connector)
+	  + ZX (aka Leo) - 8/24-bit color, overlay planes, double-buffered,
+	    3-D acceleration
 	- 4/200 on-board bwtwo
 	- P4 video (4/100 and 4/300):
 	  + bwtwo - black and white
@@ -130,7 +137,7 @@ Supported devices {:-include-:}:
 	- on-board Intel 82586 Ethernet on 4/100 and 4/200 (ie)
 	- VME Intel 82586 Ethernet cards (ie)
 	- SBus 10/100Mbit qec+be found on Sun FastEthernet cards
-	  (SUNW,501-2655) (be)
+	  (SUNW,501-2450) (be)
 	- SBus Quad 10/100Mbit qec+qe found on Sun Quad Ethernet cards
 	  (SUNW,501-2062) (qe)
 	- SBus 10/100MBit hme Ethernet cards (hme) [*]
@@ -186,8 +193,6 @@ Hardware the we do NOT currently support, but get many questions about:
         - SBus cgeight, 24-bit color, unaccelerated
         - SBus GT, 24-bit color, 8-bit color, overlay planes,
 	  double-buffered, 3-D acceleration (aka "Graphics Tower")
-        - SBus ZX, 24-bit color, 8-bit color, overlay planes,
-	  double-buffered, 3-D acceleration (aka Leo)
     * On-board Audio and ISDN
 	This is present on some sun4m systems (LX, LC, SPARCstation 10/20)
     * Multiple Processors/Modules in sun4m systems

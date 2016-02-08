@@ -32,7 +32,7 @@
  */
 
 #if defined(LIBC_SCCS) && !defined(lint)
-static char rcsid[] = "$OpenBSD: syslog.c,v 1.19 2002/06/20 23:01:10 jjbg Exp $";
+static char rcsid[] = "$OpenBSD: syslog.c,v 1.24 2003/02/27 17:26:10 danh Exp $";
 #endif /* LIBC_SCCS and not lint */
 
 #include <sys/types.h>
@@ -55,10 +55,8 @@ static struct syslog_data sdata = SYSLOG_DATA_INIT;
 
 extern char	*__progname;		/* Program name, from crt0. */
 
-static void	disconnectlog(void);	/* disconnect from syslogd */
-static void	connectlog(void);	/* (re)connect to syslogd */
-static void	disconnectlog_r(struct syslog_data *); 
-static void	connectlog_r(struct syslog_data *); 
+static void	disconnectlog_r(struct syslog_data *);	/* disconnect from syslogd */
+static void	connectlog_r(struct syslog_data *);	/* (re)connect to syslogd */
 
 /*
  * syslog, vsyslog --
@@ -81,18 +79,6 @@ vsyslog(pri, fmt, ap)
 	va_list ap;
 {
 	vsyslog_r(pri, &sdata, fmt, ap);
-}
-
-static void
-disconnectlog()
-{
-	disconnectlog_r(&sdata);
-}
-
-static void
-connectlog()
-{
-	connectlog_r(&sdata);
 }
 
 void
@@ -139,7 +125,7 @@ vsyslog_r(pri, data, fmt, ap)
 	int cnt;
 	char ch, *p, *t;
 	time_t now;
-	int fd, saved_errno;
+	int fd, saved_errno, error;
 #define	TBUF_LEN	2048
 #define	FMT_LEN		1024
 	char *stdp, tbuf[TBUF_LEN], fmt_cpy[FMT_LEN];
@@ -236,6 +222,11 @@ vsyslog_r(pri, data, fmt, ap)
 				prlen = fmt_left - 1;
 			t += prlen;
 			fmt_left -= prlen;
+		} else if (ch == '%' && fmt[1] == '%' && fmt_left > 2) {
+			*t++ = '%';
+			*t++ = '%';
+			fmt++;
+			fmt_left -= 2;
 		} else {
 			if (fmt_left > 1) {
 				*t++ = ch;
@@ -264,8 +255,6 @@ vsyslog_r(pri, data, fmt, ap)
 	if (!data->opened)
 		openlog_r(data->log_tag, data->log_stat, 0, data);
 	connectlog_r(data);
-	if (send(data->log_file, tbuf, cnt, 0) >= 0)
-		return;
 
 	/*
 	 * If the send() failed, there are two likely scenarios:
@@ -275,20 +264,24 @@ vsyslog_r(pri, data, fmt, ap)
 	 * case #1 and keep send()ing data to cover case #2
 	 * to give syslogd a chance to empty its socket buffer.
 	 */
-	disconnectlog_r(data);
-	connectlog_r(data);
-	do {
-		usleep(1);
-		if (send(data->log_file, tbuf, cnt, 0) >= 0)
-			return;
-	} while (errno == ENOBUFS);
+	if ((error = send(data->log_file, tbuf, cnt, 0)) < 0) {
+		if (errno != ENOBUFS) {
+			disconnectlog_r(data);
+			connectlog_r(data);
+		}
+		do {
+			usleep(1);
+			if ((error = send(data->log_file, tbuf, cnt, 0)) >= 0)
+				break;
+		} while (errno == ENOBUFS);
+	}
 
 	/*
 	 * Output the message to the console; try not to block
 	 * as a blocking console should not stop other processes.
 	 * Make sure the error reported is the one from the syslogd failure.
 	 */
-	if (data->log_stat & LOG_CONS &&
+	if (error == -1 && (data->log_stat & LOG_CONS) &&
 	    (fd = open(_PATH_CONSOLE, O_WRONLY|O_NONBLOCK, 0)) >= 0) {
 		struct iovec iov[2];
 		
@@ -301,9 +294,8 @@ vsyslog_r(pri, data, fmt, ap)
 		(void)close(fd);
 	}
 
-	if (data != &sdata) {
+	if (data != &sdata)
 		closelog_r(data);
-	}
 }
 
 static void
@@ -373,6 +365,7 @@ closelog_r(data)
 	(void)close(data->log_file);
 	data->log_file = -1;
 	data->connected = 0;
+	data->log_tag = NULL;
 }
 
 /* setlogmask -- set the log mask level */

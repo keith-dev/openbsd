@@ -1,4 +1,4 @@
-.\"	$OpenBSD: disklabel.8,v 1.45 2002/09/18 07:33:47 deraadt Exp $
+.\"	$OpenBSD: disklabel.8,v 1.50 2003/03/12 20:12:36 deraadt Exp $
 .\"	$NetBSD: disklabel.8,v 1.9 1995/03/18 14:54:38 cgd Exp $
 .\"
 .\" Copyright (c) 1987, 1988, 1991, 1993
@@ -47,6 +47,7 @@
 .Nm disklabel
 .Op Fl n
 .Op Fl cd Li \&| Fl r
+.Op Fl p Ar unit
 .Op Fl t
 .Op Fl v
 .Ar disk
@@ -187,6 +188,12 @@ flag.
 If
 .Ar tempfile
 already exists, it will be overwritten.
+.It Fl p Ar unit
+Print partition sizes and offsets in
+.Ar unit
+instead of sectors.
+Valid units are b(ytes), c(ylinders), k(ilobytes), m(egabytes) and
+g(igabytes).
 .It Fl t
 Format the label as a
 .Xr disktab 5
@@ -485,7 +492,7 @@ addition to a new label.
 Note that when a disk has no real BSD disklabel the kernel creates a
 default label so that the disk can be used.
 This default label will include other partitions found on the disk if
-they are supported on your architechture.
+they are supported on your architecture.
 For example, on systems that support
 .Xr fdisk 8
 partitions the default label will also include DOS and Linux partitions.
@@ -507,12 +514,12 @@ with the
 flag and paste any entries you want from the default label into the real
 one.
 .Sh EXAMPLES
-.Dl disklabel sd0
+.Li # disklabel sd0
 .Pp
 Display the in-core label for sd0 as obtained via
 .Pa /dev/rsd0c .
 .Pp
-.Dl disklabel -w -r /dev/rsd0c sd2212 foo
+.Li # disklabel -w -r /dev/rsd0c sd2212 foo
 .Pp
 Create a label for sd0 based on information for
 .Dq sd2212
@@ -523,7 +530,7 @@ Any existing bootstrap code will be clobbered.
 .Fl r
 flag though.)
 .Pp
-.Dl disklabel -e -r sd0
+.Li # disklabel -e -r sd0
 .Pp
 Read the on-disk label for sd0, edit it and reinstall in-core as
 well as on-disk.
@@ -533,13 +540,13 @@ flag
 though.)
 Existing bootstrap code is unaffected.
 .Pp
-.Dl disklabel -R sd0 mylabel
+.Li # disklabel -R sd0 mylabel
 .Pp
 Restore the on-disk and in-core label for sd0 from information in
 .Pa mylabel .
 Existing bootstrap code is unaffected.
 .Pp
-.Dl disklabel -B sd0
+.Li # disklabel -B sd0
 .Pp
 Install a new bootstrap on sd0.
 The boot code comes from
@@ -550,7 +557,7 @@ On-disk and in-core labels are unchanged, but on some systems other
 information may be destroyed.
 Use with care.
 .Pp
-.Dl disklabel -w -B /dev/rsd0c -b newboot sd2212
+.Li # disklabel -w -B /dev/rsd0c -b newboot sd2212
 .Pp
 Install a new label and bootstrap.
 The label is derived from disktab information for
@@ -619,7 +626,7 @@ option to
 can still be used to install old style boot code,
 but this usage is deprecated.
 .Pp
-On some machines, such as the sparc and amiga, partition tables
+On some machines, such as the sparc, partition tables
 may not exhibit the full functionality that is described above.
 .Sh BUGS
 When a disk name is given without a full pathname, the constructed

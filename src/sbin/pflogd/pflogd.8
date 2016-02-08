@@ -1,4 +1,4 @@
-.\"	$OpenBSD: pflogd.8,v 1.15 2002/04/23 23:09:51 frantzen Exp $
+.\"	$OpenBSD: pflogd.8,v 1.21 2003/03/11 07:10:04 david Exp $
 .\"
 .\" Copyright (c) 2001 Can Erkin Acar.  All rights reserved.
 .\"
@@ -49,7 +49,7 @@ in
 .Xr tcpdump 8
 binary format.
 These logs can be reviewed later using the
-.Ar -r
+.Fl r
 option of
 .Xr tcpdump 8 ,
 hopefully offline in case there are bugs in the packet parsing code of
@@ -99,7 +99,7 @@ The default of 96 is adequate for IP, ICMP, TCP, and UDP headers but may
 truncate protocol information for other protocols.
 Other file parsers may desire a higher snaplen.
 .It Ar expression
-selects which packets will be dumped, using the regular language of
+Selects which packets will be dumped, using the regular language of
 .Xr tcpdump 8 .
 .El
 .Sh EXAMPLES
@@ -120,10 +120,13 @@ operation of pflogd):
 # tcpdump -n -e -ttt -i pflog0
 .Ed
 .Pp
-Tcpdump has been extended to to be able to filter on the pfloghdr
-structure defined in net/if_pflog.h.  Tcpdump can restrict the output
+Tcpdump has been extended to be able to filter on the pfloghdr
+structure defined in
+.Aq Ar net/if_pflog.h .
+Tcpdump can restrict the output
 to packets logged on a specified interface, a rule number, a reason,
 a direction, an ip family or an action.
+.Pp
 .Bl -tag -width "reason match " -compact
 .It ip
 Address family equals IPv4.
@@ -136,10 +139,11 @@ Interface name equals "kue0"
 .It rulenum 10
 Rule number equals 10.
 .It reason match
-Reason equals match.  Also accepts "bad-offset", "fragment", "short",
-"normalize" and "memory".
+Reason equals match.
+Also accepts "bad-offset", "fragment", "short", "normalize" and "memory".
 .It action pass
-Action equals pass.  Also accepts "block".
+Action equals pass.
+Also accepts "block".
 .It inbound
 The direction was inbound.
 .It outbound
@@ -154,15 +158,16 @@ the wi0 interface:
 .Sh FILES
 .Bl -tag -width /var/run/pflogd.pid -compact
 .It Pa /var/run/pflogd.pid
-process ID of current
+Process ID of the currently running
+.Nm pflogd .
 .It Pa /var/log/pflog
-Default log file
+Default log file.
 .El
 .Sh SEE ALSO
 .Xr pcap 3 ,
 .Xr pf 4 ,
-.Xr pf.conf 5 ,
 .Xr pflog 4 ,
+.Xr pf.conf 5 ,
 .Xr newsyslog 8 ,
 .Xr tcpdump 8
 .Sh AUTHORS

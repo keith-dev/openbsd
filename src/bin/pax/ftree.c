@@ -1,4 +1,4 @@
-/*	$OpenBSD: ftree.c,v 1.18 2002/02/19 19:39:35 millert Exp $	*/
+/*	$OpenBSD: ftree.c,v 1.21 2002/10/16 19:20:02 millert Exp $	*/
 /*	$NetBSD: ftree.c,v 1.4 1995/03/21 09:07:21 cgd Exp $	*/
 
 /*-
@@ -40,9 +40,9 @@
 
 #ifndef lint
 #if 0
-static char sccsid[] = "@(#)ftree.c	8.2 (Berkeley) 4/18/94";
+static const char sccsid[] = "@(#)ftree.c	8.2 (Berkeley) 4/18/94";
 #else
-static char rcsid[] = "$OpenBSD: ftree.c,v 1.18 2002/02/19 19:39:35 millert Exp $";
+static const char rcsid[] = "$OpenBSD: ftree.c,v 1.21 2002/10/16 19:20:02 millert Exp $";
 #endif
 #endif /* not lint */
 
@@ -146,10 +146,10 @@ ftree_start(void)
  */
 
 int
-ftree_add(register char *str, int chflg)
+ftree_add(char *str, int chflg)
 {
-	register FTREE *ft;
-	register int len;
+	FTREE *ft;
+	int len;
 
 	/*
 	 * simple check for bad args
@@ -191,7 +191,7 @@ ftree_add(register char *str, int chflg)
  */
 
 void
-ftree_sel(register ARCHD *arcn)
+ftree_sel(ARCHD *arcn)
 {
 	/*
 	 * set reference bit for this pattern. This linked list is only used
@@ -226,8 +226,8 @@ ftree_sel(register ARCHD *arcn)
 void
 ftree_chk(void)
 {
-	register FTREE *ft;
-	register int wban = 0;
+	FTREE *ft;
+	int wban = 0;
 
 	/*
 	 * make sure all dir access times were reset.
@@ -263,7 +263,7 @@ ftree_chk(void)
 static int
 ftree_arg(void)
 {
-	register char *pt;
+	char *pt;
 
 	/*
 	 * close off the current file tree
@@ -316,7 +316,7 @@ ftree_arg(void)
 		 * watch it, fts wants the file arg stored in a array of char
 		 * ptrs, with the last one a null. we use a two element array
 		 * and set farray[0] to point at the buffer with the file name
-		 * in it. We cannnot pass all the file args to fts at one shot
+		 * in it. We cannot pass all the file args to fts at one shot
 		 * as we need to keep a handle on which file arg generates what
 		 * files (the -n and -d flags need this). If the open is
 		 * successful, return a 0.
@@ -335,9 +335,9 @@ ftree_arg(void)
  */
 
 int
-next_file(register ARCHD *arcn)
+next_file(ARCHD *arcn)
 {
-	register int cnt;
+	int cnt;
 	time_t atime;
 	time_t mtime;
 

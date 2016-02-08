@@ -1,13 +1,13 @@
-/* $RCSfile: hash.c,v $$Revision: 1.5 $$Date: 2001/05/24 18:36:40 $
+/* $RCSfile: hash.c,v $$Revision: 1.6 $$Date: 2002/10/27 22:25:40 $
  *
- *    Copyright (c) 1991-2001, Larry Wall
+ *    Copyright (c) 1991-2002, Larry Wall
  *
  *    You may distribute under the terms of either the GNU General Public
  *    License or the Artistic License, as specified in the README file.
  *
  * $Log: hash.c,v $
- * Revision 1.5  2001/05/24 18:36:40  millert
- * merge in perl 5.6.1 with our local changes
+ * Revision 1.6  2002/10/27 22:25:40  millert
+ * Resolve conflicts, remove old files, merge local changes
  *
  */
 
@@ -15,6 +15,10 @@
 #include "EXTERN.h"
 #include "a2p.h"
 #include "util.h"
+
+#ifdef NETWARE
+char *savestr(char *str);
+#endif
 
 STR *
 hfetch(register HASH *tb, char *key)
@@ -140,7 +144,7 @@ hsplit(HASH *tb)
     register HENT **oentry;
 
     a = (HENT**) saferealloc((char*)tb->tbl_array, newsize * sizeof(HENT*));
-    bzero((char*)&a[oldsize], oldsize * sizeof(HENT*)); /* zero second half */
+    memset(&a[oldsize], 0, oldsize * sizeof(HENT*)); /* zero second half */
     tb->tbl_max = --newsize;
     tb->tbl_array = a;
 
@@ -174,7 +178,7 @@ hnew(void)
     tb->tbl_fill = 0;
     tb->tbl_max = 7;
     hiterinit(tb);	/* so each() will start off right */
-    bzero((char*)tb->tbl_array, 8 * sizeof(HENT*));
+    memset(tb->tbl_array, 0, 8 * sizeof(HENT*));
     return tb;
 }
 

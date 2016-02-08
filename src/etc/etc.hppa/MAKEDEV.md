@@ -1,5 +1,5 @@
 vers(__file__,
-	{-$OpenBSD: MAKEDEV.md,v 1.9 2002/10/01 21:10:43 mickey Exp $-},
+	{-$OpenBSD: MAKEDEV.md,v 1.13 2003/02/05 20:17:38 mickey Exp $-},
 etc.MACHINE)dnl
 dnl
 dnl Copyright (c) 2001 Todd T. Fries <todd@OpenBSD.org>
@@ -45,6 +45,13 @@ _DEV(tty, 4)
 _DEV(pty, 5)
 _TITLE(prn)
 _DEV(lpt, 30)
+_TITLE(cons)
+_DEV(wscons)
+_DEV(wsdisp, 27)
+_DEV(wskbd, 28)
+_DEV(wsmux, 30)
+_TITLE(point)
+_DEV(wsmouse, 29)
 _TITLE(call)
 _TITLE(spec)
 _DEV(fdesc, 16)
@@ -52,7 +59,6 @@ _DEV(bpf, 17)
 _DEV(tun, 18)
 _DEV(pf, 21)
 _DEV(lkm, 19)
-_DEV(altq, 33)
 _DEV(rnd, 20)
 _DEV(xfs, 31)
 _DEV(ch, 13)
@@ -72,5 +78,31 @@ ramdisk)
 	_recurse pty0 bpf0 bpf1 tun0 tun1 lkm random
 	;;
 
-_std(1, 2, 29, 3, 6)
+_std(1, 2, 25, 3, 6)
 	;;
+dnl
+dnl *** hppa specific devices
+dnl
+target(all, ses, 0)dnl
+target(all, ch, 0)dnl
+target(all, ss, 0, 1)dnl
+target(all, xfs, 0)dnl
+twrget(all, flo, fd, 0, 0B, 0C, 0D, 0E, 0F, 0G, 0H)dnl
+twrget(all, flo, fd, 1, 1B, 1C, 1D, 1E, 1F, 1G, 1H)dnl
+target(all, pty, 0, 1, 2)dnl
+target(all, bpf, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9)dnl
+target(all, tun, 0, 1, 2, 3)dnl
+target(all, xy, 0, 1, 2, 3)dnl
+target(all, rd, 0)dnl
+target(all, cd, 0, 1)dnl
+target(all, sd, 0, 1, 2, 3, 4)dnl
+target(all, vnd, 0, 1, 2, 3)dnl
+target(all, ccd, 0, 1, 2, 3)dnl
+target(ramd, st, 0, 1)dnl
+target(ramd, sd, 0, 1, 2, 3)dnl
+target(ramd, rd, 0, 1)dnl
+target(ramd, pty, 0)dnl
+target(ramd, hil)dnl
+target(ramd, com, 0, 1)dnl
+target(ramd, bpf, 0, 1)dnl
+target(ramd, tun, 0, 1)dnl

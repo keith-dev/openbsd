@@ -46,7 +46,7 @@
 
 ;;; Commentary:
 
-;; $Id: cperl-mode.el,v 1.5 2001/05/24 18:35:07 millert Exp $
+;; $Id: cperl-mode.el,v 1.6 2002/10/27 22:25:21 millert Exp $
 
 ;;; If your Emacs does not default to `cperl-mode' on Perl files:
 ;;; To use this mode put the following into
@@ -1610,7 +1610,7 @@ For best results apply to an older Emacs the patches from
   ftp://ftp.math.ohio-state.edu/pub/users/ilya/cperl-mode/patches
 \(this upgrades syntax-parsing abilities of RMS Emaxen v19.34 and 
 v20.2 up to the level of RMS Emacs v20.3 - a must for a good Perl
-mode.)  You will not get much from XEmacs, it's syntax abilities are
+mode.)  You will not get much from XEmacs; its syntax abilities are
 too primitive.
 
 Get support packages choose-color.el (or font-lock-extra.el before
@@ -8228,7 +8228,7 @@ We suppose that the regexp is scanned already."
 	  (cperl-fontify-syntaxically to)))))
 
 (defvar cperl-version 
-  (let ((v  "$Revision: 1.5 $"))
+  (let ((v  "$Revision: 1.6 $"))
     (string-match ":\\s *\\([0-9.]+\\)" v)
     (substring v (match-beginning 1) (match-end 1)))
   "Version of IZ-supported CPerl package this file is based on.")

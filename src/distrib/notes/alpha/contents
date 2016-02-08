@@ -1,10 +1,12 @@
+dnl	$OpenBSD: contents,v 1.30 2003/03/25 19:57:29 miod Exp $
 TopPart
 
 OpenBSDfloppy
 				This floppy image will boot on the following
 				MACHINE models:
 				- AlphaStation 200, 250, 255, 400
-				- AlphaStation 500, 600
+dnl uncomment when it works again
+dnl				- AlphaStation 500, 600
 				- AlphaServer 800, 1000, 1000A
 				- AXPpci33 based machines, including
 				  ``Noname'', UDB, Multia
@@ -25,26 +27,28 @@ OpenBSDbsd
 
 OpenBSDrd
 
+OpenBSDcd
+
 OpenBSDfloppydesc(two,Each,s)
 
 DistributionDescription(ten)
 
-OpenBSDbase(30.6,91.3,shared)
+OpenBSDbase(39.0,122.8,shared)
 
-OpenBSDcomp(27.8,116.7,shared)
+OpenBSDcomp(23.9,94.7,shared)
 
-OpenBSDetc(1.2,3.9)
+OpenBSDetc(1.5,5.5)
 
-OpenBSDgame(3.0,6.9)
+OpenBSDgame(2.7,6.4)
 
-OpenBSDman(5.8,20.7)
+OpenBSDman(6.3,22.4)
 
-OpenBSDmisc(1.7,5.6)
+OpenBSDmisc(1.9,6.2)
 
-OpenBSDxbase(11.4,37.8)
+OpenBSDxbase(12.1,40.2)
 
 OpenBSDxfont(31.4,34.6)
 
-OpenBSDxserv(3.2,9.5)
+OpenBSDxserv(6.4,22.3)
 
-OpenBSDxshare(1.9,9.4)
+OpenBSDxshare(1.6,7.8)

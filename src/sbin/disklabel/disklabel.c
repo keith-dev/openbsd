@@ -1,4 +1,4 @@
-/*	$OpenBSD: disklabel.c,v 1.75 2002/06/09 08:13:05 todd Exp $	*/
+/*	$OpenBSD: disklabel.c,v 1.78 2003/02/13 00:10:39 tedu Exp $	*/
 
 /*
  * Copyright (c) 1987, 1993
@@ -43,7 +43,7 @@ static const char copyright[] =
 #endif /* not lint */
 
 #ifndef lint
-static const char rcsid[] = "$OpenBSD: disklabel.c,v 1.75 2002/06/09 08:13:05 todd Exp $";
+static const char rcsid[] = "$OpenBSD: disklabel.c,v 1.78 2003/02/13 00:10:39 tedu Exp $";
 #endif /* not lint */
 
 #include <sys/param.h>
@@ -125,7 +125,7 @@ int	writelabel(int, char *, struct disklabel *);
 void	l_perror(char *);
 struct disklabel *readlabel(int);
 struct disklabel *makebootarea(char *, struct disklabel *, int);
-void	display(FILE *, struct disklabel *);
+void	display(FILE *, struct disklabel *, char);
 void	display_partition(FILE *, struct disklabel *, char **, int, char, int);
 int	width_partition(struct disklabel *, int);
 int	editor(struct disklabel *, int, char *, char *);
@@ -148,9 +148,10 @@ main(argc, argv)
 	int ch, f, writeable, error = 0;
 	char *fstabfile = NULL;
 	struct disklabel *lp;
+	char print_unit = 0;
 	FILE *t;
 
-	while ((ch = getopt(argc, argv, "BEFf:NRWb:cdenrs:tvw")) != -1)
+	while ((ch = getopt(argc, argv, "BEFf:NRWb:cdenp:rs:tvw")) != -1)
 		switch (ch) {
 #if NUMBOOT > 0
 		case 'B':
@@ -211,6 +212,12 @@ main(argc, argv)
 			if (op != UNSPEC)
 				usage();
 			op = WRITE;
+			break;
+		case 'p':
+			if (strchr("bckmg", optarg[0]) == NULL ||
+			    optarg[1] != '\0')
+				usage();
+			print_unit = optarg[0];
 			break;
 		case 'n':
 			donothing++;
@@ -284,7 +291,7 @@ main(argc, argv)
 		if (tflag)
 			makedisktab(stdout, lp);
 		else
-			display(stdout, lp);
+			display(stdout, lp, print_unit);
 		error = checklabel(lp);
 		break;
 	case RESTORE:
@@ -1003,7 +1010,7 @@ display_partition(f, lp, mp, i, unit, width)
 	char unit;
 	int width;
 {
-	struct partition *pp = &lp->d_partitions[i];
+	volatile struct partition *pp = &lp->d_partitions[i];
 	double p_size, p_offset;
 
 	if (width == 0)
@@ -1089,9 +1096,10 @@ display_partition(f, lp, mp, i, unit, width)
 }
 
 void
-display(f, lp)
+display(f, lp, unit)
 	FILE *f;
 	struct disklabel *lp;
+	char unit;
 {
 	int i, j;
 	int width;
@@ -1139,7 +1147,7 @@ display(f, lp)
 	    "#    %*.*s %*.*s    fstype   [fsize bsize   cpg]\n",
 	    width, width, "size", width, width, "offset");
 	for (i = 0; i < lp->d_npartitions; i++)
-		display_partition(f, lp, NULL, i, 0, width);
+		display_partition(f, lp, NULL, i, unit, width);
 	fflush(f);
 }
 
@@ -1158,7 +1166,7 @@ edit(lp, f)
 		warn("%s", tmpfil);
 		return (1);
 	}
-	display(fp, lp);
+	display(fp, lp, 0);
 	fprintf(fp, "\n# Notes:\n");
 	fprintf(fp,
 "# Up to 16 partitions are valid, named from 'a' to 'p'.  Partition 'a' is\n"
@@ -1166,7 +1174,7 @@ edit(lp, f)
 "# disk. Any other partition is free for any use.  'size' and 'offset' are\n"
 "# in 512-byte blocks. fstype should be '4.2BSD', 'swap', or 'none' or some\n"
 "# other values.  fsize/bsize/cpg should typically be '1024 8192 16' for a\n"
-"# 4.2BSD filesystem (or '512 4096 16' except on alpha, sun4, amiga, sun3...)\n");
+"# 4.2BSD filesystem (or '512 4096 16' except on alpha, sun4, ...)\n");
 	fclose(fp);
 	for (;;) {
 		if (!editit())
@@ -1758,7 +1766,7 @@ usage()
 
 	fprintf(stderr, "usage:\n");
 	fprintf(stderr,
-	    "  disklabel [-nv] [-r|-cd] [-t] disk%s     (read)\n",
+	    "  disklabel [-nv] [-r|-cd] [-p unit] [-t] disk%s (read)\n",
 	    blank);
 	fprintf(stderr,
 	    "  disklabel [-nv] [-r|-cd] -e disk%s       (edit)\n",

@@ -1,4 +1,4 @@
-dnl	$OpenBSD: install,v 1.12 2002/06/09 05:53:54 todd Exp $
+dnl	$OpenBSD: install,v 1.16 2003/03/24 11:33:56 miod Exp $
 OpenBSDInstallShortPrelude
 
 Before you begin, you should decide if OpenBSD is to be installed
@@ -17,7 +17,7 @@ and reinstalled under MacOS.
 OpenBSDInstallPart2
 
 	At this time, the system can be installed from the supplied
-	CD boot image, by network loading the bootloader or loading
+	CD-ROM boot image, by network loading the bootloader or loading
 	the bootloader and kernel from a HFS partition.
 
 	Once the bootloader is installed on the local hard drive, the
@@ -110,10 +110,19 @@ OpenBSDInstallPart4({:-If you have DOS or Linux
 	partitions defined on the disk, these will usually show up as
 	partition 'h', 'i' and so on.
 
-	Currently OpenBSD will not share a disk with any other operating
-	system, so care should be taken not to overwrite any data on other
-	disks in the system and that no data is on the disk to be used
-	for OpenBSD/MACHINE.
+	OpenBSD/MACHINE can share a disk with MacOS or MacOS X by using
+	an HFS partitioned disk. For proper layout, the disk should be
+	partitioned with MacOS or MacOS X first with unused space or a
+	spare partition where OpenBSD can be installed.  No low disk
+	boundaries exist on MACHINE. MACHINE is unable to install the
+	bootloader into the HFS(+) partition to boot OpenBSD so it is
+	necessary copy 'ofwboot' from the installation media into
+	the first HFS(+) partition using MacOS or MacOS X.
+
+	If the disk is parititioned using MBR, the bootloader is
+	automatically installed. However because fdisk is not LBA
+	knowledgeable it may be necessary to run the 'b' command in
+	disklabel to allow OpenBSD to use the entire disk.
 
 	Note that all OpenBSD partitions in the disk label must have an
 	offset that makes it start within the OpenBSD part of the disk,

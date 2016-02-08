@@ -1,4 +1,4 @@
-/*	$OpenBSD: auth_subr.c,v 1.12 2002/08/04 22:44:12 millert Exp $	*/
+/*	$OpenBSD: auth_subr.c,v 1.22 2003/01/04 22:36:09 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 1995,1996,1997 Berkeley Software Design, Inc.
@@ -277,7 +277,7 @@ auth_close(auth_session_t *as)
 }
 
 /*
- * Request a challange for the session.
+ * Request a challenge for the session.
  * The name and style must have already been specified
  */
 char *
@@ -285,10 +285,10 @@ auth_challenge(auth_session_t *as)
 {
 	char path[MAXPATHLEN];
 
-	as->state = 0;
-
 	if (as == NULL || as->style == NULL || as->name == NULL)
 		return (NULL);
+
+	as->state = 0;
 
 	if (as->challenge) {
 		free(as->challenge);
@@ -297,7 +297,7 @@ auth_challenge(auth_session_t *as)
 
 	snprintf(path, sizeof(path), _PATH_AUTHPROG "%s", as->style);
 	auth_call(as, path, as->style, "-s", "challenge", as->name,
-	    as->class, NULL);
+	    as->class, (char *)NULL);
 	if (as->state & AUTH_CHALLENGE)
 		as->challenge = auth_getvalue(as, "challenge");
 	as->state = 0;
@@ -428,6 +428,8 @@ auth_setitem(auth_session_t *as, auth_item_t item, char *value)
 		return (0);
 
 	case AUTHV_CHALLENGE:
+		if (value == as->challenge)
+			return (0);
 		if (value != NULL && (value = strdup(value)) == NULL)
 			return (-1);
 		if (as->challenge)
@@ -436,45 +438,45 @@ auth_setitem(auth_session_t *as, auth_item_t item, char *value)
 		return (0);
 
 	case AUTHV_CLASS:
+		if (value == as->class)
+			return (0);
 		if (value != NULL && (value = strdup(value)) == NULL)
 			return (-1);
-
 		if (as->class)
 			free(as->class);
-
 		as->class = value;
 		return (0);
 
 	case AUTHV_NAME:
+		if (value == as->name)
+			return (0);
 		if (value != NULL && (value = strdup(value)) == NULL)
 			return (-1);
-
 		if (as->name)
 			free(as->name);
-
 		as->name = value;
 		return (0);
 
 	case AUTHV_SERVICE:
+		if (value == as->service)
+			return (0);
 		if (value == NULL || strcmp(value, defservice) == 0)
 			value = defservice;
 		else if ((value = strdup(value)) == NULL)
 			return (-1);
-
 		if (as->service && as->service != defservice)
 			free(as->service);
-
 		as->service = value;
 		return (0);
 
 	case AUTHV_STYLE:
+		if (value == as->style)
+			return (0);
 		if (value == NULL || strchr(value, '/') != NULL ||
 		    (value = strdup(value)) == NULL)
 			return (-1);
-
 		if (as->style)
 			free(as->style);
-
 		as->style = value;
 		return (0);
 
@@ -502,7 +504,7 @@ auth_setoption(auth_session_t *as, char *n, char *v)
 
 	opt->opt = (char *)(opt + 1);
 
-	sprintf(opt->opt, "%s=%s", n, v);
+	snprintf(opt->opt, i, "%s=%s", n, v);
 	opt->next = as->optlist;
 	as->optlist = opt;
 	return(0);
@@ -748,10 +750,9 @@ auth_check_change(auth_session_t *as)
  * is AUTH_OKAY for approval like scripts.
  *
  * Internally additional trailing arguments can be read from as->ap
- * Options will be placed be placed just after the first argument
- * (not including path).
+ * Options will be placed just after the first argument (not including path).
  *
- * Any data will sent (and freed) to the script
+ * Any data will be sent to (and freed by) the script
  */
 int
 auth_call(auth_session_t *as, char *path, ...)
@@ -764,7 +765,7 @@ auth_call(auth_session_t *as, char *path, ...)
 	int okay;
 	int pfd[2];
 	int argc;
-	char *argv[64];		/* 64 args should more than enough */
+	char *argv[64];		/* 64 args should be more than enough */
 #define	Nargc	(sizeof(argv)/sizeof(argv[0]))
 
 	va_start(as->ap0, path);
@@ -847,6 +848,7 @@ auth_call(auth_session_t *as, char *path, ...)
 		as->index = 0;
 		_auth_spool(as, pfd[0]);
 		close(pfd[0]);
+		status = 0;
 		if (waitpid(pid, &status, 0) < 0) {
 			if (errno != ECHILD) {
 				syslog(LOG_ERR, "%s: waitpid: %m", path);

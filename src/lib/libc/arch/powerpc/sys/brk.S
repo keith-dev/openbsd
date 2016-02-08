@@ -1,6 +1,33 @@
+/* $OpenBSD: brk.S,v 1.6 2002/10/07 04:47:12 drahn Exp $ */
+
+/*
+ * Copyright (c) 1996 Dale Rahn
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS
+ * OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+ * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY
+ * DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ */
+
 #include "SYS.h"
 
-	.extern curbrk
+	.extern _ASM_LABEL(__curbrk)
 	.extern _C_LABEL(end)
 
 PREFIX2(brk,break)
@@ -24,10 +51,10 @@ PREFIX2(brk,break)
 	mr	7, 3
 	/* call break(size) */
 #ifndef PIC
-	addis	6, 0, curbrk@H
-	ori	6, 6, curbrk@L	/* # 6 = &curbrk */
+	addis	6, 0, _ASM_LABEL(__curbrk)@H
+	ori	6, 6, _ASM_LABEL(__curbrk)@L	/* # 6 = &__curbrk */
 #else
-	lwz	6,_ASM_LABEL(curbrk)@got(9)
+	lwz	6,_ASM_LABEL(__curbrk)@got(9)
 #endif
 
 	sc
@@ -35,10 +62,10 @@ PREFIX2(brk,break)
 	/* check for error */
 	cmpwi	0, 0
 	beq+	.L_brk_ok	/* OK so this is stupid but I haven't read b */
-	b	PIC_PLT(_ASM_LABEL(cerror))
+	b	PIC_PLT(_ASM_LABEL(__cerror))
 
-	/* update, curbrk and return */
+	/* update, __curbrk and return */
 .L_brk_ok:
-	stw	7, 0(6)		/* # remember, 6=&curbrk, 3= new value */
+	stw	7, 0(6)		/* # remember, 6=&__curbrk, 3= new value */
 	mr	3, 0		/* # return 0 */
 	blr

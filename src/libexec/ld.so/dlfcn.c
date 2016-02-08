@@ -1,4 +1,4 @@
-/*	$OpenBSD: dlfcn.c,v 1.20 2002/08/31 04:58:25 drahn Exp $ */
+/*	$OpenBSD: dlfcn.c,v 1.24 2003/02/02 16:57:58 deraadt Exp $ */
 
 /*
  * Copyright (c) 1998 Per Fogelstrom, Opsycon AB
@@ -68,11 +68,11 @@ dlopen(const char *libname, int how)
 		return((void *)object);	/* Already loaded */
 
 	/*
-	 *	Check for 'needed' objects. For each 'needed' object we
-	 *	create a 'shadow' object and add it to a list attached to
-	 *	the object so we know our dependencies. This list should
-	 *	also be used to determine the library search order when
-	 *	resolving undefined symbols. This is not yet done. XXX
+	 * Check for 'needed' objects. For each 'needed' object we
+	 * create a 'shadow' object and add it to a list attached to
+	 * the object so we know our dependencies. This list should
+	 * also be used to determine the library search order when
+	 * resolving undefined symbols. This is not yet done. XXX
 	 */
 	dynobj = object;
 	while (dynobj) {
@@ -128,7 +128,7 @@ dlsym(void *handle, const char *name)
 	}
 
 	retval = (void *)_dl_find_symbol(name, object, &sym,
-	    SYM_SEARCH_SELF|SYM_WARNNOTFOUND|SYM_NOTPLT, 0);
+	    SYM_SEARCH_SELF|SYM_NOWARNNOTFOUND|SYM_NOTPLT, 0, "");
 	if (sym != NULL)
 		retval += sym->st_value;
 	else
@@ -192,8 +192,8 @@ _dl_real_close(void *handle)
 }
 
 /*
- *	Scan through the shadow dep list and 'unload' every library
- *	we depend upon. Shadow objects are removed when removing ourself.
+ * Scan through the shadow dep list and 'unload' every library
+ * we depend upon. Shadow objects are removed when removing ourself.
  */
 static void
 _dl_unload_deps(elf_object_t *object)
@@ -212,12 +212,10 @@ _dl_unload_deps(elf_object_t *object)
 }
 
 /*
- *	dlerror()
- *
- *	Return a character string describing the last dl... error occurred.
+ * Return a character string describing the last dl... error occurred.
  */
 const char *
-dlerror()
+dlerror(void)
 {
 	switch (_dl_errno) {
 	case 0:	/* NO ERROR */
@@ -244,19 +242,25 @@ dlerror()
 }
 
 void
-_dl_show_objects()
+_dl_show_objects(void)
 {
 	elf_object_t *object;
 	char *objtypename;
 	int outputfd;
+	char *pad;
 
 	object = _dl_objects;
 	if (_dl_traceld)
 		outputfd = STDOUT_FILENO;
-	else 
+	else
 		outputfd = STDERR_FILENO;
 
-	_dl_fdprintf(outputfd, "\tStart    End     Type Ref Name\n");
+	if (sizeof(long) == 8)
+		pad = "        ";
+	else
+		pad = "";
+	_dl_fdprintf(outputfd, "\tStart   %s End     %s Type Ref Name\n",
+	    pad, pad);
 
 	while (object) {
 		switch (object->obj_type) {
@@ -276,8 +280,9 @@ _dl_show_objects()
 			objtypename = "????";
 			break;
 		}
-		_dl_fdprintf(outputfd, "\t%X %X %s  %d  %s\n",
-		    object->load_addr, object->load_addr + object->load_size,
+		_dl_fdprintf(outputfd, "\t%lX %lX %s  %d  %s\n",
+		    (void *)object->load_addr,
+		    (void *)(object->load_addr + object->load_size),
 		    objtypename, object->refcount, object->load_name);
 		object = object->next;
 	}

@@ -1,12 +1,13 @@
-dnl	$OpenBSD: install,v 1.20 2002/04/09 01:22:22 miod Exp $
+dnl	$OpenBSD: install,v 1.22 2003/03/24 11:33:56 miod Exp $
 OpenBSDInstallPrelude
 
 dnl XXX document mopbooting from the SRM console.
 dnl XXX check if recent SRM console still can netboot, and if so, if they
 dnl XXX still use mop or a more recent protocol.
-There are several ways to install OpenBSD onto a disk.  The easiest way
-is to boot from the OpenBSD CD-ROM.  You can also use one of the OpenBSD
-installation floppies, if your machine has a floppy drive.
+There are several ways to install OpenBSD onto a disk.  The easiest way is
+to boot from the bootable CD-ROM mini image, then install from your favorite
+source. You can also use one of the OpenBSD installation floppies, if your
+machine has a floppy drive.
 
 Booting from Floppy Disk installation media:
 
@@ -32,16 +33,24 @@ Booting from CD-ROM installation media:
 	(unless it is DKA0).  For example, if your CD-ROM drive is listed
 	as DKA600, you want to use dka6 (device ID's are case
 	insensitive).
-	Insert the OpenBSD/MACHINE CD and enter
+
+	On all MACHINE computers but the TURBOchannel DEC 3000 series,
+	insert the OpenBSD/MACHINE CD-ROM and enter
 		boot -fi OSREV/MACHINE/bsd.rd DEVICE
-	where DEVICE is the dka device name.  Note that the argument
-	order is important here.
+	where DEVICE is the dka device name.
+
+	On the DEC 3000 series, insert the OpenBSD/MACHINE CD-ROM and enter
+		boot -fi ALPHA DEVICE
+	where DEVICE is the dka device name.
+	
+	Note that, in both cases, the argument order is important.
+
 	You should see info about the primary and secondary boot
 	and then the kernel should start to load.  If the kernel
 	fails to load or the spinning cursor has stopped and nothing
 	further has happened, you either have a hardware problem or
-	your alpha is not currently supported by OpenBSD; try booting
-	from a floppy instead.
+	your MACHINE is not currently supported by OpenBSD; try booting
+	from a floppy instead if possible.
 
 
 Installing using the Floppy or CD-ROM procedure:

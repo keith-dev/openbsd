@@ -1,4 +1,4 @@
-/*	$OpenBSD: crt0.c,v 1.3 2002/02/16 21:27:20 millert Exp $	*/
+/*	$OpenBSD: crt0.c,v 1.6 2003/02/28 18:05:51 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2001 Michael Shalayeff
@@ -35,13 +35,13 @@ int	global __asm ("$global$") = 0;
 int	sh_func_adrs __asm ("$$sh_func_adrs") = 0;
 
 #if defined(LIBC_SCCS) && !defined(lint)
-static const char rcsid[] = "$OpenBSD: crt0.c,v 1.3 2002/02/16 21:27:20 millert Exp $";
+static const char rcsid[] = "$OpenBSD: crt0.c,v 1.6 2003/02/28 18:05:51 deraadt Exp $";
 #endif /* LIBC_SCCS and not lint */
 
-#include <stdlib.h>
 #include <sys/syscall.h>
 #include <sys/fcntl.h>
 #include <sys/exec.h>
+#include <stdlib.h>
 #include <paths.h>
 
 #include "common.h"
@@ -61,10 +61,11 @@ extern void	__fini(void);
 #ifdef MCRT0
 extern void	monstartup(u_long, u_long);
 extern void	_mcleanup(void);
-extern u_int etext, eprol;
+extern unsigned char etext, eprol;
 #endif /* MCRT0 */
 
 void __start(char **, void (*)(void), const Obj_Entry *);
+static char *__strrchr(const char *p, char ch);
 
 void
 __start(sp, cleanup, obj)
@@ -74,6 +75,7 @@ __start(sp, cleanup, obj)
 {
 	struct ps_strings *arginfo = (struct ps_strings *)sp;
 	char **argv, *namep;
+	char *s;
 
 	__asm __volatile (".import $global$, data\n\t"
 			  "ldil L%%$global$, %%r27\n\t"
@@ -86,6 +88,11 @@ __start(sp, cleanup, obj)
 			__progname = namep;
 		else
 			__progname++;
+		for (s = __progname_storage; *__progname &&
+		    s < &__progname_storage[sizeof __progname_storage - 1]; )
+			*s++ = *__progname++;
+		*s = '\0';
+		__progname = __progname_storage;
 	}
 
 #ifdef MCRT0
@@ -93,13 +100,24 @@ __start(sp, cleanup, obj)
 	monstartup((u_long)&eprol, (u_long)&etext);
 #endif
 
+	__init();
+
 	exit(main(arginfo->ps_nargvstr, argv, environ));
 }
 
-void __main() {}
+static char *
+__strrchr(const char *p, char ch)
+{
+	char *save;
 
-#include "common.c"
+	for (save = NULL;; ++p) {
+		if (*p == ch)
+			save = (char *)p;
+		if (!*p)
+			return(save);
+	}
+}
 
 #ifdef MCRT0
-__asm __volatile(".export eprol, entry\neprol");
+__asm (".export eprol, entry\n\t.label eprol");
 #endif

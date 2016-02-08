@@ -1,4 +1,4 @@
-#	$OpenBSD: changelist,v 1.26 2002/09/22 23:37:13 millert Exp $
+#	$OpenBSD: changelist,v 1.30 2003/02/21 08:59:46 jakob Exp $
 #
 # List of files which the security script backs up and checks
 # for modifications.
@@ -8,7 +8,6 @@
 #
 
 /etc/Distfile
-/etc/altq.conf
 /etc/boot.conf
 /etc/bootparams
 /etc/bootptab
@@ -56,11 +55,11 @@
 /etc/mrouted.conf
 /etc/mygate
 /etc/myname
-/etc/named.boot
 /etc/netgroup
 /etc/netstart
 /etc/networks
 /etc/newsyslog.conf
+/etc/ntp.conf
 /etc/passwd
 /etc/passwd.conf
 /etc/pf.conf
@@ -76,6 +75,7 @@
 /etc/rc.shutdown
 /etc/remote
 /etc/resolv.conf
+/etc/rndc.key
 /etc/rpc
 /etc/security
 /etc/services
@@ -114,7 +114,8 @@
 /var/cron/allow
 /var/cron/deny
 /var/cron/tabs/root
-/var/named/named.boot
+/var/named/etc/named.conf
+/var/named/etc/rndc.key
 /var/www/conf/httpd.conf
 /var/www/conf/srm.conf
 /var/www/conf/access.conf

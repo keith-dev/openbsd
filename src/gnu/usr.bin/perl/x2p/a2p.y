@@ -1,14 +1,14 @@
 %{
-/* $RCSfile: a2p.y,v $$Revision: 1.5 $$Date: 2001/05/24 18:36:40 $
+/* $RCSfile: a2p.y,v $$Revision: 1.6 $$Date: 2002/10/27 22:25:40 $
  *
- *    Copyright (c) 1991-2001, Larry Wall
+ *    Copyright (c) 1991-2002, Larry Wall
  *
  *    You may distribute under the terms of either the GNU General Public
  *    License or the Artistic License, as specified in the README file.
  *
  * $Log: a2p.y,v $
- * Revision 1.5  2001/05/24 18:36:40  millert
- * merge in perl 5.6.1 with our local changes
+ * Revision 1.6  2002/10/27 22:25:40  millert
+ * Resolve conflicts, remove old files, merge local changes
  *
  */
 

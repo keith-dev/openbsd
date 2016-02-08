@@ -1,4 +1,4 @@
-/*	$OpenBSD: pf_print_state.c,v 1.5 2002/07/31 20:19:15 henning Exp $	*/
+/*	$OpenBSD: pf_print_state.c,v 1.23 2003/03/24 17:06:39 cedric Exp $	*/
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
@@ -33,75 +33,53 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <net/if.h>
-#include <netinet/in.h>
-#include <netinet/in_systm.h>
-#include <netinet/ip.h>
-#include <netinet/ip_icmp.h>
-#include <netinet/icmp6.h>
 #define TCPSTATES
 #include <netinet/tcp_fsm.h>
 #include <net/pfvar.h>
 #include <arpa/inet.h>
+#include <netdb.h>
 
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
-#include <ctype.h>
-#include <netdb.h>
-#include <stdarg.h>
-#include <errno.h>
-#include <err.h>
 
 #include "pfctl_parser.h"
-#include "pf_print_state.h"
+#include "pfctl.h"
 
-void	print_name(struct pf_addr *, struct pf_addr *, int);
-
-int
-unmask(struct pf_addr *m, u_int8_t af)
-{
-	int i = 31, j = 0, b = 0, msize;
-	u_int32_t tmp;
-
-	if (af == AF_INET)
-		msize = 1;
-	else
-		msize = 4;
-	while (j < msize && m->addr32[j] == 0xffffffff) {
-		b += 32;
-		j++;
-	}
-	if (j < msize) {
-		tmp = ntohl(m->addr32[j]);
-		for (i = 31; tmp & (1 << i); --i)
-			b++;
-	}
-	return (b);
-}
+void	print_name(struct pf_addr *, sa_family_t);
 
 void
-print_addr(struct pf_addr_wrap *addr, struct pf_addr *mask, u_int8_t af)
+print_addr(struct pf_addr_wrap *addr, sa_family_t af, int verbose)
 {
 	char buf[48];
 
-	if (addr->addr_dyn != NULL)
-		printf("(%s)", addr->addr.pfa.ifname);
-	else {
-		if (inet_ntop(af, &addr->addr, buf, sizeof(buf)) == NULL)
+	if (addr->type == PF_ADDR_DYNIFTL)
+		printf("(%s)", addr->v.ifname);
+	else if (addr->type == PF_ADDR_TABLE) {
+		if (verbose)
+			if (addr->p.tblcnt == -1)
+				printf("<%s:*>", addr->v.tblname);
+			else
+				printf("<%s:%d>", addr->v.tblname,
+				    addr->p.tblcnt);
+		else
+			printf("<%s>", addr->v.tblname);
+		return;
+	} else {
+		if (inet_ntop(af, &addr->v.a.addr, buf, sizeof(buf)) == NULL)
 			printf("?");
 		else
 			printf("%s", buf);
 	}
-	if (mask != NULL) {
-		int bits = unmask(mask, af);
+	if (! PF_AZERO(&addr->v.a.mask, af)) {
+		int bits = unmask(&addr->v.a.mask, af);
 
 		if (bits != (af == AF_INET ? 32 : 128))
-			printf("/%u", bits);
+			printf("/%d", bits);
 	}
 }
 
 void
-print_name(struct pf_addr *addr, struct pf_addr *mask, int af)
+print_name(struct pf_addr *addr, sa_family_t af)
 {
 	char host[NI_MAXHOST];
 
@@ -134,18 +112,19 @@ print_name(struct pf_addr *addr, struct pf_addr *mask, int af)
 }
 
 void
-print_host(struct pf_state_host *h, u_int8_t af, int opts)
+print_host(struct pf_state_host *h, sa_family_t af, int opts)
 {
 	u_int16_t p = ntohs(h->port);
 
 	if (opts & PF_OPT_USEDNS)
-		print_name(&h->addr, NULL, af);
+		print_name(&h->addr, af);
 	else {
 		struct pf_addr_wrap aw;
 
-		aw.addr = h->addr;
-		aw.addr_dyn = NULL;
-		print_addr(&aw, NULL, af);
+		memset(&aw, 0, sizeof(aw));
+		aw.v.a.addr = h->addr;
+		memset(&aw.v.a.mask, 0xff, sizeof(aw.v.a.mask));
+		print_addr(&aw, af, opts & PF_OPT_VERBOSE2);
 	}
 
 	if (p) {
@@ -171,7 +150,7 @@ print_state(struct pf_state *s, int opts)
 {
 	struct pf_state_peer *src, *dst;
 	struct protoent *p;
-	u_int8_t hrs, min, sec;
+	int min, sec;
 
 	if (s->direction == PF_OUT) {
 		src = &s->src;
@@ -211,8 +190,14 @@ print_state(struct pf_state *s, int opts)
 		if (opts & PF_OPT_VERBOSE) {
 			printf("   ");
 			print_seq(src);
+			if (src->wscale && dst->wscale)
+				printf(" wscale %u",
+				    src->wscale & PF_WSCALE_MASK);
 			printf("  ");
 			print_seq(dst);
+			if (src->wscale && dst->wscale)
+				printf(" wscale %u",
+				    dst->wscale & PF_WSCALE_MASK);
 			printf("\n");
 		}
 	} else if (s->proto == IPPROTO_UDP && src->state < PFUDPS_NSTATES &&
@@ -233,17 +218,37 @@ print_state(struct pf_state *s, int opts)
 		s->creation /= 60;
 		min = s->creation % 60;
 		s->creation /= 60;
-		hrs = s->creation;
-		printf("   age %.2u:%.2u:%.2u", hrs, min, sec);
+		printf("   age %.2u:%.2u:%.2u", s->creation, min, sec);
 		sec = s->expire % 60;
 		s->expire /= 60;
 		min = s->expire % 60;
 		s->expire /= 60;
-		hrs = s->expire;
-		printf(", expires in %.2u:%.2u:%.2u", hrs, min, sec);
+		printf(", expires in %.2u:%.2u:%.2u", s->expire, min, sec);
 		printf(", %u pkts, %u bytes", s->packets, s->bytes);
-		if (s->rule.nr != USHRT_MAX)
+		if (s->rule.nr != -1)
 			printf(", rule %u", s->rule.nr);
 		printf("\n");
 	}
+}
+
+int
+unmask(struct pf_addr *m, sa_family_t af)
+{
+	int i = 31, j = 0, b = 0, msize;
+	u_int32_t tmp;
+
+	if (af == AF_INET)
+		msize = 1;
+	else
+		msize = 4;
+	while (j < msize && m->addr32[j] == 0xffffffff) {
+		b += 32;
+		j++;
+	}
+	if (j < msize) {
+		tmp = ntohl(m->addr32[j]);
+		for (i = 31; tmp & (1 << i); --i)
+			b++;
+	}
+	return (b);
 }

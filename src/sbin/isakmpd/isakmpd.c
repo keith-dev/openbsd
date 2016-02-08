@@ -1,4 +1,4 @@
-/*	$OpenBSD: isakmpd.c,v 1.45 2002/07/05 13:58:50 ho Exp $	*/
+/*	$OpenBSD: isakmpd.c,v 1.48 2002/12/03 20:05:10 ho Exp $	*/
 /*	$EOM: isakmpd.c,v 1.54 2000/10/05 09:28:22 niklas Exp $	*/
 
 /*
@@ -45,6 +45,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <fcntl.h>
 
 #include "sysdep.h"
 
@@ -114,9 +115,10 @@ static void
 usage (void)
 {
   fprintf (stderr,
-	   "usage: %s [-c config-file] [-d] [-D class=level] [-f fifo]\n"
-	   "          [-i pid-file] [-n] [-p listen-port] [-P local-port]\n"
-	   "          [-L] [-l packetlog-file] [-r seed] [-R report-file]\n",
+	   "usage: %s [-4] [-6] [-c config-file] [-d] [-D class=level]\n"
+	   "          [-f fifo] [-i pid-file] [-n] [-p listen-port]\n"
+	   "          [-P local-port] [-L] [-l packetlog-file] [-r seed]\n"
+	   "          [-R report-file]\n",
 	   sysdep_progname ());
   exit (1);
 }
@@ -131,8 +133,16 @@ parse_args (int argc, char *argv[])
   int do_packetlog = 0;
 #endif
 
-  while ((ch = getopt (argc, argv, "c:dD:f:i:np:P:Ll:r:R:")) != -1) {
+  while ((ch = getopt (argc, argv, "46c:dD:f:i:np:P:Ll:r:R:")) != -1) {
     switch (ch) {
+    case '4':
+      bind_family |= BIND_FAMILY_INET4;
+      break;
+
+    case '6':
+      bind_family |= BIND_FAMILY_INET6;
+      break;
+
     case 'c':
       conf_path = optarg;
       break;
@@ -224,14 +234,14 @@ sighup (int sig)
 static void
 report (void)
 {
-  FILE *report, *old;
+  FILE *rfp, *old;
   mode_t old_umask;
 
   old_umask = umask (S_IRWXG | S_IRWXO);
-  report = fopen (report_file, "w");
+  rfp = fopen (report_file, "w");
   umask (old_umask);
 
-  if (!report)
+  if (!rfp)
     {
       log_error ("fopen (\"%s\", \"w\") failed", report_file);
       return;
@@ -239,10 +249,10 @@ report (void)
 
   /* Divert the log channel to the report file during the report.  */
   old = log_current ();
-  log_to (report);
+  log_to (rfp);
   ui_report ("r");
   log_to (old);
-  fclose (report);
+  fclose (rfp);
 
   sigusr1ed = 0;
 }
@@ -348,9 +358,16 @@ main (int argc, char *argv[])
   size_t mask_size;
   struct timeval tv, *timeout;
 
+  /* Make sure init() won't alloc fd 0, 1 or 2, as daemon() will close them. */
+  for (n = 0; n <= 2; n++)
+    if (fcntl (n, F_GETFL, 0) == -1 && errno == EBADF)
+      (void)open ("/dev/null", n ? O_WRONLY : O_RDONLY, 0);
+
+  /* Log cmd line parsing and initialization errors to stderr.  */
   log_to (stderr);
   parse_args (argc, argv);
   init ();
+
   if (!debug)
     {
       if (daemon (0, 0))

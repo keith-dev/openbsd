@@ -1,4 +1,5 @@
-/*	$OpenBSD: cron.c,v 1.28 2002/08/08 18:13:35 millert Exp $	*/
+/*	$OpenBSD: cron.c,v 1.32 2003/03/10 15:27:17 millert Exp $	*/
+
 /* Copyright 1988,1990,1993,1994 by Paul Vixie
  * All rights reserved
  */
@@ -21,14 +22,12 @@
  */
 
 #if !defined(lint) && !defined(LINT)
-static const char rcsid[] = "$OpenBSD: cron.c,v 1.28 2002/08/08 18:13:35 millert Exp $";
+static const char rcsid[] = "$OpenBSD: cron.c,v 1.32 2003/03/10 15:27:17 millert Exp $";
 #endif
 
 #define	MAIN_PROGRAM
 
 #include "cron.h"
-#include <sys/socket.h>
-#include <sys/un.h>
 
 enum timejump { negative, small, medium, large };
 
@@ -54,7 +53,7 @@ static void
 usage(void) {
 	const char **dflags;
 
-	fprintf(stderr, "usage:  %s [-l load_avg] [-x [", ProgramName);
+	fprintf(stderr, "usage:  %s [-l load_avg] [-n] [-x [", ProgramName);
 	for (dflags = DebugFlagNames; *dflags; dflags++)
 		fprintf(stderr, "%s%s", *dflags, dflags[1] ? "," : "]");
 	fprintf(stderr, "]\n");
@@ -75,6 +74,7 @@ main(int argc, char *argv[]) {
 	setlinebuf(stderr);
 #endif
 
+	NoFork = 0;
 	parse_args(argc, argv);
 
 	bzero((char *)&sact, sizeof sact);
@@ -87,19 +87,19 @@ main(int argc, char *argv[]) {
 	(void) sigaction(SIGCHLD, &sact, NULL);
 	sact.sa_handler = sighup_handler;
 	(void) sigaction(SIGHUP, &sact, NULL);
-	sact.sa_handler = SIG_IGN;
-	(void) sigaction(SIGPIPE, &sact, NULL);
-	(void) sigaction(SIGUSR1, &sact, NULL);	/* XXX */
 	sact.sa_handler = quit;
 	(void) sigaction(SIGINT, &sact, NULL);
 	(void) sigaction(SIGTERM, &sact, NULL);
+	sact.sa_handler = SIG_IGN;
+	(void) sigaction(SIGPIPE, &sact, NULL);
+	(void) sigaction(SIGUSR1, &sact, NULL);	/* XXX */
 
 	acquire_daemonlock(0);
 	set_cron_uid();
 	set_cron_cwd();
 
-	if (putenv("PATH="_PATH_DEFPATH) == -1) {
-		log_it("CRON",getpid(),"DEATH","can't malloc");
+	if (putenv("PATH="_PATH_DEFPATH) < 0) {
+		log_it("CRON", getpid(), "DEATH", "can't malloc");
 		exit(1);
 	}
 
@@ -109,7 +109,7 @@ main(int argc, char *argv[]) {
 #if DEBUGGING
 		(void) fprintf(stderr, "[%ld] cron started\n", (long)getpid());
 #endif
-	} else {
+	} else if (NoFork == 0) {
 		switch (fork()) {
 		case -1:
 			log_it("CRON",getpid(),"DEATH","can't fork");
@@ -117,7 +117,6 @@ main(int argc, char *argv[]) {
 			break;
 		case 0:
 			/* child process */
-			log_it("CRON",getpid(),"STARTUP","fork ok");
 			(void) setsid();
 			if ((fd = open(_PATH_DEVNULL, O_RDWR, 0)) >= 0) {
 				(void) dup2(fd, STDIN);
@@ -126,6 +125,7 @@ main(int argc, char *argv[]) {
 				if (fd != STDERR)
 					(void) close(fd);
 			}
+			log_it("CRON",getpid(),"STARTUP",CRON_VERSION);
 			break;
 		default:
 			/* parent process should just die */
@@ -143,7 +143,7 @@ main(int argc, char *argv[]) {
 	at_database.tail = NULL;
 	at_database.mtime = (time_t) 0;
 	scan_atjobs(&at_database, NULL);
-	set_time(1);
+	set_time(TRUE);
 	run_reboot_jobs(&database);
 	timeRunning = virtualTime = clockTime;
 
@@ -164,7 +164,7 @@ main(int argc, char *argv[]) {
 		/* ... wait for the time (in minutes) to change ... */
 		do {
 			cron_sleep(timeRunning + 1);
-			set_time(0);
+			set_time(FALSE);
 		} while (clockTime == timeRunning);
 		timeRunning = clockTime;
 
@@ -231,7 +231,7 @@ main(int argc, char *argv[]) {
 					virtualTime++;
 					find_jobs(virtualTime, &database,
 					    FALSE, TRUE);
-					set_time(0);
+					set_time(FALSE);
 				} while (virtualTime< timeRunning &&
 				    clockTime == timeRunning);
 				break;
@@ -325,8 +325,8 @@ find_jobs(int vtime, cron_db *db, int doWild, int doNonWild) {
 	for (u = db->head; u != NULL; u = u->next) {
 		for (e = u->crontab; e != NULL; e = e->next) {
 			Debug(DSCH|DEXT, ("user [%s:%ld:%ld:...] cmd=\"%s\"\n",
-					  e->pwd->pw_name, (long)e->pwd->pw_uid,
-					  (long)e->pwd->pw_gid, e->cmd))
+			    e->pwd->pw_name, (long)e->pwd->pw_uid,
+			    (long)e->pwd->pw_gid, e->cmd))
 			if (bit_test(e->minute, minute) &&
 			    bit_test(e->hour, hour) &&
 			    bit_test(e->month, month) &&
@@ -351,16 +351,18 @@ find_jobs(int vtime, cron_db *db, int doWild, int doNonWild) {
  */
 static void
 set_time(int initialize) {
-	struct tm *tm;
+	struct tm tm;
 	static int isdst;
 
 	StartTime = time(NULL);
 
 	/* We adjust the time to GMT so we can catch DST changes. */
-	tm = localtime(&StartTime);
-	if (initialize || tm->tm_isdst != isdst) {
-		isdst = tm->tm_isdst;
-		GMToff = get_gmtoff(&StartTime, tm);
+	tm = *localtime(&StartTime);
+	if (initialize || tm.tm_isdst != isdst) {
+		isdst = tm.tm_isdst;
+		GMToff = get_gmtoff(&StartTime, &tm);
+		Debug(DSCH, ("[%ld] GMToff=%ld\n",
+		    (long)getpid(), (long)GMToff))
 	}
 	clockTime = (StartTime + GMToff) / (time_t)SECONDS_PER_MINUTE;
 }
@@ -373,7 +375,7 @@ cron_sleep(int target) {
 	int fd, nfds;
 	unsigned char poke;
 	struct timeval t1, t2, tv;
-	struct sockaddr_un sun;
+	struct sockaddr_un s_un;
 	socklen_t sunlen;
 	static fd_set *fdsr;
 
@@ -403,7 +405,7 @@ cron_sleep(int target) {
 		if (nfds > 0) {
 			Debug(DSCH, ("[%ld] Got a poke on the socket\n",
 			    (long)getpid()))
-			fd = accept(cronSock, (struct sockaddr *)&sun, &sunlen);
+			fd = accept(cronSock, (struct sockaddr *)&s_un, &sunlen);
 			if (fd >= 0) {
 				(void) read(fd, &poke, 1);
 				close(fd);
@@ -463,7 +465,7 @@ quit(int x) {
 }
 
 static void
-sigchld_reaper() {
+sigchld_reaper(void) {
 	WAIT_T waiter;
 	PID_T pid;
 
@@ -496,7 +498,7 @@ parse_args(int argc, char *argv[]) {
 	int argch;
 	char *ep;
 
-	while (-1 != (argch = getopt(argc, argv, "l:x:"))) {
+	while (-1 != (argch = getopt(argc, argv, "l:nx:"))) {
 		switch (argch) {
 		case 'l':
 			errno = 0;
@@ -507,6 +509,9 @@ parse_args(int argc, char *argv[]) {
 				    optarg);
 				usage();
 			}
+			break;
+		case 'n':
+			NoFork = 1;
 			break;
 		case 'x':
 			if (!set_debug_flags(optarg))

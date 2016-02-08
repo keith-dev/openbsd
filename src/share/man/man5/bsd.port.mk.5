@@ -1,4 +1,4 @@
-.\" $OpenBSD: bsd.port.mk.5,v 1.74 2002/08/29 07:34:31 wcobb Exp $
+.\" $OpenBSD: bsd.port.mk.5,v 1.87 2003/03/22 08:02:03 david Exp $
 .\"
 .\" Copyright (c) 2000 Marc Espie
 .\"
@@ -24,7 +24,7 @@
 .\" (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
 .\" THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 .\"
-.Dd June 10 2000
+.Dd June 10, 2000
 .Dt BSD.PORT.MK 5
 .Os
 .Sh NAME
@@ -79,9 +79,9 @@ is set to a list of files to ignore.
 Invoking
 .Ar checksum
 with REFETCH=true
-will try to fetch a version of with mismatched checksums off the
+will try to fetch a version with the correct checksum from the
 .Ox
-main archive site.
+main archive site in the case of a checksum mismatch.
 .It Ar clean
 Clean ports contents. 
 By default, it will clean the work directory.
@@ -254,7 +254,58 @@ testing, define a
 .It Ar show
 Invoked as show=name, show the contents of ${name}.
 Mostly used from recursive makes, or to know the contents of another
-port's variables without guessing wrong.
+port's variables without guessing wrongly.
+.It Ar update-plist
+Update the packing lists for a port, using the fake installation and the
+existing packing lists.
+.Ar update-plist
+should produce mostly correct 
+.Pa PLIST ,
+.Pa PFRAG.shared
+and
+.Pa PFRAG.no-shared
+files, handling shared libraries, GNU
+.Xr info 1
+files, setuid files, and empty directories.
+It moves existing files to
+.Pa PLIST.orig ,
+.Pa PFRAG.shared.orig
+and
+.Pa PFRAG.no-shared.orig .
+If the generated lists include files and directories that shouldn't be
+included, comment these like this:
+.Bd -literal
+@comment unwanted-file
+@comment @dirrm unwanted-dir
+.Ed
+.Pp
+Subsequent calls to
+.Ar update-plist
+will automatically recognize and handle such lines correctly.
+.Pp
+.Ar update-plist
+does not handle multi-packages nor flavor situations yet, so beware.
+.It Ar update-patches
+Create or update patches for a port, using
+.Xr diff 1
+between
+.Pa file
+and
+.Pa file.orig ,
+based on
+.Pa file.orig
+existence.
+In order to generate a patch, the original file needs to be named
+.Pa file.orig
+and
+.Pa file
+edited.
+After the target is invoked, the patches are placed under the
+patches/ directory.
+It moves existing patches from
+.Pa patch-file
+to
+.Pa patch-file.orig
 .El
 .Sh VARIABLES
 .Bl -tag -width MASTER_SITES
@@ -279,6 +330,18 @@ Defaults to autoconf (though make autoreconf might be more appropriate).
 Where to invoke autoconf if ${CONFIGURE_STYLE} includes autoconf.
 Defaults to ${WRKSRC}.
 .\" AUTOCONF_DIR should probably be a list, and be renamed to AUTOCONF_DIRS ?
+.It Ev AUTOCONF_VERSION
+Starting with
+.Ox 3.3 ,
+several versions of autoconf may coexist peacefully.
+Setting 
+.Ev AUTOCONF_VERSION 
+along with
+.Ev CONFIGURE_STYLE
+set to autoconf is the correct way to specify which one to use.
+If autoconf must be run manually,
+.Ev MODGNU_AUTOCONF_DEPENDS
+can be used to specify what packages to depend upon.
 .It Ev BSD_INSTALL_{PROGRAM,SCRIPT,DATA,MAN}[_DIR]
 Macros passed to make and configure invocations.
 Set based on corresponding INSTALL_* variables.
@@ -323,7 +386,7 @@ specifically, in ${WRKDIR}/directory.
 .It Ev BULK
 If set to 
 .Sq Yes ,
-succesful package builds and installations will clean
+successful package builds and installations will clean
 their working directories, after invoking 
 .Ar ftp-packages ,
 .Ar cdrom-packages ,
@@ -333,14 +396,15 @@ See
 .Ev BIN_PACKAGES ,
 .Ev TRUST_PACKAGES .
 .It Ev BULK_COOKIES_DIR
-Used to store cookies for succesful bulk-package builds, defaults to
+Used to store cookies for successful bulk-package builds, defaults to
 .Pa ${PORTSDIR}/bulk/${MACHINE_ARCH} .
 .It Ev BULK_FLAGS
 Flags to pass to build each target in
 .Ev BULK_TARGETS .
 .It Ev BULK_TARGETS
 Targets to run after each bulk package build before cleaning up the 
-working directory. Defaults to
+working directory.
+Defaults to
 .Ar ftp-packages ,
 .Ar cdrom-packages .
 .It Ev BZIP2
@@ -373,7 +437,7 @@ Many ports ignore it.
 See also
 .Ev COPTS .
 .It Ev CHECKSUM_FILE
-Location for this port checksums, used by
+Location for this port's checksums, used by
 .Ar addsum ,
 .Ar checksum ,
 and
@@ -381,7 +445,7 @@ and
 Defaults to distinfo.
 .It Ev CLEANDEPENDS
 If set to
-.Sq Yes
+.Sq Yes ,
 .Sq make clean
 will also clean dependencies.
 Note that distclean never recurses down to dependencies.
@@ -394,6 +458,11 @@ Comment used for a flavored package, if the non-flavored comment is
 inappropriate.
 .It Ev COMMENT-foo-vanilla
 Comment used for a sub-, flavored package.
+.It Ev COMES_WITH
+The first release where the port was made part of the standard
+distribution.
+If the current OpenBSD version is >= this version then a notice
+will be displayed instead of the port being built.
 .It Ev CONFIGURE_ARGS
 Arguments to pass to configure script.
 Defaults are empty, except for
@@ -407,7 +476,7 @@ Set to name of script invoked by
 target, if appropriate.
 Should be relative to ${WRKSRC}.
 .It Ev CONFIGURE_SHARED
-Set to --enable-shared or --disable-shared, depending whether the
+Set to --enable-shared or --disable-shared, depending on whether the
 architecture supports shared libraries.
 Should be appended to CONFIGURE_ARGS, for ports that build dynamic libraries 
 and whose configure script supports these options.
@@ -433,7 +502,7 @@ see also
 .Pc .
 Add
 .Sq old
-if port is an older autoconf port, that does not recognize --sysconfdir.
+if port is an older autoconf port that does not recognize --sysconfdir.
 Add
 .Sq autoconf
 if autoconf needs to be rerun first.
@@ -485,19 +554,18 @@ to refer to ports' distfiles location, as it takes an eventual
 .Ev DIST_SUBDIR
 into account.
 .It Ev DISTFILES
-The main port distribution files (the actual software source, except
+The main port's distribution files (the actual software source, except
 for binary-only ports).
 Will be retrieved from the MASTER_SITES (see
 .Ar fetch ) ,
 checksummed and extracted (see
 .Ar checksum ,
 .Ar extract ) .
-normally holds a list of files, possibly with :0
 .Ev DISTFILES
 normally holds a list of files, possibly with
-.Sq 0
+.Sq :0
 to
-.Sq 9
+.Sq :9
 appended to select a different
 .Ev MASTER_SITES .
 See also
@@ -606,7 +674,7 @@ Location of other files related to the current ports.
 Holds at least the checksum file, sometimes other files
 (default: files.${ARCH} or files).
 .It Ev FLAVOR
-The port current options.
+The port's current options.
 Set by the user, and tested by the port to activate wanted functionalities.
 .It Ev FLAVORS
 List of all flavors keywords a port may match.
@@ -651,11 +719,14 @@ for more details.
 .Pp
 On architectures that use dynamic libraries,
 .Ev LIB_DEPENDS
-is also used as a running time dependency, and recorded in the package as
+is also used as a run-time dependency, and recorded in the package as
 such.
 .It Ev FULLDISTDIR
 Complete path to directory where ${DISTFILES} and ${PATCHFILES} will be
 located, to be used in hand-crafted extraction targets (read-only).
+.It Ev IGNORE
+The port is ignored if set to
+.Sq Yes .
 .It Ev INSTALL_{PROGRAM,SCRIPT,DATA,MAN}[_DIR]
 Macros to use to install a program, a script, a man page, or data (or the
 corresponding directory, respectively).
@@ -761,7 +832,7 @@ if neither PFRAG.shared nor CONFIGURE_SHARED are enough.
 .It Ev ONLY_FOR_ARCHS
 List of architectures on which this port builds.
 Can hold both processor-specific information (e.g., m68k), and more
-specific model information (e.g., amiga).
+specific model information (e.g., hp300).
 .It Ev OPSYS
 Always
 .Ox
@@ -874,7 +945,8 @@ Default will trip ports that try to write into $HOME while building.
 Path used by most shell invocations.
 Don't override unless really needed.
 .It Ev PORTSDIR
-Root of the ports tree (default: /usr/ports).
+Root of the ports tree (default:
+.Pa /usr/ports ) .
 .It Ev PKGDIR
 Location for packaging information (packing list, port description, port
 short description).
@@ -882,7 +954,7 @@ Default: pkg.${ARCH} or pkg.
 .It Ev PKGNAME
 Name of the main created package.
 Default is ${DISTNAME} for the main package,
-and ${DISTNAME} for multi-packages ports.
+and ${DISTNAME} for multi-package ports.
 This does not take flavors into account.
 See
 .Ev FULLPKGNAME
@@ -900,11 +972,12 @@ Default is
 The first cipher that matches in ${CHECKSUM_FILE} is verified.
 .It Ev PREFIX
 Base directory for the current port installation.
-Usually ${LOCALBASE}, though some ports may elect a location under /var,
+Usually ${LOCALBASE}, though some ports may elect a location under 
+.Pa /var ,
 and some multi-package ports may install under several locations.
 .It Ev PSEUDO_FLAVORS
 Extra list of flavors that do not register in package names, but are still
-used to control build logic, and e.g., working directories names.
+used to control build logic, and e.g., working directory names.
 Its main use is for disabling part of a multi-packages build, for instance:
 .Bd -literal
 FLAVOR=no_gnome make package 
@@ -1055,7 +1128,7 @@ Ports that need to know the WRKDIR of another port must use
 cd that_port_dir && make show VARNAME=WRKDIR for this.
 Note that WRKDIR may be a symbolic link.
 .It Ev WRKDIST
-Subdirectory of ${WRKDIR} where the source normally unpacked.
+Subdirectory of ${WRKDIR} where the source is normally unpacked.
 Base for all patches (default: ${WRKDIR}/${DISTNAME}).
 Note that WRKDIST may be a symbolic link, if set to ${WRKDIR}.
 .It Ev WRKSRC
@@ -1073,8 +1146,7 @@ Subdirectory of ${WRKDIR} where port normally installs (see
 target).
 .It Ev WRKOBJDIR
 If defined, used as a base for the actual port working directory.
-The real working directory is created there, and the port ${WRKDIR} is
-just a link.
+The real working directory ${WRKDIR} is created there.
 .It Ev X11BASE
 Where X11 has been installed (default: /usr/X11R6).
 .It Ev USE_GMAKE
@@ -1085,7 +1157,7 @@ if gnu make (${GMAKE}) is needed for correct behavior of this port.
 Set to
 .Sq Yes
 if libtool is required for correct behavior of this port.
-Add correct dependencies, and passes LIBTOOL environment variable to
+Adds correct dependencies, and passes LIBTOOL environment variable to
 scripts invocations.
 .It Ev USE_MOTIF
 Set to
@@ -1099,6 +1171,10 @@ The
 .Sq any
 setting creates an extra flavor choice of 
 .Sq lesstif .
+.It Ev USE_X11
+Set to
+.Sq Yes
+if port requires X11 to work.
 .It Ev VMEM_WARNING
 Set to 
 .Sq Yes 
@@ -1169,6 +1245,15 @@ instead.
 See
 .Xr mirroring-ports 7
 for more efficient and flexible ways to build mirrors.
+.It Ar obj
+Starting with
+.Ox 3.3 ,
+using
+.Ev WRKOBJDIR
+no longer creates a symlink between the current directory and
+a subdirectory of ${WRKOBJDIR}, so
+.Ar obj
+has become a no-operation.
 .El
 .Sh OBSOLETE VARIABLES
 .Bl -tag -width MASTER_SITES
@@ -1255,7 +1340,8 @@ See
 .It Ev NEED_VERSION
 Used to set a requirement on a specific revision of
 .Nm
-needed by a port.  No longer needed as
+needed by a port.
+No longer needed as
 .Nm
 should always be kept up-to-date.
 .It Ev NO_CONFIGURE
@@ -1292,6 +1378,16 @@ Use CLEANDEPENDS instead.
 .Fx
 ships with compressed man pages, and uses this variable to control
 that behavior.
+.It Ev OBJMACHINE
+Starting with
+.Ox 3.3 ,
+setting
+.Ev WRKOBJDIR
+creates the whole
+.Ev WRKDIR
+hierarchy under ${WRKOBJDIR}, so
+.Ev OBJMACHINE
+is no longer useful.
 .It Ev PATCH_SITES
 .Ev PATCHFILES
 used to be retrieved from a separate site list.
@@ -1328,7 +1424,7 @@ for
 .Ev SUBPACKAGE
 -foo .
 .Ev PKGNAME
-now holds the package name, not taking multi-packages nor flavors
+now holds the package name, not taking multi-packages or flavors
 into account.
 Most ports are not concerned by this change.
 .It Ev PLIST_SUBST
@@ -1371,8 +1467,11 @@ was used.
 .It Pa /usr/share/mk/bsd.port.mk
 Original location of
 .Nm bsd.port.mk .
-The current file lives under ${PORTSDIR}/infrastructure/mk/bsd.port.mk,
-whereas /usr/share/mk/bsd.port.mk is just a stub.
+The current file lives under 
+.Pa ${PORTSDIR}/infrastructure/mk/bsd.port.mk ,
+whereas 
+.Pa /usr/share/mk/bsd.port.mk
+is just a stub.
 .It Pa {scripts,files,patches}.${OPSYS}
 The
 .Ox
@@ -1632,8 +1731,6 @@ FLAVORS, MULTI_PACKAGES and FAKE are
 improvements.
 .\" Voluntarily undocumented:
 .\" AUTOCONF_ENV: probably not needed anyway, should be internal.
-.\"
-.\" Todo: OBJMACHINE
 .Sh SEE ALSO
 .Xr library-specs 7 ,
 .Xr packages-specs 7

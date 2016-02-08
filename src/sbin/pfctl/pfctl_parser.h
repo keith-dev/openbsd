@@ -1,4 +1,4 @@
-/*	$OpenBSD: pfctl_parser.h,v 1.25 2002/06/25 08:13:26 henning Exp $ */
+/*	$OpenBSD: pfctl_parser.h,v 1.50 2003/03/07 12:55:37 henning Exp $ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
@@ -40,6 +40,9 @@
 #define PF_OPT_QUIET		0x0010
 #define PF_OPT_CLRRULECTRS	0x0020
 #define PF_OPT_USEDNS		0x0040
+#define PF_OPT_VERBOSE2		0x0080
+#define PF_OPT_DUMMYACTION	0x0100
+#define PF_OPT_DEBUG		0x0200
 
 #define PF_TH_ALL		0xFF
 
@@ -56,33 +59,69 @@
 struct pfctl {
 	int dev;
 	int opts;
-	u_int16_t rule_nr;
-	struct pfioc_rule *prule;
-	struct pfioc_nat *pnat;
-	struct pfioc_binat *pbinat;
-	struct pfioc_rdr *prdr;
+	int loadopt;
+	u_int32_t rule_nr;
+	struct pfioc_pooladdr paddr;
+	struct pfioc_rule *prule[PF_RULESET_MAX];
+	struct pfioc_altq *paltq;
+	struct pfioc_queue *pqueue;
 };
 
-int	 pfctl_add_rule(struct pfctl *, struct pf_rule *);
-int	 pfctl_add_nat(struct pfctl *, struct pf_nat *);
-int	 pfctl_add_binat(struct pfctl *, struct pf_binat *);
-int	 pfctl_add_rdr(struct pfctl *, struct pf_rdr *);
+enum pfctl_iflookup_mode {
+	PFCTL_IFLOOKUP_HOST,
+	PFCTL_IFLOOKUP_NET,
+	PFCTL_IFLOOKUP_BCAST
+};
 
-int	 pfctl_set_timeout(struct pfctl *, const char *, int);
-int	 pfctl_set_optimization(struct pfctl *, const char *);
-int	 pfctl_set_limit(struct pfctl *, const char *, unsigned int);
-int	 pfctl_set_logif(struct pfctl *, char *);
+struct node_if {
+	char			 ifname[IFNAMSIZ];
+	u_int8_t		 not;
+	u_int			 ifa_flags;
+	struct node_if		*next;
+	struct node_if		*tail;
+};
 
-int	 parse_rules(FILE *, struct pfctl *);
-int	 parse_flags(char *);
+struct node_host {
+	struct pf_addr_wrap	 addr;
+	struct pf_addr		 bcast;
+	sa_family_t		 af;
+	u_int8_t		 not;
+	u_int32_t		 ifindex;	/* link-local IPv6 addrs */
+	char			*ifname;
+	u_int			 ifa_flags;
+	struct node_host	*next;
+	struct node_host	*tail;
+};
 
-void	 print_rule(struct pf_rule *);
-void	 print_nat(struct pf_nat *);
-void	 print_binat(struct pf_binat *);
-void	 print_rdr(struct pf_rdr *);
-void	 print_status(struct pf_status *);
+int	pfctl_add_rule(struct pfctl *, struct pf_rule *);
+int	pfctl_add_altq(struct pfctl *, struct pf_altq *);
+int	pfctl_add_pool(struct pfctl *, struct pf_pool *, sa_family_t);
+void	pfctl_clear_pool(struct pf_pool *);
 
-int	 unmask(struct pf_addr *, u_int8_t);
+int	pfctl_set_timeout(struct pfctl *, const char *, int, int);
+int	pfctl_set_optimization(struct pfctl *, const char *);
+int	pfctl_set_limit(struct pfctl *, const char *, unsigned int);
+int	pfctl_set_logif(struct pfctl *, char *);
+
+int	parse_rules(FILE *, struct pfctl *);
+int	parse_flags(char *);
+
+void	print_filter(struct pf_rule *, int);
+void	print_pool(struct pf_pool *, u_int16_t, u_int16_t, sa_family_t, int);
+void	print_rule(struct pf_rule *, int);
+void	print_nat(struct pf_rule *, int);
+void	print_binat(struct pf_rule *, int);
+void	print_rdr(struct pf_rule *, int);
+void	print_status(struct pf_status *);
+
+int	eval_pfaltq(struct pfctl *, struct pf_altq *, u_int32_t, u_int16_t);
+int	eval_pfqueue(struct pfctl *, struct pf_altq *, u_int32_t, u_int16_t);
+
+void	pfctl_begin_table(void);
+void	pfctl_append_addr(char *, int, int);
+void	pfctl_append_file(char *);
+void	pfctl_define_table(char *, int, int, int);
+void	pfctl_commit_table(void);
 
 struct icmptypeent {
 	char *name;
@@ -109,7 +148,15 @@ struct pf_timeout {
 #define PFCTL_FLAG_FILTER	0x02
 #define PFCTL_FLAG_NAT		0x04
 #define PFCTL_FLAG_OPTION	0x08
+#define PFCTL_FLAG_ALTQ		0x10
+#define PFCTL_FLAG_TABLE	0x20
 
 extern const struct pf_timeout pf_timeouts[];
+
+void			 set_ipmask(struct node_host *, u_int8_t);
+void			 ifa_load(void);
+struct node_host	*ifa_exists(const char *);
+struct node_host	*ifa_lookup(const char *, enum pfctl_iflookup_mode);
+struct node_host	*host(const char *, int);
 
 #endif /* _PFCTL_PARSER_H_ */

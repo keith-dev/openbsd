@@ -1,4 +1,5 @@
-/* $OpenBSD: memconfig.c,v 1.5 2002/05/30 19:09:05 deraadt Exp $ */
+/* $OpenBSD: memconfig.c,v 1.7 2003/03/13 09:09:48 deraadt Exp $ */
+
 /*-
  * Copyright (c) 1999 Michael Smith <msmith@freebsd.org>
  * All rights reserved.
@@ -24,7 +25,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/usr.sbin/memcontrol/memcontrol.c,v 1.3 1999/08/28 01:17:00 peter Exp $
+ * $FreeBSD: /home/ncvs/src/usr.sbin/memcontrol/memcontrol.c,v 1.8 2002/09/15 15:07:55 dwmalone Exp $
  */
 
 #include <sys/types.h>
@@ -50,6 +51,8 @@ struct
 	{"write-through",	MDF_WRITETHROUGH,	MDF_SETTABLE},
 	{"write-back",		MDF_WRITEBACK,		MDF_SETTABLE},
 	{"write-protect",	MDF_WRITEPROTECT,	MDF_SETTABLE},
+	{"force",		MDF_FORCE,		MDF_SETTABLE},
+	{"unknown",		MDF_UNKNOWN,		0},
 	{"fixed-base",		MDF_FIXBASE,		0},
 	{"fixed-length",	MDF_FIXLEN,		0},
 	{"set-by-firmware",	MDF_FIRMWARE,		0},
@@ -209,7 +212,7 @@ setfunc(memfd, argc, argv)
 	mrd.mr_base = 0;
 	mrd.mr_len = 0;
 	mrd.mr_flags = 0;
-	strcpy(mrd.mr_owner, "user");
+	strlcpy(mrd.mr_owner, "user", sizeof mrd.mr_owner);
 	while ((ch = getopt(argc, argv, "b:l:o:")) != -1)
 		switch(ch) {
 		case 'b':
@@ -226,7 +229,7 @@ setfunc(memfd, argc, argv)
 			if (*optarg == 0 ||
 			    strlen(optarg) > sizeof(mrd.mr_owner)-1)
 				help("set");
-			strcpy(mrd.mr_owner, optarg);
+			strlcpy(mrd.mr_owner, optarg, sizeof mrd.mr_owner);
 			break;
 
 		case '?':

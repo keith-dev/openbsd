@@ -1,4 +1,4 @@
-/*	$OpenBSD: ldasm.S,v 1.7 2002/09/09 19:06:18 drahn Exp $ */
+/*	$OpenBSD: ldasm.S,v 1.11 2003/02/26 22:05:06 drahn Exp $ */
 
 /*
  * Copyright (c) 1999 Dale Rahn
@@ -44,6 +44,7 @@
 #define AUX_entry 9
 
 #include <machine/asm.h>
+#include <sys/syscall.h>
 
 ENTRY(_dl_start)
 	mr	19, 1
@@ -65,7 +66,6 @@ ENTRY(_dl_start)
 	# this instruction never gets executed but can be used
 	# to find the virtual address where the page is loaded.
 	bl _GLOBAL_OFFSET_TABLE_@local-4
-	bl _DYNAMIC@local
 1:
 	mflr	5		# this stores where we are (+4)
 	lwz	18, 0(5)	# load the instruction at offset_sym
@@ -80,6 +80,16 @@ ENTRY(_dl_start)
 	 * operation that would be below would calulate.
 	 */
 	add	28, 18, 5
+	mr	6, 5		# save offset for later use
+
+	/* mprotect GOT-4 for correct execution of blrl instruction */
+	li	0, SYS_mprotect
+	mr	3, 28
+	li	4, 4
+	li	5, 7 /* (PROT_READ|PROT_WRITE|PROT_EXEC) */
+	sc
+
+	mr	5, 6
 
 	li	0, 0
 	dcbf	5, 18
@@ -87,17 +97,8 @@ ENTRY(_dl_start)
 	isync
 	icbi	5, 18		# make certain that the got table addr is
 				# not in the icache
-
 	sync
 	isync
-
-	addi	28, 28, 4
-	mr	29, 28
-
-	lwz	30, 0(28)	# this loads the first entry of the GOT
-				# thus forcing it to be paged in when
-				# we jump to it below.
-
 
 	# calculate where we want to be (via the got)
 	bl _GLOBAL_OFFSET_TABLE_@local-4
@@ -107,22 +108,13 @@ ENTRY(_dl_start)
 	lwz	4, .L___offset_sym@got(28)
 	mr	6, 4		# make copy of register for debugging
 
-	/* This cheats and calculates the address of _DYNAMIC
-	 * the same way that the GLOBAL_OFFSET_TABLE was calcuated
-	 */
-	lwz	18, 4(5)
-	rlwinm 18,18,0,8,30	# mask off the offset portion of the instr.
-	add	8, 18, 5	# address of _DYNAMIC (arg6 for _dl_boot)
-	addi	18, 8, 4	# correction.
 
 	sub	4, 5, 4		# calculate offset (arg1 for _dl_boot)
 	mr	17, 4
 
 
 	subi	3, 21, 4	# Get stack pointer (arg0 for _dl_boot).
-	mr	4, 17		# loff
-	mr	5, 18		# dynamicp
-	addi	6, 1, 8		# dl_data
+	addi	4, 1, 8		# dl_data
 
 	bl	_dl_boot_bind@local
 
@@ -140,6 +132,7 @@ ENTRY(_dl_start)
 	mr 4, 21
 	mr 5, 22
 	mr 6, 23
+	li 7, 0
 
 
 	mtlr 27

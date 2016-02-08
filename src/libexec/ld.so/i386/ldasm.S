@@ -1,4 +1,4 @@
-/*	$OpenBSD: ldasm.S,v 1.1 2002/08/23 23:02:48 drahn Exp $ */
+/*	$OpenBSD: ldasm.S,v 1.4 2003/02/02 16:57:58 deraadt Exp $ */
 
 /*
  * Copyright (c) 2002 Dale Rahn
@@ -49,14 +49,11 @@ _dl_start:
 	movl	%ebx,%edi		# save dl_data arg for dl_boot
 	pushl	%ebx			# push dl_data for dl_boot_bind
 
-	pushl	$0			# dynp
-	pushl	$0			# push dummy for loff
-
 	mov	%eax, %esi		# save stack for dl_boot
 
 	pushl	%eax			# load saved SP for dl_boot_bind
 
-	call	_dl_boot_bind@PLT	# _dl_boot_bind(sp,loff,dl_data)
+	call	_dl_boot_bind@PLT	# _dl_boot_bind(sp,dl_data)
 
 	pushl	%edi			# push saved dl_data
 	movl	%edi,%ebp
@@ -75,7 +72,7 @@ _dl_start:
 
 	call	_dl_boot@PLT		# _dl_boot(argv,envp,loff,dl_data)
 
-	addl	$4*6,%esp			# pop args
+	addl	$4*4,%esp			# pop args
 
 	addl	$DL_DATA_SIZE,%esp	# return dl_data
 
@@ -230,6 +227,31 @@ _dl_getdirentries:
 	ret
 
 
+	/* _dl_sigprocmask: does not handle NULL new set */
+
+	.section	".text"
+	.align		4
+	.global _dl_sigprocmask
+	.type _dl_sigprocmask,@function
+_dl_sigprocmask:
+	movl	8(%esp), %ecx
+	movl    (%ecx),%ecx
+	movl	%ecx,8(%esp)		# to new mask arg
+	mov	$SYS_sigprocmask, %eax
+	int	$0x80
+	jb	1f		 /* error: result = -errno */
+	movl	12(%esp),%ecx		# fetch old mask requested
+	testl	%ecx,%ecx		# test if old mask requested
+	jz	2f
+	movl	%eax,(%ecx)		# store old mask
+	xorl	%eax,%eax
+2:	ret
+
+1:	/* error: result = -errno; - handled here. */
+	neg	%eax
+	ret
+
+
 	.align 4
 	.global _dl_bind_start
 	.type _dl_bind_start,@function
@@ -244,13 +266,13 @@ _dl_bind_start:
 	pushl   %edi
 	pushl   %ds
 	pushl   %es
- 
+
 	pushl   44(%esp)		# Copy of reloff
 	pushl   44(%esp)		# Copy of obj
 	call    _dl_bind@PLT		# Call the binder
 	addl    $8,%esp			# pop binder args
 	movl    %eax,44(%esp)		# Store function to be called in obj
- 
+
 	popl    %es			# restore registers
 	popl    %ds
 	popl    %edi

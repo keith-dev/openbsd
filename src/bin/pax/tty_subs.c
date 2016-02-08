@@ -1,4 +1,4 @@
-/*	$OpenBSD: tty_subs.c,v 1.8 2002/02/19 19:39:35 millert Exp $	*/
+/*	$OpenBSD: tty_subs.c,v 1.11 2003/03/04 20:27:58 deraadt Exp $	*/
 /*	$NetBSD: tty_subs.c,v 1.5 1995/03/21 09:07:52 cgd Exp $	*/
 
 /*-
@@ -40,9 +40,9 @@
 
 #ifndef lint
 #if 0
-static char sccsid[] = "@(#)tty_subs.c	8.2 (Berkeley) 4/18/94";
+static const char sccsid[] = "@(#)tty_subs.c	8.2 (Berkeley) 4/18/94";
 #else
-static char rcsid[] = "$OpenBSD: tty_subs.c,v 1.8 2002/02/19 19:39:35 millert Exp $";
+static const char rcsid[] = "$OpenBSD: tty_subs.c,v 1.11 2003/03/04 20:27:58 deraadt Exp $";
 #endif
 #endif /* not lint */
 
@@ -102,7 +102,7 @@ tty_init(void)
  */
 
 void
-tty_prnt(char *fmt, ...)
+tty_prnt(const char *fmt, ...)
 {
 	va_list ap;
 
@@ -127,7 +127,7 @@ tty_prnt(char *fmt, ...)
 int
 tty_read(char *str, int len)
 {
-	register char *pt;
+	char *pt;
 
 	if ((--len <= 0) || (ttyinf == NULL) || (fgets(str,len,ttyinf) == NULL))
 		return(-1);
@@ -148,7 +148,7 @@ tty_read(char *str, int len)
  */
 
 void
-paxwarn(int set, char *fmt, ...)
+paxwarn(int set, const char *fmt, ...)
 {
 	va_list ap;
 
@@ -177,7 +177,7 @@ paxwarn(int set, char *fmt, ...)
  */
 
 void
-syswarn(int set, int errnum, char *fmt, ...)
+syswarn(int set, int errnum, const char *fmt, ...)
 {
 	va_list ap;
 
@@ -201,6 +201,6 @@ syswarn(int set, int errnum, char *fmt, ...)
 	 * format and print the errno
 	 */
 	if (errnum > 0)
-		(void)fprintf(stderr, " <%s>", strerror(errnum));
+		(void)fprintf(stderr, ": %s", strerror(errnum));
 	(void)fputc('\n', stderr);
 }

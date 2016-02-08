@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.10 2002/06/09 05:53:54 todd Exp $
+#	$OpenBSD: Makefile,v 1.14 2003/03/24 18:56:18 drahn Exp $
 
 REV=	${OSrev}
 
@@ -47,9 +47,21 @@ cd: ${BSD_RD}
 	strip ${.OBJDIR}/cd-dir/${OSREV}/macppc/bsd.rd
 	gzip -9 ${.OBJDIR}/cd-dir/${OSREV}/macppc/bsd.rd
 	mv ${.OBJDIR}/cd-dir/${OSREV}/macppc/bsd.rd.gz ${.OBJDIR}/cd-dir/${OSREV}/macppc/bsd.rd
+	# On HFS, doing the following means COPIES of the files.. therefore
+	# we skip doing so.
+	# ln ${.OBJDIR}/cd-dir/${OSREV}/macppc/bsd.rd ${.OBJDIR}/cd-dir/bsd.rd
+	# ln ${.OBJDIR}/cd-dir/bsd.rd ${.OBJDIR}/cd-dir/bsd
+	cp ${.CURDIR}/../../../sys/arch/macppc/stand/tbxidata/bsd.tbxi \
+	    ${.OBJDIR}/cd-dir/${OSREV}/macppc
 	cp ${DESTDIR}/usr/mdec/ofwboot ${.OBJDIR}/cd-dir/
-	mkhybrid -r -part -hfs -o ${.OBJDIR}/cd${OSrev}.fs ${.OBJDIR}/cd-dir
-
+	mkhybrid -v -v -r -part -hfs \
+	    -hfs-bless ${.OBJDIR}/cd-dir/${OSREV}/macppc \
+	    -map ${.CURDIR}/../../../gnu/usr.sbin/mkhybrid/src/more.mapping \
+	    -A "OpenBSD ${OSREV} macppc bootonly CD" \
+	    -P "Copyright (c) 2003 Theo de Raadt, The OpenBSD project" \
+	    -p "Theo de Raadt <deraadt@openbsd.org>" \
+	    -V "OpenBSD/macppc  ${OSREV} boot-only CD" \
+	    -o ${.OBJDIR}/cd${OSrev}.iso ${.OBJDIR}/cd-dir
 
 ${IMAGE}: rd_setup do_files rd_teardown
 
@@ -84,7 +96,7 @@ unconfig:
 .PRECIOUS:	${IMAGE}
 
 install:
-	cp ${BSD_RD} cd${REV}.fs ${DESTDIR}/snapshot/
+	cp ${BSD_RD} cd${REV}.iso ${DESTDIR}/snapshot/
 
 ${CBIN}.mk ${CBIN}.cache ${CBIN}.c: ${CRUNCHCONF}
 	crunchgen -E -D ${.CURDIR}/../../.. -L ${DESTDIR}/usr/lib ${.ALLSRC}
@@ -104,12 +116,12 @@ do_files:
 
 clean cleandir:
 	/bin/rm -f core ${IMAGE} ${CBIN} ${CBIN}.mk ${CBIN}.cache \
-	*.o *.lo *.c bsd ${BSD_RD} cd${REV}.fs \
+	*.o *.lo *.c bsd ${BSD_RD} cd${REV}.iso \
 	rdsetroot
 	rm -rf cd-dir
 
 beforeinstall:
-	cp ${BSD.RD} cd${REV}.fs ${DESTDIR}/snapshot
+	cp ${BSD.RD} cd${REV}.iso ${DESTDIR}/snapshot
 
 .include <bsd.obj.mk>
 .include <bsd.subdir.mk>

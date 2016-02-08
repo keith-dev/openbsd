@@ -1,4 +1,4 @@
-dnl	$OpenBSD: hardware,v 1.26 2002/06/30 16:36:55 miod Exp $
+dnl	$OpenBSD: hardware,v 1.32 2003/03/13 19:56:56 jason Exp $
 OpenBSD/MACHINE OSREV is expected to run on the following hardware.
 If you have hardware that is listed here and are unable to run
 OpenBSD, or if you are able to run OpenBSD on hardware not listed
@@ -6,8 +6,8 @@ here, please send mail to <alpha@openbsd.org> with as much information
 as possible.
 
 Supported hardware:
-    XP1000, DS10, DS20, 264DP, and other single processor EV6 machines
-    using the Tsunami chipset (only one processor on the DS20 will be used)
+    XP1000, DS10, DS20, 264DP, and other EV6 machines using the Tsunami
+    chipset (only one processor on the DS20 will be used)
 	  Supported devices:
 		Built-in serial and parallel ports.
 		Built-in DEC21143 ethernet.
@@ -77,19 +77,20 @@ Supported hardware:
 		Built-in audio.
 		ISA and EISA devices that require DMA operation.
 
-    AlphaStation 500 and 600
-	  Supported devices:
-		Built-in serial and parallel ports.
-		Built-in DEC21040 ethernet.
-		Built-in ISP SCSI.
-		PCI graphics card (TGA or VGA compatible).
-		Most PCI devices (see below).
-		Some ISA and EISA devices (see below).
-	  Unsupported devices:
-		Floppy drive.
-		Built-in audio.
-		ISA and EISA devices that require DMA operation.
-
+dnl uncomment when support is back on track
+dnl    AlphaStation 500 and 600
+dnl	  Supported devices:
+dnl		Built-in serial and parallel ports.
+dnl		Built-in DEC21040 ethernet.
+dnl		Built-in ISP SCSI.
+dnl		PCI graphics card (TGA or VGA compatible).
+dnl		Most PCI devices (see below).
+dnl		Some ISA and EISA devices (see below).
+dnl	  Unsupported devices:
+dnl		Floppy drive.
+dnl		Built-in audio.
+dnl		ISA and EISA devices that require DMA operation.
+dnl
     AlphaStation 200, 250, 255 and 400
 	  Supported devices:
 		Built-in serial and parallel ports.
@@ -145,8 +146,12 @@ Supported hardware:
     At this time none of the following systems are supported:
 	API UP2000, UP2000+ (mostly because we don't have any to test on)
 	DECpc AXP150 (2000/300) systems (EISA-bus PC-like systems)
-	AlphaServer systems, other than models 400 and 500, which seem to
+dnl update when AS400/500 support is back
+dnl	AlphaServer systems, other than models 400 and 500, which seem to
+dnl	  be disguised AlphaStation machines
+	AlphaServer systems, other than model 400, which seem to
 	  be disguised AlphaStation machines
+	AlphaStation 500 and 600
 	Alpha XL systems
 	DEC 4000, 7000, and 10000 systems (FutureBus+ and XMIBus based)
 	EB64+ based systems
@@ -223,6 +228,8 @@ Supported Peripherals:
 			Intel EtherExpress PRO/100, PRO/100B, and PRO/100+
 			Intel EtherExpress PRO/100+ "Management Adapter"
 			Intel EtherExpress PRO/100 Dual Port
+			Intel PRO/100 VE, PRO/100 VM, and PRO/100 S
+		Intel 21145-based PCI adapters (dc)
 		Novell NE1000, NE2000 (ISA and PCI variants thereof) (ne) [*]
 		RealTek 8129/8139-based adapters (rl), including: [*]
 			Accton MPX 5030/5038
@@ -238,28 +245,41 @@ Supported Peripherals:
 			Nortel BayStack 21
 			OvisLink LEF-8129TX, LEF-8139TX
 			SMC EZ Card 10/100 PCI 1211-TX
-		VIA Rhine/RhineII Ethernet adapters (vr), including: [*]
+		VIA Rhine/RhineII/Rhine III Ethernet adapters (vr),
+		  including: [*]
 			Addtron AEF-360TX
 			Hawking PN102TX
 			D-Link DFE530TX
 	Gigabit Ethernet Adapters
-		Intel i82542, i82543, and i82544 based adapters (gx),
-		  including: [*]
-		  Often known as Intel Pro/1000 Gigabit Server Adapter
-			Intel i82542 1000BASE-X Ethernet
-			Intel i82543 1000BASE-X Ethernet
-			Intel i82543-SC 1000BASE-X Ethernet
-			Intel i82543 1000BASE-T Ethernet
-			Intel i82544 1000BASE-T Ethernet
-			Intel i82544 1000BASE-X Ethernet
-			Intel i82544GC 1000BASE-T Ethernet (32- and 64-bit)
+		Intel i82540, i82542, i82543, i82544, i82545, and i82546
+	       	  based adapters (em), including: [*]
+		    Intel PRO/1000 Gigabit Server Adapter (SX Fiber)
+		      (PWLA8490)
+		    Intel PRO/1000F Gigabit Server Adapter (SX Fiber)
+		      (PWLA8490SX)
+		    Intel PRO/1000T Server Adapter (PWLA8490T)
+		    Intel PRO/1000XT Server Adapter (PWLA8490XT)
+		    Intel PRO/1000XS Server Adapter (SX Fiber) (PWLA8490XF)
+		    Intel PRO/1000T Desktop Adapter (PWLA8390T)
+		    Intel PRO/1000XTL Lo Profile PCI Server (PWLA8490XTL)
+		    Intel PRO/1000MT Desktop Adapter (PWLA8390MT)
+		    Intel PRO/1000MT Server Adapter (PWLA8490MT)
+		    Intel PRO/1000MT Dual Port Server Adapter (PWLA8492MT)
+		    Intel PRO/1000MF Server Adapter (SX Fiber) (PWLA8490MF)
+		    Intel PRO/1000MF Dual Port Server Adapter (SX Fiber)
+		      (PWLA8492MF)
+		    Intel PRO/1000MF Server Adapter (LX Fiber) (PWLA8490LX)
 		Broadcom BCM570x (a.k.a. Tigon3) based PCI adapters (bge),
 		  including: [-]
-			3Com 3c996-T (10/100/1000baseTX)
-			3Com 3c996-SX (1000baseSX)
-			3Com 3c996B-T (10/100/1000baseTX)
-			SysKonnect SK-9D21 (10/100/1000baseTX)
-			SysKonnect SK-9D41 (1000baseSX)
+			3Com 3c996-T
+			3Com 3c996-SX
+			3Com 3c996B-T
+			Dell PowerEdge 2550 integrated BCM5700 NIC
+			IBM xSeries 235 integrated BCM5703X NIC
+			IBM xSeries 305 integrated BCM5703X NIC
+			Netgear GA302T
+			SysKonnect SK-9D21
+			SysKonnect SK-9D41
 		Sundance/Tamarack TC9021 based PCI adapters (stge),
 		  including: [-]
 			D-Link DGE-550T (10/100/1000baseTX)
@@ -270,8 +290,8 @@ Supported Peripherals:
 		Hifn 7751-based boards (hifn), including:
 		    Soekris Engineering vpn1201 and vpn1211
 		    GTGI PowerCrypt Encryption Accelerator
-		    NETSEC 7751
-		    HiFn reference board
+		    NetSec 7751
+		    Hifn 7751 and 9751 reference boards
 		    Invertex AEON
 	Sound Devices [*]
 		Ensoniq AudioPCI (eap)
@@ -323,6 +343,7 @@ work. It's our best guess that they do, but any feedback is appreciated.
 			Siemens SpeedStream USB
 			Smartbridces smartNIC 2
 			SMC 2202USB
+			SMC EZ Connect USB
 			SOHOware NUB100
 		AMD LANCE and PCnet-based PCI adapters (le), including: [*]
 			BOCALANcard/PCI
@@ -373,6 +394,10 @@ work. It's our best guess that they do, but any feedback is appreciated.
 		  including: [*]
 			NetGear FA311
 			NetGear FA312
+		RealTek RTL8150L based USB adapters, including: [G]
+		    Melco Inc. LUA-KTX
+		    GreenHouse GH-USB100B
+		    Linksys USB100M
 		SiS 900 and SiS 7016-based PCI adapters (sis), including: [*]
 			Mototech ME313
 			NetSurf NS-KFE30D

@@ -1,4 +1,4 @@
-.\"	$OpenBSD: dc.4,v 1.25 2002/09/26 07:55:39 miod Exp $
+.\"	$OpenBSD: dc.4,v 1.29 2003/03/16 10:18:44 jmc Exp $
 .\"
 .\" Copyright (c) 1997, 1998, 1999
 .\"	Bill Paul <wpaul@ee.columbia.edu>. All rights reserved.
@@ -37,7 +37,7 @@
 .Os
 .Sh NAME
 .Nm dc
-.Nd DEC/Intel 21140, 21143 and clone 10/100 Ethernet driver
+.Nd DEC/Intel 21140, 21143, 21145 and clone 10/100 Ethernet driver
 .Sh SYNOPSIS
 .Cd "dc* at pci? dev ? function ?"
 .Cd "dc* at cardbus? dev ? function ?"
@@ -53,6 +53,8 @@ adapters and embedded controllers based on the following chipsets:
 DEC 21140 PCI
 .It
 DEC/Intel 21143 PCI and CardBus
+.It
+Intel 21145 PCI
 .It
 Macronix 98713, 98713A, 98715, 98715A, 98725, 98727, and 98732
 .It
@@ -74,12 +76,15 @@ Xircom X3201-based CardBus
 All of these chips have the same general register layout, DMA
 descriptor format and method of operation.
 All of the clone chips are based on the 21143 design with
-various modifications.  (The 21140 is an older version of the 21143.)
+various modifications.
+(The 21140 is an older version of the 21143.)
 The 21143 itself has support for 10baseT, BNC, AUI, MII and symbol
 media attachments, 10 and 100Mbps speeds in full or half duplex,
 built in NWAY autonegotiation and wake on LAN.
 The 21143 also offers several receive filter programming options including
 perfect filtering, inverse perfect filtering and hash table filtering.
+The 21145 seems to be 10 MBit/s only and has an additional (unsupported)
+HomePNA PHY.
 .Pp
 Some clone chips duplicate the 21143 fairly closely while others
 only maintain superficial similarities.
@@ -94,8 +99,8 @@ The
 driver does its best to provide generalized support for all
 of these chipsets in order to keep special case code to a minimum.
 .Pp
-These chips are used by many vendors which makes it
-difficult provide a complete list of all supported cards.
+These chips are used by many vendors, which makes it
+difficult to provide a complete list of all supported cards.
 The following NICs are known to work with the
 .Nm
 driver at this time:
@@ -209,6 +214,7 @@ is not specified.
 .Pp
 Note that the 100baseTX media type may not be available on certain
 Intel 21143 adapters which support 10mbps media attachments only.
+The Intel 21145 supports 10 MBit/s half-duplex only.
 For more information on configuring this device, see
 .Xr ifconfig 8 .
 .Sh DIAGNOSTICS

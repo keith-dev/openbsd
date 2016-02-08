@@ -1,4 +1,4 @@
-.\"	$OpenBSD: cgeight.4,v 1.13 2002/10/01 21:02:18 miod Exp $
+.\"	$OpenBSD: cgeight.4,v 1.17 2003/03/10 20:11:33 miod Exp $
 .\"	$NetBSD: cgeight.4,v 1.2 1997/10/08 22:00:03 jtc Exp $
 .\"
 .\" Copyright (c) 1996 The NetBSD Foundation, Inc.
@@ -48,7 +48,12 @@
 .Sh DESCRIPTION
 The
 .Nm
-is a memory based color frame buffer for the
+is a color frame buffer for the P4 bus
+of sun4 class workstations.
+.Pp
+The
+.Nm
+driver interfaces the frame buffer with the
 .Xr wscons 4
 console framework.
 It does not provide direct device driver entry points
@@ -56,6 +61,7 @@ but makes its functions available via the internal
 .Xr wsdisplay 4
 interface.
 .Sh SEE ALSO
+.Xr agten 4 ,
 .Xr bwtwo 4 ,
 .Xr cgfour 4 ,
 .Xr cgfourteen 4 ,
@@ -66,6 +72,8 @@ interface.
 .Xr intro 4 ,
 .Xr pnozz 4 ,
 .Xr tcx 4 ,
+.Xr tvtwo 4 ,
 .Xr vigra 4 ,
 .Xr wscons 4 ,
-.Xr wsdisplay 4
+.Xr wsdisplay 4 ,
+.Xr zx 4
