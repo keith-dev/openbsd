@@ -1,4 +1,4 @@
-#	$OpenBSD: files.pci,v 1.226 2007/02/24 20:18:08 kettenis Exp $
+#	$OpenBSD: files.pci,v 1.242 2007/08/14 23:16:43 dlg Exp $
 #	$NetBSD: files.pci,v 1.20 1996/09/24 17:47:15 christos Exp $
 #
 # Config file and device description for machine-independent PCI code.
@@ -79,10 +79,16 @@ device	arc: scsi
 attach	arc at pci
 file	dev/pci/arc.c			arc
 
+# JMicron JMB36x controllers
+device	jmb {}
+attach	jmb at pci
+file	dev/pci/jmb.c			jmb
+
 # Advanced Host Controller Interface for Serial ATA
 device	ahci: scsi, atascsi
-attach	ahci at pci
-file	dev/pci/ahci.c			ahci
+attach	ahci at pci with ahci_pci
+attach	ahci at jmb with ahci_jmb
+file	dev/pci/ahci.c			ahci | ahci_pci | ahci_jmb
 
 # AMI MegaRAID Express x00/Elite 1500/Express 1x00 RAID Controllers
 attach	ami at pci with ami_pci
@@ -207,6 +213,14 @@ file	dev/pci/isp_pci.c		isp_pci
 attach	mpi at pci with mpi_pci
 file	dev/pci/mpi_pci.c		mpi_pci
 
+# Emulex Light Pulse Fibre Channel (Service Level Interface)
+attach	sli at pci with sli_pci
+file	dev/pci/sli_pci.c		sli_pci
+
+# Silicon Image 3124/3132/3531 SATALink
+attach	sili at pci with sili_pci
+file	dev/pci/sili_pci.c		sili_pci
+
 # Ethernet driver for DC21040-based boards
 device	de: ether, ifnet, ifmedia
 attach	de at pci
@@ -249,8 +263,9 @@ file	dev/pci/neo.c			neo
 
 # PCI IDE controllers
 device	pciide {[channel = -1]}: cy82c693, wdc_base, ata, atapi
-attach	pciide at pci
-file	dev/pci/pciide.c		pciide
+attach	pciide at pci with pciide_pci
+attach	pciide at jmb with pciide_jmb
+file	dev/pci/pciide.c		pciide | pciide_pci | pciide_jmb
 
 # PCI-PCI bridge chips
 device	ppb: pcibus
@@ -336,6 +351,30 @@ device	xge: ether, ifnet, ifmedia
 attach	xge  at pci
 file	dev/pci/if_xge.c		xge
 
+# NetXen NX2031/NX2035 10Gb Ethernet
+device	nxe: ether, ifnet, ifmedia
+attach	nxe at pci
+file	dev/pci/if_nxe.c		nxe
+
+# Tehuti Networks 10Gb Ethernet
+device	thtc {}
+attach	thtc at pci
+device	tht: ether, ifnet, ifmedia, firmload
+attach	tht at thtc   
+file	dev/pci/if_tht.c		thtc | tht
+
+# Chelsio 10Gb Ethernet
+device	cheg {}
+attach	cheg at pci
+device	che: ether, ifnet, ifmedia, firmload
+attach	che at cheg   
+file	dev/pci/if_che.c		cheg | che
+
+# Myricom Myri-10G Ethernet
+device	myx: ether, ifnet, ifmedia
+attach	myx at pci
+file	dev/pci/if_myx.c		myx
+
 # DEC/Intel 21143 and "tulip" clone ethernet
 attach	dc at pci with dc_pci
 file	dev/pci/if_dc_pci.c		dc_pci
@@ -419,7 +458,7 @@ file	dev/pci/if_ste.c		ste
 # Industrial Computer Source WDT-50x
 device	wdt: pcibus
 attach	wdt at pci
-file	dev/pci/wdt.c			wdt	needs-flag
+file	dev/pci/wdt.c			wdt
 
 # Quancom PWDOG1
 device	pwdog: pcibus
@@ -542,7 +581,7 @@ attach	bge at pci
 file	dev/pci/if_bge.c		bge
 
 # Broadcom BCM570[68] gigabit ethernet
-device	bnx: ether, ifnet, mii, ifmedia, mii_phy
+device	bnx: ether, ifnet, mii, ifmedia, mii_phy, firmload
 attach	bnx at pci
 file	dev/pci/if_bnx.c		bnx
 
@@ -609,12 +648,6 @@ file	dev/pci/if_pgt_pci.c		pgt_pci
 #
 attach	malo at pci with malo_pci
 file	dev/pci/if_malo_pci.c		malo_pci
-
-#
-# Broadcom BC43xx
-#
-attach	bcw at pci with bcw_pci
-file	dev/pci/if_bcw_pci.c		bcw_pci
 
 # Sangoma PCI card
 device	san: ifnet, ifmedia, sppp

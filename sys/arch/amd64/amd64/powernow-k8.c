@@ -1,4 +1,4 @@
-/*	$OpenBSD: powernow-k8.c,v 1.16 2007/02/17 11:51:21 tom Exp $ */
+/*	$OpenBSD: powernow-k8.c,v 1.19 2007/05/31 17:49:15 gwk Exp $ */
 /*
  * Copyright (c) 2004 Martin Végiard.
  * Copyright (c) 2004-2005 Bruno Ducrot
@@ -39,6 +39,13 @@
 #include <machine/cpufunc.h>
 #include <machine/bus.h>
 
+#include "acpicpu.h"
+
+#if NACPICPU > 0
+#include <dev/acpi/acpidev.h>
+#include <dev/acpi/acpivar.h>
+#endif
+
 #define BIOS_START			0xe0000
 #define	BIOS_LEN			0x20000
 
@@ -71,13 +78,13 @@ extern int setperf_prio;
 #define PN8_PSB_TO_BATT(x)		(((x) >> 6) & 0x03)
 
 /* ACPI ctr_val status register to PowerNow K8 configuration */
-#define ACPI_PN8_CTRL_TO_FID(x)		((x) & 0x3f)
-#define ACPI_PN8_CTRL_TO_VID(x)		(((x) >> 6) & 0x1f)
-#define ACPI_PN8_CTRL_TO_VST(x)		(((x) >> 11) & 0x1f)
-#define ACPI_PN8_CTRL_TO_MVS(x)		(((x) >> 18) & 0x03)
-#define ACPI_PN8_CTRL_TO_PLL(x)		(((x) >> 20) & 0x7f)
-#define ACPI_PN8_CTRL_TO_RVO(x)		(((x) >> 28) & 0x03)
-#define ACPI_PN8_CTRL_TO_IRT(x)		(((x) >> 30) & 0x03)
+#define PN8_ACPI_CTRL_TO_FID(x)		((x) & 0x3f)
+#define PN8_ACPI_CTRL_TO_VID(x)		(((x) >> 6) & 0x1f)
+#define PN8_ACPI_CTRL_TO_VST(x)		(((x) >> 11) & 0x1f)
+#define PN8_ACPI_CTRL_TO_MVS(x)		(((x) >> 18) & 0x03)
+#define PN8_ACPI_CTRL_TO_PLL(x)		(((x) >> 20) & 0x7f)
+#define PN8_ACPI_CTRL_TO_RVO(x)		(((x) >> 28) & 0x03)
+#define PN8_ACPI_CTRL_TO_IRT(x)		(((x) >> 30) & 0x03)
 
 #define WRITE_FIDVID(fid, vid, ctrl)	\
 	wrmsr(MSR_AMDK7_FIDVID_CTL,	\
@@ -114,7 +121,7 @@ struct psb_s {
 	char signature[10];     /* AMDK7PNOW! */
 	uint8_t version;
 	uint8_t flags;
-	uint16_t ttime;         /* Min Settling time */
+	uint16_t ttime;		/* Min Settling time */
 	uint8_t reserved;
 	uint8_t n_pst;
 };
@@ -129,13 +136,17 @@ struct pst_s {
 
 struct k8pnow_cpu_state *k8pnow_current_state;
 
-/*
- * Prototypes
- */
 int k8pnow_read_pending_wait(uint64_t *);
 int k8pnow_decode_pst(struct k8pnow_cpu_state *, uint8_t *);
 int k8pnow_states(struct k8pnow_cpu_state *, uint32_t, unsigned int,
     unsigned int);
+
+#if NACPICPU > 0
+int k8pnow_acpi_init(struct k8pnow_cpu_state *, uint64_t);
+void k8pnow_acpi_pss_changed(struct acpicpu_pss *, int);
+int k8pnow_acpi_states(struct k8pnow_cpu_state *, struct acpicpu_pss *, int,
+    uint64_t);
+#endif
 
 int
 k8pnow_read_pending_wait(uint64_t *status)
@@ -155,7 +166,7 @@ k8pnow_read_pending_wait(uint64_t *status)
 void
 k8_powernow_setperf(int level)
 {
-	unsigned int i, low, high, freq;
+	unsigned int i;
 	uint64_t status;
 	int cfid, cvid, fid = 0, vid = 0;
 	int rvo;
@@ -173,18 +184,13 @@ k8_powernow_setperf(int level)
 	cvid = PN8_STA_CVID(status);
 
 	cstate = k8pnow_current_state;
-	low = cstate->state_table[0].freq;
-	high = cstate->state_table[cstate->n_states-1].freq;
 
-	freq = low + (high - low) * level / 100;
+	i = ((level * cstate->n_states) + 1) / 101;
+	if (i >= cstate->n_states)
+		i = cstate->n_states - 1;
 
-	for (i = 0; i < cstate->n_states; i++) {
-		if (cstate->state_table[i].freq >= freq) {
-			fid = cstate->state_table[i].fid;
-			vid = cstate->state_table[i].vid;
-			break;
-		}
-	}
+	fid = cstate->state_table[i].fid;
+	vid = cstate->state_table[i].vid;
 
 	if (fid == cfid && vid == cvid)
 		return;
@@ -271,7 +277,7 @@ k8pnow_decode_pst(struct k8pnow_cpu_state *cstate, uint8_t *p)
 	for (n = 0, i = 0; i < cstate->n_states; i++) {
 		state.fid = *p++;
 		state.vid = *p++;
-	
+
 		/*
 		 * The minimum supported frequency per the data sheet is 800MHz
 		 * The maximum supported frequency is 5000MHz.
@@ -290,6 +296,87 @@ k8pnow_decode_pst(struct k8pnow_cpu_state *cstate, uint8_t *p)
 	}
 	return 1;
 }
+
+#if NACPICPU > 0
+
+int
+k8pnow_acpi_states(struct k8pnow_cpu_state * cstate, struct acpicpu_pss * pss,
+    int nstates, uint64_t status)
+{
+	struct k8pnow_state state;
+	int j, k, n;
+	uint32_t ctrl;
+
+	k = -1;
+
+	for (n = 0; n < cstate->n_states; n++) {
+		if (status == pss[n].pss_status)
+			k = n;
+		ctrl = pss[n].pss_ctrl;
+		state.fid = PN8_ACPI_CTRL_TO_FID(ctrl);
+		state.vid = PN8_ACPI_CTRL_TO_VID(ctrl);
+
+		state.freq = pss[n].pss_core_freq;
+		j = n;
+		while (j > 0 && cstate->state_table[j - 1].freq > state.freq) {
+			memcpy(&cstate->state_table[j],
+			    &cstate->state_table[j - 1],
+			    sizeof(struct k8pnow_state));
+			--j;
+		}
+		memcpy(&cstate->state_table[j], &state,
+		    sizeof(struct k8pnow_state));
+	}
+
+	return k;
+}
+
+void
+k8pnow_acpi_pss_changed(struct acpicpu_pss * pss, int npss)
+{
+	int curs;
+	struct k8pnow_cpu_state * cstate;
+	uint32_t ctrl;
+	uint64_t status;
+
+	status = rdmsr(MSR_AMDK7_FIDVID_STATUS);
+	cstate = k8pnow_current_state;
+
+	curs = k8pnow_acpi_states(cstate, pss, npss, status);
+	ctrl = pss[curs].pss_ctrl;
+	cstate->vst = PN8_ACPI_CTRL_TO_VST(ctrl);
+	cstate->mvs = PN8_ACPI_CTRL_TO_MVS(ctrl);
+	cstate->pll = PN8_ACPI_CTRL_TO_PLL(ctrl);
+	cstate->irt = PN8_ACPI_CTRL_TO_IRT(ctrl);
+	cstate->low = 0;
+	cstate->n_states = npss;
+}
+
+int
+k8pnow_acpi_init(struct k8pnow_cpu_state * cstate, uint64_t status)
+{
+	int curs;
+	uint32_t ctrl;
+	struct acpicpu_pss *pss;
+
+	cstate->n_states = acpicpu_fetch_pss(&pss);
+	if (cstate->n_states == 0)
+		return 0;
+	acpicpu_set_notify(k8pnow_acpi_pss_changed);
+
+	curs = k8pnow_acpi_states(cstate, pss, cstate->n_states, status);
+	ctrl = pss[curs].pss_ctrl;
+
+	cstate->vst = PN8_ACPI_CTRL_TO_VST(ctrl);
+	cstate->mvs = PN8_ACPI_CTRL_TO_MVS(ctrl);
+	cstate->pll = PN8_ACPI_CTRL_TO_PLL(ctrl);
+	cstate->irt = PN8_ACPI_CTRL_TO_IRT(ctrl);
+	cstate->low = 0;
+
+	return 1;
+}
+
+#endif /* NACPICPU */
 
 int
 k8pnow_states(struct k8pnow_cpu_state *cstate, uint32_t cpusig,
@@ -324,7 +411,8 @@ k8pnow_states(struct k8pnow_cpu_state *cstate, uint32_t cpusig,
 					return (k8pnow_decode_pst(cstate,
 					    p+= sizeof (struct pst_s)));
 				}
-				p += sizeof(struct pst_s) + 2 * cstate->n_states;
+				p += sizeof(struct pst_s) + 2
+				    * cstate->n_states;
 			}
 		}
 	}
@@ -334,16 +422,14 @@ k8pnow_states(struct k8pnow_cpu_state *cstate, uint32_t cpusig,
 }
 
 void
-k8_powernow_init(void)
+k8_powernow_init(struct cpu_info *ci)
 {
 	uint64_t status;
 	u_int maxfid, maxvid, i;
 	u_int32_t extcpuid, dummy;
 	struct k8pnow_cpu_state *cstate;
 	struct k8pnow_state *state;
-	struct cpu_info * ci;
 	char * techname = NULL;
-	ci = curcpu();
 
 	if (setperf_prio > 1)
 		return;
@@ -367,11 +453,17 @@ k8_powernow_init(void)
 	else
 		techname = "Cool'n'Quiet K8";
 
-	/* Extended CPUID signature value */
-	CPUID(0x80000001, extcpuid, dummy, dummy, dummy);
-
-	if (!k8pnow_states(cstate, ci->ci_signature, maxfid, maxvid))
-		k8pnow_states(cstate, extcpuid, maxfid, maxvid);
+#if NACPICPU > 0
+	/* If we have acpi check acpi first */
+	if (!k8pnow_acpi_init(cstate, status))
+#endif
+	{
+		if (!k8pnow_states(cstate, ci->ci_signature, maxfid, maxvid)) {
+			/* Extended CPUID signature value */
+			CPUID(0x80000001, extcpuid, dummy, dummy, dummy);
+			k8pnow_states(cstate, extcpuid, maxfid, maxvid);
+		}
+	}
 	if (cstate->n_states) {
 		printf("%s: %s %d MHz: speeds:",
 		    ci->ci_dev->dv_xname, techname, cpuspeed);

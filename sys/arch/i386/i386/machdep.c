@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.379 2007/02/21 19:34:25 deraadt Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.403 2007/07/20 17:04:14 mk Exp $	*/
 /*	$NetBSD: machdep.c,v 1.214 1996/11/10 03:16:17 thorpej Exp $	*/
 
 /*-
@@ -97,6 +97,7 @@
 #include <sys/syscallargs.h>
 #include <sys/core.h>
 #include <sys/kcore.h>
+#include <sys/sensors.h>
 #ifdef SYSVMSG
 #include <sys/msg.h>
 #endif
@@ -174,17 +175,6 @@ extern struct proc *npxproc;
 #endif
 #endif /* NCOM > 0 || NPCCOM > 0 */
 
-/*
- * The following defines are for the code in setup_buffers that tries to
- * ensure that enough ISA DMAable memory is still left after the buffercache
- * has been allocated.
- */
-#define CHUNKSZ		(3 * 1024 * 1024)
-#define ISADMA_LIMIT	(16 * 1024 * 1024)	/* XXX wrong place */
-#define ALLOC_PGS(sz, limit, pgs) \
-    uvm_pglistalloc((sz), 0, (limit), PAGE_SIZE, 0, &(pgs), 1, 0)
-#define FREE_PGS(pgs) uvm_pglistfree(&(pgs))
-
 /* the following is used externally (sysctl_hw) */
 char machine[] = MACHINE;
 
@@ -199,14 +189,8 @@ int	cpu_apmhalt = 0;	/* sysctl'd to 1 for halt -p hack */
 int	user_ldt_enable = 0;	/* sysctl'd to 1 to enable */
 #endif
 
-#ifdef	NBUF
-int	nbuf = NBUF;
-#else
-int	nbuf = 0;
-#endif
-
 #ifndef BUFCACHEPERCENT
-#define BUFCACHEPERCENT 5
+#define BUFCACHEPERCENT 10
 #endif
 
 #ifdef	BUFPAGES
@@ -248,17 +232,23 @@ paddr_t avail_end;
 struct vm_map *exec_map = NULL;
 struct vm_map *phys_map = NULL;
 
-int kbd_reset;
+#if !defined(SMALL_KERNEL) && defined(I686_CPU)
 int p4_model;
 int p3_early;
+void (*update_cpuspeed)(void) = NULL;
+#endif
+int kbd_reset;
+
+#if !defined(SMALL_KERNEL)
 int bus_clock;
+#endif
 void (*setperf_setup)(struct cpu_info *);
 int setperf_prio = 0;		/* for concurrent handlers */
 
+void (*cpusensors_setup)(struct cpu_info *);
+
 void (*delay_func)(int) = i8254_delay;
-void (*microtime_func)(struct timeval *) = i8254_microtime;
 void (*initclock_func)(void) = i8254_initclocks;
-void (*update_cpuspeed)(void) = NULL;
 
 /*
  * Extent maps to manage I/O and ISA memory hole space.  Allocate
@@ -279,7 +269,7 @@ struct	extent *iomem_ex;
 static	int ioport_malloc_safe;
 
 caddr_t	allocsys(caddr_t);
-void	setup_buffers(vaddr_t *);
+void	setup_buffers(void);
 void	dumpsys(void);
 int	cpu_dump(void);
 void	init386(paddr_t);
@@ -335,10 +325,12 @@ void	cyrix3_cpu_setup(struct cpu_info *);
 void	cyrix6x86_cpu_setup(struct cpu_info *);
 void	natsem6x86_cpu_setup(struct cpu_info *);
 void	intel586_cpu_setup(struct cpu_info *);
+void	intel686_cpusensors_setup(struct cpu_info *);
 void	intel686_setperf_setup(struct cpu_info *);
 void	intel686_common_cpu_setup(struct cpu_info *);
 void	intel686_cpu_setup(struct cpu_info *);
 void	intel686_p4_cpu_setup(struct cpu_info *);
+void	intelcore_update_sensor(void *);
 void	tm86_cpu_setup(struct cpu_info *);
 char *	intel686_cpu_name(int);
 char *	cyrix3_cpu_name(int, int);
@@ -350,7 +342,6 @@ void	p4_update_cpuspeed(void);
 void	p3_update_cpuspeed(void);
 int	pentium_cpuspeed(int *);
 
-#if defined(I486_CPU) || defined(I586_CPU) || defined(I686_CPU)
 static __inline u_char
 cyrix_read_reg(u_char reg)
 {
@@ -364,7 +355,6 @@ cyrix_write_reg(u_char reg, u_char data)
 	outb(0x22, reg);
 	outb(0x23, data);
 }
-#endif
 
 /*
  * cpuid instruction.  request in eax, result in eax, ebx, ecx, edx.
@@ -423,8 +413,8 @@ cpu_startup()
 	curcpu()->ci_feature_flags = cpu_feature;
 	identifycpu(curcpu());
 
-	printf("real mem  = %lu (%uK)\n", ctob((paddr_t)physmem),
-	    ctob((paddr_t)physmem)/1024U);
+	printf("real mem  = %llu (%lluMB)\n", ctob((unsigned long long)physmem),
+	    ctob((unsigned long long)physmem)/1024U/1024U);
 
 	/*
 	 * Find out how much space we need, allocate it,
@@ -440,12 +430,13 @@ cpu_startup()
 	 * Now allocate buffers proper.  They are different than the above
 	 * in that they usually occupy more virtual memory than physical.
 	 */
-	setup_buffers(&maxaddr);
+	setup_buffers();
 
 	/*
 	 * Allocate a submap for exec arguments.  This map effectively
 	 * limits the number of processes exec'ing at any time.
 	 */
+	minaddr = vm_map_min(kernel_map);
 	exec_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr,
 				   16*NCARGS, VM_MAP_PAGEABLE, FALSE, NULL);
 
@@ -455,10 +446,9 @@ cpu_startup()
 	phys_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr,
 				   VM_PHYS_SIZE, 0, FALSE, NULL);
 
-	printf("avail mem = %lu (%uK)\n", ptoa((paddr_t)uvmexp.free),
-	    ptoa((paddr_t)uvmexp.free) / 1024U);
-	printf("using %d buffers containing %u bytes (%uK) of memory\n",
-	    nbuf, bufpages * PAGE_SIZE, bufpages * PAGE_SIZE / 1024);
+	printf("avail mem = %llu (%lluMB)\n",
+	    ptoa((unsigned long long)uvmexp.free),
+	    ptoa((unsigned long long)uvmexp.free)/1024U/1024U);
 
 	/*
 	 * Set up buffers, so they can be used to read disk labels.
@@ -551,134 +541,24 @@ allocsys(caddr_t v)
 	valloc(msqids, struct msqid_ds, msginfo.msgmni);
 #endif
 
-	/*
-	 * Determine how many buffers to allocate.  We use 10% of the
-	 * first 2MB of memory, and 5% of the rest of below 4G memory,
-	 * with a minimum of 16 buffers.  We allocate 1/2 as many swap
-	 * buffer headers as file i/o buffers.
-	 */
-	if (bufpages == 0) {
-		bufpages = (btoc(2 * 1024 * 1024 + avail_end)) *
-		    bufcachepercent / 100;
-	}
-	if (nbuf == 0) {
-		nbuf = bufpages;
-		if (nbuf < 16)
-			nbuf = 16;
-	}
-
-	/* Restrict to at most 35% filled kvm */
-	/* XXX - This needs UBC... */
-	if (nbuf >
-	    (VM_MAX_KERNEL_ADDRESS-VM_MIN_KERNEL_ADDRESS) / MAXBSIZE * 35 / 100)
-		nbuf = (VM_MAX_KERNEL_ADDRESS-VM_MIN_KERNEL_ADDRESS) /
-		    MAXBSIZE * 35 / 100;
-
-	/* More buffer pages than fits into the buffers is senseless.  */
-	if (bufpages > nbuf * MAXBSIZE / PAGE_SIZE)
-		bufpages = nbuf * MAXBSIZE / PAGE_SIZE;
-
-	valloc(buf, struct buf, nbuf);
 	return v;
 }
 
 void
-setup_buffers(vaddr_t *maxaddr)
+setup_buffers()
 {
-	vsize_t size;
-	vaddr_t addr;
-	int base, residual, left, chunk, i;
-	struct pglist pgs, saved_pgs;
-	struct vm_page *pg;
-
-	size = MAXBSIZE * nbuf;
-	if (uvm_map(kernel_map, (vaddr_t *) &buffers, round_page(size),
-		    NULL, UVM_UNKNOWN_OFFSET, 0,
-		    UVM_MAPFLAG(UVM_PROT_NONE, UVM_PROT_NONE, UVM_INH_NONE,
-				UVM_ADV_NORMAL, 0)))
-		panic("cpu_startup: cannot allocate VM for buffers");
-	addr = (vaddr_t)buffers;
-
-	base = bufpages / nbuf;
-	residual = bufpages % nbuf;
-	if (base >= MAXBSIZE / PAGE_SIZE) {
-		/* don't want to alloc more physical mem than needed */
-		base = MAXBSIZE / PAGE_SIZE;
-		residual = 0;
-	}
-
 	/*
-	 * In case we might need DMA bouncing we have to make sure there
-	 * is some memory below 16MB available.  On machines with many
-	 * pages reserved for the buffer cache we risk filling all of that
-	 * area with buffer pages.  We still want much of the buffers
-	 * reside there as that lowers the probability of them needing to
-	 * bounce, but we have to set aside some space for DMA buffers too.
-	 *
-	 * The current strategy is to grab hold of one 3MB chunk below 16MB
-	 * first, which we are saving for DMA buffers, then try to get
-	 * one chunk at a time for fs buffers, until that is not possible
-	 * anymore, at which point we get the rest wherever we may find it.
-	 * After that we give our saved area back. That will guarantee at
-	 * least 3MB below 16MB left for drivers' attach routines, among
-	 * them isadma.  However we still have a potential problem of PCI
-	 * devices attached earlier snatching that memory.  This can be
-	 * solved by making the PCI DMA memory allocation routines go for
-	 * memory above 16MB first.
+	 * Determine how many buffers to allocate.  We use bufcachepercent%
+	 * of the memory below 4GB.
 	 */
+	if (bufpages == 0)
+		bufpages = btoc(avail_end) * bufcachepercent / 100;
 
-	left = bufpages;
-
-	/*
-	 * First, save ISA DMA bounce buffer area so we won't lose that
-	 * capability.
-	 */
-	TAILQ_INIT(&saved_pgs);
-	TAILQ_INIT(&pgs);
-	if (!ALLOC_PGS(CHUNKSZ, ISADMA_LIMIT, saved_pgs)) {
-		/*
-		 * Then, grab as much ISA DMAable memory as possible
-		 * for the buffer cache as it is nice to not need to
-		 * bounce all buffer I/O.
-		 */
-		for (left = bufpages; left > 0; left -= chunk) {
-			chunk = min(left, CHUNKSZ / PAGE_SIZE);
-			if (ALLOC_PGS(chunk * PAGE_SIZE, ISADMA_LIMIT, pgs))
-				break;
-		}
-	}
-
-	/*
-	 * If we need more pages for the buffer cache, get them from anywhere.
-	 */
-	if (left > 0 && ALLOC_PGS(left * PAGE_SIZE, avail_end, pgs))
-		panic("cannot get physical memory for buffer cache");
-
-	/*
-	 * Finally, give back the ISA DMA bounce buffer area, so it can be
-	 * allocated by the isadma driver later.
-	 */
-	if (!TAILQ_EMPTY(&saved_pgs))
-		FREE_PGS(saved_pgs);
-
-	pg = TAILQ_FIRST(&pgs);
-	for (i = 0; i < nbuf; i++) {
-		/*
-		 * First <residual> buffers get (base+1) physical pages
-		 * allocated for them.  The rest get (base) physical pages.
-		 *
-		 * The rest of each buffer occupies virtual space,
-		 * but has no physical memory allocated for it.
-		 */
-		addr = (vaddr_t)buffers + i * MAXBSIZE;
-		for (size = PAGE_SIZE * (i < residual ? base + 1 : base);
-		    size > 0; size -= PAGE_SIZE, addr += PAGE_SIZE) {
-			pmap_kenter_pa(addr, VM_PAGE_TO_PHYS(pg),
-			    VM_PROT_READ|VM_PROT_WRITE);
-			pg = TAILQ_NEXT(pg, pageq);
-		}
-	}
-	pmap_update(pmap_kernel());
+	/* Restrict to at most 25% filled kvm */
+	if (bufpages >
+	    (VM_MAX_KERNEL_ADDRESS-VM_MIN_KERNEL_ADDRESS) / PAGE_SIZE / 4)
+		bufpages = (VM_MAX_KERNEL_ADDRESS-VM_MIN_KERNEL_ADDRESS) /
+		    PAGE_SIZE / 4;
 }
 
 /*
@@ -1311,7 +1191,6 @@ cyrix3_cpu_setup(struct cpu_info *ci)
 void
 cyrix6x86_cpu_setup(struct cpu_info *ci)
 {
-#if defined(I486_CPU) || defined(I586_CPU) || defined(I686_CPU)
 	extern int clock_broken_latch;
 
 	switch ((ci->ci_signature >> 4) & 15) { /* model */
@@ -1340,7 +1219,6 @@ cyrix6x86_cpu_setup(struct cpu_info *ci)
 		printf("%s: TSC disabled\n", ci->ci_dev.dv_xname);
 		break;
 	}
-#endif
 }
 
 void
@@ -1409,7 +1287,7 @@ amd_family5_setup(struct cpu_info *ci)
 	}
 }
 
-#if !defined(SMALL_KERNEL) && defined(I686_CPU) && !defined(MULTIPROCESSOR)
+#if !defined(SMALL_KERNEL) && defined(I686_CPU)
 void
 amd_family6_setperf_setup(struct cpu_info *ci)
 {
@@ -1424,7 +1302,7 @@ amd_family6_setperf_setup(struct cpu_info *ci)
 		break;
 	}
 }
-#endif /* !SMALL_KERNEL && I686_CPU && !MULTIPROCESSOR */
+#endif /* !SMALL_KERNEL && I686_CPU */
 
 void
 amd_family6_setup(struct cpu_info *ci)
@@ -1439,13 +1317,69 @@ amd_family6_setup(struct cpu_info *ci)
 	else
 		pagezero = i686_pagezero;
 
-#if !defined(MULTIPROCESSOR)
 	setperf_setup = amd_family6_setperf_setup;
-#endif
 #endif
 }
 
-#if !defined(SMALL_KERNEL) && defined(I686_CPU) && !defined(MULTIPROCESSOR)
+#if !defined(SMALL_KERNEL) && defined(I686_CPU)
+/*
+ * Temperature read on the CPU is relative to the maximum
+ * temperature supported by the CPU, Tj(Max).
+ * Poorly documented, refer to:
+ * http://softwarecommunity.intel.com/isn/Community/
+ * en-US/forums/thread/30228638.aspx
+ * Basically, depending on a bit in one msr, the max is either 85 or 100.
+ * Then we subtract the temperature portion of thermal status from
+ * max to get current temperature.
+ */
+void
+intelcore_update_sensor(void *args)
+{
+	struct cpu_info *ci = (struct cpu_info *) args;
+	u_int64_t msr;
+	int max = 100;
+
+	if (rdmsr(MSR_TEMPERATURE_TARGET) & MSR_TEMPERATURE_TARGET_LOW_BIT)
+		max = 85;
+
+	msr = rdmsr(MSR_THERM_STATUS);
+	if (msr & MSR_THERM_STATUS_VALID_BIT) {
+		ci->ci_sensor.value = max - MSR_THERM_STATUS_TEMP(msr);
+		/* micro degrees */
+		ci->ci_sensor.value *= 1000000;
+		/* kelvin */
+		ci->ci_sensor.value += 273150000;
+		ci->ci_sensor.flags &= ~SENSOR_FINVALID;
+	} else {
+		ci->ci_sensor.value = 0;
+		ci->ci_sensor.flags |= SENSOR_FINVALID;
+	}
+}
+
+void
+intel686_cpusensors_setup(struct cpu_info *ci)
+{
+	u_int regs[4];
+
+	if (cpuid_level < 0x06)
+		return;
+
+	/* CPUID.06H.EAX[0] = 1 tells us if we have on-die sensor */
+	cpuid(0x06, regs);
+	if ((regs[0] & 0x01) != 1)
+		return;
+
+	/* Setup the sensors structures */
+	strlcpy(ci->ci_sensordev.xname, ci->ci_dev.dv_xname,
+	    sizeof(ci->ci_sensordev.xname));
+	ci->ci_sensor.type = SENSOR_TEMP;
+	sensor_task_register(ci, intelcore_update_sensor, 5);
+	sensor_attach(&ci->ci_sensordev, &ci->ci_sensor);
+	sensordev_install(&ci->ci_sensordev);
+}
+#endif
+
+#if !defined(SMALL_KERNEL) && defined(I686_CPU)
 void
 intel686_setperf_setup(struct cpu_info *ci)
 {
@@ -1469,9 +1403,8 @@ intel686_common_cpu_setup(struct cpu_info *ci)
 {
 
 #if !defined(SMALL_KERNEL) && defined(I686_CPU)
-#if !defined(MULTIPROCESSOR)
 	setperf_setup = intel686_setperf_setup;
-#endif
+	cpusensors_setup = intel686_cpusensors_setup;
 	{
 	extern void (*pagezero)(void *, size_t);
 	extern void sse2_pagezero(void *, size_t);
@@ -1861,7 +1794,7 @@ identifycpu(struct cpu_info *ci)
 	 * let them know if that machine type isn't configured.
 	 */
 	switch (cpu_class) {
-#if !defined(I386_CPU) && !defined(I486_CPU) && !defined(I586_CPU) && !defined(I686_CPU)
+#if !defined(I486_CPU) && !defined(I586_CPU) && !defined(I686_CPU)
 #error No CPU classes configured.
 #endif
 #ifndef I686_CPU
@@ -1885,17 +1818,10 @@ identifycpu(struct cpu_info *ci)
 #ifndef I486_CPU
 	case CPUCLASS_486:
 		printf("NOTICE: this kernel does not support i486 CPU class\n");
-#ifdef I386_CPU
-		printf("NOTICE: lowering CPU class to i386\n");
-		cpu_class = CPUCLASS_386;
-		break;
 #endif
-#endif
-#ifndef I386_CPU
 	case CPUCLASS_386:
 		printf("NOTICE: this kernel does not support i386 CPU class\n");
 		panic("no appropriate CPU class available");
-#endif
 	default:
 		break;
 	}
@@ -1914,13 +1840,11 @@ identifycpu(struct cpu_info *ci)
 #endif
 	}
 
-#if defined(I486_CPU) || defined(I586_CPU) || defined(I686_CPU)
 	/*
-	 * On a 486 or above, enable ring 0 write protection.
+	 * Enable ring 0 write protection (486 or above, but 386
+	 * no longer supported).
 	 */
-	if (ci->cpu_class >= CPUCLASS_486)
-		lcr0(rcr0() | CR0_WP);
-#endif
+	lcr0(rcr0() | CR0_WP);
 
 #if defined(I686_CPU)
 	/*
@@ -1980,16 +1904,16 @@ cyrix3_get_bus_clock(struct cpu_info *ci)
 	bus = (msr >> 18) & 0x3;
 	switch (bus) {
 	case 0:
-		bus_clock = 10000;
+		bus_clock = BUS100;
 		break;
 	case 1:
-		bus_clock = 13333;
+		bus_clock = BUS133;
 		break;
 	case 2:
-		bus_clock = 20000;
+		bus_clock = BUS200;
 		break;
 	case 3:
-		bus_clock = 16666;
+		bus_clock = BUS166;
 		break;
 	}
 }
@@ -2006,10 +1930,10 @@ p4_get_bus_clock(struct cpu_info *ci)
 		bus = (msr >> 21) & 0x7;
 		switch (bus) {
 		case 0:
-			bus_clock = 10000;
+			bus_clock = BUS100;
 			break;
 		case 1:
-			bus_clock = 13333;
+			bus_clock = BUS133;
 			break;
 		default:
 			printf("%s: unknown Pentium 4 (model %d) "
@@ -2021,16 +1945,16 @@ p4_get_bus_clock(struct cpu_info *ci)
 		bus = (msr >> 16) & 0x7;
 		switch (bus) {
 		case 0:
-			bus_clock = (model == 2) ? 10000 : 26666;
+			bus_clock = (model == 2) ? BUS100 : BUS266;
 			break;
 		case 1:
-			bus_clock = 13333;
+			bus_clock = BUS133;
 			break;
 		case 2:
-			bus_clock = 20000;
+			bus_clock = BUS200;
 			break;
 		case 3:
-			bus_clock = 16666;
+			bus_clock = BUS166;
 			break;
 		default:
 			printf("%s: unknown Pentium 4 (model %d) "
@@ -2050,17 +1974,17 @@ p3_get_bus_clock(struct cpu_info *ci)
 	model = (ci->ci_signature >> 4) & 15;
 	switch (model) {
 	case 0x9: /* Pentium M (130 nm, Banias) */
-		bus_clock = 10000;
+		bus_clock = BUS100;
 		break;
 	case 0xd: /* Pentium M (90 nm, Dothan) */
 		msr = rdmsr(MSR_FSB_FREQ);
 		bus = (msr >> 0) & 0x7;
 		switch (bus) {
 		case 0:
-			bus_clock = 10000;
+			bus_clock = BUS100;
 			break;
 		case 1:
-			bus_clock = 13333;
+			bus_clock = BUS133;
 			break;
 		default:
 			printf("%s: unknown Pentium M FSB_FREQ value %d",
@@ -2074,19 +1998,22 @@ p3_get_bus_clock(struct cpu_info *ci)
 		bus = (msr >> 0) & 0x7;
 		switch (bus) {
 		case 5:
-			bus_clock = 10000;
+			bus_clock = BUS100;
 			break;
 		case 1:
-			bus_clock = 13333;
+			bus_clock = BUS133;
 			break;
 		case 3:
-			bus_clock = 16666;
+			bus_clock = BUS166;
+			break;
+		case 2:
+			bus_clock = BUS200;
 			break;
 		case 0:
-			bus_clock = 26666;
+			bus_clock = BUS266;
 			break;
 		case 4:
-			bus_clock = 33333;
+			bus_clock = BUS333;
 			break;
 		default:
 			printf("%s: unknown Core FSB_FREQ value %d",
@@ -2106,13 +2033,13 @@ p3_get_bus_clock(struct cpu_info *ci)
 		bus = (msr >> 18) & 0x3;
 		switch (bus) {
 		case 0:
-			bus_clock = 6666;
+			bus_clock = BUS66;
 			break;
 		case 1:
-			bus_clock = 13333;
+			bus_clock = BUS133;
 			break;
 		case 2:
-			bus_clock = 10000;
+			bus_clock = BUS100;
 			break;
 		default:
 			printf("%s: unknown i686 EBL_CR_POWERON value %d",
@@ -2195,6 +2122,29 @@ ibcs2_sendsig(sig_t catcher, int sig, int mask, u_long code, int type,
 	sendsig(catcher, bsd_to_ibcs2_sig[sig], mask, code, type, val);
 }
 #endif
+
+/*
+ * To send an AST to a process on another cpu we send an IPI to that cpu,
+ * the IPI schedules a special soft interrupt (that does nothing) and then
+ * returns through the normal interrupt return path which in turn handles
+ * the AST.
+ *
+ * The IPI can't handle the AST because it usually requires grabbing the
+ * biglock and we can't afford spinning in the IPI handler with interrupts
+ * unlocked (so that we take further IPIs and grow our stack until it
+ * overflows).
+ */
+void
+aston(struct proc *p)
+{
+#ifdef MULTIPROCESSOR
+	if (i386_atomic_testset_i(&p->p_md.md_astpending, 1) == 0 &&
+	    p->p_cpu != curcpu())
+		i386_fast_ipi(p->p_cpu, LAPIC_IPI_AST);
+#else
+	p->p_md.md_astpending = 1;
+#endif
+}
 
 /*
  * Send an interrupt to process.
@@ -2512,19 +2462,14 @@ haltsys:
  * reduce the chance that swapping trashes it.
  */
 void
-dumpconf()
+dumpconf(void)
 {
 	int nblks;	/* size of dump area */
-	int maj, i;
+	int i;
 
-	if (dumpdev == NODEV)
+	if (dumpdev == NODEV ||
+	    (nblks = (bdevsw[major(dumpdev)].d_psize)(dumpdev)) == 0)
 		return;
-	maj = major(dumpdev);
-	if (maj < 0 || maj >= nblkdev)
-		panic("dumpconf: bad dumpdev=0x%x", dumpdev);
-	if (bdevsw[maj].d_psize == NULL)
-		return;
-	nblks = (*bdevsw[maj].d_psize)(dumpdev);
 	if (nblks <= ctod(1))
 		return;
 
@@ -2548,7 +2493,7 @@ dumpconf()
 int
 cpu_dump()
 {
-	int (*dump)(dev_t, daddr_t, caddr_t, size_t);
+	int (*dump)(dev_t, daddr64_t, caddr_t, size_t);
 	long buf[dbtob(1) / sizeof (long)];
 	kcore_seg_t	*segp;
 
@@ -2585,8 +2530,8 @@ dumpsys()
 {
 	u_int i, j, npg;
 	int maddr;
-	daddr_t blkno;
-	int (*dump)(dev_t, daddr_t, caddr_t, size_t);
+	daddr64_t blkno;
+	int (*dump)(dev_t, daddr64_t, caddr_t, size_t);
 	int error;
 	char *str;
 	extern int msgbufmapped;
@@ -2629,7 +2574,7 @@ dumpsys()
 		maddr = ctob(dumpmem[i].start);
 		blkno = dumplo + btodb(maddr) + 1;
 #if 0
-		printf("(%d %ld %d) ", maddr, blkno, npg);
+		printf("(%d %lld %d) ", maddr, blkno, npg);
 #endif
 		for (j = npg; j--; maddr += NBPG, blkno += btodb(NBPG)) {
 
@@ -2638,7 +2583,7 @@ dumpsys()
 				printf("%d ",
 				    (ctob(dumpsize) - maddr) / (1024 * 1024));
 #if 0
-			printf("(%x %d) ", maddr, blkno);
+			printf("(%x %lld) ", maddr, blkno);
 #endif
 			pmap_enter(pmap_kernel(), dumpspace, maddr,
 			    VM_PROT_READ, PMAP_WIRED);
@@ -2670,27 +2615,6 @@ dumpsys()
 
 	delay(5000000);		/* 5 seconds */
 }
-
-#ifdef HZ
-/*
- * If HZ is defined we use this code, otherwise the code in
- * /sys/arch/i386/i386/microtime.s is used.  The other code only works
- * for HZ=100.
- */
-void
-i8254_microtime(struct timeval *tvp)
-{
-	int s = splhigh();
-
-	*tvp = time;
-	tvp->tv_usec += tick;
-	splx(s);
-	while (tvp->tv_usec >= 1000000) {
-		tvp->tv_sec++;
-		tvp->tv_usec -= 1000000;
-	}
-}
-#endif /* HZ */
 
 /*
  * Clear registers on exec
@@ -2725,12 +2649,8 @@ setregs(struct proc *p, struct exec_package *pack, u_long stack,
 	 * And update the GDT and LDT since we return to the user process
 	 * by leaving the syscall (we don't do another pmap_activate()).
 	 */
-#ifdef MULTIPROCESSOR
 	curcpu()->ci_gdt[GUCODE_SEL].sd = pcb->pcb_ldt[LUCODE_SEL].sd =
 	    pmap->pm_codeseg;
-#else
-	gdt[GUCODE_SEL].sd = pcb->pcb_ldt[LUCODE_SEL].sd = pmap->pm_codeseg;
-#endif
 
 	/*
 	 * And reset the hiexec marker in the pmap.
@@ -2911,6 +2831,7 @@ init386(paddr_t first_avail)
 	bios_memmap_t *im;
 
 	proc0.p_addr = proc0paddr;
+	cpu_info_primary.ci_self = &cpu_info_primary;
 	cpu_info_primary.ci_curpcb = &proc0.p_addr->u_pcb;
 
 	/*
@@ -3288,16 +3209,29 @@ cpu_reset()
 }
 
 void
-cpu_initclocks()
+cpu_initclocks(void)
 {
 	(*initclock_func)();
+
+	if (initclock_func == i8254_initclocks)
+		i8254_inittimecounter();
+	else
+		i8254_inittimecounter_simple();
 }
 
 void
 need_resched(struct cpu_info *ci)
 {
+	struct proc *p;
+
 	ci->ci_want_resched = 1;
-	ci->ci_astpending = 1;
+
+	/*
+	 * Need to catch the curproc in case it's cleared just
+	 * between the check and the aston().
+	 */
+	if ((p = ci->ci_curproc) != NULL)
+		aston(p);
 }
 
 #ifdef MULTIPROCESSOR
@@ -3569,9 +3503,6 @@ bus_mem_add_mapping(bus_addr_t bpa, bus_size_t size, int cacheable,
 	vaddr_t va;
 	pt_entry_t *pte;
 	bus_size_t map_size;
-#ifdef MULTIPROCESSOR
-	u_int32_t cpumask = 0;
-#endif
 
 	pa = trunc_page(bpa);
 	endpa = round_page(bpa + size);
@@ -3593,28 +3524,15 @@ bus_mem_add_mapping(bus_addr_t bpa, bus_size_t size, int cacheable,
 	    pa += PAGE_SIZE, va += PAGE_SIZE, map_size -= PAGE_SIZE) {
 		pmap_kenter_pa(va, pa, VM_PROT_READ | VM_PROT_WRITE);
 
-		/*
-		 * PG_N doesn't exist on 386's, so we assume that
-		 * the mainboard has wired up device space non-cacheable
-		 * on those machines.
-		 */
-		if (cpu_class != CPUCLASS_386) {
-			pte = kvtopte(va);
-			if (cacheable)
-				*pte &= ~PG_N;
-			else
-				*pte |= PG_N;
-#ifdef MULTIPROCESSOR
-			pmap_tlb_shootdown(pmap_kernel(), va, *pte,
-			    &cpumask);
-#else
-			pmap_update_pg(va);
-#endif
-		}
+		pte = kvtopte(va);
+		if (cacheable)
+			*pte &= ~PG_N;
+		else
+			*pte |= PG_N;
+		pmap_tlb_shootpage(pmap_kernel(), va);
 	}
-#ifdef MULTIPROCESSOR
-	pmap_tlb_shootnow(cpumask);
-#endif
+
+	pmap_tlb_shootwait();
 	pmap_update(pmap_kernel());
 
 	return 0;
@@ -3956,17 +3874,6 @@ _bus_dmamap_unload(bus_dma_tag_t t, bus_dmamap_t map)
 }
 
 /*
- * Common function for DMA map synchronization.  May be called
- * by bus-specific DMA map synchronization functions.
- */
-void
-_bus_dmamap_sync(bus_dma_tag_t t, bus_dmamap_t map, bus_addr_t addr,
-    bus_size_t size, int op)
-{
-	/* Nothing to do here. */
-}
-
-/*
  * Common function for DMA-safe memory allocation.  May be called
  * by bus-specific DMA memory allocation functions.
  */
@@ -4098,7 +4005,7 @@ _bus_dmamem_mmap(bus_dma_tag_t t, bus_dma_segment_t *segs, int nsegs, off_t off,
 /*
  * Utility function to load a linear buffer.  lastaddrp holds state
  * between invocations (for multiple-buffer loads).  segp contains
- * the starting segment on entrace, and the ending segment on exit.
+ * the starting segment on entrance, and the ending segment on exit.
  * first indicates if this is the first invocation of this function.
  */
 int
@@ -4254,6 +4161,8 @@ splassert_check(int wantipl, const char *func)
 {
 	if (lapic_tpr < wantipl)
 		splassert_fail(wantipl, lapic_tpr, func);
+	if (wantipl == IPL_NONE && curcpu()->ci_idepth != 0)
+		splassert_fail(-1, curcpu()->ci_idepth, func);
 }
 #endif
 
@@ -4263,11 +4172,15 @@ i386_intlock(int ipl)
 {
 	if (ipl < IPL_SCHED)
 		__mp_lock(&kernel_lock);
+
+	curcpu()->ci_idepth++;
 }
 
 void
 i386_intunlock(int ipl)
 {
+	curcpu()->ci_idepth--;
+
 	if (ipl < IPL_SCHED)
 		__mp_unlock(&kernel_lock);
 }
@@ -4276,11 +4189,13 @@ void
 i386_softintlock(void)
 {
 	__mp_lock(&kernel_lock);
+	curcpu()->ci_idepth++;
 }
 
 void
 i386_softintunlock(void)
 {
+	curcpu()->ci_idepth--;
 	__mp_unlock(&kernel_lock);
 }
 #endif

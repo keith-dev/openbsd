@@ -1,7 +1,7 @@
 /*
  * Birthday
  *
- * $OpenBSD: calendar.birthday,v 1.45 2006/11/28 21:35:56 mickey Exp $
+ * $OpenBSD: calendar.birthday,v 1.49 2007/06/15 20:18:57 kili Exp $
  */
 
 #ifndef _calendar_birthday_
@@ -102,6 +102,7 @@
 03/07	Sir John Frederick William Herschel born, 1792, astronomer
 03/08	Alvan Clark born, 1804, astronomer & lens manufacturer
 03/09	Howard Aiken born, 1900
+03/11	Douglas Adams born in Cambridge, England, 1952
 03/11	Robert Treat Paine born, 1731
 03/11	Vannevar Bush born, 1890
 03/12	Gustav Robert Kirchhoff born, 1824, physicist
@@ -145,9 +146,10 @@
 04/14	Christian Huygen born, 1629, physicist & astronomer;
 		discovered Saturn's rings
 04/15	Leonardo da Vinci born, 1452
+04/15	Leonhard Euler born in Basel, 1707
 04/15	Jean Genet died in Paris, 1986
 04/16	Charles (Charlie) Chaplin (Sir) born in London, 1889
-04/19	Andre Rene the Giant (Roussimoff) born in Grunoble, France, 1946
+04/19	Andre Rene the Giant (Roussimoff) born in Grenoble, France, 1946
 04/20	Adolph Hitler born, 1889
 04/22	Kant born, 1724
 04/22	Lenin born, the best friend of all the children, 1870
@@ -163,6 +165,7 @@
 05/02	Dr. Benjamin Spock born, 1903
 05/09	Pinza died, 1957
 05/10	Fred Astaire (Frederick Austerlitz) born in Omaha, Nebraska, 1899
+05/11	Douglas Adams dies in Santa Barbara, 2001
 05/12	Florence Nightingale born in Florence, Italy, 1820
 05/13	Arthur S. Sullivan born, 1842
 05/15	Mike Oldfield is born in Essex, England, 1953
@@ -187,7 +190,6 @@
 06/08	Frank Lloyd Wright born in Richland Center, Wisconsin, 1867
 06/13	Alexander the Great dies (323BC)
 06/14	Ernesto "Che" Guevara de la Serna born in Rosario, Argentina, 1928
-06/15	Edward (Edvard Hagerup) Grieg born in Bergen, Norway, 1843
 06/16	Hammurabi the Great dies, Babylon, 1686 BC
 06/17	M.C. Escher born, 1898
 06/22	Carl Hubbell born, 1903
@@ -253,6 +255,7 @@
 09/18	Konstantin Eduardovich Tsiolkovsky born, 1857, father of rocket flight
 09/18	Greta Garbo born, 1905
 09/18	Jimi Hendrix dies from an overdose, 1970
+09/18	Leonhard Euler died in St. Petersburg, 1783
 09/19	President Garfield dies of wounds in Elberon, N.J., 1881
 09/19	Tsiolkovsky died, 1935
 09/20	Upton (Beall) Sinclair born, 1878

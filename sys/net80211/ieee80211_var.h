@@ -1,4 +1,4 @@
-/*	$OpenBSD: ieee80211_var.h,v 1.18 2006/11/15 18:59:37 damien Exp $	*/
+/*	$OpenBSD: ieee80211_var.h,v 1.32 2007/07/28 11:13:41 damien Exp $	*/
 /*	$NetBSD: ieee80211_var.h,v 1.7 2004/05/06 03:07:10 dyoung Exp $	*/
 
 /*-
@@ -16,10 +16,6 @@
  *    documentation and/or other materials provided with the distribution.
  * 3. The name of the author may not be used to endorse or promote products
  *    derived from this software without specific prior written permission.
- *
- * Alternatively, this software may be distributed under the terms of the
- * GNU General Public License ("GPL") version 2 as published by the Free
- * Software Foundation.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -134,6 +130,19 @@ struct ieee80211_channel {
 #define	IEEE80211_FH_CHANSET(chan)	((chan)/IEEE80211_FH_CHANMOD+1)
 #define	IEEE80211_FH_CHANPAT(chan)	((chan)%IEEE80211_FH_CHANMOD)
 
+/*
+ * 802.11e EDCA AC parameters.
+ */
+struct ieee80211_edca_ac_params {
+	u_int8_t	ac_ecwmin;	/* CWmin = 2^ECWmin - 1 */
+	u_int8_t	ac_ecwmax;	/* CWmax = 2^ECWmax - 1 */
+	u_int8_t	ac_aifsn;
+	u_int16_t	ac_txoplimit;	/* 32TU */
+#define IEEE80211_TXOP_TO_US(txop)	((txop) * 32)
+
+	u_int8_t	ac_acm;
+};
+
 #define	IEEE80211_PS_SLEEP	0x1	/* STA is in power saving mode */
 
 #define	IEEE80211_PS_MAX_QUEUE	50	/* maximum saved packets */
@@ -151,12 +160,20 @@ struct ieee80211com {
 				    int, int, u_int32_t);
 	int			(*ic_send_mgmt)(struct ieee80211com *,
 				    struct ieee80211_node *, int, int);
+	void			(*ic_recv_eapol)(struct ieee80211com *,
+				    struct mbuf *, struct ieee80211_node *);
 	int			(*ic_newstate)(struct ieee80211com *,
 				    enum ieee80211_state, int);
 	void			(*ic_newassoc)(struct ieee80211com *,
 				    struct ieee80211_node *, int);
 	void			(*ic_updateslot)(struct ieee80211com *);
-	int			(*ic_set_tim)(struct ieee80211com *, int, int);
+	void			(*ic_updateedca)(struct ieee80211com *);
+	void			(*ic_set_tim)(struct ieee80211com *, int, int);
+	int			(*ic_set_key)(struct ieee80211com *,
+				    struct ieee80211_node *,
+				    const struct ieee80211_key *);
+	void			(*ic_delete_key)(struct ieee80211com *,
+				    struct ieee80211_node *, int);
 	u_int8_t		ic_myaddr[IEEE80211_ADDR_LEN];
 	struct ieee80211_rateset ic_sup_rates[IEEE80211_MODE_MAX];
 	struct ieee80211_channel ic_channels[IEEE80211_CHAN_MAX+1];
@@ -184,7 +201,6 @@ struct ieee80211com {
 	int			ic_fixed_rate;	/* index to ic_sup_rates[] */
 	u_int16_t		ic_rtsthreshold;
 	u_int16_t		ic_fragthreshold;
-	ieee80211_node_lock_t	ic_nodelock;	/* on node table */
 	u_int			ic_scangen;	/* gen# for timeout scan */
 	struct ieee80211_node	*(*ic_node_alloc)(struct ieee80211com *);
 	void			(*ic_node_free)(struct ieee80211com *,
@@ -193,7 +209,7 @@ struct ieee80211com {
 					struct ieee80211_node *,
 					const struct ieee80211_node *);
 	u_int8_t		(*ic_node_getrssi)(struct ieee80211com *,
-					struct ieee80211_node *);
+					const struct ieee80211_node *);
 	u_int8_t		ic_max_rssi;
 	struct ieee80211_tree	ic_tree;
 	int			ic_nnodes;	/* length of ic_nnodes */
@@ -213,7 +229,7 @@ struct ieee80211com {
 	u_int8_t		ic_des_essid[IEEE80211_NWID_LEN];
 	struct ieee80211_channel *ic_des_chan;	/* desired channel */
 	u_int8_t		ic_des_bssid[IEEE80211_ADDR_LEN];
-	struct ieee80211_wepkey	ic_nw_keys[IEEE80211_WEP_NKID];
+	struct ieee80211_key	ic_nw_keys[IEEE80211_WEP_NKID];
 	int			ic_wep_txkey;	/* default tx key index */
 	void			*ic_wep_ctx;	/* wep crypt context */
 	u_int32_t		ic_iv;		/* initial vector for wep */
@@ -221,6 +237,16 @@ struct ieee80211com {
 	struct timeval		ic_last_merge_print;	/* for rate-limiting
 							 * IBSS merge print-outs
 							 */
+	struct ieee80211_edca_ac_params ic_edca_ac[EDCA_NUM_AC];
+	u_int			ic_edca_updtcount;
+	u_int8_t		ic_globalcnt[EAPOL_KEY_NONCE_LEN];
+	u_int64_t		ic_keyreplaycnt;
+
+	u_int8_t		*ic_tim_bitmap;
+	u_int			ic_tim_len;
+	u_int			ic_tim_mcast;
+	u_int			ic_dtim_period;
+	u_int			ic_dtim_count;
 };
 #define	ic_if		ic_ac.ac_if
 #define	ic_softc	ic_if.if_softc
@@ -247,7 +273,10 @@ extern struct ieee80211com_head ieee80211com_head;
 #define IEEE80211_F_TXPOW_AUTO	0x00010000	/* TX Power: undefined */
 #define	IEEE80211_F_SHSLOT	0x00020000	/* STATUS: short slot time */
 #define	IEEE80211_F_SHPREAMBLE	0x00040000	/* STATUS: short preamble */
+#define IEEE80211_F_QOS		0x00080000	/* CONF: QoS enabled */
 #define	IEEE80211_F_USEPROT	0x00100000	/* STATUS: protection enabled */
+#define	IEEE80211_F_RSN		0x00200000	/* CONF: RSN enabled */
+#define	IEEE80211_F_WPA1	0x00400000	/* CONF: WPA1 enabled */
 #define IEEE80211_F_USERMASK	0xf0000000	/* CONF: ioctl flag mask */
 
 /* ic_caps */
@@ -262,6 +291,8 @@ extern struct ieee80211com_head ieee80211com_head;
 #define	IEEE80211_C_SHPREAMBLE	0x00000100	/* CAPABILITY: short preamble */
 #define	IEEE80211_C_MONITOR	0x00000200	/* CAPABILITY: monitor mode */
 #define IEEE80211_C_SCANALL	0x00000400	/* CAPABILITY: scan all chan */
+#define IEEE80211_C_QOS		0x00000800	/* CAPABILITY: QoS avail */
+#define IEEE80211_C_RSN		0x00001000	/* CAPABILITY: RSN avail */
 
 /* flags for ieee80211_fix_rate() */
 #define	IEEE80211_F_DOSORT	0x00000001	/* sort rate list */
@@ -282,12 +313,13 @@ int	ieee80211_rate2media(struct ieee80211com *, int,
 		enum ieee80211_phymode);
 int	ieee80211_media2rate(int);
 u_int	ieee80211_mhz2ieee(u_int, u_int);
-u_int	ieee80211_chan2ieee(struct ieee80211com *, struct ieee80211_channel *);
+u_int	ieee80211_chan2ieee(struct ieee80211com *,
+		const struct ieee80211_channel *);
 u_int	ieee80211_ieee2mhz(u_int, u_int);
 int	ieee80211_setmode(struct ieee80211com *, enum ieee80211_phymode);
 enum ieee80211_phymode ieee80211_next_mode(struct ifnet *);
 enum ieee80211_phymode ieee80211_chan2mode(struct ieee80211com *,
-		struct ieee80211_channel *);
+		const struct ieee80211_channel *);
 
 #ifdef IEEE80211_DEBUG
 extern	int ieee80211_debug;

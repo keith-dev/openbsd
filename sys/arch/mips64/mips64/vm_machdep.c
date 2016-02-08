@@ -1,4 +1,4 @@
-/*	$OpenBSD: vm_machdep.c,v 1.9 2007/02/24 11:59:47 miod Exp $	*/
+/*	$OpenBSD: vm_machdep.c,v 1.14 2007/07/16 20:20:08 miod Exp $	*/
 /*
  * Copyright (c) 1988 University of Utah.
  * Copyright (c) 1992, 1993
@@ -98,6 +98,10 @@ cpu_fork(p1, p2, stack, stacksize, func, arg)
 	pcb = &p2->p_addr->u_pcb;
 	*pcb = p1->p_addr->u_pcb;
 
+	pcb->pcb_context.val[13] = 0;
+	pcb->pcb_context.val[12] = (idle_mask << 8) & IC_INT_MASK;
+	pcb->pcb_context.val[11] = (pcb->pcb_regs.sr & ~SR_INT_MASK) |
+	    (idle_mask & SR_INT_MASK);
 	pcb->pcb_context.val[10] = (register_t)proc_trampoline;
 	pcb->pcb_context.val[8] = (register_t)(caddr_t)pcb + USPACE - 64;
 	pcb->pcb_context.val[0] = (register_t)func;
@@ -176,44 +180,11 @@ cpu_coredump(p, vp, cred, chdr)
 	return error;
 }
 
-/*
- * Move pages from one kernel virtual address to another.
- * Both addresses are assumed to reside in the Sysmap,
- * and size must be a multiple of CLSIZE.
- */
-void
-pagemove(from, to, size)
-	caddr_t from, to;
-	size_t size;
-{
-	pt_entry_t *fpte, *tpte;
-
-	if (size % PAGE_SIZE)
-		panic("pagemove");
-	fpte = kvtopte(from);
-	tpte = kvtopte(to);
-	if (((vaddr_t)from & CpuCacheAliasMask) != ((vaddr_t)to & CpuCacheAliasMask)) {
-		Mips_HitSyncDCache((vaddr_t)from, size);
-	}
-	while (size > 0) {
-		tlb_flush_addr((vaddr_t)from);
-		tlb_update((vaddr_t)to, fpte->pt_entry);
-		*tpte++ = *fpte;
-		fpte->pt_entry = PG_NV | PG_G;
-		fpte++;
-		size -= NBPG;
-		from += NBPG;
-		to += NBPG;
-	}
-}
-
 extern vm_map_t phys_map;
 
 /*
  * Map an user IO request into kernel virtual address space.
  */
-
-#define trunc_page_align(x) ((vaddr_t)(x) & ~(CpuCacheAliasMask | PAGE_SIZE))
 
 void
 vmapbuf(bp, len)
@@ -250,6 +221,7 @@ vmapbuf(bp, len)
 		kva += PAGE_SIZE;
 		sz -= PAGE_SIZE;
 	}
+	pmap_update(vm_map_pmap(phys_map));
 }
 
 /*
@@ -269,6 +241,8 @@ vunmapbuf(bp, len)
 	}
 	addr = trunc_page((vaddr_t)bp->b_data);
 	sz = round_page(len + ((vaddr_t)bp->b_data - addr));
+	pmap_remove(vm_map_pmap(phys_map), addr, addr + sz);
+	pmap_update(vm_map_pmap(phys_map));
 	uvm_km_free_wakeup(phys_map, addr, sz);
 	bp->b_data = bp->b_saveaddr;
 	bp->b_saveaddr = NULL;

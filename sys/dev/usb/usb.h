@@ -1,4 +1,4 @@
-/*	$OpenBSD: usb.h,v 1.25 2006/07/12 18:12:55 miod Exp $ */
+/*	$OpenBSD: usb.h,v 1.29 2007/07/27 09:16:09 mbalmer Exp $ */
 /*	$NetBSD: usb.h,v 1.69 2002/09/22 23:20:50 augustss Exp $	*/
 /*	$FreeBSD: src/sys/dev/usb/usb.h,v 1.14 1999/11/17 22:33:46 n_hibma Exp $	*/
 
@@ -46,18 +46,7 @@
 #include <sys/types.h>
 #include <sys/time.h>
 
-#if defined(__NetBSD__) || defined(__OpenBSD__)
 #include <sys/ioctl.h>
-#endif
-#if defined(__FreeBSD__)
-/* These two defines are used by usbd to autoload the usb kld */
-#define USB_KLD		"usb"           /* name of usb module */
-#define USB_UHUB	"usb/uhub"      /* root hub */
-#endif
-
-#if defined(_KERNEL)
-#include <dev/usb/usb_port.h>
-#endif /* _KERNEL */
 
 #define USB_STACK_VERSION 2
 
@@ -100,15 +89,13 @@ typedef u_int8_t uDWord[4];
 #define USETDW(w,v) (*(u_int32_t *)(w) = (v))
 #endif
 
-#define UPACKED __packed
-
 typedef struct {
 	uByte		bmRequestType;
 	uByte		bRequest;
 	uWord		wValue;
 	uWord		wIndex;
 	uWord		wLength;
-} UPACKED usb_device_request_t;
+} __packed usb_device_request_t;
 
 #define UT_WRITE		0x00
 #define UT_READ			0x80
@@ -185,7 +172,7 @@ typedef struct {
 	uByte		bLength;
 	uByte		bDescriptorType;
 	uByte		bDescriptorSubtype;
-} UPACKED usb_descriptor_t;
+} __packed usb_descriptor_t;
 
 typedef struct {
 	uByte		bLength;
@@ -205,7 +192,7 @@ typedef struct {
 	uByte		iProduct;
 	uByte		iSerialNumber;
 	uByte		bNumConfigurations;
-} UPACKED usb_device_descriptor_t;
+} __packed usb_device_descriptor_t;
 #define USB_DEVICE_DESCRIPTOR_SIZE 18
 
 typedef struct {
@@ -221,7 +208,7 @@ typedef struct {
 #define UC_REMOTE_WAKEUP	0x20
 	uByte		bMaxPower; /* max current in 2 mA units */
 #define UC_POWER_FACTOR 2
-} UPACKED usb_config_descriptor_t;
+} __packed usb_config_descriptor_t;
 #define USB_CONFIG_DESCRIPTOR_SIZE 9
 
 typedef struct {
@@ -234,7 +221,7 @@ typedef struct {
 	uByte		bInterfaceSubClass;
 	uByte		bInterfaceProtocol;
 	uByte		iInterface;
-} UPACKED usb_interface_descriptor_t;
+} __packed usb_interface_descriptor_t;
 #define USB_INTERFACE_DESCRIPTOR_SIZE 9
 
 typedef struct {
@@ -261,15 +248,24 @@ typedef struct {
 #define UE_GET_ISO_TYPE(a)	((a) & UE_ISO_TYPE)
 	uWord		wMaxPacketSize;
 	uByte		bInterval;
-} UPACKED usb_endpoint_descriptor_t;
+} __packed usb_endpoint_descriptor_t;
 #define USB_ENDPOINT_DESCRIPTOR_SIZE 7
 
+/*
+ * Note: The length of the USB string descriptor is stored in a one byte
+ * value and can therefore be no longer than 255 bytes.  Two bytes are
+ * used for the length itself and the descriptor type, a theoretical maximum
+ * of 253 bytes is left for the actual string data.  Since the strings are
+ * encoded as 2-byte unicode characters, only 252 bytes or 126 two-byte
+ * characters can be used.  USB_MAX_STRING_LEN is defined as 127, leaving
+ * space for the terminal '\0' character in C strings.
+ */
 typedef struct {
 	uByte		bLength;
 	uByte		bDescriptorType;
-	uWord		bString[127];
-} UPACKED usb_string_descriptor_t;
-#define USB_MAX_STRING_LEN 128
+	uWord		bString[126];
+} __packed usb_string_descriptor_t;
+#define USB_MAX_STRING_LEN 127
 #define USB_LANGUAGE_TABLE 0	/* # of the string language id table */
 
 /* Hub specific request */
@@ -324,7 +320,7 @@ typedef struct {
 #define UHD_NOT_REMOV(desc, i) \
     (((desc)->DeviceRemovable[(i)/8] >> ((i) % 8)) & 1)
 	/* deprecated */ uByte		PortPowerCtrlMask[1];
-} UPACKED usb_hub_descriptor_t;
+} __packed usb_hub_descriptor_t;
 #define USB_HUB_DESCRIPTOR_SIZE 9 /* includes deprecated PortPowerCtrlMask */
 
 typedef struct {
@@ -337,7 +333,7 @@ typedef struct {
 	uByte		bMaxPacketSize0;
 	uByte		bNumConfigurations;
 	uByte		bReserved;
-} UPACKED usb_device_qualifier_t;
+} __packed usb_device_qualifier_t;
 #define USB_DEVICE_QUALIFIER_SIZE 10
 
 typedef struct {
@@ -346,7 +342,7 @@ typedef struct {
 	uByte		bmAttributes;
 #define UOTG_SRP	0x01
 #define UOTG_HNP	0x02
-} UPACKED usb_otg_descriptor_t;
+} __packed usb_otg_descriptor_t;
 
 /* OTG feature selectors */
 #define UOTG_B_HNP_ENABLE	3
@@ -360,14 +356,14 @@ typedef struct {
 #define UDS_REMOTE_WAKEUP		0x0002
 /* Endpoint status flags */
 #define UES_HALT			0x0001
-} UPACKED usb_status_t;
+} __packed usb_status_t;
 
 typedef struct {
 	uWord		wHubStatus;
 #define UHS_LOCAL_POWER			0x0001
 #define UHS_OVER_CURRENT		0x0002
 	uWord		wHubChange;
-} UPACKED usb_hub_status_t;
+} __packed usb_hub_status_t;
 
 typedef struct {
 	uWord		wPortStatus;
@@ -387,7 +383,7 @@ typedef struct {
 #define UPS_C_SUSPEND			0x0004
 #define UPS_C_OVERCURRENT_INDICATOR	0x0008
 #define UPS_C_PORT_RESET		0x0010
-} UPACKED usb_port_status_t;
+} __packed usb_port_status_t;
 
 /* Device class codes */
 #define UDCLASS_IN_INTERFACE	0x00

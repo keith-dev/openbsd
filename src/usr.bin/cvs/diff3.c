@@ -1,4 +1,4 @@
-/*	$OpenBSD: diff3.c,v 1.35 2007/02/22 06:42:09 otto Exp $	*/
+/*	$OpenBSD: diff3.c,v 1.37 2007/06/28 21:38:09 xsa Exp $	*/
 
 /*
  * Copyright (C) Caldera International Inc.  2001-2002.
@@ -72,7 +72,7 @@ static const char copyright[] =
 
 #ifndef lint
 static const char rcsid[] =
-    "$OpenBSD: diff3.c,v 1.35 2007/02/22 06:42:09 otto Exp $";
+    "$OpenBSD: diff3.c,v 1.37 2007/06/28 21:38:09 xsa Exp $";
 #endif /* not lint */
 
 #include <ctype.h>
@@ -163,7 +163,7 @@ cvs_merge_file(struct cvs_file *cf, int verbose)
 {
 	int argc;
 	char *data, *patch;
-	char *argv[5], r1[16], r2[16];
+	char *argv[5], r1[CVS_REV_BUFSZ], r2[CVS_REV_BUFSZ];
 	char *dp13, *dp23, *path1, *path2, *path3;
 	BUF *b1, *b2, *b3, *d1, *d2, *diffb;
 	size_t dlen, plen;
@@ -492,12 +492,10 @@ getline(FILE *b, size_t *n)
 	if (cp[len - 1] != '\n')
 		len++;
 	if (len + 1 > bufsize) {
-		char *newbuf;
 		do {
 			bufsize += 1024;
 		} while (len + 1 > bufsize);
-		newbuf = xrealloc(buf, 1, bufsize);
-		buf = newbuf;
+		buf = xrealloc(buf, 1, bufsize);
 	}
 	memcpy(buf, cp, len - 1);
 	buf[len - 1] = '\n';
@@ -789,25 +787,19 @@ edscript(int n)
 static void
 increase(void)
 {
-	struct diff *p;
-	char *q;
 	size_t newsz, incr;
 
 	/* are the memset(3) calls needed? */
 	newsz = szchanges == 0 ? 64 : 2 * szchanges;
 	incr = newsz - szchanges;
 
-	p = xrealloc(d13, newsz, sizeof(*d13));
-	memset(p + szchanges, 0, incr * sizeof(*d13));
-	d13 = p;
-	p = xrealloc(d23, newsz, sizeof(*d23));
-	memset(p + szchanges, 0, incr * sizeof(*d23));
-	d23 = p;
-	p = xrealloc(de, newsz, sizeof(*de));
-	memset(p + szchanges, 0, incr * sizeof(*de));
-	de = p;
-	q = xrealloc(overlap, newsz, sizeof(*overlap));
-	memset(q + szchanges, 0, incr * sizeof(*overlap));
-	overlap = q;
+	d13 = xrealloc(d13, newsz, sizeof(*d13));
+	memset(d13 + szchanges, 0, incr * sizeof(*d13));
+	d23 = xrealloc(d23, newsz, sizeof(*d23));
+	memset(d23 + szchanges, 0, incr * sizeof(*d23));
+	de = xrealloc(de, newsz, sizeof(*de));
+	memset(de + szchanges, 0, incr * sizeof(*de));
+	overlap = xrealloc(overlap, newsz, sizeof(*overlap));
+	memset(overlap + szchanges, 0, incr * sizeof(*overlap));
 	szchanges = newsz;
 }

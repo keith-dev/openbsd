@@ -1,7 +1,7 @@
 # ex:ts=8 sw=4:
-# $OpenBSD: PackageName.pm,v 1.14 2007/03/06 23:35:01 espie Exp $
+# $OpenBSD: PackageName.pm,v 1.30 2007/06/04 20:48:23 espie Exp $
 #
-# Copyright (c) 2003-2004 Marc Espie <espie@openbsd.org>
+# Copyright (c) 2003-2007 Marc Espie <espie@openbsd.org>
 #
 # Permission to use, copy, modify, and distribute this software for any
 # purpose with or without fee is hereby granted, provided that the above
@@ -32,10 +32,10 @@ sub url2pkgname($)
 sub splitname
 {
 	local $_ = shift;
-	if (/\-(?=\d)/) {
-		my $stem = $`;
-		my $rest = $';
-		my @all = split /\-/, $rest;
+	if (/^(.*?)\-(\d.*)$/o) {
+		my $stem = $1;
+		my $rest = $2;
+		my @all = split /\-/o, $rest;
 		return ($stem, @all);
 	} else {
 		return ($_);
@@ -46,15 +46,16 @@ sub from_string
 {
 	my $class = shift;
 	local $_ = shift;
-	if (/\-(?=\d)/) {
-		my $stem = $`;
-		my $rest = $';
-		my @all = split /\-/, $rest;
+	if (/^(.*?)\-(\d.*)$/o) {
+		my $stem = $1;
+		my $rest = $2;
+		my @all = split /\-/o, $rest;
 		my $version = OpenBSD::PackageName::version->from_string(shift @all);
+		my %flavors = map {($_,1)}  @all;
 		return bless {
 			stem => $stem,
 			version => $version,
-			flavors => \@all
+			flavors => \%flavors,
 		}, "OpenBSD::PackageName::Name";
 	} else {
 		return bless {
@@ -66,8 +67,8 @@ sub from_string
 sub splitstem
 {
 	local $_ = shift;
-	if (/\-(?=\d)/) {
-		return $`;
+	if (/^(.*?)\-\d/o) {
+		return $1;
 	} else {
 		return $_;
 	}
@@ -76,7 +77,7 @@ sub splitstem
 sub is_stem
 {
 	local $_ = shift;
-	if (m/\-\d/ || $_ eq '-') {
+	if (m/\-\d/o || $_ eq '-') {
 		return 0;
 	} else {
 		return 1;
@@ -87,8 +88,8 @@ sub splitp
 {
 	local $_ = shift;
 
-	if (/^(.*\-\d[^-]*)p(\d+)/) {
-		return ($1.$', $2);
+	if (/^(.*\-\d[^-]*)p(\d+)(.*)$/o) {
+		return ($1.$3, $2);
 	} else {
 		return ($_,-1);
 	}
@@ -100,8 +101,8 @@ sub rebuildp
 	if ($p == -1) {
 		return $pkg;
 	}
-	if ($pkg =~ m/\-\d[^-]*/) {
-		return "$`$&p$p$'";
+	if ($pkg =~ m/^(.*?)(\-\d[^-]*)(.*)$/o) {
+		return "$1$2p$p$3";
 	} else {
 		return $pkg."p".$p;
 	}
@@ -123,19 +124,6 @@ sub keep_most_recent
 	return @list;
 }
 
-sub findstem
-{
-	my ($k, @list) = @_;
-	my @r = ();
-	for my $n (@list) {
-		my $stem = splitstem($n);
-		if ($k eq $stem) {
-			push(@r, $n);
-		}
-	}
-	return @r;
-}
-
 sub compile_stemlist
 {
 	my $hash = {};
@@ -149,31 +137,49 @@ sub compile_stemlist
 
 sub avail2stems
 {
-	my $state = shift;
 	my @avail = @_;
 	if (@avail == 0) {
 		require OpenBSD::Error;
 
 		OpenBSD::Error::Warn("No packages available in the PKG_PATH\n");
 	}
-	unless ($state->{forced}->{allversions}) {
-	    @avail = OpenBSD::PackageName::keep_most_recent(@avail);
-	}
 	return OpenBSD::PackageName::compile_stemlist(@avail);
-}
-
-sub available_stems
-{
-	my $state = shift;
-	return avail2stems($state, OpenBSD::PackageLocator::available());
 }
 
 package OpenBSD::PackageLocator::_compiled_stemlist;
 
-sub findstem
+sub find
 {
 	my ($self, $stem) = @_;
 	return keys %{$self->{$stem}};
+}
+
+sub add
+{
+	my ($self, $pkgname) = @_;
+	my $stem = OpenBSD::PackageName::splitstem($pkgname);
+	$self->{$stem}->{$pkgname} = 1;
+}
+
+sub delete
+{
+	my ($self, $pkgname) = @_;
+	my $stem = OpenBSD::PackageName::splitstem($pkgname);
+	delete $self->{$stem}->{$pkgname};
+	if(keys %{$self->{$stem}} == 0) {
+		delete $self->{$stem};
+	}
+}
+
+sub find_partial
+{
+	my ($self, $partial) = @_;
+	my @result = ();
+	while (my ($stem, $pkgs) = each %$self) {
+		next unless $stem =~ /\Q$partial\E/i;
+		push(@result, keys %$pkgs);
+	}
+	return @result;
 }
 	
 package OpenBSD::PackageName::version;
@@ -181,7 +187,7 @@ package OpenBSD::PackageName::version;
 sub make_dewey
 {
 	my $o = shift;
-	$o->{deweys} = [ split(/\./, $o->{string}) ];
+	$o->{deweys} = [ split(/\./o, $o->{string}) ];
 	for my $suffix (qw(rc beta pre pl)) {
 		if ($o->{deweys}->[-1] =~ m/^(\d+)$suffix(\d*)$/) {
 			$o->{deweys}->[-1] = $1;
@@ -195,13 +201,13 @@ sub from_string
 	my ($class, $string) = @_;
 	my $vnum = -1;
 	my $pnum = -1;
-	if ($string =~ m/v(\d+)$/) {
-		$vnum = $1;
-		$string = $`;
+	if ($string =~ m/^(.*)v(\d+)$/o) {
+		$vnum = $2;
+		$string = $1;
 	}
-	if ($string =~ m/p(\d+)$/) {
-		$pnum = $1;
-		$string = $`;
+	if ($string =~ m/^(.*)p(\d+)$/o) {
+		$pnum = $2;
+		$string = $1;
 	}
 	my $o = bless {
 		pnum => $pnum,
@@ -275,11 +281,11 @@ sub dewey_compare
 {
 	my ($a, $b) = @_;
 	# numerical comparison
-	if ($a =~ m/^\d+$/ and $b =~ m/^\d+$/) {
+	if ($a =~ m/^\d+$/o and $b =~ m/^\d+$/o) {
 		return $a <=> $b;
 	}
 	# added lowercase letter
-	if ("$a.$b" =~ m/^(\d+)([a-z]?)\.(\d+)([a-z]?)$/) {
+	if ("$a.$b" =~ m/^(\d+)([a-z]?)\.(\d+)([a-z]?)$/o) {
 		my ($an, $al, $bn, $bl) = ($1, $2, $3, $4);
 		if ($an != $bn) {
 			return $an <=> $bn;
@@ -307,13 +313,13 @@ package OpenBSD::PackageName::Name;
 sub to_string
 {
 	my $o = shift;
-	return join('-', $o->{stem}, $o->{version}->to_string, @{$o->{flavors}});
+	return join('-', $o->{stem}, $o->{version}->to_string, sort keys %{$o->{flavors}});
 }
 
 sub to_pattern
 {
 	my $o = shift;
-	return join('-', $o->{stem}, '*', @{$o->{flavors}});
+	return join('-', $o->{stem}, '*', sort keys %{$o->{flavors}});
 }
 
 1;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: virtual.c,v 1.26 2006/06/02 19:35:55 hshoexer Exp $	*/
+/*	$OpenBSD: virtual.c,v 1.28 2007/04/16 13:01:39 moritz Exp $	*/
 
 /*
  * Copyright (c) 2004 Håkan Olsson.  All rights reserved.
@@ -341,8 +341,7 @@ virtual_bind_if(char *ifname, struct sockaddr *if_addr, void *arg)
 	    if_addr->sa_family == AF_INET ? "v4" :
 	    (if_addr->sa_family == AF_INET6 ? "v6" : "<unknown>"),
 	    addr_str ? addr_str : "<invalid>"));
-	if (addr_str)
-		free(addr_str);
+	free(addr_str);
 
 	/*
 	 * Drop non-Internet stuff.
@@ -627,10 +626,16 @@ virtual_send_message(struct message *msg, struct transport *t)
 	 *   - in other exchange (Aggressive, ), asap
 	 * XXX ISAKMP_EXCH_BASE etc?
 	 */
-	if (v->encap_is_active == 0 &&
+
+	if (msg->flags & MSG_NATT) {
+		msg->exchange->flags |= EXCHANGE_FLAG_NAT_T_ENABLE;
+		msg->exchange->flags |= EXCHANGE_FLAG_NAT_T_CAP_PEER;
+	}
+
+	if ((v->encap_is_active == 0 &&
 	    (msg->exchange->flags & EXCHANGE_FLAG_NAT_T_ENABLE) &&
 	    (msg->exchange->type != ISAKMP_EXCH_ID_PROT ||
-		msg->exchange->step > 4)) {
+		msg->exchange->step > 4)) || (msg->flags & MSG_NATT)) {
 		LOG_DBG((LOG_MESSAGE, 10, "virtual_send_message: "
 		    "enabling NAT-T encapsulation for this exchange"));
 		v->encap_is_active++;

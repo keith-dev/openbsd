@@ -1,7 +1,7 @@
 # ex:ts=8 sw=4:
-# $OpenBSD: Ustar.pm,v 1.44 2007/02/22 21:40:39 espie Exp $
+# $OpenBSD: Ustar.pm,v 1.50 2007/06/16 09:29:37 espie Exp $
 #
-# Copyright (c) 2002-2004 Marc Espie <espie@openbsd.org>
+# Copyright (c) 2002-2007 Marc Espie <espie@openbsd.org>
 #
 # Permission to use, copy, modify, and distribute this software for any
 # purpose with or without fee is hereby granted, provided that the above
@@ -42,6 +42,7 @@ use constant {
 use File::Path ();
 use File::Basename ();
 use OpenBSD::IdCache;
+use OpenBSD::Paths;
 
 my $uidcache = new OpenBSD::UidCache;
 my $gidcache = new OpenBSD::GidCache;
@@ -73,10 +74,10 @@ sub skip
 	}
     	my $actual = read($self->{fh}, $temp, $toread);
 	if (!defined $actual) {
-		die "Error while skipping archive: $!\n";
+		die "Error while skipping archive: $!";
 	}
 	if ($actual == 0) {
-		die "Premature end of archive in header: $!\n";
+		die "Premature end of archive in header: $!";
 	}
 	$self->{swallow} -= $actual;
     }
@@ -97,14 +98,14 @@ sub next
 {
     my $self = shift;
     # get rid of the current object
-    $self->skip();
+    $self->skip;
     my $header;
     my $n = read $self->{fh}, $header, 512;
     return if (defined $n) and $n == 0;
     die "Error while reading header"
 	unless defined $n and $n == 512;
     if ($header eq "\0"x512) {
-	return $self->next();
+	return $self->next;
     }
     # decode header
     my ($name, $mode, $uid, $gid, $size, $mtime, $chksum, $type,
@@ -120,11 +121,11 @@ sub next
     if ($ck2 != oct($chksum)) {
 	die "Bad archive checksum";
     }
-    $name =~ s/\0*$//;
+    $name =~ s/\0*$//o;
     $mode = oct($mode) & 0xfff;
-    $uname =~ s/\0*$//;
-    $gname =~ s/\0*$//;
-    $linkname =~ s/\0*$//;
+    $uname =~ s/\0*$//o;
+    $gname =~ s/\0*$//o;
+    $linkname =~ s/\0*$//o;
     $major = oct($major);
     $minor = oct($minor);
     $uid = oct($uid);
@@ -132,8 +133,8 @@ sub next
     $uid = $uidcache->lookup($uname, $uid);
     $gid = $gidcache->lookup($gname, $gid);
     $mtime = oct($mtime);
-    unless ($prefix =~ m/^\0/) {
-	$prefix =~ s/\0*$//;
+    unless ($prefix =~ m/^\0/o) {
+	$prefix =~ s/\0*$//o;
 	$name = "$prefix/$name";
     }
     
@@ -175,7 +176,7 @@ sub split_name
 	my $l = length $name;
 	if ($l > MAXFILENAME && $l <= MAXFILENAME+MAXPREFIX+1) {
 		while (length($name) > MAXFILENAME && 
-		    $name =~ m/^(.*?\/)(.*)$/) {
+		    $name =~ m/^(.*?\/)(.*)$/o) {
 			$prefix .= $1;
 			$name = $2;
 		}
@@ -190,11 +191,11 @@ sub mkheader
 	my ($prefix, $name) = split_name($entry->{name});
 	my $linkname = $entry->{linkname};
 	my $size = $entry->{size};
-	if (!$entry->isFile()) {
+	if (!$entry->isFile) {
 		$size = 0;
 	}
 	my ($major, $minor);
-	if ($entry->isDevice()) {
+	if ($entry->isDevice) {
 		$major = $entry->{major};
 		$minor = $entry->{minor};
 	} else {
@@ -215,26 +216,26 @@ sub mkheader
 
 	if (defined $entry->{cwd}) {
 		my $cwd = $entry->{cwd};
-		$cwd.='/' unless $cwd =~ m/\/$/;
+		$cwd.='/' unless $cwd =~ m/\/$/o;
 		$linkname =~ s/^\Q$cwd\E//;
 	}
 	if (!defined $linkname) {
 		$linkname = '';
 	}
 	if (length $prefix > MAXPREFIX) {
-		die "Prefix too long $prefix\n";
+		die "Prefix too long $prefix";
 	}
 	if (length $name > MAXFILENAME) {
-		die "Name too long $name\n";
+		die "Name too long $name";
 	}
 	if (length $linkname > MAXLINKNAME) {
-		die "Linkname too long $linkname\n";
+		die "Linkname too long $linkname";
 	}
 	if (length $uname > MAXUSERNAME) {
-		die "Username too long $uname\n";
+		die "Username too long $uname";
 	}
 	if (length $gname > MAXGROUPNAME) {
-		die "Groupname too long $gname\n";
+		die "Groupname too long $gname";
 	}
 	my $header;
 	my $cksum = ' 'x8;
@@ -317,7 +318,7 @@ sub close
 {
 	my $self = shift;
 	if (defined $self->{padout}) {
-	    $self->pad();
+	    $self->pad;
 	}
 	close($self->{fh});
 }
@@ -343,7 +344,7 @@ sub new
 	my ($class, $object) = @_;
 
 	if ($object->{size} != 0) {
-		die "Bad archive: non null size for arbitrary entry\n";
+		die "Bad archive: non null size for arbitrary entry";
 	}
 	bless $object, $class;
 }
@@ -370,7 +371,7 @@ sub write
 	my $out = $arc->{fh};
 
 	$arc->{padout} = 1;
-	my $header = OpenBSD::Ustar::mkheader($self, $self->type());
+	my $header = OpenBSD::Ustar::mkheader($self, $self->type);
 	print $out $header or die "Error writing to archive: $!";
 	$self->write_contents($arc);
 	my $k = $self->{key};
@@ -410,7 +411,7 @@ sub copy
 	my $out = $wrarc->{fh};
 	$self->resolve_links($wrarc);
 	$wrarc->{padout} = 1;
-	my $header = OpenBSD::Ustar::mkheader($self, $self->type());
+	my $header = OpenBSD::Ustar::mkheader($self, $self->type);
 	print $out $header or die "Error writing to archive: $!";
 
 	$self->copy_contents($wrarc);
@@ -431,7 +432,7 @@ sub create
 {
 	my $self = shift;
 	File::Path::mkpath($self->{destdir}.$self->{name});
-	$self->SUPER::set_modes();
+	$self->set_modes;
 }
 
 sub isDir() { 1 }
@@ -462,7 +463,7 @@ sub resolve_links
 		$self->{linkname} = $arc->{key}->{$k};
 	} else {
 		print join("\n", keys(%{$arc->{key}})), "\n";
-		die "Can't copy link over: original for $k NOT available\n";
+		die "Can't copy link over: original for $k NOT available";
 	}
 }
 
@@ -497,7 +498,7 @@ sub create
 	require POSIX;
 	POSIX::mkfifo($self->{destdir}.$self->{name}, $self->{mode}) or
 	    die "Can't create fifo $self->{name}: $!";
-	$self->SUPER::set_modes();
+	$self->set_modes;
 }
 
 sub isFifo() { 1 }
@@ -510,7 +511,10 @@ sub create
 {
 	my $self = shift;
 	$self->make_basedir($self->{name});
-	system('/sbin/mknod', 'mknod', '-m', $self->{mode}, $self->{destdir}.$self->{name}, $self->devicetype(), $self->{major}, $self->{minor});
+	system(OpenBSD::Paths->mknod, 
+	    '-m', $self->{mode}, $self->{destdir}.$self->{name}, 
+	    $self->devicetype, $self->{major}, $self->{minor});
+	$self->set_modes;
 }
 
 sub isDevice() { 1 }
@@ -635,8 +639,8 @@ sub create
 			
 		$toread -= $actual;
 	}
-	$out->close() or die "Error closing $self->{destdir}$self->{name}: $!";
-	$self->SUPER::set_modes();
+	$out->close or die "Error closing $self->{destdir}$self->{name}: $!";
+	$self->set_modes;
 }
 
 sub contents

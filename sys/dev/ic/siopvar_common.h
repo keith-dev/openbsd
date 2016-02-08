@@ -1,4 +1,4 @@
-/*	$OpenBSD: siopvar_common.h,v 1.23 2005/11/20 22:32:48 krw Exp $ */
+/*	$OpenBSD: siopvar_common.h,v 1.25 2007/08/05 19:05:09 kettenis Exp $ */
 /*	$NetBSD: siopvar_common.h,v 1.33 2005/11/18 23:10:32 bouyer Exp $ */
 
 /*
@@ -60,13 +60,13 @@ struct siop_common_xfer {
 	u_int32_t pad1;			/*  36 */
 	u_int32_t id;			/*  40 */
 	struct scsi_generic xscmd; 	/*  44 */
-	scr_table_t t_msgin;		/*  56 */
-	scr_table_t t_extmsgin;		/*  64 */
-	scr_table_t t_extmsgdata; 	/*  72 */
-	scr_table_t t_msgout;		/*  80 */
-	scr_table_t cmd;		/*  88 */
-	scr_table_t t_status;		/*  96 */
-	scr_table_t data[SIOP_NSG]; 	/* 104 */
+	scr_table_t t_msgin;		/*  60 */
+	scr_table_t t_extmsgin;		/*  68 */
+	scr_table_t t_extmsgdata; 	/*  76 */
+	scr_table_t t_msgout;		/*  84 */
+	scr_table_t cmd;		/*  92 */
+	scr_table_t t_status;		/* 100 */
+	scr_table_t data[SIOP_NSG]; 	/* 108 */
 } __packed;
 
 /* status can hold the SCSI_* status values, and 2 additional values: */
@@ -178,6 +178,7 @@ struct siop_common_softc {
 #define SF_CHIP_DT	0x00040000 /* DT clocking */
 #define SF_CHIP_GEBUG	0x00080000 /* SCSI gross error bug */
 #define SF_CHIP_AAIP	0x00100000 /* Always generate AIP regardless of SNCTL4*/
+#define SF_CHIP_BE	0x00200000 /* big-endian */
 
 #define SF_PCI_RL	0x01000000 /* PCI read line */
 #define SF_PCI_RM	0x02000000 /* PCI read multiple */
@@ -209,3 +210,9 @@ void 	siop_sdp(struct siop_common_cmd *, int);
 void 	siop_update_resid(struct siop_common_cmd *, int);
 void	siop_clearfifo(struct siop_common_softc *);
 void	siop_resetbus(struct siop_common_softc *);
+
+#define siop_htoc32(sc, x) \
+  (((sc)->features & SF_CHIP_BE) ? htobe32((x)) : htole32((x)))
+
+#define siop_ctoh32(sc, x) \
+  (((sc)->features & SF_CHIP_BE) ? betoh32((x)) : letoh32((x)))

@@ -1,4 +1,4 @@
-#	$OpenBSD: files.isa,v 1.94 2006/03/26 20:19:53 grange Exp $
+#	$OpenBSD: files.isa,v 1.99 2007/07/04 17:10:30 henning Exp $
 #	$NetBSD: files.isa,v 1.21 1996/05/16 03:45:55 mycroft Exp $
 #
 # Config file and device description for machine-independent ISA code.
@@ -7,7 +7,7 @@
 
 # ports should specify appropriate major numbers for the following
 # devices:
-#	mcd, scd, wd, wt
+#	mcd, scd, wd
 
 device	isa {[port = -1], [size = 0],
 	     [iomem = -1], [iosiz = 0],
@@ -136,11 +136,6 @@ file	dev/isa/mcd.c			mcd needs-flag
 attach	wdc at isa with wdc_isa: isa_dma
 file	dev/isa/wdc_isa.c		wdc_isa
 
-# Wangtek- and Archive-compatible tape controller boards
-device	wt: tape, isa_dma
-attach	wt at isa
-file	dev/isa/wt.c			wt needs-flag
-
 #
 # ISA networking drivers
 #
@@ -170,14 +165,6 @@ device	ec: ether, ifnet, dp8390nic, ifmedia
 attach	ec at isa
 file	dev/isa/if_ec.c			ec
 
-# National Semiconductor DS8390/WD83C690-based boards
-# (WD/SMC 80x3 family, SMC Ultra [8216], 3Com 3C503, NE[12]000, and clones)
-# XXX conflicts with amiga if_ed.c
-#device	ed: ether, ifnet
-#attach	ed at isa with ed_isa
-#attach	ed at pcmcia with ed_pcmcia
-#file	dev/isa/if_ed.c			ed & (ed_isa | ed_pcmcia) needs-flag
-
 # 3Com 3C505
 device	eg: ether, ifnet
 attach	eg at isa
@@ -191,18 +178,6 @@ file	dev/isa/if_el.c			el
 # 3Com 3C509 Ethernet controller
 attach	ep at isa with ep_isa: elink
 file	dev/isa/if_ep_isa.c		ep_isa
-
-# Fujitsu MB8696[05]-based boards
-# (Allied Telesis AT1700)
-device	fe: ether, ifnet
-attach	fe at isa
-file	dev/isa/if_fe.c			fe
-
-# HP Lan Ethernet controllers
-# XXX currently broken
-#device hp: ether, ifnet
-#attach	hp at isa
-#file	dev/isa/if_hp.c			hp
 
 # Intel i82586-based boards
 # (AT&T StarLAN 10, AT&T EN100, AT&T StarLAN Fiber, 3Com 3C507)
@@ -220,12 +195,6 @@ device	ex: ether, ifnet
 attach	ex at isa
 file	dev/isa/if_ex.c			ex needs-flag
 
-# XXX ???
-# XXX NOT IN TREE?
-#device	ix: ether, ifnet
-#attach	ix at isa
-#file	dev/isa/if_ix.c			ix
-
 # AMD am7990 (Lance) -based boards
 # (BICC Isolan, NE2100, DEPCA)
 # device declaration in sys/conf/files
@@ -240,13 +209,6 @@ file	dev/isa/if_sm_isa.c		sm_isa
 # RangeLAN2 wireless network
 attach	rln at isa with rln_isa
 file	dev/isa/if_rln_isa.c		rln_isa
-
-# TROPIC based Token-Ring (IBM/3COM)
-define	tr_isa
-file	dev/isa/if_tr_isa.c		tr_isa
-attach	tr at isa with tr_isa: tr_isa, elink
-file	dev/isa/if_tribm_isa.c		tr_isa
-file	dev/isa/if_trtcm_isa.c		tr_isa
 
 #
 # ISA Sound hardware

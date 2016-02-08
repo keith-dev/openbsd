@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_proc.c,v 1.31 2005/12/22 06:55:03 tedu Exp $	*/
+/*	$OpenBSD: kern_proc.c,v 1.34 2007/08/04 02:43:54 ckuethe Exp $	*/
 /*	$NetBSD: kern_proc.c,v 1.14 1996/02/09 18:59:41 christos Exp $	*/
 
 /*
@@ -64,6 +64,7 @@ struct proclist allproc;
 struct proclist zombproc;
 
 struct pool proc_pool;
+struct pool process_pool;
 struct pool rusage_pool;
 struct pool ucred_pool;
 struct pool pgrp_pool;
@@ -92,6 +93,8 @@ procinit(void)
 		panic("procinit: malloc");
 
 	pool_init(&proc_pool, sizeof(struct proc), 0, 0, 0, "procpl",
+	    &pool_allocator_nointr);
+	pool_init(&process_pool, sizeof(struct process), 0, 0, 0, "processpl",
 	    &pool_allocator_nointr);
 	pool_init(&rusage_pool, sizeof(struct rusage), 0, 0, 0, "zombiepl",
 	    &pool_allocator_nointr);
@@ -230,7 +233,7 @@ enterpgrp(struct proc *p, pid_t pgid, int mksess)
 			sess->s_ttyp = NULL;
 			bcopy(p->p_session->s_login, sess->s_login,
 			    sizeof(sess->s_login));
-			p->p_flag &= ~P_CONTROLT;
+			atomic_clearbits_int(&p->p_flag, P_CONTROLT);
 			pgrp->pg_session = sess;
 #ifdef DIAGNOSTIC
 			if (p != curproc)
@@ -421,7 +424,7 @@ db_show_all_procs(db_expr_t addr, int haddr, db_expr_t count, char *modif)
 		    "COMMAND", "STRUCT PROC *", "UAREA *", "VMSPACE/VM_MAP");
 		break;
 	case 'n':
-		db_printf("   PID  %5s  %5s  %5s  S  %10s  %-9s  %-16s\n",
+		db_printf("   PID  %5s  %5s  %5s  S  %10s  %-12s  %-16s\n",
 		    "PPID", "PGRP", "UID", "FLAGS", "WAIT", "COMMAND");
 		break;
 	case 'w':
@@ -446,7 +449,7 @@ db_show_all_procs(db_expr_t addr, int haddr, db_expr_t count, char *modif)
 
 			case 'n':
 				db_printf("%5d  %5d  %5d  %d  %#10x  "
-				    "%-9.9s  %-16s\n",
+				    "%-12.12s  %-16s\n",
 				    pp ? pp->p_pid : -1, p->p_pgrp->pg_id,
 				    p->p_cred->p_ruid, p->p_stat, p->p_flag,
 				    (p->p_wchan && p->p_wmesg) ?

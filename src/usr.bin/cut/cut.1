@@ -1,4 +1,4 @@
-.\"	$OpenBSD: cut.1,v 1.9 2006/01/04 15:50:58 jmc Exp $
+.\"	$OpenBSD: cut.1,v 1.12 2007/05/31 19:20:09 jmc Exp $
 .\"	$NetBSD: cut.1,v 1.6 1995/10/02 20:19:26 jtc Exp $
 .\"
 .\" Copyright (c) 1989, 1990, 1993
@@ -33,7 +33,7 @@
 .\"
 .\"     @(#)cut.1	8.1 (Berkeley) 6/6/93
 .\"
-.Dd June 6, 1993
+.Dd $Mdocdate: May 31 2007 $
 .Dt CUT 1
 .Os
 .Sh NAME
@@ -93,9 +93,9 @@ specifies byte positions.
 The
 .Ar list
 specifies character positions.
-.It Fl d Ar string
+.It Fl d Ar delim
 Use the first character of
-.Ar string
+.Ar delim
 as the field delimiter character instead of the tab character.
 .It Fl f Ar list
 The
@@ -129,5 +129,6 @@ Show the names and login times of logged in users:
 .Sh STANDARDS
 The
 .Nm
-utility conforms to
-.St -p1003.2-92 .
+utility is compliant with the
+.St -p1003.1-2004
+specification.

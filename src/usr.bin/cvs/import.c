@@ -1,4 +1,4 @@
-/*	$OpenBSD: import.c,v 1.72 2007/02/22 06:42:09 otto Exp $	*/
+/*	$OpenBSD: import.c,v 1.74 2007/06/28 21:38:09 xsa Exp $	*/
 /*
  * Copyright (c) 2006 Joris Vink <joris@openbsd.org>
  *
@@ -287,7 +287,7 @@ import_update(struct cvs_file *cf)
 {
 	int ret;
 	BUF *b1, *b2, *d;
-	char branch[16];
+	char branch[CVS_REV_BUFSZ];
 	RCSNUM *newrev, *rev, *brev, *hrev;
 
 	cvs_log(LP_TRACE, "import_update(%s)", cf->file_path);
@@ -338,7 +338,7 @@ import_update(struct cvs_file *cf)
 
 	import_tag(cf, brev, newrev);
 
-	if (cf->file_rcs->rf_branch == NULL || cf->file_rcs->rf_inattic == 1 ||
+	if (cf->file_rcs->rf_branch == NULL || cf->in_attic == 1 ||
 	    strcmp(branch, import_branch)) {
 		import_conflicts++;
 		cvs_printf("C %s/%s\n", import_repository, cf->file_path);
@@ -356,7 +356,7 @@ import_update(struct cvs_file *cf)
 static void
 import_tag(struct cvs_file *cf, RCSNUM *branch, RCSNUM *newrev)
 {
-	char b[16];
+	char b[CVS_REV_BUFSZ];
 
 	if (cvs_noexec != 1) {
 		rcsnum_tostr(branch, b, sizeof(b));

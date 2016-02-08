@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.25 2006/11/29 12:26:13 miod Exp $ */
+/*	$OpenBSD: cpu.h,v 1.27 2007/05/30 17:10:44 miod Exp $ */
 
 /*
  * Copyright (c) 1995 Theo de Raadt
@@ -74,7 +74,7 @@
 #define M68K_MMU_MOTOROLA
 #include <m68k/cpu.h>
 
-#ifdef	_KERNEL
+#ifdef _KERNEL
 
 /*
  * Get interrupt glue.
@@ -121,7 +121,7 @@ extern int want_resched;
  * buffer pages are invalid.  On the m68k, request an ast to send us
  * through trap, marking the proc as needing a profiling tick.
  */
-#define	need_proftick(p)	{ (p)->p_flag |= P_OWEUPC; aston(); }
+#define	need_proftick(p)	aston()
 
 /*
  * Notify the current process (p) that it has a signal pending,
@@ -131,6 +131,8 @@ extern int want_resched;
 
 extern int astpending;
 #define aston() (astpending = 1)
+
+#endif	/* _KERNEL */
 
 /*
  * CTL_MACHDEP definitions.
@@ -142,6 +144,8 @@ extern int astpending;
 	{ 0, 0 }, \
 	{ "console_device", CTLTYPE_STRUCT }, \
 }
+
+#ifdef _KERNEL
 
 extern	vaddr_t intiobase, intiolimit;
 extern	vaddr_t iiomapbase;

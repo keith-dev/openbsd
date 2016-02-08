@@ -1,4 +1,4 @@
-/*	$OpenBSD: fatal.c,v 1.9 2007/02/22 06:42:09 otto Exp $ */
+/*	$OpenBSD: fatal.c,v 1.12 2007/05/29 00:21:51 ray Exp $ */
 /*
  * Copyright (c) 2002 Markus Friedl.  All rights reserved.
  *
@@ -25,6 +25,7 @@
 
 #include <sys/stat.h>
 
+#include <err.h>
 #include <fcntl.h>
 #include <stdlib.h>
 
@@ -36,16 +37,18 @@
 void
 fatal(const char *fmt,...)
 {
+	static int been_here;
 	va_list args;
+
+	/* Fatal should not loop, (the functions below can fatal). */
+	if (been_here++)
+		errx(1, "fatal loop");
 
 	va_start(args, fmt);
 	cvs_vlog(LP_ABORT, fmt, args);
 	va_end(args);
 
 	cvs_cleanup();
-
-	if (cvs_server_active)
-		cvs_server_send_response("error");
 
 	exit(1);
 }

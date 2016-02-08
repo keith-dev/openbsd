@@ -1,4 +1,4 @@
-/*	$OpenBSD: kroute.c,v 1.152 2007/02/22 08:34:18 henning Exp $ */
+/*	$OpenBSD: kroute.c,v 1.154 2007/05/11 11:27:59 claudio Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -21,6 +21,7 @@
 #include <sys/socket.h>
 #include <sys/sysctl.h>
 #include <sys/tree.h>
+#include <sys/uio.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <net/if.h>
@@ -441,7 +442,7 @@ kr_nexthop_add(struct bgpd_addr *addr)
 	struct knexthop_node	*h;
 
 	if ((h = knexthop_find(addr)) != NULL) {
-		/* should not happen... this is acctually an error path */
+		/* should not happen... this is actually an error path */
 		struct kroute_nexthop	 nh;
 		struct kroute_node	*k;
 		struct kroute6_node	*k6;
@@ -894,7 +895,7 @@ kroute_remove(struct kroute_node *kr)
 		return (-1);
 	}
 
-	/* check wether a nexthop depends on this kroute */
+	/* check whether a nexthop depends on this kroute */
 	if ((kr->r.flags & F_KERNEL) && (kr->r.flags & F_NEXTHOP))
 		RB_FOREACH(s, knexthop_tree, &knt)
 			if (s->kroute == kr)
@@ -977,7 +978,7 @@ kroute6_remove(struct kroute6_node *kr)
 		return (-1);
 	}
 
-	/* check wether a nexthop depends on this kroute */
+	/* check whether a nexthop depends on this kroute */
 	if ((kr->r.flags & F_KERNEL) && (kr->r.flags & F_NEXTHOP))
 		RB_FOREACH(s, knexthop_tree, &knt)
 			if (s->kroute == kr)
@@ -1419,7 +1420,7 @@ kroute_detach_nexthop(struct knexthop_node *kn)
 	struct kroute6_node	*k6;
 
 	/*
-	 * check wether there's another nexthop depending on this kroute
+	 * check whether there's another nexthop depending on this kroute
 	 * if not remove the flag
 	 */
 
@@ -1732,64 +1733,99 @@ if_announce(void *msg)
 int
 send_rtmsg(int fd, int action, struct kroute *kroute)
 {
-	struct {
-		struct rt_msghdr	hdr;
-		struct sockaddr_in	prefix;
-		struct sockaddr_in	nexthop;
-		struct sockaddr_in	mask;
-		struct sockaddr_rtlabel	label;
-	} r;
+	struct iovec		iov[5];
+	struct rt_msghdr	hdr;
+	struct sockaddr_in	prefix;
+	struct sockaddr_in	nexthop;
+	struct sockaddr_in	mask;
+	struct sockaddr_rtlabel	label;
+	int			iovcnt = 0;
 
 	if (kr_state.fib_sync == 0)
 		return (0);
 
-	bzero(&r, sizeof(r));
-	r.hdr.rtm_msglen = sizeof(r);
-	r.hdr.rtm_version = RTM_VERSION;
-	r.hdr.rtm_type = action;
-	r.hdr.rtm_tableid = kr_state.rtableid;
-	r.hdr.rtm_flags = RTF_PROTO1;
+	/* initialize header */
+	bzero(&hdr, sizeof(hdr));
+	hdr.rtm_version = RTM_VERSION;
+	hdr.rtm_type = action;
+	hdr.rtm_tableid = kr_state.rtableid;
+	hdr.rtm_flags = RTF_PROTO1;
 	if (kroute->flags & F_BLACKHOLE)
-		r.hdr.rtm_flags |= RTF_BLACKHOLE;
+		hdr.rtm_flags |= RTF_BLACKHOLE;
 	if (kroute->flags & F_REJECT)
-		r.hdr.rtm_flags |= RTF_REJECT;
+		hdr.rtm_flags |= RTF_REJECT;
 	if (action == RTM_CHANGE)	/* reset these flags on change */
-		r.hdr.rtm_fmask = RTF_REJECT|RTF_BLACKHOLE;
-	r.hdr.rtm_seq = kr_state.rtseq++;	/* overflow doesn't matter */
-	r.hdr.rtm_addrs = RTA_DST|RTA_GATEWAY|RTA_NETMASK|RTA_LABEL;
-	r.prefix.sin_len = sizeof(r.prefix);
-	r.prefix.sin_family = AF_INET;
-	r.prefix.sin_addr.s_addr = kroute->prefix.s_addr;
+		hdr.rtm_fmask = RTF_REJECT|RTF_BLACKHOLE;
+	hdr.rtm_seq = kr_state.rtseq++;	/* overflow doesn't matter */
+	hdr.rtm_msglen = sizeof(hdr);
+	/* adjust iovec */
+	iov[iovcnt].iov_base = &hdr;
+	iov[iovcnt++].iov_len = sizeof(hdr);
 
-	r.nexthop.sin_len = sizeof(r.nexthop);
-	r.nexthop.sin_family = AF_INET;
-	r.nexthop.sin_addr.s_addr = kroute->nexthop.s_addr;
-	if (kroute->nexthop.s_addr != 0)
-		r.hdr.rtm_flags |= RTF_GATEWAY;
+	bzero(&prefix, sizeof(prefix));
+	prefix.sin_len = sizeof(prefix);
+	prefix.sin_family = AF_INET;
+	prefix.sin_addr.s_addr = kroute->prefix.s_addr;
+	/* adjust header */
+	hdr.rtm_addrs |= RTA_DST;
+	hdr.rtm_msglen += sizeof(prefix);
+	/* adjust iovec */
+	iov[iovcnt].iov_base = &prefix;
+	iov[iovcnt++].iov_len = sizeof(prefix);
 
-	r.mask.sin_len = sizeof(r.mask);
-	r.mask.sin_family = AF_INET;
-	r.mask.sin_addr.s_addr = htonl(prefixlen2mask(kroute->prefixlen));
+	if (kroute->nexthop.s_addr != 0) {
+		bzero(&nexthop, sizeof(nexthop));
+		nexthop.sin_len = sizeof(nexthop);
+		nexthop.sin_family = AF_INET;
+		nexthop.sin_addr.s_addr = kroute->nexthop.s_addr;
+		/* adjust header */
+		hdr.rtm_flags |= RTF_GATEWAY;
+		hdr.rtm_addrs |= RTA_GATEWAY;
+		hdr.rtm_msglen += sizeof(nexthop);
+		/* adjust iovec */
+		iov[iovcnt].iov_base = &nexthop;
+		iov[iovcnt++].iov_len = sizeof(nexthop);
+	}
 
-	r.label.sr_len = sizeof(r.label);
-	strlcpy(r.label.sr_label, rtlabel_id2name(kroute->labelid),
-	    sizeof(r.label.sr_label));
+	bzero(&mask, sizeof(mask));
+	mask.sin_len = sizeof(mask);
+	mask.sin_family = AF_INET;
+	mask.sin_addr.s_addr = htonl(prefixlen2mask(kroute->prefixlen));
+	/* adjust header */
+	hdr.rtm_addrs |= RTA_NETMASK;
+	hdr.rtm_msglen += sizeof(mask);
+	/* adjust iovec */
+	iov[iovcnt].iov_base = &mask;
+	iov[iovcnt++].iov_len = sizeof(mask);
+
+	if (kroute->labelid) {
+		bzero(&label, sizeof(label));
+		label.sr_len = sizeof(label);
+		strlcpy(label.sr_label, rtlabel_id2name(kroute->labelid),
+		    sizeof(label.sr_label));
+		/* adjust header */
+		hdr.rtm_addrs |= RTA_LABEL;
+		hdr.rtm_msglen += sizeof(label);
+		/* adjust iovec */
+		iov[iovcnt].iov_base = &label;
+		iov[iovcnt++].iov_len = sizeof(label);
+	}
 
 retry:
-	if (write(fd, &r, sizeof(r)) == -1) {
+	if (writev(fd, iov, iovcnt) == -1) {
 		switch (errno) {
 		case ESRCH:
-			if (r.hdr.rtm_type == RTM_CHANGE) {
-				r.hdr.rtm_type = RTM_ADD;
+			if (hdr.rtm_type == RTM_CHANGE) {
+				hdr.rtm_type = RTM_ADD;
 				goto retry;
-			} else if (r.hdr.rtm_type == RTM_DELETE) {
+			} else if (hdr.rtm_type == RTM_DELETE) {
 				log_info("route %s/%u vanished before delete",
 				    inet_ntoa(kroute->prefix),
 				    kroute->prefixlen);
 				return (0);
 			} else {
 				log_warnx("send_rtmsg: action %u, "
-				    "prefix %s/%u: %s", r.hdr.rtm_type,
+				    "prefix %s/%u: %s", hdr.rtm_type,
 				    inet_ntoa(kroute->prefix),
 				    kroute->prefixlen, strerror(errno));
 				return (0);
@@ -1797,7 +1833,7 @@ retry:
 			break;
 		default:
 			log_warnx("send_rtmsg: action %u, prefix %s/%u: %s",
-			    r.hdr.rtm_type, inet_ntoa(kroute->prefix),
+			    hdr.rtm_type, inet_ntoa(kroute->prefix),
 			    kroute->prefixlen, strerror(errno));
 			return (0);
 		}
@@ -1809,64 +1845,102 @@ retry:
 int
 send_rt6msg(int fd, int action, struct kroute6 *kroute)
 {
-	struct {
-		struct rt_msghdr	hdr;
-		struct sockaddr_in6	prefix;
-		struct sockaddr_in6	nexthop;
-		struct sockaddr_in6	mask;
-		struct sockaddr_rtlabel	label;
-	} r;
+	struct iovec		iov[5];
+	struct rt_msghdr	hdr;
+	struct sockaddr_in6	prefix;
+	struct sockaddr_in6	nexthop;
+	struct sockaddr_in6	mask;
+	struct sockaddr_rtlabel	label;
+	int			iovcnt = 0;
 
 	if (kr_state.fib_sync == 0)
 		return (0);
 
-	bzero(&r, sizeof(r));
-	r.hdr.rtm_msglen = sizeof(r);
-	r.hdr.rtm_version = RTM_VERSION;
-	r.hdr.rtm_type = action;
-	r.hdr.rtm_tableid = kr_state.rtableid;
-	r.hdr.rtm_flags = RTF_PROTO1;
+	/* initialize header */
+	bzero(&hdr, sizeof(hdr));
+	hdr.rtm_version = RTM_VERSION;
+	hdr.rtm_type = action;
+	hdr.rtm_tableid = kr_state.rtableid;
+	hdr.rtm_flags = RTF_PROTO1;
 	if (kroute->flags & F_BLACKHOLE)
-		r.hdr.rtm_flags |= RTF_BLACKHOLE;
+		hdr.rtm_flags |= RTF_BLACKHOLE;
 	if (kroute->flags & F_REJECT)
-		r.hdr.rtm_flags |= RTF_REJECT;
-	r.hdr.rtm_seq = kr_state.rtseq++;	/* overflow doesn't matter */
-	r.hdr.rtm_addrs = RTA_DST|RTA_GATEWAY|RTA_NETMASK|RTA_LABEL;
-	r.prefix.sin6_len = sizeof(r.prefix);
-	r.prefix.sin6_family = AF_INET6;
-	memcpy(&r.prefix.sin6_addr, &kroute->prefix, sizeof(struct in6_addr));
+		hdr.rtm_flags |= RTF_REJECT;
+	if (action == RTM_CHANGE)	/* reset these flags on change */
+		hdr.rtm_fmask = RTF_REJECT|RTF_BLACKHOLE;
+	hdr.rtm_seq = kr_state.rtseq++;	/* overflow doesn't matter */
+	hdr.rtm_msglen = sizeof(hdr);
+	/* adjust iovec */
+	iov[iovcnt].iov_base = &hdr;
+	iov[iovcnt++].iov_len = sizeof(hdr);
+
+	bzero(&prefix, sizeof(prefix));
+	prefix.sin6_len = sizeof(prefix);
+	prefix.sin6_family = AF_INET6;
+	memcpy(&prefix.sin6_addr, &kroute->prefix, sizeof(struct in6_addr));
 	/* XXX scope does not matter or? */
+	/* adjust header */
+	hdr.rtm_addrs |= RTA_DST;
+	hdr.rtm_msglen += sizeof(prefix);
+	/* adjust iovec */
+	iov[iovcnt].iov_base = &prefix;
+	iov[iovcnt++].iov_len = sizeof(prefix);
 
-	r.nexthop.sin6_len = sizeof(r.nexthop);
-	r.nexthop.sin6_family = AF_INET6;
-	memcpy(&r.nexthop.sin6_addr, &kroute->nexthop, sizeof(struct in6_addr));
-	if (memcmp(&kroute->nexthop, &in6addr_any, sizeof(struct in6_addr)))
-		r.hdr.rtm_flags |= RTF_GATEWAY;
+	if (memcmp(&kroute->nexthop, &in6addr_any, sizeof(struct in6_addr))) {
+		bzero(&nexthop, sizeof(nexthop));
+		nexthop.sin6_len = sizeof(nexthop);
+		nexthop.sin6_family = AF_INET6;
+		memcpy(&nexthop.sin6_addr, &kroute->nexthop,
+		    sizeof(struct in6_addr));
+		/* adjust header */
+		hdr.rtm_flags |= RTF_GATEWAY;
+		hdr.rtm_addrs |= RTA_GATEWAY;
+		hdr.rtm_msglen += sizeof(nexthop);
+		/* adjust iovec */
+		iov[iovcnt].iov_base = &nexthop;
+		iov[iovcnt++].iov_len = sizeof(nexthop);
+	}
 
-	r.mask.sin6_len = sizeof(r.mask);
-	r.mask.sin6_family = AF_INET6;
-	memcpy(&r.mask.sin6_addr, prefixlen2mask6(kroute->prefixlen),
+	bzero(&mask, sizeof(mask));
+	mask.sin6_len = sizeof(mask);
+	mask.sin6_family = AF_INET6;
+	memcpy(&mask.sin6_addr, prefixlen2mask6(kroute->prefixlen),
 	    sizeof(struct in6_addr));
+	/* adjust header */
+	hdr.rtm_addrs |= RTA_NETMASK;
+	hdr.rtm_msglen += sizeof(mask);
+	/* adjust iovec */
+	iov[iovcnt].iov_base = &mask;
+	iov[iovcnt++].iov_len = sizeof(mask);
 
-	r.label.sr_len = sizeof(r.label);
-	strlcpy(r.label.sr_label, rtlabel_id2name(kroute->labelid),
-	    sizeof(r.label.sr_label));
+	if (kroute->labelid) {
+		bzero(&label, sizeof(label));
+		label.sr_len = sizeof(label);
+		strlcpy(label.sr_label, rtlabel_id2name(kroute->labelid),
+		    sizeof(label.sr_label));
+		/* adjust header */
+		hdr.rtm_addrs |= RTA_LABEL;
+		hdr.rtm_msglen += sizeof(label);
+		/* adjust iovec */
+		iov[iovcnt].iov_base = &label;
+		iov[iovcnt++].iov_len = sizeof(label);
+	}
 
 retry:
-	if (write(fd, &r, sizeof(r)) == -1) {
+	if (writev(fd, iov, iovcnt) == -1) {
 		switch (errno) {
 		case ESRCH:
-			if (r.hdr.rtm_type == RTM_CHANGE) {
-				r.hdr.rtm_type = RTM_ADD;
+			if (hdr.rtm_type == RTM_CHANGE) {
+				hdr.rtm_type = RTM_ADD;
 				goto retry;
-			} else if (r.hdr.rtm_type == RTM_DELETE) {
+			} else if (hdr.rtm_type == RTM_DELETE) {
 				log_info("route %s/%u vanished before delete",
 				    log_in6addr(&kroute->prefix),
 				    kroute->prefixlen);
 				return (0);
 			} else {
 				log_warnx("send_rtmsg: action %u, "
-				    "prefix %s/%u: %s", r.hdr.rtm_type,
+				    "prefix %s/%u: %s", hdr.rtm_type,
 				    log_in6addr(&kroute->prefix),
 				    kroute->prefixlen, strerror(errno));
 				return (0);
@@ -1874,7 +1948,7 @@ retry:
 			break;
 		default:
 			log_warnx("send_rtmsg: action %u, prefix %s/%u: %s",
-			    r.hdr.rtm_type, log_in6addr(&kroute->prefix),
+			    hdr.rtm_type, log_in6addr(&kroute->prefix),
 			    kroute->prefixlen, strerror(errno));
 			return (0);
 		}

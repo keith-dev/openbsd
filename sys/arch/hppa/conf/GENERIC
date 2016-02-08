@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.91 2007/02/28 21:54:43 grange Exp $
+#	$OpenBSD: GENERIC,v 1.110 2007/08/15 09:06:54 kettenis Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -22,6 +22,7 @@ option		HP7300LC_CPU		# PCXL2
 option		HP8000_CPU		# PCXU  (in 32bit mode)
 option		HP8200_CPU		# PCXU2 (in 32bit mode)
 option		HP8500_CPU		# PCXW  (in 32bit mode)
+option		HP8700_CPU		# PCXW2 (in 32bit mode)
 #option		USE_HPT
 
 option		FPEMUL
@@ -42,12 +43,14 @@ mainbus0 at root		# root bus
 mem*	at mainbus0 flags 0x0000	# /dev/*mem and memory controller
 pdc0	at mainbus0		# PDC/IODC wrapper for boot console
 power0	at mainbus0		# power/fail manager (iv 30)
+lcd0	at mainbus0		# LCD
 cpu*	at mainbus0 irq 31	# HP PA-RISC cpu
 #fpu*	at mainbus0		# HP PA-RISC fpu (iv N/A)
 #pmu*	at mainbus0 irq 29	# HP PA-RISC performance monitor unit
 phantomas0 at mainbus0		# Phantom PseudoBC GSC+ Port
 uturn0	at mainbus0		# U2/UTurn Runway IOA
 uturn1	at mainbus0
+astro*	at mainbus0		# Astro memory & I/O controller
 
 lasi0	at mainbus0 offset 0x100000 irq 28	# LASI host adapter
 lasi0	at mainbus0 offset 0xfd00000 irq 28	# LASI on C1[01]0, J2[01]0
@@ -69,8 +72,16 @@ option	PCIVERBOSE
 #pckbc0	at dino? irq 9
 com1	at dino? irq 11
 
+elroy*	at astro?
+pci*	at elroy?
+
 ppb*	at pci?
 pci*	at ppb?
+
+ssio*	at pci?
+com0	at ssio? irq 4
+com1	at ssio? irq 3
+lpt0	at ssio?
 
 # CardBus bus support
 cbb*		at pci?
@@ -152,17 +163,24 @@ scsibus* at usscanner?
 uyap*	at uhub?		# Y@P firmware loader
 udsbr*	at uhub?		# D-Link DSB-R100 radio
 radio*	at udsbr?		# USB radio
-#ubt*	at uhub?		# USB Bluetooth
 ugen*	at uhub?		# USB Generic driver
 ural*	at uhub?		# Ralink RT2500USB
 rum*	at uhub?		# Ralink RT2501USB/RT2601USB
 uow*	at uhub?		# Maxim/Dallas DS2490 1-Wire adapter
 onewire* at uow?
 
+# Bluetooth controllers
+#ubt*	at uhub?		# USB Bluetooth
+
+# Bluetooth bus support
+#bthub*	at ubt?
+
 sti0	at mainbus0 irq 11	# [H]CRX-{8,24,48}[Z] graphics
 sti0	at phantomas0 irq 11	# builtin graphics on BC*
+sti0	at uturn? irq 11
 sti1	at mainbus0 irq 12
 sti1	at phantomas0 irq 12
+sti1	at uturn? irq 12
 sti*	at pci?			# EG-PCI, FX*
 
 #medusa* at mainbus? irq 4	# FDDI
@@ -232,8 +250,10 @@ scsibus* at mpi?
 #bha*	at pci?
 #scsibus* at bha?
 
-#siop*	at mainbus? irq 3	# NCR 53C720 (Fast/Wide Diff)
-siop*	at pci?			# NCR 538XX SCSI controllers(new)
+siop*	at mainbus? irq 3	# NCR 53C720 (Fast/Wide HVD)
+siop*	at phantomas? irq 3
+siop*	at uturn? irq 3
+siop*	at pci?			# NCR 53C8XX SCSI controllers
 scsibus* at siop?
 #ahd*	at pci?			# Adaptec 79?? SCSI controllers
 #scsibus* at ahd?
@@ -247,12 +267,12 @@ em*	at pci?			# Intel Pro/1000 ethernet
 #de*	at eisa?
 dc*	at pci?			# 21143, "tulip" clone ethernet
 #dc*	at cardbus?
-#rl*	at pci?			# RealTek 81[23]9 ethernet
+rl*	at pci?			# Realtek 81[23]9 ethernet
 #rl*	at cardbus?
 #ep*	at pci?			# 3c59x ethernet
 #ep*	at eisa?		# 3c579 ethernet
 #ep*	at pcmcia?		# 3c589 ethernet
-#xl*	at pci?			# 3C9xx ethernet
+xl*	at pci?			# 3C9xx ethernet
 #xl*	at cardbus?
 fxp*	at pci?			# EtherExpress 10/100B ethernet
 #fxp*	at cardbus?
@@ -264,12 +284,17 @@ ne*	at pcmcia?
 an*	at pcmcia?
 #wi*	at pci?			# WaveLAN IEEE 802.11DS
 wi*	at pcmcia?
+skc*	at pci?			# SysKonnect GEnesis 984x
+sk*	at skc?			#  each port of above
+mskc*	at pci?			# Marvell Yukon-2
+msk*	at mskc?		#  each port of above
+bge*	at pci?			# Broadcom BCM570x (aka Tigon3)
 
 dcphy*		at mii?		# Digital Clone PHYs
 amphy*		at mii?		# AMD 79C873 PHYs
-#exphy*		at mii?		# 3Com internal PHYs
+exphy*		at mii?		# 3Com internal PHYs
 inphy*		at mii?		# Intel 82555 PHYs
-#iophy*		at mii?		# Intel 82553 PHYs
+iophy*		at mii?		# Intel 82553 PHYs
 icsphy*		at mii?		# ICS1890 PHYs
 lxtphy*		at mii?		# Level One LXT-970 PHYs
 nsphy*		at mii?		# NS83840 PHYs
@@ -278,10 +303,12 @@ nsphyter*	at mii?		# NS83843 PHYs
 #qsphy*		at mii?		# Quality Semi QS6612 PHYs
 #sqphy*		at mii?		# Seeq 8022[013] PHYs
 #tlphy*		at mii?		# ThunderLAN PHYs
-#tqphy*		at mii?		# TDK Semiconductor PHYs
-#brgphy*	at mii?		# Broadcom 10/100/1000 PHYs
+tqphy*		at mii?		# TDK Semiconductor PHYs
+brgphy*		at mii?		# Broadcom 10/100/1000 PHYs
 bmtphy*		at mii?		# Broadcom 10/100 PHYs
 eephy*		at mii?		# Marvell 88E1000 Gigabit PHYs
+xmphy*		at mii?		# XaQti XMAC-II PHYs
+rlphy*		at mii?		# Realtek 8139 internal PHYs
 ukphy*		at mii?		# generic unknown PHYs
 
 # MI devices
@@ -297,14 +324,14 @@ wsmouse*	at hilms? mux 0
 #option	FD_DEBUG
 #fd*	at fdc?			# floppy drives
 
-#pciide*	at pci? flags 0x0000
+pciide*	at pci? flags 0x0000
 #wdc0	at isa? port 0x1f0 irq 14
 #wdc1	at isa? port 0x170 irq 15
 wdc*	at pcmcia?
 wd*	at wdc? flags 0x0000
-#wd*	at pciide? flags 0x0000
-#atapiscsi* at pciide?
-#scsibus* at atapiscsi?
+wd*	at pciide? flags 0x0000
+atapiscsi* at pciide?
+scsibus* at atapiscsi?
 
 # These entries find devices on all SCSI busses and assign
 # unit numers dynamically.

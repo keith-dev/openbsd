@@ -1,4 +1,4 @@
-/*	$OpenBSD: exception.S,v 1.8 2005/12/20 07:06:26 miod Exp $ */
+/*	$OpenBSD: exception.S,v 1.13 2007/05/25 20:47:19 miod Exp $ */
 
 /*
  * Copyright (c) 2002-2003 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -134,25 +134,6 @@ u_exception_table:
 	.globl	exception
 exception:
 	.set	noat
-#ifdef TLB_TRACE
-	dmfc0	k0, COP_0_EXC_PC
-	PTR_L	k1, tlbtrcptr
-	PTR_S	k0, 0(k1)
-	dmfc0	k0, COP_0_BAD_VADDR
-        PTR_S   k0, REGSZ(k1)
-	mfc0	k0, COP_0_CAUSE_REG
-        PTR_S	k0, 2*REGSZ(k1)
-	mfc0	k0, COP_0_STATUS_REG
-        PTR_S	k0, 3*REGSZ(k1)
-
-        PTR_L   k1, tlbtrcptr
-        PTR_ADDU k1, 4*REGSZ
-        LI      k0, 0x100
-        not     k0, k0
-        and     k1, k0
-        LA      k0, tlbtrcptr
-        PTR_S   k1, 0(k0)
-#endif
 	mfc0	k0, COP_0_STATUS_REG
 	mfc0	k1, COP_0_CAUSE_REG
 	and	k0, k0, SR_KSU_USER
@@ -331,7 +312,7 @@ NNON_LEAF(u_intr, FRAMESZ(CF_SZ), ra)
 	sw	t2, (t1)
 
 	ori	t0, SR_EXL		# restoring to user mode.
-	mtc0	t0, COP_0_STATUS_REG	# must set exeption level bit.
+	mtc0	t0, COP_0_STATUS_REG	# must set exception level bit.
 
 	PTR_L	k0, curprocpaddr
 	RESTORE_REG(a3, CPL, k0, 0)
@@ -350,37 +331,6 @@ NNON_LEAF(u_intr, FRAMESZ(CF_SZ), ra)
 	eret
 	.set	at
 END(u_intr)
-
-/*---------------------------------------------------------------- set_ipending
- *  Atomic ipending set
- */
-LEAF(set_ipending, 0)
-	LA	a1, ipending
-1:
-	ll	v0, 0(a1)
-	or	v1, v0, a0
-	sc	v1, 0(a1)
-	beqz	v1, 1b
-	nop
-	j	ra
-	nop
-END(set_ipending)
-
-/*---------------------------------------------------------------- set_ipending
- *  Atomic ipending clear
- */
-LEAF(clr_ipending, 0)
-	LA	a1, ipending
-	not	a0, a0
-1:
-	ll	v0, 0(a1)
-	and	v1, v0, a0
-	sc	v1, 0(a1)
-	beqz	v1, 1b
-	nop
-	j	ra
-	nop
-END(clr_ipending)
 
 /*---------------------------------------------------------------- k_general
  *	Handle a kernel general trap. This is very much like
@@ -414,12 +364,12 @@ NNON_LEAF(k_general, FRAMESZ(KERN_EXC_FRAME_SIZE), ra)
 	and	t0, t0, t1
 	mtc0	t0, COP_0_STATUS_REG
 
-	move	a0, v0
 	.set	noat
 #if 0
 	RESTORE_REG(t0, IC, sp, CF_RA_OFFS)
 	ctc0	t0, COP_0_ICR
 #endif
+	RESTORE_REG(a0, PC, sp, CF_RA_OFFS)
 	RESTORE_CPU(sp, CF_RA_OFFS)
 	PTR_ADDU sp, sp, FRAMESZ(KERN_EXC_FRAME_SIZE)
 	sync
@@ -471,6 +421,20 @@ NNON_LEAF(u_general, FRAMESZ(CF_SZ), ra)
 	jal	trap
 	PTR_S	a3, CF_RA_OFFS(sp)		# for debugging
 
+	lw	v0, astpending
+	beq	v0, zero, 4f
+	nop
+
+	PTR_L	t0, curprocpaddr
+	SAVE_CPU_SREG(t0, 0)
+
+	jal	softintr
+	nop
+
+	PTR_L	t0, curprocpaddr
+	RESTORE_CPU_SREG(t0, 0)
+
+4:
 #ifdef PERFCNTRS
 	lw	t0, cpu_is_rm7k
 	beqz	t0, 1f			# not an RM7K. Don't do perf setup.
@@ -491,8 +455,6 @@ NNON_LEAF(u_general, FRAMESZ(CF_SZ), ra)
 	nop;nop;nop;nop
 1:
 #endif
-
-4:
 	mfc0	t0, COP_0_STATUS_REG	# dis int preserve settings.
 	li	t1, ~SR_INT_ENAB
 	and	t0, t0, t1
@@ -500,7 +462,7 @@ NNON_LEAF(u_general, FRAMESZ(CF_SZ), ra)
 	ITLBNOPFIX
 
 	ori	t0, SR_EXL		# restoring to user mode.
-	mtc0	t0, COP_0_STATUS_REG	# must set exeption level bit.
+	mtc0	t0, COP_0_STATUS_REG	# must set exception level bit.
 	ITLBNOPFIX
 
 	PTR_L	k0, curprocpaddr
@@ -591,7 +553,7 @@ NNON_LEAF(u_syscall, FRAMESZ(CF_SZ), ra)
 	ITLBNOPFIX
 
 	ori	t0, SR_EXL
-	mtc0	t0, COP_0_STATUS_REG	# set exeption level
+	mtc0	t0, COP_0_STATUS_REG	# set exception level
 	ITLBNOPFIX
 
 #if 0
@@ -620,7 +582,7 @@ NNON_LEAF(u_syscall, FRAMESZ(CF_SZ), ra)
 	.set	noat
 
 	REG_L	a0, UADDR+PCB_REGS+(SR * REGSZ)
-	mtc0	a0, COP_0_STATUS_REG	# still exeption level
+	mtc0	a0, COP_0_STATUS_REG	# still exception level
 	REG_L	a0, UADDR+PCB_REGS+(PC * REGSZ)
 	REG_L	v0, UADDR+PCB_REGS+(V0 * REGSZ)
 	dmtc0	a0, COP_0_EXC_PC		# set return address
@@ -679,7 +641,7 @@ LEAF(proc_trampoline, 0)
 	ITLBNOPFIX
 
 	ori	t0, SR_EXL		# restoring to user mode.
-	mtc0	t0, COP_0_STATUS_REG	# must set exeption level bit.
+	mtc0	t0, COP_0_STATUS_REG	# must set exception level bit.
 	ITLBNOPFIX
 
 	.set	noat

@@ -1,4 +1,4 @@
-/*	$OpenBSD: vmparam.h,v 1.10 2005/08/07 07:29:44 miod Exp $	*/
+/*	$OpenBSD: vmparam.h,v 1.13 2007/05/03 19:34:00 miod Exp $	*/
 /*	$NetBSD: vmparam.h,v 1.5 1994/10/26 21:10:10 cgd Exp $	*/
 
 /*
@@ -92,26 +92,15 @@
 #define VM_PHYSSEG_STRAT VM_PSTRAT_BSEARCH
 #define VM_PHYSSEG_NOADD
 
-
 /* user/kernel map constants */
-#ifdef __LP64__
 #define VM_MIN_ADDRESS		((vaddr_t)0x0000000000000000L)
 #define VM_MAXUSER_ADDRESS	((vaddr_t)0x0000000080000000L)
 #define VM_MAX_ADDRESS		((vaddr_t)0x0000000080000000L)
 #define VM_MIN_KERNEL_ADDRESS	((vaddr_t)0xffffffffc0000000L)
-#else
-#define VM_MIN_ADDRESS		((vaddr_t)0x00000000)
-#define VM_MAXUSER_ADDRESS	((vaddr_t)0x80000000)
-#define VM_MAX_ADDRESS		((vaddr_t)0x80000000)
-#define VM_MIN_KERNEL_ADDRESS	((vaddr_t)0xc0000000)
-#endif
+#define	VM_MAX_KERNEL_ADDRESS	((vaddr_t)0xfffffffffffff000L)
 
 #define	VM_NFREELIST		1
 #define	VM_FREELIST_DEFAULT	0
-
-/* Kernel page table size is variable. */
-extern vaddr_t virtual_end;
-#define VM_MAX_KERNEL_ADDRESS	virtual_end
 
 /* virtual sizes (bytes) for various kernel submaps */
 #define VM_PHYS_SIZE		(USRIOSIZE*PAGE_SIZE)
@@ -126,20 +115,18 @@ typedef struct pv_entry {
 	struct pv_entry	*pv_next;	/* next pv_entry */
 	struct pmap	*pv_pmap;	/* pmap where mapping lies */
 	vaddr_t		pv_va;		/* virtual address for mapping */
-	int		pv_flags;	/* Some flags for the mapping */
 } *pv_entry_t;
 
 #define __HAVE_VM_PAGE_MD
 struct vm_page_md {
-	struct pv_entry pvent;		/* pv list of this seg */
+	struct pv_entry pv_ent;		/* pv list of this seg */
 };
 
 #define	VM_MDPAGE_INIT(pg) \
 	do { \
-		(pg)->mdpage.pvent.pv_next = NULL; \
-		(pg)->mdpage.pvent.pv_pmap = NULL; \
-		(pg)->mdpage.pvent.pv_va = 0; \
-		(pg)->mdpage.pvent.pv_flags = 0; \
+		(pg)->mdpage.pv_ent.pv_next = NULL; \
+		(pg)->mdpage.pv_ent.pv_pmap = NULL; \
+		(pg)->mdpage.pv_ent.pv_va = 0; \
 	} while (0)
 
 #endif	/* _KERNEL && !_LOCORE */

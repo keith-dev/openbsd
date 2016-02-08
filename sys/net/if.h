@@ -1,4 +1,4 @@
-/*	$OpenBSD: if.h,v 1.86 2007/02/09 09:16:59 jmc Exp $	*/
+/*	$OpenBSD: if.h,v 1.91 2007/06/25 16:37:58 henning Exp $	*/
 /*	$NetBSD: if.h,v 1.23 1996/05/07 02:40:27 thorpej Exp $	*/
 
 /*
@@ -65,7 +65,7 @@
  * packet input routine.
  *
  * Routines exist for locating interfaces by their addresses
- * or for locating a interface on a certain network, as well as more general
+ * or for locating an interface on a certain network, as well as more general
  * routing and gateway routines maintaining information used to locate
  * interfaces.  These routines live in the files if.c and route.c
  */
@@ -200,6 +200,7 @@ struct ifnet {				/* and the entries */
 	u_int32_t if_hardmtu;		/* maximum MTU device supports */
 	int	if_capabilities;	/* interface capabilities */
 	char	if_description[IFDESCRSIZE]; /* interface description */
+	u_short	if_rtlabelid;		/* next route label */
 
 	/* procedure handles */
 					/* output routine (enqueue) */
@@ -290,41 +291,45 @@ struct ifnet {				/* and the entries */
  */
 #define	IF_QFULL(ifq)		((ifq)->ifq_len >= (ifq)->ifq_maxlen)
 #define	IF_DROP(ifq)		((ifq)->ifq_drops++)
-#define	IF_ENQUEUE(ifq, m) { \
-	(m)->m_nextpkt = 0; \
-	if ((ifq)->ifq_tail == 0) \
-		(ifq)->ifq_head = m; \
-	else \
-		(ifq)->ifq_tail->m_nextpkt = m; \
-	(ifq)->ifq_tail = m; \
-	(ifq)->ifq_len++; \
-}
-#define	IF_PREPEND(ifq, m) { \
-	(m)->m_nextpkt = (ifq)->ifq_head; \
-	if ((ifq)->ifq_tail == 0) \
-		(ifq)->ifq_tail = (m); \
-	(ifq)->ifq_head = (m); \
-	(ifq)->ifq_len++; \
-}
-#define	IF_DEQUEUE(ifq, m) { \
-	(m) = (ifq)->ifq_head; \
-	if (m) { \
-		if (((ifq)->ifq_head = (m)->m_nextpkt) == 0) \
-			(ifq)->ifq_tail = 0; \
-		(m)->m_nextpkt = 0; \
-		(ifq)->ifq_len--; \
-	} \
-}
+#define	IF_ENQUEUE(ifq, m)						\
+do {									\
+	(m)->m_nextpkt = 0;						\
+	if ((ifq)->ifq_tail == 0)					\
+		(ifq)->ifq_head = m;					\
+	else								\
+		(ifq)->ifq_tail->m_nextpkt = m;				\
+	(ifq)->ifq_tail = m;						\
+	(ifq)->ifq_len++;						\
+} while (0)
+#define	IF_PREPEND(ifq, m)						\
+do {									\
+	(m)->m_nextpkt = (ifq)->ifq_head;				\
+	if ((ifq)->ifq_tail == 0)					\
+		(ifq)->ifq_tail = (m);					\
+	(ifq)->ifq_head = (m);						\
+	(ifq)->ifq_len++;						\
+} while (0)
+#define	IF_DEQUEUE(ifq, m)						\
+do {									\
+	(m) = (ifq)->ifq_head;						\
+	if (m) {							\
+		if (((ifq)->ifq_head = (m)->m_nextpkt) == 0)		\
+			(ifq)->ifq_tail = 0;				\
+		(m)->m_nextpkt = 0;					\
+		(ifq)->ifq_len--;					\
+	}								\
+} while (0)
 
-#define	IF_INPUT_ENQUEUE(ifq, m) {			\
-	if (IF_QFULL(ifq)) {				\
-		IF_DROP(ifq);				\
-		m_freem(m);				\
-		if (!(ifq)->ifq_congestion)		\
-			if_congestion(ifq);		\
-	} else						\
-		IF_ENQUEUE(ifq, m);			\
-}
+#define	IF_INPUT_ENQUEUE(ifq, m)					\
+do {									\
+	if (IF_QFULL(ifq)) {						\
+		IF_DROP(ifq);						\
+		m_freem(m);						\
+		if (!(ifq)->ifq_congestion)				\
+			if_congestion(ifq);				\
+	} else								\
+		IF_ENQUEUE(ifq, m);					\
+} while (0)
 
 #define	IF_POLL(ifq, m)		((m) = (ifq)->ifq_head)
 #define	IF_PURGE(ifq)							\
@@ -341,7 +346,7 @@ do {									\
 } while (0)
 #define	IF_IS_EMPTY(ifq)	((ifq)->ifq_len == 0)
 
-#define	IFQ_MAXLEN	50
+#define	IFQ_MAXLEN	256
 #define	IFNET_SLOWHZ	1		/* granularity is 1 second */
 
 /* symbolic names for terminal (per-protocol) CTL_IFQ_ nodes */
@@ -674,6 +679,7 @@ do {									\
 #define	IFQ_INC_DROPS(ifq)		((ifq)->ifq_drops++)
 #define	IFQ_SET_MAXLEN(ifq, len)	((ifq)->ifq_maxlen = (len))
 
+extern int ifqmaxlen;
 extern struct ifnet_head ifnet;
 extern struct ifnet **ifindex2ifnet;
 extern struct ifnet *lo0ifp;

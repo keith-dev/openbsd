@@ -57,7 +57,7 @@ Version 5.2.13
     * editing: completion after "cmd " now completes files (was command).
 
 
-$OpenBSD: NEWS,v 1.13 2003/10/22 07:40:38 jmc Exp $
+$OpenBSD: NEWS,v 1.15 2007/08/02 11:05:54 fgsch Exp $
 
 Version 5.2.12
 

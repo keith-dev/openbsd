@@ -1,4 +1,4 @@
-/*	$OpenBSD: bios.c,v 1.10 2006/08/22 19:40:19 tom Exp $	*/
+/*	$OpenBSD: bios.c,v 1.12 2007/08/06 16:12:25 gwk Exp $	*/
 /*
  * Copyright (c) 2006 Gordon Willem Klok <gklok@cogeco.ca>
  *
@@ -77,6 +77,9 @@ void
 bios_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct bios_softc *sc = (struct bios_softc *)self;
+	struct smbios_struct_bios *sb;
+	struct smbtable bios;
+	char scratch[64];
 	vaddr_t va;
 	paddr_t pa, end;
 	u_int8_t *p;
@@ -121,6 +124,22 @@ bios_attach(struct device *parent, struct device *self, void *aux)
 
 		printf(": SMBIOS rev. %d.%d @ 0x%lx (%d entries)",
 		    hdr->majrev, hdr->minrev, hdr->addr, hdr->count);
+
+		bios.cookie = 0;
+		if (smbios_find_table(SMBIOS_TYPE_BIOS, &bios)) {
+			sb = bios.tblhdr;
+			printf("\n%s:", sc->sc_dev.dv_xname);
+			if ((smbios_get_string(&bios, sb->vendor,
+			    scratch, sizeof(scratch))) != NULL)
+				printf(" vendor %s", scratch);
+			if ((smbios_get_string(&bios, sb->version,
+			    scratch, sizeof(scratch))) != NULL)
+				printf(" version \"%s\"", scratch);
+			if ((smbios_get_string(&bios, sb->release,
+			    scratch, sizeof(scratch))) != NULL)
+				printf(" date %s", scratch);
+		}
+
 		smbios_info(sc->sc_dev.dv_xname);
 		break;
 	}
@@ -131,9 +150,9 @@ bios_attach(struct device *parent, struct device *self, void *aux)
  * smbios_find_table() takes a caller supplied smbios struct type and
  * a pointer to a handle (struct smbtable) returning one if the structure
  * is sucessfully located and zero otherwise. Callers should take care
- * to initilize the cookie field of the smbtable structure to zero before
+ * to initialize the cookie field of the smbtable structure to zero before
  * the first invocation of this function.
- * Multiple tables of the same type can be located by repeadtly calling
+ * Multiple tables of the same type can be located by repeatedly calling
  * smbios_find_table with the same arguments.
  */
 int
@@ -269,7 +288,7 @@ smbios_info(char * str)
 	 * some have very uninformative data which is harder to work around
 	 * and we must rely upon various heuristics to detect this. In both
 	 * cases we attempt to fall back on the base board information in the
-	 * perhaps naieve belief that motherboard vendors will supply this
+	 * perhaps naive belief that motherboard vendors will supply this
 	 * information.
 	 */
 	sminfop = NULL;
@@ -332,7 +351,7 @@ smbios_info(char * str)
 	    smbios_entry.min >= 1)) {
 		/*
 		 * If the uuid value is all 0xff the uuid is present but not
-		 * set, if its all 0 then the uuid isnt present at all.
+		 * set, if its all 0 then the uuid isn't present at all.
 		 */
 		uuidf |= SMBIOS_UUID_NPRESENT|SMBIOS_UUID_NSET;
 		for (i = 0; i < sizeof(sys->uuid); i++) {

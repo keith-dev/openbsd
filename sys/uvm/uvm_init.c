@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_init.c,v 1.13 2006/07/13 22:51:26 deraadt Exp $	*/
+/*	$OpenBSD: uvm_init.c,v 1.16 2007/06/18 21:51:15 pedro Exp $	*/
 /*	$NetBSD: uvm_init.c,v 1.14 2000/06/27 17:29:23 mrg Exp $	*/
 
 /*
@@ -134,11 +134,10 @@ uvm_init()
 	uvm_pager_init();
 
 	/*
-	 * step 8: init anonymous memory systems (both amap and anons)
+	 * step 8: init anonymous memory system
 	 */
 
 	amap_init();		/* init amap module */
-	uvm_anon_init();	/* allocate initial anons */
 
 	/*
 	 * the VM system is now up!  now that malloc is up we can resize the
@@ -153,8 +152,24 @@ uvm_init()
 	uvm_km_page_init();
 
 	/*
-	 * done!
+	 * reserve some unmapped space for malloc/pool use after free usage
 	 */
-
-	return;
+#ifdef DEADBEEF0
+	kvm_start = trunc_page(DEADBEEF0) - PAGE_SIZE;
+	if (uvm_map(kernel_map, &kvm_start, 3 * PAGE_SIZE,
+	    NULL, UVM_UNKNOWN_OFFSET, 0, UVM_MAPFLAG(UVM_PROT_NONE,
+	    UVM_PROT_NONE, UVM_INH_NONE, UVM_ADV_RANDOM, UVM_FLAG_FIXED)))
+		panic("uvm_init: cannot reserve dead beef @0x%x\n", DEADBEEF0);
+#endif
+#ifdef DEADBEEF1
+	kvm_start = trunc_page(DEADBEEF1) - PAGE_SIZE;
+	if (uvm_map(kernel_map, &kvm_start, 3 * PAGE_SIZE,
+	    NULL, UVM_UNKNOWN_OFFSET, 0, UVM_MAPFLAG(UVM_PROT_NONE,
+	    UVM_PROT_NONE, UVM_INH_NONE, UVM_ADV_RANDOM, UVM_FLAG_FIXED)))
+		panic("uvm_init: cannot reserve dead beef @0x%x\n", DEADBEEF1);
+#endif
+	/*
+	 * init anonymous memory systems
+	 */
+	uvm_anon_init();
 }

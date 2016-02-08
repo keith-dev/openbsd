@@ -1,4 +1,4 @@
-.\" $OpenBSD: re.4,v 1.27 2007/01/14 07:08:56 weingart Exp $
+.\" $OpenBSD: re.4,v 1.33 2007/06/08 22:01:27 mbalmer Exp $
 .\" Copyright (c) 2003
 .\"	Bill Paul <wpaul@windriver.com>. All rights reserved.
 .\"
@@ -31,7 +31,7 @@
 .\"
 .\" $FreeBSD: /repoman/r/ncvs/src/share/man/man4/re.4,v 1.4 2004/03/04 06:42:46 sanpei Exp $
 .\"
-.Dd September 4, 2003
+.Dd $Mdocdate: June 8 2007 $
 .Dt RE 4
 .Os
 .Sh NAME
@@ -62,6 +62,8 @@ Corega CG-LAPCIGT (8169S)
 .It
 D-Link DGE-528T (8169S)
 .It
+D-Link DGE-660TD (8169/8110SB)
+.It
 Gigabyte 7N400 Pro2 Integrated Gigabit Ethernet (8110S)
 .It
 LevelOne GNC-0105T (8169S)
@@ -88,9 +90,11 @@ over CAT5 cable.
 NICs based on the 8169, 816xS and 811xS are capable of 10, 100 and
 1000Mbps operation.
 .Pp
-All NICs supported by the
+All
 .Nm
-driver have IPv4 transmit/receive IP/TCP/UDP checksum offload
+NICs support
+IPv4 transmit/receive IP/TCP/UDP checksum offload
+and VLAN tag insertion,
 and use a descriptor-based DMA mechanism.
 .Pp
 The 8139C+ is a single-chip solution combining both a 10/100 MAC and PHY.
@@ -207,5 +211,5 @@ however it is possible to detect it.
 The user should ensure the NIC is installed in a 32-bit PCI slot to avoid
 this problem.
 .Pp
-The RealTek 8169, 8169S and 8110S chips appear to only be capable of
-transmitting Jumbo frames up to 7.5K in size.
+The RealTek 8169, 8169S and 8110S chips are only capable of transmitting
+Jumbo frames up to 7440 bytes in size.

@@ -1,4 +1,4 @@
-/*	$OpenBSD: udcf.c,v 1.29 2007/01/02 22:40:22 mbalmer Exp $ */
+/*	$OpenBSD: udcf.c,v 1.38 2007/06/14 10:11:15 mbalmer Exp $ */
 
 /*
  * Copyright (c) 2006 Marc Balmer <mbalmer@openbsd.org>
@@ -63,7 +63,7 @@ static const char	*clockname[2] = {
 	"HBG" };
 
 struct udcf_softc {
-	USBBASEDEVICE		sc_dev;		/* base device */
+	struct device		sc_dev;		/* base device */
 	usbd_device_handle	sc_udev;	/* USB device */
 	usbd_interface_handle	sc_iface;	/* data interface */
 	u_char			sc_dying;	/* disconnecting */
@@ -98,11 +98,11 @@ struct udcf_softc {
 	time_t			sc_last;
 	int			sc_nrecv;	/* consecutive valid times */
 	struct timeval		sc_last_tv;	/* uptime of last valid time */
-	struct sensor		sc_sensor;
+	struct ksensor		sc_sensor;
 #ifdef UDCF_DEBUG
-	struct sensor		sc_skew;	/* recv vs local skew */
+	struct ksensor		sc_skew;	/* recv vs local skew */
 #endif
-	struct sensordev	sc_sensordev;
+	struct ksensordev	sc_sensordev;
 };
 
 /*
@@ -133,11 +133,27 @@ void	udcf_sl_probe(void *);
 void	udcf_it_probe(void *);
 void	udcf_ct_probe(void *);
 
-USB_DECLARE_DRIVER(udcf);
+int udcf_match(struct device *, void *, void *); 
+void udcf_attach(struct device *, struct device *, void *); 
+int udcf_detach(struct device *, int); 
+int udcf_activate(struct device *, enum devact); 
 
-USB_MATCH(udcf)
+struct cfdriver udcf_cd = { 
+	NULL, "udcf", DV_DULL 
+}; 
+
+const struct cfattach udcf_ca = { 
+	sizeof(struct udcf_softc), 
+	udcf_match, 
+	udcf_attach, 
+	udcf_detach, 
+	udcf_activate, 
+};
+
+int
+udcf_match(struct device *parent, void *match, void *aux)
 {
-	USB_MATCH_START(udcf, uaa);
+	struct usb_attach_arg		*uaa = aux;
 
 	if (uaa->iface != NULL)
 		return UMATCH_NONE;
@@ -147,9 +163,11 @@ USB_MATCH(udcf)
 	    UMATCH_VENDOR_PRODUCT : UMATCH_NONE;
 }
 
-USB_ATTACH(udcf)
+void
+udcf_attach(struct device *parent, struct device *self, void *aux)
 {
-	USB_ATTACH_START(udcf, sc, uaa);
+	struct udcf_softc		*sc = (struct udcf_softc *)self;
+	struct usb_attach_arg		*uaa = aux;
 	usbd_device_handle		 dev = uaa->device;
 	usbd_interface_handle		 iface;
 	struct timeval			 t;
@@ -162,19 +180,18 @@ USB_ATTACH(udcf)
 
 	if ((err = usbd_set_config_index(dev, 0, 1))) {
 		DPRINTF(("\n%s: failed to set configuration, err=%s\n",
-		    USBDEVNAME(sc->sc_dev), usbd_errstr(err)));
+		    sc->sc_dev.dv_xname, usbd_errstr(err)));
 		goto fishy;
 	}
 
 	if ((err = usbd_device2interface_handle(dev, 0, &iface))) {
 		DPRINTF(("\n%s: failed to get interface, err=%s\n",
-		    USBDEVNAME(sc->sc_dev), usbd_errstr(err)));
+		    sc->sc_dev.dv_xname, usbd_errstr(err)));
 		goto fishy;
 	}
 
 	devinfop = usbd_devinfo_alloc(dev, 0);
-	USB_ATTACH_SETUP;
-	printf("%s: %s\n", USBDEVNAME(sc->sc_dev), devinfop);
+	printf("\n%s: %s\n", sc->sc_dev.dv_xname, devinfop);
 	usbd_devinfo_free(devinfop);
 
 	id = usbd_get_interface_descriptor(iface);
@@ -195,7 +212,7 @@ USB_ATTACH(udcf)
 	sc->sc_last = 0L;
 	sc->sc_last_tv.tv_sec = 0L;
 
-	strlcpy(sc->sc_sensordev.xname, USBDEVNAME(sc->sc_dev),
+	strlcpy(sc->sc_sensordev.xname, sc->sc_dev.dv_xname,
 	    sizeof(sc->sc_sensordev.xname));
 
 	sc->sc_sensor.type = SENSOR_TIMEDELTA;
@@ -247,7 +264,7 @@ USB_ATTACH(udcf)
 	}
 
 	usbd_add_drv_event(USB_EVENT_DRIVER_ATTACH, sc->sc_udev,
-	    USBDEV(sc->sc_dev));
+	    &sc->sc_dev);
 
 	usb_init_task(&sc->sc_task, udcf_probe, sc);
 	usb_init_task(&sc->sc_bv_task, udcf_bv_probe, sc);
@@ -302,15 +319,15 @@ USB_ATTACH(udcf)
 	timeout_add(&sc->sc_sl_to, t_wait + t_sl);
 
 	DPRINTF(("synchronizing\n"));
-	USB_ATTACH_SUCCESS_RETURN;
+	return;
 
 fishy:
 	DPRINTF(("udcf_attach failed\n"));
 	sc->sc_dying = 1;
-	USB_ATTACH_ERROR_RETURN;
 }
 
-USB_DETACH(udcf)
+int
+udcf_detach(struct device *self, int flags)
 {
 	struct udcf_softc	*sc = (struct udcf_softc *)self;
 
@@ -333,7 +350,7 @@ USB_DETACH(udcf)
 	usb_rem_task(sc->sc_udev, &sc->sc_ct_task);
 
 	usbd_add_drv_event(USB_EVENT_DRIVER_DETACH, sc->sc_udev,
-	    USBDEV(sc->sc_dev));
+	    &sc->sc_dev);
 	return 0;
 }
 
@@ -687,7 +704,7 @@ udcf_ct_probe(void *xsc)
 }
 
 int
-udcf_activate(device_ptr_t self, enum devact act)
+udcf_activate(struct device *self, enum devact act)
 {
 	struct udcf_softc *sc = (struct udcf_softc *)self;
 

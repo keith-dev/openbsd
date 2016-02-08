@@ -1,4 +1,4 @@
-/*	$OpenBSD: cat.c,v 1.17 2005/04/05 01:18:53 jaredy Exp $	*/
+/*	$OpenBSD: cat.c,v 1.19 2007/07/17 07:10:22 jmc Exp $	*/
 /*	$NetBSD: cat.c,v 1.11 1995/09/07 06:12:54 jtc Exp $	*/
 
 /*
@@ -43,7 +43,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)cat.c	8.2 (Berkeley) 4/27/95";
 #else
-static char rcsid[] = "$OpenBSD: cat.c,v 1.17 2005/04/05 01:18:53 jaredy Exp $";
+static char rcsid[] = "$OpenBSD: cat.c,v 1.19 2007/07/17 07:10:22 jmc Exp $";
 #endif
 #endif /* not lint */
 
@@ -103,7 +103,7 @@ main(int argc, char *argv[])
 			break;
 		default:
 			(void)fprintf(stderr,
-			    "usage: %s [-benstuv] [-] [file ...]\n", __progname);
+			    "usage: %s [-benstuv] [file ...]\n", __progname);
 			exit(1);
 			/* NOTREACHED */
 		}
@@ -139,7 +139,9 @@ cook_args(char **argv)
 			filename = *argv++;
 		}
 		cook_buf(fp);
-		if (fp != stdin)
+		if (fp == stdin)
+			clearerr(fp);
+		else
 			(void)fclose(fp);
 	} while (*argv);
 }

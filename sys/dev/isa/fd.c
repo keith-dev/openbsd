@@ -1,4 +1,4 @@
-/*	$OpenBSD: fd.c,v 1.60 2007/02/15 00:53:26 krw Exp $	*/
+/*	$OpenBSD: fd.c,v 1.67 2007/06/20 18:15:46 deraadt Exp $	*/
 /*	$NetBSD: fd.c,v 1.90 1996/05/12 23:12:03 mycroft Exp $	*/
 
 /*-
@@ -102,7 +102,7 @@ struct fd_softc {
 	struct fd_type *sc_deftype;	/* default type descriptor */
 	struct fd_type *sc_type;	/* current type descriptor */
 
-	daddr_t	sc_blkno;	/* starting block number */
+	daddr64_t	sc_blkno;	/* starting block number */
 	int sc_bcount;		/* byte count left */
  	int sc_opts;			/* user-set options */
 	int sc_skip;		/* bytes already transferred */
@@ -151,7 +151,7 @@ void fd_motor_off(void *arg);
 void fd_motor_on(void *arg);
 void fdfinish(struct fd_softc *fd, struct buf *bp);
 int fdformat(dev_t, struct fd_formb *, struct proc *);
-__inline struct fd_type *fd_dev_to_type(struct fd_softc *, dev_t);
+static __inline struct fd_type *fd_dev_to_type(struct fd_softc *, dev_t);
 void fdretry(struct fd_softc *);
 void fdtimeout(void *);
 
@@ -327,7 +327,7 @@ fd_nvtotype(fdc, nvraminfo, drive)
 #endif
 }
 
-__inline struct fd_type *
+static __inline struct fd_type *
 fd_dev_to_type(fd, dev)
 	struct fd_softc *fd;
 	dev_t dev;
@@ -580,7 +580,7 @@ fdclose(dev, flags, mode, p)
 	return 0;
 }
 
-int
+daddr64_t
 fdsize(dev)
 	dev_t dev;
 {
@@ -592,7 +592,7 @@ fdsize(dev)
 int
 fddump(dev, blkno, va, size)
 	dev_t dev;
-	daddr_t blkno;
+	daddr64_t blkno;
 	caddr_t va;
 	size_t size;
 {
@@ -960,7 +960,6 @@ fdioctl(dev, cmd, addr, flag, p)
 {
 	struct fd_softc *fd = fd_cd.cd_devs[FDUNIT(dev)];
 	struct disklabel dl, *lp = &dl;
-	struct cpu_disklabel cdl;
 	char *errstring;
 	int error;
 
@@ -971,7 +970,6 @@ fdioctl(dev, cmd, addr, flag, p)
 		return (0);
 	case DIOCGDINFO:
 		bzero(lp, sizeof(*lp));
-		bzero(&cdl, sizeof(struct cpu_disklabel));
 
 		lp->d_secsize = FD_BSIZE(fd);
 		lp->d_secpercyl = fd->sc_type->seccyl;
@@ -982,20 +980,16 @@ fdioctl(dev, cmd, addr, flag, p)
 		strncpy(lp->d_typename, "floppy disk", sizeof lp->d_typename);
 		lp->d_type = DTYPE_FLOPPY;
 		strncpy(lp->d_packname, "fictitious", sizeof lp->d_packname);
-		lp->d_secperunit = fd->sc_type->size;
+		DL_SETDSIZE(lp, fd->sc_type->size);
 		lp->d_rpm = 300;
 		lp->d_interleave = 1;
-
-		lp->d_partitions[RAW_PART].p_offset = 0;
-		lp->d_partitions[RAW_PART].p_size = lp->d_secperunit;
-		lp->d_partitions[RAW_PART].p_fstype = FS_UNUSED;
-		lp->d_npartitions = RAW_PART + 1;
+		lp->d_version = 1;
 
 		lp->d_magic = DISKMAGIC;
 		lp->d_magic2 = DISKMAGIC;
 		lp->d_checksum = dkcksum(lp);
 
-		errstring = readdisklabel(dev, fdstrategy, lp, &cdl, 0);
+		errstring = readdisklabel(DISKLABELDEV(dev), fdstrategy, lp, 0);
 		if (errstring) {
 			/*printf("%s: %s\n", fd->sc_dev.dv_xname, errstring);*/
 		}
@@ -1013,11 +1007,11 @@ fdioctl(dev, cmd, addr, flag, p)
 		if ((flag & FWRITE) == 0)
 			return EBADF;
 
-		error = setdisklabel(lp, (struct disklabel *)addr, 0, NULL);
+		error = setdisklabel(lp, (struct disklabel *)addr, 0);
 		if (error)
 			return error;
 
-		error = writedisklabel(dev, fdstrategy, lp, NULL);
+		error = writedisklabel(DISKLABELDEV(dev), fdstrategy, lp);
 		return error;
 
         case FD_FORM:

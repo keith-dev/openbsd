@@ -1,4 +1,4 @@
-# $OpenBSD: Makefile,v 1.39 2007/02/04 18:26:16 espie Exp $
+# $OpenBSD: Makefile,v 1.46 2007/06/25 12:21:08 espie Exp $
 
 .include <bsd.own.mk>
 
@@ -25,21 +25,25 @@ PACKAGES= \
     OpenBSD/PackageLocator.pm \
     OpenBSD/PackageName.pm \
     OpenBSD/PackageRepository.pm \
+    OpenBSD/PackageRepository/Installed.pm \
     OpenBSD/PackageRepository/SCP.pm \
+    OpenBSD/PackageRepository/Source.pm \
     OpenBSD/PackageRepositoryList.pm \
     OpenBSD/PackingElement.pm \
     OpenBSD/PackingList.pm \
-    OpenBSD/PackingOld.pm \
+    OpenBSD/Paths.pm \
     OpenBSD/PkgCfl.pm \
     OpenBSD/PkgConfig.pm \
     OpenBSD/PkgSpec.pm \
     OpenBSD/ProgressMeter.pm \
     OpenBSD/Replace.pm \
     OpenBSD/RequiredBy.pm \
+    OpenBSD/Search.pm \
     OpenBSD/SharedItems.pm \
     OpenBSD/SharedLibs.pm \
     OpenBSD/Temp.pm \
     OpenBSD/Update.pm \
+    OpenBSD/UpdateSet.pm \
     OpenBSD/Ustar.pm \
     OpenBSD/Vstat.pm \
     OpenBSD/md5.pm \
@@ -67,6 +71,7 @@ PODS= \
     OpenBSD::PkgCfl \
     OpenBSD::PkgSpec \
     OpenBSD::RequiredBy \
+    OpenBSD::Search \
     OpenBSD::Ustar \
     OpenBSD::Vstat
 

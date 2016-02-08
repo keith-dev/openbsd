@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile.sgi,v 1.14 2006/09/23 20:16:28 deraadt Exp $
+#	$OpenBSD: Makefile.sgi,v 1.16 2007/07/30 16:23:33 thib Exp $
 
 # Makefile for OpenBSD
 #
@@ -45,7 +45,7 @@ S!=	cd ../../../..; pwd
 SGI=$S/arch/sgi
 MIPS64=	$S/arch/mips64
 
-INCLUDES=	-I. -I$S/arch -I$S -nostdinc
+INCLUDES=	-I. -I$S -I$S/arch -nostdinc
 CPPFLAGS=	${INCLUDES} ${IDENT} -D_KERNEL -D__sgi__
 CDIAGFLAGS=	-Werror -Wall -Wmissing-prototypes -Wstrict-prototypes \
 		-Wno-uninitialized -Wno-format -Wno-main \
@@ -99,7 +99,7 @@ SYSTEM_OBJ=	locore.o ${OBJS} param.o ioconf.o \
 #
 SYSTEM_DEP=	Makefile ${SYSTEM_OBJ}
 SYSTEM_LD_HEAD=	rm -f $@
-SYSTEM_LD=	-@if [ X${DEBUG} = X-g ]; \
+SYSTEM_LD=	@if [ X${DEBUG} = X-g ]; \
 		then strip=-X; \
 		else strip=-x; \
 		fi; \

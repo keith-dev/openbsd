@@ -1,4 +1,4 @@
-/*	$OpenBSD: fd.c,v 1.47 2007/02/15 00:53:26 krw Exp $	*/
+/*	$OpenBSD: fd.c,v 1.54 2007/06/20 18:15:47 deraadt Exp $	*/
 /*	$NetBSD: fd.c,v 1.51 1997/05/24 20:16:19 pk Exp $	*/
 
 /*-
@@ -208,7 +208,7 @@ struct fd_softc {
 	struct fd_type *sc_deftype;	/* default type descriptor */
 	struct fd_type *sc_type;	/* current type descriptor */
 
-	daddr_t	sc_blkno;	/* starting block number */
+	daddr64_t sc_blkno;	/* starting block number */
 	int sc_bcount;		/* byte count left */
 	int sc_skip;		/* bytes already transferred */
 	int sc_nblks;		/* number of blocks currently transferring */
@@ -1738,7 +1738,7 @@ fdcretry(fdc)
 	fdc->sc_errors++;
 }
 
-int
+daddr64_t
 fdsize(dev)
 	dev_t dev;
 {
@@ -1750,7 +1750,7 @@ fdsize(dev)
 int
 fddump(dev, blkno, va, size)
 	dev_t dev;
-	daddr_t blkno;
+	daddr64_t blkno;
 	caddr_t va;
 	size_t size;
 {
@@ -1786,14 +1786,12 @@ fdioctl(dev, cmd, addr, flag, p)
 			return (EBADF);
 
 		error = setdisklabel(fd->sc_dk.dk_label,
-				    (struct disklabel *)addr, 0,
-				    fd->sc_dk.dk_cpulabel);
+		    (struct disklabel *)addr, 0);
 		if (error)
 			return (error);
 
-		error = writedisklabel(dev, fdstrategy,
-				       fd->sc_dk.dk_label,
-				       fd->sc_dk.dk_cpulabel);
+		error = writedisklabel(DISKLABELDEV(dev), fdstrategy,
+		    fd->sc_dk.dk_label);
 		return (error);
 
 	case DIOCLOCK:
@@ -1952,11 +1950,9 @@ fdgetdisklabel(dev)
 	int unit = FDUNIT(dev);
 	struct fd_softc *fd = fd_cd.cd_devs[unit];
 	struct disklabel *lp = fd->sc_dk.dk_label;
-	struct cpu_disklabel *clp = fd->sc_dk.dk_cpulabel;
 	char *errstring;
 
 	bzero(lp, sizeof(struct disklabel));
-	bzero(clp, sizeof(struct cpu_disklabel));
 
 	lp->d_type = DTYPE_FLOPPY;
 	lp->d_secsize = FD_BSIZE(fd);
@@ -1964,17 +1960,13 @@ fdgetdisklabel(dev)
 	lp->d_nsectors = fd->sc_type->sectrac;
 	lp->d_ncylinders = fd->sc_type->tracks;
 	lp->d_ntracks = fd->sc_type->heads;	/* Go figure... */
-	lp->d_secperunit = fd->sc_type->size;
+	DL_SETDSIZE(lp, fd->sc_type->size);
 	lp->d_rpm = 300;	/* XXX like it matters... */
 
 	strncpy(lp->d_typename, "floppy disk", sizeof(lp->d_typename));
 	strncpy(lp->d_packname, "fictitious", sizeof(lp->d_packname));
 	lp->d_interleave = 1;
-
-	lp->d_partitions[RAW_PART].p_offset = 0;
-	lp->d_partitions[RAW_PART].p_size = lp->d_secpercyl * lp->d_ncylinders;
-	lp->d_partitions[RAW_PART].p_fstype = FS_UNUSED;
-	lp->d_npartitions = RAW_PART + 1;
+	lp->d_version = 1;
 
 	lp->d_magic = DISKMAGIC;
 	lp->d_magic2 = DISKMAGIC;
@@ -1983,7 +1975,7 @@ fdgetdisklabel(dev)
 	/*
 	 * Call the generic disklabel extraction routine.
 	 */
-	errstring = readdisklabel(dev, fdstrategy, lp, clp, 0);
+	errstring = readdisklabel(DISKLABELDEV(dev), fdstrategy, lp, 0);
 	if (errstring) {
 		/*printf("%s: %s\n", fd->sc_dv.dv_xname, errstring);*/
 	}

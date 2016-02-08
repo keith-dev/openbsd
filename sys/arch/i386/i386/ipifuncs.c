@@ -1,4 +1,4 @@
-/*	$OpenBSD: ipifuncs.c,v 1.6 2006/05/29 09:54:16 mickey Exp $	*/
+/*	$OpenBSD: ipifuncs.c,v 1.8 2007/05/25 15:55:26 art Exp $	*/
 /* $NetBSD: ipifuncs.c,v 1.1.2.3 2000/06/26 02:04:06 sommerfeld Exp $ */
 
 /*-
@@ -77,7 +77,7 @@ void (*ipifunc[I386_NIPI])(struct cpu_info *) =
 	i386_ipi_microset,
 	i386_ipi_flush_fpu,
 	i386_ipi_synch_fpu,
-	pmap_do_tlb_shootdown,
+	NULL,
 #if 0
 	i386_reload_mtrr,
 	gdt_reload_cpu,
@@ -90,6 +90,7 @@ void (*ipifunc[I386_NIPI])(struct cpu_info *) =
 #else
 	0,
 #endif
+	i386_setperf_ipi,
 };
 
 void
@@ -143,6 +144,15 @@ i386_send_ipi(struct cpu_info *ci, int ipimask)
 	return ret;
 }
 
+int
+i386_fast_ipi(struct cpu_info *ci, int ipi)
+{
+	if (!(ci->ci_flags & CPUF_RUNNING))
+		return (ENOENT);
+
+	return (i386_ipi(ipi, ci->ci_cpuid, LAPIC_DLMODE_FIXED));
+}
+
 void
 i386_self_ipi(int vector)
 {
@@ -169,7 +179,7 @@ i386_broadcast_ipi(int ipimask)
 	if (!count)
 		return;
 
-	i386_ipi(LAPIC_IPI_VECTOR, LAPIC_DEST_ALLEXCL, LAPIC_DLMODE_FIXED);   
+	i386_ipi(LAPIC_IPI_VECTOR, LAPIC_DEST_ALLEXCL, LAPIC_DLMODE_FIXED); 
 }
 
 void

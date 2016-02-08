@@ -1,4 +1,4 @@
-/*	$OpenBSD: rcsutil.c,v 1.29 2007/02/27 07:59:13 xsa Exp $	*/
+/*	$OpenBSD: rcsutil.c,v 1.31 2007/07/19 06:37:58 ray Exp $	*/
 /*
  * Copyright (c) 2005, 2006 Joris Vink <joris@openbsd.org>
  * Copyright (c) 2006 Xavier Santolaria <xsa@openbsd.org>
@@ -595,19 +595,17 @@ rcs_strsplit(const char *str, const char *sep)
 {
 	struct rcs_argvector *av;
 	size_t i = 0;
-	char **nargv;
 	char *cp, *p;
 
 	cp = xstrdup(str);
 	av = xmalloc(sizeof(*av));
 	av->str = cp;
-	av->argv = xcalloc(i + 1, sizeof(*(av->argv)));
+	av->argv = xmalloc(sizeof(*(av->argv)));
 
 	while ((p = strsep(&cp, sep)) != NULL) {
 		av->argv[i++] = p;
-		nargv = xrealloc(av->argv,
+		av->argv = xrealloc(av->argv,
 		    i + 1, sizeof(*(av->argv)));
-		av->argv = nargv;
 	}
 	av->argv[i] = NULL;
 

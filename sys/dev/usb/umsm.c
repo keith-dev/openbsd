@@ -1,4 +1,4 @@
-/*	$OpenBSD: umsm.c,v 1.6 2007/01/30 01:22:53 jsg Exp $	*/
+/*	$OpenBSD: umsm.c,v 1.16 2007/06/19 23:59:27 jcs Exp $	*/
 
 /*
  * Copyright (c) 2006 Jonathan Gray <jsg@openbsd.org>
@@ -16,7 +16,7 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-/* Driver for Qualcomm MSM EVDO devices */
+/* Driver for Qualcomm MSM EVDO and UMTS communication devices */
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -36,11 +36,11 @@
 #define UMSM_IFACE_NO	0
 
 struct umsm_softc {
-	USBBASEDEVICE		sc_dev;
-	usbd_device_handle	sc_udev;
-	usbd_interface_handle	sc_iface;
-	device_ptr_t		sc_subdev;
-	u_char			sc_dying;
+	struct device		 sc_dev;
+	usbd_device_handle	 sc_udev;
+	usbd_interface_handle	 sc_iface;
+	struct device		*sc_subdev;
+	u_char			 sc_dying;
 };
 
 struct ucom_methods umsm_methods = {
@@ -63,6 +63,8 @@ static const struct usb_devno umsm_devs[] = {
 	{ USB_VENDOR_NOVATEL,	USB_PRODUCT_NOVATEL_S720 },
 	{ USB_VENDOR_NOVATEL,	USB_PRODUCT_NOVATEL_U720 },
 	{ USB_VENDOR_NOVATEL,	USB_PRODUCT_NOVATEL_XU870 },
+	{ USB_VENDOR_NOVATEL,	USB_PRODUCT_NOVATEL_ES620 },
+	{ USB_VENDOR_QUALCOMM,	USB_PRODUCT_QUALCOMM_MSM_HSDPA },
 	{ USB_VENDOR_SIERRA,	USB_PRODUCT_SIERRA_EM5625 },
 	{ USB_VENDOR_SIERRA,	USB_PRODUCT_SIERRA_AIRCARD_580 },
 	{ USB_VENDOR_SIERRA,	USB_PRODUCT_SIERRA_AIRCARD_595 },
@@ -75,11 +77,27 @@ static const struct usb_devno umsm_devs[] = {
 	{ USB_VENDOR_SIERRA,	USB_PRODUCT_SIERRA_MC8775 },
 };
 
-USB_DECLARE_DRIVER(umsm);
+int umsm_match(struct device *, void *, void *); 
+void umsm_attach(struct device *, struct device *, void *); 
+int umsm_detach(struct device *, int); 
+int umsm_activate(struct device *, enum devact); 
 
-USB_MATCH(umsm)
+struct cfdriver umsm_cd = { 
+	NULL, "umsm", DV_DULL 
+}; 
+
+const struct cfattach umsm_ca = { 
+	sizeof(struct umsm_softc), 
+	umsm_match, 
+	umsm_attach, 
+	umsm_detach, 
+	umsm_activate, 
+};
+
+int
+umsm_match(struct device *parent, void *match, void *aux)
 {
-	USB_MATCH_START(umsm, uaa);
+	struct usb_attach_arg *uaa = aux;
 
 	if (uaa->iface != NULL)
 		return UMATCH_NONE;
@@ -88,9 +106,11 @@ USB_MATCH(umsm)
 	    UMATCH_VENDOR_PRODUCT : UMATCH_NONE;
 }
 
-USB_ATTACH(umsm)
+void
+umsm_attach(struct device *parent, struct device *self, void *aux)
 {
-	USB_ATTACH_START(umsm, sc, uaa);
+	struct umsm_softc *sc = (struct umsm_softc *)self;
+	struct usb_attach_arg *uaa = aux;
 	struct ucom_attach_args uca;
 	usb_interface_descriptor_t *id;
 	usb_endpoint_descriptor_t *ed;
@@ -101,15 +121,14 @@ USB_ATTACH(umsm)
 	bzero(&uca, sizeof(uca));
 	sc->sc_udev = uaa->device;
 	devinfop = usbd_devinfo_alloc(uaa->device, 0);
-	USB_ATTACH_SETUP;
-	printf("%s: %s\n", USBDEVNAME(sc->sc_dev), devinfop);
+	printf("\n%s: %s\n", sc->sc_dev.dv_xname, devinfop);
 	usbd_devinfo_free(devinfop);
 
 	if (usbd_set_config_index(sc->sc_udev, UMSM_CONFIG_NO, 1) != 0) {
 		printf("%s: could not set configuration no\n",
-		    USBDEVNAME(sc->sc_dev));
+		    sc->sc_dev.dv_xname);
 		sc->sc_dying = 1;
-		USB_ATTACH_ERROR_RETURN;
+		return;
 	}
 
 	/* get the first interface handle */
@@ -117,9 +136,9 @@ USB_ATTACH(umsm)
 	    &sc->sc_iface);
 	if (error != 0) {
 		printf("%s: could not get interface handle\n",
-		    USBDEVNAME(sc->sc_dev));
+		    sc->sc_dev.dv_xname);
 		sc->sc_dying = 1;
-		USB_ATTACH_ERROR_RETURN;
+		return;
 	}
 
 	id = usbd_get_interface_descriptor(sc->sc_iface);
@@ -129,9 +148,9 @@ USB_ATTACH(umsm)
 		ed = usbd_interface2endpoint_descriptor(sc->sc_iface, i);
 		if (ed == NULL) {
 			printf("%s: no endpoint descriptor found for %d\n",
-			    USBDEVNAME(sc->sc_dev), i);
+			    sc->sc_dev.dv_xname, i);
 			sc->sc_dying = 1;
-			USB_ATTACH_ERROR_RETURN;
+			return;
 		}
 
 		if (UE_GET_DIR(ed->bEndpointAddress) == UE_DIR_IN &&
@@ -142,9 +161,9 @@ USB_ATTACH(umsm)
 			uca.bulkout = ed->bEndpointAddress;
 	}
 	if (uca.bulkin == -1 || uca.bulkout == -1) {
-		printf("%s: missing endpoint\n", USBDEVNAME(sc->sc_dev));
+		printf("%s: missing endpoint\n", sc->sc_dev.dv_xname);
 		sc->sc_dying = 1;
-		USB_ATTACH_ERROR_RETURN;
+		return;
 	}
 
 	/* We need to force size as some devices lie */
@@ -159,16 +178,15 @@ USB_ATTACH(umsm)
 	uca.info = NULL;
 
 	usbd_add_drv_event(USB_EVENT_DRIVER_ATTACH, sc->sc_udev,
-	    USBDEV(sc->sc_dev));
+	    &sc->sc_dev);
 	
 	sc->sc_subdev = config_found_sm(self, &uca, ucomprint, ucomsubmatch);
-
-	USB_ATTACH_SUCCESS_RETURN;
 }
 
-USB_DETACH(umsm)
+int
+umsm_detach(struct device *self, int flags)
 {
-	USB_DETACH_START(umsm, sc);
+	struct umsm_softc *sc = (struct umsm_softc *)self;
 	int rv = 0;
 
 	sc->sc_dying = 1;
@@ -178,13 +196,13 @@ USB_DETACH(umsm)
 	}
 
 	usbd_add_drv_event(USB_EVENT_DRIVER_DETACH, sc->sc_udev,
-			   USBDEV(sc->sc_dev));
+			   &sc->sc_dev);
 
 	return (rv);
 }
 
 int
-umsm_activate(device_ptr_t self, enum devact act)
+umsm_activate(struct device *self, enum devact act)
 {
 	struct umsm_softc *sc = (struct umsm_softc *)self;
 	int rv = 0;

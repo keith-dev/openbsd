@@ -1,4 +1,4 @@
-/*	$OpenBSD: rtl81x9reg.h,v 1.36 2006/12/12 10:24:38 reyk Exp $	*/
+/*	$OpenBSD: rtl81x9reg.h,v 1.41 2007/08/07 12:19:19 jsg Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998
@@ -152,11 +152,12 @@
 #define RL_HWREV_8110S		0x00800000
 #define RL_HWREV_8169S		0x04000000
 #define RL_HWREV_8169_8110SB	0x10000000
-#define RL_HWREV_8169_8110SC	0x18000000
+#define RL_HWREV_8169_8110SCd	0x18000000
 #define RL_HWREV_8168_SPIN1	0x30000000
 #define RL_HWREV_8100E_SPIN1	0x30800000
 #define RL_HWREV_8101E		0x34000000
 #define RL_HWREV_8168_SPIN2	0x38000000
+#define RL_HWREV_8168_SPIN3	0x38400000
 #define RL_HWREV_8100E_SPIN2	0x38800000
 #define RL_HWREV_8139		0x60000000
 #define RL_HWREV_8139A		0x70000000
@@ -168,6 +169,7 @@
 #define RL_HWREV_8139CPLUS	0x74800000
 #define RL_HWREV_8101		0x74c00000
 #define RL_HWREV_8100		0x78800000
+#define RL_HWREV_8169_8110SCe	0x98000000
 
 #define RL_TXDMA_16BYTES	0x00000000
 #define RL_TXDMA_32BYTES	0x00000100
@@ -309,6 +311,9 @@
 
 /* 9346/9356 EEPROM commands */
 
+#define RL_9346_ADDR_LEN	6	/* 93C46 1K: 128x16 */
+#define RL_9356_ADDR_LEN	8	/* 93C56 2K: 256x16 */
+ 
 #define RL_9346_WRITE		0x5
 #define RL_9346_READ		0x6
 #define RL_9346_ERASE		0x7
@@ -889,13 +894,12 @@ struct rl_softc {
 
 #define RL_PSTATE_MASK		0x0003
 #define RL_PSTATE_D0		0x0000
-#define RL_PSTATE_D1		0x0002
+#define RL_PSTATE_D1		0x0001
 #define RL_PSTATE_D2		0x0002
 #define RL_PSTATE_D3		0x0003
 #define RL_PME_EN		0x0010
 #define RL_PME_STATUS		0x8000
 
 extern int rl_attach(struct rl_softc *);
-extern int rl_detach(struct rl_softc *);
 extern int rl_intr(void *);
 extern void rl_setmulti(struct rl_softc *);

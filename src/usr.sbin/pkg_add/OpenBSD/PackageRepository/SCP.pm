@@ -1,7 +1,7 @@
 # ex:ts=8 sw=4:
-# $OpenBSD: SCP.pm,v 1.9 2006/05/26 17:12:09 steven Exp $
+# $OpenBSD: SCP.pm,v 1.16 2007/06/16 09:29:37 espie Exp $
 #
-# Copyright (c) 2003-2004 Marc Espie <espie@openbsd.org>
+# Copyright (c) 2003-2006 Marc Espie <espie@openbsd.org>
 #
 # Permission to use, copy, modify, and distribute this software for any
 # purpose with or without fee is hereby granted, provided that the above
@@ -23,6 +23,12 @@ our @ISA=qw(OpenBSD::PackageRepository::Distant);
 
 use IPC::Open2;
 use IO::Handle;
+use OpenBSD::Paths;
+
+sub urlscheme
+{
+	return 'scp';
+}
 
 our %distant = ();
 
@@ -34,7 +40,8 @@ sub initiate
 
 	my ($rdfh, $wrfh);
 
-	$self->{controller} = open2($rdfh, $wrfh, 'ssh', $self->{host}, 'perl', '-x');
+	$self->{controller} = open2($rdfh, $wrfh, OpenBSD::Paths->ssh, 
+	    $self->{host}, 'perl', '-x');
 	$self->{cmdfh} = $wrfh;
 	$self->{getfh} = $rdfh;
 	$wrfh->autoflush(1);
@@ -42,9 +49,9 @@ sub initiate
 
 	while(<DATA>) {
 		# compress script a bit
-		next if m/^\#/ && !m/^\#!/;
-		s/^\s*//;
-		next if m/^$/;
+		next if m/^\#/o && !m/^\#!/o;
+		s/^\s*//o;
+		next if m/^$/o;
 		print $wrfh $_;
 	}
 }
@@ -53,7 +60,7 @@ sub initiate
 sub may_exist
 {
 	my ($self, $name) = @_;
-	my $l = $self->list();
+	my $l = $self->list;
 	return grep {$_ eq $name } @$l;
 }
 
@@ -67,16 +74,16 @@ sub grab_object
 	print $cmdfh "ABORT\n";
 	local $_;
 	while (<$getfh>) {
-		last if m/^ABORTED/;
+		last if m/^ABORTED/o;
 	}
 	print $cmdfh "GET ", $self->{path}.$object->{name}.".tgz", "\n";
 	close($cmdfh);
 	$_ = <$getfh>;
 	chomp;
-	if (m/^ERROR:/) {
+	if (m/^ERROR:/o) {
 		die "transfer error: $_";
 	}
-	if (m/^TRANSFER:\s+(\d+)/) {
+	if (m/^TRANSFER:\s+(\d+)/o) {
 		my $buffsize = 10 * 1024;
 		my $buffer;
 		my $size = $1;
@@ -101,9 +108,12 @@ sub grab_object
 sub _new
 {
 	my ($class, $baseurl) = @_;
-	$baseurl =~ s/scp\:\/\///i;
-	$baseurl =~ m/\//;
-	bless {	host => $`, baseurl => $baseurl, key => $`, path => "/$'" }, $class;
+	if ($baseurl =~ m/^\/\/(.*?)(\/.*)$/o) {
+		bless {	host => $1, baseurl => $baseurl, 
+		    key => $1, path => $2 }, $class;
+	} else {
+		die "Invalid scp url: scp:$baseurl\n";
+	}
 }
 
 sub maxcount
@@ -126,7 +136,7 @@ sub list
 	my ($self) = @_;
 	if (!defined $self->{list}) {
 		if (!defined $self->{controller}) {
-			$self->initiate();
+			$self->initiate;
 		}
 		my $cmdfh = $self->{cmdfh};
 		my $getfh = $self->{getfh};
@@ -139,10 +149,10 @@ sub list
 			die "Could not initiate SSH session\n";
 		}
 		chomp;
-		if (m/^ERROR:/) {
+		if (m/^ERROR:/o) {
 			die $_;
 		}
-		if (!m/^SUCCESS:/) {
+		if (!m/^SUCCESS:/o) {
 			die "Synchronization error\n";
 		}
 		while (<$getfh>) {
@@ -209,8 +219,8 @@ sub abort_batch()
 local $_;
 while (<STDIN>) {
 	chomp;
-	if (m/^LIST\s+/) {
-		my $dname = $';
+	if (m/^LIST\s+(.*)$/o) {
+		my $dname = $1;
 		batch(sub {
 			my $d;
 			if (opendir($d, $dname)) {
@@ -227,8 +237,8 @@ while (<STDIN>) {
 			print "\n";
 			closedir($d);
 		});
-	} elsif (m/^GET\s+/) {
-		my $fname = $';
+	} elsif (m/^GET\s+(.*)$/o) {
+		my $fname = $1;
 		batch(sub {
 			if (open(my $fh, '<', $fname)) {
 				my $size = (stat $fh)[7];
@@ -242,9 +252,9 @@ while (<STDIN>) {
 				print "ERROR: bad file $fname $!\n";
 			}
 		});
-	} elsif (m/^BYE$/) {
+	} elsif (m/^BYE$/o) {
 		exit(0);
-	} elsif (m/^ABORT$/) {
+	} elsif (m/^ABORT$/o) {
 		abort_batch();
 	} else {
 		print "ERROR: Unknown command\n";

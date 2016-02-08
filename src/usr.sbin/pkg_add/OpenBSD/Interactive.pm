@@ -1,7 +1,7 @@
 # ex:ts=8 sw=4:
-# $OpenBSD: Interactive.pm,v 1.6 2007/02/04 12:18:39 espie Exp $
+# $OpenBSD: Interactive.pm,v 1.9 2007/06/04 14:40:39 espie Exp $
 #
-# Copyright (c) 2005 Marc Espie <espie@openbsd.org>
+# Copyright (c) 2005-2007 Marc Espie <espie@openbsd.org>
 #
 # Permission to use, copy, modify, and distribute this software for any
 # purpose with or without fee is hereby granted, provided that the above
@@ -43,7 +43,7 @@ LOOP:
 	if ($result eq '') {
 		return $values[0];
 	}
-	if ($result =~ m/^\d+$/) {
+	if ($result =~ m/^\d+$/o) {
 		if ($result >= 0 && $result < @values) {
 			return $values[$result];
 		}
@@ -79,7 +79,7 @@ LOOP2:
 		return $default;
 	}
 	chomp $result;
-	$result =~ s/\s*//g;
+	$result =~ s/\s+//go;
 	$result =~ tr/A-Z/a-z/;
 	if ($result eq 'yes' or $result eq 'y') {
 		return 1;
@@ -107,7 +107,7 @@ sub choose1
 		return $l[0];
 	} elsif (@l != 0) {
 		if ($interactive) {
-		    my $result = OpenBSD::Interactive::ask_list("Ambiguous: choose package for $pkgname", 1, ("<None>", @l));
+		    my $result = ask_list("Ambiguous: choose package for $pkgname", 1, ("<None>", @l));
 		    if ($result ne '<None>') {
 			return $result;
 		    }

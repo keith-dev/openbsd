@@ -1,4 +1,4 @@
-/*	$OpenBSD: locore.s,v 1.106 2007/02/20 21:15:01 tom Exp $	*/
+/*	$OpenBSD: locore.s,v 1.114 2007/05/29 23:02:02 tom Exp $	*/
 /*	$NetBSD: locore.s,v 1.145 1996/05/03 19:41:19 christos Exp $	*/
 
 /*-
@@ -81,54 +81,21 @@
 
 #define CPL _C_LABEL(lapic_tpr)
 
-#if defined(MULTIPROCESSOR)
-#include <machine/i82489reg.h>
-
-#define	GET_CPUINFO(reg)				\
-	movl	_C_LABEL(lapic_id),reg	;		\
-	shrl	$LAPIC_ID_SHIFT,reg	; 		\
-	movl	_C_LABEL(cpu_info)(,reg,4),reg
-#else
-#define	GET_CPUINFO(reg)				\
-	leal	_C_LABEL(cpu_info_primary),reg
-#endif
-
-#define	GET_CURPROC(reg, treg)				\
-	GET_CPUINFO(treg)			;	\
-	movl	CPU_INFO_CURPROC(treg),reg
-
-#define	PUSH_CURPROC(treg)				\
-	GET_CPUINFO(treg)			;	\
-	pushl	CPU_INFO_CURPROC(treg)
-
-#define	CLEAR_CURPROC(treg)				\
-	GET_CPUINFO(treg)			;	\
-	movl	$0,CPU_INFO_CURPROC(treg)
-
-#define	SET_CURPROC(proc,cpu)				\
-	GET_CPUINFO(cpu)			;	\
-	movl	proc,CPU_INFO_CURPROC(cpu)	;	\
-	movl	cpu,P_CPU(proc)
-
 #define	GET_CURPCB(reg)					\
-	GET_CPUINFO(reg)			;	\
-	movl	CPU_INFO_CURPCB(reg),reg
+	movl	CPUVAR(CURPCB), reg
 
-#define	SET_CURPCB(reg,treg)				\
-	GET_CPUINFO(treg)			;	\
-	movl	reg,CPU_INFO_CURPCB(treg)
-
-#define	CLEAR_RESCHED(treg)				\
-	GET_CPUINFO(treg)			;	\
-	xorl	%eax,%eax			;	\
-	movl	%eax,CPU_INFO_RESCHED(treg)
+#define	SET_CURPCB(reg)					\
+	movl	reg, CPUVAR(CURPCB)
 
 #define	CHECK_ASTPENDING(treg)				\
-	GET_CPUINFO(treg)			;	\
-	cmpl	$0,CPU_INFO_ASTPENDING(treg)
+	movl 	CPUVAR(CURPROC),treg		;	\
+	cmpl	$0, treg			;	\
+	je	1f				;	\
+	cmpl	$0,P_MD_ASTPENDING(treg)	;	\
+	1:
 
-#define	CLEAR_ASTPENDING(cireg)				\
-	movl	$0,CPU_INFO_ASTPENDING(cireg)
+#define	CLEAR_ASTPENDING(cpreg)				\
+	movl	$0,P_MD_ASTPENDING(cpreg)
 
 /*
  * These are used on interrupt or trap entry or exit.
@@ -293,7 +260,7 @@ start:	movw	$0x1234,0x472			# warm boot
 	pushl	$PSL_MBO
 	popfl
 
-	/* Clear segment registers; always null in proc0. */
+	/* Clear segment registers; null until proc0 setup */
 	xorl	%eax,%eax
 	movw	%ax,%fs
 	movw	%ax,%gs
@@ -530,11 +497,11 @@ try586:	/* Use the `cpuid' instruction. */
 /*
  * Virtual address space of kernel:
  *
- * text | data | bss | [syms] | page dir | proc0 kstack | Sysmap
- *			      0          1       2      3
+ * text | data | bss | [syms] | proc0 stack | page dir     | Sysmap
+ *			      0             1       2      3
  */
-#define	PROC0PDIR	((0)		* NBPG)
-#define	PROC0STACK	((1)		* NBPG)
+#define	PROC0STACK	((0)		* NBPG)
+#define	PROC0PDIR	((  UPAGES)	* NBPG)
 #define	SYSMAP		((1+UPAGES)	* NBPG)
 #define	TABLESIZE	((1+UPAGES) * NBPG) /* + _C_LABEL(nkpde) * NBPG */
 
@@ -599,7 +566,7 @@ try586:	/* Use the `cpuid' instruction. */
 	leal	(RELOC(_C_LABEL(etext))+PGOFSET),%edx
 	andl	$~PGOFSET,%edx
 
-	/* Skip over the first 1MB. */
+	/* Skip over the first 2MB. */
 	movl	$RELOC(KERNTEXTOFF),%eax
 	movl	%eax,%ecx
 	shrl	$PGSHIFT,%ecx
@@ -653,10 +620,10 @@ try586:	/* Use the `cpuid' instruction. */
 	movl	%eax,(PROC0PDIR+PDSLOT_PTE*4)(%esi)	# recursive PD slot
 
 	/* Save phys. addr of PTD, for libkvm. */
-	movl	%esi,RELOC(_C_LABEL(PTDpaddr))
+	leal	(PROC0PDIR)(%esi),%eax		# phys address of ptd in proc 0
+	movl	%eax,RELOC(_C_LABEL(PTDpaddr))
 
 	/* Load base of page directory and enable mapping. */
-	movl	%esi,%eax		# phys address of ptd in proc 0
 	movl	%eax,%cr3		# load ptd addr into mmu
 	movl	%cr0,%eax		# get control word
 					# enable paging & NPX emulation
@@ -686,7 +653,8 @@ begin:
 	leal	(PROC0STACK+KERNBASE)(%esi),%eax
 	movl	%eax,_C_LABEL(proc0paddr)
 	leal	(USPACE-FRAMESIZE)(%eax),%esp
-	movl	%esi,PCB_CR3(%eax)	# pcb->pcb_cr3
+	leal	(PROC0PDIR)(%esi),%ebx	# phys address of ptd in proc 0
+	movl	%ebx,PCB_CR3(%eax)	# pcb->pcb_cr3
 	xorl	%ebp,%ebp		# mark end of frames
 
 	movl	_C_LABEL(nkpde),%eax
@@ -1004,58 +972,6 @@ ENTRY(copyout)
 	cmpl	$VM_MAXUSER_ADDRESS,%edx
 	ja	_C_LABEL(copy_fault)
 
-#if defined(I386_CPU)
-#if defined(I486_CPU) || defined(I586_CPU) || defined(I686_CPU)
-	cmpl	$CPUCLASS_386,_C_LABEL(cpu_class)
-	jne	3f
-#endif /* I486_CPU || I586_CPU || I686_CPU */
-
-	testl	%eax,%eax		# anything to do?
-	jz	3f
-
-	/*
-	 * We have to check each PTE for (write) permission, since the CPU
-	 * doesn't do it for us.
-	 */
-
-	/* Compute number of pages. */
-	movl	%edi,%ecx
-	andl	$PGOFSET,%ecx
-	addl	%eax,%ecx
-	decl	%ecx
-	shrl	$PGSHIFT,%ecx
-
-	/* Compute PTE offset for start address. */
-	shrl	$PGSHIFT,%edi
-
-	GET_CURPCB(%edx)
-	movl	$2f, PCB_ONFAULT(%edx)
-
-1:	/* Check PTE for each page. */
-	testb	$PG_RW,_C_LABEL(PTmap)(,%edi,4)
-	jz	2f
-
-4:	incl	%edi
-	decl	%ecx
-	jns	1b
-
-	movl	20+FPADD(%esp),%edi
-	movl	24+FPADD(%esp),%eax
-	jmp	3f
-
-2:	/* Simulate a trap. */
-	pushl	%ecx
-	movl	%edi,%eax
-	shll	$PGSHIFT,%eax
-	pushl	%eax
-	call	_C_LABEL(trapwrite)	# trapwrite(addr)
-	addl	$4,%esp			# pop argument
-	popl	%ecx
-	testl	%eax,%eax		# if not ok, return EFAULT
-	jz	4b
-	jmp	_C_LABEL(copy_fault)
-#endif /* I386_CPU */
-
 3:	GET_CURPCB(%edx)
 	movl	$_C_LABEL(copy_fault),PCB_ONFAULT(%edx)
 
@@ -1160,73 +1076,6 @@ ENTRY(copyoutstr)
 	movl	16+FPADD(%esp),%edi		# edi = to
 	movl	20+FPADD(%esp),%edx		# edx = maxlen
 
-#if defined(I386_CPU)
-#if defined(I486_CPU) || defined(I586_CPU) || defined(I686_CPU)
-	cmpl	$CPUCLASS_386,_C_LABEL(cpu_class)
-	jne	5f
-#endif /* I486_CPU || I586_CPU || I686_CPU */
-
-	/* Compute number of bytes in first page. */
-	movl	%edi,%eax
-	andl	$PGOFSET,%eax
-	movl	$NBPG,%ecx
-	subl	%eax,%ecx		# ecx = NBPG - (src % NBPG)
-
-	GET_CURPCB(%ecx)
-	movl	$6f, PCB_ONFAULT(%ecx)
-
-1:	/*
-	 * Once per page, check that we are still within the bounds of user
-	 * space, and check for a write fault.
-	 */
-	cmpl	$VM_MAXUSER_ADDRESS,%edi
-	jae	_C_LABEL(copystr_fault)
-
-	/* Compute PTE offset for start address. */
-	movl	%edi,%eax
-	shrl	$PGSHIFT,%eax		# calculate pte address
-
-	testb	$PG_RW,_C_LABEL(PTmap)(,%eax,4)
-	jnz	2f
-
-6:	/* Simulate a trap. */
-	pushl	%edx
-	pushl	%edi
-	call	_C_LABEL(trapwrite)	# trapwrite(addr)
-	addl	$4,%esp			# clear argument from stack
-	popl	%edx
-	testl	%eax,%eax
-	jnz	_C_LABEL(copystr_fault)
-
-2:	/* Copy up to end of this page. */
-	subl	%ecx,%edx		# predecrement total count
-	jnc	3f
-	addl	%edx,%ecx		# ecx += (edx - ecx) = edx
-	xorl	%edx,%edx
-
-3:	decl	%ecx
-	js	4f
-	lodsb
-	stosb
-	testb	%al,%al
-	jnz	3b
-
-	/* Success -- 0 byte reached. */
-	addl	%ecx,%edx		# add back residual for this page
-	xorl	%eax,%eax
-	jmp	copystr_return
-
-4:	/* Go to next page, if any. */
-	movl	$NBPG,%ecx
-	testl	%edx,%edx
-	jnz	1b
-
-	/* edx is zero -- return ENAMETOOLONG. */
-	movl	$ENAMETOOLONG,%eax
-	jmp	copystr_return
-#endif /* I386_CPU */
-
-#if defined(I486_CPU) || defined(I586_CPU) || defined(I686_CPU)
 5:	GET_CURPCB(%eax)
 	movl	$_C_LABEL(copystr_fault),PCB_ONFAULT(%eax)
 	/*
@@ -1234,6 +1083,10 @@ ENTRY(copyoutstr)
 	 */
 	movl	$VM_MAXUSER_ADDRESS,%eax
 	subl	%edi,%eax
+	jbe	_C_LABEL(copystr_fault)		# die if CF == 1 || ZF == 1
+						# i.e. make sure that %edi
+						# is below VM_MAXUSER_ADDRESS
+
 	cmpl	%edx,%eax
 	jae	1f
 	movl	%eax,%edx
@@ -1244,8 +1097,6 @@ ENTRY(copyoutstr)
 
 1:	decl	%edx
 	jz	2f
-	cmpl	$VM_MAXUSER_ADDRESS,%edi
-	jae	_C_LABEL(copystr_fault)
 	lodsb
 	stosb
 	testb	%al,%al
@@ -1261,7 +1112,6 @@ ENTRY(copyoutstr)
 	jae	_C_LABEL(copystr_fault)
 	movl	$ENAMETOOLONG,%eax
 	jmp	copystr_return
-#endif /* I486_CPU || I586_CPU || I686_CPU */
 
 /*
  * copyinstr(caddr_t from, caddr_t to, size_t maxlen, size_t *lencopied);
@@ -1289,6 +1139,9 @@ ENTRY(copyinstr)
 	 */
 	movl	$VM_MAXUSER_ADDRESS,%eax
 	subl	%esi,%eax
+	jbe	_C_LABEL(copystr_fault)		# Error if CF == 1 || ZF == 1
+						# i.e. make sure that %esi
+						# is below VM_MAXUSER_ADDRESS
 	cmpl	%edx,%eax
 	jae	1f
 	movl	%eax,%edx
@@ -1299,8 +1152,6 @@ ENTRY(copyinstr)
 
 1:	decl	%edx
 	jz	2f
-	cmpl    $VM_MAXUSER_ADDRESS,%esi
-	jae     _C_LABEL(copystr_fault)
 	lodsb
 	stosb
 	testb	%al,%al
@@ -1554,9 +1405,8 @@ ENTRY(idle)
 	movl	P_ADDR(%ebx),%edi
 	movl	P_MD_TSS_SEL(%ebx),%edx
 #else
-	GET_CPUINFO(%ebx)
-	movl	CPU_INFO_IDLE_PCB(%ebx),%edi
-	movl	CPU_INFO_IDLE_TSS_SEL(%ebx),%edx
+	movl	CPUVAR(IDLE_PCB), %edi
+	movl	CPUVAR(IDLE_TSS_SEL), %edx
 #endif
 
 	/* Restore the idle context (avoid interrupts) */
@@ -1572,11 +1422,7 @@ ENTRY(idle)
 	movl	%ecx,%cr3
 
 	/* Switch TSS. Reset "task busy" flag before loading. */
-#ifdef MULTIPROCESSOR
-	movl	CPU_INFO_GDT(%ebx),%eax
-#else
-	movl	_C_LABEL(gdt),%eax
-#endif
+	movl	CPUVAR(GDT), %eax
 	andl	$~0x0200,4-SEL_KPL(%eax,%edx,1)
 	ltr	%dx
 
@@ -1587,7 +1433,7 @@ ENTRY(idle)
 	movl	%ecx,%cr0
 
 	/* Record new pcb. */
-	SET_CURPCB(%edi,%ecx)
+	SET_CURPCB(%edi)
 
 	xorl	%esi,%esi
 	sti
@@ -1648,7 +1494,7 @@ ENTRY(cpu_switch)
 	pushl	%edi
 	pushl	CPL
 
-	GET_CURPROC(%esi,%ecx)
+	movl	CPUVAR(CURPROC), %esi
 
 	/*
 	 * Clear curproc so that we don't accumulate system time while idle.
@@ -1657,7 +1503,7 @@ ENTRY(cpu_switch)
 	 * below and changes the priority.  (See corresponding comment in
 	 * userret()).
 	 */
-	CLEAR_CURPROC(%ecx)
+	movl	$0, CPUVAR(CURPROC)
 
 switch_search:
 	/*
@@ -1692,8 +1538,9 @@ switch_search:
 	btrl	%ebx,%ecx		# yes, clear to indicate empty
 	movl	%ecx,_C_LABEL(whichqs)	# update q status
 
-3:	/* We just did it. */
-	CLEAR_RESCHED(%ecx)
+3:	xorl	%eax, %eax
+	/* We just did it. */
+	movl	$0, CPUVAR(RESCHED)
 
 #ifdef	DIAGNOSTIC
 	cmpl	%eax,P_WCHAN(%edi)	# Waiting for something?
@@ -1707,7 +1554,9 @@ switch_search:
 
 	/* Record new process. */
 	movb	$SONPROC,P_STAT(%edi)	# p->p_stat = SONPROC
-	SET_CURPROC(%edi,%ecx)
+	movl	CPUVAR(SELF), %ecx
+	movl	%edi, CPUVAR(CURPROC)
+	movl	%ecx, P_CPU(%edi)
 
 	/* Skip context switch if same process. */
 	cmpl	%edi,%esi
@@ -1771,12 +1620,7 @@ switch_exited:
 	addl	$4,%esp
 	
 	/* Load TSS info. */
-#ifdef MULTIPROCESSOR
-	GET_CPUINFO(%ebx)
-	movl	CPU_INFO_GDT(%ebx),%eax
-#else
-	movl	_C_LABEL(gdt),%eax
-#endif
+	movl	CPUVAR(GDT),%eax
 	movl	P_MD_TSS_SEL(%edi),%edx
 
 	/* Switch TSS. */
@@ -1803,7 +1647,7 @@ switch_restored:
 	 * If our floating point registers are on a different CPU,
 	 * clear CR0_TS so we'll trap rather than reuse bogus state.
 	 */
-	GET_CPUINFO(%ebx)
+	movl	CPUVAR(SELF), %ebx
 	cmpl	PCB_FPCPU(%esi),%ebx
 	jz	1f
 	orl	$CR0_TS,%ecx
@@ -1812,7 +1656,7 @@ switch_restored:
 	movl	%ecx,%cr0
 
 	/* Record new pcb. */
-	SET_CURPCB(%esi, %ecx)
+	SET_CURPCB(%esi)
 
 	/* Interrupts are okay again. */
 	sti
@@ -1820,7 +1664,7 @@ switch_restored:
 switch_return:
 #if 0
 	pushl	%edi
-	GET_CPUINFO(%ebx)
+	movl	CPUVAR(NAME), %ebx
 	leal	CPU_INFO_NAME(%ebx),%ebx
 	pushl	%ebx
 	pushl	$1f
@@ -1858,13 +1702,12 @@ ENTRY(switch_exit)
 	movl	P_ADDR(%ebx),%esi
 	movl	P_MD_TSS_SEL(%ebx),%edx
 #else
-	GET_CPUINFO(%ebx)
-	movl	CPU_INFO_IDLE_PCB(%ebx),%esi
-	movl	CPU_INFO_IDLE_TSS_SEL(%ebx),%edx
+	movl	CPUVAR(IDLE_PCB), %esi
+	movl	CPUVAR(IDLE_TSS_SEL), %edx
 #endif
 
 	/* In case we fault... */
-	CLEAR_CURPROC(%ecx)
+	movl	$0, CPUVAR(CURPROC)
 
 	/* Restore the idle context. */
 	cli
@@ -1874,11 +1717,7 @@ ENTRY(switch_exit)
 	movl	PCB_EBP(%esi),%ebp
 
 	/* Load TSS info. */
-#ifdef MULTIPROCESSOR
-	movl	CPU_INFO_GDT(%ebx),%eax
-#else
-	movl	_C_LABEL(gdt),%eax
-#endif
+	movl	CPUVAR(GDT), %eax
 
 	/* Switch address space. */
 	movl	PCB_CR3(%esi),%ecx
@@ -1892,15 +1731,18 @@ ENTRY(switch_exit)
 
 	/* Clear segment registers; always null in proc0. */
 	xorl	%ecx,%ecx
-	movw	%cx,%fs
 	movw	%cx,%gs
+
+	/* Point to cpu_info */
+	movl	$GSEL(GCPU_SEL, SEL_KPL),%ecx
+	movw	%cx,%fs
 
 	/* Restore cr0 (including FPU state). */
 	movl	PCB_CR0(%esi),%ecx
 	movl	%ecx,%cr0
 
 	/* Record new pcb. */
-	SET_CURPCB(%esi, %ecx)
+	SET_CURPCB(%esi)
 
 	/* Interrupts are okay again. */
 	sti
@@ -1914,7 +1756,7 @@ ENTRY(switch_exit)
 
 	/* Jump into cpu_switch() with the right state. */
 	xorl	%esi,%esi
-	CLEAR_CURPROC(%ecx)
+	movl	$0, CPUVAR(CURPROC)
 	jmp	switch_search
 
 /*
@@ -1981,8 +1823,7 @@ IDTVEC(dna)
 	pushl	$T_DNA
 	INTRENTRY
 #ifdef MULTIPROCESSOR
-	GET_CPUINFO(%eax)
-	pushl	%eax
+	pushl	CPUVAR(SELF)
 #else
 	pushl	$_C_LABEL(cpu_info_primary)
 #endif
@@ -2078,7 +1919,7 @@ NENTRY(resume_pop_es)
 	movw	%ax,%gs
 NENTRY(resume_pop_gs)
 	pushl	%fs
-	movl	$GSEL(GDATA_SEL, SEL_KPL),%eax
+	movl	$GSEL(GCPU_SEL, SEL_KPL),%eax
 	movw	%ax,%fs
 NENTRY(resume_pop_fs)
 	movl	$T_PROTFLT,TF_TRAPNO(%esp)
@@ -2178,7 +2019,7 @@ ENTRY(bzero)
 
 	/*
 	 * if the string is too short, it's really not worth the overhead
-	 * of aligning to word boundries, etc.  So we jump to a plain
+	 * of aligning to word boundaries, etc.  So we jump to a plain
 	 * unaligned set.
 	 */
 	cmpl	$16,%edx
@@ -2192,7 +2033,7 @@ ENTRY(bzero)
 	stosb
 
 #if defined(I486_CPU)
-#if defined(I386_CPU) || defined(I586_CPU) || defined(I686_CPU)
+#if defined(I586_CPU) || defined(I686_CPU)
 	cmpl	$CPUCLASS_486,_C_LABEL(cpu_class)
 	jne	8f
 #endif

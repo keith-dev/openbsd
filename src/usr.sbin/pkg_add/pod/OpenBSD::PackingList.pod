@@ -1,4 +1,4 @@
-$OpenBSD: OpenBSD::PackingList.pod,v 1.5 2005/09/19 09:30:28 espie Exp $
+$OpenBSD: OpenBSD::PackingList.pod,v 1.7 2007/05/02 15:17:36 espie Exp $
 
 =head1 NAME
 
@@ -29,13 +29,16 @@ OpenBSD::PackingList - C<pkg_add(1)> packing-list manipulations
     $b = $p2->has($name);
     $b = $p2->get($name);
     # frequent accesses
-    print $p3->pkgname(), $p3->pkgbase(), "\n";
+    print $p3->pkgname, $p3->localbase, "\n";
 
     # processing packing-lists
     $p4->visit('method', @args);
 
+    # auto visit
+    $p4->method(@args);
+
     # signatures
-    if ($p3->signature() eq $p4->signature()) {
+    if ($p3->signature eq $p4->signature) {
     }
 
 =head1 DESCRIPTION
@@ -123,3 +126,8 @@ C<$plist-E<gt>pkgname()> retrieves a packing-list name (mandatory).
 C<$plist-E<gt>signature()> retrieves a packing-list full signature, composed
 of the package name and dependency information.
 
+C<$plist-E<gt>visit($method, @args)> is a visitor pattern, calling
+C<method(@args)> on each element of the packing-list in a specific order.
+
+As a feature, if C<OpenBSD::PackingElement-E<gt>can(method)>, 
+C<$plist-E<gt>method(@args)> will be turned into a visitor call automatically.

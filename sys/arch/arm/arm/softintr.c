@@ -1,4 +1,4 @@
-/*	$OpenBSD: softintr.c,v 1.2 2004/02/15 17:21:30 drahn Exp $	*/
+/*	$OpenBSD: softintr.c,v 1.4 2007/05/29 18:10:42 miod Exp $	*/
 /*	$NetBSD: softintr.c,v 1.2 2003/07/15 00:24:39 lukem Exp $	*/
 
 /*
@@ -44,6 +44,7 @@
 
 #include <uvm/uvm_extern.h>
 
+#include <machine/atomic.h>
 #include <machine/intr.h>
 
 struct soft_intrq soft_intrq[SI_NQUEUES];
@@ -60,19 +61,12 @@ void	netintr(void);
 void
 softintr_init(void)
 {
-#if 0
-	static const char *softintr_names[] = SI_QUEUENAMES;
-#endif
 	struct soft_intrq *siq;
 	int i;
 
 	for (i = 0; i < SI_NQUEUES; i++) {
 		siq = &soft_intrq[i];
 		TAILQ_INIT(&siq->siq_list);
-#if 0
-		evcnt_attach_dynamic(&siq->siq_evcnt, EVCNT_TYPE_INTR,
-		    NULL, "soft", softintr_names[i]);
-#endif
 		siq->siq_si = i;
 	}
 
@@ -97,7 +91,6 @@ softintr_dispatch(int si)
 	struct soft_intrhand *sih;
 	int oldirqstate;
 
-	siq->siq_evcnt.ev_count++;
 	for (;;) {
 		oldirqstate = disable_interrupts(I32_bit);
 		sih = TAILQ_FIRST(&siq->siq_list);
@@ -187,20 +180,19 @@ int netisr;
 void
 netintr(void)
 {
-	int n, s;
+	int n;
 
-	s = splhigh();
-	n = netisr;
-	netisr = 0;
-	splx(s);
+	while ((n = netisr) != 0) {
+		atomic_clearbits_int(&netisr, n);
 
 #define	DONETISR(bit, fn)						\
-	do {								\
-		if (n & (1 << (bit)))					\
-			fn();						\
-	} while (/*CONSTCOND*/0)
+		do {							\
+			if (n & (1 << (bit)))				\
+				fn();					\
+		} while (/*CONSTCOND*/0)
 
 #include <net/netisr_dispatch.h>
 
 #undef DONETISR
+	}
 }

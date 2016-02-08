@@ -1,4 +1,4 @@
-/*	$OpenBSD: biovar.h,v 1.25 2006/06/10 18:47:43 deraadt Exp $	*/
+/*	$OpenBSD: biovar.h,v 1.28 2007/05/28 21:54:26 marco Exp $	*/
 
 /*
  * Copyright (c) 2002 Niklas Hallqvist.  All rights reserved.
@@ -165,11 +165,31 @@ struct bioc_setstate {
 #define BIOC_SSONLINE		0x00	/* online disk */
 #define BIOC_SSOFFLINE		0x01	/* offline disk */
 #define BIOC_SSHOTSPARE		0x02	/* mark as hotspare */
+#define BIOC_SSREBUILD		0x03	/* rebuild on this disk */
+	int		bs_volid;	/* volume id for rebuild */
 };
 
+#define BIOCCREATERAID _IOWR('B', 38, struct bioc_createraid)
+struct bioc_createraid {
+	void		*bc_cookie;
+	void		*bc_dev_list;
+	u_int16_t	bc_dev_list_len;
+#define BIOC_CRMAXLEN		1024
+	u_int16_t	bc_level;
+	u_int32_t	bc_flags;
+#define BIOC_SCFORCE		0x01	/* do not assemble, force create */
+#define BIOC_SCDEVT		0x02	/* dev_t array or string in dev_list */
+#define BIOC_SCNOAUTOASSEMBLE	0x04	/* do not assemble during autoconf */
+};
+
+/* kernel and userspace defines */
 #define BIOC_INQ		0x0001
 #define BIOC_DISK		0x0002
 #define BIOC_VOL		0x0004
 #define BIOC_ALARM		0x0008
 #define BIOC_BLINK		0x0010
 #define BIOC_SETSTATE		0x0020
+#define BIOC_CREATERAID		0x0040
+
+/* user space defines */
+#define BIOC_DEVLIST		0x10000

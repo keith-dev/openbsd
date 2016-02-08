@@ -1,4 +1,4 @@
-/*	$OpenBSD: db_interface.c,v 1.5 2006/05/08 14:36:09 miod Exp $	*/
+/*	$OpenBSD: db_interface.c,v 1.7 2007/05/19 20:33:49 miod Exp $	*/
 /*
  * Mach Operating System
  * Copyright (c) 1993-1991 Carnegie Mellon University
@@ -409,6 +409,7 @@ m88k_db_trap(type, frame)
 	curcpu()->ci_ddb_state = CI_DDB_ENTERDDB;
 	__mp_lock(&ddb_mp_lock);
 	curcpu()->ci_ddb_state = CI_DDB_INDDB;
+	m88k_broadcast_ipi(CI_IPI_DDB);		/* pause other processors */
 #endif
 
 	ddb_regs = frame->tf_regs;
@@ -531,7 +532,7 @@ void
 db_write_bytes(db_addr_t addr, size_t size, char *data)
 {
 	extern pt_entry_t *pmap_pte(pmap_t, vaddr_t);
-	char *dst;
+	char *dst = (char *)addr;
 	vaddr_t va;
 	paddr_t pa;
 	pt_entry_t *pte, opte;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: arc.c,v 1.58 2007/02/20 17:06:23 thib Exp $ */
+/*	$OpenBSD: arc.c,v 1.65 2007/07/11 19:01:30 otto Exp $ */
 
 /*
  * Copyright (c) 2006 David Gwynne <dlg@openbsd.org>
@@ -384,8 +384,8 @@ struct arc_softc {
 	struct rwlock		sc_lock;
 	volatile int		sc_talking;
 
-	struct sensor		*sc_sensors;
-	struct sensordev	sc_sensordev;
+	struct ksensor		*sc_sensors;
+	struct ksensordev	sc_sensordev;
 	int			sc_nsensors;
 };
 #define DEVNAME(_s)		((_s)->sc_dev.dv_xname)
@@ -492,9 +492,11 @@ int			arc_bio_alarm_state(struct arc_softc *,
 int			arc_bio_getvol(struct arc_softc *, int,
 			    struct arc_fw_volinfo *);
 
+#ifndef SMALL_KERNEL
 /* sensors */
 void			arc_create_sensors(void *, void *);
 void			arc_refresh_sensors(void *);
+#endif /* SMALL_KERNEL */
 #endif
 
 int
@@ -555,6 +557,7 @@ arc_attach(struct device *parent, struct device *self, void *aux)
 	if (bio_register(self, arc_bioctl) != 0)
 		panic("%s: bioctl registration failed\n", DEVNAME(sc));
 
+#ifndef SMALL_KERNEL
 	/*
 	 * you need to talk to the firmware to get volume info. our firmware
 	 * interface relies on being able to sleep, so we need to use a thread
@@ -563,6 +566,7 @@ arc_attach(struct device *parent, struct device *self, void *aux)
 	if (scsi_task(arc_create_sensors, sc, NULL, 1) != 0)
 		printf("%s: unable to schedule arc_create_sensors as a "
 		    "scsi task", DEVNAME(sc));
+#endif
 #endif
 
 	return;
@@ -576,10 +580,10 @@ arc_detach(struct device *self, int flags)
 	shutdownhook_disestablish(sc->sc_shutdownhook);
 
 	if (arc_msg0(sc, ARC_REG_INB_MSG0_STOP_BGRB) != 0)
-		printf("%s: timeout waiting to stop bg rebuild\n");
+		printf("%s: timeout waiting to stop bg rebuild\n", DEVNAME(sc));
 
 	if (arc_msg0(sc, ARC_REG_INB_MSG0_FLUSH_CACHE) != 0)
-		printf("%s: timeout waiting to flush cache\n");
+		printf("%s: timeout waiting to flush cache\n", DEVNAME(sc));
 
 	return (0);
 }
@@ -590,10 +594,10 @@ arc_shutdown(void *xsc)
 	struct arc_softc		*sc = xsc;
 
 	if (arc_msg0(sc, ARC_REG_INB_MSG0_STOP_BGRB) != 0)
-		printf("%s: timeout waiting to stop bg rebuild\n");
+		printf("%s: timeout waiting to stop bg rebuild\n", DEVNAME(sc));
 
 	if (arc_msg0(sc, ARC_REG_INB_MSG0_FLUSH_CACHE) != 0)
-		printf("%s: timeout waiting to flush cache\n");
+		printf("%s: timeout waiting to flush cache\n", DEVNAME(sc));
 }
 
 int
@@ -710,7 +714,7 @@ arc_scsi_cmd(struct scsi_xfer *xs)
 
 	bcopy(xs->cmd, cmd->cdb, xs->cmdlen);
 
-	/* we've built the command, lets put it on the hw */
+	/* we've built the command, let's put it on the hw */
 	bus_dmamap_sync(sc->sc_dmat, ARC_DMA_MAP(sc->sc_requests),
 	    ccb->ccb_offset, ARC_MAX_IOCMDLEN,
 	    BUS_DMASYNC_PREREAD | BUS_DMASYNC_PREWRITE);
@@ -909,12 +913,12 @@ arc_query_firmware(struct arc_softc *sc)
 
 	if (arc_wait_eq(sc, ARC_REG_OUTB_ADDR1, ARC_REG_OUTB_ADDR1_FIRMWARE_OK,
 	    ARC_REG_OUTB_ADDR1_FIRMWARE_OK) != 0) {
-		printf("%s: timeout waiting for firmware ok\n");
+		printf("%s: timeout waiting for firmware ok\n", DEVNAME(sc));
 		return (1);
 	}
 
 	if (arc_msg0(sc, ARC_REG_INB_MSG0_GET_CONFIG) != 0) {
-		printf("%s: timeout waiting for get config\n");
+		printf("%s: timeout waiting for get config\n", DEVNAME(sc));
 		return (1);
 	}
 
@@ -956,7 +960,8 @@ arc_query_firmware(struct arc_softc *sc)
 	sc->sc_req_count = letoh32(fwinfo.queue_len);
 
 	if (arc_msg0(sc, ARC_REG_INB_MSG0_START_BGRB) != 0) {
-		printf("%s: timeout waiting to start bg rebuild\n");
+		printf("%s: timeout waiting to start bg rebuild\n",
+		    DEVNAME(sc));
 		return (1);
 	}
 
@@ -1102,11 +1107,11 @@ arc_bio_inq(struct arc_softc *sc, struct bioc_inq *bi)
 			goto out;
 
 		/*
-		 * i cant find an easy way to see if the volume exists or not
-		 * except to say that if it has no capacity then it isnt there.
-		 * ignore passthru volumes, bioc_vol doesnt understand them.
+		 * I can't find an easy way to see if the volume exists or not
+		 * except to say that if it has no capacity then it isn't there.
+		 * Ignore passthru volumes, bioc_vol doesn't understand them.
 		 */
-		if (volinfo->capacity != 0 &&
+		if ((volinfo->capacity != 0 || volinfo->capacity2 != 0) &&
 		    volinfo->raid_level != ARC_FW_VOL_RAIDLEVEL_PASSTHRU)
 			nvols++;
 	}
@@ -1146,7 +1151,7 @@ arc_bio_getvol(struct arc_softc *sc, int vol, struct arc_fw_volinfo *volinfo)
 		if (error != 0)
 			goto out;
 
-		if (volinfo->capacity == 0 ||
+		if ((volinfo->capacity == 0 && volinfo->capacity2 == 0) ||
 		    volinfo->raid_level == ARC_FW_VOL_RAIDLEVEL_PASSTHRU)
 			continue;
 
@@ -1156,7 +1161,8 @@ arc_bio_getvol(struct arc_softc *sc, int vol, struct arc_fw_volinfo *volinfo)
 		nvols++;
 	}
 
-	if (nvols != vol || volinfo->capacity == 0 ||
+	if (nvols != vol ||
+	    (volinfo->capacity == 0 && volinfo->capacity2 == 0) ||
 	    volinfo->raid_level == ARC_FW_VOL_RAIDLEVEL_PASSTHRU) {
 		error = ENODEV;
 		goto out;
@@ -1173,6 +1179,7 @@ arc_bio_vol(struct arc_softc *sc, struct bioc_vol *bv)
 	struct arc_fw_volinfo		*volinfo;
 	struct scsi_link		*sc_link;
 	struct device			*dev;
+	u_int64_t			blocks;
 	u_int32_t			status;
 	int				error = 0;
 
@@ -1206,7 +1213,9 @@ arc_bio_vol(struct arc_softc *sc, struct bioc_vol *bv)
 		bv->bv_percent = letoh32(volinfo->progress) / 10;
 	}
 
-	bv->bv_size = (u_int64_t)letoh32(volinfo->capacity) * ARC_BLOCKSIZE;
+	blocks = (u_int64_t)letoh32(volinfo->capacity2) << 32;
+	blocks += (u_int64_t)letoh32(volinfo->capacity);
+	bv->bv_size = blocks * ARC_BLOCKSIZE; /* XXX */
 
 	switch (volinfo->raid_level) {
 	case ARC_FW_VOL_RAIDLEVEL_0:
@@ -1251,6 +1260,7 @@ arc_bio_disk(struct arc_softc *sc, struct bioc_disk *bd)
 	struct arc_fw_raidinfo		*raidinfo;
 	struct arc_fw_diskinfo		*diskinfo;
 	int				error = 0;
+	u_int64_t			blocks;
 	char				model[81];
 	char				serial[41];
 	char				rev[17];
@@ -1311,7 +1321,9 @@ arc_bio_disk(struct arc_softc *sc, struct bioc_disk *bd)
 	bd->bd_lun = 0;
 
 	bd->bd_status = BIOC_SDONLINE;
-	bd->bd_size = (u_int64_t)letoh32(diskinfo->capacity) * ARC_BLOCKSIZE;
+	blocks = (u_int64_t)letoh32(diskinfo->capacity2) << 32;
+	blocks += (u_int64_t)letoh32(diskinfo->capacity);
+	bd->bd_size = blocks * ARC_BLOCKSIZE; /* XXX */
 
 	scsi_strvis(model, diskinfo->model, sizeof(diskinfo->model));
 	scsi_strvis(serial, diskinfo->serial, sizeof(diskinfo->serial));
@@ -1514,6 +1526,7 @@ arc_wait(struct arc_softc *sc)
 	splx(s);
 }
 
+#ifndef SMALL_KERNEL
 void
 arc_create_sensors(void *xsc, void *arg)
 {
@@ -1536,9 +1549,9 @@ arc_create_sensors(void *xsc, void *arg)
 	}
 	sc->sc_nsensors = bi.bi_novol;
 
-	sc->sc_sensors = malloc(sizeof(struct sensor) * sc->sc_nsensors,
+	sc->sc_sensors = malloc(sizeof(struct ksensor) * sc->sc_nsensors,
 	    M_DEVBUF, M_WAITOK);
-	bzero(sc->sc_sensors, sizeof(struct sensor) * sc->sc_nsensors);
+	bzero(sc->sc_sensors, sizeof(struct ksensor) * sc->sc_nsensors);
 
 	strlcpy(sc->sc_sensordev.xname, DEVNAME(sc),
 	    sizeof(sc->sc_sensordev.xname));
@@ -1558,7 +1571,7 @@ arc_create_sensors(void *xsc, void *arg)
 		sensor_attach(&sc->sc_sensordev, &sc->sc_sensors[i]);
 	}
 
-	if (sensor_task_register(sc, arc_refresh_sensors, 120) != 0)
+	if (sensor_task_register(sc, arc_refresh_sensors, 120) == NULL)
 		goto bad;
 
 	sensordev_install(&sc->sc_sensordev);
@@ -1610,6 +1623,7 @@ arc_refresh_sensors(void *arg)
 
 	}
 }
+#endif /* SMALL_KERNEL */
 #endif /* NBIO > 0 */
 
 u_int32_t

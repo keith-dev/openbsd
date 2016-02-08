@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_icmp.c,v 1.72 2007/01/03 18:39:56 claudio Exp $	*/
+/*	$OpenBSD: ip_icmp.c,v 1.76 2007/06/11 11:29:35 henning Exp $	*/
 /*	$NetBSD: ip_icmp.c,v 1.19 1996/02/13 23:42:22 christos Exp $	*/
 
 /*
@@ -68,6 +68,8 @@
  * Research Laboratory (NRL).
  */
 
+#include "carp.h"
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/mbuf.h>
@@ -85,6 +87,11 @@
 #include <netinet/ip_icmp.h>
 #include <netinet/ip_var.h>
 #include <netinet/icmp_var.h>
+
+#if NCARP > 0
+#include <net/if_types.h>
+#include <netinet/ip_carp.h>
+#endif
 
 /*
  * ICMP routines: error generation, receive packet processing, and
@@ -110,7 +117,7 @@ int *icmpctl_vars[ICMPCTL_MAXID] = ICMPCTL_VARS;
 
 void icmp_mtudisc_timeout(struct rtentry *, struct rttimer *);
 int icmp_ratelimit(const struct in_addr *, const int, const int);
-static void icmp_redirect_timeout(struct rtentry *, struct rttimer *);
+void icmp_redirect_timeout(struct rtentry *, struct rttimer *);
 
 extern	struct protosw inetsw[];
 
@@ -135,9 +142,6 @@ icmp_do_error(struct mbuf *n, int type, int code, n_long dest, int destmtu)
 	struct icmp *icp;
 	struct mbuf *m;
 	unsigned icmplen, mblen;
-#if NPF > 0
-	struct pf_mtag	*mtag;
-#endif
 
 #ifdef ICMPPRINTFS
 	if (icmpprintfs)
@@ -253,14 +257,11 @@ icmp_do_error(struct mbuf *n, int type, int code, n_long dest, int destmtu)
 	nip->ip_p = IPPROTO_ICMP;
 	nip->ip_src = oip->ip_src;
 	nip->ip_dst = oip->ip_dst;
-#if NPF > 0
+
 	/* move PF_GENERATED to new packet, if existant XXX preserve more? */
-	if ((mtag = pf_find_mtag(n)) != NULL &&
-	    mtag->flags & PF_TAG_GENERATED) {
-		mtag = pf_get_tag(m);
-		mtag->flags |= PF_TAG_GENERATED;
-	}
-#endif
+	if (n->m_pkthdr.pf.flags & PF_TAG_GENERATED)
+		m->m_pkthdr.pf.flags |= PF_TAG_GENERATED;
+
 	m_freem(n);
 	return (m);
 
@@ -288,7 +289,6 @@ icmp_error(struct mbuf *n, int type, int code, n_long dest, int destmtu)
 struct sockaddr_in icmpsrc = { sizeof (struct sockaddr_in), AF_INET };
 static struct sockaddr_in icmpdst = { sizeof (struct sockaddr_in), AF_INET };
 static struct sockaddr_in icmpgw = { sizeof (struct sockaddr_in), AF_INET };
-struct sockaddr_in icmpmask = { 8, 0 };
 
 /*
  * Process a received ICMP message.
@@ -450,6 +450,13 @@ icmp_input(struct mbuf *m, ...)
 			printf("deliver to protocol %d\n", icp->icmp_ip.ip_p);
 #endif
 		icmpsrc.sin_addr = icp->icmp_ip.ip_dst;
+#if NCARP > 0
+		if (m->m_pkthdr.rcvif->if_type == IFT_CARP &&
+		    m->m_pkthdr.rcvif->if_flags & IFF_LINK0 &&
+		    carp_lsdrop(m, AF_INET, &icmpsrc.sin_addr.s_addr,
+		    &ip->ip_dst.s_addr))
+			goto freeit;
+#endif
 		/*
 		 * XXX if the packet contains [IPv4 AH TCP], we can't make a
 		 * notification to TCP layer.
@@ -521,6 +528,13 @@ icmp_input(struct mbuf *m, ...)
 				ip->ip_src = ia->ia_dstaddr.sin_addr;
 		}
 reflect:
+#if NCARP > 0
+		if (m->m_pkthdr.rcvif->if_type == IFT_CARP &&
+		    m->m_pkthdr.rcvif->if_flags & IFF_LINK0 &&
+		    carp_lsdrop(m, AF_INET, &ip->ip_src.s_addr,
+		    &ip->ip_dst.s_addr))
+			goto freeit;
+#endif
 		/* Free packet atttributes */
 		if (m->m_flags & M_PKTHDR)
 			m_tag_delete_chain(m);
@@ -563,6 +577,13 @@ reflect:
 		}
 #endif
 		icmpsrc.sin_addr = icp->icmp_ip.ip_dst;
+#if NCARP > 0
+		if (m->m_pkthdr.rcvif->if_type == IFT_CARP &&
+		    m->m_pkthdr.rcvif->if_flags & IFF_LINK0 &&
+		    carp_lsdrop(m, AF_INET, &icmpsrc.sin_addr.s_addr,
+		    &ip->ip_dst.s_addr))
+			goto freeit;
+#endif
 		rt = NULL;
 		rtredirect(sintosa(&icmpsrc), sintosa(&icmpdst),
 		    (struct sockaddr *)0, RTF_GATEWAY | RTF_HOST,
@@ -978,7 +999,7 @@ icmp_ratelimit(const struct in_addr *dst, const int type, const int code)
 }
 
 /* XXX only handles table 0 right now */
-static void
+void
 icmp_redirect_timeout(struct rtentry *rt, struct rttimer *r)
 {
 	if (rt == NULL)

@@ -1,4 +1,4 @@
-/*	$OpenBSD: top.h,v 1.8 2007/02/22 06:36:59 otto Exp $	*/
+/*	$OpenBSD: top.h,v 1.10 2007/05/29 00:56:56 otto Exp $	*/
 
 /*
  *  Top users/processes display for Unix
@@ -61,13 +61,16 @@ extern int Header_lines;
 
 #define NUM_AVERAGES    3
 
-/* externs */
-extern const char copyright[];
 
-extern int overstrike;
+struct errs {		/* structure for a system-call error */
+        int err;	/* value of errno (that is, the actual error) */
+        char *arg;	/* argument that caused the error */
+};
+
+extern struct errs errs[];
+extern int errcnt;
 
 /* commands.c */
-extern void show_help(void);
 extern int error_count(void);
 extern void show_errors(void);
 extern char *kill_procs(char *);
@@ -82,8 +85,3 @@ extern uid_t userid(char *);
 
 /* version.c */
 extern char *version_string(void);
-extern int y_mem;
-extern int y_message;
-extern int y_header;
-extern int y_idlecursor;
-extern int y_procs;

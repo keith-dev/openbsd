@@ -1,4 +1,4 @@
-/*	$OpenBSD: usb_mem.c,v 1.16 2004/07/08 22:18:44 deraadt Exp $ */
+/*	$OpenBSD: usb_mem.c,v 1.20 2007/06/15 04:05:53 deraadt Exp $ */
 /*	$NetBSD: usb_mem.c,v 1.26 2003/02/01 06:23:40 thorpej Exp $	*/
 
 /*
@@ -50,6 +50,7 @@
 #include <sys/kernel.h>
 #include <sys/malloc.h>
 #include <sys/queue.h>
+#include <sys/timeout.h>
 #include <sys/device.h>		/* for usbdivar.h */
 #include <machine/bus.h>
 
@@ -63,18 +64,12 @@
 #include <dev/usb/usb_mem.h>
 
 #ifdef USB_DEBUG
-#define DPRINTF(x)	do { if (usbdebug) logprintf x; } while (0)
-#define DPRINTFN(n,x)	do { if (usbdebug>(n)) logprintf x; } while (0)
+#define DPRINTF(x)	do { if (usbdebug) printf x; } while (0)
+#define DPRINTFN(n,x)	do { if (usbdebug>(n)) printf x; } while (0)
 extern int usbdebug;
 #else
 #define DPRINTF(x)
 #define DPRINTFN(n,x)
-#endif
-
-#if defined(__NetBSD__)
-MALLOC_DEFINE(M_USB, "USB", "USB misc. memory");
-MALLOC_DEFINE(M_USBDEV, "USB device", "USB device driver");
-MALLOC_DEFINE(M_USBHC, "USB HC", "USB host controller");
 #endif
 
 #define USB_MEM_SMALL 64
@@ -88,18 +83,18 @@ struct usb_frag_dma {
 	LIST_ENTRY(usb_frag_dma) next;
 };
 
-Static usbd_status	usb_block_allocmem(bus_dma_tag_t, size_t, size_t,
+usbd_status	usb_block_allocmem(bus_dma_tag_t, size_t, size_t,
 					   usb_dma_block_t **);
-Static void		usb_block_freemem(usb_dma_block_t *);
+void		usb_block_freemem(usb_dma_block_t *);
 
-Static LIST_HEAD(, usb_dma_block) usb_blk_freelist =
+LIST_HEAD(, usb_dma_block) usb_blk_freelist =
 	LIST_HEAD_INITIALIZER(usb_blk_freelist);
-Static int usb_blk_nfree = 0;
+int usb_blk_nfree = 0;
 /* XXX should have different free list for different tags (for speed) */
-Static LIST_HEAD(, usb_frag_dma) usb_frag_freelist =
+LIST_HEAD(, usb_frag_dma) usb_frag_freelist =
 	LIST_HEAD_INITIALIZER(usb_frag_freelist);
 
-Static usbd_status
+usbd_status
 usb_block_allocmem(bus_dma_tag_t tag, size_t size, size_t align,
 		   usb_dma_block_t **dmap)
 {
@@ -205,7 +200,7 @@ usb_block_real_freemem(usb_dma_block_t *p)
  * from an interrupt context and that is BAD.
  * XXX when should we really free?
  */
-Static void
+void
 usb_block_freemem(usb_dma_block_t *p)
 {
 	int s;

@@ -1,10 +1,9 @@
-#	$OpenBSD: Makefile.inc,v 1.15 2007/02/16 16:56:22 tsi Exp $
+#	$OpenBSD: Makefile.inc,v 1.17 2007/06/17 00:28:21 deraadt Exp $
 
 IMAGESIZE?=		4352
 GZIPCMD?=		gzip
-GZIPFLAGS?=		-9v
+GZIPFLAGS?=		-9nv
 GZIPEXT?=		.gz
 MAKEFLOPPY=		1
-RAWLABEL=
 BOOT=			${DESTDIR}/usr/mdec/boot
 INSTALLBOOT=		${DESTDIR}/usr/mdec/installboot

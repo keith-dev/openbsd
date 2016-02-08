@@ -1,4 +1,4 @@
-/*	$OpenBSD: resolve.h,v 1.52 2006/06/16 21:34:53 kettenis Exp $ */
+/*	$OpenBSD: resolve.h,v 1.54 2007/05/05 15:21:21 drahn Exp $ */
 
 /*
  * Copyright (c) 1998 Per Fogelstrom, Opsycon AB
@@ -222,6 +222,8 @@ void	_dl_load_list_free(struct load_list *load_list);
 void	_dl_thread_kern_go(void);
 void	_dl_thread_kern_stop(void);
 
+void	_dl_thread_bind_lock(int);
+
 extern elf_object_t *_dl_objects;
 extern elf_object_t *_dl_last_object;
 
@@ -237,6 +239,9 @@ extern char *_dl_libpath;
 extern char *_dl_preload;
 extern char *_dl_bindnow;
 extern char *_dl_traceld;
+extern char *_dl_tracefmt1;
+extern char *_dl_tracefmt2;
+extern char *_dl_traceprog;
 extern char *_dl_debug;
 
 #define DL_DEB(P) do { if (_dl_debug) _dl_printf P ; } while (0)

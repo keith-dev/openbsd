@@ -1,4 +1,4 @@
-/*	$OpenBSD: route.c,v 1.81 2006/06/19 08:14:06 claudio Exp $	*/
+/*	$OpenBSD: route.c,v 1.84 2007/06/14 18:31:49 reyk Exp $	*/
 /*	$NetBSD: route.c,v 1.14 1996/02/13 22:00:46 christos Exp $	*/
 
 /*
@@ -138,7 +138,6 @@ u_int8_t		   rtafidx_max;
 u_int			   rtbl_id_max = 0;
 
 int			rttrash;	/* routes not in table but not freed */
-struct sockaddr		wildcard;	/* zero cookie for wildcard searches */
 
 struct pool		rtentry_pool;	/* pool for rtentry structures */
 struct pool		rttimer_pool;	/* pool for rttimer structures */
@@ -254,6 +253,8 @@ rtable_exists(u_int id)	/* verify table with that ID exists */
 	return (1);
 }
 
+#include "pf.h"
+#if NPF > 0
 void
 rtalloc_noclone(struct route *ro, int howstrict)
 {
@@ -313,6 +314,7 @@ miss:
 	splx(s);
 	return (newrt);
 }
+#endif /* NPF > 0 */
 
 /*
  * Packet routing routines.
@@ -1001,6 +1003,8 @@ rtinit(struct ifaddr *ifa, int cmd, int flags)
 	struct rtentry		*nrt = NULL;
 	int			 error;
 	struct rt_addrinfo	 info;
+	struct sockaddr_rtlabel	 sa_rl;
+	const char		*label;
 
 	dst = flags & RTF_HOST ? ifa->ifa_dstaddr : ifa->ifa_addr;
 	if (cmd == RTM_DELETE) {
@@ -1027,6 +1031,15 @@ rtinit(struct ifaddr *ifa, int cmd, int flags)
 	info.rti_flags = flags | ifa->ifa_flags;
 	info.rti_info[RTAX_DST] = dst;
 	info.rti_info[RTAX_GATEWAY] = ifa->ifa_addr;
+	if (ifa->ifa_ifp->if_rtlabelid) {
+		label = rtlabel_id2name(ifa->ifa_ifp->if_rtlabelid);
+		bzero(&sa_rl, sizeof(sa_rl));
+		sa_rl.sr_len = sizeof(sa_rl);
+		sa_rl.sr_family = AF_UNSPEC;
+		strlcpy(sa_rl.sr_label, label, sizeof(sa_rl.sr_label));
+		info.rti_info[RTAX_LABEL] = (struct sockaddr *)&sa_rl;
+	}
+
 	/*
 	 * XXX here, it seems that we are assuming that ifa_netmask is NULL
 	 * for RTF_HOST.  bsdi4 passes NULL explicitly (via intermediate

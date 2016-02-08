@@ -1,4 +1,4 @@
-/*	$OpenBSD: mainbus.c,v 1.63 2005/10/26 18:35:44 martin Exp $	*/
+/*	$OpenBSD: mainbus.c,v 1.66 2007/07/15 20:11:12 kettenis Exp $	*/
 
 /*
  * Copyright (c) 1998-2004 Michael Shalayeff
@@ -26,6 +26,7 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include "lcd.h"
 #include "power.h"
 
 #undef BTLBDEBUG
@@ -40,6 +41,7 @@
 #include <uvm/uvm.h>
 #include <uvm/uvm_page.h>
 
+#include <machine/bus.h>
 #include <machine/pdc.h>
 #include <machine/iomod.h>
 #include <machine/autoconf.h>
@@ -65,6 +67,8 @@ struct cfdriver mainbus_cd = {
 
 struct pdc_hpa pdc_hpa PDC_ALIGNMENT;
 struct pdc_power_info pdc_power_info PDC_ALIGNMENT;
+struct pdc_chassis_info pdc_chassis_info PDC_ALIGNMENT;
+struct pdc_chassis_lcd pdc_chassis_lcd PDC_ALIGNMENT;
 
 /* from machdep.c */
 extern struct extent *hppa_ex;
@@ -252,6 +256,12 @@ void
 mbus_barrier(void *v, bus_space_handle_t h, bus_size_t o, bus_size_t l, int op)
 {
 	sync_caches();
+}
+
+void *
+mbus_vaddr(void *v, bus_space_handle_t h)
+{
+	return ((void *)h);
 }
 
 u_int8_t
@@ -576,7 +586,7 @@ const struct hppa_bus_space_tag hppa_bustag = {
 	NULL,
 
 	mbus_map, mbus_unmap, mbus_subregion, mbus_alloc, mbus_free,
-	mbus_barrier,
+	mbus_barrier, mbus_vaddr,
 	mbus_r1,    mbus_r2,   mbus_r4,   mbus_r8,
 	mbus_w1,    mbus_w2,   mbus_w4,   mbus_w8,
 	mbus_rm_1,  mbus_rm_2, mbus_rm_4, mbus_rm_8,
@@ -641,7 +651,7 @@ mbus_dmamap_destroy(void *v, bus_dmamap_t map)
 /*
  * Utility function to load a linear buffer.  lastaddrp holds state
  * between invocations (for multiple-buffer loads).  segp contains
- * the starting segment on entrace, and the ending segment on exit.
+ * the starting segment on entrance, and the ending segment on exit.
  * first indicates if this is the first invocation of this function.
  */
 int
@@ -1025,7 +1035,7 @@ mbattach(parent, self, aux)
 	sc->sc_hpa = pdc_hpa.hpa;
 
 	/* PDC first */
-	bzero (&nca, sizeof(nca));
+	bzero(&nca, sizeof(nca));
 	nca.ca_name = "pdc";
 	nca.ca_iot = &hppa_bustag;
 	nca.ca_dmatag = &hppa_dmatag;
@@ -1033,7 +1043,7 @@ mbattach(parent, self, aux)
 
 #if NPOWER > 0
 	/* get some power */
-	bzero (&nca, sizeof(nca));
+	bzero(&nca, sizeof(nca));
 	nca.ca_name = "power";
 	nca.ca_irq = -1;
 	if (!pdc_call((iodcio_t)pdc, 0, PDC_SOFT_POWER,
@@ -1045,7 +1055,23 @@ mbattach(parent, self, aux)
 	config_found(self, &nca, mbprint);
 #endif
 
-	bzero (&nca, sizeof(nca));
+#if NLCD > 0
+	if (!pdc_call((iodcio_t)pdc, 0, PDC_CHASSIS, PDC_CHASSIS_INFO,
+	    &pdc_chassis_info, &pdc_chassis_lcd, sizeof(pdc_chassis_lcd)) &&
+	    pdc_chassis_lcd.enabled) {
+		bzero(&nca, sizeof(nca));
+		nca.ca_name = "lcd";
+		nca.ca_irq = -1;
+		nca.ca_iot = &hppa_bustag;
+		nca.ca_hpa = pdc_chassis_lcd.cmd_addr;
+		nca.ca_hpamask = HPPA_IOBEGIN;
+		nca.ca_pdc_iodc_read = (void *)&pdc_chassis_lcd;
+
+		config_found(self, &nca, mbprint);
+	}
+#endif
+
+	bzero(&nca, sizeof(nca));
 	nca.ca_hpa = 0;
 	nca.ca_irq = -1;
 	nca.ca_hpamask = HPPA_IOBEGIN;

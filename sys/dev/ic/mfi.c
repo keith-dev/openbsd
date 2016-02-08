@@ -1,4 +1,4 @@
-/* $OpenBSD: mfi.c,v 1.70 2007/02/14 00:53:16 dlg Exp $ */
+/* $OpenBSD: mfi.c,v 1.73 2007/06/24 05:34:35 dlg Exp $ */
 /*
  * Copyright (c) 2006 Marco Peereboom <marco@peereboom.us>
  *
@@ -104,8 +104,10 @@ int		mfi_ioctl_alarm(struct mfi_softc *, struct bioc_alarm *);
 int		mfi_ioctl_blink(struct mfi_softc *sc, struct bioc_blink *);
 int		mfi_ioctl_setstate(struct mfi_softc *, struct bioc_setstate *);
 int		mfi_bio_hs(struct mfi_softc *, int, int, void *);
+#ifndef SMALL_KERNEL
 int		mfi_create_sensors(struct mfi_softc *);
 void		mfi_refresh_sensors(void *);
+#endif /* SMALL_KERNEL */
 #endif /* NBIO > 0 */
 
 struct mfi_ccb *
@@ -682,8 +684,10 @@ mfi_attach(struct mfi_softc *sc)
 	else
 		sc->sc_ioctl = mfi_ioctl;
 
+#ifndef SMALL_KERNEL
 	if (mfi_create_sensors(sc) != 0)
 		printf("%s: unable to create sensors\n", DEVNAME(sc));
+#endif
 #endif /* NBIO > 0 */
 
 	return (0);
@@ -1768,6 +1772,7 @@ freeme:
 	return (rv);
 }
 
+#ifndef SMALL_KERNEL
 int
 mfi_create_sensors(struct mfi_softc *sc)
 {
@@ -1788,11 +1793,11 @@ mfi_create_sensors(struct mfi_softc *sc)
 	if (ssc == NULL)
 		return (1);
 
-	sc->sc_sensors = malloc(sizeof(struct sensor) * sc->sc_ld_cnt,
+	sc->sc_sensors = malloc(sizeof(struct ksensor) * sc->sc_ld_cnt,
 	    M_DEVBUF, M_WAITOK);
 	if (sc->sc_sensors == NULL)
 		return (1);
-	bzero(sc->sc_sensors, sizeof(struct sensor) * sc->sc_ld_cnt);	
+	bzero(sc->sc_sensors, sizeof(struct ksensor) * sc->sc_ld_cnt);	
 
 	strlcpy(sc->sc_sensordev.xname, DEVNAME(sc),
 	    sizeof(sc->sc_sensordev.xname));
@@ -1812,7 +1817,7 @@ mfi_create_sensors(struct mfi_softc *sc)
 		sensor_attach(&sc->sc_sensordev, &sc->sc_sensors[i]);
 	}
 
-	if (sensor_task_register(sc, mfi_refresh_sensors, 10) != 0)
+	if (sensor_task_register(sc, mfi_refresh_sensors, 10) == NULL)
 		goto bad;
 
 	sensordev_install(&sc->sc_sensordev);
@@ -1865,4 +1870,5 @@ mfi_refresh_sensors(void *arg)
 
 	}
 }
+#endif /* SMALL_KERNEL */
 #endif /* NBIO > 0 */

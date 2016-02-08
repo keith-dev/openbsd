@@ -1,9 +1,10 @@
-/*	$OpenBSD: ieee80211_crypto.c,v 1.9 2006/12/29 15:45:56 reyk Exp $	*/
+/*	$OpenBSD: ieee80211_crypto.c,v 1.31 2007/08/03 16:51:06 damien Exp $	*/
 /*	$NetBSD: ieee80211_crypto.c,v 1.5 2003/12/14 09:56:53 dyoung Exp $	*/
 
 /*-
  * Copyright (c) 2001 Atsushi Onoe
  * Copyright (c) 2002, 2003 Sam Leffler, Errno Consulting
+ * Copyright (c) 2007 Damien Bergamini
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -16,10 +17,6 @@
  *    documentation and/or other materials provided with the distribution.
  * 3. The name of the author may not be used to endorse or promote products
  *    derived from this software without specific prior written permission.
- *
- * Alternatively, this software may be distributed under the terms of the
- * GNU General Public License ("GPL") version 2 as published by the Free
- * Software Foundation.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -66,20 +63,53 @@
 
 #include <dev/rndvar.h>
 #include <crypto/arc4.h>
-#define	arc4_ctxlen()			sizeof (struct rc4_ctx)
-#define	arc4_setkey(_c,_k,_l)		rc4_keysetup(_c,_k,_l)
-#define	arc4_encrypt(_c,_d,_s,_l)	rc4_crypt(_c,_s,_d,_l)
+#include <crypto/md5.h>
+#include <crypto/sha1.h>
+#include <crypto/rijndael.h>
 
-static	void ieee80211_crc_init(void);
-static	u_int32_t ieee80211_crc_update(u_int32_t crc, u_int8_t *buf, int len);
+struct vector {
+	const void	*base;
+	size_t		len;
+};
+
+void	ieee80211_crc_init(void);
+u_int32_t ieee80211_crc_update(u_int32_t, const u_int8_t *, int);
+struct mbuf *ieee80211_ccmp_encrypt(struct ieee80211com *, struct mbuf *,
+	    struct ieee80211_key *);
+struct mbuf *ieee80211_ccmp_decrypt(struct ieee80211com *, struct mbuf *,
+	    struct ieee80211_key *);
+struct mbuf *ieee80211_tkip_encrypt(struct ieee80211com *, struct mbuf *,
+	    struct ieee80211_key *);
+struct mbuf *ieee80211_tkip_decrypt(struct ieee80211com *, struct mbuf *,
+	    struct ieee80211_key *);
+void	ieee80211_aes_key_wrap(const u_int8_t *, size_t, const u_int8_t *,
+	    size_t, u_int8_t *);
+int	ieee80211_aes_key_unwrap(const u_int8_t *, size_t, const u_int8_t *,
+	    u_int8_t *, size_t);
+void	ieee80211_hmac_md5_v(const struct vector *, int, const u_int8_t *,
+	    size_t, u_int8_t digest[]);
+void	ieee80211_hmac_md5(const u_int8_t *, size_t, const u_int8_t *, size_t,
+	    u_int8_t digest[]);
+void	ieee80211_hmac_sha1_v(const struct vector *, int, const u_int8_t *,
+	    size_t, u_int8_t digest[]);
+void	ieee80211_hmac_sha1(const u_int8_t *, size_t, const u_int8_t *, size_t,
+	    u_int8_t digest[]);
+void	ieee80211_prf(const u_int8_t *, size_t, struct vector *, int,
+	    u_int8_t *, size_t);
+void	ieee80211_derive_pmkid(const u_int8_t *, size_t, const u_int8_t *,
+	    const u_int8_t *, u_int8_t *);
+void	ieee80211_derive_gtk(const u_int8_t *, size_t, const u_int8_t *,
+	    const u_int8_t *, u_int8_t *, size_t);
 
 void
 ieee80211_crypto_attach(struct ifnet *ifp)
 {
-	/*
-	 * Setup crypto support.
-	 */
+	struct ieee80211com *ic = (void *)ifp;
+
 	ieee80211_crc_init();
+
+	/* initialize 256-bit global key counter to a random value */
+	get_random_bytes(ic->ic_globalcnt, EAPOL_KEY_NONCE_LEN);
 }
 
 void
@@ -91,6 +121,237 @@ ieee80211_crypto_detach(struct ifnet *ifp)
 		free(ic->ic_wep_ctx, M_DEVBUF);
 		ic->ic_wep_ctx = NULL;
 	}
+}
+
+struct mbuf *
+ieee80211_encrypt(struct ieee80211com *ic, struct mbuf *m0,
+    struct ieee80211_node *ni)
+{
+	struct ieee80211_frame *wh;
+	struct ieee80211_key *k;
+
+	/* select the key for encryption */
+	wh = mtod(m0, struct ieee80211_frame *);
+	if (IEEE80211_IS_MULTICAST(wh->i_addr1) ||
+	    ni->ni_pairwise_cipher == IEEE80211_CIPHER_USEGROUP)
+		k = &ic->ic_nw_keys[ic->ic_wep_txkey];
+	else
+		k = &ni->ni_pairwise_key;
+
+	switch (k->k_cipher) {
+	case IEEE80211_CIPHER_WEP40:
+	case IEEE80211_CIPHER_WEP104:
+		m0 = ieee80211_wep_crypt(&ic->ic_if, m0, 1);
+		break;
+	case IEEE80211_CIPHER_TKIP:
+		m0 = ieee80211_tkip_encrypt(ic, m0, k);
+		break;
+	case IEEE80211_CIPHER_CCMP:
+		m0 = ieee80211_ccmp_encrypt(ic, m0, k);
+		break;
+	default:
+		/* should not get there */
+		m_freem(m0);
+		m0 = NULL;
+	}
+	return m0;
+}
+
+struct mbuf *
+ieee80211_decrypt(struct ieee80211com *ic, struct mbuf *m0,
+    struct ieee80211_node *ni)
+{
+	struct ieee80211_frame *wh;
+	struct ieee80211_key *k;
+
+	/* select the key for decryption */
+	wh = mtod(m0, struct ieee80211_frame *);
+	if (IEEE80211_IS_MULTICAST(wh->i_addr1) ||
+	    ni->ni_pairwise_cipher == IEEE80211_CIPHER_USEGROUP) {
+		size_t hdrlen = sizeof(*wh);	/* XXX QoS */
+		u_int8_t *ivp = (u_int8_t *)wh + hdrlen;
+		/* key identifier is always located at the same index */
+		int kid = ivp[IEEE80211_WEP_IVLEN] >> 6;
+		k = &ic->ic_nw_keys[kid];
+	} else
+		k = &ni->ni_pairwise_key;
+
+	switch (k->k_cipher) {
+	case IEEE80211_CIPHER_WEP40:
+	case IEEE80211_CIPHER_WEP104:
+		m0 = ieee80211_wep_crypt(&ic->ic_if, m0, 0);
+		break;
+	case IEEE80211_CIPHER_TKIP:
+		m0 = ieee80211_tkip_decrypt(ic, m0, k);
+		break;
+	case IEEE80211_CIPHER_CCMP:
+		m0 = ieee80211_ccmp_decrypt(ic, m0, k);
+		break;
+	default:
+		/* should not get there */
+		m_freem(m0);
+		m0 = NULL;
+	}
+	return m0;
+}
+
+#define IEEE80211_CCMP_HDRLEN	8
+#define IEEE80211_CCMP_MICLEN	8
+
+struct mbuf *
+ieee80211_ccmp_encrypt(struct ieee80211com *ic, struct mbuf *m0,
+    struct ieee80211_key *k)
+{
+	struct ieee80211_frame *wh;
+	size_t hdrlen = sizeof(*wh);	/* XXX QoS */
+	u_int8_t *ivp;
+
+	M_PREPEND(m0, IEEE80211_CCMP_HDRLEN, M_NOWAIT);
+	if (m0 == NULL)
+		return m0;
+	wh = mtod(m0, struct ieee80211_frame *);
+	ovbcopy(mtod(m0, u_int8_t *) + IEEE80211_CCMP_HDRLEN, wh, hdrlen);
+	ivp = (u_int8_t *)wh + hdrlen;
+
+	k->k_tsc++;	/* increment the 48-bit PN */
+	ivp[0] = k->k_tsc;		/* PN0 */
+	ivp[1] = k->k_tsc >> 8;		/* PN1 */
+	ivp[2] = 0;			/* Rsvd */
+	ivp[3] = k->k_id << 6 | IEEE80211_WEP_EXTIV;	/* KeyID | ExtIV */
+	ivp[4] = k->k_tsc >> 16;	/* PN2 */
+	ivp[5] = k->k_tsc >> 24;	/* PN3 */
+	ivp[6] = k->k_tsc >> 32;	/* PN4 */
+	ivp[7] = k->k_tsc >> 40;	/* PN5 */
+
+	/* XXX encrypt payload if HW encryption not supported */
+
+	return m0;
+}
+
+struct mbuf *
+ieee80211_ccmp_decrypt(struct ieee80211com *ic, struct mbuf *m0,
+    struct ieee80211_key *k)
+{
+	struct ieee80211_frame *wh;
+	size_t hdrlen = sizeof(*wh);	/* XXX QoS */
+	u_int64_t pn;
+	u_int8_t *ivp;
+
+	wh = mtod(m0, struct ieee80211_frame *);
+	ivp = (u_int8_t *)wh + hdrlen;
+
+	/* check that ExtIV bit is be set */
+	if (!(ivp[3] & IEEE80211_WEP_EXTIV)) {
+		m_freem(m0);
+		return NULL;
+	}
+	/* extract the 48-bit PN from the CCMP header */
+	pn = (u_int64_t)ivp[0]       |
+	     (u_int64_t)ivp[1] <<  8 |
+	     (u_int64_t)ivp[4] << 16 |
+	     (u_int64_t)ivp[5] << 24 |
+	     (u_int64_t)ivp[6] << 32 |
+	     (u_int64_t)ivp[7] << 40;
+	/* NB: the keys are refreshed, we'll never overflow the 48 bits */
+	if (pn <= k->k_rsc) {
+		/* replayed frame, discard */
+		/* XXX statistics */
+		m_freem(m0);
+		return NULL;
+	}
+
+	/* XXX decrypt payload if HW encryption not supported */
+
+	ovbcopy(mtod(m0, u_int8_t *),
+	    mtod(m0, u_int8_t *) + IEEE80211_CCMP_HDRLEN, hdrlen);
+	m_adj(m0, IEEE80211_CCMP_HDRLEN);
+	m_adj(m0, -IEEE80211_CCMP_MICLEN);
+
+	/* update last seen packet number */
+	k->k_rsc = pn;
+
+	return m0;
+}
+
+#define IEEE80211_TKIP_HDRLEN	8
+#define IEEE80211_TKIP_MICLEN	8
+#define IEEE80211_TKIP_ICVLEN	4
+
+struct mbuf *
+ieee80211_tkip_encrypt(struct ieee80211com *ic, struct mbuf *m0,
+    struct ieee80211_key *k)
+{
+	struct ieee80211_frame *wh;
+	size_t hdrlen = sizeof(*wh);	/* XXX QoS */
+	u_int8_t *ivp;
+
+	M_PREPEND(m0, IEEE80211_TKIP_HDRLEN, M_NOWAIT);
+	if (m0 == NULL)
+		return m0;
+	wh = mtod(m0, struct ieee80211_frame *);
+	ovbcopy(mtod(m0, u_int8_t *) + IEEE80211_TKIP_HDRLEN, wh, hdrlen);
+	ivp = (u_int8_t *)wh + hdrlen;
+
+	ivp[0] = k->k_tsc >> 8;		/* TSC1 */
+	/* WEP Seed = (TSC1 | 0x20) & 0x7f (see 8.3.2.2) */
+	ivp[1] = (ivp[0] | 0x20) & 0x7f;
+	ivp[2] = k->k_tsc;		/* TSC0 */
+	ivp[3] = k->k_id << 6 | IEEE80211_WEP_EXTIV;	/* KeyID | ExtIV */
+	ivp[4] = k->k_tsc >> 16;	/* TSC2 */
+	ivp[5] = k->k_tsc >> 24;	/* TSC3 */
+	ivp[6] = k->k_tsc >> 32;	/* TSC4 */
+	ivp[7] = k->k_tsc >> 40;	/* TSC5 */
+
+	/* XXX encrypt payload if HW encryption not supported */
+
+	k->k_tsc++;	/* increment the 48-bit TSC */
+
+	return m0;
+}
+
+struct mbuf *
+ieee80211_tkip_decrypt(struct ieee80211com *ic, struct mbuf *m0,
+    struct ieee80211_key *k)
+{
+	struct ieee80211_frame *wh;
+	size_t hdrlen = sizeof(*wh);	/* XXX QoS */
+	u_int64_t tsc;
+	u_int8_t *ivp;
+
+	wh = mtod(m0, struct ieee80211_frame *);
+	ivp = (u_int8_t *)wh + hdrlen;
+
+	/* check that ExtIV bit is be set */
+	if (!(ivp[3] & IEEE80211_WEP_EXTIV)) {
+		m_freem(m0);
+		return NULL;
+	}
+	/* extract the 48-bit TSC from the TKIP header */
+	tsc = (u_int64_t)ivp[2]       |
+	      (u_int64_t)ivp[0] <<  8 |
+	      (u_int64_t)ivp[4] << 16 |
+	      (u_int64_t)ivp[5] << 24 |
+	      (u_int64_t)ivp[6] << 32 |
+	      (u_int64_t)ivp[7] << 40;
+	/* NB: the keys are refreshed, we'll never overflow the 48 bits */
+	if (tsc <= k->k_rsc) {
+		/* replayed frame, discard */
+		/* XXX statistics */
+		m_freem(m0);
+		return NULL;
+	}
+
+	/* XXX decrypt payload if HW encryption not supported */
+
+	ovbcopy(mtod(m0, u_int8_t *),
+	    mtod(m0, u_int8_t *) + IEEE80211_TKIP_HDRLEN, hdrlen);
+	m_adj(m0, IEEE80211_TKIP_HDRLEN);
+	m_adj(m0, -IEEE80211_TKIP_ICVLEN);
+
+	/* update last seen packet number */
+	k->k_rsc = tsc;
+
+	return m0;
 }
 
 /* Round up to a multiple of IEEE80211_WEP_KEYLEN + IEEE80211_WEP_IVLEN */
@@ -113,7 +374,7 @@ ieee80211_wep_crypt(struct ifnet *ifp, struct mbuf *m0, int txflag)
 
 	n0 = NULL;
 	if ((ctx = ic->ic_wep_ctx) == NULL) {
-		ctx = malloc(arc4_ctxlen(), M_DEVBUF, M_NOWAIT);
+		ctx = malloc(sizeof(struct rc4_ctx), M_DEVBUF, M_NOWAIT);
 		if (ctx == NULL) {
 			ic->ic_stats.is_crypto_nomem++;
 			goto fail;
@@ -145,8 +406,14 @@ ieee80211_wep_crypt(struct ifnet *ifp, struct mbuf *m0, int txflag)
 		if (n->m_flags & M_EXT)
 			n->m_len = n->m_ext.ext_size;
 	}
-	len = sizeof(struct ieee80211_frame);
-	memcpy(mtod(n, caddr_t), mtod(m, caddr_t), len);
+	wh = mtod(m, struct ieee80211_frame *);
+	if ((wh->i_fc[0] &
+	     (IEEE80211_FC0_TYPE_MASK | IEEE80211_FC0_SUBTYPE_QOS)) ==
+	    (IEEE80211_FC0_TYPE_DATA | IEEE80211_FC0_SUBTYPE_QOS))
+		len = sizeof(struct ieee80211_qosframe);
+	else
+		len = sizeof(struct ieee80211_frame);
+	memcpy(mtod(n, caddr_t), wh, len);
 	wh = mtod(n, struct ieee80211_frame *);
 	left -= len;
 	moff = len;
@@ -186,10 +453,10 @@ ieee80211_wep_crypt(struct ifnet *ifp, struct mbuf *m0, int txflag)
 	 */
 	bzero(&keybuf, sizeof(keybuf));
 	memcpy(keybuf, ivp, IEEE80211_WEP_IVLEN);
-	memcpy(keybuf + IEEE80211_WEP_IVLEN, ic->ic_nw_keys[kid].wk_key,
-	    ic->ic_nw_keys[kid].wk_len);
-	len = klen_round(IEEE80211_WEP_IVLEN + ic->ic_nw_keys[kid].wk_len);
-	arc4_setkey(ctx, keybuf, len);
+	memcpy(keybuf + IEEE80211_WEP_IVLEN, ic->ic_nw_keys[kid].k_key,
+	    ic->ic_nw_keys[kid].k_len);
+	len = klen_round(IEEE80211_WEP_IVLEN + ic->ic_nw_keys[kid].k_len);
+	rc4_keysetup(ctx, keybuf, len);
 
 	/* encrypt with calculating CRC */
 	crc = ~0;
@@ -224,8 +491,8 @@ ieee80211_wep_crypt(struct ifnet *ifp, struct mbuf *m0, int txflag)
 		}
 		if (len > left)
 			len = left;
-		arc4_encrypt(ctx, mtod(n, caddr_t) + noff,
-		    mtod(m, caddr_t) + moff, len);
+		rc4_crypt(ctx, mtod(m, caddr_t) + moff,
+		    mtod(n, caddr_t) + noff, len);
 		if (txflag)
 			crc = ieee80211_crc_update(crc,
 			    mtod(m, u_int8_t *) + moff, len);
@@ -252,7 +519,7 @@ ieee80211_wep_crypt(struct ifnet *ifp, struct mbuf *m0, int txflag)
 			n->m_len = sizeof(crcbuf);
 			noff = 0;
 		}
-		arc4_encrypt(ctx, mtod(n, caddr_t) + noff, crcbuf,
+		rc4_crypt(ctx, crcbuf, mtod(n, caddr_t) + noff,
 		    sizeof(crcbuf));
 	} else {
 		n->m_len = noff;
@@ -261,8 +528,8 @@ ieee80211_wep_crypt(struct ifnet *ifp, struct mbuf *m0, int txflag)
 			if (len > m->m_len - moff)
 				len = m->m_len - moff;
 			if (len > 0)
-				arc4_encrypt(ctx, crcbuf + noff,
-				    mtod(m, caddr_t) + moff, len);
+				rc4_crypt(ctx, mtod(m, caddr_t) + moff,
+				    crcbuf + noff, len);
 			m = m->m_next;
 			moff = 0;
 		}
@@ -297,7 +564,7 @@ ieee80211_wep_crypt(struct ifnet *ifp, struct mbuf *m0, int txflag)
 static u_int32_t ieee80211_crc_table[256];
 
 /* Make the table for a fast CRC. */
-static void
+void
 ieee80211_crc_init(void)
 {
 	u_int32_t c;
@@ -320,13 +587,452 @@ ieee80211_crc_init(void)
  * should be initialized to all 1's, and the transmitted value
  * is the 1's complement of the final running CRC
  */
-
-static u_int32_t
-ieee80211_crc_update(u_int32_t crc, u_int8_t *buf, int len)
+u_int32_t
+ieee80211_crc_update(u_int32_t crc, const u_int8_t *buf, int len)
 {
-	u_int8_t *endbuf;
+	const u_int8_t *endbuf;
 
 	for (endbuf = buf + len; buf < endbuf; buf++)
 		crc = ieee80211_crc_table[(crc ^ *buf) & 0xff] ^ (crc >> 8);
 	return crc;
+}
+
+/*
+ * AES Key Wrap Algorithm (see RFC 3394).
+ */
+static const u_int8_t aes_key_wrap_iv[8] =
+	{ 0xa6, 0xa6, 0xa6, 0xa6, 0xa6, 0xa6, 0xa6, 0xa6 };
+
+void
+ieee80211_aes_key_wrap(const u_int8_t *kek, size_t kek_len, const u_int8_t *pt,
+    size_t len, u_int8_t *ct)
+{
+	rijndael_ctx ctx;
+	u_int8_t *a, *r, ar[16];
+	u_int64_t t, b[2];
+	size_t i;
+	int j;
+
+	/* allow ciphertext and plaintext to overlap (ct == pt) */
+	ovbcopy(pt, ct + 8, len * 8);
+	a = ct;
+	memcpy(a, aes_key_wrap_iv, 8);	/* default IV */
+
+	rijndael_set_key_enc_only(&ctx, (u_int8_t *)kek, kek_len * 8);
+
+	for (j = 0, t = 1; j < 6; j++) {
+		r = ct + 8;
+		for (i = 0; i < len; i++, t++) {
+			memcpy(ar, a, 8);
+			memcpy(ar + 8, r, 8);
+			rijndael_encrypt(&ctx, ar, (u_int8_t *)b);
+			b[0] ^= htobe64(t);
+			memcpy(a, &b[0], 8);
+			memcpy(r, &b[1], 8);
+
+			r += 8;
+		}
+	}
+}
+
+int
+ieee80211_aes_key_unwrap(const u_int8_t *kek, size_t kek_len,
+    const u_int8_t *ct, u_int8_t *pt, size_t len)
+{
+	rijndael_ctx ctx;
+	u_int8_t a[8], *r, b[16];
+	u_int64_t t, ar[2];
+	size_t i;
+	int j;
+
+	memcpy(a, ct, 8);
+	/* allow ciphertext and plaintext to overlap (ct == pt) */
+	ovbcopy(ct + 8, pt, len * 8);
+
+	rijndael_set_key(&ctx, (u_int8_t *)kek, kek_len * 8);
+
+	for (j = 0, t = 6 * len; j < 6; j++) {
+		r = pt + (len - 1) * 8;
+		for (i = 0; i < len; i++, t--) {
+			memcpy(&ar[0], a, 8);
+			ar[0] ^= htobe64(t);
+			memcpy(&ar[1], r, 8);
+			rijndael_decrypt(&ctx, (u_int8_t *)ar, b);
+			memcpy(a, b, 8);
+			memcpy(r, b + 8, 8);
+
+			r -= 8;
+		}
+	}
+	return memcmp(a, aes_key_wrap_iv, 8) != 0;
+}
+
+void
+ieee80211_hmac_md5_v(const struct vector *vec, int vcnt, const u_int8_t *key,
+    size_t key_len, u_int8_t digest[MD5_DIGEST_LENGTH])
+{
+	MD5_CTX ctx;
+	u_int8_t k_pad[MD5_BLOCK_LENGTH];
+	u_int8_t tk[MD5_DIGEST_LENGTH];
+	int i;
+
+	if (key_len > MD5_BLOCK_LENGTH) {
+		MD5Init(&ctx);
+		MD5Update(&ctx, (u_int8_t *)key, key_len);
+		MD5Final(tk, &ctx);
+
+		key = tk;
+		key_len = MD5_DIGEST_LENGTH;
+	}
+
+	bzero(k_pad, sizeof k_pad);
+	bcopy(key, k_pad, key_len);
+	for (i = 0; i < MD5_BLOCK_LENGTH; i++)
+		k_pad[i] ^= 0x36;
+
+	MD5Init(&ctx);
+	MD5Update(&ctx, k_pad, MD5_BLOCK_LENGTH);
+	for (i = 0; i < vcnt; i++)
+		MD5Update(&ctx, (u_int8_t *)vec[i].base, vec[i].len);
+	MD5Final(digest, &ctx);
+
+	bzero(k_pad, sizeof k_pad);
+	bcopy(key, k_pad, key_len);
+	for (i = 0; i < MD5_BLOCK_LENGTH; i++)
+		k_pad[i] ^= 0x5c;
+
+	MD5Init(&ctx);
+	MD5Update(&ctx, k_pad, MD5_BLOCK_LENGTH);
+	MD5Update(&ctx, digest, MD5_DIGEST_LENGTH);
+	MD5Final(digest, &ctx);
+}
+
+void
+ieee80211_hmac_md5(const u_int8_t *text, size_t text_len, const u_int8_t *key,
+    size_t key_len, u_int8_t digest[MD5_DIGEST_LENGTH])
+{
+	struct vector vec;
+	vec.base = text;
+	vec.len  = text_len;
+	ieee80211_hmac_md5_v(&vec, 1, key, key_len, digest);
+}
+
+void
+ieee80211_hmac_sha1_v(const struct vector *vec, int vcnt, const u_int8_t *key,
+    size_t key_len, u_int8_t digest[SHA1_DIGEST_LENGTH])
+{
+	SHA1_CTX ctx;
+	u_int8_t k_pad[SHA1_BLOCK_LENGTH];
+	u_int8_t tk[SHA1_DIGEST_LENGTH];
+	int i;
+
+	if (key_len > SHA1_BLOCK_LENGTH) {
+		SHA1Init(&ctx);
+		SHA1Update(&ctx, (u_int8_t *)key, key_len);
+		SHA1Final(tk, &ctx);
+
+		key = tk;
+		key_len = SHA1_DIGEST_LENGTH;
+	}
+
+	bzero(k_pad, sizeof k_pad);
+	bcopy(key, k_pad, key_len);
+	for (i = 0; i < SHA1_BLOCK_LENGTH; i++)
+		k_pad[i] ^= 0x36;
+
+	SHA1Init(&ctx);
+	SHA1Update(&ctx, k_pad, SHA1_BLOCK_LENGTH);
+	for (i = 0; i < vcnt; i++)
+		SHA1Update(&ctx, (u_int8_t *)vec[i].base, vec[i].len);
+	SHA1Final(digest, &ctx);
+
+	bzero(k_pad, sizeof k_pad);
+	bcopy(key, k_pad, key_len);
+	for (i = 0; i < SHA1_BLOCK_LENGTH; i++)
+		k_pad[i] ^= 0x5c;
+
+	SHA1Init(&ctx);
+	SHA1Update(&ctx, k_pad, SHA1_BLOCK_LENGTH);
+	SHA1Update(&ctx, digest, SHA1_DIGEST_LENGTH);
+	SHA1Final(digest, &ctx);
+}
+
+void
+ieee80211_hmac_sha1(const u_int8_t *text, size_t text_len, const u_int8_t *key,
+    size_t key_len, u_int8_t digest[SHA1_DIGEST_LENGTH])
+{
+	struct vector vec;
+	vec.base = text;
+	vec.len  = text_len;
+	ieee80211_hmac_sha1_v(&vec, 1, key, key_len, digest);
+}
+
+/*
+ * SHA1-based Pseudo-Random Function (see 8.5.1.1).
+ */
+void
+ieee80211_prf(const u_int8_t *key, size_t key_len, struct vector *vec,
+    int vcnt, u_int8_t *output, size_t len)
+{
+	u_int8_t hash[SHA1_DIGEST_LENGTH];
+	u_int8_t count = 0;
+
+	/* single octet count, starts at 0 */
+	vec[vcnt].base = &count;
+	vec[vcnt].len  = 1;
+	vcnt++;
+
+	while (len > SHA1_DIGEST_LENGTH) {
+		ieee80211_hmac_sha1_v(vec, vcnt, key, key_len, output);
+		count++;
+
+		output += SHA1_DIGEST_LENGTH;
+		len -= SHA1_DIGEST_LENGTH;
+	}
+	if (len > 0) {
+		ieee80211_hmac_sha1_v(vec, vcnt, key, key_len, hash);
+		/* truncate HMAC-SHA1 to len bytes */
+		memcpy(output, hash, len);
+	}
+}
+
+/*
+ * Derive Pairwise Transient Key (PTK) (see 8.5.1.2).
+ */
+void
+ieee80211_derive_ptk(const u_int8_t *pmk, size_t pmk_len, const u_int8_t *aa,
+    const u_int8_t *spa, const u_int8_t *anonce, const u_int8_t *snonce,
+    u_int8_t *ptk, size_t ptk_len)
+{
+	struct vector vec[6];	/* +1 for PRF */
+	int ret;
+
+	vec[0].base = "Pairwise key expansion";
+	vec[0].len  = 23;	/* include trailing '\0' */
+
+	ret = memcmp(aa, spa, IEEE80211_ADDR_LEN) < 0;
+	/* Min(AA,SPA) */
+	vec[1].base = ret ? aa : spa;
+	vec[1].len  = IEEE80211_ADDR_LEN;
+	/* Max(AA,SPA) */
+	vec[2].base = ret ? spa : aa;
+	vec[2].len  = IEEE80211_ADDR_LEN;
+
+	ret = memcmp(anonce, snonce, EAPOL_KEY_NONCE_LEN) < 0;
+	/* Min(ANonce,SNonce) */
+	vec[3].base = ret ? anonce : snonce;
+	vec[3].len  = EAPOL_KEY_NONCE_LEN;
+	/* Max(ANonce,SNonce) */
+	vec[4].base = ret ? snonce : anonce;
+	vec[4].len  = EAPOL_KEY_NONCE_LEN;
+
+	ieee80211_prf(pmk, pmk_len, vec, 5, ptk, ptk_len);
+}
+
+/*
+ * Derive Pairwise Master Key Identifier (PMKID) (see 8.5.1.2).
+ */
+void
+ieee80211_derive_pmkid(const u_int8_t *pmk, size_t pmk_len, const u_int8_t *aa,
+    const u_int8_t *spa, u_int8_t *pmkid)
+{
+	struct vector vec[3];
+	u_int8_t hash[SHA1_DIGEST_LENGTH];
+
+	vec[0].base = "PMK Name";
+	vec[0].len  = 8;	/* does *not* include trailing '\0' */
+	vec[1].base = aa;
+	vec[1].len  = IEEE80211_ADDR_LEN;
+	vec[2].base = spa;
+	vec[2].len  = IEEE80211_ADDR_LEN;
+
+	ieee80211_hmac_sha1_v(vec, 3, pmk, pmk_len, hash);
+	/* use the first 128 bits of the HMAC-SHA1 */
+	memcpy(pmkid, hash, IEEE80211_PMKID_LEN);
+}
+
+/*
+ * Derive Group Temporal Key (GTK) (see 8.5.1.3).
+ */
+void
+ieee80211_derive_gtk(const u_int8_t *gmk, size_t gmk_len, const u_int8_t *aa,
+    const u_int8_t *gnonce, u_int8_t *gtk, size_t gtk_len)
+{
+	struct vector vec[4];	/* +1 for PRF */
+
+	vec[0].base = "Group key expansion";
+	vec[0].len  = 20;	/* include trailing '\0' */
+	vec[1].base = aa;
+	vec[1].len  = IEEE80211_ADDR_LEN;
+	vec[2].base = gnonce;
+	vec[2].len  = EAPOL_KEY_NONCE_LEN;
+
+	ieee80211_prf(gmk, gmk_len, vec, 3, gtk, gtk_len);
+}
+
+/* unaligned big endian access */
+#define BE_READ_2(p)				\
+	((u_int16_t)				\
+         ((((const u_int8_t *)(p))[0] << 8) |	\
+          (((const u_int8_t *)(p))[1])))
+
+#define BE_WRITE_2(p, v) do {			\
+	((u_int8_t *)(p))[0] = (v) >> 8;	\
+	((u_int8_t *)(p))[1] = (v) & 0xff;	\
+} while (0)
+
+/*
+ * Compute the Key MIC field of an EAPOL-Key frame using the specified Key
+ * Confirmation Key (KCK).  The hash function can be either HMAC-MD5 or
+ * HMAC-SHA1 depending on the EAPOL-Key Key Descriptor Version.
+ */
+void
+ieee80211_eapol_key_mic(struct ieee80211_eapol_key *key, const u_int8_t *kck)
+{
+	u_int8_t hash[SHA1_DIGEST_LENGTH];
+	u_int16_t len, info;
+
+	len  = BE_READ_2(key->len) + 4;
+	info = BE_READ_2(key->info);
+
+	switch (info & EAPOL_KEY_VERSION_MASK) {
+	case EAPOL_KEY_DESC_V1:
+		ieee80211_hmac_md5((u_int8_t *)key, len, kck, 16, key->mic);
+		break;
+	case EAPOL_KEY_DESC_V2:
+		ieee80211_hmac_sha1((u_int8_t *)key, len, kck, 16, hash);
+		/* truncate HMAC-SHA1 to its 128 MSBs */
+		memcpy(key->mic, hash, EAPOL_KEY_MIC_LEN);
+		break;
+	}
+}
+
+/*
+ * Check the MIC of a received EAPOL-Key frame using the specified Key
+ * Confirmation Key (KCK).
+ */
+int
+ieee80211_eapol_key_check_mic(struct ieee80211_eapol_key *key,
+    const u_int8_t *kck)
+{
+	u_int8_t mic[EAPOL_KEY_MIC_LEN];
+
+	memcpy(mic, key->mic, EAPOL_KEY_MIC_LEN);
+	memset(key->mic, 0, EAPOL_KEY_MIC_LEN);
+	ieee80211_eapol_key_mic(key, kck);
+
+	return memcmp(key->mic, mic, EAPOL_KEY_MIC_LEN) != 0;
+}
+
+/*
+ * Encrypt the Key Data field of an EAPOL-Key frame using the specified Key
+ * Encryption Key (KEK).  The encryption algorithm can be either ARC4 or
+ * AES Key Wrap depending on the EAPOL-Key Key Descriptor Version.
+ */
+void
+ieee80211_eapol_key_encrypt(struct ieee80211com *ic,
+    struct ieee80211_eapol_key *key, const u_int8_t *kek)
+{
+	struct rc4_ctx ctx;
+	u_int8_t keybuf[EAPOL_KEY_IV_LEN + 16];
+	u_int16_t len, info;
+	u_int8_t *data;
+	int n;
+
+	len  = BE_READ_2(key->paylen);
+	info = BE_READ_2(key->info);
+	data = (u_int8_t *)(key + 1);
+
+	switch (info & EAPOL_KEY_VERSION_MASK) {
+	case EAPOL_KEY_DESC_V1:
+		/* set IV to the lower 16 octets of our global key counter */
+		memcpy(key->iv, ic->ic_globalcnt + 16, 16);
+		/* increment our global key counter (256-bit, big-endian) */
+		for (n = 31; n >= 0 && ++ic->ic_globalcnt[n] == 0; n--);
+
+		/* concatenate the EAPOL-Key IV field and the KEK */
+		memcpy(keybuf, key->iv, EAPOL_KEY_IV_LEN);
+		memcpy(keybuf + EAPOL_KEY_IV_LEN, kek, 16);
+
+		rc4_keysetup(&ctx, keybuf, sizeof keybuf);
+		/* discard the first 256 octets of the ARC4 key stream */
+		rc4_skip(&ctx, RC4STATE);
+		rc4_crypt(&ctx, data, data, len);
+		break;
+	case EAPOL_KEY_DESC_V2:
+		if (len < 16 || (len & 7) != 0) {
+			/* insert padding */
+			n = (len < 16) ? 16 - len : 8 - (len & 7);
+			data[len++] = IEEE80211_ELEMID_VENDOR;
+			memset(&data[len], 0, n - 1);
+			len += n - 1;
+		}
+		ieee80211_aes_key_wrap(kek, 16, data, len / 8, data);
+		len += 8;	/* AES Key Wrap adds 8 bytes */
+		/* update key data length */
+		BE_WRITE_2(key->paylen, len);
+		/* update packet body length */
+		BE_WRITE_2(key->len, sizeof(*key) + len - 4);
+		break;
+	}
+}
+
+/*
+ * Decrypt the Key Data field of an EAPOL-Key frame using the specified Key
+ * Encryption Key (KEK).  The encryption algorithm can be either ARC4 or
+ * AES Key Wrap depending on the EAPOL-Key Key Descriptor Version.
+ */
+int
+ieee80211_eapol_key_decrypt(struct ieee80211_eapol_key *key,
+    const u_int8_t *kek)
+{
+	struct rc4_ctx ctx;
+	u_int8_t keybuf[EAPOL_KEY_IV_LEN + 16];
+	u_int16_t len, info;
+	u_int8_t *data;
+
+	len  = BE_READ_2(key->paylen);
+	info = BE_READ_2(key->info);
+	data = (u_int8_t *)(key + 1);
+
+	switch (info & EAPOL_KEY_VERSION_MASK) {
+	case EAPOL_KEY_DESC_V1:
+		/* concatenate the EAPOL-Key IV field and the KEK */
+		memcpy(keybuf, key->iv, EAPOL_KEY_IV_LEN);
+		memcpy(keybuf + EAPOL_KEY_IV_LEN, kek, 16);
+
+		rc4_keysetup(&ctx, keybuf, sizeof keybuf);
+		/* discard the first 256 octets of the ARC4 key stream */
+		rc4_skip(&ctx, RC4STATE);
+		rc4_crypt(&ctx, data, data, len);
+		return 0;
+	case EAPOL_KEY_DESC_V2:
+		/* Key Data Length must be a multiple of 8 */
+		if (len < 16 + 8 || (len & 7) != 0)
+			return 1;
+		len -= 8;	/* AES Key Wrap adds 8 bytes */
+		return ieee80211_aes_key_unwrap(kek, 16, data, data, len / 8);
+	}
+
+	return 1;	/* unknown Key Descriptor Version */
+}
+
+/*
+ * Return the length in bytes of a cipher suite key (see Table 60).
+ */
+int
+ieee80211_cipher_keylen(enum ieee80211_cipher cipher)
+{
+	switch (cipher) {
+	case IEEE80211_CIPHER_WEP40:
+		return 5;
+	case IEEE80211_CIPHER_TKIP:
+		return 32;
+	case IEEE80211_CIPHER_CCMP:
+		return 16;
+	case IEEE80211_CIPHER_WEP104:
+		return 13;
+	default:	/* unknown cipher */
+		return 0;
+	}
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: route.c,v 1.104 2006/11/28 19:21:15 reyk Exp $	*/
+/*	$OpenBSD: route.c,v 1.110 2007/06/04 12:23:43 henning Exp $	*/
 /*	$NetBSD: route.c,v 1.16 1996/04/15 18:27:05 cgd Exp $	*/
 
 /*
@@ -41,7 +41,6 @@
 #include <net/if_types.h>
 #include <net/route.h>
 #include <netinet/in.h>
-#include <netipx/ipx.h>
 #include <arpa/inet.h>
 #include <netdb.h>
 
@@ -68,7 +67,6 @@ union	sockunion {
 	struct sockaddr		sa;
 	struct sockaddr_in	sin;
 	struct sockaddr_in6	sin6;
-	struct sockaddr_ipx	sipx;
 	struct sockaddr_dl	sdl;
 	struct sockaddr_rtlabel	rtlabel;
 } so_dst, so_gate, so_mask, so_genmask, so_ifa, so_ifp, so_label;
@@ -76,7 +74,7 @@ union	sockunion {
 typedef union sockunion *sup;
 pid_t	pid;
 int	rtm_addrs, s;
-int	forcehost, forcenet, nflag, af, qflag, tflag;
+int	forcehost, forcenet, Fflag, nflag, af, qflag, tflag;
 int	iflag, verbose, aflen = sizeof(struct sockaddr_in);
 int	locking, lockrest, debugonly;
 u_long	rtm_inits;
@@ -117,7 +115,7 @@ usage(char *cp)
 	if (cp)
 		warnx("botched keyword: %s", cp);
 	fprintf(stderr,
-	    "usage: %s [-dnqtv] [ -T tableid ] command [[modifiers] args]\n",
+	    "usage: %s [-dnqtv] [-T tableid] command [[modifiers] args]\n",
 	    __progname);
 	fprintf(stderr,
 	    "commands: add, change, delete, flush, get, monitor, show\n");
@@ -225,9 +223,6 @@ flushroutes(int argc, char **argv)
 				break;
 			case K_INET6:
 				af = AF_INET6;
-				break;
-			case K_IPX:
-				af = AF_IPX;
 				break;
 			case K_LINK:
 				af = AF_LINK;
@@ -369,10 +364,6 @@ newroute(int argc, char **argv)
 			case K_SA:
 				af = PF_ROUTE;
 				aflen = sizeof(union sockunion);
-				break;
-			case K_IPX:
-				af = AF_IPX;
-				aflen = sizeof(struct sockaddr_ipx);
 				break;
 			case K_IFACE:
 			case K_INTERFACE:
@@ -579,9 +570,8 @@ show(int argc, char *argv[])
 {
 	int	af = 0;
 
-	if (argc > 1) {
-		argv++;
-		if (argc == 2 && **argv == '-')
+	while (--argc > 0) {
+		if (**(++argv)== '-')
 			switch (keyword(*argv + 1)) {
 			case K_INET:
 				af = AF_INET;
@@ -589,14 +579,14 @@ show(int argc, char *argv[])
 			case K_INET6:
 				af = AF_INET6;
 				break;
-			case K_IPX:
-				af = AF_IPX;
-				break;
 			case K_LINK:
 				af = AF_LINK;
 				break;
 			case K_ENCAP:
 				af = PF_KEY;
+				break;
+			case K_GATEWAY:
+				Fflag = 1;
 				break;
 			default:
 				usage(*argv);
@@ -775,19 +765,6 @@ getaddr(int which, char *s, struct hostent **hpp)
 		} else
 			return (1);
 	    }
-
-	case AF_IPX:
-		if (which == RTA_DST) {
-			extern short ipx_bh[3];
-			struct sockaddr_ipx *sms = &(so_mask.sipx);
-			memset(sms, 0, sizeof(*sms));
-			sms->sipx_family = 0;
-			sms->sipx_len = 6;
-			sms->sipx_addr.ipx_net = *(union ipx_net *)ipx_bh;
-			rtm_addrs |= RTA_NETMASK;
-		}
-		su->sipx.sipx_addr = ipx_addr(s);
-		return (!ipx_nullhost(su->sipx.sipx_addr));
 
 	case AF_LINK:
 		link_addr(s, &su->sdl);
@@ -1031,7 +1008,6 @@ mask_addr(union sockunion *addr, union sockunion *mask, int which)
 	if ((rtm_addrs & which) == 0)
 		return;
 	switch (addr->sa.sa_family) {
-	case AF_IPX:
 	case AF_INET:
 	case AF_INET6:
 	case 0:
@@ -1090,9 +1066,6 @@ get_linkstate(int mt, int link_state)
 	case IFT_FDDI:
 		media_type = IFM_FDDI;
 		break;
-	case IFT_ISO88025:
-		media_type = IFM_TOKEN;
-		break;
 	case IFT_CARP:
 		media_type = IFM_CARP;
 		break;
@@ -1136,8 +1109,7 @@ print_rtmsg(struct rt_msghdr *rtm, int msglen)
 		    rtm->rtm_version);
 		return;
 	}
-	printf("%s: len %d, table %u, ", msgtypes[rtm->rtm_type],
-	    rtm->rtm_msglen, rtm->rtm_tableid);
+	printf("%s: len %d, ", msgtypes[rtm->rtm_type], rtm->rtm_msglen);
 	switch (rtm->rtm_type) {
 	case RTM_IFINFO:
 		ifm = (struct if_msghdr *)rtm;
@@ -1175,8 +1147,9 @@ print_rtmsg(struct rt_msghdr *rtm, int msglen)
 		printf("\n");
 		break;
 	default:
-		printf("pid: %ld, seq %d, errno %d, flags:",
-		    (long)rtm->rtm_pid, rtm->rtm_seq, rtm->rtm_errno);
+		printf("table: %u, pid: %ld, seq %d, errno %d, flags:",
+		    rtm->rtm_tableid, (long)rtm->rtm_pid, rtm->rtm_seq,
+		    rtm->rtm_errno);
 		bprintf(stdout, rtm->rtm_flags, routeflags);
 		pmsg_common(rtm);
 	}
@@ -1391,9 +1364,6 @@ sodump(sup su, char *which)
 		    ntop_buf, sizeof(ntop_buf)));
 		break;
 	    }
-	case AF_IPX:
-		printf("%s: ipx %s; ", which, ipx_ntoa(su->sipx.sipx_addr));
-		break;
 	}
 	fflush(stdout);
 }

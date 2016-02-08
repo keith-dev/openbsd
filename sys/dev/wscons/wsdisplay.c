@@ -1,4 +1,4 @@
-/* $OpenBSD: wsdisplay.c,v 1.77 2007/03/07 06:23:04 miod Exp $ */
+/* $OpenBSD: wsdisplay.c,v 1.81 2007/07/25 23:11:52 art Exp $ */
 /* $NetBSD: wsdisplay.c,v 1.82 2005/02/27 00:27:52 perry Exp $ */
 
 /*
@@ -2111,7 +2111,7 @@ wsdisplay_unset_cons_kbd()
 }
 
 /*
- * Switch the console display to it's first screen.
+ * Switch the console display to its first screen.
  */
 void
 wsdisplay_switchtoconsole()
@@ -3283,7 +3283,7 @@ wsmoused_release(struct wsdisplay_softc *sc)
 
 		/* inject event to notify wsmoused(8) to close mouse device */
 		if (wsms_dev != NULL) 
-			wsmouse_input(wsms_dev, 0, 0, 0, 0,
+			wsmouse_input(wsms_dev, 0, 0, 0, 0, 0,
 				      WSMOUSE_INPUT_WSMOUSED_CLOSE);
 		
 	}

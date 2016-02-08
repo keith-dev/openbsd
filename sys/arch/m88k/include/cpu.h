@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.18 2007/01/12 21:41:53 aoyama Exp $ */
+/*	$OpenBSD: cpu.h,v 1.22 2007/05/19 20:34:32 miod Exp $ */
 /*
  * Copyright (c) 1996 Nivas Madhur
  * Copyright (c) 1992, 1993
@@ -54,6 +54,7 @@
 
 #ifdef _KERNEL
 
+#include <machine/atomic.h>
 #include <machine/pcb.h>
 #include <machine/psl.h>
 #include <machine/intr.h>
@@ -103,6 +104,13 @@ struct cpu_info {
 #define	CI_DDB_RUNNING	0
 #define	CI_DDB_ENTERDDB	1
 #define	CI_DDB_INDDB	2
+#define	CI_DDB_PAUSE	3
+
+	volatile int ci_ipi;			/* pending ipis */
+#define	CI_IPI_NOTIFY		0x00000001
+#define	CI_IPI_HARDCLOCK	0x00000002
+#define	CI_IPI_STATCLOCK	0x00000004
+#define	CI_IPI_DDB		0x00000008
 };
 
 extern cpuid_t master_cpu;
@@ -127,6 +135,8 @@ extern struct cpu_info m88k_cpus[MAX_CPUS];
 #define	CPU_IS_PRIMARY(ci)	((ci)->ci_primary != 0)
 
 void	cpu_boot_secondary_processors(void);
+void	m88k_send_ipi(int, cpuid_t);
+void	m88k_broadcast_ipi(int);
 
 #else	/* MULTIPROCESSOR */
 
@@ -181,23 +191,11 @@ struct clockframe {
  */
 #include <machine/intr.h>
 
-#define SIR_NET		1
-#define SIR_CLOCK	2
+#define SIR_NET		0x01
+#define SIR_CLOCK	0x02
 
-#ifdef MULTIPROCESSOR
-extern void setsoftint(int);
-extern int clrsoftint(int);
-#else
-extern int ssir;
-#define setsoftint(x)	(ssir |= (x))
-#define	clrsoftint(x)	\
-({									\
-	int tmpsir = ssir & (x);					\
-	ssir ^= tmpsir;							\
-	tmpsir;								\
-})
-#endif	/* MULTIPROCESSOR */
-
+extern unsigned int ssir;
+#define setsoftint(x)	atomic_setbits_int(&ssir, x)
 #define setsoftnet()	setsoftint(SIR_NET)
 #define setsoftclock()	setsoftint(SIR_CLOCK)
 
@@ -229,13 +227,9 @@ do {									\
  * buffer pages are invalid.  On the m88k, request an ast to send us
  * through trap(), marking the proc as needing a profiling tick.
  */
-#define	need_proftick(p)	((p)->p_flag |= P_OWEUPC, aston(p))
+#define	need_proftick(p)	aston(p)
 
-/*
- * Notify the current process (p) that it has a signal pending,
- * process as soon as possible.
- */
-#define	signotify(p)		aston(p)
+void	signotify(struct proc *);
 
 /*
  * switchframe - should be double word aligned.

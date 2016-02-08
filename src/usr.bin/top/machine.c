@@ -1,4 +1,4 @@
-/* $OpenBSD: machine.c,v 1.57 2007/02/04 14:58:45 otto Exp $	 */
+/* $OpenBSD: machine.c,v 1.62 2007/07/27 13:57:50 deraadt Exp $	 */
 
 /*-
  * Copyright (c) 1994 Thorsten Lockert <tholo@sigmasoft.com>
@@ -34,20 +34,13 @@
  */
 
 #include <sys/types.h>
-#include <sys/signal.h>
 #include <sys/param.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <limits.h>
-#include <err.h>
 #include <unistd.h>
 #include <sys/sysctl.h>
-#include <sys/dir.h>
 #include <sys/dkstat.h>
-#include <sys/file.h>
-#include <sys/time.h>
-#include <sys/resource.h>
 #include <sys/swap.h>
 #include <err.h>
 #include <errno.h>
@@ -59,6 +52,8 @@
 #include "loadavg.h"
 
 static int	swapmode(int *, int *);
+static char	*state_abbr(struct kinfo_proc2 *);
+static char	*format_comm(struct kinfo_proc2 *);
 
 /* get_process_info passes back a handle.  This is what it looks like: */
 
@@ -74,13 +69,13 @@ struct handle {
  *  These definitions control the format of the per-process area
  */
 static char header[] =
-	"  PID X        PRI NICE  SIZE   RES STATE    WAIT     TIME    CPU COMMAND";
+	"  PID X        PRI NICE  SIZE   RES STATE    WAIT      TIME    CPU COMMAND";
 
 /* 0123456   -- field to fill in starts at header+6 */
 #define UNAME_START 6
 
 #define Proc_format \
-	"%5d %-8.8s %3d %4d %5s %5s %-8s %-6.6s %6s %5.2f%% %.51s"
+	"%5d %-8.8s %3d %4d %5s %5s %-8s %-7.7s %6s %5.2f%% %.50s"
 
 /* process state names for the "STATE" column of the display */
 /*
@@ -167,12 +162,12 @@ machine_init(struct statics *statics)
 	mib[1] = HW_NCPU;
 	if (sysctl(mib, 2, &ncpu, &size, NULL, 0) == -1)
 		return (-1);
-	cpu_states = malloc(ncpu * CPUSTATES * sizeof(int64_t));
+	cpu_states = calloc(ncpu, CPUSTATES * sizeof(int64_t));
 	if (cpu_states == NULL)
 		err(1, NULL);
-	cp_time = malloc(ncpu * sizeof(int64_t *));
-	cp_old  = malloc(ncpu * sizeof(int64_t *));
-	cp_diff = malloc(ncpu * sizeof(int64_t *));
+	cp_time = calloc(ncpu, sizeof(int64_t *));
+	cp_old  = calloc(ncpu, sizeof(int64_t *));
+	cp_diff = calloc(ncpu, sizeof(int64_t *));
 	if (cp_time == NULL || cp_old == NULL || cp_diff == NULL)
 		err(1, NULL);
 	for (cpu = 0; cpu < ncpu; cpu++) {
@@ -376,8 +371,8 @@ get_process_info(struct system_info *si, struct process_select *sel,
 		/*
 		 *  Place pointers to each valid proc structure in pref[].
 		 *  Process slots that are actually in use have a non-zero
-		 *  status field.  Processes with SSYS set are system
-		 *  processes---these get ignored unless show_sysprocs is set.
+		 *  status field.  Processes with P_SYSTEM set are system
+		 *  processes---these get ignored unless show_system is set.
 		 */
 		if (pp->p_stat != 0 &&
 		    (show_system || (pp->p_flag & P_SYSTEM) == 0) &&
@@ -413,7 +408,7 @@ get_process_info(struct system_info *si, struct process_select *sel,
 
 char fmt[MAX_COLS];	/* static area where result is built */
 
-char *
+static char *
 state_abbr(struct kinfo_proc2 *pp)
 {
 	static char buf[10];
@@ -427,7 +422,7 @@ state_abbr(struct kinfo_proc2 *pp)
 	return buf;
 }
 
-char *
+static char *
 format_comm(struct kinfo_proc2 *kp)
 {
 #define ARG_SIZE 60
@@ -464,7 +459,7 @@ format_comm(struct kinfo_proc2 *kp)
 }
 
 char *
-format_next_process(caddr_t handle, char *(*get_userid)(uid_t))
+format_next_process(caddr_t handle, char *(*get_userid)(uid_t), pid_t *pid)
 {
 	char *p_wait, waddr[sizeof(void *) * 2 + 3];	/* Hexify void pointer */
 	struct kinfo_proc2 *pp;
@@ -504,6 +499,7 @@ format_next_process(caddr_t handle, char *(*get_userid)(uid_t))
 	    p_wait, format_time(cputime), 100.0 * pct,
 	    printable(format_comm(pp)));
 
+	*pid = pp->p_pid;
 	/* return the result */
 	return (fmt);
 }
@@ -713,7 +709,7 @@ swapmode(int *used, int *total)
 	if (nswap == 0)
 		return 0;
 
-	swdev = malloc(nswap * sizeof(*swdev));
+	swdev = calloc(nswap, sizeof(*swdev));
 	if (swdev == NULL)
 		return 0;
 

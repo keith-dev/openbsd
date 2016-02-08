@@ -1,4 +1,4 @@
-/*      $OpenBSD: wdcvar.h,v 1.39 2006/05/03 02:18:47 jsg Exp $     */
+/*      $OpenBSD: wdcvar.h,v 1.41 2007/05/08 16:07:03 deraadt Exp $     */
 /*	$NetBSD: wdcvar.h,v 1.17 1999/04/11 20:50:29 bouyer Exp $	*/
 
 /*-
@@ -275,7 +275,6 @@ struct wdc_xfer *wdc_get_xfer(int); /* int = WDC_NOSLEEP/CANSLEEP */
 #define WDC_NOSLEEP	0x01
 void   wdc_free_xfer(struct channel_softc *, struct wdc_xfer *);
 void  wdcstart(struct channel_softc *);
-void  wdcrestart(void *);
 int   wdcreset(struct channel_softc *, int);
 #define VERBOSE	1
 #define SILENT	0 /* wdcreset will not print errors */
@@ -306,8 +305,6 @@ void  wdc_delref(struct channel_softc *);
 
 /* ATA/ATAPI specs says a device can take 31s to reset */
 #define WDC_RESET_WAIT 31000
-
-int   atapi_print(void *, const char *);
 
 void wdc_disable_intr(struct channel_softc *);
 void wdc_enable_intr(struct channel_softc *);

@@ -1,7 +1,7 @@
 # ex:ts=8 sw=4:
-# $OpenBSD: Source.pm,v 1.1 2006/03/06 10:40:32 espie Exp $
+# $OpenBSD: Source.pm,v 1.6 2007/06/16 09:29:37 espie Exp $
 #
-# Copyright (c) 2003-2004 Marc Espie <espie@openbsd.org>
+# Copyright (c) 2003-2006 Marc Espie <espie@openbsd.org>
 #
 # Permission to use, copy, modify, and distribute this software for any
 # purpose with or without fee is hereby granted, provided that the above
@@ -18,39 +18,71 @@
 use strict;
 use warnings;
 
-package PackageRepository::Source;
+package OpenBSD::PackageRepository::Source;
+our @ISA=(qw(OpenBSD::PackageRepository));
+use OpenBSD::PackageInfo;
+use OpenBSD::Paths;
 
-sub find
+sub urlscheme
 {
-	my ($repository, $name, $arch, $srcpath) = @_;
+	return 'src';
+}
+
+sub _new
+{
+	my ($class, $baseurl) = @_;
+	bless { baseurl => $baseurl }, $class;
+}
+
+sub build_package
+{
+	my ($self, $pkgpath) = @_;
+
 	my $dir;
 	my $make;
 	if (defined $ENV{'MAKE'}) {
 		$make = $ENV{'MAKE'};
 	} else {
-		$make = '/usr/bin/make';
+		$make = OpenBSD::Paths->make;
 	}
-	if (defined $repository->{baseurl} && $repository->{baseurl} ne '') {
-		$dir = $repository->{baseurl}
+	if (defined $self->{baseurl} && $self->{baseurl} ne '') {
+		$dir = $self->{baseurl}
 	} elsif (defined $ENV{PORTSDIR}) {
 		$dir = $ENV{PORTSDIR};
 	} else {
-		$dir = '/usr/ports';
+		$dir = OpenBSD::Paths->portsdir;
 	}
 	# figure out the repository name and the pkgname
-	my $pkgfile = `cd $dir && SUBDIR=$srcpath ECHO_MSG=: $make show=PKGFILE`;
+	my $pkgfile = `cd $dir && SUBDIR=$pkgpath ECHO_MSG=: $make show=PKGFILE`;
 	chomp $pkgfile;
 	if (! -f $pkgfile) {
-		system "cd $dir && SUBDIR=$srcpath $make package BULK=Yes";
+		# XXX
+		unlock_db();
+		system "cd $dir && SUBDIR=$pkgpath $make package BULK=Yes";
+		lock_db(0);
 	}
 	if (! -f $pkgfile) {
 		return undef;
 	}
-	$pkgfile =~ m|(.*/)([^/]*)|;
+	$pkgfile =~ m|(.*/)([^/]*)|o;
 	my ($base, $fname) = ($1, $2);
 
 	my $repo = OpenBSD::PackageRepository::Local->_new($base);
-	return $repo->find($fname);
+	return $repo;
+}
+
+sub match
+{
+	my ($self, $search, @filters) = @_;
+	my $built;
+
+	if (defined $search->{pkgpath}) {
+		$built = $self->build_package($search->{pkgpath});
+	}
+	if ($built) {
+		return $built->match($search, @filters);
+	}
+	return ();
 }
 
 1;

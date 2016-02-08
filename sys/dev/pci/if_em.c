@@ -31,7 +31,7 @@ POSSIBILITY OF SUCH DAMAGE.
 
 ***************************************************************************/
 
-/* $OpenBSD: if_em.c,v 1.166 2007/01/26 15:55:30 weingart Exp $ */
+/* $OpenBSD: if_em.c,v 1.172 2007/05/31 01:04:57 henning Exp $ */
 /* $FreeBSD: if_em.c,v 1.46 2004/09/29 18:28:28 mlaier Exp $ */
 
 #include <dev/pci/if_em.h>
@@ -98,6 +98,7 @@ const struct pci_matchid em_devices[] = {
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82571EB_FIBER },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82571EB_QUAD_CPR },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82571EB_QUAD_CPR_LP },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82571EB_QUAD_FBR },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82571EB_SERDES },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82572EI_COPPER },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82572EI_FIBER },
@@ -155,8 +156,10 @@ int  em_allocate_transmit_structures(struct em_softc *);
 void em_rxeof(struct em_softc *, int);
 void em_receive_checksum(struct em_softc *, struct em_rx_desc *,
 			 struct mbuf *);
+#ifdef EM_CSUM_OFFLOAD
 void em_transmit_checksum_setup(struct em_softc *, struct mbuf *,
 				u_int32_t *, u_int32_t *);
+#endif
 void em_set_promisc(struct em_softc *);
 void em_set_multi(struct em_softc *);
 void em_print_hw_stats(struct em_softc *);
@@ -500,9 +503,10 @@ em_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 	case SIOCSIFADDR:
 		IOCTL_DEBUGOUT("ioctl rcv'd: SIOCSIFADDR (Set Interface "
 			       "Addr)");
-		ifp->if_flags |= IFF_UP;
-		if (!(ifp->if_flags & IFF_RUNNING))
+		if (!(ifp->if_flags & IFF_UP)) {
+			ifp->if_flags |= IFF_UP;
 			em_init(sc);
+		}
 #ifdef INET
 		if (ifa->ifa_addr->sa_family == AF_INET)
 			arp_ifinit(&sc->interface_data, ifa);
@@ -1605,7 +1609,7 @@ em_hardware_init(struct em_softc *sc)
 	if (sc->hw.mac_type == em_80003es2lan)
 		sc->hw.fc_pause_time = 0xFFFF;
 	else
-		sc->hw.fc_pause_time = 0x1000;
+		sc->hw.fc_pause_time = 1000;
 	sc->hw.fc_send_xon = TRUE;
 	sc->hw.fc = E1000_FC_FULL;
 
@@ -2020,6 +2024,7 @@ em_free_transmit_structures(struct em_softc *sc)
 		sc->txtag = NULL;
 }
 
+#ifdef EM_CSUM_OFFLOAD
 /*********************************************************************
  *
  *  The offload context needs to be set when we transfer the first
@@ -2100,6 +2105,7 @@ em_transmit_checksum_setup(struct em_softc *sc, struct mbuf *mp,
 	sc->num_tx_desc_avail--;
 	sc->next_avail_tx_desc = curr_txd;
 }
+#endif /* EM_CSUM_OFFLOAD */
 
 /**********************************************************************
  *
@@ -2372,8 +2378,6 @@ em_initialize_receive_unit(struct em_softc *sc)
 
 		/* Set the interrupt throttling rate.  Value is calculated
 		 * as DEFAULT_ITR = 1/(MAX_INTS_PER_SEC * 256ns) */
-#define MAX_INTS_PER_SEC	8000
-#define DEFAULT_ITR		1000000000/(MAX_INTS_PER_SEC * 256)
 		E1000_WRITE_REG(&sc->hw, ITR, DEFAULT_ITR);
 	}
 

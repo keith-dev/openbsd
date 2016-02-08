@@ -1,4 +1,4 @@
-/*	$OpenBSD: umass_scsi.c,v 1.15 2006/11/30 10:05:32 deraadt Exp $ */
+/*	$OpenBSD: umass_scsi.c,v 1.18 2007/06/13 10:33:52 mbalmer Exp $ */
 /*	$NetBSD: umass_scsipi.c,v 1.9 2003/02/16 23:14:08 augustss Exp $	*/
 /*
  * Copyright (c) 2001 The NetBSD Foundation, Inc.
@@ -108,13 +108,13 @@ umass_scsi_attach(struct umass_softc *sc)
 
 	DPRINTF(UDMASS_USB, ("%s: umass_attach_bus: SCSI\n"
 			     "sc = 0x%x, scbus = 0x%x\n",
-			     USBDEVNAME(sc->sc_dev), sc, scbus));
+			     sc->sc_dev.dv_xname, sc, scbus));
 
 	sc->sc_refcnt++;
 	scbus->base.sc_child =
 	  config_found((struct device *)sc, &saa, scsiprint);
 	if (--sc->sc_refcnt < 0)
-		usb_detach_wakeup(USBDEV(sc->sc_dev));
+		usb_detach_wakeup(&sc->sc_dev);
 
 	return (0);
 }
@@ -138,13 +138,13 @@ umass_atapi_attach(struct umass_softc *sc)
 
 	DPRINTF(UDMASS_USB, ("%s: umass_attach_bus: ATAPI\n"
 			     "sc = 0x%x, scbus = 0x%x\n",
-			     USBDEVNAME(sc->sc_dev), sc, scbus));
+			     sc->sc_dev.dv_xname, sc, scbus));
 
 	sc->sc_refcnt++;
 	scbus->base.sc_child = config_found((struct device *)sc,
 	    &saa, scsiprint);
 	if (--sc->sc_refcnt < 0)
-		usb_detach_wakeup(USBDEV(sc->sc_dev));
+		usb_detach_wakeup(&sc->sc_dev);
 
 	return (0);
 }
@@ -170,7 +170,7 @@ umass_scsi_setup(struct umass_softc *sc)
 	scbus->sc_link.adapter = &scbus->sc_adapter;
 	scbus->sc_link.adapter_softc = sc;
 	scbus->sc_link.openings = 1;
-	scbus->sc_link.quirks |= PQUIRK_ONLYBIG | sc->sc_busquirks;
+	scbus->sc_link.quirks |= SDEV_ONLYBIG | sc->sc_busquirks;
 
 	return (scbus);
 }
@@ -192,7 +192,7 @@ umass_scsi_cmd(struct scsi_xfer *xs)
 
 	DPRINTF(UDMASS_CMD, ("%s: umass_scsi_cmd: at %lu.%06lu: %d:%d "
 		"xs=%p cmd=0x%02x datalen=%d (quirks=0x%x, poll=%d)\n",
-		USBDEVNAME(sc->sc_dev), sc->tv.tv_sec, sc->tv.tv_usec,
+		sc->sc_dev.dv_xname, sc->tv.tv_sec, sc->tv.tv_usec,
 		sc_link->target, sc_link->lun, xs, xs->cmd->opcode,
 		xs->datalen, sc_link->quirks, xs->flags & SCSI_POLL));
 
@@ -211,7 +211,7 @@ umass_scsi_cmd(struct scsi_xfer *xs)
 #if defined(UMASS_DEBUG)
 	if (sc_link->target != UMASS_SCSIID_DEVICE) {
 		DPRINTF(UDMASS_SCSI, ("%s: wrong SCSI ID %d\n",
-			USBDEVNAME(sc->sc_dev), sc_link->target));
+			sc->sc_dev.dv_xname, sc_link->target));
 		xs->error = XS_DRIVER_STUFFUP;
 		goto done;
 	}
@@ -329,7 +329,7 @@ umass_scsi_cb(struct umass_softc *sc, void *priv, int residue, int status)
 	case STATUS_CMD_UNKNOWN:
 		DPRINTF(UDMASS_CMD, ("umass_scsi_cb: status cmd unknown\n"));
 		/* we can't issue REQUEST SENSE */
-		if (xs->sc_link->quirks & PQUIRK_NOSENSE) {
+		if (xs->sc_link->quirks & ADEV_NOSENSE) {
 			/*
 			 * If no residue and no other USB error,
 			 * command succeeded.
@@ -378,7 +378,7 @@ umass_scsi_cb(struct umass_softc *sc, void *priv, int residue, int status)
 
 	default:
 		panic("%s: Unknown status %d in umass_scsi_cb",
-		      USBDEVNAME(sc->sc_dev), status);
+		      sc->sc_dev.dv_xname, status);
 	}
 
 	if (xs->flags & SCSI_POLL)
@@ -421,7 +421,7 @@ umass_scsi_sense_cb(struct umass_softc *sc, void *priv, int residue,
 		break;
 	default:
 		DPRINTF(UDMASS_SCSI, ("%s: Autosense failed, status %d\n",
-			USBDEVNAME(sc->sc_dev), status));
+			sc->sc_dev.dv_xname, status));
 		xs->error = XS_DRIVER_STUFFUP;
 		break;
 	}

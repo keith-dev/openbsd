@@ -1,4 +1,4 @@
-/*	$OpenBSD: if.c,v 1.155 2007/02/14 00:53:48 jsg Exp $	*/
+/*	$OpenBSD: if.c,v 1.165 2007/07/06 14:00:59 naddy Exp $	*/
 /*	$NetBSD: if.c,v 1.35 1996/05/07 05:26:04 thorpej Exp $	*/
 
 /*
@@ -85,6 +85,9 @@
 #include <net/if_media.h>
 #include <net/if_types.h>
 #include <net/route.h>
+#include <net/netisr.h>
+
+#include <dev/rndvar.h>
 
 #ifdef INET
 #include <netinet/in.h>
@@ -543,18 +546,12 @@ do { \
 #ifdef INET6
 	IF_DETACH_QUEUES(ip6intrq);
 #endif
-#ifdef IPX
-	IF_DETACH_QUEUES(ipxintrq);
-#endif
 #ifdef NETATALK
 	IF_DETACH_QUEUES(atintrq1);
 	IF_DETACH_QUEUES(atintrq2);
 #endif
 #ifdef NATM
 	IF_DETACH_QUEUES(natmintrq);
-#endif
-#if NBLUETOOTH > 0
-	IF_DETACH_QUEUES(btintrq);
 #endif
 #undef IF_DETACH_QUEUES
 
@@ -580,6 +577,7 @@ do { \
 		if (ifa == ifnet_addrs[ifp->if_index])
 			continue;
 
+		ifa->ifa_ifp = NULL;
 		IFAFREE(ifa);
 	}
 
@@ -589,6 +587,7 @@ do { \
 
 	if_free_sadl(ifp);
 
+	ifnet_addrs[ifp->if_index]->ifa_ifp = NULL;
 	IFAFREE(ifnet_addrs[ifp->if_index]);
 	ifnet_addrs[ifp->if_index] = NULL;
 
@@ -790,7 +789,7 @@ if_clone_list(struct if_clonereq *ifcr)
 	    if_cloners_count : ifcr->ifcr_count;
 
 	for (ifc = LIST_FIRST(&if_cloners); ifc != NULL && count != 0;
-	     ifc = LIST_NEXT(ifc, ifc_list), count--, dst += IFNAMSIZ) {
+	    ifc = LIST_NEXT(ifc, ifc_list), count--, dst += IFNAMSIZ) {
 		bzero(outbuf, sizeof outbuf);
 		strlcpy(outbuf, ifc->ifc_name, IFNAMSIZ);
 		error = copyout(outbuf, dst, IFNAMSIZ);
@@ -1151,9 +1150,11 @@ ifioctl(struct socket *so, u_long cmd, caddr_t data, struct proc *p)
 	struct sockaddr_dl *sdl;
 	struct ifgroupreq *ifgr;
 	char ifdescrbuf[IFDESCRSIZE];
+	char ifrtlabelbuf[RTLABEL_LEN];
 	int error = 0;
 	size_t bytesdone;
 	short oif_flags;
+	const char *label;
 
 	switch (cmd) {
 
@@ -1291,6 +1292,24 @@ ifioctl(struct socket *so, u_long cmd, caddr_t data, struct proc *p)
 		}
 		break;
 
+	case SIOCGIFRTLABEL:
+		label = rtlabel_id2name(ifp->if_rtlabelid);
+		strlcpy(ifrtlabelbuf, label, RTLABEL_LEN);
+		error = copyoutstr(ifrtlabelbuf, ifr->ifr_data, RTLABEL_LEN,
+		    &bytesdone);
+		break;
+
+	case SIOCSIFRTLABEL:
+		if ((error = suser(p, 0)) != 0)
+			return (error);
+		error = copyinstr(ifr->ifr_data, ifrtlabelbuf,
+		    RTLABEL_LEN, &bytesdone);
+		if (error == 0) {
+			rtlabel_unref(ifp->if_rtlabelid);
+			ifp->if_rtlabelid = rtlabel_name2id(ifrtlabelbuf);
+		}
+		break;
+
 	case SIOCAIFGROUP:
 		if ((error = suser(p, 0)))
 			return (error);
@@ -1315,38 +1334,37 @@ ifioctl(struct socket *so, u_long cmd, caddr_t data, struct proc *p)
 		break;
 
 	case SIOCSIFLLADDR:
-	        if ((error = suser(p, 0)))
-	                return (error);
-	        ifa = ifnet_addrs[ifp->if_index];
-	        if (ifa == NULL)
-	                return (EINVAL);
-	        sdl = (struct sockaddr_dl *)ifa->ifa_addr;
-	        if (sdl == NULL)
-	                return (EINVAL);
-	        if (ifr->ifr_addr.sa_len != ETHER_ADDR_LEN)
-	                return (EINVAL);
+		if ((error = suser(p, 0)))
+			return (error);
+		ifa = ifnet_addrs[ifp->if_index];
+		if (ifa == NULL)
+			return (EINVAL);
+		sdl = (struct sockaddr_dl *)ifa->ifa_addr;
+		if (sdl == NULL)
+			return (EINVAL);
+		if (ifr->ifr_addr.sa_len != ETHER_ADDR_LEN)
+			return (EINVAL);
 		if (ETHER_IS_MULTICAST(ifr->ifr_addr.sa_data))
 			return (EINVAL);
-	        switch (ifp->if_type) {
+		switch (ifp->if_type) {
 		case IFT_ETHER:
+		case IFT_CARP:
 		case IFT_FDDI:
 		case IFT_XETHER:
 		case IFT_ISO88025:
 		case IFT_L2VLAN:
-	                bcopy((caddr_t)ifr->ifr_addr.sa_data,
-			      (caddr_t)((struct arpcom *)ifp)->ac_enaddr,
-			      ETHER_ADDR_LEN);
-			/* FALLTHROUGH */
-		case IFT_ARCNET:
-                        bcopy((caddr_t)ifr->ifr_addr.sa_data,
-			      LLADDR(sdl), ETHER_ADDR_LEN);
+			bcopy((caddr_t)ifr->ifr_addr.sa_data,
+			    (caddr_t)((struct arpcom *)ifp)->ac_enaddr,
+			    ETHER_ADDR_LEN);
+			bcopy((caddr_t)ifr->ifr_addr.sa_data,
+			    LLADDR(sdl), ETHER_ADDR_LEN);
 			break;
 		default:
-	                return (ENODEV);
+			return (ENODEV);
 		}
 		if (ifp->if_flags & IFF_UP) {
 			struct ifreq ifrq;
-		        int s = splnet();
+			int s = splnet();
 			ifp->if_flags &= ~IFF_UP;
 			ifrq.ifr_flags = ifp->if_flags;
 			(*ifp->if_ioctl)(ifp, SIOCSIFFLAGS, (caddr_t)&ifrq);
@@ -1355,9 +1373,9 @@ ifioctl(struct socket *so, u_long cmd, caddr_t data, struct proc *p)
 			(*ifp->if_ioctl)(ifp, SIOCSIFFLAGS, (caddr_t)&ifrq);
 			splx(s);
 			TAILQ_FOREACH(ifa, &ifp->if_addrlist, ifa_list) {
-			        if (ifa->ifa_addr != NULL &&
+				if (ifa->ifa_addr != NULL &&
 				    ifa->ifa_addr->sa_family == AF_INET)
-				        arp_ifinit((struct arpcom *)ifp, ifa);
+					arp_ifinit((struct arpcom *)ifp, ifa);
 			}
 		}
 		break;
@@ -1787,6 +1805,7 @@ if_setgroupattribs(caddr_t data)
 {
 	struct ifgroupreq	*ifgr = (struct ifgroupreq *)data;
 	struct ifg_group	*ifg;
+	struct ifg_member	*ifgm;
 	int			 demote;
 
 	TAILQ_FOREACH(ifg, &ifg_head, ifg_next)
@@ -1802,6 +1821,10 @@ if_setgroupattribs(caddr_t data)
 
 	ifg->ifg_carp_demoted += demote;
 
+	TAILQ_FOREACH(ifgm, &ifg->ifg_members, ifgm_next)
+		if (ifgm->ifgm_ifp->if_ioctl)
+			ifgm->ifgm_ifp->if_ioctl(ifgm->ifgm_ifp,
+			    SIOCSIFGATTR, data);
 	return (0);
 }
 
@@ -1927,7 +1950,7 @@ sysctl_ifq(int *name, u_int namelen, void *oldp, size_t *oldlenp,
 	/* All sysctl names at this level are terminal. */
 	if (namelen != 1)
 		return (ENOTDIR);
- 
+
 	switch (name[0]) {
 	case IFQCTL_LEN:
 		return (sysctl_rdint(oldp, oldlenp, newp, ifq->ifq_len));
@@ -1940,4 +1963,10 @@ sysctl_ifq(int *name, u_int namelen, void *oldp, size_t *oldlenp,
 		return (EOPNOTSUPP);
 	}
 	/* NOTREACHED */
+}
+
+void
+netrndintr(void)
+{
+	add_net_randomness(0);
 }

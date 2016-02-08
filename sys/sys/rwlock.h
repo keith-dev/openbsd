@@ -1,4 +1,4 @@
-/*	$OpenBSD: rwlock.h,v 1.8 2006/06/05 05:15:22 tedu Exp $	*/
+/*	$OpenBSD: rwlock.h,v 1.11 2007/05/29 00:17:32 thib Exp $	*/
 /*
  * Copyright (c) 2002 Artur Grabowski <art@openbsd.org>
  * All rights reserved. 
@@ -76,7 +76,7 @@ struct rwlock {
 	const char *rwl_name;
 };
 
-#define RWLOCK_INITIALIZER	{ 0 }
+#define RWLOCK_INITIALIZER(name)	{ 0, name }
 
 #define RWLOCK_WAIT		0x01UL
 #define RWLOCK_WRWANT		0x02UL
@@ -99,11 +99,15 @@ int rw_enter(struct rwlock *, int);
 void rw_exit(struct rwlock *);
 #define RW_WRITE	0x00UL		/* exclusive lock */	
 #define RW_READ		0x01UL		/* shared lock */
-#define RW_OPMASK	0x01UL
+#define RW_DOWNGRADE	0x02UL		/* downgrade exclusive to shared */
+#define RW_OPMASK	0x03UL
+
 #define RW_INTR		0x10UL		/* interruptible sleep */
 #define RW_SLEEPFAIL	0x20UL		/* fail if we slept for the lock */
 #define RW_NOSLEEP	0x40UL		/* don't wait for the lock */
 
-int rw_test_and_set(volatile unsigned long *, unsigned long, unsigned long);
+#ifndef rw_cas
+int rw_cas(volatile unsigned long *, unsigned long, unsigned long);
+#endif
 
 #endif

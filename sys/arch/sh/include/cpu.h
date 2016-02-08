@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.6 2007/03/03 21:37:27 miod Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.10 2007/06/06 17:15:12 deraadt Exp $	*/
 /*	$NetBSD: cpu.h,v 1.41 2006/01/21 04:24:12 uwe Exp $	*/
 
 /*-
@@ -51,6 +51,26 @@
 #ifdef _KERNEL
 
 /*
+ * Per-CPU information.
+ */
+
+#include <sys/sched.h>
+struct cpu_info {
+	struct proc *ci_curproc;
+
+	struct schedstate_percpu ci_schedstate; /* scheduler state */
+};
+
+extern struct cpu_info cpu_info_store;
+#define	curcpu()	(&cpu_info_store)
+#define cpu_number()	0
+#define CPU_IS_PRIMARY(ci)	1
+#define CPU_INFO_ITERATOR	int
+#define CPU_INFO_FOREACH(cii, ci) \
+	for (cii = 0, ci = curcpu(); ci != NULL; ci = NULL)
+
+
+/*
  * Arguments to hardclock and gatherstats encapsulate the previous
  * machine state in an opaque clockframe.
  */
@@ -88,11 +108,7 @@ do {									\
  * buffer pages are invalid.  On the MIPS, request an ast to send us
  * through trap, marking the proc as needing a profiling tick.
  */
-#define	need_proftick(p)						\
-do {									\
-	(p)->p_flag |= P_OWEUPC;					\
-	aston(p);							\
-} while (/*CONSTCOND*/0)
+#define	need_proftick(p)	aston(p)
 
 /*
  * Notify the current process (p) that it has a signal pending,
@@ -183,19 +199,6 @@ extern int want_resched;		/* need_resched() was called */
  */
 #include <machine/cputypes.h>
 
-/*
- * CTL_MACHDEP definitions.
- */
-#define	CPU_CONSDEV		1	/* dev_t: console terminal device */
-#define	CPU_KBDRESET		2	/* keyboard reset */
-#define	CPU_MAXID		3	/* number of valid machdep ids */
-
-#define	CTL_MACHDEP_NAMES {						\
-	{ 0, 0 },							\
-	{ "console_device",	CTLTYPE_STRUCT },			\
-	{ "kbdreset",		CTLTYPE_INT },				\
-}
-
 #ifdef _KERNEL
 void sh_cpu_init(int, int);
 void sh_startup(void);
@@ -207,7 +210,7 @@ void savectx(struct pcb *);
 struct fpreg;
 void fpu_save(struct fpreg *);
 void fpu_restore(struct fpreg *);
-u_int cpu_dump(int (*)(dev_t, daddr_t, caddr_t, size_t), daddr_t *);
+u_int cpu_dump(int (*)(dev_t, daddr64_t, caddr_t, size_t), daddr64_t *);
 u_int cpu_dumpsize(void);
 void dumpconf(void);
 void dumpsys(void);

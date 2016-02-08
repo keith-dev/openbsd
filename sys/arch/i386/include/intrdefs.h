@@ -1,4 +1,4 @@
-/*	$OpenBSD: intrdefs.h,v 1.6 2006/03/12 02:04:16 brad Exp $	*/
+/*	$OpenBSD: intrdefs.h,v 1.8 2007/04/21 21:06:15 gwk Exp $	*/
 /*	$NetBSD: intrdefs.h,v 1.2 2003/05/04 22:01:56 fvdl Exp $	*/
 
 #ifndef _i386_INTRDEFS_H
@@ -56,19 +56,20 @@
  * The level numbers are picked to fit into APIC vector priorities.
  */
 #define	IPL_NONE	0		/* nothing */
-#define	IPL_SOFTCLOCK	MAKEIPL(0)	/* timeouts */
-#define	IPL_SOFTNET	MAKEIPL(1)	/* protocol stacks */
-#define	IPL_BIO		MAKEIPL(2)	/* block I/O */
-#define	IPL_NET		MAKEIPL(3)	/* network */
-#define	IPL_SOFTTTY	MAKEIPL(4)	/* delayed terminal handling */
-#define	IPL_TTY		MAKEIPL(5)	/* terminal */
-#define	IPL_VM		MAKEIPL(6)	/* memory allocation */
-#define	IPL_AUDIO	MAKEIPL(7)	/* audio */
-#define	IPL_CLOCK	MAKEIPL(8)	/* clock */
-#define	IPL_STATCLOCK	MAKEIPL(9)	/* statclock */
+#define IPL_SOFTAST	MAKEIPL(0)	/* AST */
+#define	IPL_SOFTCLOCK	MAKEIPL(1)	/* timeouts */
+#define	IPL_SOFTNET	MAKEIPL(2)	/* protocol stacks */
+#define	IPL_BIO		MAKEIPL(3)	/* block I/O */
+#define	IPL_NET		MAKEIPL(4)	/* network */
+#define	IPL_SOFTTTY	MAKEIPL(5)	/* delayed terminal handling */
+#define	IPL_TTY		MAKEIPL(6)	/* terminal */
+#define	IPL_VM		MAKEIPL(7)	/* memory allocation */
+#define	IPL_AUDIO	MAKEIPL(8)	/* audio */
+#define	IPL_CLOCK	MAKEIPL(9)	/* clock */
+#define	IPL_STATCLOCK	MAKEIPL(10)	/* statclock */
 #define	IPL_SCHED	IPL_STATCLOCK
-#define	IPL_HIGH	MAKEIPL(9)	/* everything */
-#define	IPL_IPI		MAKEIPL(10)	/* interprocessor interrupt */
+#define	IPL_HIGH	MAKEIPL(11)	/* everything */
+#define	IPL_IPI		MAKEIPL(12)	/* interprocessor interrupt */
 
 /* Interrupt sharing types. */
 #define	IST_NONE	0	/* none */
@@ -87,6 +88,7 @@
 #define	SIR_CLOCK	29
 #define	SIR_NET		28
 #define	SIR_TTY		27
+#define SIR_AST		26
 
 
 /*
@@ -113,13 +115,14 @@
 #define I386_IPI_MTRR		0x00000020
 #define I386_IPI_GDT		0x00000040
 #define I386_IPI_DDB		0x00000080	/* synchronize while in ddb */
+#define I386_IPI_SETPERF	0x00000100
 
-#define I386_NIPI	8
+#define I386_NIPI	9
 
 #define I386_IPI_NAMES { "halt IPI", "timeset IPI", "FPU flush IPI", \
 			 "FPU synch IPI", "TLB shootdown IPI", \
 			 "MTRR update IPI", "GDT update IPI", \
-			 "DDB IPI" }
+			 "DDB IPI", "setperf IPI" }
 
 #define IREENT_MAGIC	0x18041969
 

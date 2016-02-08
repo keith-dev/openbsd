@@ -1,4 +1,4 @@
-/*	$OpenBSD: bgpd.h,v 1.212 2007/03/06 16:52:48 henning Exp $ */
+/*	$OpenBSD: bgpd.h,v 1.218 2007/05/28 17:26:33 henning Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -165,7 +165,8 @@ struct bgpd_config {
 	u_int					 rtableid;
 	u_int32_t				 bgpid;
 	u_int32_t				 clusterid;
-	u_int16_t				 as;
+	u_int32_t				 as;
+	u_int16_t				 short_as;
 	u_int16_t				 holdtime;
 	u_int16_t				 min_holdtime;
 };
@@ -220,10 +221,11 @@ struct peer_auth {
 };
 
 struct capabilities {
-	u_int8_t	mp_v4;		/* multiprotocol extensions, RFC 2858 */
+	u_int8_t	mp_v4;		/* multiprotocol extensions, RFC 4760 */
 	u_int8_t	mp_v6;
 	u_int8_t	refresh;	/* route refresh, RFC 2918 */
-	u_int8_t	restart;	/* draft-ietf-idr-restart */
+	u_int8_t	restart;	/* graceful restart, RFC 4724 */
+	u_int8_t	as4byte;	/* draft-ietf-idr-as4bytes-13 */
 };
 
 struct peer_config {
@@ -237,12 +239,12 @@ struct peer_config {
 	char			 demote_group[IFNAMSIZ];
 	u_int32_t		 id;
 	u_int32_t		 groupid;
+	u_int32_t		 remote_as;
 	u_int32_t		 max_prefix;
 	enum announce_type	 announce_type;
 	enum enforce_as		 enforce_as;
 	enum reconf_action	 reconf_action;
 	u_int16_t		 max_prefix_restart;
-	u_int16_t		 remote_as;
 	u_int16_t		 holdtime;
 	u_int16_t		 min_holdtime;
 	u_int8_t		 template;
@@ -339,6 +341,7 @@ enum imsg_type {
 	IMSG_CTL_SHOW_RIB_AS,
 	IMSG_CTL_SHOW_RIB_PREFIX,
 	IMSG_CTL_SHOW_RIB_ATTR,
+	IMSG_CTL_SHOW_RIB_COMMUNITY,
 	IMSG_CTL_SHOW_NETWORK,
 	IMSG_CTL_SHOW_NETWORK6,
 	IMSG_CTL_SHOW_RIB_MEM,
@@ -458,6 +461,7 @@ struct session_up {
 	struct capabilities	capa_announced;
 	struct capabilities	capa_received;
 	u_int32_t		remote_bgpid;
+	u_int16_t		short_as;
 };
 
 struct pftable_msg {
@@ -530,13 +534,19 @@ enum as_spec {
 
 struct filter_as {
 	enum as_spec	type;
-	u_int16_t	as;
+	u_int32_t	as;
+};
+
+struct filter_community {
+	int			as;
+	int			type;
 };
 
 struct ctl_show_rib_request {
 	struct ctl_neighbor	neighbor;
 	struct bgpd_addr	prefix;
 	struct filter_as	as;
+	struct filter_community community;
 	u_int32_t		peerid;
 	pid_t			pid;
 	u_int16_t		flags;
@@ -584,11 +594,12 @@ struct filter_peers {
 #define	COMMUNITY_ERROR			-1
 #define	COMMUNITY_ANY			-2
 #define	COMMUNITY_NEIGHBOR_AS		-3
+#define	COMMUNITY_UNSET			-4
 #define	COMMUNITY_WELLKNOWN		0xffff
 #define	COMMUNITY_NO_EXPORT		0xff01
 #define	COMMUNITY_NO_ADVERTISE		0xff02
 #define	COMMUNITY_NO_EXPSUBCONFED	0xff03
-#define	COMMUNITY_NO_PEER		0xff04	/* rfc3765 */
+#define	COMMUNITY_NO_PEER		0xff04	/* RFC 3765 */
 
 struct filter_prefix {
 	struct bgpd_addr	addr;
@@ -600,11 +611,6 @@ struct filter_prefixlen {
 	sa_family_t		af;
 	u_int8_t		len_min;
 	u_int8_t		len_max;
-};
-
-struct filter_community {
-	int			as;
-	int			type;
 };
 
 struct filter_match {
@@ -683,17 +689,19 @@ struct rde_memstats {
 	int64_t		attr_dcnt;
 };
 
-/* Address Family Numbers as per rfc1700 */
+/* Address Family Numbers as per RFC 1700 */
 #define	AFI_IPv4	1
 #define	AFI_IPv6	2
 #define	AFI_ALL		0xffff
 
-/* Subsequent Address Family Identifier as per rfc2858 */
+/* Subsequent Address Family Identifier as per RFC 4760 */
 #define	SAFI_NONE	0x00
 #define	SAFI_UNICAST	0x01
 #define	SAFI_MULTICAST	0x02
-#define	SAFI_BOTH	0x03
 #define	SAFI_ALL	0xff
+
+/* 4-byte magic AS number */
+#define AS_TRANS	23456
 
 /* prototypes */
 /* bgpd.c */
@@ -797,7 +805,8 @@ const char	*filterset_name(enum action_types);
 /* util.c */
 const char	*log_addr(const struct bgpd_addr *);
 const char	*log_in6addr(const struct in6_addr *);
-const char *	 log_sockaddr(struct sockaddr *);
+const char	*log_sockaddr(struct sockaddr *);
+const char	*log_as(u_int32_t);
 int		 aspath_snprint(char *, size_t, void *, u_int16_t);
 int		 aspath_asprint(char **, void *, u_int16_t);
 size_t		 aspath_strlen(void *, u_int16_t);

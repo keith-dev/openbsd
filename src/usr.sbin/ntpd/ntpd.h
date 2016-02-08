@@ -1,4 +1,4 @@
-/*	$OpenBSD: ntpd.h,v 1.82 2007/03/01 17:50:42 henning Exp $ */
+/*	$OpenBSD: ntpd.h,v 1.85 2007/08/04 02:58:02 ckuethe Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -41,11 +41,11 @@
 
 #define	INTERVAL_QUERY_NORMAL		30	/* sync to peers every n secs */
 #define	INTERVAL_QUERY_PATHETIC		60
-#define	INTERVAL_QUERY_AGRESSIVE	5
+#define	INTERVAL_QUERY_AGGRESSIVE	5
 
 #define	TRUSTLEVEL_BADPEER		6
 #define	TRUSTLEVEL_PATHETIC		2
-#define	TRUSTLEVEL_AGRESSIVE		8
+#define	TRUSTLEVEL_AGGRESSIVE		8
 #define	TRUSTLEVEL_MAX			10
 
 #define	MAX_SERVERS_DNS			8
@@ -64,7 +64,7 @@
 
 
 #define	SENSOR_DATA_MAXAGE	(15*60)
-#define	SENSOR_QUERY_INTERVAL	5
+#define	SENSOR_QUERY_INTERVAL	30
 #define	SENSOR_SCAN_INTERVAL	(5*60)
 
 enum client_state {
@@ -308,7 +308,7 @@ struct s_fixedpt	d_to_sfp(double);
 
 /* sensors.c */
 void			sensor_init(void);
-void			sensor_scan(void);
+int			sensor_scan(void);
 void			sensor_query(struct ntp_sensor *);
 int			sensor_hotplugfd(void);
 void			sensor_hotplugevent(int);

@@ -1,4 +1,4 @@
-.\"	$OpenBSD: ahci.4,v 1.1 2006/12/09 05:10:43 dlg Exp $
+.\"	$OpenBSD: ahci.4,v 1.6 2007/07/02 03:37:40 dlg Exp $
 .\"
 .\" Copyright (c) 2006 David Gwynne <dlg@openbsd.org>
 .\"
@@ -14,7 +14,7 @@
 .\" TORTIOUS ACTION, ARISING OUT OF
 .\" PERFORMANCE OF THIS SOFTWARE.
 .\"
-.Dd December 9, 2006
+.Dd $Mdocdate: July 2 2007 $
 .Dt AHCI 4
 .Os
 .Sh NAME
@@ -22,14 +22,28 @@
 .Nd Advanced Host Controller Interface for Serial ATA
 .Sh SYNOPSIS
 .Cd "ahci* at pci?"
+.Cd "ahci* at jmb?"
+.Cd "scsibus* at ahci?"
 .Sh DESCRIPTION
 The
 .Nm
 driver provides support for Serial ATA controllers conforming to the
 Advanced Host Controller Interface specification.
+.Pp
+Several AHCI capable controllers also provide a compatability mode that
+causes them to appear as a traditional ATA controller supported by
+.Xr pciide 4 .
+.Pp
+Although
+.Nm
+controllers are actual ATA controllers, the driver emulates SCSI via a
+translation layer.
 .Sh SEE ALSO
 .Xr intro 4 ,
-.Xr pci 4
+.Xr jmb 4 ,
+.Xr pci 4 ,
+.Xr pciide 4 ,
+.Xr scsi 4
 .Sh HISTORY
 The
 .Nm
@@ -40,4 +54,6 @@ driver first appeared in
 The
 .Nm
 driver was written by
-.An David Gwynne Aq dlg@openbsd.org .
+.An David Gwynne Aq dlg@openbsd.org
+and
+.An Christopher Pascoe Aq pascoe@openbsd.org .

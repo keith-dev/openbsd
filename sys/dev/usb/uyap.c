@@ -1,4 +1,4 @@
-/*	$OpenBSD: uyap.c,v 1.9 2005/08/01 05:36:49 brad Exp $ */
+/*	$OpenBSD: uyap.c,v 1.14 2007/06/14 10:11:16 mbalmer Exp $ */
 /*	$NetBSD: uyap.c,v 1.6 2002/07/11 21:14:37 augustss Exp $	*/
 
 /*
@@ -51,16 +51,32 @@
 #include <dev/usb/ezload.h>
 
 struct uyap_softc {
-	USBBASEDEVICE		sc_dev;		/* base device */
+	struct device		sc_dev;		/* base device */
 	usbd_device_handle	sc_udev;
 };
 
-USB_DECLARE_DRIVER(uyap);
+int uyap_match(struct device *, void *, void *); 
+void uyap_attach(struct device *, struct device *, void *); 
+int uyap_detach(struct device *, int); 
+int uyap_activate(struct device *, enum devact); 
+
+struct cfdriver uyap_cd = { 
+	NULL, "uyap", DV_DULL 
+}; 
+
+const struct cfattach uyap_ca = { 
+	sizeof(struct uyap_softc), 
+	uyap_match, 
+	uyap_attach, 
+	uyap_detach, 
+	uyap_activate, 
+};
 void uyap_attachhook(void *);
 
-USB_MATCH(uyap)
+int
+uyap_match(struct device *parent, void *match, void *aux)
 {
-	USB_MATCH_START(uyap, uaa);
+	struct usb_attach_arg *uaa = aux;
 
 	if (uaa->iface != NULL)
 		return (UMATCH_NONE);
@@ -83,45 +99,43 @@ uyap_attachhook(void *xsc)
 	err = ezload_downloads_and_reset(sc->sc_udev, firmwares);
 	if (err) {
 		printf("%s: download ezdata format firmware error: %s\n",
-		    USBDEVNAME(sc->sc_dev), usbd_errstr(err));
-		USB_ATTACH_ERROR_RETURN;
+		    sc->sc_dev.dv_xname, usbd_errstr(err));
+		return;
 	}
 
 	printf("%s: firmware download complete, disconnecting.\n",
-	    USBDEVNAME(sc->sc_dev));
+	    sc->sc_dev.dv_xname);
 }
 
-USB_ATTACH(uyap)
+void
+uyap_attach(struct device *parent, struct device *self, void *aux)
 {
-	USB_ATTACH_START(uyap, sc, uaa);
+	struct uyap_softc *sc = (struct uyap_softc *)self;
+	struct usb_attach_arg *uaa = aux;
 	usbd_device_handle dev = uaa->device;
 	char *devinfop;
 
 	devinfop = usbd_devinfo_alloc(dev, 0);
-	USB_ATTACH_SETUP;
-	printf("%s: %s\n", USBDEVNAME(sc->sc_dev), devinfop);
+	printf("\n%s: %s\n", sc->sc_dev.dv_xname, devinfop);
 	usbd_devinfo_free(devinfop);
 
-	printf("%s: downloading firmware\n", USBDEVNAME(sc->sc_dev));
+	printf("%s: downloading firmware\n", sc->sc_dev.dv_xname);
 
 	sc->sc_udev = dev;
 	if (rootvp == NULL)
 		mountroothook_establish(uyap_attachhook, sc);
 	else
 		uyap_attachhook(sc);
-
-	USB_ATTACH_SUCCESS_RETURN;
 }
 
-USB_DETACH(uyap)
+int
+uyap_detach(struct device *self, int flags)
 {
-	/*USB_DETACH_START(uyap, sc);*/
-
 	return (0);
 }
 
 int
-uyap_activate(device_ptr_t self, enum devact act)
+uyap_activate(struct device *self, enum devact act)
 {
 	return 0;
 }

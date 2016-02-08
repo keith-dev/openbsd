@@ -1,4 +1,4 @@
-/*	$OpenBSD: commit.c,v 1.105 2007/02/22 06:42:09 otto Exp $	*/
+/*	$OpenBSD: commit.c,v 1.108 2007/06/28 17:45:49 joris Exp $	*/
 /*
  * Copyright (c) 2006 Joris Vink <joris@openbsd.org>
  * Copyright (c) 2006 Xavier Santolaria <xsa@openbsd.org>
@@ -153,7 +153,10 @@ cvs_commit_check_files(struct cvs_file *cf)
 {
 	cvs_log(LP_TRACE, "cvs_commit_check_files(%s)", cf->file_path);
 
-	cvs_file_classify(cf, NULL);
+	if (current_cvsroot->cr_method != CVS_METHOD_LOCAL)
+		cvs_remote_classify_file(cf);
+	else
+		cvs_file_classify(cf, NULL);
 
 	if (cf->file_type == CVS_DIR) {
 		if (verbosity > 1)
@@ -207,7 +210,7 @@ void
 cvs_commit_local(struct cvs_file *cf)
 {
 	BUF *b, *d;
-	int isnew;
+	int isnew, histtype;
 	RCSNUM *head;
 	int openflags, rcsflags;
 	char rbuf[24], nbuf[24];
@@ -222,6 +225,13 @@ cvs_commit_local(struct cvs_file *cf)
 
 	if (cf->file_type != CVS_FILE)
 		fatal("cvs_commit_local: '%s' is not a file", cf->file_path);
+
+	if (cf->file_status != FILE_MODIFIED &&
+	    cf->file_status != FILE_ADDED &&
+	    cf->file_status != FILE_REMOVED) {
+		cvs_log(LP_ERR, "skipping bogus file `%s'", cf->file_path);
+		return;
+	}
 
 	if (cf->file_status == FILE_MODIFIED ||
 	    cf->file_status == FILE_REMOVED || (cf->file_status == FILE_ADDED
@@ -239,7 +249,7 @@ cvs_commit_local(struct cvs_file *cf)
 		rcsflags = RCS_CREATE;
 		openflags = O_CREAT | O_TRUNC | O_WRONLY;
 		if (cf->file_rcs != NULL) {
-			if (cf->file_rcs->rf_inattic == 0)
+			if (cf->in_attic == 0)
 				cvs_log(LP_ERR, "warning: expected %s "
 				    "to be in the Attic", cf->file_path);
 
@@ -379,6 +389,20 @@ cvs_commit_local(struct cvs_file *cf)
 		cvs_log(LP_NOTICE, "checking in '%s'; revision %s -> %s",
 		    cf->file_path, rbuf, nbuf);
 	}
+
+	switch (cf->file_status) {
+	case FILE_MODIFIED:
+		histtype = CVS_HISTORY_COMMIT_MODIFIED;
+		break;
+	case FILE_ADDED:
+		histtype = CVS_HISTORY_COMMIT_ADDED;
+		break;
+	case FILE_REMOVED:
+		histtype = CVS_HISTORY_COMMIT_REMOVED;
+		break;
+	}
+
+	cvs_history_add(histtype, cf, NULL);
 }
 
 static BUF *

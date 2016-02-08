@@ -1,4 +1,4 @@
-/*	$OpenBSD: ucomvar.h,v 1.14 2006/08/18 02:54:11 jason Exp $ */
+/*	$OpenBSD: ucomvar.h,v 1.16 2007/06/14 08:08:21 mbalmer Exp $ */
 /*	$NetBSD: ucomvar.h,v 1.10 2001/12/31 12:15:21 augustss Exp $	*/
 
 /*
@@ -38,6 +38,9 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+#define UCOMBUSCF_PORTNO		0
+#define UCOMBUSCF_PORTNO_DEFAULT	-1
+
 #define ucomcf_portno cf_loc[UCOMBUSCF_PORTNO]
 #define UCOM_UNK_PORTNO UCOMBUSCF_PORTNO_DEFAULT
 
@@ -51,7 +54,7 @@ struct ucom_methods {
 #define UCOM_SET_BREAK 3
 	int (*ucom_param)(void *sc, int portno, struct termios *);
 	int (*ucom_ioctl)(void *sc, int portno, u_long cmd,
-			  caddr_t data, int flag, usb_proc_ptr p);
+			  caddr_t data, int flag, struct proc *p);
 	int (*ucom_open)(void *sc, int portno);
 	void (*ucom_close)(void *sc, int portno);
 	void (*ucom_read)(void *sc, int portno, u_char **ptr, u_int32_t *count);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: fxpvar.h,v 1.25 2006/07/01 21:48:08 brad Exp $	*/
+/*	$OpenBSD: fxpvar.h,v 1.27 2007/05/28 22:54:04 ckuethe Exp $	*/
 /*	$NetBSD: if_fxpvar.h,v 1.1 1997/06/05 02:01:58 thorpej Exp $	*/
 
 /*                  
@@ -57,7 +57,7 @@
  * microcode is loaded.
  */
 #ifndef FXP_INT_DELAY
-#define FXP_INT_DELAY 64 
+#define FXP_INT_DELAY 128 
 #endif
 
 /*
@@ -161,7 +161,6 @@ struct fxp_softc {
 
 extern int fxp_intr(void *);
 extern int fxp_attach(struct fxp_softc *, const char *);
-extern int fxp_detach(struct fxp_softc *);
 
 #define	FXP_RXMAP_GET(sc)	((sc)->sc_rxmaps[(sc)->sc_rxfree++])
 #define	FXP_RXMAP_PUT(sc,map)	((sc)->sc_rxmaps[--(sc)->sc_rxfree] = (map))

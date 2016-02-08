@@ -1,4 +1,4 @@
-/*	$OpenBSD: pthread_private.h,v 1.58 2006/10/03 02:59:36 kurt Exp $	*/
+/*	$OpenBSD: pthread_private.h,v 1.68 2007/07/20 22:34:40 kettenis Exp $	*/
 /*
  * Copyright (c) 1995-1998 John Birrell <jb@cimlogic.com.au>.
  * All rights reserved.
@@ -52,6 +52,7 @@
  */
 #include <signal.h>
 #include <stdio.h>
+#include <sys/poll.h>
 #include <sys/queue.h>
 #include <sys/types.h>
 #include <sys/time.h>
@@ -395,9 +396,6 @@ enum pthread_susp {
  */
 #define PTHREAD_STACK_INITIAL			0x100000
 
-/* Address immediately beyond the beginning of the initial thread stack. */
-#define _POSIX_THREAD_ATTR_STACKSIZE
-
 /*
  * Define the different priority ranges.  All applications have thread
  * priorities constrained within 0-31.  The threads library raises the
@@ -493,8 +491,15 @@ enum pthread_state {
 
 
 /*
- * File descriptor locking definitions are defined in "thread_private.h"
+ * File descriptor locking definitions.
  */
+#define FD_READ		0x1
+#define FD_WRITE	0x2
+#define FD_RDWR		(FD_READ | FD_WRITE)
+#define FD_RDWR_CLOSE	(FD_RDWR | 0x4)
+
+#define _FD_LOCK(_fd,_type,_ts)	_thread_fd_lock(_fd, _type, _ts)
+#define _FD_UNLOCK(_fd,_type)	_thread_fd_unlock(_fd, _type)
 
 /*
  * File status flags struture - shared for dup'ed fd's
@@ -552,7 +557,7 @@ struct fd_table_entry {
 };
 
 struct pthread_poll_data {
-	int	nfds;
+	nfds_t	nfds;
 	struct pollfd *fds;
 };
 
@@ -561,8 +566,8 @@ union pthread_wait_data {
 	pthread_cond_t	cond;
 	const sigset_t	*sigwait;	/* Waiting on a signal in sigwait */
 	struct {
-		short		fd;	/* Used when thread waiting on fd */
-		short		branch;	/* Line number, for debugging.    */
+		int		fd;	/* Used when thread waiting on fd */
+		int		branch;	/* Line number, for debugging.    */
 		const char	*fname;	/* Source file name for debugging.*/
 	} fd;
 	FILE		*fp;
@@ -584,7 +589,7 @@ struct stack {
  * Define a continuation routine that can be used to perform a
  * transfer of control:
  */
-typedef void	(*thread_continuation_t) (void *);
+typedef void	(*thread_continuation_t) (struct pthread *);
 
 typedef V_TAILQ_ENTRY(pthread) pthread_entry_t;
 
@@ -785,7 +790,7 @@ struct pthread {
 	 * set thread priority and upon thread creation via a thread
 	 * attribute or default priority.
 	 */
-	char		base_priority;
+	int		base_priority;
 
 	/*
 	 * Inherited priority is the priority a thread inherits by
@@ -795,7 +800,7 @@ struct pthread {
 	 * that is being waited on by any other thread whose priority
 	 * is non-zero.
 	 */
-	char		inherited_priority;
+	int		inherited_priority;
 
 	/*
 	 * Active priority is always the maximum of the threads base
@@ -803,7 +808,7 @@ struct pthread {
 	 * in either the base or inherited priority, the active
 	 * priority must be recalculated.
 	 */
-	char		active_priority;
+	int		active_priority;
 
 	/* Number of priority ceiling or protection mutexes owned. */
 	int		priority_mutex_count;
@@ -989,13 +994,21 @@ SCLASS struct pollfd *_thread_pfd_table
 ;
 #endif
 
-SCLASS const int dtablecount
+SCLASS int    _thread_init_fdtsize	/* Initial fd/pfd table size.	*/
 #ifdef GLOBAL_PTHREAD_PRIVATE
-= 4096/sizeof(struct fd_table_entry);
+= 0;
 #else
 ;
 #endif
-SCLASS int    _thread_dtablesize	/* Descriptor table size.	*/
+
+SCLASS int    _thread_max_fdtsize	/* Max fd table size.	*/
+#ifdef GLOBAL_PTHREAD_PRIVATE
+= 0;
+#else
+;
+#endif
+
+SCLASS nfds_t _thread_max_pfdtsize	/* Max pfd table size.	*/
 #ifdef GLOBAL_PTHREAD_PRIVATE
 = 0;
 #else
@@ -1142,6 +1155,8 @@ void    _thread_cleanupspecific(void);
 void	_thread_clear_pending(int, pthread_t);
 void	_thread_dump_data(const void *, int);
 void    _thread_dump_info(void);
+int	_thread_fd_lock(int, int, struct timespec *);
+void	_thread_fd_unlock(int, int);
 void    _thread_init(void);
 void	_thread_kern_lock(int);
 void    _thread_kern_sched(struct sigcontext *);
@@ -1151,6 +1166,7 @@ void	_thread_kern_sched_state_unlock(enum pthread_state, spinlock_t *,
 void    _thread_kern_set_timeout(const struct timespec *);
 void    _thread_kern_sig_defer(void);
 void    _thread_kern_sig_undefer(void);
+void	_thread_key_init(void);
 void	_thread_kill_siginfo(int);
 void    _thread_sig_handler(int, siginfo_t *, struct sigcontext *);
 int	_thread_sig_handle(int, struct sigcontext *);
@@ -1162,8 +1178,6 @@ void	_thread_fs_flags_replace(int, struct fs_flags *);
 void	_thread_fd_init(void);
 int     _thread_fd_table_init(int, enum fd_entry_mode, struct fs_flags *);
 void	_thread_fd_entry_close(int);
-void	_thread_fd_unlock_owned(pthread_t);
-void	_thread_fd_unlock_thread(struct pthread	*, int, int);
 pthread_addr_t _thread_gc(pthread_addr_t);
 void	_thread_enter_cancellation_point(void);
 void	_thread_leave_cancellation_point(void);

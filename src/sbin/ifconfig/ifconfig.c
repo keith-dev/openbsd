@@ -1,4 +1,4 @@
-/*	$OpenBSD: ifconfig.c,v 1.177 2006/11/15 01:53:00 itojun Exp $	*/
+/*	$OpenBSD: ifconfig.c,v 1.185 2007/07/31 06:37:48 pyr Exp $	*/
 /*	$NetBSD: ifconfig.c,v 1.40 1997/10/01 02:19:43 enami Exp $	*/
 
 /*
@@ -95,10 +95,6 @@
 
 #include <netinet/ip_carp.h>
 
-#define	IPXIP
-#include <netipx/ipx.h>
-#include <netipx/ipx_if.h>
-
 #include <netdb.h>
 
 #include <net/if_vlan_var.h>
@@ -124,7 +120,6 @@ struct	sockaddr_in	netmask;
 #ifndef SMALL
 struct	ifaliasreq	addreq;
 struct  netrange	at_nr;		/* AppleTalk net range */
-int	ipx_type = IPX_ETHERTYPE_II;
 #endif /* SMALL */
 
 char	name[IFNAMSIZ];
@@ -145,6 +140,7 @@ void	notrailers(const char *, int);
 void	setifgroup(const char *, int);
 void	unsetifgroup(const char *, int);
 void	setifaddr(const char *, int);
+void	setifrtlabel(const char *, int);
 void	setiflladdr(const char *, int);
 void	setifdstaddr(const char *, int);
 void	setifflags(const char *, int);
@@ -165,7 +161,6 @@ void	setifnwflag(const char *, int);
 void	unsetifnwflag(const char *, int);
 void	setifnetmask(const char *, int);
 void	setifprefixlen(const char *, int);
-void	setipxframetype(const char *, int);
 void	setatrange(const char *, int);
 void	setatphase(const char *, int);
 void	settunnel(const char *, const char *);
@@ -304,13 +299,10 @@ const struct	cmd {
 	{ "eui64",	0,		0,		setia6eui64 },
 #endif /*INET6*/
 #ifndef SMALL
+	{ "rtlabel",	NEXTARG,	0,		setifrtlabel },
+	{ "-rtlabel",	-1,		0,		setifrtlabel },
 	{ "range",	NEXTARG,	0,		setatrange },
 	{ "phase",	NEXTARG,	0,		setatphase },
-	{ "802.2",	IPX_ETHERTYPE_8022,	0,	setipxframetype },
-	{ "802.2tr",	IPX_ETHERTYPE_8022TR, 0,	setipxframetype },
-	{ "802.3",	IPX_ETHERTYPE_8023,	0,	setipxframetype },
-	{ "snap",	IPX_ETHERTYPE_SNAP,	0,	setipxframetype },
-	{ "EtherII",	IPX_ETHERTYPE_II,	0,	setipxframetype },
 	{ "vlan",	NEXTARG,	0,		setvlantag },
 	{ "vlanprio",	NEXTARG,	0,		setvlanprio },
 	{ "vlandev",	NEXTARG,	0,		setvlandev },
@@ -422,8 +414,6 @@ void	in6_getprefix(const char *, int);
 #endif /* INET6 */
 void    at_status(int);
 void    at_getaddr(const char *, int);
-void	ipx_status(int);
-void	ipx_getaddr(const char *, int);
 void	ieee80211_status(void);
 void	ieee80211_listnodes(void);
 void	ieee80211_printnode(struct ieee80211_nodereq *);
@@ -450,8 +440,6 @@ const struct afswtch {
 #ifndef SMALL
 	{ "atalk", AF_APPLETALK, at_status, at_getaddr, NULL,
 	    SIOCDIFADDR, SIOCAIFADDR, C(addreq), C(addreq) },
-	{ "ipx", AF_IPX, ipx_status, ipx_getaddr, NULL,
-	    SIOCDIFADDR, SIOCAIFADDR, C(ridreq), C(addreq) },
 #endif
 	{ 0,	0,	    0,		0 }
 };
@@ -619,23 +607,8 @@ main(int argc, char *argv[])
 	}
 
 #ifndef SMALL
-	switch (af) {
-	case AF_IPX:
-		if (setipdst) {
-			struct ipxip_req rq;
-			int size = sizeof(rq);
-
-			rq.rq_ipx = addreq.ifra_addr;
-			rq.rq_ip = addreq.ifra_dstaddr;
-
-			if (setsockopt(s, 0, SO_IPXIP_ROUTE, &rq, size) < 0)
-				warn("encapsulation routing");
-		}
-		break;
-	case AF_APPLETALK:
+	if (af == AF_APPLETALK)
 		checkatrange((struct sockaddr_at *) &addreq.ifra_addr);
-		break;
-	}
 #endif /* SMALL */
 
 	if (clearaddr) {
@@ -798,13 +771,14 @@ printif(char *ifname, int ifaliases)
 	const char *namep;
 	char *oname = NULL;
 	struct ifreq *ifrp;
-	int nlen = 0, count = 0, noinet = 1;
+	int count = 0, noinet = 1;
+	size_t nlen = 0;
 
 	if (ifname) {
 		if ((oname = strdup(ifname)) == NULL)
 			err(1, "strdup");
 		nlen = strlen(oname);
-		if (!isdigit(oname[nlen - 1]))	/* is it a group? */
+		if (nlen && !isdigit(oname[nlen - 1]))	/* is it a group? */
 			if (printgroup(oname, ifaliases) != -1)
 				return;
 	}
@@ -815,7 +789,7 @@ printif(char *ifname, int ifaliases)
 	namep = NULL;
 	for (ifa = ifap; ifa; ifa = ifa->ifa_next) {
 		if (oname) {
-			if (isdigit(oname[nlen - 1])) {
+			if (nlen && isdigit(oname[nlen - 1])) {
 				/* must have exact match */
 				if (strcmp(oname, ifa->ifa_name) != 0)
 					continue;
@@ -969,6 +943,19 @@ setifaddr(const char *addr, int param)
 		clearaddr = 1;
 	(*afp->af_getaddr)(addr, (doalias >= 0 ? ADDR : RIDADDR));
 }
+
+#ifndef SMALL
+void
+setifrtlabel(const char *label, int d)
+{
+	if (d != 0)
+		ifr.ifr_data = (caddr_t)(const char *)"";
+	else
+		ifr.ifr_data = (caddr_t)label;
+	if (ioctl(s, SIOCSIFRTLABEL, &ifr) < 0)
+		warn("SIOCSIFRTLABEL");
+}
+#endif
 
 /* ARGSUSED */
 void
@@ -1794,7 +1781,7 @@ init_current_media(void)
 			 * that there are more, so we can ignore it.
 			 */
 			if (errno != E2BIG)
-				err(1, "SGIOCGIFMEDIA");
+				err(1, "SIOCGIFMEDIA");
 		}
 
 		media_current = ifmr.ifm_current;
@@ -2709,79 +2696,6 @@ at_status(int force)
 	putchar('\n');
 }
 
-/* ARGSUSED */
-void
-setipxframetype(const char *vname, int type)
-{
-	struct  sockaddr_ipx	*sipx;
-
-	ipx_type = type;
-	getsock(AF_IPX);
-	if (s < 0) {
-		if (errno == EPROTONOSUPPORT)
-			return;
-		err(1, "socket");
-	}
-	memset(&ifr, 0, sizeof(ifr));
-	strncpy(ifr.ifr_name, name, sizeof(ifr.ifr_name));
-	sipx = (struct sockaddr_ipx *)&addreq.ifra_addr;
-	sipx->sipx_type = ipx_type;
-}
-
-void
-ipx_status(int force)
-{
-	struct sockaddr_ipx *sipx;
-	struct frame_types {
-		int	type;
-		char	*name;
-	} *p, frames[] = {
-		{ IPX_ETHERTYPE_8022, "802.2" },
-		{ IPX_ETHERTYPE_8022TR, "802.2tr" },
-		{ IPX_ETHERTYPE_8023, "802.3" },
-		{ IPX_ETHERTYPE_SNAP, "SNAP" },
-		{ IPX_ETHERTYPE_II,  "EtherII" },
-		{ 0, NULL }
-	};
-
-	getsock(AF_IPX);
-	if (s < 0) {
-		if (errno == EPROTONOSUPPORT)
-			return;
-		err(1, "socket");
-	}
-	memset(&ifr, 0, sizeof(ifr));
-	(void) strlcpy(ifr.ifr_name, name, sizeof(ifr.ifr_name));
-	if (ioctl(s, SIOCGIFADDR, (caddr_t)&ifr) < 0) {
-		if (errno == EADDRNOTAVAIL || errno == EAFNOSUPPORT) {
-			if (!force)
-				return;
-			memset(&ifr.ifr_addr, 0, sizeof(ifr.ifr_addr));
-		} else
-			warn("SIOCGIFADDR");
-	}
-	(void) strlcpy(ifr.ifr_name, name, sizeof(ifr.ifr_name));
-	sipx = (struct sockaddr_ipx *)&ifr.ifr_addr;
-	printf("\tipx %s ", ipx_ntoa(sipx->sipx_addr));
-	if (flags & IFF_POINTOPOINT) { /* by W. Nesheim@Cornell */
-		if (ioctl(s, SIOCGIFDSTADDR, (caddr_t)&ifr) < 0) {
-			if (errno == EADDRNOTAVAIL)
-			    memset(&ifr.ifr_addr, 0, sizeof(ifr.ifr_addr));
-			else
-			    warn("SIOCGIFDSTADDR");
-		}
-		(void) strlcpy(ifr.ifr_name, name, sizeof(ifr.ifr_name));
-		sipx = (struct sockaddr_ipx *)&ifr.ifr_dstaddr;
-		printf("--> %s ", ipx_ntoa(sipx->sipx_addr));
-	}
-
-	for (p = frames; p->name && p->type != sipx->sipx_type; p++)
-		;
-	if (p->name != NULL)
-		printf("frame %s ", p->name);
-	putchar('\n');
-}
-
 void
 at_getaddr(const char *addr, int which)
 {
@@ -2841,24 +2755,6 @@ checkatrange(struct sockaddr_at *sat)
 	    (u_short) ntohs(sat->sat_addr.s_net))
 		errx(1, "AppleTalk address is not in range");
 	*((struct netrange *) &sat->sat_zero) = at_nr;
-}
-
-#define SIPX(x) ((struct sockaddr_ipx *) &(x))
-struct sockaddr_ipx *sipxtab[] = {
-SIPX(ridreq.ifr_addr), SIPX(addreq.ifra_addr),
-SIPX(addreq.ifra_mask), SIPX(addreq.ifra_broadaddr)};
-
-void
-ipx_getaddr(const char *addr, int which)
-{
-	struct sockaddr_ipx *sipx = sipxtab[which];
-
-	sipx->sipx_family = AF_IPX;
-	sipx->sipx_len  = sizeof(*sipx);
-	sipx->sipx_addr = ipx_addr(addr);
-	sipx->sipx_type = ipx_type;
-	if (which == MASK)
-		printf("Attempt to set IPX netmask will be ineffectual\n");
 }
 
 static int __tag = 0;
@@ -2941,10 +2837,10 @@ setvlanprio(const char *val, int d)
 void
 setvlandev(const char *val, int d)
 {
-	struct vlanreq vreq;
-
-	if (!__have_tag)
-		errx(1, "must specify both vlan tag and device");
+	struct vlanreq	 vreq;
+	int		 tag;
+	size_t		 skip;
+	const char	*estr;
 
 	bzero((char *)&vreq, sizeof(struct vlanreq));
 	ifr.ifr_data = (caddr_t)&vreq;
@@ -2953,7 +2849,15 @@ setvlandev(const char *val, int d)
 		err(1, "SIOCGETVLAN");
 
 	(void) strlcpy(vreq.vlr_parent, val, sizeof(vreq.vlr_parent));
-	vreq.vlr_tag = __tag;
+
+	if (!__have_tag && vreq.vlr_tag == 0) {
+		skip = strcspn(ifr.ifr_name, "0123456789");
+		tag = strtonum(ifr.ifr_name + skip, 1, 4095, &estr);
+		if (estr != NULL)
+			errx(1, "invalid vlan tag and device specification");
+		vreq.vlr_tag = tag;
+	} else if (__have_tag)
+		vreq.vlr_tag = __tag;
 
 	if (ioctl(s, SIOCSETVLAN, (caddr_t)&ifr) == -1)
 		err(1, "SIOCSETVLAN");
@@ -3701,15 +3605,26 @@ SIN(in_addreq.ifra_mask), SIN(in_addreq.ifra_broadaddr)};
 void
 in_getaddr(const char *s, int which)
 {
-	struct sockaddr_in *sin = sintab[which];
+	struct sockaddr_in *sin = sintab[which], tsin;
 	struct hostent *hp;
 	struct netent *np;
+	int bits, l;
+	char p[3];
 
+	bzero(&tsin, sizeof(tsin));
 	sin->sin_len = sizeof(*sin);
 	if (which != MASK)
 		sin->sin_family = AF_INET;
 
-	if (inet_aton(s, &sin->sin_addr) == 0) {
+	if (which == ADDR && strrchr(s, '/') != NULL &&
+	    (bits = inet_net_pton(AF_INET, s, &tsin.sin_addr,
+	    sizeof(tsin.sin_addr))) != -1) {
+		l = snprintf(p, sizeof(p), "%i", bits);
+		if (l >= sizeof(p) || l == -1)
+			errx(1, "%i: bad prefixlen", bits);
+		in_getprefix(p, MASK);
+		memcpy(&sin->sin_addr, &tsin.sin_addr, sizeof(sin->sin_addr));
+	} else if (inet_aton(s, &sin->sin_addr) == 0) {
 		if ((hp = gethostbyname(s)))
 			memcpy(&sin->sin_addr, hp->h_addr, hp->h_length);
 		else if ((np = getnetbyname(s)))
@@ -3814,11 +3729,23 @@ in6_getaddr(const char *s, int which)
 {
 	struct sockaddr_in6 *sin6 = sin6tab[which];
 	struct addrinfo hints, *res;
+	char buf[MAXHOSTNAMELEN+sizeof("/128")], *pfxlen;
 	int error;
 
 	memset(&hints, 0, sizeof(hints));
 	hints.ai_family = AF_INET6;
 	hints.ai_socktype = SOCK_DGRAM;	/*dummy*/
+
+	if (which == ADDR && strchr(s, '/') != NULL) {
+		if (strlcpy(buf, s, sizeof(buf)) >= sizeof(buf))
+			errx(1, "%s: bad value", s);
+		pfxlen = strchr(buf, '/');
+		*pfxlen++ = '\0';
+		s = buf;
+		in6_getprefix(pfxlen, MASK);
+		explicit_prefix = 1;
+	}
+
 	error = getaddrinfo(s, "0", &hints, &res);
 	if (error)
 		errx(1, "%s: %s", s, gai_strerror(error));

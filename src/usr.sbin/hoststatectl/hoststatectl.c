@@ -1,4 +1,4 @@
-/*	$OpenBSD: hoststatectl.c,v 1.16 2007/02/22 05:59:13 reyk Exp $	*/
+/*	$OpenBSD: hoststatectl.c,v 1.20 2007/06/12 18:09:00 pyr Exp $	*/
 
 /*
  * Copyright (c) 2006 Pierre-Yves Ritschard <pyr@spootnik.org>
@@ -142,42 +142,42 @@ main(int argc, char *argv[])
 	case SHOW_SUM:
 	case SHOW_HOSTS:
 	case SHOW_RELAYS:
-		imsg_compose(ibuf, IMSG_CTL_SHOW_SUM, 0, 0, NULL, 0);
+		imsg_compose(ibuf, IMSG_CTL_SHOW_SUM, 0, 0, -1, NULL, 0);
 		printf("Type\t%4s\t%-24s\t%-7s\tStatus\n",
 		    "Id", "Name", "Avlblty");
 		break;
 	case SERV_ENABLE:
-		imsg_compose(ibuf, IMSG_CTL_SERVICE_ENABLE, 0, 0,
+		imsg_compose(ibuf, IMSG_CTL_SERVICE_ENABLE, 0, 0, -1,
 		    &res->id, sizeof(res->id));
 		break;
 	case SERV_DISABLE:
-		imsg_compose(ibuf, IMSG_CTL_SERVICE_DISABLE, 0, 0,
+		imsg_compose(ibuf, IMSG_CTL_SERVICE_DISABLE, 0, 0, -1,
 		    &res->id, sizeof(res->id));
 		break;
 	case TABLE_ENABLE:
-		imsg_compose(ibuf, IMSG_CTL_TABLE_ENABLE, 0, 0,
+		imsg_compose(ibuf, IMSG_CTL_TABLE_ENABLE, 0, 0, -1,
 		    &res->id, sizeof(res->id));
 		break;
 	case TABLE_DISABLE:
-		imsg_compose(ibuf, IMSG_CTL_TABLE_DISABLE, 0, 0,
+		imsg_compose(ibuf, IMSG_CTL_TABLE_DISABLE, 0, 0, -1,
 		    &res->id, sizeof(res->id));
 		break;
 	case HOST_ENABLE:
-		imsg_compose(ibuf, IMSG_CTL_HOST_ENABLE, 0, 0,
+		imsg_compose(ibuf, IMSG_CTL_HOST_ENABLE, 0, 0, -1,
 		    &res->id, sizeof(res->id));
 		break;
 	case HOST_DISABLE:
-		imsg_compose(ibuf, IMSG_CTL_HOST_DISABLE, 0, 0,
+		imsg_compose(ibuf, IMSG_CTL_HOST_DISABLE, 0, 0, -1,
 		    &res->id, sizeof(res->id));
 		break;
 	case SHUTDOWN:
-		imsg_compose(ibuf, IMSG_CTL_SHUTDOWN, 0, 0, NULL, 0);
+		imsg_compose(ibuf, IMSG_CTL_SHUTDOWN, 0, 0, -1, NULL, 0);
 		break;
 	case RELOAD:
-		imsg_compose(ibuf, IMSG_CTL_RELOAD, 0, 0, NULL, 0);
+		imsg_compose(ibuf, IMSG_CTL_RELOAD, 0, 0, -1, NULL, 0);
 		break;
 	case MONITOR:
-		imsg_compose(ibuf, IMSG_CTL_NOTIFY, 0, 0, NULL, 0);
+		imsg_compose(ibuf, IMSG_CTL_NOTIFY, 0, 0, -1, NULL, 0);
 		break;
 	}
 
@@ -212,10 +212,10 @@ main(int argc, char *argv[])
 			case TABLE_ENABLE:
 			case HOST_DISABLE:
 			case HOST_ENABLE:
-				done = show_command_output(&imsg);
-				break;
 			case RELOAD:
 			case SHUTDOWN:
+				done = show_command_output(&imsg);
+				break;
 			case NONE:
 				break;
 			case MONITOR:
@@ -311,23 +311,23 @@ show_summary_msg(struct imsg *imsg, int type)
 			break;
 		service = imsg->data;
 		printf("service\t%4u\t%-24s\t%-7s\t%s\n",
-		    service->id, service->name, "",
-		    print_service_status(service->flags));
+		    service->conf.id, service->conf.name, "",
+		    print_service_status(service->conf.flags));
 		break;
 	case IMSG_CTL_TABLE:
 		if (type == SHOW_RELAYS)
 			break;
 		table = imsg->data;
 		printf("table\t%4u\t%-24s\t%-7s\t%s\n",
-		    table->id, table->name, "",
-		    print_table_status(table->up, table->flags));
+		    table->conf.id, table->conf.name, "",
+		    print_table_status(table->up, table->conf.flags));
 		break;
 	case IMSG_CTL_HOST:
 		if (type == SHOW_RELAYS)
 			break;
 		host = imsg->data;
 		printf("host\t%4u\t%-24s\t%-7s\t%s\n",
-		    host->id, host->name,
+		    host->conf.id, host->conf.name,
 		    print_availability(host->check_cnt, host->up_cnt),
 		    print_host_status(host->up, host->flags));
 		if (type == SHOW_HOSTS && host->check_cnt) {
@@ -343,8 +343,8 @@ show_summary_msg(struct imsg *imsg, int type)
 			break;
 		rlay = imsg->data;
 		printf("relay\t%4u\t%-24s\t%-7s\t%s\n",
-		    rlay->id, rlay->name, "",
-		    print_relay_status(rlay->flags));
+		    rlay->conf.id, rlay->conf.name, "",
+		    print_relay_status(rlay->conf.flags));
 		break;
 	case IMSG_CTL_STATISTICS:
 		if (type != SHOW_RELAYS)

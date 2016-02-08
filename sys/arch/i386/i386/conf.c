@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.115 2007/02/06 22:39:13 dlg Exp $	*/
+/*	$OpenBSD: conf.c,v 1.118 2007/07/23 13:30:21 mk Exp $	*/
 /*	$NetBSD: conf.c,v 1.75 1996/05/03 19:40:20 christos Exp $	*/
 
 /*
@@ -48,8 +48,6 @@ bdev_decl(wd);
 #include "fdc.h"
 #include "fd.h"
 bdev_decl(fd);
-#include "wt.h"
-bdev_decl(wt);
 #include "sd.h"
 #include "st.h"
 #include "cd.h"
@@ -66,7 +64,7 @@ struct bdevsw	bdevsw[] =
 	bdev_disk_init(NWD,wd),		/* 0: ST506/ESDI/IDE disk */
 	bdev_swap_init(1,sw),		/* 1: swap pseudo-device */
 	bdev_disk_init(NFD,fd),		/* 2: floppy diskette */
-	bdev_tape_init(NWT,wt),		/* 3: QIC-02/QIC-36 tape */
+	bdev_notdef(),			/* 3 */
 	bdev_disk_init(NSD,sd),		/* 4: SCSI disk */
 	bdev_tape_init(NST,st),		/* 5: SCSI tape */
 	bdev_disk_init(NCD,cd),		/* 6: SCSI CD-ROM */
@@ -125,7 +123,6 @@ cdev_decl(wd);
 #include "pccom.h"
 cdev_decl(com);
 cdev_decl(fd);
-cdev_decl(wt);
 #include "ss.h"
 #include "lpt.h"
 cdev_decl(lpt);
@@ -156,6 +153,7 @@ cdev_decl(music);
 #include "joy.h"
 #include "acpi.h"
 #include "apm.h"
+#include "bthub.h"
 #include "pctr.h"
 #include "bios.h"
 #include "iop.h"
@@ -214,7 +212,7 @@ struct cdevsw	cdevsw[] =
 	cdev_tty_init(NCOM,com),	/* 8: serial port */
 #endif
 	cdev_disk_init(NFD,fd),		/* 9: floppy disk */
-	cdev_tape_init(NWT,wt),		/* 10: QIC-02/QIC-36 tape */
+	cdev_notdef(),			/* 10 */
 	cdev_notdef(),			/* 11 */
 	cdev_wsdisplay_init(NWSDISPLAY,	/* 12: frame buffers, etc. */
 	    wsdisplay),
@@ -310,6 +308,7 @@ struct cdevsw	cdevsw[] =
 	cdev_gpio_init(NGPIO,gpio),	/* 83: GPIO interface */
 	cdev_nvram_init(NNVRAM,nvram),	/* 84: NVRAM interface */
 	cdev_acpi_init(NACPI,acpi),	/* 85: ACPI */
+	cdev_bthub_init(NBTHUB,bthub),	/* 86: bthub */
 };
 int	nchrdev = sizeof(cdevsw) / sizeof(cdevsw[0]);
 

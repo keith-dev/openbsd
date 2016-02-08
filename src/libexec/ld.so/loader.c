@@ -1,4 +1,4 @@
-/*	$OpenBSD: loader.c,v 1.109 2007/01/28 21:28:23 drahn Exp $ */
+/*	$OpenBSD: loader.c,v 1.111 2007/04/03 14:33:07 jason Exp $ */
 
 /*
  * Copyright (c) 1998 Per Fogelstrom, Opsycon AB
@@ -69,6 +69,7 @@ char *_dl_showmap;
 char *_dl_norandom;
 char *_dl_noprebind;
 char *_dl_prebind_validate;
+char *_dl_tracefmt1, *_dl_tracefmt2, *_dl_traceprog;
 
 struct r_debug *_dl_debug_map;
 
@@ -205,6 +206,9 @@ _dl_setup_env(char **envp)
 	_dl_preload = _dl_getenv("LD_PRELOAD", envp);
 	_dl_bindnow = _dl_getenv("LD_BIND_NOW", envp);
 	_dl_traceld = _dl_getenv("LD_TRACE_LOADED_OBJECTS", envp);
+	_dl_tracefmt1 = _dl_getenv("LD_TRACE_LOADED_OBJECTS_FMT1", envp);
+	_dl_tracefmt2 = _dl_getenv("LD_TRACE_LOADED_OBJECTS_FMT2", envp);
+	_dl_traceprog = _dl_getenv("LD_TRACE_LOADED_OBJECTS_PROGNAME", envp);
 	_dl_debug = _dl_getenv("LD_DEBUG", envp);
 	_dl_norandom = _dl_getenv("LD_NORANDOM", envp);
 	_dl_noprebind = _dl_getenv("LD_NOPREBIND", envp);
@@ -412,7 +416,7 @@ _dl_boot(const char **argv, char **envp, const long loff, long *dl_data)
 	phdp = (Elf_Phdr *)dl_data[AUX_phdr];
 	for (loop = 0; loop < dl_data[AUX_phnum]; loop++) {
 		if (phdp->p_type == PT_DYNAMIC) {
-			exe_obj = _dl_finalize_object(argv[0],
+			exe_obj = _dl_finalize_object(argv[0] ? argv[0] : "",
 			    (Elf_Dyn *)phdp->p_vaddr, dl_data, OBJTYPE_EXE,
 			    0, 0);
 			_dl_add_object(exe_obj);

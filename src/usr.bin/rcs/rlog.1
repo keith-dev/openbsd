@@ -1,4 +1,4 @@
-.\"	$OpenBSD: rlog.1,v 1.18 2006/05/08 12:09:34 xsa Exp $
+.\"	$OpenBSD: rlog.1,v 1.21 2007/05/31 19:20:15 jmc Exp $
 .\"
 .\" Copyright (c) 2005 Xavier Santolaria <xsa@openbsd.org>
 .\" All rights reserved.
@@ -14,7 +14,7 @@
 .\" WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
 .\" ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 .\" OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
-.Dd October 12, 2005
+.Dd $Mdocdate: May 31 2007 $
 .Dt RLOG 1
 .Os
 .Sh NAME
@@ -52,20 +52,20 @@ Print information about revisions of the default branch only.
 Specify revisions with dates matching the specification.
 The specification might be as follows:
 .Bl -tag -width Ds
-.It D1>D2 or D2>D1
+.It date1<date2 or date2>date1
 Select all revisions between
-.Ar \&D1
+.Ar date1
 and
-.Ar D2 .
-.It <D or D>
+.Ar date2 .
+.It <date or date>
 Select all revisions before
-.Ar D .
-.It >D or D<
+.Ar date .
+.It >date or date<
 Select all revisions after
-.Ar D .
-.It D
+.Ar date .
+.It date
 Select the latest revision before or equal to
-.Ar D .
+.Ar date .
 .El
 .Pp
 The
@@ -100,34 +100,34 @@ Print name of RCS file only.
 .It Fl r Ns Op Ar revs
 Specify revision(s) to list:
 .Bl -tag -width Ds
-.It REV1,REV2,...,
+.It rev1,rev2,...
 A list of revisions is specified by separating names or numbers
 of revisions by the
 .Sq \&,
 character.
-.It REV1:REV2
+.It rev1:rev2
 List all revisions between
-.Ar REV1
+.Ar rev1
 and
-.Ar REV2
+.Ar rev2
 (they must be on the same branch).
-.It :REV
+.It :rev
 List all revisions since the beginning of the branch until
-.Ar REV
+.Ar rev
 included.
-.It REV:
+.It rev:
 List all revisions of the branch beginning with
-.Ar REV .
-.It BRANCH
+.Ar rev .
+.It branch
 List all revisions of a branch.
-.It BRANCH.
+.It branch.
 List the latest revision of the branch
-.Ar BRANCH .
-.It BRANCH1:BRANCH2
+.Ar branch .
+.It branch1:branch2
 List all revisions of branches between
-.Ar BRANCH1
+.Ar branch1
 and
-.Ar BRANCH2 .
+.Ar branch2 .
 .El
 .Pp
 Without argument, the

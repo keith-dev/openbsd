@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_vfsops.c,v 1.62 2006/05/29 16:49:42 avsm Exp $	*/
+/*	$OpenBSD: nfs_vfsops.c,v 1.66 2007/06/20 15:00:43 thib Exp $	*/
 /*	$NetBSD: nfs_vfsops.c,v 1.46.4.1 1996/05/25 22:40:35 fvdl Exp $	*/
 
 /*
@@ -70,10 +70,11 @@
 
 extern struct nfsstats nfsstats;
 extern int nfs_ticks;
+extern u_int32_t nfs_procids[NFS_NPROCS];
 
-int nfs_sysctl(int *, u_int, void *, size_t *, void *, size_t, struct proc *);
-int nfs_checkexp(struct mount *mp, struct mbuf *nam,
-	 int *extflagsp, struct ucred **credanonp);
+int		nfs_sysctl(int *, u_int, void *, size_t *, void *, size_t, struct proc *);
+int		nfs_checkexp(struct mount *, struct mbuf *, int *, struct ucred **);
+struct mount	*nfs_mount_diskless(struct nfs_dlmount *, char *, int);
 
 /*
  * nfs vfs operations.
@@ -93,11 +94,6 @@ const struct vfsops nfs_vfsops = {
 	nfs_sysctl,
 	nfs_checkexp
 };
-
-extern u_int32_t nfs_procids[NFS_NPROCS];
-extern u_int32_t nfs_prog, nfs_vers;
-
-struct mount *nfs_mount_diskless(struct nfs_dlmount *, char *, int);
 
 #define TRUE	1
 #define	FALSE	0
@@ -612,6 +608,9 @@ nfs_mount(mp, path, data, ndp, p)
 	if (error)
 		return (error);
 
+	if ((args.flags & (NFSMNT_NFSV3|NFSMNT_RDIRPLUS)) == NFSMNT_RDIRPLUS)
+		return (EINVAL);
+
 	if (nfs_niothreads < 0) {
 		nfs_niothreads = 4;
 		nfs_getset_niothreads(TRUE);
@@ -689,8 +688,6 @@ mountnfs(argp, mp, nam, pth, hst)
 	nmp->nm_numgrps = NFS_MAXGRPS;
 	nmp->nm_readahead = NFS_DEFRAHEAD;
 	nmp->nm_deadthresh = NQ_DEADTHRESH;
-	CIRCLEQ_INIT(&nmp->nm_timerhead);
-	nmp->nm_inprog = NULLVP;
 	nmp->nm_fhsize = argp->fhsize;
 	nmp->nm_acregmin = NFS_MINATTRTIMO;
 	nmp->nm_acregmax = NFS_MAXATTRTIMO;
@@ -732,53 +729,26 @@ bad:
 	return (error);
 }
 
-/*
- * unmount system call
- */
+/* unmount system call */
 int
-nfs_unmount(mp, mntflags, p)
-	struct mount *mp;
-	int mntflags;
-	struct proc *p;
+nfs_unmount(struct mount *mp, int mntflags, struct proc *p)
 {
 	struct nfsmount *nmp;
-	int error, flags = 0;
+	int error, flags;
+
+	nmp = VFSTONFS(mp);
+	flags = 0;
 
 	if (mntflags & MNT_FORCE)
 		flags |= FORCECLOSE;
-	nmp = VFSTONFS(mp);
-	/*
-	 * Goes something like this..
-	 * - Call vflush() to clear out vnodes for this file system,
-	 *   except for the root vnode.
-	 * - Close the socket
-	 * - Free up the data structures
-	 */
 
-	/*
-	 * Must handshake with nqnfs_clientd() if it is active.
-	 */
-	nmp->nm_flag |= NFSMNT_DISMINPROG;
-	while (nmp->nm_inprog != NULLVP)
-		(void) tsleep((caddr_t)&lbolt, PSOCK, "nfsdism", 0);
 	error = vflush(mp, NULL, flags);
-	if (error) {
-		nmp->nm_flag &= ~NFSMNT_DISMINPROG;
+	if (error)
 		return (error);
-	}
-
-	/*
-	 * We are now committed to the unmount.
-	 * For NQNFS, let the server daemon free the nfsmount structure.
-	 */
-	if (nmp->nm_flag & NFSMNT_KERB)
-		nmp->nm_flag |= NFSMNT_DISMNT;
 
 	nfs_disconnect(nmp);
 	m_freem(nmp->nm_nam);
-
-	if ((nmp->nm_flag & NFSMNT_KERB) == 0)
-		free((caddr_t)nmp, M_NFSMNT);
+	free(nmp, M_NFSMNT);
 	return (0);
 }
 
@@ -801,8 +771,6 @@ nfs_root(mp, vpp)
 	*vpp = NFSTOV(np);
 	return (0);
 }
-
-extern int syncprt;
 
 /*
  * Flush out the buffer cache

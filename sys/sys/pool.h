@@ -1,4 +1,4 @@
-/*	$OpenBSD: pool.h,v 1.20 2006/12/23 15:00:15 miod Exp $	*/
+/*	$OpenBSD: pool.h,v 1.24 2007/05/28 17:55:56 tedu Exp $	*/
 /*	$NetBSD: pool.h,v 1.27 2001/06/06 22:00:17 rafal Exp $	*/
 
 /*-
@@ -64,7 +64,7 @@ struct pool_cache {
 	struct pool_cache_group
 			*pc_allocfrom;	/* group to allocate from */
 	struct pool_cache_group
-			*pc_freeto;	/* grop to free to */
+			*pc_freeto;	/* group to free to */
 	struct pool	*pc_pool;	/* parent pool */
 	struct simplelock pc_slock;	/* mutex */
 
@@ -148,6 +148,7 @@ struct pool {
 	 * since the page allocators may block.
 	 */
 	struct simplelock	pr_slock;
+	int			pr_ipl;
 
 	SPLAY_HEAD(phtree, pool_item_header) pr_phtree;
 
@@ -188,13 +189,16 @@ struct pool {
 #ifdef _KERNEL
 /* old nointr allocator, still needed for large allocations */
 extern struct pool_allocator pool_allocator_oldnointr;
-/* interrupt safe (name preserved for compat) new default allocator */
+
 extern struct pool_allocator pool_allocator_nointr;
-/* previous interrupt safe allocator, allocates from kmem */
-extern struct pool_allocator pool_allocator_kmem;
 
 void		pool_init(struct pool *, size_t, u_int, u_int, int,
 		    const char *, struct pool_allocator *);
+#ifdef DIAGNOSTIC
+void		pool_setipl(struct pool *, int);
+#else
+#define pool_setipl(p, i) do { /* nothing */  } while (0)
+#endif
 void		pool_destroy(struct pool *);
 
 void		*pool_get(struct pool *, int) __malloc;

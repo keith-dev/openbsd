@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_xge.c,v 1.37 2007/02/27 22:39:39 kettenis Exp $	*/
+/*	$OpenBSD: if_xge.c,v 1.42 2007/05/28 23:39:07 ckuethe Exp $	*/
 /*	$NetBSD: if_xge.c,v 1.1 2005/09/09 10:30:27 ragge Exp $	*/
 
 /*
@@ -38,11 +38,6 @@
 /*
  * Driver for the Neterion Xframe Ten Gigabit Ethernet controller.
  */
-
-#include <sys/cdefs.h>
-#if 0
-__KERNEL_RCSID(0, "$NetBSD: if_xge.c,v 1.1 2005/09/09 10:30:27 ragge Exp $");
-#endif
 
 #include "bpfilter.h"
 #include "vlan.h"
@@ -179,41 +174,43 @@ static uint64_t herc_dtx_cfg[] = {
 };
 
 struct xge_softc {
-	struct device sc_dev;
-	struct arpcom sc_arpcom;
-#define sc_if sc_arpcom.ac_if
-	bus_dma_tag_t sc_dmat;
-	bus_space_tag_t sc_st;
-	bus_space_handle_t sc_sh;
-	bus_space_tag_t sc_txt;
-	bus_space_handle_t sc_txh;
-	void *sc_ih;
-	int xge_type;			/* chip type */
-	int xge_if_flags;
-	void *sc_shutdownhook;
+	struct device		sc_dev;
+	struct arpcom		sc_arpcom;
+	struct ifmedia		xena_media;
 
-	struct ifmedia xena_media;
-	pcireg_t sc_pciregs[16];
+	void			*sc_ih;
+	void			*sc_shutdownhook;
+
+	bus_dma_tag_t		sc_dmat;
+	bus_space_tag_t		sc_st;
+	bus_space_handle_t	sc_sh;
+	bus_space_tag_t		sc_txt;
+	bus_space_handle_t	sc_txh;
+
+	pcireg_t		sc_pciregs[16];
+
+	int			xge_type; /* chip type */
+	int			xge_if_flags;
 
 	/* Transmit structures */
-	struct txd *sc_txd[NTXDESCS];	/* transmit frags array */
-	bus_addr_t sc_txdp[NTXDESCS];	/* bus address of transmit frags */
-	bus_dmamap_t sc_txm[NTXDESCS];	/* transmit frags map */
-	struct mbuf *sc_txb[NTXDESCS];	/* transmit mbuf pointer */
-	int sc_nexttx, sc_lasttx;
-	bus_dmamap_t sc_txmap;		/* transmit descriptor map */
+	struct txd		*sc_txd[NTXDESCS]; /* transmit frags array */
+	bus_addr_t		sc_txdp[NTXDESCS]; /* dva of transmit frags */
+	bus_dmamap_t		sc_txm[NTXDESCS]; /* transmit frags map */
+	struct mbuf		*sc_txb[NTXDESCS]; /* transmit mbuf pointer */
+	int			sc_nexttx, sc_lasttx;
+	bus_dmamap_t		sc_txmap; /* transmit descriptor map */
 
 	/* Receive data */
-	bus_dmamap_t sc_rxmap;		/* receive descriptor map */
-	struct rxd_4k *sc_rxd_4k[NRXPAGES]; /* receive desc pages */
-	bus_dmamap_t sc_rxm[NRXREAL];	/* receive buffer map */
-	struct mbuf *sc_rxb[NRXREAL];	/* mbufs on receive descriptors */
-	int sc_nextrx;			/* next descriptor to check */
+	bus_dmamap_t		sc_rxmap; /* receive descriptor map */
+	struct rxd_4k		*sc_rxd_4k[NRXPAGES]; /* receive desc pages */
+	bus_dmamap_t		sc_rxm[NRXREAL]; /* receive buffer map */
+	struct mbuf		*sc_rxb[NRXREAL]; /* mbufs on rx descriptors */
+	int			sc_nextrx; /* next descriptor to check */
 };
 
 #ifdef XGE_DEBUG
-#define DPRINTF(x)	if (xgedebug) printf x
-#define DPRINTFN(n,x)	if (xgedebug >= (n)) printf x
+#define DPRINTF(x)	do { if (xgedebug) printf x ; } while (0)
+#define DPRINTFN(n,x)	do { if (xgedebug >= (n)) printf x ; } while (0)
 int	xgedebug = 0;
 #else
 #define DPRINTF(x)
@@ -446,7 +443,7 @@ xge_attach(struct device *parent, struct device *self, void *aux)
 		val = PIF_RCSR(SW_RESET);
 		val &= 0xffff00ffffffffffULL;
 		PIF_WCSR(SW_RESET,val);
-		delay(1000*1000);	//wait for 1 sec
+		delay(1000*1000);	/* wait for 1 sec */
 	}
 
 	/* 29, Bring adapter out of reset */
@@ -826,7 +823,7 @@ xge_intr(void *pv)
 {
 	struct xge_softc *sc = pv;
 	struct txd *txd;
-	struct ifnet *ifp = &sc->sc_if;
+	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
 	bus_dmamap_t dmp;
 	uint64_t val;
 	int i, lasttx, plen;

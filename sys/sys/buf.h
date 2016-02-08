@@ -1,4 +1,4 @@
-/*	$OpenBSD: buf.h,v 1.54 2007/02/24 11:59:47 miod Exp $	*/
+/*	$OpenBSD: buf.h,v 1.57 2007/05/28 18:08:47 pedro Exp $	*/
 /*	$NetBSD: buf.h,v 1.25 1997/04/09 21:12:17 mycroft Exp $	*/
 
 /*
@@ -46,6 +46,8 @@
 struct buf;
 struct vnode;
 
+LIST_HEAD(bufhead, buf);
+
 /*
  * To avoid including <ufs/ffs/softdep.h>
  */
@@ -70,10 +72,10 @@ extern struct bio_ops {
  * The buffer header describes an I/O operation in the kernel.
  */
 struct buf {
+	LIST_ENTRY(buf) b_list;		/* All allocated buffers. */
 	LIST_ENTRY(buf) b_hash;		/* Hash chain. */
 	LIST_ENTRY(buf) b_vnbufs;	/* Buffer's associated vnode. */
 	TAILQ_ENTRY(buf) b_freelist;	/* Free list position if not active. */
-	TAILQ_ENTRY(buf) b_synclist;	/* List of dirty buffers to be written out */
 	time_t	b_synctime;		/* Time this buffer should be flushed */
 	struct	buf *b_actf, **b_actb;	/* Device driver queue when active. */
 	struct  proc *b_proc;		/* Associated proc; NULL if kernel. */
@@ -83,10 +85,8 @@ struct buf {
 	long	b_bcount;		/* Valid bytes in buffer. */
 	size_t	b_resid;		/* Remaining I/O. */
 	dev_t	b_dev;			/* Device associated with buffer. */
-	struct {
-		caddr_t	b_addr;		/* Memory, superblocks, indirect etc. */
-	} b_un;
-	void	*b_saveaddr;		/* Original b_addr for physio. */
+	caddr_t	b_data;			/* associated data */
+	void	*b_saveaddr;		/* Original b_data for physio. */
 	daddr64_t	b_lblkno;	/* Logical block number. */
 	daddr64_t	b_blkno;	/* Underlying physical block number. */
 					/* Function to call upon completion.
@@ -133,7 +133,6 @@ struct buf *bufq_default_get(struct bufq *);
 
 /* Device driver compatibility definitions. */
 #define	b_active b_bcount		/* Driver queue head: drive active. */
-#define	b_data	 b_un.b_addr		/* b_un.b_addr is not changeable. */
 #define	b_errcnt b_resid		/* Retry count while I/O in progress. */
 
 /*
@@ -208,14 +207,10 @@ struct cluster_info {
 
 #ifdef _KERNEL
 __BEGIN_DECLS
-extern int nbuf;		/* The number of buffer headers */
-extern struct buf *buf;		/* The buffer headers. */
-extern char *buffers;		/* The buffer contents. */
-extern int bufpages;		/* Number of memory pages in the buffer pool. */
-
+extern int bufpages;		/* Max number of pages for buffers' data */
 extern struct pool bufpool;
+extern struct bufhead bufhead;
 
-void	allocbuf(struct buf *, int);
 void	bawrite(struct buf *);
 void	bdwrite(struct buf *);
 void	biodone(struct buf *);
@@ -242,6 +237,9 @@ void  bgetvp(struct vnode *, struct buf *);
 
 void  buf_replacevnode(struct buf *, struct vnode *);
 void  buf_daemon(struct proc *);
+void  buf_replacevnode(struct buf *, struct vnode *);
+void  buf_daemon(struct proc *);
+int bread_cluster(struct vnode *, daddr64_t, int, struct buf **);
 
 #ifdef DEBUG
 void buf_print(struct buf *);
@@ -284,8 +282,6 @@ buf_countdeps(struct buf *bp, int i, int islocked)
 		return (0);
 }
 
-int	cluster_read(struct vnode *, struct cluster_info *,
-	    u_quad_t, daddr64_t, long, struct ucred *, struct buf **);
 void	cluster_write(struct buf *, struct cluster_info *, u_quad_t);
 
 __END_DECLS

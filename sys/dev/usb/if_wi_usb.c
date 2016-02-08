@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_wi_usb.c,v 1.33 2006/11/26 19:46:28 deraadt Exp $ */
+/*	$OpenBSD: if_wi_usb.c,v 1.42 2007/06/14 10:11:15 mbalmer Exp $ */
 
 /*
  * Copyright (c) 2003 Dale Rahn. All rights reserved.
@@ -112,8 +112,8 @@ void wi_dump_data(void *buffer, int len);
 void wi_usb_thread(void *arg);
 
 #ifdef WI_USB_DEBUG
-#define DPRINTF(x)      do { if (wi_usbdebug) logprintf x; } while (0)
-#define DPRINTFN(n,x)   do { if (wi_usbdebug >= (n)) logprintf x; } while (0)
+#define DPRINTF(x)      do { if (wi_usbdebug) printf x; } while (0)
+#define DPRINTFN(n,x)   do { if (wi_usbdebug >= (n)) printf x; } while (0)
 int     wi_usbdebug = 1;
 #else
 #define DPRINTF(x)
@@ -137,7 +137,7 @@ struct wi_usb_softc {
 	struct wi_softc		sc_wi;
 #define wi_usb_dev sc_wi.sc_dev
 
-	usb_callout_t		wi_usb_stat_ch;
+	struct timeout		wi_usb_stat_ch;
 
 	usbd_device_handle	wi_usb_udev;
 	usbd_interface_handle	wi_usb_iface;
@@ -182,7 +182,7 @@ struct wi_usb_softc {
 	void			*wi_info;
 	void			*wi_rxframe;
 
-	/* prevent multpile outstanding USB requests */
+	/* prevent multiple outstanding USB requests */
 	int			wi_lock;
 	int			wi_lockwait;
 
@@ -262,11 +262,27 @@ const struct wi_usb_type {
 };
 #define wi_usb_lookup(v, p) ((struct wi_usb_type *)usb_lookup(wi_usb_devs, v, p))
 
-USB_DECLARE_DRIVER_CLASS(wi_usb, DV_IFNET);
+int wi_usb_match(struct device *, void *, void *); 
+void wi_usb_attach(struct device *, struct device *, void *); 
+int wi_usb_detach(struct device *, int); 
+int wi_usb_activate(struct device *, enum devact); 
 
-USB_MATCH(wi_usb)
+struct cfdriver wi_usb_cd = { 
+	NULL, "wi_usb", DV_IFNET 
+}; 
+
+const struct cfattach wi_usb_ca = { 
+	sizeof(struct wi_usb_softc), 
+	wi_usb_match, 
+	wi_usb_attach, 
+	wi_usb_detach, 
+	wi_usb_activate, 
+};
+
+int
+wi_usb_match(struct device *parent, void *match, void *aux)
 {
-	USB_MATCH_START(wi_usb, uaa);
+	struct usb_attach_arg	*uaa = aux;
 
 	if (uaa->iface != NULL)
 		return (UMATCH_NONE);
@@ -280,9 +296,11 @@ USB_MATCH(wi_usb)
  * Attach the interface. Allocate softc structures, do ifmedia
  * setup and ethernet/BPF attach.
  */
-USB_ATTACH(wi_usb)
+void
+wi_usb_attach(struct device *parent, struct device *self, void *aux)
 {
-	USB_ATTACH_START(wi_usb, sc, uaa);
+	struct wi_usb_softc	*sc = (struct wi_usb_softc *)self;
+	struct usb_attach_arg	*uaa = aux;
 	char			*devinfop;
 /*	int			s; */
 	usbd_device_handle	dev = uaa->device;
@@ -297,13 +315,12 @@ USB_ATTACH(wi_usb)
 	err = usbd_set_config_no(dev, WI_USB_CONFIG_NO, 1);
 	if (err) {
 		printf("%s: setting config no failed\n",
-		    USBDEVNAME(sc->wi_usb_dev));
-		USB_ATTACH_ERROR_RETURN;
+		    sc->wi_usb_dev.dv_xname);
+		return;
 	}
 
 	devinfop = usbd_devinfo_alloc(dev, 0);
-	USB_ATTACH_SETUP;
-	printf("%s: %s\n", USBDEVNAME(sc->wi_usb_dev), devinfop);
+	printf("\n%s: %s\n", sc->wi_usb_dev.dv_xname, devinfop);
 	usbd_devinfo_free(devinfop);
 
 	/* XXX - any tasks? */
@@ -311,8 +328,8 @@ USB_ATTACH(wi_usb)
 	err = usbd_device2interface_handle(dev, WI_USB_IFACE_IDX, &iface);
 	if (err) {
 		printf("%s: getting interface handle failed\n",
-		    USBDEVNAME(sc->wi_usb_dev));
-		USB_ATTACH_ERROR_RETURN;
+		    sc->wi_usb_dev.dv_xname);
+		return;
 	}
 
 	/* XXX - flags? */
@@ -336,8 +353,8 @@ USB_ATTACH(wi_usb)
 		ed = usbd_interface2endpoint_descriptor(iface, i);
 		if (ed == NULL) {
 			printf("%s: couldn't get endpoint descriptor %d\n",
-			    USBDEVNAME(sc->wi_usb_dev), i);
-			USB_ATTACH_ERROR_RETURN;
+			    sc->wi_usb_dev.dv_xname, i);
+			return;
 		}
 		if (UE_GET_DIR(ed->bEndpointAddress) == UE_DIR_IN &&
 		    UE_GET_XFERTYPE(ed->bmAttributes) == UE_BULK) {
@@ -357,19 +374,19 @@ USB_ATTACH(wi_usb)
 
 	if (wi_usb_rx_list_init(sc)) {
 		printf("%s: rx list init failed\n",
-		    USBDEVNAME(sc->wi_usb_dev));
-		USB_ATTACH_ERROR_RETURN;
+		    sc->wi_usb_dev.dv_xname);
+		return;
 	}
 	if (wi_usb_tx_list_init(sc)) {
 		printf("%s: tx list init failed\n",
-		    USBDEVNAME(sc->wi_usb_dev));
-		USB_ATTACH_ERROR_RETURN;
+		    sc->wi_usb_dev.dv_xname);
+		return;
 	}
 
 	if (wi_usb_open_pipes(sc)){
 		printf("%s: open pipes failed\n",
-		    USBDEVNAME(sc->wi_usb_dev));
-		USB_ATTACH_ERROR_RETURN;
+		    sc->wi_usb_dev.dv_xname);
+		return;
 	}
 
 	sc->wi_usb_attached = 1;
@@ -377,15 +394,13 @@ USB_ATTACH(wi_usb)
 	kthread_create_deferred(wi_usb_start_thread, sc);
 
 	usbd_add_drv_event(USB_EVENT_DRIVER_ATTACH, sc->wi_usb_udev,
-			   USBDEV(sc->wi_usb_dev));
-
-
-	USB_ATTACH_SUCCESS_RETURN;
+			   &sc->wi_usb_dev);
 }
 
-USB_DETACH(wi_usb)
+int
+wi_usb_detach(struct device *self, int flags)
 {
-	USB_DETACH_START(wi_usb, sc);
+	struct wi_usb_softc	*sc = (struct wi_usb_softc *)self;
 	struct ifnet		*ifp = WI_GET_IFP(sc);
 	struct wi_softc		*wsc = &sc->sc_wi;
 	int s;
@@ -410,7 +425,7 @@ USB_DETACH(wi_usb)
 	/* detatch wi */
 
 	if (!(wsc->wi_flags & WI_FLAGS_ATTACHED)) {
-		printf("%s: already detached\n", USBDEVNAME(sc->wi_usb_dev));
+		printf("%s: already detached\n", sc->wi_usb_dev.dv_xname);
 		splx(s);
 		return (0);
 	}
@@ -426,7 +441,7 @@ USB_DETACH(wi_usb)
 
 	if (--sc->wi_usb_refcnt >= 0) {
 		/* Wait for processes to go away. */
-		usb_detach_wait(USBDEV(sc->wi_usb_dev));
+		usb_detach_wait(&sc->wi_usb_dev);
 	}
 
 	while (sc->wi_usb_nummem) {
@@ -440,12 +455,12 @@ USB_DETACH(wi_usb)
 		err = usbd_abort_pipe(sc->wi_usb_ep[WI_USB_ENDPT_INTR]);
 		if (err) {
 			printf("%s: abort intr pipe failed: %s\n",
-			    USBDEVNAME(sc->wi_usb_dev), usbd_errstr(err));
+			    sc->wi_usb_dev.dv_xname, usbd_errstr(err));
 		}
 		err = usbd_close_pipe(sc->wi_usb_ep[WI_USB_ENDPT_INTR]);
 		if (err) {
 			printf("%s: close intr pipe failed: %s\n",
-			    USBDEVNAME(sc->wi_usb_dev), usbd_errstr(err));
+			    sc->wi_usb_dev.dv_xname, usbd_errstr(err));
 		}
 		sc->wi_usb_ep[WI_USB_ENDPT_INTR] = NULL;
 	}
@@ -453,12 +468,12 @@ USB_DETACH(wi_usb)
 		usbd_abort_pipe(sc->wi_usb_ep[WI_USB_ENDPT_TX]);
 		if (err) {
 			printf("%s: abort tx pipe failed: %s\n",
-			    USBDEVNAME(sc->wi_usb_dev), usbd_errstr(err));
+			    sc->wi_usb_dev.dv_xname, usbd_errstr(err));
 		}
 		err = usbd_close_pipe(sc->wi_usb_ep[WI_USB_ENDPT_TX]);
 		if (err) {
 			printf("%s: close tx pipe failed: %s\n",
-			    USBDEVNAME(sc->wi_usb_dev), usbd_errstr(err));
+			    sc->wi_usb_dev.dv_xname, usbd_errstr(err));
 		}
 		sc->wi_usb_ep[WI_USB_ENDPT_TX] = NULL;
 	}
@@ -466,12 +481,12 @@ USB_DETACH(wi_usb)
 		usbd_abort_pipe(sc->wi_usb_ep[WI_USB_ENDPT_RX]);
 		if (err) {
 			printf("%s: abort rx pipe failed: %s\n",
-			    USBDEVNAME(sc->wi_usb_dev), usbd_errstr(err));
+			    sc->wi_usb_dev.dv_xname, usbd_errstr(err));
 		}
 		err = usbd_close_pipe(sc->wi_usb_ep[WI_USB_ENDPT_RX]);
 		if (err) {
 			printf("%s: close rx pipe failed: %s\n",
-			    USBDEVNAME(sc->wi_usb_dev), usbd_errstr(err));
+			    sc->wi_usb_dev.dv_xname, usbd_errstr(err));
 		}
 		sc->wi_usb_ep[WI_USB_ENDPT_RX] = NULL;
 	}
@@ -479,7 +494,7 @@ USB_DETACH(wi_usb)
 	splx(s);
 
 	usbd_add_drv_event(USB_EVENT_DRIVER_DETACH, sc->wi_usb_udev,
-	    USBDEV(sc->wi_usb_dev));
+	    &sc->wi_usb_dev);
 	return (0);
 }
 
@@ -494,7 +509,7 @@ wi_send_packet(struct wi_usb_softc *sc, int id)
 	c = &sc->wi_usb_tx_chain[0];
 
 	DPRINTFN(10,("%s: %s: id=%x\n",
-	    USBDEVNAME(sc->wi_usb_dev), __func__, id));
+	    sc->wi_usb_dev.dv_xname, __func__, id));
 
 	/* assemble packet from write_data buffer */
 	if (id == 0 || id == 1) {
@@ -528,7 +543,7 @@ wi_send_packet(struct wi_usb_softc *sc, int id)
 		total_len = rnd_len;
 
 		DPRINTFN(5,("%s: %s: id=%x len=%x\n",
-		    USBDEVNAME(sc->wi_usb_dev), __func__, id, total_len));
+		    sc->wi_usb_dev.dv_xname, __func__, id, total_len));
 
 		usbd_setup_xfer(c->wi_usb_xfer, sc->wi_usb_ep[WI_USB_ENDPT_TX],
 		    c, c->wi_usb_buf, rnd_len,
@@ -538,7 +553,7 @@ wi_send_packet(struct wi_usb_softc *sc, int id)
 		err = usbd_transfer(c->wi_usb_xfer);
 		if (err != USBD_IN_PROGRESS && err != USBD_NORMAL_COMPLETION) {
 			printf("%s: %s: error=%s\n",
-			    USBDEVNAME(sc->wi_usb_dev), __func__,
+			    sc->wi_usb_dev.dv_xname, __func__,
 			    usbd_errstr(err));
 			/* Stop the interface from process context. */
 			wi_usb_stop(sc);
@@ -548,12 +563,12 @@ wi_send_packet(struct wi_usb_softc *sc, int id)
 		}
 
 		DPRINTFN(5,("%s: %s: exit err=%x\n",
-		    USBDEVNAME(sc->wi_usb_dev), __func__, err));
+		    sc->wi_usb_dev.dv_xname, __func__, err));
 err_ret:
 		return err;
 	}
 	printf("%s:%s: invalid packet id sent %x\n",
-	    USBDEVNAME(sc->wi_usb_dev), __func__, id);
+	    sc->wi_usb_dev.dv_xname, __func__, id);
 	return 0;
 }
 
@@ -567,7 +582,7 @@ wi_cmd_usb(struct wi_softc *wsc, int cmd, int val0, int val1, int val2)
 	int			err;
 
 	DPRINTFN(5,("%s: %s: enter cmd=%x %x %x %x\n",
-	    USBDEVNAME(sc->wi_usb_dev), __func__, cmd, val0, val1, val2));
+	    sc->wi_usb_dev.dv_xname, __func__, cmd, val0, val1, val2));
 
 	if ((cmd & WI_CMD_CODE_MASK) == WI_CMD_TX) {
 		return wi_send_packet(sc, val0);
@@ -638,7 +653,7 @@ err_ret:
 	wi_usb_ctl_unlock(sc);
 
 	DPRINTFN(5,("%s: %s: exit err=%x\n",
-	    USBDEVNAME(sc->wi_usb_dev), __func__, err));
+	    sc->wi_usb_dev.dv_xname, __func__, err));
 	return err;
 }
 
@@ -654,7 +669,7 @@ wi_read_record_usb(struct wi_softc *wsc, struct wi_ltv_gen *ltv)
 	struct wi_ltv_gen	*oltv, p2ltv;
 
 	DPRINTFN(5,("%s: %s: enter rid=%x\n",
-	    USBDEVNAME(sc->wi_usb_dev), __func__, ltv->wi_type));
+	    sc->wi_usb_dev.dv_xname, __func__, ltv->wi_type));
 
 	/* Do we need to deal with these here, as in _io version?
 	 * WI_RID_ENCRYPTION -> WI_RID_P2_ENCRYPTION
@@ -707,7 +722,7 @@ wi_read_record_usb(struct wi_softc *wsc, struct wi_ltv_gen *ltv)
 	    WI_USB_TX_TIMEOUT, wi_usb_txeof);
 
 	DPRINTFN(10,("%s: %s: total_len=%x, wilen %d\n",
-	    USBDEVNAME(sc->wi_usb_dev), __func__, total_len, ltv->wi_len));
+	    sc->wi_usb_dev.dv_xname, __func__, total_len, ltv->wi_len));
 
 	err = wi_usb_do_transmit_sync(sc, c, &sc->ridresperr);
 
@@ -768,7 +783,7 @@ wi_read_record_usb(struct wi_softc *wsc, struct wi_ltv_gen *ltv)
 	wi_usb_tx_unlock(sc);
 
 	DPRINTFN(5,("%s: %s: exit err=%x\n",
-	    USBDEVNAME(sc->wi_usb_dev), __func__, err));
+	    sc->wi_usb_dev.dv_xname, __func__, err));
 	return err;
 }
 
@@ -785,7 +800,7 @@ wi_write_record_usb(struct wi_softc *wsc, struct wi_ltv_gen *ltv)
 	int			i;
 
 	DPRINTFN(5,("%s: %s: enter rid=%x wi_len %d copying %x\n",
-	    USBDEVNAME(sc->wi_usb_dev), __func__, ltv->wi_type, ltv->wi_len,
+	    sc->wi_usb_dev.dv_xname, __func__, ltv->wi_type, ltv->wi_len,
 	    (ltv->wi_len-1)*2 ));
 
 	/* Do we need to deal with these here, as in _io version?
@@ -930,7 +945,7 @@ wi_write_record_usb(struct wi_softc *wsc, struct wi_ltv_gen *ltv)
 	wi_usb_tx_unlock(sc);
 
 	DPRINTFN(5,("%s: %s: exit err=%x\n",
-	    USBDEVNAME(sc->wi_usb_dev), __func__, err));
+	    sc->wi_usb_dev.dv_xname, __func__, err));
 	return err;
 }
 
@@ -948,7 +963,7 @@ wi_alloc_nicmem_usb(struct wi_softc *wsc, int len, int *id)
 	struct wi_usb_softc	*sc = wsc->wi_usb_cdata;
 
 	DPRINTFN(10,("%s: %s: enter len=%x\n",
-	    USBDEVNAME(sc->wi_usb_dev), __func__, len));
+	    sc->wi_usb_dev.dv_xname, __func__, len));
 
 	/*
 	 * NOTE THIS IS A USB DEVICE WHICH WILL LIKELY HAVE MANY
@@ -985,7 +1000,7 @@ wi_write_data_usb(struct wi_softc *wsc, int id, int off, caddr_t buf, int len)
 	struct wi_usb_softc	*sc = wsc->wi_usb_cdata;
 
 	DPRINTFN(10,("%s: %s: id %x off %x len %d\n",
-	    USBDEVNAME(sc->wi_usb_dev), __func__, id, off, len));
+	    sc->wi_usb_dev.dv_xname, __func__, id, off, len));
 
 	if (id < 0 && id >= sc->wi_usb_nummem)
 		return EIO;
@@ -995,7 +1010,7 @@ wi_write_data_usb(struct wi_softc *wsc, int id, int off, caddr_t buf, int len)
 	if (len + off > sc->wi_usb_txmemsize[id])
 		return EIO;
 	DPRINTFN(10,("%s: %s: completed \n",
-	    USBDEVNAME(sc->wi_usb_dev), __func__));
+	    sc->wi_usb_dev.dv_xname, __func__));
 
 	bcopy(buf, ptr, len);
 	return 0;
@@ -1012,7 +1027,7 @@ wi_read_data_usb(struct wi_softc *wsc, int id, int off, caddr_t buf, int len)
 	struct wi_usb_softc	*sc = wsc->wi_usb_cdata;
 
 	DPRINTFN(10,("%s: %s: id %x off %x len %d\n",
-	    USBDEVNAME(sc->wi_usb_dev), __func__, id, off, len));
+	    sc->wi_usb_dev.dv_xname, __func__, id, off, len));
 
 	if (id == 0x1001 && sc->wi_info != NULL)
 		ptr = (u_int8_t *)sc->wi_info + off;
@@ -1043,7 +1058,7 @@ wi_read_data_usb(struct wi_softc *wsc, int id, int off, caddr_t buf, int len)
 void
 wi_usb_stop(struct wi_usb_softc *sc)
 {
-	DPRINTFN(1,("%s: %s: enter\n", USBDEVNAME(sc->wi_usb_dev),__func__));
+	DPRINTFN(1,("%s: %s: enter\n", sc->wi_usb_dev.dv_xname,__func__));
 	/* XXX */
 
 	/* Stop transfers */
@@ -1056,13 +1071,13 @@ wi_usb_do_transmit_sync(struct wi_usb_softc *sc, struct wi_usb_chain *c,
 	usbd_status		err;
 
 	DPRINTFN(10,("%s: %s:\n",
-	    USBDEVNAME(sc->wi_usb_dev), __func__));
+	    sc->wi_usb_dev.dv_xname, __func__));
 
 	sc->wi_usb_refcnt++;
 	err = usbd_transfer(c->wi_usb_xfer);
 	if (err != USBD_IN_PROGRESS && err != USBD_NORMAL_COMPLETION) {
 		printf("%s: %s error=%s\n",
-		    USBDEVNAME(sc->wi_usb_dev), __func__,
+		    sc->wi_usb_dev.dv_xname, __func__,
 		    usbd_errstr(err));
 		/* Stop the interface from process context. */
 		wi_usb_stop(sc);
@@ -1072,12 +1087,12 @@ wi_usb_do_transmit_sync(struct wi_usb_softc *sc, struct wi_usb_chain *c,
 	err = tsleep(ident, PRIBIO, "wiTXsync", hz*1);
 	if (err) {
 		DPRINTFN(1,("%s: %s: err %x\n",
-		    USBDEVNAME(sc->wi_usb_dev), __func__, err));
+		    sc->wi_usb_dev.dv_xname, __func__, err));
 		err = ETIMEDOUT;
 	}
 done:
 	if (--sc->wi_usb_refcnt < 0)
-		usb_detach_wakeup(USBDEV(sc->wi_usb_dev));
+		usb_detach_wakeup(&sc->wi_usb_dev);
 	return err;
 }
 
@@ -1101,7 +1116,7 @@ wi_usb_txeof(usbd_xfer_handle xfer, usbd_private_handle priv,
 
 	s = splnet();
 
-	DPRINTFN(10,("%s: %s: enter status=%d\n", USBDEVNAME(sc->wi_usb_dev),
+	DPRINTFN(10,("%s: %s: enter status=%d\n", sc->wi_usb_dev.dv_xname,
 		    __func__, status));
 
 	if (status != USBD_NORMAL_COMPLETION) {
@@ -1109,14 +1124,14 @@ wi_usb_txeof(usbd_xfer_handle xfer, usbd_private_handle priv,
 			splx(s);
 			return;
 		}
-		printf("%s: usb error on tx: %s\n", USBDEVNAME(sc->wi_usb_dev),
+		printf("%s: usb error on tx: %s\n", sc->wi_usb_dev.dv_xname,
 		    usbd_errstr(status));
 		if (status == USBD_STALLED) {
 			sc->wi_usb_refcnt++;
 			usbd_clear_endpoint_stall_async(
 			    sc->wi_usb_ep[WI_USB_ENDPT_TX]);
 			if (--sc->wi_usb_refcnt < 0)
-				usb_detach_wakeup(USBDEV(sc->wi_usb_dev));
+				usb_detach_wakeup(&sc->wi_usb_dev);
 		}
 		splx(s);
 		return;
@@ -1147,7 +1162,7 @@ wi_usb_txeof_frm(usbd_xfer_handle xfer, usbd_private_handle priv,
 
 	s = splnet();
 
-	DPRINTFN(10,("%s: %s: enter status=%d\n", USBDEVNAME(sc->wi_usb_dev),
+	DPRINTFN(10,("%s: %s: enter status=%d\n", sc->wi_usb_dev.dv_xname,
 		    __func__, status));
 
 	if (status != USBD_NORMAL_COMPLETION) {
@@ -1155,14 +1170,14 @@ wi_usb_txeof_frm(usbd_xfer_handle xfer, usbd_private_handle priv,
 			splx(s);
 			return;
 		}
-		printf("%s: usb error on tx: %s\n", USBDEVNAME(sc->wi_usb_dev),
+		printf("%s: usb error on tx: %s\n", sc->wi_usb_dev.dv_xname,
 		    usbd_errstr(status));
 		if (status == USBD_STALLED) {
 			sc->wi_usb_refcnt++;
 			usbd_clear_endpoint_stall_async(
 			    sc->wi_usb_ep[WI_USB_ENDPT_TX]);
 			if (--sc->wi_usb_refcnt < 0)
-				usb_detach_wakeup(USBDEV(sc->wi_usb_dev));
+				usb_detach_wakeup(&sc->wi_usb_dev);
 		}
 		splx(s);
 		return;
@@ -1187,7 +1202,7 @@ wi_usb_rx_list_init(struct wi_usb_softc *sc)
 	struct wi_usb_chain	*c;
 	int			i;
 
-	DPRINTFN(10,("%s: %s: enter\n", USBDEVNAME(sc->wi_usb_dev), __func__));
+	DPRINTFN(10,("%s: %s: enter\n", sc->wi_usb_dev.dv_xname, __func__));
 
 	for (i = 0; i < WI_USB_RX_LIST_CNT; i++) {
 		c = &sc->wi_usb_rx_chain[i];
@@ -1216,7 +1231,7 @@ wi_usb_tx_list_init(struct wi_usb_softc *sc)
 	struct wi_usb_chain	*c;
 	int			i;
 
-	DPRINTFN(10,("%s: %s: enter\n", USBDEVNAME(sc->wi_usb_dev), __func__));
+	DPRINTFN(10,("%s: %s: enter\n", sc->wi_usb_dev.dv_xname, __func__));
 
 	for (i = 0; i < WI_USB_TX_LIST_CNT; i++) {
 		c = &sc->wi_usb_tx_chain[i];
@@ -1248,7 +1263,7 @@ wi_usb_open_pipes(struct wi_usb_softc *sc)
 	struct wi_usb_chain	*c;
 	int			i;
 
-	DPRINTFN(10,("%s: %s: enter\n", USBDEVNAME(sc->wi_usb_dev),__func__));
+	DPRINTFN(10,("%s: %s: enter\n", sc->wi_usb_dev.dv_xname,__func__));
 
 	sc->wi_usb_refcnt++;
 
@@ -1257,7 +1272,7 @@ wi_usb_open_pipes(struct wi_usb_softc *sc)
 	    USBD_EXCLUSIVE_USE, &sc->wi_usb_ep[WI_USB_ENDPT_RX]);
 	if (err) {
 		printf("%s: open rx pipe failed: %s\n",
-		    USBDEVNAME(sc->wi_usb_dev), usbd_errstr(err));
+		    sc->wi_usb_dev.dv_xname, usbd_errstr(err));
 		error = EIO;
 		goto done;
 	}
@@ -1266,7 +1281,7 @@ wi_usb_open_pipes(struct wi_usb_softc *sc)
 	    USBD_EXCLUSIVE_USE, &sc->wi_usb_ep[WI_USB_ENDPT_TX]);
 	if (err) {
 		printf("%s: open tx pipe failed: %s\n",
-		    USBDEVNAME(sc->wi_usb_dev), usbd_errstr(err));
+		    sc->wi_usb_dev.dv_xname, usbd_errstr(err));
 		error = EIO;
 		goto done;
 	}
@@ -1278,7 +1293,7 @@ wi_usb_open_pipes(struct wi_usb_softc *sc)
 	    WI_USB_INTR_PKTLEN, wi_usb_intr, WI_USB_INTR_INTERVAL);
 	if (err) {
 		printf("%s: open intr pipe failed: %s\n",
-		    USBDEVNAME(sc->wi_usb_dev), usbd_errstr(err));
+		    sc->wi_usb_dev.dv_xname, usbd_errstr(err));
 		error = EIO;
 		goto done;
 	}
@@ -1290,14 +1305,14 @@ wi_usb_open_pipes(struct wi_usb_softc *sc)
 		    c, c->wi_usb_buf, WI_USB_BUFSZ,
 		    USBD_SHORT_XFER_OK | USBD_NO_COPY, USBD_NO_TIMEOUT,
 		    wi_usb_rxeof);
-		DPRINTFN(10,("%s: %s: start read\n", USBDEVNAME(sc->wi_usb_dev),
+		DPRINTFN(10,("%s: %s: start read\n", sc->wi_usb_dev.dv_xname,
 			    __func__));
 		usbd_transfer(c->wi_usb_xfer);
 	}
 
 done:
 	if (--sc->wi_usb_refcnt < 0)
-		usb_detach_wakeup(USBDEV(sc->wi_usb_dev));
+		usb_detach_wakeup(&sc->wi_usb_dev);
 
 	return (error);
 }
@@ -1330,18 +1345,17 @@ wi_get_fid_usb(struct wi_softc *sc, int fid)
 }
 
 int
-wi_usb_activate(device_ptr_t self, enum devact act)
+wi_usb_activate(struct device *self, enum devact act)
 {
 	struct wi_usb_softc *sc = (struct wi_usb_softc *)self;
 
-	DPRINTFN(10,("%s: %s: enter\n", USBDEVNAME(sc->wi_usb_dev), __func__));
+	DPRINTFN(10,("%s: %s: enter\n", sc->wi_usb_dev.dv_xname, __func__));
 
 	switch (act) {
 	case DVACT_ACTIVATE:
 		break;
 
 	case DVACT_DEACTIVATE:
-		if_deactivate(&sc->sc_wi.wi_ec.ec_if);
 		sc->wi_usb_dying = 1;
 		sc->wi_thread_info->dying = 1;
 		break;
@@ -1381,7 +1395,7 @@ wi_usb_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status
 	if (sc->wi_usb_dying)
 		return;
 
-	DPRINTFN(10,("%s: %s: enter status=%d\n", USBDEVNAME(sc->wi_usb_dev),
+	DPRINTFN(10,("%s: %s: enter status=%d\n", sc->wi_usb_dev.dv_xname,
 		    __func__, status));
 
 
@@ -1389,7 +1403,7 @@ wi_usb_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status
 		if (status == USBD_NOT_STARTED || status == USBD_IOERROR
 		    || status == USBD_CANCELLED) {
 			printf("%s: %u usb errors on rx: %s\n",
-			    USBDEVNAME(sc->wi_usb_dev), 1,
+			    sc->wi_usb_dev.dv_xname, 1,
 			    /* sc->wi_usb_rx_errs, */
 			    usbd_errstr(status));
 			return;
@@ -1398,7 +1412,7 @@ wi_usb_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status
 		sc->wi_usb_rx_errs++;
 		if (usbd_ratecheck(&sc->wi_usb_rx_notice)) {
 			printf("%s: %u usb errors on rx: %s\n",
-			    USBDEVNAME(sc->wi_usb_dev), sc->wi_usb_rx_errs,
+			    sc->wi_usb_dev.dv_xname, sc->wi_usb_rx_errs,
 			    usbd_errstr(status));
 			sc->wi_usb_rx_errs = 0;
 		}
@@ -1408,7 +1422,7 @@ wi_usb_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status
 			usbd_clear_endpoint_stall_async(
 			    sc->wi_usb_ep[WI_USB_ENDPT_RX]);
 			if (--sc->wi_usb_refcnt < 0)
-				usb_detach_wakeup(USBDEV(sc->wi_usb_dev));
+				usb_detach_wakeup(&sc->wi_usb_dev);
 		}
 		goto done;
 	}
@@ -1433,7 +1447,7 @@ wi_usb_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status
 	}
 	if (WI_USB_ISTXFRM(rtype)) {
 		DPRINTFN(2,("%s: %s: txfrm type %x\n",
-		    USBDEVNAME(sc->wi_usb_dev), __func__, rtype));
+		    sc->wi_usb_dev.dv_xname, __func__, rtype));
 		wi_usb_txfrm(sc, uin, total_len);
 		goto done;
 	}
@@ -1442,7 +1456,7 @@ wi_usb_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status
 	case WI_USB_INFOFRM:
 		/* info packet, INFO_FID hmm */
 		DPRINTFN(10,("%s: %s: infofrm type %x\n",
-		    USBDEVNAME(sc->wi_usb_dev), __func__, rtype));
+		    sc->wi_usb_dev.dv_xname, __func__, rtype));
 		wi_usb_infofrm(c, total_len);
 		break;
 	case WI_USB_CMDRESP:
@@ -1457,12 +1471,12 @@ wi_usb_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status
 	case WI_USB_WMEMRESP:
 		/* Not currently used */
 		DPRINTFN(2,("%s: %s: wmemresp type %x\n",
-		    USBDEVNAME(sc->wi_usb_dev), __func__, rtype));
+		    sc->wi_usb_dev.dv_xname, __func__, rtype));
 		break;
 	case WI_USB_RMEMRESP:
 		/* Not currently used */
 		DPRINTFN(2,("%s: %s: rmemresp type %x\n",
-		    USBDEVNAME(sc->wi_usb_dev), __func__, rtype));
+		    sc->wi_usb_dev.dv_xname, __func__, rtype));
 		break;
 	case WI_USB_BUFAVAIL:
 		printf("wi_usb: received USB_BUFAVAIL packet\n"); /* XXX */
@@ -1486,9 +1500,9 @@ wi_usb_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status
 	sc->wi_usb_refcnt++;
 	usbd_transfer(c->wi_usb_xfer);
 	if (--sc->wi_usb_refcnt < 0)
-		usb_detach_wakeup(USBDEV(sc->wi_usb_dev));
+		usb_detach_wakeup(&sc->wi_usb_dev);
 
-	DPRINTFN(10,("%s: %s: start rx\n", USBDEVNAME(sc->wi_usb_dev),
+	DPRINTFN(10,("%s: %s: start rx\n", sc->wi_usb_dev.dv_xname,
 		    __func__));
 }
 
@@ -1497,7 +1511,7 @@ wi_usb_intr(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
 {
 	struct wi_usb_softc	*sc = priv;
 
-	DPRINTFN(2,("%s: %s: enter\n", USBDEVNAME(sc->wi_usb_dev), __func__));
+	DPRINTFN(2,("%s: %s: enter\n", sc->wi_usb_dev.dv_xname, __func__));
 
 	if (sc->wi_usb_dying)
 		return;
@@ -1511,7 +1525,7 @@ wi_usb_intr(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
 			usbd_clear_endpoint_stall_async(
 			    sc->wi_usb_ep[WI_USB_ENDPT_RX]);
 			if (--sc->wi_usb_refcnt < 0)
-				usb_detach_wakeup(USBDEV(sc->wi_usb_dev));
+				usb_detach_wakeup(&sc->wi_usb_dev);
 		}
 		return;
 	}
@@ -1530,14 +1544,14 @@ wi_usb_cmdresp(struct wi_usb_chain *c)
 	cmdresperr = letoh16(presp->resp0);
 	DPRINTFN(10,("%s: %s: enter type=%x, status=%x, cmdresp=%x, "
 	    "resp=%x,%x,%x\n",
-	    USBDEVNAME(sc->wi_usb_dev), __func__, type, status, sc->cmdresp,
+	    sc->wi_usb_dev.dv_xname, __func__, type, status, sc->cmdresp,
 	    cmdresperr, letoh16(presp->resp1),
 	    letoh16(presp->resp2)));
 
 	/* XXX */
 	if (sc->cmdresp != (status & WI_STAT_CMD_CODE)) {
 		DPRINTFN(1,("%s: cmd ty %x st %x cmd %x failed %x\n",
-		    USBDEVNAME(sc->wi_usb_dev),
+		    sc->wi_usb_dev.dv_xname,
 			type, status, sc->cmdresp, cmdresperr));
 		return;
 	}
@@ -1562,13 +1576,13 @@ wi_usb_rridresp(struct wi_usb_chain *c)
 
 	if (ltv == 0) {
 		DPRINTFN(5,("%s: %s: enter ltv = 0 rid=%x len %d\n",
-		    USBDEVNAME(sc->wi_usb_dev), __func__, rid,
+		    sc->wi_usb_dev.dv_xname, __func__, rid,
 		    frmlen));
 		return;
 	}
 
 	DPRINTFN(5,("%s: %s: enter rid=%x expecting %x len %d exptlen %d\n",
-	    USBDEVNAME(sc->wi_usb_dev), __func__, rid, ltv->wi_type,
+	    sc->wi_usb_dev.dv_xname, __func__, rid, ltv->wi_type,
 	    frmlen, ltv->wi_len));
 
 	rid = letoh16(presp->rid);
@@ -1588,7 +1602,7 @@ wi_usb_rridresp(struct wi_usb_chain *c)
 	ltv->wi_len = frmlen;
 
 	DPRINTFN(10,("%s: %s: copying %d frmlen %d\n",
-	    USBDEVNAME(sc->wi_usb_dev), __func__, (ltv->wi_len-1)*2,
+	    sc->wi_usb_dev.dv_xname, __func__, (ltv->wi_len-1)*2,
 	    frmlen));
 
 	if (ltv->wi_len > 1)
@@ -1611,7 +1625,7 @@ wi_usb_wridresp(struct wi_usb_chain *c)
 	status = letoh16(presp->status);
 
 	DPRINTFN(10,("%s: %s: enter status=%x\n",
-	    USBDEVNAME(sc->wi_usb_dev), __func__, status));
+	    sc->wi_usb_dev.dv_xname, __func__, status));
 
 	sc->ridresperr = (status & WI_STAT_CMD_RESULT) >> 8;
 	sc->ridltv = 0;
@@ -1624,7 +1638,7 @@ wi_usb_infofrm(struct wi_usb_chain *c, int len)
 	struct wi_usb_softc	*sc = c->wi_usb_sc;
 
 	DPRINTFN(10,("%s: %s: enter\n",
-	    USBDEVNAME(sc->wi_usb_dev), __func__));
+	    sc->wi_usb_dev.dv_xname, __func__));
 
 	sc->wi_info = ((char *)c->wi_usb_buf) + 2;
 	wi_update_stats(&sc->sc_wi);
@@ -1644,7 +1658,7 @@ wi_usb_txfrm(struct wi_usb_softc *sc, wi_usb_usbin *uin, int total_len)
 
 
 	DPRINTFN(2,("%s: %s: enter status=%d\n",
-	    USBDEVNAME(sc->wi_usb_dev), __func__, status));
+	    sc->wi_usb_dev.dv_xname, __func__, status));
 
 	if (sc->txresp == WI_CMD_TX) {
 		sc->txresperr=status;
@@ -1654,7 +1668,7 @@ wi_usb_txfrm(struct wi_usb_softc *sc, wi_usb_usbin *uin, int total_len)
 		if (status != 0) /* XXX */
 			wi_watchdog_usb(ifp);
 	DPRINTFN(1,("%s: %s: txresp not expected status=%d \n",
-	    USBDEVNAME(sc->wi_usb_dev), __func__, status));
+	    sc->wi_usb_dev.dv_xname, __func__, status));
 	}
 
 	splx(s);
@@ -1665,7 +1679,7 @@ wi_usb_rxfrm(struct wi_usb_softc *sc, wi_usb_usbin *uin, int total_len)
 	int s;
 
 	DPRINTFN(5,("%s: %s: enter len=%d\n",
-	    USBDEVNAME(sc->wi_usb_dev), __func__, total_len));
+	    sc->wi_usb_dev.dv_xname, __func__, total_len));
 
 	s = splnet();
 
@@ -1684,7 +1698,7 @@ void
 wi_usb_start_thread(void *arg)
 {
 	struct wi_usb_softc	*sc = arg;
-	kthread_create (wi_usb_thread, arg, NULL, USBDEVNAME(sc->wi_usb_dev));
+	kthread_create (wi_usb_thread, arg, NULL, sc->wi_usb_dev.dv_xname);
 }
 
 void
@@ -1700,7 +1714,7 @@ wi_start_usb(struct ifnet *ifp)
 	s = splnet();
 
 	DPRINTFN(5,("%s: %s:\n",
-	    USBDEVNAME(sc->wi_usb_dev), __func__));
+	    sc->wi_usb_dev.dv_xname, __func__));
 
 	if (wi_usb_tx_lock_try(sc)) {
 		/* lock acquired do start now */
@@ -1746,7 +1760,7 @@ wi_inquire_usb(void *xsc)
 	s = splnet();
 
 	DPRINTFN(2,("%s: %s:\n",
-	    USBDEVNAME(sc->wi_usb_dev), __func__));
+	    sc->wi_usb_dev.dv_xname, __func__));
 
 	sc->wi_thread_info->status |= WI_INQUIRE;
 
@@ -1773,7 +1787,7 @@ wi_watchdog_usb(struct ifnet *ifp)
 	s = splnet();
 
 	DPRINTFN(5,("%s: %s: ifp %x\n",
-	    USBDEVNAME(sc->wi_usb_dev), __func__, ifp));
+	    sc->wi_usb_dev.dv_xname, __func__, ifp));
 
 	sc->wi_thread_info->status |= WI_WATCHDOG;
 
@@ -1830,18 +1844,18 @@ wi_usb_thread(void *arg)
 	for(;;) {
 		if (wi_thread_info->dying) { 
 			if (--sc->wi_usb_refcnt < 0)
-				usb_detach_wakeup(USBDEV(sc->wi_usb_dev));
+				usb_detach_wakeup(&sc->wi_usb_dev);
 			kthread_exit(0);
 		}
 
 		DPRINTFN(5,("%s: %s: dying %x status %x\n",
-		    USBDEVNAME(sc->wi_usb_dev), __func__,
+		    sc->wi_usb_dev.dv_xname, __func__,
 			wi_thread_info->dying, wi_thread_info->status));
 
 		wi_usb_ctl_lock(sc);
 
 		DPRINTFN(5,("%s: %s: starting %x\n",
-		    USBDEVNAME(sc->wi_usb_dev), __func__,
+		    sc->wi_usb_dev.dv_xname, __func__,
 		    wi_thread_info->status));
 
 		s = splusb();
@@ -1863,7 +1877,7 @@ wi_usb_thread(void *arg)
 		splx(s);
 
 		DPRINTFN(5,("%s: %s: ending %x\n",
-		    USBDEVNAME(sc->wi_usb_dev), __func__,
+		    sc->wi_usb_dev.dv_xname, __func__,
 		    wi_thread_info->status));
 		wi_usb_ctl_unlock(sc);
 
@@ -1884,7 +1898,7 @@ wi_usb_tx_lock_try(struct wi_usb_softc *sc)
 
 	s = splnet();
 
-	DPRINTFN(10,("%s: %s: enter\n", USBDEVNAME(sc->wi_usb_dev), __func__));
+	DPRINTFN(10,("%s: %s: enter\n", sc->wi_usb_dev.dv_xname, __func__));
 
 	if (sc->wi_lock != 0) {
 		return 0; /* failed to aquire lock */
@@ -1904,11 +1918,11 @@ wi_usb_tx_lock(struct wi_usb_softc *sc)
 	s = splnet();
 
 	again:
-	DPRINTFN(10,("%s: %s: enter\n", USBDEVNAME(sc->wi_usb_dev), __func__));
+	DPRINTFN(10,("%s: %s: enter\n", sc->wi_usb_dev.dv_xname, __func__));
 
 	if (sc->wi_lock != 0) {
 		sc->wi_lockwait++;
-		DPRINTFN(10,("%s: %s: busy %d\n", USBDEVNAME(sc->wi_usb_dev),
+		DPRINTFN(10,("%s: %s: busy %d\n", sc->wi_usb_dev.dv_xname,
 		__func__, sc->wi_lockwait ));
 		tsleep(&sc->wi_lock, PRIBIO, "witxl", 0);
 	}
@@ -1931,11 +1945,11 @@ wi_usb_tx_unlock(struct wi_usb_softc *sc)
 
 	sc->wi_lock = 0;
 
-	DPRINTFN(10,("%s: %s: enter\n", USBDEVNAME(sc->wi_usb_dev), __func__));
+	DPRINTFN(10,("%s: %s: enter\n", sc->wi_usb_dev.dv_xname, __func__));
 
 	if (sc->wi_lockwait) {
 		DPRINTFN(10,("%s: %s: waking\n",
-		    USBDEVNAME(sc->wi_usb_dev), __func__));
+		    sc->wi_usb_dev.dv_xname, __func__));
 		sc->wi_lockwait = 0;
 		wakeup(&sc->wi_lock);
 	}
@@ -1951,7 +1965,7 @@ wi_usb_ctl_lock(struct wi_usb_softc *sc)
 	s = splnet();
 
 	again:
-	DPRINTFN(10,("%s: %s: enter\n", USBDEVNAME(sc->wi_usb_dev),
+	DPRINTFN(10,("%s: %s: enter\n", sc->wi_usb_dev.dv_xname,
 	    __func__));
 
 	if (sc->wi_ctllock != 0) {
@@ -1962,7 +1976,7 @@ wi_usb_ctl_lock(struct wi_usb_softc *sc)
 			return;
 		}
 		sc->wi_ctllockwait++;
-		DPRINTFN(10,("%s: %s: busy %d\n", USBDEVNAME(sc->wi_usb_dev),
+		DPRINTFN(10,("%s: %s: busy %d\n", sc->wi_usb_dev.dv_xname,
 		__func__, sc->wi_ctllockwait ));
 		tsleep(&sc->wi_ctllock, PRIBIO, "wiusbthr", 0);
 	}
@@ -1987,11 +2001,11 @@ wi_usb_ctl_unlock(struct wi_usb_softc *sc)
 
 	sc->wi_ctllock--;
 
-	DPRINTFN(10,("%s: %s: enter\n", USBDEVNAME(sc->wi_usb_dev), __func__));
+	DPRINTFN(10,("%s: %s: enter\n", sc->wi_usb_dev.dv_xname, __func__));
 
 	if (sc->wi_ctllock == 0 && sc->wi_ctllockwait) {
 		DPRINTFN(10,("%s: %s: waking\n",
-		    USBDEVNAME(sc->wi_usb_dev), __func__));
+		    sc->wi_usb_dev.dv_xname, __func__));
 		sc->wi_ctllockwait = 0;
 		sc->wi_curproc = 0;
 		wakeup(&sc->wi_ctllock);

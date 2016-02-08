@@ -1,4 +1,4 @@
-/*	$OpenBSD: boot.c,v 1.12 2006/07/27 20:41:28 deraadt Exp $	*/
+/*	$OpenBSD: boot.c,v 1.14 2007/05/29 00:03:13 deraadt Exp $	*/
 /*	$NetBSD: boot.c,v 1.3 2001/05/31 08:55:19 mrg Exp $	*/
 /*
  * Copyright (c) 1997, 1999 Eduardo E. Horvath.  All rights reserved.
@@ -67,7 +67,6 @@
  */
 char *kernels[] = {
 	"bsd",
-	"obsd",
 	NULL
 };
 
@@ -284,7 +283,7 @@ main()
 	char **bootlp;
 	char *just_bootline[2];
 	
-	printf(">> %s", version);
+	printf(">> OpenBSD BOOT %s\n", version);
 
 	/*
 	 * Get the boot arguments from Openfirmware
@@ -322,7 +321,7 @@ main()
 				bootlp = 0;
 				kernels[0] = 0;	/* no more iteration */
 			} else if (cp != bootline) {
-				printf(": trying %s...\n", cp);
+				printf("Trying %s...\n", cp);
 				strlcpy(bootline, cp, sizeof bootline);
 			}
 		}

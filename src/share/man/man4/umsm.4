@@ -1,4 +1,4 @@
-.\"	$OpenBSD: umsm.4,v 1.13 2007/01/30 06:14:32 jmc Exp $
+.\"	$OpenBSD: umsm.4,v 1.21 2007/06/21 00:26:47 jcs Exp $
 .\"
 .\" Copyright (c) 2006 Jonathan Gray <jsg@openbsd.org>
 .\"
@@ -14,7 +14,7 @@
 .\" ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 .\" OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 .\"
-.Dd March 24, 2006
+.Dd $Mdocdate: June 21 2007 $
 .Dt UMSM 4
 .Os
 .Sh NAME
@@ -27,7 +27,7 @@
 The
 .Nm
 driver supports Qualcomm MSM modem adapters.
-The MSM chipset is found in EDVO and UMTS capable modems.
+The MSM chipset is found in EVDO and UMTS capable modems.
 Typically these are CardBus and PCI Express Mini Cards that incorporate a
 USB controller with the actual device attached to it.
 .Pp
@@ -39,7 +39,11 @@ driver:
 .It Em "Device		Bus"
 .It Li "AirPrime PC5220" Ta Ta CardBus
 .It Li "Kyocera KPC650" Ta Ta CardBus
+.It Li "Novatel Wireless ES620" Ta Ta USB
+.It Li "ONDA Communication H600" Ta Ta CardBus
 .It Li "Sierra Wireless MC8755" Ta Ta PCI Express Mini Card
+.It Li "Sierra Wireless AirCard 580" Ta Ta CardBus
+.It Li "Sierra Wireless AirCard 875" Ta Ta CardBus
 .El
 .Pp
 Devices suspected of being compatible are:
@@ -51,9 +55,7 @@ Devices suspected of being compatible are:
 .It Li "Novatel Wireless S720" Ta Ta CardBus
 .It Li "Novatel Wireless U720" Ta Ta USB
 .It Li "Novatel Wireless XU870 HSDPA" Ta ExpressCard
-.It Li "Sierra Wireless AirCard 580" Ta CardBus
 .It Li "Sierra Wireless AirCard 595" Ta CardBus
-.It Li "Sierra Wireless AirCard 875" Ta CardBus
 .It Li "Sierra Wireless EM5625" Ta Ta USB module
 .It Li "Sierra Wireless MC5720" Ta Ta PCI Express Mini Card
 .It Li "Sierra Wireless MC5725" Ta Ta PCI Express Mini Card
@@ -86,6 +88,52 @@ default:
 In this example the phone number is (451) 765-4321: replace this with
 the number issued for the card or your phone's number if a handset is being
 used.
+.Pp
+An example demand dial configuration for Cingular Wireless using
+.Xr pppd 8
+appears below.
+.Pp
+.Pa /etc/ppp/cingular-chat :
+.Bd -literal -offset indent
+TIMEOUT 10
+REPORT CONNECT
+ABORT BUSY
+ABORT 'NO CARRIER'
+ABORT ERROR
+'' ATZ OK AT&F OK
+AT+CGDCONT=1,"IP","isp.cingular" OK
+ATD*99***1# CONNECT
+.Ed
+.Pp
+.Pa /etc/ppp/peers/ac875 :
+.Bd -literal -offset indent
+cuaU0
+115200
+debug
+noauth
+nocrtscts
+:10.254.254.1
+ipcp-accept-remote
+defaultroute
+user isp@cingulargprs.com
+demand
+active-filter 'not udp port 123'
+persist
+idle 600
+connect "/usr/sbin/chat -v -f /etc/ppp/cingular-chat"
+.Ed
+.Pp
+.Pa /etc/ppp/chap-secrets :
+.Bd -literal -offset indent
+# Secrets for authentication using CHAP
+# client		server	secret		IP addresses
+isp@cingulargprs.com	*	CINGULAR1
+.Ed
+.Pp
+.Xr pppd 8
+is then started using:
+.Pp
+.Dl # pppd call ac875
 .Sh SEE ALSO
 .Xr ucom 4 ,
 .Xr uhub 4 ,

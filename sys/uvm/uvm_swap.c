@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_swap.c,v 1.67 2007/01/12 07:41:31 art Exp $	*/
+/*	$OpenBSD: uvm_swap.c,v 1.72 2007/06/18 21:51:15 pedro Exp $	*/
 /*	$NetBSD: uvm_swap.c,v 1.40 2000/11/17 11:39:39 mrg Exp $	*/
 
 /*
@@ -227,7 +227,7 @@ LIST_HEAD(swap_priority, swappri);
 static struct swap_priority swap_priority;
 
 /* locks */
-struct rwlock swap_syscall_lock = RWLOCK_INITIALIZER;
+struct rwlock swap_syscall_lock = RWLOCK_INITIALIZER("swplk");
 
 /*
  * prototypes
@@ -1061,11 +1061,6 @@ swap_on(p, sdp)
 	 */
 	vref(vp);
 
-  	/*
-	 * add anons to reflect the new swap space
-	 */
-	uvm_anon_add(size);
-
 #ifdef UVM_SWAP_ENCRYPT
 	if (uvm_doswapencrypt)
 		uvm_swap_initcrypt(sdp, npages);
@@ -1101,6 +1096,7 @@ swap_off(p, sdp)
 	struct proc *p;
 	struct swapdev *sdp;
 {
+	int error;
 	UVMHIST_FUNC("swap_off"); UVMHIST_CALLED(pdhist);
 	UVMHIST_LOG(pdhist, "  dev=%lx", sdp->swd_dev,0,0,0);
 
@@ -1117,15 +1113,20 @@ swap_off(p, sdp)
 
 	if (uao_swap_off(sdp->swd_drumoffset,
 			 sdp->swd_drumoffset + sdp->swd_drumsize) ||
-	    anon_swap_off(sdp->swd_drumoffset,
+	    amap_swap_off(sdp->swd_drumoffset,
 			  sdp->swd_drumoffset + sdp->swd_drumsize)) {
 		
+		error = ENOMEM;
+	} else if (sdp->swd_npginuse > sdp->swd_npgbad) {
+		error = EBUSY;
+	}
+
+	if (error) {
 		simple_lock(&uvm.swap_data_lock);
 		sdp->swd_flags |= SWF_ENABLE;
 		simple_unlock(&uvm.swap_data_lock);
-		return ENOMEM;
+		return (error);
 	}
-	KASSERT(sdp->swd_npginuse == sdp->swd_npgbad);
 
 	/*
 	 * done with the vnode and saved creds.
@@ -1139,9 +1140,6 @@ swap_off(p, sdp)
 	if (sdp->swd_vp != rootvp) {
 		(void) VOP_CLOSE(sdp->swd_vp, FREAD|FWRITE, p->p_ucred, p);
 	}
-
-	/* remove anons from the system */
-	uvm_anon_remove(sdp->swd_npages);
 
 	simple_lock(&uvm.swap_data_lock);
 	uvmexp.swpages -= sdp->swd_npages;
@@ -1327,7 +1325,7 @@ sw_reg_strategy(sdp, bp, bn)
 		error = VOP_BMAP(sdp->swd_vp, byteoff / sdp->swd_bsize,
 				 	&vp, &nbn, &nra);
 
-		if (error == 0 && nbn == (daddr_t)-1) {
+		if (error == 0 && nbn == (daddr64_t)-1) {
 			/* 
 			 * this used to just set error, but that doesn't
 			 * do the right thing.  Instead, it causes random
@@ -1364,7 +1362,7 @@ sw_reg_strategy(sdp, bp, bn)
 			sz = resid;
 
 		UVMHIST_LOG(pdhist, "sw_reg_strategy: "
-			    "vp %p/%p offset 0x%lx/0x%lx",
+			    "vp %p/%p offset 0x%lx/0x%llx",
 			    sdp->swd_vp, vp, (u_long)byteoff, nbn);
 
 		/*
@@ -1802,7 +1800,7 @@ uvm_swap_io(pps, startslot, npages, flags)
 	struct vm_page **pps;
 	int startslot, npages, flags;
 {
-	daddr_t startblk;
+	daddr64_t startblk;
 	struct	buf *bp;
 	vaddr_t kva;
 	int	result, s, mapinflags, pflag;
@@ -1899,7 +1897,7 @@ uvm_swap_io(pps, startslot, npages, flags)
 			SWAP_KEY_GET(sdp, key);	/* add reference */
 
 			/* mark for async writes */
-			tpps[i]->pqflags |= PQ_ENCRYPT;
+			atomic_setbits_int(&tpps[i]->pg_flags, PQ_ENCRYPT);
 			swap_encrypt(key, src, dst, block, 1 << PAGE_SHIFT);
 			src += 1 << PAGE_SHIFT;
 			dst += 1 << PAGE_SHIFT;

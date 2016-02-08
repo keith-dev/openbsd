@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.547 2007/02/28 21:54:43 grange Exp $
+#	$OpenBSD: GENERIC,v 1.568 2007/08/05 17:01:25 mglocker Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -13,8 +13,7 @@ machine		i386
 include		"../../../conf/GENERIC"
 maxusers	32			# estimated number of users
 
-option		I386_CPU	# CPU classes; at least one is REQUIRED
-option		I486_CPU
+option		I486_CPU	# CPU classes; at least one is REQUIRED
 option		I586_CPU
 option		I686_CPU
 
@@ -53,6 +52,7 @@ esm0	at mainbus? 		# Dell Embedded Server Management
 isa0	at mainbus0
 isa0	at pcib?
 isa0	at ichpcib?
+isa0	at piixpcib?
 isa0	at gscpcib?
 eisa0	at mainbus0
 pci*	at mainbus0
@@ -82,6 +82,7 @@ pci*	at ppb?
 pci*	at pchb?
 pcib*	at pci?			# PCI-ISA bridge
 ichpcib* at pci?		# Intel ICHx/ICHx-M LPC bridges
+piixpcib* at pci?		# Intel PIIX4 PCI-ISA bridge
 gscpcib* at pci?		# NS Geode SC1100 PCI-ISA bridge
 gpio*	at gscpcib?
 
@@ -221,6 +222,8 @@ atapiscsi* at umass?
 uhidev*	at uhub?		# Human Interface Devices
 ums*	at uhidev?		# USB mouse
 wsmouse* at ums? mux 0
+uts*	at uhub?		# USB touchscreen
+wsmouse* at uts? mux 0
 ukbd*	at uhidev?		# USB keyboard
 wskbd*	at ukbd? mux 1
 ucycom*	at uhidev?		# Cypress serial
@@ -243,7 +246,6 @@ scsibus* at usscanner?
 #uyap*	at uhub?		# Y@P firmware loader
 udsbr*	at uhub?		# D-Link DSB-R100 radio
 radio*	at udsbr?		# USB radio
-#ubt*	at uhub?		# USB Bluetooth
 uberry*	at uhub?		# Research In Motion Blackberry
 ugen*	at uhub?		# USB Generic driver
 uath*	at uhub?		# Atheros AR5005UG/AR5005UX
@@ -255,13 +257,20 @@ zyd*	at uhub?		# Zydas ZD1211
 udcf*	at uhub?		# Gude Expert mouseCLOCK
 uow*	at uhub?		# Maxim/Dallas DS2490 1-Wire adapter
 onewire* at uow?
-
 puc*	at pci?			# PCI "universal" communication device
 #puc*	at cardbus?
 
 sdhc*	at pci?			# SD Host Controller
 sdmmc*	at sdhc?		# SD/MMC bus
 scsibus* at sdmmc?		# SCSI emulation
+
+# Bluetooth controllers
+#sbt*	at sdmmc?		# SDIO Bluetooth
+#ubt*	at uhub?		# USB Bluetooth
+
+# Bluetooth bus support
+#bthub*	at sbt?
+#bthub*	at ubt?
 
 npx0	at isa? port 0xf0 irq 13	# math coprocessor
 isadma0	at isa?
@@ -349,6 +358,13 @@ scsibus* at ahb?
 ahc*	at eisa?		# Adaptec 274x, aic7770 SCSI controllers
 ahc*	at pci?			# Adaptec 2940/3940/78?? SCSI controllers
 scsibus* at ahc?
+jmb*	at pci?			# JMicron JMB36x controllers
+ahci*	at jmb?
+pciide*	at jmb?
+ahci*	at pci?			# AHCI SATA controllers
+scsibus* at ahci?
+sili*	at pci?			# Silicon Image 3124/3132/3531 SATA controllers
+scsibus* at sili?
 ahd*	at pci?			# Adaptec 79?? SCSI controllers
 scsibus* at ahd?
 arc*	at pci?			# Areca RAID Controllers
@@ -434,8 +450,6 @@ atapiscsi* at wdc?
 atapiscsi* at pciide?
 scsibus* at atapiscsi?
 
-#wt0	at isa? port 0x308 irq 5 drq 1	# Archive and Wangtek QIC tape drives
-
 # Networking devices
 we0	at isa? port 0x280 iomem 0xd0000 irq 9	# WD/SMC 80x3 ethernet
 we1	at isa? port 0x300 iomem 0xcc000 irq 10	#
@@ -516,6 +530,8 @@ nfe*	at pci?				# NVIDIA nForce Ethernet
 musycc*	at pci?				# Conexant HDLC controller
 art*	at musycc?			# Accoom Artery E1/T1 cards
 xge*	at pci?				# Neterion Xframe-I/II 10Gb ethernet
+thtc*	at pci?				# Tehuti Networks 10Gb ethernet
+tht*	at thtc?
 gem*	at pci?				# Sun 'gem' ethernet
 vic*	at pci?				# VMware VMXnet virtual interface
 
@@ -545,6 +561,7 @@ pgt*	at pci?				# Prism54 (only full-mac varients)
 pgt*	at cardbus?			# Prism54 (only full-mac varients)
 malo*	at pci?				# Marvell Libertas
 malo*	at cardbus?			# Marvell Libertas
+malo*	at pcmcia?			# Marvell 88W8385
 mbg*	at pci?				# Meinberg Funkuhren radio clocks
 
 # Media Independent Interface (mii) drivers
@@ -710,7 +727,6 @@ pseudo-device	mtrr		1	# Memory range attributes control
 pseudo-device	nvram		1
 pseudo-device	sequencer	1
 #pseudo-device	raid		4	# RAIDframe disk driver
-pseudo-device	bio		1	# ioctl multiplexing device
 pseudo-device	hotplug		1	# devices hot plugging
 
 # mouse & keyboard multiplexor pseudo-devices

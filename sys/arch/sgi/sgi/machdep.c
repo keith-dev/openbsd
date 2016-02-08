@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.34 2007/02/26 21:30:18 miod Exp $ */
+/*	$OpenBSD: machdep.c,v 1.47 2007/07/18 20:05:25 miod Exp $ */
 
 /*
  * Copyright (c) 2003-2004 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -81,6 +81,7 @@
 #include <mips64/archtype.h>
 #include <machine/bus.h>
 
+#include <sgi/localbus/crimebus.h>
 #include <sgi/localbus/macebus.h>
 #if defined(TGT_ORIGIN200) || defined(TGT_ORIGIN2000)
 #include <sgi/localbus/xbowmux.h>
@@ -91,7 +92,9 @@ extern char kernel_text[];
 extern int makebootdev(const char *, int);
 extern void stacktrace(void);
 
+#ifdef DEBUG
 void dump_tlb(void);
+#endif
 
 /* the following is used externally (sysctl_hw) */
 char	machine[] = MACHINE;		/* machine "architecture" */
@@ -100,9 +103,6 @@ char	cpu_model[30];
 /*
  * Declare these as initialized data so we can patch them.
  */
-#ifndef	NBUF
-#define NBUF 0			/* Can be changed in config */
-#endif
 #ifndef	BUFCACHEPERCENT
 #define	BUFCACHEPERCENT	5	/* Can be changed in config */
 #endif
@@ -110,7 +110,6 @@ char	cpu_model[30];
 #define BUFPAGES 0		/* Can be changed in config */
 #endif
 
-int	nbuf = NBUF;
 int	bufpages = BUFPAGES;
 int	bufcachepercent = BUFCACHEPERCENT;
 
@@ -140,6 +139,8 @@ caddr_t	ekern;
 
 struct phys_mem_desc mem_layout[MAXMEMSEGS];
 
+void crime_configure_memory(void);
+
 caddr_t mips_init(int, void *);
 void initcpu(void);
 void dumpsys(void);
@@ -157,6 +158,73 @@ int	my_endian = 1;
 int	my_endian = 0;
 #endif
 
+#if defined(TGT_O2)
+void
+crime_configure_memory(void)
+{
+	struct phys_mem_desc *m;
+	volatile u_int64_t *bank_ctrl;
+	paddr_t addr;
+	psize_t size;
+	u_int32_t first_page, last_page;
+	int bank, i;
+
+	bank_ctrl = (void *)PHYS_TO_KSEG1(CRIMEBUS_BASE + CRIME_MEM_BANK0_CONTROL);
+	for (bank = 0; bank < CRIME_MAX_BANKS; bank++) {
+		addr = (bank_ctrl[bank] & CRIME_MEM_BANK_ADDR) << 25;
+		size = (bank_ctrl[bank] & CRIME_MEM_BANK_128MB) ? 128 : 32;
+#ifdef DEBUG
+		bios_printf("crime: bank %d contains %ld MB at 0x%lx\n",
+		    bank, size, addr);
+#endif
+
+		/*
+		 * Do not report memory regions below 256MB, since
+		 * arcbios will do. Moreover, empty banks are reported
+		 * at address zero.
+		 */
+		if (addr < 256 * 1024 * 1024)
+			continue;
+
+		addr += 1024 * 1024 * 1024;
+		size *= 1024 * 1024;
+		first_page = atop(addr);
+		last_page = atop(addr + size);
+
+		/*
+		 * Try to coalesce with other memory segments if banks
+		 * are contiguous.
+		 */
+		m = NULL;
+		for (i = 0; i < MAXMEMSEGS; i++) {
+			if (mem_layout[i].mem_last_page == 0) {
+				if (m == NULL)
+					m = &mem_layout[i];
+			} else if (last_page == mem_layout[i].mem_first_page) {
+				m = &mem_layout[i];
+				m->mem_first_page = first_page;
+			} else if (mem_layout[i].mem_last_page == first_page) {
+				m = &mem_layout[i];
+				m->mem_last_page = last_page;
+			}
+		}
+		if (m != NULL && m->mem_last_page == 0) {
+			m->mem_first_page = first_page;
+			m->mem_last_page = last_page;
+		}
+		if (m != NULL)
+			physmem += atop(size);
+	}
+
+#ifdef DEBUG
+	for (i = 0; i < MAXMEMSEGS; i++)
+		if (mem_layout[i].mem_first_page)
+			bios_printf("MEM %d, 0x%x to  0x%x\n",i,
+				ptoa(mem_layout[i].mem_first_page),
+				ptoa(mem_layout[i].mem_last_page));
+#endif
+}
+#endif
 
 /*
  * Do all the stuff that locore normally does before calling main().
@@ -168,19 +236,23 @@ mips_init(int argc, void *argv)
 {
 	char *cp;
 	int i;
-	unsigned firstaddr;
 	caddr_t sd;
 	extern char start[], edata[], end[];
-	extern char tlb_miss[], e_tlb_miss[];
-	extern char xtlb_miss[], e_xtlb_miss[];
 	extern char tlb_miss_tramp[], e_tlb_miss_tramp[];
 	extern char xtlb_miss_tramp[], e_xtlb_miss_tramp[];
 	extern char exception[], e_exception[];
 
 	/*
+	 * Make sure we can access the extended address space.
+	 * Note that r10k and later do not allow XUSEG accesses
+	 * from kernel mode unless SR_UX is set.
+	 */
+	setsr(getsr() | SR_KX | SR_UX);
+
+	/*
 	 * Clear the compiled BSS segment in OpenBSD code
 	 */
-	bzero(edata, end-edata);
+	bzero(edata, end - edata);
 
 	/*
 	 *  Reserve symbol table space. If invalid pointers no table.
@@ -224,6 +296,8 @@ bios_printf("SR=%08x\n", getsr()); /* leave this in for now. need to see sr */
 		sys_config.pci_mem[0].bus_reverse = my_endian;
 		sys_config.cpu[0].tlbwired = 2;
 
+		crime_configure_memory();
+
 		sys_config.cpu[0].clock = 180000000;  /* Reasonable default */
 		cp = Bios_GetEnvironmentVariable("cpufreq");
 		if (cp && atoi(cp, 10, NULL) > 100)
@@ -239,7 +313,7 @@ bios_printf("SR=%08x\n", getsr()); /* leave this in for now. need to see sr */
 		/* R12K O2's must run with DSD on */
 		switch ((cp0_get_prid() >> 8) & 0xff) {
 		case MIPS_R12000:
-			setsr(SR_DSD);
+			setsr(getsr() | SR_DSD);
 			break;
 		}
 		break;
@@ -295,6 +369,22 @@ bios_printf("SR=%08x\n", getsr()); /* leave this in for now. need to see sr */
 		bios_printf("Boot device unrecognized: '%s'\n", cp);
 
 	/*
+	 * Read platform-specific environment variables.
+	 */
+	switch (sys_config.system_type) {
+#if defined(TGT_O2)
+	case SGI_O2:
+		/* get ethernet address from ARCBIOS */
+		cp = Bios_GetEnvironmentVariable("eaddr");
+		if (cp != NULL && strlen(cp) > 0)
+			strlcpy(bios_enaddr, cp, sizeof bios_enaddr);
+		break;
+#endif
+	default:
+		break;
+	}
+
+	/*
 	 *  Set pagesize to enable use of page macros and functions.
 	 *  Commit available memory to UVM system
 	 */
@@ -303,10 +393,20 @@ bios_printf("SR=%08x\n", getsr()); /* leave this in for now. need to see sr */
 
 	for (i = 0; i < MAXMEMSEGS && mem_layout[i].mem_first_page != 0; i++) {
 		u_int32_t fp, lp;
-		u_int32_t firstkernpage =
-		    atop(trunc_page(KSEG0_TO_PHYS(start)));
-		u_int32_t lastkernpage =
-		    atop(round_page(KSEG0_TO_PHYS(ekern)));
+		u_int32_t firstkernpage, lastkernpage;
+		paddr_t firstkernpa, lastkernpa;
+
+		if (IS_XKPHYS((vaddr_t)start))
+			firstkernpa = XKPHYS_TO_PHYS((vaddr_t)start);
+		else
+			firstkernpa = KSEG0_TO_PHYS((vaddr_t)start);
+		if (IS_XKPHYS((vaddr_t)ekern))
+			lastkernpa = XKPHYS_TO_PHYS((vaddr_t)ekern);
+		else
+			lastkernpa = KSEG0_TO_PHYS((vaddr_t)ekern);
+
+		firstkernpage = atop(trunc_page(firstkernpa));
+		lastkernpage = atop(round_page(lastkernpa));
 
 		fp = mem_layout[i].mem_first_page;
 		lp = mem_layout[i].mem_last_page;
@@ -471,9 +571,8 @@ bios_printf("SR=%08x\n", getsr()); /* leave this in for now. need to see sr */
 	 * Allocate U page(s) for proc[0], pm_tlbpid 1.
 	 */
 	proc0.p_addr = proc0paddr = curprocpaddr =
-		(struct user *)pmap_steal_memory(USPACE, NULL,NULL);
+	    (struct user *)pmap_steal_memory(USPACE, NULL, NULL);
 	proc0.p_md.md_regs = (struct trap_frame *)&proc0paddr->u_pcb.pcb_regs;
-	firstaddr = KSEG0_TO_PHYS(proc0.p_addr);
 	tlb_set_pid(1);
 
 	/*
@@ -490,22 +589,12 @@ bios_printf("SR=%08x\n", getsr()); /* leave this in for now. need to see sr */
 
 
 	/*
-	 * Copy down exception vector code. If code is to large
-	 * copy down trampolines instead of doing a panic.
+	 * Copy down exception vector code.
 	 */
-	if (e_tlb_miss - tlb_miss > 0x80) {
-		printf("NOTE: TLB code too large, using trampolines\n");
-		bcopy(tlb_miss_tramp, (char *)TLB_MISS_EXC_VEC,
-		    e_tlb_miss_tramp - tlb_miss_tramp);
-		bcopy(xtlb_miss_tramp, (char *)XTLB_MISS_EXC_VEC,
-		    e_xtlb_miss_tramp - xtlb_miss_tramp);
-	} else {
-		bcopy(tlb_miss, (char *)TLB_MISS_EXC_VEC,
-		    e_tlb_miss - tlb_miss);
-		bcopy(xtlb_miss, (char *)XTLB_MISS_EXC_VEC,
-		    e_xtlb_miss - xtlb_miss);
-	}
-
+	bcopy(tlb_miss_tramp, (char *)TLB_MISS_EXC_VEC,
+	    e_tlb_miss_tramp - tlb_miss_tramp);
+	bcopy(xtlb_miss_tramp, (char *)XTLB_MISS_EXC_VEC,
+	    e_xtlb_miss_tramp - xtlb_miss_tramp);
 	bcopy(exception, (char *)CACHE_ERR_EXC_VEC, e_exception - exception);
 	bcopy(exception, (char *)GEN_EXC_VEC, e_exception - exception);
 
@@ -513,6 +602,7 @@ bios_printf("SR=%08x\n", getsr()); /* leave this in for now. need to see sr */
 	 *  Turn off bootstrap exception vectors.
 	 */
 	setsr(getsr() & ~SR_BOOT_EXC_VEC);
+	proc0.p_md.md_regs->sr = getsr();
 
 	/*
 	 * Clear out the I and D caches.
@@ -549,28 +639,6 @@ allocsys(caddr_t v)
 	valloc(msghdrs, struct msg, msginfo.msgtql);
 	valloc(msqids, struct msqid_ds, msginfo.msgmni);
 #endif
-
-	/*
-	 * Determine how many buffers to allocate.
-	 */
-	if (bufpages == 0)
-		bufpages = physmem * bufcachepercent / 100;
-	if (nbuf == 0) {
-		nbuf = bufpages;
-		if (nbuf < 16)
-			nbuf = 16;
-	}
-	/* Restrict to at most 35% filled kvm */
-	if (nbuf * MAXBSIZE >
-	    (VM_MAX_KERNEL_ADDRESS-VM_MIN_KERNEL_ADDRESS) * 7 / 20)
-		nbuf = (VM_MAX_KERNEL_ADDRESS-VM_MIN_KERNEL_ADDRESS) /
-		    MAXBSIZE * 7 / 20;
-
-	/* More buffer pages than fits into the buffers is senseless.  */
-	if (bufpages > nbuf * MAXBSIZE / PAGE_SIZE)
-		bufpages = nbuf * MAXBSIZE / PAGE_SIZE;
-
-	valloc(buf, struct buf, nbuf);
 
 	return(v);
 }
@@ -630,10 +698,7 @@ consinit()
 void
 cpu_startup()
 {
-	unsigned i;
-	int base, residual;
 	vaddr_t minaddr, maxaddr;
-	vsize_t size;
 #ifdef PMAPDEBUG
 	extern int pmapdebug;
 	int opmapdebug = pmapdebug;
@@ -645,52 +710,29 @@ cpu_startup()
 	 * Good {morning,afternoon,evening,night}.
 	 */
 	printf(version);
-	printf("real mem = %d\n", ptoa(physmem));
-	printf("rsvd mem = %d\n", ptoa(rsvdmem));
+	printf("real mem = %u (%uMB)\n", ptoa(physmem),
+	    ptoa(physmem)/1024/1024);
+	printf("rsvd mem = %u (%uMB)\n", ptoa(rsvdmem),
+	    ptoa(rsvdmem)/1024/1024);
 
 	/*
-	 * Allocate virtual address space for file I/O buffers.
-	 * Note they are different than the array of headers, 'buf',
-	 * and usually occupy more virtual memory than physical.
+	 * Determine how many buffers to allocate.
+	 * We allocate bufcachepercent% of memory for buffer space.
 	 */
-	size = MAXBSIZE * nbuf;
-	if (uvm_map(kernel_map, (vaddr_t *) &buffers, round_page(size),
-			NULL, UVM_UNKNOWN_OFFSET, 0,
-			UVM_MAPFLAG(UVM_PROT_NONE, UVM_PROT_NONE, UVM_INH_NONE,
-			UVM_ADV_NORMAL, 0)))
-		panic("cpu_startup: cannot allocate VM for buffers");
-	base = bufpages / nbuf;
-	residual = bufpages % nbuf;
+	if (bufpages == 0)
+		bufpages = physmem * bufcachepercent / 100;
 
-	for (i = 0; i < nbuf; i++) {
-		vsize_t curbufsize;
-		vaddr_t curbuf;
+	/* Restrict to at most 25% filled kvm */
+	if (bufpages >
+	    (VM_MAX_KERNEL_ADDRESS-VM_MIN_KERNEL_ADDRESS) / PAGE_SIZE / 4) 
+		bufpages = (VM_MAX_KERNEL_ADDRESS-VM_MIN_KERNEL_ADDRESS) /
+		    PAGE_SIZE / 4;
 
-		/*
-		 * First <residual> buffers get (base+1) physical pages
-		 * allocated for them.  The rest get (base) physical pages.
-		 *
-		 * The rest of each buffer occupies virtual space,
-		 * but has no physical memory allocated for it.
-		 */
-		curbuf = (vaddr_t)buffers + i * MAXBSIZE;
-		curbufsize = PAGE_SIZE * (i < residual ? base+1 : base);
-
-		while (curbufsize) {
-			struct vm_page *pg = uvm_pagealloc(NULL, 0, NULL, 0);
-			if (pg == NULL)
-				panic("cpu_startup: not enough memory for"
-					" buffer cache");
-			pmap_kenter_pa(curbuf, VM_PAGE_TO_PHYS(pg),
-					VM_PROT_READ|VM_PROT_WRITE);
-			curbuf += PAGE_SIZE;
-			curbufsize -= PAGE_SIZE;
-		}
-	}
 	/*
 	 * Allocate a submap for exec arguments.  This map effectively
 	 * limits the number of processes exec'ing at any time.
 	 */
+	minaddr = vm_map_min(kernel_map);
 	exec_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr,
 	    16 * NCARGS, VM_MAP_PAGEABLE, FALSE, NULL);
 	/* Allocate a submap for physio */
@@ -700,9 +742,8 @@ cpu_startup()
 #ifdef PMAPDEBUG
 	pmapdebug = opmapdebug;
 #endif
-	printf("avail mem = %d\n", ptoa(uvmexp.free));
-	printf("using %d buffers containing %d bytes of memory\n",
-		nbuf, bufpages * PAGE_SIZE);
+	printf("avail mem = %u (%uMB)\n", ptoa(uvmexp.free),
+	    ptoa(uvmexp.free)/1024/1024);
 
 	extent_malloc_flags = EX_MALLOCOK;
 
@@ -785,15 +826,16 @@ setregs(p, pack, stack, retval)
 	p->p_md.md_regs->pc = pack->ep_entry & ~3;
 	p->p_md.md_regs->t9 = pack->ep_entry & ~3; /* abicall req */
 #if defined(__LP64__)
-	p->p_md.md_regs->sr = SR_FR_32|SR_XX|SR_KSU_USER|SR_UX|SR_EXL|SR_INT_ENAB;
+	p->p_md.md_regs->sr = SR_FR_32 | SR_XX | SR_KSU_USER | SR_KX | SR_UX |
+	    SR_EXL | SR_INT_ENAB;
 	if (sys_config.cpu[0].type == MIPS_R12000 &&
 	    sys_config.system_type == SGI_O2)
 		p->p_md.md_regs->sr |= SR_DSD;
 #else
 	p->p_md.md_regs->sr = SR_KSU_USER|SR_XX|SR_EXL|SR_INT_ENAB;
 #endif
-	p->p_md.md_regs->sr |= (idle_mask << 8) & SR_INT_MASK;
-	p->p_md.md_regs->ic = idle_mask & IC_INT_MASK;
+	p->p_md.md_regs->sr |= idle_mask & SR_INT_MASK;
+	p->p_md.md_regs->ic = (idle_mask << 8) & IC_INT_MASK;
 	p->p_md.md_flags &= ~MDP_FPUSED;
 	if (machFPCurProcPtr == p)
 		machFPCurProcPtr = (struct proc *)0;
@@ -888,18 +930,22 @@ int	dumpsize = 0;		/* also for savecore */
 long	dumplo = 0;
 
 void
-dumpconf()
+dumpconf(void)
 {
 	int nblks;
 
+	if (dumpdev == NODEV ||
+	    (nblks = (bdevsw[major(dumpdev)].d_psize)(dumpdev)) == 0)
+		return;
+	if (nblks <= ctod(1))
+		return;
+
 	dumpsize = ptoa(physmem);
-	if (dumpdev != NODEV && bdevsw[major(dumpdev)].d_psize) {
-		nblks = (*bdevsw[major(dumpdev)].d_psize)(dumpdev);
-		if (dumpsize > btoc(dbtob(nblks - dumplo)))
-			dumpsize = btoc(dbtob(nblks - dumplo));
-		else if (dumplo == 0)
-			dumplo = nblks - btodb(ctob(physmem));
-	}
+	if (dumpsize > btoc(dbtob(nblks - dumplo)))
+		dumpsize = btoc(dbtob(nblks - dumplo));
+	else if (dumplo == 0)
+		dumplo = nblks - btodb(ctob(physmem));
+
 	/*
 	 * Don't dump on the first page
 	 * in case the dump device includes a disk label.
@@ -1119,6 +1165,7 @@ rm7k_watchintr(trapframe)
 	return(0);
 }
 
+#ifdef DEBUG
 /*
  *	Dump TLB contents.
  */
@@ -1166,3 +1213,4 @@ char *attr[] = {
 		bios_printf("\n");
 	}
 }
+#endif

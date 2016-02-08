@@ -1,4 +1,4 @@
-/*	$OpenBSD: gdt.c,v 1.24 2005/11/19 02:18:00 pedro Exp $	*/
+/*	$OpenBSD: gdt.c,v 1.27 2007/07/02 17:11:29 thib Exp $	*/
 /*	$NetBSD: gdt.c,v 1.28 2002/12/14 09:38:50 junyoung Exp $	*/
 
 /*-
@@ -65,6 +65,7 @@
 #include <sys/proc.h>
 #include <sys/lock.h>
 #include <sys/user.h>
+#include <sys/rwlock.h>
 
 #include <uvm/uvm.h>
 
@@ -74,15 +75,11 @@ union descriptor bootstrap_gdt[NGDT];
 union descriptor *gdt = bootstrap_gdt;
 
 int gdt_size;		/* total number of GDT entries */
-int gdt_count;		/* number of GDT entries in use */
 int gdt_next;		/* next available slot for sweeping */
 int gdt_free;		/* next free slot; terminated with GNULL_SEL */
 
-struct simplelock gdt_simplelock;
-struct lock gdt_lock_store;
+struct rwlock gdt_lock_store = RWLOCK_INITIALIZER("gdtlk");
 
-static __inline void gdt_lock(void);
-static __inline void gdt_unlock(void);
 void gdt_grow(void);
 int gdt_get_slot(void);
 void gdt_put_slot(int);
@@ -91,19 +88,17 @@ void gdt_put_slot(int);
  * Lock and unlock the GDT, to avoid races in case gdt_{ge,pu}t_slot() sleep
  * waiting for memory.
  */
-static __inline void
-gdt_lock()
-{
-	if (curproc != NULL)
-		lockmgr(&gdt_lock_store, LK_EXCLUSIVE, &gdt_simplelock);
-}
+#define gdt_lock()					\
+	do {						\
+		if (curproc != NULL)			\
+			rw_enter_write(&gdt_lock_store);\
+	} while (0)
 
-static __inline void
-gdt_unlock()
-{
-	if (curproc != NULL)
-		lockmgr(&gdt_lock_store, LK_RELEASE, &gdt_simplelock);
-}
+#define gdt_unlock()					\
+	do {						\
+		if (curproc != NULL)			\
+			rw_exit_write(&gdt_lock_store);	\
+	} while (0)
 
 /* XXX needs spinlocking if we ever mean to go finegrained. */
 void
@@ -113,6 +108,8 @@ setgdt(int sel, void *base, size_t limit, int type, int dpl, int def32,
 	struct segment_descriptor *sd = &gdt[sel].sd;
 	CPU_INFO_ITERATOR cii;
 	struct cpu_info *ci;
+
+	KASSERT(sel < gdt_size);
 
 	setsegment(sd, base, limit, type, dpl, def32, gran);
 	CPU_INFO_FOREACH(cii, ci)
@@ -131,14 +128,10 @@ gdt_init()
 	vaddr_t va;
 	struct cpu_info *ci = &cpu_info_primary;
 
-	simple_lock_init(&gdt_simplelock);
-	lockinit(&gdt_lock_store, PZERO, "gdtlck", 0, 0);
-
 	max_len = MAXGDTSIZ * sizeof(union descriptor);
 	min_len = MINGDTSIZ * sizeof(union descriptor);
 
 	gdt_size = MINGDTSIZ;
-	gdt_count = NGDT;
 	gdt_next = NGDT;
 	gdt_free = GNULL_SEL;
 
@@ -172,7 +165,7 @@ gdt_alloc_cpu(struct cpu_info *ci)
 	uvm_map_pageable(kernel_map, (vaddr_t)ci->ci_gdt,
 	    (vaddr_t)ci->ci_gdt + min_len, FALSE, FALSE);
 	bzero(ci->ci_gdt, min_len);
-	bcopy(gdt, ci->ci_gdt, gdt_count * sizeof(union descriptor));
+	bcopy(gdt, ci->ci_gdt, gdt_size * sizeof(union descriptor));
 	setsegment(&ci->ci_gdt[GCPU_SEL].sd, ci, sizeof(struct cpu_info)-1,
 	    SDT_MEMRWA, SEL_KPL, 0, 0);
 }
@@ -244,8 +237,6 @@ gdt_get_slot()
 		slot = gdt_free;
 		gdt_free = gdt[slot].gd.gd_selector;
 	} else {
-		if (gdt_next != gdt_count)
-			panic("gdt_get_slot: gdt_next != gdt_count");
 		if (gdt_next >= gdt_size) {
 			if (gdt_size >= MAXGDTSIZ)
 				panic("gdt_get_slot: out of GDT descriptors");
@@ -254,7 +245,6 @@ gdt_get_slot()
 		slot = gdt_next++;
 	}
 
-	gdt_count++;
 	gdt_unlock();
 	return (slot);
 }
@@ -267,7 +257,6 @@ gdt_put_slot(int slot)
 {
 
 	gdt_lock();
-	gdt_count--;
 
 	gdt[slot].gd.gd_type = SDT_SYSNULL;
 	gdt[slot].gd.gd_selector = gdt_free;
@@ -294,6 +283,7 @@ tss_free(int sel)
 	gdt_put_slot(IDXSEL(sel));
 }
 
+#ifdef USER_LDT
 /*
  * Caller must have pmap locked for both of these functions.
  */
@@ -316,3 +306,4 @@ ldt_free(struct pmap *pmap)
 
 	gdt_put_slot(slot);
 }
+#endif /* USER_LDT */

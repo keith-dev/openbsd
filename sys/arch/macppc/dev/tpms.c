@@ -1,4 +1,4 @@
-/*	$OpenBSD: tpms.c,v 1.4 2006/03/16 06:57:23 miod Exp $	*/
+/*	$OpenBSD: tpms.c,v 1.12 2007/06/14 10:11:16 mbalmer Exp $	*/
 
 /*
  * Copyright (c) 2005, Johan Wallén
@@ -228,6 +228,8 @@ static struct tpms_dev tpms_devices[] =
        }
        /* 12 inch PowerBooks */
        POWERBOOK_TOUCHPAD(12, 0x030a, 69, 16, 52), /* XXX Not tested. */
+       /* 14 inch iBook G4 */
+       POWERBOOK_TOUCHPAD(14, 0x030b, 69, 16, 52),
        /* 15 inch PowerBooks */
        POWERBOOK_TOUCHPAD(15, 0x020e, 85, 16, 57), /* XXX Not tested. */
        POWERBOOK_TOUCHPAD(15, 0x020f, 85, 16, 57),
@@ -269,15 +271,14 @@ struct tpms_softc {
 #define TPMS_VALID 4		      /* Is the previous sample valid? */
 };
 
-/* Static function prototypes. */
-Static void tpms_intr(struct uhidev *, void *, unsigned int);
-Static int tpms_enable(void *);
-Static void tpms_disable(void *);
-Static int tpms_ioctl(void *, unsigned long, caddr_t, int, usb_proc_ptr);
-Static void reorder_sample(signed char *, signed char *);
-Static int compute_delta(struct tpms_softc *, int *, int *, int *, uint32_t *);
-Static int detect_pos(int *, int, int, int, int *, int *);
-Static int smooth_pos(int, int, int);
+void tpms_intr(struct uhidev *, void *, unsigned int);
+int tpms_enable(void *);
+void tpms_disable(void *);
+int tpms_ioctl(void *, unsigned long, caddr_t, int, struct proc *);
+void reorder_sample(signed char *, signed char *);
+int compute_delta(struct tpms_softc *, int *, int *, int *, uint32_t *);
+int detect_pos(int *, int, int, int, int *, int *);
+int smooth_pos(int, int, int);
 
 /* Access methods for wsmouse. */
 const struct wsmouse_accessops tpms_accessops = {
@@ -287,7 +288,22 @@ const struct wsmouse_accessops tpms_accessops = {
 };
 
 /* This take cares also of the basic device registration. */
-USB_DECLARE_DRIVER(tpms);
+int tpms_match(struct device *, void *, void *); 
+void tpms_attach(struct device *, struct device *, void *); 
+int tpms_detach(struct device *, int); 
+int tpms_activate(struct device *, enum devact); 
+
+struct cfdriver tpms_cd = { 
+	NULL, "tpms", DV_DULL 
+}; 
+
+const struct cfattach tpms_ca = { 
+	sizeof(struct tpms_softc), 
+	tpms_match, 
+	tpms_attach, 
+	tpms_detach, 
+	tpms_activate, 
+};
 
 /*
  * Basic driver. 
@@ -295,9 +311,10 @@ USB_DECLARE_DRIVER(tpms);
 
 /* Try to match the device at some uhidev. */
 
-USB_MATCH(tpms)
+int
+tpms_match(struct device *parent, void *match, void *aux)
 {
-	USB_MATCH_START(tpms, uaa);
+	struct usb_attach_arg *uaa = aux;
 	struct uhidev_attach_arg *uha = (struct uhidev_attach_arg *)uaa;
 	usb_device_descriptor_t *udd;
 	int i;
@@ -323,9 +340,11 @@ USB_MATCH(tpms)
 
 /* Attach the device. */
 
-USB_ATTACH(tpms)
+void
+tpms_attach(struct device *parent, struct device *self, void *aux)
 {
-	USB_ATTACH_START(tpms, sc, uaa);
+	struct tpms_softc *sc = (struct tpms_softc *)self;
+	struct usb_attach_arg *uaa = aux;
 	struct uhidev_attach_arg *uha = (struct uhidev_attach_arg *)uaa;
 	struct wsmousedev_attach_args a;
 	struct tpms_dev *pd;
@@ -355,7 +374,7 @@ USB_ATTACH(tpms)
 	    sc->sc_y_sensors <= 0 || sc->sc_y_sensors > TPMS_Y_SENSORS) {
 		printf(": unexpected sensors configuration (%d:%d)\n",
 		    sc->sc_x_sensors, sc->sc_y_sensors);
-		USB_ATTACH_ERROR_RETURN;
+		return;
 	}
 
 	sc->sc_hdev.sc_intr = tpms_intr;
@@ -367,15 +386,14 @@ USB_ATTACH(tpms)
 	a.accessops = &tpms_accessops;
 	a.accesscookie = sc;
 	sc->sc_wsmousedev = config_found(self, &a, wsmousedevprint);
-
-	USB_ATTACH_SUCCESS_RETURN;
 }
 
 /* Detach the device. */
 
-USB_DETACH(tpms)
+int
+tpms_detach(struct device *self, int flags)
 {
-	USB_DETACH_START(tpms, sc);
+	struct tpms_softc *sc = (struct tpms_softc *)self;
 	int ret;
 
 	/* The wsmouse driver does all the work. */
@@ -388,8 +406,8 @@ USB_DETACH(tpms)
 
 /* Activate the device. */
 
-Static int
-tpms_activate(device_ptr_t self, enum devact act)
+int
+tpms_activate(struct device *self, enum devact act)
 {
 	struct tpms_softc *sc = (struct tpms_softc *)self;
 	int ret;
@@ -407,7 +425,7 @@ tpms_activate(device_ptr_t self, enum devact act)
 
 /* Enable the device. */
 
-Static int
+int
 tpms_enable(void *v)
 {
 	struct tpms_softc *sc = v;
@@ -428,7 +446,7 @@ tpms_enable(void *v)
 
 /* Disable the device. */
 
-Static void
+void
 tpms_disable(void *v)
 {
 	struct tpms_softc *sc = v;
@@ -440,8 +458,8 @@ tpms_disable(void *v)
 	uhidev_close(&sc->sc_hdev);
 }
 
-Static int
-tpms_ioctl(void *v, unsigned long cmd, caddr_t data, int flag, usb_proc_ptr p)
+int
+tpms_ioctl(void *v, unsigned long cmd, caddr_t data, int flag, struct proc *p)
 {
 	switch (cmd) {
 	case WSMOUSEIO_GTYPE:
@@ -458,7 +476,7 @@ tpms_ioctl(void *v, unsigned long cmd, caddr_t data, int flag, usb_proc_ptr p)
 
 /* Handle interrupts. */
 
-Static void
+void
 tpms_intr(struct uhidev *addr, void *ibuf, unsigned int len)
 {
 	struct tpms_softc *sc = (struct tpms_softc *)addr;
@@ -503,7 +521,7 @@ tpms_intr(struct uhidev *addr, void *ibuf, unsigned int len)
 	if ((dx != 0 || dy != 0 || dz != 0 || buttons != sc->sc_buttons) &&
 	    sc->sc_wsmousedev != NULL) {
 		s = spltty();
-		wsmouse_input(sc->sc_wsmousedev, buttons, dx, -dy, dz,
+		wsmouse_input(sc->sc_wsmousedev, buttons, dx, -dy, dz, 0,
 		    WSMOUSE_INPUT_DELTA);
 		splx(s);
 	}
@@ -516,7 +534,7 @@ tpms_intr(struct uhidev *addr, void *ibuf, unsigned int len)
  * rewritten if TPMS_X_SENSORS or TPMS_Y_SENSORS change. 
  */
 
-Static void 
+void 
 reorder_sample(signed char *to, signed char *from)
 {
 	int i;
@@ -550,7 +568,7 @@ reorder_sample(signed char *to, signed char *from)
 
 /* XXX Could we report something useful in dz? */
 
-Static int
+int
 compute_delta(struct tpms_softc *sc, int *dx, int *dy, int *dz, 
 	      uint32_t * buttons)
 {
@@ -610,7 +628,7 @@ compute_delta(struct tpms_softc *sc, int *dx, int *dy, int *dz,
  * and the raw position.
  */
 
-Static int
+int
 smooth_pos(int pos_old, int pos_raw, int noise)
 {
 	int ad, delta;
@@ -637,7 +655,7 @@ smooth_pos(int pos_old, int pos_raw, int noise)
  * is in [0, (n_sensors - 1) * factor - 1].
  */
 
-Static int
+int
 detect_pos(int *sensors, int n_sensors, int threshold, int fact,
 	   int *pos_ret, int *fingers_ret)
 {

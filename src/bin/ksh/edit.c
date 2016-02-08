@@ -1,4 +1,4 @@
-/*	$OpenBSD: edit.c,v 1.31 2005/12/11 20:31:21 otto Exp $	*/
+/*	$OpenBSD: edit.c,v 1.33 2007/08/02 10:50:25 fgsch Exp $	*/
 
 /*
  * Command line editing - common code
@@ -431,12 +431,18 @@ x_file_glob(int flags, const char *str, int slen, char ***wordsp)
 		    stat(words[0], &statb) < 0) ||
 		    words[0][0] == '\0') {
 			x_free_words(nwords, words);
+			words = NULL;
 			nwords = 0;
 		}
 	}
 	afree(toglob, ATEMP);
 
-	*wordsp = nwords ? words : (char **) 0;
+	if (nwords) {
+		*wordsp = words;
+	} else if (words) {
+		x_free_words(nwords, words);
+		*wordsp = NULL;
+	}
 
 	return nwords;
 }
@@ -841,7 +847,7 @@ x_escape(const char *s, size_t len, int (*putbuf_func) (const char *, size_t))
 	int rval=0;
 
 	for (add = 0, wlen = len; wlen - add > 0; add++) {
-		if (strchr("\\$(){}*&;#|<>\"'`", s[add]) || strchr(ifs, s[add])) {
+		if (strchr("\\$(){}[]?*&;#|<>\"'`", s[add]) || strchr(ifs, s[add])) {
 			if (putbuf_func(s, add) != 0) {
 				rval = -1;
 				break;

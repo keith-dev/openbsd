@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_zyd.c,v 1.52 2007/02/11 00:08:04 jsg Exp $	*/
+/*	$OpenBSD: if_zyd.c,v 1.58 2007/06/14 10:11:15 mbalmer Exp $	*/
 
 /*-
  * Copyright (c) 2006 by Damien Bergamini <damien.bergamini@free.fr>
@@ -143,7 +143,22 @@ static const struct zyd_type {
 #define zyd_lookup(v, p)	\
 	((const struct zyd_type *)usb_lookup(zyd_devs, v, p))
 
-USB_DECLARE_DRIVER_CLASS(zyd, DV_IFNET);
+int zyd_match(struct device *, void *, void *); 
+void zyd_attach(struct device *, struct device *, void *); 
+int zyd_detach(struct device *, int); 
+int zyd_activate(struct device *, enum devact); 
+
+struct cfdriver zyd_cd = { 
+	NULL, "zyd", DV_IFNET 
+}; 
+
+const struct cfattach zyd_ca = { 
+	sizeof(struct zyd_softc), 
+	zyd_match, 
+	zyd_attach, 
+	zyd_detach, 
+	zyd_activate, 
+};
 
 void		zyd_attachhook(void *);
 int		zyd_complete_attach(struct zyd_softc *);
@@ -218,9 +233,10 @@ void		zyd_amrr_timeout(void *);
 void		zyd_newassoc(struct ieee80211com *, struct ieee80211_node *,
 		    int);
 
-USB_MATCH(zyd)
+int
+zyd_match(struct device *parent, void *match, void *aux)
 {
-	USB_MATCH_START(zyd, uaa);
+	struct usb_attach_arg *uaa = aux;
 
 	if (!uaa->iface)
 		return UMATCH_NONE;
@@ -241,7 +257,7 @@ zyd_attachhook(void *xsc)
 	fwname = (sc->mac_rev == ZYD_ZD1211) ? "zd1211" : "zd1211b";
 	if ((error = loadfirmware(fwname, &fw, &size)) != 0) {
 		printf("%s: could not read firmware file %s (error=%d)\n",
-		    USBDEVNAME(sc->sc_dev), fwname, error);
+		    sc->sc_dev.dv_xname, fwname, error);
 		return;
 	}
 
@@ -249,7 +265,7 @@ zyd_attachhook(void *xsc)
 	free(fw, M_DEVBUF);
 	if (error != 0) {
 		printf("%s: could not load firmware (error=%d)\n",
-		    USBDEVNAME(sc->sc_dev), error);
+		    sc->sc_dev.dv_xname, error);
 		return;
 	}
 
@@ -258,17 +274,18 @@ zyd_attachhook(void *xsc)
 		sc->attached = 1;
 }
 
-USB_ATTACH(zyd)
+void
+zyd_attach(struct device *parent, struct device *self, void *aux)
 {
-	USB_ATTACH_START(zyd, sc, uaa);
+	struct zyd_softc *sc = (struct zyd_softc *)self;
+	struct usb_attach_arg *uaa = aux;
 	char *devinfop;
 	usb_device_descriptor_t* ddesc;
 
 	sc->sc_udev = uaa->device;
 
 	devinfop = usbd_devinfo_alloc(sc->sc_udev, 0);
-	USB_ATTACH_SETUP;
-	printf("%s: %s\n", USBDEVNAME(sc->sc_dev), devinfop);
+	printf("\n%s: %s\n", sc->sc_dev.dv_xname, devinfop);
 	usbd_devinfo_free(devinfop);
 
 	sc->mac_rev = zyd_lookup(uaa->vendor, uaa->product)->rev;
@@ -276,17 +293,15 @@ USB_ATTACH(zyd)
 	ddesc = usbd_get_device_descriptor(sc->sc_udev);
 	if (UGETW(ddesc->bcdDevice) < 0x4330) {
 		printf("%s: device version mismatch: 0x%x "
-		    "(only >= 43.30 supported)\n", USBDEVNAME(sc->sc_dev),
+		    "(only >= 43.30 supported)\n", sc->sc_dev.dv_xname,
 		    UGETW(ddesc->bcdDevice));
-		USB_ATTACH_ERROR_RETURN;
+		return;
 	}
 
 	if (rootvp == NULL)
 		mountroothook_establish(zyd_attachhook, sc);
 	else
 		zyd_attachhook(sc);
-
-	USB_ATTACH_SUCCESS_RETURN;
 }
 
 int
@@ -307,7 +322,7 @@ zyd_complete_attach(struct zyd_softc *sc)
 	error = usbd_set_config_no(sc->sc_udev, ZYD_CONFIG_NO, 1);
 	if (error != 0) {
 		printf("%s: setting config no failed\n",
-		    USBDEVNAME(sc->sc_dev));
+		    sc->sc_dev.dv_xname);
 		goto fail;
 	}
 
@@ -315,33 +330,33 @@ zyd_complete_attach(struct zyd_softc *sc)
 	    &sc->sc_iface);
 	if (error != 0) {
 		printf("%s: getting interface handle failed\n",
-		    USBDEVNAME(sc->sc_dev));
+		    sc->sc_dev.dv_xname);
 		goto fail;
 	}
 
 	if ((error = zyd_open_pipes(sc)) != 0) {
-		printf("%s: could not open pipes\n", USBDEVNAME(sc->sc_dev));
+		printf("%s: could not open pipes\n", sc->sc_dev.dv_xname);
 		goto fail;
 	}
 
 	if ((error = zyd_read_eeprom(sc)) != 0) {
-		printf("%s: could not read EEPROM\n", USBDEVNAME(sc->sc_dev));
+		printf("%s: could not read EEPROM\n", sc->sc_dev.dv_xname);
 		goto fail;
 	}
 
 	if ((error = zyd_rf_attach(sc, sc->rf_rev)) != 0) {
-		printf("%s: could not attach RF\n", USBDEVNAME(sc->sc_dev));
+		printf("%s: could not attach RF\n", sc->sc_dev.dv_xname);
 		goto fail;
 	}
 
 	if ((error = zyd_hw_init(sc)) != 0) {
 		printf("%s: hardware initialization failed\n",
-		    USBDEVNAME(sc->sc_dev));
+		    sc->sc_dev.dv_xname);
 		goto fail;
 	}
 
 	printf("%s: HMAC ZD1211%s, FW %02x.%02x, RF %s, PA %x, address %s\n",
-	    USBDEVNAME(sc->sc_dev), (sc->mac_rev == ZYD_ZD1211) ? "": "B",
+	    sc->sc_dev.dv_xname, (sc->mac_rev == ZYD_ZD1211) ? "": "B",
 	    sc->fw_rev >> 8, sc->fw_rev & 0xff, zyd_rf_name(sc->rf_rev),
 	    sc->pa_rev, ether_sprintf(ic->ic_myaddr));
 
@@ -376,7 +391,7 @@ zyd_complete_attach(struct zyd_softc *sc)
 	ifp->if_start = zyd_start;
 	ifp->if_watchdog = zyd_watchdog;
 	IFQ_SET_READY(&ifp->if_snd);
-	memcpy(ifp->if_xname, USBDEVNAME(sc->sc_dev), IFNAMSIZ);
+	memcpy(ifp->if_xname, sc->sc_dev.dv_xname, IFNAMSIZ);
 
 	if_attach(ifp);
 	ieee80211_ifattach(ifp);
@@ -402,14 +417,15 @@ zyd_complete_attach(struct zyd_softc *sc)
 #endif
 
 	usbd_add_drv_event(USB_EVENT_DRIVER_ATTACH, sc->sc_udev,
-	    USBDEV(sc->sc_dev));
+	    &sc->sc_dev);
 
 fail:	return error;
 }
 
-USB_DETACH(zyd)
+int
+zyd_detach(struct device *self, int flags)
 {
-	USB_DETACH_START(zyd, sc);
+	struct zyd_softc *sc = (struct zyd_softc *)self;
 	struct ifnet *ifp = &sc->sc_ic.ic_if;
 	int s;
 
@@ -437,7 +453,7 @@ USB_DETACH(zyd)
 	splx(s);
 
 	usbd_add_drv_event(USB_EVENT_DRIVER_DETACH, sc->sc_udev,
-	    USBDEV(sc->sc_dev));
+	    &sc->sc_dev);
 
 	return 0;
 }
@@ -467,7 +483,7 @@ zyd_open_pipes(struct zyd_softc *sc)
 	    USBD_DEFAULT_INTERVAL);
 	if (error != 0) {
 		printf("%s: open rx intr pipe failed: %s\n",
-		    USBDEVNAME(sc->sc_dev), usbd_errstr(error));
+		    sc->sc_dev.dv_xname, usbd_errstr(error));
 		goto fail;
 	}
 
@@ -476,7 +492,7 @@ zyd_open_pipes(struct zyd_softc *sc)
 	    &sc->zyd_ep[ZYD_ENDPT_IOUT]);
 	if (error != 0) {
 		printf("%s: open tx intr pipe failed: %s\n",
-		    USBDEVNAME(sc->sc_dev), usbd_errstr(error));
+		    sc->sc_dev.dv_xname, usbd_errstr(error));
 		goto fail;
 	}
 
@@ -485,7 +501,7 @@ zyd_open_pipes(struct zyd_softc *sc)
 	    &sc->zyd_ep[ZYD_ENDPT_BIN]);
 	if (error != 0) {
 		printf("%s: open rx pipe failed: %s\n",
-		    USBDEVNAME(sc->sc_dev), usbd_errstr(error));
+		    sc->sc_dev.dv_xname, usbd_errstr(error));
 		goto fail;
 	}
 
@@ -494,7 +510,7 @@ zyd_open_pipes(struct zyd_softc *sc)
 	    &sc->zyd_ep[ZYD_ENDPT_BOUT]);
 	if (error != 0) {
 		printf("%s: open tx pipe failed: %s\n",
-		    USBDEVNAME(sc->sc_dev), usbd_errstr(error));
+		    sc->sc_dev.dv_xname, usbd_errstr(error));
 		goto fail;
 	}
 
@@ -537,14 +553,14 @@ zyd_alloc_tx_list(struct zyd_softc *sc)
 		data->xfer = usbd_alloc_xfer(sc->sc_udev);
 		if (data->xfer == NULL) {
 			printf("%s: could not allocate tx xfer\n",
-			    USBDEVNAME(sc->sc_dev));
+			    sc->sc_dev.dv_xname);
 			error = ENOMEM;
 			goto fail;
 		}
 		data->buf = usbd_alloc_buffer(data->xfer, ZYD_MAX_TXBUFSZ);
 		if (data->buf == NULL) {
 			printf("%s: could not allocate tx buffer\n",
-			    USBDEVNAME(sc->sc_dev));
+			    sc->sc_dev.dv_xname);
 			error = ENOMEM;
 			goto fail;
 		}
@@ -591,14 +607,14 @@ zyd_alloc_rx_list(struct zyd_softc *sc)
 		data->xfer = usbd_alloc_xfer(sc->sc_udev);
 		if (data->xfer == NULL) {
 			printf("%s: could not allocate rx xfer\n",
-			    USBDEVNAME(sc->sc_dev));
+			    sc->sc_dev.dv_xname);
 			error = ENOMEM;
 			goto fail;
 		}
 		data->buf = usbd_alloc_buffer(data->xfer, ZYX_MAX_RXBUFSZ);
 		if (data->buf == NULL) {
 			printf("%s: could not allocate rx buffer\n",
-			    USBDEVNAME(sc->sc_dev));
+			    sc->sc_dev.dv_xname);
 			error = ENOMEM;
 			goto fail;
 		}
@@ -776,7 +792,7 @@ zyd_cmd(struct zyd_softc *sc, uint16_t code, const void *idata, int ilen,
 		if (flags & ZYD_CMD_FLAG_READ)
 			splx(s);
 		printf("%s: could not send command (error=%s)\n",
-		    USBDEVNAME(sc->sc_dev), usbd_errstr(error));
+		    sc->sc_dev.dv_xname, usbd_errstr(error));
 		(void)usbd_free_xfer(xfer);
 		return EIO;
 	}
@@ -1467,7 +1483,7 @@ zyd_rf_attach(struct zyd_softc *sc, uint8_t type)
 		break;
 	default:
 		printf("%s: sorry, radio \"%s\" is not supported yet\n",
-		    USBDEVNAME(sc->sc_dev), zyd_rf_name(type));
+		    sc->sc_dev.dv_xname, zyd_rf_name(type));
 		return EINVAL;
 	}
 	return 0;
@@ -1557,7 +1573,7 @@ zyd_hw_init(struct zyd_softc *sc)
 	zyd_unlock_phy(sc);
 	if (error != 0) {
 		printf("%s: radio initialization failed\n",
-		    USBDEVNAME(sc->sc_dev));
+		    sc->sc_dev.dv_xname);
 		goto fail;
 	}
 
@@ -1825,7 +1841,7 @@ zyd_intr(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
 		wakeup(sc);	/* wakeup caller */
 
 	} else {
-		printf("%s: unknown notification %x\n", USBDEVNAME(sc->sc_dev),
+		printf("%s: unknown notification %x\n", sc->sc_dev.dv_xname,
 		    letoh16(cmd->code));
 	}
 }
@@ -1844,7 +1860,7 @@ zyd_rx_data(struct zyd_softc *sc, const uint8_t *buf, uint16_t len)
 
 	if (len < ZYD_MIN_FRAGSZ) {
 		printf("%s: frame too short (length=%d)\n",
-		    USBDEVNAME(sc->sc_dev), len);
+		    sc->sc_dev.dv_xname, len);
 		ifp->if_ierrors++;
 		return;
 	}
@@ -1855,7 +1871,7 @@ zyd_rx_data(struct zyd_softc *sc, const uint8_t *buf, uint16_t len)
 
 	if (stat->flags & ZYD_RX_ERROR) {
 		DPRINTF(("%s: RX status indicated error (%x)\n",
-		    USBDEVNAME(sc->sc_dev), stat->flags));
+		    sc->sc_dev.dv_xname, stat->flags));
 		ifp->if_ierrors++;
 		return;
 	}
@@ -1868,7 +1884,7 @@ zyd_rx_data(struct zyd_softc *sc, const uint8_t *buf, uint16_t len)
 	MGETHDR(m, M_DONTWAIT, MT_DATA);
 	if (m == NULL) {
 		printf("%s: could not allocate rx mbuf\n",
-		    USBDEVNAME(sc->sc_dev));
+		    sc->sc_dev.dv_xname);
 		ifp->if_ierrors++;
 		return;
 	}
@@ -1876,7 +1892,7 @@ zyd_rx_data(struct zyd_softc *sc, const uint8_t *buf, uint16_t len)
 		MCLGET(m, M_DONTWAIT);
 		if (!(m->m_flags & M_EXT)) {
 			printf("%s: could not allocate rx mbuf cluster\n",
-			    USBDEVNAME(sc->sc_dev));
+			    sc->sc_dev.dv_xname);
 			m_freem(m);
 			ifp->if_ierrors++;
 			return;
@@ -1946,7 +1962,7 @@ zyd_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
 
 	if (len < ZYD_MIN_RXBUFSZ) {
 		printf("%s: xfer too short (length=%d)\n",
-		    USBDEVNAME(sc->sc_dev), len);
+		    sc->sc_dev.dv_xname, len);
 		ifp->if_ierrors++;
 		goto skip;
 	}
@@ -1997,7 +2013,7 @@ zyd_txeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
 			return;
 
 		printf("%s: could not transmit buffer: %s\n",
-		    USBDEVNAME(sc->sc_dev), usbd_errstr(status));
+		    sc->sc_dev.dv_xname, usbd_errstr(status));
 
 		if (status == USBD_STALLED) {
 			usbd_clear_endpoint_stall_async(
@@ -2140,7 +2156,7 @@ zyd_tx_data(struct zyd_softc *sc, struct mbuf *m0, struct ieee80211_node *ni)
 	    data->buf + sizeof (struct zyd_tx_desc));
 
 	DPRINTFN(10, ("%s: sending data frame len=%u rate=%u xferlen=%u\n",
-	    USBDEVNAME(sc->sc_dev), m0->m_pkthdr.len, rate, xferlen));
+	    sc->sc_dev.dv_xname, m0->m_pkthdr.len, rate, xferlen));
 
 	m_freem(m0);	/* mbuf no longer needed */
 
@@ -2234,7 +2250,7 @@ zyd_watchdog(struct ifnet *ifp)
 
 	if (sc->tx_timer > 0) {
 		if (--sc->tx_timer == 0) {
-			printf("%s: device timeout\n", USBDEVNAME(sc->sc_dev));
+			printf("%s: device timeout\n", sc->sc_dev.dv_xname);
 			/* zyd_init(ifp); XXX needs a process context ? */
 			ifp->if_oerrors++;
 			return;
@@ -2373,12 +2389,12 @@ zyd_init(struct ifnet *ifp)
 	 */
 	if ((error = zyd_alloc_tx_list(sc)) != 0) {
 		printf("%s: could not allocate Tx list\n",
-		    USBDEVNAME(sc->sc_dev));
+		    sc->sc_dev.dv_xname);
 		goto fail;
 	}
 	if ((error = zyd_alloc_rx_list(sc)) != 0) {
 		printf("%s: could not allocate Rx list\n",
-		    USBDEVNAME(sc->sc_dev));
+		    sc->sc_dev.dv_xname);
 		goto fail;
 	}
 
@@ -2394,7 +2410,7 @@ zyd_init(struct ifnet *ifp)
 		error = usbd_transfer(data->xfer);
 		if (error != USBD_IN_PROGRESS && error != 0) {
 			printf("%s: could not queue Rx transfer\n",
-			    USBDEVNAME(sc->sc_dev));
+			    sc->sc_dev.dv_xname);
 			goto fail;
 		}
 	}
@@ -2525,14 +2541,13 @@ zyd_newassoc(struct ieee80211com *ic, struct ieee80211_node *ni, int isnew)
 }
 
 int
-zyd_activate(device_ptr_t self, enum devact act)
+zyd_activate(struct device *self, enum devact act)
 {
 	switch (act) {
 	case DVACT_ACTIVATE:
 		break;
 
 	case DVACT_DEACTIVATE:
-		/*if_deactivate(&sc->sc_ic.sc_if);*/
 		break;
 	}
 	return 0;

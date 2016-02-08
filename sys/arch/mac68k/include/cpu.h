@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.42 2006/11/29 12:26:13 miod Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.45 2007/07/29 21:24:05 miod Exp $	*/
 /*	$NetBSD: cpu.h,v 1.45 1997/02/10 22:13:40 scottr Exp $	*/
 
 /*
@@ -71,6 +71,8 @@
 #include <m68k/cpu.h>
 #define	M68K_MMU_MOTOROLA
 
+#ifdef _KERNEL
+
 /*
  * Get interrupt glue.
  */
@@ -109,7 +111,7 @@ extern int want_resched;	/* resched() was called */
  * interrupt.  Request an ast to send us through trap(),
  * marking the proc as needing a profiling tick.
  */
-#define	need_proftick(p)	( (p)->p_flag |= P_OWEUPC, aston() )
+#define	need_proftick(p)	aston()
 
 /*
  * Notify the current process (p) that it has a signal pending,
@@ -120,6 +122,8 @@ extern int want_resched;	/* resched() was called */
 extern int astpending;		/* need to trap before returning to user mode */
 #define aston() (astpending = 1)
 
+#endif	/* _KERNEL */
+
 #define CPU_CONSDEV	1
 #define CPU_MAXID	2
 
@@ -127,6 +131,8 @@ extern int astpending;		/* need to trap before returning to user mode */
 	{ 0, 0 }, \
 	{ "console_device", CTLTYPE_STRUCT }, \
 }
+
+#ifdef _KERNEL
 
 /* values for machineid --
  * 	These are equivalent to the MacOS Gestalt values. */
@@ -202,7 +208,6 @@ extern int astpending;		/* need to trap before returning to user mode */
 #define MACH_CLASSAV	10	/* A/V Centris/Quadras. */
 #define MACH_CLASSQ2	11	/* More Centris/Quadras, different sccA. */
 
-#ifdef _KERNEL
 struct mac68k_machine_S {
 	int			cpu_model_index;
 	/*
@@ -235,7 +240,6 @@ struct mac68k_machine_S {
 	int			sonic;		/* Has SONIC e-net */
 
 	int			via1_ipl;
-	int			via2_ipl;
 	int			aux_interrupts;
 };
 
@@ -252,7 +256,6 @@ extern unsigned long		NuBusBase;	/* Base address of NuBus */
 
 extern  struct mac68k_machine_S	mac68k_machine;
 extern	unsigned long		load_addr;
-#endif /* _KERNEL */
 
 #define IIOMAPSIZE		(0x040000 / PAGE_SIZE)
 
@@ -269,8 +272,6 @@ extern	unsigned long		load_addr;
 #define NBMAPSIZE	btoc(NBTOP-NBBASE)	/* ~ 96 megs */
 #define NBMEMSIZE	0x01000000	/* 16 megs per card */
 #define NBROMOFFSET	0x00FF0000	/* Last 64K == ROM */
-
-#ifdef _KERNEL
 
 /* locore.s */
 void	PCIA(void);

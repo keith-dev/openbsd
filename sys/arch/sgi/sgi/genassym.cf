@@ -1,4 +1,4 @@
-#	$OpenBSD: genassym.cf,v 1.6 2005/12/20 07:06:29 miod Exp $
+#	$OpenBSD: genassym.cf,v 1.9 2007/06/18 20:25:55 miod Exp $
 #
 # Copyright (c) 1997 Per Fogelstrom / Opsycon AB
 #
@@ -33,6 +33,8 @@ include <sys/user.h>
 
 include <uvm/uvm.h>
 
+include <machine/cpu.h>
+
 export	SONPROC
 
 struct	proc
@@ -55,7 +57,13 @@ member	pcb_context
 member	pcb_onfault
 member	pcb_segtab
 
+struct	cpu_info
+member	ci_curproc
+
 export	VM_MIN_KERNEL_ADDRESS
 export	SIGFPE
 
 export	PMAP_SEGTABSIZE
+
+export	CCA_NC
+export	CCA_NONCOHERENT

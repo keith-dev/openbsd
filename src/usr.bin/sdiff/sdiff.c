@@ -1,4 +1,4 @@
-/*	$OpenBSD: sdiff.c,v 1.20 2006/09/19 05:52:23 otto Exp $ */
+/*	$OpenBSD: sdiff.c,v 1.22 2007/06/28 02:14:41 ray Exp $ */
 
 /*
  * Written by Raymond Lai <ray@cyth.net>.
@@ -77,6 +77,7 @@ static struct option longopts[] = {
 	{ "diff-program",		required_argument,	NULL,	'F' },
 	{ "speed-large-files",		no_argument,		NULL,	'H' },
 	{ "ignore-matching-lines",	required_argument,	NULL,	'I' },
+	{ "ignore-case",		no_argument,		NULL,	'i' },
 	{ "left-column",		no_argument,		NULL,	'l' },
 	{ "output",			required_argument,	NULL,	'o' },
 	{ "strip-trailing-cr",		no_argument,		NULL,	'S' },
@@ -435,6 +436,7 @@ prompt(const char *s1, const char *s2)
 			break;
 
 		case 'l':
+		case '1':
 			/* Choose left column as-is. */
 			if (s1 != NULL)
 				fprintf(outfile, "%s\n", s1);
@@ -446,6 +448,7 @@ prompt(const char *s1, const char *s2)
 			goto QUIT;
 
 		case 'r':
+		case '2':
 			/* Choose right column as-is. */
 			if (s2 != NULL)
 				fprintf(outfile, "%s\n", s2);
@@ -1018,8 +1021,8 @@ int_usage(void)
 	    "eb:\tedit both diffs concatenated\n"
 	    "el:\tedit left diff\n"
 	    "er:\tedit right diff\n"
-	    "l:\tchoose left diff\n"
-	    "r:\tchoose right diff\n"
+	    "l | 1:\tchoose left diff\n"
+	    "r | 2:\tchoose right diff\n"
 	    "s:\tsilent mode--don't print identical lines\n"
 	    "v:\tverbose mode--print identical lines\n"
 	    "q:\tquit");

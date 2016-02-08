@@ -1,7 +1,7 @@
 # ex:ts=8 sw=4:
-# $OpenBSD: SharedItems.pm,v 1.6 2006/07/31 17:09:19 espie Exp $
+# $OpenBSD: SharedItems.pm,v 1.13 2007/06/20 13:44:40 espie Exp $
 #
-# Copyright (c) 2004 Marc Espie <espie@openbsd.org>
+# Copyright (c) 2004-2006 Marc Espie <espie@openbsd.org>
 #
 # Permission to use, copy, modify, and distribute this software for any
 # purpose with or without fee is hereby granted, provided that the above
@@ -19,23 +19,25 @@ use strict;
 use warnings;
 package OpenBSD::SharedItems;
 
-use OpenBSD::ProgressMeter;
 use OpenBSD::Error;
 use OpenBSD::PackageInfo;
 use OpenBSD::PackingList;
+use OpenBSD::Paths;
 
 sub find_items_in_installed_packages
 {
-	my $db = {dirs=>{}, users=>{}, groups=>{}};
+	my $progress = shift;
+	my $db = OpenBSD::SharedItemsRecorder->new;
 	my @list = installed_packages();
 	my $total = @list;
-	OpenBSD::ProgressMeter::set_header("Read shared items");
+	$progress->set_header("Read shared items");
 	my $done = 0;
 	for my $e (@list) {
-		OpenBSD::ProgressMeter::show($done, $total);
+		$progress->show($done, $total);
 		my $plist = OpenBSD::PackingList->from_installation($e, 
 		    \&OpenBSD::PackingList::SharedItemsOnly) or next;
-		$plist->visit('record_shared_item', $e, $db);
+		next if !defined $plist;
+		$plist->record_shared($db, $e);
 		$done++;
 	}
 	return $db;
@@ -43,16 +45,15 @@ sub find_items_in_installed_packages
 
 sub cleanup
 {
-	my $state = shift;
+	my ($recorder, $state) = @_;
 
-	my $h = $state->{dirs_to_rm};
-	my $u = $state->{users_to_rm};
-	my $g = $state->{groups_to_rm};
-	return unless defined $h or defined $u or defined $g;
-	my $remaining = find_items_in_installed_packages();
+	my $remaining = find_items_in_installed_packages($state->progress);
 
-	OpenBSD::ProgressMeter::clear();
-	OpenBSD::ProgressMeter::set_header("Clean shared items");
+	$state->progress->clear;
+	$state->progress->set_header("Clean shared items");
+	my $h = $recorder->{dirs};
+	my $u = $recorder->{users};
+	my $g = $recorder->{groups};
 	my $total = 0;
 	$total += keys %$h if defined $h;
 	$total += keys %$u if defined $u;
@@ -61,7 +62,7 @@ sub cleanup
 
 	if (defined $h) {
 		for my $d (sort {$b cmp $a} keys %$h) {
-			OpenBSD::ProgressMeter::show($done, $total);
+			$state->progress->show($done, $total);
 			my $realname = $state->{destdir}.$d;
 			if ($remaining->{dirs}->{$realname}) {
 				for my $i (@{$h->{$d}}) {
@@ -83,10 +84,10 @@ sub cleanup
 	}
 	if (defined $u) {
 		while (my ($user, $pkgname) = each %$u) {
-			OpenBSD::ProgressMeter::show($done, $total);
+			$state->progress->show($done, $total);
 			next if $remaining->{users}->{$user};
 			if ($state->{extra}) {
-				System("/usr/sbin/userdel", $user);
+				System(OpenBSD::Paths->userdel, $user);
 			} else {
 				$state->set_pkgname($pkgname);
 				$state->print("You should also run /usr/sbin/userdel $user\n");
@@ -96,10 +97,10 @@ sub cleanup
 	}
 	if (defined $g) {
 		while (my ($group, $pkgname) = each %$g) {
-			OpenBSD::ProgressMeter::show($done, $total);
+			$state->progress->show($done, $total);
 			next if $remaining->{groups}->{$group};
 			if ($state->{extra}) {
-				System("/usr/sbin/groupdel", $group);
+				System(OpenBSD::Paths->groupdel, $group);
 			} else {
 				$state->set_pkgname($pkgname);
 				$state->print("You should also run /usr/sbin/groupdel $group\n");
@@ -107,14 +108,10 @@ sub cleanup
 			$done++;
 		}
 	}
-	OpenBSD::ProgressMeter::next();
+	$state->progress->next;
 }
 
 package OpenBSD::PackingElement;
-sub record_shared_item
-{
-}
-
 sub cleanup
 {
 }
@@ -123,62 +120,36 @@ sub reload
 {
 }
 
-package OpenBSD::PackingElement::NewUser;
-sub record_shared_item
-{
-	my ($self, $pkgname, $db) = @_;
-	my $k = $self->{name};
-	$db->{users}->{$k} = $pkgname;
-}
-
-package OpenBSD::PackingElement::NewGroup;
-sub record_shared_item
-{
-	my ($self, $pkgname, $db) = @_;
-	my $k = $self->{name};
-	$db->{groups}->{$k} = $pkgname;
-}
-
-package OpenBSD::PackingElement::DirBase;
-sub record_shared_item
-{
-	my ($self, $pkgname, $db) = @_;
-	my $k = $self->fullname();
-	$db->{dirs}->{$k} = 1;
-}
-
-package OpenBSD::PackingElement::DirRm;
-sub record_shared_item
-{
-	&OpenBSD::PackingElement::DirBase::record_shared_item;
-}
-
 package OpenBSD::PackingElement::Mandir;
 sub cleanup
 {
 	my ($self, $state) = @_;
-	my $fullname = $state->{destdir}.$self->fullname();
+	my $fullname = $state->{destdir}.$self->fullname;
 	$state->print("You may wish to remove ", $fullname, " from man.conf\n");
-	unlink("$fullname/whatis.db");
+	for my $f (OpenBSD::Paths->man_cruft) {
+		unlink("$fullname/$f");
+	}
 }
 
 package OpenBSD::PackingElement::Fontdir;
 sub cleanup
 {
 	my ($self, $state) = @_;
-	my $fullname = $state->{destdir}.$self->fullname();
+	my $fullname = $state->{destdir}.$self->fullname;
 	$state->print("You may wish to remove ", $fullname, " from your font path\n");
-	unlink("$fullname/fonts.alias");
-	unlink("$fullname/fonts.dir");
-	unlink("$fullname/fonts.cache-1");
+	for my $f (OpenBSD::Paths->font_cruft) {
+		unlink("$fullname/$f");
+	}
 }
 
 package OpenBSD::PackingElement::Infodir;
 sub cleanup
 {
 	my ($self, $state) = @_;
-	my $fullname = $state->{destdir}.$self->fullname();
-	unlink("$fullname/dir");
+	my $fullname = $state->{destdir}.$self->fullname;
+	for my $f (OpenBSD::Paths->info_cruft) {
+		unlink("$fullname/$f");
+	}
 }
 
 1;

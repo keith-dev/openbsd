@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.6 2005/08/01 13:20:23 mickey Exp $
+#	$OpenBSD: Makefile,v 1.10 2007/05/30 01:25:43 tom Exp $
 
 .include "${.CURDIR}/../Makefile.inc"
 
@@ -9,7 +9,7 @@ S	=${.CURDIR}/../../../..
 SADIR=	${.CURDIR}/..
 
 PROG=	cdboot
-SRCS=	srt0.S cdboot.c conf.c
+SRCS=	srt0.S boot.c conf.c
 LD?=	ld
 SIZE?=	size
 LDFLAGS+=-melf_i386 -nostdlib -Bstatic -Ttext $(LINKADDR) -N -x -noinhibit-exec
@@ -31,15 +31,16 @@ SRCS+=	cmd.c vars.c bootarg.c
 # not required: getfile.c gets.c globals.c strlcat.c
 SRCS+=	alloc.c exit.c strcmp.c strlen.c \
 	strncmp.c memcmp.c memcpy.c memset.c printf.c snprintf.c \
-	strerror.c strncpy.c strtol.c ctime.c strlcpy.c
+	strerror.c strncpy.c strtol.c strtoll.c ctime.c strlcpy.c
 # io routines
 # not required: ioctl.c write.c
 SRCS+=	close.c closeall.c dev.c disklabel.c dkcksum.c fstat.c lseek.c \
-	open.c read.c stat.c cread.c readdir.c cons.c loadfile.c
+	open.c read.c stat.c cread.c readdir.c cons.c loadfile.c \
+	elf32.c elf64.c
 # boot filesystems
 SRCS+=	ufs.c cd9660.c
 # gcc support
-SRCS+=	moddi3.c qdivrem.c
+SRCS+=	divdi3.c moddi3.c qdivrem.c
 
 .PATH:	${S}/lib/libz
 SRCS+=	adler32.c crc32.c inflate.c inftrees.c
@@ -67,4 +68,5 @@ CPPFLAGS+=-DSLOW -DSMALL -DNOBYFOUR -DNO_GZIP -DDYNAMIC_CRC_TABLE
 CPPFLAGS+=-DLINKADDR=${LINKADDR} -I${S}/stand/boot
 CFLAGS+=-m32 ${SACFLAGS} -D__INTERNAL_LIBSA_CREAD
 CFLAGS+=-DOSREV=\"${OSREV}\" -DMACHINE=\"${MACHINE}\"
+CFLAGS+=-DKERNEL=\"/${OSREV}/${MACHINE}/bsd.rd\"
 AFLAGS+=-m32

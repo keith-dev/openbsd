@@ -1,4 +1,4 @@
-/*	$OpenBSD: est.c,v 1.27 2006/12/22 01:34:46 dim Exp $ */
+/*	$OpenBSD: est.c,v 1.30 2007/06/07 11:20:58 dim Exp $ */
 /*
  * Copyright (c) 2003 Michael Eriksson.
  * All rights reserved.
@@ -65,12 +65,6 @@
 /* Convert MHz and mV into IDs for passing to the MSR. */
 #define ID16(MHz, mV, bus_clk) \
 	((((MHz * 100 + 50) / bus_clk) << 8) | ((mV ? mV - 700 : 0) >> 4))
-
-/* Possible bus speeds (multiplied by 100 for rounding) */
-#define BUS100 10000
-#define BUS133 13333
-#define BUS166 16666
-#define BUS200 20000
 
 
 /* Ultra Low Voltage Intel Pentium M processor 900 MHz */
@@ -489,11 +483,11 @@ static const u_int16_t pm90_n725d[] = {
 
 /* Intel Pentium M processor 730 1.6 GHz, 533 MHz FSB */
 static const u_int16_t pm90_n730[] = {
-       ID16(1600, 1308, BUS133),
-       ID16(1333, 1260, BUS133),
-       ID16(1200, 1212, BUS133),
-       ID16(1067, 1180, BUS133),
-       ID16( 800,  988, BUS133),
+	ID16(1600, 1308, BUS133),
+	ID16(1333, 1260, BUS133),
+	ID16(1200, 1212, BUS133),
+	ID16(1067, 1180, BUS133),
+	ID16( 800,  988, BUS133),
 };
 
 /* Intel Pentium M processor 735 1.7 GHz, VID #A */
@@ -538,10 +532,10 @@ static const u_int16_t pm90_n735d[] = {
 
 /* Intel Pentium M processor 740 1.73 GHz, 533 MHz FSB */
 static const u_int16_t pm90_n740[] = {
-       ID16(1733, 1356, BUS133),
-       ID16(1333, 1212, BUS133),
-       ID16(1067, 1100, BUS133),
-       ID16( 800,  988, BUS133),
+	ID16(1733, 1356, BUS133),
+	ID16(1333, 1212, BUS133),
+	ID16(1067, 1100, BUS133),
+	ID16( 800,  988, BUS133),
 };
 
 /* Intel Pentium M processor 745 1.8 GHz, VID #A */
@@ -1007,7 +1001,7 @@ est_init(const char *cpu_device, int vendor)
 	/*
 	 * Find an entry which matches (vendor, bus_clock, idhi, idlo)
 	 */
-	for (i = 0; i <  NELEM(est_cpus); i++) {
+	for (i = 0; i < NELEM(est_cpus); i++) {
 		fql = &est_cpus[i];
 		if (vendor == fql->vendor && bus_clock == BUS_CLK(fql) &&
 		    idhi == fql->table[0] && idlo == fql->table[fql->n - 1]) {
@@ -1076,19 +1070,17 @@ est_init(const char *cpu_device, int vendor)
 void
 est_setperf(int level)
 {
-	int low, high, i, fq;
+	int i;
 	uint64_t msr;
 
 	if (est_fqlist == NULL)
 		return;
 
-	low = MSR2MHZ(est_fqlist->table[est_fqlist->n - 1], bus_clock);
-	high = MSR2MHZ(est_fqlist->table[0], bus_clock);
-	fq = low + (high - low) * level / 100;
+	i = ((level * est_fqlist->n) + 1) / 101;
+	if (i >= est_fqlist->n)
+		i = est_fqlist->n - 1;
+	i = est_fqlist->n - 1 - i;
 
-	for (i = est_fqlist->n - 1; i > 0; i--)
-		if (MSR2MHZ(est_fqlist->table[i], bus_clock) >= fq)
-			break;
 	msr = rdmsr(MSR_PERF_CTL);
 	msr &= ~0xffffULL;
 	msr |= est_fqlist->table[i];

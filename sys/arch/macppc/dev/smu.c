@@ -1,4 +1,4 @@
-/*	$OpenBSD: smu.c,v 1.15 2007/03/01 21:39:27 kettenis Exp $	*/
+/*	$OpenBSD: smu.c,v 1.19 2007/05/20 23:38:52 thib Exp $	*/
 
 /*
  * Copyright (c) 2005 Mark Kettenis
@@ -20,7 +20,7 @@
 #include <sys/systm.h>
 #include <sys/device.h>
 #include <sys/kernel.h>
-#include <sys/lock.h>
+#include <sys/rwlock.h>
 #include <sys/proc.h>
 #include <sys/sensors.h>
 
@@ -43,14 +43,14 @@ struct smu_fan {
 	u_int16_t	min_rpm;
 	u_int16_t	max_rpm;
 	u_int16_t	unmanaged_rpm;
-	struct sensor	sensor;
+	struct ksensor	sensor;
 };
 
 #define SMU_MAXSENSORS	3
 
 struct smu_sensor {
 	u_int8_t	reg;
-	struct sensor	sensor;
+	struct ksensor	sensor;
 };
 
 struct smu_softc {
@@ -61,7 +61,7 @@ struct smu_softc {
         bus_dmamap_t    sc_cmdmap;
         bus_dma_segment_t sc_cmdseg[1];
         caddr_t         sc_cmd;
-	struct lock	sc_lock;
+	struct rwlock	sc_lock;
 
 	/* Doorbell and mailbox. */
 	struct ppc_bus_space sc_mem_bus_space;
@@ -75,7 +75,7 @@ struct smu_softc {
 	struct smu_sensor sc_sensors[SMU_MAXSENSORS];
 	int		sc_num_sensors;
 
-	struct sensordev sc_sensordev;
+	struct ksensordev sc_sensordev;
 
 	u_int16_t	sc_cpu_diode_scale;
 	int16_t		sc_cpu_diode_offset;
@@ -242,20 +242,20 @@ smu_attach(struct device *parent, struct device *self, void *aux)
                 return;
         }
 
-	lockinit(&sc->sc_lock, PZERO, sc->sc_dev.dv_xname, 0, 0);
+	rw_init(&sc->sc_lock, sc->sc_dev.dv_xname);
 
 	/* Establish smu-doorbell interrupt. */
 	mac_intr_establish(parent, intr, IST_EDGE, IPL_BIO,
-	    smu_intr, sc, "smu");
+	    smu_intr, sc, sc->sc_dev.dv_xname);
 
 	/* Initialize global variables that control RTC functionality. */
 	time_read = smu_time_read;
 	time_write = smu_time_write;
 
 	/* Fans */
-	node = OF_getnodebyname(ca->ca_node, "fans");
+	node = OF_getnodebyname(ca->ca_node, "rpm-fans");
 	if (node == 0)
-		node = OF_getnodebyname(ca->ca_node, "rpm-fans");
+		node = OF_getnodebyname(ca->ca_node, "fans");
 	for (node = OF_child(node); node; node = OF_peer(node)) {
 		if (OF_getprop(node, "reg", &reg, sizeof reg) <= 0 ||
 		    OF_getprop(node, "device_type", type, sizeof type) <= 0)
@@ -420,14 +420,14 @@ smu_time_read(time_t *secs)
 	struct clock_ymdhms dt;
 	int error;
 
-	lockmgr(&sc->sc_lock, LK_EXCLUSIVE, NULL);
+	rw_enter_write(&sc->sc_lock);
 
 	cmd->cmd = SMU_RTC;
 	cmd->len = 1;
 	cmd->data[0] = SMU_RTC_GET_DATETIME;
 	error = smu_do_cmd(sc, 800);
 	if (error) {
-		lockmgr(&sc->sc_lock, LK_RELEASE, NULL);
+		rw_exit_write(&sc->sc_lock);
 
 		*secs = 0;
 		return (error);
@@ -440,7 +440,7 @@ smu_time_read(time_t *secs)
 	dt.dt_min = FROMBCD(cmd->data[1]);
 	dt.dt_sec = FROMBCD(cmd->data[0]);
 
-	lockmgr(&sc->sc_lock, LK_RELEASE, NULL);
+	rw_exit_write(&sc->sc_lock);
 
 	*secs = clock_ymdhms_to_secs(&dt);
 	return (0);
@@ -456,7 +456,7 @@ smu_time_write(time_t secs)
 
 	clock_secs_to_ymdhms(secs, &dt);
 
-	lockmgr(&sc->sc_lock, LK_EXCLUSIVE, NULL);
+	rw_enter_write(&sc->sc_lock);
 
 	cmd->cmd = SMU_RTC;
 	cmd->len = 8;
@@ -470,7 +470,7 @@ smu_time_write(time_t secs)
 	cmd->data[7] = TOBCD(dt.dt_year - 2000);
 	error = smu_do_cmd(sc, 800);
 
-	lockmgr(&sc->sc_lock, LK_RELEASE, NULL);
+	rw_exit_write(&sc->sc_lock);
 
 	return (error);
 }
@@ -518,12 +518,18 @@ smu_fan_set_rpm(struct smu_softc *sc, struct smu_fan *fan, u_int16_t rpm)
 {
 	struct smu_cmd *cmd = (struct smu_cmd *)sc->sc_cmd;
 
+	/*
+	 * On the PowerMac8,2 this command expects the requested fan
+	 * speed at a different location in the command block than on
+	 * the PowerMac8,1.  We simply store the value at both
+	 * locations.
+	 */
 	cmd->cmd = SMU_FAN;
-	cmd->len = 4;
+	cmd->len = 14;
 	cmd->data[0] = 0x00;	/* fan-rpm-control */
 	cmd->data[1] = 0x01 << fan->reg;
-	cmd->data[2] = (rpm >> 8) & 0xff;
-	cmd->data[3] = (rpm & 0xff);
+	cmd->data[2] = cmd->data[2 + fan->reg * 2] = (rpm >> 8) & 0xff;
+	cmd->data[3] = cmd->data[3 + fan->reg * 2] = (rpm & 0xff);
 	return smu_do_cmd(sc, 800);
 }
 
@@ -610,12 +616,12 @@ smu_refresh_sensors(void *arg)
 	struct smu_softc *sc = arg;
 	int i;
 
-	lockmgr(&sc->sc_lock, LK_EXCLUSIVE, NULL);
+	rw_enter_write(&sc->sc_lock);
 	for (i = 0; i < sc->sc_num_sensors; i++)
 		smu_sensor_refresh(sc, &sc->sc_sensors[i]);
 	for (i = 0; i < sc->sc_num_fans; i++)
 		smu_fan_refresh(sc, &sc->sc_fans[i]);
-	lockmgr(&sc->sc_lock, LK_RELEASE, NULL);
+	rw_exit_write(&sc->sc_lock);
 }
 
 int
@@ -626,7 +632,7 @@ smu_i2c_acquire_bus(void *cookie, int flags)
 	if (flags & I2C_F_POLL)
 		return (0);
 
-	return (lockmgr(&sc->sc_lock, LK_EXCLUSIVE, NULL));
+	return (rw_enter(&sc->sc_lock, RW_WRITE));
 }
 
 void
@@ -637,7 +643,7 @@ smu_i2c_release_bus(void *cookie, int flags)
         if (flags & I2C_F_POLL)
                 return;
 
-        lockmgr(&sc->sc_lock, LK_RELEASE, NULL);
+	rw_exit(&sc->sc_lock);
 }
 
 int

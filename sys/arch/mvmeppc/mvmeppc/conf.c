@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.17 2004/02/10 01:31:21 millert Exp $ */
+/*	$OpenBSD: conf.c,v 1.21 2007/06/01 23:14:07 deraadt Exp $ */
 
 /*
  * Copyright (c) 1997 Per Fogelstrom
@@ -61,11 +61,7 @@ struct bdevsw bdevsw[] = {
 	bdev_swap_init(1,sw),		/* 1 swap pseudo device */
 	bdev_disk_init(NSD,sd),		/* 2 SCSI Disk */
 	bdev_disk_init(NCD,cd),		/* 3 SCSI CD-ROM */
-#if 0
-	bdev_disk_init(NOFDISK,ofd),	/* 4 Openfirmware disk */
-#else
 	bdev_notdef(),                  /* 4 unknown*/
-#endif 
 	bdev_notdef(),                  /* 5 unknown*/
 	bdev_notdef(),                  /* 6 unknown*/
 	bdev_notdef(),                  /* 7 unknown*/
@@ -84,6 +80,7 @@ struct bdevsw bdevsw[] = {
 };
 int nblkdev = sizeof bdevsw / sizeof bdevsw[0];
 
+#include "bio.h"
 #include "pty.h"
 
 #include "bugtty.h"
@@ -133,7 +130,7 @@ struct cdevsw cdevsw[] = {
         cdev_disk_init(NCD,cd),         /* 9: SCSI CD-ROM */
         cdev_notdef(),                  /* 10: SCSI changer */
 	cdev_disk_init(NWD,wd),		/* 11: ST506/ESDI/IDE disk */
-        cdev_notdef(),                  /* 12 */
+        cdev_notdef(),			/* 12 */
 	cdev_notdef(),			/* 13 */
 	cdev_tty_init(NBUGTTY,bugtty),  /* 14: BUGtty (ttyB) */
         cdev_notdef(),                  /* 15 */
@@ -178,7 +175,7 @@ struct cdevsw cdevsw[] = {
         cdev_notdef(),                  /* 51 */
 #endif
         cdev_notdef(),                  /* 52 */ 
-        cdev_notdef(),                  /* 53 */ 
+	cdev_bio_init(NBIO,bio),	/* 53: ioctl tunnel */
 	cdev_disk_init(NRAID,raid),	/* 54: RAIDframe disk driver */
 	cdev_ptm_init(NPTY,ptm),	/* 55: pseudo-tty ptm device */
 };

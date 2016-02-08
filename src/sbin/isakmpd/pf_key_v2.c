@@ -1,4 +1,4 @@
-/* $OpenBSD: pf_key_v2.c,v 1.178 2007/02/19 09:43:34 hshoexer Exp $  */
+/* $OpenBSD: pf_key_v2.c,v 1.181 2007/05/27 18:31:30 claudio Exp $  */
 /* $EOM: pf_key_v2.c,v 1.79 2000/12/12 00:33:19 niklas Exp $	 */
 
 /*
@@ -40,7 +40,6 @@
 
 #include <net/pfkeyv2.h>
 #include <netinet/in.h>
-#include <sys/mbuf.h>
 #include <netinet/ip_ipsp.h>
 #include <arpa/inet.h>
 #include <stdlib.h>
@@ -123,7 +122,7 @@ int      pf_key_v2_socket;
 static struct pf_key_v2_msg *
 pf_key_v2_msg_new(struct sadb_msg *msg, int flags)
 {
-	struct pf_key_v2_node *node = 0;
+	struct pf_key_v2_node *node;
 	struct pf_key_v2_msg *ret;
 
 	node = malloc(sizeof *node);
@@ -142,8 +141,7 @@ pf_key_v2_msg_new(struct sadb_msg *msg, int flags)
 	return ret;
 
 cleanup:
-	if (node)
-		free(node);
+	free(node);
 	return 0;
 }
 
@@ -321,8 +319,7 @@ pf_key_v2_read(u_int32_t seq)
 	}
 
 cleanup:
-	if (buf)
-		free(buf);
+	free(buf);
 	if (ret)
 		pf_key_v2_msg_free(ret);
 	return 0;
@@ -393,8 +390,7 @@ pf_key_v2_write(struct pf_key_v2_msg *pmsg)
 	return msg->sadb_msg_seq;
 
 cleanup:
-	if (iov)
-		free(iov);
+	free(iov);
 	return 0;
 }
 
@@ -653,10 +649,8 @@ pf_key_v2_get_spi(size_t *sz, u_int8_t proto, struct sockaddr *src,
 	return spi;
 
 cleanup:
-	if (spi)
-		free(spi);
-	if (addr)
-		free(addr);
+	free(spi);
+	free(addr);
 	if (getspi)
 		pf_key_v2_msg_free(getspi);
 	if (ret)
@@ -1313,8 +1307,7 @@ pf_key_v2_set_spi(struct sa *sa, struct proto *proto, int incoming,
 		sid = 0;
 
 nosid:
-		if (sid)
-			free(sid);
+		free(sid);
 		sid = 0;
 	}
 	if (isakmp_sa->id_r) {
@@ -1347,8 +1340,7 @@ nosid:
 		sid = 0;
 
 nodid:
-		if (sid)
-			free(sid);
+		free(sid);
 		sid = 0;
 	}
 
@@ -1580,8 +1572,7 @@ doneauth:
 	    ntohl(ssa.sadb_sa_spi), sa->tag ? " tag " : "",
 	    sa->tag ? sa->tag : ""));
 
-	if (addr_str)
-		free(addr_str);
+	free(addr_str);
 
 	/*
 	 * Although PF_KEY knows about expirations, it is unreliable per the
@@ -1617,14 +1608,10 @@ doneauth:
 	return 0;
 
 cleanup:
-	if (sid)
-		free(sid);
-	if (addr)
-		free(addr);
-	if (life)
-		free(life);
-	if (key)
-		free(key);
+	free(sid);
+	free(addr);
+	free(life);
+	free(key);
 	if (update)
 		pf_key_v2_msg_free(update);
 	if (ret)
@@ -1841,14 +1828,10 @@ pf_key_v2_flow(struct sockaddr *laddr, struct sockaddr *lmask,
 	 raddr_str ? raddr_str : "<??\?>", rmask_str ? rmask_str : "<??\?>",
 		 tproto, ntohs(sport), ntohs(dport)));
 
-	if (laddr_str)
-		free(laddr_str);
-	if (lmask_str)
-		free(lmask_str);
-	if (raddr_str)
-		free(raddr_str);
-	if (rmask_str)
-		free(rmask_str);
+	free(laddr_str);
+	free(lmask_str);
+	free(raddr_str);
+	free(rmask_str);
 
 	ret = pf_key_v2_call(flow);
 	pf_key_v2_msg_free(flow);
@@ -1874,10 +1857,8 @@ pf_key_v2_flow(struct sockaddr *laddr, struct sockaddr *lmask,
 	return 0;
 
 cleanup:
-	if (sid)
-		free(sid);
-	if (addr)
-		free(addr);
+	free(sid);
+	free(addr);
 	if (flow)
 		pf_key_v2_msg_free(flow);
 	if (ret)
@@ -2038,10 +2019,8 @@ pf_key_v2_enable_sa(struct sa *sa, struct sa *isakmp_sa)
 	    didlen, proto->data);
 
 cleanup:
-	if (sid)
-		free(sid);
-	if (did)
-		free(did);
+	free(sid);
+	free(did);
 
 	return error;
 }
@@ -2303,8 +2282,7 @@ pf_key_v2_delete_spi(struct sa *sa, struct proto *proto, int incoming)
 	return 0;
 
 cleanup:
-	if (addr)
-		free(addr);
+	free(addr);
 	if (delete)
 		pf_key_v2_msg_free(delete);
 	if (ret)
@@ -2400,8 +2378,7 @@ pf_key_v2_expire(struct pf_key_v2_msg *pmsg)
 	    : "HARD", dst_str ? dst_str : "<unknown>",
 	    ntohl(ssa->sadb_sa_spi), msg->sadb_msg_satype));
 
-	if (dst_str)
-		free(dst_str);
+	free(dst_str);
 
 	/*
 	 * Find the IPsec SA.  The IPsec stack has two SAs for every IKE SA,
@@ -2821,7 +2798,7 @@ pf_key_v2_acquire(struct pf_key_v2_msg *pmsg)
 
 		case SADB_IDENTTYPE_FQDN:
 			prefstring = "FQDN";
-			/* Fall through */
+			/*FALLTHROUGH*/
 		case SADB_IDENTTYPE_USERFQDN:
 			if (!prefstring) {
 				prefstring = "USER_FQDN";
@@ -2970,8 +2947,7 @@ pf_key_v2_acquire(struct pf_key_v2_msg *pmsg)
 
 		case SADB_IDENTTYPE_FQDN:
 			prefstring = "FQDN";
-			/* Fall through */
-
+			/*FALLTHROUGH*/
 		case SADB_IDENTTYPE_USERFQDN:
 			if (!prefstring) {
 				prefstring = "USER_FQDN";
@@ -3315,8 +3291,7 @@ pf_key_v2_acquire(struct pf_key_v2_msg *pmsg)
 			if (!certprint ||
 			    conf_set(af, peer, "Credentials", certprint, 0,
 				0)) {
-				if (certprint)
-					free(certprint);
+				free(certprint);
 				conf_end(af, 0);
 				goto fail;
 			}
@@ -3431,8 +3406,7 @@ pf_key_v2_acquire(struct pf_key_v2_msg *pmsg)
 					conf_end(af, 0);
 					goto fail;
 				}
-			} else	/* Fall through */
-			{
+			} else {
 				xform = conf_get_str(
 				    "Default-phase-1-configuration",
 				    "Transforms");
@@ -3481,14 +3455,10 @@ fail:
 		pf_key_v2_msg_free(ret);
 	if (askpolicy)
 		pf_key_v2_msg_free(askpolicy);
-	if (srcid)
-		free(srcid);
-	if (dstid)
-		free(dstid);
-	if (peer)
-		free(peer);
-	if (conn)
-		free(conn);
+	free(srcid);
+	free(dstid);
+	free(peer);
+	free(conn);
 	return;
 }
 
@@ -3674,8 +3644,7 @@ pf_key_v2_group_spis(struct sa *sa, struct proto *proto1,
 	return 0;
 
 cleanup:
-	if (addr)
-		free(addr);
+	free(addr);
 	if (grpspis)
 		pf_key_v2_msg_free(grpspis);
 	if (ret)

@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.9 2006/03/12 03:14:37 brad Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.11 2007/05/16 19:37:06 thib Exp $	*/
 
 /*
  * Copyright (c) 2005 Michael Shalayeff
@@ -149,7 +149,7 @@ void splassert_fail(int, int, const char *);
 extern int splassert_ctl;
 void splassert_check(int, const char *);
 #define splassert(__wantipl) do {			\
-	if (__predict_false(splassert_ctl > 0)) {	\
+	if (splassert_ctl > 0) {			\
 		splassert_check(__wantipl, __func__);	\
 	}						\
 } while (0)
@@ -196,7 +196,7 @@ extern int cpu_hvers;
 
 #define	signotify(p)		(setsoftast())
 #define	need_resched(ci)	(want_resched = 1, setsoftast())
-#define	need_proftick(p)	((p)->p_flag |= P_OWEUPC, setsoftast())
+#define	need_proftick(p)	setsoftast()
 
 #ifndef _LOCORE
 #ifdef _KERNEL

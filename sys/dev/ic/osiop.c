@@ -1,4 +1,4 @@
-/*	$OpenBSD: osiop.c,v 1.27 2006/11/28 23:59:45 dlg Exp $	*/
+/*	$OpenBSD: osiop.c,v 1.29 2007/06/20 18:02:39 miod Exp $	*/
 /*	$NetBSD: osiop.c,v 1.9 2002/04/05 18:27:54 bouyer Exp $	*/
 
 /*
@@ -67,9 +67,6 @@
  *	NetBSD: siop.c,v 1.43 1999/09/30 22:59:53 thorpej Exp
  *
  * bus_space/bus_dma'fied by Izumi Tsutsui <tsutsui@ceres.dti.ne.jp>
- *
- * The 53c710 datasheet is available at:
- * http://www.lsilogic.com/techlib/techdocs/storage_stand_prod/index.html
  */
 
 #include <sys/cdefs.h>
@@ -1336,7 +1333,11 @@ osiop_checkintr(sc, istat, dstat, sstat0, status)
 		if (acb == NULL) {
 			printf("%s: Select timeout with no active command?\n",
 			    sc->sc_dev.dv_xname);
+#if 0
 			return (0);
+#else
+			goto bad_phase;
+#endif
 		}
 #ifdef OSIOP_DEBUG
 		if (osiop_read_1(sc, OSIOP_SBCL) & OSIOP_BSY) {
@@ -1711,13 +1712,16 @@ osiop_checkintr(sc, istat, dstat, sstat0, status)
 #ifdef OSIOP_DEBUG
 	if (osiop_debug & DEBUG_DMA)
 		panic("osiop_chkintr: **** temp ****");
+#if 0
 #ifdef DDB
 	Debugger();
 #endif
 #endif
+#endif
 	osiop_reset(sc);	/* hard reset */
 	*status = SCSI_OSIOP_NOSTATUS;
-	acb->status = ACB_S_DONE;
+	if (acb != NULL)
+		acb->status = ACB_S_DONE;
 	return (0);		/* osiop_reset cleaned up */
 }
 

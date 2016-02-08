@@ -1,4 +1,4 @@
-/*      $OpenBSD: wdc.c,v 1.93 2006/05/22 05:21:57 miod Exp $     */
+/*      $OpenBSD: wdc.c,v 1.96 2007/05/08 16:07:03 deraadt Exp $     */
 /*	$NetBSD: wdc.c,v 1.68 1999/06/23 19:00:17 bouyer Exp $ */
 
 
@@ -442,18 +442,6 @@ wdprint(aux, pnp)
 	return (UNCONF);
 }
 
-int
-atapi_print(aux, pnp)
-	void *aux;
-	const char *pnp;
-{
-	struct ata_atapi_attach *aa_link = aux;
-	if (pnp)
-		printf("atapiscsi at %s", pnp);
-	printf(" channel %d", aa_link->aa_channel);
-	return (UNCONF);
-}
-
 void
 wdc_disable_intr(chp)
 	struct channel_softc *chp;
@@ -674,9 +662,9 @@ wdcprobe(chp)
 		    chp->channel, st0, WDCS_BITS, st1, WDCS_BITS),
 		    DEBUG_PROBE);
 
-		if ((st0 & 0x7f) == 0x7f || st0 == WDSD_IBM)
+		if (st0 == 0xff || st0 == WDSD_IBM)
 			ret_value &= ~0x01;
-		if ((st1 & 0x7f) == 0x7f || st1 == (WDSD_IBM | 0x10))
+		if (st1 == 0xff || st1 == (WDSD_IBM | 0x10))
 			ret_value &= ~0x02;
 		if (ret_value == 0)
 			return 0;
@@ -980,20 +968,6 @@ wdcdetach(chp, flags)
 
 	return (rv);
 }
-
-/* restart an interrupted I/O */
-void
-wdcrestart(v)
-	void *v;
-{
-	struct channel_softc *chp = v;
-	int s;
-
-	s = splbio();
-	wdcstart(chp);
-	splx(s);
-}
-
 
 /*
  * Interrupt routine for the controller.  Acknowledge the interrupt, check for

@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfs_syscalls.c,v 1.139 2007/01/16 17:52:18 thib Exp $	*/
+/*	$OpenBSD: vfs_syscalls.c,v 1.141 2007/08/06 16:58:26 millert Exp $	*/
 /*	$NetBSD: vfs_syscalls.c,v 1.71 1996/04/23 10:29:02 mycroft Exp $	*/
 
 /*
@@ -51,6 +51,8 @@
 #include <sys/malloc.h>
 #include <sys/pool.h>
 #include <sys/dirent.h>
+#include <sys/dkio.h>
+#include <sys/disklabel.h>
 
 #include <sys/syscallargs.h>
 
@@ -1057,12 +1059,8 @@ sys_fhopen(struct proc *p, void *v, register_t *retval)
 			type |= F_WAIT;
 		VOP_UNLOCK(vp, 0, p);
 		error = VOP_ADVLOCK(vp, (caddr_t)fp, F_SETLK, &lf, type);
-		if (error) {
-			/* closef will vn_close the file for us. */
-			fdremove(fdp, indx);
-			closef(fp, p);
-			return (error);
-		}
+		if (error)
+			goto bad;
 		vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, p);
 		fp->f_flag |= FHASLOCK;
 	}
@@ -1397,6 +1395,7 @@ sys_lseek(struct proc *p, void *v, register_t *retval)
 	struct file *fp;
 	struct vattr vattr;
 	struct vnode *vp;
+	off_t offarg, newoff;
 	int error, special;
 
 	if ((fp = fd_getfile(fdp, SCARG(uap, fd))) == NULL)
@@ -1410,30 +1409,42 @@ sys_lseek(struct proc *p, void *v, register_t *retval)
 		special = 1;
 	else
 		special = 0;
+	offarg = SCARG(uap, offset);
+
 	switch (SCARG(uap, whence)) {
 	case SEEK_CUR:
-		if (!special && fp->f_offset + SCARG(uap, offset) < 0)
-			return (EINVAL);
-		fp->f_offset += SCARG(uap, offset);
+		newoff = fp->f_offset + offarg;;
 		break;
 	case SEEK_END:
 		error = VOP_GETATTR((struct vnode *)fp->f_data, &vattr,
 				    cred, p);
 		if (error)
 			return (error);
-		if (!special && (off_t)vattr.va_size + SCARG(uap, offset) < 0)
-			return (EINVAL);
-		fp->f_offset = SCARG(uap, offset) + vattr.va_size;
+		newoff = offarg + (off_t)vattr.va_size;
 		break;
 	case SEEK_SET:
-		if (!special && SCARG(uap, offset) < 0)
-			return (EINVAL);
-		fp->f_offset = SCARG(uap, offset);
+		newoff = offarg;
 		break;
 	default:
 		return (EINVAL);
 	}
-	*(off_t *)retval = fp->f_offset;
+	if (!special) {
+		if (newoff < 0)
+			return (EINVAL);
+	} else {
+		/*
+		 * Make sure the user don't seek beyond the end of the
+		 * partition.
+		 */
+		struct partinfo dpart;
+		error = vn_ioctl(fp, DIOCGPART, (void *)&dpart, p);
+		if (!error) {
+			if (newoff >= DL_GETPSIZE(dpart.part) *
+			    dpart.disklab->d_secsize)
+					return (EINVAL);
+		}
+	}
+	*(off_t *)retval = fp->f_offset = newoff;
 	fp->f_seek++;
 	return (0);
 }

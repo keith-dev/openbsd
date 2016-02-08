@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.8 2007/02/16 16:56:22 tsi Exp $
+#	$OpenBSD: Makefile,v 1.11 2007/06/17 00:28:21 deraadt Exp $
 
 CBIN=		instbin
 ARCHDIR=	${.CURDIR}/..
@@ -36,11 +36,11 @@ CDBOOT?=	${DESTDIR}/usr/mdec/cdboot
 
 STRIP?=		strip
 GZIPCMD?=	gzip
-GZIPFLAGS?=	-9
+GZIPFLAGS?=	-9n
 
 # old format, minfree, opt, b/i  trks, sects, cpg
 NEWFSOPTS=	-t ffs -m 0 -o space -f 1024 -b 8192
-NEWFSOPTS_RD?=	${NEWFSOPTS} -i 4096 -c 64 -s ${IMAGESIZE}
+NEWFSOPTS_RD?=	${NEWFSOPTS} -i 4096 -s ${IMAGESIZE}
 
 all:	bsd.rd ${LIF} ${CDROM}
 
@@ -82,7 +82,7 @@ ${RDSETROOT}: ${.CURDIR}/../../common/${RDSETROOT}.c
 ${IMAGE}: ${CBIN}
 	dd if=/dev/zero of=${REALIMAGE} count=${IMAGESIZE}
 	vnconfig -v -c ${VND} ${REALIMAGE}
-	disklabel -w ${RAWLABEL} ${VND} ${DISKTYPE}
+	disklabel -w ${VND} ${DISKTYPE}
 	newfs ${NEWFSOPTS_RD} ${VND_RDEV} || ${NEWFS_WILL_FAIL}
 	mount ${VND_DEV} ${MOUNT_POINT}
 	mtree -def ${MTREE} -p ${MOUNT_POINT}/ -u

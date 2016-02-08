@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile.inc,v 1.3 2004/02/27 16:53:24 deraadt Exp $
+#	$OpenBSD: Makefile.inc,v 1.10 2007/08/09 12:48:07 deraadt Exp $
 
 TOP=		${.CURDIR}/..
 
@@ -21,16 +21,16 @@ VND_CRDEV=	/dev/r${VND}c
 PID!=		echo $$$$
 REALIMAGE!=	echo /var/tmp/image.${PID}
 BOOT=		${DESTDIR}/usr/mdec/boot
-FLOPPYSIZE?=	144
+FLOPPYSIZE?=	2880
 FLOPPYTYPE?=	floppy3
 
 all:	${FS}
 
 ${FS}:	bsd.gz
-	dd if=/dev/zero of=${REALIMAGE} bs=10k count=${FLOPPYSIZE}
+	dd if=/dev/zero of=${REALIMAGE} bs=512 count=${FLOPPYSIZE}
 	vnconfig -v -c ${VND} ${REALIMAGE}
-	disklabel -w -r ${VND} ${FLOPPYTYPE}
-	newfs -m 0 -o space -i 524288 -c 80 ${VND_RDEV}
+	disklabel -w ${VND} ${FLOPPYTYPE}
+	newfs -m 0 -o space -i 524288 -c ${FLOPPYSIZE} ${VND_RDEV}
 	mount ${VND_DEV} ${MOUNT_POINT}
 	cp ${BOOT} ${.OBJDIR}/boot
 	strip ${.OBJDIR}/boot
@@ -48,15 +48,15 @@ ${FS}:	bsd.gz
 	rm ${REALIMAGE}
 
 DISKTYPE?=       rdroot
-NBLKS?=          3584
+NBLKS?=          4480
 # minfree, opt, b/i  trks, sects, cpg
-NEWFSARGS= -m 0 -o space -c 16 -i 4096
+NEWFSARGS= -m 0 -o space -i 4096
 
 bsd.gz: bsd.rd
 	cp bsd.rd bsd.strip
 	strip bsd.strip
 	strip -R .comment bsd.strip
-	gzip -c9 bsd.strip > bsd.gz
+	gzip -c9n bsd.strip > bsd.gz
 
 bsd.rd:	${IMAGE} bsd rdsetroot
 	cp bsd bsd.rd
@@ -74,7 +74,7 @@ ${IMAGE}: ${CBIN} rd_setup do_files rd_teardown
 rd_setup: ${CBIN}
 	dd if=/dev/zero of=${REALIMAGE} bs=512 count=${NBLKS}
 	vnconfig -v -c ${VND} ${REALIMAGE}
-	disklabel -w -r ${VND} ${DISKTYPE}
+	disklabel -w ${VND} ${DISKTYPE}
 	newfs ${NEWFSARGS} ${VND_RDEV}
 	fsck ${VND_RDEV}
 	mount ${VND_DEV} ${MOUNT_POINT}
@@ -99,7 +99,9 @@ install:
 .ifndef NOBSDRD
 	cp bsd.rd ${DESTDIR}/snapshot/bsd.rd
 .endif
+.ifndef NOFS
 	cp ${FS} ${DESTDIR}/snapshot/${FS}
+.endif
 
 ${CBIN}.mk ${CBIN}.cache ${CBIN}.c: ${CRUNCHCONF}
 	crunchgen -E -D ${BSDSRCDIR} -L ${DESTDIR}/usr/lib \

@@ -1,4 +1,4 @@
-.\"	$OpenBSD: ifconfig.8,v 1.139 2006/12/20 09:49:05 jmc Exp $
+.\"	$OpenBSD: ifconfig.8,v 1.148 2007/07/31 06:41:04 pyr Exp $
 .\"	$NetBSD: ifconfig.8,v 1.11 1996/01/04 21:27:29 pk Exp $
 .\"     $FreeBSD: ifconfig.8,v 1.16 1998/02/01 07:03:29 steve Exp $
 .\"
@@ -31,7 +31,7 @@
 .\"
 .\"     @(#)ifconfig.8	8.4 (Berkeley) 6/1/94
 .\"
-.Dd September 3, 1998
+.Dd $Mdocdate: July 31 2007 $
 .Dt IFCONFIG 8
 .Os
 .Sh NAME
@@ -121,50 +121,19 @@ The address or protocol families currently
 supported are
 .Dq inet ,
 .Dq inet6 ,
-.Dq atalk ,
 and
-.Dq ipx .
+.Dq atalk .
 .It Ar address
-For the
-.Tn DARPA
-Internet
-family,
-the address is either a host name present in the host name database,
-.Xr hosts 5 ,
-or a
-.Tn DARPA
-Internet address expressed in the Internet standard
-.Dq dot notation .
+Internet version 4 and 6 addresses
+take the form of
+a host name present in the host name database,
+.Xr hosts 5 ;
+.Dq dot
+notation (IPv4);
+colon separated (IPv6);
+or CIDR notation.
 .Pp
-Internet version 6 addresses are either a host name present
-in the host name database,
-.Xr hosts 5 ,
-or an Internet version 6 address in standard colon separated form, as
-described in the
-.Xr inet 3
-manual page.
-.Pp
-For the Xerox Network Systems(tm) and Internetwork Packet Exchange families,
-addresses are of the form
-.Dq net:a.b.c.d.e.f ,
-where
-.Dq net
-is the assigned network number (in decimal),
-and each of the six bytes of the host number,
-.Dq a
-through
-.Dq f ,
-are specified in hexadecimal.
-The host number may be omitted on Ethernet interfaces,
-which use the hardware physical address,
-and on interfaces other than the first.
-.Tn IPX
-addresses are specified as listed in the
-.Xr ipx 3
-manual page.
-.Pp
-.Tn AppleTalk
-(LLAP) addresses are specified as
+AppleTalk (LLAP) addresses are specified as
 .Dq nn.na
 .Pq Dq Network Number.Node Address .
 Node addresses are divided into two classes: User Node IDs and Server Node IDs.
@@ -183,13 +152,6 @@ The following
 may be set with
 .Nm :
 .Bl -tag -width dest_addressxx
-.It Xo
-.Cm 802.2 \*(Ba 802.2tr \*(Ba 802.3 \*(Ba
-.Cm snap \*(Ba EtherII
-.Xc
-Set the
-.Xr ipx 3
-frame type to be either 802.2, 802.2tr, 802.3, snap, or Ethernet II.
 .It Cm alias
 Establish an additional network address for this interface.
 This is sometimes useful when changing network numbers, and
@@ -204,9 +166,7 @@ Enable the use of the Address Resolution Protocol (ARP)
 in mapping
 between network level addresses and link level addresses (default).
 This is currently implemented for mapping between
-.Tn DARPA
-Internet
-addresses and Ethernet addresses.
+DARPA Internet addresses and Ethernet addresses.
 .It Fl arp
 Disable the use of ARP.
 .It Cm broadcast Ar addr
@@ -298,7 +258,7 @@ by the network interface driver as the driver may take care of this
 automatically; see the driver's manual page for more information.
 .It Cm ipdst Ar addr
 This is used to specify an Internet host which is willing to receive
-IP packets encapsulating IPX or AppleTalk packets bound for a remote network.
+IP packets encapsulating AppleTalk packets bound for a remote network.
 An apparent point-to-point link is constructed, and
 the address specified will be taken as the address and network
 of the destination.
@@ -324,8 +284,7 @@ Set the media type of the interface to
 Some interfaces support the mutually exclusive use of one of several
 different physical media connectors.
 For example, a 10Mb/s Ethernet interface might support the use of either
-.Tn AUI
-or twisted pair connectors.
+AUI or twisted pair connectors.
 Setting the media type to
 .Dq 10base5
 or
@@ -419,6 +378,19 @@ AppleTalk uses this scheme instead of
 netmasks though
 .Ox
 implements it internally as a set of netmasks.
+.It Cm rtlabel Ar route-label
+(inet)
+Attach
+.Ar route-label
+to new network routes of the specified interface.
+Route labels can be used to implement policy routing;
+see
+.Xr route 4 ,
+.Xr route 8 ,
+and
+.Xr pf.conf 5 .
+.It Cm -rtlabel
+Clear the route label.
 .It Cm timeslot Ar timeslot_range
 Set the timeslot range map, which is used to control which channels
 an interface device uses.
@@ -947,11 +919,7 @@ to
 .Ar vlan_tag .
 This value is a 12-bit number which is used to create an 802.1Q
 vlan header for packets sent from the vlan interface.
-Note that
-.Cm vlan
-and
-.Cm vlandev
-must both be set at the same time.
+This value cannot be changed once it is set for an interface.
 .It Cm vlandev Ar parent-interface
 If the interface is a
 .Xr vlan 4
@@ -967,10 +935,14 @@ by the parent interface with the correct vlan tag will be diverted to
 the associated vlan pseudo-interface.
 The vlan interface is assigned a
 copy of the parent interface's flags and the parent's Ethernet address.
+If
 .Cm vlandev
 and
 .Cm vlan
-must both be set at the same time.
+are not set at the same time, the vlan tag will be inferred from
+the interface name, for instance
+.Cm vlan5
+will be assigned 802.1Q tag 5.
 If the vlan interface already has
 a physical interface associated with it, this command will fail.
 To change the association to another physical interface, the existing

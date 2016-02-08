@@ -1,4 +1,4 @@
-/*	$OpenBSD: msdosfs_denode.c,v 1.28 2006/01/09 12:43:16 pedro Exp $	*/
+/*	$OpenBSD: msdosfs_denode.c,v 1.32 2007/06/02 02:04:21 deraadt Exp $	*/
 /*	$NetBSD: msdosfs_denode.c,v 1.23 1997/10/17 11:23:58 ws Exp $	*/
 
 /*-
@@ -105,8 +105,7 @@ msdosfs_hashget(dev, dirclust, diroff)
 			    dep->de_refcnt != 0) {
 				struct vnode *vp = DETOV(dep);
 
-				simple_lock(&vp->v_interlock);
-				if (!vget(vp, LK_EXCLUSIVE  | LK_INTERLOCK, p))
+				if (!vget(vp, LK_EXCLUSIVE, p))
 					return (dep);
 				break;
 			}
@@ -384,7 +383,7 @@ detrunc(dep, length, flags, cred, p)
 	int vflags;
 	uint32_t eofentry;
 	uint32_t chaintofree;
-	daddr_t bn;
+	daddr64_t bn;
 	int boff;
 	int isadir = dep->de_Attributes & ATTR_DIRECTORY;
 	struct buf *bp;
@@ -588,9 +587,7 @@ int
 msdosfs_reclaim(v)
 	void *v;
 {
-	struct vop_reclaim_args /* {
-		struct vnode *a_vp;
-	} */ *ap = v;
+	struct vop_reclaim_args *ap = v;
 	struct vnode *vp = ap->a_vp;
 	struct denode *dep = VTODE(vp);
 #ifdef DIAGNOSTIC
@@ -629,10 +626,7 @@ int
 msdosfs_inactive(v)
 	void *v;
 {
-	struct vop_inactive_args /* {
-		struct vnode *a_vp;
-		struct proc *a_p;
-	} */ *ap = v;
+	struct vop_inactive_args *ap = v;
 	struct vnode *vp = ap->a_vp;
 	struct denode *dep = VTODE(vp);
 	struct proc *p = ap->a_p;
@@ -682,6 +676,6 @@ out:
 	       dep->de_Name[0]);
 #endif
 	if (dep->de_Name[0] == SLOT_DELETED)
-		vrecycle(vp, (struct simplelock *)0, p);
+		vrecycle(vp, p);
 	return (error);
 }

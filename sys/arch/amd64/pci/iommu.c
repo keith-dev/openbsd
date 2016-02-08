@@ -1,4 +1,4 @@
-/*	$OpenBSD: iommu.c,v 1.18 2007/02/09 04:48:10 jason Exp $	*/
+/*	$OpenBSD: iommu.c,v 1.20 2007/05/27 21:44:23 jason Exp $	*/
 
 /*
  * Copyright (c) 2005 Jason L. Wright (jason@thought.net)
@@ -24,11 +24,6 @@
  * STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
  * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
- */
-
-/*
- * TODO:
- *	- map the PTE uncacheable and disable table walk probes
  */
 
 #include <sys/types.h>
@@ -201,6 +196,7 @@ amdgart_invalidate(void)
 		pci_conf_write(amdgart_softcs[n].g_pc,
 		    amdgart_softcs[n].g_tag, GART_CACHECTRL,
 		    GART_CACHE_INVALIDATE);
+	amdgart_invalidate_wait();
 }
 
 void
@@ -296,7 +292,7 @@ amdgart_probe(struct pcibus_attach_args *pba)
 		goto err;
 	}
 	ptepa = VM_PAGE_TO_PHYS(TAILQ_FIRST(&plist));
-	pte = (u_int32_t *)pmap_map_direct(TAILQ_FIRST(&plist));
+	pte = (u_int32_t *)pmap_map_nc_direct(TAILQ_FIRST(&plist));
 
 	ex = extent_create("iommu", dvabase, dvabase + mapsize - 1, M_DEVBUF,
 	    NULL, NULL, EX_NOWAIT | EX_NOCOALESCE);
@@ -359,7 +355,7 @@ amdgart_probe(struct pcibus_attach_args *pba)
 
 			v = pci_conf_read(pba->pba_pc, tag, GART_APCTRL);
 			v |= GART_APCTRL_ENABLE;
-			v &= ~(GART_APCTRL_DISIO | GART_APCTRL_DISTBL);
+			v &= ~GART_APCTRL_DISIO;
 			pci_conf_write(pba->pba_pc, tag, GART_APCTRL, v);
 
 			amdgart_softcs[count].g_pc = pba->pba_pc;
@@ -411,7 +407,6 @@ amdgart_initpt(struct amdgart_softc *sc, u_long nent)
 	for (i = 0; i < nent; i++)
 		sc->g_pte[i] = sc->g_scribpte;
 	amdgart_invalidate();
-	amdgart_invalidate_wait();
 }
 
 int
@@ -594,7 +589,7 @@ amdgart_dmamap_unload(bus_dma_tag_t tag, bus_dmamap_t dmam)
 
 	for (i = 0; i < dmam->dm_nsegs; i++)
 		amdgart_iommu_unmap(amdgart_softcs[0].g_ex, &dmam->dm_segs[i]);
-	/* XXX should we invalidate here? */
+	amdgart_invalidate();
 	bus_dmamap_unload(amdgart_softcs[0].g_dmat, dmam);
 }
 
@@ -602,19 +597,10 @@ void
 amdgart_dmamap_sync(bus_dma_tag_t tag, bus_dmamap_t dmam, bus_addr_t offset,
     bus_size_t size, int ops)
 {
-	if (ops & (BUS_DMASYNC_PREREAD | BUS_DMASYNC_PREWRITE)) {
-		/*
-		 * XXX this should be conditionalized... only do it
-		 * XXX when necessary.
-		 */
-		amdgart_invalidate_wait();
-	}
-
 	/*
 	 * XXX how do we deal with non-coherent mappings?  We don't
 	 * XXX allow them right now.
 	 */
-
 	bus_dmamap_sync(amdgart_softcs[0].g_dmat, dmam, offset, size, ops);
 }
 

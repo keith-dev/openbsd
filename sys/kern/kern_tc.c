@@ -6,7 +6,7 @@
  * this stuff is worth it, you can buy me a beer in return.   Poul-Henning Kamp
  * ----------------------------------------------------------------------------
  *
- * $OpenBSD: kern_tc.c,v 1.7 2006/11/15 17:25:40 jmc Exp $
+ * $OpenBSD: kern_tc.c,v 1.9 2007/05/09 17:42:19 deraadt Exp $
  * $FreeBSD: src/sys/kern/kern_tc.c,v 1.148 2003/03/18 08:45:23 phk Exp $
  */
 
@@ -179,19 +179,6 @@ microtime(struct timeval *tvp)
 }
 
 void
-getbinuptime(struct bintime *bt)
-{
-	struct timehands *th;
-	u_int gen;
-
-	do {
-		th = timehands;
-		gen = th->th_generation;
-		*bt = th->th_offset;
-	} while (gen == 0 || gen != th->th_generation);
-}
-
-void
 getnanouptime(struct timespec *tsp)
 {
 	struct timehands *th;
@@ -215,20 +202,6 @@ getmicrouptime(struct timeval *tvp)
 		gen = th->th_generation;
 		bintime2timeval(&th->th_offset, tvp);
 	} while (gen == 0 || gen != th->th_generation);
-}
-
-void
-getbintime(struct bintime *bt)
-{
-	struct timehands *th;
-	u_int gen;
-
-	do {
-		th = timehands;
-		gen = th->th_generation;
-		*bt = th->th_offset;
-	} while (gen == 0 || gen != th->th_generation);
-	bintime_add(bt, &boottimebin);
 }
 
 void
@@ -326,6 +299,7 @@ tc_setclock(struct timespec *ts)
 	/* XXX fiddle all the little crinkly bits around the fiords... */
 	tc_windup();
 	if (timestepwarnings) {
+		bintime2timespec(&bt2, &ts2);
 		log(LOG_INFO, "Time stepped from %ld.%09ld to %ld.%09ld\n",
 		    (long)ts2.tv_sec, ts2.tv_nsec,
 		    (long)ts->tv_sec, ts->tv_nsec);

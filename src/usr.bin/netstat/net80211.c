@@ -1,4 +1,4 @@
-/*	$OpenBSD: net80211.c,v 1.3 2005/12/18 17:53:12 reyk Exp $	*/
+/*	$OpenBSD: net80211.c,v 1.5 2007/08/14 20:33:47 bluhm Exp $	*/
 
 /*
  * Copyright (c) 2005 Reyk Floeter <reyk@openbsd.org>
@@ -32,6 +32,7 @@
 #include <net80211/ieee80211.h>
 #include <net80211/ieee80211_ioctl.h>
 
+#include <err.h>
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
@@ -67,7 +68,8 @@ net80211_ifstats(char *ifname)
 	p(is_rx_wrongdir, "\t%lu input packet%s with wrong direction\n");
 	p(is_rx_mcastecho, "\t%lu input multicast echo packet%s discarded\n");
 	p(is_rx_notassoc, "\t%lu input packet%s from unassociated station discarded\n");
-	p(is_rx_nowep, "\t%lu input wep packet%s without wep discarded\n");
+	p(is_rx_nowep, "\t%lu input encrypted packet%s without wep config discarded\n");
+	p(is_rx_unencrypted, "\t%lu input unencrypted packet%s with wep config discarded\n");
 	p(is_rx_wepfail, "\t%lu input wep packet%s processing failed\n");
 	p(is_rx_decap, "\t%lu input packet decapsulation%s failed\n");
 	p(is_rx_mgtdiscard, "\t%lu input management packet%s discarded\n");
@@ -102,7 +104,6 @@ net80211_ifstats(char *ifname)
 	p(is_node_timeout, "\t%lu node%s timed out\n");
 	p(is_crypto_nomem, "\t%lu failure%s with no memory for crypto ctx\n");
 
-  end:
 	close(s);
 
 #undef p

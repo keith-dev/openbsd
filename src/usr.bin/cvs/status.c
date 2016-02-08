@@ -1,4 +1,4 @@
-/*	$OpenBSD: status.c,v 1.73 2007/02/22 06:42:09 otto Exp $	*/
+/*	$OpenBSD: status.c,v 1.76 2007/07/03 12:29:52 xsa Exp $	*/
 /*
  * Copyright (c) 2006 Joris Vink <joris@openbsd.org>
  * Copyright (c) 2005, 2006 Xavier Santolaria <xsa@openbsd.org>
@@ -119,7 +119,7 @@ cvs_status_local(struct cvs_file *cf)
 	size_t len;
 	RCSNUM *head;
 	const char *status;
-	char buf[128], timebuf[32], revbuf[32];
+	char buf[128], timebuf[CVS_TIME_BUFSZ], revbuf[CVS_REV_BUFSZ];
 	struct rcs_sym *sym;
 
 	cvs_log(LP_TRACE, "cvs_status_local(%s)", cf->file_path);
@@ -141,7 +141,7 @@ cvs_status_local(struct cvs_file *cf)
 
 	if (cf->file_status == FILE_LOST ||
 	    cf->file_status == FILE_UNKNOWN ||
-	    (cf->file_rcs != NULL && cf->file_rcs->rf_inattic == 1)) {
+	    (cf->file_rcs != NULL && cf->in_attic == 1)) {
 		(void)xsnprintf(buf, sizeof(buf), "no file %s\t",
 		    cf->file_name);
 	} else
@@ -171,7 +171,11 @@ cvs_status_local(struct cvs_file *cf)
 				fatal("cvs_status_local: truncation");
 		}
 
-		(void)xsnprintf(buf, sizeof(buf), "%s\t%s", revbuf, timebuf);
+		(void)strlcpy(buf, revbuf, sizeof(buf));
+		if (cvs_server_active == 0) {
+			(void)strlcat(buf, "\t", sizeof(buf));
+			(void)strlcat(buf, timebuf, sizeof(buf));
+		}
 	}
 
 	cvs_printf("   Working revision:\t%s\n", buf);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: intr.c,v 1.23 2005/04/26 18:54:39 miod Exp $	*/
+/*	$OpenBSD: intr.c,v 1.26 2007/05/29 18:10:43 miod Exp $	*/
 /*	$NetBSD: intr.c,v 1.39 2001/07/19 23:38:11 eeh Exp $ */
 
 /*
@@ -50,6 +50,7 @@
 
 #include <net/netisr.h>
 
+#include <machine/atomic.h>
 #include <machine/cpu.h>
 #include <machine/ctlreg.h>
 #include <machine/instr.h>
@@ -105,12 +106,12 @@ strayintr(fp, vectored)
 	    (unsigned long long)fp->tf_npc, fp->tf_tstate>>TSTATE_PSTATE_SHIFT,
 	    PSTATE_BITS, vectored);
 
-	timesince = time.tv_sec - straytime;
+	timesince = time_second - straytime;
 	if (timesince <= 10) {
 		if (++nstray > 500)
 			panic("crazy interrupts");
 	} else {
-		straytime = time.tv_sec;
+		straytime = time_second;
 		nstray = 1;
 	}
 #ifdef DDB
@@ -119,7 +120,7 @@ strayintr(fp, vectored)
 }
 
 /*
- * Level 1 software interrupt (could also be Sbus level 1 interrupt).
+ * Level 1 software interrupt (could also be SBus level 1 interrupt).
  * Three possible reasons:
  *	Network software interrupt
  *	Soft clock interrupt
@@ -131,19 +132,21 @@ int
 softnet(fp)
 	void *fp;
 {
-	int n, s;
+	int n;
 	
-	s = splhigh();
-	n = netisr;
-	netisr = 0;
-	splx(s);
+	while ((n = netisr) != 0) {
+		atomic_clearbits_int(&netisr, n);
 	
-#define DONETISR(bit, fn) do {		\
-	if (n & (1 << bit))		\
-		fn();			\
-} while (0)
+#define DONETISR(bit, fn)						\
+		do {							\
+			if (n & (1 << bit))				\
+				fn();					\
+		} while (0)
+
 #include <net/netisr_dispatch.h>
+
 #undef DONETISR
+	}
 	return (1);
 }
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: pcb.h,v 1.5 2005/03/29 19:34:07 kettenis Exp $	*/
+/*	$OpenBSD: pcb.h,v 1.7 2007/05/26 00:36:03 krw Exp $	*/
 /*	$NetBSD: pcb.h,v 1.7 2000/12/29 17:12:05 eeh Exp $ */
 
 /*
@@ -133,7 +133,7 @@ struct pcb {
 
 	/* The rest is probably not needed except for pcb_rw */
 	char	pcb_cwp;	/* %cwp when switch() was called */
-	char	pcb_pil;	/* %pil when switch() was called -- prolly not needed */
+	char	pcb_pil;	/* %pil when switch() was called -- probably not needed */
 
 	const char *lastcall;	/* DEBUG -- name of last system call */
 	u_int64_t	pcb_wcookie;
@@ -154,9 +154,7 @@ struct md_coredump {
 	u_int64_t md_wcookie;
 };
 
-#ifdef _KERNEL
-extern struct pcb *cpcb;
-#else
+#ifndef _KERNEL
 /* Let gdb compile.  We need fancier macros to make these make sense. */
 #define pcb_psr	pcb_pstate
 #define pcb_wim	pcb_cwp

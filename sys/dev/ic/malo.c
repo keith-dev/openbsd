@@ -1,4 +1,4 @@
-/*	$OpenBSD: malo.c,v 1.63 2007/02/14 20:52:26 mglocker Exp $ */
+/*	$OpenBSD: malo.c,v 1.72 2007/07/18 18:10:31 damien Exp $ */
 
 /*
  * Copyright (c) 2006 Claudio Jeker <claudio@openbsd.org>
@@ -287,14 +287,16 @@ int	malo_load_firmware(struct malo_softc *sc);
 int	malo_set_wepkey(struct malo_softc *sc);
 int	malo_set_slot(struct malo_softc *sc);
 void	malo_update_slot(struct ieee80211com *ic);
+#ifdef MALO_DEBUG
 void	malo_hexdump(void *buf, int len);
+#endif
 static char *
 	malo_cmd_string(uint16_t cmd);
 static char *
 	malo_cmd_string_result(uint16_t result);
 int	malo_cmd_get_spec(struct malo_softc *sc);
-int	malo_cmd_set_wepkey(struct malo_softc *sc, struct ieee80211_wepkey *wk,
-	    uint16_t wk_i);
+int	malo_cmd_set_wepkey(struct malo_softc *sc, struct ieee80211_key *k,
+	    uint16_t k_index);
 int	malo_cmd_set_prescan(struct malo_softc *sc);
 int	malo_cmd_set_postscan(struct malo_softc *sc, uint8_t *macaddr,
 	    uint8_t ibsson);
@@ -878,8 +880,6 @@ malo_init(struct ifnet *ifp)
 	if (sc->sc_enable)
 		sc->sc_enable(sc);
 
-	/* ???, what is this for, seems unnecessary */
-	/* malo_ctl_write4(sc, 0x0c38, 0x1f); */
 	/* disable interrupts */
 	malo_ctl_read4(sc, 0x0c30);
 	malo_ctl_write4(sc, 0x0c30, 0);
@@ -974,6 +974,7 @@ malo_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	struct ifaddr *ifa;
 	struct ifreq *ifr;
 	int s, error = 0;
+	uint8_t chan;
 
 	s = splnet();
 
@@ -1004,6 +1005,21 @@ malo_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 
 		if (error == ENETRESET)
 			error = 0;
+		break;
+	case SIOCS80211CHANNEL:
+		/* allow fast channel switching in monitor mode */
+		error = ieee80211_ioctl(ifp, cmd, data);
+		if (error == ENETRESET &&
+		    ic->ic_opmode == IEEE80211_M_MONITOR) {
+			if ((ifp->if_flags & (IFF_UP | IFF_RUNNING)) ==
+			    (IFF_UP | IFF_RUNNING)) {
+				ic->ic_bss->ni_chan = ic->ic_ibss_chan;
+				chan = ieee80211_chan2ieee(ic,
+				    ic->ic_bss->ni_chan);
+				malo_cmd_set_channel(sc, chan);
+			}
+			error = 0;
+		}
 		break;
 	default:
 		error = ieee80211_ioctl(ifp, cmd, data);
@@ -1128,7 +1144,7 @@ malo_newstate(struct ieee80211com *ic, enum ieee80211_state nstate, int arg)
 	uint8_t chan;
 	int rate;
 
-	DPRINTF(("%s: %s\n", sc->sc_dev.dv_xname, __func__));
+	DPRINTFN(2, ("%s: %s\n", sc->sc_dev.dv_xname, __func__));
 
 	ostate = ic->ic_state;
 	timeout_del(&sc->sc_scan_to);
@@ -1773,12 +1789,19 @@ skip:
 	}
 
 	malo_mem_write4(sc, sc->sc_RxPdRdPtr, rxRdPtr);
+
+	/*
+	 * In HostAP mode, ieee80211_input() will enqueue packets in if_snd
+	 * without calling if_start().
+	 */
+	if (!IFQ_IS_EMPTY(&ifp->if_snd) && !(ifp->if_flags & IFF_OACTIVE))
+		(*ifp->if_start)(ifp);
 }
 
 int
 malo_load_bootimg(struct malo_softc *sc)
 {
-	char *name = "mrv8k-b.fw";
+	char *name = "malo8335-h";
 	uint8_t	*ucode;
 	size_t size;
 	int error, i;
@@ -1840,7 +1863,7 @@ int
 malo_load_firmware(struct malo_softc *sc)
 {
 	struct malo_cmdheader *hdr;
-	char *name = "mrv8k-f.fw";
+	char *name = "malo8335-m";
 	void *data;
 	uint8_t *ucode;
 	size_t size, count, bsize;
@@ -1873,7 +1896,7 @@ malo_load_firmware(struct malo_softc *sc)
 		malo_send_cmd(sc, sc->sc_cmd_dmaaddr);
 		bus_dmamap_sync(sc->sc_dmat, sc->sc_cmd_dmam, 0, PAGE_SIZE,
 		    BUS_DMASYNC_POSTWRITE);
-		delay(100);
+		delay(500);
 	}
 	free(ucode, M_DEVBUF);
 
@@ -1923,12 +1946,12 @@ malo_set_wepkey(struct malo_softc *sc)
 	int i;
 
 	for (i = 0; i < IEEE80211_WEP_NKID; i++) {
-		struct ieee80211_wepkey *wk = &ic->ic_nw_keys[i];
+		struct ieee80211_key *k = &ic->ic_nw_keys[i];
 
-		if (wk->wk_len == 0)
+		if (k->k_len == 0)
 			continue;
 
-		if (malo_cmd_set_wepkey(sc, wk, i))
+		if (malo_cmd_set_wepkey(sc, k, i))
 			return (ENXIO);
 	}
 
@@ -1971,20 +1994,39 @@ malo_update_slot(struct ieee80211com *ic)
 	}
 }
 
+#ifdef MALO_DEBUG
 void
 malo_hexdump(void *buf, int len)
 {
-	int i;
+	u_char b[16];
+	int i, j, l;
 
-	for (i = 0; i < len; i++) {
-		if (i % 16 == 0)
-			printf("%s%4i:", i ? "\n" : "", i);
-		if (i % 4 == 0)
-			printf(" ");
-		printf("%02x", (int)*((u_char *)buf + i));
+	for (i = 0; i < len; i += l) {
+		printf("%4i:", i);
+		l = min(sizeof(b), len - i);
+		bcopy(buf + i, b, l);
+		
+		for (j = 0; j < sizeof(b); j++) {
+			if (j % 2 == 0)
+				printf(" ");
+			if (j % 8 == 0)
+				printf(" ");
+			if (j < l)
+				printf("%02x", (int)b[j]);
+			else
+				printf("  ");
+		}
+		printf("  |");
+		for (j = 0; j < l; j++) {
+			if (b[j] >= 0x20 && b[j] <= 0x7e)
+				printf("%c", b[j]);
+			else
+				printf(".");
+		}
+		printf("|\n");
 	}
-	printf("\n");
 }
+#endif
 
 static char *
 malo_cmd_string(uint16_t cmd)
@@ -2081,8 +2123,8 @@ malo_cmd_get_spec(struct malo_softc *sc)
 }
 
 int
-malo_cmd_set_wepkey(struct malo_softc *sc, struct ieee80211_wepkey *wk,
-    uint16_t wk_index)
+malo_cmd_set_wepkey(struct malo_softc *sc, struct ieee80211_key *k,
+    uint16_t k_index)
 {
 	struct malo_cmdheader *hdr = sc->sc_cmd_mem;
 	struct malo_cmd_wepkey *body;
@@ -2096,9 +2138,9 @@ malo_cmd_set_wepkey(struct malo_softc *sc, struct ieee80211_wepkey *wk,
 	bzero(body, sizeof(*body));
 	body->action = htole16(1);
 	body->flags = 0;
-	body->index = wk_index;
-	body->len = wk->wk_len;
-	memcpy(body->value, wk->wk_key, wk->wk_len);
+	body->index = k_index;
+	body->len = k->k_len;
+	memcpy(body->value, k->k_key, k->k_len);
 
 	bus_dmamap_sync(sc->sc_dmat, sc->sc_cmd_dmam, 0, PAGE_SIZE,
 	    BUS_DMASYNC_PREWRITE | BUS_DMASYNC_PREREAD);

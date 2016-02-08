@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_msk.c,v 1.50 2007/02/26 04:00:25 todd Exp $	*/
+/*	$OpenBSD: if_msk.c,v 1.56 2007/06/27 19:15:47 kettenis Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998, 1999, 2000
@@ -141,7 +141,7 @@ void msk_reset(struct sk_if_softc *);
 int mskcprint(void *, const char *);
 int msk_intr(void *);
 void msk_intr_yukon(struct sk_if_softc *);
-__inline int msk_rxvalid(struct sk_softc *, u_int32_t, u_int32_t);
+static __inline int msk_rxvalid(struct sk_softc *, u_int32_t, u_int32_t);
 void msk_rxeof(struct sk_if_softc *, u_int16_t, u_int32_t);
 void msk_txeof(struct sk_if_softc *);
 int msk_encap(struct sk_if_softc *, struct mbuf *, u_int32_t *);
@@ -990,7 +990,7 @@ msk_attach(struct device *parent, struct device *self, void *aux)
 	caddr_t kva;
 	bus_dma_segment_t seg;
 	int i, rseg;
-	u_int32_t chunk, val;
+	u_int32_t chunk;
 	int mii_flags;
 
 	sc_if->sk_port = sa->skc_port;
@@ -1012,29 +1012,22 @@ msk_attach(struct device *parent, struct device *self, void *aux)
 		sc_if->arpcom.ac_enaddr[i] =
 		    sk_win_read_1(sc, SK_MAC0_0 + (sa->skc_port * 8) + i);
 
-	printf(", address %s\n",
+	printf(": address %s\n",
 	    ether_sprintf(sc_if->arpcom.ac_enaddr));
 
 	/*
-	 * Set up RAM buffer addresses. The NIC will have a certain
-	 * amount of SRAM on it, somewhere between 512K and 2MB. We
-	 * need to divide this up a) between the transmitter and
- 	 * receiver and b) between the two XMACs, if this is a
-	 * dual port NIC. Our algorithm is to divide up the memory
-	 * evenly so that everyone gets a fair share.
-	 *
-	 * Just to be contrary, Yukon2 appears to have separate memory
-	 * for each MAC.
+	 * Set up RAM buffer addresses. The Yukon2 has a small amount
+	 * of SRAM on it, somewhere between 4K and 48K.  We need to
+	 * divide this up between the transmitter and receiver.  We
+	 * give the receiver 2/3 of the memory (rounded down), and the
+	 * transmitter whatever remains.
 	 */
-	chunk = sc->sk_ramsize  - (sc->sk_ramsize + 2) / 3;
-	val = sc->sk_rboff / sizeof(u_int64_t);
-	sc_if->sk_rx_ramstart = val;
-	val += (chunk / sizeof(u_int64_t));
-	sc_if->sk_rx_ramend = val - 1;
-	chunk = sc->sk_ramsize - chunk;
-	sc_if->sk_tx_ramstart = val;
-	val += (chunk / sizeof(u_int64_t));
-	sc_if->sk_tx_ramend = val - 1;
+	chunk = (2 * (sc->sk_ramsize / sizeof(u_int64_t)) / 3) & ~0xff;
+	sc_if->sk_rx_ramstart = 0;
+	sc_if->sk_rx_ramend = sc_if->sk_rx_ramstart + chunk - 1;
+	chunk = (sc->sk_ramsize / sizeof(u_int64_t)) - chunk;
+	sc_if->sk_tx_ramstart = sc_if->sk_rx_ramend + 1;
+	sc_if->sk_tx_ramend = sc_if->sk_tx_ramstart + chunk - 1;
 
 	DPRINTFN(2, ("msk_attach: rx_ramstart=%#x rx_ramend=%#x\n"
 		     "           tx_ramstart=%#x tx_ramend=%#x\n",
@@ -1049,8 +1042,8 @@ msk_attach(struct device *parent, struct device *self, void *aux)
 	}
 	if (bus_dmamem_map(sc->sc_dmatag, &seg, rseg,
 	    sizeof(struct msk_ring_data), &kva, BUS_DMA_NOWAIT)) {
-		printf(": can't map dma buffers (%z bytes)\n",
-		       sizeof(struct msk_ring_data));
+		printf(": can't map dma buffers (%lu bytes)\n",
+		       (ulong)sizeof(struct msk_ring_data));
 		goto fail_1;
 	}
 	if (bus_dmamap_create(sc->sc_dmatag, sizeof(struct msk_ring_data), 1,
@@ -1107,7 +1100,7 @@ msk_attach(struct device *parent, struct device *self, void *aux)
 	mii_flags = MIIF_DOPAUSE;
 	if (sc->sk_fibertype)
 		mii_flags |= MIIF_HAVEFIBER;
-	mii_attach(self, &sc_if->sk_mii, 0xffffffff, MII_PHY_ANY,
+	mii_attach(self, &sc_if->sk_mii, 0xffffffff, 0,
 	    MII_OFFSET_ANY, mii_flags);
 	if (LIST_FIRST(&sc_if->sk_mii.mii_phys) == NULL) {
 		printf("%s: no PHY found!\n", sc_if->sk_dev.dv_xname);
@@ -1168,7 +1161,7 @@ mskc_attach(struct device *parent, struct device *self, void *aux)
 	pci_intr_handle_t ih;
 	const char *intrstr = NULL;
 	bus_size_t size;
-	u_int8_t hw, pmd, skrs;
+	u_int8_t hw, pmd;
 	char *revstr = NULL;
 	caddr_t kva;
 	bus_dma_segment_t seg;
@@ -1262,8 +1255,8 @@ mskc_attach(struct device *parent, struct device *self, void *aux)
 	if (bus_dmamem_map(sc->sc_dmatag, &seg, rseg,
 	    MSK_STATUS_RING_CNT * sizeof(struct msk_status_desc),
 	    &kva, BUS_DMA_NOWAIT)) {
-		printf(": can't map dma buffers (%z bytes)\n",
-		    MSK_STATUS_RING_CNT * sizeof(struct msk_status_desc));
+		printf(": can't map dma buffers (%lu bytes)\n",
+		    (ulong)(MSK_STATUS_RING_CNT * sizeof(struct msk_status_desc)));
 		goto fail_3;
 	}
 	if (bus_dmamap_create(sc->sc_dmatag,
@@ -1286,16 +1279,8 @@ mskc_attach(struct device *parent, struct device *self, void *aux)
 	/* Reset the adapter. */
 	mskc_reset(sc);
 
-	skrs = sk_win_read_1(sc, SK_EPROM0);
-	if (skrs == 0x00)
-		sc->sk_ramsize = 0x20000;
-	else
-		sc->sk_ramsize = skrs * (1<<12);
-	sc->sk_rboff = SK_RBOFF_0;
-
-	DPRINTFN(2, ("mskc_attach: ramsize=%d (%dk), rboff=%d\n",
-		     sc->sk_ramsize, sc->sk_ramsize / 1024,
-		     sc->sk_rboff));
+	sc->sk_ramsize = sk_win_read_1(sc, SK_EPROM0) * 4096;
+	DPRINTFN(2, ("mskc_attach: ramsize=%dK\n", sc->sk_ramsize / 1024));
 
 	pmd = sk_win_read_1(sc, SK_PMDTYPE);
 	if (pmd == 'L' || pmd == 'S' || pmd == 'P')
@@ -1602,7 +1587,7 @@ mskc_shutdown(void *v)
 	mskc_reset(sc);
 }
 
-__inline int
+static __inline int
 msk_rxvalid(struct sk_softc *sc, u_int32_t stat, u_int32_t len)
 {
 	if ((stat & (YU_RXSTAT_CRCERR | YU_RXSTAT_LONGERR |
@@ -1747,8 +1732,11 @@ msk_tick(void *xsc_if)
 {
 	struct sk_if_softc *sc_if = xsc_if;  
 	struct mii_data *mii = &sc_if->sk_mii;
+	int s;
 
+	s = splnet();
 	mii_tick(mii);
+	splx(s);
 	timeout_add(&sc_if->sk_tick_ch, hz);
 }
 

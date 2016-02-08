@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfs_vnops.c,v 1.54 2007/01/16 17:52:18 thib Exp $	*/
+/*	$OpenBSD: vfs_vnops.c,v 1.58 2007/06/14 20:36:34 otto Exp $	*/
 /*	$NetBSD: vfs_vnops.c,v 1.20 1996/02/04 02:18:41 christos Exp $	*/
 
 /*
@@ -61,7 +61,6 @@ int vn_write(struct file *, off_t *, struct uio *, struct ucred *);
 int vn_poll(struct file *, int, struct proc *);
 int vn_kqfilter(struct file *, struct knote *);
 int vn_closefile(struct file *, struct proc *);
-int vn_ioctl(struct file *, u_long, caddr_t, struct proc *);
 
 struct 	fileops vnops =
 	{ vn_read, vn_write, vn_ioctl, vn_poll, vn_kqfilter, vn_statfile,
@@ -420,9 +419,6 @@ vn_ioctl(struct file *fp, u_long com, caddr_t data, struct proc *p)
 			*(int *)data = vattr.va_size - fp->f_offset;
 			return (0);
 		}
-		if (com == FIBMAP)
-			return VOP_IOCTL(vp, com, data, fp->f_flag,
-					 p->p_ucred, p);
 		if (com == FIONBIO || com == FIOASYNC)  /* XXX */
 			return (0);			/* XXX */
 		/* FALLTHROUGH */
@@ -465,19 +461,15 @@ vn_lock(struct vnode *vp, int flags, struct proc *p)
 		flags |= LK_CANRECURSE;
 	
 	do {
-		if ((flags & LK_INTERLOCK) == 0)
-			simple_lock(&vp->v_interlock);
 		if (vp->v_flag & VXLOCK) {
 			vp->v_flag |= VXWANT;
-			simple_unlock(&vp->v_interlock);
 			tsleep(vp, PINOD, "vn_lock", 0);
 			error = ENOENT;
 		} else {
-			error = VOP_LOCK(vp, flags | LK_INTERLOCK, p);
+			error = VOP_LOCK(vp, flags, p);
 			if (error == 0)
 				return (error);
 		}
-		flags &= ~LK_INTERLOCK;
 	} while (flags & LK_RETRY);
 	return (error);
 }
@@ -501,20 +493,6 @@ vn_kqfilter(struct file *fp, struct knote *kn)
 /*
  * Common code for vnode access operations.
  */
-int
-vn_access(struct vnode *vp, int mode)
-{
-	struct proc *p = curproc;
-	int error;
-
-	if ((error = vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, p)))
-		return (error);
-
-	error = VOP_ACCESS(vp, mode, p->p_ucred, p);
-	VOP_UNLOCK(vp, 0, p);
-
-	return (error);
-}
 
 /* Check if a directory can be found inside another in the hierarchy */
 int

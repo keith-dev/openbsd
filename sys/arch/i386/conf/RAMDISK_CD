@@ -1,12 +1,11 @@
-#	$OpenBSD: RAMDISK_CD,v 1.136 2007/02/20 20:43:40 tom Exp $
+#	$OpenBSD: RAMDISK_CD,v 1.142 2007/07/02 14:29:37 dlg Exp $
 
 machine		i386		# architecture, used by config; REQUIRED
 
 option		SCSITERSE
 option		APM_NOPRINT
 
-option		I386_CPU	# CPU classes; at least one is REQUIRED
-option		I486_CPU
+option		I486_CPU	# CPU classes; at least one is REQUIRED
 option		I586_CPU
 option		I686_CPU
 
@@ -197,6 +196,13 @@ scsibus* at ahb?
 ahc*	at eisa?		# Adaptec 274x, aic7770 SCSI controllers
 ahc*	at pci?			# Adaptec 2940/3940/78?? SCSI controllers
 scsibus* at ahc?
+jmb*	at pci?			# JMicron JMB36x controllers
+ahci*	at jmb?
+pciide*	at jmb?
+ahci*	at pci?			# AHCI SATA controllers
+scsibus* at ahci?
+sili*	at pci?			# Silicon Image 3124/3132/3531 SATA controllers
+scsibus* at sili?
 ahd*	at pci?			# Adaptec 79?? SCSI controllers
 scsibus* at ahd?
 arc*	at pci?			# Areca RAID Controllers
@@ -281,8 +287,6 @@ wd*	at pciide? flags 0x0000
 atapiscsi* at wdc?
 atapiscsi* at pciide?
 scsibus* at atapiscsi?
-
-#wt0	at isa? port 0x308 irq 5 drq 1	# Archive/Wangtek QIC tapes
 
 we0	at isa? port 0x280 iomem 0xd0000 irq 9	# WD/SMC 80x3 ethernet series
 we1	at isa? port 0x300 iomem 0xcc000 irq 10	#

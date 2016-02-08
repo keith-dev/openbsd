@@ -1,4 +1,4 @@
-/*	$OpenBSD: pci_machdep.c,v 1.26 2006/07/10 21:38:01 kettenis Exp $	*/
+/*	$OpenBSD: pci_machdep.c,v 1.30 2007/08/04 16:39:15 kettenis Exp $	*/
 /*	$NetBSD: pci_machdep.c,v 1.22 2001/07/20 00:07:13 eeh Exp $	*/
 
 /*
@@ -278,21 +278,6 @@ sparc64_pci_enumerate_bus(struct pci_softc *sc,
 	    (cacheline/cacheinfo.ec_linesize)*cacheinfo.ec_linesize == cacheline &&
 	    (cacheline/4)*4 == cacheline);
 
-	/* Turn on parity for the bus. */
-	tag = PCITAG_CREATE(node, sc->sc_bus, 0, 0);
-	csr = pci_conf_read(pc, tag, PCI_COMMAND_STATUS_REG);
-	csr |= PCI_COMMAND_PARITY_ENABLE;
-	pci_conf_write(pc, tag, PCI_COMMAND_STATUS_REG, csr);
-
-	/*
-	 * Initialize the latency timer register.
-	 * The value 0x40 is from Solaris.
-	 */
-	bhlc = pci_conf_read(pc, tag, PCI_BHLC_REG);
-	bhlc &= ~(PCI_LATTIMER_MASK << PCI_LATTIMER_SHIFT);
-	bhlc |= 0x40 << PCI_LATTIMER_SHIFT;
-	pci_conf_write(pc, tag, PCI_BHLC_REG, bhlc);
-
 	for (node = OF_child(node); node != 0 && node != -1;
 	     node = OF_peer(node)) {
 		name[0] = name[29] = 0;
@@ -367,7 +352,7 @@ pci_conf_read(pci_chipset_tag_t pc, pcitag_t tag, int reg)
                 (long)PCITAG_OFFSET(tag), reg));
         if (PCITAG_NODE(tag) != -1) {
                 val = bus_space_read_4(pc->bustag, pc->bushandle,
-                        PCITAG_OFFSET(tag) + reg);
+                        (PCITAG_OFFSET(tag) << pc->tagshift) + reg);
         } else
 		DPRINTF(SPDB_CONF, ("pci_conf_read: bogus pcitag %x\n",
 	            (int)PCITAG_OFFSET(tag)));
@@ -389,7 +374,7 @@ pci_conf_write(pci_chipset_tag_t pc, pcitag_t tag, int reg, pcireg_t data)
         }
 
         bus_space_write_4(pc->bustag, pc->bushandle,
-                PCITAG_OFFSET(tag) + reg, data);
+                (PCITAG_OFFSET(tag) << pc->tagshift) + reg, data);
 }
 
 /*
@@ -407,7 +392,7 @@ pci_intr_map(pa, ihp)
 	char devtype[30];
 
 	len = OF_getproplen(node, "interrupts");
-	if (len < sizeof(interrupts)) {
+	if (len < 0 || len < sizeof(interrupts)) {
 		DPRINTF(SPDB_INTMAP,
 			("pci_intr_map: interrupts len %d too small\n", len));
 		return (ENODEV);
@@ -439,6 +424,12 @@ pci_intr_map(pa, ihp)
 		return ((*pa->pa_pc->intr_map)(pa, ihp));
 	else
 		return (0);
+}
+
+int
+pci_intr_line(pci_intr_handle_t ih)
+{
+	return (ih);
 }
 
 const char *

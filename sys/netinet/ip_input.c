@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_input.c,v 1.146 2006/12/28 20:06:10 deraadt Exp $	*/
+/*	$OpenBSD: ip_input.c,v 1.151 2007/05/30 04:46:45 henning Exp $	*/
 /*	$NetBSD: ip_input.c,v 1.30 1996/03/16 23:53:58 christos Exp $	*/
 
 /*
@@ -33,6 +33,7 @@
  */
 
 #include "pf.h"
+#include "carp.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -64,6 +65,11 @@
 #ifdef IPSEC
 #include <netinet/ip_ipsp.h>
 #endif /* IPSEC */
+
+#if NCARP > 0
+#include <net/if_types.h>
+#include <netinet/ip_carp.h>
+#endif
 
 #define IPMTUDISCTIMEOUT (10 * 60)	/* as per RFC 1191 */
 
@@ -190,8 +196,8 @@ static	struct ip_srcrt {
 	struct	in_addr route[MAX_IPOPTLEN/sizeof(struct in_addr)];
 } ip_srcrt;
 
-static void save_rte(u_char *, struct in_addr);
-static int ip_weadvertise(u_int32_t);
+void save_rte(u_char *, struct in_addr);
+int ip_weadvertise(u_int32_t);
 
 /*
  * IP initialization: fill in IP protocol switch table.
@@ -370,6 +376,15 @@ ipv4_input(m)
 			m_adj(m, len - m->m_pkthdr.len);
 	}
 
+#if NCARP > 0
+	if (m->m_pkthdr.rcvif->if_type == IFT_CARP &&
+	    m->m_pkthdr.rcvif->if_flags & IFF_LINK0 &&
+	    ip->ip_p != IPPROTO_ICMP &&
+	    carp_lsdrop(m, AF_INET, &ip->ip_src.s_addr,
+	    &ip->ip_dst.s_addr))
+		goto bad;
+#endif
+
 #if NPF > 0
 	/*
 	 * Packet filter
@@ -462,14 +477,24 @@ ipv4_input(m)
 	    ip->ip_dst.s_addr == INADDR_ANY)
 		goto ours;
 
+#if NCARP > 0
+	if (m->m_pkthdr.rcvif->if_type == IFT_CARP &&
+	    m->m_pkthdr.rcvif->if_flags & IFF_LINK0 &&
+	    ip->ip_p == IPPROTO_ICMP &&
+	    carp_lsdrop(m, AF_INET, &ip->ip_src.s_addr,
+	    &ip->ip_dst.s_addr))
+		goto bad;
+#endif
 	/*
 	 * Not for us; forward if possible and desirable.
 	 */
 	if (ipforwarding == 0) {
 		ipstat.ips_cantforward++;
 		m_freem(m);
-	} else {
+		return;
+	}
 #ifdef IPSEC
+	if (ipsec_in_use) {
 	        /*
 		 * IPsec policy check for forwarded packets. Look at
 		 * inner-most IPsec SA used.
@@ -496,10 +521,10 @@ ipv4_input(m)
 		 * Fall through, forward packet. Outbound IPsec policy
 		 * checking will occur in ip_output().
 		 */
+	}
 #endif /* IPSEC */
 
-		ip_forward(m, pfrdr);
-	}
+	ip_forward(m, pfrdr);
 	return;
 
 ours:
@@ -594,6 +619,9 @@ found:
 	}
 
 #ifdef IPSEC
+	if (!ipsec_in_use)
+		goto skipipsec;
+
         /*
          * If it's a protected packet for us, skip the policy check.
          * That's because we really only care about the properties of
@@ -1241,7 +1269,7 @@ save_rte(option, dst)
  * Check whether we do proxy ARP for this address and we point to ourselves.
  * Code shamelessly copied from arplookup().
  */
-static int
+int
 ip_weadvertise(addr)
 	u_int32_t addr;
 {
@@ -1411,9 +1439,6 @@ ip_forward(m, srcrt)
 	int error, type = 0, code = 0, destmtu = 0, rtableid = 0;
 	struct mbuf *mcopy;
 	n_long dest;
-#if NPF > 0
-	struct pf_mtag	*pft;
-#endif
 
 	dest = 0;
 #ifdef DIAGNOSTIC
@@ -1432,8 +1457,7 @@ ip_forward(m, srcrt)
 	}
 
 #if NPF > 0
-	if ((pft = pf_find_mtag(m)) != NULL)
-		rtableid = pft->rtableid;
+	rtableid = m->m_pkthdr.pf.rtableid;
 #endif
 
 	sin = satosin(&ipforward_rt.ro_dst);

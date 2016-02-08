@@ -1,4 +1,4 @@
-/*	$OpenBSD: psl.h,v 1.21 2006/03/12 03:14:37 brad Exp $	*/
+/*	$OpenBSD: psl.h,v 1.23 2007/05/16 19:37:06 thib Exp $	*/
 /*	$NetBSD: psl.h,v 1.12 1997/03/10 21:49:11 pk Exp $ */
 
 /*
@@ -95,6 +95,7 @@
  */
 #define IPL_AUHARD	13		/* hard audio interrupts */
 #define IPL_STATCLOCK	14		/* statclock() */
+#define IPL_SCHED	IPL_STATCLOCK
 #define IPL_HIGH	15		/* splhigh() */
 
 #if defined(_KERNEL) && !defined(_LOCORE)
@@ -168,7 +169,7 @@ void splassert_fail(int, int, const char *);
 extern int splassert_ctl;
 void splassert_check(int, const char *);
 #define splassert(__wantipl) do {			\
-	if (__predict_false(splassert_ctl > 0)) {	\
+	if (splassert_ctl > 0) {			\
 		splassert_check(__wantipl, __func__);	\
 	}						\
 } while (0)
@@ -226,6 +227,7 @@ SPLHOLD(splclock, IPL_CLOCK)
 SPLHOLD(splfd, IPL_FD)
 SPLHOLD(splzs, IPL_ZS)
 SPLHOLD(splaudio, IPL_AUHARD)
+SPLHOLD(splsched, IPL_SCHED)
 SPLHOLD(splstatclock, IPL_STATCLOCK)
 
 static __inline int splhigh()

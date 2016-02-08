@@ -1,4 +1,4 @@
-.\"	$OpenBSD: aucat.1,v 1.12 2004/07/30 11:43:02 jmc Exp $
+.\"	$OpenBSD: aucat.1,v 1.15 2007/05/31 19:20:07 jmc Exp $
 .\"
 .\" Copyright (c) 1997 Kenneth Stailey.  All rights reserved.
 .\"
@@ -34,7 +34,7 @@
 .\" SUCH DAMAGE.
 .\"
 .\"
-.Dd January 2, 1997
+.Dd $Mdocdate: May 31 2007 $
 .Dt AUCAT 1
 .Os
 .Sh NAME
@@ -43,7 +43,7 @@
 .Sh SYNOPSIS
 .Nm aucat
 .Op Fl f Ar device
-.Ar file ...
+.Ar
 .Sh DESCRIPTION
 The
 .Nm
@@ -56,11 +56,16 @@ device.
 The
 .Ar file
 operands are processed in command line order.
+.Pp
 If a Sun .au header is
 detected it is skipped over and not copied to
 .Pa /dev/audio .
-Otherwise, the
-entire file is copied to
+If a Microsoft .wav header (RIFF) is detected it is interpreted to
+select the right audio encoding for playback and the data chunk of the
+file is copied to
+.Pa /dev/audio ,
+given that the audio driver directly supports the encoding.
+Otherwise, the entire file is copied to
 .Pa /dev/audio .
 .Pp
 The options are as follows:
@@ -69,9 +74,7 @@ The options are as follows:
 Specifies an alternate audio device.
 .El
 .Pp
-The
-.Nm
-utility exits 0 on success or \*(Gt0 if an error occurred.
+.Ex -std aucat
 .Sh ENVIRONMENT
 .Bl -tag -width AUDIODEVICE
 .It Ev AUDIODEVICE

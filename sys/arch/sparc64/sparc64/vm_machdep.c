@@ -1,4 +1,4 @@
-/*	$OpenBSD: vm_machdep.c,v 1.13 2006/05/29 20:01:32 miod Exp $	*/
+/*	$OpenBSD: vm_machdep.c,v 1.15 2007/06/20 17:29:36 miod Exp $	*/
 /*	$NetBSD: vm_machdep.c,v 1.38 2001/06/30 00:02:20 eeh Exp $ */
 
 /*
@@ -68,31 +68,6 @@
 #include <machine/bus.h>
 
 #include <sparc64/sparc64/cache.h>
-
-/*
- * Move pages from one kernel virtual address to another.
- */
-void
-pagemove(from, to, size)
-	register caddr_t from, to;
-	size_t size;
-{
-	paddr_t pa;
-
-	if (size & PGOFSET || (long)from & PGOFSET || (long)to & PGOFSET)
-		panic("pagemove 1");
-
-	while (size > 0) {
-		if (pmap_extract(pmap_kernel(), (vaddr_t)from, &pa) == FALSE)
-			panic("pagemove 2");
-		pmap_kremove((vaddr_t)from, PAGE_SIZE);
-		pmap_kenter_pa((vaddr_t)to, pa, VM_PROT_READ|VM_PROT_WRITE);
-		from += PAGE_SIZE;
-		to += PAGE_SIZE;
-		size -= PAGE_SIZE;
-	}
-	pmap_update(pmap_kernel());
-}
 
 /*
  * Map a user I/O request into kernel virtual address space.
@@ -167,7 +142,8 @@ vunmapbuf(bp, len)
 	off = (vaddr_t)bp->b_data - kva;
 	len = round_page(off + len);
 
-	/* This will call pmap_remove() for us. */
+	pmap_remove(pmap_kernel(), kva, kva + len);
+	pmap_update(pmap_kernel());
 	uvm_km_free_wakeup(kernel_map, kva, len);
 	bp->b_data = bp->b_saveaddr;
 	bp->b_saveaddr = NULL;

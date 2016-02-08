@@ -1,4 +1,4 @@
-/*	$OpenBSD: netstat.h,v 1.39 2006/08/29 21:51:13 claudio Exp $	*/
+/*	$OpenBSD: netstat.h,v 1.43 2007/07/25 11:50:47 claudio Exp $	*/
 /*	$NetBSD: netstat.h,v 1.6 1996/05/07 02:55:05 thorpej Exp $	*/
 
 /*
@@ -41,6 +41,7 @@ int	Aflag;		/* show addresses of protocol control block */
 int	aflag;		/* show all sockets (including servers) */
 int	bflag;		/* show bytes instead of packets */
 int	dflag;		/* show i/f dropped packets */
+int	Fflag;		/* show routes whose gateways are in specified AF */
 int	gflag;		/* show group (multicast) routing or stats */
 int	iflag;		/* show interfaces */
 int	lflag;		/* show routing table with use and ref */
@@ -87,6 +88,8 @@ void	etherip_stats(u_long, char *);
 void	protopr(u_long, char *);
 void	ipcomp_stats(u_long, char *);
 
+void	net80211_ifstats(char *);
+
 void	tcp_dump(u_long);
 
 void	mbpr(u_long, u_long, u_long);
@@ -98,8 +101,6 @@ void	rt_stats(int, u_long);
 void	pr_rthdr(int, int);
 void	pr_encaphdr(void);
 void	pr_family(int);
-char	*ns_phost(struct sockaddr *);
-char	*ipx_phost(struct sockaddr *);
 
 #ifdef INET6
 struct in6_addr;
@@ -117,7 +118,7 @@ char	*routename6(struct sockaddr_in6 *);
 char	*netname6(struct sockaddr_in6 *, struct sockaddr_in6 *);
 #endif /*INET6*/
 
-void	p_rttables(int);
+void	p_rttables(int, u_int);
 void	p_flags(int, char *);
 void	p_addr(struct sockaddr *, struct sockaddr *, int);
 void	p_gwaddr(struct sockaddr *, int);
@@ -126,18 +127,12 @@ char	*routename(struct sockaddr *);
 char	*routename4(in_addr_t);
 char	*netname(struct sockaddr *, struct sockaddr *);
 char	*netname4(in_addr_t, in_addr_t);
-char	*ipx_print(struct sockaddr *);
 void	routepr(u_long, u_long, u_long, u_long);
 
 void	nsprotopr(u_long, char *);
 void	spp_stats(u_long, char *);
 void	idp_stats(u_long, char *);
 void	nserr_stats(u_long, char *);
-
-void	ipxprotopr(u_long, char *);
-void	spx_stats(u_long, char *);
-void	ipx_stats(u_long, char *);
-void	ipxerr_stats(u_long, char *);
 
 void	intpr(int, u_long);
 

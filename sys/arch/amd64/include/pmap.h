@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap.h,v 1.10 2006/03/15 20:01:58 miod Exp $	*/
+/*	$OpenBSD: pmap.h,v 1.16 2007/07/06 11:46:48 art Exp $	*/
 /*	$NetBSD: pmap.h,v 1.1 2003/04/26 18:39:46 fvdl Exp $	*/
 
 /*
@@ -113,7 +113,7 @@
  *  |                                 |
  *  +---------------------------------+ 0xffff800000000000 = 0x0000800000000000
  *  |                                 |
- *  |    alt.L1 table (PTE pages)     |
+ *  |    L1 table (PTE pages)	      |
  *  |                                 |
  *  +---------------------------------+ 0x00007f8000000000
  *  ~                                 ~
@@ -157,11 +157,13 @@
 #define L4_SLOT_KERNBASE	511
 #define L4_SLOT_APTE		510
 #define L4_SLOT_DIRECT		509
+#define L4_SLOT_DIRECT_NC	508
 
 #define PDIR_SLOT_KERN		L4_SLOT_KERN
 #define PDIR_SLOT_PTE		L4_SLOT_PTE
 #define PDIR_SLOT_APTE		L4_SLOT_APTE
 #define PDIR_SLOT_DIRECT	L4_SLOT_DIRECT
+#define PDIR_SLOT_DIRECT_NC	L4_SLOT_DIRECT_NC
 
 /*
  * the following defines give the virtual addresses of various MMU
@@ -176,6 +178,8 @@
 #define APTE_BASE ((pt_entry_t *) (VA_SIGN_NEG((L4_SLOT_APTE * NBPD_L4))))
 #define PMAP_DIRECT_BASE	(VA_SIGN_NEG((L4_SLOT_DIRECT * NBPD_L4)))
 #define PMAP_DIRECT_END		(VA_SIGN_NEG(((L4_SLOT_DIRECT + 1) * NBPD_L4)))
+#define PMAP_DIRECT_BASE_NC	(VA_SIGN_NEG((L4_SLOT_DIRECT_NC * NBPD_L4)))
+#define PMAP_DIRECT_END_NC	(VA_SIGN_NEG(((L4_SLOT_DIRECT_NC + 1) * NBPD_L4)))
 
 #define L1_BASE		PTE_BASE
 #define AL1_BASE	APTE_BASE
@@ -202,6 +206,10 @@
 #define NKL4_KIMG_ENTRIES	1
 #define NKL3_KIMG_ENTRIES	1
 #define NKL2_KIMG_ENTRIES	8
+
+#define NDML4_ENTRIES		1
+#define NDML3_ENTRIES		1
+#define NDML2_ENTRIES		4	/* 4GB */
 
 /*
  * Since kva space is below the kernel in its entirety, we start off
@@ -328,20 +336,15 @@ struct pmap {
 #define	PMF_USER_LDT	0x01	/* pmap has user-set LDT */
 
 /*
- * for each managed physical page we maintain a list of <PMAP,VA>'s
- * which it is mapped at.  the list is headed by a pv_head structure.
- * there is one pv_head per managed phys page (allocated at boot time).
- * the pv_head structure points to a list of pv_entry structures (each
- * describes one mapping).
+ * We keep mod/ref flags in struct vm_page->pg_flags.
  */
+#define PG_PMAP_MOD	PG_PMAP0
+#define PG_PMAP_REF	PG_PMAP1
 
-struct pv_entry;
-
-struct pv_head {
-	struct simplelock pvh_lock;	/* locks every pv on this list */
-	struct pv_entry *pvh_list;	/* head of list (locked by pvh_lock) */
-};
-
+/*
+ * for each managed physical page we maintain a list of <PMAP,VA>'s
+ * which it is mapped at.
+ */
 struct pv_entry {			/* locked by its list's pvh_lock */
 	struct pv_entry *pv_next;	/* next entry */
 	struct pmap *pv_pmap;		/* the pmap */
@@ -403,7 +406,7 @@ extern pd_entry_t *pdes[];
  */
 
 void		pmap_bootstrap(vaddr_t, paddr_t);
-boolean_t	pmap_clear_attrs(struct vm_page *, unsigned);
+boolean_t	pmap_clear_attrs(struct vm_page *, unsigned long);
 static void	pmap_page_protect(struct vm_page *, vm_prot_t);
 void		pmap_page_remove (struct vm_page *);
 static void	pmap_protect(struct pmap *, vaddr_t,
@@ -417,13 +420,20 @@ void		pmap_write_protect(struct pmap *, vaddr_t,
 
 vaddr_t reserve_dumppages(vaddr_t); /* XXX: not a pmap fn */
 
-void	pmap_tlb_shootdown(pmap_t, vaddr_t, pt_entry_t, int32_t *);
-void	pmap_tlb_shootnow(int32_t);
-void	pmap_do_tlb_shootdown(struct cpu_info *);
+void	pmap_tlb_shootpage(struct pmap *, vaddr_t);
+void	pmap_tlb_shootrange(struct pmap *, vaddr_t, vaddr_t);
+void	pmap_tlb_shoottlb(void);
+#ifdef MULTIPROCESSOR
+void	pmap_tlb_shootwait(void);
+#else
+#define	pmap_tlb_shootwait()
+#endif
+
 void	pmap_prealloc_lowmem_ptps(void);
 
 void	pagezero(vaddr_t);
 
+#define	PMAP_STEAL_MEMORY	/* enable pmap_steal_memory() */
 #define PMAP_GROWKERNEL		/* turn on pmap_growkernel interface */
 
 /*
@@ -556,9 +566,13 @@ void	pmap_ldt_cleanup(struct proc *);
 
 #define PMAP_DIRECT_MAP(pa)	((vaddr_t)PMAP_DIRECT_BASE + pa)
 #define PMAP_DIRECT_UNMAP(va)	((paddr_t)va - PMAP_DIRECT_BASE)
-
 #define pmap_map_direct(pg)	PMAP_DIRECT_MAP(VM_PAGE_TO_PHYS(pg))
 #define pmap_unmap_direct(va)	PHYS_TO_VM_PAGE(PMAP_DIRECT_UNMAP(va))
+
+#define PMAP_DIRECT_NC_MAP(pa)	((vaddr_t)PMAP_DIRECT_BASE_NC + pa)
+#define PMAP_DIRECT_NC_UNMAP(va) ((paddr_t)va - PMAP_DIRECT_BASE_NC)
+#define pmap_map_nc_direct(pg)		PMAP_DIRECT_NC_MAP(VM_PAGE_TO_PHYS(pg))
+#define pmap_unmap_nc_direct(va)	PHYS_TO_VM_PAGE(PMAP_DIRECT_NC_UNMAP(va))
 
 #define __HAVE_PMAP_DIRECT
 

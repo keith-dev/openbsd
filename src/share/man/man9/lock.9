@@ -1,4 +1,4 @@
-.\"     $OpenBSD: lock.9,v 1.13 2007/02/03 16:58:30 pedro Exp $
+.\"     $OpenBSD: lock.9,v 1.16 2007/05/31 19:20:00 jmc Exp $
 .\"     $NetBSD: lock.9,v 1.12 2001/11/01 01:13:43 wiz Exp $
 .\"
 .\" Copyright (c) 2000 The NetBSD Foundation, Inc.
@@ -32,7 +32,7 @@
 .\" ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 .\" POSSIBILITY OF SUCH DAMAGE.
 .\"
-.Dd June 23, 2000
+.Dd $Mdocdate: May 31 2007 $
 .Dt LOCK 9
 .Os
 .Sh NAME
@@ -200,18 +200,6 @@ process holding an exclusive-access lock may get additional
 exclusive-access locks if it explicitly sets the LK_CANRECURSE flag in
 the lock request, or if the LK_CANRECURSE flag was set when the lock
 was initialised.
-.It LK_UPGRADE
-The process must hold a shared-access lock that it wants to have
-upgraded to an exclusive-access lock.
-Other processes may get exclusive
-access to the protected resource between the time that the upgrade is
-requested and the time that it is granted.
-.It LK_DOWNGRADE
-The process must hold an exclusive-access lock that it wants to have
-downgraded to a shared-access lock.
-If the process holds multiple
-(recursive) exclusive-access locks, they will all be downgraded to
-shared-access locks.
 .It LK_RELEASE
 Release one instance of a lock.
 .It LK_DRAIN
@@ -251,14 +239,11 @@ Print out information about state of lock
 .Sh RETURN VALUES
 Successfully acquired locks return 0.
 A failed lock attempt always returns a non-zero error value.
-No lock is held after an error return (in particular, a failed LK_UPGRADE or
-LK_FORCEUPGRADE will have released its shared-access lock).
+No lock is held after an error return.
 Locks will always succeed unless one of the following is true:
 .Bl -tag -width Er
 .It Bq Er EBUSY
-LK_FORCEUPGRADE is requested and some other process has already
-requested a lock upgrade or LK_NOWAIT is set and a sleep would
-be required.
+LK_NOWAIT is set and a sleep would be required.
 .It Bq Er ENOLCK
 LK_SLEEPFAIL is set and a sleep was done.
 .It Bq Er EINTR
@@ -289,9 +274,12 @@ in
 .Sh SEE ALSO
 .Xr mutex 9 ,
 .Xr pmap 9 ,
+.Xr rwlock 9 ,
 .Xr spl 9 ,
 .Xr tsleep 9 ,
 .Xr uvm 9
 .Sh HISTORY
 The kernel locking API first appeared in
 .Bx 4.4 -lite2 .
+It was progressively deprecated in favor of
+.Xr rwlock 9 .

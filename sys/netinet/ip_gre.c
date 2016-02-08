@@ -1,4 +1,4 @@
-/*      $OpenBSD: ip_gre.c,v 1.29 2006/03/25 22:41:48 djm Exp $ */
+/*      $OpenBSD: ip_gre.c,v 1.31 2007/05/27 21:20:52 claudio Exp $ */
 /*	$NetBSD: ip_gre.c,v 1.9 1999/10/25 19:18:11 drochner Exp $ */
 
 /*
@@ -81,7 +81,7 @@
 #include <net/if_gre.h>
 
 struct gre_softc *gre_lookup(struct mbuf *, u_int8_t);
-static int gre_input2(struct mbuf *, int, u_char);
+int gre_input2(struct mbuf *, int, u_char);
 
 /*
  * Decapsulate.
@@ -92,7 +92,7 @@ static int gre_input2(struct mbuf *, int, u_char);
  * routine.
  */
 
-static int
+int
 gre_input2(m , hlen, proto)
         struct mbuf *m;
 	int hlen;
@@ -148,7 +148,7 @@ gre_input2(m , hlen, proto)
 			/* WCCP/GRE:
 			 *   So far as I can see (and test) it seems that Cisco's WCCP
 			 *   GRE tunnel is precisely a IP-in-GRE tunnel that differs
-			 *   only in it's protocol number.  At least, it works for me.
+			 *   only in its protocol number.  At least, it works for me.
 			 *
 			 *   The Internet Draft can be found if you look for
 			 *     draft-forster-wrec-wccp-v1-00.txt

@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_var.h,v 1.23 2004/08/03 17:11:48 marius Exp $	*/
+/*	$OpenBSD: nfs_var.h,v 1.28 2007/06/21 22:59:49 thib Exp $	*/
 /*	$NetBSD: nfs_var.h,v 1.3 1996/02/18 11:53:54 fvdl Exp $	*/
 
 /*
@@ -63,14 +63,13 @@ union nethostaddr;
 /* nfs_bio.c */
 int nfs_bioread(struct vnode *, struct uio *, int, struct ucred *);
 int nfs_write(void *);
-struct buf *nfs_getcacheblk(struct vnode *, daddr_t, int, struct proc *);
+struct buf *nfs_getcacheblk(struct vnode *, daddr64_t, int, struct proc *);
 int nfs_vinvalbuf(struct vnode *, int, struct ucred *, struct proc *,
 		       int);
 int nfs_asyncio(struct buf *);
 int nfs_doio(struct buf *, struct proc *);
 
 /* nfs_boot.c */
-int nfs_boot_init(struct nfs_diskless *, struct proc *);
 int nfs_boot_init(struct nfs_diskless *, struct proc *);
 
 /* nfs_node.c */
@@ -80,6 +79,7 @@ int nfs_inactive(void *);
 int nfs_reclaim(void *);
 
 /* nfs_vnops.c */
+int nfs_poll(void *);
 int nfs_null(struct vnode *, struct ucred *, struct proc *);
 int nfs_access(void *);
 int nfs_open(void *);
@@ -141,6 +141,13 @@ int nfsspec_close(void *);
 int nfsfifo_read(void *);
 int nfsfifo_write(void *);
 int nfsfifo_close(void *);
+int nfsfifo_reclaim(void *);
+
+#define	nfs_ioctl	((int (*)(void *))enoioctl)
+#define	nfs_revoke	vop_generic_revoke
+#define	nfs_lock	vop_generic_lock
+#define	nfs_unlock	vop_generic_unlock
+#define	nfs_islocked	vop_generic_islocked
 
 /* nfs_serv.c */
 int nfsrv3_access(struct nfsrv_descript *, struct nfssvc_sock *,
@@ -286,9 +293,5 @@ int nfs_savenickauth(struct nfsmount *, struct ucred *, int, NFSKERBKEY_T,
 			  struct mbuf **, char **, struct mbuf *);
 
 /* nfs_kq.c */
-
 int  nfs_kqfilter(void *);
-void nfs_kqinit(void);
 
-#define VN_KNOTE(vp, b) \
-        KNOTE(&vp->v_selectinfo.vsi_selinfo.si_note, (b))

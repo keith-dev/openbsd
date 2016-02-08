@@ -1,4 +1,4 @@
-/*	$OpenBSD: session.c,v 1.270 2007/02/22 08:34:18 henning Exp $ */
+/*	$OpenBSD: session.c,v 1.276 2007/06/19 09:44:55 pyr Exp $ */
 
 /*
  * Copyright (c) 2003, 2004, 2005 Henning Brauer <henning@openbsd.org>
@@ -32,6 +32,7 @@
 #include <err.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <poll.h>
 #include <pwd.h>
 #include <signal.h>
@@ -82,7 +83,7 @@ int	parse_open(struct peer *);
 int	parse_update(struct peer *);
 int	parse_refresh(struct peer *);
 int	parse_notification(struct peer *);
-int	parse_capabilities(struct peer *, u_char *, u_int16_t);
+int	parse_capabilities(struct peer *, u_char *, u_int16_t, u_int32_t *);
 void	session_dispatch_imsg(struct imsgbuf *, int, u_int *);
 void	session_up(struct peer *);
 void	session_down(struct peer *);
@@ -243,6 +244,7 @@ session_main(struct bgpd_config *config, struct peer *cpeers,
 	signal(SIGTERM, session_sighdlr);
 	signal(SIGINT, session_sighdlr);
 	signal(SIGPIPE, SIG_IGN);
+	signal(SIGHUP, SIG_IGN);
 	log_info("session engine ready");
 	close(pipe_m2s[0]);
 	close(pipe_s2r[1]);
@@ -1061,7 +1063,7 @@ session_connect(struct peer *peer)
 	struct sockaddr		*sa;
 
 	/*
-	 * we do not need the overcomplicated collision detection rfc1771
+	 * we do not need the overcomplicated collision detection RFC 1771
 	 * describes; we simply make sure there is only ever one concurrent
 	 * tcp connection per peer.
 	 */
@@ -1162,7 +1164,7 @@ session_setup_socket(struct peer *p)
 
 	if (p->conf.ebgp && p->conf.remote_addr.af == AF_INET6)
 		/* set hoplimit to foreign router's distance */
-		if (setsockopt(p->fd, IPPROTO_IPV6, IPV6_HOPLIMIT, &ttl,
+		if (setsockopt(p->fd, IPPROTO_IPV6, IPV6_UNICAST_HOPS, &ttl,
 		    sizeof(ttl)) == -1) {
 			log_peer_warn(&p->conf,
 			    "session_setup_socket setsockopt hoplimit");
@@ -1184,7 +1186,7 @@ session_setup_socket(struct peer *p)
 		return (-1);
 	}
 
-	/* set precedence, see rfc1771 appendix 5 */
+	/* set precedence, see RFC 1771 appendix 5 */
 	if (p->conf.remote_addr.af == AF_INET &&
 	    setsockopt(p->fd, IPPROTO_IP, IP_TOS, &pre, sizeof(pre)) == -1) {
 		log_peer_warn(&p->conf,
@@ -1247,6 +1249,7 @@ session_capa_ann_none(struct peer *peer)
 	peer->capa.ann.mp_v4 = SAFI_NONE;
 	peer->capa.ann.refresh = 0;
 	peer->capa.ann.restart = 0;
+	peer->capa.ann.as4byte = 0;
 }
 
 int
@@ -1356,7 +1359,7 @@ session_open(struct peer *p)
 		return;
 	}
 
-	/* multiprotocol extensions, RFC 2858 */
+	/* multiprotocol extensions, RFC 4760 */
 	if (p->capa.ann.mp_v4) {	/* 4 bytes data */
 		errs += session_capa_add(p, opb, CAPA_MP, 4, &optparamlen);
 		errs += session_capa_add_mp(opb, AFI_IPv4, p->capa.ann.mp_v4);
@@ -1370,14 +1373,23 @@ session_open(struct peer *p)
 	if (p->capa.ann.refresh)	/* no data */
 		errs += session_capa_add(p, opb, CAPA_REFRESH, 0, &optparamlen);
 
-	/* End-of-RIB marker, draft-ietf-idr-restart */
-	if (p->capa.ann.restart) {	/* 4 bytes data */
-		u_char	c[4];
+	/* End-of-RIB marker, RFC 4724 */
+	if (p->capa.ann.restart) {	/* 2 bytes data */
+		u_char		c[2];
 
-		bzero(&c, 4);
-		c[0] = 0x80;
-		errs += session_capa_add(p, opb, CAPA_RESTART, 4, &optparamlen);
-		errs += buf_add(opb, &c, 4);
+		bzero(&c, 2);
+		c[0] = 0x80; /* we're always restarting */
+		errs += session_capa_add(p, opb, CAPA_RESTART, 2, &optparamlen);
+		errs += buf_add(opb, &c, 2);
+	}
+
+	/* 4-bytes AS numbers, draft-ietf-idr-as4bytes-13 */
+	if (p->capa.ann.as4byte) {	/* 4 bytes data */
+		u_int32_t	nas;
+
+		nas = htonl(conf->as);
+		errs += session_capa_add(p, opb, CAPA_AS4BYTE, 4, &optparamlen);
+		errs += buf_add(opb, &nas, 4);
 	}
 
 	len = MSGSIZE_OPEN_MIN + optparamlen;
@@ -1388,7 +1400,10 @@ session_open(struct peer *p)
 	}
 
 	msg.version = 4;
-	msg.myas = htons(conf->as);
+	if (conf->as > USHRT_MAX)
+		msg.myas = htons(conf->short_as);
+	else
+		msg.myas = htons(conf->as);
 	if (p->conf.holdtime)
 		msg.holdtime = htons(p->conf.holdtime);
 	else
@@ -1816,9 +1831,9 @@ parse_open(struct peer *peer)
 {
 	u_char		*p, *op_val;
 	u_int8_t	 version, rversion;
-	u_int16_t	 as, msglen;
+	u_int16_t	 short_as, msglen;
 	u_int16_t	 holdtime, oholdtime, myholdtime;
-	u_int32_t	 bgpid;
+	u_int32_t	 as, bgpid;
 	u_int8_t	 optparamlen, plen;
 	u_int8_t	 op_type, op_len;
 
@@ -1846,20 +1861,14 @@ parse_open(struct peer *peer)
 		return (-1);
 	}
 
-	memcpy(&as, p, sizeof(as));
-	p += sizeof(as);
+	memcpy(&short_as, p, sizeof(short_as));
+	p += sizeof(short_as);
+	as = peer->short_as = ntohs(short_as);
 
 	/* if remote-as is zero and it's a cloned neighbor, accept any */
-	if (peer->conf.cloned && !peer->conf.remote_as) {
-		peer->conf.remote_as = ntohs(as);
+	if (peer->conf.cloned && !peer->conf.remote_as && as != AS_TRANS) {
+		peer->conf.remote_as = as;
 		peer->conf.ebgp = (peer->conf.remote_as != conf->as);
-	}
-
-	if (peer->conf.remote_as != ntohs(as)) {
-		log_peer_warnx(&peer->conf, "peer sent wrong AS %u", ntohs(as));
-		session_notification(peer, ERR_OPEN, ERR_OPEN_AS, NULL, 0);
-		change_state(peer, STATE_IDLE, EVNT_RCVD_OPEN);
-		return (-1);
 	}
 
 	memcpy(&oholdtime, p, sizeof(oholdtime));
@@ -1940,7 +1949,8 @@ parse_open(struct peer *peer)
 
 		switch (op_type) {
 		case OPT_PARAM_CAPABILITIES:		/* RFC 3392 */
-			if (parse_capabilities(peer, op_val, op_len) == -1) {
+			if (parse_capabilities(peer, op_val, op_len,
+			    &as) == -1) {
 				session_notification(peer, ERR_OPEN, 0,
 				    NULL, 0);
 				change_state(peer, STATE_IDLE, EVNT_RCVD_OPEN);
@@ -1966,6 +1976,14 @@ parse_open(struct peer *peer)
 			peer->IdleHoldTime /= 2;
 			return (-1);
 		}
+	}
+
+	if (peer->conf.remote_as != as) {
+		log_peer_warnx(&peer->conf, "peer sent wrong AS %s",
+		    log_as(as));
+		session_notification(peer, ERR_OPEN, ERR_OPEN_AS, NULL, 0);
+		change_state(peer, STATE_IDLE, EVNT_RCVD_OPEN);
+		return (-1);
 	}
 
 	return (0);
@@ -2103,6 +2121,11 @@ parse_notification(struct peer *peer)
 				log_peer_warnx(&peer->conf,
 				    "disabling restart capability");
 				break;
+			case CAPA_AS4BYTE:
+				peer->capa.ann.as4byte = 0;
+				log_peer_warnx(&peer->conf,
+				    "disabling 4-byte AS num capability");
+				break;
 			default:	/* should not happen... */
 				log_peer_warnx(&peer->conf, "received "
 				    "\"unsupported capability\" notification "
@@ -2126,7 +2149,7 @@ parse_notification(struct peer *peer)
 }
 
 int
-parse_capabilities(struct peer *peer, u_char *d, u_int16_t dlen)
+parse_capabilities(struct peer *peer, u_char *d, u_int16_t dlen, u_int32_t *as)
 {
 	u_int16_t	 len;
 	u_int8_t	 capa_code;
@@ -2134,6 +2157,7 @@ parse_capabilities(struct peer *peer, u_char *d, u_int16_t dlen)
 	u_char		*capa_val;
 	u_int16_t	 mp_afi;
 	u_int8_t	 mp_safi;
+	u_int32_t	 remote_as;
 
 	len = dlen;
 	while (len > 0) {
@@ -2163,7 +2187,7 @@ parse_capabilities(struct peer *peer, u_char *d, u_int16_t dlen)
 			capa_val = NULL;
 
 		switch (capa_code) {
-		case CAPA_MP:			/* RFC 2858 */
+		case CAPA_MP:			/* RFC 4760 */
 			if (capa_len != 4) {
 				log_peer_warnx(&peer->conf,
 				    "parse_capabilities: "
@@ -2202,6 +2226,17 @@ parse_capabilities(struct peer *peer, u_char *d, u_int16_t dlen)
 		case CAPA_RESTART:
 			peer->capa.peer.restart = 1;
 			/* we don't care about the further restart capas yet */
+			break;
+		case CAPA_AS4BYTE:
+			if (capa_len != 4) {
+				log_peer_warnx(&peer->conf,
+				    "parse_capabilities: "
+				    "expect len 4, len is %u", capa_len);
+				return (-1);
+			}
+			memcpy(&remote_as, capa_val, sizeof(remote_as));
+			*as = ntohl(remote_as);
+			peer->capa.peer.as4byte = 1;
 			break;
 		default:
 			break;
@@ -2754,6 +2789,7 @@ session_up(struct peer *p)
 	}
 
 	sup.remote_bgpid = p->remote_bgpid;
+	sup.short_as = p->short_as;
 	memcpy(&sup.capa_announced, &p->capa.ann, sizeof(sup.capa_announced));
 	memcpy(&sup.capa_received, &p->capa.peer, sizeof(sup.capa_received));
 	p->stats.last_updown = time(NULL);

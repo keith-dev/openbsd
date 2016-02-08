@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.125 2006/08/03 16:13:24 mbalmer Exp $
+#	$OpenBSD: GENERIC,v 1.134 2007/06/15 23:01:42 deraadt Exp $
 #
 #	Machine-independent option; used by all architectures for their
 #	GENERIC kernel
@@ -33,6 +33,7 @@ option		COMPAT_43	# and 4.3BSD
 option		LKM		# loadable kernel modules
 
 option		FFS		# UFS
+option		FFS2		# UFS2
 option		FFS_SOFTUPDATES	# Soft updates
 option		UFS_DIRHASH	# hash large directories
 option		QUOTA		# UFS quotas
@@ -60,13 +61,14 @@ option		ALTQ		# ALTQ base
 option		INET6		# IPv6 (needs INET)
 option		IPSEC		# IPsec
 #option		KEY		# PF_KEY (implied by IPSEC)
-#option		IPX		# IPX+SPX
-#option		IPXIP		# IPX tunneling over IP
 #option		NETATALK	# AppleTalk
 option		PPP_BSDCOMP	# PPP BSD compression
 option		PPP_DEFLATE
 option		MROUTING	# Multicast router
 #option		PIM		# Protocol Independent Multicast
+
+#softraid0	at root		# Software RAID
+#scsibus*	at softraid?
 
 pseudo-device	pf		# packet filter
 pseudo-device	pflog		# pf log if
@@ -99,5 +101,6 @@ pseudo-device	trunk		# Trunking support
 #pseudo-device	faith	1	# IPv[46] tcp relay translation i/f
 
 pseudo-device	pppoe	1	# PPP over Ethernet (RFC 2516)
+pseudo-device	bio	1	# ioctl multiplexing device
 
 option		BOOT_CONFIG	# add support for boot -c

@@ -1,4 +1,4 @@
-/*	$OpenBSD: uthread_info_openbsd.c,v 1.11 2006/09/26 14:18:28 kurt Exp $	*/
+/*	$OpenBSD: uthread_info_openbsd.c,v 1.15 2007/05/21 16:50:36 kurt Exp $	*/
 
 /*
  * Copyright (c) 1995-1998 John Birrell <jb@cimlogic.com.au>
@@ -88,7 +88,7 @@ truncname(const char *name, int maxlen)
 
 	if (name == NULL)
 		name = "(null)";
-	len = strlen(name);
+	len = (int)strlen(name);
 	if (len > maxlen)
 		return name + len - maxlen;
 	else
@@ -269,7 +269,7 @@ _thread_dump_entry(pthread_t pthread, int fd, int verbose)
 	case PS_SELECT_WAIT:
 	case PS_POLL_WAIT:
 		{
-			int i;
+			nfds_t i;
 
 			for (i = 0; i < pthread->data.poll_data->nfds; i++) 
 				snprintf(s, sizeof(s), "%s%d:%s%s",
@@ -345,7 +345,7 @@ _thread_dump_info(void)
 
 	/* Output a header for file descriptors: */
 	snprintf(s, sizeof(s), "file descriptor table, size %d:\n", 
-	    _thread_dtablesize);
+	    _thread_max_fdtsize);
 	_thread_sys_write(fd, s, strlen(s));
 
 	snprintf(s, sizeof s,
@@ -355,7 +355,7 @@ _thread_dump_info(void)
 	_thread_sys_write(fd, s, strlen(s));
 
 	/* Enter a loop to report file descriptor lock usage: */
-	for (i = 0; i < _thread_dtablesize; i++) {
+	for (i = 0; i < _thread_max_fdtsize; i++) {
 		/*
 		 * Check if memory is allocated for this file
 		 * descriptor: 
@@ -416,6 +416,7 @@ _thread_dump_data(const void *addr, int len)
 {
 	int fd = -1;
 	unsigned char data[DUMP_BUFLEN];
+	const unsigned char hexdigits[] = "0123456789abcdef";
 
 	if (getenv("PTHREAD_DEBUG") != NULL)
 		fd = _thread_sys_open(_PATH_TTY, O_WRONLY | O_APPEND);
@@ -439,21 +440,21 @@ _thread_dump_data(const void *addr, int len)
 				len = 0;
 				memset(data, ' ', DUMP_BUFLEN);
 			}
-			(char *) addr += 8;
+			addr = (char *)addr + 8;
 
-			snprintf(data, DUMP_BUFLEN, "%18p:   ", d);
+			snprintf((char *)data, DUMP_BUFLEN, "%18p:   ", d);
 			while (count--) {
 				if (isprint(*d))
 					*a++ = *d;
 				else
 					*a++ = '.';
-				*h++ = "0123456789abcdef"[(*d >> 4) & 0xf];
-				*h++ = "0123456789abcdef"[*d++ & 0xf];
+				*h++ = hexdigits[(*d >> 4) & 0xf];
+				*h++ = hexdigits[*d++ & 0xf];
 				*h++ = ' ';
 			}
 			*a++ = '\n';
 			*a = 0;
-			_thread_sys_write(fd, data, a - data);
+			_thread_sys_write(fd, data, (size_t)(a - data));
 		}
 		writestring(fd, "\n");
 		_thread_sys_close(fd);

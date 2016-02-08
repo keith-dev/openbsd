@@ -1,4 +1,4 @@
-/*	$OpenBSD: diff.c,v 1.118 2007/02/22 06:42:09 otto Exp $	*/
+/*	$OpenBSD: diff.c,v 1.120 2007/06/28 21:38:09 xsa Exp $	*/
 /*
  * Copyright (c) 2006 Joris Vink <joris@openbsd.org>
  *
@@ -160,7 +160,7 @@ cvs_diff_local(struct cvs_file *cf)
 	BUF *b1;
 	struct stat st;
 	struct timeval tv[2], tv2[2];
-	char rbuf[16], *p1, *p2;
+	char rbuf[CVS_REV_BUFSZ], *p1, *p2;
 
 	r1 = NULL;
 	b1 = NULL;
@@ -221,7 +221,7 @@ cvs_diff_local(struct cvs_file *cf)
 		tv[0].tv_usec = 0;
 		tv[1] = tv[0];
 
-		printf("Retrieving revision %s\n", rbuf);
+		cvs_printf("Retrieving revision %s\n", rbuf);
 		rcs_rev_write_stmp(cf->file_rcs, r1, p1, 0);
 	}
 
@@ -233,7 +233,7 @@ cvs_diff_local(struct cvs_file *cf)
 		tv2[0].tv_usec = 0;
 		tv2[1] = tv2[0];
 
-		printf("Retrieving revision %s\n", rbuf);
+		cvs_printf("Retrieving revision %s\n", rbuf);
 		rcs_rev_write_stmp(cf->file_rcs, diff_rev2, p2, 0);
 	} else if (cf->file_status != FILE_REMOVED) {
 		if (fstat(cf->fd, &st) == -1)

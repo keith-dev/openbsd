@@ -1,4 +1,4 @@
-/*	$OpenBSD: tcp_subr.c,v 1.93 2006/03/04 22:40:16 brad Exp $	*/
+/*	$OpenBSD: tcp_subr.c,v 1.98 2007/06/25 12:17:43 markus Exp $	*/
 /*	$NetBSD: tcp_subr.c,v 1.22 1996/02/13 23:44:00 christos Exp $	*/
 
 /*
@@ -99,9 +99,7 @@
 #include <netinet6/ip6protosw.h>
 #endif /* INET6 */
 
-#ifdef TCP_SIGNATURE
 #include <crypto/md5.h>
-#endif /* TCP_SIGNATURE */
 
 /* patchable/settable parameters for tcp */
 int	tcp_mssdflt = TCP_MSS;
@@ -109,9 +107,13 @@ int	tcp_rttdflt = TCPTV_SRTTDFLT / PR_SLOWHZ;
 
 /* values controllable via sysctl */
 int	tcp_do_rfc1323 = 1;
+#ifdef TCP_SACK
 int	tcp_do_sack = 1;	/* RFC 2018 selective ACKs */
+#endif
 int	tcp_ack_on_push = 0;	/* set to enable immediate ACK-on-PUSH */
+#ifdef TCP_ECN
 int	tcp_do_ecn = 0;		/* RFC3168 ECN enabled/disabled? */
+#endif
 int	tcp_do_rfc3390 = 1;	/* RFC3390 Increasing TCP's Initial Window */
 
 u_int32_t	tcp_now = 1;
@@ -153,9 +155,7 @@ tcp_seq  tcp_iss;
 void
 tcp_init()
 {
-#ifdef TCP_COMPAT_42
 	tcp_iss = 1;		/* wrong */
-#endif /* TCP_COMPAT_42 */
 	pool_init(&tcpcb_pool, sizeof(struct tcpcb), 0, 0, 0, "tcpcbpl",
 	    NULL);
 	pool_init(&tcpqe_pool, sizeof(struct tcpqent), 0, 0, 0, "tcpqepl",
@@ -437,7 +437,8 @@ tcp_respond(tp, template, m, ack, seq, flags)
 		   sizeof(struct ip6_hdr), ((struct ip6_hdr *)ti)->ip6_plen);
 		HTONS(((struct ip6_hdr *)ti)->ip6_plen);
 		ip6_output(m, tp ? tp->t_inpcb->inp_outputopts6 : NULL,
-		    (struct route_in6 *)ro, 0, NULL, NULL);
+		    (struct route_in6 *)ro, 0, NULL, NULL,
+		    tp ? tp->t_inpcb : NULL);
 		break;
 #endif /* INET6 */
 	case AF_INET:
@@ -1007,6 +1008,43 @@ tcp_mtudisc_increase(inp, errno)
 		/* also takes care of congestion window */
 		tcp_mss(tp, -1);
 	}
+}
+
+#define TCP_ISS_CONN_INC 4096
+int tcp_secret_init;
+u_char tcp_secret[16];
+MD5_CTX tcp_secret_ctx;
+
+void
+tcp_set_iss_tsm(struct tcpcb *tp)
+{
+	MD5_CTX ctx;
+	u_int32_t digest[4];
+
+	if (tcp_secret_init == 0) {
+		arc4random_bytes(tcp_secret, sizeof(tcp_secret));
+		MD5Init(&tcp_secret_ctx);
+		MD5Update(&tcp_secret_ctx, tcp_secret, sizeof(tcp_secret));
+		tcp_secret_init = 1;
+	}
+	ctx = tcp_secret_ctx;
+	MD5Update(&ctx, (char *)&tp->t_inpcb->inp_lport, sizeof(u_short));
+	MD5Update(&ctx, (char *)&tp->t_inpcb->inp_fport, sizeof(u_short));
+	if (tp->pf == AF_INET6) {
+		MD5Update(&ctx, (char *)&tp->t_inpcb->inp_laddr6,
+		    sizeof(struct in6_addr));
+		MD5Update(&ctx, (char *)&tp->t_inpcb->inp_faddr6,
+		    sizeof(struct in6_addr));
+	} else {
+		MD5Update(&ctx, (char *)&tp->t_inpcb->inp_laddr,
+		    sizeof(struct in_addr));
+		MD5Update(&ctx, (char *)&tp->t_inpcb->inp_faddr,
+		    sizeof(struct in_addr));
+	}
+	MD5Final((u_char *)digest, &ctx);
+	tcp_iss += TCP_ISS_CONN_INC;
+	tp->iss = digest[0] + tcp_iss;
+	tp->ts_modulate = digest[1];
 }
 
 #ifdef TCP_SIGNATURE

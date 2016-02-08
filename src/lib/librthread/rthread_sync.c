@@ -1,4 +1,4 @@
-/*	$OpenBSD: rthread_sync.c,v 1.16 2006/01/05 04:06:48 marc Exp $ */
+/*	$OpenBSD: rthread_sync.c,v 1.18 2007/06/05 18:11:49 kurt Exp $ */
 /*
  * Copyright (c) 2004,2005 Ted Unangst <tedu@openbsd.org>
  * All Rights Reserved.
@@ -37,6 +37,7 @@
 
 #include "rthread.h"
 
+static _spinlock_lock_t static_init_lock = _SPINLOCK_UNLOCKED;
 
 /*
  * Internal implementation of semaphores
@@ -252,13 +253,25 @@ pthread_mutex_destroy(pthread_mutex_t *mutexp)
 static int
 _rthread_mutex_lock(pthread_mutex_t *mutexp, int trywait)
 {
-	pthread_mutex_t mutex = *mutexp;
+	pthread_mutex_t mutex;
 	pthread_t thread = pthread_self();
+	int ret = 0;
 
-	if (!mutex) {
-		pthread_mutex_init(mutexp, NULL);
-		mutex = *mutexp;
+	/*
+	 * If the mutex is statically initialized, perform the dynamic
+	 * initialization. Note: _thread_mutex_lock() in libc requires
+	 * _rthread_mutex_lock() to perform the mutex init when *mutexp
+	 * is NULL.
+	 */
+	if (*mutexp == NULL) {
+		_spinlock(&static_init_lock);
+		if (*mutexp == NULL)
+			ret = pthread_mutex_init(mutexp, NULL);
+		_spinunlock(&static_init_lock);
+		if (ret != 0)
+			return (EINVAL);
 	}
+	mutex = *mutexp;
 	if (mutex->owner == thread) {
 		if (mutex->type == PTHREAD_MUTEX_RECURSIVE) {
 			mutex->count++;

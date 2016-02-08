@@ -1,4 +1,4 @@
-/* $OpenBSD: intr.h,v 1.23 2006/06/15 20:08:29 brad Exp $ */
+/* $OpenBSD: intr.h,v 1.28 2007/05/16 19:37:06 thib Exp $ */
 /* $NetBSD: intr.h,v 1.26 2000/06/03 20:47:41 thorpej Exp $ */
 
 /*-
@@ -114,20 +114,21 @@ struct scbvec {
  * whittle it down to 3.
  */
 
-#define	IPL_NONE	1	/* disable only this interrupt */
-#define	IPL_BIO		1	/* disable block I/O interrupts */
-#define	IPL_NET		1	/* disable network interrupts */
-#define	IPL_TTY		1	/* disable terminal interrupts */
-#define	IPL_CLOCK	2	/* disable clock interrupts */
-#define	IPL_HIGH	3	/* disable all interrupts */
-#define	IPL_SERIAL	1	/* disable serial interrupts */
-#define	IPL_AUDIO	1	/* disable audio interrupts */
+#define	IPL_NONE	ALPHA_PSL_IPL_0
+#define	IPL_SOFTINT	ALPHA_PSL_IPL_SOFT
+#define	IPL_BIO		ALPHA_PSL_IPL_IO
+#define	IPL_NET		ALPHA_PSL_IPL_IO
+#define	IPL_TTY		ALPHA_PSL_IPL_IO
+#define	IPL_SERIAL	ALPHA_PSL_IPL_IO
+#define	IPL_AUDIO	ALPHA_PSL_IPL_IO
+#define	IPL_VM		ALPHA_PSL_IPL_IO
+#define	IPL_CLOCK	ALPHA_PSL_IPL_CLOCK
+#define	IPL_HIGH	ALPHA_PSL_IPL_HIGH
 
-#define	IPL_SOFTSERIAL	0	/* serial software interrupts */
-#define	IPL_SOFTNET	1	/* network software interrupts */
-#define	IPL_SOFTCLOCK	2	/* clock software interrupts */
-#define	IPL_SOFT	3	/* other software interrupts */
-#define	IPL_NSOFT	4
+#define	IPL_SOFTSERIAL	-1	/* serial software interrupts */
+#define	IPL_SOFTNET	-2	/* network software interrupts */
+#define	IPL_SOFTCLOCK	-3	/* clock software interrupts */
+#define	IPL_SOFT	-4	/* other software interrupts */
 
 #define	IST_UNUSABLE	-1	/* interrupt cannot be used */
 #define	IST_NONE	0	/* none (dummy) */
@@ -135,10 +136,32 @@ struct scbvec {
 #define	IST_EDGE	2	/* edge-triggered */
 #define	IST_LEVEL	3	/* level-triggered */
 
+#define SI_SOFTSERIAL	0
+#define SI_SOFTNET	1
+#define SI_SOFTCLOCK	2
+#define SI_SOFT		3
+#define	SI_NSOFT	4
+
 #ifdef	_KERNEL
 
 /* SPL asserts */
-#define	splassert(wantipl)	/* nothing */
+#ifdef DIAGNOSTIC
+/*
+ * Although this function is implemented in MI code, it must be in this MD
+ * header because we don't want this header to include MI includes.
+ */
+void splassert_fail(int, int, const char *);
+extern int splassert_ctl;
+void splassert_check(int, const char *);
+#define	splassert(__wantipl)						\
+	do {								\
+		if (splassert_ctl > 0) {				\
+			splassert_check(__wantipl, __func__);		\
+		}							\
+	} while (0)
+#else
+#define	splassert(wantipl)	do { /* nothing */ } while (0)
+#endif
 
 /* IPL-lowering/restoring macros */
 #define splx(s)								\
@@ -147,21 +170,23 @@ struct scbvec {
 /* IPL-raising functions/macros */
 int _splraise(int);
 
-#define splsoft()		_splraise(ALPHA_PSL_IPL_SOFT)
+#define splsoft()		_splraise(IPL_SOFTINT)
 #define splsoftserial()		splsoft()
 #define splsoftclock()		splsoft()
 #define splsoftnet()		splsoft()
-#define splnet()                _splraise(ALPHA_PSL_IPL_IO)
-#define splbio()                _splraise(ALPHA_PSL_IPL_IO)
-#define spltty()                _splraise(ALPHA_PSL_IPL_IO)
-#define splserial()             _splraise(ALPHA_PSL_IPL_IO)
-#define splaudio()		_splraise(ALPHA_PSL_IPL_IO)
-#define splvm()			_splraise(ALPHA_PSL_IPL_IO)
-#define splclock()              _splraise(ALPHA_PSL_IPL_CLOCK)
-#define splstatclock()          _splraise(ALPHA_PSL_IPL_CLOCK)
-#define splhigh()               _splraise(ALPHA_PSL_IPL_HIGH)
+#define splnet()                _splraise(IPL_NET)
+#define splbio()                _splraise(IPL_BIO)
+#define spltty()                _splraise(IPL_TTY)
+#define splserial()             _splraise(IPL_SERIAL)
+#define splaudio()		_splraise(IPL_AUDIO)
+#define splvm()			_splraise(IPL_VM)
+#define splclock()              _splraise(IPL_CLOCK)
+#define splstatclock()          _splraise(IPL_CLOCK)
+#define splhigh()               _splraise(IPL_HIGH)
 
 #define spllpt()		spltty()
+#define spllock()		splhigh()
+#define splsched()		splhigh()
 
 /*
  * Interprocessor interrupts.  In order how we want them processed.
@@ -172,6 +197,9 @@ int _splraise(int);
 #define	ALPHA_IPI_SHOOTDOWN	0x0000000000000008UL
 #define	ALPHA_IPI_IMB		0x0000000000000010UL
 #define	ALPHA_IPI_AST		0x0000000000000020UL
+#define	ALPHA_IPI_SYNCH_FPU	0x0000000000000040UL
+#define	ALPHA_IPI_DISCARD_FPU	0x0000000000000080UL
+#define	ALPHA_IPI_PAUSE		0x0000000000000100UL
 
 #define	ALPHA_NIPIS		6	/* must not exceed 64 */
 
@@ -218,9 +246,8 @@ extern unsigned long ssir;
 
 #define	setsoft(x)	atomic_setbits_ulong(&ssir, 1 << (x))
 
-#define	__GENERIC_SOFT_INTERRUPTS
 struct alpha_soft_intrhand {
-	LIST_ENTRY(alpha_soft_intrhand)
+	TAILQ_ENTRY(alpha_soft_intrhand)
 		sih_q;
 	struct alpha_soft_intr *sih_intrhead;
 	void	(*sih_fn)(void *);
@@ -229,10 +256,10 @@ struct alpha_soft_intrhand {
 };
 
 struct alpha_soft_intr {
-	LIST_HEAD(, alpha_soft_intrhand)
+	TAILQ_HEAD(, alpha_soft_intrhand)
 		softintr_q;
 	struct simplelock softintr_slock;
-	unsigned long softintr_ipl;
+	unsigned long softintr_siq;
 };
 
 void	*softintr_establish(int, void (*)(void *), void *);
@@ -243,8 +270,18 @@ void	softintr_dispatch(void);
 #define	softintr_schedule(arg)						\
 do {									\
 	struct alpha_soft_intrhand *__sih = (arg);			\
-	__sih->sih_pending = 1;						\
-	setsoft(__sih->sih_intrhead->softintr_ipl);			\
+	struct alpha_soft_intr *__si = __sih->sih_intrhead;		\
+	int __s;							\
+									\
+	__s = splhigh();						\
+	simple_lock(&__si->softintr_slock);				\
+	if (__sih->sih_pending == 0) {					\
+		TAILQ_INSERT_TAIL(&__si->softintr_q, __sih, sih_q);	\
+		__sih->sih_pending = 1;					\
+		setsoft(__si->softintr_siq);				\
+	}								\
+	simple_unlock(&__si->softintr_slock);				\
+	splx(__s);							\
 } while (0)
 
 /* XXX For legacy software interrupts. */

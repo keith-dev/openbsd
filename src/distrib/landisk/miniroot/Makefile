@@ -16,7 +16,7 @@ DISKTYPE=       miniroot2.5M
 #NBLKS=		8192
 NBLKS=		5120
 # minfree, opt, b/i  trks, sects, cpg
-NEWFSARGS= -m 0 -o space -c 16 -i 4096
+NEWFSARGS= -m 0 -o space -i 4096
 
 
 .ifndef DESTDIR
@@ -38,10 +38,10 @@ do_files:
 rd_setup:
 	dd if=/dev/zero of=${IMAGE} bs=512 count=${NBLKS}
 	vnconfig -v -c ${VND} ${IMAGE}
-	disklabel -w -r ${VND} ${DISKTYPE}
+	disklabel -w ${VND} ${DISKTYPE}
 	fdisk -i -y ${VND}
 	fdisk -u -f ${DESTDIR}/usr/mdec/mbr -y ${VND}
-	disklabel -w -r ${VND} ${DISKTYPE}
+	disklabel -w ${VND} ${DISKTYPE}
 	disklabel -v -B -b ${DESTDIR}/usr/mdec/xxboot ${VND} 
 	newfs ${NEWFSARGS} ${VND_RDEV}
 	fsck ${VND_RDEV}

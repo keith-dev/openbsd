@@ -1,4 +1,4 @@
-/*	$OpenBSD: parse.y,v 1.43 2007/02/01 13:25:28 claudio Exp $ */
+/*	$OpenBSD: parse.y,v 1.50 2007/07/11 14:10:25 pyr Exp $ */
 
 /*
  * Copyright (c) 2004, 2005 Esben Norby <norby@openbsd.org>
@@ -45,7 +45,6 @@ static FILE			*fin = NULL;
 static int			 lineno = 1;
 static int			 errors = 0;
 char				*infile;
-char				*start_state;
 
 struct area	*area = NULL;
 struct iface	*iface = NULL;
@@ -106,16 +105,17 @@ typedef struct {
 %}
 
 %token	AREA INTERFACE ROUTERID FIBUPDATE REDISTRIBUTE RTLABEL
-%token	RFC1583COMPAT SPFDELAY SPFHOLDTIME
+%token	RFC1583COMPAT STUB ROUTER SPFDELAY SPFHOLDTIME EXTTAG
 %token	AUTHKEY AUTHTYPE AUTHMD AUTHMDKEYID
 %token	METRIC PASSIVE
 %token	HELLOINTERVAL TRANSMITDELAY
 %token	RETRANSMITINTERVAL ROUTERDEADTIME ROUTERPRIORITY
 %token	SET TYPE
 %token	YES NO
+%token	DEMOTE
 %token	ERROR
 %token	<v.string>	STRING
-%type	<v.number>	number yesno no optlist, optlist_l option
+%type	<v.number>	number yesno no optlist, optlist_l option demotecount
 %type	<v.string>	string
 
 %%
@@ -239,6 +239,15 @@ conf_main	: ROUTERID STRING {
 			SIMPLEQ_INSERT_TAIL(&conf->redist_list, r, entry);
 			conf->redistribute |= REDISTRIBUTE_ON;
 		}
+		| RTLABEL STRING EXTTAG number {
+			if (!$4) {
+				yyerror("invalid external route tag");
+				free($2);
+				YYERROR;
+			}
+			rtlabel_tag(rtlabel_name2id($2), $4);
+			free($2);
+		}
 		| RFC1583COMPAT yesno {
 			conf->rfc1583compat = $2;
 		}
@@ -260,12 +269,27 @@ conf_main	: ROUTERID STRING {
 			}
 			conf->spf_hold_time = $2;
 		}
+		| STUB ROUTER yesno {
+			if ($3)
+				conf->flags |= OSPFD_FLAG_STUB_ROUTER;
+			else
+				/* allow to force non stub mode */
+				conf->flags &= ~OSPFD_FLAG_STUB_ROUTER;
+		}
 		| defaults
 		;
 
 optlist		: /* empty */ 			{ $$ = DEFAULT_REDIST_METRIC; }
-		| SET option			{ $$ = $2; }
-		| SET optnl '{' optnl optlist_l optnl '}'	{ $$ = $5; }
+		| SET option			{
+			$$ = $2;
+			if (($$ & LSA_METRIC_MASK) == 0)
+				$$ |= DEFAULT_REDIST_METRIC;
+		}
+		| SET optnl '{' optnl optlist_l optnl '}'	{
+			$$ = $5;
+			if (($$ & LSA_METRIC_MASK) == 0)
+				$$ |= DEFAULT_REDIST_METRIC;
+		}
 		;
 
 optlist_l	: optlist_l comma option {
@@ -451,11 +475,37 @@ area		: AREA STRING {
 		}
 		;
 
+demotecount	: number	{ $$ = $1; }
+		| /*empty*/	{ $$ = 1; }
+		;
+
 areaopts_l	: areaopts_l areaoptsl nl
 		| areaoptsl optnl
 		;
 
 areaoptsl	: interface
+		| DEMOTE STRING	demotecount {
+			if ($3 > 255) {
+				yyerror("demote count too big: max 255");
+				free($2);
+				YYERROR;
+			}
+			area->demote_level = $3;
+			if (strlcpy(area->demote_group, $2,
+			    sizeof(area->demote_group)) >=
+			    sizeof(area->demote_group)) {
+				yyerror("demote group name \"%s\" too long");
+				free($2);
+				YYERROR;
+			}
+			free($2);
+			if (carp_demote_init(area->demote_group,
+			    conf->opts & OSPFD_OPT_FORCE_DEMOTE) == -1) {
+				yyerror("error initializing group \"%s\"",
+				    area->demote_group);
+				YYERROR;
+			}
+		}
 		| defaults
 		;
 
@@ -530,6 +580,22 @@ interfaceopts_l	: interfaceopts_l interfaceoptsl nl
 		;
 
 interfaceoptsl	: PASSIVE		{ iface->passive = 1; }
+		| DEMOTE STRING		{
+			if (strlcpy(iface->demote_group, $2,
+			    sizeof(iface->demote_group)) >=
+			    sizeof(iface->demote_group)) {
+				yyerror("demote group name \"%s\" too long");
+				free($2);
+				YYERROR;
+			}
+			free($2);
+			if (carp_demote_init(iface->demote_group,
+			    conf->opts & OSPFD_OPT_FORCE_DEMOTE) == -1) {
+				yyerror("error initializing group \"%s\"",
+				    iface->demote_group);
+				YYERROR;
+			}
+		}
 		| defaults
 		;
 
@@ -571,6 +637,8 @@ lookup(char *s)
 		{"auth-md",		AUTHMD},
 		{"auth-md-keyid",	AUTHMDKEYID},
 		{"auth-type",		AUTHTYPE},
+		{"demote",		DEMOTE},
+		{"external-tag",	EXTTAG},
 		{"fib-update",		FIBUPDATE},
 		{"hello-interval",	HELLOINTERVAL},
 		{"interface",		INTERFACE},
@@ -580,6 +648,7 @@ lookup(char *s)
 		{"redistribute",	REDISTRIBUTE},
 		{"retransmit-interval",	RETRANSMITINTERVAL},
 		{"rfc1583compat",	RFC1583COMPAT},
+		{"router",		ROUTER},
 		{"router-dead-time",	ROUTERDEADTIME},
 		{"router-id",		ROUTERID},
 		{"router-priority",	ROUTERPRIORITY},
@@ -587,6 +656,7 @@ lookup(char *s)
 		{"set",			SET},
 		{"spf-delay",		SPFDELAY},
 		{"spf-holdtime",	SPFHOLDTIME},
+		{"stub",		STUB},
 		{"transmit-delay",	TRANSMITDELAY},
 		{"type",		TYPE},
 		{"yes",			YES}
@@ -818,6 +888,8 @@ parse_config(char *filename, int opts)
 	infile = filename;
 
 	conf->opts = opts;
+	if (conf->opts & OSPFD_OPT_STUB_ROUTER)
+		conf->flags |= OSPFD_FLAG_STUB_ROUTER;
 	LIST_INIT(&conf->area_list);
 	LIST_INIT(&conf->cand_list);
 	SIMPLEQ_INIT(&conf->redist_list);

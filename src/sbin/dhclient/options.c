@@ -1,4 +1,4 @@
-/*	$OpenBSD: options.c,v 1.34 2007/02/14 23:19:26 deraadt Exp $	*/
+/*	$OpenBSD: options.c,v 1.36 2007/06/02 01:29:11 pvalchev Exp $	*/
 
 /* DHCP options parsing and reassembly. */
 
@@ -285,6 +285,7 @@ pretty_print_option(unsigned int code, unsigned char *data, int len,
 	for (i = 0; i < numhunk; i++) {
 		for (j = 0; j < numelem; j++) {
 			int opcount;
+			size_t oplen;
 			switch (fmtbuf[j]) {
 			case 't':
 				if (emit_quotes) {
@@ -296,10 +297,12 @@ pretty_print_option(unsigned int code, unsigned char *data, int len,
 					    !isprint(*dp)) {
 						if (dp + 1 != data + len ||
 						    *dp != 0) {
+							size_t oplen;
 							snprintf(op, opleft,
 							    "\\%03o", *dp);
-							op += 4;
-							opleft -= 4;
+							oplen = strlen(op);
+							op += oplen;
+							opleft -= oplen;
 						}
 					} else if (*dp == '"' ||
 					    *dp == '\'' ||
@@ -390,8 +393,9 @@ pretty_print_option(unsigned int code, unsigned char *data, int len,
 			default:
 				warning("Unexpected format code %c", fmtbuf[j]);
 			}
-			op += strlen(op);
-			opleft -= strlen(op);
+			oplen = strlen(op);
+			op += oplen;
+			opleft -= oplen;
 			if (opleft < 1)
 				goto toobig;
 			if (j + 1 < numelem && comma != ':') {

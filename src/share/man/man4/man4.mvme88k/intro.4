@@ -1,4 +1,4 @@
-.\"	$OpenBSD: intro.4,v 1.5 2006/09/07 14:29:23 jmc Exp $
+.\"	$OpenBSD: intro.4,v 1.8 2007/06/21 10:18:27 jmc Exp $
 .\" Copyright (c) 1990, 1991 Regents of the University of California.
 .\" All rights reserved.
 .\"
@@ -28,7 +28,7 @@
 .\"
 .\"     from: @(#)intro.4	5.2 (Berkeley) 3/27/91
 .\"
-.Dd May 14, 2003
+.Dd $Mdocdate: June 21 2007 $
 .Dt INTRO 4 mvme88k
 .Os
 .Sh NAME
@@ -39,14 +39,14 @@ The manual pages in section 4 describe the special files,
 related driver functions, and networking support
 available in the system.
 In this part of the manual, the
-.Tn SYNOPSIS
+.Sx SYNOPSIS
 section of
 each configurable device gives a sample specification
 for use in constructing a system description for the
 .Xr config 8
 program.
 The
-.Tn DIAGNOSTICS
+.Sx DIAGNOSTICS
 section lists messages which may appear on the console
 and/or in the system error log
 .Pa /var/log/messages
@@ -98,25 +98,25 @@ Not all supported devices are listed.
 .Pp
 .Bl -tag -compact -width "pcctwo(4)" -offset 3n
 .It Xr bussw 4
-BusSwitch local peripheral bus interface.
+BusSwitch local peripheral bus interface
 .\" .It Xr cl 4
 .\" Cirrus Logic CL2400 serial controller.
 .It Xr ie 4
-Intel i82596 Ethernet device.
+Intel i82596 Ethernet device
 .It Xr le 4
-AMD LANCE Ethernet device.
+AMD LANCE Ethernet device
 .\" .It Xr memc 4
 .\" memory controller.
 .It Xr osiop 4
-Symbios/NCR 53C710 SCSI controller.
+Symbios/NCR 53C710 SCSI driver
 .It Xr pcctwo 4
-PCCchip2 local bus controller.
+PCCchip2 local bus controller
 .\" .It Xr syscon 4
 .\" MVME188 system controller.
 .It Xr vme 4
-VMEchip2 VMEbus interface chip.
+VMEchip2 VMEbus interface chip
 .It Xr vs 4
-MVME328S High Performance SCSI Controller.
+MVME328S High Performance SCSI Controller
 .\" .It Xr vx 4
 .\" MVME332XT High Performance Serial I/O Controller.
 .El

@@ -1,4 +1,4 @@
-/*	$OpenBSD: autri.c,v 1.18 2006/04/07 22:41:33 jsg Exp $	*/
+/*	$OpenBSD: autri.c,v 1.20 2007/05/26 00:36:03 krw Exp $	*/
 
 /*
  * Copyright (c) 2001 SOMEYA Yoshihiko and KUROSAWA Takahiro.
@@ -308,7 +308,7 @@ autri_read_codec(sc_, index, data)
 	/* send Read Command to AC97 */
 	TWRITE4(sc, addr, (index & 0x7f) | cmd);
 
-	/* wait for 'Returned data is avalable' */
+	/* wait for 'Returned data is available' */
 	for (count=0; count < 0xffff; count++) {
 		status = TREAD4(sc, addr);
 		if ((status & busy) == 0)
@@ -815,9 +815,9 @@ autri_intr(p)
 			mask = 1 << (ch & 0x1f);
 			if (active[(ch & 0x20) ? 1 : 0] & mask) {
 
-				/* clear interupt */
+				/* clear interrupt */
 				TWRITE4(sc, (ch & 0x20) ? AUTRI_AIN_B : AUTRI_AIN_A, mask);
-				/* disable interupt */
+				/* disable interrupt */
 				autri_reg_clear_4(sc,(ch & 0x20) ? AUTRI_AINTEN_B : AUTRI_AINTEN_A, mask);
 #if 0
 				reg = TREAD4(sc,AUTRI_LFO_GC_CIR) & ~0x0000003f;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: intr.h,v 1.31 2006/03/12 02:55:58 brad Exp $ */
+/*	$OpenBSD: intr.h,v 1.33 2007/05/19 10:20:57 miod Exp $ */
 
 /*
  * Copyright (c) 1997 Per Fogelstrom, Opsycon AB and RTMX Inc, USA.
@@ -53,6 +53,7 @@
 #if defined(_KERNEL) && !defined(_LOCORE)
 
 #include <sys/evcount.h>
+#include <machine/atomic.h>
 
 #define PPC_NIRQ	66
 #define PPC_CLK_IRQ	64
@@ -67,8 +68,6 @@ int  splsoftnet(void);
 
 void do_pending_int(void);
 
-
-volatile extern int cpl, ipending, astpending;
 extern int imask[IPL_NUM];
 
 /* SPL asserts */
@@ -82,11 +81,12 @@ extern int imask[IPL_NUM];
 volatile static __inline int
 splraise(int newcpl)
 {
+	struct cpu_info *ci = curcpu();
 	int oldcpl;
 
 	__asm__ volatile("":::"memory");	/* don't reorder.... */
-	oldcpl = cpl;
-	cpl = oldcpl | newcpl;
+	oldcpl = ci->ci_cpl;
+	ci->ci_cpl = oldcpl | newcpl;
 	__asm__ volatile("":::"memory");	/* don't reorder.... */
 	return(oldcpl);
 }
@@ -94,9 +94,11 @@ splraise(int newcpl)
 volatile static __inline void
 splx(int newcpl)
 {
+	struct cpu_info *ci = curcpu();
+
 	__asm__ volatile("":::"memory");	/* reorder protect */
-	cpl = newcpl;
-	if(ipending & ~newcpl)
+	ci->ci_cpl = newcpl;
+	if(ci->ci_ipending & ~newcpl)
 		do_pending_int();
 	__asm__ volatile("":::"memory");	/* reorder protect */
 }
@@ -104,29 +106,19 @@ splx(int newcpl)
 volatile static __inline int
 spllower(int newcpl)
 {
+	struct cpu_info *ci = curcpu();
 	int oldcpl;
 
 	__asm__ volatile("":::"memory");	/* reorder protect */
-	oldcpl = cpl;
-	cpl = newcpl;
-	if(ipending & ~newcpl)
+	oldcpl = ci->ci_cpl;
+	ci->ci_cpl = newcpl;
+	if(ci->ci_ipending & ~newcpl)
 		do_pending_int();
 	__asm__ volatile("":::"memory");	/* reorder protect */
 	return(oldcpl);
 }
 
-/* Following code should be implemented with lwarx/stwcx to avoid
- * the disable/enable. i need to read the manual once more.... */
-static __inline void
-set_sint(int pending)
-{
-	int	msrsave;
-
-	__asm__ ("mfmsr %0" : "=r"(msrsave));
-	__asm__ volatile ("mtmsr %0" :: "r"(msrsave & ~PSL_EE));
-	ipending |= pending;
-	__asm__ volatile ("mtmsr %0" :: "r"(msrsave));
-}
+#define	set_sint(p)	atomic_setbits_int(&curcpu()->ci_ipending, p)
 
 #define	SINT_CLOCK	0x10000000
 #define	SINT_NET	0x20000000
@@ -140,6 +132,8 @@ set_sint(int pending)
 #define splaudio()	splraise(imask[IPL_AUDIO])
 #define splclock()	splraise(imask[IPL_CLOCK])
 #define splvm()		splraise(imask[IPL_VM])
+#define splsched()	splhigh()
+#define spllock()	splhigh()
 #define splstatclock()	splhigh()
 #define	splsoftclock()	splraise(SINT_CLOCK)
 #define	splsoftnet()	splraise(SINT_NET|SINT_CLOCK)

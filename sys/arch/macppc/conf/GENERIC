@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.161 2007/02/28 21:54:43 grange Exp $g
+#	$OpenBSD: GENERIC,v 1.171 2007/08/10 20:48:22 mglocker Exp $g
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -35,7 +35,7 @@ cpu*		at mainbus0
 mpcpcibr*	at mainbus0	# MPC106 PCI Bridge.
 memc*		at mainbus0
 openpic*	at memc?	# openpic interrupt controller
-ki2c*           at memc?        # Keywest I2C
+kiic*           at memc?        # Keywest I2C
 pchb*		at pci?
 ht*		at mainbus0
 smu*		at mainbus0
@@ -80,6 +80,7 @@ epic*		at pci?		# SMC EPIC/100 ethernet
 bge*		at pci?		# Broadcom BCM570x (aka Tigon3)
 ti*		at pci?		# Alteon Tigon 1Gb ethernet
 re*		at pci?		# Realtek 8169/8169S/8110S
+re*		at cardbus?	# Realtek 8169/8169S/8110S
 stge*		at pci?		# Sundance TC9021 GigE
 skc*		at pci?		# SysKonnect GEnesis 984x
 sk*		at skc?		#  each port of above
@@ -91,11 +92,13 @@ wi*		at pci?		# WaveLAN IEEE 802.11DS
 ral*		at pci?		# Ralink RT2500/RT2501/RT2600
 rtw*		at pci?		# Realtek 8180
 vr*		at pci?		# VIA Rhine ethernet
+pcn*		at pci?		# AMD PCnet-PCI Ethernet
 musycc*		at pci?		# Conexant HDLC controller
 art*		at musycc?	# Accoom Artery E1/T1 cards
 xge*		at pci?		# Neterion Xframe-I/II 10Gb ethernet
 mbg*		at pci?		# Meinberg Funkuhren radio clocks
 malo*		at pci?		# Marvell Libertas
+acx*		at pci?		# TI ACX100/ACX111 (802.11b/g)
 
 iop*		at pci?		# I2O processor
 ioprbs*		at iop?		# I2O arrays
@@ -138,16 +141,18 @@ pwdog0		at pci?		# Quancom PWDOG1 watchdog timer
 macintr0	at macobio?	# old interrupt controller
 openpic*	at macobio?	# openpic interrupt controller
 bm*		at macobio?	# BMAC ethernet
+xlights*	at macobio?	# Xserve front panel LEDs
 mc*		at macobio?	# MACE ethernet
 #esp*		at macobio? flags 0x0000ffff # 53c9x SCSI
 mesh*		at macobio? flags 0xffff # MESH SCSI
 #nvram*		at macobio?	# nvram
 adb*		at macobio?	# Apple Desktop Bus
 apm0		at adb?		# APM emulation
-pi2c0		at adb?		# PMU I2C
+piic0		at adb?		# PMU I2C
 wi*		at macobio?	# airport
 macgpio*	at macobio?	# GPIO, PMU interrupt router.
 macgpio*	at macgpio?	# GPIO, PMU interrupt router.
+sysbutton*	at macgpio?	# Xserve system id button.
 akbd*		at adb?		# ADB keyboard
 wskbd*		at akbd? mux 1
 ams*		at adb?		# ADB mouse
@@ -157,7 +162,7 @@ zsc*		at macobio?
 zstty*		at zsc?
 
 awacs*		at macobio?	# Apple audio device
-ki2c*		at macobio?	# Keywest I2C
+kiic*		at macobio?	# Keywest I2C
 snapper*	at macobio?	# Snapper audio device
 tumbler*	at macobio?	# Tumbler audio device
 onyx*		at macobio?	# Onyx audio device
@@ -270,7 +275,6 @@ scsibus* at usscanner?
 #uyap*	at uhub?		# Y@P firmware loader
 udsbr*	at uhub?		# D-Link DSB-R100 radio
 radio*	at udsbr?		# USB radio
-#ubt*	at uhub?		# USB Bluetooth
 ugen*	at uhub?		# USB Generic driver
 ural*	at uhub?		# Ralink RT2500USB
 rum*	at uhub?		# Ralink RT2501USB/RT2601USB
@@ -278,9 +282,15 @@ udcf*	at uhub?		# Gude Expert mouseCLOCK
 uow*	at uhub?		# Maxim/Dallas DS2490 1-Wire adapter
 onewire* at uow?
 
+# Bluetooth controllers
+#ubt*	at uhub?		# USB Bluetooth
+
+# Bluetooth bus support
+#bthub*	at ubt?
+
 # I2C bus support
-iic*		at ki2c?
-iic*		at pi2c?
+iic*		at kiic?
+iic*		at piic?
 iic*		at smu?
 
 # I2C devices
@@ -305,6 +315,7 @@ cardslot*	at cbb?
 ep*		at pcmcia?	# PCMCIA based 3C5xx ethernet
 an*		at pcmcia?	# Cisco/Aironet
 wi*		at pcmcia?	# WaveLAN IEEE 802.11DS
+malo*		at pcmcia?	# Marvell 88W8385
 dc*		at cardbus?	# 21143, "tulip" clone ethernet
 fxp*		at cardbus?	# Intel PRO/100 ethernet
 xl*		at cardbus?	# 3C575/3C656 ethernet
@@ -314,6 +325,7 @@ wdc*		at pcmcia?
 com*		at pcmcia?
 com*		at cardbus?
 malo*		at cardbus?	# Marvell Libertas
+acx*		at cardbus?	# TI ACX100/ACX111 (802.11b/g)
 
 wsdisplay*	at vgafb?
 
@@ -348,4 +360,3 @@ owtemp* at onewire?		# Temperature
 
 pseudo-device	hotplug	1	# devices hot plugging
 pseudo-device	wsmux	2	# mouse & keyboard multiplexor
-pseudo-device	bio	1	# ioctl multiplexing

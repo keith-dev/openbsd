@@ -1,4 +1,4 @@
-/*	$OpenBSD: trap.c,v 1.46 2007/02/27 22:46:32 deraadt Exp $	*/
+/*	$OpenBSD: trap.c,v 1.51 2007/07/05 22:16:30 kettenis Exp $	*/
 /*	$NetBSD: trap.c,v 1.73 2001/08/09 01:03:01 eeh Exp $ */
 
 /*
@@ -347,11 +347,7 @@ userret(struct proc *p)
 	while ((sig = CURSIG(p)) != 0)
 		postsig(sig);
 
-#ifdef notyet
 	curcpu()->ci_schedstate.spc_curpriority = p->p_priority = p->p_usrpri;
-#else
-	curpriority = p->p_priority = p->p_usrpri;
-#endif
 }
 
 /*
@@ -464,10 +460,9 @@ trap(tf, type, pc, tstate)
 dopanic:
 			trap_trace_dis = 1;
 
-			printf("trap type 0x%x: pc=%lx", type, pc); 
-			printf(" npc=%lx pstate=%b\n",
-			    (long)tf->tf_npc, pstate, PSTATE_BITS);
-			panic(type < N_TRAP_TYPES ? trap_type[type] : T);
+			panic("trap type 0x%x (%s): pc=%lx npc=%lx pstate=%b\n",
+			    type, type < N_TRAP_TYPES ? trap_type[type] : T,
+			    pc, (long)tf->tf_npc, pstate, PSTATE_BITS);
 			/* NOTREACHED */
 		}
 #if defined(COMPAT_SVR4) || defined(COMPAT_SVR4_32)
@@ -498,10 +493,9 @@ badtrap:
 	case T_AST:
 		want_ast = 0;
 		if (p->p_flag & P_OWEUPC) {
-			p->p_flag &= ~P_OWEUPC;
 			ADDUPROF(p);
 		}
-		if (want_resched)
+		if (curcpu()->ci_want_resched)
 			preempt(NULL);
 		break;
 
@@ -815,8 +809,6 @@ data_access_fault(tf, type, pc, addr, sfva, sfsr)
 	vaddr_t onfault;
 	union sigval sv;
 
-	sv.sival_ptr = (void *)addr;
-
 	uvmexp.traps++;
 	if ((p = curproc) == NULL)	/* safety check */
 		p = &proc0;
@@ -902,15 +894,20 @@ kfault:
 				extern int trap_trace_dis;
 				trap_trace_dis = 1; /* Disable traptrace for printf */
 				(void) splhigh();
-				printf("data fault: pc=%lx addr=%lx\n",
+				panic("kernel data fault: pc=%lx addr=%lx\n",
 				    pc, addr);
-				panic("kernel fault");
 				/* NOTREACHED */
 			}
 			tf->tf_pc = onfault;
 			tf->tf_npc = onfault + 4;
 			return;
 		}
+
+		if (type == T_FDMMU_MISS || (sfsr & SFSR_FV) == 0)
+			sv.sival_ptr = (void *)va;
+		else
+			sv.sival_ptr = (void *)sfva;
+
 		if (rv == ENOMEM) {
 			printf("UVM: pid %d (%s), uid %u killed: out of swap\n",
 			       p->p_pid, p->p_comm,
@@ -1037,8 +1034,7 @@ text_access_fault(tf, type, pc, sfsr)
 		extern int trap_trace_dis;
 		trap_trace_dis = 1; /* Disable traptrace for printf */
 		(void) splhigh();
-		printf("text_access_fault: pc=%lx va=%lx\n", pc, va);
-		panic("kernel fault");
+		panic("kernel text_access_fault: pc=%lx va=%lx\n", pc, va);
 		/* NOTREACHED */
 	} else
 		p->p_md.md_tf = tf;
@@ -1069,8 +1065,7 @@ text_access_fault(tf, type, pc, sfsr)
 			extern int trap_trace_dis;
 			trap_trace_dis = 1; /* Disable traptrace for printf */
 			(void) splhigh();
-			printf("text fault: pc=%llx\n", (unsigned long long)pc);
-			panic("kernel fault");
+			panic("kernel text fault: pc=%llx\n", (unsigned long long)pc);
 			/* NOTREACHED */
 		}
 		trapsignal(p, SIGSEGV, access_type, SEGV_MAPERR, sv);
@@ -1140,8 +1135,7 @@ text_access_error(tf, type, pc, sfsr, afva, afsr)
 		extern int trap_trace_dis;
 		trap_trace_dis = 1; /* Disable traptrace for printf */
 		(void) splhigh();
-		printf("text error: pc=%lx sfsr=%b\n", pc, sfsr, SFSR_BITS);
-		panic("kernel fault");
+		panic("kernel text error: pc=%lx sfsr=%b\n", pc, sfsr, SFSR_BITS);
 		/* NOTREACHED */
 	} else
 		p->p_md.md_tf = tf;
@@ -1173,9 +1167,8 @@ text_access_error(tf, type, pc, sfsr, afva, afsr)
 			extern int trap_trace_dis;
 			trap_trace_dis = 1; /* Disable traptrace for printf */
 			(void) splhigh();
-			printf("text error: pc=%lx sfsr=%b\n", pc,
+			panic("kernel text error: pc=%lx sfsr=%b\n", pc,
 			    sfsr, SFSR_BITS);
-			panic("kernel fault");
 			/* NOTREACHED */
 		}
 		trapsignal(p, SIGSEGV, access_type, SEGV_MAPERR, sv);
@@ -1229,18 +1222,15 @@ syscall(tf, code, pc)
 	int error = 0, new;
 	register_t args[8];
 	register_t rval[2];
-#ifdef DIAGNOSTIC
-	extern struct pcb *cpcb;
-#endif
 
 	uvmexp.syscalls++;
 	p = curproc;
 #ifdef DIAGNOSTIC
 	if (tf->tf_tstate & TSTATE_PRIV)
 		panic("syscall from kernel");
-	if (cpcb != &p->p_addr->u_pcb)
+	if (curpcb != &p->p_addr->u_pcb)
 		panic("syscall: cpcb/ppcb mismatch");
-	if (tf != (struct trapframe64 *)((caddr_t)cpcb + USPACE) - 1)
+	if (tf != (struct trapframe64 *)((caddr_t)curpcb + USPACE) - 1)
 		panic("syscall: trapframe");
 #endif
 	p->p_md.md_tf = tf;

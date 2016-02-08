@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.51 2005/11/15 14:36:48 robert Exp $	*/
+/*	$OpenBSD: conf.c,v 1.55 2007/06/20 18:28:56 miod Exp $	*/
 /*	$NetBSD: conf.c,v 1.16 1996/10/18 21:26:57 cgd Exp $	*/
 
 /*-
@@ -96,6 +96,7 @@ cdev_decl(com);
 #include "wsdisplay.h"
 #include "wskbd.h"
 #include "wsmouse.h"
+#include "wsmux.h"
 #include "midi.h"
 cdev_decl(midi);
 #include "sequencer.h"
@@ -104,6 +105,7 @@ cdev_decl(music);
 #include "spkr.h"
 cdev_decl(spkr);
 
+#include "bio.h"
 #include "lpt.h"
 cdev_decl(lpt);
 cdev_decl(prom);			/* XXX XXX XXX */
@@ -195,13 +197,14 @@ struct cdevsw	cdevsw[] =
 #else
 	cdev_notdef(),
 #endif
-	cdev_notdef(),			/* 53: ALTQ (deprecated) */
+	cdev_bio_init(NBIO,bio),	/* 53: ioctl tunnel */
 	cdev_iop_init(NIOP, iop),	/* 54: I2O IOP control interface */
 	cdev_ptm_init(NPTY,ptm),	/* 55: pseudo-tty ptm device */
 	cdev_hotplug_init(NHOTPLUG,hotplug), /* 56: devices hot plugging */
 	cdev_crypto_init(NCRYPTO,crypto), /* 57: /dev/crypto */
 	cdev_bktr_init(NBKTR,bktr),	/* 58: Bt848 video capture device */
 	cdev_radio_init(NRADIO,radio), /* 59: generic radio I/O */
+	cdev_mouse_init(NWSMUX, wsmux),	/* 60: ws multiplexor */
 };
 int	nchrdev = sizeof (cdevsw) / sizeof (cdevsw[0]);
 

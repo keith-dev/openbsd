@@ -1,4 +1,4 @@
-.\"	$OpenBSD: cp.1,v 1.25 2004/12/10 10:23:30 jmc Exp $
+.\"	$OpenBSD: cp.1,v 1.28 2007/05/31 19:19:14 jmc Exp $
 .\"	$NetBSD: cp.1,v 1.9 1995/07/25 19:36:45 jtc Exp $
 .\"
 .\" Copyright (c) 1989, 1990, 1993, 1994
@@ -33,7 +33,7 @@
 .\"
 .\"	@(#)cp.1	8.3 (Berkeley) 4/18/94
 .\"
-.Dd April 18, 1994
+.Dd $Mdocdate: May 31 2007 $
 .Dt CP 1
 .Os
 .Sh NAME
@@ -166,6 +166,10 @@ conditions must be fulfilled or both bits are removed.
 .Pp
 Appropriate permissions are required for file creation or overwriting.
 .Pp
+When a file containing large blocks of zero-valued bytes is copied,
+.Nm
+will attempt to create a sparse file.
+.Pp
 Symbolic links are always followed unless the
 .Fl R
 flag is set, in which case symbolic links are not followed, by default.
@@ -218,6 +222,12 @@ directory:
 .Xr fts 3 ,
 .Xr symlink 7
 .Sh STANDARDS
+The
+.Nm
+utility is compliant with the
+.St -p1003.1-2004
+specification.
+.Pp
 Historic versions of the
 .Nm
 utility had a
@@ -226,12 +236,6 @@ option.
 This implementation supports that option; however, its use is strongly
 discouraged, as it does not correctly copy special files, symbolic links
 or FIFOs.
-.Pp
-The
-.Nm
-utility is expected to be
-.St -p1003.2
-compatible.
 .Sh HISTORY
 A
 .Nm

@@ -1,4 +1,4 @@
-/*	$OpenBSD: i82489var.h,v 1.3 2006/03/29 15:02:27 mickey Exp $	*/
+/*	$OpenBSD: i82489var.h,v 1.6 2007/05/26 22:09:17 weingart Exp $	*/
 /*	$NetBSD: i82489var.h,v 1.1.2.2 2000/02/21 18:46:14 sommerfeld Exp $	*/
 
 /*-
@@ -102,10 +102,26 @@ extern void Xintrltimer(void);
 #define LAPIC_SOFTCLOCK_VECTOR		IPL_SOFTCLOCK
 #define LAPIC_SOFTNET_VECTOR		IPL_SOFTNET
 #define LAPIC_SOFTTTY_VECTOR		IPL_SOFTTTY
+#define LAPIC_SOFTAST_VECTOR		IPL_SOFTAST
+
+/*
+ * Special IPI vectors. We can use IDT 0xf0 - 0xff for this.
+ */
+#define LAPIC_IPI_OFFSET		0xf0
+#define LAPIC_IPI_AST			(LAPIC_IPI_OFFSET + 0)
+#define LAPIC_IPI_INVLTLB		(LAPIC_IPI_OFFSET + 1)
+#define LAPIC_IPI_INVLPG		(LAPIC_IPI_OFFSET + 2)
+#define LAPIC_IPI_INVLRANGE		(LAPIC_IPI_OFFSET + 3)
+
+extern void Xintripi_ast(void);
+extern void Xintripi_invltlb(void);
+extern void Xintripi_invlpg(void);
+extern void Xintripi_invlrange(void);
 
 extern void Xintrsoftclock(void);
 extern void Xintrsoftnet(void);
 extern void Xintrsofttty(void);
+extern void Xintrsoftast(void);
 
 extern void (*apichandler[])(void);
 
@@ -117,5 +133,7 @@ extern void lapic_set_lvt(void);
 extern void lapic_set_softvectors(void);
 extern void lapic_enable(void);
 extern void lapic_calibrate_timer(struct cpu_info *);
+
+#define lapic_cpu_number() 	(i82489_readreg(LAPIC_ID)>>LAPIC_ID_SHIFT)
 
 #endif

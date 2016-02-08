@@ -1,4 +1,4 @@
-/*	$OpenBSD: sh_machdep.c,v 1.10 2007/03/03 21:37:27 miod Exp $	*/
+/*	$OpenBSD: sh_machdep.c,v 1.16 2007/06/06 17:15:12 deraadt Exp $	*/
 /*	$NetBSD: sh3_machdep.c,v 1.59 2006/03/04 01:13:36 uwe Exp $	*/
 
 /*
@@ -104,6 +104,7 @@
 #include <sys/conf.h>
 #include <sys/core.h>
 #include <sys/kcore.h>
+#include <sys/reboot.h>
 
 #include <uvm/uvm_extern.h>
 
@@ -116,12 +117,6 @@
 #include <sh/trap.h>
 #include <sh/intr.h>
 #include <sh/kcore.h>
-
-#ifdef  NBUF
-int	nbuf = NBUF;
-#else
-int	nbuf = 0;
-#endif
 
 #ifndef BUFCACHEPERCENT
 #define BUFCACHEPERCENT 5
@@ -168,8 +163,6 @@ u_int32_t dumpmag = 0x8fca0101;	/* magic number */
 u_int dumpsize;			/* pages */
 long dumplo;	 		/* blocks */
 cpu_kcore_hdr_t cpu_kcore_hdr;
-
-int kbd_reset;
 
 void
 sh_cpu_init(int arch, int product)
@@ -268,12 +261,9 @@ sh_proc0_init()
 void
 sh_startup()
 {
-	u_int loop;
 	vaddr_t minaddr, maxaddr;
 	caddr_t sysbase;
 	caddr_t size;
-	vsize_t bufsize;
-	int base, residual;
 
 	printf("%s", version);
 	if (*cpu_model != '\0')
@@ -310,53 +300,23 @@ sh_startup()
 		panic("cpu_startup: system table size inconsistency");
 
 	/*
-	 * Now allocate buffers proper.  They are different than the above
-	 * in that they usually occupy more virtual memory than physical.
+	 * Determine how many buffers to allocate.
+	 * We allocate bufcachepercent% of memory for buffer space.
 	 */
-	bufsize = MAXBSIZE * nbuf;
-	if (uvm_map(kernel_map, (vaddr_t *)&buffers, round_page(bufsize),
-	    NULL, UVM_UNKNOWN_OFFSET, 0,
-	    UVM_MAPFLAG(UVM_PROT_NONE, UVM_PROT_NONE, UVM_INH_NONE,
-	    UVM_ADV_NORMAL, 0)) != 0)
-		panic("sh_startup: cannot allocate UVM space for buffers");
-	minaddr = (vaddr_t)buffers;
-	/* don't want to alloc more physical mem than needed */
-	if ((bufpages / nbuf) >= btoc(MAXBSIZE))
-		bufpages = btoc(MAXBSIZE) * nbuf;
+	if (bufpages == 0)
+		bufpages = physmem * bufcachepercent / 100;
 
-	base = bufpages / nbuf;
-	residual = bufpages % nbuf;
-	for (loop = 0; loop < nbuf; ++loop) {
-		vsize_t curbufsize;
-		vaddr_t curbuf;
-		struct vm_page *pg;
-
-		/*
-		 * Each buffer has MAXBSIZE bytes of VM space allocated.  Of
-		 * that MAXBSIZE space, we allocate and map (base+1) pages
-		 * for the first "residual" buffers, and then we allocate
-		 * "base" pages for the rest.
-		 */
-		curbuf = (vaddr_t) buffers + (loop * MAXBSIZE);
-		curbufsize = NBPG * ((loop < residual) ? (base+1) : base);
-
-		while (curbufsize) {
-			pg = uvm_pagealloc(NULL, 0, NULL, 0);
-			if (pg == NULL)
-				panic("sh_startup: not enough memory for buffer cache");
-
-			pmap_kenter_pa(curbuf, VM_PAGE_TO_PHYS(pg),
-			    VM_PROT_READ|VM_PROT_WRITE);
-			curbuf += PAGE_SIZE;
-			curbufsize -= PAGE_SIZE;
-		}
-	}
-	pmap_update(pmap_kernel());
+	/* Restrict to at most 25% filled kvm */
+	if (bufpages >
+	    (VM_MAX_KERNEL_ADDRESS-VM_MIN_KERNEL_ADDRESS) / PAGE_SIZE / 4) 
+		bufpages = (VM_MAX_KERNEL_ADDRESS-VM_MIN_KERNEL_ADDRESS) /
+		    PAGE_SIZE / 4;
 
 	/*
 	 * Allocate a submap for exec arguments.  This map effectively
 	 * limits the number of processes exec'ing at any time.
 	 */
+	minaddr = vm_map_min(kernel_map);
 	exec_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr,
 	    16 * NCARGS, VM_MAP_PAGEABLE, FALSE, NULL);
 
@@ -373,8 +333,14 @@ sh_startup()
 
 	printf("avail mem = %u (%uK)\n", ptoa(uvmexp.free),
 	    ptoa(uvmexp.free) / 1024);
-	printf("using %d buffers containing %u bytes (%uK) of memory\n",
-	    nbuf, bufpages * PAGE_SIZE, bufpages * PAGE_SIZE / 1024);
+
+	if (boothowto & RB_CONFIG) {
+#ifdef BOOT_CONFIG
+		user_config();
+#else
+		printf("kernel does not support -c; continuing..\n");
+#endif 
+	}
 }
 
 /*
@@ -397,58 +363,21 @@ allocsys(caddr_t v)
 	valloc(msghdrs, struct msg, msginfo.msgtql);
 	valloc(msqids, struct msqid_ds, msginfo.msgmni);
 #endif
-	/*
-	 * Determine how many buffers to allocate.  We use 10% of the
-	 * first 2MB of memory, and 5% of the rest, with a minimum of 16
-	 * buffers.  We allocate 1/2 as many swap buffer headers as file
-	 * i/o buffers.
-	 */
-	if (bufpages == 0)
-		bufpages = (btoc(2 * 1024 * 1024) + physmem) *
-		    bufcachepercent / 100;
 
-	if (nbuf == 0) {
-		nbuf = bufpages;
-		if (nbuf < 16)
-			nbuf = 16;
-	}
-
-	/* Restrict to at most 35% filled kvm */
-	/* XXX - This needs UBC... */
-	if (nbuf >
-	    (VM_MAX_KERNEL_ADDRESS-VM_MIN_KERNEL_ADDRESS) / MAXBSIZE * 35 / 100)
-		nbuf = (VM_MAX_KERNEL_ADDRESS-VM_MIN_KERNEL_ADDRESS) /
-		    MAXBSIZE * 35 / 100;
-
-	/* More buffer pages than fits into the buffers is senseless.  */ 
-	if (bufpages > nbuf * MAXBSIZE / PAGE_SIZE)
-		bufpages = nbuf * MAXBSIZE / PAGE_SIZE;
-
-	valloc(buf, struct buf, nbuf);
 	return v;
 }
 
 void
-dumpconf()
+dumpconf(void)
 {
 	cpu_kcore_hdr_t *h = &cpu_kcore_hdr;
 	u_int dumpextra, totaldumpsize;		/* in disk blocks */
 	u_int seg, nblks;
-	int maj;
 
-	if (dumpdev == NODEV)
+	if (dumpdev == NODEV ||
+	    (nblks = (bdevsw[major(dumpdev)].d_psize)(dumpdev)) == 0)
 		return;
-
-	maj = major(dumpdev);
-	if (maj < 0 || maj >= nblkdev) {
-		printf("dumpconf: bad dumpdev=0x%x\n", dumpdev);
-		dumpdev = NODEV;
-		return;
-	}
-	if (bdevsw[maj].d_psize == NULL)
-		return;
-	nblks = (u_int)(*bdevsw[maj].d_psize)(dumpdev);
-	if (nblks <= btodb(1U))
+	if (nblks <= ctod(1))
 		return;
 
 	dumpsize = 0;
@@ -474,8 +403,8 @@ void
 dumpsys()
 {
 	cpu_kcore_hdr_t *h = &cpu_kcore_hdr;
-	daddr_t blkno;
-	int (*dump)(dev_t, daddr_t, caddr_t, size_t);
+	daddr64_t blkno;
+	int (*dump)(dev_t, daddr64_t, caddr_t, size_t);
 	u_int page = 0;
 	paddr_t dumppa;
 	u_int seg;
@@ -838,36 +767,5 @@ cpu_reset()
 #ifndef __lint__
 	goto *(void *)0xa0000000;
 #endif
-	/* NOTREACHED */
-}
-
-int
-cpu_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
-    size_t newlen, struct proc *p)
-{
-
-	/* all sysctl names at this level are terminal */
-	if (namelen != 1)
-		return (ENOTDIR);		/* overloaded */
-
-	switch (name[0]) {
-	case CPU_CONSDEV: {
-		dev_t consdev;
-		if (cn_tab != NULL)
-			consdev = cn_tab->cn_dev;
-		else
-			consdev = NODEV;
-		return (sysctl_rdstruct(oldp, oldlenp, newp, &consdev,
-		    sizeof consdev));
-	}
-
-	case CPU_KBDRESET:
-		if (securelevel > 0)
-			return (sysctl_rdint(oldp, oldlenp, newp, kbd_reset));
-		return (sysctl_int(oldp, oldlenp, newp, newlen, &kbd_reset));
-
-	default:
-		return (EOPNOTSUPP);
-	}
 	/* NOTREACHED */
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: usscanner.c,v 1.12 2006/11/28 23:59:45 dlg Exp $	*/
+/*	$OpenBSD: usscanner.c,v 1.22 2007/06/14 10:11:16 mbalmer Exp $	*/
 /*	$NetBSD: usscanner.c,v 1.6 2001/01/23 14:04:14 augustss Exp $	*/
 
 /*
@@ -68,21 +68,13 @@
 
 #include <dev/usb/usbdevs.h>
 
-#if defined(__NetBSD__)
-#include <sys/scsiio.h>
-#include <dev/scsipi/scsi_all.h>
-#include <dev/scsipi/scsipi_all.h>
-#include <dev/scsipi/scsiconf.h>
-#include <dev/scsipi/atapiconf.h>
-#elif defined(__OpenBSD__)
 #include <scsi/scsi_all.h>
 #include <scsi/scsiconf.h>
 #include <machine/bus.h>
-#endif
 
 #ifdef USSCANNER_DEBUG
-#define DPRINTF(x)	do { if (usscannerdebug) logprintf x; } while (0)
-#define DPRINTFN(n,x)	do { if (usscannerdebug>(n)) logprintf x; } while (0)
+#define DPRINTF(x)	do { if (usscannerdebug) printf x; } while (0)
+#define DPRINTFN(n,x)	do { if (usscannerdebug>(n)) printf x; } while (0)
 int	usscannerdebug = 0;
 #else
 #define DPRINTF(x)
@@ -116,7 +108,7 @@ int	usscannerdebug = 0;
 
 #define USSCANNER_TIMEOUT 2000
 
-Static struct scsipi_device usscanner_dev =
+struct scsipi_device usscanner_dev =
 {
 	NULL,			/* Use default error handler */
 	NULL,			/* have a queue, served by this */
@@ -125,7 +117,7 @@ Static struct scsipi_device usscanner_dev =
 };
 
 struct usscanner_softc {
- 	USBBASEDEVICE		sc_dev;
+ 	struct device		sc_dev;
 	usbd_device_handle	sc_udev;
 	usbd_interface_handle	sc_iface;
 
@@ -155,39 +147,50 @@ struct usscanner_softc {
 
 	struct scsipi_xfer	*sc_xs;
 
-	device_ptr_t		sc_child;	/* child device, for detach */
+	struct device		*sc_child;	/* child device, for detach */
 
 	struct scsipi_link	sc_link;
-#if defined(__NetBSD__)
-	struct atapi_adapter	sc_atapi_adapter;
-#define sc_adapter sc_atapi_adapter._generic
-#else
 	struct scsi_adapter	sc_atapi_adapter;
 #define sc_adapter sc_atapi_adapter
-#endif
 
 	int			sc_refcnt;
 	char			sc_dying;
 };
 
 
-Static void usscanner_cleanup(struct usscanner_softc *sc);
-Static int usscanner_scsipi_cmd(struct scsipi_xfer *xs);
-Static void usscanner_scsipi_minphys(struct buf *bp);
-Static void usscanner_done(struct usscanner_softc *sc);
-Static void usscanner_sense(struct usscanner_softc *sc);
+void usscanner_cleanup(struct usscanner_softc *sc);
+int usscanner_scsipi_cmd(struct scsipi_xfer *xs);
+void usscanner_scsipi_minphys(struct buf *bp);
+void usscanner_done(struct usscanner_softc *sc);
+void usscanner_sense(struct usscanner_softc *sc);
 typedef void callback(usbd_xfer_handle, usbd_private_handle, usbd_status);
-Static callback usscanner_intr_cb;
-Static callback usscanner_cmd_cb;
-Static callback usscanner_data_cb;
-Static callback usscanner_sensecmd_cb;
-Static callback usscanner_sensedata_cb;
+callback usscanner_intr_cb;
+callback usscanner_cmd_cb;
+callback usscanner_data_cb;
+callback usscanner_sensecmd_cb;
+callback usscanner_sensedata_cb;
 
-USB_DECLARE_DRIVER(usscanner);
+int usscanner_match(struct device *, void *, void *); 
+void usscanner_attach(struct device *, struct device *, void *); 
+int usscanner_detach(struct device *, int); 
+int usscanner_activate(struct device *, enum devact); 
 
-USB_MATCH(usscanner)
+struct cfdriver usscanner_cd = { 
+	NULL, "usscanner", DV_DULL 
+}; 
+
+const struct cfattach usscanner_ca = { 
+	sizeof(struct usscanner_softc), 
+	usscanner_match, 
+	usscanner_attach, 
+	usscanner_detach, 
+	usscanner_activate, 
+};
+
+int
+usscanner_match(struct device *parent, void *match, void *aux)
 {
-	USB_MATCH_START(usscanner, uaa);
+	struct usb_attach_arg	*uaa = aux;
 
 	DPRINTFN(50,("usscanner_match\n"));
 
@@ -201,9 +204,11 @@ USB_MATCH(usscanner)
 		return (UMATCH_NONE);
 }
 
-USB_ATTACH(usscanner)
+void
+usscanner_attach(struct device *parent, struct device *self, void *aux)
 {
-	USB_ATTACH_START(usscanner, sc, uaa);
+	struct usscanner_softc	*sc = (struct usscanner_softc *)self;
+	struct usb_attach_arg	*uaa = aux;
 	struct scsibus_attach_args saa;
 	usbd_device_handle	dev = uaa->device;
 	usbd_interface_handle	iface;
@@ -216,22 +221,21 @@ USB_ATTACH(usscanner)
 	DPRINTFN(10,("usscanner_attach: sc=%p\n", sc));
 
 	devinfop = usbd_devinfo_alloc(dev, 0);
-	USB_ATTACH_SETUP;
-	printf("%s: %s\n", USBDEVNAME(sc->sc_dev), devinfop);
+	printf("\n%s: %s\n", sc->sc_dev.dv_xname, devinfop);
 	usbd_devinfo_free(devinfop);
 
 	err = usbd_set_config_no(dev, USSCANNER_CONFIG_NO, 1);
 	if (err) {
 		printf("%s: setting config no failed\n",
-		    USBDEVNAME(sc->sc_dev));
-		USB_ATTACH_ERROR_RETURN;
+		    sc->sc_dev.dv_xname);
+		return;
 	}
 
 	err = usbd_device2interface_handle(dev, USSCANNER_IFACE_IDX, &iface);
 	if (err) {
 		printf("%s: getting interface handle failed\n",
-		    USBDEVNAME(sc->sc_dev));
-		USB_ATTACH_ERROR_RETURN;
+		    sc->sc_dev.dv_xname);
+		return;
 	}
 
 	sc->sc_udev = dev;
@@ -247,8 +251,8 @@ USB_ATTACH(usscanner)
 		ed = usbd_interface2endpoint_descriptor(iface, i);
 		if (ed == NULL) {
 			printf("%s: couldn't get ep %d\n",
-			    USBDEVNAME(sc->sc_dev), i);
-			USB_ATTACH_ERROR_RETURN;
+			    sc->sc_dev.dv_xname, i);
+			return;
 		}
 		if (UE_GET_DIR(ed->bEndpointAddress) == UE_DIR_IN &&
 		    UE_GET_XFERTYPE(ed->bmAttributes) == UE_BULK) {
@@ -263,16 +267,16 @@ USB_ATTACH(usscanner)
 	}
 	if (sc->sc_in_addr == -1 || sc->sc_intr_addr == -1 ||
 	    sc->sc_out_addr == -1) {
-		printf("%s: missing endpoint\n", USBDEVNAME(sc->sc_dev));
-		USB_ATTACH_ERROR_RETURN;
+		printf("%s: missing endpoint\n", sc->sc_dev.dv_xname);
+		return;
 	}
 
 	err = usbd_open_pipe(sc->sc_iface, sc->sc_in_addr,
 			     USBD_EXCLUSIVE_USE, &sc->sc_in_pipe);
 	if (err) {
 		printf("%s: open in pipe failed, err=%d\n",
-		       USBDEVNAME(sc->sc_dev), err);
-		USB_ATTACH_ERROR_RETURN;
+		       sc->sc_dev.dv_xname, err);
+		return;
 	}
 
 	/* The interrupt endpoint must be opened as a normal pipe. */
@@ -281,25 +285,25 @@ USB_ATTACH(usscanner)
 
 	if (err) {
 		printf("%s: open intr pipe failed, err=%d\n",
-		       USBDEVNAME(sc->sc_dev), err);
+		       sc->sc_dev.dv_xname, err);
 		usscanner_cleanup(sc);
-		USB_ATTACH_ERROR_RETURN;
+		return;
 	}
 	err = usbd_open_pipe(sc->sc_iface, sc->sc_out_addr,
 			     USBD_EXCLUSIVE_USE, &sc->sc_out_pipe);
 	if (err) {
 		printf("%s: open out pipe failed, err=%d\n",
-		       USBDEVNAME(sc->sc_dev), err);
+		       sc->sc_dev.dv_xname, err);
 		usscanner_cleanup(sc);
-		USB_ATTACH_ERROR_RETURN;
+		return;
 	}
 
 	sc->sc_cmd_xfer = usbd_alloc_xfer(uaa->device);
 	if (sc->sc_cmd_xfer == NULL) {
 		printf("%s: alloc cmd xfer failed, err=%d\n",
-		       USBDEVNAME(sc->sc_dev), err);
+		       sc->sc_dev.dv_xname, err);
 		usscanner_cleanup(sc);
-		USB_ATTACH_ERROR_RETURN;
+		return;
 	}
 
 	/* XXX too big */
@@ -307,33 +311,33 @@ USB_ATTACH(usscanner)
 					     USSCANNER_MAX_TRANSFER_SIZE);
 	if (sc->sc_cmd_buffer == NULL) {
 		printf("%s: alloc cmd buffer failed, err=%d\n",
-		       USBDEVNAME(sc->sc_dev), err);
+		       sc->sc_dev.dv_xname, err);
 		usscanner_cleanup(sc);
-		USB_ATTACH_ERROR_RETURN;
+		return;
 	}
 
 	sc->sc_intr_xfer = usbd_alloc_xfer (uaa->device);
 	if (sc->sc_intr_xfer == NULL) {
 	  printf("%s: alloc intr xfer failed, err=%d\n",
-		 USBDEVNAME(sc->sc_dev), err);
+		 sc->sc_dev.dv_xname, err);
 	  usscanner_cleanup(sc);
-	  USB_ATTACH_ERROR_RETURN;
+	  return; 
         }
 
 	sc->sc_data_xfer = usbd_alloc_xfer(uaa->device);
 	if (sc->sc_data_xfer == NULL) {
 		printf("%s: alloc data xfer failed, err=%d\n",
-		       USBDEVNAME(sc->sc_dev), err);
+		       sc->sc_dev.dv_xname, err);
 		usscanner_cleanup(sc);
-		USB_ATTACH_ERROR_RETURN;
+		return;
 	}
 	sc->sc_data_buffer = usbd_alloc_buffer(sc->sc_data_xfer,
 					      USSCANNER_MAX_TRANSFER_SIZE);
 	if (sc->sc_data_buffer == NULL) {
 		printf("%s: alloc data buffer failed, err=%d\n",
-		       USBDEVNAME(sc->sc_dev), err);
+		       sc->sc_dev.dv_xname, err);
 		usscanner_cleanup(sc);
-		USB_ATTACH_ERROR_RETURN;
+		return;
 	}
 
 	/*
@@ -345,25 +349,14 @@ USB_ATTACH(usscanner)
 	/*
 	 * fill in the prototype scsipi_link.
 	 */
-#if defined(__NetBSD__)
-	sc->sc_link.type = BUS_SCSI;
-#endif
-#if defined(__OpenBSD__)
 	sc->sc_link.flags &= ~SDEV_ATAPI;
 	sc->sc_link.adapter_buswidth = 2;
 	sc->sc_link.adapter_target = USSCANNER_SCSIID_HOST;
-#endif
 
 	sc->sc_link.adapter_softc = sc;
 	sc->sc_link.adapter = &sc->sc_adapter;
 	sc->sc_link.device = &usscanner_dev;
 	sc->sc_link.openings = 1;
-#if defined(__NetBSD__)
-	sc->sc_link.scsipi_scsi.channel = SCSI_CHANNEL_ONLY_ONE;
-	sc->sc_link.scsipi_scsi.adapter_target = USSCANNER_SCSIID_HOST;
-	sc->sc_link.scsipi_scsi.max_target = USSCANNER_SCSIID_DEVICE;
-	sc->sc_link.scsipi_scsi.max_lun = 0;
-#endif
 
 	bzero(&saa, sizeof(saa));
 	saa.saa_sc_link = &sc->sc_link;
@@ -371,16 +364,15 @@ USB_ATTACH(usscanner)
 	sc->sc_child = config_found(&sc->sc_dev, &saa, scsiprint);
 
 	usbd_add_drv_event(USB_EVENT_DRIVER_ATTACH, sc->sc_udev,
-			   USBDEV(sc->sc_dev));
+			   &sc->sc_dev);
 
 	DPRINTFN(10, ("usscanner_attach: %p\n", sc->sc_udev));
-
-	USB_ATTACH_SUCCESS_RETURN;
 }
 
-USB_DETACH(usscanner)
+int
+usscanner_detach(struct device *self, int flags)
 {
-	USB_DETACH_START(usscanner, sc);
+	struct usscanner_softc *sc = (struct usscanner_softc *)self;
 	int rv, s;
 
 	DPRINTF(("usscanner_detach: sc=%p flags=%d\n", sc, flags));
@@ -397,7 +389,7 @@ USB_DETACH(usscanner)
 	s = splusb();
 	if (--sc->sc_refcnt >= 0) {
 		/* Wait for processes to go away. */
-		usb_detach_wait(USBDEV(sc->sc_dev));
+		usb_detach_wait(&sc->sc_dev);
 	}
 	splx(s);
 
@@ -407,12 +399,12 @@ USB_DETACH(usscanner)
 		rv = 0;
 
 	usbd_add_drv_event(USB_EVENT_DRIVER_DETACH, sc->sc_udev,
-			   USBDEV(sc->sc_dev));
+			   &sc->sc_dev);
 
 	return (rv);
 }
 
-Static void
+void
 usscanner_cleanup(struct usscanner_softc *sc)
 {
 	if (sc->sc_in_pipe != NULL) {
@@ -438,7 +430,7 @@ usscanner_cleanup(struct usscanner_softc *sc)
 }
 
 int
-usscanner_activate(device_ptr_t self, enum devact act)
+usscanner_activate(struct device *self, enum devact act)
 {
 	struct usscanner_softc *sc = (struct usscanner_softc *)self;
 
@@ -453,7 +445,7 @@ usscanner_activate(device_ptr_t self, enum devact act)
 	return (0);
 }
 
-Static void
+void
 usscanner_scsipi_minphys(struct buf *bp)
 {
 	if (bp->b_bcount > USSCANNER_MAX_TRANSFER_SIZE)
@@ -461,7 +453,7 @@ usscanner_scsipi_minphys(struct buf *bp)
 	minphys(bp);
 }
 
-Static void
+void
 usscanner_sense(struct usscanner_softc *sc)
 {
 	struct scsipi_xfer *xs = sc->sc_xs;
@@ -472,11 +464,7 @@ usscanner_sense(struct usscanner_softc *sc)
 	/* fetch sense data */
 	memset(&sense_cmd, 0, sizeof(sense_cmd));
 	sense_cmd.opcode = REQUEST_SENSE;
-#if defined(__NetBSD__)
-	sense_cmd.byte2 = sc_link->scsipi_scsi.lun << SCSI_CMD_LUN_SHIFT;
-#else
 	sense_cmd.byte2 = sc_link->lun << SCSI_CMD_LUN_SHIFT;
-#endif
 	sense_cmd.length = sizeof xs->sense;
 
 	sc->sc_state = UAS_SENSECMD;
@@ -492,7 +480,7 @@ usscanner_sense(struct usscanner_softc *sc)
 	usscanner_done(sc);
 }
 
-Static void
+void
 usscanner_intr_cb(usbd_xfer_handle xfer, usbd_private_handle priv,
 		 usbd_status status)
 {
@@ -503,10 +491,10 @@ usscanner_intr_cb(usbd_xfer_handle xfer, usbd_private_handle priv,
 
 #ifdef USSCANNER_DEBUG
 	if (sc->sc_state != UAS_STATUS) {
-		printf("%s: !UAS_STATUS\n", USBDEVNAME(sc->sc_dev));
+		printf("%s: !UAS_STATUS\n", sc->sc_dev.dv_xname);
 	}
 	if (sc->sc_status != 0) {
-		printf("%s: status byte=0x%02x\n", USBDEVNAME(sc->sc_dev), sc->sc_status);
+		printf("%s: status byte=0x%02x\n", sc->sc_dev.dv_xname, sc->sc_status);
 	}
 #endif
 	/* XXX what should we do on non-0 status */
@@ -519,7 +507,7 @@ usscanner_intr_cb(usbd_xfer_handle xfer, usbd_private_handle priv,
 	splx(s);
 }
 
-Static void
+void
 usscanner_data_cb(usbd_xfer_handle xfer, usbd_private_handle priv,
 		 usbd_status status)
 {
@@ -531,7 +519,7 @@ usscanner_data_cb(usbd_xfer_handle xfer, usbd_private_handle priv,
 
 #ifdef USSCANNER_DEBUG
 	if (sc->sc_state != UAS_DATA) {
-		printf("%s: !UAS_DATA\n", USBDEVNAME(sc->sc_dev));
+		printf("%s: !UAS_DATA\n", sc->sc_dev.dv_xname);
 	}
 #endif
 
@@ -561,7 +549,7 @@ usscanner_data_cb(usbd_xfer_handle xfer, usbd_private_handle priv,
 	usscanner_done(sc);
 }
 
-Static void
+void
 usscanner_sensedata_cb(usbd_xfer_handle xfer, usbd_private_handle priv,
 		       usbd_status status)
 {
@@ -573,7 +561,7 @@ usscanner_sensedata_cb(usbd_xfer_handle xfer, usbd_private_handle priv,
 
 #ifdef USSCANNER_DEBUG
 	if (sc->sc_state != UAS_SENSEDATA) {
-		printf("%s: !UAS_SENSEDATA\n", USBDEVNAME(sc->sc_dev));
+		printf("%s: !UAS_SENSEDATA\n", sc->sc_dev.dv_xname);
 	}
 #endif
 
@@ -598,7 +586,7 @@ usscanner_sensedata_cb(usbd_xfer_handle xfer, usbd_private_handle priv,
 	usscanner_done(sc);
 }
 
-Static void
+void
 usscanner_done(struct usscanner_softc *sc)
 {
 	struct scsipi_xfer *xs = sc->sc_xs;
@@ -616,7 +604,7 @@ usscanner_done(struct usscanner_softc *sc)
 	xs->error = XS_DRIVER_STUFFUP;
 }
 
-Static void
+void
 usscanner_sensecmd_cb(usbd_xfer_handle xfer, usbd_private_handle priv,
 		      usbd_status status)
 {
@@ -633,7 +621,7 @@ usscanner_sensecmd_cb(usbd_xfer_handle xfer, usbd_private_handle priv,
 #endif
 
 	if (sc->sc_state != UAS_SENSECMD) {
-		printf("%s: !UAS_SENSECMD\n", USBDEVNAME(sc->sc_dev));
+		printf("%s: !UAS_SENSECMD\n", sc->sc_dev.dv_xname);
 		xs->error = XS_DRIVER_STUFFUP;
 		goto done;
 	}
@@ -663,7 +651,7 @@ usscanner_sensecmd_cb(usbd_xfer_handle xfer, usbd_private_handle priv,
 	usscanner_done(sc);
 }
 
-Static void
+void
 usscanner_cmd_cb(usbd_xfer_handle xfer, usbd_private_handle priv,
 		 usbd_status status)
 {
@@ -681,7 +669,7 @@ usscanner_cmd_cb(usbd_xfer_handle xfer, usbd_private_handle priv,
 #endif
 
 	if (sc->sc_state != UAS_CMD) {
-		printf("%s: !UAS_CMD\n", USBDEVNAME(sc->sc_dev));
+		printf("%s: !UAS_CMD\n", sc->sc_dev.dv_xname);
 		xs->error = XS_DRIVER_STUFFUP;
 		goto done;
 	}
@@ -729,7 +717,7 @@ usscanner_cmd_cb(usbd_xfer_handle xfer, usbd_private_handle priv,
 	usscanner_done(sc);
 }
 
-Static int
+int
 usscanner_scsipi_cmd(struct scsipi_xfer *xs)
 {
 	struct scsipi_link *sc_link = xs->sc_link;
@@ -739,7 +727,7 @@ usscanner_scsipi_cmd(struct scsipi_xfer *xs)
 #ifdef notyet
 	DPRINTFN(8, ("%s: usscanner_scsi_cmd: %d:%d "
 	    "xs=%p cmd=0x%02x datalen=%d (quirks=0x%x, poll=%d)\n",
-	    USBDEVNAME(sc->sc_dev),
+	    sc->sc_dev.dv_xname,
 	    sc_link->scsipi_scsi.target, sc_link->scsipi_scsi.lun,
 	    xs, xs->cmd->opcode, xs->datalen,
 	    sc_link->quirks, xs->xs_control & XS_CTL_POLL));
@@ -753,14 +741,14 @@ usscanner_scsipi_cmd(struct scsipi_xfer *xs)
 #ifdef USSCANNER_DEBUG
 #ifdef notyet
 	if (sc_link->scsipi_scsi.target != USSCANNER_SCSIID_DEVICE) {
-		DPRINTF(("%s: wrong SCSI ID %d\n", USBDEVNAME(sc->sc_dev),
+		DPRINTF(("%s: wrong SCSI ID %d\n", sc->sc_dev.dv_xname,
 		    sc_link->scsipi_scsi.target));
 		xs->error = XS_DRIVER_STUFFUP;
 		goto done;
 	}
 #endif
 	if (sc->sc_state != UAS_IDLE) {
-		printf("%s: !UAS_IDLE\n", USBDEVNAME(sc->sc_dev));
+		printf("%s: !UAS_IDLE\n", sc->sc_dev.dv_xname);
 		xs->error = XS_DRIVER_STUFFUP;
 		goto done;
 	}

@@ -1,4 +1,4 @@
-/*	$OpenBSD: param.h,v 1.69 2007/02/12 13:10:02 henning Exp $	*/
+/*	$OpenBSD: param.h,v 1.72 2007/07/25 20:07:28 deraadt Exp $	*/
 /*	$NetBSD: param.h,v 1.23 1996/03/17 01:02:29 thorpej Exp $	*/
 
 /*-
@@ -41,8 +41,8 @@
 #define BSD4_3	1
 #define BSD4_4	1
 
-#define OpenBSD	200705		/* OpenBSD version (year & month). */
-#define OpenBSD4_1 1		/* OpenBSD 4.1 */
+#define OpenBSD	200711		/* OpenBSD version (year & month). */
+#define OpenBSD4_2 1		/* OpenBSD 4.2 */
 
 #ifndef NULL
 #ifdef 	__GNUG__
@@ -129,6 +129,20 @@
 #define	CROUND	(CBLOCK - 1)	/* Clist rounding. */
 
 /*
+ * Constants related to network buffer management.
+ * MCLBYTES must be no larger than NBPG (the software page size), and,
+ * on machines that exchange pages of input or output buffers with mbuf
+ * clusters (MAPPED_MBUFS), MCLBYTES must also be an integral multiple
+ * of the hardware page size.
+ */
+#define	MSIZE		256		/* size of an mbuf */
+#define	MCLSHIFT	11		/* convert bytes to m_buf clusters */
+					/* 2K cluster can hold Ether frame */
+#define	MCLBYTES	(1 << MCLSHIFT)	/* size of a m_buf cluster */
+#define	MCLOFSET	(MCLBYTES - 1)
+
+
+/*
  * File system parameters and macros.
  *
  * The file system is made out of blocks of at most MAXBSIZE units, with
@@ -162,10 +176,10 @@
 #endif
 
 /* Bit map related macros. */
-#define	setbit(a,i)	((a)[(i)/NBBY] |= 1<<((i)%NBBY))
-#define	clrbit(a,i)	((a)[(i)/NBBY] &= ~(1<<((i)%NBBY)))
-#define	isset(a,i)	((a)[(i)/NBBY] & (1<<((i)%NBBY)))
-#define	isclr(a,i)	(((a)[(i)/NBBY] & (1<<((i)%NBBY))) == 0)
+#define	setbit(a,i)	((a)[(i)>>3] |= 1<<((i)&(NBBY-1)))
+#define	clrbit(a,i)	((a)[(i)>>3] &= ~(1<<((i)&(NBBY-1))))
+#define	isset(a,i)	((a)[(i)>>3] & (1<<((i)&(NBBY-1))))
+#define	isclr(a,i)	(((a)[(i)>>3] & (1<<((i)&(NBBY-1)))) == 0)
 
 /* Macros for counting and rounding. */
 #ifndef howmany

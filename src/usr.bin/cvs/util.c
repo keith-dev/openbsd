@@ -1,4 +1,4 @@
-/*	$OpenBSD: util.c,v 1.107 2007/02/22 06:42:09 otto Exp $	*/
+/*	$OpenBSD: util.c,v 1.113 2007/07/19 06:34:15 ray Exp $	*/
 /*
  * Copyright (c) 2004 Jean-Francois Brousseau <jfb@openbsd.org>
  * Copyright (c) 2005, 2006 Joris Vink <joris@openbsd.org>
@@ -36,6 +36,7 @@
 #include <unistd.h>
 
 #include "cvs.h"
+#include "remote.h"
 
 /* letter -> mode type map */
 static const int cvs_modetypes[26] = {
@@ -213,45 +214,6 @@ cvs_cksum(const char *file, char *dst, size_t len)
 }
 
 /*
- * cvs_splitpath()
- *
- * Split a path <path> into the base portion and the filename portion.
- * The path is copied in <base> and the last delimiter is replaced by a NUL
- * byte.  The <file> pointer is set to point to the first character after
- * that delimiter.
- * Returns 0 on success, or -1 on failure.
- */
-void
-cvs_splitpath(const char *path, char *base, size_t blen, char **file)
-{
-	size_t rlen;
-	char *sp;
-
-	if ((rlen = strlcpy(base, path, blen)) >= blen)
-		fatal("cvs_splitpath: path truncation");
-
-	while (rlen > 0 && base[rlen - 1] == '/')
-		base[--rlen] = '\0';
-
-	sp = strrchr(base, '/');
-	if (sp == NULL) {
-		rlen = strlcpy(base, "./", blen);
-		if (rlen >= blen)
-			fatal("cvs_splitpath: path truncation");
-
-		rlen = strlcat(base, path, blen);
-		if (rlen >= blen)
-			fatal("cvs_splitpath: path truncation");
-
-		sp = base + 1;
-	}
-
-	*sp = '\0';
-	if (file != NULL)
-		*file = sp + 1;
-}
-
-/*
  * cvs_getargv()
  *
  * Parse a line contained in <line> and generate an argument vector by
@@ -292,7 +254,7 @@ cvs_getargv(const char *line, char **argv, int argvlen)
 				}
 
 				qbuf[i++] = *lp++;
-				if (i == sizeof(qbuf)) {
+				if (i == sizeof(qbuf) - 1) {
 					error++;
 					break;
 				}
@@ -367,30 +329,6 @@ cvs_freeargv(char **argv, int argc)
 	for (i = 0; i < argc; i++)
 		if (argv[i] != NULL)
 			xfree(argv[i]);
-}
-
-/*
- * cvs_exec()
- */
-int
-cvs_exec(int argc, char **argv)
-{
-	int ret;
-	pid_t pid;
-
-	if ((pid = fork()) == -1) {
-		cvs_log(LP_ERR, "failed to fork");
-		return (-1);
-	} else if (pid == 0) {
-		execvp(argv[0], argv);
-		cvs_log(LP_ERR, "failed to exec %s", argv[0]);
-		exit(1);
-	}
-
-	if (waitpid(pid, &ret, 0) == -1)
-		cvs_log(LP_ERR, "failed to waitpid");
-
-	return (ret);
 }
 
 /*
@@ -644,7 +582,7 @@ cvs_mkadmin(const char *path, const char *root, const char *repo,
 }
 
 void
-cvs_mkpath(const char *path)
+cvs_mkpath(const char *path, char *tag)
 {
 	FILE *fp;
 	size_t len;
@@ -699,7 +637,12 @@ cvs_mkpath(const char *path)
 			fatal("cvs_mkpath: %s: %s", rpath, strerror(errno));
 
 		cvs_mkadmin(rpath, current_cvsroot->cr_str, repo,
-		    NULL, NULL, 0);
+		    tag, NULL, 0);
+
+		if (cvs_server_active == 1 && strcmp(rpath, ".")) {
+			if (tag != NULL)
+				cvs_server_set_sticky(rpath, tag);
+		}
 	}
 
 	xfree(dir);
@@ -800,19 +743,17 @@ cvs_strsplit(char *str, const char *sep)
 {
 	struct cvs_argvector *av;
 	size_t i = 0;
-	char **nargv;
 	char *cp, *p;
 
 	cp = xstrdup(str);
 	av = xmalloc(sizeof(*av));
 	av->str = cp;
-	av->argv = xcalloc(i + 1, sizeof(*(av->argv)));
+	av->argv = xmalloc(sizeof(*(av->argv)));
 
 	while ((p = strsep(&cp, sep)) != NULL) {
 		av->argv[i++] = p;
-		nargv = xrealloc(av->argv,
+		av->argv = xrealloc(av->argv,
 		    i + 1, sizeof(*(av->argv)));
-		av->argv = nargv;
 	}
 	av->argv[i] = NULL;
 

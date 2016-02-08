@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ethersubr.c,v 1.105 2006/12/07 18:15:29 reyk Exp $	*/
+/*	$OpenBSD: if_ethersubr.c,v 1.110 2007/06/06 10:04:36 henning Exp $	*/
 /*	$NetBSD: if_ethersubr.c,v 1.19 1996/05/07 02:40:30 thorpej Exp $	*/
 
 /*
@@ -141,11 +141,6 @@ didn't get a copy, you may request one from <license@ipv6.nrl.navy.mil>.
 #include <netinet6/nd6.h>
 #endif
 
-#ifdef IPX
-#include <netipx/ipx.h>
-#include <netipx/ipx_if.h>
-#endif
-
 #ifdef NETATALK
 #include <netatalk/at.h>
 #include <netatalk/at_var.h>
@@ -174,20 +169,6 @@ ether_ioctl(ifp, arp, cmd, data)
 
 	case SIOCSIFADDR:
 		switch (ifa->ifa_addr->sa_family) {
-#ifdef IPX
-		case AF_IPX:
-		    {
-			struct ipx_addr *ina = &IA_SIPX(ifa)->sipx_addr;
-
-			if (ipx_nullhost(*ina))
-				ina->ipx_host =
-				    *(union ipx_host *)(arp->ac_enaddr);
-			else
-				bcopy(ina->ipx_host.c_host,
-				    arp->ac_enaddr, sizeof(arp->ac_enaddr));
-			break;
-		    }
-#endif /* IPX */
 #ifdef NETATALK
 		case AF_APPLETALK:
 			/* Nothing to do. */
@@ -281,14 +262,9 @@ ether_output(ifp0, m0, dst, rt0)
 		if (!arpresolve(ac, rt, m, dst, edst))
 			return (0);	/* if not yet resolved */
 		/* If broadcasting on a simplex interface, loopback a copy */
-		if ((m->m_flags & M_BCAST) && (ifp->if_flags & IFF_SIMPLEX)) {
-#if NPF > 0
-			struct pf_mtag	*t;
-
-			if ((t = pf_find_mtag(m)) == NULL || !t->routed)
-#endif
-				mcopy = m_copy(m, 0, (int)M_COPYALL);
-		}
+		if ((m->m_flags & M_BCAST) && (ifp->if_flags & IFF_SIMPLEX) &&
+		    !m->m_pkthdr.pf.routed)
+			mcopy = m_copy(m, 0, (int)M_COPYALL);
 		etype = htons(ETHERTYPE_IP);
 		break;
 #endif
@@ -297,16 +273,6 @@ ether_output(ifp0, m0, dst, rt0)
 		if (!nd6_storelladdr(ifp, rt, m, dst, (u_char *)edst))
 			return (0); /* it must be impossible, but... */
 		etype = htons(ETHERTYPE_IPV6);
-		break;
-#endif
-#ifdef IPX
-	case AF_IPX:
-		etype = htons(ETHERTYPE_IPX);
-		bcopy((caddr_t)&satosipx(dst)->sipx_addr.ipx_host,
-		    (caddr_t)edst, sizeof(edst));
-		/* If broadcasting on a simplex interface, loopback a copy */
-		if ((m->m_flags & M_BCAST) && (ifp->if_flags & IFF_SIMPLEX))
-			mcopy = m_copy(m, 0, (int)M_COPYALL);
 		break;
 #endif
 #ifdef NETATALK
@@ -401,7 +367,8 @@ ether_output(ifp0, m0, dst, rt0)
 		    sizeof(eh->ether_shost));
 
 #if NCARP > 0
-	if (ifp0 != ifp && ifp0->if_type == IFT_CARP) {
+	if (ifp0 != ifp && ifp0->if_type == IFT_CARP &&
+	    !(ifp0->if_flags & IFF_LINK1)) {
 		bcopy((caddr_t)((struct arpcom *)ifp0)->ac_enaddr,
 		    (caddr_t)eh->ether_shost, sizeof(eh->ether_shost));
 	}
@@ -442,7 +409,7 @@ ether_output(ifp0, m0, dst, rt0)
 			}
 			bcopy(&ifp->if_bridge, mtag + 1, sizeof(caddr_t));
 			m_tag_prepend(m, mtag);
-			bridge_output(ifp, m, NULL, NULL);
+			error = bridge_output(ifp, m, NULL, NULL);
 			return (error);
 		}
 	}
@@ -595,10 +562,19 @@ ether_input(ifp, eh, m)
 #endif /* NVLAN > 0 */
 
 #if NCARP > 0
-	if (ifp->if_carp && ifp->if_type != IFT_CARP &&
-	    (carp_input(m, (u_int8_t *)&eh->ether_shost,
-	    (u_int8_t *)&eh->ether_dhost, eh->ether_type) == 0))
-		return;
+	if (ifp->if_carp) {
+		if (ifp->if_type != IFT_CARP &&
+		    (carp_input(m, (u_int8_t *)&eh->ether_shost,
+		    (u_int8_t *)&eh->ether_dhost, eh->ether_type) == 0))
+			return;
+		/* Always clear multicast flags if received on a carp address */
+		else if (ifp->if_type == IFT_CARP &&
+		    ifp->if_flags & IFF_LINK2 &&
+		    m->m_flags & (M_BCAST|M_MCAST) &&
+		    !bcmp(((struct arpcom *)ifp)->ac_enaddr,
+		    (caddr_t)eh->ether_dhost, ETHER_ADDR_LEN))
+			m->m_flags &= ~(M_BCAST|M_MCAST);
+	}
 #endif /* NCARP > 0 */
 
 	ac = (struct arpcom *)ifp;
@@ -656,12 +632,6 @@ decapsulate:
 		inq = &ip6intrq;
 		break;
 #endif /* INET6 */
-#ifdef IPX
-	case ETHERTYPE_IPX:
-		schednetisr(NETISR_IPX);
-		inq = &ipxintrq;
-		break;
-#endif
 #ifdef NETATALK
 	case ETHERTYPE_AT:
 		schednetisr(NETISR_ATALK);
@@ -1093,6 +1063,8 @@ ether_addmulti(ifr, ac)
 	enm->enm_refcount = 1;
 	LIST_INSERT_HEAD(&ac->ac_multiaddrs, enm, enm_list);
 	ac->ac_multicnt++;
+	if (bcmp(addrlo, addrhi, ETHER_ADDR_LEN) != 0)
+		ac->ac_multirangecnt++;
 	splx(s);
 	/*
 	 * Return ENETRESET to inform the driver that the list has changed
@@ -1141,6 +1113,8 @@ ether_delmulti(ifr, ac)
 	LIST_REMOVE(enm, enm_list);
 	free(enm, M_IFMADDR);
 	ac->ac_multicnt--;
+	if (bcmp(addrlo, addrhi, ETHER_ADDR_LEN) != 0)
+		ac->ac_multirangecnt--;
 	splx(s);
 	/*
 	 * Return ENETRESET to inform the driver that the list has changed

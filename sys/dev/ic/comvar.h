@@ -1,4 +1,4 @@
-/*	$OpenBSD: comvar.h,v 1.40 2006/12/28 20:50:26 miod Exp $	*/
+/*	$OpenBSD: comvar.h,v 1.43 2007/05/08 21:28:11 deraadt Exp $	*/
 /*	$NetBSD: comvar.h,v 1.5 1996/05/05 19:50:47 christos Exp $	*/
 
 /*

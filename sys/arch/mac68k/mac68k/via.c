@@ -1,4 +1,4 @@
-/*	$OpenBSD: via.c,v 1.28 2006/06/30 15:12:47 miod Exp $	*/
+/*	$OpenBSD: via.c,v 1.30 2007/07/29 21:25:23 miod Exp $	*/
 /*	$NetBSD: via.c,v 1.62 1997/09/10 04:38:48 scottr Exp $	*/
 
 /*-
@@ -148,14 +148,12 @@ via_init()
 			break;
 		}
 
-		intr_establish(via2_intr, NULL, mac68k_machine.via2_ipl,
-		    "via2");
+		intr_establish(via2_intr, NULL, 2, "via2");
 	} else if (current_mac_model->class == MACH_CLASSIIfx) { /* OSS */
 		volatile u_char *ossintr;
 		ossintr = (volatile u_char *)Via2Base + 6;
 		*ossintr = 0;
-		intr_establish(oss_intr, NULL, mac68k_machine.via2_ipl,
-		    "via2");
+		intr_establish(oss_intr, NULL, 2, "via2");
 	} else {	/* RBV */
 		if (current_mac_model->class == MACH_CLASSIIci) {
 			/*
@@ -163,8 +161,7 @@ via_init()
 			 */
 			via2_reg(rBufB) |= DB2O_CEnable;
 		}
-		intr_establish(rbv_intr, NULL, mac68k_machine.via2_ipl,
-		    "via2");
+		intr_establish(rbv_intr, NULL, 2, "via2");
 
 		nubus_intr.vh_ipl = 1;
 		nubus_intr.vh_fn = rbv_nubus_intr;
@@ -298,7 +295,7 @@ rbv_intr(void *arg)
 	return (1);
 }
 
-static int nubus_intr_mask = 0;
+int nubus_intr_mask = 0;
 
 void
 add_nubus_intr(int slot, int (*func)(void *), void *client_data,
@@ -311,13 +308,14 @@ add_nubus_intr(int slot, int (*func)(void *), void *client_data,
 	 * Map Nubus slot 0 to "slot" 15; see note on Nubus slot
 	 * interrupt tables.
 	 */
-	if (slot == 0)
-		slot = 15;
-	slot -= 9;
 #ifdef DIAGNOSTIC
-	if (slot < 0 || slot > 7)
+	if (slot != 0 && (slot < 9 || slot > 14))
 		panic("add_nubus_intr: wrong slot %d", slot + 9);
 #endif
+	if (slot == 0)
+		slot = 15 - 9;
+	else
+		slot -= 9;
 
 	s = splhigh();
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: sha1.c,v 1.5 2004/04/28 20:39:35 hshoexer Exp $	*/
+/*	$OpenBSD: sha1.c,v 1.7 2007/07/20 19:54:01 otto Exp $	*/
 
 /*
  * SHA-1 in C
@@ -56,7 +56,7 @@ SHA1Transform(u_int32_t state[5], unsigned char buffer[SHA1_BLOCK_LENGTH])
     } CHAR64LONG16;
     CHAR64LONG16* block;
 #ifdef SHA1HANDSOFF
-    static unsigned char workspace[SHA1_BLOCK_LENGTH];
+    unsigned char workspace[SHA1_BLOCK_LENGTH];
 
     block = (CHAR64LONG16 *)workspace;
     bcopy(buffer, block, SHA1_BLOCK_LENGTH);
@@ -171,7 +171,7 @@ SHA1Final(unsigned char digest[SHA1_DIGEST_LENGTH], SHA1_CTX *context)
     bzero(context->state, 20);
     bzero(context->count, 8);
     bzero(&finalcount, 8);
-#ifdef SHA1HANDSOFF  /* make SHA1Transform overwrite it's own static vars */
+#ifdef SHA1HANDSOFF  /* make SHA1Transform overwrite its own static vars */
     SHA1Transform(context->state, context->buffer);
 #endif
 #endif

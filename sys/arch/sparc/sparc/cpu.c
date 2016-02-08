@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.c,v 1.41 2005/08/06 14:26:52 miod Exp $	*/
+/*	$OpenBSD: cpu.c,v 1.43 2007/05/10 18:06:01 art Exp $	*/
 /*	$NetBSD: cpu.c,v 1.56 1997/09/15 20:52:36 pk Exp $ */
 
 /*
@@ -243,6 +243,8 @@ cpu_attach(parent, self, aux)
 
 	if (sc->cacheinfo.c_totalsize != 0)
 		cache_print(sc);
+
+	sc->ci.ci_softc = sc;
 
 	if (sc->master) {
 		int s;

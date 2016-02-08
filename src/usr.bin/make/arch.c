@@ -1,5 +1,5 @@
 /*	$OpenPackages$ */
-/*	$OpenBSD: arch.c,v 1.55 2006/01/20 23:10:19 espie Exp $ */
+/*	$OpenBSD: arch.c,v 1.60 2007/07/30 09:51:53 espie Exp $ */
 /*	$NetBSD: arch.c,v 1.17 1996/11/06 17:58:59 christos Exp $	*/
 
 /*
@@ -241,10 +241,7 @@ Arch_ParseArchive(char **linePtr,   /* Pointer to start of specification */
 
     for (cp = libName; *cp != '(' && *cp != '\0';) {
 	if (*cp == '$') {
-	    bool ok;
-
-	    cp += Var_ParseSkip(cp, ctxt, &ok);
-	    if (ok == false)
+	    if (!Var_ParseSkip(&cp, ctxt))
 		return false;
 	    subLibName = true;
 	} else
@@ -261,14 +258,12 @@ Arch_ParseArchive(char **linePtr,   /* Pointer to start of specification */
 	 * a close paren).  */
 	bool doSubst = false; /* true if need to substitute in memberName */
 
-	while (*cp != '\0' && *cp != ')' && isspace(*cp))
+	while (isspace(*cp))
 	    cp++;
 	memberName = cp;
 	while (*cp != '\0' && *cp != ')' && !isspace(*cp)) {
 	    if (*cp == '$') {
-		bool ok;
-		cp += Var_ParseSkip(cp, ctxt, &ok);
-		if (ok == false)
+		if (!Var_ParseSkip(&cp, ctxt))
 		    return false;
 		doSubst = true;
 	    } else
@@ -383,7 +378,7 @@ Arch_ParseArchive(char **linePtr,   /* Pointer to start of specification */
      * entrance to the loop, cp is guaranteed to point at a ')') */
     do {
 	cp++;
-    } while (*cp != '\0' && isspace(*cp));
+    } while (isspace(*cp));
 
     *linePtr = cp;
     return true;

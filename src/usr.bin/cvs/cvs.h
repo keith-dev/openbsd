@@ -1,4 +1,4 @@
-/*	$OpenBSD: cvs.h,v 1.134 2007/02/22 06:42:09 otto Exp $	*/
+/*	$OpenBSD: cvs.h,v 1.141 2007/07/03 13:22:42 joris Exp $	*/
 /*
  * Copyright (c) 2004 Jean-Francois Brousseau <jfb@openbsd.org>
  * All rights reserved.
@@ -48,7 +48,10 @@
 #define CVS_HIST_CACHE	128
 #define CVS_HIST_NBFLD	6
 
-#define CVS_CKSUM_LEN	33	/* length of a CVS checksum string */
+#define CVS_CKSUM_LEN	MD5_DIGEST_STRING_LENGTH
+
+#define CVS_REV_BUFSZ	32
+#define CVS_TIME_BUFSZ	64
 
 /* operations */
 #define CVS_OP_UNKNOWN		0
@@ -145,6 +148,21 @@
 #define CVS_PATH_TEMPLATE	CVS_PATH_CVSDIR "/Template"
 #define CVS_PATH_UPDATEPROG	CVS_PATH_CVSDIR "/Update.prog"
 #define CVS_PATH_ATTIC		"Attic"
+
+/* history stuff */
+#define CVS_HISTORY_TAG			0
+#define CVS_HISTORY_CHECKOUT		1
+#define CVS_HISTORY_EXPORT		2
+#define CVS_HISTORY_RELEASE		3
+#define CVS_HISTORY_UPDATE_REMOVE	4
+#define CVS_HISTORY_UPDATE_CO		5
+#define CVS_HISTORY_UPDATE_MERGED	6
+#define CVS_HISTORY_UPDATE_MERGED_ERR	7
+#define CVS_HISTORY_COMMIT_MODIFIED	8
+#define CVS_HISTORY_COMMIT_ADDED	9
+#define CVS_HISTORY_COMMIT_REMOVED	10
+
+void	cvs_history_add(int, struct cvs_file *, const char *);
 
 struct cvs_cmd {
 	u_int	 cmd_op;
@@ -280,6 +298,7 @@ extern char *cvs_rsh;
 extern char *cvs_tmpdir;
 extern char *import_repository;
 extern char *cvs_server_path;
+extern char *cvs_specified_tag;
 
 extern int  cvs_umask;
 extern int  verbosity;
@@ -293,6 +312,7 @@ extern int  cvs_readonly;
 extern int  cvs_readonlyfs;
 extern int  cvs_error;
 extern int  cvs_server_active;
+extern int  reset_stickies;
 
 extern struct cvs_cmd *cvs_cdt[];
 
@@ -309,8 +329,6 @@ extern struct cvs_cmd cvs_cmd_history;
 extern struct cvs_cmd cvs_cmd_import;
 extern struct cvs_cmd cvs_cmd_init;
 extern struct cvs_cmd cvs_cmd_log;
-extern struct cvs_cmd cvs_cmd_login;
-extern struct cvs_cmd cvs_cmd_logout;
 extern struct cvs_cmd cvs_cmd_rdiff;
 extern struct cvs_cmd cvs_cmd_release;
 extern struct cvs_cmd cvs_cmd_remove;
@@ -371,6 +389,7 @@ int	update_has_conflict_markers(struct cvs_file *);
 #define CO_SETSTICKY	0x02
 #define CO_DUMP		0x04
 #define CO_COMMIT	0x08
+#define CO_REMOVE	0x10
 
 /* commands */
 int	cvs_add(int, char **);
@@ -383,8 +402,10 @@ int	cvs_edit(int, char **);
 int	cvs_editors(int, char **);
 int	cvs_export(int, char **);
 int	cvs_getlog(int, char **);
+int	cvs_history(int, char **);
 int	cvs_import(int, char **);
 int	cvs_init(int, char **);
+int	cvs_release(int, char **);
 int	cvs_remove(int, char **);
 int	cvs_status(int, char **);
 int	cvs_tag(int, char **);

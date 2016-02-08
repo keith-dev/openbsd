@@ -1,4 +1,4 @@
-/*	$OpenBSD: usb_quirks.c,v 1.26 2007/01/01 22:27:00 deraadt Exp $ */
+/*	$OpenBSD: usb_quirks.c,v 1.29 2007/06/05 08:43:56 mbalmer Exp $ */
 /*	$NetBSD: usb_quirks.c,v 1.45 2003/05/10 17:47:14 hamajima Exp $	*/
 /*	$FreeBSD: src/sys/dev/usb/usb_quirks.c,v 1.30 2003/01/02 04:15:55 imp Exp $	*/
 
@@ -53,7 +53,7 @@ extern int usbdebug;
 
 #define ANY 0xffff
 
-Static const struct usbd_quirk_entry {
+const struct usbd_quirk_entry {
 	u_int16_t idVendor;
 	u_int16_t idProduct;
 	u_int16_t bcdDevice;
@@ -66,6 +66,8 @@ Static const struct usbd_quirk_entry {
  { USB_VENDOR_DALLAS, USB_PRODUCT_DALLAS_J6502,	    0x0a2, { UQ_AU_NO_XU }},
  { USB_VENDOR_ALTEC, USB_PRODUCT_ALTEC_ADA70,	    0x103, { UQ_BAD_ADC }},
  { USB_VENDOR_ALTEC, USB_PRODUCT_ALTEC_ASC495,      0x000, { UQ_BAD_AUDIO }},
+ { USB_VENDOR_LOGITECH, USB_PRODUCT_LOGITECH_QUICKCAMDLXNB,
+	0x100, { UQ_BAD_AUDIO }},
  { USB_VENDOR_LOGITECH, USB_PRODUCT_LOGITECH_QUICKCAMPRONB,
 	0x000, { UQ_BAD_AUDIO }},
  { USB_VENDOR_LOGITECH, USB_PRODUCT_LOGITECH_QUICKCAMPRO4K,
@@ -154,7 +156,7 @@ usbd_find_quirk(usb_device_descriptor_t *d)
 	}
 #ifdef USB_DEBUG
 	if (usbdebug && t->quirks.uq_flags)
-		logprintf("usbd_find_quirk 0x%04x/0x%04x/%x: %d\n",
+		printf("usbd_find_quirk 0x%04x/0x%04x/%x: %d\n",
 			  UGETW(d->idVendor), UGETW(d->idProduct),
 			  UGETW(d->bcdDevice), t->quirks.uq_flags);
 #endif

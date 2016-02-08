@@ -1,4 +1,4 @@
-/*	$OpenBSD: flash.c,v 1.2 2007/02/15 00:53:26 krw Exp $	*/
+/*	$OpenBSD: flash.c,v 1.8 2007/06/20 18:15:46 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2005 Uwe Stuehler <uwe@openbsd.org>
@@ -67,8 +67,7 @@ void	flashdone(void *);
 int	flashsafestrategy(struct flash_softc *, struct buf *);
 void	flashgetdefaultlabel(dev_t, struct flash_softc *,
     struct disklabel *);
-void	flashgetdisklabel(dev_t, struct flash_softc *, struct disklabel *,
-    struct cpu_disklabel *, int);
+void	flashgetdisklabel(dev_t, struct flash_softc *, struct disklabel *, int);
 
 /*
  * Driver attachment glue
@@ -700,8 +699,7 @@ flashopen(dev_t dev, int oflags, int devtype, struct proc *p)
 			sc->sc_flags |= FDK_LOADED;
 			if (flashsafe(dev))
 				sc->sc_flags |= FDK_SAFE;
-			flashgetdisklabel(dev, sc, sc->sc_dk.dk_label,
-			    sc->sc_dk.dk_cpulabel, 0);
+			flashgetdisklabel(dev, sc, sc->sc_dk.dk_label, 0);
 		}
 	} else if (((sc->sc_flags & FDK_SAFE) == 0) !=
 	    (flashsafe(dev) == 0)) {
@@ -812,8 +810,7 @@ flashstrategy(struct buf *bp)
 
 	/* Do bounds checking on partitions. */
 	if (flashpart(bp->b_dev) != RAW_PART &&
-	    bounds_check_with_label(bp, sc->sc_dk.dk_label,
-	    sc->sc_dk.dk_cpulabel, 0) <= 0)
+	    bounds_check_with_label(bp, sc->sc_dk.dk_label, 0) <= 0)
 		goto done;
 
 	/* Queue the transfer. */
@@ -865,13 +862,13 @@ flashioctl(dev_t dev, u_long cmd, caddr_t data, int fflag, struct proc *p)
 }
 
 int
-flashdump(dev_t dev, daddr_t blkno, caddr_t va, size_t size)
+flashdump(dev_t dev, daddr64_t blkno, caddr_t va, size_t size)
 {
 	printf("flashdump\n");
 	return ENODEV;
 }
 
-int
+daddr64_t
 flashsize(dev_t dev)
 {
 	printf("flashsize\n");
@@ -900,16 +897,12 @@ void
 _flashstart(struct flash_softc *sc, struct buf *bp)
 {
 	int part;
-	long offset;
+	daddr64_t offset;
 	long pgno;
 
 	part = flashpart(bp->b_dev);
-	if (part != RAW_PART)
-		offset = sc->sc_dk.dk_label->d_partitions[part].p_offset;
-	else
-		offset = 0;
-
-	offset = offset + bp->b_blkno;
+	offset = DL_GETPOFFSET(&sc->sc_dk.dk_label->d_partitions[part]) +
+	    bp->b_blkno;
 	pgno = offset / (sc->sc_flashdev->pagesize / DEV_BSIZE);
 
 	/*
@@ -991,21 +984,16 @@ flashgetdefaultlabel(dev_t dev, struct flash_softc *sc,
 	lp->d_nsectors = sc->sc_flashdev->capacity / lp->d_ntracks
 	    / lp->d_ncylinders;
 	lp->d_secpercyl = lp->d_ntracks * lp->d_nsectors;
-	lp->d_secperunit = lp->d_ncylinders * lp->d_secpercyl;
+	DL_SETDSIZE(lp, (daddr64_t)lp->d_ncylinders * lp->d_secpercyl);
 
 	/* Fake hardware characteristics. */
 	lp->d_rpm = 3600;
 	lp->d_interleave = 1;
+	lp->d_version = 1;
 
 	/* XXX these values assume ffs. */
 	lp->d_bbsize = BBSIZE;
 	lp->d_sbsize = SBSIZE;
-
-	/* Fake the partition information. */
-	lp->d_npartitions = RAW_PART + 1;
-	lp->d_partitions[RAW_PART].p_size = lp->d_secperunit;
-	lp->d_partitions[RAW_PART].p_offset = 0;
-	lp->d_partitions[RAW_PART].p_fstype = FS_UNUSED;
 
 	/* Wrap it up. */
 	lp->d_magic = DISKMAGIC;
@@ -1015,21 +1003,19 @@ flashgetdefaultlabel(dev_t dev, struct flash_softc *sc,
 
 void
 flashgetdisklabel(dev_t dev, struct flash_softc *sc,
-    struct disklabel *lp, struct cpu_disklabel *clp, int spoofonly)
+    struct disklabel *lp, int spoofonly)
 {
 	char *errstring;
 	dev_t labeldev;
 
 	flashgetdefaultlabel(dev, sc, lp);
-	bzero(clp, sizeof(struct cpu_disklabel));
 
 	if (sc->sc_tag->default_disklabel != NULL)
-		sc->sc_tag->default_disklabel(sc->sc_cookie, dev, lp, clp);
+		sc->sc_tag->default_disklabel(sc->sc_cookie, dev, lp);
 
 	/* Call the generic disklabel extraction routine. */
 	labeldev = flashlabeldev(dev);
-	errstring = readdisklabel(labeldev, flashstrategy, lp, clp,
-	    spoofonly);
+	errstring = readdisklabel(labeldev, flashstrategy, lp, spoofonly);
 	if (errstring != NULL) {
 		/*printf("%s: %s\n", sc->sc_dev.dv_xname, errstring);*/
 	}

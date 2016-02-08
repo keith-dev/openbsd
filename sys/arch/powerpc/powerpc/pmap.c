@@ -1,7 +1,7 @@
-/*	$OpenBSD: pmap.c,v 1.97 2007/02/22 20:34:46 thib Exp $ */
+/*	$OpenBSD: pmap.c,v 1.101 2007/05/27 15:46:02 drahn Exp $ */
 
 /*
- * Copyright (c) 2001, 2002 Dale Rahn.
+ * Copyright (c) 2001, 2002, 2007 Dale Rahn.
  * All rights reserved.
  *
  *   
@@ -33,6 +33,7 @@
 #include <sys/param.h>
 #include <sys/malloc.h>
 #include <sys/proc.h>
+#include <sys/queue.h>
 #include <sys/user.h>
 #include <sys/systm.h>
 #include <sys/pool.h>
@@ -48,15 +49,11 @@
 #include <ddb/db_output.h>
 
 struct pmap kernel_pmap_;
-static int npgs;
 static struct mem_region *pmap_mem, *pmap_avail;
 struct mem_region pmap_allocated[10];
 int pmap_cnt_avail;
 int pmap_cnt_allocated;
 
-
-void * pmap_pvh;
-void * pmap_attrib;
 struct pte_64  *pmap_ptable64;
 struct pte_32  *pmap_ptable32;
 int	pmap_ptab_cnt;
@@ -70,9 +67,6 @@ static u_int usedsr[NPMAPS / sizeof(u_int) / 8];
 paddr_t zero_page;
 paddr_t copy_src_page;
 paddr_t copy_dst_page;
-
-/* P->V table */
-LIST_HEAD(pted_pv_head, pte_desc);
 
 struct pte_desc {
 	/* Linked list of phys -> virt entries */
@@ -112,7 +106,7 @@ void pmap_vp_destroy(pmap_t pm);
 struct pte_desc *pmap_vp_lookup(pmap_t pm, vaddr_t va);
 
 /* PV routines */
-int pmap_enter_pv(struct pte_desc *pted, struct pted_pv_head *);
+void pmap_enter_pv(struct pte_desc *pted, struct vm_page *);
 void pmap_remove_pv(struct pte_desc *pted);
 
 
@@ -159,8 +153,6 @@ struct pool pmap_pted_pool;
 int pmap_initialized = 0;
 int physmem;
 int physmaxaddr;
-
-#define ATTRSHIFT	4
 
 /* virtual to physical helpers */
 static inline int
@@ -289,31 +281,6 @@ pmap_vp_enter(pmap_t pm, vaddr_t va, struct pte_desc *pted)
 	pmap_simpleunlock_pm(pm);
 }
 
-/* 
- * HELPER FUNCTIONS 
- */
-static inline struct pted_pv_head *
-pmap_find_pvh(paddr_t pa)
-{
-	int bank, off;
-	bank = vm_physseg_find(atop(pa), &off);
-	if (bank != -1) {
-		return &vm_physmem[bank].pmseg.pvent[off];
-	}
-	return NULL;
-}
-
-static inline char *
-pmap_find_attr(paddr_t pa)
-{
-	int bank, off;
-	bank = vm_physseg_find(atop(pa), &off);
-	if (bank != -1) {
-		return &vm_physmem[bank].pmseg.attrs[off];
-	}
-	return NULL;
-}
-
 /* PTE manipulation/calculations */
 static inline void
 tlbie(vaddr_t va)
@@ -419,22 +386,15 @@ PTED_VALID(struct pte_desc *pted)
  * have too noticable unnecessary ram consumption.
  */
 
-int
-pmap_enter_pv(struct pte_desc *pted, struct pted_pv_head *pvh)
+void
+pmap_enter_pv(struct pte_desc *pted, struct vm_page *pg)
 {
-	int first;
-
 	if (__predict_false(!pmap_initialized)) {
-		return 0;
-	}
-	if (pvh == NULL) {
-		return 0;
+		return;
 	}
 
-	first = LIST_EMPTY(pvh);
-	LIST_INSERT_HEAD(pvh, pted, pted_pv_list);
+	LIST_INSERT_HEAD(&(pg->mdpage.pv_list), pted, pted_pv_list);
 	pted->pted_va |= PTED_VA_MANAGED_M;
-	return first;
 }
 
 void
@@ -443,34 +403,43 @@ pmap_remove_pv(struct pte_desc *pted)
 	LIST_REMOVE(pted, pted_pv_list);
 }
 
+
+/* PTE_CHG_32 == PTE_CHG_64 */
+/* PTE_REF_32 == PTE_REF_64 */
+static __inline u_int
+pmap_pte2flags(u_int32_t pte)
+{
+	return (((pte & PTE_REF_32) ? PG_PMAP_REF : 0) |
+	    ((pte & PTE_CHG_32) ? PG_PMAP_MOD : 0));
+}
+
+static __inline u_int
+pmap_flags2pte(u_int32_t flags)
+{
+	return (((flags & PG_PMAP_REF) ? PTE_REF_32 : 0) |
+	    ((flags & PG_PMAP_MOD) ? PTE_CHG_32 : 0));
+}
+
 void
 pmap_attr_save(paddr_t pa, u_int32_t bits)
 {
-	int bank, pg;
-	u_int8_t *attr;
+	struct vm_page *pg;
 
-	bank = vm_physseg_find(atop(pa), &pg);
-	if (bank == -1)
+	pg = PHYS_TO_VM_PAGE(pa);
+	if (pg == NULL)
 		return;
-	attr = &vm_physmem[bank].pmseg.attrs[pg];
-	*attr |= (u_int8_t)(bits >> ATTRSHIFT);
+
+	atomic_setbits_int(&pg->pg_flags,  pmap_pte2flags(bits));
 }
 
 int
-pmap_enter(pm, va, pa, prot, flags)
-	pmap_t pm;
-	vaddr_t va;
-	paddr_t pa;
-	vm_prot_t prot;
-	int flags;
+pmap_enter(pmap_t pm, vaddr_t va, paddr_t pa, vm_prot_t prot, int flags)
 {
 	struct pte_desc *pted;
-	struct pted_pv_head *pvh;
+	struct vm_page *pg;
 	int s;
 	int need_sync = 0;
 	int cache;
-	u_int8_t *pattr = NULL;
-	int first_map = 0;
 
 	/* MP - Acquire lock for this pmap */
 
@@ -493,8 +462,8 @@ pmap_enter(pm, va, pa, prot, flags)
 	}
 
 	/* Calculate PTE */
-	pvh = pmap_find_pvh(pa);
-	if (pvh != NULL)
+	pg = PHYS_TO_VM_PAGE(pa);
+	if (pg != NULL)
 		cache = PMAP_CACHE_WB; /* managed memory is cacheable */
 	else
 		cache = PMAP_CACHE_CI;
@@ -504,26 +473,8 @@ pmap_enter(pm, va, pa, prot, flags)
 	else
 		pmap_fill_pte32(pm, va, pa, pted, prot, flags, cache);
 
-	if (pvh != NULL) {
-		pattr = pmap_find_attr(pa); /* pattr only for managed mem */
-		first_map = pmap_enter_pv(pted, pvh); /* only managed mem */
-	}
-
-	/* 
-	 * We want to flush for executable pages which are not managed???
-	 * Always flush for the first mapping if it is executable.
-	 * If previous mappings exist, but this is the first EXE, sync.
-	 */
-
-	if (prot & VM_PROT_EXECUTE) {
-		need_sync = 1;
-		if (pvh != NULL) {
-			if (!first_map)
-				need_sync =
-				    (*pattr & (PTE_EXE_32 >> ATTRSHIFT)) == 0;
-			else if (pattr != NULL)
-				*pattr = 0;
-		}
+	if (pg != NULL) {
+		pmap_enter_pv(pted, pg); /* only managed mem */
 	}
 
 	/*
@@ -543,15 +494,18 @@ pmap_enter(pm, va, pa, prot, flags)
 		if (pm->pm_sr[sn] & SR_NOEXEC)
 			pm->pm_sr[sn] &= ~SR_NOEXEC;
 
-		if (pattr != NULL)
-			*pattr |= (PTE_EXE_32 >> ATTRSHIFT);
+		if (pg != NULL) {
+			need_sync = ((pg->pg_flags & PG_PMAP_EXE) == 0);
+			atomic_setbits_int(&pg->pg_flags, PG_PMAP_EXE);
+		} else
+			need_sync = 1;
 	} else {
 		/*
 		 * Should we be paranoid about writeable non-exec 
 		 * mappings ? if so, clear the exec tag
 		 */
-		if ((prot & VM_PROT_WRITE) && (pattr != NULL))
-			*pattr &= ~(PTE_EXE_32 >> ATTRSHIFT);
+		if ((prot & VM_PROT_WRITE) && (pg != NULL))
+			atomic_clearbits_int(&pg->pg_flags, PG_PMAP_EXE);
 	}
 
 	splx(s);
@@ -694,7 +648,6 @@ _pmap_kenter_pa(vaddr_t va, paddr_t pa, vm_prot_t prot, int flags, int cache)
 	struct pte_desc *pted;
 	int s;
 	pmap_t pm;
-	struct pted_pv_head *pvh;
 
 	pm = pmap_kernel();
 
@@ -717,9 +670,8 @@ _pmap_kenter_pa(vaddr_t va, paddr_t pa, vm_prot_t prot, int flags, int cache)
 		pmap_vp_enter(pm, va, pted);
 	}
 
-	pvh = pmap_find_pvh(pa);
 	if (cache == PMAP_CACHE_DEFAULT) {
-		if (pvh != NULL)
+		if (PHYS_TO_VM_PAGE(pa) != NULL)
 			cache = PMAP_CACHE_WB; /* managed memory is cacheable */
 		else
 			cache = PMAP_CACHE_CI;
@@ -752,7 +704,6 @@ _pmap_kenter_pa(vaddr_t va, paddr_t pa, vm_prot_t prot, int flags, int cache)
 	}
 
 	splx(s);
-
 }
 
 void
@@ -988,30 +939,21 @@ pmap_fill_pte32(pmap_t pm, vaddr_t va, paddr_t pa, struct pte_desc *pted,
  * ack, copied code in the pte flush code....
  */
 int
-pteclrbits(paddr_t pa, u_int bit, u_int clear)
+pteclrbits(struct vm_page *pg, u_int flagbit, u_int clear)
 {
-	char *pattr;
 	u_int bits;
 	int s;
 	struct pte_desc *pted;
-	struct pted_pv_head *pvh;
+	u_int ptebit = pmap_flags2pte(flagbit);
 
 	/* PTE_CHG_32 == PTE_CHG_64 */
-	/* PTE_REG_32 == PTE_REG_64 */
-
-	pattr = pmap_find_attr(pa);
-
-	/* check if managed memory */
-	if (pattr == NULL)
-		return 0;
-
-	pvh = pmap_find_pvh(pa);
+	/* PTE_REF_32 == PTE_REF_64 */
 
 	/*
 	 *  First try the attribute cache
 	 */
-	bits = (*pattr << ATTRSHIFT) & bit;
-	if ((bits == bit) && (clear == 0))
+	bits = pg->pg_flags & flagbit;
+	if ((bits == flagbit) && (clear == 0))
 		return bits;
 
 	/* cache did not contain all necessary bits,
@@ -1022,7 +964,7 @@ pteclrbits(paddr_t pa, u_int bit, u_int clear)
 	/* need lock for this pv */
 	s = splvm();
 
-	LIST_FOREACH(pted, pvh, pted_pv_list) {
+	LIST_FOREACH(pted, &(pg->mdpage.pv_list), pted_pv_list) {
 		vaddr_t va = pted->pted_va & PAGE_MASK;
 		pmap_t pm = pted->pted_pmap;
 		struct pte_64 *ptp64;
@@ -1049,16 +991,16 @@ pteclrbits(paddr_t pa, u_int bit, u_int clear)
 			 */
 			if ((pted->p.pted_pte64.pte_hi |
 			    (PTED_HID(pted) ? PTE_HID_64 : 0)) == ptp64->pte_hi) {
-				bits |=	ptp64->pte_lo & bit;
+				bits |=	pmap_pte2flags(ptp64->pte_lo & ptebit);
 				if (clear) {
 					ptp64->pte_hi &= ~PTE_VALID_64;
 					__asm__ volatile ("sync");
 					tlbie(va);
 					tlbsync();
-					ptp64->pte_lo &= ~bit;
+					ptp64->pte_lo &= ~ptebit;
 					__asm__ volatile ("sync");
 					ptp64->pte_hi |= PTE_VALID_64;
-				} else if (bits == bit)
+				} else if (bits == flagbit)
 					break;
 			}
 		} else {
@@ -1077,25 +1019,30 @@ pteclrbits(paddr_t pa, u_int bit, u_int clear)
 			 */
 			if ((pted->p.pted_pte32.pte_hi |
 			    (PTED_HID(pted) ? PTE_HID_32 : 0)) == ptp32->pte_hi) {
-				bits |=	ptp32->pte_lo & bit;
+				bits |=	pmap_pte2flags(ptp32->pte_lo & ptebit);
 				if (clear) {
 					ptp32->pte_hi &= ~PTE_VALID_32;
 					__asm__ volatile ("sync");
 					tlbie(va);
 					tlbsync();
-					ptp32->pte_lo &= ~bit;
+					ptp32->pte_lo &= ~ptebit;
 					__asm__ volatile ("sync");
 					ptp32->pte_hi |= PTE_VALID_32;
-				} else if (bits == bit)
+				} else if (bits == flagbit)
 					break;
 			}
 		}
 	}
 
-	if (clear)
-		*pattr &= ~(bit >> ATTRSHIFT);
-	else
-		*pattr |= (bits >> ATTRSHIFT);
+	if (clear) {
+		/*
+		 * this is done a second time, because while walking the list
+		 * a bit could have been promoted via pmap_attr_save()
+		 */
+		bits |= pg->pg_flags & flagbit;
+		atomic_clearbits_int(&pg->pg_flags,  flagbit); 
+	} else
+		atomic_setbits_int(&pg->pg_flags,  bits);
 
 	splx(s);
 	return bits;
@@ -1467,6 +1414,72 @@ pmap_steal_avail(size_t size, int align)
 	    size, align);
 }
 
+/*
+ * Similar to pmap_steal_avail, but operating on vm_physmem since
+ * uvm_page_physload() has been called.
+ */
+vaddr_t
+pmap_steal_memory(vsize_t size, vaddr_t *start, vaddr_t *end)
+{
+	int segno;
+	u_int npg;
+	vaddr_t va;
+	paddr_t pa;
+	struct vm_physseg *seg;
+
+	size = round_page(size);
+	npg = atop(size);
+
+	for (segno = 0, seg = vm_physmem; segno < vm_nphysseg; segno++, seg++) {
+		if (seg->avail_end - seg->avail_start < npg)
+			continue;
+		/*
+		 * We can only steal at an ``unused'' segment boundary,
+		 * i.e. either at the start or at the end.
+		 */
+		if (seg->avail_start == seg->start ||
+		    seg->avail_end == seg->end)
+			break;
+	}
+	if (segno == vm_nphysseg)
+		va = 0;
+	else {
+		if (seg->avail_start == seg->start) {
+			pa = ptoa(seg->avail_start);
+			seg->avail_start += npg;
+			seg->start += npg;
+		} else {
+			pa = ptoa(seg->avail_end) - size;
+			seg->avail_end -= npg;
+			seg->end -= npg;
+		}
+		/*
+		 * If all the segment has been consumed now, remove it.
+		 * Note that the crash dump code still knows about it
+		 * and will dump it correctly.
+		 */
+		if (seg->start == seg->end) {
+			if (vm_nphysseg-- == 1)
+				panic("pmap_steal_memory: out of memory");
+			while (segno < vm_nphysseg) {
+				seg[0] = seg[1]; /* struct copy */
+				seg++;
+				segno++;
+			}
+		}
+
+		va = (vaddr_t)pa;	/* 1:1 mapping */
+		bzero((void *)va, size);
+	}
+
+	if (start != NULL)
+		*start = VM_MIN_KERNEL_ADDRESS;
+	if (end != NULL)
+		*end = VM_MAX_KERNEL_ADDRESS;
+
+	return (va);
+}
+
 void *msgbuf_addr;
 
 /*
@@ -1601,17 +1614,12 @@ pmap_bootstrap(u_int kernelstart, u_int kernelend)
 
 	tlbia();
 
-	npgs = 0;
-	for (mp = pmap_avail; mp->size; mp++) {
-		npgs += btoc(mp->size);
-	}
-	/* Ok we lose a few pages from this allocation, but hopefully
-	 * not too many 
-	 */
-	pmap_pvh = pmap_steal_avail(sizeof(struct pted_pv_head *) * npgs, 4);
-	pmap_attrib = pmap_steal_avail(sizeof(char) * npgs, 1);
 	pmap_avail_fixup();
 	for (mp = pmap_avail; mp->size; mp++) {
+		if (mp->start > 0x80000000)
+			continue;
+		if (mp->start + mp->size > 0x80000000)
+			mp->size = 0x80000000 - mp->start;
 		uvm_page_physload(atop(mp->start), atop(mp->start+mp->size),
 		    atop(mp->start), atop(mp->start+mp->size),
 		    VM_FREELIST_DEFAULT);
@@ -1688,10 +1696,7 @@ pmap_popusr(u_int32_t sr)
 }
 
 int
-copyin(udaddr, kaddr, len)
-	const void *udaddr;
-	void *kaddr;
-	size_t len;
+copyin(const void *udaddr, void *kaddr, size_t len)
 {
 	void *p;
 	size_t l;
@@ -1721,10 +1726,7 @@ copyin(udaddr, kaddr, len)
 }
 
 int
-copyout(kaddr, udaddr, len)
-	const void *kaddr;
-	void *udaddr;
-	size_t len;
+copyout(const void *kaddr, void *udaddr, size_t len)
 {
 	void *p;
 	size_t l;
@@ -2011,31 +2013,24 @@ pmap_page_ro32(pmap_t pm, vaddr_t va)
 void
 pmap_page_protect(struct vm_page *pg, vm_prot_t prot)
 {
-	paddr_t pa = VM_PAGE_TO_PHYS(pg);
 	int s;
 	struct pte_desc *pted;
-	struct pted_pv_head *pvh;
 
 	/* need to lock for this pv */
 	s = splvm();
-	pvh = pmap_find_pvh(pa);
-
-	/* nothing to do if not a managed page */
-	if (pvh == NULL) {
-		splx(s);
-		return;
-	}
 
 	if (prot == VM_PROT_NONE) {
-		while (!LIST_EMPTY(pvh)) {
-			pted = LIST_FIRST(pvh);
+		while (!LIST_EMPTY(&(pg->mdpage.pv_list))) {
+			pted = LIST_FIRST(&(pg->mdpage.pv_list));
 			pmap_remove_pg(pted->pted_pmap, pted->pted_va);
 		}
+		/* page is being reclaimed, sync icache next use */
+		atomic_clearbits_int(&pg->pg_flags, PG_PMAP_EXE);
 		splx(s);
 		return;
 	}
 	
-	LIST_FOREACH(pted, pvh, pted_pv_list) {
+	LIST_FOREACH(pted, &(pg->mdpage.pv_list), pted_pv_list) {
 		if (ppc_proc_is_64b)
 			pmap_page_ro64(pted->pted_pmap, pted->pted_va, prot);
 		else
@@ -2091,24 +2086,9 @@ pmap_real_memory(paddr_t *start, vsize_t *size)
 	*size = 0;
 }
 
-/*
- * How much virtual space is available to the kernel?
- */
-void
-pmap_virtual_space(vaddr_t *start, vaddr_t *end)
-{
-	*start = VM_MIN_KERNEL_ADDRESS;
-	*end = VM_MAX_KERNEL_ADDRESS;
-}
-
 void
 pmap_init()
 {
-	vsize_t sz;
-	struct pted_pv_head *pvh;
-	char *attr;
-	int i, bank;
-
 	pool_init(&pmap_pmap_pool, sizeof(struct pmap), 0, 0, 0, "pmap", NULL);
 	pool_setlowat(&pmap_pmap_pool, 2);
 	pool_init(&pmap_vp_pool, sizeof(struct pmapvp), 0, 0, 0, "vp", NULL);
@@ -2117,22 +2097,6 @@ pmap_init()
 	    NULL);
 	pool_setlowat(&pmap_pted_pool, 20);
 
-	/* pmap_pvh and pmap_attr must be allocated 1-1 so that pmap_save_attr
-	 * is callable from pte_spill_r (with vm disabled)
-	 */
-	pvh = (struct pted_pv_head *)pmap_pvh;
-	for (i = npgs; i > 0; i--)
-		LIST_INIT(pvh++);
-	attr = pmap_attrib;
-	bzero(pmap_attrib, npgs);
-	pvh = (struct pted_pv_head *)pmap_pvh;
-	for (bank = 0; bank < vm_nphysseg; bank++) {
-		sz = vm_physmem[bank].end - vm_physmem[bank].start;
-		vm_physmem[bank].pmseg.pvent = pvh;
-		vm_physmem[bank].pmseg.attrs = attr;
-		pvh += sz;
-		attr += sz;
-	}
 	pmap_initialized = 1;
 }
 
@@ -2340,7 +2304,7 @@ pte_insert64(struct pte_desc *pted)
 		__asm volatile ("sync");
 		return;
 	}
-	/* first just try fill of secondary hash */
+	/* try fill of secondary hash */
 	ptp64 = pmap_ptable64 + (idx ^ pmap_ptab_mask) * 8;
 	for (i = 0; i < 8; i++) {
 		if (ptp64[i].pte_hi & PTE_VALID_64)
@@ -2384,7 +2348,7 @@ pte_insert64(struct pte_desc *pted)
 
 		tlbsync();
 		pmap_attr_save(ptp64->pte_lo & PTE_RPGN_64,
-		    ptp64->pte_lo & (PTE_REF_32|PTE_CHG_32));
+		    ptp64->pte_lo & (PTE_REF_64|PTE_CHG_64));
 	}
 
 	if (secondary)
@@ -2447,7 +2411,7 @@ pte_insert32(struct pte_desc *pted)
 		__asm volatile ("sync");
 		return;
 	}
-	/* first just try fill of secondary hash */
+	/* try fill of secondary hash */
 	ptp32 = pmap_ptable32 + (idx ^ pmap_ptab_mask) * 8;
 	for (i = 0; i < 8; i++) {
 		if (ptp32[i].pte_hi & PTE_VALID_32)
@@ -2670,13 +2634,14 @@ int pmap_show_mappings(paddr_t pa);
 int
 pmap_show_mappings(paddr_t pa) 
 {
-	struct pted_pv_head *pvh;
 	struct pte_desc *pted;
-	pvh = pmap_find_pvh(pa);
-	if (pvh == NULL) {
+	struct vm_page *pg;
+
+	pg = PHYS_TO_VM_PAGE(pa);
+	if (pg == NULL) {
 		db_printf("pa %x: unmanaged\n");
 	} else {
-		LIST_FOREACH(pted, pvh, pted_pv_list) {
+		LIST_FOREACH(pted, &(pg->mdpage.pv_list), pted_pv_list) {
 			pmap_print_pted(pted, db_printf);
 		}
 	}

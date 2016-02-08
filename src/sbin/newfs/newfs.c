@@ -1,7 +1,16 @@
-/*	$OpenBSD: newfs.c,v 1.52 2006/03/09 13:35:02 pedro Exp $	*/
+/*	$OpenBSD: newfs.c,v 1.69 2007/06/26 19:03:21 otto Exp $	*/
 /*	$NetBSD: newfs.c,v 1.20 1996/05/16 07:13:03 thorpej Exp $	*/
 
 /*
+ * Copyright (c) 2002 Networks Associates Technology, Inc.
+ * All rights reserved.
+ *
+ * This software was developed for the FreeBSD Project by Marshall
+ * Kirk McKusick and Network Associates Laboratories, the Security
+ * Research Division of Network Associates, Inc. under DARPA/SPAWAR
+ * contract N66001-01-C-8035 ("CBOSS"), as part of the DARPA CHATS
+ * research program.
+ *
  * Copyright (c) 1983, 1989, 1993, 1994
  *	The Regents of the University of California.  All rights reserved.
  *
@@ -30,23 +39,6 @@
  * SUCH DAMAGE.
  */
 
-#ifndef lint
-static char copyright[] =
-"@(#) Copyright (c) 1983, 1989, 1993, 1994\n\
-	The Regents of the University of California.  All rights reserved.\n";
-#endif /* not lint */
-
-#ifndef lint
-#if 0
-static char sccsid[] = "@(#)newfs.c	8.8 (Berkeley) 4/18/94";
-#else
-static char rcsid[] = "$OpenBSD: newfs.c,v 1.52 2006/03/09 13:35:02 pedro Exp $";
-#endif
-#endif /* not lint */
-
-/*
- * newfs: friendly front end to mkfs
- */
 #include <sys/param.h>
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -57,6 +49,7 @@ static char rcsid[] = "$OpenBSD: newfs.c,v 1.52 2006/03/09 13:35:02 pedro Exp $"
 #include <sys/sysctl.h>
 #include <sys/wait.h>
 
+#include <ufs/ufs/dinode.h>
 #include <ufs/ufs/dir.h>
 #include <ufs/ffs/fs.h>
 
@@ -85,12 +78,10 @@ struct mntopt mopts[] = {
 };
 
 void	fatal(const char *fmt, ...);
-void	usage(void);
+__dead void	usage(void);
 void	mkfs(struct partition *, char *, int, int, mode_t, uid_t, gid_t);
 void	rewritelabel(char *, int, struct disklabel *);
 u_short	dkcksum(struct disklabel *);
-
-#define	COMPAT			/* allow non-labeled disks */
 
 /*
  * The following two constants set the default block and fragment sizes.
@@ -103,27 +94,12 @@ u_short	dkcksum(struct disklabel *);
 #define	DFL_BLKSIZE	16384
 
 /*
- * Cylinder groups may have up to many cylinders. The actual
- * number used depends upon how much information can be stored
- * on a single cylinder. The default is to use as many as
- * possible.
- */
-#define	DESCPG		65536	/* desired fs_cpg */
-
-/*
- * ROTDELAY gives the minimum number of milliseconds to initiate
- * another disk transfer on the same cylinder. It is used in
- * determining the rotationally optimal layout for disk blocks
- * within a file; the default of fs_rotdelay is 0ms.
- */
-#define ROTDELAY	0
-
-/*
  * MAXBLKPG determines the maximum number of data blocks which are
  * placed in a single cylinder group. The default is one indirect
  * block worth of data blocks.
  */
-#define MAXBLKPG(bsize)	((bsize) / sizeof(daddr_t))
+#define MAXBLKPG_FFS1(bsize)	((bsize) / sizeof(int32_t))
+#define MAXBLKPG_FFS2(bsize)	((bsize) / sizeof(int64_t))
 
 /*
  * Each file system has a number of inodes statically allocated.
@@ -134,43 +110,26 @@ u_short	dkcksum(struct disklabel *);
 
 int	mfs;			/* run as the memory based filesystem */
 int	Nflag;			/* run without writing file system */
-int	Oflag;			/* format as an 4.3BSD file system */
-int	fssize;			/* file system size */
-int	ntracks;		/* # tracks/cylinder */
-int	nsectors;		/* # sectors/track */
-int	nphyssectors;		/* # sectors/track including spares */
-int	secpercyl;		/* sectors per cylinder */
-int	trackspares = -1;	/* spare sectors per track */
-int	cylspares = -1;		/* spare sectors per cylinder */
+int	Oflag = 1;		/* 0 = 4.3BSD ffs, 1 = 4.4BSD ffs, 2 = ffs2 */
+daddr64_t	fssize;			/* file system size */
 int	sectorsize;		/* bytes/sector */
 int	realsectorsize;		/* bytes/sector in hardware */
-int	rpm;			/* revolutions/minute of drive */
-int	interleave;		/* hardware sector interleave */
-int	trackskew = -1;		/* sector 0 skew, per track */
 int	fsize = 0;		/* fragment size */
 int	bsize = 0;		/* block size */
-int	cpg;			/* cylinders/cylinder group */
-int	cpgflg;			/* cylinders/cylinder group flag was given */
+int	maxfrgspercg = INT_MAX;	/* maximum fragments per cylinder group */
 int	minfree = MINFREE;	/* free space threshold */
 int	opt = DEFAULTOPT;	/* optimization preference (space or time) */
 int	reqopt = -1;		/* opt preference has not been specified */
 int	density;		/* number of bytes per inode */
-int	maxcontig = 0;		/* max contiguous blocks to allocate */
-int	rotdelay = ROTDELAY;	/* rotational delay between blocks */
 int	maxbpg;			/* maximum blocks per file in a cyl group */
 int	avgfilesize = AVFILESIZ;/* expected average file size */
 int	avgfilesperdir = AFPDIR;/* expected number of files per directory */
-int	bbsize = BBSIZE;	/* boot block size */
-int	sbsize = SBSIZE;	/* superblock size */
 int	mntflags = MNT_ASYNC;	/* flags to be passed to mount */
 int	quiet = 0;		/* quiet flag */
 u_long	memleft;		/* virtual memory available */
 caddr_t	membase;		/* start address of memory based filesystem */
-#ifdef COMPAT
 char	*disktype;
 int	unlabeled;
-#endif
-
 char	device[MAXPATHLEN];
 
 extern	char *__progname;
@@ -194,8 +153,8 @@ main(int argc, char *argv[])
 	struct stat st;
 	struct statfs *mp;
 	struct rlimit rl;
-	int fsi = -1, fso, len, n, ncyls, maxpartitions;
-	char *cp, *s1, *s2, *special, *opstring;
+	int fsi = -1, fso, len, n, maxpartitions;
+	char *cp = NULL, *s1, *s2, *special, *opstring;
 #ifdef MFS
 	char mountfromname[BUFSIZ];
 	char *pop = NULL;
@@ -204,12 +163,13 @@ main(int argc, char *argv[])
 	struct stat mountpoint;
 	int status;
 #endif
-	uid_t mfsuid;
-	gid_t mfsgid;
-	mode_t mfsmode;
+	uid_t mfsuid = 0;
+	gid_t mfsgid = 0;
+	mode_t mfsmode = 0;
 	char *fstype = NULL;
 	char **saveargv = argv;
-	int ffs = 1;
+	int ffsflag = 1;
+	const char *errstr;
 
 	if (strstr(__progname, "mfs"))
 		mfs = Nflag = quiet = 1;
@@ -219,75 +179,73 @@ main(int argc, char *argv[])
 		fatal("insane maxpartitions value %d", maxpartitions);
 
 	opstring = mfs ?
-	    "P:T:a:b:c:d:e:f:i:m:o:s:" :
-	    "NOS:T:a:b:c:d:e:f:g:h:i:k:l:m:o:p:qr:s:t:u:x:z:";
+	    "P:T:b:c:e:f:i:m:o:s:" :
+	    "NO:S:T:b:c:e:f:g:h:i:m:o:qs:t:";
 	while ((ch = getopt(argc, argv, opstring)) != -1) {
 		switch (ch) {
 		case 'N':
 			Nflag = 1;
 			break;
 		case 'O':
-			Oflag = 1;
+			Oflag = strtonum(optarg, 0, 2, &errstr);
+			if (errstr)
+				fatal("%s: invalid ffs version", optarg);
 			break;
 		case 'S':
-			if ((sectorsize = atoi(optarg)) <= 0)
-				fatal("%s: bad sector size", optarg);
+			sectorsize = strtonum(optarg, 1, INT_MAX, &errstr);
+			if (errstr)
+				fatal("sector size is %s: %s", errstr, optarg);
 			break;
-#ifdef COMPAT
 		case 'T':
 			disktype = optarg;
 			break;
-#endif
-		case 'a':
-			if ((maxcontig = atoi(optarg)) <= 0)
-				fatal("%s: bad maximum contiguous blocks\n",
-				    optarg);
-			break;
 		case 'b':
-			if ((bsize = atoi(optarg)) < 0)
-				fatal("%s: bad block size", optarg);
+			bsize = strtonum(optarg, MINBSIZE, MAXBSIZE, &errstr);
+			if (errstr)
+				fatal("block size is %s: %s", errstr, optarg);
 			break;
 		case 'c':
-			if ((cpg = atoi(optarg)) <= 0)
-				fatal("%s: bad cylinders/group", optarg);
-			cpgflg++;
-			break;
-		case 'd':
-			if ((rotdelay = atoi(optarg)) < 0)
-				fatal("%s: bad rotational delay\n", optarg);
+			maxfrgspercg = strtonum(optarg, 1, INT_MAX, &errstr);
+			if (errstr)
+				fatal("fragments per cylinder group is %s: %s",
+				    errstr, optarg);
 			break;
 		case 'e':
-			if ((maxbpg = atoi(optarg)) <= 0)
-		fatal("%s: bad blocks per file in a cylinder group\n",
-				    optarg);
+			maxbpg = strtonum(optarg, 1, INT_MAX, &errstr);
+			if (errstr)
+				fatal("blocks per file in a cylinder group is"
+				    " %s: %s", errstr, optarg);
 			break;
 		case 'f':
-			if ((fsize = atoi(optarg)) <= 0)
-				fatal("%s: bad fragment size", optarg);
+			fsize = strtonum(optarg, MINBSIZE / MAXFRAG, MAXBSIZE,
+			    &errstr);
+			if (errstr)
+				fatal("fragment size is %s: %s",
+				    errstr, optarg);
 			break;
 		case 'g':
-			if ((avgfilesize = atoi(optarg)) <= 0)
-				fatal("%s: bad average file size", optarg);
+			avgfilesize = strtonum(optarg, 1, INT_MAX, &errstr);
+			if (errstr)
+				fatal("average file size is %s: %s",
+				    errstr, optarg);
 			break;
 		case 'h':
-			if ((avgfilesperdir = atoi(optarg)) <= 0)
-				fatal("%s: bad average files per dir", optarg);
+			avgfilesperdir = strtonum(optarg, 1, INT_MAX, &errstr);
+			if (errstr)
+				fatal("average files per dir is %s: %s",
+				    errstr, optarg);
 			break;
 		case 'i':
-			if ((density = atoi(optarg)) <= 0)
-				fatal("%s: bad bytes per inode\n", optarg);
-			break;
-		case 'k':
-			if ((trackskew = atoi(optarg)) < 0)
-				fatal("%s: bad track skew", optarg);
-			break;
-		case 'l':
-			if ((interleave = atoi(optarg)) <= 0)
-				fatal("%s: bad interleave", optarg);
+			density = strtonum(optarg, 1, INT_MAX, &errstr);
+			if (errstr)
+				fatal("bytes per inode is %s: %s",
+				    errstr, optarg);
 			break;
 		case 'm':
-			if ((minfree = atoi(optarg)) < 0 || minfree > 99)
-				fatal("%s: bad free space %%\n", optarg);
+			minfree = strtonum(optarg, 0, 99, &errstr);
+			if (errstr)
+				fatal("free space %% is %s: %s",
+				    errstr, optarg);
 			break;
 		case 'o':
 			if (mfs)
@@ -302,39 +260,19 @@ main(int argc, char *argv[])
 					    "preference: use `space' or `time'.");
 			}
 			break;
-		case 'p':
-			if ((trackspares = atoi(optarg)) < 0)
-				fatal("%s: bad spare sectors per track",
-				    optarg);
-			break;
 		case 'q':
 			quiet = 1;
 			break;
-		case 'r':
-			if ((rpm = atoi(optarg)) <= 0)
-				fatal("%s: bad revolutions/minute\n", optarg);
-			break;
 		case 's':
-			if ((fssize = atoi(optarg)) <= 0)
-				fatal("%s: bad file system size", optarg);
-			break;
-		case 'z':
-			if ((ntracks = atoi(optarg)) <= 0)
-				fatal("%s: bad total tracks", optarg);
+			fssize = strtonum(optarg, 1, LLONG_MAX, &errstr);
+			if (errstr)
+				fatal("file system size is %s: %s",
+				    errstr, optarg);
 			break;
 		case 't':
 			fstype = optarg;
 			if (strcmp(fstype, "ffs"))
-				ffs = 0;
-			break;
-		case 'u':
-			if ((nsectors = atoi(optarg)) <= 0)
-				fatal("%s: bad sectors/track", optarg);
-			break;
-		case 'x':
-			if ((cylspares = atoi(optarg)) < 0)
-				fatal("%s: bad spare sectors per cylinder",
-				    optarg);
+				ffsflag = 0;
 			break;
 #ifdef MFS
 		case 'P':
@@ -345,13 +283,13 @@ main(int argc, char *argv[])
 		default:
 			usage();
 		}
-		if (!ffs)
+		if (!ffsflag)
 			break;
 	}
 	argc -= optind;
 	argv += optind;
 
-	if (ffs && argc - mfs != 1)
+	if (ffsflag && argc - mfs != 1)
 		usage();
 
 	/* Increase our data size to the max */
@@ -396,9 +334,10 @@ main(int argc, char *argv[])
 		mfsfakelabel.d_rpm = 3600;
 		mfsfakelabel.d_interleave = 1;
 		mfsfakelabel.d_npartitions = 1;
-		mfsfakelabel.d_partitions[0].p_size = 16384;
-		mfsfakelabel.d_partitions[0].p_fsize = 1024;
-		mfsfakelabel.d_partitions[0].p_frag = 8;
+		mfsfakelabel.d_version = 1;
+		DL_SETPSIZE(&mfsfakelabel.d_partitions[0], 16384);
+		mfsfakelabel.d_partitions[0].p_fragblock =
+		    DISKLABELV1_FFS_FRAGBLOCK(1024, 8);
 		mfsfakelabel.d_partitions[0].p_cpg = 16;
 
 		lp = &mfsfakelabel;
@@ -447,23 +386,20 @@ main(int argc, char *argv[])
 			++mp;
 		}
 	}
-#ifdef COMPAT
 	if (mfs && disktype != NULL) {
 		lp = (struct disklabel *)getdiskbyname(disktype);
 		if (lp == NULL)
 			fatal("%s: unknown disk type", disktype);
 		pp = &lp->d_partitions[1];
-	} else
-#endif
-	{
+	} else {
 		fsi = open(special, O_RDONLY);
 		if (fsi < 0)
 			fatal("%s: %s", special, strerror(errno));
 		if (fstat(fsi, &st) < 0)
 			fatal("%s: %s", special, strerror(errno));
 		if (!S_ISCHR(st.st_mode) && !mfs)
-			printf("%s: %s: not a character-special device\n",
-			    __progname, special);
+			warnx(": %s: not a character-special device\n",
+			    special);
 		cp = strchr(argv[0], '\0') - 1;
 		if (cp == NULL || ((*cp < 'a' || *cp > ('a' + maxpartitions - 1))
 		    && !isdigit(*cp)))
@@ -474,7 +410,7 @@ main(int argc, char *argv[])
 			pp = &lp->d_partitions[0];
 		else
 			pp = &lp->d_partitions[*cp - 'a'];
-		if (pp->p_size == 0)
+		if (DL_GETPSIZE(pp) == 0)
 			fatal("%s: `%c' partition is unavailable",
 			    argv[0], *cp);
 		if (pp->p_fstype == FS_BOOT)
@@ -483,118 +419,52 @@ main(int argc, char *argv[])
 	}
 havelabel:
 	if (fssize == 0)
-		fssize = pp->p_size;
-	if (fssize > pp->p_size && !mfs)
-	       fatal("%s: maximum file system size on the `%c' partition is %d",
-			argv[0], *cp, pp->p_size);
-	if (rpm == 0) {
-		rpm = lp->d_rpm;
-		if (rpm <= 0)
-			rpm = 3600;
-	}
-	if (ntracks == 0) {
-		ntracks = lp->d_ntracks;
-		if (ntracks <= 0)
-			fatal("%s: no default #tracks", argv[0]);
-	}
-	if (nsectors == 0) {
-		nsectors = lp->d_nsectors;
-		if (nsectors <= 0)
-			fatal("%s: no default #sectors/track", argv[0]);
-	}
+		fssize = DL_GETPSIZE(pp);
+	if (fssize > DL_GETPSIZE(pp) && !mfs)
+	       fatal("%s: maximum file system size on the `%c' partition is %lld",
+			argv[0], *cp, DL_GETPSIZE(pp));
 	if (sectorsize == 0) {
 		sectorsize = lp->d_secsize;
 		if (sectorsize <= 0)
 			fatal("%s: no default sector size", argv[0]);
 	}
-	if (trackskew == -1) {
-		trackskew = lp->d_trackskew;
-		if (trackskew < 0)
-			trackskew = 0;
-	}
-	if (interleave == 0) {
-		interleave = lp->d_interleave;
-		if (interleave <= 0)
-			interleave = 1;
-	}
 	if (fsize == 0) {
-		fsize = pp->p_fsize;
+		fsize = DISKLABELV1_FFS_FSIZE(pp->p_fragblock);
 		if (fsize <= 0)
 			fsize = MAX(DFL_FRAGSIZE, lp->d_secsize);
 	}
 	if (bsize == 0) {
-		bsize = pp->p_frag * pp->p_fsize;
+		bsize = DISKLABELV1_FFS_BSIZE(pp->p_fragblock);
 		if (bsize <= 0)
 			bsize = MIN(DFL_BLKSIZE, 8 * fsize);
 	}
-	/*
-	 * Maxcontig sets the default for the maximum number of blocks
-	 * that may be allocated sequentially. With filesystem clustering
-	 * it is possible to allocate contiguous blocks up to the maximum
-	 * transfer size permitted by the controller or buffering.
-	 */
-	if (maxcontig == 0)
-		maxcontig = MAX(1, MIN(MAXPHYS, MAXBSIZE) / bsize - 1);
 	if (density == 0)
 		density = NFPI * fsize;
 	if (minfree < MINFREE && opt != FS_OPTSPACE && reqopt == -1) {
-		fprintf(stderr, "Warning: changing optimization to space ");
-		fprintf(stderr, "because minfree is less than %d%%\n", MINFREE);
+		warnx("warning: changing optimization to space "
+		    "because minfree is less than %d%%\n", MINFREE);
 		opt = FS_OPTSPACE;
 	}
-	if (trackspares == -1) {
-		trackspares = lp->d_sparespertrack;
-		if (trackspares < 0)
-			trackspares = 0;
+	if (maxbpg == 0) {
+		if (Oflag <= 1)
+			maxbpg = MAXBLKPG_FFS1(bsize);
+		else
+			maxbpg = MAXBLKPG_FFS2(bsize);
 	}
-	nphyssectors = nsectors + trackspares;
-	if (cylspares == -1) {
-		cylspares = lp->d_sparespercyl;
-		if (cylspares < 0)
-			cylspares = 0;
-	}
-	secpercyl = nsectors * ntracks - cylspares;
-	if (secpercyl != lp->d_secpercyl)
-		fprintf(stderr, "%s (%d) %s (%lu)\n",
-		    "Warning: calculated sectors per cylinder", secpercyl,
-		    "disagrees with disk label",
-		    (unsigned long)lp->d_secpercyl);
-	if (maxbpg == 0)
-		maxbpg = MAXBLKPG(bsize);
-#ifdef notdef /* label may be 0 if faked up by kernel */
-	bbsize = lp->d_bbsize;
-	sbsize = lp->d_sbsize;
-#endif
 	oldpartition = *pp;
 	realsectorsize = sectorsize;
 	if (sectorsize < DEV_BSIZE) {
 		int secperblk = DEV_BSIZE / sectorsize;
 
 		sectorsize = DEV_BSIZE;
-		nsectors /= secperblk;
-		nphyssectors /= secperblk;
-		secpercyl /= secperblk;
 		fssize /= secperblk;
-		pp->p_size /= secperblk;
+		DL_SETPSIZE(pp, DL_GETPSIZE(pp) / secperblk);
 	} else if (sectorsize > DEV_BSIZE) {
 		int blkpersec = sectorsize / DEV_BSIZE;
 
 		sectorsize = DEV_BSIZE;
-		nsectors *= blkpersec;
-		nphyssectors *= blkpersec;
-		secpercyl *= blkpersec;
 		fssize *= blkpersec;
-		pp->p_size *= blkpersec;
-	}
-	ncyls = fssize / secpercyl;
-	if (ncyls < 2)
-		ncyls = 2;
-	if (cpg == 0)
-		cpg = DESCPG < ncyls ? DESCPG : ncyls;
-	else if (cpg > ncyls) {
-		cpg = ncyls;
-		printf("Number of cylinders restricts cylinders per group "
-		    "to %d.\n", cpg);
+		DL_SETPSIZE(pp, DL_GETPSIZE(pp) * blkpersec);
 	}
 #ifdef MFS
 	if (mfs) {
@@ -608,9 +478,9 @@ havelabel:
 
 	mkfs(pp, special, fsi, fso, mfsmode, mfsuid, mfsgid);
 	if (realsectorsize < DEV_BSIZE)
-		pp->p_size *= DEV_BSIZE / realsectorsize;
+		DL_SETPSIZE(pp, DL_GETPSIZE(pp) * DEV_BSIZE / realsectorsize);
 	else if (realsectorsize > DEV_BSIZE)
-		pp->p_size /= realsectorsize / DEV_BSIZE;
+		DL_SETPSIZE(pp, DL_GETPSIZE(pp) / realsectorsize / DEV_BSIZE);
 	if (!Nflag && memcmp(pp, &oldpartition, sizeof(oldpartition)))
 		rewritelabel(special, fso, lp);
 	if (!Nflag)
@@ -690,11 +560,7 @@ havelabel:
 	exit(0);
 }
 
-#ifdef COMPAT
 char lmsg[] = "%s: can't read disk label; disk type must be specified";
-#else
-char lmsg[] = "%s: can't read disk label";
-#endif
 
 struct disklabel *
 getdisklabel(char *s, int fd)
@@ -702,8 +568,7 @@ getdisklabel(char *s, int fd)
 	static struct disklabel lab;
 
 	if (ioctl(fd, DIOCGDINFO, (char *)&lab) < 0) {
-#ifdef COMPAT
-		if (disktype) {
+		if (disktype != NULL) {
 			struct disklabel *lp;
 
 			unlabeled++;
@@ -712,7 +577,6 @@ getdisklabel(char *s, int fd)
 				fatal("%s: unknown disk type", disktype);
 			return (lp);
 		}
-#endif
 		warn("ioctl (GDINFO)");
 		fatal(lmsg, s);
 	}
@@ -722,10 +586,9 @@ getdisklabel(char *s, int fd)
 void
 rewritelabel(char *s, int fd, struct disklabel *lp)
 {
-#ifdef COMPAT
 	if (unlabeled)
 		return;
-#endif
+
 	lp->d_checksum = 0;
 	lp->d_checksum = dkcksum(lp);
 	if (ioctl(fd, DIOCWDINFO, (char *)lp) < 0) {
@@ -736,7 +599,7 @@ rewritelabel(char *s, int fd, struct disklabel *lp)
 	if (lp->d_type == DTYPE_SMD && lp->d_flags & D_BADSECT) {
 		int i;
 		int cfd;
-		daddr_t alt;
+		daddr64_t alt;
 		char specname[64];
 		char blk[1024];
 		char *cp;
@@ -790,61 +653,29 @@ fatal(const char *fmt, ...)
 	/*NOTREACHED*/
 }
 
-struct fsoptions {
-	char *str;
-	int mfs_too;
-} fsopts[] = {
-	{ "-N do not create file system, just print out parameters", 0 },
-	{ "-O create a 4.3BSD format filesystem", 0 },
-#ifdef MFS
-	{ "-P src populate mfs filesystem", 2 },
-#endif
-	{ "-S sector size", 0 },
-#ifdef COMPAT
-	{ "-T disktype", 0 },
-#endif
-	{ "-a maximum contiguous blocks", 1 },
-	{ "-b block size", 1 },
-	{ "-c cylinders/group", 1 },
-	{ "-d rotational delay between contiguous blocks", 1 },
-	{ "-e maximum blocks per file in a cylinder group", 1 },
-	{ "-f frag size", 1 },
-	{ "-g average file size", 0 },
-	{ "-h average files per directory", 0 },
-	{ "-i number of bytes per inode", 1 },
-	{ "-k sector 0 skew, per track", 0 },
-	{ "-l hardware sector interleave", 0 },
-	{ "-m minimum free space %%", 1 },
-	{ "-n number of distinguished rotational positions", 0 },
-	{ "-o optimization preference (`space' or `time')", 1 },
-	{ "-p spare sectors per track", 0 },
-	{ "-r revolutions/minute", 0 },
-	{ "-s file system size (sectors)", 1 },
-	{ "-t file system type", 0 },
-	{ "-u sectors/track", 0 },
-	{ "-x spare sectors per cylinder", 0 },
-	{ "-z tracks/cylinder", 0 },
-	{ NULL, NULL }
-};
-
-void
+__dead void
 usage(void)
 {
-	struct fsoptions *fsopt;
+	extern char *__progname;
 
 	if (mfs) {
-		fprintf(stderr,
-		    "usage: %s [ -fsoptions ] special-device mount-point\n",
-			__progname);
+	    fprintf(stderr,
+	        "usage: %s [-b block-size] [-c fragements-per-cylinder-group] "
+		"[-e maxbpg]\n"
+		"\t[-f frag-size] [-i bytes] [-m free space] [-o options] "
+		"[-P file]\n"
+		"\t[-s size] special node\n",
+		__progname);
 	} else {
-		fprintf(stderr,
-		    "usage: %s [ -fsoptions ] special-device\n", __progname);
+	    fprintf(stderr,
+	        "usage: %s [-Nq] [-b block-size] "
+		"[-c fragments-per-cylinder-group] [-e maxbpg]\n"
+		"\t[-f frag-size] [-g avgfilesize] [-h avgfpdir] [-i bytes]\n"
+		"\t[-m free-space] [-O filesystem-format] [-o optimization]\n"
+		"\t[-S sector-size] [-s size] [-t fstype] special\n",
+		__progname);
 	}
-	fprintf(stderr, "where fsoptions are:\n");
-	for (fsopt = fsopts; fsopt->str; fsopt++) {
-		if (!mfs || fsopt->mfs_too == 1 || (mfs && fsopt->mfs_too == 2))
-			fprintf(stderr, "\t%s\n", fsopt->str);
-	}
+
 	exit(1);
 }
 

@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.15 2007/02/16 16:56:22 tsi Exp $
+#	$OpenBSD: Makefile,v 1.18 2007/06/17 00:28:21 deraadt Exp $
 
 TOP=		${.CURDIR}/..
 
@@ -24,7 +24,7 @@ VND_CRDEV=	/dev/r${VND}c
 PID!=		echo $$$$
 
 GZIPCMD?=	gzip
-GZIPFLAGS?=	-9v
+GZIPFLAGS?=	-9nv
 GZIPEXT?=	.gz
 
 MOUNT_POINT?=	/mnt
@@ -42,7 +42,7 @@ STRIP?=		strip
 DISKTYPE=       rdroot
 NBLKS=          6144
 # minfree, opt, b/i  trks, sects, cpg
-NEWFSARGS= -m 0 -o space -c 16 -i 8192
+NEWFSARGS= -m 0 -o space -i 8192
 
 .ifndef DESTDIR
 all ${IMAGE}:
@@ -59,8 +59,8 @@ bsd.gz:	bsd.rd
 ${FLOPPY}:	bsd.gz ${BOOT} /usr/
 	dd if=/dev/zero of=${REALIMAGE} count=${FLOPPYSIZE}
 	vnconfig -v -c ${VND} ${REALIMAGE}
-	disklabel -w ${RAWLABEL} ${VND} ${FLOPPYTYPE}
-	newfs -m 0 -o space -i 524288 -c 80 ${VND_RDEV}
+	disklabel -w ${VND} ${FLOPPYTYPE}
+	newfs -m 0 -o space -i 524288 -c ${FLOPPYSIZE} ${VND_RDEV}
 	mount ${VND_DEV} ${MOUNT_POINT}
 	cp ${DESTDIR}/usr/mdec/ofwboot ${MOUNT_POINT}/
 	cp bsd.gz ${MOUNT_POINT}/bsd
@@ -91,7 +91,7 @@ bsd:
 rd_setup:
 	dd if=/dev/zero of=${IMAGE} bs=512 count=${NBLKS}
 	vnconfig -v -c ${VND} ${IMAGE}
-	disklabel -w -r ${VND} ${DISKTYPE}
+	disklabel -w ${VND} ${DISKTYPE}
 	newfs ${NEWFSARGS} ${VND_RDEV}
 	fsck ${VND_RDEV}
 	mount ${VND_DEV} ${MOUNT_POINT}

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ipi.c,v 1.5 2006/03/10 21:21:08 brad Exp $	*/
+/*	$OpenBSD: ipi.c,v 1.7 2007/05/25 16:22:11 art Exp $	*/
 /*	$NetBSD: ipi.c,v 1.2 2003/03/01 13:05:37 fvdl Exp $	*/
 
 /*-
@@ -74,6 +74,15 @@ x86_send_ipi(struct cpu_info *ci, int ipimask)
 	return ret;
 }
 
+int
+x86_fast_ipi(struct cpu_info *ci, int ipi)
+{
+	if (!(ci->ci_flags & CPUF_RUNNING))
+		return (ENOENT);
+
+	return (x86_ipi(ipi, ci->ci_apicid, LAPIC_DLMODE_FIXED));
+}
+
 void
 x86_broadcast_ipi(int ipimask)
 {
@@ -125,7 +134,6 @@ x86_ipi_handler(void)
 	for (bit = 0; bit < X86_NIPI && pending; bit++) {
 		if (pending & (1<<bit)) {
 			pending &= ~(1<<bit);
-			ci->ci_ipi_events[bit].ev_count++;
 			(*ipifunc[bit])(ci);
 			ipi_count.ec_count++;
 		}

@@ -1,4 +1,4 @@
-/*	$OpenBSD: vm_machdep.c,v 1.13 2006/06/23 13:46:05 mickey Exp $	*/
+/*	$OpenBSD: vm_machdep.c,v 1.15 2007/06/20 17:29:36 miod Exp $	*/
 
 /*
  * Copyright (c) 1998 Steve Murphree, Jr.
@@ -271,39 +271,9 @@ vunmapbuf(bp, len)
 	addr = trunc_page((vaddr_t)bp->b_data);
 	off = (vaddr_t)bp->b_data & PGOFSET;
 	len = round_page(off + len);
+	pmap_remove(vm_map_pmap(phys_map), addr, addr + len);
+	pmap_update(vm_map_pmap(phys_map));
 	uvm_km_free_wakeup(phys_map, addr, len);
 	bp->b_data = bp->b_saveaddr;
 	bp->b_saveaddr = 0;
-}
-
-/*
- * Move pages from one kernel virtual address to another.
- */
-void
-pagemove(from, to, size)
-	caddr_t from, to;
-	size_t size;
-{
-	paddr_t pa;
-	boolean_t rv;
-
-#ifdef DEBUG
-	if ((size & PAGE_MASK) != 0)
-		panic("pagemove");
-#endif
-	while (size > 0) {
-		rv = pmap_extract(pmap_kernel(), (vaddr_t)from, &pa);
-#ifdef DEBUG
-		if (rv == FALSE)
-			panic("pagemove 2");
-		if (pmap_extract(pmap_kernel(), (vaddr_t)to, NULL) == TRUE)
-			panic("pagemove 3");
-#endif
-		pmap_kremove((vaddr_t)from, PAGE_SIZE);
-		pmap_kenter_pa((vaddr_t)to, pa, VM_PROT_READ|VM_PROT_WRITE);
-		from += PAGE_SIZE;
-		to += PAGE_SIZE;
-		size -= PAGE_SIZE;
-	}
-	pmap_update(pmap_kernel());
 }

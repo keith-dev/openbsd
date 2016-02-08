@@ -1,4 +1,4 @@
-/*	$OpenBSD: init_main.c,v 1.134 2007/01/12 07:41:31 art Exp $	*/
+/*	$OpenBSD: init_main.c,v 1.143 2007/07/25 23:11:52 art Exp $	*/
 /*	$NetBSD: init_main.c,v 1.84.4.1 1996/06/02 09:08:06 mrg Exp $	*/
 
 /*
@@ -73,6 +73,7 @@
 #include <sys/domain.h>
 #include <sys/mbuf.h>
 #include <sys/pipe.h>
+#include <sys/workq.h>
 
 #include <sys/syscall.h>
 #include <sys/syscallargs.h>
@@ -97,6 +98,8 @@
 extern void nfs_init(void);
 #endif
 
+#include "softraid.h"
+
 const char	copyright[] =
 "Copyright (c) 1982, 1986, 1989, 1991, 1993\n"
 "\tThe Regents of the University of California.  All rights reserved.\n"
@@ -106,25 +109,19 @@ const char	copyright[] =
 struct	session session0;
 struct	pgrp pgrp0;
 struct	proc proc0;
+struct	process process0;
 struct	pcred cred0;
 struct	plimit limit0;
 struct	vmspace vmspace0;
 struct	sigacts sigacts0;
-#if !defined(__HAVE_CPUINFO) && !defined(curproc)
-struct	proc *curproc;
-#endif
 struct	proc *initproc;
 
 int	cmask = CMASK;
 extern	struct user *proc0paddr;
 
-void	(*md_diskconf)(void) = NULL;
 struct	vnode *rootvp, *swapdev_vp;
 int	boothowto;
 struct	timeval boottime;
-#ifndef __HAVE_CPUINFO
-struct	timeval runtime;
-#endif
 int	ncpus =  1;
 __volatile int start_init_exec;		/* semaphore for start_init() */
 
@@ -142,6 +139,7 @@ void	start_reaper(void *);
 void	start_crypto(void *);
 void	init_exec(void);
 void	kqueue_init(void);
+void	workq_init(void);
 
 extern char sigcode[], esigcode[];
 #ifdef SYSCALL_DEBUG
@@ -196,9 +194,7 @@ main(void *framep)
 	 * any possible traps/probes to simplify trap processing.
 	 */
 	curproc = p = &proc0;
-#ifdef __HAVE_CPUINFO
 	p->p_cpu = curcpu();
-#endif
 
 	/*
 	 * Initialize timeouts.
@@ -256,6 +252,12 @@ main(void *framep)
 	/*
 	 * Create process 0 (the swapper).
 	 */
+
+	process0.ps_mainproc = p;
+	TAILQ_INIT(&process0.ps_threads);
+	TAILQ_INSERT_TAIL(&process0.ps_threads, p, p_thr_link);
+	p->p_p = &process0;
+
 	LIST_INSERT_HEAD(&allproc, p, p_list);
 	p->p_pgrp = &pgrp0;
 	LIST_INSERT_HEAD(PIDHASH(0), p, p_hash);
@@ -267,10 +269,7 @@ main(void *framep)
 	session0.s_count = 1;
 	session0.s_leader = p;
 
-	p->p_thrparent = p;
-	LIST_INIT(&p->p_thrchildren);
-
-	p->p_flag = P_SYSTEM | P_NOCLDWAIT;
+	atomic_setbits_int(&p->p_flag, P_SYSTEM | P_NOCLDWAIT);
 	p->p_stat = SONPROC;
 	p->p_nice = NZERO;
 	p->p_emul = &emul_native;
@@ -295,7 +294,7 @@ main(void *framep)
 	p->p_fd = fdinit(NULL);
 
 	/* Create the limits structures. */
-	p->p_limit = &limit0;
+	p->p_p->ps_limit = &limit0;
 	for (i = 0; i < sizeof(p->p_rlimit)/sizeof(p->p_rlimit[0]); i++)
 		limit0.pl_rlimit[i].rlim_cur =
 		    limit0.pl_rlimit[i].rlim_max = RLIM_INFINITY;
@@ -329,6 +328,9 @@ main(void *framep)
 
 	/* Initialize run queues */
 	rqinit();
+
+	/* Initialize work queues */
+	workq_init();
 
 	/* Configure the devices */
 	cpu_configure();
@@ -436,9 +438,12 @@ main(void *framep)
 
 	dostartuphooks();
 
+#if NSOFTRAID > 0
+	config_rootfound("softraid", NULL);
+#endif
+
 	/* Configure root/swap devices */
-	if (md_diskconf)
-		(*md_diskconf)();
+	diskconf();
 
 	/* Mount the root file system. */
 	if (vfs_mountroot())
@@ -472,14 +477,9 @@ main(void *framep)
 #else
 	boottime = mono_time = time;	
 #endif
-#ifndef __HAVE_CPUINFO
-	microuptime(&runtime);
-#endif
 	LIST_FOREACH(p, &allproc, p_list) {
 		p->p_stats->p_start = boottime;
-#ifdef __HAVE_CPUINFO
 		microuptime(&p->p_cpu->ci_schedstate.spc_runtime);
-#endif
 		p->p_rtime.tv_sec = p->p_rtime.tv_usec = 0;
 	}
 

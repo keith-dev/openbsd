@@ -1,5 +1,5 @@
 /*	$OpenPackages$ */
-/*	$OpenBSD: parse.c,v 1.70 2007/01/18 17:49:51 espie Exp $	*/
+/*	$OpenBSD: parse.c,v 1.80 2007/08/05 11:00:58 espie Exp $	*/
 /*	$NetBSD: parse.c,v 1.29 1997/03/10 21:20:04 christos Exp $	*/
 
 /*
@@ -209,18 +209,25 @@ static void ParseDoSrc(int, const char *);
 static int ParseFindMain(void *, void *);
 static void ParseAddDir(void *, void *);
 static void ParseClearPath(void *);
+
+static void add_target_node(const char *);
+static void add_target_nodes(const char *);
 static void ParseDoDependency(char *);
 static void ParseAddCmd(void *, void *);
 static void ParseHasCommands(void *);
-static void ParseDoInclude(char *);
-static void ParseTraditionalInclude(char *);
-static void ParseConditionalInclude(char *);
-static void ParseLookupIncludeFile(char *, char *, bool, bool);
+static bool handle_poison(const char *);
+static bool handle_for_loop(Buffer, const char *);
+static bool handle_undef(const char *);
 #define ParseReadLoopLine(linebuf) Parse_ReadUnparsedLine(linebuf, "for loop")
 static void ParseFinishDependency(void);
-static bool ParseIsCond(Buffer, Buffer, char *);
+static bool handle_bsd_command(Buffer, Buffer, const char *);
 static char *strip_comments(Buffer, const char *);
-static char *find_include(const char *, bool);
+static char *resolve_include_filename(const char *, bool);
+static void handle_include_file(const char *, const char *, bool, bool);
+static bool lookup_bsd_include(const char *);
+static void lookup_sysv_style_include(const char *, const char *, bool);
+static void lookup_sysv_include(const char *, const char *);
+static void lookup_conditional_include(const char *, const char *);
 
 static void ParseDoCommands(const char *);
 
@@ -432,7 +439,7 @@ ParseDoSrc(
 	 * Add the name to the .TARGETS variable as well, so the user can
 	 * employ that, if desired.
 	 */
-	Var_Append(".TARGETS", src, VAR_GLOBAL);
+	Var_Append(".TARGETS", src);
 	return;
 
     case Order:
@@ -551,6 +558,48 @@ ParseClearPath(void *p)
     Lst_Init(path);
 }
 
+static void
+add_target_node(const char *line)
+{
+	GNode *gn;
+
+	if (!Suff_IsTransform(line))
+		gn = Targ_FindNode(line, TARG_CREATE);
+	else
+		gn = Suff_AddTransform(line);
+
+	if (gn != NULL)
+		Array_AtEnd(&gtargets, gn);
+}
+
+static void
+add_target_nodes(const char *line)
+{
+
+	if (Dir_HasWildcards(line)) {
+		/*
+		 * Targets are to be sought only in the current directory,
+		 * so create an empty path for the thing. Note we need to
+		 * use Dir_Destroy in the destruction of the path as the
+		 * Dir module could have added a directory to the path...
+		 */
+		char *targName;
+		LIST emptyPath;
+		LIST curTargs;
+
+		Lst_Init(&emptyPath);
+		Lst_Init(&curTargs);
+		Dir_Expand(line, &emptyPath, &curTargs);
+		Lst_Destroy(&emptyPath, Dir_Destroy);
+		while ((targName = (char *)Lst_DeQueue(&curTargs)) != NULL) {
+			add_target_node(targName);
+		}
+		Lst_Destroy(&curTargs, NOFREE);
+	} else {
+		add_target_node(line);
+	}
+}
+
 /*-
  *---------------------------------------------------------------------
  * ParseDoDependency  --
@@ -608,7 +657,7 @@ ParseDoDependency(char *line)	/* the line to parse */
 		 * so we can safely advance beyond it...There should be
 		 * no errors in this, as they would have been discovered
 		 * in the initial Var_Subst and we wouldn't be here.  */
-		cp += Var_ParseSkip(cp, NULL, NULL);
+		Var_ParseSkip(&cp, NULL);
 	    else {
 		/* We don't want to end a word on ':' or '!' if there is a
 		 * better match later on in the string.  By "better" I mean
@@ -780,43 +829,7 @@ ParseDoDependency(char *line)	/* the line to parse */
 	 * the end of the targets list
 	 */
 	if (specType == Not && *line != '\0') {
-	    char *targName;
-
-	    if (Dir_HasWildcards(line)) {
-		/*
-		 * Targets are to be sought only in the current directory,
-		 * so create an empty path for the thing. Note we need to
-		 * use Dir_Destroy in the destruction of the path as the
-		 * Dir module could have added a directory to the path...
-		 */
-		LIST	    emptyPath;
-		LIST	    curTargs;	/* list of target names to be found 
-					 * and added to the targets list */
-
-		Lst_Init(&emptyPath);
-		Lst_Init(&curTargs);
-		Dir_Expand(line, &emptyPath, &curTargs);
-		Lst_Destroy(&emptyPath, Dir_Destroy);
-	    while ((targName = (char *)Lst_DeQueue(&curTargs)) != NULL) {
-		    if (!Suff_IsTransform(targName))
-		    gn = Targ_FindNode(targName, TARG_CREATE);
-		    else
-		    gn = Suff_AddTransform(targName);
-
-		    if (gn != NULL)
-			Array_AtEnd(&gtargets, gn);
-		}
-		Lst_Destroy(&curTargs, NOFREE);
-	    } else {
-		if (!Suff_IsTransform(line))
-		    gn = Targ_FindNode(line, TARG_CREATE);
-		else
-		    gn = Suff_AddTransform(line);
-
-		if (gn != NULL)
-		    Array_AtEnd(&gtargets, gn);
-		/* Don't need the list of target names anymore...  */
-	    }
+	    add_target_nodes(line);
 	} else if (specType == ExPath && *line != '.' && *line != '\0')
 	    Parse_Error(PARSE_WARNING, "Extra target (%s) ignored", line);
 
@@ -838,7 +851,7 @@ ParseDoDependency(char *line)	/* the line to parse */
 		Parse_Error(PARSE_WARNING, "Extra target ignored");
 	    }
 	} else {
-	    while (*cp && isspace(*cp)) {
+	    while (isspace(*cp)) {
 		cp++;
 	    }
 	}
@@ -885,7 +898,7 @@ ParseDoDependency(char *line)	/* the line to parse */
     /*
      * Get to the first source
      */
-    while (*cp && isspace(*cp)) {
+    while (isspace(*cp)) {
 	cp++;
     }
     line = cp;
@@ -997,7 +1010,7 @@ ParseDoDependency(char *line)	/* the line to parse */
 	    if (savec != '\0') {
 		cp++;
 	    }
-	    while (*cp && isspace(*cp)) {
+	    while (isspace(*cp)) {
 		cp++;
 	    }
 	    line = cp;
@@ -1047,7 +1060,7 @@ ParseDoDependency(char *line)	/* the line to parse */
 
 		ParseDoSrc(tOp, line);
 	    }
-	    while (*cp && isspace(*cp)) {
+	    while (isspace(*cp)) {
 		cp++;
 	    }
 	    line = cp;
@@ -1109,335 +1122,351 @@ ParseHasCommands(void *gnp)	    /* Node to examine */
     }
 }
 
-/*-
- *-----------------------------------------------------------------------
- * Parse_AddIncludeDir --
- *	Add a directory to the path searched for included makefiles
- *	bracketed by double-quotes. Used by functions in main.c
- *-----------------------------------------------------------------------
- */
+
+
+/***
+ *** Support for various include constructs
+ ***/
+
+
 void
-Parse_AddIncludeDir(const char	*dir)	/* The name of the directory to add */
+Parse_AddIncludeDir(const char	*dir)
 {
-    Dir_AddDir(parseIncPath, dir);
+	Dir_AddDir(parseIncPath, dir);
 }
 
-/*-
- *---------------------------------------------------------------------
- * ParseDoInclude  --
- *	Push to another file.
- *
- *	The input is the line minus the #include. A file spec is a string
- *	enclosed in <> or "". The former is looked for only in sysIncPath.
- *	The latter in . and the directories specified by -I command line
- *	options
- *
- * Side Effects:
- *	old parse context is pushed on the stack, new file becomes
- *	current context.
- *---------------------------------------------------------------------
- */
-static void
-ParseDoInclude(char	  *file)/* file specification */
-{
-    char	  endc; 	/* the character which ends the file spec */
-    char	  *cp;		/* current position in file spec */
-    bool	  isSystem;	/* true if makefile is a system makefile */
-
-    /* Skip to delimiter character so we know where to look.  */
-    while (*file == ' ' || *file == '\t')
-	file++;
-
-    if (*file != '"' && *file != '<') {
-	Parse_Error(PARSE_FATAL,
-	    ".include filename must be delimited by '\"' or '<'");
-	return;
-    }
-
-    /* Set the search path on which to find the include file based on the
-     * characters which bracket its name. Angle-brackets imply it's
-     * a system Makefile while double-quotes imply it's a user makefile */
-    if (*file == '<') {
-	isSystem = true;
-	endc = '>';
-    } else {
-	isSystem = false;
-	endc = '"';
-    }
-
-    /* Skip to matching delimiter.  */
-    for (cp = ++file; *cp != endc; cp++) {
-	if (*cp == '\0') {
-	    Parse_Error(PARSE_FATAL,
-		     "Unclosed %cinclude filename. '%c' expected",
-		     '.', endc);
-	    return;
-	}
-    }
-    ParseLookupIncludeFile(file, cp, isSystem, true);
-}
-
-/*-
- *---------------------------------------------------------------------
- * ParseTraditionalInclude  --
- *	Push to another file.
- *
- *	The input is the line minus the "include".  The file name is
- *	the string following the "include".
- *
- * Side Effects:
- *	old parse context is pushed on the stack, new file becomes
- *	current context.
- *
- *	XXX May wish to support multiple files and wildcards ?
- *---------------------------------------------------------------------
- */
-static void
-ParseTraditionalInclude(char *file) 	/* file specification */
-{
-    char	  *cp;		/* current position in file spec */
-
-    /* Skip over whitespace.  */
-    while (isspace(*file))
-	file++;
-    if (*file == '\0') {
-	Parse_Error(PARSE_FATAL,
-		     "Filename missing from \"include\"");
-	return;
-    }
-    /* Skip to end of line or next whitespace.	*/
-    for (cp = file; *cp != '\0' && !isspace(*cp);)
-	cp++;
-
-    ParseLookupIncludeFile(file, cp, true, true);
-}
-
-/*-
- *---------------------------------------------------------------------
- * ParseConditionalInclude  --
- *	May push to another file.
- *
- *	No error if the file does not exist.
- *	See ParseTraditionalInclude otherwise.
- *---------------------------------------------------------------------
- */
-static void
-ParseConditionalInclude(char *file)/* file specification */
-{
-    char	  *cp;		/* current position in file spec */
-
-    /* Skip over whitespace.  */
-    while (isspace(*file))
-	file++;
-    if (*file == '\0') {
-	Parse_Error(PARSE_FATAL,
-		     "Filename missing from \"include\"");
-	return;
-    }
-    /* Skip to end of line or next whitespace.	*/
-    for (cp = file; *cp != '\0' && !isspace(*cp);)
-	cp++;
-
-    ParseLookupIncludeFile(file, cp, true, false);
-}
-
-/* helper function for ParseLookupIncludeFile */
 static char *
-find_include(const char *file, bool isSystem)
+resolve_include_filename(const char *file, bool isSystem)
 {
-    char *fullname;
-    
-    /* Look up system files on the system path first */
-    if (isSystem) {
-	fullname = Dir_FindFileNoDot(file, sysIncPath);
-	if (fullname)
-	    return fullname;
-    }
-
-    /* Handle non-system non-absolute files... */
-    if (!isSystem && file[0] != '/') {
-	/* ... by first searching relative to the including file's
-	 * location. We don't want to cd there, of course, so we
-	 * just tack on the old file's leading path components
-	 * and call Dir_FindFile to see if we can locate the beast.  */
-	char		*slash;
-	const char	*fname;
-
-	fname = Parse_Getfilename();
-
-	slash = strrchr(fname, '/');
-	if (slash != NULL) {
-	    char *newName;
-
-	    newName = Str_concati(fname, slash, file, strchr(file, '\0'), '/');
-	    fullname = Dir_FindFile(newName, parseIncPath);
-	    if (fullname == NULL)
-		fullname = Dir_FindFile(newName, dirSearchPath);
-	    free(newName);
-	    if (fullname)
-	    	return fullname;
+	char *fullname;
+	
+	/* Look up system files on the system path first */
+	if (isSystem) {
+		fullname = Dir_FindFileNoDot(file, sysIncPath);
+		if (fullname)
+			return fullname;
 	}
-    }
 
-    /* Now look first on the -I search path, then on the .PATH
-     * search path, if not found in a -I directory.
-     * XXX: Suffix specific?  */
-    fullname = Dir_FindFile(file, parseIncPath);
-    if (fullname)
-    	return fullname;
-    fullname = Dir_FindFile(file, dirSearchPath);
-    if (fullname)
-    	return fullname;
+	/* Handle non-system non-absolute files... */
+	if (!isSystem && file[0] != '/') {
+		/* ... by looking first under the same directory as the 
+		 * current file */
+		char *slash;
+		const char *fname;
 
-    /* Still haven't found the makefile. Look for it on the system
-     * path as a last resort.  */
-    if (isSystem)
-    	return NULL;
-    else
-	return Dir_FindFile(file, sysIncPath);
+		fname = Parse_Getfilename();
+
+		slash = strrchr(fname, '/');
+		if (slash != NULL) {
+			char *newName;
+
+			newName = Str_concati(fname, slash, file, 
+			    strchr(file, '\0'), '/');
+			fullname = Dir_FindFile(newName, parseIncPath);
+			if (fullname == NULL)
+				fullname = Dir_FindFile(newName, dirSearchPath);
+			free(newName);
+			if (fullname)
+				return fullname;
+		}
+	}
+
+	/* Now look first on the -I search path, then on the .PATH
+	 * search path, if not found in a -I directory.
+	 * XXX: Suffix specific?  */
+	fullname = Dir_FindFile(file, parseIncPath);
+	if (fullname)
+		return fullname;
+	fullname = Dir_FindFile(file, dirSearchPath);
+	if (fullname)
+		return fullname;
+
+	/* Still haven't found the makefile. Look for it on the system
+	 * path as a last resort (if we haven't already). */
+	if (isSystem)
+		return NULL;
+	else
+		return Dir_FindFile(file, sysIncPath);
 }
 
-/* Common part to lookup and read an include file.  */
 static void
-ParseLookupIncludeFile(char *spec, char *endSpec, bool isSystem, 
+handle_include_file(const char *name, const char *ename, bool isSystem, 
     bool errIfNotFound)
 {
-    char *file;
-    char *fullname;
-    char endc;
+	char *file;
+	char *fullname;
 
-    /* Substitute for any variables in the file name before trying to
-     * find the thing.	*/
-    endc = *endSpec;
-    *endSpec = '\0';
-    file = Var_Subst(spec, NULL, false);
-    *endSpec = endc;
+	/* Substitute for any variables in the file name before trying to
+	 * find the thing. */
+	file = Var_Substi(name, ename, NULL, false);
 
-    fullname = find_include(file, isSystem);
-    if (fullname == NULL && errIfNotFound)
-	Parse_Error(PARSE_FATAL, "Could not find %s", file);
-	
+	fullname = resolve_include_filename(file, isSystem);
+	if (fullname == NULL && errIfNotFound)
+		Parse_Error(PARSE_FATAL, "Could not find %s", file);
+	free(file);
 
-    free(file);
 
-    if (fullname != NULL) {
-	FILE *f;
+	if (fullname != NULL) {
+		FILE *f;
 
-	f = fopen(fullname, "r");
-	if (f == NULL && errIfNotFound) {
-	    Parse_Error(PARSE_FATAL, "Cannot open %s", fullname);
-	} else {
-	    /* Once we find the absolute path to the file, we push the current
-	     * stream to the includes stack, and start reading from the new
-	     * file.  We set up the file name to be its absolute name so that
-	     * error messages are informative.	*/
-	    Parse_FromFile(fullname, f);
+		f = fopen(fullname, "r");
+		if (f == NULL && errIfNotFound)
+			Parse_Error(PARSE_FATAL, "Cannot open %s", fullname);
+		else
+			Parse_FromFile(fullname, f);
 	}
-    }
+}
+
+/* .include <file> (system) or .include "file" (normal) */
+static bool
+lookup_bsd_include(const char *file)
+{
+	char endc; 
+	const char *efile;
+	bool isSystem;
+
+	/* find starting delimiter */
+	while (isspace(*file))
+		file++;
+
+	/* determine type of file */
+	if (*file == '<') {
+		isSystem = true;
+		endc = '>';
+	} else if (*file == '"') {
+		isSystem = false;
+		endc = '"';
+	} else {
+		Parse_Error(PARSE_WARNING,
+		    ".include filename must be delimited by '\"' or '<'");
+		return false;
+	}
+
+	/* delimit file name between file and efile */
+	for (efile = ++file; *efile != endc; efile++) {
+		if (*efile == '\0') {
+			Parse_Error(PARSE_WARNING,
+			     "Unclosed .include filename. '%c' expected", endc);
+			return false;
+		}
+	}
+	handle_include_file(file, efile, isSystem, true);
+	return true;
 }
 
 
+static void
+lookup_sysv_style_include(const char *file, const char *directive, 
+    bool errIfMissing)
+{
+	const char *efile;
+
+	/* find beginning of name */
+	while (isspace(*file))
+		file++;
+	if (*file == '\0') {
+		Parse_Error(PARSE_FATAL, "Filename missing from \"%s\"",
+		    directive);
+		return;
+	}
+	/* sys5 delimits file up to next blank character or end of line */
+	for (efile = file; *efile != '\0' && !isspace(*efile);)
+		efile++;
+
+	handle_include_file(file, efile, true, errIfMissing);
+}
 
 
-/* Strip comments from the line. May return either a copy of the line, or
- * the line itself.  */
+/* system V construct:  include file */
+static void
+lookup_sysv_include(const char *file, const char *directive)
+{
+	lookup_sysv_style_include(file, directive, true);
+}
+
+
+/* sinclude file and -include file */
+static void
+lookup_conditional_include(const char *file, const char *directive)
+{
+	lookup_sysv_style_include(file, directive, false);
+}
+
+
+static bool
+handle_poison(const char *line)
+{
+	const char *p = line;
+	int type = POISON_NORMAL;
+	bool not = false;
+	bool paren_to_match = false;
+	const char *name, *ename;
+
+	while (isspace(*p))
+		p++;
+	if (*p == '!') {
+		not = true;
+		p++;
+	}
+	while (isspace(*p))
+		p++;
+	if (strncmp(p, "defined", 7) == 0) {
+		type = POISON_DEFINED;
+		p += 7;
+	} else if (strncmp(p, "empty", 5) == 0) {
+		type = POISON_EMPTY;
+		p += 5;
+	}
+	while (isspace(*p))
+		p++;
+	if (*p == '(') {
+		paren_to_match = true;
+		p++;
+	}
+	while (isspace(*p))
+		p++;
+	name = ename = p;
+	while (*p != '\0' && !isspace(*p)) {
+		if (*p == ')' && paren_to_match) {
+			paren_to_match = false;
+			p++;
+			break;
+		}
+		p++;
+		ename = p;
+	}
+	while (isspace(*p))
+		p++;
+	switch(type) {
+	case POISON_NORMAL:
+	case POISON_EMPTY:
+		if (not)
+			type = POISON_INVALID;
+		break;
+	case POISON_DEFINED:
+		if (not)
+			type = POISON_NOT_DEFINED;
+		else
+			type = POISON_INVALID;
+		break;
+	}
+	if ((*p != '\0' && *p != '#') || type == POISON_INVALID) {
+		Parse_Error(PARSE_WARNING, "Invalid syntax for .poison: %s", 
+		    line);
+		return false;
+	} else {
+		Var_MarkPoisoned(name, ename, type);
+		return true;
+	}
+}
+
+
+/* Strip comments from the line. Build a copy in buffer if necessary, */
 static char *
 strip_comments(Buffer copy, const char *line)
 {
-    const char *comment;
-    const char *p;
+	const char *comment;
+	const char *p;
 
-    comment = strchr(line, '#');
-    assert(comment != line);
-    if (comment == NULL)
-	return (char *)line;
-    else {
-	Buf_Reset(copy);
+	comment = strchr(line, '#');
+	assert(comment != line);
+	if (comment == NULL)
+		return (char *)line;
+	else {
+		Buf_Reset(copy);
 
-	for (p = line; *p != '\0'; p++) {
-	    if (*p == '\\') {
-		if (p[1] == '#') {
-		    Buf_Addi(copy, line, p);
-		    Buf_AddChar(copy, '#');
-		    line = p+2;
+		for (p = line; *p != '\0'; p++) {
+			if (*p == '\\') {
+				if (p[1] == '#') {
+					Buf_Addi(copy, line, p);
+					Buf_AddChar(copy, '#');
+					line = p+2;
+				}
+				if (p[1] != '\0')
+					p++;
+			} else if (*p == '#')
+				break;
 		}
-		if (p[1] != '\0')
-		    p++;
-	    } else if (*p == '#')
-		break;
+		Buf_Addi(copy, line, p);
+		Buf_KillTrailingSpaces(copy);
+		return Buf_Retrieve(copy);
 	}
-	Buf_Addi(copy, line, p);
-	Buf_KillTrailingSpaces(copy);
-	return Buf_Retrieve(copy);
-    }
 }
 
 static bool
-ParseIsCond(Buffer linebuf, Buffer copy, char *line)
+handle_for_loop(Buffer linebuf, const char *line)
 {
-
-    char	*stripped;
-
-    while (*line != '\0' && isspace(*line))
-	line++;
-
-    /* The line might be a conditional. Ask the conditional module
-     * about it and act accordingly.  */
-    switch (Cond_Eval(line)) {
-    case COND_SKIP:
-	/* Skip to next conditional that evaluates to COND_PARSE.  */
-	do {
-	    line = Parse_ReadNextConditionalLine(linebuf);
-	    if (line != NULL) {
-		while (*line != '\0' && isspace(*line))
-		    line++;
-		    stripped = strip_comments(copy, line);
-	    }
-	} while (line != NULL && Cond_Eval(stripped) != COND_PARSE);
-	/* FALLTHROUGH */
-    case COND_PARSE:
-	return true;
-    case COND_ISFOR: {
 	For *loop;
 
 	loop = For_Eval(line+3);
 	if (loop != NULL) {
-	    bool ok;
-	    do {
-		/* Find the matching endfor.  */
-		line = ParseReadLoopLine(linebuf);
-		if (line == NULL) {
-		    Parse_Error(PARSE_FATAL,
-			     "Unexpected end of file in for loop.\n");
-		    return false;
-		}
-		ok = For_Accumulate(loop, line);
-	    } while (ok);
-	    For_Run(loop);
-	    return true;
+		bool ok;
+		do {
+			/* Find the matching endfor.  */
+			line = ParseReadLoopLine(linebuf);
+			if (line == NULL) {
+			    Parse_Error(PARSE_FATAL,
+				 "Unexpected end of file in for loop.\n");
+			    return false;
+			}
+			ok = For_Accumulate(loop, line);
+		} while (ok);
+		For_Run(loop);
+		return true;
+	} else
+		return false;
+}
+
+static bool
+handle_undef(const char *line)
+{
+	const char *eline;
+
+	while (isspace(*line))
+		line++;
+	for (eline = line; !isspace(*eline) && *eline != '\0';)
+		eline++;
+	Var_Deletei(line, eline);
+	return true;
+}
+
+static bool
+handle_bsd_command(Buffer linebuf, Buffer copy, const char *line)
+{
+	char *stripped;
+
+	while (isspace(*line))
+		line++;
+
+	/* The line might be a conditional. Ask the conditional module
+	 * about it and act accordingly.  */
+	switch (Cond_Eval(line)) {
+	case COND_SKIP:
+		/* Skip to next conditional that evaluates to COND_PARSE.  */
+		do {
+			line = Parse_ReadNextConditionalLine(linebuf);
+			if (line != NULL) {
+				while (isspace(*line))
+					line++;
+					stripped = strip_comments(copy, line);
+			}
+		} while (line != NULL && Cond_Eval(stripped) != COND_PARSE);
+		/* FALLTHROUGH */
+	case COND_PARSE:
+		return true;
+	case COND_ISFOR: 
+		return handle_for_loop(linebuf, line);
+	case COND_ISINCLUDE:
+		return lookup_bsd_include(line + 7);
+	case COND_ISPOISON:
+		return handle_poison(line+6);
+	case COND_ISUNDEF: 
+		return handle_undef(line + 5);
+	default:
+		break;
 	}
-	break;
-    }
-    case COND_ISINCLUDE:
-	ParseDoInclude(line + 7);
-	return true;
-    case COND_ISUNDEF: {
-	char *cp;
 
-	line+=5;
-	while (*line != '\0' && isspace(*line))
-	    line++;
-	for (cp = line; !isspace(*cp) && *cp != '\0';)
-	    cp++;
-	*cp = '\0';
-	Var_Delete(line);
-	return true;
-    }
-    default:
-	break;
-    }
-
-    return false;
+	return false;
 }
 
 /*-
@@ -1501,26 +1530,31 @@ Parse_File(
 	    } else {
 		char *stripped;
 		stripped = strip_comments(&copy, line);
-		if (*stripped == '.' && ParseIsCond(&buf, &copy, stripped+1))
-		    ;
+		if (*stripped == '.' && handle_bsd_command(&buf, &copy, 
+		    stripped+1))
+			;
 		else if (FEATURES(FEATURE_SYSVINCLUDE) && 
 		    strncmp(stripped, "include", 7) == 0 &&
 		    isspace(stripped[7]) &&
 		    strchr(stripped, ':') == NULL) {
 		    /* It's an S3/S5-style "include".  */
-			ParseTraditionalInclude(stripped + 7);
+			lookup_sysv_include(stripped + 7, "include");
 		} else if (FEATURES(FEATURE_CONDINCLUDE) &&
-		    (*stripped == '-' || *stripped == 's') &&
-		    strncmp(stripped+1, "include", 7) == 0 && 
+		    strncmp(stripped, "sinclude", 8) == 0 && 
 		    isspace(stripped[8]) &&
 		    strchr(stripped, ':') == NULL) {
-		    	ParseConditionalInclude(stripped+8);
+		    	lookup_conditional_include(stripped+8, "sinclude");
+		} else if (FEATURES(FEATURE_CONDINCLUDE) &&
+		    strncmp(stripped, "-include", 8) == 0 && 
+		    isspace(stripped[8]) &&
+		    strchr(stripped, ':') == NULL) {
+		    	lookup_conditional_include(stripped+8, "-include");
 		} else {
 		    char *dep;
 
 		    if (inDependency)
 			ParseFinishDependency();
-		    if (Parse_DoVar(stripped, VAR_GLOBAL))
+		    if (Parse_DoVar(stripped))
 			inDependency = false;
 		    else {
 			size_t pos;
@@ -1580,15 +1614,15 @@ Parse_File(
 void
 Parse_Init(void)
 {
-    mainNode = NULL;
-    Static_Lst_Init(parseIncPath);
-    Static_Lst_Init(sysIncPath);
-    Array_Init(&gsources, SOURCES_SIZE);
-    Array_Init(&gtargets, TARGETS_SIZE);
-    
-    LowParse_Init();
+	mainNode = NULL;
+	Static_Lst_Init(parseIncPath);
+	Static_Lst_Init(sysIncPath);
+	Array_Init(&gsources, SOURCES_SIZE);
+	Array_Init(&gtargets, TARGETS_SIZE);
+	
+	LowParse_Init();
 #ifdef CLEANUP
-    Static_Lst_Init(&targCmds);
+	Static_Lst_Init(&targCmds);
 #endif
 }
 
@@ -1596,10 +1630,10 @@ Parse_Init(void)
 void
 Parse_End(void)
 {
-    Lst_Destroy(&targCmds, (SimpleProc)free);
-    Lst_Destroy(sysIncPath, Dir_Destroy);
-    Lst_Destroy(parseIncPath, Dir_Destroy);
-    LowParse_End();
+	Lst_Destroy(&targCmds, (SimpleProc)free);
+	Lst_Destroy(sysIncPath, Dir_Destroy);
+	Lst_Destroy(parseIncPath, Dir_Destroy);
+	LowParse_End();
 }
 #endif
 

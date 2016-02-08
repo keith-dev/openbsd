@@ -1,4 +1,4 @@
-/*	$OpenBSD: maxim6690.c,v 1.13 2006/12/23 17:46:39 deraadt Exp $	*/
+/*	$OpenBSD: maxim6690.c,v 1.15 2007/06/24 05:34:35 dlg Exp $	*/
 
 /*
  * Copyright (c) 2005 Theo de Raadt
@@ -54,8 +54,8 @@ struct maxtmp_softc {
 	u_int8_t sc_temp_invalid[2];
 	u_int8_t sc_temp2_mask;
 
-	struct sensor sc_sensor[MAXTMP_NUM_SENSORS];
-	struct sensordev sc_sensordev;
+	struct ksensor sc_sensor[MAXTMP_NUM_SENSORS];
+	struct ksensordev sc_sensordev;
 };
 
 int	maxtmp_match(struct device *, void *, void *);
@@ -132,7 +132,7 @@ maxtmp_attach(struct device *parent, struct device *self, void *aux)
 	strlcpy(sc->sc_sensor[MAXTMP_EXT].desc, "External",
 	    sizeof(sc->sc_sensor[MAXTMP_EXT].desc));
 
-	if (sensor_task_register(sc, maxtmp_refresh, 5)) {
+	if (sensor_task_register(sc, maxtmp_refresh, 5) == NULL) {
 		printf(", unable to register update task\n");
 		return;
 	}

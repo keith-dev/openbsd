@@ -1,4 +1,4 @@
-/*      $OpenBSD: ath.c,v 1.61 2007/01/03 18:16:43 claudio Exp $  */
+/*      $OpenBSD: ath.c,v 1.66 2007/07/18 18:10:31 damien Exp $  */
 /*	$NetBSD: ath.c,v 1.37 2004/08/18 21:59:39 dyoung Exp $	*/
 
 /*-
@@ -18,10 +18,6 @@
  * 3. Neither the names of the above-listed copyright holders nor the names
  *    of any contributors may be used to endorse or promote products derived
  *    from this software without specific prior written permission.
- *
- * Alternatively, this software may be distributed under the terms of the
- * GNU General Public License ("GPL") version 2 as published by the Free
- * Software Foundation.
  *
  * NO WARRANTY
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
@@ -114,7 +110,7 @@ void	ath_node_free(struct ieee80211com *, struct ieee80211_node *);
 void	ath_node_copy(struct ieee80211com *,
 	    struct ieee80211_node *, const struct ieee80211_node *);
 u_int8_t ath_node_getrssi(struct ieee80211com *,
-	    struct ieee80211_node *);
+	    const struct ieee80211_node *);
 int	ath_rxbuf_init(struct ath_softc *, struct ath_buf *);
 void	ath_rx_proc(void *, int);
 int	ath_tx_start(struct ath_softc *, struct ieee80211_node *,
@@ -221,7 +217,8 @@ ath_attach(u_int16_t devid, struct ath_softc *sc)
 	bcopy(sc->sc_dev.dv_xname, ifp->if_xname, IFNAMSIZ);
 	sc->sc_flags &= ~ATH_ATTACHED;	/* make sure that it's not attached */
 
-	ah = ath_hal_attach(devid, sc, sc->sc_st, sc->sc_sh, &status);
+	ah = ath_hal_attach(devid, sc, sc->sc_st, sc->sc_sh, sc->sc_64bit,
+	    &status);
 	if (ah == NULL) {
 		printf("%s: unable to attach hardware; HAL status %d\n",
 			ifp->if_xname, status);
@@ -1149,15 +1146,13 @@ ath_initkeytable(struct ath_softc *sc)
 
 	/* XXX maybe should reset all keys when !WEPON */
 	for (i = 0; i < IEEE80211_WEP_NKID; i++) {
-		struct ieee80211_wepkey *k = &ic->ic_nw_keys[i];
-		if (k->wk_len == 0)
+		struct ieee80211_key *k = &ic->ic_nw_keys[i];
+		if (k->k_len == 0)
 			ath_hal_reset_key(ah, i);
 		else {
 			HAL_KEYVAL hk;
 
 			bzero(&hk, sizeof(hk));
-			bcopy(k->wk_key, hk.wk_key, k->wk_len);
-
 			/*
 			 * Pad the key to a supported key length. It
 			 * is always a good idea to use full-length
@@ -1165,14 +1160,13 @@ ath_initkeytable(struct ath_softc *sc)
 			 * to be the default behaviour used by many
 			 * implementations.
 			 */
-			if (k->wk_len <= AR5K_KEYVAL_LENGTH_40)
+			if (k->k_cipher == IEEE80211_CIPHER_WEP40)
 				hk.wk_len = AR5K_KEYVAL_LENGTH_40;
-			else if (k->wk_len <= AR5K_KEYVAL_LENGTH_104)
+			else if (k->k_cipher == IEEE80211_CIPHER_WEP104)
 				hk.wk_len = AR5K_KEYVAL_LENGTH_104;
-			else if (k->wk_len <= AR5K_KEYVAL_LENGTH_128)
-				hk.wk_len = AR5K_KEYVAL_LENGTH_128;
 			else
 				return (EINVAL);
+			bcopy(k->k_key, hk.wk_key, hk.wk_len);
 
 			if (ath_hal_set_key(ah, i, &hk) != AH_TRUE)
 				return (EINVAL);
@@ -1772,9 +1766,9 @@ ath_node_copy(struct ieee80211com *ic,
 }
 
 u_int8_t
-ath_node_getrssi(struct ieee80211com *ic, struct ieee80211_node *ni)
+ath_node_getrssi(struct ieee80211com *ic, const struct ieee80211_node *ni)
 {
-	struct ath_node *an = ATH_NODE(ni);
+	const struct ath_node *an = ATH_NODE(ni);
 	int i, now, nsamples, rssi;
 
 	/*
@@ -1785,7 +1779,7 @@ ath_node_getrssi(struct ieee80211com *ic, struct ieee80211_node *ni)
 	rssi = 0;
 	i = an->an_rx_hist_next;
 	do {
-		struct ath_recv_hist *rh = &an->an_rx_hist[i];
+		const struct ath_recv_hist *rh = &an->an_rx_hist[i];
 		if (rh->arh_ticks == ATH_RHIST_NOTIME)
 			goto done;
 		if (now - rh->arh_ticks > hz)
@@ -3056,7 +3050,7 @@ ath_getchannels(struct ath_softc *sc, HAL_BOOL outdoor, HAL_BOOL xchanmode)
 	 */
 	for (i = 0; i < nchan; i++) {
 		HAL_CHANNEL *c = &chans[i];
-		ix = ath_hal_mhz2ieee(c->channel, c->channelFlags);
+		ix = ieee80211_mhz2ieee(c->channel, c->channelFlags);
 		if (ix > IEEE80211_CHAN_MAX) {
 			printf("%s: bad hal channel %u (%u/%x) ignored\n",
 				ifp->if_xname, ix, c->channel, c->channelFlags);

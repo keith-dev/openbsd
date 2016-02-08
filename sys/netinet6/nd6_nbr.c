@@ -1,4 +1,4 @@
-/*	$OpenBSD: nd6_nbr.c,v 1.42 2006/11/17 01:11:23 itojun Exp $	*/
+/*	$OpenBSD: nd6_nbr.c,v 1.45 2007/06/08 09:31:38 henning Exp $	*/
 /*	$KAME: nd6_nbr.c,v 1.61 2001/02/10 16:06:14 jinmei Exp $	*/
 
 /*
@@ -193,10 +193,13 @@ nd6_ns_input(m, off, icmp6len)
 	 */
 	/* (1) and (3) check. */
 #if NCARP > 0
-	if (ifp->if_carp && ifp->if_type != IFT_CARP) 
-		ifa = carp_iamatch6(ifp->if_carp, &taddr6);
-	if (!ifa) 
+	if (ifp->if_type == IFT_CARP) {
 		ifa = (struct ifaddr *)in6ifa_ifpwithaddr(ifp, &taddr6);
+		if (ifa && !carp_iamatch6(ifp, ifa))
+			ifa = NULL;
+	} else {
+		ifa = (struct ifaddr *)in6ifa_ifpwithaddr(ifp, &taddr6);
+	}
 #else
 	ifa = (struct ifaddr *)in6ifa_ifpwithaddr(ifp, &taddr6);
 #endif
@@ -505,7 +508,7 @@ nd6_ns_output(ifp, daddr6, taddr6, ln, dad)
 	nd_ns->nd_ns_cksum =
 	    in6_cksum(m, IPPROTO_ICMPV6, sizeof(*ip6), icmp6len);
 
-	ip6_output(m, NULL, &ro, dad ? IPV6_UNSPECSRC : 0, &im6o, NULL);
+	ip6_output(m, NULL, &ro, dad ? IPV6_UNSPECSRC : 0, &im6o, NULL, NULL);
 	icmp6_ifstat_inc(ifp, ifs6_out_msg);
 	icmp6_ifstat_inc(ifp, ifs6_out_neighborsolicit);
 	icmp6stat.icp6s_outhist[ND_NEIGHBOR_SOLICIT]++;
@@ -969,7 +972,7 @@ nd6_na_output(ifp, daddr6, taddr6, flags, tlladdr, sdl0)
 	nd_na->nd_na_cksum =
 	    in6_cksum(m, IPPROTO_ICMPV6, sizeof(struct ip6_hdr), icmp6len);
 
-	ip6_output(m, NULL, &ro, 0, &im6o, NULL);
+	ip6_output(m, NULL, &ro, 0, &im6o, NULL, NULL);
 
 	icmp6_ifstat_inc(ifp, ifs6_out_msg);
 	icmp6_ifstat_inc(ifp, ifs6_out_neighboradvert);
@@ -993,7 +996,6 @@ nd6_ifptomac(ifp)
 	struct ifnet *ifp;
 {
 	switch (ifp->if_type) {
-	case IFT_ARCNET:
 	case IFT_ETHER:
 	case IFT_FDDI:
 	case IFT_IEEE1394:

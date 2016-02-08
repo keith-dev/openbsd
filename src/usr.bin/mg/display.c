@@ -1,4 +1,4 @@
-/*	$OpenBSD: display.c,v 1.33 2006/12/24 01:07:59 kjell Exp $	*/
+/*	$OpenBSD: display.c,v 1.35 2007/05/28 17:52:17 kjell Exp $	*/
 
 /* This file is in the public domain. */
 
@@ -106,9 +106,14 @@ struct score *score;			/* [NROW * NROW] */
 #endif /* !LINENOMODE */
 static int	 linenos = LINENOMODE;
 
+/* Is macro recording enabled? */
+extern int macrodef;
+/* Is working directory global? */
+extern int globalwd;
+
 /*
- * Since we don't have variables (we probably should) this is a command
- * processor for changing the value of the line number mode flag.
+ * Since we don't have variables (we probably should) these are command
+ * processors for changing the values of mode flags.
  */
 /* ARGSUSED */
 int
@@ -123,8 +128,6 @@ linenotoggle(int f, int n)
 
 	return (TRUE);
 }
-
-
 
 /*
  * Reinit the display data structures, this is called when the terminal
@@ -823,6 +826,11 @@ modeline(struct mgwin *wp)
 		vtputc('-');
 		++n;
 	}
+	/* XXX These should eventually move to a real mode */
+	if (macrodef == TRUE)
+		n += vtputs("-def");
+	if (globalwd == TRUE)
+		n += vtputs("-gwd");
 	vtputc(')');
 	++n;
 

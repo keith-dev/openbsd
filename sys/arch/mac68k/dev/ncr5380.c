@@ -1,4 +1,4 @@
-/*	$OpenBSD: ncr5380.c,v 1.29 2006/11/28 23:59:45 dlg Exp $	*/
+/*	$OpenBSD: ncr5380.c,v 1.31 2007/04/24 16:48:43 miod Exp $	*/
 /*	$NetBSD: ncr5380.c,v 1.38 1996/12/19 21:48:18 scottr Exp $	*/
 
 /*
@@ -606,7 +606,7 @@ main_exit:
  * The SCSI-DMA interrupt.
  * This interrupt can only be triggered when running in non-polled DMA
  * mode. When DMA is not active, it will be silently ignored, it is usually
- * to late because the EOP interrupt of the controller happens just a tiny
+ * too late because the EOP interrupt of the controller happens just a tiny
  * bit earlier. It might become usefull when scatter/gather is implemented,
  * because in that case only part of the DATAIN/DATAOUT transfer is taken
  * out of a single buffer.
@@ -950,7 +950,7 @@ struct ncr_softc *sc;
 	 * loosing it means we lost the target...
 	 * Also REQ needs to be asserted here to indicate that the bus-phase
 	 * is valid. When the target does not supply REQ within a 'reasonable'
-	 * amount of time, it's probably lost in it's own maze of twisting
+	 * amount of time, it's probably lost in its own maze of twisting
 	 * passages, we have to reset the bus to free it.
 	 */
 	if (GET_5380_REG(NCR5380_IDSTAT) & SC_S_BSY)

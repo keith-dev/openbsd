@@ -1,7 +1,7 @@
 # ex:ts=8 sw=4:
-# $OpenBSD: PackageInfo.pm,v 1.20 2007/02/22 21:31:41 espie Exp $
+# $OpenBSD: PackageInfo.pm,v 1.35 2007/06/16 09:29:37 espie Exp $
 #
-# Copyright (c) 2003-2004 Marc Espie <espie@openbsd.org>
+# Copyright (c) 2003-2007 Marc Espie <espie@openbsd.org>
 #
 # Permission to use, copy, modify, and distribute this software for any
 # purpose with or without fee is hereby granted, provided that the above
@@ -19,16 +19,16 @@ use strict;
 use warnings;
 package OpenBSD::PackageInfo;
 our @ISA=qw(Exporter);
-our @EXPORT=qw(installed_packages installed_info installed_name info_names is_info_name 
+our @EXPORT=qw(installed_packages installed_info installed_name info_names is_info_name installed_stems
     lock_db unlock_db
-    add_installed delete_installed is_installed borked_package CONTENTS COMMENT DESC INSTALL DEINSTALL REQUIRE MODULE
+    add_installed delete_installed is_installed borked_package CONTENTS COMMENT DESC INSTALL DEINSTALL REQUIRE
     REQUIRED_BY REQUIRING DISPLAY UNDISPLAY MTREE_DIRS);
 
 use OpenBSD::PackageName;
+use OpenBSD::Paths;
 use constant {
 	CONTENTS => '+CONTENTS',
 	COMMENT => '+COMMENT',
-	MODULE => '+MODULE.pm' ,
 	DESC => '+DESC',
 	INSTALL => '+INSTALL',
 	DEINSTALL => '+DEINSTALL',
@@ -40,43 +40,30 @@ use constant {
 	MTREE_DIRS => '+MTREE_DIRS' };
 
 use Fcntl qw/:flock/;
-my $pkg_db = $ENV{"PKG_DBDIR"} || '/var/db/pkg';
+my $pkg_db = $ENV{"PKG_DBDIR"} || OpenBSD::Paths->pkgdb;
 
-our $list;
+my ($list, $stemlist);
 
-our @info = (CONTENTS, COMMENT, DESC, REQUIRE, INSTALL, DEINSTALL, REQUIRED_BY, REQUIRING, DISPLAY, UNDISPLAY, MTREE_DIRS, MODULE);
+our @info = (CONTENTS, COMMENT, DESC, REQUIRE, INSTALL, DEINSTALL, REQUIRED_BY, REQUIRING, DISPLAY, UNDISPLAY, MTREE_DIRS);
 
 our %info = ();
 for my $i (@info) {
 	my $j = $i;
-	$j =~ s/\+/F/;
+	$j =~ s/\+/F/o;
 	$info{$i} = $j;
-	$info{'+MODULE.pm'} = 'FMODULE';
 }
 
 sub _init_list
 {
 	$list = {};
-	my @bad=();
+	$stemlist = OpenBSD::PackageName::compile_stemlist();
 
 	opendir(my $dir, $pkg_db) or die "Bad pkg_db: $!";
 	while (my $e = readdir($dir)) {
 		next if $e eq '.' or $e eq '..';
-		next unless -d "$pkg_db/$e";
-		if (! -r _) {
-			push(@bad, $e);
-			next;
-		}
-		if (-f "$pkg_db/$e/+CONTENTS") {
-			$list->{$e} = 1;
-		} else {
-			print "Warning: $e is not really a package\n";
-		}
+		add_installed($e);
 	}
 	close($dir);
-	if (@bad > 0) {
-		print "Warning: can't access information for ", join(", ", @bad), "\n";
-	}
 }
 
 sub add_installed
@@ -86,6 +73,7 @@ sub add_installed
 	}
 	for my $p (@_) {
 		$list->{$p} = 1;
+		$stemlist->add($p);
 	}
 }
 
@@ -96,53 +84,76 @@ sub delete_installed
 	}
 	for my $p (@_) {
 		delete $list->{$p};
+		$stemlist->delete($p);
 
 	}
 }
 
-sub installed_packages(;$)
+sub installed_stems
+{
+	return $stemlist;
+}
+
+sub installed_packages
 {
 	if (!defined $list) {
 		_init_list();
 	}
 	if ($_[0]) {
-		return grep { !/^\./ } keys %$list;
+		return grep { !/^\./o } keys %$list;
 	} else {
 		return keys %$list;
 	}
 }
 
-sub installed_info($)
+sub installed_info
 {
 	my $name =  shift;
 
-	if ($name =~ m|^\Q$pkg_db\E/?|) {
+	# XXX remove the o if we allow pkg_db to change dynamically
+	if ($name =~ m|^\Q$pkg_db\E/?|o) {
 		return "$name/";
 	} else {
 		return "$pkg_db/$name/";
 	}
 }
 
-sub installed_contents($)
+sub installed_contents
 {
 	return installed_info(shift).CONTENTS;
 }
 
-sub borked_package($)
+sub borked_package
 {
-	my $pkgname = $_[0];
-	unless (-e "$pkg_db/partial-$pkgname") {
-		return "partial-$pkgname";
+	my $pkgname = shift;
+	$pkgname = "partial-$pkgname" unless $pkgname =~ m/^partial\-/;
+	unless (-e "$pkg_db/$pkgname") {
+		return $pkgname;
 	}
 	my $i = 1;
 
-	while (-e "$pkg_db/partial-$pkgname.$i") {
+	while (-e "$pkg_db/$pkgname.$i") {
 		$i++;
 	}
-	return "partial-$pkgname.$i";
+	return "$pkgname.$i";
 }
 
-sub is_installed($)
+sub libs_package
+{
+	my $pkgname = shift;
+	$pkgname =~ s/^\.libs\d*\-//;
+	unless (-e "$pkg_db/.libs-$pkgname") {
+		return ".libs-$pkgname";
+	}
+	my $i = 1;
+
+	while (-e "$pkg_db/.libs$i-$pkgname") {
+		$i++;
+	}
+	return ".libs$i-$pkgname";
+}
+
+sub is_installed
 {
 	my $name = installed_name(shift);
 	if (!defined $list) {
@@ -151,11 +162,13 @@ sub is_installed($)
 	return defined $list->{$name};
 }
 
-sub installed_name($)
+sub installed_name
 {
 	my $name = shift;
-	$name =~ s|/$||;
-	$name =~ s|^\Q$pkg_db\E/?||;
+	$name =~ s|/$||o;
+	# XXX remove the o if we allow pkg_db to change dynamically
+	$name =~ s|^\Q$pkg_db\E/?||o;
+	$name =~ s|/\+CONTENTS$||o;
 	return $name;
 }
 
@@ -164,7 +177,7 @@ sub info_names()
 	return @info;
 }
 
-sub is_info_name($)
+sub is_info_name
 {
 	my $name = shift;
 	return $info{$name};
@@ -200,12 +213,11 @@ sub solve_installed_names
 {
 	my ($old, $new, $msg, $state) = @_;
 
-	my $installed;
 	my $bad = 0;
 	my $seen = {};
 
 	for my $pkgname (@$old) {
-	    $pkgname =~ s/\.tgz$//;
+	    $pkgname =~ s/\.tgz$//o;
 	    if (is_installed($pkgname)) {
 	    	if (!$seen->{$pkgname}) {
 		    $seen->{$pkgname} = 1;
@@ -213,10 +225,10 @@ sub solve_installed_names
 		}
 	    } else {
 		if (OpenBSD::PackageName::is_stem($pkgname)) {
-		    if (!defined $installed) {
-		    	$installed = OpenBSD::PackageName::compile_stemlist(installed_packages());
-		    }
-		    my @l = $installed->findstem($pkgname);
+		    require OpenBSD::PackageRepository::Installed;
+		    require OpenBSD::Search;
+
+		    my @l = OpenBSD::PackageRepository::Installed->new->match(OpenBSD::Search::Stem->new($pkgname));
 		    if (@l == 0) {
 			print "Can't resolve $pkgname to an installed package name\n";
 			$bad = 1;
@@ -245,8 +257,7 @@ sub solve_installed_names
 			    }
 			} else {
 			    if ($state->{interactive}) {
-			    	require OpenBSD::ProgressMeter;
-
+			    	require OpenBSD::Interactive;
 				my $result = OpenBSD::Interactive::ask_list('Choose one package', 1, ("<None>", sort @l));
 				push(@$new, $result) if $result ne '<None>';
 				$seen->{$result} = 1;

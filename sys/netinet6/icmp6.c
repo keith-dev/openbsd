@@ -1,4 +1,4 @@
-/*	$OpenBSD: icmp6.c,v 1.92 2007/01/16 11:05:25 itojun Exp $	*/
+/*	$OpenBSD: icmp6.c,v 1.94 2007/06/01 00:52:38 henning Exp $	*/
 /*	$KAME: icmp6.c,v 1.217 2001/06/20 15:03:29 jinmei Exp $	*/
 
 /*
@@ -61,6 +61,9 @@
  *	@(#)ip_icmp.c	8.2 (Berkeley) 1/4/94
  */
 
+#include "faith.h"
+#include "carp.h"
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/malloc.h>
@@ -91,7 +94,9 @@
 #include <netinet6/in6_ifattach.h>
 #include <netinet6/ip6protosw.h>
 
-#include "faith.h"
+#if NCARP > 0
+#include <netinet/ip_carp.h>
+#endif
 
 /* inpcb members */
 #define in6pcb		inpcb
@@ -474,6 +479,14 @@ icmp6_input(mp, offp, proto)
 	}
 #endif
 
+#if NCARP > 0
+	if (m->m_pkthdr.rcvif->if_type == IFT_CARP &&
+	    m->m_pkthdr.rcvif->if_flags & IFF_LINK0 &&
+	    icmp6->icmp6_type == ICMP6_ECHO_REQUEST &&
+	    carp_lsdrop(m, AF_INET6, ip6->ip6_src.s6_addr32,
+	    ip6->ip6_dst.s6_addr32))
+		goto freeit;
+#endif
 	icmp6stat.icp6s_inhist[icmp6->icmp6_type]++;
 
 	switch (icmp6->icmp6_type) {
@@ -2121,7 +2134,8 @@ icmp6_reflect(m, off)
 	 * Note that only echo and node information replies are affected,
 	 * since the length of ICMP6 errors is limited to the minimum MTU.
 	 */
-	if (ip6_output(m, NULL, NULL, IPV6_MINMTU, NULL, &outif) != 0 && outif)
+	if (ip6_output(m, NULL, NULL, IPV6_MINMTU, NULL, &outif, NULL) != 0 &&
+	    outif)
 		icmp6_ifstat_inc(outif, ifs6_out_error);
 
 	if (outif)
@@ -2621,7 +2635,7 @@ noredhdropt:
 		= in6_cksum(m, IPPROTO_ICMPV6, sizeof(*ip6), ntohs(ip6->ip6_plen));
 
 	/* send the packet to outside... */
-	if (ip6_output(m, NULL, NULL, 0, NULL, NULL) != 0)
+	if (ip6_output(m, NULL, NULL, 0, NULL, NULL, NULL) != 0)
 		icmp6_ifstat_inc(ifp, ifs6_out_error);
 
 	icmp6_ifstat_inc(ifp, ifs6_out_msg);

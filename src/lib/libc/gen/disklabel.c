@@ -93,6 +93,7 @@ getdiskbyname(const char *name)
 	else
 		getnumdflt(dp->d_type, "dt", 0);
 	getnumdflt(dp->d_secpercyl, "sc", dp->d_nsectors * dp->d_ntracks);
+	/* XXX */
 	getnumdflt(dp->d_secperunit, "su", dp->d_secpercyl * dp->d_ncylinders);
 	getnumdflt(dp->d_rpm, "rm", 3600);
 	getnumdflt(dp->d_interleave, "il", 1);
@@ -109,23 +110,28 @@ getdiskbyname(const char *name)
 	strlcpy(ptype, "tx", sizeof ptype);
 	max = 'a' - 1;
 	pp = &dp->d_partitions[0];
+	dp->d_version = 1; 
 	for (p = 'a'; p < 'a' + MAXPARTITIONS; p++, pp++) {
 		long f;
 
 		psize[1] = pbsize[1] = pfsize[1] = poffset[1] = ptype[1] = p;
+		/* XXX */
 		if (cgetnum(buf, psize, &f) == -1)
 			pp->p_size = 0;
 		else {
+			u_int32_t fsize, frag = 8;
+
 			pp->p_size = f;
+			/* XXX */
 			getnum(pp->p_offset, poffset);
-			getnumdflt(pp->p_fsize, pfsize, 0);
-			if (pp->p_fsize) {
+			getnumdflt(fsize, pfsize, 0);
+			if (fsize) {
 				long bsize;
 
 				if (cgetnum(buf, pbsize, &bsize) == 0)
-					pp->p_frag = bsize / pp->p_fsize;
-				else
-					pp->p_frag = 8;
+					frag = bsize / fsize;
+				pp->p_fragblock =
+				    DISKLABELV1_FFS_FRAGBLOCK(fsize, frag);
 			}
 			getnumdflt(pp->p_fstype, ptype, 0);
 			if (pp->p_fstype == 0 && cgetstr(buf, ptype, &cq) > 0)

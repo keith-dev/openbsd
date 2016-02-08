@@ -1,4 +1,4 @@
-/*	$OpenBSD: re.c,v 1.69 2007/03/02 17:49:51 krw Exp $	*/
+/*	$OpenBSD: re.c,v 1.74 2007/07/16 19:15:01 millert Exp $	*/
 /*	$FreeBSD: if_re.c,v 1.31 2004/09/04 07:54:05 ru Exp $	*/
 /*
  * Copyright (c) 1997, 1998-2003
@@ -151,10 +151,14 @@
 #include <dev/ic/rtl81x9reg.h>
 #include <dev/ic/revar.h>
 
+#ifdef RE_DEBUG
 int redebug = 0;
-#define DPRINTF(x)	if (redebug) printf x
+#define DPRINTF(x)	do { if (redebug) printf x; } while (0)
+#else
+#define DPRINTF(x)
+#endif
 
-inline void re_set_bufaddr(struct rl_desc *, bus_addr_t);
+static inline void re_set_bufaddr(struct rl_desc *, bus_addr_t);
 
 int	re_encap(struct rl_softc *, struct mbuf *, int *);
 
@@ -209,21 +213,23 @@ static const struct re_revision {
 	{ RL_HWREV_8110S,	"RTL8110S" },
 	{ RL_HWREV_8169S,	"RTL8169S" },
 	{ RL_HWREV_8169_8110SB,	"RTL8169/8110SB" },
-	{ RL_HWREV_8169_8110SC,	"RTL8169/8110SC" },
+	{ RL_HWREV_8169_8110SCd, "RTL8169/8110SCd" },
 	{ RL_HWREV_8168_SPIN1,	"RTL8168 1" },
 	{ RL_HWREV_8100E_SPIN1,	"RTL8100E 1" },
 	{ RL_HWREV_8101E,	"RTL8101E" },
 	{ RL_HWREV_8168_SPIN2,	"RTL8168 2" },
+	{ RL_HWREV_8168_SPIN3,	"RTL8168 3" },
 	{ RL_HWREV_8100E_SPIN2, "RTL8100E 2" },
 	{ RL_HWREV_8139CPLUS,	"RTL8139C+" },
 	{ RL_HWREV_8101,	"RTL8101" },
 	{ RL_HWREV_8100,	"RTL8100" },
+	{ RL_HWREV_8169_8110SCe, "RTL8169/8110SCe" },
 
 	{ 0, NULL }
 };
 
 
-inline void
+static inline void
 re_set_bufaddr(struct rl_desc *d, bus_addr_t addr)
 {
 	d->rl_bufaddr_lo = htole32((uint32_t)addr);
@@ -820,10 +826,10 @@ re_attach(struct rl_softc *sc, const char *intrstr)
 	/* Reset the adapter. */
 	re_reset(sc);
 
-	sc->rl_eewidth = 6;
+	sc->rl_eewidth = RL_9356_ADDR_LEN;
 	re_read_eeprom(sc, (caddr_t)&re_did, 0, 1);
 	if (re_did != 0x8129)
-		sc->rl_eewidth = 8;
+		sc->rl_eewidth = RL_9346_ADDR_LEN;
 
 	/*
 	 * Get station address from the EEPROM.

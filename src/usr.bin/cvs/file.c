@@ -1,4 +1,4 @@
-/*	$OpenBSD: file.c,v 1.189 2007/02/22 06:42:09 otto Exp $	*/
+/*	$OpenBSD: file.c,v 1.194 2007/07/03 13:22:42 joris Exp $	*/
 /*
  * Copyright (c) 2006 Joris Vink <joris@openbsd.org>
  * Copyright (c) 2004 Jean-Francois Brousseau <jfb@openbsd.org>
@@ -359,7 +359,7 @@ cvs_file_walkdir(struct cvs_file *cf, struct cvs_recursion *cr)
 	    CVS_PATH_CVSDIR);
 
 	l = stat(fpath, &st);
-	if (cvs_cmdop != CVS_OP_IMPORT &&
+	if (cvs_cmdop != CVS_OP_IMPORT && cvs_cmdop != CVS_OP_RLOG &&
 	    (l == -1 || (l == 0 && !S_ISDIR(st.st_mode)))) {
 		return;
 	}
@@ -414,7 +414,7 @@ cvs_file_walkdir(struct cvs_file *cf, struct cvs_recursion *cr)
 				continue;
 			}
 
-			(void)xsnprintf(fpath, MAXPATHLEN, "%s/%s",
+			len = xsnprintf(fpath, MAXPATHLEN, "%s/%s",
 			    cf->file_path, dp->d_name);
 
 			/*
@@ -461,15 +461,10 @@ cvs_file_walkdir(struct cvs_file *cf, struct cvs_recursion *cr)
 				continue;
 			}
 
-			if (!(cr->flags & CR_RECURSE_DIRS) &&
-			    type == CVS_DIR) {
-				cp += dp->d_reclen;
-				continue;
-			}
-
 			switch (type) {
 			case CVS_DIR:
-				cvs_file_get(fpath, &dl);
+				if (cr->flags & CR_RECURSE_DIRS)
+					cvs_file_get(fpath, &dl);
 				break;
 			case CVS_FILE:
 				cvs_file_get(fpath, &fl);
@@ -504,7 +499,6 @@ cvs_file_walkdir(struct cvs_file *cf, struct cvs_recursion *cr)
 		if (!(cr->flags & CR_RECURSE_DIRS) &&
 		    ent->ce_type == CVS_ENT_DIR)
 			continue;
-
 		if (ent->ce_type == CVS_ENT_DIR)
 			cvs_file_get(fpath, &dl);
 		else if (ent->ce_type == CVS_ENT_FILE)
@@ -557,7 +551,8 @@ cvs_file_classify(struct cvs_file *cf, const char *tag)
 	int rflags, ismodified, rcsdead;
 	CVSENTRIES *entlist = NULL;
 	const char *state;
-	char repo[MAXPATHLEN], rcsfile[MAXPATHLEN], r1[16], r2[16];
+	char repo[MAXPATHLEN], rcsfile[MAXPATHLEN];
+	char r1[CVS_REV_BUFSZ], r2[CVS_REV_BUFSZ];
 
 	cvs_log(LP_TRACE, "cvs_file_classify(%s)", cf->file_path);
 
@@ -577,7 +572,6 @@ cvs_file_classify(struct cvs_file *cf, const char *tag)
 	}
 
 	cf->file_rpath = xstrdup(rcsfile);
-
 	entlist = cvs_ent_open(cf->file_wd);
 	cf->file_ent = cvs_ent_get(entlist, cf->file_name);
 
@@ -595,7 +589,7 @@ cvs_file_classify(struct cvs_file *cf, const char *tag)
 	if (cf->file_type == CVS_DIR) {
 		if (cf->fd == -1 && stat(rcsfile, &st) != -1)
 			cf->file_status = DIR_CREATE;
-		else if (cf->file_ent != NULL)
+		else if (cf->file_ent != NULL || cvs_cmdop == CVS_OP_RLOG)
 			cf->file_status = FILE_UPTODATE;
 		else
 			cf->file_status = FILE_UNKNOWN;
@@ -611,6 +605,7 @@ cvs_file_classify(struct cvs_file *cf, const char *tag)
 		break;
 	case CVS_OP_IMPORT:
 	case CVS_OP_LOG:
+	case CVS_OP_RLOG:
 		rflags |= RCS_PARSE_FULLY;
 		break;
 	}
@@ -620,41 +615,49 @@ cvs_file_classify(struct cvs_file *cf, const char *tag)
 		cf->file_rcs = rcs_open(cf->file_rpath, cf->repo_fd, rflags);
 		if (cf->file_rcs == NULL)
 			fatal("cvs_file_classify: failed to parse RCS");
-		cf->file_rcs->rf_inattic = 0;
-	} else if (cvs_cmdop != CVS_OP_CHECKOUT) {
+	} else {
 		(void)xsnprintf(rcsfile, MAXPATHLEN, "%s/%s/%s%s",
-		    repo, CVS_PATH_ATTIC, cf->file_name, RCS_FILE_EXT);
+		     repo, CVS_PATH_ATTIC, cf->file_name, RCS_FILE_EXT);
 
 		cf->repo_fd = open(rcsfile, O_RDONLY);
 		if (cf->repo_fd != -1) {
 			xfree(cf->file_rpath);
 			cf->file_rpath = xstrdup(rcsfile);
 			cf->file_rcs = rcs_open(cf->file_rpath,
-			     cf->repo_fd, rflags);
+			    cf->repo_fd, rflags);
 			if (cf->file_rcs == NULL)
 				fatal("cvs_file_classify: failed to parse RCS");
-			cf->file_rcs->rf_inattic = 1;
+			cf->in_attic = 1;
 		} else {
 			cf->file_rcs = NULL;
 		}
-	} else
-		cf->file_rcs = NULL;
+	}
 
 	if (tag != NULL && cf->file_rcs != NULL) {
-		if ((cf->file_rcsrev = rcs_translate_tag(tag, cf->file_rcs)) == NULL)
-			fatal("cvs_file_classify: could not translate tag `%s'", tag);
+		/* if we could not translate tag, means that we should
+		 * skip this file. */
+		if ((cf->file_rcsrev = rcs_translate_tag(tag, cf->file_rcs)) == NULL) {
+			cf->file_status = FILE_SKIP;
+			cvs_ent_close(entlist, ENT_NOSYNC);
+			return;
+		}
+
+		rcsnum_tostr(cf->file_rcsrev, r1, sizeof(r1));
+
 	} else if (cf->file_ent != NULL && cf->file_ent->ce_tag != NULL) {
 		cf->file_rcsrev = rcsnum_alloc();
 		rcsnum_cpy(cf->file_ent->ce_rev, cf->file_rcsrev, 0);
-	} else if (cf->file_rcs != NULL)
+	} else if (cf->file_rcs != NULL) {
 		cf->file_rcsrev = rcs_head_get(cf->file_rcs);
-	else
+	} else {
 		cf->file_rcsrev = NULL;
+	}
 
 	if (cf->file_ent != NULL)
 		rcsnum_tostr(cf->file_ent->ce_rev, r1, sizeof(r1));
-	if (cf->file_rcsrev != NULL)
+	if (cf->file_rcsrev != NULL) {
 		rcsnum_tostr(cf->file_rcsrev, r2, sizeof(r2));
+	}
 
 	ismodified = rcsdead = 0;
 	if (cf->fd != -1 && cf->file_ent != NULL) {
@@ -752,7 +755,8 @@ cvs_file_classify(struct cvs_file *cf, const char *tag)
 			}
 		}
 	} else if (cf->file_ent->ce_status == CVS_ENT_REG) {
-		if (cf->file_rcs == NULL || rcsdead == 1) {
+		if (cf->file_rcs == NULL || rcsdead == 1 ||
+		    (reset_stickies == 1 && cf->in_attic == 1)) {
 			if (cf->fd == -1) {
 				cvs_log(LP_NOTICE,
 				    "warning: %s's entry exists but"

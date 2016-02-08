@@ -1,4 +1,4 @@
-/*	$OpenBSD: adm1030.c,v 1.6 2006/12/23 17:46:39 deraadt Exp $	*/
+/*	$OpenBSD: adm1030.c,v 1.8 2007/06/24 05:34:35 dlg Exp $	*/
 
 /*
  * Copyright (c) 2005 Theo de Raadt
@@ -42,8 +42,8 @@ struct admtmp_softc {
 	i2c_addr_t	sc_addr;
 	int		sc_fanmul;
 
-	struct sensor	sc_sensor[ADMTMP_NUM_SENSORS];
-	struct sensordev sc_sensordev;
+	struct ksensor	sc_sensor[ADMTMP_NUM_SENSORS];
+	struct ksensordev sc_sensordev;
 };
 
 int	admtmp_match(struct device *, void *, void *);
@@ -102,7 +102,7 @@ admtmp_attach(struct device *parent, struct device *self, void *aux)
 
 	sc->sc_sensor[ADMTMP_FAN].type = SENSOR_FANRPM;
 
-	if (sensor_task_register(sc, admtmp_refresh, 5)) {
+	if (sensor_task_register(sc, admtmp_refresh, 5) == NULL) {
 		printf(", unable to register update task\n");
 		return;
 	}

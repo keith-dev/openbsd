@@ -1,4 +1,4 @@
-/*	$OpenBSD: locore.S,v 1.152 2006/01/10 01:17:28 martin Exp $	*/
+/*	$OpenBSD: locore.S,v 1.155 2007/07/20 22:09:23 kettenis Exp $	*/
 
 /*
  * Copyright (c) 1998-2004 Michael Shalayeff
@@ -93,12 +93,15 @@
 	.import	bootdev, data
 	.import	esym, data
 	.import	curproc, data
+	.import cpu_info_primary, data
 	.import	want_resched, data
 	.import virtual_avail, data
 	.import	proc0, data
 	.import	proc0paddr, data
 	.import	kpsw, data
 	.import	panic, code
+
+#define curproc	(cpu_info_primary + CI_CURPROC)
 
 #define	EMRG_STACKSIZE	(1*NBPG)
 #define	FPEMU_STACKSIZE	(1*NBPG)
@@ -933,7 +936,7 @@ hpmc_v
 	STRAP(itlbna,T_ITLBMISSNA,DTLBPRE)/* 16. ITLB non-access miss fault */
 	STRAP(dtlbna,T_DTLBMISSNA,DTLBPRE)/* 17. DTLB non-access miss fault */
 	ATRAP(dprot,T_DPROT)		/* 18. data protection trap
-					      unalligned data reference trap */
+					      unaligned data reference trap */
 	ATRAP(dbrk,T_DBREAK)		/* 19. data break trap */
 	STRAP(tlbd,T_TLB_DIRTY,DTLBPRE)	/* 20. TLB dirty bit trap */
 	ATRAP(pgref,T_PAGEREF)		/* 21. page reference trap */
@@ -1478,7 +1481,7 @@ EXIT($dtlb_l)
 		/* fix prom mappings */		! \
 	extrd,s	r17, 46, 8, r1			! \
 	addi,<>	0x10, r1, r0			! \
-	depdi	0, 42, 8, r17			! \
+	depdi	0, 38, 4, r17			! \
 		/* weak ordering, dyn bp */	! \
 	depwi	1, 31, 2, r16			! \
 	depdi	0, 44, 30, r25			! \

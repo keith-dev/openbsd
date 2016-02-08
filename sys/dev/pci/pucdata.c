@@ -1,4 +1,4 @@
-/*	$OpenBSD: pucdata.c,v 1.46 2006/12/28 20:52:36 miod Exp $	*/
+/*	$OpenBSD: pucdata.c,v 1.48 2007/06/08 12:44:41 mbalmer Exp $	*/
 /*	$NetBSD: pucdata.c,v 1.6 1999/07/03 05:55:23 cgd Exp $	*/
 
 /*
@@ -858,6 +858,18 @@ const struct puc_device_description puc_devices[] = {
 	    },
 	},
 
+	/* Oxford Semiconductor OX16PCI954K PCI UARTs */
+	{   /* "Oxford Semiconductor OX16PCI954K UARTs", */
+	    {   PCI_VENDOR_OXFORD2, PCI_PRODUCT_OXFORD2_OX16PCI954K,	0, 0 },
+	    {   0xffff, 0xffff,						0, 0 },
+	    {
+		{ PUC_PORT_TYPE_COM, 0x10, 0x00, COM_FREQ },
+		{ PUC_PORT_TYPE_COM, 0x14, 0x00, COM_FREQ },
+		{ PUC_PORT_TYPE_COM, 0x18, 0x00, COM_FREQ },
+		{ PUC_PORT_TYPE_COM, 0x1c, 0x00, COM_FREQ },
+	    },
+	},
+
 	/* Oxford Semiconductor OX16PCI954 PCI Parallel port */
 	{   /* "Oxford Semiconductor OX16PCI954 Parallel port", */
 	    {   PCI_VENDOR_OXFORD2, PCI_PRODUCT_OXFORD2_OX16PCI954P,	0, 0 },
@@ -1313,6 +1325,21 @@ const struct puc_device_description puc_devices[] = {
 	    },
 	},
 
+	/* Digi International Digi Neo 8 Serial */
+	{
+	    {	PCI_VENDOR_DIGI, PCI_PRODUCT_DIGI_NEO8,		0, 0  },
+	    {	0xffff, 0xffff,					0, 0  },
+	    {
+		{ PUC_PORT_TYPE_COM, 0x10, 0x0000, COM_FREQ * 8 },
+		{ PUC_PORT_TYPE_COM, 0x10, 0x0200, COM_FREQ * 8 },
+		{ PUC_PORT_TYPE_COM, 0x10, 0x0400, COM_FREQ * 8 },
+		{ PUC_PORT_TYPE_COM, 0x10, 0x0600, COM_FREQ * 8 },
+		{ PUC_PORT_TYPE_COM, 0x10, 0x0800, COM_FREQ * 8 },
+		{ PUC_PORT_TYPE_COM, 0x10, 0x0a00, COM_FREQ * 8 },
+		{ PUC_PORT_TYPE_COM, 0x10, 0x0c00, COM_FREQ * 8 },
+		{ PUC_PORT_TYPE_COM, 0x10, 0x0e00, COM_FREQ * 8 },
+	    },
+	},
 	{   /* NULL, */
 
 	    {	0,	0,		0, 0	},

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ieee80211_node.h,v 1.10 2006/11/26 11:14:23 deraadt Exp $	*/
+/*	$OpenBSD: ieee80211_node.h,v 1.21 2007/08/03 16:51:06 damien Exp $	*/
 /*	$NetBSD: ieee80211_node.h,v 1.9 2004/04/30 22:57:32 dyoung Exp $	*/
 
 /*-
@@ -16,10 +16,6 @@
  *    documentation and/or other materials provided with the distribution.
  * 3. The name of the author may not be used to endorse or promote products
  *    derived from this software without specific prior written permission.
- *
- * Alternatively, this software may be distributed under the terms of the
- * GNU General Public License ("GPL") version 2 as published by the Free
- * Software Foundation.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -48,9 +44,9 @@ struct ieee80211_rateset {
 	u_int8_t		rs_rates[IEEE80211_RATE_MAXSIZE];
 };
 
-extern struct ieee80211_rateset ieee80211_std_rateset_11a;
-extern struct ieee80211_rateset ieee80211_std_rateset_11b;
-extern struct ieee80211_rateset ieee80211_std_rateset_11g;
+extern const struct ieee80211_rateset ieee80211_std_rateset_11a;
+extern const struct ieee80211_rateset ieee80211_std_rateset_11b;
+extern const struct ieee80211_rateset ieee80211_std_rateset_11g;
 
 enum ieee80211_node_state {
 	IEEE80211_STA_CACHE,	/* cached node */
@@ -113,21 +109,41 @@ struct ieee80211_node {
 #endif
 
 	/* power saving mode */
-
 	u_int8_t		ni_pwrsave;
 	struct ifqueue		ni_savedq;	/* packets queued for pspoll */
+
+	/* RSN */
+	u_int			ni_group_cipher;
+	enum ieee80211_cipher	ni_pairwise_cipher;
+	u_int			ni_pairwise_cipherset;
+	enum ieee80211_akm	ni_akm;
+	u_int			ni_akmset;
+	u_int16_t		ni_rsncaps;
+	int			ni_port_valid;
+	u_int8_t		ni_eapol_desc;
+	u_int8_t		ni_nonce[EAPOL_KEY_NONCE_LEN];
+	u_int64_t		ni_replaycnt;
+	u_int8_t		ni_replaycnt_ok;
+	u_int8_t		*ni_rsnie;
+	struct ieee80211_key	ni_pairwise_key;
+	struct ieee80211_ptk	ni_ptk;
+	u_int8_t		ni_ptk_ok;
+	u_int8_t		ni_key_count;
 
 	/* others */
 	u_int16_t		ni_associd;	/* assoc response */
 	u_int16_t		ni_txseq;	/* seq to be transmitted */
 	u_int16_t		ni_rxseq;	/* seq previous received */
+	u_int16_t		ni_qos_txseqs[IEEE80211_NUM_TID];
+	u_int16_t		ni_qos_rxseqs[IEEE80211_NUM_TID];
 	int			ni_fails;	/* failure count to associate */
 	int			ni_inact;	/* inactivity mark count */
 	int			ni_txrate;	/* index to ni_rates[] */
 	int			ni_state;
-	u_int32_t		*ni_challenge;	/* shared-key challenge */
+
 	u_int8_t		ni_flags;	/* special-purpose state */
 #define IEEE80211_NODE_ERP	0x01
+#define IEEE80211_NODE_QOS	0x02
 };
 
 RB_HEAD(ieee80211_tree, ieee80211_node);
@@ -163,15 +179,6 @@ ieee80211_unref_node(struct ieee80211_node **ni)
 	*ni = NULL;			/* guard against use */
 }
 
-typedef int ieee80211_node_lock_t;
-#define	IEEE80211_NODE_LOCK_INIT(_ic, _name)
-#define	IEEE80211_NODE_LOCK_DESTROY(_ic)
-#define	IEEE80211_NODE_LOCK(_ic)		(_ic)->ic_nodelock = splnet()
-#define	IEEE80211_NODE_UNLOCK(_ic)		splx((_ic)->ic_nodelock)
-#define	IEEE80211_NODE_LOCK_ASSERT(_ic)
-#define	IEEE80211_NODE_LOCK_BH		IEEE80211_NODE_LOCK
-#define	IEEE80211_NODE_UNLOCK_BH	IEEE80211_NODE_UNLOCK
-
 struct ieee80211com;
 
 #ifdef MALLOC_DECLARE
@@ -187,20 +194,19 @@ extern	void ieee80211_next_scan(struct ifnet *);
 extern	void ieee80211_end_scan(struct ifnet *);
 extern	void ieee80211_reset_scan(struct ifnet *);
 extern	struct ieee80211_node *ieee80211_alloc_node(struct ieee80211com *,
-		u_int8_t *);
+		const u_int8_t *);
 extern	struct ieee80211_node *ieee80211_dup_bss(struct ieee80211com *,
-		u_int8_t *);
+		const u_int8_t *);
 extern	struct ieee80211_node *ieee80211_find_node(struct ieee80211com *,
-		u_int8_t *);
+		const u_int8_t *);
 extern	struct ieee80211_node *ieee80211_find_rxnode(struct ieee80211com *,
-		struct ieee80211_frame *);
+		const struct ieee80211_frame *);
 extern	struct ieee80211_node *ieee80211_find_txnode(struct ieee80211com *,
-		u_int8_t *);
+		const u_int8_t *);
 extern	struct ieee80211_node *
 		ieee80211_find_node_for_beacon(struct ieee80211com *,
-		u_int8_t *, struct ieee80211_channel *, char *, u_int8_t);
-extern	struct ieee80211_node * ieee80211_lookup_node(struct ieee80211com *,
-		u_int8_t *, struct ieee80211_channel *);
+		const u_int8_t *, const struct ieee80211_channel *,
+		const char *, u_int8_t);
 extern	void ieee80211_release_node(struct ieee80211com *,
 		struct ieee80211_node *);
 extern	void ieee80211_free_allnodes(struct ieee80211com *);
@@ -208,7 +214,7 @@ typedef void ieee80211_iter_func(void *, struct ieee80211_node *);
 extern	void ieee80211_iterate_nodes(struct ieee80211com *ic,
 		ieee80211_iter_func *, void *);
 extern	void ieee80211_clean_nodes(struct ieee80211com *);
-extern  int ieee80211_iserp_sta(struct ieee80211_node *);
+extern  int ieee80211_iserp_sta(const struct ieee80211_node *);
 
 extern	void ieee80211_node_join(struct ieee80211com *,
 		struct ieee80211_node *, int);
@@ -219,7 +225,8 @@ extern	int ieee80211_match_bss(struct ieee80211com *,
 extern	void ieee80211_create_ibss(struct ieee80211com* ,
 		struct ieee80211_channel *);
 
-extern	int ieee80211_node_cmp(struct ieee80211_node *, struct ieee80211_node *);
+extern	int ieee80211_node_cmp(const struct ieee80211_node *,
+		const struct ieee80211_node *);
 RB_PROTOTYPE(ieee80211_tree, ieee80211_node, ni_node, ieee80211_node_cmp);
 
 #endif /* _NET80211_IEEE80211_NODE_H_ */

@@ -1,4 +1,4 @@
-/*	$OpenBSD: vm_machdep.c,v 1.42 2006/06/24 14:04:04 miod Exp $ */
+/*	$OpenBSD: vm_machdep.c,v 1.45 2007/06/20 17:29:36 miod Exp $ */
 
 /*
  * Copyright (c) 1988 University of Utah.
@@ -112,6 +112,7 @@ cpu_fork(p1, p2, stack, stacksize, func, arg)
 	pcb->pcb_regs[6] = (int)func;		/* A2 */
 	pcb->pcb_regs[7] = (int)arg;		/* A3 */
 	pcb->pcb_regs[11] = (int)sf;		/* SSP */
+	pcb->pcb_ps = PSL_LOWIPL;		/* start kthreads at IPL 0 */
 }
 
 /*
@@ -188,39 +189,6 @@ cpu_coredump(p, vp, cred, chdr)
 
 	chdr->c_nseg++;
 	return 0;
-}
-
-/*
- * Move pages from one kernel virtual address to another.
- * Both addresses are assumed to reside in the Sysmap.
- */
-void
-pagemove(from, to, size)
-	caddr_t from, to;
-	size_t size;
-{
-	paddr_t pa;
-	boolean_t rv;
-
-#ifdef DEBUG
-	if ((size & PAGE_MASK) != 0)
-		panic("pagemove");
-#endif
-	while (size > 0) {
-		rv = pmap_extract(pmap_kernel(), (vaddr_t)from, &pa);
-#ifdef DEBUG
-		if (rv == FALSE)
-			panic("pagemove 2");
-		if (pmap_extract(pmap_kernel(), (vaddr_t)to, NULL) == TRUE)
-			panic("pagemove 3");
-#endif
-		pmap_kremove((vaddr_t)from, PAGE_SIZE);
-		pmap_kenter_pa((vaddr_t)to, pa, VM_PROT_READ|VM_PROT_WRITE);
-		from += PAGE_SIZE;
-		to += PAGE_SIZE;
-		size -= PAGE_SIZE;
-	}
-	pmap_update(pmap_kernel());
 }
 
 /*
@@ -301,6 +269,8 @@ vunmapbuf(bp, siz)
 	addr = bp->b_data;
 	npf = btoc(round_page(bp->b_bcount + ((int)addr & PGOFSET)));
 	kva = (vaddr_t)((int)addr & ~PGOFSET);
+	pmap_remove(vm_map_pmap(phys_map), kva, kva + ctob(npf));
+	pmap_update(vm_map_pmap(phys_map));
 	uvm_km_free_wakeup(phys_map, kva, ctob(npf));
 	bp->b_data = bp->b_saveaddr;
 	bp->b_saveaddr = NULL;

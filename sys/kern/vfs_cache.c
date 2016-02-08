@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfs_cache.c,v 1.19 2006/01/21 00:00:55 pedro Exp $	*/
+/*	$OpenBSD: vfs_cache.c,v 1.25 2007/06/21 12:05:14 pedro Exp $	*/
 /*	$NetBSD: vfs_cache.c,v 1.13 1996/02/04 02:18:09 christos Exp $	*/
 
 /*
@@ -89,10 +89,9 @@ struct pool nch_pool;
 u_long nextvnodeid;
 
 /*
- * Look for a the name in the cache. We don't do this
- * if the segment name is long, simply so the cache can avoid
- * holding long names (which would either waste space, or
- * add greatly to the complexity).
+ * Look for a name in the cache. We don't do this if the segment name is
+ * long, simply so the cache can avoid holding long names (which would
+ * either waste space, or add greatly to the complexity).
  *
  * Lookup is called with ni_dvp pointing to the directory to search,
  * ni_ptr pointing to the name of the entry being sought, ni_namelen
@@ -245,7 +244,8 @@ remove:
 		ncp->nc_vhash.le_prev = NULL;
 	}
 
-	TAILQ_INSERT_HEAD(&nclruhead, ncp, nc_lru);
+	pool_put(&nch_pool, ncp);
+	numcache--;
 	return (-1);
 }
 
@@ -394,7 +394,7 @@ cache_enter(struct vnode *dvp, struct vnode *vp, struct componentname *cnp)
  * Name cache initialization, from vfs_init() when we are booting
  */
 void
-nchinit()
+nchinit(void)
 {
 
 	TAILQ_INIT(&nclruhead);
@@ -429,22 +429,17 @@ cache_purge(struct vnode *vp)
 /*
  * Cache flush, a whole filesystem; called when filesys is umounted to
  * remove entries that would now be invalid
- *
- * The line "nxtcp = nchhead" near the end is to avoid potential problems
- * if the cache lru chain is modified while we are dumping the
- * inode.  This makes the algorithm O(n^2), but do you think I care?
  */
 void
 cache_purgevfs(struct mount *mp)
 {
 	struct namecache *ncp, *nxtcp;
-
+   
 	for (ncp = TAILQ_FIRST(&nclruhead); ncp != TAILQ_END(&nclruhead);
 	    ncp = nxtcp) {
-		if (ncp->nc_dvp == NULL || ncp->nc_dvp->v_mount != mp) {
-			nxtcp = TAILQ_NEXT(ncp, nc_lru);
+		nxtcp = TAILQ_NEXT(ncp, nc_lru);
+		if (ncp->nc_dvp == NULL || ncp->nc_dvp->v_mount != mp)
 			continue;
-		}
 		/* free the resources we had */
 		ncp->nc_vp = NULL;
 		ncp->nc_dvp = NULL;
@@ -457,8 +452,7 @@ cache_purgevfs(struct mount *mp)
 			LIST_REMOVE(ncp, nc_vhash);
 			ncp->nc_vhash.le_prev = NULL;
 		}
-		/* cause rescan of list, it may have altered */
-		nxtcp = TAILQ_FIRST(&nclruhead);
-		TAILQ_INSERT_HEAD(&nclruhead, ncp, nc_lru);
+		pool_put(&nch_pool, ncp);
+		numcache--;
 	}
 }

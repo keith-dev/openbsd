@@ -1,4 +1,4 @@
-/*	$OpenBSD: macebus.c,v 1.18 2006/01/04 20:23:07 miod Exp $ */
+/*	$OpenBSD: macebus.c,v 1.26 2007/07/09 21:40:24 jasper Exp $ */
 
 /*
  * Copyright (c) 2000-2004 Opsycon AB  (www.opsycon.se)
@@ -51,6 +51,7 @@
 
 #include <machine/autoconf.h>
 #include <machine/intr.h>
+#include <machine/atomic.h>
 
 #include <sgi/localbus/macebus.h>
 #include <sgi/localbus/crimebus.h>
@@ -67,6 +68,9 @@ void macebus_intr_makemasks(void);
 void macebus_do_pending_int(int);
 intrmask_t macebus_iointr(intrmask_t, struct trap_frame *);
 intrmask_t macebus_aux(intrmask_t, struct trap_frame *);
+
+bus_addr_t macebus_pa_to_device(paddr_t);
+paddr_t	macebus_device_to_pa(bus_addr_t);
 
 int maceticks;		/* Time tracker for special events */
 
@@ -120,7 +124,9 @@ struct machine_bus_dma_tag mace_bus_dma_tag = {
 	_dmamem_map,
 	_dmamem_unmap,
 	_dmamem_mmap,
-	NULL
+	macebus_pa_to_device,
+	macebus_device_to_pa,
+	CRIME_MEMORY_MASK
 };
 
 /*
@@ -210,7 +216,8 @@ macebusattach(struct device *parent, struct device *self, void *aux)
 		printf(": cannot map CRIME control registers\n");
 		return;
 	}
-	hwmask_addr = (void *)(PHYS_TO_KSEG1(CRIMEBUS_BASE)+CRIME_INT_MASK);
+	hwmask_addr = (void *)(PHYS_TO_XKPHYS(CRIMEBUS_BASE, CCA_NC) +
+	    CRIME_INT_MASK);
 
 	creg = bus_space_read_8(&crimebus_tag, crime_h, CRIME_REVISION);
 	printf(": crime rev %d.%d\n", (creg & 0xf0) >> 4, creg & 0xf);
@@ -366,7 +373,7 @@ mace_space_map(bus_space_tag_t t, bus_addr_t offs, bus_size_t size,
 	/* Handle special mapping separately */
 	if (bpa >= (MACEBUS_BASE + MACE_ISAX_OFFS) &&
 	    (bpa + size) < (MACEBUS_BASE + MACE_ISAX_OFFS + MACE_ISAX_SIZE)) {
-		*bshp = PHYS_TO_KSEG1(bpa);
+		*bshp = PHYS_TO_XKPHYS(bpa, CCA_NC);
 		return 0;
 	}
 
@@ -397,10 +404,13 @@ mace_space_unmap(bus_space_tag_t t, bus_space_handle_t bsh, bus_size_t size)
 	off = bsh - sva;
 	len = size+off;
 
-	paddr = KSEG1_TO_PHYS(bsh);
-	if (paddr >= (MACEBUS_BASE + MACE_ISAX_OFFS) &&
-	    (paddr+size) <= (MACEBUS_BASE + MACE_ISAX_OFFS + MACE_ISAX_SIZE))
-		return;
+	if (IS_XKPHYS(bsh)) {
+		paddr = XKPHYS_TO_PHYS(bsh);
+		if (paddr >= (MACEBUS_BASE + MACE_ISAX_OFFS) &&
+		    (paddr + size) <=
+		    (MACEBUS_BASE + MACE_ISAX_OFFS + MACE_ISAX_SIZE))
+			return;
+	}
 
 	if (pmap_extract(pmap_kernel(), bsh, (void *)&paddr) == 0) {
 		printf("bus_space_unmap: no pa for va %p\n", bsh);
@@ -422,6 +432,28 @@ mace_space_region(bus_space_tag_t t, bus_space_handle_t bsh,
 {
 	*nbshp = bsh + offset;
 	return (0);
+}
+
+/*
+ * Macebus bus_dma helpers.
+ * Mace accesses memory contiguously at 0x40000000 onwards.
+ */
+
+bus_addr_t
+macebus_pa_to_device(paddr_t pa)
+{
+	return (pa | CRIME_MEMORY_OFFSET);
+}
+
+paddr_t
+macebus_device_to_pa(bus_addr_t addr)
+{
+	paddr_t pa = (paddr_t)addr & CRIME_MEMORY_MASK;
+
+	if (pa >= 256 * 1024 * 1024)
+		pa |= CRIME_MEMORY_OFFSET;
+
+	return (pa);
 }
 
 /*
@@ -544,7 +576,7 @@ macebus_intr_makemasks(void)
 	}
 
 	/* Then figure out which IRQs use each level. */
-	for (level = 0; level < 5; level++) {
+	for (level = IPL_NONE; level < NIPLS; level++) {
 		int irqs = 0;
 		for (irq = 0; irq < INTMASKSIZE; irq++)
 			if (intrlevel[irq] & (1 << level))
@@ -555,15 +587,14 @@ macebus_intr_makemasks(void)
 	/*
 	 * There are tty, network and disk drivers that use free() at interrupt
 	 * time, so imp > (tty | net | bio).
-	 */
-	imask[IPL_VM] |= imask[IPL_TTY] | imask[IPL_NET] | imask[IPL_BIO];
-
-	/*
+	 *
 	 * Enforce a hierarchy that gives slow devices a better chance at not
 	 * dropping data.
 	 */
-	imask[IPL_TTY] |= imask[IPL_NET] | imask[IPL_BIO];
 	imask[IPL_NET] |= imask[IPL_BIO];
+	imask[IPL_TTY] |= imask[IPL_NET];
+	imask[IPL_VM] |= imask[IPL_TTY];
+	imask[IPL_CLOCK] |= imask[IPL_VM] | SPL_CLOCKMASK;
 
 	/*
 	 * These are pseudo-levels.
@@ -593,7 +624,7 @@ macebus_intr_makemasks(void)
 void
 macebus_do_pending_int(int newcpl)
 {
-#ifdef _USE_SILLY_OVERWORKED_HW_INT_PENDING_HANDLER_
+#if 0
 	struct intrhand *ih;
 	int vector;
 	intrmask_t hwpend;
@@ -602,7 +633,9 @@ macebus_do_pending_int(int newcpl)
 
 	/* Don't recurse... but change the mask */
 	if (processing) {
+		__asm__ (" .set noreorder\n");
 		cpl = newcpl;
+		__asm__ (" sync\n .set reorder\n");
 		return;
 	}
 	processing = 1;
@@ -619,10 +652,12 @@ macebus_do_pending_int(int newcpl)
 	/* Get what interrupt we should process */
 	hwpend = ipending & ~newcpl;
 	hwpend &= ~SINT_ALLMASK;
-	clr_ipending(hwpend);
+	atomic_clearbits_int(&ipending, hwpend);
 
 	/* Enable all non pending non masked hardware interrupts */
+	__asm__ (" .set noreorder\n");
 	cpl = (cpl & SINT_ALLMASK) | (newcpl & ~SINT_ALLMASK) | hwpend;
+	__asm__ (" sync\n .set reorder\n");
 	hw_setintrmask(cpl);
 
 	while (hwpend) {
@@ -639,40 +674,49 @@ macebus_do_pending_int(int newcpl)
 	}
 
 	/* Enable all processed pending hardware interrupts */
+	__asm__ (" .set noreorder\n");
 	cpl &= ~hwpend;
+	__asm__ (" sync\n .set reorder\n");
 	hw_setintrmask(cpl);
 
 	if ((ipending & SINT_CLOCKMASK) & ~newcpl) {
-		clr_ipending(SINT_CLOCKMASK);
+		atomic_clearbits_int(&ipending, SINT_CLOCKMASK);
 		softclock();
 	}
 	if ((ipending & SINT_NETMASK) & ~newcpl) {
 		extern int netisr;
-		int isr = netisr;
-		netisr = 0;
-		clr_ipending(SINT_NETMASK);
+		int isr;
+
+		atomic_clearbits_int(&ipending, SINT_NETMASK);
+		while ((isr = netisr) != 0) {
+			atomic_clearbits_int(&netisr, isr);
 #define	DONETISR(b,f)	if (isr & (1 << (b)))	f();
 #include <net/netisr_dispatch.h>
+		}
 	}
 
-#ifdef NOTYET
+#ifdef notyet
 	if ((ipending & SINT_TTYMASK) & ~newcpl) {
-		clr_ipending(SINT_TTYMASK);
+		atomic_clearbits_int(&ipending, SINT_TTYMASK);
 		compoll(NULL);
 	}
 #endif
 
 	/* Update masks to new cpl. Order highly important! */
+	__asm__ (" .set noreorder\n");
 	cpl = newcpl;
+	__asm__ (" sync\n .set reorder\n");
 	hw_setintrmask(newcpl);
 
 	processing = 0;
 #else
 	/* Update masks to new cpl. Order highly important! */
+	__asm__ (" .set noreorder\n");
 	cpl = newcpl;
+	__asm__ (" sync\n .set reorder\n");
 	hw_setintrmask(newcpl);
 	/* If we still have softints pending trigg processing */
-	if (ipending & SINT_ALLMASK & ~cpl)
+	if (ipending & SINT_ALLMASK & ~newcpl)
 		setsoftintr0();
 #endif
 }
@@ -697,7 +741,7 @@ macebus_iointr(intrmask_t hwpend, struct trap_frame *cf)
 
 	/* Mask off masked interrupts and save them as pending */
 	if (intstat & cf->cpl) {
-		set_ipending(intstat & cf->cpl);
+		atomic_setbits_int(&ipending, intstat & cf->cpl);
 		mask = bus_space_read_8(&crimebus_tag, crime_h, CRIME_INT_MASK);
 		mask &= ~ipending;
 		bus_space_write_8(&crimebus_tag, crime_h, CRIME_INT_MASK, mask);
@@ -706,7 +750,7 @@ macebus_iointr(intrmask_t hwpend, struct trap_frame *cf)
 
 	/* Scan all unmasked. Scan the first 16 for now */
 	pending = intstat & ~cf->cpl;
-	clr_ipending(pending);
+	atomic_clearbits_int(&ipending, pending);
 
 	for (v = 0, vm = 1; pending != 0 && v < 16 ; v++, vm <<= 1) {
 		if (pending & vm) {
@@ -742,13 +786,13 @@ macebus_aux(intrmask_t hwpend, struct trap_frame *cf)
 	mask = bus_space_read_8(&macebus_tag, mace_h, MACE_ISA_MISC_REG);
 	mask |= MACE_ISA_MISC_RLED_OFF | MACE_ISA_MISC_GLED_OFF;
 
-	/* GREEN - User mode */
+	/* GREEN - Idle */
 	/* AMBER - System mode */
-	/* RED   - IDLE */
+	/* RED   - User Mode */
 	if (cf->sr & SR_KSU_USER) {
-		mask &= ~MACE_ISA_MISC_GLED_OFF;
-	} else if (cf->pc >= (long)idle && cf->pc < (long)e_idle) {
 		mask &= ~MACE_ISA_MISC_RLED_OFF;
+	} else if (cf->pc >= (long)idle && cf->pc < (long)e_idle) {
+		mask &= ~MACE_ISA_MISC_GLED_OFF;	
 	} else {
 		mask &= ~(MACE_ISA_MISC_RLED_OFF | MACE_ISA_MISC_GLED_OFF);
 	}

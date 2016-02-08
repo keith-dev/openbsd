@@ -3,8 +3,8 @@
 # THIS FILE AUTOMATICALLY GENERATED.  DO NOT EDIT.
 # generated from:
 #
-#	OpenBSD: etc.sparc64/MAKEDEV.md,v 1.41 2006/08/28 21:04:04 tsi Exp 
-#	OpenBSD: MAKEDEV.common,v 1.33 2007/03/07 02:51:17 krw Exp 
+#	OpenBSD: etc.sparc64/MAKEDEV.md,v 1.44 2007/05/28 22:26:02 todd Exp 
+#	OpenBSD: MAKEDEV.common,v 1.36 2007/07/23 23:21:25 todd Exp 
 #	OpenBSD: MAKEDEV.mi,v 1.77 2005/10/06 06:43:19 otto Exp 
 #	OpenBSD: MAKEDEV.sub,v 1.14 2005/02/07 06:14:18 david Exp 
 #
@@ -76,6 +76,7 @@
 #	uscanner*	Scanners
 # Special purpose devices:
 #	audio*	Audio devices
+#	bio	ioctl tunnel pseudo-device
 #	bpf*	Berkeley Packet Filter
 #	crypto	Hardware crypto access driver
 #	fd	fd/* nodes
@@ -327,6 +328,10 @@ crypto)
 
 bpf*)
 	M bpf$U c 105 $U 600
+	;;
+
+bio)
+	M bio c 120 0 600
 	;;
 
 audio*)
@@ -583,7 +588,7 @@ local)
 
 all)
 	R cuaa cuab cuac cuad ttya ttyb ttyc ttyd bpp0 vnd0 vnd1 vnd2
-	R vnd3 sd0 sd1 sd2 sd3 sd4 cd0 cd1 rd0 tun0 tun1 tun2 tun3
+	R vnd3 sd0 sd1 sd2 sd3 sd4 cd0 cd1 rd0 tun0 tun1 tun2 tun3 bio
 	R bpf0 bpf1 bpf2 bpf3 bpf4 bpf5 bpf6 bpf7 bpf8 bpf9 pty0 fd1
 	R fd1B fd1C fd1D fd1E fd1F fd1G fd1H fd0 fd0B fd0C fd0D fd0E
 	R fd0F fd0G fd0H xfs0 ss0 ss1 ch0 ccd0 ccd1 ccd2 ccd3 hotplug

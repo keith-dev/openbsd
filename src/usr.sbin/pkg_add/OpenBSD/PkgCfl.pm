@@ -1,7 +1,7 @@
 # ex:ts=8 sw=4:
-# $OpenBSD: PkgCfl.pm,v 1.12 2005/08/12 18:41:35 espie Exp $
+# $OpenBSD: PkgCfl.pm,v 1.24 2007/06/12 09:53:36 espie Exp $
 #
-# Copyright (c) 2003-2004 Marc Espie <espie@openbsd.org>
+# Copyright (c) 2003-2005 Marc Espie <espie@openbsd.org>
 #
 # Permission to use, copy, modify, and distribute this software for any
 # purpose with or without fee is hereby granted, provided that the above
@@ -20,24 +20,14 @@ use warnings;
 
 package OpenBSD::PkgCfl;
 use OpenBSD::PackageName;
-use OpenBSD::PkgSpec;
+use OpenBSD::Search;
 use OpenBSD::PackageInfo;
-
-sub glob2re
-{
-	local $_ = shift;
-	s/\./\\\./g;
-	s/\+/\\\+/g;
-	s/\*/\.\*/g;
-	s/\?/\./g;
-	return "^$_\$";
-}
 
 sub make_conflict_list
 {
 	my ($class, $plist, $pkg) = @_;
 	my $l = [];
-	my $pkgname = $plist->pkgname();
+	my $pkgname = $plist->pkgname;
 	if (!defined $pkgname) {
 		print STDERR "No pkgname in packing-list for $pkg\n";
 		return;
@@ -45,21 +35,15 @@ sub make_conflict_list
 	my $stem = OpenBSD::PackageName::splitstem($pkgname);
 
 	unless (defined $plist->{'no-default-conflict'}) {
-		push(@$l, sub { OpenBSD::PkgSpec::match("$stem-*|partial-$stem-*", @_); });
+		push(@$l, OpenBSD::Search::PkgSpec->new("$stem-*|partial-$stem-*"));
 	} else {
 		$pkgname =~ s/p\d+$//;
-		push(@$l, sub { my $a; grep { $a = $_; $a =~ s/p\d+$//; $a eq $pkgname || $a eq "partial-$pkgname"} @_;});
+		push(@$l, OpenBSD::Search::PkgSpec->new("$pkgname|partial-$pkgname"));
 	}
-	push(@$l, sub { OpenBSD::PkgSpec::match(".libs-$stem-*", @_); });
-	if (defined $plist->{pkgcfl}) {
-		for my $cfl (@{$plist->{pkgcfl}}) {
-			my $re = glob2re($cfl->{name});
-			push(@$l, sub { grep { m/$re/ } @_; });
-		}
-	}
+	push(@$l, OpenBSD::Search::PkgSpec->new(".libs-$stem-*"));
 	if (defined $plist->{conflict}) {
 		for my $cfl (@{$plist->{conflict}}) {
-		    push(@$l, sub { OpenBSD::PkgSpec::match($cfl->{name}, @_); });
+		    push(@$l, OpenBSD::Search::PkgSpec->new($cfl->{name}));
 		}
 	}
 	bless $l, $class;
@@ -70,7 +54,7 @@ sub conflicts_with
 	my ($self, @pkgnames) = @_;
 	my @l = ();
 	for my $cfl (@$self) {
-		push(@l, &$cfl(@pkgnames));
+		push(@l, $cfl->filter(@pkgnames));
 	}
 	return @l;
 }
@@ -81,13 +65,13 @@ sub register($$)
 	if (!defined $plist->{conflicts}) {
 		$plist->{conflicts} = OpenBSD::PkgCfl->make_conflict_list($plist);
 	}
-	$state->{conflict_list}->{$plist->pkgname()} = $plist->{conflicts};
+	$state->{conflict_list}->{$plist->pkgname} = $plist->{conflicts};
 }
 
 sub unregister($$)
 {
 	my ($plist, $state) = @_;
-	delete $state->{conflict_list}->{$plist->pkgname()};
+	delete $state->{conflict_list}->{$plist->pkgname};
 }
 
 sub fill_conflict_lists($)
@@ -116,7 +100,7 @@ sub find($$)
 	while (my ($name, $l) = each %{$state->{conflict_list}}) {
 		next if $name eq $pkgname;
 		if (!defined $l) {
-			die "Error: $name has no definition\n";
+			die "Error: $name has no definition";
 		}
 		if ($l->conflicts_with($pkgname)) {
 			push(@bad, $name);
@@ -128,7 +112,7 @@ sub find($$)
 sub find_all
 {
 	my ($plist, $state) = @_;
-	my $pkgname = $plist->pkgname();
+	my $pkgname = $plist->pkgname;
 
 	my $l = OpenBSD::PkgCfl->make_conflict_list($plist);
 	$plist->{conflicts} = $l;

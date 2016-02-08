@@ -1,4 +1,4 @@
-/*	$OpenBSD: ami.c,v 1.176 2007/01/27 05:09:51 dlg Exp $	*/
+/*	$OpenBSD: ami.c,v 1.184 2007/06/24 05:34:35 dlg Exp $	*/
 
 /*
  * Copyright (c) 2001 Michael Shalayeff
@@ -170,8 +170,10 @@ int		ami_ioctl_disk(struct ami_softc *, struct bioc_disk *);
 int		ami_ioctl_alarm(struct ami_softc *, struct bioc_alarm *);
 int		ami_ioctl_setstate(struct ami_softc *, struct bioc_setstate *);
 
+#ifndef SMALL_KERNEL
 int		ami_create_sensors(struct ami_softc *);
 void		ami_refresh_sensors(void *);
+#endif
 #endif /* NBIO > 0 */
 
 #define DEVNAME(_s)	((_s)->sc_dev.dv_xname)
@@ -218,7 +220,7 @@ ami_read(struct ami_softc *sc, bus_size_t r)
 void
 ami_write(struct ami_softc *sc, bus_size_t r, u_int32_t v)
 {
-	AMI_DPRINTF(AMI_D_CMD, ("awo 0x%x 0x%08x", r, v));
+	AMI_DPRINTF(AMI_D_CMD, ("awo 0x%x 0x%08x ", r, v));
 
 	bus_space_write_4(sc->sc_iot, sc->sc_ioh, r, v);
 	bus_space_barrier(sc->sc_iot, sc->sc_ioh, r, 4,
@@ -387,7 +389,8 @@ ami_attach(struct ami_softc *sc)
 	}
 	sc->sc_mbox = (volatile struct ami_iocmd *)AMIMEM_KVA(sc->sc_mbox_am);
 	sc->sc_mbox_pa = htole32(AMIMEM_DVA(sc->sc_mbox_am));
-	AMI_DPRINTF(AMI_D_CMD, ("mbox_pa=%llx ", sc->sc_mbox_pa));
+	AMI_DPRINTF(AMI_D_CMD, ("mbox=%p ", sc->sc_mbox));
+	AMI_DPRINTF(AMI_D_CMD, ("mbox_pa=0x%llx ", (long long)sc->sc_mbox_pa));
 
 	/* create a spartan ccb for use with ami_poll */
 	bzero(&iccb, sizeof(iccb));
@@ -555,8 +558,10 @@ ami_attach(struct ami_softc *sc)
 	else
 		sc->sc_ioctl = ami_ioctl;
 
+#ifndef SMALL_KERNEL
 	if (ami_create_sensors(sc) != 0)
 		printf("%s: unable to create sensors\n", DEVNAME(sc));
+#endif
 #endif
 
 	rsc = malloc(sizeof(struct ami_rawsoftc) * sc->sc_channels,
@@ -937,7 +942,7 @@ ami_start_xs(struct ami_softc *sc, struct ami_ccb *ccb, struct scsi_xfer *xs)
 		return (COMPLETE);
 	}
  
-	timeout_add(&xs->stimeout, (xs->timeout * hz) / 1000);
+	timeout_add(&xs->stimeout, 61 * hz);
 	ami_start(sc, ccb);
 
 	return (SUCCESSFULLY_QUEUED);
@@ -1083,19 +1088,23 @@ ami_stimeout(void *v)
 		/* command never ran, cleanup is easy */
 		TAILQ_REMOVE(&sc->sc_ccb_preq, ccb, ccb_link);
 		ccb->ccb_flags |= AMI_CCB_F_ERR;
+		ccb->ccb_done(sc, ccb);
 		break;
 
 	case AMI_CCB_QUEUED:
-		/* XXX create a list to save ccb to and print the whole list */
-		printf("%s: timeout ccb %d\n", DEVNAME(sc), cmd->acc_id);
-		TAILQ_REMOVE(&sc->sc_ccb_runq, ccb, ccb_link);
+		/*
+		 * ccb has taken more than a minute to finish. we can't take
+		 * it off the hardware in case it finishes later, but we can
+		 * warn the user to look at what is happening.
+		 */
+		AMI_DPRINTF(AMI_D_CMD, ("%s: stimeout ccb %d, check volume "
+		    "state\n", DEVNAME(sc), cmd->acc_id));
 		break;
 
 	default:
 		panic("%s: ami_stimeout(%d) botch", DEVNAME(sc), cmd->acc_id);
 	}
 
-	ccb->ccb_done(sc, ccb);
 	splx(s);
 }
 
@@ -1870,10 +1879,9 @@ ami_ioctl_inq(struct ami_softc *sc, struct bioc_inq *bi)
 		goto bail;
 	}
 
-	if (ami_mgmt(sc, AMI_FCOP, AMI_FC_RDCONF, 0, 0, sizeof *p, p)) {
-		error = EINVAL;
+	if ((error = ami_mgmt(sc, AMI_FCOP, AMI_FC_RDCONF, 0, 0, sizeof *p,
+	    p)))
 		goto bail2;
-	}
 
 	memset(plist, 0, AMI_BIG_MAX_PDRIVES);
 
@@ -2121,10 +2129,8 @@ ami_ioctl_vol(struct ami_softc *sc, struct bioc_vol *bv)
 	if (!p)
 		return (ENOMEM);
 
-	if (ami_mgmt(sc, AMI_FCOP, AMI_FC_RDCONF, 0, 0, sizeof *p, p)) {
-		error = EINVAL;
+	if ((error = ami_mgmt(sc, AMI_FCOP, AMI_FC_RDCONF, 0, 0, sizeof *p, p)))
 		goto bail;
-	}
 
 	if (bv->bv_volid >= p->ada_nld) {
 		error = ami_vol(sc, bv, p);
@@ -2246,10 +2252,8 @@ ami_ioctl_disk(struct ami_softc *sc, struct bioc_disk *bd)
 	if (!p)
 		return (ENOMEM);
 
-	if (ami_mgmt(sc, AMI_FCOP, AMI_FC_RDCONF, 0, 0, sizeof *p, p)) {
-		error = EINVAL;
+	if ((error = ami_mgmt(sc, AMI_FCOP, AMI_FC_RDCONF, 0, 0, sizeof *p, p)))
 		goto bail;
-	}
 
 	if (bd->bd_volid >= p->ada_nld) {
 		error = ami_disk(sc, bd, p);
@@ -2372,13 +2376,13 @@ int ami_ioctl_alarm(struct ami_softc *sc, struct bioc_alarm *ba)
 		return (EINVAL);
 	}
 
-	if (ami_mgmt(sc, AMI_SPEAKER, func, 0, 0, sizeof ret, &ret))
-		error = EINVAL;
-	else
+	if (!(error = ami_mgmt(sc, AMI_SPEAKER, func, 0, 0, sizeof ret,
+	    &ret))) {
 		if (ba->ba_opcode == BIOC_GASTATUS)
 			ba->ba_status = ret;
 		else
 			ba->ba_status = 0;
+	}
 
 	return (error);
 }
@@ -2387,8 +2391,7 @@ int
 ami_ioctl_setstate(struct ami_softc *sc, struct bioc_setstate *bs)
 {
 	struct scsi_inquiry_data inqbuf;
-	int func;
-	int off;
+	int func, off, error;
 
 	switch (bs->bs_status) {
 	case BIOC_SSONLINE:
@@ -2415,13 +2418,14 @@ ami_ioctl_setstate(struct ami_softc *sc, struct bioc_setstate *bs)
 		return (EINVAL);
 	}
 
-	if (ami_mgmt(sc, AMI_CHSTATE, bs->bs_channel, bs->bs_target, func,
-	    0, NULL))
-		return (EINVAL);
+	if ((error = ami_mgmt(sc, AMI_CHSTATE, bs->bs_channel, bs->bs_target,
+	    func, 0, NULL)))
+		return (error);
 
 	return (0);
 }
 
+#ifndef SMALL_KERNEL
 int
 ami_create_sensors(struct ami_softc *sc)
 {
@@ -2442,11 +2446,11 @@ ami_create_sensors(struct ami_softc *sc)
 	if (ssc == NULL)
 		return (1);
 
-	sc->sc_sensors = malloc(sizeof(struct sensor) * sc->sc_nunits,
+	sc->sc_sensors = malloc(sizeof(struct ksensor) * sc->sc_nunits,
 	    M_DEVBUF, M_WAITOK);
 	if (sc->sc_sensors == NULL)
 		return (1);
-	bzero(sc->sc_sensors, sizeof(struct sensor) * sc->sc_nunits);	
+	bzero(sc->sc_sensors, sizeof(struct ksensor) * sc->sc_nunits);	
 
 	strlcpy(sc->sc_sensordev.xname, DEVNAME(sc),
 	    sizeof(sc->sc_sensordev.xname));
@@ -2470,7 +2474,7 @@ ami_create_sensors(struct ami_softc *sc)
 	if (sc->sc_bd == NULL)
 		goto bad;
 
-	if (sensor_task_register(sc, ami_refresh_sensors, 10) != 0)
+	if (sensor_task_register(sc, ami_refresh_sensors, 10) == NULL)
 		goto freebd;
 
 	sensordev_install(&sc->sc_sensordev);
@@ -2492,8 +2496,13 @@ ami_refresh_sensors(void *arg)
 	int i;
 
 	if (ami_mgmt(sc, AMI_FCOP, AMI_FC_RDCONF, 0, 0, sizeof(*sc->sc_bd),
-	    sc->sc_bd))
+	    sc->sc_bd)) {
+		for (i = 0; i < sc->sc_nunits; i++) {
+			sc->sc_sensors[i].value = 0; /* unknown */
+			sc->sc_sensors[i].status = SENSOR_S_UNKNOWN;
+		}
 		return;
+	}
 
 	for (i = 0; i < sc->sc_nunits; i++) {
 		switch (sc->sc_bd->ald[i].adl_status) {
@@ -2518,6 +2527,7 @@ ami_refresh_sensors(void *arg)
 		}
 	}
 }
+#endif /* SMALL_KERNEL */
 #endif /* NBIO > 0 */
 
 #ifdef AMI_DEBUG
@@ -2526,7 +2536,7 @@ ami_print_mbox(struct ami_iocmd *mbox)
 {
 	int i;
 
-	printf("acc_cmd: %d  aac_id: %d  acc_busy: %d  acc_nstat: %d",
+	printf("acc_cmd: %d  aac_id: %d  acc_busy: %d  acc_nstat: %d  ",
 	    mbox->acc_cmd, mbox->acc_id, mbox->acc_busy, mbox->acc_nstat);
 	printf("acc_status: %d  acc_poll: %d  acc_ack: %d\n",
 	    mbox->acc_status, mbox->acc_poll, mbox->acc_ack);

@@ -1,4 +1,4 @@
-/* $OpenBSD: utils.c,v 1.17 2007/02/27 16:27:39 otto Exp $	 */
+/* $OpenBSD: utils.c,v 1.20 2007/07/27 13:57:50 deraadt Exp $	 */
 
 /*
  *  Top users/processes display for Unix
@@ -38,7 +38,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
-#include <unistd.h>
+#include <stdint.h>
 
 #include "top.h"
 #include "machine.h"
@@ -167,7 +167,7 @@ argparse(char *line, int *cntp)
 	cnt += 3;
 
 	/* allocate a char * array to hold the pointers */
-	if ((argarray = malloc(cnt * sizeof(char *))) == NULL)
+	if ((argarray = calloc(cnt, sizeof(char *))) == NULL)
 		err(1, NULL);
 
 	/* allocate another array to hold the strings themselves */
@@ -227,7 +227,7 @@ percentages(int cnt, int64_t *out, int64_t *new, int64_t *old, int64_t *diffs)
 	for (i = 0; i < cnt; i++) {
 		if ((change = *new - *old) < 0) {
 			/* this only happens when the counter wraps */
-			change = (*new - *old);
+			change = INT64_MAX - *old + *new;
 		}
 		total_change += (*dp++ = change);
 		*old++ = *new++;

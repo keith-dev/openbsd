@@ -1,4 +1,4 @@
-/*	$OpenBSD: intr.h,v 1.15 2006/07/09 22:10:05 mk Exp $ */
+/*	$OpenBSD: intr.h,v 1.18 2007/06/20 16:50:41 miod Exp $ */
 
 /*
  * Copyright (c) 2001-2004 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -52,13 +52,13 @@
 
 
 /* Interrupt priority `levels'; not mutually exclusive. */
-#define	IPL_BIO		0	/* block I/O */
+#define	IPL_NONE	0	/* nothing */
+#define	IPL_BIO		1	/* block I/O */
 #define IPL_AUDIO	IPL_BIO
-#define	IPL_NET		1	/* network */
-#define	IPL_TTY		2	/* terminal */
-#define	IPL_VM		3	/* memory allocation */
-#define	IPL_CLOCK	4	/* clock */
-#define	IPL_NONE	5	/* nothing */
+#define	IPL_NET		2	/* network */
+#define	IPL_TTY		3	/* terminal */
+#define	IPL_VM		4	/* memory allocation */
+#define	IPL_CLOCK	5	/* clock */
 #define	IPL_HIGH	6	/* everything */
 #define	NIPLS		7	/* Number of levels */
 
@@ -81,34 +81,25 @@
 
 #ifndef _LOCORE
 
-#if 1
 #define splbio()		splraise(imask[IPL_BIO])
 #define splnet()		splraise(imask[IPL_NET])
 #define spltty()		splraise(imask[IPL_TTY])
 #define splaudio()		splraise(imask[IPL_AUDIO])
-#define splclock()		splraise(SPL_CLOCKMASK|SINT_ALLMASK)
+#define splclock()		splraise(imask[IPL_CLOCK])
 #define splvm()			splraise(imask[IPL_VM])
 #define splsoftclock()		splraise(SINT_CLOCKMASK)
 #define splsoftnet()		splraise(SINT_NETMASK|SINT_CLOCKMASK)
 #define splsofttty()		splraise(SINT_TTYMASK)
-#else
-#define splbio()		splhigh()
-#define splnet()		splhigh()
-#define spltty()		splhigh()
-#define splclock()		splhigh()
-#define splvm()			splhigh()
-#define splsoftclock()		splhigh()
-#define splsoftnet()		splhigh()
-#define splsofttty()		splhigh()
-#endif
 #define splstatclock()		splhigh()
+#define splsched()		splhigh()
 #define splhigh()		splraise(-1)
 #define spl0()			spllower(0)
 
+#include <machine/atomic.h>
 
-#define setsoftclock()  set_ipending(SINT_CLOCKMASK);
-#define setsoftnet()    set_ipending(SINT_NETMASK);
-#define setsofttty()    set_ipending(SINT_TTYMASK);
+#define setsoftclock()  	atomic_setbits_int(&ipending, SINT_CLOCKMASK)
+#define setsoftnet()    	atomic_setbits_int(&ipending, SINT_NETMASK)
+#define setsofttty()    	atomic_setbits_int(&ipending, SINT_TTYMASK)
 
 void	splinit(void);
 
@@ -128,12 +119,6 @@ void	splinit(void);
 typedef u_int32_t intrmask_t;		/* Type of var holding interrupt mask */
 
 #define	INTMASKSIZE	(sizeof(intrmask_t) * 8)
-
-void clearsoftclock(void);
-void clearsoftnet(void);
-#if 0
-void clearsofttty(void);
-#endif
 
 extern volatile intrmask_t cpl;
 extern volatile intrmask_t ipending;
@@ -202,12 +187,6 @@ spllower(int newcpl)
 		cpl = newcpl;
 	return (oldcpl);
 }
-
-/*
- *  Atomically update ipending.
- */
-void set_ipending(int);
-void clr_ipending(int);
 
 /*
  * Interrupt control struct used by interrupt dispatchers

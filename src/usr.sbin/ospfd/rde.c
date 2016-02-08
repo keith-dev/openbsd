@@ -1,4 +1,4 @@
-/*	$OpenBSD: rde.c,v 1.60 2007/02/12 13:23:13 claudio Exp $ */
+/*	$OpenBSD: rde.c,v 1.69 2007/07/25 19:11:27 claudio Exp $ */
 
 /*
  * Copyright (c) 2004, 2005 Claudio Jeker <claudio@openbsd.org>
@@ -60,7 +60,7 @@ struct lsa	*rde_asext_get(struct rroute *);
 struct lsa	*rde_asext_put(struct rroute *);
 
 struct lsa	*orig_asext_lsa(struct rroute *, u_int16_t);
-struct lsa	*orig_sum_lsa(struct rt_node *, u_int8_t);
+struct lsa	*orig_sum_lsa(struct rt_node *, u_int8_t, int);
 
 struct ospfd_conf	*rdeconf = NULL, *nconf = NULL;
 struct imsgbuf		*ibuf_ospfe;
@@ -137,6 +137,7 @@ rde(struct ospfd_conf *xconf, int pipe_parent2rde[2], int pipe_ospfe2rde[2],
 	signal_add(&ev_sigint, NULL);
 	signal_add(&ev_sigterm, NULL);
 	signal(SIGPIPE, SIG_IGN);
+	signal(SIGHUP, SIG_IGN);
 
 	/* setup pipes */
 	close(pipe_ospfe2rde[0]);
@@ -211,13 +212,6 @@ rde_shutdown(void)
 	_exit(0);
 }
 
-/* imesg */
-int
-rde_imsg_compose_parent(int type, pid_t pid, void *data, u_int16_t datalen)
-{
-	return (imsg_compose(ibuf_main, type, 0, pid, data, datalen));
-}
-
 int
 rde_imsg_compose_ospfe(int type, u_int32_t peerid, pid_t pid, void *data,
     u_int16_t datalen)
@@ -242,7 +236,7 @@ rde_dispatch_imsg(int fd, short event, void *bula)
 	char			*buf;
 	ssize_t			 n;
 	time_t			 now;
-	int			 r, state, self;
+	int			 r, state, self, shut = 0;
 	u_int16_t		 l;
 
 	switch (event) {
@@ -250,7 +244,7 @@ rde_dispatch_imsg(int fd, short event, void *bula)
 		if ((n = imsg_read(ibuf)) == -1)
 			fatal("imsg_read error");
 		if (n == 0)	/* connection closed */
-			fatalx("pipe closed");
+			shut = 1;
 		break;
 	case EV_WRITE:
 		if (msgbuf_write(&ibuf->w) == -1)
@@ -565,7 +559,13 @@ rde_dispatch_imsg(int fd, short event, void *bula)
 		}
 		imsg_free(&imsg);
 	}
-	imsg_event_add(ibuf);
+	if (!shut)
+		imsg_event_add(ibuf);
+	else {
+		/* this pipe is dead, so remove the event handler */
+		event_del(&ibuf->ev);
+		event_loopexit(NULL);
+	}
 }
 
 /* ARGSUSED */
@@ -582,13 +582,14 @@ rde_dispatch_parent(int fd, short event, void *bula)
 	struct vertex		*v;
 	struct rt_node		*rn;
 	ssize_t			 n;
+	int			 shut = 0;
 
 	switch (event) {
 	case EV_READ:
 		if ((n = imsg_read(ibuf)) == -1)
 			fatal("imsg_read error");
 		if (n == 0)	/* connection closed */
-			fatalx("pipe closed");
+			shut = 1;
 		break;
 	case EV_WRITE:
 		if (msgbuf_write(&ibuf->w) == -1)
@@ -698,7 +699,13 @@ rde_dispatch_parent(int fd, short event, void *bula)
 		}
 		imsg_free(&imsg);
 	}
-	imsg_event_add(ibuf);
+	if (!shut)
+		imsg_event_add(ibuf);
+	else {
+		/* this pipe is dead, so remove the event handler */
+		event_del(&ibuf->ev);
+		event_loopexit(NULL);
+	}
 }
 
 u_int32_t
@@ -710,12 +717,21 @@ rde_router_id(void)
 void
 rde_send_change_kroute(struct rt_node *r)
 {
-	struct kroute	 kr;
+	struct kroute	 	 kr;
+	struct rt_nexthop	*rn;
+
+	TAILQ_FOREACH(rn, &r->nexthop, entry) {
+		if (!rn->invalid)
+			break;
+	}
+	if (!rn)
+		fatalx("rde_send_change_kroute: no valid nexthop found");
 
 	bzero(&kr, sizeof(kr));
 	kr.prefix.s_addr = r->prefix.s_addr;
-	kr.nexthop.s_addr = r->nexthop.s_addr;
+	kr.nexthop.s_addr = rn->nexthop.s_addr;
 	kr.prefixlen = r->prefixlen;
+	kr.ext_tag = r->ext_tag;
 
 	imsg_compose(ibuf_main, IMSG_KROUTE_CHANGE, 0, 0, &kr, sizeof(kr));
 }
@@ -727,7 +743,6 @@ rde_send_delete_kroute(struct rt_node *r)
 
 	bzero(&kr, sizeof(kr));
 	kr.prefix.s_addr = r->prefix.s_addr;
-	kr.nexthop.s_addr = r->nexthop.s_addr;
 	kr.prefixlen = r->prefixlen;
 
 	imsg_compose(ibuf_main, IMSG_KROUTE_DELETE, 0, 0, &kr, sizeof(kr));
@@ -1038,9 +1053,9 @@ rde_asext_put(struct rroute *rr)
 void
 rde_summary_update(struct rt_node *rte, struct area *area)
 {
-	struct vertex	*v = NULL;
-	struct lsa	*lsa;
-	u_int8_t	 type = 0;
+	struct vertex		*v = NULL;
+	struct lsa		*lsa;
+	u_int8_t		 type = 0;
 
 	/* first check if we actually need to announce this route */
 	if (!(rte->d_type == DT_NET || rte->flags & OSPF_RTR_E))
@@ -1051,6 +1066,9 @@ rde_summary_update(struct rt_node *rte, struct area *area)
 	/* no need for summary LSA in the originating area */
 	if (rte->area.s_addr == area->id.s_addr)
 		return;
+	/* no need to originate inter-area routes to the backbone */
+	if (rte->p_type == PT_INTER_AREA && area->id.s_addr == INADDR_ANY)
+		return;
 	/* TODO nexthop check, nexthop part of area -> no summary */
 	if (rte->cost >= LS_INFINITY)
 		return;
@@ -1058,27 +1076,21 @@ rde_summary_update(struct rt_node *rte, struct area *area)
 	/* TODO inter-area network route stuff */
 	/* TODO intra-area stuff -- condense LSA ??? */
 
-	/* update lsa but only if it was changed */
 	if (rte->d_type == DT_NET) {
 		type = LSA_TYPE_SUM_NETWORK;
-		v = lsa_find(area, type, rte->prefix.s_addr, rde_router_id());
 	} else if (rte->d_type == DT_RTR) {
 		type = LSA_TYPE_SUM_ROUTER;
-		v = lsa_find(area, type, rte->adv_rtr.s_addr, rde_router_id());
 	} else
-		fatalx("orig_sum_lsa: unknown route type");
+		fatalx("rde_summary_update: unknown route type");
 
-	lsa = orig_sum_lsa(rte, type);
+	/* update lsa but only if it was changed */
+	v = lsa_find(area, type, rte->prefix.s_addr, rde_router_id());
+	lsa = orig_sum_lsa(rte, type, rte->invalid);
 	lsa_merge(rde_nbr_self(area), lsa, v);
 
-	if (v == NULL) {
-		if (rte->d_type == DT_NET)
-			v = lsa_find(area, type, rte->prefix.s_addr,
-			    rde_router_id());
-		else
-			v = lsa_find(area, type, rte->adv_rtr.s_addr,
-			    rde_router_id());
-	}
+	if (v == NULL)
+		v = lsa_find(area, type, rte->prefix.s_addr, rde_router_id());
+
 	/* suppressed/deleted routes are not found in the second lsa_find */ 
 	if (v)
 		v->cost = rte->cost;
@@ -1128,7 +1140,7 @@ orig_asext_lsa(struct rroute *rr, u_int16_t age)
 	lsa->data.asext.fw_addr = 0;
 
 	lsa->data.asext.metric = htonl(rr->metric);
-	lsa->data.asext.ext_tag = 0;
+	lsa->data.asext.ext_tag = htonl(rr->kr.ext_tag);
 
 	lsa->hdr.ls_chksum = 0;
 	lsa->hdr.ls_chksum =
@@ -1138,7 +1150,7 @@ orig_asext_lsa(struct rroute *rr, u_int16_t age)
 }
 
 struct lsa *
-orig_sum_lsa(struct rt_node *rte, u_int8_t type)
+orig_sum_lsa(struct rt_node *rte, u_int8_t type, int invalid)
 {
 	struct lsa	*lsa;
 	u_int16_t	 len;
@@ -1148,7 +1160,7 @@ orig_sum_lsa(struct rt_node *rte, u_int8_t type)
 		fatal("orig_sum_lsa");
 
 	/* LSA header */
-	lsa->hdr.age = htons(rte->invalid ? MAX_AGE : DEFAULT_AGE);
+	lsa->hdr.age = htons(invalid ? MAX_AGE : DEFAULT_AGE);
 	lsa->hdr.opts = rdeconf->options;	/* XXX not updated */
 	lsa->hdr.type = type;
 	lsa->hdr.adv_rtr = rdeconf->rtr_id.s_addr;
@@ -1161,13 +1173,11 @@ orig_sum_lsa(struct rt_node *rte, u_int8_t type)
 	 * not be true. In this case a hack needs to be done to
 	 * make the ls_id unique.
 	 */
-	if (type == LSA_TYPE_SUM_NETWORK) {
-		lsa->hdr.ls_id = rte->prefix.s_addr;
+	lsa->hdr.ls_id = rte->prefix.s_addr;
+	if (type == LSA_TYPE_SUM_NETWORK)
 		lsa->data.sum.mask = prefixlen2mask(rte->prefixlen);
-	} else {
-		lsa->hdr.ls_id = rte->adv_rtr.s_addr;
+	else
 		lsa->data.sum.mask = 0;	/* must be zero per RFC */
-	}
 
 	lsa->data.sum.metric = htonl(rte->cost & LSA_METRIC_MASK);
 
@@ -1177,4 +1187,3 @@ orig_sum_lsa(struct rt_node *rte, u_int8_t type)
 
 	return (lsa);
 }
-

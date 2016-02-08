@@ -1,7 +1,7 @@
 # ex:ts=8 sw=4:
-# $OpenBSD: PackingElement.pm,v 1.86 2006/12/16 12:28:15 espie Exp $
+# $OpenBSD: PackingElement.pm,v 1.143 2007/07/14 21:50:05 ajacoutot Exp $
 #
-# Copyright (c) 2003-2004 Marc Espie <espie@openbsd.org>
+# Copyright (c) 2003-2007 Marc Espie <espie@openbsd.org>
 #
 # Permission to use, copy, modify, and distribute this software for any
 # purpose with or without fee is hereby granted, provided that the above
@@ -18,35 +18,42 @@
 use strict;
 use warnings;
 use OpenBSD::PackageInfo;
+use OpenBSD::Paths;
 
 # perl ipc
 require 5.008_000;
 
 # This is the basic class, which is mostly abstract, except for
-# setKeyword and Factory.
+# create and register_with_factory.
 # It does provide base methods for stuff under it, though.
 package OpenBSD::PackingElement;
 our %keyword;
 
-sub Factory
+sub create
 {
-	local $_ = shift;
-	if (m/^\@(\S+)\s*/) {
+	my ($class, $line, $plist) = @_;
+	if ($line =~ m/^\@(\S+)\s*(.*)$/o) {
 		if (defined $keyword{$1}) {
-			$keyword{$1}->add(@_, $');
+			$keyword{$1}->add($plist, $2);
 		} else {
-			print STDERR "Unknown element: $_\n";
-			exit(1);
+			die "Unknown element: $line";
 		}
 	} else {
-		OpenBSD::PackingElement::File->add(@_, $_);
+		chomp $line;
+		OpenBSD::PackingElement::File->add($plist, $line);
 	}
 }
 
-sub setKeyword 
+sub register_with_factory 
 {
-	my ($class, $k) = @_;
-	$keyword{$k} = $class;
+	my ($class, $k, $o) = @_;
+	if (!defined $k) {
+		$k = $class->keyword;
+	}
+	if (!defined $o) {
+		$o = $class;
+	} 
+	$keyword{$k} = $o;
 }
 
 sub category() { 'items' }
@@ -95,31 +102,38 @@ sub needs_keyword() { 1 }
 sub write
 {
 	my ($self, $fh) = @_;
-	my $s = $self->stringize();
-	if ($self->needs_keyword()) {
+	my $s = $self->stringize;
+	if ($self->needs_keyword) {
 		$s = " $s" unless $s eq '';
-		print $fh "\@", $self->keyword(), "$s\n";
+		print $fh "\@", $self->keyword, "$s\n";
 	} else {
 		print $fh "$s\n";
 	}
+}
+
+sub write_no_sig
+{
+	my ($self, $fh) = @_;
+	$self->write($fh);
 }
 
 # needed for comment checking
 sub fullstring
 {
 	my ($self, $fh) = @_;
-	my $s = $self->stringize();
-	if ($self->needs_keyword()) {
+	my $s = $self->stringize;
+	if ($self->needs_keyword) {
 		$s = " $s" unless $s eq '';
-		return "\@".$self->keyword().$s;
+		return "\@".$self->keyword.$s;
 	} else {
 		return $s;
 	}
 }
 
-sub stringize($)
+sub stringize
 {
-	return $_[0]->{name};
+	my $self = shift;
+	return $self->{name};
 }
 
 sub IsFile() { 0 }
@@ -127,6 +141,18 @@ sub IsFile() { 0 }
 sub NoDuplicateNames() { 0 }
 
 sub signature {}
+
+sub copy_shallow_if
+{
+	my ($self, $copy, $h) = @_;
+	$self->add_object($copy) if defined $h->{$self};
+}
+
+sub copy_deep_if
+{
+	my ($self, $copy, $h) = @_;
+	$self->clone->add_object($copy) if defined $h->{$self};
+}
 
 # Basic class hierarchy
 
@@ -158,12 +184,12 @@ sub compute_fullname
 	}
 }
 
-sub fullname($)
+sub fullname
 {
 	my $self = $_[0];
 	my $fullname = $self->{name};
-	if ($fullname !~ m|^/| && $self->cwd() ne '.') {
-		$fullname = $self->cwd()."/".$fullname;
+	if ($fullname !~ m|^/|o && $self->cwd ne '.') {
+		$fullname = $self->cwd."/".$fullname;
 	}
 	return $fullname;
 }
@@ -193,8 +219,8 @@ sub dirclass() { undef }
 sub new
 {
 	my ($class, $args) = @_;
-	if ($args =~ m|/+$| and defined $class->dirclass()) {
-		bless { name => $` }, $class->dirclass();
+	if ($args =~ m/^(.*?)\/+$/o and defined $class->dirclass) {
+		bless { name => $1 }, $class->dirclass;
 	} else {
 		bless { name => $args }, $class;
 	}
@@ -203,7 +229,25 @@ sub new
 sub destate
 {
 	my ($self, $state) = @_;
+	$state->{lastfileobject} = $self;
 	$self->compute_fullname($state);
+}
+
+sub set_tempname
+{
+	my ($self, $tempname) = @_;
+	$self->{tempname} = $tempname;
+}
+
+sub realname
+{
+	my ($self, $state) = @_;
+
+	my $name = $self->fullname;
+	if (defined $self->{tempname}) {
+		$name = $self->{tempname};
+	}
+	return $state->{destdir}.$name;
 }
 
 # exec/unexec and friends
@@ -230,6 +274,11 @@ sub add_object
 	return $self;
 }
 
+sub category
+{
+	return ref(shift);
+}
+
 # all dependency information
 package OpenBSD::PackingElement::Depend;
 our @ISA=qw(OpenBSD::PackingElement::Meta);
@@ -237,7 +286,7 @@ our @ISA=qw(OpenBSD::PackingElement::Meta);
 sub signature
 {
 	my ($self, $hash) = @_;
-	$hash->{$self->{def}} = 1;
+	$hash->{$self->{name}} = 1;
 }
 
 # Abstract class for all file-like elements
@@ -249,8 +298,6 @@ use File::Basename;
 sub write
 {
 	my ($self, $fh) = @_;
-	return if defined $self->{zap};
-	print $fh "\@ignore\n" if defined $self->{ignore};
 	print $fh "\@comment no checksum\n" if defined $self->{nochecksum};
 	$self->SUPER::write($fh);
 	if (defined $self->{md5}) {
@@ -279,10 +326,6 @@ sub destate
 	if (defined $state->{nochecksum}) {
 		$self->{nochecksum} = 1;
 		undef $state->{nochecksum};
-	}
-	if (defined $state->{ignore}) {
-		$self->{ignore} = 1;
-		undef $state->{ignore};
 	}
 }
 
@@ -313,28 +356,21 @@ sub make_hardlink
 	$self->{link} = $linkname;
 }
 
-sub set_tempname
-{
-	my ($self, $tempname) = @_;
-	$self->{tempname} = $tempname;
-}
-
 sub IsFile() { 1 }
-
 
 package OpenBSD::PackingElement::File;
 our @ISA=qw(OpenBSD::PackingElement::FileBase);
 
 use OpenBSD::PackageInfo qw(is_info_name);
-__PACKAGE__->setKeyword('file');
 sub keyword() { "file" }
+__PACKAGE__->register_with_factory;
 
 sub dirclass() { "OpenBSD::PackingElement::Dir" }
 
 sub needs_keyword
 {
 	my $self = shift;
-	return $self->stringize() =~ m/\^@/;
+	return $self->stringize =~ m/\^@/;
 }
 
 sub add_object
@@ -342,10 +378,10 @@ sub add_object
 	my ($self, $plist) = @_;
 
 	$self->destate($plist->{state});
-	my $j = is_info_name($self->fullname());
+	my $j = is_info_name($self->fullname);
 	if ($j) {
 		bless $self, "OpenBSD::PackingElement::$j";
-		$plist->addunique($self);
+		$self->add_object($plist);
 	} else {
 		$plist->add2list($self);
 	}
@@ -355,8 +391,8 @@ sub add_object
 package OpenBSD::PackingElement::Sample;
 our @ISA=qw(OpenBSD::PackingElement::FileObject);
 
-__PACKAGE__->setKeyword('sample');
 sub keyword() { "sample" }
+__PACKAGE__->register_with_factory;
 sub destate
 {
 	my ($self, $state) = @_;
@@ -380,33 +416,71 @@ sub destate
 package OpenBSD::PackingElement::InfoFile;
 our @ISA=qw(OpenBSD::PackingElement::FileBase);
 
-__PACKAGE__->setKeyword('info');
 sub keyword() { "info" }
+__PACKAGE__->register_with_factory;
 sub dirclass() { "OpenBSD::PackingElement::Infodir" }
 
 package OpenBSD::PackingElement::Shell;
 our @ISA=qw(OpenBSD::PackingElement::FileBase);
 
-__PACKAGE__->setKeyword('shell');
 sub keyword() { "shell" }
+__PACKAGE__->register_with_factory;
 
 package OpenBSD::PackingElement::Manpage;
 our @ISA=qw(OpenBSD::PackingElement::FileBase);
 
-__PACKAGE__->setKeyword('man');
 sub keyword() { "man" }
+__PACKAGE__->register_with_factory;
 
 sub register_manpage
 {
 	my ($self, $state) = @_;
-	my $fname = $self->fullname();
+	return if defined $self->{tempname};
+	my $fname = $self->fullname;
 	if ($fname =~ m,^(.*/man)/(?:man|cat).*?/,) {
 		my $d = $1;
-		$state->{mandirs} = {} unless defined $state->{mandirs};
-		$state->{mandirs}->{$d} = [] 
-		    unless defined $state->{mandirs}->{$d};
 		push(@{$state->{mandirs}->{$d}}, $fname);
     	}
+}
+
+sub is_source
+{
+	my $self = shift;
+	return $self->{name} =~ m/man\/man[^\/]+\/[^\/]+\.[\dln][^\/]?$/o;
+}
+
+sub source_to_dest
+{
+	my $self = shift;
+	my $v = $self->{name};
+	$v =~ s/(man\/)man([^\/]+\/[^\/]+)\.[\dln][^\/]?$/$1cat$2.0/;
+	return $v;
+}
+
+# assumes the source is nroff, launches nroff
+sub format
+{
+	my ($self, $base, $out) = @_;
+	my $fname = $base."/".$self->fullname;
+	open(my $fh, '<', $fname) or die "Can't read $fname";
+	my $line = <$fh>;
+	close $fh;
+	my @extra = ();
+	# extra preprocessors as described in man.
+	if ($line =~ m/^\'\\\"\s+(.*)$/o) {
+		for my $letter (split $1) {
+			if ($letter =~ m/[ept]/o) {
+				push(@extra, "-$letter");
+			} elsif ($letter eq 'r') {
+				push(@extra, "-R");
+			}
+		}
+	}
+	open my $oldout, '>&STDOUT';
+	open STDOUT, '>', "$base/$out" or die "Can't write to $base/$out";
+	system(OpenBSD::Paths->groff,
+	    '-Tascii', '-mandoc', '-Wall', '-mtty-char', @extra, $fname);
+	open STDOUT, '>&', $oldout;
 }
 
 package OpenBSD::PackingElement::Lib;
@@ -414,15 +488,15 @@ our @ISA=qw(OpenBSD::PackingElement::FileBase);
 
 our $todo = 0;
 
-__PACKAGE__->setKeyword('lib');
 sub keyword() { "lib" }
+__PACKAGE__->register_with_factory;
 
 sub mark_ldconfig_directory
 {
 	require OpenBSD::SharedLibs;
 
 	my ($self, $destdir) = @_;
-	OpenBSD::SharedLibs::mark_ldconfig_directory($self->fullname(), 
+	OpenBSD::SharedLibs::mark_ldconfig_directory($self->fullname, 
 	    $destdir);
 }
 
@@ -435,52 +509,48 @@ sub ensure_ldconfig
 	}
 }
 
+sub parse
+{
+	my ($self, $filename) = @_;
+	if ($filename =~ m/^(.*?)\/?lib([^\/]+)\.so\.(\d+)\.(\d+)$/o) {
+		return ($2, $3, $4, $1);
+	} else {
+		return undef;
+	}
+}
+
 package OpenBSD::PackingElement::PkgConfig;
 our @ISA=qw(OpenBSD::PackingElement::FileBase);
 
-__PACKAGE__->setKeyword('pkgconfig');
 sub keyword() { "pkgconfig" }
+__PACKAGE__->register_with_factory;
 
 package OpenBSD::PackingElement::LibtoolLib;
 our @ISA=qw(OpenBSD::PackingElement::FileBase);
 
-__PACKAGE__->setKeyword('ltlib');
 sub keyword() { "ltlib" }
-
-package OpenBSD::PackingElement::Ignore;
-our @ISA=qw(OpenBSD::PackingElement::Annotation);
-__PACKAGE__->setKeyword('ignore');
-
-sub add
-{
-	my ($class, $plist, @args) = @_;
-	$plist->{state}->{ignore} = 1;
-	return;
-}
+__PACKAGE__->register_with_factory;
 
 # Comment is very special
 package OpenBSD::PackingElement::Comment;
 our @ISA=qw(OpenBSD::PackingElement::Meta);
 
-__PACKAGE__->setKeyword('comment');
 sub keyword() { "comment" }
+__PACKAGE__->register_with_factory;
 
 sub add
 {
-	my ($class, $plist, @args) = @_;
+	my ($class, $plist, $args) = @_;
 
-	if ($args[0] =~ m/^\$OpenBSD(.*)\$\s*$/) {
-		return OpenBSD::PackingElement::CVSTag->add($plist, @args);
-	} elsif ($args[0] =~ m/^MD5:\s*/) {
-		$plist->{state}->{lastfile}->add_md5(pack('H*', $'));
-		return;
-	} elsif ($args[0] =~ m/^subdir\=(.*?)\s+cdrom\=(.*?)\s+ftp\=(.*?)\s*$/) {
+	if ($args =~ m/^\$OpenBSD.*\$\s*$/o) {
+		return OpenBSD::PackingElement::CVSTag->add($plist, $args);
+	} elsif ($args =~ m/^subdir\=(.*?)\s+cdrom\=(.*?)\s+ftp\=(.*?)\s*$/o) {
 		return OpenBSD::PackingElement::ExtraInfo->add($plist, $1, $2, $3);
-	} elsif ($args[0] eq 'no checksum') {
+	} elsif ($args eq 'no checksum') {
 		$plist->{state}->{nochecksum} = 1;
 		return;
 	} else {
-		return $class->SUPER::add($plist, @args);
+		return $class->SUPER::add($plist, $args);
 	}
 }
 
@@ -494,116 +564,142 @@ sub category() { 'cvstags'}
 package OpenBSD::PackingElement::md5;
 our @ISA=qw(OpenBSD::PackingElement::Annotation);
 
-__PACKAGE__->setKeyword('md5');
+__PACKAGE__->register_with_factory('md5');
 
 sub add
 {
-	my ($class, $plist, @args) = @_;
+	my ($class, $plist, $args) = @_;
 
-	$plist->{state}->{lastfile}->add_md5(pack('H*', $'));
+	$plist->{state}->{lastfile}->add_md5(pack('H*', $args));
 	return;
 }
+
+package OpenBSD::PackingElement::tag;
+our @ISA=qw(OpenBSD::PackingElement::Annotation);
+
+__PACKAGE__->register_with_factory('tag');
+
+sub add
+{
+	my ($class, $plist, $args) = @_;
+
+	if ($args eq 'no checksum') {
+		$plist->{state}->{lastfile}->{nochecksum} = 1;
+	} elsif ($args eq 'no shadow') {
+		$plist->{state}->{lastdir}->{noshadow} = 1;
+	} else {
+		my $object = $plist->{state}->{lastfileobject};
+		$object->{tags}->{$args} = 1;
+		push(@{$plist->{tags}->{$args}}, $object);
+	}
+}
+
+package OpenBSD::PackingElement::DefineTag;
+our @ISA=qw(OpenBSD::PackingElement::Meta);
+
+sub keyword() { 'define-tag' }
+__PACKAGE__->register_with_factory;
 
 package OpenBSD::PackingElement::symlink;
 our @ISA=qw(OpenBSD::PackingElement::Annotation);
 
-__PACKAGE__->setKeyword('symlink');
+__PACKAGE__->register_with_factory('symlink');
 
 sub add
 {
-	my ($class, $plist, @args) = @_;
+	my ($class, $plist, $args) = @_;
 
-	$plist->{state}->{lastfile}->make_symlink(@args);
+	$plist->{state}->{lastfile}->make_symlink($args);
 	return;
 }
 
 package OpenBSD::PackingElement::hardlink;
 our @ISA=qw(OpenBSD::PackingElement::Annotation);
 
-__PACKAGE__->setKeyword('link');
+__PACKAGE__->register_with_factory('link');
 
 sub add
 {
-	my ($class, $plist, @args) = @_;
+	my ($class, $plist, $args) = @_;
 
-	$plist->{state}->{lastfile}->make_hardlink(@args);
+	$plist->{state}->{lastfile}->make_hardlink($args);
 	return;
 }
 
 package OpenBSD::PackingElement::temp;
 our @ISA=qw(OpenBSD::PackingElement::Annotation);
 
-__PACKAGE__->setKeyword('temp');
+__PACKAGE__->register_with_factory('temp');
 
 sub add
 {
-	my ($class, $plist, @args) = @_;
-	$plist->{state}->{lastfile}->set_tempname(@args);
+	my ($class, $plist, $args) = @_;
+	$plist->{state}->{lastfile}->set_tempname($args);
 	return;
 }
 
 package OpenBSD::PackingElement::size;
 our @ISA=qw(OpenBSD::PackingElement::Annotation);
 
-__PACKAGE__->setKeyword('size');
+__PACKAGE__->register_with_factory('size');
 
 sub add
 {
-	my ($class, $plist, @args) = @_;
+	my ($class, $plist, $args) = @_;
 
-	$plist->{state}->{lastfile}->add_size($args[0]);
+	$plist->{state}->{lastfile}->add_size($args);
 	return;
 }
 
 package OpenBSD::PackingElement::Option;
 our @ISA=qw(OpenBSD::PackingElement::Meta);
 
-__PACKAGE__->setKeyword('option');
 sub keyword() { 'option' }
+__PACKAGE__->register_with_factory;
 
 sub new
 {
-	my ($class, @args) = @_;
-	if ($args[0] eq 'no-default-conflict') {
-		return OpenBSD::PackingElement::NoDefaultConflict->new();
-	} elsif ($args[0] eq 'manual-installation') {
-		return OpenBSD::PackingElement::ManualInstallation->new();
+	my ($class, $args) = @_;
+	if ($args eq 'no-default-conflict') {
+		return OpenBSD::PackingElement::NoDefaultConflict->new;
+	} elsif ($args eq 'manual-installation') {
+		return OpenBSD::PackingElement::ManualInstallation->new;
+	} elsif ($args eq 'system-package') {
+		return OpenBSD::PackingElement::SystemPackage->new;
 	} else {
-		die "Unknown option: $args[0]";
+		die "Unknown option: $args";
 	}
 }
 
-package OpenBSD::PackingElement::NoDefaultConflict;
+package OpenBSD::PackingElement::UniqueOption;
 our @ISA=qw(OpenBSD::PackingElement::Unique OpenBSD::PackingElement::Option);
+
+sub stringize 
+{ 
+	my $self = shift;
+	return $self->category; 
+}
+
+sub new
+{
+	my ($class, @args) = @_;
+	bless {}, $class;
+}
+
+package OpenBSD::PackingElement::NoDefaultConflict;
+our @ISA=qw(OpenBSD::PackingElement::UniqueOption);
 
 sub category() { 'no-default-conflict' }
 
-sub stringize() 
-{
-	return 'no-default-conflict';
-}
-
-sub new
-{
-	my ($class, @args) = @_;
-	bless {}, $class;
-}
-
 package OpenBSD::PackingElement::ManualInstallation;
-our @ISA=qw(OpenBSD::PackingElement::Unique OpenBSD::PackingElement::Option);
+our @ISA=qw(OpenBSD::PackingElement::UniqueOption);
 
 sub category() { 'manual-installation' }
 
-sub stringize() 
-{
-	return 'manual-installation';
-}
+package OpenBSD::PackingElement::SystemPackage;
+our @ISA=qw(OpenBSD::PackingElement::UniqueOption);
 
-sub new
-{
-	my ($class, @args) = @_;
-	bless {}, $class;
-}
+sub category() { 'system-package' }
 
 # The special elements that don't end in the right place
 package OpenBSD::PackingElement::ExtraInfo;
@@ -614,219 +710,130 @@ sub category() { 'extrainfo' }
 sub new
 {
 	my ($class, $subdir, $cdrom, $ftp) = @_;
+
+	$cdrom =~ s/^\"(.*)\"$/$1/;
+	$cdrom =~ s/^\'(.*)\'$/$1/;
+	$ftp =~ s/^\"(.*)\"$/$1/;
+	$ftp =~ s/^\'(.*)\'$/$1/;
 	bless { subdir => $subdir, cdrom => $cdrom, ftp => $ftp}, $class;
 }
 
-sub stringize($)
+sub may_quote
 {
-	my $self = $_[0];
-	return "subdir=".$self->{subdir}." cdrom=".$self->{cdrom}.
-	    " ftp=".$self->{ftp};
+	my $s = shift;
+	if ($s =~ m/\s/) {
+		return '"'.$s.'"';
+	} else {
+		return $s;
+	}
+}
+
+sub stringize
+{
+	my $self = shift;
+	return "subdir=".$self->{subdir}." cdrom=".may_quote($self->{cdrom}).
+	    " ftp=".may_quote($self->{ftp});
 }
 
 package OpenBSD::PackingElement::Name;
 use File::Spec;
 our @ISA=qw(OpenBSD::PackingElement::Unique);
 
-__PACKAGE__->setKeyword('name');
 sub keyword() { "name" }
+__PACKAGE__->register_with_factory;
 sub category() { "name" }
 
 package OpenBSD::PackingElement::LocalBase;
 our @ISA=qw(OpenBSD::PackingElement::Unique);
 
-__PACKAGE__->setKeyword('localbase');
 sub keyword() { "localbase" }
+__PACKAGE__->register_with_factory;
 sub category() { "localbase" }
 
 package OpenBSD::PackingElement::Conflict;
 our @ISA=qw(OpenBSD::PackingElement::Meta);
 
-__PACKAGE__->setKeyword('conflict');
 sub keyword() { "conflict" }
+__PACKAGE__->register_with_factory;
 sub category() { "conflict" }
-
-package OpenBSD::PackingElement::PkgConflict;
-our @ISA=qw(OpenBSD::PackingElement::Conflict);
-
-__PACKAGE__->setKeyword('pkgcfl');
-sub keyword() { "pkgcfl" }
-sub category() { "pkgcfl" }
-
-package OpenBSD::PackingElement::PkgDep;
-our @ISA=qw(OpenBSD::PackingElement::Depend);
-
-sub signature
-{
-}
-
-__PACKAGE__->setKeyword('pkgdep');
-sub keyword() { "pkgdep" }
-sub category() { "pkgdep" }
-
-package OpenBSD::PackingElement::NewDepend;
-our @ISA=qw(OpenBSD::PackingElement::Depend);
-
-__PACKAGE__->setKeyword('newdepend');
-sub category() { "newdepend" }
-sub keyword() { "newdepend" }
-
-sub new
-{
-	my ($class, $args) = @_;
-	my ($name, $pattern, $def) = split /\:/, $args;
-	my $self = bless { pattern => $pattern, def => $def }, $class;
-	# very old packages still work
-	if ($name =~ m|/|) {
-		$self->{pkgpath} = $name;
-	} else {
-		$self->{name} = $name;
-	}
-	return $self;
-}
-
-sub stringize($)
-{
-	my $self = $_[0];
-	return (defined $self->{name} ? $self->{name} : $self->{pkgpath}).
-	    ':'.$self->{pattern}.':'.$self->{def};
-}
 
 package OpenBSD::PackingElement::Dependency;
 our @ISA=qw(OpenBSD::PackingElement::Depend);
 
-__PACKAGE__->setKeyword('depend');
-sub category() { "depend" }
 sub keyword() { "depend" }
+__PACKAGE__->register_with_factory;
+sub category() { "depend" }
 
 sub new
 {
 	my ($class, $args) = @_;
-	my ($pkgpath, $pattern, $def) = split /\:/, $args;
-	bless { pkgpath => $pkgpath, pattern => $pattern, def => $def }, $class;
+	my ($pkgpath, $pattern, $def) = split /\:/o, $args;
+	bless { name => $def, pkgpath => $pkgpath, pattern => $pattern, 
+	    def => $def }, $class;
 }
 
-sub stringize($)
+sub stringize
 {
-	my $self = $_[0];
-	return $self->{pkgpath}.':'.$self->{pattern}.':'.$self->{def};
+	my $self = shift;
+	return join(':', map { $self->{$_}} 
+	    (qw(pkgpath pattern def)));
+}
+
+sub spec
+{
+	my $self = shift;
+	if (!defined $self->{spec}) {
+		require OpenBSD::Search;
+		$self->{spec} = OpenBSD::Search::PkgSpec->new($self->{pattern});
+		$self->{spec}->add_pkgpath_hint($self->{pkgpath});
+	}
+	return $self->{spec};
 }
 
 package OpenBSD::PackingElement::Wantlib;
 our @ISA=qw(OpenBSD::PackingElement::Depend);
 
-__PACKAGE__->setKeyword('wantlib');
 sub category() { "wantlib" }
 sub keyword() { "wantlib" }
-
-sub signature
-{
-	my ($self, $hash) = @_;
-	$hash->{$self->{name}} = 1;
-}
-
-package OpenBSD::PackingElement::LibDepend;
-our @ISA=qw(OpenBSD::PackingElement::Depend);
-
-__PACKAGE__->setKeyword('libdepend');
-sub category() { "libdepend" }
-sub keyword() { "libdepend" }
-
-sub new
-{
-	my ($class, $args) = @_;
-	my ($name, $libspec, $pattern, $def)  = split /\:/, $args;
-	my $self = bless { libspec => $libspec, pattern => $pattern, 
-	    def => $def }, $class;
-	# very old packages still work
-	if ($name =~ m|/|) {
-		$self->{pkgpath} = $name;
-	} else {
-		$self->{name} = $name;
-	}
-	return $self;
-}
-
-sub stringize($)
-{
-	my $self = $_[0];
-	return (defined $self->{name} ? $self->{name} : $self->{pkgpath}).
-	    ':'.$self->{libspec}.':'.$self->{pattern}.':'.$self->{def};
-}
+__PACKAGE__->register_with_factory;
 
 package OpenBSD::PackingElement::PkgPath;
 our @ISA=qw(OpenBSD::PackingElement::Meta);
 
-__PACKAGE__->setKeyword('pkgpath');
 sub keyword() { "pkgpath" }
+__PACKAGE__->register_with_factory;
 sub category() { "pkgpath" }
 
 package OpenBSD::PackingElement::Incompatibility;
 our @ISA=qw(OpenBSD::PackingElement::Meta);
 
-__PACKAGE__->setKeyword('incompatibility');
 sub keyword() { "incompatibility" }
+__PACKAGE__->register_with_factory;
 sub category() { "incompatibility" }
 
 package OpenBSD::PackingElement::UpdateSet;
 our @ISA=qw(OpenBSD::PackingElement::Meta);
 
-__PACKAGE__->setKeyword('updateset');
 sub keyword() { "updateset" }
+__PACKAGE__->register_with_factory;
 sub category() { "updateset" }
-
-package OpenBSD::PackingElement::Module;
-our @ISA=qw(OpenBSD::PackingElement::Meta);
-
-use OpenBSD::PackageInfo;
-
-__PACKAGE__->setKeyword('module');
-sub keyword() { "module" }
-sub category() { "module" }
-
-my $installed_modules = {};
-
-sub add
-{
-	my ($class, $plist, @args) = @_;
-
-	require OpenBSD::PkgSpec;
-
-	my @candidates = OpenBSD::PkgSpec::match($args[0], installed_packages());
-	if (@candidates == 1) {
-		if (!defined $installed_modules->{$candidates[0]}) {
-			# pull in the module right here and now;
-			my $f = installed_info($candidates[0]).MODULE;
-			eval "require \"$f\";";
-			if ($@) {
-				die "Error in reading module $f: $@";
-			}
-		}
-	} elsif (@candidates == 0) {
-		$plist->{need_modules} = 1;
-	} else {
-		die "Ambiguous module: ", $args[0];
-	}
-		
-	$class->SUPER::add($plist, @args);
-}
 
 package OpenBSD::PackingElement::NewAuth;
 our @ISA=qw(OpenBSD::PackingElement::Action);
 
 package OpenBSD::PackingElement::NewUser;
 our @ISA=qw(OpenBSD::PackingElement::NewAuth);
-__PACKAGE__->setKeyword("newuser");
 
 sub type() { "user" }
 sub category() { "users" }
 sub keyword() { "newuser" }
+__PACKAGE__->register_with_factory;
 
 sub new
 {
 	my ($class, $args) = @_;
 	my ($name, $uid, $group, $loginclass, $comment, $home, $shell) = 
-	    split /\:/, $args;
+	    split /\:/o, $args;
 	bless { name => $name, uid => $uid, group => $group, 
 	    class => $loginclass, 
 	    comment => $comment, home => $home, shell => $shell }, $class;
@@ -838,53 +845,52 @@ sub check
 	my ($name, $passwd, $uid, $gid, $quota, $class, $gcos, $dir, $shell, 
 	    $expire) = getpwnam($self->{name});
 	return unless defined $name;
-	if ($self->{uid} =~ m/^\!/) {
-		return 0 unless $uid == $';
+	if ($self->{uid} =~ m/^\!(.*)$/o) {
+		return 0 unless $uid == $1;
 	}
-	if ($self->{group} =~ m/^\!/) {
-		my $g = $';
-		unless ($g =~ m/^\d+/) {
+	if ($self->{group} =~ m/^\!(.*)$/o) {
+		my $g = $1;
+		unless ($g =~ m/^\d+$/o) {
 			$g = getgrnam($g);
 			return 0 unless defined $g;
 		}
 		return 0 unless $gid eq $g;
 	}
-	if ($self->{class} =~ m/^\!/) {
-		return 0 unless $class eq $';
+	if ($self->{class} =~ m/^\!(.*)$/o) {
+		return 0 unless $class eq $1;
 	}
-	if ($self->{comment} =~ m/^\!/) {
-		return 0 unless $gcos eq $';
+	if ($self->{comment} =~ m/^\!(.*)$/o) {
+		return 0 unless $gcos eq $1;
 	}
-	if ($self->{home} =~ m/^\!/) {
-		return 0 unless $dir eq $';
+	if ($self->{home} =~ m/^\!(.*)$/o) {
+		return 0 unless $dir eq $1;
 	}
-	if ($self->{shell} =~ m/^\!/) {
-		return 0 unless $shell eq $';
+	if ($self->{shell} =~ m/^\!(.*)$/o) {
+		return 0 unless $shell eq $1;
 	}
 	return 1;
 }
 
-sub stringize($)
+sub stringize
 {
-	my $self = $_[0];
-	return $self->{name}.':'.$self->{uid}.':'.$self->{group}.':'.
-	    $self->{class}.':'.$self->{comment}.':'.$self->{home}.':'.
-	    $self->{shell};
+	my $self = shift;
+	return join(':', map { $self->{$_}} 
+	    (qw(name uid group class comment home shell)));
 }
 
 package OpenBSD::PackingElement::NewGroup;
 our @ISA=qw(OpenBSD::PackingElement::NewAuth);
 
-__PACKAGE__->setKeyword("newgroup");
 
 sub type() { "group" }
 sub category() { "groups" }
 sub keyword() { "newgroup" }
+__PACKAGE__->register_with_factory;
 
 sub new
 {
 	my ($class, $args) = @_;
-	my ($name, $gid) = split /\:/, $args;
+	my ($name, $gid) = split /\:/o, $args;
 	bless { name => $name, gid => $gid }, $class;
 }
 
@@ -893,8 +899,8 @@ sub check
 	my $self = shift;
 	my ($name, $passwd, $gid, $members) = getgrnam($self->{name});
 	return unless defined $name;
-	if ($self->{gid} =~ m/^\!/) {
-		return 0 unless $gid == $';
+	if ($self->{gid} =~ m/^\!(.*)$/o) {
+		return 0 unless $gid == $1;
 	}
 	return 1;
 }
@@ -902,16 +908,17 @@ sub check
 sub stringize($)
 {
 	my $self = $_[0];
-	return $self->{name}.':'.$self->{gid};
+	return join(':', map { $self->{$_}} 
+	    (qw(name gid)));
 }
 
 package OpenBSD::PackingElement::Cwd;
 use File::Spec;
 our @ISA=qw(OpenBSD::PackingElement::State);
 
-__PACKAGE__->setKeyword('cwd');
 
 sub keyword() { 'cwd' }
+__PACKAGE__->register_with_factory;
 
 sub destate
 {
@@ -922,9 +929,9 @@ sub destate
 package OpenBSD::PackingElement::EndFake;
 our @ISA=qw(OpenBSD::PackingElement::State);
 
-__PACKAGE__->setKeyword('endfake');
 
 sub keyword() { 'endfake' }
+__PACKAGE__->register_with_factory;
 
 sub new
 {
@@ -937,8 +944,8 @@ sub stringize() { '' }
 package OpenBSD::PackingElement::Owner;
 our @ISA=qw(OpenBSD::PackingElement::State);
 
-__PACKAGE__->setKeyword('owner');
 sub keyword() { 'owner' }
+__PACKAGE__->register_with_factory;
 
 sub destate
 {
@@ -954,8 +961,8 @@ sub destate
 package OpenBSD::PackingElement::Group;
 our @ISA=qw(OpenBSD::PackingElement::State);
 
-__PACKAGE__->setKeyword('group');
 sub keyword() { 'group' }
+__PACKAGE__->register_with_factory;
 
 sub destate
 {
@@ -971,8 +978,8 @@ sub destate
 package OpenBSD::PackingElement::Mode;
 our @ISA=qw(OpenBSD::PackingElement::State);
 
-__PACKAGE__->setKeyword('mode');
 sub keyword() { 'mode' }
+__PACKAGE__->register_with_factory;
 
 sub destate
 {
@@ -988,14 +995,14 @@ sub destate
 package OpenBSD::PackingElement::Sysctl;
 our @ISA=qw(OpenBSD::PackingElement::Action);
 
-__PACKAGE__->setKeyword('sysctl');
 sub keyword() { 'sysctl' }
+__PACKAGE__->register_with_factory;
 
 sub new
 
 {
 	my ($class, $args) = @_;
-	if ($args =~ m/^\s*(.*)\s*(\=|\>=)\s*(.*)\s*$/) {
+	if ($args =~ m/^\s*(.*)\s*(\=|\>=)\s*(.*)\s*$/o) {
 		bless { name => $1, mode => $2, value => $3}, $class;
 	} else {
 		die "Bad syntax for \@sysctl";
@@ -1004,7 +1011,7 @@ sub new
 
 sub stringize
 {
-	my $self = $_[0];
+	my $self = shift;
 	return $self->{name}.$self->{mode}.$self->{value};
 }
 
@@ -1015,23 +1022,23 @@ our @ISA=qw(OpenBSD::PackingElement::Action);
 
 sub expand
 {
-	my $state = $_[2];
-	local $_ = $_[1];
-	if (m/\%F/) {
+	my ($self, $state) = @_;
+	local $_ = $self->{name};
+	if (m/\%F/o) {
 		die "Bad expand" unless defined $state->{lastfile};
 		s/\%F/$state->{lastfile}->{name}/g;
 	}
-	if (m/\%D/) {
+	if (m/\%D/o) {
 		die "Bad expand" unless defined $state->{cwd};
-		s/\%D/$state->cwd()/ge;
+		s/\%D/$state->cwd/ge;
 	}
-	if (m/\%B/) {
+	if (m/\%B/o) {
 		die "Bad expand" unless defined $state->{lastfile};
-		s/\%B/dirname($state->{lastfile}->fullname())/ge;
+		s/\%B/dirname($state->{lastfile}->fullname)/ge;
 	}
-	if (m/\%f/) {
+	if (m/\%f/o) {
 		die "Bad expand" unless defined $state->{lastfile};
-		s/\%f/basename($state->{lastfile}->fullname())/ge;
+		s/\%f/basename($state->{lastfile}->fullname)/ge;
 	}
 	return $_;
 }
@@ -1039,7 +1046,7 @@ sub expand
 sub destate
 {
 	my ($self, $state) = @_;
-	$self->{expanded} = $self->expand($self->{name}, $state);
+	$self->{expanded} = $self->expand($state);
 }
 
 sub run
@@ -1047,52 +1054,99 @@ sub run
 	my ($self, $state) = @_;
 
 	OpenBSD::PackingElement::Lib::ensure_ldconfig($state);
-	print $self->keyword(), " ", $self->{expanded}, "\n" if $state->{beverbose};
-	$state->system('/bin/sh', '-c', $self->{expanded}) unless $state->{not};
+	print $self->keyword, " ", $self->{expanded}, "\n" if $state->{beverbose};
+	$state->system(OpenBSD::Paths->sh, '-c', $self->{expanded}) 
+	    unless $state->{not};
 }
 
 package OpenBSD::PackingElement::Exec;
 our @ISA=qw(OpenBSD::PackingElement::ExeclikeAction);
 
-__PACKAGE__->setKeyword('exec');
-
 sub keyword() { "exec" }
+__PACKAGE__->register_with_factory;
+
+package OpenBSD::PackingElement::ExecAlways;
+our @ISA=qw(OpenBSD::PackingElement::Exec);
+
+sub keyword() { "exec-always" }
+__PACKAGE__->register_with_factory;
+
+package OpenBSD::PackingElement::ExecInstall;
+our @ISA=qw(OpenBSD::PackingElement::Exec);
+
+sub keyword() { "exec-add" }
+__PACKAGE__->register_with_factory;
+
+package OpenBSD::PackingElement::ExecUpdate;
+our @ISA=qw(OpenBSD::PackingElement::Exec);
+
+sub keyword() { "exec-update" }
+__PACKAGE__->register_with_factory;
 
 package OpenBSD::PackingElement::Unexec;
 our @ISA=qw(OpenBSD::PackingElement::ExeclikeAction);
 
-__PACKAGE__->setKeyword('unexec');
 sub keyword() { "unexec" }
+__PACKAGE__->register_with_factory;
+
+package OpenBSD::PackingElement::UnexecAlways;
+our @ISA=qw(OpenBSD::PackingElement::Unexec);
+
+sub keyword() { "unexec-always" }
+__PACKAGE__->register_with_factory;
+
+package OpenBSD::PackingElement::UnexecUpdate;
+our @ISA=qw(OpenBSD::PackingElement::Unexec);
+
+sub keyword() { "unexec-update" }
+__PACKAGE__->register_with_factory;
+
+package OpenBSD::PackingElement::UnexecDelete;
+our @ISA=qw(OpenBSD::PackingElement::Unexec);
+
+sub keyword() { "unexec-delete" }
+__PACKAGE__->register_with_factory;
 
 package OpenBSD::PackingElement::ExtraUnexec;
 our @ISA=qw(OpenBSD::PackingElement::ExeclikeAction);
 
-__PACKAGE__->setKeyword('extraunexec');
 sub keyword() { "extraunexec" }
+__PACKAGE__->register_with_factory;
 
 package OpenBSD::PackingElement::DirlikeObject;
 our @ISA=qw(OpenBSD::PackingElement::FileObject);
 
-package OpenBSD::PackingElement::DirRm;
-our @ISA=qw(OpenBSD::PackingElement::DirlikeObject);
-
-__PACKAGE__->setKeyword('dirrm');
-sub keyword() { "dirrm" }
-
 package OpenBSD::PackingElement::DirBase;
 our @ISA=qw(OpenBSD::PackingElement::DirlikeObject);
 
-sub stringize($)
+sub destate
 {
-	my $self = $_[0];
+	my ($self, $state) = @_;
+	$state->{lastdir} = $self;
+	$self->SUPER::destate($state);
+}
+	
+
+sub stringize
+{
+	my $self = shift;
 	return $self->{name}."/";
+}
+
+sub write
+{
+	my ($self, $fh) = @_;
+	$self->SUPER::write($fh);
+	if (defined $self->{noshadow}) {
+		print $fh "\@tag no shadow\n";
+	}
 }
 
 package OpenBSD::PackingElement::Dir;
 our @ISA=qw(OpenBSD::PackingElement::DirBase);
 
-__PACKAGE__->setKeyword('dir');
 sub keyword() { "dir" }
+__PACKAGE__->register_with_factory;
 
 sub destate
 {
@@ -1104,7 +1158,7 @@ sub destate
 sub needs_keyword
 {
 	my $self = shift;
-	return $self->stringize() =~ m/\^@/;
+	return $self->stringize =~ m/\^@/o;
 }
 
 package OpenBSD::PackingElement::Infodir;
@@ -1114,8 +1168,8 @@ sub needs_keyword() { 1 }
 
 package OpenBSD::PackingElement::Fontdir;
 our @ISA=qw(OpenBSD::PackingElement::Dir);
-__PACKAGE__->setKeyword('fontdir');
 sub keyword() { "fontdir" }
+__PACKAGE__->register_with_factory;
 sub needs_keyword() { 1 }
 sub dirclass() { "OpenBSD::PackingElement::Fontdir" }
 
@@ -1125,13 +1179,13 @@ sub install
 {
 	my ($self, $state) = @_;
 	$self->SUPER::install($state);
-	$fonts_todo{$state->{destdir}.$self->fullname()} = 1;
+	$fonts_todo{$state->{destdir}.$self->fullname} = 1;
 }
 
 sub reload
 {
 	my ($self, $state) = @_;
-	$fonts_todo{$state->{destdir}.$self->fullname()} = 1;
+	$fonts_todo{$state->{destdir}.$self->fullname} = 1;
 }
 
 sub update_fontalias
@@ -1160,6 +1214,19 @@ sub restore_fontdir
 	}
 }
 
+sub run_if_exists
+{
+	my ($state, $cmd, @l) = @_;
+
+	require OpenBSD::Error;
+
+	if (-x $cmd) {
+		OpenBSD::Error::VSystem($state->{very_verbose}, $cmd, @l);
+	} else {
+		OpenBSD::Error::Warn("$cmd not found\n");
+	}
+}
+
 sub finish_fontdirs
 {
 	my $state = shift;
@@ -1170,17 +1237,12 @@ sub finish_fontdirs
 		map { update_fontalias($_) } @l unless $state->{not};
 		print "You may wish to update your font path for ", join(' ', @l), "\n";
 		return if $state->{not};
-		if (-x "/usr/X11R6/bin/mkfontdir") {
-			eval { OpenBSD::Error::System("/usr/X11R6/bin/mkfontdir", @l); };
-		} else {
-			OpenBSD::Error::Warn("/usr/X11R6/bin/mkfontdir not found\n");
-		}
+		run_if_exists($state, OpenBSD::Paths->mkfontscale, @l);
+		run_if_exists($state, OpenBSD::Paths->mkfontdir, @l);
+
 		map { restore_fontdir($_) } @l;
-		if (-x "/usr/X11R6/bin/fc-cache") {
-			eval { OpenBSD::Error::System("/usr/X11R6/bin/fc-cache", @l); };
-		} else {
-			OpenBSD::Error::Warn("/usr/X11R6/bin/fc-cache not found\n");
-		}
+
+		run_if_exists($state, OpenBSD::Paths->fc_cache, @l);
 	}
 }
 
@@ -1188,16 +1250,16 @@ sub finish_fontdirs
 package OpenBSD::PackingElement::Mandir;
 our @ISA=qw(OpenBSD::PackingElement::Dir);
 
-__PACKAGE__->setKeyword('mandir');
 sub keyword() { "mandir" }
+__PACKAGE__->register_with_factory;
 sub needs_keyword() { 1 }
 sub dirclass() { "OpenBSD::PackingElement::Mandir" }
 
 package OpenBSD::PackingElement::Extra;
 our @ISA=qw(OpenBSD::PackingElement::FileObject);
 
-__PACKAGE__->setKeyword('extra');
 sub keyword() { 'extra' }
+__PACKAGE__->register_with_factory;
 
 sub destate
 {
@@ -1240,13 +1302,49 @@ sub write
 	&OpenBSD::PackingElement::FileBase::write;
 }
 
+sub add_object
+{
+	my ($self, $plist) = @_;
+	$self->{infodir} = $plist->{infodir};
+	$self->SUPER::add_object($plist);
+}
+
+sub infodir
+{
+	my $self = shift;
+	return ${$self->{infodir}};
+}
+
+sub stringize
+{
+	my $self = shift;
+	return $self->category;
+}
+
+sub add
+{
+	my ($class, $plist, @args) = @_;
+
+	$class->SUPER::add($plist, $class->category);
+}
+
+sub fullname
+{
+	my $self = shift;
+	my $d = $self->infodir;
+	if (defined $d) {
+		return $d.$self->category;
+	} else {
+		return undef;
+	}
+}
+
 package OpenBSD::PackingElement::FCONTENTS;
 our @ISA=qw(OpenBSD::PackingElement::SpecialFile);
 sub category() { OpenBSD::PackageInfo::CONTENTS }
-
-package OpenBSD::PackingElement::FMODULE;
-our @ISA=qw(OpenBSD::PackingElement::SpecialFile);
-sub category() { OpenBSD::PackageInfo::MODULE }
+# XXX we don't write `self'
+sub write
+{}
 
 package OpenBSD::PackingElement::ScriptFile;
 our @ISA=qw(OpenBSD::PackingElement::SpecialFile);
@@ -1259,22 +1357,21 @@ sub run
 {
 	my ($self, $state, @args) = @_;
 
-	my $dir = $state->{dir};
 	my $not = $state->{not};
 	my $pkgname = $state->{pkgname};
-	my $name = $self->{name};
+	my $name = $self->fullname;
 
 	return if $state->{dont_run_scripts};
 
 	OpenBSD::PackingElement::Lib::ensure_ldconfig($state);
-	print $self->beautify(), " script: $dir$name $pkgname ", join(' ', @args), "\n" if $state->{beverbose};
+	print $self->beautify, " script: $name $pkgname ", join(' ', @args), "\n" if $state->{beverbose};
 	return if $not;
-	chmod 0755, $dir.$name;
-	return if $state->system($dir.$name, $pkgname, @args) == 0;
+	chmod 0755, $name;
+	return if $state->system($name, $pkgname, @args) == 0;
 	if ($state->{forced}->{scripts}) {
-		$state->warn($self->beautify(), " script failed\n");
+		$state->warn($self->beautify, " script failed\n");
 	} else {
-		$state->fatal($self->beautify()." script failed");
+		$state->fatal($self->beautify." script failed");
 	}
 }
 
@@ -1303,10 +1400,6 @@ our @ISA=qw(OpenBSD::PackingElement::ScriptFile);
 sub category() { OpenBSD::PackageInfo::REQUIRE }
 sub beautify() { "Require" }
 
-package OpenBSD::PackingElement::FREQUIRED_BY;
-our @ISA=qw(OpenBSD::PackingElement::SpecialFile);
-sub category() { OpenBSD::PackageInfo::REQUIRED_BY }
-
 package OpenBSD::PackingElement::DisplayFile;
 our @ISA=qw(OpenBSD::PackingElement::SpecialFile);
 use OpenBSD::Error;
@@ -1314,13 +1407,16 @@ use OpenBSD::Error;
 sub prepare
 {
 	my ($self, $state) = @_;
-	my $fname = $state->{dir}.$self->{name};
-	open(my $src, '<', $fname) or Fatal "Can't open $fname: $!";
-	while (<$src>) {
-		next if m/^\+\-+\s*$/;
-		s/^[+-] //;
-		$state->print($_);
-	}
+	my $fname = $self->fullname;
+	if (open(my $src, '<', $fname)) {
+		while (<$src>) {
+			next if m/^\+\-+\s*$/o;
+			s/^[+-] //o;
+			$state->print($_);
+		} 
+	} else {
+		Warn "Can't open $fname: $!\n";
+    	}
 }
 
 package OpenBSD::PackingElement::FDISPLAY;
@@ -1338,21 +1434,21 @@ sub category() { OpenBSD::PackageInfo::MTREE_DIRS }
 package OpenBSD::PackingElement::Arch;
 our @ISA=qw(OpenBSD::PackingElement::Unique);
 
-__PACKAGE__->setKeyword('arch');
 sub category() { 'arch' }
 sub keyword() { 'arch' }
+__PACKAGE__->register_with_factory;
 
 sub new
 {
 	my ($class, $args) = @_;
-	my @arches= split(/\,/, $args);
+	my @arches= split(/\,/o, $args);
 	bless { arches => \@arches }, $class;
 }
 
 sub stringize($)
 {
 	my $self = $_[0];
-	return join(',',@{$self->{arches}});
+	return join(',', @{$self->{arches}});
 }
 
 sub check
@@ -1370,15 +1466,119 @@ sub check
 			}
 		}
 		if (!defined $machine_arch) {
-			chomp($machine_arch = `/usr/bin/arch -s`);
+			my $cmd = OpenBSD::Paths->arch." -s";
+			chomp($machine_arch = `$cmd`);
 		}
 		return 1 if $ok eq $machine_arch;
 		if (!defined $arch) {
-			chomp($arch = `/usr/bin/uname -m`);
+			my $cmd = OpenBSD::Paths->uname." -m";
+			chomp($arch = `$cmd`);
 		}
 		return 1 if $ok eq $arch;
 	}
 	return;
+}
+
+package OpenBSD::PackingElement::DigitalSignature;
+our @ISA=qw(OpenBSD::PackingElement::Unique);
+sub keyword() { 'digital-signature' }
+__PACKAGE__->register_with_factory;
+
+# parse to and from a subset of iso8601
+#
+# allows us to represent timestamps in a human readable format without
+# any ambiguity
+sub time_to_iso8601
+{
+	my $time = shift;
+	my ($sec, $min, $hour, $day, $month, $year, @rest) = gmtime($time);
+	return sprintf("%04d-%02d-%02dT%02d:%02d:%02dZ", 
+	    $year+1900, $month+1, $day, $hour, $min, $sec);
+}
+
+sub iso8601_to_time
+{
+	if ($_[0] =~ m/^(\d{4})\-(\d{2})\-(\d{2})T(\d{2})\:(\d{2})\:(\d{2})Z$/) {
+		my ($year, $month, $day, $hour, $min, $sec) =
+			($1 - 1900, $2-1, $3, $4, $5, $6);
+		require POSIX;
+		my $oldtz = $ENV{TZ};
+		$ENV{TZ} = 'UTC';
+		my $t = POSIX::mktime($sec, $min, $hour, $day, $month, $year);
+		if (defined $oldtz) {
+			$ENV{TZ} = $oldtz;
+		} else {
+			delete $ENV{TZ};
+		}
+		return $t;
+	} else {
+		die "Incorrect ISO8601 timestamp: $_[0]";
+	}
+}
+
+sub new
+{
+	my ($class, $args) = @_;
+	my ($key, $tsbase, $tsmin, $tssec, $signature) = split(/\:/, $args);
+	my $timestamp = iso8601_to_time("$tsbase:$tsmin:$tssec");
+	bless { key => $key, timestamp => $timestamp, b64sig => $signature },
+		$class;
+}
+
+
+sub stringize
+{
+	my $self = shift;
+	return join(':', $self->{key}, time_to_iso8601($self->{timestamp}), 
+	    $self->{b64sig});
+}
+
+sub write_no_sig
+{
+	my ($self, $fh) = @_;
+	print $fh "\@", $self->keyword, " ", $self->{key}, ":", 
+	    $self->{timestamp}, "\n";
+}
+
+package OpenBSD::PackingElement::Old;
+our @ISA=qw(OpenBSD::PackingElement);
+
+my $warned;
+
+sub new
+{
+	my ($class, $k, $args) = @_;
+	bless { keyword => $k, name => $args }, $class;
+}
+
+sub add
+{
+	my ($o, $plist, $args) = @_;
+	my $keyword = $$o;
+	if (!$warned->{$keyword}) {
+		print STDERR "Warning: obsolete construct: \@$keyword $args\n";
+		$warned->{$keyword} = 1;
+	}
+	my $o2 = OpenBSD::PackingElement::Old->new($keyword, $args);
+	$o2->add_object($plist);
+	$plist->{deprecated} = 1;
+}
+
+sub keyword
+{
+	my $self = shift;
+	return $self->{keyword};
+}
+
+sub register_old_keyword
+{
+	my ($class, $k) = @_;
+	$class->register_with_factory($k, bless \$k, $class);
+}
+
+for my $k (qw(src display mtree ignore_inst dirrm pkgcfl pkgdep newdepend 
+    libdepend ignore)) {
+	__PACKAGE__->register_old_keyword($k);
 }
 
 1;

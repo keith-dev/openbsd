@@ -1,4 +1,4 @@
-/*	$OpenBSD: rcs.h,v 1.75 2007/02/19 11:40:00 otto Exp $	*/
+/*	$OpenBSD: rcs.h,v 1.77 2007/06/01 17:47:47 niallo Exp $	*/
 /*
  * Copyright (c) 2004 Jean-Francois Brousseau <jfb@openbsd.org>
  * All rights reserved.
@@ -68,6 +68,7 @@
 #define RCS_KW_SOURCE		0x0400
 #define RCS_KW_STATE		0x0800
 #define RCS_KW_FULLPATH		0x0010
+#define RCS_KW_MDOCDATE		0x0020
 
 #define RCS_KW_ID \
 	(RCS_KW_RCSFILE | RCS_KW_REVISION | RCS_KW_DATE \
@@ -194,7 +195,6 @@ struct rcs_delta {
 typedef struct rcs_file {
 	int	fd;
 	int	 rf_dead;
-	int	 rf_inattic;
 	char	*rf_path;
 	mode_t	 rf_mode;
 	int	 rf_flags;

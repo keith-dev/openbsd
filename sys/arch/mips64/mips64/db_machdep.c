@@ -1,4 +1,4 @@
-/*	$OpenBSD: db_machdep.c,v 1.9 2005/05/22 19:40:51 art Exp $ */
+/*	$OpenBSD: db_machdep.c,v 1.11 2007/05/03 19:34:00 miod Exp $ */
 
 /*
  * Copyright (c) 1998-2003 Opsycon AB (www.opsycon.se)
@@ -240,7 +240,7 @@ loop:
 	stksize = 0;
 
 	/* check for bad SP: could foul up next frame */
-	if (sp & 3 || sp < KSEG0_BASE) {
+	if (sp & 3 || (!IS_XKPHYS((vaddr_t)sp) && sp < KSEG0_BASE)) {
 		(*pr)("SP %p: not in kernel\n", sp);
 		ra = 0;
 		subr = 0;
@@ -408,9 +408,9 @@ done:
 
 	if (subr == (long)k_intr || subr == (long)k_general) {
 		if (subr == (long)k_intr)
-			(*pr)("<-> KERNEL INTERRUPT <->\n");
+			(*pr)("(KERNEL INTERRUPT)\n");
 		else
-			(*pr)("<-> KERNEL TRAP <->\n");
+			(*pr)("(KERNEL TRAP)\n");
 		sp = *(register_t *)sp;
 		pc = ((struct trap_frame *)sp)->pc;
 		ra = ((struct trap_frame *)sp)->ra;

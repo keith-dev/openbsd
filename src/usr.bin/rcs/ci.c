@@ -1,4 +1,4 @@
-/*	$OpenBSD: ci.c,v 1.196 2007/03/03 21:07:23 deraadt Exp $	*/
+/*	$OpenBSD: ci.c,v 1.202 2007/07/03 00:56:23 ray Exp $	*/
 /*
  * Copyright (c) 2005, 2006 Niall O'Higgins <niallo@openbsd.org>
  * All rights reserved.
@@ -92,16 +92,16 @@ static void	 checkin_mtimedate(struct checkin_params *);
 static void	 checkin_parsekeyword(char *, RCSNUM **, time_t *, char **,
     char **);
 static int	 checkin_update(struct checkin_params *);
-static void	 checkin_revert(struct checkin_params *);
+static int	 checkin_revert(struct checkin_params *);
 
 void
 checkin_usage(void)
 {
 	fprintf(stderr,
 	    "usage: ci [-qV] [-d[date]] [-f[rev]] [-I[rev]] [-i[rev]]\n"
-	    "	  [-j[rev]] [-k[rev]] [-l[rev]] [-M[rev]] [-mmsg]\n"
-	    "	  [-Nsymbol] [-nsymbol] [-r[rev]] [-sstate] [-tstr]\n"
-	    "	  [-u[rev]] [-wusername] [-xsuffixes] [-ztz] file ...\n");
+	    "          [-j[rev]] [-k[rev]] [-l[rev]] [-M[rev]] [-mmsg]\n"
+	    "          [-Nsymbol] [-nsymbol] [-r[rev]] [-sstate] [-tstr]\n"
+	    "          [-u[rev]] [-wusername] [-xsuffixes] [-ztz] file ...\n");
 }
 
 /*
@@ -115,6 +115,7 @@ checkin_main(int argc, char **argv)
 {
 	int fd;
 	int i, ch, status;
+	int base_flags, base_openflags;
 	char *rev_str;
 	struct checkin_params pb;
 
@@ -124,10 +125,10 @@ checkin_main(int argc, char **argv)
 	pb.description = pb.symbol = NULL;
 	pb.deltatext = NULL;
 	pb.newrev =  NULL;
-	pb.flags = status = 0;
 	pb.fmode = S_IRUSR|S_IRGRP|S_IROTH;
-	pb.flags = INTERACTIVE;
-	pb.openflags = RCS_RDWR|RCS_CREATE|RCS_PARSE_FULLY;
+	status = 0;
+	base_flags = INTERACTIVE;
+	base_openflags = RCS_RDWR|RCS_CREATE|RCS_PARSE_FULLY;
 	rev_str = NULL;
 
 	while ((ch = rcs_getopt(argc, argv, CI_OPTSTRING)) != -1) {
@@ -140,42 +141,42 @@ checkin_main(int argc, char **argv)
 			break;
 		case 'f':
 			rcs_setrevstr(&rev_str, rcs_optarg);
-			pb.flags |= FORCE;
+			base_flags |= FORCE;
 			break;
 		case 'I':
 			rcs_setrevstr(&rev_str, rcs_optarg);
-			pb.flags |= INTERACTIVE;
+			base_flags |= INTERACTIVE;
 			break;
 		case 'i':
 			rcs_setrevstr(&rev_str, rcs_optarg);
-			pb.openflags |= RCS_CREATE;
-			pb.flags |= CI_INIT;
+			base_openflags |= RCS_CREATE;
+			base_flags |= CI_INIT;
 			break;
 		case 'j':
 			rcs_setrevstr(&rev_str, rcs_optarg);
-			pb.openflags &= ~RCS_CREATE;
-			pb.flags &= ~CI_INIT;
+			base_openflags &= ~RCS_CREATE;
+			base_flags &= ~CI_INIT;
 			break;
 		case 'k':
 			rcs_setrevstr(&rev_str, rcs_optarg);
-			pb.flags |= CI_KEYWORDSCAN;
+			base_flags |= CI_KEYWORDSCAN;
 			break;
 		case 'l':
 			rcs_setrevstr(&rev_str, rcs_optarg);
-			pb.flags |= CO_LOCK;
+			base_flags |= CO_LOCK;
 			break;
 		case 'M':
 			rcs_setrevstr(&rev_str, rcs_optarg);
-			pb.flags |= CO_REVDATE;
+			base_flags |= CO_REVDATE;
 			break;
 		case 'm':
 			pb.rcs_msg = rcs_optarg;
 			if (pb.rcs_msg == NULL)
 				errx(1, "missing message for -m option");
-			pb.flags &= ~INTERACTIVE;
+			base_flags &= ~INTERACTIVE;
 			break;
 		case 'N':
-			pb.flags |= CI_SYMFORCE;
+			base_flags |= CI_SYMFORCE;
 			/* FALLTHROUGH */
 		case 'n':
 			pb.symbol = rcs_optarg;
@@ -183,11 +184,11 @@ checkin_main(int argc, char **argv)
 				errx(1, "invalid symbol `%s'", pb.symbol);
 			break;
 		case 'q':
-			pb.flags |= QUIET;
+			base_flags |= QUIET;
 			break;
 		case 'r':
 			rcs_setrevstr(&rev_str, rcs_optarg);
-			pb.flags |= CI_DEFAULT;
+			base_flags |= CI_DEFAULT;
 			break;
 		case 's':
 			pb.state = rcs_optarg;
@@ -195,18 +196,18 @@ checkin_main(int argc, char **argv)
 				errx(1, "invalid state `%s'", pb.state);
 			break;
 		case 'T':
-			pb.flags |= PRESERVETIME;
+			base_flags |= PRESERVETIME;
 			break;
 		case 't':
 			/* Ignore bare -t; kept for backwards compatibility. */
 			if (rcs_optarg == NULL)
 				break;
 			pb.description = rcs_optarg;
-			pb.flags |= DESCRIPTION;
+			base_flags |= DESCRIPTION;
 			break;
 		case 'u':
 			rcs_setrevstr(&rev_str, rcs_optarg);
-			pb.flags |= CO_UNLOCK;
+			base_flags |= CO_UNLOCK;
 			break;
 		case 'V':
 			printf("%s\n", rcs_version);
@@ -246,6 +247,13 @@ checkin_main(int argc, char **argv)
 		rcs_suffixes = RCS_DEFAULT_SUFFIX;
 
 	for (i = 0; i < argc; i++) {
+		/*
+		 * The pb.flags and pb.openflags may change during
+		 * loop iteration so restore them for each file.
+		 */
+		pb.flags = base_flags;
+		pb.openflags = base_openflags;
+
 		pb.filename = argv[i];
 		rcs_strip_suffix(pb.filename);
 
@@ -315,14 +323,11 @@ checkin_main(int argc, char **argv)
 				status = 1;
 		}
 
-		/* reset NEWFILE flag */
-		pb.flags &= ~NEWFILE;
-
 		rcs_close(pb.file);
 		pb.newrev = NULL;
 	}
 
-	if (!(pb.flags & QUIET) && status == 0)
+	if (!(base_flags & QUIET) && status == 0)
 		(void)fprintf(stderr, "done\n");
 
 	return (status);
@@ -339,7 +344,7 @@ checkin_diff_file(struct checkin_params *pb)
 {
 	char *path1, *path2;
 	BUF *b1, *b2, *b3;
-	char rbuf[64];
+	char rbuf[RCS_REV_BUFSZ];
 
 	b1 = b2 = b3 = NULL;
 	rcsnum_tostr(pb->frev, rbuf, sizeof(rbuf));
@@ -372,7 +377,7 @@ checkin_diff_file(struct checkin_params *pb)
 	b2 = NULL;
 
 	diff_format = D_RCSDIFF;
-	if (rcs_diffreg(path1, path2, b3, 0) == D_ERROR)
+	if (diffreg(path1, path2, b3, 0) == D_ERROR)
 		goto out;
 
 	return (b3);
@@ -400,7 +405,7 @@ out:
 static char *
 checkin_getlogmsg(RCSNUM *rev, RCSNUM *rev2, int flags)
 {
-	char   *rcs_msg, nrev[16], prev[16];
+	char   *rcs_msg, nrev[RCS_REV_BUFSZ], prev[RCS_REV_BUFSZ];
 	const char *prompt =
 	    "enter log message, terminated with a single '.' or end of file:\n";
 	RCSNUM *tmprev;
@@ -434,7 +439,7 @@ checkin_getlogmsg(RCSNUM *rev, RCSNUM *rev2, int flags)
 static int
 checkin_update(struct checkin_params *pb)
 {
-	char numb1[64], numb2[64];
+	char numb1[RCS_REV_BUFSZ], numb2[RCS_REV_BUFSZ];
 	struct stat st;
 	BUF *bp;
 
@@ -447,14 +452,14 @@ checkin_update(struct checkin_params *pb)
 
 	/* Load file contents */
 	if ((bp = rcs_buf_load(pb->filename, BUF_AUTOEXT)) == NULL)
-		goto fail;
+		return (-1);
 
 	/* If this is a zero-ending RCSNUM eg 4.0, increment it (eg to 4.1) */
 	if (pb->newrev != NULL && RCSNUM_ZERO_ENDING(pb->newrev))
 		pb->newrev = rcsnum_inc(pb->newrev);
 
 	if (checkin_checklock(pb) < 0)
-		goto fail;
+		return (-1);
 
 	/* If revision passed on command line is less than HEAD, bail.
 	 * XXX only applies to ci -r1.2 foo for example if HEAD is > 1.2 and
@@ -466,7 +471,7 @@ checkin_update(struct checkin_params *pb)
 		    pb->file->rf_path,
 		    rcsnum_tostr(pb->newrev, numb1, sizeof(numb1)),
 		    rcsnum_tostr(pb->frev, numb2, sizeof(numb2)));
-		goto fail;
+		return (-1);
 	}
 
 	/*
@@ -499,7 +504,7 @@ checkin_update(struct checkin_params *pb)
 	/* Get RCS patch */
 	if ((pb->deltatext = checkin_diff_file(pb)) == NULL) {
 		warnx("failed to get diff");
-		goto fail;
+		return (-1);
 	}
 
 	/*
@@ -507,8 +512,10 @@ checkin_update(struct checkin_params *pb)
 	 * the user and revert to latest version.
 	 */
 	if (!(pb->flags & FORCE) && (rcs_buf_len(pb->deltatext) < 1)) {
-		checkin_revert(pb);
-		goto out;
+		if (checkin_revert(pb) == -1)
+			return (-1);
+		else
+			return (0);
 	}
 
 	/* If no log message specified, get it interactively. */
@@ -526,7 +533,8 @@ checkin_update(struct checkin_params *pb)
 			    pb->flags);
 	}
 
-	if (rcs_lock_remove(pb->file, pb->username, pb->frev) < 0) {
+	if ((rcs_lock_remove(pb->file, pb->username, pb->frev) < 0) &&
+	    (rcs_lock_getmode(pb->file) != RCS_LOCK_LOOSE)) {
 		if (rcs_errno != RCS_ERR_NOENT)
 			warnx("failed to remove lock");
 		else if (!(pb->flags & CO_LOCK))
@@ -543,7 +551,7 @@ checkin_update(struct checkin_params *pb)
 	    (pb->newrev == NULL ? RCS_HEAD_REV : pb->newrev),
 	    pb->rcs_msg, pb->date, pb->author) != 0) {
 		warnx("failed to add new revision");
-		goto fail;
+		return (-1);
 	}
 
 	/*
@@ -563,7 +571,7 @@ checkin_update(struct checkin_params *pb)
 	/* Attach a symbolic name to this revision if specified. */
 	if (pb->symbol != NULL &&
 	    (checkin_attach_symbol(pb) < 0))
-		goto fail;
+		return (-1);
 
 	/* Set the state of this revision if specified. */
 	if (pb->state != NULL)
@@ -592,11 +600,8 @@ checkin_update(struct checkin_params *pb)
 		xfree(pb->rcs_msg);	/* free empty log message */
 		pb->rcs_msg = NULL;
 	}
-out:
-	return (0);
 
-fail:
-	return (-1);
+	return (0);
 }
 
 /*
@@ -609,7 +614,7 @@ static int
 checkin_init(struct checkin_params *pb)
 {
 	BUF *bp;
-	char numb[64];
+	char numb[RCS_REV_BUFSZ];
 	int fetchlog = 0;
 	struct stat st;
 
@@ -623,7 +628,7 @@ checkin_init(struct checkin_params *pb)
 
 	/* Load file contents */
 	if ((bp = rcs_buf_load(pb->filename, BUF_AUTOEXT)) == NULL)
-		goto fail;
+		return (-1);
 
 	/* Get default values from working copy if -k specified */
 	if (pb->flags & CI_KEYWORDSCAN)
@@ -637,7 +642,7 @@ checkin_init(struct checkin_params *pb)
 	if (pb->description == NULL &&
 	    rcs_set_description(pb->file, NULL) == -1) {
 		warn("%s", pb->filename);
-		goto fail;
+		return (-1);
 	}
 
 skipdesc:
@@ -665,7 +670,7 @@ skipdesc:
 	    (pb->rcs_msg == NULL ? "Initial revision" : pb->rcs_msg),
 	    pb->date, pb->author) != 0) {
 		warnx("failed to add new revision");
-		goto fail;
+		return (-1);
 	}
 
 	/*
@@ -681,12 +686,12 @@ skipdesc:
 	/* New head revision has to contain entire file; */
 	if (rcs_deltatext_set(pb->file, pb->file->rf_head, bp) == -1) {
 		warnx("failed to set new head revision");
-		goto fail;
+		return (-1);
 	}
 
 	/* Attach a symbolic name to this revision if specified. */
 	if (pb->symbol != NULL && checkin_attach_symbol(pb) < 0)
-		goto fail;
+		return (-1);
 
 	/* Set the state of this revision if specified. */
 	if (pb->state != NULL)
@@ -718,8 +723,6 @@ skipdesc:
 	}
 
 	return (0);
-fail:
-	return (-1);
 }
 
 /*
@@ -731,7 +734,7 @@ fail:
 static int
 checkin_attach_symbol(struct checkin_params *pb)
 {
-	char rbuf[16];
+	char rbuf[RCS_REV_BUFSZ];
 	int ret;
 	if (!(pb->flags & QUIET))
 		printf("symbol: %s\n", pb->symbol);
@@ -765,10 +768,10 @@ checkin_attach_symbol(struct checkin_params *pb)
  * warn the user.
  *
  */
-static void
+static int
 checkin_revert(struct checkin_params *pb)
 {
-	char rbuf[16];
+	char rbuf[RCS_REV_BUFSZ];
 
 	rcsnum_tostr(pb->frev, rbuf, sizeof(rbuf));
 
@@ -776,12 +779,29 @@ checkin_revert(struct checkin_params *pb)
 		(void)fprintf(stderr, "file is unchanged; reverting "
 		    "to previous revision %s\n", rbuf);
 
+	/* Attach a symbolic name to this revision if specified. */
+	if (pb->symbol != NULL) {
+		if (checkin_checklock(pb) == -1)
+			return (-1);
+
+		pb->newrev = pb->frev;
+		if (checkin_attach_symbol(pb) == -1)
+			return (-1);
+	}
+
 	pb->flags |= CO_REVERT;
 	(void)close(workfile_fd);
 	(void)unlink(pb->filename);
+	
+	/* If needed, write out RCSFILE before calling checkout_rev() */
+	if (pb->symbol != NULL)
+		rcs_write(pb->file);
+
 	if ((pb->flags & CO_LOCK) || (pb->flags & CO_UNLOCK))
 		checkout_rev(pb->file, pb->frev, pb->filename,
 		    pb->flags, pb->username, pb->author, NULL, NULL);
+
+	return (0);
 }
 
 /*
@@ -794,6 +814,9 @@ static int
 checkin_checklock(struct checkin_params *pb)
 {
 	struct rcs_lock *lkp;
+
+	if (rcs_lock_getmode(pb->file) == RCS_LOCK_LOOSE)
+		return (0);
 
 	TAILQ_FOREACH(lkp, &(pb->file->rf_locks), rl_list) {
 		if (!strcmp(lkp->rl_name, pb->username) &&

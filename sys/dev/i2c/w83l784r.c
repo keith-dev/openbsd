@@ -1,4 +1,4 @@
-/*	$OpenBSD: w83l784r.c,v 1.10 2006/12/23 17:46:39 deraadt Exp $	*/
+/*	$OpenBSD: w83l784r.c,v 1.12 2007/06/24 05:34:35 dlg Exp $	*/
 
 /*
  * Copyright (c) 2006 Mark Kettenis
@@ -78,8 +78,8 @@ struct wbenv_softc {
 	i2c_addr_t sc_addr[3];
 	u_int8_t sc_chip_id;
 
-	struct sensor sc_sensors[WBENV_MAX_SENSORS];
-	struct sensordev sc_sensordev;
+	struct ksensor sc_sensors[WBENV_MAX_SENSORS];
+	struct ksensordev sc_sensordev;
 	struct wbenv_sensor *sc_wbenv_sensors;
 	int sc_numsensors;
 };
@@ -219,7 +219,7 @@ wbenv_attach(struct device *parent, struct device *self, void *aux)
 	iic_ignore_addr(sc->sc_addr[2]);
 
  start:
-	if (sensor_task_register(sc, wbenv_refresh, 5)) {
+	if (sensor_task_register(sc, wbenv_refresh, 5) == NULL) {
 		printf("%s: unable to register update task\n",
 		    sc->sc_dev.dv_xname);
 		return;
@@ -269,7 +269,7 @@ wbenv_refresh(void *arg)
 void
 w83l784r_refresh_volt(struct wbenv_softc *sc, int n)
 {
-	struct sensor *sensor = &sc->sc_sensors[n];
+	struct ksensor *sensor = &sc->sc_sensors[n];
 	int data, reg = sc->sc_wbenv_sensors[n].reg;
 
 	data = wbenv_readreg(sc, reg);
@@ -281,7 +281,7 @@ w83l784r_refresh_volt(struct wbenv_softc *sc, int n)
 void
 w83l785r_refresh_volt(struct wbenv_softc *sc, int n)
 {
-	struct sensor *sensor = &sc->sc_sensors[n];
+	struct ksensor *sensor = &sc->sc_sensors[n];
 	int data, reg = sc->sc_wbenv_sensors[n].reg;
 
 	data = wbenv_readreg(sc, reg);
@@ -293,7 +293,7 @@ w83l785r_refresh_volt(struct wbenv_softc *sc, int n)
 void
 wbenv_refresh_temp(struct wbenv_softc *sc, int n)
 {
-	struct sensor *sensor = &sc->sc_sensors[n];
+	struct ksensor *sensor = &sc->sc_sensors[n];
 	int sdata;
 
 	sdata = wbenv_readreg(sc, sc->sc_wbenv_sensors[n].reg);
@@ -305,7 +305,7 @@ wbenv_refresh_temp(struct wbenv_softc *sc, int n)
 void
 w83l784r_refresh_temp(struct wbenv_softc *sc, int n)
 {
-	struct sensor *sensor = &sc->sc_sensors[n];
+	struct ksensor *sensor = &sc->sc_sensors[n];
 	int16_t sdata;
 	u_int8_t cmd = 0;
 
@@ -318,7 +318,7 @@ w83l784r_refresh_temp(struct wbenv_softc *sc, int n)
 void
 w83l784r_refresh_fanrpm(struct wbenv_softc *sc, int n)
 {
-	struct sensor *sensor = &sc->sc_sensors[n];
+	struct ksensor *sensor = &sc->sc_sensors[n];
 	int data, divisor;
 
 	data = wbenv_readreg(sc, W83L784R_FANDIV);
@@ -340,7 +340,7 @@ w83l784r_refresh_fanrpm(struct wbenv_softc *sc, int n)
 void
 w83l785r_refresh_fanrpm(struct wbenv_softc *sc, int n)
 {
-	struct sensor *sensor = &sc->sc_sensors[n];
+	struct ksensor *sensor = &sc->sc_sensors[n];
 	int data, divisor;
 
 	data = wbenv_readreg(sc, W83L785R_FANDIV);

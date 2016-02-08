@@ -1,4 +1,4 @@
-/*	$OpenBSD: fcu.c,v 1.5 2007/01/07 18:27:46 deraadt Exp $	*/
+/*	$OpenBSD: fcu.c,v 1.7 2007/06/24 05:34:35 dlg Exp $	*/
 
 /*
  * Copyright (c) 2005 Mark Kettenis
@@ -50,8 +50,8 @@ struct fcu_softc {
 	i2c_tag_t sc_tag;
 	i2c_addr_t sc_addr;
 
-	struct sensor sc_sensor[FCU_NUM_SENSORS];
-	struct sensordev sc_sensordev;
+	struct ksensor sc_sensor[FCU_NUM_SENSORS];
+	struct ksensordev sc_sensordev;
 };
 
 int	fcu_match(struct device *, void *, void *);
@@ -98,7 +98,7 @@ fcu_attach(struct device *parent, struct device *self, void *aux)
 		    sizeof(sc->sc_sensor[FCU_PWM1 + i].desc));
 	}
 
-	if (sensor_task_register(sc, fcu_refresh, 5)) {
+	if (sensor_task_register(sc, fcu_refresh, 5) == NULL) {
 		printf(", unable to register update task\n");
 		return;
 	}

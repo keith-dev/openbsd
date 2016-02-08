@@ -1,7 +1,7 @@
 # ex:ts=8 sw=4:
-# $OpenBSD: Temp.pm,v 1.6 2005/10/10 10:31:46 espie Exp $
+# $OpenBSD: Temp.pm,v 1.13 2007/06/16 09:29:37 espie Exp $
 #
-# Copyright (c) 2003-2004 Marc Espie <espie@openbsd.org>
+# Copyright (c) 2003-2005 Marc Espie <espie@openbsd.org>
 #
 # Permission to use, copy, modify, and distribute this software for any
 # purpose with or without fee is hereby granted, provided that the above
@@ -20,17 +20,45 @@ use warnings;
 package OpenBSD::Temp;
 
 use File::Temp;
-use File::Path;
+use OpenBSD::Paths;
 
-our $tempbase = $ENV{'PKG_TMPDIR'} || '/var/tmp';
+our $tempbase = $ENV{'PKG_TMPDIR'} || OpenBSD::Paths->vartmp;
 
-my $dirs = [];
-my $files = [];
+my $dirs = {};
+my $files = {};
+
+sub cleanup
+{
+	my $caught;
+	my $h = sub { $caught = shift; };
+	{
+	    require File::Path;
+
+	    local $SIG{'INT'} = $h;
+	    local $SIG{'QUIT'} = $h;
+	    local $SIG{'HUP'} = $h;
+	    local $SIG{'KILL'} = $h;
+	    local $SIG{'TERM'} = $h;
+
+	    while (my ($name, $pid) = each %$files) {
+		    unlink($name) if $pid == $$;
+	    }
+	    while (my ($dir, $pid) = each %$dirs) {
+		    File::Path::rmtree([$dir]) if $pid == $$;
+	    }
+	}
+	if (defined $caught) {
+		kill $caught, $$;
+	}
+}
+
+END {
+	cleanup();
+}
 
 my $handler = sub {
 	my ($sig) = @_;
-	File::Path::rmtree($dirs);
-	unlink(@$files);
+	cleanup();
 	$SIG{$sig} = 'DEFAULT';
 	kill $sig, $$;
 };
@@ -53,14 +81,13 @@ sub dir()
 	    local $SIG{'HUP'} = $h;
 	    local $SIG{'KILL'} = $h;
 	    local $SIG{'TERM'} = $h;
-	    $dir = File::Temp::tempdir("pkginfo.XXXXXXXXXXX", 
-	    	DIR => $tempbase, CLEANUP => 1).'/';
-	    push(@$dirs, $dir);
+	    $dir = permanent_dir($tempbase, "pkginfo");
+	    $dirs->{$dir} = $$;
 	}
 	if (defined $caught) {
 		kill $caught, $$;
 	}
-	return $dir;
+	return "$dir/";
 }
 
 sub file()
@@ -75,9 +102,8 @@ sub file()
 	    local $SIG{'HUP'} = $h;
 	    local $SIG{'KILL'} = $h;
 	    local $SIG{'TERM'} = $h;
-	    ($fh, $file) = File::Temp::tempfile("pkgout.XXXXXXXXXXX", 
-	    	DIR => $tempbase, CLEANUP => 1);
-	    push(@$files, $file);
+	    ($fh, $file) = permanent_file($tempbase, "pkgout");
+	    $files->{$file} = $$;
 	}
 	if (defined $caught) {
 		kill $caught, $$;
@@ -85,9 +111,24 @@ sub file()
 	return $file;
 }
 
-sub list($)
+sub permanent_file
 {
-	return File::Temp::tempfile("list.XXXXXXXXXXX", DIR => shift);
+	my ($dir, $stem) = @_;
+	my $template = "$stem.XXXXXXXXXX";
+	if (defined $dir) {
+		$template = "$dir/$template";
+	}
+	return File::Temp::mkstemp($template);
+}
+
+sub permanent_dir
+{
+	my ($dir, $stem) = @_;
+	my $template = "$stem.XXXXXXXXXX";
+	if (defined $dir) {
+		$template = "$dir/$template";
+	}
+	return File::Temp::mkdtemp($template);
 }
 
 1;

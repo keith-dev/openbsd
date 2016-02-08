@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.15 2007/01/28 16:38:47 miod Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.17 2007/05/22 10:31:08 martin Exp $	*/
 /*	$NetBSD: cpu.h,v 1.3 1997/02/02 06:56:57 thorpej Exp $	*/
 
 /*
@@ -65,6 +65,26 @@
  */
 
 #ifdef _KERNEL
+#ifndef _LOCORE
+#include <sys/sched.h>
+
+struct cpu_info {
+	struct proc *ci_curproc;
+
+	struct schedstate_percpu ci_schedstate;
+};
+
+extern struct cpu_info cpu_info_store;
+
+#define	curcpu()	(&cpu_info_store)
+
+#define CPU_IS_PRIMARY(ci)	1
+#define	CPU_INFO_ITERATOR	int
+#define	CPU_INFO_FOREACH(cii, ci) \
+	for (cii = 0, ci = curcpu(); ci != NULL; ci = NULL)
+
+#define cpu_number()	0
+
 /*
  * All m68k ports must provide these globals.
  */
@@ -72,7 +92,9 @@ extern	int cputype;		/* CPU on this host */
 extern	int ectype;		/* external cache on this host */
 extern	int fputype;		/* FPU on this host */
 extern	int mmutype;		/* MMU on this host */
-#endif
+
+#endif /* !_LOCORE */
+#endif /* _KERNEL */
 
 /* values for cputype */
 #define	CPU_68020	0	/* 68020 */

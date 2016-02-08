@@ -1,4 +1,4 @@
-/*	$OpenBSD: ospfd.c,v 1.41 2007/02/01 13:25:28 claudio Exp $ */
+/*	$OpenBSD: ospfd.c,v 1.48 2007/07/25 19:11:27 claudio Exp $ */
 
 /*
  * Copyright (c) 2005 Claudio Jeker <claudio@openbsd.org>
@@ -60,7 +60,7 @@ void	ospf_redistribute_default(int);
 
 int	ospf_reload(void);
 int	ospf_sendboth(enum imsg_type, void *, u_int16_t);
-void	merge_interfaces(struct area *, struct area *);
+int	merge_interfaces(struct area *, struct area *);
 struct iface *iface_lookup(struct area *, struct iface *);
 
 int	pipe_parent2ospfe[2];
@@ -103,8 +103,10 @@ main_sig_handler(int sig, short event, void *arg)
 			ospfd_shutdown();
 		break;
 	case SIGHUP:
-		/* reconfigure */
-		/* ... */
+		if (ospf_reload() == -1)
+			log_warnx("configuration reload failed");
+		else
+			log_debug("configuration reloaded");
 		break;
 	default:
 		fatalx("unexpected signal");
@@ -117,7 +119,7 @@ usage(void)
 {
 	extern char *__progname;
 
-	fprintf(stderr, "usage: %s [-dnv] [-f file]\n", __progname);
+	fprintf(stderr, "usage: %s [-cdnv] [-f file]\n", __progname);
 	exit(1);
 }
 
@@ -135,8 +137,11 @@ main(int argc, char *argv[])
 	conffile = CONF_FILE;
 	ospfd_process = PROC_MAIN;
 
-	while ((ch = getopt(argc, argv, "df:nv")) != -1) {
+	while ((ch = getopt(argc, argv, "cdf:nv")) != -1) {
 		switch (ch) {
+		case 'c':
+			opts |= OSPFD_OPT_FORCE_DEMOTE;
+			break;
 		case 'd':
 			debug = 1;
 			break;
@@ -169,8 +174,12 @@ main(int argc, char *argv[])
 	if (sysctl(mib, 4, &ipforwarding, &len, NULL, 0) == -1)
 		err(1, "sysctl");
 
-	if (!ipforwarding)
-		log_warnx("WARNING: IP forwarding NOT enabled");
+	if (ipforwarding != 1) {
+		log_warnx("WARNING: IP forwarding NOT enabled, "
+		    "running as stub router");
+		opts |= OSPFD_OPT_STUB_ROUTER;
+	}
+
 
 	/* fetch interfaces early */
 	kif_init();
@@ -291,6 +300,7 @@ ospfd_shutdown(void)
 
 	control_cleanup();
 	kr_shutdown();
+	carp_demote_shutdown();
 
 	do {
 		if ((pid = wait(NULL)) == -1 &&
@@ -335,14 +345,16 @@ main_dispatch_ospfe(int fd, short event, void *bula)
 {
 	struct imsgbuf		*ibuf = bula;
 	struct imsg		 imsg;
+	struct demote_msg	 dmsg;
 	ssize_t			 n;
+	int			 shut = 0;
 
 	switch (event) {
 	case EV_READ:
 		if ((n = imsg_read(ibuf)) == -1)
 			fatal("imsg_read error");
 		if (n == 0)	/* connection closed */
-			fatalx("pipe closed");
+			shut = 1;
 		break;
 	case EV_WRITE:
 		if (msgbuf_write(&ibuf->w) == -1)
@@ -385,6 +397,12 @@ main_dispatch_ospfe(int fd, short event, void *bula)
 			else
 				log_warnx("IFINFO request with wrong len");
 			break;
+		case IMSG_DEMOTE:
+			if (imsg.hdr.len - IMSG_HEADER_SIZE != sizeof(dmsg))
+				fatalx("invalid size of OE request");
+			memcpy(&dmsg, imsg.data, sizeof(dmsg));
+			carp_demote_set(dmsg.demote_group, dmsg.level);
+			break;
 		default:
 			log_debug("main_dispatch_ospfe: error handling imsg %d",
 			    imsg.hdr.type);
@@ -392,7 +410,13 @@ main_dispatch_ospfe(int fd, short event, void *bula)
 		}
 		imsg_free(&imsg);
 	}
-	imsg_event_add(ibuf);
+	if (!shut)
+		imsg_event_add(ibuf);
+	else {
+		/* this pipe is dead, so remove the event handler */
+		event_del(&ibuf->ev);
+		event_loopexit(NULL);
+	}
 }
 
 /* ARGSUSED */
@@ -402,13 +426,14 @@ main_dispatch_rde(int fd, short event, void *bula)
 	struct imsgbuf  *ibuf = bula;
 	struct imsg	 imsg;
 	ssize_t		 n;
+	int		 shut = 0;
 
 	switch (event) {
 	case EV_READ:
 		if ((n = imsg_read(ibuf)) == -1)
 			fatal("imsg_read error");
 		if (n == 0)	/* connection closed */
-			fatalx("pipe closed");
+			shut = 1;
 		break;
 	case EV_WRITE:
 		if (msgbuf_write(&ibuf->w) == -1)
@@ -444,7 +469,13 @@ main_dispatch_rde(int fd, short event, void *bula)
 		}
 		imsg_free(&imsg);
 	}
-	imsg_event_add(ibuf);
+	if (!shut)
+		imsg_event_add(ibuf);
+	else {
+		/* this pipe is dead, so remove the event handler */
+		event_del(&ibuf->ev);
+		event_loopexit(NULL);
+	}
 }
 
 void
@@ -511,8 +542,10 @@ ospf_redistribute(struct kroute *kr, u_int32_t *metric)
 	SIMPLEQ_FOREACH(r, &ospfd_conf->redist_list, entry) {
 		switch (r->type & ~REDIST_NO) {
 		case REDIST_LABEL:
-			if (kr->rtlabel == r->label)
+			if (kr->rtlabel == r->label) {
+				*metric = r->metric;
 				return (r->type & REDIST_NO ? 0 : 1);
+			}
 			break;
 		case REDIST_STATIC:
 			/*
@@ -620,7 +653,8 @@ merge_config(struct ospfd_conf *conf, struct ospfd_conf *xconf)
 	struct iface		*iface;
 	struct redistribute	*r;
 
-	/* change of rtr_id needs a restart and flags are ignored */
+	/* change of rtr_id needs a restart */
+	conf->flags = xconf->flags;
 	conf->spf_delay = xconf->spf_delay;
 	conf->spf_hold_time = xconf->spf_hold_time;
 	conf->redistribute = xconf->redistribute;
@@ -660,6 +694,7 @@ merge_config(struct ospfd_conf *conf, struct ospfd_conf *xconf)
 			LIST_INSERT_HEAD(&conf->area_list, xa, entry);
 			if (ospfd_process == PROC_OSPF_ENGINE) {
 				/* start interfaces */
+				ospfe_demote_area(xa, 0);
 				LIST_FOREACH(iface, &xa->iface_list, entry) {
 					if_init(conf, iface);
 					if (if_fsm(iface, IF_EVT_UP)) {
@@ -678,10 +713,13 @@ merge_config(struct ospfd_conf *conf, struct ospfd_conf *xconf)
 		 */
 		a->stub = xa->stub;
 		a->stub_default_cost = xa->stub_default_cost;
-		a->dirty = 1; /* force SPF tree recalculation */
+		if (ospfd_process == PROC_RDE_ENGINE)
+			a->dirty = 1; /* force SPF tree recalculation */
 
 		/* merge interfaces */
-		merge_interfaces(a, xa);
+		if (merge_interfaces(a, xa) &&
+		    ospfd_process == PROC_OSPF_ENGINE)
+			a->dirty = 1; /* force rtr LSA update */
 	}
 
 	if (ospfd_process == PROC_OSPF_ENGINE) {
@@ -697,6 +735,10 @@ merge_config(struct ospfd_conf *conf, struct ospfd_conf *xconf)
 					}
 				}
 			}
+			if (a->dirty) {
+				a->dirty = 0;
+				orig_rtr_lsa(a);
+			}
 		}
 	}
 
@@ -708,10 +750,11 @@ done:
 	free(xconf);
 }
 
-void
+int
 merge_interfaces(struct area *a, struct area *xa)
 {
 	struct iface	*i, *xi, *ni;
+	int		 dirty = 0;
 
 	/* problems:
 	 * - new interfaces (easy)
@@ -755,6 +798,8 @@ merge_interfaces(struct area *a, struct area *xa)
 		i->transmit_delay = xi->transmit_delay;
 		i->hello_interval = xi->hello_interval;
 		i->rxmt_interval = xi->rxmt_interval;
+		if (i->metric != xi->metric)
+			dirty = 1;
 		i->metric = xi->metric;
 		i->priority = xi->priority;
 		i->flags = xi->flags; /* needed? */
@@ -763,7 +808,7 @@ merge_interfaces(struct area *a, struct area *xa)
 		i->linkstate = xi->linkstate; /* needed? */
 
 		i->auth_type = xi->auth_type;
-		strlcpy(i->auth_key, xi->auth_key, MAX_SIMPLE_AUTH_LEN);
+		strncpy(i->auth_key, xi->auth_key, MAX_SIMPLE_AUTH_LEN);
 		md_list_clr(&i->auth_md_list);
 		md_list_copy(&i->auth_md_list, &xi->auth_md_list);
 
@@ -776,6 +821,7 @@ merge_interfaces(struct area *a, struct area *xa)
 				if_fsm(i, IF_EVT_UP);
 		}
 	}
+	return (dirty);
 }
 
 struct iface *

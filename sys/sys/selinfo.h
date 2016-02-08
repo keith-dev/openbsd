@@ -1,4 +1,4 @@
-/*	$OpenBSD: selinfo.h,v 1.1 2005/11/21 18:16:46 millert Exp $	*/
+/*	$OpenBSD: selinfo.h,v 1.3 2007/07/25 23:11:53 art Exp $	*/
 
 /*-
  * Copyright (c) 1992, 1993

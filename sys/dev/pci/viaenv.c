@@ -1,4 +1,4 @@
-/*	$OpenBSD: viaenv.c,v 1.9 2006/12/23 17:46:39 deraadt Exp $	*/
+/*	$OpenBSD: viaenv.c,v 1.11 2007/05/14 00:37:18 jsg Exp $	*/
 /*	$NetBSD: viaenv.c,v 1.9 2002/10/02 16:51:59 thorpej Exp $	*/
 
 /*
@@ -69,8 +69,8 @@ struct viaenv_softc {
 
 	int     sc_fan_div[2];	/* fan RPM divisor */
 
-	struct sensor sc_data[VIANUMSENSORS];
-	struct sensordev sc_sensordev;
+	struct ksensor sc_data[VIANUMSENSORS];
+	struct ksensordev sc_sensordev;
 };
 
 int  viaenv_match(struct device *, void *, void *);
@@ -353,33 +353,6 @@ nopm:
 #endif	/* __HAVE_TIMECOUNTER */
 	printf("\n");
 }
-
-#if 0
-int
-viaenv_gtredata(struct sysmon_envsys *sme, struct envsys_tre_data *tred)
-{
-	struct viaenv_softc *sc = sme->sme_cookie;
-
-	simple_lock(&sc->sc_slock);
-
-	viaenv_refresh_sensor_data(sc);
-	*tred = sc->sc_data[tred->sensor];
-
-	simple_unlock(&sc->sc_slock);
-
-	return (0);
-}
-
-int
-viaenv_streinfo(struct sysmon_envsys *sme, struct envsys_basic_info *binfo)
-{
-
-	/* XXX Not implemented */
-	binfo->validflags = 0;
-	
-	return (0);
-}
-#endif
 
 void
 viaenv_refresh(void *arg)

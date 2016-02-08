@@ -1,4 +1,4 @@
-.\"	$OpenBSD: hier.7,v 1.60 2005/11/30 11:23:58 jmc Exp $
+.\"	$OpenBSD: hier.7,v 1.68 2007/07/07 16:45:24 jmc Exp $
 .\"	$NetBSD: hier.7,v 1.7 1994/11/30 19:07:10 jtc Exp $
 .\"
 .\" Copyright (c) 1990, 1993
@@ -30,7 +30,7 @@
 .\"
 .\"	@(#)hier.7	8.1 (Berkeley) 6/5/93
 .\"
-.Dd June 5, 1993
+.Dd $Mdocdate: July 7 2007 $
 .Dt HIER 7
 .Os
 .Sh NAME
@@ -46,7 +46,7 @@ Alternate (backup) location for the root
 .Pq Sq /
 filesystem
 (see
-.Xr afterboot 8 ) .
+.Xr daily 8 ) .
 .It /bin/
 User utilities fundamental to both single and multi-user environments.
 These programs are statically compiled and therefore do not depend on any
@@ -197,7 +197,7 @@ X11-specific C include files.
 .It lib/
 X11 archive libraries.
 .Pp
-.Bl -tag -width "modules/" -compact
+.Bl -tag -width "pkgconfig/" -compact
 .It X11/
 Default configuration files for X11 and companion applications (see
 .Xr xdm 1 ,
@@ -205,10 +205,17 @@ Default configuration files for X11 and companion applications (see
 .Xr twm 1 ) .
 .It modules/
 Various libraries and drivers for the X11 window system.
-.Pp
+.It pkgconfig/
+Package metadata for
+.Xr pkgconfig 1 .
+.It xserver/
+Data files used by the X server.
 .El
+.Pp
 .It man/
 X11 manual pages.
+.It share/
+Architecture independent data files.
 .El
 .Pp
 .It bin/
@@ -260,8 +267,6 @@ C include files for Internet standard protocols (see
 .It netinet6/
 C include files for Internet protocol version 6 (see
 .Xr inet6 4 ) .
-.It netipx/
-C include files for the IPX protocol.
 .It netnatm/
 C include files for native mode ATM access.
 .It nfs/
@@ -376,7 +381,7 @@ and
 .Bl -tag -width propernames -compact
 .It american
 Spellings preferred in American usage.
-.It english
+.It british
 Spellings preferred in British usage.
 .It eign
 List of common words.
@@ -427,8 +432,6 @@ ASCII text files used by various games.
 GNU troff shared fonts.
 .It info/
 Texinfo source files.
-.It ipsec/
-IPsec example files.
 .It lkm/
 Example source code implementing several lkm module types (see
 .Xr lkm 4 ) .
@@ -544,9 +547,6 @@ Source for files in
 .It libexec/
 Source for files in
 .Pa /usr/libexec .
-.It lkm/
-Source for files in
-.Pa /usr/lkm .
 .It regress/
 Regress framework.
 .It sbin/
@@ -563,7 +563,14 @@ Source for files in
 .It usr.sbin/
 Source for files in
 .Pa /usr/sbin .
+.It xenocara/
+Source for the X11 window system.
 .El
+.Pp
+.It xobj/
+Architecture specific target tree produced by building the
+.Pa /usr/src/xenocara
+tree.
 .El
 .It /var/
 Multi-purpose log, temporary, transient, and spool files.

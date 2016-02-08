@@ -1,4 +1,4 @@
-/*	$OpenBSD: main.c,v 1.63 2006/08/29 21:51:13 claudio Exp $	*/
+/*	$OpenBSD: main.c,v 1.68 2007/07/25 11:50:47 claudio Exp $	*/
 /*	$NetBSD: main.c,v 1.9 1996/05/07 02:55:02 thorpej Exp $	*/
 
 /*
@@ -40,7 +40,7 @@ char copyright[] =
 #if 0
 static char sccsid[] = "from: @(#)main.c	8.4 (Berkeley) 3/1/94";
 #else
-static char *rcsid = "$OpenBSD: main.c,v 1.63 2006/08/29 21:51:13 claudio Exp $";
+static char *rcsid = "$OpenBSD: main.c,v 1.68 2007/07/25 11:50:47 claudio Exp $";
 #endif
 #endif /* not lint */
 
@@ -49,6 +49,7 @@ static char *rcsid = "$OpenBSD: main.c,v 1.63 2006/08/29 21:51:13 claudio Exp $"
 #include <sys/protosw.h>
 #include <sys/socket.h>
 
+#include <net/route.h>
 #include <netinet/in.h>
 
 #include <ctype.h>
@@ -102,61 +103,55 @@ struct nlist nl[] = {
 	{ "_mfchash" },
 #define N_VIFTABLE	17
 	{ "_viftable" },
-#define N_IPX		18
-	{ "_ipxcbtable"},
-#define N_IPXSTAT	19
-	{ "_ipxstat"},
-#define N_SPXSTAT	20
-	{ "_spx_istat"},
-#define N_AHSTAT	21
+#define N_AHSTAT	18
 	{ "_ahstat"},
-#define N_ESPSTAT	22
+#define N_ESPSTAT	19
 	{ "_espstat"},
-#define N_IP4STAT	23
+#define N_IP4STAT	20
 	{ "_ipipstat"},
-#define N_DDPSTAT	24
+#define N_DDPSTAT	21
 	{ "_ddpstat"},
-#define N_DDPCB		25
+#define N_DDPCB		22
 	{ "_ddpcb"},
-#define N_ETHERIPSTAT	26
+#define N_ETHERIPSTAT	23
 	{ "_etheripstat"},
-#define N_IP6STAT	27
+#define N_IP6STAT	24
 	{ "_ip6stat" },
-#define N_ICMP6STAT	28
+#define N_ICMP6STAT	25
 	{ "_icmp6stat" },
-#define N_PIM6STAT	29
+#define N_PIM6STAT	26
 	{ "_pim6stat" },
-#define N_MRT6PROTO	30
+#define N_MRT6PROTO	27
 	{ "_ip6_mrtproto" },
-#define N_MRT6STAT	31
+#define N_MRT6STAT	28
 	{ "_mrt6stat" },
-#define N_MF6CTABLE	32
+#define N_MF6CTABLE	29
 	{ "_mf6ctable" },
-#define N_MIF6TABLE	33
+#define N_MIF6TABLE	30
 	{ "_mif6table" },
-#define N_MBPOOL	34
+#define N_MBPOOL	31
 	{ "_mbpool" },
-#define N_MCLPOOL	35
+#define N_MCLPOOL	32
 	{ "_mclpool" },
-#define N_IPCOMPSTAT	36
+#define N_IPCOMPSTAT	33
 	{ "_ipcompstat" },
-#define N_RIP6STAT	37
+#define N_RIP6STAT	34
 	{ "_rip6stat" },
-#define N_CARPSTAT	38
+#define N_CARPSTAT	35
 	{ "_carpstats" },
-#define N_RAWIPTABLE	39
+#define N_RAWIPTABLE	36
 	{ "_rawcbtable" },
-#define N_RAWIP6TABLE	40
+#define N_RAWIP6TABLE	37
 	{ "_rawin6pcbtable" },
-#define N_PFSYNCSTAT	41
+#define N_PFSYNCSTAT	38
 	{ "_pfsyncstats" },
-#define N_PIMSTAT	42
+#define N_PIMSTAT	39
 	{ "_pimstat" },
-#define N_AF2RTAFIDX	43
+#define N_AF2RTAFIDX	40
 	{ "_af2rtafidx" },
-#define N_RTBLIDMAX	44
+#define N_RTBLIDMAX	41
 	{ "_rtbl_id_max" },
-#define N_RTMASK	45
+#define N_RTMASK	42
 	{ "_mask_rnhead" },
 	{ ""}
 };
@@ -219,15 +214,6 @@ struct protox ip6protox[] = {
 };
 #endif
 
-struct protox ipxprotox[] = {
-	{ N_IPX,	N_IPXSTAT,	1,	ipxprotopr,
-	  ipx_stats,	0,		"ipx" },
-	{ N_IPX,	N_SPXSTAT,	1,	ipxprotopr,
-	  spx_stats,	0,		"spx" },
-	{ -1,		-1,		0,	0,
-	  0,		0,		0 }
-};
-
 struct protox atalkprotox[] = {
 	{ N_DDPCB,	N_DDPSTAT,	1,	atalkprotopr,
 	  ddp_stats,	0,		"ddp" },
@@ -237,11 +223,11 @@ struct protox atalkprotox[] = {
 
 #ifndef INET6
 struct protox *protoprotox[] = {
-	protox, ipxprotox, atalkprotox, NULL
+	protox, atalkprotox, NULL
 };
 #else
 struct protox *protoprotox[] = {
-	protox, ip6protox, ipxprotox, atalkprotox, NULL
+	protox, ip6protox, atalkprotox, NULL
 };
 #endif
 
@@ -257,6 +243,7 @@ main(int argc, char *argv[])
 {
 	extern char *optarg;
 	extern int optind;
+	const char *errstr;
 	struct protoent *p;
 	struct protox *tp = NULL; /* for printing cblocks & stats */
 	int ch;
@@ -264,10 +251,11 @@ main(int argc, char *argv[])
 	char buf[_POSIX2_LINE_MAX];
 	gid_t gid;
 	u_long pcbaddr = 0;
+	u_int tableid = 0;
 
 	af = AF_UNSPEC;
 
-	while ((ch = getopt(argc, argv, "Aabdf:gI:ilM:mN:np:P:qrstuvW:w:")) != -1)
+	while ((ch = getopt(argc, argv, "AabdFf:gI:ilM:mN:np:P:qrsT:tuvW:w:")) != -1)
 		switch (ch) {
 		case 'A':
 			Aflag = 1;
@@ -281,6 +269,9 @@ main(int argc, char *argv[])
 		case 'd':
 			dflag = 1;
 			break;
+		case 'F':
+			Fflag = 1;
+			break;
 		case 'f':
 			if (strcmp(optarg, "inet") == 0)
 				af = AF_INET;
@@ -290,8 +281,6 @@ main(int argc, char *argv[])
 				af = AF_LOCAL;
 			else if (strcmp(optarg, "unix") == 0)
 				af = AF_UNIX;
-			else if (strcmp(optarg, "ipx") == 0)
-				af = AF_IPX;
 			else if (strcmp(optarg, "encap") == 0)
 				af = PF_KEY;
 			else if (strcmp(optarg, "atalk") == 0)
@@ -360,6 +349,11 @@ main(int argc, char *argv[])
 		case 's':
 			++sflag;
 			break;
+		case 'T':
+			tableid = strtonum(optarg, 0, RT_TABLEID_MAX, &errstr);
+			if (errstr)
+				errx(1, "invalid table id: %s", errstr);
+			break;
 		case 't':
 			tflag = 1;
 			break;
@@ -411,7 +405,7 @@ main(int argc, char *argv[])
 		if (sflag)
 			rt_stats(1, 0);
 		else
-			p_rttables(af);
+			p_rttables(af, tableid);
 		exit(0);
 	}
 	if ((kvmd = kvm_openfiles(nlistf, memf, NULL, O_RDONLY,
@@ -534,9 +528,6 @@ main(int argc, char *argv[])
 		for (tp = ip6protox; tp->pr_name; tp++)
 			printproto(tp, tp->pr_name);
 #endif
-	if (af == AF_IPX || af == AF_UNSPEC)
-		for (tp = ipxprotox; tp->pr_name; tp++)
-			printproto(tp, tp->pr_name);
 	if ((af == AF_UNIX || af == AF_UNSPEC) && !sflag)
 		unixpr(nl[N_UNIXSW].n_value);
 	if (af == AF_APPLETALK || af == AF_UNSPEC)
@@ -645,7 +636,7 @@ usage(void)
 {
 	(void)fprintf(stderr,
 	    "usage: %s [-Aan] [-f address_family] [-M core] [-N system]\n"
-	    "       %s [-bdgilmnqrstu] [-f address_family] [-M core] [-N system]\n"
+	    "       %s [-bdFgilmnqrstu] [-f address_family] [-M core] [-N system] [-T tableid]\n"
 	    "       %s [-bdn] [-I interface] [-M core] [-N system] [-w wait]\n"
 	    "       %s [-M core] [-N system] -P pcbaddr\n"
 	    "       %s [-s] [-M core] [-N system] [-p protocol]\n"

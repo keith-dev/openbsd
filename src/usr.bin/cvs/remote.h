@@ -1,4 +1,4 @@
-/*	$OpenBSD: remote.h,v 1.20 2007/01/18 16:45:52 joris Exp $	*/
+/*	$OpenBSD: remote.h,v 1.24 2007/07/03 13:22:43 joris Exp $	*/
 /*
  * Copyright (c) 2006 Joris Vink <joris@openbsd.org>
  *
@@ -35,6 +35,8 @@ struct cvs_resp {
 };
 
 #define	REQ_NEEDED	0x01
+#define REQ_NEEDDIR	0x02
+
 #define RESP_NEEDED	0x01
 
 extern int server_response;
@@ -85,6 +87,8 @@ void	cvs_server_static_directory(char *);
 void	cvs_server_sticky(char *);
 void	cvs_server_update_patches(char *);
 void	cvs_server_update_entry(const char *, struct cvs_file *cf);
+void	cvs_server_set_sticky(char *, char *);
+void	cvs_server_clear_sticky(char *);
 
 void	cvs_server_add(char *);
 void	cvs_server_import(char *);
@@ -95,7 +99,9 @@ void	cvs_server_checkout(char *);
 void	cvs_server_diff(char *);
 void	cvs_server_init(char *);
 void	cvs_server_log(char *);
+void	cvs_server_release(char *);
 void	cvs_server_remove(char *);
+void	cvs_server_rlog(char *);
 void	cvs_server_status(char *);
 void	cvs_server_tag(char *);
 void	cvs_server_update(char *);

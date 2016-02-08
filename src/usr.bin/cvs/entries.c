@@ -1,4 +1,4 @@
-/*	$OpenBSD: entries.c,v 1.75 2007/02/22 06:42:09 otto Exp $	*/
+/*	$OpenBSD: entries.c,v 1.79 2007/07/03 13:22:42 joris Exp $	*/
 /*
  * Copyright (c) 2006 Joris Vink <joris@openbsd.org>
  *
@@ -152,17 +152,20 @@ cvs_ent_parse(const char *entry)
 			fatal("failed to parse entry revision '%s'", entry);
 
 		if (fields[3][0] == '\0' ||
-		    strcmp(fields[3], CVS_DATE_DUMMY) == 0 ||
+		    strncmp(fields[3], CVS_DATE_DUMMY, sizeof(CVS_DATE_DUMMY) - 1) == 0 ||
 		    strncmp(fields[3], "Initial ", 8) == 0 ||
 		    strncmp(fields[3], "Result of merge", 15) == 0)
 			ent->ce_mtime = CVS_DATE_DMSEC;
 		else {
-			if (strptime(fields[3], "%a %b %d %T %Y", &t) == NULL)
-				fatal("'%s' is not a valid date", fields[3]);
-			t.tm_isdst = 0;
-			t.tm_gmtoff = 0;
-			ent->ce_mtime = mktime(&t);
-			ent->ce_mtime += t.tm_gmtoff;
+			/* Date field can be a '+=' with remote to indicate
+			 * conflict.  In this case do nothing. */
+			if (strptime(fields[3], "%a %b %d %T %Y", &t) != NULL) {
+
+				t.tm_isdst = -1;	/* Figure out DST. */
+				t.tm_gmtoff = 0;
+				ent->ce_mtime = mktime(&t);
+				ent->ce_mtime += t.tm_gmtoff;
+			}
 		}
 	}
 
@@ -439,6 +442,7 @@ cvs_write_tagfile(const char *dir, char *tag, char *date, int nb)
 			}
 			return;
 		}
+
 		if (tag != NULL) {
 			if (nb != 0)
 				(void)fprintf(fp, "N%s\n", tag);

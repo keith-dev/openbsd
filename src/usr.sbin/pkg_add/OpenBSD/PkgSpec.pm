@@ -1,7 +1,7 @@
 # ex:ts=8 sw=4:
-# $OpenBSD: PkgSpec.pm,v 1.2 2005/08/14 23:23:34 espie Exp $
+# $OpenBSD: PkgSpec.pm,v 1.16 2007/06/09 11:16:54 espie Exp $
 #
-# Copyright (c) 2003-2004 Marc Espie <espie@openbsd.org>
+# Copyright (c) 2003-2007 Marc Espie <espie@openbsd.org>
 #
 # Permission to use, copy, modify, and distribute this software for any
 # purpose with or without fee is hereby granted, provided that the above
@@ -19,10 +19,6 @@ use strict;
 use warnings;
 package OpenBSD::PkgSpec;
 
-# one useful function: 
-#   OpenBSD::PkgSpec::match($pattern, @list) -> @sublist
-# note that @sublist may contain duplicates
-
 # all the shit that does handle package specifications
 sub compare_pseudo_numbers
 {
@@ -30,13 +26,13 @@ sub compare_pseudo_numbers
 
 	my ($n1, $m1);
 
-	if ($n =~ m/^\d+/) {
-		$n1 = $&;
-		$n = $';
+	if ($n =~ m/^(\d+)(.*)$/o) {
+		$n1 = $1;
+		$n = $2;
 	}
-	if ($m =~ m/^\d+/) {
-		$m1 = $&;
-		$m = $';
+	if ($m =~ m/^(\d+)(.*)$/o) {
+		$m1 = $1;
+		$m = $2;
 	}
 
 	if ($n1 == $m1) {
@@ -52,22 +48,22 @@ sub dewey_compare
 	my ($a, $b) = @_;
 	my ($pa, $pb);
 
-	unless ($b =~ m/p\d+$/) { 		# does the Dewey hold a p<number> ?
-		$a =~ s/p\d+$//; 	# No -> strip it from version.
+	unless ($b =~ m/p\d+$/o) { 		# does the Dewey hold a p<number> ?
+		$a =~ s/p\d+$//o; 	# No -> strip it from version.
 	}
 
 	return 0 if $a =~ /^$b$/; 	# bare equality
 
-	if ($a =~ s/p(\d+)$//) {	# extract patchlevels
+	if ($a =~ s/p(\d+)$//o) {	# extract patchlevels
 		$pa = $1;
 	}
-	if ($b =~ s/p(\d+)$//) {
+	if ($b =~ s/p(\d+)$//o) {
 		$pb = $1;
 	}
 
-	my @a = split(/\./, $a);
+	my @a = split(/\./o, $a);
 	push @a, $pa if defined $pa;	# ... and restore them
-	my @b = split(/\\\./, $b);
+	my @b = split(/\\\./o, $b);
 	push @b, $pb if defined $pb;
 	while (@a > 0 && @b > 0) {
 		my $va = shift @a;
@@ -90,17 +86,17 @@ sub check_version
 	# any version spec
 	return 1 if $spec eq '.*';
 
-	my @specs = split(/,/, $spec);
-	for (grep /^\d/, @specs) { 		# exact number: check match
+	my @specs = split(/\,/o, $spec);
+	for (grep /^\d/o, @specs) { 		# exact number: check match
 		return 1 if $v =~ /^$_$/;
 		return 1 if $v =~ /^${_}p\d+$/; # allows for recent patches
 	}
 
 	# Last chance: dewey specs ?
-	my @deweys = grep !/^\d/, @specs;		
+	my @deweys = grep !/^\d/o, @specs;		
 	for (@deweys) {
-		if (m/^\<\=|\>\=|\<|\>/) {
-			my ($op, $dewey) = ($&, $');
+		if (m/^(\<\=|\>\=|\<|\>)(.*)$/o) {
+			my ($op, $dewey) = ($1, $2);
 			my $compare = dewey_compare($v, $dewey);
 			return 0 if $op eq '<' && $compare >= 0;
 			return 0 if $op eq '<=' && $compare > 0;
@@ -118,10 +114,10 @@ sub check_1flavor
 	my ($f, $spec) = @_;
 	local $_;
 
-	for (split /-/, $spec) {
+	for (split /\-/o, $spec) {
 		# must not be here
-		if (m/^\!/) {
-			return 0 if $f->{$'};
+		if (m/^\!(.*)$/o) {
+			return 0 if $f->{$1};
 		# must be here
 		} else {
 			return 0 unless $f->{$_};
@@ -137,12 +133,12 @@ sub check_flavor
 	# no flavor constraints
 	return 1 if $spec eq '';
 
-	$spec =~ s/^-//;
+	$spec =~ s/^-//o;
 	# retrieve all flavors
-	my %f = map +($_, 1), split /\-/, $f;
+	my %f = map +($_, 1), split /\-/o, $f;
 
 	# check each flavor constraint
-	for (split /,/, $spec) {
+	for (split /\,/o, $spec) {
 		if (check_1flavor(\%f, $_)) {
 			return 1;
 		}
@@ -164,24 +160,25 @@ sub subpattern_match
 	# the only constraint is that the actual number 
 	# - must start with a digit, 
 	# - not contain - or ,
-	if ($p =~ m/\-((?:\>|\>\=|\<|\<\=)?\d[^-]*)/) {
-		($stemspec, $vspec, $flavorspec) = ($`, $1, $');
+	if ($p =~ m/^(.*?)\-((?:\>|\>\=|\<|\<\=)?\d[^-]*)(.*)$/o) {
+		($stemspec, $vspec, $flavorspec) = ($1, $2, $3);
 	# `any version' matcher
-	} elsif ($p =~ m/\-\*/) {
-		($stemspec, $vspec, $flavorspec) = ($`, '*', $');
+	} elsif ($p =~ m/^(.*?)\-\*(.*)$/o) {
+		($stemspec, $vspec, $flavorspec) = ($1, '*', $2);
 	# okay, so no version marker. Assume no flavor spec.
 	} else {
 		($stemspec, $vspec, $flavorspec) = ($p, '', '');
 	}
 
-	$stemspec =~ s/\./\\\./g;
-	$stemspec =~ s/\+/\\\+/g;
-	$stemspec =~ s/\*/\.\*/g;
-	$stemspec =~ s/\?/\./g;
-	$vspec =~ s/\./\\\./g;
-	$vspec =~ s/\+/\\\+/g;
-	$vspec =~ s/\*/\.\*/g;
-	$vspec =~ s/\?/\./g;
+	$stemspec =~ s/\./\\\./go;
+	$stemspec =~ s/\+/\\\+/go;
+	$stemspec =~ s/\*/\.\*/go;
+	$stemspec =~ s/\?/\./go;
+	$stemspec =~ s/^(\\\.libs)\-/$1\\d*\-/go;
+	$vspec =~ s/\./\\\./go;
+	$vspec =~ s/\+/\\\+/go;
+	$vspec =~ s/\*/\.\*/go;
+	$vspec =~ s/\?/\./go;
 
 	$p = $stemspec;
 	$p.="-.*" if $vspec ne '';
@@ -193,8 +190,8 @@ sub subpattern_match
 	# Now, have to extract the version number, and the flavor...
 	for (@l) {
 		my ($stem, $v, $flavor);
-		if (m/\-(\d[^-]*)/) {
-			($stem, $v, $flavor) = ($`, $1, $');
+		if (m/^(.*?)\-(\d[^-]*)(.*)$/o) {
+			($stem, $v, $flavor) = ($1, $2, $3);
 			if ($stem =~ m/^$stemspec$/ &&
 			    check_version($v, $vspec) &&
 			    check_flavor($flavor, $flavorspec)) {
@@ -208,17 +205,6 @@ sub subpattern_match
 	}
 		
 	return @result;
-}
-
-sub match
-{
-	my ($pattern, @list) = @_;
-	my @l = ();
-
-	for my $subpattern (split /\|/, $pattern) {
-		push(@l, subpattern_match($subpattern, \@list));
-	}
-	return @l;
 }
 
 1;

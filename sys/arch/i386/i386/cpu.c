@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.c,v 1.21 2007/02/20 21:15:01 tom Exp $	*/
+/*	$OpenBSD: cpu.c,v 1.25 2007/05/29 18:18:20 tom Exp $	*/
 /* $NetBSD: cpu.c,v 1.1.2.7 2000/06/26 02:04:05 sommerfeld Exp $ */
 
 /*-
@@ -151,7 +151,7 @@ void	cpu_copy_trampoline(void);
 void
 cpu_init_first()
 {
-	int cpunum = cpu_number();
+	int cpunum = lapic_cpu_number();
 
 	if (cpunum != 0) {
 		cpu_info[0] = NULL;
@@ -193,10 +193,10 @@ cpu_attach(struct device *parent, struct device *self, void *aux)
 	struct pcb *pcb;
 
 	if (caa->cpu_role != CPU_ROLE_AP) {
-		if (cpunum != cpu_number()) {
+		if (cpunum != lapic_cpu_number()) {
 			panic("%s: running cpu is at apic %d"
 			    " instead of at expected %d",
-			    self->dv_xname, cpu_number(), cpunum);
+			    self->dv_xname, lapic_cpu_number(), cpunum);
 		}
 
 		ci = &cpu_info_primary;
@@ -248,7 +248,7 @@ cpu_attach(struct device *parent, struct device *self, void *aux)
 	pcb->pcb_tss.tss_esp = kstack + USPACE - 16 -
 	    sizeof (struct trapframe);
 	pcb->pcb_pmap = pmap_kernel();
-	pcb->pcb_cr3 = vtophys((vaddr_t)pcb->pcb_pmap->pm_pdir);
+	pcb->pcb_cr3 = pcb->pcb_pmap->pm_pdirpa;
 	/* pcb->pcb_cr3 = pcb->pcb_pmap->pm_pdir - KERNBASE; XXX ??? */
 
 	cpu_default_ldt(ci);	/* Use the `global' ldt until one alloc'd */
@@ -323,6 +323,7 @@ cpu_attach(struct device *parent, struct device *self, void *aux)
  * Initialize the processor appropriately.
  */
 
+#ifdef MULTIPROCESSOR
 void
 cpu_init(struct cpu_info *ci)
 {
@@ -330,13 +331,12 @@ cpu_init(struct cpu_info *ci)
 	if (ci->cpu_setup != NULL)
 		(*ci->cpu_setup)(ci);
 
-#if defined(I486_CPU) || defined(I586_CPU) || defined(I686_CPU)
 	/*
-	 * On a 486 or above, enable ring 0 write protection.
+	 * Enable ring 0 write protection (486 or above, but 386
+	 * no longer supported).
 	 */
-	if (ci->cpu_class >= CPUCLASS_486)
-		lcr0(rcr0() | CR0_WP);
-#endif
+	lcr0(rcr0() | CR0_WP);
+
 	if (cpu_feature & CPUID_PGE)
 		lcr4(rcr4() | CR4_PGE);	/* enable global TLB caching */
 
@@ -356,9 +356,6 @@ cpu_init(struct cpu_info *ci)
 	}
 #endif /* I686_CPU */
 }
-
-
-#ifdef MULTIPROCESSOR
 
 void
 cpu_boot_secondary_processors()
@@ -410,7 +407,7 @@ cpu_boot_secondary(struct cpu_info *ci)
 		printf("%s: starting", ci->ci_dev.dv_xname);
 
 	/* XXX move elsewhere, not per CPU. */
-	mp_pdirpa = vtophys((vaddr_t)kpm->pm_pdir);
+	mp_pdirpa = kpm->pm_pdirpa;
 
 	pcb = ci->ci_idle_pcb;
 

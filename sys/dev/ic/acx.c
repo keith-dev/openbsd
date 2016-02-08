@@ -1,4 +1,4 @@
-/*	$OpenBSD: acx.c,v 1.66 2007/03/01 10:55:14 claudio Exp $ */
+/*	$OpenBSD: acx.c,v 1.76 2007/08/05 22:40:38 claudio Exp $ */
 
 /*
  * Copyright (c) 2006 Jonathan Gray <jsg@openbsd.org>
@@ -146,6 +146,7 @@ void	 acx_init_info_reg(struct acx_softc *);
 int	 acx_config(struct acx_softc *);
 int	 acx_read_config(struct acx_softc *, struct acx_config *);
 int	 acx_write_config(struct acx_softc *, struct acx_config *);
+int	 acx_rx_config(struct acx_softc *);
 int	 acx_set_crypt_keys(struct acx_softc *);
 void	 acx_next_scan(void *);
 
@@ -174,6 +175,7 @@ int	 acx_reset(struct acx_softc *);
 int	 acx_set_null_tmplt(struct acx_softc *);
 int	 acx_set_probe_req_tmplt(struct acx_softc *, const char *, int);
 int	 acx_set_probe_resp_tmplt(struct acx_softc *, struct ieee80211_node *);
+int	 acx_beacon_locate(struct mbuf *, u_int8_t);
 int	 acx_set_beacon_tmplt(struct acx_softc *, struct ieee80211_node *);
 
 int	 acx_read_eeprom(struct acx_softc *, uint32_t, uint8_t *);
@@ -192,8 +194,7 @@ int	 acx_newstate(struct ieee80211com *, enum ieee80211_state, int);
 
 void	 acx_init_cmd_reg(struct acx_softc *);
 int	 acx_join_bss(struct acx_softc *, uint8_t, struct ieee80211_node *);
-int	 acx_enable_txchan(struct acx_softc *, uint8_t);
-int	 acx_enable_rxchan(struct acx_softc *, uint8_t);
+int	 acx_set_channel(struct acx_softc *, uint8_t);
 int	 acx_init_radio(struct acx_softc *, uint32_t, uint32_t);
 
 void	 acx_iter_func(void *, struct ieee80211_node *);
@@ -303,8 +304,10 @@ acx_attach(struct acx_softc *sc)
 	/*
 	 * NOTE: Don't overwrite ic_caps set by chip specific code
 	 */
-	ic->ic_caps |= IEEE80211_C_WEP |	/* WEP */
-	    IEEE80211_C_IBSS |			/* IBSS modes */
+	ic->ic_caps =
+	    IEEE80211_C_WEP |			/* WEP */
+	    IEEE80211_C_IBSS |			/* IBSS mode */
+	    IEEE80211_C_MONITOR |		/* Monitor mode */
 	    IEEE80211_C_HOSTAP |		/* Access Point */
 	    IEEE80211_C_SHPREAMBLE;		/* Short preamble */
 
@@ -378,6 +381,7 @@ int
 acx_init(struct ifnet *ifp)
 {
 	struct acx_softc *sc = ifp->if_softc;
+	struct ieee80211com *ic = &sc->sc_ic;
 	char fname[] = "tiacx111c16";
 	int error, combined = 0;
 
@@ -464,8 +468,12 @@ acx_init(struct ifnet *ifp)
 	ifp->if_flags |= IFF_RUNNING;
 	ifp->if_flags &= ~IFF_OACTIVE;
 
-	/* Begin background scanning */
-	ieee80211_new_state(&sc->sc_ic, IEEE80211_S_SCAN, -1);
+	if (ic->ic_opmode != IEEE80211_M_MONITOR)
+		/* start background scanning */
+		ieee80211_new_state(ic, IEEE80211_S_SCAN, -1);
+	else
+		/* in monitor mode change directly into run state */
+		ieee80211_new_state(ic, IEEE80211_S_RUN, -1);
 
 back:
 	if (error)
@@ -489,13 +497,13 @@ acx_set_crypt_keys(struct acx_softc *sc)
 	int i, error, got_wk = 0;
 
 	for (i = 0; i < IEEE80211_WEP_NKID; ++i) {
-		struct ieee80211_wepkey *wk = &ic->ic_nw_keys[i];
+		struct ieee80211_key *k = &ic->ic_nw_keys[i];
 
-		if (wk->wk_len == 0)
+		if (k->k_len == 0)
 			continue;
 
 		if (sc->chip_hw_crypt) {
-			error = sc->chip_set_wepkey(sc, wk, i);
+			error = sc->chip_set_wepkey(sc, k, i);
 			if (error)
 				return (error);
 			got_wk = 1;
@@ -615,6 +623,10 @@ acx_config(struct acx_softc *sc)
 	if (error)
 		return (error);
 
+	error = acx_rx_config(sc);
+	if (error)
+		return (error);
+
 	if (acx_set_probe_req_tmplt(sc, "", 0) != 0) {
 		printf("%s: can't set probe req template "
 		    "(empty ssid)\n", sc->sc_dev.dv_xname);
@@ -716,7 +728,6 @@ acx_write_config(struct acx_softc *sc, struct acx_config *conf)
 	struct acx_conf_rate_fallback rate_fb;
 	struct acx_conf_antenna ant;
 	struct acx_conf_regdom reg_dom;
-	struct acx_conf_rxopt rx_opt;
 	struct ifnet *ifp = &sc->sc_ic.ic_if;
 	int error;
 
@@ -771,15 +782,39 @@ acx_write_config(struct acx_softc *sc, struct acx_config *conf)
 			return (error);
 	}
 
-	/* What we want to receive and how to receive */
-	/* XXX may not belong here, acx_init() */
-	rx_opt.opt1 = htole16(RXOPT1_FILT_FDEST | RXOPT1_INCL_RXBUF_HDR);
-	rx_opt.opt2 = htole16(RXOPT2_RECV_ASSOC_REQ | RXOPT2_RECV_AUTH |
-	    RXOPT2_RECV_BEACON | RXOPT2_RECV_CF | RXOPT2_RECV_CTRL |
-	    RXOPT2_RECV_DATA | RXOPT2_RECV_MGMT | RXOPT2_RECV_PROBE_REQ |
-	    RXOPT2_RECV_PROBE_RESP | RXOPT2_RECV_OTHER);
+	return (0);
+}
+
+int
+acx_rx_config(struct acx_softc *sc)
+{
+	struct ieee80211com *ic = &sc->sc_ic;
+	struct acx_conf_rxopt rx_opt;
+
+	/* tell the RX receiver what frames we want to have */
+	rx_opt.opt1 = htole16(RXOPT1_INCL_RXBUF_HDR);
+	rx_opt.opt2 = htole16(
+	    RXOPT2_RECV_ASSOC_REQ |
+	    RXOPT2_RECV_AUTH |
+	    RXOPT2_RECV_BEACON |
+	    RXOPT2_RECV_CF |
+	    RXOPT2_RECV_CTRL |
+	    RXOPT2_RECV_DATA |
+	    RXOPT2_RECV_MGMT |
+	    RXOPT2_RECV_PROBE_REQ |
+	    RXOPT2_RECV_PROBE_RESP |
+	    RXOPT2_RECV_OTHER);
+
+	/* in monitor mode go promiscuous */
+	if (ic->ic_opmode == IEEE80211_M_MONITOR) {
+		rx_opt.opt1 |= RXOPT1_PROMISC;
+		rx_opt.opt2 |= RXOPT2_RECV_BROKEN | RXOPT2_RECV_ACK;
+	} else
+		rx_opt.opt1 |= RXOPT1_FILT_FDEST;
+
+	/* finally set the RX options */
 	if (acx_set_conf(sc, ACX_CONF_RXOPT, &rx_opt, sizeof(rx_opt)) != 0) {
-		printf("%s: can't set RX option\n", ifp->if_xname);
+		printf("%s: can not set RX options!\n", sc->sc_dev.dv_xname);
 		return (ENXIO);
 	}
 
@@ -794,6 +829,7 @@ acx_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	struct ifaddr *ifa;
 	struct ifreq *ifr;
 	int s, error = 0;
+	uint8_t chan;
 
 	s = splnet();
 
@@ -824,6 +860,21 @@ acx_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 
 		if (error == ENETRESET)
 			error = 0;
+		break;
+	case SIOCS80211CHANNEL:
+		/* allow fast channel switching in monitor mode */
+		error = ieee80211_ioctl(ifp, cmd, data);
+		if (error == ENETRESET &&
+		    ic->ic_opmode == IEEE80211_M_MONITOR) {
+			if ((ifp->if_flags & (IFF_UP | IFF_RUNNING)) ==
+			    (IFF_UP | IFF_RUNNING)) {
+				ic->ic_bss->ni_chan = ic->ic_ibss_chan;
+				chan = ieee80211_chan2ieee(ic,
+				    ic->ic_bss->ni_chan);
+				(void)acx_set_channel(sc, chan);
+			}
+			error = 0;
+		}
 		break;
 	default:
 		error = ieee80211_ioctl(ifp, cmd, data);
@@ -877,6 +928,19 @@ acx_start(struct ifnet *ifp)
 			m->m_pkthdr.rcvif = NULL;
 
 			/*
+			 * probe response mgmt frames are handled by the
+			 * firmware already.  So, don't send them twice.
+			 */
+			wh = mtod(m, struct ieee80211_frame *);
+			if ((wh->i_fc[0] & IEEE80211_FC0_SUBTYPE_MASK) ==
+			    IEEE80211_FC0_SUBTYPE_PROBE_RESP) {
+				if (ni != NULL)
+					ieee80211_release_node(ic, ni);
+                                m_freem(m);
+                                continue;
+			}
+
+			/*
 			 * mgmt frames are sent at the lowest available
 			 * bit-rate.
 			 */
@@ -885,16 +949,17 @@ acx_start(struct ifnet *ifp)
 		} else if (!IFQ_IS_EMPTY(&ifp->if_snd)) {
 			struct ether_header *eh;
 
+			IFQ_DEQUEUE(&ifp->if_snd, m);
+			if (m == NULL)
+				break;
+
 			if (ic->ic_state != IEEE80211_S_RUN) {
 				DPRINTF(("%s: data packet dropped due to "
 				    "not RUN.  Current state %d\n",
 				    ifp->if_xname, ic->ic_state));
+				m_freem(m);
 				break;
 			}
-
-			IFQ_DEQUEUE(&ifp->if_snd, m);
-			if (m == NULL)
-				break;
 
 			if (m->m_len < sizeof(struct ether_header)) {
 				m = m_pullup(m, sizeof(struct ether_header));
@@ -1114,7 +1179,7 @@ acx_txeof(struct acx_softc *sc)
 
 			wn->amn.amn_txcnt++;
 			if (ntries > 0) {
-				DPRINTF(("%s: tx intr ntries %d\n",
+				DPRINTFN(2, ("%s: tx intr ntries %d\n",
 				    sc->sc_dev.dv_xname, ntries));
 				wn->amn.amn_retrycnt++;
 			}
@@ -1348,6 +1413,13 @@ next:
 	 * time we can start from it.
 	 */
 	bd->rx_scan_start = idx;
+
+	/*
+	 * In HostAP mode, ieee80211_input() will enqueue packets in if_snd
+	 * without calling if_start().
+	 */
+	if (!IFQ_IS_EMPTY(&ifp->if_snd) && !(ifp->if_flags & IFF_OACTIVE))
+		(*ifp->if_start)(ifp);
 }
 
 int
@@ -1661,15 +1733,7 @@ acx_newstate(struct ieee80211com *ic, enum ieee80211_state nstate, int arg)
 			uint8_t chan;
 
 			chan = ieee80211_chan2ieee(ic, ic->ic_bss->ni_chan);
-
-			if (acx_enable_txchan(sc, chan) != 0) {
-				DPRINTF(("%s: enable TX on channel %d failed\n",
-				    ifp->if_xname, chan));
-			}
-			if (acx_enable_rxchan(sc, chan) != 0) {
-				DPRINTF(("%s: enable RX on channel %d failed\n",
-				    ifp->if_xname, chan));
-			}
+			(void)acx_set_channel(sc, chan);
 
 			timeout_add(&sc->sc_chanscan_timer,
 			    hz / acx_chanscan_rate);
@@ -1717,17 +1781,8 @@ acx_newstate(struct ieee80211com *ic, enum ieee80211_state nstate, int arg)
 
 			error = 1;
 
-			if (acx_enable_txchan(sc, chan) != 0) {
-				printf("%s: enable TX on channel %d failed\n",
-				    ifp->if_xname, chan);
+			if (acx_set_channel(sc, chan) != 0)
 				goto back;
-			}
-
-			if (acx_enable_rxchan(sc, chan) != 0) {
-				printf("%s: enable RX on channel %d failed\n",
-				    ifp->if_xname, chan);
-				goto back;
-			}
 
 			if (acx_set_beacon_tmplt(sc, ni) != 0) {
 				printf("%s: set beacon template failed\n",
@@ -1822,15 +1877,6 @@ acx_init_tmplt_ordered(struct acx_softc *sc)
 	if (acx_set_tmplt(sc, ACXCMD_TMPLT_PROBE_RESP, &data.presp,
 	    sizeof(data.presp)) != 0)
 		return (1);
-
-	/* Setup TIM template */
-	data.tim.tim_eid = IEEE80211_ELEMID_TIM;
-	data.tim.tim_len = ACX_TIM_LEN(ACX_TIM_BITMAP_LEN);
-	if (acx_set_tmplt(sc, ACXCMD_TMPLT_TIM, &data.tim,
-	    ACX_TMPLT_TIM_SIZ(ACX_TIM_BITMAP_LEN)) != 0) {
-		printf("%s: can't set tim tmplt\n", sc->sc_dev.dv_xname);
-		return (1);
-	}
 
 	return (0);
 }
@@ -2106,7 +2152,8 @@ acx_newbuf(struct acx_softc *sc, struct acx_rxbuf *rb, int wait)
 	}
 
 	/* Unload originally mapped mbuf */
-	bus_dmamap_unload(sc->sc_dmat, rb->rb_mbuf_dmamap);
+	if (rb->rb_mbuf != NULL)
+		bus_dmamap_unload(sc->sc_dmat, rb->rb_mbuf_dmamap);
 
 	/* Swap this dmamap with tmp dmamap */
 	map = rb->rb_mbuf_dmamap;
@@ -2249,7 +2296,7 @@ acx_encap(struct acx_softc *sc, struct acx_txbuf *txbuf, struct mbuf *m,
 	ctrl |= sc->chip_fw_txdesc_ctrl; /* extra chip specific flags */
 	ctrl &= ~(DESC_CTRL_HOSTOWN | DESC_CTRL_ACXDONE);
 
-	FW_TXDESC_SETFIELD_4(sc, txbuf, f_tx_len, m->m_pkthdr.len);
+	FW_TXDESC_SETFIELD_2(sc, txbuf, f_tx_len, m->m_pkthdr.len);
 	FW_TXDESC_SETFIELD_1(sc, txbuf, f_tx_error, 0);
 	FW_TXDESC_SETFIELD_1(sc, txbuf, f_tx_ack_fail, 0);
 	FW_TXDESC_SETFIELD_1(sc, txbuf, f_tx_rts_fail, 0);
@@ -2322,19 +2369,36 @@ acx_set_probe_req_tmplt(struct acx_softc *sc, const char *ssid, int ssid_len)
 	    ACX_TMPLT_PROBE_REQ_SIZ(len)));
 }
 
+struct mbuf *ieee80211_get_probe_resp(struct ieee80211com *,
+    struct ieee80211_node *);
+
 int
 acx_set_probe_resp_tmplt(struct acx_softc *sc, struct ieee80211_node *ni)
 {
 	struct ieee80211com *ic = &sc->sc_ic;
 	struct acx_tmplt_probe_resp resp;
+	struct ieee80211_frame *wh;
 	struct mbuf *m;
 	int len;
 
 	bzero(&resp, sizeof(resp));
 
-	m = ieee80211_beacon_alloc(ic, ni);
+	m = ieee80211_get_probe_resp(ic, ni);
 	if (m == NULL)
 		return (1);
+	M_PREPEND(m, sizeof(struct ieee80211_frame), M_DONTWAIT);
+	if (m == NULL)
+		return (1);
+	wh = mtod(m, struct ieee80211_frame *);
+	wh->i_fc[0] = IEEE80211_FC0_VERSION_0 | IEEE80211_FC0_TYPE_MGT |
+	    IEEE80211_FC0_SUBTYPE_PROBE_RESP;
+	wh->i_fc[1] = IEEE80211_FC1_DIR_NODS;
+	*(u_int16_t *)&wh->i_dur[0] = 0;
+	IEEE80211_ADDR_COPY(wh->i_addr1, ni->ni_macaddr);
+	IEEE80211_ADDR_COPY(wh->i_addr2, ic->ic_myaddr);
+	IEEE80211_ADDR_COPY(wh->i_addr3, ni->ni_bssid);
+	*(u_int16_t *)wh->i_seq = 0;
+
 	m_copydata(m, 0, m->m_pkthdr.len, (caddr_t)&resp.data);
 	len = m->m_pkthdr.len + sizeof(resp.size);
 	m_freem(m); 
@@ -2343,22 +2407,69 @@ acx_set_probe_resp_tmplt(struct acx_softc *sc, struct ieee80211_node *ni)
 }
 
 int
+acx_beacon_locate(struct mbuf *m, u_int8_t type)
+{
+	int off;
+	u_int8_t *frm;
+	/*
+	 * beacon frame format
+	 *	[8] time stamp
+	 *	[2] beacon interval
+	 *	[2] cabability information
+	 *	from here on [tlv] values
+	 */
+
+	if (m->m_len != m->m_pkthdr.len)
+		panic("beacon not in contiguous mbuf");
+
+	off = sizeof(struct ieee80211_frame) + 8 + 2 + 2;
+	frm = mtod(m, u_int8_t *);
+	for (; off + 1 < m->m_len; off += frm[off + 1] + 2) {
+		if (frm[off] == type)
+			return (off);
+	}
+	/* type not found */
+	return (m->m_len);
+}
+
+int
 acx_set_beacon_tmplt(struct acx_softc *sc, struct ieee80211_node *ni)
 {
 	struct ieee80211com *ic = &sc->sc_ic;
 	struct acx_tmplt_beacon beacon;
+	struct acx_tmplt_tim tim;
 	struct mbuf *m;
-	int len;
+	int len, off;
+
+	bzero(&beacon, sizeof(beacon));
+	bzero(&tim, sizeof(tim));
 
 	m = ieee80211_beacon_alloc(ic, ni);
 	if (m == NULL)
 		return (1);
-	bzero(&beacon, sizeof(beacon));
-	m_copydata(m, 0, m->m_pkthdr.len, (caddr_t)&beacon.data);
-	len = m->m_pkthdr.len + sizeof(beacon.size);
+
+	off = acx_beacon_locate(m, IEEE80211_ELEMID_TIM);
+
+	m_copydata(m, 0, off, (caddr_t)&beacon.data);
+	len = off + sizeof(beacon.size);
+
+	if (acx_set_tmplt(sc, ACXCMD_TMPLT_BEACON, &beacon, len) != 0) {
+		m_freem(m);
+		return (1);
+	}
+
+	len = m->m_pkthdr.len - off;
+	if (len == 0) {
+		/* no TIM field */
+		m_freem(m);
+		return (0);
+	}
+
+	m_copydata(m, off, len, (caddr_t)&tim.data);
+	len += sizeof(beacon.size);
 	m_freem(m);
 
-	return (acx_set_tmplt(sc, ACXCMD_TMPLT_BEACON, &beacon, len));
+	return (acx_set_tmplt(sc, ACXCMD_TMPLT_TIM, &tim, len));
 }
 
 void
@@ -2404,17 +2515,23 @@ acx_join_bss(struct acx_softc *sc, uint8_t mode, struct ieee80211_node *node)
 }
 
 int
-acx_enable_txchan(struct acx_softc *sc, uint8_t chan)
+acx_set_channel(struct acx_softc *sc, uint8_t chan)
 {
-	return (acx_exec_command(sc, ACXCMD_ENABLE_TXCHAN, &chan, sizeof(chan),
-	    NULL, 0));
-}
+	if (acx_exec_command(sc, ACXCMD_ENABLE_TXCHAN, &chan, sizeof(chan),
+	    NULL, 0) != 0) {
+		DPRINTF(("%s: setting TX channel %d failed\n",
+		    sc->sc_dev.dv_xname, chan));
+		return (ENXIO);
+	}
 
-int
-acx_enable_rxchan(struct acx_softc *sc, uint8_t chan)
-{
-	return (acx_exec_command(sc, ACXCMD_ENABLE_RXCHAN, &chan, sizeof(chan),
-	    NULL, 0));
+	if (acx_exec_command(sc, ACXCMD_ENABLE_RXCHAN, &chan, sizeof(chan),
+	    NULL, 0) != 0) {
+		DPRINTF(("%s: setting RX channel %d failed\n",
+		    sc->sc_dev.dv_xname, chan));
+		return (ENXIO);
+	}
+
+	return (0);
 }
 
 int

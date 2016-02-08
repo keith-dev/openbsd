@@ -1,4 +1,4 @@
-/*	$OpenBSD: ramdisk.c,v 1.29 2006/09/24 20:29:52 krw Exp $	*/
+/*	$OpenBSD: ramdisk.c,v 1.37 2007/06/20 18:15:46 deraadt Exp $	*/
 /*	$NetBSD: ramdisk.c,v 1.8 1996/04/12 08:30:09 leo Exp $	*/
 
 /*
@@ -99,7 +99,7 @@ struct rd_softc {
 
 void rdattach(int);
 void rd_attach(struct device *, struct device *, void *);
-void rdgetdisklabel(struct rd_softc *sc);
+void rdgetdisklabel(dev_t, struct rd_softc *, struct disklabel *, int);
 
 /*
  * Some ports (like i386) use a swapgeneric that wants to
@@ -211,14 +211,14 @@ dev_type_dump(rddump);
 int
 rddump(dev, blkno, va, size)
 	dev_t dev;
-	daddr_t blkno;
+	daddr64_t blkno;
 	caddr_t va;
 	size_t size;
 {
 	return ENODEV;
 }
 
-int
+daddr64_t
 rdsize(dev_t dev)
 {
 	int part, unit;
@@ -235,12 +235,12 @@ rdsize(dev_t dev)
 	if (sc->sc_type == RD_UNCONFIGURED)
 		return 0;
 
-	rdgetdisklabel(sc);
+	rdgetdisklabel(dev, sc, sc->sc_dkdev.dk_label, 0);
 	part = DISKPART(dev);
 	if (part >= sc->sc_dkdev.dk_label->d_npartitions)
 		return 0;
 	else
-		return sc->sc_dkdev.dk_label->d_partitions[part].p_size *
+		return DL_GETPSIZE(&sc->sc_dkdev.dk_label->d_partitions[part]) *
 		    (sc->sc_dkdev.dk_label->d_secsize / DEV_BSIZE);
 }
 
@@ -337,8 +337,7 @@ rdstrategy(bp)
 	/* Do not write on "no trespassing" areas... */
 	part = DISKPART(bp->b_dev);
 	if (part != RAW_PART &&
-	    bounds_check_with_label(bp, sc->sc_dkdev.dk_label,
-	      sc->sc_dkdev.dk_cpulabel, 1) <= 0)
+	    bounds_check_with_label(bp, sc->sc_dkdev.dk_label, 1) <= 0)
 		goto bad;
 
 	switch (sc->sc_type) {
@@ -394,6 +393,7 @@ rdioctl(dev, cmd, data, flag, proc)
 	struct proc	*proc;
 {
 	int unit;
+	struct disklabel *lp;
 	struct rd_softc *sc;
 	struct rd_conf *urd;
 	int error;
@@ -403,12 +403,32 @@ rdioctl(dev, cmd, data, flag, proc)
 
 	urd = (struct rd_conf *)data;
 	switch (cmd) {
+	case DIOCRLDINFO:
+		if (sc->sc_type == RD_UNCONFIGURED)
+			break;
+		lp = malloc(sizeof(*lp), M_TEMP, M_WAITOK);
+		rdgetdisklabel(dev, sc, lp, 0);
+		bcopy(lp, sc->sc_dkdev.dk_label, sizeof(*lp));
+		free(lp, M_TEMP);
+		return 0;
+
+	case DIOCGPDINFO:
+		if (sc->sc_type == RD_UNCONFIGURED)
+			break;
+		rdgetdisklabel(dev, sc, (struct disklabel *)data, 1);
+		return 0;
+
 	case DIOCGDINFO:
 		if (sc->sc_type == RD_UNCONFIGURED) {
 			break;
 		}
-		rdgetdisklabel(sc);
-		bcopy(sc->sc_dkdev.dk_label, data, sizeof(struct disklabel));
+		*(struct disklabel *)data = *(sc->sc_dkdev.dk_label);
+		return 0;
+
+	case DIOCGPART:
+		((struct partinfo *)data)->disklab = sc->sc_dkdev.dk_label;
+		((struct partinfo *)data)->part =
+		    &sc->sc_dkdev.dk_label->d_partitions[DISKPART(dev)];
 		return 0;
 
 	case DIOCWDINFO:
@@ -420,13 +440,11 @@ rdioctl(dev, cmd, data, flag, proc)
 			return EBADF;
 
 		error = setdisklabel(sc->sc_dkdev.dk_label,
-		    (struct disklabel *)data, /*sd->sc_dk.dk_openmask : */0,
-		    sc->sc_dkdev.dk_cpulabel);
+		    (struct disklabel *)data, /*sd->sc_dk.dk_openmask : */0);
 		if (error == 0) {
 			if (cmd == DIOCWDINFO)
 				error = writedisklabel(DISKLABELDEV(dev),
-				    rdstrategy, sc->sc_dkdev.dk_label,
-				    sc->sc_dkdev.dk_cpulabel);
+				    rdstrategy, sc->sc_dkdev.dk_label);
 		}
 
 		return error;
@@ -472,12 +490,10 @@ rdioctl(dev, cmd, data, flag, proc)
 }
 
 void
-rdgetdisklabel(struct rd_softc *sc)
+rdgetdisklabel(dev_t dev, struct rd_softc *sc, struct disklabel *lp,
+    int spoofonly)
 {
-	struct disklabel *lp = sc->sc_dkdev.dk_label;
-
-	bzero(sc->sc_dkdev.dk_label, sizeof(struct disklabel));
-	bzero(sc->sc_dkdev.dk_cpulabel, sizeof(struct cpu_disklabel));
+	bzero(lp, sizeof(struct disklabel));
 
 	lp->d_secsize = DEV_BSIZE;
 	lp->d_ntracks = 1;
@@ -492,14 +508,10 @@ rdgetdisklabel(struct rd_softc *sc)
 	strncpy(lp->d_typename, "RAM disk", sizeof(lp->d_typename));
 	lp->d_type = DTYPE_SCSI;
 	strncpy(lp->d_packname, "fictitious", sizeof(lp->d_packname));
-	lp->d_secperunit = lp->d_nsectors;
+	DL_SETDSIZE(lp, lp->d_nsectors);
 	lp->d_rpm = 3600;
 	lp->d_interleave = 1;
-
-	lp->d_partitions[RAW_PART].p_offset = 0;
-	lp->d_partitions[RAW_PART].p_size = lp->d_secperunit;
-	lp->d_partitions[RAW_PART].p_fstype = FS_UNUSED;
-	lp->d_npartitions = RAW_PART + 1;
+	lp->d_version = 1;
 
 	lp->d_magic = DISKMAGIC;
 	lp->d_magic2 = DISKMAGIC;
@@ -508,8 +520,7 @@ rdgetdisklabel(struct rd_softc *sc)
 	/*
 	 * Call the generic disklabel extraction routine
 	 */
-	readdisklabel(DISKLABELDEV(sc->sc_dev.dv_unit), rdstrategy,
-	    sc->sc_dkdev.dk_label, sc->sc_dkdev.dk_cpulabel, 0);
+	readdisklabel(DISKLABELDEV(dev), rdstrategy, lp, spoofonly);
 }
 
 /*

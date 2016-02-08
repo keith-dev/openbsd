@@ -1,4 +1,4 @@
-/*	$OpenBSD: trap.c,v 1.10 2007/01/15 23:19:05 jsg Exp $	*/
+/*	$OpenBSD: trap.c,v 1.13 2007/05/11 10:06:55 pedro Exp $	*/
 /*	$NetBSD: trap.c,v 1.2 2003/05/04 23:51:56 fvdl Exp $	*/
 
 /*-
@@ -107,9 +107,6 @@
 #endif
 
 void trap(struct trapframe);
-#if defined(I386_CPU)
-int trapwrite(unsigned);
-#endif
 
 const char *trap_type[] = {
 	"privileged instruction fault",		/*  0 T_PRIVINFLT */
@@ -334,7 +331,6 @@ copyfault:
 	case T_ASTFLT|T_USER:		/* Allow process switch */
 		uvmexp.softs++;
 		if (p->p_flag & P_OWEUPC) {
-			p->p_flag &= ~P_OWEUPC;
 			KERNEL_PROC_LOCK(p);
 			ADDUPROF(p);
 			KERNEL_PROC_UNLOCK(p);
@@ -376,7 +372,7 @@ copyfault:
 			goto we_re_toast;
 #endif
 		cr2 = rcr2();
-		KERNEL_LOCK(LK_CANRECURSE|LK_EXCLUSIVE);
+		KERNEL_LOCK();
 		goto faultcommon;
 
 	case T_PAGEFLT|T_USER: {	/* page fault */

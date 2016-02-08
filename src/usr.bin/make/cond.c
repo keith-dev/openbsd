@@ -1,5 +1,5 @@
 /*	$OpenPackages$ */
-/*	$OpenBSD: cond.c,v 1.32 2007/01/04 18:01:32 espie Exp $	*/
+/*	$OpenBSD: cond.c,v 1.35 2007/07/17 10:54:46 espie Exp $	*/
 /*	$NetBSD: cond.c,v 1.7 1996/11/06 17:59:02 christos Exp $	*/
 
 /*
@@ -171,6 +171,7 @@ static const char *
 find_cond(const char *p)
 {
     for (;;p++) {
+    	/* XXX: when *p == '\0', strchr() returns !NULL */
 	if (strchr(" \t)&|$", *p) != NULL)
 	    return p;
     }
@@ -247,10 +248,7 @@ CondGetArg(const char **linePtr, struct Name *arg, const char *func,
 static bool
 CondDoDefined(struct Name *arg)
 {
-    if (Var_Valuei(arg->s, arg->e) != NULL)
-	return true;
-    else
-	return false;
+    return Var_Definedi(arg->s, arg->e);
 }
 
 /*-
@@ -644,7 +642,7 @@ CondHandleDefault(bool doEval)
 		/* A variable is empty when it just contains
 		 * spaces... 4/15/92, christos */
 		char *p;
-		for (p = val; *p && isspace(*p); p++)
+		for (p = val; isspace(*p); p++)
 		    continue;
 		t = *p == '\0' ? True : False;
 	    }
@@ -1024,6 +1022,12 @@ Cond_Eval(const char *line)
     	if (k == K_COND_UNDEF && len == strlen(COND_UNDEF) &&
 	    strncmp(line, COND_UNDEF, len) == 0)
 	    return COND_ISUNDEF;
+	else
+	    return COND_INVALID;
+    case K_COND_POISON % MAGICSLOTS2:
+    	if (k == K_COND_POISON && len == strlen(COND_POISON) &&
+	    strncmp(line, COND_POISON, len) == 0)
+	    return COND_ISPOISON;
 	else
 	    return COND_INVALID;
     case K_COND_INCLUDE % MAGICSLOTS2:

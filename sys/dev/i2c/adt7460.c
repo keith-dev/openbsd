@@ -1,4 +1,4 @@
-/*	$OpenBSD: adt7460.c,v 1.16 2006/12/31 06:47:14 deraadt Exp $	*/
+/*	$OpenBSD: adt7460.c,v 1.18 2007/06/24 05:34:35 dlg Exp $	*/
 
 /*
  * Copyright (c) 2005 Mark Kettenis
@@ -106,8 +106,8 @@ struct adt_softc {
 	u_int8_t sc_conf;
 	struct adt_chip *chip;
 
-	struct sensor sc_sensor[ADT_NUM_SENSORS];
-	struct sensordev sc_sensordev;
+	struct ksensor sc_sensor[ADT_NUM_SENSORS];
+	struct ksensordev sc_sensordev;
 };
 
 int	adt_match(struct device *, void *, void *);
@@ -231,7 +231,7 @@ adt_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_sensor[ADT_TACH3].type = SENSOR_FANRPM;
 	sc->sc_sensor[ADT_TACH4].type = SENSOR_FANRPM;
 
-	if (sensor_task_register(sc, adt_refresh, 5)) {
+	if (sensor_task_register(sc, adt_refresh, 5) == NULL) {
 		printf(", unable to register update task\n");
 		return;
 	}

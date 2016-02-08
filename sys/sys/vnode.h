@@ -1,4 +1,4 @@
-/*	$OpenBSD: vnode.h,v 1.74 2007/02/26 11:25:23 pedro Exp $	*/
+/*	$OpenBSD: vnode.h,v 1.88 2007/06/14 20:36:34 otto Exp $	*/
 /*	$NetBSD: vnode.h,v 1.38 1996/02/29 20:59:05 cgd Exp $	*/
 
 /*
@@ -63,29 +63,21 @@ enum vtype	{ VNON, VREG, VDIR, VBLK, VCHR, VLNK, VSOCK, VFIFO, VBAD };
  * the rest, so don't believe the above comment!
  */
 enum vtagtype	{
-	VT_NON, VT_UFS, VT_NFS, VT_MFS, VT_MSDOSFS, VT_LFS, VT_LOFS, VT_FDESC,
-	VT_PORTAL, VT_KERNFS, VT_PROCFS, VT_AFS, VT_ISOFS, VT_ADOSFS, VT_EXT2FS,
-	VT_NCPFS, VT_VFS, VT_XFS, VT_NTFS, VT_UDF
+	VT_NON, VT_UFS, VT_NFS, VT_MFS, VT_MSDOSFS,
+	VT_PORTAL, VT_PROCFS, VT_AFS, VT_ISOFS, VT_ADOSFS,
+	VT_EXT2FS, VT_VFS, VT_XFS, VT_NTFS, VT_UDF
 };
 
 #define	VTAG_NAMES \
-    "NON", "UFS", "NFS", "MFS", "MSDOSFS", "LFS", "LOFS", \
-    "FDESC", "PORTAL", "KERNFS", "PROCFS", "AFS", "ISOFS", \
-    "ADOSFS", "EXT2FS", "NCPFS", "VFS", "XFS", "NTFS", "UDF"
+    "NON", "UFS", "NFS", "MFS", "MSDOSFS",			\
+    "PORTAL", "PROCFS", "AFS", "ISOFS", "ADOSFS",		\
+    "EXT2FS", "VFS", "XFS", "NTFS", "UDF"
 
 /*
  * Each underlying filesystem allocates its own private area and hangs
  * it from v_data.  If non-null, this area is freed in getnewvnode().
  */
 LIST_HEAD(buflists, buf);
-
-/*
- * Reading or writing any of these items requires holding the appropriate lock.
- * v_freelist is locked by the global vnode_free_list simple lock.
- * v_mntvnodes is locked by the global mntvnodes simple lock.
- * v_flag, v_usecount, v_holdcount and v_writecount are
- *    locked by the v_interlock simple lock.
- */
 
 struct vnode {
 	struct uvm_vnode v_uvm;			/* uvm data */
@@ -113,13 +105,9 @@ struct vnode {
 		struct fifoinfo	*vu_fifoinfo;	/* fifo (VFIFO) */
 	} v_un;
 
-	struct  simplelock v_interlock;		/* lock on usecount and flag */
 	enum	vtagtype v_tag;			/* type of underlying data */
 	void	*v_data;			/* private data for fs */
-	struct {
-		struct	simplelock vsi_lock;	/* lock to protect below */
-		struct	selinfo vsi_selinfo;	/* identity of poller(s) */
-	} v_selectinfo;
+	struct	selinfo v_selectinfo;		/* identity of poller(s) */
 };
 #define	v_mountedhere	v_un.vu_mountedhere
 #define	v_socket	v_un.vu_socket
@@ -233,45 +221,27 @@ extern int		vttoif_tab[];
 #define	V_SAVE		0x0001		/* vinvalbuf: sync file first */
 #define	V_SAVEMETA	0x0002		/* vinvalbuf: leave indirect blocks */
 
-#define REVOKEALL	0x0001		/* vop_reovke: revoke all aliases */
+#define REVOKEALL	0x0001		/* vop_revoke: revoke all aliases */
 
 
 TAILQ_HEAD(freelst, vnode);
 extern struct freelst vnode_hold_list;	/* free vnodes referencing buffers */
 extern struct freelst vnode_free_list;	/* vnode free list */
-extern struct simplelock vnode_free_list_slock;
 
-#ifdef DIAGNOSTIC
 #define	VATTR_NULL(vap)	vattr_null(vap)
-
-#define	VREF(vp)	vref(vp)
-void	vref(struct vnode *);
-#else
-#define	VATTR_NULL(vap)	(*(vap) = va_null)	/* initialize a vattr */
-
-static __inline void vref(struct vnode *);
 #define	VREF(vp)	vref(vp)		/* increase reference */
-static __inline void
-vref(vp)
-	struct vnode *vp;
-{
-	simple_lock(&vp->v_interlock);
-	vp->v_usecount++;
-	simple_unlock(&vp->v_interlock);
-}
-#endif /* DIAGNOSTIC */
-
 #define	NULLVP	((struct vnode *)NULL)
+#define	VN_KNOTE(vp, b)					\
+	KNOTE(&vp->v_selectinfo.si_note, (b))
 
 /*
  * Global vnode data.
  */
 extern	struct vnode *rootvnode;	/* root (i.e. "/") vnode */
-extern	int desiredvnodes;		/* number of vnodes desired */
+extern	int desiredvnodes;		/* XXX number of vnodes desired */
+extern	int maxvnodes;			/* XXX number of vnodes to allocate */
 extern	time_t syncdelay;		/* time to delay syncing vnodes */
 extern	int rushjob;			/* # of slots syncer should run ASAP */
-extern	struct vattr va_null;		/* predefined null vattr structure */
-
 #endif /* _KERNEL */
 
 
@@ -338,11 +308,6 @@ struct vnodeop_desc {
  */
 extern struct vnodeop_desc *vnodeop_descs[];
 
-
-/*
- * Interlock for scanning list of vnodes attached to a mountpoint
- */
-extern struct simplelock mntvnode_slock;
 
 /*
  * This macro is very helpful in defining those offsets in the vdesc struct.
@@ -441,8 +406,9 @@ void	vntblinit(void);
 int	vwaitforio(struct vnode *, int, char *, int);
 void	vwakeup(struct vnode *);
 void	vput(struct vnode *);
-int	vrecycle(struct vnode *, struct simplelock *, struct proc *);
+int	vrecycle(struct vnode *, struct proc *);
 void	vrele(struct vnode *);
+void	vref(struct vnode *);
 void	vprint(char *, struct vnode *);
 
 /* vfs_getcwd.c */
@@ -462,7 +428,6 @@ int	vop_generic_revoke(void *);
 int	vop_generic_kqfilter(void *);
 
 /* vfs_vnops.c */
-int	vn_access(struct vnode *, int);
 int	vn_isunder(struct vnode *, struct vnode *, struct proc *);
 int	vn_close(struct vnode *, int, struct ucred *, struct proc *);
 int	vn_open(struct nameidata *, int, int);
@@ -472,6 +437,7 @@ int	vn_stat(struct vnode *, struct stat *, struct proc *);
 int	vn_statfile(struct file *, struct stat *, struct proc *);
 int	vn_lock(struct vnode *, int, struct proc *);
 int	vn_writechk(struct vnode *);
+int	vn_ioctl(struct file *, u_long, caddr_t, struct proc *);
 void	vn_marktext(struct vnode *);
 
 /* vfs_sync.c */

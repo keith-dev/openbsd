@@ -1,4 +1,4 @@
-/*	$OpenBSD: procfs_vnops.c,v 1.38 2006/03/05 21:48:56 miod Exp $	*/
+/*	$OpenBSD: procfs_vnops.c,v 1.40 2007/06/18 08:30:07 jasper Exp $	*/
 /*	$NetBSD: procfs_vnops.c,v 1.40 1996/03/16 23:52:55 christos Exp $	*/
 
 /*
@@ -204,15 +204,9 @@ struct vnodeopv_desc procfs_vnodeop_opv_desc =
  * memory images.
  */
 int
-procfs_open(v)
-	void *v;
+procfs_open(void *v)
 {
-	struct vop_open_args /* {
-		struct vnode *a_vp;
-		int  a_mode;
-		struct ucred *a_cred;
-		struct proc *a_p;
-	} */ *ap = v;
+	struct vop_open_args *ap = v;
 	struct pfsnode *pfs = VTOPFS(ap->a_vp);
 	struct proc *p1 = ap->a_p;	/* tracer */
 	struct proc *p2;		/* traced */
@@ -250,15 +244,9 @@ procfs_open(v)
  * any exclusive open flag (see _open above).
  */
 int
-procfs_close(v)
-	void *v;
+procfs_close(void *v)
 {
-	struct vop_close_args /* {
-		struct vnode *a_vp;
-		int  a_fflag;
-		struct ucred *a_cred;
-		struct proc *a_p;
-	} */ *ap = v;
+	struct vop_close_args *ap = v;
 	struct pfsnode *pfs = VTOPFS(ap->a_vp);
 
 	switch (pfs->pfs_type) {
@@ -292,8 +280,7 @@ procfs_close(v)
  */
 /*ARGSUSED*/
 int
-procfs_ioctl(v)
-	void *v;
+procfs_ioctl(void *v)
 {
 
 	return (ENOTTY);
@@ -310,15 +297,9 @@ procfs_ioctl(v)
  * (EIO) would be a reasonable alternative.
  */
 int
-procfs_bmap(v)
-	void *v;
+procfs_bmap(void *v)
 {
-	struct vop_bmap_args /* {
-		struct vnode *a_vp;
-		daddr_t  a_bn;
-		struct vnode **a_vpp;
-		daddr_t *a_bnp;
-	} */ *ap = v;
+	struct vop_bmap_args *ap = v;
 
 	if (ap->a_vpp != NULL)
 		*ap->a_vpp = ap->a_vp;
@@ -344,12 +325,9 @@ procfs_bmap(v)
  * (vp) is not locked on entry or exit.
  */
 int
-procfs_inactive(v)
-	void *v;
+procfs_inactive(void *v)
 {
-	struct vop_inactive_args /* {
-		struct vnode *a_vp;
-	} */ *ap = v;
+	struct vop_inactive_args *ap = v;
 	struct vnode *vp = ap->a_vp;
 	struct pfsnode *pfs = VTOPFS(vp);
 
@@ -367,12 +345,9 @@ procfs_inactive(v)
  * from any private lists.
  */
 int
-procfs_reclaim(v)
-	void *v;
+procfs_reclaim(void *v)
 {
-	struct vop_reclaim_args /* {
-		struct vnode *a_vp;
-	} */ *ap = v;
+	struct vop_reclaim_args *ap = v;
 
 	return (procfs_freevp(ap->a_vp));
 }
@@ -381,14 +356,9 @@ procfs_reclaim(v)
  * Return POSIX pathconf information applicable to special devices.
  */
 int
-procfs_pathconf(v)
-	void *v;
+procfs_pathconf(void *v)
 {
-	struct vop_pathconf_args /* {
-		struct vnode *a_vp;
-		int a_name;
-		register_t *a_retval;
-	} */ *ap = v;
+	struct vop_pathconf_args *ap = v;
 
 	switch (ap->a_name) {
 	case _PC_LINK_MAX:
@@ -421,12 +391,9 @@ procfs_pathconf(v)
  * of (vp).
  */
 int
-procfs_print(v)
-	void *v;
+procfs_print(void *v)
 {
-	struct vop_print_args /* {
-		struct vnode *a_vp;
-	} */ *ap = v;
+	struct vop_print_args *ap = v;
 	struct pfsnode *pfs = VTOPFS(ap->a_vp);
 
 	printf("tag VT_PROCFS, type %d, pid %d, mode %x, flags %lx\n",
@@ -435,14 +402,9 @@ procfs_print(v)
 }
 
 int
-procfs_link(v)
-	void *v;
+procfs_link(void *v)
 {
-	struct vop_link_args /* {
-		struct vnode *a_dvp;
-		struct vnode *a_vp;
-		struct componentname *a_cnp;
-	} */ *ap = v;
+	struct vop_link_args *ap = v;
 
 	VOP_ABORTOP(ap->a_dvp, ap->a_cnp);
 	vput(ap->a_dvp);
@@ -450,16 +412,9 @@ procfs_link(v)
 }
 
 int
-procfs_symlink(v)
-	void *v;
+procfs_symlink(void *v)
 {
-	struct vop_symlink_args /* {
-		struct vnode *a_dvp;
-		struct vnode **a_vpp;
-		struct componentname *a_cnp;
-		struct vattr *a_vap;
-		char *a_target;
-	} */ *ap = v;
+	struct vop_symlink_args *ap = v;
 
 	VOP_ABORTOP(ap->a_dvp, ap->a_cnp);
 	vput(ap->a_dvp);
@@ -472,8 +427,7 @@ procfs_symlink(v)
  */
 /*ARGSUSED*/
 int
-procfs_badop(v)
-	void *v;
+procfs_badop(void *v)
 {
 
 	return (EIO);
@@ -489,15 +443,9 @@ procfs_badop(v)
  * this is relatively minimal for procfs.
  */
 int
-procfs_getattr(v)
-	void *v;
+procfs_getattr(void *v)
 {
-	struct vop_getattr_args /* {
-		struct vnode *a_vp;
-		struct vattr *a_vap;
-		struct ucred *a_cred;
-		struct proc *a_p;
-	} */ *ap = v;
+	struct vop_getattr_args *ap = v;
 	struct pfsnode *pfs = VTOPFS(ap->a_vp);
 	struct vattr *vap = ap->a_vap;
 	struct proc *procp;
@@ -676,8 +624,7 @@ procfs_getattr(v)
 
 /*ARGSUSED*/
 int
-procfs_setattr(v)
-	void *v;
+procfs_setattr(void *v)
 {
 	/*
 	 * just fake out attribute setting
@@ -701,15 +648,9 @@ procfs_setattr(v)
  * that the operation really does make sense.
  */
 int
-procfs_access(v)
-	void *v;
+procfs_access(void *v)
 {
-	struct vop_access_args /* {
-		struct vnode *a_vp;
-		int a_mode;
-		struct ucred *a_cred;
-		struct proc *a_p;
-	} */ *ap = v;
+	struct vop_access_args *ap = v;
 	struct vattr va;
 	int error;
 
@@ -730,14 +671,9 @@ procfs_access(v)
  * read and inwardly digest ufs_lookup().
  */
 int
-procfs_lookup(v)
-	void *v;
+procfs_lookup(void *v)
 {
-	struct vop_lookup_args /* {
-		struct vnode * a_dvp;
-		struct vnode ** a_vpp;
-		struct componentname * a_cnp;
-	} */ *ap = v;
+	struct vop_lookup_args *ap = v;
 	struct componentname *cnp = ap->a_cnp;
 	struct vnode **vpp = ap->a_vpp;
 	struct vnode *dvp = ap->a_dvp;
@@ -876,18 +812,14 @@ procfs_lookup(v)
 }
 
 int
-procfs_validfile(p, mp)
-	struct proc *p;
-	struct mount *mp;
+procfs_validfile(struct proc *p, struct mount *mp)
 {
 
 	return (p->p_textvp != NULLVP);
 }
 
 int
-procfs_validfile_linux(p, mp)
-	struct proc *p;
-	struct mount *mp;
+procfs_validfile_linux(struct proc *p, struct mount *mp)
 {
 	int flags;
 
@@ -909,17 +841,9 @@ procfs_validfile_linux(p, mp)
  * this should just be done through read()
  */
 int
-procfs_readdir(v)
-	void *v;
+procfs_readdir(void *v)
 {
-	struct vop_readdir_args /* {
-		struct vnode *a_vp;
-		struct uio *a_uio;
-		struct ucred *a_cred;
-		int *a_eofflag;
-		u_long *a_cookies;
-		int a_ncookies;
-	} */ *ap = v;
+	struct vop_readdir_args *ap = v;
 	struct uio *uio = ap->a_uio;
 	struct dirent d;
 	struct pfsnode *pfs;
@@ -1085,8 +1009,7 @@ procfs_readdir(v)
  * readlink reads the link of `curproc'
  */
 int
-procfs_readlink(v)
-	void *v;
+procfs_readlink(void *v)
 {
 	struct vop_readlink_args *ap = v;
 	char buf[16];		/* should be enough */
@@ -1108,9 +1031,7 @@ procfs_readlink(v)
  * convert decimal ascii to pid_t
  */
 static pid_t
-atopid(b, len)
-	const char *b;
-	u_int len;
+atopid(const char *b, u_int len)
 {
 	pid_t p = 0;
 
@@ -1126,14 +1047,9 @@ atopid(b, len)
 	return (p);
 }
 int
-procfs_poll(v)
-	void *v;
+procfs_poll(void *v)
 {
-	struct vop_poll_args /* {
-		struct vnode *a_vp;
-		int a_events;
-		struct proc *a_p;
-	} */ *ap = v;
+	struct vop_poll_args *ap = v;
 
 	return (ap->a_events & (POLLIN | POLLOUT | POLLRDNORM | POLLWRNORM));
 }

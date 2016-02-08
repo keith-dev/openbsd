@@ -1,4 +1,4 @@
-.\"	$OpenBSD: touch.1,v 1.10 2005/04/20 19:13:53 otto Exp $
+.\"	$OpenBSD: touch.1,v 1.14 2007/08/06 19:16:06 sobrado Exp $
 .\"	$NetBSD: touch.1,v 1.8 1995/08/31 22:10:05 jtc Exp $
 .\"
 .\" Copyright (c) 1991, 1993
@@ -33,7 +33,7 @@
 .\"
 .\"     @(#)touch.1	8.3 (Berkeley) 4/28/95
 .\"
-.Dd April 28, 1995
+.Dd $Mdocdate: August 6 2007 $
 .Dt TOUCH 1
 .Os
 .Sh NAME
@@ -44,7 +44,7 @@
 .Op Fl acm
 .Op Fl r Ar file
 .Op Fl t Ar [[CC]YY]MMDDhhmm[.SS]
-.Ar file Op Ar ...
+.Ar
 .Sh DESCRIPTION
 The
 .Nm
@@ -70,10 +70,10 @@ Change the modification time of the file.
 The access time of the file is not changed unless the
 .Fl a
 flag is also specified.
-.It Fl r
+.It Fl r Ar file
 Use the access and modification times from the specified file
 instead of the current time of day.
-.It Fl t
+.It Fl t Ar [[CC]YY]MMDDhhmm[.SS]
 Change the access and modification times to the specified time.
 The argument should be in the form
 .Dq [[CC]YY]MMDDhhmm[.SS]
@@ -125,6 +125,12 @@ utility exits 0 on success or >0 if an error occurred.
 .Sh SEE ALSO
 .Xr utimes 2
 .Sh STANDARDS
+The
+.Nm
+utility is compliant with the
+.St -p1003.1-2004
+specification.
+.Pp
 The obsolescent form of
 .Nm touch ,
 where a time format is specified as the first argument, is supported.
@@ -150,12 +156,6 @@ If the
 .Dq YY
 letter pair is in the range 69 to 99, the year is set from 1969 to 1999;
 otherwise, the year is set in the 21st century.
-.Pp
-The
-.Nm
-utility is expected to be a superset of the
-.St -p1003.2
-specification.
 .Sh HISTORY
 A
 .Nm

@@ -1,4 +1,4 @@
-/* $OpenBSD: machdep.c,v 1.84 2006/07/20 19:15:35 miod Exp $ */
+/* $OpenBSD: machdep.c,v 1.92 2007/06/06 17:15:13 deraadt Exp $ */
 /* $NetBSD: machdep.c,v 1.108 2000/09/13 15:00:23 thorpej Exp $	 */
 
 /*
@@ -123,11 +123,6 @@ caddr_t allocsys(caddr_t);
 #define BUFCACHEPERCENT 5
 #endif
 
-#ifdef	NBUF
-int nbuf = NBUF;
-#else
-int nbuf = 0;
-#endif
 #ifdef	BUFPAGES
 int bufpages = BUFPAGES;
 #else
@@ -168,15 +163,16 @@ int iospace_inited = 0;
 int	vax_led_blink = 0;
 #endif
 
-void cpu_dumpconf(void);
+struct cpu_info cpu_info_store;
+
+void dumpconf(void);
 
 void
 cpu_startup()
 {
 	caddr_t		v;
-	int		base, residual, i, sz;
+	int		sz;
 	vaddr_t		minaddr, maxaddr;
-	vsize_t		size;
 	extern unsigned int avail_end;
 	extern char	cpu_model[];
 
@@ -193,7 +189,8 @@ cpu_startup()
         if (dep_call->cpu_conf)
                 (*dep_call->cpu_conf)();
 
-	printf("total memory = %d\n", avail_end);
+	printf("real mem = %u (%uMB)\n", avail_end,
+	    avail_end/1024/1024);
 	physmem = btoc(avail_end);
 	panicstr = NULL;
 	mtpr(AST_NO, PR_ASTLVL);
@@ -209,58 +206,25 @@ cpu_startup()
 		panic("startup: no room for tables");
 	if (((unsigned long)allocsys(v) - (unsigned long)v) != sz)
 		panic("startup: table size inconsistency");
+
 	/*
-	 * Now allocate buffers proper.	 They are different than the above in
-	 * that they usually occupy more virtual memory than physical.
+	 * Determine how many buffers to allocate.
+	 * We allocate bufcachepercent% of memory for buffer space.
 	 */
-	size = MAXBSIZE * nbuf;		/* # bytes for buffers */
+	if (bufpages == 0)
+		bufpages = physmem * bufcachepercent / 100;
 
-	/* allocate VM for buffers... area is not managed by VM system */
-	if (uvm_map(kernel_map, (vaddr_t *)&buffers, round_page(size),
-		    NULL, UVM_UNKNOWN_OFFSET, 0,
-		    UVM_MAPFLAG(UVM_PROT_NONE, UVM_PROT_NONE, UVM_INH_NONE,
-			UVM_ADV_NORMAL, 0)))
-		panic("cpu_startup: cannot allocate VM for buffers");
-
-	minaddr = (vaddr_t)buffers;
-	if ((bufpages / nbuf) >= btoc(MAXBSIZE)) {
-		/* don't want to alloc more physical mem than needed */
-		bufpages = btoc(MAXBSIZE) * nbuf;
-	}
-	base = bufpages / nbuf;
-	residual = bufpages % nbuf;
-	/* now allocate RAM for buffers */
-	for (i = 0; i < nbuf; i++) {
-		vaddr_t curbuf;
-		vsize_t curbufsize;
-		struct vm_page *pg;
-
-		/*
-		 * First <residual> buffers get (base+1) physical pages
-		 * allocated for them.	The rest get (base) physical pages.
-		 * 
-		 * The rest of each buffer occupies virtual space, but has no
-		 * physical memory allocated for it.
-		 */
-		curbuf = (vaddr_t)buffers + i * MAXBSIZE;
-		curbufsize = PAGE_SIZE * (i < residual ? base + 1 : base);
-		while (curbufsize) {
-			pg = uvm_pagealloc(NULL, 0, NULL, 0);
-			if (pg == NULL)
-				panic("cpu_startup: "
-				    "not enough RAM for buffer cache");
-			pmap_kenter_pa(curbuf, VM_PAGE_TO_PHYS(pg),
-			    VM_PROT_READ | VM_PROT_WRITE);
-			curbuf += PAGE_SIZE;
-			curbufsize -= PAGE_SIZE;
-		}
-	}
-	pmap_update(kernel_map->pmap);
+	/* Restrict to at most 25% filled kvm */
+	if (bufpages >
+	    (VM_MAX_KERNEL_ADDRESS-VM_MIN_KERNEL_ADDRESS) / PAGE_SIZE / 4) 
+		bufpages = (VM_MAX_KERNEL_ADDRESS-VM_MIN_KERNEL_ADDRESS) /
+		    PAGE_SIZE / 4;
 
 	/*
 	 * Allocate a submap for exec arguments.  This map effectively limits
 	 * the number of processes exec'ing at any time.
 	 */
+	minaddr = vm_map_min(kernel_map);
 	exec_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr,
 				 16 * NCARGS, VM_MAP_PAGEABLE, FALSE, NULL);
 
@@ -271,8 +235,8 @@ cpu_startup()
 	phys_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr,
 				   VM_PHYS_SIZE, 0, FALSE, NULL);
 
-	printf("avail memory = %ld\n", ptoa(uvmexp.free));
-	printf("using %d buffers containing %d bytes of memory\n", nbuf, bufpages * PAGE_SIZE);
+	printf("avail mem = %lu (%luMB)\n", ptoa(uvmexp.free),
+	    ptoa(uvmexp.free)/1024/1024);
 
 	/*
 	 * Set up buffers, so they can be used to read disk labels.
@@ -302,21 +266,24 @@ long	dumplo = 0;
 cpu_kcore_hdr_t cpu_kcore_hdr;
 
 void
-cpu_dumpconf()
+dumpconf(void)
 {
 	int nblks;
+
+	if (dumpdev == NODEV ||
+	    (nblks = (bdevsw[major(dumpdev)].d_psize)(dumpdev)) == 0)
+		return;
+	if (nblks <= ctod(1))
+		return;
 
 	/*
 	 * XXX include the final RAM page which is not included in physmem.
 	 */
 	dumpsize = physmem + 1;
-	if (dumpdev != NODEV && bdevsw[major(dumpdev)].d_psize) {
-		nblks = (*bdevsw[major(dumpdev)].d_psize) (dumpdev);
-		if (dumpsize > btoc(dbtob(nblks - dumplo)))
-			dumpsize = btoc(dbtob(nblks - dumplo));
-		else if (dumplo == 0)
-			dumplo = nblks - btodb(ctob(dumpsize));
-	}
+	if (dumpsize > btoc(dbtob(nblks - dumplo)))
+		dumpsize = btoc(dbtob(nblks - dumplo));
+	else if (dumplo == 0)
+		dumplo = nblks - btodb(ctob(dumpsize));
 
 	/*
 	 * Don't dump on the first block in case the dump
@@ -386,7 +353,7 @@ void
 setstatclockrate(hzrate)
 	int hzrate;
 {
-	panic("setstatclockrate");
+	/* nothing to do */
 }
 
 void
@@ -628,8 +595,8 @@ void
 dumpsys()
 {
 	int maj, psize, pg;
-	daddr_t blkno;
-	int (*dump)(dev_t, daddr_t, caddr_t, size_t);
+	daddr64_t blkno;
+	int (*dump)(dev_t, daddr64_t, caddr_t, size_t);
 	paddr_t maddr;
 	int error;
 	kcore_seg_t *kseg_p;
@@ -645,7 +612,7 @@ dumpsys()
 	 * configured...
 	 */
 	if (dumpsize == 0) {
-		cpu_dumpconf();
+		dumpconf();
 		if (dumpsize == 0)
 			return;
 	}
@@ -891,28 +858,6 @@ allocsys(v)
     VALLOC(msqids, struct msqid_ds, msginfo.msgmni);
 #endif
 
-	/*
-	 * Determine how many buffers to allocate.  We make sure we allocate
-	 * at least 16 buffers.  	 
-	 */
-	if (bufpages == 0) {
-		bufpages = (btoc(2 * 1024 * 1024) + physmem) *
-		    bufcachepercent / 100;
-	}
-    if (nbuf == 0) 
-        nbuf = bufpages < 16 ? 16 : bufpages;
-
-    /* Restrict to at most 70% filled kvm */
-    if (nbuf * MAXBSIZE >
-        (VM_MAX_KERNEL_ADDRESS - VM_MIN_KERNEL_ADDRESS) * 7 / 10)
-        nbuf = (VM_MAX_KERNEL_ADDRESS - VM_MIN_KERNEL_ADDRESS) /
-            MAXBSIZE * 7 / 10;
-
-    /* More buffer pages than fits into the buffers is senseless.  */
-    if (bufpages > nbuf * MAXBSIZE / PAGE_SIZE)
-        bufpages = nbuf * MAXBSIZE / PAGE_SIZE;
-
-    VALLOC(buf, struct buf, nbuf);
     return (v);
 }
 

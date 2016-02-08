@@ -1,4 +1,4 @@
-/* $OpenBSD: monitor.c,v 1.66 2006/07/24 11:45:44 ho Exp $	 */
+/* $OpenBSD: monitor.c,v 1.71 2007/08/11 00:20:30 hshoexer Exp $	 */
 
 /*
  * Copyright (c) 2003 Håkan Olsson.  All rights reserved.
@@ -182,8 +182,7 @@ monitor_pf_key_v2_open(void)
 	}
 	pf_key_v2_socket = mm_receive_fd(m_state.s);
 	if (pf_key_v2_socket < 0) {
-		log_error("monitor_pf_key_v2_open: mm_receive_fd() failed: %s",
-		    strerror(errno));
+		log_error("monitor_pf_key_v2_open: mm_receive_fd() failed");
 		return -1;
 	}
 
@@ -221,8 +220,7 @@ monitor_open(const char *path, int flags, mode_t mode)
 
 	fd = mm_receive_fd(m_state.s);
 	if (fd < 0) {
-		log_error("monitor_open: mm_receive_fd () failed: %s",
-		    strerror(errno));
+		log_error("monitor_open: mm_receive_fd () failed");
 		return -1;
 	}
 
@@ -396,7 +394,7 @@ set_monitor_signals(void)
 {
 	int n;
 
-	for (n = 0; n < _NSIG; n++)
+	for (n = 1; n < _NSIG; n++)
 		signal(n, SIG_DFL);
 
 	/* Forward some signals to the child. */
@@ -502,7 +500,7 @@ m_priv_getfd(void)
 {
 	char	path[MAXPATHLEN];
 	size_t	len;
-	int	v, flags;
+	int	v, flags, ret;
 	int	err = 0;
 	mode_t	mode;
 
@@ -518,23 +516,24 @@ m_priv_getfd(void)
 	must_read(&flags, sizeof flags);
 	must_read(&mode, sizeof mode);
 
-	if (m_priv_local_sanitize_path(path, sizeof path, flags) != 0) {
+	if ((ret = m_priv_local_sanitize_path(path, sizeof path, flags))
+	    != 0) {
+		if (ret == 1)
+			log_print("m_priv_getfd: illegal path \"%s\"", path);
 		err = EACCES;
 		v = -1;
 	} else {
-		v = open(path, flags, mode);
-		if (v < 0)
+		if ((v = open(path, flags, mode)) == -1)
 			err = errno;
 	}
 
 	must_write(&err, sizeof err);
 
-	if (v > 0 && mm_send_fd(m_state.s, v)) {
-		log_error("m_priv_getfd: read/write operation failed");
+	if (v != -1) {
+		if (mm_send_fd(m_state.s, v) == -1)
+			log_error("m_priv_getfd: sending fd failed");
 		close(v);
-		return;
 	}
-	close(v);
 }
 
 /* Privileged: called by monitor_loop.  */
@@ -697,8 +696,12 @@ m_priv_local_sanitize_path(char *path, size_t pmax, int flags)
 
 	if (realpath(path, new_path) == NULL ||
 	    realpath("/var/run", var_run) == NULL) {
+		/*
+                 * We could not decide wether the path is ok or not.
+                 * Indicate this be returning 2.
+		 */
 		if (errno == ENOENT)
-			return 1;
+			return 2;
 		goto bad_path;
 	}
 	strlcat(var_run, "/", sizeof(var_run));
@@ -711,9 +714,6 @@ m_priv_local_sanitize_path(char *path, size_t pmax, int flags)
 		return 0;
 
 bad_path:
-	log_print("m_priv_local_sanitize_path: illegal path \"%.1023s\", "
-		  "replaced with \"/dev/null\"", path);
-	strlcpy(path, "/dev/null", pmax);
 	return 1;
 }
 
@@ -807,6 +807,7 @@ m_priv_req_readdir()
 	char path[MAXPATHLEN];
 	DIR *dp;
 	struct dirent *file;
+	struct stat sb;
 	int off, size, fd, ret, serrno;
 
 	must_read(&len, sizeof len);
@@ -835,18 +836,18 @@ m_priv_req_readdir()
 	while ((file = readdir(dp)) != NULL) {
 		strlcpy(path + off, file->d_name, size);
 
-		if (file->d_type != DT_REG && file->d_type != DT_LNK)
-				continue;
-
 		if (m_priv_local_sanitize_path(path, sizeof path, O_RDONLY)
-		    != 0) {
-			log_errorx("m_priv_req_readdir: invalid dir entry");
+		    != 0)
 			continue;
-		}
 		fd = open(path, O_RDONLY, 0);
 		if (fd == -1) {
 			log_error("m_priv_req_readdir: open "
 			    "(\"%s\", O_RDONLY, 0) failed", path);
+			continue;
+		}
+		if ((fstat(fd, &sb) == -1) ||
+		    !(S_ISREG(sb.st_mode) || S_ISLNK(sb.st_mode))) {
+			close(fd);
 			continue;
 		}
 

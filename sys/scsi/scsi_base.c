@@ -1,4 +1,4 @@
-/*	$OpenBSD: scsi_base.c,v 1.117 2006/12/12 02:44:36 krw Exp $	*/
+/*	$OpenBSD: scsi_base.c,v 1.122 2007/06/23 19:19:49 krw Exp $	*/
 /*	$NetBSD: scsi_base.c,v 1.43 1997/04/02 02:29:36 mycroft Exp $	*/
 
 /*
@@ -46,24 +46,10 @@
 #include <sys/device.h>
 #include <sys/proc.h>
 #include <sys/pool.h>
-#include <sys/kthread.h>
-#include <sys/queue.h>
 
 #include <scsi/scsi_all.h>
 #include <scsi/scsi_disk.h>
 #include <scsi/scsiconf.h>
-
-struct scsi_task {
-	void			(*func)(void *, void *);
-	void			*sc;
-	void			*arg;
-
-	TAILQ_ENTRY(scsi_task)	entry;
-};
-
-void	scsi_create_task_thread(void *);
-void	scsi_create_task(void *);
-void	scsi_task_thread(void *);
 
 static __inline struct scsi_xfer *scsi_make_xs(struct scsi_link *,
     struct scsi_generic *, int cmdlen, u_char *data_addr,
@@ -79,10 +65,8 @@ char   *scsi_decode_sense(struct scsi_sense_data *, int);
 #define	DECODE_ASC_ASCQ		2
 #define DECODE_SKSV		3
 
+int			scsi_running = 0;
 struct pool		scsi_xfer_pool;
-struct pool		scsi_task_pool;
-TAILQ_HEAD(, scsi_task)	scsi_task_list;
-volatile int		scsi_running = 0;
 
 /*
  * Called when a scsibus is attached to initialize global data.
@@ -101,14 +85,6 @@ scsi_init()
 	/* Initialize the scsi_xfer pool. */
 	pool_init(&scsi_xfer_pool, sizeof(struct scsi_xfer), 0,
 	    0, 0, "scxspl", NULL);
-
-	/* Initialize the scsi_task pool. */
-	pool_init(&scsi_task_pool, sizeof(struct scsi_task), 0,
-	    0, 0, "sctkpl", NULL);
-
-	/* Get the creation of the task thread underway. */
-	TAILQ_INIT(&scsi_task_list);
-	kthread_create_deferred(scsi_create_task_thread, NULL);
 }
 
 void
@@ -116,64 +92,6 @@ scsi_deinit()
 {
 	if (--scsi_running)
 		return;
-
-	wakeup(&scsi_task_list);
-}
-
-void
-scsi_create_task_thread(void *arg)
-{
-	if (kthread_create(scsi_task_thread, NULL, NULL, "scsi") != 0)
-		panic("unable to create scsi task thread");
-}
-
-void
-scsi_task_thread(void *arg)
-{
-	struct scsi_task		*task;
-	int				s;
-
-	s = splbio();
-	while (scsi_running) {
-		while ((task = TAILQ_FIRST(&scsi_task_list)) != NULL) {
-			TAILQ_REMOVE(&scsi_task_list, task, entry);
-			splx(s);
-
-			task->func(task->sc, task->arg);
-
-			s = splbio();
-			pool_put(&scsi_task_pool, task);
-		}
-		tsleep(&scsi_task_list, PWAIT, "slacking", 10 * hz);
-	}
-
-	if (!TAILQ_EMPTY(&scsi_task_list))
-		panic("outstanding scsi tasks");
-	splx(s);
-
-	kthread_exit(0);
-}
-
-/*
- * Must be called at splbio.
- */
-int
-scsi_task(void (*func)(void *, void *), void *sc, void *arg, int nosleep)
-{
-	struct scsi_task		*task;
-
-	task = pool_get(&scsi_task_pool, nosleep ? PR_NOWAIT : PR_WAITOK);
-	if (task == NULL)
-		return (ENOMEM);
-
-	task->func = func;
-	task->sc = sc;
-	task->arg = arg;
-
-	TAILQ_INSERT_TAIL(&scsi_task_list, task, entry);
-	wakeup(&scsi_task_list);
-
-	return (0);
 }
 
 /*
@@ -303,13 +221,15 @@ scsi_make_xs(struct scsi_link *sc_link, struct scsi_generic *scsi_cmd,
 /*
  * Find out from the device what its capacity is.
  */
-u_long
+daddr64_t
 scsi_size(struct scsi_link *sc_link, int flags, u_int32_t *blksize)
 {
-	struct scsi_read_capacity	scsi_cmd;
-	struct scsi_read_cap_data	rdcap;
-	u_long				max_addr;
-	int				error;
+	struct scsi_read_cap_data_16 rdcap16;
+	struct scsi_read_capacity_16 rc16;
+	struct scsi_read_cap_data rdcap;
+	struct scsi_read_capacity rc;
+	daddr64_t max_addr;
+	int error;
 
 	if (blksize != NULL)
 		*blksize = 0;
@@ -317,15 +237,16 @@ scsi_size(struct scsi_link *sc_link, int flags, u_int32_t *blksize)
 	/*
 	 * make up a scsi command and ask the scsi driver to do it for you.
 	 */
-	bzero(&scsi_cmd, sizeof(scsi_cmd));
-	scsi_cmd.opcode = READ_CAPACITY;
+	bzero(&rc, sizeof(rc));
+	bzero(&rdcap, sizeof(rdcap));
+	rc.opcode = READ_CAPACITY;
 
 	/*
 	 * If the command works, interpret the result as a 4 byte
 	 * number of blocks
 	 */
-	error = scsi_scsi_cmd(sc_link, (struct scsi_generic *)&scsi_cmd,
-	    sizeof(scsi_cmd), (u_char *)&rdcap, sizeof(rdcap), 2, 20000, NULL,
+	error = scsi_scsi_cmd(sc_link, (struct scsi_generic *)&rc, sizeof(rc),
+	    (u_char *)&rdcap, sizeof(rdcap), 2, 20000, NULL,
 	    flags | SCSI_DATA_IN);
 	if (error) {
 		SC_DEBUG(sc_link, SDEV_DB1, ("READ CAPACITY error (%#x)\n",
@@ -337,16 +258,30 @@ scsi_size(struct scsi_link *sc_link, int flags, u_int32_t *blksize)
 	if (blksize != NULL)
 		*blksize = _4btol(rdcap.length);
 
-	if (max_addr == 0xffffffffUL) {
-		/*
-		 * The device is reporting it has more than 2^32-1 sectors. The
-		 * 16-byte READ CAPACITY command must be issued to get full
-		 * capacity.
-		 */
-		sc_print_addr(sc_link);
-		printf("only the first 4,294,967,295 sectors will be used.\n");
-		return (0xffffffffUL);
+	if (max_addr != 0xffffffff)
+		return (max_addr + 1);
+
+	/*
+	 * The device has more than 2^32-1 sectors. Use 16-byte READ CAPACITY.
+	 */
+	 bzero(&rc16, sizeof(rc16));
+	 bzero(&rdcap16, sizeof(rdcap16));
+	 rc16.opcode = READ_CAPACITY_16;
+	 rc16.byte2 = SRC16_SERVICE_ACTION;
+	 _lto4b(sizeof(rdcap16), rc16.length);
+
+	error = scsi_scsi_cmd(sc_link, (struct scsi_generic *)&rc16,
+	    sizeof(rc16), (u_char *)&rdcap16, sizeof(rdcap16), 2, 20000, NULL,
+	    flags | SCSI_DATA_IN);
+	if (error) {
+		SC_DEBUG(sc_link, SDEV_DB1, ("READ CAPACITY 16 error (%#x)\n",
+		    error));
+		return (0);
 	}
+
+	max_addr = _8btol(rdcap16.addr);
+	if (blksize != NULL)
+		*blksize = _4btol(rdcap16.length);
 
 	return (max_addr + 1);
 }
@@ -378,6 +313,7 @@ scsi_inquire(struct scsi_link *sc_link, struct scsi_inquiry_data *inqbuf,
     int flags)
 {
 	struct scsi_inquiry			scsi_cmd;
+	int					length;
 	int					error;
 
 	bzero(&scsi_cmd, sizeof(scsi_cmd));
@@ -394,12 +330,38 @@ scsi_inquire(struct scsi_link *sc_link, struct scsi_inquiry_data *inqbuf,
 	 * Ask for only the basic 36 bytes of SCSI2 inquiry information. This
 	 * avoids problems with devices that choke trying to supply more.
 	 */
-	scsi_cmd.length = SID_INQUIRY_HDR + SID_SCSI2_ALEN;
+	length = SID_INQUIRY_HDR + SID_SCSI2_ALEN;
+	_lto2b(length, scsi_cmd.length);
 	error = scsi_scsi_cmd(sc_link, (struct scsi_generic *)&scsi_cmd,
-	    sizeof(scsi_cmd), (u_char *)inqbuf, scsi_cmd.length, 2, 10000, NULL,
+	    sizeof(scsi_cmd), (u_char *)inqbuf, length, 2, 10000, NULL,
 	    SCSI_DATA_IN | flags);
 
 	return (error);
+}
+
+/*
+ * Query a VPD inquiry page
+ */
+int
+scsi_inquire_vpd(struct scsi_link *sc_link, void *buf, u_int buflen,
+    u_int8_t page, int flags)
+{
+	struct scsi_inquiry scsi_cmd;
+	int error;
+
+	bzero(&scsi_cmd, sizeof(scsi_cmd));
+	scsi_cmd.opcode = INQUIRY;
+	scsi_cmd.flags = SI_EVPD;
+	scsi_cmd.pagecode = page;
+	_lto2b(buflen, scsi_cmd.length);
+
+	bzero(buf, buflen);
+
+	error = scsi_scsi_cmd(sc_link, (struct scsi_generic *)&scsi_cmd,
+	    sizeof(scsi_cmd), buf, buflen, 2, 10000, NULL,
+ 	    SCSI_DATA_IN | flags);
+ 
+ 	return (error);
 }
 
 /*
@@ -1058,7 +1020,7 @@ scsi_interpret_sense(struct scsi_xfer *xs)
 #endif	/* SCSIDEBUG */
 
 	/*
-	 * If the device has it's own error handler, call it first.
+	 * If the device has its own error handler, call it first.
 	 * If it returns a legit error value, return that, otherwise
 	 * it wants us to continue with normal error processing.
 	 */
@@ -1948,7 +1910,7 @@ scsi_decode_sense(struct scsi_sense_data *sense, int flag)
 
 #ifdef SCSIDEBUG
 /*
- * Given a scsi_xfer, dump the request, in all it's glory
+ * Given a scsi_xfer, dump the request, in all its glory
  */
 void
 show_scsi_xs(struct scsi_xfer *xs)

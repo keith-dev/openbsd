@@ -1,7 +1,7 @@
 # ex:ts=8 sw=4:
-# $OpenBSD: Vstat.pm,v 1.18 2007/03/07 11:24:07 espie Exp $
+# $OpenBSD: Vstat.pm,v 1.43 2007/06/30 11:38:38 espie Exp $
 #
-# Copyright (c) 2003-2004 Marc Espie <espie@openbsd.org>
+# Copyright (c) 2003-2007 Marc Espie <espie@openbsd.org>
 #
 # Permission to use, copy, modify, and distribute this software for any
 # purpose with or without fee is hereby granted, provided that the above
@@ -26,6 +26,7 @@ use warnings;
 
 package OpenBSD::Vstat;
 use File::Basename;
+use OpenBSD::Paths;
 
 my $devinfo = {};
 my $devinfo2 = {};
@@ -47,15 +48,15 @@ sub create_device($)
 sub init_devices()
 {
 	delete $ENV{'BLOCKSIZE'};
-	open(my $cmd1, "/sbin/mount|") or print STDERR "Can't run mount\n";
+	open(my $cmd1, "-|", OpenBSD::Paths->mount) or print STDERR "Can't run mount\n";
 	while (<$cmd1>) {
 		chomp;
-		if (m/^(.*?)\s+on\s+\/.*?\s+type\s+.*?(?:\s+\((.*?)\))?$/) {
+		if (m/^(.*?)\s+on\s+\/.*?\s+type\s+.*?(?:\s+\((.*?)\))?$/o) {
 			my ($dev, $opts) = ($1, $2);
 			my $i = create_device($dev);
 			next unless defined $i;
 			next unless defined $opts;
-			for my $o (split /,\s*/, $opts) {
+			for my $o (split /\,\s*/o, $opts) {
 				if ($o eq 'read-only') {
 					$i->{ro} = 1;
 				} elsif ($o eq 'nodev') {
@@ -71,7 +72,7 @@ sub init_devices()
 		}
 	}
 	close($cmd1) or print STDERR "Error running mount: $!\n";
-	$giveup = { used => 0 };
+	$giveup = { used => 0, dev => '???' };
 	bless $giveup, "OpenBSD::Vstat::Failsafe";
 }
 
@@ -80,14 +81,14 @@ sub ask_df($)
 	my $fname = shift;
 	my $info = $giveup;
 
-	open(my $cmd2, "-|", "/bin/df", $fname)
+	open(my $cmd2, "-|", OpenBSD::Paths->df, $fname)
 	    or print STDERR "Can't run df\n";
 	my $blocksize = 512;
 	while (<$cmd2>) {
 		chomp;
-		if (m/^Filesystem\s+(\d+)\-blocks/) {
+		if (m/^Filesystem\s+(\d+)\-blocks/o) {
 			$blocksize = $1;
-		} elsif (m/^(.*?)\s+\d+\s+\d+\s+(\-?\d+)\s+\d+\%\s+\/.*?$/) {
+		} elsif (m/^(.*?)\s+\d+\s+\d+\s+(\-?\d+)\s+\d+\%\s+\/.*?$/o) {
 			my ($dev, $avail) = ($1, $2);
 			$info = $devinfo->{$dev};
 			if (!defined $info) {
@@ -182,7 +183,7 @@ sub tally()
 	while (my ($device, $data) = each %$devinfo) {
 		if ($data->{used} != 0) {
 			print $device, ": ", $data->{used}, " bytes";
-			my $avail = $data->avail(); 
+			my $avail = $data->avail; 
 			if ($avail < 0) {
 				print " (missing ", int(-$avail+1), " blocks)";
 			}
@@ -194,12 +195,49 @@ sub tally()
 package OpenBSD::Vstat::MountPoint;
 sub avail
 {
-	my $self = $_[0];
+	my $self = shift;
 
 	return $self->{avail} - $self->{used}/$self->{blocksize};
 }
 
+sub report_ro
+{
+	my ($s, $state, $fname) = @_;
+
+	if ($state->{very_verbose} or ++($s->{problems}) < 4) {
+		print STDERR "Error: ", $s->{dev}, 
+		    " is read-only ($fname)\n";
+	} elsif ($s->{problems} == 4) {
+		print STDERR "Error: ... more files on ", $s->{dev}, "\n";
+	}
+	$state->{problems}++;
+}
+
+sub report_overflow
+{
+	my ($s, $state, $fname) = @_;
+
+	if ($state->{very_verbose} or ++($s->{problems}) < 4) {
+		print STDERR "Error: ", $s->{dev}, 
+		    " is not large enough ($fname)\n";
+	} elsif ($s->{problems} == 4) {
+		print STDERR "Error: ... more files do not fit on ", 
+		    $s->{dev}, "\n";
+	}
+	$state->{problems}++;
+	$state->{overflow} = 1;
+}
+
+sub report_noexec
+{
+	my ($s, $state, $fname) = @_;
+	print STDERR "Error: ", $s->{dev}, " is noexec ($fname)\n";
+	$state->{problems}++;
+}
+
 package OpenBSD::Vstat::Failsafe;
+our @ISA=(qw(OpenBSD::Vstat::MountPoint));
+
 sub avail
 {
 	return 1;

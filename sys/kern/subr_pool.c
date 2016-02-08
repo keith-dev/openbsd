@@ -1,4 +1,4 @@
-/*	$OpenBSD: subr_pool.c,v 1.48 2006/11/17 11:50:09 jmc Exp $	*/
+/*	$OpenBSD: subr_pool.c,v 1.55 2007/08/16 15:18:54 art Exp $	*/
 /*	$NetBSD: subr_pool.c,v 1.61 2001/09/26 07:14:56 chs Exp $	*/
 
 /*-
@@ -78,9 +78,6 @@ TAILQ_HEAD(,pool) pool_head = TAILQ_HEAD_INITIALIZER(pool_head);
 /* Private pool for page header structures */
 static struct pool phpool;
 
-/* # of seconds to retain page after last use */
-int pool_inactive_time = 10;
-
 /* This spin lock protects both pool_head */
 struct simplelock pool_head_slock;
 
@@ -93,14 +90,17 @@ struct pool_item_header {
 				ph_node;	/* Off-page page headers */
 	int			ph_nmissing;	/* # of chunks in use */
 	caddr_t			ph_page;	/* this page's address */
-	struct timeval		ph_time;	/* last referenced */
 };
 
 struct pool_item {
 #ifdef DIAGNOSTIC
 	int pi_magic;
 #endif
+#ifdef DEADBEEF1
+#define	PI_MAGIC DEADBEEF1
+#else
 #define	PI_MAGIC 0xdeafbeef
+#endif
 	/* Other entries use only this list entry */
 	TAILQ_ENTRY(pool_item)	pi_list;
 };
@@ -513,6 +513,8 @@ pool_init(struct pool *pp, size_t size, u_int align, u_int ioff, int flags,
 
 	simple_lock_init(&pp->pr_slock);
 
+	pp->pr_ipl = -1;
+
 	/*
 	 * Initialize private page header pool and cache magazine pool if we
 	 * haven't done so yet.
@@ -537,6 +539,14 @@ pool_init(struct pool *pp, size_t size, u_int align, u_int ioff, int flags,
 	TAILQ_INSERT_TAIL(&palloc->pa_list, pp, pr_alloc_list);
 	simple_unlock(&palloc->pa_slock);
 }
+
+#ifdef DIAGNOSTIC
+void
+pool_setipl(struct pool *pp, int ipl)
+{
+	pp->pr_ipl = ipl;
+}
+#endif
 
 /*
  * Decommission a pool resource.
@@ -617,6 +627,8 @@ pool_get(struct pool *pp, int flags)
 #ifdef DIAGNOSTIC
 	if ((flags & PR_WAITOK) != 0)
 		splassert(IPL_NONE);
+	if (pp->pr_ipl != -1)
+		splassert(pp->pr_ipl);
 	if (__predict_false(curproc == NULL && /* doing_shutdown == 0 && XXX*/
 			    (flags & PR_WAITOK) != 0))
 		panic("pool_get: %s:must have NOWAIT", pp->pr_wchan);
@@ -860,6 +872,9 @@ pool_do_put(struct pool *pp, void *v)
 	page = (caddr_t)((vaddr_t)v & pp->pr_alloc->pa_pagemask);
 
 #ifdef DIAGNOSTIC
+	if (pp->pr_ipl != -1)
+		splassert(pp->pr_ipl);
+
 	if (__predict_false(pp->pr_nout == 0)) {
 		printf("pool %s: putting with none out\n",
 		    pp->pr_wchan);
@@ -932,14 +947,6 @@ pool_do_put(struct pool *pp, void *v)
 		} else {
 			LIST_REMOVE(ph, ph_pagelist);
 			LIST_INSERT_HEAD(&pp->pr_emptypages, ph, ph_pagelist);
-
-			/*
-			 * Update the timestamp on the page.  A page must
-			 * be idle for some period of time before it can
-			 * be reclaimed by the pagedaemon.  This minimizes
-			 * ping-pong'ing for memory.
-			 */
-			microuptime(&ph->ph_time);
 		}
 		pool_update_curpage(pp);
 	}
@@ -1058,7 +1065,6 @@ pool_prime_page(struct pool *pp, caddr_t storage, struct pool_item_header *ph)
 	TAILQ_INIT(&ph->ph_itemlist);
 	ph->ph_page = storage;
 	ph->ph_nmissing = 0;
-	memset(&ph->ph_time, 0, sizeof(ph->ph_time));
 	if ((pp->pr_roflags & PR_PHINPAGE) == 0)
 		SPLAY_INSERT(phtree, &pp->pr_phtree, ph);
 
@@ -1239,9 +1245,7 @@ pool_reclaim(struct pool *pp)
 {
 	struct pool_item_header *ph, *phnext;
 	struct pool_cache *pc;
-	struct timeval curtime;
 	struct pool_pagelist pq;
-	struct timeval diff;
 	int s;
 
 	if (simple_lock_try(&pp->pr_slock) == 0)
@@ -1256,8 +1260,6 @@ pool_reclaim(struct pool *pp)
 	TAILQ_FOREACH(pc, &pp->pr_cachelist, pc_poollist)
 		pool_cache_reclaim(pc);
 
-	microuptime(&curtime);
-
 	for (ph = LIST_FIRST(&pp->pr_emptypages); ph != NULL; ph = phnext) {
 		phnext = LIST_NEXT(ph, ph_pagelist);
 
@@ -1266,9 +1268,6 @@ pool_reclaim(struct pool *pp)
 			break;
 
 		KASSERT(ph->ph_nmissing == 0);
-		timersub(&curtime, &ph->ph_time, &diff);
-		if (diff.tv_sec < pool_inactive_time)
-			continue;
 
 		/*
 		 * If freeing this page would put us below
@@ -1334,10 +1333,8 @@ pool_print_pagelist(struct pool_pagelist *pl, int (*pr)(const char *, ...))
 #endif
 
 	LIST_FOREACH(ph, pl, ph_pagelist) {
-		(*pr)("\t\tpage %p, nmissing %d, time %lu,%lu\n",
-		    ph->ph_page, ph->ph_nmissing,
-		    (u_long)ph->ph_time.tv_sec,
-		    (u_long)ph->ph_time.tv_usec);
+		(*pr)("\t\tpage %p, nmissing %d\n",
+		    ph->ph_page, ph->ph_nmissing);
 #ifdef DIAGNOSTIC
 		TAILQ_FOREACH(pi, &ph->ph_itemlist, pi_list) {
 			if (pi->pi_magic != PI_MAGIC) {
@@ -1916,7 +1913,7 @@ sysctl_dopool(int *name, u_int namelen, char *where, size_t *sizep)
 	simple_unlock(&pool_head_slock);
 	splx(s);
 
-	if (lookfor != 0 && foundpool == NULL)
+	if (*name != KERN_POOL_NPOOLS && foundpool == NULL)
 		return (ENOENT);
 
 	switch (*name) {
@@ -1940,17 +1937,11 @@ sysctl_dopool(int *name, u_int namelen, char *where, size_t *sizep)
  *
  * Each pool has a backend allocator that handles allocation, deallocation
  */
-void	*pool_page_alloc_kmem(struct pool *, int);
-void	pool_page_free_kmem(struct pool *, void *);
 void	*pool_page_alloc_oldnointr(struct pool *, int);
 void	pool_page_free_oldnointr(struct pool *, void *);
 void	*pool_page_alloc(struct pool *, int);
 void	pool_page_free(struct pool *, void *);
 
-/* old default allocator, interrupt safe */
-struct pool_allocator pool_allocator_kmem = {
-	pool_page_alloc_kmem, pool_page_free_kmem, 0,
-};
 /* previous nointr.  handles large allocations safely */
 struct pool_allocator pool_allocator_oldnointr = {
 	pool_page_alloc_oldnointr, pool_page_free_oldnointr, 0,
@@ -2025,22 +2016,6 @@ pool_page_free(struct pool *pp, void *v)
 {
 
 	uvm_km_putpage(v);
-}
-
-void *
-pool_page_alloc_kmem(struct pool *pp, int flags)
-{
-	boolean_t waitok = (flags & PR_WAITOK) ? TRUE : FALSE;
-
-	return ((void *)uvm_km_alloc_poolpage1(kmem_map, uvmexp.kmem_object,
-	    waitok));
-}
-
-void
-pool_page_free_kmem(struct pool *pp, void *v)
-{
-
-	uvm_km_free_poolpage1(kmem_map, (vaddr_t)v);
 }
 
 void *

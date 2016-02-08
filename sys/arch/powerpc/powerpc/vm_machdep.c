@@ -1,4 +1,4 @@
-/*	$OpenBSD: vm_machdep.c,v 1.41 2006/11/29 12:26:14 miod Exp $	*/
+/*	$OpenBSD: vm_machdep.c,v 1.44 2007/06/20 17:29:36 miod Exp $	*/
 /*	$NetBSD: vm_machdep.c,v 1.1 1996/09/30 16:34:57 ws Exp $	*/
 
 /*
@@ -59,14 +59,15 @@ cpu_fork(struct proc *p1, struct proc *p2, void *stack, size_t stacksize,
 	caddr_t stktop1, stktop2;
 	extern void fork_trampoline(void);
 	struct pcb *pcb = &p2->p_addr->u_pcb;
+	struct cpu_info *ci = curcpu();
 
-	if (p1 == fpuproc)
+	if (p1 == ci->ci_fpuproc)
 		save_fpu();
 	*pcb = p1->p_addr->u_pcb;
 	
 #ifdef ALTIVEC
 	if (p1->p_addr->u_pcb.pcb_vr != NULL) {
-		if (p1 == ppc_vecproc)
+		if (p1 == ci->ci_vecproc)
 			save_vec(p1);
 		pcb->pcb_vr = pool_get(&ppc_vecpl, PR_WAITOK);
 		*pcb->pcb_vr = *p1->p_addr->u_pcb.pcb_vr;
@@ -126,26 +127,6 @@ cpu_fork(struct proc *p1, struct proc *p2, void *stack, size_t stacksize,
 }
 
 /*
- * Move pages from one kernel virtual address to another.
- */
-void
-pagemove(caddr_t from, caddr_t to, size_t size)
-{
-	vaddr_t va;
-	paddr_t pa;
-	
-	for (va = (vaddr_t)from; size > 0; size -= NBPG) {
-		pmap_extract(pmap_kernel(), va, &pa);
-		pmap_kremove(va, NBPG);
-		pmap_kenter_pa((vaddr_t)to, pa,
-			   VM_PROT_READ | VM_PROT_WRITE );
-		va += NBPG;
-		to += NBPG;
-	}
-	pmap_update(pmap_kernel());
-}
-
-/*
  * cpu_exit is called as the last action during exit.
  * We release the address space and machine-dependent resources,
  * including the memory for the user structure and kernel stack.
@@ -157,21 +138,24 @@ pagemove(caddr_t from, caddr_t to, size_t size)
 void
 cpu_exit(struct proc *p)
 {
+	struct cpu_info *ci = curcpu();
 #ifdef ALTIVEC
 	struct pcb *pcb = &p->p_addr->u_pcb;
 #endif /* ALTIVEC */
 	
-	if (p == fpuproc) 	/* release the fpu */
-		fpuproc = NULL;
+	/* XXX What if the state is on the other cpu? */
+	if (p == ci->ci_fpuproc) 	/* release the fpu */
+		ci->ci_fpuproc = NULL;
 
 #ifdef ALTIVEC
-	if (p == ppc_vecproc)
-		ppc_vecproc = NULL; 	/* release the Altivec Unit */
+	/* XXX What if the state is on the other cpu? */
+	if (p == ci->ci_vecproc)
+		ci->ci_vecproc = NULL; 	/* release the Altivec Unit */
 	if (pcb->pcb_vr != NULL)
 		pool_put(&ppc_vecpl, pcb->pcb_vr);
 #endif /* ALTIVEC */
 	
-	(void)splhigh();
+	(void)splsched();
 	switchexit(p);
 }
 
@@ -239,7 +223,7 @@ vmapbuf(struct buf *bp, vsize_t len)
 		faddr += NBPG;
 		taddr += NBPG;
 	}
-	pmap_update(pmap_kernel());
+	pmap_update(vm_map_pmap(phys_map));
 }
 
 /*
@@ -257,6 +241,8 @@ vunmapbuf(struct buf *bp, vsize_t len)
 	addr = trunc_page((vaddr_t)bp->b_data);
 	off = (vaddr_t)bp->b_data - addr;
 	len = round_page(off + len);
+	pmap_remove(vm_map_pmap(phys_map), addr, addr + len);
+	pmap_update(vm_map_pmap(phys_map));
 	uvm_km_free_wakeup(phys_map, addr, len);
 	bp->b_data = bp->b_saveaddr;
 	bp->b_saveaddr = 0;

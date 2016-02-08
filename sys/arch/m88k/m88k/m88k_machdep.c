@@ -1,4 +1,4 @@
-/*	$OpenBSD: m88k_machdep.c,v 1.17 2006/11/22 22:47:46 miod Exp $	*/
+/*	$OpenBSD: m88k_machdep.c,v 1.21 2007/05/29 18:10:42 miod Exp $	*/
 /*
  * Copyright (c) 1998, 1999, 2000, 2001 Steve Murphree, Jr.
  * Copyright (c) 1996 Nivas Madhur
@@ -59,6 +59,7 @@
 
 #include <machine/asm.h>
 #include <machine/asm_macro.h>
+#include <machine/atomic.h>
 #include <machine/cmmu.h>
 #include <machine/cpu.h>
 #include <machine/reg.h>
@@ -350,56 +351,55 @@ set_cpu_number(cpuid_t number)
 }
 
 /*
+ * Notify the current process (p) that it has a signal pending,
+ * process as soon as possible.
+ */
+void
+signotify(struct proc *p)
+{
+	aston(p);
+#ifdef MULTIPROCESSOR
+	if (p->p_cpu != curcpu() && p->p_cpu != NULL)
+		m88k_send_ipi(CI_IPI_NOTIFY, p->p_cpu->ci_cpuid);
+#endif
+}
+
+/*
  * Soft interrupt interface
  */
 
-int ssir;
+unsigned int ssir;
 int netisr;
-
-#ifdef MULTIPROCESSOR
-
-void
-setsoftint(int sir)
-{
-	__mp_lock(&sir_lock);
-	ssir |= sir;
-	__mp_unlock(&sir_lock);
-}
-
-int
-clrsoftint(int sir)
-{
-	int tmpsir;
-
-	__mp_lock(&sir_lock);
-	tmpsir = ssir & sir;
-	ssir ^= tmpsir;
-	__mp_unlock(&sir_lock);
-
-	return (tmpsir);
-}
-#endif
 
 void
 dosoftint()
 {
-	if (clrsoftint(SIR_NET)) {
-		uvmexp.softs++;
-#define DONETISR(bit, fn) \
-	do { \
-		if (netisr & (1 << bit)) { \
-			netisr &= ~(1 << bit); \
-			fn(); \
-		} \
-	} while (0)
+	int sir, n;
+
+	if ((sir = ssir) == 0)
+		return;
+
+	atomic_clearbits_int(&ssir, sir);
+	uvmexp.softs++;
+
+	if (ISSET(sir, SIR_NET)) {
+		while ((n = netisr) != 0) {
+			atomic_clearbits_int(&netisr, n);
+
+#define DONETISR(bit, fn)						\
+			do {						\
+				if (n & (1 << bit))			\
+					fn();				\
+			} while (0)
+
 #include <net/netisr_dispatch.h>
+
 #undef DONETISR
+		}
 	}
 
-	if (clrsoftint(SIR_CLOCK)) {
-		uvmexp.softs++;
+	if (ISSET(sir, SIR_CLOCK))
 		softclock();
-	}
 }
 
 int
@@ -407,12 +407,11 @@ spl0()
 {
 	int s;
 
-	s = splsoftclock();
+	s = setipl(IPL_SOFTCLOCK);
 
-	if (ssir)
-		dosoftint();
+	dosoftint();
 
-	setipl(0);
+	setipl(IPL_NONE);
 	return (s);
 }
 

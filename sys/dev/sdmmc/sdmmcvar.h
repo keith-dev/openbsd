@@ -1,4 +1,4 @@
-/*	$OpenBSD: sdmmcvar.h,v 1.5 2006/11/29 14:16:43 uwe Exp $	*/
+/*	$OpenBSD: sdmmcvar.h,v 1.9 2007/05/31 10:09:01 uwe Exp $	*/
 
 /*
  * Copyright (c) 2006 Uwe Stuehler <uwe@openbsd.org>
@@ -76,6 +76,7 @@ struct sdmmc_command {
 	int		 c_blklen;	/* block length */
 	int		 c_flags;	/* see below */
 #define SCF_ITSDONE	 0x0001		/* command is complete */
+#define SCF_CMD(flags)	 ((flags) & 0x00f0)
 #define SCF_CMD_AC	 0x0000
 #define SCF_CMD_ADTC	 0x0010
 #define SCF_CMD_BC	 0x0020
@@ -89,13 +90,18 @@ struct sdmmc_command {
 /* response types */
 #define SCF_RSP_R0	 0 /* none */
 #define SCF_RSP_R1	 (SCF_RSP_PRESENT|SCF_RSP_CRC|SCF_RSP_IDX)
+#define SCF_RSP_R1B	 (SCF_RSP_PRESENT|SCF_RSP_CRC|SCF_RSP_IDX|SCF_RSP_BSY)
 #define SCF_RSP_R2	 (SCF_RSP_PRESENT|SCF_RSP_CRC|SCF_RSP_136)
 #define SCF_RSP_R3	 (SCF_RSP_PRESENT)
 #define SCF_RSP_R4	 (SCF_RSP_PRESENT)
 #define SCF_RSP_R5	 (SCF_RSP_PRESENT|SCF_RSP_CRC|SCF_RSP_IDX)
 #define SCF_RSP_R5B	 (SCF_RSP_PRESENT|SCF_RSP_CRC|SCF_RSP_IDX|SCF_RSP_BSY)
-#define SCF_RSP_R6	 (SCF_RSP_PRESENT|SCF_RSP_CRC)
+#define SCF_RSP_R6	 (SCF_RSP_PRESENT|SCF_RSP_CRC|SCF_RSP_IDX)
 	int		 c_error;	/* errno value on completion */
+
+	/* Host controller owned fields for data xfer in progress */
+	int c_resid;			/* remaining I/O */
+	u_char *c_buf;			/* remaining data */
 };
 
 /*
@@ -161,8 +167,10 @@ struct sdmmc_softc {
 	struct proc *sc_task_thread;	/* asynchronous tasks */
 	TAILQ_HEAD(, sdmmc_task) sc_tskq;   /* task thread work queue */
 	struct sdmmc_task sc_discover_task; /* card attach/detach task */
+	struct sdmmc_task sc_intr_task;	/* card interrupt task */
 	struct lock sc_lock;		/* lock around host controller */
 	void *sc_scsibus;		/* SCSI bus emulation softc */
+	TAILQ_HEAD(, sdmmc_intr_handler) sc_intrq; /* interrupt handlers */
 };
 
 /*
@@ -192,6 +200,13 @@ int	sdmmc_select_card(struct sdmmc_softc *, struct sdmmc_function *);
 int	sdmmc_set_relative_addr(struct sdmmc_softc *,
 	    struct sdmmc_function *);
 
+void	sdmmc_intr_enable(struct sdmmc_function *);
+void	sdmmc_intr_disable(struct sdmmc_function *);
+void	*sdmmc_intr_establish(struct device *, int (*)(void *),
+	    void *, const char *);
+void	sdmmc_intr_disestablish(void *);
+void	sdmmc_intr_task(void *);
+
 int	sdmmc_io_enable(struct sdmmc_softc *);
 void	sdmmc_io_scan(struct sdmmc_softc *);
 int	sdmmc_io_init(struct sdmmc_softc *, struct sdmmc_function *);
@@ -200,10 +215,13 @@ void	sdmmc_io_detach(struct sdmmc_softc *);
 u_int8_t sdmmc_io_read_1(struct sdmmc_function *, int);
 u_int16_t sdmmc_io_read_2(struct sdmmc_function *, int);
 u_int32_t sdmmc_io_read_4(struct sdmmc_function *, int);
+int	sdmmc_io_read_multi_1(struct sdmmc_function *, int, u_char *, int);
 void	sdmmc_io_write_1(struct sdmmc_function *, int, u_int8_t);
 void	sdmmc_io_write_2(struct sdmmc_function *, int, u_int16_t);
 void	sdmmc_io_write_4(struct sdmmc_function *, int, u_int32_t);
-void	sdmmc_io_function_enable(struct sdmmc_function *);
+int	sdmmc_io_write_multi_1(struct sdmmc_function *, int, u_char *, int);
+int	sdmmc_io_function_ready(struct sdmmc_function *);
+int	sdmmc_io_function_enable(struct sdmmc_function *);
 void	sdmmc_io_function_disable(struct sdmmc_function *);
 
 int	sdmmc_read_cis(struct sdmmc_function *, struct sdmmc_cis *);

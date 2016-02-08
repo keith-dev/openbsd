@@ -1,4 +1,4 @@
-/*	$OpenBSD: pchb.c,v 1.54 2006/12/14 17:36:12 kettenis Exp $	*/
+/*	$OpenBSD: pchb.c,v 1.56 2007/06/01 22:45:17 biorn Exp $	*/
 /*	$NetBSD: pchb.c,v 1.6 1997/06/06 23:29:16 thorpej Exp $	*/
 
 /*
@@ -350,6 +350,10 @@ pchbattach(struct device *parent, struct device *self, void *aux)
 		case PCI_PRODUCT_INTEL_82840_HB:
 		case PCI_PRODUCT_INTEL_82850_HB:
 		case PCI_PRODUCT_INTEL_82860_HB:
+		case PCI_PRODUCT_INTEL_82915G_HB:
+		case PCI_PRODUCT_INTEL_82925X_HB:
+		case PCI_PRODUCT_INTEL_82945GP_MCH:
+		case PCI_PRODUCT_INTEL_82955X_HB:
 			sc->bt = pa->pa_memt;
 			if (bus_space_map(sc->bt, I82802_IOBASE, I82802_IOSIZE,
 			    0, &sc->bh))

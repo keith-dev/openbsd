@@ -1,4 +1,4 @@
-/*	$OpenBSD: acxvar.h,v 1.14 2006/08/19 23:17:12 mglocker Exp $ */
+/*	$OpenBSD: acxvar.h,v 1.18 2007/07/18 18:10:31 damien Exp $ */
 
 /*
  * Copyright (c) 2006 Jonathan Gray <jsg@openbsd.org>
@@ -95,40 +95,23 @@ extern int acxdebug;
 #define CSR_CLRB_2(sc, reg, b)		\
 	CSR_WRITE_2((sc), (reg), CSR_READ_2((sc), (reg)) & (~(b)))
 
-#define DESC_READ_1(sc, off)		\
-	bus_space_read_1((sc)->sc_mem2_bt, (sc)->sc_mem2_bh, (off))
-#define DESC_READ_4(sc, off)		\
-	bus_space_read_4((sc)->sc_mem2_bt, (sc)->sc_mem2_bh, (off))
-
-#define DESC_WRITE_1(sc, off, val)	\
-	bus_space_write_1((sc)->sc_mem2_bt, (sc)->sc_mem2_bh, (off), (val))
-#define DESC_WRITE_2(sc, off, val)	\
-	bus_space_write_2((sc)->sc_mem2_bt, (sc)->sc_mem2_bh, (off), (val))
-#define DESC_WRITE_4(sc, off, val)	\
-	bus_space_write_4((sc)->sc_mem2_bt, (sc)->sc_mem2_bh, (off), (val))
 #define DESC_WRITE_REGION_1(sc, off, d, dlen)				\
 	bus_space_write_region_1((sc)->sc_mem2_bt, (sc)->sc_mem2_bh,	\
 				 (off),	(const uint8_t *)(d), (dlen))
 
-#define FW_TXDESC_SETFIELD(sc, mb, field, val, sz)	\
-	DESC_WRITE_##sz((sc), (mb)->tb_fwdesc_ofs +	\
-			      offsetof(struct acx_fw_txdesc, field), (val))
-
-#define FW_TXDESC_GETFIELD(sc, mb, field, sz)		\
-	DESC_READ_##sz((sc), (mb)->tb_fwdesc_ofs +	\
-			     offsetof(struct acx_fw_txdesc, field))
-
-#define FW_TXDESC_SETFIELD_1(sc, mb, field, val)	\
-	FW_TXDESC_SETFIELD(sc, mb, field, val, 1)
-#define FW_TXDESC_SETFIELD_2(sc, mb, field, val)	\
-	FW_TXDESC_SETFIELD(sc, mb, field, htole16(val), 2)
+#define FW_TXDESC_SETFIELD_1(sc, mb, field, val)		\
+	bus_space_write_1((sc)->sc_mem2_bt, (sc)->sc_mem2_bh,	\
+	    (mb)->tb_fwdesc_ofs + offsetof(struct acx_fw_txdesc, field), (val))
+#define FW_TXDESC_SETFIELD_2(sc, mb, field, val)		\
+	bus_space_write_2((sc)->sc_mem2_bt, (sc)->sc_mem2_bh,	\
+	    (mb)->tb_fwdesc_ofs + offsetof(struct acx_fw_txdesc, field), (val))
 #define FW_TXDESC_SETFIELD_4(sc, mb, field, val)	\
-	FW_TXDESC_SETFIELD(sc, mb, field, htole32(val), 4)
+	bus_space_write_4((sc)->sc_mem2_bt, (sc)->sc_mem2_bh,	\
+	    (mb)->tb_fwdesc_ofs + offsetof(struct acx_fw_txdesc, field), (val))
 
-#define FW_TXDESC_GETFIELD_1(sc, mb, field)		\
-	FW_TXDESC_GETFIELD(sc, mb, field, 1)
-#define FW_TXDESC_GETFIELD_4(sc, mb, field)		\
-	letoh32(FW_TXDESC_GETFIELD(sc, mb, field, 4))
+#define FW_TXDESC_GETFIELD_1(sc, mb, field)			\
+	bus_space_read_1((sc)->sc_mem2_bt, (sc)->sc_mem2_bh,	\
+	    (mb)->tb_fwdesc_ofs + offsetof(struct acx_fw_txdesc, field))
 
 /*
  * Firmware TX descriptor
@@ -440,7 +423,7 @@ struct acx_softc {
 
 	int			(*chip_set_wepkey)
 				(struct acx_softc *,
-				 struct ieee80211_wepkey *, int);
+				 struct ieee80211_key *, int);
 
 	int			(*chip_read_config)
 				(struct acx_softc *, struct acx_config *);

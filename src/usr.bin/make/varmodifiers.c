@@ -1,5 +1,5 @@
 /*	$OpenPackages$ */
-/*	$OpenBSD: varmodifiers.c,v 1.14 2005/07/15 20:43:23 espie Exp $	*/
+/*	$OpenBSD: varmodifiers.c,v 1.19 2007/07/30 09:51:53 espie Exp $	*/
 /*	$NetBSD: var.c,v 1.18 1997/03/18 19:24:46 christos Exp $	*/
 
 /*
@@ -112,9 +112,8 @@ typedef struct {
 } VarPattern;
 
 struct LoopStuff {
-    char	*var;
+    struct LoopVar	*var;
     char	*expand;
-    SymTable	*ctxt;
     bool	err;
 };
 
@@ -423,7 +422,7 @@ finish_loop(const char *s, const struct Name *n UNUSED , void *p)
 {
 	struct LoopStuff *l = (struct LoopStuff *)p;
 
-	return Var_Subst(s, l->ctxt, l->err);
+	return Var_Subst(s, NULL,  l->err);
 }
 
 static int
@@ -543,22 +542,22 @@ do_assign(const char *s, const struct Name *n, void *arg)
 
     switch (v->flags) {
     case VAR_EQUAL:
-    	Var_Seti(n->s, n->e, v->lbuffer, VAR_GLOBAL);
+    	Var_Seti(n->s, n->e, v->lbuffer);
 	break;
     case VAR_MAY_EQUAL:
     	if (s == NULL)
-	    Var_Seti(n->s, n->e, v->lbuffer, VAR_GLOBAL);
+	    Var_Seti(n->s, n->e, v->lbuffer);
 	break;
     case VAR_ADD_EQUAL:
     	if (s == NULL)
-	    Var_Seti(n->s, n->e, v->lbuffer, VAR_GLOBAL);
+	    Var_Seti(n->s, n->e, v->lbuffer);
 	else
-	    Var_Appendi(n->s, n->e, v->lbuffer, VAR_GLOBAL);
+	    Var_Appendi(n->s, n->e, v->lbuffer);
 	break;
     case VAR_BANG_EQUAL:
     	result = Cmd_Exec(v->lbuffer, &msg);
 	if (result != NULL) {
-		Var_Seti(n->s, n->e, result, VAR_GLOBAL);
+		Var_Seti(n->s, n->e, result);
 		free(result);
 	} else
 		Error(msg, v->lbuffer);
@@ -1173,7 +1172,7 @@ free_looparg(void *arg)
 {
     struct LoopStuff *l = (struct LoopStuff *)arg;
 
-    free(l->var);
+    Var_DeleteLoopVar(l->var);
     free(l->expand);
 }
 
@@ -1198,18 +1197,19 @@ get_loop(const char **p, SymTable *ctxt, bool err, int endc)
 {
     static struct LoopStuff	loop;
     const char *s;
+    const char *var;
 
     s = *p +1;
 
     loop.var = NULL;
     loop.expand = NULL;
-    loop.ctxt =ctxt;
     loop.err = err;
-    loop.var = LoopGrab(&s);
-    if (loop.var != NULL) {
+    var = LoopGrab(&s);
+    if (var != NULL) {
     	loop.expand = LoopGrab(&s);
 	if (*s == endc || *s == ':') {
 	    *p = s;
+	    loop.var = Var_NewLoopVar(var, NULL);
 	    return &loop;
 	}
     }
@@ -1372,10 +1372,12 @@ do_regex(const char *s, const struct Name *n UNUSED, void *arg)
 
 char *
 VarModifiers_Apply(char *str, const struct Name *name, SymTable *ctxt, 
-    bool err, bool *freePtr, const char *start, int endc, size_t *lengthPtr)
+    bool err, bool *freePtr, const char **pscan, int paren)
 {
     const char	*tstr;
     bool	atstart;    /* Some ODE modifiers only make sense at start */
+    char endc = paren == '(' ? ')' : '}';
+    const char *start = *pscan;
 
     tstr = start;
     /*
@@ -1455,13 +1457,12 @@ VarModifiers_Apply(char *str, const struct Name *name, SymTable *ctxt,
 	if (DEBUG(VAR))
 	    printf("Result is \"%s\"\n", str);
     }
-    if (*tstr == '\0') {
+    if (*tstr == '\0')
 	Error("Unclosed variable specification");
-	/* make tstr point at the last char of the variable specification */
-	tstr--;
-    }
+    else
+    	tstr++;
 
-    *lengthPtr += tstr - start;
+    *pscan = tstr;
     return str;
 }
 

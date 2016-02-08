@@ -1,4 +1,4 @@
-/*	$OpenBSD: autoconf.h,v 1.12 2006/05/31 20:11:31 jason Exp $	*/
+/*	$OpenBSD: autoconf.h,v 1.15 2007/05/29 09:54:27 sobrado Exp $	*/
 /*	$NetBSD: autoconf.h,v 1.10 2001/07/24 19:32:11 eeh Exp $ */
 
 /*-
@@ -92,7 +92,7 @@ struct intrmap {
 extern struct intrmap intrmap[];
 
 /* The "mainbus" on ultra desktops is actually the UPA bus.  We need to
- * separate this from peripheral buses like SBUS and PCI because each bus may
+ * separate this from peripheral buses like SBus and PCI because each bus may
  * have different ways of encoding properties, such as "reg" and "interrupts".
  */
 
@@ -145,15 +145,12 @@ char	*clockfreq(long freq);
 /* Openprom V2 style boot path */
 struct device;
 struct bootpath {
+	int	node;
 	char	name[16];	/* name of this node */
-	char	compatible[16];	/* "compatible" name of this node */
 	long	val[3];		/* up to three optional values */
 	struct device *dev;	/* device that recognised this component */
 };
 struct bootpath	*bootpath_store(int, struct bootpath *);
-
-/* Parse a disk string into a dev_t, return device struct pointer */
-struct	device *parsedisk(char *, int, int, dev_t *);
 
 /* Establish a mountroot_hook, for benefit of floppy drive, mostly. */
 void	mountroot_hook_establish(void (*)(struct device *), struct device *);

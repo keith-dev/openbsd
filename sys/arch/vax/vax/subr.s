@@ -1,4 +1,4 @@
-/*	$OpenBSD: subr.s,v 1.24 2006/11/06 21:31:37 miod Exp $     */
+/*	$OpenBSD: subr.s,v 1.26 2007/05/16 05:19:15 miod Exp $     */
 /*	$NetBSD: subr.s,v 1.32 1999/03/25 00:41:48 mrg Exp $	   */
 
 /*
@@ -130,12 +130,12 @@ _idsptch:	pushr	$0x3f
 		.long	_cmn_idsptch	# the absolute address
 		.long	0		# the callback interrupt routine
 		.long	0		# its argument
-		.long	0		# ptr to correspond evcnt struct
+		.long	0		# ptr to correspond evcount struct
 _eidsptch:
 
 _cmn_idsptch:
 		movl	(sp)+,r0	# get pointer to idspvec
-		movl	8(r0),r1	# get evcnt pointer
+		movl	8(r0),r1	# get evcount pointer
 		beql	1f		# no ptr, skip increment
 		incl	EC_COUNT(r1)	# increment low longword
 		adwc	$0,EC_COUNT+4(r1) # add any carry to hi longword
@@ -284,9 +284,11 @@ idle:	mtpr	$0,$PR_IPL		# Enable all types of interrupts
 # cpu_switch, cpu_exit and the idle loop implemented in assembler 
 # for efficiency. r0 contains pointer to last process.
 #
-	
+
+#define CURPROC _cpu_info_store + CI_CURPROC
+
 JSBENTRY(Swtch)
-	clrl	_curproc		# Stop process accounting
+	clrl	CURPROC			# Stop process accounting
 #bpt
 	mtpr	$0x1f,$PR_IPL		# block all interrupts
 	ffs	$0,$32,_whichqs,r3	# Search for bit set
@@ -305,7 +307,7 @@ noque:	.asciz	"swtch"
 2:	clrl	4(r2)			# clear proc backpointer
 	clrl	_want_resched		# we are now changing process
 	movb	$SONPROC,P_STAT(r2)	# p->p_stat = SONPROC
-	movl	r2,_curproc		# set new process running
+	movl	r2,CURPROC		# set new process running
 	cmpl	r0,r2			# Same process?
 	bneq	1f			# No, continue
 	rsb

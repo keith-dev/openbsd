@@ -1,4 +1,4 @@
-/*	$OpenBSD: trap.c,v 1.49 2007/01/28 16:38:45 miod Exp $	*/
+/*	$OpenBSD: trap.c,v 1.52 2007/05/15 13:46:22 martin Exp $	*/
 /*	$NetBSD: trap.c,v 1.57 1998/02/16 20:58:31 thorpej Exp $	*/
 
 /*
@@ -203,7 +203,7 @@ userret(struct proc *p)
 	/* take pending signals */
 	while ((sig = CURSIG(p)) != 0)
 		postsig(sig);
-	curpriority = p->p_priority = p->p_usrpri;
+	curcpu()->ci_schedstate.spc_curpriority = p->p_priority = p->p_usrpri;
 }
 
 #ifdef M68040
@@ -239,7 +239,7 @@ wb_userret(struct proc *p, struct frame *fp)
 			p->p_priority = p->p_usrpri;
 		}
 	}
-	curpriority = p->p_priority;
+	curcpu()->ci_schedstate.spc_curpriority = p->p_priority;
 }
 #endif
 
@@ -259,7 +259,6 @@ trap(type, code, v, frame)
 	struct proc *p;
 	int i, s;
 	u_int ucode;
-	u_quad_t sticks;
 	int typ = 0;
 	union sigval sv;
 
@@ -277,7 +276,6 @@ trap(type, code, v, frame)
 
 	if (USERMODE(frame.f_sr)) {
 		type |= T_USER;
-		sticks = p->p_sticks;
 		p->p_md.md_regs = frame.f_regs;
 	}
 	switch (type) {
@@ -556,7 +554,6 @@ dopanic:
 		}
 		spl0();
 		if (p->p_flag & P_OWEUPC) {
-			p->p_flag &= ~P_OWEUPC;
 			ADDUPROF(p);
 		}
 		if (type == (T_ASTFLT | T_USER) && want_resched) {
@@ -1025,13 +1022,11 @@ syscall(code, frame)
 	int error, opc, nsys;
 	size_t argsize;
 	register_t args[8], rval[2];
-	u_quad_t sticks;
 
 	uvmexp.syscalls++;
 	if (!USERMODE(frame.f_sr))
 		panic("syscall");
 	p = curproc;
-	sticks = p->p_sticks;
 	p->p_md.md_regs = frame.f_regs;
 	opc = frame.f_pc;
 

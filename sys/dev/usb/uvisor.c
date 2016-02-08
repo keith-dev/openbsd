@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvisor.c,v 1.27 2006/06/23 06:27:12 miod Exp $	*/
+/*	$OpenBSD: uvisor.c,v 1.35 2007/06/14 10:11:16 mbalmer Exp $	*/
 /*	$NetBSD: uvisor.c,v 1.21 2003/08/03 21:59:26 nathanw Exp $	*/
 
 /*
@@ -133,7 +133,7 @@ struct uvisor_palm_connection_info {
 #define UVISOROBUFSIZE 1024
 
 struct uvisor_softc {
-	USBBASEDEVICE		sc_dev;		/* base device */
+	struct device		sc_dev;		/* base device */
 	usbd_device_handle	sc_udev;	/* device */
 	usbd_interface_handle	sc_iface;	/* interface */
 /* 
@@ -141,7 +141,7 @@ struct uvisor_softc {
  */
 	int			sc_vendor;	/* USB device vendor */
 
-	device_ptr_t		sc_subdevs[UVISOR_MAX_CONN];
+	struct device		*sc_subdevs[UVISOR_MAX_CONN];
 	int			sc_numcon;
 
 	u_int16_t		sc_flags;
@@ -149,11 +149,11 @@ struct uvisor_softc {
 	u_char			sc_dying;
 };
 
-Static usbd_status uvisor_init(struct uvisor_softc *,
+usbd_status uvisor_init(struct uvisor_softc *,
 			       struct uvisor_connection_info *,
 			       struct uvisor_palm_connection_info *);
 
-Static void uvisor_close(void *, int);
+void uvisor_close(void *, int);
 
 
 struct ucom_methods uvisor_methods = {
@@ -201,11 +201,27 @@ static const struct uvisor_type uvisor_devs[] = {
 };
 #define uvisor_lookup(v, p) ((struct uvisor_type *)usb_lookup(uvisor_devs, v, p))
 
-USB_DECLARE_DRIVER(uvisor);
+int uvisor_match(struct device *, void *, void *); 
+void uvisor_attach(struct device *, struct device *, void *); 
+int uvisor_detach(struct device *, int); 
+int uvisor_activate(struct device *, enum devact); 
 
-USB_MATCH(uvisor)
+struct cfdriver uvisor_cd = { 
+	NULL, "uvisor", DV_DULL 
+}; 
+
+const struct cfattach uvisor_ca = { 
+	sizeof(struct uvisor_softc), 
+	uvisor_match, 
+	uvisor_attach, 
+	uvisor_detach, 
+	uvisor_activate, 
+};
+
+int
+uvisor_match(struct device *parent, void *match, void *aux)
 {
-	USB_MATCH_START(uvisor, uaa);
+	struct usb_attach_arg *uaa = aux;
 
 	if (uaa->iface != NULL)
 		return (UMATCH_NONE);
@@ -217,9 +233,11 @@ USB_MATCH(uvisor)
 		UMATCH_VENDOR_PRODUCT : UMATCH_NONE);
 }
 
-USB_ATTACH(uvisor)
+void
+uvisor_attach(struct device *parent, struct device *self, void *aux)
 {
-	USB_ATTACH_START(uvisor, sc, uaa);
+	struct uvisor_softc *sc = (struct uvisor_softc *)self;
+	struct usb_attach_arg *uaa = aux;
 	usbd_device_handle dev = uaa->device;
 	usbd_interface_handle iface;
 	usb_interface_descriptor_t *id;
@@ -227,7 +245,7 @@ USB_ATTACH(uvisor)
 	struct uvisor_palm_connection_info palmconinfo;
 	usb_endpoint_descriptor_t *ed;
 	char *devinfop;
-	char *devname = USBDEVNAME(sc->sc_dev);
+	char *devname = sc->sc_dev.dv_xname;
 	int i, j, hasin, hasout, port;
 	usbd_status err;
 	struct ucom_attach_args uca;
@@ -250,8 +268,7 @@ USB_ATTACH(uvisor)
 	}
 
 	devinfop = usbd_devinfo_alloc(dev, 0);
-	USB_ATTACH_SETUP;
-	printf("%s: %s\n", devname, devinfop);
+	printf("\n%s: %s\n", devname, devinfop);
 	usbd_devinfo_free(devinfop);
 
 	sc->sc_flags = uvisor_lookup(uaa->vendor, uaa->product)->uv_flags;
@@ -259,7 +276,7 @@ USB_ATTACH(uvisor)
 	
 	if ((sc->sc_flags & (VISOR | PALM4)) == 0) {
 		printf("%s: device is neither visor nor palm\n", 
-		    USBDEVNAME(sc->sc_dev));
+		    sc->sc_dev.dv_xname);
 		goto bad;
 	}
 
@@ -279,13 +296,13 @@ USB_ATTACH(uvisor)
 
 	err = uvisor_init(sc, &coninfo, &palmconinfo);
 	if (err) {
-		printf("%s: init failed, %s\n", USBDEVNAME(sc->sc_dev),
+		printf("%s: init failed, %s\n", sc->sc_dev.dv_xname,
 		       usbd_errstr(err));
 		goto bad;
 	}
 
 	usbd_add_drv_event(USB_EVENT_DRIVER_ATTACH, sc->sc_udev,
-			   USBDEV(sc->sc_dev));
+			   &sc->sc_dev);
 
 	if (sc->sc_flags & VISOR) {
 		sc->sc_numcon = UGETW(coninfo.num_ports);
@@ -336,7 +353,7 @@ USB_ATTACH(uvisor)
 				    ucomprint, ucomsubmatch);
 			else
 				printf("%s: no proper endpoints for port %d (%d,%d)\n",
-				    USBDEVNAME(sc->sc_dev), port, hasin, hasout);
+				    sc->sc_dev.dv_xname, port, hasin, hasout);
 		}
 	} else {
 		sc->sc_numcon = palmconinfo.num_ports;
@@ -366,16 +383,15 @@ USB_ATTACH(uvisor)
 		}
 	}
 
-	USB_ATTACH_SUCCESS_RETURN;
+	return;
 
 bad:
 	DPRINTF(("uvisor_attach: ATTACH ERROR\n"));
 	sc->sc_dying = 1;
-	USB_ATTACH_ERROR_RETURN;
 }
 
 int
-uvisor_activate(device_ptr_t self, enum devact act)
+uvisor_activate(struct device *self, enum devact act)
 {
 	struct uvisor_softc *sc = (struct uvisor_softc *)self;
 	int rv = 0;
@@ -396,7 +412,7 @@ uvisor_activate(device_ptr_t self, enum devact act)
 }
 
 int
-uvisor_detach(device_ptr_t self, int flags)
+uvisor_detach(struct device *self, int flags)
 {
 	struct uvisor_softc *sc = (struct uvisor_softc *)self;
 	int rv = 0;
@@ -412,7 +428,7 @@ uvisor_detach(device_ptr_t self, int flags)
 	}
 
 	usbd_add_drv_event(USB_EVENT_DRIVER_DETACH, sc->sc_udev,
-			   USBDEV(sc->sc_dev));
+			   &sc->sc_dev);
 
 	return (rv);
 }

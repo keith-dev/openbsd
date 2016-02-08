@@ -1,7 +1,7 @@
-.\"	$OpenBSD: pkg_add.1,v 1.61 2006/10/17 21:47:22 espie Exp $
+.\"	$OpenBSD: pkg_add.1,v 1.67 2007/06/20 15:41:36 steven Exp $
 .\"
-.\" FreeBSD install - a package for the installation and maintenance
-.\" of non-core utilities.
+.\" Documentation and design originally from FreeBSD. All the code has
+.\" been rewritten since. We keep the documentation's notice:
 .\"
 .\" Redistribution and use in source and binary forms, with or without
 .\" modification, are permitted provided that the following conditions
@@ -15,9 +15,7 @@
 .\" Jordan K. Hubbard
 .\"
 .\"
-.\"     @(#)pkg_add.1
-.\"
-.Dd November 25, 1994
+.Dd $Mdocdate: June 20 2007 $
 .Dt PKG_ADD 1
 .Os
 .Sh NAME
@@ -70,6 +68,9 @@ option
 .Fl u
 .Pc .
 .Pp
+Details of packing-list internals are documented in
+.Xr pkg_create 1 .
+.Pp
 In normal mode,
 the package names given on the command lines are names of new packages that
 .Nm
@@ -90,7 +91,7 @@ packages with the new.
 Each package name may be specified as a filename (which normally consists of the
 package name itself plus the
 .Dq .tgz
-suffix) or a URL referring to FTP, HTTP, or SCP locations.
+suffix) or a URL referring to FTP, HTTP, HTTPS, or SCP locations.
 The following examples are valid:
 .Pp
 .Li pkg_add -v ftp://ftp.openbsd.org/pub/OpenBSD/2.7/packages/i386/m4-1.4.tgz
@@ -210,9 +211,6 @@ proceed with an update even if
 can't find new packages for all installed packages.
 .It Ar arch
 architecture recorded in package may not match.
-.It Ar boguslibs
-not all shared libraries are marked with @lib.
-Inefficiently rescan package lists for non marked libraries.
 .It Ar conflicts
 force installation of package in the presence of conflicts.
 .It Ar installed
@@ -397,24 +395,6 @@ the installation is terminated.
 checks for collisions with installed file names, read-only file systems,
 and enough space to store files.
 .It
-If the package contains a
-.Ar require
-script (see
-.Xr pkg_create 1 ) ,
-it is executed with the following arguments:
-.Bl -tag -width indentindent
-.It Ar pkg-name
-The name of the package being installed
-.It Cm INSTALL
-Keyword denoting to the script that it is to run an installation requirements
-check
-(the keyword is useful only to scripts which serve multiple functions).
-.El
-.Pp
-If the
-.Ar require
-script exits with a non-zero status code, the installation is terminated.
-.It
 If the package contains an
 .Ar install
 script, it is executed with the following arguments:
@@ -504,9 +484,15 @@ in cases the installation fails.
 .It
 The old package is deleted as usual, except that some packages may still depend
 on it.
+Note also that
+.Cm @unexec-delete
+commands are not executed.
 .It
 The new package is installed as usual, except that the files are already present
 and only need to be renamed.
+Note also that
+.Cm @exec-add
+commands are not executed.
 .It
 Dependencies from the old package are adjusted to point to the new package.
 .El
@@ -596,7 +582,7 @@ the directories named by
 are searched.
 It should contain a series of entries separated by colons.
 Each entry consists of a directory name, ending in a slash.
-URL schemes such as FTP, HTTP, or SCP are also appropriate.
+URL schemes such as FTP, HTTP, HTTPS, or SCP are also appropriate.
 The current directory may be indicated
 implicitly by an empty directory name, or explicitly by a single
 period

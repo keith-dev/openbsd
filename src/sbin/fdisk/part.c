@@ -1,4 +1,4 @@
-/*	$OpenBSD: part.c,v 1.42 2006/06/09 17:01:47 deraadt Exp $	*/
+/*	$OpenBSD: part.c,v 1.45 2007/07/04 16:34:15 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1997 Tobias Weingartner
@@ -68,7 +68,7 @@ static const struct part_type {
 	{ 0x17, "OS/2 hidden "},   /* OS/2 BM: hidden IFS */
 	{ 0x18, "AST swap    "},   /* AST Windows swapfile */
 	{ 0x19, "Willowtech  "},   /* Willowtech Photon coS */
-	{ 0x1C, "Thinkpad Rec"},   /* IBM Thinkpad recovery partition */
+	{ 0x1C, "ThinkPad Rec"},   /* IBM ThinkPad recovery partition */
 	{ 0x20, "Willowsoft  "},   /* Willowsoft OFS1 */
 	{ 0x24, "NEC DOS     "},   /* NEC DOS */
 	{ 0x38, "Theos       "},   /* Theos */
@@ -106,6 +106,7 @@ static const struct part_type {
 	{ 0x85, "Linux ext.  "},   /* Linux extended */
 	{ 0x86, "NT FAT VS   "},   /* NT FAT volume set */
 	{ 0x87, "NTFS VS     "},   /* NTFS volume set or HPFS mirrored */
+	{ 0x8E, "Linux LVM   "},   /* Linux LVM */
 	{ 0x93, "Amoeba FS   "},   /* Amoeba filesystem */
 	{ 0x94, "Amoeba BBT  "},   /* Amoeba bad block table */
 	{ 0x99, "Mylex       "},   /* Mylex EISA SCSI */
@@ -281,13 +282,13 @@ PRT_print(int num, prt_t *partn, char *units)
 	i = unit_lookup(units);
 
 	if (partn == NULL) {
-		printf("         Starting       Ending       LBA Info:\n");
-		printf(" #: id    C   H  S -    C   H  S [       start:      size   ]\n");
+		printf("          Starting         Ending        LBA Info:\n");
+		printf(" #: id      C   H  S -      C   H  S [       start:        size ]\n");
 		printf("------------------------------------------------------------------------\n");
 	} else {
 		size = ((double)partn->ns * unit_types[SECTORS].conversion) /
 		    unit_types[i].conversion;
-		printf("%c%1d: %.2X %4u %3u %2u - %4u %3u %2u [%12u:%12.0f%s] %s\n",
+		printf("%c%1d: %.2X %6u %3u %2u - %6u %3u %2u [%12u:%12.0f%s] %s\n",
 			(partn->flag == 0x80)?'*':' ',
 			num, partn->id,
 			partn->scyl, partn->shead, partn->ssect,

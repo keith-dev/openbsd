@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.47 2007/01/17 19:30:12 mickey Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.51 2007/07/20 22:12:39 kettenis Exp $	*/
 
 /*
  * Copyright (c) 2000-2004 Michael Shalayeff
@@ -63,6 +63,26 @@
 #define	HPPA_FTRS_W32B		0x00000008
 
 #ifndef _LOCORE
+#ifdef _KERNEL
+#include <sys/sched.h>
+
+struct cpu_info {
+	struct proc *ci_curproc;
+
+	struct schedstate_percpu ci_schedstate;
+};
+
+extern struct cpu_info cpu_info_primary;
+
+#define curcpu()	(&cpu_info_primary)
+
+#define CPU_IS_PRIMARY(ci)	1
+#define CPU_INFO_ITERATOR	int
+#define CPU_INFO_FOREACH(cii, ci)	\
+	for (cii = 0, ci = curcpu(); ci != NULL; ci = NULL)
+
+#define cpu_number()	0
+
 /* types */
 enum hppa_cpu_type {
 	hpcxs, hpcxt, hpcxta, hpcxl, hpcxl2, hpcxu, hpcxu2, hpcxw
@@ -70,6 +90,7 @@ enum hppa_cpu_type {
 extern enum hppa_cpu_type cpu_type;
 extern const char *cpu_typename;
 extern int cpu_hvers;
+#endif
 #endif
 
 /*
@@ -128,7 +149,7 @@ extern int cpu_hvers;
 
 #define	signotify(p)		(setsoftast())
 #define	need_resched(ci)	(want_resched = 1, setsoftast())
-#define	need_proftick(p)	((p)->p_flag |= P_OWEUPC, setsoftast())
+#define	need_proftick(p)	setsoftast()
 #define	PROC_PC(p)		((p)->p_md.md_regs->tf_iioq_head)
 
 #ifndef _LOCORE
@@ -169,13 +190,27 @@ int	cpu_dump(void);
  */
 #define	CPU_CONSDEV		1	/* dev_t: console terminal device */
 #define	CPU_FPU			2	/* int: fpu present/enabled */
-#define	CPU_MAXID		3	/* number of valid machdep ids */
+#define	CPU_LED_BLINK		3	/* int: twiddle heartbeat LED/LCD */
+#define	CPU_MAXID		4	/* number of valid machdep ids */
 
 #define CTL_MACHDEP_NAMES { \
 	{ 0, 0 }, \
 	{ "console_device", CTLTYPE_STRUCT }, \
 	{ "fpu", CTLTYPE_INT }, \
+	{ "led_blink", CTLTYPE_INT }, \
 }
+
+#ifdef _KERNEL
+#include <sys/queue.h>
+
+struct blink_led {
+	void (*bl_func)(void *, int);
+	void *bl_arg;
+	SLIST_ENTRY(blink_led) bl_next;
+};
+
+extern void blink_led_register(struct blink_led *);
+#endif
 #endif
 
 #endif /* _MACHINE_CPU_H_ */

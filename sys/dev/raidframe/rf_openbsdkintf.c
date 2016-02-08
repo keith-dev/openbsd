@@ -1,4 +1,4 @@
-/* $OpenBSD: rf_openbsdkintf.c,v 1.34 2007/02/15 00:53:26 krw Exp $	*/
+/* $OpenBSD: rf_openbsdkintf.c,v 1.42 2007/06/23 03:11:34 krw Exp $	*/
 /* $NetBSD: rf_netbsdkintf.c,v 1.109 2001/07/27 03:30:07 oster Exp $	*/
 
 /*-
@@ -174,14 +174,14 @@ void rf_InitBP(struct buf *, struct vnode *, unsigned, dev_t, RF_SectorNum_t,
 void raidinit(RF_Raid_t *);
 
 void raidattach(int);
-int  raidsize(dev_t);
+daddr64_t raidsize(dev_t);
 int  raidopen(dev_t, int, int, struct proc *);
 int  raidclose(dev_t, int, int, struct proc *);
 int  raidioctl(dev_t, u_long, caddr_t, int, struct proc *);
 int  raidwrite(dev_t, struct uio *, int);
 int  raidread(dev_t, struct uio *, int);
 void raidstrategy(struct buf *);
-int  raiddump(dev_t, daddr_t, caddr_t, size_t);
+int  raiddump(dev_t, daddr64_t, caddr_t, size_t);
 
 /*
  * Pilfered from ccd.c
@@ -226,7 +226,6 @@ struct raid_softc {
 #define	RAIDF_WANTED	0x40	/* Someone is waiting to obtain a lock. */
 #define	RAIDF_LOCKED	0x80	/* Unit is locked. */
 
-#define	raidunit(x)	DISKUNIT(x)
 int numraid = 0;
 
 /*
@@ -265,17 +264,13 @@ struct cfattach raid_ca = {
 #define	RAIDOUTSTANDING		6
 #endif
 
-#define	RAIDLABELDEV(dev)						\
-	(MAKEDISKDEV(major((dev)), raidunit((dev)), RAW_PART))
-
 /* Declared here, and made public, for the benefit of KVM stuff... */
 struct raid_softc  *raid_softc;
 struct raid_softc **raid_scPtrs;
 
 void rf_shutdown_hook(RF_ThreadArg_t);
 void raidgetdefaultlabel(RF_Raid_t *, struct raid_softc *, struct disklabel *);
-void raidgetdisklabel(dev_t);
-void raidmakedisklabel(struct raid_softc *);
+void raidgetdisklabel(dev_t, struct disklabel *, int);
 
 int  raidlock(struct raid_softc *);
 void raidunlock(struct raid_softc *);
@@ -579,14 +574,14 @@ rf_shutdown_hook(RF_ThreadArg_t arg)
 	disk_detach(&rs->sc_dkdev);
 }
 
-int
+daddr64_t
 raidsize(dev_t dev)
 {
 	struct raid_softc *rs;
 	struct disklabel *lp;
 	int part, unit, omask, size;
 
-	unit = raidunit(dev);
+	unit = DISKUNIT(dev);
 	if (unit >= numraid)
 		return (-1);
 	rs = &raid_softc[unit];
@@ -604,7 +599,7 @@ raidsize(dev_t dev)
 	if (lp->d_partitions[part].p_fstype != FS_SWAP)
 		size = -1;
 	else
-		size = lp->d_partitions[part].p_size *
+		size = DL_GETPSIZE(&lp->d_partitions[part]) *
 		    (lp->d_secsize / DEV_BSIZE);
 
 	if (omask == 0 && raidclose(dev, 0, S_IFBLK, curproc))
@@ -615,7 +610,7 @@ raidsize(dev_t dev)
 }
 
 int
-raiddump(dev_t dev, daddr_t blkno, caddr_t va, size_t size)
+raiddump(dev_t dev, daddr64_t blkno, caddr_t va, size_t size)
 {
 	/* Not implemented. */
 	return (ENXIO);
@@ -625,9 +620,8 @@ raiddump(dev_t dev, daddr_t blkno, caddr_t va, size_t size)
 int
 raidopen(dev_t dev, int flags, int fmt, struct proc *p)
 {
-	int unit = raidunit(dev);
+	int unit = DISKUNIT(dev);
 	struct raid_softc *rs;
-	struct disklabel *lp;
 	int part,pmask;
 	int error = 0;
 
@@ -637,7 +631,6 @@ raidopen(dev_t dev, int flags, int fmt, struct proc *p)
 
 	if ((error = raidlock(rs)) != 0)
 		return (error);
-	lp = rs->sc_dkdev.dk_label;
 
 	part = DISKPART(dev);
 	pmask = (1 << part);
@@ -647,15 +640,16 @@ raidopen(dev_t dev, int flags, int fmt, struct proc *p)
 
 
 	if ((rs->sc_flags & RAIDF_INITED) && (rs->sc_dkdev.dk_openmask == 0))
-		raidgetdisklabel(dev);
+		raidgetdisklabel(dev, rs->sc_dkdev.dk_label, 0);
 
 	/* Make sure that this partition exists. */
 
 	if (part != RAW_PART) {
 		db1_printf(("Not a raw partition..\n"));
 		if (((rs->sc_flags & RAIDF_INITED) == 0) ||
-		    ((part >= lp->d_npartitions) ||
-		    (lp->d_partitions[part].p_fstype == FS_UNUSED))) {
+		    ((part >= rs->sc_dkdev.dk_label->d_npartitions) ||
+		    (rs->sc_dkdev.dk_label->d_partitions[part].p_fstype ==
+		    FS_UNUSED))) {
 			error = ENXIO;
 			raidunlock(rs);
 			db1_printf(("Bailing out...\n"));
@@ -703,7 +697,7 @@ raidopen(dev_t dev, int flags, int fmt, struct proc *p)
 int
 raidclose(dev_t dev, int flags, int fmt, struct proc *p)
 {
-	int unit = raidunit(dev);
+	int unit = DISKUNIT(dev);
 	struct raid_softc *rs;
 	int error = 0;
 	int part;
@@ -752,7 +746,7 @@ raidstrategy(struct buf *bp)
 {
 	int s;
 
-	unsigned int raidID = raidunit(bp->b_dev);
+	unsigned int raidID = DISKUNIT(bp->b_dev);
 	RF_Raid_t *raidPtr;
 	struct raid_softc *rs = &raid_softc[raidID];
 	struct disklabel *lp;
@@ -795,8 +789,7 @@ raidstrategy(struct buf *bp)
 	 */
 	wlabel = rs->sc_flags & (RAIDF_WLABEL | RAIDF_LABELLING);
 	if (DISKPART(bp->b_dev) != RAW_PART)
-		if (bounds_check_with_label(bp, lp, rs->sc_dkdev.dk_cpulabel,
-		    wlabel) <= 0) {
+		if (bounds_check_with_label(bp, lp, wlabel) <= 0) {
 			db1_printf(("Bounds check failed!!:%d %d\n",
 			    (int)bp->b_blkno, (int)wlabel));
 			biodone(bp);
@@ -819,7 +812,7 @@ raidstrategy_end:
 int
 raidread(dev_t dev, struct uio *uio, int flags)
 {
-	int unit = raidunit(dev);
+	int unit = DISKUNIT(dev);
 	struct raid_softc *rs;
 	int part;
 
@@ -840,7 +833,7 @@ raidread(dev_t dev, struct uio *uio, int flags)
 int
 raidwrite(dev_t dev, struct uio *uio, int flags)
 {
-	int unit = raidunit(dev);
+	int unit = DISKUNIT(dev);
 	struct raid_softc *rs;
 
 	if (unit >= numraid)
@@ -856,7 +849,7 @@ raidwrite(dev_t dev, struct uio *uio, int flags)
 int
 raidioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 {
-	int unit = raidunit(dev);
+	int unit = DISKUNIT(dev);
 	int error = 0;
 	int part, pmask;
 	struct raid_softc *rs;
@@ -1580,13 +1573,11 @@ raidioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 
 		rs->sc_flags |= RAIDF_LABELLING;
 
-		error = setdisklabel(rs->sc_dkdev.dk_label,
-		    lp, 0, rs->sc_dkdev.dk_cpulabel);
+		error = setdisklabel(rs->sc_dkdev.dk_label, lp, 0);
 		if (error == 0) {
 			if (cmd == DIOCWDINFO)
-				error = writedisklabel(RAIDLABELDEV(dev),
-				    raidstrategy, rs->sc_dkdev.dk_label,
-				    rs->sc_dkdev.dk_cpulabel);
+				error = writedisklabel(DISKLABELDEV(dev),
+				    raidstrategy, rs->sc_dkdev.dk_label);
 		}
 
 		rs->sc_flags &= ~RAIDF_LABELLING;
@@ -1606,8 +1597,8 @@ raidioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 		break;
 
 	case DIOCGPDINFO:
-  		raidgetdefaultlabel(raidPtr, rs, (struct disklabel *) data);
-  		break;
+		raidgetdisklabel(dev, (struct disklabel *)data, 1);
+		break;
 
 	default:
 		retcode = ENOTTY;
@@ -1723,7 +1714,7 @@ raidstart(RF_Raid_t *raidPtr)
 	RF_RaidAddr_t raid_addr;
 	int retcode;
 	struct partition *pp;
-	daddr_t blocknum;
+	daddr64_t blocknum;
 	int unit;
 	struct raid_softc *rs;
 	int	do_async;
@@ -1762,11 +1753,11 @@ raidstart(RF_Raid_t *raidPtr)
 		blocknum = bp->b_blkno;
 		if (DISKPART(bp->b_dev) != RAW_PART) {
 			pp = &rs->sc_dkdev.dk_label->d_partitions[DISKPART(bp->b_dev)];
-			blocknum += pp->p_offset;
+			blocknum += DL_GETPOFFSET(pp);
 		}
 
-		db1_printf(("Blocks: %d, %d\n", (int) bp->b_blkno,
-			    (int) blocknum));
+		db1_printf(("Blocks: %d, %lld\n", (int) bp->b_blkno,
+			    blocknum));
 
 		db1_printf(("bp->b_bcount = %d\n", (int) bp->b_bcount));
 		db1_printf(("bp->b_resid = %d\n", (int) bp->b_resid));
@@ -2100,7 +2091,7 @@ raidgetdefaultlabel(RF_Raid_t *raidPtr, struct raid_softc *rs,
 	bzero(lp, sizeof(*lp));
 
 	/* Fabricate a label... */
-	lp->d_secperunit = raidPtr->totalSectors;
+	DL_SETDSIZE(lp, raidPtr->totalSectors);
 	lp->d_secsize = raidPtr->bytesPerSector;
 	lp->d_nsectors = raidPtr->Layout.dataSectorsPerStripe;
 	lp->d_ntracks = 4 * raidPtr->numCol;
@@ -2112,11 +2103,12 @@ raidgetdefaultlabel(RF_Raid_t *raidPtr, struct raid_softc *rs,
 	lp->d_type = DTYPE_RAID;
 	strncpy(lp->d_packname, "fictitious", sizeof(lp->d_packname));
 	lp->d_rpm = 3600;
-	lp->d_interleave = 1;
 	lp->d_flags = 0;
+	lp->d_interleave = 1;
+	lp->d_version = 1;
 
-	lp->d_partitions[RAW_PART].p_offset = 0;
-	lp->d_partitions[RAW_PART].p_size = raidPtr->totalSectors;
+	DL_SETPOFFSET(&lp->d_partitions[RAW_PART], 0);
+	DL_SETPSIZE(&lp->d_partitions[RAW_PART], raidPtr->totalSectors);
 	lp->d_partitions[RAW_PART].p_fstype = FS_UNUSED;
 	lp->d_npartitions = RAW_PART + 1;
 
@@ -2130,20 +2122,18 @@ raidgetdefaultlabel(RF_Raid_t *raidPtr, struct raid_softc *rs,
  * If one is not present, fake one up.
  */
 void
-raidgetdisklabel(dev_t dev)
+raidgetdisklabel(dev_t dev, struct disklabel *lp, int spoofonly)
 {
-	int unit = raidunit(dev);
+	int unit = DISKUNIT(dev);
 	struct raid_softc *rs = &raid_softc[unit];
 	char *errstring;
-	struct disklabel *lp = rs->sc_dkdev.dk_label;
-	struct cpu_disklabel *clp = rs->sc_dkdev.dk_cpulabel;
 	RF_Raid_t *raidPtr;
 	int i;
 	struct partition *pp;
 
 	db1_printf(("Getting the disklabel...\n"));
 
-	bzero(clp, sizeof(*clp));
+	bzero(lp, sizeof(*lp));
 
 	raidPtr = raidPtrs[unit];
 
@@ -2152,12 +2142,11 @@ raidgetdisklabel(dev_t dev)
 	/*
 	 * Call the generic disklabel extraction routine.
 	 */
-	errstring = readdisklabel(RAIDLABELDEV(dev), raidstrategy, lp,
-	    rs->sc_dkdev.dk_cpulabel, 0);
+	errstring = readdisklabel(DISKLABELDEV(dev), raidstrategy, lp,
+	    spoofonly);
 	if (errstring) {
 		/*printf("%s: %s\n", rs->sc_xname, errstring);*/
 		return;
-		/*raidmakedisklabel(rs);*/
 	}
 
 	/*
@@ -2169,41 +2158,19 @@ raidgetdisklabel(dev_t dev)
 	 * if that is found.
 	 */
 #ifdef	RAIDDEBUG
-	if (lp->d_secperunit != rs->sc_size)
+	if (DL_GETDSIZE(lp) != rs->sc_size)
 		printf("WARNING: %s: "
 		    "total sector size in disklabel (%d) != "
 		    "the size of raid (%ld)\n", rs->sc_xname,
-		    lp->d_secperunit, (long) rs->sc_size);
+		    DL_GETDSIZE(lp), (long) rs->sc_size);
 #endif	/* RAIDDEBUG */
 	for (i = 0; i < lp->d_npartitions; i++) {
 		pp = &lp->d_partitions[i];
-		if (pp->p_offset + pp->p_size > rs->sc_size)
+		if (DL_GETPOFFSET(pp) + DL_GETPSIZE(pp) > rs->sc_size)
 			printf("WARNING: %s: end of partition `%c' "
 			    "exceeds the size of raid (%ld)\n",
 			    rs->sc_xname, 'a' + i, (long) rs->sc_size);
 	}
-}
-
-/*
- * Take care of things one might want to take care of in the event
- * that a disklabel isn't present.
- */
-void
-raidmakedisklabel(struct raid_softc *rs)
-{
-	struct disklabel *lp = rs->sc_dkdev.dk_label;
-	db1_printf(("Making a label..\n"));
-
-	/*
-	 * For historical reasons, if there's no disklabel present
-	 * the raw partition must be marked FS_BSDFFS.
-	 */
-
-	lp->d_partitions[RAW_PART].p_fstype = FS_BSDFFS;
-
-	strncpy(lp->d_packname, "default label", sizeof(lp->d_packname));
-
-	lp->d_checksum = dkcksum(lp);
 }
 
 /*
@@ -2848,11 +2815,11 @@ rf_find_raid_components(void)
 				/* Got the label.  Does it look reasonable ? */
 				if (rf_reasonable_label(clabel) &&
 				    (clabel->partitionSize <=
-				     label.d_partitions[i].p_size)) {
+				     DL_GETPSIZE(&label.d_partitions[i]))) {
 #ifdef	RAIDDEBUG
 					printf("Component on: %s%c: %d\n",
 					    dv->dv_xname, 'a'+i,
-					    label.d_partitions[i].p_size);
+					    DL_GETPSIZE(&label.d_partitions[i]));
 					rf_print_component_label(clabel);
 #endif	/* RAIDDEBUG */
 					/*

@@ -1,7 +1,7 @@
-/*	$OpenBSD: ar5xxx.c,v 1.38 2007/03/05 16:54:33 deraadt Exp $	*/
+/*	$OpenBSD: ar5xxx.c,v 1.42 2007/06/26 10:53:01 tom Exp $	*/
 
 /*
- * Copyright (c) 2004, 2005 Reyk Floeter <reyk@openbsd.org>
+ * Copyright (c) 2004, 2005, 2006, 2007 Reyk Floeter <reyk@openbsd.org>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -22,7 +22,6 @@
  */
 
 #include <dev/pci/pcidevs.h>
-
 #include <dev/ic/ar5xxx.h>
 
 extern ar5k_attach_t ar5k_ar5210_attach;
@@ -148,9 +147,10 @@ ath_hal_probe(u_int16_t vendor, u_int16_t device)
  * Fills in the HAL structure and initialises the device
  */
 struct ath_hal *
-ath_hal_attach(u_int16_t device, void *sc, bus_space_tag_t st,
-    bus_space_handle_t sh, int *status)
+ath_hal_attach(u_int16_t device, void *arg, bus_space_tag_t st,
+    bus_space_handle_t sh, u_int is_64bit, int *status)
 {
+	struct ath_softc *sc = (struct ath_softc *)arg;
 	struct ath_hal *hal = NULL;
 	ar5k_attach_t *attach = NULL;
 	u_int8_t mac[IEEE80211_ADDR_LEN];
@@ -212,6 +212,22 @@ ath_hal_attach(u_int16_t device, void *sc, bus_space_tag_t st,
 		 * Known single chip solutions
 		 */
 		hal->ah_single_chip = AH_TRUE;
+		break;
+	case PCI_PRODUCT_ATHEROS_AR5212_IBM:
+		/*
+		 * IBM ThinkPads use the same device ID for different
+		 * chipset versions. Ugh.
+		 */
+		if (is_64bit) {
+			/*
+			 * PCI Express "Mini Card" interface based on the
+			 * AR5424 chipset
+			 */
+			hal->ah_single_chip = AH_TRUE;
+		} else {
+			/* Classic Mini PCI interface based on AR5212 */
+			hal->ah_single_chip = AH_FALSE;
+		}
 		break;
 	default:
 		/*
@@ -351,18 +367,6 @@ ath_hal_computetxtime(struct ath_hal *hal, const HAL_RATE_TABLE *rates,
 	}
 
 	return (value);
-}
-
-u_int
-ath_hal_mhz2ieee(u_int mhz, u_int flags)
-{
-	return (ieee80211_mhz2ieee(mhz, flags));
-}
-
-u_int
-ath_hal_ieee2mhz(u_int ieee, u_int flags)
-{
-	return (ieee80211_ieee2mhz(ieee, flags));
 }
 
 HAL_BOOL
@@ -622,14 +626,22 @@ ar5k_get_regdomain(struct ath_hal *hal)
 u_int32_t
 ar5k_bitswap(u_int32_t val, u_int bits)
 {
-	u_int32_t retval = 0, bit, i;
+	if (bits == 8) {
+		val = ((val & 0xF0) >>  4) | ((val & 0x0F) <<  4);
+		val = ((val & 0xCC) >>  2) | ((val & 0x33) <<  2);
+		val = ((val & 0xAA) >>  1) | ((val & 0x55) <<  1);
 
-	for (i = 0; i < bits; i++) {
-		bit = (val >> i) & 1;
-		retval = (retval << 1) | bit;
+		return val;
+	} else {
+		u_int32_t retval = 0, bit, i;
+
+		for (i = 0; i < bits; i++) {
+			bit = (val >> i) & 1;
+			retval = (retval << 1) | bit;
+		}
+
+		return retval;
 	}
-
-	return (retval);
 }
 
 u_int
@@ -1208,7 +1220,7 @@ ar5k_ar5111_channel(struct ath_hal *hal, HAL_CHANNEL *channel)
 	 * Set the channel on the AR5111 radio
 	 */
 	data0 = data1 = 0;
-	ath_channel = ieee_channel = ath_hal_mhz2ieee(channel->c_channel,
+	ath_channel = ieee_channel = ieee80211_mhz2ieee(channel->c_channel,
 	    channel->c_channel_flags);
 
 	if (channel->c_channel_flags & IEEE80211_CHAN_2GHZ) {

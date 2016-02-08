@@ -1,4 +1,4 @@
-/* $OpenBSD: apicvec.s,v 1.8 2006/11/15 14:40:50 mickey Exp $ */
+/* $OpenBSD: apicvec.s,v 1.10 2007/05/25 15:55:26 art Exp $ */
 /* $NetBSD: apicvec.s,v 1.1.2.2 2000/02/21 21:54:01 sommerfeld Exp $ */
 
 /*-
@@ -66,6 +66,93 @@ XINTR(ipi):
 	cli
 	popl	CPL
 	INTRFASTEXIT
+
+	.globl XINTR(ipi_ast)
+XINTR(ipi_ast):
+	pushl	%eax
+	pushl	%ds
+	movl	$GSEL(GDATA_SEL, SEL_KPL), %eax
+	movl	%eax, %ds
+
+	ioapic_asm_ack()
+
+	movl	$IPL_SOFTAST, %eax
+	orl	$(1 << SIR_AST), _C_LABEL(ipending)
+
+	orl	$(LAPIC_DLMODE_FIXED|LAPIC_LVL_ASSERT|LAPIC_DEST_SELF), %eax
+	movl	%eax, _C_LABEL(local_apic) + LAPIC_ICRLO
+
+	movl	_C_LABEL(local_apic) + LAPIC_ID, %eax
+	popl	%ds
+	popl	%eax
+	iret
+
+	.globl	XINTR(ipi_invltlb)
+	.p2align 4,0x90
+XINTR(ipi_invltlb):
+	pushl	%eax
+	pushl	%ds
+	movl	$GSEL(GDATA_SEL, SEL_KPL), %eax
+	movl	%eax, %ds
+
+	ioapic_asm_ack()
+
+	movl	%cr3, %eax
+	movl	%eax, %cr3
+
+	lock
+	decl	tlb_shoot_wait
+
+	popl	%ds
+	popl	%eax
+	iret
+
+	.globl	XINTR(ipi_invlpg)
+	.p2align 4,0x90
+XINTR(ipi_invlpg):
+	pushl	%eax
+	pushl	%ds
+	movl	$GSEL(GDATA_SEL, SEL_KPL), %eax
+	movl	%eax, %ds
+
+	ioapic_asm_ack()
+
+	movl	tlb_shoot_addr1, %eax
+	invlpg	(%eax)
+
+	lock
+	decl	tlb_shoot_wait
+
+	popl	%ds
+	popl	%eax
+	iret
+
+	.globl	XINTR(ipi_invlrange)
+	.p2align 4,0x90
+XINTR(ipi_invlrange):
+	pushl	%eax
+	pushl	%edx
+	pushl	%ds
+	movl	$GSEL(GDATA_SEL, SEL_KPL), %eax
+	movl	%eax, %ds
+
+	ioapic_asm_ack()
+
+	movl	tlb_shoot_addr1, %eax
+	movl	tlb_shoot_addr2, %edx
+1:	invlpg	(%eax)
+	addl	$PAGE_SIZE, %eax
+	cmpl	%edx, %eax
+	jb	1b
+
+	lock
+	decl	tlb_shoot_wait
+
+	popl	%ds
+	popl	%edx
+	popl	%eax
+	iret
+
 #endif
 
 	/*
@@ -94,7 +181,7 @@ XINTR(ltimer):
 #endif
 	jmp	_C_LABEL(Xdoreti)
 
-	.globl	XINTR(softclock), XINTR(softnet), XINTR(softtty)
+	.globl	XINTR(softclock), XINTR(softnet), XINTR(softtty), XINTR(softast)
 XINTR(softclock):
 	pushl	$0
 	pushl	$T_ASTFLT
@@ -160,6 +247,18 @@ XINTR(softtty):
 #ifdef MULTIPROCESSOR
 	call	_C_LABEL(i386_softintunlock)
 #endif
+	jmp	_C_LABEL(Xdoreti)
+
+XINTR(softast):
+	pushl	$0
+	pushl	$T_ASTFLT
+	INTRENTRY
+	MAKE_FRAME
+	pushl	CPL
+	movl	$IPL_SOFTAST,CPL
+	andl	$~(1<<SIR_AST),_C_LABEL(ipending)
+	ioapic_asm_ack()
+	sti
 	jmp	_C_LABEL(Xdoreti)
 
 #if NIOAPIC > 0

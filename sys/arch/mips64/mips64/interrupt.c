@@ -1,4 +1,4 @@
-/*	$OpenBSD: interrupt.c,v 1.22 2006/12/24 20:30:35 miod Exp $ */
+/*	$OpenBSD: interrupt.c,v 1.31 2007/07/16 20:20:08 miod Exp $ */
 
 /*
  * Copyright (c) 2001-2004 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -46,6 +46,7 @@
 #include <machine/autoconf.h>
 #include <machine/frame.h>
 #include <machine/regnum.h>
+#include <machine/atomic.h>
 
 #include <mips64/rm7000.h>
 
@@ -147,7 +148,7 @@ interrupt(struct trap_frame *trapframe)
 	/*
 	 *  Paranoic? Perhaps. But if we got here with the enable
 	 *  bit reset a mtc0 COP_0_STATUS_REG may have been interrupted.
-	 *  If this was a disable and the pipleine had advanced long
+	 *  If this was a disable and the pipeline had advanced long
 	 *  enough... i don't know but better safe than sorry...
 	 *  The main effect is not the interrupts but the spl mechanism.
 	 */
@@ -182,12 +183,7 @@ interrupt(struct trap_frame *trapframe)
 			cause &= ~(*cpu_int_tab[i].int_hand)(active, trapframe);
 		}
 	}
-#if 0
-if ((pending & cause & ~(SOFT_INT_MASK_1|SOFT_INT_MASK_0)) != 0) {
-printf("Unhandled interrupt %x:%x\n", cause, pending);
-//Debugger();
-}
-#endif
+
 	/*
 	 *  Reenable all non served hardware levels.
 	 */
@@ -198,25 +194,31 @@ printf("Unhandled interrupt %x:%x\n", cause, pending);
 
 	xcpl = splsoftnet();
 	if ((ipending & SINT_CLOCKMASK) & ~xcpl) {
-		clr_ipending(SINT_CLOCKMASK);
+		atomic_clearbits_int(&ipending, SINT_CLOCKMASK);
 		softclock();
 	}
 	if ((ipending & SINT_NETMASK) & ~xcpl) {
 		extern int netisr;
-		int isr = netisr;
-		netisr = 0;
-		clr_ipending(SINT_NETMASK);
+		int isr;
+
+		atomic_clearbits_int(&ipending, SINT_NETMASK);
+		while ((isr = netisr) != 0) {
+			atomic_clearbits_int(&netisr, isr);
+
 #define DONETISR(b,f)   if (isr & (1 << (b)))   f();
 #include <net/netisr_dispatch.h>
+		}
 	}
 
-#ifdef NOTYET
+#ifdef notyet
 	if ((ipending & SINT_TTYMASK) & ~xcpl) {
-		clr_ipending(SINT_TTYMASK);
+		atomic_clearbits_int(&ipending, SINT_TTYMASK);
 		compoll(NULL);
 	}
 #endif
+	__asm__ (" .set noreorder\n");
 	cpl = xcpl;
+	__asm__ (" sync\n .set reorder\n");
 }
 
 
@@ -230,7 +232,7 @@ void
 set_intr(int pri, intrmask_t mask,
 	intrmask_t (*int_hand)(intrmask_t, struct trap_frame *))
 {
-	if (!(idle_mask & (SOFT_INT_MASK >> 8)))
+	if ((idle_mask & SOFT_INT_MASK) == 0)
 		evcount_attach(&soft_count, "soft", (void *)&soft_irq, &evcount_intr);
 	if (pri < 0 || pri >= NLOWINT) {
 		panic("set_intr: to high priority");
@@ -251,7 +253,7 @@ set_intr(int pri, intrmask_t mask,
 
 	cpu_int_tab[pri].int_hand = int_hand;
 	cpu_int_tab[pri].int_mask = mask;
-	idle_mask |= (mask | SOFT_INT_MASK) >> 8;
+	idle_mask |= mask | SOFT_INT_MASK;
 }
 
 /*
@@ -267,7 +269,6 @@ softintr()
 
 	astpending = 0;
 	if (p->p_flag & P_OWEUPC) {
-		p->p_flag &= ~P_OWEUPC;
 		ADDUPROF(p);
 	}
 	if (want_resched)
@@ -277,7 +278,7 @@ softintr()
 
 	while ((sig = CURSIG(p)) != 0)		/* take pending signals */
 		postsig(sig);
-	curpriority = p->p_priority = p->p_usrpri;
+	p->p_cpu->ci_schedstate.spc_curpriority = p->p_priority = p->p_usrpri;
 }
 
 
@@ -286,6 +287,8 @@ intrmask_t intrtype[INTMASKSIZE], intrmask[INTMASKSIZE], intrlevel[INTMASKSIZE];
 struct intrhand *intrhand[INTMASKSIZE];
 
 /*======================================================================*/
+
+#if 0
 
 /*
  *	Generic interrupt handling code.
@@ -413,7 +416,7 @@ generic_intr_makemasks()
 	}
 
 	/* Then figure out which IRQs use each level. */
-	for (level = 0; level < 5; level++) {
+	for (level = IPL_NONE; level < NIPLS; level++) {
 		register int irqs = 0;
 		for (irq = 0; irq < INTMASKSIZE; irq++)
 			if (intrlevel[irq] & (1 << level))
@@ -424,15 +427,14 @@ generic_intr_makemasks()
 	/*
 	 * There are tty, network and disk drivers that use free() at interrupt
 	 * time, so imp > (tty | net | bio).
-	 */
-	imask[IPL_VM] |= imask[IPL_TTY] | imask[IPL_NET] | imask[IPL_BIO];
-
-	/*
+	 *
 	 * Enforce a hierarchy that gives slow devices a better chance at not
 	 * dropping data.
 	 */
-	imask[IPL_TTY] |= imask[IPL_NET] | imask[IPL_BIO];
 	imask[IPL_NET] |= imask[IPL_BIO];
+	imask[IPL_TTY] |= imask[IPL_NET];
+	imask[IPL_VM] |= imask[IPL_TTY];
+	imask[IPL_CLOCK] |= imask[IPL_VM] | SPL_CLOCKMASK;
 
 	/*
 	 * These are pseudo-levels.
@@ -469,7 +471,9 @@ generic_do_pending_int(int newcpl)
 
 	/* Don't recurse... but change the mask. */
 	if (processing) {
+		__asm__ (" .set noreorder\n");
 		cpl = newcpl;
+		__asm__ (" sync\n .set reorder\n");
 		return;
 	}
 	processing = 1;
@@ -481,7 +485,7 @@ generic_do_pending_int(int newcpl)
 
 	hwpend = ipending & ~newcpl;	/* Do pendings being unmasked */
 	hwpend &= ~(SINT_ALLMASK);
-	clr_ipending(hwpend);
+	atomic_clearbits_int(&ipending, hwpend);
 	intem |= hwpend;
 	while (hwpend) {
 		vector = ffs(hwpend) - 1;
@@ -496,28 +500,32 @@ generic_do_pending_int(int newcpl)
 		}
 	}
 	if ((ipending & SINT_CLOCKMASK) & ~newcpl) {
-		clr_ipending(SINT_CLOCKMASK);
+		atomic_clearbits_int(&ipending, SINT_CLOCKMASK);
 		softclock();
 	}
 	if ((ipending & SINT_NETMASK) & ~newcpl) {
 		int isr = netisr;
 		netisr = 0;
-		clr_ipending(SINT_NETMASK);
+		atomic_clearbits_int(&ipending, SINT_NETMASK);
 #define	DONETISR(b,f)	if (isr & (1 << (b)))   f();
 #include <net/netisr_dispatch.h>
 	}
 
 #ifdef NOTYET
 	if ((ipending & SINT_TTYMASK) & ~newcpl) {
-		clr_ipending(SINT_TTYMASK);
+		atomic_clearbits_int(&ipending, SINT_TTYMASK);
 		compoll(NULL);
 	}
 #endif
 
+	__asm__ (" .set noreorder\n");
 	cpl = newcpl;
+	__asm__ (" sync\n .set reorder\n");
 	updateimask(newcpl);	/* Update CPU mask ins SR register */
 	processing = 0;
 }
+
+#endif
 
 void
 dummy_do_pending_int(int newcpl)
@@ -546,6 +554,8 @@ splinit()
 #endif
 }
 
+#if 0
+
 /*
  *  Process interrupts. The parameter pending has non-masked interrupts.
  */
@@ -558,7 +568,7 @@ generic_iointr(intrmask_t pending, struct trap_frame *cf)
 
 	caught = 0;
 
-	set_ipending((pending >> 8) & cpl);
+	atomic_setbits_int(&ipending, (pending >> 8) & cpl);
 	pending &= ~(cpl << 8);
 	cf->sr &= ~((ipending << 8) & SR_INT_MASK);
 	cf->ic &= ~(ipending & IC_INT_MASK);
@@ -579,6 +589,8 @@ generic_iointr(intrmask_t pending, struct trap_frame *cf)
 	}
 	return caught;
 }
+
+#endif
 
 #ifndef INLINE_SPLRAISE
 int

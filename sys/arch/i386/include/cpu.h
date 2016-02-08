@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.87 2007/02/20 21:15:01 tom Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.95 2007/06/07 11:20:58 dim Exp $	*/
 /*	$NetBSD: cpu.h,v 1.35 1996/05/05 19:29:26 christos Exp $	*/
 
 /*-
@@ -65,18 +65,20 @@
 #define clockframe intrframe
 
 #include <sys/device.h>
-#include <sys/lock.h>                  /* will also get LOCKDEBUG */
+#include <sys/lock.h>			/* will also get LOCKDEBUG */
 #include <sys/sched.h>
+#include <sys/sensors.h>
 
 struct intrsource;
 
+#ifdef _KERNEL
 /* XXX stuff to move to cpuvar.h later */
 struct cpu_info {
 	struct device ci_dev;		/* our device */
 	struct cpu_info *ci_self;	/* pointer to this structure */
 	struct schedstate_percpu ci_schedstate; /* scheduler state */
 	struct cpu_info *ci_next;	/* next cpu */
-	
+
 	/* 
 	 * Public members. 
 	 */
@@ -113,7 +115,7 @@ struct cpu_info {
 	u_int32_t	ci_ipis; 	/* interprocessor interrupts pending */
 	int		sc_apic_version;/* local APIC version */
 	u_int64_t	ci_tscbase;
-	
+
 	u_int32_t	ci_level;
 	u_int32_t	ci_vendor[4];
 	u_int32_t	ci_signature;		/* X86 cpuid type */
@@ -124,7 +126,6 @@ struct cpu_info {
 	void (*cpu_setup)(struct cpu_info *);	/* proc-dependant init */
 
 	int		ci_want_resched;
-	int		ci_astpending;
 
 	union descriptor *ci_gdt;
 	union descriptor *ci_ldt;	/* per-cpu default LDT */
@@ -136,6 +137,15 @@ struct cpu_info {
 #define CI_DDB_STOPPED		2
 #define CI_DDB_ENTERDDB		3
 #define CI_DDB_INDDB		4
+
+	volatile int ci_setperf_state;
+#define CI_SETPERF_READY	0
+#define CI_SETPERF_SHOULDSTOP	1
+#define CI_SETPERF_INTRANSIT	2
+#define CI_SETPERF_DONE		3
+
+	struct ksensordev	ci_sensordev;
+	struct ksensor		ci_sensor;
 };
 
 /*
@@ -177,8 +187,20 @@ extern struct cpu_info *cpu_info_list;
 #define CPU_STOP(_ci)		((_ci)->ci_func->stop(_ci))
 #define CPU_START_CLEANUP(_ci)	((_ci)->ci_func->cleanup(_ci))
 
-#define cpu_number()		(i82489_readreg(LAPIC_ID)>>LAPIC_ID_SHIFT)
-#define	curcpu()		(cpu_info[cpu_number()])
+static struct cpu_info *curcpu(void);
+
+__inline static struct cpu_info *
+curcpu(void)
+{
+	struct cpu_info *ci;
+
+	/* Can't include sys/param.h for offsetof() since it includes us */
+	__asm __volatile("movl %%fs:%1, %0" :
+		"=r" (ci) : "m"
+		(*(struct cpu_info * const *)&((struct cpu_info *)0)->ci_self));
+	return ci;
+}
+#define cpu_number() 		(curcpu()->ci_cpuid)
 
 #define CPU_IS_PRIMARY(ci)	((ci)->ci_flags & CPUF_PRIMARY)
 
@@ -202,7 +224,6 @@ extern void cpu_init_idle_pcbs(void);
 #define curpcb			curcpu()->ci_curpcb
 
 #define want_resched (curcpu()->ci_want_resched)
-#define astpending (curcpu()->ci_astpending)
 
 /*
  * Preempt the current process if in interrupt from user mode,
@@ -219,48 +240,35 @@ extern void need_resched(struct cpu_info *);
  */
 #define	PROC_PC(p)		((p)->p_md.md_regs->tf_eip)
 
+void aston(struct proc *);
+
 /*
  * Give a profiling tick to the current process when the user profiling
  * buffer pages are invalid.  On the i386, request an ast to send us
  * through trap(), marking the proc as needing a profiling tick.
  */
-#define	need_proftick(p)	((p)->p_flag |= P_OWEUPC, setsoftast())
+#define	need_proftick(p)	aston(p)
 
 /*
  * Notify the current process (p) that it has a signal pending,
  * process as soon as possible.
  */
-#define	signotify(p)		setsoftast()
+#define signotify(p)		aston(p)
 
 /*
  * We need a machine-independent name for this.
  */
 extern void (*delay_func)(int);
 struct timeval;
-extern void (*microtime_func)(struct timeval *);
 
 #define	DELAY(x)		(*delay_func)(x)
 #define delay(x)		(*delay_func)(x)
-#define microtime(tv)		(*microtime_func)(tv)
 
 #if defined(I586_CPU) || defined(I686_CPU)
 /*
  * High resolution clock support (Pentium only)
  */
 void	calibrate_cyclecounter(void);
-#ifndef	HZ
-extern u_quad_t pentium_base_tsc;
-#define CPU_CLOCKUPDATE()						\
-	do {								\
-		if (cpuspeed) {						\
-			__asm __volatile("cli\n"			\
-					 "rdtsc\n"			\
-					 : "=A" (pentium_base_tsc)	\
-					 : );				\
-			__asm __volatile("sti"); 			\
-		}							\
-	} while (0)
-#endif
 #endif
 
 /*
@@ -292,7 +300,6 @@ struct cpu_cpuid_feature {
 	const char *feature_name;
 };
 
-#ifdef _KERNEL
 /* locore.s */
 extern int cpu;
 extern int cpu_id;
@@ -317,6 +324,16 @@ extern int cpu_apmwarn;
 
 #if defined(I586_CPU) || defined(I686_CPU)
 extern int cpuspeed;
+#endif
+
+#if !defined(SMALL_KERNEL)
+#define BUS66  6667
+#define BUS100 10000
+#define BUS133 13333
+#define BUS166 16667
+#define BUS200 20000
+#define BUS266 26667
+#define BUS333 33333
 extern int bus_clock;
 #endif
 
@@ -357,8 +374,10 @@ void	initrtclock(void);
 void	startrtclock(void);
 void	rtcdrain(void *);
 void	i8254_delay(int);
-void	i8254_microtime(struct timeval *);
 void	i8254_initclocks(void);
+void	i8254_inittimecounter(void);
+void	i8254_inittimecounter_simple(void);
+
 
 /* est.c */
 #if !defined(SMALL_KERNEL) && defined(I686_CPU)
@@ -414,6 +433,11 @@ void	pmap_bootstrap(vaddr_t);
 
 /* vm_machdep.c */
 int	kvtop(caddr_t);
+
+#ifdef MULTIPROCESSOR
+/* mp_setperf.c */
+void	mp_setperf_init(void);
+#endif
 
 #ifdef VM86
 /* vm86.c */

@@ -1,4 +1,4 @@
-/*	$OpenBSD: fd.c,v 1.9 2007/02/15 00:53:26 krw Exp $	*/
+/*	$OpenBSD: fd.c,v 1.18 2007/06/20 18:15:46 deraadt Exp $	*/
 /*	$NetBSD: fd.c,v 1.112 2003/08/07 16:29:35 agc Exp $	*/
 
 /*-
@@ -257,7 +257,7 @@ struct fd_softc {
 	struct timeout sc_motoron_to;
 	struct timeout sc_motoroff_to;
 
-	daddr_t	sc_blkno;	/* starting block number */
+	daddr64_t sc_blkno;	/* starting block number */
 	int sc_bcount;		/* byte count left */
 	int sc_skip;		/* bytes already transferred */
 	int sc_nblks;		/* number of blocks currently transferring */
@@ -743,9 +743,9 @@ fdstrategy(bp)
 
 #ifdef FD_DEBUG
 	if (fdc_debug > 1)
-	    printf("fdstrategy: b_blkno %lld b_bcount %ld blkno %lld cylin %ld\n",
-		    (long long)bp->b_blkno, bp->b_bcount,
-		    (long long)fd->sc_blkno, bp->b_cylinder);
+	    printf("fdstrategy: b_blkno %lld b_bcount %d blkno %lld cylin %d\n",
+		    bp->b_blkno, bp->b_bcount,
+		    fd->sc_blkno, bp->b_cylinder);
 #endif
 
 	/* Queue transfer on drive, activate drive and controller if idle. */
@@ -1078,7 +1078,7 @@ fdcstatus(fdc, s)
 	struct fdc_softc *fdc;
 	char *s;
 {
-	struct fd_softc *fd = fdc->sc_drives.tqh_first;
+	struct fd_softc *fd = TAILQ_FIRST(&fdc->sc_drives);
 	int n;
 
 	/* Just print last status */
@@ -1446,14 +1446,19 @@ loop:
 		head = sec / type->sectrac;
 		sec -= head * type->sectrac;
 #ifdef DIAGNOSTIC
-		{int block;
-		 block = (fd->sc_cylin * type->heads + head) * type->sectrac + sec;
-		 if (block != fd->sc_blkno) {
-			 printf("fdcintr: block %d != blkno %d\n", block, (int)fd->sc_blkno);
+		{
+			daddr64_t block;
+
+			block = (fd->sc_cylin * type->heads + head) *
+			    type->sectrac + sec;
+			if (block != fd->sc_blkno) {
+				printf("fdcintr: block %lld != blkno %d\n",
+				    block, (int)fd->sc_blkno);
 #if defined(FD_DEBUG) && defined(DDB)
-			 Debugger();
+				 Debugger();
 #endif
-		 }}
+			}
+		}
 #endif
 		read = bp->b_flags & B_READ;
 
@@ -1580,7 +1585,7 @@ loop:
 					bp->b_flags & B_READ
 					? "read failed" : "write failed");
 				printf("blkno %lld nblks %d nstat %d tc %d\n",
-				       (long long)fd->sc_blkno, fd->sc_nblks,
+				       fd->sc_blkno, fd->sc_nblks,
 				       fdc->sc_nstat, fdc->sc_tc);
 			}
 #endif
@@ -1790,7 +1795,7 @@ fdcretry(fdc)
 	fdc->sc_errors++;
 }
 
-int
+daddr64_t
 fdsize(dev)
 	dev_t dev;
 {
@@ -1802,7 +1807,7 @@ fdsize(dev)
 int
 fddump(dev, blkno, va, size)
 	dev_t dev;
-	daddr_t blkno;
+	daddr64_t blkno;
 	caddr_t va;
 	size_t size;
 {
@@ -1850,14 +1855,12 @@ fdioctl(dev, cmd, addr, flag, p)
 			return (EBADF);
 
 		error = setdisklabel(fd->sc_dk.dk_label,
-				    (struct disklabel *)addr, 0,
-				    fd->sc_dk.dk_cpulabel);
+		    (struct disklabel *)addr, 0);
 		if (error)
 			return (error);
 
-		error = writedisklabel(dev, fdstrategy,
-				       fd->sc_dk.dk_label,
-				       fd->sc_dk.dk_cpulabel);
+		error = writedisklabel(DISKLABELDEV(dev), fdstrategy,
+		    fd->sc_dk.dk_label);
 		return (error);
 
 	case DIOCLOCK:
@@ -2001,11 +2004,9 @@ fdgetdisklabel(dev)
 	int unit = FDUNIT(dev);
 	struct fd_softc *fd = fd_cd.cd_devs[unit];
 	struct disklabel *lp = fd->sc_dk.dk_label;
-	struct cpu_disklabel *clp = fd->sc_dk.dk_cpulabel;
 	char *errstring;
 
 	bzero(lp, sizeof(struct disklabel));
-	bzero(lp, sizeof(struct cpu_disklabel));
 
 	lp->d_type = DTYPE_FLOPPY;
 	lp->d_secsize = FD_BSIZE(fd);
@@ -2013,17 +2014,13 @@ fdgetdisklabel(dev)
 	lp->d_nsectors = fd->sc_type->sectrac;
 	lp->d_ncylinders = fd->sc_type->tracks;
 	lp->d_ntracks = fd->sc_type->heads;	/* Go figure... */
-	lp->d_secperunit = lp->d_secpercyl * lp->d_ncylinders;
+	DL_SETDSIZE(lp, (daddr64_t)lp->d_secpercyl * lp->d_ncylinders);
 	lp->d_rpm = 300;	/* XXX like it matters... */
 
 	strncpy(lp->d_typename, "floppy disk", sizeof(lp->d_typename));
 	strncpy(lp->d_packname, "fictitious", sizeof(lp->d_packname));
 	lp->d_interleave = 1;
-
-	lp->d_partitions[RAW_PART].p_offset = 0;
-	lp->d_partitions[RAW_PART].p_size = lp->d_secpercyl * lp->d_ncylinders;
-	lp->d_partitions[RAW_PART].p_fstype = FS_UNUSED;
-	lp->d_npartitions = RAW_PART + 1;
+	lp->d_version = 1;
 
 	lp->d_magic = DISKMAGIC;
 	lp->d_magic2 = DISKMAGIC;
@@ -2033,7 +2030,7 @@ fdgetdisklabel(dev)
 	 * Call the generic disklabel extraction routine.  If there's
 	 * not a label there, fake it.
 	 */
-	errstring = readdisklabel(dev, fdstrategy, lp, clp, 0);
+	errstring = readdisklabel(DISKLABELDEV(dev), fdstrategy, lp, 0);
 	if (errstring) {
 		/*printf("%s: %s\n", fd->sc_dv.dv_xname, errstring);*/
 	}

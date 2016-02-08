@@ -1,4 +1,4 @@
-.\"	$OpenBSD: awk.1,v 1.25 2007/01/29 19:41:10 jmc Exp $
+.\"	$OpenBSD: awk.1,v 1.28 2007/06/27 21:10:39 jmc Exp $
 .\" EX/EE is a Bd
 .\"
 .\" Copyright (C) Lucent Technologies 1997
@@ -23,7 +23,7 @@
 .\" ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF
 .\" THIS SOFTWARE.
 .\"
-.Dd June 29, 1996
+.Dd $Mdocdate: June 27 2007 $
 .Dt AWK 1
 .Os
 .Sh NAME
@@ -307,7 +307,7 @@ The
 .Ic printf
 statement formats its expression list according to the format
 (see
-.Xr printf 3 ) .
+.Xr printf 1 ) .
 .Pp
 Patterns are arbitrary Boolean combinations
 (with
@@ -530,7 +530,7 @@ into one array element per character.
 The string resulting from formatting
 .Fa expr , ...
 according to the
-.Xr printf 3
+.Xr printf 1
 format
 .Fa fmt .
 .It Fn sub r t s
@@ -730,7 +730,6 @@ Print an error message to standard error:
 .Xr lex 1 ,
 .Xr printf 1 ,
 .Xr sed 1 ,
-.Xr printf 3 ,
 .Xr re_format 7 ,
 .Xr script 7
 .Pp
@@ -745,6 +744,20 @@ Print an error message to standard error:
 .%D 1988
 .%O ISBN 0-201-07981-X
 .Re
+.Sh STANDARDS
+The
+.Nm
+utility is compliant with the
+.St -p1003.1-2004
+specification.
+.Pp
+The flags
+.Op Fl \&dV
+and
+.Op Fl safe ,
+as well as the command
+.Cm fflush ,
+are extensions to that specification.
 .Sh HISTORY
 An
 .Nm

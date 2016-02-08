@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_rwlock.c,v 1.9 2006/11/30 20:08:22 mk Exp $	*/
+/*	$OpenBSD: kern_rwlock.c,v 1.13 2007/05/13 04:52:32 tedu Exp $	*/
 
 /*
  * Copyright (c) 2002, 2003 Artur Grabowski <art@openbsd.org>
@@ -30,6 +30,8 @@
 #include <sys/proc.h>
 #include <sys/rwlock.h>
 #include <sys/limits.h>
+
+#include <machine/lock.h>
 
 /* XXX - temporary measure until proc0 is properly aligned */
 #define RW_PROC(p) (((long)p) & ~RWLOCK_MASK)
@@ -67,6 +69,13 @@ static const struct rwlock_op {
 		0,
 		PLOCK
 	},
+	{	/* RW_DOWNGRADE */
+		RWLOCK_READ_INCR - RWLOCK_WRLOCK,
+		0,
+		0,
+		-1,
+		PLOCK
+	},
 };
 
 #ifndef __HAVE_MD_RWLOCK
@@ -79,7 +88,7 @@ rw_enter_read(struct rwlock *rwl)
 	unsigned long owner = rwl->rwl_owner;
 
 	if (__predict_false((owner & RWLOCK_WRLOCK) ||
-	    rw_test_and_set(&rwl->rwl_owner, owner, owner + RWLOCK_READ_INCR)))
+	    rw_cas(&rwl->rwl_owner, owner, owner + RWLOCK_READ_INCR)))
 		rw_enter(rwl, RW_READ);
 }
 
@@ -88,7 +97,7 @@ rw_enter_write(struct rwlock *rwl)
 {
 	struct proc *p = curproc;
 
-	if (__predict_false(rw_test_and_set(&rwl->rwl_owner, 0,
+	if (__predict_false(rw_cas(&rwl->rwl_owner, 0,
 	    RW_PROC(p) | RWLOCK_WRLOCK)))
 		rw_enter(rwl, RW_WRITE);
 }
@@ -99,7 +108,7 @@ rw_exit_read(struct rwlock *rwl)
 	unsigned long owner = rwl->rwl_owner;
 
 	if (__predict_false((owner & RWLOCK_WAIT) ||
-	    rw_test_and_set(&rwl->rwl_owner, owner, owner - RWLOCK_READ_INCR)))
+	    rw_cas(&rwl->rwl_owner, owner, owner - RWLOCK_READ_INCR)))
 		rw_exit(rwl);
 }
 
@@ -109,12 +118,13 @@ rw_exit_write(struct rwlock *rwl)
 	unsigned long owner = rwl->rwl_owner;
 
 	if (__predict_false((owner & RWLOCK_WAIT) ||
-	    rw_test_and_set(&rwl->rwl_owner, owner, 0)))
+	    rw_cas(&rwl->rwl_owner, owner, 0)))
 		rw_exit(rwl);
 }
 
+#ifndef rw_cas
 int
-rw_test_and_set(volatile unsigned long *p, unsigned long o, unsigned long n)
+rw_cas(volatile unsigned long *p, unsigned long o, unsigned long n)
 {
 	if (*p != o)
 		return (1);
@@ -122,6 +132,8 @@ rw_test_and_set(volatile unsigned long *p, unsigned long o, unsigned long n)
 
 	return (0);
 }
+#endif
+
 #endif
 
 #ifdef DIAGNOSTIC
@@ -136,8 +148,21 @@ rw_enter_diag(struct rwlock *rwl, int flags)
 	case RW_WRITE:
 	case RW_READ:
 		if (RW_PROC(curproc) == RW_PROC(rwl->rwl_owner))
-			panic("rw_enter: locking against myself");
+			panic("rw_enter: %s locking against myself",
+			    rwl->rwl_name);
 		break;
+	case RW_DOWNGRADE:
+		/*
+		 * If we're downgrading, we must hold the write lock.
+		 */
+		if ((rwl->rwl_owner & RWLOCK_WRLOCK) == 0)
+			panic("rw_enter: %s downgrade of non-write lock",
+			    rwl->rwl_name);
+		if (RW_PROC(curproc) != RW_PROC(rwl->rwl_owner))
+			panic("rw_enter: %s downgrade, not holder",
+			    rwl->rwl_name);
+		break;
+
 	default:
 		panic("rw_enter: unknown op 0x%x", flags);
 	}
@@ -154,39 +179,52 @@ rw_init(struct rwlock *rwl, const char *name)
 	rwl->rwl_name = name;
 }
 
-/*
- * You are supposed to understand this.
- */
 int
 rw_enter(struct rwlock *rwl, int flags)
 {
 	const struct rwlock_op *op;
+	struct sleep_state sls;
 	unsigned long inc, o;
-	int error, prio;
+	int error;
 
 	op = &rw_ops[flags & RW_OPMASK];
 
 	inc = op->inc + RW_PROC(curproc) * op->proc_mult;
-	prio = op->wait_prio;
-	if (flags & RW_INTR)
-		prio |= PCATCH;
 retry:
 	while (__predict_false(((o = rwl->rwl_owner) & op->check) != 0)) {
-		if (rw_test_and_set(&rwl->rwl_owner, o, o | op->wait_set))
-			continue;
+		unsigned long set = o | op->wait_set;
+		int do_sleep;
 
 		rw_enter_diag(rwl, flags);
 
 		if (flags & RW_NOSLEEP)
 			return (EBUSY);
-		if ((error = tsleep(rwl, prio, rwl->rwl_name, 0)) != 0)
+
+		sleep_setup(&sls, rwl, op->wait_prio, rwl->rwl_name);
+		if (flags & RW_INTR)
+			sleep_setup_signal(&sls, op->wait_prio | PCATCH);
+
+		do_sleep = !rw_cas(&rwl->rwl_owner, o, set);
+
+		sleep_finish(&sls, do_sleep);
+		if ((flags & RW_INTR) &&
+		    (error = sleep_finish_signal(&sls)) != 0)
 			return (error);
 		if (flags & RW_SLEEPFAIL)
 			return (EAGAIN);
 	}
 
-	if (__predict_false(rw_test_and_set(&rwl->rwl_owner, o, o + inc)))
+	if (__predict_false(rw_cas(&rwl->rwl_owner, o, o + inc)))
 		goto retry;
+
+	/*
+	 * If old lock had RWLOCK_WAIT and RWLOCK_WRLOCK set, it means we
+	 * downgraded a write lock and had possible read waiter, wake them
+	 * to let them retry the lock.
+	 */
+	if (__predict_false((o & (RWLOCK_WRLOCK|RWLOCK_WAIT)) ==
+	    (RWLOCK_WRLOCK|RWLOCK_WAIT)))
+		wakeup(rwl);
 
 	return (0);
 }
@@ -205,7 +243,7 @@ rw_exit(struct rwlock *rwl)
 		else
 			set = (owner - RWLOCK_READ_INCR) &
 				~(RWLOCK_WAIT|RWLOCK_WRWANT);
-	} while (rw_test_and_set(&rwl->rwl_owner, owner, set));
+	} while (rw_cas(&rwl->rwl_owner, owner, set));
 
 	if (owner & RWLOCK_WAIT)
 		wakeup(rwl);

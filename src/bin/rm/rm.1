@@ -1,4 +1,4 @@
-.\"	$OpenBSD: rm.1,v 1.27 2007/02/16 13:59:54 jmc Exp $
+.\"	$OpenBSD: rm.1,v 1.31 2007/06/06 00:08:57 ray Exp $
 .\"	$NetBSD: rm.1,v 1.8 1995/07/25 19:37:30 jtc Exp $
 .\"
 .\" Copyright (c) 1990, 1993, 1994
@@ -33,7 +33,7 @@
 .\"
 .\"	@(#)rm.1	8.5 (Berkeley) 12/5/94
 .\"
-.Dd December 5, 1994
+.Dd $Mdocdate: June 6 2007 $
 .Dt RM 1
 .Os
 .Sh NAME
@@ -84,7 +84,7 @@ then
 and then
 .Li 0xff
 again, before they are deleted.
-Files with multiple links will not be overwritten.
+Files with multiple links will be unlinked but not overwritten.
 .It Fl R
 Attempt to remove the file hierarchy rooted in each file argument.
 The
@@ -95,8 +95,7 @@ option.
 If the
 .Fl i
 option is specified, the user is prompted for confirmation before
-each directory's contents are processed (as well as before the attempt
-is made to remove the directory).
+each directory (and its contents) are processed.
 If the user does not respond affirmatively, the file hierarchy rooted in
 that directory is skipped.
 .Pp
@@ -151,6 +150,16 @@ $ rm ./-f
 .Sh STANDARDS
 The
 .Nm
+utility is compliant with the
+.St -p1003.1-2004
+specification.
+.Pp
+The flags
+.Op Fl dP
+are extensions to that specification.
+.Pp
+The
+.Nm
 utility differs from historical implementations in that the
 .Fl f
 option only masks attempts to remove non-existent files instead of
@@ -166,12 +175,7 @@ The interactive mode used to be a
 command, a carryover from the ancient past with an
 amusing etymology.
 .Pp
-The
-.Nm
-utility is almost
-.St -p1003.2
-compatible, except that
-.Tn POSIX
+.St -p1003.1-2004
 requires
 .Nm
 to act like

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_sk.c,v 1.139 2007/02/12 21:19:56 pedro Exp $	*/
+/*	$OpenBSD: if_sk.c,v 1.142 2007/05/26 16:44:21 reyk Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998, 1999, 2000
@@ -141,7 +141,7 @@ int sk_intr(void *);
 void sk_intr_bcom(struct sk_if_softc *);
 void sk_intr_xmac(struct sk_if_softc *);
 void sk_intr_yukon(struct sk_if_softc *);
-__inline int sk_rxvalid(struct sk_softc *, u_int32_t, u_int32_t);
+static __inline int sk_rxvalid(struct sk_softc *, u_int32_t, u_int32_t);
 void sk_rxeof(struct sk_if_softc *);
 void sk_txeof(struct sk_if_softc *);
 int sk_encap(struct sk_if_softc *, struct mbuf *, u_int32_t *);
@@ -1073,7 +1073,7 @@ sk_attach(struct device *parent, struct device *self, void *aux)
 		sc_if->arpcom.ac_enaddr[i] =
 		    sk_win_read_1(sc, SK_MAC0_0 + (sa->skc_port * 8) + i);
 
-	printf(", address %s\n",
+	printf(": address %s\n",
 	    ether_sprintf(sc_if->arpcom.ac_enaddr));
 
 	/*
@@ -1156,8 +1156,8 @@ sk_attach(struct device *parent, struct device *self, void *aux)
 	}
 	if (bus_dmamem_map(sc->sc_dmatag, &seg, rseg,
 	    sizeof(struct sk_ring_data), &kva, BUS_DMA_NOWAIT)) {
-		printf(": can't map dma buffers (%z bytes)\n",
-		       sizeof(struct sk_ring_data));
+		printf(": can't map dma buffers (%lu bytes)\n",
+		       (ulong)sizeof(struct sk_ring_data));
 		goto fail_1;
 	}
 	if (bus_dmamap_create(sc->sc_dmatag, sizeof(struct sk_ring_data), 1,
@@ -1701,7 +1701,7 @@ skc_shutdown(void *v)
 	sk_reset(sc);
 }
 
-__inline int
+static __inline int
 sk_rxvalid(struct sk_softc *sc, u_int32_t stat, u_int32_t len)
 {
 	if (sc->sk_type == SK_GENESIS) {

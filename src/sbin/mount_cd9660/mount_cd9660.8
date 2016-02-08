@@ -1,4 +1,4 @@
-.\"	$OpenBSD: mount_cd9660.8,v 1.19 2005/11/27 13:11:59 jmc Exp $
+.\"	$OpenBSD: mount_cd9660.8,v 1.22 2007/05/31 19:19:45 jmc Exp $
 .\"	$NetBSD: mount_cd9660.8,v 1.3 1995/04/23 10:33:13 cgd Exp $
 .\"
 .\" Copyright (c) 1993, 1994
@@ -33,7 +33,7 @@
 .\"
 .\"     @(#)mount_cd9660.8	8.3 (Berkeley) 3/27/94
 .\"
-.Dd March 27, 1994
+.Dd $Mdocdate: May 31 2007 $
 .Dt MOUNT_CD9660 8
 .Os
 .Sh NAME
@@ -43,6 +43,7 @@
 .Nm mount_cd9660
 .Op Fl egjR
 .Op Fl o Ar options
+.Op Fl s Ar offset
 .Ar special node
 .Sh DESCRIPTION
 The
@@ -81,6 +82,13 @@ See the
 man page for possible options and their meanings.
 .It Fl R
 Do not use any Rockridge extensions included in the filesystem.
+.It Fl s Ar offset
+Use the session starting at
+.Ar offset
+(counted in 2048-byte blocks from the start of the media) instead of
+the last session from the Table of Contents (TOC).
+The TOC can be inspected by using
+.Xr cdio 1 .
 .El
 .Sh SEE ALSO
 .Xr mount 2 ,

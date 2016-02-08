@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.14 2007/02/11 21:59:32 miod Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.18 2007/08/14 15:18:07 deraadt Exp $	*/
 /*	$NetBSD: cpu.h,v 1.34 2003/06/23 11:01:08 martin Exp $	*/
 
 /*
@@ -62,8 +62,8 @@
 #define	CPU_ALLOWAPERTURE	6	/* int: allow mmap of /dev/xf86 */
 #define CPU_APMWARN		7	/* APM battery warning percentage */
 #define CPU_KBDRESET		8	/* int: console keyboard reset */
-#define CPU_ZTSRAWMODE		9	/* int: zts returns unscaled x/y */
-#define CPU_ZTSSCALE		10	/* struct: zts scaling parameters */
+		/*		9	   formerly int: CPU_ZTSRAWMODE */
+		/*		10	   formerly struct: CPU_ZTSSCALE */
 #define	CPU_MAXSPEED		11	/* int: number of valid machdep ids */
 #define CPU_LIDSUSPEND		12	/* int: closing lid causes suspend */
 #define	CPU_MAXID		13	/* number of valid machdep ids */
@@ -78,11 +78,11 @@
 	{ "allowaperture", CTLTYPE_INT }, \
 	{ "apmwarn", CTLTYPE_INT }, \
 	{ "kbdreset", CTLTYPE_INT }, \
-	{ "ztsrawmode", CTLTYPE_INT }, \
-	{ "ztsscale", CTLTYPE_STRUCT }, \
+	{ 0, 0 }, \
+	{ 0, 0 }, \
 	{ "maxspeed", CTLTYPE_INT }, \
 	{ "lidsuspend", CTLTYPE_INT } \
-}    
+}
 
 #ifdef _KERNEL
 
@@ -199,13 +199,11 @@ void	arm32_vector_init(vaddr_t, int);
  */
 
 #include <sys/device.h>
-/*
 #include <sys/sched.h>
-*/
 struct cpu_info {
-#if 0 
+	struct proc *ci_curproc;
+
 	struct schedstate_percpu ci_schedstate; /* scheduler state */
-#endif
 #if defined(DIAGNOSTIC) || defined(LOCKDEBUG)
 	u_long ci_spin_locks;		/* # of spin locks held */
 	u_long ci_simple_locks;		/* # of simple locks held */
@@ -224,6 +222,10 @@ struct cpu_info {
 extern struct cpu_info cpu_info_store;
 #define	curcpu()	(&cpu_info_store)
 #define cpu_number()	0
+#define CPU_IS_PRIMARY(ci)	1
+#define CPU_INFO_ITERATOR	int
+#define CPU_INFO_FOREACH(cii, ci) \
+	for (cii = 0, ci = curcpu(); ci != NULL; ci = NULL)
 #endif
 
 #ifdef __PROG32
@@ -260,7 +262,7 @@ extern int want_resched;	/* resched() was called */
  * buffer pages are invalid.  On the i386, request an ast to send us
  * through trap(), marking the proc as needing a profiling tick.
  */
-#define	need_proftick(p)	((p)->p_flag |= P_OWEUPC, setsoftast())
+#define	need_proftick(p)	setsoftast()
 
 #ifndef acorn26
 /*

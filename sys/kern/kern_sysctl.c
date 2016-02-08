@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_sysctl.c,v 1.148 2007/02/20 17:42:29 deraadt Exp $	*/
+/*	$OpenBSD: kern_sysctl.c,v 1.155 2007/08/09 04:12:12 cnst Exp $	*/
 /*	$NetBSD: kern_sysctl.c,v 1.17 1996/05/20 17:49:05 mrg Exp $	*/
 
 /*-
@@ -111,8 +111,8 @@ int perflevel = 100;
  * Lock to avoid too many processes vslocking a large amount of memory
  * at the same time.
  */
-struct rwlock sysctl_lock = RWLOCK_INITIALIZER;
-struct rwlock sysctl_disklock = RWLOCK_INITIALIZER;
+struct rwlock sysctl_lock = RWLOCK_INITIALIZER("sysctllk");
+struct rwlock sysctl_disklock = RWLOCK_INITIALIZER("sysctldlk");
 
 int
 sys___sysctl(struct proc *p, void *v, register_t *retval)
@@ -188,6 +188,10 @@ sys___sysctl(struct proc *p, void *v, register_t *retval)
 		if ((error = rw_enter(&sysctl_lock, RW_WRITE|RW_INTR)) != 0)
 			return (error);
 		if (dolock) {
+			if (atop(oldlen) > uvmexp.wiredmax - uvmexp.wired) {
+				rw_exit_write(&sysctl_lock);
+				return (ENOMEM);
+			}
 			error = uvm_vslock(p, SCARG(uap, old), oldlen,
 			    VM_PROT_READ|VM_PROT_WRITE);
 			if (error) {
@@ -285,7 +289,7 @@ kern_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
 	case KERN_VERSION:
 		return (sysctl_rdstring(oldp, oldlenp, newp, version));
 	case KERN_MAXVNODES:
-		return(sysctl_int(oldp, oldlenp, newp, newlen, &desiredvnodes));
+		return(sysctl_int(oldp, oldlenp, newp, newlen, &maxvnodes));
 	case KERN_MAXPROC:
 		return (sysctl_int(oldp, oldlenp, newp, newlen, &maxproc));
 	case KERN_MAXFILES:
@@ -429,7 +433,6 @@ kern_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
 		return (sysctl_malloc(name + 1, namelen - 1, oldp, oldlenp,
 		    newp, newlen, p));
 	case KERN_CPTIME:
-#ifdef __HAVE_CPUINFO
 	{
 		CPU_INFO_ITERATOR cii;
 		struct cpu_info *ci;
@@ -441,10 +444,10 @@ kern_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
 			for (i = 0; i < CPUSTATES; i++)
 				cp_time[i] += ci->ci_schedstate.spc_cp_time[i];
 		}
-	}
-#endif
+
 		return (sysctl_rdstruct(oldp, oldlenp, newp, &cp_time,
 		    sizeof(cp_time)));
+	}
 	case KERN_NCHSTATS:
 		return (sysctl_rdstruct(oldp, oldlenp, newp, &nchstats,
 		    sizeof(struct nchstats)));
@@ -529,11 +532,9 @@ kern_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
 #endif
 	case KERN_MAXLOCKSPERUID:
 		return (sysctl_int(oldp, oldlenp, newp, newlen, &maxlocksperuid));
-#ifdef __HAVE_CPUINFO
 	case KERN_CPTIME2:
 		return (sysctl_cptime2(name + 1, namelen -1, oldp, oldlenp,
 		    newp, newlen));
-#endif
 	default:
 		return (EOPNOTSUPP);
 	}
@@ -1175,6 +1176,7 @@ fill_eproc(struct proc *p, struct eproc *ep)
 	strncpy(ep->e_emul, p->p_emul->e_name, EMULNAMELEN);
 	ep->e_emul[EMULNAMELEN] = '\0';
 	ep->e_maxrss = p->p_rlimit ? p->p_rlimit[RLIMIT_RSS].rlim_cur : 0;
+	ep->e_limit = p->p_p->ps_limit;
 }
 
 #ifndef	SMALL_KERNEL
@@ -1193,7 +1195,7 @@ fill_kproc2(struct proc *p, struct kinfo_proc2 *ki)
 	ki->p_paddr = PTRTOINT64(p);
 	ki->p_fd = PTRTOINT64(p->p_fd);
 	ki->p_stats = PTRTOINT64(p->p_stats);
-	ki->p_limit = PTRTOINT64(p->p_limit);
+	ki->p_limit = PTRTOINT64(p->p_p->ps_limit);
 	ki->p_vmspace = PTRTOINT64(p->p_vmspace);
 	ki->p_sigacts = PTRTOINT64(p->p_sigacts);
 	ki->p_sess = PTRTOINT64(p->p_session);
@@ -1285,11 +1287,7 @@ fill_kproc2(struct proc *p, struct kinfo_proc2 *ki)
 		ki->p_stat = p->p_stat;
 		ki->p_swtime = p->p_swtime;
 		ki->p_slptime = p->p_slptime;
-#ifdef __HAVE_CPUINFO
 		ki->p_schedflags = 0;
-#else
-		ki->p_schedflags = p->p_schedflags;
-#endif
 		ki->p_holdcnt = 1;
 		ki->p_priority = p->p_priority;
 		ki->p_usrpri = p->p_usrpri;
@@ -1776,8 +1774,10 @@ int
 sysctl_sensors(int *name, u_int namelen, void *oldp, size_t *oldlenp,
     void *newp, size_t newlen)
 {
-	struct sensor *s, *tmps;
-	struct sensordev *sd, *tmpsd;
+	struct ksensor *ks;
+	struct sensor *us;
+	struct ksensordev *ksd;
+	struct sensordev *usd;
 	int dev, numt, ret;
 	enum sensor_type type;
 
@@ -1786,38 +1786,46 @@ sysctl_sensors(int *name, u_int namelen, void *oldp, size_t *oldlenp,
 
 	dev = name[0];
 	if (namelen == 1) {
-		sd = sensordev_get(dev);
-		if (sd == NULL)
+		ksd = sensordev_get(dev);
+		if (ksd == NULL)
 			return (ENOENT);
 
 		/* Grab a copy, to clear the kernel pointers */
-		tmpsd = malloc(sizeof(*tmpsd), M_TEMP, M_WAITOK);
-		bcopy(sd, tmpsd, sizeof(*tmpsd));
-		bzero(&tmpsd->list, sizeof(tmpsd->list));
-		bzero(&tmpsd->sensors_list, sizeof(tmpsd->sensors_list));
+		usd = malloc(sizeof(*usd), M_TEMP, M_WAITOK);
+		bzero(usd, sizeof(*usd));
+		usd->num = ksd->num;
+		strlcpy(usd->xname, ksd->xname, sizeof(usd->xname));
+		memcpy(usd->maxnumt, ksd->maxnumt, sizeof(usd->maxnumt));
+		usd->sensors_count = ksd->sensors_count;
 
-		ret = sysctl_rdstruct(oldp, oldlenp, newp, tmpsd,
+		ret = sysctl_rdstruct(oldp, oldlenp, newp, usd,
 		    sizeof(struct sensordev));
 
-		free(tmpsd, M_TEMP);
+		free(usd, M_TEMP);
 		return (ret);
 	}
 
 	type = name[1];
 	numt = name[2];
 
-	s = sensor_find(dev, type, numt);
-	if (s == NULL)
+	ks = sensor_find(dev, type, numt);
+	if (ks == NULL)
 		return (ENOENT);
 
 	/* Grab a copy, to clear the kernel pointers */
-	tmps = malloc(sizeof(*tmps), M_TEMP, M_WAITOK);
-	bcopy(s, tmps, sizeof(*tmps));
-	bzero(&tmps->list, sizeof(tmps->list));
+	us = malloc(sizeof(*us), M_TEMP, M_WAITOK);
+	bzero(us, sizeof(*us));
+	memcpy(us->desc, ks->desc, sizeof(us->desc));
+	us->tv = ks->tv;
+	us->value = ks->value;
+	us->type = ks->type;
+	us->status = ks->status;
+	us->numt = ks->numt;
+	us->flags = ks->flags;
 
-	ret = sysctl_rdstruct(oldp, oldlenp, newp, tmps,
+	ret = sysctl_rdstruct(oldp, oldlenp, newp, us,
 	    sizeof(struct sensor));
-	free(tmps, M_TEMP);
+	free(us, M_TEMP);
 	return (ret);
 }
 
@@ -1858,7 +1866,6 @@ sysctl_emul(int *name, u_int namelen, void *oldp, size_t *oldlenp,
 
 #endif	/* SMALL_KERNEL */
 
-#ifdef __HAVE_CPUINFO
 int
 sysctl_cptime2(int *name, u_int namelen, void *oldp, size_t *oldlenp,
     void *newp, size_t newlen)
@@ -1883,4 +1890,3 @@ sysctl_cptime2(int *name, u_int namelen, void *oldp, size_t *oldlenp,
 	    &ci->ci_schedstate.spc_cp_time,
 	    sizeof(ci->ci_schedstate.spc_cp_time)));
 }
-#endif

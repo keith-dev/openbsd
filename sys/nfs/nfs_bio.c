@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_bio.c,v 1.44 2006/11/29 12:24:18 miod Exp $	*/
+/*	$OpenBSD: nfs_bio.c,v 1.46 2007/06/01 23:47:57 deraadt Exp $	*/
 /*	$NetBSD: nfs_bio.c,v 1.25.4.2 1996/07/08 20:47:04 jtc Exp $	*/
 
 /*
@@ -77,7 +77,7 @@ nfs_bioread(vp, uio, ioflag, cred)
 	struct vattr vattr;
 	struct proc *p;
 	struct nfsmount *nmp = VFSTONFS(vp->v_mount);
-	daddr_t lbn, bn, rabn;
+	daddr64_t lbn, bn, rabn;
 	caddr_t baddr;
 	int got_buf = 0, nra, error = 0, n = 0, on = 0, not_readin;
 	off_t offdiff;
@@ -227,7 +227,7 @@ again:
 		break;
 	    case VLNK:
 		nfsstats.biocache_readlinks++;
-		bp = nfs_getcacheblk(vp, (daddr_t)0, NFS_MAXPATHLEN, p);
+		bp = nfs_getcacheblk(vp, 0, NFS_MAXPATHLEN, p);
 		if (!bp)
 			return (EINTR);
 		if ((bp->b_flags & B_DONE) == 0) {
@@ -274,12 +274,7 @@ int
 nfs_write(v)
 	void *v;
 {
-	struct vop_write_args /* {
-		struct vnode *a_vp;
-		struct uio *a_uio;
-		int  a_ioflag;
-		struct ucred *a_cred;
-	} */ *ap = v;
+	struct vop_write_args *ap = v;
 	int biosize;
 	struct uio *uio = ap->a_uio;
 	struct proc *p = uio->uio_procp;
@@ -290,7 +285,7 @@ nfs_write(v)
 	struct buf *bp;
 	struct vattr vattr;
 	struct nfsmount *nmp = VFSTONFS(vp->v_mount);
-	daddr_t lbn, bn;
+	daddr64_t lbn, bn;
 	int n, on, error = 0, extended = 0, wrotedta = 0, truncated = 0;
 
 #ifdef DIAGNOSTIC
@@ -461,7 +456,7 @@ again:
 struct buf *
 nfs_getcacheblk(vp, bn, size, p)
 	struct vnode *vp;
-	daddr_t bn;
+	daddr64_t bn;
 	int size;
 	struct proc *p;
 {

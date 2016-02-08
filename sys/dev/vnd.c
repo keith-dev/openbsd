@@ -1,4 +1,4 @@
-/*	$OpenBSD: vnd.c,v 1.70 2007/02/26 11:25:23 pedro Exp $	*/
+/*	$OpenBSD: vnd.c,v 1.79 2007/06/20 18:15:46 deraadt Exp $	*/
 /*	$NetBSD: vnd.c,v 1.26 1996/03/30 23:06:11 christos Exp $	*/
 
 /*
@@ -76,6 +76,7 @@
 #include <sys/mount.h>
 #include <sys/vnode.h>
 #include <sys/file.h>
+#include <sys/rwlock.h>
 #include <sys/uio.h>
 #include <sys/conf.h>
 
@@ -132,13 +133,12 @@ struct vnd_softc {
 	struct ucred	*sc_cred;		/* credentials */
 	struct buf	 sc_tab;		/* transfer queue */
 	blf_ctx		*sc_keyctx;		/* key context */
+	struct rwlock	 sc_rwlock;
 };
 
 /* sc_flags */
 #define	VNF_ALIVE	0x0001
 #define	VNF_INITED	0x0002
-#define	VNF_WANTED	0x0040
-#define	VNF_LOCKED	0x0080
 #define	VNF_LABELLING	0x0100
 #define	VNF_WLABEL	0x0200
 #define	VNF_HAVELABEL	0x0400
@@ -161,13 +161,13 @@ int	vndsetcred(struct vnd_softc *, struct ucred *);
 void	vndiodone(struct buf *);
 void	vndshutdown(void);
 void	vndgetdisklabel(dev_t, struct vnd_softc *);
-void	vndencrypt(struct vnd_softc *, caddr_t, size_t, daddr_t, int);
+void	vndencrypt(struct vnd_softc *, caddr_t, size_t, daddr64_t, int);
 
-int	vndlock(struct vnd_softc *);
-void	vndunlock(struct vnd_softc *);
+#define vndlock(sc) rw_enter(&sc->sc_rwlock, RW_WRITE|RW_INTR)
+#define vndunlock(sc) rw_exit_write(&sc->sc_rwlock)
 
 void
-vndencrypt(struct vnd_softc *vnd, caddr_t addr, size_t size, daddr_t off,
+vndencrypt(struct vnd_softc *vnd, caddr_t addr, size_t size, daddr64_t off,
     int encrypt)
 {
 	int i, bsize;
@@ -193,6 +193,7 @@ vndattach(int num)
 {
 	char *mem;
 	u_long size;
+	int i;
 
 	if (num <= 0)
 		return;
@@ -204,6 +205,9 @@ vndattach(int num)
 	}
 	bzero(mem, size);
 	vnd_softc = (struct vnd_softc *)mem;
+	for (i = 0; i < num; i++) {
+		rw_init(&vnd_softc[i].sc_rwlock, "vndlock");
+	}
 	numvnd = num;
 
 	pool_init(&vndbufpl, sizeof(struct vndbuf), 0, 0, 0, "vndbufpl", NULL);
@@ -294,7 +298,6 @@ vndgetdisklabel(dev_t dev, struct vnd_softc *sc)
 	char *errstring = NULL;
 
 	bzero(lp, sizeof(struct disklabel));
-	bzero(sc->sc_dk.dk_cpulabel, sizeof(struct cpu_disklabel));
 
 	lp->d_secsize = 512;
 	lp->d_ntracks = 1;
@@ -305,23 +308,18 @@ vndgetdisklabel(dev_t dev, struct vnd_softc *sc)
 	strncpy(lp->d_typename, "vnd device", sizeof(lp->d_typename));
 	lp->d_type = DTYPE_VND;
 	strncpy(lp->d_packname, "fictitious", sizeof(lp->d_packname));
-	lp->d_secperunit = sc->sc_size;
+	DL_SETDSIZE(lp, sc->sc_size);
 	lp->d_rpm = 3600;
 	lp->d_interleave = 1;
 	lp->d_flags = 0;
-
-	lp->d_partitions[RAW_PART].p_offset = 0;
-	lp->d_partitions[RAW_PART].p_size = lp->d_secperunit;
-	lp->d_partitions[RAW_PART].p_fstype = FS_UNUSED;
-	lp->d_npartitions = RAW_PART + 1;
+	lp->d_version = 1;
 
 	lp->d_magic = DISKMAGIC;
 	lp->d_magic2 = DISKMAGIC;
 	lp->d_checksum = dkcksum(lp);
 
 	/* Call the generic disklabel extraction routine */
-	errstring = readdisklabel(VNDLABELDEV(dev), vndstrategy, lp,
-	    sc->sc_dk.dk_cpulabel, 0);
+	errstring = readdisklabel(VNDLABELDEV(dev), vndstrategy, lp, 0);
 	if (errstring) {
 		DNPRINTF(VDB_IO, "%s: %s\n", sc->sc_dev.dv_xname,
 		    errstring);
@@ -417,8 +415,7 @@ vndstrategy(struct buf *bp)
 
 	/* If we have a label, do a boundary check. */
 	if (vnd->sc_flags & VNF_HAVELABEL) {
-		if (bounds_check_with_label(bp, vnd->sc_dk.dk_label,
-		    vnd->sc_dk.dk_cpulabel, 1) <= 0) {
+		if (bounds_check_with_label(bp, vnd->sc_dk.dk_label, 1) <= 0) {
 			s = splbio();
 			biodone(bp);
 			splx(s);
@@ -438,7 +435,7 @@ vndstrategy(struct buf *bp)
 		/* Loop until all queued requests are handled.  */
 		for (;;) {
 			int part = DISKPART(bp->b_dev);
-			int off = vnd->sc_dk.dk_label->d_partitions[part].p_offset;
+			daddr64_t off = DL_GETPOFFSET(&vnd->sc_dk.dk_label->d_partitions[part]);
 
 			aiov.iov_base = bp->b_data;
 			auio.uio_resid = aiov.iov_len = bp->b_bcount;
@@ -497,7 +494,7 @@ vndstrategy(struct buf *bp)
 	}
 
 	/* The old-style buffercache bypassing method.  */
-	bn += vnd->sc_dk.dk_label->d_partitions[DISKPART(bp->b_dev)].p_offset;
+	bn += DL_GETPOFFSET(&vnd->sc_dk.dk_label->d_partitions[DISKPART(bp->b_dev)]);
 	bn = dbtob(bn);
 	bsize = vnd->sc_vp->v_mount->mnt_stat.f_iosize;
 	addr = bp->b_data;
@@ -906,14 +903,11 @@ vndioctl(dev_t dev, u_long cmd, caddr_t addr, int flag, struct proc *p)
 		vnd->sc_flags |= VNF_LABELLING;
 
 		error = setdisklabel(vnd->sc_dk.dk_label,
-		    (struct disklabel *)addr, /*vnd->sc_dk.dk_openmask : */0,
-		    vnd->sc_dk.dk_cpulabel);
+		    (struct disklabel *)addr, /*vnd->sc_dk.dk_openmask : */0);
 		if (error == 0) {
 			if (cmd == DIOCWDINFO)
-				error = writedisklabel(MAKEDISKDEV(major(dev),
-				    DISKUNIT(dev), RAW_PART),
-				    vndstrategy, vnd->sc_dk.dk_label,
-				    vnd->sc_dk.dk_cpulabel);
+				error = writedisklabel(VNDLABELDEV(dev),
+				    vndstrategy, vnd->sc_dk.dk_label);
 		}
 
 		vnd->sc_flags &= ~VNF_LABELLING;
@@ -999,7 +993,7 @@ vndclear(struct vnd_softc *vnd)
 	vnd->sc_size = 0;
 }
 
-int
+daddr64_t
 vndsize(dev_t dev)
 {
 	int unit = vndunit(dev);
@@ -1011,43 +1005,9 @@ vndsize(dev_t dev)
 }
 
 int
-vnddump(dev_t dev, daddr_t blkno, caddr_t va, size_t size)
+vnddump(dev_t dev, daddr64_t blkno, caddr_t va, size_t size)
 {
 
 	/* Not implemented. */
 	return (ENXIO);
-}
-
-/*
- * Wait interruptibly for an exclusive lock.
- *
- * XXX
- * Several drivers do this; it should be abstracted and made MP-safe.
- */
-int
-vndlock(struct vnd_softc *sc)
-{
-	int error;
-
-	while ((sc->sc_flags & VNF_LOCKED) != 0) {
-		sc->sc_flags |= VNF_WANTED;
-		if ((error = tsleep(sc, PRIBIO | PCATCH, "vndlck", 0)) != 0)
-			return (error);
-	}
-	sc->sc_flags |= VNF_LOCKED;
-	return (0);
-}
-
-/*
- * Unlock and wake up any waiters.
- */
-void
-vndunlock(struct vnd_softc *sc)
-{
-
-	sc->sc_flags &= ~VNF_LOCKED;
-	if ((sc->sc_flags & VNF_WANTED) != 0) {
-		sc->sc_flags &= ~VNF_WANTED;
-		wakeup(sc);
-	}
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: rde_filter.c,v 1.50 2006/05/28 23:24:15 claudio Exp $ */
+/*	$OpenBSD: rde_filter.c,v 1.53 2007/05/28 17:26:33 henning Exp $ */
 
 /*
  * Copyright (c) 2004 Claudio Jeker <claudio@openbsd.org>
@@ -74,9 +74,10 @@ rde_apply_set(struct rde_aspath *asp, struct filter_set_head *sh,
     sa_family_t af, struct rde_peer *from, struct rde_peer *peer)
 {
 	struct filter_set	*set;
-	struct aspath		*new;
+	u_char			*np;
 	int			 as, type;
-	u_int16_t		 prep_as;
+	u_int32_t		 prep_as;
+	u_int16_t		 nl;
 	u_int8_t		 prepend;
 
 	if (asp == NULL)
@@ -141,20 +142,22 @@ rde_apply_set(struct rde_aspath *asp, struct filter_set_head *sh,
 			}
 			break;
 		case ACTION_SET_PREPEND_SELF:
-			as = rde_local_as();
+			prep_as = rde_local_as();
 			prepend = set->action.prepend;
-			new = aspath_prepend(asp->aspath, as, prepend);
+			np = aspath_prepend(asp->aspath, prep_as, prepend, &nl);
 			aspath_put(asp->aspath);
-			asp->aspath = new;
+			asp->aspath = aspath_get(np, nl);
+			free(np);
 			break;
 		case ACTION_SET_PREPEND_PEER:
 			if (from == NULL)
 				break;
 			prep_as = from->conf.remote_as;
 			prepend = set->action.prepend;
-			new = aspath_prepend(asp->aspath, prep_as, prepend);
+			np = aspath_prepend(asp->aspath, prep_as, prepend, &nl);
 			aspath_put(asp->aspath);
-			asp->aspath = new;
+			asp->aspath = aspath_get(np, nl);
+			free(np);
 			break;
 		case ACTION_SET_NEXTHOP:
 		case ACTION_SET_NEXTHOP_REJECT:
@@ -253,7 +256,7 @@ rde_filter_match(struct filter_rule *f, struct rde_aspath *asp,
 		    f->match.as.as) == 0)
 			return (0);
 
-	if (asp != NULL && f->match.community.as != 0) {
+	if (asp != NULL && f->match.community.as != COMMUNITY_UNSET) {
 		switch (f->match.community.as) {
 		case COMMUNITY_ERROR:
 			fatalx("rde_apply_set bad community string");
@@ -469,7 +472,7 @@ filterset_cmp(struct filter_set *a, struct filter_set *b)
 
 	if (a->type == ACTION_SET_NEXTHOP && b->type == ACTION_SET_NEXTHOP) {
 		/*
-		 * This is the only intresting case, all others are considered
+		 * This is the only interesting case, all others are considered
 		 * equal. It does not make sense to e.g. set a nexthop and
 		 * reject it at the same time. Allow one IPv4 and one IPv6
 		 * per filter set or only one of the other nexthop modifiers.

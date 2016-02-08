@@ -1,4 +1,4 @@
-/*	$OpenBSD: ac97.c,v 1.61 2006/06/30 14:46:11 mickey Exp $	*/
+/*	$OpenBSD: ac97.c,v 1.63 2007/07/27 01:48:04 ian Exp $	*/
 
 /*
  * Copyright (c) 1999, 2000 Constantine Sapuntzakis
@@ -377,7 +377,8 @@ const struct ac97_codecid {
 }, ac97_cx[] = {
 	{ 0x21, 0xff, 0, 0,	"HSD11246" },
 	{ 0x28, 0xf8, 7, 0,	"CX20468",	ac97_cx20468_init },
-	{ 0x30, 0xff, 0, 0,	"CX?????", },
+	{ 0x30, 0xff, 0, 0,	"CXT48", },
+	{ 0x42, 0xff, 0, 0,	"CXT66", },
 }, ac97_dt[] = {
 	{ 0x00, 0xff, 0, 0,	"DT0398" },
 }, ac97_em[] = {
@@ -539,13 +540,12 @@ void	ac97_setup_defaults(struct ac97_softc *);
 int	ac97_read(struct ac97_softc *, u_int8_t, u_int16_t *);
 int	ac97_write(struct ac97_softc *, u_int8_t, u_int16_t);
 
-#define AC97_DEBUG 10
 
 #ifdef AUDIO_DEBUG
 #define DPRINTF(x)	if (ac97debug) printf x
 #define DPRINTFN(n,x)	if (ac97debug>(n)) printf x
 #ifdef AC97_DEBUG
-int	ac97debug = AC97_DEBUG;
+int	ac97debug = 1;
 #else
 int	ac97debug = 0;
 #endif

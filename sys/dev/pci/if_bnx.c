@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_bnx.c,v 1.48 2007/03/05 11:13:09 reyk Exp $	*/
+/*	$OpenBSD: if_bnx.c,v 1.53 2007/07/04 00:20:22 krw Exp $	*/
 
 /*-
  * Copyright (c) 2006 Broadcom Corporation
@@ -191,7 +191,8 @@ const struct pci_matchid bnx_devices[] = {
 	{ PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM5708 },
 	{ PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM5708S }
 #if 0
-	{ PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM5709 }
+	{ PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM5709 },
+	{ PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM5709S }
 #endif
 };
 
@@ -875,8 +876,11 @@ bnx_attachhook(void *xsc)
 	bcopy(sc->eaddr, sc->arpcom.ac_enaddr, ETHER_ADDR_LEN);
 	bcopy(sc->bnx_dev.dv_xname, ifp->if_xname, IFNAMSIZ);
 
-	ifp->if_capabilities = IFCAP_VLAN_MTU | IFCAP_CSUM_TCPv4 |
-			       IFCAP_CSUM_UDPv4;
+	ifp->if_capabilities = IFCAP_VLAN_MTU;
+
+#ifdef BNX_CSUM
+	ifp->if_capabilities |= IFCAP_CSUM_TCPv4 | IFCAP_CSUM_UDPv4;
+#endif	
 
 #if NVLAN > 0
 	ifp->if_capabilities |= IFCAP_VLAN_HWTAGGING;
@@ -1456,7 +1460,7 @@ bnx_nvram_erase_page(struct bnx_softc *sc, u_int32_t offset)
 	    BNX_NVM_COMMAND_DOIT;
 
 	/*
-	 * Clear the DONE bit separately, set the NVRAM adress to erase,
+	 * Clear the DONE bit separately, set the NVRAM address to erase,
 	 * and issue the erase command.
 	 */
 	REG_WR(sc, BNX_NVM_COMMAND, BNX_NVM_COMMAND_DONE);
@@ -3942,7 +3946,8 @@ bnx_rx_intr(struct bnx_softc *sc)
 			 * If we received a packet with a vlan tag,
 			 * attach that information to the packet.
 			 */
-			if (status & L2_FHDR_STATUS_L2_VLAN_TAG) {
+			if ((status & L2_FHDR_STATUS_L2_VLAN_TAG) &&
+			    !(sc->rx_mode & BNX_EMAC_RX_MODE_KEEP_VLAN_TAG)) {
 #if NVLAN > 0
 				struct ether_vlan_header vh;
 
@@ -3957,7 +3962,7 @@ bnx_rx_intr(struct bnx_softc *sc)
 				}
 				m_copydata(m, 0, ETHER_HDR_LEN, (caddr_t)&vh);
 				vh.evl_proto = vh.evl_encap_proto;
-				vh.evl_tag = l2fhdr->l2_fhdr_vlan_tag;
+				vh.evl_tag = htons(l2fhdr->l2_fhdr_vlan_tag);
 				vh.evl_encap_proto = htons(ETHERTYPE_VLAN);
 				m_adj(m, ETHER_HDR_LEN);
 				M_PREPEND(m, sizeof(vh), M_DONTWAIT);
@@ -4196,17 +4201,17 @@ bnx_init(void *xsc)
 	bnx_stop(sc);
 
 	if (bnx_reset(sc, BNX_DRV_MSG_CODE_RESET)) {
-		printf("%s: Controller reset failed!\n");
+		BNX_PRINTF(sc, "Controller reset failed!\n");
 		goto bnx_init_exit;
 	}
 
 	if (bnx_chipinit(sc)) {
-		printf("%s: Controller initialization failed!\n");
+		BNX_PRINTF(sc, "Controller initialization failed!\n");
 		goto bnx_init_exit;
 	}
 
 	if (bnx_blockinit(sc)) {
-		printf("%s: Block initialization failed!\n");
+		BNX_PRINTF(sc, "Block initialization failed!\n");
 		goto bnx_init_exit;
 	}
 
@@ -4701,7 +4706,7 @@ bnx_intr(void *xsc)
 		    ~STATUS_ATTN_BITS_LINK_STATE))) {
 			DBRUN(1, sc->unexpected_attentions++);
 
-			printf("%s: Fatal attention detected: 0x%08X\n", 
+			BNX_PRINTF(sc, "Fatal attention detected: 0x%08X\n",
 			    sc->status_block->status_attn_bits);
 
 			DBRUN(BNX_FATAL,

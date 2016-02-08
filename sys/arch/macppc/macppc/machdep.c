@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.87 2007/02/27 01:04:03 deraadt Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.93 2007/06/06 17:15:12 deraadt Exp $	*/
 /*	$NetBSD: machdep.c,v 1.4 1996/10/16 19:33:11 ws Exp $	*/
 
 /*
@@ -90,21 +90,12 @@
 /*
  * Global variables used here and there
  */
-struct pcb *curpcb;
-struct pmap *curpm;
-
 extern struct user *proc0paddr;
 struct pool ppc_vecpl;
 
 /*
  * Declare these as initialized data so we can patch them.
  */
-#ifdef NBUF
-int	nbuf = NBUF;
-#else
-int	nbuf = 0;
-#endif
-
 #ifndef BUFCACHEPERCENT
 #define BUFCACHEPERCENT 5
 #endif
@@ -202,6 +193,7 @@ initppc(startkernel, endkernel, args)
 	extern void *msgbuf_addr;
 	int exc, scratch;
 
+	proc0.p_cpu = &cpu_info[0];
 	proc0.p_addr = proc0paddr;
 	bzero(proc0.p_addr, sizeof *proc0.p_addr);
 
@@ -489,17 +481,17 @@ install_extint(void (*handler)(void))
 void
 cpu_startup()
 {
-	int sz, i;
+	int sz;
 	caddr_t v;
 	vaddr_t minaddr, maxaddr;
-	int base, residual;
-	v = (caddr_t)proc0paddr + USPACE;
 
+	v = (caddr_t)proc0paddr + USPACE;
 	proc0.p_addr = proc0paddr;
 
 	printf("%s", version);
 
-	printf("real mem = %d (%dK)\n", ctob(physmem), ctob(physmem)/1024);
+	printf("real mem = %u (%uMB)\n", ctob(physmem),
+	    ctob(physmem)/1024/1024);
 
 	/*
 	 * Find out how much space we need, allocate it,
@@ -512,43 +504,17 @@ cpu_startup()
 		panic("startup: table size inconsistency");
 
 	/*
-	 * Now allocate buffers proper.  They are different than the above
-	 * in that they usually occupy more virtual memory than physical.
+	 * Determine how many buffers to allocate.
+	 * We allocate bufcachepercent% of memory for buffer space.
 	 */
-	sz = MAXBSIZE * nbuf;
-	if (uvm_map(kernel_map, (vaddr_t *) &buffers, round_page(sz),
-	    NULL, UVM_UNKNOWN_OFFSET, 0, UVM_MAPFLAG(UVM_PROT_NONE,
-	    UVM_PROT_NONE, UVM_INH_NONE, UVM_ADV_NORMAL, 0)))
-		panic("cpu_startup: cannot allocate VM for buffers");
-	/*
-	addr = (vaddr_t)buffers;
-	*/
-	base = bufpages / nbuf;
-	residual = bufpages % nbuf;
-	if (base >= MAXBSIZE) {
-		/* Don't want to alloc more physical mem than ever needed */
-		base = MAXBSIZE;
-		residual = 0;
-	}
-	for (i = 0; i < nbuf; i++) {
-		vsize_t curbufsize;
-		vaddr_t curbuf;
-		struct vm_page *pg;
+	if (bufpages == 0)
+		bufpages = physmem * bufcachepercent / 100;
 
-		curbuf = (vaddr_t)buffers + i * MAXBSIZE;
-		curbufsize = PAGE_SIZE * (i < residual ? base + 1 : base);
-		while (curbufsize) {
-			pg = uvm_pagealloc(NULL, 0, NULL, 0);
-			if (pg == NULL)
-				panic("cpu_startup: not enough memory for"
-					" buffer cache");
-			pmap_kenter_pa(curbuf, VM_PAGE_TO_PHYS(pg),
-					VM_PROT_READ|VM_PROT_WRITE);
-			curbuf += PAGE_SIZE;
-			curbufsize -= PAGE_SIZE;
-		}
-	}
-	pmap_update(pmap_kernel());
+	/* Restrict to at most 25% filled kvm */
+	if (bufpages >
+	    (VM_MAX_KERNEL_ADDRESS-VM_MIN_KERNEL_ADDRESS) / PAGE_SIZE / 4) 
+		bufpages = (VM_MAX_KERNEL_ADDRESS-VM_MIN_KERNEL_ADDRESS) /
+		    PAGE_SIZE / 4;
 
 	/*
 	 * Allocate a submap for exec arguments.  This map effectively
@@ -565,10 +531,8 @@ cpu_startup()
 	    VM_PHYS_SIZE, 0, FALSE, NULL);
 	ppc_malloc_ok = 1;
 
-	printf("avail mem = %ld (%ldK)\n", ptoa(uvmexp.free),
-	    ptoa(uvmexp.free) / 1024);
-	printf("using %u buffers containing %u bytes (%uK) of memory\n",
-	    nbuf, bufpages * PAGE_SIZE, bufpages * PAGE_SIZE / 1024);
+	printf("avail mem = %lu (%luMB)\n", ptoa(uvmexp.free),
+	    ptoa(uvmexp.free) / 1024 / 1024);
 
 	/*
 	 * Set up the buffers.
@@ -593,28 +557,6 @@ allocsys(caddr_t v)
 	valloc(msghdrs, struct msg, msginfo.msgtql);
 	valloc(msqids, struct msqid_ds, msginfo.msgmni);
 #endif
-
-	/*
-	 * Decide on buffer space to use.
-	 */
-	if (bufpages == 0)
-		bufpages = physmem * bufcachepercent / 100;
-	if (nbuf == 0) {
-		nbuf = bufpages;
-		if (nbuf < 16)
-			nbuf = 16;
-	}
-	/* Restrict to at most 35% filled kvm */
-	if (nbuf >
-	    (VM_MAX_KERNEL_ADDRESS-VM_MIN_KERNEL_ADDRESS) / MAXBSIZE * 35 / 100)
-		nbuf = (VM_MAX_KERNEL_ADDRESS - VM_MIN_KERNEL_ADDRESS) /
-		    MAXBSIZE * 35 / 100;
-
-	/* More buffer pages than fits into the buffers is senseless.  */
-	if (bufpages > nbuf * MAXBSIZE / PAGE_SIZE)
-		bufpages = nbuf * MAXBSIZE / PAGE_SIZE;
-
-	valloc(buf, struct buf, nbuf);
 
 	return v;
 }
@@ -792,27 +734,20 @@ long dumplo = -1;			/* blocks */
  * reduce the chance that swapping trashes it.
  */
 void dumpconf(void);
+
 void
-dumpconf()
+dumpconf(void)
 {
 	int nblks;	/* size of dump area */
-	int maj;
 	int i;
 
-
-	if (dumpdev == NODEV)
+	if (dumpdev == NODEV ||
+	    (nblks = (bdevsw[major(dumpdev)].d_psize)(dumpdev)) == 0)
 		return;
-	maj = major(dumpdev);
-	if (maj < 0 || maj >= nblkdev)
-		panic("dumpconf: bad dumpdev=0x%x", dumpdev);
-	if (bdevsw[maj].d_psize == NULL)
-		return;
-	nblks = (*bdevsw[maj].d_psize)(dumpdev);
 	if (nblks <= ctod(1))
 		return;
 
 	/* Always skip the first block, in case there is a label there. */
-
 	if (dumplo < ctod(1))
 		dumplo = ctod(1);
 
@@ -844,7 +779,7 @@ int cpu_dump(void);
 int
 cpu_dump()
 {
-	int (*dump) (dev_t, daddr_t, caddr_t, size_t);
+	int (*dump) (dev_t, daddr64_t, caddr_t, size_t);
 	long buf[dbtob(1) / sizeof (long)];
 	kcore_seg_t	*segp;
 
@@ -867,8 +802,8 @@ dumpsys()
 #if 0
 	u_int npg;
 	u_int i, j;
-	daddr_t blkno;
-	int (*dump) (dev_t, daddr_t, caddr_t, size_t);
+	daddr64_t blkno;
+	int (*dump) (dev_t, daddr64_t, caddr_t, size_t);
 	char *str;
 	int maddr;
 	extern int msgbufmapped;
@@ -939,7 +874,6 @@ dumpsys()
 
 }
 
-volatile int cpl, ipending, astpending;
 int imask[IPL_NUM];
 
 /*
@@ -976,11 +910,7 @@ softnet(int isr)
 int
 lcsplx(int ipl)
 {
-	int oldcpl;
-
-	oldcpl = cpl;
-	splx(ipl);
-	return oldcpl;
+	return spllower(ipl);
 }
 
 /*

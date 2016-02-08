@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.4 2006/01/10 19:21:14 martin Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.7 2007/06/06 17:15:12 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2005 Michael Shalayeff
@@ -75,12 +75,6 @@
 /*
  * Patchable buffer cache parameters
  */
-#ifdef NBUF
-int nbuf = NBUF;
-#else
-int nbuf = 0;
-#endif
-
 #ifndef BUFCACHEPERCENT
 #define BUFCACHEPERCENT 10
 #endif /* BUFCACHEPERCENT */
@@ -290,29 +284,6 @@ TODO hpmc/toc/pfr
 	/* sets resvphysmem */
 	pmap_bootstrap(start);
 
-	/* buffer cache parameters */
-	if (bufpages == 0)
-		bufpages = physmem / 100 *
-		    (physmem <= 0x1000? 5 : bufcachepercent);
-
-	if (nbuf == 0)
-		nbuf = bufpages < 16? 16 : bufpages;
-
-	/* Restrict to at most 50% filled kvm */
-	if (nbuf * MAXBSIZE >
-	    (VM_MAX_KERNEL_ADDRESS-VM_MIN_KERNEL_ADDRESS) / 2)
-		nbuf = (VM_MAX_KERNEL_ADDRESS-VM_MIN_KERNEL_ADDRESS) /
-		    MAXBSIZE / 2;
-
-	/* More buffer pages than fits into the buffers is senseless. */
-	if (bufpages > nbuf * MAXBSIZE / PAGE_SIZE)
-		bufpages = nbuf * MAXBSIZE / PAGE_SIZE;
-
-	if (!(buf = (struct buf *)pmap_steal_memory(round_page(nbuf *
-	    sizeof(struct buf)), NULL, NULL)))
-		panic("cpu_startup: no space for bufs");
-	bzero(buf, nbuf * sizeof(struct buf));
-
 	/* space has been reserved in pmap_bootstrap() */
 	msgbufp = (struct msgbuf *)((vaddr_t)ptoa(physmem) -
 	    round_page(MSGBUFSIZE));
@@ -415,8 +386,6 @@ void
 cpu_startup(void)
 {
 	vaddr_t minaddr, maxaddr;
-	vsize_t size;
-	int i, base, residual;
 
 	/*
 	 * psychodelic kingdom come
@@ -428,47 +397,25 @@ cpu_startup(void)
 	printf("real mem = %u (%u reserved for PROM, %u used by OpenBSD)\n",
 	    ctob(physmem), ctob(resvmem), ctob(resvphysmem - resvmem));
 
-printf("here2\n");
-	size = MAXBSIZE * nbuf;
-	if (uvm_map(kernel_map, &minaddr, round_page(size),
-	    NULL, UVM_UNKNOWN_OFFSET, 0, UVM_MAPFLAG(UVM_PROT_NONE,
-	    UVM_PROT_NONE, UVM_INH_NONE, UVM_ADV_NORMAL, 0)))
-		panic("cpu_startup: cannot allocate VM for buffers");
-	buffers = (caddr_t)minaddr;
-	base = bufpages / nbuf;
-	residual = bufpages % nbuf;
-	for (i = 0; i < nbuf; i++) {
-		vaddr_t curbuf;
-		int cbpgs, pd;
+	/*
+	 * Determine how many buffers to allocate.
+	 * We allocate bufcachepercent% of memory for buffer space.
+	 */
+	if (bufpages == 0)
+		bufpages = physmem * bufcachepercent / 100;
 
-{ extern int pmapdebug; pd = pmapdebug; pmapdebug = 0; }
-		/*
-		 * First <residual> buffers get (base+1) physical pages
-		 * allocated for them.  The rest get (base) physical pages.
-		 *
-		 * The rest of each buffer occupies virtual space,
-		 * but has no physical memory allocated for it.
-		 */
-		curbuf = (vaddr_t) buffers + (i * MAXBSIZE);
-
-		for (cbpgs = base + (i < residual? 1 : 0); cbpgs--; ) {
-			struct vm_page *pg;
-
-			if ((pg = uvm_pagealloc(NULL, 0, NULL, 0)) == NULL)
-				panic("cpu_startup: not enough memory for "
-				    "buffer cache");
-			pmap_kenter_pa(curbuf, VM_PAGE_TO_PHYS(pg),
-			    UVM_PROT_RW);
-			curbuf += PAGE_SIZE;
-		}
-{ extern int pmapdebug; pmapdebug = pd; }
-	}
+	/* Restrict to at most 25% filled kvm */
+	if (bufpages >
+	    (VM_MAX_KERNEL_ADDRESS-VM_MIN_KERNEL_ADDRESS) / PAGE_SIZE / 4) 
+		bufpages = (VM_MAX_KERNEL_ADDRESS-VM_MIN_KERNEL_ADDRESS) /
+		    PAGE_SIZE / 4;
 
 printf("here3\n");
 	/*
 	 * Allocate a submap for exec arguments.  This map effectively
 	 * limits the number of processes exec'ing at any time.
 	 */
+	minaddr = vm_map_min(kernel_map);
 	exec_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr,
 	    16*NCARGS, VM_MAP_PAGEABLE, FALSE, NULL);
 
@@ -481,8 +428,6 @@ printf("here4\n");
 
 printf("here5\n");
 	printf("avail mem = %lu\n", ptoa(uvmexp.free));
-	printf("using %u buffers containing %u bytes of memory\n",
-	    nbuf, (unsigned)bufpages * PAGE_SIZE);
 
 	/*
 	 * Set up buffers, so they can be used to read disk labels.
@@ -802,10 +747,10 @@ void
 dumpsys(void)
 {
 	int psize, bytes, i, n;
-	register caddr_t maddr;
-	register daddr_t blkno;
-	register int (*dump)(dev_t, daddr_t, caddr_t, size_t);
-	register int error;
+	caddr_t maddr;
+	daddr64_t blkno;
+	int (*dump)(dev_t, daddr64_t, caddr_t, size_t);
+	int error;
 
 	/* Save registers
 	savectx(&dumppcb); */

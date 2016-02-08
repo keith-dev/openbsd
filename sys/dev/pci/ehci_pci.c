@@ -1,4 +1,4 @@
-/*	$OpenBSD: ehci_pci.c,v 1.10 2006/08/25 04:17:00 pascoe Exp $ */
+/*	$OpenBSD: ehci_pci.c,v 1.12 2007/06/10 14:49:01 mbalmer Exp $ */
 /*	$NetBSD: ehci_pci.c,v 1.15 2004/04/23 21:13:06 itojun Exp $	*/
 
 /*
@@ -40,6 +40,7 @@
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
+#include <sys/rwlock.h>
 #include <sys/device.h>
 #include <sys/proc.h>
 #include <sys/queue.h>
@@ -249,7 +250,7 @@ ehci_pci_takecontroller(struct ehci_pci_softc *sc)
 		    legsup | EHCI_LEGSUP_OSOWNED);
 		if (legsup & EHCI_LEGSUP_BIOSOWNED) {
 			DPRINTF(("%s: waiting for BIOS to give up control\n",
-			    USBDEVNAME(sc->sc.sc_bus.bdev)));
+			    sc->sc.sc_bus.bdev.dv_xname));
 			for (i = 0; i < 5000; i++) {
 				legsup = pci_conf_read(sc->sc_pc, sc->sc_tag,
 				    eecp);
@@ -259,7 +260,7 @@ ehci_pci_takecontroller(struct ehci_pci_softc *sc)
 			}
 			if (legsup & EHCI_LEGSUP_BIOSOWNED)
 				printf("%s: timed out waiting for BIOS\n",
-				    USBDEVNAME(sc->sc.sc_bus.bdev));
+				    sc->sc.sc_bus.bdev.dv_xname);
 		}
 	}
 }

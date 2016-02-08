@@ -1,4 +1,4 @@
-/*	$OpenBSD: cd9660_vnops.c,v 1.38 2007/01/16 17:52:18 thib Exp $	*/
+/*	$OpenBSD: cd9660_vnops.c,v 1.43 2007/06/06 17:15:13 deraadt Exp $	*/
 /*	$NetBSD: cd9660_vnops.c,v 1.42 1997/10/16 23:56:57 christos Exp $	*/
 
 /*-
@@ -149,13 +149,7 @@ int
 cd9660_setattr(v)
 	void *v;
 {
-	struct vop_setattr_args /* {
-		struct vnodeop_desc *a_desc;
-		struct vnode *a_vp;
-		struct vattr *a_vap;
-		struct ucred *a_cred;
-		struct proc *a_p;
-	} */ *ap = v;
+	struct vop_setattr_args *ap = v;
 	struct vnode *vp = ap->a_vp;
 	struct vattr *vap = ap->a_vap;
 
@@ -218,12 +212,7 @@ int
 cd9660_access(v)
 	void *v;
 {
-	struct vop_access_args /* {
-		struct vnode *a_vp;
-		int  a_mode;
-		struct ucred *a_cred;
-		struct proc *a_p;
-	} */ *ap = v;
+	struct vop_access_args *ap = v;
 	struct iso_node *ip = VTOI(ap->a_vp);
 
 	return (vaccess(ip->inode.iso_mode & ALLPERMS, ip->inode.iso_uid,
@@ -234,12 +223,7 @@ int
 cd9660_getattr(v)
 	void *v;
 {
-	struct vop_getattr_args /* {
-		struct vnode *a_vp;
-		struct vattr *a_vap;
-		struct ucred *a_cred;
-		struct proc *a_p;
-	} */ *ap = v;
+	struct vop_getattr_args *ap = v;
 	struct vnode *vp = ap->a_vp;
 	register struct vattr *vap = ap->a_vap;
 	register struct iso_node *ip = VTOI(vp);
@@ -288,16 +272,6 @@ cd9660_getattr(v)
 	return (0);
 }
 
-#ifdef DEBUG
-extern int doclusterread;
-#else
-#define doclusterread 1
-#endif
-
-/* XXX until cluster routines can handle block sizes less than one page */
-#define cd9660_doclusterread \
-	(doclusterread && (ISO_DEFAULT_BLOCK_SIZE >= NBPG))
-
 /*
  * Vnode op for reading.
  */
@@ -305,18 +279,13 @@ int
 cd9660_read(v)
 	void *v;
 {
-	struct vop_read_args /* {
-		struct vnode *a_vp;
-		struct uio *a_uio;
-		int a_ioflag;
-		struct ucred *a_cred;
-	} */ *ap = v;
+	struct vop_read_args *ap = v;
 	struct vnode *vp = ap->a_vp;
 	register struct uio *uio = ap->a_uio;
 	register struct iso_node *ip = VTOI(vp);
 	register struct iso_mnt *imp;
 	struct buf *bp;
-	daddr_t lbn, rablock;
+	daddr64_t lbn, rablock;
 	off_t diff;
 	int error = 0;
 	long size, n, on;
@@ -341,35 +310,27 @@ cd9660_read(v)
 			n = diff;
 		size = blksize(imp, ip, lbn);
 		rablock = lbn + 1;
-		if (cd9660_doclusterread) {
-			if (lblktosize(imp, rablock) <= ip->i_size)
-				error = cluster_read(vp, &ip->i_ci,
-				    (off_t)ip->i_size, lbn, size, NOCRED, &bp);
-			else
-				error = bread(vp, lbn, size, NOCRED, &bp);
-		} else {
 #define MAX_RA 32
-			if (ci->ci_lastr + 1 == lbn) {
-				struct ra {
-					daddr64_t blks[MAX_RA];
-					int sizes[MAX_RA];
-				} *ra;
-				int i;
+		if (ci->ci_lastr + 1 == lbn) {
+			struct ra {
+				daddr64_t blks[MAX_RA];
+				int sizes[MAX_RA];
+			} *ra;
+			int i;
 
-				MALLOC(ra, struct ra *, sizeof *ra,
-				    M_TEMP, M_WAITOK);
-				for (i = 0; i < MAX_RA &&
-				    lblktosize(imp, (rablock + i)) < ip->i_size;
-				    i++) {
-					ra->blks[i] = rablock + i;
-					ra->sizes[i] = blksize(imp, ip, rablock + i);
-				}
-				error = breadn(vp, lbn, size, ra->blks,
-				    ra->sizes, i, NOCRED, &bp);
-				FREE(ra, M_TEMP);
-			} else
-				error = bread(vp, lbn, size, NOCRED, &bp);
-		}
+			MALLOC(ra, struct ra *, sizeof *ra,
+			    M_TEMP, M_WAITOK);
+			for (i = 0; i < MAX_RA &&
+			    lblktosize(imp, (rablock + i)) < ip->i_size;
+			    i++) {
+				ra->blks[i] = rablock + i;
+				ra->sizes[i] = blksize(imp, ip, rablock + i);
+			}
+			error = breadn(vp, lbn, size, ra->blks,
+			    ra->sizes, i, NOCRED, &bp);
+			FREE(ra, M_TEMP);
+		} else
+			error = bread(vp, lbn, size, NOCRED, &bp);
 		ci->ci_lastr = lbn;
 		n = min(n, size - bp->b_resid);
 		if (error) {
@@ -392,27 +353,7 @@ int
 cd9660_ioctl(v)
 	void *v;
 {
-	struct vop_ioctl_args /* {
-		struct vnode *a_vp;
-		u_long a_command;
-		caddr_t  a_data;
-		int  a_fflag;
-		struct ucred *a_cred;
-		struct proc *a_p;
-	} */ *ap = v;
-	daddr32_t *blkp;
-	daddr64_t blk;
-	int error;
-
-	switch (ap->a_command) {
-	case FIBMAP:
-		blkp = (daddr32_t *) ap->a_data;
-		error = VOP_BMAP(ap->a_vp, *blkp, NULL, &blk, 0);
-		*blkp = (daddr32_t) blk;
-		return (error);
-	default:
-		return (ENOTTY);
-	}
+	return (ENOTTY);
 }
 
 /* ARGSUSED */
@@ -420,11 +361,7 @@ int
 cd9660_poll(v)
 	void *v;
 {
-	struct vop_poll_args /* {
-		struct vnode *a_vp;
-		int a_events;
-		struct proc *a_p;
-	} */ *ap = v;
+	struct vop_poll_args *ap = v;
 
 	/*
 	 * We should really check to see if I/O is possible.
@@ -552,14 +489,7 @@ int
 cd9660_readdir(v)
 	void *v;
 {
-	struct vop_readdir_args /* {
-		struct vnode *a_vp;
-		struct uio *a_uio;
-		struct ucred *a_cred;
-		int *a_eofflag;
-		u_long *a_cookies;
-		int a_ncookies;
-	} */ *ap = v;
+	struct vop_readdir_args *ap = v;
 	register struct uio *uio = ap->a_uio;
 	struct isoreaddir *idp;
 	struct vnode *vdp = ap->a_vp;
@@ -748,11 +678,7 @@ int
 cd9660_readlink(v)
 	void *v;
 {
-	struct vop_readlink_args /* {
-		struct vnode *a_vp;
-		struct uio *a_uio;
-		struct ucred *a_cred;
-	} */ *ap = v;
+	struct vop_readlink_args *ap = v;
 	ISONODE	*ip;
 	ISODIR	*dirp;
 	ISOMNT	*imp;
@@ -840,11 +766,7 @@ int
 cd9660_link(v)
 	void *v;
 {
-	struct vop_link_args /* {
-		struct vnode *a_dvp;
-		struct vnode *a_vp;
-		struct componentname *a_cnp;
-	} */ *ap = v;
+	struct vop_link_args *ap = v;
 
 	VOP_ABORTOP(ap->a_dvp, ap->a_cnp);
 	vput(ap->a_dvp);
@@ -855,13 +777,7 @@ int
 cd9660_symlink(v)
 	void *v;
 {
-	struct vop_symlink_args /* {
-		struct vnode *a_dvp;
-		struct vnode **a_vpp;
-		struct componentname *a_cnp;
-		struct vattr *a_vap;
-		char *a_target;
-	} */ *ap = v;
+	struct vop_symlink_args *ap = v;
 
 	VOP_ABORTOP(ap->a_dvp, ap->a_cnp);
 	vput(ap->a_dvp);
@@ -875,12 +791,10 @@ int
 cd9660_lock(v)
 	void *v;
 {
-	struct vop_lock_args /* {
-		struct vnode *a_vp;
-	} */ *ap = v;
+	struct vop_lock_args *ap = v;
 	struct vnode *vp = ap->a_vp;
 
-	return (lockmgr(&VTOI(vp)->i_lock, ap->a_flags, &vp->v_interlock));
+	return (lockmgr(&VTOI(vp)->i_lock, ap->a_flags, NULL));
 }
 
 /*
@@ -890,13 +804,10 @@ int
 cd9660_unlock(v)
 	void *v;
 {
-	struct vop_unlock_args /* {
-		struct vnode *a_vp;
-	} */ *ap = v;
+	struct vop_unlock_args *ap = v;
 	struct vnode *vp = ap->a_vp;
 
-	return (lockmgr(&VTOI(vp)->i_lock, ap->a_flags | LK_RELEASE,
-	    &vp->v_interlock));
+	return (lockmgr(&VTOI(vp)->i_lock, ap->a_flags | LK_RELEASE, NULL));
 }
 
 /*
@@ -907,9 +818,7 @@ int
 cd9660_strategy(v)
 	void *v;
 {
-	struct vop_strategy_args /* {
-		struct buf *a_bp;
-	} */ *ap = v;
+	struct vop_strategy_args *ap = v;
 	struct buf *bp = ap->a_bp;
 	struct vnode *vp = bp->b_vp;
 	struct iso_node *ip;
@@ -963,9 +872,7 @@ int
 cd9660_islocked(v)
 	void *v;
 {
-	struct vop_islocked_args /* {
-		struct vnode *a_vp;
-	} */ *ap = v;
+	struct vop_islocked_args *ap = v;
 
 	return (lockstatus(&VTOI(ap->a_vp)->i_lock));
 }
@@ -977,11 +884,7 @@ int
 cd9660_pathconf(v)
 	void *v;
 {
-	struct vop_pathconf_args /* {
-		struct vnode *a_vp;
-		int a_name;
-		register_t *a_retval;
-	} */ *ap = v;
+	struct vop_pathconf_args *ap = v;
 	switch (ap->a_name) {
 	case _PC_LINK_MAX:
 		*ap->a_retval = 1;

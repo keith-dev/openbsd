@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_vic.c,v 1.39 2007/01/30 09:54:24 reyk Exp $	*/
+/*	$OpenBSD: if_vic.c,v 1.49 2007/06/15 02:29:50 dlg Exp $	*/
 
 /*
  * Copyright (c) 2006 Reyk Floeter <reyk@openbsd.org>
@@ -343,8 +343,6 @@ const struct pci_matchid vic_devices[] = {
 	{ PCI_VENDOR_VMWARE, PCI_PRODUCT_VMWARE_NET }
 };
 
-extern int ifqmaxlen;
-
 int
 vic_match(struct device *parent, void *match, void *aux)
 {
@@ -434,8 +432,8 @@ vic_map_pci(struct vic_softc *sc, struct pci_attach_args *pa)
 	}
 
 	intrstr = pci_intr_string(pa->pa_pc, ih);
-	sc->sc_ih = pci_intr_establish(pa->pa_pc, ih, IPL_BIO,
-	vic_intr, sc, DEVNAME(sc));
+	sc->sc_ih = pci_intr_establish(pa->pa_pc, ih, IPL_NET,
+	    vic_intr, sc, DEVNAME(sc));
 	if (sc->sc_ih == NULL) {
 		printf(": unable to map interrupt%s%s\n",
 		    intrstr == NULL ? "" : " at ",
@@ -771,9 +769,13 @@ vic_rx_proc(struct vic_softc *sc)
 			printf("%s: mbuf alloc failed\n", DEVNAME(sc));
 			break;
 		}
+		bus_dmamap_sync(sc->sc_dmat, rxb->rxb_dmamap, 0,
+		    rxb->rxb_m->m_pkthdr.len, BUS_DMASYNC_PREREAD);
+
 		rxd->rx_physaddr = rxb->rxb_dmamap->dm_segs[0].ds_addr;
 		rxd->rx_buflength = rxb->rxb_m->m_pkthdr.len;
 		rxd->rx_length = 0;
+		rxd->rx_owner = VIC_OWNER_DRIVER;
 
 		ifp->if_ipackets++;
 
@@ -850,6 +852,7 @@ vic_iff(struct vic_softc *sc)
 	struct ether_multi *enm;
 	struct ether_multistep step;
 	u_int32_t crc;
+	u_int16_t *mcastfil = (u_int16_t *)sc->sc_data->vd_mcastfil;
 	u_int flags = 0;
 
 	bzero(&sc->sc_data->vd_mcastfil, sizeof(sc->sc_data->vd_mcastfil));
@@ -867,7 +870,7 @@ vic_iff(struct vic_softc *sc)
 
 		crc = ether_crc32_le(enm->enm_addrlo, ETHER_ADDR_LEN);
 		crc >>= 26;
-		sc->sc_data->vd_mcastfil[crc >> 4] |= htole16(1 << (crc & 0xf));
+		mcastfil[crc >> 4] |= htole16(1 << (crc & 0xf));
 
 		ETHER_NEXT_MULTI(step, enm);
 	}
@@ -1114,8 +1117,8 @@ int
 vic_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 {
 	struct vic_softc *sc = (struct vic_softc *)ifp->if_softc;
+	struct ifreq *ifr = (struct ifreq *)data;
 	struct ifaddr *ifa;
-	struct ifreq *ifr;
 	int s, error = 0;
 
 	s = splnet();
@@ -1174,12 +1177,13 @@ vic_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 
 	default:
 		error = ENOTTY;
+		break;
 	}
 
 	if (error == ENETRESET) {
 		if ((ifp->if_flags & (IFF_UP | IFF_RUNNING)) ==
 		    (IFF_UP | IFF_RUNNING))
-			vic_init(ifp);
+			vic_iff(ifp->if_softc);
 		error = 0;
 	}
 

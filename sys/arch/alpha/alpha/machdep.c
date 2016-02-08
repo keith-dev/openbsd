@@ -1,4 +1,4 @@
-/* $OpenBSD: machdep.c,v 1.104 2007/02/26 21:30:16 miod Exp $ */
+/* $OpenBSD: machdep.c,v 1.110 2007/06/06 17:15:11 deraadt Exp $ */
 /* $NetBSD: machdep.c,v 1.210 2000/06/01 17:12:38 thorpej Exp $ */
 
 /*-
@@ -96,6 +96,7 @@
 #ifdef SYSVMSG
 #include <sys/msg.h>
 #endif
+#include <sys/timetc.h>
 
 #include <sys/mount.h>
 #include <sys/syscallargs.h>
@@ -133,12 +134,6 @@ void	printregs(struct reg *);
 /*
  * Declare these as initialized data so we can patch them.
  */
-#ifdef	NBUF
-int	nbuf = NBUF;
-#else
-int	nbuf = 0;
-#endif
-
 #ifndef BUFCACHEPERCENT
 #define BUFCACHEPERCENT 10
 #endif
@@ -172,12 +167,6 @@ int	alpha_cpus;
 
 int	bootdev_debug = 0;	/* patchable, or from DDB */
 
-/*
- * XXX We need an address to which we can assign things so that they
- * won't be optimized away because we didn't use the value.
- */
-u_int32_t no_optimize;
-
 /* the following is used externally (sysctl_hw) */
 char	machine[] = MACHINE;		/* from <machine/param.h> */
 char	cpu_model[128];
@@ -204,6 +193,9 @@ int	alpha_unaligned_sigbus = 1;	/* SIGBUS on fixed-up accesses */
 #ifndef NO_IEEE
 int	alpha_fp_sync_complete = 0;	/* fp fixup if sync even without /s */
 #endif
+
+/* used by hw_sysctl */
+extern char *hw_serial;
 
 /*
  * XXX This should be dynamically sized, but we have the chicken-egg problem!
@@ -838,20 +830,6 @@ allocsys(v)
 	valloc(msqids, struct msqid_ds, msginfo.msgmni);
 #endif
 
-	/*
-	 * Determine how many buffers to allocate.
-	 * We allocate 10% of memory for buffer space.  Insure a
-	 * minimum of 16 buffers.
-	 */
-	if (bufpages == 0)
-		bufpages = (physmem / (100/bufcachepercent));
-	if (nbuf == 0) {
-		nbuf = bufpages;
-		if (nbuf < 16)
-			nbuf = 16;
-	}
-	valloc(buf, struct buf, nbuf);
-
 #undef valloc
 
 	return v;
@@ -874,10 +852,7 @@ consinit()
 void
 cpu_startup()
 {
-	register unsigned i;
-	int base, residual;
 	vaddr_t minaddr, maxaddr;
-	vsize_t size;
 #if defined(DEBUG)
 	extern int pmapdebug;
 	int opmapdebug = pmapdebug;
@@ -904,44 +879,12 @@ cpu_startup()
 	}
 
 	/*
-	 * Allocate virtual address space for file I/O buffers.
-	 * Note they are different than the array of headers, 'buf',
-	 * and usually occupy more virtual memory than physical.
+	 * Determine how many buffers to allocate.
+	 * We allocate bufcachepercent% of memory for buffer space.
 	 */
-	size = MAXBSIZE * nbuf;
-	if (uvm_map(kernel_map, (vaddr_t *) &buffers, round_page(size),
-		    NULL, UVM_UNKNOWN_OFFSET, 0,
-		    UVM_MAPFLAG(UVM_PROT_NONE, UVM_PROT_NONE, UVM_INH_NONE,
-				UVM_ADV_NORMAL, 0)))
-		panic("startup: cannot allocate VM for buffers");
-	base = bufpages / nbuf;
-	residual = bufpages % nbuf;
-	for (i = 0; i < nbuf; i++) {
-		vsize_t curbufsize;
-		vaddr_t curbuf;
-		struct vm_page *pg;
+	if (bufpages == 0)
+		bufpages = physmem * bufcachepercent / 100;
 
-		/*
-		 * Each buffer has MAXBSIZE bytes of VM space allocated.  Of
-		 * that MAXBSIZE space, we allocate and map (base+1) pages
-		 * for the first "residual" buffers, and then we allocate
-		 * "base" pages for the rest.
-		 */
-		curbuf = (vaddr_t) buffers + (i * MAXBSIZE);
-		curbufsize = PAGE_SIZE * ((i < residual) ? (base+1) : base);
-
-		while (curbufsize) {
-			pg = uvm_pagealloc(NULL, 0, NULL, 0);
-			if (pg == NULL)
-				panic("cpu_startup: not enough memory for "
-				    "buffer cache");
-			pmap_kenter_pa(curbuf, VM_PAGE_TO_PHYS(pg),
-					VM_PROT_READ|VM_PROT_WRITE);
-			curbuf += PAGE_SIZE;
-			curbufsize -= PAGE_SIZE;
-		}
-		pmap_update(pmap_kernel());
-	}
 	/*
 	 * Allocate a submap for exec arguments.  This map effectively
 	 * limits the number of processes exec'ing at any time.
@@ -968,8 +911,6 @@ cpu_startup()
 		printf("stolen memory for VM structures = %d\n", pmap_pages_stolen * PAGE_SIZE);
 	}
 #endif
-	printf("using %ld buffers containing %ld bytes (%ldK) of memory\n",
-	    (long)nbuf, (long)bufpages * PAGE_SIZE, (long)bufpages * (PAGE_SIZE / 1024));
 
 	/*
 	 * Set up buffers, so they can be used to read disk labels.
@@ -1049,6 +990,7 @@ void
 identifycpu()
 {
 	char *s;
+	int slen;
 
 	/*
 	 * print out CPU identification information.
@@ -1059,15 +1001,19 @@ identifycpu()
 			goto skipMHz;
 	printf(", %ldMHz", hwrpb->rpb_cc_freq / 1000000);
 skipMHz:
+	/* fill in hw_serial if a serial number is known */
+	slen = strlen(hwrpb->rpb_ssn) + 1;
+	if (slen > 1) {
+		hw_serial = malloc(slen, M_SYSCTL, M_NOWAIT);
+		if (hw_serial)
+			strlcpy(hw_serial, (char *)hwrpb->rpb_ssn, slen);
+	}
+
 	printf("\n");
 	printf("%ld byte page size, %d processor%s.\n",
 	    hwrpb->rpb_page_size, alpha_cpus, alpha_cpus == 1 ? "" : "s");
 #if 0
-	/* this isn't defined for any systems that we run on? */
-	printf("serial number 0x%lx 0x%lx\n",
-	    ((long *)hwrpb->rpb_ssn)[0], ((long *)hwrpb->rpb_ssn)[1]);
-
-	/* and these aren't particularly useful! */
+	/* this is not particularly useful! */
 	printf("variation: 0x%lx, revision 0x%lx\n",
 	    hwrpb->rpb_variation, *(long *)hwrpb->rpb_revision);
 #endif
@@ -1206,7 +1152,7 @@ cpu_dump_mempagecnt()
 int
 cpu_dump()
 {
-	int (*dump)(dev_t, daddr_t, caddr_t, size_t);
+	int (*dump)(dev_t, daddr64_t, caddr_t, size_t);
 	char buf[dbtob(1)];
 	kcore_seg_t *segp;
 	cpu_kcore_hdr_t *cpuhdrp;
@@ -1253,41 +1199,30 @@ cpu_dump()
  * reduce the chance that swapping trashes it.
  */
 void
-dumpconf()
+dumpconf(void)
 {
 	int nblks, dumpblks;	/* size of dump area */
-	int maj;
 
-	if (dumpdev == NODEV)
-		goto bad;
-	maj = major(dumpdev);
-	if (maj < 0 || maj >= nblkdev)
-		panic("dumpconf: bad dumpdev=0x%x", dumpdev);
-	if (bdevsw[maj].d_psize == NULL)
-		goto bad;
-	nblks = (*bdevsw[maj].d_psize)(dumpdev);
+	if (dumpdev == NODEV ||
+	    (nblks = (bdevsw[major(dumpdev)].d_psize)(dumpdev)) == 0)
+		return;
 	if (nblks <= ctod(1))
-		goto bad;
+		return;
 
 	dumpblks = cpu_dumpsize();
 	if (dumpblks < 0)
-		goto bad;
+		return;
 	dumpblks += ctod(cpu_dump_mempagecnt());
 
 	/* If dump won't fit (incl. room for possible label), punt. */
 	if (dumpblks > (nblks - ctod(1)))
-		goto bad;
+		return;
 
 	/* Put dump at end of partition */
 	dumplo = nblks - dumpblks;
 
 	/* dumpsize is in page units, and doesn't include headers. */
 	dumpsize = cpu_dump_mempagecnt();
-	return;
-
-bad:
-	dumpsize = 0;
-	return;
 }
 
 /*
@@ -1301,8 +1236,8 @@ dumpsys()
 	u_long totalbytesleft, bytes, i, n, memcl;
 	u_long maddr;
 	int psize;
-	daddr_t blkno;
-	int (*dump)(dev_t, daddr_t, caddr_t, size_t);
+	daddr64_t blkno;
+	int (*dump)(dev_t, daddr64_t, caddr_t, size_t);
 	int error;
 	extern int msgbufmapped;
 
@@ -1855,9 +1790,6 @@ void
 fpusave_cpu(struct cpu_info *ci, int save)
 {
 	struct proc *p;
-#if defined(MULTIPROCESSOR)
-	int s;
-#endif
 
 	KDASSERT(ci == curcpu());
 
@@ -1896,7 +1828,7 @@ fpusave_proc(struct proc *p, int save)
 	struct cpu_info *oci;
 #if defined(MULTIPROCESSOR)
 	u_long ipi = save ? ALPHA_IPI_SYNCH_FPU : ALPHA_IPI_DISCARD_FPU;
-	int s, spincount;
+	int spincount;
 #endif
 
 	KDASSERT(p->p_addr != NULL);
@@ -1999,37 +1931,6 @@ remrunqueue(p)
 
 	if ((struct proc *)&sched_qs[bit] == sched_qs[bit].ph_link)
 		sched_whichqs &= ~(1 << bit);
-}
-
-/*
- * Return the best possible estimate of the time in the timeval
- * to which tvp points.  Unfortunately, we can't read the hardware registers.
- * We guarantee that the time will be greater than the value obtained by a
- * previous call.
- */
-void
-microtime(tvp)
-	register struct timeval *tvp;
-{
-	int s = splclock();
-	static struct timeval lasttime;
-
-	*tvp = time;
-#ifdef notdef
-	tvp->tv_usec += clkread();
-	while (tvp->tv_usec >= 1000000) {
-		tvp->tv_sec++;
-		tvp->tv_usec -= 1000000;
-	}
-#endif
-	if (tvp->tv_sec == lasttime.tv_sec &&
-	    tvp->tv_usec <= lasttime.tv_usec &&
-	    (tvp->tv_usec = lasttime.tv_usec + 1) >= 1000000) {
-		tvp->tv_sec++;
-		tvp->tv_usec -= 1000000;
-	}
-	lasttime = *tvp;
-	splx(s);
 }
 
 /*

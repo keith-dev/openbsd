@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.86 2006/12/30 16:25:41 kettenis Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.93 2007/08/04 16:44:15 kettenis Exp $	*/
 /*	$NetBSD: machdep.c,v 1.108 2001/07/24 19:30:14 eeh Exp $ */
 
 /*-
@@ -172,14 +172,8 @@ extern vaddr_t avail_end;
 /*
  * Declare these as initialized data so we can patch them.
  */
-#ifdef	NBUF
-int	nbuf = NBUF;
-#else
-int	nbuf = 0;
-#endif
-
 #ifndef BUFCACHEPERCENT
-#define BUFCACHEPERCENT 5
+#define BUFCACHEPERCENT 10
 #endif
 
 #ifdef	BUFPAGES
@@ -232,16 +226,13 @@ void	stackdump(void);
 void
 cpu_startup()
 {
-	unsigned i;
 	caddr_t v;
 	long sz;
-	int base, residual;
 #ifdef DEBUG
 	extern int pmapdebug;
 	int opmapdebug = pmapdebug;
 #endif
 	vaddr_t minaddr, maxaddr;
-	vsize_t size;
 	extern struct user *proc0paddr;
 
 #ifdef DEBUG
@@ -255,7 +246,8 @@ cpu_startup()
 	 */
 	printf(version);
 	/*identifycpu();*/
-	printf("total memory = %ld\n", (long)physmem * PAGE_SIZE);
+	printf("real mem = %lu (%luMB)\n", ctob(physmem),
+	    ctob(physmem)/1024/1024);
 	/*
 	 * Find out how much space we need, allocate it,
 	 * and then give everything true virtual addresses.
@@ -266,52 +258,12 @@ cpu_startup()
 	if (allocsys(v) - v != sz)
 		panic("startup: table size inconsistency");
 
-        /*
-         * allocate virtual and physical memory for the buffers.
-         */
-        size = MAXBSIZE * nbuf;         /* # bytes for buffers */
-
-        /* allocate VM for buffers... area is not managed by VM system */
-        if (uvm_map(kernel_map, (vaddr_t *) &buffers, round_page(size),
-                    NULL, UVM_UNKNOWN_OFFSET, 0,
-                    UVM_MAPFLAG(UVM_PROT_NONE, UVM_PROT_NONE, UVM_INH_NONE,
-                                UVM_ADV_NORMAL, 0)) != 0)
-        	panic("cpu_startup: cannot allocate VM for buffers");
-
-        minaddr = (vaddr_t) buffers;
-        if ((bufpages / nbuf) >= btoc(MAXBSIZE)) {
-        	bufpages = btoc(MAXBSIZE) * nbuf; /* do not overallocate RAM */
-        }
-        base = bufpages / nbuf;
-        residual = bufpages % nbuf;
-
-        /* now allocate RAM for buffers */
-	for (i = 0 ; i < nbuf ; i++) {
-		vaddr_t curbuf;
-		vsize_t curbufsize;
-		struct vm_page *pg;
-
-		/*
-		 * each buffer has MAXBSIZE bytes of VM space allocated.  of
-		 * that MAXBSIZE space we allocate and map (base+1) pages
-		 * for the first "residual" buffers, and then we allocate
-		 * "base" pages for the rest.
-		 */
-		curbuf = (vaddr_t) buffers + (i * MAXBSIZE);
-		curbufsize = NBPG * ((i < residual) ? (base+1) : base);
-
-		while (curbufsize) {
-			pg = uvm_pagealloc(NULL, 0, NULL, 0);
-			if (pg == NULL)
-				panic("cpu_startup: "
-				    "not enough RAM for buffer cache");
-			pmap_kenter_pa(curbuf,
-			    VM_PAGE_TO_PHYS(pg), VM_PROT_READ|VM_PROT_WRITE);
-			curbuf += PAGE_SIZE;
-			curbufsize -= PAGE_SIZE;
-		}
-	}
-	pmap_update(pmap_kernel());
+	/*
+	 * Determine how many buffers to allocate.
+	 * We allocate bufcachepercent% of memory for buffer space.
+	 */
+	if (bufpages == 0)
+		bufpages = physmem * bufcachepercent / 100;
 
 	/*
 	 * Allocate a submap for exec arguments.  This map effectively
@@ -324,9 +276,8 @@ cpu_startup()
 #ifdef DEBUG
 	pmapdebug = opmapdebug;
 #endif
-	printf("avail memory = %ld\n", (long)uvmexp.free * PAGE_SIZE);
-	printf("using %d buffers containing %ld bytes of memory\n", nbuf,
-		(long)bufpages * PAGE_SIZE);
+	printf("avail mem = %lu (%luMB)\n", ptoa(uvmexp.free),
+	    ptoa(uvmexp.free)/1024/1024);
 
 	/*
 	 * Set up buffers, so they can be used to read disk labels.
@@ -349,30 +300,6 @@ allocsys(caddr_t v)
 	valloc(msghdrs, struct msg, msginfo.msgtql);
 	valloc(msqids, struct msqid_ds, msginfo.msgmni);
 #endif
-
-        /*
-	 * Determine how many buffers to allocate (enough to
-	 * hold 5% of total physical memory, but at least 16).
-	 * Allocate 1/2 as many swap buffer headers as file i/o buffers.
-	 */
-	 if (bufpages == 0)
-	 	bufpages = physmem * bufcachepercent / 100;
-	 if (nbuf == 0) {
-	 	nbuf = bufpages;
-		if (nbuf < 16)
-			nbuf = 16;
-	}
-	/* Restrict to at most 30% filled kvm */
-	if (nbuf * MAXBSIZE >
-	    (VM_MAX_KERNEL_ADDRESS - VM_MIN_KERNEL_ADDRESS) * 3 / 10)
-		nbuf = (VM_MAX_KERNEL_ADDRESS - VM_MIN_KERNEL_ADDRESS) /
-		    MAXBSIZE * 3 / 10;
-
-	/* More buffer pages than fits into the buffers is senseless.  */
-	if (bufpages > nbuf * MAXBSIZE / PAGE_SIZE)
-		bufpages = nbuf * MAXBSIZE / PAGE_SIZE;
-
-	valloc(buf, struct buf, nbuf);
 
 	return (v);
 }
@@ -847,15 +774,15 @@ int	dumpsize = 0;		/* also for savecore */
 long	dumplo = 0;
 
 void
-dumpconf()
+dumpconf(void)
 {
 	int nblks, dumpblks;
 
-	if (dumpdev == NODEV || bdevsw[major(dumpdev)].d_psize == 0)
-		/* No usable dump device */
+	if (dumpdev == NODEV ||
+	    (nblks = (bdevsw[major(dumpdev)].d_psize)(dumpdev)) == 0)
 		return;
-
-	nblks = (*bdevsw[major(dumpdev)].d_psize)(dumpdev);
+	if (nblks <= ctod(1))
+		return;
 
 	dumpblks = ctod(physmem) + pmap_dumpsize();
 	if (dumpblks > (nblks - ctod(1)))
@@ -895,8 +822,8 @@ void
 dumpsys()
 {
 	int psize;
-	daddr_t blkno;
-	int (*dump)(dev_t, daddr_t, caddr_t, size_t);
+	daddr64_t blkno;
+	int (*dump)(dev_t, daddr64_t, caddr_t, size_t);
 	int error = 0;
 	struct mem_region *mp;
 	extern struct mem_region *mem;
@@ -937,7 +864,7 @@ dumpsys()
 
 	error = pmap_dumpmmu(dump, blkno);
 	blkno += pmap_dumpsize();
-printf("starting dump, blkno %d\n", blkno);
+printf("starting dump, blkno %lld\n", blkno);
 	for (mp = mem; mp->size; mp++) {
 		u_int64_t i = 0, n;
 		paddr_t maddr = mp->start;
@@ -1643,6 +1570,8 @@ int sparc_bus_protect(bus_space_tag_t, bus_space_tag_t, bus_space_handle_t,
     bus_size_t, int);
 int sparc_bus_unmap(bus_space_tag_t, bus_space_tag_t, bus_space_handle_t,
     bus_size_t);
+bus_addr_t sparc_bus_addr(bus_space_tag_t, bus_space_tag_t,
+    bus_space_handle_t);
 int sparc_bus_subregion(bus_space_tag_t, bus_space_tag_t,  bus_space_handle_t,
     bus_size_t, bus_size_t, bus_space_handle_t *);
 paddr_t sparc_bus_mmap(bus_space_tag_t, bus_space_tag_t, bus_addr_t, off_t,
@@ -1657,14 +1586,11 @@ int sparc_bus_alloc(bus_space_tag_t, bus_space_tag_t, bus_addr_t, bus_addr_t,
 void sparc_bus_free(bus_space_tag_t, bus_space_tag_t, bus_space_handle_t,
     bus_size_t);
 
-vaddr_t iobase = IODEV_BASE;
-struct extent *io_space = NULL;
-
 int
 sparc_bus_map(bus_space_tag_t t, bus_space_tag_t t0, bus_addr_t	addr,
     bus_size_t size, int flags, bus_space_handle_t *hp)
 {
-	vaddr_t v;
+	vaddr_t va;
 	u_int64_t pa;
 	paddr_t	pm_flags = 0;
 	vm_prot_t pm_prot = VM_PROT_READ;
@@ -1673,16 +1599,6 @@ sparc_bus_map(bus_space_tag_t t, bus_space_tag_t t0, bus_addr_t	addr,
 		hp->bh_ptr = addr;
 		return (0);
 	}
-
-	if (iobase == NULL)
-		iobase = IODEV_BASE;
-	if (io_space == NULL)
-		/*
-		 * And set up IOSPACE extents.
-		 */
-		io_space = extent_create("IOSPACE",
-		    (u_long)IODEV_BASE, (u_long)IODEV_END, M_DEVBUF, 0, 0,
-		    EX_NOWAIT);
 
 	if (size == 0) {
 		char buf[80];
@@ -1729,18 +1645,14 @@ sparc_bus_map(bus_space_tag_t t, bus_space_tag_t t0, bus_addr_t	addr,
 	if ((flags & BUS_SPACE_MAP_CACHEABLE) == 0)
 		pm_flags |= PMAP_NC;
 
-	{ /* scope */
-		int err = extent_alloc(io_space, size, NBPG, 0, 0,
-		    EX_NOWAIT | EX_BOUNDZERO, (u_long *)&v);
-		if (err)
-			panic("sparc_bus_map: cannot allocate io_space: %d",
-			    err);
-	}
+	va = uvm_km_valloc(kernel_map, size);
+	if (va == 0)
+		return (ENOMEM);
 
 	/* note: preserve page offset */
-	hp->bh_ptr = v | ((u_long)addr & PGOFSET);
+	hp->bh_ptr = va | (addr & PGOFSET);
 
-	pa = addr & ~PAGE_MASK; /* = trunc_page(addr); Will drop high bits */
+	pa = trunc_page(addr);
 	if ((flags & BUS_SPACE_MAP_READONLY) == 0)
 		pm_prot |= VM_PROT_WRITE;
 
@@ -1760,9 +1672,9 @@ sparc_bus_map(bus_space_tag_t t, bus_space_tag_t t0, bus_addr_t	addr,
 		BUS_SPACE_PRINTF(BSDB_MAPDETAIL, ("\nsparc_bus_map: phys %llx "
 		    "virt %p hp->bh_ptr %llx", (unsigned long long)pa,
 		    (char *)v, (unsigned long long)hp->bh_ptr));
-		pmap_enter(pmap_kernel(), v, pa | pm_flags, pm_prot,
+		pmap_enter(pmap_kernel(), va, pa | pm_flags, pm_prot,
 			pm_prot|PMAP_WIRED);
-		v += PAGE_SIZE;
+		va += PAGE_SIZE;
 		pa += PAGE_SIZE;
 	} while ((size -= PAGE_SIZE) > 0);
 	pmap_update(pmap_kernel());
@@ -1840,16 +1752,14 @@ sparc_bus_unmap(bus_space_tag_t t, bus_space_tag_t t0, bus_space_handle_t bh,
 {
 	vaddr_t va = trunc_page((vaddr_t)bh.bh_ptr);
 	vaddr_t endva = va + round_page(size);
-	int error;
 
 	if (PHYS_ASI(t0->asi))
 		return (0);
 
-	error = extent_free(io_space, va, size, EX_NOWAIT);
-	if (error)
-		printf("\nsparc_bus_unmap: extent free says %d", error);
-
 	pmap_remove(pmap_kernel(), va, endva);
+	pmap_update(pmap_kernel());
+	uvm_km_free(kernel_map, va, endva - va);
+
 	return (0);
 }
 
@@ -1864,6 +1774,19 @@ sparc_bus_mmap(bus_space_tag_t t, bus_space_tag_t t0, bus_addr_t paddr,
 
 	/* Devices are un-cached... although the driver should do that */
 	return ((paddr + off) | PMAP_NC);
+}
+
+bus_addr_t
+sparc_bus_addr(bus_space_tag_t t, bus_space_tag_t t0, bus_space_handle_t h)
+{
+	paddr_t addr;
+
+	if (PHYS_ASI(t0->asi))
+		return h.bh_ptr;
+
+	if (!pmap_extract(pmap_kernel(), h.bh_ptr, &addr))
+		return (-1);
+	return addr;
 }
 
 void *
@@ -1964,7 +1887,8 @@ static const struct sparc_bus_space_tag _mainbus_space_tag = {
 	sparc_bus_subregion,		/* bus_space_subregion */
 	sparc_bus_barrier,		/* bus_space_barrier */
 	sparc_bus_mmap,			/* bus_space_mmap */
-	sparc_mainbus_intr_establish	/* bus_intr_establish */
+	sparc_mainbus_intr_establish,	/* bus_intr_establish */
+	sparc_bus_addr			/* bus_space_addr */
 };
 const bus_space_tag_t mainbus_space_tag = &_mainbus_space_tag;
 

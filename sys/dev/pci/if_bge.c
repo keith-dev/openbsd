@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_bge.c,v 1.207 2007/02/16 01:25:50 krw Exp $	*/
+/*	$OpenBSD: if_bge.c,v 1.213 2007/06/21 01:11:50 dlg Exp $	*/
 
 /*
  * Copyright (c) 2001 Wind River Systems
@@ -157,8 +157,7 @@ void bge_ifmedia_sts(struct ifnet *, struct ifmediareq *);
 u_int8_t bge_eeprom_getbyte(struct bge_softc *, int, u_int8_t *);
 int bge_read_eeprom(struct bge_softc *, caddr_t, int, int);
 
-void bge_setmulti(struct bge_softc *);
-void bge_setpromisc(struct bge_softc *);
+void bge_iff(struct bge_softc *);
 
 int bge_alloc_jumbo_mem(struct bge_softc *);
 void *bge_jalloc(struct bge_softc *);
@@ -187,8 +186,8 @@ void bge_reset(struct bge_softc *);
 void bge_link_upd(struct bge_softc *);
 
 #ifdef BGE_DEBUG
-#define DPRINTF(x)	if (bgedebug) printf x
-#define DPRINTFN(n,x)	if (bgedebug >= (n)) printf x
+#define DPRINTF(x)	do { if (bgedebug) printf x; } while (0)
+#define DPRINTFN(n,x)	do { if (bgedebug >= (n)) printf x; } while (0)
 int	bgedebug = 0;
 #else
 #define DPRINTF(x)
@@ -355,9 +354,10 @@ static const struct bge_revision {
 	{ BGE_CHIPID_BCM5755_A0, "BCM5755 A0" },
 	{ BGE_CHIPID_BCM5755_A1, "BCM5755 A1" },
 	{ BGE_CHIPID_BCM5755_A2, "BCM5755 A2" },
-	{ BGE_CHIPID_BCM5787_A0, "BCM5787 A0" },
-	{ BGE_CHIPID_BCM5787_A1, "BCM5787 A1" },
-	{ BGE_CHIPID_BCM5787_A2, "BCM5787 A2" },
+	/* the 5754 and 5787 share the same ASIC ID */
+	{ BGE_CHIPID_BCM5787_A0, "BCM5754/5787 A0" },
+	{ BGE_CHIPID_BCM5787_A1, "BCM5754/5787 A1" },
+	{ BGE_CHIPID_BCM5787_A2, "BCM5754/5787 A2" },
 	{ BGE_CHIPID_BCM5906_A1, "BCM5906 A1" },
 
 	{ 0, NULL }
@@ -381,7 +381,7 @@ static const struct bge_revision bge_majorrevs[] = {
 	{ BGE_ASICREV_BCM5714, "unknown BCM5714" },
 	{ BGE_ASICREV_BCM5755, "unknown BCM5755" },
 	/* 5754 and 5787 share the same ASIC ID */
-	{ BGE_ASICREV_BCM5787, "unknown BCM5787" },
+	{ BGE_ASICREV_BCM5787, "unknown BCM5754/5787" },
 	{ BGE_ASICREV_BCM5906, "unknown BCM5906" },
 
 	{ 0, NULL }
@@ -1060,52 +1060,38 @@ bge_init_tx_ring(struct bge_softc *sc)
 }
 
 void
-bge_setmulti(struct bge_softc *sc)
+bge_iff(struct bge_softc *sc)
 {
 	struct arpcom		*ac = &sc->arpcom;
 	struct ifnet		*ifp = &ac->ac_if;
 	struct ether_multi	*enm;
 	struct ether_multistep  step;
-	u_int32_t		hashes[4] = { 0, 0, 0, 0 };
-	u_int32_t		h;
-	int			i;
+	u_int8_t		hashes[16];
+	u_int32_t		h, rxmode;
 
 	/* First, zot all the existing filters. */
-	for (i = 0; i < 4; i++)
-		CSR_WRITE_4(sc, BGE_MAR0 + (i * 4), 0);
-
-	/* Now program new ones. */
-	if (ifp->if_flags & IFF_ALLMULTI || ifp->if_flags & IFF_PROMISC) {
-allmulti:
-		for (i = 0; i < 4; i++)
-			CSR_WRITE_4(sc, BGE_MAR0 + (i * 4), 0xFFFFFFFF);
-		return;
-	}
-
-	ETHER_FIRST_MULTI(step, ac, enm);
-	while (enm != NULL) {
-		if (bcmp(enm->enm_addrlo, enm->enm_addrhi, ETHER_ADDR_LEN)) {
-			ifp->if_flags |= IFF_ALLMULTI;
-			goto allmulti;
-		}
-		h = ether_crc32_le(enm->enm_addrlo, ETHER_ADDR_LEN) & 0x7F;
-		hashes[(h & 0x60) >> 5] |= 1 << (h & 0x1F);
-		ETHER_NEXT_MULTI(step, enm);
-	}
-
-	for (i = 0; i < 4; i++)
-		CSR_WRITE_4(sc, BGE_MAR0 + (i * 4), hashes[i]);
-}
-
-void
-bge_setpromisc(struct bge_softc *sc)
-{
-	struct ifnet	*ifp = &sc->arpcom.ac_if;
+	rxmode = CSR_READ_4(sc, BGE_RX_MODE) & ~BGE_RXMODE_RX_PROMISC;
+	ifp->if_flags &= ~IFF_ALLMULTI;
+	memset(hashes, 0x00, sizeof(hashes));
 
 	if (ifp->if_flags & IFF_PROMISC)
-		BGE_SETBIT(sc, BGE_RX_MODE, BGE_RXMODE_RX_PROMISC);
-	else
-		BGE_CLRBIT(sc, BGE_RX_MODE, BGE_RXMODE_RX_PROMISC);
+		rxmode |= BGE_RXMODE_RX_PROMISC;
+	else if (ac->ac_multirangecnt > 0) {
+		ifp->if_flags |= IFF_ALLMULTI;
+		memset(hashes, 0xff, sizeof(hashes));
+	} else {
+		ETHER_FIRST_MULTI(step, ac, enm);
+		while (enm != NULL) {
+			h = ether_crc32_le(enm->enm_addrlo, ETHER_ADDR_LEN);
+			setbit(hashes, h & 0x7F);
+			ETHER_NEXT_MULTI(step, enm);
+		}
+	}
+
+	bus_space_write_raw_region_4(sc->bge_btag, sc->bge_bhandle, BGE_MAR0,
+	    hashes, sizeof(hashes));
+
+	CSR_WRITE_4(sc, BGE_RX_MODE, rxmode);
 }
 
 /*
@@ -1383,16 +1369,21 @@ bge_blockinit(struct bge_softc *sc)
 	}
 
 	/*
-	 * Set the BD ring replentish thresholds. The recommended
+	 * Set the BD ring replenish thresholds. The recommended
 	 * values are 1/8th the number of descriptors allocated to
 	 * each ring.
 	 */
 	i = BGE_STD_RX_RING_CNT / 8;
 
-	/* Use a value of 8 for these chips to workaround HW errata */
+	/*
+	 * Use a value of 8 for the following chips to workaround HW errata.
+	 * Some of these chips have been added based on empirical
+	 * evidence (they don't work unless this is done).
+	 */
 	if (BGE_ASICREV(sc->bge_chipid) == BGE_ASICREV_BCM5750 ||
 	    BGE_ASICREV(sc->bge_chipid) == BGE_ASICREV_BCM5752 ||
-	    BGE_ASICREV(sc->bge_chipid) == BGE_ASICREV_BCM5755)
+	    BGE_ASICREV(sc->bge_chipid) == BGE_ASICREV_BCM5755 ||
+	    BGE_ASICREV(sc->bge_chipid) == BGE_ASICREV_BCM5787)
 		i = 8;
 
 	CSR_WRITE_4(sc, BGE_RBDI_STD_REPL_THRESH, i);
@@ -1844,11 +1835,13 @@ bge_attach(struct device *parent, struct device *self, void *aux)
 
 	if (BGE_IS_5705_OR_BEYOND(sc)) {
 		if (BGE_ASICREV(sc->bge_chipid) == BGE_ASICREV_BCM5755 ||
-		    BGE_ASICREV(sc->bge_chipid) == BGE_ASICREV_BCM5787)
-			sc->bge_flags |= BGE_PHY_JITTER_BUG;
+		    BGE_ASICREV(sc->bge_chipid) == BGE_ASICREV_BCM5787) {
+			if (PCI_PRODUCT(pa->pa_id) != PCI_PRODUCT_BROADCOM_BCM5722 &&
+			    PCI_PRODUCT(pa->pa_id) != PCI_PRODUCT_BROADCOM_BCM5756)
+				sc->bge_flags |= BGE_PHY_JITTER_BUG;
 			if (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_BROADCOM_BCM5755M)
 				sc->bge_flags |= BGE_PHY_ADJUST_TRIM;
-		else if (BGE_ASICREV(sc->bge_chipid) != BGE_ASICREV_BCM5906)
+		} else if (BGE_ASICREV(sc->bge_chipid) != BGE_ASICREV_BCM5906)
 			sc->bge_flags |= BGE_PHY_BER_BUG;
 	}
 
@@ -1858,19 +1851,29 @@ bge_attach(struct device *parent, struct device *self, void *aux)
 
 	bge_chipinit(sc);
 
+#ifdef __sparc64__
+	if (!gotenaddr) {
+		if (OF_getprop(PCITAG_NODE(pa->pa_tag), "local-mac-address",
+		    sc->arpcom.ac_enaddr, ETHER_ADDR_LEN) == ETHER_ADDR_LEN)
+			gotenaddr = 1;
+	}
+#endif
+
 	/*
 	 * Get station address from the EEPROM.
 	 */
-	mac_addr = bge_readmem_ind(sc, 0x0c14);
-	if ((mac_addr >> 16) == 0x484b) {
-		sc->arpcom.ac_enaddr[0] = (u_char)(mac_addr >> 8);
-		sc->arpcom.ac_enaddr[1] = (u_char)mac_addr;
-		mac_addr = bge_readmem_ind(sc, 0x0c18);
-		sc->arpcom.ac_enaddr[2] = (u_char)(mac_addr >> 24);
-		sc->arpcom.ac_enaddr[3] = (u_char)(mac_addr >> 16);
-		sc->arpcom.ac_enaddr[4] = (u_char)(mac_addr >> 8);
-		sc->arpcom.ac_enaddr[5] = (u_char)mac_addr;
-		gotenaddr = 1;
+	if (!gotenaddr) {
+		mac_addr = bge_readmem_ind(sc, 0x0c14);
+		if ((mac_addr >> 16) == 0x484b) {
+			sc->arpcom.ac_enaddr[0] = (u_char)(mac_addr >> 8);
+			sc->arpcom.ac_enaddr[1] = (u_char)mac_addr;
+			mac_addr = bge_readmem_ind(sc, 0x0c18);
+			sc->arpcom.ac_enaddr[2] = (u_char)(mac_addr >> 24);
+			sc->arpcom.ac_enaddr[3] = (u_char)(mac_addr >> 16);
+			sc->arpcom.ac_enaddr[4] = (u_char)(mac_addr >> 8);
+			sc->arpcom.ac_enaddr[5] = (u_char)mac_addr;
+			gotenaddr = 1;
+		}
 	}
 	if (!gotenaddr && (!(sc->bge_flags & BGE_NO_EEPROM))) {
 		if (bge_read_eeprom(sc, (caddr_t)&sc->arpcom.ac_enaddr,
@@ -1879,11 +1882,6 @@ bge_attach(struct device *parent, struct device *self, void *aux)
 	}
 
 #ifdef __sparc64__
-	if (!gotenaddr) {
-		if (OF_getprop(PCITAG_NODE(pa->pa_tag), "local-mac-address",
-		    sc->arpcom.ac_enaddr, ETHER_ADDR_LEN) == ETHER_ADDR_LEN)
-			gotenaddr = 1;
-	}
 	if (!gotenaddr) {
 		extern void myetheraddr(u_char *);
 
@@ -2943,14 +2941,11 @@ bge_init(void *xsc)
 	CSR_WRITE_4(sc, BGE_MAC_ADDR1_LO, htons(m[0]));
 	CSR_WRITE_4(sc, BGE_MAC_ADDR1_HI, (htons(m[1]) << 16) | htons(m[2]));
 
-	/* Enable or disable promiscuous mode as needed. */
-	bge_setpromisc(sc);
-
 	/* Disable hardware decapsulation of vlan frames. */
 	BGE_SETBIT(sc, BGE_RX_MODE, BGE_RXMODE_RX_KEEP_VLAN_DIAG);
 
-	/* Program multicast filter. */
-	bge_setmulti(sc);
+	/* Program promiscuous mode and multicast filters. */
+	bge_iff(sc);
 
 	/* Init RX ring. */
 	bge_init_rx_ring_std(sc);
@@ -3137,26 +3132,10 @@ bge_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 		break;
 	case SIOCSIFFLAGS:
 		if (ifp->if_flags & IFF_UP) {
-			/*
-			 * If only the state of the PROMISC flag changed,
-			 * then just use the 'set promisc mode' command
-			 * instead of reinitializing the entire NIC. Doing
-			 * a full re-init means reloading the firmware and
-			 * waiting for it to start up, which may take a
-			 * second or two.  Similarly for ALLMULTI.
-			 */
-			if (ifp->if_flags & IFF_RUNNING &&
-			    ((ifp->if_flags ^ sc->bge_if_flags) &
-			     IFF_PROMISC)) {
-				bge_setpromisc(sc);
-				bge_setmulti(sc);
-			} else if (ifp->if_flags & IFF_RUNNING &&
-			    (ifp->if_flags ^ sc->bge_if_flags) & IFF_ALLMULTI) {
-				bge_setmulti(sc);
-			} else {
-				if (!(ifp->if_flags & IFF_RUNNING))
-					bge_init(sc);
-			}
+			if (ifp->if_flags & IFF_RUNNING)
+				bge_iff(sc);
+			else
+				bge_init(sc);
 		} else {
 			if (ifp->if_flags & IFF_RUNNING)
 				bge_stop(sc);
@@ -3171,7 +3150,7 @@ bge_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 
 		if (error == ENETRESET) {
 			if (ifp->if_flags & IFF_RUNNING)
-				bge_setmulti(sc);
+				bge_iff(sc);
 			error = 0;
 		}
 		break;

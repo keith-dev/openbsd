@@ -1,4 +1,4 @@
-/*	$OpenBSD: fs.h,v 1.26 2007/02/17 14:32:38 mickey Exp $	*/
+/*	$OpenBSD: fs.h,v 1.32 2007/06/01 07:03:27 otto Exp $	*/
 /*	$NetBSD: fs.h,v 1.6 1995/04/12 21:21:02 mycroft Exp $	*/
 
 /*
@@ -104,7 +104,13 @@
  * in fs_fsmnt. MAXMNTLEN defines the amount of space allocated in
  * the super block for this name.
  */
-#define MAXMNTLEN	512
+#define MAXMNTLEN	468
+
+/*
+ * The volume name for this file system is kept in fs_volname.
+ * MAXVOLLEN defines the length of the buffer allocated.
+ */
+#define MAXVOLLEN	32
 
 /*
  * There is a 128-byte region in the superblock reserved for in-core
@@ -119,7 +125,7 @@
  * and the third points to an array that tracks the creation of new
  * directories.
  */
-#define		NOCSPTRS	((128 / sizeof(void *)) - 3)
+#define NOCSPTRS	((128 / sizeof(void *)) - 4)
 
 /*
  * A summary of contiguous blocks of various sizes is maintained
@@ -154,6 +160,11 @@
 #define AFPDIR		64	/* expected number of files per directory */
 
 /*
+ * Size of superblock space reserved for snapshots.
+ */
+#define FSMAXSNAP	20
+
+/*
  * Per cylinder group information; summarized in blocks allocated
  * from first cylinder group data blocks.  These blocks have to be
  * read in from fs_csaddr (size fs_cssize) in addition to the
@@ -164,6 +175,14 @@ struct csum {
 	int32_t	cs_nbfree;		/* number of free blocks */
 	int32_t	cs_nifree;		/* number of free inodes */
 	int32_t	cs_nffree;		/* number of free frags */
+};
+
+struct csum_total {
+	int64_t cs_ndir;		/* number of directories */
+	int64_t cs_nbfree;		/* number of free blocks */
+	int64_t cs_nifree;		/* number of free inodes */
+	int64_t cs_nffree;		/* number of free frags */
+	int64_t cs_spare[4];		/* future expansion */
 };
 
 /*
@@ -178,9 +197,9 @@ struct fs {
 	int32_t	 fs_dblkno;		/* offset of first data / frags */
 	int32_t	 fs_cgoffset;		/* cylinder group offset in cylinder */
 	int32_t	 fs_cgmask;		/* used to calc mod fs_ntrak */
-	time_t 	 fs_time;		/* last time written */
-	int32_t	 fs_size;		/* # of blocks in fs / frags */
-	int32_t	 fs_dsize;		/* # of data blocks in fs */
+	int32_t	 fs_ffs1_time;		/* last time written */
+	int32_t	 fs_ffs1_size;		/* # of blocks in fs / frags */
+	int32_t	 fs_ffs1_dsize;		/* # of data blocks in fs */
 	int32_t	 fs_ncg;		/* # of cylinder groups */
 	int32_t	 fs_bsize;		/* size of basic blocks / bytes */
 	int32_t	 fs_fsize;		/* size of frag blocks / bytes */
@@ -215,7 +234,7 @@ struct fs {
 /* fs_id takes the space of the unused fs_headswitch and fs_trkseek fields */
 	int32_t  fs_id[2];		/* unique filesystem id */
 /* sizes determined by number of cylinder groups and their sizes */
-	int32_t  fs_csaddr;		/* blk addr of cyl grp summary area */
+	int32_t	 fs_ffs1_csaddr;	/* blk addr of cyl grp summary area */
 	int32_t	 fs_cssize;		/* cyl grp summary area size / bytes */
 	int32_t	 fs_cgsize;		/* cyl grp block size / bytes */
 /* these fields are derived from the hardware */
@@ -229,26 +248,42 @@ struct fs {
 	int32_t	 fs_ipg;		/* inodes per group */
 	int32_t	 fs_fpg;		/* blocks per group * fs_frag */
 /* this data must be re-computed after crashes */
-	struct	csum fs_cstotal;	/* cylinder summary information */
+	struct	csum fs_ffs1_cstotal;	/* cylinder summary information */
 /* these fields are cleared at mount time */
 	int8_t	 fs_fmod;		/* super block modified flag */
 	int8_t	 fs_clean;		/* file system is clean flag */
 	int8_t	 fs_ronly;		/* mounted read-only flag */
-	int8_t	 fs_flags;		/* see FS_ below */
+	int8_t	 fs_ffs1_flags;		/* see FS_ below */
 	u_char	 fs_fsmnt[MAXMNTLEN];	/* name mounted on */
+	u_char	 fs_volname[MAXVOLLEN];	/* volume name */
+	u_int64_t fs_swuid;		/* system-wide uid */
+	int32_t	 fs_pad;		/* due to alignment of fs_swuid */
 /* these fields retain the current block allocation info */
 	int32_t	 fs_cgrotor;		/* last cg searched */
 	void    *fs_ocsp[NOCSPTRS];	/* padding; was list of fs_cs buffers */
 	u_int8_t *fs_contigdirs;	/* # of contiguously allocated dirs */
 	struct csum *fs_csp;		/* cg summary info buffer for fs_cs */
 	int32_t	*fs_maxcluster;		/* max cluster in each cyl group */
+	u_char	*fs_active;		/* reserved for snapshots */
 	int32_t	 fs_cpc;		/* cyl per cycle in postbl */
-	int16_t	 fs_opostbl[16][8];	/* old rotation block list head */
-	int32_t  fs_snapinum[20];	/* reserved for snapshot inode nums */
+/* this area is only allocated if fs_ffs1_flags & FS_FLAGS_UPDATED */
+	int32_t	 fs_maxbsize;           /* maximum blocking factor permitted */
+	int64_t	 fs_spareconf64[17];    /* old rotation block list head */
+	int64_t	 fs_sblockloc;          /* offset of standard super block */
+	struct	csum_total fs_cstotal;  /* cylinder summary information */
+	int64_t	 fs_time;               /* time last written */
+	int64_t	 fs_size;               /* number of blocks in fs */
+	int64_t	 fs_dsize;              /* number of data blocks in fs */
+	int64_t	 fs_csaddr;             /* blk addr of cyl grp summary area */
+	int64_t	 fs_pendingblocks;      /* blocks in process of being freed */
+	int32_t	 fs_pendinginodes;      /* inodes in process of being freed */
+	int32_t	 fs_snapinum[FSMAXSNAP];/* space reserved for snapshots */
+/* back to stuff that has been around a while */
 	int32_t	 fs_avgfilesize;	/* expected average file size */
 	int32_t	 fs_avgfpdir;		/* expected # of files per directory */
-	int32_t	 fs_sparecon[27];	/* reserved for future constants */
-	time_t	 fs_fscktime;		/* last time fsck(8)ed */
+	int32_t	 fs_sparecon[26];	/* reserved for future constants */
+	u_int32_t fs_flags;		/* see FS_ flags below */
+	int32_t	 fs_fscktime;		/* last time fsck(8)ed */
 	int32_t	 fs_contigsumsize;	/* size of cluster summary array */ 
 	int32_t	 fs_maxsymlinklen;	/* max length of an internal symlink */
 	int32_t	 fs_inodefmt;		/* format of on-disk inodes */
@@ -264,8 +299,6 @@ struct fs {
 	u_int8_t fs_space[1];		/* list of blocks for each rotation */
 /* actually longer */
 };
-
-#define	fs_opostbl_start	fs_opostbl[0][0]
 
 /*
  * Filesystem identification
@@ -292,9 +325,13 @@ struct fs {
 /* 
  * Filesystem flags.
  */
-#define FS_UNCLEAN    0x01   /* filesystem not clean at mount */
-#define FS_DOSOFTDEP  0x02   /* filesystem using soft dependencies */
-#define FS_FLAGS_UPDATED 0x80	/* XXX using ffs2 style superblock */
+#define FS_UNCLEAN	0x01	/* filesystem not clean at mount */
+#define FS_DOSOFTDEP	0x02	/* filesystem using soft dependencies */
+/*
+ * The following flag is used to detect a FFS1 file system that had its flags
+ * moved to the new (FFS2) location for compatibility.
+ */
+#define FS_FLAGS_UPDATED	0x80	/* file system has FFS2-like flags */
 
 /*
  * Rotational layout table format types
@@ -320,10 +357,10 @@ struct fs {
     /* blktot size */	(fs)->fs_cpg * sizeof(int32_t) + \
     /* blks size */	(fs)->fs_cpg * (fs)->fs_nrpos * sizeof(int16_t) + \
     /* inode map */	howmany((fs)->fs_ipg, NBBY) + \
-    /* block map */	howmany((fs)->fs_cpg * (fs)->fs_spc / NSPF(fs), NBBY) +\
+    /* block map */	howmany((fs)->fs_fpg, NBBY) + \
     /* if present */	((fs)->fs_contigsumsize <= 0 ? 0 : \
     /* cluster sum */	(fs)->fs_contigsumsize * sizeof(int32_t) + \
-    /* cluster map */	howmany((fs)->fs_cpg * (fs)->fs_spc / NSPB(fs), NBBY)))
+    /* cluster map */	howmany(fragstoblks(fs, (fs)->fs_fpg), NBBY)))
 
 /*
  * Convert cylinder group to base address of its global summary info.
@@ -337,7 +374,7 @@ struct fs {
 struct cg {
 	int32_t	 cg_firstfield;		/* historic cyl groups linked list */
 	int32_t	 cg_magic;		/* magic number */
-	time_t	 cg_time;		/* time last written */
+	int32_t	 cg_time;		/* time last written */
 	int32_t	 cg_cgx;		/* we are the cgx'th cylinder group */
 	int16_t	 cg_ncyl;		/* number of cyl's this cg */
 	int16_t	 cg_niblk;		/* number of inode blocks this cg */
@@ -360,7 +397,6 @@ struct cg {
 	int32_t	 cg_sparecon32[3];	/* reserved for future use */
 	int64_t	 cg_ffs2_time;		/* time last written */
 	int64_t	 cg_sparecon64[3];	/* reserved for future use */
-	u_int8_t cg_space[1];		/* space for cylinder group maps */
 /* actually longer */
 };
 
@@ -398,7 +434,7 @@ struct cg {
 struct ocg {
 	int32_t	 cg_firstfield;		/* historic linked list of cyl groups */
 	int32_t	 cg_unused_1;		/*     used for incore cyl groups */
-	time_t	 cg_time;		/* time last written */
+	int32_t	 cg_time;		/* time last written */
 	int32_t	 cg_cgx;		/* we are the cgx'th cylinder group */
 	int16_t	 cg_ncyl;		/* number of cyl's this cg */
 	int16_t	 cg_niblk;		/* number of inode blocks this cg */
@@ -461,10 +497,11 @@ struct ocg {
 #define blkmap(fs, map, loc) \
     (((map)[(loc) / NBBY] >> ((loc) % NBBY)) & (0xff >> (NBBY - (fs)->fs_frag)))
 #define cbtocylno(fs, bno) \
-    ((bno) * NSPF(fs) / (fs)->fs_spc)
+    (fsbtodb(fs, bno) / (fs)->fs_spc)
 #define cbtorpos(fs, bno) \
-    (((bno) * NSPF(fs) % (fs)->fs_spc / (fs)->fs_nsect * (fs)->fs_trackskew + \
-     (bno) * NSPF(fs) % (fs)->fs_spc % (fs)->fs_nsect * (fs)->fs_interleave) % \
+    ((fs)->fs_nrpos <= 1 ? 0 : \
+     (fsbtodb(fs, bno) % (fs)->fs_spc / (fs)->fs_nsect * (fs)->fs_trackskew + \
+     fsbtodb(fs, bno) % (fs)->fs_spc % (fs)->fs_nsect * (fs)->fs_interleave) % \
      (fs)->fs_nsect * (fs)->fs_nrpos / (fs)->fs_npsect)
 
 /*

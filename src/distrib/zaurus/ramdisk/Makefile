@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.1 2004/12/31 00:14:07 drahn Exp $
+#	$OpenBSD: Makefile,v 1.3 2007/06/17 00:28:21 deraadt Exp $
 
 REV=	${OSrev}
 
@@ -23,10 +23,9 @@ PID!=		echo $$$$
 
 
 DISKTYPE=       rdroot2.5M
-#NBLKS=		8192
 NBLKS=		5120
 # minfree, opt, b/i  trks, sects, cpg
-NEWFSARGS= -m 0 -o space -c 16 -i 4096
+NEWFSARGS= -m 0 -o space -i 4096
 
 .ifndef DESTDIR
 all ${IMAGE}:
@@ -54,7 +53,7 @@ bsd:
 rd_setup:
 	dd if=/dev/zero of=${IMAGE} bs=512 count=${NBLKS}
 	vnconfig -v -c ${VND} ${IMAGE}
-	disklabel -w -r ${VND} ${DISKTYPE}
+	disklabel -w ${VND} ${DISKTYPE}
 	newfs ${NEWFSARGS} ${VND_RDEV}
 	fsck ${VND_RDEV}
 	mount ${VND_DEV} ${MOUNT_POINT}

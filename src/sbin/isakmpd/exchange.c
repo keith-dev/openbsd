@@ -1,4 +1,4 @@
-/* $OpenBSD: exchange.c,v 1.129 2007/03/03 10:29:18 tom Exp $	 */
+/* $OpenBSD: exchange.c,v 1.131 2007/08/05 09:43:09 tom Exp $	 */
 /* $EOM: exchange.c,v 1.143 2000/12/04 00:02:25 angelos Exp $	 */
 
 /*
@@ -1205,22 +1205,15 @@ exchange_free_aux(void *v_exch)
 	if (exchange->in_transit &&
 	    exchange->in_transit != exchange->last_sent)
 		message_free(exchange->in_transit);
-	if (exchange->nonce_i)
-		free(exchange->nonce_i);
-	if (exchange->nonce_r)
-		free(exchange->nonce_r);
-	if (exchange->id_i)
-		free(exchange->id_i);
-	if (exchange->id_r)
-		free(exchange->id_r);
-	if (exchange->keystate)
-		free(exchange->keystate);
+	free(exchange->nonce_i);
+	free(exchange->nonce_r);
+	free(exchange->id_i);
+	free(exchange->id_r);
+	free(exchange->keystate);
 	if (exchange->doi && exchange->doi->free_exchange_data)
 		exchange->doi->free_exchange_data(exchange->data);
-	if (exchange->data)
-		free(exchange->data);
-	if (exchange->name)
-		free(exchange->name);
+	free(exchange->data);
+	free(exchange->name);
 	if (exchange->recv_cert) {
 		handler = cert_get(exchange->recv_certtype);
 		if (handler)
@@ -1234,8 +1227,7 @@ exchange_free_aux(void *v_exch)
 	if (exchange->recv_key)
 		key_free(exchange->recv_keytype, ISAKMP_KEYTYPE_PUBLIC,
 		    exchange->recv_key);
-	if (exchange->keynote_key)
-		free(exchange->keynote_key);	/* This is just a string */
+	free(exchange->keynote_key);	/* This is just a string */
 
 	if (exchange->policy_id != -1)
 		kn_close(exchange->policy_id);
@@ -1601,6 +1593,8 @@ exchange_free_aca_list(struct exchange *exchange)
 
 	for (aca = TAILQ_FIRST(&exchange->aca_list); aca;
 	    aca = TAILQ_FIRST(&exchange->aca_list)) {
+		if (aca->raw_ca)
+			free(aca->raw_ca);
 		if (aca->data) {
 			if (aca->handler)
 				aca->handler->free_aca(aca->data);
@@ -1609,6 +1603,58 @@ exchange_free_aca_list(struct exchange *exchange)
 		TAILQ_REMOVE(&exchange->aca_list, aca, link);
 		free(aca);
 	}
+}
+
+/* Add any CERTREQs we should send.  */
+int
+exchange_add_certreqs(struct message *msg)
+{
+	struct exchange *exchange = msg->exchange;
+	struct certreq_aca *aca;
+	u_int8_t *buf;
+
+	/*
+	 * Some peers (e.g. Cisco IOS) won't send their cert unless we
+	 * specifically ask beforehand with CERTREQ.  We reflect any
+	 * CERTREQs we receive from the initiator in order to do this.
+	 * This avoids leaking information about which CAs we trust,
+	 * and works in the most common case where both ends trust the
+	 * same CA.
+	 */
+	for (aca = TAILQ_FIRST(&exchange->aca_list); aca;
+	    aca = TAILQ_NEXT(aca, link)) {
+
+		/* But only do this if we have at least one CA */
+		if (aca->handler != NULL && aca->handler->ca_count() == 0) {
+			LOG_DBG((LOG_EXCHANGE, 10,
+			    "exchange_add_certreqs: no CA, so not "
+			    "sending a CERTREQ"));
+			continue;
+		}
+
+		if (aca->raw_ca_len) {
+			buf = malloc(ISAKMP_CERTREQ_SZ + aca->raw_ca_len);
+			if (buf == NULL) {
+				log_error("exchange_add_certreqs: "
+				    "malloc (%lu) failed",
+				    ISAKMP_CERTREQ_SZ +
+				    (unsigned long)aca->raw_ca_len);
+				return -1;
+			}
+
+			buf[ISAKMP_CERTREQ_TYPE_OFF] = aca->id;
+			memcpy(buf + ISAKMP_CERTREQ_AUTHORITY_OFF,
+			    aca->raw_ca, aca->raw_ca_len);
+
+			if (message_add_payload(msg, ISAKMP_PAYLOAD_CERT_REQ,
+			    buf, ISAKMP_CERTREQ_SZ + aca->raw_ca_len, 1)) {
+				free(buf);
+				return -1;
+			}
+		}
+	}
+
+	return 0;
 }
 
 /* Obtain certificates from acceptable certification authority.  */
@@ -1642,16 +1688,14 @@ exchange_add_certs(struct message *msg)
 		    &certlen)) {
 			log_print("exchange_add_certs: could not obtain cert "
 			    "for a type %d cert request", aca->id);
-			if (cert)
-				free(cert);
+			free(cert);
 			return -1;
 		}
 		new_cert = realloc(cert, ISAKMP_CERT_SZ + certlen);
 		if (!new_cert) {
 			log_error("exchange_add_certs: realloc (%p, %d) "
 			    "failed", cert, ISAKMP_CERT_SZ + certlen);
-			if (cert)
-				free(cert);
+			free(cert);
 			return -1;
 		}
 		cert = new_cert;

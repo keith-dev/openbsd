@@ -1,4 +1,4 @@
-/*	$OpenBSD: lock_machdep.c,v 1.3 2006/09/19 11:06:33 jsg Exp $	*/
+/*	$OpenBSD: lock_machdep.c,v 1.6 2007/05/29 18:18:20 tom Exp $	*/
 /* $NetBSD: lock_machdep.c,v 1.1.2.3 2000/05/03 14:40:30 sommerfeld Exp $ */
 
 /*-
@@ -50,6 +50,7 @@
 
 #include <machine/atomic.h>
 #include <machine/lock.h>
+#include <machine/cpufunc.h>
 
 #include <ddb/db_output.h>
 
@@ -106,3 +107,9 @@ __cpu_simple_unlock(__cpu_simple_lock_t *lockp)
 }
 
 #endif
+
+int
+rw_cas_486(volatile unsigned long *p, unsigned long o, unsigned long n)
+{
+	return (i486_atomic_cas_int((u_int *)p, o, n) != o);
+}

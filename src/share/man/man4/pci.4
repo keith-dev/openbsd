@@ -1,4 +1,4 @@
-.\"	$OpenBSD: pci.4,v 1.205 2007/03/01 22:53:44 martin Exp $
+.\"	$OpenBSD: pci.4,v 1.225 2007/08/14 22:10:42 jmc Exp $
 .\"	$NetBSD: pci.4,v 1.29 2000/04/01 00:32:23 tsarna Exp $
 .\"
 .\" Copyright (c) 2000 Theo de Raadt.  All rights reserved.
@@ -31,7 +31,7 @@
 .\" (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
 .\" THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 .\"
-.Dd October 20, 2004
+.Dd $Mdocdate: August 14 2007 $
 .Dt PCI 4
 .Os
 .Sh NAME
@@ -48,21 +48,21 @@
 .Cd "# amd64, i386"
 .Cd "pci* at mainbus0"
 .Pp
-.Cd "# cats"
-.Cd "pci0 at footbridge?"
-.Pp
 .Cd "# hppa"
 .Cd "pci* at dino?"
+.Cd "pci* at elroy?"
 .Pp
 .Cd "# landisk"
 .Cd "pci* at shpcic?"
 .Pp
 .Cd "# macppc"
 .Cd "pci* at mpcpcibr?"
+.Cd "pci* at ht?"
 .Pp
 .Cd "# sparc64"
 .Cd "pci* at psycho?"
 .Cd "pci* at schizo?"
+.Cd "pci* at pyro?"
 .Pp
 .Cd "# all architectures"
 .Cd "pci* at pchb?"
@@ -98,13 +98,15 @@ Buslogic SCSI interface
 .It Xr iha 4
 Initio INIC-940/950 based PCI SCSI interface
 .It Xr isp 4
-Qlogic based SCSI or FibreChannel SCSI interface
+Qlogic based SCSI or Fibre Channel SCSI interface
 .It Xr mpi 4
 LSI Logic Fusion-MPT Message Passing Interface
 .It Xr pcscp 4
 Advanced Micro Devices Am53c974 PCscsi-PCI SCSI interface
 .It Xr siop 4
 LSI/Symbios Logic/NCR 53c8xx SCSI interface
+.It Xr sli 4
+Emulex LightPulse Fibre Channel SCSI interface
 .It Xr trm 4
 TRM-S1040 based PCI SCSI interface
 .El
@@ -112,8 +114,12 @@ TRM-S1040 based PCI SCSI interface
 .Bl -tag -width 10n -offset ind -compact
 .It Xr ahci 4
 Advanced Host Controller Interface for Serial ATA
+.It Xr jmb 4
+JMicron JMB36x SATA II and PATA Host Controller
 .It Xr pciide 4
 PCI IDE controller driver
+.It Xr sili 4
+Silicon Image 3124/3132/3531 SATA controller
 .El
 .Ss RAID and cache controllers
 .Bl -tag -width 10n -offset ind -compact
@@ -216,6 +222,8 @@ SysKonnect XMAC II and Marvell Yukon 10/100/Gigabit Ethernet device
 Sundance Technologies ST201 10/100 Ethernet device
 .It Xr stge 4
 Sundance/Tamarack TC9021 Gigabit Ethernet device
+.It Xr tht 4
+Tehuti Networks 10Gb Ethernet device
 .It Xr ti 4
 Alteon Networks Tigon I and II Gigabit Ethernet device
 .It Xr tl 4
@@ -245,8 +253,6 @@ Aironet Communications 4500/4800 IEEE 802.11FH/b wireless network device
 Atheros IEEE 802.11a/b/g wireless network device
 .It Xr atw 4
 ADMtek ADM8211 IEEE 802.11b wireless network device
-.It Xr bcw 4
-Broadcom IEEE 802.11b/g wireless network device
 .It Xr ipw 4
 .Tn Intel
 PRO/Wireless 2100 IEEE 802.11b wireless network device
@@ -269,6 +275,8 @@ Intel PRO/Wireless 3945ABG IEEE 802.11a/b/g wireless network device
 .El
 .Ss Cryptography accelerators
 .Bl -tag -width 10n -offset ind -compact
+.It Xr glxsb 4
+Geode LX Security Block crypto accelerator
 .It Xr hifn 4
 Hifn 7751/7811/7951/7955/7956/9751 crypto accelerator
 .It Xr ises 4
@@ -342,7 +350,7 @@ Yamaha DS-XG audio device
 .Ss Time receiver devices
 .Bl -tag -width 10n -offset ind -compact
 .It Xr mbg 4
-Meinberg Funkuhren time signal station receiver
+Meinberg Funkuhren timedelta sensor
 .El
 .Ss Radio receiver devices
 .Bl -tag -width 10n -offset ind -compact
@@ -395,8 +403,10 @@ USB Open Host Controller Interface
 .Tn PCI
 .Tn PCMCIA
 controllers, including the Cirrus Logic GD6729
+.It Xr piixpcib
+Intel PIIX4 ISA bridges
 .It Xr piixpm 4
-Intel PIIX SMbus controller
+Intel PIIX SMBus controller
 .It Xr ppb 4
 Generic
 .Tn PCI Ns \- Ns Tn PCI
@@ -405,10 +415,12 @@ bridges, including
 expansion backplanes
 .It Xr sdhc 4
 SD Host Controller
+.It Xr ssio 4
+National Semiconductor PC87560 Legacy IO
 .It Xr uhci 4
 USB Universal Host Controller Interface
 .It Xr viapm 4
-VIA VT8233/8235/8237 SMBus controller
+VIA SMBus controller
 .El
 .Sh IOCTLS
 If the kernel is compiled with the

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ciss.c,v 1.24 2007/01/18 14:46:24 mickey Exp $	*/
+/*	$OpenBSD: ciss.c,v 1.27 2007/06/24 05:34:35 dlg Exp $	*/
 
 /*
  * Copyright (c) 2005,2006 Michael Shalayeff
@@ -99,7 +99,9 @@ int	ciss_sync(struct ciss_softc *sc);
 void	ciss_heartbeat(void *v);
 void	ciss_shutdown(void *v);
 void	ciss_kthread(void *v);
+#ifndef SMALL_KERNEL
 void	ciss_sensors(void *);
+#endif
 
 struct ciss_ccb *ciss_get_ccb(struct ciss_softc *sc);
 void	ciss_put_ccb(struct ciss_ccb *ccb);
@@ -418,10 +420,11 @@ ciss_attach(struct ciss_softc *sc)
 		    sc->sc_dev.dv_xname);
 
 	sc->sc_flags |= CISS_BIO;
-	sc->sensors = malloc(sizeof(struct sensor) * sc->maxunits,
+#ifndef SMALL_KERNEL
+	sc->sensors = malloc(sizeof(struct ksensor) * sc->maxunits,
 	    M_DEVBUF, M_NOWAIT);
 	if (sc->sensors) {
-		bzero(sc->sensors, sizeof(struct sensor) * sc->maxunits);
+		bzero(sc->sensors, sizeof(struct ksensor) * sc->maxunits);
 		strlcpy(sc->sensordev.xname, sc->sc_dev.dv_xname,
 		    sizeof(sc->sensordev.xname));
 		for (i = 0; i < sc->maxunits;
@@ -435,12 +438,13 @@ ciss_attach(struct ciss_softc *sc)
 			    scsibus->sc_link[i][0]->device_softc)->dv_xname,
 			    sizeof(sc->sc_lds[i]->xname));
 		}
-		if (sensor_task_register(sc, ciss_sensors, 10))
+		if (sensor_task_register(sc, ciss_sensors, 10) == NULL)
 			free(sc->sensors, M_DEVBUF);
 		else
 			sensordev_install(&sc->sensordev);
 	}
-#endif
+#endif /* SMALL_KERNEL */
+#endif /* BIO > 0 */
 
 	return 0;
 }
@@ -1172,6 +1176,7 @@ ciss_ioctl(struct device *dev, u_long cmd, caddr_t addr)
 	return error;
 }
 
+#ifndef SMALL_KERNEL
 void
 ciss_sensors(void *v)
 {
@@ -1221,6 +1226,7 @@ ciss_sensors(void *v)
 		}
 	}
 }
+#endif /* SMALL_KERNEL */
 
 int
 ciss_ldid(struct ciss_softc *sc, int target, struct ciss_ldid *id)

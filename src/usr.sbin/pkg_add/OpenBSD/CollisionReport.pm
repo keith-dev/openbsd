@@ -1,7 +1,7 @@
 # ex:ts=8 sw=4:
-# $OpenBSD: CollisionReport.pm,v 1.9 2006/05/04 08:36:07 espie Exp $
+# $OpenBSD: CollisionReport.pm,v 1.15 2007/06/20 13:44:39 espie Exp $
 #
-# Copyright (c) 2003-2004 Marc Espie <espie@openbsd.org>
+# Copyright (c) 2003-2006 Marc Espie <espie@openbsd.org>
 #
 # Permission to use, copy, modify, and distribute this software for any
 # purpose with or without fee is hereby granted, provided that the above
@@ -26,7 +26,15 @@ use OpenBSD::Vstat;
 sub collision_report($$)
 {
 	my ($list, $state) = @_;
-	my %todo = map {($_->fullname(), $_->{md5})} @$list;
+
+	if ($state->{forced}->{removecollisions}) {
+		for my $f (@$list) {
+			print "rm ", $f->fullname, "\n";
+			unlink($f->fullname);
+		}
+		return;
+	}
+	my %todo = map {($_->fullname, $_->{md5})} @$list;
 	my $bypkg = {};
 	my $clueless_bat = 0;
 	my $clueless_bat2 = 0;
@@ -48,9 +56,10 @@ sub collision_report($$)
 			print "Looking for collisions in $pkg\n" if $state->{verbose};
 			my $plist = OpenBSD::PackingList->from_installation($pkg, 
 			    \&OpenBSD::PackingList::FilesOnly);
+			next if !defined $plist;
 			for my $item (@{$plist->{items}}) {
-				next unless $item->IsFile();
-				my $name = $item->fullname();
+				next unless $item->IsFile;
+				my $name = $item->fullname;
 				if (defined $todo{$name}) {
 					$bypkg->{$pkg} = [] unless defined $bypkg->{$pkg};
 					push(@{$bypkg->{$pkg}}, $name);
@@ -65,10 +74,10 @@ sub collision_report($$)
 	    for my $item (sort @{$bypkg->{$pkg}}) {
 	    	print "\t$item ($pkg)\n";
 	    }
-	    if ($pkg =~ m/^(?:partial\-|borked\.\d+$)/) {
+	    if ($pkg =~ m/^(?:partial\-|borked\.\d+$)/o) {
 	    	$clueless_bat = $pkg;
 	    }
-	    if ($pkg =~ m/^\.libs-*$/) {
+	    if ($pkg =~ m/^\.libs\d*-*$/o) {
 	    	$clueless_bat2 = $pkg;
 	    }
 	}

@@ -1,4 +1,4 @@
-/*	$OpenBSD: cd9660_node.c,v 1.16 2006/01/09 12:43:16 pedro Exp $	*/
+/*	$OpenBSD: cd9660_node.c,v 1.19 2007/06/01 23:47:55 deraadt Exp $	*/
 /*	$NetBSD: cd9660_node.c,v 1.17 1997/05/05 07:13:57 mycroft Exp $	*/
 
 /*-
@@ -163,9 +163,8 @@ loop:
        for (ip = isohashtbl[INOHASH(dev, inum)]; ip; ip = ip->i_next) {
                if (inum == ip->i_number && dev == ip->i_dev) {
                        vp = ITOV(ip);
-                       simple_lock(&vp->v_interlock);
                        simple_unlock(&cd9660_ihash_slock);
-                       if (vget(vp, LK_EXCLUSIVE | LK_INTERLOCK, p))
+                       if (vget(vp, LK_EXCLUSIVE, p))
                                goto loop;
                        return (vp);
 	       }
@@ -235,10 +234,7 @@ int
 cd9660_inactive(v)
 	void *v;
 {
-	struct vop_inactive_args /* {
-		struct vnode *a_vp;
-		struct proc *a_p;
-	} */ *ap = v;
+	struct vop_inactive_args *ap = v;
 	struct vnode *vp = ap->a_vp;
 	struct proc *p = ap->a_p;
 	register struct iso_node *ip = VTOI(vp);
@@ -256,7 +252,7 @@ cd9660_inactive(v)
 	 * so that it can be reused immediately.
 	 */
 	if (ip->inode.iso_mode == 0)
-		vrecycle(vp, (struct simplelock *)0, p);
+		vrecycle(vp, p);
 
 	return (error);
 }
@@ -268,9 +264,7 @@ int
 cd9660_reclaim(v)
 	void *v;
 {
-	struct vop_reclaim_args /* {
-		struct vnode *a_vp;
-	} */ *ap = v;
+	struct vop_reclaim_args *ap = v;
 	register struct vnode *vp = ap->a_vp;
 	register struct iso_node *ip = VTOI(vp);
 

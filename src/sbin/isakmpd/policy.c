@@ -1,4 +1,4 @@
-/* $OpenBSD: policy.c,v 1.89 2007/03/03 18:47:37 cloder Exp $	 */
+/* $OpenBSD: policy.c,v 1.91 2007/08/05 09:43:09 tom Exp $	 */
 /* $EOM: policy.c,v 1.49 2000/10/24 13:33:39 niklas Exp $ */
 
 /*
@@ -188,18 +188,13 @@ policy_callback(char *name)
 		remote_filter_proto = local_filter_proto = "";
 		remote_id_proto = "";
 
-		if (remote_filter != 0) {
-			free(remote_filter);
-			remote_filter = 0;
-		}
-		if (local_filter != 0) {
-			free(local_filter);
-			local_filter = 0;
-		}
-		if (remote_id != 0) {
-			free(remote_id);
-			remote_id = 0;
-		}
+		free(remote_filter);
+		remote_filter = 0;
+		free(local_filter);
+		local_filter = 0;
+		free(remote_id);
+		remote_id = 0;
+
 		bzero(remote_ike_address, sizeof remote_ike_address);
 		bzero(local_ike_address, sizeof local_ike_address);
 		bzero(ah_life_kbytes, sizeof ah_life_kbytes);
@@ -1985,7 +1980,7 @@ policy_init(void)
 	/* Cleanup */
 	if (policy_asserts) {
 		for (fd = 0; fd < policy_asserts_num; fd++)
-			if (policy_asserts && policy_asserts[fd])
+			if (policy_asserts)
 				free(policy_asserts[fd]);
 
 		free(policy_asserts);
@@ -2101,11 +2096,11 @@ keynote_certreq_validate(u_int8_t *data, u_int32_t len)
 }
 
 /* Beats me what we should be doing with this.  */
-void *
-keynote_certreq_decode(u_int8_t *data, u_int32_t len)
+int
+keynote_certreq_decode(void **pdata, u_int8_t *data, u_int32_t len)
 {
 	/* XXX */
-	return NULL;
+	return 0;
 }
 
 void
@@ -2306,4 +2301,11 @@ void *
 keynote_from_printable(char *cert)
 {
 	return strdup(cert);
+}
+
+/* Number of CAs we trust (currently this is x509 only) */
+int
+keynote_ca_count(void)
+{
+	return 0;
 }

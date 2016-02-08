@@ -1,4 +1,4 @@
-/*	$OpenBSD: obio.c,v 1.16 2004/09/29 07:35:11 miod Exp $	*/
+/*	$OpenBSD: obio.c,v 1.18 2007/07/01 19:07:45 miod Exp $	*/
 /*	$NetBSD: obio.c,v 1.37 1997/07/29 09:58:11 fair Exp $	*/
 
 /*
@@ -218,7 +218,7 @@ obioattach(parent, self, args)
 		return;
 
 	/*
-	 * There is only one obio bus (it is in fact one of the Sbus slots)
+	 * There is only one obio bus (it is in fact one of the SBus slots)
 	 * How about VME?
 	 */
 	if (self->dv_unit > 0) {
@@ -349,9 +349,9 @@ vmeattach(parent, self, aux)
 	node = ra->ra_node;
 
 	sc->sc_reg = (struct vmebusreg *)
-		mapdev(&ra->ra_reg[0], 0, 0, ra->ra_reg[0].rr_len);
+		mapiodev(&ra->ra_reg[0], 0, ra->ra_reg[0].rr_len);
 	sc->sc_vec = (struct vmebusvec *)
-		mapdev(&ra->ra_reg[1], 0, 0, ra->ra_reg[1].rr_len);
+		mapiodev(&ra->ra_reg[1], 0, ra->ra_reg[1].rr_len);
 
 	/*
 	 * Get "range" property, though we don't do anything with it yet.

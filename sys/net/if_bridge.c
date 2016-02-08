@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_bridge.c,v 1.157 2007/01/08 13:52:38 michele Exp $	*/
+/*	$OpenBSD: if_bridge.c,v 1.164 2007/05/28 17:16:39 henning Exp $	*/
 
 /*
  * Copyright (c) 1999, 2000 Jason L. Wright (jason@thought.net)
@@ -51,6 +51,9 @@
 #include <net/if_llc.h>
 #include <net/route.h>
 #include <net/netisr.h>
+
+/* for arc4random() */
+#include <dev/rndvar.h>
 
 #ifdef INET
 #include <netinet/in.h>
@@ -107,8 +110,6 @@
 #ifndef	BRIDGE_RTABLE_TIMEOUT
 #define	BRIDGE_RTABLE_TIMEOUT	240
 #endif
-
-extern int ifqmaxlen;
 
 void	bridgeattach(int);
 int	bridge_ioctl(struct ifnet *, u_long, caddr_t);
@@ -1013,13 +1014,13 @@ bridge_output(struct ifnet *ifp, struct mbuf *m, struct sockaddr *sa,
 	sc = (struct bridge_softc *)ifp->if_bridge;
 	if (sc == NULL) {
 		m_freem(m);
-		return (0);
+		return (EINVAL);
 	}
 
 	if (m->m_len < sizeof(*eh)) {
 		m = m_pullup(m, sizeof(*eh));
 		if (m == NULL)
-			return (0);
+			return (ENOBUFS);
 	}
 	eh = mtod(m, struct ether_header *);
 	dst = (struct ether_addr *)&eh->ether_dhost[0];
@@ -1148,7 +1149,7 @@ sendunicast:
 	if ((dst_if->if_flags & IFF_RUNNING) == 0) {
 		m_freem(m);
 		splx(s);
-		return (0);
+		return (ENETDOWN);
 	}
 	bridge_ifenqueue(sc, dst_if, m);
 	splx(s);
@@ -1237,7 +1238,7 @@ bridgeintr_frame(struct bridge_softc *sc, struct mbuf *m)
 
 	/*
 	 * If interface is learning, and if source address
-	 * is not broadcast or multicast, record it's address.
+	 * is not broadcast or multicast, record its address.
 	 */
 	if ((ifl->bif_flags & IFBIF_LEARNING) &&
 	    (eh.ether_shost[0] & 1) == 0 &&
@@ -1715,7 +1716,8 @@ bridge_rtupdate(struct bridge_softc *sc, struct ether_addr *ea,
 			if (setflags) {
 				q->brt_if = ifp;
 				q->brt_flags = flags;
-			}
+			} else if (!(q->brt_flags & IFBAF_STATIC))
+				q->brt_if = ifp;
 
 			if (q->brt_if == ifp)
 				q->brt_age = 1;
@@ -2148,7 +2150,7 @@ bridge_filterrule(struct brl_head *h, struct ether_header *eh, struct mbuf *m)
 
 return_action:
 #if NPF > 0
-	pf_tag_packet(m, NULL, n->brl_tag, -1);
+	pf_tag_packet(m, n->brl_tag, -1);
 #endif
 	return (n->brl_action);
 }
@@ -2705,6 +2707,11 @@ bridge_ifenqueue(struct bridge_softc *sc, struct ifnet *ifp, struct mbuf *m)
 	int error, len;
 	short mflags;
 
+#if NGIF > 0
+	/* Packet needs etherip encapsulation. */
+	if (ifp->if_type == IFT_GIF)
+		m->m_flags |= M_PROTO1;
+#endif
 	len = m->m_pkthdr.len;
 	mflags = m->m_flags;
 	IFQ_ENQUEUE(&ifp->if_snd, m, NULL, error);

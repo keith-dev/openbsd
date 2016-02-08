@@ -1,4 +1,4 @@
-/*	$OpenBSD: pcivar.h,v 1.52 2007/02/23 21:34:32 deraadt Exp $	*/
+/*	$OpenBSD: pcivar.h,v 1.54 2007/08/01 21:43:03 deraadt Exp $	*/
 /*	$NetBSD: pcivar.h,v 1.23 1997/06/06 23:48:05 thorpej Exp $	*/
 
 /*
@@ -71,8 +71,6 @@ struct pci_softc;
 #include <alpha/pci/pci_machdep.h>
 #elif defined(__i386__)
 #include <i386/pci/pci_machdep.h>
-#elif defined(__cats__)
-#include <cats/pci/pci_machdep.h>
 #elif defined(__powerpc__)
 #include <powerpc/pci/pci_machdep.h>
 #elif defined(__sgi__)
@@ -99,6 +97,7 @@ struct pcibus_attach_args {
 	 * parent bridge, then we assume we are a root bus.
 	 */
 	pcitag_t	*pba_bridgetag;
+	pci_intr_handle_t *pba_bridgeih;
 
 	/*
 	 * Interrupt swizzling information.  These fields
@@ -126,6 +125,7 @@ struct pci_attach_args {
 	pcireg_t	pa_id, pa_class;
 
 	pcitag_t	*pa_bridgetag;
+	pci_intr_handle_t *pa_bridgeih;
 
 	/*
 	 * Interrupt information.
@@ -174,6 +174,7 @@ struct pci_softc {
 	LIST_HEAD(, pci_dev) sc_devs;
 	int sc_domain, sc_bus, sc_maxndevs;
 	pcitag_t *sc_bridgetag;
+	pci_intr_handle_t *sc_bridgeih;
 	u_int sc_intrswiz;
 	pcitag_t sc_intrtag;
 };

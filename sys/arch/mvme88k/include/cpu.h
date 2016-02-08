@@ -1,4 +1,4 @@
-/* $OpenBSD: cpu.h,v 1.35 2006/05/13 16:05:50 miod Exp $ */
+/* $OpenBSD: cpu.h,v 1.37 2007/05/14 17:00:40 miod Exp $ */
 /*
  * Copyright (c) 1996 Nivas Madhur
  * Copyright (c) 1992, 1993
@@ -52,6 +52,7 @@ extern u_int	(*md_getipl)(void);
 extern u_int	(*md_setipl)(u_int);
 extern u_int	(*md_raiseipl)(u_int);
 extern void	(*md_init_clocks)(void);
+extern void	(*md_send_ipi)(int, cpuid_t);
 
 struct intrhand {
 	SLIST_ENTRY(intrhand) ih_link;
@@ -74,6 +75,15 @@ int	intr_findvec(int, int, int);
 #define	NVMEINTR	256
 typedef SLIST_HEAD(, intrhand) intrhand_t;
 extern intrhand_t intr_handlers[NVMEINTR];
+
+#ifdef MVME188
+/*
+ * Currently registered VME interrupt vectors for a given IPL, if they
+ * are unique. Used to help the MVME188 interrupt handler when it's getting
+ * behind.
+ */
+extern u_int vmevec_hints[8];
+#endif
 
 void	doboot(void);
 void	nmihand(void *);

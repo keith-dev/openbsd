@@ -1,4 +1,4 @@
-/*	$OpenBSD: tsl2560.c,v 1.4 2006/12/23 17:46:39 deraadt Exp $	*/
+/*	$OpenBSD: tsl2560.c,v 1.6 2007/06/24 05:34:35 dlg Exp $	*/
 
 /*
  * Copyright (c) 2005 Mark Kettenis
@@ -40,8 +40,8 @@ struct tsl_softc {
 	i2c_tag_t sc_tag;
 	i2c_addr_t sc_addr;
 
-	struct sensor sc_sensor;
-	struct sensordev sc_sensordev;
+	struct ksensor sc_sensor;
+	struct ksensordev sc_sensordev;
 };
 
 int	tsl_match(struct device *, void *, void *);
@@ -120,7 +120,7 @@ tsl_attach(struct device *parent, struct device *self, void *aux)
 	    sizeof(sc->sc_sensordev.xname));
 	sc->sc_sensor.type = SENSOR_LUX;
 
-	if (sensor_task_register(sc, tsl_refresh, 5)) {
+	if (sensor_task_register(sc, tsl_refresh, 5) == NULL) {
 		printf(": unable to register update task\n");
 		return;
 	}

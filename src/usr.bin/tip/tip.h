@@ -1,4 +1,4 @@
-/*	$OpenBSD: tip.h,v 1.28 2006/11/06 19:37:21 millert Exp $	*/
+/*	$OpenBSD: tip.h,v 1.30 2007/06/25 15:57:28 jmc Exp $	*/
 /*	$NetBSD: tip.h,v 1.7 1997/04/20 00:02:46 mellon Exp $	*/
 
 /*
@@ -229,12 +229,6 @@ extern value_t	vtable[];	/* variable table */
 #define	LINEDISC	34
 #define	DC		35
 
-#define NOVAL	((value_t *)NULL)
-#define NOACU	((acu_t *)NULL)
-#define NOSTR	((char *)NULL)
-#define NOFILE	((FILE *)NULL)
-#define NOPWD	((struct passwd *)0)
-
 struct termios	term;		/* current mode of terminal */
 struct termios	defterm;	/* initial mode of terminal */
 struct termios	defchars;	/* current mode with initial chars */
@@ -259,7 +253,7 @@ int	intflag;		/* recognized interrupt */
 int	stoprompt;		/* for interrupting a prompt session */
 int	timedout;		/* ~> transfer timedout */
 int	cumode;			/* simulating the "cu" program */
-int	bits8;			/* terminal is is 8-bit mode */
+int	bits8;			/* terminal is 8-bit mode */
 #define STRIP_PAR	(bits8 ? 0377 : 0177)
 
 char	fname[PATH_MAX];	/* file name buffer for ~< */

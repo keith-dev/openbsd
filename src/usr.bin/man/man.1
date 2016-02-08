@@ -1,4 +1,4 @@
-.\"	$OpenBSD: man.1,v 1.27 2005/12/07 12:02:08 jmc Exp $
+.\"	$OpenBSD: man.1,v 1.37 2007/08/06 19:16:06 sobrado Exp $
 .\"
 .\" Copyright (c) 1989, 1990, 1993
 .\"	The Regents of the University of California.  All rights reserved.
@@ -29,7 +29,7 @@
 .\"
 .\"     @(#)man.1	8.2 (Berkeley) 1/2/94
 .\"
-.Dd March 9, 1998
+.Dd $Mdocdate: August 6 2007 $
 .Dt MAN 1
 .Os
 .Sh NAME
@@ -44,7 +44,7 @@
 .Op Fl S Ar subsection
 .Op Fl s Ar section
 .Op Ar section
-.Ar name Op Ar ...
+.Ar name ...
 .Nm man
 .Fl f Ar command
 .Nm man
@@ -57,6 +57,12 @@ displays the
 .Bx
 manual pages entitled
 .Ar name .
+Pages may be selected according to
+a specific category
+.Pq Ar section
+or
+machine architecture
+.Pq Ar subsection .
 .Pp
 The options are as follows:
 .Bl -tag -width Ds
@@ -66,7 +72,7 @@ Display all of the manual pages for a specified
 and
 .Ar name
 combination.
-(Normally, only the first manual page found is displayed.)
+Normally, only the first manual page found is displayed.
 .It Fl C Ar file
 Use the specified
 .Ar file
@@ -81,34 +87,32 @@ Copy the manual page to the standard output instead of using
 to paginate it.
 This is done by default if the standard output is not a terminal device.
 .It Fl f Ar command
-Locate man pages matching the
-.Ar command
-in much the same way
-.Xr whatis 1
-works.
+A synonym for
+.Xr whatis 1 .
+It looks up a given command and
+gives the header line from the manual page.
 .It Fl h
 Display only the
 .Dq SYNOPSIS
 lines of the requested manual pages.
 .It Fl k Ar keyword
-Locate man pages matching
+A synonym for
+.Xr apropos 1 .
+It shows which manual pages contain instances of any of the given
+keywords in their title line.
 .Ar keyword
-in much the same way as
-.Xr apropos 1
-works (in fact, it runs
-.Xr apropos 1 ) .
-This can be used to find which man page applies to a particular subsystem
-you are interested in.
-For instance:
+is case insensitive.
 .Pp
-.Dl $ man -k mount
-.Pp
-will list all man pages which contain
+For instance,
+to list all man pages which contain
 .Dq mount
 in the
 .Dq NAME
-line of the man page;
-in this case a list much like this:
+line of the man page:
+.Pp
+.Dl $ man -k mount
+.Pp
+Which would produce a list much like this:
 .Bd -literal
 amd (8) \(en automatically mount file systems
 amq (8) \(en automounter query tool
@@ -118,7 +122,6 @@ getfsstat (2) \(en get list of all mounted file systems
 getmntinfo (3) \(en get information about mounted file systems
 mount (8) \(en mount file systems
 mount, unmount (2) \(en mount or dismount a filesystem
-mount_ados (8) \(en mount an AmigaDOS file system
 mount_cd9660 (8) \(en mount an ISO-9660 filesystem
 mount_ext2fs (8) \(en mount an ext2fs file system
 mount_ffs (8) \(en mount a Berkeley Fast File System
@@ -171,35 +174,29 @@ line in the
 .Nm
 configuration file.
 .It Fl S Ar subsection
-Specifies the machine-dependent subsection.
-This overrides the
+Restricts the directories that
+.Nm
+will search to those of a specific machine architecture.
+By default manual pages for all architectures are installed.
+Therefore this option can be used to view pages for one
+architecture whilst using another.
+.Pp
+Overrides the
 .Ev MACHINE
-environment variable.
-See the
+environment variable;
+see also the
 .Sx ENVIRONMENT
 section below.
-.It Fl s Ar section
-Another way of specifying the section, for compatibility with
-.Nm
-on other operating systems.
-.It Fl w
-List the pathnames of the manual pages which
-.Nm
-would display for the specified
+.It Xo
+.Op Fl s
 .Ar section
-and
-.Ar name
-combination.
-.El
-.Pp
-The optional
-.Ar section
-argument restricts the directories that
+.Xc
+Restricts the directories that
 .Nm
-will search.
+will search to a specific section.
 The currently available sections are:
 .Pp
-.Bl -tag -width "3p " -offset indent -compact
+.Bl -tag -width "localXXX" -offset indent -compact
 .It 1
 General commands
 .Pq tools and utilities .
@@ -222,19 +219,32 @@ Miscellaneous.
 System maintenance and operation commands.
 .It 9
 Kernel internals.
+.It X11
+An alias for X11R6.
+.It X11R6
+X Window System.
+.It local
+Pages located in
+.Pa /usr/local .
 .El
 .Pp
 The
 .Nm
-configuration file (see
-.Xr man.conf 5 )
+configuration file,
+.Xr man.conf 5 ,
 specifies the possible
 .Ar section
 values, and their search order.
-If only a single argument is specified, or if the first argument is
-not a valid section,
+Additional sections may be specified.
+.It Fl w
+List the pathnames of the manual pages which
 .Nm
-assumes that the argument is the name of a manual page to be displayed.
+would display for the specified
+.Ar section
+and
+.Ar name
+combination.
+.El
 .Pp
 Guidelines for
 .Ox
@@ -254,7 +264,10 @@ Machine specific areas are checked before general areas.
 The current machine type may be overridden by setting the environment
 variable
 .Ev MACHINE
-to the name of a specific architecture.
+to the name of a specific architecture,
+or with the
+.Fl S
+option.
 .It Ev MANPAGER
 Any non-null value of the environment variable
 .Ev MANPAGER
@@ -302,6 +315,16 @@ default man configuration file
 .Xr mdoc.samples 7 ,
 .Xr intro 8 ,
 .Xr intro 9
+.Sh STANDARDS
+The
+.Nm
+utility is compliant with the
+.St -p1003.1-2004
+specification.
+.Pp
+The flags
+.Op Fl aCcfhMmSsw
+are extensions to that specification.
 .Sh HISTORY
 A
 .Nm

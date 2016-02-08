@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile.inc,v 1.13 2007/02/16 16:56:22 tsi Exp $
+#	$OpenBSD: Makefile.inc,v 1.18 2007/06/17 00:28:21 deraadt Exp $
 
 TOP=		${.CURDIR}/..
 
@@ -16,7 +16,7 @@ REALIMAGE!=	echo /var/tmp/image.${PID}
 
 STRIP?=		strip
 GZIPCMD?=	gzip
-GZIPFLAGS?=	-9f
+GZIPFLAGS?=	-9fn
 INSTALLBOOT?=	/usr/mdec/installboot -v
 
 XNAME?=		floppy
@@ -37,13 +37,13 @@ NBLKS=          5744
 
 # old format, minfree, opt, b/i  trks, sects, cpg
 NEWFSARGS=	-t ffs -m 0 -o space
-NEWFSARGS_RD=	-i 16384 -c 80
-NEWFSARGS_FD=	-i 524288 -d 0 -e 2000 -g 100000 -h 2 -a 10000
+NEWFSARGS_RD=	-i 8192
+NEWFSARGS_FD=	-i 524288 -c ${FLOPPYBLKS}
 
 ${FLOPPY}:	bsd.gz
 	dd if=/dev/zero of=${REALIMAGE} count=${FLOPPYBLKS}
 	vnconfig -v -c ${VND} ${REALIMAGE}
-	disklabel -w -r ${VND} ${FLOPPYTYPE}
+	disklabel -w ${VND} ${FLOPPYTYPE}
 	newfs ${NEWFSARGS} ${NEWFSARGS_FD} -s ${FLOPPYBLKS} ${VND_RDEV}
 	mount ${VND_DEV} ${MOUNT_POINT}
 	dd if=${DESTDIR}/${BOOT} of=${MOUNT_POINT}/boot bs=512
@@ -87,7 +87,7 @@ elfrdsetroot: ${TOP}/../common/elfrdsetroot.c
 do_prep:
 	dd if=/dev/zero of=${REALIMAGE} count=${NBLKS}
 	vnconfig -v -c ${VND} ${REALIMAGE}
-	disklabel -w -r ${VND} ${DISKTYPE}
+	disklabel -w ${VND} ${DISKTYPE}
 	
 do_mount:
 	newfs ${NEWFSARGS} ${NEWFSARGS_RD} -s ${NBLKS} ${VND_RDEV}

@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.8 2007/02/16 16:56:22 tsi Exp $
+#	$OpenBSD: Makefile,v 1.11 2007/06/17 00:28:20 deraadt Exp $
 
 TOP=		${.CURDIR}/..
 
@@ -16,7 +16,7 @@ REALIMAGE!=	echo /var/tmp/image.${PID}
 
 STRIP?=		strip
 GZIPCMD?=	gzip
-GZIPFLAGS?=	-9f
+GZIPFLAGS?=	-9fn
 INSTALLBOOT?=	/usr/mdec/installboot -v
 
 RAMDISK=	RAMDISKBIG
@@ -36,8 +36,8 @@ NBLKS=          5744
 
 # old format, minfree, opt, b/i  trks, sects, cpg
 NEWFSARGS=	-t ffs -m 0 -o space
-NEWFSARGS_RD=	-i 8192 -c 80
-NEWFSARGS_FD=	-i 524288 -c 80
+NEWFSARGS_RD=	-i 8192
+NEWFSARGS_FD=	-i 524288 -c ${FLOPPYBLKS}
 
 bsd.rd:	bsd.rd_unz
 	objcopy -Sg -R .comment bsd.rd_unz bsd.strip
@@ -63,7 +63,7 @@ elfrdsetroot: ${TOP}/../common/elfrdsetroot.c
 do_prep:
 	dd if=/dev/zero of=${REALIMAGE} count=${NBLKS}
 	vnconfig -v -c ${VND} ${REALIMAGE}
-	disklabel -w -r ${VND} ${DISKTYPE}
+	disklabel -w ${VND} ${DISKTYPE}
 	
 do_mount:
 	newfs ${NEWFSARGS} ${NEWFSARGS_RD} -s ${NBLKS} ${VND_RDEV}

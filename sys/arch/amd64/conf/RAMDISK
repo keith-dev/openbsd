@@ -1,4 +1,4 @@
-#	$OpenBSD: RAMDISK,v 1.37 2007/02/17 23:59:03 marco Exp $
+#	$OpenBSD: RAMDISK,v 1.40 2007/08/20 00:02:13 deraadt Exp $
 
 machine		amd64		# architecture, used by config; REQUIRED
 
@@ -27,7 +27,7 @@ option		INET		# IP + ICMP + TCP + UDP
 option		BOOT_CONFIG	# boot-time kernel config
 
 option		RAMDISK_HOOKS
-option		MINIROOTSIZE=3584
+option		MINIROOTSIZE=4480
 
 config		bsd	root on rd0a swap on rd0b and wd0b and sd0b
 
@@ -249,7 +249,7 @@ nsphy*	at mii?			# NS and compatible PHYs
 nsphyter* at mii?		# NS and compatible PHYs
 #qsphy*	at mii?			# Quality Semi QS6612 PHYs
 #sqphy*	at mii?			# Seeq 8x220 PHYs
-#rlphy* at mii?			# RealTek 8139 internal PHYs
+rlphy* at mii?			# RealTek 8139 internal PHYs
 #mtdphy* at mii?		# Myson MTD972 PHYs
 dcphy*	at mii?			# Digital Clone PHYs
 #acphy*	at mii?			# Altima AC101 PHYs

@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_socket.c,v 1.46 2006/10/28 20:56:46 thib Exp $	*/
+/*	$OpenBSD: nfs_socket.c,v 1.49 2007/06/25 20:40:00 thib Exp $	*/
 /*	$NetBSD: nfs_socket.c,v 1.27 1996/04/15 20:20:00 thorpej Exp $	*/
 
 /*
@@ -346,7 +346,7 @@ nfs_disconnect(nmp)
 	if (nmp->nm_so) {
 		so = nmp->nm_so;
 		nmp->nm_so = (struct socket *)0;
-		soshutdown(so, 2);
+		soshutdown(so, SHUT_RDWR);
 		soclose(so);
 	}
 }
@@ -401,8 +401,6 @@ nfs_send(so, nam, top, rep)
 		(struct mbuf *)0, flags);
 	if (error) {
 		if (rep) {
-			log(LOG_INFO, "nfs send error %d for server %s\n",error,
-			    rep->r_nmp->nm_mountp->mnt_stat.f_mntfromname);
 			/*
 			 * Deal with errors for the client side.
 			 */
@@ -410,8 +408,7 @@ nfs_send(so, nam, top, rep)
 				error = EINTR;
 			else
 				rep->r_flags |= R_MUSTRESEND;
-		} else
-			log(LOG_INFO, "nfsd send error %d\n", error);
+		}
 
 		/*
 		 * Handle any recoverable (soft) socket errors here. (???)
@@ -1058,7 +1055,8 @@ tryagain:
 			 */
 			if (error == ESTALE)
 				cache_purge(vp);
-			if (nmp->nm_flag & NFSMNT_NFSV3) {
+
+			if (nmp->nm_flag & NFSMNT_NFSV3 || error == ESTALE) {
 				*mrp = mrep;
 				*mdp = md;
 				*dposp = dpos;

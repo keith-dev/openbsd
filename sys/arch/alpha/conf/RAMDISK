@@ -1,4 +1,4 @@
-#	$OpenBSD: RAMDISK,v 1.65 2006/03/12 17:29:48 martin Exp $
+#	$OpenBSD: RAMDISK,v 1.67 2007/08/01 16:30:00 miod Exp $
 #	$NetBSD: RAMDISK,v 1.9 1996/12/03 17:25:33 cgd Exp $
 
 machine	alpha			# architecture, used by config; REQUIRED
@@ -11,6 +11,7 @@ option		NO_PROPOLICE
 #option		DEC_3000_300	# Pelican etc:	3000/300*
 option		DEC_2100_A50	# Avanti etc:	AlphaStation 400, 200, etc.
 option		DEC_KN20AA	# KN20AA:	AlphaStation 600
+option		DEC_KN300	# KN300:	AlphaServer 4100 and 1200
 option		DEC_AXPPCI_33	# NoName:	AXPpci33, etc.
 option		DEC_EB164	# EB164:	AlphaPC 164
 #option		DEC_EB64PLUS	# EB64+:	AlphaPC 64, etc.
@@ -49,6 +50,10 @@ config	bsd	swap generic
 mainbus0 at root
 cpu*	at mainbus0
 
+# MCBUS bus support
+mcbus*	at mainbus?
+mcmem*	at mcbus? mid?
+
 # PCI host bus adapter support
 apecs*	at mainbus?
 cia*	at mainbus?
@@ -56,6 +61,7 @@ lca*	at mainbus?
 #irongate* at mainbus?
 #tsc*	at mainbus0
 #tsp*	at tsc?
+mcpcia*	at mcbus? mid?
 
 # PCI bus support
 pci*	at apecs?
@@ -64,11 +70,12 @@ pci*	at lca?
 pci*	at ppb?
 #pci*	at irongate?
 #pci*	at tsp?
+pci*	at mcpcia?
 
 # PCI devices
 #ahc*	at pci?				# AHA-28xx SCSI (NOT 64-BIT)
 de*	at pci?				# 21x4[012]-based Ethernet
-#dc*	at pci?				# 21143, "tulip" clone ethernet
+dc*	at pci?				# 21143, "tulip" clone ethernet
 fxp*	at pci?				# EtherExpress 10/100B ethernet cards
 #ne*	at pci?				# NE2000-compat ethernet cards
 #en*	at pci?				# ENI PCI ATM (untested)
@@ -90,14 +97,19 @@ isp*	at pci?				# Qlogic ISP [12]0x0 SCSI/FibreChannel
 #option ISP_COMPILE_12160_FW=1
 
 # Media Independent Interface (mii) drivers
+amphy*	at mii?				# AMD 79C873 PHYs
+bmtphy*	at mii?				# Broadcom 10/100 PHYs
+dcphy*	at mii?				# Digital Clone PHYs
 #exphy*	at mii?				# 3Com internal PHYs
 #inphy*	at mii?				# Intel 82555 PHYs
 #icsphy* at mii?			# ICS 1890 PHYs
-#lxtphy* at mii?			# Level1 LXT970 PHYs
-#nsphy*	at mii?				# NS and compatible PHYs
+lxtphy* at mii?				# Level1 LXT970 PHYs
+mtdphy* at mii?				# Myson MTD972 PHYs
+nsphy*	at mii?				# NS and compatible PHYs
+nsphyter* at mii?			# NS and compatible PHYs
 #qsphy*	at mii?				# Quality Semi QS6612 PHYs
-#sqphy*	at mii?				# Seeq 8x220 PHYs
-#mtdphy* at mii?			# Myson MTD972 PHYs
+sqphy*	at mii?				# Seeq 8x220 PHYs
+tqphy*	at mii?				# TDK 78Q212x PHYs
 ukphy*	at mii?				# "unknown" PHYs
 
 # ISA/EISA bus support

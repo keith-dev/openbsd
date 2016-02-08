@@ -1,4 +1,4 @@
-/*	$OpenBSD: intr.h,v 1.18 2006/06/11 20:46:48 miod Exp $	*/
+/*	$OpenBSD: intr.h,v 1.20 2007/05/25 21:27:15 krw Exp $	*/
 /*	$NetBSD: intr.h,v 1.2 1997/07/24 05:43:08 scottr Exp $	*/
 
 /*-
@@ -56,7 +56,7 @@ struct isr {
 
 /*
  * These four globals contain the appropriate PSL_S|PSL_IPL? values
- * to raise interupt priority to the requested level.
+ * to raise interrupt priority to the requested level.
  */
 extern	unsigned short hp300_bioipl;
 extern	unsigned short hp300_netipl;
@@ -93,6 +93,7 @@ extern	unsigned short hp300_vmipl;
 #define	splstatclock()		_splraise(PSL_S | PSL_IPL6)
 #define	splvm()			_splraise(hp300_vmipl)
 #define	splhigh()		_spl(PSL_S | PSL_IPL7)
+#define	splsched()		splhigh()
 
 /* watch out for side effects */
 #define	splx(s)			((s) & PSL_IPL ? _spl((s)) : spl0())

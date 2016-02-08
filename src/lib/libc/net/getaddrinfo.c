@@ -1,4 +1,4 @@
-/*	$OpenBSD: getaddrinfo.c,v 1.61 2007/02/18 19:03:11 ray Exp $	*/
+/*	$OpenBSD: getaddrinfo.c,v 1.67 2007/05/20 03:54:52 ray Exp $	*/
 /*	$KAME: getaddrinfo.c,v 1.31 2000/08/31 17:36:43 itojun Exp $	*/
 
 /*
@@ -37,7 +37,7 @@
  *   in the source code.  This is because RFC2553 is silent about which error
  *   code must be returned for which situation.
  * - IPv4 classful (shortened) form.  RFC2553 is silent about it.  XNET 5.2
- *   says to use inet_aton() to convert IPv4 numeric to binary (alows
+ *   says to use inet_aton() to convert IPv4 numeric to binary (allows
  *   classful form as a result).
  *   current code - disallow classful form for IPv4 (due to use of inet_pton).
  * - freeaddrinfo(NULL).  RFC2553 is silent about it.  XNET 5.2 says it is
@@ -217,9 +217,8 @@ static const struct afd *find_afd(int);
 static int ip6_str2scopeid(char *, struct sockaddr_in6 *, u_int32_t *);
 #endif
 
-static void _sethtent(void);
-static void _endhtent(void);
-static struct addrinfo * _gethtent(const char *, const struct addrinfo *);
+static struct addrinfo * _gethtent(const char *, const struct addrinfo *,
+	FILE *);
 static struct addrinfo *_files_getaddrinfo(const char *,
 	const struct addrinfo *);
 
@@ -239,38 +238,38 @@ static struct addrinfo *_dns_getaddrinfo(const char *, const struct addrinfo *);
 
 /* XXX macros that make external reference is BAD. */
 
-#define GET_AI(ai, afd, addr) \
-do { \
-	/* external reference: pai, error, and label free */ \
-	(ai) = get_ai(pai, (afd), (addr)); \
-	if ((ai) == NULL) { \
-		error = EAI_MEMORY; \
-		goto free; \
-	} \
+#define GET_AI(ai, afd, addr)						\
+do {									\
+	/* external reference: pai, error, and label free */		\
+	(ai) = get_ai(pai, (afd), (addr));				\
+	if ((ai) == NULL) {						\
+		error = EAI_MEMORY;					\
+		goto free;						\
+	}								\
 } while (/*CONSTCOND*/0)
 
-#define GET_PORT(ai, serv) \
-do { \
-	/* external reference: error and label free */ \
-	error = get_port((ai), (serv), 0); \
-	if (error != 0) \
-		goto free; \
+#define GET_PORT(ai, serv)						\
+do {									\
+	/* external reference: error and label free */			\
+	error = get_port((ai), (serv), 0);				\
+	if (error != 0)							\
+		goto free;						\
 } while (/*CONSTCOND*/0)
 
-#define GET_CANONNAME(ai, str) \
-do { \
-	/* external reference: pai, error and label free */ \
-	error = get_canonname(pai, (ai), (str)); \
-	if (error != 0) \
-		goto free; \
+#define GET_CANONNAME(ai, str)						\
+do {									\
+	/* external reference: pai, error and label free */		\
+	error = get_canonname(pai, (ai), (str));			\
+	if (error != 0)							\
+		goto free;						\
 } while (/*CONSTCOND*/0)
 
-#define ERR(err) \
-do { \
-	/* external reference: error, and label bad */ \
-	error = (err); \
-	goto bad; \
-	/*NOTREACHED*/ \
+#define ERR(err)							\
+do {									\
+	/* external reference: error, and label bad */			\
+	error = (err);							\
+	goto bad;							\
+	/*NOTREACHED*/							\
 } while (/*CONSTCOND*/0)
 
 #define MATCH_FAMILY(x, y, w) \
@@ -421,7 +420,7 @@ getaddrinfo(const char *hostname, const char *servname,
 
 	/*
 	 * hostname as alphabetical name.
-	 * we would like to prefer AF_INET6 than AF_INET, so we'll make a
+	 * we would like to prefer AF_INET6 than AF_INET, so we'll make an
 	 * outer loop by AFs.
 	 */
 	for (ex = explore; ex->e_af >= 0; ex++) {
@@ -456,8 +455,6 @@ getaddrinfo(const char *hostname, const char *servname,
 	if (sentinel.ai_next)
 		error = 0;
 
-	if (error)
-		goto free;
 	if (error == 0) {
 		if (sentinel.ai_next) {
  good:
@@ -949,7 +946,6 @@ ip6_str2scopeid(char *scope, struct sockaddr_in6 *sin6, u_int32_t *scopeid)
 
 static const char AskedForGot[] =
 	"gethostby*.getanswer: asked for \"%s\", got \"%s\"";
-static FILE *hostf = NULL;
 
 static struct addrinfo *
 getanswer(const querybuf *answer, int anslen, const char *qname, int qtype,
@@ -1004,17 +1000,19 @@ getanswer(const querybuf *answer, int anslen, const char *qname, int qtype,
 	}
 	cp += n + QFIXEDSZ;
 	if (qtype == T_A || qtype == T_AAAA || qtype == T_ANY) {
+		size_t len;
+
 		/* res_send() has already verified that the query name is the
 		 * same as the one we sent; this just gets the expanded name
 		 * (i.e., with the succeeding search-domain tacked on).
 		 */
-		n = strlen(bp) + 1;		/* for the \0 */
-		if (n >= MAXHOSTNAMELEN) {
+		len = strlen(bp) + 1;		/* for the \0 */
+		if (len >= MAXHOSTNAMELEN) {
 			h_errno = NO_RECOVERY;
 			return (NULL);
 		}
 		canonname = bp;
-		bp += n;
+		bp += len;
 		/* The qname can be abbreviated, but h_name is now absolute. */
 		qname = canonname;
 	}
@@ -1065,11 +1063,14 @@ getanswer(const querybuf *answer, int anslen, const char *qname, int qtype,
 				continue;
 			}
 		} else if (type != qtype) {
-			if (type != T_KEY && type != T_SIG)
-				syslog(LOG_NOTICE|LOG_AUTH,
+			if (type != T_KEY && type != T_SIG) {
+				struct syslog_data sdata = SYSLOG_DATA_INIT;
+
+				syslog_r(LOG_NOTICE|LOG_AUTH, &sdata,
 	       "gethostby*.getanswer: asked for \"%s %s %s\", got type \"%s\"",
 				       qname, p_class(C_IN), p_type(qtype),
 				       p_type(type));
+			}
 			cp += n;
 			continue;		/* XXX - had_error++ ? */
 		}
@@ -1077,7 +1078,9 @@ getanswer(const querybuf *answer, int anslen, const char *qname, int qtype,
 		case T_A:
 		case T_AAAA:
 			if (strcasecmp(canonname, bp) != 0) {
-				syslog(LOG_NOTICE|LOG_AUTH,
+				struct syslog_data sdata = SYSLOG_DATA_INIT;
+
+				syslog_r(LOG_NOTICE|LOG_AUTH, &sdata,
 				       AskedForGot, canonname, bp);
 				cp += n;
 				continue;	/* XXX - had_error++ ? */
@@ -1214,28 +1217,8 @@ _dns_getaddrinfo(const char *name, const struct addrinfo *pai)
 	return sentinel.ai_next;
 }
 
-static FILE *hostf;
-
-static void
-_sethtent(void)
-{
-	if (!hostf)
-		hostf = fopen(_PATH_HOSTS, "r" );
-	else
-		rewind(hostf);
-}
-
-static void
-_endhtent(void)
-{
-	if (hostf) {
-		(void) fclose(hostf);
-		hostf = NULL;
-	}
-}
-
 static struct addrinfo *
-_gethtent(const char *name, const struct addrinfo *pai)
+_gethtent(const char *name, const struct addrinfo *pai, FILE *hostf)
 {
 	char *p;
 	char *cp, *tname, *cname;
@@ -1244,8 +1227,6 @@ _gethtent(const char *name, const struct addrinfo *pai)
 	const char *addr;
 	char hostbuf[8*1024];
 
-	if (!hostf && !(hostf = fopen(_PATH_HOSTS, "r" )))
-		return (NULL);
  again:
 	if (!(p = fgets(hostbuf, sizeof hostbuf, hostf)))
 		return (NULL);
@@ -1301,17 +1282,21 @@ _files_getaddrinfo(const char *name, const struct addrinfo *pai)
 {
 	struct addrinfo sentinel, *cur;
 	struct addrinfo *p;
+	FILE *hostf;
+
+	hostf = fopen(_PATH_HOSTS, "r");
+	if (hostf == NULL)
+		return NULL;
 
 	memset(&sentinel, 0, sizeof(sentinel));
 	cur = &sentinel;
 
-	_sethtent();
-	while ((p = _gethtent(name, pai)) != NULL) {
+	while ((p = _gethtent(name, pai, hostf)) != NULL) {
 		cur->ai_next = p;
 		while (cur && cur->ai_next)
 			cur = cur->ai_next;
 	}
-	_endhtent();
+	fclose(hostf);
 
 	return sentinel.ai_next;
 }

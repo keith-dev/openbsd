@@ -1,4 +1,4 @@
-/*	$OpenBSD: uberry.c,v 1.2 2006/11/29 19:55:37 miod Exp $	*/
+/*	$OpenBSD: uberry.c,v 1.10 2007/06/14 10:11:15 mbalmer Exp $	*/
 
 /*-
  * Copyright (c) 2006 Theo de Raadt <deraadt@openbsd.org>
@@ -38,23 +38,38 @@
 #include <dev/usb/usbdevs.h>
 
 struct uberry_softc {
-	USBBASEDEVICE			sc_dev;
+	struct device			sc_dev;
 	usbd_device_handle		sc_udev;
 	usbd_interface_handle		sc_iface;
 };
 
 #define UBERRY_CONFIG_NO		0
 
-Static struct usb_devno const uberry_devices[] = {
-	{ USB_VENDOR_RIM, USB_PRODUCT_RIM_BLACKBERRY },
-	{ 0, 0 }
+struct usb_devno const uberry_devices[] = {
+	{ USB_VENDOR_RIM, USB_PRODUCT_RIM_BLACKBERRY }
 };
 
-USB_DECLARE_DRIVER(uberry);
+int uberry_match(struct device *, void *, void *); 
+void uberry_attach(struct device *, struct device *, void *); 
+int uberry_detach(struct device *, int); 
+int uberry_activate(struct device *, enum devact); 
 
-USB_MATCH(uberry)
+struct cfdriver uberry_cd = { 
+	NULL, "uberry", DV_DULL 
+}; 
+
+const struct cfattach uberry_ca = { 
+	sizeof(struct uberry_softc), 
+	uberry_match, 
+	uberry_attach, 
+	uberry_detach, 
+	uberry_activate, 
+};
+
+int
+uberry_match(struct device *parent, void *match, void *aux)
 {
-	USB_MATCH_START(uberry, uaa);
+	struct usb_attach_arg *uaa = aux;
 
 	if (uaa->iface != NULL)
 		return UMATCH_NONE;
@@ -63,44 +78,44 @@ USB_MATCH(uberry)
 	    UMATCH_VENDOR_PRODUCT : UMATCH_NONE;
 }
 
-USB_ATTACH(uberry)
+void
+uberry_attach(struct device *parent, struct device *self, void *aux)
 {
-	USB_ATTACH_START(uberry, sc, uaa);
+	struct uberry_softc *sc = (struct uberry_softc *)self;
+	struct usb_attach_arg *uaa = aux;
 	char *devinfop;
 
 	sc->sc_udev = uaa->device;
 
 	devinfop = usbd_devinfo_alloc(uaa->device, 0);
-	USB_ATTACH_SETUP;
-	printf("%s: %s\n", USBDEVNAME(sc->sc_dev), devinfop);
+	printf("\n%s: %s\n", sc->sc_dev.dv_xname, devinfop);
 	usbd_devinfo_free(devinfop);
 
 	/* Enable the device, then it cannot idle, and will charge */
 	if (usbd_set_config_no(sc->sc_udev, UBERRY_CONFIG_NO, 1) != 0) {
 		printf("%s: could not set configuration no\n",
-		    USBDEVNAME(sc->sc_dev));
-		USB_ATTACH_ERROR_RETURN;
+		    sc->sc_dev.dv_xname);
+		return;
 	}
-	printf("%s: Charging enabled\n", USBDEVNAME(sc->sc_dev));
+	printf("%s: Charging enabled\n", sc->sc_dev.dv_xname);
 
 	usbd_add_drv_event(USB_EVENT_DRIVER_ATTACH, sc->sc_udev,
-	    USBDEV(sc->sc_dev));
-
-	USB_ATTACH_SUCCESS_RETURN;
+	    &sc->sc_dev);
 }
 
-USB_DETACH(uberry)
+int
+uberry_detach(struct device *self, int flags)
 {
-	USB_DETACH_START(uberry, sc);
+	struct uberry_softc *sc = (struct uberry_softc *)self;
 
 	usbd_add_drv_event(USB_EVENT_DRIVER_DETACH, sc->sc_udev,
-	    USBDEV(sc->sc_dev));
+	    &sc->sc_dev);
 
 	return 0;
 }
 
-Static int
-uberry_activate(device_ptr_t self, enum devact act)
+int
+uberry_activate(struct device *self, enum devact act)
 {
 	switch (act) {
 	case DVACT_ACTIVATE:

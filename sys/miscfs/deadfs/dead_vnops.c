@@ -1,4 +1,4 @@
-/*	$OpenBSD: dead_vnops.c,v 1.15 2003/09/23 16:51:12 millert Exp $	*/
+/*	$OpenBSD: dead_vnops.c,v 1.18 2007/06/01 23:47:57 deraadt Exp $	*/
 /*	$NetBSD: dead_vnops.c,v 1.16 1996/02/13 13:12:48 mycroft Exp $	*/
 
 /*
@@ -131,14 +131,9 @@ struct vnodeopv_desc dead_vnodeop_opv_desc =
  */
 /* ARGSUSED */
 int
-dead_lookup(v)
-	void *v;
+dead_lookup(void *v)
 {
-	struct vop_lookup_args /* {
-		struct vnode * a_dvp;
-		struct vnode ** a_vpp;
-		struct componentname * a_cnp;
-	} */ *ap = v;
+	struct vop_lookup_args *ap = v;
 
 	*ap->a_vpp = NULL;
 	return (ENOTDIR);
@@ -149,10 +144,8 @@ dead_lookup(v)
  */
 /* ARGSUSED */
 int
-dead_open(v)
-	void *v;
+dead_open(void *v)
 {
-
 	return (ENXIO);
 }
 
@@ -161,15 +154,9 @@ dead_open(v)
  */
 /* ARGSUSED */
 int
-dead_read(v)
-	void *v;
+dead_read(void *v)
 {
-	struct vop_read_args /* {
-		struct vnode *a_vp;
-		struct uio *a_uio;
-		int  a_ioflag;
-		struct ucred *a_cred;
-	} */ *ap = v;
+	struct vop_read_args *ap = v;
 
 	if (chkvnlock(ap->a_vp))
 		panic("dead_read: lock");
@@ -186,15 +173,9 @@ dead_read(v)
  */
 /* ARGSUSED */
 int
-dead_write(v)
-	void *v;
+dead_write(void *v)
 {
-	struct vop_write_args /* {
-		struct vnode *a_vp;
-		struct uio *a_uio;
-		int  a_ioflag;
-		struct ucred *a_cred;
-	} */ *ap = v;
+	struct vop_write_args *ap = v;
 
 	if (chkvnlock(ap->a_vp))
 		panic("dead_write: lock");
@@ -206,17 +187,9 @@ dead_write(v)
  */
 /* ARGSUSED */
 int
-dead_ioctl(v)
-	void *v;
+dead_ioctl(void *v)
 {
-	struct vop_ioctl_args /* {
-		struct vnode *a_vp;
-		u_long a_command;
-		caddr_t  a_data;
-		int  a_fflag;
-		struct ucred *a_cred;
-		struct proc *a_p;
-	} */ *ap = v;
+	struct vop_ioctl_args *ap = v;
 
 	if (!chkvnlock(ap->a_vp))
 		return (EBADF);
@@ -225,15 +198,10 @@ dead_ioctl(v)
 
 /* ARGSUSED */
 int
-dead_poll(v)
-	void *v;
+dead_poll(void *v)
 {
 #if 0
-	struct vop_poll_args /* {
-		struct vnode *a_vp;
-		int a_events;
-		struct proc *a_p;
-	} */ *ap = v;
+	struct vop_poll_args *ap = v;
 #endif
 
 	/*
@@ -246,13 +214,9 @@ dead_poll(v)
  * Just call the device strategy routine
  */
 int
-dead_strategy(v)
-	void *v;
+dead_strategy(void *v)
 {
-
-	struct vop_strategy_args /* {
-		struct buf *a_bp;
-	} */ *ap = v;
+	struct vop_strategy_args *ap = v;
 	int s;
 
 	if (ap->a_bp->b_vp == NULL || !chkvnlock(ap->a_bp->b_vp)) {
@@ -269,26 +233,13 @@ dead_strategy(v)
  * Wait until the vnode has finished changing state.
  */
 int
-dead_lock(v)
-	void *v;
+dead_lock(void *v)
 {
-	struct vop_lock_args /* {
-		struct vnode *a_vp;
-		int a_flags;
-		struct proc *a_p;
-	} */ *ap = v;
+	struct vop_lock_args *ap = v;
 	struct vnode *vp = ap->a_vp;
 
-	/*
-	 * Since we are not using the lock manager, we must clear
-	 * the interlock here.
-	 */
-	if (ap->a_flags & LK_INTERLOCK) {
-		simple_unlock(&vp->v_interlock);
-		ap->a_flags &= ~LK_INTERLOCK;
-	}
 	if (ap->a_flags & LK_DRAIN || !chkvnlock(vp))
- 		return (0);
+		return (0);
 
 	return (VCALL(vp, VOFFSET(vop_lock), ap));
 }
@@ -297,16 +248,9 @@ dead_lock(v)
  * Wait until the vnode has finished changing state.
  */
 int
-dead_bmap(v)
-	void *v;
+dead_bmap(void *v)
 {
-	struct vop_bmap_args /* {
-		struct vnode *a_vp;
-		daddr_t  a_bn;
-		struct vnode **a_vpp;
-		daddr_t *a_bnp;
-		int *a_runp;
-	} */ *ap = v;
+	struct vop_bmap_args *ap = v;
 
 	if (!chkvnlock(ap->a_vp))
 		return (EIO);
@@ -318,8 +262,7 @@ dead_bmap(v)
  */
 /* ARGSUSED */
 int
-dead_print(v)
-	void *v;
+dead_print(void *v)
 {
 	printf("tag VT_NON, dead vnode\n");
 	return 0;
@@ -330,10 +273,8 @@ dead_print(v)
  */
 /*ARGSUSED*/
 int
-dead_ebadf(v)
-	void *v;
+dead_ebadf(void *v)
 {
-
 	return (EBADF);
 }
 
@@ -342,10 +283,8 @@ dead_ebadf(v)
  */
 /*ARGSUSED*/
 int
-dead_badop(v)
-	void *v;
+dead_badop(void *v)
 {
-
 	panic("dead_badop called");
 	/* NOTREACHED */
 }
@@ -355,8 +294,7 @@ dead_badop(v)
  * in a state of change.
  */
 int
-chkvnlock(vp)
-	register struct vnode *vp;
+chkvnlock(struct vnode *vp)
 {
 	int locked = 0;
 

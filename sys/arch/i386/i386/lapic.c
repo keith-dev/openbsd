@@ -1,4 +1,4 @@
-/*	$OpenBSD: lapic.c,v 1.13 2007/02/20 21:15:01 tom Exp $	*/
+/*	$OpenBSD: lapic.c,v 1.17 2007/08/01 13:18:18 martin Exp $	*/
 /* $NetBSD: lapic.c,v 1.1.2.8 2000/02/23 06:10:50 sommerfeld Exp $ */
 
 /*-
@@ -44,6 +44,7 @@
 #include <sys/user.h>
 #include <sys/systm.h>
 #include <sys/device.h>
+#include <sys/timetc.h>
 
 #include <uvm/uvm_extern.h>
 
@@ -62,7 +63,7 @@
 #include <machine/i82489var.h>
 #include <machine/pctr.h>
 
-#include <i386/isa/timerreg.h>	/* XXX for TIMER_FREQ */
+#include <dev/ic/i8253reg.h>
 
 struct evcount clk_count;
 struct evcount ipi_count;
@@ -121,6 +122,7 @@ lapic_set_softvectors()
 	idt_vec_set(LAPIC_SOFTCLOCK_VECTOR, Xintrsoftclock);
 	idt_vec_set(LAPIC_SOFTNET_VECTOR, Xintrsoftnet);
 	idt_vec_set(LAPIC_SOFTTTY_VECTOR, Xintrsofttty);
+	idt_vec_set(LAPIC_SOFTAST_VECTOR, Xintrsoftast);
 }
 
 void
@@ -175,8 +177,7 @@ lapic_set_lvt()
  * Initialize fixed idt vectors for use by local apic.
  */
 void
-lapic_boot_init(lapic_base)
-	paddr_t lapic_base;
+lapic_boot_init(paddr_t lapic_base)
 {
 	static int clk_irq = 0;
 	static int ipi_irq = 0;
@@ -185,6 +186,10 @@ lapic_boot_init(lapic_base)
 
 #ifdef MULTIPROCESSOR
 	idt_vec_set(LAPIC_IPI_VECTOR, Xintripi);
+	idt_vec_set(LAPIC_IPI_AST, Xintripi_ast);
+	idt_vec_set(LAPIC_IPI_INVLTLB, Xintripi_invltlb);
+	idt_vec_set(LAPIC_IPI_INVLPG, Xintripi_invlpg);
+	idt_vec_set(LAPIC_IPI_INVLRANGE, Xintripi_invlrange);
 #endif
 	idt_vec_set(LAPIC_SPURIOUS_VECTOR, Xintrspurious);
 	idt_vec_set(LAPIC_TIMER_VECTOR, Xintrltimer);
@@ -259,8 +264,7 @@ extern void (*initclock_func)(void); /* XXX put in header file */
  * We're actually using the IRQ0 timer.  Hmm.
  */
 void
-lapic_calibrate_timer(ci)
-	struct cpu_info *ci;
+lapic_calibrate_timer(struct cpu_info *ci)
 {
 	unsigned int starttick, tick1, tick2, endtick;
 	unsigned int startapic, apic1, apic2, endapic;
@@ -386,7 +390,6 @@ lapic_calibrate_timer(ci)
 		 * for all our timing needs..
 		 */
 		delay_func = lapic_delay;
-		microtime_func = lapic_microtime;
 		initclock_func = lapic_initclocks;
 	}
 }
@@ -396,8 +399,7 @@ lapic_calibrate_timer(ci)
  */
 
 void
-lapic_delay(usec)
-	int usec;
+lapic_delay(int usec)
 {
 	int32_t tick, otick;
 	int64_t deltat;		/* XXX may want to be 64bit */
@@ -432,6 +434,7 @@ i386_ipi_microset(struct cpu_info *ci)
 	ci->ci_tscbase = rdtsc();
 }
 
+#if 0
 /*
  * XXX need to make work correctly on other than cpu 0.
  */
@@ -457,6 +460,7 @@ lapic_microtime(tv)
 
 	*tv = now;
 }
+#endif
 
 /*
  * XXX the following belong mostly or partly elsewhere..

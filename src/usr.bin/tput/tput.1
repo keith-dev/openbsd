@@ -1,4 +1,4 @@
-.\"	$OpenBSD: tput.1,v 1.13 2003/06/03 02:56:20 millert Exp $
+.\"	$OpenBSD: tput.1,v 1.16 2007/05/31 19:20:18 jmc Exp $
 .\"	$NetBSD: tput.1,v 1.4 1994/12/07 08:49:10 jtc Exp $
 .\"
 .\" Copyright (c) 1989, 1990, 1993
@@ -30,7 +30,7 @@
 .\"
 .\"     @(#)tput.1	8.2 (Berkeley) 3/19/94
 .\"
-.Dd June 29, 1999
+.Dd $Mdocdate: May 31 2007 $
 .Dt TPUT 1
 .Os
 .Sh NAME
@@ -53,6 +53,8 @@ applications.
 .Pp
 The options are as follows:
 .Bl -tag -width Ds
+.It Fl S
+The attributes are read from stdin instead of the command line.
 .It Fl T
 The terminal name as found in the
 .Xr terminfo
@@ -65,10 +67,6 @@ If not specified,
 retrieves the
 .Ev TERM
 variable from the environment.
-.It Fl S
-The
-.Ar attributes
-are read from stdin instead of the command line.
 .El
 .Pp
 .Nm
@@ -150,6 +148,17 @@ exits with a value of 0 if the terminal has this attribute or
 .Sh SEE ALSO
 .Xr terminfo 3 ,
 .Xr terminfo 5
+.Sh STANDARDS
+The
+.Nm
+utility is compliant with the
+.St -p1003.1-2004
+specification,
+but its presence is optional.
+.Pp
+The flag
+.Op Fl S
+is an extension to that specification.
 .Sh HISTORY
 The
 .Nm

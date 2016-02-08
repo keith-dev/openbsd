@@ -1,4 +1,4 @@
-/*	$OpenBSD: fxp.c,v 1.84 2006/12/26 17:02:09 krw Exp $	*/
+/*	$OpenBSD: fxp.c,v 1.87 2007/06/06 09:43:44 henning Exp $	*/
 /*	$NetBSD: if_fxp.c,v 1.2 1997/06/05 02:01:55 thorpej Exp $	*/
 
 /*
@@ -58,11 +58,6 @@
 #include <netinet/in_systm.h>
 #include <netinet/in_var.h>
 #include <netinet/ip.h>
-#endif
-
-#ifdef IPX
-#include <netipx/ipx.h>
-#include <netipx/ipx_if.h>
 #endif
 
 #if NBPFILTER > 0
@@ -377,6 +372,7 @@ fxp_attach(struct fxp_softc *sc, const char *intrstr)
 		bus_dmamem_unmap(sc->sc_dmat, (caddr_t)sc->sc_ctrl,
 		    sizeof(struct fxp_ctrl));
 		bus_dmamem_free(sc->sc_dmat, &sc->sc_cb_seg, sc->sc_cb_nseg);
+		goto fail;
 	}
 
 	for (i = 0; i < FXP_NTXCB; i++) {
@@ -550,32 +546,6 @@ fxp_attach(struct fxp_softc *sc, const char *intrstr)
 		m = m_free(m);
 	}
 	return (ENOMEM);
-}
-
-int
-fxp_detach(struct fxp_softc *sc)
-{
-	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
-
-	/* Unhook our tick handler. */
-	timeout_del(&sc->stats_update_to);
-
-	/* Detach any PHYs we might have. */
-	if (LIST_FIRST(&sc->sc_mii.mii_phys) != NULL)
-		mii_detach(&sc->sc_mii, MII_PHY_ANY, MII_OFFSET_ANY);
-
-	/* Delete any remaining media. */
-	ifmedia_delete_instance(&sc->sc_mii.mii_media, IFM_INST_ANY);
-
-	ether_ifdetach(ifp);
-	if_detach(ifp);
-
-	if (sc->sc_sdhook != NULL)
-		shutdownhook_disestablish(sc->sc_sdhook);
-	if (sc->sc_powerhook != NULL)
-		powerhook_disestablish(sc->sc_powerhook);
-
-	return (0);
 }
 
 /*

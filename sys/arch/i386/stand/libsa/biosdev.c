@@ -1,4 +1,4 @@
-/*	$OpenBSD: biosdev.c,v 1.70 2006/10/12 12:14:17 krw Exp $	*/
+/*	$OpenBSD: biosdev.c,v 1.72 2007/05/27 00:57:17 tom Exp $	*/
 
 /*
  * Copyright (c) 1996 Michael Shalayeff
@@ -134,7 +134,7 @@ bios_getdiskinfo(int dev, bios_diskinfo_t *pdi)
 
 	/* NOTE:
 	 * This currently hangs/reboots some machines
-	 * The IBM Thinkpad 750ED for one.
+	 * The IBM ThinkPad 750ED for one.
 	 *
 	 * Funny that an IBM/MS extension would not be
 	 * implemented by an IBM system...
@@ -260,11 +260,11 @@ biosd_io(int rw, bios_diskinfo_t *bd, daddr_t off, int nsect, void *buf)
 
 	/*
 	 * Use a bounce buffer to not cross 64k DMA boundary, and to
-	 * not access above 1 MB.
+	 * not access 1 MB or above.
 	 */
 	if (((((u_int32_t)buf) & ~0xffff) !=
 	    (((u_int32_t)buf + bbsize) & ~0xffff)) ||
-	    (((u_int32_t)buf) > 0x100000)) {
+	    (((u_int32_t)buf) >= 0x100000)) {
 		/*
 		 * XXX we believe that all the io is buffered
 		 * by fs routines, so no big reads anyway

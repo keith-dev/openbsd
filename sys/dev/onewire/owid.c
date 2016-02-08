@@ -1,4 +1,4 @@
-/*	$OpenBSD: owid.c,v 1.3 2006/12/23 17:46:39 deraadt Exp $	*/
+/*	$OpenBSD: owid.c,v 1.5 2007/06/01 21:30:31 cnst Exp $	*/
 
 /*
  * Copyright (c) 2006 Alexander Yurchenko <grange@openbsd.org>
@@ -37,8 +37,8 @@ struct owid_softc {
 	void *			sc_onewire;
 	u_int64_t		sc_rom;
 
-	struct sensor		sc_sensor;
-	struct sensordev	sc_sensordev;
+	struct ksensor		sc_sensor;
+	struct ksensordev	sc_sensordev;
 
 	int			sc_dying;
 };
@@ -84,7 +84,6 @@ owid_attach(struct device *parent, struct device *self, void *aux)
 	strlcpy(sc->sc_sensordev.xname, sc->sc_dev.dv_xname,
 	    sizeof(sc->sc_sensordev.xname));
 	sc->sc_sensor.type = SENSOR_INTEGER;
-	strlcpy(sc->sc_sensor.desc, "ID", sizeof(sc->sc_sensor.desc));
 	sc->sc_sensor.value = ONEWIRE_ROM_SN(sc->sc_rom);
 	sensor_attach(&sc->sc_sensordev, &sc->sc_sensor);
 	sensordev_install(&sc->sc_sensordev);

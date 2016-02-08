@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfs_default.c,v 1.31 2007/01/16 17:52:18 thib Exp $  */
+/*	$OpenBSD: vfs_default.c,v 1.34 2007/06/01 23:47:56 deraadt Exp $  */
 
 /*
  * Portions of this code are:
@@ -47,8 +47,6 @@
 #include <sys/event.h>
 #include <miscfs/specfs/specdev.h>
 
-extern struct simplelock spechash_slock;
-
 int filt_generic_readwrite(struct knote *, long);
 void filt_generic_detach(struct knote *);
 
@@ -59,11 +57,7 @@ void filt_generic_detach(struct knote *);
 int
 vop_generic_revoke(void *v)
 {
-	struct vop_revoke_args /* {
-		struct vnodeop_desc *a_desc;
-		struct vnode *a_vp;
-		int a_flags;
-	} */ *ap = v;
+	struct vop_revoke_args *ap = v;
 	struct vnode *vp, *vq;
 	struct proc *p = curproc;
 
@@ -73,7 +67,6 @@ vop_generic_revoke(void *v)
 #endif
 
 	vp = ap->a_vp;
-	simple_lock(&vp->v_interlock);
  
 	if (vp->v_flag & VALIASED) {
 		/*
@@ -82,7 +75,6 @@ vop_generic_revoke(void *v)
 		 */
 		if (vp->v_flag & VXLOCK) {
 			vp->v_flag |= VXWANT;
-			simple_unlock(&vp->v_interlock);
 			tsleep(vp, PINOD, "vop_generic_revokeall", 0);
 
 			return(0);
@@ -93,18 +85,14 @@ vop_generic_revoke(void *v)
 		 * are eliminating its aliases.
 		 */
 		vp->v_flag |= VXLOCK;
-		simple_unlock(&vp->v_interlock);
 		while (vp->v_flag & VALIASED) {
-			simple_lock(&spechash_slock);
 			for (vq = *vp->v_hashchain; vq; vq = vq->v_specnext) {
 				if (vq->v_rdev != vp->v_rdev ||
 				    vq->v_type != vp->v_type || vp == vq)
 					continue;
-				simple_unlock(&spechash_slock);
 				vgone(vq);
 				break;
 			}
-			simple_unlock(&spechash_slock);
 		}
 
 		/*
@@ -112,7 +100,6 @@ vop_generic_revoke(void *v)
 		 * really eliminate the vnode after which time
 		 * vgone will awaken any sleepers.
 		 */
-		simple_lock(&vp->v_interlock);
 		vp->v_flag &= ~VXLOCK;
 	}
 
@@ -132,11 +119,7 @@ vop_generic_bwrite(void *v)
 int
 vop_generic_abortop(void *v)
 {
-	struct vop_abortop_args /* {
-		struct vnodeop_desc *a_desc;
-		struct vnode *a_dvp;
-		struct componentname *a_cnp;
-	} */ *ap = v;
+	struct vop_abortop_args *ap = v;
  
 	if ((ap->a_cnp->cn_flags & (HASBUF | SAVESTART)) == HASBUF)
 		pool_put(&namei_pool, ap->a_cnp->cn_pnbuf);
@@ -154,20 +137,6 @@ vop_generic_abortop(void *v)
 int
 vop_generic_lock(void *v)
 {
-	struct vop_lock_args /* {
-		struct vnodeop_desc *a_desc;
-		struct vnode *a_vp;
-		int a_flags;
-		struct proc *a_p;
-	} */ *ap = v;
-
-	/*
-	 * Since we are not using the lock manager, we must clear
-	 * the interlock here.
-	 */
-	if (ap->a_flags & LK_INTERLOCK)
-		simple_unlock(&ap->a_vp->v_interlock);
-
 	return (0);
 }
  
@@ -195,11 +164,7 @@ struct filterops generic_filtops =
 int
 vop_generic_kqfilter(void *v)
 {
-	struct vop_kqfilter_args /* {
-		struct vnodeop_desc *a_desc;
-		struct vnode *a_vp;
-		struct knote *a_kn;
-	} */ *ap = v;
+	struct vop_kqfilter_args *ap = v;
 	struct knote *kn = ap->a_kn;
 
 	switch (kn->kn_filter) {

@@ -1,4 +1,4 @@
-/*	$OpenBSD: cvs.c,v 1.118 2007/02/24 20:52:38 otto Exp $	*/
+/*	$OpenBSD: cvs.c,v 1.129 2007/08/06 19:16:06 sobrado Exp $	*/
 /*
  * Copyright (c) 2006, 2007 Joris Vink <joris@openbsd.org>
  * Copyright (c) 2004 Jean-Francois Brousseau <jfb@openbsd.org>
@@ -32,6 +32,7 @@
 #include <pwd.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "cvs.h"
@@ -69,7 +70,7 @@ char	*cvs_tmpdir = CVS_TMPDIR_DEFAULT;
 struct cvsroot *current_cvsroot = NULL;
 
 int		cvs_getopt(int, char **);
-void		usage(void);
+__dead void	usage(void);
 static void	cvs_read_rcfile(void);
 
 struct cvs_wklhead temp_files;
@@ -103,21 +104,23 @@ cvs_cleanup(void)
 	cvs_log(LP_TRACE, "cvs_cleanup: removing temp files");
 	cvs_worklist_run(&temp_files, cvs_worklist_unlink);
 
-	if (cvs_server_active) {
+	if (cvs_server_path != NULL) {
 		if (cvs_rmdir(cvs_server_path) == -1)
 			cvs_log(LP_ERR,
 			    "warning: failed to remove server directory: %s",
 			    cvs_server_path);
 		xfree(cvs_server_path);
+		cvs_server_path = NULL;
 	}
 }
 
-void
+__dead void
 usage(void)
 {
-	fprintf(stderr,
-	    "Usage: %s [-flnQqRrtVvw] [-d root] [-e editor] [-s var=val] "
-	    "[-T tmpdir] [-z level] command [...]\n", __progname);
+	(void)fprintf(stderr,
+	    "usage: %s [-flnQqRrtVvw] [-d root] [-e editor] [-s var=val]\n"
+	    "           [-T tmpdir] [-z level] command ...\n", __progname);
+	exit(1);
 }
 
 int
@@ -167,10 +170,8 @@ main(int argc, char **argv)
 
 	argc -= ret;
 	argv += ret;
-	if (argc == 0) {
+	if (argc == 0)
 		usage();
-		exit(1);
-	}
 
 	cvs_command = argv[0];
 
@@ -232,12 +233,17 @@ main(int argc, char **argv)
 		cmd_argc += ret;
 	}
 
+	if (argc + cmd_argc >= CVS_CMD_MAXARG)
+		fatal("main: too many arguments for `%s'", cmd_argv[0]);
 	for (ret = 1; ret < argc; ret++)
 		cmd_argv[cmd_argc++] = argv[ret];
 
 	cvs_file_init();
 
 	if (cvs_cmdop == CVS_OP_SERVER) {
+		if (cmd_argc > 1)
+			fatal("server does not take any extra arguments");
+
 		setvbuf(stdin, NULL, _IOLBF, 0);
 		setvbuf(stdout, NULL, _IOLBF, 0);
 
@@ -295,7 +301,7 @@ cvs_getopt(int argc, char **argv)
 	char *ep;
 	const char *errstr;
 
-	while ((ret = getopt(argc, argv, "b:d:e:fHlnQqRrs:T:tvVwz:")) != -1) {
+	while ((ret = getopt(argc, argv, "b:d:e:flnQqRrs:T:tVvwxz:")) != -1) {
 		switch (ret) {
 		case 'b':
 			/*
@@ -377,7 +383,7 @@ cvs_getopt(int argc, char **argv)
 			break;
 		default:
 			usage();
-			exit(1);
+			/* NOTREACHED */
 		}
 	}
 

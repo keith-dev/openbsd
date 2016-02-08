@@ -1,4 +1,4 @@
-.\"	$OpenBSD: bioctl.8,v 1.41 2006/09/03 18:37:44 marco Exp $
+.\"	$OpenBSD: bioctl.8,v 1.49 2007/07/11 07:40:11 jmc Exp $
 .\"
 .\" Copyright (c) 2004, 2005 Marco Peereboom
 .\"
@@ -23,7 +23,7 @@
 .\" OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 .\" SUCH DAMAGE.
 .\"
-.Dd December 27, 2004
+.Dd $Mdocdate: July 11 2007 $
 .Dt BIOCTL 8
 .Os
 .Sh NAME
@@ -32,10 +32,13 @@
 .Sh SYNOPSIS
 .Nm bioctl
 .Bk -words
-.Op Fl Dhiv
+.Op Fl hiqv
 .Op Fl a Ar alarm-function
 .Op Fl b Ar channel:target[.lun]
+.Op Fl C Ar flag[,flag,...]
+.Op Fl c Ar raidlevel
 .Op Fl H Ar channel:target[.lun]
+.Op Fl l Ar special[,special,...]
 .Op Fl u Ar channel:target[.lun]
 .Ar device
 .Ek
@@ -78,8 +81,26 @@ to start blinking, if there is
 or
 .Xr safte 4
 support in the enclosure.
-.It Fl D
-Enable debug output.
+.It Fl C Ar flag[,flag,...]
+Pass flags when doing operations with
+.Nm .
+May be one of:
+.Pp
+.Bl -tag -width disable -compact
+.It Ar force
+Force the operation, e.g. to force creation of volumes
+with unclean data in the metatdata areas.
+.It Ar noauto
+Ignore this RAID volume upon reboot.
+.El
+.It Fl c Ar raidlevel
+Create a
+.Xr softraid 4
+device of level
+.Ar raidlevel .
+The device must begin with
+.Dq softraid
+followed by a number.
 .It Fl H Ar channel:target[.lun]
 If the device at
 .Ar channel:target[.lun]
@@ -94,6 +115,16 @@ Gigabyte, Terabyte, Petabyte, Exabyte in order to reduce the number of
 digits to four or less.
 .It Fl i
 Enumerate the selected RAID devices.
+.It Fl l Ar special[,special,...]
+Use
+.Ar special
+device list to create within the
+.Xr softraid 4
+framework.
+Requires
+.Fl c .
+.It Fl q
+Show vendor, product, revision, and serial number for the given disk.
 .It Fl u Ar channel:target[.lun]
 Instruct the device at
 .Ar channel:target[.lun]
@@ -113,6 +144,14 @@ or
 enclosures, it is also possible to directly specify the enclosure name
 (e.g. safte0).
 .El
+.Sh EXAMPLES
+The following command, executed from the command line, would configure
+the device softraid0 with 4 special devices
+(/dev/sd2e, /dev/sd3e, /dev/sd4e, /dev/sd5e) and
+a raid level of 1:
+.Bd -literal -offset 3n
+# bioctl -c 1 -l /dev/sd2e,/dev/sd3e,/dev/sd4e,/dev/sd5e softraid0
+.Ed
 .Sh SEE ALSO
 .Xr ami 4 ,
 .Xr arc 4 ,
@@ -121,7 +160,8 @@ enclosures, it is also possible to directly specify the enclosure name
 .Xr mfi 4 ,
 .Xr safte 4 ,
 .Xr scsi 4 ,
-.Xr ses 4
+.Xr ses 4 ,
+.Xr softraid 4
 .Sh HISTORY
 The
 .Nm

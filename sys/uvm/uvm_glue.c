@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_glue.c,v 1.45 2006/11/29 12:24:18 miod Exp $	*/
+/*	$OpenBSD: uvm_glue.c,v 1.47 2007/05/26 20:26:51 pedro Exp $	*/
 /*	$NetBSD: uvm_glue.c,v 1.44 2001/02/06 19:54:44 eeh Exp $	*/
 
 /* 
@@ -116,18 +116,6 @@ uvm_kernacc(addr, len, rw)
 	rv = uvm_map_checkprot(kernel_map, saddr, eaddr, prot);
 	vm_map_unlock_read(kernel_map);
 
-	/*
-	 * XXX there are still some things (e.g. the buffer cache) that
-	 * are managed behind the VM system's back so even though an
-	 * address is accessible in the mind of the VM system, there may
-	 * not be physical pages where the VM thinks there is.  This can
-	 * lead to bogus allocation of pages in the kernel address space
-	 * or worse, inconsistencies at the pmap level.  We only worry
-	 * about the buffer cache for now.
-	 */
-	if (!readbuffers && rv && (eaddr > (vaddr_t)buffers &&
-			     saddr < (vaddr_t)buffers + MAXBSIZE * nbuf))
-		rv = FALSE;
 	return(rv);
 }
 
@@ -341,9 +329,8 @@ uvm_scheduler(void)
 	/*
 	 * Nothing to do, back to sleep
 	 */
-loop:
-	tsleep(&proc0, PVM, "scheduler", 0);
-	goto loop;
+	while (1)
+		tsleep(&proc0, PVM, "scheduler", 0);
 }
 
 /*

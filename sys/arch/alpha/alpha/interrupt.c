@@ -1,4 +1,4 @@
-/* $OpenBSD: interrupt.c,v 1.20 2006/06/15 20:08:29 brad Exp $ */
+/* $OpenBSD: interrupt.c,v 1.24 2007/06/17 10:01:25 miod Exp $ */
 /* $NetBSD: interrupt.c,v 1.46 2000/06/03 20:47:36 thorpej Exp $ */
 
 /*-
@@ -492,25 +492,24 @@ int netisr;
 void
 netintr()
 {
-	int n, s;
+	int n;
 
-	s = splhigh();
-	n = netisr;
-	netisr = 0;
-	splx(s);
+	while ((n = netisr) != 0) {
+		atomic_clearbits_int(&netisr, n);
 
 #define	DONETISR(bit, fn)						\
-	do {								\
-		if (n & (1 << (bit)))					\
-			fn();						\
-	} while (0)
+		do {							\
+			if (n & (1 << (bit)))				\
+				fn();					\
+		} while (0)
 
 #include <net/netisr_dispatch.h>
 
 #undef DONETISR
+	}
 }
 
-struct alpha_soft_intr alpha_soft_intrs[IPL_NSOFT];
+struct alpha_soft_intr alpha_soft_intrs[SI_NSOFT];
 
 /* XXX For legacy software interrupts. */
 struct alpha_soft_intrhand *softnet_intrhand, *softclock_intrhand;
@@ -526,11 +525,11 @@ softintr_init()
 	struct alpha_soft_intr *asi;
 	int i;
 
-	for (i = 0; i < IPL_NSOFT; i++) {
+	for (i = 0; i < SI_NSOFT; i++) {
 		asi = &alpha_soft_intrs[i];
-		LIST_INIT(&asi->softintr_q);
+		TAILQ_INIT(&asi->softintr_q);
 		simple_lock_init(&asi->softintr_slock);
-		asi->softintr_ipl = i;
+		asi->softintr_siq = i;
 	}
 
 	/* XXX Establish legacy software interrupt handlers. */
@@ -553,27 +552,59 @@ softintr_dispatch()
 	u_int64_t n, i;
 
 	while ((n = atomic_loadlatch_ulong(&ssir, 0)) != 0) {
-		for (i = 0; i < IPL_NSOFT; i++) {
+		for (i = 0; i < SI_NSOFT; i++) {
 			if ((n & (1 << i)) == 0)
 				continue;
+	
 			asi = &alpha_soft_intrs[i];
 
-			/* Already at splsoft() */
-			simple_lock(&asi->softintr_slock);
+			for (;;) {
+				(void) alpha_pal_swpipl(ALPHA_PSL_IPL_HIGH);
+				simple_lock(&asi->softintr_slock);
 
-			for (sih = LIST_FIRST(&asi->softintr_q);
-			     sih != NULL;
-			     sih = LIST_NEXT(sih, sih_q)) {
-				if (sih->sih_pending) {
-					uvmexp.softs++;
+				sih = TAILQ_FIRST(&asi->softintr_q);
+				if (sih != NULL) {
+					TAILQ_REMOVE(&asi->softintr_q, sih,
+					    sih_q);
 					sih->sih_pending = 0;
-					(*sih->sih_fn)(sih->sih_arg);
 				}
-			}
 
-			simple_unlock(&asi->softintr_slock);
+				simple_unlock(&asi->softintr_slock);
+				(void) alpha_pal_swpipl(ALPHA_PSL_IPL_SOFT);
+
+				if (sih == NULL)
+					break;
+
+				uvmexp.softs++;
+				(*sih->sih_fn)(sih->sih_arg);
+			}
 		}
 	}
+}
+
+static int
+ipl2si(int ipl)
+{
+	int si;
+
+	switch (ipl) {
+	case IPL_TTY:			/* XXX */
+	case IPL_SOFTSERIAL:
+		si = SI_SOFTSERIAL;
+		break;
+	case IPL_SOFTNET:
+		si = SI_SOFTNET;
+		break;
+	case IPL_SOFTCLOCK:
+		si = SI_SOFTCLOCK;
+		break;
+	case IPL_SOFT:
+		si = SI_SOFT;
+		break;
+	default:
+		panic("ipl2si: %d", ipl);
+	}
+	return si;
 }
 
 /*
@@ -586,12 +617,10 @@ softintr_establish(int ipl, void (*func)(void *), void *arg)
 {
 	struct alpha_soft_intr *asi;
 	struct alpha_soft_intrhand *sih;
-	int s;
+	int si;
 
-	if (__predict_false(ipl >= IPL_NSOFT || ipl < 0))
-		panic("softintr_establish");
-
-	asi = &alpha_soft_intrs[ipl];
+	si = ipl2si(ipl);
+	asi = &alpha_soft_intrs[si];
 
 	sih = malloc(sizeof(*sih), M_DEVBUF, M_NOWAIT);
 	if (__predict_true(sih != NULL)) {
@@ -599,11 +628,6 @@ softintr_establish(int ipl, void (*func)(void *), void *arg)
 		sih->sih_fn = func;
 		sih->sih_arg = arg;
 		sih->sih_pending = 0;
-		s = splsoft();
-		simple_lock(&asi->softintr_slock);
-		LIST_INSERT_HEAD(&asi->softintr_q, sih, sih_q);
-		simple_unlock(&asi->softintr_slock);
-		splx(s);
 	}
 	return (sih);
 }
@@ -620,11 +644,12 @@ softintr_disestablish(void *arg)
 	struct alpha_soft_intr *asi = sih->sih_intrhead;
 	int s;
 
-	(void) asi;	/* XXX Unused if simple locks are noops. */
-
-	s = splsoft();
+	s = splhigh();
 	simple_lock(&asi->softintr_slock);
-	LIST_REMOVE(sih, sih_q);
+	if (sih->sih_pending) {
+		TAILQ_REMOVE(&asi->softintr_q, sih, sih_q);
+		sih->sih_pending = 0;
+	}
 	simple_unlock(&asi->softintr_slock);
 	splx(s);
 
@@ -637,3 +662,33 @@ _splraise(int s)
 	int cur = alpha_pal_rdps() & ALPHA_PSL_IPL_MASK;
 	return (s > cur ? alpha_pal_swpipl(s) : cur);
 }
+
+#ifdef DIAGNOSTIC
+void
+splassert_check(int wantipl, const char *func)
+{
+	int curipl = alpha_pal_rdps() & ALPHA_PSL_IPL_MASK;
+
+	/*
+	 * Tell soft interrupts apart from regular levels.
+	 */
+	if (wantipl < 0)
+		wantipl = IPL_SOFTINT;
+
+	/*
+	 * Depending on the system, hardware interrupts may occur either
+	 * at level 3 or level 4. Avoid false positives in the former case.
+	 */
+	if (curipl == ALPHA_PSL_IPL_IO - 1)
+		curipl = ALPHA_PSL_IPL_IO;
+
+	if (curipl < wantipl) {
+		splassert_fail(wantipl, curipl, func);
+		/*
+		 * If splassert_ctl is set to not panic, raise the ipl
+		 * in a feeble attempt to reduce damage.
+		 */
+		alpha_pal_swpipl(wantipl);
+	}
+}
+#endif

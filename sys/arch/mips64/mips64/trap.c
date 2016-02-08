@@ -1,4 +1,4 @@
-/*	$OpenBSD: trap.c,v 1.31 2006/12/24 20:30:35 miod Exp $	*/
+/*	$OpenBSD: trap.c,v 1.37 2007/07/16 20:21:20 miod Exp $	*/
 /* tracked to 1.23 */
 
 /*
@@ -151,7 +151,7 @@ extern void MipsSwitchFPState(struct proc *, struct trap_frame *);
 extern void MipsSwitchFPState16(struct proc *, struct trap_frame *);
 extern void MipsFPTrap(u_int, u_int, u_int, union sigval);
 
-register_t trap(struct trap_frame *);
+void trap(struct trap_frame *);
 #ifdef PTRACE
 int cpu_singlestep(struct proc *);
 #endif
@@ -166,7 +166,7 @@ userret(struct proc *p)
 	while ((sig = CURSIG(p)) != 0)
 		postsig(sig);
 
-	curpriority = p->p_priority = p->p_usrpri;
+	p->p_cpu->ci_schedstate.spc_curpriority = p->p_priority = p->p_usrpri;
 }
 
 /*
@@ -174,7 +174,7 @@ userret(struct proc *p)
  * In the case of a kernel trap, we return the pc where to resume if
  * pcb_onfault is set, otherwise, return old pc.
  */
-register_t
+void
 trap(trapframe)
 	struct trap_frame *trapframe;
 {
@@ -199,12 +199,13 @@ trap(trapframe)
 	 * If it was off disable all (splhigh) so we don't accidently
 	 * enable it when doing a spllower().
 	 */
-/*XXX do in locore? */
 	if (trapframe->sr & SR_INT_ENAB) {
+		if (type != T_BREAK) {
 #ifndef IMASK_EXTERNAL
-		updateimask(trapframe->cpl);
+			updateimask(trapframe->cpl);
 #endif
-		enableintr();
+			enableintr();
+		}
 	} else
 		splhigh();
 
@@ -238,7 +239,7 @@ trap(trapframe)
 			if (pg == NULL)
 				panic("trap: ktlbmod: unmanaged page");
 			pmap_set_modify(pg);
-			return (trapframe->pc);
+			return;
 		}
 		/* FALLTHROUGH */
 
@@ -274,7 +275,7 @@ trap(trapframe)
 			panic("trap: utlbmod: unmanaged page");
 		pmap_set_modify(pg);
 		if (!USERMODE(trapframe->sr))
-			return (trapframe->pc);
+			return;
 		goto out;
 	    }
 
@@ -293,10 +294,11 @@ trap(trapframe)
 			rv = uvm_fault(kernel_map, trunc_page(va), 0, ftype);
 			p->p_addr->u_pcb.pcb_onfault = onfault;
 			if (rv == 0)
-				return (trapframe->pc);
+				return;
 			if (onfault != 0) {
 				p->p_addr->u_pcb.pcb_onfault = 0;
-				return (onfault_table[onfault]);
+				trapframe->pc = onfault_table[onfault];
+				return;
 			}
 			goto err;
 		}
@@ -363,13 +365,14 @@ fault_common:
 		}
 		if (rv == 0) {
 			if (!USERMODE(trapframe->sr))
-				return (trapframe->pc);
+				return;
 			goto out;
 		}
 		if (!USERMODE(trapframe->sr)) {
 			if (onfault != 0) {
 				p->p_addr->u_pcb.pcb_onfault = 0;
-				return (onfault_table[onfault]);
+				trapframe->pc =  onfault_table[onfault];
+				return;
 			}
 			goto err;
 		}
@@ -593,7 +596,7 @@ printf("SIG-BUSB @%p pc %p, ra %p\n", trapframe->badvaddr, trapframe->pc, trapfr
 #ifdef DDB
 	case T_BREAK:
 		kdb_trap(type, trapframe);
-		return(trapframe->pc);
+		return;
 #endif
 
 	case T_BREAK+T_USER:
@@ -693,7 +696,7 @@ printf("SIG-BUSB @%p pc %p, ra %p\n", trapframe->badvaddr, trapframe->pc, trapfr
 		printf("watch exception @ %p\n", va);
 		if (rm7k_watchintr(trapframe)) {
 			/* Return to user, don't add any more overhead */
-			return (trapframe->pc);
+			return;
 		}
 		i = SIGTRAP;
 		typ = TRAP_BRKPT;
@@ -725,7 +728,7 @@ printf("SIG-BUSB @%p pc %p, ra %p\n", trapframe->badvaddr, trapframe->pc, trapfr
 						trapframe->a2, trapframe->a3);
 			locr0->v0 = -result;
 			/* Return to user, don't add any more overhead */
-			return (trapframe->pc);
+			return;
 		}
 		else {
 			i = SIGEMT;	/* Stuff it with something for now */
@@ -776,7 +779,8 @@ printf("SIG-BUSB @%p pc %p, ra %p\n", trapframe->badvaddr, trapframe->pc, trapfr
 	case T_BUS_ERR_LD_ST:	/* BERR asserted to cpu */
 		if ((onfault = p->p_addr->u_pcb.pcb_onfault) != 0) {
 			p->p_addr->u_pcb.pcb_onfault = 0;
-			return (onfault_table[onfault]);
+			trapframe->pc = onfault_table[onfault];
+			return;
 		}
 		goto err;
 
@@ -787,7 +791,8 @@ printf("SIG-BUSB @%p pc %p, ra %p\n", trapframe->badvaddr, trapframe->pc, trapfr
 		trapDump("trap");
 #endif
 		printf("\nTrap cause = %d Frame %p\n", type, trapframe);
-		printf("Trap PC %p RA %p\n", trapframe->pc, trapframe->ra);
+		printf("Trap PC %p RA %p fault %p\n",
+		    trapframe->pc, trapframe->ra, trapframe->badvaddr);
 #ifdef DDB
 		stacktrace(!USERMODE(trapframe->sr) ? trapframe : p->p_md.md_regs);
 		kdb_trap(type, trapframe);
@@ -804,7 +809,6 @@ out:
 	 * Note: we should only get here if returning to user mode.
 	 */
 	userret(p);
-	return (trapframe->pc);
 }
 
 void
@@ -857,23 +861,6 @@ trapDump(msg)
 
 		printf(" RA %p SP %p ADR %p\n", ptrp->ra, ptrp->sp, ptrp->vadr);
 	}
-
-#ifdef TLBTRACE
-	if (tlbtrcptr != NULL) {
-		register_t *next;
-
-		printf("tlbtrace:\n");
-		next = tlbtrcptr;
-		do {
-			if (next[0] != NULL) {
-				printf("pc %p, va %p segtab %p pte %p\n",
-				    next[0], next[1], next[2], next[3]);
-			}
-			next +=  4;
-			next = (register_t *)((long)next & ~0x100);
-		} while (next != tlbtrcptr);
-	}
-#endif
 
 	splx(s);
 }
@@ -1115,7 +1102,9 @@ cpu_singlestep(p)
 #define MIPS_JR_RA	0x03e00008	/* instruction code for jr ra */
 
 /* forward */
+#if !defined(DDB)
 char *fn_name(long addr);
+#endif
 void stacktrace_subr(struct trap_frame *, int (*)(const char*, ...));
 
 /*
@@ -1164,13 +1153,13 @@ loop:
 /* Jump here after a nonstandard (interrupt handler) frame */
 	stksize = 0;
 	subr = 0;
-	if	(frames++ > 6) {
+	if (frames++ > 6) {
 		(*printfn)("stackframe count exceeded\n");
 		return;
 	}
 
 	/* check for bad SP: could foul up next frame */
-	if (sp & 3 || sp < KSEG0_BASE) {
+	if (sp & 3 || (!IS_XKPHYS((vaddr_t)sp) && sp < KSEG0_BASE)) {
 		(*printfn)("SP %p: not in kernel\n", sp);
 		ra = 0;
 		subr = 0;
@@ -1320,13 +1309,16 @@ loop:
 	}
 
 done:
-	(*printfn)("%s+%x ra %p sp %p (%p,%p,%p,%p)\n",
-		fn_name(subr), pc - subr, ra, sp, a0, a1, a2, a3);
-#if defined(_LP64)
-	a0 = a1 = a2 = a3 = 0x00dead0000dead00;
+#ifdef DDB
+	db_printsym(pc, DB_STGY_ANY, printfn);
 #else
-	a0 = a1 = a2 = a3 = 0x00dead00;
+	(*printfn)("%s+%x", fn_name(subr), pc - subr);
 #endif
+	if (frames == 1)
+		(*printfn)(" ra %p sp %p (%p,%p,%p,%p)\n",
+		    ra, sp, a0, a1, a2, a3);
+	else
+		(*printfn)(" ra %p sp %p\n", ra, sp);
 
 	if (ra) {
 		if (pc == ra && stksize == 0)
@@ -1345,6 +1337,7 @@ done:
 	}
 }
 
+#if !defined(DDB)
 /*
  * Functions ``special'' enough to print by name
  */
@@ -1373,5 +1366,6 @@ fn_name(long addr)
 	snprintf(buf, sizeof(buf), "%x", addr);
 	return (buf);
 }
+#endif	/* !DDB */
 
-#endif /* DDB */
+#endif /* DDB || DEBUG */

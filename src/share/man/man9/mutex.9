@@ -1,4 +1,4 @@
-.\" $OpenBSD: mutex.9,v 1.1 2005/02/18 16:15:32 pedro Exp $
+.\" $OpenBSD: mutex.9,v 1.4 2007/05/31 19:20:00 jmc Exp $
 .\"
 .\" Copyright (c) 2005 Pedro Martelletto <pedro@openbsd.org>
 .\" All rights reserved.
@@ -15,7 +15,7 @@
 .\" ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 .\" OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 .\"
-.Dd February 9, 2005
+.Dd $Mdocdate: May 31 2007 $
 .Dt MUTEX 9
 .Os
 .Sh NAME
@@ -57,6 +57,7 @@ In case the acquisition of the mutex caused the interrupt level to be changed,
 it is then restored.
 .Sh SEE ALSO
 .Xr lockmgr 9 ,
+.Xr rwlock 9 ,
 .Xr spl 9
 .Sh HISTORY
 The
@@ -70,6 +71,11 @@ functions were written by
 .An Artur Grabowski
 .Aq art@openbsd.org .
 .Sh CAVEATS
+As these are spinning locks, don't sleep while holding one.
+.Pp
+If using a mutex in an interrupt handler, locks must be initialised
+with the correct IPL or deadlock will occur.
+.Pp
 Multiple mutexes may be nested, but not interleaved.
 This is okay:
 .Bd -literal -offset indent

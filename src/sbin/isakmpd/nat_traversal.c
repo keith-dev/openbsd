@@ -1,4 +1,4 @@
-/*	$OpenBSD: nat_traversal.c,v 1.18 2007/02/22 10:01:02 hshoexer Exp $	*/
+/*	$OpenBSD: nat_traversal.c,v 1.20 2007/05/05 17:43:34 cloder Exp $	*/
 
 /*
  * Copyright (c) 2004 Håkan Olsson.  All rights reserved.
@@ -131,8 +131,7 @@ nat_t_setup_hashes(void)
 
 errout:
 	for (i = 0; i < n; i++)
-		if (isakmp_nat_t_cap[i].hash)
-			free(isakmp_nat_t_cap[i].hash);
+		free(isakmp_nat_t_cap[i].hash);
 	return -1;
 }
 
@@ -194,9 +193,6 @@ nat_t_check_vendor_payload(struct message *msg, struct payload *p)
 
 	for (i = 0; i < NUMNATTCAP; i++) {
 		if (vlen != isakmp_nat_t_cap[i].hashsize) {
-			LOG_DBG((LOG_EXCHANGE, 50, "nat_t_check_vendor_payload: "
-			    "bad size %lu != %lu", (unsigned long)vlen,
-			    (unsigned long)isakmp_nat_t_cap[i].hashsize));
 			continue;
 		}
 		if (memcmp(isakmp_nat_t_cap[i].hash, pbuf + ISAKMP_GEN_SZ,

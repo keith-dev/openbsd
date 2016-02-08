@@ -1,4 +1,4 @@
-.\"	$OpenBSD: hoststated.conf.5,v 1.37 2007/03/06 19:26:46 reyk Exp $
+.\"	$OpenBSD: hoststated.conf.5,v 1.46 2007/07/24 17:51:33 pyr Exp $
 .\"
 .\" Copyright (c) 2006 Pierre-Yves Ritschard <pyr@spootnik.org>
 .\"
@@ -14,7 +14,7 @@
 .\" ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 .\" OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 .\"
-.Dd November 1, 2006
+.Dd $Mdocdate: July 24 2007 $
 .Dt HOSTSTATED.CONF 5
 .Os
 .Sh NAME
@@ -204,6 +204,21 @@ If the
 .Ic ssl
 keyword is present,
 the transaction will occur in an SSL tunnel.
+.It Ic check script Ar path
+Execute an external program to check the host state.
+The program will be executed for each host by specifing the host name
+on the command line:
+.Bd -literal -offset indent
+/usr/local/bin/checkload.pl front-www1.private.example.com
+.Ed
+.Pp
+.Xr hoststated 8
+expects a positive return value on success and zero on failure.
+Note that the script will be executed with the privileges of the
+.Qq _hoststated
+user and terminated after
+.Ar timeout
+milliseconds.
 .It Ic check ssl
 Perform a complete SSL handshake with each host to check their availability.
 .It Ic check tcp
@@ -239,7 +254,10 @@ more times before setting the host state to down.
 When using the TCP or HTTP checking methods, use this
 .Ar port
 to connect to hosts.
-This parameter is mandatory.
+If this parameter is not specified,
+.Xr hoststated 8
+will create a template table which inherits the port from the
+referencing service or relay.
 Main and backup tables need to have the same real port.
 .It Ic timeout Ar number
 Set the timeout in milliseconds for each host that is checked using
@@ -325,9 +343,15 @@ is the specified IP address of the relay to listen on.
 See
 .Xr ssl 8
 for details about SSL server certificates.
-.It Ic forward to Ar address Ic port Ar port
+.It Xo
+.Ic forward to Ar address Ic port Ar port
+.Op Ic retry Ar number
+.Xc
 Specify the address and port of the target host to connect to.
-.It Ic service Ar name
+.It Xo
+.Ic service Ar name
+.Op Ic retry Ar number
+.Xc
 Use the first virtual IP address and port from the specified service
 as the target host to connect to.
 This is exclusive to the
@@ -369,7 +393,10 @@ more times.
 See the
 .Sx TABLES
 section for details about host entries.
-.It Ic nat lookup
+.It Xo
+.Ic nat lookup
+.Op Ic retry Ar number
+.Xc
 When redirecting connections with an
 .Ar rdr
 rule in
@@ -440,19 +467,25 @@ HTTP server replies.
 .Pp
 The following entity types for the actions are available:
 .Bl -tag -width Ds
+.It Ic cookie
+Look up the entity as a value in the Cookie header when using the
+.Ic http
+protocol.
+This type is only available with the direction
+.Ic request .
 .It Ic header
 Look up the entity in the application protocol headers, like HTTP
 headers in
 .Ic http
 mode.
-.It Ic url
-Look up the entity as a GET variable in the URL when using the
+.It Ic path
+Look up the entity as a value in the URL path when using the
 .Ic http
 protocol.
 This type is only available with the direction
 .Ic request .
-.It Ic cookie
-Look up the entity as a value in the Cookie header when using the
+.It Ic url
+Look up the entity as a GET variable in the URL when using the
 .Ic http
 protocol.
 This type is only available with the direction
@@ -505,9 +538,11 @@ section above.
 Log the name and the value of the entity.
 .El
 .It Ic tcp Ar option
-Enable or disable the specified TCP option; see
+Enable or disable the specified TCP/IP options; see
 .Xr tcp 4
-for details about TCP options.
+and
+.Xr ip 4
+for more information about the options.
 Valid options are:
 .Bl -tag -width Ds
 .It Ic backlog Ar number
@@ -516,6 +551,14 @@ The backlog option is 10 by default and is limited by the
 .Ic kern.somaxconn
 .Xr sysctl 8
 variable.
+.It Ic ip minttl Ar number
+This option for the underlying IP connection may be used to discard packets
+with a TTL lower than the specified value.
+This can be used to implement the
+.Ar Generalized TTL Security Mechanism (GTSM)
+according to RFC 3682.
+.It Ic ip ttl
+Change the default time-to-live value in the IP headers.
 .It Xo
 .Op Ic no
 .Ic nodelay
@@ -629,7 +672,7 @@ interval 5
 table phphosts {
 	timeout 300
 	real port 8080
-	check http "/" digest 630aa3c2f...
+	check http "/" digest "630aa3c2f..."
 	host $www1
 	host $www2
 	host $www3
@@ -674,6 +717,7 @@ protocol http_ssl {
 	header change "Keep-Alive" to "$TIMEOUT"
 	url hash "sessid"
 	cookie hash "sessid"
+	path filter "*command=*" from "/cgi-bin/index.cgi"
 
 	ssl { sslv2, ciphers "MEDIUM:HIGH" }
 }
@@ -711,12 +755,12 @@ relay sshforward {
 .Sh HISTORY
 The
 .Nm
-program first appeared in
+file format first appeared in
 .Ox 4.1 .
 .Sh AUTHORS
 .An -nosplit
 The
-.Nm
+.Xr hoststated 8
 program was written by
 .An Pierre-Yves Ritschard Aq pyr@openbsd.org
 and

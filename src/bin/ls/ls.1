@@ -1,4 +1,4 @@
-.\"	$OpenBSD: ls.1,v 1.47 2007/03/03 23:26:12 jmc Exp $
+.\"	$OpenBSD: ls.1,v 1.52 2007/05/31 19:19:15 jmc Exp $
 .\"	$NetBSD: ls.1,v 1.14 1995/12/05 02:44:01 jtc Exp $
 .\"
 .\" Copyright (c) 1980, 1990, 1991, 1993, 1994
@@ -33,7 +33,7 @@
 .\"
 .\"     @(#)ls.1	8.7 (Berkeley) 7/29/94
 .\"
-.Dd July 29, 1994
+.Dd $Mdocdate: May 31 2007 $
 .Dt LS 1
 .Os
 .Sh NAME
@@ -88,7 +88,9 @@ Use time file's status was last changed instead of last modification
 time for sorting
 .Pq Fl t
 or printing
-.Pq Fl l , Fl n .
+.Pf ( Fl g , l ,
+or
+.Fl n ) .
 .It Fl d
 Directories are listed as plain files (not searched recursively) and
 symbolic links in the argument list are not indirected through.
@@ -111,8 +113,9 @@ after each that is a FIFO.
 .It Fl f
 Output is not sorted.
 .It Fl g
-Does nothing; kept for compatibility with older versions of
-.Nm ls .
+The same as
+.Fl l ,
+except that the owner is not printed.
 .It Fl h
 When used with a long format
 option, use unit suffixes: Byte, Kilobyte, Megabyte, Gigabyte, Terabyte,
@@ -148,7 +151,9 @@ List in long format as in
 but retain user and group IDs in a numeric format.
 .It Fl o
 Include the file flags in a long format
-.Pq Fl l , Fl n
+.Pf ( Fl g , l ,
+or
+.Fl n )
 output.
 .It Fl p
 Display a slash
@@ -178,7 +183,9 @@ environment variable.
 Display complete time information for the file, including
 month, day, hour, minute, second, and year.
 This option has no effect unless one of the long format
-.Pq Fl l , Fl n
+.Pf ( Fl g , l ,
+or
+.Fl n )
 options is also specified.
 .It Fl t
 Sort by time modified (most recently modified
@@ -190,7 +197,9 @@ instead of last modification time
 for sorting
 .Pq Fl t
 or printing
-.Pq Fl l , Fl n .
+.Pf ( Fl g , l ,
+or
+.Fl n ) .
 .It Fl x
 Multi-column output sorted across the page rather than down the page.
 .El
@@ -198,11 +207,19 @@ Multi-column output sorted across the page rather than down the page.
 The
 .Fl 1 ,
 .Fl C ,
+.Fl g ,
 .Fl l ,
 and
 .Fl n
 options all override each other; the last one specified determines
-the format used.
+the format used with the exception that if both
+.Fl l
+and
+.Fl g
+are specified,
+.Fl l
+will always override
+.Fl g .
 .Pp
 The
 .Fl c
@@ -235,7 +252,8 @@ and
 options.
 .Ss The Long Format
 If the
-.Fl l
+.Fl g ,
+.Fl l ,
 or
 .Fl n
 options are given, the following information
@@ -243,7 +261,8 @@ is displayed for each file:
 mode,
 number of links,
 owner,
-group,
+group (though not for
+.Fl g ) ,
 size in bytes,
 time of last modification
 .Pq Dq mmm dd HH:MM ,
@@ -277,7 +296,8 @@ linked-to file is preceded by
 .Dq \-\*(Gt .
 .Pp
 The file mode printed under the
-.Fl l
+.Fl g ,
+.Fl l ,
 or
 .Fl n
 options consists of the entry type, owner permissions, group permissions,
@@ -446,16 +466,30 @@ printed first:
 .Xr symlink 7 ,
 .Xr sticky 8
 .Sh STANDARDS
-The group field is now automatically included in the long listing for
-files in order to be compatible with the
-.St -p1003.2
-specification.
-.Pp
 The
 .Nm
-utility is expected to be a superset of the
-.St -p1003.2
+utility is compliant with the
+.St -p1003.1-2004
 specification.
+.Pp
+The flags
+.Op Fl AhkRST
+are extensions to that specification.
+.Pp
+Historically, the
+.Fl g
+flag was used to specify that the group field be included in long listings.
+The group field is now automatically included in the long listing for
+files and the meaning of the
+.Fl g
+flag has been changed in order to be compatible with the
+.St -p1003.1-2004
+specification.
+.Pp
+Behaviour for the
+.Fl o
+flag differs between this implementation and
+.St -p1003.1-2004 .
 .Sh HISTORY
 An
 .Nm

@@ -1,4 +1,4 @@
-/*	$OpenBSD: dhclient.c,v 1.111 2007/02/25 18:10:43 krw Exp $	*/
+/*	$OpenBSD: dhclient.c,v 1.114 2007/08/14 15:29:18 stevesk Exp $	*/
 
 /*
  * Copyright 2004 Henning Brauer <henning@openbsd.org>
@@ -60,10 +60,11 @@
 #include "dhcpd.h"
 #include "privsep.h"
 
-#define	CLIENT_PATH "PATH=/usr/bin:/usr/sbin:/bin:/sbin"
+#define	CLIENT_PATH 		"PATH=/usr/bin:/usr/sbin:/bin:/sbin"
+#define DEFAULT_LEASE_TIME	43200	/* 12 hours... */
+#define TIME_MAX		2147483647
 
 time_t cur_time;
-time_t default_lease_time = 43200; /* 12 hours... */
 
 char *path_dhclient_conf = _PATH_DHCLIENT_CONF;
 char *path_dhclient_db = NULL;
@@ -78,8 +79,6 @@ int routefd = -1;
 struct iaddr iaddr_broadcast = { 4, { 255, 255, 255, 255 } };
 struct in_addr inaddr_any;
 struct sockaddr_in sockaddr_broadcast;
-
-#define TIME_MAX 2147483647
 
 struct interface_info *ifi;
 struct client_state *client;
@@ -99,6 +98,7 @@ int		 fork_privchld(int, int);
 #define	ADVANCE(x, n) (x += ROUNDUP((n)->sa_len))
 
 time_t	scripttime;
+static FILE *leaseFile;
 
 int
 findproto(char *cp, int n)
@@ -351,6 +351,8 @@ main(int argc, char *argv[])
 	if ((fd = open(path_dhclient_db, O_RDONLY|O_EXLOCK|O_CREAT, 0)) == -1)
 		error("can't open and lock %s: %m", path_dhclient_db);
 	read_client_leases();
+	if ((leaseFile = fopen(path_dhclient_db, "w")) == NULL)
+		error("can't open %s: %m", path_dhclient_db);
 	rewrite_client_leases();
 	close(fd);
 
@@ -600,7 +602,7 @@ dhcpack(struct iaddr client_addr, struct option_data *options)
 		client->new->expiry =
 		    getULong(client->new->options[DHO_DHCP_LEASE_TIME].data);
 	else
-		client->new->expiry = default_lease_time;
+		client->new->expiry = DEFAULT_LEASE_TIME;
 	/* A number that looks negative here is really just very large,
 	   because the lease expiry offset is unsigned. */
 	if (client->new->expiry < 0)
@@ -1457,21 +1459,16 @@ free_client_lease(struct client_lease *lease)
 	free(lease);
 }
 
-FILE *leaseFile;
-
 void
 rewrite_client_leases(void)
 {
 	struct client_lease *lp;
 
-	if (!leaseFile) {
-		leaseFile = fopen(path_dhclient_db, "w");
-		if (!leaseFile)
-			error("can't create %s: %m", path_dhclient_db);
-	} else {
-		fflush(leaseFile);
-		rewind(leaseFile);
-	}
+	if (!leaseFile)	/* XXX */
+		error("lease file not open");
+
+	fflush(leaseFile);
+	rewind(leaseFile);
 
 	for (lp = client->leases; lp; lp = lp->next)
 		write_client_lease(lp, 1);
@@ -1502,11 +1499,8 @@ write_client_lease(struct client_lease *lease, int rewrite)
 	if (lease->is_static)
 		return;
 
-	if (!leaseFile) {	/* XXX */
-		leaseFile = fopen(path_dhclient_db, "w");
-		if (!leaseFile)
-			error("can't create %s: %m", path_dhclient_db);
-	}
+	if (!leaseFile)	/* XXX */
+		error("lease file not open");
 
 	fprintf(leaseFile, "lease {\n");
 	if (lease->is_bootp)
@@ -2088,9 +2082,11 @@ option_as_string(unsigned int code, unsigned char *data, int len)
 	for (; dp < data + len; dp++) {
 		if (!isascii(*dp) || !isprint(*dp)) {
 			if (dp + 1 != data + len || *dp != 0) {
+				size_t oplen;
 				snprintf(op, opleft, "\\%03o", *dp);
-				op += 4;
-				opleft -= 4;
+				oplen = strlen(op);
+				op += oplen;
+				opleft -= oplen;
 			}
 		} else if (*dp == '"' || *dp == '\'' || *dp == '$' ||
 		    *dp == '`' || *dp == '\\') {

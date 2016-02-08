@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_gif.c,v 1.41 2007/02/22 15:31:44 claudio Exp $	*/
+/*	$OpenBSD: if_gif.c,v 1.45 2007/05/26 17:13:30 jason Exp $	*/
 /*	$KAME: if_gif.c,v 1.43 2001/02/20 08:51:07 itojun Exp $	*/
 
 /*
@@ -64,8 +64,6 @@
 #include "bpfilter.h"
 #include "bridge.h"
 
-extern int ifqmaxlen;
-
 void	gifattach(int);
 int	gif_clone_create(struct if_clone *, int);
 int	gif_clone_destroy(struct ifnet *);
@@ -115,7 +113,7 @@ gif_clone_create(ifc, unit)
 
 #if NBPFILTER > 0
 	bpfattach(&sc->gif_if.if_bpf, &sc->gif_if, DLT_NULL,
-		  sizeof(u_int));
+	    sizeof(u_int));
 #endif
 	s = splnet();
 	LIST_INSERT_HEAD(&gif_softc_list, sc, gif_list);
@@ -149,10 +147,10 @@ gif_clone_destroy(ifp)
 
 void
 gif_start(ifp)
-        struct ifnet *ifp;
+	struct ifnet *ifp;
 {
 	struct gif_softc *sc = (struct gif_softc*)ifp;
-        struct mbuf *m;
+	struct mbuf *m;
 	struct m_tag *mtag;
 	int family;
 	int s;
@@ -177,7 +175,7 @@ gif_start(ifp)
 	splx(s);
 
 	while (1) {
-	        s = splnet();
+		s = splnet();
 		IFQ_DEQUEUE(&ifp->if_snd, m);
 		splx(s);
 
@@ -196,9 +194,11 @@ gif_start(ifp)
 				log(LOG_NOTICE, "gif_output: "
 				    "recursively called too many times\n");
 				m_freem(m);
-				continue;
+				break;
 			}
 		}
+		if (mtag)
+			continue;
 
 		mtag = m_tag_get(PACKET_TAG_GIF, sizeof(caddr_t), M_NOWAIT);
 		if (mtag == NULL) {
@@ -215,6 +215,7 @@ gif_start(ifp)
 		m->m_flags &= ~(M_BCAST|M_MCAST);
 
 		/* extract address family */
+		family = AF_UNSPEC;
 		tp = *mtod(m, u_int8_t *);
 		tp = (tp >> 4) & 0xff;  /* Get the IP version number. */
 #ifdef INET
@@ -231,16 +232,10 @@ gif_start(ifp)
 		 * Check if the packet is comming via bridge and needs
 		 * etherip encapsulation or not.
 		 */
-		if (ifp->if_bridge)
-			for (mtag = m_tag_find(m, PACKET_TAG_BRIDGE, NULL);
-			    mtag;
-			    mtag = m_tag_find(m, PACKET_TAG_BRIDGE, mtag)) {
-				if (!bcmp(&ifp->if_bridge, mtag + 1,
-				    sizeof(caddr_t))) {
-					family = AF_LINK;
-					break;
-				}
-			}
+		if (ifp->if_bridge && (m->m_flags & M_PROTO1)) {
+			m->m_flags &= ~M_PROTO1;
+			family = AF_LINK;
+		}
 #endif
 
 #if NBPFILTER > 0
@@ -298,7 +293,7 @@ gif_output(ifp, m, dst, rt)
 		break;
 #endif
 	default:
-		m_freem(m);		
+		m_freem(m);
 		error = ENETDOWN;
 		goto end;
 	}
@@ -319,7 +314,7 @@ gif_output(ifp, m, dst, rt)
 	splx(s);
 	return (error);
 
-  end:
+end:
 	if (error)
 		ifp->if_oerrors++;
 	return (error);
@@ -338,11 +333,11 @@ gif_ioctl(ifp, cmd, data)
 	struct sockaddr *sa;
 	int s;
 	struct gif_softc *sc2;
-		
+
 	switch (cmd) {
 	case SIOCSIFADDR:
 		break;
-		
+
 	case SIOCSIFDSTADDR:
 		break;
 
@@ -521,7 +516,7 @@ gif_ioctl(ifp, cmd, data)
 		/* change the IFF_{UP, RUNNING} flag as well? */
 		break;
 #endif
-			
+
 	case SIOCGIFPSRCADDR:
 #ifdef INET6
 	case SIOCGIFPSRCADDR_IN6:
@@ -553,7 +548,7 @@ gif_ioctl(ifp, cmd, data)
 			return (EINVAL);
 		bcopy((caddr_t)src, (caddr_t)dst, src->sa_len);
 		break;
-			
+
 	case SIOCGIFPDSTADDR:
 #ifdef INET6
 	case SIOCGIFPDSTADDR_IN6:

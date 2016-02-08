@@ -1,4 +1,4 @@
-/*	$OpenBSD: ieee80211.c,v 1.20 2006/12/25 19:24:26 reyk Exp $	*/
+/*	$OpenBSD: ieee80211.c,v 1.24 2007/07/03 20:25:32 damien Exp $	*/
 /*	$NetBSD: ieee80211.c,v 1.19 2004/06/06 05:45:29 dyoung Exp $	*/
 
 /*-
@@ -16,10 +16,6 @@
  *    documentation and/or other materials provided with the distribution.
  * 3. The name of the author may not be used to endorse or promote products
  *    derived from this software without specific prior written permission.
- *
- * Alternatively, this software may be distributed under the terms of the
- * GNU General Public License ("GPL") version 2 as published by the Free
- * Software Foundation.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -76,7 +72,8 @@ int ieee80211_cache_size = IEEE80211_CACHE_SIZE;
 struct ieee80211com_head ieee80211com_head =
     LIST_HEAD_INITIALIZER(ieee80211com_head);
 
-static void ieee80211_setbasicrates(struct ieee80211com *);
+void ieee80211_setbasicrates(struct ieee80211com *);
+int ieee80211_findrate(struct ieee80211com *, enum ieee80211_phymode, int);
 
 void
 ieee80211_ifattach(struct ifnet *ifp)
@@ -149,6 +146,7 @@ ieee80211_ifattach(struct ifnet *ifp)
 	if (ic->ic_lintval == 0)
 		ic->ic_lintval = 100;		/* default sleep */
 	ic->ic_bmisstimeout = 7*ic->ic_lintval;	/* default 7 beacons */
+	ic->ic_dtim_period = 1;	/* all TIMs are DTIMs */
 
 	LIST_INSERT_HEAD(&ieee80211com_head, ic, ic_list);
 	ieee80211_node_attach(ifp);
@@ -200,7 +198,7 @@ ieee80211_mhz2ieee(u_int freq, u_int flags)
  * Convert channel to IEEE channel number.
  */
 u_int
-ieee80211_chan2ieee(struct ieee80211com *ic, struct ieee80211_channel *c)
+ieee80211_chan2ieee(struct ieee80211com *ic, const struct ieee80211_channel *c)
 {
 	struct ifnet *ifp = &ic->ic_if;
 	if (ic->ic_channels <= c && c <= &ic->ic_channels[IEEE80211_CHAN_MAX])
@@ -258,7 +256,7 @@ ieee80211_media_init(struct ifnet *ifp,
 	struct ieee80211com *ic = (void *)ifp;
 	struct ifmediareq imr;
 	int i, j, mode, rate, maxrate, mword, mopt, r;
-	struct ieee80211_rateset *rs;
+	const struct ieee80211_rateset *rs;
 	struct ieee80211_rateset allrates;
 
 	/*
@@ -353,8 +351,9 @@ ieee80211_media_init(struct ifnet *ifp,
 #undef ADD
 }
 
-static int
-findrate(struct ieee80211com *ic, enum ieee80211_phymode mode, int rate)
+int
+ieee80211_findrate(struct ieee80211com *ic, enum ieee80211_phymode mode,
+    int rate)
 {
 #define	IEEERATE(_ic,_m,_i) \
 	((_ic)->ic_sup_rates[_m].rs_rates[_i] & IEEE80211_RATE_VAL)
@@ -438,7 +437,7 @@ ieee80211_media_change(struct ifnet *ifp)
 			     j < IEEE80211_MODE_MAX; j++) {
 				if ((ic->ic_modecaps & (1<<j)) == 0)
 					continue;
-				i = findrate(ic, j, newrate);
+				i = ieee80211_findrate(ic, j, newrate);
 				if (i != -1) {
 					/* lock mode too */
 					newphymode = j;
@@ -446,7 +445,7 @@ ieee80211_media_change(struct ifnet *ifp)
 				}
 			}
 		} else {
-			i = findrate(ic, newphymode, newrate);
+			i = ieee80211_findrate(ic, newphymode, newrate);
 		}
 		if (i == -1)			/* mode/rate mismatch */
 			return EINVAL;
@@ -535,7 +534,7 @@ void
 ieee80211_media_status(struct ifnet *ifp, struct ifmediareq *imr)
 {
 	struct ieee80211com *ic = (void *)ifp;
-	struct ieee80211_node *ni = NULL;
+	const struct ieee80211_node *ni = NULL;
 
 	imr->ifm_status = IFM_AVALID;
 	imr->ifm_active = IFM_IEEE80211;
@@ -594,13 +593,13 @@ ieee80211_watchdog(struct ifnet *ifp)
 		ifp->if_timer = 1;
 }
 
-struct ieee80211_rateset ieee80211_std_rateset_11a =
+const struct ieee80211_rateset ieee80211_std_rateset_11a =
 	{ 8, { 12, 18, 24, 36, 48, 72, 96, 108 } };
 
-struct ieee80211_rateset ieee80211_std_rateset_11b =
+const struct ieee80211_rateset ieee80211_std_rateset_11b =
 	{ 4, { 2, 4, 11, 22 } };
 
-struct ieee80211_rateset ieee80211_std_rateset_11g =
+const struct ieee80211_rateset ieee80211_std_rateset_11g =
 	{ 12, { 2, 4, 11, 22, 12, 18, 24, 36, 48, 72, 96, 108 } };
 
 /*
@@ -610,7 +609,7 @@ struct ieee80211_rateset ieee80211_std_rateset_11g =
  * 11b rates.  There's also a pseudo 11a-mode used to mark only
  * the basic OFDM rates.
  */
-static void
+void
 ieee80211_setbasicrates(struct ieee80211com *ic)
 {
 	static const struct ieee80211_rateset basic[] = {
@@ -660,7 +659,7 @@ ieee80211_setmode(struct ieee80211com *ic, enum ieee80211_phymode mode)
 		IEEE80211_CHAN_FHSS,	/* IEEE80211_MODE_FH */
 		IEEE80211_CHAN_T,	/* IEEE80211_MODE_TURBO	*/
 	};
-	struct ieee80211_channel *c;
+	const struct ieee80211_channel *c;
 	u_int modeflags;
 	int i;
 
@@ -785,7 +784,8 @@ ieee80211_next_mode(struct ifnet *ifp)
  * XXX never returns turbo modes -dcy
  */
 enum ieee80211_phymode
-ieee80211_chan2mode(struct ieee80211com *ic, struct ieee80211_channel *chan)
+ieee80211_chan2mode(struct ieee80211com *ic,
+    const struct ieee80211_channel *chan)
 {
 	/*
 	 * NB: this assumes the channel would not be supplied to us

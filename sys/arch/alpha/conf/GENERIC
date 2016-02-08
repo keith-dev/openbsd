@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.189 2007/02/28 21:54:43 grange Exp $
+#	$OpenBSD: GENERIC,v 1.194 2007/06/22 10:55:28 martin Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -18,6 +18,7 @@ option		DEC_3000_500	# Flamingo etc:	3000/[4-9]00*
 option		DEC_3000_300	# Pelican etc:	3000/300*
 option		DEC_2100_A50	# Avanti etc:	AlphaStation 400, 200, etc.
 option		DEC_KN20AA	# KN20AA:	AlphaStation 600
+option		DEC_KN300	# KN300:	AlphaServer 4100 and 1200
 option		DEC_AXPPCI_33	# NoName:	AXPpci33, etc.
 option		DEC_EB164	# EB164:	AlphaPC 164
 option		DEC_EB64PLUS	# EB64+:	AlphaPC 64, etc.
@@ -29,7 +30,6 @@ option		DEC_6600	# EV6:		XP1000, 264DP OEM Board
 option		API_UP1000	# EV6:		Alpha Processor UP1000
 
 option		COMPAT_OSF1	# OSF/1 binary compatibility
-option		COMPAT_NETBSD	# NetBSD compatibility
 
 # Misc. options
 option		EISAVERBOSE		# recognize "unknown" EISA devices
@@ -117,7 +117,6 @@ scsibus* at usscanner?
 #uyap*	at uhub?			# Y@P firmware loader
 udsbr*	at uhub?			# D-Link DSB-R100 radio
 radio*	at udsbr?			# USB radio
-#ubt*	at uhub?			# USB Bluetooth
 ugen*	at uhub?			# USB Generic driver
 uath*	at uhub?			# Atheros AR5005UG/AR5005UX
 ural*	at uhub?			# Ralink RT2500USB
@@ -125,11 +124,21 @@ rum*	at uhub?			# Ralink RT2501USB/RT2601USB
 uow*	at uhub?			# Maxim/Dallas DS2490 1-Wire adapter
 onewire* at uow?
 
+# Bluetooth controllers
+#ubt*	at uhub?			# USB Bluetooth
+
+# Bluetooth bus support
+#bthub*	at ubt?
+
 # EV6 Tsunami Core Logic
 tsc*	at	mainbus0
 
 # TURBOchannel host bus adapter support
 tcasic*	at	mainbus0
+
+# MCBUS bus support
+mcbus*	at	mainbus0
+mcmem*	at	mcbus? mid ? 
 
 # TURBOchannel bus support
 tc*	at	tcasic?
@@ -155,6 +164,7 @@ cia*	at	mainbus?
 irongate* at	mainbus?
 lca*	at	mainbus?
 tsp*	at	tsc?
+mcpcia*	at	mcbus? mid ?
 
 # PCI bus support
 pci*	at	apecs?
@@ -163,6 +173,7 @@ pci*	at	irongate?
 pci*	at	lca?
 pci*	at	ppb?
 pci*	at	tsp?
+pci*	at	mcpcia?
 
 # PCI devices
 ppb*	at pci?				# PCI-PCI bridges
@@ -184,6 +195,8 @@ twe*	at pci?				# 3ware Escalade RAID controllers
 scsibus* at twe?
 mpi*	at pci?				# LSI Logic Message Passing Interface
 scsibus* at mpi?
+sili*	at pci?				# Silicon Image 3124/3132/3531 SATA
+scsibus* at sili?
 
 #UNTESTED: the following drivers are untested.
 adw*	at pci?				# AdvanSys ULTRA WIDE SCSI
@@ -244,6 +257,7 @@ pgt*	at pci?				# Prism54 (only full-mac varients)
 ral*	at pci?				# Ralink RT2500/RT2501/RT2600
 #rtw*	at pci?				# Realtek 8180
 wi*	at pci?				# WaveLAN IEEE 802.11DS
+malo*	at pci?				# Marvell Libertas
 
 vga*	at pci?				# PCI VGA graphics
 tga*	at pci?				# DEC ZLXp-E[123] graphics

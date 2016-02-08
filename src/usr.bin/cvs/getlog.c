@@ -1,4 +1,4 @@
-/*	$OpenBSD: getlog.c,v 1.71 2007/02/22 06:42:09 otto Exp $	*/
+/*	$OpenBSD: getlog.c,v 1.76 2007/07/17 19:59:25 xsa Exp $	*/
 /*
  * Copyright (c) 2005, 2006 Xavier Santolaria <xsa@openbsd.org>
  * Copyright (c) 2006 Joris Vink <joris@openbsd.org>
@@ -18,15 +18,10 @@
 
 #include <unistd.h>
 #include <string.h>
+#include <errno.h>
 
 #include "cvs.h"
 #include "remote.h"
-
-#define LOG_REVSEP \
-"----------------------------"
-
-#define LOG_REVEND \
- "============================================================================="
 
 #define L_HEAD		0x01
 #define L_HEAD_DESCR	0x02
@@ -47,6 +42,16 @@ char	*wlist = NULL;
 struct cvs_cmd cvs_cmd_log = {
 	CVS_OP_LOG, 0, "log",
 	{ "lo" },
+	"Print out history information for files",
+	"[-bhlNRt] [-d dates] [-r revisions] [-s states] [-w logins]",
+	"bd:hlNRr:s:tw:",
+	NULL,
+	cvs_getlog
+};
+
+struct cvs_cmd cvs_cmd_rlog = {
+	CVS_OP_RLOG, 0, "rlog",
+	{ "rlo" },
 	"Print out history information for files",
 	"[-bhlNRt] [-d dates] [-r revisions] [-s states] [-w logins]",
 	"bd:hlNRr:s:tw:",
@@ -131,6 +136,10 @@ cvs_getlog(int argc, char **argv)
 		if (runflags & L_LOGINS)
 			cvs_client_send_request("Argument -w%s", wlist);
 	} else {
+		if (cvs_cmdop == CVS_OP_RLOG &&
+		    chdir(current_cvsroot->cr_dir) == -1)
+			fatal("cvs_getlog: %s", strerror(errno));
+
 		cr.fileproc = cvs_log_local;
 	}
 
@@ -144,7 +153,10 @@ cvs_getlog(int argc, char **argv)
 	if (current_cvsroot->cr_method != CVS_METHOD_LOCAL) {
 		cvs_client_send_files(argv, argc);
 		cvs_client_senddir(".");
-		cvs_client_send_request("log");
+
+		cvs_client_send_request((cvs_cmdop == CVS_OP_RLOG) ?
+		    "rlog" : "log");
+
 		cvs_client_get_responses();
 	}
 
@@ -159,7 +171,7 @@ cvs_log_local(struct cvs_file *cf)
 	struct rcs_lock *lkp;
 	struct rcs_delta *rdp;
 	struct rcs_access *acp;
-	char numb[32];
+	char numb[CVS_REV_BUFSZ];
 
 	cvs_log(LP_TRACE, "cvs_log_local(%s)", cf->file_path);
 
@@ -189,7 +201,10 @@ cvs_log_local(struct cvs_file *cf)
 	}
 
 	cvs_printf("\nRCS file: %s", cf->file_rpath);
-	cvs_printf("\nWorking file: %s", cf->file_path);
+
+	if (cvs_cmdop != CVS_OP_RLOG)
+		cvs_printf("\nWorking file: %s", cf->file_path);
+
 	cvs_printf("\nhead:");
 	if (cf->file_rcs->rf_head != NULL)
 		cvs_printf(" %s", rcsnum_tostr(cf->file_rcs->rf_head,
@@ -256,7 +271,7 @@ static void
 log_rev_print(struct rcs_delta *rdp)
 {
 	int i, found;
-	char numb[32], timeb[32];
+	char numb[CVS_REV_BUFSZ], timeb[CVS_TIME_BUFSZ];
 	struct cvs_argvector *sargv, *wargv;
 
 	i = found = 0;

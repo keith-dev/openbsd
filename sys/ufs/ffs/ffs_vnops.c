@@ -1,4 +1,4 @@
-/*	$OpenBSD: ffs_vnops.c,v 1.42 2007/02/26 11:25:23 pedro Exp $	*/
+/*	$OpenBSD: ffs_vnops.c,v 1.45 2007/06/01 23:47:57 deraadt Exp $	*/
 /*	$NetBSD: ffs_vnops.c,v 1.7 1996/05/11 18:27:24 mycroft Exp $	*/
 
 /*
@@ -161,9 +161,6 @@ struct vnodeopv_desc ffs_fifoop_opv_desc =
 int doclusterread = 1;
 int doclusterwrite = 1;
 
-#define VN_KNOTE(vp, b) \
-	KNOTE((struct klist *)&vp->v_selectinfo.vsi_selinfo.si_note, (b))
-
 /*
  * Vnode op for reading.
  */
@@ -171,12 +168,7 @@ int doclusterwrite = 1;
 int
 ffs_read(void *v)
 {
-	struct vop_read_args /* {
-		struct vnode *a_vp;
-		struct uio *a_uio;
-		int a_ioflag;
-		struct ucred *a_cred;
-	} */ *ap = v;
+	struct vop_read_args *ap = v;
 	struct vnode *vp;
 	struct inode *ip;
 	struct uio *uio;
@@ -217,7 +209,7 @@ ffs_read(void *v)
 			break;
 		lbn = lblkno(fs, uio->uio_offset);
 		nextlbn = lbn + 1;
-		size = blksize(fs, ip, lbn);
+		size = fs->fs_bsize;	/* WAS blksize(fs, ip, lbn); */
 		blkoffset = blkoff(fs, uio->uio_offset);
 		xfersize = fs->fs_bsize - blkoffset;
 		if (uio->uio_resid < xfersize)
@@ -227,13 +219,8 @@ ffs_read(void *v)
 
 		if (lblktosize(fs, nextlbn) >= DIP(ip, size))
 			error = bread(vp, lbn, size, NOCRED, &bp);
-		else if (doclusterread)
-			error = cluster_read(vp, &ip->i_ci,
-			    DIP(ip, size), lbn, size, NOCRED, &bp);
 		else if (lbn - 1 == ip->i_ci.ci_lastr) {
-			int nextsize = blksize(fs, ip, nextlbn);
-			error = breadn(vp, lbn,
-			    size, &nextlbn, &nextsize, 1, NOCRED, &bp);
+			error = bread_cluster(vp, lbn, size, &bp);
 		} else
 			error = bread(vp, lbn, size, NOCRED, &bp);
 
@@ -272,12 +259,7 @@ ffs_read(void *v)
 int
 ffs_write(void *v)
 {
-	struct vop_write_args /* {
-		struct vnode *a_vp;
-		struct uio *a_uio;
-		int a_ioflag;
-		struct ucred *a_cred;
-	} */ *ap = v;
+	struct vop_write_args *ap = v;
 	struct vnode *vp;
 	struct uio *uio;
 	struct inode *ip;
@@ -417,12 +399,7 @@ ffs_write(void *v)
 int
 ffs_fsync(void *v)
 {
-	struct vop_fsync_args /* {
-		struct vnode *a_vp;
-		struct ucred *a_cred;
-		int a_waitfor;
-		struct proc *a_p;
-	} */ *ap = v;
+	struct vop_fsync_args *ap = v;
 	struct vnode *vp = ap->a_vp;
 	struct buf *bp, *nbp;
 	int s, error, passes, skipmeta;
@@ -531,10 +508,7 @@ loop:
 int
 ffs_reclaim(void *v)
 {
-	struct vop_reclaim_args /* {
-		struct vnode *a_vp;
-		struct proc *a_p;
-	} */ *ap = v;
+	struct vop_reclaim_args *ap = v;
 	struct vnode *vp = ap->a_vp;
 	struct inode *ip = VTOI(vp);
 	int error;

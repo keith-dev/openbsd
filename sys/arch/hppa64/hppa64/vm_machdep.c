@@ -1,4 +1,4 @@
-/*	$OpenBSD: vm_machdep.c,v 1.4 2006/11/29 12:57:45 mickey Exp $	*/
+/*	$OpenBSD: vm_machdep.c,v 1.7 2007/06/20 17:29:35 miod Exp $	*/
 
 /*
  * Copyright (c) 2005 Michael Shalayeff
@@ -79,29 +79,6 @@ cpu_coredump(p, vp, cred, core)
 	core->c_nseg++;
 
 	return error;
-}
-
-/*
- * Move pages from one kernel virtual address to another.
- * Both addresses are assumed to reside in the Sysmap.
- */
-void
-pagemove(from, to, size)
-	register caddr_t from, to;
-	size_t size;
-{
-	paddr_t pa;
-
-	while (size > 0) {
-		if (pmap_extract(pmap_kernel(), (vaddr_t)from, &pa) == FALSE)
-			panic("pagemove");
-		pmap_kremove((vaddr_t)from, PAGE_SIZE);
-		pmap_kenter_pa((vaddr_t)to, pa, UVM_PROT_RW);
-		from += PAGE_SIZE;
-		to += PAGE_SIZE;
-		size -= PAGE_SIZE;
-	}
-	pmap_update(pmap_kernel());
 }
 
 void
@@ -240,7 +217,7 @@ vmapbuf(bp, len)
 	 * so that we can get all benefits of PMAP_PREFER.
 	 * - art@
 	 */
-	kva = uvm_km_valloc_prefer_wait(kernel_map, size, uva);
+	kva = uvm_km_valloc_prefer_wait(phys_map, size, uva);
 	fdcache(pm->pm_space, uva, size);
 	bp->b_data = (caddr_t)(kva + off);
 	while (size > 0) {
@@ -274,7 +251,9 @@ vunmapbuf(bp, len)
 	addr = trunc_page((vaddr_t)bp->b_data);
 	off = (vaddr_t)bp->b_data - addr;
 	len = round_page(off + len);
-	uvm_km_free_wakeup(kernel_map, addr, len);
+	pmap_kremove(addr, len);
+	pmap_update(pmap_kernel());
+	uvm_km_free_wakeup(phys_map, addr, len);
 	bp->b_data = bp->b_saveaddr;
 	bp->b_saveaddr = NULL;
 }

@@ -1,4 +1,4 @@
-#	$OpenBSD: files.i386,v 1.154 2007/02/20 21:15:01 tom Exp $
+#	$OpenBSD: files.i386,v 1.164 2007/07/04 08:16:13 mpf Exp $
 #
 # new style config file for i386 architecture
 #
@@ -21,7 +21,6 @@ file	arch/i386/i386/disksubr.c	disk
 file	arch/i386/i386/est.c		!small_kernel & i686_cpu
 file	arch/i386/i386/gdt.c
 file	arch/i386/i386/in_cksum.s	inet
-file	arch/i386/i386/ipx_cksum.c	ipx
 file	arch/i386/i386/machdep.c
 file	arch/i386/i386/via.c		i686_cpu
 file	arch/i386/i386/amd64errata.c	i686_cpu
@@ -30,7 +29,6 @@ file	arch/i386/i386/longrun.c	!small_kernel & i586_cpu
 file	arch/i386/i386/mem.c
 file	arch/i386/i386/i686_mem.c	mtrr
 file	arch/i386/i386/k6_mem.c		mtrr
-file	arch/i386/i386/microtime.s
 file	arch/i386/i386/p4tcc.c		!small_kernel & i686_cpu
 file	arch/i386/i386/pmap.c
 file	arch/i386/i386/powernow.c	!small_kernel & i586_cpu
@@ -46,7 +44,8 @@ file	arch/i386/i386/dkcsum.c		bios
 file	lib/libz/adler32.c		!ppp_deflate & !ipsec & !crypto
 file	dev/cninit.c
 file	arch/i386/i386/mptramp.s	multiprocessor
-file	arch/i386/i386/lock_machdep.c	multiprocessor
+file	arch/i386/i386/mp_setperf.c	multiprocessor
+file	arch/i386/i386/lock_machdep.c
 file	arch/i386/i386/ipifuncs.c	multiprocessor
 file	arch/i386/i386/db_mp.c		multiprocessor & ddb
 file	arch/i386/i386/wscons_machdep.c	wsdisplay
@@ -136,12 +135,17 @@ file	arch/i386/pci/gscpm.c		gscpm
 # PCI-ISA bridge chipsets
 device	pcib: isabus
 attach	pcib at pci
-file	arch/i386/pci/pcib.c		pcib | ichpcib | gscpcib
+file	arch/i386/pci/pcib.c		pcib | ichpcib | gscpcib | piixpcib
 
 # Intel ICHx/ICHx-M LPC bridges
 device	ichpcib: isabus
 attach	ichpcib at pci
 file	arch/i386/pci/ichpcib.c		ichpcib
+
+# Intel PIIX4 PCI-ISA bridge
+device	piixpcib: isabus
+attach	piixpcib at pci
+file	arch/i386/pci/piixpcib.c	piixpcib
 
 # National Semiconductor Geode SC1100 PCI-ISA bridge
 device	gscpcib: isabus, gpiobus
@@ -159,7 +163,6 @@ file	dev/pci/if_hme_pci.c		hme_pci
 
 major	{mcd = 7}
 major	{wd = 0}
-major	{wt = 3}
 
 include "../../../dev/isa/files.isa"
 file	arch/i386/isa/isa_machdep.c	isabus
@@ -411,6 +414,11 @@ include "dev/onewire/files.onewire"
 #
 include "dev/sdmmc/files.sdmmc"
 
+#
+# Machine-independent Bluetooth drivers
+#
+include "dev/bluetooth/files.bluetooth"
+
 include "../../../dev/acpi/files.acpi"
 file	arch/i386/i386/acpi_machdep.c		acpi
 
@@ -424,13 +432,9 @@ device	esm
 attach	esm at mainbus
 file	arch/i386/i386/esm.c			esm needs-flag
 
-
 #
 # VESA
 #
 include "dev/vesa/files.vesa"
 
-
 #include "dev/rasops/files.rasops"
-
-

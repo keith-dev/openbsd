@@ -1,4 +1,4 @@
-.\"	$OpenBSD: netstat.1,v 1.47 2005/09/06 23:28:23 jmc Exp $
+.\"	$OpenBSD: netstat.1,v 1.52 2007/07/25 18:49:09 claudio Exp $
 .\"	$NetBSD: netstat.1,v 1.11 1995/10/03 21:42:43 thorpej Exp $
 .\"
 .\" Copyright (c) 1983, 1990, 1992, 1993
@@ -30,7 +30,7 @@
 .\"
 .\"	from: @(#)netstat.1	8.8 (Berkeley) 4/18/94
 .\"
-.Dd April 18, 1994
+.Dd $Mdocdate: July 25 2007 $
 .Dt NETSTAT 1
 .Os
 .Sh NAME
@@ -43,10 +43,13 @@
 .Op Fl M Ar core
 .Op Fl N Ar system
 .Nm netstat
-.Op Fl bdgilmnqrstu
+.Bk -words
+.Op Fl bdFgilmnqrstu
 .Op Fl f Ar address_family
 .Op Fl M Ar core
 .Op Fl N Ar system
+.Op Fl T Ar tableid
+.Ek
 .Nm netstat
 .Op Fl bdn
 .Op Fl I Ar interface
@@ -124,6 +127,9 @@ or
 or an interval (option
 .Fl w ) ,
 show the number of dropped packets.
+.It Fl F
+When showing routes, only show routes whose gateway are in the
+same address family as the destination.
 .It Fl f Ar address_family
 Limit statistics or address control block reports to those
 of the specified
@@ -135,7 +141,6 @@ The following address families are recognized:
 .It Sy "Address Family" Ta Sy "Constant" Ta Sy "Description"
 .It "inet" Ta Dv "AF_INET" Ta "IP Version 4"
 .It "inet6" Ta Dv "AF_INET6" Ta "IP Version 6"
-.It "ipx" Ta Dv "AF_IPX" Ta "Novell IPX"
 .It "atalk" Ta Dv "AF_APPLETALK" Ta "AppleTalk"
 .It "encap" Ta Dv "PF_KEY" Ta "IPsec"
 .It "local" Ta Dv "AF_LOCAL" Ta "Local to Host (i.e., pipes)"
@@ -243,6 +248,9 @@ option is also specified, show routing statistics instead.
 .It Fl s
 Show per-protocol statistics.
 If this option is repeated, counters with a value of zero are suppressed.
+.It Fl T Ar tableid
+Select an alternate routing table to modify or query.
+Table 0 is the default table.
 .It Fl t
 With the
 .Fl i

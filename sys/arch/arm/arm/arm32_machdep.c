@@ -1,4 +1,4 @@
-/*	$OpenBSD: arm32_machdep.c,v 1.22 2006/07/12 17:29:53 miod Exp $	*/
+/*	$OpenBSD: arm32_machdep.c,v 1.27 2007/05/30 17:13:29 miod Exp $	*/
 /*	$NetBSD: arm32_machdep.c,v 1.42 2003/12/30 12:33:15 pk Exp $	*/
 
 /*
@@ -76,12 +76,6 @@ struct vm_map *phys_map = NULL;
 extern int physmem;
 caddr_t allocsys(caddr_t);
 
-#ifdef  NBUF
-int     nbuf = NBUF;
-#else
-int     nbuf = 0;
-#endif
-
 #ifndef BUFCACHEPERCENT
 #define BUFCACHEPERCENT 5
 #endif
@@ -125,16 +119,6 @@ int allowaperture = 0;
 /* Permit console keyboard to do a nice halt. */
 int kbd_reset;
 int lid_suspend;
-
-/* Touch pad scaling disable flag and scaling parameters. */
-extern int zts_rawmode;
-struct ztsscale {
-	int ts_minx;
-	int ts_maxx;
-	int ts_miny;
-	int ts_maxy;
-};
-extern struct ztsscale zts_scale;
 extern int xscale_maxspeed;
 #endif
 
@@ -263,8 +247,6 @@ cpu_startup()
 	paddr_t maxaddr;
 	caddr_t sysbase;
 	caddr_t size;
-	vsize_t bufsize;
-	int base, residual;
 
 	proc0paddr = (struct user *)kernelstack.pv_va;
 	proc0.p_addr = proc0paddr;
@@ -312,8 +294,8 @@ cpu_startup()
 	 */
 	printf(version);
 
-	printf("real mem  = %u (%uK) %uMB\n", ctob(physmem),
-	    ctob(physmem)/1024, ctob(physmem)/1024/1024);
+	printf("real mem  = %u (%uMB)\n", ctob(physmem),
+	    ctob(physmem)/1024/1024);
 
 	/*
 	 * Find out how much space we need, allocate it,
@@ -328,54 +310,24 @@ cpu_startup()
 	if ((caddr_t)((allocsys(sysbase) - sysbase)) != size)
 		panic("cpu_startup: system table size inconsistency");
 
-   	/*
-	 * Now allocate buffers proper.  They are different than the above
-	 * in that they usually occupy more virtual memory than physical.
+	/*
+	 * Determine how many buffers to allocate.
+	 * We allocate bufcachepercent% of memory for buffer space.
 	 */
-	bufsize = MAXBSIZE * nbuf;
-	if (uvm_map(kernel_map, (vaddr_t *)&buffers, round_page(bufsize),
-	    NULL, UVM_UNKNOWN_OFFSET, 0,
-	    UVM_MAPFLAG(UVM_PROT_NONE, UVM_PROT_NONE, UVM_INH_NONE,
-	    UVM_ADV_NORMAL, 0)) != 0)
-		panic("cpu_startup: cannot allocate UVM space for buffers");
-	minaddr = (vaddr_t)buffers;
-	if ((bufpages / nbuf) >= btoc(MAXBSIZE)) {
-		/* don't want to alloc more physical mem than needed */
-		bufpages = btoc(MAXBSIZE) * nbuf;
-	}
+	if (bufpages == 0)
+		bufpages = physmem * bufcachepercent / 100;
 
-	base = bufpages / nbuf;
-	residual = bufpages % nbuf;
-	for (loop = 0; loop < nbuf; ++loop) {
-		vsize_t curbufsize;
-		vaddr_t curbuf;
-		struct vm_page *pg;
-
-		/*
-		 * Each buffer has MAXBSIZE bytes of VM space allocated.  Of
-		 * that MAXBSIZE space, we allocate and map (base+1) pages
-		 * for the first "residual" buffers, and then we allocate
-		 * "base" pages for the rest.
-		 */
-		curbuf = (vaddr_t) buffers + (loop * MAXBSIZE);
-		curbufsize = NBPG * ((loop < residual) ? (base+1) : base);
-
-		while (curbufsize) {
-			pg = uvm_pagealloc(NULL, 0, NULL, 0);
-			if (pg == NULL)
-				panic("cpu_startup: not enough memory for buffer cache");
-			pmap_kenter_pa(curbuf, VM_PAGE_TO_PHYS(pg),
-				VM_PROT_READ|VM_PROT_WRITE);
-			curbuf += PAGE_SIZE;
-			curbufsize -= PAGE_SIZE;
-		}
-	}
-	pmap_update(pmap_kernel());
+	/* Restrict to at most 25% filled kvm */
+	if (bufpages >
+	    (VM_MAX_KERNEL_ADDRESS-VM_MIN_KERNEL_ADDRESS) / PAGE_SIZE / 4) 
+		bufpages = (VM_MAX_KERNEL_ADDRESS-VM_MIN_KERNEL_ADDRESS) /
+		    PAGE_SIZE / 4;
 
 	/*
 	 * Allocate a submap for exec arguments.  This map effectively
 	 * limits the number of processes exec'ing at any time.
 	 */
+	minaddr = vm_map_min(kernel_map);
 	exec_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr,
 				   16*NCARGS, VM_MAP_PAGEABLE, FALSE, NULL);
 
@@ -390,10 +342,8 @@ cpu_startup()
 	 */
 	bufinit(); 
 
-	printf("avail mem = %lu (%uK)\n", ptoa(uvmexp.free),
-	    ptoa(uvmexp.free)/1024);
-	printf("using %d buffers containing %u bytes (%uK) of memory\n",
-	    nbuf, bufpages * PAGE_SIZE, bufpages * PAGE_SIZE / 1024);
+	printf("avail mem = %lu (%uMB)\n", ptoa(uvmexp.free),
+	    ptoa(uvmexp.free)/1024/1024);
 
 	curpcb = &proc0.p_addr->u_pcb;
 	curpcb->pcb_flags = 0;
@@ -465,7 +415,6 @@ cpu_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
 		return (sysctl_int(oldp, oldlenp, newp, newlen, &cpu_apmwarn));
 #endif
 #if defined(__zaurus__)
-#include "zts.h"
 	case CPU_KBDRESET:
 		if (securelevel > 0)
 			return (sysctl_rdint(oldp, oldlenp, newp,
@@ -487,45 +436,6 @@ cpu_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
 		    &xscale_maxspeed));
 		pxa2x0_maxspeed(&xscale_maxspeed);
 		return err;
-	}
-		
-	case CPU_ZTSRAWMODE:
-#if NZTS > 0
-		return (sysctl_int(oldp, oldlenp, newp, newlen,
-		    &zts_rawmode));
-#else
-		return (EINVAL);
-#endif /* NZTS > 0 */
-	case CPU_ZTSSCALE:
-	{
-		int err = EINVAL;
-#if NZTS > 0
-		struct ztsscale *p = newp;
-		struct ztsscale ts;
-		int s;
-
-		if (!newp && newlen == 0)
-			return (sysctl_struct(oldp, oldlenp, 0, 0,
-			    &zts_scale, sizeof zts_scale));
-
-		if (!(newlen == sizeof zts_scale &&
-		    p->ts_minx < p->ts_maxx && p->ts_miny < p->ts_maxy &&
-		    p->ts_minx >= 0 && p->ts_maxx >= 0 &&
-		    p->ts_miny >= 0 && p->ts_maxy >= 0 &&
-		    p->ts_minx < 32768 && p->ts_maxx < 32768 &&
-		    p->ts_miny < 32768 && p->ts_maxy < 32768))
-			return (EINVAL);
-
-		ts = zts_scale;
-		err = sysctl_struct(oldp, oldlenp, newp, newlen,
-		    &ts, sizeof ts);
-		if (err == 0) {
-			s = splhigh();
-			zts_scale = ts;
-			splx(s);
-		}
-#endif /* NZTS > 0 */
-		return (err);
 	}
 #endif
 
@@ -557,33 +467,6 @@ allocsys(caddr_t v)
 	valloc(msghdrs, struct msg, msginfo.msgtql);
 	valloc(msqids, struct msqid_ds, msginfo.msgmni);
 #endif
-	/*
-	 * Determine how many buffers to allocate.  We use 10% of the
-	 * first 2MB of memory, and 5% of the rest, with a minimum of 16
-	 * buffers.  We allocate 1/2 as many swap buffer headers as file
-	 * i/o buffers.
-	 */
-	if (bufpages == 0) {
-		bufpages = (btoc(2 * 1024 * 1024) + physmem) *
-		    bufcachepercent / 100;
-	}
-	if (nbuf == 0) {
-		nbuf = bufpages;
-		if (nbuf < 16)
-			nbuf = 16;
-	}
 
-	/* Restrict to at most 35% filled kvm */
-	/* XXX - This needs UBC... */
-	if (nbuf >
-	    (VM_MAX_KERNEL_ADDRESS-VM_MIN_KERNEL_ADDRESS) / MAXBSIZE * 35 / 100) 
-		nbuf = (VM_MAX_KERNEL_ADDRESS-VM_MIN_KERNEL_ADDRESS) /
-		    MAXBSIZE * 35 / 100;
-
-	/* More buffer pages than fits into the buffers is senseless.  */
-	if (bufpages > nbuf * MAXBSIZE / PAGE_SIZE)
-		bufpages = nbuf * MAXBSIZE / PAGE_SIZE;
-
-	valloc(buf, struct buf, nbuf);
 	return v;
 }

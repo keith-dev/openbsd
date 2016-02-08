@@ -1,4 +1,4 @@
-/*	$OpenBSD: dma.c,v 1.22 2006/06/02 20:00:54 miod Exp $	*/
+/*	$OpenBSD: dma.c,v 1.24 2007/05/29 09:54:07 sobrado Exp $	*/
 /*	$NetBSD: dma.c,v 1.46 1997/08/27 11:24:16 bouyer Exp $ */
 
 /*
@@ -247,7 +247,7 @@ espsearch:
 		 * What happens here is that if the esp driver has not been
 		 * configured, then this returns a NULL pointer. Then when the
 		 * esp actually gets configured, it does the opposing test, and
-		 * if the sc->sc_dma field in it's softc is NULL, then tries to
+		 * if the sc->sc_dma field in its softc is NULL, then tries to
 		 * find the matching dma driver.
 		 *
 		 */
@@ -347,7 +347,7 @@ dma_reset(sc, isledma)
 
 	csr |= D_RESET;				/* reset DMA */
 	DMACSR(sc) = csr;
-	DELAY(200);				/* > 10 Sbus clocks(?) */
+	DELAY(200);				/* > 10 SBus clocks(?) */
 
 	/*DMAWAIT1(sc); why was this here? */
 	DMACSR(sc) &= ~D_RESET;			/* de-assert reset line */

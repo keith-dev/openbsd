@@ -1,7 +1,7 @@
-#	$OpenBSD: install.sub,v 1.411 2007/03/04 14:37:37 krw Exp $
+#	$OpenBSD: install.sub,v 1.421 2007/08/02 03:23:37 david Exp $
 #	$NetBSD: install.sub,v 1.5.2.8 1996/09/02 23:25:02 pk Exp $
 #
-# Copyright (c) 1997-2006 Todd Miller, Theo de Raadt, Ken Westerback
+# Copyright (c) 1997-2007 Todd Miller, Theo de Raadt, Ken Westerback
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -73,7 +73,7 @@
 #	MDTERM      - 'vt220' assumed if not provided
 #	MDDKDEVS    - '/^[sw]d[0-9][0-9]* /s/ .*//p' assumed if not provided
 #	MDCDDEVS    - '/^cd[0-9][0-9]* /s/ .*//p'    assumed if not provided
-#	MDMTDEVS    - '/^[cmsw]t[0-9][0-9]* /s/ .*//p'
+#	MDMTDEVS    - '/^[cms]t[0-9][0-9]* /s/ .*//p'
 #	MDSERIAL    - offer to configure a serial console
 #	MDXAPERTURE - set machdep.allowaperture=value in sysctl.conf
 . install.md
@@ -189,7 +189,7 @@ scan_disknames() {
 }
 
 get_ifdevs() {
-	ifconfig -a \
+	ifconfig \
 	    | egrep -v '^[[:space:]]|(bridge|enc|gif|gre|lo|pflog|pfsync|ppp|sl|tun|vlan)[[:digit:]]+:' \
 	    | sed -ne 's/^\(.*\):.*/\1/p'
 }
@@ -988,7 +988,7 @@ __EOT
 #
 # *NOTE*
 #	1) quotes around $1 are required to preserve trailing or
-#	   embeddded blanks in usercodes and passwords.
+#	   embedded blanks in usercodes and passwords.
 #	2) substitute '%' FIRST so it doesn't eliminate '%' chars we insert.
 encode_for_url() {
 	echo "$1" | sed -e "
@@ -1058,7 +1058,7 @@ install_url() {
 	ask_yn "Display the list of known $_url_type servers?"
 	if [[ $resp == y ]]; then
 		# ftp.openbsd.org == 129.128.5.191 and will remain at
-		# that address for the forseeable future.
+		# that address for the foreseeable future.
 		echo -n "Getting the list from 129.128.5.191 (ftp.openbsd.org)..."
 		ftp $_ftp_active -V -a -o - \
 			ftp://129.128.5.191/$FTPDIR/ftplist 2>/tmp/ftplisterr \
@@ -1437,9 +1437,10 @@ __EOT
 #
 # Exit if any fsck's fail (but do them all before exiting!).
 check_fs() {
-	local _dev _mp _fstype _rest _fail
+	local _dev _mp _fstype _rest _fail _f
 
-	echo "Checking non-root filesystems..."
+	ask_yn "Force checking of non-root filesystems?" yes
+	[[ $resp == y ]] && _f=f
 
 	while read _dev _mp _fstype _rest; do
 		[ "$_dev" != /dev/"$ROOTDEV" ] || continue
@@ -1447,16 +1448,14 @@ check_fs() {
 		# Make sure device exists before fsck'ing it.
 		_rest=${_dev#/dev/}
 		makedev ${_rest%[a-p]} || continue
-		echo -n "fsck -p ${_dev}..."
-		if ! fsck -fp ${_dev} >/dev/null 2>&1; then
+		echo -n "fsck -${_f}p $_dev..."
+		if ! fsck -${_f}p $_dev >/dev/null 2>&1; then
 			echo "FAILED. You must fsck $_dev manually."
 			_fail=y
 		else
 			echo "OK."
 		fi
 	done </etc/fstab
-
-	echo "...done."
 
 	[ "$_fail" ] && exit
 }
@@ -1537,10 +1536,19 @@ questions() {
 		    >>/mnt/etc/rc.conf.local
 	fi
 
-	ask_yn "Start ntpd(8) by default?"
-	if [[ $resp == y ]]; then
+	ask "NTP server? (or 'none' or 'default')" none
+	if [[ $resp != none ]]; then
 		echo "ntpd_flags=		# enabled during install" \
-		    >>/mnt/etc/rc.conf.local
+			>>/mnt/etc/rc.conf.local
+		if [[ $resp != default ]]; then
+			# Comment out the default 'servers' line, and add a
+			# 'server' line with the first token in $resp as the
+			# server.
+			set -- $resp
+			sed -e "s/^servers /#&/;/#server /a\\
+server $1
+" /mnt/etc/ntpd.conf >/tmp/ntpd.conf
+		fi
 	fi
 
 	if [[ -n $MDXAPERTURE ]]; then
@@ -1630,7 +1638,7 @@ __EOT
 ROOTDISK=
 ROOTDEV=
 
-VERSION=41
+VERSION=42
 
 VNAME="$(( $VERSION / 10 )).$(( $VERSION % 10 ))"
 SETDIR="$VNAME/$ARCH"
@@ -1649,7 +1657,7 @@ dmesg | sed -ne '/^OpenBSD /h;/^OpenBSD /!H;${g;p;}' >/var/run/dmesg.boot
 # Scan /var/run/dmesg.boot for interesting devices.
 DKDEVS=$(scan_disknames "${MDDKDEVS:-/^[sw]d[0-9][0-9]* /s/ .*//p}")
 CDDEVS=$(scan_disknames "${MDCDDEVS:-/^cd[0-9][0-9]* /s/ .*//p}")
-MTDEVS=$(scan_dmesg "${MDMTDEVS:-/^[cmsw]t[0-9][0-9]* /s/ .*//p}")
+MTDEVS=$(scan_dmesg "${MDMTDEVS:-/^[cms]t[0-9][0-9]* /s/ .*//p}")
 IFDEVS=$(get_ifdevs)
 SERIALDEV=$(get_serialdev)
 

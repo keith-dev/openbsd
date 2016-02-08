@@ -1,4 +1,4 @@
-/*	$OpenBSD: printconf.c,v 1.60 2007/03/06 16:52:48 henning Exp $	*/
+/*	$OpenBSD: printconf.c,v 1.64 2007/05/28 17:26:33 henning Exp $	*/
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -176,9 +176,11 @@ print_mainconf(struct bgpd_config *conf)
 	struct in_addr		 ina;
 	struct listen_addr	*la;
 
-	printf("AS %u\n", conf->as);
+	printf("AS %s", log_as(conf->as));
+	if (conf->as > USHRT_MAX && conf->short_as != AS_TRANS)
+		printf(" %u", conf->short_as);
 	ina.s_addr = conf->bgpid;
-	printf("router-id %s\n", inet_ntoa(ina));
+	printf("\nrouter-id %s\n", inet_ntoa(ina));
 	if (conf->holdtime)
 		printf("holdtime %u\n", conf->holdtime);
 	if (conf->min_holdtime)
@@ -270,7 +272,9 @@ print_peer(struct peer_config *p, struct bgpd_config *conf, const char *c)
 	if (p->descr[0])
 		printf("%s\tdescr \"%s\"\n", c, p->descr);
 	if (p->remote_as)
-		printf("%s\tremote-as %u\n", c, p->remote_as);
+		printf("%s\tremote-as %s\n", c, log_as(p->remote_as));
+	if (p->down)
+		printf("%s\tdown\n", c);
 	if (p->distance > 1)
 		printf("%s\tmultihop %u\n", c, p->distance);
 	if (p->passive)
@@ -447,6 +451,13 @@ print_rule(struct peer *peer_l, struct filter_rule *r)
 		printf("prefix %s/%u ", log_addr(&r->match.prefix.addr),
 		    r->match.prefix.len);
 
+	if (r->match.prefix.addr.af == 0 && r->match.prefixlen.af) {
+		if (r->match.prefixlen.af == AF_INET)
+			printf("inet ");
+		if (r->match.prefixlen.af == AF_INET6)
+			printf("inet6 ");
+	}
+
 	if (r->match.prefixlen.op) {
 		if (r->match.prefixlen.op == OP_RANGE ||
 		    r->match.prefixlen.op == OP_XRANGE) {
@@ -462,18 +473,18 @@ print_rule(struct peer *peer_l, struct filter_rule *r)
 
 	if (r->match.as.type) {
 		if (r->match.as.type == AS_ALL)
-			printf("AS %u ", r->match.as.as);
+			printf("AS %s ", log_as(r->match.as.as));
 		else if (r->match.as.type == AS_SOURCE)
-			printf("source-as %u ", r->match.as.as);
+			printf("source-as %s ", log_as(r->match.as.as));
 		else if (r->match.as.type == AS_TRANSIT)
-			printf("transit-as %u ", r->match.as.as);
+			printf("transit-as %s ", log_as(r->match.as.as));
 		else if (r->match.as.type == AS_PEER)
-			printf("peer-as %u ", r->match.as.as);
+			printf("peer-as %s ", log_as(r->match.as.as));
 		else
-			printf("unfluffy-as %u ", r->match.as.as);
+			printf("unfluffy-as %s ", log_as(r->match.as.as));
 	}
 
-	if (r->match.community.as != 0) {
+	if (r->match.community.as != COMMUNITY_UNSET) {
 		printf("community ");
 		print_community(r->match.community.as,
 		    r->match.community.type);

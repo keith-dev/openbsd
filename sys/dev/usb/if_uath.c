@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_uath.c,v 1.17 2007/02/19 17:22:02 deraadt Exp $	*/
+/*	$OpenBSD: if_uath.c,v 1.27 2007/07/18 18:10:31 damien Exp $	*/
 
 /*-
  * Copyright (c) 2006
@@ -81,8 +81,8 @@
 #endif
 
 #ifdef UATH_DEBUG
-#define DPRINTF(x)	do { if (uath_debug) logprintf x; } while (0)
-#define DPRINTFN(n, x)	do { if (uath_debug >= (n)) logprintf x; } while (0)
+#define DPRINTF(x)	do { if (uath_debug) printf x; } while (0)
+#define DPRINTFN(n, x)	do { if (uath_debug >= (n)) printf x; } while (0)
 int uath_debug = 1;
 #else
 #define DPRINTF(x)
@@ -131,74 +131,81 @@ static const struct uath_type {
 #define uath_lookup(v, p)	\
 	((const struct uath_type *)usb_lookup(uath_devs, v, p))
 
-Static void	uath_attachhook(void *);
-Static int	uath_open_pipes(struct uath_softc *);
-Static void	uath_close_pipes(struct uath_softc *);
-Static int	uath_alloc_tx_data_list(struct uath_softc *);
-Static void	uath_free_tx_data_list(struct uath_softc *);
-Static int	uath_alloc_rx_data_list(struct uath_softc *);
-Static void	uath_free_rx_data_list(struct uath_softc *);
-Static void	uath_free_rx_data(caddr_t, u_int, void *);
-Static int	uath_alloc_tx_cmd_list(struct uath_softc *);
-Static void	uath_free_tx_cmd_list(struct uath_softc *);
-Static int	uath_alloc_rx_cmd_list(struct uath_softc *);
-Static void	uath_free_rx_cmd_list(struct uath_softc *);
-Static int	uath_media_change(struct ifnet *);
-Static void	uath_stat(void *);
-Static void	uath_next_scan(void *);
-Static void	uath_task(void *);
-Static int	uath_newstate(struct ieee80211com *, enum ieee80211_state,
-		    int);
+void	uath_attachhook(void *);
+int	uath_open_pipes(struct uath_softc *);
+void	uath_close_pipes(struct uath_softc *);
+int	uath_alloc_tx_data_list(struct uath_softc *);
+void	uath_free_tx_data_list(struct uath_softc *);
+int	uath_alloc_rx_data_list(struct uath_softc *);
+void	uath_free_rx_data_list(struct uath_softc *);
+void	uath_free_rx_data(caddr_t, u_int, void *);
+int	uath_alloc_tx_cmd_list(struct uath_softc *);
+void	uath_free_tx_cmd_list(struct uath_softc *);
+int	uath_alloc_rx_cmd_list(struct uath_softc *);
+void	uath_free_rx_cmd_list(struct uath_softc *);
+int	uath_media_change(struct ifnet *);
+void	uath_stat(void *);
+void	uath_next_scan(void *);
+void	uath_task(void *);
+int	uath_newstate(struct ieee80211com *, enum ieee80211_state, int);
 #ifdef UATH_DEBUG
-Static void	uath_dump_cmd(const uint8_t *, int, char);
+void	uath_dump_cmd(const uint8_t *, int, char);
 #endif
-Static int	uath_cmd(struct uath_softc *, uint32_t, const void *, int,
-		    void *, int);
-Static int	uath_cmd_write(struct uath_softc *, uint32_t, const void *,
-		    int, int);
-Static int	uath_cmd_read(struct uath_softc *, uint32_t, const void *,
-		    int, void *, int);
-Static int	uath_write_reg(struct uath_softc *, uint32_t, uint32_t);
-Static int	uath_write_multi(struct uath_softc *, uint32_t, const void *,
-		    int);
-Static int	uath_read_reg(struct uath_softc *, uint32_t, uint32_t *);
-Static int	uath_read_eeprom(struct uath_softc *, uint32_t, void *);
-Static void	uath_cmd_rxeof(usbd_xfer_handle, usbd_private_handle,
-		    usbd_status);
-Static void	uath_data_rxeof(usbd_xfer_handle, usbd_private_handle,
-		    usbd_status);
-Static void	uath_data_txeof(usbd_xfer_handle, usbd_private_handle,
-		    usbd_status);
-Static int	uath_tx_null(struct uath_softc *);
-Static int	uath_tx_data(struct uath_softc *, struct mbuf *,
-		    struct ieee80211_node *);
-Static void	uath_start(struct ifnet *);
-Static void	uath_watchdog(struct ifnet *);
-Static int	uath_ioctl(struct ifnet *, u_long, caddr_t);
-Static int	uath_query_eeprom(struct uath_softc *);
-Static int	uath_reset(struct uath_softc *);
-Static int	uath_reset_tx_queues(struct uath_softc *);
-Static int	uath_wme_init(struct uath_softc *);
-Static int	uath_set_chan(struct uath_softc *, struct ieee80211_channel *);
-Static int	uath_set_key(struct uath_softc *,
-		    const struct ieee80211_wepkey *, int);
-Static int	uath_set_keys(struct uath_softc *);
-Static int	uath_set_rates(struct uath_softc *,
-		    const struct ieee80211_rateset *);
-Static int	uath_set_rxfilter(struct uath_softc *, uint32_t, uint32_t);
-Static int	uath_set_led(struct uath_softc *, int, int);
-Static int	uath_switch_channel(struct uath_softc *,
-		    struct ieee80211_channel *);
-Static int	uath_init(struct ifnet *);
-Static void	uath_stop(struct ifnet *, int);
-Static int	uath_loadfirmware(struct uath_softc *, const u_char *, int);
-Static int	uath_activate(device_ptr_t, enum devact);
+int	uath_cmd(struct uath_softc *, uint32_t, const void *, int, void *,
+	    int);
+int	uath_cmd_write(struct uath_softc *, uint32_t, const void *, int, int);
+int	uath_cmd_read(struct uath_softc *, uint32_t, const void *, int, void *,
+	    int);
+int	uath_write_reg(struct uath_softc *, uint32_t, uint32_t);
+int	uath_write_multi(struct uath_softc *, uint32_t, const void *, int);
+int	uath_read_reg(struct uath_softc *, uint32_t, uint32_t *);
+int	uath_read_eeprom(struct uath_softc *, uint32_t, void *);
+void	uath_cmd_rxeof(usbd_xfer_handle, usbd_private_handle, usbd_status);
+void	uath_data_rxeof(usbd_xfer_handle, usbd_private_handle, usbd_status);
+void	uath_data_txeof(usbd_xfer_handle, usbd_private_handle, usbd_status);
+int	uath_tx_null(struct uath_softc *);
+int	uath_tx_data(struct uath_softc *, struct mbuf *,
+	    struct ieee80211_node *);
+void	uath_start(struct ifnet *);
+void	uath_watchdog(struct ifnet *);
+int	uath_ioctl(struct ifnet *, u_long, caddr_t);
+int	uath_query_eeprom(struct uath_softc *);
+int	uath_reset(struct uath_softc *);
+int	uath_reset_tx_queues(struct uath_softc *);
+int	uath_wme_init(struct uath_softc *);
+int	uath_set_chan(struct uath_softc *, struct ieee80211_channel *);
+int	uath_set_key(struct uath_softc *, const struct ieee80211_key *, int);
+int	uath_set_keys(struct uath_softc *);
+int	uath_set_rates(struct uath_softc *, const struct ieee80211_rateset *);
+int	uath_set_rxfilter(struct uath_softc *, uint32_t, uint32_t);
+int	uath_set_led(struct uath_softc *, int, int);
+int	uath_switch_channel(struct uath_softc *, struct ieee80211_channel *);
+int	uath_init(struct ifnet *);
+void	uath_stop(struct ifnet *, int);
+int	uath_loadfirmware(struct uath_softc *, const u_char *, int);
+int	uath_activate(struct device *, enum devact);
 
-USB_DECLARE_DRIVER(uath);
+int uath_match(struct device *, void *, void *); 
+void uath_attach(struct device *, struct device *, void *); 
+int uath_detach(struct device *, int); 
+int uath_activate(struct device *, enum devact); 
 
-USB_MATCH(uath)
+struct cfdriver uath_cd = { 
+	NULL, "uath", DV_DULL 
+}; 
+
+const struct cfattach uath_ca = { 
+	sizeof(struct uath_softc), 
+	uath_match, 
+	uath_attach, 
+	uath_detach, 
+	uath_activate, 
+};
+
+int
+uath_match(struct device *parent, void *match, void *aux)
 {
-	USB_MATCH_START(uath, uaa);
+	struct usb_attach_arg *uaa = aux;
 
 	if (uaa->iface != NULL)
 		return UMATCH_NONE;
@@ -207,7 +214,7 @@ USB_MATCH(uath)
 	    UMATCH_VENDOR_PRODUCT : UMATCH_NONE;
 }
 
-Static void
+void
 uath_attachhook(void *xsc)
 {
 	struct uath_softc *sc = xsc;
@@ -217,7 +224,7 @@ uath_attachhook(void *xsc)
 
 	if ((error = loadfirmware("uath-ar5523", &fw, &size)) != 0) {
 		printf("%s: could not read firmware (error=%d)\n",
-		    USBDEVNAME(sc->sc_dev), error);
+		    sc->sc_dev.dv_xname, error);
 		return;
 	}
 
@@ -236,13 +243,15 @@ uath_attachhook(void *xsc)
 		usb_needs_reattach(sc->sc_udev);
 	} else {
 		printf("%s: could not load firmware (error=%s)\n",
-		    USBDEVNAME(sc->sc_dev), usbd_errstr(error));
+		    sc->sc_dev.dv_xname, usbd_errstr(error));
 	}
 }
 
-USB_ATTACH(uath)
+void
+uath_attach(struct device *parent, struct device *self, void *aux)
 {
-	USB_ATTACH_START(uath, sc, uaa);
+	struct uath_softc *sc = (struct uath_softc *)self;
+	struct usb_attach_arg *uaa = aux;
 	struct ieee80211com *ic = &sc->sc_ic;
 	struct ifnet *ifp = &ic->ic_if;
 	usbd_status error;
@@ -254,16 +263,15 @@ USB_ATTACH(uath)
 	sc->sc_port = uaa->port;
 
 	devinfop = usbd_devinfo_alloc(uaa->device, 0);
-	USB_ATTACH_SETUP;
-	printf("%s: %s\n", USBDEVNAME(sc->sc_dev), devinfop);
+	printf("\n%s: %s\n", sc->sc_dev.dv_xname, devinfop);
 	usbd_devinfo_free(devinfop);
 
 	sc->sc_flags = uath_lookup(uaa->vendor, uaa->product)->flags;
 
 	if (usbd_set_config_no(sc->sc_udev, UATH_CONFIG_NO, 0) != 0) {
 		printf("%s: could not set configuration no\n",
-		    USBDEVNAME(sc->sc_dev));
-		USB_ATTACH_ERROR_RETURN;
+		    sc->sc_dev.dv_xname);
+		return;
 	}
 
 	/* get the first interface handle */
@@ -271,8 +279,8 @@ USB_ATTACH(uath)
 	    &sc->sc_iface);
 	if (error != 0) {
 		printf("%s: could not get interface handle\n",
-		    USBDEVNAME(sc->sc_dev));
-		USB_ATTACH_ERROR_RETURN;
+		    sc->sc_dev.dv_xname);
+		return;
 	}
 
 	/*
@@ -280,8 +288,8 @@ USB_ATTACH(uath)
 	 * firmware (pre-firmware devices) or to send firmware commands.
 	 */
 	if (uath_open_pipes(sc) != 0) {
-		printf("%s: could not open pipes\n", USBDEVNAME(sc->sc_dev));
-		USB_ATTACH_ERROR_RETURN;
+		printf("%s: could not open pipes\n", sc->sc_dev.dv_xname);
+		return;
 	}
 
 	if (sc->sc_flags & UATH_FLAG_PRE_FIRMWARE) {
@@ -289,7 +297,7 @@ USB_ATTACH(uath)
 			mountroothook_establish(uath_attachhook, sc);
 		else
 			uath_attachhook(sc);
-		USB_ATTACH_SUCCESS_RETURN;
+		return;
 	}
 
 	/*
@@ -304,12 +312,12 @@ USB_ATTACH(uath)
 	 */
 	if (uath_alloc_tx_cmd_list(sc) != 0) {
 		printf("%s: could not allocate Tx command list\n",
-		    USBDEVNAME(sc->sc_dev));
+		    sc->sc_dev.dv_xname);
 		goto fail1;
 	}
 	if (uath_alloc_rx_cmd_list(sc) != 0) {
 		printf("%s: could not allocate Rx command list\n",
-		    USBDEVNAME(sc->sc_dev));
+		    sc->sc_dev.dv_xname);
 		goto fail2;
 	}
 
@@ -325,7 +333,7 @@ USB_ATTACH(uath)
 		error = usbd_transfer(cmd->xfer);
 		if (error != USBD_IN_PROGRESS && error != 0) {
 			printf("%s: could not queue Rx command xfer\n",
-			    USBDEVNAME(sc->sc_dev));
+			    sc->sc_dev.dv_xname);
 			goto fail3;
 		}
 	}
@@ -335,16 +343,16 @@ USB_ATTACH(uath)
 	 */
 	if (uath_reset(sc) != 0) {
 		printf("%s: could not initialize adapter\n",
-		    USBDEVNAME(sc->sc_dev));
+		    sc->sc_dev.dv_xname);
 		goto fail3;
 	}
 	if (uath_query_eeprom(sc) != 0) {
-		printf("%s: could not read EEPROM\n", USBDEVNAME(sc->sc_dev));
+		printf("%s: could not read EEPROM\n", sc->sc_dev.dv_xname);
 		goto fail3;
 	}
 
 	printf("%s: MAC/BBP AR5523, RF AR%c112, address %s\n",
-	    USBDEVNAME(sc->sc_dev), (sc->sc_flags & UATH_FLAG_ABG) ? '5': '2',
+	    sc->sc_dev.dv_xname, (sc->sc_flags & UATH_FLAG_ABG) ? '5': '2',
 	    ether_sprintf(ic->ic_myaddr));
 
 	/*
@@ -352,12 +360,12 @@ USB_ATTACH(uath)
 	 */
 	if (uath_alloc_tx_data_list(sc) != 0) {
 		printf("%s: could not allocate Tx data list\n",
-		    USBDEVNAME(sc->sc_dev));
+		    sc->sc_dev.dv_xname);
 		goto fail3;
 	}
 	if (uath_alloc_rx_data_list(sc) != 0) {
 		printf("%s: could not allocate Rx data list\n",
-		    USBDEVNAME(sc->sc_dev));
+		    sc->sc_dev.dv_xname);
 		goto fail4;
 	}
 
@@ -392,7 +400,7 @@ USB_ATTACH(uath)
 	ifp->if_start = uath_start;
 	ifp->if_watchdog = uath_watchdog;
 	IFQ_SET_READY(&ifp->if_snd);
-	memcpy(ifp->if_xname, USBDEVNAME(sc->sc_dev), IFNAMSIZ);
+	memcpy(ifp->if_xname, sc->sc_dev.dv_xname, IFNAMSIZ);
 
 	if_attach(ifp);
 	ieee80211_ifattach(ifp);
@@ -416,21 +424,20 @@ USB_ATTACH(uath)
 #endif
 
 	usbd_add_drv_event(USB_EVENT_DRIVER_ATTACH, sc->sc_udev,
-	    USBDEV(sc->sc_dev));
+	    &sc->sc_dev);
 
-	USB_ATTACH_SUCCESS_RETURN;
+	return;
 
 fail4:	uath_free_tx_data_list(sc);
 fail3:	uath_free_rx_cmd_list(sc);
 fail2:	uath_free_tx_cmd_list(sc);
 fail1:	uath_close_pipes(sc);
-
-	USB_ATTACH_ERROR_RETURN;
 }
 
-USB_DETACH(uath)
+int
+uath_detach(struct device *self, int flags)
 {
-	USB_DETACH_START(uath, sc);
+	struct uath_softc *sc = (struct uath_softc *)self;
 	struct ifnet *ifp = &sc->sc_ic.ic_if;
 	int s;
 
@@ -469,12 +476,12 @@ USB_DETACH(uath)
 	splx(s);
 
 	usbd_add_drv_event(USB_EVENT_DRIVER_DETACH, sc->sc_udev,
-	    USBDEV(sc->sc_dev));
+	    &sc->sc_dev);
 
 	return 0;
 }
 
-Static int
+int
 uath_open_pipes(struct uath_softc *sc)
 {
 	int error;
@@ -488,7 +495,7 @@ uath_open_pipes(struct uath_softc *sc)
 	    &sc->cmd_tx_pipe);
 	if (error != 0) {
 		printf("%s: could not open Tx command pipe: %s\n",
-		    USBDEVNAME(sc->sc_dev), usbd_errstr(error));
+		    sc->sc_dev.dv_xname, usbd_errstr(error));
 		goto fail;
 	}
 
@@ -496,7 +503,7 @@ uath_open_pipes(struct uath_softc *sc)
 	    &sc->data_tx_pipe);
 	if (error != 0) {
 		printf("%s: could not open Tx data pipe: %s\n",
-		    USBDEVNAME(sc->sc_dev), usbd_errstr(error));
+		    sc->sc_dev.dv_xname, usbd_errstr(error));
 		goto fail;
 	}
 
@@ -504,7 +511,7 @@ uath_open_pipes(struct uath_softc *sc)
 	    &sc->cmd_rx_pipe);
 	if (error != 0) {
 		printf("%s: could not open Rx command pipe: %s\n",
-		    USBDEVNAME(sc->sc_dev), usbd_errstr(error));
+		    sc->sc_dev.dv_xname, usbd_errstr(error));
 		goto fail;
 	}
 
@@ -512,7 +519,7 @@ uath_open_pipes(struct uath_softc *sc)
 	    &sc->data_rx_pipe);
 	if (error != 0) {
 		printf("%s: could not open Rx data pipe: %s\n",
-		    USBDEVNAME(sc->sc_dev), usbd_errstr(error));
+		    sc->sc_dev.dv_xname, usbd_errstr(error));
 		goto fail;
 	}
 
@@ -522,7 +529,7 @@ fail:	uath_close_pipes(sc);
 	return error;
 }
 
-Static void
+void
 uath_close_pipes(struct uath_softc *sc)
 {
 	/* assumes no transfers are pending on the pipes */
@@ -540,7 +547,7 @@ uath_close_pipes(struct uath_softc *sc)
 		usbd_close_pipe(sc->cmd_rx_pipe);
 }
 
-Static int
+int
 uath_alloc_tx_data_list(struct uath_softc *sc)
 {
 	int i, error;
@@ -553,14 +560,14 @@ uath_alloc_tx_data_list(struct uath_softc *sc)
 		data->xfer = usbd_alloc_xfer(sc->sc_udev);
 		if (data->xfer == NULL) {
 			printf("%s: could not allocate xfer\n",
-			    USBDEVNAME(sc->sc_dev));
+			    sc->sc_dev.dv_xname);
 			error = ENOMEM;
 			goto fail;
 		}
 		data->buf = usbd_alloc_buffer(data->xfer, UATH_MAX_TXBUFSZ);
 		if (data->buf == NULL) {
 			printf("%s: could not allocate xfer buffer\n",
-			    USBDEVNAME(sc->sc_dev));
+			    sc->sc_dev.dv_xname);
 			error = ENOMEM;
 			goto fail;
 		}
@@ -571,7 +578,7 @@ fail:	uath_free_tx_data_list(sc);
 	return error;
 }
 
-Static void
+void
 uath_free_tx_data_list(struct uath_softc *sc)
 {
 	int i;
@@ -584,7 +591,7 @@ uath_free_tx_data_list(struct uath_softc *sc)
 			usbd_free_xfer(sc->tx_data[i].xfer);
 }
 
-Static int
+int
 uath_alloc_rx_data_list(struct uath_softc *sc)
 {
 	int i, error;
@@ -598,14 +605,14 @@ uath_alloc_rx_data_list(struct uath_softc *sc)
 		data->xfer = usbd_alloc_xfer(sc->sc_udev);
 		if (data->xfer == NULL) {
 			printf("%s: could not allocate xfer\n",
-			    USBDEVNAME(sc->sc_dev));
+			    sc->sc_dev.dv_xname);
 			error = ENOMEM;
 			goto fail;
 		}
 		data->buf = usbd_alloc_buffer(data->xfer, sc->rxbufsz);
 		if (data->buf == NULL) {
 			printf("%s: could not allocate xfer buffer\n",
-			    USBDEVNAME(sc->sc_dev));
+			    sc->sc_dev.dv_xname);
 			error = ENOMEM;
 			goto fail;
 		}
@@ -617,7 +624,7 @@ fail:	uath_free_rx_data_list(sc);
 	return error;
 }
 
-Static void
+void
 uath_free_rx_data_list(struct uath_softc *sc)
 {
 	int i;
@@ -630,7 +637,7 @@ uath_free_rx_data_list(struct uath_softc *sc)
 			usbd_free_xfer(sc->rx_data[i].xfer);
 }
 
-Static void
+void
 uath_free_rx_data(caddr_t buf, u_int size, void *arg)
 {
 	struct uath_rx_data *data = arg;
@@ -644,7 +651,7 @@ uath_free_rx_data(caddr_t buf, u_int size, void *arg)
 		wakeup(UATH_COND_NOREF(sc));
 }
 
-Static int
+int
 uath_alloc_tx_cmd_list(struct uath_softc *sc)
 {
 	int i, error;
@@ -657,14 +664,14 @@ uath_alloc_tx_cmd_list(struct uath_softc *sc)
 		cmd->xfer = usbd_alloc_xfer(sc->sc_udev);
 		if (cmd->xfer == NULL) {
 			printf("%s: could not allocate xfer\n",
-			    USBDEVNAME(sc->sc_dev));
+			    sc->sc_dev.dv_xname);
 			error = ENOMEM;
 			goto fail;
 		}
 		cmd->buf = usbd_alloc_buffer(cmd->xfer, UATH_MAX_TXCMDSZ);
 		if (cmd->buf == NULL) {
 			printf("%s: could not allocate xfer buffer\n",
-			    USBDEVNAME(sc->sc_dev));
+			    sc->sc_dev.dv_xname);
 			error = ENOMEM;
 			goto fail;
 		}
@@ -675,7 +682,7 @@ fail:	uath_free_tx_cmd_list(sc);
 	return error;
 }
 
-Static void
+void
 uath_free_tx_cmd_list(struct uath_softc *sc)
 {
 	int i;
@@ -688,7 +695,7 @@ uath_free_tx_cmd_list(struct uath_softc *sc)
 			usbd_free_xfer(sc->tx_cmd[i].xfer);
 }
 
-Static int
+int
 uath_alloc_rx_cmd_list(struct uath_softc *sc)
 {
 	int i, error;
@@ -701,14 +708,14 @@ uath_alloc_rx_cmd_list(struct uath_softc *sc)
 		cmd->xfer = usbd_alloc_xfer(sc->sc_udev);
 		if (cmd->xfer == NULL) {
 			printf("%s: could not allocate xfer\n",
-			    USBDEVNAME(sc->sc_dev));
+			    sc->sc_dev.dv_xname);
 			error = ENOMEM;
 			goto fail;
 		}
 		cmd->buf = usbd_alloc_buffer(cmd->xfer, UATH_MAX_RXCMDSZ);
 		if (cmd->buf == NULL) {
 			printf("%s: could not allocate xfer buffer\n",
-			    USBDEVNAME(sc->sc_dev));
+			    sc->sc_dev.dv_xname);
 			error = ENOMEM;
 			goto fail;
 		}
@@ -719,7 +726,7 @@ fail:	uath_free_rx_cmd_list(sc);
 	return error;
 }
 
-Static void
+void
 uath_free_rx_cmd_list(struct uath_softc *sc)
 {
 	int i;
@@ -732,7 +739,7 @@ uath_free_rx_cmd_list(struct uath_softc *sc)
 			usbd_free_xfer(sc->rx_cmd[i].xfer);
 }
 
-Static int
+int
 uath_media_change(struct ifnet *ifp)
 {
 	int error;
@@ -751,7 +758,7 @@ uath_media_change(struct ifnet *ifp)
  * This function is called periodically (every second) when associated to
  * query device statistics.
  */
-Static void
+void
 uath_stat(void *arg)
 {
 	struct uath_softc *sc = arg;
@@ -765,7 +772,7 @@ uath_stat(void *arg)
 	    UATH_CMD_FLAG_ASYNC);
 	if (error != 0) {
 		printf("%s: could not query statistics (error=%d)\n",
-		    USBDEVNAME(sc->sc_dev), error);
+		    sc->sc_dev.dv_xname, error);
 	}
 }
 
@@ -773,7 +780,7 @@ uath_stat(void *arg)
  * This function is called periodically (every 250ms) during scanning to
  * switch from one channel to another.
  */
-Static void
+void
 uath_next_scan(void *arg)
 {
 	struct uath_softc *sc = arg;
@@ -784,7 +791,7 @@ uath_next_scan(void *arg)
 		ieee80211_next_scan(ifp);
 }
 
-Static void
+void
 uath_task(void *arg)
 {
 	struct uath_softc *sc = arg;
@@ -805,7 +812,7 @@ uath_task(void *arg)
 	case IEEE80211_S_SCAN:
 		if (uath_switch_channel(sc, ic->ic_bss->ni_chan) != 0) {
 			printf("%s: could not switch channel\n",
-			    USBDEVNAME(sc->sc_dev));
+			    sc->sc_dev.dv_xname);
 			break;
 		}
 		timeout_add(&sc->scan_to, hz / 4);
@@ -820,7 +827,7 @@ uath_task(void *arg)
 
 		if (uath_switch_channel(sc, ni->ni_chan) != 0) {
 			printf("%s: could not switch channel\n",
-			    USBDEVNAME(sc->sc_dev));
+			    sc->sc_dev.dv_xname);
 			break;
 		}
 
@@ -845,7 +852,7 @@ uath_task(void *arg)
 
 		if (uath_set_rates(sc, &ni->ni_rates) != 0) {
 			printf("%s: could not set negotiated rate set\n",
-			    USBDEVNAME(sc->sc_dev));
+			    sc->sc_dev.dv_xname);
 			break;
 		}
 		break;
@@ -913,7 +920,7 @@ uath_task(void *arg)
 	sc->sc_newstate(ic, sc->sc_state, sc->sc_arg);
 }
 
-Static int
+int
 uath_newstate(struct ieee80211com *ic, enum ieee80211_state nstate, int arg)
 {
 	struct uath_softc *sc = ic->ic_softc;
@@ -930,7 +937,7 @@ uath_newstate(struct ieee80211com *ic, enum ieee80211_state nstate, int arg)
 }
 
 #ifdef UATH_DEBUG
-Static void
+void
 uath_dump_cmd(const uint8_t *buf, int len, char prefix)
 {
 	int i;
@@ -949,7 +956,7 @@ uath_dump_cmd(const uint8_t *buf, int len, char prefix)
 /*
  * Low-level function to send read or write commands to the firmware.
  */
-Static int
+int
 uath_cmd(struct uath_softc *sc, uint32_t code, const void *idata, int ilen,
     void *odata, int flags)
 {
@@ -995,7 +1002,7 @@ uath_cmd(struct uath_softc *sc, uint32_t code, const void *idata, int ilen,
 		if (flags & UATH_CMD_FLAG_READ)
 			splx(s);
 		printf("%s: could not send command 0x%x (error=%s)\n",
-		    USBDEVNAME(sc->sc_dev), code, usbd_errstr(error));
+		    sc->sc_dev.dv_xname, code, usbd_errstr(error));
 		return error;
 	}
 	sc->cmd_idx = (sc->cmd_idx + 1) % UATH_TX_CMD_LIST_COUNT;
@@ -1009,12 +1016,12 @@ uath_cmd(struct uath_softc *sc, uint32_t code, const void *idata, int ilen,
 	splx(s);
 	if (error != 0) {
 		printf("%s: timeout waiting for command reply\n",
-		    USBDEVNAME(sc->sc_dev));
+		    sc->sc_dev.dv_xname);
 	}
 	return error;
 }
 
-Static int
+int
 uath_cmd_write(struct uath_softc *sc, uint32_t code, const void *data, int len,
     int flags)
 {
@@ -1022,7 +1029,7 @@ uath_cmd_write(struct uath_softc *sc, uint32_t code, const void *data, int len,
 	return uath_cmd(sc, code, data, len, NULL, flags);
 }
 
-Static int
+int
 uath_cmd_read(struct uath_softc *sc, uint32_t code, const void *idata,
     int ilen, void *odata, int flags)
 {
@@ -1030,7 +1037,7 @@ uath_cmd_read(struct uath_softc *sc, uint32_t code, const void *idata,
 	return uath_cmd(sc, code, idata, ilen, odata, flags);
 }
 
-Static int
+int
 uath_write_reg(struct uath_softc *sc, uint32_t reg, uint32_t val)
 {
 	struct uath_write_mac write;
@@ -1044,12 +1051,12 @@ uath_write_reg(struct uath_softc *sc, uint32_t reg, uint32_t val)
 	    3 * sizeof (uint32_t), 0);
 	if (error != 0) {
 		printf("%s: could not write register 0x%02x\n",
-		    USBDEVNAME(sc->sc_dev), reg);
+		    sc->sc_dev.dv_xname, reg);
 	}
 	return error;
 }
 
-Static int
+int
 uath_write_multi(struct uath_softc *sc, uint32_t reg, const void *data,
     int len)
 {
@@ -1065,12 +1072,12 @@ uath_write_multi(struct uath_softc *sc, uint32_t reg, const void *data,
 	    (len == 0) ? sizeof (uint32_t) : 2 * sizeof (uint32_t) + len, 0);
 	if (error != 0) {
 		printf("%s: could not write %d bytes to register 0x%02x\n",
-		    USBDEVNAME(sc->sc_dev), len, reg);
+		    sc->sc_dev.dv_xname, len, reg);
 	}
 	return error;
 }
 
-Static int
+int
 uath_read_reg(struct uath_softc *sc, uint32_t reg, uint32_t *val)
 {
 	struct uath_read_mac read;
@@ -1081,14 +1088,14 @@ uath_read_reg(struct uath_softc *sc, uint32_t reg, uint32_t *val)
 	    0);
 	if (error != 0) {
 		printf("%s: could not read register 0x%02x\n",
-		    USBDEVNAME(sc->sc_dev), betoh32(reg));
+		    sc->sc_dev.dv_xname, betoh32(reg));
 		return error;
 	}
 	*val = betoh32(*(uint32_t *)read.data);
 	return error;
 }
 
-Static int
+int
 uath_read_eeprom(struct uath_softc *sc, uint32_t reg, void *odata)
 {
 	struct uath_read_mac read;
@@ -1099,7 +1106,7 @@ uath_read_eeprom(struct uath_softc *sc, uint32_t reg, void *odata)
 	    &read, 0);
 	if (error != 0) {
 		printf("%s: could not read EEPROM offset 0x%02x\n",
-		    USBDEVNAME(sc->sc_dev), betoh32(reg));
+		    sc->sc_dev.dv_xname, betoh32(reg));
 		return error;
 	}
 	len = betoh32(read.len);
@@ -1107,7 +1114,7 @@ uath_read_eeprom(struct uath_softc *sc, uint32_t reg, void *odata)
 	return error;
 }
 
-Static void
+void
 uath_cmd_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv,
     usbd_status status)
 {
@@ -1169,7 +1176,7 @@ uath_cmd_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv,
 	(void)usbd_transfer(xfer);
 }
 
-Static void
+void
 uath_data_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv,
     usbd_status status)
 {
@@ -1227,7 +1234,7 @@ uath_data_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv,
 	ndata = SLIST_FIRST(&sc->rx_freelist);
 	if (ndata == NULL) {
 		printf("%s: could not allocate Rx buffer\n",
-		    USBDEVNAME(sc->sc_dev));
+		    sc->sc_dev.dv_xname);
 		m_freem(m);
 		ifp->if_ierrors++;
 		goto skip;
@@ -1297,7 +1304,7 @@ skip:	/* setup a new transfer */
 	(void)usbd_transfer(data->xfer);
 }
 
-Static int
+int
 uath_tx_null(struct uath_softc *sc)
 {
 	struct uath_tx_data *data;
@@ -1325,7 +1332,7 @@ uath_tx_null(struct uath_softc *sc)
 	return uath_cmd_write(sc, UATH_CMD_0F, NULL, 0, UATH_CMD_FLAG_ASYNC);
 }
 
-Static void
+void
 uath_data_txeof(usbd_xfer_handle xfer, usbd_private_handle priv,
     usbd_status status)
 {
@@ -1340,7 +1347,7 @@ uath_data_txeof(usbd_xfer_handle xfer, usbd_private_handle priv,
 			return;
 
 		printf("%s: could not transmit buffer: %s\n",
-		    USBDEVNAME(sc->sc_dev), usbd_errstr(status));
+		    sc->sc_dev.dv_xname, usbd_errstr(status));
 
 		if (status == USBD_STALLED)
 			usbd_clear_endpoint_stall_async(sc->data_tx_pipe);
@@ -1364,7 +1371,7 @@ uath_data_txeof(usbd_xfer_handle xfer, usbd_private_handle priv,
 	splx(s);
 }
 
-Static int
+int
 uath_tx_data(struct uath_softc *sc, struct mbuf *m0, struct ieee80211_node *ni)
 {
 	struct ieee80211com *ic = &sc->sc_ic;
@@ -1470,7 +1477,7 @@ uath_tx_data(struct uath_softc *sc, struct mbuf *m0, struct ieee80211_node *ni)
 	return 0;
 }
 
-Static void
+void
 uath_start(struct ifnet *ifp)
 {
 	struct uath_softc *sc = ifp->if_softc;
@@ -1537,7 +1544,7 @@ uath_start(struct ifnet *ifp)
 	}
 }
 
-Static void
+void
 uath_watchdog(struct ifnet *ifp)
 {
 	struct uath_softc *sc = ifp->if_softc;
@@ -1546,7 +1553,7 @@ uath_watchdog(struct ifnet *ifp)
 
 	if (sc->sc_tx_timer > 0) {
 		if (--sc->sc_tx_timer == 0) {
-			printf("%s: device timeout\n", USBDEVNAME(sc->sc_dev));
+			printf("%s: device timeout\n", sc->sc_dev.dv_xname);
 			/*uath_init(ifp); XXX needs a process context! */
 			ifp->if_oerrors++;
 			return;
@@ -1557,7 +1564,7 @@ uath_watchdog(struct ifnet *ifp)
 	ieee80211_watchdog(ifp);
 }
 
-Static int
+int
 uath_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 {
 	struct uath_softc *sc = ifp->if_softc;
@@ -1613,7 +1620,7 @@ uath_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	return error;
 }
 
-Static int
+int
 uath_query_eeprom(struct uath_softc *sc)
 {
 	uint32_t tmp;
@@ -1623,7 +1630,7 @@ uath_query_eeprom(struct uath_softc *sc)
 	error = uath_read_eeprom(sc, UATH_EEPROM_MACADDR, sc->sc_ic.ic_myaddr);
 	if (error != 0) {
 		printf("%s: could not read MAC address\n",
-		    USBDEVNAME(sc->sc_dev));
+		    sc->sc_dev.dv_xname);
 		return error;
 	}
 
@@ -1631,7 +1638,7 @@ uath_query_eeprom(struct uath_softc *sc)
 	error = uath_read_eeprom(sc, UATH_EEPROM_RXBUFSZ, &tmp);
 	if (error != 0) {
 		printf("%s: could not read maximum Rx buffer size\n",
-		    USBDEVNAME(sc->sc_dev));
+		    sc->sc_dev.dv_xname);
 		return error;
 	}
 	sc->rxbufsz = betoh32(tmp) & 0xfff;
@@ -1639,7 +1646,7 @@ uath_query_eeprom(struct uath_softc *sc)
 	return 0;
 }
 
-Static int
+int
 uath_reset(struct uath_softc *sc)
 {
 	struct uath_cmd_setup setup;
@@ -1673,7 +1680,7 @@ uath_reset(struct uath_softc *sc)
 	return error;
 }
 
-Static int
+int
 uath_reset_tx_queues(struct uath_softc *sc)
 {
 	int ac, error;
@@ -1690,7 +1697,7 @@ uath_reset_tx_queues(struct uath_softc *sc)
 	return error;
 }
 
-Static int
+int
 uath_wme_init(struct uath_softc *sc)
 {
 	struct uath_qinfo qinfo;
@@ -1725,7 +1732,7 @@ uath_wme_init(struct uath_softc *sc)
 	return error;
 }
 
-Static int
+int
 uath_set_chan(struct uath_softc *sc, struct ieee80211_channel *c)
 {
 	struct uath_set_chan chan;
@@ -1742,9 +1749,8 @@ uath_set_chan(struct uath_softc *sc, struct ieee80211_channel *c)
 	return uath_cmd_write(sc, UATH_CMD_SET_CHAN, &chan, sizeof chan, 0);
 }
 
-Static int
-uath_set_key(struct uath_softc *sc, const struct ieee80211_wepkey *wk,
-    int index)
+int
+uath_set_key(struct uath_softc *sc, const struct ieee80211_key *k, int index)
 {
 	struct uath_cmd_crypto crypto;
 	int i;
@@ -1763,31 +1769,30 @@ uath_set_key(struct uath_softc *sc, const struct ieee80211_wepkey *wk,
 	 * Each byte of the key must be XOR'ed with 10101010 before being
 	 * transmitted to the firmware.
 	 */
-	for (i = 0; i < wk->wk_len; i++)
-		crypto.key[i] = wk->wk_key[i] ^ 0xaa;
+	for (i = 0; i < k->k_len; i++)
+		crypto.key[i] = k->k_key[i] ^ 0xaa;
 
-	DPRINTF(("setting crypto key index=%d len=%d\n", index, wk->wk_len));
+	DPRINTF(("setting crypto key index=%d len=%d\n", index, k->k_len));
 	return uath_cmd_write(sc, UATH_CMD_CRYPTO, &crypto, sizeof crypto, 0);
 }
 
-Static int
+int
 uath_set_keys(struct uath_softc *sc)
 {
 	const struct ieee80211com *ic = &sc->sc_ic;
 	int i, error;
 
 	for (i = 0; i < IEEE80211_WEP_NKID; i++) {
-		const struct ieee80211_wepkey *wk = &ic->ic_nw_keys[i];
+		const struct ieee80211_key *k = &ic->ic_nw_keys[i];
 
-		if (wk->wk_len > 0 &&
-		    (error = uath_set_key(sc, wk, i)) != 0)
+		if (k->k_len > 0 && (error = uath_set_key(sc, k, i)) != 0)
 			return error;
 	}
 	return uath_set_key(sc, &ic->ic_nw_keys[ic->ic_wep_txkey],
 	    UATH_DEFAULT_KEY);
 }
 
-Static int
+int
 uath_set_rates(struct uath_softc *sc, const struct ieee80211_rateset *rs)
 {
 	struct uath_cmd_rates rates;
@@ -1802,7 +1807,7 @@ uath_set_rates(struct uath_softc *sc, const struct ieee80211_rateset *rs)
 	return uath_cmd_write(sc, UATH_CMD_SET_RATES, &rates, sizeof rates, 0);
 }
 
-Static int
+int
 uath_set_rxfilter(struct uath_softc *sc, uint32_t filter, uint32_t flags)
 {
 	struct uath_cmd_filter rxfilter;
@@ -1815,7 +1820,7 @@ uath_set_rxfilter(struct uath_softc *sc, uint32_t filter, uint32_t flags)
 	    sizeof rxfilter, 0);
 }
 
-Static int
+int
 uath_set_led(struct uath_softc *sc, int which, int on)
 {
 	struct uath_cmd_led led;
@@ -1829,7 +1834,7 @@ uath_set_led(struct uath_softc *sc, int which, int on)
 	return uath_cmd_write(sc, UATH_CMD_SET_LED, &led, sizeof led, 0);
 }
 
-Static int
+int
 uath_switch_channel(struct uath_softc *sc, struct ieee80211_channel *c)
 {
 	uint32_t val;
@@ -1837,35 +1842,35 @@ uath_switch_channel(struct uath_softc *sc, struct ieee80211_channel *c)
 
 	/* set radio frequency */
 	if ((error = uath_set_chan(sc, c)) != 0) {
-		printf("%s: could not set channel\n", USBDEVNAME(sc->sc_dev));
+		printf("%s: could not set channel\n", sc->sc_dev.dv_xname);
 		return error;
 	}
 
 	/* reset Tx rings */
 	if ((error = uath_reset_tx_queues(sc)) != 0) {
 		printf("%s: could not reset Tx queues\n",
-		    USBDEVNAME(sc->sc_dev));
+		    sc->sc_dev.dv_xname);
 		return error;
 	}
 
 	/* set Tx rings WME properties */
 	if ((error = uath_wme_init(sc)) != 0) {
 		printf("%s: could not init Tx queues\n",
-		    USBDEVNAME(sc->sc_dev));
+		    sc->sc_dev.dv_xname);
 		return error;
 	}
 
 	val = htobe32(0);
 	error = uath_cmd_write(sc, UATH_CMD_SET_STATE, &val, sizeof val, 0);
 	if (error != 0) {
-		printf("%s: could not set state\n", USBDEVNAME(sc->sc_dev));
+		printf("%s: could not set state\n", sc->sc_dev.dv_xname);
 		return error;
 	}
 
 	return uath_tx_null(sc);
 }
 
-Static int
+int
 uath_init(struct ifnet *ifp)
 {
 	struct uath_softc *sc = ifp->if_softc;
@@ -1901,7 +1906,7 @@ uath_init(struct ifnet *ifp)
 		error = usbd_transfer(data->xfer);
 		if (error != USBD_IN_PROGRESS && error != 0) {
 			printf("%s: could not queue Rx transfer\n",
-			    USBDEVNAME(sc->sc_dev));
+			    sc->sc_dev.dv_xname);
 			goto fail;
 		}
 		SLIST_REMOVE_HEAD(&sc->rx_freelist, next);
@@ -1911,7 +1916,7 @@ uath_init(struct ifnet *ifp)
 	    UATH_CMD_FLAG_MAGIC);
 	if (error != 0) {
 		printf("%s: could not send read command 07h\n",
-		    USBDEVNAME(sc->sc_dev));
+		    sc->sc_dev.dv_xname);
 		goto fail;
 	}
 	DPRINTF(("command 07h return code: %x\n", betoh32(val)));
@@ -1919,13 +1924,13 @@ uath_init(struct ifnet *ifp)
 	/* set default channel */
 	ic->ic_bss->ni_chan = ic->ic_ibss_chan;
 	if ((error = uath_set_chan(sc, ic->ic_bss->ni_chan)) != 0) {
-		printf("%s: could not set channel\n", USBDEVNAME(sc->sc_dev));
+		printf("%s: could not set channel\n", sc->sc_dev.dv_xname);
 		goto fail;
 	}
 
 	if ((error = uath_wme_init(sc)) != 0) {
 		printf("%s: could not setup WME parameters\n",
-		    USBDEVNAME(sc->sc_dev));
+		    sc->sc_dev.dv_xname);
 		goto fail;
 	}
 
@@ -1948,7 +1953,7 @@ uath_init(struct ifnet *ifp)
 
 	if ((error = uath_set_keys(sc)) != 0) {
 		printf("%s: could not set crypto keys\n",
-		    USBDEVNAME(sc->sc_dev));
+		    sc->sc_dev.dv_xname);
 		goto fail;
 	}
 
@@ -1974,7 +1979,7 @@ fail:	uath_stop(ifp, 1);
 	return error;
 }
 
-Static void
+void
 uath_stop(struct ifnet *ifp, int disable)
 {
 	struct uath_softc *sc = ifp->if_softc;
@@ -2016,7 +2021,7 @@ uath_stop(struct ifnet *ifp, int disable)
  * product Id (a la ezusb).  XXX this could also be implemented in userland
  * through /dev/ugen.
  */
-Static int
+int
 uath_loadfirmware(struct uath_softc *sc, const u_char *fw, int len)
 {
 	usbd_xfer_handle ctlxfer, txxfer, rxxfer;
@@ -2026,42 +2031,42 @@ uath_loadfirmware(struct uath_softc *sc, const u_char *fw, int len)
 
 	if ((ctlxfer = usbd_alloc_xfer(sc->sc_udev)) == NULL) {
 		printf("%s: could not allocate Tx control xfer\n",
-		    USBDEVNAME(sc->sc_dev));
+		    sc->sc_dev.dv_xname);
 		error = USBD_NOMEM;
 		goto fail1;
 	}
 	txblock = usbd_alloc_buffer(ctlxfer, sizeof (struct uath_fwblock));
 	if (txblock == NULL) {
 		printf("%s: could not allocate Tx control block\n",
-		    USBDEVNAME(sc->sc_dev));
+		    sc->sc_dev.dv_xname);
 		error = USBD_NOMEM;
 		goto fail2;
 	}
 
 	if ((txxfer = usbd_alloc_xfer(sc->sc_udev)) == NULL) {
 		printf("%s: could not allocate Tx xfer\n",
-		    USBDEVNAME(sc->sc_dev));
+		    sc->sc_dev.dv_xname);
 		error = USBD_NOMEM;
 		goto fail2;
 	}
 	txdata = usbd_alloc_buffer(txxfer, UATH_MAX_FWBLOCK_SIZE);
 	if (txdata == NULL) {
 		printf("%s: could not allocate Tx buffer\n",
-		    USBDEVNAME(sc->sc_dev));
+		    sc->sc_dev.dv_xname);
 		error = USBD_NOMEM;
 		goto fail3;
 	}
 
 	if ((rxxfer = usbd_alloc_xfer(sc->sc_udev)) == NULL) {
 		printf("%s: could not allocate Rx control xfer\n",
-		    USBDEVNAME(sc->sc_dev));
+		    sc->sc_dev.dv_xname);
 		error = USBD_NOMEM;
 		goto fail3;
 	}
 	rxblock = usbd_alloc_buffer(rxxfer, sizeof (struct uath_fwblock));
 	if (rxblock == NULL) {
 		printf("%s: could not allocate Rx control block\n",
-		    USBDEVNAME(sc->sc_dev));
+		    sc->sc_dev.dv_xname);
 		error = USBD_NOMEM;
 		goto fail4;
 	}
@@ -2085,7 +2090,7 @@ uath_loadfirmware(struct uath_softc *sc, const u_char *fw, int len)
 		    UATH_CMD_TIMEOUT, NULL);
 		if ((error = usbd_sync_transfer(ctlxfer)) != 0) {
 			printf("%s: could not send firmware block info\n",
-			    USBDEVNAME(sc->sc_dev));
+			    sc->sc_dev.dv_xname);
 			break;
 		}
 
@@ -2095,7 +2100,7 @@ uath_loadfirmware(struct uath_softc *sc, const u_char *fw, int len)
 		    USBD_NO_COPY, UATH_DATA_TIMEOUT, NULL);
 		if ((error = usbd_sync_transfer(txxfer)) != 0) {
 			printf("%s: could not send firmware block data\n",
-			    USBDEVNAME(sc->sc_dev));
+			    sc->sc_dev.dv_xname);
 			break;
 		}
 
@@ -2105,7 +2110,7 @@ uath_loadfirmware(struct uath_softc *sc, const u_char *fw, int len)
 		    USBD_NO_COPY, UATH_CMD_TIMEOUT, NULL);
 		if ((error = usbd_sync_transfer(rxxfer)) != 0) {
 			printf("%s: could not read firmware answer\n",
-			    USBDEVNAME(sc->sc_dev));
+			    sc->sc_dev.dv_xname);
 			break;
 		}
 
@@ -2121,15 +2126,14 @@ fail2:	usbd_free_xfer(ctlxfer);
 fail1:	return error;
 }
 
-Static int
-uath_activate(device_ptr_t self, enum devact act)
+int
+uath_activate(struct device *self, enum devact act)
 {
 	switch (act) {
 	case DVACT_ACTIVATE:
 		break;
 
 	case DVACT_DEACTIVATE:
-		/*if_deactivate(&sc->sc_ic.ic_if);*/
 		break;
 	}
 	return 0;

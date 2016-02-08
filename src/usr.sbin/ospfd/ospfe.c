@@ -1,4 +1,4 @@
-/*	$OpenBSD: ospfe.c,v 1.53 2007/02/26 12:16:18 norby Exp $ */
+/*	$OpenBSD: ospfe.c,v 1.57 2007/07/25 19:11:27 claudio Exp $ */
 
 /*
  * Copyright (c) 2005 Claudio Jeker <claudio@openbsd.org>
@@ -51,6 +51,7 @@ struct iface	*find_vlink(struct abr_rtr *);
 struct ospfd_conf	*oeconf = NULL, *nconf;
 struct imsgbuf		*ibuf_main;
 struct imsgbuf		*ibuf_rde;
+int			 oe_nofib;
 
 /* ARGSUSED */
 void
@@ -106,6 +107,8 @@ ospfe(struct ospfd_conf *xconf, int pipe_parent2ospfe[2], int pipe_ospfe2rde[2],
 	if_set_recvbuf(xconf->ospf_socket);
 
 	oeconf = xconf;
+	if (oeconf->flags & OSPFD_FLAG_NO_FIB_UPDATE)
+		oe_nofib = 1;
 
 	if ((pw = getpwnam(OSPFD_USER)) == NULL)
 		fatal("getpwnam");
@@ -133,6 +136,7 @@ ospfe(struct ospfd_conf *xconf, int pipe_parent2ospfe[2], int pipe_ospfe2rde[2],
 	signal_add(&ev_sigint, NULL);
 	signal_add(&ev_sigterm, NULL);
 	signal(SIGPIPE, SIG_IGN);
+	signal(SIGHUP, SIG_IGN);
 
 	/* setup pipes */
 	close(pipe_parent2ospfe[0]);
@@ -176,6 +180,7 @@ ospfe(struct ospfd_conf *xconf, int pipe_parent2ospfe[2], int pipe_ospfe2rde[2],
 
 	/* start interfaces */
 	LIST_FOREACH(area, &oeconf->area_list, entry) {
+		ospfe_demote_area(area, 0);
 		LIST_FOREACH(iface, &area->iface_list, entry) {
 			if_init(xconf, iface);
 			if (if_fsm(iface, IF_EVT_UP)) {
@@ -252,14 +257,14 @@ ospfe_dispatch_main(int fd, short event, void *bula)
 	struct iface	*iface = NULL;
 	struct kif	*kif;
 	struct auth_md	 md;
-	int		 n, link_ok;
+	int		 n, link_ok, stub_changed, shut = 0;
 
 	switch (event) {
 	case EV_READ:
 		if ((n = imsg_read(ibuf)) == -1)
 			fatal("imsg_read error");
 		if (n == 0)	/* connection closed */
-			fatalx("pipe closed");
+			shut = 1;
 		break;
 	case EV_WRITE:
 		if (msgbuf_write(&ibuf->w) == -1)
@@ -350,8 +355,15 @@ ospfe_dispatch_main(int fd, short event, void *bula)
 			md_list_add(&niface->auth_md_list, md.keyid, md.key);
 			break;
 		case IMSG_RECONF_END:
+			if ((oeconf->flags & OSPFD_FLAG_STUB_ROUTER) !=
+			    (nconf->flags & OSPFD_FLAG_STUB_ROUTER))
+				stub_changed = 1;
+			else
+				stub_changed = 0;
 			merge_config(oeconf, nconf);
 			nconf = NULL;
+			if (stub_changed)
+				orig_rtr_lsa_all(NULL);
 			break;
 		case IMSG_CTL_KROUTE:
 		case IMSG_CTL_KROUTE_ADDR:
@@ -366,7 +378,13 @@ ospfe_dispatch_main(int fd, short event, void *bula)
 		}
 		imsg_free(&imsg);
 	}
-	imsg_event_add(ibuf);
+	if (!shut)
+		imsg_event_add(ibuf);
+	else {
+		/* this pipe is dead, so remove the event handler */
+		event_del(&ibuf->ev);
+		event_loopexit(NULL);
+	}
 }
 
 /* ARGSUSED */
@@ -383,7 +401,7 @@ ospfe_dispatch_rde(int fd, short event, void *bula)
 	struct lsa_entry	*le;
 	struct imsg		 imsg;
 	struct abr_rtr		 ar;
-	int			 n, noack = 0;
+	int			 n, noack = 0, shut = 0;
 	u_int16_t		 l, age;
 
 	switch (event) {
@@ -391,7 +409,7 @@ ospfe_dispatch_rde(int fd, short event, void *bula)
 		if ((n = imsg_read(ibuf)) == -1)
 			fatal("imsg_read error");
 		if (n == 0)	/* connection closed */
-			fatalx("pipe closed");
+			shut = 1;
 		break;
 	case EV_WRITE:
 		if (msgbuf_write(&ibuf->w) == -1)
@@ -629,7 +647,13 @@ ospfe_dispatch_rde(int fd, short event, void *bula)
 		}
 		imsg_free(&imsg);
 	}
-	imsg_event_add(ibuf);
+	if (!shut)
+		imsg_event_add(ibuf);
+	else {
+		/* this pipe is dead, so remove the event handler */
+		event_del(&ibuf->ev);
+		event_loopexit(NULL);
+	}
 }
 
 struct iface *
@@ -723,7 +747,12 @@ orig_rtr_lsa(struct area *area)
 				rtr_link.id = nbr->id.s_addr;
 				rtr_link.data = iface->addr.s_addr;
 				rtr_link.type = LINK_TYPE_POINTTOPOINT;
-				rtr_link.metric = htons(iface->metric);
+				/* RFC 3137: stub router support */
+				if (oeconf->flags & OSPFD_FLAG_STUB_ROUTER ||
+				    oe_nofib)
+					rtr_link.metric = 0xffff;
+				else
+					rtr_link.metric = htons(iface->metric);
 				num_links++;
 				if (buf_add(buf, &rtr_link, sizeof(rtr_link)))
 					fatalx("orig_rtr_lsa: buf_add failed");
@@ -739,8 +768,8 @@ orig_rtr_lsa(struct area *area)
 					rtr_link.id = iface->addr.s_addr;
 					rtr_link.data = iface->mask.s_addr;
 				}
-				rtr_link.metric = htons(iface->metric);
 				rtr_link.type = LINK_TYPE_STUB_NET;
+				rtr_link.metric = htons(iface->metric);
 				num_links++;
 				if (buf_add(buf, &rtr_link, sizeof(rtr_link)))
 					fatalx("orig_rtr_lsa: buf_add failed");
@@ -793,7 +822,12 @@ orig_rtr_lsa(struct area *area)
 				rtr_link.id = nbr->id.s_addr;
 				rtr_link.data = iface->addr.s_addr;
 				rtr_link.type = LINK_TYPE_VIRTUAL;
-				rtr_link.metric = htons(iface->metric);
+				/* RFC 3137: stub router support */
+				if (oeconf->flags & OSPFD_FLAG_STUB_ROUTER ||
+				    oe_nofib)
+					rtr_link.metric = 0xffff;
+				else
+					rtr_link.metric = htons(iface->metric);
 				num_links++;
 				virtual = 1;
 				if (buf_add(buf, &rtr_link, sizeof(rtr_link)))
@@ -809,6 +843,7 @@ orig_rtr_lsa(struct area *area)
 			rtr_link.id = iface->addr.s_addr;
 			rtr_link.data = 0xffffffff;
 			rtr_link.type = LINK_TYPE_STUB_NET;
+			rtr_link.metric = htons(iface->metric);
 			num_links++;
 			if (buf_add(buf, &rtr_link, sizeof(rtr_link)))
 				fatalx("orig_rtr_lsa: buf_add failed");
@@ -818,12 +853,18 @@ orig_rtr_lsa(struct area *area)
 				    nbr->state & NBR_STA_FULL) {
 					bzero(&rtr_link, sizeof(rtr_link));
 					log_debug("orig_rtr_lsa: "
-					    "point-to-point, interface %s",
+					    "point-to-multipoint, interface %s",
 					    iface->name);
 					rtr_link.id = nbr->addr.s_addr;
 					rtr_link.data = iface->addr.s_addr;
 					rtr_link.type = LINK_TYPE_POINTTOPOINT;
-					rtr_link.metric = htons(iface->metric);
+					/* RFC 3137: stub router support */
+					if (oe_nofib || oeconf->flags &
+					    OSPFD_FLAG_STUB_ROUTER)
+						rtr_link.metric = 0xffff;
+					else
+						rtr_link.metric =
+						    htons(iface->metric);
 					num_links++;
 					if (buf_add(buf, &rtr_link,
 					    sizeof(rtr_link)))
@@ -837,7 +878,12 @@ orig_rtr_lsa(struct area *area)
 		}
 
 		rtr_link.num_tos = 0;
-		rtr_link.metric = htons(iface->metric);
+		/* RFC 3137: stub router support */
+		if ((oeconf->flags & OSPFD_FLAG_STUB_ROUTER || oe_nofib) &&
+		    rtr_link.type != LINK_TYPE_STUB_NET)
+			rtr_link.metric = 0xffff;
+		else
+			rtr_link.metric = htons(iface->metric);
 		num_links++;
 		if (buf_add(buf, &rtr_link, sizeof(rtr_link)))
 			fatalx("orig_rtr_lsa: buf_add failed");
@@ -860,11 +906,11 @@ orig_rtr_lsa(struct area *area)
 
 	if (oeconf->border)
 		lsa_rtr.flags |= OSPF_RTR_B;
+	/* TODO set V flag if a active virtual link ends here and the
+	 * area is the tranist area for this link. */
 	if (virtual)
 		lsa_rtr.flags |= OSPF_RTR_V;
 
-	/* TODO set V flag if a active virtual link ends here and the
-	 * area is the tranist area for this link. */
 	lsa_rtr.dummy = 0;
 	lsa_rtr.nlinks = htons(num_links);
 	memcpy(buf_seek(buf, sizeof(lsa_hdr), sizeof(lsa_rtr)),
@@ -962,6 +1008,19 @@ ospfe_router_id(void)
 }
 
 void
+ospfe_fip_update(int type)
+{
+	int	old = oe_nofib;
+
+	if (type == IMSG_CTL_FIB_COUPLE)
+		oe_nofib = 0;
+	if (type == IMSG_CTL_FIB_DECOUPLE)
+		oe_nofib = 1;
+	if (old != oe_nofib)
+		orig_rtr_lsa_all(NULL);
+}
+
+void
 ospfe_iface_ctl(struct ctl_conn *c, unsigned int idx)
 {
 	struct area		*area;
@@ -997,4 +1056,43 @@ ospfe_nbr_ctl(struct ctl_conn *c)
 			}
 
 	imsg_compose(&c->ibuf, IMSG_CTL_END, 0, 0, NULL, 0);
+}
+
+void
+ospfe_demote_area(struct area *area, int active)
+{
+	struct demote_msg	dmsg;
+
+	if (ospfd_process != PROC_OSPF_ENGINE ||
+	    area->demote_group[0] == '\0')
+		return;
+
+	bzero(&dmsg, sizeof(dmsg));
+	strlcpy(dmsg.demote_group, area->demote_group,  
+	sizeof(dmsg.demote_group));
+	dmsg.level = area->demote_level;
+	if (active)
+		dmsg.level = -dmsg.level;
+
+	ospfe_imsg_compose_parent(IMSG_DEMOTE, 0, &dmsg, sizeof(dmsg));
+}
+
+void
+ospfe_demote_iface(struct iface *iface, int active)
+{
+	struct demote_msg	dmsg;
+
+	if (ospfd_process != PROC_OSPF_ENGINE ||
+	    iface->demote_group[0] == '\0')
+		return;
+
+	bzero(&dmsg, sizeof(dmsg));
+	strlcpy(dmsg.demote_group, iface->demote_group,  
+	sizeof(dmsg.demote_group));
+	if (active)
+		dmsg.level = -1;
+	else
+		dmsg.level = 1;
+
+	ospfe_imsg_compose_parent(IMSG_DEMOTE, 0, &dmsg, sizeof(dmsg));
 }

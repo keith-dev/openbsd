@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ral.c,v 1.89 2007/02/19 17:22:02 deraadt Exp $	*/
+/*	$OpenBSD: if_ral.c,v 1.100 2007/07/18 18:10:31 damien Exp $	*/
 
 /*-
  * Copyright (c) 2005, 2006
@@ -72,8 +72,8 @@
 #endif
 
 #ifdef URAL_DEBUG
-#define DPRINTF(x)	do { if (ural_debug) logprintf x; } while (0)
-#define DPRINTFN(n, x)	do { if (ural_debug >= (n)) logprintf x; } while (0)
+#define DPRINTF(x)	do { if (ural_debug) printf x; } while (0)
+#define DPRINTFN(n, x)	do { if (ural_debug >= (n)) printf x; } while (0)
 int ural_debug = 0;
 #else
 #define DPRINTF(x)
@@ -109,69 +109,62 @@ static const struct usb_devno ural_devs[] = {
 	{ USB_VENDOR_ZINWELL,		USB_PRODUCT_ZINWELL_RT2570 }
 };
 
-Static int		ural_alloc_tx_list(struct ural_softc *);
-Static void		ural_free_tx_list(struct ural_softc *);
-Static int		ural_alloc_rx_list(struct ural_softc *);
-Static void		ural_free_rx_list(struct ural_softc *);
-Static int		ural_media_change(struct ifnet *);
-Static void		ural_next_scan(void *);
-Static void		ural_task(void *);
-Static int		ural_newstate(struct ieee80211com *,
-			    enum ieee80211_state, int);
-Static void		ural_txeof(usbd_xfer_handle, usbd_private_handle,
-			    usbd_status);
-Static void		ural_rxeof(usbd_xfer_handle, usbd_private_handle,
-			    usbd_status);
+int		ural_alloc_tx_list(struct ural_softc *);
+void		ural_free_tx_list(struct ural_softc *);
+int		ural_alloc_rx_list(struct ural_softc *);
+void		ural_free_rx_list(struct ural_softc *);
+int		ural_media_change(struct ifnet *);
+void		ural_next_scan(void *);
+void		ural_task(void *);
+int		ural_newstate(struct ieee80211com *, enum ieee80211_state,
+		    int);
+void		ural_txeof(usbd_xfer_handle, usbd_private_handle, usbd_status);
+void		ural_rxeof(usbd_xfer_handle, usbd_private_handle, usbd_status);
 #if NBPFILTER > 0
-Static uint8_t		ural_rxrate(const struct ural_rx_desc *);
+uint8_t		ural_rxrate(const struct ural_rx_desc *);
 #endif
-Static int		ural_ack_rate(struct ieee80211com *, int);
-Static uint16_t		ural_txtime(int, int, uint32_t);
-Static uint8_t		ural_plcp_signal(int);
-Static void		ural_setup_tx_desc(struct ural_softc *,
-			    struct ural_tx_desc *, uint32_t, int, int);
-Static int		ural_tx_bcn(struct ural_softc *, struct mbuf *,
-			    struct ieee80211_node *);
-Static int		ural_tx_data(struct ural_softc *, struct mbuf *,
-			    struct ieee80211_node *);
-Static void		ural_start(struct ifnet *);
-Static void		ural_watchdog(struct ifnet *);
-Static int		ural_ioctl(struct ifnet *, u_long, caddr_t);
-Static void		ural_eeprom_read(struct ural_softc *, uint16_t, void *,
-			    int);
-Static uint16_t		ural_read(struct ural_softc *, uint16_t);
-Static void		ural_read_multi(struct ural_softc *, uint16_t, void *,
-			    int);
-Static void		ural_write(struct ural_softc *, uint16_t, uint16_t);
-Static void		ural_write_multi(struct ural_softc *, uint16_t, void *,
-			    int);
-Static void		ural_bbp_write(struct ural_softc *, uint8_t, uint8_t);
-Static uint8_t		ural_bbp_read(struct ural_softc *, uint8_t);
-Static void		ural_rf_write(struct ural_softc *, uint8_t, uint32_t);
-Static void		ural_set_chan(struct ural_softc *,
-			    struct ieee80211_channel *);
-Static void		ural_disable_rf_tune(struct ural_softc *);
-Static void		ural_enable_tsf_sync(struct ural_softc *);
-Static void		ural_update_slot(struct ural_softc *);
-Static void		ural_set_txpreamble(struct ural_softc *);
-Static void		ural_set_basicrates(struct ural_softc *);
-Static void		ural_set_bssid(struct ural_softc *, const uint8_t *);
-Static void		ural_set_macaddr(struct ural_softc *, const uint8_t *);
-Static void		ural_update_promisc(struct ural_softc *);
-Static const char	*ural_get_rf(int);
-Static void		ural_read_eeprom(struct ural_softc *);
-Static int		ural_bbp_init(struct ural_softc *);
-Static void		ural_set_txantenna(struct ural_softc *, int);
-Static void		ural_set_rxantenna(struct ural_softc *, int);
-Static int		ural_init(struct ifnet *);
-Static void		ural_stop(struct ifnet *, int);
-Static void		ural_newassoc(struct ieee80211com *,
-			    struct ieee80211_node *, int);
-Static void		ural_amrr_start(struct ural_softc *,
-			    struct ieee80211_node *);
-Static void		ural_amrr_timeout(void *);
-Static void		ural_amrr_update(usbd_xfer_handle, usbd_private_handle,
-			    usbd_status status);
+int		ural_ack_rate(struct ieee80211com *, int);
+uint16_t	ural_txtime(int, int, uint32_t);
+uint8_t		ural_plcp_signal(int);
+void		ural_setup_tx_desc(struct ural_softc *, struct ural_tx_desc *,
+		    uint32_t, int, int);
+int		ural_tx_bcn(struct ural_softc *, struct mbuf *,
+		    struct ieee80211_node *);
+int		ural_tx_data(struct ural_softc *, struct mbuf *,
+		    struct ieee80211_node *);
+void		ural_start(struct ifnet *);
+void		ural_watchdog(struct ifnet *);
+int		ural_ioctl(struct ifnet *, u_long, caddr_t);
+void		ural_eeprom_read(struct ural_softc *, uint16_t, void *, int);
+uint16_t	ural_read(struct ural_softc *, uint16_t);
+void		ural_read_multi(struct ural_softc *, uint16_t, void *, int);
+void		ural_write(struct ural_softc *, uint16_t, uint16_t);
+void		ural_write_multi(struct ural_softc *, uint16_t, void *, int);
+void		ural_bbp_write(struct ural_softc *, uint8_t, uint8_t);
+uint8_t		ural_bbp_read(struct ural_softc *, uint8_t);
+void		ural_rf_write(struct ural_softc *, uint8_t, uint32_t);
+void		ural_set_chan(struct ural_softc *, struct ieee80211_channel *);
+void		ural_disable_rf_tune(struct ural_softc *);
+void		ural_enable_tsf_sync(struct ural_softc *);
+void		ural_update_slot(struct ural_softc *);
+void		ural_set_txpreamble(struct ural_softc *);
+void		ural_set_basicrates(struct ural_softc *);
+void		ural_set_bssid(struct ural_softc *, const uint8_t *);
+void		ural_set_macaddr(struct ural_softc *, const uint8_t *);
+void		ural_update_promisc(struct ural_softc *);
+const char	*ural_get_rf(int);
+void		ural_read_eeprom(struct ural_softc *);
+int		ural_bbp_init(struct ural_softc *);
+void		ural_set_txantenna(struct ural_softc *, int);
+void		ural_set_rxantenna(struct ural_softc *, int);
+int		ural_init(struct ifnet *);
+void		ural_stop(struct ifnet *, int);
+void		ural_newassoc(struct ieee80211com *, struct ieee80211_node *,
+		    int);
+void		ural_amrr_start(struct ural_softc *, struct ieee80211_node *);
+void		ural_amrr_timeout(void *);
+void		ural_amrr_update(usbd_xfer_handle, usbd_private_handle,
+		    usbd_status status);
 
 static const struct {
 	uint16_t	reg;
@@ -196,11 +189,27 @@ static const uint32_t ural_rf2525e_r2[] =   RAL_RF2525E_R2;
 static const uint32_t ural_rf2526_hi_r2[] = RAL_RF2526_HI_R2;
 static const uint32_t ural_rf2526_r2[] =    RAL_RF2526_R2;
 
-USB_DECLARE_DRIVER_CLASS(ural, DV_IFNET);
+int ural_match(struct device *, void *, void *); 
+void ural_attach(struct device *, struct device *, void *); 
+int ural_detach(struct device *, int); 
+int ural_activate(struct device *, enum devact); 
 
-USB_MATCH(ural)
+struct cfdriver ural_cd = { 
+	NULL, "ural", DV_IFNET 
+}; 
+
+const struct cfattach ural_ca = { 
+	sizeof(struct ural_softc), 
+	ural_match, 
+	ural_attach, 
+	ural_detach, 
+	ural_activate, 
+};
+
+int
+ural_match(struct device *parent, void *match, void *aux)
 {
-	USB_MATCH_START(ural, uaa);
+	struct usb_attach_arg *uaa = aux;
 
 	if (uaa->iface != NULL)
 		return UMATCH_NONE;
@@ -209,9 +218,11 @@ USB_MATCH(ural)
 	    UMATCH_VENDOR_PRODUCT : UMATCH_NONE;
 }
 
-USB_ATTACH(ural)
+void
+ural_attach(struct device *parent, struct device *self, void *aux)
 {
-	USB_ATTACH_START(ural, sc, uaa);
+	struct ural_softc *sc = (struct ural_softc *)self;
+	struct usb_attach_arg *uaa = aux;
 	struct ieee80211com *ic = &sc->sc_ic;
 	struct ifnet *ifp = &ic->ic_if;
 	usb_interface_descriptor_t *id;
@@ -223,14 +234,13 @@ USB_ATTACH(ural)
 	sc->sc_udev = uaa->device;
 
 	devinfop = usbd_devinfo_alloc(uaa->device, 0);
-	USB_ATTACH_SETUP;
-	printf("%s: %s\n", USBDEVNAME(sc->sc_dev), devinfop);
+	printf("\n%s: %s\n", sc->sc_dev.dv_xname, devinfop);
 	usbd_devinfo_free(devinfop);
 
 	if (usbd_set_config_no(sc->sc_udev, RAL_CONFIG_NO, 0) != 0) {
 		printf("%s: could not set configuration no\n",
-		    USBDEVNAME(sc->sc_dev));
-		USB_ATTACH_ERROR_RETURN;
+		    sc->sc_dev.dv_xname);
+		return;
 	}
 
 	/* get the first interface handle */
@@ -238,8 +248,8 @@ USB_ATTACH(ural)
 	    &sc->sc_iface);
 	if (error != 0) {
 		printf("%s: could not get interface handle\n",
-		    USBDEVNAME(sc->sc_dev));
-		USB_ATTACH_ERROR_RETURN;
+		    sc->sc_dev.dv_xname);
+		return;
 	}
 
 	/*
@@ -252,8 +262,8 @@ USB_ATTACH(ural)
 		ed = usbd_interface2endpoint_descriptor(sc->sc_iface, i);
 		if (ed == NULL) {
 			printf("%s: no endpoint descriptor for iface %d\n",
-			    USBDEVNAME(sc->sc_dev), i);
-			USB_ATTACH_ERROR_RETURN;
+			    sc->sc_dev.dv_xname, i);
+			return;
 		}
 
 		if (UE_GET_DIR(ed->bEndpointAddress) == UE_DIR_IN &&
@@ -264,8 +274,8 @@ USB_ATTACH(ural)
 			sc->sc_tx_no = ed->bEndpointAddress;
 	}
 	if (sc->sc_rx_no == -1 || sc->sc_tx_no == -1) {
-		printf("%s: missing endpoint\n", USBDEVNAME(sc->sc_dev));
-		USB_ATTACH_ERROR_RETURN;
+		printf("%s: missing endpoint\n", sc->sc_dev.dv_xname);
+		return;
 	}
 
 	usb_init_task(&sc->sc_task, ural_task, sc);
@@ -282,7 +292,7 @@ USB_ATTACH(ural)
 	ural_read_eeprom(sc);
 
 	printf("%s: MAC/BBP RT%04x (rev 0x%02x), RF %s, address %s\n",
-	    USBDEVNAME(sc->sc_dev), sc->macbbp_rev, sc->asic_rev,
+	    sc->sc_dev.dv_xname, sc->macbbp_rev, sc->asic_rev,
 	    ural_get_rf(sc->rf_rev), ether_sprintf(ic->ic_myaddr));
 
 	ic->ic_phytype = IEEE80211_T_OFDM;	/* not only, but not used */
@@ -319,7 +329,7 @@ USB_ATTACH(ural)
 	ifp->if_start = ural_start;
 	ifp->if_watchdog = ural_watchdog;
 	IFQ_SET_READY(&ifp->if_snd);
-	memcpy(ifp->if_xname, USBDEVNAME(sc->sc_dev), IFNAMSIZ);
+	memcpy(ifp->if_xname, sc->sc_dev.dv_xname, IFNAMSIZ);
 
 	if_attach(ifp);
 	ieee80211_ifattach(ifp);
@@ -344,14 +354,13 @@ USB_ATTACH(ural)
 #endif
 
 	usbd_add_drv_event(USB_EVENT_DRIVER_ATTACH, sc->sc_udev,
-	    USBDEV(sc->sc_dev));
-
-	USB_ATTACH_SUCCESS_RETURN;
+	    &sc->sc_dev);
 }
 
-USB_DETACH(ural)
+int
+ural_detach(struct device *self, int flags)
 {
-	USB_DETACH_START(ural, sc);
+	struct ural_softc *sc = (struct ural_softc *)self;
 	struct ifnet *ifp = &sc->sc_ic.ic_if;
 	int s;
 
@@ -385,12 +394,12 @@ USB_DETACH(ural)
 	splx(s);
 
 	usbd_add_drv_event(USB_EVENT_DRIVER_DETACH, sc->sc_udev,
-	    USBDEV(sc->sc_dev));
+	    &sc->sc_dev);
 
 	return 0;
 }
 
-Static int
+int
 ural_alloc_tx_list(struct ural_softc *sc)
 {
 	int i, error;
@@ -405,7 +414,7 @@ ural_alloc_tx_list(struct ural_softc *sc)
 		data->xfer = usbd_alloc_xfer(sc->sc_udev);
 		if (data->xfer == NULL) {
 			printf("%s: could not allocate tx xfer\n",
-			    USBDEVNAME(sc->sc_dev));
+			    sc->sc_dev.dv_xname);
 			error = ENOMEM;
 			goto fail;
 		}
@@ -413,7 +422,7 @@ ural_alloc_tx_list(struct ural_softc *sc)
 		    RAL_TX_DESC_SIZE + IEEE80211_MAX_LEN);
 		if (data->buf == NULL) {
 			printf("%s: could not allocate tx buffer\n",
-			    USBDEVNAME(sc->sc_dev));
+			    sc->sc_dev.dv_xname);
 			error = ENOMEM;
 			goto fail;
 		}
@@ -425,7 +434,7 @@ fail:	ural_free_tx_list(sc);
 	return error;
 }
 
-Static void
+void
 ural_free_tx_list(struct ural_softc *sc)
 {
 	int i;
@@ -445,7 +454,7 @@ ural_free_tx_list(struct ural_softc *sc)
 	}
 }
 
-Static int
+int
 ural_alloc_rx_list(struct ural_softc *sc)
 {
 	int i, error;
@@ -458,13 +467,13 @@ ural_alloc_rx_list(struct ural_softc *sc)
 		data->xfer = usbd_alloc_xfer(sc->sc_udev);
 		if (data->xfer == NULL) {
 			printf("%s: could not allocate rx xfer\n",
-			    USBDEVNAME(sc->sc_dev));
+			    sc->sc_dev.dv_xname);
 			error = ENOMEM;
 			goto fail;
 		}
 		if (usbd_alloc_buffer(data->xfer, MCLBYTES) == NULL) {
 			printf("%s: could not allocate rx buffer\n",
-			    USBDEVNAME(sc->sc_dev));
+			    sc->sc_dev.dv_xname);
 			error = ENOMEM;
 			goto fail;
 		}
@@ -472,14 +481,14 @@ ural_alloc_rx_list(struct ural_softc *sc)
 		MGETHDR(data->m, M_DONTWAIT, MT_DATA);
 		if (data->m == NULL) {
 			printf("%s: could not allocate rx mbuf\n",
-			    USBDEVNAME(sc->sc_dev));
+			    sc->sc_dev.dv_xname);
 			error = ENOMEM;
 			goto fail;
 		}
 		MCLGET(data->m, M_DONTWAIT);
 		if (!(data->m->m_flags & M_EXT)) {
 			printf("%s: could not allocate rx mbuf cluster\n",
-			    USBDEVNAME(sc->sc_dev));
+			    sc->sc_dev.dv_xname);
 			error = ENOMEM;
 			goto fail;
 		}
@@ -492,7 +501,7 @@ fail:	ural_free_tx_list(sc);
 	return error;
 }
 
-Static void
+void
 ural_free_rx_list(struct ural_softc *sc)
 {
 	int i;
@@ -511,7 +520,7 @@ ural_free_rx_list(struct ural_softc *sc)
 	}
 }
 
-Static int
+int
 ural_media_change(struct ifnet *ifp)
 {
 	int error;
@@ -530,7 +539,7 @@ ural_media_change(struct ifnet *ifp)
  * This function is called periodically (every 200ms) during scanning to
  * switch from one channel to another.
  */
-Static void
+void
 ural_next_scan(void *arg)
 {
 	struct ural_softc *sc = arg;
@@ -541,7 +550,7 @@ ural_next_scan(void *arg)
 		ieee80211_next_scan(ifp);
 }
 
-Static void
+void
 ural_task(void *arg)
 {
 	struct ural_softc *sc = arg;
@@ -593,14 +602,14 @@ ural_task(void *arg)
 			m = ieee80211_beacon_alloc(ic, ni);
 			if (m == NULL) {
 				printf("%s: could not allocate beacon\n",
-				    USBDEVNAME(sc->sc_dev));
+				    sc->sc_dev.dv_xname);
 				return;
 			}
 
 			if (ural_tx_bcn(sc, m, ni) != 0) {
 				m_freem(m);
 				printf("%s: could not transmit beacon\n",
-				    USBDEVNAME(sc->sc_dev));
+				    sc->sc_dev.dv_xname);
 				return;
 			}
 
@@ -629,7 +638,7 @@ ural_task(void *arg)
 	sc->sc_newstate(ic, sc->sc_state, sc->sc_arg);
 }
 
-Static int
+int
 ural_newstate(struct ieee80211com *ic, enum ieee80211_state nstate, int arg)
 {
 	struct ural_softc *sc = ic->ic_if.if_softc;
@@ -655,7 +664,7 @@ ural_newstate(struct ieee80211com *ic, enum ieee80211_state nstate, int arg)
 
 #define RAL_RXTX_TURNAROUND	5	/* us */
 
-Static void
+void
 ural_txeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
 {
 	struct ural_tx_data *data = priv;
@@ -669,7 +678,7 @@ ural_txeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
 			return;
 
 		printf("%s: could not transmit buffer: %s\n",
-		    USBDEVNAME(sc->sc_dev), usbd_errstr(status));
+		    sc->sc_dev.dv_xname, usbd_errstr(status));
 
 		if (status == USBD_STALLED)
 			usbd_clear_endpoint_stall_async(sc->sc_tx_pipeh);
@@ -695,7 +704,7 @@ ural_txeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
 	splx(s);
 }
 
-Static void
+void
 ural_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
 {
 	struct ural_rx_data *data = priv;
@@ -720,7 +729,7 @@ ural_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
 	usbd_get_xfer_status(xfer, NULL, NULL, &len, NULL);
 
 	if (len < RAL_RX_DESC_SIZE + IEEE80211_MIN_LEN) {
-		DPRINTF(("%s: xfer too short %d\n", USBDEVNAME(sc->sc_dev),
+		DPRINTF(("%s: xfer too short %d\n", sc->sc_dev.dv_xname,
 		    len));
 		ifp->if_ierrors++;
 		goto skip;
@@ -742,14 +751,14 @@ ural_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
 	MGETHDR(mnew, M_DONTWAIT, MT_DATA);
 	if (mnew == NULL) {
 		printf("%s: could not allocate rx mbuf\n",
-		    USBDEVNAME(sc->sc_dev));
+		    sc->sc_dev.dv_xname);
 		ifp->if_ierrors++;
 		goto skip;
 	}
 	MCLGET(mnew, M_DONTWAIT);
 	if (!(mnew->m_flags & M_EXT)) {
 		printf("%s: could not allocate rx mbuf cluster\n",
-		    USBDEVNAME(sc->sc_dev));
+		    sc->sc_dev.dv_xname);
 		m_freem(mnew);
 		ifp->if_ierrors++;
 		goto skip;
@@ -818,7 +827,7 @@ skip:	/* setup a new transfer */
  * which a given frame was received.
  */
 #if NBPFILTER > 0
-Static uint8_t
+uint8_t
 ural_rxrate(const struct ural_rx_desc *desc)
 {
 	if (letoh32(desc->flags) & RAL_RX_OFDM) {
@@ -850,7 +859,7 @@ ural_rxrate(const struct ural_rx_desc *desc)
 /*
  * Return the expected ack rate for a frame transmitted at rate `rate'.
  */
-Static int
+int
 ural_ack_rate(struct ieee80211com *ic, int rate)
 {
 	switch (rate) {
@@ -885,7 +894,7 @@ ural_ack_rate(struct ieee80211com *ic, int rate)
  * The function automatically determines the operating mode depending on the
  * given rate. `flags' indicates whether short preamble is in use or not.
  */
-Static uint16_t
+uint16_t
 ural_txtime(int len, int rate, uint32_t flags)
 {
 	uint16_t txtime;
@@ -905,7 +914,7 @@ ural_txtime(int len, int rate, uint32_t flags)
 	return txtime;
 }
 
-Static uint8_t
+uint8_t
 ural_plcp_signal(int rate)
 {
 	switch (rate) {
@@ -930,7 +939,7 @@ ural_plcp_signal(int rate)
 	}
 }
 
-Static void
+void
 ural_setup_tx_desc(struct ural_softc *sc, struct ural_tx_desc *desc,
     uint32_t flags, int len, int rate)
 {
@@ -977,7 +986,7 @@ ural_setup_tx_desc(struct ural_softc *sc, struct ural_tx_desc *desc,
 
 #define RAL_TX_TIMEOUT	5000
 
-Static int
+int
 ural_tx_bcn(struct ural_softc *sc, struct mbuf *m0, struct ieee80211_node *ni)
 {
 	struct ural_tx_desc *desc;
@@ -1027,7 +1036,7 @@ ural_tx_bcn(struct ural_softc *sc, struct mbuf *m0, struct ieee80211_node *ni)
 	return error;
 }
 
-Static int
+int
 ural_tx_data(struct ural_softc *sc, struct mbuf *m0, struct ieee80211_node *ni)
 {
 	struct ieee80211com *ic = &sc->sc_ic;
@@ -1214,7 +1223,7 @@ ural_tx_data(struct ural_softc *sc, struct mbuf *m0, struct ieee80211_node *ni)
 	return 0;
 }
 
-Static void
+void
 ural_start(struct ifnet *ifp)
 {
 	struct ural_softc *sc = ifp->if_softc;
@@ -1282,7 +1291,7 @@ ural_start(struct ifnet *ifp)
 	}
 }
 
-Static void
+void
 ural_watchdog(struct ifnet *ifp)
 {
 	struct ural_softc *sc = ifp->if_softc;
@@ -1291,7 +1300,7 @@ ural_watchdog(struct ifnet *ifp)
 
 	if (sc->sc_tx_timer > 0) {
 		if (--sc->sc_tx_timer == 0) {
-			printf("%s: device timeout\n", USBDEVNAME(sc->sc_dev));
+			printf("%s: device timeout\n", sc->sc_dev.dv_xname);
 			/*ural_init(ifp); XXX needs a process context! */
 			ifp->if_oerrors++;
 			return;
@@ -1302,7 +1311,7 @@ ural_watchdog(struct ifnet *ifp)
 	ieee80211_watchdog(ifp);
 }
 
-Static int
+int
 ural_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 {
 	struct ural_softc *sc = ifp->if_softc;
@@ -1377,7 +1386,7 @@ ural_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	return error;
 }
 
-Static void
+void
 ural_eeprom_read(struct ural_softc *sc, uint16_t addr, void *buf, int len)
 {
 	usb_device_request_t req;
@@ -1392,11 +1401,11 @@ ural_eeprom_read(struct ural_softc *sc, uint16_t addr, void *buf, int len)
 	error = usbd_do_request(sc->sc_udev, &req, buf);
 	if (error != 0) {
 		printf("%s: could not read EEPROM: %s\n",
-		    USBDEVNAME(sc->sc_dev), usbd_errstr(error));
+		    sc->sc_dev.dv_xname, usbd_errstr(error));
 	}
 }
 
-Static uint16_t
+uint16_t
 ural_read(struct ural_softc *sc, uint16_t reg)
 {
 	usb_device_request_t req;
@@ -1412,13 +1421,13 @@ ural_read(struct ural_softc *sc, uint16_t reg)
 	error = usbd_do_request(sc->sc_udev, &req, &val);
 	if (error != 0) {
 		printf("%s: could not read MAC register: %s\n",
-		    USBDEVNAME(sc->sc_dev), usbd_errstr(error));
+		    sc->sc_dev.dv_xname, usbd_errstr(error));
 		return 0;
 	}
-	return le16toh(val);
+	return letoh16(val);
 }
 
-Static void
+void
 ural_read_multi(struct ural_softc *sc, uint16_t reg, void *buf, int len)
 {
 	usb_device_request_t req;
@@ -1433,11 +1442,11 @@ ural_read_multi(struct ural_softc *sc, uint16_t reg, void *buf, int len)
 	error = usbd_do_request(sc->sc_udev, &req, buf);
 	if (error != 0) {
 		printf("%s: could not read MAC register: %s\n",
-		    USBDEVNAME(sc->sc_dev), usbd_errstr(error));
+		    sc->sc_dev.dv_xname, usbd_errstr(error));
 	}
 }
 
-Static void
+void
 ural_write(struct ural_softc *sc, uint16_t reg, uint16_t val)
 {
 	usb_device_request_t req;
@@ -1452,11 +1461,11 @@ ural_write(struct ural_softc *sc, uint16_t reg, uint16_t val)
 	error = usbd_do_request(sc->sc_udev, &req, NULL);
 	if (error != 0) {
 		printf("%s: could not write MAC register: %s\n",
-		    USBDEVNAME(sc->sc_dev), usbd_errstr(error));
+		    sc->sc_dev.dv_xname, usbd_errstr(error));
 	}
 }
 
-Static void
+void
 ural_write_multi(struct ural_softc *sc, uint16_t reg, void *buf, int len)
 {
 	usb_device_request_t req;
@@ -1471,11 +1480,11 @@ ural_write_multi(struct ural_softc *sc, uint16_t reg, void *buf, int len)
 	error = usbd_do_request(sc->sc_udev, &req, buf);
 	if (error != 0) {
 		printf("%s: could not write MAC register: %s\n",
-		    USBDEVNAME(sc->sc_dev), usbd_errstr(error));
+		    sc->sc_dev.dv_xname, usbd_errstr(error));
 	}
 }
 
-Static void
+void
 ural_bbp_write(struct ural_softc *sc, uint8_t reg, uint8_t val)
 {
 	uint16_t tmp;
@@ -1486,7 +1495,7 @@ ural_bbp_write(struct ural_softc *sc, uint8_t reg, uint8_t val)
 			break;
 	}
 	if (ntries == 5) {
-		printf("%s: could not write to BBP\n", USBDEVNAME(sc->sc_dev));
+		printf("%s: could not write to BBP\n", sc->sc_dev.dv_xname);
 		return;
 	}
 
@@ -1494,7 +1503,7 @@ ural_bbp_write(struct ural_softc *sc, uint8_t reg, uint8_t val)
 	ural_write(sc, RAL_PHY_CSR7, tmp);
 }
 
-Static uint8_t
+uint8_t
 ural_bbp_read(struct ural_softc *sc, uint8_t reg)
 {
 	uint16_t val;
@@ -1508,13 +1517,13 @@ ural_bbp_read(struct ural_softc *sc, uint8_t reg)
 			break;
 	}
 	if (ntries == 5) {
-		printf("%s: could not read BBP\n", USBDEVNAME(sc->sc_dev));
+		printf("%s: could not read BBP\n", sc->sc_dev.dv_xname);
 		return 0;
 	}
 	return ural_read(sc, RAL_PHY_CSR7) & 0xff;
 }
 
-Static void
+void
 ural_rf_write(struct ural_softc *sc, uint8_t reg, uint32_t val)
 {
 	uint32_t tmp;
@@ -1525,7 +1534,7 @@ ural_rf_write(struct ural_softc *sc, uint8_t reg, uint32_t val)
 			break;
 	}
 	if (ntries == 5) {
-		printf("%s: could not write to RF\n", USBDEVNAME(sc->sc_dev));
+		printf("%s: could not write to RF\n", sc->sc_dev.dv_xname);
 		return;
 	}
 
@@ -1539,7 +1548,7 @@ ural_rf_write(struct ural_softc *sc, uint8_t reg, uint32_t val)
 	DPRINTFN(15, ("RF R[%u] <- 0x%05x\n", reg & 0x3, val & 0xfffff));
 }
 
-Static void
+void
 ural_set_chan(struct ural_softc *sc, struct ieee80211_channel *c)
 {
 	struct ieee80211com *ic = &sc->sc_ic;
@@ -1627,7 +1636,7 @@ ural_set_chan(struct ural_softc *sc, struct ieee80211_channel *c)
 /*
  * Disable RF auto-tuning.
  */
-Static void
+void
 ural_disable_rf_tune(struct ural_softc *sc)
 {
 	uint32_t tmp;
@@ -1647,7 +1656,7 @@ ural_disable_rf_tune(struct ural_softc *sc)
  * Refer to IEEE Std 802.11-1999 pp. 123 for more information on TSF
  * synchronization.
  */
-Static void
+void
 ural_enable_tsf_sync(struct ural_softc *sc)
 {
 	struct ieee80211com *ic = &sc->sc_ic;
@@ -1675,7 +1684,7 @@ ural_enable_tsf_sync(struct ural_softc *sc)
 	DPRINTF(("enabling TSF synchronization\n"));
 }
 
-Static void
+void
 ural_update_slot(struct ural_softc *sc)
 {
 	struct ieee80211com *ic = &sc->sc_ic;
@@ -1700,7 +1709,7 @@ ural_update_slot(struct ural_softc *sc)
 	ural_write(sc, RAL_MAC_CSR12, eifs);
 }
 
-Static void
+void
 ural_set_txpreamble(struct ural_softc *sc)
 {
 	uint16_t tmp;
@@ -1714,7 +1723,7 @@ ural_set_txpreamble(struct ural_softc *sc)
 	ural_write(sc, RAL_TXRX_CSR10, tmp);
 }
 
-Static void
+void
 ural_set_basicrates(struct ural_softc *sc)
 {
 	struct ieee80211com *ic = &sc->sc_ic;
@@ -1729,7 +1738,7 @@ ural_set_basicrates(struct ural_softc *sc)
 	}
 }
 
-Static void
+void
 ural_set_bssid(struct ural_softc *sc, const uint8_t *bssid)
 {
 	uint16_t tmp;
@@ -1746,7 +1755,7 @@ ural_set_bssid(struct ural_softc *sc, const uint8_t *bssid)
 	DPRINTF(("setting BSSID to %s\n", ether_sprintf((uint8_t *)bssid)));
 }
 
-Static void
+void
 ural_set_macaddr(struct ural_softc *sc, const uint8_t *addr)
 {
 	uint16_t tmp;
@@ -1764,7 +1773,7 @@ ural_set_macaddr(struct ural_softc *sc, const uint8_t *addr)
 	    ether_sprintf((uint8_t *)addr)));
 }
 
-Static void
+void
 ural_update_promisc(struct ural_softc *sc)
 {
 	struct ifnet *ifp = &sc->sc_ic.ic_if;
@@ -1782,7 +1791,7 @@ ural_update_promisc(struct ural_softc *sc)
 	    "entering" : "leaving"));
 }
 
-Static const char *
+const char *
 ural_get_rf(int rev)
 {
 	switch (rev) {
@@ -1797,7 +1806,7 @@ ural_get_rf(int rev)
 	}
 }
 
-Static void
+void
 ural_read_eeprom(struct ural_softc *sc)
 {
 	struct ieee80211com *ic = &sc->sc_ic;
@@ -1826,7 +1835,7 @@ ural_read_eeprom(struct ural_softc *sc)
 	ural_eeprom_read(sc, RAL_EEPROM_TXPOWER, sc->txpow, 14);
 }
 
-Static int
+int
 ural_bbp_init(struct ural_softc *sc)
 {
 #define N(a)	(sizeof (a) / sizeof ((a)[0]))
@@ -1839,7 +1848,7 @@ ural_bbp_init(struct ural_softc *sc)
 		DELAY(1000);
 	}
 	if (ntries == 100) {
-		printf("%s: timeout waiting for BBP\n", USBDEVNAME(sc->sc_dev));
+		printf("%s: timeout waiting for BBP\n", sc->sc_dev.dv_xname);
 		return EIO;
 	}
 
@@ -1860,7 +1869,7 @@ ural_bbp_init(struct ural_softc *sc)
 #undef N
 }
 
-Static void
+void
 ural_set_txantenna(struct ural_softc *sc, int antenna)
 {
 	uint16_t tmp;
@@ -1889,7 +1898,7 @@ ural_set_txantenna(struct ural_softc *sc, int antenna)
 	ural_write(sc, RAL_PHY_CSR6, tmp | (tx & 0x7));
 }
 
-Static void
+void
 ural_set_rxantenna(struct ural_softc *sc, int antenna)
 {
 	uint8_t rx;
@@ -1909,7 +1918,7 @@ ural_set_rxantenna(struct ural_softc *sc, int antenna)
 	ural_bbp_write(sc, RAL_BBP_RX, rx);
 }
 
-Static int
+int
 ural_init(struct ifnet *ifp)
 {
 #define N(a)	(sizeof (a) / sizeof ((a)[0]))
@@ -1935,7 +1944,7 @@ ural_init(struct ifnet *ifp)
 	}
 	if (ntries == 100) {
 		printf("%s: timeout waiting for BBP/RF to wakeup\n",
-		    USBDEVNAME(sc->sc_dev));
+		    sc->sc_dev.dv_xname);
 		error = EIO;
 		goto fail;
 	}
@@ -1970,9 +1979,9 @@ ural_init(struct ifnet *ifp)
 	 * Copy WEP keys into adapter's memory (SEC_CSR0 to SEC_CSR31).
 	 */
 	for (i = 0; i < IEEE80211_WEP_NKID; i++) {
-		struct ieee80211_wepkey *wk = &ic->ic_nw_keys[i];
+		struct ieee80211_key *k = &ic->ic_nw_keys[i];
 		ural_write_multi(sc, RAL_SEC_CSR0 + i * IEEE80211_KEYBUF_SIZE,
-		    wk->wk_key, IEEE80211_KEYBUF_SIZE);
+		    k->k_key, IEEE80211_KEYBUF_SIZE);
 	}
 
 	/*
@@ -1981,7 +1990,7 @@ ural_init(struct ifnet *ifp)
 	sc->amrr_xfer = usbd_alloc_xfer(sc->sc_udev);
 	if (sc->amrr_xfer == NULL) {
 		printf("%s: could not allocate AMRR xfer\n",
-		    USBDEVNAME(sc->sc_dev));
+		    sc->sc_dev.dv_xname);
 		goto fail;
 	}
 
@@ -1992,14 +2001,14 @@ ural_init(struct ifnet *ifp)
 	    &sc->sc_tx_pipeh);
 	if (error != 0) {
 		printf("%s: could not open Tx pipe: %s\n",
-		    USBDEVNAME(sc->sc_dev), usbd_errstr(error));
+		    sc->sc_dev.dv_xname, usbd_errstr(error));
 		goto fail;
 	}
 	error = usbd_open_pipe(sc->sc_iface, sc->sc_rx_no, USBD_EXCLUSIVE_USE,
 	    &sc->sc_rx_pipeh);
 	if (error != 0) {
 		printf("%s: could not open Rx pipe: %s\n",
-		    USBDEVNAME(sc->sc_dev), usbd_errstr(error));
+		    sc->sc_dev.dv_xname, usbd_errstr(error));
 		goto fail;
 	}
 
@@ -2009,13 +2018,13 @@ ural_init(struct ifnet *ifp)
 	error = ural_alloc_tx_list(sc);
 	if (error != 0) {
 		printf("%s: could not allocate Tx list\n",
-		    USBDEVNAME(sc->sc_dev));
+		    sc->sc_dev.dv_xname);
 		goto fail;
 	}
 	error = ural_alloc_rx_list(sc);
 	if (error != 0) {
 		printf("%s: could not allocate Rx list\n",
-		    USBDEVNAME(sc->sc_dev));
+		    sc->sc_dev.dv_xname);
 		goto fail;
 	}
 
@@ -2030,7 +2039,7 @@ ural_init(struct ifnet *ifp)
 		error = usbd_transfer(data->xfer);
 		if (error != 0 && error != USBD_IN_PROGRESS) {
 			printf("%s: could not queue Rx transfer\n",
-			    USBDEVNAME(sc->sc_dev));
+			    sc->sc_dev.dv_xname);
 			goto fail;
 		}
 	}
@@ -2061,7 +2070,7 @@ fail:	ural_stop(ifp, 1);
 #undef N
 }
 
-Static void
+void
 ural_stop(struct ifnet *ifp, int disable)
 {
 	struct ural_softc *sc = ifp->if_softc;
@@ -2099,14 +2108,14 @@ ural_stop(struct ifnet *ifp, int disable)
 	ural_free_tx_list(sc);
 }
 
-Static void
+void
 ural_newassoc(struct ieee80211com *ic, struct ieee80211_node *ni, int isnew)
 {
 	/* start with lowest Tx rate */
 	ni->ni_txrate = 0;
 }
 
-Static void
+void
 ural_amrr_start(struct ural_softc *sc, struct ieee80211_node *ni)
 {
 	int i;
@@ -2125,7 +2134,7 @@ ural_amrr_start(struct ural_softc *sc, struct ieee80211_node *ni)
 	timeout_add(&sc->amrr_to, hz);
 }
 
-Static void
+void
 ural_amrr_timeout(void *arg)
 {
 	struct ural_softc *sc = arg;
@@ -2151,7 +2160,7 @@ ural_amrr_timeout(void *arg)
 	splx(s);
 }
 
-Static void
+void
 ural_amrr_update(usbd_xfer_handle xfer, usbd_private_handle priv,
     usbd_status status)
 {
@@ -2160,7 +2169,7 @@ ural_amrr_update(usbd_xfer_handle xfer, usbd_private_handle priv,
 
 	if (status != USBD_NORMAL_COMPLETION) {
 		printf("%s: could not retrieve Tx statistics - cancelling "
-		    "automatic rate control\n", USBDEVNAME(sc->sc_dev));
+		    "automatic rate control\n", sc->sc_dev.dv_xname);
 		return;
 	}
 
@@ -2181,15 +2190,14 @@ ural_amrr_update(usbd_xfer_handle xfer, usbd_private_handle priv,
 	timeout_add(&sc->amrr_to, hz);
 }
 
-Static int
-ural_activate(device_ptr_t self, enum devact act)
+int
+ural_activate(struct device *self, enum devact act)
 {
 	switch (act) {
 	case DVACT_ACTIVATE:
 		break;
 
 	case DVACT_DEACTIVATE:
-		/*if_deactivate(&sc->sc_ic.ic_if);*/
 		break;
 	}
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_sig.c,v 1.87 2007/02/06 18:42:37 art Exp $	*/
+/*	$OpenBSD: kern_sig.c,v 1.94 2007/05/30 07:42:52 moritz Exp $	*/
 /*	$NetBSD: kern_sig.c,v 1.54 1996/04/22 01:38:32 christos Exp $	*/
 
 /*
@@ -78,7 +78,10 @@ int	filt_signal(struct knote *kn, long hint);
 struct filterops sig_filtops =
 	{ 0, filt_sigattach, filt_sigdetach, filt_signal };
 
-void proc_stop(struct proc *p);
+void proc_stop(struct proc *p, int);
+void proc_stop_sweep(void *);
+struct timeout proc_stop_to;
+
 int cansignal(struct proc *, struct pcred *, struct proc *, int);
 
 struct pool sigacts_pool;	/* memory pool for sigacts structures */
@@ -97,8 +100,9 @@ cansignal(struct proc *p, struct pcred *pc, struct proc *q, int signum)
 
 #ifdef RTHREADS
 	/* a thread can only be signalled from within the same process */
-	if (q->p_flag & P_THREAD)
-		return (p->p_thrparent == q->p_thrparent);
+	if (q->p_flag & P_THREAD) {
+		return (p->p_p == q->p_p);
+	}
 #endif
 
 	if (signum == SIGCONT && q->p_session == p->p_session)
@@ -145,13 +149,14 @@ cansignal(struct proc *p, struct pcred *pc, struct proc *q, int signum)
 	return (0);
 }
 
-
 /*
  * Initialize signal-related data structures.
  */
 void
 signal_init(void)
 {
+	timeout_set(&proc_stop_to, proc_stop_sweep, NULL);
+
 	pool_init(&sigacts_pool, sizeof(struct sigacts), 0, 0, 0, "sigapl",
 	    &pool_allocator_nointr);
 }
@@ -288,9 +293,9 @@ setsigvec(struct proc *p, int signum, struct sigaction *sa)
 	ps->ps_catchmask[signum] = sa->sa_mask &~ sigcantmask;
 	if (signum == SIGCHLD) {
 		if (sa->sa_flags & SA_NOCLDSTOP)
-			p->p_flag |= P_NOCLDSTOP;
+			atomic_setbits_int(&p->p_flag, P_NOCLDSTOP);
 		else
-			p->p_flag &= ~P_NOCLDSTOP;
+			atomic_clearbits_int(&p->p_flag, P_NOCLDSTOP);
 		/*
 		 * If the SA_NOCLDWAIT flag is set or the handler
 		 * is SIG_IGN we reparent the dying child to PID 1
@@ -300,9 +305,9 @@ setsigvec(struct proc *p, int signum, struct sigaction *sa)
 		 */
 		if (p->p_pid != 1 && ((sa->sa_flags & SA_NOCLDWAIT) ||
 		    sa->sa_handler == SIG_IGN))
-			p->p_flag |= P_NOCLDWAIT;
+			atomic_setbits_int(&p->p_flag, P_NOCLDWAIT);
 		else
-			p->p_flag &= ~P_NOCLDWAIT;
+			atomic_clearbits_int(&p->p_flag, P_NOCLDWAIT);
 	}
 	if ((sa->sa_flags & SA_RESETHAND) != 0)
 		ps->ps_sigreset |= bit;
@@ -403,7 +408,7 @@ execsigs(struct proc *p)
 	ps->ps_sigstk.ss_size = 0;
 	ps->ps_sigstk.ss_sp = 0;
 	ps->ps_flags = 0;
-	p->p_flag &= ~P_NOCLDWAIT;
+	atomic_clearbits_int(&p->p_flag, P_NOCLDWAIT);
 	if (ps->ps_sigact[SIGCHLD] == SIG_IGN)
 		ps->ps_sigact[SIGCHLD] = SIG_DFL;
 }
@@ -776,6 +781,7 @@ psignal(struct proc *p, int signum)
 #ifdef RTHREADS
 	struct proc *q;
 #endif
+	int wakeparent = 0;
 
 #ifdef DIAGNOSTIC
 	if ((u_int)signum >= NSIG || signum == 0)
@@ -787,7 +793,9 @@ psignal(struct proc *p, int signum)
 		return;
 
 #ifdef RTHREADS
-	LIST_FOREACH(q, &p->p_thrchildren, p_thrsib) {
+	TAILQ_FOREACH(q, &p->p_p->ps_threads, p_thr_link) {
+		if (q == p)
+			continue;
 		if (q->p_sigdivert & (1 << signum)) {
 			q->p_sigdivert = 0;
 			psignal(q, signum);
@@ -839,19 +847,24 @@ psignal(struct proc *p, int signum)
 
 	if (prop & SA_CONT) {
 #ifdef RTHREADS
-		LIST_FOREACH(q, &p->p_thrchildren, p_thrsib)
-			psignal(q, signum);
+		TAILQ_FOREACH(q, &p->p_p->ps_threads, p_thr_link) {
+			if (q != p)
+				psignal(q, signum);
+		 }
 #endif
 		atomic_clearbits_int(&p->p_siglist, stopsigmask);
 	}
 
 	if (prop & SA_STOP) {
 #ifdef RTHREADS
-		LIST_FOREACH(q, &p->p_thrchildren, p_thrsib)
-			psignal(q, signum);
+		
+		TAILQ_FOREACH(q, &p->p_p->ps_threads, p_thr_link) {
+			if (q != p)
+				psignal(q, signum);
+		 }
 #endif
 		atomic_clearbits_int(&p->p_siglist, contsigmask);
-		p->p_flag &= ~P_CONTINUED;
+		atomic_clearbits_int(&p->p_flag, P_CONTINUED);
 	}
 
 	atomic_setbits_int(&p->p_siglist, mask);
@@ -905,9 +918,7 @@ psignal(struct proc *p, int signum)
 				goto out;
 			atomic_clearbits_int(&p->p_siglist, mask);
 			p->p_xstat = signum;
-			if ((p->p_pptr->p_flag & P_NOCLDSTOP) == 0)
-				psignal(p->p_pptr, SIGCHLD);
-			proc_stop(p);
+			proc_stop(p, 0);
 			goto out;
 		}
 		/*
@@ -942,8 +953,8 @@ psignal(struct proc *p, int signum)
 			 * an event, then it goes back to run state.
 			 * Otherwise, process goes back to sleep state.
 			 */
-			p->p_flag |= P_CONTINUED;
-			wakeup(p->p_pptr);
+			atomic_setbits_int(&p->p_flag, P_CONTINUED);
+			wakeparent = 1;
 			if (action == SIG_DFL)
 				atomic_clearbits_int(&p->p_siglist, mask);
 			if (action == SIG_CATCH)
@@ -996,6 +1007,8 @@ run:
 	setrunnable(p);
 out:
 	SCHED_UNLOCK(s);
+	if (wakeparent)
+		wakeup(p->p_pptr);
 }
 
 /*
@@ -1014,6 +1027,7 @@ int
 issignal(struct proc *p)
 {
 	int signum, mask, prop;
+	int dolock = (p->p_flag & P_SINTR) == 0;
 	int s;
 
 	for (;;) {
@@ -1040,11 +1054,11 @@ issignal(struct proc *p)
 			 */
 			p->p_xstat = signum;
 
-			SCHED_LOCK(s);	/* protect mi_switch */
-			psignal(p->p_pptr, SIGCHLD);
-			proc_stop(p);
-			mi_switch();
-			SCHED_UNLOCK(s);
+			if (dolock)
+				SCHED_LOCK(s);
+			proc_stop(p, 1);
+			if (dolock)
+				SCHED_UNLOCK(s);
 
 			/*
 			 * If we are no longer being traced, or the parent
@@ -1103,12 +1117,11 @@ issignal(struct proc *p)
 				    prop & SA_TTYSTOP))
 					break;	/* == ignore */
 				p->p_xstat = signum;
-				if ((p->p_pptr->p_flag & P_NOCLDSTOP) == 0)
-					psignal(p->p_pptr, SIGCHLD);
-				SCHED_LOCK(s);
-				proc_stop(p);
-				mi_switch();
-				SCHED_UNLOCK(s);
+				if (dolock)
+					SCHED_LOCK(s);
+				proc_stop(p, 1);
+				if (dolock)
+					SCHED_UNLOCK(s);
 				break;
 			} else if (prop & SA_IGNORE) {
 				/*
@@ -1152,15 +1165,53 @@ keep:
  * on the run queue.
  */
 void
-proc_stop(struct proc *p)
+proc_stop(struct proc *p, int sw)
 {
+#ifdef __HAVE_GENERIC_SOFT_INTERRUPTS
+	extern void *softclock_si;
+#endif
 #ifdef MULTIPROCESSOR
 	SCHED_ASSERT_LOCKED();
 #endif
 
 	p->p_stat = SSTOP;
-	p->p_flag &= ~P_WAITED;
-	wakeup(p->p_pptr);
+	atomic_clearbits_int(&p->p_flag, P_WAITED);
+	atomic_setbits_int(&p->p_flag, P_STOPPED);
+	if (!timeout_pending(&proc_stop_to)) {
+		timeout_add(&proc_stop_to, 0);
+		/*
+		 * We need this soft interrupt to be handled fast.
+		 * Extra calls to softclock don't hurt.
+		 */
+#ifdef __HAVE_GENERIC_SOFT_INTERRUPTS
+                softintr_schedule(softclock_si);
+#else
+                setsoftclock();
+#endif
+	}
+	if (sw)
+		mi_switch();
+}
+
+/*
+ * Called from a timeout to send signals to the parents of stopped processes.
+ * We can't do this in proc_stop because it's called with nasty locks held
+ * and we would need recursive scheduler lock to deal with that.
+ */
+void
+proc_stop_sweep(void *v)
+{
+	struct proc *p;
+
+	LIST_FOREACH(p, &allproc, p_list) {
+		if ((p->p_flag & P_STOPPED) == 0)
+			continue;
+		atomic_clearbits_int(&p->p_flag, P_STOPPED);
+
+		if ((p->p_pptr->p_flag & P_NOCLDSTOP) == 0)
+			psignal(p->p_pptr, SIGCHLD);
+		wakeup(p->p_pptr);
+	}
 }
 
 /*
@@ -1279,7 +1330,7 @@ void
 sigexit(struct proc *p, int signum)
 {
 	/* Mark process as going away */
-	p->p_flag |= P_WEXIT;
+	atomic_setbits_int(&p->p_flag, P_WEXIT);
 
 	p->p_acflag |= AXSIG;
 	if (sigprop[signum] & SA_CORE) {
@@ -1305,24 +1356,32 @@ coredump(struct proc *p)
 	struct vmspace *vm = p->p_vmspace;
 	struct nameidata nd;
 	struct vattr vattr;
-	int error, error1;
-	char name[MAXCOMLEN+6];		/* progname.core */
+	int error, error1, len;
+	char name[sizeof("/var/crash/") + MAXCOMLEN + sizeof(".core")];
+	char *dir = "";
 	struct core core;
 
 	/*
 	 * Don't dump if not root and the process has used set user or
-	 * group privileges.
+	 * group privileges, unless the nosuidcoredump sysctl is set to 2,
+	 * in which case dumps are put into /var/crash/.
 	 */
-	if ((p->p_flag & P_SUGID) &&
-	    (error = suser(p, 0)) != 0)
-		return (error);
-	if ((p->p_flag & P_SUGID) && nosuidcoredump)
-		return (EPERM);
+	if (((p->p_flag & P_SUGID) && (error = suser(p, 0))) ||
+	   ((p->p_flag & P_SUGID) && nosuidcoredump)) {
+		if (nosuidcoredump == 2)
+			dir = "/var/crash/";
+		else
+			return (EPERM);
+	}
 
 	/* Don't dump if will exceed file size limit. */
 	if (USPACE + ctob(vm->vm_dsize + vm->vm_ssize) >=
 	    p->p_rlimit[RLIMIT_CORE].rlim_cur)
 		return (EFBIG);
+
+	len = snprintf(name, sizeof(name), "%s%s.core", dir, p->p_comm);
+	if (len >= sizeof(name))
+		return (EACCES);
 
 	/*
 	 * ... but actually write it as UID
@@ -1331,7 +1390,6 @@ coredump(struct proc *p)
 	cred->cr_uid = p->p_cred->p_ruid;
 	cred->cr_gid = p->p_cred->p_rgid;
 
-	snprintf(name, sizeof name, "%s.core", p->p_comm);
 	NDINIT(&nd, LOOKUP, NOFOLLOW, UIO_SYSSPACE, name, p);
 
 	error = vn_open(&nd, O_CREAT | FWRITE | O_NOFOLLOW, S_IRUSR | S_IWUSR);

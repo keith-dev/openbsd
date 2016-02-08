@@ -1,4 +1,4 @@
-vers(a, {-$OpenBSD: MAKEDEV.common,v 1.33 2007/03/07 02:51:17 krw Exp $-})dnl
+vers(a, {-$OpenBSD: MAKEDEV.common,v 1.36 2007/07/23 23:21:25 todd Exp $-})dnl
 dnl
 dnl Copyright (c) 2001-2006 Todd T. Fries <todd@OpenBSD.org>
 dnl
@@ -156,7 +156,6 @@ twrget(all, lpt, lpa, 0, 1, 2)dnl
 target(all, joy, 0, 1)dnl
 twrget(all, rnd, random)dnl
 target(all, uk, 0)dnl
-target(all, wt, 0)dnl
 twrget(all, au, audio, 0)dnl
 twrget(all, speak, speaker)dnl
 target(all, asc, 0)dnl
@@ -201,14 +200,6 @@ _mkdev(uall, uall, {-dnl
 show_target({-usb-})dnl
 -})dnl
 __devtitle(tap, Tapes)dnl
-__devitem(wt, {-wt*-}, Archive/Wangtek QIC-cartridge tape drives)dnl
-_mkdev(wt, wt*,
-{-name=wt
-	n=Mult($U, 8) m=Add($n, 4)
-	M $name$U	b major_wt_b $n 640 operator
-	M r$name$U	c major_wt_c $n 640 operator
-	M n$name$U	b major_wt_b $m 640 operator
-	M nr$name$U	c major_wt_c $m 640 operator-})dnl
 __devitem(tz, tz*, {-DEC TK50 cartridge tape drives-})dnl
 __devitem(st, {-st*-}, SCSI tape drives)dnl
 _mkdev(st, st*, {-n=Mult($U, 16)
@@ -230,6 +221,8 @@ _mkdev(cd, cd*, {-dodisk2 cd $U major_cd_b major_cd_c $U 0{--}ifstep(cd)-})dnl
 __devitem(mcd, mcd*, Mitsumi CD-ROM drives)dnl
 _mkdev(mcd, mcd*, {-dodisk2 mcd $U major_mcd_b major_mcd_c $U 0{--}ifstep(mcd)dnl
 -})dnl
+__devitem(bthub, {-bthub*-}, Bluetooth Hubs)dnl
+_mcdev(bthub, bthub*, bthub, {-major_bthub_c-})dnl
 __devitem(ch, {-ch*-}, SCSI media changers)dnl
 _mcdev(ch, ch*, ch, {-major_ch_c-}, 660, operator)dnl
 __devitem(uk, uk*, Unknown SCSI devices)dnl
@@ -254,7 +247,6 @@ target(ramd, sd, 0, 1, 2, 3, 4)dnl
 target(ramd, wd, 0, 1, 2, 3, 4)dnl
 target(ramd, st, 0, 1)dnl
 target(ramd, cd, 0, 1)dnl
-target(ramd, wt, 0)dnl
 target(ramd, rd, 0)dnl
 dnl
 __devitem(rd, {-rd*-}, quote(rd)pseudo-disks)dnl
@@ -299,7 +291,7 @@ __devitem(vnd, vnd*, quote(file)pseudo-disk devices)dnl
 _mkdev(vnd, vnd*, {-dodisk vnd $U major_vnd_b major_vnd_c $U 0{--}ifstep(vnd)
 	dodisk svnd $U major_vnd_b major_vnd_c $U 2048{--}ifstep(vnd)-})dnl
 __devitem(ra, ra*, {-MSCP disks-})dnl
-__devitem(hp, hp*, {-MASSBUSS disks-})dnl
+__devitem(hp, hp*, {-MASSBUS disks-})dnl
 __devitem(hk, hk*, {-UNIBUS RK06 and RK07 disks-})dnl
 __devitem(up, up*, {-Other UNIBUS devices-})dnl
 __devitem(rb, rb*, {-730 IDC w/ RB80 and/or RB02-})dnl

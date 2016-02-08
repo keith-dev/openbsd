@@ -1,15 +1,19 @@
-#	$OpenBSD: Makefile,v 1.39 2006/04/25 11:47:43 espie Exp $
+#	$OpenBSD: Makefile,v 1.43 2007/07/21 14:40:33 espie Exp $
 
 PROG=	make
 CFLAGS+= -I${.OBJDIR} -I${.CURDIR}
+HOSTCFLAGS+= -I${.OBJDIR} -I${.CURDIR}
 CDIAGFLAGS=-Wall -W -Wno-char-subscripts -Wstrict-prototypes -pedantic \
 	-Wmissing-prototypes
 
-CFLAGS+=-DUSE_TIMESPEC
-CFLAGS+=-DHAS_BOOL_H
-CFLAGS+=-DHAS_PATHS_H
-CFLAGS+=-DHAS_EXTENDED_GETCWD
-#CFLAGS+=-DHAS_STATS
+CDEFS+=-DUSE_TIMESPEC
+CDEFS+=-DHAS_BOOL_H
+CDEFS+=-DHAS_PATHS_H
+CDEFS+=-DHAS_EXTENDED_GETCWD
+#CDEFS+=-DHAS_STATS
+
+CFLAGS+=${CDEFS}
+HOSTCFLAGS+=${CDEFS}
 
 SRCS=	arch.c buf.c cmd_exec.c compat.c cond.c dir.c error.c for.c \
 	init.c job.c lowparse.c main.c make.c memory.c parse.c \
@@ -19,7 +23,6 @@ SRCS+=	lstAddNew.c lstAppend.c lstConcat.c lstConcatDestroy.c \
 	lstDeQueue.c lstDestroy.c lstDupl.c lstFindFrom.c lstForEachFrom.c \
 	lstInsert.c lstMember.c lstRemove.c lstReplace.c lstSucc.c
 .PATH:	${.CURDIR}/lst.lib
-
 
 CLEANFILES+=generate hashconsts.h generate.o regress.o check
 
@@ -38,7 +41,7 @@ condhashconsts.h: generate
 	${.OBJDIR}/generate 2 ${MAGICCONDSLOTS} >${.TARGET}
 
 generate: generate.c stats.c memory.c
-	${HOSTCC} ${LDSTATIC} -o ${.TARGET} ${CFLAGS} ${.ALLSRC} ${LDADD}
+	${HOSTCC} ${LDSTATIC} -o ${.TARGET} ${HOSTCFLAGS} ${.ALLSRC} ${LDADD}
 
 check: regress.o str.o memory.o buf.o
 	${CC} -o ${.TARGET} ${CFLAGS} ${.ALLSRC} ${LDADD}

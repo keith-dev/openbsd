@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap.h,v 1.43 2007/02/20 21:15:01 tom Exp $	*/
+/*	$OpenBSD: pmap.h,v 1.47 2007/05/29 18:18:20 tom Exp $	*/
 /*	$NetBSD: pmap.h,v 1.44 2000/04/24 17:18:18 thorpej Exp $	*/
 
 /*
@@ -272,7 +272,7 @@ struct pmap {
 	union descriptor *pm_ldt;	/* user-set LDT */
 	int pm_ldt_len;			/* number of LDT entries */
 	int pm_ldt_sel;			/* LDT selector */
-	uint32_t pm_cpus;		/* mask oc CPUs using map */
+	uint32_t pm_cpus;		/* mask of CPUs using map */
 };
 
 /* pm_flags */
@@ -286,19 +286,18 @@ struct pmap {
  * describes one mapping).
  */
 
-struct pv_entry;
-
-struct pv_head {
-	struct simplelock pvh_lock;	/* locks every pv on this list */
-	struct pv_entry *pvh_list;	/* head of list (locked by pvh_lock) */
-};
-
 struct pv_entry {			/* locked by its list's pvh_lock */
 	struct pv_entry *pv_next;	/* next entry */
 	struct pmap *pv_pmap;		/* the pmap */
 	vaddr_t pv_va;			/* the virtual address */
 	struct vm_page *pv_ptp;		/* the vm_page of the PTP */
 };
+
+/*
+ * We keep mod/ref flags in struct vm_page->pg_flags.
+ */
+#define PG_PMAP_MOD	PG_PMAP0
+#define	PG_PMAP_REF	PG_PMAP1
 
 /*
  * pv_entrys are dynamically allocated in chunks from a single page.
@@ -351,8 +350,8 @@ extern int pmap_pg_g;			/* do we support PG_G? */
 #define	pmap_resident_count(pmap)	((pmap)->pm_stats.resident_count)
 #define	pmap_update(pm)			/* nada */
 
-#define pmap_clear_modify(pg)		pmap_change_attrs(pg, 0, PG_M)
-#define pmap_clear_reference(pg)	pmap_change_attrs(pg, 0, PG_U)
+#define pmap_clear_modify(pg)		pmap_clear_attrs(pg, PG_M)
+#define pmap_clear_reference(pg)	pmap_clear_attrs(pg, PG_U)
 #define pmap_copy(DP,SP,D,L,S)
 #define pmap_is_modified(pg)		pmap_test_attrs(pg, PG_M)
 #define pmap_is_referenced(pg)		pmap_test_attrs(pg, PG_U)
@@ -368,15 +367,13 @@ extern int pmap_pg_g;			/* do we support PG_G? */
  */
 
 void		pmap_bootstrap(vaddr_t);
-boolean_t	pmap_change_attrs(struct vm_page *, int, int);
+boolean_t	pmap_clear_attrs(struct vm_page *, int);
 static void	pmap_page_protect(struct vm_page *, vm_prot_t);
 void		pmap_page_remove(struct vm_page *);
 static void	pmap_protect(struct pmap *, vaddr_t,
 				vaddr_t, vm_prot_t);
 void		pmap_remove(struct pmap *, vaddr_t, vaddr_t);
 boolean_t	pmap_test_attrs(struct vm_page *, int);
-static void	pmap_update_pg(vaddr_t);
-static void	pmap_update_2pg(vaddr_t,vaddr_t);
 void		pmap_write_protect(struct pmap *, vaddr_t,
 				vaddr_t, vm_prot_t);
 int		pmap_exec_fixup(struct vm_map *, struct trapframe *,
@@ -384,9 +381,14 @@ int		pmap_exec_fixup(struct vm_map *, struct trapframe *,
 
 vaddr_t reserve_dumppages(vaddr_t); /* XXX: not a pmap fn */
 
-void	pmap_tlb_shootdown(pmap_t, vaddr_t, pt_entry_t, int32_t *);
-void	pmap_tlb_shootnow(int32_t);
-void	pmap_do_tlb_shootdown(struct cpu_info *);
+void	pmap_tlb_shootpage(struct pmap *, vaddr_t);
+void	pmap_tlb_shootrange(struct pmap *, vaddr_t, vaddr_t);
+void	pmap_tlb_shoottlb(void);
+#ifdef MULTIPROCESSOR
+void	pmap_tlb_shootwait(void);
+#else
+#define pmap_tlb_shootwait()
+#endif
 
 #define PMAP_GROWKERNEL		/* turn on pmap_growkernel interface */
 
@@ -405,42 +407,19 @@ boolean_t	pmap_zero_page_uncached(paddr_t);
  *	if hardware doesn't support one-page flushing)
  */
 
-__inline static void
-pmap_update_pg(va)
-	vaddr_t va;
-{
-#if defined(I386_CPU)
-	if (cpu_class == CPUCLASS_386)
-		tlbflush();
-	else
-#endif
-		invlpg((u_int) va);
-}
+#define pmap_update_pg(va)	invlpg((u_int)(va))
 
 /*
  * pmap_update_2pg: flush two pages from the TLB
  */
 
-__inline static void
-pmap_update_2pg(va, vb)
-	vaddr_t va, vb;
-{
-#if defined(I386_CPU)
-	if (cpu_class == CPUCLASS_386)
-		tlbflush();
-	else
-#endif
-	{
-		invlpg((u_int) va);
-		invlpg((u_int) vb);
-	}
-}
+#define pmap_update_2pg(va, vb) { invlpg((u_int)(va)); invlpg((u_int)(vb)); }
 
 /*
  * pmap_page_protect: change the protection of all recorded mappings
  *	of a managed page
  *
- * => This function is a front end for pmap_page_remove/pmap_change_attrs
+ * => This function is a front end for pmap_page_remove/pmap_clear_attrs
  * => We only have to worry about making the page more protected.
  *	Unprotecting a page is done on-demand at fault time.
  */
@@ -452,7 +431,7 @@ pmap_page_protect(pg, prot)
 {
 	if ((prot & VM_PROT_WRITE) == 0) {
 		if (prot & (VM_PROT_READ|VM_PROT_EXECUTE)) {
-			(void) pmap_change_attrs(pg, PG_RO, PG_RW);
+			(void) pmap_clear_attrs(pg, PG_RW);
 		} else {
 			pmap_page_remove(pg);
 		}

@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.6 2002/06/09 05:53:54 todd Exp $
+#	$OpenBSD: Makefile,v 1.9 2007/06/17 00:28:21 deraadt Exp $
 
 TOP=		${.CURDIR}/..
 
@@ -22,7 +22,7 @@ PID!=		echo $$$$
 DISKTYPE=       rdroot
 NBLKS=          8192
 # minfree, opt, b/i  trks, sects, cpg
-NEWFSARGS= -m 0 -o space -c 16 -i 4096
+NEWFSARGS= -m 0 -o space
 
 .ifndef DESTDIR
 all ${IMAGE}:
@@ -42,7 +42,7 @@ cd: ${BSD_RD}
 	-@mkdir -p ${.OBJDIR}/cd-dir/${OSREV}/mvmeppc/
 	cp bsd.rd ${.OBJDIR}/cd-dir/${OSREV}/mvmeppc/bsd.rd
 	strip ${.OBJDIR}/cd-dir/${OSREV}/mvmeppc/bsd.rd
-	gzip -9 ${.OBJDIR}/cd-dir/${OSREV}/mvmeppc/bsd.rd
+	gzip -9n ${.OBJDIR}/cd-dir/${OSREV}/mvmeppc/bsd.rd
 	mv ${.OBJDIR}/cd-dir/${OSREV}/mvmeppc/bsd.rd.gz ${.OBJDIR}/cd-dir/${OSREV}/mvmeppc/bsd.rd
 
 
@@ -59,7 +59,7 @@ bsd:
 rd_setup:
 	dd if=/dev/zero of=${IMAGE} bs=512 count=${NBLKS}
 	vnconfig -v -c ${VND} ${IMAGE}
-	disklabel -w -r ${VND} ${DISKTYPE}
+	disklabel -w ${VND} ${DISKTYPE}
 	newfs ${NEWFSARGS} ${VND_RDEV}
 	fsck ${VND_RDEV}
 	mount ${VND_DEV} ${MOUNT_POINT}

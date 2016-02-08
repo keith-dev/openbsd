@@ -1,4 +1,4 @@
-.\"	$OpenBSD: tc_init.9,v 1.2 2005/12/25 14:55:35 grange Exp $
+.\"	$OpenBSD: tc_init.9,v 1.4 2007/05/31 19:20:01 jmc Exp $
 .\"
 .\" Copyright (c) 2004 Alexander Yurchenko <grange@openbsd.org>
 .\"
@@ -14,7 +14,7 @@
 .\" ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 .\" OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 .\"
-.Dd December 15, 2004
+.Dd $Mdocdate: May 31 2007 $
 .Dt TC_INIT 9
 .Os
 .Sh NAME
@@ -97,7 +97,7 @@ function, giving a pointer to the structure as a
 parameter.
 .Sh CODE REFERENCES
 The timecounter framework is implemented in the file
-.Pa sys/kern/kern_tc .
+.Pa sys/kern/kern_tc.c .
 .Sh SEE ALSO
 .Xr amdpm 4 ,
 .Xr elansc 4 ,

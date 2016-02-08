@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_output.c,v 1.184 2006/12/05 09:17:12 markus Exp $	*/
+/*	$OpenBSD: ip_output.c,v 1.188 2007/07/20 19:00:35 claudio Exp $	*/
 /*	$NetBSD: ip_output.c,v 1.28 1996/02/13 23:43:07 christos Exp $	*/
 
 /*
@@ -84,8 +84,8 @@ extern int ipforwarding;
 extern int ipmforwarding;
 #endif
 
-static struct mbuf *ip_insertoptions(struct mbuf *, struct mbuf *, int *);
-static void ip_mloopback(struct ifnet *, struct mbuf *, struct sockaddr_in *);
+struct mbuf *ip_insertoptions(struct mbuf *, struct mbuf *, int *);
+void ip_mloopback(struct ifnet *, struct mbuf *, struct sockaddr_in *);
 
 /*
  * IP output.  The packet in mbuf chain m contains a skeletal IP
@@ -243,6 +243,9 @@ ip_output(struct mbuf *m0, ...)
 	}
 
 #ifdef IPSEC
+	if (!ipsec_in_use && inp == NULL)
+		goto done_spd;
+
 	/*
 	 * splnet is chosen over spltdb because we are not allowed to
 	 * lower the level, and udp_output calls us in splnet().
@@ -655,8 +658,9 @@ sendit:
 	 * If deferred crypto processing is needed, check that the
 	 * interface supports it.
 	 */
-	if ((mtag = m_tag_find(m, PACKET_TAG_IPSEC_OUT_CRYPTO_NEEDED, NULL))
-	    != NULL && (ifp->if_capabilities & IFCAP_IPSEC) == 0) {
+	if (ipsec_in_use && (mtag = m_tag_find(m,
+	    PACKET_TAG_IPSEC_OUT_CRYPTO_NEEDED, NULL)) != NULL &&
+	    (ifp->if_capabilities & IFCAP_IPSEC) == 0) {
 		/* Notify IPsec to do its own crypto. */
 		ipsp_skipcrypto_unmark((struct tdb_ident *)(mtag + 1));
 		m_freem(m);
@@ -697,7 +701,7 @@ sendit:
 #endif
 
 #ifdef IPSEC
-	if ((flags & IP_FORWARDING) && (ipforwarding == 2) &&
+	if (ipsec_in_use && (flags & IP_FORWARDING) && (ipforwarding == 2) &&
 	    (m_tag_find(m, PACKET_TAG_IPSEC_IN_DONE, NULL) == NULL)) {
 		error = EHOSTUNREACH;
 		m_freem(m);
@@ -928,7 +932,7 @@ sendorfree:
  * Adjust IP destination as required for IP source routing,
  * as indicated by a non-zero in_addr at the start of the options.
  */
-static struct mbuf *
+struct mbuf *
 ip_insertoptions(m, opt, phlen)
 	struct mbuf *m;
 	struct mbuf *opt;
@@ -1821,7 +1825,7 @@ ip_setmoptions(optname, imop, m)
 		 * membership slots are full.
 		 */
 		for (i = 0; i < imo->imo_num_memberships; ++i) {
-			if (imo->imo_membership[i]->inm_ifp == ifp &&
+			if (imo->imo_membership[i]->inm_ia->ia_ifp == ifp &&
 			    imo->imo_membership[i]->inm_addr.s_addr
 						== mreq->imr_multiaddr.s_addr)
 				break;
@@ -1878,7 +1882,7 @@ ip_setmoptions(optname, imop, m)
 		 */
 		for (i = 0; i < imo->imo_num_memberships; ++i) {
 			if ((ifp == NULL ||
-			     imo->imo_membership[i]->inm_ifp == ifp) &&
+			     imo->imo_membership[i]->inm_ia->ia_ifp == ifp) &&
 			     imo->imo_membership[i]->inm_addr.s_addr ==
 			     mreq->imr_multiaddr.s_addr)
 				break;
@@ -1990,7 +1994,7 @@ ip_freemoptions(imo)
  * calls the output routine of the loopback "driver", but with an interface
  * pointer that might NOT be &loif -- easier than replicating that code here.
  */
-static void
+void
 ip_mloopback(ifp, m, dst)
 	struct ifnet *ifp;
 	struct mbuf *m;

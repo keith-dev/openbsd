@@ -1,4 +1,4 @@
-/*	$OpenBSD: linux_blkio.c,v 1.5 2002/03/14 01:26:50 millert Exp $	*/
+/*	$OpenBSD: linux_blkio.c,v 1.7 2007/06/06 17:15:13 deraadt Exp $	*/
 /*	$NetBSD: linux_blkio.c,v 1.3 2001/01/18 17:48:04 tv Exp $	*/
 
 /*
@@ -91,7 +91,8 @@ linux_ioctl_blkio(struct proc *p, struct linux_sys_ioctl_args *uap,
 			size = label.d_nsectors * label.d_ntracks *
 			    label.d_ncylinders;
 		} else
-			size = partp.part->p_size;
+			/* XXX ignores > 32bit blocks */
+			size = DL_GETPSIZE(partp.part);
 		error = copyout(&size, SCARG(uap, data), sizeof size);
 		break;
 	case LINUX_BLKSECTGET:

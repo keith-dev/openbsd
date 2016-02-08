@@ -1,4 +1,4 @@
-/*	$OpenBSD: ext2fs_subr.c,v 1.14 2006/07/18 22:44:33 pedro Exp $	*/
+/*	$OpenBSD: ext2fs_subr.c,v 1.17 2007/06/17 20:15:25 jasper Exp $	*/
 /*	$NetBSD: ext2fs_subr.c,v 1.1 1997/06/11 09:34:03 bouyer Exp $	*/
 
 /*
@@ -82,7 +82,7 @@ ext2fs_bufatoff(struct inode *ip, off_t offset, char **res, struct buf **bpp)
 	struct vnode *vp;
 	struct m_ext2fs *fs;
 	struct buf *bp;
-	ufs1_daddr_t lbn;
+	int32_t lbn;
 	int error;
 
 	vp = ITOV(ip);
@@ -103,18 +103,15 @@ ext2fs_bufatoff(struct inode *ip, off_t offset, char **res, struct buf **bpp)
 
 #if defined(_KERNEL) && defined(DIAGNOSTIC)
 void
-ext2fs_checkoverlap(bp, ip)
-	struct buf *bp;
-	struct inode *ip;
+ext2fs_checkoverlap(struct buf *bp, struct inode *ip)
 {
-	struct buf *ebp, *ep;
-	ufs1_daddr_t start, last;
+	struct buf *ep;
+	int32_t start, last;
 	struct vnode *vp;
 
-	ebp = &buf[nbuf];
 	start = bp->b_blkno;
 	last = start + btodb(bp->b_bcount) - 1;
-	for (ep = buf; ep < ebp; ep++) {
+	LIST_FOREACH(ep, &bufhead, b_list) {
 		if (ep == bp || (ep->b_flags & B_INVAL) ||
 			ep->b_vp == NULLVP)
 			continue;

@@ -20,6 +20,9 @@ Boston, MA 02111-1307, USA.  */
 
 /* Controlling the compilation driver.  */
 
+#undef TARGET_DEFAULT
+#define TARGET_DEFAULT (MASK_FP | MASK_FPREGS | MASK_GAS)
+
 /* alpha needs __start.  */
 #undef LINK_SPEC
 #define LINK_SPEC \
@@ -54,6 +57,12 @@ Boston, MA 02111-1307, USA.  */
 #undef PTRDIFF_TYPE
 #define PTRDIFF_TYPE "long int"
 
+#undef INTMAX_TYPE
+#define INTMAX_TYPE "long long int"
+
+#undef UINTMAX_TYPE
+#define UINTMAX_TYPE "long long unsigned int"
+
 #undef WCHAR_TYPE
 #define WCHAR_TYPE "int"
 
@@ -65,3 +74,7 @@ Boston, MA 02111-1307, USA.  */
 
 /* .set on alpha is not used to output labels.  */
 #undef SET_ASM_OP
+
+/* don't want no friggin' stack checks.  */
+#undef STACK_CHECK_BUILTIN
+#define STACK_CHECK_BUILTIN 0

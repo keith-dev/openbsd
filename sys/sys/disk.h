@@ -1,4 +1,4 @@
-/*	$OpenBSD: disk.h,v 1.13 2006/03/15 20:20:42 miod Exp $	*/
+/*	$OpenBSD: disk.h,v 1.17 2007/06/20 18:15:47 deraadt Exp $	*/
 /*	$NetBSD: disk.h,v 1.11 1996/04/28 20:22:50 thorpej Exp $	*/
 
 /*
@@ -50,11 +50,10 @@
 
 #include <sys/time.h>
 #include <sys/queue.h>
-#include <sys/lock.h>
+#include <sys/rwlock.h>
 
 struct buf;
 struct disklabel;
-struct cpu_disklabel;
 
 #define DS_DISKNAMELEN	16
 
@@ -73,7 +72,7 @@ struct diskstats {
 
 struct disk {
 	TAILQ_ENTRY(disk) dk_link;	/* link in global disklist */
-	struct lock	dk_lock;	/* disk lock */
+	struct rwlock	dk_lock;	/* disk lock */
 	char		*dk_name;	/* disk name */
 	int		dk_flags;	/* disk flags */
 #define DKF_CONSTRUCTED  0x0001
@@ -106,9 +105,8 @@ struct disk {
 	 * must be dynamically allocated, otherwise the size of this
 	 * structure becomes machine-dependent.
 	 */
-	daddr_t		dk_labelsector;		/* sector containing label */
+	daddr64_t	dk_labelsector;		/* sector containing label */
 	struct disklabel *dk_label;	/* label */
-	struct cpu_disklabel *dk_cpulabel;
 };
 
 struct dkdriver {
@@ -119,7 +117,7 @@ struct dkdriver {
 	int	(*d_ioctl)(dev_t dev, u_long cmd, caddr_t data, int fflag,
 				struct proc *);
 	int	(*d_dump)(dev_t);
-	void	(*d_start)(struct buf *, daddr_t);
+	void	(*d_start)(struct buf *, daddr64_t);
 	int	(*d_mklabel)(struct disk *);
 #endif
 };
@@ -162,8 +160,6 @@ void	disk_attach(struct disk *);
 void	disk_detach(struct disk *);
 void	disk_busy(struct disk *);
 void	disk_unbusy(struct disk *, long, int);
-void	disk_resetstat(struct disk *);
-struct	disk *disk_find(char *);
 
 int	disk_lock(struct disk *);
 void    disk_unlock(struct disk *);

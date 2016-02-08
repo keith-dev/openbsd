@@ -1,4 +1,4 @@
-/*	$OpenBSD: uark.c,v 1.1 2006/08/14 08:30:22 jsg Exp $	*/
+/*	$OpenBSD: uark.c,v 1.10 2007/06/14 10:11:15 mbalmer Exp $	*/
 
 /*
  * Copyright (c) 2006 Jonathan Gray <jsg@openbsd.org>
@@ -32,7 +32,7 @@
 #include <dev/usb/ucomvar.h>
 
 #ifdef UARK_DEBUG
-#define DPRINTFN(n, x)  do { if (uarkdebug > (n)) logprintf x; } while (0)
+#define DPRINTFN(n, x)  do { if (uarkdebug > (n)) printf x; } while (0)
 int	uarkebug = 0;
 #else
 #define DPRINTFN(n, x)
@@ -60,23 +60,23 @@ int	uarkebug = 0;
 #define UARK_REQUEST		0xfe
 
 struct uark_softc {
-	USBBASEDEVICE		sc_dev;
-	usbd_device_handle	sc_udev;
-	usbd_interface_handle	sc_iface;
-	device_ptr_t		sc_subdev;
+	struct device		 sc_dev;
+	usbd_device_handle	 sc_udev;
+	usbd_interface_handle	 sc_iface;
+	struct device 		*sc_subdev;
 
-	u_char			sc_msr;
-	u_char			sc_lsr;
+	u_char			 sc_msr;
+	u_char			 sc_lsr;
 
-	u_char			sc_dying;
+	u_char			 sc_dying;
 };
 
-Static void	uark_get_status(void *, int portno, u_char *lsr, u_char *msr);
-Static void	uark_set(void *, int, int, int);
-Static int	uark_param(void *, int, struct termios *);
-Static int	uark_open(void *sc, int);
-Static void	uark_break(void *, int, int);
-Static int	uark_cmd(struct uark_softc *, uint16_t, uint16_t);
+void	uark_get_status(void *, int portno, u_char *lsr, u_char *msr);
+void	uark_set(void *, int, int, int);
+int	uark_param(void *, int, struct termios *);
+int	uark_open(void *sc, int);
+void	uark_break(void *, int, int);
+int	uark_cmd(struct uark_softc *, uint16_t, uint16_t);
 
 struct ucom_methods uark_methods = {
 	uark_get_status,
@@ -93,11 +93,27 @@ static const struct usb_devno uark_devs[] = {
 	{ USB_VENDOR_ARKMICRO,		USB_PRODUCT_ARKMICRO_ARK3116 }
 };
 
-USB_DECLARE_DRIVER(uark);
+int uark_match(struct device *, void *, void *); 
+void uark_attach(struct device *, struct device *, void *); 
+int uark_detach(struct device *, int); 
+int uark_activate(struct device *, enum devact); 
 
-USB_MATCH(uark)
+struct cfdriver uark_cd = { 
+	NULL, "uark", DV_DULL 
+}; 
+
+const struct cfattach uark_ca = { 
+	sizeof(struct uark_softc), 
+	uark_match, 
+	uark_attach, 
+	uark_detach, 
+	uark_activate, 
+};
+
+int
+uark_match(struct device *parent, void *match, void *aux)
 {
-	USB_MATCH_START(uark, uaa);
+	struct usb_attach_arg *uaa = aux;
 
 	if (uaa->iface != NULL)
 		return UMATCH_NONE;
@@ -106,9 +122,11 @@ USB_MATCH(uark)
 	    UMATCH_VENDOR_PRODUCT : UMATCH_NONE;
 }
 
-USB_ATTACH(uark)
+void
+uark_attach(struct device *parent, struct device *self, void *aux)
 {
-	USB_ATTACH_START(uark, sc, uaa);
+	struct uark_softc *sc = (struct uark_softc *)self;
+	struct usb_attach_arg *uaa = aux;
 	struct ucom_attach_args uca;
 	usb_interface_descriptor_t *id;
 	usb_endpoint_descriptor_t *ed;
@@ -119,15 +137,14 @@ USB_ATTACH(uark)
 	bzero(&uca, sizeof(uca));
 	sc->sc_udev = uaa->device;
 	devinfop = usbd_devinfo_alloc(uaa->device, 0);
-	USB_ATTACH_SETUP;
-	printf("%s: %s\n", USBDEVNAME(sc->sc_dev), devinfop);
+	printf("\n%s: %s\n", sc->sc_dev.dv_xname, devinfop);
 	usbd_devinfo_free(devinfop);
 
 	if (usbd_set_config_index(sc->sc_udev, UARK_CONFIG_NO, 1) != 0) {
 		printf("%s: could not set configuration no\n",
-		    USBDEVNAME(sc->sc_dev));
+		    sc->sc_dev.dv_xname);
 		sc->sc_dying = 1;
-		USB_ATTACH_ERROR_RETURN;
+		return;
 	}
 
 	/* get the first interface handle */
@@ -135,9 +152,9 @@ USB_ATTACH(uark)
 	    &sc->sc_iface);
 	if (error != 0) {
 		printf("%s: could not get interface handle\n",
-		    USBDEVNAME(sc->sc_dev));
+		    sc->sc_dev.dv_xname);
 		sc->sc_dying = 1;
-		USB_ATTACH_ERROR_RETURN;
+		return;
 	}
 
 	id = usbd_get_interface_descriptor(sc->sc_iface);
@@ -147,9 +164,9 @@ USB_ATTACH(uark)
 		ed = usbd_interface2endpoint_descriptor(sc->sc_iface, i);
 		if (ed == NULL) {
 			printf("%s: no endpoint descriptor found for %d\n",
-			    USBDEVNAME(sc->sc_dev), i);
+			    sc->sc_dev.dv_xname, i);
 			sc->sc_dying = 1;
-			USB_ATTACH_ERROR_RETURN;
+			return;
 		}
 
 		if (UE_GET_DIR(ed->bEndpointAddress) == UE_DIR_IN &&
@@ -161,9 +178,9 @@ USB_ATTACH(uark)
 	}
 
 	if (uca.bulkin == -1 || uca.bulkout == -1) {
-		printf("%s: missing endpoint\n", USBDEVNAME(sc->sc_dev));
+		printf("%s: missing endpoint\n", sc->sc_dev.dv_xname);
 		sc->sc_dying = 1;
-		USB_ATTACH_ERROR_RETURN;
+		return;
 	}
 
 	uca.ibufsize = UARKBUFSZ;
@@ -177,16 +194,15 @@ USB_ATTACH(uark)
 	uca.info = NULL;
 
 	usbd_add_drv_event(USB_EVENT_DRIVER_ATTACH, sc->sc_udev,
-	    USBDEV(sc->sc_dev));
+	    &sc->sc_dev);
 	
 	sc->sc_subdev = config_found_sm(self, &uca, ucomprint, ucomsubmatch);
-
-	USB_ATTACH_SUCCESS_RETURN;
 }
 
-USB_DETACH(uark)
+int
+uark_detach(struct device *self, int flags)
 {
-	USB_DETACH_START(uark, sc);
+	struct uark_softc *sc = (struct uark_softc *)self;
 	int rv = 0;
 
 	sc->sc_dying = 1;
@@ -196,13 +212,13 @@ USB_DETACH(uark)
 	}
 
 	usbd_add_drv_event(USB_EVENT_DRIVER_DETACH, sc->sc_udev,
-			   USBDEV(sc->sc_dev));
+			   &sc->sc_dev);
 
 	return (rv);
 }
 
 int
-uark_activate(device_ptr_t self, enum devact act)
+uark_activate(struct device *self, enum devact act)
 {
 	struct uark_softc *sc = (struct uark_softc *)self;
 	int rv = 0;
@@ -220,7 +236,7 @@ uark_activate(device_ptr_t self, enum devact act)
 	return (rv);
 }
 
-Static void
+void
 uark_set(void *vsc, int portno, int reg, int onoff)
 {
 	struct uark_softc *sc = vsc;
@@ -236,7 +252,7 @@ uark_set(void *vsc, int portno, int reg, int onoff)
 	}
 }
 
-Static int
+int
 uark_param(void *vsc, int portno, struct termios *t)
 {
 	struct uark_softc *sc = (struct uark_softc *)vsc;
@@ -325,7 +341,7 @@ uark_break(void *vsc, int portno, int onoff)
 #ifdef UARK_DEBUG
 	struct uark_softc *sc = vsc;
 
-	printf("%s: break %s!\n", USBDEVNAME(sc->sc_dev),
+	printf("%s: break %s!\n", sc->sc_dev.dv_xname,
 	    onoff ? "on" : "off");
 
 	if (onoff)

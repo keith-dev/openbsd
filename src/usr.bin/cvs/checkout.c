@@ -1,4 +1,4 @@
-/*	$OpenBSD: checkout.c,v 1.92 2007/02/22 06:42:09 otto Exp $	*/
+/*	$OpenBSD: checkout.c,v 1.99 2007/07/25 08:45:24 xsa Exp $	*/
 /*
  * Copyright (c) 2006 Joris Vink <joris@openbsd.org>
  *
@@ -33,7 +33,6 @@ static void checkout_repository(const char *, const char *);
 
 extern int prune_dirs;
 extern int build_dirs;
-extern int reset_stickies;
 
 static int flags = CR_REPO | CR_RECURSE_DIRS;
 
@@ -76,6 +75,9 @@ cvs_checkout(int argc, char **argv)
 			break;
 		case 'R':
 			break;
+		case 'r':
+			cvs_specified_tag = optarg;
+			break;
 		default:
 			fatal("%s", cvs_cmd_checkout.cmd_synopsis);
 		}
@@ -106,6 +108,9 @@ cvs_export(int argc, char **argv)
 			break;
 		case 'R':
 			break;
+		case 'r':
+			cvs_specified_tag = optarg;
+			break;
 		default:
 			fatal("%s", cvs_cmd_export.cmd_synopsis);
 		}
@@ -133,6 +138,9 @@ checkout_check_repository(int argc, char **argv)
 	if (current_cvsroot->cr_method != CVS_METHOD_LOCAL) {
 		cvs_client_connect_to_server();
 
+		if (cvs_specified_tag != NULL)
+			cvs_client_send_request("Argument -r%s",
+			    cvs_specified_tag);
 		if (reset_stickies == 1)
 			cvs_client_send_request("Argument -A");
 
@@ -169,7 +177,8 @@ checkout_check_repository(int argc, char **argv)
 			    argv[i]);
 			continue;
 		}
-		cvs_mkpath(argv[i]);
+
+		cvs_mkpath(argv[i], cvs_specified_tag);
 		checkout_repository(repo, argv[i]);
 	}
 }
@@ -182,6 +191,9 @@ checkout_repository(const char *repobase, const char *wdbase)
 
 	TAILQ_INIT(&fl);
 	TAILQ_INIT(&dl);
+
+	cvs_history_add((cvs_cmdop == CVS_OP_CHECKOUT) ?
+	    CVS_HISTORY_CHECKOUT : CVS_HISTORY_EXPORT, NULL, wdbase);
 
 	build_dirs = 1;
 	cr.enterdir = cvs_update_enterdir;
@@ -209,8 +221,9 @@ cvs_checkout_file(struct cvs_file *cf, RCSNUM *rnum, int co_flags)
 	CVSENTRIES *ent;
 	struct timeval tv[2];
 	char *tosend;
-	char template[MAXPATHLEN], *p, entry[CVS_ENT_MAXLINELEN], rev[16];
-	char timebuf[64], kbuf[8], tbuf[32], stickytag[32];
+	char template[MAXPATHLEN], entry[CVS_ENT_MAXLINELEN];
+	char kbuf[8], stickytag[32], rev[CVS_REV_BUFSZ];
+	char timebuf[CVS_TIME_BUFSZ], tbuf[CVS_TIME_BUFSZ];
 
 	exists = 0;
 	tosend = NULL;
@@ -282,7 +295,12 @@ cvs_checkout_file(struct cvs_file *cf, RCSNUM *rnum, int co_flags)
 	}
 
 	if (co_flags & CO_SETSTICKY)
-		(void)xsnprintf(stickytag, sizeof(stickytag), "T%s", rev);
+		if (cvs_specified_tag != NULL)
+			(void)xsnprintf(stickytag, sizeof(stickytag), "T%s",
+			    cvs_specified_tag);
+		else
+			(void)xsnprintf(stickytag, sizeof(stickytag), "T%s",
+			    rev);
 	else
 		stickytag[0] = '\0';
 
@@ -301,13 +319,12 @@ cvs_checkout_file(struct cvs_file *cf, RCSNUM *rnum, int co_flags)
 	    cf->file_name, rev, timebuf, kbuf, stickytag);
 
 	if (cvs_server_active == 0) {
-		ent = cvs_ent_open(cf->file_wd);
-		cvs_ent_add(ent, entry);
-		cvs_ent_close(ent, ENT_SYNC);
+		if (!(co_flags & CO_REMOVE)) {
+			ent = cvs_ent_open(cf->file_wd);
+			cvs_ent_add(ent, entry);
+			cvs_ent_close(ent, ENT_SYNC);
+		}
 	} else {
-		if ((p = strrchr(cf->file_rpath, ',')) != NULL)
-			*p = '\0';
-
 		if (co_flags & CO_MERGE) {
 			cvs_merge_file(cf, 1);
 			tosend = cf->file_path;
@@ -317,12 +334,15 @@ cvs_checkout_file(struct cvs_file *cf, RCSNUM *rnum, int co_flags)
 			cvs_server_update_entry("Checked-in", cf);
 		else if (co_flags & CO_MERGE)
 			cvs_server_update_entry("Merged", cf);
+		else if (co_flags & CO_REMOVE)
+			cvs_server_update_entry("Removed", cf);
 		else
 			cvs_server_update_entry("Updated", cf);
 
-		cvs_remote_output(entry);
+		if (!(co_flags & CO_REMOVE))
+			cvs_remote_output(entry);
 
-		if (!(co_flags & CO_COMMIT)) {
+		if (!(co_flags & CO_COMMIT) && !(co_flags & CO_REMOVE)) {
 			if (!(co_flags & CO_MERGE)) {
 				(void)xsnprintf(template, MAXPATHLEN,
 				    "%s/checkout.XXXXXXXXXX", cvs_tmpdir);
@@ -340,8 +360,5 @@ cvs_checkout_file(struct cvs_file *cf, RCSNUM *rnum, int co_flags)
 				    cvs_worklist_unlink);
 			}
 		}
-
-		if (p != NULL)
-			*p = ',';
 	}
 }

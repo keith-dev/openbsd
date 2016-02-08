@@ -1,4 +1,4 @@
-.\" $OpenBSD: bsd.port.mk.5,v 1.190 2007/02/06 19:01:24 espie Exp $
+.\" $OpenBSD: bsd.port.mk.5,v 1.201 2007/06/23 09:42:24 steven Exp $
 .\"
 .\" Copyright (c) 2000 Marc Espie
 .\"
@@ -24,7 +24,7 @@
 .\" (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
 .\" THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 .\"
-.Dd June 10, 2000
+.Dd $Mdocdate: June 23 2007 $
 .Dt BSD.PORT.MK 5
 .Os
 .Sh NAME
@@ -51,12 +51,21 @@ followed by sections on obsolete constructs that a porter may need
 when converting from other ports systems.
 There is a separate section covering the fake framework, a section
 explaining flavors and multi-packages, and a section covering
-the generation of packing-lists.
+the generation of package information.
+.Pp
+Binary package details are mostly covered in
+.Xr pkg_create 1
+for the packing-list details,
+and in
+.Xr pkg_add 1
+for the installation semantics.
 .Pp
 Selected common user activity such as the building of every package in
 the system is covered by
 .Xr ports 7
 instead.
+.Xr packages 7
+provides an overview of the result.
 .Sh TARGETS
 .Bl -tag -width do-configure
 .It Ar {build,run,all,regress}-dir-depends
@@ -141,7 +150,8 @@ can be used to avoid all checksumming steps.
 Clean ports contents.
 By default, it will clean the work directory.
 It can be invoked as
-make clean='[depends bulk work fake flavors dist install sub package packages]'.
+make clean='[depends bulk work fake flavors dist install sub package
+packages plist readme]'.
 .Bl -tag -width packages
 .It Va work
 Clean work directory.
@@ -149,14 +159,18 @@ Clean work directory.
 Clean bulk cookie.
 .It Va depends
 Recurse into dependencies.
-.It Va flavors
-Clean all work directories.
 .It Va dist
 Clean distribution files.
+.It Va fake
+Clean fake installation directory.
+.It Va flavors
+Clean all work directories.
 .It Va install
 Uninstall package.
 .It Va package
 Remove all copies of package file.
+.It Va plist
+Remove registered packing lists of all subpackages.
 .It Va readmes
 Clean files generated through the
 .Ar readme
@@ -309,7 +323,7 @@ See also
 .Ar unlink-categories .
 .It Ar makesum
 Create the ${CHECKSUM_FILE} list of recorded checksums by running the
-cryptographic fingerprints sha1, md5 and rmd160 on ${ALLFILES}.
+cryptographic fingerprints sha256, sha1, md5 and rmd160 on ${ALLFILES}.
 .Ev NO_CHECKSUM
 can be used to avoid all checksumming steps.
 .It Ar manpages-check
@@ -413,7 +427,7 @@ Run regression tests for the port.
 Essentially depend on a correct build and invoke
 .Bd -literal
 env -i ${MAKE_ENV} ${MAKE_PROGRAM} ${REGRESS_FLAGS} \e
-	-f ${MAKE_FILE} ${REGRESS_TARGET}
+	-f ${MAKE_FILE} ${REGRESS_TARGET} ${REGRESS_LOG}
 .Ed
 .Pp
 If a port needs some other ports installed to run regression tests,
@@ -695,6 +709,15 @@ Many ports ignore it.
 See also
 .Ev COPTS ,
 .Ev CDIAGFLAGS .
+.It Ev CHECK_LIB_DEPENDS
+Use settings.
+If set to
+.Sq Yes ,
+every package build will verify that shared libraries are correctly
+registered.
+Defaults to
+.Sq \&No ,
+as this can be a big performance hit.
 .It Ev CHECKSUM_FILE
 Location for this port's checksums, used by
 .Ar addsum ,
@@ -877,6 +900,14 @@ Used to display
 .Sq ===> Configuring for foo
 and similar informative messages.
 Override to turn off, for instance.
+.It Ev ECHO_REORDER
+User settings.
+Set it to
+.Sq echo
+to see
+.Ev REORDER_DEPENDENCIES
+actions.
+Silent by default.
 .It Ev ERRORS
 List of errors found while parsing the port's Makefile.
 Display the errors before making any target, and if any error starts with
@@ -1418,7 +1449,7 @@ Defaults to empty.
 .It Ev PREFERRED_CIPHERS
 List of cryptographic ciphers to use, in order of preference.
 Default is
-.Sq sha1 rmd160 md5 .
+.Sq sha256 sha1 rmd160 md5 .
 The first cipher that matches in ${CHECKSUM_FILE} is verified.
 .It Ev PREFIX
 Base directory for the current port installation.
@@ -1457,6 +1488,10 @@ Defaults to ${MAKE_FLAGS}.
 Set to
 .Sq Yes
 if port needs human interaction to run its tests.
+.It Ev REGRESS_LOG
+Command used to log the results of regression tests to REGRESS_LOGFILE.
+.It Ev REGRESS_LOGFILE
+Log file containing the results of regression tests.
 .It Ev REGRESS_TARGET
 Target to run regression tests.
 Defaults to
@@ -1662,11 +1697,10 @@ setting creates an extra flavor choice of
 See also
 .Ev MOTIFLIB
 .It Ev USE_SYSTRACE
+User settings.
 Set to
 .Sq Yes
 to protect port building with systrace.
-Set by the user, e.g. in
-.Pa /etc/mk.conf .
 .It Ev USE_X11
 Set to
 .Sq Yes
@@ -1723,11 +1757,6 @@ Note that WRKDIST may be a symbolic link, if set to ${WRKDIR}.
 Subdirectory of ${WRKDIR} where the actual source is.
 Base for configuration (default: ${WRKDIST})
 Note that WRKSRC may be a symbolic link, if set to ${WRKDIR}.
-.It Ev WRKPKG
-Subdirectory of ${WRKBUILD} where package information gets generated.
-Defaults to ${WKRBUILD}/pkg, do not override unless
-.Sq pkg
-conflicts with the port's conventions.
 .It Ev WRKINST
 Subdirectory of ${WRKDIR} where port normally installs (see
 .Ar fake
@@ -1765,11 +1794,10 @@ cache of all distribution files.
 .It Pa distinfo
 Checksum file.
 Holds the output of
-.Xr md5 1 ,
-.Xr sha1 1 ,
-and
-.Xr rmd160 1
-for the ports ${DISTFILES} and ${PATCHFILES}.
+.Xr cksum 1 ,
+using ${PREFERRED_CIPHERS},
+for the port's ${DISTFILES} and ${PATCHFILES},
+as well as the sizes of these files.
 .It Pa ${FULLDISTDIR}/${ALLFILES}
 cache of distribution files for a given port.
 .It Pa ${PKGDIR}/DESCR
@@ -2124,6 +2152,11 @@ The framework will automatically detect the presence of
 files to extract.
 .It Ev VARNAME
 Use make show=name instead of make show VARNAME=name.
+.It Ev WRKPKG
+Directory used to build package information from the templates under
+.Pa ${PKGDIR} .
+This information is now built on the fly by
+.Xr pkg_create 1 .
 .El
 .Sh OBSOLETE FILES
 .Bl -tag -width files/md5
@@ -2142,6 +2175,10 @@ in the Makefile, or put the script in ${FILESDIR} and
 invoke it.
 .It Pa ${PKGDIR}/COMMENT
 Use COMMENT variable instead.
+.It Pa ${PKGDIR}/DEINSTALL*
+Use @unexec annotations in the packing-list instead.
+.It Pa ${PKGDIR}/INSTALL*
+Use @exec annotations in the packing-list instead.
 .It Pa ${PKGDIR}/PLIST.noshared
 Use PFRAG.shared or PFRAG.no-shared instead.
 PLIST.noshared was too easy to forget when updating ports.
@@ -2151,6 +2188,9 @@ Until revision 1.295,
 .Nm
 did not substitute variables in the packing list unless this special form
 was used.
+.It Pa ${PKGDIR}/REQ*
+Old requirement script.
+Was mostly unused anyway.
 .It Pa /usr/share/mk/bsd.port.mk
 Original location of
 .Nm bsd.port.mk .
@@ -2268,7 +2308,7 @@ in FLAVORS.
 In recursive package building, flavors can be specified as a comma
 separated list after the package directory, e.g., SUBDIR+=vim,no_x11.
 .Pp
-Finally, packing information will use templates with the canonical package
+Finally, package information will use templates with the canonical package
 extension if they are available: if FLAVOR='option1 option2' and both
 COMMENT and COMMENT-option1-option2 are available, COMMENT-option1-option2 will
 be used.
@@ -2296,7 +2336,7 @@ will be used for the subpackages respectively called
 and
 .Ev FULLPKGNAME-server .
 .Pp
-All packing information is also derived from
+All package information is also derived from
 templates with SUBPACKAGE appended.
 In the preceding example, the packing-list template for FULLPKGNAME-lib
 must be in PLIST-lib.
@@ -2379,11 +2419,12 @@ and invoking
 is the same as invoking
 subupdate
 for all subpackages.
-.Sh THE GENERATION OF PACKING INFORMATION
+.Sh THE GENERATION OF PACKAGE INFORMATION
 Starting after
-.Ox 2.7
-(around revision 1.300 of bsd.port.mk), all packing information is
-generated from templates in ${PKGDIR}.
+.Ox 4.1
+all package information is processed directly by
+.Xr pkg_create 1
+from templates in ${PKG_DIR}.
 .Pp
 .Bl -bullet -compact
 .It
@@ -2392,13 +2433,11 @@ depending on the current SUBPACKAGE and FLAVOR information.
 Set ${PLIST${SUBPACKAGE}}, ${DESCR${SUBPACKAGE}}, ${COMMENT${SUBPACKAGE}}, ${MESSAGE${SUBPACKAGE}}, ${UNMESSAGE${SUBPACKAGE}} accordingly.
 .It
 Detect the existence of ${PKGDIR}/{REQ,INSTALL,DEINSTALL}${SUBPACKAGE}.
-Modify PKG_ARGS accordingly, to use the generated files, and add
-dependencies to regenerate the files if the templates change.
+These are now deprecated.
+Use @exec and @unexec annotations instead.
 .It
 Generate the actual DESCR, and if needed, MESSAGE, UNMESSAGE,
-REQ, INSTALL, DEINSTALL from the templates in ${DESCR}, ${MESSAGE},
-${UNMESSAGE}, ${PKGDIR}/REQ${SUBPACKAGE},
-${PKGDIR}/INSTALL${SUBPACKAGE}, ${PKGDIR}/DEINSTALL${SUBPACKAGE}, by
+from the templates in ${DESCR}, ${MESSAGE}, ${UNMESSAGE}, by
 substituting the variables in ${SUBST_VARS}, and by substituting
 ${FLAVORS} with the canonical flavor extension for this port,
 e.g., if FLAVORS=no_map gfx qt2, if FLAVOR=gfx no_map, this is
@@ -2406,7 +2445,7 @@ e.g., if FLAVORS=no_map gfx qt2, if FLAVOR=gfx no_map, this is
 .It
 Generate the actual PLIST from the template ${PLIST},
 by inserting shared/no-shared fragments, merging other fragments,
-and applying the same variable substitutions as other packing information.
+and applying the same variable substitutions as other package information.
 .El
 .Pp
 Note that ${COMMENT} is currently not substituted, to speed up
@@ -2465,19 +2504,22 @@ PFRAG.shared fragments.
 .Pp
 If
 .Ev PLIST_DB
-points to a directory, all packing-lists generated by
+points to a directory, all packing-lists from packages generated by
 .Xr pkg_create 1
 during the
 .Ar package
-stage are saved in that location in a timeless format:
-md5 and size information are removed, as well as build specificities.
+stage are saved in that location by a script:
+.Pa ${PORTSDIR}/infrastructure/packages/register-plist .
+This script strips some irrelevant information and normalizes the
+packing-list somehow, and compares it to existing information, looking
+for relevant changes.
 Since a package name must always be changed when the packing-list changes,
 any attempt to replace a packing-list of a given name with a different
 packing-list will be flagged as an error.
 .Pp
 In MULTI_PACKAGES mode, there must be separate COMMENT, DESCR, and PLIST
-templates for each SUBPACKAGE (and optional distinct MESSAGE, UNMESSAGE,
-REQ, INSTALL, DEINSTALL files in a similar way).
+templates for each SUBPACKAGE (and optional distinct MESSAGE, UNMESSAGE
+files in a similar way).
 This contrasts with the FLAVORS
 situation, where all these files will automatically default to the
 non-flavor version if there is no flavor-specific file around.

@@ -1,4 +1,4 @@
-/*	$OpenBSD: show.c,v 1.56 2006/12/29 10:04:36 claudio Exp $	*/
+/*	$OpenBSD: show.c,v 1.60 2007/07/24 20:22:23 claudio Exp $	*/
 /*	$NetBSD: show.c,v 1.1 1996/11/15 18:01:41 gwr Exp $	*/
 
 /*
@@ -42,7 +42,6 @@
 #include <net/pfkeyv2.h>
 #include <net/route.h>
 #include <netinet/in.h>
-#include <netipx/ipx.h>
 #include <netinet/if_ether.h>
 #include <netinet/ip_ipsp.h>
 #include <arpa/inet.h>
@@ -59,10 +58,10 @@
 #include "show.h"
 
 char	*any_ntoa(const struct sockaddr *);
-char	*ipx_print(struct sockaddr *);
 char	*link_print(struct sockaddr *);
 
 extern int nflag;
+extern int Fflag;
 
 #define PLEN  (LONG_BIT / 4 + 2) /* XXX this is also defined in netstat.h */
 
@@ -150,6 +149,8 @@ p_rttables(int af, u_int tableid)
 	if (buf) {
 		for (next = buf; next < lim; next += rtm->rtm_msglen) {
 			rtm = (struct rt_msghdr *)next;
+			if (rtm->rtm_version != RTM_VERSION)
+				continue;
 			sa = (struct sockaddr *)(rtm + 1);
 			if (af != AF_UNSPEC && sa->sa_family != af)
 				continue;
@@ -250,12 +251,15 @@ p_rtentry(struct rt_msghdr *rtm)
 	if (sa->sa_family == AF_KEY)
 		return;
 
+	get_rtaddrs(rtm->rtm_addrs, sa, rti_info);
+	if (Fflag && rti_info[RTAX_GATEWAY]->sa_family != sa->sa_family) {
+		return;
+	}
 	if (old_af != sa->sa_family) {
 		old_af = sa->sa_family;
 		pr_family(sa->sa_family);
 		pr_rthdr(sa->sa_family);
 	}
-	get_rtaddrs(rtm->rtm_addrs, sa, rti_info);
 
 	mask = rti_info[RTAX_NETMASK];
 	if ((sa = rti_info[RTAX_DST]) == NULL)
@@ -283,7 +287,6 @@ void
 p_pfkentry(struct sadb_msg *msg)
 {
 	static int	 	 old = 0;
-	struct sadb_ext		*ext;
 	struct sadb_address	*saddr;
 	struct sadb_protocol	*sap, *saft;
 	struct sockaddr		*sa, *mask;
@@ -338,9 +341,6 @@ pr_family(int af)
 		break;
 	case AF_INET6:
 		afname = "Internet6";
-		break;
-	case AF_IPX:
-		afname = "IPX";
 		break;
 	case PF_KEY:
 		afname = "Encap";
@@ -521,14 +521,14 @@ routename(struct sockaddr *sa)
 		first = 0;
 		if (gethostname(domain, sizeof(domain)) == 0 &&
 		    (cp = strchr(domain, '.')))
-			strlcpy(domain, cp + 1, sizeof(domain));
+			(void)strlcpy(domain, cp + 1, sizeof(domain));
 		else
 			domain[0] = '\0';
 		cp = NULL;
 	}
 
 	if (sa->sa_len == 0) {
-		strlcpy(line, "default", sizeof(line));
+		(void)strlcpy(line, "default", sizeof(line));
 		return (line);
 	}
 
@@ -558,9 +558,6 @@ routename(struct sockaddr *sa)
 		return (routename6(&sin6));
 	    }
 
-	case AF_IPX:
-		return (ipx_print(sa));
-
 	case AF_LINK:
 		return (link_print(sa));
 
@@ -570,12 +567,12 @@ routename(struct sockaddr *sa)
 			struct sockaddr_rtlabel *sr;
 
 			sr = (struct sockaddr_rtlabel *)sa;
-			strlcpy(name, sr->sr_label, sizeof(name));
+			(void)strlcpy(name, sr->sr_label, sizeof(name));
 			return (name);
 		}
 		/* FALLTHROUGH */
 	default:
-		snprintf(line, sizeof(line), "(%d) %s",
+		(void)snprintf(line, sizeof(line), "(%d) %s",
 		    sa->sa_family, any_ntoa(sa));
 		break;
 	}
@@ -766,17 +763,11 @@ netname(struct sockaddr *sa, struct sockaddr *mask)
 	case AF_INET:
 		return netname4(((struct sockaddr_in *)sa)->sin_addr.s_addr,
 		    (struct sockaddr_in *)mask);
-
 	case AF_INET6:
 		return netname6((struct sockaddr_in6 *)sa,
 		    (struct sockaddr_in6 *)mask);
-
-	case AF_IPX:
-		return (ipx_print(sa));
-
 	case AF_LINK:
 		return (link_print(sa));
-
 	default:
 		snprintf(line, sizeof(line), "af %d: %s",
 		    sa->sa_family, any_ntoa(sa));
@@ -805,57 +796,6 @@ any_ntoa(const struct sockaddr *sa)
 	return (obuf);
 }
 
-short ipx_nullh[] = {0,0,0};
-short ipx_bh[] = {-1,-1,-1};
-
-char *
-ipx_print(struct sockaddr *sa)
-{
-	struct sockaddr_ipx *sipx = (struct sockaddr_ipx *)sa;
-	struct ipx_addr work;
-	union {
-		union ipx_net	net_e;
-		u_int32_t	long_e;
-	} net;
-	u_short port;
-	static char mybuf[50+MAXHOSTNAMELEN], cport[10], chost[25];
-	char *host = "";
-	char *p;
-	u_char *q;
-
-	work = sipx->sipx_addr;
-	port = ntohs(work.ipx_port);
-	work.ipx_port = 0;
-	net.net_e = work.ipx_net;
-	if (ipx_nullhost(work) && net.long_e == 0) {
-		if (!port)
-			return ("*.*");
-		snprintf(mybuf, sizeof(mybuf), "*.0x%XH", port);
-		return (mybuf);
-	}
-
-	if (memcmp(ipx_bh, work.ipx_host.c_host, 6) == 0)
-		host = "any";
-	else if (memcmp(ipx_nullh, work.ipx_host.c_host, 6) == 0)
-		host = "*";
-	else {
-		q = work.ipx_host.c_host;
-		snprintf(chost, sizeof(chost), "%02X%02X%02X%02X%02X%02XH",
-		    q[0], q[1], q[2], q[3], q[4], q[5]);
-		for (p = chost; *p == '0' && p < chost + 12; p++)
-			/* void */;
-		host = p;
-	}
-	if (port)
-		snprintf(cport, sizeof(cport), ".%XH", htons(port));
-	else
-		*cport = '\0';
-
-	snprintf(mybuf, sizeof(mybuf), "%XH.%s%s",
-	    ntohl(net.long_e), host, cport);
-	return (mybuf);
-}
-
 char *
 link_print(struct sockaddr *sa)
 {
@@ -864,7 +804,7 @@ link_print(struct sockaddr *sa)
 
 	if (sdl->sdl_nlen == 0 && sdl->sdl_alen == 0 &&
 	    sdl->sdl_slen == 0) {
-		snprintf(line, sizeof(line), "link#%d", sdl->sdl_index);
+		(void)snprintf(line, sizeof(line), "link#%d", sdl->sdl_index);
 		return (line);
 	}
 	switch (sdl->sdl_type) {

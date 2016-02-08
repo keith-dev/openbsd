@@ -1,4 +1,4 @@
-/*	$OpenBSD: pca9554.c,v 1.9 2006/12/23 17:46:39 deraadt Exp $	*/
+/*	$OpenBSD: pca9554.c,v 1.14 2007/07/31 21:34:39 cnst Exp $	*/
 
 /*
  * Copyright (c) 2005 Theo de Raadt
@@ -45,8 +45,8 @@ struct pcagpio_softc {
 	struct gpio_chipset_tag sc_gpio_gc;
         gpio_pin_t sc_gpio_pins[PCAGPIO_NPINS];
 
-	struct sensor sc_sensor[PCAGPIO_NPINS];
-	struct sensordev sc_sensordev;
+	struct ksensor sc_sensor[PCAGPIO_NPINS];
+	struct ksensordev sc_sensordev;
 };
 
 int	pcagpio_match(struct device *, void *, void *);
@@ -118,18 +118,18 @@ pcagpio_attach(struct device *parent, struct device *self, void *aux)
 	    sizeof(sc->sc_sensordev.xname));
 
 	for (i = 0; i < PCAGPIO_NPINS; i++) {
-		sc->sc_sensor[i].type = SENSOR_INTEGER;
+		sc->sc_sensor[i].type = SENSOR_INDICATOR;
 		if ((sc->sc_control & (1 << i)) == 0) {
-			snprintf(sc->sc_sensor[i].desc,
-			    sizeof(sc->sc_sensor[i].desc), "out%d", i);
+			strlcpy(sc->sc_sensor[i].desc, "out",
+			    sizeof(sc->sc_sensor[i].desc));
 			outputs++;
 		} else
-			snprintf(sc->sc_sensor[i].desc,
-			    sizeof(sc->sc_sensor[i].desc), "in%d", i);
+			strlcpy(sc->sc_sensor[i].desc, "in",
+			    sizeof(sc->sc_sensor[i].desc));
 
 	}
 
-	if (sensor_task_register(sc, pcagpio_refresh, 5)) {
+	if (sensor_task_register(sc, pcagpio_refresh, 5) == NULL) {
 		printf(", unable to register update task\n");
 		return;
 	}
@@ -141,8 +141,8 @@ pcagpio_attach(struct device *parent, struct device *self, void *aux)
 #endif
 
 	printf(":");
-	if (8 - outputs)
-		printf(" %d inputs", 8 - outputs);
+	if (PCAGPIO_NPINS - outputs)
+		printf(" %d inputs", PCAGPIO_NPINS - outputs);
 	if (outputs)
 		printf(" %d outputs", outputs);
 	printf("\n");

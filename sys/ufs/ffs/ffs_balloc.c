@@ -1,4 +1,4 @@
-/*	$OpenBSD: ffs_balloc.c,v 1.31 2007/01/17 20:47:13 sturm Exp $	*/
+/*	$OpenBSD: ffs_balloc.c,v 1.34 2007/06/01 18:54:27 pedro Exp $	*/
 /*	$NetBSD: ffs_balloc.c,v 1.3 1996/02/09 22:22:21 christos Exp $	*/
 
 /*
@@ -80,9 +80,9 @@ ffs1_balloc(struct inode *ip, off_t startoffset, int size, struct ucred *cred,
 	struct vnode *vp;
 	struct proc *p;
 	struct indir indirs[NIADDR + 2];
-	ufs1_daddr_t newb, *bap, pref;
+	int32_t newb, *bap, pref;
 	int deallocated, osize, nsize, num, i, error;
-	ufs1_daddr_t *allocib, *blkp, *allocblk, allociblk[NIADDR+1];
+	int32_t *allocib, *blkp, *allocblk, allociblk[NIADDR+1];
 	int unwindidx = -1;
 
 	vp = ITOV(ip);
@@ -164,12 +164,13 @@ ffs1_balloc(struct inode *ip, off_t startoffset, int size, struct ucred *cred,
 				 * Just read the block (if requested).
 				 */
 				if (bpp != NULL) {
-					error = bread(vp, lbn, osize, NOCRED,
-					    bpp);
+					error = bread(vp, lbn, fs->fs_bsize,
+					    NOCRED, bpp);
 					if (error) {
 						brelse(*bpp);
 						return (error);
 					}
+					(*bpp)->b_bcount = osize;
 				}
 				return (0);
 			} else {
@@ -204,7 +205,9 @@ ffs1_balloc(struct inode *ip, off_t startoffset, int size, struct ucred *cred,
 			if (error)
 				return (error);
 			if (bpp != NULL) {
-				*bpp = getblk(vp, lbn, nsize, 0, 0);
+				*bpp = getblk(vp, lbn, fs->fs_bsize, 0, 0);
+				if (nsize < fs->fs_bsize)
+					(*bpp)->b_bcount = nsize;
 				(*bpp)->b_blkno = fsbtodb(fs, newb);
 				if (flags & B_CLRBUF)
 					clrbuf(*bpp);
@@ -436,7 +439,7 @@ ffs2_balloc(struct inode *ip, off_t off, int size, struct ucred *cred,
 {
 	daddr_t lbn, lastlbn, nb, newb, *blkp;
 	daddr_t pref, *allocblk, allociblk[NIADDR + 1];
-	ufs2_daddr_t *bap, *allocib;
+	daddr64_t *bap, *allocib;
 	int deallocated, osize, nsize, num, i, error, unwindidx, r;
 	struct buf *bp, *nbp;
 	struct indir indirs[NIADDR + 2];
@@ -534,12 +537,13 @@ ffs2_balloc(struct inode *ip, off_t off, int size, struct ucred *cred,
 				 * big as we want. Just read it, if requested.
 				 */
 				if (bpp != NULL) {
-					error = bread(vp, lbn, osize, NOCRED,
-					    bpp);
+					error = bread(vp, lbn, fs->fs_bsize,
+					    NOCRED, bpp);
 					if (error) {
 						brelse(*bpp);
 						return (error);
 					}
+					(*bpp)->b_bcount = osize;
 				}
 
 				return (0);
@@ -576,7 +580,9 @@ ffs2_balloc(struct inode *ip, off_t off, int size, struct ucred *cred,
 				return (error);
 
 			if (bpp != NULL) {
-				bp = getblk(vp, lbn, nsize, 0, 0);
+				bp = getblk(vp, lbn, fs->fs_bsize, 0, 0);
+				if (nsize < fs->fs_bsize)
+					bp->b_bcount = nsize;
 				bp->b_blkno = fsbtodb(fs, newb);
 				if (flags & B_CLRBUF)
 					clrbuf(bp);

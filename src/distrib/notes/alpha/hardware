@@ -1,4 +1,4 @@
-dnl	$OpenBSD: hardware,v 1.85 2007/03/09 22:43:37 deraadt Exp $
+dnl	$OpenBSD: hardware,v 1.89 2007/06/22 10:55:28 martin Exp $
 OpenBSD/MACHINE OSREV is expected to run on the following hardware.
 If you have hardware that is listed here and are unable to run
 OpenBSD, or if you are able to run OpenBSD on hardware not listed
@@ -21,7 +21,8 @@ Supported hardware:
 		Floppy drive.
 		ISA devices that require DMA operation.
 
-    API UP1000 machines and other EV6 machines using the Irongate chipset
+    API UP1000, UP2000, and UP2000+ and other EV6 machines using the
+    Irongate chipset
 	  Supported devices:
 		Built-in serial and parallel ports.
 		Built-in DEC21040 Ethernet.
@@ -64,7 +65,7 @@ Supported hardware:
 		ISA IDE controller on the EB164.
 		ISA devices that require DMA operation.
 
-    AlphaServer 800, 1000 and 1000A
+    AlphaServer 800, 1000, 1000A, 1200 and 4100
 	  Supported devices:
 		Built-in serial and parallel ports.
 		Built-in DEC21040 Ethernet.
@@ -143,7 +144,6 @@ Supported hardware:
 		Other TURBOchannel cards.
 
     At this time none of the following systems are supported:
-	API UP2000, UP2000+ (mostly because we don't have any to test on)
 	DECpc AXP150 (2000/300) systems (EISA-bus PC-like systems)
 	AlphaServer systems, other than models 400 and 500, which seem to
 	  be disguised AlphaStation machines
@@ -429,6 +429,19 @@ Supported Peripherals:
 		Brooktree 8[47][89] based frame grabber and TV tuner cards,
 		including: [G]
 			Leadtek Winfast TV 2000
+		Hardware monitoring sensors, including: [-]
+			Analog Devices AD7416, AD7417 and AD7418 (adc)
+			Analog Devices ADM1021 (admtemp)
+			Analog Devices ADM1024 (admlc)
+			Analog Devices ADM1025 (admtm)
+			Analog Devices ADM1030 (admtmp)
+			Analog Devices ADM1031 (admtt)
+			Analog Devices ADT7460 (adt)
+			National Semiconductor LM75, LM77 (lmtemp)
+			National Semiconductor LM78, LM78-J, LM79 (lm)
+			National Semiconductor LM87 (lmenv)
+			Maxim DS1624/DS1631/DS1721 (maxds)
+			Maxim MAX6642/MAX6690 (maxtmp)
 
 Untested Peripherals:
 
@@ -602,6 +615,9 @@ work. It's our best guess that they do, but any feedback is appreciated.
 		    PLANEX GW-DS54G
 		    SMC EZ Connect g 2.4GHz SMC2802W
 		    SMC 2802Wv2
+		Marvell Libertas based PCI IEEE 802.11b/g adapters [-]
+		    Netgear WG311v3
+		    Tenda TWL542P
 		Ralink RT2500 based PCI IEEE 802.11b/g adapters  [*]
 		    A-Link WL54H
 		    Amigo AWI-926W

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ffs_alloc.c,v 1.70 2007/01/26 11:08:39 pedro Exp $	*/
+/*	$OpenBSD: ffs_alloc.c,v 1.78 2007/06/22 13:59:12 thib Exp $	*/
 /*	$NetBSD: ffs_alloc.c,v 1.11 1996/05/11 18:27:09 mycroft Exp $	*/
 
 /*
@@ -68,15 +68,15 @@
 	    (fs)->fs_fsmnt, (cp));				\
 } while (0)
 
-static daddr_t	ffs_alloccg(struct inode *, int, daddr_t, int);
-static daddr_t	ffs_alloccgblk(struct inode *, struct buf *, daddr_t);
-static daddr_t	ffs_clusteralloc(struct inode *, int, daddr_t, int);
-static ino_t	ffs_dirpref(struct inode *);
-static daddr_t	ffs_fragextend(struct inode *, int, long, int, int);
-static u_long	ffs_hashalloc(struct inode *, int, long, int,
-		    daddr_t (*)(struct inode *, int, daddr_t, int));
-static daddr_t	ffs_nodealloccg(struct inode *, int, daddr_t, int);
-static daddr_t	ffs_mapsearch(struct fs *, struct cg *, daddr_t, int);
+daddr_t	ffs_alloccg(struct inode *, int, daddr_t, int);
+daddr_t	ffs_alloccgblk(struct inode *, struct buf *, daddr_t);
+daddr_t	ffs_clusteralloc(struct inode *, int, daddr_t, int);
+ino_t	ffs_dirpref(struct inode *);
+daddr_t	ffs_fragextend(struct inode *, int, long, int, int);
+u_long	ffs_hashalloc(struct inode *, int, long, int,
+    daddr_t (*)(struct inode *, int, daddr_t, int));
+daddr_t	ffs_nodealloccg(struct inode *, int, daddr_t, int);
+daddr_t	ffs_mapsearch(struct fs *, struct cg *, daddr_t, int);
 
 int ffs1_reallocblks(void *);
 #ifdef FFS2
@@ -84,7 +84,7 @@ int ffs2_reallocblks(void *);
 #endif
 
 #ifdef DIAGNOSTIC
-static int      ffs_checkblk(struct inode *, daddr_t, long);
+int      ffs_checkblk(struct inode *, daddr_t, long);
 #endif
 
 /*
@@ -211,9 +211,12 @@ ffs_realloccg(struct inode *ip, daddr_t lbprev, daddr_t bpref, int osize,
 	/*
 	 * Allocate the extra space in the buffer.
 	 */
-	if (bpp != NULL &&
-	    (error = bread(ITOV(ip), lbprev, osize, NOCRED, &bp)) != 0)
-		goto error;
+	if (bpp != NULL) {
+		if ((error = bread(ITOV(ip), lbprev, fs->fs_bsize,
+		    NOCRED, &bp)) != 0)
+			goto error;
+		bp->b_bcount = osize;
+	}
 
 	if ((error = ufs_quota_alloc_blocks(ip, btodb(nsize - osize), cred))
 	    != 0)
@@ -231,9 +234,13 @@ ffs_realloccg(struct inode *ip, daddr_t lbprev, daddr_t bpref, int osize,
 		if (bpp != NULL) {
 			if (bp->b_blkno != fsbtodb(fs, bno))
 				panic("ffs_realloccg: bad blockno");
-			allocbuf(bp, nsize);
+#ifdef DIAGNOSTIC
+			if (nsize > bp->b_bufsize)
+				panic("ffs_realloccg: small buf");
+#endif
+			bp->b_bcount = nsize;
 			bp->b_flags |= B_DONE;
-			bzero((char *)bp->b_data + osize, (u_int)nsize - osize);
+			bzero(bp->b_data + osize, (u_int)nsize - osize);
 			*bpp = bp;
 		}
 		if (blknop != NULL) {
@@ -300,9 +307,13 @@ ffs_realloccg(struct inode *ip, daddr_t lbprev, daddr_t bpref, int osize,
 	ip->i_flag |= IN_CHANGE | IN_UPDATE;
 	if (bpp != NULL) {
 		bp->b_blkno = fsbtodb(fs, bno);
-		allocbuf(bp, nsize);
+#ifdef DIAGNOSTIC
+		if (nsize > bp->b_bufsize)
+			panic("ffs_realloccg: small buf 2");
+#endif
+		bp->b_bcount = nsize;
 		bp->b_flags |= B_DONE;
-		bzero((char *)bp->b_data + osize, (u_int)nsize - osize);
+		bzero(bp->b_data + osize, (u_int)nsize - osize);
 		*bpp = bp;
 	}
 	if (blknop != NULL) {
@@ -355,10 +366,7 @@ int prtrealloc = 0;
 int
 ffs1_reallocblks(void *v)
 {
-	struct vop_reallocblks_args /* {
-		struct vnode *a_vp;
-		struct cluster_save *a_buflist;
-	} */ *ap = v;
+	struct vop_reallocblks_args *ap = v;
 	struct fs *fs;
 	struct inode *ip;
 	struct vnode *vp;
@@ -561,19 +569,16 @@ fail:
 int
 ffs2_reallocblks(void *v)
 {
-	struct vop_reallocblks_args /* {
-		struct vnode *a_vp;
-		struct cluster_save *a_buflist;
-	} */ *ap = v;
+	struct vop_reallocblks_args *ap = v;
 	struct fs *fs;
 	struct inode *ip;
 	struct vnode *vp;
 	struct buf *sbp, *ebp;
-	ufs2_daddr_t *bap, *sbap, *ebap = 0;
+	daddr64_t *bap, *sbap, *ebap = 0;
 	struct cluster_save *buflist;
 	struct ufsmount *ump;
-	ufs_lbn_t start_lbn, end_lbn;
-	ufs2_daddr_t soff, newblk, blkno, pref;
+	daddr64_t start_lbn, end_lbn;
+	daddr64_t soff, newblk, blkno, pref;
 	struct indir start_ap[NIADDR + 1], end_ap[NIADDR + 1], *idp;
 	int i, len, start_lvl, end_lvl, ssize;
 
@@ -632,7 +637,7 @@ ffs2_reallocblks(void *v)
 			brelse(sbp);
 			return (ENOSPC);
 		}
-		sbap = (ufs2_daddr_t *)sbp->b_data;
+		sbap = (daddr64_t *)sbp->b_data;
 		soff = idp->in_off;
 	}
 
@@ -649,7 +654,7 @@ ffs2_reallocblks(void *v)
 		ssize = len - (idp->in_off + 1);
 		if (bread(vp, idp->in_lbn, (int)fs->fs_bsize, NOCRED, &ebp))
 			goto fail;
-		ebap = (ufs2_daddr_t *)ebp->b_data;
+		ebap = (daddr64_t *)ebp->b_data;
 	}
 
 	/*
@@ -785,12 +790,14 @@ fail:
 int
 ffs_reallocblks(void *v)
 {
+#ifdef FFS2
+	struct vop_reallocblks_args *ap = v;
+#endif
+
 	if (!doreallocblks)
 		return (ENOSPC);
 
 #ifdef FFS2
-	struct vop_reallocblks_args *ap = v;
-
 	if (VTOI(ap->a_vp)->i_ump->um_fstype == UM_UFS2)
 		return (ffs2_reallocblks(v));
 #endif
@@ -904,7 +911,7 @@ noinodes:
  * If we allocate a first level directory then force allocation
  * in another cylinder group.
  */
-static ino_t
+ino_t
 ffs_dirpref(struct inode *pip)
 {
 	struct fs *fs;
@@ -1030,8 +1037,8 @@ end:
  * here a best guess is made based upon the logical block number being
  * allocated.
  */
-ufs1_daddr_t
-ffs1_blkpref(struct inode *ip, daddr_t lbn, int indx, ufs1_daddr_t *bap)
+int32_t
+ffs1_blkpref(struct inode *ip, daddr_t lbn, int indx, int32_t *bap)
 {
 	struct fs *fs;
 	int cg, avgbfree, startcg;
@@ -1073,8 +1080,8 @@ ffs1_blkpref(struct inode *ip, daddr_t lbn, int indx, ufs1_daddr_t *bap)
  * Same as above, for UFS2.
  */
 #ifdef FFS2
-ufs2_daddr_t
-ffs2_blkpref(struct inode *ip, daddr_t lbn, int indx, ufs2_daddr_t *bap)
+int64_t
+ffs2_blkpref(struct inode *ip, daddr_t lbn, int indx, int64_t *bap)
 {
 	struct fs *fs;
 	int cg, avgbfree, startcg;
@@ -1127,7 +1134,7 @@ ffs2_blkpref(struct inode *ip, daddr_t lbn, int indx, ufs2_daddr_t *bap)
  *   3) brute force search for a free block.
  */
 /*VARARGS5*/
-static u_long
+u_long
 ffs_hashalloc(struct inode *ip, int cg, long pref, int size,
     daddr_t (*allocator)(struct inode *, int, daddr_t, int))
 {
@@ -1176,7 +1183,7 @@ ffs_hashalloc(struct inode *ip, int cg, long pref, int size,
  * Check to see if the necessary fragments are available, and
  * if they are, allocate them.
  */
-static daddr_t
+daddr_t
 ffs_fragextend(struct inode *ip, int cg, long bprev, int osize, int nsize)
 {
 	struct fs *fs;
@@ -1247,7 +1254,7 @@ ffs_fragextend(struct inode *ip, int cg, long bprev, int osize, int nsize)
  * Check to see if a block of the appropriate size is available,
  * and if it is, allocate it.
  */
-static daddr_t
+daddr_t
 ffs_alloccg(struct inode *ip, int cg, daddr_t bpref, int size)
 {
 	struct fs *fs;
@@ -1340,7 +1347,7 @@ ffs_alloccg(struct inode *ip, int cg, daddr_t bpref, int size)
  * Note that this routine only allocates fs_bsize blocks; these
  * blocks may be fragmented by the routine that allocates them.
  */
-static daddr_t
+daddr_t
 ffs_alloccgblk(struct inode *ip, struct buf *bp, daddr_t bpref)
 {
 	struct fs *fs;
@@ -1404,7 +1411,7 @@ gotit:
  * are multiple choices in the same cylinder group. Instead we just
  * take the first one that we find following bpref.
  */
-static daddr_t
+daddr_t
 ffs_clusteralloc(struct inode *ip, int cg, daddr_t bpref, int len)
 {
 	struct fs *fs;
@@ -1484,6 +1491,8 @@ ffs_clusteralloc(struct inode *ip, int cg, daddr_t bpref, int len)
 	/*
 	 * Allocate the cluster that we have found.
 	 */
+	cgp->cg_ffs2_time = cgp->cg_time = time_second;
+
 #ifdef DIAGNOSTIC
 	for (i = 1; i <= len; i++)
 		if (!ffs_isblock(fs, cg_blksfree(cgp), got - run + i))
@@ -1508,7 +1517,7 @@ fail:
 }
 
 /* inode allocation routine */
-static daddr_t
+daddr_t
 ffs_nodealloccg(struct inode *ip, int cg, daddr_t ipref, int mode)
 {
 	struct fs *fs;
@@ -1676,7 +1685,7 @@ gotit:
  * block reassembly is checked.
  */
 void
-ffs_blkfree(struct inode *ip, daddr_t bno, long size)
+ffs_blkfree(struct inode *ip, daddr64_t bno, long size)
 {
 	struct fs *fs;
 	struct cg *cgp;
@@ -1854,7 +1863,7 @@ ffs_freefile(struct inode *pip, ino_t ino, mode_t mode)
  * Verify allocation of a block or fragment. Returns true if block or
  * fragment is allocated, false if it is free.
  */
-static int
+int
 ffs_checkblk(struct inode *ip, daddr_t bno, long size)
 {
 	struct fs *fs;
@@ -1906,7 +1915,7 @@ ffs_checkblk(struct inode *ip, daddr_t bno, long size)
  * It is a panic if a request is made to find a block if none are
  * available.
  */
-static daddr_t
+daddr_t
 ffs_mapsearch(struct fs *fs, struct cg *cgp, daddr_t bpref, int allocsiz)
 {
 	daddr_t bno;

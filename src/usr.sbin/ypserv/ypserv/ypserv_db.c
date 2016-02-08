@@ -1,4 +1,4 @@
-/*	$OpenBSD: ypserv_db.c,v 1.23 2006/04/03 05:01:24 deraadt Exp $ */
+/*	$OpenBSD: ypserv_db.c,v 1.25 2007/05/29 21:11:10 maja Exp $ */
 
 /*
  * Copyright (c) 1994 Mats O Jansson <moj@stacken.kth.se>
@@ -13,12 +13,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by Mats O Jansson
- *	and Charles D. Cranor.
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS
  * OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
@@ -34,7 +28,7 @@
  */
 
 #ifndef lint
-static const char rcsid[] = "$OpenBSD: ypserv_db.c,v 1.23 2006/04/03 05:01:24 deraadt Exp $";
+static const char rcsid[] = "$OpenBSD: ypserv_db.c,v 1.25 2007/05/29 21:11:10 maja Exp $";
 #endif
 
 /*
@@ -147,7 +141,7 @@ yp_private(datum key, int ypprivate)
 static void
 ypdb_close_last(void)
 {
-	struct opt_map *last = maps.cqh_last;
+	struct opt_map *last = CIRCLEQ_LAST(&maps);
 
 	if (last == (void *)&maps) {
 		yplog("  ypdb_close_last: LRU list is empty!");

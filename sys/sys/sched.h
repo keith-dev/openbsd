@@ -1,4 +1,4 @@
-/*	$OpenBSD: sched.h,v 1.14 2007/02/03 16:48:23 miod Exp $	*/
+/*	$OpenBSD: sched.h,v 1.16 2007/05/18 14:41:55 art Exp $	*/
 /* $NetBSD: sched.h,v 1.2 1999/02/28 18:14:58 ross Exp $ */
 
 /*-
@@ -123,10 +123,10 @@ extern int rrticks_init;		/* ticks per roundrobin() */
 
 struct proc;
 void schedclock(struct proc *);
-#ifdef __HAVE_CPUINFO
 struct cpu_info;
 void roundrobin(struct cpu_info *);
-#endif
+
+#define sched_is_idle() (whichqs == 0)
 
 /* Inherit the parent's scheduler history */
 #define scheduler_fork_hook(parent, child) do {				\
@@ -138,9 +138,6 @@ void roundrobin(struct cpu_info *);
 	(parent)->p_estcpu = ESTCPULIM((parent)->p_estcpu + (child)->p_estcpu);\
 } while (0)
 
-#if !defined(__HAVE_CPUINFO) && !defined(splsched)
-#define splsched() splhigh()
-#endif
 #ifndef IPL_SCHED
 #define IPL_SCHED IPL_HIGH
 #endif

@@ -1,4 +1,4 @@
-/*	$OpenBSD: mpi.c,v 1.82 2006/11/28 23:59:45 dlg Exp $ */
+/*	$OpenBSD: mpi.c,v 1.86 2007/06/12 19:29:23 thib Exp $ */
 
 /*
  * Copyright (c) 2005, 2006 David Gwynne <dlg@openbsd.org>
@@ -341,7 +341,7 @@ mpi_run_ppr(struct mpi_softc *sc)
 	}
 
 	pagelen = hdr.page_length * 4; /* dwords to bytes */
-	physdisk_pg = malloc(pagelen, M_TEMP, M_WAITOK);
+	physdisk_pg = malloc(pagelen, M_TEMP, M_WAITOK|M_CANFAIL);
 	if (physdisk_pg == NULL) {
 		DNPRINTF(MPI_D_RAID|MPI_D_PPR, "%s: mpi_run_ppr unable to "
 		    "allocate ioc pg 3\n", DEVNAME(sc));
@@ -588,6 +588,7 @@ mpi_inq(struct mpi_softc *sc, u_int16_t target, int physdisk)
 
 	bzero(&inq, sizeof(inq));
 	inq.opcode = INQUIRY;
+	_lto2b(sizeof(struct scsi_inquiry_data), inq.length);
 
 	ccb = mpi_get_ccb(sc);
 	if (ccb == NULL)
@@ -797,7 +798,7 @@ mpi_alloc_ccbs(struct mpi_softc *sc)
 	TAILQ_INIT(&sc->sc_ccb_free);
 
 	sc->sc_ccbs = malloc(sizeof(struct mpi_ccb) * sc->sc_maxcmds,
-	    M_DEVBUF, M_WAITOK);
+	    M_DEVBUF, M_WAITOK|M_CANFAIL);
 	if (sc->sc_ccbs == NULL) {
 		printf("%s: unable to allocate ccbs\n", DEVNAME(sc));
 		return (1);
@@ -891,7 +892,7 @@ mpi_alloc_replies(struct mpi_softc *sc)
 	DNPRINTF(MPI_D_MISC, "%s: mpi_alloc_replies\n", DEVNAME(sc));
 
 	sc->sc_rcbs = malloc(MPI_REPLY_COUNT * sizeof(struct mpi_rcb),
-	    M_DEVBUF, M_WAITOK);
+	    M_DEVBUF, M_WAITOK|M_CANFAIL);
 	if (sc->sc_rcbs == NULL)
 		return (1);
 
@@ -1672,7 +1673,7 @@ mpi_iocfacts(struct mpi_softc *sc)
 	sc->sc_maxcmds = letoh16(ifp.global_credits);
 	sc->sc_maxchdepth = ifp.max_chain_depth;
 	sc->sc_ioc_number = ifp.ioc_number;
-	if (sc->sc_flags & MPI_F_VMWARE)
+	if (sc->sc_flags & MPI_F_SPI)
 		sc->sc_buswidth = 16;
 	else
 		sc->sc_buswidth =
@@ -1906,7 +1907,7 @@ mpi_eventnotify_done(struct mpi_ccb *ccb)
 		if (sc->sc_scsibus == NULL)
 			break;
 
-		if (scsi_task(mpi_evt_sas, sc, ccb->ccb_rcb, 1) != 0) {
+		if (scsi_task(mpi_evt_sas, sc, ccb->ccb_rcb, 0) != 0) {
 			printf("%s: unable to run SAS device status change\n",
 			    DEVNAME(sc));
 			break;
@@ -2150,7 +2151,7 @@ mpi_get_raid(struct mpi_softc *sc)
 	}
 
 	pagelen = hdr.page_length * 4; /* dwords to bytes */
-	vol_page = malloc(pagelen, M_TEMP, M_WAITOK);
+	vol_page = malloc(pagelen, M_TEMP, M_WAITOK|M_CANFAIL);
 	if (vol_page == NULL) {
 		DNPRINTF(MPI_D_RAID, "%s: mpi_get_raid unable to allocate "
 		    "space for ioc config page 2\n", DEVNAME(sc));

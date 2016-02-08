@@ -1,4 +1,4 @@
-/*	$OpenBSD: via.c,v 1.8 2006/11/17 07:47:56 tom Exp $	*/
+/*	$OpenBSD: via.c,v 1.12 2007/08/14 20:10:05 henric Exp $	*/
 /*	$NetBSD: machdep.c,v 1.214 1996/11/10 03:16:17 thorpej Exp $	*/
 
 /*-
@@ -63,8 +63,8 @@ void	viac3_rnd(void *);
 #ifdef CRYPTO
 
 struct viac3_session {
-	u_int32_t	ses_ekey[4 * (MAXNR + 1) + 4];	/* 128 bit aligned */
-	u_int32_t	ses_dkey[4 * (MAXNR + 1) + 4];	/* 128 bit aligned */
+	u_int32_t	ses_ekey[4 * (AES_MAXROUNDS + 1) + 4];	/* 128 bit aligned */
+	u_int32_t	ses_dkey[4 * (AES_MAXROUNDS + 1) + 4];	/* 128 bit aligned */
 	u_int8_t	ses_iv[16];			/* 128 bit aligned */
 	u_int32_t	ses_cw0;
 	struct swcr_data *swd;
@@ -188,6 +188,7 @@ viac3_crypto_newsession(u_int32_t *sidp, struct cryptoini *cri)
 				cw0 = C3_CRYPT_CWLO_KEY256;
 				break;
 			default:
+				viac3_crypto_freesession(sesn);
 				return (EINVAL);
 			}
 			cw0 |= C3_CRYPT_CWLO_ALG_AES | C3_CRYPT_CWLO_KEYGEN_SW |
@@ -202,7 +203,7 @@ viac3_crypto_newsession(u_int32_t *sidp, struct cryptoini *cri)
 			    c->cri_klen);
 			rijndaelKeySetupDec(ses->ses_dkey, c->cri_key,
 			    c->cri_klen);
-			for (i = 0; i < 4 * (MAXNR + 1); i++) {
+			for (i = 0; i < 4 * (AES_MAXROUNDS + 1); i++) {
 				ses->ses_ekey[i] = ntohl(ses->ses_ekey[i]);
 				ses->ses_dkey[i] = ntohl(ses->ses_dkey[i]);
 			}
@@ -276,6 +277,7 @@ viac3_crypto_newsession(u_int32_t *sidp, struct cryptoini *cri)
 
 			break;
 		default:
+			viac3_crypto_freesession(sesn);
 			return (EINVAL);
 		}
 	}
@@ -510,7 +512,7 @@ out:
  * store random data, and can be accessed a lot quicker than waiting
  * for new data to be generated.  As we are using every 8th bit only
  * due to whitening. Since the RNG generates in excess of 21KB/s at
- * it's worst, collecting 64 bytes worth of entropy should not affect
+ * its worst, collecting 64 bytes worth of entropy should not affect
  * things significantly.
  *
  * Note, due to some weirdness in the RNG, we need at least 7 bytes
@@ -536,6 +538,9 @@ viac3_rnd(void *v)
 	struct timeout *tmo = v;
 	unsigned int *p, i, rv, creg0, len = VIAC3_RNG_BUFSIZ;
 	static int buffer[VIAC3_RNG_BUFSIZ + 2];	/* XXX why + 2? */
+#ifdef MULTIPROCESSOR
+	int s = splipi();
+#endif
 
 	creg0 = rcr0();		/* Permit access to SIMD/FPU path */
 	lcr0(creg0 & ~(CR0_EM|CR0_TS));
@@ -550,6 +555,10 @@ viac3_rnd(void *v)
 	    : "memory", "cc");
 
 	lcr0(creg0);
+
+#ifdef MULTIPROCESSOR
+	splx(s);
+#endif
 
 	for (i = 0, p = buffer; i < VIAC3_RNG_BUFSIZ; i++, p++)
 		add_true_randomness(*p);

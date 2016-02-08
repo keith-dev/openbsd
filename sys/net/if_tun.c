@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_tun.c,v 1.85 2007/02/21 13:24:55 claudio Exp $	*/
+/*	$OpenBSD: if_tun.c,v 1.89 2007/06/06 10:04:36 henning Exp $	*/
 /*	$NetBSD: if_tun.c,v 1.24 1996/05/07 02:40:48 thorpej Exp $	*/
 
 /*
@@ -71,11 +71,6 @@
 #include <netinet/if_ether.h>
 #endif
 
-#ifdef IPX
-#include <netipx/ipx.h>
-#include <netipx/ipx_if.h>
-#endif
-
 #ifdef NETATALK
 #include <netatalk/at.h>
 #include <netatalk/at_var.h>
@@ -113,8 +108,6 @@ int	tundebug = TUN_DEBUG;
 
 /* Only these IFF flags are changeable by TUNSIFINFO */
 #define TUN_IFF_FLAGS (IFF_UP|IFF_POINTOPOINT|IFF_MULTICAST|IFF_BROADCAST)
-
-extern int ifqmaxlen;
 
 void	tunattach(int);
 int	tunopen(dev_t, int, int, struct proc *);
@@ -520,7 +513,7 @@ tun_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 
 	case SIOCSIFFLAGS:
 		error = tun_switch(tp,
-		    ifr->ifr_flags & IFF_LINK0 ? TUN_LAYER2 : 0);
+		    ifp->if_flags & IFF_LINK0 ? TUN_LAYER2 : 0);
 		break;
 	default:
 		error = EINVAL;
@@ -819,7 +812,7 @@ tunwrite(dev_t dev, struct uio *uio, int ioflag)
 	if (tp->tun_flags & TUN_LAYER2) {
 		/*
 		 * Pad so that IP header is correctly aligned
-		 * this is neccessary for all strict aligned architectures.
+		 * this is necessary for all strict aligned architectures.
 		 */
 		mlen -= ETHER_ALIGN;
 		m->m_data += ETHER_ALIGN;
@@ -885,12 +878,6 @@ tunwrite(dev_t dev, struct uio *uio, int ioflag)
 	case AF_INET6:
 		ifq = &ip6intrq;
 		isr = NETISR_IPV6;
-		break;
-#endif
-#ifdef IPX
-	case AF_IPX:
-		ifq = &ipxintrq;
-		isr = NETISR_IPX;
 		break;
 #endif
 #ifdef NETATALK

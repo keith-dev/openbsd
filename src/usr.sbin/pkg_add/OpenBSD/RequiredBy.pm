@@ -1,7 +1,7 @@
 # ex:ts=8 sw=4:
-# $OpenBSD: RequiredBy.pm,v 1.11 2005/08/17 18:24:53 espie Exp $
+# $OpenBSD: RequiredBy.pm,v 1.16 2007/06/04 14:40:39 espie Exp $
 #
-# Copyright (c) 2003-2004 Marc Espie <espie@openbsd.org>
+# Copyright (c) 2003-2005 Marc Espie <espie@openbsd.org>
 #
 # Permission to use, copy, modify, and distribute this software for any
 # purpose with or without fee is hereby granted, provided that the above
@@ -21,12 +21,11 @@ use warnings;
 package OpenBSD::RequirementList;
 use OpenBSD::PackageInfo;
 
-sub fill_entries($)
+sub fill_entries
 {
 	my $self = shift;
 	if (!exists $self->{entries}) {
-		my $l = {};
-		$self->{entries} = $l;
+		my $l = $self->{entries} = {};
 
 		if (-f $self->{filename}) {
 			open(my $fh, '<', $self->{filename}) or 
@@ -34,9 +33,9 @@ sub fill_entries($)
 				$self->{filename}, ": $!";
 			local $_;
 			while(<$fh>) {
-				chomp $_;
-				s/\s+$//;
-				next if /^$/;
+				s/\s+$//o;
+				next if /^$/o;
+				chomp;
 				$l->{$_} = 1;
 			}
 			close($fh);
@@ -71,12 +70,12 @@ sub synch
 	}
 } 
 
-sub list($)
+sub list
 {
 	my $self = shift;
 
 	if (wantarray) {
-		$self->fill_entries();
+		$self->fill_entries;
 		return keys %{$self->{entries}};
 	} else {
 		if (exists $self->{entries}) {
@@ -95,7 +94,7 @@ sub delete
 	for my $pkg (@pkgnames) {
 		delete $self->{entries}->{$pkg};
 	}
-	$self->synch();
+	$self->synch;
 }
 
 sub add
@@ -105,7 +104,7 @@ sub add
 	for my $pkg (@pkgnames) {
 		$self->{entries}->{$pkg} = 1;
 	}
-	$self->synch();
+	$self->synch;
 }
 
 my $cache = {};
@@ -113,7 +112,7 @@ my $cache = {};
 sub new
 {
 	my ($class, $pkgname) = @_;
-	my $f = installed_info($pkgname).$class->filename();
+	my $f = installed_info($pkgname).$class->filename;
 	if (!exists $cache->{$f}) {
 		return $cache->{$f} = bless { filename => $f }, $class;
 	}
@@ -123,7 +122,7 @@ sub new
 sub forget
 {
 	my ($class, $dir) = @_;
-	my $f = $dir.$class->filename();
+	my $f = $dir.$class->filename;
 	if (exists $cache->{$f}) {
 		$cache->{$f}->{entries} = {};
 		$cache->{$f}->{nonempty} = 0;
@@ -140,7 +139,7 @@ sub compute_closure
 	while (my $pkgname = pop @todo) {
 		next if $done{$pkgname};
 		$done{$pkgname} = 1;
-		for my $dep ($class->new($pkgname)->list()) {
+		for my $dep ($class->new($pkgname)->list) {
 			next if defined $done{$dep};
 			push(@todo, $dep);
 		}

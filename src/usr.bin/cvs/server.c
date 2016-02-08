@@ -1,4 +1,4 @@
-/*	$OpenBSD: server.c,v 1.55 2007/02/22 06:42:09 otto Exp $	*/
+/*	$OpenBSD: server.c,v 1.65 2007/07/03 13:22:43 joris Exp $	*/
 /*
  * Copyright (c) 2006 Joris Vink <joris@openbsd.org>
  *
@@ -91,9 +91,8 @@ cvs_server(int argc, char **argv)
 
 	server_argv[0] = xstrdup("server");
 
-	cvs_server_path = xmalloc(MAXPATHLEN);
-	(void)xsnprintf(cvs_server_path, MAXPATHLEN, "%s/cvs-serv%d",
-	    cvs_tmpdir, getpid());
+	(void)xasprintf(&cvs_server_path, "%s/cvs-serv%d", cvs_tmpdir,
+	    getpid());
 
 	if (mkdir(cvs_server_path, 0700) == -1)
 		fatal("failed to create temporary server directory: %s, %s",
@@ -116,6 +115,10 @@ cvs_server(int argc, char **argv)
 		if (req->hdlr == NULL)
 			fatal("opencvs server does not support '%s'", cmd);
 
+		if ((req->flags & REQ_NEEDDIR) && (server_currentdir == NULL))
+			fatal("`%s' needs a directory to be sent with "
+			    "the `Directory` request first", cmd);
+
 		(*req->hdlr)(data);
 		xfree(cmd);
 	}
@@ -127,25 +130,12 @@ void
 cvs_server_send_response(char *fmt, ...)
 {
 	va_list ap;
-	char *data, *s;
-	struct cvs_resp *resp;
+	char *data;
 
 	va_start(ap, fmt);
-	vasprintf(&data, fmt, ap);
+	if (vasprintf(&data, fmt, ap) == -1)
+		fatal("vasprintf: %s", strerror(errno));
 	va_end(ap);
-
-	if ((s = strchr(data, ' ')) != NULL)
-		*s = '\0';
-
-	resp = cvs_remote_get_response_info(data);
-	if (resp == NULL)
-		fatal("'%s' is an unknown response", data);
-
-	if (resp->supported != 1)
-		fatal("remote cvs client does not support '%s'", data);
-
-	if (s != NULL)
-		*s = ' ';
 
 	cvs_log(LP_TRACE, "%s", data);
 	cvs_remote_output(data);
@@ -165,7 +155,9 @@ cvs_server_validresp(char *data)
 	char *sp, *ep;
 	struct cvs_resp *resp;
 
-	sp = data;
+	if ((sp = data) == NULL)
+		fatal("Missing argument for Valid-responses");
+
 	do {
 		if ((ep = strchr(sp, ' ')) != NULL)
 			*ep = '\0';
@@ -240,6 +232,9 @@ cvs_server_sticky(char *data)
 	FILE *fp;
 	char tagpath[MAXPATHLEN];
 
+	if (data == NULL)
+		fatal("Missing argument for Sticky");
+
 	(void)xsnprintf(tagpath, MAXPATHLEN, "%s/%s",
 	    server_currentdir, CVS_PATH_TAG);
 
@@ -255,6 +250,9 @@ cvs_server_sticky(char *data)
 void
 cvs_server_globalopt(char *data)
 {
+	if (data == NULL)
+		fatal("Missing argument for Global_option");
+
 	if (!strcmp(data, "-l"))
 		cvs_nolog = 1;
 
@@ -278,6 +276,9 @@ void
 cvs_server_set(char *data)
 {
 	char *ep;
+
+	if (data == NULL)
+		fatal("Missing argument for Set");
 
 	ep = strchr(data, '=');
 	if (ep == NULL)
@@ -314,7 +315,7 @@ cvs_server_directory(char *data)
 	else
 		p = xstrdup(repo + 1);
 
-	cvs_mkpath(p);
+	cvs_mkpath(p, NULL);
 
 	if ((dirn = basename(p)) == NULL)
 		fatal("cvs_server_directory: %s", strerror(errno));
@@ -332,9 +333,8 @@ cvs_server_directory(char *data)
 
 	if (server_currentdir != NULL)
 		xfree(server_currentdir);
-	server_currentdir = xstrdup(p);
+	server_currentdir = p;
 
-	xfree(p);
 	xfree(dir);
 }
 
@@ -342,6 +342,9 @@ void
 cvs_server_entry(char *data)
 {
 	CVSENTRIES *entlist;
+
+	if (data == NULL)
+		fatal("Missing argument for Entry");
 
 	entlist = cvs_ent_open(server_currentdir);
 	cvs_ent_add(entlist, data);
@@ -356,6 +359,9 @@ cvs_server_modified(char *data)
 	mode_t fmode;
 	const char *errstr;
 	char *mode, *len, fpath[MAXPATHLEN];
+
+	if (data == NULL)
+		fatal("Missing argument for Modified");
 
 	mode = cvs_remote_input();
 	len = cvs_remote_input();
@@ -395,6 +401,9 @@ cvs_server_unchanged(char *data)
 	struct cvs_ent *ent;
 	struct timeval tv[2];
 
+	if (data == NULL)
+		fatal("Missing argument for Unchanged");
+
 	(void)xsnprintf(fpath, MAXPATHLEN, "%s/%s", server_currentdir, data);
 
 	if ((fd = open(fpath, O_RDWR | O_CREAT | O_TRUNC)) == -1)
@@ -427,9 +436,11 @@ cvs_server_questionable(char *data)
 void
 cvs_server_argument(char *data)
 {
-
-	if (server_argc > CVS_CMD_MAXARG)
+	if (server_argc >= CVS_CMD_MAXARG)
 		fatal("cvs_server_argument: too many arguments sent");
+
+	if (data == NULL)
+		fatal("Missing argument for Argument");
 
 	server_argv[server_argc++] = xstrdup(data);
 }
@@ -539,6 +550,17 @@ cvs_server_init(char *data)
 }
 
 void
+cvs_server_release(char *data)
+{
+	if (chdir(server_currentdir) == -1)
+		fatal("cvs_server_init: %s", strerror(errno));
+
+	cvs_cmdop = CVS_OP_RELEASE;
+	cvs_release(server_argc, server_argv);
+	cvs_server_send_response("ok");
+}
+
+void
 cvs_server_remove(char *data)
 {
 	if (chdir(server_currentdir) == -1)
@@ -567,6 +589,25 @@ cvs_server_log(char *data)
 		fatal("cvs_server_log: %s", strerror(errno));
 
 	cvs_cmdop = CVS_OP_LOG;
+	cvs_getlog(server_argc, server_argv);
+	cvs_server_send_response("ok");
+}
+ 
+void
+cvs_server_rlog(char *data)
+{
+	char fpath[MAXPATHLEN];
+	struct cvsroot *cvsroot;
+
+	cvsroot = cvsroot_get(NULL);
+
+	(void)xsnprintf(fpath, MAXPATHLEN, "%s/%s",
+	    cvsroot->cr_dir, server_currentdir);
+
+	if (chdir(fpath) == -1)
+		fatal("cvs_server_log: %s", strerror(errno));
+
+	cvs_cmdop = CVS_OP_RLOG;
 	cvs_getlog(server_argc, server_argv);
 	cvs_server_send_response("ok");
 }
@@ -604,16 +645,45 @@ cvs_server_version(char *data)
 void
 cvs_server_update_entry(const char *resp, struct cvs_file *cf)
 {
-	char *p, response[MAXPATHLEN];
+	char *p;
+	char repo[MAXPATHLEN], fpath[MAXPATHLEN];
 
 	if ((p = strrchr(cf->file_rpath, ',')) != NULL)
 		*p = '\0';
 
-	(void)xsnprintf(response, MAXPATHLEN, "%s %s/", resp, cf->file_wd);
+	cvs_get_repository_path(cf->file_wd, repo, MAXPATHLEN);
+	(void)xsnprintf(fpath, MAXPATHLEN, "%s/%s", repo, cf->file_name);
 
-	cvs_server_send_response("%s", response);
-	cvs_remote_output(cf->file_rpath);
+	cvs_server_send_response("%s %s/", resp, cf->file_wd);
+	cvs_remote_output(fpath);
 
 	if (p != NULL)
 		*p = ',';
+}
+
+void
+cvs_server_set_sticky(char *dir, char *tag)
+{
+	char fpath[MAXPATHLEN], tbuf[CVS_ENT_MAXLINELEN];
+
+	(void)xsnprintf(fpath, MAXPATHLEN, "%s/%s",
+	    current_cvsroot->cr_dir, dir);
+
+	(void)xsnprintf(tbuf, MAXPATHLEN, "T%s", tag);
+
+	cvs_server_send_response("Set-sticky %s", dir);
+	cvs_remote_output(fpath);
+	cvs_remote_output(tbuf);
+}
+
+void
+cvs_server_clear_sticky(char *dir)
+{
+	char fpath[MAXPATHLEN];
+
+	(void)xsnprintf(fpath, MAXPATHLEN, "%s/%s",
+	    current_cvsroot->cr_dir, dir);
+
+	cvs_server_send_response("Clear-sticky %s", dir);
+	cvs_remote_output(fpath);
 }

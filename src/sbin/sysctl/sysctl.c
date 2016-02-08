@@ -1,4 +1,4 @@
-/*	$OpenBSD: sysctl.c,v 1.146 2007/02/20 00:02:56 deraadt Exp $	*/
+/*	$OpenBSD: sysctl.c,v 1.149 2007/06/04 13:17:54 henning Exp $	*/
 /*	$NetBSD: sysctl.c,v 1.9 1995/09/30 07:12:50 thorpej Exp $	*/
 
 /*
@@ -40,7 +40,7 @@ static const char copyright[] =
 #if 0
 static const char sccsid[] = "@(#)sysctl.c	8.5 (Berkeley) 5/9/95";
 #else
-static const char rcsid[] = "$OpenBSD: sysctl.c,v 1.146 2007/02/20 00:02:56 deraadt Exp $";
+static const char rcsid[] = "$OpenBSD: sysctl.c,v 1.149 2007/06/04 13:17:54 henning Exp $";
 #endif
 #endif /* not lint */
 
@@ -100,9 +100,6 @@ static const char rcsid[] = "$OpenBSD: sysctl.c,v 1.146 2007/02/20 00:02:56 dera
 #include <nfs/nfsproto.h>
 #include <nfs/nfs.h>
 
-#include <netipx/ipx.h>
-#include <netipx/ipx_var.h>
-#include <netipx/spx_var.h>
 #include <ddb/db_var.h>
 #include <dev/rndvar.h>
 
@@ -183,7 +180,6 @@ int	Aflag, aflag, nflag, qflag;
 #define	LONGARRAY	0x00000800
 #define	KMEMSTATS	0x00001000
 #define	SENSORS		0x00002000
-#define	ZTSSCALE	0x00004000
 
 /* prototypes */
 void debuginit(void);
@@ -197,7 +193,6 @@ int sysctl_inet(char *, char **, int *, int, int *);
 int sysctl_inet6(char *, char **, int *, int, int *);
 #endif
 int sysctl_bpf(char *, char **, int *, int, int *);
-int sysctl_ipx(char *, char **, int *, int, int *);
 int sysctl_fs(char *, char **, int *, int, int *);
 static int sysctl_vfs(char *, char **, int[], int, int *);
 static int sysctl_vfsgen(char *, char **, int[], int, int *);
@@ -307,19 +302,11 @@ parse(char *string, int flags)
 	int indx, type, state, intval, len;
 	size_t size, newsize = 0;
 	int lal = 0, special = 0;
-	void *newval = 0;
+	void *newval = NULL;
 	int64_t quadval;
 	struct list *lp;
 	int mib[CTL_MAXNAME];
 	char *cp, *bufp, buf[BUFSIZ];
-#ifdef CPU_ZTSSCALE
-	struct ztsscale {
-		int ts_minx;
-		int ts_maxx;
-		int ts_miny;
-		int ts_maxy;
-	} tsbuf;
-#endif
 
 	(void)strlcpy(buf, string, sizeof(buf));
 	bufp = buf;
@@ -556,12 +543,6 @@ parse(char *string, int flags)
 			break;
 		}
 #endif
-		if (mib[1] == PF_IPX) {
-			len = sysctl_ipx(string, &bufp, mib, flags, &type);
-			if (len >= 0)
-				break;
-			return;
-		}
 		if (mib[1] == PF_BPF) {
 			len = sysctl_bpf(string, &bufp, mib, flags, &type);
 			if (len < 0)
@@ -622,46 +603,6 @@ parse(char *string, int flags)
 			len = sysctl_chipset(string, &bufp, mib, flags, &type);
 			if (len < 0)
 				return;
-			break;
-		}
-#endif
-#ifdef CPU_ZTSSCALE
-		if (mib[1] == CPU_ZTSSCALE) {
-			special |= ZTSSCALE;
-			if (newsize > 0) {
-				const char *errstr = 0;
-
-				/* Unspecified values default to 0. */
-				bzero(&tsbuf, sizeof tsbuf);
-				newval = (void *)strtok(newval, ",");
-				if (newval != NULL) {
-					tsbuf.ts_minx = (int)strtonum(newval,
-					    0, 32768, &errstr);
-					newval = (void *)strtok(NULL, ",");
-				}
-				if (!errstr && newval != NULL) {
-					tsbuf.ts_maxx = (int)strtonum(newval,
-					    0, 32768, &errstr);
-					newval = (void *)strtok(NULL, ",");
-				}
-				if (!errstr && newval != NULL) {
-					tsbuf.ts_miny = (int)strtonum(newval,
-					    0, 32768, &errstr);
-					newval = (void *)strtok(NULL, ",");
-				}
-				if (!errstr && newval != NULL) {
-					tsbuf.ts_maxy = (int)strtonum(newval,
-					    0, 32768, &errstr);
-					newval = (void *)strtok(NULL, ",");
-				}
-				if (errstr)
-					errx(1, "calibration value is %s",
-					    errstr);
-				if (newval != NULL)
-					errx(1, "too many calibration values");
-				newval = &tsbuf;
-				newsize = sizeof(tsbuf);
-			}
 			break;
 		}
 #endif
@@ -961,32 +902,6 @@ parse(char *string, int flags)
 		}
 		return;
 	}
-#ifdef CPU_ZTSSCALE
-	if (special & ZTSSCALE) {
-		struct ztsscale *tsp;
-
-		if (newsize == 0) {
-			if (!nflag)
-				(void)printf("%s%s", string, equ);
-			tsp = (struct ztsscale *)buf;
-			(void)printf("%d,%d,%d,%d\n", tsp->ts_minx,
-			    tsp->ts_maxx, tsp->ts_miny, tsp->ts_maxy);
-		} else {
-			if (!qflag) {
-				if (!nflag) {
-					tsp = (struct ztsscale *)buf;
-					(void)printf("%s: %d,%d,%d,%d -> ",
-					    string, tsp->ts_minx, tsp->ts_maxx,
-					    tsp->ts_miny, tsp->ts_maxy);
-				}
-				tsp = (struct ztsscale *)newval;
-				(void)printf("%d,%d,%d,%d\n", tsp->ts_minx,
-				    tsp->ts_maxx, tsp->ts_miny, tsp->ts_maxy);
-			}
-		}
-		return;
-	}
-#endif
 	switch (type) {
 	case CTLTYPE_INT:
 		if (newsize == 0) {
@@ -1708,7 +1623,8 @@ sysctl_malloc(char *string, char **bufpp, int mib[], int flags, int *typep)
 				return (-1);
 			lp.size = stor + 2;
 			for (i = 1;
-			    (lp.list[i].ctl_name = strsep(&buf, ",")) != NULL; i++) {
+			    (lp.list[i].ctl_name = strsep(&buf, ",")) != NULL;
+			    i++) {
 				if (lp.list[i].ctl_name[0] == '\0') {
 					i--;
 					continue;
@@ -1842,7 +1758,7 @@ sysctl_inet(char *string, char **bufpp, int mib[], int flags, int *typep)
 	if (*typep == CTLTYPE_NODE) {
 		int tindx;
 
-		if (*bufpp == 0) {
+		if (*bufpp == NULL) {
 			listall(string, &ifqlist);
 			return(-1);
 		}
@@ -1936,54 +1852,6 @@ sysctl_inet6(char *string, char **bufpp, int mib[], int flags, int *typep)
 	return (4);
 }
 #endif
-
-struct ctlname ipxname[] = CTL_IPXPROTO_NAMES;
-struct ctlname ipxpname[] = IPXCTL_NAMES;
-struct ctlname spxpname[] = SPXCTL_NAMES;
-struct list ipxlist = { ipxname, IPXCTL_MAXID };
-struct list ipxvars[] = {
-	{ ipxpname, IPXCTL_MAXID },	/* ipx */
-	{ 0, 0 },
-	{ 0, 0 },
-	{ 0, 0 },
-	{ 0, 0 },
-	{ spxpname, SPXCTL_MAXID },
-};
-
-/*
- * Handle internet requests
- */
-int
-sysctl_ipx(char *string, char **bufpp, int mib[], int flags, int *typep)
-{
-	struct list *lp;
-	int indx;
-
-	if (*bufpp == NULL) {
-		listall(string, &ipxlist);
-		return (-1);
-	}
-	if ((indx = findname(string, "third", bufpp, &ipxlist)) == -1)
-		return (-1);
-	mib[2] = indx;
-	if (indx <= IPXPROTO_SPX && ipxvars[indx].list != NULL)
-		lp = &ipxvars[indx];
-	else if (!flags)
-		return (-1);
-	else {
-		warnx("%s: no variables defined for this protocol", string);
-		return (-1);
-	}
-	if (*bufpp == NULL) {
-		listall(string, lp);
-		return (-1);
-	}
-	if ((indx = findname(string, "fourth", bufpp, lp)) == -1)
-		return (-1);
-	mib[3] = indx;
-	*typep = lp->list[indx].ctl_type;
-	return (4);
-}
 
 /* handle bpf requests */
 int
@@ -2333,6 +2201,8 @@ print_sensor(struct sensor *s)
 		printf(" (%s)", s->desc);
 
 	switch (s->status) {
+	case SENSOR_S_UNSPEC:
+		break;
 	case SENSOR_S_OK:
 		printf(", OK");
 		break;

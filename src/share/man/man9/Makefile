@@ -1,9 +1,10 @@
-#	$OpenBSD: Makefile,v 1.122 2007/02/18 20:47:16 mk Exp $
+#	$OpenBSD: Makefile,v 1.129 2007/06/16 13:21:44 damien Exp $
 #	$NetBSD: Makefile,v 1.4 1996/01/09 03:23:01 thorpej Exp $
 
 #	Makefile for section 9 (kernel function and variable) manual pages.
 
-MAN=	altq.9 aml_evalnode.9 audio.9 autoconf.9 bio_register.9 boot.9 \
+MAN=	altq.9 aml_evalnode.9 atomic.9 audio.9 autoconf.9 bio_register.9 \
+	boot.9 \
 	buffercache.9 bus_dma.9 bus_space.9 copy.9 crypto.9 ctxsw.9 delay.9 \
 	disk.9 disklabel.9 dohooks.9 dopowerhooks.9 \
 	domountroothooks.9 doshutdownhooks.9 dostartuphooks.9 \
@@ -27,10 +28,11 @@ MAN=	altq.9 aml_evalnode.9 audio.9 autoconf.9 bio_register.9 boot.9 \
 	vfs_cache.9 vaccess.9 vclean.9 vcount.9 vdevgone.9 vfinddev.9 vflush.9 \
 	vflushbuf.9 vget.9 vgone.9 vhold.9 vinvalbuf.9 vnode.9 vnsubr.9 \
 	VOP_GETATTR.9 VOP_LOOKUP.9 vput.9 vrecycle.9 vref.9 vrele.9 \
-	vwaitforio.9 vwakeup.9 wdog_register.9
+	vwaitforio.9 vwakeup.9 wdog_register.9 workq_add_task.9
 
 MLINKS+=aml_evalnode.9 aml_evalname.9 aml_evalnode.9 aml_find_node.9 \
 	aml_evalnode.9 aml_freevalue.9 aml_evalnode.9 aml_val2int.9
+MLINKS+=atomic.9 atomic_setbits_int.9 atomic.9 atomic_clearbits_int.9
 MLINKS+=autoconf.9 config_init.9 autoconf.9 config_search.9 \
 	autoconf.9 config_rootsearch.9 autoconf.9 config_found_sm.9 \
 	autoconf.9 config_found.9 autoconf.9 config_rootfound.9 \
@@ -112,8 +114,7 @@ MLINKS+=crypto.9 crypto_register.9 \
 	crypto.9 crypto_freereq.9
 MLINKS+=ctxsw.9 cpu_switch.9 ctxsw.9 mi_switch.9
 MLINKS+=disk.9 disk_init.9 disk.9 disk_attach.9 disk.9 disk_detatch.9 \
-	disk.9 disk_busy.9 disk.9 disk_unbusy.9 disk.9 disk_find.9 \
-	disk.9 disk_resetstat.9
+	disk.9 disk_busy.9 disk.9 disk_unbusy.9
 MLINKS+=disklabel.9 readdisklabel.9 disklabel.9 writedisklabel.9 \
 	disklabel.9 setdisklabel.9 disklabel.9 bounds_check_with_label.9
 MLINKS+=evcount.9 evcount_attach.9 evcount.9 evcount_detach.9
@@ -154,7 +155,6 @@ MLINKS+=ieee80211_node.9 ieee80211_node_attach.9 \
 	ieee80211_node.9 ieee80211_alloc_node.9 \
 	ieee80211_node.9 ieee80211_dup_bss.9 \
 	ieee80211_node.9 ieee80211_find_node.9 \
-	ieee80211_node.9 ieee80211_lookup_node.9 \
 	ieee80211_node.9 ieee80211_release_node.9 \
 	ieee80211_node.9 ieee80211_free_node.9 \
 	ieee80211_node.9 ieee80211_free_allnodes.9 \
@@ -172,7 +172,7 @@ MLINKS+=ieee80211_proto.9 ieee80211_proto_attach.9 \
 MLINKS+=kern.9 imax.9 kern.9 imin.9 kern.9 lmax.9 kern.9 lmin.9 \
 	kern.9 max.9 kern.9 min.9 kern.9 ulmax.9 kern.9 ulmin.9 kern.9 abs.9 \
 	kern.9 assert.9 kern.9 KASSERT.9 kern.9 KDASSERT.9 \
-	kern.9 locc.9 kern.9 skpc.9 kern.9 scanc.9 kern.9 bcmp.9 \
+	kern.9 skpc.9 kern.9 scanc.9 kern.9 bcmp.9 \
 	kern.9 memchr.9 kern.9 memcmp.9 kern.9 ffs.9 \
 	kern.9 strlen.9 kern.9 strncpy.9 kern.9 strlcpy.9 kern.9 strlcat.9 \
 	kern.9 strcmp.9 kern.9 strncmp.9 kern.9 strncasecmp.9 \
@@ -210,8 +210,7 @@ MLINKS+=microtime.9 getmicrotime.9 microtime.9 microuptime.9 \
 	microtime.9 getmicrouptime.9 microtime.9 nanotime.9 \
 	microtime.9 getnanotime.9 microtime.9 nanouptime.9 \
 	microtime.9 getnanouptime.9 microtime.9 bintime.9 \
-	microtime.9 getbintime.9 microtime.9 binuptime.9 \
-	microtime.9 getbinuptime.9
+	microtime.9 binuptime.9
 MLINKS+=mountroothook_establish.9 mountroothook_disestablish.9
 MLINKS+=mutex.9 mtx_init.9 mutex.9 mtx_enter.9 mutex.9 mtx_leave.9
 MLINKS+=namei.9 lookup.9 namei.9 relookup.9 namei.9 NDINIT.9
@@ -315,7 +314,7 @@ MLINKS+=vfs_cache.9 cache_enter.9 vfs_cache.9 cache_lookup.9 \
 	vfs_cache.9 cache_purge.9 vfs_cache.9 cache_purgevfs.9 \
 	vfs_cache.9 cache_revlookup.9
 MLINKS+=vgone.9 vgonel.9
-MLINKS+=vnsubr.9 vn_access.9 vnsubr.9 vn_close.9 vnsubr.9 vn_default_error.9 \
+MLINKS+=vnsubr.9 vn_close.9 vnsubr.9 vn_default_error.9 \
 	vnsubr.9 vn_isunder.9 vnsubr.9 vn_lock.9 vnsubr.9 vn_open.9 \
 	vnsubr.9 vn_rdwr.9 vnsubr.9 vn_stat.9 vnsubr.9 vn_writechk.9 \
 	vnsubr.9 vn_marktext.9
@@ -337,5 +336,7 @@ MLINKS+=VOP_LOOKUP.9 VOP_ABORTOP.9 VOP_LOOKUP.9 VOP_ACCESS.9 \
 	VOP_LOOKUP.9 VOP_REVOKE.9 VOP_LOOKUP.9 VOP_RMDIR.9 \
 	VOP_LOOKUP.9 VOP_STRATEGY.9 VOP_LOOKUP.9 VOP_SYMLINK.9 \
 	VOP_LOOKUP.9 VOP_UNLOCK.9 VOP_LOOKUP.9 VOP_WRITE.9
+MLINKS+=workq_add_task.9 workq_create.9 \
+	workq_add_task.9 workq_destroy.9
 
 .include <bsd.prog.mk>

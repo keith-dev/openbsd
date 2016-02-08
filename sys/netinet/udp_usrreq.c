@@ -1,4 +1,4 @@
-/*	$OpenBSD: udp_usrreq.c,v 1.112 2006/12/09 01:12:28 itojun Exp $	*/
+/*	$OpenBSD: udp_usrreq.c,v 1.114 2007/06/11 11:29:35 henning Exp $	*/
 /*	$NetBSD: udp_usrreq.c,v 1.28 1996/03/16 23:54:03 christos Exp $	*/
 
 /*
@@ -118,8 +118,8 @@ int *udpctl_vars[UDPCTL_MAXID] = UDPCTL_VARS;
 struct	inpcbtable udbtable;
 struct	udpstat udpstat;
 
-static	void udp_detach(struct inpcb *);
-static	void udp_notify(struct inpcb *, int);
+void udp_detach(struct inpcb *);
+void udp_notify(struct inpcb *, int);
 
 #ifndef UDBHASHSIZE
 #define	UDBHASHSIZE	128
@@ -533,13 +533,8 @@ udp_input(struct mbuf *m, ...)
 	    ip->ip_dst, uh->uh_dport);
 	if (inp == 0) {
 		int	inpl_reverse = 0;
-#if NPF > 0
-		struct pf_mtag *t;
-
-		if ((t = pf_find_mtag(m)) != NULL &&
-		    t->flags & PF_TAG_TRANSLATE_LOCALHOST)
+		if (m->m_pkthdr.pf.flags & PF_TAG_TRANSLATE_LOCALHOST)
 			inpl_reverse = 1;
-#endif
 		++udpstat.udps_pcbhashmiss;
 #ifdef INET6
 		if (ip6) {
@@ -652,7 +647,7 @@ bad:
  * Notify a udp user of an asynchronous error;
  * just wake up so that he can collect error status.
  */
-static void
+void
 udp_notify(inp, errno)
 	struct inpcb *inp;
 	int errno;
@@ -1211,7 +1206,7 @@ release:
 	return (error);
 }
 
-static void
+void
 udp_detach(inp)
 	struct inpcb *inp;
 {

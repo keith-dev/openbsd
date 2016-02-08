@@ -1,4 +1,4 @@
-/*	$OpenBSD: intr.c,v 1.7 2006/03/13 19:39:52 brad Exp $	*/
+/*	$OpenBSD: intr.c,v 1.10 2007/07/29 21:24:05 miod Exp $	*/
 /*	$NetBSD: intr.c,v 1.2 1998/08/25 04:03:56 scottr Exp $	*/
 
 /*-
@@ -51,6 +51,7 @@
 
 #include <net/netisr.h>
 
+#include <machine/atomic.h>
 #include <machine/cpu.h>
 #include <machine/intr.h>
 
@@ -70,7 +71,6 @@ int	intr_debug = 0;
  * interrupt on different levels as listed in locore.s
  */
 u_short	mac68k_ttyipl;
-u_short	mac68k_bioipl;
 u_short	mac68k_netipl;
 u_short	mac68k_vmipl;
 u_short	mac68k_clockipl;
@@ -85,23 +85,22 @@ intr_init()
 {
 	/* Standard spl(9) interrupt priorities */
 	mac68k_ttyipl = (PSL_S | PSL_IPL1);
-	mac68k_bioipl = (PSL_S | PSL_IPL2);
 
 	if (mac68k_machine.aux_interrupts) {
 		mac68k_netipl = (PSL_S | PSL_IPL3);
 		mac68k_vmipl = (PSL_S | PSL_IPL6);
-		mac68k_clockipl = (PSL_S | PSL_IPL6);
-		mac68k_statclockipl = (PSL_S | PSL_IPL6);
 	} else {
-		mac68k_netipl = (PSL_S | PSL_IPL2);
-		mac68k_vmipl = (PSL_S | PSL_IPL2);
-		mac68k_clockipl = (PSL_S | PSL_IPL2);
-		mac68k_statclockipl = (PSL_S | PSL_IPL2);
-
 		if (current_mac_model->class == MACH_CLASSAV)
-			mac68k_bioipl = mac68k_netipl = (PSL_S | PSL_IPL4);
+			mac68k_netipl = (PSL_S | PSL_IPL4);
+		else if (mac68k_machine.sonic)
+			mac68k_netipl = (PSL_S | PSL_IPL3);
+		else
+			mac68k_netipl = (PSL_S | PSL_IPL2);
+
+		mac68k_vmipl = (PSL_S | PSL_IPL2);
 	}
 	
+	mac68k_clockipl = mac68k_statclockipl = mac68k_vmipl;
 	intr_computeipl();
 }
 
@@ -116,8 +115,8 @@ intr_computeipl()
 	 * Enforce `bio <= net <= tty <= imp <= statclock <= clock'
 	 * as defined in spl(9)
 	 */
-	if (mac68k_bioipl > mac68k_netipl)
-		mac68k_netipl = mac68k_bioipl;
+	if ((PSL_S | PSL_IPL2) > mac68k_netipl)
+		mac68k_netipl = (PSL_S | PSL_IPL2);
 	
 	if (mac68k_netipl > mac68k_ttyipl)
 		mac68k_ttyipl = mac68k_netipl;
@@ -135,11 +134,6 @@ intr_computeipl()
 /*
  * Establish an autovectored interrupt handler.
  * Called by driver attach functions.
- *
- * XXX Warning!  DO NOT use Macintosh ROM traps from an interrupt handler
- * established by this routine, either directly or indirectly, without
- * properly saving and restoring all registers.  If not, chaos _will_
- * ensue!  (sar 19980806)
  */
 void
 intr_establish(int (*func)(void *), void *arg, int ipl, const char *name)
@@ -191,8 +185,6 @@ intr_disestablish(int ipl)
 /*
  * This is the dispatcher called by the low-level
  * assembly language interrupt routine.
- *
- * XXX Note: see the warning in intr_establish()
  */
 void
 intr_dispatch(int evec)	/* format | vector offset */
@@ -224,21 +216,16 @@ int netisr;
 void
 netintr()
 {
-	int s, isr;
+	int isr;
 
-	for (;;) {
-		s = splhigh();
-		isr = netisr;
-		netisr = 0;
-		splx(s);
+	while ((isr = netisr) != 0) {
+		atomic_clearbits_int(&netisr, isr);
 		
-		if (isr == 0)
-			return;
-
-#define DONETISR(bit, fn) do {		\
-	if (isr & (1 << bit))		\
-		(fn)();			\
-} while (0)
+#define DONETISR(bit, fn)						\
+		do {							\
+			if (isr & (1 << bit))				\
+				(fn)();					\
+		} while (0)
 
 #include <net/netisr_dispatch.h>
 

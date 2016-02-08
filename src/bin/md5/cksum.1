@@ -1,4 +1,4 @@
-.\"	$OpenBSD: cksum.1,v 1.12 2007/02/27 21:41:58 millert Exp $
+.\"	$OpenBSD: cksum.1,v 1.17 2007/05/31 19:19:15 jmc Exp $
 .\"
 .\" Copyright (c) 1991, 1993
 .\"	The Regents of the University of California.  All rights reserved.
@@ -32,7 +32,7 @@
 .\"
 .\"	@(#)cksum.1	8.2 (Berkeley) 4/28/95
 .\"
-.Dd April 30, 2004
+.Dd $Mdocdate: May 31 2007 $
 .Dt CKSUM 1
 .Os
 .Sh NAME
@@ -42,7 +42,7 @@
 .Sh SYNOPSIS
 .Nm cksum
 .Bk -words
-.Op Fl pqrtx
+.Op Fl bpqrtx
 .Op Fl a Ar algorithms
 .Op Fl c Op Ar checklist ...
 .Op Fl o Ar 1 | 2
@@ -111,8 +111,39 @@ Multiple algorithms may be specified, separated by a comma or whitespace.
 Additionally, multiple
 .Fl a
 options may be specified on the command line.
-If an algorithm is repeated, only the first instance is used.
 Case is ignored when matching algorithms.
+The output format may be specified on a per-algorithm basis
+by using a single-character suffix, e.g.\&
+.Dq sha256b .
+If the algorithm has a
+.Sq b
+suffix, the checksum will be output in base64 format.
+If the algorithm has an
+.Sq x
+suffix, the checksum will be output in hex format.
+If an algorithm with the same output format is repeated,
+only the first instance is used.
+Note that output format suffixes are not supported
+for the
+.Ar cksum ,
+.Ar sum
+and
+.Ar sysvsum
+algorithms.
+.It Fl b
+Output checksums in base64 notation, not hexadecimal by
+default.
+A
+.Sq b
+or
+.Sq x
+suffix on the algorithm will override this default.
+This option is ignored for the
+.Ar cksum ,
+.Ar sum
+and
+.Ar sysvsum
+algorithms, which do not use hexadecimal output.
 .It Fl c Op Ar checklist ...
 Compares all checksums contained in the file
 .Ar checklist
@@ -133,7 +164,9 @@ Use historic algorithms instead of the (superior) default one
 Echoes stdin to stdout and appends the
 checksum to stdout.
 .It Fl q
-Only print the checksum (quiet mode).
+Only print the checksum (quiet mode) or if used in conjunction with the
+.Fl c
+flag, only print the failed cases.
 .It Fl r
 Reverse the format of the hash algorithm output, making
 it match the checksum output format.
@@ -142,6 +175,10 @@ Prints a checksum of the given
 .Ar string .
 .It Fl t
 Runs a built-in time trial.
+Specifying
+.Fl t
+multiple times results in the number of rounds being multiplied
+by 10 for each additional flag.
 .It Fl x
 Runs a built-in test script.
 .El
@@ -242,10 +279,12 @@ in the following ACM article:
 .Re
 .Sh STANDARDS
 The
-.Nm cksum
+.Nm
 utility is compliant with the
-.St -p1003.2-92
+.St -p1003.1-2004
 specification.
+.Pp
+All the flags are extensions to that specification.
 .Sh HISTORY
 A
 .Nm sum

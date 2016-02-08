@@ -1,4 +1,4 @@
-/* $OpenBSD: pmap.c,v 1.49 2007/02/03 16:48:21 miod Exp $ */
+/* $OpenBSD: pmap.c,v 1.52 2007/05/26 20:26:50 pedro Exp $ */
 /* $NetBSD: pmap.c,v 1.154 2000/12/07 22:18:55 thorpej Exp $ */
 
 /*-
@@ -777,9 +777,8 @@ pmap_bootstrap(paddr_t ptaddr, u_int maxasn, u_long ncpuids)
 	/*
 	 * Figure out how many PTE's are necessary to map the kernel.
 	 */
-	lev3mapsize = (VM_PHYS_SIZE +
-		nbuf * MAXBSIZE + 16 * NCARGS + PAGER_MAP_SIZE) / PAGE_SIZE +
-		(maxproc * UPAGES) + nkmempages;
+	lev3mapsize = (VM_PHYS_SIZE + 16 * NCARGS + PAGER_MAP_SIZE) /
+	    PAGE_SIZE + (maxproc * UPAGES) + nkmempages;
 
 #ifdef SYSVSHM
 	lev3mapsize += shminfo.shmall;
@@ -2147,6 +2146,24 @@ pmap_extract(pmap_t pmap, vaddr_t va, paddr_t *pap)
 	if (pmapdebug & PDB_FOLLOW)
 		printf("pmap_extract(%p, %lx) -> ", pmap, va);
 #endif
+
+	if (pmap == pmap_kernel()) {
+		if (va < ALPHA_K0SEG_BASE) {
+			/* nothing */
+		} else if (va <= ALPHA_K0SEG_END) {
+			pa = ALPHA_K0SEG_TO_PHYS(va);
+			rv = TRUE;
+		} else {
+			l3pte = PMAP_KERNEL_PTE(va);
+			if (pmap_pte_v(l3pte)) {
+				pa = pmap_pte_pa(l3pte) | (va & PGOFSET);
+				*pap = pa;
+				rv = TRUE;
+			}
+		}
+		goto out_nolock;
+	}
+
 	PMAP_LOCK(pmap);
 
 	l1pte = pmap_l1pte(pmap, va);
@@ -2166,6 +2183,7 @@ pmap_extract(pmap_t pmap, vaddr_t va, paddr_t *pap)
 	rv = TRUE;
  out:
 	PMAP_UNLOCK(pmap);
+ out_nolock:
 #ifdef DEBUG
 	if (pmapdebug & PDB_FOLLOW) {
 		if (rv)
@@ -4108,9 +4126,9 @@ pmap_tlb_shootdown(pmap_t pmap, vaddr_t va, pt_entry_t pte)
 			 * TBIA[P].
 			 */
 			if (pq->pq_pte & PG_ASM)
-				ipinum = ALPHA_IPI_TBIA;
+				ipinum = ALPHA_IPI_SHOOTDOWN;
 			else
-				ipinum = ALPHA_IPI_TBIAP;
+				ipinum = ALPHA_IPI_IMB;
 			alpha_send_ipi(i, ipinum);
 		} else {
 			pj->pj_pmap = pmap;

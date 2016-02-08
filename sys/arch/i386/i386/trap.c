@@ -1,4 +1,4 @@
-/*	$OpenBSD: trap.c,v 1.81 2007/01/09 08:43:25 art Exp $	*/
+/*	$OpenBSD: trap.c,v 1.85 2007/06/26 13:39:02 tom Exp $	*/
 /*	$NetBSD: trap.c,v 1.95 1996/05/05 06:50:02 mycroft Exp $	*/
 
 /*-
@@ -99,7 +99,6 @@ extern struct emul emul_aout;
 
 static __inline void userret(struct proc *);
 void trap(struct trapframe);
-int trapwrite(unsigned);
 void syscall(struct trapframe);
 
 /*
@@ -312,8 +311,10 @@ trap(struct trapframe frame)
 				    offsetof(struct trapframe, tf_gs));
 				resume = (int)resume_pop_gs;
 				break;
+			default:
+				goto we_re_toast;
 			}
-                        break;
+			break;
 		default:
 			goto we_re_toast;
 		}
@@ -383,7 +384,6 @@ trap(struct trapframe frame)
 	case T_ASTFLT|T_USER:		/* Allow process switch */
 		uvmexp.softs++;
 		if (p->p_flag & P_OWEUPC) {
-			p->p_flag &= ~P_OWEUPC;
 			KERNEL_PROC_LOCK(p);
 			ADDUPROF(p);
 			KERNEL_PROC_UNLOCK(p);
@@ -448,7 +448,7 @@ trap(struct trapframe frame)
 			goto we_re_toast;
 #endif
 		cr2 = rcr2();
-		KERNEL_LOCK(LK_CANRECURSE|LK_EXCLUSIVE);
+		KERNEL_LOCK();
 		goto faultcommon;
 
 	case T_PAGEFLT|T_USER: {	/* page fault */
@@ -566,31 +566,6 @@ trap(struct trapframe frame)
 		return;
 out:
 	userret(p);
-}
-
-/*
- * Compensate for 386 brain damage (missing URKR)
- */
-int
-trapwrite(unsigned int addr)
-{
-	vaddr_t va;
-	struct proc *p;
-	struct vmspace *vm;
-
-	va = trunc_page((vaddr_t)addr);
-	if (va >= VM_MAXUSER_ADDRESS)
-		return 1;
-
-	p = curproc;
-	vm = p->p_vmspace;
-
-	if (uvm_fault(&vm->vm_map, va, 0, VM_PROT_READ | VM_PROT_WRITE))
-		return 1;
-
-	uvm_grow(p, va);
-
-	return 0;
 }
 
 /*

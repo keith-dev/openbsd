@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.c,v 1.18 2007/01/07 18:13:41 kettenis Exp $	*/
+/*	$OpenBSD: cpu.c,v 1.20 2007/05/02 18:46:07 kettenis Exp $	*/
 /*	$NetBSD: cpu.c,v 1.13 2001/05/26 21:27:15 chs Exp $ */
 
 /*
@@ -71,9 +71,6 @@ struct cacheinfo cacheinfo = {
 	us_dcache_flush_page
 };
 
-/* Our exported CPU info; we have only one for now. */  
-struct cpu_info cpu_info_store;
-
 /* Linked list of all CPUs in system. */
 struct cpu_info *cpus = NULL;
 
@@ -127,6 +124,7 @@ cpu_attach(parent, dev, aux)
 	int node;
 	long clk;
 	int impl, vers, fver;
+	char *cpuname;
 	char *fpuname;
 	struct mainbus_attach_args *ma = aux;
 	struct fpstate64 *fpstate;
@@ -174,14 +172,20 @@ cpu_attach(parent, dev, aux)
 		cpu_clockrate[0] = clk; /* Tell OS what frequency we run on */
 		cpu_clockrate[1] = clk/1000000;
 	}
+	cpuname = getpropstring(node, "name");
+	if (strcmp(cpuname, "cpu") == 0)
+		cpuname = getpropstring(node, "compatible");
 	snprintf(cpu_model, sizeof cpu_model,
-		"%s (rev %d.%d) @ %s MHz, %s FPU", getpropstring(node, "name"),
+		"%s (rev %d.%d) @ %s MHz, %s FPU", cpuname,
 		vers >> 4, vers & 0xf, clockfreq(clk), fpuname);
 	printf(": %s\n", cpu_model);
 
 	cacheinfo.c_physical = 1; /* Dunno... */
 	cacheinfo.c_split = 1;
-	cacheinfo.ic_linesize = l = getpropint(node, "icache-line-size", 0);
+	l = getpropint(node, "icache-line-size", 0);
+	if (l == 0)
+		l = getpropint(node, "l1-icache-line-size", 0);
+	cacheinfo.ic_linesize = l;
 	for (i = 0; (1 << i) < l && l; i++)
 		/* void */;
 	if ((1 << i) != l && l)
@@ -189,12 +193,16 @@ cpu_attach(parent, dev, aux)
 	cacheinfo.ic_l2linesize = i;
 	cacheinfo.ic_totalsize = getpropint(node, "icache-size", 0);
 	if (cacheinfo.ic_totalsize == 0)
+		cacheinfo.ic_totalsize = getpropint(node, "l1-icache-size", 0);
+	if (cacheinfo.ic_totalsize == 0)
 		cacheinfo.ic_totalsize = l *
 		    getpropint(node, "icache-nlines", 64) *
 		    getpropint(node, "icache-associativity", 1);
 
-	cacheinfo.dc_linesize = l =
-		getpropint(node, "dcache-line-size",0);
+	l = getpropint(node, "dcache-line-size", 0);
+	if (l == 0)
+		l = getpropint(node, "l1-dcache-line-size", 0);
+	cacheinfo.dc_linesize = l;
 	for (i = 0; (1 << i) < l && l; i++)
 		/* void */;
 	if ((1 << i) != l && l)
@@ -202,18 +210,24 @@ cpu_attach(parent, dev, aux)
 	cacheinfo.dc_l2linesize = i;
 	cacheinfo.dc_totalsize = getpropint(node, "dcache-size", 0);
 	if (cacheinfo.dc_totalsize == 0)
+		cacheinfo.dc_totalsize = getpropint(node, "l1-dcache-size", 0);
+	if (cacheinfo.dc_totalsize == 0)
 		cacheinfo.dc_totalsize = l *
 		    getpropint(node, "dcache-nlines", 128) *
 		    getpropint(node, "dcache-associativity", 1);
 	
-	cacheinfo.ec_linesize = l =
-		getpropint(node, "ecache-line-size", 0);
+	l = getpropint(node, "ecache-line-size", 0);
+	if (l == 0)
+		l = getpropint(node, "l2-cache-line-size", 0);
+	cacheinfo.ec_linesize = l;
 	for (i = 0; (1 << i) < l && l; i++)
 		/* void */;
 	if ((1 << i) != l && l)
 		panic("bad ecache line size %d", l);
 	cacheinfo.ec_l2linesize = i;
 	cacheinfo.ec_totalsize = getpropint(node, "ecache-size", 0);
+	if (cacheinfo.ec_totalsize == 0)
+		cacheinfo.ec_totalsize = getpropint(node, "l2-cache-size", 0);
 	if (cacheinfo.ec_totalsize == 0)
 		cacheinfo.ec_totalsize = l *
 		    getpropint(node, "ecache-nlines", 32768) *

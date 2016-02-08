@@ -1,7 +1,7 @@
 # ex:ts=8 sw=4:
-# $OpenBSD: IdCache.pm,v 1.2 2005/06/13 11:33:07 espie Exp $
+# $OpenBSD: IdCache.pm,v 1.4 2007/06/04 14:40:39 espie Exp $
 #
-# Copyright (c) 2002-2004 Marc Espie <espie@openbsd.org>
+# Copyright (c) 2002-2005 Marc Espie <espie@openbsd.org>
 #
 # Permission to use, copy, modify, and distribute this software for any
 # purpose with or without fee is hereby granted, provided that the above
@@ -50,7 +50,7 @@ sub lookup
 {
 	my ($self, $name, $default) = @_;
 
-	if ($name =~ m/^\d+$/) {
+	if ($name =~ m/^\d+$/o) {
 		return $name;
 	} else {
 		return $self->SUPER::lookup($name, $default);

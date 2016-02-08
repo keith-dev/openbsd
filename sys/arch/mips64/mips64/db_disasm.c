@@ -1,4 +1,4 @@
-/*	$OpenBSD: db_disasm.c,v 1.5 2006/01/15 14:36:09 miod Exp $	*/
+/*	$OpenBSD: db_disasm.c,v 1.7 2007/07/05 04:37:30 miod Exp $	*/
 /*-
  * Copyright (c) 1991, 1993
  *	The Regents of the University of California.  All rights reserved.
@@ -35,7 +35,7 @@
  * SUCH DAMAGE.
  *
  *	from: @(#)kadb.c	8.1 (Berkeley) 6/10/93
- *      $Id: db_disasm.c,v 1.5 2006/01/15 14:36:09 miod Exp $
+ *      $Id: db_disasm.c,v 1.7 2007/07/05 04:37:30 miod Exp $
  */
 
 #include <sys/param.h>
@@ -45,6 +45,7 @@
 #include <machine/db_machdep.h>
 #include <ddb/db_interface.h>
 #include <ddb/db_output.h>
+#include <ddb/db_sym.h>
 
 static char *op_name[64] = {
 /* 0 */	"spec",	"bcond","j",	"jal",	"beq",	"bne",	"blez",	"bgtz",
@@ -131,7 +132,8 @@ db_disasm(loc, altfmt)
 {
         if (md_printins(kdbpeek((void *)loc), loc)) {
 		loc += 4;
-		printf("\t\t");
+		db_printsym(loc, DB_STGY_ANY, db_printf);
+		db_printf(":\t ");
 		md_printins(kdbpeek((void *)loc), loc);
 	}
 	loc += 4;
@@ -258,7 +260,8 @@ md_printins(int ins, int mdbdot)
 			reg_name[i.IType.rt]);
 	pr_displ:
 		delay = 1;
-		db_printf("0x%08x", mdbdot + 4 + ((short)i.IType.imm << 2));
+		db_printsym(mdbdot + 4 + ((short)i.IType.imm << 2),
+		    DB_STGY_PROC, db_printf);
 		break;
 
 	case OP_COP0:
@@ -341,7 +344,8 @@ md_printins(int ins, int mdbdot)
 	case OP_J:
 	case OP_JAL:
 		db_printf("%s\t", op_name[i.JType.op]);
-		db_printf("0x%8x",(mdbdot & 0xF0000000) | (i.JType.target << 2));
+		db_printsym((mdbdot & ~0x0fffffffL) | (i.JType.target << 2),
+		    DB_STGY_PROC, db_printf);
 		delay = 1;
 		break;
 

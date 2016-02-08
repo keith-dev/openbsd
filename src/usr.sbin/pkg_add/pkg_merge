@@ -1,5 +1,5 @@
 #! /usr/bin/perl
-# Copyright (c) 2005 Marc Espie <espie@openbsd.org>
+# Copyright (c) 2005-2007 Marc Espie <espie@openbsd.org>
 # 
 # Permission to use, copy, modify, and distribute this software for any
 # purpose with or without fee is hereby granted, provided that the above
@@ -14,6 +14,7 @@
 # OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
 use strict;
+use warnings;
 use OpenBSD::PackageLocator;
 use OpenBSD::PackageInfo;
 use OpenBSD::PackingList;
@@ -21,6 +22,7 @@ use OpenBSD::Getopt;
 use OpenBSD::Error;
 use OpenBSD::Ustar;
 use OpenBSD::ArcCheck;
+use OpenBSD::Paths;
 use File::Copy;
 use File::Path;
 
@@ -40,7 +42,7 @@ sub mark_tocopy
 sub copy_over
 {
 	my ($self, $wrarc, $prefix, $pkg) = @_;
-	my $e = $pkg->{pkg}->next();
+	my $e = $pkg->{pkg}->next;
 	if (!$e->check_name($self)) {
 		die "Names don't match: ", $e->{name}, " ", $self->{name};
 	}
@@ -51,7 +53,7 @@ sub copy_over
 sub make_alias
 {
 	my ($self, $wrarc, $prefix, $pkg, $alias) = @_;
-	my $e = $pkg->{pkg}->next();
+	my $e = $pkg->{pkg}->next;
 	if (!$e->check_name($self)) {
 		die "Names don't match: ", $e->{name}, " ", $self->{name};
 	}
@@ -74,7 +76,7 @@ sub copy_over
 		$wrarc->destdir($pkg->{dir});
 		my $e = $wrarc->prepare($self->{name});
 		$e->{name} = "$prefix/".$e->{name};
-		$e->write();
+		$e->write;
 	}
 }
 
@@ -144,13 +146,13 @@ my @tomerge;
 
 my $prefix = 'a';
 my $allprefix = '';
-open( my $outfh, "|gzip -c >$opt_o");
+open( my $outfh, "|-", OpenBSD::Paths->gzip, "-o", $opt_o);
 
 my $wrarc = OpenBSD::Ustar->new($outfh, ".");
 for my $pkgname (@ARGV) {
 	my $true_package = OpenBSD::PackageLocator->find($pkgname);
 	die "No such package $pkgname" unless $true_package;
-	my $dir = $true_package->info();
+	my $dir = $true_package->info;
 	my $plist = OpenBSD::PackingList->fromfile($dir.CONTENTS);
 
 	my $in = {
@@ -162,7 +164,7 @@ for my $pkgname (@ARGV) {
 		};
 	my $e = OpenBSD::PackingElement::FCONTENTS->new(CONTENTS);
 	$e->copy_over($wrarc, $prefix, $true_package);
-	$plist->visit('mark_tocopy', $in->{tocopy});
+	$plist->mark_tocopy($in->{tocopy});
 	push(@tomerge, $in);
 	$prefix++;
 }
@@ -245,5 +247,5 @@ while(1) {
 		}
 	}
 }
-$wrarc->close();
+$wrarc->close;
 print "Shared $total_files files for $total_size bytes\n" if $opt_v;

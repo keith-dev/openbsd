@@ -1,8 +1,8 @@
 #! /usr/bin/perl
 # ex:ts=8 sw=4:
-# $OpenBSD: pkg,v 1.3 2004/10/11 09:44:06 espie Exp $
+# $OpenBSD: pkg,v 1.9 2007/06/12 09:53:36 espie Exp $
 #
-# Copyright (c) 2003-2004 Marc Espie <espie@openbsd.org>
+# Copyright (c) 2003-2007 Marc Espie <espie@openbsd.org>
 #
 # Permission to use, copy, modify, and distribute this software for any
 # purpose with or without fee is hereby granted, provided that the above
@@ -22,13 +22,11 @@ use Getopt::Std;
 
 sub check_dependencies($)
 {
-	eval { 
-		require OpenBSD::PkgSpec;
-		require OpenBSD::PackageInfo;
-	};
+	require OpenBSD::Search;
+	require OpenBSD::PackageRepository::Installed;
 	my $dependency = shift;
-	my @m = OpenBSD::PkgSpec::match($dependency, 
-	    OpenBSD::PackageInfo::installed_packages());
+	my @m = OpenBSD::PackageRepository::Installed->new
+	    ->match(OpenBSD::Search::PkgSpec->new($dependency));
 	return (@m != 0) ? 1 : 0;
 }
 
@@ -36,7 +34,7 @@ sub check_dependencies($)
 my %opts;
 my %legacy = map +($_, 1), qw{add info delete create};
 if (@ARGV == 0) {
-	die "needs arguments\n";
+	die "needs arguments";
 }
 
 getopts('v', \%opts);
@@ -58,4 +56,4 @@ if (defined $legacy{$cmd}) {
 		}
 	}
 }
-die "Bad command $cmd\n";
+die "Bad command $cmd";

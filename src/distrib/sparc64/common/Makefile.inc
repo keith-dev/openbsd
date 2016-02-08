@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile.inc,v 1.6 2002/04/30 09:18:20 deraadt Exp $
+#	$OpenBSD: Makefile.inc,v 1.8 2007/06/17 00:28:21 deraadt Exp $
 
 TOP=		${.CURDIR}/..
 
@@ -30,8 +30,8 @@ all:	${FS}
 ${FS}:	bsd.rd
 	dd if=/dev/zero of=${REALIMAGE} bs=10k count=${FLOPPYSIZE}
 	vnconfig -v -c ${VND} ${REALIMAGE}
-	disklabel -w -r ${VND} ${FLOPPYTYPE}
-	newfs -m 0 -o space -i 524288 -c 80 ${VND_RDEV}
+	disklabel -w ${VND} ${FLOPPYTYPE}
+	newfs -m 0 -o space -i 524288 -c ${FLOPPYSIZE} ${VND_RDEV}
 	mount ${VND_DEV} ${MOUNT_POINT}
 	TOPDIR=${TOP} CURDIR=${.CURDIR} OBJDIR=${.OBJDIR} \
 	    TARGDIR=${MOUNT_POINT} UTILS=${UTILS} \
@@ -48,14 +48,14 @@ ${FS}:	bsd.rd
 DISKTYPE?=       rdroot
 NBLKS?=          3510
 # minfree, opt, b/i  trks, sects, cpg
-NEWFSARGS= -m 0 -o space -c 16 -i 4096
+NEWFSARGS= -m 0 -o space -i 4096
 
 ${IMAGE}: ${CBIN} rd_setup do_files rd_teardown
 
 rd_setup: ${CBIN}
 	dd if=/dev/zero of=${REALIMAGE} bs=512 count=${NBLKS}
 	vnconfig -v -c ${VND} ${REALIMAGE}
-	disklabel -w -r ${VND} ${DISKTYPE}
+	disklabel -w ${VND} ${DISKTYPE}
 	newfs ${NEWFSARGS} ${VND_RDEV}
 	fsck ${VND_RDEV}
 	mount ${VND_DEV} ${MOUNT_POINT}

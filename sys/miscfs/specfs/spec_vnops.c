@@ -1,4 +1,4 @@
-/*	$OpenBSD: spec_vnops.c,v 1.38 2007/01/16 17:52:18 thib Exp $	*/
+/*	$OpenBSD: spec_vnops.c,v 1.43 2007/06/18 08:30:07 jasper Exp $	*/
 /*	$NetBSD: spec_vnops.c,v 1.29 1996/04/22 01:42:38 christos Exp $	*/
 
 /*
@@ -110,14 +110,9 @@ spec_vnoperate(void *v)
  * Trivial lookup routine that always fails.
  */
 int
-spec_lookup(v)
-	void *v;
+spec_lookup(void *v)
 {
-	struct vop_lookup_args /* {
-		struct vnode *a_dvp;
-		struct vnode **a_vpp;
-		struct componentname *a_cnp;
-	} */ *ap = v;
+	struct vop_lookup_args *ap = v;
 
 	*ap->a_vpp = NULL;
 	return (ENOTDIR);
@@ -128,21 +123,15 @@ spec_lookup(v)
  */
 /* ARGSUSED */
 int
-spec_open(v)
-	void *v;
+spec_open(void *v)
 {
-	struct vop_open_args /* {
-		struct vnode *a_vp;
-		int  a_mode;
-		struct ucred *a_cred;
-		struct proc *a_p;
-	} */ *ap = v;
+	struct vop_open_args *ap = v;
 	struct proc *p = ap->a_p;
 	struct vnode *vp = ap->a_vp;
 	struct vnode *bvp;
 	dev_t bdev;
 	dev_t dev = (dev_t)vp->v_rdev;
-	register int maj = major(dev);
+	int maj = major(dev);
 	int error;
 
 	/*
@@ -222,21 +211,15 @@ spec_open(v)
  */
 /* ARGSUSED */
 int
-spec_read(v)
-	void *v;
+spec_read(void *v)
 {
-	struct vop_read_args /* {
-		struct vnode *a_vp;
-		struct uio *a_uio;
-		int  a_ioflag;
-		struct ucred *a_cred;
-	} */ *ap = v;
-	register struct vnode *vp = ap->a_vp;
-	register struct uio *uio = ap->a_uio;
+	struct vop_read_args *ap = v;
+	struct vnode *vp = ap->a_vp;
+	struct uio *uio = ap->a_uio;
  	struct proc *p = uio->uio_procp;
 	struct buf *bp;
-	daddr64_t bn, nextbn;
-	long bsize, bscale;
+	daddr64_t bn, nextbn, bscale;
+	int bsize;
 	struct partinfo dpart;
 	int n, on, majordev;
 	int (*ioctl)(dev_t, u_long, caddr_t, int, struct proc *);
@@ -261,30 +244,31 @@ spec_read(v)
 		return (error);
 
 	case VBLK:
-		if (uio->uio_resid == 0)
-			return (0);
 		if (uio->uio_offset < 0)
 			return (EINVAL);
 		bsize = BLKDEV_IOSIZE;
 		if ((majordev = major(vp->v_rdev)) < nblkdev &&
 		    (ioctl = bdevsw[majordev].d_ioctl) != NULL &&
 		    (*ioctl)(vp->v_rdev, DIOCGPART, (caddr_t)&dpart, FREAD, p) == 0) {
-			if (dpart.part->p_fstype == FS_BSDFFS &&
-			    dpart.part->p_frag != 0 && dpart.part->p_fsize != 0)
-				bsize = dpart.part->p_frag *
-				    dpart.part->p_fsize;
+			u_int32_t frag =
+			    DISKLABELV1_FFS_FRAG(dpart.part->p_fragblock);
+			u_int32_t fsize =
+			    DISKLABELV1_FFS_FSIZE(dpart.part->p_fragblock);
+			if (dpart.part->p_fstype == FS_BSDFFS && frag != 0 &&
+			    fsize != 0)
+				bsize = frag * fsize;
 		}
 		bscale = btodb(bsize);
 		do {
 			bn = btodb(uio->uio_offset) & ~(bscale - 1);
 			on = uio->uio_offset % bsize;
-			n = min((unsigned)(bsize - on), uio->uio_resid);
+			n = min((bsize - on), uio->uio_resid);
 			if (vp->v_lastr + bscale == bn) {
 				nextbn = bn + bscale;
-				error = breadn(vp, bn, (int)bsize, &nextbn,
-					(int *)&bsize, 1, NOCRED, &bp);
+				error = breadn(vp, bn, bsize, &nextbn, &bsize,
+				    1, NOCRED, &bp);
 			} else
-				error = bread(vp, bn, (int)bsize, NOCRED, &bp);
+				error = bread(vp, bn, bsize, NOCRED, &bp);
 			vp->v_lastr = bn;
 			n = min(n, bsize - bp->b_resid);
 			if (error) {
@@ -303,13 +287,9 @@ spec_read(v)
 }
 
 int
-spec_inactive(v)
-	void *v;
+spec_inactive(void *v)
 {
-	struct vop_inactive_args /* {
-		struct vnode *a_vp;
-		struct proc *a_p;
-	} */ *ap = v;
+	struct vop_inactive_args *ap = v;
 
 	VOP_UNLOCK(ap->a_vp, 0, ap->a_p);
 	return (0);
@@ -320,21 +300,15 @@ spec_inactive(v)
  */
 /* ARGSUSED */
 int
-spec_write(v)
-	void *v;
+spec_write(void *v)
 {
-	struct vop_write_args /* {
-		struct vnode *a_vp;
-		struct uio *a_uio;
-		int  a_ioflag;
-		struct ucred *a_cred;
-	} */ *ap = v;
-	register struct vnode *vp = ap->a_vp;
-	register struct uio *uio = ap->a_uio;
+	struct vop_write_args *ap = v;
+	struct vnode *vp = ap->a_vp;
+	struct uio *uio = ap->a_uio;
 	struct proc *p = uio->uio_procp;
 	struct buf *bp;
-	daddr_t bn;
-	long bsize, bscale;
+	daddr64_t bn, bscale;
+	int bsize;
 	struct partinfo dpart;
 	int n, on, majordev;
 	int (*ioctl)(dev_t, u_long, caddr_t, int, struct proc *);
@@ -365,16 +339,19 @@ spec_write(v)
 		if ((majordev = major(vp->v_rdev)) < nblkdev &&
 		    (ioctl = bdevsw[majordev].d_ioctl) != NULL &&
 		    (*ioctl)(vp->v_rdev, DIOCGPART, (caddr_t)&dpart, FREAD, p) == 0) {
-			if (dpart.part->p_fstype == FS_BSDFFS &&
-			    dpart.part->p_frag != 0 && dpart.part->p_fsize != 0)
-				bsize = dpart.part->p_frag *
-				    dpart.part->p_fsize;
+			u_int32_t frag =
+			    DISKLABELV1_FFS_FRAG(dpart.part->p_fragblock);
+			u_int32_t fsize =
+			    DISKLABELV1_FFS_FSIZE(dpart.part->p_fragblock);
+			if (dpart.part->p_fstype == FS_BSDFFS && frag != 0 &&
+			    fsize != 0)
+				bsize = frag * fsize;
 		}
 		bscale = btodb(bsize);
 		do {
 			bn = btodb(uio->uio_offset) & ~(bscale - 1);
 			on = uio->uio_offset % bsize;
-			n = min((unsigned)(bsize - on), uio->uio_resid);
+			n = min((bsize - on), uio->uio_resid);
 			error = bread(vp, bn, bsize, NOCRED, &bp);
 			n = min(n, bsize - bp->b_resid);
 			if (error) {
@@ -400,17 +377,9 @@ spec_write(v)
  */
 /* ARGSUSED */
 int
-spec_ioctl(v)
-	void *v;
+spec_ioctl(void *v)
 {
-	struct vop_ioctl_args /* {
-		struct vnode *a_vp;
-		u_long a_command;
-		caddr_t  a_data;
-		int  a_fflag;
-		struct ucred *a_cred;
-		struct proc *a_p;
-	} */ *ap = v;
+	struct vop_ioctl_args *ap = v;
 	dev_t dev = ap->a_vp->v_rdev;
 	int maj = major(dev);
 
@@ -432,15 +401,10 @@ spec_ioctl(v)
 
 /* ARGSUSED */
 int
-spec_poll(v)
-	void *v;
+spec_poll(void *v)
 {
-	struct vop_poll_args /* {
-		struct vnode *a_vp;
-		int  a_events;
-		struct proc *a_p;
-	} */ *ap = v;
-	register dev_t dev;
+	struct vop_poll_args *ap = v;
+	dev_t dev;
 
 	switch (ap->a_vp->v_type) {
 
@@ -455,13 +419,9 @@ spec_poll(v)
 }
 /* ARGSUSED */
 int
-spec_kqfilter(v)
-	void *v;
+spec_kqfilter(void *v)
 {
-	struct vop_kqfilter_args /* {
-		struct vnode *a_vp;
-		struct knote *a_kn;
-	} */ *ap = v;
+	struct vop_kqfilter_args *ap = v;
 
 	dev_t dev;
 
@@ -476,17 +436,11 @@ spec_kqfilter(v)
  */
 /* ARGSUSED */
 int
-spec_fsync(v)
-	void *v;
+spec_fsync(void *v)
 {
-	struct vop_fsync_args /* {
-		struct vnode *a_vp;
-		struct ucred *a_cred;
-		int  a_waitfor;
-		struct proc *a_p;
-	} */ *ap = v;
-	register struct vnode *vp = ap->a_vp;
-	register struct buf *bp;
+	struct vop_fsync_args *ap = v;
+	struct vnode *vp = ap->a_vp;
+	struct buf *bp;
 	struct buf *nbp;
 	int s;
 
@@ -526,12 +480,9 @@ loop:
 }
 
 int
-spec_strategy(v)
-	void *v;
+spec_strategy(void *v)
 {
-	struct vop_strategy_args /* {
-		struct buf *a_bp;
-	} */ *ap = v;
+	struct vop_strategy_args *ap = v;
 	struct buf *bp = ap->a_bp;
 	int maj = major(bp->b_dev);
 	
@@ -546,16 +497,9 @@ spec_strategy(v)
  * This is a noop, simply returning what one has been given.
  */
 int
-spec_bmap(v)
-	void *v;
+spec_bmap(void *v)
 {
-	struct vop_bmap_args /* {
-		struct vnode *a_vp;
-		daddr_t  a_bn;
-		struct vnode **a_vpp;
-		daddr_t *a_bnp;
-		int *a_runp;
-	} */ *ap = v;
+	struct vop_bmap_args *ap = v;
 
 	if (ap->a_vpp != NULL)
 		*ap->a_vpp = ap->a_vp;
@@ -572,16 +516,10 @@ spec_bmap(v)
  */
 /* ARGSUSED */
 int
-spec_close(v)
-	void *v;
+spec_close(void *v)
 {
-	struct vop_close_args /* {
-		struct vnode *a_vp;
-		int  a_fflag;
-		struct ucred *a_cred;
-		struct proc *a_p;
-	} */ *ap = v;
-	register struct vnode *vp = ap->a_vp;
+	struct vop_close_args *ap = v;
+	struct vnode *vp = ap->a_vp;
 	dev_t dev = vp->v_rdev;
 	int (*devclose)(dev_t, int, int, struct proc *);
 	int mode, error;
@@ -657,12 +595,9 @@ spec_close(v)
  * Print out the contents of a special device vnode.
  */
 int
-spec_print(v)
-	void *v;
+spec_print(void *v)
 {
-	struct vop_print_args /* {
-		struct vnode *a_vp;
-	} */ *ap = v;
+	struct vop_print_args *ap = v;
 
 	printf("tag VT_NON, dev %d, %d\n", major(ap->a_vp->v_rdev),
 		minor(ap->a_vp->v_rdev));
@@ -673,14 +608,9 @@ spec_print(v)
  * Return POSIX pathconf information applicable to special devices.
  */
 int
-spec_pathconf(v)
-	void *v;
+spec_pathconf(void *v)
 {
-	struct vop_pathconf_args /* {
-		struct vnode *a_vp;
-		int a_name;
-		register_t *a_retval;
-	} */ *ap = v;
+	struct vop_pathconf_args *ap = v;
 
 	switch (ap->a_name) {
 	case _PC_LINK_MAX:
@@ -712,18 +642,10 @@ spec_pathconf(v)
  */
 /* ARGSUSED */
 int
-spec_advlock(v)
-	void *v;
+spec_advlock(void *v)
 {
-	struct vop_advlock_args /* {
-		struct vnodeop_desc *a_desc;
-		struct vnode *a_vp;
-		caddr_t  a_id;
-		int  a_op;
-		struct flock *a_fl;
-		int  a_flags;
-	} */ *ap = v;
-	register struct vnode *vp = ap->a_vp;
+	struct vop_advlock_args *ap = v;
+	struct vnode *vp = ap->a_vp;
 
 	return (lf_advlock(&vp->v_speclockf, (off_t)0, ap->a_id,
 		ap->a_op, ap->a_fl, ap->a_flags));
@@ -734,8 +656,7 @@ spec_advlock(v)
  */
 /*ARGSUSED*/
 int
-spec_ebadf(v)
-	void *v;
+spec_ebadf(void *v)
 {
 
 	return (EBADF);
@@ -746,8 +667,7 @@ spec_ebadf(v)
  */
 /*ARGSUSED*/
 int
-spec_badop(v)
-	void *v;
+spec_badop(void *v)
 {
 
 	panic("spec_badop called");

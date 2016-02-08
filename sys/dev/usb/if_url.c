@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_url.c,v 1.34 2007/02/11 20:29:22 miod Exp $ */
+/*	$OpenBSD: if_url.c,v 1.48 2007/06/14 10:11:15 mbalmer Exp $ */
 /*	$NetBSD: if_url.c,v 1.6 2002/09/29 10:19:21 martin Exp $	*/
 /*
  * Copyright (c) 2001, 2002
@@ -47,12 +47,10 @@
 
 #include <sys/param.h>
 #include <sys/systm.h>
-#include <sys/lock.h>
+#include <sys/rwlock.h>
 #include <sys/mbuf.h>
 #include <sys/kernel.h>
-#if defined(__OpenBSD__)
 #include <sys/proc.h>
-#endif
 #include <sys/socket.h>
 
 #include <sys/device.h>
@@ -66,15 +64,6 @@
 #include <net/bpf.h>
 #endif
 
-#if defined(__NetBSD__)
-#include <net/if_ether.h>
-#ifdef INET
-#include <netinet/in.h>
-#include <netinet/if_inarp.h>
-#endif
-#endif /* defined(__NetBSD__) */
-
-#if defined(__OpenBSD__)
 #ifdef INET
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
@@ -82,7 +71,6 @@
 #include <netinet/ip.h>
 #include <netinet/if_ether.h>
 #endif
-#endif /* defined(__OpenBSD__) */
 
 #include <dev/mii/mii.h>
 #include <dev/mii/miivar.h>
@@ -97,44 +85,59 @@
 
 
 /* Function declarations */
-USB_DECLARE_DRIVER_CLASS(url, DV_IFNET);
+int url_match(struct device *, void *, void *); 
+void url_attach(struct device *, struct device *, void *); 
+int url_detach(struct device *, int); 
+int url_activate(struct device *, enum devact); 
 
-Static int url_openpipes(struct url_softc *);
-Static int url_rx_list_init(struct url_softc *);
-Static int url_tx_list_init(struct url_softc *);
-Static int url_newbuf(struct url_softc *, struct url_chain *, struct mbuf *);
-Static void url_start(struct ifnet *);
-Static int url_send(struct url_softc *, struct mbuf *, int);
-Static void url_txeof(usbd_xfer_handle, usbd_private_handle, usbd_status);
-Static void url_rxeof(usbd_xfer_handle, usbd_private_handle, usbd_status);
-Static void url_tick(void *);
-Static void url_tick_task(void *);
-Static int url_ioctl(struct ifnet *, u_long, caddr_t);
-Static void url_stop_task(struct url_softc *);
-Static void url_stop(struct ifnet *, int);
-Static void url_watchdog(struct ifnet *);
-Static int url_ifmedia_change(struct ifnet *);
-Static void url_ifmedia_status(struct ifnet *, struct ifmediareq *);
-Static void url_lock_mii(struct url_softc *);
-Static void url_unlock_mii(struct url_softc *);
-Static int url_int_miibus_readreg(device_ptr_t, int, int);
-Static void url_int_miibus_writereg(device_ptr_t, int, int, int);
-Static void url_miibus_statchg(device_ptr_t);
-Static int url_init(struct ifnet *);
-Static void url_setmulti(struct url_softc *);
-Static void url_reset(struct url_softc *);
+struct cfdriver url_cd = { 
+	NULL, "url", DV_IFNET 
+}; 
 
-Static int url_csr_read_1(struct url_softc *, int);
-Static int url_csr_read_2(struct url_softc *, int);
-Static int url_csr_write_1(struct url_softc *, int, int);
-Static int url_csr_write_2(struct url_softc *, int, int);
-Static int url_csr_write_4(struct url_softc *, int, int);
-Static int url_mem(struct url_softc *, int, int, void *, int);
+const struct cfattach url_ca = { 
+	sizeof(struct url_softc), 
+	url_match, 
+	url_attach, 
+	url_detach, 
+	url_activate, 
+};
+
+int url_openpipes(struct url_softc *);
+int url_rx_list_init(struct url_softc *);
+int url_tx_list_init(struct url_softc *);
+int url_newbuf(struct url_softc *, struct url_chain *, struct mbuf *);
+void url_start(struct ifnet *);
+int url_send(struct url_softc *, struct mbuf *, int);
+void url_txeof(usbd_xfer_handle, usbd_private_handle, usbd_status);
+void url_rxeof(usbd_xfer_handle, usbd_private_handle, usbd_status);
+void url_tick(void *);
+void url_tick_task(void *);
+int url_ioctl(struct ifnet *, u_long, caddr_t);
+void url_stop_task(struct url_softc *);
+void url_stop(struct ifnet *, int);
+void url_watchdog(struct ifnet *);
+int url_ifmedia_change(struct ifnet *);
+void url_ifmedia_status(struct ifnet *, struct ifmediareq *);
+void url_lock_mii(struct url_softc *);
+void url_unlock_mii(struct url_softc *);
+int url_int_miibus_readreg(struct device *, int, int);
+void url_int_miibus_writereg(struct device *, int, int, int);
+void url_miibus_statchg(struct device *);
+int url_init(struct ifnet *);
+void url_setmulti(struct url_softc *);
+void url_reset(struct url_softc *);
+
+int url_csr_read_1(struct url_softc *, int);
+int url_csr_read_2(struct url_softc *, int);
+int url_csr_write_1(struct url_softc *, int, int);
+int url_csr_write_2(struct url_softc *, int, int);
+int url_csr_write_4(struct url_softc *, int, int);
+int url_mem(struct url_softc *, int, int, void *, int);
 
 /* Macros */
 #ifdef URL_DEBUG
-#define DPRINTF(x)	do { if (urldebug) logprintf x; } while (0)
-#define DPRINTFN(n,x)	do { if (urldebug >= (n)) logprintf x; } while (0)
+#define DPRINTF(x)	do { if (urldebug) printf x; } while (0)
+#define DPRINTFN(n,x)	do { if (urldebug >= (n)) printf x; } while (0)
 int urldebug = 0;
 #else
 #define DPRINTF(x)
@@ -171,9 +174,10 @@ static const struct url_type {
 
 
 /* Probe */
-USB_MATCH(url)
+int
+url_match(struct device *parent, void *match, void *aux)
 {
-	USB_MATCH_START(url, uaa);
+	struct usb_attach_arg *uaa = aux;
 
 	if (uaa->iface != NULL)
 		return (UMATCH_NONE);
@@ -182,24 +186,25 @@ USB_MATCH(url)
 		UMATCH_VENDOR_PRODUCT : UMATCH_NONE);
 }
 /* Attach */
-USB_ATTACH(url)
+void
+url_attach(struct device *parent, struct device *self, void *aux)
 {
-	USB_ATTACH_START(url, sc, uaa);
+	struct url_softc *sc = (struct url_softc *)self;
+	struct usb_attach_arg *uaa = aux;
 	usbd_device_handle dev = uaa->device;
 	usbd_interface_handle iface;
 	usbd_status err;
 	usb_interface_descriptor_t *id;
 	usb_endpoint_descriptor_t *ed;
 	char *devinfop;
-	char *devname = USBDEVNAME(sc->sc_dev);
+	char *devname = sc->sc_dev.dv_xname;
 	struct ifnet *ifp;
 	struct mii_data *mii;
 	u_char eaddr[ETHER_ADDR_LEN];
 	int i, s;
 
 	devinfop = usbd_devinfo_alloc(dev, 0);
-	USB_ATTACH_SETUP;
-	printf("%s: %s\n", devname, devinfop);
+	printf("\n%s: %s\n", devname, devinfop);
 	usbd_devinfo_free(devinfop);
 
 	/* Move the device into the configured state. */
@@ -210,7 +215,7 @@ USB_ATTACH(url)
 	}
 
 	usb_init_task(&sc->sc_tick_task, url_tick_task, sc);
-	lockinit(&sc->sc_mii_lock, PZERO, "urlmii", 0, 0);
+	rw_init(&sc->sc_mii_lock, "urlmii");
 	usb_init_task(&sc->sc_stop_task, (void (*)(void *)) url_stop_task, sc);
 
 	/* get control interface */
@@ -270,9 +275,7 @@ USB_ATTACH(url)
 	/* Print Ethernet Address */
 	printf("%s: address %s\n", devname, ether_sprintf(eaddr));
 
-#if defined(__OpenBSD__)
 	bcopy(eaddr, (char *)&sc->sc_ac.ac_enaddr, ETHER_ADDR_LEN);
-#endif
 	/* initialize interface information */
 	ifp = GET_IFP(sc);
 	ifp->if_softc = sc;
@@ -281,10 +284,6 @@ USB_ATTACH(url)
 	ifp->if_start = url_start;
 	ifp->if_ioctl = url_ioctl;
 	ifp->if_watchdog = url_watchdog;
-#if defined(__NetBSD__)
-	ifp->if_init = url_init;
-	ifp->if_stop = url_stop;
-#endif
 
 	IFQ_SET_READY(&ifp->if_snd);
 
@@ -314,35 +313,35 @@ USB_ATTACH(url)
 
 	/* attach the interface */
 	if_attach(ifp);
-	Ether_ifattach(ifp, eaddr);
+	ether_ifattach(ifp);
 
-	usb_callout_init(sc->sc_stat_ch);
+	timeout_set(&sc->sc_stat_ch, NULL, NULL);
 	sc->sc_attached = 1;
 	splx(s);
 
-	usbd_add_drv_event(USB_EVENT_DRIVER_ATTACH, dev, USBDEV(sc->sc_dev));
+	usbd_add_drv_event(USB_EVENT_DRIVER_ATTACH, dev, &sc->sc_dev);
 
-	USB_ATTACH_SUCCESS_RETURN;
+	return;
 
  bad:
 	sc->sc_dying = 1;
-	USB_ATTACH_ERROR_RETURN;
 }
 
 /* detach */
-USB_DETACH(url)
+int
+url_detach(struct device *self, int flags)
 {
-	USB_DETACH_START(url, sc);
+	struct url_softc *sc = (struct url_softc *)self;
 	struct ifnet *ifp = GET_IFP(sc);
 	int s;
 
-	DPRINTF(("%s: %s: enter\n", USBDEVNAME(sc->sc_dev), __func__));
+	DPRINTF(("%s: %s: enter\n", sc->sc_dev.dv_xname, __func__));
 
 	/* Detached before attached finished */
 	if (!sc->sc_attached)
 		return (0);
 
-	usb_uncallout(sc->sc_stat_ch, url_tick, sc);
+	timeout_del(&sc->sc_stat_ch);
 
 	/* Remove any pending tasks */
 	usb_rem_task(sc->sc_udev, &sc->sc_tick_task);
@@ -352,7 +351,7 @@ USB_DETACH(url)
 
 	if (--sc->sc_refcnt >= 0) {
 		/* Wait for processes to go away */
-		usb_detach_wait(USBDEV(sc->sc_dev));
+		usb_detach_wait(&sc->sc_dev);
 	}
 
 	if (ifp->if_flags & IFF_RUNNING)
@@ -366,13 +365,13 @@ USB_DETACH(url)
 #ifdef DIAGNOSTIC
 	if (sc->sc_pipe_tx != NULL)
 		printf("%s: detach has active tx endpoint.\n",
-		       USBDEVNAME(sc->sc_dev));
+		       sc->sc_dev.dv_xname);
 	if (sc->sc_pipe_rx != NULL)
 		printf("%s: detach has active rx endpoint.\n",
-		       USBDEVNAME(sc->sc_dev));
+		       sc->sc_dev.dv_xname);
 	if (sc->sc_pipe_intr != NULL)
 		printf("%s: detach has active intr endpoint.\n",
-		       USBDEVNAME(sc->sc_dev));
+		       sc->sc_dev.dv_xname);
 #endif
 
 	sc->sc_attached = 0;
@@ -380,13 +379,13 @@ USB_DETACH(url)
 	splx(s);
 
 	usbd_add_drv_event(USB_EVENT_DRIVER_DETACH, sc->sc_udev,
-			   USBDEV(sc->sc_dev));
+			   &sc->sc_dev);
 
 	return (0);
 }
 
 /* read/write memory */
-Static int
+int
 url_mem(struct url_softc *sc, int cmd, int offset, void *buf, int len)
 {
 	usb_device_request_t req;
@@ -396,7 +395,7 @@ url_mem(struct url_softc *sc, int cmd, int offset, void *buf, int len)
 		return (0);
 
 	DPRINTFN(0x200,
-		("%s: %s: enter\n", USBDEVNAME(sc->sc_dev), __func__));
+		("%s: %s: enter\n", sc->sc_dev.dv_xname, __func__));
 
 	if (sc->sc_dying)
 		return (0);
@@ -413,10 +412,10 @@ url_mem(struct url_softc *sc, int cmd, int offset, void *buf, int len)
 	sc->sc_refcnt++;
 	err = usbd_do_request(sc->sc_udev, &req, buf);
 	if (--sc->sc_refcnt < 0)
-		usb_detach_wakeup(USBDEV(sc->sc_dev));
+		usb_detach_wakeup(&sc->sc_dev);
 	if (err) {
 		DPRINTF(("%s: url_mem(): %s failed. off=%04x, err=%d\n",
-			 USBDEVNAME(sc->sc_dev),
+			 sc->sc_dev.dv_xname,
 			 cmd == URL_CMD_READMEM ? "read" : "write",
 			 offset, err));
 	}
@@ -425,13 +424,13 @@ url_mem(struct url_softc *sc, int cmd, int offset, void *buf, int len)
 }
 
 /* read 1byte from register */
-Static int
+int
 url_csr_read_1(struct url_softc *sc, int reg)
 {
 	u_int8_t val = 0;
 
 	DPRINTFN(0x100,
-		 ("%s: %s: enter\n", USBDEVNAME(sc->sc_dev), __func__));
+		 ("%s: %s: enter\n", sc->sc_dev.dv_xname, __func__));
 
 	if (sc->sc_dying)
 		return (0);
@@ -440,13 +439,13 @@ url_csr_read_1(struct url_softc *sc, int reg)
 }
 
 /* read 2bytes from register */
-Static int
+int
 url_csr_read_2(struct url_softc *sc, int reg)
 {
 	uWord val;
 
 	DPRINTFN(0x100,
-		 ("%s: %s: enter\n", USBDEVNAME(sc->sc_dev), __func__));
+		 ("%s: %s: enter\n", sc->sc_dev.dv_xname, __func__));
 
 	if (sc->sc_dying)
 		return (0);
@@ -456,13 +455,13 @@ url_csr_read_2(struct url_softc *sc, int reg)
 }
 
 /* write 1byte to register */
-Static int
+int
 url_csr_write_1(struct url_softc *sc, int reg, int aval)
 {
 	u_int8_t val = aval;
 
 	DPRINTFN(0x100,
-		 ("%s: %s: enter\n", USBDEVNAME(sc->sc_dev), __func__));
+		 ("%s: %s: enter\n", sc->sc_dev.dv_xname, __func__));
 
 	if (sc->sc_dying)
 		return (0);
@@ -471,13 +470,13 @@ url_csr_write_1(struct url_softc *sc, int reg, int aval)
 }
 
 /* write 2bytes to register */
-Static int
+int
 url_csr_write_2(struct url_softc *sc, int reg, int aval)
 {
 	uWord val;
 
 	DPRINTFN(0x100,
-		 ("%s: %s: enter\n", USBDEVNAME(sc->sc_dev), __func__));
+		 ("%s: %s: enter\n", sc->sc_dev.dv_xname, __func__));
 
 	USETW(val, aval);
 
@@ -488,13 +487,13 @@ url_csr_write_2(struct url_softc *sc, int reg, int aval)
 }
 
 /* write 4bytes to register */
-Static int
+int
 url_csr_write_4(struct url_softc *sc, int reg, int aval)
 {
 	uDWord val;
 
 	DPRINTFN(0x100,
-		 ("%s: %s: enter\n", USBDEVNAME(sc->sc_dev), __func__));
+		 ("%s: %s: enter\n", sc->sc_dev.dv_xname, __func__));
 
 	USETDW(val, aval);
 
@@ -504,7 +503,7 @@ url_csr_write_4(struct url_softc *sc, int reg, int aval)
 	return (url_mem(sc, URL_CMD_WRITEMEM, reg, &val, 4) ? -1 : 0);
 }
 
-Static int
+int
 url_init(struct ifnet *ifp)
 {
 	struct url_softc *sc = ifp->if_softc;
@@ -512,7 +511,7 @@ url_init(struct ifnet *ifp)
 	u_char *eaddr;
 	int i, s;
 
-	DPRINTF(("%s: %s: enter\n", USBDEVNAME(sc->sc_dev), __func__));
+	DPRINTF(("%s: %s: enter\n", sc->sc_dev.dv_xname, __func__));
 
 	if (sc->sc_dying)
 		return (EIO);
@@ -522,11 +521,7 @@ url_init(struct ifnet *ifp)
 	/* Cancel pending I/O and free all TX/RX buffers */
 	url_stop(ifp, 1);
 
-#if defined(__OpenBSD__)
 	eaddr = sc->sc_ac.ac_enaddr;
-#elif defined(__NetBSD__)
-	eaddr = LLADDR(ifp->if_sadl);
-#endif
 	for (i = 0; i < ETHER_ADDR_LEN; i++)
 		url_csr_write_1(sc, URL_IDR0 + i, eaddr[i]);
 
@@ -552,14 +547,14 @@ url_init(struct ifnet *ifp)
 
 	/* Initialize transmit ring */
 	if (url_tx_list_init(sc) == ENOBUFS) {
-		printf("%s: tx list init failed\n", USBDEVNAME(sc->sc_dev));
+		printf("%s: tx list init failed\n", sc->sc_dev.dv_xname);
 		splx(s);
 		return (EIO);
 	}
 
 	/* Initialize receive ring */
 	if (url_rx_list_init(sc) == ENOBUFS) {
-		printf("%s: rx list init failed\n", USBDEVNAME(sc->sc_dev));
+		printf("%s: rx list init failed\n", sc->sc_dev.dv_xname);
 		splx(s);
 		return (EIO);
 	}
@@ -584,17 +579,19 @@ url_init(struct ifnet *ifp)
 
 	splx(s);
 
-	usb_callout(sc->sc_stat_ch, hz, url_tick, sc);
+	timeout_del(&sc->sc_stat_ch);
+	timeout_set(&sc->sc_stat_ch, url_tick, sc);
+	timeout_add(&sc->sc_stat_ch, hz);
 
 	return (0);
 }
 
-Static void
+void
 url_reset(struct url_softc *sc)
 {
 	int i;
 
-	DPRINTF(("%s: %s: enter\n", USBDEVNAME(sc->sc_dev), __func__));
+	DPRINTF(("%s: %s: enter\n", sc->sc_dev.dv_xname, __func__));
 
 	if (sc->sc_dying)
 		return;
@@ -611,11 +608,11 @@ url_reset(struct url_softc *sc)
 }
 
 int
-url_activate(device_ptr_t self, enum devact act)
+url_activate(struct device *self, enum devact act)
 {
 	struct url_softc *sc = (struct url_softc *)self;
 
-	DPRINTF(("%s: %s: enter, act=%d\n", USBDEVNAME(sc->sc_dev),
+	DPRINTF(("%s: %s: enter, act=%d\n", sc->sc_dev.dv_xname,
 		 __func__, act));
 
 	switch (act) {
@@ -623,7 +620,6 @@ url_activate(device_ptr_t self, enum devact act)
 		break;
 
 	case DVACT_DEACTIVATE:
-		if_deactivate(GET_IFP(sc));
 		sc->sc_dying = 1;
 		break;
 	}
@@ -634,7 +630,7 @@ url_activate(device_ptr_t self, enum devact act)
 #define url_calchash(addr) (ether_crc32_be((addr), ETHER_ADDR_LEN) >> 26)
 
 
-Static void
+void
 url_setmulti(struct url_softc *sc)
 {
 	struct ifnet *ifp;
@@ -644,7 +640,7 @@ url_setmulti(struct url_softc *sc)
 	int h = 0;
 	int mcnt = 0;
 
-	DPRINTF(("%s: %s: enter\n", USBDEVNAME(sc->sc_dev), __func__));
+	DPRINTF(("%s: %s: enter\n", sc->sc_dev.dv_xname, __func__));
 
 	if (sc->sc_dying)
 		return;
@@ -695,7 +691,7 @@ url_setmulti(struct url_softc *sc)
 	url_csr_write_4(sc, URL_MAR4, hashes[1]);
 }
 
-Static int
+int
 url_openpipes(struct url_softc *sc)
 {
 	struct url_chain *c;
@@ -713,7 +709,7 @@ url_openpipes(struct url_softc *sc)
 			     USBD_EXCLUSIVE_USE, &sc->sc_pipe_rx);
 	if (err) {
 		printf("%s: open rx pipe failed: %s\n",
-		       USBDEVNAME(sc->sc_dev), usbd_errstr(err));
+		       sc->sc_dev.dv_xname, usbd_errstr(err));
 		error = EIO;
 		goto done;
 	}
@@ -723,7 +719,7 @@ url_openpipes(struct url_softc *sc)
 			     USBD_EXCLUSIVE_USE, &sc->sc_pipe_tx);
 	if (err) {
 		printf("%s: open tx pipe failed: %s\n",
-		       USBDEVNAME(sc->sc_dev), usbd_errstr(err));
+		       sc->sc_dev.dv_xname, usbd_errstr(err));
 		error = EIO;
 		goto done;
 	}
@@ -737,7 +733,7 @@ url_openpipes(struct url_softc *sc)
 				  url_intr, URL_INTR_INTERVAL);
 	if (err) {
 		printf("%s: open intr pipe failed: %s\n",
-		       USBDEVNAME(sc->sc_dev), usbd_errstr(err));
+		       sc->sc_dev.dv_xname, usbd_errstr(err));
 		error = EIO;
 		goto done;
 	}
@@ -752,35 +748,35 @@ url_openpipes(struct url_softc *sc)
 				USBD_SHORT_XFER_OK | USBD_NO_COPY,
 				USBD_NO_TIMEOUT, url_rxeof);
 		(void)usbd_transfer(c->url_xfer);
-		DPRINTF(("%s: %s: start read\n", USBDEVNAME(sc->sc_dev),
+		DPRINTF(("%s: %s: start read\n", sc->sc_dev.dv_xname,
 			 __func__));
 	}
 
  done:
 	if (--sc->sc_refcnt < 0)
-		usb_detach_wakeup(USBDEV(sc->sc_dev));
+		usb_detach_wakeup(&sc->sc_dev);
 
 	return (error);
 }
 
-Static int
+int
 url_newbuf(struct url_softc *sc, struct url_chain *c, struct mbuf *m)
 {
 	struct mbuf *m_new = NULL;
 
-	DPRINTF(("%s: %s: enter\n", USBDEVNAME(sc->sc_dev), __func__));
+	DPRINTF(("%s: %s: enter\n", sc->sc_dev.dv_xname, __func__));
 
 	if (m == NULL) {
 		MGETHDR(m_new, M_DONTWAIT, MT_DATA);
 		if (m_new == NULL) {
 			printf("%s: no memory for rx list "
-			       "-- packet dropped!\n", USBDEVNAME(sc->sc_dev));
+			       "-- packet dropped!\n", sc->sc_dev.dv_xname);
 			return (ENOBUFS);
 		}
 		MCLGET(m_new, M_DONTWAIT);
 		if (!(m_new->m_flags & M_EXT)) {
 			printf("%s: no memory for rx list "
-			       "-- packet dropped!\n", USBDEVNAME(sc->sc_dev));
+			       "-- packet dropped!\n", sc->sc_dev.dv_xname);
 			m_freem(m_new);
 			return (ENOBUFS);
 		}
@@ -798,14 +794,14 @@ url_newbuf(struct url_softc *sc, struct url_chain *c, struct mbuf *m)
 }
 
 
-Static int
+int
 url_rx_list_init(struct url_softc *sc)
 {
 	struct url_cdata *cd;
 	struct url_chain *c;
 	int i;
 
-	DPRINTF(("%s: %s: enter\n", USBDEVNAME(sc->sc_dev), __func__));
+	DPRINTF(("%s: %s: enter\n", sc->sc_dev.dv_xname, __func__));
 
 	cd = &sc->sc_cdata;
 	for (i = 0; i < URL_RX_LIST_CNT; i++) {
@@ -829,14 +825,14 @@ url_rx_list_init(struct url_softc *sc)
 	return (0);
 }
 
-Static int
+int
 url_tx_list_init(struct url_softc *sc)
 {
 	struct url_cdata *cd;
 	struct url_chain *c;
 	int i;
 
-	DPRINTF(("%s: %s: enter\n", USBDEVNAME(sc->sc_dev), __func__));
+	DPRINTF(("%s: %s: enter\n", sc->sc_dev.dv_xname, __func__));
 
 	cd = &sc->sc_cdata;
 	for (i = 0; i < URL_TX_LIST_CNT; i++) {
@@ -859,13 +855,13 @@ url_tx_list_init(struct url_softc *sc)
 	return (0);
 }
 
-Static void
+void
 url_start(struct ifnet *ifp)
 {
 	struct url_softc *sc = ifp->if_softc;
 	struct mbuf *m_head = NULL;
 
-	DPRINTF(("%s: %s: enter, link=%d\n", USBDEVNAME(sc->sc_dev),
+	DPRINTF(("%s: %s: enter, link=%d\n", sc->sc_dev.dv_xname,
 		 __func__, sc->sc_link));
 
 	if (sc->sc_dying)
@@ -899,14 +895,14 @@ url_start(struct ifnet *ifp)
 	ifp->if_timer = 5;
 }
 
-Static int
+int
 url_send(struct url_softc *sc, struct mbuf *m, int idx)
 {
 	int total_len;
 	struct url_chain *c;
 	usbd_status err;
 
-	DPRINTF(("%s: %s: enter\n", USBDEVNAME(sc->sc_dev),__func__));
+	DPRINTF(("%s: %s: enter\n", sc->sc_dev.dv_xname,__func__));
 
 	c = &sc->sc_cdata.url_tx_chain[idx];
 
@@ -927,16 +923,16 @@ url_send(struct url_softc *sc, struct mbuf *m, int idx)
 	sc->sc_refcnt++;
 	err = usbd_transfer(c->url_xfer);
 	if (--sc->sc_refcnt < 0)
-		usb_detach_wakeup(USBDEV(sc->sc_dev));
+		usb_detach_wakeup(&sc->sc_dev);
 	if (err != USBD_IN_PROGRESS) {
-		printf("%s: url_send error=%s\n", USBDEVNAME(sc->sc_dev),
+		printf("%s: url_send error=%s\n", sc->sc_dev.dv_xname,
 		       usbd_errstr(err));
 		/* Stop the interface */
 		usb_add_task(sc->sc_udev, &sc->sc_stop_task);
 		return (EIO);
 	}
 
-	DPRINTF(("%s: %s: send %d bytes\n", USBDEVNAME(sc->sc_dev),
+	DPRINTF(("%s: %s: send %d bytes\n", sc->sc_dev.dv_xname,
 		 __func__, total_len));
 
 	sc->sc_cdata.url_tx_cnt++;
@@ -944,7 +940,7 @@ url_send(struct url_softc *sc, struct mbuf *m, int idx)
 	return (0);
 }
 
-Static void
+void
 url_txeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
 {
 	struct url_chain *c = priv;
@@ -957,7 +953,7 @@ url_txeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
 
 	s = splnet();
 
-	DPRINTF(("%s: %s: enter\n", USBDEVNAME(sc->sc_dev), __func__));
+	DPRINTF(("%s: %s: enter\n", sc->sc_dev.dv_xname, __func__));
 
 	ifp->if_timer = 0;
 	ifp->if_flags &= ~IFF_OACTIVE;
@@ -968,13 +964,13 @@ url_txeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
 			return;
 		}
 		ifp->if_oerrors++;
-		printf("%s: usb error on tx: %s\n", USBDEVNAME(sc->sc_dev),
+		printf("%s: usb error on tx: %s\n", sc->sc_dev.dv_xname,
 		       usbd_errstr(status));
 		if (status == USBD_STALLED) {
 			sc->sc_refcnt++;
 			usbd_clear_endpoint_stall_async(sc->sc_pipe_tx);
 			if (--sc->sc_refcnt < 0)
-				usb_detach_wakeup(USBDEV(sc->sc_dev));
+				usb_detach_wakeup(&sc->sc_dev);
 		}
 		splx(s);
 		return;
@@ -991,7 +987,7 @@ url_txeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
 	splx(s);
 }
 
-Static void
+void
 url_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
 {
 	struct url_chain *c = priv;
@@ -1002,7 +998,7 @@ url_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
 	url_rxhdr_t rxhdr;
 	int s;
 
-	DPRINTF(("%s: %s: enter\n", USBDEVNAME(sc->sc_dev),__func__));
+	DPRINTF(("%s: %s: enter\n", sc->sc_dev.dv_xname,__func__));
 
 	if (sc->sc_dying)
 		return;
@@ -1013,7 +1009,7 @@ url_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
 		sc->sc_rx_errs++;
 		if (usbd_ratecheck(&sc->sc_rx_notice)) {
 			printf("%s: %u usb errors on rx: %s\n",
-			       USBDEVNAME(sc->sc_dev), sc->sc_rx_errs,
+			       sc->sc_dev.dv_xname, sc->sc_rx_errs,
 			       usbd_errstr(status));
 			sc->sc_rx_errs = 0;
 		}
@@ -1021,7 +1017,7 @@ url_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
 			sc->sc_refcnt++;
 			usbd_clear_endpoint_stall_async(sc->sc_pipe_rx);
 			if (--sc->sc_refcnt < 0)
-				usb_detach_wakeup(USBDEV(sc->sc_dev));
+				usb_detach_wakeup(&sc->sc_dev);
 		}
 		goto done;
 	}
@@ -1038,7 +1034,7 @@ url_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
 	memcpy(&rxhdr, c->url_buf + total_len - ETHER_CRC_LEN, sizeof(rxhdr));
 
 	DPRINTF(("%s: RX Status: %dbytes%s%s%s%s packets\n",
-		 USBDEVNAME(sc->sc_dev),
+		 sc->sc_dev.dv_xname,
 		 UGETW(rxhdr) & URL_RXHDR_BYTEC_MASK,
 		 UGETW(rxhdr) & URL_RXHDR_VALID_MASK ? ", Valid" : "",
 		 UGETW(rxhdr) & URL_RXHDR_RUNTPKT_MASK ? ", Runt" : "",
@@ -1069,9 +1065,9 @@ url_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
 		bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
 #endif
 
-	DPRINTF(("%s: %s: deliver %d\n", USBDEVNAME(sc->sc_dev),
+	DPRINTF(("%s: %s: deliver %d\n", sc->sc_dev.dv_xname,
 		 __func__, m->m_len));
-	IF_INPUT(ifp, m);
+	ether_input_mbuf(ifp, m);
 
  done1:
 	splx(s);
@@ -1084,18 +1080,18 @@ url_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
 	sc->sc_refcnt++;
 	usbd_transfer(xfer);
 	if (--sc->sc_refcnt < 0)
-		usb_detach_wakeup(USBDEV(sc->sc_dev));
+		usb_detach_wakeup(&sc->sc_dev);
 
-	DPRINTF(("%s: %s: start rx\n", USBDEVNAME(sc->sc_dev), __func__));
+	DPRINTF(("%s: %s: start rx\n", sc->sc_dev.dv_xname, __func__));
 }
 
 #if 0
-Static void url_intr()
+void url_intr()
 {
 }
 #endif
 
-Static int
+int
 url_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 {
 	struct url_softc *sc = ifp->if_softc;
@@ -1104,7 +1100,7 @@ url_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	struct mii_data *mii;
 	int s, error = 0;
 
-	DPRINTF(("%s: %s: enter\n", USBDEVNAME(sc->sc_dev), __func__));
+	DPRINTF(("%s: %s: enter\n", sc->sc_dev.dv_xname, __func__));
 
 	if (sc->sc_dying)
 		return (EIO);
@@ -1177,7 +1173,7 @@ url_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	return (error);
 }
 
-Static void
+void
 url_watchdog(struct ifnet *ifp)
 {
 	struct url_softc *sc = ifp->if_softc;
@@ -1185,10 +1181,10 @@ url_watchdog(struct ifnet *ifp)
 	usbd_status stat;
 	int s;
 
-	DPRINTF(("%s: %s: enter\n", USBDEVNAME(sc->sc_dev), __func__));
+	DPRINTF(("%s: %s: enter\n", sc->sc_dev.dv_xname, __func__));
 
 	ifp->if_oerrors++;
-	printf("%s: watchdog timeout\n", USBDEVNAME(sc->sc_dev));
+	printf("%s: watchdog timeout\n", sc->sc_dev.dv_xname);
 
 	s = splusb();
 	c = &sc->sc_cdata.url_tx_chain[0];
@@ -1200,28 +1196,28 @@ url_watchdog(struct ifnet *ifp)
 	splx(s);
 }
 
-Static void
+void
 url_stop_task(struct url_softc *sc)
 {
 	url_stop(GET_IFP(sc), 1);
 }
 
 /* Stop the adapter and free any mbufs allocated to the RX and TX lists. */
-Static void
+void
 url_stop(struct ifnet *ifp, int disable)
 {
 	struct url_softc *sc = ifp->if_softc;
 	usbd_status err;
 	int i;
 
-	DPRINTF(("%s: %s: enter\n", USBDEVNAME(sc->sc_dev), __func__));
+	DPRINTF(("%s: %s: enter\n", sc->sc_dev.dv_xname, __func__));
 
 	ifp->if_timer = 0;
 	ifp->if_flags &= ~(IFF_RUNNING | IFF_OACTIVE);
 
 	url_reset(sc);
 
-	usb_uncallout(sc->sc_stat_ch, url_tick, sc);
+	timeout_del(&sc->sc_stat_ch);
 
 	/* Stop transfers */
 	/* RX endpoint */
@@ -1229,11 +1225,11 @@ url_stop(struct ifnet *ifp, int disable)
 		err = usbd_abort_pipe(sc->sc_pipe_rx);
 		if (err)
 			printf("%s: abort rx pipe failed: %s\n",
-			       USBDEVNAME(sc->sc_dev), usbd_errstr(err));
+			       sc->sc_dev.dv_xname, usbd_errstr(err));
 		err = usbd_close_pipe(sc->sc_pipe_rx);
 		if (err)
 			printf("%s: close rx pipe failed: %s\n",
-			       USBDEVNAME(sc->sc_dev), usbd_errstr(err));
+			       sc->sc_dev.dv_xname, usbd_errstr(err));
 		sc->sc_pipe_rx = NULL;
 	}
 
@@ -1242,11 +1238,11 @@ url_stop(struct ifnet *ifp, int disable)
 		err = usbd_abort_pipe(sc->sc_pipe_tx);
 		if (err)
 			printf("%s: abort tx pipe failed: %s\n",
-			       USBDEVNAME(sc->sc_dev), usbd_errstr(err));
+			       sc->sc_dev.dv_xname, usbd_errstr(err));
 		err = usbd_close_pipe(sc->sc_pipe_tx);
 		if (err)
 			printf("%s: close tx pipe failed: %s\n",
-			       USBDEVNAME(sc->sc_dev), usbd_errstr(err));
+			       sc->sc_dev.dv_xname, usbd_errstr(err));
 		sc->sc_pipe_tx = NULL;
 	}
 
@@ -1257,11 +1253,11 @@ url_stop(struct ifnet *ifp, int disable)
 		err = usbd_abort_pipe(sc->sc_pipe_intr);
 		if (err)
 			printf("%s: abort intr pipe failed: %s\n",
-			       USBDEVNAME(sc->sc_dev), usbd_errstr(err));
+			       sc->sc_dev.dv_xname, usbd_errstr(err));
 		err = usbd_close_pipe(sc->sc_pipe_intr);
 		if (err)
 			printf("%s: close intr pipe failed: %s\n",
-			       USBDEVNAME(sc->sc_dev), usbd_errstr(err));
+			       sc->sc_dev.dv_xname, usbd_errstr(err));
 		sc->sc_pipe_intr = NULL;
 	}
 #endif
@@ -1294,13 +1290,13 @@ url_stop(struct ifnet *ifp, int disable)
 }
 
 /* Set media options */
-Static int
+int
 url_ifmedia_change(struct ifnet *ifp)
 {
 	struct url_softc *sc = ifp->if_softc;
 	struct mii_data *mii = GET_MII(sc);
 
-	DPRINTF(("%s: %s: enter\n", USBDEVNAME(sc->sc_dev), __func__));
+	DPRINTF(("%s: %s: enter\n", sc->sc_dev.dv_xname, __func__));
 
 	if (sc->sc_dying)
 		return (0);
@@ -1317,13 +1313,13 @@ url_ifmedia_change(struct ifnet *ifp)
 }
 
 /* Report current media status. */
-Static void
+void
 url_ifmedia_status(struct ifnet *ifp, struct ifmediareq *ifmr)
 {
 	struct url_softc *sc = ifp->if_softc;
 	struct mii_data *mii = GET_MII(sc);
 
-	DPRINTF(("%s: %s: enter\n", USBDEVNAME(sc->sc_dev), __func__));
+	DPRINTF(("%s: %s: enter\n", sc->sc_dev.dv_xname, __func__));
 
 	if (sc->sc_dying)
 		return;
@@ -1339,7 +1335,7 @@ url_ifmedia_status(struct ifnet *ifp, struct ifmediareq *ifmr)
 	ifmr->ifm_status = mii->mii_media_status;
 }
 
-Static void
+void
 url_tick(void *xsc)
 {
 	struct url_softc *sc = xsc;
@@ -1347,7 +1343,7 @@ url_tick(void *xsc)
 	if (sc == NULL)
 		return;
 
-	DPRINTFN(0xff, ("%s: %s: enter\n", USBDEVNAME(sc->sc_dev),
+	DPRINTFN(0xff, ("%s: %s: enter\n", sc->sc_dev.dv_xname,
 			__func__));
 
 	if (sc->sc_dying)
@@ -1357,7 +1353,7 @@ url_tick(void *xsc)
 	usb_add_task(sc->sc_udev, &sc->sc_tick_task);
 }
 
-Static void
+void
 url_tick_task(void *xsc)
 {
 	struct url_softc *sc = xsc;
@@ -1368,7 +1364,7 @@ url_tick_task(void *xsc)
 	if (sc == NULL)
 		return;
 
-	DPRINTFN(0xff, ("%s: %s: enter\n", USBDEVNAME(sc->sc_dev),
+	DPRINTFN(0xff, ("%s: %s: enter\n", sc->sc_dev.dv_xname,
 			__func__));
 
 	if (sc->sc_dying)
@@ -1386,41 +1382,43 @@ url_tick_task(void *xsc)
 	if (!sc->sc_link && mii->mii_media_status & IFM_ACTIVE &&
 	    IFM_SUBTYPE(mii->mii_media_active) != IFM_NONE) {
 		DPRINTF(("%s: %s: got link\n",
-			 USBDEVNAME(sc->sc_dev), __func__));
+			 sc->sc_dev.dv_xname, __func__));
 		sc->sc_link++;
 		if (IFQ_IS_EMPTY(&ifp->if_snd) == 0)
 			   url_start(ifp);
 	}
 
-	usb_callout(sc->sc_stat_ch, hz, url_tick, sc);
+	timeout_del(&sc->sc_stat_ch);
+	timeout_set(&sc->sc_stat_ch, url_tick, sc);
+	timeout_add(&sc->sc_stat_ch, hz);
 
 	splx(s);
 }
 
 /* Get exclusive access to the MII registers */
-Static void
+void
 url_lock_mii(struct url_softc *sc)
 {
-	DPRINTFN(0xff, ("%s: %s: enter\n", USBDEVNAME(sc->sc_dev),
+	DPRINTFN(0xff, ("%s: %s: enter\n", sc->sc_dev.dv_xname,
 			__func__));
 
 	sc->sc_refcnt++;
-	usb_lockmgr(&sc->sc_mii_lock, LK_EXCLUSIVE, NULL, curproc);
+	rw_enter_write(&sc->sc_mii_lock);
 }
 
-Static void
+void
 url_unlock_mii(struct url_softc *sc)
 {
-	DPRINTFN(0xff, ("%s: %s: enter\n", USBDEVNAME(sc->sc_dev),
+	DPRINTFN(0xff, ("%s: %s: enter\n", sc->sc_dev.dv_xname,
 		       __func__));
 
-	usb_lockmgr(&sc->sc_mii_lock, LK_RELEASE, NULL, curproc);
+	rw_exit_write(&sc->sc_mii_lock);
 	if (--sc->sc_refcnt < 0)
-		usb_detach_wakeup(USBDEV(sc->sc_dev));
+		usb_detach_wakeup(&sc->sc_dev);
 }
 
-Static int
-url_int_miibus_readreg(device_ptr_t dev, int phy, int reg)
+int
+url_int_miibus_readreg(struct device *dev, int phy, int reg)
 {
 	struct url_softc *sc;
 	u_int16_t val;
@@ -1428,14 +1426,14 @@ url_int_miibus_readreg(device_ptr_t dev, int phy, int reg)
 	if (dev == NULL)
 		return (0);
 
-	sc = USBGETSOFTC(dev);
+	sc = (void *)dev;
 
 	DPRINTFN(0xff, ("%s: %s: enter, phy=%d reg=0x%04x\n",
-		 USBDEVNAME(sc->sc_dev), __func__, phy, reg));
+		 sc->sc_dev.dv_xname, __func__, phy, reg));
 
 	if (sc->sc_dying) {
 #ifdef DIAGNOSTIC
-		printf("%s: %s: dying\n", USBDEVNAME(sc->sc_dev),
+		printf("%s: %s: dying\n", sc->sc_dev.dv_xname,
 		       __func__);
 #endif
 		return (0);
@@ -1444,7 +1442,7 @@ url_int_miibus_readreg(device_ptr_t dev, int phy, int reg)
 	/* XXX: one PHY only for the RTL8150 internal PHY */
 	if (phy != 0) {
 		DPRINTFN(0xff, ("%s: %s: phy=%d is not supported\n",
-			 USBDEVNAME(sc->sc_dev), __func__, phy));
+			 sc->sc_dev.dv_xname, __func__, phy));
 		return (0);
 	}
 
@@ -1473,7 +1471,7 @@ url_int_miibus_readreg(device_ptr_t dev, int phy, int reg)
 		break;
 	default:
 		printf("%s: %s: bad register %04x\n",
-		       USBDEVNAME(sc->sc_dev), __func__, reg);
+		       sc->sc_dev.dv_xname, __func__, reg);
 		val = 0;
 		goto R_DONE;
 		break;
@@ -1486,28 +1484,28 @@ url_int_miibus_readreg(device_ptr_t dev, int phy, int reg)
 
  R_DONE:
 	DPRINTFN(0xff, ("%s: %s: phy=%d reg=0x%04x => 0x%04x\n",
-		 USBDEVNAME(sc->sc_dev), __func__, phy, reg, val));
+		 sc->sc_dev.dv_xname, __func__, phy, reg, val));
 
 	url_unlock_mii(sc);
 	return (val);
 }
 
-Static void
-url_int_miibus_writereg(device_ptr_t dev, int phy, int reg, int data)
+void
+url_int_miibus_writereg(struct device *dev, int phy, int reg, int data)
 {
 	struct url_softc *sc;
 
 	if (dev == NULL)
 		return;
 
-	sc = USBGETSOFTC(dev);
+	sc = (void *)dev;
 
 	DPRINTFN(0xff, ("%s: %s: enter, phy=%d reg=0x%04x data=0x%04x\n",
-		 USBDEVNAME(sc->sc_dev), __func__, phy, reg, data));
+		 sc->sc_dev.dv_xname, __func__, phy, reg, data));
 
 	if (sc->sc_dying) {
 #ifdef DIAGNOSTIC
-		printf("%s: %s: dying\n", USBDEVNAME(sc->sc_dev),
+		printf("%s: %s: dying\n", sc->sc_dev.dv_xname,
 		       __func__);
 #endif
 		return;
@@ -1516,7 +1514,7 @@ url_int_miibus_writereg(device_ptr_t dev, int phy, int reg, int data)
 	/* XXX: one PHY only for the RTL8150 internal PHY */
 	if (phy != 0) {
 		DPRINTFN(0xff, ("%s: %s: phy=%d is not supported\n",
-			 USBDEVNAME(sc->sc_dev), __func__, phy));
+			 sc->sc_dev.dv_xname, __func__, phy));
 		return;
 	}
 
@@ -1544,7 +1542,7 @@ url_int_miibus_writereg(device_ptr_t dev, int phy, int reg, int data)
 		break;
 	default:
 		printf("%s: %s: bad register %04x\n",
-		       USBDEVNAME(sc->sc_dev), __func__, reg);
+		       sc->sc_dev.dv_xname, __func__, reg);
 		goto W_DONE;
 		break;
 	}
@@ -1559,8 +1557,8 @@ url_int_miibus_writereg(device_ptr_t dev, int phy, int reg, int data)
 	return;
 }
 
-Static void
-url_miibus_statchg(device_ptr_t dev)
+void
+url_miibus_statchg(struct device *dev)
 {
 #ifdef URL_DEBUG
 	struct url_softc *sc;
@@ -1568,8 +1566,8 @@ url_miibus_statchg(device_ptr_t dev)
 	if (dev == NULL)
 		return;
 
-	sc = USBGETSOFTC(dev);
-	DPRINTF(("%s: %s: enter\n", USBDEVNAME(sc->sc_dev), __func__));
+	sc = (void *)dev;
+	DPRINTF(("%s: %s: enter\n", sc->sc_dev.dv_xname, __func__));
 #endif
 	/* Nothing to do */
 }
@@ -1578,18 +1576,18 @@ url_miibus_statchg(device_ptr_t dev)
 /*
  * external PHYs support, but not test.
  */
-Static int
-url_ext_miibus_redreg(device_ptr_t dev, int phy, int reg)
+int
+url_ext_miibus_redreg(struct device *dev, int phy, int reg)
 {
-	struct url_softc *sc = USBGETSOFTC(dev);
+	struct url_softc *sc = (void *)dev;
 	u_int16_t val;
 
 	DPRINTF(("%s: %s: enter, phy=%d reg=0x%04x\n",
-		 USBDEVNAME(sc->sc_dev), __func__, phy, reg));
+		 sc->sc_dev.dv_xname, __func__, phy, reg));
 
 	if (sc->sc_dying) {
 #ifdef DIAGNOSTIC
-		printf("%s: %s: dying\n", USBDEVNAME(sc->sc_dev),
+		printf("%s: %s: dying\n", sc->sc_dev.dv_xname,
 		       __func__);
 #endif
 		return (0);
@@ -1610,29 +1608,29 @@ url_ext_miibus_redreg(device_ptr_t dev, int phy, int reg)
 			break;
 	}
 	if (i == URL_TIMEOUT) {
-		printf("%s: MII read timed out\n", USBDEVNAME(sc->sc_dev));
+		printf("%s: MII read timed out\n", sc->sc_dev.dv_xname);
 	}
 
 	val = url_csr_read_2(sc, URL_PHYDAT);
 
 	DPRINTF(("%s: %s: phy=%d reg=0x%04x => 0x%04x\n",
-		 USBDEVNAME(sc->sc_dev), __func__, phy, reg, val));
+		 sc->sc_dev.dv_xname, __func__, phy, reg, val));
 
 	url_unlock_mii(sc);
 	return (val);
 }
 
-Static void
-url_ext_miibus_writereg(device_ptr_t dev, int phy, int reg, int data)
+void
+url_ext_miibus_writereg(struct device *dev, int phy, int reg, int data)
 {
-	struct url_softc *sc = USBGETSOFTC(dev);
+	struct url_softc *sc = (void *)dev;
 
 	DPRINTF(("%s: %s: enter, phy=%d reg=0x%04x data=0x%04x\n",
-		 USBDEVNAME(sc->sc_dev), __func__, phy, reg, data));
+		 sc->sc_dev.dv_xname, __func__, phy, reg, data));
 
 	if (sc->sc_dying) {
 #ifdef DIAGNOSTIC
-		printf("%s: %s: dying\n", USBDEVNAME(sc->sc_dev),
+		printf("%s: %s: dying\n", sc->sc_dev.dv_xname,
 		       __func__);
 #endif
 		return;
@@ -1651,7 +1649,7 @@ url_ext_miibus_writereg(device_ptr_t dev, int phy, int reg, int data)
 
 	if (i == URL_TIMEOUT) {
 		printf("%s: MII write timed out\n",
-		       USBDEVNAME(sc->sc_dev));
+		       sc->sc_dev.dv_xname);
 	}
 
 	url_unlock_mii(sc);

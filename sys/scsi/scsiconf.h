@@ -1,4 +1,4 @@
-/*	$OpenBSD: scsiconf.h,v 1.82 2006/12/12 02:44:36 krw Exp $	*/
+/*	$OpenBSD: scsiconf.h,v 1.87 2007/06/23 19:19:49 krw Exp $	*/
 /*	$NetBSD: scsiconf.h,v 1.35 1997/04/02 02:29:38 mycroft Exp $	*/
 
 /*
@@ -52,6 +52,7 @@
 
 #include <sys/queue.h>
 #include <sys/timeout.h>
+#include <sys/workq.h>
 #include <machine/cpu.h>
 #include <scsi/scsi_debug.h>
 
@@ -73,7 +74,7 @@
  * each individual scsi bus has an array that points to all the scsi_link
  *    structs associated with that scsi bus. Slots with no device have
  *    a NULL pointer.
- * each individual device also knows the address of it's own scsi_link
+ * each individual device also knows the address of its own scsi_link
  *    structure.
  *
  *				-------------
@@ -302,16 +303,19 @@ struct scsi_xfer {
 const void *scsi_inqmatch(struct scsi_inquiry_data *, const void *, int,
 	    int, int *);
 
+#define scsi_task(_f, _a1, _a2, _fl) \
+    workq_add_task(NULL, (_fl), (_f), (_a1), (_a2))
+
 void	scsi_init(void);
 void	scsi_deinit(void);
-int	scsi_task(void (*func)(void *, void *), void *, void *, int);
 struct scsi_xfer *
 	scsi_get_xs(struct scsi_link *, int);
 void	scsi_free_xs(struct scsi_xfer *, int);
 int	scsi_execute_xs(struct scsi_xfer *);
-u_long	scsi_size(struct scsi_link *, int, u_int32_t *);
+daddr64_t scsi_size(struct scsi_link *, int, u_int32_t *);
 int	scsi_test_unit_ready(struct scsi_link *, int, int);
 int	scsi_inquire(struct scsi_link *, struct scsi_inquiry_data *, int);
+int	scsi_inquire_vpd(struct scsi_link *, void *, u_int, u_int8_t, int);
 int	scsi_prevent(struct scsi_link *, int, int);
 int	scsi_start(struct scsi_link *, int, int);
 int	scsi_mode_sense(struct scsi_link *, int, int, struct scsi_mode_header *,

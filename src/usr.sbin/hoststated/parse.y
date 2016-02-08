@@ -1,4 +1,4 @@
-/*	$OpenBSD: parse.y,v 1.35 2007/03/07 17:40:32 reyk Exp $	*/
+/*	$OpenBSD: parse.y,v 1.50 2007/07/05 09:42:26 thib Exp $	*/
 
 /*
  * Copyright (c) 2006 Pierre-Yves Ritschard <pyr@spootnik.org>
@@ -91,6 +91,8 @@ int		 host_dns(const char *, struct addresslist *,
 int		 host(const char *, struct addresslist *,
 		    int, in_port_t, const char *);
 
+struct table	*table_inherit(const char *, in_port_t);
+
 typedef struct {
 	union {
 		u_int32_t	 number;
@@ -106,15 +108,15 @@ typedef struct {
 %token	SERVICE TABLE BACKUP HOST REAL
 %token  CHECK TCP ICMP EXTERNAL REQUEST RESPONSE
 %token  TIMEOUT CODE DIGEST PORT TAG INTERFACE
-%token	VIRTUAL INTERVAL DISABLE STICKYADDR BACKLOG
+%token	VIRTUAL INTERVAL DISABLE STICKYADDR BACKLOG PATH SCRIPT
 %token	SEND EXPECT NOTHING SSL LOADBALANCE ROUNDROBIN CIPHERS COOKIE
 %token	RELAY LISTEN ON FORWARD TO NAT LOOKUP PREFORK NO MARK MARKED
 %token	PROTO SESSION CACHE APPEND CHANGE REMOVE FROM FILTER HASH HEADER
-%token	LOG UPDATES ALL DEMOTE NODELAY SACK SOCKET BUFFER URL RETRY
+%token	LOG UPDATES ALL DEMOTE NODELAY SACK SOCKET BUFFER URL RETRY IP
 %token	ERROR
 %token	<v.string>	STRING
 %type	<v.string>	interface
-%type	<v.number>	number port http_type loglevel sslcache optssl
+%type	<v.number>	number port http_type loglevel sslcache optssl dstport
 %type	<v.number>	proto_type dstmode docheck retry log flag direction
 %type	<v.host>	host
 %type	<v.tv>		timeout
@@ -156,7 +158,7 @@ http_type	: STRING	{
 			} else if (strcmp("http", $1) == 0) {
 				$$ = 0;
 			} else {
-				yyerror("invalid check type: $1", $1);
+				yyerror("invalid check type: %s", $1);
 				free($1);
 				YYERROR;
 			}
@@ -169,7 +171,7 @@ proto_type	: TCP				{ $$ = RELAY_PROTO_TCP; }
 			if (strcmp("http", $1) == 0) {
 				$$ = RELAY_PROTO_HTTP;
 			} else {
-				yyerror("invalid protocol type: $1", $1);
+				yyerror("invalid protocol type: %s", $1);
 				free($1);
 				YYERROR;
 			}
@@ -211,11 +213,13 @@ varset		: STRING '=' STRING	{
 
 sendbuf		: NOTHING		{
 			table->sendbuf = NULL;
+			table->sendbuf_len = 0;
 		}
 		| STRING		{
 			table->sendbuf = strdup($1);
 			if (table->sendbuf == NULL)
 				fatal("out of memory");
+			table->sendbuf_len = strlen(table->sendbuf);
 			free($1);
 		}
 		;
@@ -258,8 +262,8 @@ loglevel	: UPDATES		{ $$ = HOSTSTATED_OPT_LOGUPDATE; }
 service		: SERVICE STRING	{
 			struct service *srv;
 
-			TAILQ_FOREACH(srv, &conf->services, entry)
-				if (!strcmp(srv->name, $2))
+			TAILQ_FOREACH(srv, conf->services, entry)
+				if (!strcmp(srv->conf.name, $2))
 					break;
 			if (srv != NULL) {
 				yyerror("service %s defined twice", $2);
@@ -269,13 +273,14 @@ service		: SERVICE STRING	{
 			if ((srv = calloc(1, sizeof (*srv))) == NULL)
 				fatal("out of memory");
 
-			if (strlcpy(srv->name, $2, sizeof(srv->name)) >=
-			    sizeof(srv->name)) {
+			if (strlcpy(srv->conf.name, $2,
+			    sizeof(srv->conf.name)) >=
+			    sizeof(srv->conf.name)) {
 				yyerror("service name truncated");
 				YYERROR;
 			}
 			free($2);
-			srv->id = last_service_id++;
+			srv->conf.id = last_service_id++;
 			if (last_service_id == INT_MAX) {
 				yyerror("too many services defined");
 				YYERROR;
@@ -284,28 +289,30 @@ service		: SERVICE STRING	{
 		} '{' optnl serviceopts_l '}'	{
 			if (service->table == NULL) {
 				yyerror("service %s has no table",
-				    service->name);
+				    service->conf.name);
 				YYERROR;
 			}
 			if (TAILQ_EMPTY(&service->virts)) {
 				yyerror("service %s has no virtual ip",
-				    service->name);
+				    service->conf.name);
 				YYERROR;
 			}
 			conf->servicecount++;
-			if (service->backup == NULL)
+			if (service->backup == NULL) {
+				service->conf.backup_id = 
+				    conf->empty_table.conf.id;
 				service->backup = &conf->empty_table;
-			else if (service->backup->port !=
-			    service->table->port) {
+			} else if (service->backup->conf.port !=
+			    service->table->conf.port) {
 				yyerror("service %s uses two different ports "
 				    "for its table and backup table",
-				    service->name);
+				    service->conf.name);
 				YYERROR;
 			}
 
-			if (!(service->flags & F_DISABLE))
-				service->flags |= F_ADD;
-			TAILQ_INSERT_HEAD(&conf->services, service, entry);
+			if (!(service->conf.flags & F_DISABLE))
+				service->conf.flags |= F_ADD;
+			TAILQ_INSERT_HEAD(conf->services, service, entry);
 		}
 		;
 
@@ -313,25 +320,27 @@ serviceopts_l	: serviceopts_l serviceoptsl nl
 		| serviceoptsl optnl
 		;
 
-serviceoptsl	: TABLE STRING	{
-			struct table *tb;
+serviceoptsl	: TABLE STRING dstport	{
+			struct table	*tb;
+			in_port_t	 port;
 
-			TAILQ_FOREACH(tb, &conf->tables, entry)
-				if (!strcmp(tb->name, $2))
-					break;
-			if (tb == NULL) {
-				yyerror("no such table: %s", $2);
+			port = $3;
+			if (port == 0)
+				port = service->conf.port;
+			if ((tb = table_inherit($2, port)) == NULL) {
 				free($2);
 				YYERROR;
-			} else {
-				service->table = tb;
-				service->table->serviceid = service->id;
-				service->table->flags |= F_USED;
-				free($2);
 			}
+			free($2);
+
+			service->table = tb;
+			service->conf.table_id = tb->conf.id;
+			service->table->conf.serviceid = service->conf.id;
+			service->table->conf.flags |= F_USED;
 		}
-		| BACKUP TABLE STRING	{
-			struct table *tb;
+		| BACKUP TABLE STRING dstport	{
+			struct table	*tb;
+			in_port_t	 port;
 
 			if (service->backup) {
 				yyerror("backup already specified");
@@ -339,20 +348,19 @@ serviceoptsl	: TABLE STRING	{
 				YYERROR;
 			}
 
-			TAILQ_FOREACH(tb, &conf->tables, entry)
-				if (!strcmp(tb->name, $3))
-					break;
-
-			if (tb == NULL) {
-				yyerror("no such table: %s", $3);
+			port = $4;
+			if (port == 0)
+				port = service->conf.port;
+			if ((tb = table_inherit($3, port)) == NULL) {
 				free($3);
 				YYERROR;
-			} else {
-				service->backup = tb;
-				service->backup->serviceid = service->id;
-				service->backup->flags |= (F_USED|F_BACKUP);
-				free($3);
 			}
+			free($3);
+
+			service->backup = tb;
+			service->conf.backup_id = tb->conf.id;
+			service->backup->conf.serviceid = service->conf.id;
+			service->backup->conf.flags |= (F_USED|F_BACKUP);
 		}
 		| VIRTUAL HOST STRING port interface {
 			if (host($3, &service->virts,
@@ -364,12 +372,15 @@ serviceoptsl	: TABLE STRING	{
 			}
 			free($3);
 			free($5);
+			if (service->conf.port == 0)
+				service->conf.port = $4;
 		}
-		| DISABLE			{ service->flags |= F_DISABLE; }
-		| STICKYADDR			{ service->flags |= F_STICKY; }
+		| DISABLE		{ service->conf.flags |= F_DISABLE; }
+		| STICKYADDR		{ service->conf.flags |= F_STICKY; }
 		| TAG STRING {
-			if (strlcpy(service->tag, $2, sizeof(service->tag)) >=
-			    sizeof(service->tag)) {
+			if (strlcpy(service->conf.tag, $2,
+			    sizeof(service->conf.tag)) >=
+			    sizeof(service->conf.tag)) {
 				yyerror("service tag name truncated");
 				free($2);
 				YYERROR;
@@ -381,11 +392,11 @@ serviceoptsl	: TABLE STRING	{
 table		: TABLE STRING	{
 			struct table *tb;
 
-			TAILQ_FOREACH(tb, &conf->tables, entry)
-				if (!strcmp(tb->name, $2))
+			TAILQ_FOREACH(tb, conf->tables, entry)
+				if (!strcmp(tb->conf.name, $2))
 					break;
 			if (tb != NULL) {
-				yyerror("table %s defined twice");
+				yyerror("table %s defined twice", $2);
 				free($2);
 				YYERROR;
 			}
@@ -393,13 +404,13 @@ table		: TABLE STRING	{
 			if ((tb = calloc(1, sizeof (*tb))) == NULL)
 				fatal("out of memory");
 
-			if (strlcpy(tb->name, $2, sizeof(tb->name)) >=
-			    sizeof(tb->name)) {
+			if (strlcpy(tb->conf.name, $2, sizeof(tb->conf.name)) >=
+			    sizeof(tb->conf.name)) {
 				yyerror("table name truncated");
 				YYERROR;
 			}
-			tb->id = last_table_id++;
-			bcopy(&conf->timeout, &tb->timeout,
+			tb->conf.id = last_table_id++;
+			bcopy(&conf->timeout, &tb->conf.timeout,
 			    sizeof(struct timeval));
 			if (last_table_id == INT_MAX) {
 				yyerror("too many tables defined");
@@ -408,20 +419,18 @@ table		: TABLE STRING	{
 			free($2);
 			table = tb;
 		} '{' optnl tableopts_l '}'	{
-			if (table->port == 0) {
-				yyerror("table %s has no port", table->name);
-				YYERROR;
-			}
 			if (TAILQ_EMPTY(&table->hosts)) {
-				yyerror("table %s has no hosts", table->name);
+				yyerror("table %s has no hosts",
+				    table->conf.name);
 				YYERROR;
 			}
-			if (table->check == CHECK_NOCHECK) {
-				yyerror("table %s has no check", table->name);
+			if (table->conf.check == CHECK_NOCHECK) {
+				yyerror("table %s has no check",
+				    table->conf.name);
 				YYERROR;
 			}
 			conf->tablecount++;
-			TAILQ_INSERT_HEAD(&conf->tables, table, entry);
+			TAILQ_INSERT_HEAD(conf->tables, table, entry);
 		}
 		;
 
@@ -430,52 +439,56 @@ tableopts_l	: tableopts_l tableoptsl nl
 		;
 
 tableoptsl	: host			{
-			$1->tableid = table->id;
-			$1->tablename = table->name;
+			$1->conf.tableid = table->conf.id;
+			$1->tablename = table->conf.name;
 			TAILQ_INSERT_HEAD(&table->hosts, $1, entry);
 		}
 		| TIMEOUT timeout	{
-			bcopy(&$2, &table->timeout, sizeof(struct timeval));
+			bcopy(&$2, &table->conf.timeout,
+			    sizeof(struct timeval));
 		}
 		| CHECK ICMP		{
-			table->check = CHECK_ICMP;
+			table->conf.check = CHECK_ICMP;
 		}
 		| CHECK TCP		{
-			table->check = CHECK_TCP;
+			table->conf.check = CHECK_TCP;
 		}
 		| CHECK SSL		{
-			table->check = CHECK_TCP;
+			table->conf.check = CHECK_TCP;
 			conf->flags |= F_SSL;
-			table->flags |= F_SSL;
+			table->conf.flags |= F_SSL;
 		}
 		| CHECK http_type STRING CODE number {
 			if ($2) {
 				conf->flags |= F_SSL;
-				table->flags |= F_SSL;
+				table->conf.flags |= F_SSL;
 			}
-			table->check = CHECK_HTTP_CODE;
-			table->retcode = $5;
+			table->conf.check = CHECK_HTTP_CODE;
+			table->conf.retcode = $5;
 			if (asprintf(&table->sendbuf,
 			    "HEAD %s HTTP/1.0\r\n\r\n", $3) == -1)
 				fatal("asprintf");
 			free($3);
 			if (table->sendbuf == NULL)
 				fatal("out of memory");
+			table->sendbuf_len = strlen(table->sendbuf);
 		}
 		| CHECK http_type STRING DIGEST STRING {
 			if ($2) {
 				conf->flags |= F_SSL;
-				table->flags |= F_SSL;
+				table->conf.flags |= F_SSL;
 			}
-			table->check = CHECK_HTTP_DIGEST;
+			table->conf.check = CHECK_HTTP_DIGEST;
 			if (asprintf(&table->sendbuf,
 			    "GET %s HTTP/1.0\r\n\r\n", $3) == -1)
 				fatal("asprintf");
 			free($3);
 			if (table->sendbuf == NULL)
 				fatal("out of memory");
-			if (strlcpy(table->digest, $5,
-			    sizeof(table->digest)) >= sizeof(table->digest)) {
+			table->sendbuf_len = strlen(table->sendbuf);
+			if (strlcpy(table->conf.digest, $5,
+			    sizeof(table->conf.digest)) >=
+			    sizeof(table->conf.digest)) {
 				yyerror("http digest truncated");
 				free($5);
 				YYERROR;
@@ -483,39 +496,54 @@ tableoptsl	: host			{
 			free($5);
 		}
 		| CHECK SEND sendbuf EXPECT STRING optssl {
-			table->check = CHECK_SEND_EXPECT;
+			table->conf.check = CHECK_SEND_EXPECT;
 			if ($6) {
 				conf->flags |= F_SSL;
-				table->flags |= F_SSL;
+				table->conf.flags |= F_SSL;
 			}
-			if (strlcpy(table->exbuf, $5, sizeof(table->exbuf))
-			    >= sizeof(table->exbuf)) {
+			if (strlcpy(table->conf.exbuf, $5,
+			    sizeof(table->conf.exbuf))
+			    >= sizeof(table->conf.exbuf)) {
 				yyerror("yyparse: expect buffer truncated");
 				free($5);
 				YYERROR;
 			}
 			free($5);
 		}
+		| CHECK SCRIPT STRING {
+			table->conf.check = CHECK_SCRIPT;
+			if (strlcpy(table->conf.path, $3,
+			    sizeof(table->conf.path)) >=
+			    sizeof(table->conf.path)) {
+				yyerror("script path truncated");
+				free($3);
+				YYERROR;
+			}
+			free($3);
+		}
 		| REAL port {
-			table->port = $2;
+			table->conf.port = $2;
 		}
 		| DEMOTE STRING	{
-			table->flags |= F_DEMOTE;
-			if (strlcpy(table->demote_group, $2,
-			    sizeof(table->demote_group))
-			    >= sizeof(table->demote_group)) {
+			table->conf.flags |= F_DEMOTE;
+			if (strlcpy(table->conf.demote_group, $2,
+			    sizeof(table->conf.demote_group))
+			    >= sizeof(table->conf.demote_group)) {
 				yyerror("yyparse: demote group name too long");
 				free($2);
 				YYERROR;
 			}
 			free($2);
-			if (carp_demote_init(table->demote_group, 1) == -1) {
+			if (carp_demote_init(table->conf.demote_group, 1)
+			    == -1) {
 				yyerror("yyparse: error initializing group "
-				    "'%s'", table->demote_group);
+				    "'%s'", table->conf.demote_group);
 				YYERROR;
 			}
 		}
-		| DISABLE			{ table->flags |= F_DISABLE; }
+		| DISABLE			{
+			table->conf.flags |= F_DISABLE;
+		}
 		;
 
 proto		: PROTO STRING	{
@@ -543,8 +571,9 @@ proto		: PROTO STRING	{
 			p->type = RELAY_PROTO_TCP;
 			p->tcpflags = TCPFLAG_DEFAULT;
 			p->sslflags = SSLFLAG_DEFAULT;
-			p->sslciphers = NULL;
 			p->tcpbacklog = RELAY_BACKLOG;
+			(void)strlcpy(p->sslciphers, SSLCIPHERS_DEFAULT,
+			    sizeof(p->sslciphers));
 			if (last_proto_id == INT_MAX) {
 				yyerror("too many protocols defined");
 				YYERROR;
@@ -675,6 +704,20 @@ tcpflags	: SACK 			{ proto->tcpflags |= TCPFLAG_SACK; }
 			proto->tcpflags |= TCPFLAG_BUFSIZ;
 			proto->tcpbufsiz = $3;
 		}
+		| IP STRING number	{
+			if (strcasecmp("ttl", $2) == 0) {
+				proto->tcpflags |= TCPFLAG_IPTTL;
+				proto->tcpipttl = $3;
+			} else if (strcasecmp("minttl", $2) == 0) {
+				proto->tcpflags |= TCPFLAG_IPMINTTL;
+				proto->tcpipminttl = $3;
+			} else {
+				yyerror("invalid TCP/IP flag: %s", $2);
+				free($2);
+				YYERROR;
+			}
+			free($2);
+		}
 		;
 
 sslflags_l	: sslflags comma sslflags_l
@@ -683,9 +726,13 @@ sslflags_l	: sslflags comma sslflags_l
 
 sslflags	: SESSION CACHE sslcache	{ proto->cache = $3; }
 		| CIPHERS STRING		{
-			proto->sslciphers = strdup($2);
-			if (proto->sslciphers == NULL)
-				fatal("out of memory");
+			if (strlcpy(proto->sslciphers, $2,
+			    sizeof(proto->sslciphers)) >=
+			    sizeof(proto->sslciphers)) {
+				yyerror("sslciphers truncated");
+				free($2);
+				YYERROR;
+			}
 			free($2);
 		}
 		| NO flag			{ proto->sslflags &= ~($2); }
@@ -787,6 +834,10 @@ marked		: /* empty */
 nodetype	: HEADER			{ node.type = NODE_TYPE_HEADER; }
 		| URL				{ node.type = NODE_TYPE_URL; }
 		| COOKIE			{ node.type = NODE_TYPE_COOKIE; }
+		| PATH				{
+				proto->flags |= F_LOOKUP_PATH;
+				node.type = NODE_TYPE_PATH;
+		}
 		;
 
 sslcache	: number			{ $$ = $1; }
@@ -797,7 +848,7 @@ relay		: RELAY STRING	{
 			struct relay *r;
 
 			TAILQ_FOREACH(r, &conf->relays, entry)
-				if (!strcmp(r->name, $2))
+				if (!strcmp(r->conf.name, $2))
 					break;
 			if (r != NULL) {
 				yyerror("relay %s defined twice", $2);
@@ -807,36 +858,40 @@ relay		: RELAY STRING	{
 			if ((r = calloc(1, sizeof (*r))) == NULL)
 				fatal("out of memory");
 
-			if (strlcpy(r->name, $2, sizeof(r->name)) >=
-			    sizeof(r->name)) {
+			if (strlcpy(r->conf.name, $2, sizeof(r->conf.name)) >=
+			    sizeof(r->conf.name)) {
 				yyerror("relay name truncated");
 				YYERROR;
 			}
 			free($2);
-			r->id = last_relay_id++;
-			r->timeout.tv_sec = RELAY_TIMEOUT;
+			r->conf.id = last_relay_id++;
+			r->conf.timeout.tv_sec = RELAY_TIMEOUT;
 			r->proto = NULL;
-			r->dsttable = NULL;
+			r->conf.proto = EMPTY_ID;
+			r->conf.dsttable = EMPTY_ID;
+			r->conf.dstretry = 0;
 			if (last_relay_id == INT_MAX) {
 				yyerror("too many relays defined");
 				YYERROR;
 			}
 			rlay = r;
 		} '{' optnl relayopts_l '}'	{
-			if (rlay->ss.ss_family == AF_UNSPEC) {
+			if (rlay->conf.ss.ss_family == AF_UNSPEC) {
 				yyerror("relay %s has no listener",
-				    rlay->name);
+				    rlay->conf.name);
 				YYERROR;
 			}
-			if ((rlay->flags & F_NATLOOK) == 0 &&
-			    rlay->dstss.ss_family == AF_UNSPEC &&
-			    rlay->dsttable == NULL) {
+			if ((rlay->conf.flags & F_NATLOOK) == 0 &&
+			    rlay->conf.dstss.ss_family == AF_UNSPEC &&
+			    rlay->conf.dsttable == EMPTY_ID) {
 				yyerror("relay %s has no target, service, "
-				    "or table", rlay->name);
+				    "or table", rlay->conf.name);
 				YYERROR;
 			}
-			if (rlay->proto == NULL)
+			if (rlay->conf.proto == EMPTY_ID) {
 				rlay->proto = &conf->proto_default;
+				rlay->conf.proto = conf->proto_default.id;
+			}
 			conf->relaycount++;
 			TAILQ_INIT(&rlay->sessions);
 			TAILQ_INSERT_HEAD(&conf->relays, rlay, entry);
@@ -851,9 +906,9 @@ relayoptsl	: LISTEN ON STRING port optssl {
 			struct addresslist 	 al;
 			struct address		*h;
 
-			if (rlay->ss.ss_family != AF_UNSPEC) {
+			if (rlay->conf.ss.ss_family != AF_UNSPEC) {
 				yyerror("relay %s listener already specified",
-				    rlay->name);
+				    rlay->conf.name);
 				YYERROR;
 			}
 
@@ -865,20 +920,20 @@ relayoptsl	: LISTEN ON STRING port optssl {
 			}
 			free($3);
 			h = TAILQ_FIRST(&al);
-			bcopy(&h->ss, &rlay->ss, sizeof(rlay->ss));
-			rlay->port = h->port;
+			bcopy(&h->ss, &rlay->conf.ss, sizeof(rlay->conf.ss));
+			rlay->conf.port = h->port;
 			if ($5) {
-				rlay->flags |= F_SSL;
+				rlay->conf.flags |= F_SSL;
 				conf->flags |= F_SSL;
 			}
 		}
-		| FORWARD TO STRING port {
+		| FORWARD TO STRING port retry {
 			struct addresslist 	 al;
 			struct address		*h;
 
-			if (rlay->dstss.ss_family != AF_UNSPEC) {
+			if (rlay->conf.dstss.ss_family != AF_UNSPEC) {
 				yyerror("relay %s target or service already "
-				    "specified", rlay->name);
+				    "specified", rlay->conf.name);
 				free($3);
 				YYERROR;
 			}
@@ -891,45 +946,53 @@ relayoptsl	: LISTEN ON STRING port optssl {
 			}
 			free($3);
 			h = TAILQ_FIRST(&al);
-			bcopy(&h->ss, &rlay->dstss, sizeof(rlay->dstss));
-			rlay->dstport = h->port;
+			bcopy(&h->ss, &rlay->conf.dstss,
+			    sizeof(rlay->conf.dstss));
+			rlay->conf.dstport = h->port;
+			rlay->conf.dstretry = $5;
 		}
-		| SERVICE STRING {
+		| SERVICE STRING retry {
 			struct service	*svc;
 			struct address	*h;
 
-			if (rlay->dstss.ss_family != AF_UNSPEC) {
+			if (rlay->conf.dstss.ss_family != AF_UNSPEC) {
 				yyerror("relay %s target or service already "
-				    "specified", rlay->name);
+				    "specified", rlay->conf.name);
 				free($2);
 				YYERROR;
 			}
 
 			if ((svc = service_findbyname(conf, $2)) == NULL) {
 				yyerror("relay %s for unknown service %s",
-				    rlay->name, $2);
+				    rlay->conf.name, $2);
 				free($2);
 				YYERROR;
 			}
 			free($2);
 			h = TAILQ_FIRST(&svc->virts);
-			bcopy(&h->ss, &rlay->dstss, sizeof(rlay->dstss));
-			rlay->dstport = h->port;
+			bcopy(&h->ss, &rlay->conf.dstss,
+			    sizeof(rlay->conf.dstss));
+			rlay->conf.dstport = h->port;
+			rlay->conf.dstretry = $3;
 		}
-		| TABLE STRING dstmode docheck {
-			struct table	*dsttable;
+		| TABLE STRING dstport dstmode docheck {
+			struct table	*tb;
 
-			if ((dsttable = table_findbyname(conf, $2)) == NULL) {
-				yyerror("relay %d for unknown table %s",
-				    rlay->name, $2);
+			rlay->conf.dstport = $3;
+			if (rlay->conf.dstport == 0)
+				rlay->conf.dstport = rlay->conf.port;
+
+			if ((tb = table_inherit($2, rlay->conf.dstport)) ==
+			    NULL) {
 				free($2);
 				YYERROR;
 			}
 			free($2);
-			rlay->dsttable = dsttable;
-			rlay->dstmode = $3;
-			rlay->dstcheck = $4;
-			rlay->dsttable->flags |= F_USED;
+			rlay->conf.dsttable = tb->conf.id;
+			rlay->dsttable = tb;
+			rlay->conf.dstmode = $4;
+			rlay->conf.dstcheck = $5;
+			rlay->dsttable->conf.flags |= F_USED;
 		}
 		| PROTO STRING {
 			struct protocol *p;
@@ -943,12 +1006,16 @@ relayoptsl	: LISTEN ON STRING port optssl {
 				YYERROR;
 			}
 			p->flags |= F_USED;
+			rlay->conf.proto = p->id;
 			rlay->proto = p;
 			free($2);
 		}
-		| NAT LOOKUP			{ rlay->flags |= F_NATLOOK; }
-		| TIMEOUT number		{ rlay->timeout.tv_sec = $2; }
-		| DISABLE			{ rlay->flags |= F_DISABLE; }
+		| NAT LOOKUP retry	{
+			rlay->conf.flags |= F_NATLOOK;
+			rlay->conf.dstretry = $3;
+		}
+		| TIMEOUT number	{ rlay->conf.timeout.tv_sec = $2; }
+		| DISABLE		{ rlay->conf.flags |= F_DISABLE; }
 		;
 
 dstmode		: /* empty */		{ $$ = RELAY_DSTMODE_DEFAULT; }
@@ -963,6 +1030,10 @@ docheck		: /* empty */		{ $$ = 1; }
 
 interface	: /*empty*/		{ $$ = NULL; }
 		| INTERFACE STRING	{ $$ = $2; }
+		;
+
+dstport		: /* empty */		{ $$ = 0; }
+		| port			{ $$ = $1; }
 		;
 
 host		: HOST STRING retry {
@@ -980,19 +1051,19 @@ host		: HOST STRING retry {
 				YYERROR;
 			}
 			a = TAILQ_FIRST(&al);
-			memcpy(&$$->ss, &a->ss, sizeof($$->ss));
+			memcpy(&$$->conf.ss, &a->ss, sizeof($$->conf.ss));
 			free(a);
 
-			if (strlcpy($$->name, $2, sizeof($$->name)) >=
-			    sizeof($$->name)) {
+			if (strlcpy($$->conf.name, $2, sizeof($$->conf.name)) >=
+			    sizeof($$->conf.name)) {
 				yyerror("host name truncated");
 				free($2);
 				free($$);
 				YYERROR;
 			}
 			free($2);
-			$$->id = last_host_id++;
-			$$->retry = $3;
+			$$->conf.id = last_host_id++;
+			$$->conf.retry = $3;
 			if (last_host_id == INT_MAX) {
 				yyerror("too many hosts defined");
 				free($$);
@@ -1085,6 +1156,7 @@ lookup(char *s)
 		{ "icmp",		ICMP },
 		{ "interface",		INTERFACE },
 		{ "interval",		INTERVAL },
+		{ "ip",			IP },
 		{ "listen",		LISTEN },
 		{ "loadbalance",	LOADBALANCE },
 		{ "log",		LOG },
@@ -1096,6 +1168,7 @@ lookup(char *s)
 		{ "nodelay",		NODELAY },
 		{ "nothing",		NOTHING },
 		{ "on",			ON },
+		{ "path",		PATH },
 		{ "port",		PORT },
 		{ "prefork",		PREFORK },
 		{ "protocol",		PROTO },
@@ -1107,6 +1180,7 @@ lookup(char *s)
 		{ "retry",		RETRY },
 		{ "roundrobin",		ROUNDROBIN },
 		{ "sack",		SACK },
+		{ "script",		SCRIPT },
 		{ "send",		SEND },
 		{ "service",		SERVICE },
 		{ "session",		SESSION },
@@ -1332,23 +1406,33 @@ top:
 	return (c);
 }
 
-int
-parse_config(struct hoststated *x_conf, const char *filename, int opts)
+struct hoststated *
+parse_config(const char *filename, int opts)
 {
 	struct sym	*sym, *next;
+	struct table	*nexttb;
+	struct host	*h;
 
-	conf = x_conf;
+	if ((conf = calloc(1, sizeof(*conf))) == NULL ||
+	    (conf->tables = calloc(1, sizeof(*conf->tables))) == NULL ||
+	    (conf->services = calloc(1, sizeof(*conf->services))) == NULL) {
+		warn("cannot allocate memory");
+		return (NULL);
+	}
 
-	TAILQ_INIT(&conf->services);
-	TAILQ_INIT(&conf->tables);
+	last_host_id = last_table_id = last_service_id = last_proto_id =
+	    last_relay_id = 0;
+
+	TAILQ_INIT(conf->services);
+	TAILQ_INIT(conf->tables);
 	TAILQ_INIT(&conf->protos);
 	TAILQ_INIT(&conf->relays);
 
 	memset(&conf->empty_table, 0, sizeof(conf->empty_table));
-	conf->empty_table.id = EMPTY_TABLE;
-	conf->empty_table.flags |= F_DISABLE;
-	(void)strlcpy(conf->empty_table.name, "empty",
-	    sizeof(conf->empty_table.name));
+	conf->empty_table.conf.id = EMPTY_TABLE;
+	conf->empty_table.conf.flags |= F_DISABLE;
+	(void)strlcpy(conf->empty_table.conf.name, "empty",
+	    sizeof(conf->empty_table.conf.name));
 
 	bzero(&conf->proto_default, sizeof(conf->proto_default));
 	conf->proto_default.flags = F_USED;
@@ -1367,10 +1451,12 @@ parse_config(struct hoststated *x_conf, const char *filename, int opts)
 	conf->prefork_relay = RELAY_NUMPROC;
 	conf->statinterval.tv_sec = RELAY_STATINTERVAL;
 	conf->opts = opts;
+	conf->confpath = filename;
 
 	if ((fin = fopen(filename, "r")) == NULL) {
 		warn("%s", filename);
-		return (0);
+		free(conf);
+		return (NULL);
 	}
 	infile = filename;
 	setservent(1);
@@ -1392,10 +1478,13 @@ parse_config(struct hoststated *x_conf, const char *filename, int opts)
 		}
 	}
 
-	if (TAILQ_EMPTY(&conf->services) && TAILQ_EMPTY(&conf->relays)) {
+	if (TAILQ_EMPTY(conf->services) && TAILQ_EMPTY(&conf->relays)) {
 		log_warnx("no services, nothing to do");
 		errors++;
 	}
+
+	if (TAILQ_EMPTY(&conf->relays))
+		conf->prefork_relay = 0;
 
 	if (timercmp(&conf->timeout, &conf->interval, >=)) {
 		log_warnx("global timeout exceeds interval");
@@ -1403,14 +1492,27 @@ parse_config(struct hoststated *x_conf, const char *filename, int opts)
 	}
 
 	/* Verify that every table is used */
-	TAILQ_FOREACH(table, &conf->tables, entry) {
-		if (!(table->flags & F_USED)) {
-			log_warnx("unused table: %s", table->name);
+	for (table = TAILQ_FIRST(conf->tables); table != NULL;
+	     table = nexttb) {
+		nexttb = TAILQ_NEXT(table, entry);
+		if (table->conf.port == 0) {
+			TAILQ_REMOVE(conf->tables, table, entry);
+			while ((h = TAILQ_FIRST(&table->hosts)) != NULL) {
+				TAILQ_REMOVE(&table->hosts, h, entry);
+				free(h);
+			}
+			if (table->sendbuf != NULL)
+				free(table->sendbuf);
+			free(table);
+			continue;
+		}
+		if (!(table->conf.flags & F_USED)) {
+			log_warnx("unused table: %s", table->conf.name);
 			errors++;
 		}
-		if (timercmp(&table->timeout, &conf->interval, >=)) {
+		if (timercmp(&table->conf.timeout, &conf->interval, >=)) {
 			log_warnx("table timeout exceeds interval: %s",
-			    table->name);
+			    table->conf.name);
 			errors++;
 		}
 	}
@@ -1424,11 +1526,11 @@ parse_config(struct hoststated *x_conf, const char *filename, int opts)
 	}
 
 	if (errors) {
-		bzero(&conf, sizeof (*conf));
-		return (-1);
+		free(conf);
+		return (NULL);
 	}
 
-	return (0);
+	return (conf);
 }
 
 int
@@ -1634,4 +1736,76 @@ host(const char *s, struct addresslist *al, int max,
 	}
 
 	return (host_dns(s, al, max, port, ifname));
+}
+
+struct table *
+table_inherit(const char *name, in_port_t port)
+{
+	char		pname[TABLE_NAME_SIZE + 6];
+	struct host	*h, *dsth;
+	struct table	*dsttb, *tb;
+
+	/* Get the table or table template */
+	if ((dsttb = table_findbyname(conf, name)) == NULL) {
+		yyerror("unknown table or template %s", name);
+		return (NULL);
+	}
+	if (dsttb->conf.port != 0)
+		return (dsttb);
+
+	if (port == 0) {
+		yyerror("invalid port");
+		return (NULL);
+	}
+
+	/* Check if a matching table already exists */
+	snprintf(pname, sizeof(pname), "%s:%u", name, ntohs(port));
+	if ((tb = table_findbyname(conf, pname)) != NULL) {
+		if (tb->conf.port == 0) {
+			yyerror("invalid table");
+			return (NULL);
+		}
+		return (tb);
+	}
+
+	/* Create a new table */
+	if ((tb = calloc(1, sizeof (*tb))) == NULL)
+		fatal("out of memory");
+	bcopy(dsttb, tb, sizeof(*tb));
+	if (strlcpy(tb->conf.name, pname, sizeof(tb->conf.name))
+	    >= sizeof(tb->conf.name)) {
+		yyerror("table name truncated");
+		return (NULL);
+	}
+	if (dsttb->sendbuf != NULL &&
+	    (tb->sendbuf = strdup(dsttb->sendbuf)) == NULL)
+		fatal("out of memory");
+	tb->conf.port = port;
+	tb->conf.id = last_table_id++;
+	if (last_table_id == INT_MAX) {
+		yyerror("too many tables defined");
+		return (NULL);
+	}
+
+	/* Copy the associated hosts */
+	bzero(&tb->hosts, sizeof(tb->hosts));
+	TAILQ_FOREACH(dsth, &dsttb->hosts, entry) {
+		if ((h = (struct host *)
+		    calloc(1, sizeof (*h))) == NULL)
+			fatal("out of memory");
+		bcopy(dsth, h, sizeof(*h));
+		h->conf.id = last_host_id++;
+		if (last_host_id == INT_MAX) {
+			yyerror("too many hosts defined");
+			return (NULL);
+		}
+		h->conf.tableid = tb->conf.id;
+		h->tablename = tb->conf.name;
+		TAILQ_INSERT_HEAD(&tb->hosts, h, entry);
+	}
+
+	conf->tablecount++;
+	TAILQ_INSERT_HEAD(conf->tables, tb, entry);
+
+	return (tb);
 }

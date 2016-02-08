@@ -1,4 +1,4 @@
-/*	$OpenBSD: encrypt.c,v 1.25 2007/03/06 11:16:55 jmc Exp $	*/
+/*	$OpenBSD: encrypt.c,v 1.28 2007/07/14 21:26:38 krw Exp $	*/
 
 /*
  * Copyright (c) 1996, Jason Downs.  All rights reserved.
@@ -35,6 +35,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <login_cap.h>
+#include <limits.h>
 
 /*
  * Very simple little program, for encrypting passwords from the command
@@ -50,7 +51,6 @@ extern char *__progname;
 char buffer[_PASSWORD_LEN];
 
 void	usage(void);
-char	*trim(char *);
 void	print_passwd(char *, int, void *);
 
 void
@@ -61,26 +61,6 @@ usage(void)
 	    "usage: %s [-km] [-b rounds] [-c class] [-p | string] [-s salt]\n",
 	    __progname);
 	exit(1);
-}
-
-char *
-trim(char *line)
-{
-	char *ptr;
-
-	if (line[0] == '\0')
-		return (line);
-
-	for (ptr = &line[strlen(line)-1]; ptr > line; ptr--) {
-		if (!isspace(*ptr))
-			break;
-	}
-	ptr[1] = '\0';
-
-	for (ptr = line; *ptr && isspace(*ptr); ptr++)
-		;
-
-	return(ptr);
 }
 
 void
@@ -144,6 +124,7 @@ main(int argc, char **argv)
 	int prompt = 0;
 	int rounds;
 	void *extra = NULL;		/* Store salt or number of rounds */
+	const char *errstr;
 
 	if (strcmp(__progname, "makekey") == 0)
 		operation = DO_MAKEKEY;
@@ -179,7 +160,9 @@ main(int argc, char **argv)
 			if (operation != -1)
 				usage();
 			operation = DO_BLF;
-			rounds = atoi(optarg);
+			rounds = strtonum(optarg, 1, INT_MAX, &errstr);
+			if (errstr != NULL)
+				errx(1, "%s: %s", errstr, optarg);
 			extra = &rounds;
 			break;
 
@@ -202,15 +185,17 @@ main(int argc, char **argv)
 			print_passwd(string, operation, extra);
 			(void)fputc('\n', stdout);
 		} else {
+			size_t len;
 			/* Encrypt stdin to stdout. */
 			while (!feof(stdin) &&
 			    (fgets(line, sizeof(line), stdin) != NULL)) {
-				/* Kill the whitesapce. */
-				string = trim(line);
-				if (*string == '\0')
+			    	len = strlen(line);
+				if (len == 0 || line[0] == '\n')
 					continue;
-				
-				print_passwd(string, operation, extra);
+				if (line[len - 1] == '\n')
+                     			line[len - 1] = '\0';
+
+				print_passwd(line, operation, extra);
 
 				if (operation == DO_MAKEKEY) {
 					fflush(stdout);

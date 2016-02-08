@@ -1,4 +1,4 @@
-/*	$OpenBSD: xinstall.c,v 1.43 2006/01/10 00:30:08 millert Exp $	*/
+/*	$OpenBSD: xinstall.c,v 1.46 2007/08/06 19:16:06 sobrado Exp $	*/
 /*	$NetBSD: xinstall.c,v 1.9 1995/12/20 10:25:17 jonathan Exp $	*/
 
 /*
@@ -40,7 +40,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)xinstall.c	8.1 (Berkeley) 7/21/93";
 #endif
-static char rcsid[] = "$OpenBSD: xinstall.c,v 1.43 2006/01/10 00:30:08 millert Exp $";
+static char rcsid[] = "$OpenBSD: xinstall.c,v 1.46 2007/08/06 19:16:06 sobrado Exp $";
 #endif /* not lint */
 
 #include <sys/param.h>
@@ -553,7 +553,7 @@ strip(char *to_name)
 		(void)unlink(to_name);
 		errx(EX_TEMPFAIL, "forks: %s", strerror(serrno));
 	case 0:
-		execl(path_strip, "strip", to_name, (char *)NULL);
+		execl(path_strip, "strip", "--", to_name, (char *)NULL);
 		warn("%s", path_strip);
 		_exit(EX_OSERR);
 	default:
@@ -601,7 +601,7 @@ void
 usage(void)
 {
 	(void)fprintf(stderr, "\
-usage: install [-bCcdpSs] [-B suffix] [-f flags] [-g group] [-m mode] [-o owner]\n	       source [...] target [...]\n");
+usage: install [-bCcdpSs] [-B suffix] [-f flags] [-g group] [-m mode] [-o owner]\n	       source ... target ...\n");
 	exit(EX_USAGE);
 	/* NOTREACHED */
 }
@@ -673,11 +673,11 @@ create_newfile(char *path, struct stat *sbp)
  *	uses lseek whenever it detects the input data is all 0 within that
  *	file block. In more detail, the strategy is as follows:
  *	While the input is all zero keep doing an lseek. Keep track of when we
- *	pass over file block boundries. Only write when we hit a non zero
+ *	pass over file block boundaries. Only write when we hit a non zero
  *	input. once we have written a file block, we continue to write it to
  *	the end (we stop looking at the input). When we reach the start of the
  *	next file block, start checking for zero blocks again. Working on file
- *	block boundries significantly reduces the overhead when copying files
+ *	block boundaries significantly reduces the overhead when copying files
  *	that are NOT very sparse. This overhead (when compared to a write) is
  *	almost below the measurement resolution on many systems. Without it,
  *	files with holes cannot be safely copied. It does has a side effect as

@@ -1,4 +1,4 @@
-/*	$OpenBSD: misc.c,v 1.30 2006/03/12 00:26:58 deraadt Exp $	*/
+/*	$OpenBSD: misc.c,v 1.32 2007/08/02 11:05:54 fgsch Exp $	*/
 
 /*
  * Miscellaneous functions

@@ -1,4 +1,4 @@
-/*	$OpenBSD: umass_quirks.c,v 1.24 2006/12/09 21:22:30 pedro Exp $	*/
+/*	$OpenBSD: umass_quirks.c,v 1.29 2007/06/13 10:33:52 mbalmer Exp $	*/
 /*	$NetBSD: umass_quirks.c,v 1.67 2004/06/28 07:49:16 mycroft Exp $	*/
 
 /*
@@ -42,13 +42,8 @@
 #include <sys/device.h>
 #include <sys/buf.h>
 
-#if defined(__NetBSD__)
-#include <dev/scsipi/scsipi_all.h> /* for scsiconf.h below */
-#include <dev/scsipi/scsiconf.h> /* for quirks defines */
-#elif defined(__OpenBSD__)
 #include <scsi/scsi_all.h>
 #include <scsi/scsiconf.h>
-#endif
 
 #include <dev/usb/usb.h>
 #include <dev/usb/usbdi.h>
@@ -57,13 +52,13 @@
 #include <dev/usb/umassvar.h>
 #include <dev/usb/umass_quirks.h>
 
-Static usbd_status umass_init_insystem(struct umass_softc *);
-Static usbd_status umass_init_shuttle(struct umass_softc *);
+usbd_status umass_init_insystem(struct umass_softc *);
+usbd_status umass_init_shuttle(struct umass_softc *);
 
-Static void umass_fixup_sony(struct umass_softc *);
-Static void umass_fixup_yedata(struct umass_softc *);
+void umass_fixup_sony(struct umass_softc *);
+void umass_fixup_yedata(struct umass_softc *);
 
-Static const struct umass_quirk umass_quirks[] = {
+const struct umass_quirk umass_quirks[] = {
 	{ { USB_VENDOR_ATI, USB_PRODUCT_ATI2_205 },
 	  UMASS_WPROTO_BBB, UMASS_CPROTO_ISD_ATA,
 	  0,
@@ -91,7 +86,7 @@ Static const struct umass_quirk umass_quirks[] = {
 	{ { USB_VENDOR_FUJIPHOTO, USB_PRODUCT_FUJIPHOTO_MASS0100 },
 	  UMASS_WPROTO_UNSPEC, UMASS_CPROTO_UNSPEC,
 	  0,
-	  PQUIRK_NOSENSE,
+	  ADEV_NOSENSE,
 	  UMATCH_DEVCLASS_DEVSUBCLASS_DEVPROTO,
 	  NULL, NULL
 	},
@@ -107,7 +102,7 @@ Static const struct umass_quirk umass_quirks[] = {
 	{ { USB_VENDOR_HP, USB_PRODUCT_HP_CDWRITERPLUS },
 	  UMASS_WPROTO_CBI, UMASS_CPROTO_ATAPI,
 	  0,
-	  PQUIRK_NOSENSE,
+	  ADEV_NOSENSE,
 	  UMATCH_VENDOR_PRODUCT,
 	  NULL, NULL
 	},
@@ -193,7 +188,7 @@ Static const struct umass_quirk umass_quirks[] = {
 	{ { USB_VENDOR_IRIVER, USB_PRODUCT_IRIVER_IFP_1XX },
 	  UMASS_WPROTO_UNSPEC, UMASS_CPROTO_UNSPEC,
 	  0,
-	  PQUIRK_ONLYBIG,
+	  SDEV_ONLYBIG,
 	  UMATCH_VENDOR_PRODUCT,
 	  NULL, NULL
 	},
@@ -289,7 +284,7 @@ Static const struct umass_quirk umass_quirks[] = {
 	{ { USB_VENDOR_OLYMPUS, USB_PRODUCT_OLYMPUS_C700 },
 	  UMASS_WPROTO_UNSPEC, UMASS_CPROTO_UNSPEC,
 	  0,
-	  PQUIRK_ONLYBIG | SDEV_NOSYNCCACHE,
+	  SDEV_ONLYBIG | SDEV_NOSYNCCACHE,
 	  UMATCH_DEVCLASS_DEVSUBCLASS_DEVPROTO,
 	  NULL, NULL
 	},
@@ -369,7 +364,7 @@ Static const struct umass_quirk umass_quirks[] = {
 	{ { USB_VENDOR_SHUTTLE, USB_PRODUCT_SHUTTLE_EUSB },
 	  UMASS_WPROTO_CBI_I, UMASS_CPROTO_ATAPI,
 	  0,
-	  PQUIRK_NOSENSE,
+	  ADEV_NOSENSE,
 	  UMATCH_VENDOR_PRODUCT,
 	  umass_init_shuttle, NULL
 	},
@@ -478,7 +473,7 @@ umass_lookup(u_int16_t vendor, u_int16_t product)
 		usb_lookup(umass_quirks, vendor, product));
 }
 
-Static usbd_status
+usbd_status
 umass_init_insystem(struct umass_softc *sc)
 {
 	usbd_status err;
@@ -487,14 +482,14 @@ umass_init_insystem(struct umass_softc *sc)
 	if (err) {
 		DPRINTF(UDMASS_USB,
 			("%s: could not switch to Alt Interface 1\n",
-			USBDEVNAME(sc->sc_dev)));
+			sc->sc_dev.dv_xname));
 		return (err);
 	}
 
 	return (USBD_NORMAL_COMPLETION);
 }
 
-Static usbd_status
+usbd_status
 umass_init_shuttle(struct umass_softc *sc)
 {
 	usb_device_request_t req;
@@ -510,7 +505,7 @@ umass_init_shuttle(struct umass_softc *sc)
 	return (usbd_do_request(sc->sc_udev, &req, &status));
 }
 
-Static void
+void
 umass_fixup_sony(struct umass_softc *sc)
 {
 	usb_interface_descriptor_t *id;
@@ -524,6 +519,7 @@ umass_fixup_sony(struct umass_softc *sc)
 		 * revision number is used to distinguish between them.
 		 */
 		switch (UGETW(dd->bcdDevice)) {
+		case 0x611: /* Sony DSC-T10, rev 6.11 */
 		case 0x600: /* Sony DSC-W50, rev 6.00 */
 		case 0x500: /* Sony DSC-P41, rev 5.00 */
 			sc->sc_cmd = UMASS_CPROTO_UFI;
@@ -534,7 +530,7 @@ umass_fixup_sony(struct umass_softc *sc)
 	}
 }
 
-Static void
+void
 umass_fixup_yedata(struct umass_softc *sc)
 {
 	usb_device_descriptor_t *dd;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: tlbhandler.S,v 1.13 2006/03/04 19:33:21 miod Exp $ */
+/*	$OpenBSD: tlbhandler.S,v 1.16 2007/05/25 20:58:39 miod Exp $ */
 
 /*
  * Copyright (c) 1995-2004 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -38,6 +38,8 @@
 #include <machine/regnum.h>
 #include <machine/cpustate.h>
 
+#define	HAIRY_R5000_ERRATA
+
 #include "assym.h"
 
 	.set	mips3
@@ -55,45 +57,30 @@
 /*****************************  Start of code copied to exception vector */
 	.globl	tlb_miss	/* 0xffffffff80000000 */
 	.set	noat
+	.ent	tlb_miss, 0
 tlb_miss:
-#ifdef TLB_TRACE
-	dmfc0	k0, COP_0_EXC_PC
-	PTR_L	k1, tlbtrcptr
-	PTR_S	k0, 0(k1)
-	dmfc0	k0, COP_0_BAD_VADDR
-	PTR_S	zero, 2*REGSZ(k1)
-	PTR_S	zero, 3*REGSZ(k1)
-	bltz	k0, 1f			# kernel address
-	PTR_S	k0, REGSZ(k1)
-
-	PTR_L	k1, curprocpaddr
-	PTR_L	k1, PCB_SEGTAB(k1)
-	PTR_SRL	k0, k0, SEGSHIFT - LOGREGSZ
-	andi	k0, k0, (PMAP_SEGTABSIZE - 1) << LOGREGSZ
-	PTR_ADDU k1, k1, k0
-	PTR_L	k0, 0(k1)		# get pointer to page table
-	PTR_L	k1, tlbtrcptr
-	PTR_S	k0, 2*REGSZ(k1)
-	beqz	k0, 1f
-	dmfc0	k1, COP_0_BAD_VADDR
-
-	PTR_SRL	k1, k1, PGSHIFT - 2
-	andi	k1, k1, ((NPTEPG/2) - 1) << 3
-	PTR_ADDU k1, k1, k0		# index into segment map
-	lwu	k0, 0(k1)		# get page PTE
-	dsll	k0, k0, 32
-	lwu	k1, 4(k1)
-	or	k0, k1
-	PTR_L	k1, tlbtrcptr
-	PTR_S	k0, 3*REGSZ(k1)
+#ifdef HAIRY_R5000_ERRATA
+	/*
+	 * R5000 errata: edge cases can trigger a TLB miss exception
+	 * instead of an invalid TLB exception. Servicing the TLB miss
+	 * exception would cause a duplicate TLB to be inserted, which
+	 * causes the processor operation to become unpredictable (but
+	 * very bad for the kernel's health, ten times out of nine).
+	 *
+	 * More details about the problem can be found in:
+	 *  http://www.linux-mips.org/archives/linux-mips/2000-02/msg00040.html
+	 *
+	 * We work around the issue by checking for an existing TLB entry,
+	 * and handling this as an invalid TLB exception (as it was intended
+	 * to be), in this case.
+	 */
+	tlbp
+	mfc0	k1, COP_0_TLB_INDEX
+	bltz	k1, 1f			# missing!
+	 nop
+	j	k_tlb_inv
+	 nop
 1:
-	PTR_L	k1, tlbtrcptr
-	PTR_ADDU k1, 4*REGSZ
-	LI	k0, 0x100
-	nor	k0, zero, k0
-	and	k1, k0
-	LA	k0, tlbtrcptr
-	PTR_S	k1, 0(k0)
 #endif
 	PTR_L	k1, curprocpaddr
 	dmfc0	k0, COP_0_BAD_VADDR
@@ -127,6 +114,7 @@ tlb_load:
 	nop
 	nop
 	eret				# RM7000 need 4 for JTLB usage.
+	.end	tlb_miss
 
 	.globl	e_tlb_miss
 e_tlb_miss:
@@ -136,7 +124,18 @@ e_tlb_miss:
  */
 	.globl	xtlb_miss	/* 0xffffffff80000080 */
 	.set	noat
+	.ent	xtlb_miss, 0
 xtlb_miss:
+#ifdef HAIRY_R5000_ERRATA
+	/* See errata comments in tlb_miss above */
+	tlbp
+	mfc0	k1, COP_0_TLB_INDEX
+	bltz	k1, 1f			# missing!
+	 nop
+	j	k_tlb_inv
+	 nop
+1:
+#endif
 	dmfc0	k0, COP_0_BAD_VADDR
 	bltz	k0, _k_miss		# kernel address space
 	PTR_SRL	k0, k0, SEGSHIFT
@@ -162,12 +161,15 @@ _inv_seg:
 _k_miss:
 	j	k_tlb_miss		# kernel tlbmiss.
 	dmfc0	k0, COP_0_BAD_VADDR	# must reload.
+	.end	xtlb_miss
 
 	.globl	e_xtlb_miss
 e_xtlb_miss:
 	.set	at
 /*****************************  End of code copied to exception vector */
 
+	.globl	tlb_miss_nopt
+	.ent	tlb_miss_nopt, 0
 tlb_miss_nopt:
 	.set	noat
 	mfc0	k0, COP_0_STATUS_REG
@@ -176,27 +178,32 @@ tlb_miss_nopt:
 	nop
 	j	k_general
 	nop
+	.end	tlb_miss_nopt
 	.set	at
 
 /*
  * Trampolines copied to exception vectors when code is too big.
  */
 	.globl	tlb_miss_tramp
+	.ent	tlb_miss_tramp, 0
 tlb_miss_tramp:
 	.set	noat
 	LA	k0, tlb_miss
 	jr	k0
 	nop
+	.end	tlb_miss_tramp
 	.set	at
 	.globl	e_tlb_miss_tramp
 e_tlb_miss_tramp:
 
 	.globl	xtlb_miss_tramp
+	.ent	xtlb_miss_tramp, 0
 xtlb_miss_tramp:
 	.set	noat
 	LA	k0, xtlb_miss
 	jr	k0
 	nop
+	.end	xtlb_miss_tramp
 	.set	at
 	.globl	e_xtlb_miss_tramp
 e_xtlb_miss_tramp:

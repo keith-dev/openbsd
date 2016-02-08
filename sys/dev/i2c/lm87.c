@@ -1,4 +1,4 @@
-/*	$OpenBSD: lm87.c,v 1.17 2006/12/23 17:46:39 deraadt Exp $	*/
+/*	$OpenBSD: lm87.c,v 1.19 2007/06/24 05:34:35 dlg Exp $	*/
 
 /*
  * Copyright (c) 2005 Mark Kettenis
@@ -61,8 +61,8 @@ struct lmenv_softc {
 	i2c_tag_t sc_tag;
 	i2c_addr_t sc_addr;
 
-	struct sensor sc_sensor[LMENV_NUM_SENSORS];
-	struct sensordev sc_sensordev;
+	struct ksensor sc_sensor[LMENV_NUM_SENSORS];
+	struct ksensordev sc_sensordev;
 	int	sc_fan1_div, sc_fan2_div;
 	int	sc_family;
 };
@@ -223,7 +223,7 @@ lmenv_attach(struct device *parent, struct device *self, void *aux)
 		sc->sc_sensor[LMENV_FAN2].type = SENSOR_FANRPM;
 	}
 
-	if (sensor_task_register(sc, lmenv_refresh, 5)) {
+	if (sensor_task_register(sc, lmenv_refresh, 5) == NULL) {
 		printf(", unable to register update task\n");
 		return;
 	}

@@ -1,4 +1,4 @@
-/*	$OpenBSD: hoststated.h,v 1.36 2007/03/05 11:44:50 reyk Exp $	*/
+/*	$OpenBSD: hoststated.h,v 1.53 2007/06/18 17:29:38 pyr Exp $	*/
 
 /*
  * Copyright (c) 2006, 2007 Pierre-Yves Ritschard <pyr@spootnik.org>
@@ -48,6 +48,12 @@
 #define READ_BUF_SIZE		65535
 #define ICMP_BUF_SIZE		64
 
+#define PURGE_TABLES		0x01
+#define PURGE_SERVICES		0x02
+#define PURGE_RELAYS		0x04
+#define PURGE_PROTOS		0x08
+#define PURGE_EVERYTHING	0xff
+
 /* buffer */
 struct buf {
 	TAILQ_ENTRY(buf)	 entry;
@@ -56,6 +62,7 @@ struct buf {
 	size_t			 max;
 	size_t			 wpos;
 	size_t			 rpos;
+	int			 fd;
 };
 
 struct msgbuf {
@@ -71,6 +78,11 @@ struct buf_read {
 	u_char			 buf[READ_BUF_SIZE];
 	u_char			*rptr;
 	size_t			 wpos;
+};
+
+struct imsg_fd {
+	TAILQ_ENTRY(imsg_fd)	entry;
+	int			fd;
 };
 
 struct imsgbuf {
@@ -117,7 +129,21 @@ enum imsg_type {
 	IMSG_SYNC,
 	IMSG_NATLOOK,
 	IMSG_DEMOTE,
-	IMSG_STATISTICS
+	IMSG_STATISTICS,
+	IMSG_RECONF,		/* reconfiguration notifies */
+	IMSG_RECONF_TABLE,
+	IMSG_RECONF_SENDBUF,
+	IMSG_RECONF_HOST,
+	IMSG_RECONF_SERVICE,
+	IMSG_RECONF_VIRT,
+	IMSG_RECONF_PROTO,
+	IMSG_RECONF_REQUEST_TREE,
+	IMSG_RECONF_RESPONSE_TREE,
+	IMSG_RECONF_PNODE_KEY,
+	IMSG_RECONF_PNODE_VAL,
+	IMSG_RECONF_RELAY,
+	IMSG_RECONF_END,
+	IMSG_SCRIPT
 };
 
 struct imsg_hdr {
@@ -144,6 +170,11 @@ struct ctl_status {
 struct ctl_id {
 	objid_t		 id;
 	char		 name[MAX_NAME_SIZE];
+};
+
+struct ctl_script {
+	objid_t		 host;
+	int		 retval;
 };
 
 struct ctl_demote {
@@ -203,6 +234,10 @@ struct ctl_relay_event {
 	u_int8_t		*nodes;
 	struct proto_tree	*tree;
 
+	char			*path;
+	char			*args;
+	char			*version;
+
 	int			 marked;
 	int			 line;
 	size_t			 toread;
@@ -218,6 +253,8 @@ struct ctl_relay_event {
 
 struct ctl_natlook {
 	objid_t			 id;
+	int			 proc;
+
 	struct sockaddr_storage	 src;
 	struct sockaddr_storage	 dst;
 	struct sockaddr_storage	 rsrc;
@@ -225,19 +262,17 @@ struct ctl_natlook {
 	in_port_t		 rsport;
 	in_port_t		 rdport;
 	int			 in;
-	int			 proc;
 };
 
 struct ctl_stats {
 	objid_t			 id;
 	int			 proc;
+
 	u_int			 interval;
 	u_long			 cnt;
 	u_long			 tick;
-
 	u_long			 avg;
 	u_long			 last;
-
 	u_long			 avg_hour;
 	u_long			 last_hour;
 	u_long			 avg_day;
@@ -252,37 +287,42 @@ struct address {
 };
 TAILQ_HEAD(addresslist, address);
 
-#define F_DISABLE		0x0001
-#define F_BACKUP		0x0002
-#define F_USED			0x0004
-#define F_DOWN			0x0008
-#define F_ADD			0x0010
-#define F_DEL			0x0020
-#define F_CHANGED		0x0040
-#define F_STICKY		0x0080
-#define F_CHECK_DONE		0x0100
-#define F_ACTIVE_RULESET	0x0200
-#define F_CHECK_SENT		0x0400
-#define F_SSL			0x0800
-#define F_NATLOOK		0x1000
-#define F_DEMOTE		0x2000
+#define F_DISABLE		0x00000001
+#define F_BACKUP		0x00000002
+#define F_USED			0x00000004
+#define F_DOWN			0x00000008
+#define F_ADD			0x00000010
+#define F_DEL			0x00000020
+#define F_CHANGED		0x00000040
+#define F_STICKY		0x00000080
+#define F_CHECK_DONE		0x00000100
+#define F_ACTIVE_RULESET	0x00000200
+#define F_CHECK_SENT		0x00000400
+#define F_SSL			0x00000800
+#define F_NATLOOK		0x00001000
+#define F_DEMOTE		0x00002000
+#define F_LOOKUP_PATH		0x00004000
+#define F_DEMOTED		0x00008000
 
-struct host {
-	u_int16_t		 flags;
+struct host_config {
 	objid_t			 id;
 	objid_t			 tableid;
-	char			*tablename;
+	int			 retry;
 	char			 name[MAXHOSTNAMELEN];
+	struct sockaddr_storage	 ss;
+};
+
+struct host {
+	TAILQ_ENTRY(host)	 entry;
+	struct host_config	 conf;
+	u_int32_t		 flags;
+	char			*tablename;
 	int			 up;
 	int			 last_up;
 	u_long			 check_cnt;
 	u_long			 up_cnt;
 	int			 retry_cnt;
-	int			 retry;
-
-	struct sockaddr_storage	 ss;
 	struct ctl_tcp_event	 cte;
-	TAILQ_ENTRY(host)	 entry;
 };
 TAILQ_HEAD(hostlist, host);
 
@@ -293,25 +333,29 @@ enum host_status {
 };
 #define HOST_ISUP(x)	(x == HOST_UP)
 
-struct table {
+struct table_config {
 	objid_t			 id;
 	objid_t			 serviceid;
-	u_int16_t		 flags;
+	u_int32_t		 flags;
 	int			 check;
-	int			 up;
-	int			 demoted;
 	char			 demote_group[IFNAMSIZ];
+	struct timeval		 timeout;
 	in_port_t		 port;
 	int			 retcode;
-	struct timeval		 timeout;
 	char			 name[TABLE_NAME_SIZE];
 	char			 path[MAXPATHLEN];
-	char			*sendbuf;
 	char			 exbuf[64];
 	char			 digest[41]; /* length of sha1 digest * 2 */
-	SSL_CTX			*ssl_ctx;
-	struct hostlist		 hosts;
+};
+
+struct table {
 	TAILQ_ENTRY(table)	 entry;
+	struct table_config	 conf;
+	int			 up;
+	struct hostlist		 hosts;
+	SSL_CTX			*ssl_ctx;
+	int			 sendbuf_len;
+	char			*sendbuf;
 };
 TAILQ_HEAD(tablelist, table);
 
@@ -321,19 +365,26 @@ enum table_check {
 	CHECK_TCP		= 2,
 	CHECK_HTTP_CODE		= 3,
 	CHECK_HTTP_DIGEST	= 4,
-	CHECK_SEND_EXPECT	= 5
+	CHECK_SEND_EXPECT	= 5,
+	CHECK_SCRIPT		= 6
+};
+
+struct service_config {
+	objid_t			 id;
+	u_int32_t		 flags;
+	in_port_t		 port;
+	objid_t			 table_id;
+	objid_t			 backup_id;
+	char			 name[SRV_NAME_SIZE];
+	char			 tag[TAG_NAME_SIZE];
 };
 
 struct service {
-	objid_t			 id;
-	u_int16_t		 flags;
-	in_port_t		 port;
-	char			 name[SRV_NAME_SIZE];
-	char			 tag[TAG_NAME_SIZE];
+	TAILQ_ENTRY(service)	 entry;
+	struct service_config	 conf;
 	struct addresslist	 virts;
 	struct table		*table;
 	struct table		*backup; /* use this if no host up */
-	TAILQ_ENTRY(service)	 entry;
 };
 TAILQ_HEAD(servicelist, service);
 
@@ -369,7 +420,8 @@ enum nodeaction {
 enum nodetype {
 	NODE_TYPE_HEADER	= 0,
 	NODE_TYPE_URL		= 1,
-	NODE_TYPE_COOKIE	= 2
+	NODE_TYPE_COOKIE	= 2,
+	NODE_TYPE_PATH		= 3
 };
 
 #define PNFLAG_MACRO		0x01
@@ -406,6 +458,8 @@ enum prototype {
 #define TCPFLAG_SACK		0x04
 #define TCPFLAG_NSACK		0x08
 #define TCPFLAG_BUFSIZ		0x10
+#define TCPFLAG_IPTTL		0x20
+#define TCPFLAG_IPMINTTL	0x40
 #define TCPFLAG_DEFAULT		0x00
 
 #define SSLFLAG_SSLV2		0x01
@@ -418,12 +472,14 @@ enum prototype {
 
 struct protocol {
 	objid_t			 id;
-	u_int16_t		 flags;
+	u_int32_t		 flags;
 	u_int8_t		 tcpflags;
 	int			 tcpbufsiz;
 	int			 tcpbacklog;
+	u_int8_t		 tcpipttl;
+	u_int8_t		 tcpipminttl;
 	u_int8_t		 sslflags;
-	char			*sslciphers;
+	char			 sslciphers[32];
 	char			 name[MAX_NAME_SIZE];
 	int			 cache;
 	enum prototype		 type;
@@ -437,37 +493,44 @@ struct protocol {
 };
 TAILQ_HEAD(protolist, protocol);
 
-struct relay {
+struct relay_config {
 	objid_t			 id;
-	u_int16_t		 flags;
+	u_int32_t		 flags;
+	objid_t			 proto;
+	char			 name[MAXHOSTNAMELEN];
+	in_port_t		 port;
+	in_port_t		 dstport;
+	int			 dstmode;
+	int			 dstcheck;
+	int			 dstretry;
+	objid_t			 dsttable;
+	struct sockaddr_storage	 ss;
+	struct sockaddr_storage	 dstss;
+	struct timeval		 timeout;
+};
+
+struct relay {
+	TAILQ_ENTRY(relay)	 entry;
+	struct relay_config	 conf;
 	int			 up;
 	struct protocol		*proto;
-	char			 name[MAXHOSTNAMELEN];
 	int			 s;
-	in_port_t		 port;
-	struct sockaddr_storage	 ss;
 	struct bufferevent	*bev;
 
 	int			 dsts;
-	in_port_t		 dstport;
-	struct sockaddr_storage	 dstss;
 	struct bufferevent	*dstbev;
 
 	struct table		*dsttable;
 	u_int32_t		 dstkey;
 	struct host		*dsthost[RELAY_MAXHOSTS];
 	int			 dstnhosts;
-	int			 dstmode;
-	int			 dstcheck;
 
 	struct event		 ev;
-	struct timeval		 timeout;
 	SSL_CTX			*ctx;
 
 	struct ctl_stats	 stats[RELAY_MAXPROC + 1];
 
 	struct sessionlist	 sessions;
-	TAILQ_ENTRY(relay)	 entry;
 };
 TAILQ_HEAD(relaylist, relay);
 
@@ -487,7 +550,8 @@ enum {
 
 struct hoststated {
 	u_int8_t		 opts;
-	u_int16_t		 flags;
+	u_int32_t		 flags;
+	const char		*confpath;
 	struct pfdata		*pf;
 	int			 tablecount;
 	int			 servicecount;
@@ -498,8 +562,8 @@ struct hoststated {
 	struct table		 empty_table;
 	struct protocol		 proto_default;
 	struct event		 ev;
-	struct tablelist	 tables;
-	struct servicelist	 services;
+	struct tablelist	*tables;
+	struct servicelist	*services;
 	struct protolist	 protos;
 	struct relaylist	 relays;
 	u_int16_t		 prefork_relay;
@@ -545,7 +609,7 @@ TAILQ_HEAD(ctl_connlist, ctl_conn);
 
 /* control.c */
 int	control_init(void);
-int	control_listen(void);
+int	control_listen(struct hoststated *, struct imsgbuf *);
 void    control_accept(int, short, void *);
 void    control_dispatch_imsg(int, short, void *);
 void	control_imsg_forward(struct imsg *);
@@ -556,8 +620,8 @@ void    session_socket_blockmode(int, enum blockmodes);
 extern  struct ctl_connlist ctl_conns;
 
 /* parse.y */
-int	parse_config(struct hoststated *, const char *, int);
-int	cmdline_symset(char *);
+struct hoststated	*parse_config(const char *, int);
+int			 cmdline_symset(char *);
 
 /* log.c */
 void	log_init(int);
@@ -587,17 +651,18 @@ void	 imsg_init(struct imsgbuf *, int, void (*)(int, short, void *));
 ssize_t	 imsg_read(struct imsgbuf *);
 ssize_t	 imsg_get(struct imsgbuf *, struct imsg *);
 int	 imsg_compose(struct imsgbuf *, enum imsg_type, u_int32_t, pid_t,
-	    void *, u_int16_t);
+	    int, void *, u_int16_t);
 struct buf *imsg_create(struct imsgbuf *, enum imsg_type, u_int32_t, pid_t,
 	    u_int16_t);
 int	 imsg_add(struct buf *, void *, u_int16_t);
 int	 imsg_close(struct imsgbuf *, struct buf *);
 void	 imsg_free(struct imsg *);
 void	 imsg_event_add(struct imsgbuf *); /* needs to be provided externally */
+int	 imsg_get_fd(struct imsgbuf *);
 
 /* pfe.c */
-pid_t	 pfe(struct hoststated *, int [2], int [2], int [2], int [2],
-	    int [RELAY_MAXPROC][2]);
+pid_t	 pfe(struct hoststated *, int [2], int [2], int [RELAY_MAXPROC][2],
+	    int [2], int [RELAY_MAXPROC][2]);
 void	 show(struct ctl_conn *);
 int	 enable_service(struct ctl_conn *, struct ctl_id *);
 int	 enable_table(struct ctl_conn *, struct ctl_id *);
@@ -616,13 +681,13 @@ void	 flush_rulesets(struct hoststated *);
 int	 natlook(struct hoststated *, struct ctl_natlook *);
 
 /* hce.c */
-pid_t	 hce(struct hoststated *, int [2], int [2], int [2], int [2],
-	    int [RELAY_MAXPROC][2]);
+pid_t	 hce(struct hoststated *, int [2], int [2], int [RELAY_MAXPROC][2],
+	    int [2], int [RELAY_MAXPROC][2]);
 void	 hce_notify_done(struct host *, const char *);
 
 /* relay.c */
-pid_t	 relay(struct hoststated *, int [2], int [2], int [2], int [2],
-	    int [RELAY_MAXPROC][2]);
+pid_t	 relay(struct hoststated *, int [2], int [2], int [RELAY_MAXPROC][2],
+	    int [2], int [RELAY_MAXPROC][2]);
 void	 relay_notify_done(struct host *, const char *);
 
 RB_PROTOTYPE(proto_tree, protonode, nodes, relay_proto_cmp);
@@ -634,6 +699,11 @@ void	 check_icmp(struct hoststated *, struct timeval *);
 
 /* check_tcp.c */
 void	 check_tcp(struct ctl_tcp_event *);
+
+/* check_script.c */
+void	 check_script(struct host *);
+void	 script_done(struct hoststated *, struct ctl_script *);
+int	 script_exec(struct hoststated *, struct ctl_script *);
 
 /* ssl.c */
 void	 ssl_init(struct hoststated *);
@@ -655,6 +725,8 @@ struct relay	*relay_find(struct hoststated *, objid_t);
 struct session	*session_find(struct hoststated *, objid_t);
 struct relay	*relay_findbyname(struct hoststated *, const char *);
 int		 expand_string(char *, size_t, const char *, const char *);
+void		 purge_config(struct hoststated *, u_int8_t);
+void		 merge_config(struct hoststated *, struct hoststated *);
 
 /* carp.c */
 int	 carp_demote_init(char *, int);

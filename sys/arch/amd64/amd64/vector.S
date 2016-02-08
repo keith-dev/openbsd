@@ -1,4 +1,4 @@
-/*	$OpenBSD: vector.S,v 1.7 2005/10/09 17:09:34 fgsch Exp $	*/
+/*	$OpenBSD: vector.S,v 1.10 2007/06/01 21:01:51 art Exp $	*/
 /*	$NetBSD: vector.S,v 1.5 2004/06/28 09:13:11 fvdl Exp $	*/
 
 /*
@@ -74,6 +74,7 @@
 
 #define ALIGN_TEXT	.align 16,0x90
 
+#include <machine/param.h>
 #include <machine/i8259.h>
 #include <machine/i82093reg.h>
 #include <machine/i82489reg.h>
@@ -318,6 +319,54 @@ IDTVEC(resume_lapic_ipi)
 	sti
 	INTRFASTEXIT
 
+IDTVEC(ipi_invltlb)
+	pushq	%rax
+
+	ioapic_asm_ack()
+
+	movq	%cr3, %rax
+	movq	%rax, %cr3
+
+	lock
+	decq	tlb_shoot_wait
+
+	popq	%rax
+	iretq
+
+IDTVEC(ipi_invlpg)
+	pushq	%rax
+
+	ioapic_asm_ack()
+
+	movq	tlb_shoot_addr1, %rax
+	invlpg	(%rax)
+
+	lock
+	decq	tlb_shoot_wait
+
+	popq	%rax
+	iretq
+
+IDTVEC(ipi_invlrange)
+	pushq	%rax
+	pushq	%rdx
+
+	ioapic_asm_ack()
+
+	movq	tlb_shoot_addr1, %rax
+	movq	tlb_shoot_addr2, %rdx
+1:	invlpg	(%rax)
+	addq	$PAGE_SIZE, %rax
+	cmpq	%rdx, %rax
+	jb	1b
+
+	lock
+	decq	tlb_shoot_wait
+
+	popq	%rdx
+	popq	%rax
+	iretq
+
 #endif /* MULTIPROCESSOR */
 	
 	/*
@@ -394,7 +443,6 @@ IDTVEC(intr_/**/name/**/num)						;\
 	cmpl	%ebx,%r13d						;\
 	jae	10f			/* currently masked; hold it */	;\
 	incl	MY_COUNT+V_INTR		/* statistical info */		;\
-	incq	IS_EVCNT(%r14)						;\
 1:									\
 	pushq	%r13							;\
 	movl	%ebx,CPUVAR(ILEVEL)					;\
@@ -742,7 +790,6 @@ IDTVEC(softserial)
 	call	_C_LABEL(x86_softintlock)
 #endif
 	movq	CPUVAR(ISOURCES) + SIR_SERIAL * 8, %r12
-	incq	IS_EVCNT(%r12)
 	movl	$X86_SOFTINTR_SOFTSERIAL,%edi
 	call	_C_LABEL(softintr_dispatch)
 #ifdef MULTIPROCESSOR	
@@ -759,7 +806,6 @@ IDTVEC(softnet)
 	call	_C_LABEL(x86_softintlock)
 #endif
 	movq	CPUVAR(ISOURCES) + SIR_NET * 8, %r12
-	incq    IS_EVCNT(%r12)
 
 	xorq	%r12,%r12
 	xchgl	_C_LABEL(netisr),%r12d
@@ -789,7 +835,6 @@ IDTVEC(softclock)
 	call	_C_LABEL(x86_softintlock)
 #endif
 	movq	CPUVAR(ISOURCES) + SIR_CLOCK * 8, %r12
-	incq	IS_EVCNT(%r12)
 
 	movl	$X86_SOFTINTR_SOFTCLOCK,%edi
 	call	_C_LABEL(softintr_dispatch)

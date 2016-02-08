@@ -1,4 +1,4 @@
-/*	$OpenBSD: asb100.c,v 1.8 2006/12/23 17:46:39 deraadt Exp $	*/
+/*	$OpenBSD: asb100.c,v 1.10 2007/06/24 05:34:35 dlg Exp $	*/
 
 /*
  * Copyright (c) 2005 Damien Miller <djm@openbsd.org>
@@ -106,8 +106,8 @@ struct asbtm_softc {
 	i2c_tag_t	sc_tag;
 	i2c_addr_t	sc_addr;
 
-	struct sensor	sc_sensor[ASB100_NUM_SENSORS];
-	struct sensordev sc_sensordev;
+	struct ksensor	sc_sensor[ASB100_NUM_SENSORS];
+	struct ksensordev sc_sensordev;
 	int		sc_fanmul[3];
 	int		sc_satellite[2];
 };
@@ -258,7 +258,7 @@ asbtm_attach(struct device *parent, struct device *self, void *aux)
 	strlcpy(sc->sc_sensor[ASB100_SENSOR_TEMP3].desc, "External",
 	    sizeof(sc->sc_sensor[ASB100_SENSOR_TEMP3].desc));
 
-	if (sensor_task_register(sc, asbtm_refresh, 5)) {
+	if (sensor_task_register(sc, asbtm_refresh, 5) == NULL) {
 		printf(", unable to register update task\n");
 		return;
 	}
@@ -271,7 +271,7 @@ asbtm_attach(struct device *parent, struct device *self, void *aux)
 }
 
 static void
-fanval(struct sensor *sens, int mul, u_int8_t data)
+fanval(struct ksensor *sens, int mul, u_int8_t data)
 {
 	int tmp = data * mul;
 

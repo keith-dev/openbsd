@@ -1,4 +1,4 @@
-/* $OpenBSD: i80321_intr.c,v 1.9 2006/12/20 14:27:58 drahn Exp $ */
+/* $OpenBSD: i80321_intr.c,v 1.11 2007/05/19 15:47:16 miod Exp $ */
 
 /*
  * Copyright (c) 2006 Dale Rahn <drahn@openbsd.org>
@@ -147,7 +147,7 @@ i80321intc_calc_mask(void)
 		/* Enable interrupts at lower levels */
 		for (i = 0; i < min; i++)
 			i80321intc_imask[i] |= (1 << irq);
-		/* Diable interrupts at upper levels */
+		/* Disable interrupts at upper levels */
 		for (;i <= IPL_HIGH; i++)
 			i80321intc_imask[i] &= ~(1 << irq);
 	}
@@ -399,3 +399,20 @@ i80321_irq_handler(void *arg)
 	if(softint_pending & i80321intc_smask[current_ipl_level])
 		i80321intc_do_pending();
 }
+
+#ifdef DIAGNOSTIC
+void
+i80321_splassert_check(int wantipl, const char *func)
+{
+	int oldipl = current_ipl_level;
+
+	if (oldipl < wantipl) {
+		splassert_fail(wantipl, oldipl, func);
+		/*
+		 * If the splassert_ctl is set to not panic, raise the ipl
+		 * in a feeble attempt to reduce damage.
+		 */
+		i80321intc_setipl(wantipl);
+	}
+}
+#endif

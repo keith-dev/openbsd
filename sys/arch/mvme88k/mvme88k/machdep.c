@@ -1,4 +1,4 @@
-/* $OpenBSD: machdep.c,v 1.185 2006/11/18 22:58:28 miod Exp $	*/
+/* $OpenBSD: machdep.c,v 1.192 2007/06/06 17:15:12 deraadt Exp $	*/
 /*
  * Copyright (c) 1998, 1999, 2000, 2001 Steve Murphree, Jr.
  * Copyright (c) 1996 Nivas Madhur
@@ -125,6 +125,9 @@ void (*md_init_clocks)(void);
 u_int (*md_getipl)(void);
 u_int (*md_setipl)(u_int);
 u_int (*md_raiseipl)(u_int);
+#ifdef MULTIPROCESSOR
+void (*md_send_ipi)(int, cpuid_t);
+#endif
 
 int physmem;	  /* available physical memory, in pages */
 
@@ -138,12 +141,6 @@ __cpu_simple_lock_t cpu_mutex = __SIMPLELOCK_UNLOCKED;
 /*
  * Declare these as initialized data so we can patch them.
  */
-#ifdef	NBUF
-int nbuf = NBUF;
-#else
-int nbuf = 0;
-#endif
-
 #ifndef BUFCACHEPERCENT
 #define BUFCACHEPERCENT 5
 #endif
@@ -327,8 +324,6 @@ cpu_startup()
 {
 	caddr_t v;
 	int sz, i;
-	vsize_t size;
-	int base, residual;
 	vaddr_t minaddr, maxaddr;
 
 	/*
@@ -346,7 +341,8 @@ cpu_startup()
 	 */
 	printf(version);
 	identifycpu();
-	printf("real mem  = %d\n", ctob(physmem));
+	printf("real mem = %u (%uMB)\n", ctob(physmem),
+	    ctob(physmem)/1024/1024);
 
 	/*
 	 * Find out how much space we need, allocate it,
@@ -382,54 +378,23 @@ cpu_startup()
 	}
 
 	/*
-	 * Now allocate buffers proper.  They are different than the above
-	 * in that they usually occupy more virtual memory than physical.
+	 * Determine how many buffers to allocate.
+	 * We allocate bufcachepercent% of memory for buffer space.
 	 */
-	size = MAXBSIZE * nbuf;
-	if (uvm_map(kernel_map, (vaddr_t *) &buffers, round_page(size),
-	    NULL, UVM_UNKNOWN_OFFSET, 0, UVM_MAPFLAG(UVM_PROT_NONE,
-	      UVM_PROT_NONE, UVM_INH_NONE, UVM_ADV_NORMAL, 0)))
-		panic("cpu_startup: cannot allocate VM for buffers");
-	minaddr = (vaddr_t)buffers;
+	if (bufpages == 0)
+		bufpages = physmem * bufcachepercent / 100;
 
-	if ((bufpages / nbuf) >= btoc(MAXBSIZE)) {
-		/* don't want to alloc more physical mem than needed */
-		bufpages = btoc(MAXBSIZE) * nbuf;
-	}
-	base = bufpages / nbuf;
-	residual = bufpages % nbuf;
-
-	for (i = 0; i < nbuf; i++) {
-		vsize_t curbufsize;
-		vaddr_t curbuf;
-		struct vm_page *pg;
-
-		/*
-		 * Each buffer has MAXBSIZE bytes of VM space allocated.  Of
-		 * that MAXBSIZE space, we allocate and map (base+1) pages
-		 * for the first "residual" buffers, and then we allocate
-		 * "base" pages for the rest.
-		 */
-		curbuf = (vaddr_t)buffers + (i * MAXBSIZE);
-		curbufsize = PAGE_SIZE * ((i < residual) ? (base + 1) : base);
-
-		while (curbufsize) {
-			pg = uvm_pagealloc(NULL, 0, NULL, 0);
-			if (pg == NULL)
-				panic("cpu_startup: not enough memory for "
-				      "buffer cache");
-			pmap_kenter_pa(curbuf, VM_PAGE_TO_PHYS(pg),
-			    VM_PROT_READ | VM_PROT_WRITE);
-			curbuf += PAGE_SIZE;
-			curbufsize -= PAGE_SIZE;
-		}
-	}
-	pmap_update(pmap_kernel());
+	/* Restrict to at most 25% filled kvm */
+	if (bufpages >
+	    (VM_MAX_KERNEL_ADDRESS-VM_MIN_KERNEL_ADDRESS) / PAGE_SIZE / 4) 
+		bufpages = (VM_MAX_KERNEL_ADDRESS-VM_MIN_KERNEL_ADDRESS) /
+		    PAGE_SIZE / 4;
 
 	/*
 	 * Allocate a submap for exec arguments.  This map effectively
 	 * limits the number of processes exec'ing at any time.
 	 */
+	minaddr = vm_map_min(kernel_map);
 	exec_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr,
 	    16 * NCARGS, VM_MAP_PAGEABLE, FALSE, NULL);
 
@@ -439,9 +404,8 @@ cpu_startup()
 	phys_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr,
 	    VM_PHYS_SIZE, 0, FALSE, NULL);
 
-	printf("avail mem = %ld (%d pages)\n", ptoa(uvmexp.free), uvmexp.free);
-	printf("using %d buffers containing %d bytes of memory\n", nbuf,
-	    bufpages * PAGE_SIZE);
+	printf("avail mem = %lu (%luMB)\n", ptoa(uvmexp.free),
+	    ptoa(uvmexp.free)/1024/1024);
 
 	/*
 	 * Set up buffers, so they can be used to read disk labels.
@@ -489,34 +453,6 @@ allocsys(v)
 	valloc(msghdrs, struct msg, msginfo.msgtql);
 	valloc(msqids, struct msqid_ds, msginfo.msgmni);
 #endif
-
-	/*
-	 * Determine how many buffers to allocate.  We use 10% of the
-	 * first 2MB of memory, and 5% of the rest, with a minimum of 16
-	 * buffers.  We allocate 1/2 as many swap buffer headers as file
-	 * i/o buffers.
-	 */
-	if (bufpages == 0) {
-		bufpages = (btoc(2 * 1024 * 1024) + physmem) *
-		    bufcachepercent / 100;
-	}
-	if (nbuf == 0) {
-		nbuf = bufpages;
-		if (nbuf < 16)
-			nbuf = 16;
-	}
-
-	/* Restrict to at most 70% filled kvm */
-	if (nbuf >
-	    (VM_MAX_KERNEL_ADDRESS - VM_MIN_KERNEL_ADDRESS) / MAXBSIZE * 7 / 10)
-		nbuf = (VM_MAX_KERNEL_ADDRESS - VM_MIN_KERNEL_ADDRESS) /
-		    MAXBSIZE * 7 / 10;
-
-	/* More buffer pages than fits into the buffers is senseless.  */
-	if (bufpages > nbuf * MAXBSIZE / PAGE_SIZE)
-		bufpages = nbuf * MAXBSIZE / PAGE_SIZE;
-
-	valloc(buf, struct buf, nbuf);
 
 	return v;
 }
@@ -595,19 +531,13 @@ cpu_kcore_hdr_t cpu_kcore_hdr;
  * reduce the chance that swapping trashes it.
  */
 void
-dumpconf()
+dumpconf(void)
 {
 	int nblks;	/* size of dump area */
-	int maj;
 
-	if (dumpdev == NODEV)
+	if (dumpdev == NODEV ||
+	    (nblks = (bdevsw[major(dumpdev)].d_psize)(dumpdev)) == 0)
 		return;
-	maj = major(dumpdev);
-	if (maj < 0 || maj >= nblkdev)
-		panic("dumpconf: bad dumpdev=0x%x", dumpdev);
-	if (bdevsw[maj].d_psize == NULL)
-		return;
-	nblks = (*bdevsw[maj].d_psize)(dumpdev);
 	if (nblks <= ctod(1))
 		return;
 
@@ -642,9 +572,9 @@ dumpsys()
 {
 	int maj;
 	int psize;
-	daddr_t blkno;		/* current block to write */
+	daddr64_t blkno;	/* current block to write */
 				/* dump routine */
-	int (*dump)(dev_t, daddr_t, caddr_t, size_t);
+	int (*dump)(dev_t, daddr64_t, caddr_t, size_t);
 	int pg;			/* page being dumped */
 	paddr_t maddr;		/* PA being dumped */
 	int error;		/* error code from (*dump)() */
@@ -791,6 +721,7 @@ secondary_main()
 	struct cpu_info *ci = curcpu();
 
 	cpu_configuration_print(0);
+	ncpus++;
 	__cpu_simple_unlock(&cpu_mutex);
 
 	microuptime(&ci->ci_schedstate.spc_runtime);
@@ -1210,3 +1141,32 @@ raiseipl(unsigned level)
 	set_psr(psr);
 	return curspl;
 }
+
+#ifdef MULTIPROCESSOR
+
+void
+m88k_send_ipi(int ipi, cpuid_t cpu)
+{
+	struct cpu_info *ci;
+
+	ci = &m88k_cpus[cpu];
+	if (ci->ci_alive)
+		(*md_send_ipi)(ipi, cpu);
+}
+
+void
+m88k_broadcast_ipi(int ipi)
+{
+	struct cpu_info *ci;
+	CPU_INFO_ITERATOR cii;
+
+	CPU_INFO_FOREACH(cii, ci) {
+		if (ci == curcpu())
+			continue;
+
+		if (ci->ci_alive)
+			(*md_send_ipi)(ipi, ci->ci_cpuid);
+	}
+}
+
+#endif

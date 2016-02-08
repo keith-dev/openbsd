@@ -1,5 +1,5 @@
 vers(__file__,
-	{-$OpenBSD: MAKEDEV.md,v 1.30 2006/04/16 11:34:01 todd Exp $-},
+	{-$OpenBSD: MAKEDEV.md,v 1.34 2007/06/20 18:28:55 miod Exp $-},
 etc.MACHINE)dnl
 dnl
 dnl Copyright (c) 2001-2006 Todd T. Fries <todd@OpenBSD.org>
@@ -46,7 +46,7 @@ _TITLE(cons)
 _DEV(wscons)
 _DEV(wsdisp, 25)
 _DEV(wskbd, 29)
-_DEV(wsmux, 56)
+_DEV(wsmux, 60)
 _TITLE(point)
 _DEV(wsmouse, 30)
 _TITLE(prn)
@@ -61,6 +61,7 @@ _DEV(ulpt, 47)
 _DEV(usb, 45)
 _TITLE(spec)
 _DEV(au, 24)
+_DEV(bio, 53)
 _DEV(bktr, 58)
 _DEV(bpf, 11)
 _DEV(cry, 57)
@@ -105,6 +106,7 @@ ttyB*|ttyc*)
 dnl
 dnl *** alpha specific targets
 dnl
+target(all, bio)dnl
 target(all, ch, 0)dnl
 target(all, ss, 0, 1)dnl
 target(all, xfs, 0)dnl

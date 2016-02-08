@@ -1,4 +1,4 @@
-#	$OpenBSD: RAMDISK,v 1.60 2007/03/07 06:23:02 miod Exp $
+#	$OpenBSD: RAMDISK,v 1.66 2007/07/02 14:29:37 dlg Exp $
 
 # Machine architecture; required by config(8)
 machine		sparc64
@@ -19,7 +19,6 @@ option		DST=0		# daylight saving time used by RTC
 
 option		SMALL_KERNEL
 option		NO_PROPOLICE
-option		DIAGNOSTIC	# internal consistency checks
 option		FFS		# UFS
 option		NFSCLIENT	# Network File System client
 option		CD9660		# ISO 9660 + Rock Ridge file system
@@ -39,19 +38,21 @@ config		bsd	root on rd0a
 mainbus0 at root
 cpu0	at mainbus0
 
+# Bus types found on SPARC systems.
+sbus*	at mainbus0
+upa0	at mainbus0
 central0 at mainbus0
 fhc0	at central0
 fhc*	at mainbus0
-
-# Bus types found on SPARC systems.
+psycho*	at mainbus0
+pci*	at psycho?
 schizo*	at mainbus0
 pci*	at schizo?
-sbus*	at mainbus0		# Ultra 1/E4500
-psycho*	at mainbus0
-upa0	at mainbus0
-pci*	at psycho?		# Ultra 5
+pyro*	at mainbus0
+pci*	at pyro?
 pci*	at ppb?
 ppb*	at pci?
+ebus*	at mainbus0
 ebus*	at pci?
 
 # PCI Ethernet
@@ -75,6 +76,7 @@ bge*	at pci?			# Broadcom BCM570x (aka Tigon3)
 stge*	at pci?			# Sundance TC9021 GigE
 rl*	at pci?			# RealTek 81[23]9 ethernet
 vr*	at pci?			# VIA Rhine ethernet
+re*	at pci?			# RealTek 8169/8169S/8110S
 
 auxio*	at ebus?
 auxio*	at sbus?
@@ -125,11 +127,20 @@ scsibus* at esp?
 siop*	at pci?
 isp*	at pci?
 mpi*	at pci?
+sili*	at pci?
+arc*	at pci?
+jmb*	at pci?
+ahci*	at jmb?
+pciide*	at jmb?
+ahci*	at pci?
 
 option ISP_COMPILE_FW=1
 scsibus*	at siop?
 scsibus*	at isp?
 scsibus*	at mpi?
+scsibus*	at sili?
+scsibus*	at arc?
+scsibus*	at ahci?
 
 # These entries find devices on all SCSI busses and assign
 # unit numers dynamically.
@@ -156,6 +167,7 @@ inphy*	at mii?			# Intel 82555 PHYs
 lxtphy*	at mii?			# Level1 LXT970 PHYs
 rlphy*	at mii?			# RealTek 8139 internal PHYs
 urlphy*	at mii?			# Realtek RTL8150L internal PHY
+rgephy*	at mii?			# Realtek 8169S/8110S PHY
 ukphy*	at mii?			# Unknown PHYs
 
 # PCI USB Controllers

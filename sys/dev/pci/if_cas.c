@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_cas.c,v 1.4 2007/02/27 21:19:40 kettenis Exp $	*/
+/*	$OpenBSD: if_cas.c,v 1.8 2007/04/18 21:08:35 kettenis Exp $	*/
 
 /*
  *
@@ -176,13 +176,14 @@ static const u_int8_t cas_promdat2[] = {
 int
 cas_pci_enaddr(struct cas_softc *sc, struct pci_attach_args *pa)
 {
+	struct pci_vpd_largeres *res;
 	struct pci_vpd *vpd;
 	bus_space_handle_t romh;
 	bus_space_tag_t romt;
 	bus_size_t romsize;
-	u_int8_t buf[32];
+	u_int8_t buf[32], *desc;
 	pcireg_t address, mask;
-	int dataoff, vpdoff;
+	int dataoff, vpdoff, len;
 	int rv = -1;
 
 	address = pci_conf_read(pa->pa_pc, pa->pa_tag, PCI_ROM_REG);
@@ -215,21 +216,68 @@ cas_pci_enaddr(struct cas_softc *sc, struct pci_attach_args *pa)
 	if (vpdoff < 0x1c)
 		goto fail;
 
+next:
 	bus_space_read_region_1(romt, romh, vpdoff, buf, sizeof(buf));
-
-	/*
-	 * The VPD is not in PCI 2.2 standard format.  The length in
-	 * the resource header is big endian.
-	 */
-	vpd = (struct pci_vpd *)(buf + 3);
-	if (!PCI_VPDRES_ISLARGE(buf[0]) ||
-	    PCI_VPDRES_LARGE_NAME(buf[0]) != PCI_VPDRES_TYPE_VPD)
-		goto fail;
-	if (vpd->vpd_key0 != 'N' || vpd->vpd_key1 != 'A')
+	if (!PCI_VPDRES_ISLARGE(buf[0]))
 		goto fail;
 
-	bcopy(buf + 6, sc->sc_arpcom.ac_enaddr, ETHER_ADDR_LEN);
-	rv = 0;
+	res = (struct pci_vpd_largeres *)buf;
+	vpdoff += sizeof(*res);
+
+	len = ((res->vpdres_len_msb << 8) + res->vpdres_len_lsb);
+	switch(PCI_VPDRES_LARGE_NAME(res->vpdres_byte0)) {
+	case PCI_VPDRES_TYPE_IDENTIFIER_STRING:
+		/* Skip identifier string. */
+		vpdoff += len;
+		goto next;
+
+	case PCI_VPDRES_TYPE_VPD:
+		while (len > 0) {
+			bus_space_read_region_1(romt, romh, vpdoff,
+			     buf, sizeof(buf));
+
+			vpd = (struct pci_vpd *)buf;
+			vpdoff += sizeof(*vpd) + vpd->vpd_len;
+			len -= sizeof(*vpd) + vpd->vpd_len;
+
+			/*
+			 * We're looking for an "Enhanced" VPD...
+			 */
+			if (vpd->vpd_key0 != 'Z')
+				continue;
+
+			desc = buf + sizeof(*vpd);
+
+			/* 
+			 * ...which is an instance property...
+			 */
+			if (desc[0] != 'I')
+				continue;
+			desc += 3;
+
+			/* 
+			 * ...that's a byte array with the proper
+			 * length for a MAC address...
+			 */
+			if (desc[0] != 'B' || desc[1] != ETHER_ADDR_LEN)
+				continue;
+			desc += 2;
+
+			/*
+			 * ...named "local-mac-address".
+			 */
+			if (strcmp(desc, "local-mac-address") != 0)
+				continue;
+			desc += strlen("local-mac-address") + 1;
+					
+			bcopy(desc, sc->sc_arpcom.ac_enaddr, ETHER_ADDR_LEN);
+			rv = 0;
+		}
+		break;
+
+	default:
+		goto fail;
+	}
 
  fail:
 	if (romsize != 0)
@@ -332,7 +380,7 @@ cas_config(struct cas_softc *sc)
 	 * DMA map for it.
 	 */
 	if ((error = bus_dmamem_alloc(sc->sc_dmatag,
-	    sizeof(struct cas_control_data), PAGE_SIZE, 0, &sc->sc_cdseg,
+	    sizeof(struct cas_control_data), CAS_PAGE_SIZE, 0, &sc->sc_cdseg,
 	    1, &sc->sc_cdnseg, 0)) != 0) {
 		printf("\n%s: unable to allocate control data, error = %d\n",
 		    sc->sc_dev.dv_xname, error);
@@ -372,8 +420,8 @@ cas_config(struct cas_softc *sc)
 		caddr_t kva;
 		int rseg;
 
-		if ((error = bus_dmamem_alloc(sc->sc_dmatag, PAGE_SIZE,
-		    PAGE_SIZE, 0, &seg, 1, &rseg, BUS_DMA_NOWAIT)) != 0) {
+		if ((error = bus_dmamem_alloc(sc->sc_dmatag, CAS_PAGE_SIZE,
+		    CAS_PAGE_SIZE, 0, &seg, 1, &rseg, BUS_DMA_NOWAIT)) != 0) {
 			printf("\n%s: unable to alloc rx DMA mem %d, "
 			    "error = %d\n", sc->sc_dev.dv_xname, i, error);
 			goto fail_5;
@@ -381,22 +429,22 @@ cas_config(struct cas_softc *sc)
 		sc->sc_rxsoft[i].rxs_dmaseg = seg;
 
 		if ((error = bus_dmamem_map(sc->sc_dmatag, &seg, rseg,
-		    PAGE_SIZE, &kva, BUS_DMA_NOWAIT)) != 0) {
+		    CAS_PAGE_SIZE, &kva, BUS_DMA_NOWAIT)) != 0) {
 			printf("\n%s: unable to alloc rx DMA mem %d, "
 			    "error = %d\n", sc->sc_dev.dv_xname, i, error);
 			goto fail_5;
 		}
 		sc->sc_rxsoft[i].rxs_kva = kva;
 
-		if ((error = bus_dmamap_create(sc->sc_dmatag, PAGE_SIZE, 1,
-		    PAGE_SIZE, 0, 0, &sc->sc_rxsoft[i].rxs_dmamap)) != 0) {
+		if ((error = bus_dmamap_create(sc->sc_dmatag, CAS_PAGE_SIZE, 1,
+		    CAS_PAGE_SIZE, 0, 0, &sc->sc_rxsoft[i].rxs_dmamap)) != 0) {
 			printf("\n%s: unable to create rx DMA map %d, "
 			    "error = %d\n", sc->sc_dev.dv_xname, i, error);
 			goto fail_5;
 		}
 
 		if ((error = bus_dmamap_load(sc->sc_dmatag,
-		   sc->sc_rxsoft[i].rxs_dmamap, kva, PAGE_SIZE, NULL,
+		   sc->sc_rxsoft[i].rxs_dmamap, kva, CAS_PAGE_SIZE, NULL,
 		   BUS_DMA_NOWAIT)) != 0) {
 			printf("\n%s: unable to load rx DMA map %d, "
 			    "error = %d\n", sc->sc_dev.dv_xname, i, error);
@@ -1119,29 +1167,33 @@ cas_rint(struct cas_softc *sc)
 			rxs = &sc->sc_rxsoft[idx];
 
 			DPRINTF(sc, ("hdr at idx %d, off %d, len %d\n",
-			    idx, len, off));
+			    idx, off, len));
 
 			bus_dmamap_sync(sc->sc_dmatag, rxs->rxs_dmamap, 0,
 			    rxs->rxs_dmamap->dm_mapsize, BUS_DMASYNC_POSTREAD);
 
 			cp = rxs->rxs_kva + off * 256;
 			m = m_devget(cp, len + ETHER_ALIGN, 0, ifp, NULL);
-			m_adj(m, ETHER_ALIGN);
-
+			
 			if (word[0] & CAS_RC0_RELEASE_HDR)
 				cas_add_rxbuf(sc, idx);
 
+			if (m != NULL) {
+				m_adj(m, ETHER_ALIGN);
+
 #if NBPFILTER > 0
-			/*
-			 * Pass this up to any BPF listeners, but only
-			 * pass it up the stack if its for us.
-			 */
-			if (ifp->if_bpf)
-				bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
+				/*
+				 * Pass this up to any BPF listeners, but only
+				 * pass it up the stack if its for us.
+				 */
+				if (ifp->if_bpf)
+					bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
 #endif /* NPBFILTER > 0 */
 
-			ifp->if_ipackets++;
-			ether_input_mbuf(ifp, m);
+				ifp->if_ipackets++;
+				ether_input_mbuf(ifp, m);
+			} else
+				ifp->if_ierrors++;
 		}
 
 		len = CAS_RC0_DATA_LEN(word[0]);
@@ -1159,22 +1211,26 @@ cas_rint(struct cas_softc *sc)
 			/* XXX We should not be copying the packet here. */
 			cp = rxs->rxs_kva + off;
 			m = m_devget(cp, len + ETHER_ALIGN, 0, ifp, NULL);
-			m_adj(m, ETHER_ALIGN);
 
 			if (word[0] & CAS_RC0_RELEASE_DATA)
 				cas_add_rxbuf(sc, idx);
 
+			if (m != NULL) {
+				m_adj(m, ETHER_ALIGN);
+
 #if NBPFILTER > 0
-			/*
-			 * Pass this up to any BPF listeners, but only
-			 * pass it up the stack if its for us.
-			 */
-			if (ifp->if_bpf)
-				bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
+				/*
+				 * Pass this up to any BPF listeners, but only
+				 * pass it up the stack if its for us.
+				 */
+				if (ifp->if_bpf)
+					bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
 #endif /* NPBFILTER > 0 */
 
-			ifp->if_ipackets++;
-			ether_input_mbuf(ifp, m);
+				ifp->if_ipackets++;
+				ether_input_mbuf(ifp, m);
+			} else
+				ifp->if_ierrors++;
 		}
 
 		if (word[0] & CAS_RC0_SPLIT)

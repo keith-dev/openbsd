@@ -1,4 +1,4 @@
-/*	$OpenBSD: presto.c,v 1.6 2006/09/24 20:29:52 krw Exp $	*/
+/*	$OpenBSD: presto.c,v 1.13 2007/06/20 18:15:47 deraadt Exp $	*/
 /*
  * Copyright (c) 2003, Miodrag Vallat.
  * All rights reserved.
@@ -71,7 +71,7 @@ struct presto_softc {
 
 void	prestostrategy(struct buf *);
 void	presto_attach(struct device *, struct device *, void *);
-void	presto_getdisklabel(struct presto_softc *);
+void	presto_getdisklabel(dev_t, struct presto_softc *);
 int	presto_match(struct device *, void *, void *);
 
 struct cfattach presto_ca = {
@@ -167,9 +167,6 @@ presto_attach(struct device *parent, struct device *self, void *args)
 	sc->sc_dk.dk_driver = &presto_dk;
 	sc->sc_dk.dk_name = sc->sc_dev.dv_xname;
 	disk_attach(&sc->sc_dk);
-
-	/* read the disk label immediately */
-	presto_getdisklabel(sc);
 }
 
 /*
@@ -177,7 +174,7 @@ presto_attach(struct device *parent, struct device *self, void *args)
  */
 
 int
-prestodump(dev_t dev, daddr_t blkno, caddr_t va, size_t size)
+prestodump(dev_t dev, daddr64_t blkno, caddr_t va, size_t size)
 {
 	/*
 	 * A dump to nvram is theoretically possible, but its size is
@@ -186,7 +183,7 @@ prestodump(dev_t dev, daddr_t blkno, caddr_t va, size_t size)
 	return (ENXIO);
 }
 
-int
+daddr64_t
 prestosize(dev_t dev)
 {
 	struct presto_softc *sc;
@@ -201,7 +198,7 @@ prestosize(dev_t dev)
 	if (part >= sc->sc_dk.dk_label->d_npartitions)
 		return (0);
 	else
-		return (sc->sc_dk.dk_label->d_partitions[part].p_size *
+		return (DL_GETPSIZE(&sc->sc_dk.dk_label->d_partitions[part]) *
 		    (sc->sc_dk.dk_label->d_secsize / DEV_BSIZE));
 }
 
@@ -215,6 +212,9 @@ prestoopen(dev_t dev, int flag, int fmt, struct proc *proc)
 	sc = (struct presto_softc *)device_lookup(&presto_cd, unit);
 	if (sc == NULL)
 		return (ENXIO);
+
+	/* read the disk label */
+	presto_getdisklabel(dev, sc);
 
 	/* only allow valid partitions */
 	part = DISKPART(dev);
@@ -294,8 +294,7 @@ prestostrategy(struct buf *bp)
 	/* Do not write on "no trespassing" areas... */
 	part = DISKPART(bp->b_dev);
 	if (part != RAW_PART &&
-	    bounds_check_with_label(bp, sc->sc_dk.dk_label,
-	    sc->sc_dk.dk_cpulabel, 1) <= 0)
+	    bounds_check_with_label(bp, sc->sc_dk.dk_label, 1) <= 0)
 		goto bad;
 
 	/* Bound the request size, then move data between buf and nvram */
@@ -341,8 +340,7 @@ prestoioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *proc)
 			return (EBADF);
 
 		error = setdisklabel(sc->sc_dk.dk_label,
-		    (struct disklabel *)data, /*sd->sc_dk.dk_openmask : */0,
-		    sc->sc_dk.dk_cpulabel);
+		    (struct disklabel *)data, /*sd->sc_dk.dk_openmask : */0);
 		return (error);
 
 	case DIOCWDINFO:
@@ -350,12 +348,10 @@ prestoioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *proc)
 			return (EBADF);
 
 		error = setdisklabel(sc->sc_dk.dk_label,
-		    (struct disklabel *)data, /*sd->sc_dk.dk_openmask : */0,
-		    sc->sc_dk.dk_cpulabel);
+		    (struct disklabel *)data, /*sd->sc_dk.dk_openmask : */0);
 		if (error == 0) {
 			error = writedisklabel(DISKLABELDEV(dev),
-			    prestostrategy, sc->sc_dk.dk_label,
-			    sc->sc_dk.dk_cpulabel);
+			    prestostrategy, sc->sc_dk.dk_label);
 		}
 
 		return (error);
@@ -368,18 +364,17 @@ prestoioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *proc)
  * Read the disklabel. If none is present, use a fictitious one instead.
  */
 void
-presto_getdisklabel(struct presto_softc *sc)
+presto_getdisklabel(dev_t dev, struct presto_softc *sc)
 {
 	struct disklabel *lp = sc->sc_dk.dk_label;
 
-	bzero(sc->sc_dk.dk_cpulabel, sizeof(struct cpu_disklabel));
 	bzero(sc->sc_dk.dk_label, sizeof(struct disklabel));
 
 	lp->d_secsize = DEV_BSIZE;
 	lp->d_ntracks = 1;
 	lp->d_nsectors = 32;
-	lp->d_secperunit = (sc->sc_memsize - PSERVE_OFFSET) >> DEV_BSHIFT;
-	lp->d_ncylinders = lp->d_secperunit / lp->d_nsectors;
+	DL_SETDSIZE(lp, (sc->sc_memsize - PSERVE_OFFSET) >> DEV_BSHIFT);
+	lp->d_ncylinders = DL_GETDSIZE(lp) / lp->d_nsectors;
 	lp->d_secpercyl = lp->d_nsectors;
 
 	strncpy(lp->d_typename, "Prestoserve", 16);
@@ -387,16 +382,11 @@ presto_getdisklabel(struct presto_softc *sc)
 	strncpy(lp->d_packname, sc->sc_model, 16);
 	lp->d_rpm = 3600;
 	lp->d_interleave = 1;
-
-	lp->d_partitions[RAW_PART].p_offset = 0;
-	lp->d_partitions[RAW_PART].p_size = lp->d_secperunit;
-	lp->d_partitions[RAW_PART].p_fstype = FS_UNUSED;
-	lp->d_npartitions = RAW_PART + 1;
+	lp->d_version = 1;
 
 	lp->d_magic = DISKMAGIC;
 	lp->d_magic2 = DISKMAGIC;
 	lp->d_checksum = dkcksum(lp);
 
-	readdisklabel(DISKLABELDEV(sc->sc_dev.dv_unit), prestostrategy,
-	    sc->sc_dk.dk_label, sc->sc_dk.dk_cpulabel, 0);
+	readdisklabel(DISKLABELDEV(dev), prestostrategy, sc->sc_dk.dk_label, 0);
 }

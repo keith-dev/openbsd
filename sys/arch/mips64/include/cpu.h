@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.14 2006/12/24 20:30:35 miod Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.20 2007/07/18 20:03:50 miod Exp $	*/
 
 /*-
  * Copyright (c) 1992, 1993
@@ -52,9 +52,6 @@
 #define KSEG1_BASE	0xffffffffa0000000
 #define KSSEG_BASE	0xffffffffc0000000
 #define KSEG3_BASE	0xffffffffe0000000
-/* Compatible between R5K and R1xK */
-#define	XKSEG0_BASE	0x9800000000000000
-#define	XKSEG1_BASE	0x9000000000000000
 #else
 #define KSEG0_BASE	0x80000000
 #define KSEG1_BASE	0xa0000000
@@ -68,6 +65,23 @@
 #define	PHYS_TO_KSEG0(x)	((u_long)(x) | KSEG0_BASE)
 #define	PHYS_TO_KSEG1(x)	((u_long)(x) | KSEG1_BASE)
 #define	PHYS_TO_KSEG3(x)	((u_long)(x) | KSEG3_BASE)
+
+/*
+ * Cache Coherency Attributes
+ * We only list values common to r4k and r5k.
+ */
+#if !defined(_LOCORE)
+#define	CCA_NC			2UL	/* uncached, write-around */
+#define	CCA_NONCOHERENT		3UL	/* cached, non-coherent, write-back */
+#endif
+
+#ifdef __LP64__
+#define	XKPHYS_BASE		0x8000000000000000UL
+#define	XKPHYS_TO_PHYS(x)	((paddr_t)(x) & 0x0000000fffffffffUL)
+#define	PHYS_TO_XKPHYS(x,c)	((paddr_t)(x) | XKPHYS_BASE | (c) << 59)
+#define	IS_XKPHYS(va)		(((va) >> 62) == 2)
+#define	XKPHYS_TO_CCA(x)	(((x) >> 59) & 0x07)
+#endif
 
 #ifdef _KERNEL
 
@@ -316,11 +330,29 @@
  * definitions of cpu-dependent requirements
  * referenced in generic code
  */
-#define	COPY_SIGCODE		/* copy sigcode above user stack in exec */
-
 #define	cpu_wait(p)		/* nothing */
 
 #ifndef _LOCORE
+
+#include <sys/sched.h>
+
+struct cpu_info {
+	struct schedstate_percpu ci_schedstate;
+
+	struct proc *ci_curproc;
+};
+
+extern struct cpu_info cpu_info_primary;
+
+#define curcpu()	(&cpu_info_primary)
+
+#define CPU_IS_PRIMARY(ci)	1
+#define CPU_INFO_ITERATOR	int
+#define CPU_INFO_FOREACH(cii, ci)					\
+	for (cii = 0, ci = curcpu(); ci != NULL; ci = NULL)
+
+#define cpu_number()	0
+
 #include <machine/frame.h>
 /*
  * Arguments to hardclock and gatherstats encapsulate the previous
@@ -349,7 +381,7 @@ extern int int_nest_cntr;
  * buffer pages are invalid.  On the PICA, request an ast to send us
  * through trap, marking the proc as needing a profiling tick.
  */
-#define	need_proftick(p)	{ (p)->p_flag |= P_OWEUPC; aston(); }
+#define	need_proftick(p)	aston()
 
 /*
  * Notify the current process (p) that it has a signal pending,
@@ -476,9 +508,7 @@ void	tlb_write_indexed(int, struct tlb_entry *);
 int	tlb_update(vaddr_t, unsigned);
 void	tlb_read(int, struct tlb_entry *);
 
-void	wbflush(void);
 void	savectx(struct user *, int);
-int	copykstack(struct user *);
 void	switch_exit(struct proc *);
 void	MipsSaveCurFPState(struct proc *);
 void	MipsSaveCurFPState16(struct proc *);
@@ -490,14 +520,14 @@ extern u_int32_t cpu_counter_last;      /* Last compare value loaded    */
  *  Low level access routines to CPU registers
  */
 
-void setsoftintr0(void);
-void clearsoftintr0(void);
-void setsoftintr1(void);
-void clearsoftintr1(void);
+void	setsoftintr0(void);
+void	clearsoftintr0(void);
+void	setsoftintr1(void);
+void	clearsoftintr1(void);
 u_int32_t enableintr(void);
 u_int32_t disableintr(void);
 u_int32_t updateimask(intrmask_t);
-void setsr(u_int32_t);
+void	setsr(u_int32_t);
 u_int32_t getsr(void);
 
 #endif /* _KERNEL */

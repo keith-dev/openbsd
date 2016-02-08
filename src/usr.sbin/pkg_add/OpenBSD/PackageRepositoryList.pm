@@ -1,7 +1,7 @@
 # ex:ts=8 sw=4:
-# $OpenBSD: PackageRepositoryList.pm,v 1.3 2006/11/17 15:34:15 espie Exp $
+# $OpenBSD: PackageRepositoryList.pm,v 1.16 2007/05/19 09:50:31 espie Exp $
 #
-# Copyright (c) 2003-2004 Marc Espie <espie@openbsd.org>
+# Copyright (c) 2003-2006 Marc Espie <espie@openbsd.org>
 #
 # Permission to use, copy, modify, and distribute this software for any
 # purpose with or without fee is hereby granted, provided that the above
@@ -23,38 +23,21 @@ package OpenBSD::PackageRepositoryList;
 sub new
 {
 	my $class = shift;
-	return bless {list => [], avail => undef }, $class;
+	return bless {list => [] }, $class;
 }
 
 sub add
 {
 	my $self = shift;
 	push @{$self->{list}}, @_;
-	if (@_ > 0) {
-		$self->{avail} = undef;
-	}
 }
 
 sub find
 {
-	my ($self, $pkgname, $arch, $srcpath) = @_;
+	my ($self, $pkgname, $arch) = @_;
 
 	for my $repo (@{$self->{list}}) {
-		my $pkg;
-
-		for (my $retry = 5; $retry < 60; $retry *= 2) {
-			undef $repo->{lasterror};
-			$pkg = $repo->find($pkgname, $arch, $srcpath);
-			if (!defined $pkg && defined $repo->{lasterror} && 
-			    $repo->{lasterror} == 421 && 
-			    defined $self->{avail} &&
-			    $self->{avail}->{$pkgname} eq $repo) { 
-				print STDERR "Temporary error, sleeping $retry seconds\n";
-				sleep($retry);
-			} else {
-				last;
-			}
-		}
+		my $pkg = $repo->find($pkgname, $arch);
 		return $pkg if defined $pkg;
 	}
 	return;
@@ -65,47 +48,41 @@ sub grabPlist
 	my ($self, $pkgname, $arch, $code) = @_;
 
 	for my $repo (@{$self->{list}}) {
-		my $plist;
-
-		for (my $retry = 5; $retry < 60; $retry *= 2) {
-			undef $repo->{lasterror};
-			$plist = $repo->grabPlist($pkgname, $arch, $code);
-			if (!defined $plist && defined $repo->{lasterror} && 
-			    $repo->{lasterror} == 421 && 
-			    defined $self->{avail} &&
-			    $self->{avail}->{$pkgname} eq $repo) { 
-				print STDERR "Temporary error, sleeping $retry seconds\n";
-				sleep($retry);
-			} else {
-				last;
-			}
-		}
+		my $plist = $repo->grabPlist($pkgname, $arch, $code);
 		return $plist if defined $plist;
 	}
 	return;
 }
 
-sub available
+sub match
 {
-	my $self = shift;
-
-	if (!defined $self->{avail}) {
-		my $available_packages = {};
-		foreach my $loc (reverse @{$self->{list}}) {
-		    foreach my $pkg (@{$loc->list()}) {
-		    	$available_packages->{$pkg} = $loc;
-		    }
+	my ($self, @search) = @_;
+	for my $repo (@{$self->{list}}) {
+		my @l = $repo->match(@search);
+		if (@l > 0) {
+			return @l;
 		}
-		$self->{avail} = $available_packages;
 	}
-	return keys %{$self->{avail}};
+	return ();
+}
+
+sub match_locations
+{
+	my ($self, @search) = @_;
+	for my $repo (@{$self->{list}}) {
+		my @l = $repo->match_locations(@search);
+		if (@l > 0) {
+			return @l;
+		}
+	}
+	return ();
 }
 
 sub cleanup
 {
 	my $self = shift;
 	for my $repo (@{$self->{list}}) {
-		$repo->cleanup();
+		$repo->cleanup;
 	}
 }
 

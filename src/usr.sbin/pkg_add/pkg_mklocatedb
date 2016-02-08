@@ -1,5 +1,5 @@
 #! /usr/bin/perl
-# Copyright (c) 2005 Marc Espie <espie@openbsd.org>
+# Copyright (c) 2005-2007 Marc Espie <espie@openbsd.org>
 # 
 # Permission to use, copy, modify, and distribute this software for any
 # purpose with or without fee is hereby granted, provided that the above
@@ -19,6 +19,7 @@ use OpenBSD::PackageInfo;
 use OpenBSD::PackingList;
 use OpenBSD::Getopt;
 use OpenBSD::Error;
+use OpenBSD::Paths;
 use File::Path;
 
 package OpenBSD::PackingElement;
@@ -28,7 +29,7 @@ package OpenBSD::PackingElement::FileObject;
 sub print_name
 {
 	my ($self, $fh, $pkgname) = @_;
-	print $fh $pkgname, ":", $self->fullname(), "\n";
+	print $fh $pkgname, ":", $self->fullname, "\n";
 }
 
 package main;
@@ -42,11 +43,11 @@ sub info
 	my $plist = shift;
 	my $r;
 	if ($opt_a) {
-		$r = $plist->{extrainfo}->{subdir}.":".$plist->pkgname();
+		$r = $plist->{extrainfo}->{subdir}.":".$plist->pkgname;
 	} elsif ($opt_P) {
 		$r = $plist->{extrainfo}->{subdir};
 	} else {
-		$r = $plist->pkgname();
+		$r = $plist->pkgname;
 	}
 	print STDERR "$r\n" unless $opt_q;
 	return $r;
@@ -74,7 +75,7 @@ try {
 };
 
 my $fh;
-my $MKLOCATEDB="/usr/libexec/locate.mklocatedb";
+my $MKLOCATEDB = OpenBSD::Paths->mklocatedb;
 
 if ($opt_n or -t STDOUT) {
 	$fh = \*STDOUT;
@@ -82,7 +83,8 @@ if ($opt_n or -t STDOUT) {
 	open $fh, "|-", $MKLOCATEDB, $MKLOCATEDB or die "couldn't open pipe: $!";
 }
 if ($opt_s || $opt_x) {
-	my ($rev, $arch) = split(/ /, `uname -mr`);
+	my $cmd = OpenBSD::Paths->uname." -mr";
+	my ($rev, $arch) = split(/\s+/o, `$cmd`);
 	chomp $arch;
 	$rev =~ s/\.//;
 	if ($opt_s) {
@@ -120,13 +122,13 @@ if ($opt_r) {
 
 	opendir(my $dir, $opt_r) or next;
 	while (my $e = readdir $dir) {
-		if ($e =~ m/^(\w+\d\d)\.tgz$/) {
+		if ($e =~ m/^(\w+\d\d)\.tgz$/o) {
 			my $set = $1;
-			open my $arc, '-|', '/usr/bin/gzip', 'gzip', '-c', '-d', "$opt_r/$e";
+			open my $arc, '-|', OpenBSD::Paths->gzip, '-c', '-d', "$opt_r/$e";
 			my $u = OpenBSD::Ustar->new($arc, '/');
-			while (my $f = $u->next()) {
+			while (my $f = $u->next) {
 				my $name = $f->{name};
-				$name =~ s/^\.//;
+				$name =~ s/^\.//o;
 				print $fh "$set:$name\n";
 			}
 			close $arc;
@@ -151,8 +153,8 @@ if ($opt_p) {
 			}
 			$done = 1;
 		    });
-		if (defined $plist && defined $plist->pkgname()) {
-			$plist->visit('print_name', $fh, info($plist));
+		if (defined $plist && defined $plist->pkgname) {
+			$plist->print_name($fh, info($plist));
 		}
 	}
 	close($in);
@@ -161,12 +163,13 @@ if ($opt_p) {
 elsif (@ARGV==0) {
 	for my $pkgname (installed_packages()) {
 		my $plist = OpenBSD::PackingList->from_installation($pkgname);
-		$plist->visit('print_name', $fh, info($plist));
+		next unless defined $plist;
+		$plist->print_name($fh, info($plist));
 	}
 } else {
 	for my $pkgname (@ARGV) {
 		my $plist = OpenBSD::PackageLocator->grabPlist($pkgname);
 		next unless $plist;
-		$plist->visit('print_name', $fh, info($plist));
+		$plist->print_name($fh, info($plist));
 	}
 }

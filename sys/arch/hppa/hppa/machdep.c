@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.151 2006/05/28 23:08:07 martin Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.164 2007/07/22 19:24:45 kettenis Exp $	*/
 
 /*
  * Copyright (c) 1999-2003 Michael Shalayeff
@@ -88,12 +88,6 @@
 /*
  * Patchable buffer cache parameters
  */
-#ifdef NBUF
-int nbuf = NBUF;
-#else
-int nbuf = 0;
-#endif
-
 #ifndef BUFCACHEPERCENT
 #define BUFCACHEPERCENT 10
 #endif /* BUFCACHEPERCENT */
@@ -124,6 +118,7 @@ int dcache_stride, dcache_line_mask;
  */
 volatile u_int8_t *machine_ledaddr;
 int machine_ledword, machine_leds;
+struct cpu_info cpu_info_primary;
 
 /*
  * CPU params (should be the same for all cpus in the system)
@@ -146,6 +141,8 @@ u_int	fpu_version;
 int	cpu_model_hpux;	/* contains HPUX_SYSCONF_CPU* kind of value */
 #endif
 
+int	led_blink;
+
 /*
  * exported methods for cpus
  */
@@ -164,7 +161,7 @@ paddr_t	avail_end;
  * Things for MI glue to stick on.
  */
 struct user *proc0paddr;
-long mem_ex_storage[EXTENT_FIXED_STORAGE_SIZE(32) / sizeof(long)];
+long mem_ex_storage[EXTENT_FIXED_STORAGE_SIZE(64) / sizeof(long)];
 struct extent *hppa_ex;
 
 struct vm_map *exec_map = NULL;
@@ -177,6 +174,7 @@ static __inline void fall(int, int, int, int, int);
 void dumpsys(void);
 void hpmc_dump(void);
 void cpuid(void);
+void blink_led_timeout(void *);
 
 /*
  * wide used hardware params
@@ -266,6 +264,10 @@ const struct hppa_cpu_typed {
 #endif
 #ifdef HP8500_CPU
 	{ "PCXW",  hpcxw, HPPA_CPU_PCXW, HPPA_FTRS_W32B,
+	  4, desidhash_u, ibtlb_u, NULL, pbtlb_u },
+#endif
+#ifdef HP8700_CPU
+	{ "PCXW2",  hpcxw, HPPA_CPU_PCXW2, HPPA_FTRS_W32B,
 	  4, desidhash_u, ibtlb_u, NULL, pbtlb_u },
 #endif
 	{ "", 0 }
@@ -378,28 +380,8 @@ hppa_init(start)
 	 * Now allocate kernel dynamic variables
 	 */
 
-	/* buffer cache parameters */
-	if (bufpages == 0)
-		bufpages = physmem / 100 *
-		    (physmem <= 0x1000? 5 : bufcachepercent);
-
-	if (nbuf == 0)
-		nbuf = bufpages < 16? 16 : bufpages;
-
-	/* Restrict to at most 70% filled kvm */
-	if (nbuf * MAXBSIZE >
-	    (VM_MAX_KERNEL_ADDRESS-VM_MIN_KERNEL_ADDRESS) * 7 / 10)
-		nbuf = (VM_MAX_KERNEL_ADDRESS-VM_MIN_KERNEL_ADDRESS) /
-		    MAXBSIZE * 7 / 10;
-
-	/* More buffer pages than fits into the buffers is senseless. */
-	if (bufpages > nbuf * MAXBSIZE / PAGE_SIZE)
-		bufpages = nbuf * MAXBSIZE / PAGE_SIZE;
-
 	v1 = v = round_page(start);
 #define valloc(name, type, num) (name) = (type *)v; v = (vaddr_t)((name)+(num))
-
-	valloc(buf, struct buf, nbuf);
 
 #ifdef SYSVMSG
 	valloc(msgpool, char, msginfo.msgmax);
@@ -641,8 +623,6 @@ void
 cpu_startup(void)
 {
 	vaddr_t minaddr, maxaddr;
-	vsize_t size;
-	int i, base, residual;
 
 	/*
 	 * i won't understand a friend of mine,
@@ -656,43 +636,24 @@ cpu_startup(void)
 	printf("real mem = %u (%u reserved for PROM, %u used by OpenBSD)\n",
 	    ctob(physmem), ctob(resvmem), ctob(resvphysmem - resvmem));
 
-	size = MAXBSIZE * nbuf;
-	if (uvm_map(kernel_map, &minaddr, round_page(size),
-	    NULL, UVM_UNKNOWN_OFFSET, 0, UVM_MAPFLAG(UVM_PROT_NONE,
-	    UVM_PROT_NONE, UVM_INH_NONE, UVM_ADV_NORMAL, 0)))
-		panic("cpu_startup: cannot allocate VM for buffers");
-	buffers = (caddr_t)minaddr;
-	base = bufpages / nbuf;
-	residual = bufpages % nbuf;
-	for (i = 0; i < nbuf; i++) {
-		vaddr_t curbuf;
-		int cbpgs;
+	/*
+	 * Determine how many buffers to allocate.
+	 * We allocate bufcachepercent% of memory for buffer space.
+	 */
+	if (bufpages == 0)
+		bufpages = physmem * bufcachepercent / 100;
 
-		/*
-		 * First <residual> buffers get (base+1) physical pages
-		 * allocated for them.  The rest get (base) physical pages.
-		 *
-		 * The rest of each buffer occupies virtual space,
-		 * but has no physical memory allocated for it.
-		 */
-		curbuf = (vaddr_t) buffers + (i * MAXBSIZE);
-
-		for (cbpgs = base + (i < residual? 1 : 0); cbpgs--; ) {
-			struct vm_page *pg;
-
-			if ((pg = uvm_pagealloc(NULL, 0, NULL, 0)) == NULL)
-				panic("cpu_startup: not enough memory for "
-				    "buffer cache");
-			pmap_kenter_pa(curbuf, VM_PAGE_TO_PHYS(pg),
-			    UVM_PROT_RW);
-			curbuf += PAGE_SIZE;
-		}
-	}
+	/* Restrict to at most 25% filled kvm */
+	if (bufpages >
+	    (VM_MAX_KERNEL_ADDRESS-VM_MIN_KERNEL_ADDRESS) / PAGE_SIZE / 4) 
+		bufpages = (VM_MAX_KERNEL_ADDRESS-VM_MIN_KERNEL_ADDRESS) /
+		    PAGE_SIZE / 4;
 
 	/*
 	 * Allocate a submap for exec arguments.  This map effectively
 	 * limits the number of processes exec'ing at any time.
 	 */
+	minaddr = vm_map_min(kernel_map);
 	exec_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr,
 	    16*NCARGS, VM_MAP_PAGEABLE, FALSE, NULL);
 
@@ -703,8 +664,6 @@ cpu_startup(void)
 	    VM_PHYS_SIZE, 0, FALSE, NULL);
 
 	printf("avail mem = %lu\n", ptoa(uvmexp.free));
-	printf("using %d buffers containing %u bytes of memory\n",
-	    nbuf, (unsigned)bufpages * PAGE_SIZE);
 
 	/*
 	 * Set up buffers, so they can be used to read disk labels.
@@ -774,31 +733,6 @@ delay(us)
 		us -= n;
 	}
 }
-
-void
-microtime(struct timeval *tv)
-{
-	extern u_long cpu_itmr;
-	u_long itmr, mask;
-	int s;
-
-	s = splhigh();
-	tv->tv_sec  = time.tv_sec;
-	tv->tv_usec = time.tv_usec;
-
-	rsm(PSL_I, mask);
-	mfctl(CR_ITMR, itmr);
-	itmr -= cpu_itmr;
-	ssm(PSL_I, mask);
-	splx(s);
-
-	tv->tv_usec += itmr * cpu_ticksdenom / cpu_ticksnum;
-	if (tv->tv_usec >= 1000000) {
-		tv->tv_usec -= 1000000;
-		tv->tv_sec++;
-	}
-}
-
 
 static __inline void
 fall(c_base, c_count, c_loop, c_stride, data)
@@ -1011,6 +945,11 @@ boot(howto)
 	} else {
 		printf("rebooting...");
 		DELAY(2000000);
+
+		/* ask firmware to reset */
+                pdc_call((iodcio_t)pdc, 0, PDC_BROADCAST_RESET, PDC_DO_RESET);
+
+		/* forcably reset module if that fails */
 		__asm __volatile(".export hppa_reset, entry\n\t"
 		    ".label hppa_reset");
 		__asm __volatile("stwas %0, 0(%1)"
@@ -1086,10 +1025,10 @@ void
 dumpsys(void)
 {
 	int psize, bytes, i, n;
-	register caddr_t maddr;
-	register daddr_t blkno;
-	register int (*dump)(dev_t, daddr_t, caddr_t, size_t);
-	register int error;
+	caddr_t maddr;
+	daddr64_t blkno;
+	int (*dump)(dev_t, daddr64_t, caddr_t, size_t);
+	int error;
 
 	/* Save registers
 	savectx(&dumppcb); */
@@ -1471,8 +1410,16 @@ sys_sigreturn(p, v, retval)
 	fdcache(HPPA_SID_KERNEL, (vaddr_t)p->p_addr->u_pcb.pcb_fpregs,
 	    sizeof(ksc.sc_fpregs));
 
-	tf->tf_iioq_head = ksc.sc_pcoqh;
-	tf->tf_iioq_tail = ksc.sc_pcoqt;
+	tf->tf_iioq_head = ksc.sc_pcoqh | HPPA_PC_PRIV_USER;
+	tf->tf_iioq_tail = ksc.sc_pcoqt | HPPA_PC_PRIV_USER;
+	if ((tf->tf_iioq_head & ~PAGE_MASK) == SYSCALLGATE)
+		tf->tf_iisq_head = HPPA_SID_KERNEL;
+	else
+		tf->tf_iisq_head = p->p_addr->u_pcb.pcb_space;
+	if ((tf->tf_iioq_tail & ~PAGE_MASK) == SYSCALLGATE)
+		tf->tf_iisq_tail = HPPA_SID_KERNEL;
+	else
+		tf->tf_iisq_tail = p->p_addr->u_pcb.pcb_space;
 	tf->tf_ipsw = ksc.sc_ps;
 
 #ifdef DEBUG
@@ -1642,6 +1589,7 @@ cpu_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
 	extern u_int fpu_enable;
 	extern int cpu_fpuena;
 	dev_t consdev;
+	int oldval, ret;
 
 	/* all sysctl names at this level are terminal */
 	if (namelen != 1)
@@ -1662,6 +1610,15 @@ cpu_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
 			mtctl(0, CR_CCR);
 		}
 		return (sysctl_int(oldp, oldlenp, newp, newlen, &cpu_fpuena));
+	case CPU_LED_BLINK:
+		oldval = led_blink;
+		ret = sysctl_int(oldp, oldlenp, newp, newlen, &led_blink);
+		/*
+		 * If we were false and are now true, start the timer.
+		 */
+		if (!oldval && led_blink > oldval)
+			blink_led_timeout(NULL);
+		return (ret);
 	default:
 		return (EOPNOTSUPP);
 	}
@@ -1676,10 +1633,55 @@ cpu_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
 void
 consinit(void)
 {
-	static int initted;
+	/*
+	 * Initial console setup has been done in pdc_init().
+	 */
+}
 
-	if (!initted) {
-		initted++;
-		cninit();
+
+struct blink_led_softc {
+	SLIST_HEAD(, blink_led) bls_head;
+	int bls_on;
+	struct timeout bls_to;
+} blink_sc = { SLIST_HEAD_INITIALIZER(bls_head), 0 };
+
+void
+blink_led_register(struct blink_led *l)
+{
+	if (SLIST_EMPTY(&blink_sc.bls_head)) {
+		timeout_set(&blink_sc.bls_to, blink_led_timeout, &blink_sc);
+		blink_sc.bls_on = 0;
+		if (led_blink)
+			timeout_add(&blink_sc.bls_to, 1);
 	}
+	SLIST_INSERT_HEAD(&blink_sc.bls_head, l, bl_next);
+}
+
+void
+blink_led_timeout(void *vsc)
+{
+	struct blink_led_softc *sc = &blink_sc;
+	struct blink_led *l;
+	int t;
+
+	if (SLIST_EMPTY(&sc->bls_head))
+		return;
+
+	SLIST_FOREACH(l, &sc->bls_head, bl_next) {
+		(*l->bl_func)(l->bl_arg, sc->bls_on);
+	}
+	sc->bls_on = !sc->bls_on;
+
+	if (!led_blink)
+		return;
+
+	/*
+	 * Blink rate is:
+	 *      full cycle every second if completely idle (loadav = 0)
+	 *      full cycle every 2 seconds if loadav = 1
+	 *      full cycle every 3 seconds if loadav = 2
+	 * etc.
+	 */
+	t = (((averunnable.ldavg[0] + FSCALE) * hz) >> (FSHIFT + 1));
+	timeout_add(&sc->bls_to, t);
 }

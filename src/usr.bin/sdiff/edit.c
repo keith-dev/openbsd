@@ -1,4 +1,4 @@
-/*	$OpenBSD: edit.c,v 1.15 2007/02/26 08:32:00 steven Exp $ */
+/*	$OpenBSD: edit.c,v 1.17 2007/05/11 02:47:52 ray Exp $ */
 
 /*
  * Written by Raymond Lai <ray@cyth.net>.
@@ -10,6 +10,9 @@
 
 #include <ctype.h>
 #include <err.h>
+#include <errno.h>
+#include <paths.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -18,48 +21,61 @@
 #include "common.h"
 #include "extern.h"
 
-static void edit(const char *);
+int editit(const char *);
 
 /*
- * Takes the name of a file and opens it with an editor.
+ * Execute an editor on the specified pathname, which is interpreted
+ * from the shell.  This means flags may be included.
+ *
+ * Returns -1 on error, or the exit value on success.
  */
-static void
-edit(const char *filename)
+int
+editit(const char *pathname)
 {
-	int status;
+	char *argp[] = {"sh", "-c", NULL, NULL}, *ed, *p;
+	sig_t sighup, sigint, sigquit;
 	pid_t pid;
-	const char *editor;
+	int saved_errno, st;
 
-	editor = getenv("VISUAL");
-	if (editor == NULL)
-		editor = getenv("EDITOR");
-	if (editor == NULL)
-		editor = "vi";
+	ed = getenv("VISUAL");
+	if (ed == NULL || ed[0] == '\0')
+		ed = getenv("EDITOR");
+	if (ed == NULL || ed[0] == '\0')
+		ed = _PATH_VI;
+	if (asprintf(&p, "%s %s", ed, pathname) == -1)
+		return (-1);
+	argp[2] = p;
 
-	/* Start editor on temporary file. */
-	switch (pid = fork()) {
-	case 0:
-		/* child */
-		execlp(editor, editor, filename, (void *)NULL);
-		warn("could not execute editor: %s", editor);
-		cleanup(filename);
-	case -1:
-		warn("could not fork");
-		cleanup(filename);
+	sighup = signal(SIGHUP, SIG_IGN);
+	sigint = signal(SIGINT, SIG_IGN);
+	sigquit = signal(SIGQUIT, SIG_IGN);
+	if ((pid = fork()) == -1)
+		goto fail;
+	if (pid == 0) {
+		execv(_PATH_BSHELL, argp);
+		_exit(127);
 	}
-
-	/* parent */
-	/* Wait for editor to exit. */
-	if (waitpid(pid, &status, 0) == -1) {
-		warn("waitpid");
-		cleanup(filename);
+	while (waitpid(pid, &st, 0) == -1)
+		if (errno != EINTR)
+			goto fail;
+	free(p);
+	(void)signal(SIGHUP, sighup);
+	(void)signal(SIGINT, sigint);
+	(void)signal(SIGQUIT, sigquit);
+	if (!WIFEXITED(st)) {
+		errno = EINTR;
+		return (-1);
 	}
+	return (WEXITSTATUS(st));
 
-	/* Check that editor terminated normally. */
-	if (!WIFEXITED(status)) {
-		warn("%s terminated abnormally", editor);
-		cleanup(filename);
-	}
+ fail:
+	saved_errno = errno;
+	(void)signal(SIGHUP, sighup);
+	(void)signal(SIGINT, sigint);
+	(void)signal(SIGQUIT, sigquit);
+	free(p);
+	errno = saved_errno;
+	return (-1);
 }
 
 /*
@@ -144,7 +160,10 @@ RIGHT:
 	free(text);
 
 	/* Edit temp file. */
-	edit(filename);
+	if (editit(filename) == -1) {
+		warn("error editing %s", filename);
+		cleanup(filename);
+	}
 
 	/* Open temporary file. */
 	if (!(file = fopen(filename, "r"))) {

@@ -1,4 +1,4 @@
-/*	$OpenBSD: safte.c,v 1.33 2007/02/21 22:37:38 deanna Exp $ */
+/*	$OpenBSD: safte.c,v 1.37 2007/06/24 05:34:35 dlg Exp $ */
 
 /*
  * Copyright (c) 2005 David Gwynne <dlg@openbsd.org>
@@ -50,7 +50,7 @@ void	safte_attach(struct device *, struct device *, void *);
 int	safte_detach(struct device *, int);
 
 struct safte_sensor {
-	struct sensor		se_sensor;
+	struct ksensor		se_sensor;
 	enum {
 		SAFTE_T_FAN,
 		SAFTE_T_PWRSUP,
@@ -71,7 +71,8 @@ struct safte_softc {
 
 	int			sc_nsensors;
 	struct safte_sensor	*sc_sensors;
-	struct sensordev	sc_sensordev;
+	struct ksensordev	sc_sensordev;
+	struct sensor_task	*sc_sensortask;
 
 	int			sc_celsius;
 	int			sc_ntemps;
@@ -112,7 +113,7 @@ safte_match(struct device *parent, void *match, void *aux)
 	struct scsi_inquiry_data	inqbuf;
 	struct scsi_inquiry		cmd;
 	struct safte_inq		*si = (struct safte_inq *)&inqbuf.extra;
-	int				flags;
+	int				length, flags;
 
 	if (inq == NULL)
 		return (0);
@@ -127,14 +128,15 @@ safte_match(struct device *parent, void *match, void *aux)
 	    (inq->response_format & SID_ANSII) != 2)
 		return (0);
 
+	length = inq->additional_length + SAFTE_EXTRA_OFFSET;
+	if (length < SAFTE_INQ_LEN)
+		return (0);
+	if (length > sizeof(inqbuf))
+		length = sizeof(inqbuf);
+
 	memset(&cmd, 0, sizeof(cmd));
 	cmd.opcode = INQUIRY;
-	cmd.length = inq->additional_length + SAFTE_EXTRA_OFFSET;
-	if (cmd.length < SAFTE_INQ_LEN)
-		return (0);
-
-	if (cmd.length > sizeof(inqbuf))
-		cmd.length = sizeof(inqbuf);
+	_lto2b(length, cmd.length);
 
 	memset(&inqbuf, 0, sizeof(inqbuf));
 	memset(&inqbuf.extra, ' ', sizeof(inqbuf.extra));
@@ -144,7 +146,7 @@ safte_match(struct device *parent, void *match, void *aux)
 		flags |= SCSI_AUTOCONF;
 
 	if (scsi_scsi_cmd(sa->sa_sc_link, (struct scsi_generic *)&cmd,
-	    sizeof(cmd), (u_char *)&inqbuf, cmd.length, 2, 10000, NULL,
+	    sizeof(cmd), (u_char *)&inqbuf, length, 2, 10000, NULL,
 	    flags) != 0)
 		return (0);
 
@@ -179,16 +181,20 @@ safte_attach(struct device *parent, struct device *self, void *aux)
 		return;
 	}
 
-	if (sc->sc_nsensors > 0 &&
-	    sensor_task_register(sc, safte_read_encstat, 10) != 0) {
-		printf("%s: unable to register update task\n", DEVNAME(sc));
-		sc->sc_nsensors = sc->sc_ntemps = 0;
-		free(sc->sc_sensors, M_DEVBUF);
-	} else {
-		for (i = 0; i < sc->sc_nsensors; i++)
-			sensor_attach(&sc->sc_sensordev, 
-			    &sc->sc_sensors[i].se_sensor);
-		sensordev_install(&sc->sc_sensordev);
+	if (sc->sc_nsensors > 0) {
+		sc->sc_sensortask = sensor_task_register(sc,
+		    safte_read_encstat, 10);
+		if (sc->sc_sensortask == NULL) {
+			printf("%s: unable to register update task\n",
+			    DEVNAME(sc));
+			sc->sc_nsensors = sc->sc_ntemps = 0;
+			free(sc->sc_sensors, M_DEVBUF);
+		} else {
+			for (i = 0; i < sc->sc_nsensors; i++)
+				sensor_attach(&sc->sc_sensordev, 
+				    &sc->sc_sensors[i].se_sensor);
+			sensordev_install(&sc->sc_sensordev);
+		}
 	}
 
 #if NBIO > 0
@@ -223,7 +229,7 @@ safte_detach(struct device *self, int flags)
 
 	if (sc->sc_nsensors > 0) {
 		sensordev_deinstall(&sc->sc_sensordev);
-		sensor_task_unregister(sc);
+		sensor_task_unregister(sc->sc_sensortask);
 
 		for (i = 0; i < sc->sc_nsensors; i++)
 			sensor_detach(&sc->sc_sensordev, 
@@ -362,8 +368,6 @@ safte_read_config(struct safte_softc *sc)
 		s->se_type = SAFTE_T_TEMP;
 		s->se_field = (u_int8_t *)(sc->sc_encbuf + j + i);
 		s->se_sensor.type = SENSOR_TEMP;
-		snprintf(s->se_sensor.desc, sizeof(s->se_sensor.desc),
-		    "Temp%d", i);
 
 		s++;
 	}

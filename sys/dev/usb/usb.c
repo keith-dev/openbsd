@@ -1,4 +1,4 @@
-/*	$OpenBSD: usb.c,v 1.35 2006/11/01 03:37:24 tedu Exp $	*/
+/*	$OpenBSD: usb.c,v 1.56 2007/06/15 11:41:48 mbalmer Exp $	*/
 /*	$NetBSD: usb.c,v 1.77 2003/01/01 00:10:26 thorpej Exp $	*/
 
 /*
@@ -73,8 +73,8 @@
 #include <dev/usb/usb_quirks.h>
 
 #ifdef USB_DEBUG
-#define DPRINTF(x)	do { if (usbdebug) logprintf x; } while (0)
-#define DPRINTFN(n,x)	do { if (usbdebug>(n)) logprintf x; } while (0)
+#define DPRINTF(x)	do { if (usbdebug) printf x; } while (0)
+#define DPRINTFN(n,x)	do { if (usbdebug>(n)) printf x; } while (0)
 int	usbdebug = 0;
 #if defined(UHCI_DEBUG) && NUHCI > 0
 extern int	uhcidebug;
@@ -94,65 +94,68 @@ int	usb_noexplore = 0;
 #endif
 
 struct usb_softc {
-	USBBASEDEVICE	sc_dev;		/* base device */
-	usbd_bus_handle sc_bus;		/* USB controller */
+	struct device	 sc_dev;	/* base device */
+	usbd_bus_handle  sc_bus;	/* USB controller */
 	struct usbd_port sc_port;	/* dummy port for root hub */
 
-	usb_proc_ptr	sc_event_thread;
+	struct proc	*sc_event_thread;
 
-	char		sc_dying;
+	char		 sc_dying;
 };
 
 TAILQ_HEAD(, usb_task) usb_all_tasks;
 
-#if defined(__NetBSD__)
-dev_type_open(usbopen);
-dev_type_close(usbclose);
-dev_type_read(usbread);
-dev_type_ioctl(usbioctl);
-dev_type_poll(usbpoll);
-dev_type_kqfilter(usbkqfilter);
+volatile int threads_pending = 0;
 
-const struct cdevsw usb_cdevsw = {
-	usbopen, usbclose, usbread, nowrite, usbioctl,
-	nostop, notty, usbpoll, nommap, usbkqfilter,
-};
-#endif
-
-Static volatile int threads_pending = 0;
-
-Static void	usb_discover(void *);
-Static void	usb_create_event_thread(void *);
-Static void	usb_event_thread(void *);
-Static void	usb_task_thread(void *);
-Static usb_proc_ptr usb_task_thread_proc = NULL;
+void	usb_discover(void *);
+void	usb_create_event_thread(void *);
+void	usb_event_thread(void *);
+void	usb_task_thread(void *);
+struct proc *usb_task_thread_proc = NULL;
 
 #define USB_MAX_EVENTS 100
 struct usb_event_q {
 	struct usb_event ue;
 	SIMPLEQ_ENTRY(usb_event_q) next;
 };
-Static SIMPLEQ_HEAD(, usb_event_q) usb_events =
+SIMPLEQ_HEAD(, usb_event_q) usb_events =
 	SIMPLEQ_HEAD_INITIALIZER(usb_events);
-Static int usb_nevents = 0;
-Static struct selinfo usb_selevent;
-Static usb_proc_ptr usb_async_proc;  /* process that wants USB SIGIO */
-Static int usb_dev_open = 0;
-Static void usb_add_event(int, struct usb_event *);
+int usb_nevents = 0;
+struct selinfo usb_selevent;
+struct proc *usb_async_proc;  /* process that wants USB SIGIO */
+int usb_dev_open = 0;
+void usb_add_event(int, struct usb_event *);
 
-Static int usb_get_next_event(struct usb_event *);
+int usb_get_next_event(struct usb_event *);
 
-Static const char *usbrev_str[] = USBREV_STR;
+const char *usbrev_str[] = USBREV_STR;
 
-USB_DECLARE_DRIVER(usb);
+int usb_match(struct device *, void *, void *); 
+void usb_attach(struct device *, struct device *, void *); 
+int usb_detach(struct device *, int); 
+int usb_activate(struct device *, enum devact); 
 
-USB_MATCH(usb)
+struct cfdriver usb_cd = { 
+	NULL, "usb", DV_DULL 
+}; 
+
+const struct cfattach usb_ca = { 
+	sizeof(struct usb_softc), 
+	usb_match, 
+	usb_attach, 
+	usb_detach, 
+	usb_activate, 
+};
+
+int
+usb_match(struct device *parent, void *match, void *aux)
 {
 	DPRINTF(("usbd_match\n"));
 	return (UMATCH_GENERIC);
 }
 
-USB_ATTACH(usb)
+void
+usb_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct usb_softc *sc = (struct usb_softc *)self;
 	usbd_device_handle dev;
@@ -181,7 +184,7 @@ USB_ATTACH(usb)
 	default:
 		printf(", not supported\n");
 		sc->sc_dying = 1;
-		USB_ATTACH_ERROR_RETURN;
+		return;
 	}
 	printf("\n");
 
@@ -189,33 +192,29 @@ USB_ATTACH(usb)
 	if (cold)
 		sc->sc_bus->use_polling++;
 
-	ue.u.ue_ctrlr.ue_bus = USBDEVUNIT(sc->sc_dev);
+	ue.u.ue_ctrlr.ue_bus = sc->sc_dev.dv_unit;
 	usb_add_event(USB_EVENT_CTRLR_ATTACH, &ue);
 
-#ifdef USB_USE_SOFTINTR
 #ifdef __HAVE_GENERIC_SOFT_INTERRUPTS
 	/* XXX we should have our own level */
 	sc->sc_bus->soft = softintr_establish(IPL_SOFTNET,
 	    sc->sc_bus->methods->soft_intr, sc->sc_bus);
 	if (sc->sc_bus->soft == NULL) {
-		printf("%s: can't register softintr\n", USBDEVNAME(sc->sc_dev));
+		printf("%s: can't register softintr\n", sc->sc_dev.dv_xname);
 		sc->sc_dying = 1;
-		USB_ATTACH_ERROR_RETURN;
+		return;
 	}
-#else
-	usb_callout_init(sc->sc_bus->softi);
-#endif
 #endif
 
-	err = usbd_new_device(USBDEV(sc->sc_dev), sc->sc_bus, 0, speed, 0,
+	err = usbd_new_device(&sc->sc_dev, sc->sc_bus, 0, speed, 0,
 		  &sc->sc_port);
 	if (!err) {
 		dev = sc->sc_port.device;
 		if (dev->hub == NULL) {
 			sc->sc_dying = 1;
 			printf("%s: root device is not a hub\n",
-			       USBDEVNAME(sc->sc_dev));
-			USB_ATTACH_ERROR_RETURN;
+			       sc->sc_dev.dv_xname);
+			return;
 		}
 		sc->sc_bus->root_hub = dev;
 #if 1
@@ -229,7 +228,7 @@ USB_ATTACH(usb)
 #endif
 	} else {
 		printf("%s: root hub problem, error=%d\n",
-		       USBDEVNAME(sc->sc_dev), err);
+		       sc->sc_dev.dv_xname, err);
 		sc->sc_dying = 1;
 	}
 	if (cold)
@@ -237,11 +236,8 @@ USB_ATTACH(usb)
 
 	config_pending_incr();
 	kthread_create_deferred(usb_create_event_thread, sc);
-
-	USB_ATTACH_SUCCESS_RETURN;
 }
 
-#if defined(__NetBSD__) || defined(__OpenBSD__)
 void
 usb_create_event_thread(void *arg)
 {
@@ -304,8 +300,14 @@ void
 usb_event_thread(void *arg)
 {
 	struct usb_softc *sc = arg;
+	int pwrdly;
 
 	DPRINTF(("usb_event_thread: start\n"));
+
+	/* Wait for power to come good. */
+	pwrdly = sc->sc_bus->root_hub->hub->hubdesc.bPwrOn2PwrGood * 
+	    UHD_PWRON_FACTOR + USB_EXTRA_POWER_UP_TIME;
+	usb_delay_ms(sc->sc_bus, pwrdly);
 
 	/* USB1 threads wait for USB2 threads to finish their first probe. */
 	while (sc->sc_bus->usbrev != USBREV_2_0 && threads_pending)
@@ -380,10 +382,9 @@ usbctlprint(void *aux, const char *pnp)
 
 	return (UNCONF);
 }
-#endif /* defined(__NetBSD__) || defined(__OpenBSD__) */
 
 int
-usbopen(dev_t dev, int flag, int mode, usb_proc_ptr p)
+usbopen(dev_t dev, int flag, int mode, struct proc *p)
 {
 	int unit = minor(dev);
 	struct usb_softc *sc;
@@ -396,7 +397,11 @@ usbopen(dev_t dev, int flag, int mode, usb_proc_ptr p)
 		return (0);
 	}
 
-	USB_GET_SC_OPEN(usb, unit, sc);
+	if (unit >= usb_cd.cd_ndevs)
+		return (ENXIO);
+	sc = usb_cd.cd_devs[unit];
+	if (sc == NULL)
+		return (ENXIO);
 
 	if (sc->sc_dying)
 		return (EIO);
@@ -438,7 +443,7 @@ usbread(dev_t dev, struct uio *uio, int flag)
 }
 
 int
-usbclose(dev_t dev, int flag, int mode, usb_proc_ptr p)
+usbclose(dev_t dev, int flag, int mode, struct proc *p)
 {
 	int unit = minor(dev);
 
@@ -451,7 +456,7 @@ usbclose(dev_t dev, int flag, int mode, usb_proc_ptr p)
 }
 
 int
-usbioctl(dev_t devt, u_long cmd, caddr_t data, int flag, usb_proc_ptr p)
+usbioctl(dev_t devt, u_long cmd, caddr_t data, int flag, struct proc *p)
 {
 	struct usb_softc *sc;
 	int unit = minor(devt);
@@ -474,7 +479,7 @@ usbioctl(dev_t devt, u_long cmd, caddr_t data, int flag, usb_proc_ptr p)
 		}
 	}
 
-	USB_GET_SC(usb, unit, sc);
+	sc = usb_cd.cd_devs[unit];
 
 	if (sc->sc_dying)
 		return (EIO);
@@ -578,7 +583,7 @@ usbioctl(dev_t devt, u_long cmd, caddr_t data, int flag, usb_proc_ptr p)
 }
 
 int
-usbpoll(dev_t dev, int events, usb_proc_ptr p)
+usbpoll(dev_t dev, int events, struct proc *p)
 {
 	int revents, mask, s;
 
@@ -599,21 +604,21 @@ usbpoll(dev_t dev, int events, usb_proc_ptr p)
 	}
 }
 
-Static void filt_usbrdetach(struct knote *);
-Static int filt_usbread(struct knote *, long);
+void filt_usbrdetach(struct knote *);
+int filt_usbread(struct knote *, long);
 int usbkqfilter(dev_t, struct knote *);
 
-Static void
+void
 filt_usbrdetach(struct knote *kn)
 {
 	int s;
 
 	s = splusb();
-	SLIST_REMOVE(&usb_selevent.sel_klist, kn, knote, kn_selnext);
+	SLIST_REMOVE(&usb_selevent.si_note, kn, knote, kn_selnext);
 	splx(s);
 }
 
-Static int
+int
 filt_usbread(struct knote *kn, long hint)
 {
 
@@ -624,7 +629,7 @@ filt_usbread(struct knote *kn, long hint)
 	return (1);
 }
 
-Static struct filterops usbread_filtops =
+struct filterops usbread_filtops =
 	{ 1, NULL, filt_usbrdetach, filt_usbread };
 
 int
@@ -637,7 +642,7 @@ usbkqfilter(dev_t dev, struct knote *kn)
 	case EVFILT_READ:
 		if (minor(dev) != USB_DEV_MINOR)
 			return (1);
-		klist = &usb_selevent.sel_klist;
+		klist = &usb_selevent.si_note;
 		kn->kn_fop = &usbread_filtops;
 		break;
 
@@ -655,7 +660,7 @@ usbkqfilter(dev_t dev, struct knote *kn)
 }
 
 /* Explore device tree from the root. */
-Static void
+void
 usb_discover(void *v)
 {
 	struct usb_softc *sc = v;
@@ -726,17 +731,17 @@ usbd_add_dev_event(int type, usbd_device_handle udev)
 }
 
 void
-usbd_add_drv_event(int type, usbd_device_handle udev, device_ptr_t dev)
+usbd_add_drv_event(int type, usbd_device_handle udev, struct device *dev)
 {
 	struct usb_event ue;
 
 	ue.u.ue_driver.ue_cookie = udev->cookie;
-	strncpy(ue.u.ue_driver.ue_devname, USBDEVPTRNAME(dev),
+	strncpy(ue.u.ue_driver.ue_devname, dev->dv_xname,
 	    sizeof ue.u.ue_driver.ue_devname);
 	usb_add_event(type, &ue);
 }
 
-Static void
+void
 usb_add_event(int type, struct usb_event *uep)
 {
 	struct usb_event_q *ueq;
@@ -769,25 +774,19 @@ void
 usb_schedsoftintr(usbd_bus_handle bus)
 {
 	DPRINTFN(10,("usb_schedsoftintr: polling=%d\n", bus->use_polling));
-#ifdef USB_USE_SOFTINTR
+#ifdef __HAVE_GENERIC_SOFT_INTERRUPTS
 	if (bus->use_polling) {
 		bus->methods->soft_intr(bus);
 	} else {
-#ifdef __HAVE_GENERIC_SOFT_INTERRUPTS
 		softintr_schedule(bus->soft);
-#else
-		if (!usb_callout_pending(bus->softi))
-			usb_callout(bus->softi, 0, bus->methods->soft_intr,
-				    bus);
-#endif /* __HAVE_GENERIC_SOFT_INTERRUPTS */
 	}
 #else
 	bus->methods->soft_intr(bus);
-#endif /* USB_USE_SOFTINTR */
+#endif /* __HAVE_GENERIC_SOFT_INTERRUPTS */
 }
 
 int
-usb_activate(device_ptr_t self, enum devact act)
+usb_activate(struct device *self, enum devact act)
 {
 	struct usb_softc *sc = (struct usb_softc *)self;
 	usbd_device_handle dev = sc->sc_port.device;
@@ -810,7 +809,7 @@ usb_activate(device_ptr_t self, enum devact act)
 }
 
 int
-usb_detach(device_ptr_t self, int flags)
+usb_detach(struct device *self, int flags)
 {
 	struct usb_softc *sc = (struct usb_softc *)self;
 	struct usb_event ue;
@@ -828,24 +827,20 @@ usb_detach(device_ptr_t self, int flags)
 		wakeup(&sc->sc_bus->needs_explore);
 		if (tsleep(sc, PWAIT, "usbdet", hz * 60))
 			printf("%s: event thread didn't die\n",
-			       USBDEVNAME(sc->sc_dev));
+			       sc->sc_dev.dv_xname);
 		DPRINTF(("usb_detach: event thread dead\n"));
 	}
 
 	usbd_finish();
 
-#ifdef USB_USE_SOFTINTR
 #ifdef __HAVE_GENERIC_SOFT_INTERRUPTS
 	if (sc->sc_bus->soft != NULL) {
 		softintr_disestablish(sc->sc_bus->soft);
 		sc->sc_bus->soft = NULL;
 	}
-#else
-	usb_uncallout(sc->sc_bus->softi, bus->methods->soft_intr, bus);
-#endif
 #endif
 
-	ue.u.ue_ctrlr.ue_bus = USBDEVUNIT(sc->sc_dev);
+	ue.u.ue_ctrlr.ue_bus = sc->sc_dev.dv_unit;
 	usb_add_event(USB_EVENT_CTRLR_DETACH, &ue);
 
 	return (0);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.37 2006/12/24 20:30:35 miod Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.40 2007/05/14 21:38:08 kettenis Exp $	*/
 /*	$NetBSD: cpu.h,v 1.28 2001/06/14 22:56:58 thorpej Exp $ */
 
 /*
@@ -105,6 +105,8 @@ struct cpu_info {
 	int			ci_upaid;
 	struct schedstate_percpu ci_schedstate; /* scheduler state */
 
+	int			ci_want_resched;
+
 	/* DEBUG/DIAGNOSTIC stuff */
 	u_long			ci_spin_locks;	/* # of spin locks held */
 	u_long			ci_simple_locks;/* # of simple locks held */
@@ -116,13 +118,15 @@ struct cpu_info {
 };
 
 extern struct cpu_info *cpus;
-extern struct cpu_info cpu_info_store;
 
-#if 1
-#define	curcpu()	(&cpu_info_store)
-#else
 #define	curcpu()	((struct cpu_info *)CPUINFO_VA)
-#endif
+
+#define CPU_IS_PRIMARY(ci)	1
+#define CPU_INFO_ITERATOR	int
+#define CPU_INFO_FOREACH(cii, ci)					\
+	for (cii = 0, ci = curcpu(); ci != NULL; ci = NULL)
+
+#define curpcb		curcpu()->ci_cpcb
 
 /*
  * definitions of cpu-dependent requirements
@@ -161,8 +165,7 @@ extern	int want_ast;
  * Preempt the current process if in interrupt from user mode,
  * or after the current trap/syscall if in system mode.
  */
-extern	int want_resched;	/* resched() was called */
-#define	need_resched(ci)	(want_resched = 1, want_ast = 1)
+#define	need_resched(ci)	(ci->ci_want_resched = 1, want_ast = 1)
 
 /*
  * This is used during profiling to integrate system time.
@@ -174,7 +177,7 @@ extern	int want_resched;	/* resched() was called */
  * buffer pages are invalid.  On the sparc, request an ast to send us
  * through trap(), marking the proc as needing a profiling tick.
  */
-#define	need_proftick(p)	((p)->p_flag |= P_OWEUPC, want_ast = 1)
+#define	need_proftick(p)	do { want_ast = 1; } while (0)
 
 /*
  * Notify the current process (p) that it has a signal pending,

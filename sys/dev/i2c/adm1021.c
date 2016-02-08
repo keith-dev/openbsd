@@ -1,4 +1,4 @@
-/*	$OpenBSD: adm1021.c,v 1.25 2006/12/23 17:46:39 deraadt Exp $	*/
+/*	$OpenBSD: adm1021.c,v 1.27 2007/06/24 05:34:35 dlg Exp $	*/
 
 /*
  * Copyright (c) 2005 Theo de Raadt
@@ -45,8 +45,8 @@ struct admtemp_softc {
 	i2c_tag_t	sc_tag;
 	i2c_addr_t	sc_addr;
 
-	struct sensor	sc_sensor[ADMTEMP_NUM_SENSORS];
-	struct sensordev sc_sensordev;
+	struct ksensor	sc_sensor[ADMTEMP_NUM_SENSORS];
+	struct ksensordev sc_sensordev;
 	int		sc_noexternal;
 };
 
@@ -151,7 +151,7 @@ admtemp_attach(struct device *parent, struct device *self, void *aux)
 	    xeon ? "Xeon" : "Internal",
 	    sizeof(sc->sc_sensor[ADMTEMP_INT].desc));
 
-	if (sensor_task_register(sc, admtemp_refresh, 5)) {
+	if (sensor_task_register(sc, admtemp_refresh, 5) == NULL) {
 		printf(", unable to register update task\n");
 		return;
 	}

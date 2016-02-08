@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.11 2007/02/06 22:39:13 dlg Exp $	*/
+/*	$OpenBSD: conf.c,v 1.15 2007/08/02 16:40:27 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1994, 1995 Charles M. Hannum.  All rights reserved.
@@ -47,8 +47,6 @@ bdev_decl(wd);
 #include "fdc.h"
 #include "fd.h"
 bdev_decl(fd);
-#include "wt.h"
-bdev_decl(wt);
 #include "sd.h"
 #include "st.h"
 #include "cd.h"
@@ -65,7 +63,7 @@ struct bdevsw	bdevsw[] =
 	bdev_disk_init(NWD,wd),		/* 0: ST506/ESDI/IDE disk */
 	bdev_swap_init(1,sw),		/* 1: swap pseudo-device */
 	bdev_disk_init(NFD,fd),		/* 2: floppy diskette */
-	bdev_tape_init(NWT,wt),		/* 3: QIC-02/QIC-36 tape */
+	bdev_notdef(),			/* 3 */
 	bdev_disk_init(NSD,sd),		/* 4: SCSI disk */
 	bdev_tape_init(NST,st),		/* 5: SCSI tape */
 	bdev_disk_init(NCD,cd),		/* 6: SCSI CD-ROM */
@@ -77,7 +75,7 @@ struct bdevsw	bdevsw[] =
 	bdev_lkm_dummy(),		/* 12 */
 	bdev_lkm_dummy(),		/* 13 */
 	bdev_disk_init(NVND,vnd),	/* 14: vnode disk driver */
-	bdev_lkm_dummy(),	/* 15: Sony CD-ROM */
+	bdev_lkm_dummy(),		/* 15: Sony CD-ROM */
 	bdev_disk_init(NCCD,ccd),	/* 16: concatenated disk driver */
 	bdev_disk_init(NRD,rd),		/* 17: ram disk driver */
 	bdev_lkm_dummy(),		/* 18 */
@@ -105,6 +103,13 @@ int	nblkdev = sizeof(bdevsw) / sizeof(bdevsw[0]);
         (dev_type_stop((*))) enodev, 0,  dev_init(c,n,select), \
         (dev_type_mmap((*))) enodev, 0 }
 
+/* open, close, read */
+#define cdev_nvram_init(c,n) { \
+	dev_init(c,n,open), dev_init(c,n,close), dev_init(c,n,read), \
+	(dev_type_write((*))) enodev, (dev_type_ioctl((*))) enodev, \
+	(dev_type_stop((*))) enodev, 0, seltrue, \
+	(dev_type_mmap((*))) enodev, 0 }
+
 
 #define	mmread	mmrw
 #define	mmwrite	mmrw
@@ -116,7 +121,6 @@ cdev_decl(wd);
 #include "com.h"
 cdev_decl(com);
 cdev_decl(fd);
-cdev_decl(wt);
 cdev_decl(scd);
 #include "ss.h"
 #include "lpt.h"
@@ -146,6 +150,7 @@ cdev_decl(mcd);
 #include "sequencer.h"
 cdev_decl(music);
 #include "acpi.h"
+#include "bthub.h"
 #include "iop.h"
 #ifdef XFS
 #include <xfs/nxfs.h>
@@ -163,6 +168,8 @@ cdev_decl(xfs_dev);
 #include "cz.h"
 cdev_decl(cztty);
 #include "radio.h"
+#include "nvram.h"
+cdev_decl(nvram);
 
 #include "wsdisplay.h"
 #include "wskbd.h"
@@ -189,7 +196,7 @@ struct cdevsw	cdevsw[] =
 	cdev_log_init(1,log),		/* 7: /dev/klog */
 	cdev_tty_init(NCOM,com),	/* 8: serial port */
 	cdev_disk_init(NFD,fd),		/* 9: floppy disk */
-	cdev_tape_init(NWT,wt),		/* 10: QIC-02/QIC-36 tape */
+	cdev_notdef(),			/* 10 */
 	cdev_lkm_dummy(),		/* 11: Sony CD-ROM */
 	cdev_wsdisplay_init(NWSDISPLAY,	/* 12: frame buffers, etc. */
 	    wsdisplay),
@@ -283,6 +290,8 @@ struct cdevsw	cdevsw[] =
 	cdev_ptm_init(NPTY,ptm),	/* 81: pseudo-tty ptm device */
 	cdev_hotplug_init(NHOTPLUG,hotplug), /* 82: devices hot plugging */
 	cdev_acpi_init(NACPI,acpi),	/* 83: ACPI */
+	cdev_bthub_init(NBTHUB,bthub),	/* 84: bthub */
+	cdev_nvram_init(NNVRAM,nvram),	/* 85: NVRAM interface */
 };
 int	nchrdev = sizeof(cdevsw) / sizeof(cdevsw[0]);
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: uftdi.c,v 1.33 2007/03/03 12:40:31 deraadt Exp $ 	*/
+/*	$OpenBSD: uftdi.c,v 1.41 2007/06/14 10:11:15 mbalmer Exp $ 	*/
 /*	$NetBSD: uftdi.c,v 1.14 2003/02/23 04:20:07 simonb Exp $	*/
 
 /*
@@ -85,33 +85,33 @@ int uftdidebug = 0;
 #define UFTDIOBUFSIZE 64
 
 struct uftdi_softc {
-	USBBASEDEVICE		sc_dev;		/* base device */
-	usbd_device_handle	sc_udev;	/* device */
-	usbd_interface_handle	sc_iface;	/* interface */
+	struct device		 sc_dev;		/* base device */
+	usbd_device_handle	 sc_udev;	/* device */
+	usbd_interface_handle	 sc_iface;	/* interface */
 
-	enum uftdi_type		sc_type;
-	u_int			sc_hdrlen;
+	enum uftdi_type		 sc_type;
+	u_int			 sc_hdrlen;
 
-	u_char			sc_msr;
-	u_char			sc_lsr;
+	u_char			 sc_msr;
+	u_char			 sc_lsr;
 
-	device_ptr_t		sc_subdev;
+	struct device		*sc_subdev;
 
-	u_char			sc_dying;
+	u_char			 sc_dying;
 
-	u_int			last_lcr;
+	u_int			 last_lcr;
 };
 
-Static void	uftdi_get_status(void *, int portno, u_char *lsr, u_char *msr);
-Static void	uftdi_set(void *, int, int, int);
-Static int	uftdi_param(void *, int, struct termios *);
-Static int	uftdi_open(void *sc, int portno);
-Static void	uftdi_read(void *sc, int portno, u_char **ptr,
+void	uftdi_get_status(void *, int portno, u_char *lsr, u_char *msr);
+void	uftdi_set(void *, int, int, int);
+int	uftdi_param(void *, int, struct termios *);
+int	uftdi_open(void *sc, int portno);
+void	uftdi_read(void *sc, int portno, u_char **ptr,
 			   u_int32_t *count);
-Static void	uftdi_write(void *sc, int portno, u_char *to, u_char *from,
+void	uftdi_write(void *sc, int portno, u_char *to, u_char *from,
 			    u_int32_t *count);
-Static void	uftdi_break(void *sc, int portno, int onoff);
-Static int	uftdi_8u232am_getrate(speed_t speed, int *rate);
+void	uftdi_break(void *sc, int portno, int onoff);
+int	uftdi_8u232am_getrate(speed_t speed, int *rate);
 
 struct ucom_methods uftdi_methods = {
 	uftdi_get_status,
@@ -124,11 +124,27 @@ struct ucom_methods uftdi_methods = {
 	uftdi_write,
 };
 
-USB_DECLARE_DRIVER(uftdi);
+int uftdi_match(struct device *, void *, void *); 
+void uftdi_attach(struct device *, struct device *, void *); 
+int uftdi_detach(struct device *, int); 
+int uftdi_activate(struct device *, enum devact); 
 
-USB_MATCH(uftdi)
+struct cfdriver uftdi_cd = { 
+	NULL, "uftdi", DV_DULL 
+}; 
+
+const struct cfattach uftdi_ca = { 
+	sizeof(struct uftdi_softc), 
+	uftdi_match, 
+	uftdi_attach, 
+	uftdi_detach, 
+	uftdi_activate, 
+};
+
+int
+uftdi_match(struct device *parent, void *match, void *aux)
 {
-	USB_MATCH_START(uftdi, uaa);
+	struct usb_attach_arg *uaa = aux;
 
 	if (uaa->iface != NULL) {
 		if (uaa->vendor == USB_VENDOR_FTDI &&
@@ -184,15 +200,17 @@ USB_MATCH(uftdi)
 	return (UMATCH_NONE);
 }
 
-USB_ATTACH(uftdi)
+void
+uftdi_attach(struct device *parent, struct device *self, void *aux)
 {
-	USB_ATTACH_START(uftdi, sc, uaa);
+	struct uftdi_softc *sc = (struct uftdi_softc *)self;
+	struct usb_attach_arg *uaa = aux;
 	usbd_device_handle dev = uaa->device;
 	usbd_interface_handle iface;
 	usb_interface_descriptor_t *id;
 	usb_endpoint_descriptor_t *ed;
 	char *devinfop;
-	char *devname = USBDEVNAME(sc->sc_dev);
+	char *devname = sc->sc_dev.dv_xname;
 	int i;
 	usbd_status err;
 	struct ucom_attach_args uca;
@@ -218,8 +236,7 @@ USB_ATTACH(uftdi)
 		iface = uaa->iface;
 
 	devinfop = usbd_devinfo_alloc(dev, 0);
-	USB_ATTACH_SETUP;
-	printf("%s: %s\n", devname, devinfop);
+	printf("\n%s: %s\n", devname, devinfop);
 	usbd_devinfo_free(devinfop);
 
 	id = usbd_get_interface_descriptor(iface);
@@ -340,12 +357,12 @@ USB_ATTACH(uftdi)
 	}
 	if (uca.bulkin == -1) {
 		printf("%s: Could not find data bulk in\n",
-		       USBDEVNAME(sc->sc_dev));
+		       sc->sc_dev.dv_xname);
 		goto bad;
 	}
 	if (uca.bulkout == -1) {
 		printf("%s: Could not find data bulk out\n",
-		       USBDEVNAME(sc->sc_dev));
+		       sc->sc_dev.dv_xname);
 		goto bad;
 	}
 
@@ -365,21 +382,20 @@ USB_ATTACH(uftdi)
 	uca.info = NULL;
 
 	usbd_add_drv_event(USB_EVENT_DRIVER_ATTACH, sc->sc_udev,
-			   USBDEV(sc->sc_dev));
+			   &sc->sc_dev);
 
 	DPRINTF(("uftdi: in=0x%x out=0x%x\n", uca.bulkin, uca.bulkout));
 	sc->sc_subdev = config_found_sm(self, &uca, ucomprint, ucomsubmatch);
 
-	USB_ATTACH_SUCCESS_RETURN;
+	return;
 
 bad:
 	DPRINTF(("uftdi_attach: ATTACH ERROR\n"));
 	sc->sc_dying = 1;
-	USB_ATTACH_ERROR_RETURN;
 }
 
 int
-uftdi_activate(device_ptr_t self, enum devact act)
+uftdi_activate(struct device *self, enum devact act)
 {
 	struct uftdi_softc *sc = (struct uftdi_softc *)self;
 	int rv = 0;
@@ -398,7 +414,7 @@ uftdi_activate(device_ptr_t self, enum devact act)
 }
 
 int
-uftdi_detach(device_ptr_t self, int flags)
+uftdi_detach(struct device *self, int flags)
 {
 	struct uftdi_softc *sc = (struct uftdi_softc *)self;
 
@@ -410,12 +426,12 @@ uftdi_detach(device_ptr_t self, int flags)
 	}
 
 	usbd_add_drv_event(USB_EVENT_DRIVER_DETACH, sc->sc_udev,
-			   USBDEV(sc->sc_dev));
+			   &sc->sc_dev);
 
 	return (0);
 }
 
-Static int
+int
 uftdi_open(void *vsc, int portno)
 {
 	struct uftdi_softc *sc = vsc;
@@ -456,7 +472,7 @@ uftdi_open(void *vsc, int portno)
 	return (0);
 }
 
-Static void
+void
 uftdi_read(void *vsc, int portno, u_char **ptr, u_int32_t *count)
 {
 	struct uftdi_softc *sc = vsc;
@@ -489,7 +505,7 @@ uftdi_read(void *vsc, int portno, u_char **ptr, u_int32_t *count)
 	*count -= 2;
 }
 
-Static void
+void
 uftdi_write(void *vsc, int portno, u_char *to, u_char *from, u_int32_t *count)
 {
 	struct uftdi_softc *sc = vsc;
@@ -505,7 +521,7 @@ uftdi_write(void *vsc, int portno, u_char *to, u_char *from, u_int32_t *count)
 	*count += sc->sc_hdrlen;
 }
 
-Static void
+void
 uftdi_set(void *vsc, int portno, int reg, int onoff)
 {
 	struct uftdi_softc *sc = vsc;
@@ -539,7 +555,7 @@ uftdi_set(void *vsc, int portno, int reg, int onoff)
 	(void)usbd_do_request(sc->sc_udev, &req, NULL);
 }
 
-Static int
+int
 uftdi_param(void *vsc, int portno, struct termios *t)
 {
 	struct uftdi_softc *sc = vsc;
@@ -685,7 +701,7 @@ uftdi_break(void *vsc, int portno, int onoff)
 	(void)usbd_do_request(sc->sc_udev, &req, NULL);
 }
 
-Static int
+int
 uftdi_8u232am_getrate(speed_t speed, int *rate)
 {
 	/* Table of the nearest even powers-of-2 for values 0..15. */

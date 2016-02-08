@@ -1,4 +1,4 @@
-/*	$OpenBSD: client.c,v 1.74 2006/10/27 12:22:41 henning Exp $ */
+/*	$OpenBSD: client.c,v 1.76 2007/05/01 07:40:45 otto Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -99,6 +99,9 @@ client_nextaddr(struct ntp_peer *p)
 		p->query->fd = -1;
 	}
 
+	if (p->state == STATE_DNS_INPROGRESS)
+		return (-1);
+
 	if (p->addr_head.a == NULL) {
 		priv_host_dns(p->addr_head.name, p->id);
 		p->state = STATE_DNS_INPROGRESS;
@@ -120,7 +123,7 @@ client_query(struct ntp_peer *p)
 	int	tos = IPTOS_LOWDELAY;
 
 	if (p->addr == NULL && client_nextaddr(p) == -1) {
-		set_next(p, error_interval());
+		set_next(p, scale_interval(INTERVAL_QUERY_AGGRESSIVE));
 		return (0);
 	}
 
@@ -137,7 +140,8 @@ client_query(struct ntp_peer *p)
 			if (errno == ECONNREFUSED || errno == ENETUNREACH ||
 			    errno == EHOSTUNREACH || errno == EADDRNOTAVAIL) {
 				client_nextaddr(p);
-				set_next(p, error_interval());
+				set_next(p,
+				    scale_interval(INTERVAL_QUERY_AGGRESSIVE));
 				return (-1);
 			} else
 				fatal("client_query connect");
@@ -268,8 +272,8 @@ client_dispatch(struct ntp_peer *p, u_int8_t settime)
 
 	if (p->trustlevel < TRUSTLEVEL_PATHETIC)
 		interval = scale_interval(INTERVAL_QUERY_PATHETIC);
-	else if (p->trustlevel < TRUSTLEVEL_AGRESSIVE)
-		interval = scale_interval(INTERVAL_QUERY_AGRESSIVE);
+	else if (p->trustlevel < TRUSTLEVEL_AGGRESSIVE)
+		interval = scale_interval(INTERVAL_QUERY_AGGRESSIVE);
 	else
 		interval = scale_interval(INTERVAL_QUERY_NORMAL);
 

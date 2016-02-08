@@ -1,7 +1,7 @@
 # ex:ts=8 sw=4:
-# $OpenBSD: SharedLibs.pm,v 1.8 2005/08/16 20:05:12 espie Exp $
+# $OpenBSD: SharedLibs.pm,v 1.29 2007/06/20 13:44:40 espie Exp $
 #
-# Copyright (c) 2003-2004 Marc Espie <espie@openbsd.org>
+# Copyright (c) 2003-2005 Marc Espie <espie@openbsd.org>
 #
 # Permission to use, copy, modify, and distribute this software for any
 # purpose with or without fee is hereby granted, provided that the above
@@ -17,24 +17,11 @@
 
 use strict;
 use warnings;
+use OpenBSD::Paths;
 package OpenBSD::PackingElement;
 
 sub mark_available_lib
 {
-}
-
-sub mark_bogus_lib
-{
-}
-
-package OpenBSD::PackingElement::FileBase;
-
-sub mark_bogus_lib
-{
-	my ($self, $pkgname) = @_;
-	my $fname = $self->fullname();
-	return unless $fname =~ m/\/lib[^\/]+\.so\.\d+\.\d+$/;
-	OpenBSD::SharedLibs::register_lib($fname, $pkgname);
 }
 
 package OpenBSD::PackingElement::Lib;
@@ -42,11 +29,7 @@ package OpenBSD::PackingElement::Lib;
 sub mark_available_lib
 {
 	my ($self, $pkgname) = @_;
-	OpenBSD::SharedLibs::register_lib($self->fullname(), $pkgname);
-}
-
-sub mark_bogus_lib
-{
+	OpenBSD::SharedLibs::register_lib($self->fullname, $pkgname);
 }
 
 package OpenBSD::SharedLibs;
@@ -54,7 +37,7 @@ use File::Basename;
 use OpenBSD::Error;
 
 my $path;
-my @ldconfig = ('/sbin/ldconfig');
+my @ldconfig = (OpenBSD::Paths->ldconfig);
 
 
 sub init_path($)
@@ -62,14 +45,14 @@ sub init_path($)
 	my $destdir = shift;
 	$path={};
 	if ($destdir ne '') {
-		unshift @ldconfig, 'chroot', $destdir;
+		unshift @ldconfig, OpenBSD::Paths->chroot, $destdir;
 	}
 	open my $fh, "-|", @ldconfig, "-r";
 	if (defined $fh) {
 		local $_;
 		while (<$fh>) {
-			if (m/^\s*search directories:\s*(.*?)\s*$/) {
-				for my $d (split(':', $1)) {
+			if (m/^\s*search directories:\s*(.*?)\s*$/o) {
+				for my $d (split(/\:/o, $1)) {
 					$path->{$d} = 1;
 				}
 			}
@@ -105,83 +88,83 @@ our $registered_libs = {};
 sub register_lib
 {
 	my ($name, $pkgname) = @_;
-	if ($name =~ m/^(.*\/lib.*?\.so\.\d+)\.(\d+)$/) {
-		my ($stem, $minor) = ($1, $2);
-		$registered_libs->{"$stem"} = [] 
-		    unless defined $registered_libs->{"$stem"};
-		push(@{$registered_libs->{"$stem"}}, [$minor, $pkgname]);
+	my ($stem, $major, $minor, $dir) = 
+	    OpenBSD::PackingElement::Lib->parse($name);
+	if (defined $stem) {
+		push(@{$registered_libs->{$stem}->{$dir}->{$major}},
+		    [$minor, $pkgname]);
 	}
 }
 
 my $done_plist = {};
 
-sub add_system_libs
+sub system_dirs
+{
+	return OpenBSD::Paths->library_dirs;
+}
+
+sub add_libs_from_system
 {
 	my ($destdir) = @_;
 	return if $done_plist->{'system'};
 	$done_plist->{'system'} = 1;
-	for my $dirname ("/usr/lib", "/usr/X11R6/lib") {
-		opendir(my $dir, $destdir.$dirname) or next;
+	for my $dirname (system_dirs()) {
+		opendir(my $dir, $destdir.$dirname."/lib") or next;
 		while (my $d = readdir($dir)) {
-			register_lib("$dirname/$d", 'system');
+			register_lib("$dirname/lib/$d", 'system');
 		}
 		closedir($dir);
 	}
 }
 
-sub add_package_libs
+sub add_libs_from_installed_package
 {
-	my ($pkgname, $wantpath) = @_;
+	my $pkgname = shift;
 	return if $done_plist->{$pkgname};
 	$done_plist->{$pkgname} = 1;
 	my $plist = OpenBSD::PackingList->from_installation($pkgname, 
 	    \&OpenBSD::PackingList::LibraryOnly);
-	if (!defined $plist) {
-		Warn "Can't read plist for $pkgname\n";
-		return;
-	}
-	if (defined $wantpath) {
-		if (defined $plist->{extrainfo}) {
-			$pkgname = $plist->{extrainfo}->{subdir};
-		}
-	}
+	next if !defined $plist;
 
-	$plist->visit('mark_available_lib', $pkgname);
+	$plist->mark_available_lib($pkgname);
 }
 
-sub add_bogus_package_libs
+sub add_libs_from_plist
 {
-	my $pkgname = $_[0];
-	if (!defined $done_plist->{$pkgname}) {
-		add_package_libs($pkgname);
-	}
-	return if $done_plist->{$pkgname} == 2;
-	$done_plist->{$pkgname} = 2;
-	my $plist = OpenBSD::PackingList->from_installation($pkgname);
-	if (!defined $plist) {
-		Warn "Can't read plist for $pkgname\n";
-		return;
-	}
-	$plist->visit('mark_bogus_lib', $pkgname);
-}
-
-sub add_plist_libs
-{
-	my ($plist) = @_;
-	my $pkgname = $plist->pkgname();
+	my $plist = shift;
+	my $pkgname = $plist->pkgname;
 	return if $done_plist->{$pkgname};
 	$done_plist->{$pkgname} = 1;
-	$plist->visit('mark_available_lib', $pkgname);
+	$plist->mark_available_lib($pkgname);
 }
 
-sub _lookup_libspec
+sub normalize_dir_and_spec
 {
-	my ($dir, $spec) = @_;
-	my @r = ();
+	my ($base, $libspec) = @_;
+	if ($libspec =~ m/^(.*)\/([^\/]+)$/o) {
+		return ("$base/$1", $2);
+	} else {
+		return ("$base/lib", $libspec);
+	}
+}
 
-	if ($spec =~ m/^(.*)\.(\d+)\.(\d+)$/) {
-		my ($libname, $major, $minor) = ($1, $2, $3);
-		my $exists = $registered_libs->{"$dir/lib$libname.so.$major"};
+sub parse_spec
+{
+	my $spec = shift;
+	if ($spec =~ m/^(.*)\.(\d+)\.(\d+)$/o) {
+		return ($1, $2, $3);
+	} else {
+		return undef;
+	}
+}
+
+sub lookup_libspec
+{
+	my ($dir, $spec) = normalize_dir_and_spec(@_);
+	my @r = ();
+	my ($libname, $major, $minor) = parse_spec($spec);
+	if (defined $libname) {
+		my $exists = $registered_libs->{$libname}->{$dir}->{$major};
 		if (defined $exists) {
 			for my $e (@$exists) {
 				if ($e->[0] >= $minor) {
@@ -193,14 +176,48 @@ sub _lookup_libspec
 	return @r;
 }
 
-sub lookup_libspec
+sub entry_string
 {
-	my ($base, $libspec, $wantpath) = @_;
-		
-	if ($libspec =~ m|(.*)/|) {
-		return _lookup_libspec("$base/$1", $');
-	} else {
-		return _lookup_libspec("$base/lib", $libspec);
+	my ($d, $M, $m) = @_;
+	return "partial match in $d: major=$M, minor=$m";
+}
+
+sub why_is_this_bad
+{
+	my ($base, $name, $d1, $d2, $M1, $M2, $m1, $m2, $pkgname) = @_;
+	if ($d1 ne $d2 && !($pkgname eq 'system' && $d1 eq "$base/lib")) {
+		return "bad directory";
+	}
+	if ($M1 != $M2) {
+		return "bad major";
+	}
+	if ($m1 > $m2) {
+		return "minor not large enough";
+	}
+	return "$pkgname not reachable";
+}
+
+sub report_problem
+{
+	my $base = $_[0];
+	my ($dir, $name) = normalize_dir_and_spec(@_);
+	my ($stem, $major, $minor) = parse_spec($name);
+
+	return unless defined $stem;
+	return unless defined $registered_libs->{$stem};
+
+	while (my ($d, $v) = each %{$registered_libs->{$stem}}) {
+		while (my ($M, $w) = each %$v) {
+			for my $e (@$w) {
+				print "$name: ", 
+				    entry_string($d, $M, $e->[0]),
+				    " (", 
+				    why_is_this_bad($base, $name, $dir, 
+				    	$d, $major, $M, $minor, 
+					$e->[0], $e->[1]),
+				    ")\n";
+			}
+		}
 	}
 }
 

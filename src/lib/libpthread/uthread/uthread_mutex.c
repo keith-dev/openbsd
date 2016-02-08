@@ -1,4 +1,4 @@
-/*	$OpenBSD: uthread_mutex.c,v 1.18 2005/10/31 20:48:31 brad Exp $	*/
+/*	$OpenBSD: uthread_mutex.c,v 1.21 2007/06/05 18:11:49 kurt Exp $	*/
 /*
  * Copyright (c) 1995 John Birrell <jb@cimlogic.com.au>.
  * All rights reserved.
@@ -114,7 +114,7 @@ pthread_mutex_init(pthread_mutex_t * mutex,
 	enum pthread_mutextype	type = 0;
 	int		protocol = 0;
 	int		ceiling = 0;
-	int		flags = 0;
+	long		flags = 0;
 	int		ret = 0;
 
 	if (mutex == NULL)
@@ -648,7 +648,7 @@ mutex_lock_common(pthread_mutex_t * mutex)
 
 	if (curthread->interrupted != 0 &&
 	    curthread->continuation != NULL)
-		curthread->continuation((void *) curthread);
+		curthread->continuation(curthread);
 
 	/* Return the completion status: */
 	return (ret);
@@ -667,7 +667,9 @@ pthread_mutex_lock(pthread_mutex_t *mutex)
 
 	/*
 	 * If the mutex is statically initialized, perform the dynamic
-	 * initialization:
+	 * initialization. Note: _thread_mutex_lock() in libc requires
+	 * pthread_mutex_lock() to perform the mutex init when *mutex
+	 * is NULL.
 	 */
 	else if ((*mutex != NULL) || ((ret = init_static(mutex)) == 0))
 		ret = mutex_lock_common(mutex);

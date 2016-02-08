@@ -1,4 +1,4 @@
-/*	$OpenBSD: Locore.c,v 1.11 2006/12/05 20:30:26 gwk Exp $	*/
+/*	$OpenBSD: Locore.c,v 1.13 2007/06/23 18:51:45 drahn Exp $	*/
 /*	$NetBSD: Locore.c,v 1.1 1997/04/16 20:29:11 thorpej Exp $	*/
 
 /*
@@ -34,10 +34,14 @@
 
 #include <lib/libsa/stand.h>
 #include <macppc/stand/openfirm.h>
+#include <dev/cons.h>   
+     
 
 /*
 #include "machine/cpu.h"
 */
+
+#define ENABLE_DECREMENTER_WORKAROUND
 
 static int (*openfirmware)(void *);
 
@@ -95,7 +99,7 @@ _start(void *vpd, int res, int (*openfirm)(void *), char *arg, int argl)
 
 	bat_init();
 	openfirmware = openfirm;	/* Save entry to Open Firmware */
-#if 0
+#ifdef ENABLE_DECREMENTER_WORKAROUND
 	patch_dec_intr();
 #endif
 	setup();
@@ -103,7 +107,7 @@ _start(void *vpd, int res, int (*openfirm)(void *), char *arg, int argl)
 	exit();
 }
 
-#if 0
+#ifdef ENABLE_DECREMENTER_WORKAROUND
 void handle_decr_intr();
 __asm (	"	.globl handle_decr_intr\n"
 	"	.type handle_decr_intr@function\n"
@@ -214,35 +218,6 @@ OF_getprop(int handle, char *prop, void *buf, int buflen)
 		return -1;
 	return args.size;
 }
-
-#ifdef	__notyet__	/* Has a bug on FirePower */
-int
-OF_setprop(int handle, char *prop, void *buf, int len)
-{
-	static struct {
-		char *name;
-		int nargs;
-		int nreturns;
-		int phandle;
-		char *prop;
-		void *buf;
-		int len;
-		int size;
-	} args = {
-		"setprop",
-		4,
-		1,
-	};
-
-	args.phandle = handle;
-	args.prop = prop;
-	args.buf = buf;
-	args.len = len;
-	if (openfirmware(&args) == -1)
-		return -1;
-	return args.size;
-}
-#endif
 
 int
 OF_open(char *dname)
@@ -375,16 +350,6 @@ OF_claim(void *virt, u_int size, u_int align)
 		1,
 	};
 
-/*
-#ifdef	FIRMWORKSBUGS
-*/
-#if 0
-	/*
-	 * Bug with Firmworks OFW
-	 */
-	if (virt)
-		return virt;
-#endif
 	args.virt = virt;
 	args.size = size;
 	args.align = align;
@@ -537,7 +502,13 @@ void
 putchar(int c)
 {
 	char ch = c;
-
+	if (c == '\177') {
+		ch = '\b';
+		OF_write(stdout, &ch, 1);
+		ch = ' ';
+		OF_write(stdout, &ch, 1);
+		ch = '\b';
+	}
 	if (c == '\n')
 		putchar('\r');
 	OF_write(stdout, &ch, 1);
@@ -546,11 +517,81 @@ putchar(int c)
 int
 getchar()
 {
-	unsigned char ch = '\0';
+	int c = cngetc();
+
+	if (c == '\r')
+		c = '\n';
+
+	if ((c < ' ' && c != '\n') || c == '\177')
+		return(c);
+
+	putchar(c);
+
+	return(c);
+}
+
+void
+ofc_probe(struct consdev *cn)
+{
+	cn->cn_pri = CN_NORMAL;
+	cn->cn_dev = makedev(0,0); /* WTF */
+}
+
+
+void
+ofc_init(struct consdev *cn)
+{
+}
+
+char buffered_char;
+int
+ofc_getc(dev_t dev)
+{
+	u_int8_t ch;
 	int l;
+
+	if (dev & 0x80)  {
+		if (buffered_char != 0)
+			return 1;
+
+		l = OF_read(stdin, &ch, 1);
+		if (l == 1) {
+			buffered_char = ch;
+			return 1;
+		}
+		return 0;
+	}
+
+	if (buffered_char != 0) {
+		ch = buffered_char;
+		buffered_char = 0;
+		return ch;
+	}
 
 	while ((l = OF_read(stdin, &ch, 1)) != 1)
 		if (l != -2 && l != 0)
-			return -1;
+			return 0;
 	return ch;
+		
+}
+
+void
+ofc_putc(dev_t dev, int c)
+{
+	char ch;
+
+	ch = 'a';
+	OF_write(stdout, &ch, 1);
+	ch = c;
+	if (c == '\177' && c == '\b') {
+		ch = 'A';
+	}
+	OF_write(stdout, &ch, 1);
+}
+
+
+void 
+machdep()
+{
+	cninit();
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ffs_vfsops.c,v 1.98 2006/12/28 20:33:24 thib Exp $	*/
+/*	$OpenBSD: ffs_vfsops.c,v 1.109 2007/08/04 03:33:31 art Exp $	*/
 /*	$NetBSD: ffs_vfsops.c,v 1.19 1996/02/09 22:22:26 christos Exp $	*/
 
 /*
@@ -68,6 +68,9 @@ int ffs_sbupdate(struct ufsmount *, int);
 int ffs_reload_vnode(struct vnode *, void *);
 int ffs_sync_vnode(struct vnode *, void *);
 int ffs_validate(struct fs *);
+
+void ffs1_compat_read(struct fs *, struct ufsmount *, daddr64_t);
+void ffs1_compat_write(struct fs *, struct ufsmount *);
 
 const struct vfsops ffs_vfsops = {
 	ffs_mount,
@@ -477,7 +480,7 @@ ffs_reload_vnode(struct vnode *vp, void *args)
 	/*
 	 * Step 5: invalidate all cached file data.
 	 */
-	if (vget(vp, LK_EXCLUSIVE | LK_INTERLOCK, fra->p))
+	if (vget(vp, LK_EXCLUSIVE, fra->p))
 		return (0);
 
 	if (vinvalbuf(vp, 0, fra->cred, fra->p, 0, 0))
@@ -550,20 +553,21 @@ ffs_reload(struct mount *mountp, struct ucred *cred, struct proc *p)
 	else
 		size = dpart.disklab->d_secsize;
 
-	error = bread(devvp, (daddr_t)(SBOFF / size), SBSIZE, NOCRED, &bp);
+	fs = VFSTOUFS(mountp)->um_fs;
+
+	error = bread(devvp, (daddr_t)(fs->fs_sblockloc / size), SBSIZE,
+	    NOCRED, &bp);
 	if (error) {
 		brelse(bp);
 		return (error);
 	}
 
 	newfs = (struct fs *)bp->b_data;
-	if (newfs->fs_magic != FS_MAGIC || (u_int)newfs->fs_bsize > MAXBSIZE ||
-	    newfs->fs_bsize < sizeof(struct fs) ||
-	    (u_int)newfs->fs_sbsize > SBSIZE) {
+	if (ffs_validate(newfs) == 0) {
 		brelse(bp);
-		return (EIO);		/* XXX needs translation */
+		return (EINVAL);
 	}
-	fs = VFSTOUFS(mountp)->um_fs;
+
 	/*
 	 * Copy pointer fields back into superblock before copying in	XXX
 	 * new superblock. These should really be in the ufsmount.	XXX
@@ -577,6 +581,7 @@ ffs_reload(struct mount *mountp, struct ucred *cred, struct proc *p)
 		bp->b_flags |= B_INVAL;
 	brelse(bp);
 	mountp->mnt_maxsymlinklen = fs->fs_maxsymlinklen;
+	ffs1_compat_read(fs, VFSTOUFS(mountp), fs->fs_sblockloc);
 	ffs_oldfscompat(fs);
 	(void)ffs_statfs(mountp, &mountp->mnt_stat, p);
 	/*
@@ -665,7 +670,7 @@ ffs_mountfs(struct vnode *devvp, struct mount *mp, struct proc *p)
 	dev_t dev;
 	struct partinfo dpart;
 	caddr_t space;
-	ufs2_daddr_t sbloc;
+	daddr64_t sbloc;
 	int error, i, blks, size, ronly;
 	int32_t *lp;
 	size_t strsize;
@@ -719,11 +724,13 @@ ffs_mountfs(struct vnode *devvp, struct mount *mp, struct proc *p)
 		fs = (struct fs *) bp->b_data;
 		sbloc = sbtry[i];
 
+#if 0
 		if (fs->fs_magic == FS_UFS2_MAGIC) {
 			printf("ffs_mountfs(): Sorry, no UFS2 support (yet)\n");
 			error = EFTYPE;
 			goto out;
 		}
+#endif
 
 		/*
 		 * Do not look for an FFS1 file system at SBLOCK_UFS2. Doing so
@@ -745,7 +752,6 @@ ffs_mountfs(struct vnode *devvp, struct mount *mp, struct proc *p)
 	fs->fs_fmod = 0;
 	fs->fs_flags &= ~FS_UNCLEAN;
 	if (fs->fs_clean == 0) {
-		fs->fs_flags |= FS_UNCLEAN;
 #if 0
 		/*
 		 * It is safe mount unclean file system
@@ -800,6 +806,10 @@ ffs_mountfs(struct vnode *devvp, struct mount *mp, struct proc *p)
 	bp = NULL;
 	fs = ump->um_fs;
 
+	ffs1_compat_read(fs, ump, sbloc);
+
+	if (fs->fs_clean == 0)
+		fs->fs_flags |= FS_UNCLEAN;
 	fs->fs_ronly = ronly;
 	size = fs->fs_cssize;
 	blks = howmany(size, fs->fs_fsize);
@@ -947,6 +957,48 @@ ffs_oldfscompat(struct fs *fs)
 }
 
 /*
+ * Auxiliary function for reading FFS1 super blocks.
+ */
+void
+ffs1_compat_read(struct fs *fs, struct ufsmount *ump, daddr64_t sbloc)
+{
+	if (fs->fs_magic == FS_UFS2_MAGIC)
+		return; /* UFS2 */
+#if 0
+	if (fs->fs_ffs1_flags & FS_FLAGS_UPDATED)
+		return; /* Already updated */
+#endif
+	fs->fs_flags = fs->fs_ffs1_flags;
+	fs->fs_sblockloc = sbloc;
+	fs->fs_maxbsize = fs->fs_bsize;
+	fs->fs_time = fs->fs_ffs1_time;
+	fs->fs_size = fs->fs_ffs1_size;
+	fs->fs_dsize = fs->fs_ffs1_dsize;
+	fs->fs_csaddr = fs->fs_ffs1_csaddr;
+	fs->fs_cstotal.cs_ndir = fs->fs_ffs1_cstotal.cs_ndir;
+	fs->fs_cstotal.cs_nbfree = fs->fs_ffs1_cstotal.cs_nbfree;
+	fs->fs_cstotal.cs_nifree = fs->fs_ffs1_cstotal.cs_nifree;
+	fs->fs_cstotal.cs_nffree = fs->fs_ffs1_cstotal.cs_nffree;
+	fs->fs_ffs1_flags |= FS_FLAGS_UPDATED;
+}
+
+/*
+ * Auxiliary function for writing FFS1 super blocks.
+ */
+void
+ffs1_compat_write(struct fs *fs, struct ufsmount *ump)
+{
+	if (fs->fs_magic != FS_UFS1_MAGIC)
+		return; /* UFS2 */
+
+	fs->fs_ffs1_time = fs->fs_time;
+	fs->fs_ffs1_cstotal.cs_ndir = fs->fs_cstotal.cs_ndir;
+	fs->fs_ffs1_cstotal.cs_nbfree = fs->fs_cstotal.cs_nbfree;
+	fs->fs_ffs1_cstotal.cs_nifree = fs->fs_cstotal.cs_nifree;
+	fs->fs_ffs1_cstotal.cs_nffree = fs->fs_cstotal.cs_nffree;
+}
+
+/*
  * unmount system call
  */
 int
@@ -1066,13 +1118,7 @@ ffs_statfs(struct mount *mp, struct statfs *sbp, struct proc *p)
 		bcopy(&mp->mnt_stat.mount_info.ufs_args,
 		    &sbp->mount_info.ufs_args, sizeof(struct ufs_args));
 	}
-
-#ifdef FFS2
-	if (fs->fs_magic == FS_UFS2_MAGIC)
-		strncpy(sbp->f_fstypename, MOUNT_FFS2, MFSNAMELEN);
-	else
-#endif
-		strncpy(sbp->f_fstypename, mp->mnt_vfc->vfc_name, MFSNAMELEN);
+	strncpy(sbp->f_fstypename, mp->mnt_vfc->vfc_name, MFSNAMELEN);
 
 	return (0);
 }
@@ -1095,11 +1141,10 @@ ffs_sync_vnode(struct vnode *vp, void *arg) {
 	    ((ip->i_flag &
 		(IN_ACCESS | IN_CHANGE | IN_MODIFIED | IN_UPDATE)) == 0	&&
 		LIST_EMPTY(&vp->v_dirtyblkhd)) ) {
-		simple_unlock(&vp->v_interlock);
 		return (0);
 	}
 
-	if (vget(vp, LK_EXCLUSIVE | LK_NOWAIT | LK_INTERLOCK, fsa->p))
+	if (vget(vp, LK_EXCLUSIVE | LK_NOWAIT, fsa->p))
 		return (0);
 
 	if ((error = VOP_FSYNC(vp, fsa->cred, fsa->waitfor, fsa->p)))
@@ -1163,8 +1208,6 @@ ffs_sync(struct mount *mp, int waitfor, struct ucred *cred, struct proc *p)
 			goto loop;
 	}
 	if (waitfor != MNT_LAZY) {
-		if (ump->um_mountp->mnt_flag & MNT_SOFTDEP)
-			waitfor = MNT_NOWAIT;
 		vn_lock(ump->um_devvp, LK_EXCLUSIVE | LK_RETRY, p);
 		if ((error = VOP_FSYNC(ump->um_devvp, cred, waitfor, p)) != 0)
 			allerror = error;
@@ -1190,8 +1233,8 @@ ffs_sync(struct mount *mp, int waitfor, struct ucred *cred, struct proc *p)
 int
 ffs_vget(struct mount *mp, ino_t ino, struct vnode **vpp)
 {
-	register struct fs *fs;
-	register struct inode *ip;
+	struct fs *fs;
+	struct inode *ip;
 	struct ufs1_dinode *dp1;
 #ifdef FFS2
 	struct ufs2_dinode *dp2;
@@ -1395,16 +1438,19 @@ ffs_sbupdate(struct ufsmount *mp, int waitfor)
 		else if ((error = bwrite(bp)))
 			allerror = error;
 	}
+
 	/*
 	 * Now write back the superblock itself. If any errors occurred
 	 * up to this point, then fail so that the superblock avoids
 	 * being written out as clean.
 	 */
-	if (allerror)
+	if (allerror) {
 		return (allerror);
+	}
 
-	bp = getblk(mp->um_devvp, SBOFF >> (fs->fs_fshift - fs->fs_fsbtodb),
-		    (int)fs->fs_sbsize, 0, 0);
+	bp = getblk(mp->um_devvp,
+	    fs->fs_sblockloc >> (fs->fs_fshift - fs->fs_fsbtodb),
+	    (int)fs->fs_sbsize, 0, 0);
 	fs->fs_fmod = 0;
 	fs->fs_time = time_second;
 	bcopy((caddr_t)fs, bp->b_data, (u_int)fs->fs_sbsize);
@@ -1423,10 +1469,13 @@ ffs_sbupdate(struct ufsmount *mp, int waitfor)
 	}							/* XXX */
 	dfs->fs_maxfilesize = mp->um_savedmaxfilesize;		/* XXX */
 
+	ffs1_compat_write(dfs, mp);
+
 	if (waitfor != MNT_WAIT)
 		bawrite(bp);
 	else if ((error = bwrite(bp)))
 		allerror = error;
+
 	return (allerror);
 }
 

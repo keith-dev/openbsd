@@ -1,4 +1,4 @@
-#	$OpenBSD: files,v 1.393 2007/02/19 11:44:24 dlg Exp $
+#	$OpenBSD: files,v 1.409 2007/07/18 18:17:09 damien Exp $
 #	$NetBSD: files,v 1.87 1996/05/19 17:17:50 jonathan Exp $
 
 #	@(#)files.newconf	7.5 (Berkeley) 5/10/93
@@ -60,7 +60,6 @@ define	systrace
 define	ether
 define	fddi
 define	sppp
-define	token
 define	wlan
 define	bluetooth
 
@@ -185,6 +184,14 @@ file	dev/ic/isp_openbsd.c		isp
 device	mpi: scsi
 file	dev/ic/mpi.c			mpi
 
+# Emulex Light Pulse Fibre Channel (Service Level Interface)
+device	sli: scsi
+file	dev/ic/sli.c			sli
+
+# Silicon Image 3124/3132/3531 SATALink
+device	sili: scsi, atascsi
+file	dev/ic/sili.c			sili
+
 # UltraStor SCSI controllers
 device	uha: scsi
 file	dev/ic/uha.c			uha
@@ -287,10 +294,6 @@ file	dev/ic/i82596.c			ie & (ie_pci | ie_eisa | ie_gsc)
 device	gem: ether, ifnet, ifmedia, mii
 file	dev/ic/gem.c			gem
 
-# TROPIC Token-Ring controller
-device	tr: ether, token, ifnet
-file	dev/ic/tropic.c			tr
-
 # 8250/16[45]50-based "com" ports
 device	com: tty
 device	pccom: tty			# XXX
@@ -387,10 +390,6 @@ file	dev/ic/aic6915.c		sf
 device	malo: ether, ifnet, ifmedia, firmload, wlan
 file	dev/ic/malo.c			malo
 
-# Broadcom BCM43xx
-device	bcw: ether, ifnet, ifmedia, wlan
-file	dev/ic/bcw.c			bcw
-
 # Attributes which machine-independent bus support can be attached to.
 # These should be defined here, because some of these busses can have
 # devices which provide these attributes, and we'd like to avoid hairy
@@ -405,6 +404,7 @@ define	pcmciabus {[controller = -1], [socket = -1]}	# PCMCIA attachment
 define	cbbus {[slot = -1]}		# CardBus attachment
 define	pcmciaslot {[slot = -1]}	# PCMCIA slot itself
 define	sdmmcbus {}			# SD/MMC attachment
+define	btbus {}			# Bluetooth host controller
 
 # UHCI USB controller
 device	uhci: usbus
@@ -430,6 +430,11 @@ file dev/radio.c			radio	needs-flag
 # IPMI
 device	ipmi
 file	dev/ipmi.c			ipmi	needs-flag
+
+# Software RAID
+device	softraid: scsi
+attach	softraid at root
+file	dev/softraid.c			softraid	needs-flag
 
 # legitimate pseudo-devices
 pseudo-device vnd: disk
@@ -485,14 +490,9 @@ file	dev/hotplug.c			hotplug	needs-flag
 pseudo-device pppoe: ifnet, ether, sppp
 file 	net/if_pppoe.c			pppoe	needs-flag
 
-
 # XXX machine-independent SCSI files should live somewhere here, maybe
 
 # kernel sources
-file adosfs/adlookup.c			adosfs
-file adosfs/adutil.c			adosfs
-file adosfs/advfsops.c			adosfs
-file adosfs/advnops.c			adosfs
 file altq/altq_subr.c			altq
 file altq/altq_red.c			altq
 file altq/altq_cbq.c			altq
@@ -650,6 +650,7 @@ file kern/kern_tc.c
 file kern/kern_time.c
 file kern/kern_timeout.c
 file kern/kern_watchdog.c		!small_kernel
+file kern/kern_workq.c
 file kern/kern_xxx.c
 file kern/kgdb_stub.c			kgdb
 file kern/sched_bsd.c
@@ -658,7 +659,6 @@ file kern/subr_disk.c
 file kern/subr_evcount.c
 file kern/subr_extent.c
 file kern/subr_log.c
-file kern/subr_mutex.c
 file kern/subr_pool.c
 file kern/subr_prf.c
 file kern/subr_prof.c
@@ -730,7 +730,7 @@ file net/bpf.c				bpfilter		needs-count
 file net/bpf_filter.c			bpfilter
 file net/if.c
 file net/if_atmsubr.c			atm			needs-flag
-file net/if_ethersubr.c			ether | inet | fddi | token needs-flag
+file net/if_ethersubr.c			ether | inet | fddi	needs-flag
 file net/if_fddisubr.c			fddi
 file net/if_spppsubr.c			sppp
 file net/if_loop.c			loop
@@ -742,7 +742,6 @@ file net/ppp_tty.c			ppp
 file net/bsd-comp.c			ppp_bsdcomp
 file net/ppp-deflate.c			ppp_deflate
 file net/zlib.c				ppp_deflate | ipsec | crypto
-file net/if_tokensubr.c			token			needs-flag
 file net/if_tun.c			tun			needs-count
 file net/if_bridge.c			bridge			needs-count
 file net/bridgestp.c			bridge
@@ -797,10 +796,10 @@ file netinet/ip_esp.c			inet & ipsec
 file netinet/ip_ah.c			inet & ipsec
 file netinet/ip_carp.c			carp			needs-count
 file netinet/ip_ipcomp.c		inet & ipsec
-file crypto/rijndael.c			(inet & ipsec) | crypto | uvm_swap_encrypt
+file crypto/rijndael.c			(inet & ipsec) | crypto | uvm_swap_encrypt | wlan
 file crypto/md5.c
 file crypto/rmd160.c			(inet & ipsec) | crypto
-file crypto/sha1.c			(inet & ipsec) | crypto | carp
+file crypto/sha1.c			(inet & ipsec) | crypto | carp | wlan
 file crypto/sha2.c			(inet & ipsec) | crypto
 file crypto/blf.c			(inet & ipsec) | crypto | vnd
 file crypto/cast.c			(inet & ipsec) | crypto
@@ -824,21 +823,26 @@ file netatalk/ddp_output.c		netatalk
 file netatalk/ddp_usrreq.c		netatalk
 file netbt/bt_input.c			bluetooth		needs-flag
 file netbt/bt_proto.c			bluetooth
-file netbt/hci_raw.c			bluetooth
+file netbt/hci_event.c			bluetooth
+file netbt/hci_ioctl.c			bluetooth
+file netbt/hci_link.c			bluetooth
+file netbt/hci_misc.c			bluetooth
+file netbt/hci_socket.c			bluetooth
+file netbt/hci_unit.c			bluetooth
+file netbt/l2cap_lower.c		bluetooth
+file netbt/l2cap_misc.c			bluetooth
+file netbt/l2cap_signal.c		bluetooth
+file netbt/l2cap_socket.c		bluetooth
+file netbt/l2cap_upper.c		bluetooth
+file netbt/rfcomm_dlc.c			bluetooth
+file netbt/rfcomm_session.c		bluetooth
+file netbt/rfcomm_socket.c		bluetooth
+file netbt/rfcomm_upper.c		bluetooth
+file netbt/sco_socket.c			bluetooth
+file netbt/sco_upper.c			bluetooth
 file netnatm/natm_pcb.c			natm
 file netnatm/natm_proto.c		natm
 file netnatm/natm.c			natm
-file netipx/ipx.c			ipx
-file netipx/ipx_input.c			ipx
-file netipx/ipx_ip.c			ipx
-file netipx/ipx_outputfl.c		ipx
-file netipx/ipx_pcb.c			ipx
-file netipx/ipx_proto.c			ipx
-file netipx/ipx_tun.c			ipx
-file netipx/ipx_usrreq.c		ipx
-file netipx/ipx_cksum.c			ipx
-file netipx/spx_debug.c			ipx
-file netipx/spx_usrreq.c		ipx
 file nfs/krpc_subr.c			nfsclient
 file nfs/nfs_bio.c			nfsclient
 file nfs/nfs_boot.c			nfsclient

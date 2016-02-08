@@ -1,7 +1,7 @@
-.\"	$OpenBSD: pkg_info.1,v 1.23 2007/01/29 10:57:36 bernd Exp $
+.\"	$OpenBSD: pkg_info.1,v 1.28 2007/06/20 15:41:36 steven Exp $
 .\"
-.\" FreeBSD install - a package for the installation and maintenance
-.\" of non-core utilities.
+.\" Documentation and design originally from FreeBSD. All the code has
+.\" been rewritten since. We keep the documentation's notice:
 .\"
 .\" Redistribution and use in source and binary forms, with or without
 .\" modification, are permitted provided that the following conditions
@@ -15,9 +15,7 @@
 .\" Jordan K. Hubbard
 .\"
 .\"
-.\"     @(#)pkg_info.1
-.\"
-.Dd August 22, 1998
+.Dd $Mdocdate: June 20 2007 $
 .Dt PKG_INFO 1
 .Os
 .Sh NAME
@@ -26,7 +24,7 @@
 .Sh SYNOPSIS
 .Nm pkg_info
 .Bk -words
-.Op Fl AacDdfIiKkLMPpqRrSsUv
+.Op Fl AacDdfIiKkLMPpqRrSstUv
 .Op Fl E Ar filename
 .Op Fl e Ar pkg-name
 .Op Fl l Ar str
@@ -47,7 +45,8 @@ command.
 The
 .Ar pkg-name
 may be the name of an installed package, the pathname to a package
-distribution file, or a URL to a package available through FTP, HTTP, or SCP.
+distribution file, or a URL to a package available through FTP, HTTP, HTTPS,
+or SCP.
 .Nm
 will try to complete
 .Ar pkg-name
@@ -162,6 +161,8 @@ This signature is a unique tag showing the package name, and the version number
 of every dependency and shared library necessary to build this package.
 .It Fl s
 Show an estimate of the total size of each package.
+.It Fl t
+Show packages which are not required by any other packages.
 .It Fl U
 Show the deinstall-message file (if any) for each package.
 .It Fl v

@@ -1,7 +1,7 @@
 # ex:ts=8 sw=4:
-# $OpenBSD: Delete.pm,v 1.34 2007/03/07 11:24:07 espie Exp $
+# $OpenBSD: Delete.pm,v 1.71 2007/06/30 11:35:21 espie Exp $
 #
-# Copyright (c) 2003-2004 Marc Espie <espie@openbsd.org>
+# Copyright (c) 2003-2007 Marc Espie <espie@openbsd.org>
 #
 # Permission to use, copy, modify, and distribute this software for any
 # purpose with or without fee is hereby granted, provided that the above
@@ -22,55 +22,20 @@ use OpenBSD::Error;
 use OpenBSD::Vstat;
 use OpenBSD::PackageInfo;
 use OpenBSD::RequiredBy;
+use OpenBSD::Paths;
 use File::Basename;
 
 sub keep_old_files
 {
-	my ($state, $plist, $dir) = @_;
+	my ($state, $plist) = @_;
 	my $p = new OpenBSD::PackingList;
-	for my $i (qw(cvstags name no-default-conflict pkgcfl conflict) ) {
-		if (defined $plist->{$i}) {
-			$p->{$i} = $plist->{$i};
-		}
-	}
-	for my $i (@{$plist->{items}}) {
-		if ($i->isa("OpenBSD::PackingElement::Cwd")) {
-			push(@{$p->{items}}, $i);
-			next;
-		}
-		next unless $i->IsFile();
-		if (defined $i->{stillaround}) {
-			delete $i->{stillaround};
-			if ($state->{replacing}) {
-				require File::Temp;
+	my $borked = borked_package($plist->pkgname);
+	$p->set_infodir(installed_info($borked));
+	mkdir($p->infodir);
 
-				my $n = $i->fullname();
-
-				my ($fh, $j) = File::Temp::mkstemp("$n.XXXXXXXX");
-				close $fh;
-				if (rename($n, $j)) {
-					print "Renaming old file $n to $j\n";
-					if ($i->{name} !~ m|^/| && $i->cwd() ne '.') {
-						my $c = $i->cwd();
-						$j =~ s|^\Q$c\E/||;
-					}
-					$i->{name} = $j;
-				} else {
-					print "Bad rename $n to $j: $!\n";
-				}
-			}
-			push(@{$p->{items}}, $i);
-		}
-	}
-	my $borked = borked_package($plist->pkgname());
-	$p->{name}->{name} = $borked;
-	my $dest = installed_info($borked);
-	mkdir($dest);
-	require File::Copy;
-
-	File::Copy::copy($dir.COMMENT, $dest);
-	File::Copy::copy($dir.DESC, $dest);
-	$p->to_installation();
+	$plist->copy_old_stuff($p, $state);
+	$p->set_pkgname($borked);
+	$p->to_installation;
 	return $borked;
 }
 
@@ -95,35 +60,23 @@ sub manpages_unindex
 	undef $state->{mandirs};
 }
 
-sub validate_plist($$)
+sub validate_plist
 {
 	my ($plist, $state) = @_;
 
-	my $destdir = $state->{destdir};
-	$state->{problems} = 0;
-	$state->{totsize} = 0;
-	$plist->visit('prepare_for_deletion', $state);
-	my $dir = installed_info($plist->pkgname());
-	for my $i (info_names()) {
-		my $fname = $dir.$i;
-		if (-e $fname) {
-			my $size = (stat _)[7];
-			my $s = OpenBSD::Vstat::remove($fname, $size);
-			next unless defined $s;
-			if ($s->{ro}) {
-				Warn "Error: ", $s->{dev}, " is read-only ($fname)\n";
-				$state->{problems}++;
-			}
-		}
+	if ($plist->has('system-package')) {
+		$state->{problems}++;
+		print STDERR "Error: can't delete system packages\n";
+		return;
 	}
-	Fatal "fatal issues" if $state->{problems};
-	$state->{totsize} = 1 if $state->{totsize} == 0;
-	$plist->{totsize} = $state->{totsize};
+	$plist->prepare_for_deletion($state, $plist->pkgname);
 }
 
 sub remove_packing_info
 {
-	my $dir = shift;
+	my $plist = shift;
+
+	my $dir = $plist->infodir;
 
 	for my $fname (info_names()) {
 		unlink($dir.$fname);
@@ -136,61 +89,33 @@ sub remove_packing_info
 sub delete_package
 {
 	my ($pkgname, $state) = @_;
-	OpenBSD::ProgressMeter::message("reading plist");
+	$state->progress->message("reading plist");
 	my $plist = OpenBSD::PackingList->from_installation($pkgname) or
 	    Fatal "Bad package";
-	if (!defined $plist->pkgname()) {
+	if (!defined $plist->pkgname) {
 		Fatal "Package $pkgname has no name";
 	}
-	if ($plist->pkgname() ne $pkgname) {
+	if ($plist->pkgname ne $pkgname) {
 		Fatal "Package $pkgname real name does not match";
 	}
 
+	$state->{problems} = 0;
 	validate_plist($plist, $state);
+	$plist->compute_size;
+	Fatal "fatal issues in deinstalling $pkgname"
+	    if $state->{problems};
 	OpenBSD::Vstat::synchronize();
 
 	delete_plist($plist, $state);
 }
 
-sub delete_plist
+sub unregister_dependencies
 {
 	my ($plist, $state) = @_;
 
-	my $totsize = $plist->{totsize};
-	my $pkgname = $plist->pkgname();
-	$state->{pkgname} = $pkgname;
-	my $dir = installed_info($pkgname);
-	$state->{dir} = $dir;
-	$ENV{'PKG_PREFIX'} = $plist->pkgbase();
-	if ($plist->has(REQUIRE)) {
-		$plist->get(REQUIRE)->delete($state);
-	}
-	if ($plist->has(DEINSTALL)) {
-		$plist->get(DEINSTALL)->delete($state);
-	} 
-	$plist->visit('register_manpage', $state);
-	manpages_unindex($state);
-	my $donesize = 0;
-	for my $item (@{$plist->{groups}}, @{$plist->{users}}, @{$plist->{items}}) {
-		$item->delete($state);
-		if (defined $item->{size}) {
-                        $donesize += $item->{size};
-                        OpenBSD::ProgressMeter::show($donesize, $totsize);
-                }
-	}
+	my $pkgname = $plist->pkgname;
 
-	OpenBSD::ProgressMeter::next();
-	if ($plist->has(UNDISPLAY)) {
-		$plist->get(UNDISPLAY)->prepare($state);
-	}
-
-	# guard against duplicate pkgdep
-	my $removed = {};
-
-	my $zap_dependency = sub {
-		my $name = shift;
-
-		return if defined $removed->{$name};
+	for my $name (OpenBSD::Requiring->new($pkgname)->list) {
 		print "remove dependency on $name\n" 
 		    if $state->{very_verbose} or $state->{not};
 		local $@;
@@ -199,28 +124,62 @@ sub delete_plist
 		} catchall {
 			print STDERR "$_\n";
 		};
-		$removed->{$name} = 1;
-	};
-
-	for my $item (@{$plist->{pkgdep}}) {
-		&$zap_dependency($item->{name});
 	}
-	for my $name (OpenBSD::Requiring->new($pkgname)->list()) {
-		&$zap_dependency($name);
-	}
+}
 		
+sub delete_plist
+{
+	my ($plist, $state) = @_;
+
+	my $totsize = $plist->{totsize};
+	my $donesize = 0;
+	my $pkgname = $plist->pkgname;
+	$state->{pkgname} = $pkgname;
+	$ENV{'PKG_PREFIX'} = $plist->localbase;
+	$plist->register_manpage($state);
+	manpages_unindex($state);
+	$plist->delete_and_progress($state, \$donesize, $totsize);
+	$state->progress->next;
+	if ($plist->has(UNDISPLAY)) {
+		$plist->get(UNDISPLAY)->prepare($state);
+	}
+ 
+
+	unregister_dependencies($plist, $state);
 	return if $state->{not};
 	if ($state->{baddelete}) {
-	    my $borked = keep_old_files($state, $plist, $dir);
+	    my $borked = keep_old_files($state, $plist);
 	    $state->print("Files kept as $borked package\n");
 	    delete $state->{baddelete};
 	}
 			
 
-	remove_packing_info($dir);
+	remove_packing_info($plist);
+	delete_installed($pkgname);
 }
 
 package OpenBSD::PackingElement;
+
+sub rename_file_to_temp
+{
+	my $self = shift;
+	require OpenBSD::Temp;
+
+	my $n = $self->fullname;
+
+	my ($fh, $j) = OpenBSD::Temp::permanent_file(undef, $n);
+	close $fh;
+	if (rename($n, $j)) {
+		print "Renaming old file $n to $j\n";
+		if ($self->{name} !~ m/^\//o && $self->cwd ne '.') {
+			my $c = $self->cwd;
+			$j =~ s|^\Q$c\E/||;
+		}
+		$self->{name} = $j;
+	} else {
+		print "Bad rename $n to $j: $!\n";
+	}
+}
 
 sub prepare_for_deletion
 {
@@ -228,6 +187,29 @@ sub prepare_for_deletion
 
 sub delete
 {
+}
+
+sub delete_and_progress
+{
+	my ($self, $state, $donesize, $totsize) = @_;
+	$self->delete($state);
+	$self->mark_progress($state->progress, $donesize, $totsize);
+}
+
+sub record_shared
+{
+}
+
+sub copy_old_stuff
+{
+}
+
+package OpenBSD::PackingElement::Cwd;
+
+sub copy_old_stuff
+{
+	my ($self, $plist, $state) = @_;
+	$self->add_object($plist);
 }
 
 package OpenBSD::PackingElement::FileObject;
@@ -248,18 +230,7 @@ sub mark_dir
 {
 	my ($self, $state) = @_;
 
-	$self->mark_directory($state, dirname($self->fullname()));
-}
-
-sub realname
-{
-	my ($self, $state) = @_;
-
-	my $name = $self->fullname();
-	if (defined $self->{tempname}) {
-		$name = $self->{tempname};
-	}
-	return $state->{destdir}.$name;
+	$self->mark_directory($state, dirname($self->fullname));
 }
 
 sub do_not_delete
@@ -288,7 +259,7 @@ package OpenBSD::PackingElement::DirlikeObject;
 sub mark_dir
 {
 	my ($self, $state) = @_;
-	$self->mark_directory($state, $self->fullname());
+	$self->mark_directory($state, $self->fullname);
 }
 
 package OpenBSD::PackingElement::NewUser;
@@ -296,16 +267,17 @@ sub delete
 {
 	my ($self, $state) = @_;
 
-	my $name = $self->{name};
-
 	if ($state->{beverbose}) {
-		print "rmuser: $name\n";
+		print "rmuser: $self->{name}\n";
 	}
 
-	$state->{users_to_rm} = {} unless defined $state->{users_to_rm};
+	$self->record_shared($state->{recorder}, $state->{pkgname});
+}
 
-	my $h = $state->{users_to_rm};
-	$h->{$name} = $state->{pkgname};
+sub record_shared
+{
+	my ($self, $recorder, $pkgname) = @_;
+	$recorder->{users}->{$self->{name}} = $pkgname;
 }
 
 package OpenBSD::PackingElement::NewGroup;
@@ -313,48 +285,68 @@ sub delete
 {
 	my ($self, $state) = @_;
 
-	my $name = $self->{name};
-
 	if ($state->{beverbose}) {
-		print "rmgroup: $name\n";
+		print "rmgroup: $self->{name}\n";
 	}
 
-	$state->{groups_to_rm} = {} unless defined $state->{groups_to_rm};
+	$self->record_shared($state->{recorder}, $state->{pkgname});
+}
 
-	my $h = $state->{groups_to_rm};
-	$h->{$name} = $state->{pkgname};
+sub record_shared
+{
+	my ($self, $recorder, $pkgname) = @_;
+	$recorder->{groups}->{$self->{name}} = $pkgname;
 }
 
 package OpenBSD::PackingElement::DirBase;
+sub prepare_for_deletion
+{
+	my ($self, $state, $pkgname) = @_;
+	return unless $self->{noshadow};
+	$state->{noshadow}->{$state->{destdir}.$self->fullname} = 1;
+}
+
 sub delete
 {
 	my ($self, $state) = @_;
 
-	my $name = $self->fullname();
-
 	if ($state->{very_verbose}) {
-		print "dirrm: $name\n";
+		print "rmdir: ", $self->fullname, "\n";
 	}
 
-	$state->{dirs_to_rm} = {} unless defined $state->{dirs_to_rm};
-
-	my $h = $state->{dirs_to_rm};
-	$h->{$name} = [] unless defined $h->{$name};
-	$self->{pkgname} = $state->{pkgname};
-	push(@{$h->{$name}}, $self);
+	$self->record_shared($state->{recorder}, $state->{pkgname});
 }
 
-package OpenBSD::PackingElement::DirRm;
-sub delete
+sub record_shared
 {
-	&OpenBSD::PackingElement::DirBase::delete;
+	my ($self, $recorder, $pkgname) = @_;
+	$self->{pkgname} = $pkgname;
+	push(@{$recorder->{dirs}->{$self->fullname}} , $self);
 }
 
 package OpenBSD::PackingElement::Unexec;
 sub delete
 {
 	my ($self, $state) = @_;
-	$self->run($state);
+	if ($self->should_run($state)) {
+		$self->run($state);
+	}
+}
+
+sub should_run() { 1 }
+
+package OpenBSD::PackingElement::UnexecDelete;
+sub should_run 
+{ 
+	my ($self, $state) = @_;
+	return !$state->{replacing};
+}
+
+package OpenBSD::PackingElement::UnexecUpdate;
+sub should_run 
+{ 
+	my ($self, $state) = @_;
+	return $state->{replacing};
 }
 
 package OpenBSD::PackingElement::FileBase;
@@ -364,21 +356,13 @@ use OpenBSD::Vstat;
 
 sub prepare_for_deletion
 {
-	my ($self, $state) = @_;
+	my ($self, $state, $pkgname) = @_;
 
-	my $fname = $state->{destdir}.$self->fullname();
-	$state->{totsize} += $self->{size} if defined $self->{size};
+	my $fname = $state->{destdir}.$self->fullname;
 	my $s = OpenBSD::Vstat::remove($fname, $self->{size});
 	return unless defined $s;
 	if ($s->{ro}) {
-		if ($state->{very_verbose} or ++($s->{problems}) < 4) {
-			Warn "Error: ", $s->{dev}, 
-			    " is read-only ($fname)\n";
-		} elsif ($s->{problems} == 4) {
-			Warn "Error: ... more files can't be removed from ",
-				$s->{dev}, "\n";
-		}
-		$state->{problems}++;
+		$s->report_ro($state, $fname);
 	}
 }
 
@@ -411,7 +395,7 @@ sub delete
 			}
 			unless (defined($self->{link}) or $self->{nochecksum} or $state->{quick}) {
 				if (!defined $self->{md5}) {
-					print "Problem: ", $self->fullname(),
+					print "Problem: ", $self->fullname,
 					    " does not have an md5 checksum\n";
 					print "NOT deleting: $realname\n";
 					$state->print("Couldn't delete $realname (no md5)\n");
@@ -420,7 +404,7 @@ sub delete
 				my $md5 = OpenBSD::md5::fromfile($realname);
 				if ($md5 ne $self->{md5}) {
 					print "Problem: md5 doesn't match for ",
-						$self->fullname(), "\n";
+						$self->fullname, "\n";
 					print "NOT deleting: $realname\n";
 					$state->print("Couldn't delete $realname (bad md5)\n");
 					$self->do_not_delete($state);
@@ -437,6 +421,62 @@ sub delete
 		print "Problem deleting $realname\n";
 		$state->print("deleting $realname failed: $!\n");
 	}
+}
+
+sub copy_old_stuff
+{
+	my ($self, $plist, $state) = @_;
+
+	if (defined $self->{stillaround}) {
+		delete $self->{stillaround};
+		if ($state->{replacing}) {
+			$self->rename_file_to_temp;
+		}
+		$self->add_object($plist);
+	}
+}
+
+package OpenBSD::PackingElement::SpecialFile;
+use OpenBSD::PackageInfo;
+
+sub prepare_for_deletetion
+{
+	my ($self, $state, $pkgname) = @_;
+
+	my $fname = $self->fullname;
+	my $size = $self->{size};
+	if (!defined $size) {
+		$size = (stat $fname)[7];
+	}
+	my $s = OpenBSD::Vstat::remove($fname, $self->{size});
+	return unless defined $s;
+	if ($s->{ro}) {
+		$s->report_ro($state, $fname);
+	}
+	if ($s->{noexec} && $self->exec_on_delete) {
+		$s->report_noexec($state, $fname);
+	}
+}
+
+sub copy_old_stuff
+{
+}
+
+package OpenBSD::PackingElement::Meta;
+sub copy_old_stuff
+{
+	my ($self, $plist, $state) = @_;
+	$self->add_object($plist);
+}
+
+package OpenBSD::PackingElement::FDESC;
+sub copy_old_stuff
+{
+	my ($self, $plist, $state) = @_;
+	require File::Copy;
+
+	File::Copy::copy($self->fullname, $plist->infodir);
+	$self->add_object($plist);
 }
 
 package OpenBSD::PackingElement::Sample;
@@ -502,9 +542,10 @@ sub delete
 {
 	my ($self, $state) = @_;
 	unless ($state->{not}) {
-	    my $fullname = $state->{destdir}.$self->fullname();
+	    my $fullname = $state->{destdir}.$self->fullname;
 	    VSystem($state->{very_verbose}, 
-	    "install-info", "--delete", "--info-dir=".dirname($fullname), $fullname);
+		OpenBSD::Paths->install_info, 
+		"--delete", "--info-dir=".dirname($fullname), $fullname);
 	}
 	$self->SUPER::delete($state);
 }
@@ -515,22 +556,23 @@ sub delete
 	my ($self, $state) = @_;
 	unless ($state->{not}) {
 		my $destdir = $state->{destdir};
-		my $fullname = $self->fullname();
+		my $fullname = $self->fullname;
 		my @l=();
-		if (open(my $shells, '<', $destdir.'/etc/shells')) {
+		if (open(my $shells, '<', $destdir.OpenBSD::Paths->shells)) {
 			local $_;
 			while(<$shells>) {
 				push(@l, $_);
-				s/^\#.*//;
+				s/^\#.*//o;
 				if ($_ =~ m/^\Q$fullname\E\s*$/) {
 					pop(@l);
 				}
 			}
 			close($shells);
-			open(my $shells2, '>', $destdir.'/etc/shells');
+			open(my $shells2, '>', $destdir.OpenBSD::Paths->shells);
 			print $shells2 @l;
 			close $shells2;
-			print "Shell $fullname removed from $destdir/etc/shells\n";
+			print "Shell $fullname removed from $destdir",
+			    OpenBSD::Paths->shells, "\n";
 		}
 	}
 	$self->SUPER::delete($state);
@@ -596,7 +638,7 @@ sub delete
 	$self->mark_ldconfig_directory($state->{destdir});
 }
 
-package OpenBSD::PackingElement::FREQUIRE;
+package OpenBSD::PackingElement::FDEINSTALL;
 sub delete
 {
 	my ($self, $state) = @_;
@@ -604,12 +646,12 @@ sub delete
 	$self->run($state, "DEINSTALL");
 }
 
-package OpenBSD::PackingElement::FDEINSTALL;
-sub delete
+package OpenBSD::PackingElement::Depend;
+sub copy_old_stuff
 {
-	my ($self, $state) = @_;
+	my ($self, $plist, $state) = @_;
 
-	$self->run($state, "DEINSTALL");
+	OpenBSD::PackingElement::Comment->add($plist, "\@".$self->keyword." ".$self->stringize);
 }
 
 1;

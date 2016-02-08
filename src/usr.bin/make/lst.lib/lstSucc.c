@@ -1,5 +1,5 @@
 /*	$OpenPackages$ */
-/*	$OpenBSD: lstSucc.c,v 1.13 2004/04/07 13:11:36 espie Exp $	*/
+/*	$OpenBSD: lstSucc.c,v 1.15 2007/07/30 09:51:53 espie Exp $	*/
 /*	$NetBSD: lstSucc.c,v 1.5 1996/11/06 17:59:52 christos Exp $	*/
 
 /*
@@ -55,9 +55,9 @@
 LstNode
 Lst_Succ(LstNode ln)
 {
-    if (ln == NULL)
-	return NULL;
-    else
-	return ln->nextPtr;
+	if (ln == NULL)
+		return NULL;
+	else
+		return ln->nextPtr;
 }
 

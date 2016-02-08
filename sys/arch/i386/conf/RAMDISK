@@ -1,12 +1,11 @@
-#	$OpenBSD: RAMDISK,v 1.148 2007/02/17 23:59:03 marco Exp $
+#	$OpenBSD: RAMDISK,v 1.153 2007/07/04 19:27:48 deraadt Exp $
 
 machine		i386		# architecture, used by config; REQUIRED
 
 option		SCSITERSE
 option		APM_NOPRINT
 
-option		I386_CPU	# CPU classes; at least one is REQUIRED
-option		I486_CPU
+option		I486_CPU	# CPU classes; at least one is REQUIRED
 option		I586_CPU
 option		I686_CPU
 
@@ -123,12 +122,12 @@ pccom*	at isapnp?
 #lpt2	at isa? port 0x3bc
 
 
-bha0	at isa? port 0x330	# BusLogic [57]4X SCSI controllers
-bha1	at isa? disable port 0x334 # BusLogic [57]4X SCSI controllers
-bha2	at isa? disable
-bha*	at pci?
+#bha0	at isa? port 0x330	# BusLogic [57]4X SCSI controllers
+#bha1	at isa? disable port 0x334 # BusLogic [57]4X SCSI controllers
+#bha2	at isa? disable
+#bha*	at pci?
 #bha*	at eisa?		# XXX eisa still runs in isa-compat
-scsibus* at bha?
+#scsibus* at bha?
 aha0	at isa? port 0x330	# Adaptec 154[02] SCSI controllers
 aha1	at isa? port 0x334	# Adaptec 154[02] SCSI controllers
 #aha*	at isapnp?
@@ -194,8 +193,6 @@ atapiscsi* at wdc?
 atapiscsi* at pciide?
 scsibus* at atapiscsi?
 
-#wt0	at isa? port 0x308 irq 5 drq 1	# Archive/Wangtek QIC tapes
-
 we0	at isa? port 0x280 iomem 0xd0000 irq 9	# WD/SMC 80x3 ethernet series
 we1	at isa? port 0x300 iomem 0xcc000 irq 10	#
 we*	at isapnp?
@@ -239,8 +236,8 @@ dc*	at pci?				# 21143, "tulip" clone ethernet
 sis*	at pci?				# SiS 900/7016 ethernet
 #ste*	at pci?				# Sundance ST201 ethernet
 #ti*	at pci?				# Alteon Tigon 1Gb ethernet
-skc*	at pci?				# SysKonnect GEnesis 984x
-sk*	at skc?				#  each port of above
+#skc*	at pci?				# SysKonnect GEnesis 984x
+#sk*	at skc?				#  each port of above
 em*	at pci?				# Intel Pro/1000 ethernet
 #txp*	at pci?				# 3com 3CR990
 #nge*	at pci?				# NS DP83820/DP83821 GigE

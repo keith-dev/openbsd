@@ -1,4 +1,4 @@
-/* $OpenBSD: cpu.h,v 1.26 2006/12/24 20:30:35 miod Exp $ */
+/* $OpenBSD: cpu.h,v 1.30 2007/05/06 19:05:11 martin Exp $ */
 /* $NetBSD: cpu.h,v 1.45 2000/08/21 02:03:12 thorpej Exp $ */
 
 /*-
@@ -101,11 +101,14 @@ typedef union alpha_t_float {
 
 #include <machine/alpha_cpu.h>
 #include <machine/frame.h>
+#include <machine/param.h>
 
 #ifdef _KERNEL
 
 #include <machine/bus.h>
+#include <machine/intr.h>
 #include <sys/device.h>
+#include <sys/sched.h>
 
 struct pcb;
 struct proc;
@@ -156,9 +159,6 @@ void	trap(unsigned long, unsigned long, unsigned long, unsigned long,
 void	trap_init(void);
 void	enable_nsio_ide(bus_space_tag_t);
 
-void	release_fpu(int);
-void	synchronize_fpstate(struct proc *, int);
-
 /* Multiprocessor glue; cpu.c */
 struct cpu_info;
 int	cpu_iccb_send(cpuid_t, const char *);
@@ -182,6 +182,7 @@ struct cpu_info {
 	/*
 	 * Public members.
 	 */
+	struct schedstate_percpu ci_schedstate;	/* scheduler state */
 #if defined(DIAGNOSTIC) || defined(LOCKDEBUG)
 	u_long ci_spin_locks;		/* # of spin locks held */
 	u_long ci_simple_locks;		/* # of simple locks held */
@@ -189,6 +190,7 @@ struct cpu_info {
 	struct proc *ci_curproc;	/* current owner of the processor */
 	struct simplelock ci_slock;	/* lock on this data structure */
 	cpuid_t ci_cpuid;		/* our CPU ID */
+	struct cpu_info *ci_next;
 
 	/*
 	 * Private members.
@@ -202,6 +204,7 @@ struct cpu_info {
 	u_long ci_want_resched;		/* preempt current process */
 	u_long ci_astpending;		/* AST is pending */
 	u_long ci_intrdepth;		/* interrupt trap depth */
+	struct trapframe *ci_db_regs;	/* registers for debuggers */
 #if defined(MULTIPROCESSOR)
 	u_long ci_flags;		/* flags; see below */
 	u_long ci_ipis;			/* interprocessor interrupts pending */
@@ -217,13 +220,18 @@ struct cpu_info {
 void	fpusave_cpu(struct cpu_info *, int);
 void	fpusave_proc(struct proc *, int);
 
+#define	CPU_INFO_UNIT(ci)		((ci)->ci_dev->dv_unit)
+#define	CPU_INFO_ITERATOR		int
+#define	CPU_INFO_FOREACH(cii, ci)	for (cii = 0, ci = curcpu(); \
+					    ci != NULL; ci = ci->ci_next)
+
 #if defined(MULTIPROCESSOR)
 extern	__volatile u_long cpus_running;
 extern	__volatile u_long cpus_paused;
 extern	struct cpu_info cpu_info[];
 
-#define	curcpu()		((struct cpu_info *)alpha_pal_rdval())
-#define	CPU_IS_PRIMARY(ci)	((ci)->ci_flags & CPUF_PRIMARY)
+#define	curcpu()			((struct cpu_info *)alpha_pal_rdval())
+#define	CPU_IS_PRIMARY(ci)		((ci)->ci_flags & CPUF_PRIMARY)
 
 void	cpu_boot_secondary_processors(void);
 
@@ -233,6 +241,7 @@ void	cpu_pause_resume_all(int);
 extern	struct cpu_info cpu_info_store;
 
 #define	curcpu()	(&cpu_info_store)
+#define	CPU_IS_PRIMARY(ci)	1
 #endif /* MULTIPROCESSOR */
 
 #define	curproc		curcpu()->ci_curproc
@@ -296,13 +305,11 @@ do {									\
 #ifdef notyet
 #define	need_proftick(p)						\
 do {									\
-	(p)->p_flag |= P_OWEUPC;					\
 	aston((p)->p_cpu);						\
 } while (/*CONSTCOND*/0)
 #else
 #define	need_proftick(p)						\
 do {									\
-	(p)->p_flag |= P_OWEUPC;					\
 	aston(curcpu());						\
 } while (/*CONSTCOND*/0)
 #endif
@@ -398,6 +405,10 @@ int alpha_fp_complete(u_long, u_long, struct proc *, u_int64_t *);
 #endif
 
 void alpha_enable_fp(struct proc *, int);
+
+#ifdef MULTIPROCESSOR
+#include <sys/mplock.h>
+#endif
 
 #endif /* _KERNEL */
 #endif /* _ALPHA_CPU_H_ */

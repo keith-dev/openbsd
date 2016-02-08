@@ -1,4 +1,4 @@
-/*	$OpenBSD: edit.c,v 1.34 2007/02/22 06:42:09 otto Exp $	*/
+/*	$OpenBSD: edit.c,v 1.36 2007/07/01 10:43:13 xsa Exp $	*/
 /*
  * Copyright (c) 2006, 2007 Xavier Santolaria <xsa@openbsd.org>
  *
@@ -256,8 +256,8 @@ cvs_edit_local(struct cvs_file *cf)
 	FILE *fp;
 	struct tm *t;
 	time_t now;
-	char bfpath[MAXPATHLEN], timebuf[64], thishost[MAXHOSTNAMELEN];
-	char wdir[MAXPATHLEN];
+	char timebuf[CVS_TIME_BUFSZ], thishost[MAXHOSTNAMELEN];
+	char bfpath[MAXPATHLEN], wdir[MAXPATHLEN];
 
 	if (cvs_noexec == 1)
 		return;
@@ -385,7 +385,7 @@ cvs_unedit_local(struct cvs_file *cf)
 	if (cf->file_ent != NULL) {
 		CVSENTRIES *entlist;
 		struct cvs_ent *ent;
-		char *entry, rbuf[16];
+		char *entry, rbuf[CVS_REV_BUFSZ];
 
 		entlist = cvs_ent_open(cf->file_wd);
 
@@ -428,7 +428,7 @@ cvs_base_handle(struct cvs_file *cf, int flags)
 	size_t len;
 	int i;
 	char *dp, *sp;
-	char buf[MAXPATHLEN], *fields[2], rbuf[16];
+	char buf[MAXPATHLEN], *fields[2], rbuf[CVS_REV_BUFSZ];
 
 	cvs_log(LP_TRACE, "cvs_base_handle(%s)", cf->file_path);
 

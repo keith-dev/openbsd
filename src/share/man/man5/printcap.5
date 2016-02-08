@@ -1,4 +1,4 @@
-.\"	$OpenBSD: printcap.5,v 1.17 2003/06/02 23:30:14 millert Exp $
+.\"	$OpenBSD: printcap.5,v 1.21 2007/05/31 19:19:58 jmc Exp $
 .\"	$NetBSD: printcap.5,v 1.7 1998/02/20 12:24:50 hubertf Exp $
 .\"
 .\" Copyright (c) 1983, 1991, 1993
@@ -30,7 +30,7 @@
 .\"
 .\"     @(#)printcap.5	8.2 (Berkeley) 12/11/93
 .\"
-.Dd December 11, 1993
+.Dd $Mdocdate: May 31 2007 $
 .Dt PRINTCAP 5
 .Os
 .Sh NAME
@@ -93,8 +93,9 @@ format)
 .It "lf	str" Ta Pa /dev/console Ta No "error logging file name"
 .It "lo	str" Ta Pa lock Ta No "name of lock file"
 .It "lp	str" Ta Pa /dev/lp Ta No "local printer device, or port@host for remote"
+.It "mc	num	0	maximum number of copies allowed; 0=unlimited"
 .It "ms	str" Ta Dv NULL Ta No "list of terminal modes to set or clear"
-.It "mx	num	1000	max file size (in"
+.It "mx	num	0	max file size (in"
 .Dv BUFSIZ
 blocks); 0=unlimited
 .It "nd	str" Ta Dv NULL Ta No "next directory for queues list (unimplemented)"
@@ -256,7 +257,7 @@ using the
 facility.
 Messages printed on
 .Em stderr
-of one of the filters are sent to the corresponding
+by the filters are sent to the corresponding
 .Sy lf
 file.
 The filters may, of course, use

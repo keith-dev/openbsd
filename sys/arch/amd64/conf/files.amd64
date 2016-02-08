@@ -1,4 +1,4 @@
-#	$OpenBSD: files.amd64,v 1.26 2007/02/17 17:35:43 tom Exp $
+#	$OpenBSD: files.amd64,v 1.33 2007/08/02 16:40:27 deraadt Exp $
 
 maxpartitions 16
 maxusers 2 16 128
@@ -31,6 +31,7 @@ file	arch/amd64/amd64/bus_dma.c
 file	arch/amd64/amd64/mptramp.S		multiprocessor
 file	arch/amd64/amd64/ipifuncs.c		multiprocessor
 file	arch/amd64/amd64/ipi.c			multiprocessor
+file	arch/amd64/amd64/mp_setperf.c		multiprocessor
 
 file	arch/amd64/amd64/apic.c			ioapic | lapic
 
@@ -57,7 +58,8 @@ file	arch/amd64/amd64/kgdb_machdep.c		kgdb
 # Basic clock - required
 file	arch/amd64/isa/clock.c
 
-file	arch/amd64/amd64/powernow-k8.c
+file	arch/amd64/amd64/powernow-k8.c		!small_kernel
+file	arch/amd64/amd64/est.c			!small_kernel
 
 include	"dev/mii/files.mii"
 
@@ -162,10 +164,18 @@ device	fd: disk, isa_dma
 attach	fd at fdc
 file	dev/isa/fd.c				fd needs-flag
 
+pseudo-device	nvram
+file	arch/amd64/amd64/nvram.c	nvram needs-flag
+
 #
 # USB
 #
 include	"dev/usb/files.usb"
+
+#
+# Bluetooth
+#
+include "dev/bluetooth/files.bluetooth"
 
 #
 # I2C
@@ -204,5 +214,7 @@ major	{st = 5}
 major	{cd = 6}
 major	{rd = 17}
 major	{wd = 0}
-major	{wt = 3}
 major	{fd = 2}
+
+file	arch/amd64/pci/agp_machdep.c		pciagp
+file	dev/pci/agp_i810.c			pciagp

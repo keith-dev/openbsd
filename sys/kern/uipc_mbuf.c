@@ -1,4 +1,4 @@
-/*	$OpenBSD: uipc_mbuf.c,v 1.79 2006/12/29 13:04:37 pedro Exp $	*/
+/*	$OpenBSD: uipc_mbuf.c,v 1.85 2007/07/20 09:59:19 claudio Exp $	*/
 /*	$NetBSD: uipc_mbuf.c,v 1.15.4.1 1996/06/13 17:11:44 cgd Exp $	*/
 
 /*
@@ -134,6 +134,7 @@ nmbclust_update(void)
 	 * reached message max once a minute.
 	 */
 	(void)pool_sethardlimit(&mclpool, nmbclust, mclpool_warnmsg, 60);
+	pool_sethiwat(&mbpool, nmbclust);
 }
 
 void
@@ -153,15 +154,24 @@ m_reclaim(void *arg, int flags)
 
 /*
  * Space allocation routines.
- * These are also available as macros
- * for critical paths.
  */
 struct mbuf *
 m_get(int nowait, int type)
 {
 	struct mbuf *m;
+	int s;
 
-	MGET(m, nowait, type);
+	s = splvm();
+	m = pool_get(&mbpool, nowait == M_WAIT ? PR_WAITOK|PR_LIMITFAIL : 0);
+	if (m) {
+		m->m_type = type;
+		mbstat.m_mtypes[type]++;
+		m->m_next = (struct mbuf *)NULL;
+		m->m_nextpkt = (struct mbuf *)NULL;
+		m->m_data = m->m_dat;
+		m->m_flags = 0;
+	}
+	splx(s);
 	return (m);
 }
 
@@ -169,8 +179,28 @@ struct mbuf *
 m_gethdr(int nowait, int type)
 {
 	struct mbuf *m;
+	int s;
 
-	MGETHDR(m, nowait, type);
+	s = splvm();
+	m = pool_get(&mbpool, nowait == M_WAIT ? PR_WAITOK|PR_LIMITFAIL : 0);
+	if (m) {
+		m->m_type = type;
+		mbstat.m_mtypes[type]++;
+		m->m_next = (struct mbuf *)NULL;
+		m->m_nextpkt = (struct mbuf *)NULL;
+		m->m_data = m->m_pktdat;
+		m->m_flags = M_PKTHDR;
+		m->m_pkthdr.rcvif = NULL;
+		SLIST_INIT(&m->m_pkthdr.tags);
+		m->m_pkthdr.csum_flags = 0;
+		m->m_pkthdr.pf.hdr = NULL;
+		m->m_pkthdr.pf.rtableid = 0;
+		m->m_pkthdr.pf.qid = 0;
+		m->m_pkthdr.pf.tag = 0;
+		m->m_pkthdr.pf.flags = 0;
+		m->m_pkthdr.pf.routed = 0;
+	}
+	splx(s);
 	return (m);
 }
 
@@ -186,12 +216,52 @@ m_getclr(int nowait, int type)
 	return (m);
 }
 
+void
+m_clget(struct mbuf *m, int how)
+{
+	int s;
+
+	s = splvm();
+	m->m_ext.ext_buf =
+	    pool_get(&mclpool, how == M_WAIT ? (PR_WAITOK|PR_LIMITFAIL) : 0);
+	splx(s);
+	if (m->m_ext.ext_buf != NULL) {
+		m->m_data = m->m_ext.ext_buf;
+		m->m_flags |= M_EXT|M_CLUSTER;
+		m->m_ext.ext_size = MCLBYTES;
+		m->m_ext.ext_free = NULL;
+		m->m_ext.ext_arg = NULL;
+		MCLINITREFERENCE(m);
+	}
+}
+
 struct mbuf *
 m_free(struct mbuf *m)
 {
 	struct mbuf *n;
+	int s;
 
-	MFREE(m, n);
+	s = splvm();
+	mbstat.m_mtypes[m->m_type]--;
+	if (m->m_flags & M_PKTHDR)
+		m_tag_delete_chain(m);
+	if (m->m_flags & M_EXT) {
+		if (MCLISREFERENCED(m))
+			_MCLDEREFERENCE(m);
+		else if (m->m_flags & M_CLUSTER)
+			pool_put(&mclpool, m->m_ext.ext_buf);
+		else if (m->m_ext.ext_free)
+			(*(m->m_ext.ext_free))(m->m_ext.ext_buf,
+			    m->m_ext.ext_size, m->m_ext.ext_arg);
+		else
+			free(m->m_ext.ext_buf,m->m_ext.ext_type);
+		m->m_flags &= ~(M_CLUSTER|M_EXT);
+		m->m_ext.ext_size = 0;
+	}
+	n = m->m_next;
+	pool_put(&mbpool, m);
+	splx(s);
+
 	return (n);
 }
 
@@ -221,6 +291,9 @@ m_prepend(struct mbuf *m, int len, int how)
 {
 	struct mbuf *mn;
 
+	if (len > MHLEN)
+		panic("mbuf prepend length too big");
+
 	MGET(mn, how, m->m_type);
 	if (mn == NULL) {
 		m_freem(m);
@@ -230,8 +303,7 @@ m_prepend(struct mbuf *m, int len, int how)
 		M_MOVE_PKTHDR(mn, m);
 	mn->m_next = m;
 	m = mn;
-	if (len < MHLEN)
-		MH_ALIGN(m, len);
+	MH_ALIGN(m, len);
 	m->m_len = len;
 	return (m);
 }
@@ -942,31 +1014,3 @@ m_apply(struct mbuf *m, int off, int len,
 
 	return (0);
 }
-
-#ifdef SMALL_KERNEL
-/*
- * The idea of adding code in a small kernel might look absurd, but this is
- * instead of macros.
- */
-struct mbuf *
-_sk_mget(int how, int type)
-{
-	struct mbuf *m;
-	_MGET(m, how, type);
-	return m;
-}
-
-struct mbuf *
-_sk_mgethdr(int how, int type)
-{
-	struct mbuf *m;
-	_MGETHDR(m, how, type);
-	return m;
-}
-
-void
-_sk_mclget(struct mbuf *m, int how)
-{
-	_MCLGET(m, how);
-}
-#endif /* SMALL_KERNEL */

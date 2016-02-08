@@ -1,4 +1,4 @@
-dnl	$OpenBSD: hardware,v 1.246 2007/03/09 22:43:37 deraadt Exp $
+dnl	$OpenBSD: hardware,v 1.251 2007/06/08 22:13:01 mbalmer Exp $
 OpenBSD/MACHINE OSREV works across a broad range of standard PCs and
 clones, with a wide variety of processors and I/O bus architectures.  It
 can be expected to install and run with minimal difficulties on most
@@ -220,8 +220,6 @@ Supported hardware {:-include-:}:
 	Tape Drives
 		Most SCSI tape drives [C]
 		Most SCSI tape changers [G]
-		QIC-02 and QIC-36 format (Archive- and Wangtek-
-		   compatible) tape drives [*]
 	MDA, CGA, VGA, SVGA, and HGC Display Adapters.  (Note that not
 		all of the display adapters OpenBSD/MACHINE
 		are supported by X.  See the XFree86 FAQ for more
@@ -604,7 +602,7 @@ Supported hardware {:-include-:}:
 		    Proxim Skyline 4032
 		    Senao NL-5354MP
 		    Wistron CM9
-		Atheros USB IEEE 802.11a/b/g adapters [*]
+		Atheros USB IEEE 802.11a/b/g adapters [G]
 		    Compex WLU108AG
 		    Compex WLU108G
 		    D-Link DWL-G132
@@ -782,13 +780,13 @@ Supported hardware {:-include-:}:
 		    Z-Com XI-725/726
 		    Z-Com XI-735
 		    ZyXEL ZyAIR B-200
-		Intersil/Conexant Prism GT CardBus Full-MAC IEEE 802.11a/b/g [*]
+		Intersil/Conexant Prism GT CardBus Full-MAC IEEE 802.11a/b/g [G]
 		    3COM 3CRWE154G72
 		    NETGEAR WG511
 		    SMC EZ Connect g 2.4GHz SMC2835W-v2
 		    Soyo Aerielink
 		    Zyxel ZyAIR G-100 
-		Intersil/Conexant Prism GT PCI Full-MAC IEEE 802.11a/b/g [*]
+		Intersil/Conexant Prism GT PCI Full-MAC IEEE 802.11a/b/g [G]
 		    D-Link DWL-g650 A1
 		    I-O Data WN-G54/CB
 		    I4 Z-Com XG-600
@@ -798,10 +796,12 @@ Supported hardware {:-include-:}:
 		    PLANEX GW-DS54G
 		    SMC EZ Connect g 2.4GHz SMC2802W
 		    SMC 2802Wv2
-		Marvell Libertas CardBus IEEE 802.11b/g wireless adapters [*]
+		Marvell Libertas CardBus IEEE 802.11b/g wireless adapters [G]
 		    Netgear WG511v2
-		Marvell Libertas PCI IEEE 802.11b/g wireless adapters [*]
+		    Tenda TWL541C
+		Marvell Libertas PCI IEEE 802.11b/g wireless adapters [G]
 		    Netgear WG311v3
+		    Tenda TWL542P
 		Ralink RT2500 based CardBus IEEE 802.11b/g adapters [A] [B]
 		    A-Link WL54PC
 		    Alfa AWPC036
@@ -1133,6 +1133,7 @@ Supported hardware {:-include-:}:
 		    Buffalo LGY-PCI-GT (8169S)
 		    Corega CG-LAPCIGT (8169S)
 		    D-Link DGE-528T (8169S)
+		    D-Link DGE-660TD (8196/8110SB)
 		    Gigabyte 7N400 Pro2 Integrated Gigabit Ethernet (8110S)
 		    LevelOne GNC-0105T (8169S)
 		    Linksys EG1032v3 (8169S)
@@ -1364,13 +1365,31 @@ Supported hardware {:-include-:}:
 		    VideoLogic Captivator PCI
 		    Zoltrix TV and Genie TV/FM
 		Hardware monitoring sensors, including: [G]
+		    Asus AS99127F
+		    Asus ASB100
+		    Analog Devices AD7416, AD7417 and AD7418
+		    Analog Devices ADM1021
+		    Analog Devices ADM1024
+		    Analog Devices ADM1025
+		    Analog Devices ADM1026
+		    Analog Devices ADM1030
+		    Analog Devices ADM1031
+		    Analog Devices ADT7460
+		    Genesys Logic GL518SM
 		    ITE IT8705F, IT8712F
-		    National Semiconductor LM75, LM77, LM78, LM78-J, LM79
+		    National Semiconductor LM87
+		    National Semiconductor LM75, LM77
+		    National Semiconductor LM78, LM78-J, LM79
 		    National Semiconductor PC87366 LPC Super I/O VLM and TMS
+		    Maxim DS1624/DS1631/DS1721
+		    Maxim MAX6642/MAX6690
 		    SiS SiS950
+		    ThinkPad Active Protection System accelerometer
 		    VIA VT1211
 		    VIA VT82C686A, VT8231
-		    Winbond W83697HF, W83627HF, W83627THF, W83781D, W83782D
+		    Winbond W83627HF, W83627THF, W83627DHG, W83627EHF, W83637HF
+		    Winbond W83697HF, W83781D, W83782D, W83783S, W83791D, W83792D
+		    Winbond W83L784R, W83L785R and W83L785TS-L
 		Hardware watchdog timer support, including: [G]
 		    AMD Elan SC520 System Controller
 		    ICS PCI-WDT500/501 watchdog timer

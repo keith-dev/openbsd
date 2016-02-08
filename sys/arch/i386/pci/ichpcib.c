@@ -1,4 +1,4 @@
-/*	$OpenBSD: ichpcib.c,v 1.16 2006/12/12 23:14:27 dim Exp $	*/
+/*	$OpenBSD: ichpcib.c,v 1.19 2007/06/02 18:39:57 jsg Exp $	*/
 /*
  * Copyright (c) 2004 Alexander Yurchenko <grange@openbsd.org>
  *
@@ -82,7 +82,7 @@ struct cfdriver ichpcib_cd = {
 
 #ifndef SMALL_KERNEL
 static const char p4hint[] = "Mobile Intel(R) Pentium(R) 4";
-static void *ichss_cookie;	/* XXX */
+struct ichpcib_softc *ichss_sc;
 extern int setperf_prio;
 #endif	/* !SMALL_KERNEL */
 
@@ -105,7 +105,8 @@ const struct pci_matchid ichpcib_devices[] = {
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82801GBM_LPC },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82801GH_LPC },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82801GHM_LPC },
-	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82801H_LPC }
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82801H_LPC },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82801HBM_LPC }
 };
 
 int
@@ -159,7 +160,7 @@ ichpcib_attach(struct device *parent, struct device *self, void *aux)
 			ICH_GEN_PMCON1_SS_EN);
 
 		/* Hook into hw.setperf sysctl */
-		ichss_cookie = sc;
+		ichss_sc = sc;
 		cpu_setperf = ichss_setperf;
 		setperf_prio = 2;
 	}
@@ -232,13 +233,13 @@ ichss_present(struct pci_attach_args *pa)
 void
 ichss_setperf(int level)
 {
-	struct ichpcib_softc *sc = ichss_cookie;
+	struct ichpcib_softc *sc = ichss_sc;
 	u_int8_t state, ostate, cntl;
 	int s;
 
 #ifdef DIAGNOSTIC
 	if (sc == NULL) {
-		printf("%s: no cookie", __func__);
+		printf("%s: no ichss_sc", __func__);
 		return;
 	}
 #endif
@@ -274,8 +275,10 @@ ichss_setperf(int level)
 		bus_space_write_1(sc->sc_pm_iot, sc->sc_pm_ioh, ICH_PM_CNTL,
 		    cntl);
 
+#ifdef I686_CPU
 		if (update_cpuspeed != NULL)
 			update_cpuspeed();
+#endif
 	}
 	splx(s);
 }

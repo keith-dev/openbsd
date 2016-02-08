@@ -1,4 +1,4 @@
-/*	$OpenBSD: intr.h,v 1.7 2006/03/12 02:34:39 brad Exp $	*/
+/*	$OpenBSD: intr.h,v 1.11 2007/05/25 16:22:11 art Exp $	*/
 /*	$NetBSD: intr.h,v 1.2 2003/05/04 22:01:56 fvdl Exp $	*/
 
 /*-
@@ -67,7 +67,7 @@
 
 struct intrstub {
 	void *ist_entry;
-	void *ist_recurse; 
+	void *ist_recurse;
 	void *ist_resume;
 };
 
@@ -78,7 +78,6 @@ struct intrsource {
 	struct pic *is_pic;		/* originating PIC */
 	void *is_recurse;		/* entry for spllower */
 	void *is_resume;		/* entry for doreti */
-	struct evcnt is_evcnt;		/* interrupt counter */
 	char is_evname[32];		/* event counter name */
 	int is_flags;			/* see below */
 	int is_type;			/* level, edge */
@@ -175,7 +174,7 @@ void splassert_fail(int, int, const char *);
 extern int splassert_ctl;
 void splassert_check(int, const char *);
 #define splassert(__wantipl) do {			\
-	if (__predict_false(splassert_ctl > 0)) {	\
+	if (splassert_ctl > 0) {			\
 		splassert_check(__wantipl, __func__);	\
 	}						\
 } while (0)
@@ -224,6 +223,7 @@ void intr_printconfig(void);
 
 #ifdef MULTIPROCESSOR
 int x86_send_ipi(struct cpu_info *, int);
+int x86_fast_ipi(struct cpu_info *, int);
 void x86_broadcast_ipi(int);
 void x86_multicast_ipi(int, int);
 void x86_ipi_handler(void);
@@ -231,6 +231,7 @@ void x86_intlock(struct intrframe);
 void x86_intunlock(struct intrframe);
 void x86_softintlock(void);
 void x86_softintunlock(void);
+void x86_setperf_ipi(struct cpu_info *);
 
 extern void (*ipifunc[X86_NIPI])(struct cpu_info *);
 #endif
@@ -243,7 +244,7 @@ extern void (*ipifunc[X86_NIPI])(struct cpu_info *);
 
 #define	X86_SOFTINTR_SOFTCLOCK		0
 #define	X86_SOFTINTR_SOFTNET		1
-#define	X86_SOFTINTR_SOFTSERIAL	2
+#define	X86_SOFTINTR_SOFTSERIAL		2
 #define	X86_NSOFTINTR			3
 
 #ifndef _LOCORE

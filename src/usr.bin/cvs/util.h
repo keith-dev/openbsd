@@ -1,4 +1,4 @@
-/*	$OpenBSD: util.h,v 1.17 2007/02/19 11:40:00 otto Exp $	*/
+/*	$OpenBSD: util.h,v 1.20 2007/07/03 13:22:43 joris Exp $	*/
 /*
  * Copyright (c) 2006 Niall O'Higgins <niallo@openbsd.org>
  * All rights reserved.
@@ -31,12 +31,10 @@ void	  cvs_get_repository_path(const char *, char *, size_t);
 void	  cvs_get_repository_name(const char *, char *, size_t);
 void	  cvs_modetostr(mode_t, char *, size_t);
 void	  cvs_strtomode(const char *, mode_t *);
-void	  cvs_splitpath(const char *, char *, size_t, char **);
 void	  cvs_mkadmin(const char *, const char *, const char *,
 	      char *, char *, int);
-void	  cvs_mkpath(const char *);
+void	  cvs_mkpath(const char *, char *);
 int	  cvs_cksum(const char *, char *, size_t);
-int	  cvs_exec(int, char **);
 int	  cvs_getargv(const char *, char **, int);
 int	  cvs_chdir(const char *, int);
 int	  cvs_rename(const char *, const char *);

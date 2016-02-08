@@ -803,7 +803,7 @@ xfs_lock(struct vop_lock_args * ap)
     ret = lockmgr(l, flags, &vp->v_interlock, ap->a_p);
 #endif
 #else
-    ret = lockmgr(l, flags, &vp->v_interlock);
+    ret = lockmgr(l, flags, NULL);
 #endif
 #else
 #ifdef HAVE_FREEBSD_THREAD
@@ -857,7 +857,7 @@ xfs_unlock(struct vop_unlock_args * ap)
     ret = lockmgr (l, flags | LK_RELEASE, &vp->v_interlock, ap->a_p);
 #endif
 #else
-    ret = lockmgr (l, flags | LK_RELEASE, &vp->v_interlock);
+    ret = lockmgr (l, flags | LK_RELEASE, NULL);
 #endif
 #else
 #ifdef HAVE_FREEBSD_THREAD
@@ -1008,9 +1008,9 @@ xfs_mmap(struct vop_mmap_args *ap)
 int
 xfs_bmap(struct vop_bmap_args *ap)
      /*	IN struct vnode *vp;
-	IN daddr_t bn;
+	IN daddr64_t bn;
 	OUT struct vnode **vpp;
-	IN daddr_t *bnp;
+	IN daddr64_t *bnp;
 	OUT int *runp;
 	OUT int *runb;
 	*/
@@ -1173,9 +1173,7 @@ xfs_cntl(struct vnode * vp,
 int
 xfs_print (struct vop_print_args *v)
 {
-    struct vop_print_args /* {
-	struct vnode	*a_vp;
-    } */ *ap = v;
+    struct vop_print_args *ap = v;
     xfs_printnode_common (ap->a_vp);
     return 0;
 }
@@ -1185,13 +1183,7 @@ xfs_print (struct vop_print_args *v)
 int
 xfs_advlock(struct vop_advlock_args *v)
 {
-    struct vop_advlock_args /* {
-	struct vnode *a_vp;
-	caddr_t  a_id;
-	int  a_op;
-	struct flock *a_fl;
-	int  a_flags;
-    } */ *ap = v;
+    struct vop_advlock_args *ap = v;
 #if defined(HAVE_KERNEL_LF_ADVLOCK) && !defined(__APPLE__)
     struct xfs_node *xn = VNODE_TO_XNODE(ap->a_vp);
  

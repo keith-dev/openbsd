@@ -1,4 +1,4 @@
-/*	$OpenBSD: mount.h,v 1.77 2006/12/15 03:04:24 krw Exp $	*/
+/*	$OpenBSD: mount.h,v 1.81 2007/06/01 05:37:14 deraadt Exp $	*/
 /*	$NetBSD: mount.h,v 1.48 1996/02/18 11:55:47 fvdl Exp $	*/
 
 /*
@@ -94,11 +94,14 @@ struct iso_args {
 	char	*fspec;			/* block special device to mount */
 	struct	export_args export_info;/* network export info */
 	int	flags;			/* mounting flags, see below */
+	int	sess;			/* start sector of session */
 };
-#define	ISOFSMNT_NORRIP	0x00000001	/* disable Rock Ridge Ext.*/
-#define	ISOFSMNT_GENS	0x00000002	/* enable generation numbers */
-#define	ISOFSMNT_EXTATT	0x00000004	/* enable extended attributes */
-#define	ISOFSMNT_NOJOLIET 0x00000008	/* disable Joliet Ext.*/
+
+#define	ISOFSMNT_NORRIP		0x00000001	/* disable Rock Ridge Ext.*/
+#define	ISOFSMNT_GENS		0x00000002	/* enable generation numbers */
+#define	ISOFSMNT_EXTATT		0x00000004	/* enable extended attr. */
+#define	ISOFSMNT_NOJOLIET	0x00000008	/* disable Joliet Ext.*/
+#define	ISOFSMNT_SESS		0x00000010	/* use iso_args.sess */
 
 /*
  * Arguments to mount NFS
@@ -222,18 +225,6 @@ struct msdosfs_args {
 #define MSDOSFSMNT_ALLOWDIRX	0x10	/* dir is mode +x if r */
 
 /*
- * Arguments to mount amigados filesystems.
- */
-struct adosfs_args {
-	char	*fspec;		/* blocks special holding the fs to mount */
-	struct	export_args export_info;
-				/* network export information */
-	uid_t	uid;		/* uid that owns adosfs files */
-	gid_t	gid;		/* gid that owns adosfs files */
-	mode_t	mask;		/* mask to be applied for adosfs perms */
-};
-
-/*
  * Arguments to mount ntfs filesystems
  */
 struct ntfs_args {
@@ -287,7 +278,6 @@ union mount_info {
 	struct iso_args iso_args;
 	struct procfs_args procfs_args;
 	struct msdosfs_args msdosfs_args;
-	struct adosfs_args adosfs_args;
 	struct ntfs_args ntfs_args;
 	char __align[160];	/* 64-bit alignment and room to grow */
 };
@@ -339,7 +329,6 @@ struct ostatfs {
  * File system types.
  */
 #define	MOUNT_FFS	"ffs"		/* UNIX "Fast" Filesystem */
-#define	MOUNT_FFS2	"ffs2"		/* UNIX "Fast" Filesystem, version 2 */
 #define	MOUNT_UFS	MOUNT_FFS	/* for compatibility */
 #define	MOUNT_NFS	"nfs"		/* Network Filesystem */
 #define	MOUNT_MFS	"mfs"		/* Memory Filesystem */
@@ -348,7 +337,6 @@ struct ostatfs {
 #define	MOUNT_PROCFS	"procfs"	/* /proc Filesystem */
 #define	MOUNT_AFS	"afs"		/* Andrew Filesystem */
 #define	MOUNT_CD9660	"cd9660"	/* ISO9660 (aka CDROM) Filesystem */
-#define	MOUNT_ADOSFS	"adosfs"	/* AmigaDOS Filesystem */
 #define	MOUNT_EXT2FS	"ext2fs"	/* Second Extended Filesystem */
 #define	MOUNT_NCPFS	"ncpfs"		/* NetWare Network File System */
 #define	MOUNT_XFS	"xfs"		/* xfs */
@@ -597,9 +585,7 @@ void	vfs_shutdown(void);	/* unmount and sync file systems */
 long	makefstype(char *);
 int	dounmount(struct mount *, int, struct proc *, struct vnode *);
 void	vfsinit(void);
-#ifdef DEBUG
 void	vfs_bufstats(void);
-#endif
 int	vfs_register(struct vfsconf *);
 int	vfs_unregister(struct vfsconf *);
 #else /* _KERNEL */

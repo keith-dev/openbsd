@@ -1,4 +1,4 @@
-.\"	$OpenBSD: com.4,v 1.27 2006/09/24 23:07:48 martin Exp $
+.\"	$OpenBSD: com.4,v 1.31 2007/06/20 14:26:09 jmc Exp $
 .\"	$NetBSD: com.4,v 1.5 1996/03/16 00:07:08 thorpej Exp $
 .\"
 .\" Copyright (c) 1990, 1991 The Regents of the University of California.
@@ -33,7 +33,7 @@
 .\"
 .\"     from: @(#)dca.4	5.2 (Berkeley) 3/27/91
 .\"
-.Dd July 6, 2005
+.Dd $Mdocdate: June 20 2007 $
 .Dt COM 4
 .Os
 .Sh NAME
@@ -69,6 +69,8 @@
 .Cd "com1 at gsc? offset 0x822000 irq 6"
 .Cd "com2 at gsc? irq 13"
 .Cd "com1 at dino? irq 11"
+.Cd "com0 at ssio? irq 4"
+.Cd "com1 at ssio? irq 3"
 .Pp
 .Cd "# macppc"
 .Cd "com* at pcmcia?"
@@ -95,8 +97,8 @@ The
 .Nm com
 and
 .Nm pccom
-drivers provide support for NS8250-, NS16450-, NS16550-, ST16650-, and
-TI16750-based
+drivers provide support for NS8250-, NS16450-, NS16550-, ST16650-,
+ST16C654-, and TI16750-based
 .Tn EIA
 .Tn RS-232C
 .Pf ( Tn CCITT
@@ -158,6 +160,7 @@ with the code listed.
 .Xr puc 4 ,
 .Xr pxaip 4 ,
 .Xr rtfps 4 ,
+.Xr ssio 4 ,
 .Xr tty 4
 .Sh HISTORY
 The

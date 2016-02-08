@@ -1,4 +1,4 @@
-/*	$OpenBSD: print-802_11.c,v 1.7 2006/06/23 21:53:01 reyk Exp $	*/
+/*	$OpenBSD: print-802_11.c,v 1.12 2007/08/14 19:10:45 mglocker Exp $	*/
 
 /*
  * Copyright (c) 2005 Reyk Floeter <reyk@openbsd.org>
@@ -65,6 +65,7 @@ int	 ieee80211_elements(struct ieee80211_frame *, u_int);
 int	 ieee80211_frame(struct ieee80211_frame *, u_int);
 int	 ieee80211_print(struct ieee80211_frame *, u_int);
 u_int	 ieee80211_any2ieee(u_int, u_int);
+void	 ieee80211_reason(u_int16_t);
 
 #define TCARR(a)	TCHECK2(*a, sizeof(a))
 
@@ -113,8 +114,10 @@ ieee80211_hdr(struct ieee80211_frame *wh)
 		break;
 	}
 	if (vflag) {
+		u_int16_t seq;
 		TCARR(wh->i_seq);
-		printf(" (seq %u): ", letoh16(*(u_int16_t *)&wh->i_seq[0]));
+		bcopy(wh->i_seq, &seq, sizeof(u_int16_t));
+		printf(" (seq %u): ", letoh16(seq));
 	} else
 		printf(": ");
 
@@ -129,9 +132,10 @@ int
 ieee80211_data(struct ieee80211_frame *wh, u_int len)
 {
 	u_int8_t *t = (u_int8_t *)wh;
+	struct ieee80211_frame_addr4 *w4;
 	u_int datalen;
 
-	TCHECK2(*t, sizeof(struct ieee80211_frame));
+	TCHECK(*wh);
 	t += sizeof(struct ieee80211_frame);
 	datalen = len - sizeof(struct ieee80211_frame);
 
@@ -143,7 +147,14 @@ ieee80211_data(struct ieee80211_frame *wh, u_int len)
 		llc_print(t, datalen, datalen, wh->i_addr3, wh->i_addr1);
 		break;
 	case IEEE80211_FC1_DIR_NODS:
+		llc_print(t, datalen, datalen, wh->i_addr2, wh->i_addr1);
+		break;
 	case IEEE80211_FC1_DIR_DSTODS:
+		w4 = (struct ieee80211_frame_addr4 *) wh;
+		TCHECK(*w4);
+		t = (u_int8_t *) (w4 + 1);
+		datalen = len - sizeof(*w4);
+		llc_print(t, datalen, datalen, w4->i_addr4, w4->i_addr3);
 		break;
 	}
 
@@ -194,32 +205,33 @@ int
 ieee80211_elements(struct ieee80211_frame *wh, u_int flen)
 {
 	u_int8_t *buf, *frm;
-	u_int8_t *tstamp, *bintval, *capinfo;
+	u_int64_t tstamp;
+	u_int16_t bintval, capinfo;
 	int i;
 
 	buf = (u_int8_t *)wh;
 	frm = (u_int8_t *)&wh[1];
 
-	tstamp = frm;
-	TCHECK2(*tstamp, 8);
+	TCHECK2(*frm, 8);
+	bcopy(frm, &tstamp, sizeof(u_int64_t));
 	frm += 8;
 
 	if (vflag > 1)
-		printf(", timestamp %llu", letoh64(*(u_int64_t *)tstamp));
+		printf(", timestamp %llu", letoh64(tstamp));
 
-	bintval = frm;
-	TCHECK2(*bintval, 2);
+	TCHECK2(*frm, 2);
+	bcopy(frm, &bintval, sizeof(u_int16_t));
 	frm += 2;
 
 	if (vflag > 1)
-		printf(", interval %u", letoh16(*(u_int16_t *)bintval));
+		printf(", interval %u", letoh16(bintval));
 
-	capinfo = frm;
-	TCHECK2(*capinfo, 2);
+	TCHECK2(*frm, 2);
+	bcopy(frm, &capinfo, sizeof(u_int16_t));
 	frm += 2;
 
 	if (vflag)
-		printb(", caps", letoh16(*(u_int16_t *)capinfo),
+		printb(", caps", letoh16(capinfo),
 		    IEEE80211_CAPINFO_BITS);
 
 	while (TTEST2(*frm, 2)) {
@@ -398,6 +410,11 @@ ieee80211_frame(struct ieee80211_frame *wh, u_int len)
 				break;
 			}
 			break;
+		case IEEE80211_FC0_SUBTYPE_DEAUTH:
+		case IEEE80211_FC0_SUBTYPE_DISASSOC:
+			TCHECK2(*frm, 2);		/* Reason Code */
+			ieee80211_reason(frm[0] | (frm[1] << 8));
+			break;
 		}
 		break;
 	default:
@@ -457,12 +474,12 @@ ieee802_11_if_print(u_char *user, const struct pcap_pkthdr *h,
 	packetp = p;
 	snapend = p + h->caplen;
 
-	if (ieee80211_print(wh, (u_int)h->caplen) != 0)
+	if (ieee80211_print(wh, (u_int)h->len) != 0)
 		printf("[|802.11]");
 
 	if (!ieee80211_encap) {
 		if (xflag)
-			default_print(p, (u_int)h->caplen);
+			default_print(p, (u_int)h->len);
 		putchar('\n');
 	}
 }
@@ -477,6 +494,7 @@ ieee802_11_radio_if_print(u_char *user, const struct pcap_pkthdr *h,
 	u_int8_t *t;
 	u_int32_t present;
 	u_int len, rh_len;
+	u_int16_t tmp;
 
 	if (!ieee80211_encap)
 		ts_print(&h->ts);
@@ -486,7 +504,7 @@ ieee802_11_radio_if_print(u_char *user, const struct pcap_pkthdr *h,
 
 	TCHECK(*rh);
 
-	len = h->caplen;
+	len = h->len;
 	rh_len = letoh16(rh->it_len);
 	if (rh->it_version != 0) {
 		printf("[?radiotap + 802.11 v:%u]", rh->it_version);
@@ -508,9 +526,12 @@ ieee802_11_radio_if_print(u_char *user, const struct pcap_pkthdr *h,
 	(present & (1 << IEEE80211_RADIOTAP_##_x))
 
 	if (RADIOTAP(TSFT)) {
+		u_int64_t tsf;
+
 		TCHECK2(*t, 8);
+		bcopy(t, &tsf, sizeof(u_int64_t));
 		if (vflag > 1)
-			printf(", tsf %llu", letoh64(*(u_int64_t*)t));
+			printf(", tsf %llu", letoh64(tsf));
 		t += 8;
 	}
 
@@ -540,10 +561,12 @@ ieee802_11_radio_if_print(u_char *user, const struct pcap_pkthdr *h,
 		u_int16_t freq, flags;
 		TCHECK2(*t, 2);
 
-		freq = letoh16(*(u_int16_t*)t);
+		bcopy(t, &freq, sizeof(u_int16_t));
+		freq = letoh16(freq);
 		t += 2;
 		TCHECK2(*t, 2);
-		flags = letoh16(*(u_int16_t*)t);
+		bcopy(t, &flags, sizeof(u_int16_t));
+		flags = letoh16(flags);
 		t += 2;
 
 		printf(", chan %u", ieee80211_any2ieee(freq, flags));
@@ -587,24 +610,28 @@ ieee802_11_radio_if_print(u_char *user, const struct pcap_pkthdr *h,
 
 	if (RADIOTAP(LOCK_QUALITY)) {
 		TCHECK2(*t, 2);
-		if (vflag)
-			printf(", quality %u", letoh16(*(u_int16_t*)t));
+		if (vflag) {
+			bcopy(t, &tmp, sizeof(u_int16_t));
+			printf(", quality %u", letoh16(tmp));
+		}
 		t += 2;
 	}
 
 	if (RADIOTAP(TX_ATTENUATION)) {
 		TCHECK2(*t, 2);
-		if (vflag)
-			printf(", txatt %u",
-			    letoh16(*(u_int16_t*)t));
+		if (vflag) {
+			bcopy(t, &tmp, sizeof(u_int16_t));
+			printf(", txatt %u", letoh16(tmp));
+		}
 		t += 2;
 	}
 
 	if (RADIOTAP(DB_TX_ATTENUATION)) {
 		TCHECK2(*t, 2);
-		if (vflag)
-			printf(", txatt %udB",
-			    letoh16(*(u_int16_t*)t));
+		if (vflag) {
+			bcopy(t, &tmp, sizeof(u_int16_t));
+			printf(", txatt %udB", letoh16(tmp));
+		}
 		t += 2;
 	}
 
@@ -635,8 +662,11 @@ ieee802_11_radio_if_print(u_char *user, const struct pcap_pkthdr *h,
 
 	if (RADIOTAP(FCS)) {
 		TCHECK2(*t, 4);
-		if (vflag)
-			printf(", fcs %08x", letoh32(*(u_int32_t*)t));
+		if (vflag) {
+			u_int32_t fcs;
+			bcopy(t, &fcs, sizeof(u_int32_t));
+			printf(", fcs %08x", letoh32(fcs));
+		}
 		t += 4;
 	}
 
@@ -664,7 +694,58 @@ ieee802_11_radio_if_print(u_char *user, const struct pcap_pkthdr *h,
  out:
 	if (!ieee80211_encap) {
 		if (xflag)
-			default_print(p, h->caplen);
+			default_print(p, h->len);
 		putchar('\n');
+	}
+}
+
+void
+ieee80211_reason(u_int16_t reason)
+{
+	if (!vflag)
+		return;
+
+	switch (reason) {
+	case IEEE80211_REASON_UNSPECIFIED:
+		printf(", unspecified failure");
+		break;
+	case IEEE80211_REASON_AUTH_EXPIRE:
+		printf(", authentication expired");
+		break;
+	case IEEE80211_REASON_AUTH_LEAVE:
+		printf(", deauth - station left");
+		break;
+	case IEEE80211_REASON_ASSOC_EXPIRE:
+		printf(", association expired");
+		break;
+	case IEEE80211_REASON_ASSOC_TOOMANY:
+		printf(", too many associated stations");
+		break;
+	case IEEE80211_REASON_NOT_AUTHED:
+		printf(", not authenticated");
+		break;
+	case IEEE80211_REASON_NOT_ASSOCED:
+		printf(", not associated");
+		break;
+	case IEEE80211_REASON_ASSOC_LEAVE:
+		printf(", disassociated - station left");
+		break;
+	case IEEE80211_REASON_ASSOC_NOT_AUTHED:
+		printf(", association but not authenticated");
+		break;
+	case IEEE80211_REASON_RSN_REQUIRED:
+		printf(", rsn required");
+		break;
+	case IEEE80211_REASON_RSN_INCONSISTENT:
+		printf(", rsn inconsistent");
+		break;
+	case IEEE80211_REASON_IE_INVALID:
+		printf(", ie invalid");
+		break;
+	case IEEE80211_REASON_MIC_FAILURE:
+		printf(", mic failure");
+		break;
+	default:
+		printf(", unknown reason %u", reason);
 	}
 }

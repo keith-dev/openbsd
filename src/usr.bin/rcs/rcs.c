@@ -1,4 +1,4 @@
-/*	$OpenBSD: rcs.c,v 1.36 2007/02/27 07:59:13 xsa Exp $	*/
+/*	$OpenBSD: rcs.c,v 1.41 2007/07/03 00:56:23 ray Exp $	*/
 /*
  * Copyright (c) 2004 Jean-Francois Brousseau <jfb@openbsd.org>
  * All rights reserved.
@@ -369,7 +369,7 @@ void
 rcs_write(RCSFILE *rfp)
 {
 	FILE *fp;
-	char numbuf[64], *fn;
+	char numbuf[RCS_REV_BUFSZ], *fn;
 	struct rcs_access *ap;
 	struct rcs_sym *symp;
 	struct rcs_branch *brp;
@@ -1408,8 +1408,8 @@ rcs_rev_remove(RCSFILE *rf, RCSNUM *rev)
 		rcs_buf_free(prevbuf);
 
 		diff_format = D_RCSDIFF;
-		if (rcs_diffreg(path_tmp1, path_tmp2, newdiff, 0) == D_ERROR)
-			errx(1, "rcs_diffreg failed");
+		if (diffreg(path_tmp1, path_tmp2, newdiff, 0) == D_ERROR)
+			errx(1, "diffreg failed");
 
 		newdeltatext = newdiff;
 	} else if (nextrdp == NULL && prevrdp != NULL) {
@@ -1881,7 +1881,6 @@ rcs_parse_delta(RCSFILE *rfp)
 		rcs_errno = RCS_ERR_PARSE;
 		warnx("unexpected token `%s' at start of delta",
 		    RCS_TOKSTR(rfp));
-		rcs_freedelta(rdp);
 		return (-1);
 	}
 
@@ -2411,7 +2410,7 @@ rcs_gettok(RCSFILE *rfp)
 		type = RCS_TOK_SCOLON;
 	} else if (ch == ':') {
 		type = RCS_TOK_COLON;
-	} else if (isalpha(ch)) {
+	} else if (isalpha(ch) || ch == '_' || ch == '$' || ch == '.' || ch == '-') {
 		type = RCS_TOK_ID;
 		*(bp++) = ch;
 		for (;;) {
@@ -2420,7 +2419,7 @@ rcs_gettok(RCSFILE *rfp)
 				type = RCS_TOK_EOF;
 				break;
 			} else if (!isalnum(ch) && ch != '_' && ch != '-' &&
-			    ch != '/') {
+			    ch != '/' && ch != '.' && ch != '$') {
 				ungetc(ch, pdp->rp_file);
 				break;
 			}
@@ -2533,11 +2532,10 @@ rcs_pushtok(RCSFILE *rfp, const char *tok, int type)
 static void
 rcs_growbuf(RCSFILE *rf)
 {
-	void *tmp;
 	struct rcs_pdata *pdp = (struct rcs_pdata *)rf->rf_pdata;
 
-	tmp = xrealloc(pdp->rp_buf, 1, pdp->rp_blen + RCS_BUFEXTSIZE);
-	pdp->rp_buf = tmp;
+	pdp->rp_buf = xrealloc(pdp->rp_buf, 1,
+	    pdp->rp_blen + RCS_BUFEXTSIZE);
 	pdp->rp_blen += RCS_BUFEXTSIZE;
 	pdp->rp_bufend = pdp->rp_buf + pdp->rp_blen - 1;
 }
@@ -2843,7 +2841,7 @@ int
 rcs_rev_setlog(RCSFILE *rfp, RCSNUM *rev, const char *logtext)
 {
 	struct rcs_delta *rdp;
-	char buf[16];
+	char buf[RCS_REV_BUFSZ];
 
 	rcsnum_tostr(rev, buf, sizeof(buf));
 

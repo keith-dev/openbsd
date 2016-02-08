@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_vlan.c,v 1.68 2006/05/22 23:25:15 krw Exp $	*/
+/*	$OpenBSD: if_vlan.c,v 1.70 2007/06/06 14:05:58 henning Exp $	*/
 
 /*
  * Copyright 1998 Massachusetts Institute of Technology
@@ -78,7 +78,6 @@
 #include <net/if_vlan_var.h>
 
 extern struct	ifaddr	**ifnet_addrs;
-extern int ifqmaxlen;
 u_long vlan_tagmask;
 
 #define TAG_HASH_SIZE	32
@@ -333,6 +332,8 @@ vlan_config(struct ifvlan *ifv, struct ifnet *p, u_int16_t tag)
 
 	if (p->if_type != IFT_ETHER)
 		return EPROTONOSUPPORT;
+	if (ifv->ifv_p == p && ifv->ifv_tag == tag) /* noop */
+		return (0);
 	if (ifv->ifv_p)
 		return EBUSY;
 

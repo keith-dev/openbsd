@@ -1,7 +1,7 @@
 # ex:ts=8 sw=4:
-# $OpenBSD: Update.pm,v 1.64 2006/04/08 23:24:06 bernd Exp $
+# $OpenBSD: Update.pm,v 1.80 2007/06/09 11:16:54 espie Exp $
 #
-# Copyright (c) 2004 Marc Espie <espie@openbsd.org>
+# Copyright (c) 2004-2006 Marc Espie <espie@openbsd.org>
 #
 # Permission to use, copy, modify, and distribute this software for any
 # purpose with or without fee is hereby granted, provided that the above
@@ -18,17 +18,153 @@ use strict;
 use warnings;
 
 package OpenBSD::Update;
-use OpenBSD::ProgressMeter;
 use OpenBSD::Interactive;
 use OpenBSD::PackageInfo;
 use OpenBSD::PackageLocator;
 use OpenBSD::PackageName;
 use OpenBSD::Error;
 
-
-sub find
+sub new
 {
-	my ($old, $new, $state) = @_;
+	my $class = shift;
+	return bless {cant => [], updates => []}, $class;
+}
+
+sub cant
+{
+	my $self = shift;
+	return $self->{cant};
+}
+
+sub updates
+{
+	my $self = shift;
+	return $self->{updates};
+}
+
+sub add2cant
+{
+	my ($self, @args) = @_;
+	push(@{$self->{cant}}, @args);
+}
+
+sub add2updates
+{
+	my ($self, @args) = @_;
+	push(@{$self->{updates}}, @args);
+}
+
+sub process_package
+{
+	my ($self, $pkgname, $state) = @_;
+	if ($pkgname =~ m/^(?:\.libs\d*|partial)\-/o) {
+		$state->progress->clear;
+		print "Not updating $pkgname, remember to clean it\n";
+		return;
+	}
+	my @search = ();
+	push(@search, OpenBSD::Search::Stem->split($pkgname));
+	if (!$state->{forced}->{allversions}) {
+		push(@search, OpenBSD::Search::Filter->keep_most_recent);
+	}
+
+	my $found;
+	my $plist;
+
+	push(@search, OpenBSD::Search::Filter->new(
+	    sub {
+		my @l = @_;
+		if (@l == 0) {
+			return @l;
+		}
+		if (@l == 1 && $state->{forced}->{pkgpath}) {
+			return @l;
+		}
+		my @l2 = ();
+		$plist = OpenBSD::PackingList->from_installation($pkgname, \&OpenBSD::PackingList::UpdateInfoOnly);
+		if (!defined $plist) {
+			Fatal("Can't locate $pkgname");
+		}
+		for my $candidate (@l) {
+		    my $handle = OpenBSD::PackageLocator->find($candidate, $state->{arch});
+		    if (!$handle) {
+			    next;
+		    }
+		    $handle->close_now;
+		    my $p2 = $handle->plist(\&OpenBSD::PackingList::UpdateInfoOnly);
+		    if (!$p2) {
+			next;
+		    }
+		    if ($p2->has('arch')) {
+			unless ($p2->{arch}->check($state->{arch})) {
+			    next;
+			}
+		    }
+		    if ($plist->signature eq $p2->signature) {
+			$found = $candidate;
+			push(@l2, $candidate);
+			next;
+		    }
+		    if ($p2->{extrainfo}->{subdir} eq $plist->{extrainfo}->{subdir}) {
+			push(@l2, $candidate);
+		    } elsif ($p2->has('pkgpath')) {
+			for my $p (@{$p2->{pkgpath}}) {
+				if ($p->{name} eq $plist->{extrainfo}->{subdir}) {
+					push(@l2, $candidate);
+					last;
+				}
+			}
+		    }
+		}
+		return @l2;
+	    }));
+
+
+	my @l = OpenBSD::PackageLocator->match(@search);
+	if (@l == 0) {
+		$self->add2cant($pkgname);
+		return;
+	}
+	if (@l == 1) {
+		if ($state->{forced}->{pkgpath}) {
+			$state->progress->clear;
+			print "Directly updating $pkgname -> ", $l[0], "\n";
+			$self->add2updates($l[0]);
+			return;
+		}
+		if (defined $found && $found eq  $l[0] && 
+		    !$plist->uses_old_libs) {
+				my $msg = "No need to update $pkgname";
+				$state->progress->message($msg);
+				print "$msg\n" if $state->{beverbose};
+				return;
+		}
+	}
+
+	$state->progress->clear;
+	print "Candidates for updating $pkgname -> ", join(' ', @l), "\n";
+		
+	if (@l == 1) {
+		$self->add2updates($l[0]);
+		return;
+	}
+	my $result = OpenBSD::Interactive::choose1($pkgname, 
+	    $state->{interactive}, sort @l);
+	if (defined $result) {
+		if (defined $found && $found eq $result && 
+		    !$plist->uses_old_libs) {
+			print "No need to update $pkgname\n";
+		} else {
+			$self->add2updates($result);
+		}
+	} else {
+		$state->{issues} = 1;
+	}
+}
+
+sub process
+{
+	my ($self, $old, $state) = @_;
 	my @list = ();
 
 	OpenBSD::PackageInfo::solve_installed_names($old, \@list, "(updating them all)", $state);
@@ -37,101 +173,12 @@ sub find
 
 		@list = OpenBSD::Requiring->compute_closure(@list);
 	}
-	my @cantupdate = ();
-	my $hash = OpenBSD::PackageName::available_stems($state);
 
-	OpenBSD::ProgressMeter::set_header("Looking for updates");
+	$state->progress->set_header("Looking for updates");
 	for my $pkgname (@list) {
-		next if $pkgname =~ m/^\.libs-/;
-		my $stem = OpenBSD::PackageName::splitstem($pkgname);
-		my @l = $hash->findstem($stem);
-		if (@l == 0) {
-			push(@cantupdate, $pkgname);
-			next;
-		}
-		my @l2 = ();
-		if (@l == 1 && $state->{forced}->{pkgpath}) {
-			OpenBSD::ProgressMeter::clear();
-			print "Directly updating $pkgname -> ", $l[0], "\n";
-			push(@$new, $l[0]);
-			next;
-		}
-		my $plist = OpenBSD::PackingList->from_installation($pkgname, \&OpenBSD::PackingList::UpdateInfoOnly);
-		if (!defined $plist) {
-			Fatal("Can't locate $pkgname");
-		}
-		my $found;
-		for my $candidate (@l) {
-		    my $handle = OpenBSD::PackageLocator->find($candidate, $state->{arch});
-		    if (!$handle) {
-			    next;
-		    }
-		    $handle->close_now();
-		    my $p2 = $handle->plist(\&OpenBSD::PackingList::UpdateInfoOnly);
-		    if (!$p2) {
-		    	next;
-		    }
-		    if ($p2->has('arch')) {
-			unless ($p2->{arch}->check($state->{arch})) {
-			    next;
-			}
-		    }
-		    if ($plist->signature() eq $p2->signature()) {
-		    	$found = $candidate;
-		    }
-		    if ($p2->{extrainfo}->{subdir} eq $plist->{extrainfo}->{subdir}) {
-			push(@l2, $candidate);
-		    } elsif ($p2->has('pkgpath')) {
-		    	for my $p (@{$p2->{pkgpath}}) {
-				if ($p->{name} eq $plist->{extrainfo}->{subdir}) {
-					push(@l2, $candidate);
-					last;
-				}
-		    	}
-		    }
-		}
-
-		if (defined $found && @l2 == 1 && $found eq  $l2[0]) {
-			if (!$plist->uses_old_libs()) {
-				my $msg = "No need to update $pkgname";
-				OpenBSD::ProgressMeter::message($msg);
-				print "$msg\n" if $state->{beverbose};
-				next;
-			}
-		}
-		OpenBSD::ProgressMeter::clear();
-		print "Candidates for updating $pkgname -> ", join(' ', @l2), "\n";
-		# if all packages have the same version, but distinct p,
-		# grab the most recent.
-		if (@l2 > 1) {
-		    @l2 = OpenBSD::PackageName::keep_most_recent(@l2);
-		}
-			
-		if (@l2 == 1) {
-			if (defined $found && $found eq  $l2[0] && !$plist->uses_old_libs()) {
-				my $msg = "No need to update $pkgname";
-				OpenBSD::ProgressMeter::message($msg);
-				print "$msg\n" if $state->{beverbose};
-			} else {
-				push(@$new, $l2[0]);
-			}
-		} elsif (@l2 == 0) {
-			push(@cantupdate, $pkgname);
-		} else {
-			my $result = OpenBSD::Interactive::choose1($pkgname, $state->{interactive}, sort @l2);
-			if (defined $result) {
-				if (defined $found && $found eq  $result && !$plist->uses_old_libs()) {
-					print "No need to update $pkgname\n";
-				} else {
-					push(@$new, $result);
-				}
-			} else {
-				$state->{issues} = 1;
-			}
-		}
+		$self->process_package($pkgname, $state);
 	}
-	OpenBSD::ProgressMeter::next();
-	return @cantupdate;
+	$state->progress->next;
 }
 
 1;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: control.c,v 1.53 2006/08/23 08:13:04 claudio Exp $ */
+/*	$OpenBSD: control.c,v 1.55 2007/03/28 12:33:32 henning Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -209,7 +209,7 @@ control_dispatch_msg(struct pollfd *pfd, u_int *ctl_cnt)
 	if (!(pfd->revents & POLLIN))
 		return (0);
 
-	if (imsg_read(&c->ibuf) <= 0) {
+	if ((n = imsg_read(&c->ibuf)) == -1 || n == 0) {
 		*ctl_cnt -= control_close(pfd->fd);
 		return (1);
 	}
@@ -232,6 +232,7 @@ control_dispatch_msg(struct pollfd *pfd, u_int *ctl_cnt)
 			case IMSG_CTL_SHOW_RIB_AS:
 			case IMSG_CTL_SHOW_RIB_PREFIX:
 			case IMSG_CTL_SHOW_RIB_MEM:
+			case IMSG_CTL_SHOW_RIB_COMMUNITY:
 			case IMSG_CTL_SHOW_NETWORK:
 			case IMSG_CTL_SHOW_TERSE:
 				break;
@@ -373,6 +374,7 @@ control_dispatch_msg(struct pollfd *pfd, u_int *ctl_cnt)
 				    "wrong length");
 			break;
 		case IMSG_CTL_SHOW_RIB_MEM:
+		case IMSG_CTL_SHOW_RIB_COMMUNITY:
 		case IMSG_CTL_SHOW_NETWORK:
 			c->ibuf.pid = imsg.hdr.pid;
 			imsg_compose_rde(imsg.hdr.type, imsg.hdr.pid,

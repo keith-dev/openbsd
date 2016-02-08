@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.25 2007/02/17 17:35:43 tom Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.31 2007/05/29 18:53:52 deraadt Exp $	*/
 /*	$NetBSD: cpu.h,v 1.1 2003/04/26 18:39:39 fvdl Exp $	*/
 
 /*-
@@ -55,6 +55,9 @@
 #include <sys/device.h>
 #include <sys/lock.h>
 #include <sys/sched.h>
+#include <sys/sensors.h>
+
+#ifdef _KERNEL
 
 struct cpu_info {
 	struct device *ci_dev;
@@ -101,7 +104,6 @@ struct cpu_info {
 	void (*ci_info)(struct cpu_info *);
 
 	int		ci_want_resched;
-	int		ci_astpending;
 
 	struct x86_cache_info ci_cinfo[CAI_COUNT];
 
@@ -119,11 +121,18 @@ struct cpu_info {
 #define CI_DDB_ENTERDDB		3
 #define CI_DDB_INDDB		4
 
+	volatile int ci_setperf_state;
+#define CI_SETPERF_READY	0
+#define CI_SETPERF_SHOULDSTOP	1
+#define CI_SETPERF_INTRANSIT	2
+#define CI_SETPERF_DONE		3
+
 	struct x86_64_tss	ci_doubleflt_tss;
 
 	char *ci_doubleflt_stack;
 
-	struct evcnt ci_ipi_events[X86_NIPI];
+	struct ksensordev	ci_sensordev;
+	struct ksensor		ci_sensor;
 };
 
 #define CPUF_BSP	0x0001		/* CPU is the original BSP */
@@ -193,6 +202,8 @@ extern struct cpu_info cpu_info_primary;
 
 #endif	/* MULTIPROCESSOR */
 
+#endif /* _KERNEL */
+
 #include <machine/psl.h>
 
 #ifdef MULTIPROCESSOR
@@ -227,7 +238,7 @@ extern u_int32_t cpus_attached;
  * buffer pages are invalid.  On the i386, request an ast to send us
  * through trap(), marking the proc as needing a profiling tick.
  */
-#define	need_proftick(p)	((p)->p_flag |= P_OWEUPC, aston(p))
+#define	need_proftick(p)	aston(p)
 
 void signotify(struct proc *);
 
@@ -302,8 +313,16 @@ void x86_bus_space_init(void);
 void x86_bus_space_mallocok(void);
 
 /* powernow-k8.c */
-void k8_powernow_init(void);
+void k8_powernow_init(struct cpu_info *);
 void k8_powernow_setperf(int);
+
+void est_init(struct cpu_info *);
+void est_setperf(int);
+
+#ifdef MULTIPROCESSOR
+/* mp_setperf.c */
+void mp_setperf_init(void);
+#endif
 
 #endif /* _KERNEL */
 

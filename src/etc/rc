@@ -1,4 +1,4 @@
-#	$OpenBSD: rc,v 1.301 2007/02/27 16:24:29 beck Exp $
+#	$OpenBSD: rc,v 1.304 2007/04/25 14:12:05 espie Exp $
 
 # System startup script run by init on autoboot
 # or after single-user.
@@ -121,15 +121,9 @@ if [ X"$1" = X"shutdown" ]; then
 		echo /etc/rc.shutdown complete.
 
 		# bring carp interfaces down gracefully
-		for hn in /etc/hostname.carp[0-9]*; do
-			# Strip off /etc/hostname. prefix
-			if=${hn#/etc/hostname.}
-			test "$if" = "carp[0-9]*" && continue
-
-			ifconfig $if > /dev/null 2>&1
-			if [ $? -eq 0 ]; then
-				ifconfig $if down
-			fi
+		ifconfig -a|grep '^carp.*:'|cut -f1 -d:|while read if
+		do
+			ifconfig $if down
 		done
 
 		if [ X"${powerdown}" = X"YES" ]; then
@@ -198,7 +192,7 @@ fi
 trap "echo 'Boot interrupted.'; exit 1" 3
 
 umount -a >/dev/null 2>&1
-mount -a -t nonfs
+mount -a -t nonfs,vnd
 mount -uw /		# root on nfs requires this, others aren't hurt
 rm -f /fastboot		# XXX (root now writeable)
 
@@ -401,6 +395,10 @@ fi
 
 if [ X"${timed_flags}" != X"NO" ]; then
 	echo -n ' timed'; timed $timed_flags
+fi
+
+if [ X"${nmeaattach_flags}" != X"NO" -a -n "${nmeaattach_flags}" ]; then
+	echo -n ' nmeaattach';	nmeaattach ${nmeaattach_flags}
 fi
 
 if [ X"${ntpd_flags}" != X"NO" ]; then

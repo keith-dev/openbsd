@@ -1,4 +1,4 @@
-/*	$OpenBSD: moscom.c,v 1.2 2006/10/26 06:02:43 jsg Exp $	*/
+/*	$OpenBSD: moscom.c,v 1.10 2007/06/14 10:11:15 mbalmer Exp $	*/
 
 /*
  * Copyright (c) 2006 Jonathan Gray <jsg@openbsd.org>
@@ -133,23 +133,23 @@
 #define MOSCOM_BAUD_REF		115200
 
 struct moscom_softc {
-	USBBASEDEVICE		sc_dev;
-	usbd_device_handle	sc_udev;
-	usbd_interface_handle	sc_iface;
-	device_ptr_t		sc_subdev;
+	struct device		 sc_dev;
+	usbd_device_handle	 sc_udev;
+	usbd_interface_handle	 sc_iface;
+	struct device		*sc_subdev;
 
-	u_char			sc_msr;
-	u_char			sc_lsr;
-	u_char			sc_lcr;
+	u_char			 sc_msr;
+	u_char			 sc_lsr;
+	u_char			 sc_lcr;
 
-	u_char			sc_dying;
+	u_char			 sc_dying;
 };
 
-Static void	moscom_get_status(void *, int, u_char *, u_char *);
-Static void	moscom_set(void *, int, int, int);
-Static int	moscom_param(void *, int, struct termios *);
-Static int	moscom_open(void *, int);
-Static int	moscom_cmd(struct moscom_softc *, int, int);	
+void	moscom_get_status(void *, int, u_char *, u_char *);
+void	moscom_set(void *, int, int, int);
+int	moscom_param(void *, int, struct termios *);
+int	moscom_open(void *, int);
+int	moscom_cmd(struct moscom_softc *, int, int);	
 
 struct ucom_methods moscom_methods = {
 	NULL,
@@ -166,11 +166,27 @@ static const struct usb_devno moscom_devs[] = {
 	{ USB_VENDOR_MOSCHIP,		USB_PRODUCT_MOSCHIP_MCS7703 }
 };
 
-USB_DECLARE_DRIVER(moscom);
+int moscom_match(struct device *, void *, void *); 
+void moscom_attach(struct device *, struct device *, void *); 
+int moscom_detach(struct device *, int); 
+int moscom_activate(struct device *, enum devact); 
 
-USB_MATCH(moscom)
+struct cfdriver moscom_cd = { 
+	NULL, "moscom", DV_DULL 
+}; 
+
+const struct cfattach moscom_ca = { 
+	sizeof(struct moscom_softc), 
+	moscom_match, 
+	moscom_attach, 
+	moscom_detach, 
+	moscom_activate, 
+};
+
+int
+moscom_match(struct device *parent, void *match, void *aux)
 {
-	USB_MATCH_START(moscom, uaa);
+	struct usb_attach_arg *uaa = aux;
 
 	if (uaa->iface != NULL)
 		return UMATCH_NONE;
@@ -179,9 +195,11 @@ USB_MATCH(moscom)
 	    UMATCH_VENDOR_PRODUCT : UMATCH_NONE;
 }
 
-USB_ATTACH(moscom)
+void
+moscom_attach(struct device *parent, struct device *self, void *aux)
 {
-	USB_ATTACH_START(moscom, sc, uaa);
+	struct moscom_softc *sc = (struct moscom_softc *)self;
+	struct usb_attach_arg *uaa = aux;
 	struct ucom_attach_args uca;
 	usb_interface_descriptor_t *id;
 	usb_endpoint_descriptor_t *ed;
@@ -192,15 +210,14 @@ USB_ATTACH(moscom)
 	bzero(&uca, sizeof(uca));
 	sc->sc_udev = uaa->device;
 	devinfop = usbd_devinfo_alloc(uaa->device, 0);
-	USB_ATTACH_SETUP;
-	printf("%s: %s\n", USBDEVNAME(sc->sc_dev), devinfop);
+	printf("\n%s: %s\n", sc->sc_dev.dv_xname, devinfop);
 	usbd_devinfo_free(devinfop);
 
 	if (usbd_set_config_index(sc->sc_udev, MOSCOM_CONFIG_NO, 1) != 0) {
 		printf("%s: could not set configuration no\n",
-		    USBDEVNAME(sc->sc_dev));
+		    sc->sc_dev.dv_xname);
 		sc->sc_dying = 1;
-		USB_ATTACH_ERROR_RETURN;
+		return;
 	}
 
 	/* get the first interface handle */
@@ -208,9 +225,9 @@ USB_ATTACH(moscom)
 	    &sc->sc_iface);
 	if (error != 0) {
 		printf("%s: could not get interface handle\n",
-		    USBDEVNAME(sc->sc_dev));
+		    sc->sc_dev.dv_xname);
 		sc->sc_dying = 1;
-		USB_ATTACH_ERROR_RETURN;
+		return;
 	}
 
 	id = usbd_get_interface_descriptor(sc->sc_iface);
@@ -220,9 +237,9 @@ USB_ATTACH(moscom)
 		ed = usbd_interface2endpoint_descriptor(sc->sc_iface, i);
 		if (ed == NULL) {
 			printf("%s: no endpoint descriptor found for %d\n",
-			    USBDEVNAME(sc->sc_dev), i);
+			    sc->sc_dev.dv_xname, i);
 			sc->sc_dying = 1;
-			USB_ATTACH_ERROR_RETURN;
+			return;
 		}
 
 		if (UE_GET_DIR(ed->bEndpointAddress) == UE_DIR_IN &&
@@ -234,9 +251,9 @@ USB_ATTACH(moscom)
 	}
 
 	if (uca.bulkin == -1 || uca.bulkout == -1) {
-		printf("%s: missing endpoint\n", USBDEVNAME(sc->sc_dev));
+		printf("%s: missing endpoint\n", sc->sc_dev.dv_xname);
 		sc->sc_dying = 1;
-		USB_ATTACH_ERROR_RETURN;
+		return;
 	}
 
 	uca.ibufsize = MOSCOMBUFSZ;
@@ -250,16 +267,15 @@ USB_ATTACH(moscom)
 	uca.info = NULL;
 
 	usbd_add_drv_event(USB_EVENT_DRIVER_ATTACH, sc->sc_udev,
-	    USBDEV(sc->sc_dev));
+	    &sc->sc_dev);
 	
 	sc->sc_subdev = config_found_sm(self, &uca, ucomprint, ucomsubmatch);
-
-	USB_ATTACH_SUCCESS_RETURN;
 }
 
-USB_DETACH(moscom)
+int
+moscom_detach(struct device *self, int flags)
 {
-	USB_DETACH_START(moscom, sc);
+	struct moscom_softc *sc = (struct moscom_softc *)self;
 	int rv = 0;
 
 	sc->sc_dying = 1;
@@ -269,13 +285,13 @@ USB_DETACH(moscom)
 	}
 
 	usbd_add_drv_event(USB_EVENT_DRIVER_DETACH, sc->sc_udev,
-			   USBDEV(sc->sc_dev));
+			   &sc->sc_dev);
 
 	return (rv);
 }
 
 int
-moscom_activate(device_ptr_t self, enum devact act)
+moscom_activate(struct device *self, enum devact act)
 {
 	struct moscom_softc *sc = (struct moscom_softc *)self;
 	int rv = 0;
@@ -293,7 +309,7 @@ moscom_activate(device_ptr_t self, enum devact act)
 	return (rv);
 }
 
-Static int
+int
 moscom_open(void *vsc, int portno)
 {
 	struct moscom_softc *sc = vsc;
@@ -323,7 +339,7 @@ moscom_open(void *vsc, int portno)
 	return (0);
 }
 
-Static void
+void
 moscom_set(void *vsc, int portno, int reg, int onoff)
 {
 	struct moscom_softc *sc = vsc;
@@ -349,7 +365,7 @@ moscom_set(void *vsc, int portno, int reg, int onoff)
 	moscom_cmd(sc, MOSCOM_MCR, val);
 }
 
-Static int
+int
 moscom_param(void *vsc, int portno, struct termios *t)
 {
 	struct moscom_softc *sc = (struct moscom_softc *)vsc;
@@ -410,7 +426,7 @@ moscom_param(void *vsc, int portno, struct termios *t)
 	return (0);
 }
 
-Static void
+void
 moscom_get_status(void *vsc, int portno, u_char *lsr, u_char *msr)
 {
 	struct moscom_softc *sc = vsc;
@@ -421,7 +437,7 @@ moscom_get_status(void *vsc, int portno, u_char *lsr, u_char *msr)
 		*lsr = sc->sc_lsr;
 }
 
-Static int
+int
 moscom_cmd(struct moscom_softc *sc, int reg, int val)
 {
 	usb_device_request_t req;

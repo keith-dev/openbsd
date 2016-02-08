@@ -1,4 +1,4 @@
-/*	$OpenBSD: ccdconfig.c,v 1.29 2006/03/26 18:06:00 grunk Exp $	*/
+/*	$OpenBSD: ccdconfig.c,v 1.32 2007/08/06 19:16:05 sobrado Exp $	*/
 /*	$NetBSD: ccdconfig.c,v 1.6 1996/05/16 07:11:18 thorpej Exp $	*/
 
 /*-
@@ -54,6 +54,12 @@
 #include <string.h>
 #include <unistd.h>
 #include <util.h>
+
+#ifndef SMALL
+/* this kvm nonsense doesn't belong here */
+#define SMALL
+#endif
+
 #ifndef SMALL
 #include <kvm.h>
 #include <nlist.h>
@@ -714,12 +720,10 @@ static void
 usage(void)
 {
 
-	fprintf(stderr, "usage: %s [-cv] ccd ileave [flags] %s\n", __progname,
-	    "dev [...]");
+	fprintf(stderr, "usage: %s [-cv] ccd ileave [flags] dev ...\n",
+	    __progname);
 	fprintf(stderr, "       %s -C [-v] [-f config_file]\n", __progname);
-	fprintf(stderr, "       %s -u [-v] ccd [...]\n", __progname);
+	fprintf(stderr, "       %s -u [-v] ccd ...\n", __progname);
 	fprintf(stderr, "       %s -U [-v] [-f config_file]\n", __progname);
-	fprintf(stderr, "       %s -g [-M core] [-N system] %s\n", __progname,
-	    "[ccd [...]]");
 	exit(1);
 }

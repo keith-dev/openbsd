@@ -1,4 +1,4 @@
-/*	$OpenBSD: ohcivar.h,v 1.21 2006/05/22 15:52:48 krw Exp $ */
+/*	$OpenBSD: ohcivar.h,v 1.25 2007/06/15 11:41:48 mbalmer Exp $ */
 /*	$NetBSD: ohcivar.h,v 1.32 2003/02/22 05:24:17 tsutsui Exp $	*/
 /*	$FreeBSD: src/sys/dev/usb/ohcivar.h,v 1.13 1999/11/17 22:33:41 n_hibma Exp $	*/
 
@@ -107,9 +107,9 @@ typedef struct ohci_softc {
 	u_int8_t sc_addr;		/* device address */
 	u_int8_t sc_conf;		/* device configuration */
 
-#ifdef USB_USE_SOFTINTR
+#ifdef __HAVE_GENERIC_SOFT_INTERRUPTS
 	char sc_softwake;
-#endif /* USB_USE_SOFTINTR */
+#endif /* __HAVE_GENERIC_SOFT_INTERRUPTS */
 
 	ohci_soft_ed_t *sc_freeeds;
 	ohci_soft_td_t *sc_freetds;
@@ -135,9 +135,9 @@ typedef struct ohci_softc {
 	u_int sc_overrun_cnt;
 	struct timeval sc_overrun_ntc;
 
-	usb_callout_t sc_tmo_rhsc;
+	struct timeout sc_tmo_rhsc;
 
-	device_ptr_t sc_child;
+	struct device *sc_child;
 
 	char sc_dying;
 } ohci_softc_t;
@@ -147,8 +147,10 @@ struct ohci_xfer {
 	struct usb_task	abort_task;
 };
 
+usbd_status	ohci_checkrev(ohci_softc_t *);
+usbd_status	ohci_handover(ohci_softc_t *);
 usbd_status	ohci_init(ohci_softc_t *);
 int		ohci_intr(void *);
 int		ohci_detach(ohci_softc_t *, int);
-int		ohci_activate(device_ptr_t, enum devact);
+int		ohci_activate(struct device *, enum devact);
 void		ohci_power(int, void *);

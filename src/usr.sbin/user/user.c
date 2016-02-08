@@ -1,4 +1,4 @@
-/* $OpenBSD: user.c,v 1.70 2007/03/02 04:27:11 ray Exp $ */
+/* $OpenBSD: user.c,v 1.72 2007/08/02 16:18:05 deraadt Exp $ */
 /* $NetBSD: user.c,v 1.69 2003/04/14 17:40:07 agc Exp $ */
 
 /*
@@ -768,33 +768,33 @@ read_defaults(user_t *up)
 	if (fp != NULL) {
 		while ((s = fparseln(fp, &len, &lineno, NULL, 0)) != NULL) {
 			if (strncmp(s, "group", 5) == 0) {
-				for (cp = s + 5 ; *cp && isspace(*cp) ; cp++) {
+				for (cp = s + 5 ; isspace(*cp) ; cp++) {
 				}
 				memsave(&up->u_primgrp, cp, strlen(cp));
 			} else if (strncmp(s, "base_dir", 8) == 0) {
-				for (cp = s + 8 ; *cp && isspace(*cp) ; cp++) {
+				for (cp = s + 8 ; isspace(*cp) ; cp++) {
 				}
 				memsave(&up->u_basedir, cp, strlen(cp));
 			} else if (strncmp(s, "skel_dir", 8) == 0) {
-				for (cp = s + 8 ; *cp && isspace(*cp) ; cp++) {
+				for (cp = s + 8 ; isspace(*cp) ; cp++) {
 				}
 				memsave(&up->u_skeldir, cp, strlen(cp));
 			} else if (strncmp(s, "shell", 5) == 0) {
-				for (cp = s + 5 ; *cp && isspace(*cp) ; cp++) {
+				for (cp = s + 5 ; isspace(*cp) ; cp++) {
 				}
 				memsave(&up->u_shell, cp, strlen(cp));
 			} else if (strncmp(s, "password", 8) == 0) {
-				for (cp = s + 8 ; *cp && isspace(*cp) ; cp++) {
+				for (cp = s + 8 ; isspace(*cp) ; cp++) {
 				}
 				memsave(&up->u_password, cp, strlen(cp));
 #ifdef EXTENSIONS
 			} else if (strncmp(s, "class", 5) == 0) {
-				for (cp = s + 5 ; *cp && isspace(*cp) ; cp++) {
+				for (cp = s + 5 ; isspace(*cp) ; cp++) {
 				}
 				memsave(&up->u_class, cp, strlen(cp));
 #endif
 			} else if (strncmp(s, "inactive", 8) == 0) {
-				for (cp = s + 8 ; *cp && isspace(*cp) ; cp++) {
+				for (cp = s + 8 ; isspace(*cp) ; cp++) {
 				}
 				if (strcmp(cp, UNSET_INACTIVE) == 0) {
 					if (up->u_inactive) {
@@ -806,20 +806,20 @@ read_defaults(user_t *up)
 				}
 #ifdef EXTENSIONS
 			} else if (strncmp(s, "range", 5) == 0) {
-				for (cp = s + 5 ; *cp && isspace(*cp) ; cp++) {
+				for (cp = s + 5 ; isspace(*cp) ; cp++) {
 				}
 				(void) save_range(up, cp);
 #endif
 #ifdef EXTENSIONS
 			} else if (strncmp(s, "preserve", 8) == 0) {
-				for (cp = s + 8 ; *cp && isspace(*cp) ; cp++) {
+				for (cp = s + 8 ; isspace(*cp) ; cp++) {
 				}
 				up->u_preserve = (strncmp(cp, "true", 4) == 0) ? 1 :
 						  (strncmp(cp, "yes", 3) == 0) ? 1 :
 						   atoi(cp);
 #endif
 			} else if (strncmp(s, "expire", 6) == 0) {
-				for (cp = s + 6 ; *cp && isspace(*cp) ; cp++) {
+				for (cp = s + 6 ; isspace(*cp) ; cp++) {
 				}
 				if (strcmp(cp, UNSET_EXPIRY) == 0) {
 					if (up->u_expire) {
@@ -1063,11 +1063,21 @@ adduser(char *login_name, user_t *up)
 		errx(EXIT_FAILURE, "already a `%s' user", login_name);
 	}
 	if (up->u_flags & F_HOMEDIR) {
-		(void) strlcpy(home, up->u_home, sizeof(home));
+		if (strlcpy(home, up->u_home, sizeof(home)) >= sizeof(home)) {
+			(void) close(ptmpfd);
+			pw_abort();
+			errx(EXIT_FAILURE, "home directory `%s' too long",
+			    up->u_home);
+		}
 	} else {
 		/* if home directory hasn't been given, make it up */
-		(void) snprintf(home, sizeof(home), "%s/%s", up->u_basedir,
-		    login_name);
+		if (snprintf(home, sizeof(home), "%s/%s", up->u_basedir,
+		    login_name) >= sizeof(home)) {
+			(void) close(ptmpfd);
+			pw_abort();
+			errx(EXIT_FAILURE, "home directory `%s/%s' too long",
+			    up->u_basedir, login_name);
+		}
 	}
 	if (!scantime(&inactive, up->u_inactive)) {
 		warnx("Warning: inactive time `%s' invalid, password expiry off",
@@ -1806,7 +1816,10 @@ usermod(int argc, char **argv)
 			u.u_flags |= F_GROUP;
 			break;
 		case 'l':
-			(void) strlcpy(newuser, optarg, sizeof(newuser));
+			if (strlcpy(newuser, optarg, sizeof(newuser)) >=
+			    sizeof(newuser))
+				errx(EXIT_FAILURE, "username `%s' too long",
+				    optarg);
 			have_new_user = 1;
 			u.u_flags |= F_USERNAME;
 			break;

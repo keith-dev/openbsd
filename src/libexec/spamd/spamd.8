@@ -1,4 +1,4 @@
-.\"	$OpenBSD: spamd.8,v 1.97 2007/03/07 21:35:25 millert Exp $
+.\"	$OpenBSD: spamd.8,v 1.107 2007/08/11 06:09:02 jmc Exp $
 .\"
 .\" Copyright (c) 2002 Theo de Raadt.  All rights reserved.
 .\"
@@ -22,7 +22,7 @@
 .\" (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
 .\" THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 .\"
-.Dd December 18, 2002
+.Dd $Mdocdate: August 11 2007 $
 .Dt SPAMD 8
 .Os
 .Sh NAME
@@ -104,6 +104,18 @@ flag,
 it will consult a pre-defined set of blacklist addresses
 to decide whether to tarpit the host or not.
 .Pp
+When a sending hosts talks to
+.Nm ,
+the reply will be
+.Em stuttered .
+That is,
+the response will be sent back a character at a time, slowly.
+For blacklisted hosts,
+the entire dialogue is stuttered.
+For greylisted hosts,
+the default is to stutter for the first 10 seconds
+of dialogue only.
+.Pp
 The options are as follows:
 .Bl -tag -width Ds
 .It Fl 4
@@ -111,11 +123,13 @@ For blacklisted entries, return error code 450 to the spammer (default).
 .It Fl 5
 For blacklisted entries, return error code 550 to the spammer.
 .It Fl B Ar maxblack
-The maximum number of concurrent blacklisted connections to allow.
+The maximum number of concurrent blacklisted connections to stutter at.
 This value may not be greater than maxcon (see below).
 The default is
 .Ar maxcon
 \- 100.
+When this value is exceeded new blacklisted connections will not be stuttered
+at.
 .It Fl b
 Run in blacklist-only mode.
 .It Fl c Ar maxcon
@@ -171,11 +185,11 @@ using
 .It Fl S Ar secs
 Stutter at greylisted connections for the specified amount
 of seconds, after which the connection is not stuttered at.
-Defaults to 10.
+The default is 10; maximum is 90.
 .It Fl s Ar secs
 Delay each character sent to the client by the specified
 amount of seconds.
-Defaults to 1.
+The default is 1; maximum is 10.
 .It Fl v
 Enable verbose logging.
 By default
@@ -299,6 +313,10 @@ monthly mailing list digests without greylist delays every time.
 .Xr spamd-setup 8
 should be run periodically by
 .Xr cron 8 .
+When run in blacklist-only mode,
+the
+.Fl b
+flag should be specified.
 Use
 .Xr crontab 1
 to uncomment the entry in root's crontab.
@@ -408,7 +426,7 @@ Any host attempting to make new deliveries to
 the low priority MX for which a tuple has not previously
 been seen will be trapped.
 .Pp
-Note that is is important to ensure that a host running
+Note that it is important to ensure that a host running
 .Nm
 with the low priority MX address active must see all the greylist
 changes for a higher priority MX host for the same domains, either by
@@ -421,14 +439,7 @@ value 10, a second IP address with MX of value 99 (a higher number, and
 therefore lower priority) would ensure that any RFC conformant client
 would attempt delivery to the IP address with the MX value of 10
 first, and should not attempt to deliver to the address with MX value 99.
-.Sh BLACKLISTING
-The normal way that spam has been dealt with in the past is to either
-accept and drop, or outright block.
-When configured to use 450 responses,
-.Nm
-takes neither of these actions: it rejects the mail back to the senders'
-queue.
-.Pp
+.Sh BLACKLIST-ONLY MODE
 When running in default mode, the
 .Xr pf.conf 5
 rules described above are sufficient.
@@ -527,11 +538,11 @@ add the unicast targets
 .Ar foo.somewhere.org
 and
 .Ar bar.somewhere.org ,
-and accept incoming unicast messages from
-.Ar foo.somewhere.org
+and accept incoming unicast messages sent to
+.Ar example.somewhere.org
 only.
 .Bd -literal -offset indent
-# /usr/libexec/spamd -y foo.somewhere.org -Y em0:2 \e
+# /usr/libexec/spamd -y example.somewhere.org -Y em0:2 \e
 	-Y foo.somewhere.org -Y bar.somewhere.org
 .Ed
 .Pp
@@ -582,6 +593,10 @@ required traps to be entered into the database including the enclosing
 \*(Lt\*(Gt characters;
 current versions expect only the email address without the enclosing
 \*(Lt\*(Gt characters.
+.Pp
+Blacklisted hosts are no longer stored in the
+.Aq spamd
+table when operating in default mode for performance reasons.
 .Sh BUGS
 .Nm
 currently uses the user

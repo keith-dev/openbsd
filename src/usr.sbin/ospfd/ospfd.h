@@ -1,4 +1,4 @@
-/*	$OpenBSD: ospfd.h,v 1.65 2007/02/01 13:02:04 claudio Exp $ */
+/*	$OpenBSD: ospfd.h,v 1.68 2007/06/19 16:45:15 reyk Exp $ */
 
 /*
  * Copyright (c) 2004 Esben Norby <norby@openbsd.org>
@@ -47,6 +47,7 @@
 #define	MAX_RTSOCK_BUF		128 * 1024
 
 #define	OSPFD_FLAG_NO_FIB_UPDATE	0x0001
+#define	OSPFD_FLAG_STUB_ROUTER		0x0002
 
 #define	F_OSPFD_INSERTED	0x0001
 #define	F_KERNEL		0x0002
@@ -143,7 +144,8 @@ enum imsg_type {
 	IMSG_RECONF_AREA,
 	IMSG_RECONF_IFACE,
 	IMSG_RECONF_AUTHMD,
-	IMSG_RECONF_END
+	IMSG_RECONF_END,
+	IMSG_DEMOTE
 };
 
 struct imsg_hdr {
@@ -171,12 +173,14 @@ struct area {
 	LIST_HEAD(, iface)	 iface_list;
 	LIST_HEAD(, rde_nbr)	 nbr_list;
 /*	list			 addr_range_list; */
+	char			 demote_group[IFNAMSIZ];
 	u_int32_t		 stub_default_cost;
 	u_int32_t		 num_spf_calc;
 	int			 active;
 	u_int8_t		 transit;
 	u_int8_t		 stub;
 	u_int8_t		 dirty;
+	u_int8_t		 demote_level;
 };
 
 /* interface states */
@@ -327,6 +331,7 @@ struct iface {
 	struct lsa_head		 ls_ack_list;
 
 	char			 name[IF_NAMESIZE];
+	char			 demote_group[IFNAMSIZ];
 	char			 auth_key[MAX_SIMPLE_AUTH_LEN];
 	struct in_addr		 addr;
 	struct in_addr		 dst;
@@ -394,6 +399,8 @@ struct ospfd_conf {
 #define OSPFD_OPT_VERBOSE	0x00000001
 #define OSPFD_OPT_VERBOSE2	0x00000002
 #define OSPFD_OPT_NOACTION	0x00000004
+#define OSPFD_OPT_STUB_ROUTER	0x00000008
+#define OSPFD_OPT_FORCE_DEMOTE	0x00000010
 	u_int32_t		spf_delay;
 	u_int32_t		spf_hold_time;
 	time_t			uptime;
@@ -412,6 +419,7 @@ struct kroute {
 	struct in_addr	nexthop;
 	u_int16_t	flags;
 	u_int16_t	rtlabel;
+	u_int32_t	ext_tag;
 	u_short		ifindex;
 	u_int8_t	prefixlen;
 };
@@ -438,6 +446,18 @@ struct kif {
 	u_int8_t		 link_state;
 	u_int8_t		 nh_reachable;	/* for nexthop verification */
 };
+
+/* name2id */
+struct n2id_label {
+	TAILQ_ENTRY(n2id_label)	 entry;
+	char			*name;
+	u_int16_t		 id;
+	u_int32_t		 ext_tag;
+	int			 ref;
+};
+
+TAILQ_HEAD(n2id_labels, n2id_label);
+extern struct n2id_labels rt_labels;
 
 /* control data structures */
 struct ctl_iface {
@@ -524,6 +544,11 @@ struct ctl_sum_area {
 	u_int32_t		 num_lsa;
 };
 
+struct demote_msg {
+	char			 demote_group[IF_NAMESIZE];
+	int			 level;
+};
+
 /* area.c */
 struct area	*area_new(void);
 int		 area_del(struct area *);
@@ -542,6 +567,12 @@ void		 buf_free(struct buf *);
 void		 msgbuf_init(struct msgbuf *);
 void		 msgbuf_clear(struct msgbuf *);
 int		 msgbuf_write(struct msgbuf *);
+
+/* carp.c */
+int		 carp_demote_init(char *, int);
+void		 carp_demote_shutdown(void);
+int		 carp_demote_get(char *);
+int		 carp_demote_set(char *, int);
 
 /* parse.y */
 struct ospfd_conf	*parse_config(char *, int);
@@ -595,6 +626,9 @@ const char	*path_type_name(enum path_type);
 u_int16_t	 rtlabel_name2id(const char *);
 const char	*rtlabel_id2name(u_int16_t);
 void		 rtlabel_unref(u_int16_t);
+u_int32_t	 rtlabel_id2tag(u_int16_t);
+u_int16_t	 rtlabel_tag2id(u_int32_t);
+void		 rtlabel_tag(u_int16_t, u_int32_t);
 
 /* ospfd.c */
 void	main_imsg_compose_ospfe(int, pid_t, void *, u_int16_t);

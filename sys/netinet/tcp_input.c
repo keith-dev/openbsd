@@ -1,4 +1,4 @@
-/*	$OpenBSD: tcp_input.c,v 1.201 2007/02/13 06:39:50 itojun Exp $	*/
+/*	$OpenBSD: tcp_input.c,v 1.207 2007/06/15 18:23:06 markus Exp $	*/
 /*	$NetBSD: tcp_input.c,v 1.23 1996/02/13 23:43:44 christos Exp $	*/
 
 /*
@@ -95,6 +95,8 @@
 #include <netinet/tcp_debug.h>
 
 struct	tcpiphdr tcp_saveti;
+
+int tcp_mss_adv(struct ifnet *, int);
 
 #ifdef INET6
 #include <netinet6/in6_var.h>
@@ -376,7 +378,7 @@ tcp_input(struct mbuf *m, ...)
 	int todrop, acked, ourfinisacked, needoutput = 0;
 	int hdroptlen = 0;
 	short ostate = 0;
-	int iss = 0;
+	tcp_seq iss, *reuse = NULL;
 	u_long tiwin;
 	struct tcp_opt_info opti;
 	int iphlen;
@@ -605,13 +607,8 @@ findpcb:
 	}
 	if (inp == 0) {
 		int	inpl_flags = 0;
-#if NPF > 0
-		struct pf_mtag *t;
-
-		if ((t = pf_find_mtag(m)) != NULL &&
-		    t->flags & PF_TAG_TRANSLATE_LOCALHOST)
+		if (m->m_pkthdr.pf.flags & PF_TAG_TRANSLATE_LOCALHOST)
 			inpl_flags = INPLOOKUP_WILDCARD;
-#endif
 		++tcpstat.tcps_pcbhashmiss;
 		switch (af) {
 #ifdef INET6
@@ -849,7 +846,7 @@ findpcb:
 				 */
 				if (so->so_qlen <= so->so_qlimit &&
 				    syn_cache_add(&src.sa, &dst.sa, th, iphlen,
-						so, m, optp, optlen, &opti))
+				    so, m, optp, optlen, &opti, reuse))
 					m = NULL;
 			}
 			goto drop;
@@ -1271,6 +1268,28 @@ trimthenstep6:
 		tp->snd_wl1 = th->th_seq - 1;
 		tp->rcv_up = th->th_seq;
 		goto step6;
+	/*
+	 * If a new connection request is received while in TIME_WAIT,
+	 * drop the old connection and start over if the if the
+	 * timestamp or the sequence numbers are above the previous
+	 * ones.
+	 */
+	case TCPS_TIME_WAIT:
+		if (((tiflags & (TH_SYN|TH_ACK)) == TH_SYN) &&
+		    ((opti.ts_present &&
+		    TSTMP_LT(tp->ts_recent, opti.ts_val)) ||
+		    SEQ_GT(th->th_seq, tp->rcv_nxt))) {
+			/*
+			* Advance the iss by at least 32768, but
+			* clear the msb in order to make sure
+			* that SEG_LT(snd_nxt, iss).
+			*/
+			iss = tp->snd_nxt +
+			    ((arc4random() & 0x7fffffff) | 0x8000);
+			reuse = &iss;
+			tp = tcp_close(tp);
+			goto findpcb;
+		}
 	}
 
 	/*
@@ -1369,19 +1388,6 @@ trimthenstep6:
 		tcpstat.tcps_rcvpackafterwin++;
 		if (todrop >= tlen) {
 			tcpstat.tcps_rcvbyteafterwin += tlen;
-			/*
-			 * If a new connection request is received
-			 * while in TIME_WAIT, drop the old connection
-			 * and start over if the sequence numbers
-			 * are above the previous ones.
-			 */
-			if (tiflags & TH_SYN &&
-			    tp->t_state == TCPS_TIME_WAIT &&
-			    SEQ_GT(th->th_seq, tp->rcv_nxt)) {
-				iss = tp->snd_nxt + TCP_ISSINCR;
-				tp = tcp_close(tp);
-				goto findpcb;
-			}
 			/*
 			 * If window is closed can only take segments at
 			 * window edge, and have to drop data and PUSH from
@@ -3243,14 +3249,19 @@ tcp_newreno(tp, th)
 		 * Partial window deflation.  Relies on fact that tp->snd_una
 		 * not updated yet.
 		 */
-		tp->snd_cwnd -= (th->th_ack - tp->snd_una - tp->t_maxseg);
+		if (tp->snd_cwnd > th->th_ack - tp->snd_una)
+			tp->snd_cwnd -= th->th_ack - tp->snd_una;
+		else
+			tp->snd_cwnd = 0;
+		tp->snd_cwnd += tp->t_maxseg;
+
 		return 1;
 	}
 	return 0;
 }
 #endif /* TCP_SACK */
 
-static int
+int
 tcp_mss_adv(struct ifnet *ifp, int af)
 {
 	int mss = 0;
@@ -3948,7 +3959,7 @@ syn_cache_unreach(src, dst, th)
  */
 
 int
-syn_cache_add(src, dst, th, iphlen, so, m, optp, optlen, oi)
+syn_cache_add(src, dst, th, iphlen, so, m, optp, optlen, oi, issp)
 	struct sockaddr *src;
 	struct sockaddr *dst;
 	struct tcphdr *th;
@@ -3958,6 +3969,7 @@ syn_cache_add(src, dst, th, iphlen, so, m, optp, optlen, oi)
 	u_char *optp;
 	int optlen;
 	struct tcp_opt_info *oi;
+	tcp_seq *issp;
 {
 	struct tcpcb tb, *tp;
 	long win;
@@ -4060,7 +4072,7 @@ syn_cache_add(src, dst, th, iphlen, so, m, optp, optlen, oi)
 	tcp_iss += TCP_ISSINCR/2;
 	sc->sc_iss = tcp_iss;
 #else
-	sc->sc_iss = tcp_rndiss_next();
+	sc->sc_iss = issp ? *issp : arc4random();
 #endif
 	sc->sc_peermaxseg = oi->maxseg;
 	sc->sc_ourmaxseg = tcp_mss_adv(m->m_flags & M_PKTHDR ?
@@ -4369,7 +4381,7 @@ syn_cache_respond(sc, m)
 				ro->ro_rt ? ro->ro_rt->rt_ifp : NULL);
 
 		error = ip6_output(m, NULL /*XXX*/, (struct route_in6 *)ro, 0,
-			(struct ip6_moptions *)0, NULL);
+			(struct ip6_moptions *)0, NULL, NULL);
 		break;
 #endif
 	default:

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ehcivar.h,v 1.10 2006/08/14 00:41:11 pascoe Exp $ */
+/*	$OpenBSD: ehcivar.h,v 1.13 2007/06/12 16:26:36 mbalmer Exp $ */
 /*	$NetBSD: ehcivar.h,v 1.19 2005/04/29 15:04:29 augustss Exp $	*/
 
 /*
@@ -131,12 +131,12 @@ typedef struct ehci_softc {
 
 	SIMPLEQ_HEAD(, usbd_xfer) sc_free_xfers; /* free xfers */
 
-	struct lock sc_doorbell_lock;
+	struct rwlock sc_doorbell_lock;
 
-	usb_callout_t sc_tmo_pcd;
-	usb_callout_t sc_tmo_intrlist;
+	struct timeout sc_tmo_pcd;
+	struct timeout sc_tmo_intrlist;
 
-	device_ptr_t sc_child;		/* /dev/usb# device */
+	struct device *sc_child;		/* /dev/usb# device */
 
 	char sc_dying;
 } ehci_softc_t;
@@ -157,5 +157,5 @@ typedef struct ehci_softc {
 usbd_status	ehci_init(ehci_softc_t *);
 int		ehci_intr(void *);
 int		ehci_detach(ehci_softc_t *, int);
-int		ehci_activate(device_ptr_t, enum devact);
+int		ehci_activate(struct device *, enum devact);
 void		ehci_shutdown(void *);

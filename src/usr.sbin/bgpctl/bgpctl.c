@@ -1,4 +1,4 @@
-/*	$OpenBSD: bgpctl.c,v 1.117 2007/03/03 12:43:08 henning Exp $ */
+/*	$OpenBSD: bgpctl.c,v 1.126 2007/08/06 19:16:06 sobrado Exp $ */
 
 /*
  * Copyright (c) 2003 Henning Brauer <henning@openbsd.org>
@@ -49,6 +49,7 @@ char		*fmt_peer(const char *, const struct bgpd_addr *, int, int);
 void		 show_summary_head(void);
 int		 show_summary_msg(struct imsg *, int);
 int		 show_summary_terse_msg(struct imsg *, int);
+int		 show_neighbor_terse(struct imsg *);
 int		 show_neighbor_msg(struct imsg *, enum neighbor_views);
 void		 print_neighbor_capa_mp_safi(u_int8_t);
 void		 print_neighbor_msgstats(struct peer *);
@@ -88,8 +89,8 @@ usage(void)
 {
 	extern char	*__progname;
 
-	fprintf(stderr, "usage: %s [-s socket] [-o path] [-n] "
-	    "<command> [arg [...]]\n", __progname);
+	fprintf(stderr, "usage: %s [-n] [-o directory] [-s socket] "
+	    "command [arguments ...]\n", __progname);
 	exit(1);
 }
 
@@ -194,6 +195,7 @@ main(int argc, char *argv[])
 		break;
 	case SHOW_NEIGHBOR:
 	case SHOW_NEIGHBOR_TIMERS:
+	case SHOW_NEIGHBOR_TERSE:
 		if (res->peeraddr.af || res->peerdesc[0])
 			imsg_compose(ibuf, IMSG_CTL_SHOW_NEIGHBOR, 0, 0, -1,
 			    &neighbor, sizeof(neighbor));
@@ -212,6 +214,12 @@ main(int argc, char *argv[])
 			memcpy(&ribreq.prefix, &res->addr, sizeof(res->addr));
 			ribreq.prefixlen = res->prefixlen;
 			type = IMSG_CTL_SHOW_RIB_PREFIX;
+		}
+		if (res->community.as != COMMUNITY_UNSET &&
+		    res->community.type != COMMUNITY_UNSET) {
+			memcpy(&ribreq.community, &res->community,
+			    sizeof(res->community));
+			type = IMSG_CTL_SHOW_RIB_COMMUNITY;
 		}
 		memcpy(&ribreq.neighbor, &neighbor,
 		    sizeof(ribreq.neighbor));
@@ -335,6 +343,9 @@ main(int argc, char *argv[])
 			case SHOW_NEIGHBOR_TIMERS:
 				done = show_neighbor_msg(&imsg, NV_TIMERS);
 				break;
+			case SHOW_NEIGHBOR_TERSE:
+				done = show_neighbor_terse(&imsg);
+				break;
 			case SHOW_RIB:
 				if (res->flags & F_CTL_DETAIL)
 					done = show_rib_detail_msg(&imsg,
@@ -402,8 +413,8 @@ fmt_peer(const char *descr, const struct bgpd_addr *remote_addr,
 void
 show_summary_head(void)
 {
-	printf("%-20s %-5s %-10s %-10s %-5s %-8s %s\n", "Neighbor", "AS",
-	    "MsgRcvd", "MsgSent", "OutQ", "Up/Down", "State/PrefixRcvd");
+	printf("%-20s %-8s %-10s %-10s %-5s %-8s %s\n", "Neighbor", "AS",
+	    "MsgRcvd", "MsgSent", "OutQ", "Up/Down", "State/PrfRcvd");
 }
 
 int
@@ -419,8 +430,8 @@ show_summary_msg(struct imsg *imsg, int nodescr)
 		    p->conf.remote_masklen, nodescr);
 		if (strlen(s) >= 20)
 			s[20] = 0;
-		printf("%-20s %5u %10llu %10llu %5u %-8s ",
-		    s, p->conf.remote_as,
+		printf("%-20s %8s %10llu %10llu %5u %-8s ",
+		    s, log_as(p->conf.remote_as),
 		    p->stats.msg_rcvd_open + p->stats.msg_rcvd_notification +
 		    p->stats.msg_rcvd_update + p->stats.msg_rcvd_keepalive +
 		    p->stats.msg_rcvd_rrefresh,
@@ -460,9 +471,39 @@ show_summary_terse_msg(struct imsg *imsg, int nodescr)
 		p = imsg->data;
 		s = fmt_peer(p->conf.descr, &p->conf.remote_addr,
 		    p->conf.remote_masklen, nodescr);
-		printf("%s %u %s\n", s, p->conf.remote_as,
+		printf("%s %s %s\n", s, log_as(p->conf.remote_as),
 		    p->conf.template ? "Template" : statenames[p->state]);
 		free(s);
+		break;
+	case IMSG_CTL_END:
+		return (1);
+	default:
+		break;
+	}
+
+	return (0);
+}
+
+int
+show_neighbor_terse(struct imsg *imsg)
+{
+	struct peer		*p;
+
+	switch (imsg->hdr.type) {
+	case IMSG_CTL_SHOW_NEIGHBOR:
+		p = imsg->data;
+		printf("%llu %llu %llu %llu %llu %llu %llu "
+		    "%llu %llu %llu %u %u %llu %llu %llu %llu\n",
+		    p->stats.msg_sent_open, p->stats.msg_rcvd_open,
+		    p->stats.msg_sent_notification,
+		    p->stats.msg_rcvd_notification,
+		    p->stats.msg_sent_update, p->stats.msg_rcvd_update,
+		    p->stats.msg_sent_keepalive, p->stats.msg_rcvd_keepalive,
+		    p->stats.msg_sent_rrefresh, p->stats.msg_rcvd_rrefresh,
+		    p->stats.prefix_cnt, p->conf.max_prefix,
+		    p->stats.prefix_sent_update, p->stats.prefix_rcvd_update,
+		    p->stats.prefix_sent_withdraw,
+		    p->stats.prefix_rcvd_withdraw);
 		break;
 	case IMSG_CTL_END:
 		return (1);
@@ -502,7 +543,7 @@ show_neighbor_msg(struct imsg *imsg, enum neighbor_views nv)
 		if (p->conf.remote_as == 0 && p->conf.template)
 			printf("remote AS: accept any");
 		else
-			printf("remote AS %u", p->conf.remote_as);
+			printf("remote AS %s", log_as(p->conf.remote_as));
 		if (p->conf.template)
 			printf(", Template");
 		if (p->conf.cloned)
@@ -522,7 +563,8 @@ show_neighbor_msg(struct imsg *imsg, enum neighbor_views nv)
 		    fmt_timeframe(p->stats.last_read),
 		    p->holdtime, p->holdtime/3);
 		if (p->capa.peer.mp_v4 || p->capa.peer.mp_v6 ||
-		    p->capa.peer.refresh || p->capa.peer.restart) {
+		    p->capa.peer.refresh || p->capa.peer.restart ||
+		    p->capa.peer.as4byte) {
 			printf("  Neighbor capabilities:\n");
 			if (p->capa.peer.mp_v4) {
 				printf("    Multiprotocol extensions: IPv4");
@@ -536,6 +578,8 @@ show_neighbor_msg(struct imsg *imsg, enum neighbor_views nv)
 				printf("    Route Refresh\n");
 			if (p->capa.peer.restart)
 				printf("    Graceful Restart\n");
+			if (p->capa.peer.as4byte)
+				printf("    4-byte AS numbers\n");
 		}
 		printf("\n");
 		switch (nv) {
@@ -597,9 +641,6 @@ print_neighbor_capa_mp_safi(u_int8_t safi)
 	case SAFI_MULTICAST:
 		printf(" Multicast");
 		break;
-	case SAFI_BOTH:
-		printf(" Unicast and Multicast");
-		break;
 	default:
 		printf(" unknown (%u)", safi);
 		break;
@@ -622,13 +663,19 @@ print_neighbor_msgstats(struct peer *p)
 	    p->stats.msg_sent_keepalive, p->stats.msg_rcvd_keepalive);
 	printf("  %-15s %10llu %10llu\n", "Route Refresh",
 	    p->stats.msg_sent_rrefresh, p->stats.msg_rcvd_rrefresh);
-	printf("  %-15s %10llu %10llu\n", "Total",
+	printf("  %-15s %10llu %10llu\n\n", "Total",
 	    p->stats.msg_sent_open + p->stats.msg_sent_notification +
 	    p->stats.msg_sent_update + p->stats.msg_sent_keepalive +
 	    p->stats.msg_sent_rrefresh,
 	    p->stats.msg_rcvd_open + p->stats.msg_rcvd_notification +
 	    p->stats.msg_rcvd_update + p->stats.msg_rcvd_keepalive +
 	    p->stats.msg_rcvd_rrefresh);
+	printf("  Update statistics:\n");
+	printf("  %-15s %-10s %-10s\n", "", "Sent", "Received");
+	printf("  %-15s %10llu %10llu\n", "Updates",
+	    p->stats.prefix_sent_update, p->stats.prefix_rcvd_update);
+	printf("  %-15s %10llu %10llu\n", "Withdraws",
+	    p->stats.prefix_sent_withdraw, p->stats.prefix_rcvd_withdraw);
 }
 
 void
@@ -881,8 +928,6 @@ ift2ifm(int media_type)
 		return (IFM_ETHER);
 	case IFT_FDDI:
 		return (IFM_FDDI);
-	case IFT_ISO88025:
-		return (IFM_TOKEN);
 	case IFT_CARP:
 		return (IFM_CARP);
 	case IFT_IEEE80211:

@@ -1,4 +1,4 @@
-/*	$OpenBSD: co.c,v 1.105 2007/02/27 07:59:13 xsa Exp $	*/
+/*	$OpenBSD: co.c,v 1.109 2007/07/03 00:56:23 ray Exp $	*/
 /*
  * Copyright (c) 2005 Joris Vink <joris@openbsd.org>
  * All rights reserved.
@@ -45,7 +45,7 @@ static int	checkout_file_has_diffs(RCSFILE *, RCSNUM *, const char *);
 int
 checkout_main(int argc, char **argv)
 {
-	int fd, i, ch, flags, kflag, status;
+	int fd, i, ch, flags, kflag, ret;
 	RCSNUM *rev;
 	RCSFILE *file;
 	const char *author, *date, *state;
@@ -53,7 +53,7 @@ checkout_main(int argc, char **argv)
 	char *rev_str, *username;
 	time_t rcs_mtime = -1;
 
-	flags = status = 0;
+	flags = ret = 0;
 	kflag = RCS_KWEXP_ERR;
 	rev = RCS_HEAD_REV;
 	rev_str = NULL;
@@ -164,6 +164,7 @@ checkout_main(int argc, char **argv)
 		fd = rcs_choosefile(argv[i], fpath, sizeof(fpath));
 		if (fd < 0) {
 			warn("%s", fpath);
+			ret = 1;
 			continue;
 		}
 		rcs_strip_suffix(argv[i]);
@@ -202,10 +203,11 @@ checkout_main(int argc, char **argv)
 			}
 		}
 
-		if ((status = checkout_rev(file, rev, argv[i], flags,
-		    username, author, state, date)) < 0) {
+		if (checkout_rev(file, rev, argv[i], flags,
+		    username, author, state, date) < 0) {
 			rcs_close(file);
 			rcsnum_free(rev);
+			ret = 1;
 			continue;
 		}
 
@@ -220,7 +222,7 @@ checkout_main(int argc, char **argv)
 		rcs_close(file);
 	}
 
-	return (status);
+	return (ret);
 }
 
 void
@@ -248,7 +250,7 @@ checkout_rev(RCSFILE *file, RCSNUM *frev, const char *dst, int flags,
 	BUF *bp;
 	u_int i;
 	int fd, lcount;
-	char buf[16];
+	char buf[RCS_REV_BUFSZ];
 	mode_t mode = DEFFILEMODE;
 	struct stat st;
 	struct rcs_delta *rdp;
@@ -407,6 +409,10 @@ checkout_rev(RCSFILE *file, RCSNUM *frev, const char *dst, int flags,
 		}
 	}
 
+	/* If strict locking is disabled, make file writable by owner. */
+	if (rcs_lock_getmode(file) == RCS_LOCK_LOOSE)
+		mode |= S_IWUSR;
+
 	if (file->rf_ndelta == 0 && !(flags & QUIET) &&
 	    ((flags & CO_LOCK) || (flags & CO_UNLOCK))) {
 		(void)fprintf(stderr, "no revisions, so nothing can be %s\n",
@@ -519,7 +525,7 @@ checkout_err_nobranch(RCSFILE *file, const char *author, const char *date,
  * checkout_file_has_diffs()
  *
  * Check for diffs between the working file and its current revision.
- * Same return values as rcs_diffreg()
+ * Same return values as diffreg()
  */
 static int
 checkout_file_has_diffs(RCSFILE *rfp, RCSNUM *frev, const char *dst)
@@ -544,7 +550,7 @@ checkout_file_has_diffs(RCSFILE *rfp, RCSNUM *frev, const char *dst)
 	rcs_buf_empty(bp);
 
 	diff_format = D_RCSDIFF;
-	ret = rcs_diffreg(dst, tempfile, bp, 0);
+	ret = diffreg(dst, tempfile, bp, 0);
 
 	rcs_buf_free(bp);
 	unlink(tempfile);

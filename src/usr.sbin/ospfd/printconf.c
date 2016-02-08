@@ -1,4 +1,4 @@
-/*	$OpenBSD: printconf.c,v 1.6 2006/11/09 03:59:54 joel Exp $ */
+/*	$OpenBSD: printconf.c,v 1.10 2007/06/19 16:45:15 reyk Exp $ */
 
 /*
  * Copyright (c) 2004, 2005 Esben Norby <norby@openbsd.org>
@@ -31,6 +31,7 @@
 void	print_mainconf(struct ospfd_conf *);
 const char *print_no(u_int16_t);
 void	print_redistribute(struct ospfd_conf *);
+void	print_rtlabel(struct ospfd_conf *);
 void	print_iface(struct iface *);
 
 void
@@ -48,7 +49,11 @@ print_mainconf(struct ospfd_conf *conf)
 	else
 		printf("rfc1583compat no\n");
 
+	if (conf->flags & OSPFD_FLAG_STUB_ROUTER)
+		printf("stub router yes\n");
+
 	print_redistribute(conf);
+	print_rtlabel(conf);
 
 	printf("spf-delay %u\n", conf->spf_delay);
 	printf("spf-holdtime %u\n", conf->spf_hold_time);
@@ -84,12 +89,23 @@ print_redistribute(struct ospfd_conf *conf)
 			    print_no(r->type), rtlabel_id2name(r->label));
 			break;
 		case REDIST_ADDR:
-			printf("%ssredistribute %s/%d\n",
+			printf("%sredistribute %s/%d\n",
 			    print_no(r->type), inet_ntoa(r->addr),
 			    mask2prefixlen(r->mask.s_addr));
 			break;
 		}
 	}
+}
+
+void
+print_rtlabel(struct ospfd_conf *conf)
+{
+	struct n2id_label	*label;
+
+	TAILQ_FOREACH(label, &rt_labels, entry)
+		if (label->ext_tag)
+			printf("rtlabel \"%s\" external-tag %u\n",
+			    label->name, label->ext_tag);
 }
 
 void
@@ -104,6 +120,8 @@ print_iface(struct iface *iface)
 
 	if (iface->passive)
 		printf("\t\tpassive\n");
+	if (*iface->demote_group)
+		printf("\t\tdemote %s\n", iface->demote_group);
 
 	printf("\t\tretransmit-interval %d\n", iface->rxmt_interval);
 	printf("\t\trouter-dead-time %d\n", iface->dead_interval);
@@ -142,6 +160,9 @@ print_config(struct ospfd_conf *conf)
 
 	LIST_FOREACH(area, &conf->area_list, entry) {
 		printf("area %s {\n", inet_ntoa(area->id));
+		if (*area->demote_group)
+			printf("\tdemote %s %d\n", area->demote_group,
+			area->demote_level);
 		LIST_FOREACH(iface, &area->iface_list, entry) {
 			print_iface(iface);
 		}

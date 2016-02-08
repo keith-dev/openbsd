@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap.c,v 1.9 2007/02/03 16:48:23 miod Exp $	*/
+/*	$OpenBSD: pmap.c,v 1.13 2007/05/18 14:41:55 art Exp $	*/
 /*	$NetBSD: pmap.c,v 1.147 2004/01/18 13:03:50 scw Exp $	*/
 
 /*
@@ -198,6 +198,7 @@
 #include <sys/user.h>
 #include <sys/pool.h>
 #include <sys/cdefs.h>
+#include <sys/sched.h>
  
 #include <uvm/uvm.h>
 
@@ -433,10 +434,10 @@ struct l2_dtable {
 static __inline pt_entry_t *
 pmap_alloc_l2_ptp(paddr_t *pap)		
 {
-	pt_entry_t * pted;
+	pt_entry_t *pted;
 
 	pted = pool_cache_get(&pmap_l2ptp_cache, PR_NOWAIT);
-	*pap  = vtophys((vaddr_t)pted);
+	(void)pmap_extract(pmap_kernel(), (vaddr_t)pted, pap);
 	return pted;
 }
 #endif /* POOL_CACHE_PADDR */
@@ -673,7 +674,7 @@ do {					\
 /*
  * main pv_entry manipulation functions:
  *   pmap_enter_pv: enter a mapping onto a vm_page list
- *   pmap_remove_pv: remove a mappiing from a vm_page list
+ *   pmap_remove_pv: remove a mapping from a vm_page list
  *
  * NOTE: pmap_enter_pv expects to lock the pvh itself
  *       pmap_remove_pv expects te caller to lock the pvh before calling
@@ -3340,7 +3341,7 @@ pmap_pageidlezero(struct vm_page *pg)
 
 	for (i = 0, ptr = (int *)cdstp;
 			i < (PAGE_SIZE / sizeof(int)); i++) {
-		if (whichqs != 0) {
+		if (!sched_is_idle()) {
 			/*
 			 * A process has become ready.  Abort now,
 			 * so we don't keep it waiting while we
@@ -4071,7 +4072,7 @@ pmap_init(void)
 
 	/*
 	 * Now we need to free enough pv_entry structures to allow us to get
-	 * the kmem_map/kmem_object allocated and inited (done after this
+	 * the kmem_map allocated and inited (done after this
 	 * function is finished).  to do this we allocate one bootstrap page out
 	 * of kernel_map and use it to provide an initial pool of pv_entry
 	 * structures.   we never free this page.
