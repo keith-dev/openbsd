@@ -1,7 +1,7 @@
 #############################################################################  
 # Pod/Find.pm -- finds files containing POD documentation
 #
-# Author: Marek Rouchal <marek@saftsack.fs.uni-bayreuth.de>
+# Author: Marek Rouchal <marekr@cpan.org>
 # 
 # Copyright (C) 1999-2000 by Marek Rouchal (and borrowing code
 # from Nick Ing-Simmon's PodToHtml). All rights reserved.
@@ -13,7 +13,7 @@
 package Pod::Find;
 
 use vars qw($VERSION);
-$VERSION = 0.24;   ## Current version of this package
+$VERSION = 0.24_01;   ## Current version of this package
 require  5.005;   ## requires this Perl version or later
 use Carp;
 
@@ -201,7 +201,11 @@ sub pod_find
         File::Find::find( sub {
             my $item = $File::Find::name;
             if(-d) {
-                if($dirs_visited{$item}) {
+                if($item =~ m{/(?:RCS|CVS|SCCS|\.svn)$}) {
+                    $File::Find::prune = 1;
+                    return;
+                }
+                elsif($dirs_visited{$item}) {
                     warn "Directory '$item' already seen, skipping.\n"
                         if($opts{-verbose});
                     $File::Find::prune = 1;
@@ -498,7 +502,9 @@ sub contains_pod {
 
 =head1 AUTHOR
 
-Marek Rouchal E<lt>marek@saftsack.fs.uni-bayreuth.deE<gt>,
+Please report bugs using L<http://rt.cpan.org>.
+
+Marek Rouchal E<lt>marekr@cpan.orgE<gt>,
 heavily borrowing code from Nick Ing-Simmons' PodToHtml.
 
 Tim Jenness E<lt>t.jenness@jach.hawaii.eduE<gt> provided

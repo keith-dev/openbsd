@@ -1,4 +1,4 @@
-/*	$OpenBSD: rpc_cout.c,v 1.16 2003/06/19 20:31:08 deraadt Exp $	*/
+/*	$OpenBSD: rpc_cout.c,v 1.18 2004/07/16 07:31:05 matthieu Exp $	*/
 /*	$NetBSD: rpc_cout.c,v 1.6 1996/10/01 04:13:53 cgd Exp $	*/
 /*
  * Sun RPC is a product of Sun Microsystems, Inc. and is provided for
@@ -56,7 +56,6 @@ static void print_ifarg(char *);
 static void print_ifsizeof(char *, char *);
 static void print_ifclose(int);
 static void print_ifstat(int, char *, char *, relation, char *, char *, char *);
-static void emit_num(definition *);
 static void emit_program(definition *);
 static void emit_enum(definition *);
 static void emit_union(definition *);
@@ -166,8 +165,6 @@ print_header(def)
 
 	if (doinline == 0)
 		return;
-	/* May cause lint to complain. but  ... */
-	fprintf(fout, "\tint32_t *buf;\n");
 }
 
 static void
@@ -459,15 +456,19 @@ emit_struct(def)
 		can_inline = 1;
 
 	if (can_inline == 0) {	/* can not inline, drop back to old mode */
+		fprintf(fout, "\n");
 		for (dl = def->def.st.decls; dl != NULL; dl = dl->next)
 			print_stat(1, &dl->decl);
 		return;
 	}
 
+	/* May cause lint to complain. but  ... */
+	fprintf(fout, "\tint32_t *buf;\n");
+
 	flag = PUT;
 	for (j = 0; j < 2; j++) {
 		if (flag == PUT)
-			fprintf(fout, "\tif (xdrs->x_op == XDR_ENCODE) {\n");
+			fprintf(fout, "\n\tif (xdrs->x_op == XDR_ENCODE) {\n");
 		else
 			fprintf(fout, "\t\treturn (TRUE);\n\t} else if (xdrs->x_op == XDR_DECODE) {\n");
 

@@ -1,8 +1,8 @@
-#	$OpenBSD: Makefile,v 1.8 2003/07/02 20:54:17 deraadt Exp $
+#	$OpenBSD: Makefile,v 1.10 2004/07/09 21:52:21 mickey Exp $
 
 LDSTATIC=${STATIC}
 PROG=	kdump
-CFLAGS+=-I${.CURDIR}/../ktrace -I${.CURDIR}
+CFLAGS+=-I${.CURDIR}/../ktrace -I${.CURDIR} -I${.CURDIR}/../../sys
 SRCS=	kdump.c ioctl.c subr.c
 .PATH:	${.CURDIR}/../ktrace
 CLEANFILES+=ioctl.c
@@ -32,6 +32,7 @@ ioctl.c: ${.CURDIR}/mkioctls
 	    ${DESTDIR}/usr/include/sys/chio.h \
 	    ${DESTDIR}/usr/include/sys/dkio.h \
 	    ${DESTDIR}/usr/include/sys/filio.h \
+	    ${DESTDIR}/usr/include/sys/gpio.h \
 	    ${DESTDIR}/usr/include/sys/midiio.h \
 	    ${DESTDIR}/usr/include/sys/mtio.h \
 	    ${DESTDIR}/usr/include/sys/pciio.h \

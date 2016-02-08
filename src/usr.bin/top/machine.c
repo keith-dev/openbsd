@@ -1,4 +1,4 @@
-/* $OpenBSD: machine.c,v 1.37 2004/01/08 18:15:06 millert Exp $	 */
+/* $OpenBSD: machine.c,v 1.43 2004/06/13 18:49:02 otto Exp $	 */
 
 /*-
  * Copyright (c) 1994 Thorsten Lockert <tholo@sigmasoft.com>
@@ -59,13 +59,13 @@
 #include "utils.h"
 #include "loadavg.h"
 
-static int      swapmode(int *, int *);
+static int	swapmode(int *, int *);
 
 /* get_process_info passes back a handle.  This is what it looks like: */
 
 struct handle {
 	struct kinfo_proc2 **next_proc;	/* points to next valid proc pointer */
-	int             remaining;	/* number of pointers remaining */
+	int		remaining;	/* number of pointers remaining */
 };
 
 /* what we consider to be process size: */
@@ -74,14 +74,14 @@ struct handle {
 /*
  *  These definitions control the format of the per-process area
  */
-static char     header[] =
-	"  PID X        PRI NICE  SIZE   RES STATE WAIT     TIME    CPU COMMAND";
+static char header[] =
+	"  PID X        PRI NICE  SIZE   RES STATE    WAIT     TIME    CPU COMMAND";
 
 /* 0123456   -- field to fill in starts at header+6 */
 #define UNAME_START 6
 
 #define Proc_format \
-	"%5d %-8.8s %3d %4d %5s %5s %-5s %-6.6s %6s %5.2f%% %.14s"
+	"%5d %-8.8s %3d %4d %5s %5s %-8s %-6.6s %6s %5.2f%% %.11s"
 
 /* process state names for the "STATE" column of the display */
 /*
@@ -90,7 +90,7 @@ static char     header[] =
  */
 
 char	*state_abbrev[] = {
-	"", "start", "run\0\0\0", "sleep", "stop", "zomb",
+	"", "start", "run", "sleep", "stop", "zomb", "dead", "onproc"
 };
 
 static int      stathz;
@@ -140,6 +140,8 @@ static int      pageshift;	/* log base 2 of the pagesize */
 /* define pagetok in terms of pageshift */
 #define pagetok(size) ((size) << pageshift)
 
+int		ncpu;
+
 unsigned int	maxslp;
 
 static int
@@ -159,7 +161,13 @@ getstathz(void)
 int
 machine_init(struct statics *statics)
 {
-	int pagesize;
+	size_t size = sizeof(ncpu);
+	int mib[2], pagesize;
+
+	mib[0] = CTL_HW;
+	mib[1] = HW_NCPU;
+	if (sysctl(mib, 2, &ncpu, &size, NULL, 0) == -1)
+		return (-1);
 
 	stathz = getstathz();
 	if (stathz == -1)
@@ -365,6 +373,20 @@ get_process_info(struct system_info *si, struct process_select *sel,
 char fmt[MAX_COLS];	/* static area where result is built */
 
 char *
+state_abbr(struct kinfo_proc2 *pp)
+{
+	static char buf[10];
+
+	if (ncpu > 1 && pp->p_cpuid != KI_NOCPU)
+		snprintf(buf, sizeof buf, "%s/%d",
+		    state_abbrev[(unsigned char)pp->p_stat], pp->p_cpuid);
+	else
+		snprintf(buf, sizeof buf, "%s",
+		    state_abbrev[(unsigned char)pp->p_stat]);
+	return buf;
+}
+
+char *
 format_next_process(caddr_t handle, char *(*get_userid)(uid_t))
 {
 	char *p_wait, waddr[sizeof(void *) * 2 + 3];	/* Hexify void pointer */
@@ -410,7 +432,7 @@ format_next_process(caddr_t handle, char *(*get_userid)(uid_t))
 	    format_k(pagetok(PROCSIZE(pp))),
 	    format_k(pagetok(pp->p_vm_rssize)),
 	    (pp->p_stat == SSLEEP && pp->p_slptime > maxslp) ?
-	    "idle" : state_abbrev[(unsigned char)pp->p_stat],
+	    "idle" : state_abbr(pp),
 	    p_wait, format_time(cputime), 100.0 * pct,
 	    printable(pp->p_comm));
 
@@ -587,7 +609,7 @@ int (*proc_compares[])(const void *, const void *) = {
 /*
  * proc_owner(pid) - returns the uid that owns process "pid", or -1 if
  *		the process does not exist.
- *		It is EXTREMLY IMPORTANT that this function work correctly.
+ *		It is EXTREMELY IMPORTANT that this function work correctly.
  *		If top runs setuid root (as in SVR4), then this function
  *		is the only thing that stands in the way of a serious
  *		security problem.  It validates requests for the "kill"

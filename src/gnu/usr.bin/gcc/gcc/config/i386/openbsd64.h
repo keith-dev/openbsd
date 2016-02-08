@@ -36,7 +36,8 @@ Boston, MA 02111-1307, USA.  */
   do						\
     {						\
     	OPENBSD_OS_CPP_BUILTINS_ELF();		\
-	OPENBSD_OS_CPP_BUILTINS_LP64();		\
+	if (TARGET_64BIT)			\
+		OPENBSD_OS_CPP_BUILTINS_LP64();	\
     }						\
   while (0)
 
@@ -118,7 +119,3 @@ Boston, MA 02111-1307, USA.  */
 
 #undef JUMP_TABLES_IN_TEXT_SECTION
 #define JUMP_TABLES_IN_TEXT_SECTION (flag_pic)
-
-/* pick up defines for mprotect (used in TRANSFER_FROM_TRANPOLINE) */
-#include <sys/types.h>
-#include <sys/mman.h>

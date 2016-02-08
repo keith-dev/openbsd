@@ -1,5 +1,5 @@
 package Cwd;
-use 5.006;
+$VERSION = $VERSION = '2.19';
 
 =head1 NAME
 
@@ -20,7 +20,7 @@ current working directory.  It is recommended that getcwd (or another
 *cwd() function) be used in I<all> code to ensure portability.
 
 By default, it exports the functions cwd(), getcwd(), fastcwd(), and
-fastgetcwd() into the caller's namespace.  
+fastgetcwd() (and, on Win32, getdcwd()) into the caller's namespace.  
 
 
 =head2 getcwd and friends
@@ -66,6 +66,18 @@ unexpectedly". That should never happen.
   my $cwd = fastgetcwd();
 
 The fastgetcwd() function is provided as a synonym for cwd().
+
+=item getdcwd
+
+    my $cwd = getdcwd();
+    my $cwd = getdcwd('C:');
+
+The getdcwd() function is also provided on Win32 to get the current working
+directory on the specified drive, since Windows maintains a separate current
+working directory for each drive.  If no drive is specified then the current
+drive is assumed.
+
+This function simply calls the Microsoft C library _getdcwd() function.
 
 =back
 
@@ -130,6 +142,12 @@ C<fast_abs_path()>.
 
 =back
 
+=head1 AUTHOR
+
+Originally by the perl5-porters.
+
+Maintained by Ken Williams <KWILLIAMS@cpan.org>
+
 =head1 SEE ALSO
 
 L<File::chdir>
@@ -137,12 +155,13 @@ L<File::chdir>
 =cut
 
 use strict;
+use Exporter;
+use vars qw(@ISA @EXPORT @EXPORT_OK);
 
-our $VERSION = '2.08';
-
-use base qw/ Exporter /;
-our @EXPORT = qw(cwd getcwd fastcwd fastgetcwd);
-our @EXPORT_OK = qw(chdir abs_path fast_abs_path realpath fast_realpath);
+@ISA = qw/ Exporter /;
+@EXPORT = qw(cwd getcwd fastcwd fastgetcwd);
+push @EXPORT, qw(getdcwd) if $^O eq 'MSWin32';
+@EXPORT_OK = qw(chdir abs_path fast_abs_path realpath fast_realpath);
 
 # sys_cwd may keep the builtin command
 
@@ -150,16 +169,19 @@ our @EXPORT_OK = qw(chdir abs_path fast_abs_path realpath fast_realpath);
 # there is no sense to process the rest of the file.
 # The best choice may be to have this in BEGIN, but how to return from BEGIN?
 
-if ($^O eq 'os2' && defined &sys_cwd && defined &sys_abspath) {
+if ($^O eq 'os2') {
     local $^W = 0;
-    *cwd		= \&sys_cwd;
-    *getcwd		= \&cwd;
-    *fastgetcwd		= \&cwd;
-    *fastcwd		= \&cwd;
-    *abs_path		= \&sys_abspath;
-    *fast_abs_path	= \&abs_path;
-    *realpath		= \&abs_path;
-    *fast_realpath	= \&abs_path;
+
+    *cwd                = defined &sys_cwd ? \&sys_cwd : \&_os2_cwd;
+    *getcwd             = \&cwd;
+    *fastgetcwd         = \&cwd;
+    *fastcwd            = \&cwd;
+
+    *fast_abs_path      = \&sys_abspath if defined &sys_abspath;
+    *abs_path           = \&fast_abs_path;
+    *realpath           = \&fast_abs_path;
+    *fast_realpath      = \&fast_abs_path;
+
     return 1;
 }
 
@@ -169,27 +191,104 @@ eval {
     XSLoader::load('Cwd');
 };
 
+# Big nasty table of function aliases
+my %METHOD_MAP =
+  (
+   VMS =>
+   {
+    cwd			=> '_vms_cwd',
+    getcwd		=> '_vms_cwd',
+    fastcwd		=> '_vms_cwd',
+    fastgetcwd		=> '_vms_cwd',
+    abs_path		=> '_vms_abs_path',
+    fast_abs_path	=> '_vms_abs_path',
+   },
+
+   MSWin32 =>
+   {
+    # We assume that &_NT_cwd is defined as an XSUB or in the core.
+    cwd			=> '_NT_cwd',
+    getcwd		=> '_NT_cwd',
+    fastcwd		=> '_NT_cwd',
+    fastgetcwd		=> '_NT_cwd',
+    abs_path		=> 'fast_abs_path',
+    realpath		=> 'fast_abs_path',
+   },
+
+   dos => 
+   {
+    cwd			=> '_dos_cwd',
+    getcwd		=> '_dos_cwd',
+    fastgetcwd		=> '_dos_cwd',
+    fastcwd		=> '_dos_cwd',
+    abs_path		=> 'fast_abs_path',
+   },
+
+   qnx =>
+   {
+    cwd			=> '_qnx_cwd',
+    getcwd		=> '_qnx_cwd',
+    fastgetcwd		=> '_qnx_cwd',
+    fastcwd		=> '_qnx_cwd',
+    abs_path		=> '_qnx_abs_path',
+    fast_abs_path	=> '_qnx_abs_path',
+   },
+
+   cygwin =>
+   {
+    getcwd		=> 'cwd',
+    fastgetcwd		=> 'cwd',
+    fastcwd		=> 'cwd',
+    abs_path		=> 'fast_abs_path',
+    realpath		=> 'fast_abs_path',
+   },
+
+   epoc =>
+   {
+    cwd			=> '_epoc_cwd',
+    getcwd	        => '_epoc_cwd',
+    fastgetcwd		=> '_epoc_cwd',
+    fastcwd		=> '_epoc_cwd',
+    abs_path		=> 'fast_abs_path',
+   },
+
+   MacOS =>
+   {
+    getcwd		=> 'cwd',
+    fastgetcwd		=> 'cwd',
+    fastcwd		=> 'cwd',
+    abs_path		=> 'fast_abs_path',
+   },
+  );
+
+$METHOD_MAP{NT} = $METHOD_MAP{MSWin32};
+$METHOD_MAP{nto} = $METHOD_MAP{qnx};
+
 
 # Find the pwd command in the expected locations.  We assume these
 # are safe.  This prevents _backtick_pwd() consulting $ENV{PATH}
 # so everything works under taint mode.
 my $pwd_cmd;
-foreach my $try (qw(/bin/pwd /usr/bin/pwd)) {
+foreach my $try ('/bin/pwd',
+		 '/usr/bin/pwd',
+		 '/QOpenSys/bin/pwd', # OS/400 PASE.
+		) {
+
     if( -x $try ) {
         $pwd_cmd = $try;
         last;
     }
 }
 unless ($pwd_cmd) {
-    if (-x '/QOpenSys/bin/pwd') { # OS/400 PASE.
-        $pwd_cmd = '/QOpenSys/bin/pwd' ;
-    } else {
-        # Isn't this wrong?  _backtick_pwd() will fail if somenone has
-        # pwd in their path but it is not /bin/pwd or /usr/bin/pwd?
-        # See [perl #16774]. --jhi
-        $pwd_cmd = 'pwd';
-    }
+    # Isn't this wrong?  _backtick_pwd() will fail if somenone has
+    # pwd in their path but it is not /bin/pwd or /usr/bin/pwd?
+    # See [perl #16774]. --jhi
+    $pwd_cmd = 'pwd';
 }
+
+# Lazy-load Carp
+sub _carp  { require Carp; Carp::carp(@_)  }
+sub _croak { require Carp; Carp::croak(@_) }
 
 # The 'natural and safe form' for UNIX (pwd may be setuid root)
 sub _backtick_pwd {
@@ -205,10 +304,11 @@ sub _backtick_pwd {
 # Since some ports may predefine cwd internally (e.g., NT)
 # we take care not to override an existing definition for cwd().
 
-unless(defined &cwd) {
+unless ($METHOD_MAP{$^O}{cwd} or defined &cwd) {
     # The pwd command is not available in some chroot(2)'ed environments
-    if( $^O eq 'MacOS' || (defined $ENV{PATH} && 
-                           grep { -x "$_/pwd" } split(':', $ENV{PATH})) ) 
+    my $sep = $Config::Config{path_sep} || ':';
+    if( $^O eq 'MacOS' || (defined $ENV{PATH} &&
+			   grep { -x "$_/pwd" } split($sep, $ENV{PATH})) )
     {
 	*cwd = \&_backtick_pwd;
     }
@@ -351,17 +451,38 @@ sub chdir {
 
 # In case the XS version doesn't load.
 *abs_path = \&_perl_abs_path unless defined &abs_path;
-sub _perl_abs_path
+sub _perl_abs_path(;$)
 {
     my $start = @_ ? shift : '.';
     my($dotdots, $cwd, @pst, @cst, $dir, @tst);
 
     unless (@cst = stat( $start ))
     {
-	require Carp;
-	Carp::carp ("stat($start): $!");
+	_carp("stat($start): $!");
 	return '';
     }
+
+    unless (-d _) {
+        # Make sure we can be invoked on plain files, not just directories.
+        # NOTE that this routine assumes that '/' is the only directory separator.
+	
+        my ($dir, $file) = $start =~ m{^(.*)/(.+)$}
+	    or return cwd() . '/' . $start;
+	
+	if (-l _) {
+	    my $link_target = readlink($start);
+	    die "Can't resolve link $start: $!" unless defined $link_target;
+	    
+	    require File::Spec;
+            $link_target = $dir . '/' . $link_target
+                unless File::Spec->file_name_is_absolute($link_target);
+	    
+	    return abs_path($link_target);
+	}
+	
+	return abs_path($dir) . '/' . $file;
+    }
+
     $cwd = '';
     $dotdots = $start;
     do
@@ -371,14 +492,12 @@ sub _perl_abs_path
 	local *PARENT;
 	unless (opendir(PARENT, $dotdots))
 	{
-	    require Carp;
-	    Carp::carp ("opendir($dotdots): $!");
+	    _carp("opendir($dotdots): $!");
 	    return '';
 	}
 	unless (@cst = stat($dotdots))
 	{
-	    require Carp;
-	    Carp::carp ("stat($dotdots): $!");
+	    _carp("stat($dotdots): $!");
 	    closedir(PARENT);
 	    return '';
 	}
@@ -392,8 +511,7 @@ sub _perl_abs_path
 	    {
 		unless (defined ($dir = readdir(PARENT)))
 	        {
-		    require Carp;
-		    Carp::carp ("readdir($dotdots): $!");
+		    _carp("readdir($dotdots): $!");
 		    closedir(PARENT);
 		    return '';
 		}
@@ -425,14 +543,35 @@ sub fast_abs_path {
     ($path) = $path =~ /(.*)/;
     ($cwd)  = $cwd  =~ /(.*)/;
 
+    unless (-e $path) {
+ 	_croak("$path: No such file or directory");
+    }
+
+    unless (-d _) {
+        # Make sure we can be invoked on plain files, not just directories.
+	
+	my ($vol, $dir, $file) = File::Spec->splitpath($path);
+	return File::Spec->catfile($cwd, $path) unless length $dir;
+
+	if (-l $path) {
+	    my $link_target = readlink($path);
+	    die "Can't resolve link $path: $!" unless defined $link_target;
+	    
+	    $link_target = File::Spec->catpath($vol, $dir, $link_target)
+                unless File::Spec->file_name_is_absolute($link_target);
+	    
+	    return fast_abs_path($link_target);
+	}
+	
+	return fast_abs_path(File::Spec->catpath($vol, $dir, '')) . '/' . $file;
+    }
+
     if (!CORE::chdir($path)) {
- 	require Carp;
- 	Carp::croak ("Cannot chdir to $path: $!");
+ 	_croak("Cannot chdir to $path: $!");
     }
     my $realpath = getcwd();
     if (! ((-d $cwd) && (CORE::chdir($cwd)))) {
- 	require Carp;
- 	Carp::croak ("Cannot chdir back to $cwd: $!");
+ 	_croak("Cannot chdir back to $cwd: $!");
     }
     $realpath;
 }
@@ -458,12 +597,11 @@ sub _vms_cwd {
 
 sub _vms_abs_path {
     return $ENV{'DEFAULT'} unless @_;
+
+    # may need to turn foo.dir into [.foo]
     my $path = VMS::Filespec::pathify($_[0]);
-    if (! defined $path)
-	{
-	require Carp;
-	Carp::croak("Invalid path name $_[0]")
-	}
+    $path = $_[0] unless defined $path;
+
     return VMS::Filespec::rmsexpand($path);
 }
 
@@ -525,68 +663,17 @@ sub _epoc_cwd {
     return $ENV{'PWD'};
 }
 
-{
-    no warnings;	# assignments trigger 'subroutine redefined' warning
 
-    if ($^O eq 'VMS') {
-        *cwd		= \&_vms_cwd;
-        *getcwd		= \&_vms_cwd;
-        *fastcwd	= \&_vms_cwd;
-        *fastgetcwd	= \&_vms_cwd;
-        *abs_path	= \&_vms_abs_path;
-        *fast_abs_path	= \&_vms_abs_path;
-    }
-    elsif ($^O eq 'NT' or $^O eq 'MSWin32') {
-        # We assume that &_NT_cwd is defined as an XSUB or in the core.
-        *cwd		= \&_NT_cwd;
-        *getcwd		= \&_NT_cwd;
-        *fastcwd	= \&_NT_cwd;
-        *fastgetcwd	= \&_NT_cwd;
-        *abs_path	= \&fast_abs_path;
-        *realpath   = \&fast_abs_path;
-    }
-    elsif ($^O eq 'os2') {
-        # sys_cwd may keep the builtin command
-        *cwd		= defined &sys_cwd ? \&sys_cwd : \&_os2_cwd;
-        *getcwd		= \&cwd;
-        *fastgetcwd	= \&cwd;
-        *fastcwd	= \&cwd;
-        *abs_path	= \&fast_abs_path;
-    }
-    elsif ($^O eq 'dos') {
-        *cwd		= \&_dos_cwd;
-        *getcwd		= \&_dos_cwd;
-        *fastgetcwd	= \&_dos_cwd;
-        *fastcwd	= \&_dos_cwd;
-        *abs_path	= \&fast_abs_path;
-    }
-    elsif ($^O =~ m/^(?:qnx|nto)$/ ) {
-        *cwd		= \&_qnx_cwd;
-        *getcwd		= \&_qnx_cwd;
-        *fastgetcwd	= \&_qnx_cwd;
-        *fastcwd	= \&_qnx_cwd;
-        *abs_path	= \&_qnx_abs_path;
-        *fast_abs_path	= \&_qnx_abs_path;
-    }
-    elsif ($^O eq 'cygwin') {
-        *getcwd	= \&cwd;
-        *fastgetcwd	= \&cwd;
-        *fastcwd	= \&cwd;
-        *abs_path	= \&fast_abs_path;
-    }
-    elsif ($^O eq 'epoc') {
-        *cwd            = \&_epoc_cwd;
-        *getcwd	        = \&_epoc_cwd;
-        *fastgetcwd	= \&_epoc_cwd;
-        *fastcwd	= \&_epoc_cwd;
-        *abs_path	= \&fast_abs_path;
-    }
-    elsif ($^O eq 'MacOS') {
-    	*getcwd     = \&cwd;
-    	*fastgetcwd = \&cwd;
-    	*fastcwd    = \&cwd;
-    	*abs_path   = \&fast_abs_path;
-    }
+# Now that all the base-level functions are set up, alias the
+# user-level functions to the right places
+
+if (exists $METHOD_MAP{$^O}) {
+  my $map = $METHOD_MAP{$^O};
+  foreach my $name (keys %$map) {
+    no warnings;	# assignments trigger 'subroutine redefined' warning
+    no strict 'refs';
+    *{$name} = \&{$map->{$name}};
+  }
 }
 
 

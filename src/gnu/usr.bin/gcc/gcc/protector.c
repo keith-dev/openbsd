@@ -936,6 +936,9 @@ arrange_var_order (block)
     
   while (block && TREE_CODE(block)==BLOCK)
     {
+      /* arrange the location of character arrays in depth first.  */
+      arrange_var_order (BLOCK_SUBBLOCKS (block));
+
       types = BLOCK_VARS (block);
 
       while (types)
@@ -945,7 +948,7 @@ arrange_var_order (block)
 	  if (! DECL_EXTERNAL (types) && ! TREE_STATIC (types)
 	      && TREE_CODE (types) == VAR_DECL
 	      && ! DECL_ARTIFICIAL (types)
-	      && ! DECL_INLINE (types)	/* don't sweep inlined string */
+	      && ! DECL_VAR_INLINE (types)	/* don't sweep inlined string */
 	      && DECL_RTL_SET_P (types)
 	      && GET_CODE (DECL_RTL (types)) == MEM
 	      && GET_MODE (DECL_RTL (types)) == BLKmode
@@ -990,8 +993,6 @@ arrange_var_order (block)
 
 	  types = TREE_CHAIN(types);
 	}
-
-      arrange_var_order (BLOCK_SUBBLOCKS (block));
 
       block = BLOCK_CHAIN (block);
     }
@@ -2306,6 +2307,8 @@ push_frame_of_insns (insn, push_size, boundary)
 		/* Copy the various flags, and other information.  */
 		memcpy (insn, first, sizeof (struct rtx_def) - sizeof (rtunion));
 		PATTERN (insn) = PATTERN (first);
+		INSN_CODE (insn) = INSN_CODE (first);
+		LOG_LINKS (insn) = LOG_LINKS (first);
 		REG_NOTES (insn) = REG_NOTES (first);
 
 		/* then remove the first insn of splitted insns.  */

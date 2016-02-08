@@ -1,4 +1,4 @@
-/*	$OpenBSD: nm.c,v 1.23 2004/01/14 04:23:26 millert Exp $	*/
+/*	$OpenBSD: nm.c,v 1.26 2004/07/11 07:08:46 mickey Exp $	*/
 /*	$NetBSD: nm.c,v 1.7 1996/01/14 23:04:03 pk Exp $	*/
 
 /*
@@ -42,7 +42,7 @@ static const char copyright[] =
 #if 0
 static const char sccsid[] = "@(#)nm.c	8.1 (Berkeley) 6/6/93";
 #endif
-static const char rcsid[] = "$OpenBSD: nm.c,v 1.23 2004/01/14 04:23:26 millert Exp $";
+static const char rcsid[] = "$OpenBSD: nm.c,v 1.26 2004/07/11 07:08:46 mickey Exp $";
 
 #include <sys/param.h>
 #include <sys/mman.h>
@@ -115,7 +115,7 @@ char	*symname(struct nlist *);
 int	process_file(int, const char *);
 int	show_archive(int, const char *, FILE *);
 int	show_file(int, int, const char *, FILE *fp, off_t, union hdr *);
-void 	print_symbol(const char *, struct nlist *, int);
+void	print_symbol(const char *, struct nlist *, int);
 int	elf_symload(const char *, FILE *, off_t, Elf_Ehdr *, Elf_Shdr *);
 
 #define	OPTSTRING_NM	"aABCegnoprsuvVw"
@@ -247,8 +247,9 @@ process_file(int count, const char *fname)
 	union hdr exec_head;
 	FILE *fp;
 	int retval;
+	size_t bytes;
 	char magic[SARMAG];
-    
+
 	if (!(fp = fopen(fname, "r"))) {
 		warn("cannot read %s", fname);
 		return(1);
@@ -256,15 +257,19 @@ process_file(int count, const char *fname)
 
 	if (!issize && count > 1)
 		(void)printf("\n%s:\n", fname);
-    
+
 	/*
 	 * first check whether this is an object file - read a object
 	 * header, and skip back to the beginning
 	 */
-	if (fread((char *)&exec_head, sizeof(exec_head), (size_t)1, fp) != 1) {
-		warnx("%s: bad format", fname);
-		(void)fclose(fp);
-		return(1);
+	bzero(&exec_head, sizeof(exec_head));
+	bytes = fread((char *)&exec_head, 1, sizeof(exec_head), fp);
+	if (bytes < sizeof(exec_head)) {
+		if (bytes < sizeof(exec_head.aout) || IS_ELF(exec_head.elf)) {
+			warnx("%s: bad format", fname);
+			(void)fclose(fp);
+			return(1);
+		}
 	}
 	rewind(fp);
 
@@ -317,7 +322,7 @@ mmbr_name(struct ar_hdr *arh, char **name, int baselen, int *namelen, FILE *fp)
 	 */
 	if ((arh->ar_name[0] == '#') &&
 	    (arh->ar_name[1] == '1') &&
-	    (arh->ar_name[2] == '/') && 
+	    (arh->ar_name[2] == '/') &&
 	    (isdigit(arh->ar_name[3]))) {
 		int len = atoi(&arh->ar_name[3]);
 
@@ -602,7 +607,7 @@ show_archive(int count, const char *fname, FILE *fp)
 		rval |= show_file(2, non_object_warning, name, fp, foff, &exec_head);
 		/*
 		 * skip to next archive object - it starts at the next
-	 	 * even byte boundary
+		 * even byte boundary
 		 */
 #define even(x) (((x) + 1) & ~1)
 skip:		if (fseeko(fp, last_ar_off + even(mmbrlen), SEEK_SET)) {
@@ -747,6 +752,7 @@ show_file(int count, int warn_fmt, const char *name, FILE *fp, off_t foff, union
 			free(names);
 			return(1);
 		}
+		stabsize = fix_long_order(stabsize, N_GETMID(head->aout));
 		MMAP(stab, stabsize, PROT_READ, MAP_PRIVATE|MAP_FILE,
 		    fileno(fp), staboff);
 		if (stab == MAP_FAILED) {
@@ -954,14 +960,14 @@ elf_symload(const char *name, FILE *fp, off_t foff, Elf_Ehdr *eh, Elf_Shdr *shdr
 			free(snames);
 		return (1);
 	}
-		
+
 	return (0);
 }
 
 char *
 symname(struct nlist *sym)
 {
-	if (demangle && sym->n_un.n_name[0] == '_') 
+	if (demangle && sym->n_un.n_name[0] == '_')
 		return sym->n_un.n_name + 1;
 	else
 		return sym->n_un.n_name;
@@ -983,9 +989,9 @@ print_symbol(const char *name, struct nlist *sym, int aout)
 	 */
 	if (!print_only_undefined_symbols) {
 		/* print symbol's value */
-		if (SYMBOL_TYPE(sym->n_type) == N_UNDF || 
-		    (show_extensions && SYMBOL_TYPE(sym->n_type) == N_INDR && 
-		     sym->n_value == 0))
+		if (SYMBOL_TYPE(sym->n_type) == N_UNDF ||
+		    (show_extensions && SYMBOL_TYPE(sym->n_type) == N_INDR &&
+		    sym->n_value == 0))
 			(void)printf("        ");
 		else
 			(void)printf("%08lx", sym->n_value);

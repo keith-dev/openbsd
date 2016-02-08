@@ -1,4 +1,4 @@
-.\"	$OpenBSD: wi.4tbl,v 1.42 2004/03/25 23:56:20 millert Exp $
+.\"	$OpenBSD: wi.4tbl,v 1.51 2004/09/06 20:16:01 millert Exp $
 .\"
 .\" Copyright (c) 1997, 1998, 1999
 .\"	Bill Paul <wpaul@ctr.columbia.edu>. All rights reserved.
@@ -132,7 +132,7 @@ driver:
 .Pp
 .in +\n(dIu
 .TS
-tab (:) ;
+tab (:) nokeep ;
 l l l
 _ _ _
 l l l .
@@ -143,8 +143,12 @@ Acer Warplink USB-400:Prism-3:USB
 Actiontec HWC01170:Prism-2.5:PCMCIA
 Actiontec HWU01170:Prism-3:USB
 Addtron AWP-100:Prism-2:PCMCIA
-Agere Orinoco:Hermes:PCMCIA
+Agere ORiNOCO:Hermes:PCMCIA
+Apacer Wireless Steno MB112:Prism-3:USB
 Apple Airport:Hermes:macobio
+Adaptec AWN-8030:Prism-2.5:PCMCIA
+Asus SpaceLink WL-100:Prism-2.5:PCMCIA
+Belkin F5D6020 (version 1 only):Prism-2:PCMCIA
 Buffalo AirStation:Prism-2:PCMCIA
 Buffalo AirStation:Prism-2:CF
 Cabletron RoamAbout:Hermes:PCMCIA
@@ -155,8 +159,8 @@ Corega PCCA-11:Prism-2:PCMCIA
 Corega PCCB-11:Prism-2:PCMCIA
 Corega CGWLPCIA11:Prism-2:PCI
 Corega WLUSB-11:Prism-3:USB
-Dlink DWL520:Prism-2.5:PCI
-Dlink DWL650:Prism-2.5:PCMCIA
+Dlink DWL520 (rev A and B only):Prism-2.5:PCI
+Dlink DWL650 (rev A1-J3 only):Prism-2.5:PCMCIA
 ELSA XI300:Prism-2:PCMCIA
 ELSA XI325:Prism-2.5:PCMCIA
 ELSA XI325H:Prism-2.5:PCMCIA
@@ -181,6 +185,7 @@ Linksys WUSB12:Prism-3:USB
 Lucent WaveLAN:Hermes:PCMCIA
 Melco WLI-USB-KS11G:Prism-3:USB
 MicroSoft MN510:Prism-3:USB
+MicroSoft MN520:Prism-2.5:PCMCIA
 NANOSPEED ROOT-RZ2000:Prism-2:PCMCIA
 NDC/Sohoware NCP130:Prism-2:PCI
 NEC CMZ-RT-WP:Prism-2:PCMCIA
@@ -341,6 +346,7 @@ command.
 .Sh SEE ALSO
 .Xr an 4 ,
 .Xr arp 4 ,
+.Xr atw 4 ,
 .Xr ifmedia 4 ,
 .Xr intro 4 ,
 .Xr macobio 4 ,
@@ -395,7 +401,7 @@ Software WEP is currently only supported in HostAP and BSS modes.
 Furthermore, Software WEP is currently incapable of decrypting
 fragmented frames.
 Lucent-based cards using firmware 8.10 and above fragment encrypted
-frames send at 11Mbps.
+frames sent at 11Mbps.
 To work around this, Lucent clients with this firmware revision
 connecting to a HostAP server should use a 2Mbps connection or
 upgrade their firmware to version 8.72.

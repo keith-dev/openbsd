@@ -11,7 +11,9 @@ use strict;
 use warnings;
 use Carp;
 
-our $VERSION = '0.25';
+no warnings 'utf8';
+
+our $VERSION = '0.30';
 our $PACKAGE = __PACKAGE__;
 
 require Exporter;
@@ -115,6 +117,8 @@ Unicode::Normalize - Unicode Normalization Forms
 
 =head1 SYNOPSIS
 
+(1) using function names exported by default:
+
   use Unicode::Normalize;
 
   $NFD_string  = NFD($string);  # Normalization Form D
@@ -122,7 +126,7 @@ Unicode::Normalize - Unicode Normalization Forms
   $NFKD_string = NFKD($string); # Normalization Form KD
   $NFKC_string = NFKC($string); # Normalization Form KC
 
-   or
+(2) using function names exported on request:
 
   use Unicode::Normalize 'normalize';
 
@@ -180,7 +184,7 @@ each other. C<FCD()> will return one of these equivalent forms.
 
 returns the FCC form ("Fast C Contiguous"; cf. UTN #5).
 
-Note: FCD is unique, as well as four normalization forms (NF*).
+Note: FCC is unique, as well as four normalization forms (NF*).
 
 =item C<$normalized_string = normalize($form_name, $string)>
 
@@ -277,7 +281,7 @@ returns C<YES> (C<1>) or C<NO> (C<empty string>).
 
 returns C<YES> (C<1>), C<NO> (C<empty string>), or C<MAYBE> (C<undef>).
 
-If a string is not in C<FCD>, it must not be in <FCC>.
+If a string is not in FCD, it must not be in FCC.
 So C<checkFCC($not_FCD_string)> should return C<NO>.
 
 =item C<$result = check($form_name, $string)>
@@ -380,11 +384,11 @@ C<normalize> and other some functions: on request.
 
 =head1 AUTHOR
 
-SADAHIRO Tomoyuki, <SADAHIRO@cpan.org>
+SADAHIRO Tomoyuki <SADAHIRO@cpan.org>
 
   http://homepage1.nifty.com/nomenclator/perl/
 
-  Copyright(C) 2001-2003, SADAHIRO Tomoyuki. Japan. All rights reserved.
+  Copyright(C) 2001-2004, SADAHIRO Tomoyuki. Japan. All rights reserved.
 
   This module is free software; you can redistribute it
   and/or modify it under the same terms as Perl itself.
@@ -393,7 +397,7 @@ SADAHIRO Tomoyuki, <SADAHIRO@cpan.org>
 
 =over 4
 
-=item http://www.unicode.org/unicode/reports/tr15/
+=item http://www.unicode.org/reports/tr15/
 
 Unicode Normalization Forms - UAX #15
 

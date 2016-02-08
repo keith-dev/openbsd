@@ -1,4 +1,4 @@
-/*	$OpenBSD: rde_decide.c,v 1.33 2004/03/11 14:22:23 claudio Exp $ */
+/*	$OpenBSD: rde_decide.c,v 1.38 2004/08/06 12:04:08 claudio Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Claudio Jeker <claudio@openbsd.org>
@@ -23,7 +23,6 @@
 #include <string.h>
 
 #include "bgpd.h"
-#include "ensure.h"
 #include "rde.h"
 
 int	prefix_cmp(struct prefix *, struct prefix *);
@@ -112,42 +111,37 @@ prefix_cmp(struct prefix *p1, struct prefix *p2)
 {
 	struct rde_aspath	*asp1, *asp2;
 
-	ENSURE(p1 != NULL);
-
-	/* p2 is allowed to be NULL */
+	if (p1 == NULL)
+		return (-1);
 	if (p2 == NULL)
 		return (1);
 
 	asp1 = p1->aspath;
 	asp2 = p2->aspath;
-	/* 1. check if prefix is eligible a.k.a reachable */
-	ENSURE(asp2->nexthop != NULL && asp1->nexthop != NULL);
 
-	if (asp2->nexthop->state != NEXTHOP_REACH)
+	/* 1. check if prefix is eligible a.k.a reachable */
+	if (asp2->nexthop != NULL && asp2->nexthop->state != NEXTHOP_REACH)
 		return (1);
-	if (asp1->nexthop->state != NEXTHOP_REACH)
+	if (asp1->nexthop != NULL && asp1->nexthop->state != NEXTHOP_REACH)
 		return (-1);
 
 	/* 2. preference of prefix, bigger is better */
-	if ((asp1->flags.lpref - asp2->flags.lpref) != 0)
-		return (asp1->flags.lpref - asp2->flags.lpref);
+	if ((asp1->lpref - asp2->lpref) != 0)
+		return (asp1->lpref - asp2->lpref);
 
 	/* 3. aspath count, the shorter the better */
-	if ((asp2->flags.aspath->hdr.as_cnt -
-	    asp1->flags.aspath->hdr.as_cnt) != 0)
-		return (asp2->flags.aspath->hdr.as_cnt -
-		    asp1->flags.aspath->hdr.as_cnt);
+	if ((asp2->aspath->ascnt - asp1->aspath->ascnt) != 0)
+		return (asp2->aspath->ascnt - asp1->aspath->ascnt);
 
 	/* 4. origin, the lower the better */
-	if ((asp2->flags.origin - asp1->flags.origin) != 0)
-		return (asp2->flags.origin - asp1->flags.origin);
+	if ((asp2->origin - asp1->origin) != 0)
+		return (asp2->origin - asp1->origin);
 
 	/* 5. MED decision, only comparable between the same neighboring AS */
-	if (aspath_neighbor(asp1->flags.aspath) ==
-	    aspath_neighbor(asp2->flags.aspath))
-		/* the bigger, the better */
-		if ((asp1->flags.med - asp2->flags.med) != 0)
-			return (asp1->flags.med - asp2->flags.med);
+	if (aspath_neighbor(asp1->aspath) == aspath_neighbor(asp2->aspath))
+		/* lowest value wins */
+		if ((asp2->med - asp1->med) != 0)
+			return (asp2->med - asp1->med);
 
 	/*
 	 * 6. EBGP is cooler than IBGP
@@ -163,18 +157,19 @@ prefix_cmp(struct prefix *p1, struct prefix *p2)
 
 	/* 7. nexthop costs. NOT YET -> IGNORE */
 
-	/* 8. lowest BGP Id wins */
-	if ((asp2->peer->remote_bgpid - asp1->peer->remote_bgpid) != 0)
-		return (asp2->peer->remote_bgpid - asp1->peer->remote_bgpid);
+	/* 8. older route (more stable) wins */
+	if ((p2->lastchange - p1->lastchange) != 0)
+		return (p2->lastchange - p1->lastchange);
 
-	/* 9. lowest peer address wins */
-	if (memcmp(&asp1->peer->conf.remote_addr,
-	    &asp2->peer->conf.remote_addr,
-	    sizeof(asp1->peer->conf.remote_addr)) != 0)
-		return (memcmp(&asp1->peer->conf.remote_addr,
-		    &asp2->peer->conf.remote_addr,
-		    sizeof(asp1->peer->conf.remote_addr)));
+	/* 9. lowest BGP Id wins */
+	if ((p2->peer->remote_bgpid - p1->peer->remote_bgpid) != 0)
+		return (p2->peer->remote_bgpid - p1->peer->remote_bgpid);
 
+	/* 10. lowest peer address wins (IPv4 is better than IPv6) */
+	if (memcmp(&p1->peer->remote_addr, &p2->peer->remote_addr,
+	    sizeof(p1->peer->remote_addr)) != 0)
+		return (-memcmp(&p1->peer->remote_addr, &p2->peer->remote_addr,
+		    sizeof(p1->peer->remote_addr)));
 
 	fatalx("Uh, oh a politician in the decision process");
 	/* NOTREACHED */
@@ -218,11 +213,8 @@ prefix_evaluate(struct prefix *p, struct pt_entry *pte)
 	xp = LIST_FIRST(&pte->prefix_h);
 	if (pte->active != xp) {
 		/* need to generate an update */
-		if (pte->active != NULL) {
-			ENSURE(pte->active->aspath != NULL);
-			ENSURE(pte->active->aspath->active_cnt > 0);
+		if (pte->active != NULL)
 			pte->active->aspath->active_cnt--;
-		}
 
 		/*
 		 * Send update with remove for pte->active and add for xp
@@ -234,14 +226,12 @@ prefix_evaluate(struct prefix *p, struct pt_entry *pte)
 		rde_generate_updates(xp, pte->active);
 		rde_send_kroute(xp, pte->active);
 
-		if (xp == NULL || xp->aspath->nexthop == NULL ||
-		    xp->aspath->nexthop->state != NEXTHOP_REACH)
+		if (xp == NULL || (xp->aspath->nexthop != NULL &&
+		    xp->aspath->nexthop->state != NEXTHOP_REACH))
 			pte->active = NULL;
 		else {
 			pte->active = xp;
 			pte->active->aspath->active_cnt++;
-			ENSURE(pte->active->aspath->active_cnt <=
-			    pte->active->aspath->prefix_cnt);
 		}
 	}
 }

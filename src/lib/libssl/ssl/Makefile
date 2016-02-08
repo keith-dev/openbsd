@@ -1,4 +1,4 @@
-# $OpenBSD: Makefile,v 1.17 2003/06/02 08:45:58 markus Exp $
+# $OpenBSD: Makefile,v 1.19 2004/08/06 22:41:41 pefo Exp $
 
 LIB=	ssl
 
@@ -9,9 +9,6 @@ LSSL_SRC= ${.CURDIR}/../${SSLEAYDIST}/ssl
 .if ${MACHINE_ARCH} == "i386"
 CFLAGS+= -DL_ENDIAN -DBN_ASM
 .else
-.if ${MACHINE_ARCH} == "mips"
-CFLAGS+= -DL_ENDIAN
-.else
 .if ${MACHINE_ARCH} == "vax"
 CFLAGS+= -DL_ENDIAN
 .else
@@ -19,7 +16,6 @@ CFLAGS+= -DL_ENDIAN
 # no ENDIAN stuff defined for alpha
 .else
 CFLAGS+= -DB_ENDIAN
-.endif
 .endif
 .endif 
 .endif
@@ -31,7 +27,7 @@ CFLAGS+= -I${.CURDIR}/../${SSLEAYDIST}
 
 SRCS=	bio_ssl.c s2_clnt.c s3_both.c s3_srvr.c ssl_err2.c ssl_txt.c	\
 	t1_srvr.c s23_clnt.c s2_enc.c s3_clnt.c ssl_algs.c ssl_lib.c	\
-	ssltest.c s23_lib.c s2_lib.c s3_enc.c ssl_asn1.c ssl_rsa.c	\
+	s23_lib.c s2_lib.c s3_enc.c ssl_asn1.c ssl_rsa.c	\
 	t1_clnt.c s23_meth.c s2_meth.c s3_lib.c ssl_cert.c ssl_sess.c	\
 	t1_enc.c s23_pkt.c s2_pkt.c s3_meth.c ssl_ciph.c ssl_stat.c	\
 	t1_lib.c s23_srvr.c s2_srvr.c s3_pkt.c ssl_err.c \

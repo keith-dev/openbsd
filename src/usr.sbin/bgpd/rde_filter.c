@@ -1,4 +1,4 @@
-/*	$OpenBSD: rde_filter.c,v 1.7 2004/03/11 17:12:51 claudio Exp $ */
+/*	$OpenBSD: rde_filter.c,v 1.18 2004/08/10 13:02:08 claudio Exp $ */
 
 /*
  * Copyright (c) 2004 Claudio Jeker <claudio@openbsd.org>
@@ -18,22 +18,24 @@
 #include <sys/types.h>
 #include <sys/queue.h>
 
+#include <string.h>
+
 #include "bgpd.h"
 #include "rde.h"
 
 extern struct filter_head	*rules_l;	/* XXX ugly */
 
-int	rde_filter_match(struct filter_rule *, struct attr_flags *,
+int	rde_filter_match(struct filter_rule *, struct rde_aspath *,
 	    struct bgpd_addr *, u_int8_t);
 
 enum filter_actions
-rde_filter(struct rde_peer *peer, struct attr_flags *attrs,
+rde_filter(struct rde_peer *peer, struct rde_aspath *asp,
     struct bgpd_addr *prefix, u_int8_t prefixlen, enum directions dir)
 {
 	struct filter_rule	*f;
 	enum filter_actions	 action = ACTION_ALLOW; /* default allow */
 
-	TAILQ_FOREACH(f, rules_l, entries) {
+	TAILQ_FOREACH(f, rules_l, entry) {
 		if (dir != f->dir)
 			continue;
 		if (f->peer.groupid != 0 &&
@@ -42,8 +44,8 @@ rde_filter(struct rde_peer *peer, struct attr_flags *attrs,
 		if (f->peer.peerid != 0 &&
 		    f->peer.peerid != peer->conf.id)
 			continue;
-		if (rde_filter_match(f, attrs, prefix, prefixlen)) {
-			rde_apply_set(attrs, &f->set);
+		if (rde_filter_match(f, asp, prefix, prefixlen)) {
+			rde_apply_set(asp, &f->set, prefix->af);
 			if (f->action != ACTION_NONE)
 				action = f->action;
 			if (f->quick)
@@ -54,56 +56,64 @@ rde_filter(struct rde_peer *peer, struct attr_flags *attrs,
 }
 
 void
-rde_apply_set(struct attr_flags *attrs, struct filter_set *set)
+rde_apply_set(struct rde_aspath *asp, struct filter_set *set, sa_family_t af)
 {
-	if (attrs == NULL)
+	struct aspath	*new;
+	u_int16_t	 as;
+
+	if (asp == NULL)
 		return;
 
 	if (set->flags & SET_LOCALPREF)
-		attrs->lpref = set->localpref;
-	if (set->flags & SET_MED)
-		attrs->med = set->med;
-	if (set->flags & SET_NEXTHOP)
-		attrs->nexthop = set->nexthop;
+		asp->lpref = set->localpref;
+	if (set->flags & SET_MED) {
+		asp->flags |= F_ATTR_MED | F_ATTR_MED_ANNOUNCE;
+		asp->med = set->med;
+	}
+
+	nexthop_modify(asp, &set->nexthop, set->flags, af);
+
 	if (set->flags & SET_PREPEND) {
-		/*
-		 * The actual prepending is done afterwards because
-		 * This could overflow but somebody that uses that many
-		 * prepends is loony and needs professional help.
-		 */
-		attrs->aspath->hdr.prepend += set->prepend;
-		attrs->aspath->hdr.as_cnt += set->prepend;
+		as = rde_local_as();
+		new = aspath_prepend(asp->aspath, as, set->prepend);
+		aspath_put(asp->aspath);
+		asp->aspath = new;
+	}
+	if (set->flags & SET_PFTABLE)
+		strlcpy(asp->pftable, set->pftable, sizeof(asp->pftable));
+	if (set->flags & SET_COMMUNITY) {
+		struct attr *a;
+
+		if ((a = attr_optget(asp, ATTR_COMMUNITIES)) == NULL) {
+			attr_optadd(asp, ATTR_OPTIONAL|ATTR_TRANSITIVE,
+			    ATTR_COMMUNITIES, NULL, 0);
+			if ((a = attr_optget(asp, ATTR_COMMUNITIES)) == NULL)
+				fatalx("internal community bug");
+		}
+		community_set(a, set->community.as, set->community.type);
 	}
 }
 
 int
-rde_filter_match(struct filter_rule *f, struct attr_flags *attrs,
+rde_filter_match(struct filter_rule *f, struct rde_aspath *asp,
     struct bgpd_addr *prefix, u_int8_t plen)
 {
-	in_addr_t	mask;
 
-	if (attrs != NULL && f->match.as.type != AS_NONE)
-		if (aspath_match(attrs->aspath, f->match.as.type,
+	if (asp != NULL && f->match.as.type != AS_NONE)
+		if (aspath_match(asp->aspath, f->match.as.type,
 		    f->match.as.as) == 0)
 			return (0);
 
-	if (attrs != NULL && f->match.community.as != 0)
-		if (rde_filter_community(attrs, f->match.community.as,
+	if (asp != NULL && f->match.community.as != 0)
+		if (rde_filter_community(asp, f->match.community.as,
 		    f->match.community.type) == 0)
 			return (0);
 
 	if (f->match.prefix.addr.af != 0 &&
 	    f->match.prefix.addr.af == prefix->af) {
-		switch (f->match.prefix.addr.af) {
-		case AF_INET:
-			mask = htonl(0xffffffff << (32 - f->match.prefix.len));
-			if ((prefix->v4.s_addr & mask) !=
-			    (f->match.prefix.addr.v4.s_addr & mask))
-				return (0);
-			break;
-		default:
-			fatalx("rde_filter_match: unsupported address family");
-		}
+		if (prefix_compare(prefix, &f->match.prefix.addr,
+		    f->match.prefix.len))
+			return (0);
 
 		/* test prefixlen stuff too */
 		switch (f->match.prefixlen.op) {
@@ -167,11 +177,11 @@ rde_filter_match(struct filter_rule *f, struct attr_flags *attrs,
 }
 
 int
-rde_filter_community(struct attr_flags *attr, int as, int type)
+rde_filter_community(struct rde_aspath *asp, int as, int type)
 {
 	struct attr	*a;
 
-	a = attr_optget(attr, ATTR_COMMUNITIES);
+	a = attr_optget(asp, ATTR_COMMUNITIES);
 	if (a == NULL)
 		/* no communities, no match */
 		return (0);

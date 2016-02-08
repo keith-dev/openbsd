@@ -1,4 +1,4 @@
-/*	$OpenBSD: options.c,v 1.7 2004/03/02 18:49:21 deraadt Exp $	*/
+/*	$OpenBSD: options.c,v 1.11 2004/05/06 22:29:15 deraadt Exp $	*/
 
 /* DHCP options parsing and reassembly. */
 
@@ -102,10 +102,8 @@ void
 parse_option_buffer(struct packet *packet,
     unsigned char *buffer, int length)
 {
-	unsigned char *s, *t;
-	unsigned char *end = buffer + length;
-	int len;
-	int code;
+	unsigned char *s, *t, *end = buffer + length;
+	int len, code;
 
 	for (s = buffer; *s != DHO_END && s < end; ) {
 		code = s[0];
@@ -137,17 +135,17 @@ parse_option_buffer(struct packet *packet,
 		if (s + len + 2 > end) {
 		    bogus:
 			bad_options++;
-			warn("option %s (%d) %s.",
+			warning("option %s (%d) %s.",
 			    dhcp_options[code].name, len,
 			    "larger than buffer");
 			if (bad_options == bad_options_max) {
 				packet->options_valid = 1;
 				bad_options = 0;
-				warn("Many bogus options seen in offers.");
-				warn("Taking this offer in spite of bogus");
-				warn("options - hope for the best!");
+				warning("Many bogus options seen in offers. "
+				    "Taking this offer in spite of bogus "
+				    "options - hope for the best!");
 			} else {
-				warn("rejecting bogus offer.");
+				warning("rejecting bogus offer.");
 				packet->options_valid = 0;
 			}
 			return;
@@ -157,7 +155,7 @@ parse_option_buffer(struct packet *packet,
 		 * space for it and copy it there.
 		 */
 		if (!packet->options[code].data) {
-			if (!(t = dmalloc(len + 1, "parse_option_buffer")))
+			if (!(t = calloc(1, len + 1)))
 				error("Can't allocate storage for option %s.",
 				    dhcp_options[code].name);
 			/*
@@ -174,8 +172,7 @@ parse_option_buffer(struct packet *packet,
 			 * we last saw.   This is really only required
 			 * for clients, but what the heck...
 			 */
-			t = dmalloc(len + packet->options[code].len + 1,
-			    "parse_option_buffer");
+			t = calloc(1, len + packet->options[code].len + 1);
 			if (!t)
 				error("Can't expand storage for option %s.",
 				    dhcp_options[code].name);
@@ -185,8 +182,7 @@ parse_option_buffer(struct packet *packet,
 				&s[2], len);
 			packet->options[code].len += len;
 			t[packet->options[code].len] = 0;
-			dfree(packet->options[code].data,
-			    "parse_option_buffer");
+			free(packet->options[code].data);
 			packet->options[code].data = t;
 		}
 		s += len + 2;
@@ -205,13 +201,9 @@ cons_options(struct packet *inpacket, struct dhcp_packet *outpacket,
     int overload, /* Overload flags that may be set. */
     int terminate, int bootpp, u_int8_t *prl, int prl_len)
 {
-	unsigned char priority_list[300];
-	int priority_len;
-	unsigned char buffer[4096];	/* Really big buffer... */
-	int main_buffer_size;
-	int mainbufix, bufix;
-	int option_size;
-	int length;
+	unsigned char priority_list[300], buffer[4096];
+	int priority_len, main_buffer_size, mainbufix, bufix;
+	int option_size, length;
 
 	/*
 	 * If the client has provided a maximum DHCP message size, use
@@ -352,11 +344,7 @@ store_options(unsigned char *buffer, int buflen, struct tree_cache **options,
     unsigned char *priority_list, int priority_len, int first_cutoff,
     int second_cutoff, int terminate)
 {
-	int bufix = 0;
-	int option_stored[256];
-	int i;
-	int ix;
-	int tto;
+	int bufix = 0, option_stored[256], i, ix, tto;
 
 	/* Zero out the stored-lengths array. */
 	memset(option_stored, 0, sizeof(option_stored));
@@ -388,10 +376,6 @@ store_options(unsigned char *buffer, int buflen, struct tree_cache **options,
 		if (option_stored[code])
 			continue;
 		option_stored[code] = 1;
-
-		/* Find the value of the option... */
-		if (!tree_evaluate(options[code]))
-			continue;
 
 		/* We should now have a constant length for the option. */
 		length = options[code]->len;
@@ -465,17 +449,12 @@ pretty_print_option(unsigned int code, unsigned char *data, int len,
     int emit_commas, int emit_quotes)
 {
 	static char optbuf[32768]; /* XXX */
-	int hunksize = 0;
-	int numhunk = -1;
-	int numelem = 0;
-	char fmtbuf[32];
-	int i, j, k;
-	char *op = optbuf;
-	int opleft = sizeof(optbuf);
+	int hunksize = 0, numhunk = -1, numelem = 0;
+	char fmtbuf[32], *op = optbuf;
+	int i, j, k, opleft = sizeof(optbuf);
 	unsigned char *dp = data;
 	struct in_addr foo;
 	char comma;
-
 
 	/* Code should be between 0 and 255. */
 	if (code > 255)
@@ -489,7 +468,7 @@ pretty_print_option(unsigned int code, unsigned char *data, int len,
 	/* Figure out the size of the data. */
 	for (i = 0; dhcp_options[code].format[i]; i++) {
 		if (!numhunk) {
-			warn("%s: Excess information in format string: %s",
+			warning("%s: Excess information in format string: %s",
 			    dhcp_options[code].name,
 			    &(dhcp_options[code].format[i]));
 			break;
@@ -540,7 +519,7 @@ pretty_print_option(unsigned int code, unsigned char *data, int len,
 		case 'e':
 			break;
 		default:
-			warn("%s: garbage in format string: %s",
+			warning("%s: garbage in format string: %s",
 			    dhcp_options[code].name,
 			    &(dhcp_options[code].format[i]));
 			break;
@@ -549,13 +528,13 @@ pretty_print_option(unsigned int code, unsigned char *data, int len,
 
 	/* Check for too few bytes... */
 	if (hunksize > len) {
-		warn("%s: expecting at least %d bytes; got %d",
+		warning("%s: expecting at least %d bytes; got %d",
 		    dhcp_options[code].name, hunksize, len);
 		return ("<error>");
 	}
 	/* Check for too many bytes... */
 	if (numhunk == -1 && hunksize < len)
-		warn("%s: %d extra bytes",
+		warning("%s: %d extra bytes",
 		    dhcp_options[code].name, len - hunksize);
 
 	/* If this is an array, compute its size. */
@@ -563,7 +542,7 @@ pretty_print_option(unsigned int code, unsigned char *data, int len,
 		numhunk = len / hunksize;
 	/* See if we got an exact number of hunks. */
 	if (numhunk > 0 && numhunk * hunksize < len)
-		warn("%s: %d extra bytes at end of array",
+		warning("%s: %d extra bytes at end of array",
 		    dhcp_options[code].name, len - numhunk * hunksize);
 
 	/* A one-hunk array prints the same as a single hunk. */
@@ -677,7 +656,7 @@ pretty_print_option(unsigned int code, unsigned char *data, int len,
 				opleft -= opcount;
 				break;
 			default:
-				warn("Unexpected format code %c", fmtbuf[j]);
+				warning("Unexpected format code %c", fmtbuf[j]);
 			}
 			op += strlen(op);
 			opleft -= strlen(op);
@@ -698,7 +677,7 @@ pretty_print_option(unsigned int code, unsigned char *data, int len,
 	}
 	return (optbuf);
  toobig:
-	warn("dhcp option too large");
+	warning("dhcp option too large");
 	return ("<error>");
 }
 
@@ -734,5 +713,5 @@ do_packet(struct interface_info *interface, struct dhcp_packet *packet,
 	/* Free the data associated with the options. */
 	for (i = 0; i < 256; i++)
 		if (tp.options[i].len && tp.options[i].data)
-			dfree(tp.options[i].data, "do_packet");
+			free(tp.options[i].data);
 }

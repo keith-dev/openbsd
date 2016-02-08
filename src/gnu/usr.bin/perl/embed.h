@@ -2,7 +2,7 @@
  *    embed.h
  *
  *    Copyright (C) 1993, 1994, 1995, 1996, 1997, 1998, 1999,
- *    2000, 2001, 2002, 2003, by Larry Wall and others
+ *    2000, 2001, 2002, 2003, 2004, by Larry Wall and others
  *
  *    You may distribute under the terms of either the GNU General Public
  *    License or the Artistic License, as specified in the README file.
@@ -1339,9 +1339,6 @@
 #define share_hek_flags		S_share_hek_flags
 #endif
 #ifdef PERL_CORE
-#define hv_fetch_flags		S_hv_fetch_flags
-#endif
-#ifdef PERL_CORE
 #define hv_notallowed		S_hv_notallowed
 #endif
 #endif
@@ -1556,6 +1553,9 @@
 #endif
 #ifdef PERL_CORE
 #define doparseform		S_doparseform
+#endif
+#ifdef PERL_CORE
+#define num_overflow		S_num_overflow
 #endif
 #ifdef PERL_CORE
 #define dopoptoeval		S_dopoptoeval
@@ -2171,6 +2171,19 @@
 #ifdef PERL_CORE
 #define get_debug_opts		Perl_get_debug_opts
 #endif
+#endif
+#define hv_clear_placeholders	Perl_hv_clear_placeholders
+#if defined(PERL_IN_HV_C) || defined(PERL_DECL_PROT)
+#ifdef PERL_CORE
+#define hv_delete_common	S_hv_delete_common
+#endif
+#ifdef PERL_CORE
+#define hv_fetch_common		S_hv_fetch_common
+#endif
+#endif
+#define hv_scalar		Perl_hv_scalar
+#ifdef PERL_CORE
+#define magic_scalarpack	Perl_magic_scalarpack
 #endif
 #define ck_anoncode		Perl_ck_anoncode
 #define ck_bitop		Perl_ck_bitop
@@ -3844,9 +3857,6 @@
 #define share_hek_flags(a,b,c,d)	S_share_hek_flags(aTHX_ a,b,c,d)
 #endif
 #ifdef PERL_CORE
-#define hv_fetch_flags(a,b,c,d,e)	S_hv_fetch_flags(aTHX_ a,b,c,d,e)
-#endif
-#ifdef PERL_CORE
 #define hv_notallowed(a,b,c,d)	S_hv_notallowed(aTHX_ a,b,c,d)
 #endif
 #endif
@@ -3962,13 +3972,13 @@
 #define nuke_stacks()		S_nuke_stacks(aTHX)
 #endif
 #ifdef PERL_CORE
-#define open_script(a,b,c,d)	S_open_script(aTHX_ a,b,c,d)
+#define open_script(a,b,c)	S_open_script(aTHX_ a,b,c)
 #endif
 #ifdef PERL_CORE
 #define usage(a)		S_usage(aTHX_ a)
 #endif
 #ifdef PERL_CORE
-#define validate_suid(a,b,c)	S_validate_suid(aTHX_ a,b,c)
+#define validate_suid(a,b)	S_validate_suid(aTHX_ a,b)
 #endif
 #  if defined(IAMSUID)
 #ifdef PERL_CORE
@@ -4061,6 +4071,9 @@
 #endif
 #ifdef PERL_CORE
 #define doparseform(a)		S_doparseform(aTHX_ a)
+#endif
+#ifdef PERL_CORE
+#define num_overflow		S_num_overflow
 #endif
 #ifdef PERL_CORE
 #define dopoptoeval(a)		S_dopoptoeval(aTHX_ a)
@@ -4392,7 +4405,7 @@
 #define not_a_number(a)		S_not_a_number(aTHX_ a)
 #endif
 #ifdef PERL_CORE
-#define visit(a)		S_visit(aTHX_ a)
+#define visit(a,b,c)		S_visit(aTHX_ a,b,c)
 #endif
 #ifdef PERL_CORE
 #define sv_add_backref(a,b)	S_sv_add_backref(aTHX_ a,b)
@@ -4675,6 +4688,19 @@
 #ifdef PERL_CORE
 #define get_debug_opts(a)	Perl_get_debug_opts(aTHX_ a)
 #endif
+#endif
+#define hv_clear_placeholders(a)	Perl_hv_clear_placeholders(aTHX_ a)
+#if defined(PERL_IN_HV_C) || defined(PERL_DECL_PROT)
+#ifdef PERL_CORE
+#define hv_delete_common(a,b,c,d,e,f,g)	S_hv_delete_common(aTHX_ a,b,c,d,e,f,g)
+#endif
+#ifdef PERL_CORE
+#define hv_fetch_common(a,b,c,d,e,f,g,h)	S_hv_fetch_common(aTHX_ a,b,c,d,e,f,g,h)
+#endif
+#endif
+#define hv_scalar(a)		Perl_hv_scalar(aTHX_ a)
+#ifdef PERL_CORE
+#define magic_scalarpack(a,b)	Perl_magic_scalarpack(aTHX_ a,b)
 #endif
 #define ck_anoncode(a)		Perl_ck_anoncode(aTHX_ a)
 #define ck_bitop(a)		Perl_ck_bitop(aTHX_ a)

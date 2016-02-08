@@ -1,4 +1,4 @@
-/*	$OpenBSD: log.h,v 1.1 2004/01/04 02:13:52 henning Exp $ */
+/*	$OpenBSD: log.h,v 1.3 2004/05/21 16:01:14 claudio Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -16,7 +16,7 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-static const char *statenames[] = {
+static const char * const statenames[] = {
 	"None",
 	"Idle",
 	"Connect",
@@ -24,4 +24,70 @@ static const char *statenames[] = {
 	"OpenSent",
 	"OpenConfirm",
 	"Established"
+};
+
+static const char * const eventnames[] = {
+	"None",
+	"Start",
+	"Stop",
+	"Connection opened",
+	"Connection closed",
+	"Connection open failed",
+	"Fatal error",
+	"ConnectRetryTimer expired",
+	"HoldTimer expired",
+	"KeepaliveTimer expired",
+	"OPEN message received",
+	"KEEPALIVE message received",
+	"UPDATE message received",
+	"NOTIFICATION received"
+};
+
+static const char * const errnames[] = {
+	"none",
+	"Header error",
+	"error in OPEN message",
+	"error in UPDATE message",
+	"HoldTimer expired",
+	"Finite State Machine error",
+	"Cease"
+};
+
+static const char * const suberr_header_names[] = {
+	"none",
+	"synchronization error",
+	"wrong length",
+	"unknown message type"
+};
+
+static const char * const suberr_open_names[] = {
+	"none",
+	"version mismatch",
+	"AS unacceptable",
+	"BGPID invalid",
+	"optional parameter error",
+	"Authentication error",
+	"unacceptable holdtime",
+	"unsupported capability"
+};
+
+static const char * const suberr_update_names[] = {
+	"none",
+	"attribute list error",
+	"unknown well-known attribute",
+	"well-known attribute missing",
+	"attribute flags error",
+	"attribute length wrong",
+	"origin unacceptable",
+	"loop detected",
+	"nexthop unacceptable",
+	"optional attribute error",
+	"network unacceptable",
+	"AS-Path unacceptable"
+};
+
+static const char * const procnames[] = {
+	"parent",
+	"SE",
+	"RDE"
 };

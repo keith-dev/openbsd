@@ -1,4 +1,4 @@
-/*	$OpenBSD: rtld_machine.c,v 1.31 2003/09/04 19:37:08 drahn Exp $ */
+/*	$OpenBSD: rtld_machine.c,v 1.34 2004/05/25 21:42:48 mickey Exp $ */
 
 /*
  * Copyright (c) 1999 Dale Rahn
@@ -76,17 +76,6 @@
 #include "syscall.h"
 #include "archdep.h"
 #include "resolve.h"
-
-void
-_dl_bcopy(const void *src, void *dest, int size)
-{
-	const unsigned char *psrc = src;
-	unsigned char *pdest = dest;
-	int i;
-
-	for (i = 0; i < size; i++)
-		pdest[i] = psrc[i];
-}
 
 /*
  * The following table holds for each relocation type:
@@ -274,7 +263,7 @@ _dl_md_reloc(elf_object_t *object, int rel, int relasz)
 				this = NULL;
 				ooff = _dl_find_symbol_bysym(object,
 				    ELF_R_SYM(relas->r_info),
-				    _dl_objects, &this,
+				    _dl_objects, &this, NULL,
 				    SYM_SEARCH_ALL|SYM_WARNNOTFOUND|
 				    ((type == R_TYPE(JMP_SLOT)) ?
 					SYM_PLT : SYM_NOTPLT),
@@ -305,7 +294,7 @@ resolve_failed:
 			Elf_Addr soff;
 
 			soff = _dl_find_symbol(symn, object->next, &srcsym,
-			    SYM_SEARCH_ALL|SYM_WARNNOTFOUND|SYM_NOTPLT,
+			    NULL, SYM_SEARCH_ALL|SYM_WARNNOTFOUND|SYM_NOTPLT,
 			    size, object);
 			if (srcsym == NULL)
 				goto resolve_failed;
@@ -574,12 +563,12 @@ _dl_reloc_plt(Elf_Word *where, Elf_Addr value, Elf_RelA *rela)
 		 *	nop
 		 *
 		 */
-		where[6] = JMP     | LOVAL(value);
+		where[6] = JMP | LOVAL(value);
 		where[5] = ORG5;
-		where[4] = SLLX    | 12;
-		where[3] = OR      | LOVAL((value) >> 32);
+		where[4] = SLLX | 12;
+		where[3] = OR | LOVAL((value) >> 32);
 		where[2] = SETHIG5 | HIVAL(value, 10);
-		where[1] = SETHI   | HIVAL(value, 42);
+		where[1] = SETHI | HIVAL(value, 42);
 		__asm __volatile("iflush %0+24" : : "r" (where));
 		__asm __volatile("iflush %0+20" : : "r" (where));
 		__asm __volatile("iflush %0+16" : : "r" (where));
@@ -633,7 +622,7 @@ _dl_bind(elf_object_t *object, int index)
 
 	addr = (Elf_Word *)(object->load_offs + rela->r_offset);
 	this = NULL;
-	ooff = _dl_find_symbol(symn, _dl_objects, &this,
+	ooff = _dl_find_symbol(symn, _dl_objects, &this, NULL,
 	    SYM_SEARCH_ALL|SYM_WARNNOTFOUND|SYM_PLT, sym->st_size, object);
 	if (this == NULL) {
 		_dl_printf("lazy binding failed!\n");
@@ -706,13 +695,13 @@ _dl_md_reloc_got(elf_object_t *object, int lazy)
 	object->got_addr = NULL;
 	object->got_size = 0;
 	this = NULL;
-	ooff = _dl_find_symbol("__got_start", object, &this,
+	ooff = _dl_find_symbol("__got_start", object, &this, NULL,
 	    SYM_SEARCH_SELF|SYM_NOWARNNOTFOUND|SYM_PLT, 0, object);
 	if (this != NULL)
 		object->got_addr = ooff + this->st_value;
 
 	this = NULL;
-	ooff = _dl_find_symbol("__got_end", object, &this,
+	ooff = _dl_find_symbol("__got_end", object, &this, NULL,
 	    SYM_SEARCH_SELF|SYM_NOWARNNOTFOUND|SYM_PLT, 0, object);
 	if (this != NULL)
 		object->got_size = ooff + this->st_value  - object->got_addr;
@@ -720,13 +709,13 @@ _dl_md_reloc_got(elf_object_t *object, int lazy)
 	plt_addr = 0;
 	object->plt_size = 0;
 	this = NULL;
-	ooff = _dl_find_symbol("__plt_start", object, &this,
+	ooff = _dl_find_symbol("__plt_start", object, &this, NULL,
 	    SYM_SEARCH_SELF|SYM_NOWARNNOTFOUND|SYM_PLT, 0, object);
 	if (this != NULL)
 		plt_addr = ooff + this->st_value;
 
 	this = NULL;
-	ooff = _dl_find_symbol("__plt_end", object, &this,
+	ooff = _dl_find_symbol("__plt_end", object, &this, NULL,
 	    SYM_SEARCH_SELF|SYM_NOWARNNOTFOUND|SYM_PLT, 0, object);
 	if (this != NULL)
 		object->plt_size = ooff + this->st_value  - plt_addr;

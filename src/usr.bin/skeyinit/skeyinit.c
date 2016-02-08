@@ -1,4 +1,4 @@
-/*	$OpenBSD: skeyinit.c,v 1.45 2003/11/26 00:05:27 espie Exp $	*/
+/*	$OpenBSD: skeyinit.c,v 1.48 2004/06/07 19:28:03 otto Exp $	*/
 
 /* OpenBSD S/Key (skeyinit.c)
  *
@@ -93,12 +93,12 @@ main(int argc, char **argv)
 			case 'a':
 				if (argv[++i] == NULL || argv[i][0] == '\0')
 					usage();
-				if (auth_type == NULL)
-					auth_type = argv[i];
+				auth_type = argv[i];
 				break;
 			case 's':
 				defaultsetup = 0;
-				auth_type = "skey";
+				if (auth_type == NULL)
+					auth_type = "skey";
 				break;
 			case 'x':
 				hexmode = 1;
@@ -179,7 +179,7 @@ main(int argc, char **argv)
 		/* existing user */
 		break;
 	case 1:
-		if (!defaultsetup) {
+		if (!defaultsetup && strcmp(auth_type, "skey") == 0) {
 			fprintf(stderr,
 "You must authenticate yourself before using S/Key for the first time.  In\n"
 "secure mode this is normally done via an existing S/Key key.  However, since\n"
@@ -290,7 +290,7 @@ main(int argc, char **argv)
 	    fchmod(fileno(skey.keyfile), S_IRUSR | S_IWUSR) != 0)
 		err(1, "can't set owner/mode for %s", pp->pw_name);
 	if (n == 0)
-		n = 99;
+		n = 100;
 
 	/* Set hash type if asked to */
 	if (ht && strcmp(ht, skey_get_algorithm()) != 0)
@@ -412,7 +412,7 @@ normal_mode(char *username, int n, char *key, char *seed)
 		if (i > 2)
 			errx(1, "S/Key entry not updated");
 
-		if (readpassphrase("Enter secret passphrase: ", passwd,
+		if (readpassphrase("Enter new secret passphrase: ", passwd,
 		    sizeof(passwd), 0) == NULL || passwd[0] == '\0')
 			exit(1);
 

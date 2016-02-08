@@ -1,4 +1,4 @@
-#	$OpenBSD: special,v 1.57 2004/02/10 23:45:10 henning Exp $
+#	$OpenBSD: special,v 1.62 2004/07/14 15:50:42 millert Exp $
 #	$NetBSD: special,v 1.4 1996/05/08 21:30:18 pk Exp $
 #	@(#)special	8.2 (Berkeley) 1/23/94
 #
@@ -57,12 +57,13 @@ special		type=file mode=0600 uname=root gname=wheel
 ..	#mtree
 moduli		type=file mode=0644 uname=root gname=wheel
 netstart	type=file mode=0644 uname=root gname=wheel
+ntpd.conf	type=file mode=0644 uname=root gname=wheel
 passwd		type=file mode=0644 uname=root gname=wheel
-passwd.conf	type=file mode=0644 uname=root gname=wheel optional
 pf.conf		type=file mode=0600 uname=root gname=wheel optional
 printcap	type=file mode=0644 uname=root gname=wheel
 rc		type=file mode=0644 uname=root gname=wheel
 rc.conf		type=file mode=0644 uname=root gname=wheel
+rc.conf.local	type=file mode=0644 uname=root gname=wheel optional
 rc.local	type=file mode=0644 uname=root gname=wheel
 rc.securelevel	type=file mode=0644 uname=root gname=wheel
 rc.shutdown	type=file mode=0644 uname=root gname=wheel
@@ -73,6 +74,7 @@ sensorsd.conf	type=file mode=0644 uname=root gname=wheel
 shells		type=file mode=0644 uname=root gname=wheel
 skey		type=dir mode=01730 uname=root gname=auth optional
 ..	#skey
+spamd.conf	type=file mode=0644 uname=root gname=wheel optional
 spwd.db		type=file mode=0640 uname=root gname=_shadow
 ssh		type=dir mode=0755 uname=root gname=wheel optional
 ssh_config	type=file mode=0644 uname=root gname=wheel
@@ -96,7 +98,7 @@ uucp		type=dir mode=0755 uname=root gname=wheel optional ignore
 
 root		type=dir mode=0700 uname=root gname=wheel
 .cshrc		type=file mode=0644 uname=root gname=wheel
-.klogin		type=file mode=0600 uname=root gname=wheel
+.klogin		type=file mode=0600 uname=root gname=wheel optional
 .login		type=file mode=0644 uname=root gname=wheel
 .profile	type=file mode=0644 uname=root gname=wheel
 .rhosts		type=file mode=0600 uname=root gname=wheel optional

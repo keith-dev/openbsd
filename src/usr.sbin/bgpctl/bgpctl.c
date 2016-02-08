@@ -1,4 +1,4 @@
-/*	$OpenBSD: bgpctl.c,v 1.48 2004/03/11 18:56:34 claudio Exp $ */
+/*	$OpenBSD: bgpctl.c,v 1.61 2004/08/20 15:49:35 henning Exp $ */
 
 /*
  * Copyright (c) 2003 Henning Brauer <henning@openbsd.org>
@@ -22,7 +22,9 @@
 #include <net/if.h>
 #include <net/if_media.h>
 #include <net/if_types.h>
+
 #include <err.h>
+#include <netdb.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -39,18 +41,19 @@ enum neighbor_views {
 	NV_TIMERS
 };
 
-
 void		 usage(void);
 int		 main(int, char *[]);
 void		 show_summary_head(void);
 int		 show_summary_msg(struct imsg *);
 int		 show_neighbor_msg(struct imsg *, enum neighbor_views);
+void		 print_neighbor_capa_mp_safi(u_int8_t);
 void		 print_neighbor_msgstats(struct peer *);
 void		 print_neighbor_timers(struct peer *);
 void		 print_timer(const char *, time_t, u_int);
 static char	*fmt_timeframe(time_t t);
 static char	*fmt_timeframe_core(time_t t);
 void		 show_fib_head(void);
+void		 show_network_head(void);
 int		 show_fib_msg(struct imsg *);
 void		 show_nexthop_head(void);
 int		 show_nexthop_msg(struct imsg *);
@@ -81,6 +84,7 @@ main(int argc, char *argv[])
 	struct sockaddr_un	 sun;
 	int			 fd, n, done;
 	struct imsg		 imsg;
+	struct network_config	 net;
 	struct parse_result	*res;
 
 	if ((res = parse(argc, argv)) == NULL)
@@ -182,6 +186,36 @@ main(int argc, char *argv[])
 		printf("request sent.\n");
 		done = 1;
 		break;
+	case NEIGHBOR_CLEAR:
+		imsg_compose(&ibuf, IMSG_CTL_NEIGHBOR_CLEAR, 0,
+		    &res->addr, sizeof(res->addr));
+		printf("request sent.\n");
+		done = 1;
+		break;
+	case NETWORK_ADD:
+	case NETWORK_REMOVE:
+		bzero(&net, sizeof(net));
+		memcpy(&net.prefix, &res->addr, sizeof(res->addr));
+		net.prefixlen = res->prefixlen;
+		/* attribute sets are not supported */
+		if (res->action == NETWORK_ADD)
+			imsg_compose(&ibuf, IMSG_NETWORK_ADD, 0,
+			    &net, sizeof(net));
+		else
+			imsg_compose(&ibuf, IMSG_NETWORK_REMOVE, 0,
+			    &net, sizeof(net));
+		printf("request sent.\n");
+		done = 1;
+		break;
+	case NETWORK_FLUSH:
+		imsg_compose(&ibuf, IMSG_NETWORK_FLUSH, 0, NULL, 0);
+		printf("request sent.\n");
+		done = 1;
+		break;
+	case NETWORK_SHOW:
+		imsg_compose(&ibuf, IMSG_CTL_SHOW_NETWORK, 0, NULL, 0);
+		show_network_head();
+		break;
 	}
 
 	while (ibuf.w.queued)
@@ -222,6 +256,9 @@ main(int argc, char *argv[])
 			case SHOW_RIB:
 				done = show_rib_summary_msg(&imsg);
 				break;
+			case NETWORK_SHOW:
+				done = show_fib_msg(&imsg);
+				break;
 			case NONE:
 			case RELOAD:
 			case FIB:
@@ -230,6 +267,10 @@ main(int argc, char *argv[])
 			case NEIGHBOR:
 			case NEIGHBOR_UP:
 			case NEIGHBOR_DOWN:
+			case NEIGHBOR_CLEAR:
+			case NETWORK_ADD:
+			case NETWORK_REMOVE:
+			case NETWORK_FLUSH:
 				break;
 			}
 			imsg_free(&imsg);
@@ -243,32 +284,53 @@ main(int argc, char *argv[])
 void
 show_summary_head(void)
 {
-	printf("%-15s %-5s %-10s %-10s %-5s %-8s %s\n", "Neighbor", "AS",
-	    "MsgRcvd", "MsgSent", "OutQ", "Up/Down", "State");
+	printf("%-20s %-5s %-10s %-10s %-5s %-8s %s\n", "Neighbor", "AS",
+	    "MsgRcvd", "MsgSent", "OutQ", "Up/Down", "State/PrefixRcvd");
 }
 
 int
 show_summary_msg(struct imsg *imsg)
 {
 	struct peer		*p;
+	char			*s;
 
 	switch (imsg->hdr.type) {
 	case IMSG_CTL_SHOW_NEIGHBOR:
 		p = imsg->data;
-		printf("%-15s %5u %10llu %10llu %5u %-8s %s\n",
-		    log_addr(&p->conf.remote_addr),
-		    p->conf.remote_as,
+		if ((p->conf.remote_addr.af == AF_INET &&
+		    p->conf.remote_masklen != 32) ||
+		    (p->conf.remote_addr.af == AF_INET6 &&
+		    p->conf.remote_masklen != 128)) {
+			if (asprintf(&s, "%s/%u",
+			    log_addr(&p->conf.remote_addr),
+			    p->conf.remote_masklen) == -1)
+				err(1, NULL);
+		} else
+			if ((s = strdup(log_addr(&p->conf.remote_addr))) ==
+			    NULL)
+				err(1, NULL);
+
+		printf("%-20s %5u %10llu %10llu %5u %-8s ",
+		    s, p->conf.remote_as,
 		    p->stats.msg_rcvd_open + p->stats.msg_rcvd_notification +
-		    p->stats.msg_rcvd_update + p->stats.msg_rcvd_keepalive,
+		    p->stats.msg_rcvd_update + p->stats.msg_rcvd_keepalive +
+		    p->stats.msg_rcvd_rrefresh,
 		    p->stats.msg_sent_open + p->stats.msg_sent_notification +
-		    p->stats.msg_sent_update + p->stats.msg_sent_keepalive,
+		    p->stats.msg_sent_update + p->stats.msg_sent_keepalive +
+		    p->stats.msg_sent_rrefresh,
 		    p->wbuf.queued,
-		    fmt_timeframe(p->stats.last_updown),
-		    statenames[p->state]);
+		    fmt_timeframe(p->stats.last_updown));
+		if (p->state == STATE_ESTABLISHED) {
+			printf("%u", p->stats.prefix_cnt);
+			if (p->conf.max_prefix != 0)
+				printf("/%u", p->conf.max_prefix);
+		} else
+			printf("%s", statenames[p->state]);
+		printf("\n");
+		free(s);
 		break;
 	case IMSG_CTL_END:
 		return (1);
-		break;
 	default:
 		break;
 	}
@@ -280,16 +342,35 @@ int
 show_neighbor_msg(struct imsg *imsg, enum neighbor_views nv)
 {
 	struct peer		*p;
-	struct sockaddr_in	*sa_in;
 	struct in_addr		 ina;
+	char			 buf[NI_MAXHOST], pbuf[NI_MAXSERV], *s;
 
 	switch (imsg->hdr.type) {
 	case IMSG_CTL_SHOW_NEIGHBOR:
 		p = imsg->data;
+		if ((p->conf.remote_addr.af == AF_INET &&
+		    p->conf.remote_masklen != 32) ||
+		    (p->conf.remote_addr.af == AF_INET6 &&
+		    p->conf.remote_masklen != 128)) {
+			if (asprintf(&s, "%s/%u",
+			    log_addr(&p->conf.remote_addr),
+			    p->conf.remote_masklen) == -1)
+				err(1, NULL);
+		} else
+			s = strdup(log_addr(&p->conf.remote_addr));
+
 		ina.s_addr = p->remote_bgpid;
-		printf("BGP neighbor is %s, remote AS %u\n",
-		    log_addr(&p->conf.remote_addr),
-		    p->conf.remote_as);
+		printf("BGP neighbor is %s, ", s);
+		free(s);
+		if (p->conf.remote_as == 0 && p->conf.template)
+			printf("remote AS: accept any");
+		else
+			printf("remote AS %u", p->conf.remote_as);
+		if (p->conf.template)
+			printf(", Template");
+		if (p->conf.cloned)
+			printf(", Cloned");
+		printf("\n");
 		if (p->conf.descr[0])
 			printf(" Description: %s\n", p->conf.descr);
 		printf("  BGP version 4, remote router-id %s\n",
@@ -303,6 +384,19 @@ show_neighbor_msg(struct imsg *imsg, enum neighbor_views nv)
 		printf("  Last read %s, holdtime %us, keepalive interval %us\n",
 		    fmt_timeframe(p->stats.last_read),
 		    p->holdtime, p->holdtime/3);
+		if (p->capa.mp_v4 || p->capa.mp_v6 || p->capa.refresh) {
+			printf("  Neighbor capabilities:\n");
+			if (p->capa.mp_v4) {
+				printf("    Multiprotocol extensions: IPv4");
+				print_neighbor_capa_mp_safi(p->capa.mp_v4);
+			}
+			if (p->capa.mp_v6) {
+				printf("    Multiprotocol extensions: IPv6");
+				print_neighbor_capa_mp_safi(p->capa.mp_v6);
+			}
+			if (p->capa.refresh)
+				printf("    Route Refresh\n");
+		}
 		printf("\n");
 		switch (nv) {
 		case NV_DEFAULT:
@@ -313,18 +407,23 @@ show_neighbor_msg(struct imsg *imsg, enum neighbor_views nv)
 			break;
 		}
 		printf("\n");
-		if (p->sa_local.ss_family == AF_INET) {
-			sa_in = (struct sockaddr_in *)&p->sa_local;
-			printf("  Local host:   %20s, Local port:   %5u\n",
-			    inet_ntoa(sa_in->sin_addr),
-			    ntohs(sa_in->sin_port));
+		if (getnameinfo((struct sockaddr *)&p->sa_local,
+		    (socklen_t)p->sa_local.ss_len,
+		    buf, sizeof(buf), pbuf, sizeof(pbuf),
+		    NI_NUMERICHOST | NI_NUMERICSERV)) {
+			strlcpy(buf, "(unknown)", sizeof(buf));
+			strlcpy(pbuf, "", sizeof(pbuf));
 		}
-		if (p->sa_remote.ss_family == AF_INET) {
-			sa_in = (struct sockaddr_in *)&p->sa_remote;
-			printf("  Foreign host: %20s, Foreign port: %5u\n",
-			    inet_ntoa(sa_in->sin_addr),
-			    ntohs(sa_in->sin_port));
+		printf("  Local host:  %20s, Local port:  %5s\n", buf, pbuf);
+
+		if (getnameinfo((struct sockaddr *)&p->sa_remote,
+		    (socklen_t)p->sa_remote.ss_len,
+		    buf, sizeof(buf), pbuf, sizeof(pbuf),
+		    NI_NUMERICHOST | NI_NUMERICSERV)) {
+			strlcpy(buf, "(unknown)", sizeof(buf));
+			strlcpy(pbuf, "", sizeof(pbuf));
 		}
+		printf("  Remote host: %20s, Remote port: %5s\n", buf, pbuf);
 		printf("\n");
 		break;
 	case IMSG_CTL_END:
@@ -335,6 +434,26 @@ show_neighbor_msg(struct imsg *imsg, enum neighbor_views nv)
 	}
 
 	return (0);
+}
+
+void
+print_neighbor_capa_mp_safi(u_int8_t safi)
+{
+	switch (safi) {
+	case SAFI_UNICAST:
+		printf(" Unicast");
+		break;
+	case SAFI_MULTICAST:
+		printf(" Multicast");
+		break;
+	case SAFI_BOTH:
+		printf(" Unicast and Multicast");
+		break;
+	default:
+		printf(" unknown (%u)", safi);
+		break;
+	}
+	printf("\n");
 }
 
 void
@@ -350,11 +469,15 @@ print_neighbor_msgstats(struct peer *p)
 	    p->stats.msg_sent_update, p->stats.msg_rcvd_update);
 	printf("  %-15s %10llu %10llu\n", "Keepalives",
 	    p->stats.msg_sent_keepalive, p->stats.msg_rcvd_keepalive);
+	printf("  %-15s %10llu %10llu\n", "Route Refresh",
+	    p->stats.msg_sent_rrefresh, p->stats.msg_rcvd_rrefresh);
 	printf("  %-15s %10llu %10llu\n", "Total",
 	    p->stats.msg_sent_open + p->stats.msg_sent_notification +
-	    p->stats.msg_sent_update + p->stats.msg_sent_keepalive,
+	    p->stats.msg_sent_update + p->stats.msg_sent_keepalive +
+	    p->stats.msg_sent_rrefresh,
 	    p->stats.msg_rcvd_open + p->stats.msg_rcvd_notification +
-	    p->stats.msg_rcvd_update + p->stats.msg_rcvd_keepalive);
+	    p->stats.msg_rcvd_update + p->stats.msg_rcvd_keepalive +
+	    p->stats.msg_rcvd_rrefresh);
 }
 
 void
@@ -363,8 +486,8 @@ print_neighbor_timers(struct peer *p)
 	print_timer("IdleHoldTimer:", p->IdleHoldTimer, p->IdleHoldTime);
 	print_timer("ConnectRetryTimer:", p->ConnectRetryTimer,
 	    INTERVAL_CONNECTRETRY);
-	print_timer("HoldTimer:", p->HoldTimer, p->holdtime);
-	print_timer("KeepaliveTimer:", p->KeepaliveTimer, p->holdtime/3);
+	print_timer("HoldTimer:", p->HoldTimer, (u_int)p->holdtime);
+	print_timer("KeepaliveTimer:", p->KeepaliveTimer, (u_int)p->holdtime/3);
 }
 
 void
@@ -438,6 +561,13 @@ show_fib_head(void)
 	printf("flags destination          gateway\n");
 }
 
+void
+show_network_head(void)
+{
+	printf("flags: S = Static\n");
+	printf("flags destination\n");
+}
+
 int
 show_fib_msg(struct imsg *imsg)
 {
@@ -446,6 +576,7 @@ show_fib_msg(struct imsg *imsg)
 
 	switch (imsg->hdr.type) {
 	case IMSG_CTL_KROUTE:
+	case IMSG_CTL_SHOW_NETWORK:
 		if (imsg->hdr.len < IMSG_HEADER_SIZE + sizeof(struct kroute))
 			errx(1, "wrong imsg len");
 		k = imsg->data;

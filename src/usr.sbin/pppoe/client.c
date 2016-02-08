@@ -1,4 +1,4 @@
-/*	$OpenBSD: client.c,v 1.17 2003/06/04 04:46:13 jason Exp $	*/
+/*	$OpenBSD: client.c,v 1.20 2004/09/03 06:37:14 tedu Exp $	*/
 
 /*
  * Copyright (c) 2000 Network Security Technologies, Inc. http://www.netsec.net
@@ -77,10 +77,7 @@ int timer_clr(void);
 int timer_hit(void);
 
 int
-client_mode(bfd, sysname, srvname, myea)
-	int bfd;
-	u_int8_t *sysname, *srvname;
-	struct ether_addr *myea;
+client_mode(int bfd, u_int8_t *sysname, u_int8_t *srvname, struct ether_addr *myea)
 {
 	struct ether_addr rmea;
 	fd_set *fdsp = NULL;
@@ -151,10 +148,7 @@ client_mode(bfd, sysname, srvname, myea)
 }
 
 static int
-send_padi(fd, ea, srv)
-	int fd;
-	struct ether_addr *ea;
-	u_int8_t *srv;
+send_padi(int fd, struct ether_addr *ea, u_int8_t *srv)
 {
 	struct iovec iov[10];
 	struct pppoe_header ph = {
@@ -210,13 +204,9 @@ send_padi(fd, ea, srv)
 }
 
 static int
-send_padr(bfd, srv, myea, rmea, eh, ph, tl)
-	int bfd;
-	u_int8_t *srv;
-	struct ether_addr *myea, *rmea;
-	struct ether_header *eh;
-	struct pppoe_header *ph;
-	struct tag_list *tl;
+send_padr(int bfd, u_int8_t *srv, struct ether_addr *myea,
+    struct ether_addr *rmea, struct ether_header *eh,
+    struct pppoe_header *ph, struct tag_list *tl)
 {
 	struct iovec iov[12];
 	u_int16_t etype = htons(ETHERTYPE_PPPOEDISC);
@@ -266,7 +256,7 @@ send_padr(bfd, srv, myea, rmea, eh, ph, tl)
 		iov[idx].iov_base = &n->type;
 		iov[idx++].iov_len = sizeof(n->type) + sizeof(n->len);
 		if (n->len) {
-			iov[idx].iov_base = &n->val;
+			iov[idx].iov_base = n->val;
 			iov[idx++].iov_len = n->len;
 		}
 		ph->len += sizeof(n->type) + sizeof(n->len) + n->len;
@@ -291,10 +281,8 @@ send_padr(bfd, srv, myea, rmea, eh, ph, tl)
 }
 
 static int
-getpackets(bfd, srv, sysname, myea, rmea)
-	int bfd;
-	u_int8_t *srv, *sysname;
-	struct ether_addr *myea, *rmea;
+getpackets(int bfd, u_int8_t *srv, u_int8_t *sysname,
+    struct ether_addr *myea, struct ether_addr *rmea)
 {
 	static u_int8_t *pktbuf;
 	u_int8_t *mpkt, *pkt, *epkt;
@@ -380,8 +368,10 @@ getpackets(bfd, srv, sysname, myea, rmea)
 				goto next;
 			if ((r = bpf_to_ppp(pppfd, len, mpkt)) < 0)
 				return (-1);
-			if (r == 0)
+			if (r == 0) {
+				usleep(100000);
 				continue;
+			}
 		}
 next:
 		pkt += BPF_WORDALIGN(bh->bh_hdrlen + bh->bh_caplen);
@@ -391,14 +381,9 @@ next:
 
 
 static int
-recv_pado(bfd, srv, myea, rmea, eh, ph, len, pkt)
-	int bfd;
-	u_int8_t *srv;
-	struct ether_addr *myea, *rmea;
-	struct ether_header *eh;
-	struct pppoe_header *ph;
-	u_long len;
-	u_int8_t *pkt;
+recv_pado(int bfd, u_int8_t *srv, struct ether_addr *myea,
+    struct ether_addr *rmea, struct ether_header *eh,
+    struct pppoe_header *ph, u_long len, u_int8_t *pkt)
 {
 	struct tag_list tl;
 	struct tag_node *n;
@@ -455,14 +440,10 @@ out:
 }
 
 static int
-recv_pads(bfd, srv, sysname, myea, rmea, eh, ph, len, pkt)
-	int bfd;
-	u_int8_t *srv, *sysname;
-	struct ether_addr *myea, *rmea;
-	struct ether_header *eh;
-	struct pppoe_header *ph;
-	u_long len;
-	u_int8_t *pkt;
+recv_pads(int bfd, u_int8_t *srv, u_int8_t *sysname,
+    struct ether_addr *myea, struct ether_addr *rmea,
+    struct ether_header *eh, struct pppoe_header *ph,
+    u_long len, u_int8_t *pkt)
 {
 	struct tag_node *n;
 	struct tag_list tl;
@@ -510,13 +491,9 @@ out:
 }
 
 static int
-recv_padt(bfd, myea, rmea, eh, ph, len, pkt)
-	int bfd;
-	struct ether_addr *myea, *rmea;
-	struct ether_header *eh;
-	struct pppoe_header *ph;
-	u_long len;
-	u_int8_t *pkt;
+recv_padt(int bfd, struct ether_addr *myea, struct ether_addr *rmea,
+    struct ether_header *eh, struct pppoe_header *ph,
+    u_long len, u_int8_t *pkt)
 {
 	if (bcmp(&eh->ether_shost[0], rmea, ETHER_ADDR_LEN))
 		return (0);
@@ -531,15 +508,13 @@ volatile sig_atomic_t timer_alarm;
 static struct sigaction timer_oact;
 
 void
-timer_handler(sig)
-	int sig;
+timer_handler(int sig)
 {
 	timer_alarm = 1;
 }
 
 int
-timer_set(sec)
-	u_int sec;
+timer_set(u_int sec)
 {
 	struct sigaction act;
 	struct itimerval it;

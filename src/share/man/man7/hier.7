@@ -1,4 +1,4 @@
-.\"	$OpenBSD: hier.7,v 1.44 2004/02/16 08:33:51 miod Exp $
+.\"	$OpenBSD: hier.7,v 1.47 2004/07/15 23:43:02 jmc Exp $
 .\"	$NetBSD: hier.7,v 1.7 1994/11/30 19:07:10 jtc Exp $
 .\"
 .\" Copyright (c) 1990, 1993
@@ -221,6 +221,10 @@ C include files for the ISO standard file systems (currently only cd9660).
 C include files for the KerberosV authentication subsystem (see
 .Xr info 1
 heimdal).
+.It libmilter/
+C include files for the
+.Xr sendmail 8
+mail filter API.
 .It machine/
 Machine specific C include files.
 .It miscfs/
@@ -239,9 +243,6 @@ C include files for Internet protocol version 6 (see
 .Xr inet6 4 ) .
 .It netipx/
 C include files for the IPX protocol.
-.It netiso/
-C include files for ISO standard protocols (see
-.Xr iso 4 ) .
 .It netnatm/
 C include files for native mode ATM access.
 .It netns/
@@ -414,6 +415,7 @@ Example source code implementing several lkm module types (see
 Locales for multi-language support.
 .It man/
 Manual pages.
+.Pp
 .Bl -tag -width man3p/ -compact
 .It cat*/
 Preformatted
@@ -442,6 +444,7 @@ System maintenance and operation commands.
 .It man9/
 Kernel internals.
 .El
+.Pp
 .It misc/
 Miscellaneous system-wide ASCII text files.
 .Pp

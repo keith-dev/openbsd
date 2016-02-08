@@ -1,4 +1,4 @@
-/*	$OpenBSD: passwd.c,v 1.42 2003/06/26 16:34:42 deraadt Exp $	*/
+/*	$OpenBSD: passwd.c,v 1.44 2004/07/13 21:09:48 millert Exp $	*/
 
 /*
  * Copyright (c) 1987, 1993, 1994, 1995
@@ -30,7 +30,7 @@
  */
 
 #if defined(LIBC_SCCS) && !defined(lint)
-static const char rcsid[] = "$OpenBSD: passwd.c,v 1.42 2003/06/26 16:34:42 deraadt Exp $";
+static const char rcsid[] = "$OpenBSD: passwd.c,v 1.44 2004/07/13 21:09:48 millert Exp $";
 #endif /* LIBC_SCCS and not lint */
 
 #include <sys/types.h>
@@ -54,77 +54,9 @@ static const char rcsid[] = "$OpenBSD: passwd.c,v 1.42 2003/06/26 16:34:42 deraa
 
 #include "util.h"
 
-#define NUM_OPTIONS	2	/* Number of hardcoded defaults */
-
-static void	pw_cont(int sig);
-
-static const char options[NUM_OPTIONS][2][80] = {
-	{"localcipher", "blowfish,4"},
-	{"ypcipher", "old"}
-};
-
 static char pw_defdir[] = "/etc";
 static char *pw_dir = pw_defdir;
 static char *pw_lck;
-
-static void trim_whitespace(char *);
-static int read_line(FILE *, char *, int);
-static const char *pw_default(const char *);
-
-/* Removes head and/or tail spaces. */
-static void
-trim_whitespace(char *line)
-{
-	char   *p;
-
-	/* Remove leading spaces */
-	p = line;
-	while (isspace(*p))
-		p++;
-	(void) memmove(line, p, strlen(p) + 1);
-
-	/* Remove trailing spaces */
-	p = line + strlen(line) - 1;
-	while (isspace(*p))
-		p--;
-	*(p + 1) = '\0';
-}
-
-
-/* Get one line, remove spaces from front and tail */
-static int
-read_line(FILE *fp, char *line, int max)
-{
-	char   *p;
-
-	/* Read one line of config */
-	if (fgets(line, max, fp) == 0)
-		return 0;
-	if (!(p = strchr(line, '\n'))) {
-		warnx("line too long");
-		return 0;
-	}
-	*p = '\0';
-
-	/* Remove comments */
-	if ((p = strchr(line, '#')))
-		*p = '\0';
-
-	trim_whitespace(line);
-	return 1;
-}
-
-
-static const char *
-pw_default(const char *option)
-{
-	int	i;
-
-	for (i = 0; i < NUM_OPTIONS; i++)
-		if (!strcmp(options[i][0], option))
-			return options[i][1];
-	return NULL;
-}
 
 char *
 pw_file(const char *nm)
@@ -141,81 +73,6 @@ pw_file(const char *nm)
 		return NULL;
 	return new_nm;
 }
-
-
-/*
- * Retrieve password information from the /etc/passwd.conf file,
- * at the moment this is only for choosing the cipher to use.
- * It could easily be used for other authentication methods as
- * well.
- */
-void
-pw_getconf(char *data, size_t max, const char *key, const char *option)
-{
-	FILE   *fp;
-	char    line[LINE_MAX];
-	static char result[LINE_MAX];
-	char   *p;
-	int	got = 0;
-	int	found = 0;
-
-	result[0] = '\0';
-
-	p = pw_file(_PATH_PASSWDCONF);
-	if (!p || (fp = fopen(p, "r")) == NULL) {
-		if (p)
-			free(p);
-		if ((p = (char *)pw_default(option))) {
-			strncpy(data, p, max - 1);
-			data[max - 1] = '\0';
-		} else
-			data[0] = '\0';
-		return;
-	}
-	free(p);
-
-	while (!found && (got || read_line(fp, line, LINE_MAX))) {
-		got = 0;
-		if (strncmp(key, line, strlen(key)) ||
-		    line[strlen(key)] != ':')
-			continue;
-
-		/* Now we found our specified key */
-		while (read_line(fp, line, LINE_MAX)) {
-			char   *p2;
-
-			/* Leaving key field */
-			if (strchr(line, ':')) {
-				got = 1;
-				break;
-			}
-			p2 = line;
-			if (!(p = strsep(&p2, "=")) || p2 == NULL)
-				continue;
-			trim_whitespace(p);
-			if (!strncmp(p, option, strlen(option))) {
-				trim_whitespace(p2);
-				strlcpy(result, p2, sizeof result);
-				found = 1;
-				break;
-			}
-		}
-	}
-	fclose(fp);
-
-	/*
-	 * If we got no result and were looking for a default
-	 * value, try hard coded defaults.
-	 */
-
-	if (!strlen(result) && !strcmp(key,"default") &&
-	    (p = (char *)pw_default(option)))
-		strncpy(data, p, max - 1);
-	else
-		strncpy(data, result, max - 1);
-	data[max - 1] = '\0';
-}
-
 
 void
 pw_setdir(const char *dir)
@@ -422,12 +279,27 @@ pw_prompt(void)
 		pw_error(NULL, 0, 0);
 }
 
-void
-pw_copy(int ffd, int tfd, struct passwd *pw)
+static int
+pw_equal(const struct passwd *pw1, const struct passwd *pw2)
 {
+	return (strcmp(pw1->pw_name, pw2->pw_name) == 0 &&
+	    pw1->pw_uid == pw2->pw_uid &&
+	    pw1->pw_gid == pw2->pw_gid &&
+	    strcmp(pw1->pw_class, pw2->pw_class) == 0 &&
+	    pw1->pw_change == pw2->pw_change &&
+	    pw1->pw_expire == pw2->pw_expire &&
+	    strcmp(pw1->pw_gecos, pw2->pw_gecos) == 0 &&
+	    strcmp(pw1->pw_dir, pw2->pw_dir) == 0 &&
+	    strcmp(pw1->pw_shell, pw2->pw_shell) == 0);
+}
+
+void
+pw_copy(int ffd, int tfd, const struct passwd *pw, const struct passwd *opw)
+{
+	struct passwd tpw;
 	FILE   *from, *to;
 	int	done;
-	char   *p, buf[8192];
+	char   *p, *ep, buf[8192];
 	char   *master = pw_file(_PATH_MASTERPASSWD);
 
 	if (!master)
@@ -438,7 +310,7 @@ pw_copy(int ffd, int tfd, struct passwd *pw)
 		pw_error(pw_lck ? pw_lck : NULL, pw_lck ? 1 : 0, 1);
 
 	for (done = 0; fgets(buf, sizeof(buf), from);) {
-		if (!strchr(buf, '\n')) {
+		if ((ep = strchr(buf, '\n')) == NULL) {
 			warnx("%s: line too long", master);
 			pw_error(NULL, 0, 1);
 		}
@@ -453,12 +325,22 @@ pw_copy(int ffd, int tfd, struct passwd *pw)
 			pw_error(NULL, 0, 1);
 		}
 		*p = '\0';
-		if (strcmp(buf, pw->pw_name)) {
+		if (strcmp(buf, opw ? opw->pw_name : pw->pw_name)) {
 			*p = ':';
 			(void)fprintf(to, "%s", buf);
 			if (ferror(to))
 				goto err;
 			continue;
+		}
+		if (opw != NULL) {
+			*p = ':';
+			*ep = '\0';
+			if (!pw_scan(buf, &tpw, NULL))
+				pw_error(NULL, 0, 1);
+			if (!pw_equal(&tpw, opw)) {
+				warnx("%s: inconsistent entry", master);
+				pw_error(NULL, 0, 1);
+			}
 		}
 		(void)fprintf(to, "%s:%s:%u:%u:%s:%d:%d:%s:%s:%s\n",
 		    pw->pw_name, pw->pw_passwd, (u_int)pw->pw_uid,

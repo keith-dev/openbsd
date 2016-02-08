@@ -1,4 +1,4 @@
-/*	$OpenBSD: resolve.c,v 1.21 2003/09/04 19:33:48 drahn Exp $ */
+/*	$OpenBSD: resolve.c,v 1.24 2004/07/05 00:47:40 kjell Exp $ */
 
 /*
  * Copyright (c) 1998 Per Fogelstrom, Opsycon AB
@@ -76,7 +76,6 @@ _dl_finalize_object(const char *objname, Elf_Dyn *dynp, const u_long *dl_data,
 	_dl_printf("objname [%s], dynp %p, dl_data %p, objtype %x laddr %lx, loff %lx\n",
 	    objname, dynp, dl_data, objtype, laddr, loff);
 #endif
-
 	object = _dl_malloc(sizeof(elf_object_t));
 	object->prev = object->next = NULL;
 
@@ -144,6 +143,10 @@ _dl_finalize_object(const char *objname, Elf_Dyn *dynp, const u_long *dl_data,
 	object->refcount = 1;
 	object->first_child = NULL;
 	object->last_child = NULL;
+	/* default dev, inode for dlopen-able objects. */
+	object->dev = 0;
+	object->inode = 0;
+
 	return(object);
 }
 
@@ -194,33 +197,43 @@ int _dl_symcachestat_lookups;
 
 Elf_Addr
 _dl_find_symbol_bysym(elf_object_t *req_obj, unsigned int symidx,
-    elf_object_t *startlook, const Elf_Sym **ref, int flags, int req_size)
+    elf_object_t *startlook, const Elf_Sym **ref, const elf_object_t **pobj,
+    int flags, int req_size)
 {
 	Elf_Addr ret;
 	const Elf_Sym *sym;
 	const char *symn;
+	const elf_object_t *sobj;
 
 	_dl_symcachestat_lookups ++;
 	if ((_dl_symcache != NULL) &&
 	     (symidx < req_obj->nchains) &&
+	     (_dl_symcache[symidx].obj != NULL) &&
 	     (_dl_symcache[symidx].sym != NULL) &&
 	     (_dl_symcache[symidx].flags == flags)) {
 
 		_dl_symcachestat_hits++;
+		sobj = _dl_symcache[symidx].obj;
 		*ref = _dl_symcache[symidx].sym;
-		return _dl_symcache[symidx].offset;
+		if (pobj)
+			*pobj = sobj;
+		return sobj->load_offs;
 	}
 
 	sym = req_obj->dyn.symtab;
 	sym += symidx;
 	symn = req_obj->dyn.strtab + sym->st_name;
 
-	ret = _dl_find_symbol(symn, startlook, ref, flags, req_size, req_obj);
+	ret = _dl_find_symbol(symn, startlook, ref, &sobj,
+	    flags, req_size, req_obj);
+
+	if (pobj)
+		*pobj = sobj;
 
 	if ((_dl_symcache != NULL) &&
 	     (symidx < req_obj->nchains)) {
 		_dl_symcache[symidx].sym = *ref;
-		_dl_symcache[symidx].offset = ret;
+		_dl_symcache[symidx].obj = sobj;
 		_dl_symcache[symidx].flags = flags;
 	}
 
@@ -229,7 +242,8 @@ _dl_find_symbol_bysym(elf_object_t *req_obj, unsigned int symidx,
 
 Elf_Addr
 _dl_find_symbol(const char *name, elf_object_t *startlook,
-    const Elf_Sym **ref, int flags, int req_size, elf_object_t *req_obj)
+    const Elf_Sym **ref, const elf_object_t **pobj,
+    int flags, int req_size, elf_object_t *req_obj)
 {
 	const Elf_Sym *weak_sym = NULL;
 	unsigned long h = 0;
@@ -253,7 +267,7 @@ _dl_find_symbol(const char *name, elf_object_t *startlook,
 			found = 1;
 			goto found;
 		}
-		    
+
 retry_nonglobal_dlo:
 	for (object = startlook; object;
 	    object = ((flags & SYM_SEARCH_SELF) ? 0 : object->next)) {
@@ -261,7 +275,7 @@ retry_nonglobal_dlo:
 		if ((lastchance == 0) &&
 		    ((object->obj_flags & RTLD_GLOBAL) == 0) &&
 		    (object->obj_type == OBJTYPE_DLO) &&
-		    (object != req_obj)) 
+		    (object != req_obj))
 			continue;
 
 		if (find_symbol_obj(object, name, h, flags, ref, &weak_sym,
@@ -296,6 +310,9 @@ found:
 		    _dl_progname, req_obj->load_name,
 		    object->load_name, name);
 	}
+
+	if (pobj)
+		*pobj = object;
 
 	return (object->load_offs);
 }

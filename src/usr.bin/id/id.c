@@ -1,4 +1,4 @@
-/*	$OpenBSD: id.c,v 1.14 2004/01/07 22:18:14 tdeval Exp $	*/
+/*	$OpenBSD: id.c,v 1.16 2004/07/19 09:22:17 pvalchev Exp $	*/
 
 /*-
  * Copyright (c) 1991, 1993
@@ -37,7 +37,7 @@ static char copyright[] =
 
 #ifndef lint
 /*static char sccsid[] = "@(#)id.c	8.3 (Berkeley) 4/28/95";*/
-static char rcsid[] = "$OpenBSD: id.c,v 1.14 2004/01/07 22:18:14 tdeval Exp $";
+static char rcsid[] = "$OpenBSD: id.c,v 1.16 2004/07/19 09:22:17 pvalchev Exp $";
 #endif /* not lint */
 
 #include <sys/param.h>
@@ -260,7 +260,6 @@ group(struct passwd *pw, int nflag)
 {
 	int cnt, ngroups;
 	gid_t gid, groups[NGROUPS + 1];
-	uid_t uid;
 	struct group *gr;
 	char *fmt;
 
@@ -296,7 +295,7 @@ who(char *u)
 {
 	struct passwd *pw;
 	uid_t uid;
-	char *ep;
+	const char *errstr;
 
 	/*
 	 * Translate user argument into a pw pointer.  First, try to
@@ -304,8 +303,8 @@ who(char *u)
 	 */
 	if ((pw = getpwnam(u)))
 		return(pw);
-	uid = strtoul(u, &ep, 10);
-	if (*u && !*ep && (pw = getpwuid(uid)))
+	uid = strtonum(u, 0, UID_MAX, &errstr);
+	if (!errstr && (pw = getpwuid(uid)))
 		return(pw);
 	errx(1, "%s: No such user", u);
 	/* NOTREACHED */

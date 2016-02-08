@@ -1,4 +1,4 @@
-/*	$OpenBSD: theo.c,v 1.60 2004/02/27 23:20:52 mickey Exp $	*/
+/*	$OpenBSD: theo.c,v 1.70 2004/08/23 22:01:31 henning Exp $	*/
 /*
  * Copyright (c) 2002 Artur Grabowski <art@openbsd.org>
  * All rights reserved.
@@ -143,7 +143,16 @@ static const char *talk[] = {
 	"Your connection is breaking up.",
 	"germans are not allowed to get involved there",
 	"gprs sucks camel dick dryer than the gobi desert",
-	"I AM NEVER SATISFIED"
+	"I AM NEVER SATISFIED",
+	"don't they recognize their moral responsibility to entertain me?",
+	"#ifdef is for emacs developers.",
+	"Many well known people become net-kooks in their later life, because they lose touch with reality.",
+	"You're not allowed to have an opinion.",
+	"tweep tweep tweep",
+	"Quite frankly, SSE's alignment requirement is the most utterly retarded idea since eating your own shit.",
+	"Holy verbose prom startup Batman.",
+	"Do you think you are exempt from COMPILING BEFORE YOU COMMIT",
+	"I want to be REALLY COOL just like all the other developers!"
 };
 
 static const int ntalk = sizeof(talk)/sizeof(talk[0]);

@@ -1,4 +1,4 @@
-/* $OpenBSD: user.c,v 1.56 2004/02/26 21:18:18 millert Exp $ */
+/* $OpenBSD: user.c,v 1.60 2004/06/04 18:04:21 otto Exp $ */
 /* $NetBSD: user.c,v 1.69 2003/04/14 17:40:07 agc Exp $ */
 
 /*
@@ -77,8 +77,8 @@ typedef struct user_t {
 	const char     *u_groupv[NGROUPS_MAX];	/* secondary groups */
 	char	       *u_shell;		/* user's shell */
 	char	       *u_basedir;		/* base directory for home */
-	char	       *u_expire;		/* when password will expire */
-	char	       *u_inactive;		/* when account will expire */
+	char	       *u_expire;		/* when account will expire */
+	char	       *u_inactive;		/* when password will expire */
 	char	       *u_skeldir;		/* directory for startup files */
 	char	       *u_class;		/* login class */
 	unsigned int	u_rsize;		/* size of range array */
@@ -320,10 +320,11 @@ creategid(char *group, gid_t gid, const char *name)
 	struct stat	st;
 	FILE		*from;
 	FILE		*to;
-	char		buf[LINE_MAX];
+	char		*buf;
 	char		f[MaxFileNameLen];
-	int		fd;
-	int		cc;
+	int		fd, ret;
+	int		wroteit = 0;
+	size_t		len;
 
 	if (getgrnam(group) != NULL) {
 		warnx("group `%s' already exists", group);
@@ -351,8 +352,14 @@ creategid(char *group, gid_t gid, const char *name)
 		warn("can't create gid: fdopen `%s' failed", f);
 		return 0;
 	}
-	while ((cc = fread(buf, sizeof(char), sizeof(buf), from)) > 0) {
-		if (fwrite(buf, cc, 1, to) != 1) {
+	while ((buf = fgetln(from, &len)) != NULL && len > 0) {
+		ret = 0;
+		if (buf[0] == '+' && wroteit == 0) {
+			ret = fprintf(to, "%s:*:%u:%s\n", group, gid, name);
+			wroteit = 1;
+		}
+		if (ret == -1 ||
+		    fprintf(to, "%*.*s", (int)len, (int)len, buf) != len) {
 			(void) fclose(from);
 			(void) fclose(to);
 			(void) unlink(f);
@@ -360,9 +367,15 @@ creategid(char *group, gid_t gid, const char *name)
 			return 0;
 		}
 	}
-	(void) fprintf(to, "%s:*:%u:%s\n", group, gid, name);
+	ret = 0;
+	if (wroteit == 0)
+		ret = fprintf(to, "%s:*:%u:%s\n", group, gid, name);
 	(void) fclose(from);
-	(void) fclose(to);
+	if (fclose(to) == EOF || ret == -1) {
+		(void) unlink(f);
+		warn("can't create gid: short write to `%s'", f);
+		return 0;
+	}
 	if (rename(f, _PATH_GROUP) < 0) {
 		(void) unlink(f);
 		warn("can't create gid: can't rename `%s' to `%s'", f,
@@ -443,7 +456,11 @@ modify_gid(char *group, char *newent)
 		}
 	}
 	(void) fclose(from);
-	(void) fclose(to);
+	if (fclose(to) == EOF) {
+		(void) unlink(f);
+		warn("can't modify gid: short write to `%s'", f);
+		return 0;
+	}
 	if (rename(f, _PATH_GROUP) < 0) {
 		(void) unlink(f);
 		warn("can't modify gid: can't rename `%s' to `%s'", f, _PATH_GROUP);
@@ -549,7 +566,11 @@ append_group(char *user, int ngroups, const char **groups)
 		}
 	}
 	(void) fclose(from);
-	(void) fclose(to);
+	if (fclose(to) == EOF) {
+		(void) unlink(f);
+		warn("can't append group: short write to `%s'", f);
+		return 0;
+	}
 	if (rename(f, _PATH_GROUP) < 0) {
 		(void) unlink(f);
 		warn("can't append group: can't rename `%s' to `%s'", f, _PATH_GROUP);
@@ -700,7 +721,10 @@ setdefaults(user_t *up)
 		}
 	}
 #endif
-	(void) fclose(fp);
+	if (fclose(fp) == EOF) {
+		warn("can't write to `%s'", CONFFILE);
+		ret = 0;
+	}
 	if (ret) {
 		ret = ((rename(template, CONFFILE) == 0) && (chmod(CONFFILE, 0644) == 0));
 	}
@@ -1021,14 +1045,15 @@ adduser(char *login_name, user_t *up)
 		    login_name);
 	}
 	if (!scantime(&inactive, up->u_inactive)) {
-		warnx("Warning: inactive time `%s' invalid, account expiry off",
+		warnx("Warning: inactive time `%s' invalid, password expiry off",
 				up->u_inactive);
 	}
 	if (!scantime(&expire, up->u_expire)) {
-		warnx("Warning: expire time `%s' invalid, password expiry off",
+		warnx("Warning: expire time `%s' invalid, account expiry off",
 				up->u_expire);
 	}
-	if (lstat(home, &st) < 0 && !(up->u_flags & F_MKDIR)) {
+	if (lstat(home, &st) < 0 && !(up->u_flags & F_MKDIR) &&
+	    strcmp(home, _PATH_NONEXISTENT) != 0) {
 		warnx("Warning: home directory `%s' doesn't exist, and -m was"
 		    " not specified", home);
 	}
@@ -1190,7 +1215,12 @@ rm_user_from_groups(char *login_name)
 	}
 	(void) fchmod(fileno(to), st.st_mode & 07777);
 	(void) fclose(from);
-	(void) fclose(to);
+	if (fclose(to) == EOF) {
+		(void) unlink(f);
+		warn("can't remove gid for `%s': short write to `%s'",
+		    login_name, f);
+		return 0;
+	}
 	if (rename(f, _PATH_GROUP) < 0) {
 		(void) unlink(f);
 		warn("can't remove gid for `%s': can't rename `%s' to `%s'",
@@ -1352,7 +1382,7 @@ moduser(char *login_name, char *newlogin, user_t *up)
 		}
 		if (up->u_flags & F_EXPIRE) {
 			if (!scantime(&pwp->pw_expire, up->u_expire)) {
-				warnx("Warning: expire time `%s' invalid, password expiry off",
+				warnx("Warning: expire time `%s' invalid, account expiry off",
 					up->u_expire);
 			}
 		}

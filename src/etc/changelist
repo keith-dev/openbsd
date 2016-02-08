@@ -1,4 +1,4 @@
-#	$OpenBSD: changelist,v 1.35 2004/02/26 22:01:17 david Exp $
+#	$OpenBSD: changelist,v 1.40 2004/07/14 15:50:42 millert Exp $
 #
 # List of files which the security script backs up and checks
 # for modifications.
@@ -11,7 +11,6 @@
 /etc/bgpd.conf
 /etc/boot.conf
 /etc/bootparams
-/etc/bootptab
 /etc/ccd.conf
 /etc/changelist
 /etc/crontab
@@ -40,6 +39,8 @@
 /etc/hosts.equiv
 /etc/hosts.lpd
 /etc/inetd.conf
++/etc/isakmpd/private/local.key
+/etc/isakmpd/private/local.pub
 /etc/ksh.kshrc
 /etc/locate.rc
 /etc/login.conf
@@ -60,9 +61,8 @@
 /etc/netstart
 /etc/networks
 /etc/newsyslog.conf
-/etc/ntp.conf
+/etc/ntpd.conf
 /etc/passwd
-/etc/passwd.conf
 /etc/pf.conf
 /etc/pf.os
 /etc/phones
@@ -86,6 +86,7 @@
 /etc/shosts.equiv
 /etc/slip.hosts
 /etc/slip.login
+/etc/spamd.conf
 /etc/ssh/ssh_config
 +/etc/ssh/ssh_host_dsa_key
 /etc/ssh/ssh_host_dsa_key.pub

@@ -1,4 +1,4 @@
-.\"	$OpenBSD: queue.3,v 1.33 2003/12/16 21:08:20 millert Exp $
+.\"	$OpenBSD: queue.3,v 1.36 2004/08/16 21:31:31 jmc Exp $
 .\"	$NetBSD: queue.3,v 1.4 1995/07/03 00:25:36 mycroft Exp $
 .\"
 .\" Copyright (c) 1993 The Regents of the University of California.
@@ -181,9 +181,9 @@
 .Ft void
 .Fn SIMPLEQ_INSERT_TAIL "SIMPLEQ_HEAD *head" "struct TYPE *elm" "SIMPLEQ_ENTRY NAME"
 .Ft void
-.Fn SIMPLEQ_INSERT_AFTER "struct TYPE *listelm" "struct TYPE *elm" "SIMPLEQ_ENTRY NAME"
+.Fn SIMPLEQ_INSERT_AFTER "SIMPLEQ_HEAD *head" "struct TYPE *listelm" "struct TYPE *elm" "SIMPLEQ_ENTRY NAME"
 .Ft void
-.Fn SIMPLEQ_REMOVE_HEAD "SIMPLEQ_HEAD *head" "struct TYPE *elm" "SIMPLEQ_ENTRY NAME"
+.Fn SIMPLEQ_REMOVE_HEAD "SIMPLEQ_HEAD *head" "SIMPLEQ_ENTRY NAME"
 .Pp
 .Fn TAILQ_ENTRY "TYPE"
 .Fn TAILQ_HEAD "HEADNAME" "TYPE"
@@ -200,7 +200,7 @@
 .Ft "bool"
 .Fn TAILQ_EMPTY "TAILQ_HEAD *head"
 .Fn TAILQ_FOREACH "VARNAME" "TAILQ_HEAD *head" "TAILQ_ENTRY NAME"
-.Fn TAILQ_FOREACH_REVERSE "VARNAME" "TAILQ_HEAD *head" "TAILQ_ENTRY NAME" "HEADNAME"
+.Fn TAILQ_FOREACH_REVERSE "VARNAME" "TAILQ_HEAD *head" "HEADNAME" "TAILQ_ENTRY NAME"
 .Ft void
 .Fn TAILQ_INIT "TAILQ_HEAD *head"
 .Ft void
@@ -722,16 +722,16 @@ n1 = malloc(sizeof(struct entry));	/* Insert at the head. */
 SIMPLEQ_INSERT_HEAD(&head, n1, entries);
 
 n2 = malloc(sizeof(struct entry));	/* Insert after. */
-SIMPLEQ_INSERT_AFTER(n1, n2, entries);
+SIMPLEQ_INSERT_AFTER(&head, n1, n2, entries);
 
 n2 = malloc(sizeof(struct entry));	/* Insert at the tail. */
-SIMPLEQ_INSERT_TAIL(&head, n1, entries);
+SIMPLEQ_INSERT_TAIL(&head, n2, entries);
 					/* Forward traversal. */
 for (np = SIMPLEQ_FIRST(&head); np != NULL; np = SIMPLEQ_NEXT(np, entries))
 	np-> ...
 					/* Delete. */
 while ((n1 = SIMPLEQ_FIRST(&head)) != NULL)
-	SIMPLEQ_REMOVE_HEAD(&head, n1, entries);
+	SIMPLEQ_REMOVE_HEAD(&head, entries);
 .Ed
 .Sh TAIL QUEUES
 A tail queue is headed by a structure defined by the
@@ -824,7 +824,7 @@ starts at the first element and proceeds towards the last.
 starts at the last element and proceeds towards the first.
 .Bd -literal -offset indent
 TAILQ_FOREACH(np, &head, NAME)
-TAILQ_FOREACH_REVERSE(np, &head, NAME, HEADNAME)
+TAILQ_FOREACH_REVERSE(np, &head, HEADNAME, NAME)
 .Ed
 .Pp
 The

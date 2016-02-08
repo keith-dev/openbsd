@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.100 2004/02/27 17:36:11 deraadt Exp $
+#	$OpenBSD: Makefile,v 1.104 2004/08/06 22:30:54 pefo Exp $
 
 #
 # For more information on building in tricky environments, please see
@@ -132,12 +132,12 @@ ${CROSSDIRS}:
 			echo ${TARGET} ;;\
 		amiga|hp300|mac68k|mvme68k) \
 			echo m68k ;;\
-		mvme88k) \
+		luna88k|mvme88k) \
 			echo m88k ;;\
-		macppc|mvmeppc|pegasos) \
+		macppc|mvmeppc) \
 			echo powerpc ;;\
 		sgi) \
-			echo mips ;;\
+			echo mips64 ;;\
 		*) \
 			(echo Unknown arch ${TARGET} >&2) ; exit 1;; \
 	esac > ${CROSSDIR}/TARGET_ARCH
@@ -176,8 +176,7 @@ ${CROSSINCLUDES}:	${CROSSOBJ}
 
 .if ${TARGET} == "alpha" || ${TARGET} == "amd64" || ${TARGET} == "hppa" || \
     ${TARGET} == "i386" || ${TARGET} == "macppc" || ${TARGET} == "mvmeppc" || \
-    ${TARGET} == "pegasos" || ${TARGET} == "sparc" || ${TARGET} == "sparc64" || \
-    ${TARGET} == "sgi"
+    ${TARGET} == "sparc" || ${TARGET} == "sparc64" || ${TARGET} == "sgi"
 BINUTILS=	ar as gasp ld nm objcopy objdump ranlib readelf size \
 		strings strip
 NEW_BINUTILS?=	Yes
@@ -198,21 +197,17 @@ ${CROSSBINUTILS}:	${CROSSINCLUDES}
 .else
 	(cd ${.CURDIR}/gnu/usr.bin/gas; \
 	    TARGET_MACHINE_ARCH=`cat ${CROSSDIR}/TARGET_ARCH` \
-	    MACHINE_ARCH=`cat ${CROSSDIR}/TARGET_ARCH` \
 	    MAKEOBJDIR=obj.${MACHINE}.${TARGET} ${MAKE} depend all; \
 	    TARGET_MACHINE_ARCH=`cat ${CROSSDIR}/TARGET_ARCH` \
-	    MACHINE_ARCH=`cat ${CROSSDIR}/TARGET_ARCH` \
 	    DESTDIR=${CROSSDIR} MAKEOBJDIR=obj.${MACHINE}.${TARGET} \
 	    ${MAKE} NOMAN= install)
 	ln -sf ${CROSSDIR}/usr/bin/as \
 	    ${CROSSDIR}/usr/`cat ${CROSSDIR}/TARGET_CANON`/bin/as
 	(cd ${.CURDIR}/gnu/usr.bin/ld; \
 	    TARGET_MACHINE_ARCH=`cat ${CROSSDIR}/TARGET_ARCH` \
-	    MACHINE_ARCH=`cat ${CROSSDIR}/TARGET_ARCH` \
 	    MAKEOBJDIR=obj.${MACHINE}.${TARGET} \
 	    ${MAKE} NOPIC= NOMAN= depend all; \
 	    TARGET_MACHINE_ARCH=`cat ${CROSSDIR}/TARGET_ARCH` \
-	    MACHINE_ARCH=`cat ${CROSSDIR}/TARGET_ARCH` \
 	    DESTDIR=${CROSSDIR} MAKEOBJDIR=obj.${MACHINE}.${TARGET} \
 	    ${MAKE} NOPIC= NOMAN= install)
 	ln -sf ${CROSSDIR}/usr/bin/ld \
@@ -232,26 +227,23 @@ ${CROSSBINUTILS}:	${CROSSINCLUDES}
 	(cd ${.CURDIR}/usr.bin/strip; \
 	    MAKEOBJDIR=obj.${MACHINE}.${TARGET} \
 	    ${MAKE} TARGET_MACHINE_ARCH=`cat ${CROSSDIR}/TARGET_ARCH` \
-	    MACHINE_ARCH=`cat ${CROSSDIR}/TARGET_ARCH` \
 	    NOMAN= depend all; \
 	    DESTDIR=${CROSSDIR} MAKEOBJDIR=obj.${MACHINE}.${TARGET} \
 	    ${MAKE} TARGET_MACHINE_ARCH=`cat ${CROSSDIR}/TARGET_ARCH` \
-	    MACHINE_ARCH=`cat ${CROSSDIR}/TARGET_ARCH` \
 	    NOMAN= install)
 	ln -sf ${CROSSDIR}/usr/bin/strip \
 	    ${CROSSDIR}/usr/`cat ${CROSSDIR}/TARGET_CANON`/bin/strip
+.endif
 	(cd ${.CURDIR}/usr.bin/nm; \
 	    MAKEOBJDIR=obj.${MACHINE}.${TARGET} \
 	    ${MAKE} TARGET_MACHINE_ARCH=`cat ${CROSSDIR}/TARGET_ARCH` \
-	    MACHINE_ARCH=`cat ${CROSSDIR}/TARGET_ARCH` \
 	    NOMAN= depend all; \
 	    DESTDIR=${CROSSDIR} MAKEOBJDIR=obj.${MACHINE}.${TARGET} \
 	    ${MAKE} NOMAN= install)
 	ln -sf ${CROSSDIR}/usr/bin/nm \
 	    ${CROSSDIR}/usr/`cat ${CROSSDIR}/TARGET_CANON`/bin/nm
 	ln -sf ${CROSSDIR}/usr/bin/size \
-	    ${CROSSDIR}/usr/`cat ${CROSSDIR}/TARGET_CANON`/bin/nm
-.endif
+	    ${CROSSDIR}/usr/`cat ${CROSSDIR}/TARGET_CANON`/bin/size
 	@for cmd in ${BINUTILS}; do \
 	 if [ ! -e ${CROSSDIR}/usr/bin/$$cmd -a \
 	 -e ${CROSSDIR}/usr/bin/`cat ${CROSSDIR}/TARGET_CANON`-$$cmd ]; then \
@@ -268,14 +260,19 @@ ${CROSSBINUTILS}:	${CROSSINCLUDES}
 ${CROSSGCC}:		${CROSSBINUTILS}
 	(cd ${CROSSDIR}/usr/obj/gnu/egcs/gcc; \
 	    /bin/sh ${.CURDIR}/gnu/egcs/gcc/configure \
-	    --prefix ${CROSSDIR}/usr \
+	    --with-gnu-as --with-gnu-ld --prefix ${CROSSDIR}/usr \
 	    --target `cat ${CROSSDIR}/TARGET_CANON` \
+	    --enable-languages="c,c++" --enable-cpp --disable-nls \
 	    --with-gxx-include-dir=${CROSSDIR}/usr/include/g++ && \
 	    PATH=${CROSSPATH} ${MAKE} BISON=yacc LANGUAGES="${CROSSLANGS}" \
-	    LDFLAGS="${LDSTATIC}" build_infodir=. \
+	    CFLAGS="${CFLAGS} -I${.CURDIR}/gnu/lib/libiberty/include" \
+	    LIBIBERTY_INCLUDES=${.CURDIR}/gnu/lib/libiberty/include \
+	    DEMANGLER_PROG= DEMANGLE_H= LDFLAGS="${LDSTATIC}" build_infodir=. \
 	    GCC_FOR_TARGET="./xgcc -B./ -I${CROSSDIR}/usr/include" && \
 	    ${MAKE} BISON=yacc LANGUAGES="${CROSSLANGS}" LDFLAGS="${LDSTATIC}" \
 	    GCC_FOR_TARGET="./xgcc -B./ -I${CROSSDIR}/usr/include" \
+	    CFLAGS="${CFLAGS} -I${.CURDIR}/gnu/lib/libiberty/include" \
+	    LIBIBERTY_INCLUDES=${.CURDIR}/gnu/lib/libiberty/include \
 	    build_infodir=. INSTALL_MAN= INSTALL_HEADERS_DIR= install)
 	ln -sf ${CROSSDIR}/usr/bin/`cat ${CROSSDIR}/TARGET_CANON`-gcc \
 	    ${CROSSDIR}/usr/bin/cc

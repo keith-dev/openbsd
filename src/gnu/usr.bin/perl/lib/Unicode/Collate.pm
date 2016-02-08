@@ -12,19 +12,13 @@ use warnings;
 use Carp;
 use File::Spec;
 
-require Exporter;
+no warnings 'utf8';
 
-our $VERSION = '0.30';
+our $VERSION = '0.40';
 our $PACKAGE = __PACKAGE__;
 
-our @ISA = qw(Exporter);
-
-our %EXPORT_TAGS = ();
-our @EXPORT_OK = ();
-our @EXPORT = ();
-
-(our $Path = $INC{'Unicode/Collate.pm'}) =~ s/\.pm$//;
-our $KeyFile = "allkeys.txt";
+my @Path = qw(Unicode Collate);
+my $KeyFile = "allkeys.txt";
 
 # Perl's boolean
 use constant TRUE  => 1;
@@ -34,7 +28,7 @@ use constant NOMATCHPOS => -1;
 # A coderef to get combining class imported from Unicode::Normalize
 # (i.e. \&Unicode::Normalize::getCombinClass).
 # This is also used as a HAS_UNICODE_NORMALIZE flag.
-our $CVgetCombinClass;
+my $CVgetCombinClass;
 
 # Supported Levels
 use constant MinLevel => 1;
@@ -46,12 +40,6 @@ use constant Min3Wt => 0x02;
 
 # Shifted weight at 4th level
 use constant Shift4Wt => 0xFFFF;
-
-# Variable weight at 1st level.
-# This is a negative value but should be regarded as zero on collation.
-# This is for distinction of variable chars from level 3 ignorable chars.
-use constant Var1Wt => -1;
-
 
 # A boolean for Variable and 16-bit weights at 4 levels of Collation Element
 # PROBLEM: The Default Unicode Collation Element Table
@@ -108,7 +96,7 @@ use constant BMP_Max       => 0xFFFF;
 
 # Logical_Order_Exception in PropList.txt
 # TODO: synchronization with change of PropList.txt.
-our $DefaultRearrange = [ 0x0E40..0x0E44, 0x0EC0..0x0EC4 ];
+my $DefaultRearrange = [ 0x0E40..0x0E44, 0x0EC0..0x0EC4 ];
 
 sub UCA_Version { "11" }
 
@@ -142,13 +130,14 @@ our @ChangeNG = qw/
     entry mapping table maxlength
     ignoreChar ignoreName undefChar undefName variableTable
     versionTable alternateTable backwardsTable forwardsTable rearrangeTable
-    derivCode normCode rearrangeHash L3_ignorable
+    derivCode normCode rearrangeHash
     backwardsFlag
   /;
 # The hash key 'ignored' is deleted at v 0.21.
 # The hash key 'isShift' is deleted at v 0.23.
 # The hash key 'combining' is deleted at v 0.24.
 # The hash key 'entries' is deleted at v 0.30.
+# The hash key 'L3_ignorable' is deleted at v 0.40.
 
 sub version {
     my $self = shift;
@@ -185,11 +174,13 @@ sub change {
 
 sub _checkLevel {
     my $level = shift;
-    my $key   = shift;
-    croak sprintf "Illegal level %d (in \$self->{%s}) lower than %d.",
-	$level, $key, MinLevel if MinLevel > $level;
-    croak sprintf "Unsupported level %d (in \$self->{%s}) higher than %d ",
-	$level, $key, MaxLevel if MaxLevel < $level;
+    my $key   = shift; # 'level' or 'backwards'
+    MinLevel <= $level or croak sprintf
+	"Illegal level %d (in value for key '%s') lower than %d.",
+	    $level, $key, MinLevel;
+    $level <= MaxLevel or croak sprintf
+	"Unsupported level %d (in value for key '%s') higher than %d.",
+	    $level, $key, MaxLevel;
 }
 
 my %DerivCode = (
@@ -206,7 +197,7 @@ sub checkCollator {
 	or croak "Illegal UCA version (passed $self->{UCA_Version}).";
 
     $self->{variable} ||= $self->{alternate} || $self->{variableTable} ||
-		$self->{alternateTable} || $self->{alternate} || 'shifted';
+				$self->{alternateTable} || 'shifted';
     $self->{variable} = $self->{alternate} = lc($self->{variable});
     exists $VariableOK{ $self->{variable} }
 	or croak "$PACKAGE unknown variable tag name: $self->{variable}";
@@ -274,15 +265,17 @@ sub new
     $self->read_table if defined $self->{table};
 
     if ($self->{entry}) {
-	$self->parseEntry($_) foreach split /\n/, $self->{entry};
+	while ($self->{entry} =~ /([^\n]+)/g) {
+	    $self->parseEntry($1);
+	}
     }
 
     $self->{level} ||= MaxLevel;
     $self->{UCA_Version} ||= UCA_Version();
 
-    $self->{overrideHangul} = ''
+    $self->{overrideHangul} = FALSE
 	if ! exists $self->{overrideHangul};
-    $self->{overrideCJK} = ''
+    $self->{overrideCJK} = FALSE
 	if ! exists $self->{overrideCJK};
     $self->{normalization} = 'NFD'
 	if ! exists $self->{normalization};
@@ -298,38 +291,43 @@ sub new
 
 sub read_table {
     my $self = shift;
-    my $file = $self->{table} ne '' ? $self->{table} : $KeyFile;
 
-    my $filepath = File::Spec->catfile($Path, $file);
-    open my $fk, "<$filepath"
-	or croak "File does not exist at $filepath";
+    my($f, $fh);
+    foreach my $d (@INC) {
+	$f = File::Spec->catfile($d, @Path, $self->{table});
+	last if open($fh, $f);
+	$f = undef;
+    }
+    defined $f
+	or croak "$PACKAGE: $self->{table} is not found in @INC";
 
-    while (<$fk>) {
+    while (<$fh>) {
 	next if /^\s*#/;
-	if (/^\s*\@/) {
-	    if    (/^\s*\@version\s*(\S*)/) {
-		$self->{versionTable} ||= $1;
-	    }
-	    elsif (/^\s*\@variable\s+(\S*)/) { # since UTS #10-9
-		$self->{variableTable} ||= $1;
-	    }
-	    elsif (/^\s*\@alternate\s+(\S*)/) { # till UTS #10-8
-		$self->{alternateTable} ||= $1;
-	    }
-	    elsif (/^\s*\@backwards\s+(\S*)/) {
-		push @{ $self->{backwardsTable} }, $1;
-	    }
-	    elsif (/^\s*\@forwards\s+(\S*)/) { # parhaps no use
-		push @{ $self->{forwardsTable} }, $1;
-	    }
-	    elsif (/^\s*\@rearrange\s+(.*)/) { # (\S*) is NG
-		push @{ $self->{rearrangeTable} }, _getHexArray($1);
-	    }
+	unless (s/^\s*\@//) {
+	    $self->parseEntry($_);
 	    next;
 	}
-	$self->parseEntry($_);
+
+	if (/^version\s*(\S*)/) {
+	    $self->{versionTable} ||= $1;
+	}
+	elsif (/^variable\s+(\S*)/) { # since UTS #10-9
+	    $self->{variableTable} ||= $1;
+	}
+	elsif (/^alternate\s+(\S*)/) { # till UTS #10-8
+	    $self->{alternateTable} ||= $1;
+	}
+	elsif (/^backwards\s+(\S*)/) {
+	    push @{ $self->{backwardsTable} }, $1;
+	}
+	elsif (/^forwards\s+(\S*)/) { # parhaps no use
+	    push @{ $self->{forwardsTable} }, $1;
+	}
+	elsif (/^rearrange\s+(.*)/) { # (\S*) is NG
+	    push @{ $self->{rearrangeTable} }, _getHexArray($1);
+	}
     }
-    close $fk;
+    close $fh;
 }
 
 
@@ -389,39 +387,38 @@ sub parseEntry
 	# if and only if "all" CEs are [.0000.0000.0000].
     }
 
-    $self->{mapping}{$entry} = \@key;
+    $self->{mapping}{$entry} = $is_L3_ignorable ? [] : \@key;
 
     if (@uv > 1) {
 	(!$self->{maxlength}{$uv[0]} || $self->{maxlength}{$uv[0]} < @uv)
 	    and $self->{maxlength}{$uv[0]} = @uv;
     }
-    else {
-	$is_L3_ignorable
-	    ? ($self->{L3_ignorable}{$uv[0]} = TRUE)
-	    : ($self->{L3_ignorable}{$uv[0]} and
-	       $self->{L3_ignorable}{$uv[0]} = FALSE); # &&= stores key.
-    }
 }
 
 
 ##
-## arrayref[weights] = varCE(VCE)
+## VCE = _varCE(variable term, VCE)
 ##
-sub varCE
+sub _varCE
 {
-    my $self = shift;
-    my($var, @wt) = unpack(VCE_TEMPLATE, shift);
+    my $vbl = shift;
+    my $vce = shift;
+    if ($vbl eq 'non-ignorable') {
+	return $vce;
+    }
+    my ($var, @wt) = unpack VCE_TEMPLATE, $vce;
 
-    $self->{variable} eq 'blanked' ?
-	$var ? [Var1Wt, 0, 0, $wt[3]] : \@wt :
-    $self->{variable} eq 'non-ignorable' ?
-	\@wt :
-    $self->{variable} eq 'shifted' ?
-	$var ? [Var1Wt, 0, 0, $wt[0] ]
-	     : [ @wt[0..2], $wt[0]+$wt[1]+$wt[2] ? Shift4Wt : 0 ] :
-    $self->{variable} eq 'shift-trimmed' ?
-	$var ? [Var1Wt, 0, 0, $wt[0] ] : [ @wt[0..2], 0 ] :
-	croak "$PACKAGE unknown variable name: $self->{variable}";
+    if ($var) {
+	return pack(VCE_TEMPLATE, $var, 0, 0, 0,
+		$vbl eq 'blanked' ? $wt[3] : $wt[0]);
+    }
+    elsif ($vbl eq 'blanked') {
+	return $vce;
+    }
+    else {
+	return pack(VCE_TEMPLATE, $var, @wt[0..2],
+	    $vbl eq 'shifted' && $wt[0]+$wt[1]+$wt[2] ? Shift4Wt : 0);
+    }
 }
 
 sub viewSortKey
@@ -458,7 +455,6 @@ sub splitEnt
     my $map  = $self->{mapping};
     my $max  = $self->{maxlength};
     my $reH  = $self->{rearrangeHash};
-    my $ign  = $self->{L3_ignorable};
     my $ver9 = $self->{UCA_Version} >= 9;
 
     my ($str, @buf);
@@ -491,18 +487,17 @@ sub splitEnt
 	}
     }
 
-    if ($ver9) {
-	# To remove a character marked as a completely ignorable.
-	for (my $i = 0; $i < @src; $i++) {
-	    $src[$i] = undef if $ign->{ $src[$i] };
-	}
+    # To remove a character marked as a completely ignorable.
+    for (my $i = 0; $i < @src; $i++) {
+	$src[$i] = undef
+	    if _isIllegal($src[$i]) || ($ver9 &&
+		$map->{ $src[$i] } && @{ $map->{ $src[$i] } } == 0);
     }
 
     for (my $i = 0; $i < @src; $i++) {
-	next if _isNonCharacter($src[$i]);
-
-	my $i_orig = $i;
 	my $jcps = $src[$i];
+	next if ! defined $jcps;
+	my $i_orig = $i;
 
 	if ($max->{$jcps}) { # contract
 	    my $temp_jcps = $jcps;
@@ -548,9 +543,8 @@ sub splitEnt
 	}
 
 	if ($wLen) {
-	    for (my $p = $i + 1; $p < @src; $p++) {
-		last if defined $src[$p];
-		$i = $p;
+	    for (; $i + 1 < @src; $i++) {
+		last if defined $src[$i + 1];
 	    }
 	}
 
@@ -561,17 +555,18 @@ sub splitEnt
 
 
 ##
-## list of arrayrefs of weights = getWt(JCPS)
+## list of VCE = getWt(JCPS)
 ##
 sub getWt
 {
     my $self = shift;
     my $u    = shift;
+    my $vbl  = $self->{variable};
     my $map  = $self->{mapping};
     my $der  = $self->{derivCode};
 
     return if !defined $u;
-    return map($self->varCE($_), @{ $map->{$u} })
+    return map(_varCE($vbl, $_), @{ $map->{$u} })
 	if $map->{$u};
 
     # JCPS must not be a contraction, then it's a code point.
@@ -613,13 +608,13 @@ sub getWt
 		    $map->{$_} ? @{ $map->{$_} } : $der->($_);
 		} @decH);
 	}
-	return map $self->varCE($_), @hangulCE;
+	return map _varCE($vbl, $_), @hangulCE;
     }
     elsif (CJK_UidIni  <= $u && $u <= CJK_UidFin  ||
 	   CJK_ExtAIni <= $u && $u <= CJK_ExtAFin ||
 	   CJK_ExtBIni <= $u && $u <= CJK_ExtBFin) {
 	my $cjk  = $self->{overrideCJK};
-	return map $self->varCE($_),
+	return map _varCE($vbl, $_),
 	    $cjk
 		? map(pack(VCE_TEMPLATE, NON_VAR, @$_), &$cjk($u))
 		: defined $cjk && $self->{UCA_Version} <= 8 && $u <= BMP_Max
@@ -627,7 +622,7 @@ sub getWt
 		    : $der->($u);
     }
     else {
-	return map $self->varCE($_), $der->($u);
+	return map _varCE($vbl, $_), $der->($u);
     }
 }
 
@@ -641,11 +636,9 @@ sub getSortKey
     my $lev  = $self->{level};
     my $rEnt = $self->splitEnt(shift); # get an arrayref of JCPS
     my $ver9 = $self->{UCA_Version} >= 9;
-    my $v2i  = $self->{variable} ne 'non-ignorable';
+    my $v2i  = $ver9 && $self->{variable} ne 'non-ignorable';
 
-    # weight arrays
-    my (@wts, @buf, $last_is_variable);
-
+    my @buf; # weight arrays
     if ($self->{hangul_terminator}) {
 	my $preHST = '';
 	foreach my $jcps (@$rEnt) {
@@ -659,38 +652,40 @@ sub getSortKey
 		$preHST =~ /V\z/ && $curHST =~ /^L/ ||
 		$preHST =~ /T\z/ && $curHST =~ /^[LV]/) {
 
-		push @wts, $self->varCE_HangulTerm;
+		push @buf, $self->getWtHangulTerm();
 	    }
 	    $preHST = $curHST;
 
-	    push @wts, $self->getWt($jcps);
+	    push @buf, $self->getWt($jcps);
 	}
 	$preHST # end at hangul
-	    and push @wts, $self->varCE_HangulTerm;
+	    and push @buf, $self->getWtHangulTerm();
     }
     else {
 	foreach my $jcps (@$rEnt) {
-	    push @wts, $self->getWt($jcps);
+	    push @buf, $self->getWt($jcps);
 	}
-    }
-
-    foreach my $wt (@wts) {
-	if ($v2i && $ver9) {
-	    if ($wt->[0] == 0) { # ignorable
-		next if $last_is_variable;
-	    } else {
-		$last_is_variable = ($wt->[0] == Var1Wt);
-	    }
-	}
-	push @buf, $wt;
     }
 
     # make sort key
     my @ret = ([],[],[],[]);
-    foreach my $v (0..$lev-1) {
-	foreach my $b (@buf) {
-	    push @{ $ret[$v] }, $b->[$v]
-		if 0 < $b->[$v];
+    my $last_is_variable;
+
+    foreach my $vwt (@buf) {
+	my($var, @wt) = unpack(VCE_TEMPLATE, $vwt);
+	if ($v2i) {
+	    if ($var) {
+		$last_is_variable = TRUE;
+	    }
+	    elsif (!$wt[0]) { # ignorable
+		next if $last_is_variable;
+	    }
+	    else {
+		$last_is_variable = FALSE;
+	    }
+	}
+	foreach my $v (0..$lev-1) {
+	    0 < $wt[$v] and push @{ $ret[$v] }, $wt[$v];
 	}
     }
 
@@ -772,10 +767,10 @@ sub _derivCE_8 {
 }
 
 
-sub varCE_HangulTerm {
+sub getWtHangulTerm {
     my $self = shift;
-    return $self->varCE(pack(VCE_TEMPLATE,
-	NON_VAR, $self->{hangul_terminator}, 0,0,0));
+    return _varCE($self->{variable},
+	pack(VCE_TEMPLATE, NON_VAR, $self->{hangul_terminator}, 0,0,0));
 }
 
 
@@ -801,7 +796,7 @@ sub _decompHangul {
     );
 }
 
-sub _isNonCharacter {
+sub _isIllegal {
     my $code = shift;
     return ! defined $code                      # removed
 	|| ($code < 0 || 0x10FFFF < $code)      # out of range
@@ -888,63 +883,68 @@ sub index
 	    ? map([$_, 0], $temp..$len)
 	    : wantarray ? ($temp,0) : $temp;
     }
-    if ($len < $pos) {
-	return wantarray ? () : NOMATCHPOS;
-    }
+    $len < $pos
+	and return wantarray ? () : NOMATCHPOS;
     my $strE = $self->splitEnt($pos ? substr($str, $pos) : $str, TRUE);
-    if (! @$strE) {
-	return wantarray ? () : NOMATCHPOS;
-    }
-    my $last_is_variable;
+    @$strE
+	or return wantarray ? () : NOMATCHPOS;
+
     my(@strWt, @iniPos, @finPos, @subWt, @g_ret);
 
-    $last_is_variable = FALSE;
-    for my $wt (map $self->getWt($_), @$subE) {
-	my $to_be_pushed = _nonIgnorAtLevel($wt,$lev);
+    my $last_is_variable;
+    for my $vwt (map $self->getWt($_), @$subE) {
+	my($var, @wt) = unpack(VCE_TEMPLATE, $vwt);
+	my $to_be_pushed = _nonIgnorAtLevel(\@wt,$lev);
 
 	if ($v2i && $ver9) {
-	    if ($wt->[0] == 0) {
+	    if ($var) {
+		$last_is_variable = TRUE;
+	    }
+	    elsif (!$wt[0]) { # ignorable
 		$to_be_pushed = FALSE if $last_is_variable;
-	    } else {
-		$last_is_variable = ($wt->[0] == Var1Wt);
+	    }
+	    else {
+		$last_is_variable = FALSE;
 	    }
 	}
 
-	if (@subWt && $wt->[0] == 0) {
-	    push @{ $subWt[-1] }, $wt if $to_be_pushed;
+	if (@subWt && !$var && !$wt[0]) {
+	    push @{ $subWt[-1] }, \@wt if $to_be_pushed;
 	} else {
-	    $wt->[0] = 0 if $wt->[0] == Var1Wt;
-	    push @subWt, [ $wt ];
+	    push @subWt, [ \@wt ];
 	}
     }
 
     my $count = 0;
     my $end = @$strE - 1;
 
-    $last_is_variable = FALSE;
-
+    $last_is_variable = FALSE; # reuse
     for (my $i = 0; $i <= $end; ) { # no $i++
 	my $found_base = 0;
 
 	# fetch a grapheme
 	while ($i <= $end && $found_base == 0) {
-	    for my $wt ($self->getWt($strE->[$i][0])) {
-		my $to_be_pushed = _nonIgnorAtLevel($wt,$lev);
+	    for my $vwt ($self->getWt($strE->[$i][0])) {
+		my($var, @wt) = unpack(VCE_TEMPLATE, $vwt);
+		my $to_be_pushed = _nonIgnorAtLevel(\@wt,$lev);
 
 		if ($v2i && $ver9) {
-		    if ($wt->[0] == 0) {
+		    if ($var) {
+			$last_is_variable = TRUE;
+		    }
+		    elsif (!$wt[0]) { # ignorable
 			$to_be_pushed = FALSE if $last_is_variable;
-		    } else {
-			$last_is_variable = ($wt->[0] == Var1Wt);
+		    }
+		    else {
+			$last_is_variable = FALSE;
 		    }
 		}
 
-		if (@strWt && $wt->[0] == 0) {
-		    push @{ $strWt[-1] }, $wt if $to_be_pushed;
+		if (@strWt && !$var && !$wt[0]) {
+		    push @{ $strWt[-1] }, \@wt if $to_be_pushed;
 		    $finPos[-1] = $strE->[$i][2];
 		} elsif ($to_be_pushed) {
-		    $wt->[0] = 0 if $wt->[0] == Var1Wt;
-		    push @strWt,  [ $wt ];
+		    push @strWt, [ \@wt ];
 		    push @iniPos, $found_base ? NOMATCHPOS : $strE->[$i][1];
 		    $finPos[-1] = NOMATCHPOS if $found_base;
 		    push @finPos, $strE->[$i][2];
@@ -1144,16 +1144,44 @@ in the collation element table through C<table>,
 mapping to collation elements is overrided.
 If it does not exist, the mapping is defined additionally.
 
-  entry => <<'ENTRIES', # use the UCA file format
-00E6 ; [.0861.0020.0002.00E6] [.08B1.0020.0002.00E6] # ligature <ae> as <a><e>
-0063 0068 ; [.0893.0020.0002.0063]      # "ch" in traditional Spanish
-0043 0068 ; [.0893.0020.0008.0043]      # "Ch" in traditional Spanish
-ENTRIES
+    entry => <<'ENTRY', # for DUCET v4.0.0 (allkeys-4.0.0.txt)
+0063 0068 ; [.0E6A.0020.0002.0063] # ch
+0043 0068 ; [.0E6A.0020.0007.0043] # Ch
+0043 0048 ; [.0E6A.0020.0008.0043] # CH
+006C 006C ; [.0F4C.0020.0002.006C] # ll
+004C 006C ; [.0F4C.0020.0007.004C] # Ll
+004C 004C ; [.0F4C.0020.0008.004C] # LL
+00F1      ; [.0F7B.0020.0002.00F1] # n-tilde
+006E 0303 ; [.0F7B.0020.0002.00F1] # n-tilde
+00D1      ; [.0F7B.0020.0008.00D1] # N-tilde
+004E 0303 ; [.0F7B.0020.0008.00D1] # N-tilde
+ENTRY
+
+    entry => <<'ENTRY', # for DUCET v4.0.0 (allkeys-4.0.0.txt)
+00E6 ; [.0E33.0020.0002.00E6][.0E8B.0020.0002.00E6] # ae ligature as <a><e>
+00C6 ; [.0E33.0020.0008.00C6][.0E8B.0020.0008.00C6] # AE ligature as <A><E>
+ENTRY
 
 B<NOTE:> The code point in the UCA file format (before C<';'>)
-B<must> be a Unicode code point, but not a native code point.
+B<must> be a Unicode code point (defined as hexadecimal),
+but not a native code point.
 So C<0063> must always denote C<U+0063>,
 but not a character of C<"\x63">.
+
+Weighting may vary depending on collation element table.
+So ensure the weights defined in C<entry> will be consistent with
+those in the collation element table loaded via C<table>.
+
+In DUCET v4.0.0, primary weight of C<C> is C<0E60>
+and that of C<D> is C<0E6D>. So setting primary weight of C<CH> to C<0E6A>
+(as a value between C<0E60> and C<0E6D>)
+makes ordering as C<C E<lt> CH E<lt> D>.
+Exactly speaking DUCET already has some characters between C<C> and C<D>:
+C<small capital C> (C<U+1D04>) with primary weight C<0E64>,
+C<c-hook/C-hook> (C<U+0188/U+0187>) with C<0E65>,
+and C<c-curl> (C<U+0255>) with C<0E69>.
+Then primary weight C<0E6A> for C<CH> makes C<CH>
+ordered between C<c-curl> and C<D>.
 
 =item hangul_terminator
 
@@ -1232,10 +1260,10 @@ though they are not concerned with C<Unicode::Normalize::normalize()>.
 If C<undef> (not a string C<"undef">) is passed explicitly
 as the value for this key,
 any normalization is not carried out (this may make tailoring easier
-if any normalization is not desired).
-Under C<(normalization =E<gt> undef)>, only contiguous contractions
-are resolved; e.g. C<A-cedilla-ring> would be primary equal to C<A>,
-even if C<A-ring> (and C<A-ring-cedilla>) is ordered after C<Z>.
+if any normalization is not desired). Under C<(normalization =E<gt> undef)>,
+only contiguous contractions are resolved;
+e.g. even if C<A-ring> (and C<A-ring-cedilla>) is ordered after C<Z>,
+C<A-cedilla-ring> would be primary equal to C<A>.
 In this point,
 C<(normalization =E<gt> undef, preprocess =E<gt> sub { NFD(shift) })>
 B<is not> equivalent to C<(normalization =E<gt> 'NFD')>.
@@ -1289,14 +1317,15 @@ in table or C<entry> is still valid.
 
 -- see 7.1 Derived Collation Elements, UTS #10.
 
-By default, Hangul Syllables are decomposed into Hangul Jamo.
+By default, Hangul Syllables are decomposed into Hangul Jamo,
+even if C<(normalization =E<gt> undef)>.
 But the mapping of Hangul Syllables may be overrided.
 
 This tag works like C<overrideCJK>, so see there for examples.
 
 If you want to override the mapping of Hangul Syllables,
-the Normalization Forms D and KD are not appropriate
-(they will be decomposed before overriding).
+NFD, NFKD, and FCD are not appropriate,
+since they will decompose Hangul Syllables before overriding.
 
 If C<undef> is passed explicitly as the value for this key,
 weight for Hangul Syllables is treated as undefined
@@ -1343,12 +1372,12 @@ but it is not warned at present.>
 -- see 3.2 Default Unicode Collation Element Table, UTS #10.
 
 You can use another collation element table if desired.
-The table file must be put into a directory
-where F<Unicode/Collate.pm> is installed.
-E.g. in F<perl/lib/Unicode/Collate> directory
-when you have F<perl/lib/Unicode/Collate.pm>.
 
-By default, the filename F<"allkeys.txt"> is used.
+The table file should locate in the F<Unicode/Collate> directory
+on C<@INC>. Say, if the filename is F<Foo.txt>
+the table file is searched as F<Unicode/Collate/Foo.txt> in <@INC>.
+
+By default, F<allkeys.txt> (as the filename of DUCET) is used.
 
 If C<undef> is passed explicitly as the value for this key,
 no file is read (but you can define collation elements via C<entry>).
@@ -1383,6 +1412,10 @@ as it is greater than any other assigned collation elements
 (in the codepoint order among the unassigned characters).
 But, it'd be better to ignore characters
 unfamiliar to you and maybe never used.
+
+ex. Collation weights for beyond-BMP characters are not stored in object:
+
+    undefChar => qr/[^\0-\x{fffd}]/,
 
 =item katakana_before_hiragana
 
@@ -1422,7 +1455,7 @@ By default (if specification is omitted), 'shifted' is adopted.
    'Blanked'        Variable elements are made ignorable at levels 1 through 3;
                     considered at the 4th level.
 
-   'Non-ignorable'  Variable elements are not reset to ignorable.
+   'Non-Ignorable'  Variable elements are not reset to ignorable.
 
    'Shifted'        Variable elements are made ignorable at levels 1 through 3
                     their level 4 weight is replaced by the old level 1 weight.
@@ -1680,9 +1713,8 @@ assign C<normalization =E<gt> undef> explicitly.
 
 =head2 Conformance Test
 
-The Conformance Test for the UCA is provided
-in L<http://www.unicode.org/reports/tr10/CollationTest.html>
-and L<http://www.unicode.org/reports/tr10/CollationTest.zip>
+The Conformance Test for the UCA is available
+under L<http://www.unicode.org/Public/UCA/>.
 
 For F<CollationTest_SHIFTED.txt>,
 a collator via C<Unicode::Collate-E<gt>new( )> should be used;
@@ -1693,11 +1725,11 @@ B<Unicode::Normalize is required to try The Conformance Test.>
 
 =head1 AUTHOR
 
-SADAHIRO Tomoyuki, <SADAHIRO@cpan.org>
+SADAHIRO Tomoyuki <SADAHIRO@cpan.org>
 
   http://homepage1.nifty.com/nomenclator/perl/
 
-  Copyright(C) 2001-2003, SADAHIRO Tomoyuki. Japan. All rights reserved.
+  Copyright(C) 2001-2004, SADAHIRO Tomoyuki. Japan. All rights reserved.
 
   This library is free software; you can redistribute it
   and/or modify it under the same terms as Perl itself.
@@ -1712,17 +1744,17 @@ L<http://www.unicode.org/reports/tr10/>
 
 =item The Default Unicode Collation Element Table (DUCET)
 
-L<http://www.unicode.org/reports/tr10/allkeys.txt>
+L<http://www.unicode.org/Public/UCA/latest/allkeys.txt>
 
 =item The conformance test for the UCA
 
-L<http://www.unicode.org/reports/tr10/CollationTest.html>
+L<http://www.unicode.org/Public/UCA/latest/CollationTest.html>
 
-L<http://www.unicode.org/reports/tr10/CollationTest.zip>
+L<http://www.unicode.org/Public/UCA/latest/CollationTest.zip>
 
 =item Hangul Syllable Type
 
-http://www.unicode.org/Public/UNIDATA/HangulSyllableType.txt
+L<http://www.unicode.org/Public/UNIDATA/HangulSyllableType.txt>
 
 =item Unicode Normalization Forms - UAX #15
 

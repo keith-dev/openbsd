@@ -1,4 +1,4 @@
-/*	$OpenBSD: table.c,v 1.14 2003/06/10 16:41:29 deraadt Exp $	*/
+/*	$OpenBSD: table.c,v 1.16 2004/09/08 16:18:12 henning Exp $	*/
 
 /*
  * Copyright (c) 1983, 1988, 1993
@@ -1054,6 +1054,10 @@ read_rt(void)
 			continue;
 		}
 
+		/* ignore routes from bgpd */
+		if (m.r.rtm.rtm_flags & RTF_PROTO1)
+			continue;
+
 		if (m.r.rtm.rtm_type == RTM_IFINFO
 		    || m.r.rtm.rtm_type == RTM_NEWADDR
 		    || m.r.rtm.rtm_type == RTM_DELADDR) {
@@ -1711,7 +1715,7 @@ rtdelete(struct rt_entry *rt)
 	mask_sock.sin_addr.s_addr = rt->rt_mask;
 	masktrim(&mask_sock);
 	if (rt != (struct rt_entry *)rhead->rnh_deladdr(&dst_sock, &mask_sock,
-							rhead)) {
+							rhead, NULL)) {
 		msglog("rnh_deladdr() failed");
 	} else {
 		free(rt);

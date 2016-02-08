@@ -1,4 +1,4 @@
-/*	$OpenBSD: mkfs.c,v 1.38 2004/01/13 01:42:08 tedu Exp $	*/
+/*	$OpenBSD: mkfs.c,v 1.44 2004/09/10 19:49:15 otto Exp $	*/
 /*	$NetBSD: mkfs.c,v 1.25 1995/06/18 21:35:38 cgd Exp $	*/
 
 /*
@@ -34,7 +34,7 @@
 #if 0
 static char sccsid[] = "@(#)mkfs.c	8.3 (Berkeley) 2/3/94";
 #else
-static char rcsid[] = "$OpenBSD: mkfs.c,v 1.38 2004/01/13 01:42:08 tedu Exp $";
+static char rcsid[] = "$OpenBSD: mkfs.c,v 1.44 2004/09/10 19:49:15 otto Exp $";
 #endif
 #endif /* not lint */
 
@@ -47,6 +47,7 @@ static char rcsid[] = "$OpenBSD: mkfs.c,v 1.38 2004/01/13 01:42:08 tedu Exp $";
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 
+#include <err.h>
 #include <string.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -54,6 +55,7 @@ static char rcsid[] = "$OpenBSD: mkfs.c,v 1.38 2004/01/13 01:42:08 tedu Exp $";
 #ifndef STANDALONE
 #include <a.out.h>
 #include <stdio.h>
+#include <errno.h>
 #endif
 
 /*
@@ -129,17 +131,36 @@ daddr_t		alloc(int, int);
 static int	charsperline(void);
 void		initcg(int, time_t);
 void		wtfs(daddr_t, int, void *);
-void		fsinit(time_t);
+int		fsinit(time_t, mode_t, uid_t, gid_t);
 int		makedir(struct direct *, int);
 void		iput(struct ufs1_dinode *, ino_t);
 void		setblock(struct fs *, unsigned char *, int);
 void		clrblock(struct fs *, unsigned char *, int);
 int		isblock(struct fs *, unsigned char *, int);
 void		rdfs(daddr_t, int, void *);
-void		mkfs(struct partition *pp, char *fsys, int fi, int fo);
+void		mkfs(struct partition *, char *, int, int,
+		    mode_t, uid_t, gid_t);
+
+#ifndef STANDALONE
+volatile sig_atomic_t cur_cylno;
+volatile const char *cur_fsys;
 
 void
-mkfs(struct partition *pp, char *fsys, int fi, int fo)
+siginfo(int sig)
+{
+	int save_errno = errno;
+	char buf[128];
+
+	snprintf(buf, sizeof(buf), "%s: initializing cg %ld/%d\n",
+	    cur_fsys, (long)cur_cylno, sblock.fs_ncg);
+	write(STDERR_FILENO, buf, strlen(buf));
+	errno = save_errno;
+}
+#endif
+
+void
+mkfs(struct partition *pp, char *fsys, int fi, int fo,
+    mode_t mfsmode, uid_t mfsuid, gid_t mfsgid)
 {
 	long i, mincpc, mincpg, inospercg;
 	long cylno, rpos, blk, j, warn = 0;
@@ -163,7 +184,7 @@ mkfs(struct partition *pp, char *fsys, int fi, int fo)
 #endif
 	if (mfs) {
 		membase = mmap(NULL, fssize * sectorsize, PROT_READ|PROT_WRITE,
-		    MAP_ANON|MAP_PRIVATE, -1, 0);
+		    MAP_ANON|MAP_PRIVATE, -1, (off_t)0);
 		if (membase == MAP_FAILED)
 			err(12, "mmap");
 		madvise(membase, fssize * sectorsize, MADV_RANDOM);
@@ -225,6 +246,10 @@ recalc:
 	if (sblock.fs_bsize < MINBSIZE) {
 		errx(19, "block size %d is too small, minimum is %d",
 		     sblock.fs_bsize, MINBSIZE);
+	}
+	if (sblock.fs_bsize > MAXBSIZE) {
+		errx(19, "block size %d is too large, maximum is %d",
+		     sblock.fs_bsize, MAXBSIZE);
 	}
 	if (sblock.fs_bsize < sblock.fs_fsize) {
 		errx(20, "block size (%d) cannot be smaller than fragment size (%d)",
@@ -617,9 +642,16 @@ next:
 	 */
 	if (!quiet)
 		printf("super-block backups (for fsck -b #) at:\n");
+#ifndef STANDALONE
+	else if (!mfs && isatty(STDIN_FILENO)) {
+		signal(SIGINFO, siginfo);
+		cur_fsys = fsys;
+	}
+#endif
 	i = 0;
 	width = charsperline();
 	for (cylno = 0; cylno < sblock.fs_ncg; cylno++) {
+		cur_cylno = (sig_atomic_t)cylno;
 		initcg(cylno, utime);
 		if (quiet)
 			continue;
@@ -641,7 +673,8 @@ next:
 	 * Now construct the initial file system,
 	 * then write out the super-block.
 	 */
-	fsinit(utime);
+	if (fsinit(utime, mfsmode, mfsuid, mfsgid) != 0)
+		errx(32, "fsinit failed");
 	sblock.fs_time = utime;
 	/* don't write magic until we are done */
 	sblock.fs_magic = 0;
@@ -725,9 +758,8 @@ initcg(int cylno, time_t utime)
 		acg.cg_nextfreeoff = acg.cg_clusteroff + howmany
 		    (sblock.fs_cpg * sblock.fs_spc / NSPB(&sblock), NBBY);
 	}
-	if (acg.cg_nextfreeoff - (long)(&acg.cg_firstfield) > sblock.fs_cgsize) {
+	if (acg.cg_nextfreeoff > sblock.fs_cgsize)
 		errx(37, "panic: cylinder group too big");
-	}
 	acg.cg_cs.cs_nifree += sblock.fs_ipg;
 	if (cylno == 0)
 		for (i = 0; i < ROOTINO; i++) {
@@ -864,8 +896,8 @@ struct odirect olost_found_dir[] = {
 };
 #endif
 
-void
-fsinit(time_t utime)
+int
+fsinit(time_t utime, mode_t mfsmode, uid_t mfsuid, gid_t mfsgid)
 {
 	/*
 	 * initialize the node
@@ -895,7 +927,8 @@ fsinit(time_t utime)
 	node.di_mode = IFDIR | 1700;
 	node.di_nlink = 2;
 	node.di_size = sblock.fs_bsize;
-	node.di_db[0] = alloc(node.di_size, node.di_mode);
+	if ((node.di_db[0] = alloc(node.di_size, node.di_mode)) == 0)
+		return (1);
 	node.di_blocks = btodb(fragroundup(&sblock, node.di_size));
 	wtfs(fsbtodb(&sblock, node.di_db[0]), node.di_size, buf);
 	iput(&node, LOSTFOUNDINO);
@@ -903,19 +936,26 @@ fsinit(time_t utime)
 	/*
 	 * create the root directory
 	 */
-	if (mfs)
-		node.di_mode = IFDIR | 01777;
-	else
+	if (mfs) {
+		node.di_mode = IFDIR | mfsmode;
+		node.di_uid = mfsuid;
+		node.di_gid = mfsgid;
+	} else {
 		node.di_mode = IFDIR | UMASK;
+		node.di_uid = geteuid();
+		node.di_gid = getegid();
+	}
 	node.di_nlink = PREDEFDIR;
 	if (Oflag)
 		node.di_size = makedir((struct direct *)oroot_dir, PREDEFDIR);
 	else
 		node.di_size = makedir(root_dir, PREDEFDIR);
-	node.di_db[0] = alloc(sblock.fs_fsize, node.di_mode);
+	if ((node.di_db[0] = alloc(sblock.fs_fsize, node.di_mode)) == 0)
+		return (1);
 	node.di_blocks = btodb(fragroundup(&sblock, node.di_size));
 	wtfs(fsbtodb(&sblock, node.di_db[0]), sblock.fs_fsize, buf);
 	iput(&node, ROOTINO);
+	return (0);
 }
 
 /*
@@ -1001,10 +1041,8 @@ iput(struct ufs1_dinode *ip, ino_t ino)
 {
 	struct ufs1_dinode buf[MAXINOPB];
 	daddr_t d;
-	int c;
 
 	ip->di_gen = (u_int32_t)arc4random();
-	c = ino_to_cg(&sblock, ino);
 	rdfs(fsbtodb(&sblock, cgtod(&sblock, 0)), sblock.fs_cgsize,
 	    (char *)&acg);
 	if (acg.cg_magic != CG_MAGIC) {

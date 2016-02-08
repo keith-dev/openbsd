@@ -1,4 +1,4 @@
-.\"	$OpenBSD: kqueue.2,v 1.13 2003/12/17 12:03:05 jmc Exp $
+.\"	$OpenBSD: kqueue.2,v 1.17 2004/09/06 05:26:34 brad Exp $
 .\"
 .\" Copyright (c) 2000 Jonathan Lemon
 .\" All rights reserved.
@@ -101,6 +101,14 @@ is a pointer to an array of kevent structures.
 .Fa nevents
 determines the size of
 .Fa eventlist .
+When
+.Fa nevents
+is zero,
+.Fn kevent
+will return immediately even if there is a
+.Fa timeout
+specified unlike
+.Xr select 2 .
 If
 .Fa timeout
 is a non-null pointer, it specifies a maximum interval to wait
@@ -301,7 +309,7 @@ be attached to,
 containing the udata value, and
 .Va sigev_notify
 set to
-.Dv SIGEV_EVENT .
+.Dv SIGEV_KEVENT .
 When the aio_* function is called, the event will be registered
 with the specified kqueue, and the
 .Va ident
@@ -317,7 +325,7 @@ address of the kevent structure placed in the
 .Va aio_lio_opcode
 field of the AIO request.
 However, this approach will not work on architectures with 64-bit pointers,
-and should be considered depreciated.
+and should be considered deprecated.
 .It Dv EVFILT_VNODE
 Takes a file descriptor as the identifier and the events to watch for in
 .Va fflags ,
@@ -342,7 +350,7 @@ The file referenced by the descriptor was renamed.
 .It Dv NOTE_REVOKE
 Access to the file was revoked via
 .Xr revoke 2
-or the underlying fileystem was unmounted.
+or the underlying file system was unmounted.
 .El
 .Pp
 On return,
@@ -401,7 +409,7 @@ even if the signal has been marked as
 Event notification happens after normal signal delivery processing.
 .Va data
 returns the number of times the signal has occurred since the last call to
-.Fn kqueue .
+.Fn kevent .
 This filter automatically sets the
 .Dv EV_CLEAR
 flag internally.
@@ -496,3 +504,8 @@ system and this manual page were written by
 .Sh BUGS
 It is currently not possible to watch FIFOs, AIO, or a vnode that
 resides on anything but a UFS file system.
+.Pp
+The
+.Fa timeout
+value is limited to 24 hours; longer timeouts will be silently
+reinterpreted as 24 hours.

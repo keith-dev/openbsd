@@ -1,6 +1,4 @@
-/*	$OpenBSD: dhclient.c,v 1.31 2004/03/05 23:57:16 deraadt Exp $	*/
-
-/* DHCP Client. */
+/*	$OpenBSD: dhclient.c,v 1.58 2004/08/30 07:43:32 otto Exp $	*/
 
 /*
  * Copyright 2004 Henning Brauer <henning@openbsd.org>
@@ -56,6 +54,7 @@
  */
 
 #include "dhcpd.h"
+#include "privsep.h"
 
 #define	PERIOD 0x2e
 #define	hyphenchar(c) ((c) == 0x2d)
@@ -74,16 +73,15 @@
 
 time_t cur_time;
 time_t default_lease_time = 43200; /* 12 hours... */
-time_t max_lease_time = 86400; /* 24 hours... */
-struct tree_cache *global_options[256];
 
 char *path_dhclient_conf = _PATH_DHCLIENT_CONF;
-char *path_dhclient_db = _PATH_DHCLIENT_DB;
+char *path_dhclient_db = NULL;
 
 int log_perror = 1;
+int privfd;
+int nullfd = -1;
 
 struct iaddr iaddr_broadcast = { 4, { 255, 255, 255, 255 } };
-struct iaddr iaddr_any = { 4, { 0, 0, 0, 0 } };
 struct in_addr inaddr_any;
 struct sockaddr_in sockaddr_broadcast;
 
@@ -93,27 +91,30 @@ struct sockaddr_in sockaddr_broadcast;
  */
 #define ASSERT_STATE(state_is, state_shouldbe) {}
 
-#if !defined (TIME_MAX)
 #define TIME_MAX 2147483647
-#endif
 
 int		log_priority;
 int		no_daemon;
-int		save_scripts;
 int		unknown_ok = 1;
 int		routefd;
 
 struct interface_info	*ifi;
 
-void	 usage(void);
-int	 check_option(struct client_lease *l, int option);
-int	 ipv4addrs(char * buf);
-int	 res_hnok(const char *dn);
-char	*option_as_string(unsigned int code, unsigned char *data, int len);
+int		 findproto(char *, int);
+struct sockaddr	*get_ifa(char *, int);
+void		 routehandler(struct protocol *);
+void		 usage(void);
+int		 check_option(struct client_lease *l, int option);
+int		 ipv4addrs(char * buf);
+int		 res_hnok(const char *dn);
+char		*option_as_string(unsigned int code, unsigned char *data, int len);
+int		 fork_privchld(int, int);
 
 #define	ROUNDUP(a) \
 	    ((a) > 0 ? (1 + (((a) - 1) | (sizeof(long) - 1))) : sizeof(long))
 #define	ADVANCE(x, n) (x += ROUNDUP((n)->sa_len))
+
+time_t	scripttime;
 
 int
 findproto(char *cp, int n)
@@ -145,6 +146,25 @@ findproto(char *cp, int n)
 	return (-1);
 }
 
+struct sockaddr *
+get_ifa(char *cp, int n)
+{
+	struct sockaddr *sa;
+	int i;
+
+	if (n == 0)
+		return (NULL);
+	for (i = 1; i; i <<= 1)
+		if (i & n) {
+			sa = (struct sockaddr *)cp;
+			if (i == RTA_IFA)
+				return (sa);
+			ADVANCE(cp, sa);
+		}
+
+	return (NULL);
+}
+
 void
 routehandler(struct protocol *p)
 {
@@ -153,6 +173,10 @@ routehandler(struct protocol *p)
 	struct if_msghdr *ifm;
 	struct ifa_msghdr *ifam;
 	struct if_announcemsghdr *ifan;
+	struct client_lease *l;
+	time_t t = time(NULL);
+	struct sockaddr *sa;
+	struct iaddr a;
 	ssize_t n;
 
 	n = read(routefd, &msg, sizeof(msg));
@@ -168,7 +192,24 @@ routehandler(struct protocol *p)
 			break;
 		if (findproto((char *)(ifam + 1), ifam->ifam_addrs) != AF_INET)
 			break;
-		/* goto die; */
+		if (ifi == NULL)
+			goto die;
+		sa = get_ifa((char *)(ifam + 1), ifam->ifam_addrs);
+		if (sa == NULL)
+			goto die;
+
+		if ((a.len = sizeof(struct in_addr)) > sizeof(a.iabuf))
+			error("king bula sez: len mismatch");
+		memcpy(a.iabuf, &((struct sockaddr_in *)sa)->sin_addr, a.len);
+
+		for (l = ifi->client->active; l != NULL; l = l->next)
+			if (addr_eq(a, l->address))
+				break;
+
+		if (l != NULL)	/* new addr is the one we set */
+			break;
+
+		goto die;
 		break;
 	case RTM_DELADDR:
 		ifam = (struct ifa_msghdr *)rtm;
@@ -176,8 +217,9 @@ routehandler(struct protocol *p)
 			break;
 		if (findproto((char *)(ifam + 1), ifam->ifam_addrs) != AF_INET)
 			break;
+		if (scripttime == 0 || t < scripttime + 3)
+			break;
 		goto die;
-		break;
 	case RTM_IFINFO:
 		ifm = (struct if_msghdr *)rtm;
 		if (ifm->ifm_index != ifi->index)
@@ -197,10 +239,10 @@ routehandler(struct protocol *p)
 	return;
 
 die:
-	script_init(ifi, "FAIL", NULL);
+	script_init("FAIL", NULL);
 	if (ifi->client->alias)
-		script_write_params(ifi, "alias_", ifi->client->alias);
-	script_go(ifi);
+		script_write_params("alias_", ifi->client->alias);
+	script_go();
 	exit(1);
 }
 
@@ -208,22 +250,21 @@ int
 main(int argc, char *argv[])
 {
 	extern char		*__progname;
-	int			 ch, fd, quiet = 0;
+	int			 ch, fd, quiet = 0, i = 0;
+	int			 pipe_fd[2];
+	struct passwd		*pw;
 
 	/* Initially, log errors to stderr as well as to syslogd. */
-	openlog(__progname, LOG_NDELAY, DHCPD_LOG_FACILITY);
+	openlog(__progname, LOG_PID | LOG_NDELAY, DHCPD_LOG_FACILITY);
 	setlogmask(LOG_UPTO(LOG_INFO));
 
-	while ((ch = getopt(argc, argv, "c:dDl:qu")) != -1)
+	while ((ch = getopt(argc, argv, "c:dl:qu")) != -1)
 		switch (ch) {
 		case 'c':
 			path_dhclient_conf = optarg;
 			break;
 		case 'd':
 			no_daemon = 1;
-			break;
-		case 'D':
-			save_scripts = 1;
 			break;
 		case 'l':
 			path_dhclient_db = optarg;
@@ -246,12 +287,16 @@ main(int argc, char *argv[])
 
 	if ((ifi = calloc(1, sizeof(struct interface_info))) == NULL)
 		error("calloc");
-	strlcpy(ifi->name, argv[0], IFNAMSIZ);
+	if (strlcpy(ifi->name, argv[0], IFNAMSIZ) >= IFNAMSIZ)
+		error("Interface name too long");
+	if (path_dhclient_db == NULL && asprintf(&path_dhclient_db, "%s.%s",
+	    _PATH_DHCLIENT_DB, ifi->name) == -1)
+		error("asprintf");
 
 	if (quiet)
 		log_perror = 0;
 
-	/* Get the current time... */
+	tzset();
 	time(&cur_time);
 
 	memset(&sockaddr_broadcast, 0, sizeof(sockaddr_broadcast));
@@ -262,25 +307,70 @@ main(int argc, char *argv[])
 	inaddr_any.s_addr = INADDR_ANY;
 
 	read_client_conf();
+
+	if (!interface_link_status(ifi->name)) {
+		fprintf(stderr, "%s: no link ", ifi->name);
+		fflush(stderr);
+		sleep(1);
+		while (!interface_link_status(ifi->name)) {
+			fprintf(stderr, ".");
+			fflush(stderr);
+			if (++i > 10) {
+				fprintf(stderr, " giving up\n");
+				exit(1);
+			}
+			sleep(1);
+		}
+		fprintf(stderr, "got link\n");
+	}
+
+	if ((nullfd = open(_PATH_DEVNULL, O_RDWR, 0)) == -1)
+		error("cannot open %s: %m", _PATH_DEVNULL);
+
+	if ((pw = getpwnam("_dhcp")) == NULL) {
+		warning("no such user: _dhcp, falling back to \"nobody\"");
+		if ((pw = getpwnam("nobody")) == NULL)
+			error("no such user: nobody");
+	}
+
+	if (pipe(pipe_fd) == -1)
+		error("pipe");
+
+	fork_privchld(pipe_fd[0], pipe_fd[1]);
+
+	close(pipe_fd[0]);
+	privfd = pipe_fd[1];
+
 	if ((fd = open(path_dhclient_db, O_RDONLY|O_EXLOCK|O_CREAT, 0)) == -1)
 		error("can't open and lock %s: %m", path_dhclient_db);
 	read_client_leases();
 	rewrite_client_leases();
 	close(fd);
 
-	if (interface_link_status(ifi->name)) {
-		script_init(ifi, "PREINIT", NULL);
-		if (ifi->client->alias)
-			script_write_params(ifi, "alias_", ifi->client->alias);
-		script_go(ifi);
-	} else
-		error("no link on interface %s", ifi->name);
+	priv_script_init("PREINIT", NULL);
+	if (ifi->client->alias)
+		priv_script_write_params("alias_", ifi->client->alias);
+	priv_script_go();
 
 	if ((routefd = socket(PF_ROUTE, SOCK_RAW, 0)) != -1)
 		add_protocol("AF_ROUTE", routefd, routehandler, ifi);
 
 	/* set up the interface */
 	discover_interfaces(ifi);
+
+	if (chroot(_PATH_VAREMPTY) == -1)
+		error("chroot");
+	if (chdir("/") == -1)
+		error("chdir(\"/\")");
+
+	if (setgroups(1, &pw->pw_gid) ||
+	    setegid(pw->pw_gid) || setgid(pw->pw_gid) ||
+	    seteuid(pw->pw_uid) || setuid(pw->pw_uid))
+		error("can't drop privileges: %m");
+
+	endpwent();
+
+	setproctitle("%s", ifi->name);
 
 	ifi->client->state = S_INIT;
 	state_reboot(ifi);
@@ -298,7 +388,7 @@ usage(void)
 {
 	extern char	*__progname;
 
-	fprintf(stderr, "usage: %s [-dDqu] ", __progname);
+	fprintf(stderr, "usage: %s [-dqu] ", __progname);
 	fprintf(stderr, "[-c conffile] [-l leasefile] interface\n");
 	exit(1);
 }
@@ -366,9 +456,10 @@ state_reboot(void *ipp)
 	send_request(ip);
 }
 
-/* Called when a lease has completely expired and we've been unable to
-   renew it. */
-
+/*
+ * Called when a lease has completely expired and we've
+ * been unable to renew it.
+ */
 void
 state_init(void *ipp)
 {
@@ -390,14 +481,14 @@ state_init(void *ipp)
 	send_discover(ip);
 }
 
-/* state_selecting is called when one or more DHCPOFFER packets have been
-   received and a configurable period of time has passed. */
-
+/*
+ * state_selecting is called when one or more DHCPOFFER packets
+ * have been received and a configurable period of time has passed.
+ */
 void
 state_selecting(void *ipp)
 {
 	struct interface_info *ip = ipp;
-
 	struct client_lease *lp, *next, *picked;
 
 	ASSERT_STATE(state, S_SELECTING);
@@ -417,14 +508,14 @@ state_selecting(void *ipp)
 		/* Check to see if we got an ARPREPLY for the address
 		   in this particular lease. */
 		if (!picked) {
-			script_init(ip, "ARPCHECK", lp->medium);
-			script_write_params(ip, "check_", lp);
+			script_init("ARPCHECK", lp->medium);
+			script_write_params("check_", lp);
 
 			/* If the ARPCHECK code detects another
 			   machine using the offered address, it exits
 			   nonzero.  We need to send a DHCPDECLINE and
 			   toss the lease. */
-			if (script_go(ip)) {
+			if (script_go()) {
 				make_decline(ip, lp);
 				send_decline(ip);
 				goto freeit;
@@ -526,6 +617,9 @@ dhcpack(struct packet *packet)
 	   because the lease expiry offset is unsigned. */
 	if (ip->client->new->expiry < 0)
 		ip->client->new->expiry = TIME_MAX;
+	/* XXX should be fixed by resetting the client state */
+	if (ip->client->new->expiry < 60)
+		ip->client->new->expiry = 60;
 
 	/* Take the server-provided renewal time if there is one;
 	   otherwise figure it out according to the spec. */
@@ -567,16 +661,16 @@ bind_lease(struct interface_info *ip)
 	write_client_lease(ip, ip->client->new, 0);
 
 	/* Run the client script with the new parameters. */
-	script_init(ip, (ip->client->state == S_REQUESTING ? "BOUND" :
+	script_init((ip->client->state == S_REQUESTING ? "BOUND" :
 	    (ip->client->state == S_RENEWING ? "RENEW" :
 	    (ip->client->state == S_REBOOTING ? "REBOOT" : "REBIND"))),
 	    ip->client->new->medium);
 	if (ip->client->active && ip->client->state != S_REBOOTING)
-		script_write_params(ip, "old_", ip->client->active);
-	script_write_params(ip, "new_", ip->client->new);
+		script_write_params("old_", ip->client->active);
+	script_write_params("new_", ip->client->new);
 	if (ip->client->alias)
-		script_write_params(ip, "alias_", ip->client->alias);
-	script_go(ip);
+		script_write_params("alias_", ip->client->alias);
+	script_go();
 
 	/* Replace the old active lease with the new one. */
 	if (ip->client->active)
@@ -741,11 +835,11 @@ dhcpoffer(struct packet *packet)
 	lease->medium = ip->client->medium;
 
 	/* Send out an ARP Request for the offered IP address. */
-	script_init(ip, "ARPSEND", lease->medium);
-	script_write_params(ip, "check_", lease);
+	script_init("ARPSEND", lease->medium);
+	script_write_params("check_", lease);
 	/* If the script can't send an ARP request without waiting,
 	   we'll be waiting when we do the ARPCHECK, so don't wait now. */
-	if (script_go(ip))
+	if (script_go())
 		arp_timeout_needed = 0;
 	else
 		arp_timeout_needed = 2;
@@ -812,7 +906,7 @@ packet_to_lease(struct packet *packet)
 	lease = malloc(sizeof(struct client_lease));
 
 	if (!lease) {
-		warn("dhcpoffer: no memory to record lease.");
+		warning("dhcpoffer: no memory to record lease.");
 		return (NULL);
 	}
 
@@ -824,7 +918,7 @@ packet_to_lease(struct packet *packet)
 			lease->options[i].data =
 			    malloc(packet->options[i].len + 1);
 			if (!lease->options[i].data) {
-				warn("dhcpoffer: no memory for option %d", i);
+				warning("dhcpoffer: no memory for option %d", i);
 				free_client_lease(lease);
 				return (NULL);
 			} else {
@@ -838,7 +932,7 @@ packet_to_lease(struct packet *packet)
 			}
 			if (!check_option(lease,i)) {
 				/* ignore a bogus lease offer */
-				warn("Invalid lease option - ignoring offer");
+				warning("Invalid lease option - ignoring offer");
 				free_client_lease(lease);
 				return (NULL);
 			}
@@ -854,14 +948,14 @@ packet_to_lease(struct packet *packet)
 	    packet->raw->sname[0]) {
 		lease->server_name = malloc(DHCP_SNAME_LEN + 1);
 		if (!lease->server_name) {
-			warn("dhcpoffer: no memory for server name.");
+			warning("dhcpoffer: no memory for server name.");
 			free_client_lease(lease);
 			return (NULL);
 		}
 		memcpy(lease->server_name, packet->raw->sname, DHCP_SNAME_LEN);
 		lease->server_name[DHCP_SNAME_LEN]='\0';
 		if (!res_hnok(lease->server_name) ) {
-			warn("Bogus server name %s",  lease->server_name );
+			warning("Bogus server name %s",  lease->server_name );
 			free_client_lease(lease);
 			return (NULL);
 		}
@@ -875,7 +969,7 @@ packet_to_lease(struct packet *packet)
 		/* Don't count on the NUL terminator. */
 		lease->filename = malloc(DHCP_FILE_LEN + 1);
 		if (!lease->filename) {
-			warn("dhcpoffer: no memory for filename.");
+			warning("dhcpoffer: no memory for filename.");
 			free_client_lease(lease);
 			return (NULL);
 		}
@@ -929,10 +1023,7 @@ void
 send_discover(void *ipp)
 {
 	struct interface_info *ip = ipp;
-
-	int result;
-	int interval;
-	int increase = 1;
+	int interval, increase = 1;
 
 	/* Figure out how long it's been since we started transmitting. */
 	interval = cur_time - ip->client->first_sending;
@@ -964,8 +1055,8 @@ again:
 
 		note("Trying medium \"%s\" %d", ip->client->medium->string,
 		    increase);
-		script_init(ip, "MEDIUM", ip->client->medium);
-		if (script_go(ip))
+		script_init("MEDIUM", ip->client->medium);
+		if (script_go())
 			goto again;
 	}
 
@@ -1016,8 +1107,8 @@ again:
 	    ntohs(sockaddr_broadcast.sin_port), ip->client->interval);
 
 	/* Send out a packet. */
-	result = send_packet(ip, NULL, &ip->client->packet,
-	    ip->client->packet_length, inaddr_any, &sockaddr_broadcast, NULL);
+	(void)send_packet(ip, &ip->client->packet, ip->client->packet_length,
+	    inaddr_any, &sockaddr_broadcast, NULL);
 
 	add_timeout(cur_time + ip->client->interval, send_discover, ip);
 }
@@ -1032,7 +1123,6 @@ void
 state_panic(void *ipp)
 {
 	struct interface_info *ip = ipp;
-
 	struct client_lease *loop = ip->client->active;
 	struct client_lease *lp;
 
@@ -1050,17 +1140,17 @@ state_panic(void *ipp)
 			    piaddr(ip->client->active->address));
 			/* Run the client script with the existing
 			   parameters. */
-			script_init(ip, "TIMEOUT",
+			script_init("TIMEOUT",
 			    ip->client->active->medium);
-			script_write_params(ip, "new_", ip->client->active);
+			script_write_params("new_", ip->client->active);
 			if (ip->client->alias)
-				script_write_params(ip, "alias_",
+				script_write_params("alias_",
 				    ip->client->alias);
 
 			/* If the old lease is still good and doesn't
 			   yet need renewal, go into BOUND state and
 			   timeout at the renewal time. */
-			if (!script_go(ip)) {
+			if (!script_go()) {
 				if (cur_time <
 				    ip->client->active->renewal) {
 					ip->client->state = S_BOUND;
@@ -1112,10 +1202,10 @@ activate_next:
 	   tell the shell script that we failed to allocate an address,
 	   and try again later. */
 	note("No working leases in persistent database - sleeping.\n");
-	script_init(ip, "FAIL", NULL);
+	script_init("FAIL", NULL);
 	if (ip->client->alias)
-		script_write_params(ip, "alias_", ip->client->alias);
-	script_go(ip);
+		script_write_params("alias_", ip->client->alias);
+	script_go();
 	ip->client->state = S_INIT;
 	add_timeout(cur_time + ip->client->config->retry_interval, state_init,
 	    ip);
@@ -1126,11 +1216,9 @@ void
 send_request(void *ipp)
 {
 	struct interface_info *ip = ipp;
-
-	int result;
-	int interval;
 	struct sockaddr_in destination;
 	struct in_addr from;
+	int interval;
 
 	/* Figure out how long it's been since we started transmitting. */
 	interval = cur_time - ip->client->first_sending;
@@ -1160,10 +1248,10 @@ cancel:
 	if (ip->client->state == S_REBOOTING &&
 	    !ip->client->medium &&
 	    ip->client->active->medium ) {
-		script_init(ip, "MEDIUM", ip->client->active->medium);
+		script_init("MEDIUM", ip->client->active->medium);
 
 		/* If the medium we chose won't fly, go to INIT state. */
-		if (script_go(ip))
+		if (script_go())
 			goto cancel;
 
 		/* Record the medium. */
@@ -1175,18 +1263,18 @@ cancel:
 	if (ip->client->state != S_REQUESTING &&
 	    cur_time > ip->client->active->expiry) {
 		/* Run the client script with the new parameters. */
-		script_init(ip, "EXPIRE", NULL);
-		script_write_params(ip, "old_", ip->client->active);
+		script_init("EXPIRE", NULL);
+		script_write_params("old_", ip->client->active);
 		if (ip->client->alias)
-			script_write_params(ip, "alias_", ip->client->alias);
-		script_go(ip);
+			script_write_params("alias_", ip->client->alias);
+		script_go();
 
 		/* Now do a preinit on the interface so that we can
 		   discover a new address. */
-		script_init(ip, "PREINIT", NULL);
+		script_init("PREINIT", NULL);
 		if (ip->client->alias)
-			script_write_params(ip, "alias_", ip->client->alias);
-		script_go(ip);
+			script_write_params("alias_", ip->client->alias);
+		script_go();
 
 		ip->client->state = S_INIT;
 		state_init(ip);
@@ -1250,8 +1338,8 @@ cancel:
 	    inet_ntoa(destination.sin_addr), ntohs(destination.sin_port));
 
 	/* Send out a packet. */
-	result = send_packet(ip, NULL, &ip->client->packet,
-	    ip->client->packet_length, from, &destination, NULL);
+	(void) send_packet(ip, &ip->client->packet, ip->client->packet_length,
+	    from, &destination, NULL);
 
 	add_timeout(cur_time + ip->client->interval, send_request, ip);
 }
@@ -1260,41 +1348,23 @@ void
 send_decline(void *ipp)
 {
 	struct interface_info *ip = ipp;
-	int result;
 
 	note("DHCPDECLINE on %s to %s port %d", ip->name,
 	    inet_ntoa(sockaddr_broadcast.sin_addr),
 	    ntohs(sockaddr_broadcast.sin_port));
 
 	/* Send out a packet. */
-	result = send_packet(ip, NULL, &ip->client->packet,
-	    ip->client->packet_length, inaddr_any, &sockaddr_broadcast, NULL);
-}
-
-void
-send_release(void *ipp)
-{
-	struct interface_info *ip = ipp;
-
-	int result;
-
-	note("DHCPRELEASE on %s to %s port %d", ip->name,
-	    inet_ntoa(sockaddr_broadcast.sin_addr),
-	    ntohs(sockaddr_broadcast.sin_port));
-
-	/* Send out a packet. */
-	result = send_packet(ip, NULL, &ip->client->packet,
-	    ip->client->packet_length, inaddr_any, &sockaddr_broadcast, NULL);
+	(void) send_packet(ip, &ip->client->packet, ip->client->packet_length,
+	    inaddr_any, &sockaddr_broadcast, NULL);
 }
 
 void
 make_discover(struct interface_info *ip, struct client_lease *lease)
 {
 	unsigned char discover = DHCPDISCOVER;
-	int i;
-
 	struct tree_cache *options[256];
 	struct tree_cache option_elements[256];
+	int i;
 
 	memset(option_elements, 0, sizeof(option_elements));
 	memset(options, 0, sizeof(options));
@@ -1307,7 +1377,6 @@ make_discover(struct interface_info *ip, struct client_lease *lease)
 	options[i]->len = sizeof(discover);
 	options[i]->buf_size = sizeof(discover);
 	options[i]->timeout = 0xFFFFFFFF;
-	options[i]->tree = NULL;
 
 	/* Request the options we want */
 	i  = DHO_DHCP_PARAMETER_REQUEST_LIST;
@@ -1317,7 +1386,6 @@ make_discover(struct interface_info *ip, struct client_lease *lease)
 	options[i]->buf_size =
 		ip->client->config->requested_option_count;
 	options[i]->timeout = 0xFFFFFFFF;
-	options[i]->tree = NULL;
 
 	/* If we had an address, try to get it again. */
 	if (lease) {
@@ -1328,7 +1396,6 @@ make_discover(struct interface_info *ip, struct client_lease *lease)
 		options[i]->len = lease->address.len;
 		options[i]->buf_size = lease->address.len;
 		options[i]->timeout = 0xFFFFFFFF;
-		options[i]->tree = NULL;
 	} else
 		ip->client->requested_address.len = 0;
 
@@ -1344,7 +1411,6 @@ make_discover(struct interface_info *ip, struct client_lease *lease)
 			options[i]->buf_size =
 			    ip->client->config->send_options[i].len;
 			options[i]->timeout = 0xFFFFFFFF;
-			options[i]->tree = NULL;
 		}
 
 	/* Set up the option buffer... */
@@ -1378,10 +1444,9 @@ void
 make_request(struct interface_info *ip, struct client_lease * lease)
 {
 	unsigned char request = DHCPREQUEST;
-	int i;
-
 	struct tree_cache *options[256];
 	struct tree_cache option_elements[256];
+	int i;
 
 	memset(options, 0, sizeof(options));
 	memset(&ip->client->packet, 0, sizeof(ip->client->packet));
@@ -1393,7 +1458,6 @@ make_request(struct interface_info *ip, struct client_lease * lease)
 	options[i]->len = sizeof(request);
 	options[i]->buf_size = sizeof(request);
 	options[i]->timeout = 0xFFFFFFFF;
-	options[i]->tree = NULL;
 
 	/* Request the options we want */
 	i = DHO_DHCP_PARAMETER_REQUEST_LIST;
@@ -1403,7 +1467,6 @@ make_request(struct interface_info *ip, struct client_lease * lease)
 	options[i]->buf_size =
 		ip->client->config->requested_option_count;
 	options[i]->timeout = 0xFFFFFFFF;
-	options[i]->tree = NULL;
 
 	/* If we are requesting an address that hasn't yet been assigned
 	   to us, use the DHCP Requested Address option. */
@@ -1415,7 +1478,6 @@ make_request(struct interface_info *ip, struct client_lease * lease)
 		options[i]->len = lease->options[i].len;
 		options[i]->buf_size = lease->options[i].len;
 		options[i]->timeout = 0xFFFFFFFF;
-		options[i]->tree = NULL;
 	}
 	if (ip->client->state == S_REQUESTING ||
 	    ip->client->state == S_REBOOTING) {
@@ -1426,7 +1488,6 @@ make_request(struct interface_info *ip, struct client_lease * lease)
 		options[i]->len = lease->address.len;
 		options[i]->buf_size = lease->address.len;
 		options[i]->timeout = 0xFFFFFFFF;
-		options[i]->tree = NULL;
 	} else
 		ip->client->requested_address.len = 0;
 
@@ -1442,7 +1503,6 @@ make_request(struct interface_info *ip, struct client_lease * lease)
 			options[i]->buf_size =
 			    ip->client->config->send_options[i].len;
 			options[i]->timeout = 0xFFFFFFFF;
-			options[i]->tree = NULL;
 		}
 
 	/* Set up the option buffer... */
@@ -1485,14 +1545,11 @@ make_request(struct interface_info *ip, struct client_lease * lease)
 void
 make_decline(struct interface_info *ip, struct client_lease *lease)
 {
+	struct tree_cache *options[256], message_type_tree;
+	struct tree_cache requested_address_tree;
+	struct tree_cache server_id_tree, client_id_tree;
 	unsigned char decline = DHCPDECLINE;
 	int i;
-
-	struct tree_cache *options[256];
-	struct tree_cache message_type_tree;
-	struct tree_cache requested_address_tree;
-	struct tree_cache server_id_tree;
-	struct tree_cache client_id_tree;
 
 	memset(options, 0, sizeof(options));
 	memset(&ip->client->packet, 0, sizeof(ip->client->packet));
@@ -1504,7 +1561,6 @@ make_decline(struct interface_info *ip, struct client_lease *lease)
 	options[i]->len = sizeof(decline);
 	options[i]->buf_size = sizeof(decline);
 	options[i]->timeout = 0xFFFFFFFF;
-	options[i]->tree = NULL;
 
 	/* Send back the server identifier... */
 	i = DHO_DHCP_SERVER_IDENTIFIER;
@@ -1513,7 +1569,6 @@ make_decline(struct interface_info *ip, struct client_lease *lease)
 	options[i]->len = lease->options[i].len;
 	options[i]->buf_size = lease->options[i].len;
 	options[i]->timeout = 0xFFFFFFFF;
-	options[i]->tree = NULL;
 
 	/* Send back the address we're declining. */
 	i = DHO_DHCP_REQUESTED_ADDRESS;
@@ -1522,7 +1577,6 @@ make_decline(struct interface_info *ip, struct client_lease *lease)
 	options[i]->len = lease->address.len;
 	options[i]->buf_size = lease->address.len;
 	options[i]->timeout = 0xFFFFFFFF;
-	options[i]->tree = NULL;
 
 	/* Send the uid if the user supplied one. */
 	i = DHO_DHCP_CLIENT_IDENTIFIER;
@@ -1532,7 +1586,6 @@ make_decline(struct interface_info *ip, struct client_lease *lease)
 		options[i]->len = ip->client->config->send_options[i].len;
 		options[i]->buf_size = ip->client->config->send_options[i].len;
 		options[i]->timeout = 0xFFFFFFFF;
-		options[i]->tree = NULL;
 	}
 
 
@@ -1551,63 +1604,6 @@ make_decline(struct interface_info *ip, struct client_lease *lease)
 	ip->client->packet.flags = 0;
 
 	/* ciaddr must always be zero. */
-	memset(&ip->client->packet.ciaddr, 0,
-	    sizeof(ip->client->packet.ciaddr));
-	memset(&ip->client->packet.yiaddr, 0,
-	    sizeof(ip->client->packet.yiaddr));
-	memset(&ip->client->packet.siaddr, 0,
-	    sizeof(ip->client->packet.siaddr));
-	memset(&ip->client->packet.giaddr, 0,
-	    sizeof(ip->client->packet.giaddr));
-	memcpy(ip->client->packet.chaddr,
-	    ip->hw_address.haddr, ip->hw_address.hlen);
-}
-
-void
-make_release(struct interface_info *ip, struct client_lease *lease)
-{
-	unsigned char request = DHCPRELEASE;
-	int i;
-
-	struct tree_cache *options[256];
-	struct tree_cache message_type_tree;
-	struct tree_cache server_id_tree;
-
-	memset(options, 0, sizeof(options));
-	memset(&ip->client->packet, 0, sizeof(ip->client->packet));
-
-	/* Set DHCP_MESSAGE_TYPE to DHCPRELEASE */
-	i = DHO_DHCP_MESSAGE_TYPE;
-	options[i] = &message_type_tree;
-	options[i]->value = &request;
-	options[i]->len = sizeof(request);
-	options[i]->buf_size = sizeof(request);
-	options[i]->timeout = 0xFFFFFFFF;
-	options[i]->tree = NULL;
-
-	/* Send back the server identifier... */
-	i = DHO_DHCP_SERVER_IDENTIFIER;
-	options[i] = &server_id_tree;
-	options[i]->value = lease->options[i].data;
-	options[i]->len = lease->options[i].len;
-	options[i]->buf_size = lease->options[i].len;
-	options[i]->timeout = 0xFFFFFFFF;
-	options[i]->tree = NULL;
-
-	/* Set up the option buffer... */
-	ip->client->packet_length = cons_options(NULL, &ip->client->packet, 0,
-	    options, 0, 0, 0, NULL, 0);
-	if (ip->client->packet_length < BOOTP_MIN_LEN)
-		ip->client->packet_length = BOOTP_MIN_LEN;
-
-	ip->client->packet.op = BOOTREQUEST;
-	ip->client->packet.htype = ip->hw_address.htype;
-	ip->client->packet.hlen = ip->hw_address.hlen;
-	ip->client->packet.hops = 0;
-	ip->client->packet.xid = arc4random();
-	ip->client->packet.secs = 0;
-	ip->client->packet.flags = 0;
-
 	memset(&ip->client->packet.ciaddr, 0,
 	    sizeof(ip->client->packet.ciaddr));
 	memset(&ip->client->packet.yiaddr, 0,
@@ -1643,11 +1639,14 @@ rewrite_client_leases(void)
 {
 	struct client_lease *lp;
 
-	if (leaseFile)
-		fclose(leaseFile);
-	leaseFile = fopen(path_dhclient_db, "w");
-	if (!leaseFile)
-		error("can't create %s: %m", path_dhclient_db);
+	if (!leaseFile) {
+		leaseFile = fopen(path_dhclient_db, "w");
+		if (!leaseFile)
+			error("can't create %s: %m", path_dhclient_db);
+	} else {
+		fflush(leaseFile);
+		rewind(leaseFile);
+	}
 
 	for (lp = ifi->client->leases; lp; lp = lp->next)
 		write_client_lease(ifi, lp, 1);
@@ -1655,15 +1654,17 @@ rewrite_client_leases(void)
 		write_client_lease(ifi, ifi->client->active, 1);
 
 	fflush(leaseFile);
+	ftruncate(fileno(leaseFile), ftell(leaseFile));
+	fsync(fileno(leaseFile));
 }
 
 void
 write_client_lease(struct interface_info *ip, struct client_lease *lease,
     int rewrite)
 {
-	int i;
-	struct tm *t;
 	static int leases_written;
+	struct tm *t;
+	int i;
 
 	if (!rewrite) {
 		if (leases_written++ > 20) {
@@ -1718,12 +1719,46 @@ write_client_lease(struct interface_info *ip, struct client_lease *lease,
 	fflush(leaseFile);
 }
 
-char scriptName[256];
-FILE *scriptFile;
+void
+script_init(char *reason, struct string_list *medium)
+{
+	size_t		 len, mediumlen = 0;
+	struct imsg_hdr	 hdr;
+	struct buf	*buf;
+	int		 errs;
+
+	if (medium != NULL && medium->string != NULL)
+		mediumlen = strlen(medium->string);
+
+	hdr.code = IMSG_SCRIPT_INIT;
+	hdr.len = sizeof(struct imsg_hdr) +
+	    sizeof(size_t) + mediumlen +
+	    sizeof(size_t) + strlen(reason);
+
+	if ((buf = buf_open(hdr.len)) == NULL)
+		error("buf_open: %m");
+
+	errs = 0;
+	errs += buf_add(buf, &hdr, sizeof(hdr));
+	errs += buf_add(buf, &mediumlen, sizeof(mediumlen));
+	if (mediumlen > 0)
+		errs += buf_add(buf, medium->string, mediumlen);
+	len = strlen(reason);
+	errs += buf_add(buf, &len, sizeof(len));
+	errs += buf_add(buf, reason, len);
+
+	if (errs)
+		error("buf_add: %m");
+
+	if (buf_close(privfd, buf) == -1)
+		error("buf_close: %m");
+}
 
 void
-script_init(struct interface_info *ip, char *reason, struct string_list *medium)
+priv_script_init(char *reason, char *medium)
 {
+	struct interface_info *ip = ifi;
+
 	if (ip) {
 		ip->client->scriptEnvsize = 100;
 		if (ip->client->scriptEnv == NULL)
@@ -1741,20 +1776,18 @@ script_init(struct interface_info *ip, char *reason, struct string_list *medium)
 		script_set_env(ip->client, "", "interface", ip->name);
 
 		if (medium)
-			script_set_env(ip->client, "", "medium",
-			    medium->string);
+			script_set_env(ip->client, "", "medium", medium);
 
 		script_set_env(ip->client, "", "reason", reason);
 	}
 }
 
 void
-script_write_params(struct interface_info *ip, char *prefix,
-    struct client_lease *lease)
+priv_script_write_params(char *prefix, struct client_lease *lease)
 {
-	int i;
+	struct interface_info *ip = ifi;
 	u_int8_t dbuf[1500];
-	int len = 0;
+	int i, len = 0;
 	char tbuf[128];
 
 	script_set_env(ip->client, prefix, "ip_address",
@@ -1765,8 +1798,7 @@ script_write_params(struct interface_info *ip, char *prefix,
 	    sizeof(lease->address.iabuf))) {
 		struct iaddr netmask, subnet, broadcast;
 
-		memcpy(netmask.iabuf,
-		    lease->options[DHO_SUBNET_MASK].data,
+		memcpy(netmask.iabuf, lease->options[DHO_SUBNET_MASK].data,
 		    lease->options[DHO_SUBNET_MASK].len);
 		netmask.len = lease->options[DHO_SUBNET_MASK].len;
 
@@ -1812,7 +1844,7 @@ supersede:
 					    config->defaults[i].len +
 					    lease->options[i].len;
 					if (len > sizeof(dbuf)) {
-						warn("no space to %s %s",
+						warning("no space to %s %s",
 						    "prepend option",
 						    dhcp_options[i].name);
 						goto supersede;
@@ -1834,7 +1866,7 @@ supersede:
 					    config->defaults[i].len +
 					    lease->options[i].len;
 					if (len > sizeof(dbuf)) {
-						warn("no space to %s %s",
+						warning("no space to %s %s",
 						    "append option",
 						    dhcp_options[i].name);
 						goto supersede;
@@ -1864,8 +1896,9 @@ supersede:
 		}
 		if (len) {
 			char name[256];
+
 			if (dhcp_option_ev_name(name, sizeof(name),
-						 &dhcp_options[i]))
+			    &dhcp_options[i]))
 				script_set_env(ip->client, prefix, name,
 				    pretty_print_option(i, dp, len, 0, 0));
 		}
@@ -1874,16 +1907,99 @@ supersede:
 	script_set_env(ip->client, prefix, "expiry", tbuf);
 }
 
-int
-script_go(struct interface_info *ip)
+void
+script_write_params(char *prefix, struct client_lease *lease)
 {
-	char *scriptName;
-	char *argv[2];
-	char **envp;
-	char *epp[3];
-	char reason[] = "REASON=NBI";
+	size_t		 fn_len = 0, sn_len = 0, pr_len = 0;
+	struct imsg_hdr	 hdr;
+	struct buf	*buf;
+	int		 errs, i;
+
+	if (lease->filename != NULL)
+		fn_len = strlen(lease->filename);
+	if (lease->server_name != NULL)
+		sn_len = strlen(lease->server_name);
+	if (prefix != NULL)
+		pr_len = strlen(prefix);
+
+	hdr.code = IMSG_SCRIPT_WRITE_PARAMS;
+	hdr.len = sizeof(hdr) + sizeof(struct client_lease) +
+	    sizeof(size_t) + fn_len + sizeof(size_t) + sn_len +
+	    sizeof(size_t) + pr_len;
+
+	for (i = 0; i < 256; i++)
+		hdr.len += sizeof(int) + lease->options[i].len;
+
+	scripttime = time(NULL);
+
+	if ((buf = buf_open(hdr.len)) == NULL)
+		error("buf_open: %m");
+
+	errs = 0;
+	errs += buf_add(buf, &hdr, sizeof(hdr));
+	errs += buf_add(buf, lease, sizeof(struct client_lease));
+	errs += buf_add(buf, &fn_len, sizeof(fn_len));
+	errs += buf_add(buf, lease->filename, fn_len);
+	errs += buf_add(buf, &sn_len, sizeof(sn_len));
+	errs += buf_add(buf, lease->server_name, sn_len);
+	errs += buf_add(buf, &pr_len, sizeof(pr_len));
+	errs += buf_add(buf, prefix, pr_len);
+
+	for (i = 0; i < 256; i++) {
+		errs += buf_add(buf, &lease->options[i].len,
+		    sizeof(lease->options[i].len));
+		errs += buf_add(buf, lease->options[i].data,
+		    lease->options[i].len);
+	}
+
+	if (errs)
+		error("buf_add: %m");
+
+	if (buf_close(privfd, buf) == -1)
+		error("buf_close: %m");
+}
+
+int
+script_go(void)
+{
+	struct imsg_hdr	 hdr;
+	struct buf	*buf;
+	int		 ret;
+
+	scripttime = time(NULL);
+
+	hdr.code = IMSG_SCRIPT_GO;
+	hdr.len = sizeof(struct imsg_hdr);
+
+	if ((buf = buf_open(hdr.len)) == NULL)
+		error("buf_open: %m");
+
+	if (buf_add(buf, &hdr, sizeof(hdr)))
+		error("buf_add: %m");
+
+	if (buf_close(privfd, buf) == -1)
+		error("buf_close: %m");
+
+	bzero(&hdr, sizeof(hdr));
+	buf_read(privfd, &hdr, sizeof(hdr));
+	if (hdr.code != IMSG_SCRIPT_GO_RET)
+		error("unexpected msg type %u", hdr.code);
+	if (hdr.len != sizeof(hdr) + sizeof(int))
+		error("received corrupted message");
+	buf_read(privfd, &ret, sizeof(ret));
+
+	return (ret);
+}
+
+int
+priv_script_go(void)
+{
+	char *scriptName, *argv[2], **envp, *epp[3], reason[] = "REASON=NBI";
 	static char client_path[] = CLIENT_PATH;
+	struct interface_info *ip = ifi;
 	int pid, wpid, wstatus;
+
+	scripttime = time(NULL);
 
 	if (ip) {
 		scriptName = ip->client->config->script_name;
@@ -1927,7 +2043,7 @@ void
 script_set_env(struct client_state *client, const char *prefix,
     const char *name, const char *value)
 {
-	int i, namelen;
+	int i, j, namelen;
 
 	namelen = strlen(name);
 
@@ -1944,6 +2060,7 @@ script_set_env(struct client_state *client, const char *prefix,
 		if (i >= client->scriptEnvsize - 1) {
 			char **newscriptEnv;
 			int newscriptEnvsize = client->scriptEnvsize + 50;
+
 			newscriptEnv = realloc(client->scriptEnv,
 			    newscriptEnvsize);
 			if (newscriptEnv == NULL) {
@@ -1965,6 +2082,15 @@ script_set_env(struct client_state *client, const char *prefix,
 	if (client->scriptEnv[i] == NULL)
 		error("script_set_env: no memory for variable assignment");
 
+	/* No `` or $() command substitution allowed in environment values! */
+	for (j=0; j < strlen(value); j++)
+		switch (value[j]) {
+		case '`':
+		case '$':
+			error("illegal character (%c) in value '%s'", value[j],
+			    value);
+			/* not reached */
+		}
 	snprintf(client->scriptEnv[i], strlen(prefix) + strlen(name) +
 	    1 + strlen(value) + 1, "%s%s=%s", prefix, name, value);
 }
@@ -2014,6 +2140,15 @@ go_daemon(void)
 
 	if (daemon(1, 0) == -1)
 		error("daemon");
+
+	/* we are chrooted, daemon(3) fails to open /dev/null */
+	if (nullfd != -1) {
+		dup2(nullfd, STDIN_FILENO);
+		dup2(nullfd, STDOUT_FILENO);
+		dup2(nullfd, STDERR_FILENO);
+		close(nullfd);
+		nullfd = -1;
+	}
 }
 
 int
@@ -2031,84 +2166,84 @@ check_option(struct client_lease *l, int option)
 	    l->options[option].len);
 
 	switch (option) {
-	case DHO_SUBNET_MASK :
-	case DHO_TIME_SERVERS :
-	case DHO_NAME_SERVERS :
-	case DHO_ROUTERS :
-	case DHO_DOMAIN_NAME_SERVERS :
-	case DHO_LOG_SERVERS :
-	case DHO_COOKIE_SERVERS :
-	case DHO_LPR_SERVERS :
-	case DHO_IMPRESS_SERVERS :
-	case DHO_RESOURCE_LOCATION_SERVERS :
-	case DHO_SWAP_SERVER :
-	case DHO_BROADCAST_ADDRESS :
-	case DHO_NIS_SERVERS :
-	case DHO_NTP_SERVERS :
-	case DHO_NETBIOS_NAME_SERVERS :
-	case DHO_NETBIOS_DD_SERVER :
-	case DHO_FONT_SERVERS :
-	case DHO_DHCP_SERVER_IDENTIFIER :
+	case DHO_SUBNET_MASK:
+	case DHO_TIME_SERVERS:
+	case DHO_NAME_SERVERS:
+	case DHO_ROUTERS:
+	case DHO_DOMAIN_NAME_SERVERS:
+	case DHO_LOG_SERVERS:
+	case DHO_COOKIE_SERVERS:
+	case DHO_LPR_SERVERS:
+	case DHO_IMPRESS_SERVERS:
+	case DHO_RESOURCE_LOCATION_SERVERS:
+	case DHO_SWAP_SERVER:
+	case DHO_BROADCAST_ADDRESS:
+	case DHO_NIS_SERVERS:
+	case DHO_NTP_SERVERS:
+	case DHO_NETBIOS_NAME_SERVERS:
+	case DHO_NETBIOS_DD_SERVER:
+	case DHO_FONT_SERVERS:
+	case DHO_DHCP_SERVER_IDENTIFIER:
 		if (!ipv4addrs(opbuf)) {
-			warn("Invalid IP address in option: %s", opbuf);
+			warning("Invalid IP address in option: %s", opbuf);
 			return (0);
 		}
 		return (1)  ;
-	case DHO_HOST_NAME :
-	case DHO_DOMAIN_NAME :
-	case DHO_NIS_DOMAIN :
+	case DHO_HOST_NAME:
+	case DHO_DOMAIN_NAME:
+	case DHO_NIS_DOMAIN:
 		if (!res_hnok(sbuf)) {
-			warn("Bogus Host Name option %d: %s (%s)", option,
+			warning("Bogus Host Name option %d: %s (%s)", option,
 			    sbuf, opbuf);
 			return (0);
 		}
 		return (1);
-	case DHO_PAD :
-	case DHO_TIME_OFFSET :
-	case DHO_BOOT_SIZE :
-	case DHO_MERIT_DUMP :
-	case DHO_ROOT_PATH :
-	case DHO_EXTENSIONS_PATH :
-	case DHO_IP_FORWARDING :
-	case DHO_NON_LOCAL_SOURCE_ROUTING :
-	case DHO_POLICY_FILTER :
-	case DHO_MAX_DGRAM_REASSEMBLY :
-	case DHO_DEFAULT_IP_TTL :
-	case DHO_PATH_MTU_AGING_TIMEOUT :
-	case DHO_PATH_MTU_PLATEAU_TABLE :
-	case DHO_INTERFACE_MTU :
-	case DHO_ALL_SUBNETS_LOCAL :
-	case DHO_PERFORM_MASK_DISCOVERY :
-	case DHO_MASK_SUPPLIER :
-	case DHO_ROUTER_DISCOVERY :
-	case DHO_ROUTER_SOLICITATION_ADDRESS :
-	case DHO_STATIC_ROUTES :
-	case DHO_TRAILER_ENCAPSULATION :
-	case DHO_ARP_CACHE_TIMEOUT :
-	case DHO_IEEE802_3_ENCAPSULATION :
-	case DHO_DEFAULT_TCP_TTL :
-	case DHO_TCP_KEEPALIVE_INTERVAL :
-	case DHO_TCP_KEEPALIVE_GARBAGE :
-	case DHO_VENDOR_ENCAPSULATED_OPTIONS :
-	case DHO_NETBIOS_NODE_TYPE :
-	case DHO_NETBIOS_SCOPE :
-	case DHO_X_DISPLAY_MANAGER :
-	case DHO_DHCP_REQUESTED_ADDRESS :
-	case DHO_DHCP_LEASE_TIME :
-	case DHO_DHCP_OPTION_OVERLOAD :
-	case DHO_DHCP_MESSAGE_TYPE :
-	case DHO_DHCP_PARAMETER_REQUEST_LIST :
-	case DHO_DHCP_MESSAGE :
-	case DHO_DHCP_MAX_MESSAGE_SIZE :
-	case DHO_DHCP_RENEWAL_TIME :
-	case DHO_DHCP_REBINDING_TIME :
-	case DHO_DHCP_CLASS_IDENTIFIER :
-	case DHO_DHCP_CLIENT_IDENTIFIER :
-	case DHO_DHCP_USER_CLASS_ID :
-	case DHO_END :
+	case DHO_PAD:
+	case DHO_TIME_OFFSET:
+	case DHO_BOOT_SIZE:
+	case DHO_MERIT_DUMP:
+	case DHO_ROOT_PATH:
+	case DHO_EXTENSIONS_PATH:
+	case DHO_IP_FORWARDING:
+	case DHO_NON_LOCAL_SOURCE_ROUTING:
+	case DHO_POLICY_FILTER:
+	case DHO_MAX_DGRAM_REASSEMBLY:
+	case DHO_DEFAULT_IP_TTL:
+	case DHO_PATH_MTU_AGING_TIMEOUT:
+	case DHO_PATH_MTU_PLATEAU_TABLE:
+	case DHO_INTERFACE_MTU:
+	case DHO_ALL_SUBNETS_LOCAL:
+	case DHO_PERFORM_MASK_DISCOVERY:
+	case DHO_MASK_SUPPLIER:
+	case DHO_ROUTER_DISCOVERY:
+	case DHO_ROUTER_SOLICITATION_ADDRESS:
+	case DHO_STATIC_ROUTES:
+	case DHO_TRAILER_ENCAPSULATION:
+	case DHO_ARP_CACHE_TIMEOUT:
+	case DHO_IEEE802_3_ENCAPSULATION:
+	case DHO_DEFAULT_TCP_TTL:
+	case DHO_TCP_KEEPALIVE_INTERVAL:
+	case DHO_TCP_KEEPALIVE_GARBAGE:
+	case DHO_VENDOR_ENCAPSULATED_OPTIONS:
+	case DHO_NETBIOS_NODE_TYPE:
+	case DHO_NETBIOS_SCOPE:
+	case DHO_X_DISPLAY_MANAGER:
+	case DHO_DHCP_REQUESTED_ADDRESS:
+	case DHO_DHCP_LEASE_TIME:
+	case DHO_DHCP_OPTION_OVERLOAD:
+	case DHO_DHCP_MESSAGE_TYPE:
+	case DHO_DHCP_PARAMETER_REQUEST_LIST:
+	case DHO_DHCP_MESSAGE:
+	case DHO_DHCP_MAX_MESSAGE_SIZE:
+	case DHO_DHCP_RENEWAL_TIME:
+	case DHO_DHCP_REBINDING_TIME:
+	case DHO_DHCP_CLASS_IDENTIFIER:
+	case DHO_DHCP_CLIENT_IDENTIFIER:
+	case DHO_DHCP_USER_CLASS_ID:
+	case DHO_END:
 		return (1);
 	default:
-		warn("unknown dhcp option value 0x%x", option);
+		warning("unknown dhcp option value 0x%x", option);
 		return (unknown_ok);
 	}
 }
@@ -2173,20 +2308,14 @@ option_as_string(unsigned int code, unsigned char *data, int len)
 		error("option_as_string: bad code %d\n", code);
 
 	for (; dp < data + len; dp++) {
-		if (!isascii(*dp) ||
-		    !isprint(*dp)) {
-			if (dp + 1 != data + len ||
-			    *dp != 0) {
-				snprintf(op, opleft,
-				    "\\%03o", *dp);
+		if (!isascii(*dp) || !isprint(*dp)) {
+			if (dp + 1 != data + len || *dp != 0) {
+				snprintf(op, opleft, "\\%03o", *dp);
 				op += 4;
 				opleft -= 4;
 			}
-		} else if (*dp == '"' ||
-		    *dp == '\'' ||
-		    *dp == '$' ||
-		    *dp == '`' ||
-		    *dp == '\\') {
+		} else if (*dp == '"' || *dp == '\'' || *dp == '$' ||
+		    *dp == '`' || *dp == '\\') {
 			*op++ = '\\';
 			*op++ = *dp;
 			opleft -= 2;
@@ -2200,6 +2329,43 @@ option_as_string(unsigned int code, unsigned char *data, int len)
 	*op = 0;
 	return optbuf;
 toobig:
-	warn("dhcp option too large");
+	warning("dhcp option too large");
 	return "<error>";
+}
+
+int
+fork_privchld(int fd, int fd2)
+{
+	struct pollfd pfd[1];
+	int nfds;
+
+	switch (fork()) {
+	case -1:
+		error("cannot fork");
+	case 0:
+		break;
+	default:
+		return (0);
+	}
+
+	setproctitle("%s [priv]", ifi->name);
+
+	dup2(nullfd, STDIN_FILENO);
+	dup2(nullfd, STDOUT_FILENO);
+	dup2(nullfd, STDERR_FILENO);
+	close(nullfd);
+	close(fd2);
+
+	for (;;) {
+		pfd[0].fd = fd;
+		pfd[0].events = POLLIN;
+		if ((nfds = poll(pfd, 1, INFTIM)) == -1)
+			if (errno != EINTR)
+				error("poll error");
+
+		if (nfds == 0 || !(pfd[0].revents & POLLIN))
+			continue;
+
+		dispatch_imsg(fd);
+	}
 }

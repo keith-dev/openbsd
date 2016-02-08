@@ -1,4 +1,4 @@
-/*	$OpenBSD: scsiconf.h,v 1.42 2004/03/10 01:37:40 krw Exp $	*/
+/*	$OpenBSD: scsiconf.h,v 1.47 2004/07/31 11:31:30 krw Exp $	*/
 /*	$NetBSD: scsiconf.h,v 1.35 1997/04/02 02:29:38 mycroft Exp $	*/
 
 /*
@@ -133,15 +133,6 @@ struct scsi_adapter {
 #define	ESCAPE_NOT_SUPPORTED	3
 
 /*
- * Device Specific Sense Handlers return either an errno
- * or one of these three items.
- */
-
-#define SCSIRET_NOERROR   0	/* No Error */
-#define SCSIRET_RETRY    -1	/* Retry the command that got this sense */
-#define SCSIRET_CONTINUE -2	/* Continue with standard sense processing */
-
-/*
  * These entry points are called by the low-end drivers to get services from
  * whatever high-end drivers they are attached to.  Each device type has one
  * of these statically allocated.
@@ -199,7 +190,6 @@ struct scsi_link {
 #define	ADEV_NODOORLOCK		0x2000	/* can't lock door */
 #define SDEV_ONLYBIG		0x4000  /* always use READ_BIG and WRITE_BIG */
 	u_int8_t inquiry_flags;		/* copy of flags from probe INQUIRY */
-	u_int8_t inquiry_flags2;	/* copy of flags2 from probe INQUIRY */
 	struct	scsi_device *device;	/* device entry points etc. */
 	void	*device_softc;		/* needed for call to foo_start */
 	struct	scsi_adapter *adapter;	/* adapter entry points etc. */
@@ -325,6 +315,7 @@ struct scsi_xfer {
  */
 #define TEST_READY_RETRIES_DEFAULT	5
 #define TEST_READY_RETRIES_CD		10
+#define TEST_READY_RETRIES_TAPE		60
 
 const void *scsi_inqmatch(struct scsi_inquiry_data *, const void *, int,
 	    int, int *);
@@ -336,7 +327,6 @@ void	scsi_free_xs(struct scsi_xfer *);
 int	scsi_execute_xs(struct scsi_xfer *);
 u_long	scsi_size(struct scsi_link *, int);
 int	scsi_test_unit_ready(struct scsi_link *, int, int);
-int	scsi_change_def(struct scsi_link *, int);
 int	scsi_inquire(struct scsi_link *, struct scsi_inquiry_data *, int);
 int	scsi_prevent(struct scsi_link *, int, int);
 int	scsi_start(struct scsi_link *, int, int);
@@ -352,7 +342,7 @@ int	scsi_do_safeioctl(struct scsi_link *, dev_t, u_long, caddr_t,
 void	sc_print_addr(struct scsi_link *);
 
 void	show_scsi_xs(struct scsi_xfer *);
-void	scsi_print_sense(struct scsi_xfer *, int);
+void	scsi_print_sense(struct scsi_xfer *);
 void	show_scsi_cmd(struct scsi_xfer *);
 void	show_mem(u_char *, int);
 int	scsi_probe_busses(int, int, int);

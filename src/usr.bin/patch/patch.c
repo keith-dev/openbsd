@@ -1,4 +1,4 @@
-/*	$OpenBSD: patch.c,v 1.38 2003/10/31 20:20:45 millert Exp $	*/
+/*	$OpenBSD: patch.c,v 1.41 2004/07/09 19:13:46 otto Exp $	*/
 
 /*
  * patch - a program to apply diffs to original files
@@ -27,7 +27,7 @@
  */
 
 #ifndef lint
-static const char rcsid[] = "$OpenBSD: patch.c,v 1.38 2003/10/31 20:20:45 millert Exp $";
+static const char rcsid[] = "$OpenBSD: patch.c,v 1.41 2004/07/09 19:13:46 otto Exp $";
 #endif /* not lint */
 
 #include <sys/types.h>
@@ -624,13 +624,18 @@ locate_hunk(LINENUM fuzz)
 	LINENUM	max_neg_offset = first_guess - last_frozen_line - 1 + pch_context();
 
 	if (pat_lines == 0) {		/* null range matches always */
-		if (verbose && (diff_type == CONTEXT_DIFF
+		if (verbose && fuzz == 0 && (diff_type == CONTEXT_DIFF
 		    || diff_type == NEW_CONTEXT_DIFF
 		    || diff_type == UNI_DIFF)) {
 			say("Empty context always matches.\n");
-			say("Detection of previously applied patch not possible.\n");
 		}
-		return first_guess;
+		if (diff_type == CONTEXT_DIFF
+		    || diff_type == NEW_CONTEXT_DIFF
+		    || diff_type == UNI_DIFF) {
+			if (fuzz == 0)
+				return (input_lines == 0 ? first_guess : 0);
+		} else
+			return (first_guess);
 	}
 	if (max_neg_offset >= first_guess)	/* do not try lines < 0 */
 		max_neg_offset = first_guess - 1;
@@ -924,6 +929,21 @@ patch_match(LINENUM base, LINENUM offset, LINENUM fuzz)
 				return false;
 		} else if (strnNE(ilineptr, plineptr, plinelen))
 			return false;
+		if (iline == input_lines) {
+			/*
+			 * We are looking at the last line of the file.
+			 * If the file has no eol, the patch line should
+			 * not have one either and vice-versa. Note that
+			 * plinelen > 0.
+			 */
+			if (last_line_missing_eol) {
+				if (plineptr[plinelen - 1] == '\n')
+					return false;
+			} else {
+				if (plineptr[plinelen - 1] != '\n')
+					return false;
+			}
+		}
 	}
 	return true;
 }

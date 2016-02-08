@@ -1,4 +1,4 @@
-#	$OpenBSD: install.sub,v 1.337 2004/03/23 02:39:39 krw Exp $
+#	$OpenBSD: install.sub,v 1.351 2004/08/09 18:08:50 deraadt Exp $
 #	$NetBSD: install.sub,v 1.5.2.8 1996/09/02 23:25:02 pk Exp $
 #
 # Copyright (c) 1997-2004 Todd Miller, Theo de Raadt, Ken Westerback
@@ -171,6 +171,22 @@ get_ifdevs() {
 	    | sed -ne 's/^\(.*\):.*/\1/p'
 }
 
+# Get the first (lowest unit #) serial device if any, if MDSERIAL is set.
+# NOTE: Only single digit serial devices (<dev>0 -> <dev>9) are looked for.
+get_serialdev() {
+	local _devs _d _bd _td
+
+	[[ -n $MDSERIAL ]] || exit
+	set -- $MDSERIAL
+	_d=$1
+	_bd=$2
+	_td=$3
+	_devs=$(sed -ne "/^${_d}\([0-9]\) .*/s//\1/p" /var/run/dmesg.boot)
+	_devs=$(bsort $_devs)
+	set -- $_devs
+	echo "${_bd}${1} ${_td}${1}"
+}
+
 # Ask for a password, saving the input in $resp.
 #    Display $1 as the prompt.
 #    *Don't* allow the '!' options that ask does.
@@ -303,7 +319,7 @@ isin() {
 # add first argument to list formed by the remaining arguments
 # adds to the tail if the element does not already exist
 addel() {
-	local	_a=$1 _b _seen=false
+	local	_a=$1
 
 	shift
 
@@ -397,9 +413,10 @@ __EOT
 makedev() {
 	local _dev=$1 _node=/dev/r${1}c
 
-	# Don't need to make network interface devices nodes. If the device
-	# nodes exist, don't need to create them.
-	if isin $_dev $IFDEVS || [[ -c $_node ]] ; then
+	# Don't need to make network interface device nodes.  If the device is
+	# just a number then ignore it. This is used when selecting a serial
+	# console speed.  If the device node exists, don't need to create it.
+	if isin $_dev $IFDEVS || [[ -c $_node || -z ${_dev##+([0-9])} ]] ; then
 		return 0
 	fi
 
@@ -484,25 +501,54 @@ __EOT
 	resp=$_selected
 }
 
-configure_all_interfaces() {
-	local _IFDEVS=$IFDEVS _ifs
+configure_ifs() {
+	local _IFDEVS=$IFDEVS _ifs _name _media _hn
 
 	while : ; do
-		_IFDEVS=`rmel "$_ifs" $_IFDEVS`
-
-		ask_which "interface" "do you wish to initialize" "$_IFDEVS" "" \
-		    "No more interfaces to initialize"
+		ask_which "interface" "do you wish to initialize" "$_IFDEVS" \
+			"" "No more interfaces to initialize"
 		[[ $resp == done ]] && break
 
 		_ifs=$resp
-		configure_ifs $_ifs || _ifs=
+		_hn=/tmp/hostname.$_ifs
+
+		# Get symbolic name - will be used in DHCP requests.
+		ask "Symbolic (host) name for $_ifs?" "$(hostname -s)"
+		_name=$resp
+
+		# Get and apply media options.
+		_media=$(ifconfig -m $_ifs | grep "media ")
+		if [[ -n $_media ]]; then
+			cat << __EOT
+The media options for $_ifs are currently
+$(ifconfig -m $_ifs | sed -n '/supported/D;/media:/p')
+__EOT
+			ask_yn "Do you want to change the media options?"
+			case $resp in
+			y)	cat << __EOT
+Supported media options for $_ifs are:
+$_media
+__EOT
+				ask "Media options for $_ifs?"
+				_media=$resp
+				ifconfig $_ifs $_media || return 1
+				;;
+			n)	_media=
+				;;
+			esac
+		fi
+
+		rm -f $_hn
+		v4_config "$_ifs" "$_media" "$_name" "$_hn"
+
+		[[ -f $_hn ]] && _IFDEVS=$(rmel "$_ifs" $_IFDEVS)
 	done
 }
 
 # Output '<UP | DOWN> [<addr> <netmask> <rest of inet line>]'.
 #
 # $1 == interface
-inet_info() {
+v4_info() {
 	ifconfig $1 inet | sed -n '
 		1s/.*<UP,.*/UP/p
 		1s/.*<.*/DOWN/p
@@ -542,7 +588,7 @@ __EOT
 
 	dhclient $_ifs
 
-	set -- $(inet_info $_ifs)
+	set -- $(v4_info $_ifs)
 
 	if [[ $1 == UP && $2 == "0.0.0.0" ]]; then
 		ifconfig $_ifs delete down
@@ -559,67 +605,58 @@ __EOT
 	return 0
 }
 
-configure_ifs() {
-	local _ifs=$1 _addr _mask _name _prompt _media _config
+v4_config() {
+	local _ifs=$1 _media=$2 _name=$3 _hn=$4 _prompt
 
-	set -- $(inet_info $_ifs)
-	[[ $1 == UP ]] && ifconfig $_ifs delete down
-	[[ -n $2 && $2 != "0.0.0.0" ]] && { _addr=$2; _mask=$3; }
-
-	# Get symbolic name - will be used in DHCP requests.
-	ask "Symbolic (host) name for $_ifs?" "$(hostname -s)"
-	_name=$resp
-
-	# Get and apply media options.
-	_media=$(ifconfig -m $_ifs | grep "media ")
-	if [[ -n $_media ]]; then
-		cat << __EOT
-The default media for $_ifs is
-$(ifconfig -m $_ifs | sed -n '/supported/D;/media:/p')
-__EOT
-		ask_yn "Do you want to change the default media?"
-		case $resp in
-		y)	cat << __EOT
-Supported media options for $_ifs are:
-$_media
-__EOT
-			ask "Media options for $_ifs?"
-			_media=$resp
-			ifconfig $_ifs $_media down || return 1
-			;;
-		n)	_media=
-			;;
-		esac
+	set -- $(v4_info $_ifs)
+	if [[ -n $2 ]]; then
+		ifconfig $_ifs inet $2 delete
+		[[ $2 != "0.0.0.0" ]] && { _addr=$2; _mask=$3; }
 	fi
 
-	# Get address and mask.
-	_prompt="IP address for ${_ifs}?"
-	[[ -x /sbin/dhclient ]] && _prompt="$_prompt (or 'dhcp')"
+	[[ -x /sbin/dhclient ]] && _prompt=" or 'dhcp'"
+	_prompt="IPv4 address for $_ifs? (or 'none'$_prompt)"
 
 	ask_until "$_prompt" "$_addr"
 	case $resp in
+	none)	;;
 	dhcp)	if [[ ! -x /sbin/dhclient ]]; then
-			echo "DHCP not supported - no /sbin/dhclient found."
-			return 1
+			echo "DHCP not possible - no /sbin/dhclient."
+		elif dhcp_request $_ifs "$_name" || dhcp_request $_ifs ; then
+			addhostent "127.0.0.1" "$_name"
+			echo "dhcp NONE NONE NONE $_media" > $_hn
 		fi
-		dhcp_request $_ifs "$_name" || dhcp_request $_ifs || return 1
-		_config="dhcp NONE NONE"
-		# Fake address for the hosts file.
-		_addr=127.0.0.1
 		;;
 	*)	_addr=$resp
 		ask_until "Netmask?" "${_mask:=255.255.255.0}"
-		_mask=$resp
-		ifconfig $_ifs inet $_addr netmask $_mask $_media up || return 1
-		_config="inet $_addr $_mask"
+		if ifconfig $_ifs inet $_addr netmask $resp up ; then
+			addhostent "$_addr" "$_name"
+			echo "inet $_addr $resp NONE $_media" > $_hn
+		fi
 		;;
 	esac
+}
 
-	# Save configuration information.
-	echo "$_config NONE $_media" > /tmp/hostname.$_ifs
-	addhostent $_addr $_name
-	return 0
- }
+v4_defroute() {
+	local _dr _prompt=" or 'none'"
+
+	[[ -x /sbin/dhclient ]] && _prompt=", 'dhcp'$_prompt"
+	_prompt="Default IPv4 route? (IPv4 address$_prompt)"
+
+	_dr=$(route -n show -inet | sed -ne '/^default */{s///; s/ .*//; p;}')
+	[[ -f /tmp/dhclient.conf ]] && _dr=dhcp
+
+	while : ; do
+		ask_until "$_prompt" "$_dr"
+		case $resp in
+		none|dhcp) break ;;
+		esac
+		route delete -inet default > /dev/null 2>&1
+		route -n add -inet -host default "$resp" && { echo "$resp" >/tmp/mygate ; break ; }
+		# Put the old default route back. The new one did not work.
+		route -n add -inet -host default $_dr >/dev/null 2>&1
+	done
+}
 
 # Returns true if $1 contains only alphanumerics
 isalphanumeric() {
@@ -644,8 +681,6 @@ enable_network() {
 			cp /mnt/etc/${_netfile} /etc/${_netfile}
 		fi
 	done
-
-	DIDNET=y
 
 	# Set the address for the loopback interface. Bringing the
 	# interface up, automatically invokes the IPv6 address ::1.
@@ -890,8 +925,6 @@ ftp_error() {
 #	and _ftp_active must be global.
 install_url() {
 	local _url_type=$1 _file_list _url_base _oifs _prompt _passwd
-
-	donetconfig
 
 	ask "HTTP/FTP proxy URL? (e.g. 'http://proxy:8080', or 'none')" \
 	    "${ftp_proxy:-none}"
@@ -1214,8 +1247,6 @@ install_nfs() {
 		return
 	fi
 
-	donetconfig
-
 	# Get the IP address of the server
 	ask_until "Server IP address or hostname?" "$_nfs_server_ip"
 	_nfs_server_ip=$resp
@@ -1345,11 +1376,11 @@ set_timezone() {
 
 		while [[ -d $_zonepath ]]; do
 			ask "What sub-timezone of '${_zonepath#$_zoneroot}' are you in? ('?' for list)"
-			if [[ $resp == ? ]]; then
-				ls -F $_zonepath
-			else
-				_zonepath=$_zonepath/$resp
-			fi
+			case $resp in
+			"")	;;
+			?)	ls -F $_zonepath ;;
+			*)	_zonepath=$_zonepath/$resp ;;
+			esac
 		done
 
 		if [[ -f $_zonepath ]]; then
@@ -1413,6 +1444,8 @@ __EOT
 # user selects from that location. Repeat as many times as the user
 # needs to get all desired sets.
 install_sets() {
+	local _d
+
 	cat << __EOT
 
 You will now specify the location and names of the ${MODE} sets you want to
@@ -1422,12 +1455,14 @@ installation notes for details on the contents of each.
 __EOT
 
 	while : ; do
+		_d=
 		cat << __EOT
 
 Sets can be located on a (m)ounted filesystem; a (c)drom, (d)isk or (t)ape
 device; or a (f)tp, (n)fs or (h)ttp server.
 __EOT
-		ask "Where are the ${MODE} sets? (or 'done')"
+		[[ -z $DEFAULTSETS ]] && _d=done
+		ask "Where are the $MODE sets? (or 'done')" "$_d"
 
 		case $resp in
 		done)	sane_install && return ;;
@@ -1560,13 +1595,9 @@ get_fqdn() {
 }
 
 donetconfig() {
-	local _dn _ns _dr
+	local _dn _ns
 
-	[[ -n $DIDNET ]] && return
-
-	DIDNET=y
-
-	configure_all_interfaces
+	configure_ifs
 
 	# As dhclient will populate /etc/resolv.conf, a symbolic link to
 	# /tmp/resolv.conf.shadow, mv any such file to /tmp/resolv.conf
@@ -1600,19 +1631,8 @@ donetconfig() {
 		[[ $resp == y ]] && cp /tmp/resolv.conf /tmp/resolv.conf.shadow
 	fi
 
-	# Get/Confirm the default route.
-	_dr=$(route -n show | sed -ne '/^default */{s///; s/ .*//; p;}')
-	[[ -f /tmp/dhclient.conf ]] && _dr=dhcp
-	while : ; do
-		ask_until "Default route? (IP address, 'dhcp' or 'none')" "$_dr"
-		case $resp in
-		none|dhcp) break ;;
-		esac
-		route delete default > /dev/null 2>&1
-		route -n add -host default "$resp" && { echo "$resp" >/tmp/mygate ; break ; }
-		# Put the old default route back. The new one did not work.
-		route -n add -host default $_dr >/dev/null 2>&1
-	done
+	# Get/Confirm an IPv4 default route if an IPv4 address was configured.
+	[[ -n $(ifconfig -a | sed -ne '/[ 	]inet .* broadcast /p') ]] && v4_defroute
 
 	edit_tmp_file hosts
 	manual_net_cfg
@@ -1625,19 +1645,34 @@ populateusrlocal() {
 }
 
 questions() {
-	ask_yn "Do you wish sshd(8) to be started by default?" yes
+	local _bd _td
+
+	ask_yn "Start sshd(8) by default?" yes
 	if [[ $resp == n ]]; then
 		echo "sshd_flags=NO		# disabled during install" \
 		    > /mnt/etc/rc.conf.local
 	fi
 
-	[[ -n $MDXAPERTURE ]] || return
-
-	ask_yn "Do you expect to run the X Window System?" yes
-	if [[ $resp == y ]]; then
-		sed -e "/^#\(machdep\.allowaperture=${MDXAPERTURE}\)/s//\1	/" \
-		    /mnt/etc/sysctl.conf > /tmp/sysctl.conf
+	if [[ -n $MDXAPERTURE ]]; then
+		ask_yn "Do you expect to run the X Window System?" yes
+		if [[ $resp == y ]]; then
+			sed -e "/^#\(machdep\.allowaperture=${MDXAPERTURE}\)/s//\1	/" \
+			    /mnt/etc/sysctl.conf > /tmp/sysctl.conf
+		fi
 	fi
+
+	[[ -z $SERIALDEV ]] && return
+	set -- $SERIALDEV
+	_bd=$1
+	_td=$2
+	ask_yn "Change the default console to $_bd?"
+	[[ $resp == n ]] && return
+	ask_which "speed" "should $_bd use" "9600 19200 38400 57600 115200"
+	[[ $resp == done ]] && return
+	echo "set tty $_bd\nstty $_bd $resp" >>/mnt/etc/boot.conf
+	sed	-e "/^${_td}/s/std.9600/std.${resp}/" \
+		-e "/^${_td}/s/unknown/vt220	/" \
+		-e "/${_td}/s/off/on secure/" /mnt/etc/ttys >/tmp/ttys
 }
 
 finish_up() {
@@ -1698,7 +1733,7 @@ __EOT
 ROOTDISK=
 ROOTDEV=
 
-VERSION=35
+VERSION=36
 
 VNAME="$(( $VERSION / 10 )).$(( $VERSION % 10 ))"
 SETDIR="$VNAME/$ARCH"
@@ -1714,10 +1749,11 @@ done
 # Extract and save one boot's worth of dmesg
 dmesg | sed -ne '/^OpenBSD /h;/^OpenBSD /!H;${g;p;}' > /var/run/dmesg.boot
 
-# Scan /var/run/dmesg.boot for disks and cds
-DKDEVS=`get_dkdevs`
-CDDEVS=`get_cddevs`
-IFDEVS=`get_ifdevs`
+# Scan /var/run/dmesg.boot for interesting devices.
+DKDEVS=$(get_dkdevs)
+CDDEVS=$(get_cddevs)
+IFDEVS=$(get_ifdevs)
+SERIALDEV=$(get_serialdev)
 
 # Devices created with makedev().
 DEVSMADE=
@@ -1725,12 +1761,12 @@ DEVSMADE=
 # Selected sets will be installed in the order they are listed in $THESETS.
 # Ensure that siteXX.tgz is the *last* set listed so its contents overwrite
 # the contents of the other sets, not the other way around.
-THESETS="bsd bsd.rd $MDSETS"
-DEFAULTSETS="bsd"
-for _set in base etc misc comp man game xbase xshare xfont xserv site ; do
-	[[ $MODE == upgrade && $_set == etc ]] && continue
+THESETS="bsd bsd.rd bsd.mp $MDSETS"
+DEFAULTSETS="bsd bsd.rd"
+for _set in base etc misc comp man game xbase xetc xshare xfont xserv site ; do
+	[[ $MODE == upgrade && ( $_set == etc || $_set == xetc ) ]] && continue
 	THESETS="$THESETS ${_set}${VERSION}.tgz"
-	isin $_set xbase xshare xfont xserv site && continue
+	isin $_set xbase xetc xshare xfont xserv site && continue
 	DEFAULTSETS="$DEFAULTSETS ${_set}${VERSION}.tgz"
 done
 

@@ -1,7 +1,7 @@
 /*    perl.h
  *
  *    Copyright (C) 1993, 1994, 1995, 1996, 1997, 1998, 1999,
- *    2000, 2001, 2002, 2003, by Larry Wall and others
+ *    2000, 2001, 2002, 2003, 2004, by Larry Wall and others
  *
  *    You may distribute under the terms of either the GNU General Public
  *    License or the Artistic License, as specified in the README file.
@@ -1318,6 +1318,7 @@ typedef NVTYPE NV;
 #       define Perl_atan2 atan2l
 #       define Perl_pow powl
 #       define Perl_floor floorl
+#       define Perl_ceil ceill
 #       define Perl_fmod fmodl
 #   endif
 /* e.g. libsunmath doesn't have modfl and frexpl as of mid-March 2000 */
@@ -1388,6 +1389,7 @@ long double modfl(long double, long double *);
 #   define Perl_atan2 atan2
 #   define Perl_pow pow
 #   define Perl_floor floor
+#   define Perl_ceil ceil
 #   define Perl_fmod fmod
 #   define Perl_modf(x,y) modf(x,y)
 #   define Perl_frexp(x,y) frexp(x,y)
@@ -1800,7 +1802,6 @@ typedef union any ANY;
 typedef struct ptr_tbl_ent PTR_TBL_ENT_t;
 typedef struct ptr_tbl PTR_TBL_t;
 typedef struct clone_params CLONE_PARAMS;
-
 
 #include "handy.h"
 
@@ -3070,6 +3071,10 @@ EXTCONST char PL_no_myglob[]
   INIT("\"my\" variable %s can't be in a package");
 EXTCONST char PL_no_localize_ref[]
   INIT("Can't localize through a reference");
+#ifdef PERL_MALLOC_WRAP
+EXTCONST char PL_memory_wrap[]
+  INIT("panic: memory wrap");
+#endif
 
 EXTCONST char PL_uuemap[65]
   INIT("`!\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_");
@@ -4305,6 +4310,19 @@ int flock(int fd, int op);
 #   define PERL_MOUNT_NOSUID M_NOSUID
 #endif
 
+#if !defined(PERL_MOUNT_NOEXEC) && defined(MOUNT_NOEXEC)
+#    define PERL_MOUNT_NOEXEC MOUNT_NOEXEC
+#endif
+#if !defined(PERL_MOUNT_NOEXEC) && defined(MNT_NOEXEC)
+#    define PERL_MOUNT_NOEXEC MNT_NOEXEC
+#endif
+#if !defined(PERL_MOUNT_NOEXEC) && defined(MS_NOEXEC)
+#   define PERL_MOUNT_NOEXEC MS_NOEXEC
+#endif
+#if !defined(PERL_MOUNT_NOEXEC) && defined(M_NOEXEC)
+#   define PERL_MOUNT_NOEXEC M_NOEXEC
+#endif
+
 #endif /* IAMSUID */
 
 #ifdef I_LIBUTIL
@@ -4497,6 +4515,15 @@ extern void moncontrol(int);
    HAS_DIRFD
 
    so that Configure picks them up. */
+
+/* Source code compatibility cruft:
+   PERL_XS_APIVERSION is not used, and has been superseded by inc_version_list
+   It and PERL_PM_APIVERSION are retained for source compatibility in the
+   5.8.x maintenance branch.
+ */
+
+#define PERL_XS_APIVERSION "5.8.3"
+#define PERL_PM_APIVERSION "5.005"
 
 #endif /* Include guard */
 

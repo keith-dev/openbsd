@@ -8,7 +8,6 @@
 ./etc/amd/master.sample
 ./etc/authpf
 ./etc/bgpd.conf
-./etc/bootptab
 ./etc/ccd.conf
 ./etc/changelist
 ./etc/csh.cshrc
@@ -29,6 +28,7 @@
 ./etc/hosts
 ./etc/hosts.equiv
 ./etc/hosts.lpd
+./etc/hotplug
 ./etc/inetd.conf
 ./etc/kerberosV
 ./etc/kerberosV/README
@@ -46,6 +46,8 @@
 ./etc/mail/access.db
 ./etc/mail/aliases
 ./etc/mail/aliases.db
+./etc/mail/genericstable
+./etc/mail/genericstable.db
 ./etc/mail/helpfile
 ./etc/mail/local-host-names
 ./etc/mail/localhost.cf
@@ -72,6 +74,7 @@
 ./etc/netstart
 ./etc/networks
 ./etc/newsyslog.conf
+./etc/ntpd.conf
 ./etc/passwd
 ./etc/pf.conf
 ./etc/pf.os
@@ -107,7 +110,6 @@
 ./etc/skel/.login
 ./etc/skel/.mailrc
 ./etc/skel/.profile
-./etc/skel/.rhosts
 ./etc/sliphome/slip.hosts
 ./etc/sliphome/slip.login
 ./etc/spamd.conf
@@ -158,7 +160,6 @@
 ./var/named/standard/localhost
 ./var/named/standard/loopback
 ./var/named/standard/loopback6.arpa
-./var/named/standard/loopback6.int
 ./var/named/standard/root.hint
 ./var/run/utmp
 ./var/www/cgi-bin/printenv

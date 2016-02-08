@@ -1,4 +1,5 @@
-/*	$OpenBSD: pwd_check.c,v 1.7 2004/03/14 22:53:18 tedu Exp $	*/
+/*	$OpenBSD: pwd_check.c,v 1.9 2004/07/13 21:29:12 millert Exp $	*/
+
 /*
  * Copyright 2000 Niels Provos <provos@citi.umich.edu>
  * All rights reserved.
@@ -42,8 +43,6 @@
 #include <regex.h>
 #include <grp.h>
 #include <paths.h>
-#include <pwd.h>
-#include <util.h>
 #include <login_cap.h>
 
 struct pattern {
@@ -81,21 +80,21 @@ struct pattern patterns[] = {
 };
 
 int
-pwd_check(struct passwd *pwd, login_cap_t *lc, char *password)
+pwd_check(login_cap_t *lc, char *password)
 {
 	regex_t rgx;
 	int i, res, min_len;
-	char *cp, option[LINE_MAX];
+	char *checker;
 	int pipefds[2];
 	pid_t child;
 
-	min_len = (int) login_getcapnum(lc, "minpasswordlen", 6, 6);
+	min_len = (int)login_getcapnum(lc, "minpasswordlen", 6, 6);
 	if (min_len > 0 && strlen(password) < min_len) {
 		printf("Please enter a longer password.\n");
 		return (0);
 	}
 
-	for (i = 0; i < sizeof(patterns)/sizeof(struct pattern); i++) {
+	for (i = 0; i < sizeof(patterns) / sizeof(struct pattern); i++) {
 		if (regcomp(&rgx, patterns[i].match, patterns[i].flags) != 0)
 			continue;
 		res = regexec(&rgx, password, 0, NULL, 0);
@@ -106,46 +105,12 @@ pwd_check(struct passwd *pwd, login_cap_t *lc, char *password)
 		}
 	}
 
-	/* Okay, now pass control to an external program */
-
-	/*
-	 * Check login.conf, falling back onto the deprecated passwd.conf
-	 */
-	if ((cp = login_getcapstr(lc, "passwordcheck", NULL, NULL)) != NULL) {
-		strlcpy(option, cp, sizeof(option));
-		free(cp);
-	} else {
-		pw_getconf(option, LINE_MAX, pwd->pw_name, "pwdcheck");
-
-		/* Try to find an entry for the group */
-		if (*option == 0) {
-			struct group *grp;
-			char grpkey[LINE_MAX];
-
-			grp = getgrgid(pwd->pw_gid);
-			if (grp != NULL) {
-				snprintf(grpkey, LINE_MAX, ":%s",
-				    grp->gr_name);
-				pw_getconf(option, LINE_MAX, grpkey,
-				    "pwdcheck");
-			}
-			if (grp != NULL && *option == 0 &&
-			    strchr(pwd->pw_name, '.') == NULL) {
-				snprintf(grpkey, LINE_MAX, ".%s",
-				    grp->gr_name);
-				pw_getconf(option, LINE_MAX, grpkey,
-				    "pwdcheck");
-			}
-			if (*option == 0)
-				pw_getconf(option, LINE_MAX, "default",
-				    "pwdcheck");
-		}
-	}
-
-	/* If no checker is specified, we accept the password */
-	if (*option == 0)
+	/* If no external checker is specified, just accept the password */
+	checker = login_getcapstr(lc, "passwordcheck", NULL, NULL);
+	if (checker == NULL)
 		return (1);
 
+	/* Okay, now pass control to an external program */
 	if (pipe(pipefds) == -1) {
 		warn("pipe");
 		goto out;
@@ -165,7 +130,7 @@ pwd_check(struct passwd *pwd, login_cap_t *lc, char *password)
 		close(pipefds[0]);
 		close(pipefds[1]);
 
-		argp[2] = option;
+		argp[2] = checker;
 		if (execv(_PATH_BSHELL, argp) == -1)
 			exit(1);
 		/* NOT REACHED */
@@ -181,79 +146,35 @@ pwd_check(struct passwd *pwd, login_cap_t *lc, char *password)
 
 	/* get the return value from the child */
 	wait(&child);
-	if (WIFEXITED(child) && WEXITSTATUS(child) == 0)
+	if (WIFEXITED(child) && WEXITSTATUS(child) == 0) {
+		free(checker);
 		return (1);
+	}
 
  out:
+	free(checker);
 	printf("Please use a different password. Unusual capitalization,\n");
 	printf("control characters, or digits are suggested.\n");
 	return (0);
 }
 
 int
-pwd_gettries(struct passwd *pwd, login_cap_t *lc)
+pwd_gettries(login_cap_t *lc)
 {
-	char option[LINE_MAX];
-	char *ep = option;
 	quad_t ntries;
-	long lval;
+
+	if ((ntries = login_getcapnum(lc, "passwordtries", -1, -1)) != -1) {
+		if (ntries > 0 && ntries <= INT_MAX)
+			return((int)ntries);
+		fprintf(stderr,
+		    "Warning: pwdtries out of range in /etc/login.conf");
+	}
 
 	/*
-	 * Check login.conf, falling back onto the deprecated passwd.conf
+	 * If no amount of tries is specified, return a default of 3,
+	 * meaning that after 3 attempts where the user is foiled by the
+	 * password checks, it will no longer be checked and they can set
+	 * it to whatever they like.  This is the historic BSD behavior.
 	 */
-	if ((ntries = login_getcapnum(lc, "passwordtries", -1, -1)) != -1) {
-		if (ntries > INT_MAX || ntries < 0) {
-			fprintf(stderr,
-			    "Warning: pwdtries out of range in /etc/login.conf");
-			goto out;
-		}
-		return((int)ntries);
-	}
-
-	pw_getconf(option, LINE_MAX, pwd->pw_name, "pwdtries");
-
-	/* Try to find an entry for the group */
-	if (*option == 0) {
-		struct group *grp;
-		char grpkey[LINE_MAX];
-
-		grp = getgrgid(pwd->pw_gid);
-		if (grp != NULL) {
-			snprintf(grpkey, LINE_MAX, ":%s", grp->gr_name);
-			pw_getconf(option, LINE_MAX, grpkey, "pwdtries");
-		}
-		if (grp != NULL && *option == 0 &&
-		    strchr(pwd->pw_name, '.') == NULL) {
-			snprintf(grpkey, LINE_MAX, ".%s", grp->gr_name);
-			pw_getconf(option, LINE_MAX, grpkey, "pwdtries");
-		}
-		if (*option == 0)
-			pw_getconf(option, LINE_MAX, "default", "pwdtries");
-	}
-
-	if (*option == 0)
-		goto out;
-
-	errno = 0;
-	lval = strtol(option, &ep, 10);
-	if (option[0] == '\0' || *ep != '\0') {
-		fprintf(stderr,
-		    "Warning: Bad pwdtries line in /etc/passwd.conf");
-		goto out;
-	}
-	if ((errno == ERANGE && (lval == LONG_MAX || lval == LONG_MIN)) ||
-	    (lval > INT_MAX || lval < 0)) {
-		fprintf(stderr,
-		    "Warning: pwdtries out of range in /etc/passwd.conf");
-		goto out;
-	}
-	return((int) lval);
-
-	/* If no amount of tries is specified, return a default of
-	 * 3, meaning that after 3 attempts where the user is foiled
-	 * by the password checks, it will no longer be checked and
-	 * they can set it to whatever they like.
-	 */
-	out:
-		return (3);
+	return (3);
 }

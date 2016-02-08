@@ -1,4 +1,4 @@
-dnl	$OpenBSD: contents,v 1.48 2004/03/27 23:33:10 miod Exp $
+dnl	$OpenBSD: contents,v 1.53 2004/09/10 19:41:41 miod Exp $
 TopPart
 
 OpenBSDminiroot
@@ -19,10 +19,10 @@ OpenBSDrd
 
 OpenBSDcd
 
-	installboot	The OpenBSD/MACHINE boot loader installation program
-	bootxx		The OpenBSD/MACHINE boot block
-	boot		The OpenBSD/MACHINE secondary boot loader
-	boot.net	The OpenBSD/MACHINE network boot loader
+	installboot	The OpenBSD/MACHINE boot loader installation program.
+	bootxx		The OpenBSD/MACHINE boot block.
+	boot		The OpenBSD/MACHINE secondary boot loader.
+	boot.net	The OpenBSD/MACHINE network boot loader.
 
 
 Please note that there are multiple bootable images and kernels, intended
@@ -35,24 +35,26 @@ Sun bootblocks require a separate kernel image and root filesystem.
 
 OpenBSDfloppydesc(single,The)
 
-DistributionDescription(ten)
+DistributionDescription(eleven)
 
-OpenBSDbase(32.3,93.3,shared)
+OpenBSDbase(33587882,97707496,shared)
 
-OpenBSDcomp(19.8,67.1,shared)
+OpenBSDcomp(20645474,69351317,shared)
 
-OpenBSDetc(1.6,6.3)
+OpenBSDetc(1699139,6548483)
 
-OpenBSDgame(2.7,6.0)
+OpenBSDgame(2666066,6040198)
 
-OpenBSDman(6.7,23.7)
+OpenBSDman(6955575,24825631)
 
-OpenBSDmisc(2.2,7.2)
+OpenBSDmisc(2245725,7365432)
 
-OpenBSDxbase(10.2,31.1)
+OpenBSDxbase(9608176,27501060)
 
-OpenBSDxfont(33.5,37.5)
+OpenBSDxetc(443632,2325807)
 
-OpenBSDxserv(7.5,21.1)
+OpenBSDxfont(33472010,37456744)
 
-OpenBSDxshare(1.7,8.4)
+OpenBSDxserv(7513963,21208661)
+
+OpenBSDxshare(1935366,9970339)

@@ -1,4 +1,4 @@
-#	$OpenBSD: sys.mk,v 1.36 2004/02/27 18:02:47 deraadt Exp $
+#	$OpenBSD: sys.mk,v 1.38 2004/08/09 18:08:51 deraadt Exp $
 #	$NetBSD: sys.mk,v 1.27 1996/04/10 05:47:19 mycroft Exp $
 #	@(#)sys.mk	5.11 (Berkeley) 3/13/91
 
@@ -10,7 +10,7 @@
 
 unix=		We run OpenBSD.
 OSMAJOR=	3
-OSMINOR=	5
+OSMINOR=	6
 OSREV=		$(OSMAJOR).$(OSMINOR)
 OSrev=		$(OSMAJOR)$(OSMINOR)
 
@@ -32,11 +32,7 @@ LINK.S?=	${CC} ${AFLAGS} ${CPPFLAGS} ${LDFLAGS}
 
 CC?=		cc
 
-.if (${MACHINE_ARCH} == "m88k")
-CFLAGS?=	-O1 ${PIPE} ${DEBUG}
-.else
 CFLAGS?=	-O2 ${PIPE} ${DEBUG}
-.endif
 COMPILE.c?=	${CC} ${CFLAGS} ${CPPFLAGS} -c
 LINK.c?=	${CC} ${CFLAGS} ${CPPFLAGS} ${LDFLAGS}
 

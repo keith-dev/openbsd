@@ -1,4 +1,4 @@
-/*	$OpenBSD: alloc.c,v 1.5 2004/02/24 15:35:55 henning Exp $	*/
+/*	$OpenBSD: alloc.c,v 1.9 2004/05/04 20:28:40 deraadt Exp $	*/
 
 /* Memory allocation... */
 
@@ -42,74 +42,25 @@
 
 #include "dhcpd.h"
 
-struct dhcp_packet *dhcp_free_list;
-struct packet *packet_free_list;
-
-void *
-dmalloc(int size, char *name)
-{
-	void *foo = calloc(size, sizeof(char));
-
-	if (!foo)
-		warn("No memory for %s.", name);
-	return (foo);
-}
-
-void
-dfree(void *ptr, char *name)
-{
-	if (!ptr) {
-		warn("dfree %s: free on null pointer.", name);
-		return;
-	}
-	free(ptr);
-}
-
-struct tree *
-new_tree(char *name)
-{
-	struct tree *rval = dmalloc(sizeof(struct tree), name);
-
-	return (rval);
-}
-
 struct string_list *
-new_string_list(size_t size, char * name)
+new_string_list(size_t size)
 {
 	struct string_list *rval;
 
-	rval = dmalloc(sizeof(struct string_list) + size, name);
+	rval = calloc(1, sizeof(struct string_list) + size);
 	if (rval != NULL)
 		rval->string = ((char *)rval) + sizeof(struct string_list);
 	return (rval);
 }
 
-struct tree_cache *free_tree_caches;
-
-struct tree_cache *
-new_tree_cache(char *name)
-{
-	struct tree_cache *rval;
-
-	if (free_tree_caches) {
-		rval = free_tree_caches;
-		free_tree_caches = (struct tree_cache *)(rval->value);
-	} else {
-		rval = dmalloc(sizeof(struct tree_cache), name);
-		if (!rval)
-			error("unable to allocate tree cache for %s.", name);
-	}
-	return (rval);
-}
-
 struct hash_table *
-new_hash_table(int count, char *name)
+new_hash_table(int count)
 {
 	struct hash_table *rval;
 
-	rval = dmalloc(sizeof(struct hash_table) -
+	rval = calloc(1, sizeof(struct hash_table) -
 	    (DEFAULT_HASH_SIZE * sizeof(struct hash_bucket *)) +
-	    (count * sizeof(struct hash_bucket *)), name);
+	    (count * sizeof(struct hash_bucket *)));
 	if (rval == NULL)
 		return (NULL);
 	rval->hash_count = count;
@@ -117,52 +68,9 @@ new_hash_table(int count, char *name)
 }
 
 struct hash_bucket *
-new_hash_bucket(char *name)
+new_hash_bucket(void)
 {
-	struct hash_bucket *rval = dmalloc(sizeof(struct hash_bucket), name);
+	struct hash_bucket *rval = calloc(1, sizeof(struct hash_bucket));
 
 	return (rval);
-}
-
-void
-free_hash_bucket(struct hash_bucket *ptr, char *name)
-{
-	dfree(ptr, name);
-}
-
-void
-free_hash_table(struct hash_table *ptr, char *name)
-{
-	dfree(ptr, name);
-}
-
-void
-free_tree_cache(struct tree_cache *ptr, char *name)
-{
-	ptr->value = (unsigned char *)free_tree_caches;
-	free_tree_caches = ptr;
-}
-
-void
-free_packet(struct packet *ptr, char *name)
-{
-	dfree(ptr, name);
-}
-
-void
-free_dhcp_packet(struct dhcp_packet *ptr, char *name)
-{
-	dfree(ptr, name);
-}
-
-void
-free_tree(struct tree *ptr, char *name)
-{
-	dfree(ptr, name);
-}
-
-void
-free_string_list(struct string_list *ptr, char *name)
-{
-	dfree(ptr, name);
 }

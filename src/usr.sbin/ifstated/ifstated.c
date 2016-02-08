@@ -1,4 +1,4 @@
-/*	$OpenBSD: ifstated.c,v 1.16 2004/03/15 19:42:33 markus Exp $	*/
+/*	$OpenBSD: ifstated.c,v 1.18 2004/06/15 23:59:11 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2004 Marco Pfatschbacher <mpf@openbsd.org>
@@ -82,16 +82,16 @@ usage(void)
 {
 	extern char* __progname;
 
-	fprintf(stderr, "usage: %s [-dhinv] [-D macro=value] [-f config]\n",
-		__progname);
+	fprintf(stderr, "usage: %s [-dhinv] [-D macro=value] [-f file]\n",
+	    __progname);
 	exit(1);
 }
 
 int
 main(int argc, char *argv[])
 {
-	int ch;
 	struct timeval tv;
+	int ch;
 
 	while ((ch = getopt(argc, argv, "dD:f:hniv")) != -1) {
 		switch (ch) {
@@ -208,9 +208,9 @@ load_config(void)
 void
 rt_msg_handler(int fd, short event, void *arg)
 {
-	struct if_msghdr ifm;
 	char msg[2048];
 	struct rt_msghdr *rtm = (struct rt_msghdr *)&msg;
+	struct if_msghdr ifm;
 	int len;
 
 	len = read(fd, msg, sizeof(msg));
@@ -262,8 +262,8 @@ external_handler(int fd, short event, void *arg)
 void
 external_async_exec(struct ifsd_external *external)
 {
-	pid_t pid;
 	char *argp[] = {"sh", "-c", NULL, NULL};
+	pid_t pid;
 
 	if (external->pid > 0) {
 		logit(IFSD_LOG_NORMAL,

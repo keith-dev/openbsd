@@ -12,7 +12,7 @@ use File::Spec::Functions qw(catfile catdir splitdir);
 use vars qw($VERSION @Pagers $Bindir $Pod2man
   $Temp_Files_Created $Temp_File_Lifetime
 );
-$VERSION = '3.11';
+$VERSION = '3.13';
 #..........................................................................
 
 BEGIN {  # Make a DEBUG constant very first thing...
@@ -766,9 +766,12 @@ sub maybe_generate_dynamic_pod {
         push @{ $self->{'temp_file_list'} }, $buffer;
          # I.e., it MIGHT be deleted at the end.
         
-        print $buffd "=over 8\n\n";
+	my $in_list = $self->opt_f;
+
+        print $buffd "=over 8\n\n" if $in_list;
         print $buffd @dynamic_pod  or die "Can't print $buffer: $!";
-        print $buffd "=back\n";
+        print $buffd "=back\n"     if $in_list;
+
         close $buffd        or die "Can't close $buffer: $!";
         
         @$found_things = $buffer;
@@ -1310,10 +1313,12 @@ sub check_file {
     unless( ref $self ) {
       # Should never get called:
       $Carp::Verbose = 1;
-      Carp::croak join '',
+      require Carp;
+      Carp::croak( join '',
         "Crazy ", __PACKAGE__, " error:\n",
         "check_file must be an object_method!\n",
         "Aborting"
+      );
     }
     
     if(length $dir and not -d $dir) {

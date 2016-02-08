@@ -1,4 +1,4 @@
-/*	$OpenBSD: pwd_gensalt.c,v 1.17 2003/07/02 21:04:10 deraadt Exp $ */
+/*	$OpenBSD: pwd_gensalt.c,v 1.20 2004/07/15 17:23:44 millert Exp $ */
 
 /*
  * Copyright 1997 Niels Provos <provos@physnet.uni-hamburg.de>
@@ -38,64 +38,35 @@
 #include <err.h>
 #include <grp.h>
 #include <pwd.h>
-#include <util.h>
 #include <time.h>
 #include <login_cap.h>
 
 void	to64(char *, int32_t, int n);
 char	*bcrypt_gensalt(u_int8_t);
-int	pwd_gensalt(char *, int, struct passwd *, login_cap_t *, char);
+int	pwd_gensalt(char *, int, login_cap_t *, char);
+
+#define	YPCIPHER_DEF		"old"
+#define	LOCALCIPHER_DEF		"blowfish,6"
 
 int
-pwd_gensalt(char *salt, int saltlen, struct passwd *pwd, login_cap_t *lc, char type)
+pwd_gensalt(char *salt, int saltlen, login_cap_t *lc, char type)
 {
-	char	option[LINE_MAX], *next, *now, *cipher;
+	char *next, *now;
 
 	*salt = '\0';
 
 	switch (type) {
 	case 'y':
-		cipher = "ypcipher";
+		next = login_getcapstr(lc, "ypcipher", YPCIPHER_DEF,
+		    YPCIPHER_DEF);
 		break;
 	case 'l':
 	default:
-		cipher = "localcipher";
+		next = login_getcapstr(lc, "localcipher", LOCALCIPHER_DEF,
+		    LOCALCIPHER_DEF);
 		break;
 	}
 
-	/*
-	 * Check login.conf, falling back onto the deprecated passwd.conf
-	 */
-	/* XXX - when passwd.conf goes away completely, add a default value */
-	if ((next = login_getcapstr(lc, cipher, NULL, NULL)) != NULL) {
-		strlcpy(option, next, sizeof(option));
-		free(next);
-	} else {
-		pw_getconf(option, LINE_MAX, pwd->pw_name, cipher);
-
-		/* Try to find an entry for the group */
-		if (*option == 0) {
-			struct group *grp;
-			char grpkey[LINE_MAX];
-
-			grp = getgrgid(pwd->pw_gid);
-			if (grp != NULL) {
-				snprintf(grpkey, LINE_MAX, ":%s",
-				    grp->gr_name);
-				pw_getconf(option, LINE_MAX, grpkey, cipher);
-			}
-			if (grp != NULL && *option == 0 &&
-			    strchr(pwd->pw_name, '.') == NULL) {
-				snprintf(grpkey, LINE_MAX, ".%s",
-				    grp->gr_name);
-				pw_getconf(option, LINE_MAX, grpkey, cipher);
-			}
-			if (*option == 0)
-				pw_getconf(option, LINE_MAX, "default", cipher);
-		}
-	}
-
-	next = option;
 	now = strsep(&next, ",");
 	if (!strcmp(now, "old")) {
 		if (saltlen < 3)

@@ -1,4 +1,4 @@
-/*	$OpenBSD: elf.c,v 1.2 2004/01/13 17:32:32 mickey Exp $	*/
+/*	$OpenBSD: elf.c,v 1.8 2004/08/20 04:42:51 mickey Exp $	*/
 
 /*
  * Copyright (c) 2003 Michael Shalayeff
@@ -52,6 +52,9 @@
 #else
 #error "Unsupported ELF class"
 #endif
+
+#define	ELF_SBSS	".sbss"
+#define	ELF_PLT		".plt"
 
 int
 elf_fix_header(Elf_Ehdr *eh)
@@ -147,15 +150,19 @@ elf_fix_sym(Elf_Ehdr *eh, Elf_Sym *sym)
 int
 elf2nlist(Elf_Sym *sym, Elf_Ehdr *eh, Elf_Shdr *shdr, char *shstr, struct nlist *np)
 {
-	/* extern char *stab; */
 	const char *sn;
 
 	if (sym->st_shndx < eh->e_shnum)
 		sn = shstr + shdr[sym->st_shndx].sh_name;
 	else
 		sn = "";
-
-/* printf("%s 0x%x %s(0x%x)\n", stab + sym->st_name, sym->st_info, sn, sym->st_shndx); */
+#if 0
+	{
+		extern char *stab;
+		printf("%d:%s %d %s\n", sym->st_shndx, sn,
+		    ELF_ST_TYPE(sym->st_info), stab + sym->st_name);
+	}
+#endif
 	switch(ELF_ST_TYPE(sym->st_info)) {
 	case STT_NOTYPE:
 		switch (sym->st_shndx) {
@@ -178,11 +185,38 @@ elf2nlist(Elf_Sym *sym, Elf_Ehdr *eh, Elf_Shdr *shdr, char *shstr, struct nlist 
 				np->n_other = 'r';
 			} else if (!strcmp(sn, ELF_DATA))
 				np->n_type = N_DATA;
+			else if (!strncmp(sn, ELF_GOT, sizeof(ELF_GOT) - 1))
+				np->n_type = N_DATA;
+			else if (!strncmp(sn, ELF_PLT, sizeof(ELF_PLT) - 1))
+				np->n_type = N_DATA;
 			else if (!strcmp(sn, ELF_BSS))
+				np->n_type = N_BSS;
+			else if (!strcmp(sn, ELF_SBSS))
 				np->n_type = N_BSS;
 			else
 				np->n_other = '?';
 			break;
+		}
+		break;
+
+	case STT_OBJECT:
+		np->n_type = N_DATA;
+		switch (sym->st_shndx) {
+		case SHN_ABS:
+			np->n_type = N_ABS;
+			break;
+		case SHN_COMMON:
+			np->n_type = N_COMM;
+			break;
+		default:
+			if (sym->st_shndx >= eh->e_shnum)
+				break;
+			else if (!strcmp(sn, ELF_SBSS))
+				np->n_type = N_BSS;
+			else if (!strcmp(sn, ELF_BSS))
+				np->n_type = N_BSS;
+			else if (!strcmp(sn, ELF_RODATA))
+				np->n_other = 'r';
 		}
 		break;
 
@@ -191,24 +225,27 @@ elf2nlist(Elf_Sym *sym, Elf_Ehdr *eh, Elf_Shdr *shdr, char *shstr, struct nlist 
 		if (ELF_ST_BIND(sym->st_info) == STB_WEAK) {
 			np->n_type = N_INDR;
 			np->n_other = 'W';
-		} else if (sym->st_shndx == SHN_UNDEF)
+		} else if (sym->st_shndx == SHN_ABS)
+			np->n_type = N_ABS;
+		else if (sym->st_shndx == SHN_UNDEF)
 			np->n_type = N_UNDF | N_EXT;
-		else if (strcmp(sn, ELF_TEXT))	/* XXX GNU compat */
+		else if (strcmp(sn, ELF_INIT) &&
+		    strcmp(sn, ELF_TEXT) &&
+		    strcmp(sn, ELF_FINI))	/* XXX GNU compat */
 			np->n_other = '?';
 		break;
 
-	case STT_OBJECT:
-		np->n_type = N_DATA;
-		if (sym->st_shndx == SHN_ABS)
+	case STT_SECTION:
+		switch (sym->st_shndx) {
+		case SHN_ABS:
 			np->n_type = N_ABS;
-		if (sym->st_shndx == SHN_COMMON)
-			np->n_type = N_COMM;
-		else if (sym->st_shndx >= eh->e_shnum)
 			break;
-		else if (!strcmp(sn, ELF_BSS))
-			np->n_type = N_BSS;
-		else if (!strcmp(sn, ELF_RODATA))
-			np->n_other = 'r';
+		case SHN_COMMON:
+			np->n_type = N_COMM;
+			break;
+		default:
+			np->n_other = '?';
+		}
 		break;
 
 	case STT_FILE:

@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.12 2003/05/09 00:07:09 millert Exp $
+#	$OpenBSD: Makefile,v 1.15 2004/04/25 16:28:32 itojun Exp $
 
 PROG=	routed
 SRCS=	if.c input.c main.c output.c parms.c radix.c rdisc.c table.c trace.c
@@ -9,7 +9,5 @@ SUBDIR=	rtquery
 
 # Do *NOT* turn this flag on unless you like security holes
 #CFLAGS+=-DPERMIT_TRACE
-
-.PATH: ${.CURDIR}/../../sys/net
 
 .include <bsd.prog.mk>

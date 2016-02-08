@@ -1,4 +1,4 @@
-.\"	$OpenBSD: newfs.8,v 1.36 2003/10/17 09:35:30 jmc Exp $
+.\"	$OpenBSD: newfs.8,v 1.41 2004/08/15 22:06:20 jmc Exp $
 .\"	$NetBSD: newfs.8,v 1.12 1995/03/18 14:58:41 cgd Exp $
 .\"
 .\" Copyright (c) 1983, 1987, 1991, 1993, 1994
@@ -68,6 +68,7 @@
 .Pp
 .Nm mount_mfs
 .Bk -words
+.Op Fl P Ar file
 .Op Fl a Ar maxcontig
 .Op Fl b Ar block-size
 .Op Fl c Ar cylinders
@@ -221,6 +222,8 @@ See
 for more details on how to set this option.
 .It Fl s Ar size
 The size of the file system in sectors.
+The maximum size of a file system is 2,147,483,647 (2^31 \- 1) sectors,
+which is slightly less than 1TB.
 .El
 .Pp
 The following options override the standard sizes for the disk geometry.
@@ -241,7 +244,7 @@ The size of a sector in bytes (almost never anything but 512).
 Used to describe perturbations in the media format to compensate for
 a slow controller.
 Track skew is the offset of sector 0 on track N relative to sector 0
-on track N-1 on the same cylinder.
+on track N\-1 on the same cylinder.
 .It Fl l Ar hardware sector interleave
 Used to describe perturbations in the media format to compensate for
 a slow controller.
@@ -286,11 +289,22 @@ The options to the
 command are as described for the
 .Nm
 command, except for the
+.Fl P
+option and the
 .Fl o
 option.
 .Pp
-That option is as follows:
+These options are as follows:
 .Bl -tag -width indent
+.It Fl P Ar file
+If
+.Ar file
+is a directory, populate the created mfs file system with the contents
+of the directory.
+If
+.Ar file
+is a block device, populate the created mfs file system with
+the contents of the FFS file system contained on the device.
 .It Fl o
 Options are specified with a
 .Fl o
@@ -299,6 +313,19 @@ See the
 .Xr mount 8
 man page for possible options and their meanings.
 .El
+.Pp
+If the
+.Fl P Ar file
+option is not used, the owner and mode of the created mfs file system will
+be the same as the owner and mode of the mount point.
+.Sh ENVIRONMENT
+.Bl -tag -width TMPDIR
+.It Ev TMPDIR
+Directory in which to create temporary mount points for use by
+.Nm mount_mfs Fl P
+instead of
+.Pa /tmp .
+.El
 .Sh SEE ALSO
 .Xr disktab 5 ,
 .Xr fs 5 ,
@@ -306,6 +333,7 @@ man page for possible options and their meanings.
 .Xr dumpfs 8 ,
 .Xr fsck 8 ,
 .Xr fsirand 8 ,
+.Xr growfs 8 ,
 .Xr mount 8 ,
 .Xr tunefs 8
 .Rs
@@ -325,3 +353,9 @@ The
 .Nm
 command appeared in
 .Bx 4.2 .
+.Sh BUGS
+Certain combinations of block and fragment sizes may not produce a valid
+file system.
+If a non-default block or fragment size is specified,
+.Xr fsck 8
+should be run on the newly created filesystem before use.

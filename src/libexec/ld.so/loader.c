@@ -1,4 +1,4 @@
-/*	$OpenBSD: loader.c,v 1.73 2004/02/23 20:47:39 drahn Exp $ */
+/*	$OpenBSD: loader.c,v 1.83 2004/08/11 17:13:10 pefo Exp $ */
 
 /*
  * Copyright (c) 1998 Per Fogelstrom, Opsycon AB
@@ -84,9 +84,11 @@ _dl_debug_state(void)
 void
 _dl_run_dtors(elf_object_t *object)
 {
-	DL_DEB(("doing dtors: [%s]\n", object->load_name));
-	if (object->dyn.fini)
+	if (object->dyn.fini) {
+		DL_DEB(("doing dtors @%p: [%s]\n",
+		    object->dyn.fini, object->load_name));
 		(*object->dyn.fini)();
+	}
 	if (object->next)
 		_dl_run_dtors(object->next);
 }
@@ -208,7 +210,7 @@ _dl_boot(const char **argv, char **envp, const long loff, long *dl_data)
 	{
 		extern char *__got_start;
 		extern char *__got_end;
-#ifndef RTLD_TEXT_PLT
+#ifdef RTLD_PROTECT_PLT
 		extern char *__plt_start;
 		extern char *__plt_end;
 #endif
@@ -218,7 +220,7 @@ _dl_boot(const char **argv, char **envp, const long loff, long *dl_data)
 		    ELF_TRUNC((long)&__got_start, _dl_pagesz),
 		    GOT_PERMS);
 
-#ifndef RTLD_TEXT_PLT
+#ifdef RTLD_PROTECT_PLT
 		/* only for DATA_PLT or BSS_PLT */
 		_dl_mprotect((void *)ELF_TRUNC((long)&__plt_start, _dl_pagesz),
 		    ELF_ROUND((long)&__plt_end,_dl_pagesz) -
@@ -337,9 +339,6 @@ _dl_boot(const char **argv, char **envp, const long loff, long *dl_data)
 	_dl_add_object(dyn_obj);
 	dyn_obj->status |= STAT_RELOC_DONE;
 
-	if (_dl_traceld == NULL)
-		_dl_fixup_user_env();
-
 	/*
 	 * Everything should be in place now for doing the relocation
 	 * and binding. Call _dl_rtld to do the job. Fingers crossed.
@@ -347,36 +346,15 @@ _dl_boot(const char **argv, char **envp, const long loff, long *dl_data)
 	if (_dl_traceld == NULL)
 		_dl_rtld(_dl_objects);
 
-	/*
-	 * The first object is the executable itself,
-	 * it is responsible for running it's own ctors/dtors
-	 * thus do NOT run the ctors for the executable, all of
-	 * the shared libraries which follow.
-	 * Do not run init code if run from ldd.
-	 */
-	if ((_dl_traceld == NULL) && (_dl_objects->next != NULL)) {
-		_dl_objects->status |= STAT_INIT_DONE;
-		_dl_call_init(_dl_objects);
-	}
+	if (_dl_debug || _dl_traceld)
+		_dl_show_objects();
 
-	/*
-	 * Schedule a routine to be run at shutdown, by using atexit.
-	 * Cannot call atexit directly from ld.so?
-	 * Do not schedule destructors if run from ldd.
-	 */
-	if (_dl_traceld == NULL) {
-		const Elf_Sym *sym;
-		Elf_Addr ooff;
+	DL_DEB(("dynamic loading done.\n"));
 
-		sym = NULL;
-		ooff = _dl_find_symbol("atexit", _dl_objects, &sym,
-		    SYM_SEARCH_ALL|SYM_NOWARNNOTFOUND|SYM_PLT, 0, dyn_obj);
-		if (sym == NULL)
-			_dl_printf("cannot find atexit, destructors will not be run!\n");
-		else
-			(*(void (*)(Elf_Addr))(sym->st_value + ooff))
-			    ((Elf_Addr)_dl_dtors);
-	}
+	if (_dl_traceld)
+		_dl_exit(0);
+
+	_dl_fixup_user_env();
 
 	/*
 	 * Finally make something to help gdb when poking around in the code.
@@ -408,12 +386,41 @@ _dl_boot(const char **argv, char **envp, const long loff, long *dl_data)
 
 	_dl_debug_state();
 
-	if (_dl_debug || _dl_traceld) {
-		_dl_show_objects();
-		DL_DEB(("dynamic loading done.\n"));
+	/*
+	 * The first object is the executable itself,
+	 * it is responsible for running it's own ctors/dtors
+	 * thus do NOT run the ctors for the executable, all of
+	 * the shared libraries which follow.
+	 * Do not run init code if run from ldd.
+	 */
+	if (_dl_objects->next != NULL) {
+		_dl_objects->status |= STAT_INIT_DONE;
+		_dl_call_init(_dl_objects);
 	}
-	if (_dl_traceld)
-		_dl_exit(0);
+
+	/*
+	 * Schedule a routine to be run at shutdown, by using atexit.
+	 * Cannot call atexit directly from ld.so?
+	 * Do not schedule destructors if run from ldd.
+	 */
+	{
+		const elf_object_t *sobj;
+		const Elf_Sym *sym;
+		Elf_Addr ooff;
+
+		sym = NULL;
+		ooff = _dl_find_symbol("atexit", _dl_objects, &sym, &sobj,
+		    SYM_SEARCH_ALL|SYM_NOWARNNOTFOUND|SYM_PLT, 0, dyn_obj);
+		if (sym == NULL)
+			_dl_printf("cannot find atexit, destructors will not be run!\n");
+		else
+#ifdef MD_ATEXIT
+			MD_ATEXIT(sobj, sym, (Elf_Addr)&_dl_dtors);
+#else
+			(*(void (*)(Elf_Addr))(sym->st_value + ooff))
+			    ((Elf_Addr)_dl_dtors);
+#endif
+	}
 
 	DL_DEB(("entry point: 0x%lx\n", dl_data[AUX_entry]));
 
@@ -474,7 +481,8 @@ _dl_boot_bind(const long sp, long *dl_data, Elf_Dyn *dynamicp)
 
 #if defined(__alpha__)
 	dynp = (Elf_Dyn *)((long)_DYNAMIC);
-#elif defined(__sparc__) || defined(__sparc64__) || defined(__powerpc__)
+#elif defined(__sparc__) || defined(__sparc64__) || defined(__powerpc__) || \
+    defined(__hppa__)
 	dynp = dynamicp;
 #else
 	dynp = (Elf_Dyn *)((long)_DYNAMIC + loff);
@@ -646,7 +654,7 @@ _dl_rtld(elf_object_t *object)
 	_dl_md_reloc_got(object, !(_dl_bindnow || object->dyn.bind_now));
 
 	if (_dl_symcache != NULL) {
-		if (sz != 0) 
+		if (sz != 0)
 			_dl_munmap( _dl_symcache, sz);
 		_dl_symcache = NULL;
 	}
@@ -667,9 +675,11 @@ _dl_call_init(elf_object_t *object)
 	if (object->status & STAT_INIT_DONE)
 		return;
 
-	DL_DEB(("doing ctors: [%s]\n", object->load_name));
-	if (object->dyn.init)
+	if (object->dyn.init) {
+		DL_DEB(("doing ctors @%p: [%s]\n",
+		    object->dyn.init, object->load_name));
 		(*object->dyn.init)();
+	}
 
 	/* What about loops? */
 	object->status |= STAT_INIT_DONE;
@@ -716,9 +726,9 @@ _dl_unsetenv(const char *var, char **env)
 	}
 }
 
-/* 
+/*
  * _dl_fixup_user_env()
- * 
+ *
  * Set the user environment so that programs can use the environment
  * while running constructors. Specifically, MALLOC_OPTIONS= for malloc()
  */
@@ -733,7 +743,7 @@ _dl_fixup_user_env(void)
 	dummy_obj.load_name = "ld.so";
 
 	sym = NULL;
-	ooff = _dl_find_symbol("environ", _dl_objects, &sym,
+	ooff = _dl_find_symbol("environ", _dl_objects, &sym, NULL,
 	    SYM_SEARCH_ALL|SYM_NOWARNNOTFOUND|SYM_PLT, 0, &dummy_obj);
 	if (sym != NULL)
 		*((char ***)(sym->st_value + ooff)) = _dl_so_envp;

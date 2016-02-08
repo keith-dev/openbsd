@@ -1,4 +1,4 @@
-/*	$OpenBSD: resolve.h,v 1.29 2003/09/04 19:33:48 drahn Exp $ */
+/*	$OpenBSD: resolve.h,v 1.32 2004/08/11 19:14:56 drahn Exp $ */
 
 /*
  * Copyright (c) 1998 Per Fogelstrom, Opsycon AB
@@ -122,6 +122,10 @@ typedef struct elf_object {
 
 	struct dep_node *first_child;
 	struct dep_node *last_child;
+
+	/* for object confirmation */
+	dev_t	dev;
+	ino_t inode;
 } elf_object_t;
 
 struct dep_node {
@@ -144,9 +148,11 @@ extern int  _dl_md_reloc(elf_object_t *object, int rel, int relsz);
 extern void _dl_md_reloc_got(elf_object_t *object, int lazy);
 
 Elf_Addr _dl_find_symbol(const char *name, elf_object_t *startlook,
-    const Elf_Sym **ref, int flags, int sym_size, elf_object_t *object);
+    const Elf_Sym **ref, const elf_object_t **pobj,
+    int flags, int sym_size, elf_object_t *object);
 Elf_Addr _dl_find_symbol_bysym(elf_object_t *req_obj, unsigned int symidx,
-    elf_object_t *startlook, const Elf_Sym **ref, int flags, int req_size);
+    elf_object_t *startlook, const Elf_Sym **ref, const elf_object_t **pobj,
+    int flags, int req_size);
 /*
  * defines for _dl_find_symbol() flag field, three bits of meaning
  * myself	- clear: search all objects,	set: search only this object
@@ -207,14 +213,16 @@ extern char *_dl_debug;
 #define	DL_NO_SYMBOL		6
 #define	DL_INVALID_HANDLE	7
 #define	DL_INVALID_CTL		8
+#define	DL_NO_OBJECT		9
+#define	DL_CANT_FIND_OBJ	10
 
 #define ELF_ROUND(x,malign) (((x) + (malign)-1) & ~((malign)-1))
 #define ELF_TRUNC(x,malign) ((x) & ~((malign)-1))
 
 /* symbol lookup cache */
 typedef struct sym_cache {
+	const elf_object_t *obj;
 	const Elf_Sym	*sym;
-	Elf_Addr	offset;
 	int flags;
 } sym_cache;
 

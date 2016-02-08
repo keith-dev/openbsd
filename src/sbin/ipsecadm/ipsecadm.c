@@ -1,4 +1,4 @@
-/* $OpenBSD: ipsecadm.c,v 1.74 2004/01/27 22:46:55 itojun Exp $ */
+/* $OpenBSD: ipsecadm.c,v 1.80 2004/06/25 02:35:36 henning Exp $ */
 /*
  * The authors of this code are John Ioannidis (ji@tla.org),
  * Angelos D. Keromytis (kermit@csd.uch.gr) and
@@ -48,8 +48,6 @@
 #include <net/route.h>
 #include <net/if_dl.h>
 #include <netinet/in.h>
-#include <netns/ns.h>
-#include <netiso/iso.h>
 #include <netccitt/x25.h>
 #include <net/pfkeyv2.h>
 #include <netinet/ip_ipsp.h>
@@ -64,6 +62,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <paths.h>
+#include <err.h>
 
 #define KEYSIZE_LIMIT	1024
 
@@ -88,6 +87,7 @@
 #define ENC_IP		0x4000
 
 #define CMD_MASK	0xff00
+#define XFORM_MASK	0x0f00
 
 #define isencauth(x)	((x)&~CMD_MASK)
 #define iscmd(x,y)	(((x) & CMD_MASK) == (y))
@@ -122,7 +122,7 @@ extern void ipsecadm_monitor(void);
 extern void ipsecadm_show(u_int8_t);
 int	addrparse(const char *, struct sockaddr *, struct sockaddr *);
 void	xf_set(struct iovec *, int, int);
-int	x2i(char *);
+int	x2i(u_char *);
 int	isvalid(char *, int, int);
 void	usage(void);
 
@@ -242,7 +242,7 @@ xf_set(struct iovec *iov, int cnt, int len)
 }
 
 int
-x2i(char *s)
+x2i(u_char *s)
 {
 	char ss[3];
 
@@ -264,7 +264,7 @@ isvalid(char *option, int type, int mode)
 
 	for (i = sizeof(xf) / sizeof(transform) - 1; i >= 0; i--)
 		if (!strcmp(option, xf[i].name) &&
-		    (xf[i].flags & CMD_MASK) == type &&
+		    (xf[i].flags & XFORM_MASK) == type &&
 		    (xf[i].flags & mode)) {
 			goto gotit;
 		}
@@ -354,6 +354,8 @@ main(int argc, char *argv[])
 	u_char realkey[8192], realakey[8192];
 	struct iovec iov[30];
 	struct addrinfo hints, *res;
+	const char *errstr;
+	char *ep;
 
 	if (argc < 2) {
 		usage();
@@ -561,11 +563,11 @@ main(int argc, char *argv[])
 		if (!strcmp(argv[i] + 1, "key") && keyp == NULL &&
 		    (i + 1 < argc)) {
 			if (mode & (AH_NEW | AH_OLD | TCPMD5)) {
-				authp = argv[++i];
-				alen = strlen(authp) / 2;
+				authp = (u_char *)argv[++i];
+				alen = strlen((char *)authp) / 2;
 			} else {
-				keyp = argv[++i];
-				klen = strlen(keyp) / 2;
+				keyp = (u_char *)argv[++i];
+				klen = strlen((char *)keyp) / 2;
 			}
 			continue;
 		}
@@ -581,12 +583,13 @@ main(int argc, char *argv[])
 			}
 			if ((sb.st_size > KEYSIZE_LIMIT) || (sb.st_size == 0)) {
 				fprintf(stderr,
-				    "%s: file %s is too %s (must be between 1 and %d bytes).\nb",
+				    "%s: file %s is too %s "
+				    "(must be between 1 and %d bytes).\nb",
 				    argv[0], argv[i],
 				    sb.st_size ? "large" : "small", KEYSIZE_LIMIT);
 				exit(1);
 			}
-			pptr = malloc(sb.st_size);
+			pptr = malloc((int)sb.st_size);
 			if (pptr == NULL) {
 				perror("malloc()");
 				exit(1);
@@ -596,7 +599,7 @@ main(int argc, char *argv[])
 				perror("open()");
 				exit(1);
 			}
-			if (read(fd, pptr, sb.st_size) < sb.st_size) {
+			if (read(fd, pptr, (size_t)sb.st_size) < sb.st_size) {
 				perror("read()");
 				exit(1);
 			}
@@ -628,12 +631,13 @@ main(int argc, char *argv[])
 			}
 			if ((sb.st_size > KEYSIZE_LIMIT) || (sb.st_size == 0)) {
 				fprintf(stderr,
-				    "%s: file %s is too %s (must be between 1 and %d bytes).\n",
+				    "%s: file %s is too %s "
+				    "(must be between 1 and %d bytes).\n",
 				    argv[0], argv[i],
 				    sb.st_size ? "large" : "small", KEYSIZE_LIMIT);
 				exit(1);
 			}
-			authp = malloc(sb.st_size);
+			authp = malloc((int)sb.st_size);
 			if (authp == NULL) {
 				perror("malloc()");
 				exit(1);
@@ -643,7 +647,7 @@ main(int argc, char *argv[])
 				perror("open()");
 				exit(1);
 			}
-			if (read(fd, authp, sb.st_size) < sb.st_size) {
+			if (read(fd, authp, (int)sb.st_size) < sb.st_size) {
 				perror("read()");
 				exit(1);
 			}
@@ -660,8 +664,8 @@ main(int argc, char *argv[])
 				    argv[0], argv[i]);
 				exit(1);
 			}
-			authp = argv[++i];
-			alen = strlen(authp) / 2;
+			authp = (u_char *)argv[++i];
+			alen = strlen((char *)authp) / 2;
 			continue;
 		}
 		if (!strcmp(argv[i] + 1, "iv") && (i + 1 < argc)) {
@@ -709,38 +713,34 @@ main(int argc, char *argv[])
 		}
 		if (!strcmp(argv[i] + 1, "spi") && spi == SPI_LOCAL_USE &&
 		    (i + 1 < argc) && !bypass && !deny) {
-			spi = strtoul(argv[i + 1], NULL, 16);
-			if (spi >= SPI_RESERVED_MIN && spi <= SPI_RESERVED_MAX) {
-				fprintf(stderr, "%s: invalid spi %s\n",
-				    argv[0], argv[i + 1]);
-				exit(1);
-			}
+			spi = strtoul(argv[i + 1], &ep, 16);
+			if ((argv[i + 1] == '\0' || *ep != '\0') ||
+			    (errno == ERANGE && spi == ULONG_MAX) ||
+			    (spi >= SPI_RESERVED_MIN && spi <= SPI_RESERVED_MAX))
+				errx(1, "invalid spi %s", argv[i + 1]);
 			sa.sadb_sa_spi = htonl(spi);
 			i++;
 			continue;
 		}
 		if (!strcmp(argv[i] + 1, "spi2") && spi2 == SPI_LOCAL_USE &&
 		    iscmd(mode, GRP_SPI) && (i + 1 < argc)) {
-			spi2 = strtoul(argv[i + 1], NULL, 16);
-			if (spi2 == SPI_LOCAL_USE ||
-			    (spi2 >= SPI_RESERVED_MIN && spi2 <= SPI_RESERVED_MAX)) {
-				fprintf(stderr, "%s: invalid spi2 %s\n",
-				    argv[0], argv[i + 1]);
-				exit(1);
-			}
+			spi2 = strtoul(argv[i + 1], &ep, 16);
+			if ((argv[i + 1] == '\0' || *ep != '\0') ||
+			    (errno == ERANGE && spi == ULONG_MAX) ||
+			    (spi2 >= SPI_RESERVED_MIN && spi2 <= SPI_RESERVED_MAX))
+				errx(1, "invalid spi2 %s", argv[i + 1]);
 			sa2.sadb_sa_spi = htonl(spi2);
 			i++;
 			continue;
 		}
 		if (!strcmp(argv[i] + 1, "cpi") && cpi == SPI_LOCAL_USE &&
 		    (i + 1 < argc) && !bypass && !deny) {
-			cpi = strtoul(argv[i + 1], NULL, 16);
-			if (cpi >= CPI_RESERVED_MIN && (cpi <= CPI_RESERVED_MAX ||
-			    cpi >= CPI_PRIVATE_MAX)) {
-				fprintf(stderr, "%s: invalid cpi %s\n",
-				    argv[0], argv[i + 1]);
-				exit(1);
-			}
+			cpi = strtoul(argv[i + 1], &ep, 16);
+			if ((argv[i + 1] == '\0' || *ep != '\0') ||
+			    (errno == ERANGE && spi == ULONG_MAX) ||
+			    (cpi >= CPI_RESERVED_MIN && cpi <= CPI_RESERVED_MAX) ||
+			    (cpi > USHRT_MAX))
+				errx(1, "invalid cpi %s", argv[i + 1]);
 			sa.sadb_sa_spi = ntohl(cpi);
 			i++;
 			continue;
@@ -964,7 +964,9 @@ main(int argc, char *argv[])
 			udpencap.sadb_x_udpencap_exttype = SADB_X_EXT_UDPENCAP;
 			udpencap.sadb_x_udpencap_len = sizeof(udpencap) / 8;
 			udpencap.sadb_x_udpencap_port =
-			    strtoul(argv[i + 1], NULL, 10);
+			    strtonum(argv[i + 1], 0, USHRT_MAX, &errstr);
+			if (errstr)
+				errx(1, "invalid port %s", argv[i + 1]);
 			udpencap.sadb_x_udpencap_port =
 			    htons(udpencap.sadb_x_udpencap_port);
 			udpencap.sadb_x_udpencap_reserved = 0;
@@ -1011,8 +1013,8 @@ main(int argc, char *argv[])
 				fprintf(stderr, "%s: malloc failed\n", argv[0]);
 				exit(1);
 			}
-			strlcpy(srcid, argv[i + 1], len);
-			sid1.sadb_ident_len += ROUNDUP(strlen(srcid) + 1) /
+			strlcpy((char *)srcid, argv[i + 1], len);
+			sid1.sadb_ident_len += ROUNDUP(strlen((char *)srcid) + 1) /
 			    sizeof(u_int64_t);
 			i++;
 			continue;
@@ -1031,8 +1033,8 @@ main(int argc, char *argv[])
 				fprintf(stderr, "%s: malloc failed\n", argv[0]);
 				exit(1);
 			}
-			strlcpy(dstid, argv[i + 1], len);
-			sid2.sadb_ident_len += ROUNDUP(strlen(dstid) + 1) /
+			strlcpy((char *)dstid, argv[i + 1], len);
+			sid2.sadb_ident_len += ROUNDUP(strlen((char *)dstid) + 1) /
 			    sizeof(u_int64_t);
 			i++;
 			continue;
@@ -1191,7 +1193,11 @@ main(int argc, char *argv[])
 				tproto = tp->p_proto;
 				transportproto = argv[i + 1];
 			} else {
-				tproto = atoi(argv[i + 1]);
+				tproto = strtonum(argv[i + 1], 0, INT_MAX, 
+				    &errstr);
+				if (errstr)
+					errx(1, "bad protocol %s",
+					    argv[i + 1]);
 				tp = getprotobynumber(tproto);
 				if (tp == NULL)
 					transportproto = "UNKNOWN";
@@ -1216,8 +1222,13 @@ main(int argc, char *argv[])
 					exit(1);
 				}
 				sport = svp->s_port;
-			} else
-				sport = htons(atoi(argv[i + 1]));
+			} else {
+				sport = strtonum(argv[i + 1], 0, USHRT_MAX,
+				    &errstr);
+				if (errstr)
+					errx(1, "invalid port %s", argv[i + 1]);
+				sport = htons(sport);
+			}
 			i++;
 			continue;
 		}
@@ -1232,8 +1243,13 @@ main(int argc, char *argv[])
 					exit(1);
 				}
 				dport = svp->s_port;
-			} else
-				dport = htons(atoi(argv[i + 1]));
+			} else {
+				dport = strtonum(argv[i + 1], 0, USHRT_MAX,
+				    &errstr);
+				if (errstr)
+					errx(1, "invalid port %s", argv[i + 1]);
+				dport = htons(dport);
+			}
 			i++;
 			continue;
 		}
@@ -1326,14 +1342,14 @@ main(int argc, char *argv[])
 					exit(1);
 				}
 			} else {
-				proto2 = atoi(argv[i + 1]);
-
-				if (proto2 != IPPROTO_ESP && proto2 != IPPROTO_AH &&
-				    proto2 != IPPROTO_IPIP && proto2 != IPPROTO_IPCOMP) {
-					fprintf(stderr,
-					    "%s: unknown security protocol2 %d\n",
-					    argv[0], proto2);
-					exit(1);
+				proto2 = strtonum(argv[i + 1], 0, INT_MAX,
+				    &errstr);
+				if (errstr || (proto2 != IPPROTO_ESP && 
+				    proto2 != IPPROTO_AH &&
+				    proto2 != IPPROTO_IPIP && 
+				    proto2 != IPPROTO_IPCOMP)) {
+					errx(1, "unknown security protocol2 %s",
+					    argv[i + 1]);
 				}
 				if (proto2 == IPPROTO_ESP)
 					sprotocol.sadb_protocol_proto = sproto2 =
@@ -1367,6 +1383,9 @@ main(int argc, char *argv[])
 				} else if (!strcasecmp(argv[i + 1], "ipcomp")) {
 					smsg.sadb_msg_satype = SADB_X_SATYPE_IPCOMP;
 					proto = IPPROTO_IPCOMP;
+				} else if (!strcasecmp(argv[i + 1], "tcpmd5")) {
+					smsg.sadb_msg_satype = SADB_X_SATYPE_TCPSIGNATURE;
+					proto = IPPROTO_TCP;
 				} else {
 					fprintf(stderr,
 					    "%s: unknown security protocol type %s\n",
@@ -1374,13 +1393,14 @@ main(int argc, char *argv[])
 					exit(1);
 				}
 			} else {
-				proto = atoi(argv[i + 1]);
-				if (proto != IPPROTO_ESP && proto != IPPROTO_AH &&
-				    proto != IPPROTO_IPIP && proto != IPPROTO_IPCOMP) {
-					fprintf(stderr,
-					    "%s: unknown security protocol %d\n",
-					    argv[0], proto);
-					exit(1);
+				proto = strtonum(argv[i + 1], 0, INT_MAX,
+				    &errstr);
+				if (errstr || (proto != IPPROTO_ESP && 
+				    proto != IPPROTO_AH &&
+				    proto != IPPROTO_IPIP && 
+				    proto != IPPROTO_IPCOMP)) {
+					errx(1, "unknown security protocol %s",
+					    argv[i + 1]);
 				}
 				if (proto == IPPROTO_ESP)
 					smsg.sadb_msg_satype = SADB_SATYPE_ESP;
@@ -1523,7 +1543,7 @@ argfail:
 			iov[cnt++].iov_len = sizeof(sid1);
 			/* SRC identity */
 			iov[cnt].iov_base = srcid;
-			iov[cnt++].iov_len = ROUNDUP(strlen(srcid) + 1);
+			iov[cnt++].iov_len = ROUNDUP(strlen((char *)srcid) + 1);
 			smsg.sadb_msg_len += sid1.sadb_ident_len;
 		}
 		if (dstid) {
@@ -1531,7 +1551,7 @@ argfail:
 			iov[cnt++].iov_len = sizeof(sid2);
 			/* DST identity */
 			iov[cnt].iov_base = dstid;
-			iov[cnt++].iov_len = ROUNDUP(strlen(dstid) + 1);
+			iov[cnt++].iov_len = ROUNDUP(strlen((char *)dstid) + 1);
 			smsg.sadb_msg_len += sid2.sadb_ident_len;
 		}
 		if (sad1.sadb_address_exttype) {
@@ -1773,7 +1793,7 @@ argfail:
 				iov[cnt++].iov_len = sizeof(sid1);
 				/* SRC identity */
 				iov[cnt].iov_base = srcid;
-				iov[cnt++].iov_len = ROUNDUP(strlen(srcid) + 1);
+				iov[cnt++].iov_len = ROUNDUP(strlen((char *)srcid) + 1);
 				smsg.sadb_msg_len += sid1.sadb_ident_len;
 			}
 			if ((dstid) &&
@@ -1782,7 +1802,7 @@ argfail:
 				iov[cnt++].iov_len = sizeof(sid2);
 				/* DST identity */
 				iov[cnt].iov_base = dstid;
-				iov[cnt++].iov_len = ROUNDUP(strlen(dstid) + 1);
+				iov[cnt++].iov_len = ROUNDUP(strlen((char *)dstid) + 1);
 				smsg.sadb_msg_len += sid2.sadb_ident_len;
 			}
 			break;

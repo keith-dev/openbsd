@@ -22,7 +22,7 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 #include "includes.h"
-RCSID("$OpenBSD: ssh-keysign.c,v 1.15 2004/01/19 21:25:15 markus Exp $");
+RCSID("$OpenBSD: ssh-keysign.c,v 1.18 2004/08/23 14:29:23 dtucker Exp $");
 
 #include <openssl/evp.h>
 #include <openssl/rand.h>
@@ -41,6 +41,7 @@ RCSID("$OpenBSD: ssh-keysign.c,v 1.15 2004/01/19 21:25:15 markus Exp $");
 #include "canohost.h"
 #include "pathnames.h"
 #include "readconf.h"
+#include "uidswap.h"
 
 /* XXX readconf.c needs these */
 uid_t original_real_uid;
@@ -148,17 +149,20 @@ main(int argc, char **argv)
 	key_fd[0] = open(_PATH_HOST_RSA_KEY_FILE, O_RDONLY);
 	key_fd[1] = open(_PATH_HOST_DSA_KEY_FILE, O_RDONLY);
 
-	seteuid(getuid());
-	setuid(getuid());
+	original_real_uid = getuid();	/* XXX readconf.c needs this */
+	if ((pw = getpwuid(original_real_uid)) == NULL)
+		fatal("getpwuid failed");
+	pw = pwcopy(pw);
+
+	permanently_set_uid(pw);
 
 #ifdef DEBUG_SSH_KEYSIGN
 	log_init("ssh-keysign", SYSLOG_LEVEL_DEBUG3, SYSLOG_FACILITY_AUTH, 0);
 #endif
 
 	/* verify that ssh-keysign is enabled by the admin */
-	original_real_uid = getuid();	/* XXX readconf.c needs this */
 	initialize_options(&options);
-	(void)read_config_file(_PATH_HOST_CONFIG_FILE, "", &options);
+	(void)read_config_file(_PATH_HOST_CONFIG_FILE, "", &options, 0);
 	fill_default_options(&options);
 	if (options.enable_ssh_keysign != 1)
 		fatal("ssh-keysign not enabled in %s",
@@ -166,10 +170,6 @@ main(int argc, char **argv)
 
 	if (key_fd[0] == -1 && key_fd[1] == -1)
 		fatal("could not open any host key");
-
-	if ((pw = getpwuid(getuid())) == NULL)
-		fatal("getpwuid failed");
-	pw = pwcopy(pw);
 
 	SSLeay_add_all_algorithms();
 	for (i = 0; i < 256; i++)

@@ -1,4 +1,4 @@
-/*	$OpenBSD: tokenadm.c,v 1.6 2002/09/06 19:12:36 deraadt Exp $	*/
+/*	$OpenBSD: tokenadm.c,v 1.8 2004/06/21 15:27:19 avsm Exp $	*/
 
 /*-
  * Copyright (c) 1995 Migration Associates Corp. All Rights Reserved
@@ -102,7 +102,7 @@ main(int argc, char **argv)
 	if (setrlimit(RLIMIT_CORE, &cds) < 0)
 		syslog(LOG_ERR, "couldn't set core dump size to 0: %m");
 
-	while ((c = getopt(argc, argv, "BDERT1bdem:ru")) != -1)
+	while ((c = getopt(argc, argv, "BDERT1dem:r")) != -1)
 		switch (c) {
 		case 'B':
 			if (what != LIST)
@@ -153,11 +153,11 @@ main(int argc, char **argv)
 			if (what == REMOVE || how)
 				goto usage;
 			if (*optarg == '-') {
-				if ((c = token_mode(optarg+1)) == NULL)
+				if ((c = token_mode(optarg+1)) == 0)
 					errx(1, "%s: unknown mode", optarg+1);
 				dmode |= c;
 			} else {
-				if ((c = token_mode(optarg)) == NULL)
+				if ((c = token_mode(optarg)) == 0)
 					errx(1, "%s: unknown mode", optarg);
 				emode |= c;
 			}

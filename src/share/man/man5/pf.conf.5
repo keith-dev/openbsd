@@ -1,4 +1,4 @@
-.\"	$OpenBSD: pf.conf.5,v 1.292 2004/02/24 05:44:48 mcbride Exp $
+.\"	$OpenBSD: pf.conf.5,v 1.300 2004/09/10 12:40:49 jaredy Exp $
 .\"
 .\" Copyright (c) 2002, Daniel Hartmeier
 .\" All rights reserved.
@@ -229,7 +229,7 @@ command.
 .Bl -tag -width xxxx
 .It Ar set timeout
 .Pp
-.Bl -tag -width interval -compact
+.Bl -tag -width "src.track" -compact
 .It Ar interval
 Interval between purging expired states and fragments.
 .It Ar frag
@@ -618,6 +618,24 @@ guessable base time.
 will cause
 .Ar scrub
 to modulate the TCP timestamps with a random number.
+.It extended PAWS checks
+There is a problem with TCP on long fat pipes, in that a packet might get
+delayed for longer than it takes the connection to wrap its 32-bit sequence
+space.
+In such an occurance, the old packet would be indistinguishable from a
+new packet and would be accepted as such.
+The solution to this is called PAWS: Protection Against Wrapped Sequence
+numbers.
+It protects against it by making sure the timestamp on each packet does
+not go backwards.
+.Ar reassemble tcp
+also makes sure the timestamp on the packet does not go forward more
+than the RFC allows.
+By doing this,
+.Xr pf 4
+artificially extends the security of TCP sequence numbers by 10 to 18
+bits when the host uses appropriately randomized timestamps, since a
+blind attacker would have to guess the timestamp as well.
 .El
 .El
 .Pp
@@ -664,6 +682,18 @@ assigned.
 mainly controls the time packets take to get sent out, while
 .Ar bandwidth
 has primarily effects on throughput.
+.Ar cbq
+achieves both partitioning and sharing of link bandwidth
+by hierarchically structured classes.
+Each class has its own
+.Ar queue
+and is assigned its share of
+.Ar bandwidth .
+A child class can borrow bandwidth from its parent class
+as long as excess bandwidth is available
+(see the option
+.Ar borrow ,
+below).
 .It Ar priq
 Priority Queueing.
 .Ar Queues
@@ -697,6 +727,14 @@ assigned.
 mainly controls the time packets take to get sent out, while
 .Ar bandwidth
 has primarily effects on throughput.
+.Ar hfsc
+supports both link-sharing and guaranteed real-time services.
+It employs a service curve based QoS model,
+and its unique feature is an ability to decouple
+.Ar delay
+and
+.Ar bandwidth
+allocation.
 .El
 .Pp
 The interfaces on which queueing should be activated are declared using
@@ -935,8 +973,8 @@ the packet filter for evaluation.
 .Pp
 Since translation occurs before filtering the filter
 engine will see packets as they look after any
-addresses and ports have been translated. Filter rules
-will therefore have to filter based on the translated
+addresses and ports have been translated.
+Filter rules will therefore have to filter based on the translated
 address and port number.
 Packets that match a translation rule are only automatically passed if
 the
@@ -1508,6 +1546,15 @@ by specifying the
 operator before the
 .Ar tagged
 keyword.
+.It Ar probability <number>
+A probability attribute can be attached to a rule, with a value set between
+0 and 1, bounds not included.
+In that case, the rule will be honoured using the given probability value
+only.
+For example, the following rule will drop 20% of incoming ICMP packets:
+.Bd -literal -offset indent
+block in proto icmp probability 20%
+.Ed
 .El
 .Sh ROUTING
 If a packet matches a rule with a route option set, the packet filter will
@@ -1538,7 +1585,7 @@ option is similar to
 but routes packets that pass in the opposite direction (replies) to the
 specified interface.
 Opposite direction is only defined in the context of a state entry, and
-.Ar route-to
+.Ar reply-to
 is useful only in rules that create state.
 It can be used on systems with multiple external connections to
 route all outgoing packets of a connection through the interface
@@ -1855,13 +1902,14 @@ Prevent state changes for states created by this rule from appearing on the
 interface.
 .It Ar <timeout> <seconds>
 Changes the timeout values used for states created by this rule.
+.El
 .Pp
 When the
 .Ar source-track
 keyword is specified, the number of states per source IP is tracked.
 The following limits can be set:
 .Pp
-.Bl  -tag -width xxxx -compact
+.Bl -tag -width xxxx -compact
 .It Ar max-src-nodes
 Limits the maximum number of source addresses which can simultaneously
 have state table entries.
@@ -1869,6 +1917,7 @@ have state table entries.
 Limits the maximum number of simultaneous state entries that a single
 source address can create with this rule.
 .El
+.Pp
 For a list of all valid timeout names, see
 .Sx OPTIONS
 above.
@@ -1880,7 +1929,6 @@ pass in proto tcp from any to any \e
       (max 100, source-track rule, max-src-nodes 75, \e
       max-src-states 3, tcp.established 60, tcp.closing 5)
 .Ed
-.El
 .Sh OPERATING SYSTEM FINGERPRINTING
 Passive OS Fingerprinting is a mechanism to inspect nuances of a TCP
 connection's initial SYN packet and guess at the host's operating system.
@@ -1891,7 +1939,7 @@ upon.
 .Pp
 The fingerprints may be specified by operating system class, by
 version, or by subtype/patchlevel.
-The class of an operating system is typically the vender or genre
+The class of an operating system is typically the vendor or genre
 and would be OpenBSD for the
 .Xr pf 4
 firewall itself.
@@ -2056,84 +2104,87 @@ The timeout value can also be adjusted.
 .Pp
 Currently, only IPv4 fragments are supported and IPv6 fragments
 are blocked unconditionally.
-.Sh ANCHORS AND NAMED RULESETS
+.Sh ANCHORS
 Besides the main ruleset,
 .Xr pfctl 8
-can load named rulesets into
+can load rulesets into
 .Ar anchor
 attachment points.
 An
 .Ar anchor
-contains a list of named rulesets.
+is a container that can hold rules, address tables, and other anchors.
+.Pp
 An
 .Ar anchor
-has a name which specifies where
+has a name which specifies the path where
 .Xr pfctl 8
-can be used to attach sub-rulesets.
-A named ruleset contains filter and translation rules, like the
-main ruleset.
-The main ruleset can reference
+can be used to access the anchor to perform operations on it, such as
+attaching child anchors to it or loading rules into it.
+Anchors may be nested, with components separated by
+.Sq /
+characters, similar to how file system hierarchies are laid out.
+The main ruleset is actually the default anchor, so filter and
+translation rules, for example, may also be contained in any anchor.
+.Pp
+An anchor can reference another
 .Ar anchor
-attachment points
+attachment point
 using the following kinds
 of rules:
 .Bl -tag -width xxxx
 .It Ar nat-anchor <name>
 Evaluates the
 .Ar nat
-rules of all named rulesets in the specified
+rules in the specified
 .Ar anchor .
 .It Ar rdr-anchor <name>
 Evaluates the
 .Ar rdr
-rules of all named rulesets in the specified
+rules in the specified
 .Ar anchor .
 .It Ar binat-anchor <name>
 Evaluates the
 .Ar binat
-rules of all named rulesets in the specified
+rules in the specified
 .Ar anchor .
 .It Ar anchor <name>
-Evaluates the filter rules of all named rulesets in the specified
+Evaluates the filter rules in the specified
 .Ar anchor .
-.It Ar load anchor <name>:<ruleset> from <file>
-Loads the rules from the specified file into the named
-ruleset
-.Ar <ruleset>
-attached to the anchor
-.Ar <name> .
+.It Ar load anchor <name> from <file>
+Loads the rules from the specified file into the
+anchor
+.Ar name .
 .El
 .Pp
 When evaluation of the main ruleset reaches an
 .Ar anchor
 rule,
 .Xr pf 4
-will proceed to evaluate all rules specified in the
-named rulesets attached to that
-.Ar anchor .
+will proceed to evaluate all rules specified in that anchor.
 .Pp
-Matching filter rules in named rulesets with the
+Matching filter and translation rules in anchors with the
 .Ar quick
-option and matching translation rules are final and abort the
-evaluation of both the rules in the
-.Ar anchor
+option are final and abort the evaluation of the rules in other
+anchors
 and the main ruleset.
 .Pp
-Only the main ruleset can contain
 .Ar anchor
-rules.
-.Pp
-When an
+rules are evaluated relative to the anchor in which they are contained.
+For example, all
 .Ar anchor
-contains more than one named ruleset, they are evaluated
-in the alphabetical order of their names.
+rules specified in the main ruleset will reference anchor
+attachment points underneath the main ruleset, and
+.Ar anchor
+rules specified in a file loaded from a
+.Ar load anchor
+rule will be attached under that anchor point.
 .Pp
-Rules may contain
+Rules may be contained in
 .Ar anchor
 attachment points which do not contain any rules when the main ruleset
-is loaded, and later such named rulesets can be manipulated through
+is loaded, and later such anchors can be manipulated through
 .Xr pfctl 8
-without reloading the main ruleset.
+without reloading the main ruleset or other anchors.
 For example,
 .Bd -literal -offset indent
 ext_if = \&"kue0\&"
@@ -2145,27 +2196,27 @@ pass in on $ext_if proto tcp from any \e
 .Ed
 .Pp
 blocks all packets on the external interface by default, then evaluates
-all rulesets in the
+all rules in the
 .Ar anchor
 named "spam", and finally passes all outgoing connections and
 incoming connections to port 25.
 .Bd -literal -offset indent
 # echo \&"block in quick from 1.2.3.4 to any\&" \&| \e
-      pfctl -a spam:manual -f -
+      pfctl -a spam -f -
 .Ed
 .Pp
-loads a single ruleset containing a single rule into the
+This loads a single rule into the
 .Ar anchor ,
 which blocks all packets from a specific address.
 .Pp
-The named ruleset can also be populated by adding a
+The anchor can also be populated by adding a
 .Ar load anchor
 rule after the
 .Ar anchor
 rule:
 .Bd -literal -offset indent
 anchor spam
-load anchor spam:manual from "/etc/pf-spam.conf"
+load anchor spam from "/etc/pf-spam.conf"
 .Ed
 .Pp
 When
@@ -2174,7 +2225,7 @@ loads
 .Nm pf.conf ,
 it will also load all the rules from the file
 .Pa /etc/pf-spam.conf
-into the named ruleset.
+into the anchor.
 .Pp
 Optionally,
 .Ar anchor
@@ -2185,7 +2236,7 @@ using the same syntax as filter rules.
 When parameters are used, the
 .Ar anchor
 rule is only evaluated for matching packets.
-This allows conditional evaluation of named rulesets, like:
+This allows conditional evaluation of anchors, like:
 .Bd -literal -offset indent
 block on $ext_if all
 anchor spam proto tcp from any to any port smtp
@@ -2201,10 +2252,56 @@ packets with destination port 25.
 Hence,
 .Bd -literal -offset indent
 # echo \&"block in quick from 1.2.3.4 to any" \&| \e
-      pfctl -a spam:manual -f -
+      pfctl -a spam -f -
 .Ed
 .Pp
 will only block connections from 1.2.3.4 to port 25.
+.Pp
+Anchors may end with the asterisk
+.Pq Sq *
+character, which signifies that all anchors attached at that point
+should be evaluated in the alphabetical ordering of their anchor name.
+For example,
+.Bd -literal -offset indent
+anchor "spam/*"
+.Ed
+.Pp
+will evaluate each rule in each anchor attached to the
+.Li spam
+anchor.
+Note that it will only evaluate anchors that are directly attached to the
+.Li spam
+anchor, and will not descend to evaluate anchors recursively.
+.Pp
+Since anchors are evaluated relative to the anchor in which they are
+contained, there is a mechanism for accessing the parent and ancestor
+anchors of a given anchor.
+Similar to file system path name resolution, if the sequence
+.Dq ..
+appears as an anchor path component, the parent anchor of the current
+anchor in the path evaluation at that point will become the new current
+anchor.
+As an example, consider the following:
+.Bd -literal -offset indent
+# echo ' anchor "spam/allowed" ' | pfctl -f -
+# echo -e ' anchor "../banned" \en pass' | \e
+      pfctl -a spam/allowed -f -
+.Ed
+.Pp
+Evaluation of the main ruleset will lead into the
+.Li spam/allowed
+anchor, which will evaluate the rules in the
+.Li spam/banned
+anchor, if any, before finally evaluating the
+.Ar pass
+rule.
+.Pp
+Since the parser specification for anchor names is a string, any
+reference to an anchor name containing solidus
+.Pq Sq /
+characters will require double quote
+.Pq Sq \&"
+characters around the anchor name.
 .Sh TRANSLATION EXAMPLES
 This example maps incoming requests on port 80 to port 8080, on
 which a daemon is running (because, for example, it is not run as root,
@@ -2483,7 +2580,7 @@ anchor-rule    = "anchor" string [ ( "in" | "out" ) ] [ "on" ifspec ]
 trans-anchors  = ( "nat-anchor" | "rdr-anchor" | "binat-anchor" ) string
                  [ "on" ifspec ] [ af ] [ "proto" ] [ protospec ] [ hosts ]
 
-load-anchor    = "load anchor" anchorname:rulesetname "from" filename
+load-anchor    = "load anchor" string "from" filename
 
 queueopts-list = queueopts-list queueopts | queueopts
 queueopts      = [ "bandwidth" bandwidth-spec ] |

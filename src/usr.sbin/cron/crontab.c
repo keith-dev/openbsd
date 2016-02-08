@@ -1,28 +1,28 @@
-/*	$OpenBSD: crontab.c,v 1.43 2003/07/30 20:20:01 millert Exp $	*/
+/*	$OpenBSD: crontab.c,v 1.45 2004/06/22 03:15:33 avsm Exp $	*/
 
 /* Copyright 1988,1990,1993,1994 by Paul Vixie
  * All rights reserved
  */
 
 /*
+ * Copyright (c) 2004 by Internet Systems Consortium, Inc. ("ISC")
  * Copyright (c) 1997,2000 by Internet Software Consortium, Inc.
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
  * copyright notice and this permission notice appear in all copies.
  *
- * THE SOFTWARE IS PROVIDED "AS IS" AND INTERNET SOFTWARE CONSORTIUM DISCLAIMS
- * ALL WARRANTIES WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES
- * OF MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL INTERNET SOFTWARE
- * CONSORTIUM BE LIABLE FOR ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL
- * DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR
- * PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS
- * ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS
- * SOFTWARE.
+ * THE SOFTWARE IS PROVIDED "AS IS" AND ISC DISCLAIMS ALL WARRANTIES
+ * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+ * MERCHANTABILITY AND FITNESS.  IN NO EVENT SHALL ISC BE LIABLE FOR
+ * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+ * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT
+ * OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
 #if !defined(lint) && !defined(LINT)
-static char const rcsid[] = "$OpenBSD: crontab.c,v 1.43 2003/07/30 20:20:01 millert Exp $";
+static char const rcsid[] = "$OpenBSD: crontab.c,v 1.45 2004/06/22 03:15:33 avsm Exp $";
 #endif
 
 /* crontab - install and manage per-user crontab files
@@ -234,7 +234,7 @@ list_cmd(void) {
 	int ch;
 
 	log_it(RealUser, Pid, "LIST", User);
-	if (!glue_strings(n, sizeof n, SPOOL_DIR, User, '/')) {
+	if (snprintf(n, sizeof n, "%s/%s", SPOOL_DIR, User) >= sizeof(n)) {
 		fprintf(stderr, "path too long\n");
 		exit(ERROR_EXIT);
 	}
@@ -259,7 +259,7 @@ delete_cmd(void) {
 	char n[MAX_FNAME];
 
 	log_it(RealUser, Pid, "DELETE", User);
-	if (!glue_strings(n, sizeof n, SPOOL_DIR, User, '/')) {
+	if (snprintf(n, sizeof n, "%s/%s", SPOOL_DIR, User) >= sizeof(n)) {
 		fprintf(stderr, "path too long\n");
 		exit(ERROR_EXIT);
 	}
@@ -291,7 +291,7 @@ edit_cmd(void) {
 	PID_T pid, xpid;
 
 	log_it(RealUser, Pid, "BEGIN EDIT", User);
-	if (!glue_strings(n, sizeof n, SPOOL_DIR, User, '/')) {
+	if (snprintf(n, sizeof n, "%s/%s", SPOOL_DIR, User) >= sizeof(n)) {
 		fprintf(stderr, "path too long\n");
 		exit(ERROR_EXIT);
 	}
@@ -321,8 +321,8 @@ edit_cmd(void) {
 	(void)signal(SIGINT, SIG_IGN);
 	(void)signal(SIGQUIT, SIG_IGN);
 
-	if (!glue_strings(Filename, sizeof Filename, _PATH_TMP,
-	    "crontab.XXXXXXXXXX", '/')) {
+	if (snprintf(Filename, sizeof Filename, "%s/crontab.XXXXXXXXXX",
+	    _PATH_TMP) >= sizeof(Filename)) {
 		fprintf(stderr, "path too long\n");
 		goto fatal;
 	}
@@ -400,7 +400,7 @@ edit_cmd(void) {
 			perror(_PATH_TMP);
 			exit(ERROR_EXIT);
 		}
-		if (!glue_strings(q, sizeof q, editor, Filename, ' ')) {
+		if (snprintf(q, sizeof q, "%s %s", editor, Filename) >= sizeof(q)) {
 			fprintf(stderr, "%s: editor command line too long\n",
 			    ProgramName);
 			exit(ERROR_EXIT);
@@ -508,8 +508,8 @@ replace_cmd(void) {
 		fprintf(stderr, "%s: Cannot allocate memory.\n", ProgramName);
 		return (-2);
 	}
-	if (!glue_strings(TempFilename, sizeof TempFilename, SPOOL_DIR,
-	    "tmp.XXXXXXXXXX", '/')) {
+	if (snprintf(TempFilename, sizeof TempFilename, "%s/tmp.XXXXXXXXX", SPOOL_DIR) >=
+		sizeof(TempFilename)) {
 		TempFilename[0] = '\0';
 		fprintf(stderr, "path too long\n");
 		return (-2);
@@ -611,7 +611,7 @@ replace_cmd(void) {
 		goto done;
 	}
 
-	if (!glue_strings(n, sizeof n, SPOOL_DIR, User, '/')) {
+	if (snprintf(n, sizeof n, "%s/%s", SPOOL_DIR, User) >= sizeof(n)) {
 		fprintf(stderr, "path too long\n");
 		error = -2;
 		goto done;

@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.77 2004/02/09 19:21:52 espie Exp $
+#	$OpenBSD: Makefile,v 1.80 2004/07/07 16:53:51 art Exp $
 #	$NetBSD: Makefile,v 1.4 1996/01/09 03:23:01 thorpej Exp $
 
 #	Makefile for section 9 (kernel function and variable) manual pages.
@@ -8,8 +8,8 @@ MAN=	altq.9 audio.9 autoconf.9 boot.9 bus_dma.9 bus_space.9 \
 	dohooks.9 dopowerhooks.9 doshutdownhooks.9 dostartuphooks.9 \
 	extattr.9 file.9 \
 	fork1.9 extent.9 getdevvp.9 getnewvnode.9 hash.9 hashinit.9 \
-	hardclock.9 hook_establish.9 hz.9 hzto.9 intro.9 inittodr.9 log.9 \
-	kern.9 knote.9 kthread.9 ktrace.9 lock.9 \
+	hardclock.9 hook_establish.9 hz.9 hzto.9 iic.9 intro.9 inittodr.9 \
+	kern.9 knote.9 kthread.9 ktrace.9 lock.9 log.9 \
 	malloc.9 mbuf.9 mbuf_tags.9 md5.9 microtime.9 namei.9 \
 	panic.9 pfind.9 physio.9 pmap.9 \
 	pool.9 powerhook_establish.9 ppsratecheck.9 printf.9 psignal.9 \
@@ -132,6 +132,12 @@ MLINKS+=mbuf.9 m_copym2.9 mbuf.9 m_copym.9 mbuf.9 m_free.9 mbuf.9 MFREE.9 \
 	mbuf.9 MEXTALLOC.9 mbuf.9 MCLGET.9 mbuf.9 MEXTADD.9 mbuf.9 M_ALIGN.9 \
 	mbuf.9 MH_ALIGN.9 mbuf.9 M_READONLY.9 mbuf.9 M_LEADINGSPACE.9 \
 	mbuf.9 M_TRAILINGSPACE.9 mbuf.9 MCHTYPE.9
+MLINKS+=microtime.9 getmicrotime.9 microtime.9 microuptime.9 \
+	microtime.9 getmicrouptime.9 microtime.9 nanotime.9 \
+	microtime.9 getnanotime.9 microtime.9 nanouptime.9 \
+	microtime.9 getnanouptime.9 microtime.9 bintime.9 \
+	microtime.9 getbintime.9 microtime.9 binuptime.9 \
+	microtime.9 getbinuptime.9
 MLINKS+=namei.9 lookup.9 namei.9 relookup.9 namei.9 NDINIT.9
 MLINKS+=random.9 add_true_randomness.9 \
 	random.9 add_timer_randomness.9 \
@@ -216,7 +222,7 @@ MLINKS+=VOP_LOOKUP.9 VOP_CREATE.9 VOP_LOOKUP.9 VOP_FSYNC.9 \
 	VOP_LOOKUP.9 VOP_GETEXTATTR.9 VOP_LOOKUP.9 VOP_ISLOCKED.9 \
 	VOP_LOOKUP.9 VOP_LINK.9 VOP_LOOKUP.9 VOP_LOCK.9 \
 	VOP_LOOKUP.9 VOP_MKDIR.9 VOP_LOOKUP.9 VOP_PRINT.9 \
-	VOP_LOOKUP.9 VOP_READLINK.9 VOP_LOOKUP.9 VOP_REALOCBLKS.9 \
+	VOP_LOOKUP.9 VOP_READLINK.9 VOP_LOOKUP.9 VOP_REALLOCBLKS.9 \
 	VOP_LOOKUP.9 VOP_RECLAIM.9 VOP_LOOKUP.9 VOP_REMOVE.9 \
 	VOP_LOOKUP.9 VOP_REVOKE.9 VOP_LOOKUP.9 VOP_RMDIR.9 \
 	VOP_LOOKUP.9 VOP_SETEXTATTR.9 VOP_LOOKUP.9 VOP_STRATEGY.9 \

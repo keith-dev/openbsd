@@ -1,4 +1,4 @@
-/*	$OpenBSD: syslogd.c,v 1.74 2004/01/19 16:06:05 millert Exp $	*/
+/*	$OpenBSD: syslogd.c,v 1.82 2004/07/03 23:40:44 djm Exp $	*/
 
 /*
  * Copyright (c) 1983, 1988, 1993, 1994
@@ -39,7 +39,7 @@ static const char copyright[] =
 #if 0
 static const char sccsid[] = "@(#)syslogd.c	8.3 (Berkeley) 4/4/94";
 #else
-static const char rcsid[] = "$OpenBSD: syslogd.c,v 1.74 2004/01/19 16:06:05 millert Exp $";
+static const char rcsid[] = "$OpenBSD: syslogd.c,v 1.82 2004/07/03 23:40:44 djm Exp $";
 #endif
 #endif /* not lint */
 
@@ -142,12 +142,13 @@ struct filed {
 		char	f_uname[MAXUNAMES][UT_NAMESIZE+1];
 		struct {
 			char	f_hname[MAXHOSTNAMELEN];
-			struct sockaddr_in	f_addr;
+			struct sockaddr_storage	f_addr;
 		} f_forw;		/* forwarding address */
 		char	f_fname[MAXPATHLEN];
 		struct {
 			char	f_mname[MAX_MEMBUF_NAME];
 			struct ringbuf *f_rb;
+			int	f_overflow;
 		} f_mb;		/* Memory buffer */
 	} f_un;
 	char	f_prevline[MAXSVLINE];		/* last message logged */
@@ -156,7 +157,8 @@ struct filed {
 	int	f_prevpri;			/* pri of f_prevline */
 	int	f_prevlen;			/* length of f_prevline */
 	int	f_prevcount;			/* repetition cnt of prevline */
-	int	f_repeatcount;			/* number of "repeated" msgs */
+	unsigned int f_repeatcount;		/* number of "repeated" msgs */
+	int	f_quick;			/* abort when matched */
 };
 
 /*
@@ -210,15 +212,35 @@ char	*ctlsock_path = NULL;	/* Path to control socket */
 #define CTL_WRITING_REPLY	2
 int	ctl_state = 0;		/* What the control socket is up to */
 
-size_t	ctl_cmd_bytes = 0;	/* number of bytes of ctl_cmd read */
+/*
+ * Client protocol NB. all numeric fields in network byte order
+ */
+#define CTL_VERSION		0
+
+/* Request */
 struct	{
+	u_int32_t	version;
 #define CMD_READ	1	/* Read out log */
 #define CMD_READ_CLEAR	2	/* Read and clear log */
 #define CMD_CLEAR	3	/* Clear log */
 #define CMD_LIST	4	/* List available logs */
-	int	cmd;
-	char	logname[MAX_MEMBUF_NAME];
+#define CMD_FLAGS	5	/* Query flags only */
+	u_int32_t	cmd;
+	char		logname[MAX_MEMBUF_NAME];
 }	ctl_cmd;
+
+size_t	ctl_cmd_bytes = 0;	/* number of bytes of ctl_cmd read */
+
+/* Reply */
+struct ctl_reply_hdr {
+	u_int32_t	version;
+#define CTL_HDR_FLAG_OVERFLOW	0x01
+	u_int32_t	flags;
+	/* Reply text follows, up to MAX_MEMBUF long */
+};
+
+#define CTL_HDR_LEN		(sizeof(struct ctl_reply_hdr))
+#define CTL_REPLY_MAXSIZE	(CTL_HDR_LEN + MAX_MEMBUF)
 
 char	*ctl_reply = NULL;	/* Buffer for control connection reply */
 size_t	ctl_reply_size = 0;	/* Number of bytes used in reply */
@@ -240,7 +262,7 @@ void	domark(int);
 void	markit(void);
 void	fprintlog(struct filed *, int, char *);
 void	init(void);
-void	logerror(char *);
+void	logerror(const char *);
 void	logmsg(int, char *, char *, int);
 void	printline(char *, char *);
 void	printsys(char *);
@@ -260,7 +282,7 @@ main(int argc, char *argv[])
 {
 	int ch, i, linesize, fd;
 	struct sockaddr_un fromunix;
-	struct sockaddr_in sin, frominet;
+	struct sockaddr_in s_in, frominet;
 	socklen_t len;
 	char *p, *line;
 	char resolve[MAXHOSTNAMELEN];
@@ -332,20 +354,6 @@ main(int argc, char *argv[])
 		pfd[i].events = 0;
 	}
 
-#ifndef SUN_LEN
-#define SUN_LEN(unp) (strlen((unp)->sun_path) + 2)
-#endif
-	for (i = 0; i < nfunix; i++) {
-		if ((fd = unix_socket(funixn[i], SOCK_DGRAM, 0666)) == -1) {
-			if (i == 0)
-				die(0);
-			continue;
-		}
-		double_rbuf(fd);
-		pfd[PFD_UNIX_0 + i].fd = fd;
-		pfd[PFD_UNIX_0 + i].events = POLLIN;
-	}
-
 	if ((fd = socket(AF_INET, SOCK_DGRAM, 0)) != -1) {
 		struct servent *sp;
 
@@ -356,11 +364,11 @@ main(int argc, char *argv[])
 			logerror("syslog/udp: unknown service");
 			die(0);
 		}
-		memset(&sin, 0, sizeof(sin));
-		sin.sin_len = sizeof(sin);
-		sin.sin_family = AF_INET;
-		sin.sin_port = LogPort = sp->s_port;
-		if (bind(fd, (struct sockaddr *)&sin, sizeof(sin)) < 0) {
+		memset(&s_in, 0, sizeof(s_in));
+		s_in.sin_len = sizeof(s_in);
+		s_in.sin_family = AF_INET;
+		s_in.sin_port = LogPort = sp->s_port;
+		if (bind(fd, (struct sockaddr *)&s_in, sizeof(s_in)) < 0) {
 			logerror("bind");
 			if (!Debug)
 				die(0);
@@ -372,15 +380,31 @@ main(int argc, char *argv[])
 		}
 	}
 
-	if (ctlsock_path != NULL) {
-		if ((fd = unix_socket(ctlsock_path, SOCK_STREAM, 0600)) == -1)
-			die(0);
-		if (listen(fd, 16) == -1) {
-			logerror("ctlsock listen");
-			die(0);
+#ifndef SUN_LEN
+#define SUN_LEN(unp) (strlen((unp)->sun_path) + 2)
+#endif
+	for (i = 0; i < nfunix; i++) {
+		if ((fd = unix_socket(funixn[i], SOCK_DGRAM, 0666)) == -1) {
+			if (i == 0 && !Debug)
+				die(0);
+			continue;
 		}
-		pfd[PFD_CTLSOCK].fd = fd;
-		pfd[PFD_CTLSOCK].events = POLLIN;
+		double_rbuf(fd);
+		pfd[PFD_UNIX_0 + i].fd = fd;
+		pfd[PFD_UNIX_0 + i].events = POLLIN;
+	}
+
+	if (ctlsock_path != NULL) {
+		fd = unix_socket(ctlsock_path, SOCK_STREAM, 0600);
+		if (fd != -1) {
+			if (listen(fd, 16) == -1) {
+				logerror("ctlsock listen");
+				die(0);
+			}
+			pfd[PFD_CTLSOCK].fd = fd;
+			pfd[PFD_CTLSOCK].events = POLLIN;
+		} else if (!Debug)
+			die(0);
 	}
 
 	if ((fd = open(_PATH_KLOG, O_RDONLY, 0)) == -1) {
@@ -436,7 +460,7 @@ main(int argc, char *argv[])
 
 	/* Allocate ctl socket reply buffer if we have a ctl socket */
 	if (pfd[PFD_CTLSOCK].fd != -1 &&
-	    (ctl_reply = malloc(MAX_MEMBUF)) == NULL) {
+	    (ctl_reply = malloc(CTL_REPLY_MAXSIZE)) == NULL) {
 		logerror("Couldn't allocate ctlsock reply buffer");
 		die(0);
 	}
@@ -675,7 +699,7 @@ logmsg(int pri, char *msg, char *from, int flags)
 
 	/* extract program name */
 	for(i = 0; i < NAME_MAX; i++) {
-		if (!isalnum(msg[i]))
+		if (!isalnum(msg[i]) && msg[i] != '-')
 			break;
 		prog[i] = msg[i];
 	}
@@ -752,6 +776,9 @@ logmsg(int pri, char *msg, char *from, int flags)
 				fprintlog(f, flags, msg);
 			}
 		}
+
+		if (f->f_quick)
+			break;
 	}
 	(void)sigprocmask(SIG_SETMASK, &omask, NULL);
 }
@@ -824,7 +851,7 @@ fprintlog(struct filed *f, int flags, char *msg)
 			l = strlen(line);
 		if (sendto(pfd[PFD_INET].fd, line, l, 0,
 		    (struct sockaddr *)&f->f_un.f_forw.f_addr,
-		    sizeof(f->f_un.f_forw.f_addr)) != l) {
+		    f->f_un.f_forw.f_addr.ss_len) != l) {
 			f->f_type = F_UNUSED;
 			logerror("sendto");
 		}
@@ -888,9 +915,11 @@ fprintlog(struct filed *f, int flags, char *msg)
 
 	case F_MEMBUF:
 		dprintf("\n");
-		snprintf(line, sizeof(line), "%.15s %s",
-		    (char *)iov[0].iov_base, (char *)iov[4].iov_base);
-		ringbuf_append_line(f->f_un.f_mb.f_rb, line);
+		snprintf(line, sizeof(line), "%.15s %s %s",
+		    (char *)iov[0].iov_base, (char *)iov[2].iov_base, 
+		    (char *)iov[4].iov_base);
+		if (ringbuf_append_line(f->f_un.f_mb.f_rb, line) == 1)
+			f->f_un.f_mb.f_overflow = 1;
 		break;
 	}
 	f->f_prevcount = 0;
@@ -1022,7 +1051,7 @@ doinit(int signo)
  * Print syslogd errors some place.
  */
 void
-logerror(char *type)
+logerror(const char *type)
 {
 	char buf[100];
 
@@ -1139,12 +1168,12 @@ init(void)
 			p++;
 			while (isspace(*p))
 				p++;
-			if (!*p) {
+			if (!*p || (*p == '*' && (!p[1] || isspace(p[1])))) {
 				strlcpy(prog, "*", sizeof(prog));
 				continue;
 			}
 			for (i = 0; i < NAME_MAX; i++) {
-				if (!isalnum(p[i]))
+				if (!isalnum(p[i]) && p[i] != '-' && p[i] != '!')
 					break;
 				prog[i] = p[i];
 			}
@@ -1217,9 +1246,8 @@ cfline(char *line, struct filed *f, char *prog)
 {
 	int i, pri, addr_len;
 	size_t rb_len;
-	char *bp, *p, *q;
+	char *bp, *p, *q, *cp;
 	char buf[MAXLINE], ebuf[100];
-	char addr[MAXHOSTNAMELEN];
 	struct filed *xf;
 
 	dprintf("cfline(\"%s\", f, \"%s\")\n", line, prog);
@@ -1232,6 +1260,11 @@ cfline(char *line, struct filed *f, char *prog)
 		f->f_pmask[i] = INTERNAL_NOPRI;
 
 	/* save program name if any */
+	if (*prog == '!') {
+		f->f_quick = 1;
+		prog++;
+	} else
+		f->f_quick = 0;
 	if (!strcmp(prog, "*"))
 		prog = NULL;
 	else {
@@ -1261,7 +1294,6 @@ cfline(char *line, struct filed *f, char *prog)
 			pri = LOG_PRIMASK + 1;
 		else {
 			/* ignore trailing spaces */
-			int i;
 			for (i=strlen(buf)-1; i >= 0 && buf[i] == ' '; i--) {
 				buf[i]='\0';
 			}
@@ -1309,20 +1341,25 @@ cfline(char *line, struct filed *f, char *prog)
 	case '@':
 		if (!InetInuse)
 			break;
-		(void)strlcpy(f->f_un.f_forw.f_hname, ++p,
-		    sizeof(f->f_un.f_forw.f_hname));
-		addr_len = priv_gethostbyname(f->f_un.f_forw.f_hname,
-		    addr, sizeof addr);
-		if (addr_len < 1) {
-			logerror((char *)hstrerror(h_errno));
+		if ((cp = strrchr(++p, ':')) != NULL)
+			*cp++ = '\0';
+		if ((strlcpy(f->f_un.f_forw.f_hname, p,
+		    sizeof(f->f_un.f_forw.f_hname)) >=
+		    sizeof(f->f_un.f_forw.f_hname))) {
+			snprintf(ebuf, sizeof(ebuf), "hostname too long \"%s\"",
+			    p);
+			logerror(ebuf);
 			break;
 		}
-		memset(&f->f_un.f_forw.f_addr, 0,
+		addr_len = priv_gethostserv(f->f_un.f_forw.f_hname, 
+		    cp == NULL ? "syslog" : cp, 
+		    (struct sockaddr*)&f->f_un.f_forw.f_addr, 
 		    sizeof(f->f_un.f_forw.f_addr));
-		f->f_un.f_forw.f_addr.sin_len = sizeof(f->f_un.f_forw.f_addr);
-		f->f_un.f_forw.f_addr.sin_family = AF_INET;
-		f->f_un.f_forw.f_addr.sin_port = LogPort;
-		memmove(&f->f_un.f_forw.f_addr.sin_addr, addr, addr_len);
+		if (addr_len < 1) {
+			snprintf(ebuf, sizeof(ebuf), "bad hostname \"%s\"", p);
+			logerror(ebuf);
+			break;
+		}
 		f->f_type = F_FORW;
 		break;
 
@@ -1400,6 +1437,7 @@ cfline(char *line, struct filed *f, char *prog)
 			logerror(p);
 			break;
 		}
+		f->f_un.f_mb.f_overflow = 0;
 		break;
 
 	default:
@@ -1515,6 +1553,16 @@ unix_socket(char *path, int type, mode_t mode)
 		return (-1);
 	}
 
+	if (Debug) {
+		if (connect(fd, (struct sockaddr *)&s_un, sizeof(s_un)) == 0 ||
+		    errno == EPROTOTYPE) {
+			close(fd);
+			errno = EISCONN;
+			logerror("connect");
+			return (-1);
+		}
+	}
+
 	old_umask = umask(0177);
 
 	unlink(path);
@@ -1613,6 +1661,10 @@ ctlconn_read_handler(void)
 {
 	ssize_t n;
 	struct filed *f;
+	u_int32_t flags = 0;
+	size_t reply_text_size;
+	struct ctl_reply_hdr *reply_hdr = (struct ctl_reply_hdr *)ctl_reply;
+	char *reply_text = ctl_reply + CTL_HDR_LEN;
 
 	if (ctl_state != CTL_READING_CMD) {
 		/* Shouldn't be here! */
@@ -1620,6 +1672,7 @@ ctlconn_read_handler(void)
 		ctlconn_cleanup();
 		return;
 	}
+
  retry:
 	n = read(pfd[PFD_CTLCONN].fd, (char*)&ctl_cmd + ctl_cmd_bytes,
 	    sizeof(ctl_cmd) - ctl_cmd_bytes);
@@ -1639,6 +1692,12 @@ ctlconn_read_handler(void)
 	if (ctl_cmd_bytes < sizeof(ctl_cmd))
 		return;
 
+	if (ntohl(ctl_cmd.version) != CTL_VERSION) {
+		logerror("Unknown client protocol version");
+		ctlconn_cleanup();
+		return;
+	}
+
 	/* Ensure that logname is \0 terminated */
 	if (memchr(ctl_cmd.logname, '\0', sizeof(ctl_cmd.logname)) == NULL) {
 		logerror("Corrupt ctlsock command");
@@ -1646,60 +1705,73 @@ ctlconn_read_handler(void)
 		return;
 	}
 
-	ctl_reply_size = ctl_reply_offset = 0;
-	*ctl_reply = '\0';
+	*reply_text = '\0';
 
+	ctl_reply_size = reply_text_size = ctl_reply_offset = 0;
+	memset(reply_hdr, '\0', sizeof(*reply_hdr));
+
+	ctl_cmd.cmd = ntohl(ctl_cmd.cmd);
 	dprintf("ctlcmd %x logname \"%s\"\n", ctl_cmd.cmd, ctl_cmd.logname);
 
 	switch (ctl_cmd.cmd) {
 	case CMD_READ:
 	case CMD_READ_CLEAR:
+	case CMD_FLAGS:
 		f = find_membuf_log(ctl_cmd.logname);
 		if (f == NULL) {
-			strlcpy(ctl_reply, "No such log\n", MAX_MEMBUF);
+			strlcpy(reply_text, "No such log\n", MAX_MEMBUF);
 		} else {
-			ringbuf_to_string(ctl_reply, MAX_MEMBUF,
-			    f->f_un.f_mb.f_rb);
+			if (ctl_cmd.cmd != CMD_FLAGS) {
+				ringbuf_to_string(reply_text, MAX_MEMBUF,
+				    f->f_un.f_mb.f_rb);
+			}
+			if (f->f_un.f_mb.f_overflow)
+				flags |= CTL_HDR_FLAG_OVERFLOW;
+			if (ctl_cmd.cmd == CMD_READ_CLEAR) {
+				ringbuf_clear(f->f_un.f_mb.f_rb);
+				f->f_un.f_mb.f_overflow = 0;
+			}
 		}
-		ctl_reply_size = strlen(ctl_reply);
-
-		if (ctl_cmd.cmd == CMD_READ_CLEAR)
-			ringbuf_clear(f->f_un.f_mb.f_rb);
+		reply_text_size = strlen(reply_text);
 		break;
 	case CMD_CLEAR:
 		f = find_membuf_log(ctl_cmd.logname);
 		if (f == NULL) {
-			strlcpy(ctl_reply, "No such log\n", MAX_MEMBUF);
+			strlcpy(reply_text, "No such log\n", MAX_MEMBUF);
 		} else {
 			ringbuf_clear(f->f_un.f_mb.f_rb);
-			strlcpy(ctl_reply, "Log cleared\n", MAX_MEMBUF);
+			if (f->f_un.f_mb.f_overflow)
+				flags |= CTL_HDR_FLAG_OVERFLOW;
+			f->f_un.f_mb.f_overflow = 0;
+			strlcpy(reply_text, "Log cleared\n", MAX_MEMBUF);
 		}
-		ctl_reply_size = strlen(ctl_reply);
+		reply_text_size = strlen(reply_text);
 		break;
 	case CMD_LIST:
 		for (f = Files; f != NULL; f = f->f_next) {
 			if (f->f_type == F_MEMBUF) {
-				strlcat(ctl_reply, f->f_un.f_mb.f_mname,
+				strlcat(reply_text, f->f_un.f_mb.f_mname,
 				    MAX_MEMBUF);
-				strlcat(ctl_reply, " ", MAX_MEMBUF);
+				if (f->f_un.f_mb.f_overflow) {
+					strlcat(reply_text, "*", MAX_MEMBUF);
+					flags |= CTL_HDR_FLAG_OVERFLOW;
+				}
+				strlcat(reply_text, " ", MAX_MEMBUF);
 			}
 		}
-		strlcat(ctl_reply, "\n", MAX_MEMBUF);
-		ctl_reply_size = strlen(ctl_reply);
+		strlcat(reply_text, "\n", MAX_MEMBUF);
+		reply_text_size = strlen(reply_text);
 		break;
 	default:
 		logerror("Unsupported ctlsock command");
 		ctlconn_cleanup();
 		return;
 	}
+	reply_hdr->version = htonl(CTL_VERSION);
+	reply_hdr->flags = htonl(flags);
 
-	dprintf("ctlcmd reply length %d\n", ctl_reply_size);
-
-	/* If there is no reply, close the connection now */
-	if (ctl_reply_size == 0) {
-		ctlconn_cleanup();
-		return;
-	}
+	ctl_reply_size = reply_text_size + CTL_HDR_LEN;
+	dprintf("ctlcmd reply length %lu\n", (u_long)ctl_reply_size);
 
 	/* Otherwise, set up to write out reply */
 	ctl_state = CTL_WRITING_REPLY;

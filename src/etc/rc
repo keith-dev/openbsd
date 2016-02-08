@@ -1,4 +1,4 @@
-#	$OpenBSD: rc,v 1.241 2004/03/22 15:02:35 cedric Exp $
+#	$OpenBSD: rc,v 1.251 2004/08/21 08:17:28 hshoexer Exp $
 
 # System startup script run by init on autoboot
 # or after single-user.
@@ -42,9 +42,6 @@ if [ $1x = shutdownx ]; then
 		echo /etc/rc.shutdown in progress...
 		. /etc/rc.shutdown
 		echo /etc/rc.shutdown complete.
-		if [ "X${powerdown}" = X"YES" ]; then
-			exit 2
-		fi
 
 		# bring carp interfaces down gracefully
 		for hn in /etc/hostname.carp[0-9]*; do
@@ -52,8 +49,16 @@ if [ $1x = shutdownx ]; then
 			if=${hn#/etc/hostname.}
 			test "$if" = "carp[0-9]*" && continue
 
-			ifconfig $if down
+			ifconfig $if > /dev/null 2>&1
+			if [ "$?" != "0" ]; then
+				ifconfig $if down
+			fi
 		done
+
+		if [ "X${powerdown}" = X"YES" ]; then
+			exit 2
+		fi
+
 	else
 		echo single user: not running /etc/rc.shutdown
 	fi
@@ -133,6 +138,8 @@ if [ "X${pf}" != X"NO" ]; then
 	RULES="$RULES\npass in proto tcp from any to any port 22 keep state"
 	RULES="$RULES\npass out proto { tcp, udp } from any to any port 53 keep state"
 	RULES="$RULES\npass out inet proto icmp all icmp-type echoreq keep state"
+	RULES="$RULES\npass out inet6 proto icmp6 all icmp6-type routersol"
+	RULES="$RULES\npass in inet6 proto icmp6 all icmp6-type routeradv"
 	RULES="$RULES\npass proto { pfsync, carp }"
 	case `sysctl vfs.mounts.nfs 2>/dev/null` in
 	*[1-9]*)
@@ -190,9 +197,8 @@ dd if=/dev/urandom of=/var/db/host.random bs=1024 count=64 \
 rm -f /etc/nologin
 rm -f /var/spool/lock/LCK.*
 rm -f /var/spool/uucp/STST/*
-(cd /var/run && { test -r dhclient.pid && dhclient_pid=`cat dhclient.pid`; rm -rf -- *; install -c -m 664 -g utmp /dev/null utmp; test -n "$dhclient_pid" && echo "$dhclient_pid" > dhclient.pid; })
+(cd /var/run && { rm -rf -- *; install -c -m 664 -g utmp /dev/null utmp; })
 (cd /var/authpf && rm -rf -- *)
-
 
 # save a copy of the boot messages
 dmesg >/var/run/dmesg.boot
@@ -232,9 +238,8 @@ if [ "X${named_flags}" != X"NO" ]; then
 fi
 
 # $isakmpd_flags is imported from /etc/rc.conf;
-# If $isakmpd_flags == NO or /etc/isakmpd/isakmpd.policy doesn't exist, then
-# isakmpd isn't run.
-if [ "X${isakmpd_flags}" != X"NO" -a -e /etc/isakmpd/isakmpd.policy ]; then
+# If $isakmpd_flags == NO, isakmpd isn't run.
+if [ "X${isakmpd_flags}" != X"NO" ]; then
 	echo 'starting isakmpd';	isakmpd ${isakmpd_flags}
 fi
 
@@ -294,7 +299,7 @@ if [ X${amd} = X"YES" -a -e ${amd_master} ]; then
 	    -a ${amd_dir} `cat ${amd_master}` > /var/run/amd.pid )
 fi
 
-# run rdate before timed
+# run rdate before timed/ntpd
 if [ X"${rdate_flags}" != X"NO" ]; then
 	echo -n ' rdate';	rdate -s ${rdate_flags}
 fi
@@ -303,6 +308,10 @@ fi
 # if $timed_flags == NO, timed isn't run.
 if [ "X${timed_flags}" != X"NO" ]; then
 	echo -n ' timed'; timed $timed_flags
+fi
+
+if [ "X${ntpd_flags}" != X"NO" ]; then
+	echo -n ' ntpd'; ntpd $ntpd_flags
 fi
 echo '.'
 
@@ -320,7 +329,7 @@ if [ "X${afs}" = X"YES" -a -c /dev/xfs0 ]; then
 	echo -n 'mounting afs:'
 	mkdir -p -m 0755 /afs
 	mount -t xfs /dev/xfs0 /afs
-	/usr/libexec/afsd ${afsd_flags} 
+	/usr/libexec/afsd ${afsd_flags}
 	echo ' done.'
 fi
 
@@ -438,6 +447,19 @@ if [ ! -f /etc/ssh/ssh_host_key ]; then
 	fi
 fi
 
+if [ ! -f /etc/isakmpd/private/local.key ]; then
+	echo -n "openssl: generating new isakmpd RSA key... "
+	if /usr/sbin/openssl genrsa -out /etc/isakmpd/private/local.key 1024 \
+	    > /dev/null 2>&1; then
+		chmod 600 /etc/isakmpd/private/local.key
+		openssl rsa -out /etc/isakmpd/private/local.pub \
+		    -in /etc/isakmpd/private/local.key -pubout > /dev/null 2>&1
+		echo done.
+	else
+		echo failed.
+	fi
+fi
+
 echo -n starting network daemons:
 
 # $routed_flags are imported from /etc/rc.conf.
@@ -537,7 +559,7 @@ if [ "X${spamd_flags}" != X"NO" ]; then
 	if [ "X${spamd_grey}" != X"NO" ]; then
 		spamd_flags="${spamd_flags} -g"
 	fi
-	echo -n ' spamd';		/usr/libexec/spamd ${spamd_flags}
+	echo -n ' spamd';		eval /usr/libexec/spamd ${spamd_flags}
 	/usr/libexec/spamd-setup
 	if [ "X${spamd_grey}" != X"NO" ]; then
 		echo -n ' spamlogd'
@@ -621,6 +643,10 @@ fi
 
 if [ X"${sensorsd_flags}" != X"NO" ]; then
 	echo -n ' sensorsd';	/usr/sbin/sensorsd ${sensorsd_flags}
+fi
+
+if [ X"${hotplugd_flags}" != X"NO" -a -x /usr/sbin/hotplugd ]; then
+	echo -n ' hotplugd';	/usr/sbin/hotplugd ${hotplugd_flags}
 fi
 
 echo -n ' cron';		cron

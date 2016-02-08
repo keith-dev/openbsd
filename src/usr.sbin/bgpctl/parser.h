@@ -1,4 +1,4 @@
-/*	$OpenBSD: parser.h,v 1.3 2004/03/02 19:32:43 claudio Exp $ */
+/*	$OpenBSD: parser.h,v 1.5 2004/08/20 15:49:35 henning Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -36,7 +36,12 @@ enum actions {
 	FIB_DECOUPLE,
 	NEIGHBOR,
 	NEIGHBOR_UP,
-	NEIGHBOR_DOWN
+	NEIGHBOR_DOWN,
+	NEIGHBOR_CLEAR,
+	NETWORK_ADD,
+	NETWORK_REMOVE,
+	NETWORK_FLUSH,
+	NETWORK_SHOW
 };
 
 struct parse_result {

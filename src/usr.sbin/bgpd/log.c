@@ -1,4 +1,4 @@
-/*	$OpenBSD: log.c,v 1.30 2004/03/11 12:41:36 henning Exp $ */
+/*	$OpenBSD: log.c,v 1.39 2004/07/09 11:00:28 henning Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -23,11 +23,13 @@
 
 #include <err.h>
 #include <errno.h>
+#include <netdb.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <syslog.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "bgpd.h"
@@ -36,72 +38,6 @@
 
 int	debug;
 
-static const char *eventnames[] = {
-	"None",
-	"Start",
-	"Stop",
-	"Connection opened",
-	"Connection closed",
-	"Connection open failed",
-	"Fatal error",
-	"ConnectRetryTimer expired",
-	"HoldTimer expired",
-	"KeepaliveTimer expired",
-	"OPEN message received",
-	"KEEPALIVE message received",
-	"UPDATE message received",
-	"NOTIFICATION received"
-};
-
-static const char *errnames[] = {
-	"none",
-	"Header error",
-	"error in OPEN message",
-	"error in UPDATE message",
-	"HoldTimer expired",
-	"Finite State Machine error",
-	"Cease"
-};
-
-static const char *suberr_header_names[] = {
-	"none",
-	"synchronization error",
-	"wrong length",
-	"unknown message type"
-};
-
-static const char *suberr_open_names[] = {
-	"none",
-	"version mismatch",
-	"AS unacceptable",
-	"BGPID invalid",
-	"optional parameter error",
-	"Authentication error",
-	"unacceptable holdtime",
-	"unsupported capability"
-};
-
-static const char *suberr_update_names[] = {
-	"none",
-	"attribute list error",
-	"unknown well-known attribute",
-	"well-known attribute missing",
-	"attribute flags error",
-	"attribute length wrong",
-	"origin unacceptable",
-	"loop detected",
-	"nexthop unacceptable",
-	"optional attribute error",
-	"network unacceptable",
-	"AS-Path unacceptable"
-};
-
-static const char *procnames[] = {
-	"parent",
-	"SE",
-	"RDE"
-};
-
 char	*log_fmt_peer(const struct peer_config *);
 void	 logit(int, const char *, ...);
 
@@ -109,17 +45,27 @@ char *
 log_fmt_peer(const struct peer_config *peer)
 {
 	const char	*ip;
-	char		*pfmt;
+	char		*pfmt, *p;
 
 	ip = log_addr(&peer->remote_addr);
+	if ((peer->remote_addr.af == AF_INET && peer->remote_masklen != 32) ||
+	    (peer->remote_addr.af == AF_INET6 && peer->remote_masklen != 128)) {
+		if (asprintf(&p, "%s/%u", ip, peer->remote_masklen) == -1)
+			fatal(NULL);
+	} else {
+		if ((p = strdup(ip)) == NULL)
+			fatal(NULL);
+	}
+
 	if (peer->descr[0]) {
-		if (asprintf(&pfmt, "neighbor %s (%s)", ip, peer->descr) ==
+		if (asprintf(&pfmt, "neighbor %s (%s)", p, peer->descr) ==
 		    -1)
 			fatal(NULL);
 	} else {
-		if (asprintf(&pfmt, "neighbor %s", ip) == -1)
+		if (asprintf(&pfmt, "neighbor %s", p) == -1)
 			fatal(NULL);
 	}
+	free(p);
 	return (pfmt);
 }
 
@@ -132,6 +78,8 @@ log_init(int n_debug)
 
 	if (!debug)
 		openlog(__progname, LOG_PID | LOG_NDELAY, LOG_DAEMON);
+
+	tzset();
 }
 
 void
@@ -251,9 +199,11 @@ log_debug(const char *emsg, ...)
 {
 	va_list	 ap;
 
-	va_start(ap, emsg);
-	vlog(LOG_DEBUG, emsg, ap);
-	va_end(ap);
+	if (debug) {
+		va_start(ap, emsg);
+		vlog(LOG_DEBUG, emsg, ap);
+		va_end(ap);
+	}
 }
 
 void
@@ -362,14 +312,15 @@ log_notification(const struct peer *peer, u_int8_t errcode, u_int8_t subcode,
 }
 
 void
-log_conn_attempt(const struct peer *peer, struct in_addr remote)
+log_conn_attempt(const struct peer *peer, struct sockaddr *sa)
 {
-	char *p;
+	char		*p;
+	const char	*b;
 
-	if (peer == NULL)	/* connection from non-peer, drop */
-		logit(LOG_INFO, "connection from non-peer %s refused",
-			    inet_ntoa(remote));
-	else {
+	if (peer == NULL) {	/* connection from non-peer, drop */
+		b = log_sockaddr(sa);
+		logit(LOG_INFO, "connection from non-peer %s refused", b);
+	} else {
 		p = log_fmt_peer(&peer->conf);
 		logit(LOG_INFO, "Connection attempt from %s while session is "
 		    "in state %s", p, statenames[peer->state]);
@@ -384,6 +335,18 @@ log_addr(const struct bgpd_addr *addr)
 
 	if (inet_ntop(addr->af, &addr->ba, buf, sizeof(buf)) == NULL)
 		return ("?");
+	else
+		return (buf);
+}
+
+const char *
+log_sockaddr(struct sockaddr *sa)
+{
+	static char	buf[NI_MAXHOST];
+
+	if (getnameinfo(sa, sa->sa_len, buf, sizeof(buf), NULL, 0,
+	    NI_NUMERICHOST))
+		return ("(unknown)");
 	else
 		return (buf);
 }

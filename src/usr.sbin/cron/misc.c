@@ -1,28 +1,28 @@
-/*	$OpenBSD: misc.c,v 1.27 2003/04/15 08:08:45 deraadt Exp $	*/
+/*	$OpenBSD: misc.c,v 1.33 2004/07/22 16:36:28 millert Exp $	*/
 
 /* Copyright 1988,1990,1993,1994 by Paul Vixie
  * All rights reserved
  */
 
 /*
+ * Copyright (c) 2004 by Internet Systems Consortium, Inc. ("ISC")
  * Copyright (c) 1997,2000 by Internet Software Consortium, Inc.
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
  * copyright notice and this permission notice appear in all copies.
  *
- * THE SOFTWARE IS PROVIDED "AS IS" AND INTERNET SOFTWARE CONSORTIUM DISCLAIMS
- * ALL WARRANTIES WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES
- * OF MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL INTERNET SOFTWARE
- * CONSORTIUM BE LIABLE FOR ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL
- * DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR
- * PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS
- * ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS
- * SOFTWARE.
+ * THE SOFTWARE IS PROVIDED "AS IS" AND ISC DISCLAIMS ALL WARRANTIES
+ * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+ * MERCHANTABILITY AND FITNESS.  IN NO EVENT SHALL ISC BE LIABLE FOR
+ * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+ * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT
+ * OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
 #if !defined(lint) && !defined(LINT)
-static char const rcsid[] = "$OpenBSD: misc.c,v 1.27 2003/04/15 08:08:45 deraadt Exp $";
+static char const rcsid[] = "$OpenBSD: misc.c,v 1.33 2004/07/22 16:36:28 millert Exp $";
 #endif
 
 /* vix 26jan87 [RCS has the rest of the log]
@@ -49,41 +49,6 @@ static int LogFD = ERR;
 #if defined(SYSLOG)
 static int syslog_open = FALSE;
 #endif
-
-/*
- * glue_strings is the overflow-safe equivalent of
- *	snprintf(buffer, buffer_size, "%s%c%s", a, separator, b);
- *
- * returns 1 on success, 0 on failure.  'buffer' MUST NOT be used if
- * glue_strings fails.
- */
-int
-glue_strings(char *buffer, size_t buffer_size, const char *a, const char *b,
-	     char separator)
-{
-	char *buf;
-	char *buf_end;
-
-	if (buffer_size <= 0)
-		return (0);
-	buf_end = buffer + buffer_size;
-	buf = buffer;
-
-	for ( /* nothing */; buf < buf_end && *a != '\0'; buf++, a++ )
-		*buf = *a;
-	if (buf == buf_end)
-		return (0);
-	if (separator != '/' || buf == buffer || buf[-1] != '/')
-		*buf++ = separator;
-	if (buf == buf_end)
-		return (0);
-	for ( /* nothing */; buf < buf_end && *b != '\0'; buf++, b++ )
-		*buf = *b;
-	if (buf == buf_end)
-		return (0);
-	*buf = '\0';
-	return (1);
-}
 
 int
 strcmp_until(const char *left, const char *right, char until) {
@@ -742,7 +707,7 @@ long get_gmtoff(time_t *clock, struct tm *local)
  *	opens a UNIX domain socket that crontab uses to poke cron.
  */
 int
-open_socket()
+open_socket(void)
 {
 	int		   sock;
 	mode_t		   omask;
@@ -755,8 +720,22 @@ open_socket()
 		log_it("CRON", getpid(), "DEATH", "can't create socket");
 		exit(ERROR_EXIT);
 	}
-	if (!glue_strings(s_un.sun_path, sizeof s_un.sun_path, SPOOL_DIR,
-	    CRONSOCK, '/')) {
+	if (fcntl(sock, F_SETFD, FD_CLOEXEC) == -1) {
+		fprintf(stderr, "%s: can't make socket close on exec: %s\n",
+		    ProgramName, strerror(errno));
+		log_it("CRON", getpid(), "DEATH",
+		    "can't make socket close on exec");
+		exit(ERROR_EXIT);
+	}
+	if (fcntl(sock, F_SETFL, O_NONBLOCK) == -1) {
+		fprintf(stderr, "%s: can't make socket non-blocking: %s\n",
+		    ProgramName, strerror(errno));
+		log_it("CRON", getpid(), "DEATH",
+		    "can't make socket non-blocking");
+		exit(ERROR_EXIT);
+	}
+	if (snprintf(s_un.sun_path, sizeof s_un.sun_path, "%s/%s",
+	      SPOOL_DIR, CRONSOCK) >= sizeof(s_un.sun_path)) {
 		fprintf(stderr, "%s/%s: path too long\n", SPOOL_DIR, CRONSOCK);
 		log_it("CRON", getpid(), "DEATH", "path too long");
 		exit(ERROR_EXIT);
@@ -791,27 +770,26 @@ poke_daemon(const char *spool_dir, unsigned char cookie) {
 	int sock = -1;
 	struct sockaddr_un s_un;
 
-	if (utime(spool_dir, NULL) < 0) {
-		fprintf(stderr, "%s: unable to update mtime on %s\n",
-		    ProgramName, spool_dir);
+	(void) utime(spool_dir, NULL);		/* old poke method */
+
+	if (snprintf(s_un.sun_path, sizeof s_un.sun_path, "%s/%s",
+	      SPOOL_DIR, CRONSOCK) >= sizeof(s_un.sun_path)) {
+		fprintf(stderr, "%s: %s/%s: path too long\n",
+		    ProgramName, SPOOL_DIR, CRONSOCK);
 		return;
 	}
-
-	if (glue_strings(s_un.sun_path, sizeof s_un.sun_path, SPOOL_DIR,
-	    CRONSOCK, '/')) {
-		s_un.sun_family = AF_UNIX;
+	s_un.sun_family = AF_UNIX;
 #ifdef SUN_LEN
-		s_un.sun_len = SUN_LEN(&s_un);
+	s_un.sun_len = SUN_LEN(&s_un);
 #endif
-		(void) signal(SIGPIPE, SIG_IGN);
-		if ((sock = socket(AF_UNIX, SOCK_STREAM, 0)) >= 0 &&
-		    connect(sock, (struct sockaddr *)&s_un, sizeof(s_un)) == 0)
-			write(sock, &cookie, 1);
-		else
-			fprintf(stderr, "%s: warning, cron does not appear to be "
-			    "running.\n", ProgramName);
-		if (sock >= 0)
-			close(sock);
-		(void) signal(SIGPIPE, SIG_DFL);
-	}
+	(void) signal(SIGPIPE, SIG_IGN);
+	if ((sock = socket(AF_UNIX, SOCK_STREAM, 0)) >= 0 &&
+	    connect(sock, (struct sockaddr *)&s_un, sizeof(s_un)) == 0)
+		write(sock, &cookie, 1);
+	else
+		fprintf(stderr, "%s: warning, cron does not appear to be "
+		    "running.\n", ProgramName);
+	if (sock >= 0)
+		close(sock);
+	(void) signal(SIGPIPE, SIG_DFL);
 }

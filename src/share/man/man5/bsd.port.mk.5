@@ -1,4 +1,4 @@
-.\" $OpenBSD: bsd.port.mk.5,v 1.134 2004/02/18 13:39:02 xsa Exp $
+.\" $OpenBSD: bsd.port.mk.5,v 1.146 2004/08/03 08:05:05 espie Exp $
 .\"
 .\" Copyright (c) 2000 Marc Espie
 .\"
@@ -116,10 +116,8 @@ target that simulates invoking
 Check distribution archives and distribution patches control sum against
 the results recorded in ${CHECKSUM_FILE},
 using the cryptographic signature utilities listed in ${PREFERRED_CIPHERS}.
-Normally ${ALLFILES}
-are checksummed, unless
-.Ev IGNOREFILES
-is set to a list of files to ignore.
+All the files needed to recreate a port should be in ${ALLFILES} and
+checksummed.
 Invoking
 .Ar checksum
 with REFETCH=true
@@ -292,8 +290,7 @@ See also
 .Ar unlink-categories .
 .It Ar makesum
 Create the ${CHECKSUM_FILE} list of recorded checksums by running the
-cryptographic fingerprints sha1, md5 and rmd160 on ${ALLFILES} minus
-${IGNOREFILES}.
+cryptographic fingerprints sha1, md5 and rmd160 on ${ALLFILES}.
 .Ev NO_CHECKSUM
 can be used to avoid all checksumming steps.
 .It Ar manpages-check
@@ -360,6 +357,11 @@ exists, the files described under
 .Ev PATCH_LIST
 will be applied under
 .Ev WRKDIST .
+See also
+.Ev REORDER_DEPENDENCIES
+for possible
+.Ar post-patch
+clean-up.
 .It Ar readmes
 Create an html description of packages, including comments, description,
 and dependencies.
@@ -678,6 +680,12 @@ assume
 .Xr perl 1
 .Xr ExtUtils::MakeMaker 3p
 style.
+Add
+.Sq modbuild ,
+to enable
+.Xr perl 1
+.Xr Module::Build 3p
+style.
 If
 .Sq gnu ,
 assume
@@ -931,11 +939,6 @@ Location of the gnu make binary, if needed.
 Defaults to gmake.
 .It Ev HOMEPAGE
 Set to a link to the homepage of the software, if applicable.
-.It Ev IGNOREFILES
-Set to the list of files that cannot be checksummed.
-For use by ports which
-fetch dynamically generated archives that can't be checksummed.
-Avoid using IGNOREFILES whenever possible.
 .It Ev LIB_DEPENDS
 Libraries this port depends upon.
 Each item has the form
@@ -1007,6 +1010,21 @@ If USE_LIBTOOL is set, the environment variable LIBTOOL is set
 to ${LIBTOOL} ${LIBTOOL_FLAGS}.
 .It Ev LOCALBASE
 where other ports have already been installed (default: /usr/local)
+.It Ev LOCKDIR
+User settings.
+If set, points to a directory common for all instances of concurrent ports
+builds.
+.It Ev LOCK_CMD
+User settings.
+If set, expands to a command that will acquire a lock.
+This lock will reside in
+.Pa ${LOCKDIR} .
+See also
+.Xr ports 7 .
+.It Ev LP64_ARCHS
+Set to the list of 64-bit architectures.
+Use with
+.Ev NOT_FOR_ARCHS .
 .It Ev MAINTAINER
 E-mail address with full name of the port's maintainer.
 Defaults to ports@openbsd.org.
@@ -1108,7 +1126,7 @@ broken port.
 See also
 .Ev IGNORE .
 .It Ev NO_REGRESS
-Port does not have any regression tests.
+Port does not have any regression targets.
 .It Ev NO_SHARED_ARCHS
 Set to the list of platforms that do not support shared libraries.
 Use with
@@ -1336,6 +1354,22 @@ which default to
 and
 .Sq check
 respectively.
+.It Ev REORDER_DEPENDENCIES
+Points to a list of files that specify inter-dependencies for
+.Xr make 1 .
+If defined, each line of the file is either a comment (starting with #)
+or a pair of two files: most_recent older.
+At the end of
+.Ar post-patch ,
+.Xr touch 1
+will be used to ensure those files are put in the proper order.
+The files are assumed to be under
+.Pa ${WRKSRC} .
+The notation /file can be used to ask for a recursive search, e.g.,
+to make sure that all Makefile.in are up-to-date.
+See
+.Pa ${PORTSDIR}/infrastructure/mk/automake.dep
+for an example.
 .It Ev RUN_DEPENDS
 Specification of ports this port needs installed to be functional.
 Same format as BUILD_DEPENDS.
@@ -1367,6 +1401,10 @@ Wipe ${WRKBUILD} to start anew, but skipping the extract/patch stage.
 Set to
 .Sq flavored
 if distinct flavors of the port may share a common source tree.
+.It Ev SHARED_ONLY
+Set to
+.Sq Yes
+if port can only be built on architectures with shared libraries.
 .It Ev SUBPACKAGE
 Set to the sub package suffix when building a package in a multi-package port.
 Read-only.
@@ -1451,6 +1489,11 @@ correct.
 See also
 .Ev BIN_PACKAGES ,
 .Ev BULK .
+.It Ev UNLOCK_CMD
+User settings.
+If set, expands to a command that will release a lock.
+This lock will reside in
+.Pa ${LOCKDIR} .
 .It Ev UNZIP
 Name of the unzip binary.
 .It Ev WARNINGS
@@ -1701,6 +1744,10 @@ instead.
 .It Ev HAVE_MOTIF
 Old user settings.
 No longer needed since OpenMotif is now free.
+.It Ev IGNOREFILES
+Set to the list of files that can't be checksummed.
+All uses of it have led to postponing the correct action: talking
+to the software author and getting him to provide versioned archives.
 .It Ev MANn
 List of unformatted manpages, per section.
 .It Ev MANPREFIX

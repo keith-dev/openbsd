@@ -1,4 +1,4 @@
-/*	$OpenBSD: uthread_kern.c,v 1.27 2003/05/13 16:49:32 marc Exp $	*/
+/*	$OpenBSD: uthread_kern.c,v 1.29 2004/04/13 01:09:55 marc Exp $	*/
 /*
  * Copyright (c) 1995-1998 John Birrell <jb@cimlogic.com.au>
  * All rights reserved.
@@ -470,6 +470,16 @@ _thread_kern_sched(struct sigcontext * scp)
 			/* Restore the new thread, saving current. */
 			_thread_machdep_switch(&curthread->_machdep,
 					       &old_thread_run->_machdep);
+
+			/*
+			 * DANGER WILL ROBINSON
+			 * All stack local variables now contain the values
+			 * they had when this thread was last running.  In
+			 * particular, curthread is NOT pointing to the
+			 * current thread.   Make it point to the current
+			 * before use.
+			 */
+			curthread = _get_curthread();
 			_thread_kern_in_sched = 0;
 
 			/* run any installed switch-hooks */
@@ -795,7 +805,9 @@ _thread_kern_poll(int wait_reqd)
 			/* File descriptor read wait: */
 			case PS_FDR_WAIT:
 				if ((nfds < _thread_dtablesize) &&
-				    (_thread_pfd_table[nfds].revents & POLLRDNORM)) {
+				    (_thread_pfd_table[nfds].revents
+				       & (POLLRDNORM|POLLERR|POLLHUP|POLLNVAL))
+				      != 0) {
 					PTHREAD_WAITQ_CLEARACTIVE();
 					PTHREAD_WORKQ_REMOVE(pthread);
 					PTHREAD_NEW_STATE(pthread,PS_RUNNING);
@@ -807,7 +819,9 @@ _thread_kern_poll(int wait_reqd)
 			/* File descriptor write wait: */
 			case PS_FDW_WAIT:
 				if ((nfds < _thread_dtablesize) &&
-				    (_thread_pfd_table[nfds].revents & POLLWRNORM)) {
+				    (_thread_pfd_table[nfds].revents
+				       & (POLLWRNORM|POLLERR|POLLHUP|POLLNVAL))
+				      != 0) {
 					PTHREAD_WAITQ_CLEARACTIVE();
 					PTHREAD_WORKQ_REMOVE(pthread);
 					PTHREAD_NEW_STATE(pthread,PS_RUNNING);

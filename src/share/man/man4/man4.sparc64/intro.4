@@ -1,4 +1,4 @@
-.\"     $OpenBSD: intro.4,v 1.29 2003/11/14 18:32:46 jmc Exp $
+.\"     $OpenBSD: intro.4,v 1.34 2004/08/17 23:49:21 jaredy Exp $
 .\"
 .\" Copyright (c) 2001-2002 The OpenBSD Project
 .\" All Rights Reserved.
@@ -73,6 +73,8 @@ Devices are indicated by their functional interface.
 Not all supported devices are listed.
 .Pp
 .Bl -tag -width zs/zstty/zskbd(4) -compact -offset indent
+.It Xr agten 4
+Fujitsu AG-10e frame buffer.
 .It Xr apio 4
 Aurora SBus pio1 parallel ports.
 .It Xr asio 4
@@ -102,7 +104,7 @@ ports.
 .It Xr creator 4
 UPA Creator/Creator 3D/Elite 3D color graphics frame buffer.
 .It Xr dc 4
-Clones of the DEC Tulip ethernet controller.
+Clones of the DEC Tulip Ethernet controller.
 .It Xr eap 4
 Ensoniq AudioPCI based audio.
 .It Xr eso 4
@@ -112,7 +114,7 @@ ESP SCSI controller.
 .It Xr fxp 4
 Intel EtherExpress PRO/100 Ethernet driver.
 .It Xr gem 4
-GEM gigabit ethernet interface.
+GEM Gigabit Ethernet interface.
 .It Xr hifn 4
 Hifn 7751/7811/7951 cryptography accelerators.
 .It Xr hme 4
@@ -120,13 +122,16 @@ SBus HME Ethernet controllers (SunSwift).
 .It Xr isp 4
 Qlogic ISP SBus SCSI controller.
 .It Xr le/lebuffer 4
-AMD 7990 LANCE ethernet controller.
+AMD 7990 LANCE Ethernet controller.
 .It Xr lofn 4
 Hifn 6500 public key cryptography engine.
 .It Xr lpt 4
 Parallel port driver.
 .It Xr magma 4
 MAGMA serial/parallel communication boards.
+.It Xr mgx 4
+.Tn Southland Media Systems
+MGX and MGXPlus frame buffers.
 .It Xr openprom 4
 Sun Open boot PROM (what became IEEE 1275) configuration driver.
 .It Xr pckbd 4
@@ -135,6 +140,10 @@ PS/2-style keyboard driver.
 PROM console input/output device.
 .It Xr pms/pmsi 4
 PS/2 auxiliary port mouse driver.
+.It Xr rfx 4
+Vitec/Connectware/AP&D
+.Tn RasterFlex
+framebuffer series.
 .It Xr qe 4
 Quad 10BaseT SBus Ethernet controller.
 .It Xr qec 4
@@ -169,6 +178,8 @@ PCI graphics frame buffer.
 xl 3Com EtherLink XL and Fast EtherLink XL Ethernet driver.
 .It Xr zs/zstty/zskbd 4
 Zilog 8530 serial controller (and serial keyboards).
+.It Xr zx 4
+24 bit accelerated SBus color frame buffer.
 .El
 .Sh SEE ALSO
 .Xr autoconf 4 ,

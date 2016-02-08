@@ -1,4 +1,4 @@
-/*	$OpenBSD: privsep.c,v 1.16 2004/03/14 19:17:05 otto Exp $	*/
+/*	$OpenBSD: privsep.c,v 1.21 2004/07/09 16:22:04 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2003 Anil Madhavapeddy <anil@recoil.org>
@@ -66,7 +66,7 @@ enum cmd_types {
 	PRIV_OPEN_UTMP,		/* open utmp for reading only */
 	PRIV_OPEN_CONFIG,	/* open config file for reading only */
 	PRIV_CONFIG_MODIFIED,	/* check if config file has been modified */
-	PRIV_GETHOSTBYNAME,	/* resolve hostname into numerical address */
+	PRIV_GETHOSTSERV,	/* resolve host/service names */
 	PRIV_GETHOSTBYADDR,	/* resolve numeric address into hostname */
 	PRIV_DONE_CONFIG_PARSE	/* signal that the initial config parse is done */
 };
@@ -98,11 +98,13 @@ int
 priv_init(char *conf, int numeric, int lockfd, int nullfd, char *argv[])
 {
 	int i, fd, socks[2], cmd, addr_len, addr_af, result, restart;
-	size_t path_len, hostname_len;
+	size_t path_len, hostname_len, servname_len;
 	char path[MAXPATHLEN], hostname[MAXHOSTNAMELEN];
+	char servname[MAXHOSTNAMELEN];
 	struct stat cf_stat;
 	struct hostent *hp;
 	struct passwd *pw;
+	struct addrinfo hints, *res0;
 
 	for (i = 1; i < _NSIG; i++)
 		signal(i, SIG_DFL);
@@ -156,9 +158,11 @@ priv_init(char *conf, int numeric, int lockfd, int nullfd, char *argv[])
 		close(nullfd);
 
 	/* Father */
-	/* Pass TERM/HUP through to child, and accept CHLD */
+	/* Pass TERM/HUP/INT/QUIT through to child, and accept CHLD */
 	signal(SIGTERM, sig_pass_to_chld);
 	signal(SIGHUP, sig_pass_to_chld);
+	signal(SIGINT, sig_pass_to_chld);
+	signal(SIGQUIT, sig_pass_to_chld);
 	signal(SIGCHLD, sig_got_chld);
 
 	setproctitle("[priv]");
@@ -208,10 +212,11 @@ priv_init(char *conf, int numeric, int lockfd, int nullfd, char *argv[])
 			path[path_len - 1] = '\0';
 			check_tty_name(path, path_len);
 			fd = open(path, O_WRONLY|O_NONBLOCK, 0);
+			send_fd(socks[0], fd);
 			if (fd < 0)
 				warnx("priv_open_tty failed");
-			send_fd(socks[0], fd);
-			close(fd);
+			else
+				close(fd);
 			break;
 
 		case PRIV_OPEN_LOG:
@@ -224,29 +229,32 @@ priv_init(char *conf, int numeric, int lockfd, int nullfd, char *argv[])
 			path[path_len - 1] = '\0';
 			check_log_name(path, path_len);
 			fd = open(path, O_WRONLY|O_APPEND|O_NONBLOCK, 0);
+			send_fd(socks[0], fd);
 			if (fd < 0)
 				warnx("priv_open_log failed");
-			send_fd(socks[0], fd);
-			close(fd);
+			else
+				close(fd);
 			break;
 
 		case PRIV_OPEN_UTMP:
 			dprintf("[priv]: msg PRIV_OPEN_UTMP received\n");
 			fd = open(_PATH_UTMP, O_RDONLY|O_NONBLOCK, 0);
+			send_fd(socks[0], fd);
 			if (fd < 0)
 				warnx("priv_open_utmp failed");
-			send_fd(socks[0], fd);
-			close(fd);
+			else
+				close(fd);
 			break;
 
 		case PRIV_OPEN_CONFIG:
 			dprintf("[priv]: msg PRIV_OPEN_CONFIG received\n");
 			stat(config_file, &cf_info);
 			fd = open(config_file, O_RDONLY|O_NONBLOCK, 0);
+			send_fd(socks[0], fd);
 			if (fd < 0)
 				warnx("priv_open_config failed");
-			send_fd(socks[0], fd);
-			close(fd);
+			else
+				close(fd);
 			break;
 
 		case PRIV_CONFIG_MODIFIED:
@@ -269,21 +277,34 @@ priv_init(char *conf, int numeric, int lockfd, int nullfd, char *argv[])
 			increase_state(STATE_RUNNING);
 			break;
 
-		case PRIV_GETHOSTBYNAME:
-			dprintf("[priv]: msg PRIV_GETHOSTBYNAME received\n");
-			/* Expecting: length, hostname */
+		case PRIV_GETHOSTSERV:
+			dprintf("[priv]: msg PRIV_GETHOSTSERV received\n");
+			/* Expecting: len, hostname, len, servname */
 			must_read(socks[0], &hostname_len, sizeof(size_t));
 			if (hostname_len == 0 || hostname_len > sizeof(hostname))
 				_exit(0);
 			must_read(socks[0], &hostname, hostname_len);
 			hostname[hostname_len - 1] = '\0';
-			hp = gethostbyname(hostname);
-			if (hp == NULL) {
+
+			must_read(socks[0], &servname_len, sizeof(size_t));
+			if (servname_len == 0 || servname_len > sizeof(servname))
+				_exit(0);
+			must_read(socks[0], &servname, servname_len);
+			servname[servname_len - 1] = '\0';
+
+			memset(&hints, '\0', sizeof(hints));
+			hints.ai_family = AF_INET;
+			hints.ai_socktype = SOCK_DGRAM;
+			i = getaddrinfo(hostname, servname, &hints, &res0);
+			if (i != 0 || res0 == NULL) {
 				addr_len = 0;
 				must_write(socks[0], &addr_len, sizeof(int));
 			} else {
-				must_write(socks[0], &hp->h_length, sizeof(int));
-				must_write(socks[0], hp->h_addr, hp->h_length);
+				/* Just send the first address */
+				i = res0->ai_addrlen;
+				must_write(socks[0], &i, sizeof(int));
+				must_write(socks[0], res0->ai_addr, i);
+				freeaddrinfo(res0);
 			}
 			break;
 
@@ -358,13 +379,13 @@ bad_path:
  * and rewrite to /dev/null if it's a bad path.
  */
 static void
-check_log_name(char *log, size_t loglen)
+check_log_name(char *lognam, size_t loglen)
 {
 	struct logname *lg;
 	char *p;
 
 	/* Any path containing '..' is invalid.  */
-	for (p = log; *p && (p - log) < loglen; p++)
+	for (p = lognam; *p && (p - lognam) < loglen; p++)
 		if (*p == '.' && *(p + 1) == '.')
 			goto bad_path;
 
@@ -373,12 +394,12 @@ check_log_name(char *log, size_t loglen)
 		lg = malloc(sizeof(struct logname));
 		if (!lg)
 			err(1, "check_log_name() malloc");
-		strlcpy(lg->path, log, MAXPATHLEN);
+		strlcpy(lg->path, lognam, MAXPATHLEN);
 		TAILQ_INSERT_TAIL(&lognames, lg, next);
 		break;
 	case STATE_RUNNING:
 		TAILQ_FOREACH(lg, &lognames, next)
-			if (!strcmp(lg->path, log))
+			if (!strcmp(lg->path, lognam))
 				return;
 		goto bad_path;
 		break;
@@ -391,8 +412,8 @@ check_log_name(char *log, size_t loglen)
 
 bad_path:
 	warnx("%s: invalid attempt to open %s: rewriting to /dev/null",
-	    __func__, log);
-	strlcpy(log, "/dev/null", loglen);
+	    __func__, lognam);
+	strlcpy(lognam, "/dev/null", loglen);
 }
 
 /* Crank our state into less permissive modes */
@@ -431,7 +452,7 @@ priv_open_tty(const char *tty)
 
 /* Open log-file */
 int
-priv_open_log(const char *log)
+priv_open_log(const char *lognam)
 {
 	char path[MAXPATHLEN];
 	int cmd, fd;
@@ -440,7 +461,7 @@ priv_open_log(const char *log)
 	if (priv_fd < 0)
 		errx(1, "%s: called from privileged child", __func__);
 
-	if (strlcpy(path, log, sizeof path) >= sizeof(path))
+	if (strlcpy(path, lognam, sizeof path) >= sizeof(path))
 		return -1;
 	path_len = strlen(path) + 1;
 
@@ -506,7 +527,7 @@ priv_open_config(void)
 
 /* Ask if config file has been modified since last attempt to read it */
 int
-priv_config_modified()
+priv_config_modified(void)
 {
 	int cmd, res;
 
@@ -535,14 +556,15 @@ priv_config_parse_done(void)
 	must_write(priv_fd, &cmd, sizeof(int));
 }
 
-/* Resolve hostname into address.  Response is placed into addr, and
+/* Name/service to address translation.  Response is placed into addr, and
  * the length is returned (zero on error) */
 int
-priv_gethostbyname(char *host, char *addr, size_t addr_len)
+priv_gethostserv(char *host, char *serv, struct sockaddr *addr,
+    size_t addr_len)
 {
-	char hostcpy[MAXHOSTNAMELEN];
+	char hostcpy[MAXHOSTNAMELEN], servcpy[MAXHOSTNAMELEN];
 	int cmd, ret_len;
-	size_t hostname_len;
+	size_t hostname_len, servname_len;
 
 	if (priv_fd < 0)
 		errx(1, "%s: called from privileged portion", __func__);
@@ -550,11 +572,16 @@ priv_gethostbyname(char *host, char *addr, size_t addr_len)
 	if (strlcpy(hostcpy, host, sizeof hostcpy) >= sizeof(hostcpy))
 		errx(1, "%s: overflow attempt in hostname", __func__);
 	hostname_len = strlen(hostcpy) + 1;
+	if (strlcpy(servcpy, serv, sizeof servcpy) >= sizeof(servcpy))
+		errx(1, "%s: overflow attempt in servname", __func__);
+	servname_len = strlen(servcpy) + 1;
 
-	cmd = PRIV_GETHOSTBYNAME;
+	cmd = PRIV_GETHOSTSERV;
 	must_write(priv_fd, &cmd, sizeof(int));
 	must_write(priv_fd, &hostname_len, sizeof(size_t));
 	must_write(priv_fd, hostcpy, hostname_len);
+	must_write(priv_fd, &servname_len, sizeof(size_t));
+	must_write(priv_fd, servcpy, servname_len);
 
 	/* Expect back an integer size, and then a string of that length */
 	must_read(priv_fd, &ret_len, sizeof(int));
@@ -568,7 +595,9 @@ priv_gethostbyname(char *host, char *addr, size_t addr_len)
 		errx(1, "%s: overflow attempt in return", __func__);
 
 	/* Read the resolved address and make sure we got all of it */
+	memset(addr, '\0', addr_len);
 	must_read(priv_fd, addr, ret_len);
+
 	return ret_len;
 }
 
@@ -604,7 +633,7 @@ priv_gethostbyaddr(char *addr, int addr_len, int af, char *res, size_t res_len)
 	return ret_len;
 }
 
-/* If priv parent gets a TERM or HUP, pass it through to child instead */
+/* Pass the signal through to child */
 static void
 sig_pass_to_chld(int sig)
 {

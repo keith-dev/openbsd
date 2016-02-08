@@ -1,4 +1,4 @@
-dnl	$OpenBSD: contents,v 1.48 2004/03/27 23:33:09 miod Exp $
+dnl	$OpenBSD: contents,v 1.54 2004/09/10 19:41:39 miod Exp $
 TopPart
 
 OpenBSDfloppy
@@ -20,9 +20,17 @@ OpenBSDdistsets
 
 OpenBSDbsd
 
+OpenBSDbsdmp
+
 OpenBSDrd
 
 OpenBSDcd
+
+	cdemu{:--:}OSrev.iso	Another bootable CD-ROM image, for older systems
+			which BIOS only support the ``large floppy emulation''
+			mode for bootable CD-ROM, and as such are unable to
+			boot cd{:--:}OSrev.iso; this image is provided for
+			convenience purposes, but should never be needed.
 
 Additionally, you may be interested in
 
@@ -37,24 +45,26 @@ OpenBSDfloppydesc(three,Each,s)
 In addition, the "tools/" directory contains some utilities that might be
 useful for the installation.
 
-DistributionDescription(ten)
+DistributionDescription(eleven)
 
-OpenBSDbase(31.0,89.1,shared)
+OpenBSDbase(32148121,92303250,shared)
 
-OpenBSDcomp(17.8,58.6,shared)
+OpenBSDcomp(18669925,60702972,shared)
 
-OpenBSDetc(1.6,6.4)
+OpenBSDetc(1694991,6532135)
 
-OpenBSDgame(2.6,6.0)
+OpenBSDgame(2597798,5994214)
 
-OpenBSDman(6.7,23.7)
+OpenBSDman(6954862,24825347)
 
-OpenBSDmisc(2.2,7.2)
+OpenBSDmisc(2245626,7365432)
 
-OpenBSDxbase(11.1,32.8)
+OpenBSDxbase(10364495,29080928)
 
-OpenBSDxfont(32.5,36.0)
+OpenBSDxetc(440889,2316085)
 
-OpenBSDxserv(15.8,41.1)
+OpenBSDxfont(32504208,36041353)
 
-OpenBSDxshare(1.7,8.4)
+OpenBSDxserv(15831441,41291357)
+
+OpenBSDxshare(1933573,9970341)

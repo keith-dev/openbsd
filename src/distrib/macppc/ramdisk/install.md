@@ -1,4 +1,4 @@
-#	$OpenBSD: install.md,v 1.24 2003/12/04 20:17:02 deraadt Exp $
+#	$OpenBSD: install.md,v 1.26 2004/07/18 01:14:04 deraadt Exp $
 #
 #
 # Copyright (c) 1996 The NetBSD Foundation, Inc.
@@ -128,7 +128,7 @@ __EOT
 
 		return
 	fi
- 
+
 	# Manual MBR setup. The user is basically on their own. Give a few
 	# hints and let the user rip.
 	cat << __EOT
@@ -137,10 +137,10 @@ __EOT
 
 A valid MBR for an OpenBSD bootable disk must contain at least:
 
-a) One DOS (id '06') partition at least 1MB in size. This is where OpenFirmware
-will look for the 'ofwboot' program used to boot OpenBSD. Consult your PowerPC
-OpenFirmware manual -and- the INSTALL.$ARCH file for directions on setting up
-this partition correctly.
+a) One DOS (id '06') partition at least 1MB in size. This is where Open
+Firmware will look for the 'ofwboot' program used to boot OpenBSD.
+Consult your PowerPC Open Firmware manual -and- the INSTALL.$ARCH file
+for directions on setting up this partition correctly.
 
 b) One OpenBSD (id 'A6') partition.
 
@@ -176,7 +176,7 @@ You must modify an existing partition to be of type "OpenBSD" and have the name
 MacOS tools before attempting to install OpenBSD.
 
 __EOT
-	
+
 	pdisk /dev/${_disk}c
 }
 
@@ -218,9 +218,9 @@ __EOT
 
 	cat << __EOT
 
-Once the machine has rebooted use OpenFirmware to boot into OpenBSD, as
-described in the INSTALL.$ARCH document. The command to boot OpenBSD will be
-something like 'boot hd:,ofwboot /bsd'.
+Once the machine has rebooted use Open Firmware to boot into OpenBSD, as
+described in the INSTALL.$ARCH document. The command to boot OpenBSD will
+be something like 'boot hd:,ofwboot /bsd'.
 
 __EOT
 }

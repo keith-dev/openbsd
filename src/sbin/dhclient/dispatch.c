@@ -1,4 +1,4 @@
-/*	$OpenBSD: dispatch.c,v 1.22 2004/03/02 18:49:21 deraadt Exp $	*/
+/*	$OpenBSD: dispatch.c,v 1.29 2004/06/22 01:10:49 canacar Exp $	*/
 
 /*
  * Copyright 2004 Henning Brauer <henning@openbsd.org>
@@ -66,8 +66,8 @@ static int interface_status(struct interface_info *ifinfo);
 void
 discover_interfaces(struct interface_info *iface)
 {
-	struct sockaddr_in foo;
 	struct ifaddrs *ifap, *ifa;
+	struct sockaddr_in foo;
 	struct ifreq *tif;
 
 	if (getifaddrs(&ifap) != 0)
@@ -80,7 +80,7 @@ discover_interfaces(struct interface_info *iface)
 			continue;
 
 		if (strcmp(iface->name, ifa->ifa_name))
-			break;
+			continue;
 
 		/*
 		 * If we have the capability, extract link information
@@ -89,6 +89,7 @@ discover_interfaces(struct interface_info *iface)
 		if (ifa->ifa_addr->sa_family == AF_LINK) {
 			struct sockaddr_dl *foo =
 			    (struct sockaddr_dl *)ifa->ifa_addr;
+
 			iface->index = foo->sdl_index;
 			iface->hw_address.hlen = foo->sdl_alen;
 			iface->hw_address.htype = HTYPE_ETHER; /* XXX */
@@ -122,7 +123,6 @@ discover_interfaces(struct interface_info *iface)
 	if_register_receive(iface);
 	if_register_send(iface);
 	add_protocol(iface->name, iface->rfdesc, got_one, iface);
-
 	freeifaddrs(ifap);
 }
 
@@ -146,7 +146,6 @@ dispatch(void)
 	struct pollfd *fds;
 	time_t howlong;
 
-	nfds = 0;
 	for (l = protocols; l; l = l->next)
 		nfds++;
 
@@ -162,6 +161,7 @@ dispatch(void)
 another:
 		if (timeouts) {
 			struct timeout *t;
+
 			if (timeouts->when <= cur_time) {
 				t = timeouts;
 				timeouts = timeouts->next;
@@ -185,10 +185,9 @@ another:
 			to_msec = -1;
 
 		/* Set up the descriptors to be polled. */
-		i = 0;
-
-		for (l = protocols; l; l = l->next) {
+		for (i = 0, l = protocols; l; l = l->next) {
 			struct interface_info *ip = l->local;
+
 			if (ip && (l->handler != got_one || !ip->dead)) {
 				fds[i].fd = l->fd;
 				fds[i].events = POLLIN;
@@ -208,8 +207,7 @@ another:
 			if (errno == EAGAIN || errno == EINTR) {
 				time(&cur_time);
 				continue;
-			}
-			else
+			} else
 				error("poll: %m");
 		}
 
@@ -220,7 +218,7 @@ another:
 		for (l = protocols; l; l = l->next) {
 			struct interface_info *ip;
 			ip = l->local;
-			if ((fds[i].revents & POLLIN)) {
+			if ((fds[i].revents & (POLLIN | POLLHUP))) {
 				fds[i].revents = 0;
 				if (ip && (l->handler != got_one ||
 				    !ip->dead))
@@ -241,7 +239,7 @@ got_one(struct protocol *l)
 	struct sockaddr_in from;
 	struct hardware hfrom;
 	struct iaddr ifrom;
-	size_t result;
+	ssize_t result;
 	union {
 		/*
 		 * Packet input buffer.  Must be as large as largest
@@ -254,13 +252,13 @@ got_one(struct protocol *l)
 
 	if ((result = receive_packet(ip, u.packbuf, sizeof(u), &from,
 	    &hfrom)) == -1) {
-		warn("receive_packet failed on %s: %s", ip->name,
+		warning("receive_packet failed on %s: %s", ip->name,
 		    strerror(errno));
 		ip->errors++;
 		if ((!interface_status(ip)) ||
 		    (ip->noifmedia && ip->errors > 20)) {
 			/* our interface has gone away. */
-			warn("Interface %s no longer appears valid.",
+			warning("Interface %s no longer appears valid.",
 			    ip->name);
 			ip->dead = 1;
 			interfaces_invalidated = 1;
@@ -297,13 +295,14 @@ interface_status(struct interface_info *ifinfo)
 		syslog(LOG_ERR, "ioctl(SIOCGIFFLAGS) on %s: %m", ifname);
 		goto inactive;
 	}
+
 	/*
 	 * if one of UP and RUNNING flags is dropped,
 	 * the interface is not active.
 	 */
-	if ((ifr.ifr_flags & (IFF_UP|IFF_RUNNING)) != (IFF_UP|IFF_RUNNING)) {
+	if ((ifr.ifr_flags & (IFF_UP|IFF_RUNNING)) != (IFF_UP|IFF_RUNNING))
 		goto inactive;
-	}
+
 	/* Next, check carrier on the interface, if possible */
 	if (ifinfo->noifmedia)
 		goto active;

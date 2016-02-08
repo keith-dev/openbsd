@@ -3,8 +3,8 @@
 # THIS FILE AUTOMATICALLY GENERATED.  DO NOT EDIT.
 # generated from:
 #
-#	OpenBSD: etc.hp300/MAKEDEV.md,v 1.19 2004/02/20 19:13:08 miod Exp 
-#	OpenBSD: MAKEDEV.common,v 1.4 2004/03/12 04:54:04 deraadt Exp 
+#	OpenBSD: etc.hp300/MAKEDEV.md,v 1.22 2004/08/03 21:46:46 miod Exp 
+#	OpenBSD: MAKEDEV.common,v 1.12 2004/08/19 07:05:20 miod Exp 
 #	OpenBSD: MAKEDEV.mi,v 1.72 2004/02/16 18:58:53 miod Exp 
 #	OpenBSD: MAKEDEV.sub,v 1.12 2004/02/20 19:13:01 miod Exp 
 #
@@ -31,22 +31,24 @@
 #	local	Configuration specific devices
 # Disks:
 #	ccd*	Concatenated disk devices
+#	cd*	ATAPI and SCSI CD-ROM drives
 #	hd*	HP300 HP-IB disks
 #	rd*	"rd" pseudo-disks
 #	sd*	SCSI disks, including flopticals
 #	vnd*	"file" pseudo-disk devices
 # Tapes:
+#	ch*	SCSI media changers
 #	ct*	HP300 HP-IB cartridge tape drives
 #	mt*	(Magnetic) 9-track reel tape drives
-#	st*	Exabyte tape
+#	st*	SCSI tape drives
 # Terminal ports:
 #	apci*	HP400 4 port serial mux interface
 #	dca*	HP200/300 single port serial interface
 #	dcm*	HP200/300 4 port serial mux interface
 # Pseudo terminals:
 #	ptm	pty master device
-#	pty*	Set of 16 master pseudo terminals
-#	tty*	Set of 16 slave pseudo terminals
+#	pty*	Set of 62 master pseudo terminals
+#	tty*	Set of 62 slave pseudo terminals
 # Console ports:
 #	grf*	Raw interface to HP300 graphics devices
 #	ite*	Terminal emulator interface to HP300 graphics devices
@@ -59,8 +61,10 @@
 #	lkm	Loadable kernel modules interface
 #	pf*	Packet Filter
 #	*random	In-kernel random data source
-#	tun*	Network tunnel driver
+#	ss*	SCSI scanners
 #	systrace*	System call tracing device
+#	tun*	Network tunnel driver
+#	uk*	Unknown SCSI devices
 #	xfs*	XFS filesystem node
 PATH=/sbin:/usr/sbin:/bin:/usr/bin
 T=$0
@@ -195,7 +199,7 @@ U=`unt $i`
 case $i in
 ramdisk)
 	R std ct0 ct1 st0 st1 hd0 hd1 hd2 hd3 hd4
-	R sd0 sd1 sd2 sd3 sd4 rd0 pty0
+	R sd0 sd1 sd2 sd3 sd4 cd0 cd1 rd0 pty0
 	R hil grf0 apci0 ite0 dca0 dcm0 dcm1
 	R bpf0 bpf1 tun0 tun1 lkm random
 	;;
@@ -311,12 +315,24 @@ xfs*)
 	M xfs$U c 51 $U 600
 	;;
 
-systrace)
-	M systrace c 50 0 644
+uk*)
+	M uk$U c 37 $U 640 operator
 	;;
 
 tun*)
 	M tun$U c 23 $U 600
+	;;
+
+systrace)
+	M systrace c 50 0 644
+	;;
+
+ss*)
+	M ss$U c 38 $(($U*16)) 640 operator
+	M nss$U c 38 $(($(($U*16))+1)) 640 operator
+	M enss$U c 38 $(($(($U*16))+3)) 640 operator
+	RMlist="$RMlist scan$U"
+	MKlist="$MKlist;umask 77;ln -s ss$U scan$U"
 	;;
 
 *random)
@@ -351,13 +367,17 @@ pty*)
 		echo bad unit for pty in: $i
 		continue
 	fi
-	set -A tbl p q r s t u v w x y z P Q R S T
-	name=${tbl[$U]}
+	set -A letters p q r s t u v w x y z P Q R S T
+	set -A suffixes 0 1 2 3 4 5 6 7 8 9 a b c d e f g h i j k l m n o p q \
+	    r s t u v w x y z A B C D E F G H I J K L M N O P Q R S T U V W X \
+	    Y Z
+
+	name=${letters[$U]}
 	n=0
-	while [ $n -lt 16 ]
+	while [ $n -lt 62 ]
 	do
-		nam=$name$(hex $n)
-		off=$(($U*16))
+		nam=$name${suffixes[$n]}
+		off=$(($U*62))
 		M tty$nam c 4 $(($off+$n))
 		M pty$nam c 5 $(($off+$n))
 		n=$(($n+1))
@@ -368,11 +388,20 @@ ptm)
 	M ptm c 52 0 666
 	;;
 
-ct*|mt*|st*)
+st*)
+	n=$(($U*16))
+	for pre in " " n e en
+	do
+		M ${pre}st$U	b 7 $n 660 operator
+		M ${pre}rst$U	c 20 $n 660 operator
+		n=$(($n+1))
+	done
+	;;
+
+ct*|mt*)
 	case $i in
 	ct*) name=ct blk=0 chr=7;;
 	mt*) name=mt blk=1 chr=16;;
-	st*) name=st blk=7 chr=20;;
 	esac
 	case $U in
 	[0-7])
@@ -392,6 +421,10 @@ ct*|mt*|st*)
 	esac
 	;;
 
+ch*)
+	M ch$U c 39 $U 660 operator
+	;;
+
 vnd*)
 	dodisk vnd $U 6 19 $U 0
 	dodisk svnd $U 6 19 $U 2048
@@ -401,16 +434,20 @@ rd*)
 	dodisk2 rd $U 8 34 $U 0
 	;;
 
+cd*)
+	dodisk2 cd $U 9 18 $U 0
+	;;
+
 local)
 	test -s $T.local && sh $T.local
 	;;
 
 all)
-	R ite0 ct0 ct1 hd0 hd1 hd2 dcm0 dcm1 dcm2 dcm3 dca0 dca1 st0
-	R st1 hil grf0 ccd0 ccd1 ccd2 ccd3 vnd0 vnd1 vnd2 vnd3 sd0 sd1
-	R sd2 sd3 sd4 rd0 tun0 tun1 tun2 tun3 bpf0 bpf1 bpf2 bpf3 bpf4
-	R bpf5 bpf6 bpf7 bpf8 bpf9 pty0 pty1 pty2 xfs0 ptm local ppi0
-	R apci0 random lkm pf systrace std fd
+	R ite0 ct0 ct1 hd0 hd1 hd2 dcm0 dcm1 dcm2 dcm3 dca0 dca1 hil
+	R grf0 ccd0 ccd1 ccd2 ccd3 vnd0 vnd1 vnd2 vnd3 sd0 sd1 sd2 sd3
+	R sd4 cd0 cd1 rd0 tun0 tun1 tun2 tun3 bpf0 bpf1 bpf2 bpf3 bpf4
+	R bpf5 bpf6 bpf7 bpf8 bpf9 pty0 xfs0 ss0 ch0 ptm local ppi0
+	R apci0 uk0 random lkm pf systrace std st0 st1 fd
 	;;
 
 sd*|hd*|ccd*)

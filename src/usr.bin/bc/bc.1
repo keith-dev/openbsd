@@ -1,4 +1,4 @@
-.\"	$OpenBSD: bc.1,v 1.15 2003/12/02 09:00:48 otto Exp $
+.\"	$OpenBSD: bc.1,v 1.17 2004/08/25 21:59:59 jmc Exp $
 .\"
 .\" Copyright (C) Caldera International Inc.  2001-2002.
 .\" All rights reserved.
@@ -172,9 +172,9 @@ The boolean operators (!, && and ||) are non-portable extensions.
 The boolean not
 (!) operator has much lower precedence than the same operator in the
 C language.
-This has the consquence that the expression
+This has the consequence that the expression
 .Sy !a < b
-is interpeted as
+is interpreted as
 .Sy !(a < b) .
 Prudent programmers use parentheses when writing expressions involving
 boolean operators.
@@ -331,12 +331,9 @@ option is specified on the command line.
 .El
 .Sh SEE ALSO
 .Xr dc 1
-.Rs
-.%B USD:06
-.%A L. L. Cherry
-.%A R. Morris
-.%T "BC \- An arbitrary precision desk-calculator language"
-.Re
+.Pp
+"BC \- An Arbitrary Precision Desk-Calculator Language",
+.Pa /usr/share/doc/usd/06.bc/ .
 .Sh STANDARDS
 The
 .Nm

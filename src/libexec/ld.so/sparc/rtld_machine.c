@@ -1,4 +1,4 @@
-/*	$OpenBSD: rtld_machine.c,v 1.20 2003/09/04 19:37:08 drahn Exp $ */
+/*	$OpenBSD: rtld_machine.c,v 1.23 2004/05/25 21:42:48 mickey Exp $ */
 
 /*
  * Copyright (c) 1999 Dale Rahn
@@ -43,17 +43,6 @@
 #include "syscall.h"
 #include "archdep.h"
 #include "resolve.h"
-
-void
-_dl_bcopy(const void *src, void *dest, int size)
-{
-	const unsigned char *psrc = src;
-	unsigned char *pdest = dest;
-	int i;
-
-	for (i = 0; i < size; i++)
-		pdest[i] = psrc[i];
-}
 
 /*
  * The following table holds for each relocation type:
@@ -253,7 +242,7 @@ _dl_md_reloc(elf_object_t *object, int rel, int relasz)
 				this = NULL;
 				ooff = _dl_find_symbol_bysym(object,
 				    ELF_R_SYM(relas->r_info),
-				    _dl_objects, &this,
+				    _dl_objects, &this, NULL,
 				    SYM_SEARCH_ALL|SYM_WARNNOTFOUND|
 				    ((type == R_TYPE(JMP_SLOT)) ?
 					SYM_PLT : SYM_NOTPLT),
@@ -280,7 +269,7 @@ resolve_failed:
 			Elf_Addr soff;
 
 			soff = _dl_find_symbol(symn, object->next, &srcsym,
-			    SYM_SEARCH_ALL|SYM_WARNNOTFOUND|
+			    NULL, SYM_SEARCH_ALL|SYM_WARNNOTFOUND|
 			    ((type == R_TYPE(JMP_SLOT)) ? SYM_PLT : SYM_NOTPLT),
 			    size, object);
 			if (srcsym == NULL)
@@ -341,7 +330,7 @@ _dl_bind(elf_object_t *object, int reloff)
 
 	addr = (Elf_Addr *)(object->load_offs + rela->r_offset);
 	this = NULL;
-	ooff = _dl_find_symbol(symn, _dl_objects, &this,
+	ooff = _dl_find_symbol(symn, _dl_objects, &this, NULL,
 	    SYM_SEARCH_ALL|SYM_WARNNOTFOUND|SYM_PLT, sym->st_size, object);
 	if (this == NULL) {
 		_dl_printf("lazy binding failed!\n");
@@ -392,9 +381,9 @@ _dl_md_reloc_got(elf_object_t *object, int lazy)
 		 * The second entry holds the object identification.
 		 * Note: each PLT entry is three words long.
 		 */
-#define SAVE    0x9de3bfc0      /* i.e. `save %sp,-64,%sp' */
-#define CALL    0x40000000
-#define NOP     0x01000000
+#define SAVE	0x9de3bfc0	/* i.e. `save %sp,-64,%sp' */
+#define CALL	0x40000000
+#define NOP	0x01000000
 		pltgot[0] = SAVE;
 		pltgot[1] = CALL |
 		    ((Elf_Addr)&_dl_bind_start - (Elf_Addr)&pltgot[1]) >> 2;
@@ -413,13 +402,13 @@ _dl_md_reloc_got(elf_object_t *object, int lazy)
 	object->got_addr = NULL;
 	object->got_size = 0;
 	this = NULL;
-	ooff = _dl_find_symbol("__got_start", object, &this,
+	ooff = _dl_find_symbol("__got_start", object, &this, NULL,
 	    SYM_SEARCH_SELF|SYM_NOWARNNOTFOUND|SYM_PLT, 0, object);
 	if (this != NULL)
 		object->got_addr = ooff + this->st_value;
 
 	this = NULL;
-	ooff = _dl_find_symbol("__got_end", object, &this,
+	ooff = _dl_find_symbol("__got_end", object, &this, NULL,
 	    SYM_SEARCH_SELF|SYM_NOWARNNOTFOUND|SYM_PLT, 0, object);
 	if (this != NULL)
 		object->got_size = ooff + this->st_value  - object->got_addr;
@@ -427,13 +416,13 @@ _dl_md_reloc_got(elf_object_t *object, int lazy)
 	plt_addr = 0;
 	object->plt_size = 0;
 	this = NULL;
-	ooff = _dl_find_symbol("__plt_start", object, &this,
+	ooff = _dl_find_symbol("__plt_start", object, &this, NULL,
 	    SYM_SEARCH_SELF|SYM_NOWARNNOTFOUND|SYM_PLT, 0, object);
 	if (this != NULL)
 		plt_addr = ooff + this->st_value;
 
 	this = NULL;
-	ooff = _dl_find_symbol("__plt_end", object, &this,
+	ooff = _dl_find_symbol("__plt_end", object, &this, NULL,
 	    SYM_SEARCH_SELF|SYM_NOWARNNOTFOUND|SYM_PLT, 0, object);
 	if (this != NULL)
 		object->plt_size = ooff + this->st_value  - plt_addr;
@@ -494,7 +483,7 @@ _dl_mul_fixup()
 	size_t len;
 
 
-        mib[0] = CTL_MACHDEP;
+	mib[0] = CTL_MACHDEP;
 	mib[1] = CPU_V8MUL;
 	len = sizeof(v8mul);
 	_dl_sysctl(mib, 2, &v8mul, &len, NULL, 0);

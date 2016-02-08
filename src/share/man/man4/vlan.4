@@ -1,4 +1,4 @@
-.\" $OpenBSD: vlan.4,v 1.20 2003/12/08 10:03:43 markus Exp $
+.\" $OpenBSD: vlan.4,v 1.23 2004/08/17 23:58:36 jaredy Exp $
 .\"
 .\" Copyright (c) 2000 The NetBSD Foundation, Inc.
 .\" All rights reserved.
@@ -51,7 +51,7 @@ conjunction with IEEE 802.1Q-compliant Ethernet devices.
 A
 .Nm
 interface can be created at runtime using the
-.Ic ifconfig vlanN create
+.Ic ifconfig vlan Ns Ar N Ic create
 command or by setting up a
 .Xr hostname.if 5
 configuration file for
@@ -82,13 +82,6 @@ the canonical field (always 0), and 12 bits for the vlan identifier.
 Following the vlan header is the actual ether type for the frame and length
 information.
 .Pp
-The network interfaces are named
-.Sy vlan Ns Ar 0 ,
-.Sy vlan Ns Ar 1 ,
-etc.
-The number of interfaces is given by the corresponding
-.Sy pseudo-device
-line in the system config file.
 .Nm
 interfaces support the following unique
 .Xr ioctl 2 Ns s :
@@ -146,7 +139,9 @@ and
 .Xr inet 4 ,
 .Xr ip 4 ,
 .Xr netintro 4 ,
-.Xr ifconfig 8
+.Xr hostname.if 5 ,
+.Xr ifconfig 8 ,
+.Xr netstart 8
 .Rs
 .%T IEEE 802.1Q standard
 .%O http://standards.ieee.org/getieee802/802.1.html

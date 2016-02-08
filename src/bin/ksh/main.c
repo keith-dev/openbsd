@@ -1,4 +1,4 @@
-/*	$OpenBSD: main.c,v 1.26 2004/01/08 05:43:14 jmc Exp $	*/
+/*	$OpenBSD: main.c,v 1.28 2004/08/23 14:56:32 millert Exp $	*/
 
 /*
  * startup, main loop, environments and error handling
@@ -254,7 +254,7 @@ main(int argc, char *argv[])
 	}
 	ppid = getppid();
 	setint(global("PPID"), (long) ppid);
-#ifdef KSH
+#if defined(KSH) && !defined(__OpenBSD__)
 	setint(global("RANDOM"), (long) (time((time_t *)0) * kshpid * ppid));
 #endif /* KSH */
 	/* setstr can't fail here */
@@ -731,7 +731,8 @@ quitenv()
 				 * Don't do it for SIGQUIT, since we'd
 				 * dump a core..
 				 */
-				if (sig == SIGINT || sig == SIGTERM) {
+				if ((sig == SIGINT || sig == SIGTERM) &&
+				    getpgrp() == kshpid) {
 					setsig(&sigtraps[sig], SIG_DFL,
 						SS_RESTORE_CURR|SS_FORCE);
 					kill(0, sig);

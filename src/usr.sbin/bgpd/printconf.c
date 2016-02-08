@@ -1,4 +1,4 @@
-/*	$OpenBSD: printconf.c,v 1.12 2004/03/17 12:40:38 claudio Exp $	*/
+/*	$OpenBSD: printconf.c,v 1.29 2004/08/24 15:50:16 claudio Exp $	*/
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -17,6 +17,7 @@
  */
 
 #include <stdio.h>
+#include <string.h>
 
 #include "bgpd.h"
 #include "mrt.h"
@@ -26,7 +27,9 @@ void		 print_op(enum comp_ops);
 void		 print_set(struct filter_set *);
 void		 print_mainconf(struct bgpd_config *);
 void		 print_network(struct network_config *);
-void		 print_peer(struct peer_config *);
+void		 print_peer(struct peer_config *, struct bgpd_config *);
+const char	*print_auth_alg(u_int8_t);
+const char	*print_enc_alg(u_int8_t);
 void		 print_rule(struct peer *, struct filter_rule *);
 const char *	 mrt_type(enum mrt_type);
 void		 print_mrt(u_int32_t, u_int32_t, const char *);
@@ -75,7 +78,11 @@ print_set(struct filter_set *set)
 		if (set->flags & SET_MED)
 			printf("med %u ", set->med);
 		if (set->flags & SET_NEXTHOP)
-			printf("nexthop %s ", inet_ntoa(set->nexthop));
+			printf("nexthop %s ", log_addr(&set->nexthop));
+		if (set->flags & SET_NEXTHOP_REJECT)
+			printf("nexthop reject ");
+		if (set->flags & SET_NEXTHOP_BLACKHOLE)
+			printf("nexthop blackhole ");
 		if (set->flags & SET_PREPEND)
 			printf("prepend-self %u ", set->prepend);
 		printf("}");
@@ -85,7 +92,8 @@ print_set(struct filter_set *set)
 void
 print_mainconf(struct bgpd_config *conf)
 {
-	struct in_addr	ina;
+	struct in_addr		 ina;
+	struct listen_addr	*la;
 
 	printf("AS %u\n", conf->as);
 	ina.s_addr = conf->bgpid;
@@ -106,8 +114,9 @@ print_mainconf(struct bgpd_config *conf)
 	if (conf->log & BGPD_LOG_UPDATES)
 		printf("log updates\n");
 
-	if (conf->listen_addr.sin_addr.s_addr != INADDR_ANY)
-		printf("listen-on %s\n", inet_ntoa(conf->listen_addr.sin_addr));
+	TAILQ_FOREACH(la, conf->listen_addrs, entry)
+		printf("listen on %s\n",
+		    log_sockaddr((struct sockaddr *)&la->sa));
 }
 
 void
@@ -121,11 +130,13 @@ print_network(struct network_config *n)
 }
 
 void
-print_peer(struct peer_config *p)
+print_peer(struct peer_config *p, struct bgpd_config *conf)
 {
 	const char	*tab	= "\t";
 	const char	*nada	= "";
 	const char	*c;
+	char		*method;
+	struct in_addr	 ina;
 
 	if (p->group[0]) {
 		printf("group \"%s\" {\n", p->group);
@@ -133,10 +144,16 @@ print_peer(struct peer_config *p)
 	} else
 		c = nada;
 
-	printf("%sneighbor %s {\n", c, log_addr(&p->remote_addr));
+	if ((p->remote_addr.af == AF_INET && p->remote_masklen != 32) ||
+	    (p->remote_addr.af == AF_INET6 && p->remote_masklen != 128))
+		printf("%sneighbor %s/%u {\n", c, log_addr(&p->remote_addr),
+		    p->remote_masklen);
+	else
+		printf("%sneighbor %s {\n", c, log_addr(&p->remote_addr));
 	if (p->descr[0])
 		printf("%s\tdescr \"%s\"\n", c, p->descr);
-	printf("%s\tremote-as %u\n", c, p->remote_as);
+	if (p->remote_as)
+		printf("%s\tremote-as %u\n", c, p->remote_as);
 	if (p->distance > 1)
 		printf("%s\tmultihop %u\n", c, p->distance);
 	if (p->passive)
@@ -157,10 +174,49 @@ print_peer(struct peer_config *p)
 		printf("%s\tannounce none\n", c);
 	else if (p->announce_type == ANNOUNCE_ALL)
 		printf("%s\tannounce all\n", c);
+	else if (p->announce_type == ANNOUNCE_DEFAULT_ROUTE)
+		printf("%s\tannounce default-route\n", c);
 	else
 		printf("%s\tannounce ???\n", c);
-	if (p->tcp_md5_key[0])
+	if (p->enforce_as == ENFORCE_AS_ON)
+		printf("%s\tenforce neighbor-as yes\n", c);
+	else
+		printf("%s\tenforce neighbor-as no\n", c);
+	if (p->reflector_client) {
+		if (conf->clusterid == 0)
+			printf("%s\troute-reflector\n", c);
+		else {
+			ina.s_addr = conf->clusterid;
+			printf("%s\troute-reflector %s\n", c,
+			    inet_ntoa(ina));
+		}
+	}
+
+	if (p->auth.method == AUTH_MD5SIG)
 		printf("%s\ttcp md5sig\n", c);
+	else if (p->auth.method == AUTH_IPSEC_MANUAL_ESP ||
+	    p->auth.method == AUTH_IPSEC_MANUAL_AH) {
+		if (p->auth.method == AUTH_IPSEC_MANUAL_ESP)
+			method = "esp";
+		else
+			method = "ah";
+
+		printf("%s\tipsec %s in spi %u %s XXXXXX", c, method,
+		    p->auth.spi_in, print_auth_alg(p->auth.auth_alg_in));
+		if (p->auth.enc_alg_in)
+			printf(" %s XXXXXX", print_enc_alg(p->auth.enc_alg_in));
+		printf("\n");
+
+		printf("%s\tipsec %s out spi %u %s XXXXXX", c, method,
+		    p->auth.spi_out, print_auth_alg(p->auth.auth_alg_out));
+		if (p->auth.enc_alg_out)
+			printf(" %s XXXXXX",
+			    print_enc_alg(p->auth.enc_alg_out));
+		printf("\n");
+	} else if (p->auth.method == AUTH_IPSEC_IKE_AH)
+		printf("%s\tipsec ah ike\n", c);
+	else if (p->auth.method == AUTH_IPSEC_IKE_ESP)
+		printf("%s\tipsec esp ike\n", c);
 
 	if (p->attrset.flags)
 		printf("%s\t", c);
@@ -173,6 +229,32 @@ print_peer(struct peer_config *p)
 	printf("%s}\n", c);
 	if (p->group[0])
 		printf("}\n");
+}
+
+const char *
+print_auth_alg(u_int8_t alg)
+{
+	switch (alg) {
+	case SADB_AALG_SHA1HMAC:
+		return ("sha1");
+	case SADB_AALG_MD5HMAC:
+		return ("md5");
+	default:
+		return ("???");
+	}
+}
+
+const char *
+print_enc_alg(u_int8_t alg)
+{
+	switch (alg) {
+	case SADB_EALG_3DESCBC:
+		return ("3des");
+	case SADB_X_EALG_AES:
+		return ("aes");
+	default:
+		return ("???");
+	}
 }
 
 void
@@ -237,11 +319,11 @@ print_rule(struct peer *peer_l, struct filter_rule *r)
 		if (r->match.as.type == AS_ALL)
 			printf("AS %u ", r->match.as.as);
 		else if (r->match.as.type == AS_SOURCE)
-			printf("source-AS %u ", r->match.as.as);
+			printf("source-as %u ", r->match.as.as);
 		else if (r->match.as.type == AS_TRANSIT)
-			printf("transit-AS %u ", r->match.as.as);
+			printf("transit-as %u ", r->match.as.as);
 		else
-			printf("unfluffy-AS %u ", r->match.as.as);
+			printf("unfluffy-as %u ", r->match.as.as);
 	}
 
 	if (r->match.community.as != 0) {
@@ -266,9 +348,11 @@ mrt_type(enum mrt_type t)
 {
 	switch (t) {
 	case MRT_NONE:
-		return "unfluffy MRT";
+		break;
 	case MRT_TABLE_DUMP:
 		return "table";
+	case MRT_TABLE_DUMP_MP:
+		return "table-mp";
 	case MRT_ALL_IN:
 		return "all in";
 	case MRT_ALL_OUT:
@@ -291,16 +375,17 @@ print_mrt(u_int32_t pid, u_int32_t gid, const char *prep)
 	if (xmrt_l == NULL)
 		return;
 
-	LIST_FOREACH(m, xmrt_l, list)
-		if ((gid != 0 && m->conf.group_id == gid) ||
-		    (m->conf.peer_id == pid && m->conf.group_id == gid)) {
-			if (m->ReopenTimerInterval == 0)
+	LIST_FOREACH(m, xmrt_l, entry)
+		if ((gid != 0 && m->group_id == gid) ||
+		    (m->peer_id == pid && m->group_id == gid)) {
+			if (MRT2MC(m)->ReopenTimerInterval == 0)
 				printf("%sdump %s %s\n", prep,
-				    mrt_type(m->conf.type), m->name);
+				    mrt_type(m->type), MRT2MC(m)->name);
 			else
 				printf("%sdump %s %s %d\n", prep,
-				    mrt_type(m->conf.type),
-				    m->name, m->ReopenTimerInterval);
+				    mrt_type(m->type),
+				    MRT2MC(m)->name,
+				    MRT2MC(m)->ReopenTimerInterval);
 		}
 }
 
@@ -317,12 +402,12 @@ print_config(struct bgpd_config *conf, struct network_head *net_l,
 	printf("\n");
 	print_mrt(0, 0, "");
 	printf("\n");
-	TAILQ_FOREACH(n, net_l, network_l)
+	TAILQ_FOREACH(n, net_l, entry)
 		print_network(&n->net);
 	printf("\n");
 	for (p = peer_l; p != NULL; p = p->next)
-		print_peer(&p->conf);
+		print_peer(&p->conf, conf);
 	printf("\n");
-	TAILQ_FOREACH(r, rules_l, entries)
+	TAILQ_FOREACH(r, rules_l, entry)
 		print_rule(peer_l, r);
 }

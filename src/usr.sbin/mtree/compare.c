@@ -1,5 +1,5 @@
 /*	$NetBSD: compare.c,v 1.11 1996/09/05 09:56:48 mycroft Exp $	*/
-/*	$OpenBSD: compare.c,v 1.17 2003/06/02 23:36:54 millert Exp $	*/
+/*	$OpenBSD: compare.c,v 1.19 2004/08/01 18:32:20 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 1989, 1993
@@ -34,7 +34,7 @@
 #if 0
 static const char sccsid[] = "@(#)compare.c	8.1 (Berkeley) 6/6/93";
 #else
-static const char rcsid[] = "$OpenBSD: compare.c,v 1.17 2003/06/02 23:36:54 millert Exp $";
+static const char rcsid[] = "$OpenBSD: compare.c,v 1.19 2004/08/01 18:32:20 deraadt Exp $";
 #endif
 #endif /* not lint */
 
@@ -79,10 +79,7 @@ static char *ftype(u_int);
 	} while (0)							\
 
 int
-compare(name, s, p)
-	char *name;
-	NODE *s;
-	FTSENT *p;
+compare(char *name, NODE *s, FTSENT *p)
 {
 	u_int32_t len, val;
 	int fd, label;
@@ -251,7 +248,7 @@ typeerr:		LABEL;
 		}
 	}
 	if (s->flags & F_MD5) {
-		char *new_digest, buf[33];
+		char *new_digest, buf[MD5_DIGEST_STRING_LENGTH];
 
 		new_digest = MD5File(p->fts_accpath, buf);
 		if (!new_digest) {
@@ -343,8 +340,7 @@ typeerr:		LABEL;
 }
 
 char *
-inotype(type)
-	u_int type;
+inotype(u_int type)
 {
 	switch(type & S_IFMT) {
 	case S_IFBLK:
@@ -368,8 +364,7 @@ inotype(type)
 }
 
 static char *
-ftype(type)
-	u_int type;
+ftype(u_int type)
 {
 	switch(type) {
 	case F_BLOCK:
@@ -393,8 +388,7 @@ ftype(type)
 }
 
 char *
-rlink(name)
-	char *name;
+rlink(char *name)
 {
 	static char lbuf[MAXPATHLEN];
 	int len;

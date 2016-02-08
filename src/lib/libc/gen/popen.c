@@ -31,7 +31,7 @@
  */
 
 #if defined(LIBC_SCCS) && !defined(lint)
-static char rcsid[] = "$OpenBSD: popen.c,v 1.13 2003/06/02 20:18:34 millert Exp $";
+static char rcsid[] = "$OpenBSD: popen.c,v 1.15 2004/08/06 18:31:11 pedro Exp $";
 #endif /* LIBC_SCCS and not lint */
 
 #include <sys/param.h>
@@ -52,9 +52,7 @@ static struct pid {
 } *pidlist; 
 	
 FILE *
-popen(program, type)
-	const char *program;
-	const char *type;
+popen(const char *program, const char *type)
 {
 	struct pid * volatile cur;
 	FILE *iop;
@@ -141,21 +139,21 @@ popen(program, type)
  *	if already `pclosed', or waitpid returns an error.
  */
 int
-pclose(iop)
-	FILE *iop;
+pclose(FILE *iop)
 {
 	register struct pid *cur, *last;
 	int pstat;
 	pid_t pid;
 
-	(void)fclose(iop);
-
 	/* Find the appropriate file pointer. */
 	for (last = NULL, cur = pidlist; cur; last = cur, cur = cur->next)
 		if (cur->fp == iop)
 			break;
+
 	if (cur == NULL)
 		return (-1);
+
+	(void)fclose(iop);
 
 	do {
 		pid = waitpid(cur->pid, &pstat, 0);

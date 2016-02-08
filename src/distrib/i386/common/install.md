@@ -1,4 +1,4 @@
-#	$OpenBSD: install.md,v 1.22 2004/03/03 02:19:26 krw Exp $
+#	$OpenBSD: install.md,v 1.24 2004/09/12 21:01:27 deraadt Exp $
 #
 #
 # Copyright (c) 1996 The NetBSD Foundation, Inc.
@@ -42,6 +42,8 @@
 MDFSTYPE=msdos
 MDFSOPTS=-s
 MDXAPERTURE=2
+MDSERIAL="pccom com tty0"
+
 ARCH=ARCH
 
 md_set_term() {
@@ -55,7 +57,7 @@ md_set_term() {
 		case $resp in
 		P*|p*)  _tables="be br de dk es fr it jp lt no pt ru sf sg sv ua uk us"
 			;;
-		U*|u*)	_tables="br de dk es fr it jp no sf sg sv uk us"
+		U*|u*)	_tables="be br de dk es fr it jp no sf sg sv uk us"
 			;;
 		done)	;;
 		*)	echo "'$resp' is not a valid keyboard type."

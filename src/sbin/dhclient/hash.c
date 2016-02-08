@@ -1,4 +1,4 @@
-/*	$OpenBSD: hash.c,v 1.5 2004/02/07 13:59:45 henning Exp $	*/
+/*	$OpenBSD: hash.c,v 1.9 2004/05/10 15:30:47 deraadt Exp $	*/
 
 /* Routines for manipulating hash tables... */
 
@@ -47,7 +47,8 @@ static int do_hash(unsigned char *, int, int);
 struct hash_table *
 new_hash(void)
 {
-	struct hash_table *rv = new_hash_table(DEFAULT_HASH_SIZE, "new_hash");
+	struct hash_table *rv = new_hash_table(DEFAULT_HASH_SIZE);
+
 	if (!rv)
 		return (rv);
 	memset(&rv->buckets[0], 0,
@@ -58,9 +59,8 @@ new_hash(void)
 static int
 do_hash(unsigned char *name, int len, int size)
 {
-	int accum = 0;
 	unsigned char *s = name;
-	int i = len;
+	int accum = 0, i = len;
 
 	while (i--) {
 		/* Add the character in... */
@@ -75,8 +75,8 @@ do_hash(unsigned char *name, int len, int size)
 void add_hash(struct hash_table *table, unsigned char *name, int len,
     unsigned char *pointer)
 {
-	int hashno;
 	struct hash_bucket *bp;
+	int hashno;
 
 	if (!table)
 		return;
@@ -84,10 +84,10 @@ void add_hash(struct hash_table *table, unsigned char *name, int len,
 		len = strlen((char *)name);
 
 	hashno = do_hash(name, len, table->hash_count);
-	bp = new_hash_bucket("add_hash");
+	bp = new_hash_bucket();
 
 	if (!bp) {
-		warn("Can't add %s to hash table.", name);
+		warning("Can't add %s to hash table.", name);
 		return;
 	}
 	bp->name = name;
@@ -97,43 +97,11 @@ void add_hash(struct hash_table *table, unsigned char *name, int len,
 	table->buckets[hashno] = bp;
 }
 
-void
-delete_hash_entry(struct hash_table *table, unsigned char *name, int len)
-{
-	int hashno;
-	struct hash_bucket *bp, *pbp = NULL;
-
-	if (!table)
-		return;
-	if (!len)
-		len = strlen((char *)name);
-
-	hashno = do_hash(name, len, table->hash_count);
-
-	/*
-	 * Go through the list looking for an entry that matches; if we
-	 * find it, delete it.
-	 */
-	for (bp = table->buckets[hashno]; bp; bp = bp->next) {
-		if ((!bp->len &&
-		    !strcmp((char *)bp->name, (char *)name)) ||
-		    (bp->len == len && !memcmp(bp->name, name, len))) {
-			if (pbp)
-				pbp->next = bp->next;
-			else
-				table->buckets[hashno] = bp->next;
-			free_hash_bucket(bp, "delete_hash_entry");
-			break;
-		}
-		pbp = bp;	/* jwg, 9/6/96 - nice catch! */
-	}
-}
-
 unsigned char *
 hash_lookup(struct hash_table *table, unsigned char *name, int len)
 {
-	int hashno;
 	struct hash_bucket *bp;
+	int hashno;
 
 	if (!table)
 		return (NULL);

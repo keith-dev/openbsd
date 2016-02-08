@@ -1,6 +1,6 @@
-.\"	$OpenBSD: rmd160.3,v 1.20 2003/06/25 19:33:34 deraadt Exp $
+.\"	$OpenBSD: rmd160.3,v 1.28 2004/08/24 20:10:33 millert Exp $
 .\"
-.\" Copyright (c) 1997 Todd C. Miller <Todd.Miller@courtesan.com>
+.\" Copyright (c) 1997, 2004 Todd C. Miller <Todd.Miller@courtesan.com>
 .\"
 .\" Permission to use, copy, modify, and distribute this software for any
 .\" purpose with or without fee is hereby granted, provided that the above
@@ -17,16 +17,18 @@
 .\" See http://www.esat.kuleuven.ac.be/~bosselae/ripemd160.html
 .\"	for detailed information about RIPEMD-160.
 .\"
-.Dd July 16, 1997
+.Dd April 29, 2004
 .Dt RMD160 3
 .Os
 .Sh NAME
 .Nm RMD160Init ,
 .Nm RMD160Update ,
+.Nm RMD160Pad ,
 .Nm RMD160Final ,
 .Nm RMD160Transform ,
 .Nm RMD160End ,
 .Nm RMD160File ,
+.Nm RMD160FileChunk ,
 .Nm RMD160Data
 .Nd calculate the ``RIPEMD-160'' message digest
 .Sh SYNOPSIS
@@ -35,17 +37,21 @@
 .Ft void
 .Fn RMD160Init "RMD160_CTX *context"
 .Ft void
-.Fn RMD160Update "RMD160_CTX *context" "const u_char *data" "u_int32_t nbytes"
+.Fn RMD160Update "RMD160_CTX *context" "const u_int8_t *data" "u_int32_t nbytes"
 .Ft void
-.Fn RMD160Final "u_char digest[20]" "RMD160_CTX *context"
+.Fn RMD160Pad "RMD160_CTX *context"
 .Ft void
-.Fn RMD160Transform "u_int32_t state[5]" "const u_char block[64]"
+.Fn RMD160Final "u_int8_t digest[RMD160_DIGEST_LENGTH]" "RMD160_CTX *context"
+.Ft void
+.Fn RMD160Transform "u_int32_t state[5]" "const u_int8_t block[RMD160_BLOCK_LENGTH]"
 .Ft "char *"
 .Fn RMD160End "RMD160_CTX *context" "char *buf"
 .Ft "char *"
-.Fn RMD160File "char *filename" "char *buf"
+.Fn RMD160File "const char *filename" "char *buf"
 .Ft "char *"
-.Fn RMD160Data "const u_char *data" "size_t len" "char *buf"
+.Fn RMD160FileChunk "const char *filename" "char *buf" "off_t offset" "off_t length"
+.Ft "char *"
+.Fn RMD160Data "const u_int8_t *data" "size_t len" "char *buf"
 .Sh DESCRIPTION
 The RMD160 functions implement the 160-bit RIPE message digest hash algorithm
 (RMD-160).
@@ -86,10 +92,12 @@ is called when all data has been added via
 and stores a message digest in the
 .Ar digest
 parameter.
-When a null pointer is passed to
-.Fn RMD160Final
-as first argument only the final padding will be applied and the
-current context can still be used with
+.Pp
+The
+.Fn RMD160Pad
+function can be used to apply padding to the message digest as in
+.Fn RMD160Final ,
+but the current context can still be used with
 .Fn RMD160Update .
 .Pp
 The
@@ -122,6 +130,23 @@ If
 .Fn RMD160File
 is unable to open the file a NULL pointer is returned.
 .Pp
+.Fn RMD160FileChunk
+behaves like
+.Fn RMD160File
+but calculates the digest only for that portion of the file starting at
+.Fa offset
+and continuing for
+.Fa length
+bytes or until end of file is reached, whichever comes first.
+A zero
+.Fa length
+can be specified to read until end of file.
+A negative
+.Fa length
+or
+.Fa offset
+will be ignored.
+.Pp
 The
 .Fn RMD160Data
 function
@@ -147,19 +172,19 @@ The follow code fragment will calculate the digest for
 the string "abc" which is ``0x8eb208f7e05d987a9b044a8e98c6b087f15a0bfc''.
 .Bd -literal -offset indent
 RMD160_CTX rmd;
-u_char results[20];
+u_int8_t results[RMD160_DIGEST_LENGTH];
 char *buf;
 int n;
 
 buf = "abc";
 n = strlen(buf);
 RMD160Init(&rmd);
-RMD160Update(&rmd, (u_char *)buf, n);
+RMD160Update(&rmd, (u_int8_t *)buf, n);
 RMD160Final(results, &rmd);
 
 /* Print the digest as one long hex value */
 printf("0x");
-for (n = 0; n < 20; n++)
+for (n = 0; n < RMD160_DIGEST_LENGTH; n++)
 	printf("%02x", results[n]);
 putchar('\en');
 .Ed
@@ -167,16 +192,18 @@ putchar('\en');
 Alternately, the helper functions could be used in the following way:
 .Bd -literal -offset indent
 RMD160_CTX rmd;
-u_char output[41];
+u_int8_t output[RMD160_DIGEST_STRING_LENGTH];
 char *buf = "abc";
 
 printf("0x%s\en", RMD160Data(buf, strlen(buf), output));
 .Ed
 .Sh SEE ALSO
+.Xr cksum 1 ,
 .Xr rmd160 1 ,
 .Xr md4 3 ,
 .Xr md5 3 ,
-.Xr sha1 3
+.Xr sha1 3 ,
+.Xr sha2 3
 .Rs
 .%A H. Dobbertin, A. Bosselaers, B. Preneel
 .%T RIPEMD-160, a strengthened version of RIPEMD
@@ -202,6 +229,7 @@ This implementation of RMD-160 was written by Markus Friedl.
 The
 .Fn RMD160End ,
 .Fn RMD160File ,
+.Fn RMD160FileChunk ,
 and
 .Fn RMD160Data
 helper functions are derived from code written by Poul-Henning Kamp.

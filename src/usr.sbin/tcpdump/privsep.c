@@ -1,4 +1,4 @@
-/*	$OpenBSD: privsep.c,v 1.5 2004/03/14 19:17:05 otto Exp $	*/
+/*	$OpenBSD: privsep.c,v 1.11 2004/07/14 19:07:03 henning Exp $	*/
 
 /*
  * Copyright (c) 2003 Can Erkin Acar
@@ -81,7 +81,7 @@ static void	parent_open_bpf(int, int *);
 static void	parent_open_dump(int, const char *);
 static void	parent_open_output(int, const char *);
 static void	parent_setfilter(int, char *, int *);
-static void	parent_done_init(int, int *);
+static void	parent_init_done(int, int *);
 static void	parent_gethostbyaddr(int);
 static void	parent_ether_ntohost(int);
 static void	parent_getrpcbynumber(int);
@@ -176,6 +176,7 @@ priv_init(int argc, char **argv)
 
 	/* parse the arguments for required options so that the child
 	 * need not send them back */
+	opterr = 0;
 	while ((i = getopt(argc, argv,
 	    "ac:deE:fF:i:lnNOopqr:s:StT:vw:xXY")) != -1) {
 		switch (i) {
@@ -231,9 +232,9 @@ priv_init(int argc, char **argv)
 			test_state(STATE_INIT, STATE_FILTER);
 			parent_setfilter(socks[0], cmdbuf, &bpfd);
 			break;
-		case PRIV_DONE_INIT:
+		case PRIV_INIT_DONE:
 			test_state(STATE_FILTER, STATE_RUN);
-			parent_done_init(socks[0], &bpfd);
+			parent_init_done(socks[0], &bpfd);
 			break;
 		case PRIV_GETHOSTBYADDR:
 			test_state(STATE_RUN, STATE_RUN);
@@ -301,7 +302,7 @@ parent_open_bpf(int fd, int *bpfd)
 static void
 parent_open_dump(int fd, const char *RFileName)
 {
-	int file, err;
+	int file, err = 0;
 
 	logmsg(LOG_DEBUG, "[priv]: msg PRIV_OPEN_DUMP received");
 
@@ -317,7 +318,8 @@ parent_open_dump(int fd, const char *RFileName)
 	}
 	send_fd(fd, file);
 	must_write(fd, &err, sizeof(int));
-	close(file);
+	if (file >= 0)
+		close(file);
 }
 
 static void
@@ -329,13 +331,13 @@ parent_open_output(int fd, const char *WFileName)
 
 	file = open(WFileName, O_WRONLY|O_CREAT|O_TRUNC, 0666);
 	err = errno;
-	if (file < 0)
-		logmsg(LOG_DEBUG, "[priv]: failed to open %s: %s",
-		    WFileName, strerror(errno));
-
 	send_fd(fd, file);
 	must_write(fd, &err, sizeof(int));
-	close(file);
+	if (file < 0)
+		logmsg(LOG_DEBUG, "[priv]: failed to open %s: %s",
+		    WFileName, strerror(err));
+	else
+		close(file);
 }
 
 static void
@@ -350,11 +352,11 @@ parent_setfilter(int fd, char *cmdbuf, int *bpfd)
 }
 
 static void
-parent_done_init(int fd, int *bpfd)
+parent_init_done(int fd, int *bpfd)
 {
 	int ret;
 
-	logmsg(LOG_DEBUG, "[priv]: msg PRIV_DONE_INIT received");
+	logmsg(LOG_DEBUG, "[priv]: msg PRIV_INIT_DONE received");
 	
 	close(*bpfd);	/* done with bpf descriptor */
 	*bpfd = -1;
@@ -542,9 +544,9 @@ priv_init_done(void)
 	int ret;
 
 	if (priv_fd < 0)
-		errx(1, "%s: called from privileged portion\n", __func__);
+		errx(1, "%s: called from privileged portion", __func__);
 
-	write_command(priv_fd, PRIV_DONE_INIT);
+	write_command(priv_fd, PRIV_INIT_DONE);
 	must_read(priv_fd, &ret, sizeof(int));
 }
 
@@ -647,10 +649,9 @@ priv_getprotoentry(char *name, size_t name_len, int *num)
 }
 
 /* localtime() replacement: ask parent for localtime and gmtime, cache
- * the localtime for about one hour i.e. until one of the fields other
- * than seconds and minutes change. The check is done using gmtime
- * values since they are the same in parent and child.
- * XXX assumes timezone granularity is 1 hour.  */
+ * the localtime for about one minute i.e. until one of the fields other
+ * than seconds changes. The check is done using gmtime
+ * values since they are the same in parent and child. */
 struct	tm *
 priv_localtime(const time_t *t)
 {
@@ -661,12 +662,10 @@ priv_localtime(const time_t *t)
 	if (gt != NULL) {
 		gt = gmtime(t);
 		gt0.tm_sec = gt->tm_sec;
-		gt0.tm_min = gt->tm_min;
 		gt0.tm_zone = gt->tm_zone;
 
 		if (memcmp(gt, &gt0, sizeof(struct tm)) == 0) {
 			lt.tm_sec = gt0.tm_sec;
-			lt.tm_min = gt0.tm_min;
 			return &lt;
 		}
 	}
@@ -740,7 +739,7 @@ sig_got_chld(int sig)
 	errno = save_err;
 }
 
-/* Read all data or return 1 for error.  */
+/* Read all data or return 1 for error. */
 int
 may_read(int fd, void *buf, size_t n)
 {

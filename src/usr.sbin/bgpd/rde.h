@@ -1,4 +1,4 @@
-/*	$OpenBSD: rde.h,v 1.36 2004/03/11 17:12:51 claudio Exp $ */
+/*	$OpenBSD: rde.h,v 1.55 2004/08/13 14:03:20 claudio Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Claudio Jeker <claudio@openbsd.org> and
@@ -25,23 +25,13 @@
 
 #include "bgpd.h"
 
-/* XXX generic stuff, should be somewhere else */
-/* Address Family Numbers as per rfc1700 */
-#define AFI_IPv4	1
-#define AFI_IPv6	2
-
-/* Subsequent Address Family Identifier as per rfc2858 */
-#define SAFI_UNICAST	1
-#define SAFI_MULTICAST	2
-#define SAFI_BOTH	3
-
 /* rde internal structures */
 
 enum peer_state {
 	PEER_NONE,
 	PEER_DOWN,
 	PEER_UP,
-	PEER_ERR	/* error occured going to PEER_DOWN state */
+	PEER_ERR	/* error occurred going to PEER_DOWN state */
 };
 
 /*
@@ -73,29 +63,22 @@ struct rde_peer {
 	struct uptree_attr		 up_attrs;
 	struct uplist_attr		 updates;
 	struct uplist_prefix		 withdraws;
+	struct uplist_attr		 updates6;
+	struct uplist_prefix		 withdraws6;
 };
 
 #define AS_SET			1
 #define AS_SEQUENCE		2
-#define ASPATH_HEADER_SIZE	sizeof(struct aspath_hdr)
+#define ASPATH_HEADER_SIZE	sizeof(struct aspath)
 
-struct aspath_hdr {
-	u_int16_t			len;	/* total length of aspath
-						   in octets */
-	u_int16_t			as_cnt;	/* number of AS's in data */
-	u_int16_t			prepend;
-};
+LIST_HEAD(aspath_list, aspath);
 
 struct aspath {
-	struct aspath_hdr		hdr;
-	u_char				data[1];
-	/*
-	 * data consists of multiple struct aspath_segment with a length of
-	 * len octets. In zebra data is a pointer to some memory location with
-	 * the aspath segments. We could do it like this but then we should
-	 * remove the pointer from rde_aspath and store the aspath header
-	 * directly there.
-	 */
+	LIST_ENTRY(aspath)	entry;
+	int			refcnt;	/* reference count */
+	u_int16_t		len;	/* total length of aspath in octets */
+	u_int16_t		ascnt;	/* number of AS hops in data */
+	u_char			data[0]; /* placeholder for actual data */
 };
 
 enum attrtypes {
@@ -107,7 +90,11 @@ enum attrtypes {
 	ATTR_LOCALPREF,
 	ATTR_ATOMIC_AGGREGATE,
 	ATTR_AGGREGATOR,
-	ATTR_COMMUNITIES
+	ATTR_COMMUNITIES,
+	ATTR_ORIGINATOR_ID,
+	ATTR_CLUSTER_LIST,
+	ATTR_MP_REACH_NLRI=14,
+	ATTR_MP_UNREACH_NLRI=15
 };
 
 /* attribute flags. 4 low order bits reserved */
@@ -120,27 +107,65 @@ enum attrtypes {
 #define ATTR_WELL_KNOWN		ATTR_TRANSITIVE
 
 struct attr {
+	TAILQ_ENTRY(attr)		 entry;
 	u_int8_t			 flags;
 	u_int8_t			 type;
 	u_int16_t			 len;
 	u_char				*data;
-	TAILQ_ENTRY(attr)		 attr_l;
+};
+
+struct mpattr {
+	void		*reach;
+	u_int16_t	 reach_len;
+	void		*unreach;
+	u_int16_t	 unreach_len;
 };
 
 TAILQ_HEAD(attr_list, attr);
+
+struct path_table {
+	struct aspath_head	*path_hashtbl;
+	u_int32_t		 path_hashmask;
+};
+
+LIST_HEAD(prefix_head, prefix);
+
+#define	F_ATTR_ORIGIN		0x001
+#define	F_ATTR_ASPATH		0x002
+#define	F_ATTR_NEXTHOP		0x004
+#define	F_ATTR_LOCALPREF	0x008
+#define	F_ATTR_MED		0x010
+#define	F_ATTR_MED_ANNOUNCE	0x020
+#define	F_ATTR_MP_REACH		0x040
+#define	F_ATTR_MP_UNREACH	0x080
+#define	F_PREFIX_ANNOUNCED	0x100
+#define	F_NEXTHOP_REJECT	0x200
+#define	F_NEXTHOP_BLACKHOLE	0x400
+#define	F_ATTR_LINKED		0x800
 
 #define ORIGIN_IGP		0
 #define ORIGIN_EGP		1
 #define ORIGIN_INCOMPLETE	2
 
-struct attr_flags {
+#define DEFAULT_LPREF		100
+
+struct rde_aspath {
+	LIST_ENTRY(rde_aspath)		 path_l, peer_l, nexthop_l;
+	struct prefix_head		 prefix_h;
+	struct rde_peer			*peer;
+
+	/* path attributes */
 	struct aspath			*aspath;
-	struct in_addr			 nexthop;	/* exit nexthop */
+	struct nexthop			*nexthop;	/* may be NULL */
+	struct attr_list		 others;
 	u_int32_t			 med;		/* multi exit disc */
 	u_int32_t			 lpref;		/* local pref */
 	u_int8_t			 origin;
-	u_int8_t			 wflags;	/* internally used */
-	struct attr_list		 others;
+
+	u_int16_t			 flags;	/* internally used */
+	u_int16_t			 prefix_cnt; /* # of prefixes */
+	u_int16_t			 active_cnt; /* # of active prefixes */
+	char				 pftable[PFTABLE_LEN];
 };
 
 enum nexthop_state {
@@ -151,53 +176,54 @@ enum nexthop_state {
 
 struct nexthop {
 	LIST_ENTRY(nexthop)	nexthop_l;
-	enum nexthop_state	state;
+	struct aspath_head	path_h;
 #if 0
 	/*
 	 * currently we use the boolean nexthop state, this could be exchanged
-	 * with a variable coast with a max for unreachable.
+	 * with a variable cost with a max for unreachable.
 	 */
 	u_int32_t		costs;
 #endif
-	struct aspath_head	path_h;
+	enum nexthop_state	state;
 	struct bgpd_addr	exit_nexthop;
 	struct bgpd_addr	true_nexthop;
 	struct bgpd_addr	nexthop_net;
 	u_int8_t		nexthop_netlen;
 	u_int8_t		flags;
-#define NEXTHOP_CONNECTED	0x1
-#define NEXTHOP_ANNOUNCE	0x2
+#define NEXTHOP_CONNECTED	0x01
+#define NEXTHOP_LINKLOCAL	0x02
 };
 
-struct path_table {
-	struct aspath_head	*path_hashtbl;
-	u_int32_t		 path_hashmask;
-};
-
-LIST_HEAD(prefix_head, prefix);
-
-struct rde_aspath {
-	LIST_ENTRY(rde_aspath)		 peer_l, path_l, nexthop_l;
-	struct prefix_head		 prefix_h;
-	struct rde_peer			*peer;
-	struct nexthop			*nexthop;
-	u_int16_t			 prefix_cnt; /* # of prefixes */
-	u_int16_t			 active_cnt; /* # of active prefixes */
-	struct attr_flags		 flags;
-};
-
+/* generic entry without address specific part */
 struct pt_entry {
-	LIST_ENTRY(pt_entry)		 pt_l;	/* currently we are using a
-						   hash list for prefixes */
-	struct bgpd_addr		 prefix;
+	RB_ENTRY(pt_entry)		 pt_e;
+	sa_family_t			 af;
 	u_int8_t			 prefixlen;
 	struct prefix_head		 prefix_h;
 	struct prefix			*active; /* for fast access */
+};
+
+struct pt_entry4 {
+	RB_ENTRY(pt_entry)		 pt_e;
+	sa_family_t			 af;
+	u_int8_t			 prefixlen;
+	struct prefix_head		 prefix_h;
+	struct prefix			*active; /* for fast access */
+	struct in_addr			 prefix4;
 	/*
 	 * Route Flap Damping structures
 	 * Currently I think they belong into the prefix but for the moment
 	 * we just ignore the dampening at all.
 	 */
+};
+
+struct pt_entry6 {
+	RB_ENTRY(pt_entry)		 pt_e;
+	sa_family_t			 af;
+	u_int8_t			 prefixlen;
+	struct prefix_head		 prefix_h;
+	struct prefix			*active; /* for fast access */
+	struct in6_addr			 prefix6;
 };
 
 struct prefix {
@@ -206,73 +232,77 @@ struct prefix {
 	struct pt_entry			*prefix;
 	struct rde_peer			*peer;
 	time_t				 lastchange;
-/* currently I can't think of additional prefix flags.
- * NOTE: the selected route is stored in prefix->active */
 };
 
 /* prototypes */
 /* rde.c */
 void		 rde_send_kroute(struct prefix *, struct prefix *);
 void		 rde_send_nexthop(struct bgpd_addr *, int);
+void		 rde_send_pftable(const char *, struct bgpd_addr *,
+		     u_int8_t, int);
+void		 rde_send_pftable_commit(void);
+
 void		 rde_generate_updates(struct prefix *, struct prefix *);
 u_int16_t	 rde_local_as(void);
 int		 rde_noevaluate(void);
 
 /* rde_attr.c */
-void		 attr_init(struct attr_flags *);
-int		 attr_parse(u_char *, u_int16_t, struct attr_flags *, int,
-		     enum enforce_as, u_int16_t);
-u_char		*attr_error(u_char *, u_int16_t, struct attr_flags *,
-		     u_int8_t *, u_int16_t *);
-u_int8_t	 attr_missing(struct attr_flags *, int);
-int		 attr_compare(struct attr_flags *, struct attr_flags *);
-void		 attr_copy(struct attr_flags *, struct attr_flags *);
-void		 attr_move(struct attr_flags *, struct attr_flags *);
-void		 attr_free(struct attr_flags *);
 int		 attr_write(void *, u_int16_t, u_int8_t, u_int8_t, void *,
 		     u_int16_t);
-int		 attr_optadd(struct attr_flags *, u_int8_t, u_int8_t,
-		     u_char *, u_int16_t);
-struct attr	*attr_optget(struct attr_flags *, u_int8_t);
-void		 attr_optfree(struct attr_flags *);
+void		 attr_optcopy(struct rde_aspath *, struct rde_aspath *);
+int		 attr_optadd(struct rde_aspath *, u_int8_t, u_int8_t,
+		     void *, u_int16_t);
+struct attr	*attr_optget(const struct rde_aspath *, u_int8_t);
+void		 attr_optfree(struct rde_aspath *);
+int		 attr_mp_nexthop(u_char *, u_int16_t, u_int16_t,
+		     struct rde_aspath *);
 
 int		 aspath_verify(void *, u_int16_t);
 #define		 AS_ERR_LEN	-1
 #define		 AS_ERR_TYPE	-2
 #define		 AS_ERR_BAD	-3
-struct aspath	*aspath_create(void *, u_int16_t);
-void		 aspath_destroy(struct aspath *);
-int		 aspath_write(void *, u_int16_t, struct aspath *, u_int16_t,
-		     int);
+void		 aspath_init(u_int32_t);
+void		 aspath_shutdown(void);
+struct aspath	*aspath_get(void *, u_int16_t);
+void		 aspath_put(struct aspath *);
 u_char		*aspath_dump(struct aspath *);
 u_int16_t	 aspath_length(struct aspath *);
-u_int16_t	 aspath_count(struct aspath *);
+u_int16_t	 aspath_count(const void *, u_int16_t);
 u_int16_t	 aspath_neighbor(struct aspath *);
-u_int32_t	 aspath_hash(struct aspath *);
 int		 aspath_loopfree(struct aspath *, u_int16_t);
 int		 aspath_compare(struct aspath *, struct aspath *);
+u_int32_t	 aspath_hash(const void *, u_int16_t);
+struct aspath	*aspath_prepend(struct aspath *, u_int16_t, int);
 int		 aspath_snprint(char *, size_t, void *, u_int16_t);
 int		 aspath_asprint(char **, void *, u_int16_t);
 size_t		 aspath_strlen(void *, u_int16_t);
 int		 aspath_match(struct aspath *, enum as_spec, u_int16_t);
 int		 community_match(void *, u_int16_t, int, int);
+int		 community_set(struct attr *, int, int);
 
 /* rde_rib.c */
 void		 path_init(u_int32_t);
 void		 path_shutdown(void);
-void		 path_update(struct rde_peer *, struct attr_flags *,
+void		 path_update(struct rde_peer *, struct rde_aspath *,
 		     struct bgpd_addr *, int);
-struct rde_aspath *path_get(struct aspath *, struct rde_peer *);
-struct rde_aspath *path_add(struct rde_peer *, struct attr_flags *);
+int		 path_compare(struct rde_aspath *, struct rde_aspath *);
+struct rde_aspath *path_lookup(struct rde_aspath *, struct rde_peer *);
 void		 path_remove(struct rde_aspath *);
 void		 path_updateall(struct rde_aspath *, enum nexthop_state);
 void		 path_destroy(struct rde_aspath *);
 int		 path_empty(struct rde_aspath *);
+struct rde_aspath *path_copy(struct rde_aspath *);
+struct rde_aspath *path_get(void);
+void		 path_put(struct rde_aspath *);
 
-struct prefix	*prefix_get(struct rde_aspath *, struct bgpd_addr *, int);
+#define	PREFIX_SIZE(x)	(((x) + 7) / 8 + 1)
+int		 prefix_compare(const struct bgpd_addr *,
+		    const struct bgpd_addr *, int);
+struct prefix	*prefix_get(struct rde_peer *, struct bgpd_addr *, int);
 struct pt_entry	*prefix_add(struct rde_aspath *, struct bgpd_addr *, int);
 struct pt_entry	*prefix_move(struct rde_aspath *, struct prefix *);
 void		 prefix_remove(struct rde_peer *, struct bgpd_addr *, int);
+int		 prefix_write(u_char *, int, struct bgpd_addr *, u_int8_t);
 struct prefix	*prefix_bypeer(struct pt_entry *, struct rde_peer *);
 void		 prefix_updateall(struct rde_aspath *, enum nexthop_state);
 void		 prefix_destroy(struct prefix *);
@@ -280,9 +310,13 @@ void		 prefix_network_clean(struct rde_peer *, time_t);
 
 void		 nexthop_init(u_int32_t);
 void		 nexthop_shutdown(void);
-void		 nexthop_add(struct rde_aspath *);
-void		 nexthop_remove(struct rde_aspath *);
+void		 nexthop_modify(struct rde_aspath *, struct bgpd_addr *, int,
+		     sa_family_t);
+void		 nexthop_link(struct rde_aspath *);
+void		 nexthop_unlink(struct rde_aspath *);
 void		 nexthop_update(struct kroute_nexthop *);
+struct nexthop	*nexthop_get(struct bgpd_addr *);
+int		 nexthop_compare(struct nexthop *, struct nexthop *);
 
 /* rde_decide.c */
 void		 prefix_evaluate(struct prefix *, struct pt_entry *);
@@ -290,6 +324,7 @@ void		 up_init(struct rde_peer *);
 void		 up_down(struct rde_peer *);
 void		 up_generate_updates(struct rde_peer *,
 		     struct prefix *, struct prefix *);
+void		 up_generate_default(struct rde_peer *, sa_family_t);
 int		 up_dump_prefix(u_char *, int, struct uplist_prefix *,
 		     struct rde_peer *);
 int		 up_dump_attrnlri(u_char *, int, struct rde_peer *);
@@ -299,16 +334,19 @@ void		 up_dump_upcall(struct pt_entry *, void *);
 void		 pt_init(void);
 void		 pt_shutdown(void);
 int		 pt_empty(struct pt_entry *);
+void		 pt_getaddr(struct pt_entry *, struct bgpd_addr *);
 struct pt_entry	*pt_get(struct bgpd_addr *, int);
 struct pt_entry *pt_add(struct bgpd_addr *, int);
 void		 pt_remove(struct pt_entry *);
 struct pt_entry	*pt_lookup(struct bgpd_addr *);
-void		 pt_dump(void (*)(struct pt_entry *, void *), void *);
+void		 pt_dump(void (*)(struct pt_entry *, void *), void *,
+		     sa_family_t);
 
 /* rde_filter.c */
-enum filter_actions rde_filter(struct rde_peer *, struct attr_flags *,
+enum filter_actions rde_filter(struct rde_peer *, struct rde_aspath *,
     struct bgpd_addr *, u_int8_t, enum directions);
-void		 rde_apply_set(struct attr_flags *, struct filter_set *);
-int		 rde_filter_community(struct attr_flags *, int, int);
+void		 rde_apply_set(struct rde_aspath *, struct filter_set *,
+		     sa_family_t);
+int		 rde_filter_community(struct rde_aspath *, int, int);
 
 #endif /* __RDE_H__ */

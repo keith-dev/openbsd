@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.201 2004/02/29 18:02:14 deraadt Exp $
+#	$OpenBSD: Makefile,v 1.211 2004/08/26 03:34:15 deraadt Exp $
 
 TZDIR=		/usr/share/zoneinfo
 LOCALTIME=	Canada/Mountain
@@ -12,21 +12,19 @@ NOOBJ=	oobj
 # -rw-r--r--
 BINOWN= root
 BINGRP= wheel
-BIN1=	bootptab changelist ccd.conf csh.cshrc csh.login csh.logout \
-	daily dhcpd.conf dhcpd.interfaces exports ftpusers \
-	ftpchroot gettytab group hosts hosts.lpd inetd.conf \
-	ksh.kshrc locate.rc man.conf monthly motd mrouted.conf \
-	myname netstart networks newsyslog.conf \
-	phones printcap protocols rbootd.conf rc rc.conf rc.local \
-	rc.securelevel rc.shutdown remote rpc security services \
-	shells spamd.conf syslog.conf weekly etc.${MACHINE}/disktab \
-	dhclient.conf mailer.conf
+BIN1=	changelist ccd.conf csh.cshrc csh.login csh.logout daily dhcpd.conf \
+	dhcpd.interfaces exports ftpusers ftpchroot gettytab group hosts \
+	hosts.lpd inetd.conf ksh.kshrc locate.rc man.conf monthly motd \
+	mrouted.conf myname netstart networks newsyslog.conf phones printcap \
+	protocols rbootd.conf rc rc.conf rc.local rc.securelevel rc.shutdown \
+	remote rpc security services shells spamd.conf syslog.conf weekly \
+	etc.${MACHINE}/disktab dhclient.conf mailer.conf ntpd.conf
 
-.if ${MACHINE} == "alpha" || ${MACHINE} == "hppa" || \
-    ${MACHINE} == "i386" || ${MACHINE} == "macppc" || \
-    ${MACHINE} == "pegasos" || ${MACHINE} == "sparc" || \
-    ${MACHINE} == "sparc64" || ${MACHINE} == "amd64" || \
-    ${MACHINE} == "cats"
+.if ${MACHINE} == "alpha" || ${MACHINE} == "amd64" || \
+    ${MACHINE} == "cats" || ${MACHINE} == "hppa" || \
+    ${MACHINE} == "i386" || ${MACHINE} == "luna88k" || \
+    ${MACHINE} == "macppc" || ${MACHINE} == "sparc" || \
+    ${MACHINE} == "sparc64"
 BIN1+=	wsconsctl.conf
 .endif
 
@@ -60,7 +58,7 @@ distribution-etc-root-var distribution distrib-dirs release snapshot:
 .else
 distribution-etc-root-var: distrib-dirs
 	${INSTALL} -c -o ${BINOWN} -g ${BINGRP} -m 644 ${BIN1} ${DESTDIR}/etc
-	cat etc.${MACHINE}/ttys ttys.pty > ${DESTDIR}/etc/ttys && \
+	ksh ttys.pty | cat etc.${MACHINE}/ttys - > ${DESTDIR}/etc/ttys && \
 	    chown ${BINOWN} ${DESTDIR}/etc/ttys && \
 	    chgrp ${BINGRP} ${DESTDIR}/etc/ttys && \
 	    chmod 644 ${DESTDIR}/etc/ttys
@@ -105,9 +103,7 @@ distribution-etc-root-var: distrib-dirs
 		${INSTALL} -c -o root -g wheel -m 644 dot.mailrc \
 		    ${DESTDIR}/etc/skel/.mailrc; \
 		${INSTALL} -c -o root -g wheel -m 644 dot.profile \
-		    ${DESTDIR}/etc/skel/.profile; \
-		${INSTALL} -c -o root -g wheel -m 600 dot.rhosts \
-		    ${DESTDIR}/etc/skel/.rhosts
+		    ${DESTDIR}/etc/skel/.profile
 	cd kerberosV; \
 		${INSTALL} -c -o root -g wheel -m 644 README \
 		    ${DESTDIR}/etc/kerberosV; \
@@ -173,8 +169,6 @@ distribution-etc-root-var: distrib-dirs
 		    ${DESTDIR}/var/named/standard/loopback; \
 		${INSTALL} -c -o root -g wheel -m 644 db.loopback6.arpa \
 		    ${DESTDIR}/var/named/standard/loopback6.arpa; \
-		${INSTALL} -c -o root -g wheel -m 644 db.loopback6.int \
-		    ${DESTDIR}/var/named/standard/loopback6.int; \
 		${INSTALL} -c -o root -g wheel -m 644 root.hint \
 		    ${DESTDIR}/var/named/standard; \
 	/bin/rm -f ${DESTDIR}/etc/localtime
@@ -264,15 +258,16 @@ release: distribution snap_pre snap_md
 	cd ${.CURDIR}/../distrib/sets && exec ${SUDO} sh maketars ${OSrev}
 	-cp ${DESTDIR}/snapshot/bsd* ${RELEASEDIR}
 	-cp ${DESTDIR}/snapshot/*boot* ${RELEASEDIR}
+	-cp ${DESTDIR}/snapshot/cdbr ${RELEASEDIR}
 	-cp ${DESTDIR}/snapshot/*BOOT* ${RELEASEDIR}
 	-cp ${DESTDIR}/snapshot/cd*.iso ${RELEASEDIR}
 	-cp ${DESTDIR}/snapshot/INSTALL.* ${RELEASEDIR}
 	-cp ${DESTDIR}/snapshot/*.fs ${DESTDIR}/snapshot/*.fs.gz ${RELEASEDIR}
 	-cd ${RELEASEDIR}; \
-		md5 bsd!(*.gz) *boot* *BOOT* INSTALL.* *.fs *.iso *.gz *.tgz \
+		md5 bsd!(*.gz) *boot* cdbr *BOOT* INSTALL.* *.fs *.iso *.gz *.tgz \
 		    > MD5
 	-cd ${RELEASEDIR}; \
-		cksum bsd!(*.gz) *boot* *BOOT* INSTALL.* *.fs *.iso *.gz *.tgz \
+		cksum bsd!(*.gz) *boot* cdbr *BOOT* INSTALL.* *.fs *.iso *.gz *.tgz \
 		    > CKSUM
 .if defined(MACHINE_HAS_TOOLS)
 	mkdir -p ${RELEASEDIR}/tools
@@ -334,12 +329,13 @@ MAKEDEVARCHS+= cats
 MAKEDEVARCHS+= hp300
 MAKEDEVARCHS+= hppa
 MAKEDEVARCHS+= i386
+MAKEDEVARCHS+= luna88k
 MAKEDEVARCHS+= mac68k
 MAKEDEVARCHS+= macppc
 MAKEDEVARCHS+= mvme68k
 MAKEDEVARCHS+= mvme88k
 #MAKEDEVARCHS+= mvmeppc
-MAKEDEVARCHS+= pegasos
+MAKEDEVARCHS+= sgi
 MAKEDEVARCHS+= sparc
 MAKEDEVARCHS+= sparc64
 MAKEDEVARCHS+= vax
@@ -377,7 +373,7 @@ distrib:
 DHSIZE=1024 1536 2048 3072 4096
 update-moduli:
 	( \
-		echo '#    $$OpenBSD: Makefile,v 1.201 2004/02/29 18:02:14 deraadt Exp $$'; \
+		echo '#    $$OpenBSD: Makefile,v 1.211 2004/08/26 03:34:15 deraadt Exp $$'; \
 		echo '# Time Type Tests Tries Size Generator Modulus'; \
 		( for i in ${DHSIZE}; do \
 			ssh-keygen -b $$i -G /dev/stdout; \

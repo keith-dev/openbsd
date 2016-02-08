@@ -1,7 +1,7 @@
 /*    doio.c
  *
  *    Copyright (C) 1991, 1992, 1993, 1994, 1995, 1996, 1997, 1998, 1999,
- *    2000, 2001, 2002, 2003, by Larry Wall and others
+ *    2000, 2001, 2002, 2003, 2004, by Larry Wall and others
  *
  *    You may distribute under the terms of either the GNU General Public
  *    License or the Artistic License, as specified in the README file.
@@ -48,9 +48,7 @@
 #  define OPEN_EXCL 0
 #endif
 
-#if !defined(NSIG) || defined(M_UNIX) || defined(M_XENIX)
 #include <signal.h>
-#endif
 
 bool
 Perl_do_open(pTHX_ GV *gv, register char *name, I32 len, int as_raw,
@@ -725,11 +723,13 @@ Perl_nextargv(pTHX_ register GV *gv)
     if (PL_filemode & (S_ISUID|S_ISGID)) {
 	PerlIO_flush(IoIFP(GvIOn(PL_argvoutgv)));  /* chmod must follow last write */
 #ifdef HAS_FCHMOD
-	(void)fchmod(PL_lastfd,PL_filemode);
+	if (PL_lastfd != -1)
+	    (void)fchmod(PL_lastfd,PL_filemode);
 #else
 	(void)PerlLIO_chmod(PL_oldname,PL_filemode);
 #endif
     }
+    PL_lastfd = -1;
     PL_filemode = 0;
     if (!GvAV(gv))
         return Nullfp;
@@ -1172,6 +1172,7 @@ fail_discipline:
 #ifndef PERLIO_LAYERS
 		Perl_croak(aTHX_ "IO layers (like '%.*s') unavailable", end-s, s);
 #else
+		len -= end-s;
 		s = end;
 #endif
 	    }
@@ -2290,8 +2291,9 @@ Perl_start_glob (pTHX_ SV *tmpglob, IO *io)
 		if (*cp == '?') *cp = '%';  /* VMS style single-char wildcard */
 	    while (ok && ((sts = lib$find_file(&wilddsc,&rsdsc,&cxt,
 					       &dfltdsc,NULL,NULL,NULL))&1)) {
-		end = rstr + (unsigned long int) *rslt;
-		if (!hasver) while (*end != ';') end--;
+		/* with varying string, 1st word of buffer contains result length */
+		end = rstr + *((unsigned short int*)rslt);
+		if (!hasver) while (*end != ';' && end > rstr) end--;
 		*(end++) = '\n';  *end = '\0';
 		for (cp = rstr; *cp; cp++) *cp = _tolower(*cp);
 		if (hasdir) {

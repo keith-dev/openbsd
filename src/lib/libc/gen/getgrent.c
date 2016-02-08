@@ -29,7 +29,7 @@
  */
 
 #if defined(LIBC_SCCS) && !defined(lint)
-static char rcsid[] = "$OpenBSD: getgrent.c,v 1.19 2003/06/02 20:18:34 millert Exp $";
+static char rcsid[] = "$OpenBSD: getgrent.c,v 1.21 2004/06/07 21:11:23 marc Exp $";
 #endif /* LIBC_SCCS and not lint */
 
 #include <sys/types.h>
@@ -59,7 +59,6 @@ static struct group_storage {
 
 /* File pointers are locked with the 'gr' mutex */
 _THREAD_PRIVATE_KEY(gr);
-_THREAD_PRIVATE_MUTEX(gr);
 static FILE *_gr_fp;
 static struct group _gr_group;
 static int _gr_stayopen;
@@ -80,7 +79,7 @@ static int	__ypcurrentlen;
 #endif
 
 struct group *
-getgrent()
+getgrent(void)
 {
 	struct group *p_gr = (struct group*)_THREAD_PRIVATE(gr, _gr_group, NULL);
 	struct group_storage *gs = (struct group_storage *)_THREAD_PRIVATE(gr_storage,
@@ -94,10 +93,7 @@ getgrent()
 }
 
 static struct group *
-getgrnam_gs(name, p_gr, gs)
-	const char *name;
-	struct group *p_gr;
-	struct group_storage *gs;
+getgrnam_gs(const char *name, struct group *p_gr, struct group_storage *gs)
 {
 	int rval;
 
@@ -114,8 +110,7 @@ getgrnam_gs(name, p_gr, gs)
 }
 
 struct group *
-getgrnam(name)
-	const char *name;
+getgrnam(const char *name)
 {
 	struct group *p_gr = (struct group*)_THREAD_PRIVATE(gr,_gr_group,NULL);
 	struct group_storage *gs = (struct group_storage *)_THREAD_PRIVATE(gr_storage,
@@ -125,12 +120,8 @@ getgrnam(name)
 }
 
 int
-getgrnam_r(name, grp, buffer, bufsize, result)
-	const char *name;
-	struct group *grp;
-	char *buffer;
-	size_t bufsize;
-	struct group **result;
+getgrnam_r(const char *name, struct group *grp, char *buffer,
+	size_t bufsize, struct group **result)
 {
 	int errnosave;
 	int ret;
@@ -148,10 +139,7 @@ getgrnam_r(name, grp, buffer, bufsize, result)
 }
 
 static struct group *
-getgrgid_gs(gid, p_gr, gs)
-	gid_t gid;
-	struct group *p_gr;
-	struct group_storage *gs;
+getgrgid_gs(gid_t gid, struct group *p_gr, struct group_storage *gs)
 {
 	int rval;
 
@@ -168,8 +156,7 @@ getgrgid_gs(gid, p_gr, gs)
 }
 
 struct group *
-getgrgid(gid)
-	gid_t gid;
+getgrgid(gid_t gid)
 {
 	struct group *p_gr = (struct group*)_THREAD_PRIVATE(gr, _gr_group, NULL);
 	struct group_storage *gs = (struct group_storage *)_THREAD_PRIVATE(gr_storage,
@@ -179,12 +166,8 @@ getgrgid(gid)
 }
 
 int
-getgrgid_r(gid, grp, buffer, bufsize, result)
-	gid_t gid;
-	struct group *grp;
-	char *buffer;
-	size_t bufsize;
-	struct group **result;
+getgrgid_r(gid_t gid, struct group *grp, char *buffer, size_t bufsize,
+	struct group **result)
 {
 	int errnosave;
 	int ret;
@@ -202,7 +185,7 @@ getgrgid_r(gid, grp, buffer, bufsize, result)
 }
 
 static int
-start_gr()
+start_gr(void)
 {
 	if (_gr_fp) {
 		rewind(_gr_fp);
@@ -218,14 +201,13 @@ start_gr()
 }
 
 void
-setgrent()
+setgrent(void)
 {
 	(void) setgroupent(0);
 }
 
 int
-setgroupent(stayopen)
-	int stayopen;
+setgroupent(int stayopen)
 {
 	int retval;
 
@@ -242,7 +224,7 @@ setgroupent(stayopen)
 
 static
 void
-endgrent_basic()
+endgrent_basic(void)
 {
 	if (_gr_fp) {
 		(void)fclose(_gr_fp);
@@ -257,7 +239,7 @@ endgrent_basic()
 }
 
 void
-endgrent()
+endgrent(void)
 {
 	_THREAD_PRIVATE_MUTEX_LOCK(gr);
 	endgrent_basic();
@@ -265,12 +247,8 @@ endgrent()
 }
 
 static int
-grscan(search, gid, name, p_gr, gs)
-	register int search;
-	register gid_t gid;
-	register const char *name;
-	struct group *p_gr;
-	struct group_storage *gs;
+grscan(int search, gid_t gid, const char *name, struct group *p_gr,
+    struct group_storage *gs)
 {
 	register char *cp, **m;
 	char *bp, *endp;

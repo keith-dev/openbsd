@@ -1,4 +1,4 @@
-/*	$OpenBSD: parse.c,v 1.7 2004/02/24 13:08:26 henning Exp $	*/
+/*	$OpenBSD: parse.c,v 1.11 2004/05/05 23:07:47 deraadt Exp $	*/
 
 /* Common parser code for dhcpd and dhclient. */
 
@@ -60,9 +60,8 @@
 void
 skip_to_semi(FILE *cfile)
 {
-	int token;
+	int brace_count = 0, token;
 	char *val;
-	int brace_count = 0;
 
 	do {
 		token = peek_token(&val, cfile);
@@ -113,9 +112,8 @@ parse_semi(FILE *cfile)
 char *
 parse_string(FILE *cfile)
 {
-	char *val;
+	char *val, *s;
 	int token;
-	char *s;
 
 	token = next_token(&val, cfile);
 	if (token != STRING) {
@@ -130,63 +128,6 @@ parse_string(FILE *cfile)
 
 	if (!parse_semi(cfile))
 		return (NULL);
-	return (s);
-}
-
-/*
- * hostname :== identifier | hostname DOT identifier
- */
-char *
-parse_host_name(FILE *cfile)
-{
-	char *val;
-	int token;
-	int len = 0;
-	char *s;
-	char *t;
-	pair c = NULL;
-
-	/* Read a dotted hostname... */
-	do {
-		/* Read a token, which should be an identifier. */
-		token = next_token(&val, cfile);
-		if (!is_identifier(token) && token != NUMBER) {
-			parse_warn("expecting an identifier in hostname");
-			skip_to_semi(cfile);
-			return (NULL);
-		}
-		/* Store this identifier... */
-		if (!(s = malloc(strlen(val) + 1)))
-			error("can't allocate temp space for hostname.");
-		strlcpy(s, val, strlen(val) + 1);
-		c = cons((caddr_t)s, c);
-		len += strlen(s) + 1;
-		/*
-		 * Look for a dot; if it's there, keep going, otherwise
-		 * we're done.
-		 */
-		token = peek_token(&val, cfile);
-		if (token == DOT)
-			token = next_token(&val, cfile);
-	} while (token == DOT);
-
-	/* Assemble the hostname together into a string. */
-	if (!(s = malloc(len)))
-		error("can't allocate space for hostname.");
-	t = s + len;
-	*--t = '\0';
-	while (c) {
-		pair cdr = c->cdr;
-		int l = strlen((char *)c->car);
-		t -= l;
-		memcpy(t, (char *)c->car, l);
-		/* Free up temp space. */
-		free(c->car);
-		free(c);
-		c = cdr;
-		if (t != s)
-			*--t = '.';
-	}
 	return (s);
 }
 
@@ -207,10 +148,9 @@ parse_ip_addr(FILE *cfile, struct iaddr *addr)
 void
 parse_hardware_param(FILE *cfile, struct hardware *hardware)
 {
-	char *val;
-	int token;
-	int hlen;
 	unsigned char *t;
+	int token, hlen;
+	char *val;
 
 	token = next_token(&val, cfile);
 	switch (token) {
@@ -247,8 +187,8 @@ parse_hardware_param(FILE *cfile, struct hardware *hardware)
 		parse_warn("hardware address too long");
 	} else {
 		hardware->hlen = hlen;
-		memcpy((unsigned char *)&hardware->haddr[0],
-		    t, hardware->hlen);
+		memcpy((unsigned char *)&hardware->haddr[0], t,
+		    hardware->hlen);
 		if (hlen < sizeof(hardware->haddr))
 			memset(&hardware->haddr[hlen], 0,
 			    sizeof(hardware->haddr) - hlen);
@@ -296,11 +236,9 @@ unsigned char *
 parse_numeric_aggregate(FILE *cfile, unsigned char *buf, int *max,
     int separator, int base, int size)
 {
-	char *val;
-	int token;
 	unsigned char *bufp = buf, *s = NULL;
-	char *t;
-	int count = 0;
+	int token, count = 0;
+	char *val, *t;
 	pair c = NULL;
 
 	if (!bufp && *max) {
@@ -378,11 +316,9 @@ parse_numeric_aggregate(FILE *cfile, unsigned char *buf, int *max,
 void
 convert_num(unsigned char *buf, char *str, int base, int size)
 {
-	char *ptr = str;
-	int negative = 0;
+	int negative = 0, tval, max;
 	u_int32_t val = 0;
-	int tval;
-	int max;
+	char *ptr = str;
 
 	if (*ptr == '-') {
 		negative = 1;
@@ -414,11 +350,11 @@ convert_num(unsigned char *buf, char *str, int base, int size)
 		else if (tval >= '0')
 			tval -= '0';
 		else {
-			warn("Bogus number: %s.", str);
+			warning("Bogus number: %s.", str);
 			break;
 		}
 		if (tval >= base) {
-			warn("Bogus number: %s: digit %d not in base %d",
+			warning("Bogus number: %s: digit %d not in base %d",
 			    str, tval, base);
 			break;
 		}
@@ -432,15 +368,15 @@ convert_num(unsigned char *buf, char *str, int base, int size)
 	if (val > max) {
 		switch (base) {
 		case 8:
-			warn("value %s%o exceeds max (%d) for precision.",
+			warning("value %s%o exceeds max (%d) for precision.",
 			    negative ? "-" : "", val, max);
 			break;
 		case 16:
-			warn("value %s%x exceeds max (%d) for precision.",
+			warning("value %s%x exceeds max (%d) for precision.",
 			    negative ? "-" : "", val, max);
 			break;
 		default:
-			warn("value %s%u exceeds max (%d) for precision.",
+			warning("value %s%u exceeds max (%d) for precision.",
 			    negative ? "-" : "", val, max);
 			break;
 		}
@@ -458,7 +394,7 @@ convert_num(unsigned char *buf, char *str, int base, int size)
 			putLong(buf, -(unsigned long)val);
 			break;
 		default:
-			warn("Unexpected integer size: %d", size);
+			warning("Unexpected integer size: %d", size);
 			break;
 		}
 	else
@@ -473,7 +409,7 @@ convert_num(unsigned char *buf, char *str, int base, int size)
 			putULong(buf, val);
 			break;
 		default:
-			warn("Unexpected integer size: %d", size);
+			warning("Unexpected integer size: %d", size);
 			break;
 		}
 }
@@ -489,12 +425,11 @@ convert_num(unsigned char *buf, char *str, int base, int size)
 time_t
 parse_date(FILE *cfile)
 {
-	struct tm tm;
-	int guess;
-	char *val;
-	int token;
 	static int months[11] = { 31, 59, 90, 120, 151, 181,
 	    212, 243, 273, 304, 334 };
+	int guess, token;
+	struct tm tm;
+	char *val;
 
 	/* Day of week... */
 	token = next_token(&val, cfile);

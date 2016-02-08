@@ -1,4 +1,4 @@
-/*	$OpenBSD: disk.c,v 1.20 2003/07/29 18:38:35 deraadt Exp $	*/
+/*	$OpenBSD: disk.c,v 1.22 2004/08/03 09:23:11 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1997, 2001 Tobias Weingartner
@@ -87,7 +87,7 @@ DISK_getlabelmetrics(char *name)
 	if ((fd = DISK_open(name, O_RDONLY)) != -1) {
 		lm = malloc(sizeof(DISK_metrics));
 		if (lm == NULL)
-			err(1, "malloc");
+			err(1, NULL);
 
 		if (ioctl(fd, DIOCGDINFO, &dl) == -1) {
 			warn("DIOCGDINFO");
@@ -150,7 +150,7 @@ DISK_getbiosmetrics(char *name)
 
 	bm = malloc(sizeof(di));
 	if (bm == NULL)
-		err(1, "malloc");
+		err(1, NULL);
 	bm->cylinders = di.bios_cylinders;
 	bm->heads = di.bios_heads;
 	bm->sectors = di.bios_sectors;
@@ -236,7 +236,7 @@ DISK_printmetrics(disk_t *disk, char *units)
 	if (disk->real)
 		printf("geometry: %d/%d/%d [%.0f %s]\n", disk->real->cylinders,
 		    disk->real->heads, disk->real->sectors, size,
-		       unit_types[i].lname);
+		    unit_types[i].lname);
 	else
 		printf("geometry: <none>\n");
 

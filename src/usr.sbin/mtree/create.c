@@ -1,5 +1,5 @@
 /*	$NetBSD: create.c,v 1.11 1996/09/05 09:24:19 mycroft Exp $	*/
-/*	$OpenBSD: create.c,v 1.20 2003/06/02 23:36:54 millert Exp $	*/
+/*	$OpenBSD: create.c,v 1.23 2004/08/01 18:32:20 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 1989, 1993
@@ -34,7 +34,7 @@
 #if 0
 static const char sccsid[] = "@(#)create.c	8.1 (Berkeley) 6/6/93";
 #else
-static const char rcsid[] = "$OpenBSD: create.c,v 1.20 2003/06/02 23:36:54 millert Exp $";
+static const char rcsid[] = "$OpenBSD: create.c,v 1.23 2004/08/01 18:32:20 deraadt Exp $";
 #endif
 #endif /* not lint */
 
@@ -76,7 +76,7 @@ static int	statd(FTS *, FTSENT *, uid_t *, gid_t *, mode_t *);
 static void	statf(int, FTSENT *);
 
 void
-cwalk()
+cwalk(void)
 {
 	FTS *t;
 	FTSENT *p;
@@ -133,9 +133,7 @@ cwalk()
 }
 
 static void
-statf(indent, p)
-	int indent;
-	FTSENT *p;
+statf(int indent, FTSENT *p)
 {
 	struct group *gr;
 	struct passwd *pw;
@@ -206,7 +204,7 @@ statf(indent, p)
 		output(indent, &offset, "cksum=%lu", val);
 	}
 	if (keys & F_MD5 && S_ISREG(p->fts_statp->st_mode)) {
-		char *md5digest, buf[33];
+		char *md5digest, buf[MD5_DIGEST_STRING_LENGTH];
 
 		md5digest = MD5File(p->fts_accpath,buf);
 		if (!md5digest)
@@ -263,12 +261,7 @@ statf(indent, p)
 #define	MAXMODE	MBITS + 1
 
 static int
-statd(t, parent, puid, pgid, pmode)
-	FTS *t;
-	FTSENT *parent;
-	uid_t *puid;
-	gid_t *pgid;
-	mode_t *pmode;
+statd(FTS *t, FTSENT *parent, uid_t *puid, gid_t *pgid, mode_t *pmode)
 {
 	FTSENT *p;
 	gid_t sgid;
@@ -359,8 +352,7 @@ statd(t, parent, puid, pgid, pmode)
 }
 
 static int
-dsort(a, b)
-	const FTSENT **a, **b;
+dsort(const FTSENT **a, const FTSENT **b)
 {
 	if (S_ISDIR((*a)->fts_statp->st_mode)) {
 		if (!S_ISDIR((*b)->fts_statp->st_mode))

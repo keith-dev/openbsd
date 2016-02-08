@@ -1,11 +1,11 @@
-# $OpenBSD: Makefile,v 1.2 2003/09/25 15:34:25 millert Exp $
+# $OpenBSD: Makefile,v 1.4 2004/08/14 17:06:03 millert Exp $
 #
 # Generate the various .db versions from their source files.
 # The sendmail .mc files are not built here.  They live in
 # /usr/share/sendmail/cf and have their own Makefile.
 #
 
-.for DB in access aliases mailertable virtusertable userdb
+.for DB in access aliases genericstable mailertable virtusertable userdb
 . if exists(${DB})
 DB_FILES+= ${DB}.db
 . endif
@@ -31,6 +31,9 @@ distribution:
 	    -O DontBlameSendmail=mapinunsafedirpath
 	${INSTALL} -c -o root -g wheel -m 644 local-host-names \
 	    ${DESTDIR}/etc/mail/local-host-names
+	${INSTALL} -c -o root -g wheel -m 644 genericstable \
+	    ${DESTDIR}/etc/mail/genericstable
+	makemap hash ${DESTDIR}/etc/mail/genericstable < genericstable
 	${INSTALL} -c -o root -g wheel -m 644 mailertable \
 	    ${DESTDIR}/etc/mail/mailertable
 	makemap hash ${DESTDIR}/etc/mail/mailertable < mailertable
@@ -41,7 +44,8 @@ distribution:
 	${INSTALL} -c -o root -g wheel -m 644 virtusertable \
 	    ${DESTDIR}/etc/mail/virtusertable
 	makemap hash ${DESTDIR}/etc/mail/virtusertable < virtusertable
-	@for db in access.db aliases.db mailertable.db virtusertable.db; do \
+	@for db in access.db aliases.db genericstable.db mailertable.db \
+	    virtusertable.db; do \
 		chmod 644 ${DESTDIR}/etc/mail/$$db; \
 	done
 
@@ -50,6 +54,9 @@ access.db: access
 
 aliases.db: aliases
 	sendmail -bi
+
+genericstable.db: genericstable
+	makemap hash ${.ALLSRC} < ${.ALLSRC}
 
 mailertable.db: mailertable
 	makemap hash ${.ALLSRC} < ${.ALLSRC}

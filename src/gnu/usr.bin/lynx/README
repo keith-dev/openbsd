@@ -1,7 +1,7 @@
 
                              Lynx README file
 
-Lynx Version 2.8.4 is the latest release (July 2001).
+Lynx Version 2.8.5 is the latest release (February 2004).
 See the CHANGES file for a complete record of all changes and bug fixes.
 New releases are announced on the lynx-dev mailing list (see below).
 
@@ -10,7 +10,7 @@ FOR REAL NOVICES
 To use this package, you need a compiler & a bit of experience
 at very simple programming.  If you just want something which will work
 `out-of-the-box', you can get pre-compiled versions of Lynx
-by following the links from  <URL: http://lynx.browser.org/> ;
+by following the links from  <URL: http://lynx.isc.org/> ;
 for DOS or Windows, goto <URL: http://www.fdisk.com/doslynx/lynxport.htm>.
 
 WHAT IS LYNX?
@@ -37,7 +37,7 @@ HOW TO GET LYNX
        <URL: ftp://lynx.isc.org/release>;
    the latest development version is at:
        <URL: http://lynx.isc.org/current>.
-   The Lynx homepage is <URL: http://lynx.browser.org/>.
+   The Lynx homepage is <URL: http://lynx.isc.org/>.
    The on-line help page (enter `h') has links to many useful things.
 
 LICENSE

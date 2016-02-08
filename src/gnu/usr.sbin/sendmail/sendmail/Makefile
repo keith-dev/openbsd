@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.23 2003/12/30 18:53:09 millert Exp $
+#	$OpenBSD: Makefile,v 1.25 2004/06/29 04:07:49 millert Exp $
 
 PROG=	sendmail
 
@@ -21,10 +21,8 @@ LDADD+= -lsasl2
 LDFLAGS+=-L/usr/local/lib
 .endif
 
-# To build milter support define WANT_LIBMILTER in /etc/mk.conf (unsupported)
-.if defined(WANT_LIBMILTER)
+# Compile with milter support.
 ENVDEF+= -DMILTER
-.endif
 
 # Since we have random PIDs we need to be careful to avoid filename collisions
 ENVDEF+= -DFAST_PID_RECYCLE
@@ -37,10 +35,10 @@ ENVDEF+= -D_FFR_DEAL_WITH_ERROR_SSL
 
 SRCS=	main.c alias.c arpadate.c bf.c collect.c conf.c control.c convtime.c \
 	daemon.c deliver.c domain.c envelope.c err.c headers.c macro.c map.c \
-	mci.c milter.c mime.c parseaddr.c queue.c readcf.c recipient.c \
-	sasl.c savemail.c sfsasl.c shmticklib.c sm_resolve.c srvrsmtp.c stab.c \
-	stats.c sysexits.c timers.c tls.c trace.c udb.c usersmtp.c util.c \
-	version.c
+	mci.c milter.c mime.c parseaddr.c queue.c ratectrl.c readcf.c \
+	recipient.c sasl.c savemail.c sfsasl.c shmticklib.c sm_resolve.c \
+	srvrsmtp.c stab.c stats.c sysexits.c timers.c tls.c trace.c udb.c \
+	usersmtp.c util.c version.c
 MAN=	aliases.5 mailq.8 newaliases.8 sendmail.8
 MLINKS=	sendmail.8 hoststat.1 sendmail.8 purgestat.1
 BINDIR=	/usr/libexec/sendmail

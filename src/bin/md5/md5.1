@@ -1,6 +1,6 @@
-.\"	$OpenBSD: md5.1,v 1.17 2003/06/17 21:56:23 millert Exp $
+.\"	$OpenBSD: md5.1,v 1.20 2004/08/24 21:22:25 tom Exp $
 .\"
-.\" Copyright (c) 2003 Todd C. Miller <Todd.Miller@courtesan.com>
+.\" Copyright (c) 2003, 2004 Todd C. Miller <Todd.Miller@courtesan.com>
 .\"
 .\" Permission to use, copy, modify, and distribute this software for any
 .\" purpose with or without fee is hereby granted, provided that the above
@@ -18,7 +18,7 @@
 .\" Agency (DARPA) and Air Force Research Laboratory, Air Force
 .\" Materiel Command, USAF, under agreement number F39502-99-1-0512.
 .\"
-.Dd June 4, 2001
+.Dd April 30, 2004
 .Dt MD5 1
 .Os
 .Sh NAME
@@ -27,18 +27,23 @@
 .Sh SYNOPSIS
 .Nm md5
 .Oo
-.Fl p | Fl t | Fl x |
+.Fl p | t | x |
+.Fl c Oo Ar checklist ... Oc |
 .Fl s Ar string |
-.Fl c Ar [ file ... ] |
 .Ar file ...
 .Oc
 .Sh DESCRIPTION
 .Nm
 takes as input a message of arbitrary length and produces
 as output a 128-bit "fingerprint" or "message digest" of the input.
-It is conjectured that it is computationally infeasible to produce
-two messages having the same message digest, or to produce any
+It was conjectured that it would be computationally infeasible to produce
+two messages having the same message digest (a collision), or to produce any
 message having a given prespecified target message digest.
+However, collisions have now been produced for
+.Em MD5 ,
+so the use of other message digest functions, such as
+.Xr sha1 1 ,
+is now preferred.
 .Pp
 The
 .Em MD5
@@ -50,24 +55,25 @@ such as
 .Pp
 The options are as follows:
 .Bl -tag -width Ds
-.It Fl s Ar string
-Prints a checksum of the given
-.Ar string .
-.It Fl c Ar [ file ... ]
-Compares all checksums in
-.Ar file
-with newly computed checksums for the files mentioned in
-.Ar file .
+.It Xo
+.Fl c
+.Op Ar checklist ...
+.Xc
+Compares all checksums contained in the file
+.Ar checklist
+with newly computed checksums for the corresponding files.
 Output consists of the digest used, the file name,
 and an OK or FAILED for the result of the comparison.
-This will validate any of the supported checksums in
-.Ar file ,
-including RMD-160 and SHA-1.
+This will validate any of the supported checksums (see
+.Xr cksum 1 ) .
 If no file is given, stdin is used.
 .It Fl p
 Echoes stdin to stdout and appends the
 .Em MD5
 sum to stdout.
+.It Fl s Ar string
+Prints a checksum of the given
+.Ar string .
 .It Fl t
 Runs a built-in time trial.
 .It Fl x
@@ -80,5 +86,14 @@ options are processed.
 .Xr cksum 1 ,
 .Xr rmd160 1 ,
 .Xr sha1 1
-.Pp
-RFC 1321 describes in detail the MD2, MD4, and MD5 message-digest algorithms.
+.Rs
+.%A R. Rivest
+.%T The MD5 Message-Digest Algorithm
+.%O RFC 1321
+.Re
+.Sh BUGS
+Since collisions have been found for
+.Em MD5 ,
+the use of
+.Xr sha1 1
+is recommended instead.

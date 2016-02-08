@@ -1,4 +1,4 @@
-/*	$OpenBSD: iostat.c,v 1.19 2004/02/15 02:45:47 tedu Exp $	*/
+/*	$OpenBSD: iostat.c,v 1.21 2004/08/08 00:19:16 pedro Exp $	*/
 /*	$NetBSD: iostat.c,v 1.10 1996/10/25 18:21:58 scottr Exp $	*/
 
 /*
@@ -202,8 +202,7 @@ main(int argc, char *argv[])
 }
 
 static void
-sigheader(signo)
-	int signo;
+sigheader(int signo)
 {
 	wantheader = 1;
 }
@@ -254,8 +253,7 @@ header(void)
 }
 
 static void
-disk_stats(etime)
-double etime;
+disk_stats(double etime)
 {
 	int dn;
 	double atime, mbps;
@@ -266,10 +264,11 @@ double etime;
 
 		/* average Kbytes per transfer. */
 		if (cur.dk_rxfer[dn] + cur.dk_wxfer[dn])
-			mbps = ((cur.dk_rxfer[dn] + cur.dk_wxfer[dn]) /
+			mbps = ((cur.dk_rbytes[dn] + cur.dk_wbytes[dn]) /
 			    (1024.0)) / (cur.dk_rxfer[dn] + cur.dk_wxfer[dn]);
 		else
 			mbps = 0.0;
+
 		(void)printf(" %5.2f", mbps);
 
 		/* average transfers per second. */
@@ -291,8 +290,7 @@ double etime;
 }
 
 static void
-disk_stats2(etime)
-double etime;
+disk_stats2(double etime)
 {
 	int dn;
 	double atime;
@@ -317,7 +315,7 @@ double etime;
 }
 
 static void
-cpustats()
+cpustats(void)
 {
 	int state;
 	double time;
@@ -333,7 +331,7 @@ cpustats()
 }
 
 static void
-usage()
+usage(void)
 {
 	(void)fprintf(stderr,
 "usage: iostat [-CdDIT] [-c count] [-M core] [-N system] [-w wait] [drives]\n");
@@ -341,7 +339,7 @@ usage()
 }
 
 static void
-display()
+display(void)
 {
 	int	i;
 	double	etime;
@@ -379,9 +377,7 @@ display()
 }
 
 static void
-selectdrives(argc, argv)
-int	argc;
-char	*argv[];
+selectdrives(int argc, char *argv[])
 {
 	int	i, ndrives;
 

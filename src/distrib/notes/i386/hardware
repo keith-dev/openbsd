@@ -1,4 +1,4 @@
-dnl	$OpenBSD: hardware,v 1.151 2004/03/26 08:56:10 tom Exp $
+dnl	$OpenBSD: hardware,v 1.159 2004/09/10 19:13:07 miod Exp $
 OpenBSD/MACHINE OSREV works across a broad range of standard PCs and
 clones, with a wide variety of processors and I/O bus architectures.  It
 can be expected to install and run with minimal difficulties on most
@@ -6,8 +6,9 @@ current products.  The cases where problems may be encountered are
 typically older proprietary PCs, laptops, or specialized server boxes
 that rely on a custom BIOS to paper over implementation differences.
 
-OpenBSD does not currently support multiple processors (SMP), but will
-run using one processor on a multi-processor system board.
+OpenBSD/MACHINE OSREV supports most SMP (Symmetrical MultiProcessor)
+systems.  To support SMP operation, a separate SMP kernel (bsd.mp)
+is included with the installation file sets.
 
 The minimal configuration to install the system is 12MB or 16MB of RAM and
 perhaps 100MB of disk space.  A custom kernel might be able to run with only
@@ -21,7 +22,7 @@ Supported hardware {:-include-:}:
 	Processors
 		All CPU chips compatible with the Intel 80386 (MACHINE)
 		architecture:
-			386/486 (SX/DX/DX2/DX4)
+			386/486 (SX/DX/DX2/DX4, an FPU is required)
 			Intel Pentium/Pentium-MMX
 			Intel Pentium Pro/II/III/Celeron/Xeon
 			Intel Pentium IV
@@ -49,6 +50,7 @@ Supported hardware {:-include-:}:
 		Both 16-bit PCMCIA Cards and newer 32-bit CardBus
 		support
 		Universal Serial Bus (USB)
+		Inter IC (I2C) bus
 		The MCA bus found in various IBM PS/2 machines is not
 		supported.
 	Bus Interfaces
@@ -322,6 +324,10 @@ Supported hardware {:-include-:}:
 		    SMC 2202USB
 		    SMC EZ Connect USB
 		    SOHOware NUB100
+		ASIX Electronics AX88172 USB Ethernet adapters, including:
+		    D-Link DUBE100
+		    LinkSys USB200M
+		    Netgear FA120
 		AMD LANCE and PCnet-based ISA Ethernet adapters, including: [B]
 		    Novell NE1500T
 		    Novell NE2100
@@ -511,6 +517,21 @@ Supported hardware {:-include-:}:
 		    NDC/Sohoware NCP130 PCI
 		    Netgear MA301 PCI
 		    US Robotics 2415 PCI (rebadged WL11000P)
+		USB Adapters
+		    Acer Warplink USB-400
+		    Actiontec HWU01170
+		    Corega WLUSB-11
+		    I-O DATA WN-B11/USB
+		    Intel PRO/Wireless 2011B
+		    Intersil Prism 2X
+		    JVC MP-XP7250
+		    Linksys WUSB11 v3.0
+		    Linksys WUSB12
+		    Melco WLI-USB-KS11G
+		    MicroSoft MN510
+		    Netgear MA111
+		    Siemens SpeedStream SS1022
+		    Syntax USB-400
 	Gigabit Ethernet Adapters
 		Alteon Tigon I/II PCI Gigabit Ethernet boards, including: [A]
 		  [B] [C]
@@ -766,11 +787,16 @@ Supported hardware {:-include-:}:
 		    VideoLogic Captivator PCI
 		    Zoltrix TV
 		Hardware monitoring sensors, including: [G]
-		    National Semiconductor LM78, LM78-J, LM79
+		    National Semiconductor LM75, LM77, LM78, LM78-J, LM79
+		    National Semiconductor PC87366 LPC Super I/O VLM and TMS
 		    Winbond W83697HF, W83627HF, W83627THF, W83781D, W83782D
 		    VIA VT82C686A, VT8231
 		    ITE IT8705F, IT8712F
 		    SiS SiS950
+		General Purpose Input/Output (GPIO) devices, including:
+		    National Semiconductor PC87366 LPC Super I/O GPIO
+		    National Semiconductor Geode SC1100 PCI-ISA bridge GPIO
+		    AMD Elan SC520 System Controller PIO function
 	Many kinds of ISA Plug-and-Play cards
 		Nearly all SB-style audio cards
 		Nearly all joystick ports
@@ -858,16 +884,16 @@ WD7000 and TMC-7000 SCSI host adapters
 		wds0	0x350	15	6
 		wds1	0x358	11	5
 
-SCSI disks	sd0	first SCSI disk (by SCSI id)
-		sd1	second SCSI disk (by SCSI id)
-		sd2	third SCSI disk (by SCSI id)
-		sd3	fourth SCSI disk (by SCSI id)
+SCSI disks	sd0	first SCSI disk (by SCSI ID)
+		sd1	second SCSI disk (by SCSI ID)
+		sd2	third SCSI disk (by SCSI ID)
+		sd3	fourth SCSI disk (by SCSI ID)
 
-SCSI tapes	st0	first SCSI tape (by SCSI id)
-		st1	second SCSI tape (by SCSI id)
+SCSI tapes	st0	first SCSI tape (by SCSI ID)
+		st1	second SCSI tape (by SCSI ID)
 
-SCSI CD-ROMs	cd0	first SCSI CD-ROM (by SCSI id)
-		cd1	second SCSI CD-ROM (by SCSI id)
+SCSI CD-ROMs	cd0	first SCSI CD-ROM (by SCSI ID)
+		cd1	second SCSI CD-ROM (by SCSI ID)
 
 SMC/WD 8003, 8013, Elite16, and Elite16 Ultra Ethernet boards
 		we0	0x280	9		iomem 0xd0000

@@ -1,4 +1,4 @@
-/*	$OpenBSD: clparse.c,v 1.12 2004/03/02 18:49:21 deraadt Exp $	*/
+/*	$OpenBSD: clparse.c,v 1.17 2004/08/24 15:06:03 henning Exp $	*/
 
 /* Parser for dhclient config and lease files... */
 
@@ -155,13 +155,14 @@ read_client_leases(void)
 		if (token == EOF)
 			break;
 		if (token != LEASE) {
-			warn("Corrupt lease file - possible data loss!");
+			warning("Corrupt lease file - possible data loss!");
 			skip_to_semi(cfile);
 			break;
 		} else
 			parse_client_lease_statement(cfile, 0);
 
 	} while (1);
+	fclose(cfile);
 }
 
 /*
@@ -837,7 +838,7 @@ bad_flag:
 				dp = buf;
 				goto alloc;
 			default:
-				warn("Bad format %c in parse_option_param.",
+				warning("Bad format %c in parse_option_param.",
 				    *fmt);
 				skip_to_semi(cfile);
 				return (NULL);
@@ -882,7 +883,7 @@ parse_string_list(FILE *cfile, struct string_list **lp, int multiple)
 			return;
 		}
 
-		tmp = new_string_list(strlen(val) + 1, "parse tmp");
+		tmp = new_string_list(strlen(val) + 1);
 		if (tmp == NULL)
 			error("no memory for string list entry.");
 		strlcpy(tmp->string, val, strlen(val) + 1);

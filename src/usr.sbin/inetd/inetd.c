@@ -1,4 +1,4 @@
-/*	$OpenBSD: inetd.c,v 1.115 2004/01/06 19:45:54 millert Exp $	*/
+/*	$OpenBSD: inetd.c,v 1.120 2004/09/06 07:03:08 otto Exp $	*/
 
 /*
  * Copyright (c) 1983,1991 The Regents of the University of California.
@@ -36,8 +36,8 @@ char copyright[] =
 #endif /* not lint */
 
 #ifndef lint
-/*static char sccsid[] = "from: @(#)inetd.c	5.30 (Berkeley) 6/3/91";*/
-static char rcsid[] = "$OpenBSD: inetd.c,v 1.115 2004/01/06 19:45:54 millert Exp $";
+/*static const char sccsid[] = "from: @(#)inetd.c	5.30 (Berkeley) 6/3/91";*/
+static const char rcsid[] = "$OpenBSD: inetd.c,v 1.120 2004/09/06 07:03:08 otto Exp $";
 #endif /* not lint */
 
 /*
@@ -493,7 +493,7 @@ main(int argc, char *argv[])
 				} else
 					ctrl = sep->se_fd;
 				(void) sigprocmask(SIG_BLOCK, &blockmask, NULL);
-				spawn(sep, ctrl);
+				spawn(sep, ctrl);	/* spawn will unblock */
 			}
 		}
 	}
@@ -629,9 +629,11 @@ doreap(void)
 		fprintf(stderr, "reaping asked for\n");
 
 	for (;;) {
-		pid = wait3(&status, WNOHANG, NULL);
-		if (pid <= 0)
+		if ((pid = wait3(&status, WNOHANG, NULL)) <= 0) {
+			if (pid == -1 && errno == EINTR)
+				continue;
 			break;
+		}
 		if (debug)
 			fprintf(stderr, "%ld reaped, status %x\n",
 			    (long)pid, status);
@@ -666,7 +668,7 @@ void
 doconfig(void)
 {
 	struct servtab *sep, *cp, **sepp;
-	int n, add;
+	int add;
 	char protoname[10];
 	sigset_t omask;
 
@@ -682,7 +684,7 @@ doconfig(void)
 			if (matchconf(sep, cp))
 				break;
 		add = 0;
-		if (sep != 0) {
+		if (sep != NULL) {
 			int i;
 
 #define SWAP(type, a, b) {type c=(type)a; a=(type)b; b=(type)c;}
@@ -720,16 +722,21 @@ doconfig(void)
 		case AF_UNIX:
 			if (sep->se_fd != -1)
 				break;
-			(void)unlink(sep->se_service);
-			n = strlen(sep->se_service);
-			if (n > sizeof sep->se_ctrladdr_un.sun_path - 1)
-				n = sizeof sep->se_ctrladdr_un.sun_path - 1;
-			strncpy(sep->se_ctrladdr_un.sun_path,
-			    sep->se_service, n);
-			sep->se_ctrladdr_un.sun_path[n] = '\0';
+			sep->se_ctrladdr_size =
+			    strlcpy(sep->se_ctrladdr_un.sun_path,
+			    sep->se_service,
+			    sizeof sep->se_ctrladdr_un.sun_path);
+			if (sep->se_ctrladdr_size >=
+			    sizeof sep->se_ctrladdr_un.sun_path) {
+				syslog(LOG_WARNING, "%s/%s: UNIX domain socket "
+				    "path too long", sep->se_service,
+				    sep->se_proto);
+				goto serv_unknown;
+			}
 			sep->se_ctrladdr_un.sun_family = AF_UNIX;
-			sep->se_ctrladdr_size = n +
-			    sizeof sep->se_ctrladdr_un.sun_family;
+			sep->se_ctrladdr_size +=
+			    1 + sizeof sep->se_ctrladdr_un.sun_family;
+			(void)unlink(sep->se_service);
 			setup(sep);
 			break;
 		case AF_INET:
@@ -1162,12 +1169,9 @@ endconfig(void)
 struct servtab *
 getconfigent(void)
 {
-	struct servtab *sep;
+	struct servtab *sep, *tsep;
+	char *arg, *cp, *hostdelim, *s;
 	int argc;
-	char *cp, *arg, *s;
-	char *hostdelim;
-	struct servtab *nsep;
-	struct servtab *psep;
 
 	sep = (struct servtab *) malloc(sizeof(struct servtab));
 	if (sep == NULL) {
@@ -1200,7 +1204,9 @@ more:
 		if (arg[0] == '[' && hostdelim > arg && hostdelim[-1] == ']') {
 			hostdelim[-1] = '\0';
 			sep->se_hostaddr = newstr(arg + 1);
-		} else
+		} else if (hostdelim == arg)
+			sep->se_hostaddr = newstr("*");
+		else
 			sep->se_hostaddr = newstr(arg);
 		arg = hostdelim + 1;
 		/*
@@ -1243,9 +1249,22 @@ more:
 	if (strcmp(sep->se_proto, "unix") == 0) {
 		sep->se_family = AF_UNIX;
 	} else {
+		int s;
+
 		sep->se_family = AF_INET;
 		if (sep->se_proto[strlen(sep->se_proto) - 1] == '6')
 			sep->se_family = AF_INET6;
+
+		/* check if the family is supported */
+		s = socket(sep->se_family, SOCK_DGRAM, 0);
+		if (s < 0) {
+			syslog(LOG_WARNING, "%s/%s: %s: the address family is "
+			    "not supported by the kernel", sep->se_service,
+			    sep->se_proto, sep->se_hostaddr);
+			goto more;
+		}
+		close(s);
+
 		if (strncmp(sep->se_proto, "rpc/", 4) == 0) {
 			char *cp, *ccp;
 			long l;
@@ -1331,128 +1350,71 @@ more:
 		if (argc < MAXARGV)
 			sep->se_argv[argc++] = newstr(arg);
 	}
+	if (argc == 0 && sep->se_bi == NULL) {
+		if ((arg = strrchr(sep->se_server, '/')) != NULL)
+			arg++;
+		else
+			arg = sep->se_server;
+		sep->se_argv[argc++] = newstr(arg);
+	}
 	while (argc <= MAXARGV)
 		sep->se_argv[argc++] = NULL;
 
 	/*
-	 * Now that we've processed the entire line, check if the hostname
-	 * specifier was a comma separated list of hostnames. If so
-	 * we'll make new entries for each address.
+	 * Resolve each hostname in the se_hostaddr list (if any)
+	 * and create a new entry for each resolved address.
 	 */
-	while ((hostdelim = strrchr(sep->se_hostaddr, ',')) != NULL) {
-		nsep = dupconfig(sep);
+	if (sep->se_hostaddr != NULL && strcmp(sep->se_proto, "unix") != 0) {
+		struct addrinfo hints, *res0, *res;
+		char *host, *hostlist0, *hostlist, *port;
+		int error;
 
-		/*
-		 * NULL terminate the hostname field of the existing entry,
-		 * and make a dup for the new entry.
-		 */
-		*hostdelim++ = '\0';
-		nsep->se_hostaddr = newstr(hostdelim);
-
-		nsep->se_next = sep->se_next;
-		sep->se_next = nsep;
-	}
-
-	nsep = sep;
-	while (nsep != NULL) {
-		nsep->se_checked = 1;
-		switch (nsep->se_family) {
-		case AF_INET:
-		case AF_INET6:
-		    {
-			struct addrinfo hints, *res0, *res;
-			char *host, *port;
-			int error;
-			int s;
-
-			/* check if the family is supported */
-			s = socket(nsep->se_family, SOCK_DGRAM, 0);
-			if (s < 0) {
-				syslog(LOG_WARNING,
-				    "%s/%s: %s: the address family is "
-				    "not supported by the kernel",
-				    nsep->se_service, nsep->se_proto,
-				    nsep->se_hostaddr);
-				nsep->se_checked = 0;
-				goto skip;
-			}
-			close(s);
+		hostlist = hostlist0 = sep->se_hostaddr;
+		sep->se_hostaddr = NULL;
+		sep->se_checked = -1;
+		while ((host = strsep(&hostlist, ",")) != NULL) {
+			if (*host == '\0')
+				continue;
 
 			memset(&hints, 0, sizeof(hints));
-			hints.ai_family = nsep->se_family;
-			hints.ai_socktype = nsep->se_socktype;
+			hints.ai_family = sep->se_family;
+			hints.ai_socktype = sep->se_socktype;
 			hints.ai_flags = AI_PASSIVE;
-			if (!strcmp(nsep->se_hostaddr, "*"))
-				host = NULL;
-			else
-				host = nsep->se_hostaddr;
 			port = "0";
 			/* XXX shortened IPv4 syntax is now forbidden */
-			error = getaddrinfo(host, port, &hints, &res0);
+			error = getaddrinfo(strcmp(host, "*") ? host : NULL,
+			    port, &hints, &res0);
 			if (error) {
 				syslog(LOG_ERR, "%s/%s: %s: %s",
-				    nsep->se_service, nsep->se_proto,
-				    nsep->se_hostaddr,
-				    gai_strerror(error));
-				nsep->se_checked = 0;
-				goto skip;
+				    sep->se_service, sep->se_proto,
+				    host, gai_strerror(error));
+				continue;
 			}
 			for (res = res0; res; res = res->ai_next) {
 				if (res->ai_addrlen >
-				    sizeof(nsep->se_ctrladdr_storage))
+				    sizeof(sep->se_ctrladdr_storage))
 					continue;
-				if (res == res0) {
-					memcpy(&nsep->se_ctrladdr_storage,
-					    res->ai_addr, res->ai_addrlen);
-					continue;
-				}
-
-				psep = dupconfig(nsep);
-				psep->se_hostaddr = newstr(nsep->se_hostaddr);
-				psep->se_checked = 1;
-				memcpy(&psep->se_ctrladdr_storage, res->ai_addr,
-				    res->ai_addrlen);
-				psep->se_ctrladdr_size = res->ai_addrlen;
-
 				/*
-				 * Prepend to list, don't want to look up its
-				 * hostname again.
+				 * If sep is unused, store host in there.
+				 * Otherwise, dup a new entry and prepend it.
 				 */
-				psep->se_next = sep;
-				sep = psep;
+				if (sep->se_checked == -1) {
+					sep->se_checked = 0;
+				} else {
+					tsep = dupconfig(sep);
+					tsep->se_next = sep;
+					sep = tsep;
+				}
+				sep->se_hostaddr = newstr(host);
+				memcpy(&sep->se_ctrladdr_storage,
+				    res->ai_addr, res->ai_addrlen);
+				sep->se_ctrladdr_size = res->ai_addrlen;
 			}
 			freeaddrinfo(res0);
-			break;
-		    }
 		}
-skip:
-		nsep = nsep->se_next;
-	}
-
-	/*
-	 * Finally, free any entries which failed the gethostbyname
-	 * check.
-	 */
-	psep = NULL;
-	nsep = sep;
-	while (nsep != NULL) {
-		struct servtab *tsep;
-
-		if (nsep->se_checked == 0) {
-			tsep = nsep;
-			if (psep == NULL) {
-				sep = nsep->se_next;
-				nsep = sep;
-			} else {
-				nsep = nsep->se_next;
-				psep->se_next = nsep;
-			}
-			freeconfig(tsep);
-		} else {
-			nsep->se_checked = 0;
-			psep = nsep;
-			nsep = nsep->se_next;
-		}
+		free(hostlist0);
+		if (sep->se_checked == -1)
+			goto more;	/* no resolvable names/addresses */
 	}
 
 	return (sep);
@@ -1463,21 +1425,22 @@ freeconfig(struct servtab *cp)
 {
 	int i;
 
-	if (cp->se_hostaddr)
-		free(cp->se_hostaddr);
-	if (cp->se_service)
-		free(cp->se_service);
-	if (cp->se_proto)
-		free(cp->se_proto);
-	if (cp->se_user)
-		free(cp->se_user);
-	if (cp->se_group)
-		free(cp->se_group);
-	if (cp->se_server)
-		free(cp->se_server);
-	for (i = 0; i < MAXARGV; i++)
-		if (cp->se_argv[i])
-			free(cp->se_argv[i]);
+	free(cp->se_hostaddr);
+	cp->se_hostaddr = NULL;
+	free(cp->se_service);
+	cp->se_service = NULL;
+	free(cp->se_proto);
+	cp->se_proto = NULL;
+	free(cp->se_user);
+	cp->se_user = NULL;
+	free(cp->se_group);
+	cp->se_group = NULL;
+	free(cp->se_server);
+	cp->se_server = NULL;
+	for (i = 0; i < MAXARGV; i++) {
+		free(cp->se_argv[i]);
+		cp->se_argv[i] = NULL;
+	}
 }
 
 char *
@@ -1925,6 +1888,8 @@ spawn(struct servtab *sep, int ctrl)
 					 * Simply ignore the connection.
 					 */
 					--sep->se_count;
+					sigprocmask(SIG_SETMASK, &emptymask,
+					    NULL);
 					return;
 				}
 				syslog(LOG_ERR,
@@ -2000,6 +1965,12 @@ spawn(struct servtab *sep, int ctrl)
 					pwd->pw_gid = grp->gr_gid;
 					tmpint |= LOGIN_SETGROUP;
 				}
+				if (sep->se_family == AF_UNIX &&
+				    chown(sep->se_ctrladdr_un.sun_path,
+				    pwd->pw_uid, pwd->pw_gid) < 0)
+					syslog(LOG_WARNING,
+					    "%s/%s: UNIX domain socket: %m",
+					    sep->se_service, sep->se_proto);
 				if (setusercontext(NULL, pwd, pwd->pw_uid,
 				    tmpint) < 0) {
 					syslog(LOG_ERR,
@@ -2009,7 +1980,7 @@ spawn(struct servtab *sep, int ctrl)
 				}
 			}
 			if (debug)
-				fprintf(stderr, "%ld execl %s\n",
+				fprintf(stderr, "%ld execv %s\n",
 				    (long)getpid(), sep->se_server);
 			if (ctrl != STDIN_FILENO) {
 				dup2(ctrl, STDIN_FILENO);

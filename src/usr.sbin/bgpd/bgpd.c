@@ -1,4 +1,4 @@
-/*	$OpenBSD: bgpd.c,v 1.88 2004/03/16 12:06:43 henning Exp $ */
+/*	$OpenBSD: bgpd.c,v 1.105 2004/08/24 11:43:16 henning Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -42,7 +42,7 @@ int	main(int, char *[]);
 int	check_child(pid_t, const char *);
 int	reconfigure(char *, struct bgpd_config *, struct mrt_head *,
 	    struct peer **, struct filter_head *);
-int	dispatch_imsg(struct imsgbuf *, int, struct mrt_head *);
+int	dispatch_imsg(struct imsgbuf *, int);
 
 int			rfd = -1;
 volatile sig_atomic_t	mrtdump = 0;
@@ -83,11 +83,11 @@ usage(void)
 	exit(1);
 }
 
-#define POLL_MAX		8
 #define PFD_PIPE_SESSION	0
 #define PFD_PIPE_ROUTE		1
 #define PFD_SOCK_ROUTE		2
-#define PFD_MRT_START		3
+#define POLL_MAX		3
+#define MAX_TIMEOUT		3600
 
 int
 main(int argc, char *argv[])
@@ -99,12 +99,13 @@ main(int argc, char *argv[])
 	struct filter_head	*rules_l;
 	struct network		*net;
 	struct filter_rule	*r;
-	struct mrt		*(mrt[POLL_MAX]), *m;
+	struct mrt		*m;
+	struct listen_addr	*la;
 	struct pollfd		 pfd[POLL_MAX];
 	pid_t			 io_pid = 0, rde_pid = 0, pid;
 	char			*conffile;
 	int			 debug = 0;
-	int			 ch, i, j, n, nfds, timeout;
+	int			 ch, nfds, timeout;
 	int			 pipe_m2s[2];
 	int			 pipe_m2r[2];
 	int			 pipe_s2r[2];
@@ -175,27 +176,26 @@ main(int argc, char *argv[])
 
 	log_info("startup");
 
-	if (pipe(pipe_m2s) == -1)
-		fatal("pipe");
-	if (fcntl(pipe_m2s[0], F_SETFL, O_NONBLOCK) == -1 ||
-	    fcntl(pipe_m2s[1], F_SETFL, O_NONBLOCK) == -1)
-		fatal("fcntl");
-	if (pipe(pipe_m2r) == -1)
-		fatal("pipe");
-	if (fcntl(pipe_m2r[0], F_SETFL, O_NONBLOCK) == -1 ||
-	    fcntl(pipe_m2r[1], F_SETFL, O_NONBLOCK) == -1)
-		fatal("fcntl");
-	if (pipe(pipe_s2r) == -1)
-		fatal("pipe");
-	if (fcntl(pipe_s2r[0], F_SETFL, O_NONBLOCK) == -1 ||
-	    fcntl(pipe_s2r[1], F_SETFL, O_NONBLOCK) == -1)
-		fatal("fcntl");
+	if (socketpair(AF_UNIX, SOCK_STREAM, PF_UNSPEC, pipe_m2s) == -1)
+		fatal("socketpair");
+	if (socketpair(AF_UNIX, SOCK_STREAM, PF_UNSPEC, pipe_m2r) == -1)
+		fatal("socketpair");
+	if (socketpair(AF_UNIX, SOCK_STREAM, PF_UNSPEC, pipe_s2r) == -1)
+		fatal("socketpair");
+	session_socket_blockmode(pipe_m2s[0], BM_NONBLOCK);
+	session_socket_blockmode(pipe_m2s[1], BM_NONBLOCK);
+	session_socket_blockmode(pipe_m2r[0], BM_NONBLOCK);
+	session_socket_blockmode(pipe_m2r[1], BM_NONBLOCK);
+	session_socket_blockmode(pipe_s2r[0], BM_NONBLOCK);
+	session_socket_blockmode(pipe_s2r[1], BM_NONBLOCK);
+
+	prepare_listeners(&conf);
 
 	/* fork children */
 	rde_pid = rde_main(&conf, peer_l, &net_l, rules_l, &mrt_l,
-	    pipe_m2r, pipe_s2r);
+	    pipe_m2r, pipe_s2r, pipe_m2s);
 	io_pid = session_main(&conf, peer_l, &net_l, rules_l, &mrt_l,
-	    pipe_m2s, pipe_s2r);
+	    pipe_m2s, pipe_s2r, pipe_m2r);
 
 	setproctitle("parent");
 
@@ -216,60 +216,70 @@ main(int argc, char *argv[])
 	mrt_init(&ibuf_rde, &ibuf_se);
 	if ((rfd = kr_init(!(conf.flags & BGPD_FLAG_NO_FIB_UPDATE))) == -1)
 		quit = 1;
+	if (pftable_clear_all() != 0)
+		quit = 1;
 
 	while ((net = TAILQ_FIRST(&net_l)) != NULL) {
-		TAILQ_REMOVE(&net_l, net, network_l);
+		TAILQ_REMOVE(&net_l, net, entry);
 		free(net);
 	}
 
 	while ((r = TAILQ_FIRST(rules_l)) != NULL) {
-		TAILQ_REMOVE(rules_l, r, entries);
+		TAILQ_REMOVE(rules_l, r, entry);
 		free(r);
 	}
 
+	while ((la = TAILQ_FIRST(conf.listen_addrs)) != NULL) {
+		TAILQ_REMOVE(conf.listen_addrs, la, entry);
+		close(la->fd);
+		free(la);
+	}
+
+	mrt_reconfigure(&mrt_l);
+
 	while (quit == 0) {
-		pfd[PFD_PIPE_SESSION].fd = ibuf_se.sock;
+		pfd[PFD_PIPE_SESSION].fd = ibuf_se.fd;
 		pfd[PFD_PIPE_SESSION].events = POLLIN;
 		if (ibuf_se.w.queued)
 			pfd[PFD_PIPE_SESSION].events |= POLLOUT;
-		pfd[PFD_PIPE_ROUTE].fd = ibuf_rde.sock;
+		pfd[PFD_PIPE_ROUTE].fd = ibuf_rde.fd;
 		pfd[PFD_PIPE_ROUTE].events = POLLIN;
 		if (ibuf_rde.w.queued)
 			pfd[PFD_PIPE_ROUTE].events |= POLLOUT;
 		pfd[PFD_SOCK_ROUTE].fd = rfd;
 		pfd[PFD_SOCK_ROUTE].events = POLLIN;
-		i = PFD_MRT_START;
-		i = mrt_select(&mrt_l, pfd, mrt, i, POLL_MAX, &timeout);
 
-		if ((nfds = poll(pfd, i, INFTIM)) == -1)
+		timeout = mrt_timeout(&mrt_l);
+		if (timeout > MAX_TIMEOUT)
+			timeout = MAX_TIMEOUT;
+
+		if ((nfds = poll(pfd, POLL_MAX, timeout * 1000)) == -1)
 			if (errno != EINTR) {
 				log_warn("poll error");
 				quit = 1;
 			}
 
 		if (nfds > 0 && (pfd[PFD_PIPE_SESSION].revents & POLLOUT))
-			if ((n = msgbuf_write(&ibuf_se.w)) < 0) {
+			if (msgbuf_write(&ibuf_se.w) < 0) {
 				log_warn("pipe write error (to SE)");
 				quit = 1;
 			}
 
 		if (nfds > 0 && (pfd[PFD_PIPE_ROUTE].revents & POLLOUT))
-			if ((n = msgbuf_write(&ibuf_rde.w)) < 0) {
+			if (msgbuf_write(&ibuf_rde.w) < 0) {
 				log_warn("pipe write error (to RDE)");
 				quit = 1;
 			}
 
 		if (nfds > 0 && pfd[PFD_PIPE_SESSION].revents & POLLIN) {
 			nfds--;
-			if (dispatch_imsg(&ibuf_se, PFD_PIPE_SESSION,
-			    &mrt_l) == -1)
+			if (dispatch_imsg(&ibuf_se, PFD_PIPE_SESSION) == -1)
 				quit = 1;
 		}
 
 		if (nfds > 0 && pfd[PFD_PIPE_ROUTE].revents & POLLIN) {
 			nfds--;
-			if (dispatch_imsg(&ibuf_rde, PFD_PIPE_ROUTE,
-			    &mrt_l) == -1)
+			if (dispatch_imsg(&ibuf_rde, PFD_PIPE_ROUTE) == -1)
 				quit = 1;
 		}
 
@@ -277,14 +287,6 @@ main(int argc, char *argv[])
 			nfds--;
 			if (kr_dispatch_msg() == -1)
 				quit = 1;
-		}
-
-		for (j = PFD_MRT_START; j < i && nfds > 0 ; j++) {
-			if (pfd[j].revents & POLLOUT) {
-				if ((n = mrt_write(mrt[j])) < 0) {
-					log_warn("mrt write error");
-				}
-			}
 		}
 
 		if (reconfig) {
@@ -320,13 +322,15 @@ main(int argc, char *argv[])
 		free(p);
 	}
 	while ((m = LIST_FIRST(&mrt_l)) != NULL) {
-		LIST_REMOVE(m, list);
+		LIST_REMOVE(m, entry);
 		free(m);
 	}
 
 	free(rules_l);
 	control_cleanup();
 	kr_shutdown();
+	pftable_clear_all();
+	free(conf.listen_addrs);
 
 	do {
 		if ((pid = wait(NULL)) == -1 &&
@@ -366,6 +370,7 @@ reconfigure(char *conffile, struct bgpd_config *conf, struct mrt_head *mrt_l,
 	struct network		*n;
 	struct peer		*p;
 	struct filter_rule	*r;
+	struct listen_addr	*la;
 
 	if (parse_config(conffile, conf, mrt_l, peer_l, &net_l, rules_l)) {
 		log_warnx("config file %s has errors, not reloading",
@@ -373,43 +378,53 @@ reconfigure(char *conffile, struct bgpd_config *conf, struct mrt_head *mrt_l,
 		return (-1);
 	}
 
+	prepare_listeners(conf);
+
 	if (imsg_compose(&ibuf_se, IMSG_RECONF_CONF, 0,
 	    conf, sizeof(struct bgpd_config)) == -1)
 		return (-1);
 	if (imsg_compose(&ibuf_rde, IMSG_RECONF_CONF, 0,
 	    conf, sizeof(struct bgpd_config)) == -1)
 		return (-1);
-	for (p = *peer_l; p != NULL; p = p->next) {
+	for (p = *peer_l; p != NULL; p = p->next)
 		if (imsg_compose(&ibuf_se, IMSG_RECONF_PEER, p->conf.id,
 		    &p->conf, sizeof(struct peer_config)) == -1)
 			return (-1);
-		if (imsg_compose(&ibuf_rde, IMSG_RECONF_PEER, p->conf.id,
-		    &p->conf, sizeof(struct peer_config)) == -1)
-			return (-1);
-	}
 	while ((n = TAILQ_FIRST(&net_l)) != NULL) {
-		if (imsg_compose(&ibuf_rde, IMSG_RECONF_NETWORK, 0,
+		if (imsg_compose(&ibuf_rde, IMSG_NETWORK_ADD, 0,
 		    &n->net, sizeof(struct network_config)) == -1)
 			return (-1);
-		TAILQ_REMOVE(&net_l, n, network_l);
+		TAILQ_REMOVE(&net_l, n, entry);
 		free(n);
 	}
 	while ((r = TAILQ_FIRST(rules_l)) != NULL) {
 		if (imsg_compose(&ibuf_rde, IMSG_RECONF_FILTER, 0,
 		    r, sizeof(struct filter_rule)) == -1)
 			return (-1);
-		TAILQ_REMOVE(rules_l, r, entries);
+		TAILQ_REMOVE(rules_l, r, entry);
 		free(r);
 	}
+	while ((la = TAILQ_FIRST(conf->listen_addrs)) != NULL) {
+		if (imsg_compose_fdpass(&ibuf_se, IMSG_RECONF_LISTENER, la->fd,
+		    la, sizeof(struct listen_addr)) == -1)
+			return (-1);
+		TAILQ_REMOVE(conf->listen_addrs, la, entry);
+		free(la);
+	}
+	free(conf->listen_addrs);
+	conf->listen_addrs = NULL;
+
 	if (imsg_compose(&ibuf_se, IMSG_RECONF_DONE, 0, NULL, 0) == -1 ||
 	    imsg_compose(&ibuf_rde, IMSG_RECONF_DONE, 0, NULL, 0) == -1)
 		return (-1);
 
+	/* mrt changes can be sent out of bound */
+	mrt_reconfigure(mrt_l);
 	return (0);
 }
 
 int
-dispatch_imsg(struct imsgbuf *ibuf, int idx, struct mrt_head *mrt_l)
+dispatch_imsg(struct imsgbuf *ibuf, int idx)
 {
 	struct imsg		 imsg;
 	int			 n;
@@ -430,11 +445,6 @@ dispatch_imsg(struct imsgbuf *ibuf, int idx, struct mrt_head *mrt_l)
 			break;
 
 		switch (imsg.hdr.type) {
-		case IMSG_MRT_MSG:
-		case IMSG_MRT_END:
-			if (mrt_queue(mrt_l, &imsg) == -1)
-				log_warnx("mrt_queue failed.");
-			break;
 		case IMSG_KROUTE_CHANGE:
 			if (idx != PFD_PIPE_ROUTE)
 				log_warnx("route request not from RDE");
@@ -464,7 +474,37 @@ dispatch_imsg(struct imsgbuf *ibuf, int idx, struct mrt_head *mrt_l)
 				if (imsg.hdr.len != IMSG_HEADER_SIZE +
 				    sizeof(struct bgpd_addr))
 					log_warnx("wrong imsg len");
-				else kr_nexthop_delete(imsg.data);
+				else
+					kr_nexthop_delete(imsg.data);
+			break;
+		case IMSG_PFTABLE_ADD:
+			if (idx != PFD_PIPE_ROUTE)
+				log_warnx("pftable request not from RDE");
+			else
+				if (imsg.hdr.len != IMSG_HEADER_SIZE +
+				    sizeof(struct pftable_msg))
+					log_warnx("wrong imsg len");
+				else if (pftable_addr_add(imsg.data) != 0)
+					return (-1);
+			break;
+		case IMSG_PFTABLE_REMOVE:
+			if (idx != PFD_PIPE_ROUTE)
+				log_warnx("pftable request not from RDE");
+			else
+				if (imsg.hdr.len != IMSG_HEADER_SIZE +
+				    sizeof(struct pftable_msg))
+					log_warnx("wrong imsg len");
+				else if (pftable_addr_remove(imsg.data) != 0)
+					return (-1);
+			break;
+		case IMSG_PFTABLE_COMMIT:
+			if (idx != PFD_PIPE_ROUTE)
+				log_warnx("pftable request not from RDE");
+			else
+				if (imsg.hdr.len != IMSG_HEADER_SIZE)
+					log_warnx("wrong imsg len");
+				else if (pftable_commit() != 0)
+					return (-1);
 			break;
 		case IMSG_CTL_RELOAD:
 			if (idx != PFD_PIPE_SESSION)

@@ -1,4 +1,4 @@
-/*	$OpenBSD: binary.c,v 1.10 2003/12/29 21:20:55 canacar Exp $	*/
+/*	$OpenBSD: binary.c,v 1.12 2004/05/06 20:18:51 otto Exp $	*/
 
 /*-
  * Copyright (c) 1999 James Howard and Dag-Erling Coïdan Smørgrav
@@ -32,6 +32,8 @@
 
 #include "grep.h"
 
+#define	isbinary(ch)	(!isprint((ch)) && !isspace((ch)) && (ch) != '\b')
+
 int
 bin_file(FILE *f)
 {
@@ -39,14 +41,14 @@ bin_file(FILE *f)
 	int		i, m;
 	int		ret = 0;
 
-	if (fseek(f, 0L, SEEK_SET) == -1)
+	if (isatty(fileno(f)) || fseek(f, 0L, SEEK_SET) == -1)
 		return 0;
 
 	if ((m = (int)fread(buf, 1, BUFSIZ, f)) == 0)
 		return 0;
 
 	for (i = 0; i < m; i++)
-		if (!isprint(buf[i]) && !isspace(buf[i])) {
+		if (isbinary(buf[i])) {
 			ret = 1;
 			break;
 		}
@@ -70,7 +72,7 @@ gzbin_file(gzFile *f)
 		return 0;
 
 	for (i = 0; i < m; i++)
-		if (!isprint(buf[i]) && !isspace(buf[i])) {
+		if (isbinary(buf[i])) {
 			ret = 1;
 			break;
 		}
@@ -87,7 +89,7 @@ mmbin_file(mmf_t *f)
 
 	/* XXX knows too much about mmf internals */
 	for (i = 0; i < BUFSIZ && i < f->len; i++)
-		if (!isprint(f->base[i]) && !isspace(f->base[i]))
+		if (isbinary(f->base[i]))
 			return 1;
 	return 0;
 }

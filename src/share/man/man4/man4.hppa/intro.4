@@ -1,4 +1,4 @@
-.\" $OpenBSD: intro.4,v 1.4 2004/03/17 02:36:02 mickey Exp $
+.\" $OpenBSD: intro.4,v 1.8 2004/08/30 08:52:23 jmc Exp $
 .\"
 .\" Copyright (c) 2002,2003 Paul Weissmann
 .\" All rights reserved.
@@ -81,70 +81,10 @@ To enable a device which did not autoconfigure, the system must be rebooted.
 The autoconfiguration system is described in
 .Xr autoconf 4 .
 .Sh SUPPORTED SYSTEMS
-OpenBSD/hppa should run on systems similar to those, listed below,
-as long as they're based upon the following:
-.Pp
-.Bl -bullet -compact
-.It
-.Tn HP PA-RISC 1.1
-processors:
-.Bl -tag -compact -width PA7100/PA7150xx
-.It PA7000
-.It PA7100/PA7150
-.It PA7200/PA7250
-.It PA7100LC
-.It PA7300LC
-.El
-.It
-Viper memory controller;
-.It
-GSC bus controllers:
-.Bl -tag -compact -width WAXxx
-.It ASP
-.It LASI
-Super-integrated I/O
-.It WAX
-Basic I/O
-.El
-.It
-SCSI I/O-processors:
-.Bl -tag -compact -width NCR53c700/710xx
-.It NCR53c700/710
-Narrow Single-Ended
-.It NCR53c720
-Fast Wide Differential
-.El
-.It
-Intel i82596 CA/DX LAN coprocessors
-.It
-Venom, (H)CRX-8 and (H)CRX-24 video controllers
-.It
-EISA Adapters:
-.Bl -tag -compact -width WAX-EISAxx
-.It i82350 (Mongoose)
-.It WAX-EISA
-.El
-.It
-PCI Adapters:
-.Bl -tag -compact -width DINO
-.It Dino
-GSC-PCI bridge
-.It Cujo
-GSC-PCI 64bit bridge
-.El
-.It
-Human Interface Loop
-.Tn (HIL)
-keyboard and mouse
-.It
-PS/2 port keyboard and mouse
-.El
-.Pp
-Below a list of
+A list of
 .Tn HP 9000/700
-models targetted for support is listed, including basic
+models targetted for support is listed below, including basic
 system characteristics.
-.Pp
 .Bl -column "J210XC" "200" "7300LC" "64/64(+1MB)" "Expansion" -offset left
 .It "Model" Ta "MHz" Ta "CPU" Ta "Caches, KB" Ta "Expansion"
 .It "705" Ta "35" Ta "7000" Ta "32/64" Ta "N/A"
@@ -203,13 +143,21 @@ system characteristics.
 .It "RDI" Ta "132" Ta "7300LC" Ta "64/64(+1MB)" Ta "2 CardBus"
 .It "RDI" Ta "160" Ta "7300LC" Ta "64/64(+1MB)" Ta "2 CardBus"
 .It "RDI"  Ta "180" Ta "7300LC" Ta "64/64(+1MB)" Ta "2 CardBus"
+.It "C160" Ta "160" Ta "8000" Ta "512/512" Ta "2 GSC/PCI/EISA, 2 GSC/EISA"
+.It "C180" Ta "180" Ta "8000" Ta "1024/1024" Ta "2 GSC/PCI/EISA, 2 GSC/EISA"
+.It "J280" Ta "180" Ta "8000" Ta "1024/1024" Ta "3 GSC/PCI, PCI, PCI/EISA"
+.It "J282" Ta "180" Ta "8000" Ta "1024/1024" Ta "3 GSC/PCI, PCI, PCI/EISA"
+.It "C200" Ta "200" Ta "8200" Ta "512/1024" Ta "GSC/PCI/EISA, 3 GSC/PCI"
+.It "C240" Ta "240" Ta "8200" Ta "2048/2048" Ta "GSC/PCI/EISA, 3 GSC/PCI"
+.It "J2240" Ta "240" Ta "8200" Ta "2048/2048" Ta "3 GSC/PCI, PCI, PCI/EISA"
+.It "C360" Ta "360" Ta "8500" Ta "512/1024" Ta "GSC/PCI/EISA, 3 GSC/PCI"
 .El
 .Sh LIST OF DEVICES
 The devices listed below are supported in this incarnation of
 the system.
 Devices are indicated by their functional interface.
 Not all supported devices are listed.
-.Bl -tag -width le/lebuffer
+.Bl -tag -width phantomasXXX
 .It Xr asp 4
 The ASP I/O controller; found in most of the older machines which
 don't have LASI or WAX.
@@ -258,6 +206,8 @@ bus controller on most of the older 700 machines.
 .It Xr pdc 4
 The PROM interface, allows to call the routines in the machine's
 PROM for things like initial console output and such.
+.It Xr phantomas 4
+Phantom PseudoBC GSC+ Port.
 .It Xr power 4
 The power button interface allowing graceful shutdown of the
 system should being depressed on the running system.
@@ -275,6 +225,7 @@ implementations for add-on devices.
 .El
 .Sh SEE ALSO
 .Xr autoconf 4 ,
+.Xr io 4 ,
 .Xr config 8
 .Sh HISTORY
 The

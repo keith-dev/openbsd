@@ -1,4 +1,4 @@
-/*	$OpenBSD: gprof.h,v 1.9 2003/06/03 02:56:08 millert Exp $	*/
+/*	$OpenBSD: gprof.h,v 1.11 2004/07/20 18:20:55 marc Exp $	*/
 /*	$NetBSD: gprof.h,v 1.13 1996/04/01 21:54:06 mark Exp $	*/
 
 /*
@@ -184,7 +184,7 @@ UNIT	*samples;
 
 unsigned long	s_lowpc;	/* lowpc from the profile file */
 unsigned long	s_highpc;	/* highpc from the profile file */
-unsigned lowpc, highpc;		/* range profiled, in UNIT's */
+unsigned long	lowpc, highpc;	/* range profiled, in UNIT's */
 unsigned sampbytes;		/* number of bytes of samples */
 int	nsamples;		/* number of samples */
 double	actime;			/* accumulated time thus far for putprofline */
@@ -301,6 +301,7 @@ int		totalcmp();
 #define	TIMEDEBUG	16
 #define	SAMPLEDEBUG	32
 #define	AOUTDEBUG	64
+#define	ELFDEBUG	AOUTDEBUG
 #define	CALLDEBUG	128
 #define	LOOKUPDEBUG	256
 #define	PROPDEBUG	512

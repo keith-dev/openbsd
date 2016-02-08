@@ -401,6 +401,10 @@ elsif ($PLATFORM eq 'os2') {
 		    nthreads_cond
 		    os2_cond_wait
 		    os2_stat
+		    os2_execname
+		    async_mssleep
+		    msCounter
+		    InfoTable
 		    pthread_join
 		    pthread_create
 		    pthread_detach
@@ -620,6 +624,12 @@ else {
 		    Perl_malloced_size
 		    MallocCfg_ptr
 		    MallocCfgP_ptr
+		    )];
+}
+
+if ($define{'PERL_MALLOC_WRAP'}) {
+    emit_symbols [qw(
+		    PL_memory_wrap
 		    )];
 }
 
@@ -1028,6 +1038,7 @@ if ($PLATFORM =~ /^win(?:32|ce)$/) {
 			    win32_pclose
 			    win32_rename
 			    win32_setmode
+			    win32_chsize
 			    win32_lseek
 			    win32_tell
 			    win32_dup
@@ -1344,6 +1355,10 @@ foreach my $symbol (sort keys %export) {
 if ($PLATFORM eq 'os2') {
 	print <<EOP;
     dll_perlmain=main
+    fill_extLibpath
+    dir_subst
+    Perl_OS2_handler_install
+
 ; LAST_ORDINAL=$sym_ord
 EOP
 }

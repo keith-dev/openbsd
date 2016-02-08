@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.51 2004/03/19 14:04:43 hshoexer Exp $
+#	$OpenBSD: Makefile,v 1.57 2004/08/23 11:16:49 ho Exp $
 #	$EOM: Makefile,v 1.78 2000/10/15 21:33:42 niklas Exp $
 
 #
@@ -47,10 +47,10 @@ OS=		openbsd
 # Compile-time configuration of otherwise optional features
 #FEATURES=	tripledes des blowfish cast aes
 #FEATURES+=	policy x509 ec aggressive debug gmp
-#FEATURES+=	rawkey isakmp_cfg dnssec privsep
+#FEATURES+=	rawkey isakmp_cfg dnssec privsep nat_traversal dpd
 FEATURES=	tripledes des blowfish cast aes
 FEATURES+=	policy x509 ec aggressive debug
-FEATURES+=	rawkey isakmp_cfg privsep
+FEATURES+=	rawkey isakmp_cfg privsep nat_traversal dpd
 
 .PATH:		${.CURDIR}/sysdep/${OS}
 
@@ -63,7 +63,8 @@ SRCS=		app.c attribute.c cert.c connection.c constants.c conf.c \
 		ike_phase_1.c ike_quick_mode.c init.c ipsec.c ipsec_fld.c \
 		ipsec_num.c isakmpd.c isakmp_doi.c isakmp_fld.c isakmp_num.c \
 		key.c libcrypto.c log.c message.c math_2n.c math_group.c \
-		prf.c sa.c sysdep.c timer.c transport.c udp.c ui.c util.c
+		prf.c sa.c sysdep.c timer.c transport.c virtual.c udp.c \
+		ui.c util.c
 
 GENERATED=	exchange_num.h ipsec_fld.h ipsec_num.h isakmp_fld.h \
 		isakmp_num.h
@@ -72,7 +73,7 @@ CLEANFILES=	exchange_num.c exchange_num.h ipsec_num.c ipsec_num.h \
 		isakmp_fld.c isakmp_fld.h
 MAN=		isakmpd.8 isakmpd.conf.5 isakmpd.policy.5
 CFLAGS+=	-Wall -Wstrict-prototypes -Wmissing-prototypes \
-		-DNEED_SYSDEP_APP \
+		-Wmissing-declarations -DNEED_SYSDEP_APP \
 		-I${.CURDIR} -I${.CURDIR}/sysdep/${OS} -I.
 #CFLAGS+=	-Wsign-compare -Werror
 
@@ -95,31 +96,9 @@ CFLAGS+=	-Wall -Wstrict-prototypes -Wmissing-prototypes \
 # If you like to use Boehm's garbage collector (/usr/ports/devel/boehm-gc).
 #LDADD+=		-L/usr/local/lib -lgc
 #DPADD+=		/usr/local/lib/libgc.a
-
+#CFLAGS+=		-DUSE_BOEHM_GC -DGC_DEBUG
 # You can also use Boehm's garbage collector as a means to find leaks.
-# XXX The defines below are GCC-specific.  I think it is OK to require
-# XXX GCC if you are debugging isakmpd in this way.
-#LDADD+=		-L/usr/local/lib -lleak
-#DPADD+=		/usr/local/lib/libleak.a
-#CFLAGS+=	-D'malloc(x)=({ \
-#		  void *GC_debug_malloc (size_t, char *, int); \
-#		  GC_debug_malloc ((x), __FILE__, __LINE__); \
-#		})' \
-#		-D'realloc(x,y)=({ \
-#		  void *GC_debug_realloc (void *, size_t, char *, int); \
-#		  GC_debug_realloc ((x), (y), __FILE__, __LINE__); \
-#		})' \
-#		-D'free(x)=({ \
-#		  void GC_debug_free (void *); \
-#		  GC_debug_free (x); \
-#		})' \
-#		-D'calloc(x,y)=malloc((x) * (y))' \
-#		-D'strdup(x)=({ \
-#		  char *strcpy (char *, const char *); \
-#		  const char *_x_ = (x); \
-#		  char *_y_ = malloc (strlen (_x_) + 1); \
-#		  strcpy (_y_, _x_); \
-#		})'
+#  # setenv GC_FIND_LEAK
 
 SUBDIR=		apps
 
@@ -178,7 +157,7 @@ DPADD+=		${LIBDES}
 .endif
 
 SRCS+=		${IPSEC_SRCS} ${X509} ${POLICY} ${EC} ${AGGRESSIVE} ${DNSSEC} \
-		${ISAKMP_CFG} ${PRIVSEP}
+		${ISAKMP_CFG} ${PRIVSEP} ${DPD} ${NAT_TRAVERSAL}
 CFLAGS+=	${IPSEC_CFLAGS} ${DNSSEC_CFLAGS}
 
 LDADD+=		${DESLIB} ${LWRESLIB}
@@ -203,3 +182,6 @@ ${PROG} beforedepend: ${GENERATED}
 
 .include <bsd.prog.mk>
 .include <bsd.subdir.mk>
+
+debug:
+	(cd ${.CURDIR}; ${MAKE} DEBUG="-g -Werror")

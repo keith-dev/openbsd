@@ -1,4 +1,4 @@
-/*	$OpenBSD: session.c,v 1.139 2004/03/20 23:17:35 david Exp $ */
+/*	$OpenBSD: session.c,v 1.189 2004/09/09 21:53:57 henning Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -44,14 +44,13 @@
 #include "mrt.h"
 #include "session.h"
 
-#define	PFD_LISTEN	0
-#define PFD_PIPE_MAIN	1
-#define PFD_PIPE_ROUTE	2
-#define	PFD_SOCK_CTL	3
-#define PFD_PEERS_START	4
+#define PFD_PIPE_MAIN		0
+#define PFD_PIPE_ROUTE		1
+#define	PFD_SOCK_CTL		2
+#define PFD_LISTENERS_START	3
 
 void	session_sighdlr(int);
-int	setup_listener(void);
+int	setup_listeners(u_int *);
 void	init_conf(struct bgpd_config *);
 void	init_peer(struct peer *);
 int	timer_due(time_t);
@@ -72,27 +71,31 @@ int	session_dispatch_msg(struct pollfd *, struct peer *);
 int	parse_header(struct peer *, u_char *, u_int16_t *, u_int8_t *);
 int	parse_open(struct peer *);
 int	parse_update(struct peer *);
+int	parse_refresh(struct peer *);
 int	parse_notification(struct peer *);
 int	parse_keepalive(struct peer *);
 int	parse_capabilities(struct peer *, u_char *, u_int16_t);
-void	session_dispatch_imsg(struct imsgbuf *, int);
+void	session_dispatch_imsg(struct imsgbuf *, int, u_int *);
 void	session_up(struct peer *);
 void	session_down(struct peer *);
 
-struct peer		*getpeerbyaddr(struct bgpd_addr *);
+int			 la_cmp(struct listen_addr *, struct listen_addr *);
+struct peer		*getpeerbyip(struct sockaddr *);
+int			 session_match_mask(struct peer *, struct sockaddr *);
 struct peer		*getpeerbyid(u_int32_t);
 static struct sockaddr	*addr2sa(struct bgpd_addr *, u_int16_t);
 
 struct bgpd_config	*conf, *nconf = NULL;
+struct bgpd_sysdep	 sysdep;
 struct peer		*npeers;
 volatile sig_atomic_t	 session_quit = 0;
 int			 pending_reconf = 0;
-int			 sock = -1;
 int			 csock = -1;
+u_int			 peer_cnt;
 struct imsgbuf		 ibuf_rde;
 struct imsgbuf		 ibuf_main;
 
-struct mrt_config_head	 mrt_l;
+struct mrt_head		 mrthead;
 
 void
 session_sighdlr(int sig)
@@ -106,52 +109,74 @@ session_sighdlr(int sig)
 }
 
 int
-setup_listener(void)
+setup_listeners(u_int *la_cnt)
 {
-	int			 fd, opt;
+	int			 opt;
+	struct listen_addr	*la;
+	u_int			 cnt = 0;
 
-	if ((fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)) == -1)
-		return (fd);
+	TAILQ_FOREACH(la, conf->listen_addrs, entry) {
+		la->reconf = RECONF_NONE;
+		cnt++;
 
-	opt = 1;
-	if (setsockopt(fd, SOL_SOCKET, SO_REUSEPORT, &opt, sizeof(opt)) == -1)
-		fatal("setsockopt SO_REUSEPORT");
-	if (setsockopt(fd, IPPROTO_TCP, TCP_MD5SIG, &opt, sizeof(opt)) == -1)
-		fatal("setsockopt TCP_MD5SIG");
+		if (la->flags & LISTENER_LISTENING)
+			continue;
 
-	if (bind(fd, (struct sockaddr *)&conf->listen_addr,
-	    sizeof(conf->listen_addr))) {
-		close(fd);
-		return (-1);
+		if (la->fd == -1) {
+			log_warn("cannot establish listener on %s: invalid fd",
+			    log_sockaddr((struct sockaddr *)&la->sa));
+			continue;
+		}
+
+		opt = 1;
+		if (setsockopt(la->fd, IPPROTO_TCP, TCP_MD5SIG,
+		    &opt, sizeof(opt)) == -1) {
+			if (errno == ENOPROTOOPT) {	/* system w/o md5sig */
+				log_warnx("md5sig not available, disabling");
+				sysdep.no_md5sig = 1;
+			} else
+				fatal("setsockopt TCP_MD5SIG");
+		}
+
+		session_socket_blockmode(la->fd, BM_NONBLOCK);
+
+		if (listen(la->fd, MAX_BACKLOG)) {
+			close(la->fd);
+			fatal("listen");
+		}
+
+		la->flags |= LISTENER_LISTENING;
+
+		log_info("listening on %s",
+		    log_sockaddr((struct sockaddr *)&la->sa));
 	}
 
-	session_socket_blockmode(fd, BM_NONBLOCK);
+	*la_cnt = cnt;
 
-	if (listen(fd, MAX_BACKLOG)) {
-		close(fd);
-		return (-1);
-	}
-
-	return (fd);
+	return (0);
 }
 
-
-int
+pid_t
 session_main(struct bgpd_config *config, struct peer *cpeers,
     struct network_head *net_l, struct filter_head *rules,
-    struct mrt_head *m_l, int pipe_m2s[2], int pipe_s2r[2])
+    struct mrt_head *m_l, int pipe_m2s[2], int pipe_s2r[2], int pipe_m2r[2])
 {
-	int			 nfds, i, j, timeout, idx_peers;
+	int			 nfds, i, j, timeout;
+	int			 idx_peers, idx_listeners, idx_mrts;
 	pid_t			 pid;
 	time_t			 nextaction;
+	u_int			 pfd_elms = 0, peer_l_elms = 0, mrt_l_elms = 0;
+	u_int			 listener_cnt, ctl_cnt, mrt_cnt;
+	u_int			 new_cnt;
 	struct passwd		*pw;
-	struct peer		*p, *peer_l[OPEN_MAX], *last, *next;
+	struct peer		*p, **peer_l = NULL, *last, *next;
 	struct network		*net;
-	struct mrt		*m;
-	struct mrt_config	*mrt;
+	struct mrt		*m, **mrt_l = NULL;
 	struct filter_rule	*r;
-	struct pollfd		 pfd[OPEN_MAX];
+	struct pollfd		*pfd = NULL;
 	struct ctl_conn		*ctl_conn;
+	struct listen_addr	*la;
+	void			*newp;
 	short			 events;
 
 	conf = config;
@@ -181,10 +206,7 @@ session_main(struct bgpd_config *config, struct peer *cpeers,
 	setproctitle("session engine");
 	bgpd_process = PROC_SE;
 
-	if ((sock = setup_listener()) == -1)
-		fatalx("listener setup failed");
-
-	if (pfkey_init() == -1)
+	if (pfkey_init(&sysdep) == -1)
 		fatalx("pfkey setup failed");
 
 	if (setgroups(1, &pw->pw_gid) ||
@@ -194,61 +216,52 @@ session_main(struct bgpd_config *config, struct peer *cpeers,
 
 	endpwent();
 
+	listener_cnt = 0;
+	setup_listeners(&listener_cnt);
+
 	signal(SIGTERM, session_sighdlr);
 	signal(SIGINT, session_sighdlr);
 	signal(SIGPIPE, SIG_IGN);
 	log_info("session engine ready");
 	close(pipe_m2s[0]);
 	close(pipe_s2r[1]);
+	close(pipe_m2r[0]);
+	close(pipe_m2r[1]);
 	init_conf(conf);
 	imsg_init(&ibuf_rde, pipe_s2r[0]);
 	imsg_init(&ibuf_main, pipe_m2s[1]);
 	TAILQ_INIT(&ctl_conns);
 	csock = control_listen();
-	LIST_INIT(&mrt_l);
+	LIST_INIT(&mrthead);
+	peer_cnt = 0;
+	ctl_cnt = 0;
 
 	/* filter rules are not used in the SE */
 	while ((r = TAILQ_FIRST(rules)) != NULL) {
-		TAILQ_REMOVE(rules, r, entries);
+		TAILQ_REMOVE(rules, r, entry);
 		free(r);
 	}
 	free(rules);
 
 	/* network list is not used in the SE */
 	while ((net = TAILQ_FIRST(net_l)) != NULL) {
-		TAILQ_REMOVE(net_l, net, network_l);
+		TAILQ_REMOVE(net_l, net, entry);
 		free(net);
 	}
 
 	/* main mrt list is not used in the SE */
 	while ((m = LIST_FIRST(m_l)) != NULL) {
-		LIST_REMOVE(m, list);
+		LIST_REMOVE(m, entry);
 		free(m);
 	}
 
 	while (session_quit == 0) {
-		bzero(&pfd, sizeof(pfd));
-		pfd[PFD_LISTEN].fd = sock;
-		pfd[PFD_LISTEN].events = POLLIN;
-		pfd[PFD_PIPE_MAIN].fd = ibuf_main.sock;
-		pfd[PFD_PIPE_MAIN].events = POLLIN;
-		if (ibuf_main.w.queued > 0)
-			pfd[PFD_PIPE_MAIN].events |= POLLOUT;
-		pfd[PFD_PIPE_ROUTE].fd = ibuf_rde.sock;
-		pfd[PFD_PIPE_ROUTE].events = POLLIN;
-		if (ibuf_rde.w.queued > 0)
-			pfd[PFD_PIPE_ROUTE].events |= POLLOUT;
-		pfd[PFD_SOCK_CTL].fd = csock;
-		pfd[PFD_SOCK_CTL].events = POLLIN;
-
-		nextaction = time(NULL) + 240;	/* loop every 240s at least */
-		i = PFD_PEERS_START;
-
+		/* check for peers to be initialized or deleted */
 		last = NULL;
 		for (p = peers; p != NULL; p = next) {
 			next = p->next;
 			if (!pending_reconf) {
-				/* needs init? */
+				/* new peer that needs init? */
 				if (p->state == STATE_NONE)
 					init_peer(p);
 
@@ -267,12 +280,88 @@ session_main(struct bgpd_config *config, struct peer *cpeers,
 					else
 						peers = next;
 					free(p);
+					peer_cnt--;
 					continue;
 				}
 				p->conf.reconf_action = RECONF_NONE;
 			}
 			last = p;
+		}
 
+		if (peer_cnt > peer_l_elms ||
+		    peer_cnt + 2 * PEER_L_RESERVE < peer_l_elms) {
+			if ((newp = realloc(peer_l, sizeof(struct peer *) *
+			    (peer_cnt + PEER_L_RESERVE))) == NULL) {
+				/* panic for now  */
+				log_warn("could not resize peer_l from %u -> %u"
+				    " entries", peer_l_elms,
+				    peer_cnt + PEER_L_RESERVE);
+				fatalx("exiting");
+			}
+			peer_l = newp;
+			peer_l_elms = peer_cnt + PEER_L_RESERVE;
+		}
+
+		mrt_cnt = 0;
+		LIST_FOREACH(m, &mrthead, entry) {
+			if (m->queued)
+				mrt_cnt++;
+		}
+
+		if (mrt_cnt > mrt_l_elms ||
+		    mrt_cnt + 2 * PEER_L_RESERVE < mrt_l_elms) {
+			if ((newp = realloc(mrt_l, sizeof(struct mrt *) *
+			    (mrt_cnt + PEER_L_RESERVE))) == NULL) {
+				/* panic for now  */
+				log_warn("could not resize mrt_l from %u -> %u"
+				    " entries", mrt_l_elms,
+				    mrt_cnt + PEER_L_RESERVE);
+				fatalx("exiting");
+			}
+			mrt_l = newp;
+			mrt_l_elms = mrt_cnt + PEER_L_RESERVE;
+		}
+
+		new_cnt = PFD_LISTENERS_START + listener_cnt + peer_cnt +
+		    ctl_cnt + mrt_cnt;
+		if (new_cnt > pfd_elms ||
+		    (new_cnt + 2) * PFD_RESERVE < pfd_elms) {
+			if ((newp = realloc(pfd, sizeof(struct pollfd) *
+			    (new_cnt + PFD_RESERVE))) == NULL) {
+				/* panic for now  */
+				log_warn("could not resize pfd from %u -> %u"
+				    " entries", pfd_elms,
+				    new_cnt + PFD_RESERVE);
+				fatalx("exiting");
+			}
+			pfd = newp;
+			pfd_elms = new_cnt + PFD_RESERVE;
+		}
+
+		bzero(pfd, sizeof(struct pollfd) * pfd_elms);
+		pfd[PFD_PIPE_MAIN].fd = ibuf_main.fd;
+		pfd[PFD_PIPE_MAIN].events = POLLIN;
+		if (ibuf_main.w.queued > 0)
+			pfd[PFD_PIPE_MAIN].events |= POLLOUT;
+		pfd[PFD_PIPE_ROUTE].fd = ibuf_rde.fd;
+		pfd[PFD_PIPE_ROUTE].events = POLLIN;
+		if (ibuf_rde.w.queued > 0)
+			pfd[PFD_PIPE_ROUTE].events |= POLLOUT;
+		pfd[PFD_SOCK_CTL].fd = csock;
+		pfd[PFD_SOCK_CTL].events = POLLIN;
+
+		nextaction = time(NULL) + 240;	/* loop every 240s at least */
+		i = PFD_LISTENERS_START;
+
+		TAILQ_FOREACH(la, conf->listen_addrs, entry) {
+			pfd[i].fd = la->fd;
+			pfd[i].events = POLLIN;
+			i++;
+		}
+
+		idx_listeners = i;
+
+		for (p = peers; p != NULL; p = p->next) {
 			/* check timers */
 			if (timer_due(p->HoldTimer))
 				bgp_fsm(p, EVNT_TIMER_HOLDTIME);
@@ -314,18 +403,28 @@ session_main(struct bgpd_config *config, struct peer *cpeers,
 				events |= POLLOUT;
 
 			/* poll events */
-			if (p->sock != -1 && events != 0) {
-				pfd[i].fd = p->sock;
+			if (p->fd != -1 && events != 0) {
+				pfd[i].fd = p->fd;
 				pfd[i].events = events;
-				peer_l[i] = p;
+				peer_l[i - idx_listeners] = p;
 				i++;
 			}
 		}
 
 		idx_peers = i;
 
-		TAILQ_FOREACH(ctl_conn, &ctl_conns, entries) {
-			pfd[i].fd = ctl_conn->ibuf.sock;
+		LIST_FOREACH(m, &mrthead, entry)
+			if (m->queued) {
+				pfd[i].fd = m->fd;
+				pfd[i].events = POLLOUT;
+				mrt_l[i - idx_peers] = m;
+				i++;
+			}
+
+		idx_mrts = i;
+
+		TAILQ_FOREACH(ctl_conn, &ctl_conns, entry) {
+			pfd[i].fd = ctl_conn->ibuf.fd;
 			pfd[i].events = POLLIN;
 			if (ctl_conn->ibuf.w.queued > 0)
 				pfd[i].events |= POLLOUT;
@@ -339,18 +438,14 @@ session_main(struct bgpd_config *config, struct peer *cpeers,
 			if (errno != EINTR)
 				fatal("poll error");
 
-		if (nfds > 0 && pfd[PFD_LISTEN].revents & POLLIN) {
-			nfds--;
-			session_accept(sock);
-		}
-
 		if (nfds > 0 && pfd[PFD_PIPE_MAIN].revents & POLLOUT)
 			if (msgbuf_write(&ibuf_main.w) < 0)
 				fatal("pipe write error");
 
 		if (nfds > 0 && pfd[PFD_PIPE_MAIN].revents & POLLIN) {
 			nfds--;
-			session_dispatch_imsg(&ibuf_main, PFD_PIPE_MAIN);
+			session_dispatch_imsg(&ibuf_main, PFD_PIPE_MAIN,
+			    &listener_cnt);
 		}
 
 		if (nfds > 0 && pfd[PFD_PIPE_ROUTE].revents & POLLOUT)
@@ -359,31 +454,57 @@ session_main(struct bgpd_config *config, struct peer *cpeers,
 
 		if (nfds > 0 && pfd[PFD_PIPE_ROUTE].revents & POLLIN) {
 			nfds--;
-			session_dispatch_imsg(&ibuf_rde, PFD_PIPE_ROUTE);
+			session_dispatch_imsg(&ibuf_rde, PFD_PIPE_ROUTE,
+			    &listener_cnt);
 		}
 
 		if (nfds > 0 && pfd[PFD_SOCK_CTL].revents & POLLIN) {
 			nfds--;
-			control_accept(csock);
+			ctl_cnt += control_accept(csock);
 		}
 
-		for (j = PFD_PEERS_START; nfds > 0 && j < idx_peers; j++)
-			nfds -= session_dispatch_msg(&pfd[j], peer_l[j]);
+		for (j = PFD_LISTENERS_START; nfds > 0 && j < idx_listeners;
+		    j++)
+			if (pfd[j].revents & POLLIN) {
+				nfds--;
+				session_accept(pfd[j].fd);
+			}
+
+		for (; nfds > 0 && j < idx_peers; j++)
+			nfds -= session_dispatch_msg(&pfd[j],
+			    peer_l[j - idx_listeners]);
+
+		for (; nfds > 0 && j < idx_mrts; j++)
+			if (pfd[j].revents & POLLOUT) {
+				nfds--;
+				mrt_write(mrt_l[j - idx_peers]);
+			}
 
 		for (; nfds > 0 && j < i; j++)
-			nfds -= control_dispatch_msg(&pfd[j], j);
+			nfds -= control_dispatch_msg(&pfd[j], &ctl_cnt);
 	}
 
 	while ((p = peers) != NULL) {
 		peers = p->next;
 		bgp_fsm(p, EVNT_STOP);
+		pfkey_remove(p);
 		free(p);
 	}
 
-	while ((mrt = LIST_FIRST(&mrt_l)) != NULL) {
-		LIST_REMOVE(mrt, list);
-		free(mrt);
+	while ((m = LIST_FIRST(&mrthead)) != NULL) {
+		mrt_clean(m);
+		LIST_REMOVE(m, entry);
+		free(m);
 	}
+
+	while ((la = TAILQ_FIRST(conf->listen_addrs)) != NULL) {
+		TAILQ_REMOVE(conf->listen_addrs, la, entry);
+		free(la);
+	}
+	free(conf->listen_addrs);
+	free(peer_l);
+	free(mrt_l);
+	free(pfd);
 
 	msgbuf_write(&ibuf_rde.w);
 	msgbuf_clear(&ibuf_rde.w);
@@ -405,8 +526,11 @@ init_conf(struct bgpd_config *c)
 void
 init_peer(struct peer *p)
 {
-	p->sock = p->wbuf.sock = -1;
+	p->fd = p->wbuf.fd = -1;
 	p->capa.announce = p->conf.capabilities;
+	p->capa.ann_mp = 1;
+	p->capa.ann_refresh = 1;
+	peer_cnt++;
 
 	change_state(p, STATE_IDLE, EVNT_NONE);
 	p->IdleHoldTimer = time(NULL);	/* start ASAP */
@@ -435,14 +559,15 @@ bgp_fsm(struct peer *peer, enum session_events event)
 			/* init write buffer */
 			msgbuf_init(&peer->wbuf);
 
-			/* init pfkey */
-			if (pfkey_auth_establish(peer) == -1) {
+			/* init pfkey - remove old if any, load new ones */
+			pfkey_remove(peer);
+			if (pfkey_establish(peer) == -1) {
 				log_peer_warnx(&peer->conf,
-				    "pfkey_auth setup failed");
+				    "pfkey setup failed");
 				return;
 			}
 
-			if (peer->conf.passive) {
+			if (peer->conf.passive || peer->conf.template) {
 				change_state(peer, STATE_ACTIVE, event);
 				peer->ConnectRetryTimer = 0;
 			} else {
@@ -667,18 +792,18 @@ start_timer_keepalive(struct peer *peer)
 void
 session_close_connection(struct peer *peer)
 {
-	if (peer->sock != -1) {
-		shutdown(peer->sock, SHUT_RDWR);
-		close(peer->sock);
+	if (peer->fd != -1) {
+		shutdown(peer->fd, SHUT_RDWR);
+		close(peer->fd);
 	}
-	peer->sock = peer->wbuf.sock = -1;
+	peer->fd = peer->wbuf.fd = -1;
 }
 
 void
 change_state(struct peer *peer, enum session_state state,
     enum session_events event)
 {
-	struct mrt_config	*mrt;
+	struct mrt	*mrt;
 
 	switch (state) {
 	case STATE_IDLE:
@@ -706,15 +831,16 @@ change_state(struct peer *peer, enum session_state state,
 		msgbuf_clear(&peer->wbuf);
 		free(peer->rbuf);
 		peer->rbuf = NULL;
-		pfkey_auth_remove(peer);
 		if (peer->state == STATE_ESTABLISHED)
 			session_down(peer);
-		if (event != EVNT_STOP) {
+		if (event != EVNT_STOP && !peer->conf.cloned) {
 			peer->IdleHoldTimer = time(NULL) + peer->IdleHoldTime;
 			if (event != EVNT_NONE &&
 			    peer->IdleHoldTime < MAX_IDLE_HOLD/2)
 				peer->IdleHoldTime *= 2;
 		}
+		if (peer->state != STATE_NONE && peer->conf.cloned)
+			peer->conf.reconf_action = RECONF_DELETE;
 		break;
 	case STATE_CONNECT:
 		break;
@@ -735,14 +861,14 @@ change_state(struct peer *peer, enum session_state state,
 	}
 
 	log_statechange(peer, state, event);
-	LIST_FOREACH(mrt, &mrt_l, list) {
+	LIST_FOREACH(mrt, &mrthead, entry) {
 		if (mrt->type != MRT_ALL_IN && mrt->type != MRT_ALL_OUT)
 			continue;
 		if ((mrt->peer_id == 0 && mrt->group_id == 0) ||
 		    mrt->peer_id == peer->conf.id ||
 		    mrt->group_id == peer->conf.groupid)
 			mrt_dump_state(mrt, peer->state, state,
-			    &peer->conf, conf);
+			    peer, conf);
 	}
 	peer->state = state;
 }
@@ -753,7 +879,7 @@ session_accept(int listenfd)
 	int			 connfd;
 	int			 opt;
 	socklen_t		 len;
-	struct sockaddr_in	 cliaddr;
+	struct sockaddr_storage	 cliaddr;
 	struct peer		*p = NULL;
 
 	len = sizeof(cliaddr);
@@ -765,11 +891,11 @@ session_accept(int listenfd)
 			log_warn("accept");
 	}
 
-	p = getpeerbyip(cliaddr.sin_addr.s_addr);
+	p = getpeerbyip((struct sockaddr *)&cliaddr);
 
 	if (p != NULL &&
 	    (p->state == STATE_CONNECT || p->state == STATE_ACTIVE)) {
-		if (p->sock != -1) {
+		if (p->fd != -1) {
 			if (p->state == STATE_CONNECT)
 				session_close_connection(p);
 			else {
@@ -778,7 +904,23 @@ session_accept(int listenfd)
 				return;
 			}
 		}
-		if (p->conf.tcp_md5_key[0]) {
+
+		if (p->conf.auth.method != AUTH_NONE && sysdep.no_pfkey) {
+			log_peer_warnx(&p->conf,
+			    "ipsec or md5sig configured but not available");
+			shutdown(connfd, SHUT_RDWR);
+			close(connfd);
+			return;
+		}
+
+		if (p->conf.auth.method == AUTH_MD5SIG) {
+			if (sysdep.no_md5sig) {
+				log_peer_warnx(&p->conf,
+				    "md5sig configured but not available");
+				shutdown(connfd, SHUT_RDWR);
+				close(connfd);
+				return;
+			}
 			len = sizeof(opt);
 			if (getsockopt(connfd, IPPROTO_TCP, TCP_MD5SIG,
 			    &opt, &len) == -1)
@@ -791,7 +933,7 @@ session_accept(int listenfd)
 				return;
 			}
 		}
-		p->sock = p->wbuf.sock = connfd;
+		p->fd = p->wbuf.fd = connfd;
 		if (session_setup_socket(p)) {
 			shutdown(connfd, SHUT_RDWR);
 			close(connfd);
@@ -800,7 +942,7 @@ session_accept(int listenfd)
 		session_socket_blockmode(connfd, BM_NONBLOCK);
 		bgp_fsm(p, EVNT_CON_OPEN);
 	} else {
-		log_conn_attempt(p, cliaddr.sin_addr);
+		log_conn_attempt(p, (struct sockaddr *)&cliaddr);
 		shutdown(connfd, SHUT_RDWR);
 		close(connfd);
 	}
@@ -809,7 +951,7 @@ session_accept(int listenfd)
 int
 session_connect(struct peer *peer)
 {
-	int			 n, opt = 1;
+	int			 opt = 1;
 	struct sockaddr		*sa;
 
 	/*
@@ -817,30 +959,43 @@ session_connect(struct peer *peer)
 	 * describes; we simply make sure there is only ever one concurrent
 	 * tcp connection per peer.
 	 */
-	if (peer->sock != -1)
+	if (peer->fd != -1)
 		return (-1);
 
-	if ((peer->sock = socket(peer->conf.remote_addr.af, SOCK_STREAM,
+	if ((peer->fd = socket(peer->conf.remote_addr.af, SOCK_STREAM,
 	    IPPROTO_TCP)) == -1) {
 		log_peer_warn(&peer->conf, "session_connect socket");
 		bgp_fsm(peer, EVNT_CON_OPENFAIL);
 		return (-1);
 	}
 
-	if (peer->conf.tcp_md5_key[0])
-		if (setsockopt(peer->sock, IPPROTO_TCP, TCP_MD5SIG,
+	if (peer->conf.auth.method != AUTH_NONE && sysdep.no_pfkey) {
+		log_peer_warnx(&peer->conf,
+		    "ipsec or md5sig configured but not available");
+		bgp_fsm(peer, EVNT_CON_OPENFAIL);
+		return (-1);
+	}
+
+	if (peer->conf.auth.method == AUTH_MD5SIG) {
+		if (sysdep.no_md5sig) {
+			log_peer_warnx(&peer->conf,
+			    "md5sig configured but not available");
+			bgp_fsm(peer, EVNT_CON_OPENFAIL);
+			return (-1);
+		}
+		if (setsockopt(peer->fd, IPPROTO_TCP, TCP_MD5SIG,
 		    &opt, sizeof(opt)) == -1) {
 			log_peer_warn(&peer->conf, "setsockopt md5sig");
 			bgp_fsm(peer, EVNT_CON_OPENFAIL);
 			return (-1);
 		}
-
-	peer->wbuf.sock = peer->sock;
+	}
+	peer->wbuf.fd = peer->fd;
 
 	/* if update source is set we need to bind() */
 	if (peer->conf.local_addr.af) {
 		sa = addr2sa(&peer->conf.local_addr, 0);
-		if (bind(peer->sock, sa, sa->sa_len) == -1) {
+		if (bind(peer->fd, sa, sa->sa_len) == -1) {
 			log_peer_warn(&peer->conf, "session_connect bind");
 			bgp_fsm(peer, EVNT_CON_OPENFAIL);
 			return (-1);
@@ -852,17 +1007,16 @@ session_connect(struct peer *peer)
 		return (-1);
 	}
 
-	session_socket_blockmode(peer->sock, BM_NONBLOCK);
+	session_socket_blockmode(peer->fd, BM_NONBLOCK);
 
 	sa = addr2sa(&peer->conf.remote_addr, BGP_PORT);
-	if ((n = connect(peer->sock, sa, sa->sa_len)) == -1)
+	if (connect(peer->fd, sa, sa->sa_len) == -1) {
 		if (errno != EINPROGRESS) {
 			log_peer_warn(&peer->conf, "connect");
 			bgp_fsm(peer, EVNT_CON_OPENFAIL);
 			return (-1);
 		}
-
-	if (n == 0)
+	} else
 		bgp_fsm(peer, EVNT_CON_OPEN);
 
 	return (0);
@@ -874,18 +1028,28 @@ session_setup_socket(struct peer *p)
 	int	ttl = p->conf.distance;
 	int	pre = IPTOS_PREC_INTERNETCONTROL;
 	int	nodelay = 1;
+	int	bsize;
 
-	if (p->conf.ebgp)
+	if (p->conf.ebgp && p->sa_remote.ss_family == AF_INET)
 		/* set TTL to foreign router's distance - 1=direct n=multihop */
-		if (setsockopt(p->sock, IPPROTO_IP, IP_TTL, &ttl,
+		if (setsockopt(p->fd, IPPROTO_IP, IP_TTL, &ttl,
 		    sizeof(ttl)) == -1) {
 			log_peer_warn(&p->conf,
 			    "session_setup_socket setsockopt TTL");
 			return (-1);
 		}
 
+	if (p->conf.ebgp && p->sa_remote.ss_family == AF_INET6)
+		/* set hoplimit to foreign router's distance */
+		if (setsockopt(p->fd, IPPROTO_IPV6, IPV6_HOPLIMIT, &ttl,
+		    sizeof(ttl)) == -1) {
+			log_peer_warn(&p->conf,
+			    "session_setup_socket setsockopt hoplimit");
+			return (-1);
+		}
+
 	/* set TCP_NODELAY */
-	if (setsockopt(p->sock, IPPROTO_TCP, TCP_NODELAY, &nodelay,
+	if (setsockopt(p->fd, IPPROTO_TCP, TCP_NODELAY, &nodelay,
 	    sizeof(nodelay)) == -1) {
 		log_peer_warn(&p->conf,
 		    "session_setup_socket setsockopt TCP_NODELAY");
@@ -893,10 +1057,24 @@ session_setup_socket(struct peer *p)
 	}
 
 	/* set precedence, see rfc1771 appendix 5 */
-	if (setsockopt(p->sock, IPPROTO_IP, IP_TOS, &pre, sizeof(pre)) == -1) {
+	if (p->sa_remote.ss_family == AF_INET &&
+	    setsockopt(p->fd, IPPROTO_IP, IP_TOS, &pre, sizeof(pre)) == -1) {
 		log_peer_warn(&p->conf,
 		    "session_setup_socket setsockopt TOS");
 		return (-1);
+	}
+
+	/* only increase bufsize (and thus window) if md5 or ipsec is in use */
+	if (p->conf.auth.method != AUTH_NONE) {
+		/* try to increase bufsize. no biggie if it fails */
+		bsize = 65535;
+		while (setsockopt(p->fd, SOL_SOCKET, SO_RCVBUF, &bsize,
+		    sizeof(bsize)) == -1)
+			bsize /= 2;
+		bsize = 65535;
+		while (setsockopt(p->fd, SOL_SOCKET, SO_SNDBUF, &bsize,
+		    sizeof(bsize)) == -1)
+			bsize /= 2;
 	}
 
 	return (0);
@@ -925,11 +1103,11 @@ session_tcp_established(struct peer *peer)
 	socklen_t	len;
 
 	len = sizeof(peer->sa_local);
-	if (getsockname(peer->sock, (struct sockaddr *)&peer->sa_local,
+	if (getsockname(peer->fd, (struct sockaddr *)&peer->sa_local,
 	    &len) == -1)
 		log_warn("getsockname");
 	len = sizeof(peer->sa_remote);
-	if (getpeername(peer->sock, (struct sockaddr *)&peer->sa_remote,
+	if (getpeername(peer->fd, (struct sockaddr *)&peer->sa_remote,
 	    &len) == -1)
 		log_warn("getpeername");
 }
@@ -939,14 +1117,25 @@ session_open(struct peer *p)
 {
 	struct msg_open		 msg;
 	struct buf		*buf;
-	struct mrt_config	*mrt;
+	struct mrt		*mrt;
 	u_int16_t		 len;
-	int			 errs = 0, n;
+	int			 errs = 0;
 	u_int8_t		 op_type, op_len = 0, optparamlen = 0;
+	u_int8_t		 capa_code, capa_len;
+	struct capa_mp		 capa_mp_v4;
 
 	if (p->capa.announce) {
-		/* multiprotocol extensions, RFC 2858 */
-		/* route refresh, RFC 2918 */
+		if (p->capa.ann_mp) {
+			/* multiprotocol extensions, RFC 2858 */
+			bzero(&capa_mp_v4, sizeof(capa_mp_v4));
+			capa_mp_v4.afi = htons(AFI_IPv4);
+			capa_mp_v4.safi = SAFI_UNICAST;
+			op_len += 6;	/* 1 code + 1 len + 4 data */
+		}
+		if (p->capa.ann_refresh) {
+			/* route refresh, RFC 2918 */
+			op_len += 2;	/* 1 code + 1 len, no data */
+		}
 
 		if (op_len > 0)
 			optparamlen = sizeof(op_type) + sizeof(op_len) + op_len;
@@ -984,22 +1173,41 @@ session_open(struct peer *p)
 		errs += buf_add(buf, &op_type, sizeof(op_type));
 		errs += buf_add(buf, &op_len, sizeof(op_len));
 
-		/* multiprotocol extensions, RFC 2858 */	
-		/* route refresh, RFC 2918 */
+		if (p->capa.ann_mp) {
+			/* multiprotocol extensions, RFC 2858 */
+			capa_code = CAPA_MP;
+			capa_len = 4;
+			errs += buf_add(buf, &capa_code, sizeof(capa_code));
+			errs += buf_add(buf, &capa_len, sizeof(capa_len));
+			errs += buf_add(buf, &capa_mp_v4.afi,
+			    sizeof(capa_mp_v4.afi));
+			errs += buf_add(buf, &capa_mp_v4.pad,
+			    sizeof(capa_mp_v4.pad));
+			errs += buf_add(buf, &capa_mp_v4.safi,
+			    sizeof(capa_mp_v4.safi));
+		}
+
+		if (p->capa.ann_refresh) {
+			/* route refresh, RFC 2918 */
+			capa_code = CAPA_REFRESH;
+			capa_len = 0;
+			errs += buf_add(buf, &capa_code, sizeof(capa_code));
+			errs += buf_add(buf, &capa_len, sizeof(capa_len));
+		}
 	}
 
 	if (errs == 0) {
-		LIST_FOREACH(mrt, &mrt_l, list) {
+		LIST_FOREACH(mrt, &mrthead, entry) {
 			if (mrt->type != MRT_ALL_OUT)
 				continue;
 			if ((mrt->peer_id == 0 && mrt->group_id == 0) ||
 			    mrt->peer_id == p->conf.id ||
 			    mrt->group_id == p->conf.groupid)
 				mrt_dump_bgp_msg(mrt, buf->buf, len,
-				    &p->conf, conf);
+				    p, conf);
 		}
 
-		if ((n = buf_close(&p->wbuf, buf)) == -1) {
+		if (buf_close(&p->wbuf, buf) == -1) {
 			log_peer_warn(&p->conf, "session_open buf_close");
 			buf_free(buf);
 			bgp_fsm(p, EVNT_CON_FATAL);
@@ -1019,9 +1227,9 @@ session_keepalive(struct peer *peer)
 {
 	struct msg_header	 msg;
 	struct buf		*buf;
-	struct mrt_config	*mrt;
+	struct mrt		*mrt;
 	ssize_t			 len;
-	int			 errs = 0, n;
+	int			 errs = 0;
 
 	len = MSGSIZE_KEEPALIVE;
 
@@ -1043,16 +1251,16 @@ session_keepalive(struct peer *peer)
 		return;
 	}
 
-	LIST_FOREACH(mrt, &mrt_l, list) {
+	LIST_FOREACH(mrt, &mrthead, entry) {
 		if (mrt->type != MRT_ALL_OUT)
 			continue;
 		if ((mrt->peer_id == 0 && mrt->group_id == 0) ||
 		    mrt->peer_id == peer->conf.id ||
 		    mrt->group_id == peer->conf.groupid)
-			mrt_dump_bgp_msg(mrt, buf->buf, len, &peer->conf, conf);
+			mrt_dump_bgp_msg(mrt, buf->buf, len, peer, conf);
 	}
 
-	if ((n = buf_close(&peer->wbuf, buf)) == -1) {
+	if (buf_close(&peer->wbuf, buf) == -1) {
 		log_peer_warn(&peer->conf, "session_keepalive buf_close");
 		buf_free(buf);
 		bgp_fsm(peer, EVNT_CON_FATAL);
@@ -1069,14 +1277,17 @@ session_update(u_int32_t peerid, void *data, size_t datalen)
 	struct peer		*p;
 	struct msg_header	 msg;
 	struct buf		*buf;
-	struct mrt_config	*mrt;
+	struct mrt		*mrt;
 	ssize_t			 len;
-	int			 errs = 0, n;
+	int			 errs = 0;
 
 	if ((p = getpeerbyid(peerid)) == NULL) {
 		log_warnx("no such peer: id=%u", peerid);
 		return;
 	}
+
+	if (p->state != STATE_ESTABLISHED)
+		return;
 
 	len = MSGSIZE_HEADER + datalen;
 
@@ -1099,16 +1310,16 @@ session_update(u_int32_t peerid, void *data, size_t datalen)
 		return;
 	}
 
-	LIST_FOREACH(mrt, &mrt_l, list) {
+	LIST_FOREACH(mrt, &mrthead, entry) {
 		if (mrt->type != MRT_ALL_OUT && mrt->type != MRT_UPDATE_OUT)
 			continue;
 		if ((mrt->peer_id == 0 && mrt->group_id == 0) ||
 		    mrt->peer_id == p->conf.id ||
 		    mrt->group_id == p->conf.groupid)
-			mrt_dump_bgp_msg(mrt, buf->buf, len, &p->conf, conf);
+			mrt_dump_bgp_msg(mrt, buf->buf, len, p, conf);
 	}
 
-	if ((n = buf_close(&p->wbuf, buf)) == -1) {
+	if (buf_close(&p->wbuf, buf) == -1) {
 		log_peer_warn(&p->conf, "session_update: buf_close");
 		buf_free(buf);
 		bgp_fsm(p, EVNT_CON_FATAL);
@@ -1125,9 +1336,9 @@ session_notification(struct peer *peer, u_int8_t errcode, u_int8_t subcode,
 {
 	struct msg_header	 msg;
 	struct buf		*buf;
-	struct mrt_config	*mrt;
+	struct mrt		*mrt;
 	ssize_t			 len;
-	int			 errs = 0, n;
+	int			 errs = 0;
 
 	len = MSGSIZE_NOTIFICATION_MIN + datalen;
 
@@ -1154,16 +1365,16 @@ session_notification(struct peer *peer, u_int8_t errcode, u_int8_t subcode,
 		return;
 	}
 
-	LIST_FOREACH(mrt, &mrt_l, list) {
+	LIST_FOREACH(mrt, &mrthead, entry) {
 		if (mrt->type != MRT_ALL_OUT)
 			continue;
 		if ((mrt->peer_id == 0 && mrt->group_id == 0) ||
 		    mrt->peer_id == peer->conf.id ||
 		    mrt->group_id == peer->conf.groupid)
-			mrt_dump_bgp_msg(mrt, buf->buf, len, &peer->conf, conf);
+			mrt_dump_bgp_msg(mrt, buf->buf, len, peer, conf);
 	}
 
-	if ((n = buf_close(&peer->wbuf, buf)) == -1) {
+	if (buf_close(&peer->wbuf, buf) == -1) {
 		log_peer_warn(&peer->conf, "session_notification: buf_close");
 		buf_free(buf);
 		bgp_fsm(peer, EVNT_CON_FATAL);
@@ -1232,9 +1443,8 @@ session_dispatch_msg(struct pollfd *pfd, struct peer *p)
 	}
 
 	if (pfd->revents & POLLIN) {
-		if ((n = read(p->sock, p->rbuf->buf + p->rbuf->wpos,
-			    sizeof(p->rbuf->buf) - p->rbuf->wpos)) ==
-			    -1) {
+		if ((n = read(p->fd, p->rbuf->buf + p->rbuf->wpos,
+		    sizeof(p->rbuf->buf) - p->rbuf->wpos)) == -1) {
 				if (errno != EINTR && errno != EAGAIN) {
 					log_peer_warn(&p->conf, "read error");
 					bgp_fsm(p, EVNT_CON_FATAL);
@@ -1283,6 +1493,10 @@ session_dispatch_msg(struct pollfd *pfd, struct peer *p)
 					bgp_fsm(p, EVNT_RCVD_KEEPALIVE);
 					p->stats.msg_rcvd_keepalive++;
 					break;
+				case RREFRESH:
+					parse_refresh(p);
+					p->stats.msg_rcvd_rrefresh++;
+					break;
 				default:	/* cannot happen */
 					session_notification(p, ERR_HEADER,
 					    ERR_HDR_TYPE, &msgtype, 1);
@@ -1310,7 +1524,7 @@ session_dispatch_msg(struct pollfd *pfd, struct peer *p)
 int
 parse_header(struct peer *peer, u_char *data, u_int16_t *len, u_int8_t *type)
 {
-	struct mrt_config	*mrt;
+	struct mrt		*mrt;
 	u_char			*p;
 	u_char			 one = 0xff;
 	int			 i;
@@ -1379,6 +1593,15 @@ parse_header(struct peer *peer, u_char *data, u_int16_t *len, u_int8_t *type)
 			return (-1);
 		}
 		break;
+	case RREFRESH:
+		if (*len != MSGSIZE_RREFRESH) {
+			log_peer_warnx(&peer->conf,
+			    "received RREFRESH: illegal len: %u byte", *len);
+			session_notification(peer, ERR_HEADER, ERR_HDR_LEN,
+			    &olen, sizeof(olen));
+			return (-1);
+		}
+		break;
 	default:
 		log_peer_warnx(&peer->conf,
 		    "received msg with unknown type %u", *type);
@@ -1386,14 +1609,14 @@ parse_header(struct peer *peer, u_char *data, u_int16_t *len, u_int8_t *type)
 		    type, 1);
 		return (-1);
 	}
-	LIST_FOREACH(mrt, &mrt_l, list) {
+	LIST_FOREACH(mrt, &mrthead, entry) {
 		if (mrt->type != MRT_ALL_IN && (mrt->type != MRT_UPDATE_IN ||
 		    *type != UPDATE))
 			continue;
 		if ((mrt->peer_id == 0 && mrt->group_id == 0) ||
 		    mrt->peer_id == peer->conf.id ||
 		    mrt->group_id == peer->conf.groupid)
-			mrt_dump_bgp_msg(mrt, data, *len, &peer->conf, conf);
+			mrt_dump_bgp_msg(mrt, data, *len, peer, conf);
 	}
 	return (0);
 }
@@ -1435,6 +1658,12 @@ parse_open(struct peer *peer)
 
 	memcpy(&as, p, sizeof(as));
 	p += sizeof(as);
+
+	/* if remote-as is zero and it's a cloned neighbor, accept any */
+	if (peer->conf.cloned && !peer->conf.remote_as) {
+		peer->conf.remote_as = ntohs(as);
+		peer->conf.ebgp = (peer->conf.remote_as != conf->as);
+	}
 
 	if (peer->conf.remote_as != ntohs(as)) {
 		log_peer_warnx(&peer->conf, "peer sent wrong AS %u", ntohs(as));
@@ -1502,8 +1731,8 @@ parse_open(struct peer *peer)
 		p += sizeof(op_type);
 		plen -= sizeof(op_type);
 		memcpy(&op_len, p, sizeof(op_len));
-		p += sizeof(op_type);
-		plen -= sizeof(op_type);
+		p += sizeof(op_len);
+		plen -= sizeof(op_len);
 		if (op_len > 0) {
 			if (plen < op_len) {
 				log_peer_warnx(&peer->conf,
@@ -1546,7 +1775,7 @@ parse_open(struct peer *peer)
 			peer->IdleHoldTimer = time(NULL);	/* no punish */
 			peer->IdleHoldTime /= 2;
 			return (-1);
-			/* not reached */			
+			/* not reached */
 		}
 	}
 
@@ -1581,12 +1810,41 @@ parse_update(struct peer *peer)
 }
 
 int
+parse_refresh(struct peer *peer)
+{
+	u_char		*p;
+	struct rrefresh	 r;
+
+	p = peer->rbuf->rptr;
+	p += MSGSIZE_HEADER;	/* header is already checked */
+
+	/* afi, 2 byte */
+	memcpy(&r.afi, p, sizeof(r.afi));
+	r.afi = ntohs(r.afi);
+	p += 2;
+	/* reserved, 1 byte */
+	p += 1;
+	/* safi, 1 byte */
+	memcpy(&r.safi, p, sizeof(r.safi));
+
+	/* afi/safi unchecked -	unrecognized values will be ignored anyway */
+
+	if (imsg_compose(&ibuf_rde, IMSG_REFRESH, peer->conf.id, &r,
+	    sizeof(r)) == -1)
+		return (-1);
+
+	return (0);
+}
+
+int
 parse_notification(struct peer *peer)
 {
 	u_char		*p;
 	u_int8_t	 errcode;
 	u_int8_t	 subcode;
 	u_int16_t	 datalen;
+	u_int8_t	 capa_code;
+	u_int8_t	 capa_len;
 
 	/* just log */
 	p = peer->rbuf->rptr;
@@ -1606,9 +1864,61 @@ parse_notification(struct peer *peer)
 	p += sizeof(subcode);
 	datalen -= sizeof(subcode);
 
-	/* read & parse data section if needed */
-
 	log_notification(peer, errcode, subcode, p, datalen);
+
+	if (errcode == ERR_OPEN && subcode == ERR_OPEN_CAPA) {
+		if (datalen == 0) {	/* zebra likes to send those.. humbug */
+			log_peer_warnx(&peer->conf, "received \"unsupported "
+			    "capability\" notification without data part, "
+			    "disabling capability announcements altogether");
+			peer->capa.announce = 0;
+		}
+
+		while (datalen > 0) {
+			if (datalen < 2) {
+				log_peer_warnx(&peer->conf,
+				    "parse_notification: "
+				    "expect len >= 2, len is %u", datalen);
+				return (-1);
+			}
+			memcpy(&capa_code, p, sizeof(capa_code));
+			p += sizeof(capa_code);
+			datalen -= sizeof(capa_code);
+			memcpy(&capa_len, p, sizeof(capa_len));
+			p += sizeof(capa_len);
+			datalen -= sizeof(capa_len);
+			if (datalen < capa_len) {
+				log_peer_warnx(&peer->conf,
+				    "parse_notification: capa_len %u exceeds"
+				    "remaining msg length", capa_len);
+				return (-1);
+			}
+			p += capa_len;
+			datalen -= capa_len;
+			switch (capa_code) {
+			case CAPA_MP:
+				peer->capa.ann_mp = 0;
+				log_peer_warnx(&peer->conf,
+				    "disabling multiprotocol capability");
+				break;
+			case CAPA_REFRESH:
+				peer->capa.ann_refresh = 0;
+				log_peer_warnx(&peer->conf,
+				    "disabling route refresh capability");
+				break;
+			default:	/* should not happen... */
+				log_peer_warnx(&peer->conf, "received "
+				    "\"unsupported capability\" notification "
+				    "for unknown capability %u, disabling "
+				    "capability announcements altogether",
+				    capa_code);
+				peer->capa.announce = 0;
+				break;
+			}
+		}
+
+		return (1);
+	}
 
 	if (errcode == ERR_OPEN && subcode == ERR_OPEN_OPT) {
 		peer->capa.announce = 0;
@@ -1624,12 +1934,17 @@ parse_capabilities(struct peer *peer, u_char *d, u_int16_t dlen)
 	u_int16_t	 len;
 	u_int8_t	 capa_code;
 	u_int8_t	 capa_len;
-	void		*capa_val;
+	u_char		*capa_val;
+	u_int16_t	 mp_afi;
+	u_int8_t	 mp_safi;
 
 	len = dlen;
 	while (len > 0) {
-		if (len < 2)
+		if (len < 2) {
+			log_peer_warnx(&peer->conf, "parse_capabilities: "
+			    "expect len >= 2, len is %u", len);
 			return (-1);
+		}
 		memcpy(&capa_code, d, sizeof(capa_code));
 		d += sizeof(capa_code);
 		len -= sizeof(capa_code);
@@ -1637,8 +1952,13 @@ parse_capabilities(struct peer *peer, u_char *d, u_int16_t dlen)
 		d += sizeof(capa_len);
 		len -= sizeof(capa_len);
 		if (capa_len > 0) {
-			if (len < capa_len)
+			if (len < capa_len) {
+				log_peer_warnx(&peer->conf,
+				    "parse_capabilities: "
+				    "len %u smaller than capa_len %u",
+				    len, capa_len);
 				return (-1);
+			}
 			capa_val = d;
 			d += capa_len;
 			len -= capa_len;
@@ -1646,6 +1966,42 @@ parse_capabilities(struct peer *peer, u_char *d, u_int16_t dlen)
 			capa_val = NULL;
 
 		switch (capa_code) {
+		case CAPA_MP:			/* RFC 2858 */
+			if (capa_len != 4) {
+				log_peer_warnx(&peer->conf,
+				    "parse_capabilities: "
+				    "expect len 4, len is %u", capa_len);
+				return (-1);
+			}
+			memcpy(&mp_afi, capa_val, sizeof(mp_afi));
+			mp_afi = ntohs(mp_afi);
+			memcpy(&mp_safi, capa_val + 3, sizeof(mp_safi));
+			switch (mp_afi) {
+			case AFI_IPv4:
+				if (mp_safi < 1 || mp_safi > 3) {
+					log_peer_warnx(&peer->conf,
+					    "parse_capabilities: AFI IPv4, "
+					    "mp_safi %u illegal", mp_safi);
+					return (-1);
+				}
+				peer->capa.mp_v4 = mp_safi;
+				break;
+			case AFI_IPv6:
+				if (mp_safi < 1 || mp_safi > 3) {
+					log_peer_warnx(&peer->conf,
+					    "parse_capabilities: AFI IPv6, "
+					    "mp_safi %u illegal", mp_safi);
+					return (-1);
+				}
+				peer->capa.mp_v6 = mp_safi;
+				break;
+			default:			/* ignore */
+				break;
+			}
+			break;
+		case CAPA_REFRESH:
+			peer->capa.refresh = 1;
+			break;
 		default:
 			break;
 		}
@@ -1655,13 +2011,14 @@ parse_capabilities(struct peer *peer, u_char *d, u_int16_t dlen)
 }
 
 void
-session_dispatch_imsg(struct imsgbuf *ibuf, int idx)
+session_dispatch_imsg(struct imsgbuf *ibuf, int idx, u_int *listener_cnt)
 {
 	struct imsg		 imsg;
-	struct mrt_config	 xmrt;
-	struct mrt_config	*mrt;
+	struct mrt		 xmrt;
+	struct mrt		*mrt;
 	struct peer_config	*pconf;
 	struct peer		*p, *next;
+	struct listen_addr	*la, *nla;
 	u_char			*data;
 	enum reconf_action	 reconf;
 	int			 n;
@@ -1688,6 +2045,10 @@ session_dispatch_imsg(struct imsgbuf *ibuf, int idx)
 			    NULL)
 				fatal(NULL);
 			memcpy(nconf, imsg.data, sizeof(struct bgpd_config));
+			if ((nconf->listen_addrs = calloc(1,
+			    sizeof(struct listen_addrs))) == NULL)
+				fatal(NULL);
+			TAILQ_INIT(nconf->listen_addrs);
 			npeers = NULL;
 			init_conf(nconf);
 			pending_reconf = 1;
@@ -1711,6 +2072,36 @@ session_dispatch_imsg(struct imsgbuf *ibuf, int idx)
 			memcpy(&p->conf, pconf, sizeof(struct peer_config));
 			p->conf.reconf_action = reconf;
 			break;
+		case IMSG_RECONF_LISTENER:
+			if (idx != PFD_PIPE_MAIN)
+				fatalx("reconf request not from parent");
+			nla = imsg.data;
+			TAILQ_FOREACH(la, conf->listen_addrs, entry) {
+				if (!la_cmp(la, nla))
+					break;
+			}
+
+			if ((nla->fd = imsg_get_fd(ibuf)) == -1)
+				log_warnx("expected to receive fd for %s "
+				    "but didn't receive any",
+				    log_sockaddr((struct sockaddr *)&la->sa));
+
+			if (la == NULL) {
+				la = calloc(1, sizeof(struct listen_addr));
+				if (la == NULL)
+					fatal(NULL);
+				memcpy(&la->sa, &nla->sa, sizeof(la->sa));
+				la->flags = nla->flags;
+				la->fd = nla->fd;
+				la->reconf = RECONF_REINIT;
+				TAILQ_INSERT_TAIL(nconf->listen_addrs, la,
+				    entry);
+			} else {
+				la->reconf = RECONF_KEEP;
+				shutdown(nla->fd, SHUT_RDWR);
+				close(nla->fd);
+			}
+			break;
 		case IMSG_RECONF_DONE:
 			if (idx != PFD_PIPE_MAIN)
 				fatalx("reconf request not from parent");
@@ -1720,40 +2111,97 @@ session_dispatch_imsg(struct imsgbuf *ibuf, int idx)
 			conf->holdtime = nconf->holdtime;
 			conf->bgpid = nconf->bgpid;
 			conf->min_holdtime = nconf->min_holdtime;
+
 			/* add new peers */
 			for (p = npeers; p != NULL; p = next) {
 				next = p->next;
 				p->next = peers;
 				peers = p;
 			}
-			/* find peers to be deleted */
+			/* find ones to be deleted */
 			for (p = peers; p != NULL; p = p->next)
-				if (p->conf.reconf_action == RECONF_NONE)
+				if (p->conf.reconf_action == RECONF_NONE &&
+				    !p->conf.cloned)
 					p->conf.reconf_action = RECONF_DELETE;
+
+			/* if there are no new listeners, keep default ones */
+			if (TAILQ_EMPTY(nconf->listen_addrs))
+				TAILQ_FOREACH(la, conf->listen_addrs, entry)
+					if (la->flags & DEFAULT_LISTENER)
+						la->reconf = RECONF_KEEP;
+
+			/* delete old listeners */
+			for (la = TAILQ_FIRST(conf->listen_addrs); la != NULL;
+			    la = nla) {
+				nla = TAILQ_NEXT(la, entry);
+				if (la->reconf == RECONF_NONE) {
+					log_info("not listening on %s any more",
+					    log_sockaddr(
+					    (struct sockaddr *)&la->sa));
+					TAILQ_REMOVE(conf->listen_addrs, la,
+					    entry);
+					shutdown(la->fd, SHUT_RDWR);
+					close(la->fd);
+					free(la);
+				}
+			}
+
+			/* add new listeners */
+			while ((la = TAILQ_FIRST(nconf->listen_addrs)) !=
+			    NULL) {
+				TAILQ_REMOVE(nconf->listen_addrs, la, entry);
+				TAILQ_INSERT_TAIL(conf->listen_addrs, la,
+				    entry);
+			}
+
+			setup_listeners(listener_cnt);
+			free(nconf->listen_addrs);
 			free(nconf);
 			nconf = NULL;
 			pending_reconf = 0;
 			log_info("SE reconfigured");
 			break;
-		case IMSG_MRT_REQ:
-			if ((mrt = calloc(1, sizeof(struct mrt_config))) ==
-			    NULL)
-				fatal("session_dispatch_imsg");
-			memcpy(mrt, imsg.data, sizeof(struct mrt_config));
-			mrt->ibuf = &ibuf_main;
-			LIST_INSERT_HEAD(&mrt_l, mrt, list);
+		case IMSG_MRT_OPEN:
+		case IMSG_MRT_REOPEN:
+			if (imsg.hdr.len > IMSG_HEADER_SIZE +
+			    sizeof(struct mrt)) {
+				log_warnx("wrong imsg len");
+				break;
+			}
+
+			memcpy(&xmrt, imsg.data, sizeof(struct mrt));
+			if ((xmrt.fd = imsg_get_fd(ibuf)) == -1)
+				log_warnx("expected to receive fd for mrt dump "
+				    "but didn't receive any");
+
+			mrt = mrt_get(&mrthead, &xmrt);
+			if (mrt == NULL) {
+				/* new dump */
+				mrt = calloc(1, sizeof(struct mrt));
+				if (mrt == NULL)
+					fatal("session_dispatch_imsg");
+				memcpy(mrt, &xmrt, sizeof(struct mrt));
+				TAILQ_INIT(&mrt->bufs);
+				LIST_INSERT_HEAD(&mrthead, mrt, entry);
+			} else {
+				/* old dump reopened */
+				close(mrt->fd);
+				mrt->fd = xmrt.fd;
+			}
 			break;
-		case IMSG_MRT_END:
-			memcpy(&xmrt, imsg.data, sizeof(struct mrt_config));
-			LIST_FOREACH(mrt, &mrt_l, list) {
-				if (mrt->type != xmrt.type)
-					continue;
-				if (mrt->peer_id == xmrt.peer_id &&
-				    mrt->group_id == xmrt.group_id) {
-					LIST_REMOVE(mrt, list);
-					free(mrt);
-					break;
-				}
+		case IMSG_MRT_CLOSE:
+			if (imsg.hdr.len > IMSG_HEADER_SIZE +
+			    sizeof(struct mrt)) {
+				log_warnx("wrong imsg len");
+				break;
+			}
+
+			memcpy(&xmrt, imsg.data, sizeof(struct mrt));
+			mrt = mrt_get(&mrthead, &xmrt);
+			if (mrt != NULL) {
+				mrt_clean(mrt);
+				LIST_REMOVE(mrt, entry);
+				free(mrt);
 			}
 			break;
 		case IMSG_CTL_KROUTE:
@@ -1766,6 +2214,8 @@ session_dispatch_imsg(struct imsgbuf *ibuf, int idx)
 			break;
 		case IMSG_CTL_SHOW_RIB:
 		case IMSG_CTL_SHOW_RIB_PREFIX:
+		case IMSG_CTL_SHOW_NETWORK:
+		case IMSG_CTL_SHOW_NEIGHBOR:
 			if (idx != PFD_PIPE_ROUTE)
 				fatalx("ctl rib request not from RDE");
 			control_imsg_relay(&imsg);
@@ -1814,6 +2264,41 @@ session_dispatch_imsg(struct imsgbuf *ibuf, int idx)
 	}
 }
 
+int
+la_cmp(struct listen_addr *a, struct listen_addr *b)
+{
+	struct sockaddr_in	*in_a, *in_b;
+	struct sockaddr_in6	*in6_a, *in6_b;
+
+	if (a->sa.ss_family != b->sa.ss_family)
+		return (1);
+
+	switch (a->sa.ss_family) {
+	case AF_INET:
+		in_a = (struct sockaddr_in *)&a->sa;
+		in_b = (struct sockaddr_in *)&b->sa;
+		if (in_a->sin_addr.s_addr != in_b->sin_addr.s_addr)
+			return (1);
+		if (in_a->sin_port != in_b->sin_port)
+			return (1);
+		break;
+	case AF_INET6:
+		in6_a = (struct sockaddr_in6 *)&a->sa;
+		in6_b = (struct sockaddr_in6 *)&b->sa;
+		if (bcmp(&in6_a->sin6_addr, &in6_b->sin6_addr,
+		    sizeof(struct in6_addr)))
+			return (1);
+		if (in6_a->sin6_port != in6_b->sin6_port)
+			return (1);
+		break;
+	default:
+		fatal("king bula sez: unknown address family");
+		/* not reached */
+	}
+
+	return (0);
+}
+
 struct peer *
 getpeerbyaddr(struct bgpd_addr *addr)
 {
@@ -1829,16 +2314,110 @@ getpeerbyaddr(struct bgpd_addr *addr)
 }
 
 struct peer *
-getpeerbyip(in_addr_t ip)
+getpeerbyip(struct sockaddr *ip)
 {
-	struct peer *p;
+	struct peer	*p, *newpeer, *loose = NULL;
+	u_int32_t	 id;
 
 	/* we might want a more effective way to find peers by IP */
-	for (p = peers; p != NULL &&
-	    p->conf.remote_addr.v4.s_addr != ip; p = p->next)
-		;	/* nothing */
+	for (p = peers; p != NULL; p = p->next)
+		if (!p->conf.template &&
+		    p->conf.remote_addr.af == ip->sa_family) {
+			if (p->conf.remote_addr.af == AF_INET &&
+			    p->conf.remote_addr.v4.s_addr ==
+			    ((struct sockaddr_in *)ip)->sin_addr.s_addr)
+				return (p);
+			if (p->conf.remote_addr.af == AF_INET6 &&
+			    !bcmp(&p->conf.remote_addr.v6,
+			    &((struct sockaddr_in6 *)ip)->sin6_addr,
+			    sizeof(p->conf.remote_addr.v6)))
+				return (p);
+		}
 
-	return (p);
+	/* try template matching */
+	for (p = peers; p != NULL; p = p->next)
+		if (p->conf.template &&
+		    p->conf.remote_addr.af == ip->sa_family &&
+		    session_match_mask(p, ip))
+			if (loose == NULL || loose->conf.remote_masklen <
+			    p->conf.remote_masklen)
+				loose = p;
+
+	if (loose != NULL) {
+		/* clone */
+		if ((newpeer = malloc(sizeof(struct peer))) == NULL)
+			fatal(NULL);
+		memcpy(newpeer, loose, sizeof(struct peer));
+		for (id = UINT_MAX; id > UINT_MAX / 2; id--) {
+			for (p = peers; p != NULL && p->conf.id != id;
+			    p = p->next)
+				;	/* nothing */
+			if (p == NULL) {	/* we found a free id */
+				newpeer->conf.id = id;
+				break;
+			}
+		}
+		if (newpeer->conf.remote_addr.af == AF_INET) {
+			newpeer->conf.remote_addr.v4.s_addr =
+			    ((struct sockaddr_in *)ip)->sin_addr.s_addr;
+			newpeer->conf.remote_masklen = 32;
+		}
+		if (newpeer->conf.remote_addr.af == AF_INET6) {
+			memcpy(&p->conf.remote_addr.v6,
+			    &((struct sockaddr_in6 *)ip)->sin6_addr,
+			    sizeof(newpeer->conf.remote_addr.v6));
+			newpeer->conf.remote_masklen = 128;
+		}
+		newpeer->conf.template = 0;
+		newpeer->conf.cloned = 1;
+		newpeer->state = STATE_NONE;
+		newpeer->rbuf = NULL;
+		init_peer(newpeer);
+		bgp_fsm(newpeer, EVNT_START);
+		newpeer->next = peers;
+		peers = newpeer;
+		return (newpeer);
+	}
+
+	return (NULL);
+}
+
+int
+session_match_mask(struct peer *p, struct sockaddr *ip)
+{
+	int		 i;
+	in_addr_t	 v4mask;
+	struct in6_addr	*in;
+	struct in6_addr	 mask;
+
+	if (p->conf.remote_addr.af == AF_INET) {
+		v4mask = htonl(0xffffffff << (32 - p->conf.remote_masklen));
+		if (p->conf.remote_addr.v4.s_addr ==
+		    ((((struct sockaddr_in *)ip)->sin_addr.s_addr) & v4mask))
+			return (1);
+		else
+			return (0);
+	}
+
+	if (p->conf.remote_addr.af == AF_INET6) {
+		bzero(&mask, sizeof(mask));
+		for (i = 0; i < p->conf.remote_masklen / 8; i++)
+			mask.s6_addr[i] = 0xff;
+		i = p->conf.remote_masklen % 8;
+		if (i)
+			mask.s6_addr[p->conf.remote_masklen / 8] = 0xff00 >> i;
+
+		in = &((struct sockaddr_in6 *)ip)->sin6_addr;
+
+		for (i = 0; i < 16; i++)
+			if ((in->s6_addr[i] & mask.s6_addr[i]) !=
+			    p->conf.remote_addr.addr8[i])
+				return (0);
+
+		return (1);
+	}
+
+	return (0);
 }
 
 struct peer *
@@ -1895,6 +2474,7 @@ session_up(struct peer *peer)
 		fatalx("session_up: unsupported address family");
 	}
 
+	memcpy(&sup.conf, &peer->conf, sizeof(sup.conf));
 	peer->stats.last_updown = time(NULL);
 	if (imsg_compose(&ibuf_rde, IMSG_SESSION_UP, peer->conf.id,
 	    &sup, sizeof(sup)) == -1)

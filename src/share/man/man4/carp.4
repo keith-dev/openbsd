@@ -1,4 +1,4 @@
-.\"	$OpenBSD: carp.4,v 1.9 2004/03/25 17:53:16 henning Exp $
+.\"	$OpenBSD: carp.4,v 1.12 2004/08/17 00:24:40 jaredy Exp $
 .\"
 .\" Copyright (c) 2003, Ryan McBride.  All rights reserved.
 .\"
@@ -46,7 +46,7 @@ can also provide load balancing functionality.
 A
 .Nm
 interface can be created at runtime using the
-.Ic ifconfig carpN create
+.Ic ifconfig carp Ns Ar N Ic create
 command or by setting up a
 .Xr hostname.if 5
 configuration file for
@@ -58,12 +58,12 @@ the administrator needs to configure at minimum a common virtual host ID and
 virtual host IP address on each machine which is to take part in the virtual
 group.
 Additional parameters can also be set on a per-interface basis:
-.Ar advbase
+.Cm advbase
 and
-.Ar advskew ,
+.Cm advskew ,
 which are used to control how frequently the host sends advertisements when it
 is the master for a virtual host, and
-.Ar pass
+.Cm pass
 which is used to authenticate carp advertisements.
 These configurations can be done using
 .Xr ifconfig 8 ,
@@ -84,23 +84,27 @@ First the
 .Nm
 interfaces on Host A are configured.
 The
-.Ar advskew
+.Cm advskew
 of 100 on the second virtual host means that its advertisements will be sent
 out slightly less frequently.
 .Bd -literal -offset indent
 # ifconfig carp0 create
-# ifconfig carp0 vhid 1 pass mekmitasdigoat 192.168.1.10
+# ifconfig carp0 vhid 1 pass mekmitasdigoat 192.168.1.10 \e
+	255.255.255.0
 # ifconfig carp1 create
-# ifconfig carp1 vhid 2 advskew 100 pass mekmitasdigoat 192.168.1.10
+# ifconfig carp1 vhid 2 advskew 100 pass mekmitasdigoat \e
+	192.168.1.10 255.255.255.0
 .Ed
 .Pp
 The configuration for host B is identical, except the skew is on
 virtual host 1 rather than virtual host 2.
 .Bd -literal -offset indent
 # ifconfig carp0 create
-# ifconfig carp0 vhid 1 advskew 100 pass mekmitasdigoat 192.168.1.10
+# ifconfig carp0 vhid 1 advskew 100 pass mekmitasdigoat \e
+	192.168.1.10 255.255.255.0
 # ifconfig carp1 create
-# ifconfig carp1 vhid 2 pass mekmitasdigoat 192.168.1.10
+# ifconfig carp1 vhid 2 pass mekmitasdigoat 192.168.1.10 \e
+	255.255.255.0
 .Ed
 .Pp
 Finally, the ARP balancing feature must be enabled on both hosts:
@@ -126,7 +130,9 @@ will all appear to come from that router and be balanced to the same host.
 .Sh SEE ALSO
 .Xr sysctl 3 ,
 .Xr inet 4 ,
+.Xr hostname.if 5 ,
 .Xr ifconfig 8 ,
+.Xr netstart 8 ,
 .Xr sysctl 8
 .Sh HISTORY
 The

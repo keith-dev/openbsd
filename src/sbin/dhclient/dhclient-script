@@ -1,6 +1,6 @@
 #!/bin/sh
 #
-# $OpenBSD: dhclient-script,v 1.1 2004/01/18 01:26:20 deraadt Exp $
+# $OpenBSD: dhclient-script,v 1.6 2004/05/06 18:22:41 claudio Exp $
 #
 # Copyright (c) 2003 Kenneth R Westerback <krw@openbsd.org>
 #
@@ -49,7 +49,8 @@ delete_old_alias() {
 
 add_new_alias() {
 	if [ -n "$alias_ip_address" ]; then
-		ifconfig $interface inet alias $alias_ip_address netmask $alias_subnet_mask
+		ifconfig $interface inet alias $alias_ip_address netmask \
+		    $alias_subnet_mask
 		route add $alias_ip_address 127.0.0.1
 	fi
 }
@@ -67,14 +68,17 @@ delete_old_routes() {
 		done
 	fi
 
-	# XXX BOUND RENEW REBIND REBOOT did not /dev/null output before.
-	arp -n -a | sed -n -e 's/^.*(\(.*\)) at .*$/arp -d \1/p' | sh >/dev/null 2>&1
+	arp -dan
 }
 
 add_new_routes() {
 	route delete default >/dev/null 2>&1
 	for router in $new_routers; do
-		route add default $router >/dev/null 2>&1
+		if [ "$new_ip_address" = "$router" ]; then
+			route add default -iface $router >/dev/null 2>&1
+		else
+			route add default $router >/dev/null 2>&1
+		fi
 		# 2nd and subsequent default routers error out, so explicitly
 		# stop processing the list after the first one.
 		break
@@ -159,7 +163,7 @@ PREINIT)
 
 ARPCHECK|ARPSEND)
 	;;
-  
+
 BOUND|RENEW|REBIND|REBOOT)
 	if [ -n "$old_ip_address" ]; then
 		if [ "$old_ip_address" != "$alias_ip_address" ]; then

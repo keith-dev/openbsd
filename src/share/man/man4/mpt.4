@@ -1,4 +1,4 @@
-.\"	$OpenBSD: mpt.4,v 1.2 2004/03/21 20:33:17 marco Exp $
+.\"	$OpenBSD: mpt.4,v 1.5 2004/08/24 05:37:26 david Exp $
 .\"
 .\" Copyright (c) 2003 Wasabi Systems, Inc.
 .\" All rights reserved.
@@ -71,6 +71,8 @@ FC919
 .It
 FC929
 .Pq Dual 2Gb/s Tn Fibre Channel
+.It
+Emulated in VMWare ESX Server 2
 .El
 .Pp
 The LSI Logic SCSI and Fibre Channel controllers contain firmware that presents
@@ -86,7 +88,7 @@ host driver.
 The MPI (Message Passing Interface) defintion includes a register-level
 transport mechanism and a messaging protocol.
 A system doorbell and message queues define the MPI transport interface.
-Inbound Message Frames (MF), allocated in host memory, indentify I/O operations
+Inbound Message Frames (MF), allocated in host memory, identify I/O operations
 to be performed by the IO Controller (IOC).
 These operations are queued on the Request Queue by the host driver.
 Outbound Message Frames, also in host memory, track I/O operations as they
@@ -115,20 +117,3 @@ The
 driver was ported from
 .Nx
 by Milos Urbanek, Kenneth R. Westerback and Marco Peereboom.
-.Sh BUGS
-This driver does not function properly with MPT firmware levels higher than
-1.03.00.
-.Pp
-The runtime MPT firmware is displayed under the REV heading for the 1020/1030
-chips during POST.
-Example:
-.Bd -literal
-HBA ID LUN VENDOR   PRODUCT               REV SYNC  WIDE
---- -- --- -------- ---------------- -------- ----- ----
- 0   7  0  LSILogic 1020/1030[  102]  1013D00 320.0  16
- 1   7  0  LSILogic 1020/1030[  102]  1013D00 320.0  16
-.Ed
-.Pp
-The version is 1013D00 which translates to 1.01.3D.00.
-The last two digits are normally not used and it is written in decimal notation.
-Thus making this example version 1.01.61.

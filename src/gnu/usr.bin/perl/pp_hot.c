@@ -1,7 +1,7 @@
 /*    pp_hot.c
  *
  *    Copyright (C) 1991, 1992, 1993, 1994, 1995, 1996, 1997, 1998, 1999,
- *    2000, 2001, 2002, 2003, by Larry Wall and others
+ *    2000, 2001, 2002, 2003, 2004, by Larry Wall and others
  *
  *    You may distribute under the terms of either the GNU General Public
  *    License or the Artistic License, as specified in the README file.
@@ -141,7 +141,7 @@ PP(pp_concat)
     bool lbyte;
     STRLEN rlen;
     char* rpv = SvPV(right, rlen);	/* mg_get(right) happens here */
-    bool rbyte = !SvUTF8(right), rcopied = FALSE;
+    bool rbyte = !DO_UTF8(right), rcopied = FALSE;
 
     if (TARG == right && right != left) {
 	right = sv_2mortal(newSVpvn(rpv, rlen));
@@ -151,7 +151,7 @@ PP(pp_concat)
 
     if (TARG != left) {
 	lpv = SvPV(left, llen);		/* mg_get(left) may happen here */
-	lbyte = !SvUTF8(left);
+	lbyte = !DO_UTF8(left);
 	sv_setpvn(TARG, lpv, llen);
 	if (!lbyte)
 	    SvUTF8_on(TARG);
@@ -164,7 +164,9 @@ PP(pp_concat)
 	if (!SvOK(TARG))
 	    sv_setpv(left, "");
 	lpv = SvPV_nomg(left, llen);
-	lbyte = !SvUTF8(left);
+	lbyte = !DO_UTF8(left);
+	if (IN_BYTES)
+	    SvUTF8_off(TARG);
     }
 
 #if defined(PERL_Y2KWARN)
@@ -489,7 +491,8 @@ PP(pp_add)
 PP(pp_aelemfast)
 {
     dSP;
-    AV *av = GvAV(cGVOP_gv);
+    AV *av = PL_op->op_flags & OPf_SPECIAL ?
+		(AV*)PAD_SV(PL_op->op_targ) : GvAV(cGVOP_gv);
     U32 lval = PL_op->op_flags & OPf_MOD;
     SV** svp = av_fetch(av, PL_op->op_private, lval);
     SV *sv = (svp ? *svp : &PL_sv_undef);
@@ -743,7 +746,10 @@ PP(pp_rv2av)
 	    U32 i;
 	    for (i=0; i < (U32)maxarg; i++) {
 		SV **svp = av_fetch(av, i, FALSE);
-		SP[i+1] = (svp) ? *svp : &PL_sv_undef;
+		/* See note in pp_helem, and bug id #27839 */
+		SP[i+1] = svp
+		    ? SvGMAGICAL(*svp) ? sv_mortalcopy(*svp) : *svp
+		    : &PL_sv_undef;
 	    }
 	}
 	else {
@@ -870,21 +876,10 @@ PP(pp_rv2hv)
     else if (gimme == G_SCALAR) {
 	dTARGET;
 
-	/* 21394 adds this, but I'm not sure if it's safe in maint:
-	if (SvRMAGICAL(hv) && mg_find((SV *)hv, PERL_MAGIC_tied))
-	    Perl_croak(aTHX_ "Can't provide tied hash usage; "
-		       "use keys(%%hash) to test if empty");
-	*/
-
 	if (SvTYPE(hv) == SVt_PVAV)
 	    hv = avhv_keys((AV*)hv);
 
-	if (HvFILL(hv))
-            Perl_sv_setpvf(aTHX_ TARG, "%"IVdf"/%"IVdf,
-			   (IV)HvFILL(hv), (IV)HvMAX(hv) + 1);
-	else
-	    sv_setiv(TARG, 0);
-	
+	TARG = Perl_hv_scalar(aTHX_ hv);
 	SETTARG;
     }
     RETURN;
@@ -994,8 +989,12 @@ PP(pp_aassign)
     HV *hash;
     I32 i;
     int magic;
+    int duplicates = 0;
+    SV **firsthashrelem = 0;	/* "= 0" keeps gcc 2.95 quiet  */
+
 
     PL_delaymagic = DM_DELAY;		/* catch simultaneous items */
+    gimme = GIMME_V;
 
     /* If there's a common identifier on both sides we have to take
      * special care that assigning the identifier on the left doesn't
@@ -1062,6 +1061,7 @@ PP(pp_aassign)
 		hash = (HV*)sv;
 		magic = SvMAGICAL(hash) != 0;
 		hv_clear(hash);
+		firsthashrelem = relem;
 
 		while (relem < lastrelem) {	/* gobble up all the rest */
 		    HE *didstore;
@@ -1073,6 +1073,9 @@ PP(pp_aassign)
 		    if (*relem)
 			sv_setsv(tmpstr,*relem);	/* value */
 		    *(relem++) = tmpstr;
+		    if (gimme != G_VOID && hv_exists_ent(hash, sv, 0))
+			/* key overwrites an existing entry */
+			duplicates += 2;
 		    didstore = hv_store_ent(hash,sv,tmpstr,0);
 		    if (magic) {
 			if (SvSMAGICAL(tmpstr))
@@ -1173,17 +1176,26 @@ PP(pp_aassign)
     }
     PL_delaymagic = 0;
 
-    gimme = GIMME_V;
     if (gimme == G_VOID)
 	SP = firstrelem - 1;
     else if (gimme == G_SCALAR) {
 	dTARGET;
 	SP = firstrelem;
-	SETi(lastrelem - firstrelem + 1);
+	SETi(lastrelem - firstrelem + 1 - duplicates);
     }
     else {
-	if (ary || hash)
+	if (ary)
 	    SP = lastrelem;
+	else if (hash) {
+	    if (duplicates) {
+		/* Removes from the stack the entries which ended up as
+		 * duplicated keys in the hash (fix for [perl #24380]) */
+		Move(firsthashrelem + duplicates,
+			firsthashrelem, duplicates, SV**);
+		lastrelem -= duplicates;
+	    }
+	    SP = lastrelem;
+	}
 	else
 	    SP = firstrelem + (lastlelem - firstlelem);
 	lelem = firstlelem + (relem - firstrelem);
@@ -1344,10 +1356,10 @@ play_it_again:
 	    /*SUPPRESS 560*/
 	    if ((rx->startp[i] != -1) && rx->endp[i] != -1 ) {
 		len = rx->endp[i] - rx->startp[i];
+		s = rx->startp[i] + truebase;
 	        if (rx->endp[i] < 0 || rx->startp[i] < 0 ||
 		    len < 0 || len > strend - s)
 		    DIE(aTHX_ "panic: pp_match start/end pointers");
-		s = rx->startp[i] + truebase;
 		sv_setpvn(*SP, s, len);
 		if (DO_UTF8(TARG) && is_utf8_string((U8*)s, len))
 		    SvUTF8_on(*SP);
@@ -1543,7 +1555,7 @@ Perl_do_readline(pTHX)
 	    sv_unref(sv);
 	(void)SvUPGRADE(sv, SVt_PV);
 	tmplen = SvLEN(sv);	/* remember if already alloced */
-	if (!tmplen)
+	if (!tmplen && !SvREADONLY(sv))
 	    Sv_Grow(sv, 80);	/* try short-buffering it */
 	offset = 0;
 	if (type == OP_RCATLINE && SvOK(sv)) {
@@ -1574,7 +1586,9 @@ Perl_do_readline(pTHX)
     for (;;) {
 	PUTBACK;
 	if (!sv_gets(sv, fp, offset)
-	    && (type == OP_GLOB || SNARF_EOF(gimme, PL_rs, io, sv)))
+	    && (type == OP_GLOB
+		|| SNARF_EOF(gimme, PL_rs, io, sv)
+		|| PerlIO_error(fp)))
 	{
 	    PerlIO_clearerr(fp);
 	    if (IoFLAGS(io) & IOf_ARGV) {
@@ -1829,7 +1843,7 @@ PP(pp_iter)
 {
     dSP;
     register PERL_CONTEXT *cx;
-    SV* sv;
+    SV *sv, *oldsv;
     AV* av;
     SV **itersvp;
 
@@ -1845,8 +1859,8 @@ PP(pp_iter)
 	if (cx->blk_loop.iterlval) {
 	    /* string increment */
 	    register SV* cur = cx->blk_loop.iterlval;
-	    STRLEN maxlen;
-	    char *max = SvPV((SV*)av, maxlen);
+	    STRLEN maxlen = 0;
+	    char *max = SvOK((SV*)av) ? SvPV((SV*)av, maxlen) : "";
 	    if (!SvNIOK(cur) && SvCUR(cur) <= maxlen) {
 #ifndef USE_5005THREADS			  /* don't risk potential race */
 		if (SvREFCNT(*itersvp) == 1 && !SvMAGICAL(*itersvp)) {
@@ -1859,8 +1873,9 @@ PP(pp_iter)
 		    /* we need a fresh SV every time so that loop body sees a
 		     * completely new SV for closures/references to work as
 		     * they used to */
-		    SvREFCNT_dec(*itersvp);
+		    oldsv = *itersvp;
 		    *itersvp = newSVsv(cur);
+		    SvREFCNT_dec(oldsv);
 		}
 		if (strEQ(SvPVX(cur), max))
 		    sv_setiv(cur, 0); /* terminate next time */
@@ -1885,8 +1900,9 @@ PP(pp_iter)
 	    /* we need a fresh SV every time so that loop body sees a
 	     * completely new SV for closures/references to work as they
 	     * used to */
-	    SvREFCNT_dec(*itersvp);
+	    oldsv = *itersvp;
 	    *itersvp = newSViv(cx->blk_loop.iterix++);
+	    SvREFCNT_dec(oldsv);
 	}
 	RETPUSHYES;
     }
@@ -1894,8 +1910,6 @@ PP(pp_iter)
     /* iterate array */
     if (cx->blk_loop.iterix >= (av == PL_curstack ? cx->blk_oldsp : AvFILL(av)))
 	RETPUSHNO;
-
-    SvREFCNT_dec(*itersvp);
 
     if (SvMAGICAL(av) || AvREIFY(av)) {
 	SV **svp = av_fetch(av, ++cx->blk_loop.iterix, FALSE);
@@ -1936,7 +1950,10 @@ PP(pp_iter)
 	sv = (SV*)lv;
     }
 
+    oldsv = *itersvp;
     *itersvp = SvREFCNT_inc(sv);
+    SvREFCNT_dec(oldsv);
+
     RETPUSHYES;
 }
 
@@ -2300,6 +2317,7 @@ PP(pp_leavesub)
     SV *sv;
 
     POPBLOCK(cx,newpm);
+    cxstack_ix++; /* temporarily protect top context */
 
     TAINT_NOT;
     if (gimme == G_SCALAR) {
@@ -2337,10 +2355,11 @@ PP(pp_leavesub)
     }
     PUTBACK;
 
+    LEAVE;
+    cxstack_ix--;
     POPSUB(cx,sv);	/* Stack values are safe: release CV and @_ ... */
     PL_curpm = newpm;	/* ... and pop $1 et al */
 
-    LEAVE;
     LEAVESUB(sv);
     return pop_return();
 }
@@ -2358,6 +2377,7 @@ PP(pp_leavesublv)
     SV *sv;
 
     POPBLOCK(cx,newpm);
+    cxstack_ix++; /* temporarily protect top context */
 
     TAINT_NOT;
 
@@ -2393,9 +2413,10 @@ PP(pp_leavesublv)
 	 * the refcounts so the caller gets a live guy. Cannot set
 	 * TEMP, so sv_2mortal is out of question. */
 	if (!CvLVALUE(cx->blk_sub.cv)) {
+	    LEAVE;
+	    cxstack_ix--;
 	    POPSUB(cx,sv);
 	    PL_curpm = newpm;
-	    LEAVE;
 	    LEAVESUB(sv);
 	    DIE(aTHX_ "Can't modify non-lvalue subroutine call");
 	}
@@ -2404,9 +2425,10 @@ PP(pp_leavesublv)
 	    EXTEND_MORTAL(1);
 	    if (MARK == SP) {
 		if (SvFLAGS(TOPs) & (SVs_TEMP | SVs_PADTMP | SVf_READONLY)) {
+		    LEAVE;
+		    cxstack_ix--;
 		    POPSUB(cx,sv);
 		    PL_curpm = newpm;
-		    LEAVE;
 		    LEAVESUB(sv);
 		    DIE(aTHX_ "Can't return %s from lvalue subroutine",
 			SvREADONLY(TOPs) ? (TOPs == &PL_sv_undef) ? "undef"
@@ -2419,9 +2441,10 @@ PP(pp_leavesublv)
 		}
 	    }
 	    else {			/* Should not happen? */
+		LEAVE;
+		cxstack_ix--;
 		POPSUB(cx,sv);
 		PL_curpm = newpm;
-		LEAVE;
 		LEAVESUB(sv);
 		DIE(aTHX_ "%s returned from lvalue subroutine in scalar context",
 		    (MARK > SP ? "Empty array" : "Array"));
@@ -2435,9 +2458,10 @@ PP(pp_leavesublv)
 		    && SvFLAGS(*mark) & (SVs_TEMP | SVs_PADTMP | SVf_READONLY)) {
 		    /* Might be flattened array after $#array =  */
 		    PUTBACK;
+		    LEAVE;
+		    cxstack_ix--;
 		    POPSUB(cx,sv);
 		    PL_curpm = newpm;
-		    LEAVE;
 		    LEAVESUB(sv);
 		    DIE(aTHX_ "Can't return a %s from lvalue subroutine",
 			SvREADONLY(TOPs) ? "readonly value" : "temporary");
@@ -2489,10 +2513,11 @@ PP(pp_leavesublv)
     }
     PUTBACK;
 
+    LEAVE;
+    cxstack_ix--;
     POPSUB(cx,sv);	/* Stack values are safe: release CV and @_ ... */
     PL_curpm = newpm;	/* ... and pop $1 et al */
 
-    LEAVE;
     LEAVESUB(sv);
     return pop_return();
 }
@@ -2856,9 +2881,7 @@ try_autoload:
 	 * Owing the speed considerations, we choose instead to search for
 	 * the cv using find_runcv() when calling doeval().
 	 */
-	if (CvDEPTH(cv) < 2)
-	    (void)SvREFCNT_inc(cv);
-	else {
+	if (CvDEPTH(cv) >= 2) {
 	    PERL_STACK_OVERFLOW_CHECK();
 	    pad_push(padlist, CvDEPTH(cv), 1);
 	}
@@ -2973,6 +2996,18 @@ PP(pp_aelem)
 	RETPUSHUNDEF;
     svp = av_fetch(av, elem, lval && !defer);
     if (lval) {
+#ifdef PERL_MALLOC_WRAP
+	 static const char oom_array_extend[] =
+	      "Out of memory during array extend"; /* Duplicated in av.c */
+	 if (SvUOK(elemsv)) {
+	      UV uv = SvUV(elemsv);
+	      elem = uv > IV_MAX ? IV_MAX : uv;
+	 }
+	 else if (SvNOK(elemsv))
+	      elem = (IV)SvNV(elemsv);
+	 if (elem > 0)
+	      MEM_WRAP_CHECK_1(elem,SV*,oom_array_extend);
+#endif
 	if (!svp || *svp == &PL_sv_undef) {
 	    SV* lv;
 	    if (!defer)

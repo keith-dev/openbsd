@@ -1,4 +1,4 @@
-.\"	$OpenBSD: sk.4,v 1.22 2003/12/17 17:29:23 jason Exp $
+.\"	$OpenBSD: sk.4,v 1.26 2004/08/20 06:17:05 deraadt Exp $
 .\"
 .\" Copyright (c) 1997, 1998, 1999
 .\"	Bill Paul <wpaul@ctr.columbia.edu>. All rights reserved.
@@ -38,15 +38,15 @@
 .Sh NAME
 .Nm sk ,
 .Nm skc
-.Nd SysKonnect XMAC II and Marvell GMAC based gigabit ethernet
+.Nd SysKonnect XMAC II and Marvell GMAC based Gigabit Ethernet
 .Sh SYNOPSIS
 .Cd "skc* at pci? dev ? function ?"
 .Cd "sk* at skc?"
 .Sh DESCRIPTION
 The
 .Nm sk
-driver provides support for SysKonnect based gigabit ethernet adapters
-and Marvell based gigabit ethernet adapters, including the following:
+driver provides support for SysKonnect based Gigabit Ethernet adapters
+and Marvell based Gigabit Ethernet adapters, including the following:
 .Pp
 .Bl -bullet -offset indent -compact
 .It
@@ -69,6 +69,8 @@ SK-9821 V2.0 single port, copper adapter
 SK-9843 V2.0 single port, copper adapter
 .It
 3com 3c940 single port, copper adapter
+.It
+Belkin F5D5005, copper adapter
 .It
 Linksys EG1032v2, copper adapter
 .It
@@ -129,7 +131,7 @@ file.
 Set 1000Mbps (Gigabit Ethernet) operation on fiber and force full-duplex mode.
 .It Cm media No 1000baseSX Cm mediaopt No half-duplex
 Set 1000Mbps (Gigabit Ethernet) operation on fiber and force half-duplex mode.
-.It Cm media No 1000baseT Cm mediaopt
+.It Cm media No 1000baseT Cm mediaopt No full-duplex
 Set 1000Mbps (Gigabit Ethernet) operation and force full-duplex mode.
 .El
 .Pp

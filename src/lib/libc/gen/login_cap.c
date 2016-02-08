@@ -1,5 +1,20 @@
-/*	$OpenBSD: login_cap.c,v 1.19 2004/01/07 01:09:40 fgsch Exp $	*/
+/*	$OpenBSD: login_cap.c,v 1.23 2004/08/10 15:53:31 millert Exp $	*/
 
+/*
+ * Copyright (c) 2000-2004 Todd C. Miller <Todd.Miller@courtesan.com>
+ *
+ * Permission to use, copy, modify, and distribute this software for any
+ * purpose with or without fee is hereby granted, provided that the above
+ * copyright notice and this permission notice appear in all copies.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+ * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+ * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+ * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+ * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ */
 /*-
  * Copyright (c) 1995,1997 Berkeley Software Design, Inc. All rights reserved.
  *
@@ -53,15 +68,17 @@
 
 
 static	char *_authtypes[] = { LOGIN_DEFSTYLE, 0 };
-static	int setuserpath(login_cap_t *, char *);
+static	char *expandstr(const char *, const struct passwd *, int);
+static	int login_setenv(char *, char *, const struct passwd *, int);
+static	int setuserenv(login_cap_t *lc, const struct passwd *pwd);
+static	int setuserpath(login_cap_t *, const struct passwd *pwd);
 static	u_quad_t multiply(u_quad_t, u_quad_t);
 static	u_quad_t strtolimit(char *, char **, int);
 static	u_quad_t strtosize(char *, char **, int);
 static	int gsetrl(login_cap_t *lc, int what, char *name, int type);
 
 login_cap_t *
-login_getclass(class)
-	char *class;
+login_getclass(char *class)
 {
 	char *classfiles[2];
 	login_cap_t *lc;
@@ -135,10 +152,7 @@ login_getclass(class)
 }
 
 char *
-login_getstyle(lc, style, atype)
-	login_cap_t *lc;
-	char *style;
-	char *atype;
+login_getstyle(login_cap_t *lc, char *style, char *atype)
 {
     	char **authtypes = _authtypes;
 	char *auths, *ta;
@@ -209,11 +223,7 @@ login_getstyle(lc, style, atype)
 }
 
 char *
-login_getcapstr(lc, cap, def, e)
-	login_cap_t *lc;
-	char *cap;
-	char *def;
-	char *e;
+login_getcapstr(login_cap_t *lc, char *cap, char *def, char *e)
 {
 	char *res, *str;
 	int stat;
@@ -249,11 +259,7 @@ login_getcapstr(lc, cap, def, e)
 }
 
 quad_t
-login_getcaptime(lc, cap, def, e)
-	login_cap_t *lc;
-	char *cap;
-	quad_t def;
-	quad_t e;
+login_getcaptime(login_cap_t *lc, char *cap, quad_t def, quad_t e)
 {
 	char *ep;
 	char *res, *sres;
@@ -341,11 +347,7 @@ invalid:
 }
 
 quad_t
-login_getcapnum(lc, cap, def, e)
-	login_cap_t *lc;
-	char *cap;
-	quad_t def;
-	quad_t e;
+login_getcapnum(login_cap_t *lc, char *cap, quad_t def, quad_t e)
 {
 	char *ep;
 	char *res;
@@ -402,11 +404,7 @@ login_getcapnum(lc, cap, def, e)
 }
 
 quad_t
-login_getcapsize(lc, cap, def, e)
-	login_cap_t *lc;
-	char *cap;
-	quad_t def;
-	quad_t e;
+login_getcapsize(login_cap_t *lc, char *cap, quad_t def, quad_t e)
 {
 	char *ep;
 	char *res;
@@ -457,10 +455,7 @@ login_getcapsize(lc, cap, def, e)
 }
 
 int
-login_getcapbool(lc, cap, def)
-	login_cap_t *lc;
-	char *cap;
-	u_int def;
+login_getcapbool(login_cap_t *lc, char *cap, u_int def)
 {
     	if (!lc->lc_cap)
 		return (def);
@@ -469,8 +464,7 @@ login_getcapbool(lc, cap, def)
 }
 
 void
-login_close(lc)
-	login_cap_t *lc;
+login_close(login_cap_t *lc)
 {
 	if (lc) {
 		if (lc->lc_class)
@@ -501,15 +495,14 @@ static struct {
 	{ RLIMIT_NPROC,		CNUMB, "maxproc", },
 	{ RLIMIT_NOFILE,	CNUMB, "openfiles", },
 	{ RLIMIT_CORE,		CSIZE, "coredumpsize", },
+#ifdef RLIMIT_VMEM
+	{ RLIMIT_VMEM,		CSIZE, "vmemoryuse", },
+#endif
 	{ -1, 0, 0 }
 };
 
 static int
-gsetrl(lc, what, name, type)
-	login_cap_t *lc;
-	int what;
-	char *name;
-	int type;
+gsetrl(login_cap_t *lc, int what, char *name, int type)
 {
 	struct rlimit rl;
 	struct rlimit r;
@@ -585,9 +578,7 @@ gsetrl(lc, what, name, type)
 }
 
 int
-setclasscontext(class, flags)
-	char *class;
-	u_int flags;
+setclasscontext(char *class, u_int flags)
 {
 	int ret;
 	login_cap_t *lc;
@@ -602,11 +593,7 @@ setclasscontext(class, flags)
 }
 
 int
-setusercontext(lc, pwd, uid, flags)
-	login_cap_t *lc;
-	struct passwd *pwd;
-	uid_t uid;
-	u_int flags;
+setusercontext(login_cap_t *lc, struct passwd *pwd, uid_t uid, u_int flags)
 {
 	login_cap_t *flc;
 	quad_t p;
@@ -674,8 +661,16 @@ setusercontext(lc, pwd, uid, flags)
 		}
 	}
 
+	if (flags & LOGIN_SETENV) {
+		if (setuserenv(lc, pwd) == -1) {
+			syslog(LOG_ERR, "could not set user environment: %m");
+			login_close(flc);
+			return (-1);
+		}
+	}
+
 	if (flags & LOGIN_SETPATH) {
-		if (setuserpath(lc, pwd ? pwd->pw_dir : "") == -1) {
+		if (setuserpath(lc, pwd) == -1) {
 			syslog(LOG_ERR, "could not set PATH: %m");
 			login_close(flc);
 			return (-1);
@@ -688,80 +683,119 @@ setusercontext(lc, pwd, uid, flags)
 
 /*
  * Look up "path" for this user in login.conf and replace whitespace
- * with ':' and "~/" with "$HOME/" at the beginning of entries.  Sets
- * the PATH environment variable to the result or _PATH_DEFPATH on error.
+ * with ':' while expanding '~' and '$'.  Sets the PATH environment
+ * variable to the result or _PATH_DEFPATH on error.
  */
 static int
-setuserpath(lc, home)
-	login_cap_t *lc;
-	char *home;
+setuserpath(login_cap_t *lc, const struct passwd *pwd)
 {
-	size_t psize, n;
-	char *p, *path, *opath, *dst, *dend, *tmp, last;
-	int cnt, error;
+	char *path = NULL, *opath = NULL, *op, *np;
+	int len, error;
 
-	dst = path = NULL;
-	if ((opath = login_getcapstr(lc, "path", NULL, NULL)) == NULL)
-		goto done;
+	if (lc->lc_cap == NULL)
+		goto setit;		/* impossible */
 
-	/* Count the number of entries that begin with "~/" or consist of "~" */
-	for (p = opath, cnt = 0, last = ' '; *p != '\0'; last = *p++) {
-		if (p[0] == '~' && (last == ' ' || last == '\t')) {
-			switch (p[1]) {
-			case '/':
-				p++;
-				/* FALLTHROUGH */
-			case ' ':
-			case '\t':
-			case '\0':
-				cnt++;
-				break;
-			}
+	if ((len = cgetustr(lc->lc_cap, "path", &opath)) <= 0)
+		goto setit;
+
+	if ((path = malloc(len + 1)) == NULL)
+		goto setit;
+
+	/* Convert opath from space-separated to colon-separated path. */
+	for (op = opath, np = path; *op != '\0'; ) {
+		switch (*op) {
+		case ' ':
+		case '\t':
+			/*
+			 * Collapse consecutive spaces and trim any space
+			 * at the very end.
+			 */
+			do {
+				op++;
+			} while (*op == ' ' || *op == '\t');
+			if (*op != '\0')
+				*np++ = ':';
+			break;
+		case '\\':
+			/* check for escaped whitespace */
+			if (*(op + 1) == ' ' || *(op + 1) == '\t')
+				*np++ = *op++;
+			/* FALLTHROUGH */
+		default:
+			*np++ = *op++;
+			break;
 		}
+		
 	}
+	*np = '\0';
+setit:
+	error = login_setenv("PATH", path ? path : _PATH_DEFPATH, pwd, 1);
+	free(opath);
+	free(path);
+	return (error);
+}
 
-	/* The '~' in opath counts against strlen(home), hence the decrement. */
-	psize = (p - opath) + (cnt * (strlen(home) - 1)) + 1;
-	if ((dst = path = malloc(psize)) == NULL)
-		goto done;
+/*
+ * Look up "setenv" for this user in login.conf and set the comma-separated
+ * list of environment variables, expanding '~' and '$'.
+ */
+static int
+setuserenv(login_cap_t *lc, const struct passwd *pwd)
+{
+	char *beg, *end, *ep, *list, *value;
+	int len, error;
 
-	/* Copy path elements from opath into path, expanding ~ as we go. */
-	dend = dst + psize;
-	for (tmp = opath; (p = strsep(&tmp, " \t")) != NULL; ) {
-		if (*p == '\0')
+	if (lc->lc_cap == NULL)
+		return (-1);		/* impossible */
+
+	if ((len = cgetustr(lc->lc_cap, "setenv", &list)) <= 0)
+		return (0);
+
+	for (beg = end = list, ep = list + len + 1; end < ep; end++) {
+		switch (*end) {
+		case '\\':
+			if (*(end + 1) == ',')
+				end++;	/* skip escaped comma */
 			continue;
-		if (p[0] == '~' && (p[1] == '/' || p[1] == '\0')) {
-			n = strlcpy(dst, home, dend - dst);
-			if (n >= dend - dst) {
-				dst = path;
-				goto done;
+		case ',':
+		case '\0':
+			*end = '\0';
+			if (beg == end) {
+				beg++;
+				continue;
 			}
-			dst += n;
-			p++;
+			break;
+		default:
+			continue;
 		}
-		if ((n = strlcpy(dst, p, dend - dst)) >= dend - dst) {
-			dst = path;
-			goto done;
-		}
-		dst += n;
-		*dst++ = ':';
-	}
-	if (dst != path)
-		*--dst = '\0';		/* replace trailing ':' w/ a NUL */
 
-	/*
-	 * Possible exit states:
-	 *	error: path == NULL, opath == NULL, dst == NULL
-	 *	error: path == NULL, opath != NULL, dst == NULL
-	 *	error: path != NULL, opath != NULL, dst == path
-	 *	good:  path != NULL, opath != NULL, dst != path
-	 */
-done:
-	error = setenv("PATH", (path != dst) ? path : _PATH_DEFPATH, 1);
-	if (opath != NULL)
-		free(opath);
-	if (path != opath)
-		free(path);
+		if ((value = strchr(beg, '=')) != NULL)
+			*value++ = '\0';
+		else
+			value = "";
+		if ((error = login_setenv(beg, value, pwd, 0)) != 0) {
+			free(list);
+			return (error);
+		}
+		beg = end + 1;
+	}
+	free(list);
+	return (0);
+}
+
+/*
+ * Set an environment variable, substituting for ~ and $
+ */
+static int
+login_setenv(char *name, char *ovalue, const struct passwd *pwd, int ispath)
+{
+	char *value = NULL;
+	int error;
+
+	if (*ovalue != '\0')
+		value = expandstr(ovalue, pwd, ispath);
+	error = setenv(name, value ? value : ovalue, 1);
+	free(value);
 	return (error);
 }
 
@@ -779,10 +813,7 @@ done:
  */
 static
 u_quad_t
-strtosize(str, endptr, radix)
-	char *str;
-	char **endptr;
-	int radix;
+strtosize(char *str, char **endptr, int radix)
 {
 	u_quad_t num, num2, t;
 	char *expr, *expr2;
@@ -855,10 +886,7 @@ erange:
 
 static
 u_quad_t
-strtolimit(str, endptr, radix)
-	char *str;
-	char **endptr;
-	int radix;
+strtolimit(char *str, char **endptr, int radix)
 {
 	if (strcasecmp(str, "infinity") == 0 || strcasecmp(str, "inf") == 0) {
 		if (endptr)
@@ -869,9 +897,7 @@ strtolimit(str, endptr, radix)
 }
 
 static u_quad_t
-multiply(n1, n2)
-	u_quad_t n1;
-	u_quad_t n2;
+multiply(u_quad_t n1, u_quad_t n2)
 {
 	static int bpw = 0;
 	u_quad_t m;
@@ -977,4 +1003,141 @@ secure_path(char *path)
 		return (-1);
 	}
 	return (0);
+}
+
+/*
+ * Check whether or not a tilde in a string should be expanded.
+ * We only do expansion for things like "~", "~/...", ~me", "~me/...".
+ * Additionally, for paths the tilde must be a the beginning.
+ */
+#define tilde_valid(s, b, u, l, ip) \
+    ((!(ip) || (s) == (b) || (s)[-1] == ':') && \
+    ((s)[1] == '/' || (s)[1] == '\0' || \
+    (strncmp((s)+1, u, l) == 0 && ((s)[l+1] == '/' || (s)[l+1] == '\0'))))
+
+/*
+ * Make a copy of a string, expanding '~' to the user's homedir, '$' to the
+ * login name and other escape sequences as per cgetstr(3).
+ */
+static char *
+expandstr(const char *ostr, const struct passwd *pwd, int ispath)
+{
+	size_t n, olen, nlen, ulen, dlen;
+	const char *ep, *eo, *op;
+	char *nstr, *np;
+	int ch;
+
+	if (pwd != NULL) {
+		ulen = strlen(pwd->pw_name);
+		dlen = strlen(pwd->pw_dir);
+	}
+
+	/* calculate the size of the new string */
+	olen = nlen = strlen(ostr);
+	for (op = ostr, ep = ostr + olen; op < ep; op++) {
+		switch (*op) {
+		case '~':
+			if (pwd == NULL ||
+			    !tilde_valid(op, ostr, pwd->pw_name, ulen, ispath))
+				break;
+			if (op[1] != '/' && op[1] != '\0') {
+				op += ulen;	/* ~username */
+				nlen = nlen - ulen - 1 + dlen;
+			} else
+				nlen += dlen - 1;
+			break;
+		case '$':
+			if (pwd != NULL)
+				nlen += ulen - 1;
+			break;
+		case '^':
+			/* control char */
+			if (*++op != '\0')
+				nlen--;
+			break;
+		case '\\':
+			if (op[1] == '\0')
+				break;
+			/*
+			 * Byte in octal notation (\123) or an escaped char (\t)
+			 */
+			eo = op + 4;
+			do {
+				op++;
+				nlen--;
+			} while (op < eo && *op >= '0' && *op <= '7');
+			break;
+		}
+	}
+	if ((np = nstr = malloc(++nlen)) == NULL)
+		return (NULL);
+
+	for (op = ostr, ep = ostr + olen; op < ep; op++) {
+		switch ((ch = *op)) {
+		case '~':
+			if (pwd == NULL ||
+			    !tilde_valid(op, ostr, pwd->pw_name, ulen, ispath))
+				break;
+			if (op[1] != '/' && op[1] != '\0')
+				op += ulen;	/* ~username */
+			strlcpy(np, pwd->pw_dir, nlen);
+			nlen -= dlen;
+			np += dlen;
+			continue;
+		case '$':
+			if (pwd == NULL)
+				break;
+			strlcpy(np, pwd->pw_name, nlen);
+			nlen -= ulen;
+			np += ulen;
+			continue;
+		case '^':
+			if (op[1] != '\0')
+				ch = *++op & 037;
+			break;
+		case '\\':
+			if (op[1] == '\0')
+				break;
+			switch(*++op) {
+			case '0': case '1': case '2': case '3':
+			case '4': case '5': case '6': case '7':
+				/* byte in octal up to 3 digits long */
+				ch = 0;
+				n = 3;
+				do {
+					ch = ch * 8 + (*op++ - '0');
+				} while (--n && *op >= '0' && *op <= '7');
+				break;
+			case 'b': case 'B':
+				ch = '\b';
+				break;
+			case 't': case 'T':
+				ch = '\t';
+				break;
+			case 'n': case 'N':
+				ch = '\n';
+				break;
+			case 'f': case 'F':
+				ch = '\f';
+				break;
+			case 'r': case 'R':
+				ch = '\r';
+				break;
+			case 'e': case 'E':
+				ch = '\033';
+				break;
+			case 'c': case 'C':
+				ch = ':';
+				break;
+			default:
+				ch = *op;
+				break;
+			}
+			break;
+		}
+		*np++ = ch;
+		nlen--;
+	}
+	*np = '\0';
+	return (nstr);
 }

@@ -1,4 +1,4 @@
-vers(a, {-$OpenBSD: MAKEDEV.common,v 1.5 2004/03/12 18:25:15 miod Exp $-})dnl
+vers(a, {-$OpenBSD: MAKEDEV.common,v 1.12 2004/08/19 07:05:20 miod Exp $-})dnl
 divert(1)dnl
 dnl
 dnl Common device definitions.
@@ -166,6 +166,7 @@ target(all, view0, 0, 1, 2, 3, 4, 5)dnl
 target(all, local)dnl
 target(all, gpr, 0)dnl
 target(all, ptm)dnl
+target(all, hotplug)dnl
 dnl
 _mkdev(all, {-all-}, {-dnl
 show_target(all)dnl
@@ -174,7 +175,7 @@ dnl
 dnl XXX some arches use ramd, others ramdisk - needs to be fixed eventually
 __devitem(ramdisk, ramdisk, Ramdisk kernel devices,nothing)dnl
 dnl
-target(usb, usb, 0, 1)dnl
+target(usb, usb, 0, 1, 2, 3)dnl
 target(usb, urio, 0)dnl
 twrget(usb, uscan, uscanner, 0)dnl
 target(usb, uhid, 0, 1, 2, 3)dnl
@@ -218,7 +219,7 @@ _mkdev(mcd, mcd*, {-dodisk2 mcd $U major_mcd_b major_mcd_c $U 0{--}ifstep(mcd)dn
 -})dnl
 __devitem(ch, {-ch*-}, SCSI media changers)dnl
 _mcdev(ch, ch*, ch, {-major_ch_c-}, 660, operator)dnl
-__devitem(uk, uk*, SCSI unknown devices)dnl
+__devitem(uk, uk*, Unknown SCSI devices)dnl
 _mcdev(uk, uk*, uk, {-major_uk_c-}, 640, operator)dnl
 __devitem(ss, ss*, SCSI scanners)dnl
 _mkdev(ss, ss*, {-M ss$U c major_ss_c Mult($U,16) 640 operator
@@ -343,19 +344,23 @@ _mkdev(wsmouse, wsmouse*, {-M wsmouse$U c major_wsmouse_c $U 600-})dnl
 __devtitle(pty, Pseudo terminals)dnl
 __devitem(ptm, ptm, pty master device)dnl
 _mkdev(ptm, ptm, {-M ptm c major_ptm_c 0 666-})dnl
-__devitem(tty, tty*, Set of 16 slave pseudo terminals)dnl
-__devitem(pty, pty*, Set of 16 master pseudo terminals)dnl
+__devitem(tty, tty*, Set of 62 slave pseudo terminals)dnl
+__devitem(pty, pty*, Set of 62 master pseudo terminals)dnl
 _mkdev(pty, pty*, {-if [ $U -gt 15 ]; then
 		echo bad unit for pty in: $i
 		continue
 	fi
-	set -A tbl p q r s t u v w x y z P Q R S T
-	name=${tbl[$U]}
+	set -A letters p q r s t u v w x y z P Q R S T
+	set -A suffixes 0 1 2 3 4 5 6 7 8 9 a b c d e f g h i j k l m n o p q \
+	    r s t u v w x y z A B C D E F G H I J K L M N O P Q R S T U V W X \
+	    Y Z
+
+	name=${letters[$U]}
 	n=0
-	while [ $n -lt 16 ]
+	while [ $n -lt 62 ]
 	do
-		nam=$name$(hex $n)
-		off=Mult($U, 16)
+		nam=$name${suffixes[$n]}
+		off=Mult($U, 62)
 		M tty$nam c major_tty_c Add($off, $n)
 		M pty$nam c major_pty_c Add($off, $n)
 		n=Add($n, 1)
@@ -466,7 +471,7 @@ _mkdev(fdesc, fd, {-RMlist="mkdir -p fd;$RMlist" n=0
 __devitem(grf_mac, grf*, Raw interface to the mac68k graphics devices,grf)dnl
 __devitem(ite, ite*, Terminal emulator interface to HP300 graphics devices)dnl
 __devitem({-hil-}, {-hil-}, HP-HIL input devices)dnl
-__devitem(oppr, openprom,,openprom)dnl
+__devitem(oppr, openprom,PROM settings,openprom)dnl
 _cdev(oppr, openprom, 70, 0)dnl
 __devitem(cry, crypto, Hardware crypto access driver,crypto)dnl
 _mkdev(cry, crypto, {-M crypto c major_cry_c-} 0)dnl
@@ -543,4 +548,8 @@ _mkdev(adb, adb, {-M adb c major_adb_c 0-})dnl
 __devitem(pdc, pdc, PDC device)dnl
 __devitem(gpr, gpr*, GPR400 smartcard reader)dnl
 _mcdev(gpr, gpr*, gpr, {-major_gpr_c-})dnl
+__devitem(hotplug, hotplug, devices hot plugging)dnl
+_mkdev(hotplug, hotplug, {-M hotplug c major_hotplug_c $U 400-})dnl
+__devitem(gpio, gpio*, General Purpose Input/Output)dnl
+_mcdev(gpio, gpio*, gpio, {-major_gpio_c-}, 600)dnl
 _mkdev(local, local, {-test -s $T.local && sh $T.local-})dnl

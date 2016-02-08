@@ -1,4 +1,4 @@
-/*	$OpenBSD: config.c,v 1.33 2004/03/17 17:49:53 henning Exp $ */
+/*	$OpenBSD: config.c,v 1.39 2004/06/20 17:49:46 henning Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -31,18 +31,17 @@
 #include "bgpd.h"
 #include "session.h"
 
-void			*sconf;
-
 u_int32_t	get_bgpid(void);
 int		host_v4(const char *, struct bgpd_addr *, u_int8_t *);
 int		host_v6(const char *, struct bgpd_addr *);
 
 int
 merge_config(struct bgpd_config *xconf, struct bgpd_config *conf,
-    struct peer *peer_l)
+    struct peer *peer_l, struct listen_addrs *listen_addrs)
 {
-	struct peer	*p;
-	int		 errs = 0;
+	struct peer				*p;
+	struct listen_addr			*la;
+	int					 errs = 0;
 
 	/* preserve cmd line opts */
 	conf->opts = xconf->opts;
@@ -58,6 +57,9 @@ merge_config(struct bgpd_config *xconf, struct bgpd_config *conf,
 	if (!conf->bgpid)
 		conf->bgpid = get_bgpid();
 
+	if ((conf->flags & BGPD_FLAG_REFLECTOR) && conf->clusterid == 0)
+		conf->clusterid = conf->bgpid;
+
 	for (p = peer_l; p != NULL; p = p->next) {
 		p->conf.ebgp = (p->conf.remote_as != conf->as);
 		if (p->conf.announce_type == ANNOUNCE_UNDEF)
@@ -66,14 +68,25 @@ merge_config(struct bgpd_config *xconf, struct bgpd_config *conf,
 		if (p->conf.enforce_as == ENFORCE_AS_UNDEF)
 			p->conf.enforce_as = p->conf.ebgp == 0 ?
 			    ENFORCE_AS_OFF : ENFORCE_AS_ON;
-		if (p->conf.tcp_md5_key[0] && p->conf.local_addr.af == 0) {
-			log_peer_warnx(&p->conf, "\"tcp md5sig\" requires "
-			    "\"local-address\" to be set");
-			errs++;
+		if (p->conf.reflector_client && p->conf.ebgp) {
+			log_peer_warnx(&p->conf, "configuration error: "
+			    "EBGP neighbors are not allowed in route "
+			    "reflector clusters");
+			return (1);
 		}
 	}
 
+	if (xconf->listen_addrs != NULL) {
+		while ((la = TAILQ_FIRST(xconf->listen_addrs)) != NULL) {
+			TAILQ_REMOVE(xconf->listen_addrs, la, entry);
+			free(la);
+		}
+		free(xconf->listen_addrs);
+	}
+
 	memcpy(xconf, conf, sizeof(struct bgpd_config));
+
+	xconf->listen_addrs = listen_addrs;
 
 	return (errs);
 }
@@ -134,8 +147,9 @@ host(const char *s, struct bgpd_addr *h, u_int8_t *len)
 	char			*p, *q, *ps;
 
 	if ((p = strrchr(s, '/')) != NULL) {
+		errno = 0;
 		mask = strtol(p+1, &q, 0);
-		if (!q || *q || mask > 128 || q == (p+1)) {
+		if (errno == ERANGE || !q || *q || mask > 128 || q == (p+1)) {
 			log_warnx("invalid netmask");
 			return (0);
 		}
@@ -209,4 +223,52 @@ host_v6(const char *s, struct bgpd_addr *h)
 	}
 
 	return (0);
+}
+
+void
+prepare_listeners(struct bgpd_config *conf)
+{
+	struct listen_addr	*la;
+	int			 opt = 1;
+
+	if (TAILQ_EMPTY(conf->listen_addrs)) {
+		if ((la = calloc(1, sizeof(struct listen_addr))) == NULL)
+			fatal("setup_listeners calloc");
+		la->fd = -1;
+		la->flags = DEFAULT_LISTENER;
+		la->sa.ss_len = sizeof(struct sockaddr_in);
+		((struct sockaddr_in *)&la->sa)->sin_family = AF_INET;
+		((struct sockaddr_in *)&la->sa)->sin_addr.s_addr =
+		    htonl(INADDR_ANY);
+		((struct sockaddr_in *)&la->sa)->sin_port = htons(BGP_PORT);
+		TAILQ_INSERT_TAIL(conf->listen_addrs, la, entry);
+
+		if ((la = calloc(1, sizeof(struct listen_addr))) == NULL)
+			fatal("setup_listeners calloc");
+		la->fd = -1;
+		la->flags = DEFAULT_LISTENER;
+		la->sa.ss_len = sizeof(struct sockaddr_in6);
+		((struct sockaddr_in6 *)&la->sa)->sin6_family = AF_INET6;
+		((struct sockaddr_in6 *)&la->sa)->sin6_port = htons(BGP_PORT);
+		TAILQ_INSERT_TAIL(conf->listen_addrs, la, entry);
+	}
+
+	TAILQ_FOREACH(la, conf->listen_addrs, entry) {
+		if ((la->fd = socket(la->sa.ss_family, SOCK_STREAM,
+		    IPPROTO_TCP)) == -1)
+			fatal("socket");
+
+		opt = 1;
+		if (setsockopt(la->fd, SOL_SOCKET, SO_REUSEPORT,
+		    &opt, sizeof(opt)) == -1)
+			fatal("setsockopt SO_REUSEPORT");
+
+		if (bind(la->fd, (struct sockaddr *)&la->sa, la->sa.ss_len) ==
+		    -1) {
+			log_warn("cannot bind to %s",
+			    log_sockaddr((struct sockaddr *)&la->sa));
+			close(la->fd);
+			la->fd = -1;
+		}
+	}
 }

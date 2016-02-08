@@ -1,4 +1,4 @@
-.\"	$OpenBSD: tcpdump.8,v 1.43 2003/10/12 10:59:47 dhartmei Exp $
+.\"	$OpenBSD: tcpdump.8,v 1.48 2004/07/28 09:37:26 markus Exp $
 .\"
 .\" Copyright (c) 1987, 1988, 1989, 1990, 1991, 1992, 1994, 1995, 1996
 .\"	The Regents of the University of California.  All rights reserved.
@@ -193,12 +193,18 @@ Do not print a timestamp on each dump line.
 Print an unformatted timestamp on each dump line.
 .It Fl ttt
 Print day and month in timestamp.
+.It Fl tttt
+Print timestamp difference between packets.
+.It Fl ttttt
+Print timestamp difference since the first packet.
 .It Fl T Ar type
 Force packets selected by
 .Ar expression
 to be interpreted as the specified
 .Ar type .
 Currently known types are
+.Cm vrrp
+.Pq Virtual Router Redundancy protocol ,
 .Cm cnfp
 .Pq Cisco NetFlow protocol ,
 .Cm rpc
@@ -635,6 +641,7 @@ The known codes are:
 .Ar match ,
 .Ar bad-offset ,
 .Ar fragment ,
+.Ar bad-timestamp ,
 .Ar short ,
 .Ar normalize ,
 and

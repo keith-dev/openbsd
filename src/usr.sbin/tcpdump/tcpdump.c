@@ -1,4 +1,4 @@
-/*	$OpenBSD: tcpdump.c,v 1.35 2004/01/28 19:44:55 canacar Exp $	*/
+/*	$OpenBSD: tcpdump.c,v 1.38 2004/06/20 17:51:55 avsm Exp $	*/
 
 /*
  * Copyright (c) 1988, 1989, 1990, 1991, 1992, 1993, 1994, 1995, 1996, 1997
@@ -26,7 +26,7 @@ static const char copyright[] =
     "@(#) Copyright (c) 1988, 1989, 1990, 1991, 1992, 1993, 1994, 1995, 1996, 1997\n\
 The Regents of the University of California.  All rights reserved.\n";
 static const char rcsid[] =
-    "@(#) $Header: /cvs/src/usr.sbin/tcpdump/tcpdump.c,v 1.35 2004/01/28 19:44:55 canacar Exp $ (LBL)";
+    "@(#) $Header: /cvs/src/usr.sbin/tcpdump/tcpdump.c,v 1.38 2004/06/20 17:51:55 avsm Exp $ (LBL)";
 #endif
 
 /*
@@ -92,7 +92,7 @@ extern int esp_init(char *);
 
 /* Forwards */
 RETSIGTYPE cleanup(int);
-extern __dead void usage(void) __attribute__((volatile));
+extern __dead void usage(void);
 
 /* Length of saved portion of packet. */
 int snaplen = DEFAULT_SNAPLEN;
@@ -122,6 +122,7 @@ static struct printer printers[] = {
 	{ pflog_if_print, 	DLT_PFLOG },
 	{ pflog_old_if_print, 	DLT_OLD_PFLOG },
 	{ pfsync_if_print, 	DLT_PFSYNC },
+	{ ppp_ether_if_print,	DLT_PPP_ETHER },
 	{ NULL,			0 },
 };
 
@@ -281,6 +282,8 @@ main(int argc, char **argv)
 				packettype = PT_RTCP;
 			else if (strcasecmp(optarg, "cnfp") == 0)
 				packettype = PT_CNFP;
+			else if (strcasecmp(optarg, "vrrp") == 0)
+				packettype = PT_VRRP;
 			else if (strcasecmp(optarg, "sack") == 0)
 				snaplen = SACK_SNAPLEN;
 			else

@@ -1,4 +1,4 @@
-/*	$OpenBSD: dhcpd.h,v 1.26 2004/03/05 23:57:16 deraadt Exp $	*/
+/*	$OpenBSD: dhcpd.h,v 1.33 2004/05/06 22:29:15 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2004 Henning Brauer <henning@openbsd.org>
@@ -106,7 +106,6 @@ struct packet {
 	struct interface_info	*interface;
 	struct hardware		*haddr;
 	struct option_data	 options[256];
-	int			 got_requested_address;
 };
 
 struct hardware {
@@ -256,7 +255,7 @@ void do_packet(struct interface_info *, struct dhcp_packet *,
 /* errwarn.c */
 extern int warnings_occurred;
 void error(char *, ...) __attribute__ ((__format__ (__printf__, 1, 2)));
-int warn(char *, ...) __attribute__ ((__format__ (__printf__, 1, 2)));
+int warning(char *, ...) __attribute__ ((__format__ (__printf__, 1, 2)));
 int note(char *, ...) __attribute__ ((__format__ (__printf__, 1, 2)));
 int debug(char *, ...) __attribute__ ((__format__ (__printf__, 1, 2)));
 int parse_warn(char *, ...) __attribute__ ((__format__ (__printf__, 1, 2)));
@@ -275,7 +274,6 @@ int peek_token(char **, FILE *);
 void skip_to_semi(FILE *);
 int parse_semi(FILE *);
 char *parse_string(FILE *);
-char *parse_host_name(FILE *);
 int parse_ip_addr(FILE *, struct iaddr *);
 void parse_hardware_param(FILE *, struct hardware *);
 void parse_lease_time(FILE *, time_t *);
@@ -285,31 +283,19 @@ void convert_num(unsigned char *, char *, int, int);
 time_t parse_date(FILE *);
 
 /* tree.c */
-int tree_evaluate(struct tree_cache *);
-struct dns_host_entry *enter_dns_host(char *);
 pair cons(caddr_t, pair);
 
 /* alloc.c */
-void *dmalloc(int, char *);
-void dfree(void *, char *);
-struct tree *new_tree(char *);
-struct tree_cache *new_tree_cache(char *);
-struct hash_table *new_hash_table(int, char *);
-struct hash_bucket *new_hash_bucket(char *);
-struct string_list *new_string_list(size_t size, char * name);
-void free_hash_bucket(struct hash_bucket *, char *);
-void free_hash_table(struct hash_table *, char *);
-void free_tree_cache(struct tree_cache *, char *);
-void free_tree(struct tree *, char *);
-void free_string_list(struct string_list *, char *);
+struct string_list	*new_string_list(size_t size);
+struct hash_table	*new_hash_table(int);
+struct hash_bucket	*new_hash_bucket(void);
 
 /* bpf.c */
 int if_register_bpf(struct interface_info *);
 void if_register_send(struct interface_info *);
 void if_register_receive(struct interface_info *);
-ssize_t send_packet(struct interface_info *,
-    struct packet *, struct dhcp_packet *, size_t, struct in_addr,
-    struct sockaddr_in *, struct hardware *);
+ssize_t send_packet(struct interface_info *, struct dhcp_packet *, size_t,
+    struct in_addr, struct sockaddr_in *, struct hardware *);
 ssize_t receive_packet(struct interface_info *, unsigned char *, size_t,
     struct sockaddr_in *, struct hardware *);
 
@@ -329,14 +315,12 @@ int interface_link_status(char *);
 /* hash.c */
 struct hash_table *new_hash(void);
 void add_hash(struct hash_table *, unsigned char *, int, unsigned char *);
-void delete_hash_entry(struct hash_table *, unsigned char *, int);
 unsigned char *hash_lookup(struct hash_table *, unsigned char *, int);
 
 /* tables.c */
 extern struct option dhcp_options[256];
 extern unsigned char dhcp_option_default_priority_list[];
 extern int sizeof_dhcp_option_default_priority_list;
-extern char *hardware_types[256];
 extern struct hash_table universe_hash;
 extern struct universe dhcp_universe;
 void initialize_universes(void);
@@ -353,9 +337,7 @@ void putShort(unsigned char *, int);
 
 /* inet.c */
 struct iaddr subnet_number(struct iaddr, struct iaddr);
-struct iaddr ip_addr(struct iaddr, struct iaddr, u_int32_t);
 struct iaddr broadcast_addr(struct iaddr, struct iaddr);
-u_int32_t host_addr(struct iaddr, struct iaddr);
 int addr_eq(struct iaddr, struct iaddr);
 char *piaddr(struct iaddr);
 
@@ -374,7 +356,6 @@ void dhcpnak(struct packet *);
 
 void send_discover(void *);
 void send_request(void *);
-void send_release(void *);
 void send_decline(void *);
 
 void state_reboot(void *);
@@ -389,16 +370,18 @@ void bind_lease(struct interface_info *);
 void make_discover(struct interface_info *, struct client_lease *);
 void make_request(struct interface_info *, struct client_lease *);
 void make_decline(struct interface_info *, struct client_lease *);
-void make_release(struct interface_info *, struct client_lease *);
 
 void free_client_lease(struct client_lease *);
 void rewrite_client_leases(void);
 void write_client_lease(struct interface_info *, struct client_lease *, int);
 
-void script_init(struct interface_info *, char *, struct string_list *);
-void script_write_params(struct interface_info *,
-    char *, struct client_lease *);
-int script_go(struct interface_info *);
+void	 priv_script_init(char *, char *);
+void	 priv_script_write_params(char *, struct client_lease *);
+int	 priv_script_go(void);
+
+void script_init(char *, struct string_list *);
+void script_write_params(char *, struct client_lease *);
+int script_go(void);
 void client_envadd(struct client_state *,
     const char *, const char *, const char *, ...);
 void script_set_env(struct client_state *, const char *, const char *,
@@ -416,12 +399,11 @@ void dhcp(struct packet *);
 /* packet.c */
 void assemble_hw_header(struct interface_info *, unsigned char *,
     int *, struct hardware *);
-void assemble_udp_ip_header(struct interface_info *, unsigned char *,
-    int *, u_int32_t, u_int32_t, unsigned int, unsigned char *, int);
-ssize_t decode_hw_header(struct interface_info *, unsigned char *,
-    int, struct hardware *);
-ssize_t decode_udp_ip_header(struct interface_info *, unsigned char *,
-    int, struct sockaddr_in *, unsigned char *, int);
+void assemble_udp_ip_header(unsigned char *, int *, u_int32_t, u_int32_t,
+    unsigned int, unsigned char *, int);
+ssize_t decode_hw_header(unsigned char *, int, struct hardware *);
+ssize_t decode_udp_ip_header(unsigned char *, int, struct sockaddr_in *,
+    unsigned char *, int);
 
 /* ethernet.c */
 void assemble_ethernet_header(struct interface_info *, unsigned char *,
@@ -446,3 +428,10 @@ void parse_client_lease_declaration(FILE *, struct client_lease *,
 struct option *parse_option_decl(FILE *, struct option_data *);
 void parse_string_list(FILE *, struct string_list **, int);
 void parse_reject_statement(FILE *, struct client_config *);
+
+/* privsep.c */
+struct buf	*buf_open(size_t);
+int		 buf_add(struct buf *, void *, size_t);
+int		 buf_close(int, struct buf *);
+ssize_t		 buf_read(int, void *, size_t);
+void		 dispatch_imsg(int);

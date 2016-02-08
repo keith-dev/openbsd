@@ -1,7 +1,7 @@
 /*    mg.c
  *
  *    Copyright (C) 1991, 1992, 1993, 1994, 1995, 1996, 1997, 1998, 1999,
- *    2000, 2001, 2002, 2003, by Larry Wall and others
+ *    2000, 2001, 2002, 2003, 2004, by Larry Wall and others
  *
  *    You may distribute under the terms of either the GNU General Public
  *    License or the Artistic License, as specified in the README file.
@@ -379,7 +379,7 @@ Perl_mg_free(pTHX_ SV *sv)
 	if (vtbl && vtbl->svt_free)
 	    CALL_FPTR(vtbl->svt_free)(aTHX_ sv, mg);
 	if (mg->mg_ptr && mg->mg_type != PERL_MAGIC_regex_global) {
-	    if (mg->mg_len > 0)
+	    if (mg->mg_len > 0 || mg->mg_type == PERL_MAGIC_utf8)
 		Safefree(mg->mg_ptr);
 	    else if (mg->mg_len == HEf_SVKEY)
 		SvREFCNT_dec((SV*)mg->mg_ptr);
@@ -392,10 +392,7 @@ Perl_mg_free(pTHX_ SV *sv)
     return 0;
 }
 
-
-#if !defined(NSIG) || defined(M_UNIX) || defined(M_XENIX)
 #include <signal.h>
-#endif
 
 U32
 Perl_magic_regdata_cnt(pTHX_ SV *sv, MAGIC *mg)
@@ -618,8 +615,12 @@ Perl_magic_get(pTHX_ SV *sv, MAGIC *mg)
 		  SetLastError(dwErr);
 	     }
 #else
-	     sv_setnv(sv, (NV)errno);
-	     sv_setpv(sv, errno ? Strerror(errno) : "");
+	     {
+		 int saveerrno = errno;
+		 sv_setnv(sv, (NV)errno);
+		 sv_setpv(sv, errno ? Strerror(errno) : "");
+		 errno = saveerrno;
+	     }
 #endif
 #endif
 #endif
@@ -642,8 +643,10 @@ Perl_magic_get(pTHX_ SV *sv, MAGIC *mg)
 	    sv_setsv(sv, &PL_sv_undef);
 	break;
     case '\017':		/* ^O & ^OPEN */
-	if (*(mg->mg_ptr+1) == '\0')
+	if (*(mg->mg_ptr+1) == '\0') {
 	    sv_setpv(sv, PL_osname);
+	    SvTAINTED_off(sv);
+	}
 	else if (strEQ(mg->mg_ptr, "\017PEN")) {
 	    if (!PL_compiling.cop_io)
 		sv_setsv(sv, &PL_sv_undef);
@@ -1527,6 +1530,7 @@ Perl_magic_wipepack(pTHX_ SV *sv, MAGIC *mg)
     call_method("CLEAR", G_SCALAR|G_DISCARD);
     POPSTACK;
     LEAVE;
+
     return 0;
 }
 
@@ -1559,6 +1563,41 @@ int
 Perl_magic_existspack(pTHX_ SV *sv, MAGIC *mg)
 {
     return magic_methpack(sv,mg,"EXISTS");
+}
+
+SV *
+Perl_magic_scalarpack(pTHX_ HV *hv, MAGIC *mg)
+{
+    dSP;
+    SV *retval = &PL_sv_undef;
+    SV *tied = SvTIED_obj((SV*)hv, mg);
+    HV *pkg = SvSTASH((SV*)SvRV(tied));
+   
+    if (!gv_fetchmethod_autoload(pkg, "SCALAR", FALSE)) {
+        SV *key;
+        if (HvEITER(hv))
+            /* we are in an iteration so the hash cannot be empty */
+            return &PL_sv_yes;
+        /* no xhv_eiter so now use FIRSTKEY */
+        key = sv_newmortal();
+        magic_nextpack((SV*)hv, mg, key);
+        HvEITER(hv) = NULL;     /* need to reset iterator */
+        return SvOK(key) ? &PL_sv_yes : &PL_sv_no;
+    }
+   
+    /* there is a SCALAR method that we can call */
+    ENTER;
+    PUSHSTACKi(PERLSI_MAGIC);
+    PUSHMARK(SP);
+    EXTEND(SP, 1);
+    PUSHs(tied);
+    PUTBACK;
+
+    if (call_method("SCALAR", G_SCALAR))
+        retval = *PL_stack_sp--; 
+    POPSTACK;
+    LEAVE;
+    return retval;
 }
 
 int
@@ -1897,14 +1936,14 @@ Perl_magic_killbackrefs(pTHX_ SV *sv, MAGIC *mg)
     SV **svp = AvARRAY(av);
     I32 i = AvFILLp(av);
     while (i >= 0) {
-	if (svp[i] && svp[i] != &PL_sv_undef) {
+	if (svp[i]) {
 	    if (!SvWEAKREF(svp[i]))
 		Perl_croak(aTHX_ "panic: magic_killbackrefs");
 	    /* XXX Should we check that it hasn't changed? */
 	    SvRV(svp[i]) = 0;
 	    (void)SvOK_off(svp[i]);
 	    SvWEAKREF_off(svp[i]);
-	    svp[i] = &PL_sv_undef;
+	    svp[i] = Nullsv;
 	}
 	i--;
     }
@@ -2059,12 +2098,14 @@ Perl_magic_set(pTHX_ SV *sv, MAGIC *mg)
 	break;
     case '\017':	/* ^O */
 	if (*(mg->mg_ptr+1) == '\0') {
-	    if (PL_osname)
+	    if (PL_osname) {
 		Safefree(PL_osname);
-	    if (SvOK(sv))
-		PL_osname = savepv(SvPV(sv,len));
-	    else
 		PL_osname = Nullch;
+	    }
+	    if (SvOK(sv)) {
+		TAINT_PROPER("assigning to $^O");
+		PL_osname = savepv(SvPV(sv,len));
+	    }
 	}
 	else if (strEQ(mg->mg_ptr, "\017PEN")) {
 	    if (!PL_compiling.cop_io)
@@ -2075,7 +2116,8 @@ Perl_magic_set(pTHX_ SV *sv, MAGIC *mg)
 	break;
     case '\020':	/* ^P */
 	PL_perldb = SvIOK(sv) ? SvIVX(sv) : sv_2iv(sv);
-	if (PL_perldb && !PL_DBsingle)
+	if ((PERLDB_SUB || PERLDB_LINE || PERLDB_SUBLINE)
+		&& !PL_DBsingle)
 	    init_debugger();
 	break;
     case '\024':	/* ^T */

@@ -235,6 +235,7 @@ Perl_vmstrnenv(const char *lnm, char *eqv, unsigned long int idx,
           retsts = SS$_NOLOGNAM;
           for (i = 0; environ[i]; i++) { 
             if ((eq = strchr(environ[i],'=')) && 
+                lnmdsc.dsc$w_length == (eq - environ[i]) &&
                 !strncmp(environ[i],uplnm,eq - environ[i])) {
               eq++;
               for (eqvlen = 0; eq[eqvlen]; eqvlen++) eqv[eqvlen] = eq[eqvlen];
@@ -694,7 +695,21 @@ prime_env_iter(void)
         continue;
       }
       PERL_HASH(hash,key,keylen);
-      sv = newSVpvn(cp2,cp1 - cp2 + 1);
+
+      if (cp1 == cp2 && *cp2 == '.') {
+        /* A single dot usually means an unprintable character, such as a null
+         * to indicate a zero-length value.  Get the actual value to make sure.
+         */
+        char lnm[LNM$C_NAMLENGTH+1];
+        char eqv[LNM$C_NAMLENGTH+1];
+        strncpy(lnm, key, keylen);
+        int trnlen = vmstrnenv(lnm, eqv, 0, fildev, 0);
+        sv = newSVpvn(eqv, strlen(eqv));
+      }
+      else {
+        sv = newSVpvn(cp2,cp1 - cp2 + 1);
+      }
+
       SvTAINTED_on(sv);
       hv_store(envhv,key,keylen,sv,hash);
       hv_store(seenhv,key,keylen,&PL_sv_yes,hash);
@@ -744,6 +759,11 @@ Perl_vmssetenv(pTHX_ char *lnm, char *eqv, struct dsc$descriptor_s **tabvec)
     $DESCRIPTOR(crtlenv,"CRTL_ENV");  $DESCRIPTOR(clisym,"CLISYM");
     $DESCRIPTOR(local,"_LOCAL");
 
+    if (!lnm) {
+        set_errno(EINVAL); set_vaxc_errno(SS$_IVLOGNAM);
+        return SS$_IVLOGNAM;
+    }
+
     for (cp1 = lnm, cp2 = uplnm; *cp1; cp1++, cp2++) {
       *cp2 = _toupper(*cp1);
       if (cp1 - lnm > LNM$C_NAMLENGTH) {
@@ -758,8 +778,9 @@ Perl_vmssetenv(pTHX_ char *lnm, char *eqv, struct dsc$descriptor_s **tabvec)
       for (curtab = 0; tabvec[curtab]; curtab++) {
         if (!ivenv && !str$case_blind_compare(tabvec[curtab],&crtlenv)) {
         int i;
-          for (i = 0; environ[i]; i++) { /* Iff it's an environ elt, reset */
+          for (i = 0; environ[i]; i++) { /* If it's an environ elt, reset */
             if ((cp1 = strchr(environ[i],'=')) && 
+                lnmdsc.dsc$w_length == (cp1 - environ[i]) &&
                 !strncmp(environ[i],lnm,cp1 - environ[i])) {
 #ifdef HAS_SETENV
               return setenv(lnm,"",1) ? vaxc$errno : 0;
@@ -3658,7 +3679,8 @@ static char *mp_do_tounixspec(pTHX_ char *spec, char *buf, int ts)
 {
   static char __tounixspec_retbuf[NAM$C_MAXRSS+1];
   char *dirend, *rslt, *cp1, *cp2, *cp3, tmp[NAM$C_MAXRSS+1];
-  int devlen, dirlen, retlen = NAM$C_MAXRSS+1, expand = 0;
+  int devlen, dirlen, retlen = NAM$C_MAXRSS+1;
+  int expand = 1; /* guarantee room for leading and trailing slashes */
   unsigned short int trnlnm_iter_count;
 
   if (spec == NULL) return NULL;

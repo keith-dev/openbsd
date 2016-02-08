@@ -1,4 +1,4 @@
-/*	$OpenBSD: parser.c,v 1.5 2004/03/11 16:34:21 henning Exp $ */
+/*	$OpenBSD: parser.c,v 1.8 2004/08/20 15:49:35 henning Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -55,12 +55,15 @@ static const struct token t_neighbor_modifiers[];
 static const struct token t_show_as[];
 static const struct token t_show_prefix[];
 static const struct token t_show_ip[];
+static const struct token t_nexthop[];
+static const struct token t_prefix[];
 
 static const struct token t_main[] = {
 	{ KEYWORD,	"reload",	RELOAD,		NULL},
 	{ KEYWORD,	"show",		SHOW,		t_show},
 	{ KEYWORD,	"fib",		FIB,		t_fib},
 	{ KEYWORD,	"neighbor",	NEIGHBOR,	t_neighbor},
+	{ KEYWORD,	"network",	NONE,		t_nexthop},
 	{ ENDTOKEN,	"",		NONE,		NULL}
 };
 
@@ -124,6 +127,7 @@ static const struct token t_neighbor[] = {
 static const struct token t_neighbor_modifiers[] = {
 	{ KEYWORD,	"up",		NEIGHBOR_UP,	NULL},
 	{ KEYWORD,	"down",		NEIGHBOR_DOWN,	NULL},
+	{ KEYWORD,	"clear",	NEIGHBOR_CLEAR,	NULL},
 	{ ENDTOKEN,	"",		NONE,		NULL}
 };
 
@@ -141,6 +145,19 @@ static const struct token t_show_prefix[] = {
 
 static const struct token t_show_ip[] = {
 	{ KEYWORD,	"bgp",		SHOW_RIB,	t_show_rib},
+	{ ENDTOKEN,	"",		NONE,		NULL}
+};
+
+static const struct token t_nexthop[] = {
+	{ KEYWORD,	"add",		NETWORK_ADD,	t_prefix},
+	{ KEYWORD,	"delete",	NETWORK_REMOVE,	t_prefix},
+	{ KEYWORD,	"flush",	NETWORK_FLUSH,	NULL},
+	{ KEYWORD,	"show",		NETWORK_SHOW,	NULL},
+	{ ENDTOKEN,	"",		NONE,		NULL}
+};
+
+static const struct token t_prefix[] = {
+	{ PREFIX,	"",		NONE,		NULL},
 	{ ENDTOKEN,	"",		NONE,		NULL}
 };
 
@@ -283,7 +300,7 @@ show_valid_args(const struct token table[])
 	for (i = 0; table[i].type != ENDTOKEN; i++) {
 		switch (table[i].type) {
 		case NOTOKEN:
-			fprintf(stderr, "  (nothing)\n");
+			fprintf(stderr, "  <cr>\n");
 			break;
 		case KEYWORD:
 		case FLAG:

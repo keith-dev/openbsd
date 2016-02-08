@@ -1,30 +1,21 @@
 #! /usr/bin/perl
 
 # ex:ts=8 sw=4:
-# $OpenBSD: pkg_add,v 1.29 2004/03/18 16:49:50 tholo Exp $
+# $OpenBSD: pkg_add,v 1.50 2004/08/12 19:18:03 brad Exp $
 #
-# Copyright (c) 2003 Marc Espie.
-# 
-# Redistribution and use in source and binary forms, with or without
-# modification, are permitted provided that the following conditions
-# are met:
-# 1. Redistributions of source code must retain the above copyright
-#    notice, this list of conditions and the following disclaimer.
-# 2. Redistributions in binary form must reproduce the above copyright
-#    notice, this list of conditions and the following disclaimer in the
-#    documentation and/or other materials provided with the distribution.
-# 
-# THIS SOFTWARE IS PROVIDED BY THE OPENBSD PROJECT AND CONTRIBUTORS
-# ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-# A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE OPENBSD
-# PROJECT OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-# LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-# DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-# THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+# Copyright (c) 2003-2004 Marc Espie <espie@openbsd.org>
+#
+# Permission to use, copy, modify, and distribute this software for any
+# purpose with or without fee is hereby granted, provided that the above
+# copyright notice and this permission notice appear in all copies.
+#
+# THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+# WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+# MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+# ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+# WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+# ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+# OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
 # this is it ! The hard one
 use strict;
@@ -41,13 +32,15 @@ use File::Copy;
 our %forced = ();
 our ($ftp_only, $cdrom_only);
 
-# XXX we don't want to load this package all the time
-package OpenBSD::RequiredBy;
-our $AUTOLOAD;
-sub AUTOLOAD {
-	eval { require OpenBSD::RequiredBy;
-	};
-	goto &$AUTOLOAD;
+sub ensure_ldconfig
+{
+	my $verbose = shift;
+	return unless defined $OpenBSD::PackingElement::Lib::todo;
+	print "running ldconfig -m ", join(' ', keys %$OpenBSD::PackingElement::Lib::todo), "\n"
+	    if  $verbose;
+	system(@OpenBSD::PackingElement::Lib::ldconfig, "-m", 
+	    keys %$OpenBSD::PackingElement::Lib::todo);
+	undef $OpenBSD::PackingElement::Lib::todo;
 }
 
 package OpenBSD::PackingElement;
@@ -56,35 +49,120 @@ sub install
 {
 }
 
-package OpenBSD::PackingElement::File;
+sub set_modes
+{
+	my ($self, $name) = @_;
+
+	if (defined $self->{owner} && defined $self->{group}) {
+		system('chown', $self->{owner}.':'.$self->{group}, $name);
+	} elsif (defined $self->{owner}) {
+		system('chown', $self->{owner}, $name);
+	} elsif (defined $self->{group}) {
+		system('chown', ':'.$self->{group}, $name);
+	}
+	if (defined $self->{mode}) {
+		system('chmod', $self->{mode}, $name);
+	}
+}
+
+package OpenBSD::PackingElement::FileBase;
 use File::Basename;
 use File::Path;
 
 sub install
 {
 	my ($self, $archive, $destdir, $verbose, $not) = @_;
+	my $fullname = $self->fullname();
 
 	my $file=$archive->next();
 	if ($file->{name} ne $self->{name}) {
 		die "Error: archive does not match", $file->{name}, "!=",
 		$self->{name}, "\n";
 	}
-	print "extracting ", $destdir, $self->fullname(), "\n" if $verbose;
-	$file->{name} = $self->fullname();
+	print "extracting ", $destdir, $fullname, "\n" if $verbose;
+	return if $not;
+	$file->{name} = $fullname;
 	$file->{cwd} = $self->{cwd};
 	$file->{destdir} = $destdir;
-	return if $not;
 	$file->create();
-	if (defined $self->{owner} && defined $self->{group}) {
-		system('chown', $self->{owner}.':'.$self->{group}, $destdir.$self->fullname());
-	} elsif (defined $self->{owner}) {
-		system('chown', $self->{owner}, $destdir.$self->fullname());
-	} elsif (defined $self->{group}) {
-		system('chown', ':'.$self->{group}, $destdir.$self->fullname());
+	$self->set_modes($destdir.$fullname);
+}
+
+package OpenBSD::PackingElement::Sample;
+use File::Copy;
+
+sub install
+{
+	my ($self, $archive, $destdir, $verbose, $not) = @_;
+
+	my $filename = $destdir.$self->{name};
+	my $orig = $self->{copyfrom};
+	if (!defined $orig) {
+		die "\@sample element does not reference a valid file\n";
 	}
-	if (defined $self->{mode}) {
-		system('chmod', $self->{mode}, $destdir.$self->fullname());
+	my $origname = $destdir.$orig->fullname();
+	if (-e $filename) {
+		print "The existing configuration file $filename has NOT been changed\n";
+		if (defined $orig->{md5}) {
+			require OpenBSD::md5;
+
+			my $md5 = OpenBSD::md5::fromfile($filename);
+			if ($md5 eq $orig->{md5}) {
+				print "\t(but it seems to match the sample file $origname)\n";
+			} else {
+				print "\tIt does not match the sample file $origname\n";
+				print "You may wish to update it manually\n";
+			}
+		}
+	} else {
+		if ($not) {
+			print "The configuration file $filename would be installed from $origname\n";
+		} else {
+			copy($origname, $filename);
+			$self->set_modes($filename);
+			print "The configuration file $filename has been installed from $origname\n";
+		}
 	}
+}
+
+package OpenBSD::PackingElement::Sampledir;
+
+sub install
+{
+	&OpenBSD::PackingElement::Dir::install;
+}
+
+package OpenBSD::PackingElement::Mandir;
+
+sub install
+{
+	my ($self, $archive, $destdir, $verbose, $not) = @_;
+	$self->SUPER::install($archive, $destdir, $verbose, $not);
+	print "You may wish to add ", $self->fullname(), " to /etc/man.conf\n";
+}
+
+package OpenBSD::PackingElement::InfoFile;
+use File::Basename;
+
+sub install
+{
+	my ($self, $archive, $destdir, $verbose, $not) = @_;
+	$self->SUPER::install($archive, $destdir, $verbose, $not);
+	return if $not;
+	my $fullname = $destdir.$self->fullname();
+	system("install-info", "--info-dir=".dirname($fullname), $fullname);
+}
+
+package OpenBSD::PackingElement::Dir;
+sub install
+{
+	my ($self, $archive, $destdir, $verbose, $not) = @_;
+	my $fullname = $self->fullname();
+
+	print "new directory ", $destdir, $fullname, "\n" if $verbose;
+	return if $not;
+	File::Path::mkpath($destdir.$fullname);
+	$self->set_modes($destdir.$fullname);
 }
 
 package OpenBSD::PackingElement::Exec;
@@ -93,8 +171,18 @@ sub install
 {
 	my ($self, $archive, $destdir, $verbose, $not) = @_;
 
+	main::ensure_ldconfig($verbose) unless $not;
 	print "exec ", $self->{expanded}, "\n" if $verbose or $not;
 	system('/bin/sh', '-c', $self->{expanded}) unless $not;
+}
+
+package OpenBSD::PackingElement::Lib;
+
+sub install
+{
+	my ($self, $archive, $destdir, $verbose, $not) = @_;
+	$self->SUPER::install($archive, $destdir, $verbose, $not);
+	$self->mark_ldconfig_directory($destdir);
 }
 
 package OpenBSD::PackingElement::Arch;
@@ -267,7 +355,7 @@ sub solve_dependencies
 		push(@$to_register, $dep->{name});
 	}
 	for my $dep (@{$plist->{newdepend}}, @{$plist->{libdepend}}) {
-	    next if $dep->{name} ne $plist->pkgname();
+	    next if defined $dep->{name} and $dep->{name} ne $plist->pkgname();
 	    my @candidates = OpenBSD::PackageName::pkgspec_match($dep->{pattern}, installed_packages());
 	    if (@candidates >= 1) {
 		    push(@$to_register, $candidates[0]);
@@ -342,7 +430,8 @@ sub borked_installation
 	# last file may have not copied correctly
 	my $last = $plist->{items}->[@{$plist->{items}}-1];
 	if ($last->IsFile()) {
-	    use OpenBSD::md5;
+	    require OpenBSD::md5;
+
 	    my $old = $last->{md5};
 	    $last->{md5} = OpenBSD::md5::fromfile($last->{fullname});
 	    if ($old ne $last->{md5}) {
@@ -403,6 +492,52 @@ sub borked_script($)
 	}
 }
 
+sub collision_report
+{
+	my $list = shift;
+	my %todo = map {($_, 1)} @$list;
+	my $bypkg = {};
+	
+
+	for my $pkg (installed_packages()) {
+		my $plist = OpenBSD::PackingList->fromfile(installed_info($pkg).CONTENTS, \&OpenBSD::PackingList::FilesOnly);
+		for my $item (@{$plist->{items}}) {
+			next unless $item->IsFile();
+			my $name = $item->fullname();
+			if (defined $todo{$name}) {
+				$bypkg->{$pkg} = [] unless defined $bypkg->{$pkg};
+				push(@{$bypkg->{$pkg}}, $name);
+				delete $todo{$name};
+			}
+		}
+	}
+	print "Collision: the following files already exist\n";
+	for my $pkg (sort keys %$bypkg) {
+	    for my $item (sort @{$bypkg->{$pkg}}) {
+	    	print "\t$item ($pkg)\n";
+	    }
+	}
+	for my $item (sort keys %todo) {
+	    print "\t$item\n";
+	}
+}
+
+sub manpages_index
+{
+	my ($plist, $destdir) = @_;
+	return unless defined $plist->{state}->{mandirs};
+	require OpenBSD::Makewhatis;
+
+	while (my ($k, $v) = each %{$plist->{state}->{mandirs}}) {
+		my @l = map { $destdir.$_ } @$v;
+		eval { OpenBSD::Makewhatis::merge($destdir.$k, \@l); };
+		if ($@) {
+			print STDERR "Error in makewhatis: $@\n";
+		}
+	}
+}
+
+
 sub really_add($$)
 {
 	my ($handle, $destdir) = @_;
@@ -442,8 +577,7 @@ sub really_add($$)
 		}
 	}
 	if (@$colliding > 0) {
-		print "Collision: the following files already exists\n\t",
-			join("\n\t", @$colliding), "\n";
+		collision_report($colliding);
 	}
 	exit(1) if $problems;
 
@@ -453,6 +587,7 @@ sub really_add($$)
 	};
 
 	if ($plist->has(REQUIRE)) {
+		ensure_ldconfig($opt_v) unless $opt_n;
 		print "Require script: $dir",REQUIRE," $pkgname INSTALL\n" if $opt_v or $opt_n;
 		unless ($opt_n) {
 			chmod 0755, $dir.REQUIRE;
@@ -460,12 +595,16 @@ sub really_add($$)
 			    borked_script("require script");
 		}
 	}
-	if ($plist->has(INSTALL)) {
-		print "Install script: $dir",INSTALL," $pkgname PRE-INSTALL\n" if $opt_v or $opt_n;
-		unless ($opt_n) {
-			chmod 0755, $dir.INSTALL;
-			system($dir.INSTALL, $pkgname, "PRE-INSTALL") == 0 or
-			    borked_script("install script");
+
+	unless ($opt_I) {
+		if ($plist->has(INSTALL)) {
+			ensure_ldconfig($opt_v) unless $opt_n;
+			print "Install script: $dir",INSTALL," $pkgname PRE-INSTALL\n" if $opt_v or $opt_n;
+			unless ($opt_n) {
+				chmod 0755, $dir.INSTALL;
+				system($dir.INSTALL, $pkgname, "PRE-INSTALL") == 0 or
+				    borked_script("install script");
+			}
 		}
 	}
 
@@ -478,18 +617,28 @@ sub really_add($$)
 
 	$plist->{done} = [];
 	for my $item (@{$plist->{items}}) {
-		$item->install($handle, $destdir, $opt_v, $opt_n);
+		eval { $item->install($handle, $destdir, $opt_v, $opt_n); };
+		if ($@) {
+			print STDERR "$@";
+			$errors++;
+			last;
+		}
 		push(@{$plist->{done}}, $item);
 		last if $interrupted;
 	}
 
+	manpages_index($plist, $destdir);
 	$handle->close();
-	if ($plist->has(INSTALL) && !$interrupted) {
-		print "Install script: $dir",INSTALL ,"$pkgname POST-INSTALL\n" if $opt_v or $opt_n;
-		unless ($opt_n) {
-			if (system($dir.INSTALL, $pkgname, "POST-INSTALL") != 0) {
-				print STDERR "install script for $pkgname borked\n";
-				$errors++ unless $forced{scripts};
+
+	unless ($opt_I) {
+		if ($plist->has(INSTALL) && !$interrupted) {
+			ensure_ldconfig($opt_v) unless $opt_n;
+			print "Install script: $dir",INSTALL ," $pkgname POST-INSTALL\n" if $opt_v or $opt_n;
+			unless ($opt_n) {
+				if (system($dir.INSTALL, $pkgname, "POST-INSTALL") != 0) {
+					print STDERR "install script for $pkgname borked\n";
+					$errors++ unless $forced{scripts};
+				}
 			}
 		}
 	}
@@ -502,6 +651,8 @@ sub really_add($$)
 	my $dest = installed_info($pkgname);
 	register_installation($dir, $dest, $plist) unless $opt_n;
 	if (defined $handle->{solved_dependencies} && !$opt_n) {
+		require OpenBSD::RequiredBy;
+
 		for my $dep (@{$handle->{solved_dependencies}}) {
 			OpenBSD::RequiredBy->new($dep)->add($pkgname);
 		}
@@ -509,7 +660,7 @@ sub really_add($$)
 	add_installed($pkgname);
 	if ($plist->has(DISPLAY)) {
 		my $pager = $ENV{'PAGER'} || "/usr/bin/more";
-		system($pager, $dir.DISPLAY);
+		system("$pager $dir".DISPLAY);
 	}
 }
 
@@ -557,7 +708,7 @@ while (my $pkg = shift @todo) {
 	}
 	for my $dep (@{$plist->{libdepend}}) {
 		# can't check libspecs yet
-		next if $dep->{name} ne $plist->pkgname();
+		next if defined $dep->{name} and $dep->{name} ne $plist->pkgname();
 		if (!check_lib_specs($plist->pkgbase(), $dep->{libspec})) {
 			print "Can't install $pkg: incorrect libspec: ",
 			    $dep->{libspec}, "\n";
@@ -570,6 +721,9 @@ while (my $pkg = shift @todo) {
 	really_add($handle, $destdir);
 	$conflict_list->{$plist->pkgname()} = $handle->{conflicts};
 }
+
+OpenBSD::PackingElement::Fontdir::finish_fontdirs();
+ensure_ldconfig($opt_v) unless $opt_n;
 
 if ($opt_n or $opt_v) {
 	OpenBSD::Vstat::tally();

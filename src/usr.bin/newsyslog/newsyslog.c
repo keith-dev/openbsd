@@ -1,4 +1,4 @@
-/*	$OpenBSD: newsyslog.c,v 1.76 2003/12/16 19:32:45 otto Exp $	*/
+/*	$OpenBSD: newsyslog.c,v 1.81 2004/07/11 17:21:21 millert Exp $	*/
 
 /*
  * Copyright (c) 1999, 2002, 2003 Todd C. Miller <Todd.Miller@courtesan.com>
@@ -14,6 +14,7 @@
  * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ *
  * Sponsored in part by the Defense Advanced Research Projects
  * Agency (DARPA) and Air Force Research Laboratory, Air Force
  * Materiel Command, USAF, under agreement number F39502-99-1-0512.
@@ -71,7 +72,7 @@
  */
 
 #ifndef lint
-static const char rcsid[] = "$OpenBSD: newsyslog.c,v 1.76 2003/12/16 19:32:45 otto Exp $";
+static const char rcsid[] = "$OpenBSD: newsyslog.c,v 1.81 2004/07/11 17:21:21 millert Exp $";
 #endif /* not lint */
 
 #ifndef CONF
@@ -135,7 +136,7 @@ struct conf_entry {
 	off_t   size;		/* Size cutoff to trigger trimming the log */
 	int     hours;		/* Hours between log trimming */
 	time_t  trim_at;	/* Specific time at which to do trimming */
-	int     permissions;	/* File permissions on the log */
+	mode_t  permissions;	/* File permissions on the log */
 	int	signal;		/* Signal to send (defaults to SIGHUP) */
 	int     flags;		/* Flags (CE_COMPACT & CE_BINARY)  */
 	char	*whom;		/* Whom to notify if logfile changes */
@@ -169,10 +170,10 @@ int	age_old_log(struct conf_entry *);
 int	domonitor(struct conf_entry *);
 int	isnumberstr(char *);
 int	log_trim(char *);
-int	movefile(char *, char *, uid_t, gid_t, int);
+int	movefile(char *, char *, uid_t, gid_t, mode_t);
 int	stat_suffix(char *, size_t, char *, struct stat *,
 	    int (*)(const char *, struct stat *));
-off_t	sizefile(char *);
+off_t	sizefile(struct stat *);
 struct conf_entry *
 	parse_file(int *);
 time_t	parse8601(char *);
@@ -181,6 +182,7 @@ void	child_killer(int);
 void	compress_log(struct conf_entry *);
 void	do_entry(struct conf_entry *);
 void	dotrim(struct conf_entry *);
+void	rotate(struct conf_entry *, const char *);
 void	parse_args(int, char **);
 void	run_command(char *);
 void	send_signal(char *, int);
@@ -191,8 +193,8 @@ main(int argc, char **argv)
 {
 	struct conf_entry *p, *q, *x, *y;
 	struct pidinfo *pidlist, *pl;
-	char **av;
 	int status, listlen;
+	char **av;
 	
 	parse_args(argc, argv);
 	argc -= optind;
@@ -278,7 +280,8 @@ main(int argc, char **argv)
 
 	/* Step 4, compress the log.0 file if configured to do so and free */
 	while (p) {
-		if ((p->flags & CE_COMPACT) && (p->flags & CE_ROTATED))
+		if ((p->flags & CE_COMPACT) && (p->flags & CE_ROTATED) &&
+		    p->numlogs > 0)
 			compress_log(p);
 		q = p;
 		p = p->next;
@@ -294,9 +297,9 @@ main(int argc, char **argv)
 void
 do_entry(struct conf_entry *ent)
 {
+	struct stat sb;
 	int modtime;
 	off_t size;
-	struct stat sb;
 
 	if (lstat(ent->log, &sb) != 0)
 		return;
@@ -305,52 +308,55 @@ do_entry(struct conf_entry *ent)
 		DPRINTF(("--> not a regular file, skipping\n"));
 		return;
 	}
+	if (S_ISLNK(sb.st_mode) && stat(ent->log, &sb) != 0) {
+		DPRINTF(("--> link target does not exist, skipping\n"));
+		return;
+	}
+	if (ent->uid == (uid_t)-1)
+		ent->uid = sb.st_uid;
+	if (ent->gid == (gid_t)-1)
+		ent->gid = sb.st_gid;
 
 	DPRINTF(("%s <%d%s%s%s%s>: ", ent->log, ent->numlogs,
 	    (ent->flags & CE_COMPACT) ? "Z" : "",
 	    (ent->flags & CE_BINARY) ? "B" : "",
 	    (ent->flags & CE_FOLLOW) ? "F" : "",
 	    (ent->flags & CE_MONITOR) && monitormode ? "M" : ""));
-
-	size = sizefile(ent->log);
+	size = sizefile(&sb);
 	modtime = age_old_log(ent);
-	if (size < 0) {
-		DPRINTF(("does not exist.\n"));
-	} else {
-		if (ent->flags & CE_TRIMAT && !force) {
-			if (timenow < ent->trim_at ||
-			    difftime(timenow, ent->trim_at) >= 60 * 60) {
-				DPRINTF(("--> will trim at %s",
-				    ctime(&ent->trim_at)));
-				return;
-			} else if (ent->hours <= 0) {
-				DPRINTF(("--> time is up\n"));
-			}
+	if (ent->flags & CE_TRIMAT && !force) {
+		if (timenow < ent->trim_at ||
+		    difftime(timenow, ent->trim_at) >= 60 * 60) {
+			DPRINTF(("--> will trim at %s",
+			    ctime(&ent->trim_at)));
+			return;
+		} else if (ent->hours <= 0) {
+			DPRINTF(("--> time is up\n"));
 		}
-		if (ent->size > 0)
-			DPRINTF(("size (KB): %.2f [%d] ", size / 1024.0,
-			    (int)(ent->size / 1024)));
-		if (ent->hours > 0)
-			DPRINTF(("age (hr): %d [%d] ", modtime, ent->hours));
-		if (monitormode && (ent->flags & CE_MONITOR) && domonitor(ent))
-			DPRINTF(("--> monitored\n"));
-		else if (!monitormode &&
-		    (force || (ent->size > 0 && size >= ent->size) ||
-		    (ent->hours <= 0 && (ent->flags & CE_TRIMAT)) ||
-		    (ent->hours > 0 && (modtime >= ent->hours || modtime < 0)
-		    && ((ent->flags & CE_BINARY) || size >= MIN_SIZE)))) {
-			DPRINTF(("--> trimming log....\n"));
-			if (noaction && !verbose)
-				printf("%s <%d%s%s%s>\n", ent->log,
-				    ent->numlogs,
-				    (ent->flags & CE_COMPACT) ? "Z" : "",
-				    (ent->flags & CE_BINARY) ? "B" : "",
-				    (ent->flags & CE_FOLLOW) ? "F" : "");
-			dotrim(ent);
-			ent->flags |= CE_ROTATED;
-		} else
-			DPRINTF(("--> skipping\n"));
 	}
+	if (ent->size > 0)
+		DPRINTF(("size (KB): %.2f [%d] ", size / 1024.0,
+		    (int)(ent->size / 1024)));
+	if (ent->hours > 0)
+		DPRINTF(("age (hr): %d [%d] ", modtime, ent->hours));
+	if (monitormode && (ent->flags & CE_MONITOR) && domonitor(ent))
+		DPRINTF(("--> monitored\n"));
+	else if (!monitormode &&
+	    (force || (ent->size > 0 && size >= ent->size) ||
+	    (ent->hours <= 0 && (ent->flags & CE_TRIMAT)) ||
+	    (ent->hours > 0 && (modtime >= ent->hours || modtime < 0)
+	    && ((ent->flags & CE_BINARY) || size >= MIN_SIZE)))) {
+		DPRINTF(("--> trimming log....\n"));
+		if (noaction && !verbose)
+			printf("%s <%d%s%s%s>\n", ent->log,
+			    ent->numlogs,
+			    (ent->flags & CE_COMPACT) ? "Z" : "",
+			    (ent->flags & CE_BINARY) ? "B" : "",
+			    (ent->flags & CE_FOLLOW) ? "F" : "");
+		dotrim(ent);
+		ent->flags |= CE_ROTATED;
+	} else
+		DPRINTF(("--> skipping\n"));
 }
 
 /* Run the specified command */
@@ -367,10 +373,10 @@ run_command(char *cmd)
 void
 send_signal(char *pidfile, int signal)
 {
-	pid_t pid;
-	FILE *f;
 	char line[BUFSIZ], *ep, *err;
+	pid_t pid;
 	long lval;
+	FILE *f;
 
 	if ((f = fopen(pidfile, "r")) == NULL) {
 		warn("can't open %s", pidfile);
@@ -412,8 +418,8 @@ send_signal(char *pidfile, int signal)
 void
 parse_args(int argc, char **argv)
 {
-	int ch;
 	char *p;
+	int ch;
 
 	timenow = time(NULL);
 	daytime = ctime(&timenow) + 4;
@@ -474,15 +480,14 @@ usage(void)
 struct conf_entry *
 parse_file(int *nentries)
 {
-	FILE *f;
 	char line[BUFSIZ], *parse, *q, *errline, *group, *tmp, *ep;
-	int lineno;
-	long l;
-	struct conf_entry *first = NULL;
-	struct conf_entry *working = NULL;
+	struct conf_entry *working = NULL, *first = NULL;
 	struct passwd *pwd;
 	struct group *grp;
 	struct stat sb;
+	int lineno;
+	FILE *f;
+	long l;
 
 	if (strcmp(conf, "-") == 0)
 		f = stdin;
@@ -499,12 +504,12 @@ parse_file(int *nentries)
 			err(1, "strdup");
 		(*nentries)++;
 		if (!first) {
-			working = (struct conf_entry *) malloc(sizeof(struct conf_entry));
+			working = malloc(sizeof(struct conf_entry));
 			if (working == NULL)
 				err(1, "malloc");
 			first = working;
 		} else {
-			working->next = (struct conf_entry *) malloc(sizeof(struct conf_entry));
+			working->next = malloc(sizeof(struct conf_entry));
 			if (working->next == NULL)
 				err(1, "malloc");
 			working = working->next;
@@ -539,7 +544,6 @@ parse_file(int *nentries)
 			if (*q) {
 				if (!(isnumberstr(q))) {
 					if ((grp = getgrnam(q)) == NULL)
-
 						errx(1, "%s:%d: unknown group: %s",
 						    conf, lineno, q);
 					working->gid = grp->gr_gid;
@@ -555,13 +559,17 @@ parse_file(int *nentries)
 			working->gid = (gid_t)-1;
 		}
 
-		if (!sscanf(q, "%o", &working->permissions))
+		l = strtol(q, &ep, 8);
+		if (*ep != '\0' || l < 0 || l > ALLPERMS)
 			errx(1, "%s:%d: bad permissions: %s", conf, lineno, q);
+		working->permissions = (mode_t)l;
 
 		q = parse = missing_field(sob(++parse), errline, lineno);
 		*(parse = son(parse)) = '\0';
-		if (!sscanf(q, "%d", &working->numlogs) || working->numlogs < 0)
+		l = strtol(q, &ep, 10);
+		if (*ep != '\0' || l < 0 || l >= INT_MAX)
 			errx(1, "%s:%d: bad number: %s", conf, lineno, q);
+		working->numlogs = (int)l;
 
 		q = parse = missing_field(sob(++parse), errline, lineno);
 		*(parse = son(parse)) = '\0';
@@ -743,19 +751,10 @@ missing_field(char *p, char *errline, int lineno)
 }
 
 void
-dotrim(struct conf_entry *ent)
+rotate(struct conf_entry *ent, const char *oldlog)
 {
-	char    file1[MAXPATHLEN], file2[MAXPATHLEN];
-	char    oldlog[MAXPATHLEN], *suffix;
-	int     fd;
-	int	numdays = ent->numlogs;
-
-	/* Is there a separate backup dir? */
-	if (ent->backdir != NULL)
-		snprintf(oldlog, sizeof(oldlog), "%s/%s", ent->backdir,
-		    ent->logbase);
-	else
-		strlcpy(oldlog, ent->log, sizeof(oldlog));
+	char file1[MAXPATHLEN], file2[MAXPATHLEN], *suffix;
+	int numdays = ent->numlogs;
 
 	/* Remove oldest log (may not exist) */
 	(void)snprintf(file1, sizeof(file1), "%s.%d", oldlog, numdays);
@@ -785,21 +784,35 @@ dotrim(struct conf_entry *ent)
 		if (noaction) {
 			printf("\tmv %s %s\n", file1, file2);
 			printf("\tchmod %o %s\n", ent->permissions, file2);
-			if (ent->uid != (uid_t)-1 || ent->gid != (gid_t)-1)
-				printf("\tchown %u:%u %s\n",
-				    ent->uid, ent->gid, file2);
+			printf("\tchown %u:%u %s\n", ent->uid, ent->gid, file2);
 		} else {
 			if (rename(file1, file2))
 				warn("can't mv %s to %s", file1, file2);
 			if (chmod(file2, ent->permissions))
 				warn("can't chmod %s", file2);
-			if (ent->uid != (uid_t)-1 || ent->gid != (gid_t)-1)
-				if (chown(file2, ent->uid, ent->gid))
-					warn("can't chown %s", file2);
+			if (chown(file2, ent->uid, ent->gid))
+				warn("can't chown %s", file2);
 		}
 	}
+}
+
+void
+dotrim(struct conf_entry *ent)
+{
+	char file1[MAXPATHLEN], file2[MAXPATHLEN], oldlog[MAXPATHLEN];
+	int fd;
+
+	/* Is there a separate backup dir? */
+	if (ent->backdir != NULL)
+		snprintf(oldlog, sizeof(oldlog), "%s/%s", ent->backdir,
+		    ent->logbase);
+	else
+		strlcpy(oldlog, ent->log, sizeof(oldlog));
+
+	if (ent->numlogs > 0)
+		rotate(ent, oldlog);
 	if (!noaction && !(ent->flags & CE_BINARY))
-		(void)log_trim(ent->log);  /* Report the trimming to the old log */
+		(void)log_trim(ent->log);
 
 	(void)snprintf(file2, sizeof(file2), "%s.XXXXXXXXXX", ent->log);
 	if (noaction)  {
@@ -807,11 +820,10 @@ dotrim(struct conf_entry *ent)
 	} else {
 		if ((fd = mkstemp(file2)) < 0)
 			err(1, "can't start '%s' log", file2);
-		if (ent->uid != (uid_t)-1 || ent->gid != (gid_t)-1)
-			if (fchown(fd, ent->uid, ent->gid))
-				err(1, "can't chown '%s' log file", file2);
 		if (fchmod(fd, ent->permissions))
 			err(1, "can't chmod '%s' log file", file2);
+		if (fchown(fd, ent->uid, ent->gid))
+			err(1, "can't chown '%s' log file", file2);
 		(void)close(fd);
 		/* Add status message */
 		if (!(ent->flags & CE_BINARY) && log_trim(file2))
@@ -825,9 +837,11 @@ dotrim(struct conf_entry *ent)
 			warn("can't rm %s", ent->log);
 	} else {
 		(void)snprintf(file1, sizeof(file1), "%s.0", oldlog);
-		if (noaction)
+		if (noaction) {
 			printf("\tmv %s to %s\n", ent->log, file1);
-		else if (movefile(ent->log, file1, ent->uid, ent->gid,
+			printf("\tchmod %o %s\n", ent->permissions, file1);
+			printf("\tchown %u:%u %s\n", ent->uid, ent->gid, file1);
+		} else if (movefile(ent->log, file1, ent->uid, ent->gid,
 		    ent->permissions))
 			warn("can't mv %s to %s", ent->log, file1);
 	}
@@ -858,8 +872,8 @@ log_trim(char *log)
 void
 compress_log(struct conf_entry *ent)
 {
-	pid_t pid;
 	char *base, tmp[MAXPATHLEN];
+	pid_t pid;
 
 	if (ent->backdir != NULL)
 		snprintf(tmp, sizeof(tmp), "%s/%s.0", ent->backdir,
@@ -887,26 +901,21 @@ compress_log(struct conf_entry *ent)
 
 /* Return size in kilobytes of a file */
 off_t
-sizefile(char *file)
+sizefile(struct stat *sb)
 {
-	struct stat sb;
-
-	if (stat(file, &sb) < 0)
-		return (-1);
-
 	/* For sparse files, return the size based on number of blocks used. */
-	if (sb.st_size / DEV_BSIZE > sb.st_blocks)
-		return (sb.st_blocks * DEV_BSIZE);
+	if (sb->st_size / DEV_BSIZE > sb->st_blocks)
+		return (sb->st_blocks * DEV_BSIZE);
 	else
-		return (sb.st_size);
+		return (sb->st_size);
 }
 
 /* Return the age (in hours) of old log file (file.0), or -1 if none */
 int
 age_old_log(struct conf_entry *ent)
 {
-	struct stat sb;
 	char file[MAXPATHLEN];
+	struct stat sb;
 
 	if (ent->backdir != NULL)
 		(void)snprintf(file, sizeof(file), "%s/%s.0", ent->backdir,
@@ -957,10 +966,10 @@ isnumberstr(char *string)
 int
 domonitor(struct conf_entry *ent)
 {
-	struct stat sb, tsb;
 	char fname[MAXPATHLEN], *flog, *p, *rb = NULL;
-	FILE *fp;
+	struct stat sb, tsb;
 	off_t osize;
+	FILE *fp;
 	int rd;
 
 	if (stat(ent->log, &sb) < 0)
@@ -1066,8 +1075,8 @@ cleanup:
 FILE *
 openmail(void)
 {
-	FILE *ret;
 	char *cmdbuf = NULL;
+	FILE *ret;
 
 	if (asprintf(&cmdbuf, "%s -t", SENDMAIL) != -1) {
 		ret = popen(cmdbuf, "w");
@@ -1136,8 +1145,8 @@ lstat_log(char *file, size_t size, int flags)
 time_t
 parse8601(char *s)
 {
-	char *t;
 	struct tm tm, *tmp;
+	char *t;
 	long l;
 
 	tmp = localtime(&timenow);
@@ -1174,8 +1183,8 @@ parse8601(char *s)
 	}
 
 	/* sanity check */
-	if (tm.tm_year < 70 || tm.tm_mon < 0 || tm.tm_mon > 12
-	    || tm.tm_mday < 1 || tm.tm_mday > 31)
+	if (tm.tm_year < 70 || tm.tm_mon < 0 || tm.tm_mon > 12 ||
+	    tm.tm_mday < 1 || tm.tm_mday > 31)
 		return (-1);
 
 	if (*t != '\0') {
@@ -1200,8 +1209,8 @@ parse8601(char *s)
 		}
 
 		/* sanity check */
-		if (tm.tm_sec < 0 || tm.tm_sec > 60 || tm.tm_min < 0
-		    || tm.tm_min > 59 || tm.tm_hour < 0 || tm.tm_hour > 23)
+		if (tm.tm_sec < 0 || tm.tm_sec > 60 || tm.tm_min < 0 ||
+		    tm.tm_min > 59 || tm.tm_hour < 0 || tm.tm_hour > 23)
 			return (-1);
 	}
 	return (mktime(&tm));
@@ -1224,13 +1233,11 @@ parse8601(char *s)
 time_t
 parseDWM(char *s)
 {
-	char *t;
-	struct tm tm, *tmp;
-	long l;
-	int nd;
 	static int mtab[] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
-	int WMseen = 0;
-	int Dseen = 0;
+	int WMseen = 0, Dseen = 0, nd;
+	struct tm tm, *tmp;
+	char *t;
+	long l;
 
 	tmp = localtime(&timenow);
 	tm = *tmp;
@@ -1325,27 +1332,30 @@ parseDWM(char *s)
  * Move a file using rename(2) is possible and copying if not.
  */
 int
-movefile(char *from, char *to, uid_t owner_uid, gid_t group_gid, int perm)
+movefile(char *from, char *to, uid_t owner_uid, gid_t group_gid, mode_t perm)
 {
 	FILE *src, *dst;
 	int i;
 
 	/* try rename(2) first */
-	i = rename(from, to);
-	if (i == 0 || errno != EXDEV)
-		return (i);
+	if (rename(from, to) == 0) {
+		if (chmod(to, perm))
+			warn("can't chmod %s", to);
+		if (chown(to, owner_uid, group_gid))
+			warn("can't chown %s", to);
+		return (0);
+	} else if (errno != EXDEV)
+		return (-1);
 
 	/* different filesystem, have to copy the file */
 	if ((src = fopen(from, "r")) == NULL)
 		err(1, "can't fopen %s for reading", from);
 	if ((dst = fopen(to, "w")) == NULL)
 		err(1, "can't fopen %s for writing", to);
-	if (owner_uid != (uid_t)-1 || group_gid != (gid_t)-1) {
-		if (fchown(fileno(dst), owner_uid, group_gid))
-			err(1, "can't fchown %s", to);
-	}
 	if (fchmod(fileno(dst), perm))
 		err(1, "can't fchmod %s", to);
+	if (fchown(fileno(dst), owner_uid, group_gid))
+		err(1, "can't fchown %s", to);
 
 	while ((i = getc(src)) != EOF) {
 		if ((putc(i, dst)) == EOF)

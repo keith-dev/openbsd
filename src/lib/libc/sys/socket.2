@@ -1,4 +1,4 @@
-.\"	$OpenBSD: socket.2,v 1.20 2003/06/02 20:18:39 millert Exp $
+.\"	$OpenBSD: socket.2,v 1.22 2004/04/15 19:52:18 jmc Exp $
 .\"	$NetBSD: socket.2,v 1.5 1995/02/27 12:37:53 cgd Exp $
 .\"
 .\" Copyright (c) 1983, 1991, 1993
@@ -53,8 +53,7 @@ which should be used.
 These families are defined in the include file
 .Ao Pa sys/socket.h Ac .
 The currently understood formats are
-.Pp
-.Bd -literal -offset indent -compact
+.Bd -literal -offset indent
 AF_UNIX		(UNIX internal protocols),
 AF_INET		(ARPA Internet protocols),
 AF_INET6	(ARPA IPv6 protocols),
@@ -68,8 +67,7 @@ The socket has the indicated
 .Fa type ,
 which specifies the semantics of communication.
 Currently defined types are:
-.Pp
-.Bd -literal -offset indent -compact
+.Bd -literal -offset indent
 SOCK_STREAM
 SOCK_DGRAM
 SOCK_RAW
@@ -122,7 +120,7 @@ socket type.
 .Pp
 Sockets of type
 .Dv SOCK_STREAM
-are full-duplex byte streams, similar to pipes.
+are full-duplex byte streams.
 A stream socket must be in a
 .Em connected
 state before any data may be sent or received on it.

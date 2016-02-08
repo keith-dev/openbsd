@@ -1,4 +1,4 @@
-/*	$OpenBSD: control.c,v 1.26 2004/03/17 14:39:45 henning Exp $ */
+/*	$OpenBSD: control.c,v 1.37 2004/08/24 12:43:34 claudio Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -36,6 +36,7 @@ struct {
 
 struct ctl_conn	*control_connbyfd(int);
 struct ctl_conn	*control_connbypid(pid_t);
+int		 control_close(int);
 
 int
 control_init(void)
@@ -104,7 +105,7 @@ control_cleanup(void)
 	unlink(SOCKET_NAME);
 }
 
-void
+int
 control_accept(int listenfd)
 {
 	int			 connfd;
@@ -115,22 +116,23 @@ control_accept(int listenfd)
 	len = sizeof(sun);
 	if ((connfd = accept(listenfd,
 	    (struct sockaddr *)&sun, &len)) == -1) {
-		if (errno == EWOULDBLOCK || errno == EINTR)
-			return;
-		else
+		if (errno != EWOULDBLOCK && errno != EINTR)
 			log_warn("session_control_accept");
+		return (0);
 	}
 
 	session_socket_blockmode(connfd, BM_NONBLOCK);
 
 	if ((ctl_conn = malloc(sizeof(struct ctl_conn))) == NULL) {
 		log_warn("session_control_accept");
-		return;
+		return (0);
 	}
 
 	imsg_init(&ctl_conn->ibuf, connfd);
 
-	TAILQ_INSERT_TAIL(&ctl_conns, ctl_conn, entries);
+	TAILQ_INSERT_TAIL(&ctl_conns, ctl_conn, entry);
+
+	return (1);
 }
 
 struct ctl_conn *
@@ -138,8 +140,8 @@ control_connbyfd(int fd)
 {
 	struct ctl_conn	*c;
 
-	for (c = TAILQ_FIRST(&ctl_conns); c != NULL && c->ibuf.sock != fd;
-	    c = TAILQ_NEXT(c, entries))
+	for (c = TAILQ_FIRST(&ctl_conns); c != NULL && c->ibuf.fd != fd;
+	    c = TAILQ_NEXT(c, entry))
 		;	/* nothing */
 
 	return (c);
@@ -151,31 +153,33 @@ control_connbypid(pid_t pid)
 	struct ctl_conn	*c;
 
 	for (c = TAILQ_FIRST(&ctl_conns); c != NULL && c->ibuf.pid != pid;
-	    c = TAILQ_NEXT(c, entries))
+	    c = TAILQ_NEXT(c, entry))
 		;	/* nothing */
 
 	return (c);
 }
 
-void
+int
 control_close(int fd)
 {
 	struct ctl_conn	*c;
 
 	if ((c = control_connbyfd(fd)) == NULL) {
 		log_warn("control_close: fd %d: not found", fd);
-		return;
+		return (0);
 	}
 
 	msgbuf_clear(&c->ibuf.w);
-	TAILQ_REMOVE(&ctl_conns, c, entries);
+	TAILQ_REMOVE(&ctl_conns, c, entry);
 
-	close(c->ibuf.sock);
+	close(c->ibuf.fd);
 	free(c);
+
+	return (1);
 }
 
 int
-control_dispatch_msg(struct pollfd *pfd, int i)
+control_dispatch_msg(struct pollfd *pfd, u_int *ctl_cnt)
 {
 	struct imsg		 imsg;
 	struct ctl_conn		*c;
@@ -190,7 +194,7 @@ control_dispatch_msg(struct pollfd *pfd, int i)
 
 	if (pfd->revents & POLLOUT)
 		if (msgbuf_write(&c->ibuf.w) < 0) {
-			control_close(pfd->fd);
+			*ctl_cnt -= control_close(pfd->fd);
 			return (1);
 		}
 
@@ -198,13 +202,13 @@ control_dispatch_msg(struct pollfd *pfd, int i)
 		return (0);
 
 	if (imsg_read(&c->ibuf) <= 0) {
-		control_close(pfd->fd);
+		*ctl_cnt -= control_close(pfd->fd);
 		return (1);
 	}
 
 	for (;;) {
 		if ((n = imsg_get(&c->ibuf, &imsg)) == -1) {
-			control_close(pfd->fd);
+			*ctl_cnt -= control_close(pfd->fd);
 			return (1);
 		}
 
@@ -213,20 +217,21 @@ control_dispatch_msg(struct pollfd *pfd, int i)
 
 		switch (imsg.hdr.type) {
 		case IMSG_CTL_SHOW_NEIGHBOR:
+			c->ibuf.pid = imsg.hdr.pid;
 			if (imsg.hdr.len == IMSG_HEADER_SIZE +
 			    sizeof(struct bgpd_addr)) {
 				addr = imsg.data;
-				p = getpeerbyip(addr->v4.s_addr);
+				p = getpeerbyaddr(addr);
 				if (p != NULL)
-					imsg_compose(&c->ibuf,
-					    IMSG_CTL_SHOW_NEIGHBOR,
-					    0, p, sizeof(struct peer));
+					imsg_compose_rde(imsg.hdr.type,
+					    imsg.hdr.pid,
+					    p, sizeof(struct peer));
 			} else
 				for (p = peers; p != NULL; p = p->next)
-					imsg_compose(&c->ibuf,
-					    IMSG_CTL_SHOW_NEIGHBOR,
-					    0, p, sizeof(struct peer));
-			imsg_compose(&c->ibuf, IMSG_CTL_END, 0, NULL, 0);
+					imsg_compose_rde(imsg.hdr.type,
+					    imsg.hdr.pid,
+					    p, sizeof(struct peer));
+			imsg_compose_rde(IMSG_CTL_END, imsg.hdr.pid, NULL, 0);
 			break;
 		case IMSG_CTL_RELOAD:
 		case IMSG_CTL_FIB_COUPLE:
@@ -234,32 +239,34 @@ control_dispatch_msg(struct pollfd *pfd, int i)
 			imsg_compose_parent(imsg.hdr.type, 0, NULL, 0);
 			break;
 		case IMSG_CTL_NEIGHBOR_UP:
-			if (imsg.hdr.len == IMSG_HEADER_SIZE +
-			    sizeof(struct bgpd_addr)) {
-				addr = imsg.data;
-				p = getpeerbyip(addr->v4.s_addr);
-				if (p != NULL)
-					bgp_fsm(p, EVNT_START);
-				else
-					log_warnx("IMSG_CTL_NEIGHBOR_UP "
-					    "with unknown neighbor");
-			} else
-				log_warnx("got IMSG_CTL_NEIGHBOR_UP with "
-				    "wrong length");
-			break;
 		case IMSG_CTL_NEIGHBOR_DOWN:
+		case IMSG_CTL_NEIGHBOR_CLEAR:
 			if (imsg.hdr.len == IMSG_HEADER_SIZE +
 			    sizeof(struct bgpd_addr)) {
 				addr = imsg.data;
-				p = getpeerbyip(addr->v4.s_addr);
-				if (p != NULL)
+				p = getpeerbyaddr(addr);
+				if (p == NULL) {
+					log_warnx("IMSG_CTL_NEIGHBOR_ "
+					    "with unknown neighbor");
+					break;
+				}
+				switch (imsg.hdr.type) {
+				case IMSG_CTL_NEIGHBOR_UP:
+					bgp_fsm(p, EVNT_START);
+					break;
+				case IMSG_CTL_NEIGHBOR_DOWN:
 					bgp_fsm(p, EVNT_STOP);
-				else
-					log_warnx("IMSG_CTL_NEIGHBOR_DOWN"
-					    " with unknown neighbor");
+					break;
+				case IMSG_CTL_NEIGHBOR_CLEAR:
+					bgp_fsm(p, EVNT_STOP);
+					bgp_fsm(p, EVNT_START);
+					break;
+				default:
+					fatal("king bula wants more humppa");
+				}
 			} else
-				log_warnx("got IMSG_CTL_NEIGHBOR_DOWN "
-				    "with wrong length");
+				log_warnx("got IMSG_CTL_NEIGHBOR_ with "
+				    "wrong length");
 			break;
 		case IMSG_CTL_KROUTE:
 		case IMSG_CTL_KROUTE_ADDR:
@@ -272,8 +279,15 @@ control_dispatch_msg(struct pollfd *pfd, int i)
 		case IMSG_CTL_SHOW_RIB:
 		case IMSG_CTL_SHOW_RIB_AS:
 		case IMSG_CTL_SHOW_RIB_PREFIX:
+		case IMSG_CTL_SHOW_NETWORK:
 			c->ibuf.pid = imsg.hdr.pid;
 			imsg_compose_rde(imsg.hdr.type, imsg.hdr.pid,
+			    imsg.data, imsg.hdr.len - IMSG_HEADER_SIZE);
+			break;
+		case IMSG_NETWORK_ADD:
+		case IMSG_NETWORK_REMOVE:
+		case IMSG_NETWORK_FLUSH:
+			imsg_compose_rde(imsg.hdr.type, 0,
 			    imsg.data, imsg.hdr.len - IMSG_HEADER_SIZE);
 			break;
 		default:
