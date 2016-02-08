@@ -36,7 +36,7 @@
  * SUCH DAMAGE.
  *
  *	from: @(#)amd.c	8.1 (Berkeley) 6/6/93
- *	$Id: amd.c,v 1.2 2001/03/02 06:22:21 deraadt Exp $
+ *	$Id: amd.c,v 1.11 2002/08/05 07:24:26 pvalchev Exp $
  */
 
 #ifndef lint
@@ -62,7 +62,6 @@ static char copyright[] =
 #include <rpcsvc/yp_prot.h>
 
 char pid_fsname[16 + MAXHOSTNAMELEN];	/* "kiska.southseas.nz:(pid%d)" */
-char *progname;				/* "amd" */
 #ifdef HAS_HOST
 #ifdef HOST_EXEC
 char *host_helper;
@@ -77,7 +76,7 @@ char *arch = ARCH_REP;			/* Name of current architecture */
 char *endian = ARCH_ENDIAN;		/* Big or Little endian */
 char *wire;
 int foreground = 1;			/* This is the top-level server */
-int mypid;				/* Current process id */
+pid_t mypid;				/* Current process id */
 int immediate_abort;			/* Should close-down unmounts be retried */
 struct in_addr myipaddr;		/* (An) IP address of this host */
 serv_state amd_state;
@@ -92,8 +91,8 @@ int orig_umask;
  * SIGINT - tells amd to do a full shutdown, including unmounting all filesystem.
  * SIGTERM - tells amd to shutdown now.  Just unmounts the automount nodes.
  */
-static void sigterm(sig)
-int sig;
+static void
+sigterm(int sig)
 {
 #ifdef SYS5_SIGNALS
 	signal(sig, sigterm);
@@ -121,8 +120,8 @@ int sig;
  * When a SIGHUP arrives it schedules a call to mapc_reload
  */
 /*ARGSUSED*/
-static void sighup(sig)
-int sig;
+static void
+sighup(int sig)
 {
 #ifdef SYS5_SIGNALS
 	signal(sig, sighup);
@@ -140,22 +139,23 @@ int sig;
 }
 
 /*ARGSUSED*/
-static void parent_exit(sig)
-int sig;
+static void
+parent_exit(int sig)
 {
 	exit(0);
 }
 
-static int daemon_mode(P_void)
+static pid_t
+daemon_mode(void)
 {
-	int bgpid;
+	pid_t bgpid;
 
 	signal(SIGQUIT, parent_exit);
 	bgpid = background();
 
 	if (bgpid != 0) {
 		if (print_pid) {
-			printf("%d\n", bgpid);
+			printf("%ld\n", (long)bgpid);
 			fflush(stdout);
 		}
 		/*
@@ -193,12 +193,10 @@ static int daemon_mode(P_void)
 }
 
 int
-main(argc, argv)
-int argc;
-char *argv[];
+main(int argc, char *argv[])
 {
 	char *domdot;
-	int ppid = 0;
+	pid_t ppid = 0;
 	int error;
 
 	/*
@@ -211,20 +209,6 @@ char *argv[];
 	 * Set processing status.
 	 */
 	amd_state = Start;
-
-	/*
-	 * Determine program name
-	 */
-	if (argv[0]) {
-		progname = strrchr(argv[0], '/');
-		if (progname && progname[1])
-			progname++;
-		else
-			progname = argv[0];
-	}
-
-	if (!progname)
-		progname = "amd";
 
 	/*
 	 * Initialise process id.  This is kept
@@ -260,7 +244,7 @@ char *argv[];
 		*domdot++ = '\0';
 		hostdomain = domdot;
 	}
-	strcpy(hostd, hostname);
+	strlcpy(hostd, hostname, sizeof hostd);
 
 	/*
 	 * Trap interrupts for shutdowns.
@@ -317,7 +301,7 @@ char *argv[];
 	 * Now check we are root.
 	 */
 	if (geteuid() != 0) {
-		plog(XLOG_FATAL, "Must be root to mount filesystems (euid = %d)", geteuid());
+		plog(XLOG_FATAL, "Must be root to mount filesystems (euid = %u)", geteuid());
 		going_down(1);
 	}
 
@@ -338,7 +322,7 @@ char *argv[];
 #endif /* DEBUG */
 	ppid = daemon_mode();
 
-	sprintf(pid_fsname, "%s:(pid%d)", hostname, mypid);
+	snprintf(pid_fsname, sizeof(pid_fsname), "%s:(pid%ld)", hostname, (long)mypid);
 
 	do_mapc_reload = clocktime() + ONE_HOUR;
 
@@ -347,7 +331,7 @@ char *argv[];
 	 */
 	error = mount_automounter(ppid);
 	if (error && ppid)
-		kill(SIGALRM, ppid);
+		kill(ppid, SIGALRM);
 	going_down(error);
 
 	abort();

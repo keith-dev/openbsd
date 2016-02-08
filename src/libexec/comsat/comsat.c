@@ -1,4 +1,4 @@
-/*	$OpenBSD: comsat.c,v 1.21 2002/02/16 21:27:29 millert Exp $	*/
+/*	$OpenBSD: comsat.c,v 1.26 2002/09/06 19:43:54 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1980, 1993
@@ -41,9 +41,10 @@ static char copyright[] =
 
 #ifndef lint
 /*static char sccsid[] = "from: @(#)comsat.c	8.1 (Berkeley) 6/4/93";*/
-static char rcsid[] = "$OpenBSD: comsat.c,v 1.21 2002/02/16 21:27:29 millert Exp $";
+static char rcsid[] = "$OpenBSD: comsat.c,v 1.26 2002/09/06 19:43:54 deraadt Exp $";
 #endif /* not lint */
 
+#include <sys/limits.h>
 #include <sys/param.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
@@ -87,14 +88,12 @@ void reapchildren(int);
 volatile sig_atomic_t wantreadutmp;
 
 int
-main(argc, argv)
-	int argc;
-	char *argv[];
+main(int argc, char *argv[])
 {
 	struct sockaddr_storage from;
 	struct sigaction sa;
 	int cc;
-	int fromlen;
+	socklen_t fromlen;
 	char msgbuf[100];
 	sigset_t sigset;
 
@@ -158,8 +157,7 @@ main(argc, argv)
 }
 
 void
-reapchildren(signo)
-	int signo;
+reapchildren(int signo)
 {
 	int save_errno = errno;
 
@@ -169,8 +167,7 @@ reapchildren(signo)
 }
 
 void
-readutmp(signo)
-	int signo;
+readutmp(int signo)
 {
 	wantreadutmp = 1;
 }
@@ -187,6 +184,11 @@ doreadutmp(void)
 	(void)fstat(uf, &statbf);
 	if (statbf.st_mtime > utmpmtime) {
 		utmpmtime = statbf.st_mtime;
+		/* avoid int overflow */
+		if (statbf.st_size > INT_MAX - 10 * sizeof(struct utmp)) {
+			syslog(LOG_ALERT, "utmp file excessively large");
+			exit(1);
+		}
 		if (statbf.st_size > utmpsize) {
 			utmpsize = statbf.st_size + 10 * sizeof(struct utmp);
 			if ((utmp = realloc(utmp, utmpsize)) == NULL) {
@@ -201,10 +203,10 @@ doreadutmp(void)
 }
 
 void
-mailfor(name)
-	char *name;
+mailfor(char *name)
 {
 	struct utmp *utp = &utmp[nutmp];
+	char utname[UT_NAMESIZE+1];
 	char *cp;
 	off_t offset;
 
@@ -212,22 +214,23 @@ mailfor(name)
 		return;
 	*cp = '\0';
 	offset = atoi(cp + 1);
-	while (--utp >= utmp)
-		if (!strncmp(utp->ut_name, name, sizeof(utmp[0].ut_name)))
+	while (--utp >= utmp) {
+		memcpy(utname, utp->ut_name, UT_NAMESIZE);
+		utname[sizeof(utname)-1] = '\0';
+		if (!strncmp(utname, name, UT_NAMESIZE))
 			notify(utp, offset);
+	}
 }
 
 static char *cr;
 
 void
-notify(utp, offset)
-	struct utmp *utp;
-	off_t offset;
+notify(struct utmp *utp, off_t offset)
 {
 	FILE *tp;
 	struct stat stb;
 	struct termios ttybuf;
-	char tty[MAXPATHLEN], name[sizeof(utmp[0].ut_name) + 1];
+	char tty[MAXPATHLEN], name[UT_NAMESIZE + 1];
 
 	(void)snprintf(tty, sizeof(tty), "%s%.*s",
 	    _PATH_DEV, (int)sizeof(utp->ut_line), utp->ut_line);
@@ -237,10 +240,12 @@ notify(utp, offset)
 		return;
 	}
 	if (stat(tty, &stb) || !(stb.st_mode & S_IEXEC)) {
-		dsyslog(LOG_DEBUG, "%s: wrong mode on %s", utp->ut_name, tty);
+		dsyslog(LOG_DEBUG, "%.*s: wrong mode on %s",
+		    (int)sizeof(utp->ut_name), utp->ut_name, tty);
 		return;
 	}
-	dsyslog(LOG_DEBUG, "notify %s on %s", utp->ut_name, tty);
+	dsyslog(LOG_DEBUG, "notify %.*s on %s", (int)sizeof(utp->ut_name),
+	    utp->ut_name, tty);
 	if (fork())
 		return;
 	(void)signal(SIGALRM, SIG_DFL);
@@ -252,7 +257,8 @@ notify(utp, offset)
 	(void)tcgetattr(fileno(tp), &ttybuf);
 	cr = (ttybuf.c_oflag & ONLCR) && (ttybuf.c_oflag & OPOST) ?
 	    "\n" : "\n\r";
-	(void)strlcpy(name, utp->ut_name, sizeof(name));
+	memcpy(name, utp->ut_name, UT_NAMESIZE);
+	name[sizeof(name)-1] = '\0';
 	(void)fprintf(tp, "%s\007New mail for %s@%.*s\007 has arrived:%s----%s",
 	    cr, name, (int)sizeof(hostname), hostname, cr, cr);
 	jkfprintf(tp, name, offset);
@@ -261,10 +267,7 @@ notify(utp, offset)
 }
 
 void
-jkfprintf(tp, name, offset)
-	FILE *tp;
-	char name[];
-	off_t offset;
+jkfprintf(FILE *tp, char name[], off_t offset)
 {
 	char *cp, ch;
 	char visout[5], *s2;

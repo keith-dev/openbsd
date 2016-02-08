@@ -391,6 +391,10 @@ static char *ssl_var_lookup_ssl_cert(pool *p, X509 *xs, char *var)
     return result;
 }
 
+#ifndef NID_uniqueIdentifier
+#define NID_uniqueIdentifier             102
+#endif
+
 static const struct {
     char *name;
     int   nid;
@@ -407,7 +411,11 @@ static const struct {
     { "G",     NID_givenName              },
     { "S",     NID_surname                },
     { "D",     NID_description            },
+#if SSL_LIBRARY_VERSION >= 0x00907000
+    { "UID",   NID_x500UniqueIdentifier   },
+#else
     { "UID",   NID_uniqueIdentifier       },
+#endif
     { "Email", NID_pkcs9_emailAddress     },
     { NULL,    0                          }
 };

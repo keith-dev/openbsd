@@ -1,5 +1,5 @@
-/*	$OpenBSD: route6d.c,v 1.26 2002/02/25 02:33:06 itojun Exp $	*/
-/*	$KAME: route6d.c,v 1.81 2002/02/25 02:27:22 itojun Exp $	*/
+/*	$OpenBSD: route6d.c,v 1.31 2002/08/21 16:30:29 itojun Exp $	*/
+/*	$KAME: route6d.c,v 1.88 2002/08/21 16:24:25 itojun Exp $	*/
 
 /*
  * Copyright (C) 1995, 1996, 1997, and 1998 WIDE Project.
@@ -31,7 +31,7 @@
  */
 
 #if 0
-static char _rcsid[] = "$OpenBSD: route6d.c,v 1.26 2002/02/25 02:33:06 itojun Exp $";
+static char _rcsid[] = "$OpenBSD: route6d.c,v 1.31 2002/08/21 16:30:29 itojun Exp $";
 #endif
 
 #include <stdio.h>
@@ -135,7 +135,9 @@ int	nifc;		/* number of valid ifc's */
 struct	ifc **index2ifc;
 int	nindex2ifc;
 struct	ifc *loopifcp = NULL;	/* pointing to loopback */
-fd_set	sockvec;	/* vector to select() for receiving */
+fd_set	*sockvecp;	/* vector to select() for receiving */
+fd_set	*recvecp;
+int	fdmasks;
 int	rtsock;		/* the routing socket */
 int	ripsock;	/* socket to send/receive RIP datagram */
 int	maxfd;		/* maximum fd for select() */
@@ -195,7 +197,7 @@ FILE	*rtlog = NULL;
 
 int logopened = 0;
 
-static	u_long	seq = 0;
+static	int	seq = 0;
 
 volatile sig_atomic_t seenalrm;
 volatile sig_atomic_t seenquit;
@@ -424,8 +426,6 @@ main(argc, argv)
 	sigemptyset(&mask);
 	sigaddset(&mask, SIGALRM);
 	while (1) {
-		fd_set	recvec;
-
 		if (seenalrm) {
 			ripalarm();
 			seenalrm = 0;
@@ -442,8 +442,8 @@ main(argc, argv)
 			continue;
 		}
 
-		FD_COPY(&sockvec, &recvec);
-		switch (select(maxfd + 1, &recvec, 0, 0, 0)) {
+		memcpy(recvecp, sockvecp, fdmasks);
+		switch (select(maxfd + 1, recvecp, 0, 0, 0)) {
 		case -1:
 			if (errno != EINTR) {
 				fatal("select");
@@ -453,12 +453,12 @@ main(argc, argv)
 		case 0:
 			continue;
 		default:
-			if (FD_ISSET(ripsock, &recvec)) {
+			if (FD_ISSET(ripsock, recvecp)) {
 				sigprocmask(SIG_BLOCK, &mask, &omask);
 				riprecv();
 				sigprocmask(SIG_SETMASK, &omask, NULL);
 			}
-			if (FD_ISSET(rtsock, &recvec)) {
+			if (FD_ISSET(rtsock, recvecp)) {
 				sigprocmask(SIG_BLOCK, &mask, &omask);
 				rtrecv();
 				sigprocmask(SIG_SETMASK, &omask, NULL);
@@ -636,12 +636,6 @@ init()
 	}
 	memcpy(&ripsin, res->ai_addr, res->ai_addrlen);
 
-#ifdef FD_ZERO
-	FD_ZERO(&sockvec);
-#else
-	memset(&sockvec, 0, sizeof(sockvec));
-#endif
-	FD_SET(ripsock, &sockvec);
 	maxfd = ripsock;
 
 	if (nflag == 0) {
@@ -649,11 +643,24 @@ init()
 			fatal("route socket");
 			/*NOTREACHED*/
 		}
-		FD_SET(rtsock, &sockvec);
 		if (rtsock > maxfd)
 			maxfd = rtsock;
 	} else
 		rtsock = -1;	/*just for safety */
+
+	fdmasks = howmany(maxfd + 1, NFDBITS) * sizeof(fd_mask);
+	if ((sockvecp = malloc(fdmasks)) == NULL) {
+		fatal("malloc");
+		/*NOTREACHED*/
+	}
+	if ((recvecp = malloc(fdmasks)) == NULL) {
+		fatal("malloc");
+		/*NOTREACHED*/
+	}
+	memset(sockvecp, 0, fdmasks);
+	FD_SET(ripsock, sockvecp);
+	if (rtsock >= 0)
+		FD_SET(rtsock, sockvecp);
 }
 
 #define	RIPSIZE(n) \
@@ -725,6 +732,9 @@ ripsend(ifcp, sin6, flag)
 	struct	riprt *rrt;
 	struct	in6_addr *nh;	/* next hop */
 	int	maxrte;
+
+	if (qflag)
+		return;
 
 	if (ifcp == NULL) {
 		/*
@@ -2783,7 +2793,7 @@ getroute(np, gw)
 	struct in6_addr *gw;
 {
 	u_char buf[BUFSIZ];
-	u_long myseq;
+	int myseq;
 	int len;
 	struct rt_msghdr *rtm;
 	struct sockaddr_in6 *sin6;
@@ -3009,11 +3019,11 @@ filterconfig()
 			iflp = ap;
 			goto ifonly;
 		}
-		if ((p = index(ap, ',')) != NULL) {
+		if ((p = strchr(ap, ',')) != NULL) {
 			*p++ = '\0';
 			iflp = p;
 		}
-		if ((p = index(ap, '/')) == NULL) {
+		if ((p = strchr(ap, '/')) == NULL) {
 			fatal("no prefixlen specified for '%s'", ap);
 			/*NOTREACHED*/
 		}
@@ -3034,7 +3044,7 @@ ifonly:
 		/* parse the interface listing portion */
 		while (iflp) {
 			ifname = iflp;
-			if ((iflp = index(iflp, ',')) != NULL)
+			if ((iflp = strchr(iflp, ',')) != NULL)
 				*iflp++ = '\0';
 			ifcp = ifc_find(ifname);
 			if (ifcp == NULL) {
@@ -3256,14 +3266,15 @@ char *
 allocopy(p)
 	char *p;
 {
-	char *q = (char *)malloc(strlen(p) + 1);
+	int len = strlen(p) + 1;
+	char *q = (char *)malloc(len);
 
 	if (!q) {
 		fatal("malloc");
 		/*NOTREACHED*/
 	}
 
-	strcpy(q, p);
+	strlcpy(q, p, len);
 	return q;
 }
 

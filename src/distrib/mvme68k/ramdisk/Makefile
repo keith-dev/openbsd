@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.11 2001/05/11 15:23:09 deraadt Exp $
+#	$OpenBSD: Makefile,v 1.16 2002/06/09 05:53:54 todd Exp $
 
 TOP=		${.CURDIR}/..
 
@@ -10,7 +10,7 @@ LISTS=		${.CURDIR}/list
 UTILS?=		${.CURDIR}/../../miniroot
 
 MOUNT_POINT=	/mnt
-MTREE=		${.CURDIR}/mtree.conf
+MTREE=		${UTILS}/mtree.conf
 
 VND?=		svnd0
 VND_DEV=	/dev/${VND}a
@@ -34,15 +34,15 @@ ${IMAGE}: rd_setup do_files rd_teardown
 
 bsd:
 .ifndef(NOBUILD)
-	cd ${.CURDIR}/../../../sys/arch/mvme68k/conf && config MINIROOT
-	cd ${.CURDIR}/../../../sys/arch/mvme68k/compile/MINIROOT && \
+	cd ${.CURDIR}/../../../sys/arch/mvme68k/conf && config RAMDISK
+	cd ${.CURDIR}/../../../sys/arch/mvme68k/compile/RAMDISK && \
 	    make clean && make
 .endif
-	cp ${.CURDIR}/../../../sys/arch/mvme68k/compile/MINIROOT/bsd bsd
+	cp ${.CURDIR}/../../../sys/arch/mvme68k/compile/RAMDISK/bsd bsd
 
 rd_test: rd_setup rd_teardown
 
-rd_setup: 
+rd_setup:
 	dd if=/dev/zero of=${IMAGE} bs=512 count=${NBLKS}
 	vnconfig -v -c ${VND} ${IMAGE}
 	disklabel -w -r ${VND} ${DISKTYPE}
@@ -79,7 +79,9 @@ ${CBIN}: ${CBIN}.mk ${CBIN}.cache ${CBIN}.c
 do_files:
 	mtree -def ${MTREE} -p ${MOUNT_POINT}/ -u
 	TOPDIR=${TOP} CURDIR=${.CURDIR} OBJDIR=${.OBJDIR} \
-	    REV=${REV} TARGDIR=${MOUNT_POINT} sh ${TOP}/runlist.sh ${LISTS}
+	    REV=${REV} TARGDIR=${MOUNT_POINT} UTILS=${UTILS} \
+	    sh ${UTILS}/runlist.sh ${LISTS}
+	rm ${MOUNT_POINT}/${CBIN}
 
 clean cleandir:
 	/bin/rm -f core ${IMAGE} ${CBIN} ${CBIN}.conf ${CBIN}.mk ${CBIN}.cache \

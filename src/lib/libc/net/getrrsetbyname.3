@@ -1,4 +1,4 @@
-.\" $OpenBSD: getrrsetbyname.3,v 1.4 2001/08/08 16:28:43 jakob Exp $
+.\" $OpenBSD: getrrsetbyname.3,v 1.7 2002/06/09 05:03:59 deraadt Exp $
 .\"
 .\" Copyright (C) 2000, 2001  Internet Software Consortium.
 .\"
@@ -67,10 +67,11 @@ and
 are in uncompressed DNS wire format.
 Properties of the rdataset are represented in the
 .Li rri_flags
-bitfield. If the
+bitfield.
+If the
 .Dv RRSET_VALIDATED
 bit is set, the data has been DNSSEC
-validated and the signatures verified. 
+validated and the signatures verified.
 .Pp
 The following structures are used:
 .Bd -literal -offset
@@ -100,7 +101,9 @@ and
 .Li rdatainfo
 structures,
 and the canonical host name strings pointed to by the
-.Li rrsetinfostructure.
+.Li rrsetinfo
+u lib/libc/sys/lseek.2
+structure.
 Memory allocated for the dynamically allocated structures created by
 a successful call to
 .Fn getrrsetbyname

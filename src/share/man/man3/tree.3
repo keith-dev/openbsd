@@ -1,4 +1,4 @@
-.\"	$OpenBSD: tree.3,v 1.4 2002/04/08 21:07:54 dugsong Exp $
+.\"	$OpenBSD: tree.3,v 1.7 2002/06/12 01:09:20 provos Exp $
 .\"/*
 .\" * Copyright 2002 Niels Provos <provos@citi.umich.edu>
 .\" * All rights reserved.
@@ -95,9 +95,9 @@
 .Fn SPLAY_FOREACH "VARNAME" "NAME" "SPLAY_HEAD *head"
 .Ft void
 .Fn SPLAY_INIT "SPLAY_HEAD *head"
-.Ft void
+.Ft "struct TYPE *"
 .Fn SPLAY_INSERT "NAME" "SPLAY_HEAD *head" "struct TYPE *elm"
-.Ft void
+.Ft "struct TYPE *"
 .Fn SPLAY_REMOVE "NAME" "SPLAY_HEAD *head" "struct TYPE *elm"
 .Pp
 .Fn RB_PROTOTYPE "NAME" "TYPE" "FIELD" "CMP"
@@ -126,9 +126,9 @@
 .Fn RB_FOREACH "VARNAME" "NAME" "RB_HEAD *head"
 .Ft void
 .Fn RB_INIT "RB_HEAD *head"
-.Ft void
+.Ft "struct TYPE *"
 .Fn RB_INSERT "NAME" "RB_HEAD *head" "struct TYPE *elm"
-.Ft void
+.Ft "struct TYPE *"
 .Fn RB_REMOVE "NAME" "RB_HEAD *head" "struct TYPE *elm"
 .Sh DESCRIPTION
 These macros defines data structures for different types of trees:
@@ -412,8 +412,10 @@ macro should be used to check whether a splay tree is empty.
 .Sh NOTES
 Trying to free a tree in the following way is a common error:
 .Bd -literal -offset indent
-SPLAY_FOREACH(var, NAME, head)
+SPLAY_FOREACH(var, NAME, head) {
+	SPLAY_REMOVE(NAME, head, var);
 	free(var);
+}
 free(head);
 .Ed
 .Pp
@@ -426,8 +428,26 @@ Proper code needs a second variable.
 .Bd -literal -offset indent
 for (var = SPLAY_MIN(NAME, head); var != NULL; var = nxt) {
 	nxt = SPLAY_NEXT(NAME, head, var);
+	SPLAY_REMOVE(NAME, head, var);
 	free(var);
 }
 .Ed
+.Pp
+Both
+.Fn RB_INSERT
+and
+.Fn SPLAY_INSERT
+return
+.Va NULL
+if the element was inserted in the tree successfully, otherwise they
+return a pointer to the element with the colliding key.
+.Pp
+Accordingly,
+.Fn RB_REMOVE
+and
+.Fn SPLAY_REMOVE
+return the pointer to the removed element otherwise they return
+.Va NULL
+to indicate an error.
 .Sh AUTHORS
 The author of the tree macros is Niels Provos.

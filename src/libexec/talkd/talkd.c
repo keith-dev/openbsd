@@ -1,4 +1,4 @@
-/*	$OpenBSD: talkd.c,v 1.10 2002/02/19 18:38:02 mpech Exp $	*/
+/*	$OpenBSD: talkd.c,v 1.15 2002/09/25 03:43:20 itojun Exp $	*/
 
 /*
  * Copyright (c) 1983 Regents of the University of California.
@@ -41,7 +41,7 @@ char copyright[] =
 
 #ifndef lint
 /*static char sccsid[] = "from: @(#)talkd.c	5.8 (Berkeley) 2/26/91";*/
-static char rcsid[] = "$Id: talkd.c,v 1.10 2002/02/19 18:38:02 mpech Exp $";
+static char rcsid[] = "$Id: talkd.c,v 1.15 2002/09/25 03:43:20 itojun Exp $";
 #endif /* not lint */
 
 /*
@@ -65,7 +65,6 @@ static char rcsid[] = "$Id: talkd.c,v 1.10 2002/02/19 18:38:02 mpech Exp $";
 #include <paths.h>
 #include "talkd.h"
 
-int	sockt;
 int	debug = 0;
 void	timeout();
 long	lastmsgtime;
@@ -80,8 +79,8 @@ main(argc, argv)
 	int argc;
 	char *argv[];
 {
-	if (getuid()) {
-		fprintf(stderr, "%s: getuid: not super-user", argv[0]);
+	if (getuid() != 0) {
+		fprintf(stderr, "%s: getuid: not super-user\n", argv[0]);
 		exit(1);
 	}
 	openlog("talkd", LOG_PID, LOG_DAEMON);
@@ -98,30 +97,40 @@ main(argc, argv)
 	init_table();
 	signal(SIGALRM, timeout);
 	alarm(TIMEOUT);
-	for (;;) {
-		CTL_MSG		request;
-		CTL_RESPONSE	response;
-		int		cc;
-		int		len = sizeof(response.addr);
 
-		cc = recvfrom(0, (char *)&request, sizeof (request), 0,
-			(struct sockaddr *)&response.addr, &len);
+	for (;;) {
+		CTL_RESPONSE response;
+		socklen_t len = sizeof(response.addr);
+		CTL_MSG	request;
+		int cc;
+		struct sockaddr ctl_addr;
+
+		memset(&response, 0, sizeof(response));
+		cc = recvfrom(STDIN_FILENO, (char *)&request,
+		    sizeof (request), 0, (struct sockaddr *)&response.addr,
+		    &len);
 		if (cc != sizeof (request)) {
 			if (cc < 0 && errno != EINTR)
 				syslog(LOG_WARNING, "recvfrom: %m");
 			continue;
 		}
+
 		/* Force NUL termination */
-		request.l_name[NAME_SIZE-1] = '\0';
-		request.r_name[NAME_SIZE-1] = '\0';
-		request.r_tty[TTY_SIZE-1] = '\0';
+		request.l_name[sizeof(request.l_name) - 1] = '\0';
+		request.r_name[sizeof(request.r_name) - 1] = '\0';
+		request.r_tty[sizeof(request.r_tty) - 1] = '\0';
+
+		memcpy(&ctl_addr, &request.ctl_addr, sizeof(ctl_addr));
+		ctl_addr.sa_family = request.ctl_addr.sa_family;
+		ctl_addr.sa_len = sizeof(ctl_addr);
+		if (ctl_addr.sa_family != AF_INET)
+			continue;
 
 		lastmsgtime = time(0);
 		process_request(&request, &response);
 		/* can block here, is this what I want? */
-		cc = sendto(sockt, (char *)&response,
-		    sizeof (response), 0, (struct sockaddr *)&request.ctl_addr,
-		    sizeof (request.ctl_addr));
+		cc = sendto(STDOUT_FILENO, (char *)&response,
+		    sizeof (response), 0, &ctl_addr, sizeof (ctl_addr));
 		if (cc != sizeof (response))
 			syslog(LOG_WARNING, "sendto: %m");
 	}

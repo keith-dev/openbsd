@@ -1,5 +1,5 @@
 vers(__file__,
-	{-$OpenBSD: MAKEDEV.md,v 1.6 2002/04/14 23:26:45 deraadt Exp $-},
+	{-$OpenBSD: MAKEDEV.md,v 1.9 2002/09/06 21:48:34 miod Exp $-},
 etc.MACHINE)dnl
 dnl
 dnl Copyright (c) 2001 Todd T. Fries <todd@OpenBSD.org>
@@ -61,11 +61,12 @@ _DEV(lkm, 24)
 _DEV(rnd, 32)
 _DEV(xfs, 51)
 _DEV(altq, 52)
+_DEV(systrace, 50)
 dnl
 divert(7)dnl
 dnl
 ramdisk)
-	_recurse std ct0 ct1 st0 st1 hd0 hd1 hd2 hd3 hd4 cd0
+	_recurse std ct0 ct1 st0 st1 hd0 hd1 hd2 hd3 hd4
 	_recurse sd0 sd1 sd2 sd3 sd4 rd0 pty0
 	_recurse hil grf0 apci0 ite0 dca0 dcm0 dcm1
 	_recurse bpf0 bpf1 tun0 tun1 lkm random
@@ -148,8 +149,7 @@ ite*)
 grf*)
 	case $U in
 	0|1|2|3)
-		M grf$U c major_grf_c $U
-#		echo "grf$U: use MAKEDEV.hpux to make HP-UX names for device"
+		M grf$U c major_grf_c $U 600
 		;;
 	*)
 		echo bad unit for grf in: $i
@@ -157,10 +157,10 @@ grf*)
 	esac
 	;;
 
-hil*)
+hil)
 	for U in 0 1 2 3 4 5 6 7
 	do
-		M hil$U c 14 $U
+		M hil$U c 14 $U 600
 	done
 	MKlist="$MKlist;ln hil1 keyboard"
 	MKlist="$MKlist;ln hil3 locator"

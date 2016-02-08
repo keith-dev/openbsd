@@ -1,4 +1,4 @@
-/*	$OpenBSD: worm.c,v 1.15 2002/02/16 21:27:12 millert Exp $	*/
+/*	$OpenBSD: worm.c,v 1.17 2002/05/31 04:21:30 pjanzen Exp $	*/
 
 /*
  * Copyright (c) 1980, 1993
@@ -43,7 +43,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)worm.c	8.1 (Berkeley) 5/31/93";
 #else
-static char rcsid[] = "$OpenBSD: worm.c,v 1.15 2002/02/16 21:27:12 millert Exp $";
+static char rcsid[] = "$OpenBSD: worm.c,v 1.17 2002/05/31 04:21:30 pjanzen Exp $";
 #endif
 #endif /* not lint */
 
@@ -109,10 +109,6 @@ main(argc, argv)
 	struct timeval t, tod;
 	struct timezone tz;
 	fd_set rset;
-
-	/* revoke */
-	setegid(getgid());
-	setgid(getgid());
 
 	FD_ZERO(&rset);
 	setbuf(stdout, outbuf);
@@ -190,8 +186,8 @@ main(argc, argv)
 void
 life()
 {
-	register struct body *bp, *np;
-	register int i,j = 1;
+	struct body *bp, *np;
+	int i,j = 1;
 
 	head = newlink();
 	head->x = start_len % (COLS-5) + 2;
@@ -271,7 +267,7 @@ void
 process(ch)
 	int ch;
 {
-	register int x,y;
+	int x,y;
 	struct body *nh;
 
 	x = head->x;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: misc.c,v 1.11 2001/12/12 19:02:50 millert Exp $	*/
+/*	$OpenBSD: misc.c,v 1.23 2002/08/08 18:17:50 millert Exp $	*/
 /* Copyright 1988,1990,1993,1994 by Paul Vixie
  * All rights reserved
  */
@@ -21,30 +21,18 @@
  */
 
 #if !defined(lint) && !defined(LINT)
-static char rcsid[] = "$OpenBSD: misc.c,v 1.11 2001/12/12 19:02:50 millert Exp $";
+static char const rcsid[] = "$OpenBSD: misc.c,v 1.23 2002/08/08 18:17:50 millert Exp $";
 #endif
 
 /* vix 26jan87 [RCS has the rest of the log]
  * vix 30dec86 [written]
  */
 
-
 #include "cron.h"
-#if SYS_TIME_H
-# include <sys/time.h>
-#else
-# include <time.h>
-#endif
-#include <sys/file.h>
-#include <sys/stat.h>
-#include <errno.h>
-#include <fcntl.h>
-#if defined(SYSLOG)
-# include <syslog.h>
-#endif
+#include <sys/socket.h>
+#include <sys/un.h>
 
-
-#if defined(LOG_CRON) && defined(LOG_FILE)
+#if defined(SYSLOG) && defined(LOG_FILE)
 # undef LOG_FILE
 #endif
 
@@ -52,8 +40,15 @@ static char rcsid[] = "$OpenBSD: misc.c,v 1.11 2001/12/12 19:02:50 millert Exp $
 # define LOG_CRON LOG_DAEMON
 #endif
 
+#ifndef FACILITY
+#define FACILITY LOG_CRON
+#endif
 
-static int		LogFD = ERR;
+static int LogFD = ERR;
+
+#if defined(SYSLOG)
+static int syslog_open = FALSE;
+#endif
 
 /*
  * glue_strings is the overflow-safe equivalent of
@@ -63,12 +58,8 @@ static int		LogFD = ERR;
  * glue_strings fails.
  */
 int
-glue_strings(buffer, buffer_size, a, b, separator)
-	char	*buffer;
-	int	buffer_size;	
-	char	*a;
-	char	*b;
-	int	separator;
+glue_strings(char *buffer, size_t buffer_size, const char *a, const char *b,
+	     char separator)
 {
 	char *buf;
 	char *buf_end;
@@ -95,7 +86,7 @@ glue_strings(buffer, buffer_size, a, b, separator)
 }
 
 int
-strcmp_until(const char *left, const char *right, int until) {
+strcmp_until(const char *left, const char *right, char until) {
 	while (*left && *left != until && *left == *right) {
 		left++;
 		right++;
@@ -108,13 +99,10 @@ strcmp_until(const char *left, const char *right, int until) {
 	return (*left - *right);
 }
 
-
 /* strdtb(s) - delete trailing blanks in string 's' and return new length
  */
 int
-strdtb(s)
-	char	*s;
-{
+strdtb(char *s) {
 	char	*x = s;
 
 	/* scan forward to the null
@@ -139,11 +127,8 @@ strdtb(s)
 	return (x - s);
 }
 
-
 int
-set_debug_flags(flags)
-	char	*flags;
-{
+set_debug_flags(const char *flags) {
 	/* debug flags are of the form    flag[,flag ...]
 	 *
 	 * if an error occurs, print a message to stdout and return FALSE.
@@ -157,7 +142,7 @@ set_debug_flags(flags)
 
 #else /* DEBUGGING */
 
-	char	*pc = flags;
+	const char *pc = flags;
 
 	DebugFlags = 0;
 
@@ -167,11 +152,10 @@ set_debug_flags(flags)
 
 		/* try to find debug flag name in our list.
 		 */
-		for (	test = DebugFlagNames, mask = 1;
-			*test != NULL && strcmp_until(*test, pc, ',');
-			test++, mask <<= 1
-		    )
-			;
+		for (test = DebugFlagNames, mask = 1;
+		     *test != NULL && strcmp_until(*test, pc, ',');
+		     test++, mask <<= 1)
+			continue;
 
 		if (!*test) {
 			fprintf(stderr,
@@ -191,7 +175,7 @@ set_debug_flags(flags)
 	}
 
 	if (DebugFlags) {
-		int	flag;
+		int flag;
 
 		fprintf(stderr, "debug flags enabled:");
 
@@ -206,10 +190,8 @@ set_debug_flags(flags)
 #endif /* DEBUGGING */
 }
 
-
 void
-set_cron_uid()
-{
+set_cron_uid(void) {
 #if defined(BSD) || defined(POSIX)
 	if (seteuid(ROOT_UID) < OK) {
 		perror("seteuid");
@@ -223,11 +205,9 @@ set_cron_uid()
 #endif
 }
 
-
 void
-set_cron_cwd()
-{
-	struct stat	sb;
+set_cron_cwd(void) {
+	struct stat sb;
 
 	/* first check for CRONDIR ("/var/cron" or some such)
 	 */
@@ -242,7 +222,7 @@ set_cron_cwd()
 			exit(ERROR_EXIT);
 		}
 	}
-	if (!(sb.st_mode & S_IFDIR)) {
+	if ((sb.st_mode & S_IFDIR) == 0) {
 		fprintf(stderr, "'%s' is not a directory, bailing out.\n",
 			CRONDIR);
 		exit(ERROR_EXIT);
@@ -266,92 +246,89 @@ set_cron_cwd()
 			exit(ERROR_EXIT);
 		}
 	}
-	if (!(sb.st_mode & S_IFDIR)) {
+	if ((sb.st_mode & S_IFDIR) == 0) {
 		fprintf(stderr, "'%s' is not a directory, bailing out.\n",
 			SPOOL_DIR);
 		exit(ERROR_EXIT);
 	}
 }
 
-
 /* acquire_daemonlock() - write our PID into /etc/cron.pid, unless
  *	another daemon is already running, which we detect here.
  *
  * note: main() calls us twice; once before forking, once after.
  *	we maintain static storage of the file pointer so that we
- *	can rewrite our PID into the PIDFILE after the fork.
- *
- * it would be great if fflush() disassociated the file buffer.
+ *	can rewrite our PID into _PATH_CRON_PID after the fork.
  */
 void
-acquire_daemonlock(closeflag)
-	int closeflag;
-{
-	static	FILE	*fp = NULL;
-	char		buf[3*MAX_FNAME];
-	char		pidfile[MAX_FNAME];
-	int		fd;
-	PID_T		otherpid;
+acquire_daemonlock(int closeflag) {
+	static int fd = -1;
+	char buf[3*MAX_FNAME];
+	const char *pidfile;
+	char *ep;
+	long otherpid;
+	ssize_t num;
 
-	if (closeflag && fp) {
-		fclose(fp);
-		fp = NULL;
+	if (closeflag) {
+		/* close stashed fd for child so we don't leak it. */
+		if (fd != -1) {
+			close(fd);
+			fd = -1;
+		}
 		return;
 	}
 
-	if (!fp) {
-		if (!glue_strings(pidfile, sizeof pidfile, PIDDIR,
-		    PIDFILE, '/')) {
-			fprintf(stderr, "%s%s: path too long\n",
-				PIDDIR, PIDFILE);
-			log_it("CRON", getpid(), "DEATH", "path too long");
-			exit(ERROR_EXIT);
-		}
-		if ((-1 == (fd = open(pidfile, O_RDWR|O_CREAT, 0644))) ||
-		    (NULL == (fp = fdopen(fd, "r+")))) {
-			snprintf(buf, sizeof buf, "can't open or create %s: %s",
-				pidfile, strerror(errno));
-			fprintf(stderr, "%s: %s\n", ProgramName, buf);
-			log_it("CRON", getpid(), "DEATH", buf);
-			exit(ERROR_EXIT);
-		}
-
-		if (flock(fd, LOCK_EX|LOCK_NB) < OK) {
+	if (fd == -1) {
+		pidfile = _PATH_CRON_PID;
+		if ((fd = open(pidfile, O_RDWR|O_CREAT|O_EXLOCK|O_NONBLOCK,
+		    0644)) == -1) {
 			int save_errno = errno;
 
-			if (fscanf(fp, "%d", &otherpid) == 1)
+			if (errno != EWOULDBLOCK)  {
 				snprintf(buf, sizeof buf,
-				    "can't lock %s, otherpid may be %d: %s",
+				    "can't open or create %s: %s", pidfile,
+				    strerror(save_errno));
+				fprintf(stderr, "%s: %s\n", ProgramName, buf);
+				log_it("CRON", getpid(), "DEATH", buf);
+				exit(ERROR_EXIT);
+			}
+
+			/* couldn't lock the pid file, try to read existing. */
+			bzero(buf, sizeof(buf));
+			if ((fd = open(pidfile, O_RDONLY, 0)) >= 0 &&
+			    (num = read(fd, buf, sizeof(buf) - 1)) > 0 &&
+			    (otherpid = strtol(buf, &ep, 10)) > 0 &&
+			    ep != buf && *ep == '\n' && otherpid != LONG_MAX) {
+				snprintf(buf, sizeof buf,
+				    "can't lock %s, otherpid may be %ld: %s",
 				    pidfile, otherpid, strerror(save_errno));
-			else
+			} else {
 				snprintf(buf, sizeof buf,
 				    "can't lock %s, otherpid unknown: %s",
 				    pidfile, strerror(save_errno));
+			}
 			fprintf(stderr, "%s: %s\n", ProgramName, buf);
 			log_it("CRON", getpid(), "DEATH", buf);
 			exit(ERROR_EXIT);
 		}
-
 		(void) fcntl(fd, F_SETFD, 1);
 	}
 
-	rewind(fp);
-	fprintf(fp, "%ld\n", (long)getpid());
-	fflush(fp);
-	(void) ftruncate(fileno(fp), ftell(fp));
+	snprintf(buf, sizeof(buf), "%ld\n", (long)getpid());
+	(void) lseek(fd, (off_t)0, SEEK_SET);
+	num = write(fd, buf, strlen(buf));
+	(void) ftruncate(fd, num);
 
-	/* abandon fd and fp even though the file is open. we need to
-	 * keep it open and locked, but we don't need the handles elsewhere.
+	/* abandon fd even though the file is open. we need to keep
+	 * it open and locked, but we don't need the handles elsewhere.
 	 */
 }
 
 /* get_char(file) : like getc() but increment LineNumber on newlines
  */
 int
-get_char(file)
-	FILE	*file;
-{
-	int	ch;
+get_char(FILE *file) {
+	int ch;
 
 	ch = getc(file);
 	if (ch == '\n')
@@ -359,19 +336,14 @@ get_char(file)
 	return (ch);
 }
 
-
 /* unget_char(ch, file) : like ungetc but do LineNumber processing
  */
 void
-unget_char(ch, file)
-	int	ch;
-	FILE	*file;
-{
+unget_char(int ch, FILE *file) {
 	ungetc(ch, file);
 	if (ch == '\n')
 		Set_LineNum(LineNumber - 1)
 }
-
 
 /* get_string(str, max, file, termstr) : like fgets() but
  *		(1) has terminator string which should include \n
@@ -380,13 +352,8 @@ unget_char(ch, file)
  *		(4) returns EOF or terminating character, whichever
  */
 int
-get_string(string, size, file, terms)
-	char	*string;
-	int	size;
-	FILE	*file;
-	char	*terms;
-{
-	int	ch;
+get_string(char *string, int size, FILE *file, char *terms) {
+	int ch;
 
 	while (EOF != (ch = get_char(file)) && !strchr(terms, ch)) {
 		if (size > 1) {
@@ -401,14 +368,11 @@ get_string(string, size, file, terms)
 	return (ch);
 }
 
-
 /* skip_comments(file) : read past comment (if any)
  */
 void
-skip_comments(file)
-	FILE	*file;
-{
-	int	ch;
+skip_comments(FILE *file) {
+	int ch;
 
 	while (EOF != (ch = get_char(file))) {
 		/* ch is now the first character of a line.
@@ -441,86 +405,90 @@ skip_comments(file)
 		unget_char(ch, file);
 }
 
-
-/* int in_file(char *string, FILE *file)
+/* int in_file(const char *string, FILE *file, int error)
  *	return TRUE if one of the lines in file matches string exactly,
- *	FALSE otherwise.
+ *	FALSE if no lines match, and error on error.
  */
 static int
-in_file(string, file)
-	char *string;
-	FILE *file;
+in_file(const char *string, FILE *file, int error)
 {
 	char line[MAX_TEMPSTR];
+	char *endp;
 
-	rewind(file);
+	if (fseek(file, 0L, SEEK_SET))
+		return (error);
 	while (fgets(line, MAX_TEMPSTR, file)) {
-		if (line[0] != '\0')
-			line[strlen(line)-1] = '\0';
+		if (line[0] != '\0') {
+			endp = &line[strlen(line) - 1];
+			if (*endp != '\n')
+				return (error);
+			*endp = '\0';
+		}
 		if (0 == strcmp(line, string))
 			return (TRUE);
 	}
+	if (ferror(file))
+		return (error);
 	return (FALSE);
 }
 
-
-/* int allowed(char *username)
+/* int allowed(const char *username)
  *	returns TRUE if (ALLOW_FILE exists and user is listed)
  *	or (DENY_FILE exists and user is NOT listed)
  *	or (neither file exists but user=="root" so it's okay)
  */
 int
-allowed(username)
-	char *username;
-{
-	static int	init = FALSE;
-	static FILE	*allow, *deny;
+allowed(const char *username) {
+	FILE	*allow = NULL;
+	FILE	*deny = NULL;
+	int	isallowed;
 
-	if (!init) {
-		init = TRUE;
 #if defined(ALLOW_FILE) && defined(DENY_FILE)
-		allow = fopen(ALLOW_FILE, "r");
-		deny = fopen(DENY_FILE, "r");
-		Debug(DMISC, ("allow/deny enabled, %d/%d\n", !!allow, !!deny))
-#else
-		allow = NULL;
-		deny = NULL;
-#endif
-	}
+	isallowed = FALSE;
+	allow = fopen(ALLOW_FILE, "r");
+	if (allow == NULL && errno != ENOENT)
+		goto out;
+	deny = fopen(DENY_FILE, "r");
+	if (deny == NULL && errno != ENOENT)
+		goto out;
+	Debug(DMISC, ("allow/deny enabled, %d/%d\n", !!allow, !!deny))
 
-	if (allow)
-		return (in_file(username, allow));
-	if (deny)
-		return (!in_file(username, deny));
+	if (allow) {
+		isallowed = in_file(username, allow, FALSE);
+		goto out;
+	}
+	if (deny) {
+		isallowed = !in_file(username, deny, TRUE);
+		goto out;
+	}
+#endif
 
 #if defined(ALLOW_ONLY_ROOT)
-	return (strcmp(username, ROOT_USER) == 0);
+	isallowed = strcmp(username, ROOT_USER) == 0;
 #else
-	return (TRUE);
+	isallowed = TRUE;
 #endif
+
+out:
+	if (allow)
+		fclose(allow);
+	if (deny)
+		fclose(deny);
+
+	return (isallowed);
 }
 
-
 void
-log_it(username, xpid, event, detail)
-	const char *username;
-	int	xpid;
-	const char *event;
-	const char *detail;
-{
+log_it(const char *username, PID_T xpid, const char *event, const char *detail) {
 #if defined(LOG_FILE) || DEBUGGING
-	PID_T		pid = xpid;
+	PID_T pid = xpid;
 #endif
 #if defined(LOG_FILE)
-	char		*msg;
-	size_t		msglen;
-	TIME_T		now = time((TIME_T) 0);
-	struct tm	*t = localtime(&now);
+	char *msg;
+	size_t msglen;
+	TIME_T now = time((TIME_T) 0);
+	struct tm *t = localtime(&now);
 #endif /*LOG_FILE*/
-
-#if defined(SYSLOG)
-	static int	syslog_open = 0;
-#endif
 
 #if defined(LOG_FILE)
 	/* we assume that MAX_TEMPSTR will hold the date, time, &punctuation.
@@ -545,10 +513,10 @@ log_it(username, xpid, event, detail)
 	 * everything out in one chunk and this has to be atomically appended
 	 * to the log file.
 	 */
-	snprintf(msg, msglen, "%s (%02d/%02d-%02d:%02d:%02d-%d) %s (%s)\n",
+	snprintf(msg, msglen, "%s (%02d/%02d-%02d:%02d:%02d-%ld) %s (%s)\n",
 		username,
-		t->tm_mon+1, t->tm_mday, t->tm_hour, t->tm_min, t->tm_sec, pid,
-		event, detail);
+		t->tm_mon+1, t->tm_mday, t->tm_hour, t->tm_min, t->tm_sec,
+		(long)pid, event, detail);
 
 	/* we have to run strlen() because sprintf() returns (char*) on old BSD
 	 */
@@ -564,12 +532,8 @@ log_it(username, xpid, event, detail)
 
 #if defined(SYSLOG)
 	if (!syslog_open) {
-		/* we don't use LOG_PID since the pid passed to us by
-		 * our client may not be our own.  therefore we want to
-		 * print the pid ourselves.
-		 */
 # ifdef LOG_DAEMON
-		openlog(ProgramName, LOG_PID, LOG_CRON);
+		openlog(ProgramName, LOG_PID, FACILITY);
 # else
 		openlog(ProgramName, LOG_PID);
 # endif
@@ -588,25 +552,29 @@ log_it(username, xpid, event, detail)
 #endif
 }
 
-
 void
-log_close() {
+log_close(void) {
 	if (LogFD != ERR) {
 		close(LogFD);
 		LogFD = ERR;
 	}
+#if defined(SYSLOG)
+	closelog();
+	syslog_open = FALSE;
+#endif /*SYSLOG*/
 }
 
-
-/* two warnings:
+/* char *first_word(char *s, char *t)
+ *	return pointer to first word
+ * parameters:
+ *	s - string we want the first word of
+ *	t - terminators, implicitly including \0
+ * warnings:
  *	(1) this routine is fairly slow
  *	(2) it returns a pointer to static storage
  */
 char *
-first_word(s, t)
-	char *s;	/* string we want the first word of */
-	char *t;	/* terminators, implicitly including \0 */
-{
+first_word(char *s, char *t) {
 	static char retbuf[2][MAX_TEMPSTR + 1];	/* sure wish C had GC */
 	static int retsel = 0;
 	char *rb, *rp;
@@ -630,7 +598,6 @@ first_word(s, t)
 	*rp = '\0';
 	return (rb);
 }
-
 
 /* warning:
  *	heavily ascii-dependent.
@@ -666,7 +633,6 @@ mkprint(dst, src, len)
 	*dst = '\0';
 }
 
-
 /* warning:
  *	returns a pointer to malloc'd storage, you must call free yourself.
  */
@@ -682,7 +648,6 @@ mkprints(src, len)
 
 	return (dst);
 }
-
 
 #ifdef MAIL_DATE
 /* Sat, 27 Feb 1993 11:44:51 -0800 (CST)
@@ -720,14 +685,14 @@ arpadate(clock)
 }
 #endif /*MAIL_DATE*/
 
-#ifdef HAVE_SAVED_UIDS
-static uid_t save_euid;
-int swap_uids() { save_euid = geteuid(); return (seteuid(getuid())); }
-int swap_uids_back() { return (seteuid(save_euid)); }
-#else /*HAVE_SAVED_UIDS*/
-int swap_uids() { return (setreuid(geteuid(), getuid())); }
-int swap_uids_back() { return (swap_uids()); }
-#endif /*HAVE_SAVED_UIDS*/
+#ifdef HAVE_SAVED_GIDS
+static gid_t save_egid;
+int swap_gids() { save_egid = getegid(); return (setegid(getgid())); }
+int swap_gids_back() { return (setegid(save_egid)); }
+#else /*HAVE_SAVED_GIDS*/
+int swap_gids() { return (setregid(getegid(), getgid())); }
+int swap_gids_back() { return (swap_gids()); }
+#endif /*HAVE_SAVED_GIDS*/
 
 /* Return the offset from GMT in seconds (algorithm taken from sendmail). */
 #ifndef HAVE_TM_GMTOFF
@@ -757,3 +722,49 @@ long get_gmtoff(time_t *clock, struct tm *local)
 	return (offset);
 }
 #endif /* HAVE_TM_GMTOFF */
+
+/* void open_socket(void)
+ *	opens a UNIX domain socket that crontab uses to poke cron.
+ */
+int
+open_socket()
+{
+	int		   sock;
+	mode_t		   omask;
+	struct sockaddr_un sun;
+
+	sock = socket(AF_UNIX, SOCK_STREAM, 0);
+	if (sock == -1) {
+		fprintf(stderr, "%s: can't create socket: %s\n",
+		    ProgramName, strerror(errno));
+		log_it("CRON", getpid(), "DEATH", "can't create socket");
+		exit(ERROR_EXIT);
+	}
+	if (!glue_strings(sun.sun_path, sizeof sun.sun_path, SPOOL_DIR,
+	    CRONSOCK, '/')) {
+		fprintf(stderr, "%s/%s: path too long\n", SPOOL_DIR, CRONSOCK);
+		log_it("CRON", getpid(), "DEATH", "path too long");
+		exit(ERROR_EXIT);
+	}
+	unlink(sun.sun_path);
+	sun.sun_len = strlen(sun.sun_path);
+	sun.sun_family = AF_UNIX;
+
+	omask = umask(007);
+	if (bind(sock, (struct sockaddr *)&sun, sizeof(sun))) {
+		fprintf(stderr, "%s: can't bind socket: %s\n",
+		    ProgramName, strerror(errno));
+		log_it("CRON", getpid(), "DEATH", "can't bind socket");
+		exit(ERROR_EXIT);
+	}
+	if (listen(sock, SOMAXCONN)) {
+		fprintf(stderr, "%s: can't listen on socket: %s\n",
+		    ProgramName, strerror(errno));
+		log_it("CRON", getpid(), "DEATH", "can't listen on socket");
+		exit(ERROR_EXIT);
+	}
+	chmod(sun.sun_path, 0660);
+	umask(omask);
+
+	return(sock);
+}

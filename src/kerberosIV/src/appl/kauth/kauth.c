@@ -41,7 +41,7 @@
 
 #include "kauth.h"
 
-RCSID("$KTH: kauth.c,v 1.97.2.1 2000/02/28 03:42:51 assar Exp $");
+RCSID("$KTH: kauth.c,v 1.101 2001/02/20 01:44:44 assar Exp $");
 
 krb_principal princ;
 static char srvtab[MaxPathLen];
@@ -157,12 +157,12 @@ get_ticket_address(krb_principal *princ, des_cblock *key)
 	
     code = get_ad_tkt(princ->name, princ->instance, princ->realm, 0);
     if(code) {
-	warnx("get_ad_tkt: %s\n", krb_get_err_text(code));
+	warnx("get_ad_tkt: %s", krb_get_err_text(code));
 	return code;
     }
     code = krb_get_cred(princ->name, princ->instance, princ->realm, &c);
     if(code) {
-	warnx("krb_get_cred: %s\n", krb_get_err_text(code));
+	warnx("krb_get_cred: %s", krb_get_err_text(code));
 	return code;
     }
 
@@ -181,7 +181,7 @@ get_ticket_address(krb_principal *princ, des_cblock *key)
 			 key,
 			 schedule);
     if(code) {
-	warnx("decomp_ticket: %s\n", krb_get_err_text(code));
+	warnx("decomp_ticket: %s", krb_get_err_text(code));
 	return code;
     }
     memset(&session, 0, sizeof(session));
@@ -206,8 +206,6 @@ main(int argc, char **argv)
     char **host;
     int nhost;
     char tf[MaxPathLen];
-
-    set_progname (argv[0]);
 
     if ((file =  getenv("KRBTKFILE")) == 0)
 	file = TKT_FILE;  
@@ -276,7 +274,6 @@ main(int argc, char **argv)
 	    break;
 	case 'v':
 	    version_flag++;
-	    print_version(NULL);
 	    break;
 	case '?':
 	default:
@@ -317,8 +314,7 @@ main(int argc, char **argv)
 	}while(f < 0);
 	close(f);
 	unlink(tf);
-	if(setenv("KRBTKFILE", tf, 1) != 0)
-	    errx(1, "cannot set KRBTKFILE");
+	esetenv("KRBTKFILE", tf, 1);
 	krb_set_tkt_string (tf);
     }
     

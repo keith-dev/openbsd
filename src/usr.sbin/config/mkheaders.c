@@ -1,4 +1,4 @@
-/*	$OpenBSD: mkheaders.c,v 1.12 2002/03/14 16:44:24 mpech Exp $	*/
+/*	$OpenBSD: mkheaders.c,v 1.14 2002/07/14 02:59:41 deraadt Exp $	*/
 /*	$NetBSD: mkheaders.c,v 1.12 1997/02/02 21:12:34 thorpej Exp $	*/
 
 /*
@@ -93,7 +93,7 @@ emitcnt(head)
 	char buf[BUFSIZ];
 	char fname[BUFSIZ];
 
-	(void)sprintf(fname, "%s.h", head->nv_name);
+	(void)snprintf(fname, sizeof fname, "%s.h", head->nv_name);
 	if ((fp = fopen(fname, "r")) == NULL)
 		goto writeit;
 	nv = head;
@@ -132,28 +132,37 @@ emitopt(nv)
 {
 	struct nvlist *option;
 	char new_contents[BUFSIZ], buf[BUFSIZ];
-	char fname[BUFSIZ], *p;
+	char fname[BUFSIZ], totlen;
 	int nlines;
 	FILE *fp;
 
 	/*
 	 * Generate the new contents of the file.
 	 */
-	p = new_contents;
 	if ((option = ht_lookup(opttab, nv->nv_str)) == NULL)
-		p += sprintf(p, "/* option `%s' not defined */\n",
+		totlen = snprintf(new_contents, sizeof new_contents,
+		    "/* option `%s' not defined */\n",
 		    nv->nv_str);
 	else {
-		p += sprintf(p, "#define\t%s", option->nv_name);
 		if (option->nv_str != NULL)
-			p += sprintf(p, "\t%s", option->nv_str);
-		p += sprintf(p, "\n");
+			totlen = snprintf(new_contents, sizeof new_contents,
+			    "#define\t%s\t%s\n",
+			    option->nv_name, option->nv_str);
+		else
+			totlen = snprintf(new_contents, sizeof new_contents,
+			    "#define\t%s\n",
+			    option->nv_name);
+	}
+
+	if (totlen >= sizeof new_contents) {
+		fprintf(stderr, "config: string too long\n");
+		return (1);
 	}
 
 	/*
 	 * Compare the new file to the old.
 	 */
-	sprintf(fname, "opt_%s.h", nv->nv_name);
+	snprintf(fname, sizeof fname, "opt_%s.h", nv->nv_name);
 	if ((fp = fopen(fname, "r")) == NULL)
 		goto writeit;
 	nlines = 0;

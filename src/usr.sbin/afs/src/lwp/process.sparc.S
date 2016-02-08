@@ -1,4 +1,4 @@
-/* $Id: process.sparc.S,v 1.2 2001/09/11 14:10:09 jason Exp $ */
+/* $KTH: process.sparc.S,v 1.2.4.1 2002/08/13 22:47:40 lha Exp $ */
 
 /*
 ****************************************************************************
@@ -25,33 +25,55 @@
 
 #undef RCSID
 
+#if defined(__sparc64__) && !defined(__sparcv9)
+#define __sparcv9 1
+#endif
+
+
 #if defined(AFS_SUN5_ENV)
 #include <sys/asm_linkage.h>
 #include <sys/trap.h>
-#ifndef STACK_BIAS
-#define STACK_BIAS 0
-#endif	
 #elif defined(AFS_BSD_ENV)
 #ifdef HAVE_MACHINE_ASM_H
 #include <machine/asm.h>
 #endif
 #include <machine/trap.h>
 #define ST_FLUSH_WINDOWS ST_FLUSHWIN
-#define MINFRAME 92
-#define SA(x) (((x)+7)&~7)
-#define STACK_ALIGN 8
-#define STACK_BIAS 0
 #elif defined(AFS_LINUX_ENV)
-#define AFS_SUN5_ENV 1          /* Make believe this is Solaris */ 
 #define ST_FLUSH_WINDOWS 0x03   /* XXX:  from asm/traps.h */
-#define MINFRAME 92
-#define SA(x) (((x)+7)&~7)
-#define STACK_ALIGN 8
-#define STACK_BIAS 0
 #else				/* SunOS4 */
 #include <sun4/asm_linkage.h>
 #include <sun4/trap.h>
-#define STACK_BIAS 0
+#endif
+
+#ifdef __sparcv9
+	
+#ifndef STACK_BIAS
+#define STACK_BIAS      (2048-1)
+#endif
+#ifndef STACK_ALIGN	
+#define STACK_ALIGN	8
+#endif
+#ifndef MINFRAME
+#define MINFRAME	176
+#endif
+	
+#else /* !__sparcv9 */
+	
+#ifndef STACK_BIAS
+#define STACK_BIAS      0
+#endif
+#ifndef STACK_ALIGN	
+#define STACK_ALIGN	4
+#endif
+#ifndef MINFRAME
+#define MINFRAME	96
+#endif
+	
+#endif /* __sparcv9 */
+	
+#ifndef SA
+#define SA(x)		(((x)+(STACK_ALIGN-1))& ~(STACK_ALIGN-1))
 #endif
 
 #include <lwp_elf.h>
@@ -70,9 +92,7 @@ ENTRY(savecontext)
 	ta	ST_FLUSH_WINDOWS		! FLush all other active windows
 
 	/* The following 3 lines do the equivalent of: _PRE_Block = 1 */
-#ifdef	AFS_SUN5_ENV
-	
-#if defined(__sparcv9) || defined(__sparcv9__)
+#ifdef	__sparcv9	
 	sethi	%hh(PRE_Block),%l0
 	or	%l0,%hm(PRE_Block),%l0
 	sethi	%lm(PRE_Block),%g1
@@ -83,13 +103,10 @@ ENTRY(savecontext)
 	sethi	%hi(PRE_Block),%l0
 	or	%l0,%lo(_C_LABEL(PRE_Block)),%l0
 #endif
-#else   /* AFS_SUN5_ENV */
-	set	_C_LABEL(PRE_Block), %l0
-#endif
 	mov	1,%l1
 	stb	%l1, [%l0]
 
-#if defined(__sparcv9) || defined(__sparcv9__)
+#ifdef	__sparcv9
 	
 topstack	= 0
 globals = 8
@@ -323,7 +340,7 @@ L1:	call	%i0			! call f()
 ENTRY(returnto)
 	ta	ST_FLUSH_WINDOWS		! FLush all other active windows
 
-#if defined(__sparcv9) || defined(__sparcv9__)
+#ifdef	__sparcv9
 
 #ifdef	save_allregs
 	ldx	[%i1 + globals + 64 + 0], %f0
@@ -508,8 +525,7 @@ ENTRY(returnto)
 #endif	/* __sparcv9 */
 
 	/* The following 3 lines are equivalent to: _PRE_Block = 0 */
-#ifdef	AFS_SUN5_ENV
-#if defined(__sparcv9) || defined(__sparcv9__)
+#ifdef	__sparcv9	
 	sethi	%hh(_C_LABEL(PRE_Block)),%l0
 	or	%l0,%hm(_C_LABEL(PRE_Block)),%l0
 	sethi	%lm(_C_LABEL(PRE_Block)),%g1
@@ -519,9 +535,6 @@ ENTRY(returnto)
 #else
 	sethi	%hi(_C_LABEL(PRE_Block)),%l0
 	or	%l0,%lo(_C_LABEL(PRE_Block)),%l0
-#endif
-#else   /* AFS_SUN5_ENV */
-	set	_C_LABEL(PRE_Block), %l0
 #endif
 	mov	0,%l1
 	stb	%l1, [%l0]

@@ -1,8 +1,9 @@
-/*	$OpenBSD: config.h,v 1.10 2001/05/29 21:41:33 millert Exp $	*/
+/*	$OpenBSD: config.h,v 1.13 2002/07/15 19:13:29 millert Exp $	*/
 
 /* Copyright 1988,1990,1993,1994 by Paul Vixie
  * All rights reserved
  */
+
 /*
  * Copyright (c) 1997,2000 by Internet Software Consortium, Inc.
  *
@@ -20,7 +21,7 @@
  * SOFTWARE.
  */
 
-/* config.h - configurables for Vixie Cron
+/* config.h - configurables for ISC cron
  */
 
 /*
@@ -40,10 +41,11 @@
 			 * (hint: MAILTO= was added for this reason).
 			 */
 
-#define MAILFMT "%s -FCronDaemon -odi -oem -t"		/*-*/
+#define MAILFMT "%s -FCronDaemon -odi -oem -oi -t"	/*-*/
 			/* -Fx	 = set full-name of sender
 			 * -odi	 = Option Deliverymode Interactive
 			 * -oem	 = Option Errors Mailedtosender
+			 * -oi   = Ignore "." alone on a line
 			 * -t    = Get recipient from headers
 			 */
 #define MAILARG _PATH_SENDMAIL				/*-*/
@@ -93,3 +95,6 @@
 
 			/* if your OS supports BSD authentication */
 #define BSD_AUTH			/*-*/
+
+			/* maximum load at which batch jobs will still run */
+#define BATCH_MAXLOAD	1.5

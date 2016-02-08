@@ -1,8 +1,9 @@
-/*	$OpenBSD: pathnames.h,v 1.4 2001/10/24 17:28:16 millert Exp $	*/
+/*	$OpenBSD: pathnames.h,v 1.8 2002/07/15 19:13:29 millert Exp $	*/
 
 /* Copyright 1993,1994 by Paul Vixie
  * All rights reserved
  */
+
 /*
  * Copyright (c) 1997,2000 by Internet Software Consortium, Inc.
  *
@@ -20,8 +21,15 @@
  * SOFTWARE.
  */
 
+#ifndef _PATHNAMES_H_
+#define _PATHNAMES_H_
+
+#if (defined(BSD)) && (BSD >= 199103) || defined(__linux) || defined(AIX)
+# include <paths.h>
+#endif /*BSD*/
+ 
 #ifndef CRONDIR
-			/* CRONDIR is where crond(8) and crontab(1) both chdir
+			/* CRONDIR is where cron(8) and crontab(1) both chdir
 			 * to; SPOOL_DIR, ALLOW_FILE, DENY_FILE, and LOG_FILE
 			 * are all relative to this directory.
 			 */
@@ -31,12 +39,18 @@
 			/* SPOOLDIR is where the crontabs live.
 			 * This directory will have its modtime updated
 			 * whenever crontab(1) changes a crontab; this is
-			 * the signal for crond(8) to look at each individual
+			 * the signal for cron(8) to look at each individual
 			 * crontab file and reload those whose modtimes are
 			 * newer than they were last time around (or which
 			 * didn't exist last time around...)
 			 */
 #define SPOOL_DIR	"tabs"
+
+			/* CRONSOCK is the name of the socket used by crontab
+			 * to poke cron while it is sleeping to re-read the
+			 * cron spool files.  It lives in the spool directory.
+			 */
+#define CRONSOCK	".sock"
 
 			/* undefining these turns off their features.  note
 			 * that ALLOW_FILE and DENY_FILE must both be defined
@@ -51,6 +65,7 @@
 #define LOG_FILE	"log"
 
 			/* where should the daemon stick its PID?
+			 * PIDDIR must end in '/'.
 			 */
 #ifdef _PATH_VARRUN
 # define PIDDIR	_PATH_VARRUN
@@ -58,6 +73,7 @@
 # define PIDDIR "/etc/"
 #endif
 #define PIDFILE		"cron.pid"
+#define _PATH_CRON_PID	PIDDIR PIDFILE
 
 			/* 4.3BSD-style crontab */
 #define SYSCRONTAB	"/etc/crontab"
@@ -86,3 +102,14 @@
 #ifndef _PATH_DEVNULL
 # define _PATH_DEVNULL "/dev/null"
 #endif
+
+#if !defined(_PATH_SENDMAIL)
+# define _PATH_SENDMAIL "/usr/lib/sendmail"
+#endif /*SENDMAIL*/
+
+/* XXX */
+#define _PATH_ATJOBS	"/var/at/jobs"
+#define _PATH_AT_ALLOW	"/var/at/at.allow"
+#define _PATH_AT_DENY	"/var/at/at.deny"
+
+#endif /* _PATHNAMES_H_ */

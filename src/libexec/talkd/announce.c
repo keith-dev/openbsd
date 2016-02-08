@@ -1,4 +1,4 @@
-/*	$OpenBSD: announce.c,v 1.12 2002/02/16 21:27:31 millert Exp $	*/
+/*	$OpenBSD: announce.c,v 1.15 2002/09/24 17:36:53 millert Exp $	*/
 
 /*
  * Copyright (c) 1983 Regents of the University of California.
@@ -35,7 +35,7 @@
 
 #ifndef lint
 /*static char sccsid[] = "from: @(#)announce.c	5.9 (Berkeley) 2/26/91";*/
-static char rcsid[] = "$Id: announce.c,v 1.12 2002/02/16 21:27:31 millert Exp $";
+static char rcsid[] = "$Id: announce.c,v 1.15 2002/09/24 17:36:53 millert Exp $";
 #endif /* not lint */
 
 #include <sys/param.h>
@@ -93,7 +93,7 @@ announce(request, remote_machine)
  * Build a block of characters containing the message. 
  * It is sent blank filled and in a single block to
  * try to keep the message in one piece if the recipient
- * in in vi at the time
+ * is in vi at the time
  */
 static void
 print_mesg(tf, request, remote_machine)
@@ -108,7 +108,7 @@ print_mesg(tf, request, remote_machine)
 	char line_buf[N_LINES][N_CHARS];
 	int sizes[N_LINES];
 	char big_buf[(N_LINES + 1) * N_CHARS];
-	char *bptr, *lptr, *vis_user;
+	char *bptr, *lptr, vis_user[sizeof(request->l_name) * 4];
 	int i, j, max_size;
 
 	i = 0;
@@ -121,21 +121,20 @@ print_mesg(tf, request, remote_machine)
 	max_size = max(max_size, sizes[i]);
 	i++;
 	(void)snprintf(line_buf[i], N_CHARS, 
-		"Message from Talk_Daemon@%s at %d:%02d ...",
-		hostname, localclock->tm_hour , localclock->tm_min );
+	    "Message from Talk_Daemon@%s at %d:%02d ...",
+	    hostname, localclock->tm_hour , localclock->tm_min );
 	sizes[i] = strlen(line_buf[i]);
 	max_size = max(max_size, sizes[i]);
 	i++;
-	vis_user = (char *) malloc(strlen(request->l_name) * 4 + 1);
 	strvis(vis_user, request->l_name, VIS_CSTYLE);
 	(void)snprintf(line_buf[i], N_CHARS,
-		"talk: connection requested by %s@%s.",
-		vis_user, remote_machine);
+	    "talk: connection requested by %s@%s.",
+	    vis_user, remote_machine);
 	sizes[i] = strlen(line_buf[i]);
 	max_size = max(max_size, sizes[i]);
 	i++;
 	(void)snprintf(line_buf[i], N_CHARS, "talk: respond with:  talk %s@%s",
-		vis_user, remote_machine);
+	    vis_user, remote_machine);
 	sizes[i] = strlen(line_buf[i]);
 	max_size = max(max_size, sizes[i]);
 	i++;

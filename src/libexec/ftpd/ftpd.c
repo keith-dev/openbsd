@@ -1,4 +1,4 @@
-/*	$OpenBSD: ftpd.c,v 1.125 2002/03/30 22:01:51 deraadt Exp $	*/
+/*	$OpenBSD: ftpd.c,v 1.136 2002/08/29 22:52:00 deraadt Exp $	*/
 /*	$NetBSD: ftpd.c,v 1.15 1995/06/03 22:46:47 mycroft Exp $	*/
 
 /*
@@ -64,16 +64,17 @@
  */
 
 #ifndef lint
-static char copyright[] =
+static const char copyright[] =
 "@(#) Copyright (c) 1985, 1988, 1990, 1992, 1993, 1994\n\
 	The Regents of the University of California.  All rights reserved.\n";
 #endif /* not lint */
 
 #ifndef lint
 #if 0
-static char sccsid[] = "@(#)ftpd.c	8.4 (Berkeley) 4/16/94";
+static const char sccsid[] = "@(#)ftpd.c	8.4 (Berkeley) 4/16/94";
 #else
-static char rcsid[] = "$OpenBSD: ftpd.c,v 1.125 2002/03/30 22:01:51 deraadt Exp $";
+static const char rcsid[] = 
+    "$OpenBSD: ftpd.c,v 1.136 2002/08/29 22:52:00 deraadt Exp $";
 #endif
 #endif /* not lint */
 
@@ -149,7 +150,7 @@ int	debug = 0;
 int	timeout = 900;    /* timeout after 15 minutes of inactivity */
 int	maxtimeout = 7200;/* don't allow idle time to be set beyond 2 hours */
 int	logging;
-int	high_data_ports = 0;
+int	anon_ok = 1;
 int	anon_only = 0;
 int	multihome = 0;
 int	guest;
@@ -240,7 +241,7 @@ static char	*copy_dir(char *, struct passwd *);
 static char	*curdir(void);
 static void	 end_login(void);
 static FILE	*getdatasock(char *);
-static int	guniquefd(char *, char **);
+static int	 guniquefd(char *, char **);
 static void	 lostconn(int);
 static void	 sigquit(int);
 static int	 receive_data(FILE *, FILE *);
@@ -249,7 +250,9 @@ static int	 send_data(FILE *, FILE *, off_t, off_t, int);
 static struct passwd *
 		 sgetpwnam(char *);
 static void	 reapchild(int);
+#if defined(TCPWRAPPERS)
 static int	 check_host(struct sockaddr *);
+#endif /* TCPWRAPPERS */
 static void	 usage(void);
 
 void	 logxfer(char *, off_t, time_t);
@@ -262,12 +265,12 @@ curdir()
 	if (getcwd(path, sizeof(path)-1) == NULL)
 		return ("");
 	if (path[1] != '\0')		/* special case for root dir. */
-		strcat(path, "/");
+		strlcat(path, "/", sizeof path);
 	/* For guest account, skip / since it's chrooted */
 	return (guest ? path+1 : path);
 }
 
-char *argstr = "AdDhlMSt:T:u:UvP46";
+char *argstr = "AdDhnlMSt:T:u:UvP46";
 
 static void
 usage()
@@ -283,7 +286,8 @@ main(argc, argv, envp)
 	char *argv[];
 	char **envp;
 {
-	int addrlen, ch, on = 1, tos;
+	socklen_t addrlen;
+	int ch, on = 1, tos;
 	char *cp, line[LINE_MAX];
 	FILE *fp;
 	struct hostent *hp;
@@ -313,8 +317,7 @@ main(argc, argv, envp)
 			portcheck = 0;
 			break;
 
-		case 'h':
-			high_data_ports = 1;
+		case 'h':		/* deprecated */
 			break;
 
 		case 'l':
@@ -323,6 +326,10 @@ main(argc, argv, envp)
 
 		case 'M':
 			multihome = 1;
+			break;
+
+		case 'n':
+			anon_ok = 0;
 			break;
 
 		case 'S':
@@ -474,7 +481,7 @@ main(argc, argv, envp)
 	}
 
 	/* set this here so klogin can use it... */
-	(void)snprintf(ttyline, sizeof(ttyline), "ftp%d", getpid());
+	(void)snprintf(ttyline, sizeof(ttyline), "ftp%ld", (long)getpid());
 
 	sa.sa_handler = SIG_DFL;
 	(void) sigaction(SIGCHLD, &sa, NULL);
@@ -493,6 +500,9 @@ main(argc, argv, envp)
 
 	sa.sa_handler = lostconn;
 	(void) sigaction(SIGPIPE, &sa, NULL);
+
+	sa.sa_handler = toolong;
+	(void) sigaction(SIGALRM, &sa, NULL);
 
 	addrlen = sizeof(ctrl_addr);
 	if (getsockname(0, (struct sockaddr *)&ctrl_addr, &addrlen) < 0) {
@@ -711,7 +721,8 @@ user(name)
 
 	guest = 0;
 	host = multihome ? dhostname : hostname;
-	if (strcmp(name, "ftp") == 0 || strcmp(name, "anonymous") == 0) {
+	if (anon_ok &&
+	    (strcmp(name, "ftp") == 0 || strcmp(name, "anonymous") == 0)) {
 		if (checkuser(_PATH_FTPUSERS, "ftp") ||
 		    checkuser(_PATH_FTPUSERS, "anonymous"))
 			reply(530, "User %s access denied.", name);
@@ -859,8 +870,12 @@ end_login()
 	}
 	pw = NULL;
 	/* umask is restored in ftpcmd.y */
-	setusercontext(NULL, getpwuid(0), (uid_t)0,
-	    LOGIN_SETPRIORITY|LOGIN_SETRESOURCES);
+	if (setusercontext(NULL, getpwuid(0), (uid_t)0,
+	    LOGIN_SETPRIORITY|LOGIN_SETRESOURCES) != 0) {
+		perror_reply(451, "Local resource failure: setusercontext");
+		syslog(LOG_NOTICE, "setusercontext: %m");
+		exit(1);
+	}
 	logged_in = 0;
 	guest = 0;
 	dochroot = 0;
@@ -947,7 +962,12 @@ pass(passwd)
 		flags |= LOGIN_SETUMASK;
 	else
 		(void) umask(defumask);
-	setusercontext(lc, pw, (uid_t)0, flags);
+	if (setusercontext(lc, pw, (uid_t)0, flags) != 0) {
+		perror_reply(451, "Local resource failure: setusercontext");
+		syslog(LOG_NOTICE, "setusercontext: %m");
+		dologout(1);
+		/* NOTREACHED */
+	}
 
 	/* open wtmp before chroot */
 	ftpdlogwtmp(ttyline, pw->pw_name, remotehost);
@@ -1347,7 +1367,7 @@ dataconn(name, size, mode)
 	FILE *file;
 	int retry = 0;
 	in_port_t *p;
-	char *fa, *ha;
+	u_char *fa, *ha;
 	int alen;
 
 	file_size = size;
@@ -1359,9 +1379,9 @@ dataconn(name, size, mode)
 		sizebuf[0] = '\0';
 	if (pdata >= 0) {
 		union sockunion from;
-		int s, fromlen = sizeof(from);
+		int s;
+		socklen_t fromlen = sizeof(from);
 
-		signal (SIGALRM, toolong);
 		(void) alarm ((unsigned) timeout);
 		s = accept(pdata, (struct sockaddr *)&from, &fromlen);
 		(void) alarm (0);
@@ -1621,7 +1641,7 @@ receive_data(instr, outstr)
 	int c;
 	int cnt;
 	char buf[BUFSIZ];
-	struct sigaction sa;
+	struct sigaction sa, sa_saved;
 	volatile int bare_lfs = 0;
 
 	transflag++;
@@ -1629,10 +1649,11 @@ receive_data(instr, outstr)
 
 	case TYPE_I:
 	case TYPE_L:
+		memset(&sa, 0, sizeof(sa));
 		sigfillset(&sa.sa_mask);
 		sa.sa_flags = SA_RESTART;
-		sigaction(SIGALRM, &sa, NULL);
-
+		sa.sa_handler = lostconn;
+		(void) sigaction(SIGALRM, &sa, &sa_saved);
 		do {
 			(void) alarm ((unsigned) timeout);
 			cnt = read(fileno(instr), buf, sizeof(buf));
@@ -1646,6 +1667,7 @@ receive_data(instr, outstr)
 				byte_count += cnt;
 			}
 		} while (cnt > 0);
+		(void) sigaction(SIGALRM, &sa_saved, NULL);
 		if (cnt < 0)
 			goto data_err;
 		transflag = 0;
@@ -1756,7 +1778,7 @@ statcmd()
 	char hbuf[MAXHOSTNAMELEN];
 	int ispassive;
 
-	lreply(211, "%s FTP server status:", hostname, version);
+	lreply(211, "%s FTP server status:", hostname);
 	printf("     %s\r\n", version);
 	getnameinfo((struct sockaddr *)&his_addr, his_addr.su_len,
 	    hbuf, sizeof(hbuf), NULL, 0, NI_NUMERICHOST);
@@ -1859,9 +1881,13 @@ printaddr:
 		}
 		if (af) {
 			char hbuf[MAXHOSTNAMELEN], pbuf[10];
-			if (getnameinfo((struct sockaddr *)su, su->su_len,
+			union sockunion tmp = *su;
+
+			if (tmp.su_family == AF_INET6)
+				tmp.su_sin6.sin6_scope_id = 0;
+			if (getnameinfo((struct sockaddr *)&tmp, tmp.su_len,
 			    hbuf, sizeof(hbuf), pbuf, sizeof(pbuf),
-			    NI_NUMERICHOST) == 0) {
+			    NI_NUMERICHOST | NI_NUMERICSERV) == 0) {
 				if (ispassive)
 					printf("211- EPSV ");
 				else
@@ -2181,7 +2207,8 @@ myoob()
 void
 passive()
 {
-	int len, on;
+	socklen_t len;
+	int on;
 	u_char *p, *a;
 
 	if (pw == NULL) {
@@ -2205,12 +2232,10 @@ passive()
 		return;
 	}
 
-#ifdef IP_PORTRANGE
-	on = high_data_ports ? IP_PORTRANGE_HIGH : IP_PORTRANGE_DEFAULT;
+	on = IP_PORTRANGE_HIGH;
 	if (setsockopt(pdata, IPPROTO_IP, IP_PORTRANGE,
 	    (char *)&on, sizeof(on)) < 0)
 		goto pasv_error;
-#endif
 
 	pasv_addr = ctrl_addr;
 	pasv_addr.su_sin.sin_port = 0;
@@ -2300,7 +2325,8 @@ af2epsvproto(int af)
 void
 long_passive(char *cmd, int pf)
 {
-	int len, on;
+	socklen_t len;
+	int on;
 	u_char *p, *a;
 
 	if (!logged_in) {
@@ -2341,21 +2367,16 @@ long_passive(char *cmd, int pf)
 
 	switch (ctrl_addr.su_family) {
 	case AF_INET:
-#ifdef IP_PORTRANGE
-		on = high_data_ports ? IP_PORTRANGE_HIGH : IP_PORTRANGE_DEFAULT;
+		on = IP_PORTRANGE_HIGH;
 		if (setsockopt(pdata, IPPROTO_IP, IP_PORTRANGE,
 		    (char *)&on, sizeof(on)) < 0)
 			goto pasv_error;
-#endif
 		break;
 	case AF_INET6:
-#ifdef IPV6_PORTRANGE
-		on = high_data_ports ? IPV6_PORTRANGE_HIGH
-				     : IPV6_PORTRANGE_DEFAULT;
+		on = IPV6_PORTRANGE_HIGH;
 		if (setsockopt(pdata, IPPROTO_IPV6, IPV6_PORTRANGE,
 		    (char *)&on, sizeof(on)) < 0)
 			goto pasv_error;
-#endif
 		break;
 	}
 
@@ -2383,7 +2404,7 @@ long_passive(char *cmd, int pf)
 			    4, 4, a[0], a[1], a[2], a[3], 2, p[0], p[1]);
 			return;
 		case AF_INET6:
-			a = (char *) &pasv_addr.su_sin6.sin6_addr;
+			a = (u_char *) &pasv_addr.su_sin6.sin6_addr;
 			reply(228,
 			    "Entering Long Passive Mode (%u,%u,%u,%u,%u,%u,"
 			    "%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u)",
@@ -2773,17 +2794,18 @@ logxfer(name, size, start)
 		strvis(vremotehost, remotehost, VIS_SAFE|VIS_NOSLASH);
 		strvis(vpw, guest? guestpw : pw->pw_name, VIS_SAFE|VIS_NOSLASH);
 
-		len = snprintf(buf, sizeof(buf),
+		if ((len = snprintf(buf, sizeof(buf),
 		    "%.24s %d %s %qd %s %c %s %c %c %s ftp %d %s %s\n",
 		    ctime(&now), now - start + (now == start),
-		    vremotehost, (long long) size, vpath,
+		    vremotehost, (long long)size, vpath,
 		    ((type == TYPE_A) ? 'a' : 'b'), "*" /* none yet */,
 		    'o', ((guest) ? 'a' : 'r'),
 		    vpw, 0 /* none yet */,
-		    ((guest) ? "*" : pw->pw_name), dhostname);
-		if (len >= sizeof(buf)) {
-			len = sizeof(buf);
-			buf[sizeof(buf) - 1] = '\n';
+		    ((guest) ? "*" : pw->pw_name), dhostname)) >= sizeof(buf)
+		    || len < 0) {
+			if ((len = strlen(buf)) == 0)
+				return;		/* should not happen */
+			buf[len - 1] = '\n';
 		}
 		write(statfd, buf, len);
 		free(vpw);

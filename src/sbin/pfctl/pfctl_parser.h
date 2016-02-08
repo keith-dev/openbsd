@@ -1,4 +1,4 @@
-/*	$OpenBSD: pfctl_parser.h,v 1.15 2002/03/11 22:22:57 dhartmei Exp $ */
+/*	$OpenBSD: pfctl_parser.h,v 1.25 2002/06/25 08:13:26 henning Exp $ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
@@ -41,6 +41,18 @@
 #define PF_OPT_CLRRULECTRS	0x0020
 #define PF_OPT_USEDNS		0x0040
 
+#define PF_TH_ALL		0xFF
+
+#define PF_NAT_PROXY_PORT_LOW	50001
+#define PF_NAT_PROXY_PORT_HIGH	65535
+
+#define FCNT_NAMES { \
+	"searches", \
+	"inserts", \
+	"removals", \
+	NULL \
+}
+
 struct pfctl {
 	int dev;
 	int opts;
@@ -56,16 +68,21 @@ int	 pfctl_add_nat(struct pfctl *, struct pf_nat *);
 int	 pfctl_add_binat(struct pfctl *, struct pf_binat *);
 int	 pfctl_add_rdr(struct pfctl *, struct pf_rdr *);
 
+int	 pfctl_set_timeout(struct pfctl *, const char *, int);
+int	 pfctl_set_optimization(struct pfctl *, const char *);
+int	 pfctl_set_limit(struct pfctl *, const char *, unsigned int);
+int	 pfctl_set_logif(struct pfctl *, char *);
+
 int	 parse_rules(FILE *, struct pfctl *);
-int	 parse_nat(FILE *, struct pfctl *);
 int	 parse_flags(char *);
 
 void	 print_rule(struct pf_rule *);
 void	 print_nat(struct pf_nat *);
 void	 print_binat(struct pf_binat *);
 void	 print_rdr(struct pf_rdr *);
-void	 print_state(struct pf_state *, int);
 void	 print_status(struct pf_status *);
+
+int	 unmask(struct pf_addr *, u_int8_t);
 
 struct icmptypeent {
 	char *name;
@@ -78,10 +95,21 @@ struct icmpcodeent {
 	u_int8_t code;
 };
 
-struct icmptypeent	 *geticmptypebynumber(u_int8_t, u_int8_t);
-struct icmptypeent	 *geticmptypebyname(char *, u_int8_t);
-struct icmpcodeent	 *geticmpcodebynumber(u_int8_t, u_int8_t, u_int8_t);
-struct icmpcodeent	 *geticmpcodebyname(u_long, char *, u_int8_t);
-struct hostent		 *getpfhostname(const char *);
+const struct icmptypeent *geticmptypebynumber(u_int8_t, u_int8_t);
+const struct icmptypeent *geticmptypebyname(char *, u_int8_t);
+const struct icmpcodeent *geticmpcodebynumber(u_int8_t, u_int8_t, u_int8_t);
+const struct icmpcodeent *geticmpcodebyname(u_long, char *, u_int8_t);
+
+struct pf_timeout {
+	const char	*name;
+	int		 timeout;
+};
+
+#define PFCTL_FLAG_ALL		0x01
+#define PFCTL_FLAG_FILTER	0x02
+#define PFCTL_FLAG_NAT		0x04
+#define PFCTL_FLAG_OPTION	0x08
+
+extern const struct pf_timeout pf_timeouts[];
 
 #endif /* _PFCTL_PARSER_H_ */

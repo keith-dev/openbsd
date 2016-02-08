@@ -1,4 +1,4 @@
-/* $OpenBSD: scanlib.c,v 1.2 2001/10/25 22:22:22 espie Exp $ */
+/* $OpenBSD: scanlib.c,v 1.5 2002/09/07 01:25:34 marc Exp $ */
 
 /*
  * Copyright (c) 2001 Marc Espie.
@@ -30,18 +30,20 @@
  */
 #include <sys/types.h>
 #include <sys/param.h>
-#include <fcntl.h>
-#include <unistd.h>
+
 #include <a.out.h>
+#include <err.h>
+#include <fcntl.h>
 #include <link.h>
+#include <stdio.h>
+#include <unistd.h>
+
+extern void scan_library(int, struct exec *, const char *, const char *,
+			 const char *); 
 
 void
-scan_library(fd, hdr, name, fmt1, fmt2)
-    int fd;
-    struct exec *hdr;
-    const char *name;
-    const char *fmt1;
-    const char *fmt2;
+scan_library(int fd, struct exec *hdr, const char *name, const char *fmt1,
+	     const char *fmt2)
 {
 	struct _dynamic			dyn;
 	struct section_dispatch_table	sdt;
@@ -87,7 +89,7 @@ scan_library(fd, hdr, name, fmt1, fmt2)
 
 	if (sdt.sdt_sods) {
 		struct sod	sod;
-		off_t 		offset;
+		off_t		offset;
 		char		entry[MAXPATHLEN];
 
 		for (offset = sdt.sdt_sods; offset != 0; 

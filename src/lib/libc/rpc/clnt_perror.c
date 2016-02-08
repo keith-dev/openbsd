@@ -28,7 +28,7 @@
  */
 
 #if defined(LIBC_SCCS) && !defined(lint)
-static char *rcsid = "$OpenBSD: clnt_perror.c,v 1.13 2001/09/15 13:51:00 deraadt Exp $";
+static char *rcsid = "$OpenBSD: clnt_perror.c,v 1.15 2002/09/10 05:39:07 deraadt Exp $";
 #endif /* LIBC_SCCS and not lint */
 
 /*
@@ -139,7 +139,7 @@ clnt_sperror(rpch, s)
 		break;
 	}
 	strstart[CLNT_PERROR_BUFLEN-2] = '\0';
-	strcat(strstart, "\n");
+	strlcat(strstart, "\n", CLNT_PERROR_BUFLEN);
 	return (strstart);
 
 truncated:
@@ -152,7 +152,7 @@ clnt_perror(rpch, s)
 	CLIENT *rpch;
 	char *s;
 {
-	(void) fprintf(stderr, "%s\n", clnt_sperror(rpch, s));
+	(void) fprintf(stderr, "%s", clnt_sperror(rpch, s));
 }
 
 static const char *const rpc_errlist[] = {

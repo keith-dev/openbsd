@@ -1,4 +1,4 @@
-/*	$OpenBSD: if.c,v 1.11 2002/02/17 19:42:39 millert Exp $	*/
+/*	$OpenBSD: if.c,v 1.14 2002/06/10 19:57:35 espie Exp $	*/
 /*	$KAME: if.c,v 1.17 2001/01/21 15:27:30 itojun Exp $	*/
 
 /*
@@ -36,23 +36,12 @@
 #include <sys/ioctl.h>
 #include <net/if.h>
 #include <net/if_types.h>
-#ifdef __FreeBSD__
-# include <net/ethernet.h>
-#endif
 #include <ifaddrs.h>
-#ifdef __NetBSD__
-#include <net/if_ether.h>
-#endif
 #include <net/route.h>
 #include <net/if_dl.h>
 #include <netinet/in.h>
 #include <netinet/icmp6.h>
-#ifdef __bsdi__
-# include <netinet/if_ether.h>
-#endif
-#ifdef __OpenBSD__
 #include <netinet/if_ether.h>
-#endif
 #include <unistd.h>
 #include <errno.h>
 #include <stdlib.h>
@@ -195,7 +184,7 @@ if_getflags(int ifindex, int oifflags)
 	int s;
 
 	if ((s = socket(AF_INET6, SOCK_DGRAM, 0)) < 0) {
-		syslog(LOG_ERR, "<%s> socket: %s", __FUNCTION__,
+		syslog(LOG_ERR, "<%s> socket: %s", __func__,
 		       strerror(errno));
 		return (oifflags & ~IFF_UP);
 	}
@@ -203,7 +192,7 @@ if_getflags(int ifindex, int oifflags)
 	if_indextoname(ifindex, ifr.ifr_name);
 	if (ioctl(s, SIOCGIFFLAGS, (caddr_t)&ifr) < 0) {
 		syslog(LOG_ERR, "<%s> ioctl:SIOCGIFFLAGS: failed for %s",
-		       __FUNCTION__, ifr.ifr_name);
+		       __func__, ifr.ifr_name);
 		close(s);
 		return (oifflags & ~IFF_UP);
 	}
@@ -215,11 +204,12 @@ if_getflags(int ifindex, int oifflags)
 int
 lladdropt_length(struct sockaddr_dl *sdl)
 {
-	switch(sdl->sdl_type) {
-	 case IFT_ETHER:
-		 return(ROUNDUP8(ETHER_ADDR_LEN + 2));
-	 default:
-		 return(0);
+	switch (sdl->sdl_type) {
+	case IFT_ETHER:
+	case IFT_FDDI:
+		return(ROUNDUP8(ETHER_ADDR_LEN + 2));
+	default:
+		return(0);
 	}
 }
 
@@ -230,17 +220,17 @@ lladdropt_fill(struct sockaddr_dl *sdl, struct nd_opt_hdr *ndopt)
 
 	ndopt->nd_opt_type = ND_OPT_SOURCE_LINKADDR; /* fixed */
 
-	switch(sdl->sdl_type) {
-	 case IFT_ETHER:
-		 ndopt->nd_opt_len = (ROUNDUP8(ETHER_ADDR_LEN + 2)) >> 3;
-		 addr = (char *)(ndopt + 1);
-		 memcpy(addr, LLADDR(sdl), ETHER_ADDR_LEN);
-		 break;
-	 default:
-		 syslog(LOG_ERR,
-			"<%s> unsupported link type(%d)",
-			__FUNCTION__, sdl->sdl_type);
-		 exit(1);
+	switch (sdl->sdl_type) {
+	case IFT_ETHER:
+	case IFT_FDDI:
+		ndopt->nd_opt_len = (ROUNDUP8(ETHER_ADDR_LEN + 2)) >> 3;
+		addr = (char *)(ndopt + 1);
+		memcpy(addr, LLADDR(sdl), ETHER_ADDR_LEN);
+		break;
+	default:
+		syslog(LOG_ERR, "<%s> unsupported link type(%d)",
+		    __func__, sdl->sdl_type);
+		exit(1);
 	}
 
 	return;
@@ -276,7 +266,7 @@ get_next_msg(char *buf, char *lim, int ifindex, size_t *lenp, int filter)
 		/* just for safety */
 		if (!rtm->rtm_msglen) {
 			syslog(LOG_WARNING, "<%s> rtm_msglen is 0 "
-				"(buf=%p lim=%p rtm=%p)", __FUNCTION__,
+				"(buf=%p lim=%p rtm=%p)", __func__,
 				buf, lim, rtm);
 			break;
 		}
@@ -495,16 +485,16 @@ get_iflist(char **buf, size_t *size)
 
 	if (sysctl(mib, 6, NULL, size, NULL, 0) < 0) {
 		syslog(LOG_ERR, "<%s> sysctl: iflist size get failed",
-		       __FUNCTION__);
+		       __func__);
 		exit(1);
 	}
 	if ((*buf = malloc(*size)) == NULL) {
-		syslog(LOG_ERR, "<%s> malloc failed", __FUNCTION__);
+		syslog(LOG_ERR, "<%s> malloc failed", __func__);
 		exit(1);
 	}
 	if (sysctl(mib, 6, *buf, size, NULL, 0) < 0) {
 		syslog(LOG_ERR, "<%s> sysctl: iflist get failed",
-		       __FUNCTION__);
+		       __func__);
 		exit(1);
 	}
 	return;
@@ -530,7 +520,7 @@ parse_iflist(struct if_msghdr ***ifmlist_p, char *buf, size_t bufsize)
 	/* roughly estimate max list size of pointers to each if_msghdr */
 	malloc_size = (bufsize/iflentry_size) * sizeof(size_t);
 	if ((*ifmlist_p = (struct if_msghdr **)malloc(malloc_size)) == NULL) {
-		syslog(LOG_ERR, "<%s> malloc failed", __FUNCTION__);
+		syslog(LOG_ERR, "<%s> malloc failed", __func__);
 		exit(1);
 	}
 
@@ -538,7 +528,7 @@ parse_iflist(struct if_msghdr ***ifmlist_p, char *buf, size_t bufsize)
 	for (ifm = (struct if_msghdr *)buf; ifm < (struct if_msghdr *)lim;) {
 		if (ifm->ifm_msglen == 0) {
 			syslog(LOG_WARNING, "<%s> ifm_msglen is 0 "
-			       "(buf=%p lim=%p ifm=%p)", __FUNCTION__,
+			       "(buf=%p lim=%p ifm=%p)", __func__,
 			       buf, lim, ifm);
 			return;
 		}
@@ -546,9 +536,9 @@ parse_iflist(struct if_msghdr ***ifmlist_p, char *buf, size_t bufsize)
 		if (ifm->ifm_type == RTM_IFINFO) {
 			(*ifmlist_p)[ifm->ifm_index] = ifm;
 		} else {
-			syslog(LOG_ERR, "out of sync parsing NET_RT_IFLIST\n"
-			       "expected %d, got %d\n msglen = %d\n"
-			       "buf:%p, ifm:%p, lim:%p\n",
+			syslog(LOG_ERR, "out of sync parsing NET_RT_IFLIST,"
+			       "expected %d, got %d, msglen = %d,"
+			       "buf:%p, ifm:%p, lim:%p",
 			       RTM_IFINFO, ifm->ifm_type, ifm->ifm_msglen,
 			       buf, ifm, lim);
 			exit (1);
@@ -561,7 +551,7 @@ parse_iflist(struct if_msghdr ***ifmlist_p, char *buf, size_t bufsize)
 			/* just for safety */
 			if (!ifam->ifam_msglen) {
 				syslog(LOG_WARNING, "<%s> ifa_msglen is 0 "
-				       "(buf=%p lim=%p ifam=%p)", __FUNCTION__,
+				       "(buf=%p lim=%p ifam=%p)", __func__,
 				       buf, lim, ifam);
 				return;
 			}

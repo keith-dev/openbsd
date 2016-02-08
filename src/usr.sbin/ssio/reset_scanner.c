@@ -1,4 +1,4 @@
-static char *rcs_id = "$Id: reset_scanner.c,v 1.2 1999/05/23 17:19:23 aaron Exp $";
+static char *rcs_id = "$Id: reset_scanner.c,v 1.4 2002/06/01 20:27:15 deraadt Exp $";
 #ifdef _IBMR2
 /*
  *  PINT Pint Is Not TWAIN - common scanner driver interface for UN*X
@@ -32,7 +32,7 @@ void
 usage(char *prog_name)
 {
   fprintf(stderr, "usage: %s [-l <logical name>]\n", prog_name);
-  exit(-1);
+  exit(1);
 }
 
 main(int argc, char *argv[])
@@ -64,13 +64,12 @@ main(int argc, char *argv[])
     }
   }
 
-  strcpy(device, "/dev/");
-  strcat(device, logical_name);
+  snprintf(device, sizeof device, "/dev/%s", logical_device);
 
   if ((sfd = openx(device, O_RDONLY, 0, SC_FORCED_OPEN)) < 0) {
     fprintf(stderr, "openx of %s failed: ", device);
     perror("");
-    exit(-1);
+    exit(1);
   }
 
   close(sfd);
@@ -78,9 +77,9 @@ main(int argc, char *argv[])
   if (fast)
     exit(0);
 
-  sprintf(cmd, "rmdev -l %s", logical_name);
+  snprintf(cmd, sizeof cmd, "rmdev -l %s", logical_name);
   system(cmd);
-  sprintf(cmd, "mkdev -l %s", logical_name);
+  snprintf(cmd, sizeof cmd, "mkdev -l %s", logical_name);
   system(cmd);
 }
 #else

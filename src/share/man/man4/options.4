@@ -1,4 +1,4 @@
-.\"	$OpenBSD: options.4,v 1.97 2002/04/07 19:29:55 millert Exp $
+.\"	$OpenBSD: options.4,v 1.109 2002/09/26 07:55:40 miod Exp $
 .\"	$NetBSD: options.4,v 1.21 1997/06/25 03:13:00 thorpej Exp $
 .\"
 .\" Copyright (c) 1998 Theo de Raadt
@@ -95,9 +95,9 @@ applications.
 This option is supported on the i386 architecture.
 See
 .Xr compat_bsdos 8 .
-Requires
+It also requires the use of
 .Cm option COMPAT_43
-also be used for proper operation.
+for proper operation.
 .It Cd option COMPAT_LINUX
 On those architectures that support it, this enables binary
 compatibility with
@@ -112,7 +112,7 @@ On those architectures that support it, this enables binary
 compatibility with
 .Em SunOS 4.x
 applications built for the same architecture.
-This option is supported on the sparc and most m68k platforms.
+This option is supported on sparc and all m68k architectures.
 See
 .Xr compat_sunos 8 .
 .It Cd option COMPAT_ULTRIX
@@ -120,8 +120,7 @@ On those architectures that support it, this enables binary
 compatibility with
 .Tn Ultrix
 applications built for the same architecture.
-This option is available on the little-endian MIPS platforms like the
-pmax and arc.
+This option is available on the vax architecture.
 See
 .Xr compat_ultrix 8 .
 .It Cd option COMPAT_FREEBSD
@@ -234,11 +233,11 @@ to be built in addition to
 .Pa bsd.gdb
 is useful for debugging kernels and their crashdumps with gdb.
 Note that
-.Xr gdb Ns 's
+.Xr gdb 1 Ns 's
 .Fl k
 flag is obsolete and should not be used.
 Instead, a crashdump can be debugged by starting
-.Xr gdb
+.Xr gdb 1
 with the kernel name as an argument (no core file) and then use the
 .Xr gdb 1
 command
@@ -527,6 +526,11 @@ See also
 .Xr chflags 1 .
 .It Cd option UFS_EXTATTR
 This option enables Extended Attribute support for UFS filesystems.
+.It Cd option UFS_EXTATTR_AUTOSTART
+This option causes Extended Attributes to be started and enabled when each
+UFS filesystem is mounted.
+The attribute storage is expected to be (relative to mount point)
+.Pa /.attribute/{system|user}/<attrname>
 .El
 .Ss Miscellaneous Options
 .Bl -ohang
@@ -540,11 +544,16 @@ Makes the boot process more verbose for PCMCIA peripherals.
 .It Cd option MACOBIOVERBOSE
 Makes the boot process more verbose for Mac OBIO peripherals.
 .It Cd option APERTURE
-Provide in-kernel support for VGA framebuffer mapping by user-processes
-(such as an X windows server).
-This option is supported in the i386 architecture.
-.It Cd option XSERVER
-Support for X windows in the console driver.
+Provide in-kernel support for controlling VGA framebuffer mapping 
+and PCI configuration registers by user-processes
+(such as an X Window System server).
+This option is supported on the 
+.Va alpha Ns ,
+.Va i386 Ns ,
+.Va macppc 
+and
+.Va sparc64 
+architectures.
 .It Cd option LKM
 Enables support for loadable kernel modules.
 See
@@ -650,13 +659,23 @@ server on some architectures.
 See
 .Xr pci 4
 for details.
+.It Cd option PCIAGP
+Enables
+.Xr ioctl 2
+access to the AGP GART on the supported chipsets.
+It's used by the
+.Xr XFree86 1
+server on some architectures.
+See
+.Xr vga 4
+for details.
 .El
 .Ss Networking Options
 .Bl -ohang
 .It Cd option GATEWAY
 Enables
 .Em IPFORWARDING
-and (on most ports) increases the size of
+and (on most architectures) increases the size of
 .Em NMBCLUSTERS .
 In general,
 .Em GATEWAY
@@ -705,7 +724,7 @@ This option is currently required.
 See
 .Xr inet 4
 for details.
-.It Cd options INET6
+.It Cd option INET6
 Includes support for the
 .Tn IPv6
 protocol stack.
@@ -719,7 +738,7 @@ enables multicast routing code as well.
 This option requires
 .Em INET
 at this moment, but it should not.
-.It Cd options ND6_DEBUG
+.It Cd option ND6_DEBUG
 The option sets the default value of net.inet6.icmp6.nd6_debug to 1,
 for debugging IPv6 neighbor discovery protocol handling.
 See
@@ -791,6 +810,15 @@ outstanding data during the fast recovery phase by using
 information.
 This option can only be used together with
 .Em TCP_SACK .
+.It Cd option TCP_ECN
+Turns on Explicit Congestion Notification (RFC3168).
+.Em ECN
+allows intermediate routers to use the Congestion Experienced
+codepoint in the IP header as an indication of congestion, and allows
+TCP to adjust the trasmission rate using this signal.
+Both communication endpoints negotiate enabling
+.Em ECN
+functionality at the TCP connection establishment.
 .It Cd option TCP_SIGNATURE
 Turns on support for the TCP MD5 Signature option (RFC 2385).
 This is used by
@@ -946,7 +974,7 @@ Sets the maximum number of
 style shared memory pages that are available through the
 .Xr shmget 2
 system call.
-Default value is 1024 on most ports.
+Default value is 1024 on most architectures.
 See
 .Pa /usr/include/machine/vmparam.h
 for the default.
@@ -977,8 +1005,10 @@ Default value is 10.
 Size of kernel mbuf cluster map,
 .Em mb_map ,
 in CLBYTES-sized logical pages.
-Default on most ports is 256 (512 with
-.Dq option GATEWAY ) .
+Defaults to 2048 on i386, to 1024 on powerc and sparc64, and to 512 on
+other architectures (doubled when using
+.Dq option GATEWAY
+except on i386).
 See
 .Pa /usr/include/machine/param.h
 for exact default information.
@@ -1014,10 +1044,6 @@ panic.
 These options set the number of pages available for the buffer cache.
 Their default value is a machine dependent value, often calculated as
 between 5% and 10% of total available RAM.
-.It Cd option NTP
-Modify the scheduler code to add hooks necessary for running an NTP daemon.
-.Em ntpd
-is available as part of the port collection.
 .It Cd option APM_NOPRINT
 This option is supported on the i386 architecture.
 When enabled kernel messages regarding the status of the automatic power
@@ -1029,12 +1055,26 @@ status can still be obtained using
 .Xr apm 8
 and/or
 .Xr apmd 8 .
+.It Cd option \&"TIMEZONE=value\&"
+.Ar value
+indicates the timezone offset of hardware realtime clock device, in minutes,
+from UTC.
+It is useful when hardware realtime clock device is configured with local time,
+when you dual-boot
+.Ox
+with other operating systems on a single machine.
+For instance, if hardware realtime clock is set to Tokyo time,
+.Ar value
+should be
+.Li \&-540
+as Tokyo local time is 9 hours ahead of UTC.
+Doublequote is needed when specifying a negative
+.Ar value .
 .El
 .\" The following requests should be uncommented and used where appropriate.
 .\" .Sh FILES
 .\" .Sh EXAMPLES
 .Sh SEE ALSO
-.Xr X 1 ,
 .Xr gdb 1 ,
 .Xr ktrace 1 ,
 .Xr quota 1 ,
@@ -1061,6 +1101,7 @@ and/or
 .Xr ns 4 ,
 .Xr pci 4 ,
 .Xr xf86 4 ,
+.Xr X 7 ,
 .Xr apm 8 ,
 .Xr apmd 8 ,
 .Xr config 8 ,
@@ -1081,7 +1122,6 @@ and/or
 .Xr quotaon 8 ,
 .Xr rpc.rquotad 8 ,
 .Xr sysctl 8 ,
-.Xr xntpd 8 ,
 .Xr altq 9
 .Sh HISTORY
 The

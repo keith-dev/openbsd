@@ -1,4 +1,4 @@
-/*	$OpenBSD: newfs.c,v 1.32 2002/02/19 19:39:38 millert Exp $	*/
+/*	$OpenBSD: newfs.c,v 1.35 2002/05/26 09:24:35 deraadt Exp $	*/
 /*	$NetBSD: newfs.c,v 1.20 1996/05/16 07:13:03 thorpej Exp $	*/
 
 /*
@@ -44,7 +44,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)newfs.c	8.8 (Berkeley) 4/18/94";
 #else
-static char rcsid[] = "$OpenBSD: newfs.c,v 1.32 2002/02/19 19:39:38 millert Exp $";
+static char rcsid[] = "$OpenBSD: newfs.c,v 1.35 2002/05/26 09:24:35 deraadt Exp $";
 #endif
 #endif /* not lint */
 
@@ -167,7 +167,7 @@ int	minfree = MINFREE;	/* free space threshold */
 int	opt = DEFAULTOPT;	/* optimization preference (space or time) */
 int	reqopt = -1;		/* opt preference has not been specified */
 int	density;		/* number of bytes per inode */
-int	maxcontig = 8;		/* max contiguous blocks to allocate */
+int	maxcontig = 0;		/* max contiguous blocks to allocate */
 int	rotdelay = ROTDELAY;	/* rotational delay between blocks */
 int	maxbpg;			/* maximum blocks per file in a cyl group */
 int	nrpos = NRPOS;		/* # of distinguished rotational positions */
@@ -589,13 +589,13 @@ havelabel:
 	if (mfs) {
 		struct mfs_args args;
 
-		sprintf(buf, "mfs:%d", getpid());
+		sprintf(buf, "mfs:%ld", (long)getpid());
 		args.fspec = buf;
-		args.export.ex_root = -2;
+		args.export_info.ex_root = -2;
 		if (mntflags & MNT_RDONLY)
-			args.export.ex_flags = MNT_EXRDONLY;
+			args.export_info.ex_flags = MNT_EXRDONLY;
 		else
-			args.export.ex_flags = 0;
+			args.export_info.ex_flags = 0;
 		args.base = membase;
 		args.size = fssize * sectorsize;
 		if (mount(MOUNT_MFS, argv[1], mntflags, &args) < 0)

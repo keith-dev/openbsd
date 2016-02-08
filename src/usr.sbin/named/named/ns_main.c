@@ -1,11 +1,11 @@
-/*	$OpenBSD: ns_main.c,v 1.18 2002/02/16 21:28:06 millert Exp $	*/
+/*	$OpenBSD: ns_main.c,v 1.24 2002/09/12 17:43:14 millert Exp $	*/
 
 #if !defined(lint) && !defined(SABER)
 #if 0
 static char sccsid[] = "@(#)ns_main.c	4.55 (Berkeley) 7/1/91";
 static char rcsid[] = "$From: ns_main.c,v 8.26 1998/05/11 04:19:45 vixie Exp $";
 #else
-static char rcsid[] = "$OpenBSD: ns_main.c,v 1.18 2002/02/16 21:28:06 millert Exp $";
+static char rcsid[] = "$OpenBSD: ns_main.c,v 1.24 2002/09/12 17:43:14 millert Exp $";
 #endif
 #endif /* not lint */
 
@@ -184,9 +184,10 @@ main(argc, argv, envp)
 	register struct qstream *sp;
 	register struct qdatagram *dqp;
 	struct qstream *nextsp;
-	int nfds;
+	int nfds, nullfd;
 	const int on = 1;
 	int rfd, size, len;
+	socklen_t getsockoptlen;
 	time_t lasttime, maxctime;
 	u_char buf[PACKETSZ];
 #ifdef NeXT
@@ -382,12 +383,25 @@ main(argc, argv, envp)
 	}		
 #endif
 
+#ifdef DEBUG
+		if (!debug)
+#endif
+		{
+			nullfd = open(_PATH_DEVNULL, O_RDWR);
+			if (nullfd < 0) {
+				fprintf(stderr, "open /dev/null failed: %s\n",
+					strerror(errno));
+				exit(1);
+			}
+		}
+
 	/*
 	 * Chroot if desired.
 	 */
 	if (chroot_dir != NULL) {
 		struct stat sb;
 
+		tzset();
 		if (chroot(chroot_dir) < 0) {
 			fprintf(stderr, "chroot %s failed: %s\n", chroot_dir,
 				strerror(errno));
@@ -470,7 +484,7 @@ main(argc, argv, envp)
 #else /*PID_FIX*/
 	fp = fopen(PidFile, "w");
 	if (fp != NULL) {
-		fprintf(fp, "%d\n", getpid());
+		fprintf(fp, "%ld\n", (long)getpid());
 		fprintf(fp, "%s\n", nsargs);
 		(void) my_fclose(fp);
 	}
@@ -639,12 +653,11 @@ main(argc, argv, envp)
 		if (!debug)
 #endif
 		{
-			n = open(_PATH_DEVNULL, O_RDONLY);
-			(void) dup2(n, 0);
-			(void) dup2(n, 1);
-			(void) dup2(n, 2);
-			if (n > 2)
-				(void) my_close(n);
+			(void) dup2(nullfd, 0);
+			(void) dup2(nullfd, 1);
+			(void) dup2(nullfd, 2);
+			if (nullfd > 2)
+				(void) my_close(nullfd);
 		}
 	}
 #else
@@ -653,7 +666,7 @@ main(argc, argv, envp)
 #endif
 	{
 #ifdef HAVE_DAEMON
-		daemon(1, 0);
+		daemon(1, 1);
 #else
 		switch (fork()) {
 		case -1:
@@ -667,12 +680,6 @@ main(argc, argv, envp)
 			/* parent */
 			exit(0);
 		}
-		n = open(_PATH_DEVNULL, O_RDONLY);
-		(void) dup2(n, 0);
-		(void) dup2(n, 1);
-		(void) dup2(n, 2);
-		if (n > 2)
-			(void) my_close(n);
 #if defined(SYSV) || defined(hpux)
 		setpgrp();
 #else
@@ -702,6 +709,11 @@ main(argc, argv, envp)
 		}
 #endif /* SYSV */
 #endif /* HAVE_DAEMON */
+		(void) dup2(nullfd, 0);
+		(void) dup2(nullfd, 1);
+		(void) dup2(nullfd, 2);
+		if (nullfd > 2)
+			(void) my_close(nullfd);
 	}
 #endif /* USE_SETSID */
 #ifdef WANT_PIDFILE
@@ -738,7 +750,7 @@ main(argc, argv, envp)
 		       group_name);
 	}
 
-	syslog(LOG_NOTICE, "Ready to answer queries.\n");
+	syslog(LOG_NOTICE, "Ready to answer queries.");
 	prime_cache();
 #ifdef NeXT
 	old_sigmask = sigblock(sigmask(SIGCHLD));
@@ -824,7 +836,7 @@ main(argc, argv, envp)
 		     dqp = dqp->dq_next) {
 		    if (FD_ISSET(dqp->dq_dfd, tmpmask))
 		        for (udpcnt = 0; udpcnt < 42; udpcnt++) {  /*XXX*/
-			    int from_len = sizeof(from_addr);
+			    socklen_t from_len = sizeof(from_addr);
 
 			    if ((n = recvfrom(dqp->dq_dfd, (char *)buf,
 					      MIN(PACKETSZ, sizeof buf), 0,
@@ -869,7 +881,7 @@ main(argc, argv, envp)
 		** which, if our accept() failed, will bring us back here.
 		*/
 		if (FD_ISSET(vs, tmpmask)) {
-			int from_len = sizeof(from_addr);
+			socklen_t from_len = sizeof(from_addr);
 
 			rfd = accept(vs,
 				     (struct sockaddr *)&from_addr,
@@ -911,23 +923,23 @@ main(argc, argv, envp)
 				continue;
 			}
 #if defined(IP_OPTIONS)
-			len = sizeof ip_opts;
+			getsockoptlen = sizeof ip_opts;
 			if (getsockopt(rfd, IPPROTO_IP, IP_OPTIONS,
-				       (char *)&ip_opts, &len) < 0) {
+				       (char *)&ip_opts, &getsockoptlen) < 0) {
 				syslog(LOG_INFO,
 				       "getsockopt(rfd, IP_OPTIONS): %m");
 				(void) my_close(rfd);
 				continue;
 			}
-			if (len != 0) {
+			if (getsockoptlen != 0) {
 				int i;
 
 				nameserIncr(from_addr.sin_addr, nssRcvdOpts);
 				/* any socket with an LSRR or SSRR option
 				 * must be killed immediately or it can be
 				 * tcp sequenced */
-				for (i = 0; (void *)&ip_opts.ipopt_list[i] -
-				    (void *)&ip_opts < len && rfd != -1; ) {	
+				for (i = 0; (char *)&ip_opts.ipopt_list[i] -
+				    (char *)&ip_opts < getsockoptlen && rfd != -1; ) {	
 					u_char c = (u_char)ip_opts.ipopt_list[i];
 					if (c == IPOPT_LSRR || c == IPOPT_SSRR) {
 						my_close(rfd);
@@ -988,7 +1000,7 @@ main(argc, argv, envp)
 #ifdef DEBUG
 			if (debug)
 				syslog(LOG_DEBUG,
-				       "IP/TCP connection from %s (fd %d)\n",
+				       "IP/TCP connection from %s (fd %d)",
 				       sin_ntoa(&sp->s_from), rfd);
 #endif
 		}
@@ -1347,6 +1359,7 @@ opensocket(dqp)
 	register struct qdatagram *dqp;
 {
 	int m, n;
+	socklen_t getsockoptlen;
 	int on = 1;
 	int fd;
 
@@ -1376,9 +1389,10 @@ opensocket(dqp)
 		/* XXX press on regardless, this is not too serious. */
 	}
 #ifdef SO_RCVBUF
-	m = sizeof(n);
-	if ((getsockopt(dqp->dq_dfd, SOL_SOCKET, SO_RCVBUF, (char*)&n, &m) >= 0)
-	    && (m == sizeof(n))
+	getsockoptlen = sizeof(n);
+	if ((getsockopt(dqp->dq_dfd, SOL_SOCKET, SO_RCVBUF, (char*)&n,
+	    &getsockoptlen) >= 0)
+	    && (getsockoptlen == sizeof(n))
 	    && (n < rbufsize)) {
 		(void) setsockopt(dqp->dq_dfd, SOL_SOCKET, SO_RCVBUF,
 				  (char *)&rbufsize, sizeof(rbufsize));
@@ -1475,7 +1489,7 @@ setdumpflg()
 }
 
 /*
-** Turn on or off debuging by open or closeing the debug file
+** Turn on or off debugging by open or closeing the debug file
 */
 
 static void
@@ -1517,7 +1531,7 @@ setdebug(code)
 /*
 ** Catch a special signal and set debug level.
 **
-**  If debuging is off then turn on debuging else increment the level.
+**  If debugging is off then turn on debugging else increment the level.
 **
 ** Handy for looking in on long running name servers.
 */
@@ -1778,7 +1792,7 @@ ns_setproctitle(a, s)
 	char *a;
 	int s;
 {
-	int size;
+	socklen_t size;
 	register char *cp;
 	struct sockaddr_in sin;
 	char buf[80];

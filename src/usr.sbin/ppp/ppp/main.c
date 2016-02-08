@@ -25,7 +25,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $OpenBSD: main.c,v 1.31 2002/03/31 02:38:49 brian Exp $
+ * $OpenBSD: main.c,v 1.34 2002/06/28 09:34:24 brian Exp $
  */
 
 #include <sys/param.h>
@@ -72,7 +72,6 @@
 #include "throughput.h"
 #include "slcompress.h"
 #include "ncpaddr.h"
-#include "ip.h"
 #include "ipcp.h"
 #include "filter.h"
 #include "descriptor.h"
@@ -118,10 +117,13 @@ Cleanup(int excode)
 void
 AbortProgram(int excode)
 {
-  server_Close(SignalBundle);
+  if (SignalBundle)
+    server_Close(SignalBundle);
   log_Printf(LogPHASE, "PPP Terminated (%s).\n", ex_desc(excode));
-  bundle_Close(SignalBundle, NULL, CLOSE_STAYDOWN);
-  bundle_Destroy(SignalBundle);
+  if (SignalBundle) {
+    bundle_Close(SignalBundle, NULL, CLOSE_STAYDOWN);
+    bundle_Destroy(SignalBundle);
+  }
   log_Close();
   exit(excode);
 }
@@ -186,7 +188,7 @@ RestartServer(int signo)
 static void
 Usage(void)
 {
-  fprintf(stderr, "Usage: ppp [-auto | -foreground | -background | -direct |"
+  fprintf(stderr, "usage: ppp [-auto | -foreground | -background | -direct |"
           " -dedicated | -ddial | -interactive]"
 #ifndef NOALIAS
           " [-nat]"

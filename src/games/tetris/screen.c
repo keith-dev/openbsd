@@ -1,4 +1,4 @@
-/*	$OpenBSD: screen.c,v 1.7 2002/02/16 21:27:11 millert Exp $	*/
+/*	$OpenBSD: screen.c,v 1.10 2002/07/26 21:33:28 mickey Exp $	*/
 /*	$NetBSD: screen.c,v 1.4 1995/04/29 01:11:36 mycroft Exp $	*/
 
 /*-
@@ -94,7 +94,7 @@ static int
 	MSflag;			/* can move in standout mode */
 
 
-struct tcsinfo {	/* termcap string info; some abbrevs above */
+struct tcsinfo {		/* termcap string info; some abbrevs above */
 	char tcname[3];
 	char **tcaddr;
 } tcstrings[] = {
@@ -174,13 +174,15 @@ scr_init()
 		stop("cannot find your termcap");
 	fill = combuf;
 	{
-		register struct tcsinfo *p;
+		struct tcsinfo *p;
 
 		for (p = tcstrings; p->tcaddr; p++)
 			*p->tcaddr = tgetstr(p->tcname, &fill);
 	}
+	if (classic)
+		SOstr = SEstr = NULL;
 	{
-		register struct tcninfo *p;
+		struct tcninfo *p;
 
 		for (p = tcflags; p->tcaddr; p++)
 			*p->tcaddr = tgetflag(p->tcname);
@@ -368,11 +370,11 @@ typedef cell regcell;
 void
 scr_update()
 {
-	register cell *bp, *sp;
-	register regcell so, cur_so = 0;
-	register int i, ccol, j;
+	cell *bp, *sp;
+	regcell so, cur_so = 0;
+	int i, ccol, j;
 	sigset_t sigset, osigset;
-	static struct shape *lastshape;
+	static const struct shape *lastshape;
 
 	sigemptyset(&sigset);
 	sigaddset(&sigset, SIGTSTP);
@@ -412,7 +414,7 @@ scr_update()
 		if (SOstr)
 			putpad(SOstr);
 		moveto(r, 2 * c);
-		putstr(SOstr ? "  " : "XX");
+		putstr(SOstr ? "  " : "[]");
 		for (i = 0; i < 3; i++) {
 			t = c + r * B_COLS;
 			t += nextshape->off[i];
@@ -421,7 +423,7 @@ scr_update()
 			tc = t % B_COLS;
 
 			moveto(tr, 2*tc);
-			putstr(SOstr ? "  " : "XX");
+			putstr(SOstr ? "  " : "[]");
 		}
 		putpad(SEstr);
 	}
@@ -448,7 +450,7 @@ scr_update()
 				}
 				putstr("  ");
 			} else
-				putstr(so ? "XX" : "  ");
+				putstr(so ? "[]" : "  ");
 			ccol = i + 1;
 			/*
 			 * Look ahead a bit, to avoid extra motion if
@@ -481,12 +483,12 @@ scr_update()
  */
 void
 scr_msg(s, set)
-	register char *s;
+	char *s;
 	int set;
 {
 	
 	if (set || CEstr == NULL) {
-		register int l = strlen(s);
+		int l = strlen(s);
 
 		moveto(Rows - 2, ((Cols - l) >> 1) - 1);
 		if (set)

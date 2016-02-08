@@ -44,7 +44,7 @@
 
 #ifndef lint
 static char copyright[] =
-"$Id: sysconfd.c,v 1.1 1998/08/18 03:43:36 deraadt Exp $ Copyright (c) 1995, 1996 The Internet Software Consortium.  All rights reserved.\n";
+"$Id: sysconfd.c,v 1.4 2002/07/03 23:11:29 deraadt Exp $ Copyright (c) 1995, 1996 The Internet Software Consortium.  All rights reserved.\n";
 #endif /* not lint */
 
 #include "dhcpd.h"
@@ -93,8 +93,9 @@ int main (argc, argv, envp)
 		error ("unable to create sysconf socket: %m");
 
 	/* XXX for now... */
+	memset(&name, 0, sizeof(name));
 	name.sun_family = PF_UNIX;
-	strcpy (name.sun_path, "/var/run/sysconf");
+	strlcpy (name.sun_path, "/var/run/sysconf", sizeof name.sun_path);
 	name.sun_len = ((sizeof name) - (sizeof name.sun_path) +
 			strlen (name.sun_path));
 	unlink (name.sun_path);
@@ -139,7 +140,7 @@ void new_connection (proto)
 	int new_fd;
 
 	tmp = (struct sysconf_client *)malloc (sizeof *tmp);
-	if (tmp < 0)
+	if (tmp == NULL)
 		error ("Can't find memory for new client!");
 	memset (tmp, 0, sizeof *tmp);
 

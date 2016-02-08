@@ -1,4 +1,4 @@
-/*	$OpenBSD: ftp-proxy.c,v 1.20 2002/03/12 08:01:51 dhartmei Exp $ */
+/*	$OpenBSD: ftp-proxy.c,v 1.24 2002/07/07 08:54:50 jufi Exp $ */
 
 /*
  * Copyright (c) 1996-2001
@@ -61,7 +61,7 @@
  * TODO:
  * Plenty, this is very basic, with the idea to get it in clean first.
  *
- * - Ipv6 and EPASV support
+ * - IPv6 and EPASV support
  * - Content filter support
  * - filename filter support
  * - per-user rules perhaps.
@@ -161,18 +161,17 @@ connection_mode_t connection_mode;
 extern void debuglog(int debug_level, const char *fmt, ...);
 
 static void
-usage()
+usage(void)
 {
 	syslog(LOG_NOTICE,
 	    "usage: %s [-AnrVw] [-t timeout] [-D debuglevel] %s %s",
 	    __progname, "[-g group] [-u user] [-m min_port]",
-	    "[-M max_port]\n");
+	    "[-M max_port]");
 	exit(EX_USAGE);
 }
 
-
 static void
-close_client_data()
+close_client_data(void)
 {
 	if (client_data_socket >= 0) {
 		shutdown(client_data_socket, 2);
@@ -181,9 +180,8 @@ close_client_data()
 	}
 }
 
-
 static void
-close_server_data()
+close_server_data(void)
 {
 	if (server_data_socket >= 0)  {
 		shutdown(server_data_socket, 2);
@@ -192,9 +190,8 @@ close_server_data()
 	}
 }
 
-
 static void
-drop_privs()
+drop_privs(void)
 {
 	struct passwd *pw;
 	struct group *gr;
@@ -255,17 +252,15 @@ check_host(struct sockaddr_in *client_sin, struct sockaddr_in *server_sin)
 		 * the tcp wrapper cares about these things, and we don't
 		 * want to pass in a printed address as a name.
 		 */
-		i = getnameinfo(
-			(struct sockaddr *) &client_sin->sin_addr,
-			sizeof(&client_sin->sin_addr), cname,
-			sizeof(cname), NULL, 0, NI_NAMEREQD);
+		i = getnameinfo((struct sockaddr *) &client_sin->sin_addr,
+		    sizeof(&client_sin->sin_addr), cname, sizeof(cname),
+		    NULL, 0, NI_NAMEREQD);
 		if (i == -1)
 			strlcpy(cname, STRING_UNKNOWN, sizeof(cname));
 
-		i = getnameinfo(
-			(struct sockaddr *)&server_sin->sin_addr,
-			sizeof(&server_sin->sin_addr), sname,
-			sizeof(sname), NULL, 0, NI_NAMEREQD);
+		i = getnameinfo((struct sockaddr *)&server_sin->sin_addr,
+		    sizeof(&server_sin->sin_addr), sname, sizeof(sname),
+		    NULL, 0, NI_NAMEREQD);
 		if (i == -1)
 			strlcpy(sname, STRING_UNKNOWN, sizeof(sname));
 	} else {
@@ -290,7 +285,7 @@ check_host(struct sockaddr_in *client_sin, struct sockaddr_in *server_sin)
 }
 
 double
-wallclock_time()
+wallclock_time(void)
 {
 	struct timeval tv;
 
@@ -302,7 +297,7 @@ wallclock_time()
  * Show the stats for this data transfer
  */
 void
-show_xfer_stats()
+show_xfer_stats(void)
 {
 	char tbuf[1000];
 	double delta;
@@ -425,7 +420,7 @@ new_dataconn(int server)
 	close_server_data();
 
 	if (server) {
-		bzero (&server_listen_sa, sizeof(server_listen_sa));
+		bzero(&server_listen_sa, sizeof(server_listen_sa));
 		server_listen_socket = get_backchannel_socket(SOCK_STREAM,
 		    min_port, max_port, -1, 1, &server_listen_sa);
 
@@ -456,10 +451,8 @@ new_dataconn(int server)
 	return(0);
 }
 
-
-
 static void
-connect_pasv_backchannel()
+connect_pasv_backchannel(void)
 {
 	struct sockaddr_in listen_sa;
 	int salen;
@@ -468,8 +461,7 @@ connect_pasv_backchannel()
 	 * We are about to accept a connection from the client.
 	 * This is a PASV data connection.
 	 */
-
-	debuglog(2, "client listen socket ready\n");
+	debuglog(2, "client listen socket ready");
 
 	close_server_data();
 	close_client_data();
@@ -502,10 +494,8 @@ connect_pasv_backchannel()
 	xfer_start_time = wallclock_time();
 }
 
-
-
 static void
-connect_port_backchannel()
+connect_port_backchannel(void)
 {
 	struct sockaddr_in listen_sa;
 	int salen;
@@ -514,8 +504,7 @@ connect_port_backchannel()
 	 * We are about to accept a connection from the server.
 	 * This is a PORT or EPRT data connection.
 	 */
-
-	debuglog(2, "server listen socket ready\n");
+	debuglog(2, "server listen socket ready");
 
 	close_server_data();
 	close_client_data();
@@ -581,7 +570,6 @@ connect_port_backchannel()
 	server_data_bytes = 0;
 	xfer_start_time = wallclock_time();
 }
-
 
 void
 do_client_cmd(struct csiob *client, struct csiob *server)
@@ -677,7 +665,7 @@ do_client_cmd(struct csiob *client, struct csiob *server)
 			goto parsefail;
 		memcpy(&client_listen_sa, res->ai_addr, res->ai_addrlen);
 
-		debuglog(1, "client wants us to use %s:%u\n",
+		debuglog(1, "client wants us to use %s:%u",
 		    inet_ntoa(client_listen_sa.sin_addr),
 		    htons(client_listen_sa.sin_port));
 
@@ -687,7 +675,7 @@ do_client_cmd(struct csiob *client, struct csiob *server)
 		new_dataconn(1);
 		connection_mode = EPRT_MODE;
 
-		debuglog(1, "we want server to use %s:%u\n",
+		debuglog(1, "we want server to use %s:%u",
 		    inet_ntoa(server->sa.sin_addr),
 		    ntohs(server_listen_sa.sin_port));
 
@@ -717,7 +705,7 @@ out:
 		if (res)
 			freeaddrinfo(res);
 		if (sendbuf == NULL) {
-			debuglog(1, "to client(modified):  %s\n", tbuf);
+			debuglog(1, "to client(modified):  %s", tbuf);
 			i = strlen(tbuf);
 			do {
 				rv = send(client->fd, tbuf + j, i - j, 0);
@@ -739,7 +727,7 @@ out:
 		 * resorting to using a dynamic rdr rule we have to add in
 		 * for the reply to this connection, and take away afterwards.
 		 * so this will wait until we have the right solution for rule
-		 * addtions/deletions in pf.
+		 * additions/deletions in pf.
 		 *
 		 * in the meantime we just tell the client we don't do it,
 		 * and most clients should fall back to using PASV.
@@ -747,7 +735,7 @@ out:
 
 		snprintf(tbuf, sizeof(tbuf),
 		    "500 EPSV command not understood\r\n");
-		debuglog(1, "to client(modified):  %s\n", tbuf);
+		debuglog(1, "to client(modified):  %s", tbuf);
 		j = 0;
 		i = strlen(tbuf);
 		do {
@@ -764,7 +752,7 @@ out:
 		int byte_number;
 		u_char *tailptr;
 
-		debuglog(1, "Got a PORT command\n");
+		debuglog(1, "Got a PORT command");
 
 		tailptr = &client->line_buffer[strlen("port ")];
 		byte_number = 0;
@@ -779,14 +767,14 @@ out:
 			exit(EX_DATAERR);
 		}
 
-		for (i = 0; i<6; i++)
+		for (i = 0; i<6; i++) {
 			if (values[i] > 255) {
 				syslog(LOG_INFO,
 				    "malformed PORT command (%s)",
 				    client->line_buffer);
 				exit(EX_DATAERR);
 			}
-
+		}
 
 		client_listen_sa.sin_family = AF_INET;
 		client_listen_sa.sin_addr.s_addr = htonl((values[0] << 24) |
@@ -795,7 +783,7 @@ out:
 
 		client_listen_sa.sin_port = htons((values[4] << 8) |
 		    values[5]);
-		debuglog(1, "client wants us to use %u.%u.%u.%u:%u\n",
+		debuglog(1, "client wants us to use %u.%u.%u.%u:%u",
 		    values[0], values[1], values[2], values[3],
 		    (values[4] << 8) | values[5]);
 
@@ -805,17 +793,17 @@ out:
 		new_dataconn(1);
 		connection_mode = PORT_MODE;
 
-		debuglog(1, "we want server to use %s:%u\n",
+		debuglog(1, "we want server to use %s:%u",
 		    inet_ntoa(server->sa.sin_addr),
 		    ntohs(server_listen_sa.sin_port));
 
 		snprintf(tbuf, sizeof(tbuf), "PORT %u,%u,%u,%u,%u,%u\r\n",
-			 ((u_char *)&server->sa.sin_addr.s_addr)[0],
-			 ((u_char *)&server->sa.sin_addr.s_addr)[1],
-			 ((u_char *)&server->sa.sin_addr.s_addr)[2],
-			 ((u_char *)&server->sa.sin_addr.s_addr)[3],
-			 ((u_char *)&server_listen_sa.sin_port)[0],
-			 ((u_char *)&server_listen_sa.sin_port)[1]);
+		    ((u_char *)&server->sa.sin_addr.s_addr)[0],
+		    ((u_char *)&server->sa.sin_addr.s_addr)[1],
+		    ((u_char *)&server->sa.sin_addr.s_addr)[2],
+		    ((u_char *)&server->sa.sin_addr.s_addr)[3],
+		    ((u_char *)&server_listen_sa.sin_port)[0],
+		    ((u_char *)&server_listen_sa.sin_port)[1]);
 
 		debuglog(1, "to server(modified):  %s", tbuf);
 
@@ -878,15 +866,15 @@ do_server_reply(struct csiob *server, struct csiob *client)
 	}
 	if (*p == '-')
 		continuing = 1;
-	else 
-		continuing = 0;	  
+	else
+		continuing = 0;
 	if (code == 227 && !NatMode) {
 		unsigned int values[6];
 		u_char *tailptr;
 		int byte_number;
 
-		debuglog(1, "Got a PASV reply\n");
-		debuglog(1, "{%s}\n", (char *)server->line_buffer);
+		debuglog(1, "Got a PASV reply");
+		debuglog(1, "{%s}", (char *)server->line_buffer);
 
 		tailptr = strchr((char *)server->line_buffer, '(');
 		if (tailptr == NULL) {
@@ -896,7 +884,7 @@ do_server_reply(struct csiob *server, struct csiob *client)
 				exit(EX_DATAERR);
 			}
 		}
-		tailptr++; /* skip past space or ( */ 
+		tailptr++; /* skip past space or ( */
 
 		byte_number = 0;
 		values[0] = 0;
@@ -922,7 +910,7 @@ do_server_reply(struct csiob *server, struct csiob *client)
 		server_listen_sa.sin_port = htons((values[4] << 8) |
 		    values[5]);
 
-		debuglog(1, "server wants us to use %s:%u\n",
+		debuglog(1, "server wants us to use %s:%u",
 		    inet_ntoa(server_listen_sa.sin_addr), (values[4] << 8) |
 		    values[5]);
 
@@ -930,7 +918,7 @@ do_server_reply(struct csiob *server, struct csiob *client)
 		connection_mode = PASV_MODE;
 		iap = &(server->sa.sin_addr);
 
-		debuglog(1, "we want client to use %s:%u\n", inet_ntoa(*iap),
+		debuglog(1, "we want client to use %s:%u", inet_ntoa(*iap),
 		    htons(client_listen_sa.sin_port));
 
 		snprintf(tbuf, sizeof(tbuf),
@@ -939,7 +927,7 @@ do_server_reply(struct csiob *server, struct csiob *client)
 		    ((u_char *)iap)[2], ((u_char *)iap)[3],
 		    ((u_char *)&client_listen_sa.sin_port)[0],
 		    ((u_char *)&client_listen_sa.sin_port)[1]);
-		debuglog(1, "to client(modified):  %s\n", tbuf);
+		debuglog(1, "to client(modified):  %s", tbuf);
 		sendbuf = tbuf;
 	} else {
  sendit:
@@ -963,7 +951,7 @@ do_server_reply(struct csiob *server, struct csiob *client)
 }
 
 int
-main(int argc, char **argv)
+main(int argc, char *argv[])
 {
 	struct csiob client_iob, server_iob;
 	struct sigaction new_sa, old_sa;
@@ -1086,10 +1074,10 @@ main(int argc, char **argv)
 
 	client_iob.fd = 0;
 
-	debuglog(1, "client is %s:%u\n", ClientName,
+	debuglog(1, "client is %s:%u", ClientName,
 	    ntohs(client_iob.sa.sin_port));
 
-	debuglog(1, "target server is %s:%u\n", RealServerName,
+	debuglog(1, "target server is %s:%u", RealServerName,
 	    ntohs(real_server_sa.sin_port));
 
 	server_iob.fd = get_backchannel_socket(SOCK_STREAM, min_port, max_port,
@@ -1113,7 +1101,7 @@ main(int argc, char **argv)
 	i = getnameinfo((struct sockaddr *)&server_iob.sa,
 	    sizeof(server_iob.sa), OurName, sizeof(OurName), NULL, 0, flags);
 
-	debuglog(1, "our end of socket to server is %s:%u\n", OurName,
+	debuglog(1, "our end of socket to server is %s:%u", OurName,
 	    ntohs(server_iob.sa.sin_port));
 
 	/* ignore SIGPIPE */
@@ -1177,7 +1165,7 @@ main(int argc, char **argv)
 		if (server_data_socket > maxfd)
 			maxfd = server_data_socket;
 
-		debuglog(3, "client is %s, server is %s\n",
+		debuglog(3, "client is %s, server is %s",
 		    client_iob.alive ? "alive" : "dead",
 		    server_iob.alive ? "alive" : "dead");
 
@@ -1190,13 +1178,13 @@ main(int argc, char **argv)
 
 		if (client_iob.alive && telnet_getline(&client_iob,
 		    &server_iob)) {
-			debuglog(3, "client line buffer is \"%s\"\n",
+			debuglog(3, "client line buffer is \"%s\"",
 			    (char *)client_iob.line_buffer);
 			if (client_iob.line_buffer[0] != '\0')
 				do_client_cmd(&client_iob, &server_iob);
 		} else if (server_iob.alive && telnet_getline(&server_iob,
 		    &client_iob)) {
-			debuglog(3, "server line buffer is \"%s\"\n",
+			debuglog(3, "server line buffer is \"%s\"",
 			    (char *)server_iob.line_buffer);
 			if (server_iob.line_buffer[0] != '\0')
 				do_server_reply(&server_iob, &client_iob);
@@ -1243,7 +1231,7 @@ main(int argc, char **argv)
 			    FD_ISSET(client_data_socket, fdsp)) {
 				int rval;
 
-				debuglog(3, "xfer client to server\n");
+				debuglog(3, "xfer client to server");
 				rval = xfer_data("client to server",
 				    client_data_socket,
 				    server_data_socket,
@@ -1260,7 +1248,7 @@ main(int argc, char **argv)
 			    FD_ISSET(server_data_socket, fdsp)) {
 				int rval;
 
-				debuglog(3, "xfer server to client\n");
+				debuglog(3, "xfer server to client");
 				rval = xfer_data("server to client",
 				    server_data_socket,
 				    client_data_socket,

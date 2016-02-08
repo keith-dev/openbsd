@@ -1,4 +1,4 @@
-/*	$OpenBSD: tokenadm.c,v 1.3 2001/10/24 13:06:36 mpech Exp $	*/
+/*	$OpenBSD: tokenadm.c,v 1.6 2002/09/06 19:12:36 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 1995 Migration Associates Corp. All Rights Reserved
@@ -57,8 +57,8 @@ typedef enum {
 	ENONLY = 0x04,
 	DISONLY = 0x08,
 	ONECOL = 0x10,
-	REVERSE = 0x20,
-	} how_t;
+	REVERSE = 0x20
+} how_t;
 
 static	int	force_unlock(char *);
 static	int	process_record(char *, unsigned, unsigned);
@@ -102,7 +102,7 @@ main(int argc, char **argv)
 	if (setrlimit(RLIMIT_CORE, &cds) < 0)
 		syslog(LOG_ERR, "couldn't set core dump size to 0: %m");
 
-    	while ((c = getopt(argc, argv, "BDERT1bdem:ru")) != -1)
+	while ((c = getopt(argc, argv, "BDERT1bdem:ru")) != -1)
 		switch (c) {
 		case 'B':
 			if (what != LIST)
@@ -209,11 +209,10 @@ usage:
 			tt->name);
 		exit(1);
 	}
-		
 
 	argv += optind - 1;
 	while (*++argv)
-		switch(what) {
+		switch (what) {
 		case LIST:
 			if (tokendb_getrec(*argv, &tokenrec)) {
 				printf("%s: no such user\n", *argv);
@@ -333,7 +332,7 @@ retry:
 }
 
 /*
- * Force remove a user record-level lock.  
+ * Force remove a user record-level lock.
  */
 
 static	int

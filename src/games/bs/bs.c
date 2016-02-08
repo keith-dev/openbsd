@@ -1,4 +1,4 @@
-/*	$OpenBSD: bs.c,v 1.12 2002/02/18 06:45:26 deraadt Exp $	*/
+/*	$OpenBSD: bs.c,v 1.17 2002/08/09 09:54:30 pjanzen Exp $	*/
 /*
  * bs.c - original author: Bruce Holloway
  *		salvo option by: Chuck A DeGaul
@@ -11,10 +11,10 @@
  */
 
 #ifndef lint
-static char rcsid[] = "$OpenBSD: bs.c,v 1.12 2002/02/18 06:45:26 deraadt Exp $";
+static const char rcsid[] = "$OpenBSD: bs.c,v 1.17 2002/08/09 09:54:30 pjanzen Exp $";
 #endif
 
-/* #define _POSIX_SOURCE  */  /* (setegid, random) */
+/* #define _POSIX_SOURCE  */  /* ( random() ) */
 
 #include <sys/param.h>
 #include <sys/types.h>
@@ -334,13 +334,10 @@ static int rnd(int n)
 static void randomplace(int b, ship_t *ss)
 /* generate a valid random ship placement into px,py */
 {
-    register int bwidth = BWIDTH - ss->length;
-    register int bdepth = BDEPTH - ss->length;
-
     do {
-	ss->y = rnd(bdepth);
-	ss->x = rnd(bwidth);
 	ss->dir = rnd(2) ? E : S;
+	ss->x = rnd(BWIDTH - (ss->dir == E ? ss->length : 0));
+	ss->y = rnd(BDEPTH - (ss->dir == S ? ss->length : 0));
     } while
 	(!checkplace(b, ss, FALSE));
 }
@@ -637,8 +634,8 @@ static int getcoord(int atcpu)
 
 		getmouse(&myevent);
 		if (atcpu
-			&& myevent.y >= CY(0) && myevent.y <= CY(BDEPTH)
-			&& myevent.x >= CX(0) && myevent.x <= CX(BDEPTH))
+			&& myevent.y >= CY(0) && myevent.y < CY(BDEPTH)
+			&& myevent.x >= CX(0) && myevent.x < CX(BWIDTH))
 		{
 		    curx = CXINV(myevent.x);
 		    cury = CYINV(myevent.y);
@@ -980,6 +977,7 @@ static void randomfire(int *px, int *py)
 	else if (srchstep > cpulongest)
     {
 	     --srchstep; 
+	     randomfire(px, py);
     }
 	else
     {
@@ -1276,7 +1274,7 @@ void usage()
 
 static void do_options(int c, char *op[])
 {
-    register int i;
+    int i;
 
     if (c > 1)
     {
@@ -1327,8 +1325,8 @@ static void do_options(int c, char *op[])
 
 static int scount(int who)
 {
-    register int i, shots;
-    register ship_t *sp;
+    int i, shots;
+    ship_t *sp;
 
     if (who)
 	sp = cpuship;	/* count cpu shots */
@@ -1347,10 +1345,6 @@ static int scount(int who)
 
 int main(int argc, char *argv[])
 {
-    /* revoke privs */
-    setegid(getgid());
-    setgid(getgid());
-
     do_options(argc, argv);
 
     intro();
@@ -1369,7 +1363,7 @@ int main(int argc, char *argv[])
 		}
 		else  /* salvo */
 		{
-		    register int i;
+		    int i;
 
 		    i = scount(turn);
 		    while (i--)
@@ -1404,4 +1398,5 @@ int main(int argc, char *argv[])
 	(playagain());
     uninitgame(0);
     /*NOTREACHED*/
+    exit(0);
 }

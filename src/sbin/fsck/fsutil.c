@@ -1,4 +1,4 @@
-/*	$OpenBSD: fsutil.c,v 1.6 2002/02/19 19:39:38 millert Exp $	*/
+/*	$OpenBSD: fsutil.c,v 1.8 2002/09/06 21:16:16 deraadt Exp $	*/
 /*	$NetBSD: fsutil.c,v 1.2 1996/10/03 20:06:31 christos Exp $	*/
 
 /*
@@ -37,6 +37,7 @@
 static char rcsid[] = "$NetBSD: fsutil.c,v 1.2 1996/10/03 20:06:31 christos Exp $";
 #endif /* not lint */
 
+#include <sys/param.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -59,22 +60,20 @@ extern char *__progname;
 static void vmsg(int, const char *, va_list);
 
 void
-setcdevname(cd, pr)
-	const char *cd;
-	int pr;
+setcdevname(const char *cd, int pr)
 {
 	dev = cd;
 	preen = pr;
 }
 
 const char *
-cdevname()
+cdevname(void)
 {
 	return dev;
 }
 
 int
-hotroot()
+hotroot(void)
 {
 	return hot;
 }
@@ -92,10 +91,7 @@ errexit(const char *fmt, ...)
 }
 
 static void
-vmsg(fatal, fmt, ap)
-	int fatal;
-	const char *fmt;
-	va_list ap;
+vmsg(int fatal, const char *fmt, va_list ap)
 {
 	if (!fatal && preen)
 		(void) printf("%s: ", dev);
@@ -134,8 +130,7 @@ pwarn(const char *fmt, ...)
 }
 
 void
-perror(s)
-	const char *s;
+perror(const char *s)
 {
 	pfatal("%s (%s)", s, strerror(errno));
 }
@@ -152,13 +147,12 @@ panic(const char *fmt, ...)
 }
 
 char *
-unrawname(name)
-	char *name;
+unrawname(char *name)
 {
 	char *dp;
 	struct stat stb;
 
-	if ((dp = strrchr(name, '/')) == 0)
+	if ((dp = strrchr(name, '/')) == NULL)
 		return (name);
 	if (stat(name, &stb) < 0)
 		return (name);
@@ -171,25 +165,23 @@ unrawname(name)
 }
 
 char *
-rawname(name)
-	char *name;
+rawname(char *name)
 {
-	static char rawbuf[32];
+	static char rawbuf[MAXPATHLEN];
 	char *dp;
 
-	if ((dp = strrchr(name, '/')) == 0)
+	if ((dp = strrchr(name, '/')) == NULL)
 		return (0);
 	*dp = 0;
-	(void)strcpy(rawbuf, name);
+	(void)strlcpy(rawbuf, name, sizeof rawbuf);
 	*dp = '/';
-	(void)strcat(rawbuf, "/r");
-	(void)strcat(rawbuf, &dp[1]);
+	(void)strlcat(rawbuf, "/r", sizeof rawbuf);
+	(void)strlcat(rawbuf, &dp[1], sizeof rawbuf);
 	return (rawbuf);
 }
 
 char *
-blockcheck(origname)
-	char *origname;
+blockcheck(char *origname)
 {
 	struct stat stslash, stblock, stchar;
 	char *newname, *raw;
@@ -242,8 +234,7 @@ retry:
 
 
 void *
-emalloc(s)
-	size_t s;
+emalloc(size_t s)
 {
 	void *p;
 
@@ -257,9 +248,7 @@ emalloc(s)
 
 
 void *
-erealloc(p, s)
-	void *p;
-	size_t s;
+erealloc(void *p, size_t s)
 {
 	if (s == 0)
 		err(1, "realloc failed");
@@ -271,8 +260,7 @@ erealloc(p, s)
 
 
 char *
-estrdup(s)
-	const char *s;
+estrdup(const char *s)
 {
 	char *p = strdup(s);
 	if (p == NULL)

@@ -1,4 +1,4 @@
-#	$OpenBSD: services,v 1.40 2002/02/26 16:09:12 lebel Exp $
+#	$OpenBSD: services,v 1.45 2002/08/13 02:21:40 millert Exp $
 #
 # Network services, Internet style
 #
@@ -77,6 +77,8 @@ uucp-path	117/tcp
 nntp		119/tcp		readnews untp	# USENET News Transfer Protocol
 ntp		123/tcp
 ntp		123/udp				# Network Time Protocol
+pwdgen		129/tcp				# Password Generator Protocol
+pwdgen		129/udp				# Password Generator Protocol
 epmap		135/tcp				# DCE endpoint resolution
 epmap		135/udp
 netbios-ns	137/tcp				# NETBIOS Name Service
@@ -85,8 +87,8 @@ netbios-dgm	138/tcp				# NETBIOS Datagram Service
 netbios-dgm	138/udp
 netbios-ssn	139/tcp				# NETBIOS session service
 netbios-ssn	139/udp
-imap		143/tcp		imap2 		# Internet Message Access Proto
-imap		143/udp		imap2 		# Internet Message Access Proto
+imap		143/tcp		imap2		# Internet Message Access Proto
+imap		143/udp		imap2		# Internet Message Access Proto
 bftp		152/tcp				# Background File Transfer Proto
 snmp		161/udp				# Simple Net Mgmt Proto
 snmp-trap	162/udp		snmptrap	# Traps for SNMP
@@ -126,15 +128,19 @@ svrloc		427/tcp				# Server Location
 svrloc		427/udp
 nnsp		433/tcp		usenet		# Network News Transfer
 https		443/tcp				# secure http (SSL)
-kpasswd		464/udp				# Kerberos 5 password changing
 kpasswd		464/tcp				# Kerberos 5 password changing
+kpasswd		464/udp				# Kerberos 5 password changing
 photuris	468/tcp				# Photuris Key Management
 photuris	468/udp
 isakmp		500/udp				# ISAKMP key management
 kshell		544/tcp		krcmd		# Kerberos remote shell
-ekshell		545/tcp		      		# Kerberos encrypted shell
+ekshell		545/tcp				# Kerberos encrypted shell
 submission	587/tcp		msa		# mail message submission
 submission	587/udp		msa		# mail message submission
+imaps		993/tcp				# imap4 protocol over TLS/SSL
+imaps		993/udp				# imap4 protocol over TLS/SSL
+pop3s		995/tcp		spop3		# pop3 protocol over TLS/SSL
+pop3s		995/udp		spop3		# pop3 protocol over TLS/SSL
 #
 # UNIX specific services
 #
@@ -185,6 +191,8 @@ ingreslock	1524/tcp
 ingreslock	1524/udp
 prospero-np	1525/tcp		# Prospero non-privileged
 prospero-np	1525/udp
+pptp		1723/tcp		# Point-to-Point Tunneling Protocol
+pptp		1723/udp		# Point-to-Point Tunneling Protocol
 nfsd		2049/udp	nfs	# NFS server
 nfsd		2049/tcp	nfs	# NFS server
 eklogin		2105/tcp		# Kerberos encrypted rlogin
@@ -227,15 +235,15 @@ kauth		2120/tcp			# Remote kauth
 # AFS Services
 #
 afs3-fileserver		7000/udp	# AFS fileserver
-afs3-callback       	7001/udp	# AFS callback server
-afs3-prserver       	7002/udp	# AFS protection server
+afs3-callback		7001/udp	# AFS callback server
+afs3-prserver		7002/udp	# AFS protection server
 afs3-vlserver		7003/udp	# AFS volumelocation server
-afs3-kaserver       	7004/udp	# AFS kerberos authentication server
-afs3-volser         	7005/udp	# AFS volume server
-afs3-errors         	7006/udp	# AFS error server ?
-afs3-bos            	7007/udp	# AFS basic over-see server ?
-afs3-update         	7008/udp	# AFS server to server update
-afs3-rmtsys         	7009/udp	# AFS remote cache manager service
+afs3-kaserver		7004/udp	# AFS kerberos authentication server
+afs3-volser		7005/udp	# AFS volume server
+afs3-errors		7006/udp	# AFS error server ?
+afs3-bos		7007/udp	# AFS basic over-see server ?
+afs3-update		7008/udp	# AFS server to server update
+afs3-rmtsys		7009/udp	# AFS remote cache manager service
 #
 # Unofficial services
 #
@@ -251,6 +259,7 @@ cvspserver	2401/tcp		# cvs pserver
 webster		2627/tcp		# Network dictionary
 webster		2627/udp
 mysql		3306/tcp		# MySQL
+postgresql	5432/tcp		# PostgreSQL
 canna		5680/tcp		# Kana->Kanji server
 icb		7326/tcp		# Internet Citizen's Band
 hunt		26740/udp		# hunt(6)

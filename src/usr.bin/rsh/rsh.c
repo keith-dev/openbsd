@@ -1,4 +1,4 @@
-/*	$OpenBSD: rsh.c,v 1.25 2002/02/19 19:39:39 millert Exp $	*/
+/*	$OpenBSD: rsh.c,v 1.30 2002/08/12 02:31:43 itojun Exp $	*/
 
 /*-
  * Copyright (c) 1983, 1990 The Regents of the University of California.
@@ -41,7 +41,7 @@ char copyright[] =
 
 #ifndef lint
 /*static char sccsid[] = "from: @(#)rsh.c	5.24 (Berkeley) 7/1/91";*/
-static char rcsid[] = "$OpenBSD: rsh.c,v 1.25 2002/02/19 19:39:39 millert Exp $";
+static char rcsid[] = "$OpenBSD: rsh.c,v 1.30 2002/08/12 02:31:43 itojun Exp $";
 #endif /* not lint */
 
 #include <sys/types.h>
@@ -74,7 +74,7 @@ char dst_realm_buf[REALM_SZ], *dest_realm;
 void warning(const char *, ...);
 void desrw_set_key(des_cblock *, des_key_schedule *);
 int des_read(int, char *, int);
-int des_write(int, char *, int);
+int des_write(int, void *, int);
 
 int krcmd(char **, u_short, char *, char *, int *, char *);
 int krcmd_mutual(char **, u_short, char *, char *, int *, char *,
@@ -82,6 +82,8 @@ int krcmd_mutual(char **, u_short, char *, char *, int *, char *,
 #endif
 
 void usage(void);
+void sendsig(int);
+char *copyargs(char **argv);
 
 void talk(int, sigset_t *, int, int);
 
@@ -91,19 +93,16 @@ void talk(int, sigset_t *, int, int);
 int rfd2;
 
 int
-main(argc, argv)
-	int argc;
-	char **argv;
+main(int argc, char *argv[])
 {
 	extern char *optarg;
 	extern int optind;
 	struct passwd *pw;
 	struct servent *sp;
 	sigset_t mask, omask;
-	int argoff, asrsh, ch, dflag, nflag, one, pid = 0, rem, uid;
-	char *p;
-	char *args, *host, *user, *copyargs();
-	void sendsig();
+	int argoff, asrsh, ch, dflag, nflag, one, rem, uid;
+	char *args, *host, *user, *p;
+	pid_t pid = 0;
 
 	argoff = asrsh = dflag = nflag = 0;
 	one = 1;
@@ -173,14 +172,19 @@ main(argc, argv)
 	if (!host && !(host = argv[optind++]))
 		usage();
 
-	/* if no further arguments, must have been called as rlogin. */
+	/* if no command, login to remote host via rlogin or telnet. */
 	if (!argv[optind]) {
-		if (asrsh)
-			*argv = "rlogin";
 		seteuid(getuid());
 		setuid(getuid());
+		if (asrsh)
+			*argv = "rlogin";
 		execv(_PATH_RLOGIN, argv);
-		(void)fprintf(stderr, "rsh: can't exec %s.\n", _PATH_RLOGIN);
+		if (errno == ENOENT) {
+			if (asrsh)
+				*argv = "telnet";
+			execv(_PATH_TELNET, argv);
+		}
+		(void)fprintf(stderr, "rsh: can't exec %s.\n", _PATH_TELNET);
 		exit(1);
 	}
 
@@ -326,10 +330,7 @@ try_connect:
 }
 
 void
-talk(nflag, omask, pid, rem)
-	int nflag, pid;
-	sigset_t *omask;
-	int rem;
+talk(int nflag, sigset_t *omask, pid_t pid, int rem)
 {
 	int cc, wc;
 	char *bp;
@@ -345,6 +346,8 @@ reread:		errno = 0;
 		bp = buf;
 
 rewrite:	FD_ZERO(&rembits);
+		if (rem >= FD_SETSIZE)
+			errx(1, "descriptor too large");
                 FD_SET(rem, &rembits);
 		if (select(rem + 1, 0, &rembits, 0, 0) < 0) {
 			if (errno != EINTR) {
@@ -379,7 +382,11 @@ done:
 
 	sigprocmask(SIG_SETMASK, omask, NULL);
 	FD_ZERO(&readfrom);
+	if (rfd2 >= FD_SETSIZE)
+		errx(1, "descriptor too large");
 	FD_SET(rfd2, &readfrom);
+	if (rem >= FD_SETSIZE)
+		errx(1, "descriptor too large");
 	FD_SET(rem, &readfrom);
 	do {
 		FD_COPY(&readfrom, &ready);
@@ -423,8 +430,7 @@ done:
 }
 
 void
-sendsig(signo)
-	char signo;
+sendsig(int signo)
 {
 	int save_errno = errno;
 
@@ -456,12 +462,10 @@ warning(const char *fmt, ...)
 #endif
 
 char *
-copyargs(argv)
-	char **argv;
+copyargs(char **argv)
 {
+	char **ap, *p, *args;
 	int cc;
-	char **ap, *p;
-	char *args, *malloc();
 
 	cc = 0;
 	for (ap = argv; *ap; ++ap)
@@ -483,7 +487,7 @@ void
 usage(void)
 {
 	(void)fprintf(stderr,
-	    "usage: rsh [-nd%s]%s[-l login] host [command]\n",
+	    "usage: rsh [-Kdn%s]%s[-l username] hostname [command]\n",
 #ifdef KERBEROS
 	    "x", " [-k realm] ");
 #else

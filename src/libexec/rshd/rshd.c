@@ -1,4 +1,4 @@
-/*	$OpenBSD: rshd.c,v 1.44 2002/03/16 18:38:19 millert Exp $	*/
+/*	$OpenBSD: rshd.c,v 1.48 2002/09/06 19:43:54 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 1988, 1989, 1992, 1993, 1994
@@ -41,7 +41,7 @@ static char copyright[] =
 
 #ifndef lint
 /* from: static char sccsid[] = "@(#)rshd.c	8.2 (Berkeley) 4/6/94"; */
-static char *rcsid = "$OpenBSD: rshd.c,v 1.44 2002/03/16 18:38:19 millert Exp $";
+static char *rcsid = "$OpenBSD: rshd.c,v 1.48 2002/09/06 19:43:54 deraadt Exp $";
 #endif /* not lint */
 
 /*
@@ -119,13 +119,12 @@ void desrw_set_key(des_cblock *, des_key_schedule *);
 #endif
 
 int
-main(argc, argv)
-	int argc;
-	char *argv[];
+main(int argc, char *argv[])
 {
 	extern int __check_rhosts_file;
 	struct linger linger;
-	int ch, on = 1, fromlen;
+	int ch, on = 1;
+	socklen_t fromlen;
 	struct sockaddr_storage from;
 
 	openlog("rshd", LOG_PID | LOG_ODELAY, LOG_DAEMON);
@@ -205,8 +204,7 @@ char	*envinit[1] = { 0 };
 extern char **environ;
 
 void
-doit(fromp)
-	struct sockaddr *fromp;
+doit(struct sockaddr *fromp)
 {
 	extern char *__rcmd_errstr;	/* syslog hook from libc/net/rcmd.c. */
 	struct addrinfo hints, *res, *res0;
@@ -215,8 +213,8 @@ doit(fromp)
 	u_short port;
 	in_port_t *portp;
 	fd_set ready, readfrom;
-	int cc, nfd, pv[2], pid, s = 0;
-	int one = 1;
+	int cc, nfd, pv[2], s = 0, one = 1;
+	pid_t pid;
 	char *hostname, *errorstr, *errorhost = (char *) NULL;
 	char *cp, sig, buf[BUFSIZ];
 	char cmdbuf[NCARGS+1], locuser[_PW_NAME_LEN+1], remuser[_PW_NAME_LEN+1];
@@ -284,29 +282,30 @@ doit(fromp)
 	}
 
 #ifdef IP_OPTIONS
-	if (fromp->sa_family == AF_INET)
-      {
-	struct ipoption opts;
-	int optsize = sizeof(opts), ipproto, i;
-	struct protoent *ip;
+	if (fromp->sa_family == AF_INET) {
+		struct ipoption opts;
+		socklen_t optsize = sizeof(opts);
+		int ipproto, i;
+		struct protoent *ip;
 
-	if ((ip = getprotobyname("ip")) != NULL)
-		ipproto = ip->p_proto;
-	else
-		ipproto = IPPROTO_IP;
-	if (!getsockopt(0, ipproto, IP_OPTIONS, (char *)&opts, &optsize) &&
-	    optsize != 0) {
-		for (i = 0; (void *)&opts.ipopt_list[i] - (void *)&opts <
-		    optsize; ) {	
-			u_char c = (u_char)opts.ipopt_list[i];
-			if (c == IPOPT_LSRR || c == IPOPT_SSRR)
-				exit(1);
-			if (c == IPOPT_EOL)
-				break;
-			i += (c == IPOPT_NOP) ? 1 : (u_char)opts.ipopt_list[i+1];
+		if ((ip = getprotobyname("ip")) != NULL)
+			ipproto = ip->p_proto;
+		else
+			ipproto = IPPROTO_IP;
+		if (!getsockopt(0, ipproto, IP_OPTIONS, (char *)&opts,
+		    &optsize) && optsize != 0) {
+			for (i = 0; (void *)&opts.ipopt_list[i] - (void *)&opts <
+			    optsize; ) {
+				u_char c = (u_char)opts.ipopt_list[i];
+				if (c == IPOPT_LSRR || c == IPOPT_SSRR)
+					exit(1);
+				if (c == IPOPT_EOL)
+					break;
+				i += (c == IPOPT_NOP) ? 1 :
+				    (u_char)opts.ipopt_list[i+1];
+			}
 		}
 	}
-      }
 #endif
 
 #ifdef	KERBEROS
@@ -443,7 +442,7 @@ doit(fromp)
 		kdata = (AUTH_DAT *) authbuf;
 		ticket = (KTEXT) tickbuf;
 		authopts = 0L;
-		strcpy(instance, "*");
+		strlcpy(instance, "*", sizeof instance);
 		version[VERSION_SIZE - 1] = '\0';
 #ifdef CRYPT
 		if (doencrypt) {
@@ -794,9 +793,7 @@ error(const char *fmt, ...)
 }
 
 void
-getstr(buf, cnt, err)
-	char *buf, *err;
-	int cnt;
+getstr(char *buf, int cnt, char *err)
 {
 	char c;
 
@@ -820,8 +817,7 @@ getstr(buf, cnt, err)
  * interpreted as such.
  */
 int
-local_domain(h)
-	char *h;
+local_domain(char *h)
 {
 	char localhost[MAXHOSTNAMELEN];
 	char *p1, *p2;
@@ -836,8 +832,7 @@ local_domain(h)
 }
 
 char *
-topdomain(h)
-	char *h;
+topdomain(char *h)
 {
 	char *p, *maybe = NULL;
 	int dots = 0;
@@ -853,7 +848,7 @@ topdomain(h)
 }
 
 void
-usage()
+usage(void)
 {
 
 	syslog(LOG_ERR, "usage: rshd [-%s]", OPTIONS);

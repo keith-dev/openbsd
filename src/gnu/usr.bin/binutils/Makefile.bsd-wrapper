@@ -1,6 +1,6 @@
-#	$OpenBSD: Makefile.bsd-wrapper,v 1.45 2002/04/02 21:56:33 fgsch Exp $
+#	$OpenBSD: Makefile.bsd-wrapper,v 1.48 2002/08/11 22:51:48 art Exp $
 
-NEW_BINUTILS=alpha mips powerpc hppa sparc64
+NEW_BINUTILS=alpha mips powerpc hppa sparc64 sparc
 
 SUBDIRS=	opcodes bfd
 ALL_X11_MODULES=
@@ -25,11 +25,11 @@ INSTALL_X11_MODULES+=install-gdb
 
 .for _arch in ${MACHINE_ARCH}
 .  if !empty(NEW_BINUTILS:M${_arch})
-SUBDIRS+=	binutils ld gas gprof
+SUBDIRS+=	binutils ld gas
 MAN+=		binutils/ar.1 binutils/nm.1 \
 		binutils/objcopy.1 binutils/ranlib.1 \
 		binutils/size.1 binutils/strings.1 binutils/strip.1 \
-		gas/doc/as.1 gprof/gprof.1 ld/ld.1
+		gas/doc/as.1 ld/ld.1
 .  endif
 .endfor
 
@@ -86,6 +86,19 @@ install: maninstall
 
 clean cleandir:
 	-@if [ -e Makefile ]; then ${MAKE} distclean; fi
+
+prereq: config.status
+	cd ${.OBJDIR}/bfd && ${MAKE} bfd.h
+	# we don't install ansidecl.h, we merge it into the file that
+	# needs it instead.
+	sed -e '/^#include "ansidecl.h"/r${.CURDIR}/include/ansidecl.h' -e '//d' \
+		bfd/bfd.h >bfd/mybfd.h
+
+includes:
+	install -C -o ${BINOWN} -g ${BINGRP} -m ${NONBINMODE} \
+		${.CURDIR}/include/bfdlink.h ${DESTDIR}/usr/include
+	install -C -o ${BINOWN} -g ${BINGRP} -m ${NONBINMODE} \
+		bfd/mybfd.h ${DESTDIR}/usr/include/bfd.h
 
 depend:
 	# Nothing here so far...

@@ -1,3 +1,5 @@
+/*	$OpenBSD: mod_vhost_alias.c,v 1.6 2002/08/15 16:06:11 henning Exp $ */
+
 /* ====================================================================
  * The Apache Software License, Version 1.1
  *
@@ -183,6 +185,8 @@ static const char *vhost_alias_set(cmd_parms *cmd, void *dummy, char *map)
     else {
 	return "INTERNAL ERROR: unknown command info";
     }
+
+    ap_server_strip_chroot(map, 1);
 
     if (!(ap_os_is_path_absolute(map))) {
 	if (strcasecmp(map, "none")) {

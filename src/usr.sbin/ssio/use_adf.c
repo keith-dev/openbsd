@@ -1,4 +1,4 @@
-static char *rcs_id = "$Id: use_adf.c,v 1.5 2000/02/01 03:24:14 deraadt Exp $";
+static char *rcs_id = "$Id: use_adf.c,v 1.7 2002/06/01 20:27:15 deraadt Exp $";
 /*
  * Copyright (c) 1995 Kenneth Stailey
  * All rights reserved.
@@ -51,7 +51,7 @@ void
 usage(char *prog_name)
 {
   fprintf(stderr, "usage: %s [-l <logical name>]\n", prog_name);
-  exit(-1);
+  exit(1);
 }
 
 main(int argc, char *argv[])
@@ -83,8 +83,7 @@ main(int argc, char *argv[])
     exit(1);
   }
 	
-  strcpy(device, "/dev/");
-  strcat(device, logical_name);
+  snprintf(device, sizeof device, "/dev/%s", logical_name);
 
   if ((sfd = open(device, O_RDONLY)) < 0) {
     fprintf(stderr, "open of %s failed: ", device);

@@ -1,6 +1,6 @@
-/*	$OpenBSD: ldasm.S,v 1.9 2002/03/17 00:22:04 art Exp $	*/
+/*	$OpenBSD: ldasm.S,v 1.13 2002/08/11 18:41:17 drahn Exp $	*/
 /*	$NetBSD: rtld_start.S,v 1.5 2001/08/14 22:17:48 eeh Exp $	*/
-	
+
 /*
  * Copyright (c) 2001 Jason L. Wright (jason@thought.net)
  * All rights reserved.
@@ -50,8 +50,8 @@
  *    documentation and/or other materials provided with the distribution.
  * 3. All advertising materials mentioning features or use of this software
  *    must display the following acknowledgement:
- *        This product includes software developed by the NetBSD
- *        Foundation, Inc. and its contributors.
+ *	This product includes software developed by the NetBSD
+ *	Foundation, Inc. and its contributors.
  * 4. Neither the name of The NetBSD Foundation nor the names of its
  *    contributors may be used to endorse or promote products derived
  *    from this software without specific prior written permission.
@@ -83,11 +83,11 @@
  * _rtld() expects the stack pointer to point to two longwords for argument
  *	return followed by argc, etc.  We need to create a pointer to
  *	&argc + 16 and pass that in.  The return args will be in those locations.
- * 
+ *
  * NB:	We are violating the ELF spec by passing a pointer to the ps strings in
- * 	%g1 instead of a termination routine.
+ *	%g1 instead of a termination routine.
  */
-	
+
 /* Offset of ARGC from bottom of stack */
 #define	ARGC	(16*8)
 /* XXX - DL_DATA_SIZE should be (9*8), but I can't think right now. */
@@ -109,18 +109,18 @@ _dl_start:
 	call	_dl_boot_bind		! _dl_boot_bind(sp,loff,dynp,dl_data)
 	 mov	%l3, %o3
 
-	mov	%l3, %o4
+	mov	%l3, %o3
 	ldx	[%l0], %l3		! argc = *sp
 	sllx	%l3, 3, %l3		! argc *= sizeof(long)
 	addx	%l0, 8, %o0		! argv = [sp + argc]
 	addx	%l0, 16, %o1		! envp = sp + 16 +
 	addx	%o1, %l3, %o1		!	+ argc
 
-	addx	%o4, (7*8), %l2
+	addx	%o3, (7*8), %l2
 	ldx	[%l2], %o2		! loff = dl_data[AUX_base];
 
 	call	_dl_boot		! _dl_boot(argv,envp,loff,dynp,dl_data)
-	 mov	0, %o3			! dynp = 0
+	 nop
 
 	add	%sp, DL_DATA_SIZE, %sp		! restore stack
 	mov	%l1, %g1		! restore ps_strings
@@ -140,7 +140,7 @@ _dl_start:
 	 *
 	 * The first two entries of PLT2 contain the xword object pointer.
 	 *
-	 * These routines are called with two longword arguments, 
+	 * These routines are called with two longword arguments,
 	 * x and y.  To calculate the address of the entry,
 	 * _dl_bind_start_1(x, y) does:
 	 *
@@ -156,7 +156,7 @@ _dl_start:
 	 */
 
 	/* NOTE: _dl_bind_start_0 is untested.  Hence the debug stuff */
-	
+
 	.section	".text"
 	.align	4
 	.global	_dl_bind_start_0
@@ -164,9 +164,9 @@ _dl_start:
 _dl_bind_start_0:	# (x, y)
 #if 0
 	call	_dl_bind_start_0_stub
-	 ldx     [%o1 + (10*4)], %l7
+	 ldx	[%o1 + (10*4)], %l7
 	mov	%o0, %o1
-	
+
 	call	_dl_bind
 	 mov	%l7, %o0
 #else
@@ -178,7 +178,7 @@ _dl_bind_start_0:	# (x, y)
 	sdivx	%l0, 5120, %l1		/* Calculate i/5120 */
 	ldx	[%o1 + (10*4)], %o0	/* Load object pointer from PLT2 */
 	sub	%l0, %l1, %l2		/* And i%5120 */
-	
+
 	/* Let the division churn for a bit. */
 	sdivx	%l2, 14, %l4		/* (i%5120)/24 */
 
@@ -190,29 +190,28 @@ _dl_bind_start_0:	# (x, y)
 	sethi	%hi(32768), %l6
 	add	%l3, %l4, %l5		/* %l5 = (i/5120)*160 + (i%5120)/24; */
 	add	%l5, %l6, %l5
-	
+
 	call	_dl_bind		/* Call _dl_bind(obj, offset) */
 	 mov	%l5, %o1
 
 	jmp	%o0			/* return value == function address */
 	 restore			/* Dump our stack frame */
-#endif	
-	
+#endif
+
 	.section	".text"
 	.align	4
 	.global	_dl_bind_start_1
 	.type	_dl_bind_start_1,@function
 _dl_bind_start_1:	# (x, y)
 	srax	%o0, 15, %o2		/* %o0 is the index to our PLT slot */
-	
+
 	ldx	[%o1 + 8], %o0		/* The object pointer is at [%o1 + 8] */
-	
+
 	call	_dl_bind		/* Call _dl_bind(obj, offset) */
 	 mov	%o2, %o1
 
 	jmp	%o0			/* return value == function address */
 	 restore			/* Dump our stack frame */
-	
 
 	.section ".text"
 	.align 4
@@ -220,7 +219,7 @@ _dl_bind_start_1:	# (x, y)
 	.type _dl_close,@function
 _dl_close:
 	mov SYS_close | SYSCALL_G2RFLAG, %g1	! call sys_close
-	add %o7, 8, %g2				! just return on sucess
+	add %o7, 8, %g2				! just return on success
 	t ST_SYSCALL				! off to wonderland
 	retl
 	 sub %g0, %o0, %o0			! error: result = -errno
@@ -232,7 +231,7 @@ _dl_close:
 	.type _dl_exit,@function
 _dl_exit:
 	mov SYS_exit | SYSCALL_G2RFLAG, %g1	! call sys_exit
-	add %o7, 8, %g2				! just return on sucess
+	add %o7, 8, %g2				! just return on success
 	t ST_SYSCALL				! off to wonderland
 	retl
 	 sub %g0, %o0, %o0			! error: result = -errno
@@ -252,11 +251,11 @@ _dl_issetugid:
 
 	.section ".text"
 	.align 4
-	.global _dl___syscall
-	.type _dl___syscall,@function
-_dl___syscall:
+	.global _dl__syscall
+	.type _dl__syscall,@function
+_dl__syscall:
 	mov SYS___syscall | SYSCALL_G2RFLAG, %g1	! call sys_exit
-	add %o7, 8, %g2				! just return on sucess
+	add %o7, 8, %g2				! just return on success
 	t ST_SYSCALL				! off to wonderland
 	retl
 	 sub %g0, %o0, %o0			! error: result = -errno
@@ -268,7 +267,7 @@ _dl___syscall:
 	.type _dl_munmap,@function
 _dl_munmap:
 	mov SYS_munmap | SYSCALL_G2RFLAG, %g1	! calling sys_mmap
-	add %o7, 8, %g2				! just return on sucess
+	add %o7, 8, %g2				! just return on success
 	t ST_SYSCALL				! off to wonderland
 	retl
 	 sub %g0, %o0, %o0			! error: result = -errno
@@ -280,7 +279,7 @@ _dl_munmap:
 	.type _dl_mprotect,@function
 _dl_mprotect:
 	mov SYS_mprotect | SYSCALL_G2RFLAG, %g1	! calling sys_mprotect
-	add %o7, 8, %g2				! just return on sucess
+	add %o7, 8, %g2				! just return on success
 	t ST_SYSCALL				! off to wonderland
 	retl
 	 sub %g0, %o0, %o0			! error: result = -errno
@@ -292,7 +291,7 @@ _dl_mprotect:
 	.type _dl_open,@function
 _dl_open:
 	mov SYS_open | SYSCALL_G2RFLAG, %g1	! calling sys_open
-	add %o7, 8, %g2				! just return on sucess
+	add %o7, 8, %g2				! just return on success
 	t ST_SYSCALL				! off to wonderland
 	retl
 	 sub %g0, %o0, %o0			! error: result = -errno
@@ -304,7 +303,7 @@ _dl_open:
 	.type _dl_read,@function
 _dl_read:
 	mov SYS_read | SYSCALL_G2RFLAG, %g1	! calling sys_read
-	add %o7, 8, %g2				! just return on sucess
+	add %o7, 8, %g2				! just return on success
 	t ST_SYSCALL				! off to wonderland
 	retl
 	 sub %g0, %o0, %o0			! error: result = -errno
@@ -316,7 +315,7 @@ _dl_read:
 	.type _dl_write,@function
 _dl_write:
 	mov SYS_write | SYSCALL_G2RFLAG, %g1	! calling sys_write
-	add %o7, 8, %g2				! just return on sucess
+	add %o7, 8, %g2				! just return on success
 	t ST_SYSCALL				! off to wonderland
 	retl
 	 sub %g0, %o0, %o0			! error: result = -errno
@@ -328,7 +327,43 @@ _dl_write:
 	.type _dl_stat,@function
 _dl_stat:
 	mov SYS_stat | SYSCALL_G2RFLAG, %g1	! call sys_stat
-	add %o7, 8, %g2				! just return on sucess
+	add %o7, 8, %g2				! just return on success
 	t ST_SYSCALL				! off to wonderland
 	retl
 	 sub %g0, %o0, %o0			! error: result = -errno
+
+
+	.section ".text"
+	.align 4
+	.globl _dl_fstat
+	.type _dl_fstat,@function
+_dl_fstat:
+	mov  SYS_fstat | SYSCALL_G2RFLAG, %g1	! call sys_fstat
+	add %o7, 8, %g2				! just return on success
+	t ST_SYSCALL				! off to wonderland
+	retl
+	 sub %g0, %o0, %o0                      ! error: result = -errno
+
+
+	.section ".text"
+	.align 4
+	.globl _dl_fcntl
+	.type _dl_fcntl,@function
+_dl_fcntl:
+	mov  SYS_fcntl | SYSCALL_G2RFLAG, %g1	! call sys_fstat
+	add %o7, 8, %g2				! just return on success
+	t ST_SYSCALL				! off to wonderland
+	retl
+	 sub %g0, %o0, %o0                      ! error: result = -errno
+
+
+	.section ".text"
+	.align 4
+	.globl _dl_getdirentries
+	.type _dl_getdirentries,@function
+_dl_getdirentries:
+	mov  SYS_getdirentries | SYSCALL_G2RFLAG, %g1	! call sys_fstat
+	add %o7, 8, %g2					! just return on success
+	t ST_SYSCALL					! off to wonderland
+	retl
+	 sub %g0, %o0, %o0                      ! error: result = -errno

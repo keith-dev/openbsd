@@ -1,4 +1,4 @@
-/*	$OpenBSD: print-ike.c,v 1.10 2002/02/19 19:39:40 millert Exp $	*/
+/*	$OpenBSD: print-ike.c,v 1.15 2002/09/23 04:10:14 millert Exp $	*/
 
 /*
  * Copyright (c) 1990, 1991, 1992, 1993, 1994, 1995, 1996, 1997, 1998, 1999
@@ -29,7 +29,7 @@
 
 #ifndef lint
 static const char rcsid[] =
-    "@(#) $Header: /cvs/src/usr.sbin/tcpdump/print-ike.c,v 1.10 2002/02/19 19:39:40 millert Exp $ (XXX)";
+    "@(#) $Header: /cvs/src/usr.sbin/tcpdump/print-ike.c,v 1.15 2002/09/23 04:10:14 millert Exp $ (XXX)";
 #endif
 
 #include <sys/param.h>
@@ -295,6 +295,7 @@ ike_pl_transform_print (u_char *buf, int len, u_char doi)
 {
 	const char *ah[] = IPSEC_AH_INITIALIZER;
 	const char *esp[] = IPSEC_ESP_INITIALIZER;
+	const char *ipcomp[] = IPCOMP_INITIALIZER;
 	u_char *attr = buf + 4;
 
 	printf("\n\t%stransform: %u ID: ", ike_tab_offset(), buf[0]);
@@ -321,6 +322,12 @@ ike_pl_transform_print (u_char *buf, int len, u_char doi)
 			else
 				printf("%d(unknown)", buf[1]);
 			break;
+		case PROTO_IPCOMP:
+			if (buf[1] < (sizeof ipcomp / sizeof ipcomp[0]))
+				printf("%s", ipcomp[buf[1]]);
+			else
+				printf("%d(unknown)", buf[1]);
+			break;
 		default:
 			printf("%d(unknown)", buf[1]);
 		}
@@ -336,23 +343,28 @@ ike_pl_transform_print (u_char *buf, int len, u_char doi)
 void
 ike_pl_proposal_print (u_char *buf, int len, u_char doi)
 {
+	u_int8_t i, p_id = buf[1], spisz = buf[2];
+
 	printf(" proposal: %d proto: %s spisz: %d xforms: %d",
-	    buf[0], (buf[1] < (sizeof ike / sizeof ike[0]) ? ike[buf[1]] :
-	    "(unknown)"), buf[2], buf[3]);
+	    buf[0], (p_id < (sizeof ike / sizeof ike[0]) ? ike[p_id] :
+	    "(unknown)"), spisz, buf[3]);
 
 	/* We need to store this for upcoming ike_attribute_print call. */
-	xform_proto = buf[1];
+	xform_proto = p_id;
 
-	if (buf[2]) {
-		/* XXX it is possible that spisz may be != 4 ... */
-		printf(" SPI: 0x%08x",
-		    buf[4]<<24 | buf[5]<<16 | buf[6]<<8 | buf[7]);
+	if (spisz) {
+		if (p_id == PROTO_IPCOMP)
+			printf(" CPI: 0x");
+		else
+			printf(" SPI: 0x");
+		for (i = 0; i < spisz && (i + 4) < len; i++)
+			printf("%02x", buf[i + 4]);
 		doi = IPSEC_DOI;
 	} else
 		doi = ISAKMP_DOI;
 
 	if ((char)buf[3] > 0)
-		ike_pl_print(PAYLOAD_TRANSFORM, buf+4+buf[2], doi);
+		ike_pl_print(PAYLOAD_TRANSFORM, buf + 4 + buf[2], doi);
 }
 
 void
@@ -411,7 +423,7 @@ ipsec_id_print (u_char *buf, int len, u_char doi)
 	case IPSEC_ID_FQDN:
 	case IPSEC_ID_USER_FQDN:
 		printf("\"");
-		for(p = buf + 4; (int)(p - buf) < len; p++)
+		for(p = buf + 4; (int)(p - buf) < len - 4; p++)
 			printf("%c",(isprint(*p) ? *p : '.'));
 		printf("\"");
 		break;
@@ -675,6 +687,7 @@ ike_pl_print (u_char type, u_char *buf, u_char doi)
 		break;
 
 	default:
+		break;
 	}
 	ike_tab_level--;
 

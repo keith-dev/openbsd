@@ -1,4 +1,4 @@
-/*	$OpenBSD: mount_portal.c,v 1.18 2002/02/16 21:27:36 millert Exp $	*/
+/*	$OpenBSD: mount_portal.c,v 1.22 2002/09/06 21:16:34 deraadt Exp $	*/
 /*	$NetBSD: mount_portal.c,v 1.8 1996/04/13 01:31:54 jtc Exp $	*/
 
 /*
@@ -47,7 +47,7 @@ char copyright[] =
 #if 0
 static char sccsid[] = "@(#)mount_portal.c	8.6 (Berkeley) 4/26/95";
 #else
-static char rcsid[] = "$OpenBSD: mount_portal.c,v 1.18 2002/02/16 21:27:36 millert Exp $";
+static char rcsid[] = "$OpenBSD: mount_portal.c,v 1.22 2002/09/06 21:16:34 deraadt Exp $";
 #endif
 #endif /* not lint */
 
@@ -169,7 +169,7 @@ main(argc, argv)
 	un.sun_family = AF_UNIX;
 	if (sizeof(_PATH_TMPPORTAL) >= sizeof(un.sun_path))
 		errx(1, "portal socket name too long");
-	(void)strcpy(un.sun_path, _PATH_TMPPORTAL);
+	(void)strlcpy(un.sun_path, _PATH_TMPPORTAL, sizeof un.sun_path);
 	so = mkstemp(un.sun_path);
 	if (so < 0)
 		err(1, "can't create portal socket name: %s", un.sun_path);
@@ -194,7 +194,7 @@ main(argc, argv)
 	 */
 	daemon(0, 0);
 
-	(void)snprintf(tag, sizeof(tag), "portal:%d", getpid());
+	(void)snprintf(tag, sizeof(tag), "portal:%ld", (long)getpid());
 	args.pa_config = tag;
 
 	/*
@@ -220,13 +220,15 @@ main(argc, argv)
 
 	fdssize = howmany(so+1, NFDBITS) * sizeof(fd_mask);
 	fdsp = (fd_set *)malloc(fdssize);
+	if (fdsp == NULL)
+		err(1, "malloc");
 
 	/*
 	 * Just loop waiting for new connections and activating them
 	 */
 	for (;;) {
 		struct sockaddr_un un2;
-		int len2 = sizeof(un2);
+		socklen_t salen = sizeof(un2);
 		int so2;
 		pid_t pid;
 		int rc;
@@ -256,7 +258,7 @@ main(argc, argv)
 		}
 		if (rc == 0)
 			break;
-		so2 = accept(so, (struct sockaddr *) &un2, &len2);
+		so2 = accept(so, (struct sockaddr *) &un2, &salen);
 		if (so2 < 0) {
 			/*
 			 * The unmount function does a shutdown on the socket

@@ -1,9 +1,11 @@
-#	$OpenBSD: Makefile,v 1.20 2002/02/15 20:28:57 deraadt Exp $
+#	$OpenBSD: Makefile,v 1.24 2002/08/05 15:25:43 art Exp $
 
 REV=		${OSrev}
 
 CBIN=		instbin
 ARCHDIR=	${.CURDIR}/../${MACHINE}/ramdisk
+
+.include <bsd.own.mk>
 
 .if exists(${ARCHDIR}/Makefile.inc)
 .include "${ARCHDIR}/Makefile.inc"
@@ -19,14 +21,19 @@ REALIMAGE!=	echo /tmp/image.${PID}
 IMAGE?=		ramdisk${REV}.fs
 IMAGESIZE?=	8192 # 4MB in 512 byte blocks
 NEWFS_WILL_FAIL?=false
+.if ${ELF_TOOLCHAIN} == "yes"
+RDSETROOT?=	elfrdsetroot
+CRUNCHGENOPTS?=-E
+.else
+RDSETROOT?=	rdsetroot
 CRUNCHGENOPTS?=
+.endif
 KERNEL?=	RAMDISK
 UTILS?=		${.CURDIR}/../miniroot
 STRIP?=		strip
-RDSETROOT?=	rdsetroot
 
 LISTS=		${.CURDIR}/list ${ARCHDIR}/list
-MTREE=		${.CURDIR}/mtree.conf
+MTREE=		${UTILS}/mtree.conf
 
 FLOPPY?=	floppy${REV}.fs
 FLOPPYSIZE?=	2880
@@ -61,7 +68,7 @@ ${FLOPPY}:	bsd.gz ${BOOT} ${BOOTXX}
 	disklabel -w ${RAWLABEL} ${VND} ${FLOPPYTYPE}
 	newfs ${NEWFSOPTS_FD} ${VND_RDEV}
 	mount ${VND_DEV} ${MOUNT_POINT}
-	cp ${BOOT} ${MOUNT_POINT}$/
+	cp ${BOOT} ${MOUNT_POINT}/
 	cp bsd.gz ${MOUNT_POINT}/bsd
 	${INSTALLBOOT} -v ${BOOTIN} ${BOOTXX} \
 		`echo ${VND_RDEV} | sed -e 's/a$$/c/'`
@@ -104,6 +111,7 @@ ${IMAGE}: ${CBIN}
 	mtree -def ${MTREE} -p ${MOUNT_POINT}/ -u
 	REV=${REV} CURDIR=${.CURDIR} OBJDIR=${.OBJDIR} ARCHDIR=${ARCHDIR} \
 	    TARGDIR=${MOUNT_POINT} UTILS=${UTILS} sh ${UTILS}/runlist.sh ${LISTS}
+	rm ${MOUNT_POINT}/${CBIN}
 	@echo ""
 	@df -i ${MOUNT_POINT}
 	@echo ""

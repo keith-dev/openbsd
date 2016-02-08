@@ -1,5 +1,5 @@
 vers(__file__,
-	{-$OpenBSD: MAKEDEV.md,v 1.4 2002/02/14 13:29:20 todd Exp $-},
+	{-$OpenBSD: MAKEDEV.md,v 1.8 2002/05/16 21:11:20 miod Exp $-},
 etc.MACHINE)dnl
 dnl
 dnl Copyright (c) 2001 Todd T. Fries <todd@OpenBSD.org>
@@ -32,11 +32,12 @@ _DEV(fdesc, 21)
 _DEV(local)
 _DEV(ramd)
 _DEV(st, 14, 5)
-_DEV(sd, 13, 4, 8)
-_DEV(cd, 15, 6, 8)
+_DEV(sd, 13, 4)
+_DEV(cd, 15, 6)
+_DEV(rd, 18, 13)
 _DEV(ch, 17)
-_DEV(vnd, 19, 8, 8)
-_DEV(ccd, 20, 9, 8)
+_DEV(vnd, 19, 8)
+_DEV(ccd, 20, 9)
 _TITLE(term)
 _DEV(mac_ttye)
 _DEV(mac_tty0)
@@ -57,11 +58,11 @@ _DEV(ss, 33)
 _DEV(xfs, 51)
 _DEV(adb, 23)
 _DEV(asc, 36)
+_DEV(systrace, 50)
 dnl
 divert(7)dnl
 dnl
 _std(1, 2, 37, 3, 6)
-	M reload	c 2 20 640 kmem
 	;;
 
 tty0*)

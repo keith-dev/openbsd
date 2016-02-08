@@ -38,7 +38,7 @@
 
 #ifndef lint
 /*static char sccsid[] = "from: @(#)restart.c	8.1 (Berkeley) 6/6/93";*/
-static char *rcsid = "$Id: restart.c,v 1.1.1.1 1995/10/18 08:47:12 deraadt Exp $";
+static char *rcsid = "$Id: restart.c,v 1.3 2002/08/03 08:29:31 pvalchev Exp $";
 #endif /* not lint */
 
 #include "am.h"
@@ -55,7 +55,8 @@ static char *rcsid = "$Id: restart.c,v 1.1.1.1 1995/10/18 08:47:12 deraadt Exp $
  * This module relies on internal details of other components.  If
  * you change something else make *sure* restart() still works.
  */
-void restart()
+void
+restart()
 {
 	/*
 	 * Read the existing mount table
@@ -120,7 +121,7 @@ void restart()
 				mo.opt_rfs = strdup(cp+1);
 				*cp = ':';
 			} else if (fs_ops->ffserver == find_nfs_srvr) {
-				/* 
+				/*
 				 * Prototype 4.4 BSD used to end up here -
 				 * might as well keep the workaround for now
 				 */

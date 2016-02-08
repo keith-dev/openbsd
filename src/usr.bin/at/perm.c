@@ -1,4 +1,4 @@
-/*	$OpenBSD: perm.c,v 1.2 2002/02/16 21:27:44 millert Exp $	*/
+/*	$OpenBSD: perm.c,v 1.4 2002/05/14 18:05:39 millert Exp $	*/
 
 /* 
  * perm.c - check user permission for at(1)
@@ -25,8 +25,6 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-/* System Headers */
-
 #include <sys/types.h>
 #include <errno.h>
 #include <pwd.h>
@@ -36,29 +34,20 @@
 #include <string.h>
 #include <unistd.h>
 
-/* Local headers */
-
 #include "at.h"
 #include "panic.h"
 #include "pathnames.h"
 #include "privs.h"
 
-/* File scope variables */
-
 #ifndef lint
-static char rcsid[] = "$OpenBSD: perm.c,v 1.2 2002/02/16 21:27:44 millert Exp $";
+static const char rcsid[] = "$OpenBSD: perm.c,v 1.4 2002/05/14 18:05:39 millert Exp $";
 #endif
-
-/* Function declarations */
 
 static int check_for_user(FILE *, const char *);
 
-/* Local functions */
 
 static int
-check_for_user(fp, name)
-	FILE *fp;
-	const char *name;
+check_for_user(FILE *fp, const char *name)
 {
 	char *buffer;
 	size_t len;
@@ -80,10 +69,8 @@ check_for_user(fp, name)
 }
 
 
-/* Global functions */
-
 int
-check_permission()
+check_permission(void)
 {
 	FILE *fp;
 	uid_t uid = geteuid();
@@ -93,24 +80,24 @@ check_permission()
 		return 1;
 
 	if ((pentry = getpwuid(uid)) == NULL) {
-		perror("Cannot access user database");
+		perror("Cannot access password database");
 		exit(EXIT_FAILURE);
 	}
 
-	PRIV_START
+	PRIV_START;
 
 	fp = fopen(_PATH_AT_ALLOW, "r");
 
-	PRIV_END
+	PRIV_END;
 
 	if (fp != NULL) {
 		return (check_for_user(fp, pentry->pw_name));
 	} else {
-		PRIV_START
+		PRIV_START;
 
 		fp = fopen(_PATH_AT_DENY, "r");
 
-		PRIV_END
+		PRIV_END;
 
 		if (fp != NULL)
 			return (!check_for_user(fp, pentry->pw_name));

@@ -1,8 +1,8 @@
-/*	$OpenBSD: archdep.h,v 1.4 2002/02/21 23:17:53 drahn Exp $ */
+/*	$OpenBSD: archdep.h,v 1.9 2002/08/12 01:05:23 drahn Exp $ */
 
 /*
  * Copyright (c) 1998 Per Fogelstrom, Opsycon AB
- * 
+ *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
@@ -49,7 +49,7 @@
 
 /* HACK */
 #define DT_PROCNUM 0
-#ifndef DT_BIND_NOW 
+#ifndef DT_BIND_NOW
 #define DT_BIND_NOW 0
 #endif
 
@@ -57,46 +57,48 @@
  *	The following functions are declared inline so they can
  *	be used before bootstrap linking has been finished.
  */
+
 static inline void
 _dl_dcbf(Elf32_Addr *addr)
 {
-  __asm__ volatile ("dcbst 0, %0\n\t"
-		    "sync\n\t"
-		    "icbi 0, %0\n\t"
-		    "sync\n\t"
-		    "isync"
-                    : : "r" (addr) : "0");
+	__asm__ volatile ("dcbst 0, %0\n\t"
+	    "sync\n\t"
+	    "icbi 0, %0\n\t"
+	    "sync\n\t"
+	    "isync"
+	    : : "r" (addr) : "0");
 }
 
 static inline void
-RELOC_RELA(Elf32_Rela *r,
-	const Elf32_Sym *s, Elf32_Addr *p, int v)
+RELOC_REL(Elf_Rel *r, const Elf_Sym *s, Elf_Addr *p, unsigned long v)
 {
-	if(ELF32_R_TYPE((r)->r_info) == RELOC_RELATIVE) {
-		if((ELF32_ST_BIND((s)->st_info) == STB_LOCAL) &&
-		   ((ELF32_ST_TYPE((s)->st_info) == STT_SECTION) ||
-		   (ELF32_ST_TYPE((s)->st_info) == STT_NOTYPE)) ) {
-			*(p) = (v) + (r)->r_addend;
-		} else {
-			*(p) = (v) + (s)->st_value + (r)->r_addend;
+	/* PowerPC does not use REL type relocations */
+	_dl_exit(20);
+}
+
+static inline void
+RELOC_RELA(Elf32_Rela *r, const Elf32_Sym *s, Elf32_Addr *p, unsigned long v)
+{
+	if (ELF32_R_TYPE(r->r_info) == RELOC_RELATIVE) {
+		*p = v + r->r_addend;
+	} else if (ELF32_R_TYPE(r->r_info) == RELOC_JMP_SLOT) {
+		Elf32_Addr val = v + s->st_value + r->r_addend -
+		    (Elf32_Addr)(p);
+		if (((val & 0xfe000000) != 0) &&
+		    ((val & 0xfe000000) != 0xfe000000)) {
+			/* invalid offset */
+			_dl_exit(20);
 		}
-	} else if(ELF32_R_TYPE((r)->r_info) == RELOC_JMP_SLOT) {
-		Elf32_Addr val = (v) + (s)->st_value + (r)->r_addend -
-			(Elf32_Addr)(p); 			
-		if (((val & 0xfe000000) != 0) &&	
-			((val & 0xfe000000) != 0xfe000000))
-		{					
-			/* invalid offset */	
-			_dl_exit(20);			
-		} 				
-		val &= ~0xfc000000;	
+		val &= ~0xfc000000;
 		val |=  0x48000000;
-		*(p) = val;	
+		*p = val;
 		_dl_dcbf(p);
-	} else if(ELF32_R_TYPE((r)->r_info) == RELOC_GLOB_DAT) {
-		*(p) = (v) + (s)->st_value + (r)->r_addend;
-	} else {					
-		/* error */
+	} else if (ELF32_R_TYPE((r)->r_info) == RELOC_GLOB_DAT) {
+		*p = v + s->st_value + r->r_addend;
+	} else {
+		/* XXX - printf might not work here, but we give it a shot. */
+		_dl_printf("Unknown bootstrap relocation.\n");
+		_dl_exit(6);
 	}
 }
 

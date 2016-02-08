@@ -36,18 +36,19 @@
  * SUCH DAMAGE.
  *
  *	from: @(#)amq_svc.c	8.1 (Berkeley) 6/6/93
- *	$Id: amq_svc.c,v 1.3 1995/12/18 16:48:57 deraadt Exp $
+ *	$Id: amq_svc.c,v 1.5 2002/09/10 05:43:50 deraadt Exp $
  *
  */
+
+#include <sys/types.h>
+#include <syslog.h>
 
 #include "am.h"
 #include "amq.h"
 extern bool_t xdr_amq_mount_info_qelem();
 
 void
-amq_program_1(rqstp, transp)
-	struct svc_req *rqstp;
-	SVCXPRT *transp;
+amq_program_1(struct svc_req *rqstp, SVCXPRT *transp)
 {
 	union {
 		amq_string amqproc_mnttree_1_arg;
@@ -58,6 +59,17 @@ amq_program_1(rqstp, transp)
 	char *result;
 	bool_t (*xdr_argument)(), (*xdr_result)();
 	char *(*local)();
+	extern SVCXPRT *lamqp;
+
+	if (transp != lamqp) {
+		struct sockaddr_in *fromsin = svc_getcaller(transp);
+
+		syslog(LOG_WARNING,
+		    "non-local amq attempt (might be from %s)",
+		    inet_ntoa(fromsin->sin_addr));
+		svcerr_noproc(transp);
+		return;
+	}
 
 	switch (rqstp->rq_proc) {
 	case AMQPROC_NULL:
@@ -132,4 +144,3 @@ amq_program_1(rqstp, transp)
 		going_down(1);
 	}
 }
-

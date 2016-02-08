@@ -1,4 +1,4 @@
-.\"	$OpenBSD: newsyslog.8,v 1.21 2001/08/02 18:37:35 mpech Exp $
+.\"	$OpenBSD: newsyslog.8,v 1.29 2002/09/19 21:22:59 millert Exp $
 .\"
 .\" Copyright (c) 1997, Jason Downs.  All rights reserved.
 .\"
@@ -56,8 +56,10 @@
 .Nd maintain system log files to manageable sizes
 .Sh SYNOPSIS
 .Nm newsyslog
-.Op Fl mnrv
+.Op Fl Fmnrv
+.Op Fl a Ar directory
 .Op Fl f Ar config_file
+.Op Ar log ...
 .Sh DESCRIPTION
 .Nm
 is a program that should be scheduled to run periodically by
@@ -79,6 +81,17 @@ Optionally the archived logs can be compressed to save space.
 .Pp
 The options are as follows:
 .Bl -tag -width Ds
+.It Fl F
+Force
+.Nm
+to trim logs regardless of the size and/or age requirements specified in
+.Pa /etc/newsyslog.conf .
+This option may be combined with the
+.Fl n
+or
+.Fl v
+flags to aid in debugging problems with
+.Pa /etc/newsyslog.conf .
 .It Fl m
 Monitoring mode; only entries marked with an
 .Sq M
@@ -103,6 +116,22 @@ so this option should only be used in debugging.
 Be verbose.
 In this mode it will print out each log and its
 reasons for either trimming that log or skipping it.
+.It Fl a Ar directory
+Specify a
+.Ar directory
+into which archived log files will be written.
+If
+.Ar directory
+is a relative path, it is it is appended to the parent directory
+of each log and the archived log is stored in the result.
+If an absolute path is given, all archived logs are stored in the given
+.Ar directory .
+If
+.Ar directory
+does not exist for a specified log, it is ignored for that entry and
+the log is rotated as if the
+.Fl a
+option was not specified.
 .It Fl f Ar config_file
 Use
 .Ar config_file
@@ -110,6 +139,15 @@ instead of
 .Pa /etc/newsyslog.conf
 for the configuration file.
 .El
+.Pp
+If one or more
+.Ar log
+files are specified on the command line, only the specified logs will
+be rotated.
+Note that each
+.Ar log
+specified must have an entry in
+.Pa /etc/newsyslog.conf .
 .Pp
 A log can be archived because of two reasons.
 The log file can have
@@ -157,13 +195,20 @@ Octal mode of created log files and archives.
 .It number of archives
 Specify the number of archives to be kept besides the log file itself.
 .It size of archives
-When the size of the log file reaches this point, the log file becomes trimmed
-as described above.
+When the size of the log file (in kilobytes) reaches this point, the log
+file is trimmed as described above.
 If this field is replaced by a
 .Ql * ,
 then the size of
 the log file is not taken into account when determining when to trim the
 log file.
+By default, files smaller than 512 bytes are not rotated unless the
+.Sq B
+(binary) flag is set.
+This prevents
+.Nm
+from rotating files consisting solely of a message indicating
+that the log file has been turned over.
 .It archive interval
 Specify the time separation between the trimming of the log file.
 If this field is replaced by a
@@ -194,6 +239,9 @@ The
 .Sq M
 flag marks this entry as a monitored
 log file.
+The
+.Sq F
+flag specifies that symbolic links should be followed.
 .It monitor notification (optional)
 Specify the account that should receive notification messages if this is
 a monitored log file.
@@ -213,13 +261,18 @@ Signal names
 must start with
 .Dq SIG
 and be the signal name, not the number, e.g.,
-.Em SIGUSR1 .
+.Dv SIGUSR1 .
 .It command (optional)
 Specify a command to run instead of sending a signal to the process.
 The command must be enclosed in double quotes
 .Pq Ql \&" ) .
+The empty string,
+.Ql \&"\&" ,
+can use used to prevent
+.Nm
+from sending a signal or running a command.
 You cannot specify both a command and a PID file.
-.Em NOTE: 
+.Em NOTE:
 If you specify a command to be run,
 .Nm
 will not send a

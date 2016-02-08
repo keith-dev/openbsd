@@ -1,4 +1,4 @@
-/*	$OpenBSD: popen.c,v 1.14 2002/01/23 16:31:18 mpech Exp $	*/
+/*	$OpenBSD: popen.c,v 1.17 2002/07/02 18:09:54 danh Exp $	*/
 /*	$NetBSD: popen.c,v 1.5 1995/04/11 02:45:00 cgd Exp $	*/
 
 /*
@@ -40,9 +40,10 @@
 
 #ifndef lint
 #if 0
-static char sccsid[] = "@(#)popen.c	8.3 (Berkeley) 4/6/94";
+static const char sccsid[] = "@(#)popen.c	8.3 (Berkeley) 4/6/94";
 #else
-static char rcsid[] = "$NetBSD: popen.c,v 1.5 1995/04/11 02:45:00 cgd Exp $";
+static const char rcsid[] = 
+    "$OpenBSD: popen.c,v 1.17 2002/07/02 18:09:54 danh Exp $";
 #endif
 #endif /* not lint */
 
@@ -66,7 +67,7 @@ static char rcsid[] = "$NetBSD: popen.c,v 1.5 1995/04/11 02:45:00 cgd Exp $";
  * may create a pipe to a hidden program as a side effect of a list or dir
  * command.
  */
-static int *pids;
+static pid_t *pids;
 static int fds;
 
 #define MAX_ARGV	100
@@ -78,7 +79,8 @@ ftpd_popen(program, type)
 {
 	char *cp;
 	FILE *iop;
-	int argc, gargc, pdes[2], pid;
+	int argc, gargc, pdes[2];
+	pid_t pid;
 	char **pop, *argv[MAX_ARGV], *gargv[MAX_GARGV];
 
 	if ((*type != 'r' && *type != 'w') || type[1])
@@ -87,9 +89,9 @@ ftpd_popen(program, type)
 	if (!pids) {
 		if ((fds = getdtablesize()) <= 0)
 			return (NULL);
-		if ((pids = (int *)malloc((u_int)(fds * sizeof(int)))) == NULL)
+		if ((pids = (pid_t *)malloc((u_int)(fds * sizeof(pid_t)))) == NULL)
 			return (NULL);
-		memset(pids, 0, fds * sizeof(int));
+		memset(pids, 0, fds * sizeof(pid_t));
 	}
 	if (pipe(pdes) < 0)
 		return (NULL);
@@ -127,7 +129,7 @@ ftpd_popen(program, type)
 
 	iop = NULL;
 
-	switch(pid = fork()) {
+	switch (pid = fork()) {
 	case -1:			/* error */
 		(void)close(pdes[0]);
 		(void)close(pdes[1]);
@@ -203,7 +205,7 @@ ftpd_pclose(iop)
 	sigprocmask(SIG_SETMASK, &osigset, NULL);
 	pids[fdes] = 0;
 	if (pid < 0)
-		return (pid);
+		return (-1);
 	if (WIFEXITED(status))
 		return (WEXITSTATUS(status));
 	return (1);

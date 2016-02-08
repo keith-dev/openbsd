@@ -1,4 +1,4 @@
-/*	$OpenBSD: res_debug.c,v 1.11 2001/06/11 10:05:59 itojun Exp $	*/
+/*	$OpenBSD: res_debug.c,v 1.14 2002/07/25 21:55:30 deraadt Exp $	*/
 
 /*
  * ++Copyright++ 1985, 1990, 1993
@@ -82,7 +82,7 @@
 static char sccsid[] = "@(#)res_debug.c	8.1 (Berkeley) 6/4/93";
 static char rcsid[] = "$From: res_debug.c,v 8.19 1996/11/26 10:11:23 vixie Exp $";
 #else
-static char rcsid[] = "$OpenBSD: res_debug.c,v 1.11 2001/06/11 10:05:59 itojun Exp $";
+static char rcsid[] = "$OpenBSD: res_debug.c,v 1.14 2002/07/25 21:55:30 deraadt Exp $";
 #endif
 #endif /* LIBC_SCCS and not lint */
 
@@ -104,6 +104,8 @@ static char rcsid[] = "$OpenBSD: res_debug.c,v 1.11 2001/06/11 10:05:59 itojun E
 
 extern const char *_res_opcodes[];
 extern const char *_res_resultcodes[];
+
+static const char *loc_ntoal(const u_char *binary, char *ascii, int ascii_len);
 
 /* XXX: we should use getservbyport() instead. */
 static const char *
@@ -159,7 +161,9 @@ dewks(wks)
 	case 161: return "snmp";
 	case 162: return "snmp-trap";
 	case 170: return "print-srv";
-	default: (void) sprintf(nbuf, "%d", wks); return (nbuf);
+	default:
+		(void) snprintf(nbuf, sizeof nbuf, "%d", wks);
+		return (nbuf);
 	}
 }
 
@@ -183,7 +187,9 @@ deproto(protonum)
 	case 12: return "pup";
 	case 16: return "chaos";
 	case 17: return "udp";
-	default: (void) sprintf(nbuf, "%d", protonum); return (nbuf);
+	default:
+		(void) snprintf(nbuf, sizeof nbuf, "%d", protonum);
+		return (nbuf);
 	}
 }
 
@@ -282,7 +288,7 @@ __fp_nquery(msg, len, file)
 	cp = msg + HFIXEDSZ;
 	endMark = msg + len;
 	if ((!_res.pfcode) || (_res.pfcode & RES_PRF_HEADX) || hp->rcode) {
-		fprintf(file, ";; ->>HEADER<<- opcode: %s, status: %s, id: %d",
+		fprintf(file, ";; ->>HEADER<<- opcode: %s, status: %s, id: %u",
 			_res_opcodes[hp->opcode],
 			_res_resultcodes[hp->rcode],
 			ntohs(hp->id));
@@ -310,10 +316,10 @@ __fp_nquery(msg, len, file)
 			fprintf(file, " cd");
 	}
 	if ((!_res.pfcode) || (_res.pfcode & RES_PRF_HEAD1)) {
-		fprintf(file, "; Ques: %d", ntohs(hp->qdcount));
-		fprintf(file, ", Ans: %d", ntohs(hp->ancount));
-		fprintf(file, ", Auth: %d", ntohs(hp->nscount));
-		fprintf(file, ", Addit: %d", ntohs(hp->arcount));
+		fprintf(file, "; Ques: %u", ntohs(hp->qdcount));
+		fprintf(file, ", Ans: %u", ntohs(hp->ancount));
+		fprintf(file, ", Auth: %u", ntohs(hp->nscount));
+		fprintf(file, ", Addit: %u", ntohs(hp->arcount));
 	}
 	if ((!_res.pfcode) || (_res.pfcode & 
 		(RES_PRF_HEADX | RES_PRF_HEAD2 | RES_PRF_HEAD1))) {
@@ -436,7 +442,7 @@ __p_fqnname(cp, msg, msglen, name, namelen)
 
 	if ((n = dn_expand(msg, cp + msglen, cp, name, namelen)) < 0)
 		return (NULL);
-	newlen = strlen (name);
+	newlen = strlen(name);
 	if (newlen == 0 || name[newlen - 1] != '.') {
 		if (newlen+1 >= namelen)	/* Lack space for final dot */
 			return (NULL);
@@ -527,7 +533,7 @@ __p_rr(cp, msg, file)
 				cp += sizeof (u_char);
 				port = _getshort((u_char*)cp);
 				cp += INT16SZ;
-				fprintf(file, "\t%s\t; proto %d, port %d",
+				fprintf(file, "\t%s\t; proto %u, port %u",
 					address, protocol, port);
 			}
 			break;
@@ -599,14 +605,14 @@ __p_rr(cp, msg, file)
 	case T_MX:
 	case T_AFSDB:
 	case T_RT:
-		fprintf(file, "\t%d ", _getshort((u_char*)cp));
+		fprintf(file, "\t%u ", _getshort((u_char*)cp));
 		cp += INT16SZ;
 		if ((cp = p_fqname(cp, msg, file)) == NULL)
 			return (NULL);
 		break;
 
 	case T_PX:
-		fprintf(file, "\t%d ", _getshort((u_char*)cp));
+		fprintf(file, "\t%u ", _getshort((u_char*)cp));
 		cp += INT16SZ;
 		if ((cp = p_fqname(cp, msg, file)) == NULL)
 			return (NULL);
@@ -662,7 +668,7 @@ __p_rr(cp, msg, file)
 	case T_LOC: {
 		char t[255];
 
-		fprintf(file, "\t%s", loc_ntoa(cp, t));
+		fprintf(file, "\t%s", loc_ntoal(cp, t, sizeof t));
 		cp += dlen;
 		break;
 	    }
@@ -782,7 +788,7 @@ __p_rr(cp, msg, file)
 	        type = _getshort((u_char*)cp);
 		cp += INT16SZ;
 		fprintf(file, " %s", p_type(type));
-		fprintf(file, "\t%d", *cp++);	/* algorithm */
+		fprintf(file, "\t%u", *cp++);	/* algorithm */
 		/* Check label value and print error if wrong. */
 		n = *cp++;
 		c = dn_count_labels (rrname);
@@ -958,7 +964,7 @@ __sym_ntos(syms, number, success)
 		}
 	}
 
-	sprintf (unname, "%d", number);
+	snprintf(unname, sizeof unname, "%d", number);
 	if (success)
 		*success = 0;
 	return (unname);
@@ -980,7 +986,7 @@ __sym_ntop(syms, number, success)
 			return (syms->humanname);
 		}
 	}
-	sprintf(unname, "%d", number);
+	snprintf(unname, sizeof unname, "%d", number);
 	if (success)
 		*success = 0;
 	return (unname);
@@ -1030,8 +1036,9 @@ __p_option(option)
 	case RES_INSECURE2:	return "insecure2";
 	case RES_USE_INET6:	return "inet6";
 	case RES_USE_EDNS0:	return "edns0";
-	default:		sprintf(nbuf, "?0x%lx?", (u_long)option);
-				return (nbuf);
+	default:
+		snprintf(nbuf, sizeof nbuf, "?0x%lx?", (u_long)option);
+		return (nbuf);
 	}
 }
 
@@ -1043,11 +1050,13 @@ p_time(value)
 	u_int32_t value;
 {
 	static char nbuf[40];
+	char *ebuf;
 	int secs, mins, hours, days;
 	register char *p;
+	int tmp;
 
 	if (value == 0) {
-		strcpy(nbuf, "0 secs");
+		strlcpy(nbuf, "0 secs", sizeof nbuf);
 		return (nbuf);
 	}
 
@@ -1062,27 +1071,49 @@ p_time(value)
 
 #define	PLURALIZE(x)	x, (x == 1) ? "" : "s"
 	p = nbuf;
+	ebuf = nbuf + sizeof(nbuf);
 	if (days) {
-		(void)sprintf(p, "%d day%s", PLURALIZE(days));
-		while (*++p);
+		if ((tmp = snprintf(p, ebuf - p, "%d day%s",
+		    PLURALIZE(days))) >= ebuf - nbuf || tmp < 0)
+			goto full;
+		p += tmp;
 	}
 	if (hours) {
 		if (days)
 			*p++ = ' ';
-		(void)sprintf(p, "%d hour%s", PLURALIZE(hours));
-		while (*++p);
+		if (p >= ebuf)
+			goto full;
+		if ((tmp = snprintf(p, ebuf - p, "%d hour%s",
+		    PLURALIZE(hours))) >= ebuf - nbuf || tmp < 0)
+			goto full;
+		p += tmp;
 	}
 	if (mins) {
 		if (days || hours)
 			*p++ = ' ';
-		(void)sprintf(p, "%d min%s", PLURALIZE(mins));
-		while (*++p);
+		if (p >= ebuf)
+			goto full;
+		if ((tmp = snprintf(p, ebuf - p, "%d min%s",
+		    PLURALIZE(mins))) >= ebuf - nbuf || tmp < 0)
+			goto full;
+		p += tmp;
 	}
 	if (secs || ! (days || hours || mins)) {
 		if (days || hours || mins)
 			*p++ = ' ';
-		(void)sprintf(p, "%d sec%s", PLURALIZE(secs));
+		if (p >= ebuf)
+			goto full;
+		if ((tmp = snprintf(p, ebuf - p, "%d sec%s",
+		    PLURALIZE(secs))) >= ebuf - nbuf || tmp < 0)
+			goto full;
 	}
+	return (nbuf);
+full:
+	p = nbuf + sizeof(nbuf) - 4;
+	*p++ = '.';
+	*p++ = '.';
+	*p++ = '.';
+	*p++ = '\0';
 	return (nbuf);
 }
 
@@ -1109,7 +1140,7 @@ precsize_ntoa(prec)
 
 	val = mantissa * poweroften[exponent];
 
-	(void) sprintf(retbuf, "%ld.%.2ld", val/100, val%100);
+	(void) snprintf(retbuf, sizeof retbuf, "%ld.%.2ld", val/100, val%100);
 	return (retbuf);
 }
 
@@ -1366,11 +1397,20 @@ loc_aton(ascii, binary)
 	return (16);		/* size of RR in octets */
 }
 
-/* takes an on-the-wire LOC RR and formats it in a human readable format. */
 const char *
 loc_ntoa(binary, ascii)
 	const u_char *binary;
 	char *ascii;
+{
+	return loc_ntoal(binary, ascii, 255);
+}
+
+/* takes an on-the-wire LOC RR and formats it in a human readable format. */
+static const char *
+loc_ntoal(binary, ascii, ascii_len)
+	const u_char *binary;
+	char *ascii;
+	int ascii_len;
 {
 	static char *error = "?";
 	register const u_char *cp = binary;
@@ -1391,7 +1431,7 @@ loc_ntoa(binary, ascii)
 	versionval = *cp++;
 
 	if (versionval) {
-		sprintf(ascii, "; error: unknown LOC RR version");
+		snprintf(ascii, ascii_len, "; error: unknown LOC RR version");
 		return (ascii);
 	}
 
@@ -1453,7 +1493,7 @@ loc_ntoa(binary, ascii)
 	if ((vpstr = strdup(precsize_ntoa(vpval))) == NULL)
 		vpstr = error;
 
-	sprintf(ascii,
+	snprintf(ascii, ascii_len,
 	      "%d %.2d %.2d.%.3d %c %d %.2d %.2d.%.3d %c %d.%.2dm %sm %sm %sm",
 		latdeg, latmin, latsec, latsecfrac, northsouth,
 		longdeg, longmin, longsec, longsecfrac, eastwest,
@@ -1513,7 +1553,7 @@ __p_secstodate (secs)
 	time = gmtime(&clock);
 	time->tm_year += 1900;
 	time->tm_mon += 1;
-	sprintf(output, "%04d%02d%02d%02d%02d%02d",
+	snprintf(output, sizeof output, "%04d%02d%02d%02d%02d%02d",
 		time->tm_year, time->tm_mon, time->tm_mday,
 		time->tm_hour, time->tm_min, time->tm_sec);
 	return (output);

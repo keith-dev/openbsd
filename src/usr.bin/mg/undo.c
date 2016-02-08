@@ -1,7 +1,7 @@
-/* $OpenBSD: undo.c,v 1.9 2002/03/18 01:45:55 vincent Exp $ */
+/* $OpenBSD: undo.c,v 1.14 2002/09/15 22:18:39 vincent Exp $ */
 /*
- * Copyright (c) 2002 Vincent Labrecque <vincent@openbsd.org>
- *							 All rights reserved.
+ * Copyright (c) 2002 Vincent Labrecque
+ * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -36,6 +36,7 @@
  */
 static LIST_HEAD(, undo_rec)	 undo_free;
 static int			 undo_free_num;
+static int			 nobound;
 
 /*
  * Global variables
@@ -60,7 +61,7 @@ static int drop_oldest_undo_record(void);
  *
  * Find an absolute dot in the buffer from a line/offset pair, and vice-versa.
  *
- * Since lines can be deleted while they are referenced by undo record, we 
+ * Since lines can be deleted while they are referenced by undo record, we
  * need to have an absolute dot to have something reliable.
  */
 
@@ -75,14 +76,14 @@ find_absolute_dot(LINE *lp, int off)
 			if (p == curwp->w_linep) {
 				ewprintf("Error: Undo stuff called with a"
 				    "nonexistent line");
-				return FALSE;
+				return (FALSE);
 			}
 		}
 		count += llength(p) + 1;
 	}
 	count += off;
 
-	return count;
+	return (count);
 }
 
 static int
@@ -96,13 +97,13 @@ find_line_offset(int pos, LINE **olp, int *offset)
 		if ((p = lforw(p)) == curwp->w_linep) {
 			*olp = NULL;
 			*offset = 0;
-			return FALSE;
+			return (FALSE);
 		}
 	}
 	*olp = p;
 	*offset = pos;
 
-	return TRUE;
+	return (TRUE);
 }
 
 static struct undo_rec *
@@ -120,7 +121,7 @@ new_undo_record(void)
 	}
 	memset(rec, 0, sizeof(struct undo_rec));
 
-	return rec;
+	return (rec);
 }
 
 void
@@ -162,9 +163,9 @@ drop_oldest_undo_record(void)
 		undo_free_num--;
 		LIST_REMOVE(rec, next);
 		free_undo_record(rec);
-		return 1;
+		return (1);
 	}
-	return 0;
+	return (0);
 }
 
 static __inline__ int
@@ -174,16 +175,16 @@ last_was_boundary()
 
 	if ((rec = LIST_FIRST(&curbp->b_undo)) != NULL &&
 	    (rec->type == BOUNDARY))
-		return 1;
-	return 0;
+		return (1);
+	return (0);
 }
 
 int
 undo_enable(int on)
 {
-	undo_disable_flag = on ? 0 : 1;
-
-	return on;
+	int pon = undo_disable_flag;
+	undo_disable_flag = (on == TRUE) ? 0 : 1;
+	return (pon ? FALSE : TRUE);
 }
 
 int
@@ -191,15 +192,18 @@ undo_add_boundary(void)
 {
 	struct undo_rec *rec;
 
+	if (nobound)
+		return (TRUE);
+
 	rec = new_undo_record();
 	rec->type = BOUNDARY;
 
 	LIST_INSERT_HEAD(&curbp->b_undo, rec, next);
 
-	return TRUE;
+	return (TRUE);
 }
 
-/* 
+/*
  * If asocial is true, we arrange for this record to be let alone.  forever.
  * Yes, this is a bit of a hack...
  */
@@ -210,7 +214,7 @@ undo_add_custom(int asocial,
 	struct undo_rec *rec;
 
 	if (undo_disable_flag)
-		return TRUE;
+		return (TRUE);
 	rec = new_undo_record();
 	if (lp != NULL)
 		rec->pos = find_absolute_dot(lp, offset);
@@ -229,7 +233,7 @@ undo_add_custom(int asocial,
 	if (asocial)		/* Add a second one */
 		undo_add_boundary();
 
-	return TRUE;
+	return (TRUE);
 }
 
 int
@@ -240,7 +244,7 @@ undo_add_insert(LINE *lp, int offset, int size)
 	int pos;
 
 	if (undo_disable_flag)
-		return TRUE;
+		return (TRUE);
 	reg.r_linep = lp;
 	reg.r_offset = offset;
 	reg.r_size = size;
@@ -249,17 +253,17 @@ undo_add_insert(LINE *lp, int offset, int size)
 
 	/*
 	 * We try to reuse the last undo record to `compress' things.
-	 */	
+	 */
 	rec = LIST_FIRST(&curbp->b_undo);
-	/* this will be hit like, 80% of the time... */
-	if (rec != NULL && rec->type == BOUNDARY)
-		rec = LIST_NEXT(rec, next);
-
-	if ((rec != NULL) &&
-	    (rec->type == INSERT)) {
-		if (rec->pos + rec->region.r_size == pos) {
-			rec->region.r_size += reg.r_size;
-			return TRUE;
+	if (rec != NULL) {
+		/* this will be hit like, 80% of the time... */
+		if (rec->type == BOUNDARY)
+			rec = LIST_NEXT(rec, next);
+		if (rec->type == INSERT) {
+			if (rec->pos + rec->region.r_size == pos) {
+				rec->region.r_size += reg.r_size;
+				return (TRUE);
+			}
 		}
 	}
 
@@ -278,7 +282,7 @@ undo_add_insert(LINE *lp, int offset, int size)
 	LIST_INSERT_HEAD(&curbp->b_undo, rec, next);
 	undo_add_boundary();
 
-	return TRUE;
+	return (TRUE);
 }
 
 /*
@@ -292,7 +296,7 @@ undo_add_delete(LINE *lp, int offset, int size)
 	int pos;
 
 	if (undo_disable_flag)
-		return TRUE;
+		return (TRUE);
 
 	reg.r_linep = lp;
 	reg.r_offset = offset;
@@ -300,14 +304,14 @@ undo_add_delete(LINE *lp, int offset, int size)
 
 	pos = find_absolute_dot(lp, offset);
 
-	if (offset == llength(lp)) /* if it's a newline... */
+	if (offset == llength(lp))	/* if it's a newline... */
 		undo_add_boundary();
 	else if ((rec = LIST_FIRST(&curbp->b_undo)) != NULL) {
 		/*
 		 * Separate this command from the previous one if we're not
 		 * just before the previous record...
 		 */
-		if (rec->type == DELETE){
+		if (rec->type == DELETE) {
 			if (rec->pos - rec->region.r_size != pos)
 				undo_add_boundary();
 		} else if (rec->type != BOUNDARY)
@@ -330,7 +334,7 @@ undo_add_delete(LINE *lp, int offset, int size)
 	LIST_INSERT_HEAD(&curbp->b_undo, rec, next);
 	undo_add_boundary();
 
-	return TRUE;
+	return (TRUE);
 }
 
 /*
@@ -339,39 +343,16 @@ undo_add_delete(LINE *lp, int offset, int size)
 int
 undo_add_change(LINE *lp, int offset, int size)
 {
-	REGION reg;
-	struct undo_rec *rec;
-
 	if (undo_disable_flag)
-		return TRUE;
-
-	reg.r_linep = lp;
-	reg.r_offset = offset;
-	reg.r_size = size;
-
-	rec = new_undo_record();
-	rec->pos = find_absolute_dot(lp, offset);
-	rec->type = CHANGE;
-	memmove(&rec->region, &reg, sizeof reg);
-
-	/*
-	 * Try to allocate a buffer for the changed data.
-	 */
-	do {
-		rec->content = malloc(size + 1);
-	} while ((rec->content == NULL) && drop_oldest_undo_record());
-
-	if (rec->content == NULL)
-		panic("Out of memory in undo change code");
-
-	region_get_data(&reg, rec->content, size);
-
-	if (!last_was_boundary())
-		undo_add_boundary();
-	LIST_INSERT_HEAD(&curbp->b_undo, rec, next);
+		return (TRUE);
+	undo_add_boundary();
+	nobound = 1;
+	undo_add_delete(lp, offset, size);
+	undo_add_insert(lp, offset, size);
+	nobound = 0;
 	undo_add_boundary();
 
-	return TRUE;
+	return (TRUE);
 }
 
 /*
@@ -390,30 +371,30 @@ undo_dump(void)
 	 * Prepare the buffer for insertion.
 	 */
 	if ((bp = bfind("*undo*", TRUE)) == NULL)
-		return FALSE;
+		return (FALSE);
 	bp->b_flag |= BFREADONLY;
 	bclear(bp);
 	popbuf(bp);
 
-	for (wp = wheadp; wp != NULL; wp = wp->w_wndp)
+	for (wp = wheadp; wp != NULL; wp = wp->w_wndp) {
 		if (wp->w_bufp == bp) {
 			wp->w_dotp = bp->b_linep;
 			wp->w_doto = 0;
 		}
+	}
 
 	num = 0;
 	for (rec = LIST_FIRST(&curbp->b_undo); rec != NULL;
-	     rec = LIST_NEXT(rec, next)) {
+	    rec = LIST_NEXT(rec, next)) {
 		num++;
 		snprintf(buf, sizeof buf,
 		    "Record %d =>\t %s at %d ", num,
 		    (rec->type == DELETE) ? "DELETE":
 		    (rec->type == INSERT) ? "INSERT":
-		    (rec->type == CHANGE) ? "CHANGE":
 		    (rec->type == BOUNDARY) ? "----" : "UNKNOWN",
 		    rec->pos);
-		if (rec->type == DELETE || rec->type == CHANGE) {
 
+		if (rec->content) {
 			strlcat(buf, "\"", sizeof buf);
 			snprintf(tmp, sizeof tmp, "%.*s", rec->region.r_size,
 			    rec->content);
@@ -422,10 +403,9 @@ undo_dump(void)
 		}
 		snprintf(tmp, sizeof buf, " [%d]", rec->region.r_size);
 		strlcat(buf, tmp, sizeof buf);
-
 		addlinef(bp, buf);
 	}
-	return TRUE;
+	return (TRUE);
 }
 
 /*
@@ -444,7 +424,7 @@ undo_dump(void)
  *	[action1]
  *	 ------
  *	 [undo]
- * 
+ *
  * After another undo:
  *
  *
@@ -453,10 +433,10 @@ undo_dump(void)
  *	[action1]  <--- Undoptr
  *	 ------
  *	 [undo]
- * 
+ *
  * Note that the "undo of actionX" have no special meaning. Only when,
  * say, we undo a deletion, the insertion will be recorded just as if it
- * was typed on the keyboard. Hence resulting in the inverse operation to be
+ * was typed on the keyboard. Resulting in the inverse operation being
  * saved in the list.
  *
  * If undoptr reaches the bottom of the list, or if we moved between
@@ -480,7 +460,7 @@ undo(int f, int n)
 		ptr = LIST_FIRST(&curbp->b_undo);
 
 	rval = TRUE;
-	while (n > 0) {
+	while (n--) {
 		/* if we have a spurious boundary, free it and move on.... */
 		while (ptr && ptr->type == BOUNDARY) {
 			nptr = LIST_NEXT(ptr, next);
@@ -494,12 +474,12 @@ undo(int f, int n)
 		 * its creation.
 		 */
 		if (ptr == NULL) {
-			ewprintf("Nothing to undo!");
+			ewprintf("No further undo information");
 			rval = FALSE;
 			break;
 		}
 
-		/* 
+		/*
 		 * Loop while we don't get a boundary specifying we've
 		 * finished the current action...
 		 */
@@ -517,8 +497,8 @@ undo(int f, int n)
 			 * not move there...
 			 */
 			if (ptr->type != BOUNDARY) {
-				if (find_line_offset(ptr->pos,&lp,&offset)
-				    == FALSE) {
+				if (find_line_offset(ptr->pos, &lp,
+				    &offset) == FALSE) {
 					ewprintf("Internal error in Undo!");
 					rval = FALSE;
 					break;
@@ -535,13 +515,8 @@ undo(int f, int n)
 				ldelete(ptr->region.r_size, KFORW);
 				break;
 			case DELETE:
-				region_put_data(ptr->content, 
+				region_put_data(ptr->content,
 				    ptr->region.r_size);
-				break;
-			case CHANGE:
-				forwchar(0, ptr->region.r_size);
-				lreplace(ptr->region.r_size,
-				    ptr->content, 1);
 				break;
 			case BOUNDARY:
 				done = 1;
@@ -556,7 +531,6 @@ undo(int f, int n)
 		} while (ptr != NULL && !done);
 
 		ewprintf("Undo!");
-		n--;
 	}
 	/*
 	 * Record where we are. (we have to save our new position at the end
@@ -566,5 +540,5 @@ undo(int f, int n)
 	curbp->b_undopos.r_linep = curwp->w_dotp;
 	curbp->b_undopos.r_offset = curwp->w_doto;
 
- 	return rval;
+	return (rval);
 }

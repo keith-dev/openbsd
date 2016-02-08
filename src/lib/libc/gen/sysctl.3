@@ -1,4 +1,4 @@
-.\"	$OpenBSD: sysctl.3,v 1.84 2002/04/03 20:33:49 angelos Exp $
+.\"	$OpenBSD: sysctl.3,v 1.94 2002/07/06 19:14:19 nordin Exp $
 .\"
 .\" Copyright (c) 1993
 .\"	The Regents of the University of California.  All rights reserved.
@@ -285,13 +285,15 @@ information.
 .It Dv KERN_MAXPARTITIONS No "	integer	no"
 .It Dv KERN_MAXPROC No "	integer	yes"
 .It Dv KERN_MAXVNODES No "	integer	yes"
+.It Dv KERN_MBSTAT No "	struct mbstat	no"
 .It Dv KERN_MSGBUFSIZE No "	integer	no"
 .It Dv KERN_NCHSTATS No "	struct nchstats	no"
+.It Dv KERN_NFILES No "	integer	no"
 .It Dv KERN_NGROUPS No "	integer	no"
+.It Dv KERN_NOSUIDCOREDUMP No "	integer	yes"
 .It Dv KERN_NPROCS No "	integer	no"
 .It Dv KERN_NSELCOLL No "	integer	no"
-.It Dv KERN_NTPTIME No "	struct ntptimeval	no"
-.It Dv KERN_NOSUIDCOREDUMP No "	integer	yes"
+.It Dv KERN_NUMVNODES No "	integer	no"
 .It Dv KERN_OSRELEASE No "	string	no"
 .It Dv KERN_OSREV No "	integer	no"
 .It Dv KERN_OSTYPE No "	string	no"
@@ -309,12 +311,15 @@ information.
 .It Dv KERN_SYSVSEM No "	integer	no"
 .It Dv KERN_SYSVSHM No "	integer	no"
 .It Dv KERN_TTY No "	node	not applicable"
+.It Dv KERN_TTYCOUNT No "	integer	no"
 .It Dv KERN_USERMOUNT No "	integer	yes"
 .It Dv KERN_VERSION No "	string	no"
 .It Dv KERN_VNODE No "	struct vnode	no"
 .It Dv KERN_STACKGAPRANDOM No "	integer	yes"
+.It Dv KERN_USERASYMCRYPTO No "	integer	yes"
 .It Dv KERN_USERCRYPTO No "	integer	yes"
 .It Dv KERN_CRYPTODEVALLOWSOFT No "	integer	yes"
+.It Dv KERN_PROC_ARGS No "	node not applicable"
 .El
 .Pp
 .Bl -tag -width "123456"
@@ -383,6 +388,12 @@ The maximum number of partitions allowed per disk.
 The maximum number of simultaneous processes the system will allow.
 .It Dv KERN_MAXVNODES
 The maximum number of vnodes available on the system.
+.It Dv KERN_MBSTAT
+A
+.Li struct mbstat
+structure is returned, containing statistics on
+.Xr mbuf 9
+usage.
 .It Dv KERN_MSGBUFSIZE
 The size of the kernel message buffer.
 .It Dv KERN_NCHSTATS
@@ -393,6 +404,8 @@ This structure contains information the
 filename to
 .Xr inode 5
 mapping cache.
+.It Dv KERN_NFILES
+Number of open files.
 .It Dv KERN_NGROUPS
 The maximum number of supplemental groups.
 .It Dv KERN_NPROCS
@@ -403,10 +416,8 @@ Programs with their set-user-ID bit set will not dump core when this is set.
 Number of
 .Xr select 2
 collisions.
-.It Dv KERN_NTPTIME
-Returns a
-.Li strct ntptimeval ,
-containing kernel precision timekeeping information.
+.It Dv KERN_NUMVNODES
+Number of vnodes in use.
 .It Dv KERN_OSRELEASE
 The system release string.
 .It Dv KERN_OSREV
@@ -546,17 +557,20 @@ The third level name selects the System V style IPC facility.
 .Pp
 .Bl -tag -width "123456"
 .It Li KERN_SYSVIPC_MSG_INFO
-Return information on the System V style message facility.  The
+Return information on the System V style message facility.
+The
 .Sy msg_sysctl_info
 structure is defined in
 .Aq Pa sys/msg.h .
 .It Li KERN_SYSVIPC_SEM_INFO
-Return information on the System V style semaphore facility.  The
+Return information on the System V style semaphore facility.
+The
 .Sy sem_sysctl_info
 structure is defined in
 .Aq Pa sys/sem.h .
 .It Li KERN_SYSVIPC_SHM_INFO
-Return information on the System V style shared memory facility.  The
+Return information on the System V style shared memory facility.
+The
 .Sy shm_sysctl_info
 structure is defined in
 .Aq Pa sys/shm.h .
@@ -596,6 +610,10 @@ Return the number of input characters in raw mode.
 .It Dv KERN_TTY_TKCANCC
 Return the number of input characters in canonical mode.
 .El
+.It Dv KERN_TTYCOUNT
+Number of available
+.Xr tty 4
+devices.
 .It Dv KERN_USERMOUNT
 Return non-zero if regular users can issue
 .Xr mount 2
@@ -620,6 +638,12 @@ The random value is added to make buffer overflow exploitation slightly
 harder.
 The bigger the number, the harder it is to brute force this added protection,
 but it also means bigger waste of memory.
+.It Dv KERN_USERASYMCRYPTO
+Permits userland to use
+.Pa /dev/crypto
+for cryptographic support for asymmetric (public) key operations via hardware
+cryptographic devices.
+kern.usercrypto must also be set.
 .It Dv KERN_USERCRYPTO
 Permits userland to use
 .Pa /dev/crypto
@@ -628,6 +652,25 @@ for cryptographic support via hardware cryptographic devices.
 Permits userland to use
 .Pa /dev/crypto
 even if there is no hardware crypto accelerator in the system.
+.It Dv KERN_PROC_ARGS
+Returns the arguments or environment of a process.
+The third level name is the pid of the process.
+The fourth level name is one of:
+.Bl -column KERN_PROC_NARGVXXX -offset indent
+.It Dv KERN_PROC_ARGV
+.It Dv KERN_PROC_NARGV
+.It Dv KERN_PROC_ENV
+.It Dv KERN_PROC_NENV
+.El
+.Pp
+.Dv KERN_PROC_NARGV
+and
+.Dv KERN_PROC_NENV
+return the number of elements in the the argv or env array.
+.Dv KERN_PROC_ARG
+returns the argv array and
+.Dv KERN_PROC_ENV
+returns the environ array.
 .El
 .Ss CTL_MACHDEP
 The set of variables defined is architecture dependent.
@@ -707,6 +750,7 @@ The currently defined protocols and names are:
 .It icmp	errppslimit	integer	yes
 .It icmp	rediraccept	integer	yes
 .It icmp	redirtimeout	integer	yes
+.It icmp	tstamprepl	integer	yes
 .It ipip	allow	integer	yes
 .It tcp	rfc1323	integer	yes
 .It tcp	ident	structure	no
@@ -895,7 +939,8 @@ If set to 0, incoming WCCPv1-style GRE packets will not be processed.
 If set to any other value, and gre.allow allows GRE packet processing,
 WCCPv1-style GRE packets will be processed.
 .It Li mobileip.allow
-If set to 0, incoming MobileIP encapsulated packets (RFC 2004) will not be processed.
+If set to 0, incoming MobileIP encapsulated packets (RFC 2004) will not be
+processed.
 If set to any other value, processing will occur.
 .It Li etherip.allow
 If set to 0, incoming Ethernet-in-IPv4 packets will not be processed.
@@ -916,7 +961,8 @@ Note that routers will never accept ICMP redirect packets,
 and the variable is meaningful on IP hosts only.
 .It Li icmp.redirtimeout
 The variable specifies lifetime of routing entries generated by incoming
-ICMP redirect.  The default timeout is 10 minutes.
+ICMP redirect.
+The default timeout is 10 minutes.
 .It Li tcp.rfc1323
 Returns 1 if RFC1323 extensions to
 .Tn TCP
@@ -1018,6 +1064,8 @@ The currently defined protocols and names are:
 .It ip6	kame_version	string	no
 .It ip6	use_deprecated	integer	yes
 .It ip6	rr_prune	integer	yes
+.It ip6	v6only	integer	no
+.It ip6	maxfrags	integer	yes
 .It icmp6	rediraccept	integer	yes
 .It icmp6	redirtimeout	integer	yes
 .It icmp6	nd6_prune	integer	yes
@@ -1079,7 +1127,8 @@ and
 for more details.
 .It Li ip6.log_interval
 This variable permits adjusting the amount of logs generated by the
-IPv6 packet forwarding engine.  The value indicates the number of
+IPv6 packet forwarding engine.
+The value indicates the number of
 seconds of interval which must elapse between log output.
 .It Li ip6.hdrnestlimit
 The number of IPv6 extension headers permitted on incoming IPv6 packets.
@@ -1107,6 +1156,19 @@ RFC2462 5.5.4.
 .It Li ip6.rr_prune
 The variable specifies interval between IPv6 router renumbering prefix
 babysitting in seconds.
+.It Li ip6.v6only
+The variable specifies initial value for
+.Dv IPV6_V6ONLY
+socket option for
+.Dv AF_INET6
+socket.
+It is always 1 for
+.Ox .
+.It Li ip6.maxfrags
+The maximum number of fragments the node will accept.
+0 means that the node will not accept any fragments.
+-1 means that the node will accept as many fragments as it receives.
+The flag is provided basically for avoiding possible DoS attacks.
 .It Li icmp6.rediraccept
 If set to non-zero, the host will accept ICMPv6 redirect packets.
 Note that IPv6 routers will never accept ICMPv6 redirect packets,

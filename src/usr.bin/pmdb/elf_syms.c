@@ -1,4 +1,4 @@
-/*	$OpenBSD: elf_syms.c,v 1.4 2002/03/19 21:17:52 fgsch Exp $	*/
+/*	$OpenBSD: elf_syms.c,v 1.7 2002/07/31 04:42:01 art Exp $	*/
 /*
  * Copyright (c) 2002 Artur Grabowski <art@openbsd.org>
  * All rights reserved. 
@@ -89,12 +89,12 @@ sym_check_elf(const char *name, struct pstate *ps)
 		error = 1;
 
 #ifndef __NetBSD__
-	if (!error && !IS_ELF(ehdr) ||
+	if (!error && (!IS_ELF(ehdr) ||
 	    ehdr.e_ident[EI_CLASS] != ELF_TARG_CLASS ||
 	    ehdr.e_ident[EI_DATA] != ELF_TARG_DATA ||
 	    ehdr.e_ident[EI_VERSION] != ELF_TARG_VER ||
 	    ehdr.e_machine != ELF_TARG_MACH ||
-	    ehdr.e_version != ELF_TARG_VER)
+	    ehdr.e_version != ELF_TARG_VER))
 		error = 1;
 #endif
 
@@ -311,6 +311,12 @@ sym_bkpt(struct pstate *ps, void *arg)
 	return BKPT_KEEP_CONT;
 }
 
+/* Is the ABI really so daft that it doesn't include the linking offset? */
+struct xlink_map {
+	struct link_map lm;
+	Elf_Addr a;
+};
+
 /*
  * Called after execution started so that we can load any dynamic symbols.
  */
@@ -318,8 +324,8 @@ void
 elf_update(struct pstate *ps)
 {
 #ifndef __NetBSD__
-	pid_t pid = ps->ps_pid;
-	struct elf_object_v1 eobj;
+	struct xlink_map xlm;
+#define lm xlm.lm
 	struct r_debug rdeb;
 	reg addr;
 	Elf_Dyn dyn;
@@ -333,7 +339,7 @@ elf_update(struct pstate *ps)
 	addr = s->st_value + ps->ps_sym_exe->st_offs;
 
 	do {
-		if (read_from_pid(pid, addr, &dyn, sizeof(dyn)) < 0) {
+		if (process_read(ps, addr, &dyn, sizeof(dyn)) < 0) {
 			warnx("Can't read _DYNAMIC");
 			return;
 		}
@@ -345,7 +351,7 @@ elf_update(struct pstate *ps)
 		return;
 	}
 
-	if (read_from_pid(pid, dyn.d_un.d_ptr, &rdeb, sizeof(rdeb)) < 0) {
+	if (process_read(ps, dyn.d_un.d_ptr, &rdeb, sizeof(rdeb)) < 0) {
 		warnx("Can't read DT_DEBUG");
 		return;
 	}
@@ -370,16 +376,16 @@ elf_update(struct pstate *ps)
 		char fname[MAXPATHLEN];
 		int i;
 
-		if (read_from_pid(pid, addr, &eobj, sizeof(eobj)) < 0) {
+		if (process_read(ps, addr, &xlm, sizeof(xlm)) < 0) {
 			warnx("Can't read symbols...");
 			return;
 		}
 
-		addr = (Elf_Addr)eobj.next;
+		addr = (Elf_Addr)lm.l_next;
 
-		if (eobj.load_name == NULL || eobj.load_name == (char *)-1)
+		if (lm.l_name == NULL || lm.l_name == (char *)-1)
 			continue;
-		if (read_from_pid(pid, (Elf_Addr)eobj.load_name, fname,
+		if (process_read(ps, (Elf_Addr)lm.l_name, fname,
 		    sizeof(fname)) < 0) {
 			warnx("Can't read symbols...");
 			return;
@@ -392,7 +398,7 @@ elf_update(struct pstate *ps)
 		if (i == MAXPATHLEN)
 			continue;
 
-		if (st_open(ps, fname, eobj.load_offs) == NULL)
+		if (st_open(ps, fname, xlm.a) == NULL)
 			warn("symbol loading failed");
 	}
 #endif

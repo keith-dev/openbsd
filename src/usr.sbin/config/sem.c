@@ -1,4 +1,4 @@
-/*	$OpenBSD: sem.c,v 1.25 2002/03/14 16:44:24 mpech Exp $	*/
+/*	$OpenBSD: sem.c,v 1.27 2002/06/11 05:58:27 nordin Exp $	*/
 /*	$NetBSD: sem.c,v 1.10 1996/11/11 23:40:11 gwr Exp $	*/
 
 /*
@@ -170,7 +170,7 @@ setmaxusers(n)
 	}
 	maxusers = n;
 	if (n < minmaxusers) {
-		warnx("warning: minimum of %d maxusers assumed\n", minmaxusers);
+		warnx("warning: minimum of %d maxusers assumed", minmaxusers);
 		maxusers = minmaxusers;
 	} else if (n > maxmaxusers) {
 		warnx("warning: maxusers (%d) > %d", n, maxmaxusers);
@@ -578,10 +578,12 @@ resolve(nvp, name, what, dflt, part)
 			if (dev->d_major == maj)
 				break;
 		if (dev == NULL)
-			(void)sprintf(buf, "<%d/%d>", maj, min);
+			(void)snprintf(buf, sizeof buf, "<%d/%d>",
+			    maj, min);
 		else
-			(void)sprintf(buf, "%s%d%c", dev->d_name,
-			    min / maxpartitions, (min % maxpartitions) + 'a');
+			(void)snprintf(buf, sizeof buf, "%s%d%c",
+			    dev->d_name, min / maxpartitions,
+			    (min % maxpartitions) + 'a');
 		nv->nv_str = intern(buf);
 		return (0);
 	}

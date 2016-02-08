@@ -1,4 +1,4 @@
-/*	$OpenBSD: main.c,v 1.19 2002/03/18 01:45:55 vincent Exp $	*/
+/*	$OpenBSD: main.c,v 1.22 2002/07/25 16:37:54 vincent Exp $	*/
 
 /*
  *	Mainline.
@@ -63,9 +63,11 @@ main(int argc, char **argv)
 #endif	/* !NO_STARTUP */
 	while (--argc > 0) {
 		cp = adjustname(*++argv);
-		curbp = findbuffer(cp);
-		(void)showbuffer(curbp, curwp, 0);
-		(void)readin(cp);
+		if (cp != NULL) {
+			curbp = findbuffer(cp);
+			(void)showbuffer(curbp, curwp, 0);
+			(void)readin(cp);
+		}
 	}
 
 	/* fake last flags */
@@ -103,7 +105,7 @@ main(int argc, char **argv)
  * Initialize default buffer and window.
  */
 static void
-edinit()
+edinit(void)
 {
 	BUFFER	*bp;
 	MGWIN	*wp;
@@ -111,6 +113,8 @@ edinit()
 	bheadp = NULL;
 	bp = bfind("*scratch*", TRUE);		/* Text buffer.		 */
 	wp = (MGWIN *)malloc(sizeof(MGWIN));	/* Initial window.	 */
+	if (wp == NULL)
+		panic("Out of memory");
 	if (bp == NULL || wp == NULL)
 		panic("edinit");
 	curbp = bp;				/* Current ones.	 */
@@ -135,8 +139,7 @@ edinit()
  */
 /* ARGSUSED */
 int
-quit(f, n)
-	int f, n;
+quit(int f, int n)
 {
 	int	 s;
 
@@ -159,8 +162,7 @@ quit(f, n)
  */
 /* ARGSUSED */
 int
-ctrlg(f, n)
-	int f, n;
+ctrlg(int f, int n)
 {
 	return ABORT;
 }

@@ -1,4 +1,4 @@
-.\"     $OpenBSD: intro.4,v 1.23 2002/03/29 22:46:00 jason Exp $
+.\"     $OpenBSD: intro.4,v 1.28 2002/10/01 21:08:41 miod Exp $
 .\"	$NetBSD: intro.4,v 1.5 1998/02/06 06:07:00 perry Exp $
 .\"
 .\" Copyright (c) 1996 Jonathan Stone.
@@ -98,7 +98,7 @@ Pseudo-devices are not listed.
 Devices are indicated by their functional interface.
 Not all supported devices are listed.
 .Pp
-.Bl -tag -width le/lebuffer(4) -compact -offset indent
+.Bl -tag -width zs/zstty/zskbd(4) -compact -offset indent
 .It Xr audioamd 4
 AMD 79C30 obio (sun4c and SPARC Classic) audio controller.
 .It Xr audiocs 4
@@ -106,23 +106,25 @@ CS4231 based audio found in some sun4c and sun4m models.
 .It Xr be 4
 10BaseT/100BaseTX SBus Ethernet controller.
 .It Xr bwtwo 4
-black and white obio frame buffer.
+black and white SBus and obio (sun4) frame buffer.
 .It Xr cgeight 4
 24 bit VMEbus color frame buffer.
 .It Xr cgfour 4
 8 bit obio (sun4 P4 bus) color graphics frame buffer.
 .It Xr cgfourteen 4
-24 bit SBus color frame buffer.
+24 bit MBus color frame buffer.
 .It Xr cgsix 4
-8 bit obio (sun4c & sun4m), SBus color graphics frame buffer.
+8 bit SBus and obio (sun4c & sun4m) color graphics frame buffer.
 .It Xr cgthree 4
 8 bit VMEbus, SBus, and obio (sun4m) color graphics frame buffer.
+.It Xr cgtwelve 4
+24 bit SBus color frame buffer.
 .It Xr cgtwo 4
 8 bit VMEbus color frame buffer.
-.It Xr eeprom 4
-Sun non-volatile configuration RAM driver.
+.It Xr daadio 4
+MATRIX MD-DAADIO digital/analog and analog/digital parallel i/o board.
 .It Xr esp 4
-NCR53C90 ESP100 (Sun 4/300),.
+NCR53C90 ESP100 (Sun 4/300),
 .br
 ESP100A (sun4c),
 .br
@@ -135,21 +137,17 @@ floppy disk drive controller.
 .It Xr fga 4
 Force FGA5000 SBus/VME bridge.
 .It Xr hme 4
-SBus HME Ethernet controllers (SunSwift).
+SBus HME Ethernet controllers (SunSwift) and SBus QuadFastEthernet controllers.
 .It Xr ie 4
-Intel 82586 Ethernet controller (Sun 4/100).
+Intel 82586 Ethernet controller (Sun 4/100 and 4/200).
 .It Xr isp 4
 Qlogic ISP SBus SCSI controller.
-.It Xr kbd 4
-Sun type 2, type 3, type 4, and type 5 keyboards (on zs).
 .It Xr le/lebuffer 4
-AMD 7990 LANCE ethernet controller (Sun 4/200, 4/300, sun4c, sun4m, SBus).
+AMD 7990 LANCE ethernet controller (Sun 4/300, sun4c, sun4m, SBus).
 .It Xr led 4
 diagnostic LED display on sun4 and sun4m (4/600) machines.
 .It Xr magma 4
 Magma serial/parallel communication boards.
-.It Xr ms 4
-Sun mouse (on zs).
 .It Xr openprom 4
 Sun Open boot PROM (what became IEEE 1275) configuration driver.
 .It Xr pnozz 4
@@ -162,8 +160,8 @@ Supported as a carrier for the
 or
 .Nm qe
 Ethernet controllers.
-.It Xr qfe 4
-SBus QuadFastEthernet controllers.
+.It Xr scf 4
+Force CPU-5 system configuration registers.
 .It Xr si 4
 NCR5380 "SCSI-2" VMEbus (Sun 4/200, Sun 4/400) SCSI controller.
 .It Xr spif 4
@@ -174,14 +172,16 @@ NCR5380 obio (Sun 4/100) "SCSI Weird" SCSI controller.
 Tadpole microcontroller interface.
 .It Xr tcx 4
 8 or 24 bit SBus color graphics frame buffer.
+.It Xr vigra 4
+8 bit SBus color framebuffer with VGA-compatible modes and connector.
 .It Xr xbox 4
 SBus Expansion Subsystem.
 .It Xr xd 4
 Xylogics 753/7053 VMEbus SMD disk controller.
 .It Xr xy 4
 Xylogics 450/451 VMEbus SMD disk controller.
-.It Xr zs 4
-Zilog 8530 serial controller.
+.It Xr zs/zstty/zskbd 4
+Zilog 8530 serial controller (and serial keyboards).
 .El
 .Sh SEE ALSO
 .Xr autoconf 4 ,

@@ -1,4 +1,28 @@
-.\"     $OpenBSD: vnode.9,v 1.7 2002/02/28 19:22:05 csapuntz Exp $
+.\"     $OpenBSD: vnode.9,v 1.9 2002/08/26 20:18:07 art Exp $
+.\"
+.\" Copyright (c) 2001 Constantine Sapuntzakis
+.\" All rights reserved.
+.\"
+.\" Redistribution and use in source and binary forms, with or without
+.\" modification, are permitted provided that the following conditions
+.\" are met:
+.\"
+.\" 1. Redistributions of source code must retain the above copyright
+.\"    notice, this list of conditions and the following disclaimer.
+.\" 2. The name of the author may not be used to endorse or promote products
+.\"    derived from this software without specific prior written permission.
+.\"
+.\" THIS SOFTWARE IS PROVIDED ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES,
+.\" INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY
+.\" AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL
+.\" THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+.\" EXEMPLARY, OR CONSEQUENTIAL  DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+.\" PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+.\" OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+.\" WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+.\" OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+.\" ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+.\"
 .Dd February 22, 2001
 .Dt vnode 9
 .Os OpenBSD 2.9
@@ -10,34 +34,36 @@ A vnode is an object that speaks the UNIX file interface (open,
 read, write, close, readdir, etc.). Vnodes can represent files, 
 directories, FIFOs, domain sockets, block devices, character devices.
 .Pp
-Each vnode has a set of methods which start with string 'VOP_'. These
-methods include VOP_OPEN, VOP_READ, VOP_WRITE, VOP_RENAME, VOP_CLOSE,
+Each vnode has a set of methods which start with string 'VOP_'.
+These methods include VOP_OPEN, VOP_READ, VOP_WRITE, VOP_RENAME, VOP_CLOSE,
 VOP_MKDIR. Many of these methods correspond closely to the equivalent
-file system call--open, read, write, rename, etc. Each file system (FFS,
-NFS, etc.) provides implementations for these methods.
+file system call--open, read, write, rename, etc.
+Each file system (FFS, NFS, etc.) provides implementations for these methods.
 .Pp
-The Virtual File System (VFS) library maintains a pool of vnodes. File systems
-cannot allocate their own vnodes; they must use the functions provided
-by the VFS to create and manage vnodes.
+The Virtual File System (VFS) library maintains a pool of vnodes.
+File systems cannot allocate their own vnodes; they must use the functions
+provided by the VFS to create and manage vnodes.
 .Ss Vnode state
-.Pp
 Vnodes have a reference count which corresponds to the number of kernel
 objects that hold references to the vnode. A positive reference count keeps
 the vnode off of the free list, which prevents the vnode from being recycled
 to refer to a different file.
 .Pp
 Vnodes that refer to a valid file and have a reference count of 1 or
-greater are "active". When a vnodes reference count drops to zero, it
-is "inactivated" and becomes "inactive". Inactive vnodes are placed on the
+greater are "active".
+When a vnodes reference count drops to zero, it
+is "inactivated" and becomes "inactive".
+Inactive vnodes are placed on the
 free list, to be re-used to represent other files.
 .Pp
 Before a struct vnode can be re-used to refer to another file, it must
-be cleaned out of all information pertaining to the old file. A vnode that
-doesn't refer to any file is called a "reclaimed" vnode.
+be cleaned out of all information pertaining to the old file.
+A vnode that doesn't refer to any file is called a "reclaimed" vnode.
 .Pp
 The VFS may "reclaim" a vnode with a positive reference count.
 This is done when the underlying file is revoked, as happens with the
-revoke system call or through a forceable unmount. Such a vnode is given
+revoke system call or through a forceable unmount.
+Such a vnode is given
 to the dead file system, which returns errors for most operations.
 The vnode will not be re-used for another file until its reference count
 hits zero.
@@ -53,8 +79,9 @@ The vnode returned has a reference count (v_usecount) of 1.
 .Pp
 The 
 .Xr vref 9 
-call increments the reference count on the vnode. It may only be
-on a vnode with reference count of 1 or greater. The
+call increments the reference count on the vnode.
+It may only be on a vnode with reference count of 1 or greater.
+The
 .Xr vrele 9
 and 
 .Xr vput 9 
@@ -66,16 +93,17 @@ call also releases the vnode lock.
 The
 .Xr vget 9
 call, when used on an inactive vnode, will make the vnode "active"
-by bumping the reference count to one. When called on an active vnode,
-vget increases the reference count by one. However, if the vnode
-is being reclaimed concurrently, then vget will fail and return an error.
+by bumping the reference count to one.
+When called on an active vnode, vget increases the reference count by one.
+However, if the vnode is being reclaimed concurrently, then vget will fail
+and return an error.
 .Pp
 The
 .Xr vgone 9 
 and 
 .Xr vgonel 9 
-orchestrate the reclamation of a vnode. They can be called on both
-active and inactive vnodes.
+orchestrate the reclamation of a vnode.
+They can be called on both active and inactive vnodes.
 .Pp
 While transitioning a vnode to the "reclaimed" state, the VFS will call
 .Xr vop_reclaim 9 

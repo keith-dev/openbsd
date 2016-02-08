@@ -1,3 +1,4 @@
+/*	$OpenBSD: usrdb.c,v 1.6 2002/05/30 18:47:44 deraadt Exp $	*/
 /*
  * Copyright (c) 1994 Christopher G. Demetriou
  * All rights reserved.
@@ -29,7 +30,7 @@
  */
 
 #ifndef LINT
-static char rcsid[] = "$Id: usrdb.c,v 1.4 2002/02/16 21:28:09 millert Exp $";
+static char rcsid[] = "$Id: usrdb.c,v 1.6 2002/05/30 18:47:44 deraadt Exp $";
 #endif
 
 #include <sys/types.h>
@@ -37,6 +38,8 @@ static char rcsid[] = "$Id: usrdb.c,v 1.4 2002/02/16 21:28:09 millert Exp $";
 #include <err.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <pwd.h>
+#include <stdio.h>
 #include <string.h>
 #include "extern.h"
 #include "pathnames.h"
@@ -85,7 +88,7 @@ usracct_init()
 				warn("initializing user accounting stats");
 				error = -1;
 				break;
-			} 
+			}
 
 			serr = DB_SEQ(saved_usracct_db, &key, &data, R_NEXT);
 			if (serr < 0) {
@@ -116,8 +119,7 @@ usracct_destroy()
 }
 
 int
-usracct_add(ci)
-	const struct cmdinfo *ci;
+usracct_add(const struct cmdinfo *ci)
 {
 	DBT key, data;
 	struct userinfo newui;
@@ -152,7 +154,7 @@ usracct_add(ci)
 	newui.ui_mem += ci->ci_mem;
 	newui.ui_io += ci->ci_io;
 
-	data.data = &newui; 
+	data.data = &newui;
 	data.size = sizeof(newui);
 	rv = DB_PUT(usracct_db, &key, &data, 0);
 	if (rv < 0) {
@@ -211,7 +213,6 @@ usracct_update()
 		warn("syncing process accounting summary");
 		error = -1;
 	}
-out:
 	if (DB_CLOSE(saved_usracct_db) < 0) {
 		warn("closing process accounting summary");
 		error = -1;
@@ -265,14 +266,13 @@ usracct_print()
 }
 
 static int
-uid_compare(k1, k2)
-	const DBT *k1, *k2;
+uid_compare(const DBT *k1, const DBT *k2)
 {
 	u_long d1, d2;
 
 	memcpy(&d1, k1->data, sizeof(d1));
 	memcpy(&d2, k2->data, sizeof(d2));
-	
+
 	if (d1 < d2)
 		return -1;
 	else if (d1 == d2)

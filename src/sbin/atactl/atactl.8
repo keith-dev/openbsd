@@ -1,4 +1,4 @@
-.\"	$OpenBSD: atactl.8,v 1.12 2002/02/11 18:43:51 mpech Exp $
+.\"	$OpenBSD: atactl.8,v 1.17 2002/08/04 14:11:41 gluk Exp $
 .\"	$NetBSD: atactl.8,v 1.5 1999/02/24 18:49:14 jwise Exp $
 .\"
 .\" Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -67,6 +67,7 @@ is specified without a
 the
 .Cm identify
 command is implied.
+.Sh COMMANDS
 .Pp
 .Cm identify
 .Pp
@@ -162,7 +163,7 @@ Support for automatic acoustic management is indicated by the device with
 .Sq Automatic Acoustic Management feature set
 in the output of the
 .Cm identify
-command. 
+command.
 .Pp
 .Cm acousticdisable
 .Pp
@@ -233,6 +234,108 @@ behaviour in implementing this, so it is
 recommended to issue this command on a disk containing any currently
 mounted filesystems.
 .Pp
+.Cm secsetpass
+.Ar user
+.Ar high | maximum
+.br
+.Cm secsetpass
+.Ar master
+.Pp
+Sets password and security level for the specified device.
+There are two passwords, user and master, and two security levels, high and
+maximum.
+The maximum password length is 32 symbols.
+The security system is enabled by sending a user password to the device with
+this command.
+When the security system is enabled, access to user data on the device is
+denied after a power cycle until the user password is sent to the device with
+the
+.Cm secunlock
+command.
+A master password may be set in a addition to the user password.
+The purpose of the master password is to allow an administrator to establish
+a password that is kept secret from the user, and which may be used to unlock
+the device if the user password is lost.
+Setting the master password does not enable security system.
+Each master password change decrements the master password revision
+code value which is displayed in the
+.Cm identify
+command output if supported.
+After value 0x0001 is reached the next value will be 0xfffe.
+The security level determines device behavior when the master password is used
+to unlock the device.
+When the security level is set to high the device requires the
+.Cm secunlock
+command if the master password is used to unlock.
+When the security level is set to maximum the device requires a
+.Cm secerase
+command if the master password is used to unlock.
+Execution of the
+.Cm secerase
+command erases all user data on the device.
+.Pp
+.Cm secunlock
+.Ar user | master
+.Pp
+Unlocks the specified device with user or master password.
+The device will always unlock if a valid user password is received.
+If the security level was set to high during the last
+.Cm secsetpass
+command, the device will unlock if the master password is received.
+If the security level was set to maximum during the last
+.Cm secsetpass
+command, the device won't unlock if the master password is received.
+.Pp
+.Cm secerase
+.Ar user | master
+.Op Ar enhanced
+.Pp
+Erases all user data and unlocks the specified device.
+Execution of this command with master password is the only way to unlock a
+device locked at maximum security level with
+.Cm secsetpass
+command if user password is lost or unknown.
+There are two erase modes: normal and enhanced.
+Default erase mode is normal.
+In the normal erase mode this command will write binary zeroes to
+all user data areas.
+The enhanced erase mode is optional and may not be supported by your device.
+When enhanced erase mode specified, the device will write predetermined
+data patterns to all user data areas.
+In enhanced erase mode, all previously written user data will be overwritten,
+including sectors that are no longer in use due to reallocation.
+This command will disable the device lock mode, however, the master password
+will still be stored internally within the device and may be reactivated later
+when a new user password is set.
+.Pp
+.Cm secfreeze
+.Pp
+Prevents changes to passwords until a following power cycle.
+The purpose of this command is to prevent password setting attacks on the
+security system.
+After command completion any other commands that update the device lock mode
+will be aborted.
+.Pp
+.Cm secdisablepass
+.Ar user | master
+.Pp
+Disables the lock mode for the specified device with user or master password.
+This command won't change the master password.
+The master password will be reactivated when a user password is set.
+.Pp
+Support for the security commands is indicated by the device with
+.Sq Security Mode feature set
+in the output of the
+.Cm identify
+command.
+.Pp
+.Em WARNING
+.br
+Be very careful while playing with these commands.
+If you lose the user and master passwords the device will not be accessible
+at all.
+Don't use it unless the implications are completely understood.
+.Pp
 .Cm smartenable
 .Pp
 Enables SMART (Self-Monitoring, Analysis, and Reporting Technology) on the
@@ -251,6 +354,11 @@ Disables support for SMART on the specified device.
 Note that this means that the device will no longer record any SMART
 information.
 .Pp
+Note that SMART
+.Em must
+be enabled while executing the next described commands or the device will
+return an error.
+.Pp
 .Cm smartstatus
 .Pp
 Reads the reliability status of the specified device.
@@ -259,9 +367,82 @@ that one of its thresholds is exceeded (a strong indication of imminent
 failure), the warning
 .Sq SMART threshold exceeded!
 is printed to stderr and a status of 2 is returned.
-Note that SMART
-.Em must
-be enabled or the device will return an error.
+.Pp
+.Cm smartautosave
+.Ar enable | disable
+.Pp
+Enables/disables attribute autosave feature on the specified device.
+.Pp
+.Cm smartoffline
+.Ar subcommand
+.Pp
+Causes the specified device to immediately initiate the optional set of
+activities that collect SMART data in off-line mode and then save this data
+to the device's non-volatile memory, or execute a self-diagnostic test
+routines in either captive or off-line mode.
+The
+.Ar subcommand
+may be one of the following:
+.Bl -inset -offset indent
+.It Em collect
+start SMART off-line data collection immediately;
+.It Em shortoffline
+execute SMART short self-test routine immediately in off-line mode;
+.It Em extenoffline
+execute SMART extended self-test routine immediately in off-line mode;
+.It Em abort
+abort off-line mode self-test routine;
+.It Em shortcaptive
+execute SMART short self-test routine immediately in captive mode;
+.It Em extencaptive
+execute SMART extended self-test routine immediately in captive mode.
+.El
+.Pp
+Note that executing self-test routines in captive mode causes the device to
+be not accessible until the routine completes.
+This option is therefore
+.Em not recommended
+unless the implications are understood.
+.Pp
+.Cm smartread
+.Pp
+Reads various SMART information from the specified device and prints it to
+stdout.
+.Pp
+.Cm smartreadlog
+.Ar log
+.Pp
+Reads specified
+.Ar log
+and prints it to stdout.
+The
+.Ar log
+may by one of the following:
+.Bl -inset -offset indent
+.It Em directory
+error log directory;
+.It Em summary
+summary error log;
+.It Em comp
+comprehensive error log;
+.It Em selftest
+self-test log.
+.El
+.Pp
+.Cm readattr
+.Pp
+Displays attributes thresholds and values for the specified device.
+Besides attributes values device vendor can provide additional information
+shown in the last column ``Raw''.
+Attributes names can be completely wrong since they vary between vendors and
+even models, so don't rely on it.
+SMART must be enabled while executing this command or the device will return
+an error.
+.Pp
+SMART commands and
+.Cm readattr
+command are for experts only.
+If you can't understand its meaning don't ask us, read ATA working drafts.
 .Pp
 .Cm writecachedisable
 .Pp
@@ -327,9 +508,7 @@ so even though disabling a feature works, enabling might not.
 The
 .Nm
 command was written by Ken Hornstein.
-It was based heavily on the
-.Xr scsictl 8
-command written by Jason R. Thorpe.
+It was based heavily on the scsictl command written by Jason R. Thorpe.
 Support for acoustic management, advanced power management, power-up in
 standby, read look-ahead and SMART was added by Wouter Slegers.
 .Sh HISTORY
@@ -348,9 +527,3 @@ command is rather ugly.
 Disabling read look-head with the
 .Cm readaheaddisable
 might cause problems with mounted filesystems on that device.
-.Pp
-There is no support for reading SMART logs or initiating a SMART
-selftest.
-.Pp
-There is no support for the Secure Mode commands (in particular the
-Security Erase Unit).

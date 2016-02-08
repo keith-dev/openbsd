@@ -1,4 +1,4 @@
-/*	$OpenBSD: ncheck_ffs.c,v 1.10 2002/03/14 06:51:41 mpech Exp $	*/
+/*	$OpenBSD: ncheck_ffs.c,v 1.14 2002/08/12 00:42:56 aaron Exp $	*/
 
 /*-
  * Copyright (c) 1995, 1996 SigmaSoft, Th. Lockert <tholo@sigmasoft.com>
@@ -31,7 +31,7 @@
  */
 
 #ifndef lint
-static char rcsid[] = "$OpenBSD: ncheck_ffs.c,v 1.10 2002/03/14 06:51:41 mpech Exp $";
+static char rcsid[] = "$OpenBSD: ncheck_ffs.c,v 1.14 2002/08/12 00:42:56 aaron Exp $";
 #endif /* not lint */
 
 #include <sys/param.h>
@@ -91,8 +91,7 @@ char *rawname(char *);
  * Check to see if the indicated inodes are the same
  */
 int
-matchino(key, val)
-	const void *key, *val;
+matchino(const void *key, const void *val)
 {
 	ino_t k = *(ino_t *)key;
 	ino_t v = *(ino_t *)val;
@@ -107,8 +106,7 @@ matchino(key, val)
 /*
  * Check if the indicated inode match the entry in the cache
  */
-int matchcache(key, val)
-	const void *key, *val;
+int matchcache(const void *key, const void *val)
 {
 	ino_t		ino = *(ino_t *)key;
 	struct icache_s	*ic = (struct icache_s *)val;
@@ -124,14 +122,14 @@ int matchcache(key, val)
  * Add an inode to the cached entries
  */
 void
-cacheino(ino, ip)
-	ino_t ino;
-	struct dinode *ip;
+cacheino(ino_t ino, struct dinode *ip)
 {
 	if (nicache)
 		icache = realloc(icache, (nicache + 1) * sizeof(struct icache_s));
 	else
 		icache = malloc(sizeof(struct icache_s));
+	if (icache == NULL)
+		errx(1, "malloc");
 	icache[nicache].ino = ino;
 	icache[nicache++].di = *ip;
 }
@@ -140,12 +138,12 @@ cacheino(ino, ip)
  * Get a cached inode
  */
 struct dinode *
-cached(ino)
-	ino_t ino;
+cached(ino_t ino)
 {
 	struct icache_s *ic;
 
-	ic = (struct icache_s *)bsearch(&ino, icache, nicache, sizeof(struct icache_s), matchcache);
+	ic = (struct icache_s *)bsearch(&ino, icache, nicache,
+	    sizeof(struct icache_s), matchcache);
 	return ic ? &ic->di : NULL;
 }
 
@@ -155,8 +153,7 @@ cached(ino)
  * inodes pointing to directories
  */
 void
-findinodes(maxino)
-	ino_t maxino;
+findinodes(ino_t maxino)
 {
 	ino_t ino;
 	struct dinode *dp;
@@ -183,8 +180,7 @@ findinodes(maxino)
  * per cylinder group
  */
 struct dinode *
-getino(inum)
-	ino_t inum;
+getino(ino_t inum)
 {
 	static struct dinode *itab = NULL;
 	static daddr_t iblk = -1;
@@ -197,7 +193,7 @@ getino(inum)
 	if ((inum / sblock->fs_ipg) != iblk || itab == NULL) {
 		iblk = inum / sblock->fs_ipg;
 		if (itab == NULL &&
-		    (itab = calloc(sizeof(struct dinode), sblock->fs_ipg)) == NULL)
+		    (itab = calloc(sblock->fs_ipg, sizeof(struct dinode))) == NULL)
 			errx(1, "no memory for inodes");
 		bread(fsbtodb(sblock, cgimin(sblock, iblk)), (char *)itab,
 		      sblock->fs_ipg * sizeof(struct dinode));
@@ -214,10 +210,7 @@ int	breaderrors = 0;
 #define	BREADEMAX 32
 
 void
-bread(blkno, buf, size)
-	daddr_t blkno;
-	char *buf;
-	int size;	
+bread(daddr_t blkno, char *buf, int size)
 {
 	int cnt, i;
 
@@ -271,8 +264,7 @@ loop:
  * Add an inode to the in-memory list of inodes to dump
  */
 void
-addinode(ino)
-	ino_t ino;
+addinode(ino_t ino)
 {
 	if (ninodes)
 		ilist = realloc(ilist, sizeof(ino_t) * (ninodes + 1));
@@ -288,9 +280,7 @@ addinode(ino)
  * Scan the directory pointer at by ino
  */
 void
-scanonedir(ino, path)
-	ino_t ino;
-	const char *path;
+scanonedir(ino_t ino, const char *path)
 {
 	struct dinode *dp;
 	long filesize;
@@ -317,12 +307,8 @@ scanonedir(ino, path)
  * require the directory to be dumped.
  */
 void
-dirindir(ino, blkno, ind_level, filesize, path)
-	ino_t ino;
-	daddr_t blkno;
-	int ind_level;
-	long *filesize;
-	const char *path;
+dirindir(ino_t ino, daddr_t blkno, int ind_level, long *filesize,
+    const char *path)
 {
 	daddr_t idblk[MAXBSIZE / sizeof(daddr_t)];
 	int i;
@@ -352,12 +338,8 @@ dirindir(ino, blkno, ind_level, filesize, path)
  * Pass inodes pointing to directories back to scanonedir().
  */
 void
-searchdir(ino, blkno, size, filesize, path)
-	ino_t ino;
-	daddr_t blkno;
-	long size;
-	long filesize;
-	const char *path;
+searchdir(ino_t ino, daddr_t blkno, long size, long filesize,
+    const char *path)
 {
 	char dblk[MAXBSIZE];
 	struct direct *dp;
@@ -394,15 +376,18 @@ searchdir(ino, blkno, size, filesize, path)
 			    path, dp->d_name, mode == IFDIR ? "/." : "");
 		}
 		if (mode == IFDIR) {
+			int len;
+
 			if (dp->d_name[0] == '.') {
 				if (dp->d_name[1] == '\0' ||
 				    (dp->d_name[1] == '.' && dp->d_name[2] == '\0'))
 				continue;
 			}
-			npath = malloc(strlen(path) + strlen(dp->d_name) + 2);
-			strcpy(npath, path);
-			strcat(npath, "/");
-			strcat(npath, dp->d_name);
+			len = strlen(path) + strlen(dp->d_name) + 2;
+			npath = malloc(len);
+			if (npath == NULL)
+				errx(1, "malloc");
+			snprintf(npath, len, "%s/%s", path, dp->d_name);
 			scanonedir(dp->d_ino, npath);
 			free(npath);
 		}
@@ -410,8 +395,7 @@ searchdir(ino, blkno, size, filesize, path)
 }
 
 char *
-rawname(name)
-	char *name;
+rawname(char *name)
 {
 	static char newname[MAXPATHLEN];
 	char *p;
@@ -427,16 +411,14 @@ rawname(name)
 }
 
 void
-usage()
+usage(void)
 {
 	fprintf(stderr, "Usage: ncheck_ffs [-i numbers] [-ams] filesystem\n");
 	exit(3);
 }
 
 int
-main(argc, argv)
-	int argc;
-	char *argv[];
+main(int argc, char *argv[])
 {
 	struct stat stblock;
 	struct fstab *fsp;

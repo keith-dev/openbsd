@@ -30,7 +30,7 @@
  */
 
 #if defined(LIBC_SCCS) && !defined(lint)
-static char *rcsid = "$OpenBSD: ypmatch_cache.c,v 1.7 1998/01/20 18:40:27 deraadt Exp $";
+static char *rcsid = "$OpenBSD: ypmatch_cache.c,v 1.9 2002/07/31 22:28:32 deraadt Exp $";
 #endif /* LIBC_SCCS and not lint */
 
 #include <sys/param.h>
@@ -53,15 +53,14 @@ static char *rcsid = "$OpenBSD: ypmatch_cache.c,v 1.7 1998/01/20 18:40:27 deraad
 int _yplib_cache = 5;
 
 static bool_t
-ypmatch_add(map, key, keylen, val, vallen)
-	const char     *map;
-	const char     *key;
-	u_int           keylen;
-	char           *val;
-	u_int           vallen;
+ypmatch_add(const char *map, const char *key, u_int keylen, char *val,
+    u_int vallen)
 {
 	struct ypmatch_ent *ep;
 	time_t t;
+
+	if (keylen == 0 || vallen == 0)
+		return (0);
 
 	(void)time(&t);
 
@@ -117,12 +116,8 @@ ypmatch_add(map, key, keylen, val, vallen)
 }
 
 static bool_t
-ypmatch_find(map, key, keylen, val, vallen)
-	const char     *map;
-	const char     *key;
-	u_int           keylen;
-	char          **val;
-	u_int          *vallen;
+ypmatch_find(const char *map, const char *key, u_int keylen, char **val,
+    u_int *vallen)
 {
 	struct ypmatch_ent *ep;
 	time_t          t;
@@ -150,13 +145,8 @@ ypmatch_find(map, key, keylen, val, vallen)
 }
 
 int
-yp_match(indomain, inmap, inkey, inkeylen, outval, outvallen)
-	const char     *indomain;
-	const char     *inmap;
-	const char     *inkey;
-	int             inkeylen;
-	char          **outval;
-	int            *outvallen;
+yp_match(const char *indomain, const char *inmap, const char *inkey,
+    int inkeylen, char **outval, int *outvallen)
 {
 	struct dom_binding *ysd;
 	struct ypresp_val yprv;
@@ -164,7 +154,7 @@ yp_match(indomain, inmap, inkey, inkeylen, outval, outvallen)
 	struct ypreq_key yprk;
 	int tries = 0, r;
 
-	if (indomain == NULL || *indomain == '\0' || 
+	if (indomain == NULL || *indomain == '\0' ||
 	    strlen(indomain) > YPMAXDOMAIN || inmap == NULL ||
 	    *inmap == '\0' || strlen(inmap) > YPMAXMAP ||
 	    inkey == NULL || inkeylen == 0 || inkeylen >= YPMAXRECORD)
@@ -232,15 +222,8 @@ out:
 }
 
 int
-yp_next(indomain, inmap, inkey, inkeylen, outkey, outkeylen, outval, outvallen)
-	const char     *indomain;
-	const char     *inmap;
-	const char     *inkey;
-	int             inkeylen;
-	char          **outkey;
-	int            *outkeylen;
-	char          **outval;
-	int            *outvallen;
+yp_next(const char *indomain, const char *inmap, const char *inkey,
+    int inkeylen, char **outkey, int *outkeylen, char **outval, int *outvallen)
 {
 	struct ypresp_key_val yprkv;
 	struct ypreq_key yprk;

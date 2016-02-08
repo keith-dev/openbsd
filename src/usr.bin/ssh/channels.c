@@ -39,14 +39,13 @@
  */
 
 #include "includes.h"
-RCSID("$OpenBSD: channels.c,v 1.172 2002/03/25 21:13:51 markus Exp $");
+RCSID("$OpenBSD: channels.c,v 1.183 2002/09/17 07:47:02 itojun Exp $");
 
 #include "ssh.h"
 #include "ssh1.h"
 #include "ssh2.h"
 #include "packet.h"
 #include "xmalloc.h"
-#include "uidswap.h"
 #include "log.h"
 #include "misc.h"
 #include "channels.h"
@@ -129,10 +128,6 @@ static u_int x11_fake_data_len;
 
 #define	NUM_SOCKS	10
 
-/* Name and directory of socket for authentication agent forwarding. */
-static char *auth_sock_name = NULL;
-static char *auth_sock_dir = NULL;
-
 /* AF_UNSPEC or AF_INET or AF_INET6 */
 static int IPv4or6 = AF_UNSPEC;
 
@@ -210,7 +205,7 @@ channel_register_fds(Channel *c, int rfd, int wfd, int efd,
 
 Channel *
 channel_new(char *ctype, int type, int rfd, int wfd, int efd,
-    int window, int maxpack, int extusage, char *remote_name, int nonblock)
+    u_int window, u_int maxpack, int extusage, char *remote_name, int nonblock)
 {
 	int i, found;
 	Channel *c;
@@ -234,6 +229,9 @@ channel_new(char *ctype, int type, int rfd, int wfd, int efd,
 		/* There are no free slots.  Take last+1 slot and expand the array.  */
 		found = channels_alloc;
 		channels_alloc += 10;
+		if (channels_alloc > 10000)
+			fatal("channel_new: internal error: channels_alloc %d "
+			    "too big.", channels_alloc);
 		debug2("channel: expanding %d", channels_alloc);
 		channels = xrealloc(channels, channels_alloc * sizeof(Channel *));
 		for (i = found; i < channels_alloc; i++)
@@ -574,6 +572,7 @@ void
 channel_send_open(int id)
 {
 	Channel *c = channel_lookup(id);
+
 	if (c == NULL) {
 		log("channel_send_open: %d: bad id", id);
 		return;
@@ -591,6 +590,7 @@ void
 channel_request_start(int local_id, char *service, int wantconfirm)
 {
 	Channel *c = channel_lookup(local_id);
+
 	if (c == NULL) {
 		log("channel_request_start: %d: unknown channel id", local_id);
 		return;
@@ -605,6 +605,7 @@ void
 channel_register_confirm(int id, channel_callback_fn *fn)
 {
 	Channel *c = channel_lookup(id);
+
 	if (c == NULL) {
 		log("channel_register_comfirm: %d: bad id", id);
 		return;
@@ -615,6 +616,7 @@ void
 channel_register_cleanup(int id, channel_callback_fn *fn)
 {
 	Channel *c = channel_lookup(id);
+
 	if (c == NULL) {
 		log("channel_register_cleanup: %d: bad id", id);
 		return;
@@ -625,6 +627,7 @@ void
 channel_cancel_cleanup(int id)
 {
 	Channel *c = channel_lookup(id);
+
 	if (c == NULL) {
 		log("channel_cancel_cleanup: %d: bad id", id);
 		return;
@@ -635,6 +638,7 @@ void
 channel_register_filter(int id, channel_filter_fn *fn)
 {
 	Channel *c = channel_lookup(id);
+
 	if (c == NULL) {
 		log("channel_register_filter: %d: bad id", id);
 		return;
@@ -647,6 +651,7 @@ channel_set_fds(int id, int rfd, int wfd, int efd,
     int extusage, int nonblock, u_int window_max)
 {
 	Channel *c = channel_lookup(id);
+
 	if (c == NULL || c->type != SSH_CHANNEL_LARVAL)
 		fatal("channel_activate for non-larval channel %d.", id);
 	channel_register_fds(c, rfd, wfd, efd, extusage, nonblock);
@@ -707,8 +712,8 @@ channel_pre_open(Channel *c, fd_set * readset, fd_set * writeset)
 			FD_SET(c->wfd, writeset);
 		} else if (c->ostate == CHAN_OUTPUT_WAIT_DRAIN) {
 			if (CHANNEL_EFD_OUTPUT_ACTIVE(c))
-                               debug2("channel %d: obuf_empty delayed efd %d/(%d)",
-                                   c->self, c->efd, buffer_len(&c->extended));
+			       debug2("channel %d: obuf_empty delayed efd %d/(%d)",
+				   c->self, c->efd, buffer_len(&c->extended));
 			else
 				chan_obuf_empty(c);
 		}
@@ -817,6 +822,7 @@ static void
 channel_pre_x11_open_13(Channel *c, fd_set * readset, fd_set * writeset)
 {
 	int ret = x11_open_helper(&c->output);
+
 	if (ret == 1) {
 		/* Start normal processing for the channel. */
 		c->type = SSH_CHANNEL_OPEN;
@@ -868,7 +874,7 @@ channel_pre_x11_open(Channel *c, fd_set * readset, fd_set * writeset)
 static int
 channel_decode_socks4(Channel *c, fd_set * readset, fd_set * writeset)
 {
-	u_char *p, *host;
+	char *p, *host;
 	int len, have, i, found;
 	char username[256];
 	struct {
@@ -1397,6 +1403,7 @@ static void
 channel_post_output_drain_13(Channel *c, fd_set * readset, fd_set * writeset)
 {
 	int len;
+
 	/* Send buffered output data to the socket. */
 	if (FD_ISSET(c->sock, writeset) && buffer_len(&c->output) > 0) {
 		len = write(c->sock, buffer_ptr(&c->output),
@@ -1474,6 +1481,7 @@ static void
 channel_handler_init(void)
 {
 	int i;
+
 	for (i = 0; i < SSH_CHANNEL_MAX_TYPE; i++) {
 		channel_pre[i] = NULL;
 		channel_post[i] = NULL;
@@ -1573,8 +1581,9 @@ channel_after_select(fd_set * readset, fd_set * writeset)
 void
 channel_output_poll(void)
 {
-	int len, i;
 	Channel *c;
+	int i;
+	u_int len;
 
 	for (i = 0; i < channels_alloc; i++) {
 		c = channels[i];
@@ -1641,8 +1650,8 @@ channel_output_poll(void)
 			 * hack for extended data: delay EOF if EFD still in use.
 			 */
 			if (CHANNEL_EFD_INPUT_ACTIVE(c))
-                               debug2("channel %d: ibuf_empty delayed efd %d/(%d)",
-                                   c->self, c->efd, buffer_len(&c->extended));
+			       debug2("channel %d: ibuf_empty delayed efd %d/(%d)",
+				   c->self, c->efd, buffer_len(&c->extended));
 			else
 				chan_ibuf_empty(c);
 		}
@@ -1652,7 +1661,7 @@ channel_output_poll(void)
 		    c->remote_window > 0 &&
 		    (len = buffer_len(&c->extended)) > 0 &&
 		    c->extended_usage == CHAN_EXTENDED_READ) {
-			debug2("channel %d: rwin %d elen %d euse %d",
+			debug2("channel %d: rwin %u elen %u euse %d",
 			    c->self, c->remote_window, buffer_len(&c->extended),
 			    c->extended_usage);
 			if (len > c->remote_window)
@@ -1722,9 +1731,8 @@ void
 channel_input_extended_data(int type, u_int32_t seq, void *ctxt)
 {
 	int id;
-	int tcode;
 	char *data;
-	u_int data_len;
+	u_int data_len, tcode;
 	Channel *c;
 
 	/* Get the channel number and verify it. */
@@ -1879,7 +1887,7 @@ channel_input_open_confirmation(int type, u_int32_t seq, void *ctxt)
 			c->confirm(c->self, NULL);
 			debug2("callback done");
 		}
-		debug("channel %d: open confirm rwindow %d rmax %d", c->self,
+		debug("channel %d: open confirm rwindow %u rmax %u", c->self,
 		    c->remote_window, c->remote_maxpacket);
 	}
 	packet_check_eom();
@@ -1936,7 +1944,8 @@ void
 channel_input_window_adjust(int type, u_int32_t seq, void *ctxt)
 {
 	Channel *c;
-	int id, adjust;
+	int id;
+	u_int adjust;
 
 	if (!compat20)
 		return;
@@ -1952,7 +1961,7 @@ channel_input_window_adjust(int type, u_int32_t seq, void *ctxt)
 	}
 	adjust = packet_get_int();
 	packet_check_eom();
-	debug2("channel %d: rcvd adjust %d", id, adjust);
+	debug2("channel %d: rcvd adjust %u", id, adjust);
 	c->remote_window += adjust;
 }
 
@@ -2007,7 +2016,6 @@ channel_setup_fwd_listener(int type, const char *listen_addr, u_short listen_por
 	struct addrinfo hints, *ai, *aitop;
 	const char *host;
 	char ntop[NI_MAXHOST], strport[NI_MAXSERV];
-	struct linger linger;
 
 	success = 0;
 	host = (type == SSH_CHANNEL_RPORT_LISTENER) ?
@@ -2050,13 +2058,13 @@ channel_setup_fwd_listener(int type, const char *listen_addr, u_short listen_por
 			continue;
 		}
 		/*
-		 * Set socket options.  We would like the socket to disappear
-		 * as soon as it has been closed for whatever reason.
+		 * Set socket options.
+		 * Allow local port reuse in TIME_WAIT.
 		 */
-		setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on));
-		linger.l_onoff = 1;
-		linger.l_linger = 5;
-		setsockopt(sock, SOL_SOCKET, SO_LINGER, &linger, sizeof(linger));
+		if (setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &on,
+		    sizeof(on)) == -1)
+			error("setsockopt SO_REUSEADDR: %s", strerror(errno));
+
 		debug("Local forwarding listening on %s port %s.", ntop, strport);
 
 		/* Bind the socket to the address. */
@@ -2126,7 +2134,7 @@ channel_request_remote_forwarding(u_short listen_port,
 		const char *address_to_bind = "0.0.0.0";
 		packet_start(SSH2_MSG_GLOBAL_REQUEST);
 		packet_put_cstring("tcpip-forward");
-		packet_put_char(0);			/* boolean: want reply */
+		packet_put_char(1);			/* boolean: want reply */
 		packet_put_cstring(address_to_bind);
 		packet_put_int(listen_port);
 		packet_send();
@@ -2327,12 +2335,12 @@ channel_connect_to(const char *host, u_short port)
 
 /*
  * Creates an internet domain socket for listening for X11 connections.
- * Returns a suitable display number for the DISPLAY variable, or -1 if
- * an error occurs.
+ * Returns 0 and a suitable display number for the DISPLAY variable
+ * stored in display_numberp , or -1 if an error occurs.
  */
 int
 x11_create_display_inet(int x11_display_offset, int x11_use_localhost,
-    int single_connection)
+    int single_connection, u_int *display_numberp)
 {
 	Channel *nc = NULL;
 	int display_number, sock;
@@ -2365,6 +2373,10 @@ x11_create_display_inet(int x11_display_offset, int x11_use_localhost,
 			if (bind(sock, ai->ai_addr, ai->ai_addrlen) < 0) {
 				debug("bind port %d: %.100s", port, strerror(errno));
 				close(sock);
+
+				if (ai->ai_next)
+					continue;
+
 				for (n = 0; n < num_socks; n++) {
 					close(socks[n]);
 				}
@@ -2404,7 +2416,8 @@ x11_create_display_inet(int x11_display_offset, int x11_use_localhost,
 	}
 
 	/* Return the display number for the DISPLAY environment variable. */
-	return display_number;
+	*display_numberp = display_number;
+	return (0);
 }
 
 static int
@@ -2573,6 +2586,7 @@ void
 deny_input_open(int type, u_int32_t seq, void *ctxt)
 {
 	int rchan = packet_get_int();
+
 	switch (type) {
 	case SSH_SMSG_AGENT_OPEN:
 		error("Warning: ssh server tried agent forwarding.");
@@ -2670,105 +2684,6 @@ auth_request_forwarding(void)
 	packet_start(SSH_CMSG_AGENT_REQUEST_FORWARDING);
 	packet_send();
 	packet_write_wait();
-}
-
-/*
- * Returns the name of the forwarded authentication socket.  Returns NULL if
- * there is no forwarded authentication socket.  The returned value points to
- * a static buffer.
- */
-
-char *
-auth_get_socket_name(void)
-{
-	return auth_sock_name;
-}
-
-/* removes the agent forwarding socket */
-
-void
-auth_sock_cleanup_proc(void *_pw)
-{
-	struct passwd *pw = _pw;
-
-	if (auth_sock_name) {
-		temporarily_use_uid(pw);
-		unlink(auth_sock_name);
-		rmdir(auth_sock_dir);
-		auth_sock_name = NULL;
-		restore_uid();
-	}
-}
-
-/*
- * This is called to process SSH_CMSG_AGENT_REQUEST_FORWARDING on the server.
- * This starts forwarding authentication requests.
- */
-
-int
-auth_input_request_forwarding(struct passwd * pw)
-{
-	Channel *nc;
-	int sock;
-	struct sockaddr_un sunaddr;
-
-	if (auth_get_socket_name() != NULL) {
-		error("authentication forwarding requested twice.");
-		return 0;
-	}
-
-	/* Temporarily drop privileged uid for mkdir/bind. */
-	temporarily_use_uid(pw);
-
-	/* Allocate a buffer for the socket name, and format the name. */
-	auth_sock_name = xmalloc(MAXPATHLEN);
-	auth_sock_dir = xmalloc(MAXPATHLEN);
-	strlcpy(auth_sock_dir, "/tmp/ssh-XXXXXXXX", MAXPATHLEN);
-
-	/* Create private directory for socket */
-	if (mkdtemp(auth_sock_dir) == NULL) {
-		packet_send_debug("Agent forwarding disabled: "
-		    "mkdtemp() failed: %.100s", strerror(errno));
-		restore_uid();
-		xfree(auth_sock_name);
-		xfree(auth_sock_dir);
-		auth_sock_name = NULL;
-		auth_sock_dir = NULL;
-		return 0;
-	}
-	snprintf(auth_sock_name, MAXPATHLEN, "%s/agent.%d",
-		 auth_sock_dir, (int) getpid());
-
-	/* delete agent socket on fatal() */
-	fatal_add_cleanup(auth_sock_cleanup_proc, pw);
-
-	/* Create the socket. */
-	sock = socket(AF_UNIX, SOCK_STREAM, 0);
-	if (sock < 0)
-		packet_disconnect("socket: %.100s", strerror(errno));
-
-	/* Bind it to the name. */
-	memset(&sunaddr, 0, sizeof(sunaddr));
-	sunaddr.sun_family = AF_UNIX;
-	strlcpy(sunaddr.sun_path, auth_sock_name, sizeof(sunaddr.sun_path));
-
-	if (bind(sock, (struct sockaddr *) & sunaddr, sizeof(sunaddr)) < 0)
-		packet_disconnect("bind: %.100s", strerror(errno));
-
-	/* Restore the privileged uid. */
-	restore_uid();
-
-	/* Start listening on the socket. */
-	if (listen(sock, 5) < 0)
-		packet_disconnect("listen: %.100s", strerror(errno));
-
-	/* Allocate a channel for the authentication agent socket. */
-	nc = channel_new("auth socket",
-	    SSH_CHANNEL_AUTH_SOCKET, sock, sock, -1,
-	    CHAN_X11_WINDOW_DEFAULT, CHAN_X11_PACKET_DEFAULT,
-	    0, xstrdup("auth socket"), 1);
-	strlcpy(nc->path, auth_sock_name, sizeof(nc->path));
-	return 1;
 }
 
 /* This is called to process an SSH_SMSG_AGENT_OPEN message. */

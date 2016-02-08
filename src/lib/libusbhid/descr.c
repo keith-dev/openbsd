@@ -1,5 +1,5 @@
-/*	$OpenBSD: descr.c,v 1.1 2001/12/30 07:04:38 pvalchev Exp $	*/
-/*	$NetBSD: descr.c,v 1.9 2000/09/24 02:13:24 augustss Exp $	*/
+/*	$OpenBSD: descr.c,v 1.3 2002/05/10 00:09:17 nate Exp $	*/
+/*	$NetBSD: descr.c,v 1.2 2002/02/20 20:31:07 christos Exp $	*/
 
 /*
  * Copyright (c) 1999 Lennart Augustsson <augustss@netbsd.org>
@@ -45,11 +45,11 @@ hid_get_report_desc(int fd)
 {
 	struct usb_ctl_report_desc rep;
 
-	rep.size = 0;
+	rep.ucrd_size = 0;
 	if (ioctl(fd, USB_GET_REPORT_DESC, &rep) < 0)
 		return (NULL);
 
-	return hid_use_report_desc(rep.data, (unsigned int)rep.size);
+	return hid_use_report_desc(rep.ucrd_data, (unsigned int)rep.ucrd_size);
 }
 
 report_desc_t

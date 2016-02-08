@@ -1,4 +1,5 @@
-/*	$OpenBSD: common.c,v 1.16 2002/02/19 19:39:40 millert Exp $	*/
+/*	$OpenBSD: common.c,v 1.23 2002/06/13 06:48:40 millert Exp $	*/
+/*	$NetBSD: common.c,v 1.21 2000/08/09 14:28:50 itojun Exp $	*/
 
 /*
  * Copyright (c) 1983, 1993
@@ -42,7 +43,7 @@
 #if 0
 static const char sccsid[] = "@(#)common.c	8.5 (Berkeley) 4/28/95";
 #else
-static const char rcsid[] = "$OpenBSD: common.c,v 1.16 2002/02/19 19:39:40 millert Exp $";
+static const char rcsid[] = "$OpenBSD: common.c,v 1.23 2002/06/13 06:48:40 millert Exp $";
 #endif
 #endif /* not lint */
 
@@ -57,11 +58,14 @@ static const char rcsid[] = "$OpenBSD: common.c,v 1.16 2002/02/19 19:39:40 mille
 
 #include <dirent.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <unistd.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <signal.h>
 #include <stdarg.h>
+#include <ifaddrs.h>
 #include "lp.h"
 #include "pathnames.h"
 
@@ -112,15 +116,7 @@ long	 XC;		/* flags to clear for local mode */
 long	 XS;		/* flags to set for local mode */
 
 char	line[BUFSIZ];
-char	*bp;		/* pointer into printcap buffer. */
-char	*printer;	/* printer name */
-			/* host machine name */
-char	host[MAXHOSTNAMELEN];
-char	*from = host;	/* client's machine name */
 int	remote;		/* true if sending files to a remote host */
-char	*printcapdb[2] = { _PATH_PRINTCAP, 0 };
-
-extern uid_t	uid, euid;
 
 static int compar(const void *, const void *);
 
@@ -130,83 +126,81 @@ static int compar(const void *, const void *);
  * Most of this code comes from rcmd.c.
  */
 int
-getport(rhost, rport)
-	char *rhost;
-	int rport;
+getport(char *rhost, int rport)
 {
-	struct hostent *hp;
-	struct servent *sp;
-	struct sockaddr_in sin;
-	int s, timo = 1, on = 1, lport = IPPORT_RESERVED - 1;
-	int err;
+	struct addrinfo hints, *res, *r;
+	u_int timo = 1;
+	int s, lport = IPPORT_RESERVED - 1;
+	int error;
+	int refuse, trial;
+	char pbuf[NI_MAXSERV];
 
 	/*
 	 * Get the host address and port number to connect to.
 	 */
 	if (rhost == NULL)
 		fatal("no remote host to connect to");
-	bzero((char *)&sin, sizeof(sin));
-	if (inet_aton(rhost, &sin.sin_addr) == 1)
-		sin.sin_family = AF_INET;
-	else {
-		siginterrupt(SIGINT, 1);
-		hp = gethostbyname(rhost);
-		if (hp == NULL) {
-			if (errno == EINTR && gotintr) {
-				siginterrupt(SIGINT, 0);
-				return (-1);
-			}
-			siginterrupt(SIGINT, 0);
-			fatal("unknown host %s", rhost);
-		}
-		siginterrupt(SIGINT, 0);
-		bcopy(hp->h_addr, (caddr_t)&sin.sin_addr, hp->h_length);
-		sin.sin_family = hp->h_addrtype;
-	}
-	if (rport == 0) {
-		sp = getservbyname("printer", "tcp");
-		if (sp == NULL)
-			fatal("printer/tcp: unknown service");
-		sin.sin_port = sp->s_port;
-	} else
-		sin.sin_port = htons(rport);
+	memset(&hints, 0, sizeof(hints));
+	hints.ai_family = PF_UNSPEC;
+	hints.ai_socktype = SOCK_STREAM;
+	if (rport)
+		snprintf(pbuf, sizeof(pbuf), "%d", rport);
+	else
+		snprintf(pbuf, sizeof(pbuf), "printer");
+	siginterrupt(SIGINT, 1);
+	error = getaddrinfo(rhost, pbuf, &hints, &res);
+	siginterrupt(SIGINT, 0);
+	if (error)
+		fatal("printer/tcp: %s", gai_strerror(error));
 
 	/*
 	 * Try connecting to the server.
 	 */
 retry:
-	seteuid(euid);
-	siginterrupt(SIGINT, 1);
-	s = rresvport(&lport);
-	siginterrupt(SIGINT, 0);
-	seteuid(uid);
-	if (s < 0)
-		return(-1);
-	siginterrupt(SIGINT, 1);
-	if (connect(s, (struct sockaddr *)&sin, sizeof(sin)) < 0) {
-		err = errno;
-		(void) close(s);
-		siginterrupt(SIGINT, 0);
-		errno = err;
-		if (errno == EINTR && gotintr) {
-			close(s);
-			return (-1);
+	s = -1;
+	refuse = trial = 0;
+	for (r = res; r; r = r->ai_next) {
+		trial++;
+retryport:
+		PRIV_START;
+		s = rresvport_af(&lport, r->ai_family);
+		PRIV_END;
+		if (s < 0) {
+			/* fall back to non-privileged port */
+			if (errno != EACCES ||
+			    (s = socket(r->ai_family, SOCK_STREAM, 0)) < 0)
+				return(-1);
 		}
-		if (errno == EADDRINUSE) {
-			lport--;
-			goto retry;
+		siginterrupt(SIGINT, 1);
+		if (connect(s, r->ai_addr, r->ai_addrlen) < 0) {
+			error = errno;
+			siginterrupt(SIGINT, 0);
+			(void)close(s);
+			s = -1;
+			errno = error;
+			if (errno == EADDRINUSE) {
+				lport--;
+				goto retryport;
+			} else if (errno == ECONNREFUSED)
+				refuse++;
+			continue;
+		} else {
+			siginterrupt(SIGINT, 0);
+			break;
 		}
-		if (errno == ECONNREFUSED && timo <= 16) {
-			sleep(timo);
-			timo *= 2;
-			goto retry;
-		}
-		return(-1);
 	}
-		siginterrupt(SIGINT, 0);
-	
-	/* Don't bother if we get an error here.  */
-	setsockopt(s, SOL_SOCKET, SO_KEEPALIVE, (char *)&on, sizeof on);
+	if (s < 0 && trial == refuse && timo <= 16) {
+		sleep(timo);
+		timo *= 2;
+		goto retry;
+	}
+	if (res)
+		freeaddrinfo(res);
+
+	/* Don't worry if we get an error from setsockopt(). */
+	trial = 1;
+	setsockopt(s, SOL_SOCKET, SO_KEEPALIVE, &trial, sizeof(trial));
+
 	return(s);
 }
 
@@ -216,8 +210,7 @@ retry:
  * Returns 0 at EOF or the number of characters read.
  */
 int
-getline(cfp)
-	FILE *cfp;
+getline(FILE *cfp)
 {
 	int linel = 0;
 	char *lp = line;
@@ -230,7 +223,7 @@ getline(cfp)
 			do {
 				*lp++ = ' ';
 				linel++;
-			} while ((linel & 07) != 0 && linel+1<sizeof(line));
+			} while ((linel & 07) != 0 && linel+1 < sizeof(line));
 			continue;
 		}
 		*lp++ = c;
@@ -246,23 +239,20 @@ getline(cfp)
  * Return the number of entries and a pointer to the list.
  */
 int
-getq(namelist)
-	struct queue *(*namelist[]);
+getq(struct queue ***namelist)
 {
 	struct dirent *d;
 	struct queue *q, **queue;
-	int nitems;
+	size_t nitems, arraysz;
 	struct stat stbuf;
 	DIR *dirp;
-	int arraysz;
-	
 
-	seteuid(euid);
+	PRIV_START;
 	dirp = opendir(SD);
-	seteuid(uid);
-	if (dirp== NULL)
+	PRIV_END;
+	if (dirp == NULL)
 		return(-1);
-	if (fstat(dirp->dd_fd, &stbuf) < 0)
+	if (fstat(dirfd(dirp), &stbuf) < 0)
 		goto errdone;
 
 	/*
@@ -278,24 +268,24 @@ getq(namelist)
 	while ((d = readdir(dirp)) != NULL) {
 		if (d->d_name[0] != 'c' || d->d_name[1] != 'f')
 			continue;	/* daemon control files only */
-		seteuid(euid);
+		PRIV_START;
 		if (stat(d->d_name, &stbuf) < 0) {
-			seteuid(uid);
+			PRIV_END;
 			continue;	/* Doesn't exist */
 		}
-		seteuid(uid);
+		PRIV_END;
 		q = (struct queue *)malloc(sizeof(time_t)+strlen(d->d_name)+1);
 		if (q == NULL)
 			goto errdone;
 		q->q_time = stbuf.st_mtime;
-		strcpy(q->q_name, d->d_name);
+		strcpy(q->q_name, d->d_name);	/* safe */
 		/*
 		 * Check to make sure the array has space left and
 		 * realloc the maximum size.
 		 */
 		if (++nitems > arraysz) {
 			arraysz *= 2;
-			queue = (struct queue **)realloc((char *)queue,
+			queue = (struct queue **)realloc(queue,
 				arraysz * sizeof(struct queue *));
 			if (queue == NULL)
 				goto errdone;
@@ -317,14 +307,12 @@ errdone:
  * Compare modification times.
  */
 static int
-compar(p1, p2)
-	const void *p1, *p2;
+compar(const void *v1, const void *v2)
 {
-	if ((*(struct queue **)p1)->q_time < (*(struct queue **)p2)->q_time)
-		return(-1);
-	if ((*(struct queue **)p1)->q_time > (*(struct queue **)p2)->q_time)
-		return(1);
-	return(0);
+	struct queue *p1 = *(struct queue **)v1;
+	struct queue *p2 = *(struct queue **)v2;
+
+	return(p1->q_time - p2->q_time);
 }
 
 /*
@@ -332,70 +320,110 @@ compar(p1, p2)
  * as the remote machine (RM) entry (if it exists).
  */
 char *
-checkremote()
+checkremote(void)
 {
-	char name[MAXHOSTNAMELEN];
-	struct hostent *hp;
+	char lname[NI_MAXHOST], rname[NI_MAXHOST];
+	struct addrinfo hints, *res, *res0;
 	static char errbuf[128];
-	char *rp, *rp_b;
+	int error;
+	struct ifaddrs *ifap, *ifa;
+#ifdef NI_WITHSCOPEID
+	const int niflags = NI_NUMERICHOST | NI_WITHSCOPEID;
+#else
+	const int niflags = NI_NUMERICHOST;
+#endif
+#ifdef __KAME__
+	struct sockaddr_in6 sin6;
+	struct sockaddr_in6 *sin6p;
+#endif
 
-	remote = 0;	/* assume printer is local */
-	if (RM != NULL) {
-		/* get the official name of the local host */
-		gethostname(name, sizeof(name));
-		name[sizeof(name)-1] = '\0';
-		siginterrupt(SIGINT, 1);
-		hp = gethostbyname(name);
-		if (hp == (struct hostent *) NULL) {
-			if (errno == EINTR && gotintr) {
-				siginterrupt(SIGINT, 0);
-				return NULL;
-			}
-			siginterrupt(SIGINT, 0);
-			(void) snprintf(errbuf, sizeof(errbuf),
-			    "unable to get official name for local machine %s",
-			    name);
-			return errbuf;
-		} else
-			strlcpy(name, hp->h_name, sizeof name);
+	remote = 0;	/* assume printer is local on failure */
+
+	if (RM == NULL || *RM == '\0')
+		return NULL;
+
+	/* get the local interface addresses */
+	siginterrupt(SIGINT, 1);
+	if (getifaddrs(&ifap) < 0) {
+		(void)snprintf(errbuf, sizeof(errbuf),
+		    "unable to get local interface address: %s",
+		    strerror(errno));
 		siginterrupt(SIGINT, 0);
+		return errbuf;
+	}
+	siginterrupt(SIGINT, 0);
 
-		/* get the official name of RM */
-		hp = gethostbyname(RM);
-		if (hp == (struct hostent *) NULL) {
-		    (void) snprintf(errbuf, sizeof(errbuf),
-			"unable to get official name for remote machine %s",
-			RM);
-		    return errbuf;
-		}
+	/* get the remote host addresses (RM) */
+	memset(&hints, 0, sizeof(hints));
+	hints.ai_flags = AI_CANONNAME;
+	hints.ai_family = PF_UNSPEC;
+	hints.ai_socktype = SOCK_STREAM;
+	res = NULL;
+	siginterrupt(SIGINT, 1);
+	error = getaddrinfo(RM, NULL, &hints, &res0);
+	siginterrupt(SIGINT, 0);
+	if (error) {
+		(void)snprintf(errbuf, sizeof(errbuf),
+		    "unable to resolve remote machine %s: %s",
+		    RM, gai_strerror(error));
+		freeifaddrs(ifap);
+		return errbuf;
+	}
 
-		/*
-		 * if the two hosts are not the same,
-		 * then the printer must be remote.
-		 */
-		if (strcasecmp(name, hp->h_name) != 0)
-			remote = 1;
-		else if (cgetstr(bp, "rp", &rp) > 0) {
-			if (cgetent(&rp_b, printcapdb, rp) == 0) {
-				if (cgetmatch(rp_b, printer) != 0)
-					remote = 1;
-				free(rp_b);
-			} else {
-				(void) snprintf(errbuf, sizeof(errbuf),
-					"can't find (local) remote printer %s",
-					rp);
-					free(rp);
-					return errbuf;
+	remote = 1;	/* assume printer is remote */
+
+	for (res = res0; res; res = res->ai_next) {
+		siginterrupt(SIGINT, 1);
+		error = getnameinfo(res->ai_addr, res->ai_addrlen,
+		    rname, sizeof(rname), NULL, 0, niflags);
+		siginterrupt(SIGINT, 0);
+		if (error != 0)
+			continue;
+		for (ifa = ifap; ifa; ifa = ifa->ifa_next) {
+#ifdef __KAME__
+			sin6p = (struct sockaddr_in6 *)ifa->ifa_addr;
+			if (ifa->ifa_addr->sa_family == AF_INET6 &&
+			    ifa->ifa_addr->sa_len == sizeof(sin6) &&
+			    IN6_IS_ADDR_LINKLOCAL(&sin6p->sin6_addr) &&
+			    *(u_int16_t *)&sin6p->sin6_addr.s6_addr[2]) {
+				/* kame scopeid hack */
+				memcpy(&sin6, ifa->ifa_addr, sizeof(sin6));
+				sin6.sin6_scope_id =
+				    ntohs(*(u_int16_t *)&sin6p->sin6_addr.s6_addr[2]);
+				sin6.sin6_addr.s6_addr[2] = 0;
+				sin6.sin6_addr.s6_addr[3] = 0;
+				siginterrupt(SIGINT, 1);
+				error = getnameinfo((struct sockaddr *)&sin6,
+				    sin6.sin6_len, lname, sizeof(lname),
+				    NULL, 0, niflags);
+				siginterrupt(SIGINT, 0);
+				if (error != 0)
+					continue;
+			} else
+#endif
+			siginterrupt(SIGINT, 1);
+			error = getnameinfo(ifa->ifa_addr,
+			    ifa->ifa_addr->sa_len, lname, sizeof(lname), NULL,
+			    0, niflags);
+			siginterrupt(SIGINT, 0);
+			if (error != 0)
+				continue;
+
+			if (strcmp(rname, lname) == 0) {
+				remote = 0;
+				goto done;
 			}
-			free(rp);
 		}
 	}
+done:
+	freeaddrinfo(res0);
+	freeifaddrs(ifap);
 	return NULL;
 }
 
 /* sleep n milliseconds */
 void
-delay(n)
+delay(int n)
 {
 	struct timeval tdelay;
 
@@ -406,7 +434,7 @@ delay(n)
 	(void) select(0, (fd_set *)0, (fd_set *)0, (fd_set *)0, &tdelay);
 }
 
-void
+__dead void
 fatal(const char *msg, ...)
 {
 	extern char *__progname;
@@ -422,4 +450,29 @@ fatal(const char *msg, ...)
 	va_end(ap);
 	(void)putchar('\n');
 	exit(1);
+}
+
+int
+safe_open(const char *path, int flags, mode_t mode)
+{
+	int fd, serrno;
+	struct stat stbuf;
+
+	if ((fd = open(path, flags|O_NONBLOCK, mode)) < 0 ||
+	    fstat(fd, &stbuf) < 0) {
+		if (fd >= 0) {
+			serrno = errno;
+			close(fd);
+			errno = serrno;
+		}
+		return (-1);
+	}
+	if (!S_ISREG(stbuf.st_mode)) {
+		close(fd);
+		errno = EACCES;
+		return (-1);
+	}
+	if (mode)
+		(void)fchmod(fd, mode);
+	return (fd);
 }

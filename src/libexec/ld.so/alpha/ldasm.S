@@ -1,8 +1,8 @@
-/*	$OpenBSD: ldasm.S,v 1.5 2002/03/17 00:22:04 art Exp $ */
+/*	$OpenBSD: ldasm.S,v 1.9 2002/08/11 18:41:17 drahn Exp $ */
 
 /*
  * Copyright (c) 2001 Niklas Hallqvist
- * 
+ *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
@@ -78,8 +78,8 @@ L1:
 	lda	t0, _GLOBAL_OFFSET_TABLE_
 	addq	t0, t2, t0
 	lda	t1, _DYNAMIC
-	addq	t1, t2, t1	
-L2:	cmpult	t0, t1, t3	
+	addq	t1, t2, t1
+L2:	cmpult	t0, t1, t3
 	beq	t3, L3
 	ldq	t3, 0(t0)
 	addq	t3, t2, t3
@@ -102,11 +102,10 @@ L3:
 	lda	s2, 0(sp)
 	mov	s2, a3
 	CALL(_dl_boot_bind)
-	mov	s3, a0
-	mov	s4, a1
-	mov	s1, a2
-	mov	s5, a3
-	mov	s2, a4
+	mov	s3, a0		/* **argv  */
+	mov	s4, a1		/* **envp  */
+	mov	s1, a2		/* loff    */
+	mov	s2, a3		/* dl_data */
 	CALL(_dl_boot)
 	mov	s0, a0
 	mov	v0, pv
@@ -194,7 +193,7 @@ L100:	LDGP(t0)
 	imb
 
 	/* Pop the stack frame and turn control to the destination. */
-	lda     sp, 168(sp)
+	lda	sp, 168(sp)
 	jmp	zero, (pv)
 END(_dl_bind_start)
 
@@ -203,7 +202,7 @@ END(_dl_bind_start)
  * In reality these are not leaves, but they are stubs which does not need
  * further register saving.
  */
-	
+
 LEAF_NOPROFILE(_dl_exit, 1)
 	ldiq	v0, SYS_exit
 	call_pal PAL_OSF1_callsys
@@ -235,7 +234,7 @@ LEAF_NOPROFILE(_dl_read, 3)
 	ldiq	v0, SYS_read
 	call_pal PAL_OSF1_callsys
 	RET
-END(_dl_exit)
+END(_dl_read)
 
 LEAF_NOPROFILE(_dl_mmap, 6)
 	lda	sp, -8(sp)
@@ -264,10 +263,32 @@ LEAF_NOPROFILE(_dl_issetugid, 0)
 	RET
 END(_dl_issetugid)
 
-#ifdef USE_CACHE
 LEAF_NOPROFILE(_dl_stat, 2)
 	ldiq	v0, SYS_stat
 	call_pal PAL_OSF1_callsys
 	RET
 END(_dl_stat)
-#endif
+
+LEAF_NOPROFILE(_dl__syscall, 3)
+	ldiq	v0, SYS___syscall
+	call_pal PAL_OSF1_callsys
+	RET
+END(_dl__syscall)
+
+LEAF_NOPROFILE(_dl_fstat, 2)
+	ldiq	v0, SYS_fstat
+	call_pal PAL_OSF1_callsys
+	RET
+END(_dl_fstat)
+
+LEAF_NOPROFILE(_dl_fcntl, 3)
+	ldiq	v0, SYS_fcntl
+	call_pal PAL_OSF1_callsys
+	RET
+END(_dl_fcntl)
+
+LEAF_NOPROFILE(_dl_getdirentries, 4)
+	ldiq	v0, SYS_getdirentries
+	call_pal PAL_OSF1_callsys
+	RET
+END(_dl_getdirentries)

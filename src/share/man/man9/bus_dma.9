@@ -1,4 +1,4 @@
-.\"	$OpenBSD: bus_dma.9,v 1.10 2002/03/07 18:09:24 jason Exp $ 
+.\"	$OpenBSD: bus_dma.9,v 1.12 2002/06/12 07:10:36 aaron Exp $ 
 .\" $NetBSD: bus_dma.9,v 1.14 2000/06/14 06:49:19 cgd Exp $
 .\"
 .\" Copyright (c) 1996, 1997, 1998 The NetBSD Foundation, Inc.
@@ -144,7 +144,7 @@ for each dma xfer {
         bus_dmamap_unload(); /* prepare dmamap for reuse             */
 
         /*
-         * copy any data desired from the DMA'able memory using the
+         * Copy any data desired from the DMA'able memory using the
          * pointer created by bus_dmamem_map().
          */
 
@@ -157,7 +157,7 @@ bus_dmamap_destroy();        /* release any resources used by dmamap */
 .Sh NOTES
 All data structures, function prototypes, and macros are defined in
 the architecture-specific header
-.Pa Aq machine/bus.h .
+.Aq Pa machine/bus.h .
 Note that this document assumes the existence of types already defined
 by the current "bus.h" interface.
 .Pp
@@ -306,8 +306,8 @@ Otherwise, the buffer is assumed to be in process
 .Fa p Ns 's
 address space.
 .It Fa flags
-are defined as follows:
-.Bl -tag -width "BUS_DMA_STREAMING" -compact
+Flags are defined as follows:
+.Bl -tag -width BUS_DMA_STREAMING -compact
 .It Dv BUS_DMA_WAITOK
 It is safe to wait (sleep) for resources during this call.
 .It Dv BUS_DMA_NOWAIT
@@ -329,24 +329,26 @@ the DMA transaction.
 This flag allows the use of this special hardware, provided that
 the device is doing sequential, unidirectional transfers which
 conform to certain alignment and size constraints defined by the
-platform.  If the platform does not support the feature, or if
+platform.
+If the platform does not support the feature, or if
 the buffer being loaded into the DMA map does not conform to the
 constraints required for use of the feature, then this flag will
-be silently ignored.  Also refer to the use of this flag with the
+be silently ignored.
+Also refer to the use of this flag with the
 .Fn bus_dmamem_alloc
 function.
 .It Dv BUS_DMA_READ
 This is a hint to the machine-dependent back-end that indicates the  
 mapping will be used only for a
 .Em "device -\*[Gt] memory"
-transaction.  The back-end may perform optimizations based on this
-information.
+transaction.
+The back-end may perform optimizations based on this information.
 .It Dv BUS_DMA_WRITE
 This is a hint to the machine-dependent back-end that indicates the
 mapping will be used only for a
 .Em "memory -\*[Gt] device"
-transaction.  The back-end may perform optimizations based on this
-information.
+transaction.
+The back-end may perform optimizations based on this information.
 .El
 .El
 .Pp
@@ -459,7 +461,7 @@ operations is not allowed, and behavior is undefined if this is attempted.
 .El
 .Pp
 Synchronization operations are expressed from the perspective of the
-host RAM, e.g. a
+host RAM, e.g., a
 .Em "device -> memory"
 operation is a
 .Em READ
@@ -487,7 +489,9 @@ This function exists so that multiple read and write transfers can be
 performed with the same buffer, and so that drivers can explicitly
 inform the
 .Nm
-code when their data is 'ready' in its DMA buffer.
+code when their data is
+.Dq ready
+in its DMA buffer.
 .Pp
 An example of multiple read-write use of a single mapping
 might look like:
@@ -545,8 +549,8 @@ can thus not be used to program DMA controller address registers.
 Only the values in the
 .Fa dm_segs
 array of a successfully loaded DMA map (using
-.Fn bus_dmamap_load
-) can be used for this purpose.
+.Fn bus_dmamap_load )
+can be used for this purpose.
 .Pp
 Allocations will always be rounded to the hardware page size.
 Callers may wish to take advantage of this, and cluster allocation of
@@ -554,7 +558,7 @@ small data structures.
 Arguments are as follows:
 .Bl -tag -width alignment -compact
 .It Fa tag
-The is the bus_dma_tag_t passed down from the parent driver via
+This is the bus_dma_tag_t passed down from the parent driver via
 .Fa <bus>_attach_args .
 .It Fa size
 The amount of memory to allocate.
@@ -586,16 +590,18 @@ It is safe to wait (sleep) for resources during this call.
 .It Dv BUS_DMA_NOWAIT
 It is not safe to wait (sleep) for resources during this call.
 .It Dv BUS_DMA_STREAMING
-Adjusts, if necessary, the size, alignment, and boundary constrains
+Adjusts, if necessary, the size, alignment, and boundary constraints
 to conform to the platform-dependent requirements for the use of the
 .Dv BUS_DMA_STREAMING
 flag with the
 .Fn bus_dmamap_load
-function.  If the platform does not support the  
+function.
+If the platform does not support the  
 .Dv BUS_DMA_STREAMING
 feature, or if the size, alignment, and boundary constraints
 would already satisfy the platform's requirements, this flag
-is silently ignored.  The
+is silently ignored.
+The
 .Dv BUS_DMA_STREAMING
 flag will never relax the constraints specified in the call.
 .It Dv BUS_DMA_BUS[1-4]

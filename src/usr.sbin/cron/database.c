@@ -1,4 +1,4 @@
-/*	$OpenBSD: database.c,v 1.5 2001/02/18 19:48:33 millert Exp $	*/
+/*	$OpenBSD: database.c,v 1.11 2002/08/10 20:28:51 millert Exp $	*/
 /* Copyright 1988,1990,1993,1994 by Paul Vixie
  * All rights reserved
  */
@@ -21,7 +21,7 @@
  */
 
 #if !defined(lint) && !defined(LINT)
-static char rcsid[] = "$OpenBSD: database.c,v 1.5 2001/02/18 19:48:33 millert Exp $";
+static char const rcsid[] = "$OpenBSD: database.c,v 1.11 2002/08/10 20:28:51 millert Exp $";
 #endif
 
 /* vix 26jan87 [RCS has the log]
@@ -81,8 +81,7 @@ load_database(cron_db *old_db) {
 	new_db.head = new_db.tail = NULL;
 
 	if (syscron_stat.st_mtime) {
-		process_crontab("root", "*system*",
-				SYSCRONTAB, &syscron_stat,
+		process_crontab(ROOT_USER, NULL, SYSCRONTAB, &syscron_stat,
 				&new_db, old_db);
 	}
 
@@ -183,14 +182,18 @@ process_crontab(const char *uname, const char *fname, const char *tabname,
 	int crontab_fd = OK - 1;
 	user *u;
 
-	if (strcmp(fname, "*system*") != 0 && !(pw = getpwnam(uname))) {
+	if (fname == NULL) {
+		/* must be set to something for logging purposes.
+		 */
+		fname = "*system*";
+	} else if ((pw = getpwnam(uname)) == NULL) {
 		/* file doesn't have a user in passwd file.
 		 */
 		log_it(fname, getpid(), "ORPHAN", "no passwd entry");
 		goto next_crontab;
 	}
 
-	if ((crontab_fd = open(tabname, O_RDONLY, 0)) < OK) {
+	if ((crontab_fd = open(tabname, O_RDONLY|O_NONBLOCK|O_NOFOLLOW, 0)) < OK) {
 		/* crontab not accessible?
 		 */
 		log_it(fname, getpid(), "CAN'T OPEN", tabname);
@@ -199,6 +202,23 @@ process_crontab(const char *uname, const char *fname, const char *tabname,
 
 	if (fstat(crontab_fd, statbuf) < OK) {
 		log_it(fname, getpid(), "FSTAT FAILED", tabname);
+		goto next_crontab;
+	}
+	if (!S_ISREG(statbuf->st_mode)) {
+		log_it(fname, getpid(), "NOT REGULAR", tabname);
+		goto next_crontab;
+	}
+	if ((statbuf->st_mode & 07777) != 0600) {
+		log_it(fname, getpid(), "BAD FILE MODE", tabname);
+		goto next_crontab;
+	}
+	if (statbuf->st_uid != 0 && (pw == NULL ||
+	    statbuf->st_uid != pw->pw_uid || strcmp(uname, pw->pw_name) != 0)) {
+		log_it(fname, getpid(), "WRONG FILE OWNER", tabname);
+		goto next_crontab;
+	}
+	if (statbuf->st_nlink != 1) {
+		log_it(fname, getpid(), "BAD LINK COUNT", tabname);
 		goto next_crontab;
 	}
 

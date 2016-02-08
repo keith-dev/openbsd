@@ -1,33 +1,37 @@
-# $OpenBSD: Makefile,v 1.13 2002/02/18 13:08:51 art Exp $
+# $OpenBSD: Makefile,v 1.37 2002/09/22 15:19:08 henning Exp $
 
-PFTESTS=1 2 3 4 5 6 7 8 9 10 11 12 13
-PFFAIL=1 2 3 4 5 6 7 8
+PFTESTS=1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27
+PFTESTS+=28 29 30
+PFFAIL=1 2 3 4 5 6 7 8 9 10 11 12 13 14 15
+PFSIMPLE=1 2
 
 .for n in ${PFFAIL}
-REGRESSTARGETS+=pfail${n}
+REGRESS_TARGETS+=pfail${n}
 
 pfail${n}:
-	if pfctl -nv -R - < ${.CURDIR}/pfail${n}.in > /dev/null 2>&1 ; then \
+	if pfctl -nv -f - < ${.CURDIR}/pfail${n}.in > /dev/null 2>&1 ; then \
 		false ; \
 	fi
 
 .endfor
 
 .for n in ${PFTESTS}
-REGRESSTARGETS+=pf${n}
+REGRESS_TARGETS+=pf${n}
 
 pf${n}:
-	pfctl -nv -R - < ${.CURDIR}/pf${n}.in | \
-	    cmp -s ${.CURDIR}/pf${n}.ok /dev/stdin
+	pfctl -nv -f - < ${.CURDIR}/pf${n}.in | \
+	    diff -u ${.CURDIR}/pf${n}.ok /dev/stdin
 
 .endfor
 
-binat1:
-	pfctl -nv -N - < ${.CURDIR}/binat1.in | \
-	    cmp -s ${.CURDIR}/binat1.ok /dev/stdin
+.for n in ${PFSIMPLE}
+REGRESS_TARGETS+=pfsimple${n}
 
-REGRESSTARGETS+=binat1
+pfsimple${n}:
+	pfctl -nf - < ${.CURDIR}/pfsimple${n}.in
 
-.PHONY: ${REGRESSTARGETS}
+.endfor
+
+.PHONY: ${REGRESS_TARGETS}
 
 .include <bsd.regress.mk>

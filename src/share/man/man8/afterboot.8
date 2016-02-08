@@ -1,4 +1,4 @@
-.\"	$OpenBSD: afterboot.8,v 1.72 2002/02/22 02:02:33 miod Exp $
+.\"	$OpenBSD: afterboot.8,v 1.75 2002/10/02 17:38:38 miod Exp $
 .Dd October 20, 1997
 .Dt AFTERBOOT 8
 \!\" Originally created by Marshall M. Midden -- 1997-10-20, m4@umn.edu
@@ -49,7 +49,7 @@ file and set
 to
 .Dq no
 (see
-.Xr sshd 8 ) .
+.Xr sshd_config 5 ) .
 .Pp
 Upon successful login on the console, you may see the message
 .Dq Don't login as root, use su .
@@ -265,6 +265,18 @@ In both these cases, make sure that
 .Xr named 8
 is running
 (otherwise there are long waits for resolver timeouts).
+.Ss RPC-based network services
+Several services depend on the RPC portmapper,
+.Xr portmap 8 ,
+being running for proper operation.
+This includes YP and NFS exports, among other services.
+To get the RPC portmapper to start automatically on boot,
+you will need to have this line in
+.Pa /etc/rc.conf
+:
+.Bd -literal -offset indent
+portmap=YES
+.Ed
 .Ss YP Setup
 Check the YP domain name with the
 .Xr domainname 1
@@ -312,16 +324,16 @@ Example:
 .Li # Ic cat /etc/fstab
 /dev/sd0a / ffs rw 1 1
 /dev/sd0b none swap sw 0 0
-/dev/sd0d /usr ffs rw 1 2
-/dev/sd0e /var ffs rw 1 3
-/dev/sd0g /tmp ffs rw 1 4
-/dev/sd0h /home ffs rw 1 5
+/dev/sd0d /usr ffs rw,nodev 1 2
+/dev/sd0e /var ffs rw,nodev,nosuid 1 3
+/dev/sd0g /tmp ffs rw,nodev,nosuid 1 4
+/dev/sd0h /home ffs rw,nodev,nosuid 1 5
 .Li # Ic mount
 /dev/sd0a on / type ffs (local)
-/dev/sd0d on /usr type ffs (local)
-/dev/sd0e on /var type ffs (local)
-/dev/sd0g on /tmp type ffs (local)
-/dev/sd0h on /home type ffs (local)
+/dev/sd0d on /usr type ffs (local, nodev)
+/dev/sd0e on /var type ffs (local, nodev, nosuid)
+/dev/sd0g on /tmp type ffs (local, nodev, nosuid)
+/dev/sd0h on /home type ffs (local, nodev, nosuid)
 .Li # Ic df
 Filesystem  1024-blocks     Used    Avail Capacity  Mounted on
 /dev/sd0a         22311    14589     6606    69%    /
@@ -483,6 +495,9 @@ for authentication, and you already have a
 Kerberos
 master, change directory to
 .Pa /etc/kerberosIV
+or
+.Pa /etc/kerberosV
+depending on the kerberos version used,
 and configure.
 Remember to get a
 .Pa srvtab

@@ -1,4 +1,4 @@
-#	$OpenBSD: list2sh.awk,v 1.5 1997/05/05 16:31:36 grr Exp $
+#	$OpenBSD: list2sh.awk,v 1.11 2002/08/29 01:53:37 krw Exp $
 #	$NetBSD: list2sh.awk,v 1.2 1996/05/04 15:45:31 pk Exp $
 
 BEGIN {
@@ -11,14 +11,26 @@ BEGIN {
 }
 $1 == "COPY" {
 	printf("echo '%s'\n", $0);
-	printf("rm -f ${TARGDIR}/%s\n", $3);
+	printf("test -f ${TARGDIR}/%s && rm -fr ${TARGDIR}/%s\n", $3, $3);
 	printf("cp %s ${TARGDIR}/%s\n", $2, $3);
+	next;
+}
+$1 == "REMOVE" {
+	printf("echo '%s'\n", $0);
+	printf("rm -f ${TARGDIR}/%s\n", $2);
+	next;
+}	
+$1 == "STRIP" {
+	printf("echo '%s'\n", $0);
+	printf("test -f ${TARGDIR}/%s && rm -fr ${TARGDIR}/%s\n", $3, $3);
+	printf("cp %s ${TARGDIR}/%s\n", $2, $3);
+	printf("strip ${TARGDIR}/%s\n", $3);
 	next;
 }
 $1 == "LINK" {
 	printf("echo '%s'\n", $0);
 	for (i = 3; i <= NF; i++) {
-		printf("rm -f ${TARGDIR}/%s\n", $i);
+		printf("test -f ${TARGDIR}/%s && rm -f ${TARGDIR}/%s\n", $i, $i);
 		printf("(cd ${TARGDIR}; ln %s %s)\n", $2, $i);
 	}
 	next;
@@ -26,7 +38,7 @@ $1 == "LINK" {
 $1 == "SYMLINK" {
 	printf("echo '%s'\n", $0);
 	for (i = 3; i <= NF; i++) {
-		printf("rm -f ${TARGDIR}/%s\n", $i);
+		printf("test -f ${TARGDIR}/%s && rm -f ${TARGDIR}/%s\n", $i, $i);
 		printf("(cd ${TARGDIR}; ln -s %s %s)\n", $2, $i);
 	}
 	next;
@@ -36,6 +48,10 @@ $1 == "ARGVLINK" {
 	next;
 }
 $1 == "SRCDIRS" {
+	# crunchgen directive; ignored here
+	next;
+}
+$1 == "LIBS" {
 	# crunchgen directive; ignored here
 	next;
 }
@@ -61,6 +77,18 @@ $1 == "SPECIAL" {
 	work=$0;
 	sub("^[ 	]*" $1 "[ 	]*", "", work);
 	printf("(cd ${TARGDIR}; %s)\n", work);
+	next;
+}
+$1 == "TERMCAP" {
+	printf("echo '%s'\n", $0);
+	printf("(cd ${TARGDIR}; tic -C -x -r -e %s ${UTILS}/../../share/termtypes/termtypes.master | sed -e '/^#.*/d' -e 's,/usr/share/lib/tabset,/usr/share/tabset,g' -e 's,/usr/lib/tabset,/usr/share/tabset,g' > %s)\n",
+	    $2, $3);
+	next;
+}
+$1 == "SCRIPT" {
+	printf("echo '%s'\n", $0);
+	printf("sed -e '/^[ 	]*#[ 	].*$/d' -e '/^[ 	]*#$/d' -e \"s/^ARCH=ARCH$/ARCH=`arch -ks`/\" < %s > ${TARGDIR}/%s\n",
+	    $2, $3);
 	next;
 }
 {

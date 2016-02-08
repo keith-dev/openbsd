@@ -1,4 +1,4 @@
-/*	$OpenBSD: authenticate.c,v 1.9 2002/03/20 17:17:15 mpech Exp $	*/
+/*	$OpenBSD: authenticate.c,v 1.12 2002/07/14 23:47:30 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 1997 Berkeley Software Design, Inc. All rights reserved.
@@ -129,8 +129,10 @@ _auth_checknologin(login_cap_t *lc, int print)
 	/* First try the nologin file specified in login.conf. */
 	if (*nologin != '\0' && stat(nologin, &sb) == 0)
 		goto print_nologin;
-	if (mustfree)
+	if (mustfree) {
 		free(nologin);
+		mustfree = 0;
+	}
 
 	/* If that doesn't exist try _PATH_NOLOGIN. */
 	if (stat(_PATH_NOLOGIN, &sb) == 0) {
@@ -189,7 +191,7 @@ auth_approval(auth_session_t *as, login_cap_t *lc, char *name, char *type)
 			pwd = getpwnam(name);
 		else {
 			if ((pwd = getpwuid(getuid())) == NULL) {
-				syslog(LOG_ERR, "no such user id %d", getuid());
+				syslog(LOG_ERR, "no such user id %u", getuid());
 				_warnx("cannot approve who we don't recognize");
 				return (0);
 			}
@@ -208,7 +210,7 @@ auth_approval(auth_session_t *as, login_cap_t *lc, char *name, char *type)
 			return (0);
 		}
 		if (pwd == NULL && (approve = strchr(name, '.')) != NULL) {
-			strcpy(path, name);
+			strlcpy(path, name, sizeof path);
 			path[approve-name] = '\0';
 			pwd = getpwnam(name);
 		}
@@ -236,7 +238,7 @@ auth_approval(auth_session_t *as, login_cap_t *lc, char *name, char *type)
 			login_close(lc);
 		syslog(LOG_ERR, "Invalid %s script: %s", s, approve);
 		_warnx("invalid path to approval script");
-               free(approve);
+		free(approve);
 		return (0);
 	}
 
@@ -245,8 +247,8 @@ auth_approval(auth_session_t *as, login_cap_t *lc, char *name, char *type)
 			login_close(lc);
 		syslog(LOG_ERR, "%m");
 		_warn(NULL);
-               if (approve)
-                       free(approve);
+		if (approve)
+			free(approve);
 		return (0);
 	}
 
@@ -270,18 +272,18 @@ auth_approval(auth_session_t *as, login_cap_t *lc, char *name, char *type)
 		if (stat(pwd->pw_dir, &sb) < 0 ||
 		    (sb.st_mode & 0170000) != S_IFDIR ||
 		    (pwd->pw_uid && sb.st_uid == pwd->pw_uid &&
-		     (sb.st_mode & S_IXUSR) == 0)) {
+		    (sb.st_mode & S_IXUSR) == 0)) {
 			auth_setstate(as, (auth_getstate(as) & ~AUTH_ALLOW));
 			goto out;
 		}
 	}
 	if (approve)
-	    auth_call(as, approve, strrchr(approve, '/') + 1, name,
-		lc->lc_class, type, 0);
+		auth_call(as, approve, strrchr(approve, '/') + 1, name,
+		    lc->lc_class, type, 0);
 
 out:
-       if (approve)
-               free(approve);
+	if (approve)
+		free(approve);
 	if (close_lc_on_exit)
 		login_close(lc);
 
@@ -301,7 +303,7 @@ auth_usercheck(char *name, char *style, char *type, char *password)
 
 	if (strlen(name) >= sizeof(namebuf))
 		return (NULL);
-	strcpy(namebuf, name);
+	strlcpy(namebuf, name, sizeof namebuf);
 	name = namebuf;
 
 	/*
@@ -367,7 +369,7 @@ auth_userchallenge(char *name, char *style, char *type, char **challengep)
 
 	if (strlen(name) >= sizeof(namebuf))
 		return (NULL);
-	strcpy(namebuf, name);
+	strlcpy(namebuf, name, sizeof namebuf);
 	name = namebuf;
 
 	/*

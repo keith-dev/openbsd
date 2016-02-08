@@ -1,4 +1,4 @@
-/*	$OpenBSD: rf_configure.c,v 1.6 2002/03/29 14:26:59 tdeval Exp $	*/
+/*	$OpenBSD: rf_configure.c,v 1.9 2002/06/09 08:13:09 todd Exp $	*/
 /*	$NetBSD: rf_configure.c,v 1.14 2001/02/04 21:05:42 christos Exp $	*/
 
 /*
@@ -50,7 +50,6 @@
 
 #include <stdio.h>
 #include <stdlib.h>
-#include <ansidecl.h>
 #include <errno.h>
 #include <strings.h>
 #include <sys/types.h>
@@ -61,7 +60,14 @@
 #include "rf_decluster.h"
 #include "rf_configure.h"
 
-/* 
+/* so much for #include <ansidecl.h> */
+#ifdef __GNUCC__
+#define	ATTRIBUTE_UNUSED	__attribute__ ((__unused__))
+#else
+#define	ATTRIBUTE_UNUSED
+#endif
+
+/*
  * XXX we include this here so we don't need to drag rf_debugMem.c into
  * the picture...  This is userland, afterall...
  */
@@ -146,7 +152,7 @@ int rf_get_next_nonblank_line(char *buf, int len, FILE *fp,
  * version of the driver, and in the user-level program that configures
  * the system via ioctl.
  */
-int 
+int
 rf_MakeConfig(configname, cfgPtr)
   char         *configname;
   RF_Config_t  *cfgPtr;
@@ -196,11 +202,11 @@ rf_MakeConfig(configname, cfgPtr)
       cp = rf_find_non_white(buf);
 			if (!strncmp(cp, "START", strlen("START")))
 				break;
-      (void) strcpy(&cfgPtr->debugVars[c][0], cp);
+      strlcpy(&cfgPtr->debugVars[c][0], cp, RF_MAXDBGVLEN);
     }
   }
   rewind(fp);
-  strcpy(cfgPtr->diskQueueType,"fifo");
+  strlcpy(cfgPtr->diskQueueType,"fifo", sizeof(RF_DiskQueueType_t));
   cfgPtr->maxOutstandingDiskReqs = 1;
   /* scan the file for the block related to disk queues */
   if (rf_search_file_for_start_of("queue",buf,256,fp)) {
@@ -304,7 +310,7 @@ out:
 /* used in architectures such as RAID0 where there is no layout-specific
  * information to be passed into the configuration code.
  */
-int 
+int
 rf_MakeLayoutSpecificNULL(fp, cfgPtr, ignored)
   FILE         *fp				ATTRIBUTE_UNUSED;
   RF_Config_t  *cfgPtr;
@@ -315,7 +321,7 @@ rf_MakeLayoutSpecificNULL(fp, cfgPtr, ignored)
   return(0);
 }
 
-int 
+int
 rf_MakeLayoutSpecificDeclustered(configfp, cfgPtr, arg)
   FILE         *configfp;
   RF_Config_t  *cfgPtr;
@@ -373,7 +379,7 @@ rf_MakeLayoutSpecificDeclustered(configfp, cfgPtr, arg)
 	cfgPtr->layoutSpecificSize = RF_SPAREMAP_NAME_LEN +
 	    6 * sizeof(int) + b * k;
   /* can't use RF_Malloc here b/c debugMem module not yet init'd */
-  cfgBuf = (char *) malloc(cfgPtr->layoutSpecificSize);          
+  cfgBuf = (char *) malloc(cfgPtr->layoutSpecificSize);
   cfgPtr->layoutSpecific = (void *) cfgBuf;
   p = cfgBuf;
 
@@ -418,7 +424,7 @@ rf_MakeLayoutSpecificDeclustered(configfp, cfgPtr, arg)
  * utilities
  *
  ***************************************************************************/
- 
+
 /* finds a non-white character in the line */
 char   *
 rf_find_non_white(char *p)
@@ -439,7 +445,7 @@ rf_find_white(char *p)
  * searches a file for a line that says "START string", where string is
  * specified as a parameter
  */
-int 
+int
 rf_search_file_for_start_of(string, buf, len, fp)
 	const char *string;
   char  *buf;
@@ -462,7 +468,7 @@ rf_search_file_for_start_of(string, buf, len, fp)
 }
 
 /* reads from file fp into buf until it finds an interesting line */
-int 
+int
 rf_get_next_nonblank_line(buf, len, fp, errmsg)
   char  *buf;
   int    len					ATTRIBUTE_UNUSED;

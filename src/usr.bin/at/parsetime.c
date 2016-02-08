@@ -1,4 +1,4 @@
-/*	$OpenBSD: parsetime.c,v 1.9 2000/01/05 08:06:25 millert Exp $	*/
+/*	$OpenBSD: parsetime.c,v 1.12 2002/06/14 21:35:00 todd Exp $	*/
 /*	$NetBSD: parsetime.c,v 1.3 1995/03/25 18:13:36 glass Exp $	*/
 
 /* 
@@ -36,20 +36,16 @@
  *                                   \PLUS NUMBER MINUTES|HOURS|DAYS|WEEKS/
  */
 
-/* System Headers */
-
 #include <sys/types.h>
+#include <err.h>
 #include <errno.h>
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
 #include <tzfile.h>
 #include <unistd.h>
-#include <ctype.h>
-#include <err.h>
-
-/* Local headers */
 
 #include "at.h"
 #include "panic.h"
@@ -138,30 +134,24 @@ struct {
 	{ "sat", SAT, 0 },
 };
 
-/* File scope variables */
-
 static char **scp;	/* scanner - pointer at arglist */
 static char scc;	/* scanner - count of remaining arguments */
 static char *sct;	/* scanner - next char pointer in current argument */
 static int need;	/* scanner - need to advance to next argument */
-
 static char *sc_token;	/* scanner - token buffer */
-static size_t sc_len;   /* scanner - lenght of token buffer */
+static size_t sc_len;   /* scanner - length of token buffer */
 static int sc_tokid;	/* scanner - token id */
 static int sc_tokplur;	/* scanner - is token plural? */
 
 #ifndef lint
-static char rcsid[] = "$OpenBSD: parsetime.c,v 1.9 2000/01/05 08:06:25 millert Exp $";
+static const char rcsid[] = "$OpenBSD: parsetime.c,v 1.12 2002/06/14 21:35:00 todd Exp $";
 #endif
-
-/* Local functions */
 
 /*
  * parse a token, checking if it's something special to us
  */
 static int
-parse_token(arg)
-	char *arg;
+parse_token(char *arg)
 {
 	int i;
 
@@ -174,16 +164,14 @@ parse_token(arg)
 
 	/* not special - must be some random id */
 	return (ID);
-} /* parse_token */
+}
 
 
 /*
  * init_scanner() sets up the scanner to eat arguments
  */
 static void
-init_scanner(argc, argv)
-	int argc;
-	char **argv;
+init_scanner(int argc, char **argv)
 {
 	scp = argv;
 	scc = argc;
@@ -194,17 +182,17 @@ init_scanner(argc, argv)
 
 	if ((sc_token = (char *) malloc(sc_len)) == NULL)
 		panic("Insufficient virtual memory");
-} /* init_scanner */
+}
 
 /*
  * token() fetches a token from the input stream
  */
 static int
-token()
+token(void)
 {
 	int idx;
 
-	while (1) {
+	for (;;) {
 		(void)memset(sc_token, 0, sc_len);
 		sc_tokid = EOF;
 		sc_tokplur = 0;
@@ -262,31 +250,29 @@ token()
 			return ((sc_tokid = SLASH));
 		else
 			return ((sc_tokid = JUNK));
-	} /* while (1) */
-} /* token */
+	}
+}
 
 
 /*
  * plonk() gives an appropriate error message if a token is incorrect
  */
 static void
-plonk(tok)
-	int tok;
+plonk(int tok)
 {
 	panic((tok == EOF) ? "incomplete time" : "garbled time");
-} /* plonk */
+}
 
 
 /* 
  * expect() gets a token and dies most horribly if it's not the token we want
  */
 static void
-expect(desired)
-	int desired;
+expect(int desired)
 {
 	if (token() != desired)
 		plonk(sc_tokid);	/* and we die here... */
-} /* expect */
+}
 
 
 /*
@@ -295,9 +281,7 @@ expect(desired)
  * work properly
  */
 static void
-dateadd(minutes, tm)
-	int minutes;
-	struct tm *tm;
+dateadd(int minutes, struct tm *tm)
 {
 	/* increment days */
 
@@ -328,7 +312,7 @@ dateadd(minutes, tm)
 			tm->tm_hour = 0;
 		}
 	}
-} /* dateadd */
+}
 
 
 /*
@@ -338,8 +322,7 @@ dateadd(minutes, tm)
  *
  */
 static void
-plus(tm)
-	struct tm *tm;
+plus(struct tm *tm)
 {
 	int delay;
 	int expectplur;
@@ -364,7 +347,7 @@ plus(tm)
 	}
 
 	plonk(sc_tokid);
-} /* plus */
+}
 
 
 /*
@@ -372,8 +355,7 @@ plus(tm)
  *     [NUMBER [DOT NUMBER] [AM|PM]]
  */
 static void
-tod(tm)
-	struct tm *tm;
+tod(struct tm *tm)
 {
 	int hour, minute = 0;
 	size_t tlen;
@@ -432,16 +414,14 @@ tod(tm)
 		tm->tm_hour = 0;
 		tm->tm_mday++;
 	}
-} /* tod */
+}
 
 
 /*
  * assign_date() assigns a date, wrapping to next year if needed
  */
 static void
-assign_date(tm, mday, mon, year)
-	struct tm *tm;
-	int mday, mon, year;
+assign_date(struct tm *tm, int mday, int mon, int year)
 {
 
 	/*
@@ -471,7 +451,7 @@ assign_date(tm, mday, mon, year)
 
 	if (year >= 0)
 		tm->tm_year = year;
-} /* assign_date */
+}
 
 
 /* 
@@ -484,8 +464,7 @@ assign_date(tm, mday, mon, year)
  *  \PLUS NUMBER MINUTES|HOURS|DAYS|WEEKS/
  */
 static void
-month(tm)
-	struct tm *tm;
+month(struct tm *tm)
 {
 	int year = (-1);
 	int mday, wday, mon;
@@ -587,15 +566,11 @@ month(tm)
 		assign_date(tm, mday, mon, year);
 		break;
 	} /* case */
-} /* month */
+}
 
-
-/* Global functions */
 
 time_t
-parsetime(argc, argv)
-	int argc;
-	char **argv;
+parsetime(int argc, char **argv)
 {
 	/*
 	 * Do the argument parsing, die if necessary, and return the
@@ -613,10 +588,10 @@ parsetime(argc, argv)
 	runtime.tm_sec = 0;
 	runtime.tm_isdst = 0;
 
-	if (argc <= optind)
+	if (argc == 0)
 		usage();
 
-	init_scanner(argc - optind, argv + optind);
+	init_scanner(argc, argv);
 
 	switch (token()) {
 	case NOW:	/* now is optional prefix for PLUS tree */
@@ -680,4 +655,4 @@ parsetime(argc, argv)
 		panic("Trying to travel back in time");
 
 	return (runtimer);
-} /* parsetime */
+}

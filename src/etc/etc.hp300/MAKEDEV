@@ -3,11 +3,10 @@
 # THIS FILE AUTOMATICALLY GENERATED.  DO NOT EDIT.
 # generated from:
 #
-#	OpenBSD: etc.hp300/MAKEDEV.md,v 1.6 2002/04/14 23:26:45 deraadt Exp 
-#	OpenBSD: MAKEDEV.mi,v 1.43 2002/04/11 20:28:49 deraadt Exp 
+#	OpenBSD: etc.hp300/MAKEDEV.md,v 1.9 2002/09/06 21:48:34 miod Exp 
+#	OpenBSD: MAKEDEV.mi,v 1.51 2002/08/29 23:43:16 todd Exp 
 #	OpenBSD: MAKEDEV.sub,v 1.7 2002/02/16 01:19:52 deraadt Exp 
 #
-#	$OpenBSD: MAKEDEV,v 1.52 2002/04/14 23:27:01 deraadt Exp $
 #
 # Copyright (c) 2001,2002 Todd T. Fries <todd@OpenBSD.org>
 # All rights reserved.
@@ -68,6 +67,7 @@
 #	*random	inkernel random data source
 #	xfs*	XFS filesystem devices
 #	altq/	ALTQ control interface
+#	systrace*	system call tracing device
 PATH=/sbin:/usr/sbin:/bin:/usr/bin
 T=$0
 
@@ -183,7 +183,7 @@ U=`unt $i`
 
 case $i in
 ramdisk)
-	R std ct0 ct1 st0 st1 hd0 hd1 hd2 hd3 hd4 cd0
+	R std ct0 ct1 st0 st1 hd0 hd1 hd2 hd3 hd4
 	R sd0 sd1 sd2 sd3 sd4 rd0 pty0
 	R hil grf0 apci0 ite0 dca0 dcm0 dcm1
 	R bpf0 bpf1 tun0 tun1 lkm random
@@ -278,8 +278,7 @@ ite*)
 grf*)
 	case $U in
 	0|1|2|3)
-		M grf$U c 10 $U
-#		echo "grf$U: use MAKEDEV.hpux to make HP-UX names for device"
+		M grf$U c 10 $U 600
 		;;
 	*)
 		echo bad unit for grf in: $i
@@ -287,14 +286,18 @@ grf*)
 	esac
 	;;
 
-hil*)
+hil)
 	for U in 0 1 2 3 4 5 6 7
 	do
-		M hil$U c 14 $U
+		M hil$U c 14 $U 600
 	done
 	MKlist="$MKlist;ln hil1 keyboard"
 	MKlist="$MKlist;ln hil3 locator"
 	RMlist="$RMlist keyboard locator"
+	;;
+
+systrace)
+	M systrace c 50 0 644
 	;;
 
 altq)
@@ -400,7 +403,7 @@ all)
 	R st1 hil grf0 ccd0 ccd1 ccd2 ccd3 vnd0 vnd1 vnd2 vnd3 sd0 sd1
 	R sd2 sd3 sd4 rd0 tun0 tun1 tun2 tun3 bpf0 bpf1 bpf2 bpf3 bpf4
 	R bpf5 bpf6 bpf7 bpf8 bpf9 pty0 pty1 pty2 xfs0 local ppi0
-	R apci0 random lkm pf altq std fd
+	R apci0 random lkm pf altq systrace std fd
 	;;
 
 sd*|hd*|ccd*)

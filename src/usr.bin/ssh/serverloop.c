@@ -35,13 +35,14 @@
  */
 
 #include "includes.h"
-RCSID("$OpenBSD: serverloop.c,v 1.101 2002/03/30 18:51:15 markus Exp $");
+RCSID("$OpenBSD: serverloop.c,v 1.104 2002/09/19 16:03:15 stevesk Exp $");
 
 #include "xmalloc.h"
 #include "packet.h"
 #include "buffer.h"
 #include "log.h"
 #include "servconf.h"
+#include "canohost.h"
 #include "sshpty.h"
 #include "channels.h"
 #include "compat.h"
@@ -347,14 +348,17 @@ process_input(fd_set * readset)
 	if (FD_ISSET(connection_in, readset)) {
 		len = read(connection_in, buf, sizeof(buf));
 		if (len == 0) {
-			verbose("Connection closed by remote host.");
+			verbose("Connection closed by %.100s",
+			    get_remote_ipaddr());
 			connection_closed = 1;
 			if (compat20)
 				return;
 			fatal_cleanup();
 		} else if (len < 0) {
 			if (errno != EINTR && errno != EAGAIN) {
-				verbose("Read error from remote host: %.100s", strerror(errno));
+				verbose("Read error from remote host "
+				    "%.100s: %.100s",
+				    get_remote_ipaddr(), strerror(errno));
 				fatal_cleanup();
 			}
 		} else {
@@ -674,8 +678,8 @@ server_loop(pid_t pid, int fdin_arg, int fdout_arg, int fderr_arg)
 		if (errno != EINTR)
 			packet_disconnect("wait: %.100s", strerror(errno));
 	if (wait_pid != pid)
-		error("Strange, wait returned pid %d, expected %d",
-		    wait_pid, pid);
+		error("Strange, wait returned pid %ld, expected %ld",
+		    (long)wait_pid, (long)pid);
 
 	/* Check if it exited normally. */
 	if (WIFEXITED(wait_status)) {
@@ -902,10 +906,8 @@ server_input_channel_open(int type, u_int32_t seq, void *ctxt)
 {
 	Channel *c = NULL;
 	char *ctype;
-	u_int len;
 	int rchan;
-	int rmaxpack;
-	int rwindow;
+	u_int rmaxpack, rwindow, len;
 
 	ctype = packet_get_string(&len);
 	rchan = packet_get_int();

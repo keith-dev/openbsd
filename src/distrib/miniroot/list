@@ -1,8 +1,8 @@
-#	$OpenBSD: list,v 1.24 2001/12/17 00:41:50 krw Exp $
+#	$OpenBSD: list,v 1.30 2002/04/30 07:22:56 deraadt Exp $
 #	$NetBSD: list,v 1.4.4.1 1996/06/20 20:30:26 pk Exp $
 
 SRCDIRS distrib/special
-SRCDIRS gnu/usr.bin usr.bin bin sbin usr.sbin usr.bin/vi
+SRCDIRS gnu/usr.bin usr.bin bin sbin usr.sbin
 
 # copy the crunched binary, link to it, and kill it
 COPY	${OBJDIR}/instbin	instbin
@@ -38,35 +38,23 @@ LINK	instbin			sbin/mount_nfs
 LINK	instbin			sbin/newfs sbin/mount_mfs
 LINK	instbin			sbin/ping
 LINK	instbin			sbin/route
-LINK	instbin			sbin/shutdown
-LINK	instbin			sbin/slattach
 LINK	instbin			sbin/umount
-SYMLINK	../../instbin		usr/sbin/chroot
-SYMLINK	../../instbin		usr/bin/ftp
-SYMLINK	../../instbin		usr/bin/gzip usr/bin/gunzip usr/bin/gzcat
-SYMLINK	../../instbin		usr/bin/sed
-SYMLINK	../../instbin		usr/bin/sort
-SYMLINK	../../instbin		usr/bin/tip
-SYMLINK	../../instbin		usr/bin/build usr/bin/vi
+LINK	instbin			usr/bin/ftp
+LINK	instbin			usr/bin/gzip usr/bin/gunzip usr/bin/gzcat
+LINK	instbin			usr/bin/sed
 
 # `internal' crunchgen links
-ARGVLINK mount_ffs	ffs
-ARGVLINK mount_nfs	nfs
-ARGVLINK mount_cd9660	cd9660
 ARGVLINK ksh		-sh
 
 # various files that we need in /etc for the install
 COPY	${DESTDIR}/etc/group		etc/group
-COPY	${DESTDIR}/etc/master.passwd	etc/master.passwd
-COPY	${DESTDIR}/etc/passwd		etc/passwd
-COPY	${DESTDIR}/etc/pwd.db		etc/pwd.db
 COPY	${DESTDIR}/etc/spwd.db		etc/spwd.db
-COPY	${CURDIR}/protocols		etc/protocols
-COPY	${CURDIR}/services		etc/services
+COPY	${CURDIR}/../miniroot/protocols	etc/protocols
+COPY	${CURDIR}/../miniroot/services	etc/services
 
 # and the installation scripts
-COPY	${CURDIR}/install.sub		install.sub
-COPY	${CURDIR}/install.sh		install
-COPY	${CURDIR}/upgrade.sh		upgrade
-SPECIAL sed "/^VERSION=/s/=.*/=${REV}/" < ${CURDIR}/install.sub > install.sub
+SCRIPT	${CURDIR}/dot.profile		.profile
+SCRIPT	${CURDIR}/upgrade.sh		upgrade
+SCRIPT	${CURDIR}/install.sh		install
+SCRIPT	${CURDIR}/install.sub		install.sub
 SPECIAL	chmod 755 install upgrade

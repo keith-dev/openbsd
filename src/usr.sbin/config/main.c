@@ -1,4 +1,4 @@
-/*	$OpenBSD: main.c,v 1.25 2002/03/14 16:44:24 mpech Exp $	*/
+/*	$OpenBSD: main.c,v 1.29 2002/09/06 19:02:06 deraadt Exp $	*/
 /*	$NetBSD: main.c,v 1.22 1997/02/02 21:12:33 thorpej Exp $	*/
 
 /*
@@ -211,13 +211,15 @@ main(argc, argv)
 	last_component = strrchr(conffile, '/');
 	last_component = (last_component) ? last_component + 1 : conffile;
 	if (pflag) {
-		p  = emalloc(strlen(last_component) + 17);
-		(void)sprintf(p, "../compile/%s.PROF", last_component);
+		int len = strlen(last_component) + 17;
+		p  = emalloc(len);
+		(void)snprintf(p, len, "../compile/%s.PROF", last_component);
 		(void)addmkoption(intern("PROF"), "-pg");
 		(void)addoption(intern("GPROF"), NULL);
 	} else {
-		p = emalloc(strlen(last_component) + 13);
-		(void)sprintf(p, "../compile/%s", last_component);
+		int len = strlen(last_component) + 13;
+		p = emalloc(len);
+		(void)snprintf(p, len, "../compile/%s", last_component);
 	}
 	defbuilddir = (argc == 0) ? "." : p;
 
@@ -286,7 +288,7 @@ mksymlinks()
 	char *p, buf[MAXPATHLEN];
 	const char *q;
 
-	sprintf(buf, "arch/%s/include", machine);
+	snprintf(buf, sizeof buf, "arch/%s/include", machine);
 	p = sourcepath(buf);
 	(void)unlink("machine");
 	ret = symlink(p, "machine");
@@ -295,7 +297,7 @@ mksymlinks()
 		    p, strerror(errno));
 
 	if (machinearch != NULL) {
-		sprintf(buf, "arch/%s/include", machinearch);
+		snprintf(buf, sizeof buf, "arch/%s/include", machinearch);
 		p = sourcepath(buf);
 		q = machinearch;
 	} else {
@@ -345,7 +347,7 @@ defoption(name)
 	(void)do_option(defopttab, &nextdefopt, n, name, "defopt");
 
 	/*
-	 * Insert a verbatum copy of the option name, as well,
+	 * Insert a verbatim copy of the option name, as well,
 	 * to speed lookups when creating the Makefile.
 	 */
 	(void)ht_insert(defopttab, name, (void *)name);
@@ -507,7 +509,7 @@ hasparent(i)
 	 *	    we search its devbase for a matching unit number.
 	 *	(2) If the device was attach to an attribute, then we
 	 *	    search all attributes the device can be attached to
-	 *	    for parents (with appropriate unit numebrs) that
+	 *	    for parents (with appropriate unit numbers) that
 	 *	    may be able to attach the device.
 	 */
 
@@ -562,6 +564,7 @@ cfcrosscheck(cf, what, nv)
 		    cf->cf_name, what, nv->nv_str, nv->nv_str);
 		errs++;
 loop:
+		;
 	}
 	return (errs);
 }

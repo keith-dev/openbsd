@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	$OpenBSD: prompt.c,v 1.11 2001/08/19 23:22:18 brian Exp $
+ *	$OpenBSD: prompt.c,v 1.13 2002/06/15 08:02:01 brian Exp $
  */
 
 #include <sys/param.h>
@@ -59,7 +59,6 @@
 #include "hdlc.h"
 #include "lcp.h"
 #include "ncpaddr.h"
-#include "ip.h"
 #include "ipcp.h"
 #include "filter.h"
 #include "async.h"
@@ -278,7 +277,7 @@ prompt_Read(struct fdescriptor *d, struct bundle *bundle, const fd_set *fdset)
           arg.bundle = bundle;
           arg.cx = p->TermMode;
           arg.prompt = p;
-        
+
 	  mbuf_Show(&arg);
         }
 	break;

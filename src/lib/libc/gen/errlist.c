@@ -32,7 +32,7 @@
  */
 
 #if defined(LIBC_SCCS) && !defined(lint)
-static char *rcsid = "$OpenBSD: errlist.c,v 1.3 1996/09/15 09:30:59 tholo Exp $";
+static char *rcsid = "$OpenBSD: errlist.c,v 1.6 2002/07/01 07:51:33 pjanzen Exp $";
 #endif /* LIBC_SCCS and not lint */
 
 #ifdef lint
@@ -125,7 +125,7 @@ const char *const
 /* quotas & mush */
 	"Too many processes",			/* 67 - EPROCLIM */
 	"Too many users",			/* 68 - EUSERS */
-	"Disc quota exceeded",			/* 69 - EDQUOT */
+	"Disk quota exceeded",			/* 69 - EDQUOT */
 
 /* Network File System */
 	"Stale NFS file handle",		/* 70 - ESTALE */
@@ -139,5 +139,9 @@ const char *const
 	"No locks available",			/* 77 - ENOLCK */
 	"Function not implemented",		/* 78 - ENOSYS */
 	"Inappropriate file type or format",	/* 79 - EFTYPE */
+	"Authentication error",			/* 80 - EAUTH */
+	"Need authenticator",			/* 81 - ENEEDAUTH */
+	"IPsec processing failure",		/* 82 - EIPSEC */
+	"Attribute not found",			/* 83 - ENOATTR */
 };
 int _sys_nerr = { sizeof _sys_errlist/sizeof _sys_errlist[0] };

@@ -12,7 +12,7 @@
  */
 
 #include "includes.h"
-RCSID("$OpenBSD: canohost.c,v 1.31 2002/02/27 21:23:13 stevesk Exp $");
+RCSID("$OpenBSD: canohost.c,v 1.34 2002/09/23 20:46:27 stevesk Exp $");
 
 #include "packet.h"
 #include "xmalloc.h"
@@ -42,19 +42,22 @@ get_remote_hostname(int socket, int verify_reverse_mapping)
 		debug("getpeername failed: %.100s", strerror(errno));
 		fatal_cleanup();
 	}
-	if (from.ss_family == AF_INET)
-		check_ip_options(socket, ntop);
 
 	if (getnameinfo((struct sockaddr *)&from, fromlen, ntop, sizeof(ntop),
 	    NULL, 0, NI_NUMERICHOST) != 0)
 		fatal("get_remote_hostname: getnameinfo NI_NUMERICHOST failed");
+
+	if (from.ss_family == AF_INET)
+		check_ip_options(socket, ntop);
 
 	debug3("Trying to reverse map address %.100s.", ntop);
 	/* Map the IP address to a host name. */
 	if (getnameinfo((struct sockaddr *)&from, fromlen, name, sizeof(name),
 	    NULL, 0, NI_NAMEREQD) != 0) {
 		/* Host name not found.  Use ip address. */
+#if 0
 		log("Could not reverse map address %.100s.", ntop);
+#endif
 		return xstrdup(ntop);
 	}
 
@@ -193,18 +196,12 @@ get_socket_address(int socket, int remote, int flags)
 
 	if (remote) {
 		if (getpeername(socket, (struct sockaddr *)&addr, &addrlen)
-		    < 0) {
-			debug("get_socket_ipaddr: getpeername failed: %.100s",
-			    strerror(errno));
+		    < 0)
 			return NULL;
-		}
 	} else {
 		if (getsockname(socket, (struct sockaddr *)&addr, &addrlen)
-		    < 0) {
-			debug("get_socket_ipaddr: getsockname failed: %.100s",
-			    strerror(errno));
+		    < 0)
 			return NULL;
-		}
 	}
 	/* Get the address in ascii. */
 	if (getnameinfo((struct sockaddr *)&addr, addrlen, ntop, sizeof(ntop),
@@ -218,13 +215,21 @@ get_socket_address(int socket, int remote, int flags)
 char *
 get_peer_ipaddr(int socket)
 {
-	return get_socket_address(socket, 1, NI_NUMERICHOST);
+	char *p;
+
+	if ((p = get_socket_address(socket, 1, NI_NUMERICHOST)) != NULL)
+		return p;
+	return xstrdup("UNKNOWN");
 }
 
 char *
 get_local_ipaddr(int socket)
 {
-	return get_socket_address(socket, 0, NI_NUMERICHOST);
+	char *p;
+
+	if ((p = get_socket_address(socket, 0, NI_NUMERICHOST)) != NULL)
+		return p;
+	return xstrdup("UNKNOWN");
 }
 
 char *

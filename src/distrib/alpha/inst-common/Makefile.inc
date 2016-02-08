@@ -1,17 +1,21 @@
 #
-#	$OpenBSD: Makefile.inc,v 1.3 2001/02/08 14:32:31 deraadt Exp $
+#	$OpenBSD: Makefile.inc,v 1.6 2002/04/30 03:47:03 deraadt Exp $
 #
 
 # TOP is assumed to be defined by Makefile including this one.
 
-CBIN?=		raminst
+CBIN?=		instbin
 COMMONDIR=	${TOP}/inst-common
+UTILS=		${TOP}/../miniroot
 
 MOUNT_POINT?=	${TOP}/${BASE}/fs
 
-LISTS=		${COMMONDIR}/list ${.CURDIR}/list ${.CURDIR}/../common/list
-CRUNCHCONF?=	${COMMONDIR}/${CBIN}.conf
-MTREE=		${COMMONDIR}/mtree.conf
+LISTS?=		${.CURDIR}/../common/list
+CRUNCHCONF?=	${CBIN}.conf
+MTREE=		${UTILS}/mtree.conf
+
+${CRUNCHCONF}: ${LISTS}
+	awk -f ${UTILS}/makeconf.awk CBIN=${CBIN} ${LISTS} > ${CBIN}.conf
 
 ${CBIN}.mk ${CBIN}.cache ${CBIN}.c: ${CRUNCHCONF}
 	crunchgen -E -D ${BSDSRCDIR} -L ${DESTDIR}/usr/lib ${CRUNCHCONF}
@@ -22,7 +26,9 @@ ${CBIN}: ${CBIN}.mk ${CBIN}.cache ${CBIN}.c
 do_files:
 	mtree -def ${MTREE} -p ${MOUNT_POINT}/ -u
 	TOPDIR=${TOP} CURDIR=${.CURDIR} OBJDIR=${.OBJDIR} \
-	    REV=${REV} TARGDIR=${MOUNT_POINT} sh ${TOP}/runlist.sh ${LISTS}
+	    REV=${REV} TARGDIR=${MOUNT_POINT} UTILS=${UTILS}\
+	    sh ${UTILS}/runlist.sh ${LISTS}
+	rm ${MOUNT_POINT}/${CBIN}
 
 clean cleandir:
 	/bin/rm -f core ${IMAGE} ${CBIN} ${CBIN}.mk ${CBIN}.cache *.o *.lo *.c

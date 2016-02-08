@@ -1,4 +1,4 @@
-/*	$OpenBSD: skeyaudit.c,v 1.12 2002/02/16 21:27:52 millert Exp $	*/
+/*	$OpenBSD: skeyaudit.c,v 1.14 2002/05/29 15:32:10 millert Exp $	*/
 
 /*
  * Copyright (c) 1997, 2000 Todd C. Miller <Todd.Miller@courtesan.com>
@@ -42,31 +42,26 @@
 #include <unistd.h>
 #include <skey.h>
 
-extern char *__progname;
-
 void notify(struct passwd *, int, int);
 FILE *runsendmail(struct passwd *, int *);
-void usage(void);
+__dead void usage(void);
 
 int
-main(argc, argv)
-	int argc;
-	char **argv;
+main(int argc, char **argv)
 {
 	struct passwd *pw;
 	struct skey key;
-	int ch, errs = 0, left = 0, aflag = 0, iflag = 0, limit = 12;
 	char *name;
+	int ch, left, aflag, iflag, limit;
 
-	if (geteuid() != 0)
-		errx(1, "must be setuid root");
-
+	left = aflag = iflag = 0;
+	limit = 12;
 	while ((ch = getopt(argc, argv, "ail:")) != -1)
 		switch(ch) {
 		case 'a':
-			aflag = 1;
 			if (getuid() != 0)
 				errx(1, "only root may use the -a flag");
+			aflag = 1;
 			break;
 		case 'i':
 			iflag = 1;
@@ -100,7 +95,7 @@ main(argc, argv)
 			notify(pw, left, iflag);
 		}
 		if (ch == -1)
-			errx(-1, "cannot open %s", _PATH_SKEYKEYS);
+			errx(-1, "cannot open %s", _PATH_SKEYDIR);
 		else
 			(void)fclose(key.keyfile);
 	} else {
@@ -110,35 +105,32 @@ main(argc, argv)
 			err(1, "cannot allocate memory");
 		sevenbit(name);
 
-		errs = skeylookup(&key, name);
-		switch (errs) {
+		switch (skeylookup(&key, name)) {
 			case 0:		/* Success! */
 				left = key.n - 1;
 				break;
 			case -1:	/* File error */
-				errx(errs, "cannot open %s", _PATH_SKEYKEYS);
+				errx(1, "cannot open %s/%s", _PATH_SKEYDIR,
+				    name);
 				break;
 			case 1:		/* Unknown user */
-				warnx("%s is not listed in %s", name,
-				    _PATH_SKEYKEYS);
+				errx(1, "user %s is not listed in %s", name,
+				    _PATH_SKEYDIR);
 		}
 		(void)fclose(key.keyfile);
 
-		if (!errs && left < limit)
+		if (left < limit)
 			notify(pw, left, iflag);
 	}
 		
-	exit(errs);
+	exit(0);
 }
 
 void
-notify(pw, seq, interactive)
-	struct passwd *pw;
-	int seq;
-	int interactive;
+notify(struct passwd *pw, int seq, int interactive)
 {
 	static char hostname[MAXHOSTNAMELEN];
-	int pid;
+	pid_t pid;
 	FILE *out;
 
 	/* Only set this once */
@@ -176,12 +168,11 @@ pw->pw_name, hostname);
 }
 
 FILE *
-runsendmail(pw, pidp)
-	struct passwd *pw;
-	int *pidp;
+runsendmail(struct passwd *pw, pid_t *pidp)
 {
 	FILE *fp;
-	int pfd[2], pid;
+	int pfd[2];
+	pid_t pid;
 
 	if (pipe(pfd) < 0)
 		return(NULL);
@@ -214,9 +205,12 @@ runsendmail(pw, pidp)
 
 	return(fp);
 }
-void
-usage()
+
+__dead void
+usage(void)
 {
+	extern char *__progname;
+
 	(void)fprintf(stderr, "Usage: %s [-i] [-l limit]\n",
 	    __progname);
 	exit(1);

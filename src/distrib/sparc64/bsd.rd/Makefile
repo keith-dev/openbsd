@@ -1,13 +1,12 @@
-#	$OpenBSD: Makefile,v 1.2 2001/10/12 19:04:56 jason Exp $
+#	$OpenBSD: Makefile,v 1.11 2002/06/09 05:53:55 todd Exp $
 
 TOP=		${.CURDIR}/..
 
 .include "${TOP}/Makefile.inc"
 IMAGE=		ramdisk${REV}.fs
 CBIN?=		instbin
-CRUNCHCONF?=    ${TOP}/common/${CBIN}.conf
-CRUNCHCONF?=    ${.CURDIR}/../common/${CBIN}.conf
-LISTS?=		${.CURDIR}/../common/list ${.CURDIR}/list
+LISTS?=		${.CURDIR}/list
+UTILS?=		${TOP}/../miniroot
 
 MOUNT_POINT=	/mnt
 
@@ -22,7 +21,7 @@ STRIP?=		strip
 GZIP?=		gzip
 GZIPFLAGS?=	-9f
 INSTALLBOOT?=	/usr/mdec/installboot -v
-MTREE=		${.CURDIR}/../common/mtree.conf
+MTREE=		${UTILS}/mtree.conf
 
 RAMDISK=	RAMDISK
 BOOT?=		/usr/mdec/boot
@@ -35,7 +34,6 @@ CLEANFILES+=	bsd.rd_unz elfrdsetroot
 #.include "${TOP}/common/Makefile.inc"
 
 all: ${CBIN} bsd.rd
-	@echo "all done"
 
 DISKTYPE=       rdroot
 NBLKS=          5744
@@ -63,9 +61,6 @@ bsd:
 ${IMAGE}:	do_prep do_mount do_files do_umount
 	mv -f ${REALIMAGE} ${IMAGE}
 
-ecoffrdsetroot:	${TOP}/ecoffrdsetroot.c
-	${HOSTCC} ${HOSTCFLAGS} -o ecoffrdsetroot ${TOP}/ecoffrdsetroot.c
-
 elfrdsetroot: ${TOP}/../common/elfrdsetroot.c
 	${HOSTCC} ${HOSTCFLAGS} -o elfrdsetroot ${TOP}/../common/elfrdsetroot.c
 
@@ -77,7 +72,7 @@ do_prep:
 do_mount:
 	newfs ${NEWFSARGS} ${NEWFSARGS_RD} -s ${NBLKS} ${VND_RDEV}
 	mount ${VND_DEV} ${MOUNT_POINT}
- 
+
 do_umount:
 	@echo ""
 	@df -i ${MOUNT_POINT}
@@ -119,9 +114,12 @@ install:
 	cp bsd.rd ${DESTDIR}/snapshot/bsd.rd
 .endif
 
-${CBIN}.mk ${CBIN}.cache ${CBIN}.c: ${CRUNCHCONF}
+${CBIN}.conf: ${LISTS}
+	awk -f ${UTILS}/makeconf.awk CBIN=${CBIN} ${LISTS} > ${CBIN}.conf
+
+${CBIN}.mk ${CBIN}.cache ${CBIN}.c: ${CBIN}.conf
 	crunchgen -E -D ${BSDSRCDIR} -L ${DESTDIR}/usr/lib \
-	-c ${CBIN}.c -e ${CBIN} -m ${CBIN}.mk ${CRUNCHCONF}
+	-c ${CBIN}.c -e ${CBIN} -m ${CBIN}.mk ${CBIN}.conf
 
 ${CBIN}: ${CBIN}.mk ${CBIN}.cache ${CBIN}.c
 	make -f ${CBIN}.mk all
@@ -129,7 +127,9 @@ ${CBIN}: ${CBIN}.mk ${CBIN}.cache ${CBIN}.c
 do_files:
 	mtree -def ${MTREE} -p ${MOUNT_POINT}/ -u
 	TOPDIR=${TOP} CURDIR=${.CURDIR} OBJDIR=${.OBJDIR} \
-	    REV=${REV} TARGDIR=${MOUNT_POINT} sh ${TOP}/common/runlist.sh ${LISTS}
+	    REV=${REV} TARGDIR=${MOUNT_POINT} UTILS=${UTILS} \
+	    sh ${UTILS}/runlist.sh ${LISTS}
+	rm ${MOUNT_POINT}/${CBIN}
 
 clean cleandir:
 	/bin/rm -f core ${IMAGE} ${CBIN} ${CBIN}.mk ${CBIN}*.cache \

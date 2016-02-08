@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	$OpenBSD: mp.c,v 1.27 2002/01/16 14:13:06 brian Exp $
+ *	$OpenBSD: mp.c,v 1.30 2002/05/16 01:13:39 brian Exp $
  */
 
 #include <sys/param.h>
@@ -62,7 +62,6 @@
 #include "lqr.h"
 #include "hdlc.h"
 #include "ncpaddr.h"
-#include "ip.h"
 #include "ipcp.h"
 #include "auth.h"
 #include "lcp.h"
@@ -543,9 +542,6 @@ mp_Assemble(struct mp *mp, struct mbuf *m, struct physical *p)
         len = mp_ReadHeader(mp, *frag, &h);
         if (first == -1)
           first = h.seq;
-        (*frag)->m_offset += len;
-        (*frag)->m_len -= len;
-        (*frag)->m_nextpkt = NULL;
         if (frag == &q && !h.begin) {
           log_Printf(LogWARN, "Oops - MP frag %lu should have a begin flag\n",
                     (u_long)h.seq);
@@ -556,7 +552,7 @@ mp_Assemble(struct mp *mp, struct mbuf *m, struct physical *p)
                     (u_long)h.seq - 1);
           /*
            * Stuff our fragment back at the front of the queue and zap
-           * our half-assembed packet.
+           * our half-assembled packet.
            */
           (*frag)->m_nextpkt = mp->inbufs;
           mp->inbufs = *frag;
@@ -565,10 +561,14 @@ mp_Assemble(struct mp *mp, struct mbuf *m, struct physical *p)
           q = NULL;
           frag = &q;
           h.end = 0;	/* just in case it's a whole packet */
-        } else
+        } else {
+          (*frag)->m_offset += len;
+          (*frag)->m_len -= len;
+          (*frag)->m_nextpkt = NULL;
           do
             frag = &(*frag)->m_next;
           while (*frag != NULL);
+        }
       } while (!h.end);
 
       if (q) {
@@ -667,12 +667,12 @@ mp_FillPhysicalQueues(struct bundle *bundle)
   struct mp *mp = &bundle->ncp.mp;
   struct datalink *dl, *fdl;
   size_t total, add, len;
-  int thislink, nlinks;
+  int thislink, nlinks, nopenlinks, sendasip;
   u_int32_t begin, end;
   struct mbuf *m, *mo;
   struct link *bestlink;
 
-  thislink = nlinks = 0;
+  thislink = nlinks = nopenlinks = 0;
   for (fdl = NULL, dl = bundle->links; dl; dl = dl->next) {
     /* Include non-open links here as mp->out.link will stay more correct */
     if (!fdl) {
@@ -682,6 +682,8 @@ mp_FillPhysicalQueues(struct bundle *bundle)
         thislink++;
     }
     nlinks++;
+    if (dl->state == DATALINK_OPEN)
+      nopenlinks++;
   }
 
   if (!fdl) {
@@ -713,7 +715,6 @@ mp_FillPhysicalQueues(struct bundle *bundle)
     }
 
     if (!mp_QueueLen(mp)) {
-      struct datalink *other;
       int mrutoosmall;
 
       /*
@@ -723,12 +724,10 @@ mp_FillPhysicalQueues(struct bundle *bundle)
        * in the outbound traffic going out as PROTO_IP or PROTO_IPV6 rather
        * than PROTO_MP.
        */
-      for (other = dl->next; other; other = other->next)
-        if (other->state == DATALINK_OPEN)
-          break;
 
       mrutoosmall = 0;
-      if (!other) {
+      sendasip = nopenlinks < 2;
+      if (sendasip) {
         if (dl->physical->link.lcp.his_mru < mp->peer_mrru) {
           /*
            * Actually, forget it.  This test is done against the MRRU rather
@@ -737,20 +736,20 @@ mp_FillPhysicalQueues(struct bundle *bundle)
            * too likely to upset some ppp implementations.
            */
           mrutoosmall = 1;
-          other = dl;
+          sendasip = 0;
         }
       }
 
-      bestlink = other ? &mp->link : &dl->physical->link;
+      bestlink = sendasip ? &dl->physical->link : &mp->link;
       if (!ncp_PushPacket(&bundle->ncp, &mp->out.af, bestlink))
         break;	/* Nothing else to send */
 
       if (mrutoosmall)
         log_Printf(LogDEBUG, "Don't send data as PROTO_IP, MRU < MRRU\n");
-      else if (!other)
+      else if (sendasip)
         log_Printf(LogDEBUG, "Sending data as PROTO_IP, not PROTO_MP\n");
 
-      if (!other) {
+      if (sendasip) {
         add = link_QueueLen(&dl->physical->link);
         if (add) {
           /* this link has got stuff already queued.  Let it continue */

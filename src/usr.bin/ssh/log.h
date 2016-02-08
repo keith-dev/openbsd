@@ -1,4 +1,4 @@
-/*	$OpenBSD: log.h,v 1.6 2002/02/22 12:20:34 markus Exp $	*/
+/*	$OpenBSD: log.h,v 1.8 2002/07/19 15:43:33 markus Exp $	*/
 
 /*
  * Author: Tatu Ylonen <ylo@cs.hut.fi>
@@ -28,7 +28,7 @@ typedef enum {
 	SYSLOG_FACILITY_LOCAL5,
 	SYSLOG_FACILITY_LOCAL6,
 	SYSLOG_FACILITY_LOCAL7,
-	SYSLOG_FACILITY_NOT_SET = -1,
+	SYSLOG_FACILITY_NOT_SET = -1
 }       SyslogFacility;
 
 typedef enum {
@@ -40,7 +40,7 @@ typedef enum {
 	SYSLOG_LEVEL_DEBUG1,
 	SYSLOG_LEVEL_DEBUG2,
 	SYSLOG_LEVEL_DEBUG3,
-	SYSLOG_LEVEL_NOT_SET = -1,
+	SYSLOG_LEVEL_NOT_SET = -1
 }       LogLevel;
 
 void     log_init(char *, LogLevel, SyslogFacility, int);
@@ -59,6 +59,7 @@ void     debug3(const char *, ...) __attribute__((format(printf, 1, 2)));
 void     fatal_cleanup(void);
 void     fatal_add_cleanup(void (*) (void *), void *);
 void     fatal_remove_cleanup(void (*) (void *), void *);
+void     fatal_remove_all_cleanups(void);
 
 void	 do_log(LogLevel, const char *, va_list);
 

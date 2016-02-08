@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip6_input.c,v 1.41 2002/03/14 01:27:12 millert Exp $	*/
+/*	$OpenBSD: ip6_input.c,v 1.46 2002/09/11 03:27:30 itojun Exp $	*/
 /*	$KAME: ip6_input.c,v 1.188 2001/03/29 05:34:31 itojun Exp $	*/
 
 /*
@@ -102,7 +102,6 @@
 #include <netinet/icmp6.h>
 #include <netinet6/in6_ifattach.h>
 #include <netinet6/nd6.h>
-#include <netinet6/in6_prefix.h>
 
 #include <netinet6/ip6protosw.h>
 
@@ -167,25 +166,10 @@ ip6_init2(dummy)
 	void *dummy;
 {
 
-#if 1
-	/*
-	 * to route local address of p2p link to loopback,
-	 * assign loopback address first.
-	 */
-	in6_ifattach(lo0ifp, NULL);
-#else
-	/* you MUST bring lo0 up manually, in rc script. */
-#endif
-
 	/* nd6_timer_init */
 	bzero(&nd6_timer_ch, sizeof(nd6_timer_ch));
 	timeout_set(&nd6_timer_ch, nd6_timer, NULL);
 	timeout_add(&nd6_timer_ch, hz);
-
-	/* router renumbering prefix list maintenance */
-	bzero(&in6_rr_timer_ch, sizeof(in6_rr_timer_ch));
-	timeout_set(&in6_rr_timer_ch, in6_rr_timer, (caddr_t)0);
-	timeout_add(&in6_rr_timer_ch, hz);
 }
 
 /*
@@ -311,7 +295,7 @@ ip6_input(m)
 	 * support IPv4-less kernel compilation, we cannot support SIIT
 	 * environment at all.  So, it makes more sense for us to reject any
 	 * malicious packets for non-SIIT environment, than try to do a
-	 * partical support for SIIT environment.
+	 * partial support for SIIT environment.
 	 */
 	if (IN6_IS_ADDR_V4MAPPED(&ip6->ip6_src) ||
 	    IN6_IS_ADDR_V4MAPPED(&ip6->ip6_dst)) {
@@ -461,7 +445,7 @@ ip6_input(m)
 	     * already done through looking up the routing table.
 	     */
 	    IN6_ARE_ADDR_EQUAL(&ip6->ip6_dst,
-			       &rt6_key(ip6_forward_rt.ro_rt)->sin6_addr) &&
+	    &rt6_key(ip6_forward_rt.ro_rt)->sin6_addr) &&
 #endif
 	    ip6_forward_rt.ro_rt->rt_ifp->if_type == IFT_LOOP) {
 		struct in6_ifaddr *ia6 =
@@ -489,7 +473,7 @@ ip6_input(m)
 	}
 
 	/*
-	 * FAITH(Firewall Aided Internet Translator)
+	 * FAITH (Firewall Aided Internet Translator)
 	 */
 #if defined(NFAITH) && 0 < NFAITH
 	if (ip6_keepfaith) {
@@ -736,11 +720,11 @@ ip6_hopopts_input(plenp, rtalertp, mp, offp)
 
 	if (ip6_process_hopopts(m, (u_int8_t *)hbh + sizeof(struct ip6_hbh),
 				hbhlen, rtalertp, plenp) < 0)
-		return(-1);
+		return (-1);
 
 	*offp = off;
 	*mp = m;
-	return(0);
+	return (0);
 }
 
 /*
@@ -748,6 +732,10 @@ ip6_hopopts_input(plenp, rtalertp, mp, offp)
  * This function is separate from ip6_hopopts_input() in order to
  * handle a case where the sending node itself process its hop-by-hop
  * options header. In such a case, the function is called from ip6_output().
+ *
+ * The function assumes that hbh header is located right after the IPv6 header
+ * (RFC2460 p7), opthead is pointer into data content in m, and opthead to
+ * opthead + hbhlen is located in continuous memory region.
  */
 int
 ip6_process_hopopts(m, opthead, hbhlen, rtalertp, plenp)
@@ -762,6 +750,7 @@ ip6_process_hopopts(m, opthead, hbhlen, rtalertp, plenp)
 	u_int8_t *opt = opthead;
 	u_int16_t rtalert_val;
 	u_int32_t jumboplen;
+	const int erroff = sizeof(struct ip6_hdr) + sizeof(struct ip6_hbh);
 
 	for (; hbhlen > 0; hbhlen -= optlen, opt += optlen) {
 		switch (*opt) {
@@ -781,10 +770,13 @@ ip6_process_hopopts(m, opthead, hbhlen, rtalertp, plenp)
 				ip6stat.ip6s_toosmall++;
 				goto bad;
 			}
-			if (*(opt + 1) != IP6OPT_RTALERT_LEN - 2)
-				/* XXX: should we discard the packet? */
-				log(LOG_ERR, "length of router alert opt is inconsitent(%d)",
-				    *(opt + 1));
+			if (*(opt + 1) != IP6OPT_RTALERT_LEN - 2) {
+				/* XXX stat */
+				icmp6_error(m, ICMP6_PARAM_PROB,
+				    ICMP6_PARAMPROB_HEADER,
+				    erroff + opt + 1 - opthead);
+				return (-1);
+			}
 			optlen = IP6OPT_RTALERT_LEN;
 			bcopy((caddr_t)(opt + 2), (caddr_t)&rtalert_val, 2);
 			*rtalertp = ntohs(rtalert_val);
@@ -795,11 +787,13 @@ ip6_process_hopopts(m, opthead, hbhlen, rtalertp, plenp)
 				ip6stat.ip6s_toosmall++;
 				goto bad;
 			}
-			if (*(opt + 1) != IP6OPT_JUMBO_LEN - 2)
-				/* XXX: should we discard the packet? */
-				log(LOG_ERR, "length of jumbopayload opt "
-				    "is inconsistent(%d)\n",
-				    *(opt + 1));
+			if (*(opt + 1) != IP6OPT_JUMBO_LEN - 2) {
+				/* XXX stat */
+				icmp6_error(m, ICMP6_PARAM_PROB,
+				    ICMP6_PARAMPROB_HEADER,
+				    erroff + opt + 1 - opthead);
+				return (-1);
+			}
 			optlen = IP6OPT_JUMBO_LEN;
 
 			/*
@@ -810,11 +804,9 @@ ip6_process_hopopts(m, opthead, hbhlen, rtalertp, plenp)
 			if (ip6->ip6_plen) {
 				ip6stat.ip6s_badoptions++;
 				icmp6_error(m, ICMP6_PARAM_PROB,
-					    ICMP6_PARAMPROB_HEADER,
-					    sizeof(struct ip6_hdr) +
-					    sizeof(struct ip6_hbh) +
-					    opt - opthead);
-				return(-1);
+				    ICMP6_PARAMPROB_HEADER,
+				    erroff + opt - opthead);
+				return (-1);
 			}
 
 			/*
@@ -836,11 +828,9 @@ ip6_process_hopopts(m, opthead, hbhlen, rtalertp, plenp)
 			if (*plenp != 0) {
 				ip6stat.ip6s_badoptions++;
 				icmp6_error(m, ICMP6_PARAM_PROB,
-					    ICMP6_PARAMPROB_HEADER,
-					    sizeof(struct ip6_hdr) +
-					    sizeof(struct ip6_hbh) +
-					    opt + 2 - opthead);
-				return(-1);
+				    ICMP6_PARAMPROB_HEADER,
+				    erroff + opt + 2 - opthead);
+				return (-1);
 			}
 #endif
 
@@ -850,11 +840,9 @@ ip6_process_hopopts(m, opthead, hbhlen, rtalertp, plenp)
 			if (jumboplen <= IPV6_MAXPACKET) {
 				ip6stat.ip6s_badoptions++;
 				icmp6_error(m, ICMP6_PARAM_PROB,
-					    ICMP6_PARAMPROB_HEADER,
-					    sizeof(struct ip6_hdr) +
-					    sizeof(struct ip6_hbh) +
-					    opt + 2 - opthead);
-				return(-1);
+				    ICMP6_PARAMPROB_HEADER,
+				    erroff + opt + 2 - opthead);
+				return (-1);
 			}
 			*plenp = jumboplen;
 
@@ -864,21 +852,20 @@ ip6_process_hopopts(m, opthead, hbhlen, rtalertp, plenp)
 				ip6stat.ip6s_toosmall++;
 				goto bad;
 			}
-			if ((optlen = ip6_unknown_opt(opt, m,
-						      sizeof(struct ip6_hdr) +
-						      sizeof(struct ip6_hbh) +
-						      opt - opthead)) == -1)
-				return(-1);
+			optlen = ip6_unknown_opt(opt, m,
+			    erroff + opt - opthead);
+			if (optlen == -1)
+				return (-1);
 			optlen += 2;
 			break;
 		}
 	}
 
-	return(0);
+	return (0);
 
   bad:
 	m_freem(m);
-	return(-1);
+	return (-1);
 }
 
 /*
@@ -897,14 +884,14 @@ ip6_unknown_opt(optp, m, off)
 
 	switch (IP6OPT_TYPE(*optp)) {
 	case IP6OPT_TYPE_SKIP: /* ignore the option */
-		return((int)*(optp + 1));
+		return ((int)*(optp + 1));
 	case IP6OPT_TYPE_DISCARD:	/* silently discard */
 		m_freem(m);
-		return(-1);
+		return (-1);
 	case IP6OPT_TYPE_FORCEICMP: /* send ICMP even if multicasted */
 		ip6stat.ip6s_badoptions++;
 		icmp6_error(m, ICMP6_PARAM_PROB, ICMP6_PARAMPROB_OPTION, off);
-		return(-1);
+		return (-1);
 	case IP6OPT_TYPE_ICMP: /* send ICMP if not multicasted */
 		ip6stat.ip6s_badoptions++;
 		ip6 = mtod(m, struct ip6_hdr *);
@@ -914,11 +901,11 @@ ip6_unknown_opt(optp, m, off)
 		else
 			icmp6_error(m, ICMP6_PARAM_PROB,
 				    ICMP6_PARAMPROB_OPTION, off);
-		return(-1);
+		return (-1);
 	}
 
 	m_freem(m);		/* XXX: NOTREACHED */
-	return(-1);
+	return (-1);
 }
 
 /*
@@ -1254,7 +1241,7 @@ ip6_pullexthdr(m, off, nxt)
  * carefully. Moreover, it will not be used in the near future when
  * we develop `neater' mechanism to process extension headers.
  */
-char *
+u_int8_t *
 ip6_get_prevhdr(m, off)
 	struct mbuf *m;
 	int off;
@@ -1262,7 +1249,7 @@ ip6_get_prevhdr(m, off)
 	struct ip6_hdr *ip6 = mtod(m, struct ip6_hdr *);
 
 	if (off == sizeof(struct ip6_hdr))
-		return(&ip6->ip6_nxt);
+		return (&ip6->ip6_nxt);
 	else {
 		int len, nxt;
 		struct ip6_ext *ip6e = NULL;
@@ -1286,7 +1273,7 @@ ip6_get_prevhdr(m, off)
 			nxt = ip6e->ip6e_nxt;
 		}
 		if (ip6e)
-			return(&ip6e->ip6e_nxt);
+			return (&ip6e->ip6e_nxt);
 		else
 			return NULL;
 	}
@@ -1473,6 +1460,10 @@ ip6_sysctl(name, namelen, oldp, oldlenp, newp, newlen)
 				&ip6_use_deprecated);
 	case IPV6CTL_RR_PRUNE:
 		return sysctl_int(oldp, oldlenp, newp, newlen, &ip6_rr_prune);
+	case IPV6CTL_V6ONLY:
+		return sysctl_rdint(oldp, oldlenp, newp, ip6_v6only);
+	case IPV6CTL_MAXFRAGS:
+		return sysctl_int(oldp, oldlenp, newp, newlen, &ip6_maxfrags);
 	default:
 		return EOPNOTSUPP;
 	}

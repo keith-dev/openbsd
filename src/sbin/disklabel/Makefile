@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.27 2002/02/20 01:55:49 miod Exp $
+#	$OpenBSD: Makefile,v 1.29 2002/08/08 00:35:50 mickey Exp $
 
 PROG=	disklabel
 SRCS=	disklabel.c dkcksum.c editor.c manual.c
@@ -8,6 +8,8 @@ MAN=	disklabel.8 disklabel.5
 
 
 CLEANFILES+=manual.c
+
+.include <bsd.own.mk>
 
 .ifdef NOMAN
 manual.c:
@@ -35,7 +37,7 @@ CFLAGS+= -DDOSLABEL -DNUMBOOT=1
 CFLAGS+= -DSEEALSO="\"fdisk(8)\""
 .endif
 
-.if (${MACHINE} == "hp300") || (${MACHINE} == "vax")
+.if (${MACHINE} == "hp300") || (${MACHINE} == "vax") || (${MACHINE} == "hppa")
 CFLAGS+= -DNUMBOOT=1
 .endif
 

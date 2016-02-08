@@ -28,7 +28,7 @@
  */
 
 #if defined(LIBC_SCCS) && !defined(lint)
-static char *rcsid = "$OpenBSD: clnt_udp.c,v 1.17 2001/09/15 13:51:00 deraadt Exp $";
+static char *rcsid = "$OpenBSD: clnt_udp.c,v 1.19 2002/09/06 18:35:12 deraadt Exp $";
 #endif /* LIBC_SCCS and not lint */
 
 /*
@@ -97,7 +97,7 @@ struct cu_data {
  *     Caller may wish to set this something more useful.
  *
  * wait is the amount of time used between retransmitting a call if
- * no response has been heard;  retransmition occurs until the actual
+ * no response has been heard;  retransmission occurs until the actual
  * rpc call times out.
  *
  * sendsz and recvsz are the maximum allowable packet sizes that can be
@@ -220,7 +220,7 @@ clntudp_call(cl, proc, xargs, argsp, xresults, resultsp, utimeout)
 	XDR *xdrs;
 	int outlen;
 	int inlen;
-	int fromlen;
+	socklen_t fromlen;
 	fd_set *fds, readfds;
 	struct sockaddr_in from;
 	struct rpc_msg reply_msg;

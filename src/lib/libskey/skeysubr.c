@@ -9,7 +9,7 @@
  *
  * S/Key misc routines.
  *
- * $OpenBSD: skeysubr.c,v 1.23 2002/02/16 21:27:28 millert Exp $
+ * $OpenBSD: skeysubr.c,v 1.25 2002/05/29 18:53:15 deraadt Exp $
  */
 
 #include <stdio.h>
@@ -92,9 +92,9 @@ keycrunch_md4(result, seed, passwd)
 		buflen = strlen(seed) + strlen(passwd);
 		if ((buf = (char *)malloc(buflen + 1)) == NULL)
 			return(-1);
-		(void)strcpy(buf, seed);
+		(void)strlcpy(buf, seed, buflen + 1);
 		lowcase(buf);
-		(void)strcat(buf, passwd);
+		(void)strlcat(buf, passwd, buflen + 1);
 		sevenbit(buf);
 	} else {
 		buf = result;
@@ -137,9 +137,9 @@ keycrunch_md5(result, seed, passwd)
 		buflen = strlen(seed) + strlen(passwd);
 		if ((buf = (char *)malloc(buflen + 1)) == NULL)
 			return(-1);
-		(void)strcpy(buf, seed);
+		(void)strlcpy(buf, seed, buflen + 1);
 		lowcase(buf);
-		(void)strcat(buf, passwd);
+		(void)strlcat(buf, passwd, buflen + 1);
 		sevenbit(buf);
 	} else {
 		buf = result;
@@ -182,9 +182,9 @@ keycrunch_sha1(result, seed, passwd)
 		buflen = strlen(seed) + strlen(passwd);
 		if ((buf = (char *)malloc(buflen + 1)) == NULL)
 			return(-1);
-		(void)strcpy(buf, seed);
+		(void)strlcpy(buf, seed, buflen + 1);
 		lowcase(buf);
-		(void)strcat(buf, passwd);
+		(void)strlcat(buf, passwd, buflen + 1);
 		sevenbit(buf);
 	} else {
 		buf = result;
@@ -238,9 +238,9 @@ keycrunch_rmd160(result, seed, passwd)
 		buflen = strlen(seed) + strlen(passwd);
 		if ((buf = (char *)malloc(buflen + 1)) == NULL)
 			return(-1);
-		(void)strcpy(buf, seed);
+		(void)strlcpy(buf, seed, buflen + 1);
 		lowcase(buf);
-		(void)strcat(buf, passwd);
+		(void)strlcat(buf, passwd, buflen + 1);
 		sevenbit(buf);
 	} else {
 		buf = result;

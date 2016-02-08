@@ -1,4 +1,4 @@
-/*	$OpenBSD: yp_passwd.c,v 1.20 2002/02/16 21:27:50 millert Exp $	*/
+/*	$OpenBSD: yp_passwd.c,v 1.23 2002/06/28 22:28:17 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1988 The Regents of the University of California.
@@ -34,7 +34,7 @@
  */
 #ifndef lint
 /*static const char sccsid[] = "from: @(#)yp_passwd.c	1.0 2/2/93";*/
-static const char rcsid[] = "$OpenBSD: yp_passwd.c,v 1.20 2002/02/16 21:27:50 millert Exp $";
+static const char rcsid[] = "$OpenBSD: yp_passwd.c,v 1.23 2002/06/28 22:28:17 deraadt Exp $";
 #endif /* not lint */
 
 #ifdef	YP
@@ -61,47 +61,49 @@ static const char rcsid[] = "$OpenBSD: yp_passwd.c,v 1.20 2002/02/16 21:27:50 mi
 #define _PASSWORD_LEN PASS_MAX
 #endif
 
-extern int pwd_gensalt(char *, int, struct passwd *, login_cap_t *, char);
-extern int pwd_check(struct passwd *, login_cap_t *, char *);
-extern int pwd_gettries(struct passwd *, login_cap_t *);
-extern void kbintr(int);
+extern int	pwd_gensalt(char *, int, struct passwd *, login_cap_t *, char);
+extern int	pwd_check(struct passwd *, login_cap_t *, char *);
+extern int	pwd_gettries(struct passwd *, login_cap_t *);
+extern void	kbintr(int);
 
-char *ypgetnewpasswd(struct passwd *, login_cap_t *, char **);
-struct passwd *ypgetpwnam(char *);
+char		*ypgetnewpasswd(struct passwd *, login_cap_t *, char **);
+struct passwd	*ypgetpwnam(char *);
 
 char *domain;
 
 static int
-pw_error(name, err, eval)
-	char *name;
-	int err, eval;
+pw_error(char *name, int err, int eval)
 {
-	if (err) 
-		warn("%s", name);
+	if (err) {
+		if (name)
+			warn("%s", name);
+		else
+			warn(NULL);
+	}
 
-	warnx("YP passwd database unchanged.");
+	warnx("YP passwd database: unchanged.");
 	exit(eval);
 }
 
 int
-yp_passwd(username)
-	char *username;
+yp_passwd(char *username)
 {
-	char *master;
-	int r, rpcport, status;
-	uid_t uid;
 	struct yppasswd yppasswd;
+	int r, rpcport, status;
 	struct passwd *pw;
 	struct timeval tv;
-	CLIENT *client;
 	login_cap_t *lc;
+	CLIENT *client;
+	char *master;
+	uid_t uid;
 
 	/*
 	 * Get local domain
 	 */
 	if ((r = yp_get_default_domain(&domain)) != 0) {
-		warnx("can't get local YP domain. Reason: %s", yperr_string(r));
-		return(1);
+		warnx("can't get local YP domain. Reason: %s",
+		    yperr_string(r));
+		return (1);
 	}
 
 	/*
@@ -111,7 +113,7 @@ yp_passwd(username)
 	if ((r = yp_master(domain, "passwd.byname", &master)) != 0) {
 		warnx("can't find the master YP server. Reason: %s",
 		    yperr_string(r));
-		return(1);
+		return (1);
 	}
 
 	/*
@@ -121,31 +123,32 @@ yp_passwd(username)
 	    YPPASSWDPROC_UPDATE, IPPROTO_UDP)) == 0) {
 		warnx("master YP server not running yppasswd daemon.");
 		warnx("Can't change password.");
-		return(1);
+		return (1);
 	}
 
 	/*
-	 * Be sure the port is priviledged
+	 * Be sure the port is privileged
 	 */
 	if (rpcport >= IPPORT_RESERVED) {
 		warnx("yppasswd daemon is on an invalid port.");
-		return(1);
+		return (1);
 	}
 
 	/* Get user's login identity */
 	if (!(pw = ypgetpwnam(username))) {
 		warnx("unknown user %s.", username);
-		return(1);
+		return (1);
 	}
 	if ((lc = login_getclass(pw->pw_class)) == NULL) {
 		warnx("unable to get login class for user %s.", username);
-		return(1);
+		return (1);
 	}
-		
+
 	uid = getuid();
 	if (uid && uid != pw->pw_uid) {
-		warnx("you may only change your own password: %s", strerror(EACCES));
-		return(1);
+		warnx("you may only change your own password: %s",
+		    strerror(EACCES));
+		return (1);
 	}
 
 	/* prompt for new password */
@@ -153,18 +156,18 @@ yp_passwd(username)
 
 	/* tell rpc.yppasswdd */
 	yppasswd.newpw.pw_name	= pw->pw_name;
-	yppasswd.newpw.pw_uid 	= pw->pw_uid;
+	yppasswd.newpw.pw_uid	= pw->pw_uid;
 	yppasswd.newpw.pw_gid	= pw->pw_gid;
 	yppasswd.newpw.pw_gecos = pw->pw_gecos;
 	yppasswd.newpw.pw_dir	= pw->pw_dir;
 	yppasswd.newpw.pw_shell	= pw->pw_shell;
-	
+
 	client = clnt_create(master, YPPASSWDPROG, YPPASSWDVERS, "udp");
 	if (client==NULL) {
 		warnx("cannot contact yppasswdd on %s: Reason: %s",
 		    master, yperr_string(YPERR_YPBIND));
 		free(yppasswd.newpw.pw_passwd);
-		return(YPERR_YPBIND);
+		return (YPERR_YPBIND);
 	}
 	client->cl_auth = authunix_create_default();
 	tv.tv_sec = 2;
@@ -176,33 +179,30 @@ yp_passwd(username)
 	else if (status) {
 		printf("Couldn't change YP password.\n");
 		free(yppasswd.newpw.pw_passwd);
-		return(1);
+		return (1);
 	}
-	printf("The YP password has been changed on %s, the master YP passwd server.\n",
-	    master);
+	printf("The YP password has been changed on %s, "
+	    "the master YP passwd server.\n", master);
 	free(yppasswd.newpw.pw_passwd);
-	return(0);
+	return (0);
 }
 
 char *
-ypgetnewpasswd(pw, lc, old_pass)
-	struct passwd *pw;
-	login_cap_t *lc;
-	char **old_pass;
+ypgetnewpasswd(struct passwd *pw, login_cap_t *lc, char **old_pass)
 {
 	static char buf[_PASSWORD_LEN+1];
-	char *p;
-	int tries, pwd_tries;
 	char salt[_PASSWORD_LEN];
 	sig_t saveint, savequit;
+	int tries, pwd_tries;
+	char *p;
 
 	saveint = signal(SIGINT, kbintr);
 	savequit = signal(SIGQUIT, kbintr);
-	
+
 	printf("Changing YP password for %s.\n", pw->pw_name);
 	if (old_pass) {
 		*old_pass = NULL;
-	
+
 		if (pw->pw_passwd[0]) {
 			p = getpass("Old password:");
 			if (strcmp(crypt(p, pw->pw_passwd), pw->pw_passwd)) {
@@ -225,22 +225,22 @@ ypgetnewpasswd(pw, lc, old_pass)
 			pw_error(NULL, 0, 0);
 		}
 		if (strcmp(p, "s/key") == 0) {
-			printf("That password collides with a system feature. Choose another.\n");
+			printf("That password collides with a system feature. "
+			    "Choose another.\n");
 			continue;
 		}
-		if ((tries++ < pwd_tries || pwd_tries == 0) 
+		if ((tries++ < pwd_tries || pwd_tries == 0)
 		    && pwd_check(pw, lc, p) == 0)
 			continue;
-		strncpy(buf, p, sizeof buf-1);
-		buf[sizeof buf-1] = '\0';
+		strlcpy(buf, p, sizeof buf);
 		if (!strcmp(buf, getpass("Retype new password:")))
 			break;
 		(void)printf("Mismatch; try again, EOF to quit.\n");
 	}
-        if( !pwd_gensalt( salt, _PASSWORD_LEN, pw, lc, 'y' )) {
-                (void)printf("Couldn't generate salt.\n");
-                pw_error(NULL, 0, 0);
-        }
+	if (!pwd_gensalt(salt, _PASSWORD_LEN, pw, lc, 'y')) {
+		(void)printf("Couldn't generate salt.\n");
+		pw_error(NULL, 0, 0);
+	}
 	p = strdup(crypt(buf, salt));
 	if (p == NULL)
 		pw_error(NULL, 1, 1);
@@ -274,10 +274,10 @@ interpret(struct passwd *pwent, char *line)
 	pwent->pw_change = 0;
 	pwent->pw_expire = 0;
 	pwent->pw_class = "";
-	
+
 	/* line without colon separators is no good, so ignore it */
-	if(!strchr(p, ':'))
-		return(NULL);
+	if (!strchr(p, ':'))
+		return (NULL);
 
 	pwent->pw_name = p;
 	p = pwskip(p);
@@ -301,16 +301,15 @@ interpret(struct passwd *pwent, char *line)
 static char *__yplin;
 
 struct passwd *
-ypgetpwnam(nam)
-	char *nam;
+ypgetpwnam(char *nam)
 {
 	static struct passwd pwent;
-	char *val;
 	int reason, vallen;
-	
+	char *val;
+
 	reason = yp_match(domain, "passwd.byname", nam, strlen(nam),
 	    &val, &vallen);
-	switch(reason) {
+	switch (reason) {
 	case 0:
 		break;
 	default:
@@ -323,11 +322,10 @@ ypgetpwnam(nam)
 	__yplin = (char *)malloc(vallen + 1);
 	if (__yplin == NULL)
 		pw_error(NULL, 1, 1);
-	strncpy(__yplin, val, vallen);
-	__yplin[vallen] = '\0';
+	strlcpy(__yplin, val, vallen + 1);
 	free(val);
 
-	return(interpret(&pwent, __yplin));
+	return (interpret(&pwent, __yplin));
 }
 
 #endif	/* YP */

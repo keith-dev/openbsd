@@ -1,6 +1,6 @@
 include(MAKEDEV.sub)dnl
 dnl
-vers(a, {-$OpenBSD: MAKEDEV.mi,v 1.43 2002/04/11 20:28:49 deraadt Exp $-})dnl
+vers(a, {-$OpenBSD: MAKEDEV.mi,v 1.51 2002/08/29 23:43:16 todd Exp $-})dnl
 dnl
 divert(1)dnl
 {-#-}
@@ -139,7 +139,6 @@ dnl
 target(all, mcd, 0)dnl
 twrget(all, fdesc, fd)dnl
 target(all, st, 0, 1)dnl
-target(all, mcd, 0)dnl
 target(all, std)dnl
 target(all, raid, 0, 1, 2, 3)dnl
 target(all, rz, 0, 1, 2, 3, 4)dnl
@@ -149,6 +148,7 @@ target(all, rx, 0, 1)dnl
 target(all, wd, 0, 1, 2, 3)dnl
 target(all, xd, 0, 1, 2, 3)dnl
 twrget(all, aflo, fd, 0, 1, 2, 3)dnl
+target(all, systrace)dnl
 target(all, pctr)dnl
 target(all, pctr0)dnl
 target(all, altq)dnl
@@ -174,7 +174,6 @@ twrget(all, lpt, lpa, 0, 1, 2)dnl
 target(all, joy, 0, 1)dnl
 twrget(all, rnd, random)dnl
 target(all, uk, 0)dnl
-target(all, st, 0)dnl
 target(all, wt, 0)dnl
 target(all, wdt, 0)dnl
 twrget(all, au, audio, 0)dnl
@@ -206,6 +205,7 @@ target(all, apci, 0)dnl
 target(all, ppi, 0)dnl
 target(all, view0, 0, 1, 2, 3, 4, 5)dnl
 target(all, local)dnl
+target(all, gpr, 0)dnl
 dnl
 _mkdev(all, {-all-}, {-dnl
 show_target(all)dnl
@@ -328,6 +328,9 @@ target(ramd, bpf, 0)dnl
 target(ramd, rd, 0)dnl
 -})dnl
 ifelse(MACHINE, sparc, {-dnl
+twrget(wscons, wscons, ttyD, cfg, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, a, b)dnl
+twrget(wscons, wscons, ttyE, cfg, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, a, b)dnl
+twrget(wscons, wscons, ttyF, cfg, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, a, b)dnl
 target(all, ses, 0)dnl
 target(all, ch, 0)dnl
 target(all, ss, 0, 1)dnl
@@ -351,6 +354,8 @@ target(ramd, cd, 0)dnl
 -})dnl
 ifelse(MACHINE, sparc64, {-dnl
 twrget(wscons, wscons, ttyD, cfg, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, a, b)dnl
+twrget(wscons, wscons, ttyE, cfg, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, a, b)dnl
+twrget(wscons, wscons, ttyF, cfg, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, a, b)dnl
 target(all, ccd, 0, 1, 2, 3)dnl
 target(all, ses, 0)dnl
 target(all, ch, 0)dnl
@@ -583,6 +588,7 @@ target(all, cd, 0, 1)dnl
 target(all, ccd, 0, 1, 2, 3)dnl
 target(ramd, sd, 0, 1, 2, 3)dnl
 target(ramd, st, 0, 1)dnl
+target(ramd, rd, 0, 1)dnl
 target(ramd, adb)dnl
 target(ramd, asc, 0)dnl
 target(ramd, grf, 0, 1)dnl
@@ -977,6 +983,8 @@ _mkdev(apm, apm*, {-M apm	c major_apm_c 0 644
 __devitem(pcmcia, pcmcia*, PCMCIA card drivers)dnl
 __devitem(pctr, pctr*, PC Performance Tuning Register access device)dnl
 _mkdev(pctr, pctr, {-M pctr c major_pctr_c 0 644-})dnl
+__devitem(systrace, systrace*, system call tracing device)dnl
+_mkdev(systrace, systrace, {-M systrace c major_systrace_c 0 644-})dnl
 __devitem(au, audio*, audio device)dnl
 _mkdev(au, audio*, {-M sound$U	c major_au_c $U
 	M mixer$U	c major_au_c Add($U, 16)
@@ -1120,6 +1128,8 @@ __devitem(adb, adb, Apple Desktop bus event interface)dnl
 _mkdev(adb, adb, {-M adb c major_adb_c 0-})dnl
 __devitem(pdc, pdc, PDC device)dnl
 _mkdev(local, local, {-test -s $T.local && sh $T.local-}, 666)dnl
+__devitem(gpr, gpr*, gpr400 pcmcia device)dnl
+_mcdev(gpr, gpr*, gpr, {-major_gpr_c-})dnl
 dnl
 divert(1)dnl
 include(etc.MACHINE/MAKEDEV.md)dnl
@@ -1133,7 +1143,6 @@ divert(0)dnl
 #
 show_vers()dnl <-- now that all files are included, show versions
 #
-{-#-}	$Open{--}BSD$
 dnl
 divert(2)dnl
 PATH=/sbin:/usr/sbin:/bin:/usr/bin

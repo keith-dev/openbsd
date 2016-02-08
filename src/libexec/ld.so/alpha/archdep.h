@@ -1,8 +1,8 @@
-/*	$OpenBSD: archdep.h,v 1.5 2002/02/21 23:17:53 drahn Exp $ */
+/*	$OpenBSD: archdep.h,v 1.7 2002/08/12 01:05:23 drahn Exp $ */
 
 /*
  * Copyright (c) 1998 Per Fogelstrom, Opsycon AB
- * 
+ *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
@@ -46,6 +46,13 @@
 #include <machine/reloc.h>
 #include "syscall.h"
 #include "util.h"
+
+static inline void
+RELOC_REL(Elf64_Rel *r, const Elf64_Sym *s, Elf64_Addr *p, unsigned long v)
+{
+	/* Alpha does not use REL type relocations */
+	_dl_exit(20);
+}
 
 static inline void
 RELOC_RELA(Elf64_Rela *r, const Elf64_Sym *s, Elf64_Addr *p, unsigned long v)

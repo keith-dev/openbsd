@@ -1,4 +1,4 @@
-/* $OpenBSD: signature.c,v 1.11 2001/09/03 20:14:51 deraadt Exp $ */
+/* $OpenBSD: signature.c,v 1.14 2002/06/17 19:39:20 angelos Exp $ */
 /*
  * The author of this code is Angelos D. Keromytis (angelos@dsl.cis.upenn.edu)
  *
@@ -447,7 +447,7 @@ kn_decode_key(struct keynote_deckey *dc, char *key, int keytype)
 	return 0;
     }
 
-    key = index(key, ':'); /* Move forward, to the Encoding. We're guaranteed
+    key = strchr(key, ':'); /* Move forward, to the Encoding. We're guaranteed
 			    * to have a ':' character, since this is a key */
     key++;
 
@@ -516,7 +516,7 @@ kn_decode_key(struct keynote_deckey *dc, char *key, int keytype)
 	kk = dc->dec_key;
 	if (keytype == KEYNOTE_PRIVATE_KEY)
 	{
-	    if (d2i_DSAPrivateKey((DSA **) &kk, &decoded, len) == (DSA *) NULL)
+	    if (d2i_DSAPrivateKey((DSA **) &kk,(const unsigned char **) &decoded, len) == (DSA *) NULL)
 	    {
 		if (ptr != (unsigned char *) NULL)
 		  free(ptr);
@@ -527,7 +527,7 @@ kn_decode_key(struct keynote_deckey *dc, char *key, int keytype)
 	}
 	else
 	{
-	    if (d2i_DSAPublicKey((DSA **) &kk, &decoded, len) == (DSA *) NULL)
+	    if (d2i_DSAPublicKey((DSA **) &kk, (const unsigned char **) &decoded, len) == (DSA *) NULL)
 	    {
 		if (ptr != (unsigned char *) NULL)
 		  free(ptr);
@@ -557,7 +557,7 @@ kn_decode_key(struct keynote_deckey *dc, char *key, int keytype)
         kk = dc->dec_key;
         if (keytype == KEYNOTE_PRIVATE_KEY)
         {
-            if (d2i_RSAPrivateKey((RSA **) &kk, &decoded, len) == (RSA *) NULL)
+            if (d2i_RSAPrivateKey((RSA **) &kk, (const unsigned char **) &decoded, len) == (RSA *) NULL)
             {
                 if (ptr != (unsigned char *) NULL)
                   free(ptr);
@@ -568,7 +568,7 @@ kn_decode_key(struct keynote_deckey *dc, char *key, int keytype)
         }
         else
         {
-            if (d2i_RSAPublicKey((RSA **) &kk, &decoded, len) == (RSA *) NULL)
+            if (d2i_RSAPublicKey((RSA **) &kk, (const unsigned char **) &decoded, len) == (RSA *) NULL)
             {
                 if (ptr != (unsigned char *) NULL)
                   free(ptr);
@@ -775,7 +775,7 @@ keynote_sigverify_assertion(struct assertion *as)
 	  (as->as_signeralgorithm == KEYNOTE_ALGORITHM_RSA)))
       return SIGRESULT_FALSE;
 
-    sig = index(as->as_signature, ':');   /* Move forward to the Encoding. We
+    sig = strchr(as->as_signature, ':');   /* Move forward to the Encoding. We
 					   * are guaranteed to have a ':'
 					   * character, since this is a valid
 					   * signature */
@@ -929,6 +929,7 @@ keynote_sign_assertion(struct assertion *as, char *sigalg, void *key,
     SHA_CTX shscontext;
     MD5_CTX md5context;
 #endif /* CRYPTO */
+    int len;
 
     if ((as->as_signature_string_s == (char *) NULL) ||
 	(as->as_startofsignature == (char *) NULL) ||
@@ -959,7 +960,7 @@ keynote_sign_assertion(struct assertion *as, char *sigalg, void *key,
 	return (char *) NULL;
     }
 
-    sig = index(sigalg, ':');
+    sig = strchr(sigalg, ':');
     if (sig == (unsigned char *) NULL)
     {
 	keynote_errno = ERROR_SYNTAX;
@@ -1137,8 +1138,8 @@ keynote_sign_assertion(struct assertion *as, char *sigalg, void *key,
     }
 
     /* Replace as->as_signature */
-    as->as_signature = (char *) calloc(strlen(sigalg) +
-				       strlen(finalbuf) + 1, sizeof(char));
+    len = strlen(sigalg) + strlen(finalbuf) + 1;
+    as->as_signature = (char *) calloc(len, sizeof(char));
     if (as->as_signature == (char *) NULL)
     {
 	free(finalbuf);
@@ -1147,7 +1148,7 @@ keynote_sign_assertion(struct assertion *as, char *sigalg, void *key,
     }
 
     /* Concatenate algorithm name and signature value */
-    sprintf(as->as_signature, "%s%s", sigalg, finalbuf);
+    snprintf(as->as_signature, len, "%s%s", sigalg, finalbuf);
     free(finalbuf);
     finalbuf = as->as_signature;
 

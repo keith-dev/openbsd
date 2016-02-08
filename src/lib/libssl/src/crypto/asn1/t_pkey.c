@@ -60,21 +60,21 @@
 #include "cryptlib.h"
 #include <openssl/buffer.h>
 #include <openssl/bn.h>
-#ifndef NO_RSA
+#ifndef OPENSSL_NO_RSA
 #include <openssl/rsa.h>
 #endif
-#ifndef NO_DH
+#ifndef OPENSSL_NO_DH
 #include <openssl/dh.h>
 #endif
-#ifndef NO_DSA
+#ifndef OPENSSL_NO_DSA
 #include <openssl/dsa.h>
 #endif
 
 static int print(BIO *fp,const char *str,BIGNUM *num,
 		unsigned char *buf,int off);
-#ifndef NO_RSA
-#ifndef NO_FP_API
-int RSA_print_fp(FILE *fp, RSA *x, int off)
+#ifndef OPENSSL_NO_RSA
+#ifndef OPENSSL_NO_FP_API
+int RSA_print_fp(FILE *fp, const RSA *x, int off)
         {
         BIO *b;
         int ret;
@@ -91,15 +91,39 @@ int RSA_print_fp(FILE *fp, RSA *x, int off)
         }
 #endif
 
-int RSA_print(BIO *bp, RSA *x, int off)
+int RSA_print(BIO *bp, const RSA *x, int off)
 	{
 	char str[128];
 	const char *s;
 	unsigned char *m=NULL;
-	int i,ret=0;
+	int ret=0;
+	size_t buf_len=0, i;
 
-	i=RSA_size(x);
-	m=(unsigned char *)OPENSSL_malloc((unsigned int)i+10);
+	if (x->n)
+		buf_len = (size_t)BN_num_bytes(x->n);
+	if (x->e)
+		if (buf_len < (i = (size_t)BN_num_bytes(x->e)))
+			buf_len = i;
+	if (x->d)
+		if (buf_len < (i = (size_t)BN_num_bytes(x->d)))
+			buf_len = i;
+	if (x->p)
+		if (buf_len < (i = (size_t)BN_num_bytes(x->p)))
+			buf_len = i;
+	if (x->q)
+		if (buf_len < (i = (size_t)BN_num_bytes(x->q)))
+			buf_len = i;
+	if (x->dmp1)
+		if (buf_len < (i = (size_t)BN_num_bytes(x->dmp1)))
+			buf_len = i;
+	if (x->dmq1)
+		if (buf_len < (i = (size_t)BN_num_bytes(x->dmq1)))
+			buf_len = i;
+	if (x->iqmp)
+		if (buf_len < (i = (size_t)BN_num_bytes(x->iqmp)))
+			buf_len = i;
+
+	m=(unsigned char *)OPENSSL_malloc(buf_len+10);
 	if (m == NULL)
 		{
 		RSAerr(RSA_F_RSA_PRINT,ERR_R_MALLOC_FAILURE);
@@ -136,11 +160,11 @@ err:
 	if (m != NULL) OPENSSL_free(m);
 	return(ret);
 	}
-#endif /* NO_RSA */
+#endif /* OPENSSL_NO_RSA */
 
-#ifndef NO_DSA
-#ifndef NO_FP_API
-int DSA_print_fp(FILE *fp, DSA *x, int off)
+#ifndef OPENSSL_NO_DSA
+#ifndef OPENSSL_NO_FP_API
+int DSA_print_fp(FILE *fp, const DSA *x, int off)
 	{
 	BIO *b;
 	int ret;
@@ -157,26 +181,29 @@ int DSA_print_fp(FILE *fp, DSA *x, int off)
 	}
 #endif
 
-int DSA_print(BIO *bp, DSA *x, int off)
+int DSA_print(BIO *bp, const DSA *x, int off)
 	{
 	char str[128];
 	unsigned char *m=NULL;
-	int i,ret=0;
-	BIGNUM *bn=NULL;
+	int ret=0;
+	size_t buf_len=0,i;
 
-	if (x->p != NULL)
-		bn=x->p;
-	else if (x->priv_key != NULL)
-		bn=x->priv_key;
-	else if (x->pub_key != NULL)
-		bn=x->pub_key;
-		
-	/* larger than needed but what the hell :-) */
-	if (bn != NULL)
-		i=BN_num_bytes(bn)*2;
-	else
-		i=256;
-	m=(unsigned char *)OPENSSL_malloc((unsigned int)i+10);
+	if (x->p)
+		buf_len = (size_t)BN_num_bytes(x->p);
+	if (x->q)
+		if (buf_len < (i = (size_t)BN_num_bytes(x->q)))
+			buf_len = i;
+	if (x->g)
+		if (buf_len < (i = (size_t)BN_num_bytes(x->g)))
+			buf_len = i;
+	if (x->priv_key)
+		if (buf_len < (i = (size_t)BN_num_bytes(x->priv_key)))
+			buf_len = i;
+	if (x->pub_key)
+		if (buf_len < (i = (size_t)BN_num_bytes(x->pub_key)))
+			buf_len = i;
+
+	m=(unsigned char *)OPENSSL_malloc(buf_len+10);
 	if (m == NULL)
 		{
 		DSAerr(DSA_F_DSA_PRINT,ERR_R_MALLOC_FAILURE);
@@ -207,7 +234,7 @@ err:
 	if (m != NULL) OPENSSL_free(m);
 	return(ret);
 	}
-#endif /* !NO_DSA */
+#endif /* !OPENSSL_NO_DSA */
 
 static int print(BIO *bp, const char *number, BIGNUM *num, unsigned char *buf,
 	     int off)
@@ -259,9 +286,9 @@ static int print(BIO *bp, const char *number, BIGNUM *num, unsigned char *buf,
 	return(1);
 	}
 
-#ifndef NO_DH
-#ifndef NO_FP_API
-int DHparams_print_fp(FILE *fp, DH *x)
+#ifndef OPENSSL_NO_DH
+#ifndef OPENSSL_NO_FP_API
+int DHparams_print_fp(FILE *fp, const DH *x)
         {
         BIO *b;
         int ret;
@@ -278,13 +305,18 @@ int DHparams_print_fp(FILE *fp, DH *x)
         }
 #endif
 
-int DHparams_print(BIO *bp, DH *x)
+int DHparams_print(BIO *bp, const DH *x)
 	{
 	unsigned char *m=NULL;
-	int reason=ERR_R_BUF_LIB,i,ret=0;
+	int reason=ERR_R_BUF_LIB,ret=0;
+	size_t buf_len=0, i;
 
-	i=BN_num_bytes(x->p);
-	m=(unsigned char *)OPENSSL_malloc((unsigned int)i+10);
+	if (x->p)
+		buf_len = (size_t)BN_num_bytes(x->p);
+	if (x->g)
+		if (buf_len < (i = (size_t)BN_num_bytes(x->g)))
+			buf_len = i;
+	m=(unsigned char *)OPENSSL_malloc(buf_len+10);
 	if (m == NULL)
 		{
 		reason=ERR_R_MALLOC_FAILURE;
@@ -312,9 +344,9 @@ err:
 	}
 #endif
 
-#ifndef NO_DSA
-#ifndef NO_FP_API
-int DSAparams_print_fp(FILE *fp, DSA *x)
+#ifndef OPENSSL_NO_DSA
+#ifndef OPENSSL_NO_FP_API
+int DSAparams_print_fp(FILE *fp, const DSA *x)
         {
         BIO *b;
         int ret;
@@ -331,13 +363,21 @@ int DSAparams_print_fp(FILE *fp, DSA *x)
         }
 #endif
 
-int DSAparams_print(BIO *bp, DSA *x)
+int DSAparams_print(BIO *bp, const DSA *x)
 	{
 	unsigned char *m=NULL;
-	int reason=ERR_R_BUF_LIB,i,ret=0;
+	int reason=ERR_R_BUF_LIB,ret=0;
+	size_t buf_len=0,i;
 
-	i=BN_num_bytes(x->p);
-	m=(unsigned char *)OPENSSL_malloc((unsigned int)i+10);
+	if (x->p)
+		buf_len = (size_t)BN_num_bytes(x->p);
+	if (x->q)
+		if (buf_len < (i = (size_t)BN_num_bytes(x->q)))
+			buf_len = i;
+	if (x->g)
+		if (buf_len < (i = (size_t)BN_num_bytes(x->g)))
+			buf_len = i;
+	m=(unsigned char *)OPENSSL_malloc(buf_len+10);
 	if (m == NULL)
 		{
 		reason=ERR_R_MALLOC_FAILURE;
@@ -357,5 +397,5 @@ err:
 	return(ret);
 	}
 
-#endif /* !NO_DSA */
+#endif /* !OPENSSL_NO_DSA */
 

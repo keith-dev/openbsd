@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	$OpenBSD: bundle.c,v 1.63 2002/03/31 02:38:49 brian Exp $
+ *	$OpenBSD: bundle.c,v 1.66 2002/06/15 08:02:00 brian Exp $
  */
 
 #include <sys/param.h>
@@ -191,7 +191,7 @@ bundle_Notify(struct bundle *bundle, char c)
   }
 }
 
-static void 
+static void
 bundle_ClearQueues(void *v)
 {
   struct bundle *bundle = (struct bundle *)v;
@@ -227,6 +227,13 @@ bundle_LinkAdded(struct bundle *bundle, struct datalink *dl)
   if (dl->state == DATALINK_OPEN)
     bundle->phys_type.open |= dl->physical->type;
 
+#ifndef NORADIUS
+  if ((bundle->phys_type.open & (PHYS_DEDICATED|PHYS_DDIAL))
+      != bundle->phys_type.open && bundle->session.timer.state == TIMER_STOPPED)
+    if (bundle->radius.sessiontime)
+      bundle_StartSessionTimer(bundle, 0);
+#endif
+
   if ((bundle->phys_type.open & (PHYS_DEDICATED|PHYS_DDIAL))
       != bundle->phys_type.open && bundle->idle.timer.state == TIMER_STOPPED)
     /* We may need to start our idle timer */
@@ -246,8 +253,13 @@ bundle_LinksRemoved(struct bundle *bundle)
   mp_CheckAutoloadTimer(&bundle->ncp.mp);
 
   if ((bundle->phys_type.open & (PHYS_DEDICATED|PHYS_DDIAL))
-      == bundle->phys_type.open)
+      == bundle->phys_type.open) {
+#ifndef NORADIUS
+    if (bundle->radius.sessiontime)
+      bundle_StopSessionTimer(bundle);
+#endif
     bundle_StopIdleTimer(bundle);
+   }
 }
 
 static void
@@ -274,6 +286,10 @@ bundle_LayerUp(void *v, struct fsm *fp)
     if (ncp_LayersOpen(&fp->bundle->ncp) == 1) {
       bundle_CalculateBandwidth(fp->bundle);
       time(&bundle->upat);
+#ifndef NORADIUS
+      if (bundle->radius.sessiontime)
+        bundle_StartSessionTimer(bundle, 0);
+#endif
       bundle_StartIdleTimer(bundle, 0);
       mp_CheckAutoloadTimer(&fp->bundle->ncp.mp);
     }
@@ -300,6 +316,10 @@ bundle_LayerDown(void *v, struct fsm *fp)
 
   if (isncp(fp->proto)) {
     if (ncp_LayersOpen(&fp->bundle->ncp) == 0) {
+#ifndef NORADIUS
+      if (bundle->radius.sessiontime)
+        bundle_StopSessionTimer(bundle);
+#endif
       bundle_StopIdleTimer(bundle);
       bundle->upat = 0;
       mp_StopAutoloadTimer(&bundle->ncp.mp);
@@ -399,6 +419,10 @@ bundle_Close(struct bundle *bundle, const char *name, int how)
   }
 
   if (!others_active) {
+#ifndef NORADIUS
+    if (bundle->radius.sessiontime)
+      bundle_StopSessionTimer(bundle);
+#endif
     bundle_StopIdleTimer(bundle);
     if (ncp_LayersUnfinished(&bundle->ncp))
       ncp_Close(&bundle->ncp);
@@ -526,11 +550,11 @@ bundle_DescriptorRead(struct fdescriptor *d, struct bundle *bundle,
   if (FD_ISSET(bundle->dev.fd, fdset)) {
     struct tun_data tun;
     int n, pri;
-    char *data;
+    u_char *data;
     size_t sz;
 
     if (bundle->dev.header) {
-      data = (char *)&tun;
+      data = (u_char *)&tun;
       sz = sizeof tun;
     } else {
       data = tun.data;
@@ -597,7 +621,7 @@ bundle_DescriptorRead(struct fdescriptor *d, struct bundle *bundle,
         /*
          * Drop the packet.  If we were to queue it, we'd just end up with
          * a pile of timed-out data in our output queue by the time we get
-         * around to actually dialing.  We'd also prematurely reach the 
+         * around to actually dialing.  We'd also prematurely reach the
          * threshold at which we stop select()ing to read() the tun
          * device - breaking auto-dial.
          */
@@ -708,10 +732,11 @@ bundle_Create(const char *prefix, int type, int unit)
 #if defined(__FreeBSD__) && !defined(NOKLDLOAD)
       if (bundle.unit == minunit && !kldtried++) {
         /*
-	 * Attempt to load the tunnel interface KLD if it isn't loaded
-	 * already.
+         * Attempt to load the tunnel interface KLD if it isn't loaded
+         * already.
          */
-        loadmodules(LOAD_VERBOSLY, "if_tun", NULL);
+        if (loadmodules(LOAD_VERBOSLY, "if_tun", NULL))
+          bundle.unit--;
         continue;
       }
 #endif
@@ -941,6 +966,10 @@ bundle_LinkClosed(struct bundle *bundle, struct datalink *dl)
     ncp2initial(&bundle->ncp);
     mp_Down(&bundle->ncp.mp);
     bundle_NewPhase(bundle, PHASE_DEAD);
+#ifndef NORADIUS
+    if (bundle->radius.sessiontime)
+      bundle_StopSessionTimer(bundle);
+#endif
     bundle_StopIdleTimer(bundle);
   }
 }
@@ -1116,7 +1145,7 @@ bundle_ShowStatus(struct cmdargs const *arg)
   return 0;
 }
 
-static void 
+static void
 bundle_IdleTimeout(void *v)
 {
   struct bundle *bundle = (struct bundle *)v;
@@ -1182,6 +1211,47 @@ bundle_RemainingIdleTime(struct bundle *bundle)
     return bundle->idle.done - time(NULL);
   return -1;
 }
+
+#ifndef NORADIUS
+
+static void
+bundle_SessionTimeout(void *v)
+{
+  struct bundle *bundle = (struct bundle *)v;
+
+  log_Printf(LogPHASE, "Session-Timeout timer expired\n");
+  bundle_StopSessionTimer(bundle);
+  bundle_Close(bundle, NULL, CLOSE_STAYDOWN);
+}
+
+void
+bundle_StartSessionTimer(struct bundle *bundle, unsigned secs)
+{
+  timer_Stop(&bundle->session.timer);
+  if ((bundle->phys_type.open & (PHYS_DEDICATED|PHYS_DDIAL)) !=
+      bundle->phys_type.open && bundle->radius.sessiontime) {
+    time_t now = time(NULL);
+
+    if (secs == 0)
+      secs = bundle->radius.sessiontime;
+
+    bundle->session.timer.func = bundle_SessionTimeout;
+    bundle->session.timer.name = "session";
+    bundle->session.timer.load = secs * SECTICKS;
+    bundle->session.timer.arg = bundle;
+    timer_Start(&bundle->session.timer);
+    bundle->session.done = now + secs;
+  }
+}
+
+void
+bundle_StopSessionTimer(struct bundle *bundle)
+{
+  timer_Stop(&bundle->session.timer);
+  bundle->session.done = 0;
+}
+
+#endif
 
 int
 bundle_IsDead(struct bundle *bundle)
@@ -1545,8 +1615,8 @@ bundle_SendDatalink(struct datalink *dl, int s, struct sockaddr_un *sun)
       int res;
 
       if ((got = read(reply[0], &newpid, sizeof newpid)) == sizeof newpid) {
-        log_Printf(LogDEBUG, "Received confirmation from pid %d\n",
-                   (int)newpid);
+        log_Printf(LogDEBUG, "Received confirmation from pid %ld\n",
+                   (long)newpid);
         if (lock && (res = ID0uu_lock_txfr(lock, newpid)) != UU_LOCK_OK)
             log_Printf(LogERROR, "uu_lock_txfr: %s\n", uu_lockerr(res));
 
@@ -1686,8 +1756,8 @@ bundle_setsid(struct bundle *bundle, int holdsession)
           close(fds[0]);
           setsid();
           bundle_ChangedPID(bundle);
-          log_Printf(LogDEBUG, "%d -> %d: %s session control\n",
-                     (int)orig, (int)getpid(),
+          log_Printf(LogDEBUG, "%ld -> %ld: %s session control\n",
+                     (long)orig, (long)getpid(),
                      holdsession ? "Passed" : "Dropped");
           timer_InitService(0);		/* Start the Timer Service */
           break;
@@ -1824,7 +1894,7 @@ bundle_CalculateBandwidth(struct bundle *bundle)
     }
   }
 
-  if(bundle->bandwidth == 0)
+  if (bundle->bandwidth == 0)
     bundle->bandwidth = 115200;		/* Shrug */
 
   if (bundle->ncp.mp.active) {

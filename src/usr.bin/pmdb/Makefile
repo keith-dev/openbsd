@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.5 2002/03/15 16:51:29 art Exp $
+#	$OpenBSD: Makefile,v 1.7 2002/06/05 18:02:27 fgsch Exp $
 
 .include <bsd.own.mk>
 
@@ -9,7 +9,7 @@ NOPROG=no, man
 .else
 
 PROG=pmdb
-SRCS=pmdb.c symbol.c clit.c process.c signal.c break.c
+SRCS=pmdb.c symbol.c clit.c process.c signal.c break.c core.c
 
 # support for NetBSD
 .if defined(OBJECT_FMT)
@@ -29,7 +29,7 @@ CPPFLAGS+=-DPMDB_AOUT
 .endif
 
 LDADD=-ledit -lcurses
-DPADD=${LIBEDIT} ${LIBTERMCAP}
+DPADD=${LIBEDIT} ${LIBCURSES}
 
 CPPFLAGS+=-I${.CURDIR}
 

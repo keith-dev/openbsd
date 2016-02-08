@@ -1,4 +1,4 @@
-.\"	$OpenBSD: xl.4,v 1.22 2001/06/22 12:15:48 mpech Exp $
+.\"	$OpenBSD: xl.4,v 1.25 2002/09/26 22:09:53 miod Exp $
 .\"
 .\" Copyright (c) 1997, 1998
 .\"     Bill Paul <wpaul@ctr.columbia.edu>. All rights reserved.
@@ -101,6 +101,8 @@ The 3C985 series of Gigabit cards are supported by the
 .Xr ti 4
 driver.
 .Pp
+Hardware TCP/IP checksum offloading for IPv4 is supported on the 3C905B.
+.Pp
 The following media types and options (as given to
 .Xr ifconfig 8 )
 are supported:
@@ -113,7 +115,7 @@ adapters that have external PHYs or built-in autonegotiation logic.
 For 3C900 and 3C900B adapters, the driver
 will choose the mode specified in the EEPROM.
 You can change this by adding media options to the appropriate
-.Pa /etc/hostname.xlX
+.Xr hostname.if 5
 file.
 .It Cm media No 100baseFX Cm mediaopt No full-duplex
 For those cards that support it, force full-duplex 100Mbps operation over fiber.
@@ -199,13 +201,18 @@ The driver makes a lot of noise about this condition because
 the author considers it a manufacturing defect.
 .El
 .Sh SEE ALSO
+.Xr arp 4 ,
+.Xr cardbus 4 ,
 .Xr ec 4 ,
 .Xr eg 4 ,
 .Xr el 4 ,
 .Xr ep 4 ,
 .Xr ie 4 ,
-.Xr ti 4 ,
 .Xr ifmedia 4 ,
+.Xr intro 4 ,
+.Xr ti 4 ,
+.Xr netintro 4 ,
+.Xr hostname.if 5 ,
 .Xr ifconfig 8
 .Sh HISTORY
 The

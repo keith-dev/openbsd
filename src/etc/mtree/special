@@ -1,4 +1,4 @@
-#	$OpenBSD: special,v 1.40 2002/02/13 04:53:54 marc Exp $
+#	$OpenBSD: special,v 1.46 2002/07/18 21:32:28 provos Exp $
 #	$NetBSD: special,v 1.4 1996/05/08 21:30:18 pk Exp $
 #	@(#)special	8.2 (Berkeley) 1/23/94
 #
@@ -53,7 +53,6 @@ mtree		type=dir mode=0755 uname=root gname=wheel
 special		type=file mode=0600 uname=root gname=wheel
 ..	#mtree
 moduli		type=file mode=0644 uname=root gname=wheel
-nat.conf	type=file mode=0644 uname=root gname=wheel optional
 netstart	type=file mode=0644 uname=root gname=wheel
 passwd		type=file mode=0644 uname=root gname=wheel
 passwd.conf	type=file mode=0644 uname=root gname=wheel optional
@@ -68,7 +67,8 @@ resolv.conf	type=file mode=0644 uname=root gname=wheel optional
 resolv.conf.tail type=file mode=0644 uname=root gname=wheel optional
 security	type=file mode=0644 uname=root gname=wheel
 shells		type=file mode=0644 uname=root gname=wheel
-skeykeys	type=file mode=0600 uname=root gname=wheel optional
+skey		type=dir mode=01730 uname=root gname=auth optional
+..	#skey
 spwd.db		type=file mode=0600 uname=root gname=wheel
 ssh		type=dir mode=0755 uname=root gname=wheel optional
 ssh_config	type=file mode=0644 uname=root gname=wheel
@@ -80,6 +80,8 @@ ssh_host_rsa_key	type=file mode=0600 uname=root gname=wheel optional
 ssh_host_rsa_key.pub	type=file mode=0644 uname=root gname=wheel optional
 sshd_config	type=file mode=0644 uname=root gname=wheel
 ..	#ssh
+systrace	type=dir mode=0755 uname=root gname=wheel optional
+..	#systrace
 syslog.conf	type=file mode=0644 uname=root gname=wheel
 ttys		type=file mode=0644 uname=root gname=wheel
 weekly		type=file mode=0644 uname=root gname=wheel
@@ -103,8 +105,6 @@ usr		type=dir mode=0755 uname=root gname=wheel
 bin		type=dir mode=0755 uname=root gname=wheel ignore
 ..	#usr/bin
 games		type=dir mode=0755 uname=root gname=wheel optional
-hide		type=dir mode=0550 uname=root gname=games optional ignore
-..	#usr/games/hide
 ..	#usr/games
 include		type=dir mode=0755 uname=root gname=bin ignore
 ..	#usr/include
@@ -142,7 +142,7 @@ backups		type=dir mode=0700 uname=root gname=wheel ignore
 ..	#var/backups
 cron		type=dir mode=0555 uname=root gname=wheel
 log		type=file mode=0600 uname=root gname=wheel
-tabs		type=dir mode=0700 uname=root gname=wheel ignore
+tabs		type=dir mode=1730 uname=root gname=crontab ignore
 ..	#var/cron/tabs
 ..	#var/cron
 db		type=dir mode=0755 uname=root gname=wheel
@@ -185,7 +185,7 @@ mqueue		type=dir mode=0700 uname=root gname=wheel ignore
 ..	#var/spool/mqueue
 news		type=dir mode=0755 uname=root gname=wheel optional ignore
 ..	#var/spool/news
-output		type=dir mode=0755 uname=root gname=wheel ignore
+output		type=dir mode=0775 uname=root gname=daemon ignore
 ..	#var/spool/output
 smtpd		type=dir mode=0755 uname=uucp gname=daemon ignore
 ..	#var/spool/smtpd

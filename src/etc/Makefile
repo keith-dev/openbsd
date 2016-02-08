@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.155 2002/04/03 20:56:36 deraadt Exp $
+#	$OpenBSD: Makefile,v 1.171 2002/09/06 21:30:22 deraadt Exp $
 
 TZDIR=		/usr/share/zoneinfo
 LOCALTIME=	US/Pacific
@@ -13,17 +13,18 @@ NOOBJ=	oobj
 BINOWN= root
 BINGRP= wheel
 BIN1=	bootptab changelist ccd.conf csh.cshrc csh.login csh.logout \
-	daily dhcpd.conf dhcpd.interfaces dm.conf exports ftpusers \
+	daily dhcpd.conf dhcpd.interfaces exports ftpusers \
 	ftpchroot gettytab group hosts hosts.lpd inetd.conf \
 	ksh.kshrc locate.rc man.conf monthly motd mrouted.conf \
-	myname netstart networks newsyslog.conf pf.conf nat.conf \
+	myname netstart networks newsyslog.conf pf.conf \
 	phones printcap protocols rbootd.conf rc rc.conf rc.local \
 	rc.securelevel rc.shutdown remote rpc security services \
 	shells syslog.conf weekly etc.${MACHINE}/disktab dhclient.conf \
 	mailer.conf
 
 .if (${MACHINE} == "alpha" || ${MACHINE} == "hppa" || \
-     ${MACHINE} == "i386" || ${MACHINE} == "macppc" || ${MACHINE} == "sparc64")
+     ${MACHINE} == "i386" || ${MACHINE} == "macppc" || \
+     ${MACHINE} == "sparc" || ${MACHINE} == "sparc64")
 BIN1+=	wsconsctl.conf
 .endif
 
@@ -77,8 +78,8 @@ distribution-etc-root-var: distrib-dirs
 	pwd_mkdb -p -d ${DESTDIR}/etc /etc/master.passwd
 	${INSTALL} -c -o root -g wheel -m 644 moduli ${DESTDIR}/etc
 	${INSTALL} -c -o ${BINOWN} -g ${BINGRP} -m 555 \
-	     MAKEDEV.local etc.${MACHINE}/MAKEDEV ${DESTDIR}/dev
-	(cd root; \
+	    etc.${MACHINE}/MAKEDEV ${DESTDIR}/dev
+	cd root; \
 		${INSTALL} -c -o root -g wheel -m 644 dot.cshrc \
 		    ${DESTDIR}/root/.cshrc; \
 		${INSTALL} -c -o root -g wheel -m 600 dot.klogin \
@@ -89,8 +90,8 @@ distribution-etc-root-var: distrib-dirs
 		    ${DESTDIR}/root/.profile; \
 		rm -f ${DESTDIR}/.cshrc ${DESTDIR}/.profile; \
 		ln ${DESTDIR}/root/.cshrc ${DESTDIR}/.cshrc; \
-		ln ${DESTDIR}/root/.profile ${DESTDIR}/.profile)
-	(cd skel; \
+		ln ${DESTDIR}/root/.profile ${DESTDIR}/.profile
+	cd skel; \
 		${INSTALL} -c -o root -g wheel -m 644 dot.cshrc \
 		    ${DESTDIR}/etc/skel/.cshrc; \
 		${INSTALL} -c -o root -g wheel -m 644 dot.login \
@@ -100,8 +101,8 @@ distribution-etc-root-var: distrib-dirs
 		${INSTALL} -c -o root -g wheel -m 644 dot.profile \
 		    ${DESTDIR}/etc/skel/.profile; \
 		${INSTALL} -c -o root -g wheel -m 600 dot.rhosts \
-		    ${DESTDIR}/etc/skel/.rhosts)
-	(cd kerberosIV; \
+		    ${DESTDIR}/etc/skel/.rhosts
+	cd kerberosIV; \
 		${INSTALL} -c -o root -g wheel -m 644 README \
 		    ${DESTDIR}/etc/kerberosIV; \
 		${INSTALL} -c -o root -g wheel -m 644 krb.conf \
@@ -111,16 +112,16 @@ distribution-etc-root-var: distrib-dirs
 		${INSTALL} -c -o root -g wheel -m 644 krb.extra \
 		    ${DESTDIR}/etc/kerberosIV; \
 		${INSTALL} -c -o root -g wheel -m 644 krb.equiv \
-		    ${DESTDIR}/etc/kerberosIV)
-	(cd kerberosV; \
+		    ${DESTDIR}/etc/kerberosIV
+	cd kerberosV; \
 		${INSTALL} -c -o root -g wheel -m 644 README \
 		    ${DESTDIR}/etc/kerberosV; \
 		${INSTALL} -c -o root -g wheel -m 644 krb5.conf.example \
-		    ${DESTDIR}/etc/kerberosV)
-	(cd amd; \
+		    ${DESTDIR}/etc/kerberosV
+	cd amd; \
 		${INSTALL} -c -o root -g wheel -m 644 master.sample \
-		    ${DESTDIR}/etc/amd)
-	(cd mtree; \
+		    ${DESTDIR}/etc/amd
+	cd mtree; \
 		${INSTALL} -c -o root -g wheel -m 600 special \
 		    ${DESTDIR}/etc/mtree; \
 		${INSTALL} -c -o root -g wheel -m 444 4.4BSD.dist \
@@ -128,17 +129,8 @@ distribution-etc-root-var: distrib-dirs
 		${INSTALL} -c -o root -g wheel -m 444 BSD.local.dist \
 		    ${DESTDIR}/etc/mtree; \
 		${INSTALL} -c -o root -g wheel -m 444 BSD.x11.dist \
-		    ${DESTDIR}/etc/mtree)
-	(cd photuris; \
-		${INSTALL} -c -o root -g wheel -m 600 secrets.conf \
-		    ${DESTDIR}/etc/photuris; \
-		${INSTALL} -c -o root -g wheel -m 600 attributes.conf \
-		    ${DESTDIR}/etc/photuris; \
-		${INSTALL} -c -o root -g wheel -m 600 photuris.conf \
-		    ${DESTDIR}/etc/photuris; \
-		${INSTALL} -c -o root -g wheel -m 600 photuris.startup \
-		    ${DESTDIR}/etc/photuris)
-	(cd ppp; \
+		    ${DESTDIR}/etc/mtree
+	cd ppp; \
 		${INSTALL} -c -o root -g wheel -m 600 chap-secrets \
 		    ${DESTDIR}/etc/ppp; \
 		${INSTALL} -c -o root -g wheel -m 600 options \
@@ -158,8 +150,8 @@ distribution-etc-root-var: distrib-dirs
 		${INSTALL} -c -o root -g wheel -m 644 ppp.linkdown.sample \
 		    ${DESTDIR}/etc/ppp; \
 		${INSTALL} -c -o root -g wheel -m 644 ppp.secret.sample \
-		    ${DESTDIR}/etc/ppp)
-	(cd afs; \
+		    ${DESTDIR}/etc/ppp
+	cd afs; \
 		${INSTALL} -c -o root -g wheel -m 644 afsd.conf \
 		    ${DESTDIR}/etc/afs; \
 		${INSTALL} -c -o root -g wheel -m 644 ThisCell \
@@ -169,12 +161,17 @@ distribution-etc-root-var: distrib-dirs
 		${INSTALL} -c -o root -g wheel -m 644 SuidCells \
 		    ${DESTDIR}/etc/afs; \
 		${INSTALL} -c -o root -g wheel -m 644 README \
-		    ${DESTDIR}/etc/afs)
-	(cd namedb; \
+		    ${DESTDIR}/etc/afs
+	cd systrace; \
+		${INSTALL} -c -o root -g wheel -m 600 usr_sbin_lpd \
+		    ${DESTDIR}/etc/systrace; \
+		${INSTALL} -c -o root -g wheel -m 600 usr_sbin_named \
+		    ${DESTDIR}/etc/systrace;
+	cd namedb; \
 	    ${INSTALL} -c -o root -g ${BINGRP} -m 644 named.boot \
 		${DESTDIR}/var/named; \
 	    ${INSTALL} -c -o named -g ${BINGRP} -m 644 ${NAMEDB} \
-		${DESTDIR}/var/named/namedb)
+		${DESTDIR}/var/named/namedb
 	/bin/rm -f ${DESTDIR}/etc/localtime
 	ln -s ${TZDIR}/${LOCALTIME} ${DESTDIR}/etc/localtime
 	/bin/rm -f ${DESTDIR}/etc/rmt
@@ -183,9 +180,7 @@ distribution-etc-root-var: distrib-dirs
 		${DESTDIR}/var/crash
 	${INSTALL} -c -o ${BINOWN} -g operator -m 664 /dev/null \
 		${DESTDIR}/etc/dumpdates
-	${INSTALL} -c -o ${BINOWN} -g wheel -m 600 /dev/null \
-		${DESTDIR}/etc/skeykeys
-	${INSTALL} -c -o root -g wheel -m 600 /dev/null \
+	${INSTALL} -c -o root -g crontab -m 660 /dev/null \
 		${DESTDIR}/var/at/at.deny
 	${INSTALL} -c -o root -g wheel -m 600 /dev/null \
 		${DESTDIR}/var/cron/log
@@ -221,13 +216,13 @@ distribution-etc-root-var: distrib-dirs
 	    chgrp ${BINGRP} ${DESTDIR}/${PCS} && \
 	    chmod 644 ${DESTDIR}/${PCS}
 .endif
-	(cd ../gnu/usr.sbin/sendmail/cf/cf; ${MAKE} distribution)
-	(cd ../usr.sbin/ypserv/ypinit; ${MAKE} distribution)
-	(cd ../usr.bin/ssh; ${MAKE} distribution)
-	(cd ../usr.sbin/httpd; ${MAKE} -f Makefile.bsd-wrapper distribution)
-	(cd ../lib/libssl; ${MAKE} -f Makefile.bsd-wrapper distribution)
-	(cd ../gnu/usr.bin/lynx; ${MAKE} -f Makefile.bsd-wrapper distribution)
-	(cd ../usr.bin/mail; ${MAKE} distribution)
+	cd ../gnu/usr.sbin/sendmail/cf/cf && exec ${MAKE} distribution
+	cd ../usr.sbin/ypserv/ypinit && exec ${MAKE} distribution
+	cd ../usr.bin/ssh && exec ${MAKE} distribution
+	cd ../usr.sbin/httpd && exec ${MAKE} -f Makefile.bsd-wrapper distribution
+	cd ../lib/libssl && exec ${MAKE} distribution
+	cd ../gnu/usr.bin/lynx && exec ${MAKE} -f Makefile.bsd-wrapper distribution
+	cd ../usr.bin/mail && exec ${MAKE} distribution
 	${INSTALL} -c -o root -g ${BINGRP} -m 644 aliases \
 	    ${DESTDIR}/etc/mail/aliases
 	/usr/libexec/sendmail/sendmail -C${DESTDIR}/etc/mail/sendmail.cf \
@@ -238,8 +233,9 @@ distribution-etc-root-var: distrib-dirs
 	${INSTALL} -c -o root -g wheel -m 440 ../usr.bin/sudo/sudoers \
 		${DESTDIR}/etc/sudoers
 
-distribution: distribution-etc-root-var
-	(cd ..; ${MAKE} install)
+distribution:
+	exec ${SUDO} ${MAKE} distribution-etc-root-var
+	cd .. && exec ${SUDO} ${MAKE} install
 
 distrib-dirs:
 	if [ ! -d ${DESTDIR}/. ]; then \
@@ -257,8 +253,8 @@ release:
 	@false
 .else
 release: distribution snap_pre snap_md
-	cd ${.CURDIR}/../distrib/notes; ${MAKE}; ${MAKE} install
-	cd ${.CURDIR}/../distrib/sets; sh maketars ${OSrev}
+	cd ${.CURDIR}/../distrib/notes && ${MAKE} && exec ${SUDO} ${MAKE} install
+	cd ${.CURDIR}/../distrib/sets && exec ${SUDO} sh maketars ${OSrev}
 	-cp ${DESTDIR}/snapshot/bsd* ${RELEASEDIR}
 	-cp ${DESTDIR}/snapshot/*boot* ${RELEASEDIR}
 	-cp ${DESTDIR}/snapshot/*BOOT* ${RELEASEDIR}
@@ -283,8 +279,8 @@ snapshot: distribution snap_pre snap_tar snap_md
 	cd ${DESTDIR}/snapshot && md5 * > MD5
 
 snap_pre:
-	/bin/rm -rf ${DESTDIR}/snapshot
-	${INSTALL} -d -o root -g wheel -m 755 ${DESTDIR}/snapshot
+	${SUDO} /bin/rm -rf ${DESTDIR}/snapshot
+	${SUDO} ${INSTALL} -d -o root -g wheel -m 755 ${DESTDIR}/snapshot
 
 snap_tar:
 	cd ${DESTDIR} && tar cf - bin \
@@ -329,23 +325,20 @@ MAKEDEVARCHS+= hppa
 MAKEDEVARCHS+= i386
 MAKEDEVARCHS+= mac68k
 MAKEDEVARCHS+= macppc
-#MAKEDEVARCHS+= mvme68k
-#MAKEDEVARCHS+= mvme88k
+MAKEDEVARCHS+= mvme68k
+MAKEDEVARCHS+= mvme88k
 #MAKEDEVARCHS+= mvmeppc
 MAKEDEVARCHS+= sparc
 MAKEDEVARCHS+= sparc64
 MAKEDEVARCHS+= sun3
 #MAKEDEVARCHS+= vax
 
-all:
-#	make M=${MACHINE} m4
-
 clean:
 	rm -f etc.${MACHINE}/MAKEDEV
 
 cleandir:
 	cd ${.CURDIR}; for m in ${MAKEDEVARCHS}; do \
-	    make MACHINE=$$m clean; done
+	    ${MAKE} MACHINE=$$m clean; done
 
 m4: etc.${M}/MAKEDEV
 
@@ -357,6 +350,12 @@ etc.${M}/MAKEDEV: MAKEDEV.sub MAKEDEV.mi etc.${M}/MAKEDEV.md
 
 allarchs: MAKEDEV.sub MAKEDEV.mi
 	cd ${.CURDIR}; for m in ${MAKEDEVARCHS}; do \
-	    make M=$$m m4; done
+	    ${MAKE} M=$$m m4; done
 
+distrib:
+	cd ${.CURDIR}/../distrib && \
+	    ${MAKE} cleandir && ${MAKE} && exec ${SUDO} ${MAKE} install
+
+.PHONY: distribution-etc-root-var distribution distrib-dirs \
+	release snapshot allarchs snap_pre snap_tar snap_md m4
 .include <bsd.prog.mk>

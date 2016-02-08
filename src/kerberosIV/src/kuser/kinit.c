@@ -19,7 +19,7 @@
 
 #include "kuser_locl.h"
 
-RCSID("$KTH: kinit.c,v 1.17 1997/12/12 04:48:44 assar Exp $");
+RCSID("$KTH: kinit.c,v 1.18 2001/02/20 23:07:56 assar Exp $");
 
 #define	LIFE	DEFAULT_TKT_LIFE /* lifetime of ticket in 5-minute units */
 #define CHPASSLIFE 2
@@ -54,8 +54,6 @@ main(int argc, char **argv)
     char   *username = NULL;
     int     iflag, rflag, vflag, lflag, pflag, lifetime, k_errno;
     int	    i;
-
-    set_progname (argv[0]);
 
     *inst = *realm = '\0';
     iflag = rflag = vflag = lflag = pflag = 0;

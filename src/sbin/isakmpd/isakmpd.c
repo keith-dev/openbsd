@@ -1,4 +1,4 @@
-/*	$OpenBSD: isakmpd.c,v 1.39 2001/12/11 01:54:34 ho Exp $	*/
+/*	$OpenBSD: isakmpd.c,v 1.45 2002/07/05 13:58:50 ho Exp $	*/
 /*	$EOM: isakmpd.c,v 1.54 2000/10/05 09:28:22 niklas Exp $	*/
 
 /*
@@ -78,14 +78,14 @@ int debug = 0;
  * If we receive a SIGHUP signal, this flag gets set to show we need to
  * reconfigure ASAP.
  */
-static int sighupped = 0;
+volatile sig_atomic_t sighupped = 0;
 
 /*
  * If we receive a USR1 signal, this flag gets set to show we need to dump
  * a report over our internal state ASAP.  The file to report to is settable
  * via the -R parameter.
  */
-static int sigusr1ed = 0;
+volatile sig_atomic_t sigusr1ed = 0;
 static char *report_file = "/var/run/isakmpd.report";
 
 /*
@@ -93,13 +93,13 @@ static char *report_file = "/var/run/isakmpd.report";
  * rehash our SA soft expiration timers to a uniform distribution.
  * XXX Perhaps this is a really bad idea?
  */
-static int sigusr2ed = 0;
+volatile sig_atomic_t sigusr2ed = 0;
 
 /*
- * If we recieve a TERM signal, perform a "clean shutdown" of the daemon.
+ * If we receive a TERM signal, perform a "clean shutdown" of the daemon.
  * This includes to send DELETE notifications for all our active SAs.
  */
-static int sigtermed = 0;
+volatile sig_atomic_t sigtermed = 0;
 void daemon_shutdown_now (int);
 
 /* The default path of the PID file.  */
@@ -301,10 +301,10 @@ daemon_shutdown (void)
   if (transport_prio_sendqs_empty ())
     {
       /*
-       * When the prioritized transport sendq:s are empty, i.e all 
+       * When the prioritized transport sendq:s are empty, i.e all
        * the DELETE notifications have been sent, we can shutdown.
        */
-	 
+	
 #ifdef USE_DEBUG
       log_packet_stop ();
 #endif
@@ -333,7 +333,7 @@ write_pid_file (void)
   if (fp != NULL)
     {
       /* XXX Error checking!  */
-      fprintf (fp, "%d\n", getpid ());
+      fprintf (fp, "%ld\n", (long) getpid ());
       fclose (fp);
     }
   else
@@ -348,6 +348,7 @@ main (int argc, char *argv[])
   size_t mask_size;
   struct timeval tv, *timeout;
 
+  log_to (stderr);
   parse_args (argc, argv);
   init ();
   if (!debug)
@@ -383,10 +384,10 @@ main (int argc, char *argv[])
   mask_size = howmany (n, NFDBITS) * sizeof (fd_mask);
   rfds = (fd_set *)malloc (mask_size);
   if (!rfds)
-    log_fatal ("main: malloc (%d) failed", mask_size);
+    log_fatal ("main: malloc (%lu) failed", (unsigned long)mask_size);
   wfds = (fd_set *)malloc (mask_size);
   if (!wfds)
-    log_fatal ("main: malloc (%d) failed", mask_size);
+    log_fatal ("main: malloc (%lu) failed", (unsigned long)mask_size);
 
   while (1)
     {
@@ -417,7 +418,7 @@ main (int argc, char *argv[])
        * indicated we should start a shutdown of the daemon.
        *
        * Note: Since _one_ message is sent per iteration of this enclosing
-       * while-loop, and we want to send a number of DELETE notifications, 
+       * while-loop, and we want to send a number of DELETE notifications,
        * we must loop atleast this number of times. The daemon_shutdown()
        * function starts by queueing the DELETEs, all other calls just
        * increments the 'sigtermed' variable until it reaches a "safe"

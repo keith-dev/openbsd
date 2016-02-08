@@ -13,7 +13,7 @@
  */
 
 #include "includes.h"
-RCSID("$OpenBSD: sshconnect1.c,v 1.49 2002/03/14 15:24:27 markus Exp $");
+RCSID("$OpenBSD: sshconnect1.c,v 1.52 2002/08/08 13:50:23 aaron Exp $");
 
 #include <openssl/bn.h>
 #include <openssl/md5.h>
@@ -251,7 +251,7 @@ try_rsa_authentication(int idx)
 	 * load the private key.  Try first with empty passphrase; if it
 	 * fails, ask for a passphrase.
 	 */
-	if (public->flags && KEY_FLAG_EXT)
+	if (public->flags & KEY_FLAG_EXT)
 		private = public;
 	else
 		private = key_load_private_type(KEY_RSA1, authfile, "", NULL);
@@ -845,7 +845,7 @@ try_challenge_response_authentication(void)
 			error("Permission denied, please try again.");
 		if (options.cipher == SSH_CIPHER_NONE)
 			log("WARNING: Encryption is disabled! "
-			    "Reponse will be transmitted in clear text.");
+			    "Response will be transmitted in clear text.");
 		response = read_passphrase(prompt, 0);
 		if (strcmp(response, "") == 0) {
 			xfree(response);
@@ -1092,7 +1092,7 @@ ssh_kex(char *host, struct sockaddr *hostaddr)
  */
 void
 ssh_userauth1(const char *local_user, const char *server_user, char *host,
-    Key **keys, int nkeys)
+    Sensitive *sensitive)
 {
 #ifdef KRB5
 	krb5_context context = NULL;
@@ -1178,9 +1178,11 @@ ssh_userauth1(const char *local_user, const char *server_user, char *host,
 	 */
 	if ((supported_authentications & (1 << SSH_AUTH_RHOSTS_RSA)) &&
 	    options.rhosts_rsa_authentication) {
-		for (i = 0; i < nkeys; i++) {
-			if (keys[i] != NULL && keys[i]->type == KEY_RSA1 &&
-			    try_rhosts_rsa_authentication(local_user, keys[i]))
+		for (i = 0; i < sensitive->nkeys; i++) {
+			if (sensitive->keys[i] != NULL &&
+			    sensitive->keys[i]->type == KEY_RSA1 &&
+			    try_rhosts_rsa_authentication(local_user,
+			    sensitive->keys[i]))
 				goto success;
 		}
 	}

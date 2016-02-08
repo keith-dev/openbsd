@@ -1,4 +1,4 @@
-/*	$OpenBSD: rcp.c,v 1.28 2002/02/19 19:39:35 millert Exp $	*/
+/*	$OpenBSD: rcp.c,v 1.31 2002/07/04 04:26:40 deraadt Exp $	*/
 /*	$NetBSD: rcp.c,v 1.9 1995/03/21 08:19:06 cgd Exp $	*/
 
 /*
@@ -115,9 +115,7 @@ void	 toremote(char *, int, char *[]);
 void	 usage(void);
 
 int
-main(argc, argv)
-	int argc;
-	char *argv[];
+main(int argc, char *argv[])
 {
 	struct servent *sp;
 	int ch, fflag, tflag;
@@ -185,6 +183,8 @@ main(argc, argv)
 	if ((pwd = getpwuid(userid = getuid())) == NULL)
 		errx(1, "unknown user %d", (int)userid);
 
+	unsetenv("RSH");		/* Force the use of /usr/bin/rsh */
+
 	rem = STDIN_FILENO;		/* XXX */
 
 	if (fflag) {			/* Follow "protocol", send data. */
@@ -233,9 +233,7 @@ main(argc, argv)
 }
 
 void
-toremote(targ, argc, argv)
-	char *targ, *argv[];
-	int argc;
+toremote(char *targ, int argc, char *argv[])
 {
 	int i, len, tos;
 	char *bp, *host, *src, *suser, *thost, *tuser, *user;
@@ -311,7 +309,8 @@ toremote(targ, argc, argv)
 					exit(1);
 				tos = IPTOS_THROUGHPUT;
 				if (setsockopt(rem, IPPROTO_IP, IP_TOS,
-				    &tos, sizeof(int)) < 0)
+				    &tos, sizeof(int)) < 0 &&
+				    errno != ENOPROTOOPT)
 					warn("TOS (ignored)");
 				if (response() < 0)
 					exit(1);
@@ -326,9 +325,7 @@ toremote(targ, argc, argv)
 }
 
 void
-tolocal(argc, argv)
-	int argc;
-	char *argv[];
+tolocal(int argc, char *argv[])
 {
 	int i, len, tos;
 	char *bp, *host, *src, *suser, *user;
@@ -381,7 +378,8 @@ tolocal(argc, argv)
 		}
 		(void)seteuid(userid);
 		tos = IPTOS_THROUGHPUT;
-		if (setsockopt(rem, IPPROTO_IP, IP_TOS, &tos, sizeof(int)) < 0)
+		if (setsockopt(rem, IPPROTO_IP, IP_TOS, &tos, sizeof(int)) < 0
+		    && errno != ENOPROTOOPT)
 			warn("TOS (ignored)");
 		sink(1, argv + argc - 1);
 		(void)seteuid(0);
@@ -392,9 +390,7 @@ tolocal(argc, argv)
 }
 
 void
-source(argc, argv)
-	int argc;
-	char *argv[];
+source(int argc, char *argv[])
 {
 	struct stat stb;
 	static BUF buffer;
@@ -489,9 +485,7 @@ next:			(void)close(fd);
 }
 
 void
-rsource(name, statp)
-	char *name;
-	struct stat *statp;
+rsource(char *name, struct stat *statp)
 {
 	DIR *dirp;
 	struct dirent *dp;
@@ -542,9 +536,7 @@ rsource(name, statp)
 }
 
 void
-sink(argc, argv)
-	int argc;
-	char *argv[];
+sink(int argc, char *argv[])
 {
 	static BUF buffer;
 	struct stat stb;
@@ -782,8 +774,7 @@ screwup:
 
 #ifdef KERBEROS
 int
-kerberos(host, bp, locuser, user)
-	char **host, *bp, *locuser, *user;
+kerberos(char **host, char *bp, char *locuser, char *user)
 {
 	struct servent *sp;
 
@@ -821,7 +812,7 @@ again:
 #endif /* KERBEROS */
 
 int
-response()
+response(void)
 {
 	char ch, *cp, resp, rbuf[BUFSIZ];
 
@@ -854,10 +845,10 @@ response()
 }
 
 void
-usage()
+usage(void)
 {
 #ifdef KERBEROS
-	(void)fprintf(stderr, "usage: %s [-Kpx] [-k realm] f1 f2\n", 
+	(void)fprintf(stderr, "usage: %s [-Kpx] [-k realm] f1 f2\n",
             __progname);
  	(void)fprintf(stderr, "       %s [-Kprx] [-k realm] f1 ... fn directory\n",
             __progname);

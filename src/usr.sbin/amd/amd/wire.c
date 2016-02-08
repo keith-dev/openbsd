@@ -36,7 +36,7 @@
  * SUCH DAMAGE.
  *
  *	from: @(#)wire.c	8.1 (Berkeley) 6/6/93
- *	$Id: wire.c,v 1.7 2001/03/02 06:22:05 deraadt Exp $
+ *	$Id: wire.c,v 1.10 2002/08/03 08:29:31 pvalchev Exp $
  */
 
 /*
@@ -84,8 +84,8 @@ static addrlist *localnets = 0;
 #define clist (ifc.ifc_ifcu.ifcu_req)
 #define count (ifc.ifc_len/sizeof(struct ifreq))
 
-char *getwire P((void));
-char *getwire()
+char *
+getwire(void)
 {
 	struct hostent *hp;
 	struct netent *np;
@@ -186,9 +186,9 @@ char *getwire()
 			 * Figure out the subnet's network address
 			 */
 			subnet = address & netmask;
-		  
+
 #ifdef IN_CLASSA
-			subnet = ntohl(subnet); 
+			subnet = ntohl(subnet);
 
 			if (IN_CLASSA(subnet)) {
 				mask = IN_CLASSA_NET;
@@ -236,7 +236,7 @@ char *getwire()
 				if (hp)
 					s = hp->h_name;
 				else
-					s = inet_dquad(buf, subnet);
+					s = inet_dquad(buf, sizeof(buf), subnet);
 			}
 			netname = strdup(s);
 		}
@@ -244,7 +244,7 @@ char *getwire()
 
 out:
 	if (sk >= 0)
-		(void) close(sk); 
+		(void) close(sk);
 	if (netname)
 		return netname;
 	return strdup(NO_SUBNET);
@@ -252,8 +252,8 @@ out:
 
 #else
 
-char *getwire P((void));
-char *getwire()
+char *
+getwire(void)
 {
 	return strdup(NO_SUBNET);
 }
@@ -263,9 +263,8 @@ char *getwire()
  * Determine whether a network is on a local network
  * (addr) is in network byte order.
  */
-int islocalnet P((u_int32_t addr));
-int islocalnet(addr)
-u_int32_t addr;
+int
+islocalnet(u_int32_t addr)
 {
 	addrlist *al;
 
@@ -275,7 +274,7 @@ u_int32_t addr;
 
 #ifdef DEBUG
 	{ char buf[16];
-	plog(XLOG_INFO, "%s is on a remote network", inet_dquad(buf, addr));
+	plog(XLOG_INFO, "%s is on a remote network", inet_dquad(buf, sizeof(buf), addr));
 	}
 #endif
 	return FALSE;

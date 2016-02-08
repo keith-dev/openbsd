@@ -1,8 +1,8 @@
-/*	$OpenBSD: archdep.h,v 1.6 2002/02/21 23:17:53 drahn Exp $ */
+/*	$OpenBSD: archdep.h,v 1.13 2002/08/12 01:05:23 drahn Exp $ */
 
 /*
  * Copyright (c) 1998 Per Fogelstrom, Opsycon AB
- * 
+ *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
@@ -49,22 +49,29 @@
 #include "syscall.h"
 #include "util.h"
 
-static inline long
+static inline void *
 _dl_mmap(void *addr, unsigned int len, unsigned int prot,
 	unsigned int flags, int fd, off_t offset)
-{ 
-	return(_dl___syscall((quad_t)SYS_mmap, addr, len, prot,
+{
+	return((void *)_dl__syscall((quad_t)SYS_mmap, addr, len, prot,
 		flags, fd, 0, offset));
+}
+
+static inline void
+RELOC_REL(Elf_Rel *r, const Elf_Sym *s, Elf_Addr *p, unsigned long v)
+{
+	/* SPARC64 does not use REL type relocations */
+	_dl_exit(20);
 }
 
 static inline void
 RELOC_RELA(Elf_RelA *r, const Elf_Sym *s, Elf_Addr *p, unsigned long v)
 {
 	if (ELF_R_TYPE(r->r_info) == RELOC_RELATIVE) {
-		*p += (Elf_Addr)v;
+		*p = v + r->r_addend;
 	} else {
 		/* XXX - printf might not work here, but we give it a shot. */
-		_dl_printf("Unkown bootstrap relocation.\n");
+		_dl_printf("Unknown bootstrap relocation.\n");
 		_dl_exit(6);
 	}
 }

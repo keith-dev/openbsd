@@ -1,9 +1,11 @@
-#	$OpenBSD: Makefile,v 1.23 2001/09/04 22:25:02 deraadt Exp $
+#	$OpenBSD: Makefile,v 1.25 2002/08/05 15:25:43 art Exp $
 
 REV=		${OSrev}
 
 CBIN=		instbin
 ARCHDIR=	${.CURDIR}/../${MACHINE}/miniroot
+
+.include <bsd.own.mk>
 
 .if exists(${ARCHDIR}/Makefile.inc)
 .include "${ARCHDIR}/Makefile.inc"
@@ -20,7 +22,11 @@ IMAGE?=		miniroot${REV}.fs
 IMAGESIZE?=	10240 # 5MB in 512 byte blocks
 NEWFSOPTS?=
 NEWFS_WILL_FAIL?=false
+.if ${ELF_TOOLCHAIN} == "yes"
+CRUNCHGENOPTS?=-E
+.else
 CRUNCHGENOPTS?=
+.endif
 
 LISTS=		${.CURDIR}/list ${ARCHDIR}/list
 CRUNCHCONF=	${CBIN}.conf
@@ -48,6 +54,7 @@ all: ${CBIN} bsd
 	mtree -def ${MTREE} -p ${MOUNT_POINT}/ -u
 	REV=${REV} CURDIR=${.CURDIR} OBJDIR=${.OBJDIR} ARCHDIR=${ARCHDIR} \
 	    TARGDIR=${MOUNT_POINT} sh ${.CURDIR}/runlist.sh ${LISTS}
+	rm ${MOUNT_POINT}/${CBIN}
 	@echo ""
 	@df -i ${MOUNT_POINT}
 	@echo ""

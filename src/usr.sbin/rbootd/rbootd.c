@@ -1,4 +1,4 @@
-/*	$OpenBSD: rbootd.c,v 1.13 2002/03/14 16:44:25 mpech Exp $	*/
+/*	$OpenBSD: rbootd.c,v 1.15 2002/07/16 23:38:52 mickey Exp $	*/
 /*	$NetBSD: rbootd.c,v 1.5 1995/10/06 05:12:17 thorpej Exp $	*/
 
 /*
@@ -55,11 +55,12 @@ static char copyright[] =
 
 #ifndef lint
 /*static char sccsid[] = "@(#)rbootd.c	8.1 (Berkeley) 6/4/93";*/
-static char rcsid[] = "$OpenBSD: rbootd.c,v 1.13 2002/03/14 16:44:25 mpech Exp $";
+static char rcsid[] = "$OpenBSD: rbootd.c,v 1.15 2002/07/16 23:38:52 mickey Exp $";
 #endif /* not lint */
 
 #include <sys/param.h>
 #include <sys/time.h>
+
 #include <ctype.h>
 #include <err.h>
 #include <errno.h>
@@ -70,6 +71,8 @@ static char rcsid[] = "$OpenBSD: rbootd.c,v 1.13 2002/03/14 16:44:25 mpech Exp $
 #include <string.h>
 #include <syslog.h>
 #include <unistd.h>
+#include <util.h>
+
 #include "defs.h"
 
 extern	char *__progname;	/* from crt0.o */
@@ -188,7 +191,6 @@ main(argc, argv)
 		syslog(LOG_ERR, "gethostname: %m");
 		DoExit();
 	}
-	MyHost[MAXHOSTNAMELEN] = '\0';
 
 	/*
 	 *  Write proc's pid to a file.

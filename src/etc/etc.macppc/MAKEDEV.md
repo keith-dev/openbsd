@@ -1,5 +1,5 @@
 vers(__file__,
-	{-$OpenBSD: MAKEDEV.md,v 1.5 2002/02/23 17:02:03 matthieu Exp $-},
+	{-$OpenBSD: MAKEDEV.md,v 1.7 2002/05/16 21:11:20 miod Exp $-},
 etc.MACHINE)dnl
 dnl
 dnl Copyright (c) 2001 Todd T. Fries <todd@OpenBSD.org>
@@ -78,6 +78,7 @@ _DEV(pf, 39)
 _DEV(cry, 47)
 _DEV(usbs)
 _DEV(pci, 71)
+_DEV(systrace, 50)
 dnl
 divert(7)dnl
 dnl
@@ -91,5 +92,5 @@ ttyE*)
 	case $type in
 	E)	major=25; minor=$unit ;;
 	esac
-	M tty$type$unit c $major $minor
+	M tty$type$unit c $major $minor 660
 	;;

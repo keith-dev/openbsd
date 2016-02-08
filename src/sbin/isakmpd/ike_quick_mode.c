@@ -1,4 +1,4 @@
-/*	$OpenBSD: ike_quick_mode.c,v 1.59 2002/03/06 09:43:08 ho Exp $	*/
+/*	$OpenBSD: ike_quick_mode.c,v 1.67 2002/09/11 09:50:43 ho Exp $	*/
 /*	$EOM: ike_quick_mode.c,v 1.139 2001/01/26 10:43:17 niklas Exp $	*/
 
 /*
@@ -120,7 +120,7 @@ check_policy (struct exchange *exchange, struct sa *sa, struct sa *isakmp_sa)
   /* Initialize if necessary -- e.g., if pre-shared key auth was used */
   if (isakmp_sa->policy_id < 0)
     {
-      if ((isakmp_sa->policy_id = LK (kn_init, ())) == -1)
+      if ((isakmp_sa->policy_id = kn_init ()) == -1)
         {
 	  log_print ("check_policy: failed to initialize policy session");
 	  return 0;
@@ -128,15 +128,13 @@ check_policy (struct exchange *exchange, struct sa *sa, struct sa *isakmp_sa)
     }
 
   /* Add the callback that will handle attributes.  */
-  if (LK (kn_add_action, (isakmp_sa->policy_id, ".*",
-			  (char *) policy_callback,
-			  ENVIRONMENT_FLAG_FUNC | ENVIRONMENT_FLAG_REGEX))
-      == -1)
+  if (kn_add_action (isakmp_sa->policy_id, ".*", (char *) policy_callback,
+		     ENVIRONMENT_FLAG_FUNC | ENVIRONMENT_FLAG_REGEX) == -1)
     {
       log_print ("check_policy: "
 		 "kn_add_action (%d, \".*\", %p, FUNC | REGEX) failed",
 		 isakmp_sa->policy_id, policy_callback);
-      LK (kn_close, (isakmp_sa->policy_id));
+      kn_close (isakmp_sa->policy_id);
       isakmp_sa->policy_id = -1;
       return 0;
     }
@@ -147,18 +145,18 @@ check_policy (struct exchange *exchange, struct sa *sa, struct sa *isakmp_sa)
       if (!keynote_ids)
         {
 	  log_error ("check_policy: "
-		     "failed to allocate %d bytes for book keeping",
-		     keynote_policy_asserts_num * sizeof *keynote_ids);
+	     "failed to allocate %lu bytes for book keeping",
+	     keynote_policy_asserts_num * (unsigned long)sizeof *keynote_ids);
 	  return 0;
         }
     }
 
   /* Add the policy assertions */
   for (i = 0; i < keynote_policy_asserts_num; i++)
-    keynote_ids[i] = LK (kn_add_assertion, (isakmp_sa->policy_id,
-					    keynote_policy_asserts[i],
-					    strlen (keynote_policy_asserts[i]),
-					    ASSERT_FLAG_LOCAL));
+    keynote_ids[i] = kn_add_assertion (isakmp_sa->policy_id,
+				       keynote_policy_asserts[i],
+				       strlen (keynote_policy_asserts[i]),
+				       ASSERT_FLAG_LOCAL);
 
   /* Initialize -- we'll let the callback do all the work.  */
   policy_exchange = exchange;
@@ -181,8 +179,8 @@ check_policy (struct exchange *exchange, struct sa *sa, struct sa *isakmp_sa)
       principal = calloc (nprinc, sizeof *principal);
       if (!principal)
         {
-	  log_error ("check_policy: calloc (%d, %d) failed", nprinc,
-		     sizeof *principal);
+	  log_error ("check_policy: calloc (%d, %lu) failed", nprinc,
+		     (unsigned long)sizeof *principal);
 	  goto policydone;
 	}
 
@@ -190,8 +188,8 @@ check_policy (struct exchange *exchange, struct sa *sa, struct sa *isakmp_sa)
       principal[0] = calloc (len, sizeof (char));
       if (!principal[0])
         {
-	  log_error ("check_policy: calloc (%d, %d) failed", len,
-		     sizeof (char));
+	  log_error ("check_policy: calloc (%d, %lu) failed", len,
+		     (unsigned long)sizeof (char));
 	  goto policydone;
 	}
 
@@ -204,8 +202,8 @@ check_policy (struct exchange *exchange, struct sa *sa, struct sa *isakmp_sa)
       principal[1] = calloc (len, sizeof (char));
       if (!principal[1])
         {
-	  log_error ("check_policy: calloc (%d, %d) failed", len,
-		     sizeof (char));
+	  log_error ("check_policy: calloc (%d, %lu) failed", len,
+		     (unsigned long)sizeof (char));
 	  goto policydone;
 	}
 
@@ -219,8 +217,8 @@ check_policy (struct exchange *exchange, struct sa *sa, struct sa *isakmp_sa)
       principal[2] = calloc (len, sizeof (char));
       if (!principal[2])
         {
-	  log_error ("check_policy: calloc (%d, %d) failed", len,
-		     sizeof (char));
+	  log_error ("check_policy: calloc (%d, %lu) failed", len,
+		     (unsigned long)sizeof (char));
 	  goto policydone;
 	}
 
@@ -238,8 +236,8 @@ check_policy (struct exchange *exchange, struct sa *sa, struct sa *isakmp_sa)
       principal = calloc (nprinc, sizeof *principal);
       if (!principal)
         {
-	  log_error ("check_policy: calloc (%d, %d) failed", nprinc,
-		     sizeof *principal);
+	  log_error ("check_policy: calloc (%d, %lu) failed", nprinc,
+		     (unsigned long)sizeof *principal);
 	  goto policydone;
 	}
 
@@ -247,8 +245,9 @@ check_policy (struct exchange *exchange, struct sa *sa, struct sa *isakmp_sa)
       principal[0] = strdup (isakmp_sa->keynote_key);
       if (!principal[0])
         {
-	  log_error ("check_policy: calloc (%d, %d) failed",
-		     strlen (isakmp_sa->keynote_key), sizeof (char));
+	  log_error ("check_policy: calloc (%lu, %lu) failed",
+		     (unsigned long)strlen (isakmp_sa->keynote_key),
+		     (unsigned long)sizeof (char));
 	  goto policydone;
 	}
 #endif
@@ -259,7 +258,8 @@ check_policy (struct exchange *exchange, struct sa *sa, struct sa *isakmp_sa)
       principal = calloc (2, sizeof *principal);
       if (!principal)
         {
-	  log_error ("check_policy: calloc (2, %d) failed", sizeof *principal);
+	  log_error ("check_policy: calloc (2, %lu) failed",
+		     (unsigned long)sizeof *principal);
 	  goto policydone;
 	}
 
@@ -273,9 +273,9 @@ check_policy (struct exchange *exchange, struct sa *sa, struct sa *isakmp_sa)
 	}
 
       dc.dec_key = isakmp_sa->recv_key;
-      principal[0] = LK (kn_encode_key, (&dc, INTERNAL_ENC_PKCS1, ENCODING_HEX,
-					 KEYNOTE_PUBLIC_KEY));
-      if (LKV (keynote_errno) == ERROR_MEMORY)
+      principal[0] = kn_encode_key (&dc, INTERNAL_ENC_PKCS1, ENCODING_HEX,
+				    KEYNOTE_PUBLIC_KEY);
+      if (keynote_errno == ERROR_MEMORY)
 	{
 	  log_print ("check_policy: failed to get memory for public key");
 	  goto policydone;
@@ -291,8 +291,8 @@ check_policy (struct exchange *exchange, struct sa *sa, struct sa *isakmp_sa)
       principal[1] = calloc (len, sizeof (char));
       if (!principal[1])
 	{
-	  log_error ("check_policy: calloc (%d, %d) failed", len,
-		     sizeof (char));
+	  log_error ("check_policy: calloc (%d, %lu) failed", len,
+		     (unsigned long)sizeof (char));
 	  goto policydone;
 	}
 
@@ -302,18 +302,18 @@ check_policy (struct exchange *exchange, struct sa *sa, struct sa *isakmp_sa)
       principal[1] = 0;
 
       /* Generate a "DN:" principal.  */
-      subject = LC (X509_get_subject_name, (isakmp_sa->recv_cert));
+      subject = X509_get_subject_name (isakmp_sa->recv_cert);
       if (subject)
 	{
           principal[1] = calloc (259, sizeof (char));
           if (!principal[1])
             {
-	      log_error ("check_policy: calloc (259, %d) failed",
-			 sizeof (char));
+	      log_error ("check_policy: calloc (259, %lu) failed",
+			 (unsigned long)sizeof (char));
 	      goto policydone;
             }
 	  strlcpy (principal[1], "DN:", 259);
-	  LC (X509_NAME_oneline, (subject, principal[1] + 3, 256));
+	  X509_NAME_oneline (subject, principal[1] + 3, 256);
 	  nprinc = 2;
 	} else {
 	  nprinc = 1;
@@ -348,29 +348,28 @@ check_policy (struct exchange *exchange, struct sa *sa, struct sa *isakmp_sa)
       LOG_DBG ((LOG_POLICY, 40, "check_policy: adding authorizer [%s]",
 		principal[i]));
 
-      if (LK (kn_add_authorizer, (isakmp_sa->policy_id, principal[i])) == -1)
+      if (kn_add_authorizer (isakmp_sa->policy_id, principal[i]) == -1)
         {
 	  int j;
 
 	  for (j = 0; j < i; j++)
-	    LK (kn_remove_authorizer, (isakmp_sa->policy_id, principal[j]));
+	    kn_remove_authorizer (isakmp_sa->policy_id, principal[j]);
 	  log_print ("check_policy: kn_add_authorizer failed");
 	  goto policydone;
 	}
     }
 
   /* Ask policy */
-  result = LK (kn_do_query, (isakmp_sa->policy_id, return_values,
-			     RETVALUES_NUM));
+  result = kn_do_query (isakmp_sa->policy_id, return_values, RETVALUES_NUM);
   LOG_DBG ((LOG_POLICY, 40, "check_policy: kn_do_query returned %d", result));
 
   /* Cleanup environment */
-  LK (kn_cleanup_action_environment, (isakmp_sa->policy_id));
+  kn_cleanup_action_environment (isakmp_sa->policy_id);
 
   /* Remove authorizers from the session */
   for (i = 0; i < nprinc; i++)
     {
-      LK (kn_remove_authorizer, (isakmp_sa->policy_id, principal[i]));
+      kn_remove_authorizer (isakmp_sa->policy_id, principal[i]);
       free (principal[i]);
     }
 
@@ -398,7 +397,7 @@ check_policy (struct exchange *exchange, struct sa *sa, struct sa *isakmp_sa)
   for (i = 0; i < keynote_policy_asserts_num; i++)
     {
       if (keynote_ids[i] != -1)
-	LK (kn_remove_assertion, (isakmp_sa->policy_id, keynote_ids[i]));
+	kn_remove_assertion (isakmp_sa->policy_id, keynote_ids[i]);
     }
 
   if (keynote_ids)
@@ -441,7 +440,7 @@ initiator_send_HASH_SA_NONCE (struct message *msg)
   size_t *transforms_len = 0, *new_transforms_len;
   int *transform_cnt = 0, *new_transform_cnt;
   int i, suite_no, prop_no, prot_no, xf_no, value, update_nextp, protocol_num;
-  int prop_cnt = 0;
+  int prop_cnt = 0, proto_id;
   struct proto *proto;
   struct conf_list *suite_conf, *prot_conf = 0, *xf_conf = 0, *life_conf;
   struct conf_list_node *suite, *prot, *xf, *life;
@@ -483,8 +482,9 @@ initiator_send_HASH_SA_NONCE (struct message *msg)
 	      if (!new_proposal)
 		{
 		  log_error ("initiator_send_HASH_SA_NONCE: "
-			     "realloc (%p, %d) failed",
-			     proposal, prop_cnt * sizeof *proposal);
+			     "realloc (%p, %lu) failed",
+			     proposal,
+			     prop_cnt * (unsigned long)sizeof *proposal);
 		  goto bail_out;
 		}
 	      proposal = new_proposal;
@@ -494,9 +494,9 @@ initiator_send_HASH_SA_NONCE (struct message *msg)
 	      if (!new_transforms_len)
 		{
 		  log_error ("initiator_send_HASH_SA_NONCE: "
-			     "realloc (%p, %d) failed",
+			     "realloc (%p, %lu) failed",
 			     transforms_len,
-			     prop_cnt * sizeof *transforms_len);
+			     prop_cnt * (unsigned long)sizeof *transforms_len);
 		  goto bail_out;
 		}
 	      transforms_len = new_transforms_len;
@@ -506,8 +506,9 @@ initiator_send_HASH_SA_NONCE (struct message *msg)
 	      if (!new_transform)
 		{
 		  log_error ("initiator_send_HASH_SA_NONCE: "
-			     "realloc (%p, %d) failed",
-			     transform, prop_cnt * sizeof *transform);
+			     "realloc (%p, %lu) failed",
+			     transform,
+			     prop_cnt * (unsigned long)sizeof *transform);
 		  goto bail_out;
 		}
 	      transform = new_transform;
@@ -517,8 +518,9 @@ initiator_send_HASH_SA_NONCE (struct message *msg)
 	      if (!new_transform_cnt)
 		{
 		  log_error ("initiator_send_HASH_SA_NONCE: "
-			     "realloc (%p, %d) failed",
-			     transform_cnt, prop_cnt * sizeof *transform_cnt);
+			     "realloc (%p, %lu) failed",
+			     transform_cnt,
+			     prop_cnt * (unsigned long)sizeof *transform_cnt);
 		  goto bail_out;
 		}
 	      transform_cnt = new_transform_cnt;
@@ -528,8 +530,9 @@ initiator_send_HASH_SA_NONCE (struct message *msg)
 	      if (!new_transform_len)
 		{
 		  log_error ("initiator_send_HASH_SA_NONCE: "
-			     "realloc (%p, %d) failed",
-			     transform_len, prop_cnt * sizeof *transform_len);
+			     "realloc (%p, %lu) failed",
+			     transform_len,
+			     prop_cnt * (unsigned long)sizeof *transform_len);
 		  goto bail_out;
 		}
 	      transform_len = new_transform_len;
@@ -539,12 +542,28 @@ initiator_send_HASH_SA_NONCE (struct message *msg)
 	  if (!protocol_id)
 	    goto bail_out;
 
-	  /* XXX Not too beautiful, but do we have a choice?  */
-	  id_map = strcasecmp (protocol_id, "IPSEC_AH") == 0 ? ipsec_ah_cst
-	    : strcasecmp (protocol_id, "IPSEC_ESP") == 0 ? ipsec_esp_cst
-	    : strcasecmp (protocol_id, "IPCOMP") == 0 ? ipsec_ipcomp_cst : 0;
-	  if (!id_map)
-	    goto bail_out;
+	  proto_id = constant_value (ipsec_proto_cst, protocol_id);
+	  switch (proto_id)
+	    {
+	    case IPSEC_PROTO_IPSEC_AH:
+	      id_map = ipsec_ah_cst;
+	      break;
+
+	    case IPSEC_PROTO_IPSEC_ESP:
+	      id_map = ipsec_esp_cst;
+	      break;
+
+	    case IPSEC_PROTO_IPCOMP:
+	      id_map = ipsec_ipcomp_cst;
+	      break;
+
+	    default:
+	      {
+		log_print ("initiator_send_HASH_SA_NONCE: invalid PROTCOL_ID: "
+			   "%s", protocol_id);
+		goto bail_out;
+	      }
+	    }
 
 	  /* Now get each transform we offer for this protocol.  */
 	  xf_conf = conf_get_list (prot->field, "Transforms");
@@ -557,8 +576,9 @@ initiator_send_HASH_SA_NONCE (struct message *msg)
 	  if (!transform[prop_no])
 	    {
 	      log_error ("initiator_send_HASH_SA_NONCE: "
-			 "calloc (%d, %d) failed",
-			 transform_cnt[prop_no], sizeof **transform);
+			 "calloc (%d, %lu) failed",
+			 transform_cnt[prop_no],
+			 (unsigned long)sizeof **transform);
 	      goto bail_out;
 	    }
 
@@ -567,8 +587,9 @@ initiator_send_HASH_SA_NONCE (struct message *msg)
 	  if (!transform_len[prop_no])
 	    {
 	      log_error ("initiator_send_HASH_SA_NONCE: "
-			 "calloc (%d, %d) failed",
-			 transform_cnt[prop_no], sizeof **transform_len);
+			 "calloc (%d, %lu) failed",
+			 transform_cnt[prop_no],
+			 (unsigned long)sizeof **transform_len);
 	      goto bail_out;
 	    }
 
@@ -631,7 +652,7 @@ initiator_send_HASH_SA_NONCE (struct message *msg)
                               attr =
                                 attribute_set_var (attr,
                                                    IPSEC_ATTR_SA_LIFE_DURATION,
-                                                   (char *)&value,
+                                                   (u_int8_t *)&value,
 						   sizeof value);
                             }
                         }
@@ -643,59 +664,73 @@ initiator_send_HASH_SA_NONCE (struct message *msg)
 				      ipsec_encap_cst,
 				      IPSEC_ATTR_ENCAPSULATION_MODE, &attr);
 
-	      attribute_set_constant (xf->field, "AUTHENTICATION_ALGORITHM",
-				      ipsec_auth_cst,
-				      IPSEC_ATTR_AUTHENTICATION_ALGORITHM,
-				      &attr);
+	      if (proto_id != IPSEC_PROTO_IPCOMP)
+		{
+		  attribute_set_constant (xf->field,
+					  "AUTHENTICATION_ALGORITHM",
+					  ipsec_auth_cst,
+					  IPSEC_ATTR_AUTHENTICATION_ALGORITHM,
+					  &attr);
 
-	      attribute_set_constant (xf->field, "GROUP_DESCRIPTION",
-				      ike_group_desc_cst,
-				      IPSEC_ATTR_GROUP_DESCRIPTION, &attr);
+		  attribute_set_constant (xf->field, "GROUP_DESCRIPTION",
+					  ike_group_desc_cst,
+					  IPSEC_ATTR_GROUP_DESCRIPTION, &attr);
 
+		  value = conf_get_num (xf->field, "KEY_LENGTH", 0);
+		  if (value)
+		    attr = attribute_set_basic (attr, IPSEC_ATTR_KEY_LENGTH,
+						value);
 
-	      value = conf_get_num (xf->field, "KEY_LENGTH", 0);
+		  value = conf_get_num (xf->field, "KEY_ROUNDS", 0);
+		  if (value)
+		    attr = attribute_set_basic (attr, IPSEC_ATTR_KEY_ROUNDS,
+						value);
+		}
+	      else
+		{
+		  value = conf_get_num (xf->field, "COMPRESS_DICTIONARY_SIZE",
+					0);
+		  if (value)
+		    attr = attribute_set_basic (attr,
+						IPSEC_ATTR_COMPRESS_DICTIONARY_SIZE,
+						value);
+
+		  value = conf_get_num (xf->field,
+					"COMPRESS_PRIVATE_ALGORITHM", 0);
+		  if (value)
+		    attr = attribute_set_basic (attr,
+						IPSEC_ATTR_COMPRESS_PRIVATE_ALGORITHM,
+						value);
+		}
+
+	      value = conf_get_num (xf->field, "ECN_TUNNEL", 0);
 	      if (value)
-		attr = attribute_set_basic (attr, IPSEC_ATTR_KEY_LENGTH,
+		attr = attribute_set_basic (attr, IPSEC_ATTR_ECN_TUNNEL,
 					    value);
-
-	      value = conf_get_num (xf->field, "KEY_ROUNDS", 0);
-	      if (value)
-		attr = attribute_set_basic (attr, IPSEC_ATTR_KEY_ROUNDS,
-					    value);
-
-	      value = conf_get_num (xf->field, "COMPRESS_DICTIONARY_SIZE", 0);
-	      if (value)
-		attr
-		  = attribute_set_basic (attr,
-					 IPSEC_ATTR_COMPRESS_DICTIONARY_SIZE,
-					 value);
-
-	      value
-		= conf_get_num (xf->field, "COMPRESS_PRIVATE_ALGORITHM", 0);
-	      if (value)
-		attr
-		  = attribute_set_basic (attr,
-					 IPSEC_ATTR_COMPRESS_PRIVATE_ALGORITHM,
-					 value);
 
 	      /* Record the real transform size.  */
 	      transforms_len[prop_no] += (transform_len[prop_no][xf_no]
 					  = attr - transform[prop_no][xf_no]);
 
-	      /*
-	       * Make sure that if a group description is specified, it is
-	       * specified for all transforms equally.
-	       */
-	      attr = conf_get_str (xf->field, "GROUP_DESCRIPTION");
-	      new_group_desc
-		= attr ? constant_value (ike_group_desc_cst, attr) : 0;
-	      if (group_desc == -1)
-		group_desc = new_group_desc;
-	      else if (group_desc != new_group_desc)
+	      if (proto_id != IPSEC_PROTO_IPCOMP)
 		{
-		  log_print ("initiator_send_HASH_SA_NONCE: "
-			     "differing group descriptions in a proposal");
-		  goto bail_out;
+		  /*
+		   * Make sure that if a group description is specified, it is
+		   * specified for all transforms equally.
+		   */
+		  attr = (u_int8_t *)conf_get_str (xf->field,
+						   "GROUP_DESCRIPTION");
+		  new_group_desc
+		    = attr ? constant_value (ike_group_desc_cst,
+					     (char *)attr) : 0;
+		  if (group_desc == -1)
+		    group_desc = new_group_desc;
+		  else if (group_desc != new_group_desc)
+		    {
+		      log_print ("initiator_send_HASH_SA_NONCE: "
+				 "differing group descriptions in a proposal");
+		      goto bail_out;
+		    }
 		}
 	    }
 	  conf_free_list (xf_conf);
@@ -718,8 +753,8 @@ initiator_send_HASH_SA_NONCE (struct message *msg)
 	  proposal[prop_no] = malloc (proposal_len);
 	  if (!proposal[prop_no])
 	    {
-	      log_error ("initiator_send_HASH_SA_NONCE: malloc (%d) failed",
-			 proposal_len);
+	      log_error ("initiator_send_HASH_SA_NONCE: malloc (%lu) failed",
+			 (unsigned long)proposal_len);
 	      goto bail_out;
 	    }
 
@@ -730,8 +765,8 @@ initiator_send_HASH_SA_NONCE (struct message *msg)
 	  proto = calloc (1, sizeof *proto);
 	  if (!proto)
 	    {
-	      log_error ("initiator_send_HASH_SA_NONCE: calloc (1, %d) failed",
-			 sizeof *proto);
+	      log_error ("initiator_send_HASH_SA_NONCE: calloc (1, %lu) "
+			 "failed", (unsigned long)sizeof *proto);
 	      goto bail_out;
 	    }
 
@@ -740,8 +775,8 @@ initiator_send_HASH_SA_NONCE (struct message *msg)
 	      proto->data = calloc (1, doi->proto_size);
 	      if (!proto->data)
 		{
-		  log_error ("initiator_send_HASH_SA_NONCE: "
-			     "calloc (1, %d) failed", doi->proto_size);
+		  log_error ("initiator_send_HASH_SA_NONCE: calloc (1, %lu) "
+			     "failed", (unsigned long)doi->proto_size);
 		  goto bail_out;
 		}
 	    }
@@ -774,7 +809,8 @@ initiator_send_HASH_SA_NONCE (struct message *msg)
   sa_buf = malloc (sa_len);
   if (!sa_buf)
     {
-      log_error ("initiator_send_HASH_SA_NONCE: malloc (%d) failed", sa_len);
+      log_error ("initiator_send_HASH_SA_NONCE: malloc (%lu) failed",
+		 (unsigned long)sa_len);
       goto bail_out;
     }
   SET_ISAKMP_SA_DOI (sa_buf, IPSEC_DOI_IPSEC);
@@ -831,7 +867,7 @@ initiator_send_HASH_SA_NONCE (struct message *msg)
     return -1;
 
   /* Generate optional KEY_EXCH payload.  */
-  if (group_desc)
+  if (group_desc > 0)
     {
       ie->group = group_get (group_desc);
       ie->g_x_len = dh_getlen (ie->group);
@@ -895,7 +931,8 @@ initiator_send_HASH_SA_NONCE (struct message *msg)
       id = calloc (sz, sizeof (char));
       if (!id)
 	{
-	  log_error ("initiator_send_HASH_SA_NONCE: malloc(%d) failed", sz);
+	  log_error ("initiator_send_HASH_SA_NONCE: malloc(%lu) failed",
+		     (unsigned long)sz);
 	  return -1;
 	}
 
@@ -924,7 +961,7 @@ initiator_send_HASH_SA_NONCE (struct message *msg)
 	  return -1;
 	}
 
-    /* Send supplied remote_id */
+      /* Send supplied remote_id */
       id = ipsec_build_id (remote_id, &sz);
       if (!id)
 	return -1;
@@ -1009,7 +1046,7 @@ initiator_recv_HASH_SA_NONCE (struct message *msg)
 
   /* Allocate the prf and start calculating our HASH(1).  XXX Share?  */
   LOG_DBG_BUF ((LOG_NEGOTIATION, 90, "initiator_recv_HASH_SA_NONCE: SKEYID_a",
-		isa->skeyid_a, isa->skeyid_len));
+		(u_int8_t *)isa->skeyid_a, isa->skeyid_len));
   prf = prf_alloc (isa->prf_type, hash->type, isa->skeyid_a, isa->skeyid_len);
   if (!prf)
     return -1;
@@ -1078,8 +1115,8 @@ initiator_recv_HASH_SA_NONCE (struct message *msg)
       ie->id_ci = malloc (ie->id_ci_sz);
       if (!ie->id_ci)
 	{
-	  log_error ("initiator_recv_HASH_SA_NONCE: malloc (%d) failed",
-		     ie->id_ci_sz);
+	  log_error ("initiator_recv_HASH_SA_NONCE: malloc (%lu) failed",
+		     (unsigned long)ie->id_ci_sz);
 	  return -1;
 	}
       memcpy (ie->id_ci, idp->p, ie->id_ci_sz);
@@ -1094,8 +1131,8 @@ initiator_recv_HASH_SA_NONCE (struct message *msg)
       ie->id_cr = malloc (ie->id_cr_sz);
       if (!ie->id_cr)
 	{
-	  log_error ("initiator_recv_HASH_SA_NONCE: malloc (%d) failed",
-		     ie->id_cr_sz);
+	  log_error ("initiator_recv_HASH_SA_NONCE: malloc (%lu) failed",
+		     (unsigned long)ie->id_cr_sz);
 	  return -1;
 	}
       memcpy (ie->id_cr, idp->p, ie->id_cr_sz);
@@ -1131,8 +1168,8 @@ initiator_recv_HASH_SA_NONCE (struct message *msg)
 
       if (!ie->id_ci || !ie->id_cr)
 	{
-	  log_error ("initiator_recv_HASH_SA_NONCE: malloc (%d) failed",
-		     ie->id_cr_sz);
+	  log_error ("initiator_recv_HASH_SA_NONCE: malloc (%lu) failed",
+		     (unsigned long)ie->id_cr_sz);
 	  if (ie->id_ci)
 	    free (ie->id_ci);
 	  if (ie->id_cr)
@@ -1246,8 +1283,8 @@ initiator_send_HASH (struct message *msg)
   buf = malloc (ISAKMP_HASH_SZ + hashsize);
   if (!buf)
     {
-      log_error ("initiator_send_HASH: malloc (%d) failed",
-		 ISAKMP_HASH_SZ + hashsize);
+      log_error ("initiator_send_HASH: malloc (%lu) failed",
+		 ISAKMP_HASH_SZ + (unsigned long)hashsize);
       return -1;
     }
   if (message_add_payload (msg, ISAKMP_PAYLOAD_HASH, buf,
@@ -1264,7 +1301,7 @@ initiator_send_HASH (struct message *msg)
   if (!prf)
     return -1;
   prf->Init (prf->prfctx);
-  prf->Update (prf->prfctx, "\0", 1);
+  prf->Update (prf->prfctx, (unsigned char *)"\0", 1);
   LOG_DBG_BUF ((LOG_NEGOTIATION, 90, "initiator_send_HASH: message_id",
 		exchange->message_id, ISAKMP_HDR_MESSAGE_ID_LEN));
   prf->Update (prf->prfctx, exchange->message_id, ISAKMP_HDR_MESSAGE_ID_LEN);
@@ -1310,6 +1347,9 @@ post_quick_mode (struct message *msg)
       for (proto = TAILQ_FIRST (&sa->protos); proto;
 	   proto = TAILQ_NEXT (proto, link))
 	{
+	  if (proto->proto == IPSEC_PROTO_IPCOMP)
+	    continue;
+
 	  iproto = proto->data;
 
 	  /*
@@ -1337,9 +1377,10 @@ post_quick_mode (struct message *msg)
 			   / prf->blocksize) * prf->blocksize);
 	      if (!iproto->keymat[i])
 		{
-		  log_error ("post_quick_mode: malloc (%d) failed",
-			     ((ie->keymat_len + prf->blocksize - 1)
-			      / prf->blocksize) * prf->blocksize);
+		  log_error ("post_quick_mode: malloc (%lu) failed",
+			     (((unsigned long)ie->keymat_len +
+			       prf->blocksize - 1) / prf->blocksize) *
+			     prf->blocksize);
 		  /* XXX What more to do?  */
 		  free (prf);
 		  continue;
@@ -1434,8 +1475,8 @@ responder_recv_HASH_SA_NONCE (struct message *msg)
   my_hash = malloc (hash_len - ISAKMP_GEN_SZ);
   if (!my_hash)
     {
-      log_error ("responder_recv_HASH_SA_NONCE: malloc (%d) failed",
-		 hash_len - ISAKMP_GEN_SZ);
+      log_error ("responder_recv_HASH_SA_NONCE: malloc (%lu) failed",
+		 (unsigned long)hash_len - ISAKMP_GEN_SZ);
       goto cleanup;
     }
 
@@ -1492,8 +1533,8 @@ responder_recv_HASH_SA_NONCE (struct message *msg)
       ie->id_ci = malloc (ie->id_ci_sz);
       if (!ie->id_ci)
 	{
-	  log_error ("responder_recv_HASH_SA_NONCE: malloc (%d) failed",
-		     ie->id_ci_sz);
+	  log_error ("responder_recv_HASH_SA_NONCE: malloc (%lu) failed",
+		     (unsigned long)ie->id_ci_sz);
 	  goto cleanup;
 	}
       memcpy (ie->id_ci, idp->p, ie->id_ci_sz);
@@ -1508,8 +1549,8 @@ responder_recv_HASH_SA_NONCE (struct message *msg)
       ie->id_cr = malloc (ie->id_cr_sz);
       if (!ie->id_cr)
 	{
-	  log_error ("responder_recv_HASH_SA_NONCE: malloc (%d) failed",
-		     ie->id_cr_sz);
+	  log_error ("responder_recv_HASH_SA_NONCE: malloc (%lu) failed",
+		     (unsigned long)ie->id_cr_sz);
 	  goto cleanup;
 	}
       memcpy (ie->id_cr, idp->p, ie->id_cr_sz);
@@ -1545,8 +1586,8 @@ responder_recv_HASH_SA_NONCE (struct message *msg)
 
       if (!ie->id_ci || !ie->id_cr)
 	{
-	  log_error ("responder_recv_HASH_SA_NONCE: malloc (%d) failed",
-		     ie->id_ci_sz);
+	  log_error ("responder_recv_HASH_SA_NONCE: malloc (%lu) failed",
+		     (unsigned long)ie->id_ci_sz);
 	  goto cleanup;
 	}
 
@@ -1585,7 +1626,7 @@ responder_recv_HASH_SA_NONCE (struct message *msg)
   if (message_negotiate_sa (msg, check_policy))
     goto cleanup;
 #else
-  if (message_negotiate_sa (msg, libkeynote ? check_policy : 0))
+  if (message_negotiate_sa (msg, 0))
     goto cleanup;
 #endif
 #else
@@ -1639,6 +1680,7 @@ responder_recv_HASH_SA_NONCE (struct message *msg)
       retval = 0;
 
     next_sa:
+      ; /* XXX gcc3 wants this. */
     }
 
   if (kep)
@@ -1683,11 +1725,7 @@ responder_recv_HASH_SA_NONCE (struct message *msg)
 	}
     }
 #if !defined (USE_POLICY) && !defined (USE_KEYNOTE)
-#ifdef USE_POLICY
-  else if (!libkeynote)
-#else
   else
-#endif
     {
       /*
        * This code is no longer necessary, as policy determines acceptance
@@ -1740,8 +1778,8 @@ responder_send_HASH_SA_NONCE (struct message *msg)
   buf = malloc (ISAKMP_HASH_SZ + hashsize);
   if (!buf)
     {
-      log_error ("responder_send_HASH_SA_NONCE: malloc (%d) failed",
-		 ISAKMP_HASH_SZ + hashsize);
+      log_error ("responder_send_HASH_SA_NONCE: malloc (%lu) failed",
+		 ISAKMP_HASH_SZ + (unsigned long)hashsize);
       return -1;
     }
   if (message_add_payload (msg, ISAKMP_PAYLOAD_HASH, buf,
@@ -1770,7 +1808,8 @@ responder_send_HASH_SA_NONCE (struct message *msg)
       id = malloc (sz);
       if (!id)
 	{
-	  log_error ("responder_send_HASH_SA_NONCE: malloc (%d) failed", sz);
+	  log_error ("responder_send_HASH_SA_NONCE: malloc (%lu) failed",
+		     (unsigned long)sz);
 	  return -1;
 	}
       memcpy (id, ie->id_ci, sz);
@@ -1786,7 +1825,8 @@ responder_send_HASH_SA_NONCE (struct message *msg)
       id = malloc (sz);
       if (!id)
 	{
-	  log_error ("responder_send_HASH_SA_NONCE: malloc (%d) failed", sz);
+	  log_error ("responder_send_HASH_SA_NONCE: malloc (%lu) failed",
+		     (unsigned long)sz);
 	  return -1;
 	}
       memcpy (id, ie->id_cr, sz);
@@ -1850,7 +1890,7 @@ gen_g_xy (struct message *msg)
   ie->g_xy = malloc (ie->g_x_len);
   if (!ie->g_xy)
     {
-      log_error ("gen_g_xy: malloc (%d) failed", ie->g_x_len);
+      log_error ("gen_g_xy: malloc (%lu) failed", (unsigned long)ie->g_x_len);
       return;
     }
   if (dh_create_shared (ie->group, ie->g_xy,
@@ -1881,8 +1921,8 @@ responder_recv_HASH (struct message *msg)
   my_hash = malloc (hash_len - ISAKMP_GEN_SZ);
   if (!my_hash)
     {
-      log_error ("responder_recv_HASH: malloc (%d) failed",
-		 hash_len - ISAKMP_GEN_SZ);
+      log_error ("responder_recv_HASH: malloc (%lu) failed",
+		 (unsigned long)hash_len - ISAKMP_GEN_SZ);
       goto cleanup;
     }
 
@@ -1895,7 +1935,7 @@ responder_recv_HASH (struct message *msg)
   if (!prf)
     goto cleanup;
   prf->Init (prf->prfctx);
-  prf->Update (prf->prfctx, "\0", 1);
+  prf->Update (prf->prfctx, (unsigned char *)"\0", 1);
   LOG_DBG_BUF ((LOG_NEGOTIATION, 90, "responder_recv_HASH: message_id",
 		exchange->message_id, ISAKMP_HDR_MESSAGE_ID_LEN));
   prf->Update (prf->prfctx, exchange->message_id, ISAKMP_HDR_MESSAGE_ID_LEN);

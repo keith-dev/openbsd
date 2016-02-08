@@ -33,7 +33,7 @@
 
 #include "config.h"
 
-RCSID("$KTH: kstring2key.c,v 1.16 1999/12/02 16:58:28 joda Exp $");
+RCSID("$KTH: kstring2key.c,v 1.18 2001/08/26 01:40:37 assar Exp $");
 
 #include <stdio.h>
 #include <string.h>
@@ -42,7 +42,11 @@ RCSID("$KTH: kstring2key.c,v 1.16 1999/12/02 16:58:28 joda Exp $");
 
 #include <roken.h>
 
+#ifdef HAVE_OPENSSL
+#include <openssl/des.h>
+#else
 #include <des.h>
+#endif
 #include <krb.h>
 
 #define VERIFY 0
@@ -80,8 +84,6 @@ main(int argc, char **argv)
     des_cblock key;
     char buf[1024];
     char *cellname = 0, *salt = 0;
-
-    set_progname (argv[0]);
 
     if (argc >= 3 && argv[1][0] == '-' && argv[1][1] == 'c')
 	{

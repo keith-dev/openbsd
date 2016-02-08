@@ -1,4 +1,4 @@
-/*	$OpenBSD: if.c,v 1.10 2001/10/26 13:29:26 ho Exp $	*/
+/*	$OpenBSD: if.c,v 1.12 2002/08/23 17:24:19 ho Exp $	*/
 /*	$EOM: if.c,v 1.12 1999/10/01 13:45:20 niklas Exp $	*/
 
 /*
@@ -95,7 +95,7 @@ siocgifconf (struct ifconf *ifcp)
       ifcp->ifc_buf = buf = new_buf;
       if (ioctl (s, SIOCGIFCONF, ifcp) == -1)
 	{
-	  log_error ("siocgifconf: ioctl (%s, SIOCGIFCONF, ...) failed", s);
+	  log_error ("siocgifconf: ioctl (%d, SIOCGIFCONF, ...) failed", s);
 	  goto err;
 	}
 
@@ -109,7 +109,7 @@ siocgifconf (struct ifconf *ifcp)
     }
   close (s);
   return 0;
-  
+
 err:
   if (buf)
     free (buf);

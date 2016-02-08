@@ -1,4 +1,4 @@
-.\" $OpenBSD: ams.4,v 1.2 2001/09/02 19:36:55 miod Exp $
+.\" $OpenBSD: ams.4,v 1.4 2002/10/01 20:59:48 miod Exp $
 .\"
 .\" Copyright (c) 2001 Peter Philipp
 .\" All rights reserved.
@@ -28,12 +28,12 @@
 .Dd July 30, 2001
 .Dt AMS 4 macppc
 .Os 
-
 .Sh NAME
 .Nm ams
 .Nd Apple Mouse Support
 .Sh SYNOPSIS
 .Cd "ams* at adb?"
+.Cd "wsmouse at ams? mux 0"
 .Sh DESCRIPTION
 The 
 .Nm 
@@ -58,7 +58,10 @@ Logitech non-EMP Mouseman
 TrackMan trackball
 .El
 .Sh SEE ALSO
-.Xr adb 4
+.Xr adb 4 ,
+.Xr intro 4 ,
+.Xr ums 4 ,
+.Xr wsmouse 4
 .Sh AUTHORS
 The 
 .Nm

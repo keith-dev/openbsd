@@ -1,4 +1,4 @@
-#	$OpenBSD: install.md,v 1.5 2002/03/31 17:30:31 deraadt Exp $
+#	$OpenBSD: install.md,v 1.14 2002/05/20 16:53:57 krw Exp $
 #
 #
 # Copyright (c) 1996 The NetBSD Foundation, Inc.
@@ -41,37 +41,11 @@
 
 # Machine-dependent install sets
 MDSETS=kernel
+MDTERM=vt100
+MDFSTYPE=msdos
 ARCH=ARCH
 
 md_set_term() {
-	test -n "$TERM" && return
-	echo -n "Specify terminal type [vt220]: "
-	getresp vt220
-	TERM=$resp
-	export TERM
-}
-
-md_makerootwritable() {
-	:
-}
-
-md_get_diskdevs() {
-	# return available disk devices
-	bsort `cat /kern/msgbuf | egrep -a "^[sw]d[0-9]+ " | cutword 1`
-}
-
-md_get_cddevs() {
-	# return available CDROM devices
-	bsort `cat /kern/msgbuf | egrep -a "^cd[0-9]+ " | cutword 1`
-}
-
-md_get_partition_range() {
-	# return range of valid partition letters
-	echo [a-p]
-}
-
-md_questions() {
-	:
 }
 
 md_installboot() {
@@ -91,14 +65,6 @@ md_installboot() {
 	fi
 }
 
-md_native_fstype() {
-	echo "msdos"
-}
-
-md_native_fsopts() {
-	echo "ro"
-}
-
 md_init_mbr() {
 	# $1 is the disk to init
 	echo
@@ -113,8 +79,7 @@ md_init_mbr() {
 	echo "consult your PowerPC OpenFirmware manual -and- the"
 	echo "PowerPC OpenBSD Installation Guide for doing setup this way."
 	echo
-	echo -n "Do you want to init the MBR and the MSDOS partition? [y] "
-	getresp "y"
+	ask "Do you want to init the MBR and the MSDOS partition?" y
 	case "$resp" in
 	n*|N*)	exit 0;;
 	*)	echo
@@ -160,8 +125,7 @@ md_checkfordisklabel() {
 	echo "any HFS partitions on the disk, including the partition table."
 	echo "Choose the MBR option carefully, knowing this fact."
 
-	echo -n "Do you want to choose (H)FS labeling or (M)BR labeling [H] "
-	getresp "h"
+	ask "Do you want to choose (H)FS labeling or (M)BR labeling?" H
 	case "$resp" in
 	m*|M*)	export disklabeltype=MBR
 		md_checkforMBRdisklabel $1
@@ -177,15 +141,13 @@ md_checkfordisklabel() {
 md_checkforMBRdisklabel() {
 
 	echo "You have chosen to put a MBR disklabel on the disk."
-	echo -n "Is this correct? [n] "
-	getresp "n"
+	ask "Is this correct?" n
 	case "$resp" in
 	n*|N*)	echo "aborting install"
 		exit 0;;
 	esac
 
-	echo -n "Have you initialized an MSDOS partition using OpenFirmware? [n] "
-	getresp "n"
+	ask "Have you initialized an MSDOS partition using OpenFirmware?" n
 	case "$resp" in
 	n*|N*)	md_init_mbr $1;;
 	*)	echo
@@ -197,8 +159,7 @@ md_checkforMBRdisklabel() {
 		echo "Also note that the boot partition must be included as partition"
 		echo "'i' in the OpenBSD disklabel."
 		echo
-		echo -n "Do you want to keep the current MSDOS partition setup? [y]"
-		getresp "y"
+		ask "Do you want to keep the current MSDOS partition setup?" y
 		case "$resp" in
 		n*|N*)	md_init_mbr $1;;
 		esac
@@ -237,19 +198,17 @@ md_prep_fdisk()
 	echo "WARNING: Wrong information in the BIOS partition table might"
 	echo "render the disk unusable."
 
-	echo -n "Press [Enter] to continue "
-	getresp ""
+	ask "Press [Enter] to continue"
 
 	echo
 	echo "Current partition information is:"
 	fdisk ${_disk}
-	echo -n "Press [Enter] to continue "
-	getresp ""
+	ask "Press [Enter] to continue"
 
 	_done=0
 	while [ $_done = 0 ]; do
 		echo
-		cat << \__md_prep_fdisk_1
+		cat << __EOT
 
 An OpenBSD partition should have type (i.d.) of 166 (A6), and should be the
 only partition marked as active. Also make sure that the size of the partition
@@ -260,10 +219,9 @@ The fdisk utility will be started update mode (interactive.)
 You will be able to add / modify this information as needed.
 If you make a mistake, simply exit fdisk without storing the new
 information, and you will be allowed to start over.
-__md_prep_fdisk_1
+__EOT
 		echo
-		echo -n "Press [Enter] to continue "
-		getresp ""
+		ask "Press [Enter] to continue"
 
 		fdisk -e ${_disk}
 
@@ -274,8 +232,7 @@ __md_prep_fdisk_1
 		echo
 		echo "(You will be permitted to edit this information again.)"
 		echo "-------------------------------------------------------"
-		echo -n "Is the above information correct? [n] "
-		getresp "n"
+		ask "Is the above information correct?" n
 
 		case "$resp" in
 		n*|N*)	;;
@@ -289,8 +246,7 @@ __md_prep_fdisk_1
 	echo "At least the MSDOS partition used for booting must be accessible"
 	echo "by OpenBSD as partition 'i'. You may need this information to "
 	echo "fill in the OpenBSD disk label later."
-	echo -n "Press [Enter] to continue "
-	getresp ""
+	ask "Press [Enter] to continue"
 }
 
 md_prep_disklabel()
@@ -300,30 +256,29 @@ md_prep_disklabel()
 	_disk=$1
 	md_checkfordisklabel $_disk
 	case $? in
-	0)	echo -n "Do you wish to edit the disklabel on $_disk? [y] "
+	0)	ask "Do you wish to edit the disklabel on $_disk?" y
 		;;
 	1)	md_prep_fdisk ${_disk}
 		echo "WARNING: Disk $_disk has no label"
-		echo -n "Do you want to create one with the disklabel editor? [y] "
+		ask "Do you want to create one with the disklabel editor?" y
 		;;
 	2)	echo "WARNING: Label on disk $_disk is corrupted"
-		echo -n "Do you want to try and repair the damage using the disklabel editor? [y] "
+		ask "Do you want to try and repair the damage using the disklabel editor?" y
 		;;
 	esac
 
-	getresp "y"
 	case "$resp" in
 	y*|Y*)	;;
 	*)	return ;;
 	esac
 
 	# display example
-	cat << \__md_prep_disklabel_1
+	cat << __EOT
 
 Disk partition sizes and offsets are in sector (most likely 512 bytes) units.
 You may set these size/offset pairs on cylinder boundaries
      (the number of sector per cylinder is given in )
-     (the `sectors/cylinder' entry, which is not shown here)
+     (the 'sectors/cylinder' entry, which is not shown here)
 Also, you *must* make sure that the 'i' partition points at the MSDOS
 partition that will be used for booting. The 'c' partition shall start
 at offset 0 and include the entire disk. This is most likely correct when
@@ -343,9 +298,9 @@ Do not change any parameters except the partition layout and the label name.
   h:  2008403  4256797    4.2BSD     1024  8192    16   # (Cyl. 4626*- 6809*)
   i:    10208       32     MSDOS                        # (Cyl.    0*- 11*)
 [End of example]
-__md_prep_disklabel_1
-	echo -n "Press [Enter] to continue "
-	getresp ""
+__EOT
+	ask "Press [Enter] to continue"
+
 	if [[ $disklabeltype = "HFS" ]]
 	then
 		disklabel -c -f /tmp/fstab.${_disk} -E ${_disk}
@@ -361,65 +316,10 @@ __md_prep_disklabel_1
 	fi
 }
 
-md_welcome_banner() {
-{
-	if [ "$MODE" = install ]; then
-		cat << __EOT
-Welcome to the OpenBSD/powerpc ${VERSION_MAJOR}.${VERSION_MINOR} installation program.
-
-This program is designed to help you put OpenBSD on your disk in a simple and
-rational way.
-__EOT
-
-	else
-		cat << __EOT
-Welcome to the OpenBSD/powerpc ${VERSION_MAJOR}.${VERSION_MINOR} upgrade program.
-
-This program is designed to help you upgrade your OpenBSD system in a simple
-and rational way.  As a reminder, installing the 'etc' binary set is NOT
-recommended.  Once the rest of your system has been upgraded, you should
-manually merge any changes to files in the 'etc' set into those files which
-already exist on your system.
-__EOT
-	fi
-
-cat << __EOT
-
-As with anything which modifies your disk's contents, this program can cause
-SIGNIFICANT data loss, and you are advised to make sure your data is backed
-up before beginning the installation process.
-
-Default answers are displayed in brackets after the questions.  You can hit
-Control-C at any time to quit, but if you do so at a prompt, you may have
-to hit return.  Also, quitting in the middle of installation may leave your
-system in an inconsistent state.  If you hit Control-C and restart the
-install, the install program will remember many of your old answers.
-
-__EOT
-} | more
-}
-
-md_not_going_to_install() {
-	cat << __EOT
-
-OK, then.  Enter 'reboot' at the prompt to reset the machine.  Once the machine
-has rebooted, use Open Firmware to load the new boot code.
-
-__EOT
-}
-
 md_congrats() {
-	local what;
-	if [ "$MODE" = install ]; then
-		what=installed
-	else
-		what=upgraded
-	fi
 	cat << __EOT
 
-CONGRATULATIONS!  You have successfully $what OpenBSD!  To boot the
-installed system, enter reboot at the command prompt.  Once the machine
-has rebooted, use Open Firmware to boot into OpenBSD.
-
+Once the machine has rebooted use Open Firmware to boot into OpenBSD,
+as described in the install document.
 __EOT
 }

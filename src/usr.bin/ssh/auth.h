@@ -1,4 +1,4 @@
-/*	$OpenBSD: auth.h,v 1.35 2002/03/19 10:35:39 markus Exp $	*/
+/*	$OpenBSD: auth.h,v 1.41 2002/09/26 11:38:43 markus Exp $	*/
 
 /*
  * Copyright (c) 2000 Markus Friedl.  All rights reserved.
@@ -43,6 +43,7 @@
 #endif
 
 typedef struct Authctxt Authctxt;
+typedef struct Authmethod Authmethod;
 typedef struct KbdintDevice KbdintDevice;
 
 struct Authctxt {
@@ -69,6 +70,12 @@ struct Authctxt {
 	krb5_principal	 krb5_user;
 	char		*krb5_ticket_file;
 #endif
+};
+
+struct Authmethod {
+	char	*name;
+	int	(*userauth)(Authctxt *authctxt);
+	int	*enabled;
 };
 
 /*
@@ -106,7 +113,7 @@ int	 user_key_allowed(struct passwd *, Key *);
 
 #ifdef KRB4
 #include <krb.h>
-int     auth_krb4(Authctxt *, KTEXT, char **);
+int     auth_krb4(Authctxt *, KTEXT, char **, KTEXT);
 int	auth_krb4_password(Authctxt *, const char *);
 void    krb4_cleanup_proc(void *);
 
@@ -119,7 +126,7 @@ int     auth_afs_token(Authctxt *, const char *);
 #endif /* KRB4 */
 
 #ifdef KRB5
-int	auth_krb5(Authctxt *authctxt, krb5_data *auth, char **client);
+int	auth_krb5(Authctxt *authctxt, krb5_data *auth, char **client, krb5_data *);
 int	auth_krb5_tgt(Authctxt *authctxt, krb5_data *tgt);
 int	auth_krb5_password(Authctxt *authctxt, const char *password);
 void	krb5_cleanup_proc(void *authctxt);
@@ -132,6 +139,8 @@ Authctxt *authctxt_new(void);
 void	auth_log(Authctxt *, int, char *, char *);
 void	userauth_finish(Authctxt *, int, char *);
 int	auth_root_allowed(char *);
+
+char	*auth2_read_banner(void);
 
 void	privsep_challenge_enable(void);
 
@@ -166,6 +175,11 @@ Key	*get_hostkey_by_index(int);
 Key	*get_hostkey_by_type(int);
 int	 get_hostkey_index(Key *);
 int	 ssh1_session_key(BIGNUM *);
+
+/* debug messages during authentication */
+void	 auth_debug_add(const char *fmt,...) __attribute__((format(printf, 1, 2)));
+void	 auth_debug_send(void);
+void	 auth_debug_reset(void);
 
 #define AUTH_FAIL_MAX 6
 #define AUTH_FAIL_LOG (AUTH_FAIL_MAX/2)

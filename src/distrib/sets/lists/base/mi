@@ -39,6 +39,7 @@
 ./bin/sleep
 ./bin/stty
 ./bin/sync
+./bin/systrace
 ./bin/tar
 ./bin/test
 ./dev
@@ -55,13 +56,13 @@
 ./etc/kerberosIV
 ./etc/mail
 ./etc/mtree
-./etc/photuris
 ./etc/ppp
 ./etc/skel
 ./etc/sliphome
 ./etc/ssl
 ./etc/ssl/lib
 ./etc/ssl/private
+./etc/systrace
 ./etc/tcfs
 ./etc/termcap
 ./home
@@ -91,7 +92,6 @@
 ./sbin/init
 ./sbin/ipsecadm
 ./sbin/isakmpd
-./sbin/kbd
 ./sbin/lmccontrol
 ./sbin/mkfifo
 ./sbin/mknod
@@ -123,7 +123,6 @@
 ./sbin/nologin
 ./sbin/pfctl
 ./sbin/pflogd
-./sbin/photurisd
 ./sbin/ping
 ./sbin/ping6
 ./sbin/quotacheck
@@ -266,6 +265,7 @@
 ./usr/bin/indxbib
 ./usr/bin/info
 ./usr/bin/infocmp
+./usr/bin/infokey
 ./usr/bin/infotocap
 ./usr/bin/install
 ./usr/bin/install-info
@@ -277,7 +277,6 @@
 ./usr/bin/kdestroy
 ./usr/bin/kdump
 ./usr/bin/keynote
-./usr/bin/kf
 ./usr/bin/kinit
 ./usr/bin/klist
 ./usr/bin/ktrace
@@ -381,7 +380,6 @@
 ./usr/bin/reset
 ./usr/bin/rev
 ./usr/bin/rlog
-./usr/bin/rlogin
 ./usr/bin/rpcinfo
 ./usr/bin/rs
 ./usr/bin/rsh
@@ -457,6 +455,7 @@
 ./usr/bin/unprotoize
 ./usr/bin/unvis
 ./usr/bin/uptime
+./usr/bin/usbhidaction
 ./usr/bin/usbhidctl
 ./usr/bin/users
 ./usr/bin/uudecode
@@ -497,7 +496,6 @@
 ./usr/bin/zmore
 ./usr/bin/znew
 ./usr/games
-./usr/games/hide
 ./usr/include
 ./usr/lib
 ./usr/lib/apache
@@ -1113,7 +1111,6 @@
 ./usr/libdata/ssh/Ssh.bin
 ./usr/libexec
 ./usr/libexec/afsd
-./usr/libexec/atrun
 ./usr/libexec/auth
 ./usr/libexec/auth/login_activ
 ./usr/libexec/auth/login_chpass
@@ -1161,7 +1158,6 @@
 ./usr/libexec/kauthd
 ./usr/libexec/kdc
 ./usr/libexec/kerberos
-./usr/libexec/kfd
 ./usr/libexec/kpasswdd
 ./usr/libexec/kpropd
 ./usr/libexec/locate.bigram
@@ -1176,15 +1172,12 @@
 ./usr/libexec/makekey
 ./usr/libexec/makewhatis
 ./usr/libexec/ntalkd
-./usr/libexec/rexecd
-./usr/libexec/rlogind
 ./usr/libexec/rpc.rquotad
 ./usr/libexec/rpc.rstatd
 ./usr/libexec/rpc.rusersd
 ./usr/libexec/rpc.rwalld
 ./usr/libexec/rpc.sprayd
 ./usr/libexec/rshd
-./usr/libexec/safe_finger
 ./usr/libexec/sendmail
 ./usr/libexec/sendmail/sendmail
 ./usr/libexec/sftp-server
@@ -1193,6 +1186,7 @@
 ./usr/libexec/smtpd
 ./usr/libexec/smtpfwdd
 ./usr/libexec/spellprog
+./usr/libexec/ssh-keysign
 ./usr/libexec/tcpd
 ./usr/libexec/telnetd
 ./usr/libexec/tftpd
@@ -1231,7 +1225,6 @@
 ./usr/mdec
 ./usr/obj
 ./usr/sbin
-./usr/sbin/ab
 ./usr/sbin/ac
 ./usr/sbin/accton
 ./usr/sbin/activadm
@@ -1248,6 +1241,7 @@
 ./usr/sbin/bootpef
 ./usr/sbin/bootpgw
 ./usr/sbin/bootptest
+./usr/sbin/bos
 ./usr/sbin/certpatch
 ./usr/sbin/chat
 ./usr/sbin/chgrp
@@ -1277,7 +1271,6 @@
 ./usr/sbin/groupmod
 ./usr/sbin/host
 ./usr/sbin/httpd
-./usr/sbin/ifmcstat
 ./usr/sbin/inetd
 ./usr/sbin/iostat
 ./usr/sbin/kadmin
@@ -1298,10 +1291,8 @@
 ./usr/sbin/mailwrapper
 ./usr/sbin/makedbm
 ./usr/sbin/makemap
-./usr/sbin/mk-amd-map
 ./usr/sbin/mkalias
 ./usr/sbin/mkhybrid
-./usr/sbin/mkisofs
 ./usr/sbin/mknetid
 ./usr/sbin/mopa.out
 ./usr/sbin/mopchk
@@ -1386,7 +1377,6 @@
 ./usr/sbin/traceroute
 ./usr/sbin/traceroute6
 ./usr/sbin/trpt
-./usr/sbin/trsp
 ./usr/sbin/usbdevs
 ./usr/sbin/user
 ./usr/sbin/useradd
@@ -1440,6 +1430,7 @@
 ./usr/share/calendar/calendar.holiday
 ./usr/share/calendar/calendar.judaic
 ./usr/share/calendar/calendar.music
+./usr/share/calendar/calendar.openbsd
 ./usr/share/calendar/calendar.pagan
 ./usr/share/calendar/calendar.russian
 ./usr/share/calendar/calendar.usholiday
@@ -1711,7 +1702,6 @@
 ./usr/share/groff_font/devps/zapfdr.pfa
 ./usr/share/info
 ./usr/share/ipsec
-./usr/share/ipsec/attributes.conf
 ./usr/share/ipsec/isakmpd
 ./usr/share/ipsec/isakmpd/VPN-3way-template.conf
 ./usr/share/ipsec/isakmpd/VPN-east.conf
@@ -1722,10 +1712,7 @@
 ./usr/share/ipsec/isakmpd/singlehost-setup.sh
 ./usr/share/ipsec/isakmpd/singlehost-west.conf
 ./usr/share/ipsec/isakmpd/singlehost-west.gdb
-./usr/share/ipsec/photuris.conf
-./usr/share/ipsec/photuris.startup
 ./usr/share/ipsec/rc.vpn
-./usr/share/ipsec/secrets.conf
 ./usr/share/lkm
 ./usr/share/lkm/misc
 ./usr/share/lkm/misc/module
@@ -1822,7 +1809,6 @@
 ./usr/share/sendmail/cf/chez.cs.mc
 ./usr/share/sendmail/cf/clientproto.mc
 ./usr/share/sendmail/cf/corpse.mc
-./usr/share/sendmail/cf/courtesan-lists.mc
 ./usr/share/sendmail/cf/courtesan-nonet.mc
 ./usr/share/sendmail/cf/courtesan.mc
 ./usr/share/sendmail/cf/cs-hpux10.mc
@@ -1850,6 +1836,7 @@
 ./usr/share/sendmail/cf/mail.cs.mc
 ./usr/share/sendmail/cf/mail.eecs.mc
 ./usr/share/sendmail/cf/mailspool.cs.mc
+./usr/share/sendmail/cf/openbsd-bulk.mc
 ./usr/share/sendmail/cf/openbsd-lists.mc
 ./usr/share/sendmail/cf/openbsd-localhost.mc
 ./usr/share/sendmail/cf/openbsd-proto.mc
@@ -3754,8 +3741,8 @@
 ./var/account
 ./var/at
 ./var/at/jobs
-./var/at/spool
 ./var/audit
+./var/authpf
 ./var/backups
 ./var/crash
 ./var/cron
@@ -3815,6 +3802,7 @@
 ./var/www/icons
 ./var/www/icons/small
 ./var/www/logs
+./var/www/users
 ./var/yp
 ./var/yp/Makefile.main
 ./var/yp/Makefile.main.dist

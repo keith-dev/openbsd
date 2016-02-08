@@ -1,4 +1,4 @@
-/*	$OpenBSD: kdump.c,v 1.15 2002/03/12 10:40:33 art Exp $	*/
+/*	$OpenBSD: kdump.c,v 1.18 2002/07/06 19:14:20 nordin Exp $	*/
 
 /*-
  * Copyright (c) 1988, 1993
@@ -43,7 +43,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)kdump.c	8.4 (Berkeley) 4/28/95";
 #endif
-static char *rcsid = "$OpenBSD: kdump.c,v 1.15 2002/03/12 10:40:33 art Exp $";
+static char *rcsid = "$OpenBSD: kdump.c,v 1.18 2002/07/06 19:14:20 nordin Exp $";
 #endif /* not lint */
 
 #include <sys/param.h>
@@ -70,6 +70,7 @@ static char *rcsid = "$OpenBSD: kdump.c,v 1.15 2002/03/12 10:40:33 art Exp $";
 int timestamp, decimal, fancy = 1, tail, maxdata;
 char *tracefile = DEF_TRACEFILE;
 struct ktr_header ktr_header;
+pid_t pid = -1;
 
 #define eqs(s1, s2)	(strcmp((s1), (s2)) == 0)
 
@@ -93,7 +94,6 @@ struct ktr_header ktr_header;
 #define SYSVMSG
 #define SYSVSHM
 #define LFS
-#define NTP
 #include "../../sys/kern/syscalls.c"
 
 #include "../../sys/compat/bsdos/bsdos_syscalls.c"
@@ -113,7 +113,6 @@ struct ktr_header ktr_header;
 #undef SYSVMSG
 #undef SYSVSHM
 #undef LFS
-#undef NTP
 
 struct emulation {
 	char *name;		/* Emulation name */
@@ -158,17 +157,15 @@ static void setemul(const char *);
 static void usage(void);
 
 int
-main(argc, argv)
-	int argc;
-	char *argv[];
+main(int argc, char *argv[])
 {
-	int ch, ktrlen, size;
-	void *m;
+	int ch, ktrlen, size, silent;
 	int trpoints = ALL_POINTS;
+	void *m;
 
 	current = &emulations[0];	/* native */
 
-	while ((ch = getopt(argc, argv, "e:f:dlm:nRTt:")) != -1)
+	while ((ch = getopt(argc, argv, "e:f:dlm:nRp:Tt:")) != -1)
 		switch (ch) {
 		case 'e':
 			setemul(optarg);
@@ -187,6 +184,9 @@ main(argc, argv)
 			break;
 		case 'n':
 			fancy = 0;
+			break;
+		case 'p':
+			pid = atoi(optarg);
 			break;
 		case 'R':
 			timestamp = 2;	/* relative timestamp */
@@ -211,7 +211,10 @@ main(argc, argv)
 	if (!freopen(tracefile, "r", stdin))
 		err(1, "%s", tracefile);
 	while (fread_tail(&ktr_header, sizeof(struct ktr_header), 1)) {
-		if (trpoints & (1<<ktr_header.ktr_type))
+		silent = 0;
+		if (pid != -1 && pid != ktr_header.ktr_pid)
+			silent = 1;
+		if (silent == 0 && trpoints & (1<<ktr_header.ktr_type))
 			dumpheader(&ktr_header);
 		if ((ktrlen = ktr_header.ktr_len) < 0)
 			errx(1, "bogus length 0x%x", ktrlen);
@@ -223,6 +226,8 @@ main(argc, argv)
 		}
 		if (ktrlen && fread_tail(m, ktrlen, 1) == 0)
 			errx(1, "data too short");
+		if (silent)
+			continue;
 		if ((trpoints & (1<<ktr_header.ktr_type)) == 0)
 			continue;
 		switch (ktr_header.ktr_type) {
@@ -255,9 +260,7 @@ main(argc, argv)
 }
 
 static int
-fread_tail(buf, size, num)
-	void *buf;
-	int num, size;
+fread_tail(void *buf, int size, int num)
 {
 	int i;
 
@@ -269,11 +272,10 @@ fread_tail(buf, size, num)
 }
 
 static void
-dumpheader(kth)
-	struct ktr_header *kth;
+dumpheader(struct ktr_header *kth)
 {
-	char unknown[64], *type;
 	static struct timeval prevtime;
+	char unknown[64], *type;
 	struct timeval temp;
 
 	switch (kth->ktr_type) {
@@ -299,11 +301,13 @@ dumpheader(kth)
 		type = "EMUL";
 		break;
 	default:
-		(void)sprintf(unknown, "UNKNOWN(%d)", kth->ktr_type);
+		(void)snprintf(unknown, sizeof unknown, "UNKNOWN(%d)",
+		    kth->ktr_type);
 		type = unknown;
 	}
 
-	(void)printf("%6d %-8.*s ", kth->ktr_pid, MAXCOMLEN, kth->ktr_comm);
+	(void)printf("%6ld %-8.*s ", (long)kth->ktr_pid, MAXCOMLEN,
+	    kth->ktr_comm);
 	if (timestamp) {
 		if (timestamp == 2) {
 			timersub(&kth->ktr_time, &prevtime, &temp);
@@ -316,8 +320,7 @@ dumpheader(kth)
 }
 
 static void
-ioctldecode(cmd)
-	u_long cmd;
+ioctldecode(u_long cmd)
 {
 	char dirbuf[4], *dir = dirbuf;
 
@@ -336,8 +339,7 @@ ioctldecode(cmd)
 }
 
 static void
-ktrsyscall(ktr)
-	struct ktr_syscall *ktr;
+ktrsyscall(struct ktr_syscall *ktr)
 {
 	int argsize = ktr->ktr_argsize;
 	register_t *ap;
@@ -352,6 +354,7 @@ ktrsyscall(ktr)
 		if (fancy) {
 			if (ktr->ktr_code == SYS_ioctl) {
 				const char *cp;
+
 				if (decimal)
 					(void)printf("(%ld", (long)*ap);
 				else
@@ -391,8 +394,7 @@ ktrsyscall(ktr)
 }
 
 static void
-ktrsysret(ktr)
-	struct ktr_sysret *ktr;
+ktrsysret(struct ktr_sysret *ktr)
 {
 	int ret = ktr->ktr_retval;
 	int error = ktr->ktr_error;
@@ -427,17 +429,13 @@ ktrsysret(ktr)
 }
 
 static void
-ktrnamei(cp, len) 
-	const char *cp;
-	int len;
+ktrnamei(const char *cp, int len)
 {
 	(void)printf("\"%.*s\"\n", len, cp);
 }
 
 static void
-ktremul(cp, len) 
-	char *cp;
-	int len;
+ktremul(char *cp, int len)
 {
 	char name[1024];
 
@@ -452,17 +450,13 @@ ktremul(cp, len)
 }
 
 static void
-ktrgenio(ktr, len)
-	struct ktr_genio *ktr;
-	int len;
+ktrgenio(struct ktr_genio *ktr, int len)
 {
-	int datalen = len - sizeof (struct ktr_genio);
 	char *dp = (char *)ktr + sizeof (struct ktr_genio);
-	char *cp;
-	int col = 0;
-	int width;
-	char visbuf[5];
+	int datalen = len - sizeof (struct ktr_genio);
 	static int screenwidth = 0;
+	int col = 0, width;
+	char visbuf[5], *cp;
 
 	if (screenwidth == 0) {
 		struct winsize ws;
@@ -482,6 +476,7 @@ ktrgenio(ktr, len)
 	for (; datalen > 0; datalen--, dp++) {
 		(void) vis(visbuf, *dp, VIS_CSTYLE, *(dp+1));
 		cp = visbuf;
+
 		/*
 		 * Keep track of printables and
 		 * space chars (like fold(1)).
@@ -490,7 +485,7 @@ ktrgenio(ktr, len)
 			(void)putchar('\t');
 			col = 8;
 		}
-		switch(*cp) {
+		switch (*cp) {
 		case '\n':
 			col = 0;
 			(void)putchar('\n');
@@ -516,8 +511,7 @@ ktrgenio(ktr, len)
 }
 
 static void
-ktrpsig(psig)
-	struct ktr_psig *psig;
+ktrpsig(struct ktr_psig *psig)
 {
 	(void)printf("SIG%s ", sys_signame[psig->signo]);
 	if (psig->action == SIG_DFL)
@@ -540,27 +534,26 @@ ktrpsig(psig)
 }
 
 static void
-ktrcsw(cs)
-	struct ktr_csw *cs;
+ktrcsw(struct ktr_csw *cs)
 {
 	(void)printf("%s %s\n", cs->out ? "stop" : "resume",
 	    cs->user ? "user" : "kernel");
 }
 
 static void
-usage()
+usage(void)
 {
 
 	(void)fprintf(stderr,
-"usage: kdump [-dnlRT] [-e emulation] [-f trfile] [-m maxdata] [-t [cnis]]\n");
+"usage: kdump [-dnlRT] [-e emulation] [-p pid] [-f trfile] [-m maxdata] [-t [cnis]]\n");
 	exit(1);
 }
 
 static void
-setemul(name)
-	const char *name;
+setemul(const char *name)
 {
 	int i;
+
 	for (i = 0; emulations[i].name != NULL; i++)
 		if (strcmp(emulations[i].name, name) == 0) {
 			current = &emulations[i];

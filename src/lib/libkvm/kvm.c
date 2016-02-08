@@ -1,4 +1,4 @@
-/*	$OpenBSD: kvm.c,v 1.30 2002/03/05 00:15:08 deraadt Exp $ */
+/*	$OpenBSD: kvm.c,v 1.33 2002/09/17 21:21:08 deraadt Exp $ */
 /*	$NetBSD: kvm.c,v 1.43 1996/05/05 04:31:59 gwr Exp $	*/
 
 /*-
@@ -42,7 +42,7 @@
 #if 0
 static char sccsid[] = "@(#)kvm.c	8.2 (Berkeley) 2/13/94";
 #else
-static char *rcsid = "$OpenBSD: kvm.c,v 1.30 2002/03/05 00:15:08 deraadt Exp $";
+static char *rcsid = "$OpenBSD: kvm.c,v 1.33 2002/09/17 21:21:08 deraadt Exp $";
 #endif
 #endif /* LIBC_SCCS and not lint */
 
@@ -78,6 +78,7 @@ static int	_kvm_get_header(kvm_t *);
 static kvm_t	*_kvm_open(kvm_t *, const char *, const char *, const char *,
 		    int, char *);
 static int	clear_gap(kvm_t *, FILE *, int);
+static int	kvm_setfd(kvm_t *);
 
 char *
 kvm_geterr(kd)
@@ -191,6 +192,7 @@ _kvm_open(kd, uf, mf, sf, flag, errout)
 	kd->vmfd = -1;
 	kd->swfd = -1;
 	kd->nlfd = -1;
+	kd->alive = 0;
 	kd->procbase = 0;
 	kd->nbpg = getpagesize();
 	kd->swapspc = 0;
@@ -203,6 +205,11 @@ _kvm_open(kd, uf, mf, sf, flag, errout)
 	kd->cpu_dsize = 0;
 	kd->cpu_data = 0;
 	kd->dump_off = 0;
+
+	if (flag & KVM_NO_FILES) {
+		kd->alive = 1;
+		return (kd);
+	}	
 
 	if (uf && strlen(uf) >= MAXPATHLEN) {
 		_kvm_err(kd, kd->program, "exec file name too long");
@@ -241,6 +248,7 @@ _kvm_open(kd, uf, mf, sf, flag, errout)
 			_kvm_syserr(kd, kd->program, "%s", _PATH_KMEM);
 			goto failed;
 		}
+		kd->alive = 1;
 		if ((kd->swfd = open(sf, flag, 0)) < 0) {
 			_kvm_syserr(kd, kd->program, "%s", sf);
 			goto failed;
@@ -287,7 +295,10 @@ _kvm_open(kd, uf, mf, sf, flag, errout)
 				goto failed;
 		}
 	}
-	return (kd);
+	if (kvm_setfd(kd) == 0)
+		return (kd);
+	else
+		_kvm_syserr(kd, kd->program, "can't set close on exec flag");
 failed:
 	/*
 	 * Copy out the error if doing sane error semantics.
@@ -457,7 +468,8 @@ off_t	dump_off;
 	if (kd->cpu_data == NULL)
 		goto fail;
 
-	sz = _kvm_pread(kd, kd->pmfd, kd->cpu_data, cpu_hdr.c_size, (off_t)dump_off+hdr_size);
+	sz = _kvm_pread(kd, kd->pmfd, kd->cpu_data, cpu_hdr.c_size,
+	    (off_t)dump_off+hdr_size);
 	if (sz != cpu_hdr.c_size) {
 		_kvm_err(kd, 0, "invalid size in cpu_hdr");
 		goto fail;
@@ -641,6 +653,7 @@ kvm_close(kd)
 		error |= close(kd->pmfd);
 	if (kd->vmfd >= 0)
 		error |= close(kd->vmfd);
+	kd->alive = 0;
 	if (kd->nlfd >= 0)
 		error |= close(kd->nlfd);
 	if (kd->swfd >= 0)
@@ -834,7 +847,8 @@ kvm_t	*kd;
 		return (-1);
 
 	x = 0;
-	if (_kvm_pwrite(kd, kd->pmfd, &x, sizeof(x), (off_t)_kvm_pa2off(kd, pa)) != sizeof(x)) {
+	if (_kvm_pwrite(kd, kd->pmfd, &x, sizeof(x),
+	    (off_t)_kvm_pa2off(kd, pa)) != sizeof(x)) {
 		_kvm_err(kd, 0, "cannot invalidate dump");
 		return (-1);
 	}
@@ -878,7 +892,8 @@ kvm_read(kd, kva, buf, len)
 				return (-1);
 			if (cc > len)
 				cc = len;
-			cc = _kvm_pread(kd, kd->pmfd, cp, cc, (off_t)_kvm_pa2off(kd, pa));
+			cc = _kvm_pread(kd, kd->pmfd, cp, cc,
+			    (off_t)_kvm_pa2off(kd, pa));
 			if (cc < 0) {
 				_kvm_syserr(kd, 0, _PATH_MEM);
 				break;
@@ -926,4 +941,20 @@ kvm_write(kd, kva, buf, len)
 		return (-1);
 	}
 	/* NOTREACHED */
+}
+
+static int
+kvm_setfd(kd)
+	kvm_t *kd;
+{
+	if (kd->pmfd >= 0 && fcntl(kd->pmfd, F_SETFD, FD_CLOEXEC) < 0)
+		return (-1);
+	if (kd->vmfd >= 0 && fcntl(kd->vmfd, F_SETFD, FD_CLOEXEC) < 0)
+		return (-1);
+	if (kd->nlfd >= 0 && fcntl(kd->nlfd, F_SETFD, FD_CLOEXEC) < 0)
+		return (-1);
+	if (kd->swfd >= 0 && fcntl(kd->swfd, F_SETFD, FD_CLOEXEC) < 0)
+		return (-1);
+
+	return (0);
 }

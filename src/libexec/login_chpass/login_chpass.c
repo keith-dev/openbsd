@@ -1,4 +1,4 @@
-/*	$OpenBSD: login_chpass.c,v 1.6 2002/02/16 21:27:30 millert Exp $	*/
+/*	$OpenBSD: login_chpass.c,v 1.10 2002/09/06 18:45:06 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 1995,1996 Berkeley Software Design, Inc. All rights reserved.
@@ -92,14 +92,11 @@ void	krb_chpass(char *, char *, char **);
 void	yp_chpass(char *);
 
 int
-main(argc, argv)
-	int argc;
-	char *argv[];
+main(int argc, char *argv[])
 {
-    	struct rlimit rl;
-    	char *username;
-    	char *instance;
-    	int c;
+	char *username, *instance;
+	struct rlimit rl;
+	int c;
 
 	rl.rlim_cur = 0;
 	rl.rlim_max = 0;
@@ -109,8 +106,8 @@ main(argc, argv)
 
 	openlog("login", LOG_ODELAY, LOG_AUTH);
 
-    	while ((c = getopt(argc, argv, "s:v:")) != -1)
-		switch(c) {
+	while ((c = getopt(argc, argv, "s:v:")) != -1)
+		switch (c) {
 		case 'v':
 			break;
 		case 's':	/* service */
@@ -124,7 +121,7 @@ main(argc, argv)
 			exit(1);
 		}
 
-	switch(argc - optind) {
+	switch (argc - optind) {
 	case 2:
 		/* class is not used */
 	case 1:
@@ -141,7 +138,7 @@ main(argc, argv)
 		*instance++ = '\0';
 	else
 		instance = "";
-	
+
 #ifdef KERBEROS
 	if (krb_get_lrealm(realm, 0) == KSUCCESS)
 		krb_chpass(username, instance, argv);
@@ -156,8 +153,7 @@ main(argc, argv)
 }
 
 void
-local_chpass(argv)
-	char *argv[];
+local_chpass(char *argv[])
 {
 
 	/* login_lchpass doesn't check instance so don't bother restoring it */
@@ -169,8 +165,7 @@ local_chpass(argv)
 
 #ifdef YP
 void
-yp_chpass(username)
-	char *username;
+yp_chpass(char *username)
 {
 	char *master;
 	int r, rpcport, status;
@@ -236,7 +231,7 @@ yp_chpass(username)
 
 	/* tell rpc.yppasswdd */
 	yppasswd.newpw.pw_name	= pw->pw_name;
-	yppasswd.newpw.pw_uid 	= pw->pw_uid;
+	yppasswd.newpw.pw_uid	= pw->pw_uid;
 	yppasswd.newpw.pw_gid	= pw->pw_gid;
 	yppasswd.newpw.pw_gecos = pw->pw_gecos;
 	yppasswd.newpw.pw_dir	= pw->pw_dir;
@@ -268,8 +263,8 @@ yp_chpass(username)
 	exit(0);
 }
 
-void kbintr(signo)
-	int signo;
+void
+kbintr(int signo)
 {
 	char msg[] = "YP passwd database unchanged.\n";
 	struct iovec iv[3];
@@ -289,10 +284,7 @@ void kbintr(signo)
 
 #ifdef KERBEROS
 void
-krb_chpass(username, instance, argv)
-	char *username;
-	char *instance;
-	char *argv[];
+krb_chpass(char *username, char *instance, char *argv[])
 {
 	int rval;
 	char pword[MAX_KPW_LEN];
@@ -309,8 +301,8 @@ krb_chpass(username, instance, argv)
 	krb_get_default_principal(principal.name,
 	    principal.instance, principal.realm);
 
-	snprintf(tktstring, sizeof(tktstring), "%s.chpass.%s.%d",
-	    TKT_ROOT, username, getpid());
+	snprintf(tktstring, sizeof(tktstring), "%s.chpass.%s.%ld",
+	    TKT_ROOT, username, (long)getpid());
 	krb_set_tkt_string(tktstring);
 
 	(void)setpriority(PRIO_PROCESS, 0, -4);
@@ -321,7 +313,7 @@ krb_chpass(username, instance, argv)
 	}
 
 	rval = kadm_init_link (PWSERV_NAME, KRB_MASTER, principal.realm);
-	if (rval != KADM_SUCCESS) 
+	if (rval != KADM_SUCCESS)
 		com_err(argv[0], rval, "while initializing");
 	else {
 		des_cblock newkey;
@@ -347,6 +339,6 @@ krb_chpass(username, instance, argv)
 
 	if (rval == 0)
 		(void)writev(BACK_CHANNEL, iov, 2);
-    	exit(rval);
+	exit(rval);
 }
 #endif

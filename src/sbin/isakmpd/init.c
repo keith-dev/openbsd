@@ -1,4 +1,4 @@
-/*	$OpenBSD: init.c,v 1.18 2001/12/10 03:34:51 ho Exp $	*/
+/*	$OpenBSD: init.c,v 1.20 2002/08/07 13:19:20 ho Exp $	*/
 /*	$EOM: init.c,v 1.25 2000/03/30 14:27:24 ho Exp $	*/
 
 /*
@@ -89,6 +89,7 @@ init (void)
 
   /* Depends on conf_init and policy_init having run */
   cert_init ();
+  crl_init ();
 
   sa_init ();
   transport_init ();
@@ -117,9 +118,6 @@ reinit (void)
   /* Reread config file.  */
   conf_reinit ();
 
-  /* Try again to link in libcrypto (good if we started without /usr).  */
-  libcrypto_init ();
-
   /* Set timezone */
   tzset ();
 
@@ -130,6 +128,7 @@ reinit (void)
 
   /* Reinitialize certificates */
   cert_init ();
+  crl_init ();
 
   /* Reinitialize our connection list.  */
   connection_reinit ();

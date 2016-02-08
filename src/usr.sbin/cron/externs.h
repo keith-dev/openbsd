@@ -1,8 +1,9 @@
-/*	$OpenBSD: externs.h,v 1.3 2001/02/18 19:48:34 millert Exp $	*/
+/*	$OpenBSD: externs.h,v 1.8 2002/07/17 22:10:56 millert Exp $	*/
 
 /* Copyright 1993,1994 by Paul Vixie
  * All rights reserved
  */
+
 /*
  * Copyright (c) 1997,2000 by Internet Software Consortium, Inc.
  *
@@ -24,7 +25,9 @@
 
 #include <sys/param.h>
 #include <sys/types.h>
+#if !defined(AIX) && !defined(UNICOS)
 #include <sys/time.h>
+#endif
 #include <sys/wait.h>
 #include <sys/fcntl.h>
 #include <sys/file.h>
@@ -32,10 +35,14 @@
 
 #include <bitstring.h>
 #include <ctype.h>
+#ifndef isascii
+#define isascii(c)      ((unsigned)(c)<=0177)
+#endif
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <grp.h>
+#include <limits.h>
 #include <locale.h>
 #include <pwd.h>
 #include <signal.h>
@@ -50,14 +57,6 @@
 #if defined(SYSLOG)
 # include <syslog.h>
 #endif
-
-#if (defined(BSD)) && (BSD >= 199103) || defined(__linux) || defined(AIX)
-# include <paths.h>
-#endif /*BSD*/
-
-#if !defined(_PATH_SENDMAIL)
-# define _PATH_SENDMAIL "/usr/lib/sendmail"
-#endif /*SENDMAIL*/
 
 #if defined(LOGIN_CAP)
 #include <login_cap.h>
@@ -84,17 +83,11 @@ extern char *tzname[2];
 #endif
 
 #if (BSD >= 199103)
-# define HAVE_SAVED_UIDS
+# define HAVE_SAVED_GIDS
 #endif
 
 #define MY_UID(pw) getuid()
 #define MY_GID(pw) getgid()
-
-#if !defined(AIX) && !defined(UNICOS)
-# define SYS_TIME_H 1
-#else
-# define SYS_TIME_H 0
-#endif
 
 /* getopt() isn't part of POSIX.  some systems define it in <stdlib.h> anyway.
  * of those that do, some complain that our definition is different and some
@@ -115,7 +108,7 @@ extern	int optind, opterr, optopt;
  */
 extern	int		flock(int, int);
 
-/* not all systems who provice flock() provide these definitions.
+/* not all systems who provide flock() provide these definitions.
  */
 #ifndef LOCK_SH
 # define LOCK_SH 1
@@ -128,4 +121,8 @@ extern	int		flock(int, int);
 #endif
 #ifndef LOCK_UN
 # define LOCK_UN 8
+#endif
+
+#ifndef WCOREDUMP
+# define WCOREDUMP(st)          (((st) & 0200) != 0)
 #endif

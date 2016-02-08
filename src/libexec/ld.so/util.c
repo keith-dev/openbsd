@@ -1,8 +1,8 @@
-/*	$OpenBSD: util.c,v 1.2 2002/04/09 19:59:47 drahn Exp $	*/
+/*	$OpenBSD: util.c,v 1.9 2002/07/24 04:11:10 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1998 Per Fogelstrom, Opsycon AB
- * 
+ *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
@@ -38,7 +38,7 @@
 #include "archdep.h"
 
 /*
- * Static vars usable after bootsrapping.
+ * Static vars usable after bootstrapping.
  */
 static void *_dl_malloc_base;
 static void *_dl_malloc_pool = 0;
@@ -48,8 +48,11 @@ char *
 _dl_strdup(const char *orig)
 {
 	char *newstr;
-	newstr = _dl_malloc(_dl_strlen(orig)+1);
-	_dl_strcpy(newstr, orig);
+	int len;
+
+	len = _dl_strlen(orig)+1;
+	newstr = _dl_malloc(len);
+	_dl_strlcpy(newstr, orig, len);
 	return (newstr);
 }
 
@@ -63,10 +66,9 @@ _dl_strdup(const char *orig)
  */
 
 void *
-_dl_malloc(int size)
+_dl_malloc(size_t size)
 {
-	long *p;
-	long *t, *n;
+	long *p, *t, *n;
 
 	size = (size + 8 + DL_MALLOC_ALIGN - 1) & ~(DL_MALLOC_ALIGN - 1);
 
@@ -82,11 +84,10 @@ _dl_malloc(int size)
 			return((void *)t);
 		}
 	}
-	if ((_dl_malloc_pool == 0) ||
-	    (_dl_malloc_pool + size > _dl_malloc_base + 4096)) {
+	if (_dl_malloc_pool == 0 ||
+	    _dl_malloc_pool + size > _dl_malloc_base + 4096) {
 		_dl_malloc_pool = (void *)_dl_mmap((void *)0, 4096,
-						PROT_READ|PROT_WRITE,
-						MAP_ANON|MAP_PRIVATE, -1, 0);
+		    PROT_READ|PROT_WRITE, MAP_ANON|MAP_PRIVATE, -1, 0);
 		if (_dl_malloc_pool == 0 || _dl_malloc_pool == MAP_FAILED ) {
 			_dl_printf("Dynamic loader failure: malloc.\n");
 			_dl_exit(7);

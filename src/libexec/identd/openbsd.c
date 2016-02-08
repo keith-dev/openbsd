@@ -1,4 +1,4 @@
-/* $OpenBSD: openbsd.c,v 1.15 2001/01/28 19:34:29 niklas Exp $ */
+/* $OpenBSD: openbsd.c,v 1.18 2002/07/16 10:32:37 deraadt Exp $ */
 
 /*
  * This program is in the public domain and may be used freely by anyone
@@ -31,21 +31,16 @@
 #include "identd.h"
 #include "error.h"
 
-
 /*
  * Return the user number for the connection owner
  */
 int
-k_getuid(faddr, fport, laddr, lport, uid)
-	struct in_addr *faddr;
-	int     fport;
-	struct in_addr *laddr;
-	int     lport;
-	uid_t	*uid;
+k_getuid(struct in_addr *faddr, int fport, struct in_addr *laddr,
+    int lport, uid_t *uid)
 {
-	struct tcp_ident_mapping tir;
-	struct sockaddr_in *fin, *lin;
 	int mib[] = { CTL_NET, PF_INET, IPPROTO_TCP, TCPCTL_IDENT };
+	struct sockaddr_in *fin, *lin;
+	struct tcp_ident_mapping tir;
 	int error = 0;
 	size_t i;
 
@@ -56,7 +51,7 @@ k_getuid(faddr, fport, laddr, lport, uid)
 	tir.laddr.ss_family = AF_INET;
 	fin = (struct sockaddr_in *) &tir.faddr;
 	lin = (struct sockaddr_in *) &tir.laddr;
-	
+
 	memcpy(&fin->sin_addr, faddr, sizeof (struct in_addr));
 	memcpy(&lin->sin_addr, laddr, sizeof (struct in_addr));
 	fin->sin_port = fport;
@@ -73,29 +68,24 @@ k_getuid(faddr, fport, laddr, lport, uid)
 	return (-1);
 }
 
-
 /*
  * Return the user number for the connection owner
  * New minty IPv6 version.
  */
 int
-k_getuid6(faddr, fport, laddr, lport, uid)
-	struct sockaddr_in6 *faddr;
-	int     fport;
-	struct sockaddr_in6 *laddr;
-	int     lport;
-	uid_t	*uid;
+k_getuid6(struct sockaddr_in6 *faddr, int fport, struct sockaddr_in6 *laddr,
+    int lport, uid_t *uid)
 {
-	struct tcp_ident_mapping tir;
-	struct sockaddr_in6 *fin, *lin;
 	int mib[] = { CTL_NET, PF_INET, IPPROTO_TCP, TCPCTL_IDENT };
+	struct sockaddr_in6 *fin, *lin;
+	struct tcp_ident_mapping tir;
 	int error = 0;
 	size_t i;
 
 	memset(&tir, 0, sizeof (tir));
 	fin = (struct sockaddr_in6 *) &tir.faddr;
 	lin = (struct sockaddr_in6 *) &tir.laddr;
-	
+
 	if (faddr->sin6_len > sizeof(tir.faddr))
 		return -1;
 	memcpy(fin, faddr, faddr->sin6_len);
@@ -115,6 +105,3 @@ k_getuid6(faddr, fport, laddr, lport, uid)
 
 	return (-1);
 }
-
-
-

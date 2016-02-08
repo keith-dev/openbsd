@@ -1,8 +1,8 @@
-/*	$OpenBSD: resolve.h,v 1.8 2002/03/17 00:22:04 art Exp $ */
+/*	$OpenBSD: resolve.h,v 1.17 2002/08/23 22:57:03 drahn Exp $ */
 
 /*
  * Copyright (c) 1998 Per Fogelstrom, Opsycon AB
- * 
+ *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
@@ -37,12 +37,12 @@
 
 #include <link.h>
 
-typedef struct load_list {
+struct load_list {
 	struct load_list *next;
-	char       *start;
-	size_t     size;
-	int        prot;
-} load_list_t;
+	char	*start;
+	size_t	size;
+	int	prot;
+};
 
 /*
  *  Structure describing a loaded object.
@@ -51,14 +51,14 @@ typedef struct load_list {
  */
 typedef struct elf_object {
 	Elf_Addr load_addr;		/* Real load address */
-	Elf_Addr load_offs;		/* Load offset from link address */
-	char	   *load_name;		/* Pointer to object name */
-	Elf_Dyn  *load_dyn;		/* Pointer to object dynamic data */
+	char	*load_name;		/* Pointer to object name */
+	Elf_Dyn *load_dyn;		/* Pointer to object dynamic data */
 	struct elf_object *next;
 	struct elf_object *prev;
 /* End struct link_map compatible */
+	Elf_Addr load_offs;		/* Load offset from link address */
 
-	load_list_t *load_list;
+	struct load_list *load_list;
 
 	u_int32_t  load_size;
 
@@ -122,19 +122,41 @@ typedef struct elf_object {
 extern void _dl_rt_resolve(void);
 
 extern elf_object_t *_dl_add_object(const char *objname, Elf_Dyn *dynp,
-				    const u_long *, const int objtype,
-				    const long laddr, const long loff);
-extern void         _dl_remove_object(elf_object_t *object);
+	    const u_long *, const int objtype,
+	    const long laddr, const long loff);
+extern void	_dl_remove_object(elf_object_t *object);
 
 extern elf_object_t *_dl_lookup_object(const char *objname);
 extern elf_object_t *_dl_load_shlib(const char *, elf_object_t *, int);
-extern void         _dl_unload_shlib(elf_object_t *object);
+extern void	_dl_unload_shlib(elf_object_t *object);
 
 extern int  _dl_md_reloc(elf_object_t *object, int rel, int relsz);
 extern void _dl_md_reloc_got(elf_object_t *object, int lazy);
 
 Elf_Addr _dl_find_symbol(const char *name, elf_object_t *startlook,
-			const Elf_Sym **ref, int myself, int warnnotfound);
+    const Elf_Sym **ref, int flags, int sym_size);
+/*
+ * defines for _dl_find_symbol() flag field, three bits of meaning
+ * myself 	- clear: search all objects,	set: search only this object
+ * warnnotfound - clear: no warning, 		set: warn if not found
+ * inplt	- clear: possible plt ref	set: real matching function.
+ *
+ * inplt - due to how ELF handles function addresses in shared libraries
+ * &func may actually refer to the plt entry in the main program
+ * rather than the actual function address in the .so file.
+ * This rather bizarre behavior is documented in the SVR4 ABI.
+ * when getting the function address to relocate a PLT entry
+ * the 'real' function address is necessary, not the possible PLT address.
+ */
+/* myself */
+#define SYM_SEARCH_ALL		0
+#define SYM_SEARCH_SELF		1
+/* warnnotfound */
+#define SYM_NOWARNNOTFOUND	0
+#define SYM_WARNNOTFOUND	2
+/* inplt */
+#define SYM_NOTPLT		0
+#define SYM_PLT			4
 
 void _dl_rtld(elf_object_t *object);
 void _dl_call_init(elf_object_t *object);

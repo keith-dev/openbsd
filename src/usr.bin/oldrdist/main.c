@@ -1,4 +1,4 @@
-/*	$OpenBSD: main.c,v 1.12 2002/02/19 19:39:38 millert Exp $	*/
+/*	$OpenBSD: main.c,v 1.15 2002/06/18 23:49:15 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1983, 1993
@@ -41,10 +41,11 @@ static char copyright[] =
 
 #ifndef lint
 /* from: static char sccsid[] = "@(#)main.c	8.1 (Berkeley) 6/9/93"; */
-static char *rcsid = "$OpenBSD: main.c,v 1.12 2002/02/19 19:39:38 millert Exp $";
+static char *rcsid = "$OpenBSD: main.c,v 1.15 2002/06/18 23:49:15 deraadt Exp $";
 #endif /* not lint */
 
 #include <stdarg.h>
+#include <libgen.h>
 #include "defs.h"
 
 #define NHOSTS 100
@@ -70,8 +71,8 @@ char	host[32];	/* host name */
 int	nerrs;		/* number of errors while sending/receiving */
 char	user[10];	/* user's name */
 char	homedir[128];	/* user's home directory */
-int	userid;		/* user's user ID */
-int	groupid;	/* user's group ID */
+uid_t	userid;		/* user's user ID */
+gid_t	groupid;	/* user's group ID */
 
 struct	passwd *pw;	/* pointer to static area used by getpwent */
 struct	group *gr;	/* pointer to static area used by getgrent */
@@ -99,7 +100,7 @@ main(argc, argv)
 	gethostname(host, sizeof(host));
 	strcpy(tempfile, _PATH_TMP);
 	strcat(tempfile, _RDIST_TMP);
-	tempname = xbasename(tempfile);
+	tempname = basename(tempfile);
 
 	while (--argc > 0) {
 		if ((arg = *++argv)[0] != '-')
@@ -306,31 +307,4 @@ prnames(nl)
 		nl = nl->n_next;
 	}
 	printf(")\n");
-}
-
-void
-warn(const char *fmt, ...)
-{
-	extern int yylineno;
-	va_list ap;
-
-	va_start(ap, fmt);
-	(void)fprintf(stderr, "rdist: line %d: Warning: ", yylineno);
-	(void)vfprintf(stderr, fmt, ap);
-	(void)fprintf(stderr, "\n");
-	va_end(ap);
-}
-
-/*
- * Private version of basename()
- */
-char *xbasename(path)
-	char *path;
-{
-	char *cp;
-
-	if (cp = strrchr(path, '/'))
-		return(cp+1);
-	else
-		return(path);
 }

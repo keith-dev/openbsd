@@ -1,4 +1,4 @@
-/*	$OpenBSD: res_init.c,v 1.25 2002/02/16 21:27:23 millert Exp $	*/
+/*	$OpenBSD: res_init.c,v 1.27 2002/07/25 21:13:45 deraadt Exp $	*/
 
 /*
  * ++Copyright++ 1985, 1989, 1993
@@ -64,7 +64,7 @@
 static char sccsid[] = "@(#)res_init.c	8.1 (Berkeley) 6/7/93";
 static char rcsid[] = "$From: res_init.c,v 8.7 1996/09/28 06:51:07 vixie Exp $";
 #else
-static char rcsid[] = "$OpenBSD: res_init.c,v 1.25 2002/02/16 21:27:23 millert Exp $";
+static char rcsid[] = "$OpenBSD: res_init.c,v 1.27 2002/07/25 21:13:45 deraadt Exp $";
 #endif
 #endif /* LIBC_SCCS and not lint */
 
@@ -211,7 +211,7 @@ res_init()
 	_res.nscount = 1;
 	_res.ndots = 1;
 	_res.pfcode = 0;
-	strncpy(_res.lookups, "f", sizeof _res.lookups);
+	strlcpy(_res.lookups, "f", sizeof _res.lookups);
 
 	/* Allow user to override the local domain definition */
 	if (issetugid() == 0 && (cp = getenv("LOCALDOMAIN")) != NULL) {
@@ -253,7 +253,7 @@ res_init()
 	 line[sizeof(name) - 1] == '\t'))
 
 	if ((fp = fopen(_PATH_RESCONF, "r")) != NULL) {
-	    strncpy(_res.lookups, "bf", sizeof _res.lookups);
+	    strlcpy(_res.lookups, "bf", sizeof _res.lookups);
 
 	    /* read the config file */
 	    buf[0] = '\0';
@@ -371,7 +371,7 @@ res_init()
 		    memset(&hints, 0, sizeof(hints));
 		    hints.ai_flags = AI_NUMERICHOST;
 		    hints.ai_socktype = SOCK_DGRAM;
-		    snprintf(pbuf, sizeof(pbuf), "%d", NAMESERVER_PORT);
+		    snprintf(pbuf, sizeof(pbuf), "%u", NAMESERVER_PORT);
 		    res = NULL;
 		    if (getaddrinfo(cp, pbuf, &hints, &res) == 0 &&
 			    res->ai_next == NULL) {
@@ -593,7 +593,7 @@ res_setoptions(options, source)
 					_res.ndots = RES_MAXNDOTS;
 #ifdef DEBUG
 				if (_res.options & RES_DEBUG)
-					printf(";;\tndots=%d\n", _res.ndots);
+					printf(";;\tndots=%u\n", _res.ndots);
 #endif
 			}
 		} else if (!strncmp(cp, "debug", sizeof("debug") - 1)) {

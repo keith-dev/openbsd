@@ -1,4 +1,4 @@
-/*	$OpenBSD: auth_subr.c,v 1.9 2002/03/13 21:39:41 millert Exp $	*/
+/*	$OpenBSD: auth_subr.c,v 1.12 2002/08/04 22:44:12 millert Exp $	*/
 
 /*-
  * Copyright (c) 1995,1996,1997 Berkeley Software Design, Inc.
@@ -814,10 +814,10 @@ auth_call(auth_session_t *as, char *path, ...)
 
 	switch (pid = fork()) {
 	case -1:
-		close(pfd[0]);
-		close(pfd[1]);
 		syslog(LOG_ERR, "%s: %m", path);
 		_warnx("internal resource failure");
+		close(pfd[0]);
+		close(pfd[1]);
 		goto fail;
 	case 0:
 #define	COMM_FD	3
@@ -960,7 +960,7 @@ _auth_spool(auth_session_t *as, int fd)
 		 * Go ahead and convert newlines into NULs to allow
 		 * easy scanning of the file.
 		 */
-		while(r-- > 0)
+		while (r-- > 0)
 			if (*b++ == '\n')
 				b[-1] = '\0';
 	}
@@ -981,7 +981,7 @@ _add_rmlist(auth_session_t *as, char *file)
 	}
 	rm->file = (char *)(rm + 1);
 	rm->next = as->rmlist;
-	strcpy(rm->file, file);
+	strlcpy(rm->file, file, i);
 	as->rmlist = rm;
 }
 

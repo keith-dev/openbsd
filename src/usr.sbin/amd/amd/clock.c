@@ -36,7 +36,7 @@
  * SUCH DAMAGE.
  *
  *	from: @(#)clock.c	8.1 (Berkeley) 6/6/93
- *	$Id: clock.c,v 1.2 2001/03/02 06:22:02 deraadt Exp $
+ *	$Id: clock.c,v 1.4 2002/08/05 07:24:26 pvalchev Exp $
  */
 
 /*
@@ -56,7 +56,7 @@ typedef struct callout callout;
 struct callout {
 	callout	*c_next;		/* List of callouts */
 	void	(*c_fn)();		/* Function to call */
-	voidp	c_closure;		/* Closure to pass to call */
+	void	*c_closure;		/* Closure to pass to call */
 	time_t	c_time;			/* Time of call */
 	int	c_id;			/* Unique identifier */
 };
@@ -78,8 +78,8 @@ time_t next_softclock;			/* Time of next call to softclock() */
 #define	CID_ALLOC()	(++callout_id)
 #define	CID_UNDEF	(0)
 
-static callout *alloc_callout(P_void);
-static callout *alloc_callout()
+static callout *
+alloc_callout(void)
 {
 	callout *cp = free_callouts;
 	if (cp) {
@@ -90,12 +90,11 @@ static callout *alloc_callout()
 	return ALLOC(callout);
 }
 
-static void free_callout P((callout *cp));
-static void free_callout(cp)
-callout *cp;
+static void
+free_callout(callout *cp)
 {
 	if (nfree_callouts > CALLOUT_FREE_SLOP) {
-		free((voidp) cp);
+		free((void *)cp);
 	} else {
 		cp->c_next = free_callouts;
 		free_callouts = cp;
@@ -108,11 +107,8 @@ callout *cp;
  *
  * (*fn)(closure) will be called at clocktime() + secs
  */
-int timeout P((unsigned int secs, void (*fn)(), voidp closure));
-int timeout(secs, fn, closure)
-unsigned int secs;
-void (*fn)();
-voidp closure;
+int
+timeout(unsigned int secs, void (*fn)(), void *closure)
 {
 	callout *cp, *cp2;
 	time_t t = clocktime() + secs;
@@ -151,9 +147,8 @@ voidp closure;
 /*
  * De-schedule a callout
  */
-void untimeout P((int id));
-void untimeout(id)
-int id;
+void
+untimeout(int id)
 {
 	callout *cp, *cp2;
 	for (cp = &callouts; (cp2 = cp->c_next); cp = cp2) {
@@ -168,10 +163,8 @@ int id;
 /*
  * Reschedule after clock changed
  */
-void reschedule_timeouts P((time_t now, time_t then));
-void reschedule_timeouts(now, then)
-time_t now;
-time_t then;
+void
+reschedule_timeouts(time_t now, time_t then)
 {
 	callout *cp;
 
@@ -190,8 +183,8 @@ time_t then;
 /*
  * Clock handler
  */
-int softclock(P_void);
-int softclock()
+int
+softclock(void)
 {
 	time_t now;
 	callout *cp;
@@ -217,7 +210,7 @@ int softclock()
 			 * and try to allocate a callout
 			 */
 			void (*fn)() = cp->c_fn;
-			voidp closure = cp->c_closure;
+			void *closure = cp->c_closure;
 
 			callouts.c_next = cp->c_next;
 			free_callout(cp);

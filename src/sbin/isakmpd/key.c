@@ -1,4 +1,4 @@
-/*	$OpenBSD: key.c,v 1.9 2002/03/06 13:55:12 ho Exp $	*/
+/*	$OpenBSD: key.c,v 1.12 2002/09/11 09:50:44 ho Exp $	*/
 /*
  * The author of this code is Angelos D. Keromytis (angelos@cis.upenn.edu)
  *
@@ -24,7 +24,6 @@
 
 #include "sysdep.h"
 
-#include "dyn.h"
 #include "key.h"
 #include "libcrypto.h"
 #include "log.h"
@@ -40,7 +39,7 @@ key_free (int type, int private, void *key)
       free (key);
       break;
     case ISAKMP_KEY_RSA:
-      LC (RSA_free, (key));
+      RSA_free (key);
       break;
     case ISAKMP_KEY_NONE:
     default:
@@ -59,31 +58,33 @@ key_serialize (int type, int private, void *key, u_int8_t **data, size_t *datale
     {
     case ISAKMP_KEY_PASSPHRASE:
       *datalen = strlen ((char *)key);
-      *data = strdup ((char *)key);
+      *data = (u_int8_t *)strdup ((char *)key);
       break;
     case ISAKMP_KEY_RSA:
       switch (private)
 	{
 	case ISAKMP_KEYTYPE_PUBLIC:
-	  *datalen = LC (i2d_RSAPublicKey, ((RSA *)key, NULL));
+	  *datalen = i2d_RSAPublicKey ((RSA *)key, NULL);
 	  *data = p = malloc (*datalen);
 	  if (!p)
 	    {
-	      log_error("key_serialize: malloc (%d) failed", *datalen);
+	      log_error("key_serialize: malloc (%lu) failed",
+		(unsigned long)*datalen);
 	      return;
 	    }
-	  *datalen = LC (i2d_RSAPublicKey, ((RSA *)key, &p));
+	  *datalen = i2d_RSAPublicKey ((RSA *)key, &p);
 	  break;
 
 	case ISAKMP_KEYTYPE_PRIVATE:
-	  *datalen = LC (i2d_RSAPrivateKey, ((RSA *)key, NULL));
+	  *datalen = i2d_RSAPrivateKey ((RSA *)key, NULL);
 	  *data = p = malloc (*datalen);
 	  if (!p)
 	    {
-	      log_error("key_serialize: malloc (%d) failed", *datalen);
+	      log_error("key_serialize: malloc (%lu) failed",
+		(unsigned long)*datalen);
 	      return;
 	    }
-	  *datalen = LC (i2d_RSAPrivateKey, ((RSA *)key, &p));
+	  *datalen = i2d_RSAPrivateKey ((RSA *)key, &p);
 	  break;
 	}
       break;
@@ -129,22 +130,20 @@ key_internalize (int type, int private, u_int8_t *data, int datalen)
   switch (type)
     {
     case ISAKMP_KEY_PASSPHRASE:
-      return strdup (data);
+      return strdup ((char *)data);
     case ISAKMP_KEY_RSA:
       switch (private)
 	{
 #if OPENSSL_VERSION_NUMBER >= 0x00907000L
 	case ISAKMP_KEYTYPE_PUBLIC:
-	  return LC (d2i_RSAPublicKey, (NULL, (const u_int8_t **)&data,
-					datalen));
+	  return d2i_RSAPublicKey (NULL, (const u_int8_t **)&data, datalen);
 	case ISAKMP_KEYTYPE_PRIVATE:
-	  return LC (d2i_RSAPrivateKey, (NULL, (const u_int8_t **)&data,
-					 datalen));
+	  return d2i_RSAPrivateKey (NULL, (const u_int8_t **)&data, datalen);
 #else
 	case ISAKMP_KEYTYPE_PUBLIC:
-	  return LC (d2i_RSAPublicKey, (NULL, &data, datalen));
+	  return d2i_RSAPublicKey (NULL, &data, datalen);
 	case ISAKMP_KEYTYPE_PRIVATE:
-	  return LC (d2i_RSAPrivateKey, (NULL, &data, datalen));
+	  return d2i_RSAPrivateKey (NULL, &data, datalen);
 #endif
 	default:
 	  log_error ("key_internalize: not public or private RSA key passed");
@@ -162,13 +161,13 @@ key_internalize (int type, int private, u_int8_t *data, int datalen)
 /* Convert from printable to serialized */
 void
 key_from_printable (int type, int private, char *key, u_int8_t **data,
-		    int *datalen)
+		    u_int32_t *datalen)
 {
   switch (type)
     {
     case ISAKMP_KEY_PASSPHRASE:
       *datalen = strlen (key);
-      *data = strdup (key);
+      *data = (u_int8_t *)strdup (key);
       break;
 
     case ISAKMP_KEY_RSA:

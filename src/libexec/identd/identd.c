@@ -1,4 +1,4 @@
-/*	$OpenBSD: identd.c,v 1.26 2002/03/12 19:45:09 millert Exp $	*/
+/*	$OpenBSD: identd.c,v 1.33 2002/09/13 01:31:39 djm Exp $	*/
 
 /*
  * This program is in the public domain and may be used freely by anyone
@@ -35,45 +35,42 @@
 #include "identd.h"
 #include "error.h"
 
-extern char *version;
 extern char *__progname;
 
-int     verbose_flag = 0;
-int     debug_flag = 0;
-int     syslog_flag = 0;
-int     multi_flag = 0;
-int     unknown_flag = 0;
-int     number_flag = 0;
-int     noident_flag = 0;
-int	userident_flag = 0;
-int	token_flag = 0;
+int     verbose_flag;
+int     debug_flag;
+int     syslog_flag;
+int     multi_flag;
+int     unknown_flag;
+int     number_flag;
+int     noident_flag;
+int	userident_flag;
+int	token_flag;
+int	no_user_token_flag;
 
-int     lport = 0;
-int     fport = 0;
+int     lport;
+int     fport;
 
 const  char *opsys_name = "UNIX";
 const  char *charset_sep = "";
 char   *charset_name = "";
-char   *indirect_host = NULL;
-char   *indirect_password = NULL;
 
 static pid_t child_pid;
 
 void
-usage()
+usage(void)
 {
 	syslog(LOG_ERR,
 	    "%s [-i | -w | -b] [-t seconds] [-u uid] [-g gid] [-p port] "
-	    "[-a address] [-c charset] [-noelVvmNUdh]", __progname);
+	    "[-a address] [-c charset] [-noelvmNUdh]", __progname);
 	exit(2);
 }
 
 /*
  * Return the name of the connecting host, or the IP number as a string.
  */
-char   *
-gethost4_addr(addr)
-	struct in_addr *addr;
+char *
+gethost4_addr(struct in_addr *addr)
 {
 	struct hostent *hp;
 
@@ -83,18 +80,16 @@ gethost4_addr(addr)
 	return inet_ntoa(*addr);
 }
 
-char   *
-gethost(ss)
-	struct sockaddr_storage *ss;
+char *
+gethost(struct sockaddr_storage *ss)
 {
 	if (ss->ss_family == AF_INET6)
 		return (gethost6((struct sockaddr_in6 *)ss));
 	return (gethost4((struct sockaddr_in *)ss));
 }
 
-char   *
-gethost4(sin)
-	struct sockaddr_in *sin;
+char *
+gethost4(struct sockaddr_in *sin)
 {
 	struct hostent *hp;
 
@@ -107,9 +102,8 @@ gethost4(sin)
 /*
  * Return the name of the connecting host, or the IP number as a string.
  */
-char   *
-gethost6(addr)
-	struct sockaddr_in6 *addr;
+char *
+gethost6(struct sockaddr_in6 *addr)
 {
 	static char hbuf[2][NI_MAXHOST];
 #ifdef NI_WITHSCOPEID
@@ -117,9 +111,9 @@ gethost6(addr)
 #else
 	const int niflags = NI_NUMERICHOST;
 #endif
-	static int bb=0; 
+	static int bb = 0;
 	int error;
-	
+
 	bb = (bb+1)%2;
 	error = getnameinfo((struct sockaddr *)addr, addr->sin6_len,
 	    hbuf[bb], sizeof(hbuf[bb]), NULL, 0, niflags);
@@ -136,7 +130,7 @@ volatile sig_atomic_t alarm_fired;
  * Exit cleanly after our time's up.
  */
 static void
-alarm_handler()
+alarm_handler(int notused)
 {
 	alarm_fired = 1;
 }
@@ -145,37 +139,35 @@ alarm_handler()
  * Main entry point into this daemon
  */
 int 
-main(argc, argv)
-	int     argc;
-	char   *argv[];
+main(int argc, char *argv[])
 {
-	int     len;
 	struct sockaddr_storage sa, sa2;
-	/* 	struct sockaddr_in sin;*/
-	struct sockaddr_in * sin;
-	struct sockaddr_in6 * sin6;
+	/* struct sockaddr_in sin;*/
+	struct sockaddr_in *sin;
+	struct sockaddr_in6 *sin6;
 	struct in_addr laddr, faddr;
 	struct in6_addr laddr6, faddr6;
 	struct passwd *pwd;
 	struct group *grp;
-	int     background_flag = 0;
-	int     timeout = 0;
+	int     background_flag = 0, timeout = 0, ch;
 	char   *portno = "auth";
 	char   *bind_address = NULL;
 	uid_t   set_uid = 0;
 	gid_t   set_gid = 0;
 	extern char *optarg;
-	extern int optind;
-	int ch;
+	socklen_t len;
 
 	openlog(__progname, LOG_PID, LOG_DAEMON);
 	/*
 	 * Parse the command line arguments
 	 */
-	while ((ch = getopt(argc, argv, "hbwit:p:a:u:g:c:r:loenVvdmNU")) != -1) {
+	while ((ch = getopt(argc, argv, "hHbwit:p:a:u:g:c:r:loenvdmNU")) != -1) {
 		switch (ch) {
 		case 'h':
 			token_flag = 1;
+			break;
+		case 'H':
+			no_user_token_flag = token_flag = 1;
 			break;
 		case 'b':	/* Start as standalone daemon */
 			background_flag = 1;
@@ -227,9 +219,6 @@ main(argc, argv)
 			charset_name = optarg;
 			charset_sep = " , ";
 			break;
-		case 'r':
-			indirect_host = optarg;
-			break;
 		case 'l':	/* Use the Syslog daemon for logging */
 			syslog_flag++;
 			break;
@@ -241,10 +230,6 @@ main(argc, argv)
 			break;
 		case 'n':
 			number_flag = 1;
-			break;
-		case 'V':	/* Give version of this daemon */
-			(void)fprintf(stderr, "[identd version %s]\r\n", version);
-			exit(0);
 			break;
 		case 'v':	/* Be verbose */
 			verbose_flag++;
@@ -355,7 +340,7 @@ main(argc, argv)
 				signal(SIGALRM, alarm_handler);
 				alarm(timeout);
 			}
-			
+
 			/*
 			 * Wait for a connection request to occur.
 			 * Ignore EINTR (Interrupted System Call).
@@ -438,8 +423,7 @@ main(argc, argv)
 	if (sa.ss_family == AF_INET6) {
 		sin6 = (struct sockaddr_in6 *)&sa;
 		faddr6 = sin6->sin6_addr;
-	}
-	else {
+	} else {
 		sin = (struct sockaddr_in *)&sa;
 		faddr = sin->sin_addr;
 	}
@@ -471,8 +455,7 @@ main(argc, argv)
 		 */
 		parse6(STDIN_FILENO, (struct sockaddr_in6 *)&sa2,
 		    (struct sockaddr_in6 *)&sa);
-	}
-	else {
+	} else {
 		sin = (struct sockaddr_in *)&sa2;
 		laddr = sin->sin_addr;
 		/*

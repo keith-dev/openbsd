@@ -1,29 +1,52 @@
-/*	$OpenBSD: main.c,v 1.34 2002/02/19 19:39:40 millert Exp $	*/
+/*	$OpenBSD: main.c,v 1.39 2002/07/29 22:02:38 millert Exp $	*/
 
 /*
  * main.c - Point-to-Point Protocol main module
  *
- * Copyright (c) 1989 Carnegie Mellon University.
- * All rights reserved.
+ * Copyright (c) 1984-2000 Carnegie Mellon University. All rights reserved.
  *
- * Redistribution and use in source and binary forms are permitted
- * provided that the above copyright notice and this paragraph are
- * duplicated in all such forms and that any documentation,
- * advertising materials, and other materials related to such
- * distribution and use acknowledge that the software was developed
- * by Carnegie Mellon University.  The name of the
- * University may not be used to endorse or promote products derived
- * from this software without specific prior written permission.
- * THIS SOFTWARE IS PROVIDED ``AS IS'' AND WITHOUT ANY EXPRESS OR
- * IMPLIED WARRANTIES, INCLUDING, WITHOUT LIMITATION, THE IMPLIED
- * WARRANTIES OF MERCHANTIBILITY AND FITNESS FOR A PARTICULAR PURPOSE.
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ *
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ *
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ *
+ * 3. The name "Carnegie Mellon University" must not be used to
+ *    endorse or promote products derived from this software without
+ *    prior written permission. For permission or any legal
+ *    details, please contact
+ *      Office of Technology Transfer
+ *      Carnegie Mellon University
+ *      5000 Forbes Avenue
+ *      Pittsburgh, PA  15213-3890
+ *      (412) 268-4387, fax: (412) 268-7395
+ *      tech-transfer@andrew.cmu.edu
+ *
+ * 4. Redistributions of any form whatsoever must retain the following
+ *    acknowledgment:
+ *    "This product includes software developed by Computing Services
+ *     at Carnegie Mellon University (http://www.cmu.edu/computing/)."
+ *
+ * CARNEGIE MELLON UNIVERSITY DISCLAIMS ALL WARRANTIES WITH REGARD TO
+ * THIS SOFTWARE, INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY
+ * AND FITNESS, IN NO EVENT SHALL CARNEGIE MELLON UNIVERSITY BE LIABLE
+ * FOR ANY SPECIAL, INDIRECT OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+ * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN
+ * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
+ * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
 #ifndef lint
 #if 0
 static char rcsid[] = "Id: main.c,v 1.49 1998/05/05 05:24:17 paulus Exp $";
 #else
-static char rcsid[] = "$OpenBSD: main.c,v 1.34 2002/02/19 19:39:40 millert Exp $";
+static char rcsid[] = "$OpenBSD: main.c,v 1.39 2002/07/29 22:02:38 millert Exp $";
 #endif
 #endif
 
@@ -331,7 +354,9 @@ main(argc, argv)
     SIGNAL(SIGILL, bad_signal);
     SIGNAL(SIGPIPE, bad_signal);
     SIGNAL(SIGQUIT, bad_signal);
+#if SIGSEGV_CHECK
     SIGNAL(SIGSEGV, bad_signal);
+#endif
 #ifdef SIGBUS
     SIGNAL(SIGBUS, bad_signal);
 #endif
@@ -638,7 +663,7 @@ create_pidfile()
 
     (void) sprintf(pidfilename, "%s%s.pid", _PATH_VARRUN, ifname);
     if ((pidfile = fopen(pidfilename, "w")) != NULL) {
-	fprintf(pidfile, "%d\n", pid);
+	fprintf(pidfile, "%ld\n", (long)pid);
 	(void) fclose(pidfile);
     } else {
 	syslog(LOG_ERR, "Failed to create pid file %s: %m", pidfilename);
@@ -799,7 +824,7 @@ close_tty()
     restore_tty(ttyfd);
 
     if (tty_mode != (mode_t) -1)
-	chmod(devnam, tty_mode);
+	fchmod(ttyfd, tty_mode);
 
     close(ttyfd);
     ttyfd = -1;
@@ -1078,7 +1103,7 @@ device_script(program, in, out)
     char *program;
     int in, out;
 {
-    int pid;
+    pid_t pid;
     int status;
     int errfd;
 
@@ -1155,7 +1180,7 @@ run_program(prog, args, must_exist)
     char **args;
     int must_exist;
 {
-    int pid;
+    pid_t pid;
 
     pid = fork();
     if (pid == -1) {
@@ -1205,7 +1230,7 @@ run_program(prog, args, must_exist)
 	    syslog(LOG_WARNING, "Can't execute %s: %m", prog);
 	_exit(1);
     }
-    MAINDEBUG((LOG_DEBUG, "Script %s started; pid = %d", prog, pid));
+    MAINDEBUG((LOG_DEBUG, "Script %s started; pid = %ld", prog, (long)pid));
     ++n_children;
     return 0;
 }
@@ -1218,7 +1243,8 @@ run_program(prog, args, must_exist)
 static void
 reap_kids()
 {
-    int pid, status;
+    int status;
+    pid_t pid;
 
     if (n_children == 0)
 	return;
@@ -1230,8 +1256,8 @@ reap_kids()
     if (pid > 0) {
 	--n_children;
 	if (WIFSIGNALED(status)) {
-	    syslog(LOG_WARNING, "Child process %d terminated with signal %d",
-		   pid, WTERMSIG(status));
+	    syslog(LOG_WARNING, "Child process %ld terminated with signal %d",
+		   (long)pid, WTERMSIG(status));
 	}
     }
 }

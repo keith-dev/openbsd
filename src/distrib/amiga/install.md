@@ -1,4 +1,4 @@
-#	$OpenBSD: install.md,v 1.12 2002/03/31 17:30:30 deraadt Exp $
+#	$OpenBSD: install.md,v 1.20 2002/05/22 01:48:38 krw Exp $
 #	$NetBSD: install.md,v 1.3.2.5 1996/08/26 15:45:28 gwr Exp $
 #
 #
@@ -42,47 +42,15 @@
 
 # Machine-dependent install sets
 MDSETS=kernel
+MDFSTYPE=ados
+MDCDDEVS='/^a\{0,1\}cd[0-9][0-9]* /s/ .*//p'
 ARCH=ARCH
 
 md_set_term() {
-	if [ ! -z "$TERM" ]; then
-		return
-	fi
-	echo -n "Specify terminal type [vt220]: "
-	getresp "vt220"
-	TERM="$resp"
-	export TERM
-}
-
-md_get_diskdevs() {
-	# return available disk devices
-	dmesg | sed -n -e '/^[sw]d[0-9] /{s/ .*//;p;}'
-}
-
-md_get_cddevs() {
-	# return available CDROM devices
-	dmesg | sed -n -e '/^a\{0,1\}cd[0-9] /{s/ .*//;p;}'
-}
-
-md_get_partition_range() {
-	# return range of valid partition letters
-	echo "[a-p]"
-}
-
-md_questions() {
-	:
 }
 
 md_installboot() {
 	# Nothing needed
-}
-
-md_native_fstype() {
-	echo "ados"
-}
-
-md_native_fsopts() {
-	echo "ro"
 }
 
 md_checkfordisklabel() {
@@ -120,70 +88,10 @@ md_prep_disklabel()
 	esac
 }
 
-md_welcome_banner() {
-{
-	if [ "$MODE" = "install" ]; then
-		echo ""
-		echo "Welcome to the OpenBSD/amiga ${VERSION_MAJOR}.${VERSION_MINOR} installation program."
-		cat << \__welcome_banner_1
-
-This program is designed to help you put OpenBSD on your disk in a simple and
-rational way.
-__welcome_banner_1
-
-	else
-		echo ""
-		echo "Welcome to the OpenBSD/amiga ${VERSION_MAJOR}.${VERSION_MINOR} upgrade program."
-		cat << \__welcome_banner_2
-
-This program is designed to help you upgrade your OpenBSD system in a
-simple and rational way.
-
-As a reminder, installing the `etc' binary set is NOT recommended.
-Once the rest of your system has been upgraded, you should manually
-merge any changes to files in the `etc' set into those files which
-already exist on your system.
-__welcome_banner_2
-	fi
-
-cat << \__welcome_banner_3
-
-As with anything which modifies your disk's contents, this
-program can cause SIGNIFICANT data loss, and you are advised
-to make sure your data is backed up before beginning the
-installation process.
-
-Default answers are displayed in brackets after the questions.
-You can hit Control-C at any time to quit, but if you do so at a
-prompt, you may have to hit return.  Also, quitting in the middle of
-installation may leave your system in an inconsistent state.
-
-__welcome_banner_3
-} | more
-}
-
-md_not_going_to_install() {
-	cat << \__not_going_to_install_1
-
-OK, then.  Enter `halt' at the prompt to halt the machine.  Once the
-machine has halted, power-cycle the system and you'll get back to AmigaOS.
-
-__not_going_to_install_1
-}
-
 md_congrats() {
-	local what;
-	if [ "$MODE" = "install" ]; then
-		what="installed";
-	else
-		what="upgraded";
-	fi
-	cat << __congratulations_1
+	cat << __EOT
 
-CONGRATULATIONS!  You have successfully $what OpenBSD!
-To boot the installed system, enter halt at the command prompt. Once the
-system has halted, reset the machine, enter AmigaOS and boot via loadbsd
-without the -b flag, per the install document.
-
-__congratulations_1
+Once in AmigaOS, boot via loadbsd without the -b flag, as described
+in the install document.
+__EOT
 }

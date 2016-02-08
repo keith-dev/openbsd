@@ -1,9 +1,9 @@
-/*	$OpenBSD: conf.c,v 1.37 2002/03/01 14:54:20 ho Exp $	*/
+/*	$OpenBSD: conf.c,v 1.45 2002/09/11 09:50:43 ho Exp $	*/
 /*	$EOM: conf.c,v 1.48 2000/12/04 02:04:29 angelos Exp $	*/
 
 /*
  * Copyright (c) 1998, 1999, 2000, 2001 Niklas Hallqvist.  All rights reserved.
- * Copyright (c) 2000, 2001 Håkan Olsson.  All rights reserved.
+ * Copyright (c) 2000, 2001, 2002 Håkan Olsson.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -202,7 +202,7 @@ conf_set_now (char *section, char *tag, char *value, int override,
   node = calloc (1, sizeof *node);
   if (!node)
     {
-      log_error ("conf_set: calloc (1, %d) failed", sizeof *node);
+      log_error ("conf_set: calloc (1, %lu) failed", (unsigned long)sizeof *node);
       return 1;
     }
   node->section = strdup (section);
@@ -223,7 +223,7 @@ conf_set_now (char *section, char *tag, char *value, int override,
 static void
 conf_parse_line (int trans, char *line, size_t sz)
 {
-  char *cp = line;
+  char *val;
   int i;
   static char *section = 0;
   static int ln = 0;
@@ -240,6 +240,8 @@ conf_parse_line (int trans, char *line, size_t sz)
       for (i = 1; i < sz; i++)
 	if (line[i] == ']')
 	  break;
+      if (section)
+	free (section);
       if (i == sz)
 	{
 	  log_print ("conf_parse_line: %d:"
@@ -247,16 +249,19 @@ conf_parse_line (int trans, char *line, size_t sz)
 	  section = 0;
 	  return;
 	}
-      if (section)
-	free (section);
       section = malloc (i);
+      if (!section)
+	{
+	  log_print ("conf_parse_line: %d: malloc (%d) failed", ln, i);
+	  return;
+	}
       strlcpy (section, line + 1, i);
       return;
     }
 
   /* Deal with assignments.  */
   for (i = 0; i < sz; i++)
-    if (cp[i] == '=')
+    if (line[i] == '=')
       {
 	/* If no section, we are ignoring the lines.  */
 	if (!section)
@@ -266,13 +271,17 @@ conf_parse_line (int trans, char *line, size_t sz)
 	    return;
 	  }
 	line[strcspn (line, " \t=")] = '\0';
+	val = line + i + 1 + strspn (line + i + 1, " \t");
+	/* Skip trailing whitespace, if any */
+	i = strcspn (val, " \t\r");
+	if (i)
+	  val[i] = '\0';
 	/* XXX Perhaps should we not ignore errors?  */
-	conf_set (trans, section, line,
-		  line + i + 1 + strspn (line + i + 1, " \t"), 0, 0);
+	conf_set (trans, section, line, val, 0, 0);
 	return;
       }
 
-  /* Other non-empty lines are wierd.  */
+  /* Other non-empty lines are weird.  */
   i = strspn (line, " \t");
   if (line[i])
     log_print ("conf_parse_line: %d: syntax error", ln);
@@ -415,6 +424,8 @@ conf_load_defaults (int tr)
 	    0, 1);
   conf_set (tr, "X509-certificates", "Private-key", CONF_DFLT_X509_PRIVATE_KEY,
 	    0, 1);
+  conf_set (tr, "X509-certificates", "CRL-directory", CONF_DFLT_X509_CRL_DIR,
+	    0, 1);
 #endif
 
 #ifdef USE_KEYNOTE
@@ -461,7 +472,7 @@ conf_load_defaults (int tr)
 	    conf_set (tr, sect, "AUTHENTICATION_METHOD", mm_auth[auth], 0, 1);
 
 	    /* XXX Always DH group 2 (MODP_1024) */
-	    conf_set (tr, sect, "GROUP_DESCRIPTION", 
+	    conf_set (tr, sect, "GROUP_DESCRIPTION",
 		      dh_group[group < group_max ? group : 1], 0, 1);
 
 	    conf_set (tr, sect, "Life", CONF_DFLT_TAG_LIFE_MAIN_MODE, 0, 1);
@@ -496,7 +507,7 @@ conf_load_defaults (int tr)
 		  char tmp[CONF_MAX];
 
 		  snprintf (tmp, CONF_MAX, "QM-%s%s%s%s%s%s", PROTO (proto),
-			    MODE_p (mode), qm_enc_p[enc], qm_hash_p[hash], 
+			    MODE_p (mode), qm_enc_p[enc], qm_hash_p[hash],
 			    PFS (pfs), dh_group_p[group]);
 
 		  strlcpy (sect, tmp, CONF_MAX);
@@ -536,7 +547,7 @@ conf_load_defaults (int tr)
 
 		      /* XXX Another shortcut -- to keep length down.  */
 		      if (pfs)
-			conf_set (tr, sect, "GROUP_DESCRIPTION", 
+			conf_set (tr, sect, "GROUP_DESCRIPTION",
 				  dh_group[group < group_max ? group : 1], 0,
 				  1);
 		    }
@@ -565,7 +576,7 @@ conf_reinit (void)
 {
   struct conf_binding *cb = 0;
   int fd, i, trans;
-  off_t sz;
+  size_t sz;
   char *new_conf_addr = 0;
   struct stat sb;
 
@@ -584,15 +595,15 @@ conf_reinit (void)
       new_conf_addr = malloc (sz);
       if (!new_conf_addr)
         {
-	  log_error ("conf_reinit: malloc (%d) failed", sz);
+	  log_error ("conf_reinit: malloc (%lu) failed", (unsigned long)sz);
 	  goto fail;
 	}
 
       /* XXX I assume short reads won't happen here.  */
       if (read (fd, new_conf_addr, sz) != sz)
         {
-	    log_error ("conf_reinit: read (%d, %p, %d) failed",
-		       fd, new_conf_addr, sz);
+	    log_error ("conf_reinit: read (%d, %p, %lu) failed",
+		       fd, new_conf_addr, (unsigned long)sz);
 	    goto fail;
 	}
       close (fd);
@@ -817,7 +828,7 @@ conf_decode_base64 (u_int8_t *out, u_int32_t *len, u_char *buf)
 	  if (c2 & 0xF)
 	    return 0;
 
-	  if (strcmp (buf, "==") == 0)
+	  if (strcmp ((char *)buf, "==") == 0)
 	    buf++;
 	  else
 	    return 0;
@@ -835,7 +846,7 @@ conf_decode_base64 (u_int8_t *out, u_int32_t *len, u_char *buf)
 	      if (c3 & 3)
 		return 0;
 
-	      if (strcmp (buf, "="))
+	      if (strcmp ((char *)buf, "="))
 		return 0;
 
 	    }
@@ -912,7 +923,8 @@ conf_trans_node (int transaction, enum conf_op op)
   node = calloc (1, sizeof *node);
   if (!node)
     {
-      log_error ("conf_trans_node: calloc (1, %d) failed", sizeof *node);
+      log_error ("conf_trans_node: calloc (1, %lu) failed",
+	(unsigned long)sizeof *node);
       return 0;
     }
   node->trans = transaction;

@@ -4,6 +4,17 @@ $	__arch := VAX
 $	if f$getsyi("cpu") .ge. 128 then __arch := AXP
 $	exe_dir := sys$disk:[-.'__arch'.exe.apps]
 $
+$	set noon
+$	define/user sys$output nla0:
+$	mcr 'exe_dir'openssl no-rsa
+$	save_severity=$SEVERITY
+$	set on
+$	if save_severity
+$	then
+$	    write sys$output "skipping RSA conversion test"
+$	    exit
+$	endif
+$
 $	cmd := mcr 'exe_dir'openssl rsa
 $
 $	t := testrsa.pem
@@ -13,7 +24,9 @@ $	write sys$output "testing RSA conversions"
 $	if f$search("fff.*") .nes "" then delete fff.*;*
 $	if f$search("ff.*") .nes "" then delete ff.*;*
 $	if f$search("f.*") .nes "" then delete f.*;*
-$	copy 't' fff.p
+$	convert/fdl=sys$input: 't' fff.p
+RECORD
+	FORMAT STREAM_LF
 $
 $	write sys$output "p -> d"
 $	'cmd' -in fff.p -inform p -outform d -out f.d

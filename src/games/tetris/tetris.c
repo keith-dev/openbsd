@@ -1,4 +1,4 @@
-/*	$OpenBSD: tetris.c,v 1.11 2002/02/16 21:27:11 millert Exp $	*/
+/*	$OpenBSD: tetris.c,v 1.14 2002/07/26 21:33:28 mickey Exp $	*/
 /*	$NetBSD: tetris.c,v 1.2 1995/04/22 07:42:47 cgd Exp $	*/
 
 /*-
@@ -40,7 +40,7 @@
  */
 
 #ifndef lint
-static char copyright[] =
+static const char copyright[] =
 "@(#) Copyright (c) 1992, 1993\n\
 	The Regents of the University of California.  All rights reserved.\n";
 #endif /* not lint */
@@ -67,17 +67,17 @@ static char copyright[] =
 
 cell	board[B_SIZE];
 int	Rows, Cols;
-struct shape *curshape;
-struct shape *nextshape;
+const struct shape *curshape;
+const struct shape *nextshape;
 long	fallrate;
 int	score;
 gid_t	gid, egid;
 char	key_msg[100];
-int	showpreview;
+int	showpreview, classic;
 
 static void	elide(void);
 static void	setup_board(void);
-struct shape	*randshape(void);
+const struct shape *randshape(void);
 void	onintr(int);
 void	usage(void);
 
@@ -89,8 +89,8 @@ void	usage(void);
 static void
 setup_board()
 {
-	register int i;
-	register cell *p;
+	int i;
+	cell *p;
 
 	p = board;
 	for (i = B_SIZE; i; i--)
@@ -103,8 +103,8 @@ setup_board()
 static void
 elide()
 {
-	register int i, j, base;
-	register cell *p;
+	int i, j, base;
+	cell *p;
 
 	for (i = A_FIRST; i < A_LAST; i++) {
 		base = i * B_COLS + 1;
@@ -125,16 +125,16 @@ elide()
 	}
 }
 
-struct shape *
+const struct shape *
 randshape()
 {
-	struct shape *tmp;
+	const struct shape *tmp;
 	int i, j;
 
 	tmp = &shapes[random() % 7];
 	j = random() % 4;
 	for (i = 0; i < j; i++)
-		tmp = &shapes[tmp->rot];
+		tmp = &shapes[classic? tmp->rotc : tmp->rot];
 	return (tmp);
 }
 	
@@ -144,9 +144,9 @@ main(argc, argv)
 	int argc;
 	char *argv[];
 {
-	register int pos, c;
-	register char *keys;
-	register int level = 2;
+	int pos, c;
+	char *keys;
+	int level = 2;
 	char key_write[6][10];
 	int ch, i, j;
 
@@ -156,9 +156,17 @@ main(argc, argv)
 	egid = getegid();
 	setegid(gid);
 
-	showpreview = 0;
-	while ((ch = getopt(argc, argv, "hk:l:ps")) != -1)
+	classic = showpreview = 0;
+	while ((ch = getopt(argc, argv, "chk:l:ps")) != -1)
 		switch(ch) {
+		case 'c':
+			/*
+			 * this means:
+			 *	- rotate the other way;
+			 *	- no reverse video.
+			 */
+			classic = 1;
+			break;
 		case 'k':
 			if (strlen(keys = optarg) != 6)
 				usage();
@@ -285,7 +293,8 @@ main(argc, argv)
 		}
 		if (c == keys[1]) {
 			/* turn */
-			struct shape *new = &shapes[curshape->rot];
+			const struct shape *new = &shapes[
+			    classic? curshape->rotc : curshape->rot];
 
 			if (fits_in(new, pos))
 				curshape = new;

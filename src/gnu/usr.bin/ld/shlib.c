@@ -1,4 +1,4 @@
-/*	$OpenBSD: shlib.c,v 1.10 2000/06/28 15:32:40 form Exp $	*/
+/*	$OpenBSD: shlib.c,v 1.14 2002/09/07 01:25:34 marc Exp $	*/
 /*	$NetBSD: shlib.c,v 1.13 1998/04/04 01:00:29 fvdl Exp $	*/
 
 /*
@@ -15,7 +15,7 @@
  *    documentation and/or other materials provided with the distribution.
  * 3. All advertising materials mentioning features or use of this software
  *    must display the following acknowledgement:
- *      This product includes software developed by Paul Kranenburg.
+ *	This product includes software developed by Paul Kranenburg.
  * 4. The name of the author may not be used to endorse or promote products
  *    derived from this software without specific prior written permission
  *
@@ -74,8 +74,7 @@ char	*standard_search_dirs[] = {
 
 
 void
-add_search_dir(name)
-	char	*name;
+add_search_dir(char *name)
 {
 	int i, len;
 
@@ -96,8 +95,7 @@ add_search_dir(name)
 }
 
 void
-remove_search_dir(name)
-	char	*name;
+remove_search_dir(char *name)
 {
 	int	i, len;
 
@@ -122,10 +120,9 @@ remove_search_dir(name)
 }
 
 void
-add_search_path(path)
-char	*path;
+add_search_path(char *path)
 {
-	register char	*cp, *dup;
+	char	*cp, *dup;
 
 	if (path == NULL)
 		return;
@@ -138,23 +135,22 @@ char	*path;
 }
 
 void
-remove_search_path(path)
-char	*path;
+remove_search_path(char *path)
 {
-	register char	*cp, *dup;
-
-	if (path == NULL)
+	char    *cp, *dup;
+  
+	if (path == NULL)  
 		return;
-
+        
 	/* Remove search directories from `path' */
 	path = dup = strdup(path);
 	while ((cp = strsep(&path, ":")) != NULL)
 		remove_search_dir(cp);
 	free(dup);
 }
-
+                
 void
-std_search_path()
+std_search_path(void)
 {
 	int	i, n;
 
@@ -171,9 +167,7 @@ std_search_path()
  */
 
 int
-getdewey(dewey, cp)
-int	dewey[];
-char	*cp;
+getdewey(int dewey[], char *cp)
 {
 	int	i, n;
 
@@ -202,11 +196,9 @@ char	*cp;
  * Return  0 if equal.
  */
 int
-cmpndewey(d1, n1, d2, n2)
-int	d1[], d2[];
-int	n1, n2;
+cmpndewey(int d1[], int n1, int d2[], int n2)
 {
-	register int	i;
+	int	i;
 
 	for (i = 0; i < n1 && i < n2; i++) {
 		if (d1[i] < d2[i])
@@ -233,9 +225,9 @@ int	n1, n2;
  * major and minor version numbers.
  *
  * MAJOR == -1 && MINOR == -1	--> find highest version
- * MAJOR != -1 && MINOR == -1   --> find highest minor version
- * MAJOR == -1 && MINOR != -1   --> invalid
- * MAJOR != -1 && MINOR != -1   --> find highest micro version
+ * MAJOR != -1 && MINOR == -1	--> find highest minor version
+ * MAJOR == -1 && MINOR != -1	--> invalid
+ * MAJOR != -1 && MINOR != -1	--> find highest micro version
  */
 
 /* Not interested in devices right now... */
@@ -243,10 +235,7 @@ int	n1, n2;
 #undef minor
 
 char *
-findshlib(name, majorp, minorp, do_dot_a)
-char	*name;
-int	*majorp, *minorp;
-int	do_dot_a;
+findshlib(char *name, int *majorp, int *minorp, int do_dot_a)
 {
 	int		dewey[MAXDEWEY];
 	int		ndewey;
@@ -266,7 +255,7 @@ int	do_dot_a;
 	for (i = 0; i < n_search_dirs; i++) {
 		DIR		*dd = opendir(search_dirs[i]);
 		struct dirent	*dp;
-		char 		*path = NULL;
+		char		*path = NULL;
 
 		if (dd == NULL)
 			continue;

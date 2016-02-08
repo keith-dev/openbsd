@@ -1,4 +1,4 @@
-/*	$OpenBSD: uucpd.c,v 1.21 2002/02/16 21:27:31 millert Exp $	*/
+/*	$OpenBSD: uucpd.c,v 1.25 2002/09/06 19:43:54 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1985 The Regents of the University of California.
@@ -44,7 +44,7 @@ char copyright[] =
 
 #ifndef lint
 /*static char sccsid[] = "from: @(#)uucpd.c	5.10 (Berkeley) 2/26/91";*/
-static char rcsid[] = "$OpenBSD: uucpd.c,v 1.21 2002/02/16 21:27:31 millert Exp $";
+static char rcsid[] = "$OpenBSD: uucpd.c,v 1.25 2002/09/06 19:43:54 deraadt Exp $";
 #endif /* not lint */
 
 /*
@@ -79,9 +79,9 @@ void dologout(void);
 void dologin(struct passwd *, struct sockaddr_in *);
 
 struct	sockaddr_in hisctladdr;
-int hisaddrlen = sizeof hisctladdr;
+socklen_t hisaddrlen = sizeof hisctladdr;
 struct	sockaddr_in myctladdr;
-int mypid;
+pid_t	mypid;
 
 char Username[64], Loginname[64];
 char *nenv[] = {
@@ -95,9 +95,7 @@ extern char **environ;
 char utline[UT_LINESIZE+1];
 
 int
-main(argc, argv)
-int argc;
-char **argv;
+main(int argc, char *argv[])
 {
 #ifndef BSDINETD
 	int s, tcp_socket;
@@ -117,7 +115,7 @@ char **argv;
 	}
 	if ((childpid = fork()) == 0)
 		doit(&hisctladdr);
-	snprintf(utline, sizeof(utline), "uucp%.4d", childpid);
+	snprintf(utline, sizeof(utline), "uucp%.4ld", (long)childpid);
 	dologout();
 	exit(1);
 #else /* !BSDINETD */
@@ -128,9 +126,9 @@ char **argv;
 	}
 	if (fork())
 		exit(0);
-	snprintf(utline, sizeof(utline), "uucp%.4d", childpid);
+	snprintf(utline, sizeof(utline), "uucp%.4ld", (long)childpid);
 
-	if ((s=open(_PATH_TTY, 2)) >= 0){
+	if ((s = open(_PATH_TTY, 2)) >= 0){
 		ioctl(s, TIOCNOTTY, (char *)0);
 		close(s);
 	}
@@ -172,12 +170,11 @@ char **argv;
 }
 
 void
-doit(sinp)
-struct sockaddr_in *sinp;
+doit(struct sockaddr_in *sinp)
 {
 	char user[64], passwd[64];
-	char *xpasswd, *crypt();
-	struct passwd *pw, *getpwnam();
+	char *xpasswd;
+	struct passwd *pw;
 
 	alarm(60);
 	do {
@@ -232,9 +229,7 @@ struct sockaddr_in *sinp;
 }
 
 int
-readline(p, n)
-char *p;
-int n;
+readline(char *p, int n)
 {
 	char c;
 
@@ -257,10 +252,11 @@ int n;
 struct	utmp utmp;
 
 void
-dologout()
+dologout(void)
 {
 	int save_errno = errno;
-	int status, pid, wtmp;
+	int status, wtmp;
+	pid_t pid;
 
 #ifdef BSDINETD
 	while ((pid=wait(&status)) > 0) {
@@ -284,9 +280,7 @@ dologout()
  * Record login in wtmp file.
  */
 void
-dologin(pw, sin)
-struct passwd *pw;
-struct sockaddr_in *sin;
+dologin(struct passwd *pw, struct sockaddr_in *sin)
 {
 	char line[32];
 	char remotehost[MAXHOSTNAMELEN];
@@ -306,7 +300,7 @@ struct sockaddr_in *sin;
 	wtmp = open(_PATH_WTMP, O_WRONLY|O_APPEND);
 	if (wtmp >= 0) {
 		/* hack, but must be unique and no tty line */
-		(void) sprintf(line, "uucp%.4d", getpid());
+		(void) snprintf(line, sizeof line, "uucp%.4ld", (long)getpid());
 		SCPYN(utmp.ut_line, line);
 		SCPYN(utmp.ut_name, pw->pw_name);
 		SCPYN(utmp.ut_host, remotehost);

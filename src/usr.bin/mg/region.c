@@ -1,4 +1,4 @@
-/*	$OpenBSD: region.c,v 1.9 2002/02/20 22:30:54 vincent Exp $	*/
+/*	$OpenBSD: region.c,v 1.11 2002/08/22 23:28:19 deraadt Exp $	*/
 
 /*
  *		Region based commands.
@@ -93,11 +93,16 @@ lowerregion(f, n)
 	REGION	 region;
 	int	 loffs, c, s;
 
+	if (curbp->b_flag & BFREADONLY) {
+		ewprintf("Buffer is read-only");
+		return (FALSE);
+	}
+
 	if ((s = getregion(&region)) != TRUE)
 		return s;
 
 	undo_add_change(region.r_linep, region.r_offset, region.r_size);
-	
+
 	lchange(WFHARD);
 	linep = region.r_linep;
 	loffs = region.r_offset;
@@ -130,11 +135,15 @@ upperregion(f, n)
 	REGION	  region;
 	int	  loffs, c, s;
 
+	if (curbp->b_flag & BFREADONLY) {
+		ewprintf("Buffer is read-only");
+		return (FALSE);
+	}
 	if ((s = getregion(&region)) != TRUE)
 		return s;
-	
+
 	undo_add_change(region.r_linep, region.r_offset, region.r_size);
-		
+
 	lchange(WFHARD);
 	linep = region.r_linep;
 	loffs = region.r_offset;
@@ -261,6 +270,10 @@ prefixregion(f, n)
 	int	 nline;
 	int	 s;
 
+	if (curbp->b_flag & BFREADONLY) {
+		ewprintf("Buffer is read-only");
+		return (FALSE);
+	}
 	if ((f == TRUE) && ((s = setprefix(FFRAND, 1)) != TRUE))
 		return s;
 
@@ -318,7 +331,7 @@ region_get_data(REGION *reg, char *buf, int len)
 {
 	int i, off;
 	LINE *lp;
-	
+
 	i = 0;
 	off = reg->r_offset;
 	lp = reg->r_linep;

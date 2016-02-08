@@ -1,3 +1,4 @@
+/*	$OpenBSD: catman.c,v 1.5 2002/06/01 20:15:43 deraadt Exp $	*/
 /*
  * Copyright (c) 1993 Winning Strategies, Inc.
  * All rights reserved.
@@ -29,7 +30,7 @@
  */
 
 #ifndef lint
-static char rcsid[] = "$Id: catman.c,v 1.3 2002/02/16 21:28:01 millert Exp $";
+static char rcsid[] = "$Id: catman.c,v 1.5 2002/06/01 20:15:43 deraadt Exp $";
 #endif /* not lint */
 
 #include <sys/types.h>
@@ -64,9 +65,7 @@ void makewhatis(const char *);
 void dosystem(const char *);
 
 int
-main(argc, argv)
-	int argc;
-	char **argv;
+main(int argc, char **argv)
 {
 	int c;
 
@@ -118,9 +117,7 @@ main(argc, argv)
 
 
 void
-catman(path, section)
-	const char *path;
-	char *section;
+catman(const char *path, char *section)
 {
 	char mandir[PATH_MAX];
 	char catdir[PATH_MAX];
@@ -152,8 +149,10 @@ catman(path, section)
 		if (sectlen == 0)
 			errx(1, "malformed section string");
 
-		sprintf(mandir, "%s/%s%.*s", path, _PATH_MANPAGES, sectlen, s);
-		sprintf(catdir, "%s/%s%.*s", path, _PATH_CATPAGES, sectlen, s);
+		snprintf(mandir, sizeof mandir, "%s/%s%.*s", path,
+		    _PATH_MANPAGES, sectlen, s);
+		snprintf(catdir, sizeof catdir, "%s/%s%.*s", path,
+		    _PATH_CATPAGES, sectlen, s);
 
 		if ((dirp = opendir(mandir)) == 0) {
 			warn("can't open %s", mandir);
@@ -181,8 +180,10 @@ catman(path, section)
 			    strcmp(dp->d_name, "..") == 0)
 				continue;
 
-			sprintf(manpage, "%s/%s", mandir, dp->d_name);
-			sprintf(catpage, "%s/%s", catdir, dp->d_name);
+			snprintf(manpage, sizeof manpage, "%s/%s",
+			    mandir, dp->d_name);
+			snprintf(catpage, sizeof catpage, "%s/%s",
+			    catdir, dp->d_name);
 			if ((tmp = strrchr(catpage, '.')) != NULL)
 				strcpy(tmp, ".0");
 			else
@@ -212,7 +213,8 @@ catman(path, section)
 					 * manpage is out of date,
 					 * reformat
 					 */
-					sprintf(sysbuf, "nroff -mandoc %s > %s",
+					snprintf(sysbuf, sizeof sysbuf,
+					    "nroff -mandoc %s > %s",
 					    manpage, catpage);
 					if (f_noprint == 0)
 						printf("%s\n", sysbuf);
@@ -227,12 +229,11 @@ catman(path, section)
 }
 
 void
-makewhatis(path)
-	const char *path;
+makewhatis(const char *path)
 {
 	char sysbuf[1024];
 
-	sprintf(sysbuf, "%s %s", _PATH_MAKEWHATIS, path);
+	snprintf(sysbuf, sizeof sysbuf, "%s %s", _PATH_MAKEWHATIS, path);
 	if (f_noprint == 0)
 		printf("%s\n", sysbuf);
 	if (f_noaction == 0)
@@ -240,8 +241,7 @@ makewhatis(path)
 }
 
 void
-dosystem(cmd)
-	const char *cmd;
+dosystem(const char *cmd)
 {
 	int status;
 
@@ -255,14 +255,16 @@ dosystem(cmd)
 	if (WIFSTOPPED(status))
 		errx(1, "child was stopped. aborting");
 	if (f_ignerr == 0)
-		errx(1,"*** Exited %d");
-	warnx("*** Exited %d (continuing)");
+		errx(1,"*** Exited %d", status);
+	warnx("*** Exited %d (continuing)", status);
 }
 
 void
 usage()
 {
+	extern char *__progname;
+
 	(void)fprintf(stderr,
-	    "usage: catman [-knpsw] [-M manpath] [sections]\n");
+	    "usage: %s [-knpsw] [-M manpath] [sections]\n", __progname);
 	exit(1);
 }

@@ -1,4 +1,4 @@
-.\"	$OpenBSD: pf.4,v 1.15 2002/03/26 09:38:30 dhartmei Exp $
+.\"	$OpenBSD: pf.4,v 1.17 2002/07/15 14:04:28 pb Exp $
 .\"
 .\" Copyright (C) 2001, Kjell Wooding.  All rights reserved.
 .\"
@@ -127,7 +127,7 @@ struct pfioc_binat {
 .Ed
 .It Dv DIOCCOMMITBINATS Fa "u_int32_t"
 .It Dv DIOCGETBINATS   Fa "struct pfioc_binat"
-.It Dv DIOCGETBINAT    Fa "struct pfioc_changebinat"
+.It Dv DIOCGETBINAT    Fa "struct pfioc_binat"
 .It Dv DIOCBEGINRDRS   Fa "u_int32_t"
 .It Dv DIOCADDRDR      Fa "struct pfioc_rdr"
 .Bd -literal
@@ -273,6 +273,15 @@ struct pfioc_tm {
 .It Dv DIOCGETTIMEOUT  Fa "struct pfioc_tm"
 .It Dv DIOCCLRRULECTRS
 Clear per-rule statistics.
+.It Dv DIOCSETLIMIT   Fa "struct pfioc_limit"
+Sets hard limits on the memory pools used by the packet filter.
+.Bd -literal
+struct pfioc_limit {
+	int		index;
+	unsigned	limit;
+};
+.Ed
+.It Dv DIOCGETLIMIT   Fa "struct pfioc_limit"
 .El
 .Sh EXAMPLES
 The following example demonstrates how to use the DIOCNATLOOK command

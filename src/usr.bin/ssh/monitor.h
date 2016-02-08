@@ -1,4 +1,4 @@
-/*	$OpenBSD: monitor.h,v 1.3 2002/03/26 03:24:01 stevesk Exp $	*/
+/*	$OpenBSD: monitor.h,v 1.8 2002/09/26 11:38:43 markus Exp $	*/
 
 /*
  * Copyright 2002 Niels Provos <provos@citi.umich.edu>
@@ -33,6 +33,7 @@ enum monitor_reqtype {
 	MONITOR_REQ_FREE, MONITOR_REQ_AUTHSERV,
 	MONITOR_REQ_SIGN, MONITOR_ANS_SIGN,
 	MONITOR_REQ_PWNAM, MONITOR_ANS_PWNAM,
+	MONITOR_REQ_AUTH2_READ_BANNER, MONITOR_ANS_AUTH2_READ_BANNER,
 	MONITOR_REQ_AUTHPASSWORD, MONITOR_ANS_AUTHPASSWORD,
 	MONITOR_REQ_BSDAUTHQUERY, MONITOR_ANS_BSDAUTHQUERY,
 	MONITOR_REQ_BSDAUTHRESPOND, MONITOR_ANS_BSDAUTHRESPOND,
@@ -48,7 +49,9 @@ enum monitor_reqtype {
 	MONITOR_REQ_RSAKEYALLOWED, MONITOR_ANS_RSAKEYALLOWED,
 	MONITOR_REQ_RSACHALLENGE, MONITOR_ANS_RSACHALLENGE,
 	MONITOR_REQ_RSARESPONSE, MONITOR_ANS_RSARESPONSE,
-	MONITOR_REQ_TERM,
+	MONITOR_REQ_KRB4, MONITOR_ANS_KRB4,
+	MONITOR_REQ_KRB5, MONITOR_ANS_KRB5,
+	MONITOR_REQ_TERM
 };
 
 struct mm_master;
@@ -58,7 +61,7 @@ struct monitor {
 	struct mm_master	*m_zback;
 	struct mm_master	*m_zlib;
 	struct Kex		**m_pkex;
-	int			 m_pid;
+	pid_t			 m_pid;
 };
 
 struct monitor *monitor_init(void);

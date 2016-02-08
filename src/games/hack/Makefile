@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.10 1998/07/24 00:10:29 millert Exp $
+#	$OpenBSD: Makefile,v 1.13 2002/05/31 03:46:35 pjanzen Exp $
 
 PROG=	hack
 CFLAGS+=-I.
@@ -15,10 +15,10 @@ SRCS+=	alloc.c hack.Decl.c hack.apply.c hack.bones.c hack.c hack.cmd.c \
 	hack.u_init.c hack.unix.c hack.vault.c hack.version.c hack.wield.c \
 	hack.wizard.c hack.worm.c hack.worn.c hack.zap.c rnd.c
 MAN=	hack.6
-DPADD+=	${LIBCURSES} ${LIBCOMPAT}
+DPADD+=	${LIBCURSES}
 LDADD+=	-lcurses
-HIDEGAME=hidegame
 CLEANFILES+=hack.onames.h makedefs
+BINMODE=2555
 
 ${PROG}: hack.onames.h
 

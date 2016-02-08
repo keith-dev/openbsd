@@ -1,4 +1,4 @@
-/*	$OpenBSD: server.c,v 1.17 2002/02/19 19:39:38 millert Exp $	*/
+/*	$OpenBSD: server.c,v 1.20 2002/06/23 03:07:21 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1983, 1993
@@ -35,11 +35,14 @@
 
 #ifndef lint
 /* from: static char sccsid[] = "@(#)server.c	8.1 (Berkeley) 6/9/93"; */
-static char *rcsid = "$OpenBSD: server.c,v 1.17 2002/02/19 19:39:38 millert Exp $";
+static char *rcsid = "$OpenBSD: server.c,v 1.20 2002/06/23 03:07:21 deraadt Exp $";
 #endif /* not lint */
 
 #include <sys/wait.h>
+
 #include <stdarg.h>
+#include <libgen.h>
+
 #include "defs.h"
 
 #define	ack() 	(void) write(rem, "\0\n", 2)
@@ -281,7 +284,7 @@ install(src, dest, destdir, opts)
 			rname++;
 		destdir = 1;
 	} else {
-		rname = xbasename(target);
+		rname = basename(target);
 	}
 	if (debug)
 		printf("target = %s, rname = %s\n", target, rname);
@@ -389,14 +392,14 @@ sendf(rname, opts)
 
 	if (pw == NULL || pw->pw_uid != stb.st_uid)
 		if ((pw = getpwuid(stb.st_uid)) == NULL) {
-			log(lfp, "%s: no password entry for uid %d \n",
+			log(lfp, "%s: no password entry for uid %u \n",
 				target, stb.st_uid);
 			pw = NULL;
 			(void) snprintf(user, sizeof(user), ":%lu", stb.st_uid);
 		}
 	if (gr == NULL || gr->gr_gid != stb.st_gid)
 		if ((gr = getgrgid(stb.st_gid)) == NULL) {
-			log(lfp, "%s: no name for group %d\n",
+			log(lfp, "%s: no name for group %u\n",
 				target, stb.st_gid);
 			gr = NULL;
 			(void) snprintf(group, sizeof(group), ":%lu",
@@ -1078,9 +1081,10 @@ fchog(fd, file, owner, group, mode)
 	int mode;
 {
 	int i;
-	int uid, gid;
+	uid_t uid;
+	gid_t gid;
 	extern char user[];
-	extern int userid;
+	extern uid_t userid;
 
 	uid = userid;
 	if (userid == 0) {
@@ -1365,10 +1369,12 @@ static void
 dospecial(cmd)
 	char *cmd;
 {
-	int fd[2], status, pid, i;
+	int fd[2], status;
 	char *cp, *s;
 	char sbuf[BUFSIZ];
-	extern int userid, groupid;
+	pid_t pid, i;
+	extern uid_t userid;
+	extern gid_t groupid;
 
 	if (pipe(fd) < 0) {
 		error("%s\n", strerror(errno));

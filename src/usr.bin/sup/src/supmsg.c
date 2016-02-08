@@ -1,4 +1,4 @@
-/*	$OpenBSD: supmsg.c,v 1.10 2002/02/19 19:39:39 millert Exp $	*/
+/*	$OpenBSD: supmsg.c,v 1.12 2002/08/12 00:42:56 aaron Exp $	*/
 
 /*
  * Copyright (c) 1992 Carnegie Mellon University
@@ -67,7 +67,7 @@
 extern int	pgmver;			/* program version of partner */
 extern int	pgmversion;		/* my program version */
 extern char	*scmver;		/* scm version of partner */
-extern int	fspid;			/* process id of fileserver */
+extern pid_t	fspid;			/* process id of fileserver */
 
 static int refuseone(TREE *, void *);
 static int listone(TREE *, void *);
@@ -745,7 +745,7 @@ msgxpatch()
 		if (x != SCMOK)
 			return (x);
 		xargc += 2;
-		xargv = (char **)calloc(sizeof (char *), xargc+1);
+		xargv = (char **)calloc(xargc+1, sizeof (char *));
 		if (xargv == NULL)
 			return (SCMERR);
 		for (i = 2; i < xargc; i++) {

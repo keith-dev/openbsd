@@ -1,4 +1,4 @@
-/*	$OpenBSD: tip.h,v 1.12 2002/02/16 21:27:55 millert Exp $	*/
+/*	$OpenBSD: tip.h,v 1.14 2002/06/04 00:09:08 deraadt Exp $	*/
 /*	$NetBSD: tip.h,v 1.7 1997/04/20 00:02:46 mellon Exp $	*/
 
 /*
@@ -170,7 +170,7 @@ typedef
 typedef
 	struct {
 		char	e_char;		/* char to match on */
-		char	e_flags;	/* experimental, priviledged */
+		char	e_flags;	/* experimental, privileged */
 		char	*e_help;	/* help string */
 		int 	(*e_func)();	/* command */
 	}
@@ -178,7 +178,7 @@ typedef
 
 #define NORM	00		/* normal protection, execute anyone */
 #define EXP	01		/* experimental, mark it with a `*' on help */
-#define PRIV	02		/* priviledged, root execute only */
+#define PRIV	02		/* privileged, root execute only */
 
 extern int	vflag;		/* verbose during reading of .tiprc file */
 extern int	noesc;		/* no escape `~' char */
@@ -281,7 +281,7 @@ int	args(char *buf, char *a[], int num);
 int	escape(void);
 int	prompt(char *s, char *p, size_t sz);
 int	size(char *s);
-int	speed(int n);
+int	ttysetup(int speed);
 int	uu_lock(char *ttyname);
 int	uu_unlock(char *ttyname);
 int	vstring(char *s, char *v);
@@ -305,7 +305,6 @@ void	tipin(void);
 void	tipout(void);
 void	transfer(char *buf, int fd, char *eofchars);
 void	transmit(FILE *fd, char *eofchars, char *command);
-void	ttysetup(int speed);
 void	unraw(void);
 void	user_uid(void);
 void	vinit(void);

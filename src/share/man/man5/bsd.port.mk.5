@@ -1,4 +1,4 @@
-.\" $OpenBSD: bsd.port.mk.5,v 1.65 2002/04/02 16:03:47 espie Exp $
+.\" $OpenBSD: bsd.port.mk.5,v 1.74 2002/08/29 07:34:31 wcobb Exp $
 .\"
 .\" Copyright (c) 2000 Marc Espie
 .\"
@@ -31,7 +31,7 @@
 .Nm bsd.port.mk
 .Nd ports tree master Makefile fragment
 .Sh SYNOPSIS
-.Fd #include <bsd.port.mk>
+.Fd .include <bsd.port.mk>
 .Sh DESCRIPTION
 .Nm
 holds all the standard routines used by the ports tree.
@@ -86,10 +86,12 @@ main archive site.
 Clean ports contents. 
 By default, it will clean the work directory.
 It can be invoked as 
-make clean='[depends work fake flavors dist install sub package packages]'.
+make clean='[depends bulk work fake flavors dist install sub package packages]'.
 .Bl -tag -width packages
 .It Va work
 Clean work directory.
+.It Va bulk
+Clean bulk cookie.
 .It Va depends
 Recurse into dependencies.
 .It Va flavors
@@ -147,9 +149,7 @@ Each file of the
 and
 .Ev PATCHFILES
 lists is retrieved, if necessary, from the list of sites in
-.Ev MASTER_SITES ,
-with %SUBDIR% substituted with
-.Ev MASTER_SITE_SUBDIR .
+.Ev MASTER_SITES .
 If a filename ends with a
 .Sq :0
 to
@@ -231,6 +231,8 @@ exists, the files described under
 .Ev PATCH_LIST
 will be applied under
 .Ev WRKDIST .
+.It Ar print-depends
+Print all dependencies for the given port.
 .It Ar rebuild
 Force rebuild of the port.
 .It Ar regress
@@ -280,6 +282,16 @@ Defaults to ${WRKSRC}.
 .It Ev BSD_INSTALL_{PROGRAM,SCRIPT,DATA,MAN}[_DIR]
 Macros passed to make and configure invocations.
 Set based on corresponding INSTALL_* variables.
+.It Ev BIN_PACKAGES
+If set to
+.Sq Yes ,
+the 
+.Ar package
+target will trust a package built in the repository to be up-to-date,
+and will not rebuild it if the work directory is absent.
+See also
+.Ev BULK ,
+.Ev TRUST_PACKAGES .
 .It Ev BUILD_DEPENDS
 List of other ports the current port needs to build correctly.
 Each item has the form
@@ -302,6 +314,35 @@ package name.
 is a comma separated list of flavors.
 By default, the dependency will build the default flavor.
 Build dependencies are checked at the beginning of the extract stage.
+.Pp
+Build dependencies that are not the default 
+.Ar package or 
+.Ar install 
+target will be processed in a subdirectory of the working directory,
+specifically, in ${WRKDIR}/directory.
+.It Ev BULK
+If set to 
+.Sq Yes ,
+succesful package builds and installations will clean
+their working directories, after invoking 
+.Ar ftp-packages ,
+.Ar cdrom-packages ,
+and any other targets mentioned in BULK_TARGETS.
+See
+.Ev BULK_COOKIES_DIR ,
+.Ev BIN_PACKAGES ,
+.Ev TRUST_PACKAGES .
+.It Ev BULK_COOKIES_DIR
+Used to store cookies for succesful bulk-package builds, defaults to
+.Pa ${PORTSDIR}/bulk/${MACHINE_ARCH} .
+.It Ev BULK_FLAGS
+Flags to pass to build each target in
+.Ev BULK_TARGETS .
+.It Ev BULK_TARGETS
+Targets to run after each bulk package build before cleaning up the 
+working directory. Defaults to
+.Ar ftp-packages ,
+.Ar cdrom-packages .
 .It Ev BZIP2
 Name of the bzip2 binary.
 .It Ev CATEGORIES
@@ -571,6 +612,8 @@ Set by the user, and tested by the port to activate wanted functionalities.
 List of all flavors keywords a port may match.
 Used to sort FLAVOR into a canonical order to build the package name,
 or to select the packing-list, and as a quick validity check.
+See also
+.Ev PSEUDO_FLAVORS .
 .It Ev FLAVOR_EXT
 Canonical list of flavors being set for the current build, dash-separated.
 See
@@ -690,13 +733,6 @@ See
 .Qq Flavors and multi-packages
 below.
 .Pp
-.It Ev NEED_VERSION
-Specific revision of
-.Nm
-needed by this ports tree.
-Usually set to the current version of
-.Nm
-when port was built, and updated by port maintainers when needed.
 .It Ev NOT_FOR_ARCHS
 List of architectures on which this port does not build.
 See also
@@ -866,6 +902,17 @@ The first cipher that matches in ${CHECKSUM_FILE} is verified.
 Base directory for the current port installation.
 Usually ${LOCALBASE}, though some ports may elect a location under /var,
 and some multi-package ports may install under several locations.
+.It Ev PSEUDO_FLAVORS
+Extra list of flavors that do not register in package names, but are still
+used to control build logic, and e.g., working directories names.
+Its main use is for disabling part of a multi-packages build, for instance:
+.Bd -literal
+FLAVOR=no_gnome make package 
+.Ed
+.Pp
+Creation of a separate working directory is mandatory.
+If, at a later time, a full build with all subpackages is required,
+all the work will need to be done again.
 .It Ev REFETCH
 If set to true,
 .Ar checksum
@@ -985,6 +1032,14 @@ Name of the tar binary.
 Base location for the templates used in the
 .Ar readme
 target.
+.It Ev TRUST_PACKAGES
+If set to
+.Sq Yes ,
+dependency mechanisms will assume the database of installed packages is
+correct.
+See also
+.Ev BIN_PACKAGES ,
+.Ev BULK .
 .It Ev UNZIP
 Name of the unzip binary.
 .It Ev WRKBUILD
@@ -1073,7 +1128,7 @@ Default path to a CD-Rom (or other media) full of distribution files.
 Arch-dependent Makefile fragment, included automatically.
 .It Pa ${DISTDIR}
 cache of all distribution files.
-.It Pa ${FILESDIR}/md5
+.It Pa distinfo
 Checksum file.
 Holds the output of
 .Xr md5 1 ,
@@ -1169,6 +1224,22 @@ Used to organize a collection of ports that share most files.
 .Ox
 uses a single port with flavors or multi-packages to produce
 package variations instead.
+.It Ev MASTER_SITE_SUBDIR
+Contents were used to replace 
+.Sq %SUBDIR%
+in all 
+.Ev MASTER_SITES
+variables.
+Since
+.Sq %SUBDIR%
+almost always occur at the end of the directory,
+the simpler
+.Li ${VARIABLE:=subdir/}
+construct is now used instead 
+.Po 
+taken from
+.Nx 
+.Pc .
 .It Ev MD5_FILE
 Use
 .Ev CHECKSUM_FILE
@@ -1181,6 +1252,12 @@ and
 to determine which files can be mirrored instead.
 See
 .Xr mirroring-ports 7 .
+.It Ev NEED_VERSION
+Used to set a requirement on a specific revision of
+.Nm
+needed by a port.  No longer needed as
+.Nm
+should always be kept up-to-date.
 .It Ev NO_CONFIGURE
 If ${FILESDIR}/configure does not exist, no automatic configuration will
 be done anyway.
@@ -1275,6 +1352,10 @@ instead.
 .El
 .Sh OBSOLETE FILES
 .Bl -tag -width files/md5
+.It Pa ${FILESDIR}/md5
+Renamed to
+.Pa distinfo
+to match other BSD, and save directories.
 .It Pa ${SCRIPTDIR}/{pre,do,post}-*
 Identical functionality can be obtained through a {pre,do,post}-* target,
 invoking the script manually if necessary.
@@ -1515,7 +1596,7 @@ Having a separate directory is enough to trick
 into grabbing the right version.
 Note that libraries used only for 
 .Xr dlopen 3
-do not need NEWDYNLIDIR.
+do not need NEWDYNLIBDIR.
 .Pp
 The special
 .Ar plist

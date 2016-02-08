@@ -1,4 +1,4 @@
-/*	$OpenBSD: md.h,v 1.4 2000/02/01 21:01:41 espie Exp $  */
+/*	$OpenBSD: md.h,v 1.6 2002/07/17 20:33:29 marc Exp $  */
 /*	$NetBSD: md.h,v 1.3 1996/02/22 00:20:06 pk Exp $  */
 
 /*
@@ -100,11 +100,11 @@ typedef struct jmpslot {
 
 /* Define IO byte swapping routines */
 
-void	md_swapin_exec_hdr __P((struct exec *));
-void	md_swapout_exec_hdr __P((struct exec *));
-void	md_swapin_reloc __P((struct relocation_info *, int));
-void	md_swapout_reloc __P((struct relocation_info *, int));
-void	md_swapout_jmpslot __P((jmpslot_t *, int));
+void	md_swapin_exec_hdr(struct exec *);
+void	md_swapout_exec_hdr(struct exec *);
+void	md_swapin_reloc(struct relocation_info *, int);
+void	md_swapout_reloc(struct relocation_info *, int);
+void	md_swapout_jmpslot(jmpslot_t *, int);
 
 #  define md_swapin_symbols(s,n)		swap_symbols(s,n)
 #  define md_swapout_symbols(s,n)		swap_symbols(s,n)
@@ -126,7 +126,7 @@ void	md_swapout_jmpslot __P((jmpslot_t *, int));
 
 #  define md_swap_short(x) ( (((x) >> 8) & 0xff) | (((x) & 0xff) << 8) )
 
-#  define md_swap_long(x) ( (((x) >> 24) & 0xff    ) | (((x) >> 8 ) & 0xff00    ) | \
+#  define md_swap_long(x) ( (((x) >> 24) & 0xff	   ) | (((x) >> 8 ) & 0xff00	) | \
 			    (((x) << 8 ) & 0xff0000) | (((x) << 24) & 0xff000000) )
 
 # else	/* We need not swap, but must pay attention to alignment: */

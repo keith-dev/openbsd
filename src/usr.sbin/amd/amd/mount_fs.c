@@ -36,7 +36,7 @@
  * SUCH DAMAGE.
  *
  *	from: @(#)mount_fs.c	8.1 (Berkeley) 6/6/93
- *	$Id: mount_fs.c,v 1.5 2001/03/02 06:22:03 deraadt Exp $
+ *	$Id: mount_fs.c,v 1.8 2002/08/03 08:29:31 pvalchev Exp $
  */
 
 #include "am.h"
@@ -87,8 +87,8 @@ struct opt_tab mnt_flags[] = {
 	{ 0, 0 }
 };
 
-int compute_mount_flags(mnt)
-struct mntent *mnt;
+int
+compute_mount_flags(struct mntent *mnt)
 {
 	struct opt_tab *opt;
 	int flags;
@@ -107,13 +107,9 @@ struct mntent *mnt;
 	return flags;
 }
 
-int mount_fs P((struct mntent *mnt, int flags, caddr_t mnt_data, int retry, MTYPE_TYPE type));
-int mount_fs(mnt, flags, mnt_data, retry, type)
-struct mntent *mnt;
-int flags;
-caddr_t mnt_data;
-int retry;
-MTYPE_TYPE type;
+int
+mount_fs(struct mntent *mnt, int flags, caddr_t mnt_data, int retry,
+    MTYPE_TYPE type)
 {
 	int error = 0;
 #ifdef MNTINFO_DEV
@@ -174,11 +170,13 @@ again:
 		xopts = mnt->mnt_opts;
 		if (sizeof(stb.st_dev) == 2) {
 			/* e.g. SunOS 4.1 */
-			sprintf(zopts, "%s,%s=%s%04x", xopts, MNTINFO_DEV,
+			snprintf(zopts, strlen(mnt->mnt_opts) + 32,
+					"%s,%s=%s%04x", xopts, MNTINFO_DEV,
 					MNTINFO_PREF, (u_int) stb.st_dev & 0xffff);
 		} else {
 			/* e.g. System Vr4 */
-			sprintf(zopts, "%s,%s=%s%08x", xopts, MNTINFO_DEV,
+			snprintf(zopts, strlen(mnt->mnt_opts) + 32,
+					"%s,%s=%s%08x", xopts, MNTINFO_DEV,
 					MNTINFO_PREF, (u_int) stb.st_dev);
 		}
 		mnt->mnt_opts = zopts;
@@ -215,8 +213,8 @@ again:
 
 #include <ctype.h>
 
-static char *nextmntopt(p)
-char **p;
+static char *
+nextmntopt(char **p)
 {
 	char *cp = *p;
 	char *rp;
@@ -248,16 +246,15 @@ char **p;
 	return rp;
 }
 
-char *hasmntopt(mnt, opt)
-struct mntent *mnt;
-char *opt;
+char *
+hasmntopt(struct mntent *mnt, char *opt)
 {
 	char t[MNTMAXSTR];
 	char *f;
 	char *o = t;
 	int l = strlen(opt);
-	strncpy(t, mnt->mnt_opts, MNTMAXSTR - 1);
-	t[MNTMAXSTR - 1] = 0;
+
+	strlcpy(t, mnt->mnt_opts, sizeof(t));
 
 	while (*(f = nextmntopt(&o)))
 		if (strncmp(opt, f, l) == 0)

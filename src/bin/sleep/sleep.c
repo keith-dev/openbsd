@@ -1,4 +1,4 @@
-/*	$OpenBSD: sleep.c,v 1.12 2002/02/16 21:27:07 millert Exp $	*/
+/*	$OpenBSD: sleep.c,v 1.15 2002/09/06 18:16:59 deraadt Exp $	*/
 /*	$NetBSD: sleep.c,v 1.8 1995/03/21 09:11:11 cgd Exp $	*/
 
 /*
@@ -44,7 +44,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)sleep.c	8.3 (Berkeley) 4/2/94";
 #else
-static char rcsid[] = "$OpenBSD: sleep.c,v 1.12 2002/02/16 21:27:07 millert Exp $";
+static char rcsid[] = "$OpenBSD: sleep.c,v 1.15 2002/09/06 18:16:59 deraadt Exp $";
 #endif
 #endif /* not lint */
 
@@ -63,13 +63,11 @@ void usage(void);
 void alarmh(int);
 
 int
-main(argc, argv)
-	int argc;
-	char *argv[];
+main(int argc, char *argv[])
 {
 	int ch;
 	time_t secs = 0, t;
-	unsigned char *cp;
+	char *cp;
 	long nsecs = 0;
 	struct timespec rqtp;
 	int i;
@@ -80,8 +78,6 @@ main(argc, argv)
 
 	while ((ch = getopt(argc, argv, "")) != -1)
 		switch(ch) {
-		case '?':
-		case 'h':
 		default:
 			usage();
 		}
@@ -93,7 +89,8 @@ main(argc, argv)
 
 	cp = *argv;
 	while ((*cp != '\0') && (*cp != '.')) {
-		if (!isdigit(*cp)) usage();
+		if (!isdigit(*cp))
+			usage();
 		t = (secs * 10) + (*cp++ - '0');
 		if (t / 10 != secs)	/* oflow */
 			return (EINVAL);
@@ -104,8 +101,10 @@ main(argc, argv)
 	if (*cp == '.') {
 		*cp++ = '\0';
 		for (i = 100000000; i > 0; i /= 10) {
-			if (*cp == '\0') break;
-			if (!isdigit(*cp)) usage();
+			if (*cp == '\0')
+				break;
+			if (!isdigit(*cp))
+				usage();
 			nsecs += (*cp++ - '0') * i;
 		}
 
@@ -115,7 +114,8 @@ main(argc, argv)
 		 * checking the rest of the argument.
 		 */
 		while (*cp != '\0') {
-			if (!isdigit(*cp++)) usage();
+			if (!isdigit(*cp++))
+				usage();
 		}
 	}
 
@@ -129,7 +129,7 @@ main(argc, argv)
 }
 
 void
-usage()
+usage(void)
 {
 	(void)fprintf(stderr, "usage: %s seconds\n", __progname);
 	exit(1);
@@ -140,8 +140,7 @@ usage()
  * of SIGALRM.
  */
 void
-alarmh(sigraised)
-	int sigraised;
+alarmh(int sigraised)
 {
 	/*
 	 * exit() flushes stdio buffers, which is not legal in a signal

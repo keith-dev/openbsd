@@ -1,4 +1,4 @@
-/*	$OpenBSD: ldconfig.c,v 1.9 2000/06/28 15:32:40 form Exp $	*/
+/*	$OpenBSD: ldconfig.c,v 1.14 2002/09/07 01:25:34 marc Exp $	*/
 
 /*
  * Copyright (c) 1993,1995 Paul Kranenburg
@@ -14,7 +14,7 @@
  *    documentation and/or other materials provided with the distribution.
  * 3. All advertising materials mentioning features or use of this software
  *    must display the following acknowledgement:
- *      This product includes software developed by Paul Kranenburg.
+ *	This product includes software developed by Paul Kranenburg.
  * 4. The name of the author may not be used to endorse or promote products
  *    derived from this software without specific prior written permission
  *
@@ -79,16 +79,14 @@ struct shlib_list {
 static struct shlib_list	*shlib_head = NULL, **shlib_tail = &shlib_head;
 static char			*dir_list;
 
-static void	enter __P((char *, char *, char *, int *, int));
-static int	dodir __P((char *, int));
-static int	buildhints __P((void));
-static int	readhints __P((void));
-static void	listhints __P((void));
+static void	enter(char *, char *, char *, int *, int);
+static int	dodir(char *, int);
+static int	buildhints(void);
+static int	readhints(void);
+static void	listhints(void);
 
 int
-main(argc, argv)
-int	argc;
-char	*argv[];
+main(int argc, char *argv[])
 {
 	int		i, c;
 	int		rval = 0;
@@ -171,9 +169,7 @@ char	*argv[];
 }
 
 int
-dodir(dir, silent)
-char	*dir;
-int	silent;
+dodir(char *dir, int silent)
 {
 	DIR		*dd;
 	struct dirent	*dp;
@@ -187,8 +183,8 @@ int	silent;
 	}
 
 	while ((dp = readdir(dd)) != NULL) {
-		register int n;
-		register char *cp;
+		int n;
+		char *cp;
 
 		/* Check for `lib' prefix */
 		if (dp->d_name[0] != 'l' ||
@@ -226,9 +222,7 @@ int	silent;
 }
 
 static void
-enter(dir, file, name, dewey, ndewey)
-char	*dir, *file, *name;
-int	dewey[], ndewey;
+enter(char *dir, char *file, char *name, int dewey[], int ndewey)
 {
 	struct shlib_list	*shp;
 
@@ -281,10 +275,8 @@ int	dewey[], ndewey;
 #define _PATH_LD_HINTS		"./ld.so.hints"
 #endif
 
-int
-hinthash(cp, vmajor, vminor)
-char	*cp;
-int	vmajor, vminor;
+static int
+hinthash(char *cp, int vmajor, int vminor)
 {
 	int	k = 0;
 
@@ -300,7 +292,7 @@ int	vmajor, vminor;
 }
 
 int
-buildhints()
+buildhints(void)
 {
 	struct hints_header	hdr;
 	struct hints_bucket	*blist;
@@ -431,7 +423,7 @@ buildhints()
 }
 
 static int
-readhints()
+readhints(void)
 {
 	int			fd;
 	caddr_t			addr;
@@ -515,7 +507,7 @@ readhints()
 }
 
 static void
-listhints()
+listhints(void)
 {
 	struct shlib_list	*shp;
 	int			i;

@@ -36,7 +36,7 @@
  * SUCH DAMAGE.
  *
  *	from: @(#)info_hes.c	8.1 (Berkeley) 6/6/93
- *	$Id: info_hes.c,v 1.5 2001/08/12 12:03:03 heko Exp $
+ *	$Id: info_hes.c,v 1.11 2002/08/03 08:29:31 pvalchev Exp $
  */
 
 /*
@@ -77,10 +77,8 @@ static int servernum;
 /*
  * No easy way to probe the server - check the map name begins with "hesiod."
  */
-int hesiod_init P((char *map, time_t *tp));
-int hesiod_init(map, tp)
-char *map;
-time_t *tp;
+int
+hesiod_init(char *map, time_t *tp)
 {
 #ifdef DEBUG
 	dlog("hesiod_init(%s)", map);
@@ -98,29 +96,27 @@ time_t *tp;
  * call to hes_resolve("/defaults", "home.automount");
  */
 #ifdef notdef
-#define MAKE_HES_NAME(dest, src) sprintf(dest, "%s%s", src + HES_PREFLEN, ".automount")
+#define MAKE_HES_NAME(dest, src) snprintf(dest, sizeof(dest), \
+    "%s%s", src + HES_PREFLEN, ".automount")
 #endif
 
 /*
  * Do a Hesiod nameserver call.
  * Modify time is ignored by Hesiod - XXX
  */
-int hesiod_search P((mnt_map *m, char *map, char **pval, time_t *tp));
-int hesiod_search(m, map, key, pval, tp)
-mnt_map *m;
-char *map;
-char *key;
-char **pval;
-time_t *tp;
+int
+hesiod_search(mnt_map *m, char *map, char **pval, time_t *tp)
 {
 	int error;
 	char hes_key[MAXPATHLEN];
 	char **rvec;
+
 #ifdef DEBUG
-	dlog("hesiod_search(m=%x, map=%s, key=%s, pval=%x tp=%x)", m, map, key, pval, tp);
+	dlog("hesiod_search(m=%x, map=%s, key=%s, pval=%x tp=%x)",
+	    m, map, key, pval, tp);
 #endif
 	/*MAKE_HES_NAME(hes_map, map);*/
-	sprintf(hes_key, "%s.%s", key, map+HES_PREFLEN);
+	snprintf(hes_key, sizeof(hes_key), "%s.%s", key, map+HES_PREFLEN);
 
 	/*
 	 * Call the resolver
@@ -175,11 +171,8 @@ static mnt_map *hs_map;
 static int hs_nscount;
 static char nsaddr_list[MAX_NSADDR][sizeof(struct in_addr)];
 
-int hesiod_reload P((mnt_map *m, char *map, void (*fn)()));
-int hesiod_reload(m, map, fn)
-mnt_map *m;
-char *map;
-void (*fn)();
+int
+hesiod_reload(mnt_map *m, char *map, void (*fn)())
 {
 	char *zone_name, *cp;
 	short domainlen;
@@ -222,8 +215,8 @@ void (*fn)();
 	return(-1);
 }
 
-hs_zone_transfer(domain)
-char *domain;
+int
+hs_zone_transfer(char *domain)
 {
 	int status, len;
 	char buf[PACKETSZ];
@@ -234,7 +227,7 @@ char *domain;
 	dlog("hs_zone_transfer (%s)", domain);
 #endif
 	if ((len = res_mkquery(QUERY, domain, C_HS, T_AXFR,
-			       (char *)NULL, 0, NULL, buf, PACKETSZ)) == -1) {
+	    (char *)NULL, 0, NULL, buf, PACKETSZ)) == -1) {
 #ifdef DEBUG
 		dlog("hs_zone_transfer: res_mkquery failed");
 #endif
@@ -254,11 +247,8 @@ char *domain;
 
 #define hs_server_addr(ns) ((struct in_addr *) nsaddr_list[ns])
 
-hs_res_send(buf, buflen, answer, anslen)
-char *buf;
-int buflen;
-char *answer;
-int anslen;
+int
+hs_res_send(char *buf, int buflen, char *answer, int anslen)
 {
 	int retry, ns;
 	u_short id, len;
@@ -288,10 +278,10 @@ int anslen;
 				}
 				servernum = ns;
 				bcopy(hs_server_addr(ns), &server.sin_addr,
-				      sizeof(struct in_addr));
+				    sizeof(struct in_addr));
 				server.sin_family = AF_INET;
 				server.sin_port = htons(NAMESERVER_PORT);
-					
+
 				if (connect(s, &server,
 					    sizeof(struct sockaddr)) < 0) {
 					(void) close(s);
@@ -315,7 +305,7 @@ int anslen;
 			status = 0;
 			while (s != -1 && soacnt < 2 && status != -2) {
 				if ((status =
-				     hs_readresp(s, answer, anslen)) == -1) {
+				    hs_readresp(s, answer, anslen)) == -1) {
 					(void) close(s);
 					s = -1;
 					continue;
@@ -345,18 +335,16 @@ int anslen;
    -1: Error
    -2: Permanent failure
 */
-hs_readresp(s, answer, anslen)
-int s;
-char *answer;
-int anslen;
+int
+hs_readresp(int s, char *answer, int anslen)
 {
-	register int len, n;
+	int len, n;
 	char *cp;
 
 	cp = answer;
 	len = sizeof(short);
 	while (len != 0 &&
-	       (n = hs_res_vcread(s, (char *)cp, (int)len, &hs_timeout)) > 0) {
+	    (n = hs_res_vcread(s, (char *)cp, (int)len, &hs_timeout)) > 0) {
 		cp += n;
 		len -= n;
 	}
@@ -370,7 +358,7 @@ int anslen;
 		return(-1);
 	}
 	while (len != 0 &&
-	       (n = hs_res_vcread(s, (char *)cp, (int)len, &hs_timeout)) > 0) {
+	    (n = hs_res_vcread(s, (char *)cp, (int)len, &hs_timeout)) > 0) {
 		cp += n;
 		len -= n;
 	}
@@ -379,12 +367,10 @@ int anslen;
 	return(hs_parse(answer, answer+PACKETSZ));
 }
 
-hs_res_vcread(sock, buf, buflen, timeout)
-int sock, buflen;
-char *buf;
-struct timeval *timeout;
+int
+hs_res_vcread(int sock, char *buf, int buflen, struct timeval *timeout)
 {
-	register int n;
+	int n;
 
 	if ((n = hs_res_selwait(sock, timeout)) > 0)
 		return(read(sock, buf, buflen));
@@ -392,13 +378,12 @@ struct timeval *timeout;
 		return(n);
 }
 
-hs_res_selwait(sock, timeout)
-int sock;
-struct timeval *timeout;
+int
+hs_res_selwait(int sock, struct timeval timeout)
 {
 	fd_set *fdsp;
 	int fdsn;
-	register int n;
+	int n;
 
 	/*
 	 * Wait for reply
@@ -409,8 +394,7 @@ struct timeval *timeout;
 	memset(fdsp, 0, fdsn);
 
 	FD_SET(sock, fdsp);
-	n = select(sock+1, fdsp, (fd_set *)NULL,
-		   (fd_set *)NULL, timeout);
+	n = select(sock+1, fdsp, NULL, NULL, timeout);
 	free(fdsp);
 	return(n);
 }
@@ -420,12 +404,12 @@ struct timeval *timeout;
    -1: Error
    -2: Permanent failure
 */
-hs_parse(msg, eom)
-char *msg, *eom;
+int
+hs_parse(char *msg, char *eom)
 {
-	register char *cp;
-	register HEADER *hp;
-	register int n, len;
+	char *cp;
+	HEADER *hp;
+	int n, len;
 	int qdcount, ancount;
 	char key[PACKETSZ];
 	char *key_cpy, *value, *hs_make_value();
@@ -435,7 +419,9 @@ char *msg, *eom;
 	if (hp->rcode != NOERROR || hp->opcode != QUERY) {
 		char dq[20];
 #ifdef DEBUG
-		dlog("Bad response (%d) from nameserver %s", hp->rcode, inet_dquad(dq, hs_server_addr(servernum)->s_addr));
+		dlog("Bad response (%d) from nameserver %s",
+		    hp->rcode, inet_dquad(dq, sizeof(dq),
+		    hs_server_addr(servernum)->s_addr));
 #endif /* DEBUG */
 		return(-1);
 	}
@@ -469,7 +455,7 @@ char *msg, *eom;
 			key_cpy = strdup(key);
 #ifdef DEBUG
 			dlog("hs_parse: Parsed key: %s, value: %s", key,
-			     value);
+			    value);
 #endif
 			mapc_add_kv(hs_map, key_cpy, value);
 		}
@@ -481,12 +467,12 @@ char *msg, *eom;
 
 /* Check to see if the domain name in the supplied argument matches
    hs_domain.  Strip hs_domain from supplied argument if so. */
-hs_strip_our_domain(name)
-char *name;
+int
+hs_strip_our_domain(char *name)
 {
 	char *end_pos;
 	short targ_len, cur_len;
-	
+
 	targ_len = strlen(hs_domain);
 	cur_len = strlen(name);
 	if (cur_len <= targ_len)
@@ -503,9 +489,7 @@ char *name;
 #define MAXDATA 8*1024
 
 char *
-hs_make_value(cp, len)
-char *cp;
-int len;
+hs_make_value(chr *cp, int len)
 {
 	char *value, *cpcpy, *valuep;
 	int cnt, nextcnt, totalcnt, lencpy;
@@ -531,7 +515,7 @@ int len;
 	if (totalcnt < 1 || totalcnt > MAXDATA || totalcnt > len) {
 #ifdef DEBUG
 		dlog("TXT RR not of expected length (%d %d): %s", totalcnt,
-		     len, dbgname);
+		    len, dbgname);
 #endif /* DEBUG */
 		return(NULL);
 	}
@@ -553,15 +537,14 @@ int len;
 	return(value);
 }
 
-hs_make_ns_query(domain, ansbuf)
-char *domain;
-char *ansbuf;
+int
+hs_make_ns_query(char *domain, char *ansbuf)
 {
 	int status, len;
 	char buf[PACKETSZ];
 
 	if ((len = res_mkquery(QUERY, domain, C_HS, T_NS,
-			       (char *)NULL, 0, NULL, buf, PACKETSZ)) == -1) {
+	    (char *)NULL, 0, NULL, buf, PACKETSZ)) == -1) {
 #ifdef DEBUG
 		dlog("hs_get_ns_list: res_mkquery failed");
 #endif
@@ -570,8 +553,8 @@ char *ansbuf;
 	}
 	if ((status = res_send(buf, len, (char *)ansbuf, PACKETSZ)) == -1) {
 #ifdef DEBUG
-	    dlog("hs_get_ns_list: res_send failed.  status %d errno %d",
-		 status, errno);
+		dlog("hs_get_ns_list: res_send failed.  status %d errno %d",
+		    status, errno);
 #endif
 		errno = 0;
 		return(-1);
@@ -580,25 +563,25 @@ char *ansbuf;
 }
 
 static void
-add_address(addr)
-struct in_addr *addr;
+add_address(struct in_addr *addr)
 {
 	char dq[20];
+
 	bcopy((char *)addr, nsaddr_list[hs_nscount++], sizeof(struct in_addr));
 #ifdef DEBUG
-	dlog("Adding NS address %s", inet_dquad(dq, addr->s_addr));
+	dlog("Adding NS address %s", inet_dquad(dq, sizeof(dq), addr->s_addr));
 #endif /* DEBUG */
 }
 
-hs_get_ns_list(domain)
-char *domain;
+int
+hs_get_ns_list(char *domain)
 {
-	register HEADER *hp;
+	HEADER *hp;
 	int qdcount, nscount;
-	register char *cp;
-	register int n, len;
+	char *cp;
+	int n, len;
 	char key[PACKETSZ], name[PACKETSZ], msg[PACKETSZ], *eom;
-	register u_int32_t **hptr;
+	u_int32_t **hptr;
 	struct hostent *ghp;
 	int numns;
 	char nsname[MAXHSNS][MAXDATA];
@@ -614,7 +597,7 @@ char *domain;
 	if (hp->rcode != NOERROR || hp->opcode != QUERY) {
 #ifdef DEBUG
 		dlog("Bad response (%d) from nameserver %#x", hp->rcode,
-		      hs_server_addr(servernum)->s_addr);
+		    hs_server_addr(servernum)->s_addr);
 #endif /* DEBUG */
 		return(-1);
 	}
@@ -653,7 +636,8 @@ char *domain;
 #ifdef DEBUG
 				dlog("hs_get_ns_list: Saving name %s", name);
 #endif
-				strncpy(nsname[numns], name, MAXDATA);
+				strlcpy(nsname[numns], name,
+				    sizeof(nsname[numns]));
 				nshaveaddr[numns] = 0;
 				numns++;
 			}
@@ -686,7 +670,7 @@ char *domain;
 		if ((ghp = gethostbyname(nsname[i])) == 0)
 			continue;
 		for (hptr = (in_addr_t **)ghp->h_addr_list;
-		     *hptr && hs_nscount < MAX_NSADDR; hptr++) {
+		    *hptr && hs_nscount < MAX_NSADDR; hptr++) {
 			add_address((struct in_addr *) *hptr);
 		}
 	}

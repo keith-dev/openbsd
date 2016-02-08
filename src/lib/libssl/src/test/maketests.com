@@ -143,11 +143,12 @@ $ GOSUB CHECK_OPT_FILE
 $!
 $! Define The TEST Files.
 $!
-$ TEST_FILES = "BNTEST,IDEATEST,MD2TEST,MD4TEST,MD5TEST,HMACTEST,"+ -
+$ TEST_FILES = "BNTEST,ECTEST,IDEATEST,MD2TEST,MD4TEST,MD5TEST,HMACTEST,"+ -
 	       "RC2TEST,RC4TEST,RC5TEST,"+ -
 	       "DESTEST,SHATEST,SHA1TEST,MDC2TEST,RMDTEST,"+ -
-	       "RANDTEST,DHTEST,"+ -
-	       "BFTEST,CASTTEST,SSLTEST,EXPTEST,DSATEST,RSA_TEST"
+	       "RANDTEST,DHTEST,ENGINETEST,"+ -
+	       "BFTEST,CASTTEST,SSLTEST,EXPTEST,DSATEST,RSA_TEST,"+ -
+	       "EVP_TEST"
 $ TCPIP_PROGRAMS = ",,"
 $ IF COMPILER .EQS. "VAXC" THEN -
      TCPIP_PROGRAMS = ",SSLTEST,"
@@ -514,6 +515,7 @@ $ CHECK_OPTIONS:
 $!
 $! Check To See If P1 Is Blank.
 $!
+$ P1 = "NORSAREF"
 $ IF (P1.EQS."NORSAREF")
 $ THEN
 $!
@@ -729,31 +731,7 @@ $ ENDIF
 $!
 $! Set Up Initial CC Definitions, Possibly With User Ones
 $!
-$ CCDEFS = "VMS=1,TCPIP_TYPE_''P4'"
-$ IF F$TRNLNM("OPENSSL_NO_ASM") THEN CCDEFS = CCDEFS + ",NO_ASM"
-$ IF F$TRNLNM("OPENSSL_NO_RSA") THEN CCDEFS = CCDEFS + ",NO_RSA"
-$ IF F$TRNLNM("OPENSSL_NO_DSA") THEN CCDEFS = CCDEFS + ",NO_DSA"
-$ IF F$TRNLNM("OPENSSL_NO_DH") THEN CCDEFS = CCDEFS + ",NO_DH"
-$ IF F$TRNLNM("OPENSSL_NO_MD2") THEN CCDEFS = CCDEFS + ",NO_MD2"
-$ IF F$TRNLNM("OPENSSL_NO_MD5") THEN CCDEFS = CCDEFS + ",NO_MD5"
-$ IF F$TRNLNM("OPENSSL_NO_RIPEMD") THEN CCDEFS = CCDEFS + ",NO_RIPEMD"
-$ IF F$TRNLNM("OPENSSL_NO_SHA") THEN CCDEFS = CCDEFS + ",NO_SHA"
-$ IF F$TRNLNM("OPENSSL_NO_SHA0") THEN CCDEFS = CCDEFS + ",NO_SHA0"
-$ IF F$TRNLNM("OPENSSL_NO_SHA1") THEN CCDEFS = CCDEFS + ",NO_SHA1"
-$ IF F$TRNLNM("OPENSSL_NO_DES")
-$ THEN
-$   CCDEFS = CCDEFS + ",NO_DES,NO_MDC2"
-$ ELSE
-$   IF F$TRNLNM("OPENSSL_NO_MDC2") THEN CCDEFS = CCDEFS + ",NO_MDC2"
-$ ENDIF
-$ IF F$TRNLNM("OPENSSL_NO_RC2") THEN CCDEFS = CCDEFS + ",NO_RC2"
-$ IF F$TRNLNM("OPENSSL_NO_RC4") THEN CCDEFS = CCDEFS + ",NO_RC4"
-$ IF F$TRNLNM("OPENSSL_NO_RC5") THEN CCDEFS = CCDEFS + ",NO_RC5"
-$ IF F$TRNLNM("OPENSSL_NO_IDEA") THEN CCDEFS = CCDEFS + ",NO_IDEA"
-$ IF F$TRNLNM("OPENSSL_NO_BF") THEN CCDEFS = CCDEFS + ",NO_BF"
-$ IF F$TRNLNM("OPENSSL_NO_CAST") THEN CCDEFS = CCDEFS + ",NO_CAST"
-$ IF F$TRNLNM("OPENSSL_NO_HMAC") THEN CCDEFS = CCDEFS + ",NO_HMAC"
-$ IF F$TRNLNM("OPENSSL_NO_SSL2") THEN CCDEFS = CCDEFS + ",NO_SSL2"
+$ CCDEFS = "TCPIP_TYPE_''P4'"
 $ IF F$TYPE(USER_CCDEFS) .NES. "" THEN CCDEFS = CCDEFS + "," + USER_CCDEFS
 $ CCEXTRAFLAGS = ""
 $ IF F$TYPE(USER_CCFLAGS) .NES. "" THEN CCEXTRAFLAGS = USER_CCFLAGS
@@ -785,7 +763,8 @@ $     CC = "CC"
 $     IF ARCH.EQS."VAX" .AND. F$TRNLNM("DECC$CC_DEFAULT").NES."/DECC" -
 	 THEN CC = "CC/DECC"
 $     CC = CC + "/''CC_OPTIMIZE'/''DEBUGGER'/STANDARD=ANSI89" + -
-           "/NOLIST/PREFIX=ALL" + CCEXTRAFLAGS
+           "/NOLIST/PREFIX=ALL" + -
+	   "/INCLUDE=(SYS$DISK:[-])" + CCEXTRAFLAGS
 $!
 $!    Define The Linker Options File Name.
 $!
@@ -817,7 +796,8 @@ $	WRITE SYS$OUTPUT "There is no VAX C on Alpha!"
 $	EXIT
 $     ENDIF
 $     IF F$TRNLNM("DECC$CC_DEFAULT").EQS."/DECC" THEN CC = "CC/VAXC"
-$     CC = CC + "/''CC_OPTIMIZE'/''DEBUGGER'/NOLIST" + CCEXTRAFLAGS
+$     CC = CC + "/''CC_OPTIMIZE'/''DEBUGGER'/NOLIST" + -
+	   "/INCLUDE=(SYS$DISK:[-])" + CCEXTRAFLAGS
 $     CCDEFS = CCDEFS + ",""VAXC"""
 $!
 $!    Define <sys> As SYS$COMMON:[SYSLIB]
@@ -847,7 +827,8 @@ $     WRITE SYS$OUTPUT "Using GNU 'C' Compiler."
 $!
 $!    Use GNU C...
 $!
-$     CC = "GCC/NOCASE_HACK/''GCC_OPTIMIZE'/''DEBUGGER'/NOLIST" + CCEXTRAFLAGS
+$     CC = "GCC/NOCASE_HACK/''GCC_OPTIMIZE'/''DEBUGGER'/NOLIST" + -
+	   "/INCLUDE=(SYS$DISK:[-])" + CCEXTRAFLAGS
 $!
 $!    Define The Linker Options File Name.
 $!
@@ -906,7 +887,7 @@ $   CC = CC + "/DEFINE=(" + CCDEFS + ")" + CCDISABLEWARNINGS
 $!
 $!  Show user the result
 $!
-$   WRITE SYS$OUTPUT "Main Compiling Command: ",CC
+$   WRITE/SYMBOL SYS$OUTPUT "Main Compiling Command: ",CC
 $!
 $!  Else The User Entered An Invalid Arguement.
 $!
@@ -929,7 +910,8 @@ $ ENDIF
 $!
 $! Time to check the contents, and to make sure we get the correct library.
 $!
-$ IF P4.EQS."SOCKETSHR" .OR. P4.EQS."MULTINET" .OR. P4.EQS."UCX"
+$ IF P4.EQS."SOCKETSHR" .OR. P4.EQS."MULTINET" .OR. P4.EQS."UCX" -
+     .OR. P4.EQS."TCPIP" .OR. P4.EQS."NONE"
 $ THEN
 $!
 $!  Check to see if SOCKETSHR was chosen
@@ -939,7 +921,7 @@ $   THEN
 $!
 $!    Set the library to use SOCKETSHR
 $!
-$     TCPIP_LIB = "[-.VMS]SOCKETSHR_SHR.OPT/OPT"
+$     TCPIP_LIB = "SYS$DISK:[-.VMS]SOCKETSHR_SHR.OPT/OPT"
 $!
 $!    Done with SOCKETSHR
 $!
@@ -965,16 +947,42 @@ $   THEN
 $!
 $!    Set the library to use UCX.
 $!
-$     TCPIP_LIB = "[-.VMS]UCX_SHR_DECC.OPT/OPT"
+$     TCPIP_LIB = "SYS$DISK:[-.VMS]UCX_SHR_DECC.OPT/OPT"
 $     IF F$TRNLNM("UCX$IPC_SHR") .NES. ""
 $     THEN
-$       TCPIP_LIB = "[-.VMS]UCX_SHR_DECC_LOG.OPT/OPT"
+$       TCPIP_LIB = "SYS$DISK:[-.VMS]UCX_SHR_DECC_LOG.OPT/OPT"
 $     ELSE
 $       IF COMPILER .NES. "DECC" .AND. ARCH .EQS. "VAX" THEN -
-	  TCPIP_LIB = "[-.VMS]UCX_SHR_VAXC.OPT/OPT"
+	  TCPIP_LIB = "SYS$DISK:[-.VMS]UCX_SHR_VAXC.OPT/OPT"
 $     ENDIF
 $!
 $!    Done with UCX
+$!
+$   ENDIF
+$!
+$!  Check to see if TCPIP was chosen
+$!
+$   IF P4.EQS."TCPIP"
+$   THEN
+$!
+$!    Set the library to use TCPIP (post UCX).
+$!
+$     TCPIP_LIB = "SYS$DISK:[-.VMS]TCPIP_SHR_DECC.OPT/OPT"
+$!
+$!    Done with TCPIP
+$!
+$   ENDIF
+$!
+$!  Check to see if NONE was chosen
+$!
+$   IF P4.EQS."NONE"
+$   THEN
+$!
+$!    Do not use a TCPIP library.
+$!
+$     TCPIP_LIB = ""
+$!
+$!    Done with NONE
 $!
 $   ENDIF
 $!
@@ -993,6 +1001,7 @@ $   WRITE SYS$OUTPUT "The Option ",P4," Is Invalid.  The Valid Options Are:"
 $   WRITE SYS$OUTPUT ""
 $   WRITE SYS$OUTPUT "    SOCKETSHR  :  To link with SOCKETSHR TCP/IP library."
 $   WRITE SYS$OUTPUT "    UCX        :  To link with UCX TCP/IP library."
+$   WRITE SYS$OUTPUT "    TCPIP      :  To link with TCPIP (post UCX) TCP/IP library."
 $   WRITE SYS$OUTPUT ""
 $!
 $!  Time To EXIT.
@@ -1050,6 +1059,7 @@ $!
 $! Save directory information
 $!
 $ __HERE = F$PARSE(F$PARSE("A.;",F$ENVIRONMENT("PROCEDURE"))-"A.;","[]A.;") - "A.;"
+$ __HERE = F$EDIT(__HERE,"UPCASE")
 $ __TOP = __HERE - "TEST]"
 $ __INCLUDE = __TOP + "INCLUDE.OPENSSL]"
 $!

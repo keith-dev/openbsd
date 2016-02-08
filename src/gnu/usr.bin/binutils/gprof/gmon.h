@@ -1,6 +1,6 @@
-/*-
- * Copyright (c) 1991 The Regents of the University of California.
- * All rights reserved.
+/*
+ * Copyright (c) 1983, 1993, 2001
+ *      The Regents of the University of California.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -10,11 +10,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by the University of
- *	California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -29,8 +25,6 @@
  * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
- *
- *	@(#)gmon.h	5.2 (Berkeley) 5/6/91
  */
 #ifndef gmon_h
 #define gmon_h
@@ -39,13 +33,8 @@ struct raw_phdr
   {
     /* FIXME: Checking a host compiler define means that we can't use
        a cross gprof to the alpha.  */
-#if defined(__alpha__) || defined(__sparc64__)
-    char low_pc[8];		/* base pc address of sample buffer */
-    char high_pc[8];		/* max pc address of sampled buffer */
-#else
-    char low_pc[4];		/* base pc address of sample buffer */
-    char high_pc[4];		/* max pc address of sampled buffer */
-#endif
+    char low_pc[GMON_PTR_SIZE];	/* base pc address of sample buffer */
+    char high_pc[GMON_PTR_SIZE];/* max pc address of sampled buffer */
     char ncnt[4];		/* size of sample buffer (plus this header) */
 
     char version[4];		/* version number */
@@ -57,15 +46,8 @@ struct raw_phdr
 
 struct old_raw_phdr
   {
-    /* FIXME: Checking a host compiler define means that we can't use
-       a cross gprof to the alpha.  */
-#if defined(__alpha__) || defined(__sparc64__)
-    char low_pc[8];		/* base pc address of sample buffer */
-    char high_pc[8];		/* max pc address of sampled buffer */
-#else
-    char low_pc[4];		/* base pc address of sample buffer */
-    char high_pc[4];		/* max pc address of sampled buffer */
-#endif
+    char low_pc[GMON_PTR_SIZE];	/* base pc address of sample buffer */
+    char high_pc[GMON_PTR_SIZE];/* max pc address of sampled buffer */
     char ncnt[4];		/* size of sample buffer (plus this header) */
 
     /* FIXME: Checking host compiler defines here means that we can't
@@ -103,7 +85,7 @@ struct old_raw_phdr
  *      calls   $0,(r0)
  *      calls   $0,(r0)
  *
- * which is separated by only three bytes, thus HASHFRACTION is 
+ * which is separated by only three bytes, thus HASHFRACTION is
  * calculated as:
  *
  *      HASHFRACTION = 3 / (2 * 2 - 1) = 1
@@ -134,17 +116,9 @@ struct tostruct
  */
 struct raw_arc
   {
-    /* FIXME: Checking a host compiler define means that we can't use
-       a cross gprof to the alpha.  */
-#ifdef __alpha__
-    char from_pc[8];
-    char self_pc[8];
-    char count[8];
-#else
-    char from_pc[4];
-    char self_pc[4];
+    char from_pc[GMON_PTR_SIZE];
+    char self_pc[GMON_PTR_SIZE];
     char count[4];
-#endif
   };
 
 /*

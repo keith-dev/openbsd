@@ -1,4 +1,4 @@
-dnl	$OpenBSD: hardware,v 1.81 2002/04/13 23:17:25 miod Exp $
+dnl	$OpenBSD: hardware,v 1.87 2002/09/04 15:46:27 jason Exp $
 OpenBSD/MACHINE OSREV works across a broad range of standard PC's and
 clones, with a wide variety of processors and I/O bus architectures.  It
 can be expected to install and run with minimal difficulties on most
@@ -16,7 +16,7 @@ X or compile the system, more RAM is recommended.  (16M of RAM will actually
 allow you to run X and/or compile but it won't be speedy. Note that until
 you have around 32M of RAM, getting more RAM is more important than getting
 a faster CPU.)
- 
+
 Supported hardware {:-include-:}:
 	Processors
 		All CPU chips compatible with the Intel 80386 (MACHINE)
@@ -89,13 +89,13 @@ Supported hardware {:-include-:}:
 		    have a boot ROM; only the AHA-152x and motherboards using
 		    this chip are likely to be bootable, consequently.)
 		Adaptec AIC-7770-based boards, including the Adaptec
-		    AHA-274x and AHA-284x families) [B] [C]
+		    AHA-274x and AHA-284x families) [C]
 		Adaptec AHA-[23]94x[W] cards and some on-board PCI designs
-		    using the AIC7870 and AIC7880 chips. [B] [C]
+		    using the AIC7870 and AIC7880 chips. [C]
 		Adaptec AHA-[23]94xU[2W] cards and some on-board PCI designs
-		    using the AIC789[01], AIC7895, AIC789[67] chips [B] [C]
+		    using the AIC789[01], AIC7895, AIC789[67] chips [C]
 		Adaptec AIC-789[29] chips and products like the
-		    AHA-29160 based upon it which do 160MB/sec SCSI. [B] [C]
+		    AHA-29160 based upon it which do 160MB/sec SCSI. [C]
 		    (However, the 7899G card is currently not supported with
 		     more than one device attached)
 		AdvanSys 'U', 'UW', 'U2W' and 'U160' PCI SCSI
@@ -145,7 +145,7 @@ Supported hardware {:-include-:}:
 		    Compaq SMART, SMART-2/E, SMART-2/P, SMART-2DH,
 		      SMART-2SL
 		DPT SmartCache and SmartRaid III/IV PCI/EISA adapters [A] [C]
-		ICP-Vortex GDT 6XXXR[DNPS] series [A]
+		Intel (and formerly ICP-Vortex) GDT series [A]
 		I2O (intelligent I/O) RAID controllers, including: [A] [C]
 		    Adaptec SCSI RAID (ASR-2100S, ASR-2110S, ASR-3200S,
 		      etc)
@@ -155,7 +155,7 @@ Supported hardware {:-include-:}:
 		    I2O, including Intel and Mylex (untested)
 	CD-ROM and DVD-ROM Drives
 		Mitsumi CD-ROM drives [*]
-		    [Note: The Mitsumi driver device probe is known 
+		    [Note: The Mitsumi driver device probe is known
 		    to cause trouble with several devices!]
 		Most SCSI CD-ROM, CD-R, CD-RW, and DVD drives
 		Most ATAPI CD-ROM, CD-R, CD-RW, and DVD drives
@@ -174,7 +174,7 @@ Supported hardware {:-include-:}:
 		ST16660-base ports
 		XR16850-based ports (only in the pccom driver)
 		AST-style 4-port serial boards [G]
-		BOCA 8-port serial cards [*] 
+		BOCA 8-port serial cards [*]
 		Cyclades Cyclom-{4, 8, 16}Y serial boards [G]
 		Cyclades-Z series multiport serial boards [G]
 		IBM PC-RT 4-port serial boards [*]
@@ -188,27 +188,27 @@ Supported hardware {:-include-:}:
 		PCI `universal' communication cards, providing serial
 		  and parallel ports, including: [G]
 		    Dolphin Peripherals 4014 (dual parallel) and
-		    	4035 (dual serial)
+			4035 (dual serial)
 		    SIIG Cyber 2P1S (dual parallel, single serial)
-		    	and 2S1P (dual serial, single parallel)
+			and 2S1P (dual serial, single parallel)
 		    SIIG Cyber 4S (quad serial)
 		    SIIG Cyber I/O (single parallel, single serial)
 		    SIIG Cyber Parallel, Parallel Dual, Serial,
-		    	Serial Dual
+			Serial Dual
 		    VScom PCI-800 (8 port serial, probably OEM)
 		    AT&T/Lucent Venus Modem (found on IBM 33L4618
-		    	card, Actiontec 56K, and others)
+			card, Actiontec 56K, and others)
 		    US Robotics 3CP5609 PCI (modem)
 		    Lava Computers 2SP-PCI (parallel port)
 		    Lava Computers 2SP-PCI and Quattro-PCI (dual
-		    	serial)
+			serial)
 		    NEC PK-UG-X008 (serial)
 		    NEC PK-UG-X001 K56flex PCI (modem)
 		    Koutech IOFLEX-2S (dual serial)
 		    Syba Tech Ltd. PCI-4S2P-550-ECP (4 port serial, 2
-		    	port parallel)
+			port parallel)
 		    Moxa Technologies Co., Ltd. PCI I/O Card 4S (4 port
-		    	serial)
+			serial)
 		    NetMos 2S1P (2 port serial and 1 port parallel)
 	Ethernet Adapters
 		3Com 3c501 [A] [B] [C]
@@ -224,13 +224,13 @@ Supported hardware {:-include-:}:
 		    3Com 3c980/3c980C server adapters
 		    3Com 3cSOHO apapter
 		    3Com 3c900B-FL and 3c900B-FL/FX fiber optic
-		    	adapters
+			adapters
 		    3Com 3c555/3c556/3c556B MiniPCI adapters
 		    Dell on-board 3c920
 		    Dell Precision on-board 3c905B
 		    Dell OptiPlex GX1 on-board 3c918
 		    Dell Latitude laptop docking station embedded
-		    	3c905
+			3c905
 		3Com 3c990 3XP Typhoon/Sidewinder PCI adapters, including: [A]
 		  [B] [C]
 		    3C990-TX-95
@@ -436,7 +436,7 @@ Supported hardware {:-include-:}:
 		    SGI Tigon
 		Intel i82542, i82543, and i82544 based adapters, including:
 		  [A] [B] [C]
-		  Often known as Intel Pro/1000 Gigabit Server Adapter 
+		  Often known as Intel Pro/1000 Gigabit Server Adapter
 		    Intel i82542 1000BASE-X Ethernet
 		    Intel i82543 1000BASE-X Ethernet
 		    Intel i82543-SC 1000BASE-X Ethernet
@@ -458,16 +458,16 @@ Supported hardware {:-include-:}:
 		    D-Link DGE-500SX
 		Broadcom BCM570x (Tigon3) based PCI adapters, including: [A]
 		  [B] [C]
-		    3Com 3c996-T (10/100/1000baseTX) 
+		    3Com 3c996-T (10/100/1000baseTX)
 		    3Com 3c996-SX (1000baseSX)
 		    3Com 3c996B-T (10/100/1000baseTX)
 		    Dell PowerEdge 2550 integrated BCM5700 NIC
 		      (10/100/1000baseTX)
-		    SysKonnect SK-9D21 (10/100/1000baseTX) 
-		    SysKonnect SK-9D41 (1000baseSX) 
+		    SysKonnect SK-9D21 (10/100/1000baseTX)
+		    SysKonnect SK-9D41 (1000baseSX)
 		Sundance/Tamarack TC9021 based PCI adapters, including: [G]
-		    D-Link DGE-550T (10/100/1000baseTX) 
-		    Antares Microsystems Gigabit Ethernet board 
+		    D-Link DGE-550T (10/100/1000baseTX)
+		    Antares Microsystems Gigabit Ethernet board
 		SysKonnect SK-9841/9842/9843/9844 Gigabit Ethernet
 		  adapters [A] [B] [C]
 	ATM Adapters
@@ -479,7 +479,8 @@ Supported hardware {:-include-:}:
 		Lan Media Corporation SSI (T1)/HSSI/DS1/DS3 WAN
 		interfaces [G]
 	Cryptography Accelerators
-		Broadcom Bluesteelnet uBsec 5501, 5601, 5805, 5820 [G]
+		Broadcom Bluesteelnet uBsec 5501, 5601, 5801, 5802, 5805,
+		  5820, 5821, 5822 [G]
 		Hifn 7751-based boards, including: [G]
 		    Soekris Engineering vpn1201 and vpn1211
 		    GTGI PowerCrypt Encryption Accelerator
@@ -520,6 +521,9 @@ Supported hardware {:-include-:}:
 			Netgear FA410TX
 			Network Everywhere NP10T
 			New Media LiveWire 10/100
+		    RealTek 81[23]9-based, including:
+			Accton MPX5030 CardBus
+			Corega FEther CB-TXD 10/100 Ethernet
 		    SMC 91Cxx-based, including:
 			Megahertz XJEM1144, CC10BT
 			SMC EtherEZ 8020BT
@@ -579,9 +583,18 @@ Supported hardware {:-include-:}:
 		ProAudio Spectrum
 		S3 SonicVibes
 		Windows Sound System
+	Radio Receiver Devices
+		AIMS Lab Radiotrack FM radio
+		AIMS Lab Radiotrack II FM radio
+		Aztech/PackardBell FM radio
+		Brooktree 848/849/878/879-based TV tuner
+		D-Link DSB-R100 USB radio
+		Forte Media FM801 audio
+		SoundForte RadioLink SF16-FMR FM radio
+		SoundForte RadioLink SF16-FMR2 FM radio
 	Miscellaneous Devices
 		APM power management,
-		Brooktree 8[47][89] based frame grabber and TV tuner cards, 
+		Brooktree 8[47][89] based frame grabber and TV tuner cards,
 		including: [G]
 		    Hauppage Wincast TV
 		    STB TV PCI Television Tuner
@@ -669,7 +682,7 @@ Ultrastor 14f, 24f (if it works), or 34f SCSI host adapters
 AHA-152x, AIC-6260- or AIC-6360-based SCSI host adapters
 		aic0	0x340	11	any
 
-Seagate ST0[12], Future Domain TMC-8xx based SCSI controllers 
+Seagate ST0[12], Future Domain TMC-8xx based SCSI controllers
 		sea0		5		iomem 0xc8000
 
 WD7000 and TMC-7000 SCSI host adapters
@@ -776,7 +789,7 @@ Special care for SMC Elite Ultra:
 
 
 Special care for PCI BIOS:
- 
+
 	As all BIOS implementations and subsystems this one has bugs too.
 	Sometimes specifications are unclear about interfaces and/or data
 	validation.

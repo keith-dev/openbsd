@@ -1,4 +1,4 @@
-/*	$OpenBSD: traceroute.c,v 1.41 2002/02/16 21:28:10 millert Exp $	*/
+/*	$OpenBSD: traceroute.c,v 1.52 2002/09/06 19:50:05 deraadt Exp $	*/
 /*	$NetBSD: traceroute.c,v 1.10 1995/05/21 15:50:45 mycroft Exp $	*/
 
 /*-
@@ -47,7 +47,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)traceroute.c	8.1 (Berkeley) 6/6/93";*/
 #else
-static char rcsid[] = "$OpenBSD: traceroute.c,v 1.41 2002/02/16 21:28:10 millert Exp $";
+static char rcsid[] = "$OpenBSD: traceroute.c,v 1.52 2002/09/06 19:50:05 deraadt Exp $";
 #endif
 #endif /* not lint */
 
@@ -227,6 +227,7 @@ static char rcsid[] = "$OpenBSD: traceroute.c,v 1.41 2002/02/16 21:28:10 millert
 #include <sys/socket.h>
 #include <sys/file.h>
 #include <sys/ioctl.h>
+#include <sys/sysctl.h>
 
 #include <netinet/in_systm.h>
 #include <netinet/in.h>
@@ -245,9 +246,6 @@ static char rcsid[] = "$OpenBSD: traceroute.c,v 1.41 2002/02/16 21:28:10 millert
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-
-#define Fprintf (void)fprintf
-#define Printf (void)printf
 
 #define	MAX_LSRR	((MAX_IPOPTLEN - 4) / 4)
 
@@ -278,7 +276,6 @@ void usage(void);
 
 int s;				/* receive (icmp) socket file descriptor */
 int sndsock;			/* send (udp) socket file descriptor */
-struct timezone tz;		/* leftover */
 
 int datalen;			/* How much data */
 int headerlen;			/* How long packet's header is */
@@ -301,23 +298,19 @@ int nflag;			/* print addresses numerically */
 int dump;
 
 int
-main(argc, argv)
-	int argc;
-	char *argv[];
+main(int argc, char *argv[])
 {
 	struct hostent *hp;
-	struct protoent *pe;
 	struct sockaddr_in from, to;
-	int ch, i, lsrr, on, probe, seq, tos, ttl, ttl_flag, incflag = 1;
+	int ch, i, lsrr, on, probe, seq, tos, ttl;
+	int ttl_flag, incflag = 1, protoset = 0;
 	struct ip *ip;
 	u_int32_t tmprnd;
 	int sump = 0;
+	int mib[4] = { CTL_NET, PF_INET, IPPROTO_IP, IPCTL_DEFTTL };
+	size_t size = sizeof(max_ttl);
 
-	if ((pe = getprotobyname("icmp")) == NULL) {
-		Fprintf(stderr, "icmp: unknown protocol\n");
-		exit(10);
-	}
-	if ((s = socket(AF_INET, SOCK_RAW, pe->p_proto)) < 0)
+	if ((s = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP)) < 0)
 		err(5, "icmp socket");
 	if ((sndsock = socket(AF_INET, SOCK_RAW, IPPROTO_RAW)) < 0)
 		err(5, "raw socket");
@@ -325,6 +318,9 @@ main(argc, argv)
 	/* revoke privs */
 	seteuid(getuid());
 	setuid(getuid());
+
+	(void) sysctl(mib, sizeof(mib)/sizeof(mib[0]), &max_ttl, &size,
+	    NULL, 0);
 
 	ttl_flag = 0;
 	lsrr = 0;
@@ -363,6 +359,9 @@ main(argc, argv)
 			lsrrlen += 4;
 			break;
 		case 'I':
+			if (protoset)
+				errx(1, "protocol already set with -P");
+			protoset = 1;
 			proto = IPPROTO_ICMP;
 			break;
 		case 'l':
@@ -379,13 +378,17 @@ main(argc, argv)
 			break;
 		case 'p':
 			port = atoi(optarg);
-			if (port < 1)
-				errx(1, "port must be >0.");
+			if (port < 1 || port > 65536)
+				errx(1, "port must be >0, <65536.");
 			break;
 		case 'P':
+			if (protoset)
+				errx(1, "protocol already set with -I");
+			protoset = 1;
 			proto = atoi(optarg);
-			if (proto < 1) {
+			if (proto < 1 || proto >= IPPROTO_MAX) {
 				struct protoent *pent;
+
 				pent = getprotobyname(optarg);
 				if (pent)
 					proto = pent->p_proto;
@@ -444,6 +447,9 @@ main(argc, argv)
 		memcpy(&to.sin_addr, hp->h_addr, hp->h_length);
 		if ((hostname = strdup(hp->h_name)) == NULL)
 			err(1, "malloc");
+		if (hp->h_addr_list[1] != NULL)
+			warnx("Warning: %s has multiple addresses; using %s",
+			    hostname, inet_ntoa(to.sin_addr));
 	}
 	if (*++argv)
 		datalen = atoi(*argv);
@@ -476,6 +482,7 @@ main(argc, argv)
 	ip = (struct ip *)outpacket;
 	if (lsrr != 0) {
 		u_char *p;
+
 		p = (u_char *)(ip + 1);
 		*p++ = IPOPT_NOP;
 		*p++ = IPOPT_LSRR;
@@ -496,15 +503,12 @@ main(argc, argv)
 	ident = (getpid() & 0xffff) | 0x8000;
 	tmprnd = arc4random();
 	sec_perturb = (tmprnd & 0x80000000) ? -(tmprnd & 0x7ff) :
-						(tmprnd & 0x7ff);
+	    (tmprnd & 0x7ff);
 	usec_perturb = arc4random();
 
 	if (options & SO_DEBUG)
 		(void) setsockopt(s, SOL_SOCKET, SO_DEBUG,
-				  (char *)&on, sizeof(on));
-	if (options & SO_DONTROUTE)
-		(void) setsockopt(s, SOL_SOCKET, SO_DONTROUTE,
-				  (char *)&on, sizeof(on));
+		    (char *)&on, sizeof(on));
 #ifdef SO_SNDBUF
 	if (setsockopt(sndsock, SOL_SOCKET, SO_SNDBUF, (char *)&datalen,
 	    sizeof(datalen)) < 0)
@@ -517,10 +521,10 @@ main(argc, argv)
 #endif /* IP_HDRINCL */
 	if (options & SO_DEBUG)
 		(void) setsockopt(sndsock, SOL_SOCKET, SO_DEBUG,
-				  (char *)&on, sizeof(on));
+		    (char *)&on, sizeof(on));
 	if (options & SO_DONTROUTE)
 		(void) setsockopt(sndsock, SOL_SOCKET, SO_DONTROUTE,
-				  (char *)&on, sizeof(on));
+		    (char *)&on, sizeof(on));
 
 	if (source) {
 		(void) memset(&from, 0, sizeof(struct sockaddr));
@@ -538,15 +542,15 @@ main(argc, argv)
 			err(1, "bind");
 	}
 
-	Fprintf(stderr, "traceroute to %s (%s)", hostname,
+	fprintf(stderr, "traceroute to %s (%s)", hostname,
 		inet_ntoa(to.sin_addr));
 	if (source)
-		Fprintf(stderr, " from %s", source);
-	Fprintf(stderr, ", %d hops max, %d byte packets\n", max_ttl, datalen);
+		fprintf(stderr, " from %s", source);
+	fprintf(stderr, ", %d hops max, %d byte packets\n", max_ttl, datalen);
 	(void) fflush(stderr);
 
 	if (first_ttl > 1)
-		Printf("Skipping %d intermediate hops\n", first_ttl - 1);
+		printf("Skipping %d intermediate hops\n", first_ttl - 1);
 
 	for (ttl = first_ttl; ttl <= max_ttl; ++ttl) {
 		in_addr_t lastaddr = 0;
@@ -556,17 +560,16 @@ main(argc, argv)
 		quad_t dt;
 		int loss;
 
-		Printf("%2d ", ttl);
+		printf("%2d ", ttl);
 		for (probe = 0, loss = 0; probe < nprobes; ++probe) {
 			int cc;
 			struct timeval t1, t2;
-			struct timezone tz;
 			int code;
 
-			(void) gettimeofday(&t1, &tz);
+			(void) gettimeofday(&t1, NULL);
 			send_probe(++seq, ttl, incflag, &to);
 			while ((cc = wait_for_reply(s, &from, &t1))) {
-				(void) gettimeofday(&t2, &tz);
+				(void) gettimeofday(&t2, NULL);
 				if (t2.tv_sec - t1.tv_sec > waittime) {
 					cc = 0;
 					break;
@@ -580,19 +583,19 @@ main(argc, argv)
 					lastaddr = from.sin_addr.s_addr;
 				}
 				dt = (quad_t)(t2.tv_sec - t1.tv_sec) * 1000000
-					+ (quad_t)(t2.tv_usec - t1.tv_usec);
-				Printf("  %u", (u_int)(dt / 1000));
+				    + (quad_t)(t2.tv_usec - t1.tv_usec);
+				printf("  %u", (u_int)(dt / 1000));
 				if (dt % 1000)
-					Printf(".%u", (u_int)(dt % 1000));
-				Printf(" ms");
+					printf(".%u", (u_int)(dt % 1000));
+				printf(" ms");
 				ip = (struct ip *)packet;
 				if (ttl_flag)
-					Printf(" (%d)", ip->ip_ttl);
+					printf(" (%d)", ip->ip_ttl);
 				if (i == -2) {
 #ifndef ARCHAIC
 					ip = (struct ip *)packet;
 					if (ip->ip_ttl <= 1)
-						Printf(" !");
+						printf(" !");
 #endif
 					++got_there;
 					break;
@@ -606,69 +609,72 @@ main(argc, argv)
 #ifndef ARCHAIC
 					ip = (struct ip *)packet;
 					if (ip->ip_ttl <= 1)
-						Printf(" !");
+						printf(" !");
 #endif /* ARCHAIC */
 					++got_there;
 					break;
 				case ICMP_UNREACH_NET:
 					++unreachable;
-					Printf(" !N");
+					printf(" !N");
 					break;
 				case ICMP_UNREACH_HOST:
 					++unreachable;
-					Printf(" !H");
+					printf(" !H");
 					break;
 				case ICMP_UNREACH_PROTOCOL:
 					++got_there;
-					Printf(" !P");
+					printf(" !P");
 					break;
 				case ICMP_UNREACH_NEEDFRAG:
 					++unreachable;
-					Printf(" !F");
+					printf(" !F");
 					break;
 				case ICMP_UNREACH_SRCFAIL:
 					++unreachable;
-					Printf(" !S");
+					printf(" !S");
 					break;
 				case ICMP_UNREACH_FILTER_PROHIB:
+					++unreachable;
+					printf(" !X");
+					break;
 				case ICMP_UNREACH_NET_PROHIB: /*misuse*/
 					++unreachable;
-					Printf(" !A");
+					printf(" !A");
 					break;
 				case ICMP_UNREACH_HOST_PROHIB:
 					++unreachable;
-					Printf(" !C");
+					printf(" !C");
 					break;
 				case ICMP_UNREACH_NET_UNKNOWN:
 				case ICMP_UNREACH_HOST_UNKNOWN:
 					++unreachable;
-					Printf(" !U");
+					printf(" !U");
 					break;
 				case ICMP_UNREACH_ISOLATED:
 					++unreachable;
-					Printf(" !I");
+					printf(" !I");
 					break;
 				case ICMP_UNREACH_TOSNET:
 				case ICMP_UNREACH_TOSHOST:
 					++unreachable;
-					Printf(" !T");
+					printf(" !T");
 					break;
 				default:
 					++unreachable;
-					Printf(" !<%d>", i - 1);
+					printf(" !<%d>", i - 1);
 					break;
 				}
 				break;
 			}
 			if (cc == 0) {
-				Printf(" *");
+				printf(" *");
 				timeout++;
 				loss++;
 			}
 			(void) fflush(stdout);
 		}
 		if (sump)
-			Printf(" (%d%% loss)", (loss * 100) / nprobes);
+			printf(" (%d%% loss)", (loss * 100) / nprobes);
 		putchar('\n');
 		if (got_there || (unreachable && (unreachable + timeout) >= nprobes))
 			break;
@@ -677,14 +683,11 @@ main(argc, argv)
 }
 
 int
-wait_for_reply(sock, from, sent)
-	int sock;
-	struct sockaddr_in *from;
-	struct timeval *sent;
+wait_for_reply(int sock, struct sockaddr_in *from, struct timeval *sent)
 {
 	struct timeval now, wait;
 	int cc = 0, fdsn;
-	int fromlen = sizeof (*from);
+	socklen_t fromlen = sizeof (*from);
 	fd_set *fdsp;
 
 	fdsn = howmany(sock+1, NFDBITS) * sizeof(fd_mask);
@@ -703,32 +706,30 @@ wait_for_reply(sock, from, sent)
 		wait.tv_sec = wait.tv_usec = 0;
 
 	if (select(sock+1, fdsp, (fd_set *)0, (fd_set *)0, &wait) > 0)
-		cc=recvfrom(s, (char *)packet, sizeof(packet), 0,
-			    (struct sockaddr *)from, &fromlen);
+		cc = recvfrom(s, (char *)packet, sizeof(packet), 0,
+		    (struct sockaddr *)from, &fromlen);
 
 	free(fdsp);
 	return (cc);
 }
 
 void
-dump_packet()
+dump_packet(void)
 {
 	u_char *p;
 	int i;
 
-	Fprintf(stderr, "packet data:");
+	fprintf(stderr, "packet data:");
 	for (p = outpacket, i = 0; i < datalen; i++) {
 		if ((i % 24) == 0)
-			Fprintf(stderr, "\n ");
-		Fprintf(stderr, " %02x", *p++);
+			fprintf(stderr, "\n ");
+		fprintf(stderr, " %02x", *p++);
 	}
-	Fprintf(stderr, "\n");
+	fprintf(stderr, "\n");
 }
 
 void
-send_probe(seq, ttl, iflag, to)
-	int seq, ttl, iflag;
-	struct sockaddr_in *to;
+send_probe(int seq, int ttl, int iflag, struct sockaddr_in *to)
 {
 	struct ip *ip = (struct ip *)outpacket;
 	u_char *p = (u_char *)(ip + 1);
@@ -741,16 +742,16 @@ send_probe(seq, ttl, iflag, to)
 	ip->ip_len = htons(datalen);
 	ip->ip_ttl = ttl;
 	ip->ip_id = htons(ident+seq);
-	
-	switch(proto) {
-	   case IPPROTO_ICMP:
+
+	switch (proto) {
+	case IPPROTO_ICMP:
 		icmpp->icmp_type = icmp_type;
 		icmpp->icmp_code = icmp_code;
 		icmpp->icmp_seq = htons(seq);
 		icmpp->icmp_id = htons(ident);
 		op = (struct packetdata *)(icmpp + 1);
 		break;
-	   case IPPROTO_UDP:
+	case IPPROTO_UDP:
 		up->uh_sport = htons(ident);
 		if (iflag)
 			up->uh_dport = htons(port+seq);
@@ -767,7 +768,7 @@ send_probe(seq, ttl, iflag, to)
 	}
 	op->seq = seq;
 	op->ttl = ttl;
-	(void) gettimeofday(&tv, &tz);
+	(void) gettimeofday(&tv, NULL);
 
 	/*
 	 * We don't want hostiles snooping the net to get any useful
@@ -781,14 +782,14 @@ send_probe(seq, ttl, iflag, to)
 	 * work wants to use them they will have to subtract out the
 	 * perturbation first.
 	 */
-	(void) gettimeofday(&tv, &tz);
+	(void) gettimeofday(&tv, NULL);
 	op->sec = htonl(tv.tv_sec + sec_perturb);
 	op->usec = htonl((tv.tv_usec + usec_perturb) % 1000000);
 
 	if (proto == IPPROTO_ICMP && icmp_type == ICMP_ECHO) {
 		icmpp->icmp_cksum = 0;
 		icmpp->icmp_cksum = in_cksum((u_short *)icmpp,
-					datalen - sizeof(struct ip) - lsrrlen);
+		    datalen - sizeof(struct ip) - lsrrlen);
 		if (icmpp->icmp_cksum == 0) icmpp->icmp_cksum = 0xffff;
 	}
 
@@ -796,12 +797,12 @@ send_probe(seq, ttl, iflag, to)
 		dump_packet();
 
 	i = sendto(sndsock, outpacket, datalen, 0, (struct sockaddr *)to,
-		   sizeof(struct sockaddr_in));
+	    sizeof(struct sockaddr_in));
 	if (i < 0 || i != datalen)  {
 		if (i<0)
 			perror("sendto");
-		Printf("traceroute: wrote %s %d chars, ret=%d\n", hostname,
-			datalen, i);
+		printf("traceroute: wrote %s %d chars, ret=%d\n", hostname,
+		    datalen, i);
 		(void) fflush(stdout);
 	}
 }
@@ -810,8 +811,7 @@ send_probe(seq, ttl, iflag, to)
  * Convert an ICMP "type" field to a printable string.
  */
 char *
-pr_type(t)
-	u_char t;
+pr_type(u_char t)
 {
 	static char *ttab[] = {
 	"Echo Reply",	"ICMP 1",	"ICMP 2",	"Dest Unreachable",
@@ -829,12 +829,7 @@ pr_type(t)
 
 
 int
-packet_ok(buf, cc, from, seq, iflag)
-	u_char *buf;
-	int cc;
-	struct sockaddr_in *from;
-	int seq;
-	int iflag;
+packet_ok(u_char *buf, int cc, struct sockaddr_in *from, int seq, int iflag)
 {
 	register struct icmp *icp;
 	u_char type, code;
@@ -846,8 +841,8 @@ packet_ok(buf, cc, from, seq, iflag)
 	hlen = ip->ip_hl << 2;
 	if (cc < hlen + ICMP_MINLEN) {
 		if (verbose)
-			Printf("packet too short (%d bytes) from %s\n", cc,
-				inet_ntoa(from->sin_addr));
+			printf("packet too short (%d bytes) from %s\n", cc,
+			    inet_ntoa(from->sin_addr));
 		return (0);
 	}
 	cc -= hlen;
@@ -865,9 +860,8 @@ packet_ok(buf, cc, from, seq, iflag)
 		hip = &icp->icmp_ip;
 		hlen = hip->ip_hl << 2;
 
-		switch(proto) {
-		  case IPPROTO_ICMP:
-
+		switch (proto) {
+		case IPPROTO_ICMP:
 			if (icmp_type == ICMP_ECHO &&
 			    type == ICMP_ECHOREPLY &&
 			    icp->icmp_id == htons(ident) &&
@@ -881,7 +875,7 @@ packet_ok(buf, cc, from, seq, iflag)
 				return (type == ICMP_TIMXCEED? -1 : code + 1);
 			break;
 
-		  case IPPROTO_UDP:
+		case IPPROTO_UDP:
 			up = (struct udphdr *)((u_char *)hip + hlen);
 			if (hlen + 12 <= cc && hip->ip_p == proto &&
 			    up->uh_sport == htons(ident) &&
@@ -902,23 +896,19 @@ packet_ok(buf, cc, from, seq, iflag)
 		int i;
 		in_addr_t *lp = (in_addr_t *)&icp->icmp_ip;
 
-		Printf("\n%d bytes from %s", cc, inet_ntoa(from->sin_addr));
-		Printf(" to %s", inet_ntoa(ip->ip_dst));
-		Printf(": icmp type %d (%s) code %d\n", type, pr_type(type),
+		printf("\n%d bytes from %s", cc, inet_ntoa(from->sin_addr));
+		printf(" to %s", inet_ntoa(ip->ip_dst));
+		printf(": icmp type %d (%s) code %d\n", type, pr_type(type),
 		    icp->icmp_code);
 		for (i = 4; i < cc ; i += sizeof(in_addr_t))
-			Printf("%2d: x%8.8lx\n", i, (unsigned long)*lp++);
+			printf("%2d: x%8.8lx\n", i, (unsigned long)*lp++);
 	}
 #endif /* ARCHAIC */
 	return (0);
 }
 
-
 void
-print(buf, cc, from)
-	u_char *buf;
-	int cc;
-	struct sockaddr_in *from;
+print(u_char *buf, int cc, struct sockaddr_in *from)
 {
 	struct ip *ip;
 	int hlen;
@@ -928,13 +918,13 @@ print(buf, cc, from)
 	cc -= hlen;
 
 	if (nflag)
-		Printf(" %s", inet_ntoa(from->sin_addr));
+		printf(" %s", inet_ntoa(from->sin_addr));
 	else
-		Printf(" %s (%s)", inetname(from->sin_addr),
+		printf(" %s (%s)", inetname(from->sin_addr),
 		    inet_ntoa(from->sin_addr));
 
 	if (verbose)
-		Printf(" %d bytes to %s", cc, inet_ntoa (ip->ip_dst));
+		printf(" %d bytes to %s", cc, inet_ntoa (ip->ip_dst));
 }
 
 
@@ -942,9 +932,7 @@ print(buf, cc, from)
  * Checksum routine for Internet Protocol family headers (C Version)
  */
 u_short
-in_cksum(addr, len)
-	u_short *addr;
-	int len;
+in_cksum(u_short *addr, int len)
 {
 	register int nleft = len;
 	register u_short *w = addr;
@@ -981,8 +969,7 @@ in_cksum(addr, len)
  * numeric value, otherwise try for symbolic name.
  */
 char *
-inetname(in)
-	struct in_addr in;
+inetname(struct in_addr in)
 {
 	register char *cp;
 	register struct hostent *hp;
@@ -1010,12 +997,13 @@ inetname(in)
 }
 
 void
-usage()
+usage(void)
 {
 	extern char *__progname;
+
 	fprintf(stderr,
-"usage: %s [-SDIdnrvc] [-g gateway_addr] ... [-m max_ttl] [-p port#]\n\t\
-[-P proto] [-q nqueries] [-s src_addr] [-t tos]\n\t\
-[-w wait] [-f first_ttl] host [data size]\n", __progname);
+	    "usage: %s [-SDIdnrvc] [-g gateway_addr] ... [-m max_ttl] [-p port#]\n"
+	    "\t[-P proto] [-q nqueries] [-s src_addr] [-t tos]\n"
+	    "\t[-w wait] [-f first_ttl] host [data size]\n", __progname);
 	exit(1);
 }

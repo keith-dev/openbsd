@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.48 2000/11/08 22:09:24 deraadt Exp $
+#	$OpenBSD: Makefile,v 1.51 2002/08/16 01:59:41 wcobb Exp $
 
 # Uncomment this to enable tracing in libcurses
 #CURSESTRACE=-DTRACE
@@ -50,7 +50,12 @@ SRCS+=	lib_trace.c lib_traceatr.c lib_tracebits.c lib_tracechr.c \
 # tty
 SRCS+=	hardscroll.c hashmap.c lib_mvcur.c lib_tstp.c lib_twait.c \
 	lib_vidattr.c tty_update.c
-CFLAGS+= -I. -I${.CURDIR} ${CURSESTRACE}
+
+HOSTCFLAGS?=	${CFLAGS}
+HOSTLDFLAGS?=	${LDFLAGS}
+HOSTCFLAGS+=	-I. -I${.CURDIR} ${CURSESTRACE}
+CFLAGS+=	-I. -I${.CURDIR} ${CURSESTRACE}
+
 MAN=	curs_addch.3 curs_addchstr.3 curs_addstr.3 curs_attr.3 curs_beep.3 \
 	curs_bkgd.3 curs_border.3 curs_clear.3 curs_color.3 curs_delch.3 \
 	curs_deleteln.3 curs_extend.3 curs_getch.3 curs_getstr.3 curs_getyx.3 \
@@ -214,10 +219,10 @@ init_keytry.h: make_keys ${.CURDIR}/tinfo/keys.list
 	./make_keys ${.CURDIR}/tinfo/keys.list > ${.TARGET}
 
 make_keys: ${.CURDIR}/tinfo/make_keys.c names.c
-	${HOSTCC} ${CFLAGS} ${LDFLAGS} -o ${.TARGET} ${.CURDIR}/tinfo/make_keys.c ${LDADD}
+	${HOSTCC} ${LDSTATIC} ${HOSTCFLAGS} ${HOSTLDFLAGS} -o ${.TARGET} ${.CURDIR}/tinfo/make_keys.c ${LDADD}
 
 make_hash: ${.CURDIR}/tinfo/comp_hash.c ${.CURDIR}/hashsize.h
-	${HOSTCC} ${CFLAGS} -DMAIN_PROGRAM ${LDFLAGS} -o ${.TARGET} ${.CURDIR}/tinfo/comp_hash.c ${LDADD}
+	${HOSTCC} ${LDSTATIC} ${HOSTCFLAGS} -DMAIN_PROGRAM ${HOSTLDFLAGS} -o ${.TARGET} ${.CURDIR}/tinfo/comp_hash.c ${LDADD}
 
 expanded.c: ${.CURDIR}/term.h ${.CURDIR}/curses.priv.h ${.CURDIR}/tty/MKexpanded.sh
 	sh ${.CURDIR}/tty/MKexpanded.sh "${CPP}" ${CPPFLAGS} > ${.TARGET}
@@ -237,13 +242,20 @@ names.c codes.c: ${.CURDIR}/tinfo/MKnames.awk
 unctrl.c: ${.CURDIR}/base/MKunctrl.awk
 	echo | ${AWK} -f ${.CURDIR}/base/MKunctrl.awk > ${.TARGET}
 
+.include <bsd.own.mk>
+
 # Link libtermlib, libtermcap to libcurses so we don't break people's Makefiles
 afterinstall:
-	-cd ${DESTDIR}/usr/lib; \
+	-cd ${DESTDIR}${LIBDIR}; \
 	for i in ${_LIBS}; do \
 	    ln -f $$i `echo $$i | sed 's/curses/termlib/'`; \
 	    ln -f $$i `echo $$i | sed 's/curses/termcap/'`; \
 	done
+.if (${DEBUGLIBS:L} == "yes")
+	-cd ${DESTDIR}${LIBDIR}/debug; \
+	    ln -f lib${LIB}.a lib`echo ${LIB} | sed 's/curses/termlib/'`.a; \
+	    ln -f lib${LIB}.a lib`echo ${LIB} | sed 's/curses/termcap/'`.a
+.endif
 
 .include <bsd.lib.mk>
 

@@ -30,7 +30,7 @@ or implied warranty.
 
 #include "kadm_locl.h"
 
-RCSID("$KTH: ksrvutil.c,v 1.50 1999/11/13 06:33:59 assar Exp $");
+RCSID("$KTH: ksrvutil.c,v 1.52 2001/08/26 01:40:42 assar Exp $");
 
 #include "ksrvutil.h"
 
@@ -265,7 +265,7 @@ usage(void)
     fprintf(stderr, "{list | change | add | get | delete}\n");
     fprintf(stderr, "   -i causes the program to ask for "
 	    "confirmation before changing keys.\n");
-    fprintf(stderr, "   -k causes the key to printed for list or change.\n");
+    fprintf(stderr, "   -k causes the key to be printed for list or change.\n");
     fprintf(stderr, "   -u creates one keyfile for each principal "
 	    "(only used with `get')\n");
     exit(1);
@@ -315,8 +315,6 @@ main(int argc, char **argv)
     memset(local_realm, 0, sizeof(local_realm));
     memset(cellname, 0, sizeof(cellname));
     
-    set_progname (argv[0]);
-
     if (krb_get_default_principal(u_name, u_inst, u_realm) < 0)
 	errx (1, "could not get default principal");
 
@@ -499,12 +497,14 @@ main(int argc, char **argv)
 		     * key has been compromised so we also use a
 		     * random sequence number!
 		     */
+#ifndef HAVE_OPENSSL
 		    des_init_random_number_generator(&old_key);
 		    {
 		        des_cblock seqnum;
 			des_generate_random_block(&seqnum);
 			des_set_sequence_number((unsigned char *)&seqnum);
 		    }
+#endif
 		    /* 
 		     * Pick a new key and determine whether or not
 		     * it is safe to change
@@ -588,7 +588,7 @@ main(int argc, char **argv)
 		} else {
 		    strlcpy (sname, databuf, sizeof(sname));
 		    safe_read_stdin("Instance: ", databuf, sizeof(databuf));
-		    strlcpy (sinst, databuf, sizeof(databuf));
+		    strlcpy (sinst, databuf, sizeof(sinst));
 		}
 
 		safe_read_stdin("Realm: ", databuf, sizeof(databuf));

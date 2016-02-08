@@ -1,4 +1,4 @@
-/*	$OpenBSD: mknetid.c,v 1.7 2002/02/13 23:10:46 deraadt Exp $ */
+/*	$OpenBSD: mknetid.c,v 1.9 2002/07/19 20:59:40 deraadt Exp $ */
 
 /*
  * Copyright (c) 1996 Mats O Jansson <moj@stacken.kth.se>
@@ -32,7 +32,7 @@
  */
 
 #ifndef LINT
-static char rcsid[] = "$OpenBSD: mknetid.c,v 1.7 2002/02/13 23:10:46 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: mknetid.c,v 1.9 2002/07/19 20:59:40 deraadt Exp $";
 #endif
 
 #include <sys/param.h>
@@ -84,15 +84,11 @@ char *NetidFile = "/etc/netid";
 
 #define HASHMAX 55
 
-char *ProgramName = "mknetid";
 struct user *root = NULL, *tail = NULL;
 struct user *hroot[HASHMAX], *htail[HASHMAX];
 
 int
-read_line(fp, buf, size)
-	FILE *fp;
-	char *buf;
-	int size;
+read_line(FILE *fp, char *buf, int size)
 {
 	int done = 0;
 
@@ -124,8 +120,7 @@ read_line(fp, buf, size)
 }
 
 int
-hashidx(key)
-char key;
+hashidx(char key)
 {
 	if (key < 'A')
 		return (0);
@@ -139,8 +134,7 @@ char key;
 }
 
 void
-add_user(username, uid, gid)
-char *username, *uid, *gid;
+add_user(char *username, char *uid, char *gid)
 {
 	struct user *u;
 	int idx;
@@ -172,8 +166,7 @@ char *username, *uid, *gid;
 	}
 }
 
-void add_group(username, gid)
-char *username, *gid;
+void add_group(char *username, char *gid)
 {
 	struct user *u;
 	int idx, g;
@@ -197,9 +190,7 @@ char *username, *gid;
 }
 
 void
-read_passwd(pfile, fname)
-FILE *pfile;
-char *fname;
+read_passwd(FILE *pfile, char *fname)
 {
 	char  line[1024];
 	int   line_no = 0;
@@ -217,7 +208,7 @@ char *fname;
 
 		/*
 		 * Check if we have the whole line
-		 */ 
+		 */
 		if (line[len-1] != '\n') {
 			fprintf(stderr, "line %d in \"%s\" is too long\n",
 			    line_no, fname);
@@ -274,10 +265,9 @@ char *fname;
 }
 
 int
-isgsep(ch)
-	char ch;
+isgsep(char ch)
 {
-	switch(ch)  {
+	switch (ch)  {
 	case ',':
 	case ' ':
 	case '\t':
@@ -289,9 +279,7 @@ isgsep(ch)
 }
 
 void
-read_group(gfile, fname)
-	FILE *gfile;
-	char *fname;
+read_group(FILE *gfile, char *fname)
 {
 	char  line[2048];
 	int   line_no = 0;
@@ -374,9 +362,7 @@ read_group(gfile, fname)
 }
 
 void
-print_passwd_group(qflag, domain)
-	int qflag;
-	char *domain;
+print_passwd_group(int qflag, char *domain)
 {
 	struct user *u, *p;
 	int i;
@@ -390,8 +376,8 @@ print_passwd_group(qflag, domain)
 
 		if (p != u) {
 			if (!qflag) {
-				fprintf(stderr, "%s: unix.%d@%s %s\n",
-				    ProgramName, u->usr_uid, domain,
+				fprintf(stderr, "mknetid: unix.%d@%s %s\n",
+				    u->usr_uid, domain,
 				    "multiply defined, other definitions ignored");
 			}
 		} else {
@@ -411,9 +397,7 @@ print_passwd_group(qflag, domain)
 }
 
 void
-print_hosts(pfile, fname, domain)
-	FILE *pfile;
-	char *fname, *domain;
+print_hosts(FILE *pfile, char *fname, char *domain)
 {
 	char  line[1024];
 	int   line_no = 0;
@@ -431,7 +415,7 @@ print_hosts(pfile, fname, domain)
 
 		/*
 		 * Check if we have the whole line
-		 */ 
+		 */
 		if (line[len-1] != '\n') {
 			fprintf(stderr, "line %d in \"%s\" is too long\n",
 			    line_no, fname);
@@ -466,9 +450,7 @@ print_hosts(pfile, fname, domain)
 }
 
 void
-print_netid(mfile, fname)
-FILE *mfile;
-char *fname;
+print_netid(FILE *mfile, char *fname)
 {
 	char  line[1024];
 	int   line_no = 0;
@@ -486,7 +468,7 @@ char *fname;
 
 		/*
 		 * Check if we have the whole line
-		 */ 
+		 */
 		if (line[len-1] != '\n') {
 			fprintf(stderr, "line %d in \"%s\" is too long\n",
 			    line_no, fname);
@@ -520,17 +502,21 @@ char *fname;
 	}
 }
 
-int
-main(argc, argv)
-	int argc;
-	char *argv[];
+void
+usage(void)
 {
-	int	qflag, ch, usage;
-	char   *domain;
-	FILE   *pfile, *gfile, *hfile, *mfile;
+	fprintf(stderr,
+	    "usage: mknetid [-d domain] [-q] [-p passwdfile] [-g groupfile]\n"
+	    "               [-h hostfile] [-m netidfile]\n");
+	exit(1);
+}
 
-	qflag = usage = 0;
-	domain = NULL;
+int
+main(int argc, char *argv[])
+{
+	FILE   *pfile, *gfile, *hfile, *mfile;
+	int	qflag = 0, ch;
+	char   *domain = NULL;
 
 	while ((ch = getopt(argc, argv, "d:g:h:m:p:q")) != -1)
 		switch (ch) {
@@ -553,44 +539,34 @@ main(argc, argv)
 			qflag++;
 			break;
 		default:
-			usage++;
+			usage();
 			break;
 		}
 
-	if (argc > optind) {
-		usage++;
-	}
+	if (argc > optind)
+		usage();
 
-	if (usage) {
-		fprintf(stderr,
-		    "usage:\t%s [-d domain] [-q] [-p passwdfile] [-g groupfile]\n"
-		    "\t\t[-h hostfile] [-m netidfile]\n",
-		    ProgramName);
-		exit(1);
-	}
-
-	if (domain == NULL) {
+	if (domain == NULL)
 		yp_get_default_domain(&domain);
-	}
 
 	pfile = fopen(PasswdFile, "r");
 	if (pfile == NULL) {
-		fprintf(stderr,"%s: can't open file \"%s\"\n",
-		    ProgramName, PasswdFile);
+		fprintf(stderr,"mknetid: can't open file \"%s\"\n",
+		    PasswdFile);
 		exit(1);
 	}
 
 	gfile = fopen(GroupFile, "r");
 	if (gfile == NULL) {
-		fprintf(stderr,"%s: can't open file \"%s\"\n",
-		    ProgramName, PasswdFile);
+		fprintf(stderr,"mknetid: can't open file \"%s\"\n",
+		    PasswdFile);
 		exit(1);
 	}
 
 	hfile = fopen(HostFile, "r");
 	if (hfile == NULL) {
-		fprintf(stderr,"%s: can't open file \"%s\"\n",
-		    ProgramName, PasswdFile);
+		fprintf(stderr,"mknetid: can't open file \"%s\"\n",
+		    PasswdFile);
 		exit(1);
 	}
 

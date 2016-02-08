@@ -1,4 +1,4 @@
-/*	$OpenBSD: pflogd.c,v 1.10 2002/01/21 07:46:09 dhartmei Exp $	*/
+/*	$OpenBSD: pflogd.c,v 1.13 2002/09/03 18:28:49 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2001 Theo de Raadt
@@ -60,7 +60,8 @@ pcap_dumper_t *dpcap;
 
 int Debug = 0;
 int snaplen = DEF_SNAPLEN;
-int gotsig_close, gotsig_alrm, gotsig_hup;
+
+volatile sig_atomic_t gotsig_close, gotsig_alrm, gotsig_hup;
 
 char *filename = PFLOGD_LOG_FILE;
 char *interface = PFLOGD_DEFAULT_IF;
@@ -107,9 +108,9 @@ logmsg(int pri, const char *message, ...)
 	va_start(ap, message);
 
 	if (log_debug)
-		vfprintf(stderr,message,ap);
+		vfprintf(stderr, message, ap);
 	else
-		vsyslog(pri,message,ap);
+		vsyslog(pri, message, ap);
 	va_end(ap);
 }
 
@@ -147,16 +148,16 @@ init_pcap(void)
 
 	hpcap = pcap_open_live(interface, snaplen, 1, PCAP_TO_MS, errbuf);
 	if (hpcap == NULL) {
-		logmsg(LOG_ERR, "Failed to initialize: %s\n",errbuf);
+		logmsg(LOG_ERR, "Failed to initialize: %s\n", errbuf);
 		hpcap = oldhpcap;
 		return (-1);
 	}
 
 	if (filter) {
 		if (pcap_compile(hpcap, &bprog, filter, PCAP_OPT_FIL, 0) < 0)
-			logmsg(LOG_WARNING, "%s", pcap_geterr(hpcap));
+			logmsg(LOG_WARNING, "%s\n", pcap_geterr(hpcap));
 		else if (pcap_setfilter(hpcap, &bprog) < 0)
-			logmsg(LOG_WARNING, "%s", pcap_geterr(hpcap));
+			logmsg(LOG_WARNING, "%s\n", pcap_geterr(hpcap));
 	}
 
 	if (pcap_datalink(hpcap) != DLT_PFLOG) {
@@ -341,7 +342,7 @@ main(int argc, char **argv)
 	while (1) {
 		np = pcap_dispatch(hpcap, PCAP_NUM_PKTS, pcap_dump, (u_char *)dpcap);
 		if (np < 0)
-			logmsg(LOG_NOTICE, "%s\n",pcap_geterr(hpcap));
+			logmsg(LOG_NOTICE, "%s\n", pcap_geterr(hpcap));
 
 		if (gotsig_close)
 			break;

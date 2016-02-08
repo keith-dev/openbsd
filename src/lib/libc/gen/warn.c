@@ -32,9 +32,10 @@
  */
 
 #if defined(LIBC_SCCS) && !defined(lint)
-static char rcsid[] = "$OpenBSD: warn.c,v 1.4 2002/02/19 19:39:36 millert Exp $";
+static char rcsid[] = "$OpenBSD: warn.c,v 1.6 2002/06/12 03:16:20 fgsch Exp $";
 #endif /* LIBC_SCCS and not lint */
 
+#include <sys/cdefs.h>
 #include <err.h>
 #include <stdarg.h>
 
@@ -47,3 +48,6 @@ _warn(const char *fmt, ...)
 	_vwarn(fmt, ap);
 	va_end(ap);
 }
+
+__weak_alias(warn, _warn);
+

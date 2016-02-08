@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.1 2001/10/10 04:21:02 deraadt Exp $
+#	$OpenBSD: Makefile,v 1.7 2002/06/09 05:53:55 todd Exp $
 
 TOP=		${.CURDIR}/..
 
@@ -10,7 +10,7 @@ LISTS=		${.CURDIR}/list
 UTILS?=		${.CURDIR}/../../miniroot
 
 MOUNT_POINT=	/mnt
-MTREE=		${.CURDIR}/mtree.conf
+MTREE=		${UTILS}/mtree.conf
 
 FLOPPY=		floppyB${REV}.fs
 FLOPPYSIZE?=	2880
@@ -62,7 +62,7 @@ ${FLOPPY}:	bsd.gz ${BOOT} /usr/
 	disklabel -w ${RAWLABEL} ${VND} ${FLOPPYTYPE}
 	newfs ${NEWFSOPTS_FD} ${VND_RDEV}
 	mount ${VND_DEV} ${MOUNT_POINT}
-	cp ${DESTDIR}/usr/mdec/ofwboot ${MOUNT_POINT}$/
+	cp ${DESTDIR}/usr/mdec/ofwboot ${MOUNT_POINT}/
 	cp bsd.gz ${MOUNT_POINT}/bsd
 	${INSTALLBOOT} -v ${DESTDIR}/usr/mdec/bootblk \
 		`echo ${VND_RDEV} | sed -e 's/a$$/c/'`
@@ -88,7 +88,7 @@ bsd:
 	    make clean && make depend && COPTS=-Os make
 	cp ${TOP}/../../sys/arch/sparc64/compile/${KERNEL}/bsd bsd
 
-rd_setup: 
+rd_setup:
 	dd if=/dev/zero of=${IMAGE} bs=512 count=${NBLKS}
 	vnconfig -v -c ${VND} ${IMAGE}
 	disklabel -w -r ${VND} ${DISKTYPE}
@@ -113,6 +113,9 @@ unconfig:
 install:
 	cp ${FLOPPY} ${DESTDIR}/snapshot/
 
+${CBIN}.conf: ${LISTS}
+	awk -f ${UTILS}/makeconf.awk CBIN=${CBIN} ${LISTS} > ${CBIN}.conf
+
 ${CBIN}.mk ${CBIN}.cache ${CBIN}.c: ${CBIN}.conf
 	crunchgen -E -D ${.CURDIR}/../../.. -L ${DESTDIR}/usr/lib ${.ALLSRC}
 
@@ -123,7 +126,8 @@ do_files:
 	mtree -def ${MTREE} -p ${MOUNT_POINT}/ -u
 	TOPDIR=${TOP} CURDIR=${.CURDIR} OBJDIR=${.OBJDIR} \
 	    REV=${REV} ARCHDIR=${.CURDIR}/.. TARGDIR=${MOUNT_POINT} \
-	    sh ${TOP}/common/runlist.sh ${LISTS}
+	    UTILS=${UTILS} sh ${UTILS}/runlist.sh ${LISTS}
+	rm ${MOUNT_POINT}/${CBIN}
 
 clean cleandir:
 	/bin/rm -f core ${IMAGE} ${CBIN} ${CBIN}.mk ${CBIN}.cache \

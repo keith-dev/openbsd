@@ -1,4 +1,4 @@
-/*	$OpenBSD: at.h,v 1.3 1997/03/01 23:40:09 millert Exp $	*/
+/*	$OpenBSD: at.h,v 1.7 2002/05/14 18:05:39 millert Exp $	*/
 /*	$NetBSD: at.h,v 1.2 1995/03/25 18:13:32 glass Exp $	*/
 
 /*
@@ -27,12 +27,22 @@
  */
 
 extern int fcreated;
-extern char *namep;
+extern char *__progname;
+extern int program;
 extern char atfile[];
-extern char atverify;
+extern char vflag;
+extern char force;
+extern char interactive;
+
+enum { ATQ, ATRM, AT, BATCH, CAT };	/* what are we running as? */
+
+struct atjob {
+	time_t runtimer;
+	time_t ctime;
+	char queue;
+};
 
 #define AT_MAXJOBS	255	/* max jobs outstanding per user */
-#define AT_VERSION	2.9	/* our version number */
 
 #define DEFAULT_BATCH_QUEUE	'E'
 #define DEFAULT_AT_QUEUE	'c'

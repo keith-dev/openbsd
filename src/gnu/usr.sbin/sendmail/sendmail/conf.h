@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1998-2001 Sendmail, Inc. and its suppliers.
+ * Copyright (c) 1998-2002 Sendmail, Inc. and its suppliers.
  *	All rights reserved.
  * Copyright (c) 1983, 1995-1997 Eric P. Allman.  All rights reserved.
  * Copyright (c) 1988, 1993
@@ -10,7 +10,7 @@
  * the sendmail distribution.
  *
  *
- *	$Sendmail: conf.h,v 8.557 2001/10/05 03:49:41 ca Exp $
+ *	$Sendmail: conf.h,v 8.563 2002/06/04 02:13:50 geir Exp $
  */
 
 /*
@@ -132,6 +132,16 @@ struct rusage;	/* forward declaration to get gcc to shut up in wait.h */
 #  endif /* STARTTLS */
 # endif /* ! AUTH_MECHANISMS */
 #endif /* SASL */
+
+/*
+**  Default database permissions (alias, maps, etc.)
+**	Used by sendmail and libsmdb
+*/
+
+#ifndef DBMMODE
+# define DBMMODE	0640
+#endif /* ! DBMMODE */
+
 
 /**********************************************************************
 **  Compilation options.

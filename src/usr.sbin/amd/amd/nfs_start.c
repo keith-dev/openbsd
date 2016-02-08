@@ -36,7 +36,7 @@
  * SUCH DAMAGE.
  *
  *	from: @(#)nfs_start.c	8.1 (Berkeley) 6/6/93
- *	$Id: nfs_start.c,v 1.6 2001/09/05 23:24:21 millert Exp $
+ *	$Id: nfs_start.c,v 1.12 2002/09/10 05:43:47 deraadt Exp $
  */
 
 #include "am.h"
@@ -44,6 +44,7 @@
 #include <signal.h>
 #include <unistd.h>
 #include <setjmp.h>
+
 extern jmp_buf select_intr;
 extern int select_intr_valid;
 
@@ -53,14 +54,15 @@ extern int select_intr_valid;
  * so that we do NFS gatewaying.
  */
 #define	svcudp_create svcudp2_create
-extern SVCXPRT *svcudp2_create P((int));
+extern SVCXPRT *svcudp2_create(int);
 #endif /* HAS_TFS */
 
 extern void nfs_program_2();
 extern void amq_program_1();
 
 unsigned short nfs_port;
-SVCXPRT *nfsxprt;
+SVCXPRT *nfsxprt, *lnfsxprt;
+SVCXPRT *amqp, *lamqp;
 
 extern int fwd_sock;
 int max_fds = -1;
@@ -69,14 +71,14 @@ int max_fds = -1;
 /*
  * Check that we are not burning resources
  */
-static void checkup(P_void)
+static void
+checkup(void)
 {
-
-static int max_fd = 0;
-static char *max_mem = 0;
+	static int max_fd = 0;
+	static char *max_mem = 0;
 
 	int next_fd = dup(0);
-	extern caddr_t sbrk P((int));
+	extern caddr_t sbrk(int);
 	caddr_t next_mem = sbrk(0);
 	close(next_fd);
 
@@ -100,15 +102,13 @@ static char *max_mem = 0;
 }
 #endif /* DEBUG */
 
-static int do_select(mask, omask, fds, fdp, tvp)
-sigset_t *mask;
-sigset_t *omask;
-int fds;
-fd_set *fdp;
-struct timeval *tvp;
+static int
+do_select(sigset_t *mask, sigset_t *omask, int fds, fd_set *fdp,
+    struct timeval *tvp)
 {
 	int sig;
 	int nsel;
+
 	if ((sig = setjmp(select_intr))) {
 		select_intr_valid = 0;
 		/* Got a signal */
@@ -157,11 +157,11 @@ struct timeval *tvp;
  * Determine whether anything is left in
  * the RPC input queue.
  */
-static int rpc_pending_now()
+static int
+rpc_pending_now()
 {
 	struct timeval tvv;
 	int nsel;
-#ifdef FD_SET
 	fd_set *fdsp;
 	int fdsn;
 
@@ -170,12 +170,6 @@ static int rpc_pending_now()
 		return(0);
 	memset(fdsp, 0, fdsn);
 	FD_SET(fwd_sock, fdsp);
-#else
-	int *fdsp;
-	int readfds = (1 << fwd_sock);
-	fdsp = (int *)malloc(sizeof readfds);
-	memcpy(fdsp, &readfds, sizeof readfds);
-#endif /* FD_SET */
 
 	tvv.tv_sec = tvv.tv_usec = 0;
 	nsel = select(max_fds+1, fdsp, NULL, NULL, &tvv);
@@ -183,22 +177,16 @@ static int rpc_pending_now()
 		free(fdsp);
 		return(0);
 	}
-#ifdef FD_SET
 	if (FD_ISSET(fwd_sock, fdsp)) {
 		free(fdsp);
 		return(1);
 	}
-#else
-	if (readfds & (1 << fwd_sock)) {
-		free(fdsp);
-		return(1);
-	}
-#endif
 	free(fdsp);
 	return(0);
 }
 
-static serv_state run_rpc(P_void)
+static serv_state
+run_rpc(void)
 {
 	sigset_t mask, omask;
 
@@ -247,14 +235,10 @@ static serv_state run_rpc(P_void)
 		FD_SET(fwd_sock, fdsp);
 #endif
 #else
-#ifdef FD_SET
 		fd_set readfds;
 		FD_ZERO(&readfds);
 		readfds.fds_bits[0] = svc_fds;
 		FD_SET(fwd_sock, &readfds);
-#else
-		int readfds = svc_fds | (1 << fwd_sock);
-#endif /* FD_SET */
 #endif /* RPC_4 */
 
 #ifdef DEBUG
@@ -313,23 +297,13 @@ static serv_state run_rpc(P_void)
 			/* Read all pending NFS responses at once to avoid
 			   having responses queue up as a consequence of
 			   retransmissions. */
-#ifdef FD_SET
 			if (FD_ISSET(fwd_sock, fdsp)) {
 				FD_CLR(fwd_sock, fdsp);
-				--nsel;	
+				--nsel;
 				do {
 					fwd_reply();
 				} while (rpc_pending_now() > 0);
 			}
-#else
-			if (readfds & (1 << fwd_sock)) {
-				readfds &= ~(1 << fwd_sock);
-				--nsel;	
-				do {
-					fwd_reply();
-				} while (rpc_pending_now() > 0);
-			}
-#endif
 
 			if (nsel) {
 				/*
@@ -343,11 +317,7 @@ static serv_state run_rpc(P_void)
 				svc_getreqset(fdsp);
 #endif
 #else
-#ifdef FD_SET
 				svc_getreq(readfds.fds_bits[0]);
-#else
-				svc_getreq(readfds);
-#endif /* FD_SET */
 #endif /* RPC_4 */
 			}
 			break;
@@ -363,8 +333,8 @@ static serv_state run_rpc(P_void)
 	return amd_state;
 }
 
-static int bindnfs_port(so)
-int so;
+static int
+bindnfs_port(int so)
 {
 	unsigned short port;
 	int error = bind_resv_port(so, &port);
@@ -373,7 +343,8 @@ int so;
 	return error;
 }
 
-void unregister_amq(P_void)
+void
+unregister_amq(void)
 {
 #ifdef DEBUG
 	Debug(D_AMQ)
@@ -381,20 +352,49 @@ void unregister_amq(P_void)
 	(void) pmap_unset(AMQ_PROGRAM, AMQ_VERSION);
 }
 
-int mount_automounter(ppid)
-int ppid;
+int
+mount_automounter(pid_t ppid)
 {
-	int so = socket(AF_INET, SOCK_DGRAM, 0);
-	SVCXPRT *amqp;
-	int nmount;
+	struct sockaddr_in sin;
+	int so, so2, nmount;
+	int sinlen;
+	int on = 1;
+
+	so = socket(AF_INET, SOCK_DGRAM, 0);
 
 	if (so < 0 || bindnfs_port(so) < 0) {
 		perror("Can't create privileged nfs port");
 		return 1;
 	}
 
-	if ((nfsxprt = svcudp_create(so)) == NULL || 
-			(amqp = svcudp_create(so)) == NULL) {
+	if ((nfsxprt = svcudp_create(so)) == NULL ||
+	    (amqp = svcudp_create(so)) == NULL) {
+		plog(XLOG_FATAL, "cannot create rpc/udp service");
+		return 2;
+	}
+
+	sinlen = sizeof sin;
+	if (getsockname(so, (struct sockaddr *)&sin, &sinlen) == -1) {
+		perror("Can't get information on socket");
+		return 1;
+	}
+
+	so2 = socket(AF_INET, SOCK_DGRAM, 0);
+	if (so2 < 0) {
+		perror("Can't create 2nd socket");
+		return 1;
+	}
+
+	setsockopt(so2, SOL_SOCKET, SO_REUSEADDR, &on, sizeof on);
+
+	sin.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+	if (bind(so2, (struct sockaddr *)&sin, sizeof sin) == -1) {
+		perror("Can't bind 2nd socket");
+		return 1;
+	}
+
+	if ((lnfsxprt = svcudp_create(so2)) == NULL ||
+	    (lamqp = svcudp_create(so2)) == NULL) {
 		plog(XLOG_FATAL, "cannot create rpc/udp service");
 		return 2;
 	}
@@ -417,6 +417,8 @@ int ppid;
 	 */
 	if (so > max_fds)
 		max_fds = so;
+	if (so2 > max_fds)
+		max_fds = so2;
 	if (fwd_sock > max_fds)
 		max_fds = fwd_sock;
 

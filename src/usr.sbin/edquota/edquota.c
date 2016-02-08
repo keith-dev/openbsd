@@ -42,7 +42,7 @@ static char copyright[] =
 
 #ifndef lint
 /*static char sccsid[] = "from: @(#)edquota.c	8.1 (Berkeley) 6/6/93";*/
-static char *rcsid = "$Id: edquota.c,v 1.30 2002/03/14 16:44:24 mpech Exp $";
+static char *rcsid = "$Id: edquota.c,v 1.35 2002/09/06 21:49:21 deraadt Exp $";
 #endif /* not lint */
 
 /*
@@ -355,16 +355,17 @@ putprivs(id, quotatype, quplist)
 }
 
 /*
- * Take a list of priviledges and get it edited.
+ * Take a list of privileges and get it edited.
  */
 int
 editit(tmpfile)
 	char *tmpfile;
 {
-	int pid, stat, xpid;
+	pid_t pid, xpid;
 	char *argp[] = {"sh", "-c", NULL, NULL};
 	char *ed, *p;
 	sigset_t mask, omask;
+	int stat;
 
 	if ((ed = getenv("EDITOR")) == (char *)0)
 		ed = _PATH_VI;
@@ -673,18 +674,18 @@ cvtstoa(time)
 
 	if (time % (24 * 60 * 60) == 0) {
 		time /= 24 * 60 * 60;
-		(void)sprintf(buf, "%d day%s", (int)time,
+		(void)snprintf(buf, sizeof buf, "%d day%s", (int)time,
 		    time == 1 ? "" : "s");
 	} else if (time % (60 * 60) == 0) {
 		time /= 60 * 60;
-		(void)sprintf(buf, "%d hour%s", (int)time,
+		(void)snprintf(buf, sizeof buf, "%d hour%s", (int)time,
 		    time == 1 ? "" : "s");
 	} else if (time % 60 == 0) {
 		time /= 60;
-		(void)sprintf(buf, "%d minute%s", (int)time,
+		(void)snprintf(buf, sizeof buf, "%d minute%s", (int)time,
 		    time == 1 ? "" : "s");
 	} else
-		(void)sprintf(buf, "%d second%s", (int)time,
+		(void)snprintf(buf, sizeof buf, "%d second%s", (int)time,
 		    time == 1 ? "" : "s");
 	return(buf);
 }

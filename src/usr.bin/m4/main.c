@@ -1,4 +1,4 @@
-/*	$OpenBSD: main.c,v 1.52 2002/02/16 21:27:48 millert Exp $	*/
+/*	$OpenBSD: main.c,v 1.54 2002/04/28 14:37:12 espie Exp $	*/
 /*	$NetBSD: main.c,v 1.12 1997/02/08 23:54:49 cgd Exp $	*/
 
 /*-
@@ -47,7 +47,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)main.c	8.1 (Berkeley) 6/6/93";
 #else
-static char rcsid[] = "$OpenBSD: main.c,v 1.52 2002/02/16 21:27:48 millert Exp $";
+static char rcsid[] = "$OpenBSD: main.c,v 1.54 2002/04/28 14:37:12 espie Exp $";
 #endif
 #endif /* not lint */
 
@@ -91,6 +91,7 @@ char lquote[MAXCCHARS+1] = {LQUOTE};	/* left quote character  (`)   */
 char rquote[MAXCCHARS+1] = {RQUOTE};	/* right quote character (')   */
 char scommt[MAXCCHARS+1] = {SCOMMT};	/* start character for comment */
 char ecommt[MAXCCHARS+1] = {ECOMMT};	/* end character for comment   */
+int  synch_lines = 0;		/* line synchronisation for C preprocessor */
 
 struct keyblk keywrds[] = {	/* m4 keywords to be installed */
 	{ "include",      INCLTYPE },
@@ -166,15 +167,15 @@ static void macro(void);
 static void initkwds(void);
 static ndptr inspect(int, char *);
 static int do_look_ahead(int, const char *);
+static void reallyoutputstr(const char *);
+static void reallyputchar(int);
 
 static void enlarge_stack(void);
 
 int main(int, char *[]);
 
 int
-main(argc,argv)
-	int argc;
-	char *argv[];
+main(int argc, char *argv[])
 {
 	int c;
 	int n;
@@ -194,7 +195,7 @@ main(argc,argv)
 	outfile = NULL;
 	resizedivs(MAXOUT);
 
-	while ((c = getopt(argc, argv, "gt:d:D:U:o:I:")) != -1)
+	while ((c = getopt(argc, argv, "gst:d:D:U:o:I:")) != -1)
 		switch(c) {
 
 		case 'D':               /* define something..*/
@@ -216,6 +217,9 @@ main(argc,argv)
 			break;
 		case 'd':
 			set_trace_flags(optarg);
+			break;
+		case 's':
+			synch_lines = 1;
 			break;
 		case 't':
 			mark_traced(optarg, 1);
@@ -279,9 +283,7 @@ main(argc,argv)
  *         0 if `token' not found; all characters pushed back
  */
 static int
-do_look_ahead(t, token)
-	int	t;
-	const char	*token;
+do_look_ahead(int t, const char *token)
 {
 	int i;
 
@@ -361,6 +363,7 @@ macro()
 			if (ilevel <= 0)
 				break;			/* all done thanks.. */
 			release_input(infile+ilevel--);
+			emit_synchline();
 			bufbase = bbase[ilevel];
 			continue;
 		}
@@ -394,7 +397,7 @@ macro()
 				} else {
 					if (nlpar > 0) {
 						if (sp < 0)
-							putc(l, active);
+							reallyputchar(l);
 						else
 							CHRSAVE(l);
 					}
@@ -404,22 +407,22 @@ macro()
 		}
 
 		else if (sp < 0 && LOOK_AHEAD(t, scommt)) {
-			fputs(scommt, active);
+			reallyoutputstr(scommt);
 
 			for(;;) {
 				t = gpbc();
 				if (LOOK_AHEAD(t, ecommt)) {
-					fputs(ecommt, active);
+					reallyoutputstr(ecommt);
 					break;
 				}
 				if (t == EOF)
 					break;
-				putc(t, active);
+				reallyputchar(t);
 			}
 		}
 
 		else if (sp < 0) {		/* not in a macro at all */
-			putc(t, active);	/* output directly..	 */
+			reallyputchar(t);	/* output directly..	 */
 		}
 
 		else switch(t) {
@@ -489,15 +492,41 @@ macro()
  * output string directly, without pushing it for reparses. 
  */
 void
-outputstr(s)
-	const char *s;
+outputstr(const char *s)
 {
 	if (sp < 0)
-		while (*s)
-			putc(*s++, active);
+		reallyoutputstr(s);
 	else
 		while (*s)
 			CHRSAVE(*s++);
+}
+
+void
+reallyoutputstr(const char *s)
+{
+	if (synch_lines) {
+		while (*s) {
+			fputc(*s, active);
+			if (*s++ == '\n') {
+				infile[ilevel].synch_lineno++;
+				if (infile[ilevel].synch_lineno != 
+				    infile[ilevel].lineno)
+					do_emit_synchline();
+			}
+		}
+	} else
+		fputs(s, active);
+}
+
+void
+reallyputchar(int c)
+{
+	putc(c, active);
+	if (synch_lines && c == '\n') {
+		infile[ilevel].synch_lineno++;
+		if (infile[ilevel].synch_lineno != infile[ilevel].lineno)
+			do_emit_synchline();
+	}
 }
 
 /*
@@ -506,9 +535,7 @@ outputstr(s)
  * combo with lookup to speed things up.
  */
 static ndptr
-inspect(c, tp) 
-	int c;
-	char *tp;
+inspect(int c, char *tp) 
 {
 	char *name = tp;
 	char *etp = tp+MAXTOK;
@@ -528,7 +555,7 @@ inspect(c, tp)
 		outputstr(name);
 		while (isalnum(c = gpbc()) || c == '_') {
 			if (sp < 0)
-				putc(c, active);
+				reallyputchar(c);
 			else
 				CHRSAVE(c);
 		}
@@ -572,8 +599,7 @@ initkwds()
 
 /* Look up a builtin type, even if overridden by the user */
 int 
-builtin_type(key)
-	const char *key;
+builtin_type(const char *key)
 {
 	int i;
 
@@ -584,8 +610,7 @@ builtin_type(key)
 }
 
 char *
-builtin_realname(n)
-	int n;
+builtin_realname(int n)
 {
 	int i;
 
@@ -596,9 +621,7 @@ builtin_realname(n)
 }
 
 static void
-record(t, lev)
-	struct position *t;
-	int lev;
+record(struct position *t, int lev)
 {
 	if (lev < MAXRECORD) {
 		t[lev].name = CURRENT_NAME;
@@ -607,9 +630,7 @@ record(t, lev)
 }
 
 static void
-dump_stack(t, lev)
-	struct position *t;
-	int lev;
+dump_stack(struct position *t, int lev)
 {
 	int i;
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: transport.c,v 1.16 2001/10/26 11:37:16 ho Exp $	*/
+/*	$OpenBSD: transport.c,v 1.18 2002/06/09 08:13:07 todd Exp $	*/
 /*	$EOM: transport.c,v 1.43 2000/10/10 12:36:39 provos Exp $	*/
 
 /*
@@ -37,6 +37,7 @@
 
 #include <sys/param.h>
 #include <sys/queue.h>
+#include <string.h>
 
 #include "sysdep.h"
 
@@ -119,13 +120,13 @@ transport_report (void)
   struct message *msg;
 
   for (t = LIST_FIRST (&transport_list); t; t = LIST_NEXT (t, link))
-    { 
-      LOG_DBG ((LOG_REPORT, 0, 
+    {
+      LOG_DBG ((LOG_REPORT, 0,
 		"transport_report: transport %p flags %x refcnt %d", t,
 		t->flags, t->refcnt));
-      
+
       t->vtbl->report (t);
-      
+
       /* This is the reason message_dump_raw lives outside message.c.  */
       for (msg = TAILQ_FIRST (&t->prio_sendq); msg;
 	   msg = TAILQ_NEXT (msg, link))

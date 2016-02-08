@@ -1,3 +1,5 @@
+/* $OpenBSD: ssl_engine_init.c,v 1.19 2002/07/19 21:31:16 henning Exp $ */
+
 /*                      _             _
 **  _ __ ___   ___   __| |    ___ ___| |  mod_ssl
 ** | '_ ` _ \ / _ \ / _` |   / __/ __| |  Apache Interface to OpenSSL
@@ -164,7 +166,8 @@ void ssl_init_Module(server_rec *s, pool *p)
             sc->nPassPhraseDialogType = SSL_PPTYPE_BUILTIN;
 
         /* Open the dedicated SSL logfile */
-        ssl_log_open(s, s2, p);
+        if (!ap_server_is_chrooted())
+            ssl_log_open(s, s2, p);
     }
 
     /*
@@ -931,7 +934,7 @@ void ssl_init_CheckServers(server_rec *sm, pool *p)
     }
 
     /*
-     * Give out warnings when more than one SSL-aware virtual server uses the
+     * Give out warnings if more than one SSL-aware virtual server uses the
      * same IP:port. This doesn't work because mod_ssl then will always use
      * just the certificate/keys of one virtual host (which one cannot be said
      * easily - but that doesn't matter here).
@@ -942,6 +945,8 @@ void ssl_init_CheckServers(server_rec *sm, pool *p)
     for (s = sm; s != NULL; s = s->next) {
         sc = mySrvConfig(s);
         if (!sc->bEnabled)
+            continue;
+        if (s->addrs == NULL)
             continue;
         key = ap_psprintf(sp, "%pA:%u", &s->addrs->host_addr, s->addrs->host_port);
         ps = ssl_ds_table_get(t, key);
@@ -1004,11 +1009,14 @@ STACK_OF(X509_NAME) *ssl_init_FindCAList(server_rec *s, pool *pp, char *cpCAfile
     if (cpCAfile != NULL) {
         sk = SSL_load_client_CA_file(cpCAfile);
         for (n = 0; sk != NULL && n < sk_X509_NAME_num(sk); n++) {
+            X509_NAME *name = sk_X509_NAME_value(sk, n);
             ssl_log(s, SSL_LOG_TRACE,
                     "CA certificate: %s",
-                    X509_NAME_oneline(sk_X509_NAME_value(sk, n), buf, sizeof(buf)));
-            if (sk_X509_NAME_find(skCAList, sk_X509_NAME_value(sk, n)) < 0)
-                sk_X509_NAME_push(skCAList, sk_X509_NAME_value(sk, n));
+                    X509_NAME_oneline(name, buf, sizeof(buf)));
+            if (sk_X509_NAME_find(skCAList, name) < 0)
+                sk_X509_NAME_push(skCAList, name); /* will be freed when skCAList is */
+            else
+                X509_NAME_free(name);
         }
         sk_X509_NAME_free(sk);
     }
@@ -1022,11 +1030,14 @@ STACK_OF(X509_NAME) *ssl_init_FindCAList(server_rec *s, pool *pp, char *cpCAfile
             cp = ap_pstrcat(p, cpCApath, "/", direntry->d_name, NULL);
             sk = SSL_load_client_CA_file(cp);
             for (n = 0; sk != NULL && n < sk_X509_NAME_num(sk); n++) {
+                X509_NAME *name = sk_X509_NAME_value(sk, n);
                 ssl_log(s, SSL_LOG_TRACE,
                         "CA certificate: %s",
-                        X509_NAME_oneline(sk_X509_NAME_value(sk, n), buf, sizeof(buf)));
-                if (sk_X509_NAME_find(skCAList, sk_X509_NAME_value(sk, n)) < 0)
-                    sk_X509_NAME_push(skCAList, sk_X509_NAME_value(sk, n));
+                        X509_NAME_oneline(name, buf, sizeof(buf)));
+                if (sk_X509_NAME_find(skCAList, name) < 0)
+                    sk_X509_NAME_push(skCAList, name);
+                else
+                    X509_NAME_free(name);
             }
             sk_X509_NAME_free(sk);
         }
@@ -1116,4 +1127,3 @@ void ssl_init_ModuleKill(void *data)
 
     return;
 }
-

@@ -38,6 +38,7 @@ static const char rcsid[] =
 
 #include <err.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sysexits.h>
 #include <unistd.h>
@@ -222,7 +223,7 @@ proto_name(u_short proto)
 	case PPP_PAP:	return "pap";
 	case PPP_CHAP:	return "chap";
 	}
-	sprintf(buf, "0x%x", (unsigned)proto);
+	snprintf(buf, sizeof buf, "0x%x", (unsigned)proto);
 	return buf;
 }
 
@@ -232,8 +233,8 @@ authflags(u_short flags)
 	static char buf[30];
 	buf[0] = '\0';
 	if (flags & AUTHFLAG_NOCALLOUT)
-		strcat(buf, " callin");
+		strlcat(buf, " callin", sizeof buf);
 	if (flags & AUTHFLAG_NORECHALLENGE)
-		strcat(buf, " norechallenge");
+		strlcat(buf, " norechallenge", sizeof buf);
 	return buf;
 }

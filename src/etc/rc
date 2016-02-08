@@ -1,4 +1,4 @@
-#	$OpenBSD: rc,v 1.193 2002/02/25 03:30:46 deraadt Exp $
+#	$OpenBSD: rc,v 1.205 2002/09/12 18:21:48 millert Exp $
 
 # System startup script run by init on autoboot
 # or after single-user.
@@ -120,6 +120,7 @@ ttyflags -a
 
 if [ "X${pf}" != X"NO" ]; then
 	RULES="block in all\nblock out all"
+	RULES="$RULES\npass in proto tcp from any to any port 22 keep state"
 	case `sysctl vfs.mounts.nfs 2>/dev/null` in
 	*[1-9]*)
 		# don't kill NFS
@@ -127,7 +128,7 @@ if [ "X${pf}" != X"NO" ]; then
 		RULES="$RULES\npass out proto udp from any to any port { 111, 2049 }"
 		;;
 	esac
-	echo $RULES | pfctl -R - -e
+	echo $RULES | pfctl -f - -e
 fi
 
 if [ -f /etc/sysctl.conf ]; then
@@ -146,11 +147,8 @@ echo 'starting network'
 . /etc/netstart
 
 if [ "X${pf}" != X"NO" ]; then
-	if [ -f ${nat_rules} ]; then
-		pfctl -N ${nat_rules}
-	fi
 	if [ -f ${pf_rules} ]; then
-		pfctl -R ${pf_rules}
+		pfctl -f ${pf_rules}
 	fi
 fi
 
@@ -179,6 +177,8 @@ rm -f /etc/nologin
 rm -f /var/spool/lock/LCK.*
 rm -f /var/spool/uucp/STST/*
 (cd /var/run && { test -r dhclient.pid && dhclient_pid=`cat dhclient.pid`; rm -rf -- *; install -c -m 664 -g utmp /dev/null utmp; test -n "$dhclient_pid" && echo "$dhclient_pid" > dhclient.pid; })
+(cd /var/authpf && rm -rf -- *)
+
 
 # save a copy of the boot messages
 dmesg >/var/run/dmesg.boot
@@ -203,23 +203,9 @@ if [ "X${named_flags}" != X"NO" ]; then
 		named_flags="-u ${named_user} ${named_flags}"
 	fi
 	if [ "X${named_chroot}" != "X" ]; then
-		if [ ! -c "${named_chroot}/dev/null" ]; then
-			( cd /dev ; pax -rw -pe null ${named_chroot}/dev )
-		fi
-		if [ -f /etc/localtime -a -d "${named_chroot}/etc" ]; then
-			cmp -s /etc/localtime "${named_chroot}/etc/localtime" \
-			|| cp -p /etc/localtime "${named_chroot}/etc/localtime"
-		fi
 		named_flags="-t ${named_chroot} ${named_flags}"
 	fi
 	echo 'starting named';		named $named_flags
-fi
-
-# $photurisd_flags is imported from /etc/rc.conf;
-# If $photurisd_flags == NO or /etc/photuris/photuris.conf doesn't exist, then
-# photurisd isn't run.
-if [ "X${photurisd_flags}" != X"NO" -a -e /etc/photuris/photuris.conf ]; then
-	echo 'starting photurisd';	photurisd ${photurisd_flags}
 fi
 
 # $isakmpd_flags is imported from /etc/rc.conf;
@@ -345,6 +331,25 @@ echo clearing /tmp
 (cd /tmp && rm -rf [a-km-pr-zA-Z]* &&
     find . ! -name . ! -name lost+found ! -name quota.user \
 	! -name quota.group -execdir rm -rf -- {} \; -type d -prune)
+
+# create Unix sockets directories  for X if needed and make sure they have
+# correct permissions
+if [ -d /usr/X11R6/lib ]; then 
+	for d in /tmp/.X11-unix /tmp/.ICE-unix ; do
+		if [ -d $d ]; then 
+			if [ `ls -ld $d | cut -d' ' -f4` != root ]; then
+				chown root $d
+			fi
+			if [ `ls -ld $d | cut -d' ' -f1` != drwxrwxrwt ]; then
+				chmod 1777 $d
+			fi
+		elif [ -e $d ]; then
+			echo "Error: $d exists and isn't a directory."
+		else
+			mkdir -m 1777 $d
+		fi
+	done
+fi
 
 [ -f /etc/rc.securelevel ] && . /etc/rc.securelevel
 if [ X${securelevel} != X"" ]; then
@@ -541,7 +546,7 @@ if [ "X${mopd_flags}" != X"NO" -a -d /tftpboot/mop ]; then
 fi
 
 if [ X"${sshd_flags}" != X"NO" ]; then
-	/usr/sbin/sshd ${sshd_flags};	echo -n ' sshd'
+	echo -n ' sshd';		/usr/sbin/sshd ${sshd_flags};
 fi
 
 echo '.'
@@ -559,21 +564,6 @@ fi
 
 if [ -f /sbin/kbd -a -f /etc/kbdtype ]; then
 	kbd `cat /etc/kbdtype`
-fi
-
-# KerberosIV runs ONLY on the KDC servers
-# Kadmin runs only on the master server
-if [ X${krb4_master_kdc} = X"YES" ]; then
-	echo 'KerberosIV KDC'
-	/usr/libexec/kerberos >> /var/log/kerberos.log &
-	/usr/libexec/kadmind -n >> /var/log/kadmind.log &
-fi
-
-# Kpropd runs only on Kerberos slave servers
-if [ X${krb4_slave_kdc} = X"YES" ]; then
-	echo 'kerberos slave server'
-	/usr/libexec/kerberos -s >> /var/log/kerberos.log &
-	/usr/libexec/kpropd -i &
 fi
 
 # KerberosV master KDC

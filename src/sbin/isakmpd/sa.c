@@ -1,4 +1,4 @@
-/*	$OpenBSD: sa.c,v 1.54 2002/03/17 21:50:59 angelos Exp $	*/
+/*	$OpenBSD: sa.c,v 1.64 2002/09/08 12:38:04 ho Exp $	*/
 /*	$EOM: sa.c,v 1.112 2000/12/12 00:22:52 niklas Exp $	*/
 
 /*
@@ -92,8 +92,8 @@ sa_init (void)
   bucket_mask = (1 << INITIAL_BUCKET_BITS) - 1;
   sa_tab = malloc ((bucket_mask + 1) * sizeof (struct sa_list));
   if (!sa_tab)
-    log_fatal ("sa_init: malloc (%s) failed",
-	       (bucket_mask + 1) * sizeof (struct sa_list));
+    log_fatal ("sa_init: malloc (%lu) failed",
+	       (bucket_mask + 1) * (unsigned long)sizeof (struct sa_list));
   for (i = 0; i <= bucket_mask; i++)
     {
       LIST_INIT (&sa_tab[i]);
@@ -175,7 +175,10 @@ sa_check_name_phase (struct sa *sa, void *v_arg)
 struct sa *
 sa_lookup_by_name (char *name, int phase)
 {
-  struct name_phase_arg arg = { name, phase };
+  struct name_phase_arg arg;
+
+  arg.name = name;
+  arg.phase = phase;
 
   return sa_find (sa_check_name_phase, &arg);
 }
@@ -246,7 +249,10 @@ isakmp_sa_check (struct sa *sa, void *v_arg)
 struct sa *
 sa_lookup_isakmp_sa (struct sockaddr *dst, u_int8_t *spi)
 {
-  struct dst_isakmpspi_arg arg = { dst, spi };
+  struct dst_isakmpspi_arg arg;
+
+  arg.dst = dst;
+  arg.spi = spi;
 
   return sa_find (isakmp_sa_check, &arg);
 }
@@ -255,7 +261,11 @@ sa_lookup_isakmp_sa (struct sockaddr *dst, u_int8_t *spi)
 struct sa *
 sa_lookup_by_peer (struct sockaddr *dst, socklen_t dstlen)
 {
-  struct addr_arg arg = { dst, dstlen, 0 };
+  struct addr_arg arg;
+
+  arg.addr = dst;
+  arg.len = dstlen;
+  arg.phase = 0;
 
   return sa_find (sa_check_peer, &arg);
 }
@@ -264,7 +274,11 @@ sa_lookup_by_peer (struct sockaddr *dst, socklen_t dstlen)
 struct sa *
 sa_isakmp_lookup_by_peer (struct sockaddr *dst, socklen_t dstlen)
 {
-  struct addr_arg arg = { dst, dstlen, 1 };
+  struct addr_arg arg;
+
+  arg.addr = dst;
+  arg.len = dstlen;
+  arg.phase = 1;
 
   return sa_find (sa_check_peer, &arg);
 }
@@ -367,7 +381,8 @@ sa_create (struct exchange *exchange, struct transport *t)
   sa = calloc (1, sizeof *sa);
   if (!sa)
     {
-      log_error ("sa_create: calloc (1, %d) failed", sizeof *sa);
+      log_error ("sa_create: calloc (1, %lu) failed",
+		 (unsigned long)sizeof *sa);
       return -1;
     }
   sa->transport = t;
@@ -385,7 +400,8 @@ sa_create (struct exchange *exchange, struct transport *t)
       sa->data = calloc (1, sa->doi->sa_size);
       if (!sa->data)
 	{
-	  log_error ("sa_create: calloc (1, %d) failed", sa->doi->sa_size);
+	  log_error ("sa_create: calloc (1, %lu) failed",
+		     (unsigned long)sa->doi->sa_size);
 	  free (sa);
 	  return -1;
 	}
@@ -430,7 +446,7 @@ sa_dump (int cls, int level, char *header, struct sa *sa)
     {
       LOG_DBG ((cls, level, "%s: suite %d proto %d", header, proto->no,
 		proto->proto));
-      LOG_DBG ((cls, level, 
+      LOG_DBG ((cls, level,
 		"%s: spi_sz[0] %d spi[0] %p spi_sz[1] %d spi[1] %p", header,
 		proto->spi_sz[0], proto->spi[0], proto->spi_sz[1],
 		proto->spi[1]));
@@ -457,32 +473,32 @@ sa_dump (int cls, int level, char *header, struct sa *sa)
 static void
 report_spi (FILE *fd, const u_int8_t *buf, size_t sz, int index)
 {
-  char s[73];
+#define SBUFSZ (2 * 32 + 9)
+  char s[SBUFSZ];
   int i, j;
 
-  {
-    for (i = j = 0; i < sz;)
-      {
-	sprintf (s + j, "%02x", buf[i++]);
-	j += 2;
-	if (i % 4 == 0)
-	  {
-	    if (i % 32 == 0)
-	      {
-		s[j] = '\0';
-		fprintf(fd, "%s", s);
-		j = 0;
-	      }
-	    else
-	      s[j++] = ' ';
-	  }
-      }
-      if (j)
+  for (i = j = 0; i < sz;)
+    {
+      snprintf (s + j, SBUFSZ - j, "%02x", buf[i++]);
+      j += 2;
+      if (i % 4 == 0)
 	{
-	  s[j] = '\0';
-	  fprintf(fd, "SPI %d: %s\n", index, s);
+	  if (i % 32 == 0)
+	    {
+	      s[j] = '\0';
+	      fprintf (fd, "%s", s);
+	      j = 0;
+	    }
+	  else
+	    s[j++] = ' ';
 	}
-  }
+    }
+
+  if (j)
+    {
+      s[j] = '\0';
+      fprintf (fd, "SPI %d: %s\n", index, s);
+    }
 }
 
 
@@ -502,90 +518,93 @@ report_proto (FILE *fd, struct proto *proto)
     case IPSEC_PROTO_IPSEC_ESP:
       keylen = ipsec_esp_enckeylength (proto);
       hashlen = ipsec_esp_authkeylength (proto);
-      fprintf(fd, "Transform: IPsec ESP\n");
-      fprintf(fd, "Encryption key length: %d\n", keylen);
-      fprintf(fd, "Authentication key length: %d\n", hashlen);
+      fprintf (fd, "Transform: IPsec ESP\n");
+      fprintf (fd, "Encryption key length: %d\n", keylen);
+      fprintf (fd, "Authentication key length: %d\n", hashlen);
 
+      fprintf (fd, "Encryption algorithm: ");
       switch (proto->id)
 	{
 	case IPSEC_ESP_DES:
 	case IPSEC_ESP_DES_IV32:
 	case IPSEC_ESP_DES_IV64:
-	  fprintf(fd, "Encryption algorithm: DES\n");
+	  fprintf (fd, "DES\n");
 	  break;
 
 	case IPSEC_ESP_3DES:
-	  fprintf(fd, "Encryption algorithm: 3DES\n");
+	  fprintf (fd, "3DES\n");
 	  break;
 
 	case IPSEC_ESP_AES:
-	  fprintf(fd, "Encryption algorithm: Rijndael-128/AES\n");
+	  fprintf (fd, "Rijndael-128/AES\n");
 	  break;
 
 	case IPSEC_ESP_CAST:
-	  fprintf(fd, "Encryption algorithm: Cast-128\n");
+	  fprintf (fd, "Cast-128\n");
 	  break;
 
 	case IPSEC_ESP_BLOWFISH:
-	  fprintf(fd, "Encryption algorithm: Blowfish\n");
+	  fprintf (fd, "Blowfish\n");
 	  break;
 
 	default:
-	  fprintf(fd, "Unknown encryption algorithm %d\n", proto->id);
+	  fprintf (fd, "unknown (%d)\n", proto->id);
 	}
 
+      fprintf (fd, "Authentication algorithm: ");
       switch (iproto->auth)
 	{
 	case IPSEC_AUTH_HMAC_MD5:
-	  fprintf(fd, "Authentication algorithm: HMAC-MD5\n");
+	  fprintf (fd, "HMAC-MD5\n");
 	  break;
 
 	case IPSEC_AUTH_HMAC_SHA:
-	  fprintf(fd, "Authentication algorithm: HMAC-SHA1\n");
+	  fprintf (fd, "HMAC-SHA1\n");
 	  break;
 
         case IPSEC_AUTH_HMAC_RIPEMD:
-	  fprintf(fd, "Authentication algorithm: HMAC-RIPEMD-160\n");
+	  fprintf (fd, "HMAC-RIPEMD-160\n");
 	  break;
 
 	case IPSEC_AUTH_DES_MAC:
 	case IPSEC_AUTH_KPDK:
 	  /* XXX We should be supporting KPDK */
-	  fprintf(fd, "Unknown authentication algorithm: %d", iproto->auth); 
+	  fprintf (fd, "unknown (%d)", iproto->auth);
 	  break;
 
 	default:
-	  fprintf(fd, "Authentication algorithm not used.\n");
+	  fprintf (fd, "none\n");
 	}
       break;
 
     case IPSEC_PROTO_IPSEC_AH:
       hashlen = ipsec_ah_keylength (proto);
-      fprintf(fd, "Transform: IPsec AH\n");
-      fprintf(fd, "Encryption not used.\n");
-      fprintf(fd, "Authentication key length: %d\n", hashlen);
+      fprintf (fd, "Transform: IPsec AH\n");
+      fprintf (fd, "Encryption not used.\n");
+      fprintf (fd, "Authentication key length: %d\n", hashlen);
 
+      fprintf (fd, "Authentication algorithm: ");
       switch (proto->id)
 	{
 	case IPSEC_AH_MD5:
-	  fprintf(fd, "Authentication algorithm: HMAC-MD5\n");
+	  fprintf (fd, "HMAC-MD5\n");
 	  break;
 
 	case IPSEC_AH_SHA:
-	  fprintf(fd, "Authentication algorithm: HMAC-SHA1\n");
+	  fprintf (fd, "HMAC-SHA1\n");
 	  break;
 
 	case IPSEC_AH_RIPEMD:
-	  fprintf(fd, "Authentication algorithm: HMAC-RIPEMD-160\n");
+	  fprintf (fd, "HMAC-RIPEMD-160\n");
 	  break;
 
 	default:
-	  fprintf(fd, "Unknown authentication algorithm: %d\n", proto->id);
+	  fprintf (fd, "unknown (%d)", proto->id);
 	}
       break;
 
     default:
-      fprintf(fd, "report_proto: invalid proto %d\n", proto->proto);
+      fprintf (fd, "report_proto: invalid proto %d\n", proto->proto);
     }
 }
 
@@ -612,30 +631,30 @@ sa_dump_all (FILE *fd, struct sa *sa)
   int i;
 
   /* SA name and phase. */
-  fprintf(fd, "SA name: %s", sa->name ? sa->name : "<unnamed>");
-  fprintf(fd, " (Phase %d)\n", sa->phase);
+  fprintf (fd, "SA name: %s", sa->name ? sa->name : "<unnamed>");
+  fprintf (fd, " (Phase %d)\n", sa->phase);
 
   /* Source and destination IPs. */
-  fprintf(fd, sa->transport == NULL ? "<no transport>" :
-      sa->transport->vtbl->decode_ids (sa->transport));
-  fprintf(fd, "\n");
+  fprintf (fd, sa->transport == NULL ? "<no transport>" :
+	   sa->transport->vtbl->decode_ids (sa->transport));
+  fprintf (fd, "\n");
 
   /* Transform information. */
   for (proto = TAILQ_FIRST (&sa->protos); proto;
-      proto = TAILQ_NEXT (proto, link))
+       proto = TAILQ_NEXT (proto, link))
     {
       /* SPI values. */
       for (i = 0; i < 2; i++)
 	if (proto->spi[i])
-	  report_spi(fd, proto->spi[i], proto->spi_sz[i], i);
+	  report_spi (fd, proto->spi[i], proto->spi_sz[i], i);
 	else
-	  fprintf(fd, "SPI %d not defined.", i);
+	  fprintf (fd, "SPI %d not defined.", i);
 
-        /* Proto values. */
-	report_proto(fd, proto);
+      /* Proto values. */
+      report_proto (fd, proto);
 
-	/* SA separator. */
-	fprintf(fd, "\n");
+      /* SA separator. */
+      fprintf (fd, "\n");
     }
 }
 
@@ -648,18 +667,18 @@ sa_report_all (void)
   struct sa *sa;
 
   /* Open SA_FILE. */
-  fd = fopen(SA_FILE, "w");
+  fd = fopen (SA_FILE, "w");
 
   /* Start sa_config_report. */
   for (i = 0; i <= bucket_mask; i++)
     for (sa = LIST_FIRST (&sa_tab[i]); sa; sa = LIST_NEXT (sa, link))
       if (sa->phase == 1)
-	fprintf(fd, "SA name: none (phase 1)\n\n");
+	fprintf (fd, "SA name: none (phase 1)\n\n");
       else
 	sa_dump_all (fd, sa);
 
   /* End sa_config_report. */
-  fclose(fd);
+  fclose (fd);
 }
 
 /* Free the protocol structure pointed to by PROTO.  */
@@ -774,7 +793,7 @@ sa_release (struct sa *sa)
     free (sa->keynote_key); /* This is just a string */
 #if defined (USE_POLICY) || defined (USE_KEYNOTE)
   if (sa->policy_id != -1)
-    LK (kn_close, (sa->policy_id));
+    kn_close (sa->policy_id);
 #endif
   if (sa->name)
     free (sa->name);
@@ -824,7 +843,8 @@ sa_add_transform (struct sa *sa, struct payload *xf, int initiator,
     {
       proto = calloc (1, sizeof *proto);
       if (!proto)
-	log_error ("sa_add_transform: calloc (1, %d) failed", sizeof *proto);
+	log_error ("sa_add_transform: calloc (1, %lu) failed",
+		   (unsigned long)sizeof *proto);
     }
   else
     /* Find the protection suite that were chosen.  */
@@ -842,8 +862,8 @@ sa_add_transform (struct sa *sa, struct payload *xf, int initiator,
       proto->data = calloc (1, sa->doi->proto_size);
       if (!proto->data)
 	{
-	  log_error ("sa_add_transform: calloc (1, %d) failed",
-		     sa->doi->proto_size);
+	  log_error ("sa_add_transform: calloc (1, %lu) failed",
+		     (unsigned long)sa->doi->proto_size);
 	  goto cleanup;
 	}
     }
@@ -969,7 +989,8 @@ sa_flag (char *attr)
   } sa_flag_map[] = {
     { "active-only", SA_FLAG_ACTIVE_ONLY },
     /* Below this point are flags that are internal to the implementation.  */
-    { "__ondemand", SA_FLAG_ONDEMAND }
+    { "__ondemand", SA_FLAG_ONDEMAND },
+    { "ikecfg", SA_FLAG_IKECFG },
   };
   int i;
 

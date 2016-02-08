@@ -1,4 +1,4 @@
-/*	$OpenBSD: cron.c,v 1.19 2002/02/16 21:28:01 millert Exp $	*/
+/*	$OpenBSD: cron.c,v 1.28 2002/08/08 18:13:35 millert Exp $	*/
 /* Copyright 1988,1990,1993,1994 by Paul Vixie
  * All rights reserved
  */
@@ -21,12 +21,16 @@
  */
 
 #if !defined(lint) && !defined(LINT)
-static char rcsid[] = "$OpenBSD: cron.c,v 1.19 2002/02/16 21:28:01 millert Exp $";
+static const char rcsid[] = "$OpenBSD: cron.c,v 1.28 2002/08/08 18:13:35 millert Exp $";
 #endif
 
 #define	MAIN_PROGRAM
 
 #include "cron.h"
+#include <sys/socket.h>
+#include <sys/un.h>
+
+enum timejump { negative, small, medium, large };
 
 static	void	usage(void),
 		run_reboot_jobs(cron_db *),
@@ -35,21 +39,22 @@ static	void	usage(void),
 		cron_sleep(int),
 		sigchld_handler(int),
 		sighup_handler(int),
-		sigusr1_handler(int),
 		sigchld_reaper(void),
-		check_sigs(int),
+		quit(int),
 		parse_args(int c, char *v[]);
 
-static	volatile sig_atomic_t	got_sighup, got_sigchld, got_sigusr1;
-static	int			timeRunning, virtualTime, clockTime;
+static	volatile sig_atomic_t	got_sighup, got_sigchld;
+static	int			timeRunning, virtualTime, clockTime, cronSock;
 static	long			GMToff;
 static	cron_db			database;
+static	at_db			at_database;
+static	double			batch_maxload = BATCH_MAXLOAD;
 
 static void
 usage(void) {
 	const char **dflags;
 
-	fprintf(stderr, "usage:  %s [-x [", ProgramName);
+	fprintf(stderr, "usage:  %s [-l load_avg] [-x [", ProgramName);
 	for (dflags = DebugFlagNames; *dflags; dflags++)
 		fprintf(stderr, "%s%s", *dflags, dflags[1] ? "," : "]");
 	fprintf(stderr, "]\n");
@@ -82,6 +87,12 @@ main(int argc, char *argv[]) {
 	(void) sigaction(SIGCHLD, &sact, NULL);
 	sact.sa_handler = sighup_handler;
 	(void) sigaction(SIGHUP, &sact, NULL);
+	sact.sa_handler = SIG_IGN;
+	(void) sigaction(SIGPIPE, &sact, NULL);
+	(void) sigaction(SIGUSR1, &sact, NULL);	/* XXX */
+	sact.sa_handler = quit;
+	(void) sigaction(SIGINT, &sact, NULL);
+	(void) sigaction(SIGTERM, &sact, NULL);
 
 	acquire_daemonlock(0);
 	set_cron_uid();
@@ -108,11 +119,11 @@ main(int argc, char *argv[]) {
 			/* child process */
 			log_it("CRON",getpid(),"STARTUP","fork ok");
 			(void) setsid();
-			if ((fd = open(_PATH_DEVNULL, O_RDWR, 0)) != -1) {
+			if ((fd = open(_PATH_DEVNULL, O_RDWR, 0)) >= 0) {
 				(void) dup2(fd, STDIN);
 				(void) dup2(fd, STDOUT);
 				(void) dup2(fd, STDERR);
-				if (fd > STDERR)
+				if (fd != STDERR)
 					(void) close(fd);
 			}
 			break;
@@ -123,10 +134,15 @@ main(int argc, char *argv[]) {
 	}
 
 	acquire_daemonlock(0);
+	cronSock = open_socket();
 	database.head = NULL;
 	database.tail = NULL;
 	database.mtime = (time_t) 0;
 	load_database(&database);
+	at_database.head = NULL;
+	at_database.tail = NULL;
+	at_database.mtime = (time_t) 0;
+	scan_atjobs(&at_database, NULL);
 	set_time(1);
 	run_reboot_jobs(&database);
 	timeRunning = virtualTime = clockTime;
@@ -143,9 +159,8 @@ main(int argc, char *argv[]) {
 	 */
 	while (TRUE) {
 		int timeDiff;
-		int wakeupKind;
+		enum timejump wakeupKind;
 
-		check_sigs(TRUE);
 		/* ... wait for the time (in minutes) to change ... */
 		do {
 			cron_sleep(timeRunning + 1);
@@ -164,25 +179,25 @@ main(int argc, char *argv[]) {
 			virtualTime = timeRunning;
 			find_jobs(virtualTime, &database, TRUE, TRUE);
 		} else {
-			wakeupKind = -1;
-			if (timeDiff > -(3*MINUTE_COUNT))
-				wakeupKind = 0;
-			if (timeDiff > 0)
-				wakeupKind = 1;
-			if (timeDiff > 5)
-				wakeupKind = 2;
-			if (timeDiff > (3*MINUTE_COUNT))
-				wakeupKind = 3;
+			if (timeDiff > (3*MINUTE_COUNT) ||
+			    timeDiff < -(3*MINUTE_COUNT))
+				wakeupKind = large;
+			else if (timeDiff > 5)
+				wakeupKind = medium;
+			else if (timeDiff > 0)
+				wakeupKind = small;
+			else
+				wakeupKind = negative;
 
 			switch (wakeupKind) {
-			case 1:
+			case small:
 				/*
 				 * case 1: timeDiff is a small positive number
 				 * (wokeup late) run jobs for each virtual
 				 * minute until caught up.
 				 */
-				Debug(DSCH, ("[%d], normal case %d minutes to go\n",
-				    getpid(), timeDiff))
+				Debug(DSCH, ("[%ld], normal case %d minutes to go\n",
+				    (long)getpid(), timeDiff))
 				do {
 					if (job_runqueue())
 						sleep(10);
@@ -192,7 +207,7 @@ main(int argc, char *argv[]) {
 				} while (virtualTime < timeRunning);
 				break;
 
-			case 2:
+			case medium:
 				/*
 				 * case 2: timeDiff is a medium-sized positive
 				 * number, for example because we went to DST
@@ -204,8 +219,8 @@ main(int argc, char *argv[]) {
 				 * have a chance to run, and we do our
 				 * housekeeping.
 				 */
-				Debug(DSCH, ("[%d], DST begins %d minutes to go\n",
-				    getpid(), timeDiff))
+				Debug(DSCH, ("[%ld], DST begins %d minutes to go\n",
+				    (long)getpid(), timeDiff))
 				/* run wildcard jobs for current minute */
 				find_jobs(timeRunning, &database, TRUE, FALSE);
 	
@@ -221,7 +236,7 @@ main(int argc, char *argv[]) {
 				    clockTime == timeRunning);
 				break;
 	
-			case 0:
+			case negative:
 				/*
 				 * case 3: timeDiff is a small or medium-sized
 				 * negative num, eg. because of DST ending.
@@ -230,8 +245,8 @@ main(int argc, char *argv[]) {
 				 * not be repeated.  Virtual time does not
 				 * change until we are caught up.
 				 */
-				Debug(DSCH, ("[%d], DST ends %d minutes to go\n",
-				    getpid(), timeDiff))
+				Debug(DSCH, ("[%ld], DST ends %d minutes to go\n",
+				    (long)getpid(), timeDiff))
 				find_jobs(timeRunning, &database, TRUE, FALSE);
 				break;
 			default:
@@ -239,7 +254,8 @@ main(int argc, char *argv[]) {
 				 * other: time has changed a *lot*,
 				 * jump virtual time, and run everything
 				 */
-				Debug(DSCH, ("[%d], clock jumped\n", getpid()))
+				Debug(DSCH, ("[%ld], clock jumped\n",
+				    (long)getpid()))
 				virtualTime = timeRunning;
 				find_jobs(timeRunning, &database, TRUE, TRUE);
 			}
@@ -247,6 +263,22 @@ main(int argc, char *argv[]) {
 
 		/* Jobs to be run (if any) are loaded; clear the queue. */
 		job_runqueue();
+
+		/* Run any jobs in the at queue. */
+		atrun(&at_database, batch_maxload,
+		    timeRunning * SECONDS_PER_MINUTE - GMToff);
+
+		/* Check to see if we received a signal while running jobs. */
+		if (got_sighup) {
+			got_sighup = 0;
+			log_close();
+		}
+		if (got_sigchld) {
+			got_sigchld = 0;
+			sigchld_reaper();
+		}
+		load_database(&database);
+		scan_atjobs(&at_database, NULL);
 	}
 }
 
@@ -293,8 +325,8 @@ find_jobs(int vtime, cron_db *db, int doWild, int doNonWild) {
 	for (u = db->head; u != NULL; u = u->next) {
 		for (e = u->crontab; e != NULL; e = e->next) {
 			Debug(DSCH|DEXT, ("user [%s:%ld:%ld:...] cmd=\"%s\"\n",
-					  env_get("LOGNAME", e->envp),
-					  (long)e->uid, (long)e->gid, e->cmd))
+					  e->pwd->pw_name, (long)e->pwd->pw_uid,
+					  (long)e->pwd->pw_gid, e->cmd))
 			if (bit_test(e->minute, minute) &&
 			    bit_test(e->hour, hour) &&
 			    bit_test(e->month, month) &&
@@ -338,40 +370,80 @@ set_time(int initialize) {
  */
 static void
 cron_sleep(int target) {
-	time_t t1, t2;
-	int seconds_to_wait;
-	struct sigaction sact;
+	int fd, nfds;
+	unsigned char poke;
+	struct timeval t1, t2, tv;
+	struct sockaddr_un sun;
+	socklen_t sunlen;
+	static fd_set *fdsr;
 
-	bzero((char *)&sact, sizeof sact);
-	sigemptyset(&sact.sa_mask);
-	sact.sa_flags = 0;
-#ifdef SA_RESTART
-	sact.sa_flags |= SA_RESTART;
-#endif
-	sact.sa_handler = sigusr1_handler;
-	(void) sigaction(SIGUSR1, &sact, NULL);
+	gettimeofday(&t1, NULL);
+	t1.tv_sec += GMToff;
+	tv.tv_sec = (target * SECONDS_PER_MINUTE - t1.tv_sec) + 1;
+	tv.tv_usec = 0;
 
-	t1 = time(NULL) + GMToff;
-	seconds_to_wait = (int)(target * SECONDS_PER_MINUTE - t1) + 1;
-	Debug(DSCH, ("[%ld] Target time=%ld, sec-to-wait=%d\n",
-	    (long)getpid(), (long)target*SECONDS_PER_MINUTE, seconds_to_wait))
-
-	while (seconds_to_wait > 0 && seconds_to_wait < 65) {
-		sleep((unsigned int) seconds_to_wait);
-
-		/*
-		 * Check to see if we were interrupted by a signal.
-		 * If so, service the signal(s) then continue sleeping
-		 * where we left off.
-		 */
-		check_sigs(FALSE);
-		t2 = time(NULL) + GMToff;
-		seconds_to_wait -= (int)(t2 - t1);
-		t1 = t2;
+	if (fdsr == NULL) {
+		fdsr = (fd_set *)calloc(howmany(cronSock + 1, NFDBITS),
+		    sizeof(fd_mask));
 	}
 
-	sact.sa_handler = SIG_DFL;
-	(void) sigaction(SIGUSR1, &sact, NULL);
+	while (timerisset(&tv) && tv.tv_sec < 65) {
+		Debug(DSCH, ("[%ld] Target time=%ld, sec-to-wait=%ld\n",
+		    (long)getpid(), (long)target*SECONDS_PER_MINUTE, tv.tv_sec))
+
+		poke = 0;
+		if (fdsr)
+			FD_SET(cronSock, fdsr);
+		/* Sleep until we time out, get a poke, or get a signal. */
+		nfds = select(cronSock + 1, fdsr, NULL, NULL, &tv);
+		if (nfds == 0)
+			break;		/* timer expired */
+		if (nfds == -1 && errno != EINTR)
+			break;		/* an error occurred */
+		if (nfds > 0) {
+			Debug(DSCH, ("[%ld] Got a poke on the socket\n",
+			    (long)getpid()))
+			fd = accept(cronSock, (struct sockaddr *)&sun, &sunlen);
+			if (fd >= 0) {
+				(void) read(fd, &poke, 1);
+				close(fd);
+				if (poke & RELOAD_CRON)
+					load_database(&database);
+				if (poke & RELOAD_AT) {
+					/*
+					 * We run any pending at jobs right
+					 * away so that "at now" really runs
+					 * jobs immediately.
+					 */
+					gettimeofday(&t2, NULL);
+					if (scan_atjobs(&at_database, &t2))
+						atrun(&at_database,
+						    batch_maxload, t2.tv_sec);
+				}
+			}
+		} else {
+			/* Interrupted by a signal. */
+			if (got_sighup) {
+				got_sighup = 0;
+				log_close();
+			}
+			if (got_sigchld) {
+				got_sigchld = 0;
+				sigchld_reaper();
+			}
+		}
+
+		/* Adjust tv and continue where we left off.  */
+		gettimeofday(&t2, NULL);
+		t2.tv_sec += GMToff;
+		timersub(&t2, &t1, &t1);
+		timersub(&tv, &t1, &tv);
+		memcpy(&t1, &t2, sizeof(t1));
+		if (tv.tv_sec < 0)
+			tv.tv_sec = 0;
+		if (tv.tv_usec < 0)
+			tv.tv_usec = 0;
+	}
 }
 
 static void
@@ -385,8 +457,9 @@ sigchld_handler(int x) {
 }
 
 static void
-sigusr1_handler(int x) {
-	got_sigusr1 = 1;
+quit(int x) {
+	(void) unlink(_PATH_CRON_PID);
+	_exit(0);
 }
 
 static void
@@ -413,38 +486,34 @@ sigchld_reaper() {
 			Debug(DPROC,
 			      ("[%ld] sigchld...pid #%ld died, stat=%d\n",
 			       (long)getpid(), (long)pid, WEXITSTATUS(waiter)))
+			break;
 		}
 	} while (pid > 0);
 }
 
 static void
-check_sigs(int force_dbload) {
-	if (got_sighup) {
-		got_sighup = 0;
-		log_close();
-	}
-	if (got_sigchld) {
-		got_sigchld = 0;
-		sigchld_reaper();
-	}
-	if (got_sigusr1 || force_dbload) {
-		got_sigusr1 = 0;
-		load_database(&database);
-	}
-}
-
-static void
 parse_args(int argc, char *argv[]) {
 	int argch;
+	char *ep;
 
-	while (-1 != (argch = getopt(argc, argv, "x:"))) {
+	while (-1 != (argch = getopt(argc, argv, "l:x:"))) {
 		switch (argch) {
-		default:
-			usage();
+		case 'l':
+			errno = 0;
+			batch_maxload = strtod(optarg, &ep);
+			if (*ep != '\0' || ep == optarg || errno == ERANGE ||
+			    batch_maxload < 0) {
+				fprintf(stderr, "Illegal load average: %s\n",
+				    optarg);
+				usage();
+			}
+			break;
 		case 'x':
 			if (!set_debug_flags(optarg))
 				usage();
 			break;
+		default:
+			usage();
 		}
 	}
 }

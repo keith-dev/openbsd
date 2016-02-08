@@ -1,10 +1,10 @@
-/*	$OpenBSD: exchange.c,v 1.64 2002/01/23 18:24:34 ho Exp $	*/
+/*	$OpenBSD: exchange.c,v 1.70 2002/09/11 09:50:43 ho Exp $	*/
 /*	$EOM: exchange.c,v 1.143 2000/12/04 00:02:25 angelos Exp $	*/
 
 /*
  * Copyright (c) 1998, 1999, 2000, 2001 Niklas Hallqvist.  All rights reserved.
  * Copyright (c) 1999, 2001 Angelos D. Keromytis.  All rights reserved.
- * Copyright (c) 1999, 2000 Håkan Olsson.  All rights reserved.
+ * Copyright (c) 1999, 2000, 2002 Håkan Olsson.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -171,7 +171,7 @@ int16_t script_informational[] = {
  * Check what exchange SA is negotiated with and return a suitable validation
  * script.
  */
-u_int16_t *
+int16_t *
 exchange_script (struct exchange *exchange)
 {
   switch (exchange->type)
@@ -614,7 +614,8 @@ exchange_create (int phase, int initiator, int doi, int type)
   exchange = calloc (1, sizeof *exchange);
   if (!exchange)
     {
-      log_error ("exchange_create: calloc (1, %d) failed", sizeof *exchange);
+      log_error ("exchange_create: calloc (1, %lu) failed",
+	(unsigned long)sizeof *exchange);
       return 0;
     }
   exchange->phase = phase;
@@ -636,8 +637,8 @@ exchange_create (int phase, int initiator, int doi, int type)
       exchange->data = calloc (1, exchange->doi->exchange_size);
       if (!exchange->data)
 	{
-	  log_error ("exchange_create: calloc (1, %d) failed",
-		     exchange->doi->exchange_size);
+	  log_error ("exchange_create: calloc (1, %lu) failed",
+		(unsigned long)exchange->doi->exchange_size);
 	  exchange_free (exchange);
 	  return 0;
 	}
@@ -701,8 +702,8 @@ exchange_add_finalization (struct exchange *exchange,
   node = malloc (sizeof *node);
   if (!node)
     {
-      log_error ("exchange_add_finalization: malloc (%d) failed",
-		 sizeof *node);
+      log_error ("exchange_add_finalization: malloc (%lu) failed",
+		 (unsigned long)sizeof *node);
       free (arg);
       return;
     }
@@ -714,6 +715,21 @@ exchange_add_finalization (struct exchange *exchange,
   exchange->finalize_arg = node;
 }
 
+static void
+exchange_establish_transaction (struct exchange *exchange, void *arg, int fail)
+{
+  /* Establish a TRANSACTION exchange.  */
+  struct exchange_finalization_node *node
+    = (struct exchange_finalization_node *)arg;
+  struct sa *isakmp_sa = sa_lookup_by_name ((char *)node->second_arg, 1);
+
+  if (isakmp_sa && !fail)
+    exchange_establish_p2 (isakmp_sa, ISAKMP_EXCH_TRANSACTION, 0, 0,
+			   node->first, node->first_arg);
+
+  free (node);
+}
+
 /* Establish a phase 1 exchange.  */
 void
 exchange_establish_p1 (struct transport *t, u_int8_t type, u_int32_t doi,
@@ -723,6 +739,8 @@ exchange_establish_p1 (struct transport *t, u_int8_t type, u_int32_t doi,
 {
   struct exchange *exchange;
   struct message *msg;
+  struct conf_list *flags;
+  struct conf_list_node *flag;
   char *tag = 0;
   char *str;
 
@@ -804,8 +822,39 @@ exchange_establish_p1 (struct transport *t, u_int8_t type, u_int32_t doi,
   if (!exchange->policy && name)
     exchange->policy = conf_get_str ("Phase 1", "Default");
 
-  exchange->finalize = finalize;
-  exchange->finalize_arg = arg;
+  if (name)
+    {
+      flags = conf_get_list (name, "Flags");
+      if (flags)
+	{
+	  for (flag = TAILQ_FIRST (&flags->fields); flag;
+	       flag = TAILQ_NEXT (flag, link))
+	    if (strcasecmp (flag->field, "ikecfg") == 0)
+	      {
+		struct exchange_finalization_node *node;
+
+		node = calloc (1, (unsigned long)sizeof *node);
+		if (!node)
+		  {
+		    log_print ("exchange_establish_p1: calloc (1, %lu) failed",
+			       (unsigned long)sizeof (*node));
+		    exchange_free (exchange);
+		    return;
+		  }
+
+		/* Insert this finalization inbetween the original.  */
+		node->first = finalize;
+		node->first_arg = arg;
+		node->second_arg = name;
+		exchange_add_finalization (exchange,
+					   exchange_establish_transaction,
+					   node);
+		finalize = 0;
+	      }
+	  conf_free_list (flags);
+	}
+    }
+  exchange_add_finalization (exchange, finalize, arg);
   cookie_gen (t, exchange, exchange->cookies, ISAKMP_HDR_ICOOKIE_LEN);
   exchange_enter (exchange);
 #ifdef USE_DEBUG
@@ -815,8 +864,9 @@ exchange_establish_p1 (struct transport *t, u_int8_t type, u_int32_t doi,
   msg = message_alloc (t, 0, ISAKMP_HDR_SZ);
   msg->exchange = exchange;
 
-  /* Do not create SA for an information exchange.  */
-  if (exchange->type != ISAKMP_EXCH_INFO)
+  /* Do not create SA for an information or transaction exchange.  */
+  if (exchange->type != ISAKMP_EXCH_INFO
+      && exchange->type != ISAKMP_EXCH_TRANSACTION)
     {
       /*
        * Don't install a transport into this SA as it will be an INADDR_ANY
@@ -935,7 +985,8 @@ exchange_establish_p2 (struct sa *isakmp_sa, u_int8_t type, char *name,
    * Do not create SA's for informational exchanges.
    * XXX How to handle new group mode?
    */
-  if (exchange->type != ISAKMP_EXCH_INFO)
+  if (exchange->type != ISAKMP_EXCH_INFO
+      && exchange->type != ISAKMP_EXCH_TRANSACTION)
     {
       /* XXX Number of SAs should come from the args structure.  */
       for (i = 0; i < 1; i++)
@@ -1218,7 +1269,7 @@ exchange_free_aux (void *v_exch)
 
 #if defined (POLICY) || defined (KEYNOTE)
   if (exchange->policy_id != -1)
-    LK (kn_close, (exchange->policy_id));
+    kn_close (exchange->policy_id);
 #endif
 
   exchange_free_aca_list (exchange);
@@ -1392,8 +1443,6 @@ exchange_finalize (struct message *msg)
       exchange->keynote_key = 0;
       msg->isakmp_sa->policy_id = exchange->policy_id;
       exchange->policy_id = -1;
-      msg->isakmp_sa->id_i_len = exchange->id_i_len;
-      msg->isakmp_sa->id_r_len = exchange->id_r_len;
       msg->isakmp_sa->initiator = exchange->initiator;
 
       if (exchange->recv_certtype && exchange->recv_cert)
@@ -1425,11 +1474,6 @@ exchange_finalize (struct message *msg)
 							       ->transport)));
     }
 
-  exchange->doi->finalize_exchange (msg);
-  if (exchange->finalize)
-    exchange->finalize (exchange, exchange->finalize_arg, 0);
-  exchange->finalize = 0;
-
   /* Copy the ID from phase 1 to exchange or phase 2 SA.  */
   if (msg->isakmp_sa)
     {
@@ -1448,6 +1492,11 @@ exchange_finalize (struct message *msg)
 			  msg->isakmp_sa->id_r, msg->isakmp_sa->id_r_len);
 	}
     }
+
+  exchange->doi->finalize_exchange (msg);
+  if (exchange->finalize)
+    exchange->finalize (exchange, exchange->finalize_arg, 0);
+  exchange->finalize = 0;
 
   /*
    * There is no reason to keep the SAs connected to us anymore, in fact
@@ -1492,7 +1541,7 @@ exchange_nonce (struct exchange *exchange, int peer, size_t nonce_sz,
   *nonce = malloc (nonce_sz);
   if (!*nonce)
     {
-      log_error ("exchange_nonce: malloc (%d) failed", nonce_sz);
+      log_error ("exchange_nonce: malloc (%lu) failed", (unsigned long)nonce_sz);
       return -1;
     }
   memcpy (*nonce, buf, nonce_sz);
@@ -1511,8 +1560,8 @@ exchange_gen_nonce (struct message *msg, size_t nonce_sz)
   buf = malloc (ISAKMP_NONCE_SZ + nonce_sz);
   if (!buf)
     {
-      log_error ("exchange_gen_nonce: malloc (%d) failed",
-		 ISAKMP_NONCE_SZ + nonce_sz);
+      log_error ("exchange_gen_nonce: malloc (%lu) failed",
+		 ISAKMP_NONCE_SZ + (unsigned long)nonce_sz);
       return -1;
     }
   getrandom (buf + ISAKMP_NONCE_DATA_OFF, nonce_sz);
@@ -1595,6 +1644,15 @@ exchange_add_certs (struct message *msg)
 
   id = exchange->initiator ? exchange->id_r : exchange->id_i;
   id_len = exchange->initiator ? exchange->id_r_len : exchange->id_i_len;
+
+  /*
+   * Without IDs we cannot handle this yet. Keep the aca_list around for 
+   * a later step/retry to see if we got the ID by then. 
+   * Note: A 'return -1' breaks X509-auth interop in the responder case
+   *       with some IPSec clients that send CERTREQs early (ex SSH Sentinel).
+   */
+  if (!id)
+    return 0;
 
   for (aca = TAILQ_FIRST (&exchange->aca_list); aca;
        aca = TAILQ_NEXT (aca, link))

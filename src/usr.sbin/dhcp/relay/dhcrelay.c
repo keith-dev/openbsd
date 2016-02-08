@@ -76,9 +76,9 @@ static char message [] = "Internet Software Consortium DHCP Relay Agent";
 static char contrib [] = "Please contribute if you find this software useful.";
 static char url [] = "For info, please visit http://www.isc.org/dhcp-contrib.html";
 
-int main (argc, argv, envp)
+int main (argc, argv)
 	int argc;
-	char **argv, **envp;
+	char **argv;
 {
 	int i;
 	struct servent *ent;
@@ -122,7 +122,7 @@ int main (argc, argv, envp)
 				usage (s);
 			}
 			memset (tmp, 0, sizeof *tmp);
-			strcpy (tmp -> name, argv [i]);
+			strlcpy (tmp -> name, argv [i], sizeof (tmp->name));
 			tmp -> next = interfaces;
 			tmp -> flags = INTERFACE_REQUESTED;
 			interfaces = tmp;
@@ -159,12 +159,12 @@ int main (argc, argv, envp)
 
 	if (!quiet) {
 		note ("%s %s", message, DHCP_VERSION);
-		note (copyright);
-		note (arr);
-		note ("");
-		note (contrib);
-		note (url);
-		note ("");
+		note ("%s", copyright);
+		note ("%s", arr);
+		note ("%s", "");
+		note ("%s", contrib);
+		note ("%s", url);
+		note ("%s", "");
 	} else
 		log_perror = 0;
 
@@ -186,6 +186,7 @@ int main (argc, argv, envp)
 
 	/* Set up the server sockaddrs. */
 	for (sp = servers; sp; sp = sp -> next) {
+		memset(&sp->to, 0, sizeof(sp->to));
 		sp -> to.sin_port = local_port;
 		sp -> to.sin_family = AF_INET;
 		sp -> to.sin_len = sizeof sp -> to;
@@ -262,6 +263,7 @@ void relay (ip, packet, length, from_port, from, hfrom)
 
 	/* If it's a bootreply, forward it to the client. */
 	if (packet -> op == BOOTREPLY) {
+		memset(&to, 0, sizeof(to));
 		if (!(packet -> flags & htons (BOOTP_BROADCAST)) &&
 		    can_unicast_without_arp ()) {
 			to.sin_addr = packet -> yiaddr;
@@ -289,7 +291,7 @@ void relay (ip, packet, length, from_port, from, hfrom)
 				break;
 		}
 		if (!out) {
-			warn ("packet to bogus giaddr %s.\n",
+			warn ("packet to bogus giaddr %s.",
 			      inet_ntoa (packet -> giaddr));
 			return;
 		}
@@ -342,10 +344,10 @@ static void usage (appname)
 	note (message);
 	note (copyright);
 	note (arr);
-	note ("");
+	note ("%s", "");
 	note (contrib);
 	note (url);
-	note ("");
+	note ("%s", "");
 
 	warn ("Usage: %s [-i] [-d] [-i if0] [...-i ifN] [-p <port>]", appname);
 	error ("      [-pf pidfilename] [server1 [... serverN]]");

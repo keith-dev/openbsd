@@ -1,4 +1,4 @@
-.\"	$OpenBSD: sd.4,v 1.7 2001/10/05 14:45:53 mpech Exp $
+.\"	$OpenBSD: sd.4,v 1.9 2002/10/01 07:10:39 miod Exp $
 .\"	$NetBSD: sd.4,v 1.3 1996/10/20 23:15:23 explorer Exp $
 .\"
 .\" Copyright (c) 1996
@@ -33,8 +33,8 @@
 .Nm sd
 .Nd SCSI disk driver
 .Sh SYNOPSIS
-.Cd sd* at scsibus? target ? lun ?
-.Cd sd3 at scsibus0 target 3 lun 0
+.Cd "sd* at scsibus? target ? lun ?"
+.Cd "#sd0 at scsibus0 target 3 lun 0" Pq fixed-configuration example
 .Sh DESCRIPTION
 The
 .Nm
@@ -113,10 +113,10 @@ On many systems
 .Xr disklabel 8
 is used to partition the drive into filesystems.
 On some systems the
-.Nx
+.Ox
 portion of the disk resides within a native partition, and another
 program is used to create the
-.Nx
+.Ox
 portion.
 .Pp
 For example, the i386 port uses
@@ -147,7 +147,7 @@ calls apply to
 .Tn SCSI
 disks as well as to other disks.
 They are defined in the header file
-.Aq Pa disklabel.h .
+.Aq Pa sys/disklabel.h .
 .Pp
 .Bl -tag -width DIOCSDINFO
 .\".It Dv DIOCSBAD
@@ -225,6 +225,8 @@ partition
 .Sh DIAGNOSTICS
 None.
 .Sh SEE ALSO
+.Xr intro 4 ,
+.Xr scsi 4 ,
 .Xr wd 4 ,
 .Xr disklabel 5 ,
 .Xr disklabel 8 ,

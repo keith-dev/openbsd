@@ -1,4 +1,4 @@
-/*	$OpenBSD: login_skey.c,v 1.7 2002/02/16 21:27:30 millert Exp $	*/
+/*	$OpenBSD: login_skey.c,v 1.11 2002/09/06 18:45:07 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 1995 Berkeley Software Design, Inc. All rights reserved.
@@ -64,13 +64,11 @@ volatile sig_atomic_t resumed;
 struct skey skey;
 
 int
-main(argc, argv)
-	int argc;
-	char **argv;
+main(int argc, char *argv[])
 {
 	FILE *back = NULL;
-    	char *class = 0;
-    	char *username = 0;
+	char *class = 0;
+	char *username = 0;
 	char skeyprompt[SKEY_MAX_CHALLENGE+17];
 	char passbuf[SKEY_MAX_PW_LEN+1];
 	int c, haskey;
@@ -86,8 +84,8 @@ main(argc, argv)
 
 	openlog(NULL, LOG_ODELAY, LOG_AUTH);
 
-    	while ((c = getopt(argc, argv, "ds:v:")) != -1)
-		switch(c) {
+	while ((c = getopt(argc, argv, "ds:v:")) != -1)
+		switch (c) {
 		case 'd':	/* to remain undocumented */
 			back = stdout;
 			break;
@@ -110,7 +108,7 @@ main(argc, argv)
 			exit(1);
 		}
 
-	switch(argc - optind) {
+	switch (argc - optind) {
 	case 2:
 		class = argv[optind + 1];
 	case 1:
@@ -172,7 +170,7 @@ main(argc, argv)
 		 * challenge, even if it has to cons one up.
 		 */
 		haskey = (skeychallenge(&skey, username, skeyprompt) == 0);
-		strcat(skeyprompt, "\nS/Key Password: ");
+		strlcat(skeyprompt, "\nS/Key Password: ", sizeof skeyprompt);
 		if (mode == 1) {
 			fprintf(back, BI_VALUE " challenge %s\n",
 			    auth_mkvalue(skeyprompt));
@@ -224,16 +222,14 @@ main(argc, argv)
 }
 
 void
-quit(signo)
-	int signo;
+quit(int signo)
 {
 
 	_exit(1);
 }
 
 void
-suspend(signo)
-	int signo;
+suspend(int signo)
 {
 	sigset_t nset;
 	int save_errno = errno;

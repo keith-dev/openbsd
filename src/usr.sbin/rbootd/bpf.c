@@ -1,4 +1,4 @@
-/*	$OpenBSD: bpf.c,v 1.7 2002/03/14 16:44:25 mpech Exp $	*/
+/*	$OpenBSD: bpf.c,v 1.10 2002/05/29 18:39:00 deraadt Exp $	*/
 /*	$NetBSD: bpf.c,v 1.5.2.1 1995/11/14 08:45:42 thorpej Exp $	*/
 
 /*
@@ -49,7 +49,7 @@
 
 #ifndef lint
 /*static char sccsid[] = "@(#)bpf.c	8.1 (Berkeley) 6/4/93";*/
-static char rcsid[] = "$OpenBSD: bpf.c,v 1.7 2002/03/14 16:44:25 mpech Exp $";
+static char rcsid[] = "$OpenBSD: bpf.c,v 1.10 2002/05/29 18:39:00 deraadt Exp $";
 #endif /* not lint */
 
 #include <sys/param.h>
@@ -71,7 +71,7 @@ static char rcsid[] = "$OpenBSD: bpf.c,v 1.7 2002/03/14 16:44:25 mpech Exp $";
 #include "pathnames.h"
 
 static int BpfFd = -1;
-static unsigned BpfLen = 0;
+static unsigned int BpfLen = 0;
 static u_int8_t *BpfPkt = NULL;
 
 /*
@@ -97,7 +97,7 @@ BpfOpen()
 	 *  Open the first available BPF device.
 	 */
 	do {
-		(void) sprintf(bpfdev, _PATH_BPF, n++);
+		(void) snprintf(bpfdev, sizeof bpfdev, _PATH_BPF, n++);
 		BpfFd = open(bpfdev, O_RDWR);
 	} while (BpfFd < 0 && (errno == EBUSY || errno == EPERM));
 
@@ -297,7 +297,7 @@ BpfGetIntfName(errmsg)
 		return(NULL);
 	}
 
-	(void) strcpy(device, mp->ifr_name);
+	(void) strlcpy(device, mp->ifr_name, sizeof device);
 	return(device);
 }
 

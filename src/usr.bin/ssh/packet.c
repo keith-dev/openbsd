@@ -37,7 +37,7 @@
  */
 
 #include "includes.h"
-RCSID("$OpenBSD: packet.c,v 1.93 2002/03/24 16:01:13 markus Exp $");
+RCSID("$OpenBSD: packet.c,v 1.97 2002/07/04 08:12:15 deraadt Exp $");
 
 #include "xmalloc.h"
 #include "buffer.h"
@@ -60,6 +60,7 @@ RCSID("$OpenBSD: packet.c,v 1.93 2002/03/24 16:01:13 markus Exp $");
 #include "log.h"
 #include "canohost.h"
 #include "misc.h"
+#include "ssh.h"
 
 #ifdef PACKET_DEBUG
 #define DBG(x) x
@@ -118,6 +119,10 @@ Newkeys *newkeys[MODE_MAX];
 static u_int32_t read_seqnr = 0;
 static u_int32_t send_seqnr = 0;
 
+/* Session key for protocol v1 */
+static u_char ssh1_key[SSH_SESSION_KEY_LENGTH];
+static u_int ssh1_keylen;
+
 /* roundup current message to extra_pad bytes */
 static u_char extra_pad = 0;
 
@@ -129,6 +134,7 @@ void
 packet_set_connection(int fd_in, int fd_out)
 {
 	Cipher *none = cipher_by_name("none");
+
 	if (none == NULL)
 		fatal("packet_set_connection: cannot load cipher 'none'");
 	connection_in = fd_in;
@@ -263,7 +269,7 @@ packet_set_seqnr(int mode, u_int32_t seqnr)
 	else if (mode == MODE_OUT)
 		send_seqnr = seqnr;
 	else
-		fatal("%s: bad mode %d", __FUNCTION__, mode);
+		fatal("packet_set_seqnr: bad mode %d", mode);
 }
 
 /* returns 1 if connection is via ipv4 */
@@ -386,17 +392,32 @@ packet_start_compression(int level)
  * key is used for both sending and reception.  However, both directions are
  * encrypted independently of each other.
  */
+
 void
 packet_set_encryption_key(const u_char *key, u_int keylen,
     int number)
 {
 	Cipher *cipher = cipher_by_number(number);
+
 	if (cipher == NULL)
 		fatal("packet_set_encryption_key: unknown cipher number %d", number);
 	if (keylen < 20)
 		fatal("packet_set_encryption_key: keylen too small: %d", keylen);
+	if (keylen > SSH_SESSION_KEY_LENGTH)
+		fatal("packet_set_encryption_key: keylen too big: %d", keylen);
+	memcpy(ssh1_key, key, keylen);
+	ssh1_keylen = keylen;
 	cipher_init(&send_context, cipher, key, keylen, NULL, 0, CIPHER_ENCRYPT);
 	cipher_init(&receive_context, cipher, key, keylen, NULL, 0, CIPHER_DECRYPT);
+}
+
+u_int
+packet_get_encryption_key(u_char *key)
+{
+	if (key == NULL)
+		return (ssh1_keylen);
+	memcpy(key, ssh1_key, ssh1_keylen);
+	return (ssh1_keylen);
 }
 
 /* Start constructing a packet to send. */
@@ -419,6 +440,7 @@ void
 packet_put_char(int value)
 {
 	char ch = value;
+
 	buffer_append(&outgoing_packet, &ch, 1);
 }
 void
@@ -970,7 +992,8 @@ packet_read_poll2(u_int32_t *seqnr_p)
 		buffer_clear(&incoming_packet);
 		buffer_append(&incoming_packet, buffer_ptr(&compression_buffer),
 		    buffer_len(&compression_buffer));
-		DBG(debug("input: len after de-compress %d", buffer_len(&incoming_packet)));
+		DBG(debug("input: len after de-compress %d",
+		    buffer_len(&incoming_packet)));
 	}
 	/*
 	 * get packet type, implies consume.
@@ -991,7 +1014,7 @@ packet_read_poll2(u_int32_t *seqnr_p)
 int
 packet_read_poll_seqnr(u_int32_t *seqnr_p)
 {
-	int reason, seqnr;
+	u_int reason, seqnr;
 	u_char type;
 	char *msg;
 
@@ -1014,14 +1037,15 @@ packet_read_poll_seqnr(u_int32_t *seqnr_p)
 			case SSH2_MSG_DISCONNECT:
 				reason = packet_get_int();
 				msg = packet_get_string(NULL);
-				log("Received disconnect from %s: %d: %.400s", get_remote_ipaddr(),
-					reason, msg);
+				log("Received disconnect from %s: %u: %.400s",
+				    get_remote_ipaddr(), reason, msg);
 				xfree(msg);
 				fatal_cleanup();
 				break;
 			case SSH2_MSG_UNIMPLEMENTED:
 				seqnr = packet_get_int();
-				debug("Received SSH2_MSG_UNIMPLEMENTED for %d", seqnr);
+				debug("Received SSH2_MSG_UNIMPLEMENTED for %u",
+				    seqnr);
 				break;
 			default:
 				return type;
@@ -1039,8 +1063,8 @@ packet_read_poll_seqnr(u_int32_t *seqnr_p)
 				break;
 			case SSH_MSG_DISCONNECT:
 				msg = packet_get_string(NULL);
-				log("Received disconnect from %s: %.400s", get_remote_ipaddr(),
-					msg);
+				log("Received disconnect from %s: %.400s",
+				    get_remote_ipaddr(), msg);
 				fatal_cleanup();
 				xfree(msg);
 				break;
@@ -1077,6 +1101,7 @@ u_int
 packet_get_char(void)
 {
 	char ch;
+
 	buffer_get(&incoming_packet, &ch, 1);
 	return (u_char) ch;
 }
@@ -1110,6 +1135,7 @@ void *
 packet_get_raw(int *length_ptr)
 {
 	int bytes = buffer_len(&incoming_packet);
+
 	if (length_ptr != NULL)
 		*length_ptr = bytes;
 	return buffer_ptr(&incoming_packet);
@@ -1182,6 +1208,7 @@ packet_disconnect(const char *fmt,...)
 	char buf[1024];
 	va_list args;
 	static int disconnecting = 0;
+
 	if (disconnecting)	/* Guard against recursive invocations. */
 		fatal("packet_disconnect called recursively.");
 	disconnecting = 1;
@@ -1224,6 +1251,7 @@ void
 packet_write_poll(void)
 {
 	int len = buffer_len(&output);
+
 	if (len > 0) {
 		len = write(connection_out, buffer_ptr(&output), len);
 		if (len <= 0) {
@@ -1337,6 +1365,7 @@ int
 packet_set_maxsize(int s)
 {
 	static int called = 0;
+
 	if (called) {
 		log("packet_set_maxsize: called twice: old %d new %d",
 		    max_packet_size, s);

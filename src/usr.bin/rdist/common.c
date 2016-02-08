@@ -1,4 +1,4 @@
-/*	$OpenBSD: common.c,v 1.12 2001/11/19 19:02:15 mpech Exp $	*/
+/*	$OpenBSD: common.c,v 1.16 2002/06/23 03:07:22 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1983 Regents of the University of California.
@@ -39,7 +39,7 @@ static char RCSid[] =
 "$From: common.c,v 6.82 1998/03/23 23:27:33 michaelc Exp $";
 #else
 static char RCSid[] = 
-"$OpenBSD: common.c,v 1.12 2001/11/19 19:02:15 mpech Exp $";
+"$OpenBSD: common.c,v 1.16 2002/06/23 03:07:22 deraadt Exp $";
 #endif
 
 static char sccsid[] = "@(#)common.c";
@@ -135,8 +135,10 @@ extern int init(argc, argv, envp)
 	int i;
 	char *cp;
 
+#ifdef SIGSEGV_CHECK
 	if (!isserver)
 		(void) signal(SIGSEGV, sighandler);
+#endif
 
 	setprogname(argv);
 
@@ -154,7 +156,7 @@ extern int init(argc, argv, envp)
 
 	pw = getpwuid(userid = getuid());
 	if (pw == NULL) {
-		error("Your user id (%d) is not known to this system.",
+		error("Your user id (%u) is not known to this system.",
 		      getuid());
 		return(-1);
 	}
@@ -230,18 +232,20 @@ extern void lostconn()
 	finish();
 }
 
+#ifdef SIGSEGV_CHECK
 /*
  * Do a core dump
  */
 extern void coredump()
 {
-	error("Segmentation violation - dumping core [PID = %d, %s]",
-	      getpid(), 
+	error("Segmentation violation - dumping core [PID = %ld, %s]",
+	      (long)getpid(), 
 	      (isserver) ? "isserver" : ((amchild) ? "amchild" : "parent"));
 	abort();
 	/*NOTREACHED*/
 	fatalerr("Abort failed - no core dump.  Exiting...");
 }
+#endif
 
 /*
  * General signal handler
@@ -269,9 +273,11 @@ extern void sighandler(sig)
 		debug = !debug;
 		break;
 
+#ifdef SIGSEGV_CHECK
 	case SIGSEGV:
 		coredump();
 		break;
+#endif
 
 	case SIGHUP:
 	case SIGINT:
@@ -546,7 +552,7 @@ extern char *getusername(uid, file, opts)
 	 * do the opts check.
 	 */
   	if (IS_ON(opts, DO_NUMCHKOWNER)) { 
-		(void) sprintf(buf, ":%d", uid);
+		(void) sprintf(buf, ":%u", uid);
 		return(buf);
   	}
 
@@ -560,8 +566,8 @@ extern char *getusername(uid, file, opts)
 
 	if ((pwd = getpwuid(uid)) == NULL) {
 		message(MT_WARNING,
-			"%s: No password entry for uid %d", file, uid);
-		(void) sprintf(buf, ":%d", uid);
+			"%s: No password entry for uid %u", file, uid);
+		(void) sprintf(buf, ":%u", uid);
 	} else
 		(void) strcpy(buf, pwd->pw_name);
 
@@ -585,7 +591,7 @@ extern char *getgroupname(gid, file, opts)
 	 * do the opts check.
 	 */
   	if (IS_ON(opts, DO_NUMCHKGROUP)) { 
-		(void) sprintf(buf, ":%d", gid);
+		(void) sprintf(buf, ":%u", gid);
 		return(buf);
   	}
 
@@ -598,8 +604,8 @@ extern char *getgroupname(gid, file, opts)
 	lastgid = gid;
 
 	if ((grp = (struct group *)getgrgid(gid)) == NULL) {
-		message(MT_WARNING, "%s: No name for group %d", file, gid);
-		(void) sprintf(buf, ":%d", gid);
+		message(MT_WARNING, "%s: No name for group %u", file, gid);
+		(void) sprintf(buf, ":%u", gid);
 	} else
 		(void) strcpy(buf, grp->gr_name);
 
@@ -726,7 +732,7 @@ extern int becomeuser()
 #endif	/* HAVE_SAVED_IDS */
 
 	if (r < 0)
-		error("becomeuser %d failed: %s (ruid = %d euid = %d)",
+		error("becomeuser %d failed: %s (ruid = %u euid = %u)",
 		      userid, SYSERR, getuid(), geteuid());
 
 	return(r);
@@ -748,7 +754,7 @@ extern int becomeroot()
 #endif	/* HAVE_SAVED_IDS */
 
 	if (r < 0)
-		error("becomeroot failed: %s (ruid = %d euid = %d)",
+		error("becomeroot failed: %s (ruid = %u euid = %u)",
 		      SYSERR, getuid(), geteuid());
 
 	return(r);
@@ -814,11 +820,12 @@ extern char *getversion()
 void runcommand(cmd)
 	char *cmd;
 {
-	int fd[2], pid, i;
+	int fd[2];
 	int status;
 	char *cp, *s;
 	char sbuf[BUFSIZ], buf[BUFSIZ];
-
+	pid_t pid, i;
+	
 	if (pipe(fd) < 0) {
 		error("pipe of %s failed: %s", cmd, SYSERR);
 		return;
@@ -922,8 +929,8 @@ char *xrealloc(baseptr, amt)
  * calloc with error checking
  */
 char *xcalloc(num, esize)
-	unsigned num;
-	unsigned esize;
+	unsigned int num;
+	unsigned int esize;
 {
 	char *ptr;
 	extern POINTER *calloc();

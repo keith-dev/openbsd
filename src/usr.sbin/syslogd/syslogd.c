@@ -1,4 +1,4 @@
-/*	$OpenBSD: syslogd.c,v 1.49 2002/02/16 21:28:09 millert Exp $	*/
+/*	$OpenBSD: syslogd.c,v 1.57 2002/09/06 19:46:52 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1983, 1988, 1993, 1994
@@ -43,7 +43,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)syslogd.c	8.3 (Berkeley) 4/4/94";
 #else
-static char rcsid[] = "$OpenBSD: syslogd.c,v 1.49 2002/02/16 21:28:09 millert Exp $";
+static char rcsid[] = "$OpenBSD: syslogd.c,v 1.57 2002/09/06 19:46:52 deraadt Exp $";
 #endif
 #endif /* not lint */
 
@@ -60,7 +60,7 @@ static char rcsid[] = "$OpenBSD: syslogd.c,v 1.49 2002/02/16 21:28:09 millert Ex
  *
  * Defined Constants:
  *
- * MAXLINE -- the maximimum line length that can be handled.
+ * MAXLINE -- the maximum line length that can be handled.
  * DEFUPRI -- the default priority for user messages
  * DEFSPRI -- the default priority for kernel messages
  *
@@ -227,13 +227,12 @@ char *funixn[MAXFUNIX] = { _PATH_LOG };
 int funix[MAXFUNIX];
 
 int
-main(argc, argv)
-	int argc;
-	char *argv[];
+main(int argc, char *argv[])
 {
-	int ch, i, fklog, len, linesize, fdsrmax = 0;
+	int ch, i, fklog, linesize, fdsrmax = 0;
 	struct sockaddr_un sunx, fromunix;
 	struct sockaddr_in sin, frominet;
+	socklen_t slen, len;
 	fd_set *fdsr = NULL;
 	char *p, *line;
 	FILE *fp;
@@ -317,12 +316,19 @@ main(argc, argv)
 		    bind(funix[i], (struct sockaddr *)&sunx,
 		    SUN_LEN(&sunx)) < 0 ||
 		    chmod(funixn[i], 0666) < 0) {
-			(void) snprintf(line, sizeof line, "cannot create %s",
+			(void)snprintf(line, linesize, "cannot create %s",
 			    funixn[i]);
 			logerror(line);
 			dprintf("cannot create %s (%d)\n", funixn[i], errno);
 			if (i == 0)
 				die(0);
+		}
+		/* double socket receive buffer size */
+		if (getsockopt(funix[i], SOL_SOCKET, SO_RCVBUF, &len,
+		    &slen) == 0) {
+			len *= 2;
+			(void)setsockopt(funix[i], SOL_SOCKET, SO_RCVBUF, &len,
+			    slen);
 		}
 	}
 	finet = socket(AF_INET, SOCK_DGRAM, 0);
@@ -345,6 +351,13 @@ main(argc, argv)
 				die(0);
 		} else {
 			InetInuse = 1;
+			/* double socket receive buffer size */
+			if (getsockopt(finet, SOL_SOCKET, SO_RCVBUF, &len,
+			    &slen) == 0) {
+				len *= 2;
+				(void)setsockopt(funix[i], SOL_SOCKET,
+				    SO_RCVBUF, &len, slen);
+			}
 		}
 	}
 	if ((fklog = open(_PATH_KLOG, O_RDONLY, 0)) < 0)
@@ -354,7 +367,7 @@ main(argc, argv)
 	if (!Debug) {
 		fp = fopen(PidFile, "w");
 		if (fp != NULL) {
-			fprintf(fp, "%d\n", getpid());
+			fprintf(fp, "%ld\n", (long)getpid());
 			(void) fclose(fp);
 		}
 	}
@@ -432,7 +445,8 @@ main(argc, argv)
 				} else if (i < 0 && errno != EINTR)
 					logerror("recvfrom inet");
 			}
-		} 
+		}
+
 		for (i = 0; i < nfunix; i++) {
 			if (funix[i] != -1 && FD_ISSET(funix[i], fdsr)) {
 				len = sizeof(fromunix);
@@ -451,11 +465,12 @@ main(argc, argv)
 }
 
 void
-usage()
+usage(void)
 {
 
 	(void)fprintf(stderr,
-	    "usage: syslogd [-u] [-f conffile] [-m markinterval] [-p logpath] [-a logpath]\n");
+	    "usage: syslogd [-du] [-f config_file] [-m mark_interval] "
+	    "[-a path] [-p log_socket]\n");
 	exit(1);
 }
 
@@ -464,9 +479,7 @@ usage()
  * on the appropriate log files.
  */
 void
-printline(hname, msg)
-	char *hname;
-	char *msg;
+printline(char *hname, char *msg)
 {
 	int pri;
 	char *p, *q, line[MAXLINE + 1];
@@ -503,13 +516,12 @@ printline(hname, msg)
  * Take a raw input line from /dev/klog, split and format similar to syslog().
  */
 void
-printsys(msg)
-	char *msg;
+printsys(char *msg)
 {
 	int c, pri, flags;
 	char *lp, *p, *q, line[MAXLINE + 1];
 
-	snprintf(line, sizeof line, "%s: ", _PATH_UNIX);
+	(void)snprintf(line, sizeof line, "%s: ", _PATH_UNIX);
 	lp = line + strlen(line);
 	for (p = msg; *p != '\0'; ) {
 		flags = SYNC_FILE | ADDDATE;	/* fsync file after write */
@@ -542,16 +554,13 @@ time_t	now;
  * the priority.
  */
 void
-logmsg(pri, msg, from, flags)
-	int pri;
-	char *msg, *from;
-	int flags;
+logmsg(int pri, char *msg, char *from, int flags)
 {
 	struct filed *f;
 	int fac, msglen, prilev, i;
 	sigset_t mask, omask;
 	char *timestamp;
- 	char prog[NAME_MAX+1];
+	char prog[NAME_MAX+1];
 
 	dprintf("logmsg: pri 0%o, flags 0x%x, from %s, msg %s\n",
 	    pri, flags, from, msg);
@@ -669,10 +678,7 @@ logmsg(pri, msg, from, flags)
 }
 
 void
-fprintlog(f, flags, msg)
-	struct filed *f;
-	int flags;
-	char *msg;
+fprintlog(struct filed *f, int flags, char *msg)
 {
 	struct iovec iov[6];
 	struct iovec *v;
@@ -681,12 +687,13 @@ fprintlog(f, flags, msg)
 
 	v = iov;
 	if (f->f_type == F_WALL) {
-		v->iov_base = greetings;
-		v->iov_len = snprintf(greetings, sizeof(greetings),
+		if ((l = snprintf(greetings, sizeof(greetings),
 		    "\r\n\7Message from syslogd@%s at %.24s ...\r\n",
-		    f->f_prevhost, ctime(&now));
-		if (v->iov_len >= sizeof(greetings))
-			v->iov_len = sizeof(greetings) - 1;
+		    f->f_prevhost, ctime(&now))) >= sizeof(greetings) ||
+		    l == -1)
+			l = strlen(greetings);
+		v->iov_base = greetings;
+		v->iov_len = l;
 		v++;
 		v->iov_base = "";
 		v->iov_len = 0;
@@ -710,9 +717,12 @@ fprintlog(f, flags, msg)
 		v->iov_base = msg;
 		v->iov_len = strlen(msg);
 	} else if (f->f_prevcount > 1) {
+		if ((l = snprintf(repbuf, sizeof(repbuf),
+		    "last message repeated %d times", f->f_prevcount)) >=
+		    sizeof(repbuf) || l == -1)
+			l = strlen(repbuf);
 		v->iov_base = repbuf;
-		v->iov_len = snprintf(repbuf, sizeof repbuf,
-		    "last message repeated %d times", f->f_prevcount);
+		v->iov_len = l;
 	} else {
 		v->iov_base = f->f_prevline;
 		v->iov_len = f->f_prevlen;
@@ -729,10 +739,10 @@ fprintlog(f, flags, msg)
 
 	case F_FORW:
 		dprintf(" %s\n", f->f_un.f_forw.f_hname);
-		l = snprintf(line, sizeof(line) - 1, "<%d>%.15s %s", f->f_prevpri,
-		    (char *)iov[0].iov_base, (char *)iov[4].iov_base);
-		if (l > MAXLINE)
-			l = MAXLINE;
+		if ((l = snprintf(line, sizeof(line), "<%d>%.15s %s",
+		    f->f_prevpri, (char *)iov[0].iov_base,
+		    (char *)iov[4].iov_base)) >= sizeof(line) || l == -1)
+			l = strlen(line);
 		if (sendto(finet, line, l, 0,
 		    (struct sockaddr *)&f->f_un.f_forw.f_addr,
 		    sizeof(f->f_un.f_forw.f_addr)) != l) {
@@ -808,16 +818,13 @@ fprintlog(f, flags, msg)
  *	world, or a list of approved users.
  */
 void
-wallmsg(f, iov)
-	struct filed *f;
-	struct iovec *iov;
+wallmsg(struct filed *f, struct iovec *iov)
 {
+	struct utmp ut;
+	char line[sizeof(ut.ut_line) + 1], *p;
 	static int reenter;			/* avoid calling ourselves */
 	FILE *uf;
-	struct utmp ut;
 	int i;
-	char *p;
-	char line[sizeof(ut.ut_line) + 1];
 
 	if (reenter++)
 		return;
@@ -858,8 +865,7 @@ wallmsg(f, iov)
 }
 
 void
-reapchild(signo)
-	int signo;
+reapchild(int signo)
 {
 	int save_errno = errno;
 	int status;
@@ -873,8 +879,7 @@ reapchild(signo)
  * Return a printable representation of a host address.
  */
 char *
-cvthname(f)
-	struct sockaddr_in *f;
+cvthname(struct sockaddr_in *f)
 {
 	struct hostent *hp;
 	sigset_t omask, nmask;
@@ -903,22 +908,19 @@ cvthname(f)
 }
 
 void
-dodie(signo)
-	int signo;
+dodie(int signo)
 {
 	WantDie = signo;
 }
 
 void
-domark(signo)
-	int signo;
+domark(int signo)
 {
 	MarkSet = 1;
 }
 
 void
-doinit(signo)
-	int signo;
+doinit(int signo)
 {
 	DoInit = 1;
 }
@@ -927,8 +929,7 @@ doinit(signo)
  * Print syslogd errors some place.
  */
 void
-logerror(type)
-	char *type;
+logerror(char *type)
 {
 	char buf[100];
 
@@ -943,8 +944,7 @@ logerror(type)
 }
 
 void
-die(signo)
-	int signo;
+die(int signo)
 {
 	struct filed *f;
 	int was_initialized = Initialized;
@@ -975,14 +975,12 @@ die(signo)
  *  INIT -- Initialize syslogd from configuration table
  */
 void
-init()
+init(void)
 {
-	int i;
-	FILE *cf;
+	char cline[LINE_MAX], prog[NAME_MAX+1], *p;
 	struct filed *f, *next, **nextp;
-	char *p;
-	char cline[LINE_MAX];
- 	char prog[NAME_MAX+1];
+	FILE *cf;
+	int i;
 
 	dprintf("init\n");
 
@@ -1111,10 +1109,7 @@ init()
  * Crack a configuration file line
  */
 void
-cfline(line, f, prog)
-	char *line;
-	struct filed *f;
-	char *prog;
+cfline(char *line, struct filed *f, char *prog)
 {
 	struct hostent *hp;
 	int i, pri;
@@ -1277,7 +1272,7 @@ cfline(line, f, prog)
  * Retrieve the size of the kernel message buffer, via sysctl.
  */
 int
-getmsgbufsize()
+getmsgbufsize(void)
 {
 	int msgbufsize, mib[2];
 	size_t size;
@@ -1296,9 +1291,7 @@ getmsgbufsize()
  *  Decode a symbolic name to a numeric value
  */
 int
-decode(name, codetab)
-	const char *name;
-	CODE *codetab;
+decode(const char *name, CODE *codetab)
 {
 	CODE *c;
 	char *p, buf[40];

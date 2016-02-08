@@ -1,4 +1,4 @@
-/*	$OpenBSD: arithmetic.c,v 1.9 2002/02/16 21:27:08 millert Exp $	*/
+/*	$OpenBSD: arithmetic.c,v 1.12 2002/06/11 05:22:40 jsyn Exp $	*/
 
 /*
  * Copyright (c) 1989, 1993
@@ -46,7 +46,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)arithmetic.c	8.1 (Berkeley) 5/31/93";
 #else
-static char rcsid[] = "$OpenBSD: arithmetic.c,v 1.9 2002/02/16 21:27:08 millert Exp $";
+static char rcsid[] = "$OpenBSD: arithmetic.c,v 1.12 2002/06/11 05:22:40 jsyn Exp $";
 #endif
 #endif /* not lint */
 
@@ -121,10 +121,6 @@ main(argc, argv)
 	extern int optind;
 	int ch, cnt;
 
-	/* revoke privs */
-	setegid(getgid());
-	setgid(getgid());
-
 	while ((ch = getopt(argc, argv, "hr:o:")) != -1)
 		switch(ch) {
 		case 'o': {
@@ -197,7 +193,7 @@ showstats()
 int
 problem()
 {
-	register char *p;
+	char *p;
 	time_t start, finish;
 	int left, op, right, result;
 	char line[80];
@@ -332,7 +328,7 @@ getrandom(maxval, op, operand)
 	int maxval, op, operand;
 {
 	int value;
-	register struct penalty **pp, *p;
+	struct penalty **pp, *p;
 
 	op = opnum(op);
 	value = random() % (maxval + penalty[op][operand]);
@@ -367,7 +363,7 @@ getrandom(maxval, op, operand)
 	 * correspond to the actual sum of penalties in the list.  Provide an
 	 * obscure message.
 	 */
-	errx(1, "bug: inconsistent penalties\n");
+	errx(1, "bug: inconsistent penalties.");
 	/* NOTREACHED */
 }
 
@@ -379,7 +375,7 @@ opnum(op)
 	char *p;
 
 	if (op == 0 || (p = strchr(keylist, op)) == NULL)
-		errx(1, "bug: op %c not in keylist %s\n", op, keylist);
+		errx(1, "bug: op %c not in keylist %s.", op, keylist);
 	return(p - keylist);
 }
 

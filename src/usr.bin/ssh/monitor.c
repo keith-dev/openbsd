@@ -25,7 +25,7 @@
  */
 
 #include "includes.h"
-RCSID("$OpenBSD: monitor.c,v 1.9 2002/03/30 18:51:15 markus Exp $");
+RCSID("$OpenBSD: monitor.c,v 1.29 2002/09/26 11:38:43 markus Exp $");
 
 #include <openssl/dh.h>
 
@@ -83,6 +83,8 @@ struct {
 	u_int ivinlen;
 	u_char *ivout;
 	u_int ivoutlen;
+	u_char *ssh1key;
+	u_int ssh1keylen;
 	int ssh1cipher;
 	int ssh1protoflags;
 	u_char *input;
@@ -96,6 +98,7 @@ struct {
 int mm_answer_moduli(int, Buffer *);
 int mm_answer_sign(int, Buffer *);
 int mm_answer_pwnamallow(int, Buffer *);
+int mm_answer_auth2_read_banner(int, Buffer *);
 int mm_answer_authserv(int, Buffer *);
 int mm_answer_authpassword(int, Buffer *);
 int mm_answer_bsdauthquery(int, Buffer *);
@@ -113,6 +116,13 @@ int mm_answer_rsa_response(int, Buffer *);
 int mm_answer_sesskey(int, Buffer *);
 int mm_answer_sessid(int, Buffer *);
 
+#ifdef KRB4
+int mm_answer_krb4(int, Buffer *);
+#endif
+#ifdef KRB5
+int mm_answer_krb5(int, Buffer *);
+#endif
+
 static Authctxt *authctxt;
 static BIGNUM *ssh1_challenge = NULL;	/* used for ssh1 rsa auth */
 
@@ -120,9 +130,11 @@ static BIGNUM *ssh1_challenge = NULL;	/* used for ssh1 rsa auth */
 static u_char *key_blob = NULL;
 static u_int key_bloblen = 0;
 static int key_blobtype = MM_NOKEY;
-static u_char *hostbased_cuser = NULL;
-static u_char *hostbased_chost = NULL;
+static char *hostbased_cuser = NULL;
+static char *hostbased_chost = NULL;
 static char *auth_method = "unknown";
+static int session_id2_len = 0;
+static u_char *session_id2 = NULL;
 
 struct mon_table {
 	enum monitor_reqtype type;
@@ -143,6 +155,7 @@ struct mon_table mon_dispatch_proto20[] = {
     {MONITOR_REQ_SIGN, MON_ONCE, mm_answer_sign},
     {MONITOR_REQ_PWNAM, MON_ONCE, mm_answer_pwnamallow},
     {MONITOR_REQ_AUTHSERV, MON_ONCE, mm_answer_authserv},
+    {MONITOR_REQ_AUTH2_READ_BANNER, MON_ONCE, mm_answer_auth2_read_banner},
     {MONITOR_REQ_AUTHPASSWORD, MON_AUTH, mm_answer_authpassword},
 #ifdef BSD_AUTH
     {MONITOR_REQ_BSDAUTHQUERY, MON_ISAUTH, mm_answer_bsdauthquery},
@@ -182,6 +195,12 @@ struct mon_table mon_dispatch_proto15[] = {
 #ifdef SKEY
     {MONITOR_REQ_SKEYQUERY, MON_ISAUTH, mm_answer_skeyquery},
     {MONITOR_REQ_SKEYRESPOND, MON_AUTH, mm_answer_skeyrespond},
+#endif
+#ifdef KRB4
+    {MONITOR_REQ_KRB4, MON_ONCE|MON_AUTH, mm_answer_krb4},
+#endif
+#ifdef KRB5
+    {MONITOR_REQ_KRB5, MON_ONCE|MON_AUTH, mm_answer_krb5},
 #endif
     {0, 0, NULL}
 };
@@ -225,7 +244,7 @@ monitor_permit_authentications(int permit)
 }
 
 Authctxt *
-monitor_child_preauth(struct monitor *monitor)
+monitor_child_preauth(struct monitor *pmonitor)
 {
 	struct mon_table *ent;
 	int authenticated = 0;
@@ -248,11 +267,11 @@ monitor_child_preauth(struct monitor *monitor)
 
 	/* The first few requests do not require asynchronous access */
 	while (!authenticated) {
-		authenticated = monitor_read(monitor, mon_dispatch, &ent);
+		authenticated = monitor_read(pmonitor, mon_dispatch, &ent);
 		if (authenticated) {
 			if (!(ent->flags & MON_AUTHDECIDE))
 				fatal("%s: unexpected authentication from %d",
-				    __FUNCTION__, ent->type);
+				    __func__, ent->type);
 			if (authctxt->pw->pw_uid == 0 &&
 			    !auth_root_allowed(auth_method))
 				authenticated = 0;
@@ -267,18 +286,18 @@ monitor_child_preauth(struct monitor *monitor)
 	}
 
 	if (!authctxt->valid)
-		fatal("%s: authenticated invalid user", __FUNCTION__);
+		fatal("%s: authenticated invalid user", __func__);
 
 	debug("%s: %s has been authenticated by privileged process",
-	    __FUNCTION__, authctxt->user);
+	    __func__, authctxt->user);
 
-	mm_get_keystate(monitor);
+	mm_get_keystate(pmonitor);
 
 	return (authctxt);
 }
 
 void
-monitor_child_postauth(struct monitor *monitor)
+monitor_child_postauth(struct monitor *pmonitor)
 {
 	if (compat20) {
 		mon_dispatch = mon_dispatch_postauth20;
@@ -298,18 +317,20 @@ monitor_child_postauth(struct monitor *monitor)
 	}
 
 	for (;;)
-		monitor_read(monitor, mon_dispatch, NULL);
+		monitor_read(pmonitor, mon_dispatch, NULL);
 }
 
 void
-monitor_sync(struct monitor *monitor)
+monitor_sync(struct monitor *pmonitor)
 {
-	/* The member allocation is not visible, so sync it */
-	mm_share_sync(&monitor->m_zlib, &monitor->m_zback);
+	if (options.compression) {
+		/* The member allocation is not visible, so sync it */
+		mm_share_sync(&pmonitor->m_zlib, &pmonitor->m_zback);
+	}
 }
 
 int
-monitor_read(struct monitor *monitor, struct mon_table *ent,
+monitor_read(struct monitor *pmonitor, struct mon_table *ent,
     struct mon_table **pent)
 {
 	Buffer m;
@@ -318,10 +339,10 @@ monitor_read(struct monitor *monitor, struct mon_table *ent,
 
 	buffer_init(&m);
 
-	mm_request_receive(monitor->m_sendfd, &m);
+	mm_request_receive(pmonitor->m_sendfd, &m);
 	type = buffer_get_char(&m);
 
-	debug3("%s: checking request %d", __FUNCTION__, type);
+	debug3("%s: checking request %d", __func__, type);
 
 	while (ent->f != NULL) {
 		if (ent->type == type)
@@ -331,14 +352,14 @@ monitor_read(struct monitor *monitor, struct mon_table *ent,
 
 	if (ent->f != NULL) {
 		if (!(ent->flags & MON_PERMIT))
-			fatal("%s: unpermitted request %d", __FUNCTION__,
+			fatal("%s: unpermitted request %d", __func__,
 			    type);
-		ret = (*ent->f)(monitor->m_sendfd, &m);
+		ret = (*ent->f)(pmonitor->m_sendfd, &m);
 		buffer_free(&m);
 
 		/* The child may use this request only once, disable it */
 		if (ent->flags & MON_ONCE) {
-			debug2("%s: %d used once, disabling now", __FUNCTION__,
+			debug2("%s: %d used once, disabling now", __func__,
 			    type);
 			ent->flags &= ~MON_PERMIT;
 		}
@@ -349,7 +370,7 @@ monitor_read(struct monitor *monitor, struct mon_table *ent,
 		return ret;
 	}
 
-	fatal("%s: unsupported request: %d", __FUNCTION__, type);
+	fatal("%s: unsupported request: %d", __func__, type);
 
 	/* NOTREACHED */
 	return (-1);
@@ -394,11 +415,11 @@ mm_answer_moduli(int socket, Buffer *m)
 	max = buffer_get_int(m);
 
 	debug3("%s: got parameters: %d %d %d",
-	    __FUNCTION__, min, want, max);
+	    __func__, min, want, max);
 	/* We need to check here, too, in case the child got corrupted */
 	if (max < min || want < min || max < want)
 		fatal("%s: bad parameters: %d %d %d",
-		    __FUNCTION__, min, want, max);
+		    __func__, min, want, max);
 
 	buffer_clear(m);
 
@@ -427,20 +448,27 @@ mm_answer_sign(int socket, Buffer *m)
 	u_int siglen, datlen;
 	int keyid;
 
-	debug3("%s", __FUNCTION__);
+	debug3("%s", __func__);
 
 	keyid = buffer_get_int(m);
 	p = buffer_get_string(m, &datlen);
 
 	if (datlen != 20)
-		fatal("%s: data length incorrect: %d", __FUNCTION__, datlen);
+		fatal("%s: data length incorrect: %u", __func__, datlen);
+
+	/* save session id, it will be passed on the first call */
+	if (session_id2_len == 0) {
+		session_id2_len = datlen;
+		session_id2 = xmalloc(session_id2_len);
+		memcpy(session_id2, p, session_id2_len);
+	}
 
 	if ((key = get_hostkey_by_index(keyid)) == NULL)
-		fatal("%s: no hostkey from index %d", __FUNCTION__, keyid);
+		fatal("%s: no hostkey from index %d", __func__, keyid);
 	if (key_sign(key, &signature, &siglen, p, datlen) < 0)
-		fatal("%s: key_sign failed", __FUNCTION__);
+		fatal("%s: key_sign failed", __func__);
 
-	debug3("%s: signature %p(%d)", __FUNCTION__, signature, siglen);
+	debug3("%s: signature %p(%u)", __func__, signature, siglen);
 
 	buffer_clear(m);
 	buffer_put_string(m, signature, siglen);
@@ -465,10 +493,10 @@ mm_answer_pwnamallow(int socket, Buffer *m)
 	struct passwd *pwent;
 	int allowed = 0;
 
-	debug3("%s", __FUNCTION__);
+	debug3("%s", __func__);
 
 	if (authctxt->attempt++ != 0)
-		fatal("%s: multiple attempts for getpwnam", __FUNCTION__);
+		fatal("%s: multiple attempts for getpwnam", __func__);
 
 	login = buffer_get_string(m, NULL);
 
@@ -499,16 +527,33 @@ mm_answer_pwnamallow(int socket, Buffer *m)
 	buffer_put_cstring(m, pwent->pw_shell);
 
  out:
-	debug3("%s: sending MONITOR_ANS_PWNAM: %d", __FUNCTION__, allowed);
+	debug3("%s: sending MONITOR_ANS_PWNAM: %d", __func__, allowed);
 	mm_request_send(socket, MONITOR_ANS_PWNAM, m);
 
 	/* For SSHv1 allow authentication now */
 	if (!compat20)
 		monitor_permit_authentications(1);
-	else
+	else {
 		/* Allow service/style information on the auth context */
 		monitor_permit(mon_dispatch, MONITOR_REQ_AUTHSERV, 1);
+		monitor_permit(mon_dispatch, MONITOR_REQ_AUTH2_READ_BANNER, 1);
+	}
 
+
+	return (0);
+}
+
+int mm_answer_auth2_read_banner(int socket, Buffer *m)
+{
+	char *banner;
+
+	buffer_clear(m);
+	banner = auth2_read_banner();
+	buffer_put_cstring(m, banner != NULL ? banner : "");
+	mm_request_send(socket, MONITOR_ANS_AUTH2_READ_BANNER, m);
+
+	if (banner != NULL)
+		xfree(banner);
 
 	return (0);
 }
@@ -521,7 +566,7 @@ mm_answer_authserv(int socket, Buffer *m)
 	authctxt->service = buffer_get_string(m, NULL);
 	authctxt->style = buffer_get_string(m, NULL);
 	debug3("%s: service=%s, style=%s",
-	    __FUNCTION__, authctxt->service, authctxt->style);
+	    __func__, authctxt->service, authctxt->style);
 
 	if (strlen(authctxt->style) == 0) {
 		xfree(authctxt->style);
@@ -536,18 +581,20 @@ mm_answer_authpassword(int socket, Buffer *m)
 {
 	static int call_count;
 	char *passwd;
-	int authenticated, plen;
+	int authenticated;
+	u_int plen;
 
 	passwd = buffer_get_string(m, &plen);
 	/* Only authenticate if the context is valid */
-	authenticated = authctxt->valid && auth_password(authctxt, passwd);
+	authenticated = options.password_authentication &&
+	    authctxt->valid && auth_password(authctxt, passwd);
 	memset(passwd, 0, strlen(passwd));
 	xfree(passwd);
 
 	buffer_clear(m);
 	buffer_put_int(m, authenticated);
 
-	debug3("%s: sending result %d", __FUNCTION__, authenticated);
+	debug3("%s: sending result %d", __func__, authenticated);
 	mm_request_send(socket, MONITOR_ANS_AUTHPASSWORD, m);
 
 	call_count++;
@@ -578,7 +625,7 @@ mm_answer_bsdauthquery(int socket, Buffer *m)
 	if (res != -1)
 		buffer_put_cstring(m, prompts[0]);
 
-	debug3("%s: sending challenge res: %d", __FUNCTION__, res);
+	debug3("%s: sending challenge res: %d", __func__, res);
 	mm_request_send(socket, MONITOR_ANS_BSDAUTHQUERY, m);
 
 	if (res != -1) {
@@ -598,18 +645,19 @@ mm_answer_bsdauthrespond(int socket, Buffer *m)
 	int authok;
 
 	if (authctxt->as == 0)
-		fatal("%s: no bsd auth session", __FUNCTION__);
+		fatal("%s: no bsd auth session", __func__);
 
 	response = buffer_get_string(m, NULL);
-	authok = auth_userresponse(authctxt->as, response, 0);
+	authok = options.challenge_response_authentication &&
+	    auth_userresponse(authctxt->as, response, 0);
 	authctxt->as = NULL;
-	debug3("%s: <%s> = <%d>", __FUNCTION__, response, authok);
+	debug3("%s: <%s> = <%d>", __func__, response, authok);
 	xfree(response);
 
 	buffer_clear(m);
 	buffer_put_int(m, authok);
 
-	debug3("%s: sending authenticated: %d", __FUNCTION__, authok);
+	debug3("%s: sending authenticated: %d", __func__, authok);
 	mm_request_send(socket, MONITOR_ANS_BSDAUTHRESPOND, m);
 
 	auth_method = "bsdauth";
@@ -633,7 +681,7 @@ mm_answer_skeyquery(int socket, Buffer *m)
 	if (res != -1)
 		buffer_put_cstring(m, challenge);
 
-	debug3("%s: sending challenge res: %d", __FUNCTION__, res);
+	debug3("%s: sending challenge res: %d", __func__, res);
 	mm_request_send(socket, MONITOR_ANS_SKEYQUERY, m);
 
 	return (0);
@@ -647,7 +695,8 @@ mm_answer_skeyrespond(int socket, Buffer *m)
 
 	response = buffer_get_string(m, NULL);
 
-	authok = (authctxt->valid &&
+	authok = (options.challenge_response_authentication &&
+	    authctxt->valid &&
 	    skey_haskey(authctxt->pw->pw_name) == 0 &&
 	    skey_passcheck(authctxt->pw->pw_name, response) != -1);
 
@@ -656,7 +705,7 @@ mm_answer_skeyrespond(int socket, Buffer *m)
 	buffer_clear(m);
 	buffer_put_int(m, authok);
 
-	debug3("%s: sending authenticated: %d", __FUNCTION__, authok);
+	debug3("%s: sending authenticated: %d", __func__, authok);
 	mm_request_send(socket, MONITOR_ANS_SKEYRESPOND, m);
 
 	auth_method = "skey";
@@ -669,7 +718,7 @@ static void
 mm_append_debug(Buffer *m)
 {
 	if (auth_debug_init && buffer_len(&auth_debug)) {
-		debug3("%s: Appending debug messages for child", __FUNCTION__);
+		debug3("%s: Appending debug messages for child", __func__);
 		buffer_append(m, buffer_ptr(&auth_debug),
 		    buffer_len(&auth_debug));
 		buffer_clear(&auth_debug);
@@ -680,12 +729,13 @@ int
 mm_answer_keyallowed(int socket, Buffer *m)
 {
 	Key *key;
-	u_char *cuser, *chost, *blob;
+	char *cuser, *chost;
+	u_char *blob;
 	u_int bloblen;
 	enum mm_keytype type = 0;
 	int allowed = 0;
 
-	debug3("%s entering", __FUNCTION__);
+	debug3("%s entering", __func__);
 
 	type = buffer_get_int(m);
 	cuser = buffer_get_string(m, NULL);
@@ -696,26 +746,29 @@ mm_answer_keyallowed(int socket, Buffer *m)
 
 	if ((compat20 && type == MM_RSAHOSTKEY) ||
 	    (!compat20 && type != MM_RSAHOSTKEY))
-		fatal("%s: key type and protocol mismatch", __FUNCTION__);
+		fatal("%s: key type and protocol mismatch", __func__);
 
-	debug3("%s: key_from_blob: %p", __FUNCTION__, key);
+	debug3("%s: key_from_blob: %p", __func__, key);
 
 	if (key != NULL && authctxt->pw != NULL) {
 		switch(type) {
 		case MM_USERKEY:
-			allowed = user_key_allowed(authctxt->pw, key);
+			allowed = options.pubkey_authentication &&
+			    user_key_allowed(authctxt->pw, key);
 			break;
 		case MM_HOSTKEY:
-			allowed = hostbased_key_allowed(authctxt->pw,
+			allowed = options.hostbased_authentication &&
+			    hostbased_key_allowed(authctxt->pw,
 			    cuser, chost, key);
 			break;
 		case MM_RSAHOSTKEY:
 			key->type = KEY_RSA1; /* XXX */
-			allowed = auth_rhosts_rsa_key_allowed(authctxt->pw,
+			allowed = options.rhosts_rsa_authentication &&
+			    auth_rhosts_rsa_key_allowed(authctxt->pw,
 			    cuser, chost, key);
 			break;
 		default:
-			fatal("%s: unknown key type %d", __FUNCTION__, type);
+			fatal("%s: unknown key type %d", __func__, type);
 			break;
 		}
 		key_free(key);
@@ -734,7 +787,7 @@ mm_answer_keyallowed(int socket, Buffer *m)
 	}
 
 	debug3("%s: key %p is %s",
-	    __FUNCTION__, key, allowed ? "allowed" : "disallowed");
+	    __func__, key, allowed ? "allowed" : "disallowed");
 
 	buffer_clear(m);
 	buffer_put_int(m, allowed);
@@ -753,20 +806,28 @@ static int
 monitor_valid_userblob(u_char *data, u_int datalen)
 {
 	Buffer b;
-	u_char *p;
+	char *p;
 	u_int len;
 	int fail = 0;
-	int session_id2_len = 20 /*XXX should get from [net] */;
 
 	buffer_init(&b);
 	buffer_append(&b, data, datalen);
 
 	if (datafellows & SSH_OLD_SESSIONID) {
+		p = buffer_ptr(&b);
+		len = buffer_len(&b);
+		if ((session_id2 == NULL) ||
+		    (len < session_id2_len) ||
+		    (memcmp(p, session_id2, session_id2_len) != 0))
+			fail++;
 		buffer_consume(&b, session_id2_len);
 	} else {
-		xfree(buffer_get_string(&b, &len));
-		if (len != session_id2_len)
+		p = buffer_get_string(&b, &len);
+		if ((session_id2 == NULL) ||
+		    (len != session_id2_len) ||
+		    (memcmp(p, session_id2, session_id2_len) != 0))
 			fail++;
+		xfree(p);
 	}
 	if (buffer_get_char(&b) != SSH2_MSG_USERAUTH_REQUEST)
 		fail++;
@@ -798,21 +859,24 @@ monitor_valid_userblob(u_char *data, u_int datalen)
 }
 
 static int
-monitor_valid_hostbasedblob(u_char *data, u_int datalen, u_char *cuser,
-    u_char *chost)
+monitor_valid_hostbasedblob(u_char *data, u_int datalen, char *cuser,
+    char *chost)
 {
 	Buffer b;
-	u_char *p;
+	char *p;
 	u_int len;
 	int fail = 0;
-	int session_id2_len = 20 /*XXX should get from [net] */;
 
 	buffer_init(&b);
 	buffer_append(&b, data, datalen);
 
-	xfree(buffer_get_string(&b, &len));
-	if (len != session_id2_len)
+	p = buffer_get_string(&b, &len);
+	if ((session_id2 == NULL) ||
+	    (len != session_id2_len) ||
+	    (memcmp(p, session_id2, session_id2_len) != 0))
 		fail++;
+	xfree(p);
+
 	if (buffer_get_char(&b) != SSH2_MSG_USERAUTH_REQUEST)
 		fail++;
 	p = buffer_get_string(&b, NULL);
@@ -865,11 +929,11 @@ mm_answer_keyverify(int socket, Buffer *m)
 
 	if (hostbased_cuser == NULL || hostbased_chost == NULL ||
 	  !monitor_allowed_key(blob, bloblen))
-		fatal("%s: bad key, not previously allowed", __FUNCTION__);
+		fatal("%s: bad key, not previously allowed", __func__);
 
 	key = key_from_blob(blob, bloblen);
 	if (key == NULL)
-		fatal("%s: bad public key blob", __FUNCTION__);
+		fatal("%s: bad public key blob", __func__);
 
 	switch (key_blobtype) {
 	case MM_USERKEY:
@@ -884,24 +948,24 @@ mm_answer_keyverify(int socket, Buffer *m)
 		break;
 	}
 	if (!valid_data)
-		fatal("%s: bad signature data blob", __FUNCTION__);
+		fatal("%s: bad signature data blob", __func__);
 
 	verified = key_verify(key, signature, signaturelen, data, datalen);
 	debug3("%s: key %p signature %s",
-	    __FUNCTION__, key, verified ? "verified" : "unverified");
+	    __func__, key, verified ? "verified" : "unverified");
 
 	key_free(key);
 	xfree(blob);
 	xfree(signature);
 	xfree(data);
 
+	auth_method = key_blobtype == MM_USERKEY ? "publickey" : "hostbased";
+
 	monitor_reset_key_state();
 
 	buffer_clear(m);
 	buffer_put_int(m, verified);
 	mm_request_send(socket, MONITOR_ANS_KEYVERIFY, m);
-
-	auth_method = "publickey";
 
 	return (verified);
 }
@@ -917,8 +981,8 @@ mm_record_login(Session *s, struct passwd *pw)
 	 * the address be 0.0.0.0.
 	 */
 	memset(&from, 0, sizeof(from));
+	fromlen = sizeof(from);
 	if (packet_connection_is_on_socket()) {
-		fromlen = sizeof(from);
 		if (getpeername(packet_get_connection_in(),
 			(struct sockaddr *) & from, &fromlen) < 0) {
 			debug("getpeername: %.100s", strerror(errno));
@@ -928,15 +992,15 @@ mm_record_login(Session *s, struct passwd *pw)
 	/* Record that there was a login on that tty from the remote host. */
 	record_login(s->pid, s->tty, pw->pw_name, pw->pw_uid,
 	    get_remote_name_or_ip(utmp_len, options.verify_reverse_mapping),
-	    (struct sockaddr *)&from);
+	    (struct sockaddr *)&from, fromlen);
 }
 
 static void
 mm_session_close(Session *s)
 {
-	debug3("%s: session %d pid %d", __FUNCTION__, s->self, s->pid);
+	debug3("%s: session %d pid %d", __func__, s->self, s->pid);
 	if (s->ttyfd != -1) {
-		debug3("%s: tty %s ptyfd %d",  __FUNCTION__, s->tty, s->ptyfd);
+		debug3("%s: tty %s ptyfd %d",  __func__, s->tty, s->ptyfd);
 		fatal_remove_cleanup(session_pty_cleanup2, (void *)s);
 		session_pty_cleanup2(s);
 	}
@@ -946,11 +1010,11 @@ mm_session_close(Session *s)
 int
 mm_answer_pty(int socket, Buffer *m)
 {
-	extern struct monitor *monitor;
+	extern struct monitor *pmonitor;
 	Session *s;
 	int res, fd0;
 
-	debug3("%s entering", __FUNCTION__);
+	debug3("%s entering", __func__);
 
 	buffer_clear(m);
 	s = session_new();
@@ -958,7 +1022,7 @@ mm_answer_pty(int socket, Buffer *m)
 		goto error;
 	s->authctxt = authctxt;
 	s->pw = authctxt->pw;
-	s->pid = monitor->m_pid;
+	s->pid = pmonitor->m_pid;
 	res = pty_allocate(&s->ptyfd, &s->ttyfd, s->tty, sizeof(s->tty));
 	if (res == 0)
 		goto error;
@@ -974,7 +1038,7 @@ mm_answer_pty(int socket, Buffer *m)
 
 	/* We need to trick ttyslot */
 	if (dup2(s->ttyfd, 0) == -1)
-		fatal("%s: dup2", __FUNCTION__);
+		fatal("%s: dup2", __func__);
 
 	mm_record_login(s, authctxt->pw);
 
@@ -983,9 +1047,9 @@ mm_answer_pty(int socket, Buffer *m)
 
 	/* make sure nothing uses fd 0 */
 	if ((fd0 = open(_PATH_DEVNULL, O_RDONLY)) < 0)
-		fatal("%s: open(/dev/null): %s", __FUNCTION__, strerror(errno));
+		fatal("%s: open(/dev/null): %s", __func__, strerror(errno));
 	if (fd0 != 0)
-		error("%s: fd0 %d != 0", __FUNCTION__, fd0);
+		error("%s: fd0 %d != 0", __func__, fd0);
 
 	/* slave is not needed */
 	close(s->ttyfd);
@@ -993,7 +1057,7 @@ mm_answer_pty(int socket, Buffer *m)
 	/* no need to dup() because nobody closes ptyfd */
 	s->ptymaster = s->ptyfd;
 
-	debug3("%s: tty %s ptyfd %d",  __FUNCTION__, s->tty, s->ttyfd);
+	debug3("%s: tty %s ptyfd %d",  __func__, s->tty, s->ttyfd);
 
 	return (0);
 
@@ -1011,7 +1075,7 @@ mm_answer_pty_cleanup(int socket, Buffer *m)
 	Session *s;
 	char *tty;
 
-	debug3("%s entering", __FUNCTION__);
+	debug3("%s entering", __func__);
 
 	tty = buffer_get_string(m, NULL);
 	if ((s = session_by_tty(tty)) != NULL)
@@ -1031,7 +1095,7 @@ mm_answer_sesskey(int socket, Buffer *m)
 	monitor_permit(mon_dispatch, MONITOR_REQ_SESSKEY, 1);
 
 	if ((p = BN_new()) == NULL)
-		fatal("%s: BN_new", __FUNCTION__);
+		fatal("%s: BN_new", __func__);
 
 	buffer_get_bignum2(m, p);
 
@@ -1056,10 +1120,10 @@ mm_answer_sessid(int socket, Buffer *m)
 {
 	int i;
 
-	debug3("%s entering", __FUNCTION__);
+	debug3("%s entering", __func__);
 
 	if (buffer_len(m) != 16)
-		fatal("%s: bad ssh1 session id", __FUNCTION__);
+		fatal("%s: bad ssh1 session id", __func__);
 	for (i = 0; i < 16; i++)
 		session_id[i] = buffer_get_char(m);
 
@@ -1078,11 +1142,11 @@ mm_answer_rsa_keyallowed(int socket, Buffer *m)
 	u_int blen = 0;
 	int allowed = 0;
 
-	debug3("%s entering", __FUNCTION__);
+	debug3("%s entering", __func__);
 
-	if (authctxt->valid) {
+	if (options.rsa_authentication && authctxt->valid) {
 		if ((client_n = BN_new()) == NULL)
-			fatal("%s: BN_new", __FUNCTION__);
+			fatal("%s: BN_new", __func__);
 		buffer_get_bignum2(m, client_n);
 		allowed = auth_rsa_key_allowed(authctxt->pw, client_n, &key);
 		BN_clear_free(client_n);
@@ -1096,7 +1160,7 @@ mm_answer_rsa_keyallowed(int socket, Buffer *m)
 	if (allowed && key != NULL) {
 		key->type = KEY_RSA;	/* cheat for key_to_blob */
 		if (key_to_blob(key, &blob, &blen) == 0)
-			fatal("%s: key_to_blob failed", __FUNCTION__);
+			fatal("%s: key_to_blob failed", __func__);
 		buffer_put_string(m, blob, blen);
 
 		/* Save temporarily for comparison in verify */
@@ -1122,17 +1186,17 @@ mm_answer_rsa_challenge(int socket, Buffer *m)
 	u_char *blob;
 	u_int blen;
 
-	debug3("%s entering", __FUNCTION__);
+	debug3("%s entering", __func__);
 
 	if (!authctxt->valid)
-		fatal("%s: authctxt not valid", __FUNCTION__);
+		fatal("%s: authctxt not valid", __func__);
 	blob = buffer_get_string(m, &blen);
 	if (!monitor_allowed_key(blob, blen))
-		fatal("%s: bad key, not previously allowed", __FUNCTION__);
+		fatal("%s: bad key, not previously allowed", __func__);
 	if (key_blobtype != MM_RSAUSERKEY && key_blobtype != MM_RSAHOSTKEY)
-		fatal("%s: key type mismatch", __FUNCTION__);
+		fatal("%s: key type mismatch", __func__);
 	if ((key = key_from_blob(blob, blen)) == NULL)
-		fatal("%s: received bad key", __FUNCTION__);
+		fatal("%s: received bad key", __func__);
 
 	if (ssh1_challenge)
 		BN_clear_free(ssh1_challenge);
@@ -1141,7 +1205,7 @@ mm_answer_rsa_challenge(int socket, Buffer *m)
 	buffer_clear(m);
 	buffer_put_bignum2(m, ssh1_challenge);
 
-	debug3("%s sending reply", __FUNCTION__);
+	debug3("%s sending reply", __func__);
 	mm_request_send(socket, MONITOR_ANS_RSACHALLENGE, m);
 
 	monitor_permit(mon_dispatch, MONITOR_REQ_RSARESPONSE, 1);
@@ -1156,23 +1220,23 @@ mm_answer_rsa_response(int socket, Buffer *m)
 	u_int blen, len;
 	int success;
 
-	debug3("%s entering", __FUNCTION__);
+	debug3("%s entering", __func__);
 
 	if (!authctxt->valid)
-		fatal("%s: authctxt not valid", __FUNCTION__);
+		fatal("%s: authctxt not valid", __func__);
 	if (ssh1_challenge == NULL)
-		fatal("%s: no ssh1_challenge", __FUNCTION__);
+		fatal("%s: no ssh1_challenge", __func__);
 
 	blob = buffer_get_string(m, &blen);
 	if (!monitor_allowed_key(blob, blen))
-		fatal("%s: bad key, not previously allowed", __FUNCTION__);
+		fatal("%s: bad key, not previously allowed", __func__);
 	if (key_blobtype != MM_RSAUSERKEY && key_blobtype != MM_RSAHOSTKEY)
-		fatal("%s: key type mismatch: %d", __FUNCTION__, key_blobtype);
+		fatal("%s: key type mismatch: %d", __func__, key_blobtype);
 	if ((key = key_from_blob(blob, blen)) == NULL)
-		fatal("%s: received bad key", __FUNCTION__);
+		fatal("%s: received bad key", __func__);
 	response = buffer_get_string(m, &len);
 	if (len != 16)
-		fatal("%s: received bad response to challenge", __FUNCTION__);
+		fatal("%s: received bad response to challenge", __func__);
 	success = auth_rsa_verify_response(key, ssh1_challenge, response);
 
 	key_free(key);
@@ -1192,18 +1256,101 @@ mm_answer_rsa_response(int socket, Buffer *m)
 	return (success);
 }
 
+#ifdef KRB4
+int
+mm_answer_krb4(int socket, Buffer *m)
+{
+	KTEXT_ST auth, reply;
+	char  *client, *p;
+	int success;
+	u_int alen;
+
+	reply.length = auth.length = 0;
+ 
+	p = buffer_get_string(m, &alen);
+	if (alen >=  MAX_KTXT_LEN)
+		 fatal("%s: auth too large", __func__);
+	memcpy(auth.dat, p, alen);
+	auth.length = alen;
+	memset(p, 0, alen);
+	xfree(p);
+
+	success = options.kerberos_authentication &&
+	    authctxt->valid &&
+	    auth_krb4(authctxt, &auth, &client, &reply);
+
+	memset(auth.dat, 0, alen);
+	buffer_clear(m);
+	buffer_put_int(m, success);
+
+	if (success) {
+		buffer_put_cstring(m, client);
+		buffer_put_string(m, reply.dat, reply.length);
+		if (client)
+			xfree(client);
+		if (reply.length)
+			memset(reply.dat, 0, reply.length);
+	}
+
+	debug3("%s: sending result %d", __func__, success);
+	mm_request_send(socket, MONITOR_ANS_KRB4, m);
+
+	auth_method = "kerberos";
+
+	/* Causes monitor loop to terminate if authenticated */
+	return (success);
+}
+#endif
+
+#ifdef KRB5
+int
+mm_answer_krb5(int socket, Buffer *m)
+{
+	krb5_data tkt, reply;
+	char *client_user;
+	u_int len;
+	int success;
+
+	/* use temporary var to avoid size issues on 64bit arch */
+	tkt.data = buffer_get_string(m, &len);
+	tkt.length = len;
+
+	success = options.kerberos_authentication &&
+	    authctxt->valid &&
+	    auth_krb5(authctxt, &tkt, &client_user, &reply);
+
+	if (tkt.length)
+		xfree(tkt.data);
+
+	buffer_clear(m);
+	buffer_put_int(m, success);
+
+	if (success) {
+		buffer_put_cstring(m, client_user);
+		buffer_put_string(m, reply.data, reply.length);
+		if (client_user)
+			xfree(client_user);
+		if (reply.length)
+			xfree(reply.data);
+	}
+	mm_request_send(socket, MONITOR_ANS_KRB5, m);
+
+	return success;
+}
+#endif
+
 int
 mm_answer_term(int socket, Buffer *req)
 {
-	extern struct monitor *monitor;
+	extern struct monitor *pmonitor;
 	int res, status;
 
-	debug3("%s: tearing down sessions", __FUNCTION__);
+	debug3("%s: tearing down sessions", __func__);
 
 	/* The child is terminating */
 	session_destroy_all(&mm_session_close);
 
-	while (waitpid(monitor->m_pid, &status, 0) == -1)
+	while (waitpid(pmonitor->m_pid, &status, 0) == -1)
 		if (errno != EINTR)
 			exit(1);
 
@@ -1214,20 +1361,19 @@ mm_answer_term(int socket, Buffer *req)
 }
 
 void
-monitor_apply_keystate(struct monitor *monitor)
+monitor_apply_keystate(struct monitor *pmonitor)
 {
 	if (compat20) {
 		set_newkeys(MODE_IN);
 		set_newkeys(MODE_OUT);
 	} else {
-		u_char key[SSH_SESSION_KEY_LENGTH];
-
-		memset(key, 'a', sizeof(key));
 		packet_set_protocol_flags(child_state.ssh1protoflags);
-		packet_set_encryption_key(key, SSH_SESSION_KEY_LENGTH,
-		    child_state.ssh1cipher);
+		packet_set_encryption_key(child_state.ssh1key,
+		    child_state.ssh1keylen, child_state.ssh1cipher);
+		xfree(child_state.ssh1key);
 	}
 
+	/* for rc4 and other stateful ciphers */
 	packet_set_keycontext(MODE_OUT, child_state.keyout);
 	xfree(child_state.keyout);
 	packet_set_keycontext(MODE_IN, child_state.keyin);
@@ -1246,7 +1392,8 @@ monitor_apply_keystate(struct monitor *monitor)
 	    sizeof(outgoing_stream));
 
 	/* Update with new address */
-	mm_init_compression(monitor->m_zlib);
+	if (options.compression)
+		mm_init_compression(pmonitor->m_zlib);
 
 	/* Network I/O buffers */
 	/* XXX inefficient for large buffers, need: buffer_init_from_string */
@@ -1271,6 +1418,10 @@ mm_get_kex(Buffer *m)
 	kex = xmalloc(sizeof(*kex));
 	memset(kex, 0, sizeof(*kex));
 	kex->session_id = buffer_get_string(m, &kex->session_id_len);
+	if ((session_id2 == NULL) ||
+	    (kex->session_id_len != session_id2_len) ||
+	    (memcmp(kex->session_id, session_id2, session_id2_len) != 0))
+		fatal("mm_get_get: internal error: bad session id");
 	kex->we_need = buffer_get_int(m);
 	kex->server = 1;
 	kex->hostkey_type = buffer_get_int(m);
@@ -1296,33 +1447,35 @@ mm_get_kex(Buffer *m)
 /* This function requries careful sanity checking */
 
 void
-mm_get_keystate(struct monitor *monitor)
+mm_get_keystate(struct monitor *pmonitor)
 {
 	Buffer m;
 	u_char *blob, *p;
 	u_int bloblen, plen;
 
-	debug3("%s: Waiting for new keys", __FUNCTION__);
+	debug3("%s: Waiting for new keys", __func__);
 
 	buffer_init(&m);
-	mm_request_receive_expect(monitor->m_sendfd, MONITOR_REQ_KEYEXPORT, &m);
+	mm_request_receive_expect(pmonitor->m_sendfd, MONITOR_REQ_KEYEXPORT, &m);
 	if (!compat20) {
 		child_state.ssh1protoflags = buffer_get_int(&m);
 		child_state.ssh1cipher = buffer_get_int(&m);
+		child_state.ssh1key = buffer_get_string(&m,
+		    &child_state.ssh1keylen);
 		child_state.ivout = buffer_get_string(&m,
 		    &child_state.ivoutlen);
 		child_state.ivin = buffer_get_string(&m, &child_state.ivinlen);
 		goto skip;
 	} else {
 		/* Get the Kex for rekeying */
-		*monitor->m_pkex = mm_get_kex(&m);
+		*pmonitor->m_pkex = mm_get_kex(&m);
 	}
 
 	blob = buffer_get_string(&m, &bloblen);
 	current_keys[MODE_OUT] = mm_newkeys_from_blob(blob, bloblen);
 	xfree(blob);
 
-	debug3("%s: Waiting for second key", __FUNCTION__);
+	debug3("%s: Waiting for second key", __func__);
 	blob = buffer_get_string(&m, &bloblen);
 	current_keys[MODE_IN] = mm_newkeys_from_blob(blob, bloblen);
 	xfree(blob);
@@ -1336,22 +1489,22 @@ mm_get_keystate(struct monitor *monitor)
 	child_state.keyout = buffer_get_string(&m, &child_state.keyoutlen);
 	child_state.keyin  = buffer_get_string(&m, &child_state.keyinlen);
 
-	debug3("%s: Getting compression state", __FUNCTION__);
+	debug3("%s: Getting compression state", __func__);
 	/* Get compression state */
 	p = buffer_get_string(&m, &plen);
 	if (plen != sizeof(child_state.outgoing))
-		fatal("%s: bad request size", __FUNCTION__);
+		fatal("%s: bad request size", __func__);
 	memcpy(&child_state.outgoing, p, sizeof(child_state.outgoing));
 	xfree(p);
 
 	p = buffer_get_string(&m, &plen);
 	if (plen != sizeof(child_state.incoming))
-		fatal("%s: bad request size", __FUNCTION__);
+		fatal("%s: bad request size", __func__);
 	memcpy(&child_state.incoming, p, sizeof(child_state.incoming));
 	xfree(p);
 
 	/* Network I/O buffers */
-	debug3("%s: Getting Network I/O buffers", __FUNCTION__);
+	debug3("%s: Getting Network I/O buffers", __func__);
 	child_state.input = buffer_get_string(&m, &child_state.ilen);
 	child_state.output = buffer_get_string(&m, &child_state.olen);
 
@@ -1363,9 +1516,13 @@ mm_get_keystate(struct monitor *monitor)
 void *
 mm_zalloc(struct mm_master *mm, u_int ncount, u_int size)
 {
+	size_t len = size * ncount;
 	void *address;
 
-	address = mm_malloc(mm, size * ncount);
+	if (len == 0 || ncount > SIZE_T_MAX / size)
+		fatal("%s: mm_zalloc(%u, %u)", __func__, ncount, size);
+
+	address = mm_malloc(mm, len);
 
 	return (address);
 }
@@ -1399,7 +1556,7 @@ static void
 monitor_socketpair(int *pair)
 {
 	if (socketpair(AF_UNIX, SOCK_STREAM, 0, pair) == -1)
-		fatal("%s: socketpair", __FUNCTION__);
+		fatal("%s: socketpair", __func__);
 	FD_CLOSEONEXEC(pair[0]);
 	FD_CLOSEONEXEC(pair[1]);
 }
@@ -1420,11 +1577,13 @@ monitor_init(void)
 	mon->m_sendfd = pair[1];
 
 	/* Used to share zlib space across processes */
-	mon->m_zback = mm_create(NULL, MM_MEMSIZE);
-	mon->m_zlib = mm_create(mon->m_zback, 20 * MM_MEMSIZE);
+	if (options.compression) {
+		mon->m_zback = mm_create(NULL, MM_MEMSIZE);
+		mon->m_zlib = mm_create(mon->m_zback, 20 * MM_MEMSIZE);
 
-	/* Compression needs to share state across borders */
-	mm_init_compression(mon->m_zlib);
+		/* Compression needs to share state across borders */
+		mm_init_compression(mon->m_zlib);
+	}
 
 	return mon;
 }

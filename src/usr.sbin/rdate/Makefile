@@ -1,7 +1,8 @@
-#	$OpenBSD: Makefile,v 1.4 1997/09/21 11:44:12 deraadt Exp $
+#	$OpenBSD: Makefile,v 1.6 2002/07/27 08:47:19 jakob Exp $
 
 PROG=	rdate
-SRCS=	rdate.c
+SRCS=	rdate.c rfc868time.c ntp.c ntpleaps.c
+CFLAGS+=-Wall -Werror
 DPADD+= ${LIBUTIL}
 LDADD+= -lutil
 

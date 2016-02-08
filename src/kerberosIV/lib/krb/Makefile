@@ -1,4 +1,4 @@
-# $OpenBSD: Makefile,v 1.7 2001/05/14 14:13:36 hin Exp $
+# $OpenBSD: Makefile,v 1.9 2002/06/09 19:05:40 hin Exp $
 
 LIB	= krb
 
@@ -7,7 +7,7 @@ KRBDEPTH=../..
 
 INCLUDE_FILES	= ${KRBSRC}/lib/krb/{krb.h,krb-protos.h,prot.h} krb_err.h
 
-.PATH:	${KRBSRC}/lib/krb ${KRBSRC}/lib/roken ${KRBSRC}/lib/des
+.PATH:	${KRBSRC}/lib/krb ${KRB5SRC}/lib/roken ${KRBSRC}/lib/des
 
 CFLAGS	+= -I${KRBSRC}/lib/des -I${KRBSRC}/lib/krb -I${BSDSRCDIR}/lib/libcom_err
 
@@ -126,5 +126,6 @@ MLINKS+=krb_sendauth.3 krb_recvauth.3 krb_sendauth.3 krb_net_write.3 \
 MLINKS+=tf_util.3 tf_init.3 tf_util.3 tf_get_pname.3 tf_util.3 tf_get_pinst.3 \
 	tf_util.3 tf_get_cred.3 tf_util.3 tf_close.3
 
+DPADD+= ${LIBCOM_ERR}
 LDADD+= ${COM_ERR}
 .include <bsd.lib.mk>

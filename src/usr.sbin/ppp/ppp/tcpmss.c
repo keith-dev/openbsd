@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD$
+ * $OpenBSD: tcpmss.c,v 1.6 2002/06/15 08:02:01 brian Exp $
  */
 
 #include <sys/param.h>
@@ -53,7 +53,6 @@
 #include "iplist.h"
 #include "slcompress.h"
 #include "ncpaddr.h"
-#include "ip.h"
 #include "ipcp.h"
 #include "filter.h"
 #include "descriptor.h"
@@ -71,7 +70,7 @@
  * We are in a liberal position about MSS
  * (RFC 879, section 7).
  */
-#define MAXMSS(mtu) (mtu - sizeof(struct ip) - sizeof(struct tcphdr)) 
+#define MAXMSS(mtu) (mtu - sizeof(struct ip) - sizeof(struct tcphdr))
 
 
 /*-

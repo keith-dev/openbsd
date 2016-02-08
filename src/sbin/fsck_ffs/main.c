@@ -1,4 +1,4 @@
-/*	$OpenBSD: main.c,v 1.20 2002/02/16 21:27:34 millert Exp $	*/
+/*	$OpenBSD: main.c,v 1.24 2002/08/23 09:09:04 gluk Exp $	*/
 /*	$NetBSD: main.c,v 1.22 1996/10/11 20:15:48 thorpej Exp $	*/
 
 /*
@@ -35,7 +35,7 @@
  */
 
 #ifndef lint
-static char copyright[] =
+static const char copyright[] =
 "@(#) Copyright (c) 1980, 1986, 1993\n\
 	The Regents of the University of California.  All rights reserved.\n";
 #endif /* not lint */
@@ -44,7 +44,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)main.c	8.2 (Berkeley) 1/23/94";
 #else
-static char rcsid[] = "$OpenBSD: main.c,v 1.20 2002/02/16 21:27:34 millert Exp $";
+static const char rcsid[] = "$OpenBSD: main.c,v 1.24 2002/08/23 09:09:04 gluk Exp $";
 #endif
 #endif /* not lint */
 
@@ -64,7 +64,8 @@ static char rcsid[] = "$OpenBSD: main.c,v 1.20 2002/02/16 21:27:34 millert Exp $
 #include "extern.h"
 #include "fsutil.h"
 
-int	returntosingle;
+volatile sig_atomic_t returntosingle;
+
 int	argtoi(int, char *, char *, int);
 int	checkfilesys(char *, char *, long, int);
 int	docheck(struct fstab *);
@@ -73,9 +74,7 @@ int	main(int, char *[]);
 extern char *__progname;
 
 int
-main(argc, argv)
-	int	argc;
-	char	*argv[];
+main(int argc, char *argv[])
 {
 	int ch;
 	int ret = 0;
@@ -98,7 +97,7 @@ main(argc, argv)
 			skipclean = 0;
 			cvtlevel = argtoi('c', "conversion level", optarg, 10);
 			break;
-		
+
 		case 'd':
 			debug++;
 			break;
@@ -149,10 +148,7 @@ main(argc, argv)
 }
 
 int
-argtoi(flag, req, str, base)
-	int flag;
-	char *req, *str;
-	int base;
+argtoi(int flag, char *req, char *str, int base)
 {
 	char *cp;
 	int ret;
@@ -167,8 +163,7 @@ argtoi(flag, req, str, base)
  * Determine whether a filesystem should be checked.
  */
 int
-docheck(fsp)
-	struct fstab *fsp;
+docheck(struct fstab *fsp)
 {
 
 	if ((strcmp(fsp->fs_vfstype, "ufs") &&
@@ -185,10 +180,7 @@ docheck(fsp)
  */
 /* ARGSUSED */
 int
-checkfilesys(filesys, mntpt, auxdata, child)
-	char *filesys, *mntpt;
-	long auxdata;
-	int child;
+checkfilesys(char *filesys, char *mntpt, long auxdata, int child)
 {
 	daddr_t n_ffree, n_bfree;
 	struct dups *dp;
@@ -306,7 +298,7 @@ checkfilesys(filesys, mntpt, auxdata, child)
 		sbdirty();
 	}
 	if (cvtlevel && sblk.b_dirty) {
-		/* 
+		/*
 		 * Write out the duplicate super blocks
 		 */
 		for (cylno = 0; cylno < sblock.fs_ncg; cylno++)
@@ -317,8 +309,11 @@ checkfilesys(filesys, mntpt, auxdata, child)
 		resolved = 0;
 	ckfini(resolved); /* Don't mark fs clean if fsck needs to be re-run */
 	free(blockmap);
+	blockmap = NULL;
 	free(statemap);
-	free((char *)lncntp);
+	statemap = NULL;
+	free(lncntp);
+	lncntp = NULL;
 	if (!fsmodified)
 		return (0);
 	if (!preen)
@@ -338,8 +333,8 @@ checkfilesys(filesys, mntpt, auxdata, child)
 
 			if (flags & MNT_RDONLY) {
 				args.fspec = 0;
-				args.export.ex_flags = 0;
-				args.export.ex_root = 0;
+				args.export_info.ex_flags = 0;
+				args.export_info.ex_root = 0;
 				flags |= MNT_UPDATE | MNT_RELOAD;
 				ret = mount(MOUNT_FFS, "/", flags, &args);
 				if (ret == 0)

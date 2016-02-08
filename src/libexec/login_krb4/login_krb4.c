@@ -1,4 +1,4 @@
-/*	$OpenBSD: login_krb4.c,v 1.3 2001/08/12 21:55:46 millert Exp $	*/
+/*	$OpenBSD: login_krb4.c,v 1.5 2002/09/06 18:45:06 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 2001 Hans Insulander <hin@openbsd.org>.
@@ -34,12 +34,11 @@
 int
 krb4_login(char *username, char *password, char *invokinguser, int new_tickets)
 {
-	int ret;
 	char realm[REALM_SZ];
 	char tkfile[MAXPATHLEN];
 	char *instance, *targetuser;
 	struct passwd *pwd;
-	int fd;
+	int ret, fd;
 
 	/* Check if we can open the srvtab file */
 	if ((fd = open(KEYFILE, O_RDONLY, 0400)) < 0)
@@ -50,13 +49,12 @@ krb4_login(char *username, char *password, char *invokinguser, int new_tickets)
 	tkfile[0] = '\0';
 
 	targetuser = username;
-	if (krb_get_lrealm(realm, 1)){
+	if (krb_get_lrealm(realm, 1))
 		syslog(LOG_INFO, "krb_get_lrealm failed");
-	}
 
 	if (new_tickets) {
-		snprintf(tkfile, sizeof(tkfile), "%s%d", TKT_ROOT, 
-			 pwd ? pwd->pw_uid : getuid());
+		snprintf(tkfile, sizeof(tkfile), "%s%d", TKT_ROOT,
+		    pwd ? pwd->pw_uid : getuid());
 		krb_set_tkt_string(tkfile);
 		unlink(tkfile);
 	}
@@ -82,7 +80,7 @@ krb4_login(char *username, char *password, char *invokinguser, int new_tickets)
 		chown(tkfile, pwd->pw_uid, pwd->pw_gid);
 
 	if (ret == KSUCCESS &&
-	   krb_kuserok(username, instance, realm, targetuser) == 0) {
+	    krb_kuserok(username, instance, realm, targetuser) == 0) {
 		fprintf(back, BI_AUTH "\n");
 		if (strlen(tkfile) > 0)
 			fprintf(back, BI_SETENV " KRBTKFILE %s\n", tkfile);

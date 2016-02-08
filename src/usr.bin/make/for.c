@@ -1,5 +1,5 @@
 /*	$OpenPackages$ */
-/*	$OpenBSD: for.c,v 1.26 2001/05/29 12:53:40 espie Exp $	*/
+/*	$OpenBSD: for.c,v 1.28 2002/06/13 23:26:39 espie Exp $	*/
 /*	$NetBSD: for.c,v 1.4 1996/11/06 17:59:05 christos Exp $ */
 
 /*
@@ -146,17 +146,10 @@ For_Eval(line)
     For 	*arg;
     unsigned long n;
 
-    /* If we are not in a for loop quickly determine if the statement is
-     * a for.  */
-    if (ptr[0] != 'f' || ptr[1] != 'o' || ptr[2] != 'r' ||
-	!isspace(ptr[3]))
-	return NULL;
-    ptr += 4;
-
     while (*ptr && isspace(*ptr))
 	ptr++;
 
-    /* We found a for loop, and now we are going to parse it.  */
+    /* Parse loop.  */
 
     arg = emalloc(sizeof(*arg));
     arg->nvars = 0;

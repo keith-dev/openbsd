@@ -1,4 +1,4 @@
-/*	$OpenBSD: fileio.c,v 1.27 2002/03/27 17:42:37 millert Exp $	*/
+/*	$OpenBSD: fileio.c,v 1.34 2002/08/22 23:28:19 deraadt Exp $	*/
 
 /*
  *	POSIX fileio.c
@@ -8,6 +8,7 @@
 static FILE	*ffp;
 
 #include <sys/types.h>
+#include <limits.h>
 #include <sys/stat.h>
 #include <sys/dir.h>
 #include <string.h>
@@ -52,12 +53,12 @@ ffwopen(const char *fn, BUFFER *bp)
 		ffp = NULL;
 		ewprintf("Cannot open file for writing : %s", strerror(errno));
 		return (FIOERR);
-	}		
+	}
 
 	if ((ffp = fdopen(fd, "w")) == NULL) {
 		ewprintf("Cannot open file for writing : %s", strerror(errno));
 		close(fd);
-		return (FIOERR);	
+		return (FIOERR);
 	}
 
 	/*
@@ -68,8 +69,8 @@ ffwopen(const char *fn, BUFFER *bp)
 	 * future writes will do the same thing.
 	 */
 	if (bp && bp->b_fi.fi_mode) {
-		chmod(fn, bp->b_fi.fi_mode & 07777);
-		chown(fn, bp->b_fi.fi_uid, bp->b_fi.fi_gid);
+		fchmod(fd, bp->b_fi.fi_mode & 07777);
+		fchown(fd, bp->b_fi.fi_uid, bp->b_fi.fi_gid);
 	}
 	return (FIOSUC);
 }
@@ -230,116 +231,46 @@ extern char	*wdir;
 char *
 adjustname(const char *fn)
 {
-	char		*cp;
-	static char	fnb[NFILEN];
-	struct passwd	*pwent;
-#ifdef	SYMBLINK
-	struct stat	statbuf;
-	int		i, j;
-	char		linkbuf[NFILEN];
-#endif
+	static char fnb[MAXPATHLEN];
+	const char *cp;
+	char user[LOGIN_NAME_MAX + 1], path[MAXPATHLEN];
+	int len;
 
-	switch (*fn) {
-	case '/':
-		cp = fnb;
-		*cp++ = *fn++;
-		break;
-	case '~':
-		fn++;
-		cp = getenv("HOME");
-		if (cp != NULL && *cp != '\0' && (*fn == '/' || *fn == '\0')) {
-			cp = fnb + strlcpy(fnb, cp, sizeof(fnb));
-			if (*fn)
-				fn++;
-			break;
-		} else {
-			cp = fnb;
-			while (*fn && *fn != '/')
-				*cp++ = *fn++;
-			*cp = '\0';
-			if ((pwent = getpwnam(fnb)) != NULL) {
-				cp = fnb + strlcpy(fnb, pwent->pw_dir, sizeof(fnb));
-				break;
-			} else {
-				fn -= strlen(fnb) + 1;
-				/* can't find ~user, continue to default case */
-			}
+	path[0] = '\0';
+	/* first handle tilde expansion */
+	if (fn[0] == '~') {
+		struct passwd *pw;
+
+		cp = strchr(fn, '/');
+		if (cp == NULL)
+			cp = fn + strlen(fn); /* point to the NUL byte */
+
+		if ((cp - &fn[1]) > LOGIN_NAME_MAX) {
+			ewprintf("login name too long");
+			return (NULL);
 		}
-	default:
-#ifndef	NODIR
-		cp = fnb + strlcpy(fnb, wdir, sizeof(fnb));
-		break;
-#else
-		return fn;	/* punt */
-#endif
-	}
-	if (cp != fnb && cp[-1] != '/')
-		*cp++ = '/';
-	while (*fn) {
-		switch (*fn) {
-		case '.':
-			switch (fn[1]) {
-			case '\0':
-				*--cp = '\0';
-				return fnb;
-			case '/':
-				fn += 2;
-				continue;
-			case '.':
-				if (fn[2] != '/' && fn[2] != '\0')
-					break;
-#ifdef SYMBLINK
-				cp[-1] = '\0';
-				for (j = MAXLINK; j-- &&
-				     lstat(fnb, &statbuf) != -1 &&
-				     (statbuf.st_mode & S_IFMT) == S_IFLNK &&
-				     (i = readlink(fnb, linkbuf, sizeof linkbuf))
-				     != -1;) {
-					if (linkbuf[0] != '/') {
-						--cp;
-						while (cp > fnb && *--cp != '/')
-							;
-						++cp;
-						(void) strncpy(cp, linkbuf, i);
-						cp += i;
-					} else {
-						(void) strncpy(fnb, linkbuf, i);
-						cp = fnb + i;
-					}
-					if (cp[-1] != '/')
-						*cp++ = '\0';
-					else
-						cp[-1] = '\0';
-				}
-				cp[-1] = '/';
-#endif
-				--cp;
-				while (cp > fnb && *--cp != '/')
-					;
-				++cp;
-				if (fn[2] == '\0') {
-					*--cp = '\0';
-					return fnb;
-				}
-				fn += 3;
-				continue;
-			default:
-				break;
-			}
-			break;
-		case '/':
+		if (cp == &fn[1]) /* ~/ */
+			strlcpy(user, getlogin(), sizeof user);
+		else
+			strlcpy(user, &fn[1], cp - &fn[1] + 1);
+		pw = getpwnam(user);
+		if (pw == NULL) {
+			ewprintf("unknown user %s", user);
+			return (NULL);
+		}
+		strlcpy(path, pw->pw_dir, sizeof path - 1);
+		len = strlen(path);
+		if (path[len] != '/') {
+			path[len] = '/';
+			path[len + 1] = '\0';
+		}
+		fn = cp;
+		if (*fn == '/')
 			fn++;
-			continue;
-		default:
-			break;
-		}
-		while (*fn && (*cp++ = *fn++) != '/')
-			;
 	}
-	if (cp[-1] == '/')
-		--cp;
-	*cp = '\0';
-	return fnb;
+	strlcat(path, fn, sizeof path);
+
+	return (realpath(path, fnb));
 }
 
 #ifndef NO_STARTUP
@@ -360,32 +291,32 @@ startupfile(char *suffix)
 
 	if (suffix == NULL) {
 		if (snprintf(file, sizeof(file), "%s/.mg", home)
-			    >= sizeof(file))
-			return NULL;
+		    >= sizeof(file))
+			return (NULL);
 	} else {
 		if (snprintf(file, sizeof(file), "%s/.mg-%s", home, suffix)
-			    >= sizeof(file))
-			return NULL;
+		    >= sizeof(file))
+			return (NULL);
 	}
 
 	if (access(file, R_OK) == 0)
-		return file;
+		return (file);
 nohome:
 #ifdef STARTUPFILE
 	if (suffix == NULL) {
 		if (snprintf(file, sizeof(file), "%s", STARTUPFILE)
-			    >= sizeof(file))
-			return NULL;
+		    >= sizeof(file))
+			return (NULL);
 	} else {
 		if (snprintf(file, sizeof(file), "%s%s", STARTUPFILE, suffix)
-			    >= sizeof(file))
-			return NULL;
+		    >= sizeof(file))
+			return (NULL);
 	}
 
 	if (access(file, R_OK) == 0)
-		return file;
+		return (file);
 #endif
-	return NULL;
+	return (NULL);
 }
 #endif
 
@@ -396,19 +327,49 @@ nohome:
 int
 copy(char *frname, char *toname)
 {
-	pid_t	pid;
-	int	status;
+	int ifd, ofd, n;
+	char buf[BUFSIZ];
+	mode_t mode = DEFFILEMODE;	/* XXX?? */
+	struct stat orig;
 
-	switch ((pid = vfork())) {
-	case -1:
-		return -1;
-	case 0:
-		execl("/bin/cp", "cp", frname, toname, (char *)NULL);
-		_exit(1);	/* shouldn't happen */
-	default:
-		waitpid(pid, &status, 0);
-		return (WIFEXITED(status) && WEXITSTATUS(status) == 0);
+	if ((ifd = open(frname, O_RDONLY)) == -1)
+		return (FALSE);
+	if (fstat(ifd, &orig) == -1) {
+		ewprintf("fstat: %s", strerror(errno));
+		close(ifd);
+		return (FALSE);
 	}
+
+	if ((ofd = open(toname, O_WRONLY|O_CREAT|O_TRUNC, mode)) == -1) {
+		close(ifd);
+		return (FALSE);
+	}
+	while ((n = read(ifd, buf, sizeof buf)) > 0) {
+		if (write(ofd, buf, n) != n) {
+			ewprintf("write error : %s", strerror(errno));
+			break;
+		}
+	}
+	if (fchmod(ofd, orig.st_mode) == -1)
+		ewprintf("Cannot set original mode : %s", strerror(errno));
+
+	if (n == -1) {
+		ewprintf("Read error : %s", strerror(errno));
+		close(ifd);
+		close(ofd);
+		return (FALSE);
+	}
+	/*
+	 * It is "normal" for this to fail since we can't guarantee that
+	 * we will be running as root
+	 */
+	if (fchown(ofd, orig.st_uid, orig.st_gid) && errno != EPERM)
+		ewprintf("Cannot set owner : %s", strerror(errno));
+
+	(void) close(ifd);
+	(void) close(ofd);
+
+	return (TRUE);
 }
 
 /*
@@ -474,7 +435,7 @@ d_makename(LINE *lp, char *fn, int len)
 {
 	int i;
 	char *p, *np;
-	
+
 	strlcpy(fn, curbp->b_fname, len);
 	p = lp->l_text;
 	for (i = 0; i < NAME_FIELD; i++) {
@@ -533,6 +494,8 @@ make_file_list(char *buf)
 		buf[len - 1] = '.';
 	} else
 		dir = adjustname(buf);
+	if (dir == NULL)
+		return (FALSE);
 	/*
 	 * If the user typed a trailing / or the empty string
 	 * he wants us to use his file spec as a directory name.

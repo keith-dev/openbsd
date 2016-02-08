@@ -24,7 +24,7 @@
  */
 
 #include "includes.h"
-RCSID("$OpenBSD: monitor_mm.c,v 1.4 2002/03/25 20:12:10 stevesk Exp $");
+RCSID("$OpenBSD: monitor_mm.c,v 1.8 2002/08/02 14:43:15 millert Exp $");
 
 #include <sys/mman.h>
 
@@ -36,7 +36,14 @@ RCSID("$OpenBSD: monitor_mm.c,v 1.4 2002/03/25 20:12:10 stevesk Exp $");
 static int
 mm_compare(struct mm_share *a, struct mm_share *b)
 {
-	return ((char *)a->address - (char *)b->address);
+	long diff = (char *)a->address - (char *)b->address;
+
+	if (diff == 0)
+		return (0);
+	else if (diff < 0)
+		return (-1);
+	else
+		return (1);
 }
 
 RB_GENERATE(mmtree, mm_share, next, mm_compare)
@@ -85,7 +92,7 @@ mm_create(struct mm_master *mmalloc, size_t size)
 	address = mmap(NULL, size, PROT_WRITE|PROT_READ, MAP_ANON|MAP_SHARED,
 	    -1, 0);
 	if (address == MAP_FAILED)
-		fatal("mmap(%lu)", (u_long)size);
+		fatal("mmap(%lu): %s", (u_long)size, strerror(errno));
 
 	mm->address = address;
 	mm->size = size;
@@ -124,7 +131,8 @@ mm_destroy(struct mm_master *mm)
 	mm_freelist(mm->mmalloc, &mm->rb_allocated);
 
 	if (munmap(mm->address, mm->size) == -1)
-		fatal("munmap(%p, %lu)", mm->address, (u_long)mm->size);
+		fatal("munmap(%p, %lu): %s", mm->address, (u_long)mm->size,
+		    strerror(errno));
 	if (mm->mmalloc == NULL)
 		xfree(mm);
 	else
@@ -138,7 +146,7 @@ mm_xmalloc(struct mm_master *mm, size_t size)
 
 	address = mm_malloc(mm, size);
 	if (address == NULL)
-		fatal("%s: mm_malloc(%lu)", __FUNCTION__, (u_long)size);
+		fatal("%s: mm_malloc(%lu)", __func__, (u_long)size);
 	return (address);
 }
 
@@ -152,8 +160,10 @@ mm_malloc(struct mm_master *mm, size_t size)
 
 	if (size == 0)
 		fatal("mm_malloc: try to allocate 0 space");
+	if (size > SIZE_T_MAX - MM_MINSIZE + 1)
+		fatal("mm_malloc: size too big");
 
-	size = ((size + MM_MINSIZE - 1) / MM_MINSIZE) * MM_MINSIZE;
+	size = ((size + (MM_MINSIZE - 1)) / MM_MINSIZE) * MM_MINSIZE;
 
 	RB_FOREACH(mms, mmtree, &mm->rb_free) {
 		if (mms->size >= size)
@@ -287,7 +297,7 @@ mm_share_sync(struct mm_master **pmm, struct mm_master **pmmalloc)
 	struct mm_master *mmold;
 	struct mmtree rb_free, rb_allocated;
 
-	debug3("%s: Share sync", __FUNCTION__);
+	debug3("%s: Share sync", __func__);
 
 	mm = *pmm;
 	mmold = mm->mmalloc;
@@ -312,7 +322,7 @@ mm_share_sync(struct mm_master **pmm, struct mm_master **pmmalloc)
 	*pmm = mm;
 	*pmmalloc = mmalloc;
 
-	debug3("%s: Share sync end", __FUNCTION__);
+	debug3("%s: Share sync end", __func__);
 }
 
 void

@@ -1,4 +1,4 @@
-/*	$OpenBSD: job.c,v 1.3 2001/02/18 19:48:35 millert Exp $	*/
+/*	$OpenBSD: job.c,v 1.5 2002/07/11 20:15:40 millert Exp $	*/
 /* Copyright 1988,1990,1993,1994 by Paul Vixie
  * All rights reserved
  */
@@ -21,12 +21,10 @@
  */
 
 #if !defined(lint) && !defined(LINT)
-static char rcsid[] = "$OpenBSD: job.c,v 1.3 2001/02/18 19:48:35 millert Exp $";
+static char const rcsid[] = "$OpenBSD: job.c,v 1.5 2002/07/11 20:15:40 millert Exp $";
 #endif
 
-
 #include "cron.h"
-
 
 typedef	struct _job {
 	struct _job	*next;
@@ -34,15 +32,10 @@ typedef	struct _job {
 	user		*u;
 } job;
 
-
 static job	*jhead = NULL, *jtail = NULL;
 
-
 void
-job_add(e, u)
-	entry *e;
-	user *u;
-{
+job_add(entry *e, user *u) {
 	job *j;
 
 	/* if already on queue, keep going */
@@ -51,9 +44,9 @@ job_add(e, u)
 			return;
 
 	/* build a job queue element */
-	if ((j = (job*)malloc(sizeof(job))) == NULL)
+	if ((j = (job *)malloc(sizeof(job))) == NULL)
 		return;
-	j->next = (job*) NULL;
+	j->next = NULL;
 	j->e = e;
 	j->u = u;
 
@@ -65,12 +58,10 @@ job_add(e, u)
 	jtail = j;
 }
 
-
 int
-job_runqueue()
-{
-	job	*j, *jn;
-	int	run = 0;
+job_runqueue(void) {
+	job *j, *jn;
+	int run = 0;
 
 	for (j = jhead; j; j = jn) {
 		do_command(j->e, j->u);

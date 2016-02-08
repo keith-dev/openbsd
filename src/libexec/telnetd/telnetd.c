@@ -93,7 +93,7 @@ int	registerd_host_only = 0;
 
 /*
  * Because of the way ptyibuf is used with streams messages, we need
- * ptyibuf+1 to be on a full-word boundary.  The following wierdness
+ * ptyibuf+1 to be on a full-word boundary.  The following weirdness
  * is simply to make that happen.
  */
 long	ptyibufbuf[BUFSIZ/sizeof(long)+1];
@@ -978,7 +978,7 @@ my_telnet(int f, int p, const char *host, const char *utmp_host,
 	free(he);
     if (hostinfo && *IM)
 	putf(IM, ptyibuf2);
-    if (*IM)
+    if (IM != DEFAULT_IM && *IM)
 	free(IM);
 
     if (pcc)

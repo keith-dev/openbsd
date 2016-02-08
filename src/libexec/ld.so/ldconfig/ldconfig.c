@@ -1,4 +1,4 @@
-/*	$OpenBSD: ldconfig.c,v 1.7 2002/02/16 21:27:30 millert Exp $	*/
+/*	$OpenBSD: ldconfig.c,v 1.12 2002/07/30 22:25:27 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1993,1995 Paul Kranenburg
@@ -14,7 +14,7 @@
  *    documentation and/or other materials provided with the distribution.
  * 3. All advertising materials mentioning features or use of this software
  *    must display the following acknowledgement:
- *      This product includes software developed by Paul Kranenburg.
+ *	This product includes software developed by Paul Kranenburg.
  * 4. The name of the author may not be used to endorse or promote products
  *    derived from this software without specific prior written permission
  *
@@ -86,12 +86,10 @@ static int	readhints(void);
 static void	listhints(void);
 
 int
-main(argc, argv)
-int	argc;
-char	*argv[];
+main(int argc, char *argv[])
 {
-	int		i, c;
-	int		rval = 0;
+	int i, c;
+	int rval = 0;
 
 	while ((c = getopt(argc, argv, "RUmrsv")) != -1) {
 		switch (c) {
@@ -114,8 +112,8 @@ char	*argv[];
 			verbose = 1;
 			break;
 		default:
-			(void)fprintf(stderr,
-				"usage: %s [-RUmrsv] [dir ...]\n", __progname);
+			fprintf(stderr,
+			    "usage: %s [-RUmrsv] [dir ...]\n", __progname);
 			exit(1);
 			break;
 		}
@@ -160,6 +158,7 @@ char	*argv[];
 
 	for (i = 0; i < n_search_dirs; i++) {
 		char *cp = concat(dir_list, *dir_list?":":"", search_dirs[i]);
+
 		free(dir_list);
 		dir_list = cp;
 		rval |= dodir(search_dirs[i], 0);
@@ -171,9 +170,7 @@ char	*argv[];
 }
 
 int
-dodir(dir, silent)
-char	*dir;
-int	silent;
+dodir(char *dir, int silent)
 {
 	DIR		*dd;
 	struct dirent	*dp;
@@ -197,7 +194,7 @@ int	silent;
 			continue;
 
 		/* Copy the entry minus prefix */
-		(void)strcpy(name, dp->d_name + 3);
+		(void)strlcpy(name, dp->d_name + 3, sizeof name);
 		n = strlen(name);
 		if (n < 4)
 			continue;
@@ -221,14 +218,11 @@ int	silent;
 		ndewey = getdewey(dewey, cp + 4);
 		enter(dir, dp->d_name, name, dewey, ndewey);
 	}
-
 	return 0;
 }
 
 static void
-enter(dir, file, name, dewey, ndewey)
-char	*dir, *file, *name;
-int	dewey[], ndewey;
+enter(char *dir, char *file, char *name, int dewey[], int ndewey)
 {
 	struct shlib_list	*shp;
 
@@ -242,8 +236,8 @@ int	dewey[], ndewey;
 			/* Update this entry with higher versioned lib */
 			if (verbose)
 				printf("Updating lib%s.%d.%d to %s/%s\n",
-					shp->name, shp->major, shp->minor,
-					dir, file);
+				    shp->name, shp->major, shp->minor,
+				    dir, file);
 
 			free(shp->name);
 			shp->name = xstrdup(name);
@@ -282,9 +276,7 @@ int	dewey[], ndewey;
 #endif
 
 int
-hinthash(cp, vmajor, vminor)
-char	*cp;
-int	vmajor, vminor;
+hinthash(char *cp, int vmajor, int vminor)
 {
 	int	k = 0;
 
@@ -300,7 +292,7 @@ int	vmajor, vminor;
 }
 
 int
-buildhints()
+buildhints(void)
 {
 	struct hints_header	hdr;
 	struct hints_bucket	*blist;
@@ -332,7 +324,7 @@ buildhints()
 
 	if (verbose)
 		printf("Totals: entries %d, buckets %ld, string size %d\n",
-					nhints, hdr.hh_nbucket, strtab_sz);
+		    nhints, hdr.hh_nbucket, strtab_sz);
 
 	/* Allocate buckets and string table */
 	blist = (struct hints_bucket *)xmalloc(n);
@@ -347,8 +339,8 @@ buildhints()
 	for (shp = shlib_head; shp; shp = shp->next) {
 		struct hints_bucket	*bp;
 
-		bp = blist +
-		  (hinthash(shp->name, shp->major, shp->minor) % hdr.hh_nbucket);
+		bp = blist + (hinthash(shp->name, shp->major, shp->minor) %
+		    hdr.hh_nbucket);
 
 		if (bp->hi_pathx) {
 			int	i;
@@ -369,11 +361,11 @@ buildhints()
 
 		/* Insert strings in string table */
 		bp->hi_namex = str_index;
-		strcpy(strtab + str_index, shp->name);
+		strlcpy(strtab + str_index, shp->name, strtab_sz - str_index);
 		str_index += 1 + strlen(shp->name);
 
 		bp->hi_pathx = str_index;
-		strcpy(strtab + str_index, shp->path);
+		strlcpy(strtab + str_index, shp->path, strtab_sz - str_index);
 		str_index += 1 + strlen(shp->path);
 
 		/* Copy versions */
@@ -382,7 +374,7 @@ buildhints()
 	}
 
 	/* Copy search directories */
-	strcpy(strtab + str_index, dir_list);
+	strlcpy(strtab + str_index, dir_list, strtab_sz - str_index);
 	str_index += 1 + strlen(dir_list);
 
 	/* Sanity check */
@@ -403,7 +395,7 @@ buildhints()
 		return -1;
 	}
 	if (write(fd, blist, hdr.hh_nbucket * sizeof(struct hints_bucket)) !=
-		  hdr.hh_nbucket * sizeof(struct hints_bucket)) {
+	    hdr.hh_nbucket * sizeof(struct hints_bucket)) {
 		warn("%s", _PATH_LD_HINTS);
 		return -1;
 	}
@@ -431,16 +423,15 @@ buildhints()
 }
 
 static int
-readhints()
+readhints(void)
 {
-	int			fd;
+	int			fd, i;
 	caddr_t			addr;
 	long			msize;
 	struct hints_header	*hdr;
 	struct hints_bucket	*blist;
 	char			*strtab;
 	struct shlib_list	*shp;
-	int			i;
 
 	if ((fd = open(_PATH_LD_HINTS, O_RDONLY, 0)) == -1) {
 		warn("%s", _PATH_LD_HINTS);
@@ -458,7 +449,7 @@ readhints()
 	hdr = (struct hints_header *)addr;
 	if (HH_BADMAG(*hdr)) {
 		warnx("%s: Bad magic: %lo",
-			_PATH_LD_HINTS, hdr->hh_magic);
+		    _PATH_LD_HINTS, hdr->hh_magic);
 		return -1;
 	}
 
@@ -469,8 +460,8 @@ readhints()
 
 	if (hdr->hh_ehints > msize) {
 		if (mmap(addr+msize, hdr->hh_ehints - msize,
-				PROT_READ, MAP_PRIVATE|MAP_FIXED,
-				fd, msize) != (caddr_t)(addr+msize)) {
+		    PROT_READ, MAP_PRIVATE|MAP_FIXED,
+		    fd, msize) != (caddr_t)(addr+msize)) {
 
 			warn("%s", _PATH_LD_HINTS);
 			return -1;
@@ -510,12 +501,11 @@ readhints()
 		*shlib_tail = shp;
 		shlib_tail = &shp->next;
 	}
-
 	return 0;
 }
 
 static void
-listhints()
+listhints(void)
 {
 	struct shlib_list	*shp;
 	int			i;
@@ -525,7 +515,5 @@ listhints()
 
 	for (i = 0, shp = shlib_head; shp; i++, shp = shp->next)
 		printf("\t%d:-l%s.%d.%d => %s\n",
-			i, shp->name, shp->major, shp->minor, shp->path);
-
-	return;
+		    i, shp->name, shp->major, shp->minor, shp->path);
 }

@@ -1,3 +1,5 @@
+/*	$OpenBSD: mod_rewrite.c,v 1.15 2002/08/15 16:06:11 henning Exp $ */
+
 /* ====================================================================
  * The Apache Software License, Version 1.1
  *
@@ -91,6 +93,7 @@
 
 
 #include "mod_rewrite.h"
+#include "fdcache.h"
 
 #ifndef NO_WRITEV
 #ifndef NETWARE
@@ -515,12 +518,19 @@ static const char *cmd_rewritemap(cmd_parms *cmd, void *dconf, char *a1,
     new->fpin  = -1;
     new->fpout = -1;
 
+    /* yes, we do it twice. needed for restart awareness */
+    ap_server_strip_chroot(new->checkfile, 0);
+    ap_server_strip_chroot(new->datafile, 0);
+
     if (new->checkfile && (sconf->state == ENGINE_ENABLED)
         && (stat(new->checkfile, &st) == -1)) {
         return ap_pstrcat(cmd->pool,
                           "RewriteMap: map file or program not found:",
                           new->checkfile, NULL);
     }
+
+    ap_server_strip_chroot(new->checkfile, 1);
+    ap_server_strip_chroot(new->datafile, 1);
 
     return NULL;
 }
@@ -1220,7 +1230,7 @@ static int hook_uri2file(request_rec *r)
             rewritelog(r, 2, "local path result: %s", r->filename);
 
             /* the filename has to start with a slash! */
-            if (r->filename[0] != '/') {
+            if (!ap_os_is_path_absolute(r->filename)) {
                 return BAD_REQUEST;
             }
 
@@ -1505,7 +1515,7 @@ static int hook_fixup(request_rec *r)
             }
 
             /* the filename has to start with a slash! */
-            if (r->filename[0] != '/') {
+            if (!ap_os_is_path_absolute(r->filename)) {
                 return BAD_REQUEST;
             }
 
@@ -1983,7 +1993,7 @@ static int apply_rewrite_rule(request_rec *r, rewriterule_entry *p,
      *   location, i.e. if it's not starting with either a slash
      *   or a fully qualified URL scheme.
      */
-    if (prefixstrip && r->filename[0] != '/'
+    if (prefixstrip && !ap_os_is_path_absolute(r->filename)
 	&& !is_absolute_uri(r->filename)) {
         rewritelog(r, 3, "[per-dir %s] add per-dir prefix: %s -> %s%s",
                    perdir, r->filename, perdir, r->filename);
@@ -2070,7 +2080,7 @@ static int apply_rewrite_rule(request_rec *r, rewriterule_entry *p,
      *  not start with a slash. Here we add again the initially
      *  stripped per-directory prefix.
      */
-    if (prefixstrip && r->filename[0] != '/') {
+    if (prefixstrip && !ap_os_is_path_absolute(r->filename)) {
         rewritelog(r, 3, "[per-dir %s] add per-dir prefix: %s -> %s%s",
                    perdir, r->filename, perdir, r->filename);
         r->filename = ap_pstrcat(r->pool, perdir, r->filename, NULL);
@@ -3100,8 +3110,14 @@ static void open_rewritelog(server_rec *s, pool *p)
         conf->rewritelogfp = ap_piped_log_write_fd(pl);
     }
     else if (*conf->rewritelogfile != '\0') {
-        if ((conf->rewritelogfp = ap_popenf(p, fname, rewritelog_flags,
-                                            rewritelog_mode)) < 0) {
+	if (ap_server_chroot_desired()) {
+		conf->rewritelogfp = fdcache_open(fname, rewritelog_flags,
+		    rewritelog_mode);
+	} else {
+		conf->rewritelogfp = ap_popenf(p, fname, rewritelog_flags,
+		    rewritelog_mode);
+	}
+        if (conf->rewritelogfp < 0) {
             ap_log_error(APLOG_MARK, APLOG_ERR, s, 
 
                          "mod_rewrite: could not open RewriteLog "

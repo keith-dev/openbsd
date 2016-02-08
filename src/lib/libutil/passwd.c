@@ -1,4 +1,4 @@
-/*	$OpenBSD: passwd.c,v 1.32 2002/04/10 10:11:03 mpech Exp $	*/
+/*	$OpenBSD: passwd.c,v 1.36 2002/07/31 21:53:34 millert Exp $	*/
 
 /*
  * Copyright (c) 1987, 1993, 1994, 1995
@@ -34,7 +34,7 @@
  */
 
 #if defined(LIBC_SCCS) && !defined(lint)
-static char rcsid[] = "$OpenBSD: passwd.c,v 1.32 2002/04/10 10:11:03 mpech Exp $";
+static const char rcsid[] = "$OpenBSD: passwd.c,v 1.36 2002/07/31 21:53:34 millert Exp $";
 #endif /* LIBC_SCCS and not lint */
 
 #include <sys/types.h>
@@ -58,7 +58,7 @@ static char rcsid[] = "$OpenBSD: passwd.c,v 1.32 2002/04/10 10:11:03 mpech Exp $
 
 #include "util.h"
 
-#define NUM_OPTIONS     2       /* Number of hardcoded defaults */
+#define NUM_OPTIONS	2	/* Number of hardcoded defaults */
 
 static void	pw_cont(int sig);
 
@@ -98,9 +98,10 @@ static int
 read_line(fp, line, max)
 	FILE   *fp;
 	char   *line;
-	int     max;
+	int	max;
 {
 	char   *p;
+
 	/* Read one line of config */
 	if (fgets(line, max, fp) == 0)
 		return 0;
@@ -123,7 +124,8 @@ static const char *
 pw_default(option)
 	char   *option;
 {
-	int     i;
+	int	i;
+
 	for (i = 0; i < NUM_OPTIONS; i++)
 		if (!strcmp(options[i][0], option))
 			return options[i][1];
@@ -153,7 +155,7 @@ pw_file(nm)
  * Retrieve password information from the /etc/passwd.conf file,
  * at the moment this is only for choosing the cipher to use.
  * It could easily be used for other authentication methods as
- * well. 
+ * well.
  */
 void
 pw_getconf(data, max, key, option)
@@ -166,8 +168,8 @@ pw_getconf(data, max, key, option)
 	char    line[LINE_MAX];
 	static char result[LINE_MAX];
 	char   *p;
-	int     got = 0;
-	int     found = 0;
+	int	got = 0;
+	int	found = 0;
 
 	result[0] = '\0';
 
@@ -175,7 +177,7 @@ pw_getconf(data, max, key, option)
 	if (!p || (fp = fopen(p, "r")) == NULL) {
 		if (p)
 			free(p);
-		if((p = (char *)pw_default(option))) {
+		if ((p = (char *)pw_default(option))) {
 			strncpy(data, p, max - 1);
 			data[max - 1] = '\0';
 		} else
@@ -192,35 +194,36 @@ pw_getconf(data, max, key, option)
 
 		/* Now we found our specified key */
 		while (read_line(fp, line, LINE_MAX)) {
-		     char   *p2;
-		     /* Leaving key field */
-		     if (strchr(line, ':')) {
-			  got = 1;
-			  break;
-		     }
-		     p2 = line;
-		     if (!(p = strsep(&p2, "=")) || p2 == NULL)
-			  continue;
-		     trim_whitespace(p);
-		     if (!strncmp(p, option, strlen(option))) {
-			  trim_whitespace(p2);
-			  strcpy(result, p2);
-			  found = 1;
-			  break;
-		     }
+			char   *p2;
+
+			/* Leaving key field */
+			if (strchr(line, ':')) {
+				got = 1;
+				break;
+			}
+			p2 = line;
+			if (!(p = strsep(&p2, "=")) || p2 == NULL)
+				continue;
+			trim_whitespace(p);
+			if (!strncmp(p, option, strlen(option))) {
+				trim_whitespace(p2);
+				strlcpy(result, p2, sizeof result);
+				found = 1;
+				break;
+			}
 		}
 	}
 	fclose(fp);
 
-	/* 
+	/*
 	 * If we got no result and were looking for a default
 	 * value, try hard coded defaults.
 	 */
 
 	if (!strlen(result) && !strcmp(key,"default") &&
-	    (p=(char *)pw_default(option)))
+	    (p = (char *)pw_default(option)))
 		strncpy(data, p, max - 1);
-	else 
+	else
 		strncpy(data, result, max - 1);
 	data[max - 1] = '\0';
 }
@@ -480,10 +483,11 @@ pw_copy(ffd, tfd, pw)
 				goto err;
 			continue;
 		}
-		(void)fprintf(to, "%s:%s:%d:%d:%s:%d:%d:%s:%s:%s\n",
-		    pw->pw_name, pw->pw_passwd, pw->pw_uid, pw->pw_gid,
-		    pw->pw_class, pw->pw_change, pw->pw_expire, pw->pw_gecos,
-		    pw->pw_dir, pw->pw_shell);
+		(void)fprintf(to, "%s:%s:%u:%u:%s:%d:%d:%s:%s:%s\n",
+		    pw->pw_name, pw->pw_passwd, (u_int)pw->pw_uid,
+		    (u_int)pw->pw_gid, pw->pw_class, pw->pw_change,
+		    pw->pw_expire, pw->pw_gecos, pw->pw_dir,
+		    pw->pw_shell);
 		done = 1;
 		if (ferror(to))
 			goto err;
@@ -581,7 +585,7 @@ pw_scan(bp, pw, flags)
 				break;
 			}
 			if (!strcmp(p, sh))
-				break;	
+				break;
 		}
 		endusershell();
 	}
@@ -594,7 +598,7 @@ fmt:		warnx("corrupted entry");
 	return (1);
 }
 
-void
+__dead void
 pw_error(name, err, eval)
 	const char *name;
 	int err, eval;

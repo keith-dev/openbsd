@@ -291,6 +291,24 @@ static void cleanup_tables(void *not_used)
 }
 #endif	/* HAVE_SHMEM_MM */
 
+#ifdef __OpenBSD__
+static void initialize_secret(server_rec *s)
+{
+    u_int32_t rnd = 0, i;
+
+    ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_NOTICE, s,
+		 "Digest: generating secret for digest authentication ...");
+
+    for (i = 0; i < sizeof(secret); i++) {
+	if (i % 4 == 0)
+	    rnd = arc4random();
+	secret[i] = rnd;
+	rnd >>= 8;
+    }
+    ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_NOTICE, s,
+		 "Digest: done");
+}
+#else
 #ifdef WIN32
 /* TODO: abstract out the random number generation. APR? */
 static void initialize_secret(server_rec *s)
@@ -357,6 +375,7 @@ static void initialize_secret(server_rec *s)
 
     ap_log_error(APLOG_MARK, APLOG_NOERRNO|APLOG_NOTICE, s, "Digest: done");
 }
+#endif
 #endif
 
 #ifdef HAVE_SHMEM_MM
@@ -524,6 +543,7 @@ static const char *set_digest_file(cmd_parms *cmd, void *config,
 				   const char *file)
 {
     ((digest_config_rec *) config)->pwfile = file;
+    ap_server_strip_chroot(((digest_config_rec *) config)->pwfile, 1);
     return NULL;
 }
 
@@ -531,6 +551,7 @@ static const char *set_group_file(cmd_parms *cmd, void *config,
 				  const char *file)
 {
     ((digest_config_rec *) config)->grpfile = file;
+    ap_server_strip_chroot(((digest_config_rec *) config)->grpfile, 1);
     return NULL;
 }
 
@@ -573,7 +594,7 @@ static const char *set_nonce_lifetime(cmd_parms *cmd, void *config,
     char *endptr;
     long  lifetime;
 
-    lifetime = strtol(t, &endptr, 10);
+    lifetime = ap_strtol(t, &endptr, 10);
     if (endptr < (t+strlen(t)) && !ap_isspace(*endptr))
 	return ap_pstrcat(cmd->pool, "Invalid time in AuthDigestNonceLifetime: ", t, NULL);
 
@@ -933,7 +954,7 @@ static int get_digest_rec(request_rec *r, digest_header_rec *resp)
     }
 
     if (resp->opaque)
-	resp->opaque_num = (unsigned long) strtol(resp->opaque, NULL, 16);
+	resp->opaque_num = (unsigned long) ap_strtol(resp->opaque, NULL, 16);
 
     resp->auth_hdr_sts = VALID;
     return OK;
@@ -1375,7 +1396,7 @@ static int check_nc(const request_rec *r, const digest_header_rec *resp,
     if (!conf->check_nc || !client_mm)
 	return OK;
 
-    nc = strtol(snc, &endptr, 16);
+    nc = ap_strtol(snc, &endptr, 16);
     if (endptr < (snc+strlen(snc)) && !ap_isspace(*endptr)) {
 	ap_log_rerror(APLOG_MARK, APLOG_NOERRNO|APLOG_ERR, r,
 		      "Digest: invalid nc %s received - not a number", snc);

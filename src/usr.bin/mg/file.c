@@ -1,4 +1,4 @@
-/*	$OpenBSD: file.c,v 1.16 2002/03/16 04:17:36 vincent Exp $	*/
+/*	$OpenBSD: file.c,v 1.23 2002/09/15 22:18:40 vincent Exp $	*/
 
 /*
  *	File commands.
@@ -16,13 +16,15 @@ int
 fileinsert(int f, int n)
 {
 	int	 s;
-	char	 fname[NFILEN];
+	char	 fname[NFILEN], *adjf;
 
 	s = eread("Insert file: ", fname, NFILEN, EFNEW | EFCR | EFFILE);
 	if (s != TRUE)
 		return (s);
-	return insertfile(adjustname(fname), NULL, FALSE);
-	/* don't set buffer name */
+	adjf = adjustname(fname);
+	if (adjf == NULL)
+		return (FALSE);
+	return insertfile(adjf, NULL, FALSE);
 }
 
 /*
@@ -44,6 +46,8 @@ filevisit(int f, int n)
 	if (s != TRUE)
 		return s;
 	adjf = adjustname(fname);
+	if (adjf == NULL)
+		return (FALSE);
 	if ((bp = findbuffer(adjf)) == NULL)
 		return FALSE;
 	curbp = bp;
@@ -54,6 +58,17 @@ filevisit(int f, int n)
 	return TRUE;
 }
 
+int
+filevisitro(int f, int n)
+{
+	int error;
+
+	error = filevisit(f, n);
+	if (error != TRUE)
+		return (error);
+	curbp->b_flag |= BFREADONLY;
+	return (TRUE);
+}
 /*
  * Pop to a file in the other window.  Same as the last function, but uses
  * popbuf instead of showbuffer.
@@ -72,6 +87,8 @@ poptofile(int f, int n)
 	    EFNEW | EFCR | EFFILE)) != TRUE)
 		return s;
 	adjf = adjustname(fname);
+	if (adjf == NULL)
+		return (FALSE);
 	if ((bp = findbuffer(adjf)) == NULL)
 		return FALSE;
 	if ((wp = popbuf(bp)) == NULL)
@@ -92,7 +109,7 @@ findbuffer(char *fname)
 {
 	BUFFER		*bp;
 	char		 bname[NBUFN];
-	unsigned int count, remain, i;
+	unsigned int	 count, remain, i;
 
 	for (bp = bheadp; bp != NULL; bp = bp->b_bufp) {
 		if (strcmp(bp->b_fname, fname) == 0)
@@ -110,19 +127,28 @@ findbuffer(char *fname)
  * Read the file "fname" into the current buffer.  Make all of the text
  * in the buffer go away, after checking for unsaved changes.  This is
  * called by the "read" command, the "visit" command, and the mainline
- * (for "uemacs file").
+ * (for "mg file").
  */
 int
-readin(fname)
-	char *fname;
+readin(char *fname)
 {
 	MGWIN	*wp;
-	int	 status;
+	int	 status, i;
+	PF	*ael;
 
 	/* might be old */
 	if (bclear(curbp) != TRUE)
 		return TRUE;
 	status = insertfile(fname, fname, TRUE);
+
+	/*
+	 * Call auto-executing function if we need to.
+	 */
+	if ((ael = find_autoexec(fname)) != NULL) {
+		for (i = 0; ael[i] != NULL; i++)
+			(*ael[i])(0, 1);
+		free(ael);
+	}
 
 	/* no change */
 	curbp->b_flag &= ~BFCHG;
@@ -140,7 +166,6 @@ readin(fname)
 		curbp->b_flag |= BFREADONLY;
 	else
 		curbp->b_flag &=~ BFREADONLY;
-
 
 	return status;
 }
@@ -165,21 +190,23 @@ static char	*line = NULL;
 static int	linesize = 0;
 
 int
-insertfile(fname, newname, needinfo)
-	char *fname, *newname;
-	int   needinfo;
+insertfile(char *fname, char *newname, int needinfo)
 {
 	BUFFER	*bp;
 	LINE	*lp1, *lp2;
 	LINE	*olp;			/* line we started at */
 	MGWIN	*wp;
-	int	 nbytes, s, nline;
-	int	 opos;			/* and offset into it */
+	int	 nbytes, s, nline, siz, x = -1, x2;
+	int	 opos;			/* offset we started at */
+
+	if (needinfo)
+		x = undo_enable(FALSE);
 
 	lp1 = NULL;
-
 	if (line == NULL) {
 		line = malloc(NLINE);
+		if (line == NULL)
+			panic("out of memory");
 		linesize = NLINE;
 	}
 
@@ -202,6 +229,7 @@ insertfile(fname, newname, needinfo)
 	opos = curwp->w_doto;
 
 	/* open a new line, at point, and start inserting after it */
+	x2 = undo_enable(FALSE);
 	(void)lnewline();
 	olp = lback(curwp->w_dotp);
 	if (olp == curbp->b_linep) {
@@ -209,11 +237,14 @@ insertfile(fname, newname, needinfo)
 		(void)lnewline();
 		curwp->w_dotp = lback(curwp->w_dotp);
 	}
+	undo_enable(x2);
 
 	/* don't count fake lines at the end */
 	nline = 0;
+	siz = 0;
 	while ((s = ffgetline(line, linesize, &nbytes)) != FIOERR) {
 doneread:
+		siz += nbytes + 1;
 		switch (s) {
 		case FIOSUC:
 			++nline;
@@ -234,7 +265,7 @@ doneread:
 			if (s == FIOEOF)
 				goto endoffile;
 			break;
-		case FIOLONG:{
+		case FIOLONG: {
 				/* a line too long to fit in our buffer */
 				char	*cp;
 				int	newsize;
@@ -265,6 +296,8 @@ doneread:
 		}
 	}
 endoffile:
+	undo_add_insert(olp, opos, siz);
+
 	/* ignore errors */
 	ffclose(NULL);
 	/* don't zap an error */
@@ -318,6 +351,9 @@ out:		lp2 = NULL;
 			}
 		}
 	}
+	if (x != -1)
+		undo_enable(x);
+
 	/* return false if error */
 	return s != FIOERR;
 }
@@ -330,8 +366,7 @@ out:		lp2 = NULL;
  */
 /* ARGSUSED */
 int
-filewrite(f, n)
-	int f, n;
+filewrite(int f, int n)
 {
 	int	 s;
 	char	 fname[NFILEN];
@@ -341,6 +376,8 @@ filewrite(f, n)
 	    EFNEW | EFCR | EFFILE)) != TRUE)
 		return (s);
 	adjfname = adjustname(fname);
+	if (adjfname == NULL)
+		return (FALSE);
 	/* old attributes are no longer current */
 	bzero(&curbp->b_fi, sizeof(curbp->b_fi));
 	if ((s = writeout(curbp, adjfname)) == TRUE) {
@@ -367,8 +404,7 @@ static int	makebackup = MAKEBACKUP;
 
 /* ARGSUSED */
 int
-filesave(f, n)
-	int f, n;
+filesave(int f, int n)
 {
 	return buffsave(curbp);
 }
@@ -382,8 +418,7 @@ filesave(f, n)
  * the value of makebackup.
  */
 int
-buffsave(bp)
-	BUFFER *bp;
+buffsave(BUFFER *bp)
 {
 	int	 s;
 
@@ -432,8 +467,7 @@ buffsave(bp)
  */
 /* ARGSUSED */
 int
-makebkfile(f, n)
-	int f, n;
+makebkfile(int f, int n)
 {
 	if (f & FFARG)
 		makebackup = n > 0;
@@ -459,9 +493,7 @@ makebkfile(f, n)
  * "fileio.c" package. Most of the grief is checking of some sort.
  */
 int
-writeout(bp, fn)
-	BUFFER *bp;
-	char   *fn;
+writeout(BUFFER *bp, char *fn)
 {
 	int	 s;
 
@@ -485,8 +517,7 @@ writeout(bp, fn)
  * mode line updated.
  */
 void
-upmodes(bp)
-	BUFFER *bp;
+upmodes(BUFFER *bp)
 {
 	MGWIN	*wp;
 

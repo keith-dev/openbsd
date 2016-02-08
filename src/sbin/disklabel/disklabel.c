@@ -1,4 +1,4 @@
-/*	$OpenBSD: disklabel.c,v 1.73 2002/03/24 22:51:54 millert Exp $	*/
+/*	$OpenBSD: disklabel.c,v 1.75 2002/06/09 08:13:05 todd Exp $	*/
 
 /*
  * Copyright (c) 1987, 1993
@@ -43,7 +43,7 @@ static const char copyright[] =
 #endif /* not lint */
 
 #ifndef lint
-static const char rcsid[] = "$OpenBSD: disklabel.c,v 1.73 2002/03/24 22:51:54 millert Exp $";
+static const char rcsid[] = "$OpenBSD: disklabel.c,v 1.75 2002/06/09 08:13:05 todd Exp $";
 #endif /* not lint */
 
 #include <sys/param.h>
@@ -364,19 +364,19 @@ makelabel(type, name, lp)
 	 */
 	if (!xxboot && lp->d_boot0) {
 		if (*lp->d_boot0 != '/')
-			(void)sprintf(boot0, "%s%s",
-				      _PATH_BOOTDIR, lp->d_boot0);
+			(void)snprintf(boot0, sizeof boot0, "%s%s",
+			    _PATH_BOOTDIR, lp->d_boot0);
 		else
-			(void)strcpy(boot0, lp->d_boot0);
+			(void)strlcpy(boot0, lp->d_boot0, sizeof boot0);
 		xxboot = boot0;
 	}
 #if NUMBOOT > 1
 	if (!bootxx && lp->d_boot1) {
 		if (*lp->d_boot1 != '/')
-			(void)sprintf(boot1, "%s%s",
-				      _PATH_BOOTDIR, lp->d_boot1);
+			(void)snprintf(boot1, sizeof boot1, "%s%s",
+			    _PATH_BOOTDIR, lp->d_boot1);
 		else
-			(void)strcpy(boot1, lp->d_boot1);
+			(void)strlcpy(boot1, lp->d_boot1, sizeof boot1);
 		bootxx = boot1;
 	}
 #endif
@@ -417,7 +417,7 @@ writelabel(f, boot, lp)
 		struct partition *pp = &lp->d_partitions[2];
 
 		/*
-		 * If OpenBSD DOS partition is missing, or if 
+		 * If OpenBSD DOS partition is missing, or if
 		 * the label to be written is not within partition,
 		 * prompt first. Need to allow this in case operator
 		 * wants to convert the drive for dedicated use.
@@ -812,23 +812,23 @@ makebootarea(boot, dp, f)
 
 		if (!xxboot) {
 			(void)sprintf(np, "%s%sboot",
-				      _PATH_BOOTDIR, dkbasename);
+			    _PATH_BOOTDIR, dkbasename);
 			if (access(np, F_OK) < 0 && dkbasename[0] == 'r')
 				dkbasename++;
 			xxboot = np;
 			(void)sprintf(xxboot, "%s%sboot",
-				      _PATH_BOOTDIR, dkbasename);
+			    _PATH_BOOTDIR, dkbasename);
 			np += strlen(xxboot) + 1;
 		}
 #if NUMBOOT > 1
 		if (!bootxx) {
 			(void)sprintf(np, "%sboot%s",
-				      _PATH_BOOTDIR, dkbasename);
+			    _PATH_BOOTDIR, dkbasename);
 			if (access(np, F_OK) < 0 && dkbasename[0] == 'r')
 				dkbasename++;
 			bootxx = np;
 			(void)sprintf(bootxx, "%sboot%s",
-				      _PATH_BOOTDIR, dkbasename);
+			    _PATH_BOOTDIR, dkbasename);
 			np += strlen(bootxx) + 1;
 		}
 #endif
@@ -953,7 +953,7 @@ makedisktab(f, lp)
 			(void)fprintf(f, "o%c#%u:", c, pp->p_offset);
 			if (pp->p_fstype != FS_UNUSED) {
 				if ((unsigned) pp->p_fstype < FSMAXTYPES)
-					(void)fprintf(f, "t%c=%s:", c, 
+					(void)fprintf(f, "t%c=%s:", c,
 					    fstypenames[pp->p_fstype]);
 				else
 					(void)fprintf(f, "t%c=unknown%d:",
@@ -1077,7 +1077,7 @@ display_partition(f, lp, mp, i, unit, width)
 			else
 				putc(' ', f);
 			fprintf(f, "- %u",
-			    (pp->p_offset + 
+			    (pp->p_offset +
 			    pp->p_size + lp->d_secpercyl - 1) /
 			    lp->d_secpercyl - 1);
 			if ((pp->p_offset + pp->p_size) % lp->d_secpercyl)
@@ -1208,19 +1208,20 @@ int
 editit()
 {
 	pid_t pid, xpid;
-	int stat;
+	int stat, len;
 	extern char *getenv();
 	char *argp[] = {"sh", "-c", NULL, NULL};
 	char *ed, *p;
 
 	if ((ed = getenv("EDITOR")) == NULL)
 		ed = _PATH_VI;
-	p = (char *)malloc(strlen(ed) + 1 + strlen(tmpfil) + 1);
+	len = strlen(ed) + 1 + strlen(tmpfil) + 1;
+	p = (char *)malloc(len);
 	if (!p) {
 		warn("failed to start editor");
 		return (0);
 	}
-	sprintf(p, "%s %s", ed, tmpfil);
+	snprintf(p, len, "%s %s", ed, tmpfil);
 	argp[2] = p;
 
 	/* Turn off signals. */

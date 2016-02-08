@@ -42,7 +42,7 @@
  */
 
 #include "includes.h"
-RCSID("$OpenBSD: sshd.c,v 1.239 2002/03/30 18:51:15 markus Exp $");
+RCSID("$OpenBSD: sshd.c,v 1.260 2002/09/27 10:42:09 mickey Exp $");
 
 #include <openssl/dh.h>
 #include <openssl/bn.h>
@@ -189,7 +189,7 @@ int *startup_pipes = NULL;
 int startup_pipe;		/* in child */
 
 /* variables used for privilege separation */
-extern struct monitor *monitor;
+extern struct monitor *pmonitor;
 extern int use_privsep;
 
 /* Prototypes for various functions defined later in this file. */
@@ -206,6 +206,7 @@ static void
 close_listen_socks(void)
 {
 	int i;
+
 	for (i = 0; i < num_listen_socks; i++)
 		close(listen_socks[i]);
 	num_listen_socks = -1;
@@ -215,6 +216,7 @@ static void
 close_startup_pipes(void)
 {
 	int i;
+
 	if (startup_pipes)
 		for (i = 0; i < options.max_startups; i++)
 			if (startup_pipes[i] != -1)
@@ -247,7 +249,8 @@ sighup_restart(void)
 	close_listen_socks();
 	close_startup_pipes();
 	execv(saved_argv[0], saved_argv);
-	log("RESTART FAILED: av[0]='%.100s', error: %.100s.", saved_argv[0], strerror(errno));
+	log("RESTART FAILED: av[0]='%.100s', error: %.100s.", saved_argv[0],
+	    strerror(errno));
 	exit(1);
 }
 
@@ -267,8 +270,8 @@ sigterm_handler(int sig)
 static void
 main_sigchld_handler(int sig)
 {
-	pid_t pid;
 	int save_errno = errno;
+	pid_t pid;
 	int status;
 
 	while ((pid = waitpid(-1, &status, WNOHANG)) > 0 ||
@@ -287,11 +290,8 @@ grace_alarm_handler(int sig)
 {
 	/* XXX no idea how fix this signal handler */
 
-	/* Close the connection. */
-	packet_close();
-
 	/* Log error and exit. */
-	fatal("Timeout before authentication for %s.", get_remote_ipaddr());
+	fatal("Timeout before authentication for %s", get_remote_ipaddr());
 }
 
 /*
@@ -304,7 +304,7 @@ grace_alarm_handler(int sig)
 static void
 generate_ephemeral_server_key(void)
 {
-	u_int32_t rand = 0;
+	u_int32_t rnd = 0;
 	int i;
 
 	verbose("Generating %s%d bit RSA key.",
@@ -317,9 +317,9 @@ generate_ephemeral_server_key(void)
 
 	for (i = 0; i < SSH_SESSION_KEY_LENGTH; i++) {
 		if (i % 4 == 0)
-			rand = arc4random();
-		sensitive_data.ssh1_cookie[i] = rand & 0xff;
-		rand >>= 8;
+			rnd = arc4random();
+		sensitive_data.ssh1_cookie[i] = rnd & 0xff;
+		rnd >>= 8;
 	}
 	arc4random_stir();
 }
@@ -328,6 +328,7 @@ static void
 key_regeneration_alarm(int sig)
 {
 	int save_errno = errno;
+
 	signal(SIGALRM, SIG_DFL);
 	errno = save_errno;
 	key_do_regen = 1;
@@ -359,13 +360,14 @@ sshd_exchange_identification(int sock_in, int sock_out)
 
 	if (client_version_string == NULL) {
 		/* Send our protocol version identification. */
-		if (atomicio(write, sock_out, server_version_string, strlen(server_version_string))
+		if (atomicio(write, sock_out, server_version_string,
+		    strlen(server_version_string))
 		    != strlen(server_version_string)) {
 			log("Could not write ident string to %s", get_remote_ipaddr());
 			fatal_cleanup();
 		}
 
-		/* Read other side's version identification. */
+		/* Read other sides version identification. */
 		memset(buf, 0, sizeof(buf));
 		for (i = 0; i < sizeof(buf) - 1; i++) {
 			if (atomicio(read, sock_in, &buf[i], 1) != 1) {
@@ -408,6 +410,12 @@ sshd_exchange_identification(int sock_in, int sock_out)
 	    remote_major, remote_minor, remote_version);
 
 	compat_datafellows(remote_version);
+
+	if (datafellows & SSH_BUG_PROBE) {
+		log("probed from %s with %s.  Don't panic.",
+		    get_remote_ipaddr(), client_version_string);
+		fatal_cleanup();
+	}
 
 	if (datafellows & SSH_BUG_SCANNER) {
 		log("scanned from %s with %s.  Don't panic.",
@@ -462,7 +470,6 @@ sshd_exchange_identification(int sock_in, int sock_out)
 	}
 }
 
-
 /* Destroy the host and server keys.  They will no longer be needed. */
 void
 destroy_sensitive_data(void)
@@ -512,26 +519,28 @@ demote_sensitive_data(void)
 static void
 privsep_preauth_child(void)
 {
-	u_int32_t rand[256];
-	int i;
+	u_int32_t rnd[256];
+	gid_t gidset[1];
 	struct passwd *pw;
+	int i;
 
 	/* Enable challenge-response authentication for privilege separation */
 	privsep_challenge_enable();
 
 	for (i = 0; i < 256; i++)
-		rand[i] = arc4random();
-	RAND_seed(rand, sizeof(rand));
+		rnd[i] = arc4random();
+	RAND_seed(rnd, sizeof(rnd));
 
 	/* Demote the private keys to public keys. */
 	demote_sensitive_data();
 
 	if ((pw = getpwnam(SSH_PRIVSEP_USER)) == NULL)
-		fatal("%s: no user", SSH_PRIVSEP_USER);
+		fatal("Privilege separation user %s does not exist",
+		    SSH_PRIVSEP_USER);
 	memset(pw->pw_passwd, 0, strlen(pw->pw_passwd));
 	endpwent();
 
-	/* Change our root directory*/
+	/* Change our root directory */
 	if (chroot(_PATH_PRIVSEP_CHROOT_DIR) == -1)
 		fatal("chroot(\"%s\"): %s", _PATH_PRIVSEP_CHROOT_DIR,
 		    strerror(errno));
@@ -541,10 +550,20 @@ privsep_preauth_child(void)
 	/* Drop our privileges */
 	debug3("privsep user:group %u:%u", (u_int)pw->pw_uid,
 	    (u_int)pw->pw_gid);
+#if 0
+	/* XXX not ready, to heavy after chroot */
 	do_setusercontext(pw);
+#else
+	gidset[0] = pw->pw_gid;
+	if (setgid(pw->pw_gid) < 0)
+		fatal("setgid failed for %u", pw->pw_gid );
+	if (setgroups(1, gidset) < 0)
+		fatal("setgroups: %.100s", strerror(errno));
+	permanently_set_uid(pw);
+#endif
 }
 
-static Authctxt*
+static Authctxt *
 privsep_preauth(void)
 {
 	Authctxt *authctxt = NULL;
@@ -552,32 +571,38 @@ privsep_preauth(void)
 	pid_t pid;
 
 	/* Set up unprivileged child process to deal with network data */
-	monitor = monitor_init();
+	pmonitor = monitor_init();
 	/* Store a pointer to the kex for later rekeying */
-	monitor->m_pkex = &xxx_kex;
+	pmonitor->m_pkex = &xxx_kex;
 
 	pid = fork();
 	if (pid == -1) {
 		fatal("fork of unprivileged child failed");
 	} else if (pid != 0) {
-		debug2("Network child is on pid %d", pid);
+		fatal_remove_cleanup((void (*) (void *)) packet_close, NULL);
 
-		close(monitor->m_recvfd);
-		authctxt = monitor_child_preauth(monitor);
-		close(monitor->m_sendfd);
+		debug2("Network child is on pid %ld", (long)pid);
+
+		close(pmonitor->m_recvfd);
+		authctxt = monitor_child_preauth(pmonitor);
+		close(pmonitor->m_sendfd);
 
 		/* Sync memory */
-		monitor_sync(monitor);
+		monitor_sync(pmonitor);
 
 		/* Wait for the child's exit status */
 		while (waitpid(pid, &status, 0) < 0)
 			if (errno != EINTR)
 				break;
+
+		/* Reinstall, since the child has finished */
+		fatal_add_cleanup((void (*) (void *)) packet_close, NULL);
+
 		return (authctxt);
 	} else {
 		/* child */
 
-		close(monitor->m_sendfd);
+		close(pmonitor->m_sendfd);
 
 		/* Demote the child */
 		if (getuid() == 0 || geteuid() == 0)
@@ -597,7 +622,7 @@ privsep_postauth(Authctxt *authctxt)
 
 	if (authctxt->pw->pw_uid == 0 || options.use_login) {
 		/* File descriptor passing is broken or root login */
-		monitor_apply_keystate(monitor);
+		monitor_apply_keystate(pmonitor);
 		use_privsep = 0;
 		return;
 	}
@@ -610,21 +635,23 @@ privsep_postauth(Authctxt *authctxt)
 	}
 
 	/* New socket pair */
-	monitor_reinit(monitor);
+	monitor_reinit(pmonitor);
 
-	monitor->m_pid = fork();
-	if (monitor->m_pid == -1)
+	pmonitor->m_pid = fork();
+	if (pmonitor->m_pid == -1)
 		fatal("fork of unprivileged child failed");
-	else if (monitor->m_pid != 0) {
-		debug2("User child is on pid %d", monitor->m_pid);
-		close(monitor->m_recvfd);
-		monitor_child_postauth(monitor);
+	else if (pmonitor->m_pid != 0) {
+		fatal_remove_cleanup((void (*) (void *)) packet_close, NULL);
+
+		debug2("User child is on pid %ld", (long)pmonitor->m_pid);
+		close(pmonitor->m_recvfd);
+		monitor_child_postauth(pmonitor);
 
 		/* NEVERREACHED */
 		exit(0);
 	}
 
-	close(monitor->m_sendfd);
+	close(pmonitor->m_sendfd);
 
 	/* Demote the private keys to public keys. */
 	demote_sensitive_data();
@@ -633,7 +660,7 @@ privsep_postauth(Authctxt *authctxt)
 	do_setusercontext(authctxt->pw);
 
 	/* It is safe now to apply the key state */
-	monitor_apply_keystate(monitor);
+	monitor_apply_keystate(pmonitor);
 }
 
 static char *
@@ -669,6 +696,7 @@ Key *
 get_hostkey_by_type(int type)
 {
 	int i;
+
 	for (i = 0; i < options.num_host_key_files; i++) {
 		Key *key = sensitive_data.host_keys[i];
 		if (key != NULL && key->type == type)
@@ -689,6 +717,7 @@ int
 get_hostkey_index(Key *key)
 {
 	int i;
+
 	for (i = 0; i < options.num_host_key_files; i++) {
 		if (key == sensitive_data.host_keys[i])
 			return (i);
@@ -766,7 +795,6 @@ main(int ac, char **av)
 	const char *remote_ip;
 	int remote_port;
 	FILE *f;
-	struct linger linger;
 	struct addrinfo *ai;
 	char ntop[NI_MAXHOST], strport[NI_MAXSERV];
 	int listen_sock, maxfd;
@@ -864,6 +892,10 @@ main(int ac, char **av)
 			break;
 		case 'u':
 			utmp_len = atoi(optarg);
+			if (utmp_len > MAXHOSTNAMELEN) {
+				fprintf(stderr, "Invalid utmp length.\n");
+				exit(1);
+			}
 			break;
 		case 'o':
 			if (process_server_config_line(&options, optarg,
@@ -905,7 +937,8 @@ main(int ac, char **av)
 	debug("sshd version %.100s", SSH_VERSION);
 
 	/* load private host keys */
-	sensitive_data.host_keys = xmalloc(options.num_host_key_files*sizeof(Key*));
+	sensitive_data.host_keys = xmalloc(options.num_host_key_files *
+	    sizeof(Key *));
 	for (i = 0; i < options.num_host_key_files; i++)
 		sensitive_data.host_keys[i] = NULL;
 	sensitive_data.server_key = NULL;
@@ -961,14 +994,32 @@ main(int ac, char **av)
 		 * hate software patents. I dont know if this can go? Niels
 		 */
 		if (options.server_key_bits >
-		    BN_num_bits(sensitive_data.ssh1_host_key->rsa->n) - SSH_KEY_BITS_RESERVED &&
-		    options.server_key_bits <
-		    BN_num_bits(sensitive_data.ssh1_host_key->rsa->n) + SSH_KEY_BITS_RESERVED) {
+		    BN_num_bits(sensitive_data.ssh1_host_key->rsa->n) -
+		    SSH_KEY_BITS_RESERVED && options.server_key_bits <
+		    BN_num_bits(sensitive_data.ssh1_host_key->rsa->n) +
+		    SSH_KEY_BITS_RESERVED) {
 			options.server_key_bits =
-			    BN_num_bits(sensitive_data.ssh1_host_key->rsa->n) + SSH_KEY_BITS_RESERVED;
+			    BN_num_bits(sensitive_data.ssh1_host_key->rsa->n) +
+			    SSH_KEY_BITS_RESERVED;
 			debug("Forcing server key to %d bits to make it differ from host key.",
 			    options.server_key_bits);
 		}
+	}
+
+	if (use_privsep) {
+		struct passwd *pw;
+		struct stat st;
+
+		if ((pw = getpwnam(SSH_PRIVSEP_USER)) == NULL)
+			fatal("Privilege separation user %s does not exist",
+			    SSH_PRIVSEP_USER);
+		if ((stat(_PATH_PRIVSEP_CHROOT_DIR, &st) == -1) ||
+		    (S_ISDIR(st.st_mode) == 0))
+			fatal("Missing privilege separation directory: %s",
+			    _PATH_PRIVSEP_CHROOT_DIR);
+		if (st.st_uid != 0 || (st.st_mode & (S_IWGRP|S_IWOTH)) != 0)
+			fatal("Bad owner or mode for %s",
+			    _PATH_PRIVSEP_CHROOT_DIR);
 	}
 
 	/* Configuration looks good, so exit if in test mode. */
@@ -1056,17 +1107,12 @@ main(int ac, char **av)
 				continue;
 			}
 			/*
-			 * Set socket options.  We try to make the port
-			 * reusable and have it close as fast as possible
-			 * without waiting in unnecessary wait states on
-			 * close.
+			 * Set socket options.
+			 * Allow local port reuse in TIME_WAIT.
 			 */
-			setsockopt(listen_sock, SOL_SOCKET, SO_REUSEADDR,
-			    &on, sizeof(on));
-			linger.l_onoff = 1;
-			linger.l_linger = 5;
-			setsockopt(listen_sock, SOL_SOCKET, SO_LINGER,
-			    &linger, sizeof(linger));
+			if (setsockopt(listen_sock, SOL_SOCKET, SO_REUSEADDR,
+			    &on, sizeof(on)) == -1)
+				error("setsockopt SO_REUSEADDR: %s", strerror(errno));
 
 			debug("Bind to port %s on %s.", strport, ntop);
 
@@ -1117,7 +1163,7 @@ main(int ac, char **av)
 			 */
 			f = fopen(options.pid_file, "w");
 			if (f) {
-				fprintf(f, "%u\n", (u_int) getpid());
+				fprintf(f, "%ld\n", (long) getpid());
 				fclose(f);
 			}
 		}
@@ -1264,7 +1310,7 @@ main(int ac, char **av)
 				if (pid < 0)
 					error("fork: %.100s", strerror(errno));
 				else
-					debug("Forked child %d.", pid);
+					debug("Forked child %ld.", (long)pid);
 
 				close(startup_p[1]);
 
@@ -1291,6 +1337,14 @@ main(int ac, char **av)
 	/* This is the child processing a new connection. */
 
 	/*
+	 * Create a new session and process group since the 4.4BSD
+	 * setlogin() affects the entire process group.  We don't
+	 * want the child to be able to affect the parent.
+	 */
+	if (!debug_flag && !inetd_flag && setsid() < 0)
+		error("setsid: %.100s", strerror(errno));
+
+	/*
 	 * Disable the key regeneration alarm.  We will not regenerate the
 	 * key since we are no longer in a position to give it to anyone. We
 	 * will not restart on SIGHUP since it no longer makes sense.
@@ -1301,16 +1355,6 @@ main(int ac, char **av)
 	signal(SIGTERM, SIG_DFL);
 	signal(SIGQUIT, SIG_DFL);
 	signal(SIGCHLD, SIG_DFL);
-
-	/*
-	 * Set socket options for the connection.  We want the socket to
-	 * close as fast as possible without waiting for anything.  If the
-	 * connection is not a socket, these will do nothing.
-	 */
-	/* setsockopt(sock_in, SOL_SOCKET, SO_REUSEADDR, (void *)&on, sizeof(on)); */
-	linger.l_onoff = 1;
-	linger.l_linger = 5;
-	setsockopt(sock_in, SOL_SOCKET, SO_LINGER, &linger, sizeof(linger));
 
 	/* Set keepalives if requested. */
 	if (options.keepalives &&
@@ -1362,7 +1406,7 @@ main(int ac, char **av)
 	sshd_exchange_identification(sock_in, sock_out);
 	/*
 	 * Check that the connection comes from a privileged port.
-	 * Rhosts-Authentication only makes sense from priviledged
+	 * Rhosts-Authentication only makes sense from privileged
 	 * programs.  Of course, if the intruder has root access on his local
 	 * machine, he can connect from any port.  So do not use these
 	 * authentication methods from machines that you do not trust.
@@ -1409,7 +1453,7 @@ main(int ac, char **av)
 	 * the current keystate and exits
 	 */
 	if (use_privsep) {
-		mm_send_keystate(monitor);
+		mm_send_keystate(pmonitor);
 		exit(0);
 	}
 
@@ -1494,7 +1538,7 @@ do_ssh1_kex(void)
 	u_char session_key[SSH_SESSION_KEY_LENGTH];
 	u_char cookie[8];
 	u_int cipher_type, auth_mask, protocol_flags;
-	u_int32_t rand = 0;
+	u_int32_t rnd = 0;
 
 	/*
 	 * Generate check bytes that the client must send back in the user
@@ -1507,9 +1551,9 @@ do_ssh1_kex(void)
 	 */
 	for (i = 0; i < 8; i++) {
 		if (i % 4 == 0)
-			rand = arc4random();
-		cookie[i] = rand & 0xff;
-		rand >>= 8;
+			rnd = arc4random();
+		cookie[i] = rnd & 0xff;
+		rnd >>= 8;
 	}
 
 	/*
@@ -1667,7 +1711,7 @@ do_ssh1_kex(void)
 
 	debug("Received session key; encryption turned on.");
 
-	/* Send an acknowledgement packet.  Note that this packet is sent encrypted. */
+	/* Send an acknowledgment packet.  Note that this packet is sent encrypted. */
 	packet_start(SSH_SMSG_SUCCESS);
 	packet_send();
 	packet_write_wait();
@@ -1693,6 +1737,10 @@ do_ssh2_kex(void)
 	if (options.macs != NULL) {
 		myproposal[PROPOSAL_MAC_ALGS_CTOS] =
 		myproposal[PROPOSAL_MAC_ALGS_STOC] = options.macs;
+	}
+	if (!options.compression) {
+		myproposal[PROPOSAL_COMP_ALGS_CTOS] =
+		myproposal[PROPOSAL_COMP_ALGS_STOC] = "none";
 	}
 	myproposal[PROPOSAL_SERVER_HOST_KEY_ALGS] = list_hostkey_types();
 

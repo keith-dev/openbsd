@@ -1,4 +1,4 @@
-/*	$OpenBSD: message.c,v 1.49 2002/03/26 13:19:28 ho Exp $	*/
+/*	$OpenBSD: message.c,v 1.57 2002/09/11 09:50:44 ho Exp $	*/
 /*	$EOM: message.c,v 1.156 2000/10/10 12:36:39 provos Exp $	*/
 
 /*
@@ -154,7 +154,7 @@ message_alloc (struct transport *t, u_int8_t *buf, size_t sz)
   msg->iovlen = 1;
   if (buf)
     memcpy (msg->iov[0].iov_base, buf, sz);
-  msg->nextp = msg->iov[0].iov_base + ISAKMP_HDR_NEXT_PAYLOAD_OFF;
+  msg->nextp = (u_int8_t *)msg->iov[0].iov_base + ISAKMP_HDR_NEXT_PAYLOAD_OFF;
   msg->transport = t;
   transport_reference (t);
   for (i = ISAKMP_PAYLOAD_SA; i < ISAKMP_PAYLOAD_RESERVED_MIN; i++)
@@ -248,8 +248,8 @@ message_parse_payloads (struct message *msg, struct payload *p, u_int8_t next,
   do
     {
       LOG_DBG ((LOG_MESSAGE, 50,
-		"message_parse_payloads: offset 0x%x payload %s",
-		buf - (u_int8_t *)msg->iov[0].iov_base,
+		"message_parse_payloads: offset %ld payload %s",
+		(long)(buf - (u_int8_t *)msg->iov[0].iov_base),
 		constant_name (isakmp_payload_cst, next)));
 
       /* Does this payload's header fit?  */
@@ -379,8 +379,8 @@ message_validate_attribute (struct message *msg, struct payload *p)
   /* If we don't have an exchange yet, create one.  */
   if (!msg->exchange)
     {
-      if (zero_test (msg->iov[0].iov_base + ISAKMP_HDR_MESSAGE_ID_OFF,
-		     ISAKMP_HDR_MESSAGE_ID_LEN))
+      if (zero_test ((u_int8_t *)msg->iov[0].iov_base
+		     + ISAKMP_HDR_MESSAGE_ID_OFF, ISAKMP_HDR_MESSAGE_ID_LEN))
 	msg->exchange = exchange_setup_p1 (msg, IPSEC_DOI_IPSEC);
       else
 	msg->exchange = exchange_setup_p2 (msg, IPSEC_DOI_IPSEC);
@@ -456,8 +456,8 @@ message_validate_delete (struct message *msg, struct payload *p)
   /* If we don't have an exchange yet, create one.  */
   if (!msg->exchange)
     {
-      if (zero_test (msg->iov[0].iov_base + ISAKMP_HDR_MESSAGE_ID_OFF,
-		     ISAKMP_HDR_MESSAGE_ID_LEN))
+      if (zero_test ((u_int8_t *)msg->iov[0].iov_base
+		     + ISAKMP_HDR_MESSAGE_ID_OFF, ISAKMP_HDR_MESSAGE_ID_LEN))
 	msg->exchange = exchange_setup_p1 (msg, doi->id);
       else
 	msg->exchange = exchange_setup_p2 (msg, doi->id);
@@ -497,6 +497,14 @@ message_validate_id (struct message *msg, struct payload *p)
   struct exchange *exchange = msg->exchange;
   size_t len = GET_ISAKMP_GEN_LENGTH (p->p);
 
+  if (!exchange)
+    {
+      /* We should have an exchange at this point.  */
+      log_print ("message_validate_id: payload out of sequence");
+      message_drop (msg, ISAKMP_NOTIFY_PAYLOAD_MALFORMED, 0, 1, 1);
+      return -1;
+    }
+
   if (exchange->doi
       && exchange->doi->validate_id_information (GET_ISAKMP_ID_TYPE (p->p),
 						 p->p + ISAKMP_ID_DOI_DATA_OFF,
@@ -517,6 +525,14 @@ message_validate_key_exch (struct message *msg, struct payload *p)
   struct exchange *exchange = msg->exchange;
   size_t len = GET_ISAKMP_GEN_LENGTH (p->p);
 
+  if (!exchange)
+    {
+      /* We should have an exchange at this point.  */
+      log_print ("message_validate_key_exch: payload out of sequence");
+      message_drop (msg, ISAKMP_NOTIFY_PAYLOAD_MALFORMED, 0, 1, 1);
+      return -1;
+    }
+
   if (exchange->doi
       && exchange->doi->validate_key_information (p->p + ISAKMP_KE_DATA_OFF,
 						  len - ISAKMP_KE_DATA_OFF))
@@ -531,6 +547,14 @@ message_validate_key_exch (struct message *msg, struct payload *p)
 static int
 message_validate_nonce (struct message *msg, struct payload *p)
 {
+  if (!msg->exchange)
+    {
+      /* We should have an exchange at this point.  */
+      log_print ("message_validate_nonce: payload out of sequence");
+      message_drop (msg, ISAKMP_NOTIFY_PAYLOAD_MALFORMED, 0, 1, 1);
+      return -1;
+    }
+
   /* Nonces require no specific validation.  */
   return 0;
 }
@@ -557,8 +581,8 @@ message_validate_notify (struct message *msg, struct payload *p)
   /* If we don't have an exchange yet, create one.  */
   if (!msg->exchange)
     {
-      if (zero_test (msg->iov[0].iov_base + ISAKMP_HDR_MESSAGE_ID_OFF,
-		     ISAKMP_HDR_MESSAGE_ID_LEN))
+      if (zero_test ((u_int8_t *)msg->iov[0].iov_base
+		     + ISAKMP_HDR_MESSAGE_ID_OFF, ISAKMP_HDR_MESSAGE_ID_LEN))
 	msg->exchange = exchange_setup_p1 (msg, doi->id);
       else
 	msg->exchange = exchange_setup_p2 (msg, doi->id);
@@ -602,6 +626,14 @@ message_validate_proposal (struct message *msg, struct payload *p)
 {
   u_int8_t proto = GET_ISAKMP_PROP_PROTO (p->p);
   u_int8_t *sa = p->context->p;
+
+  if (!msg->exchange)
+    {
+      /* We should have an exchange at this point.  */
+      log_print ("message_validate_proposal: payload out of sequence");
+      message_drop (msg, ISAKMP_NOTIFY_PAYLOAD_MALFORMED, 0, 1, 1);
+      return -1;
+    }
 
   if (proto != ISAKMP_PROTO_ISAKMP
       && msg->exchange->doi->validate_proto (proto))
@@ -732,6 +764,14 @@ message_validate_sa (struct message *msg, struct payload *p)
 static int
 message_validate_sig (struct message *msg, struct payload *p)
 {
+  if (!msg->exchange)
+    {
+      /* We should have an exchange at this point.  */
+      log_print ("message_validate_sig: payload out of sequence");
+      message_drop (msg, ISAKMP_NOTIFY_PAYLOAD_MALFORMED, 0, 1, 1);
+      return -1;
+    }
+
   /* XXX Not implemented yet.  */
   return 0;
 }
@@ -742,6 +782,14 @@ message_validate_transform (struct message *msg, struct payload *p)
 {
   u_int8_t proto = GET_ISAKMP_PROP_PROTO (p->context->p);
   u_int8_t *prop = p->context->p;
+
+  if (!msg->exchange)
+    {
+      /* We should have an exchange at this point.  */
+      log_print ("message_validate_transform: payload out of sequence");
+      message_drop (msg, ISAKMP_NOTIFY_PAYLOAD_MALFORMED, 0, 1, 1);
+      return -1;
+    }
 
   if (msg->exchange->doi
       ->validate_transform_id (proto, GET_ISAKMP_TRANSFORM_ID (p->p)))
@@ -787,6 +835,14 @@ message_validate_transform (struct message *msg, struct payload *p)
 static int
 message_validate_vendor (struct message *msg, struct payload *p)
 {
+  if (!msg->exchange)
+    {
+      /* We should have an exchange at this point.  */
+      log_print ("message_validate_vendor: payload out of sequence");
+      message_drop (msg, ISAKMP_NOTIFY_PAYLOAD_MALFORMED, 0, 1, 1);
+      return -1;
+    }
+
   /* Vendor IDs are only allowed in phase 1.  */
   if (msg->exchange->phase != 1)
     {
@@ -837,9 +893,10 @@ message_sort_payloads (struct message *msg, u_int8_t next)
   for (i = ISAKMP_PAYLOAD_SA; i < ISAKMP_PAYLOAD_RESERVED_MIN; i++)
     if (i != ISAKMP_PAYLOAD_PROPOSAL && i != ISAKMP_PAYLOAD_TRANSFORM)
       SET (i, &payload_set);
-  sz = message_parse_payloads (msg, 0, next,
-			       msg->iov[0].iov_base + ISAKMP_HDR_SZ,
-			       &payload_set, message_index_payload);
+  sz =
+    message_parse_payloads (msg, 0, next,
+			    (u_int8_t *)msg->iov[0].iov_base + ISAKMP_HDR_SZ,
+			    &payload_set, message_index_payload);
   if (sz == -1)
     return -1;
   msg->iov[0].iov_len = ISAKMP_HDR_SZ + sz;
@@ -1229,13 +1286,13 @@ message_send (struct message *msg)
 #endif
   msg->flags |= MSG_IN_TRANSIT;
   exchange->in_transit = msg;
-  
+
   /*
    * If we get a retransmission of a message before our response
    * has left the queue, don't queue it again, as it will result
    * in a circular list.
    */
-  q = msg->flags & MSG_PRIORITIZED ? &msg->transport->prio_sendq : 
+  q = msg->flags & MSG_PRIORITIZED ? &msg->transport->prio_sendq :
     &msg->transport->sendq;
 
   for (m = TAILQ_FIRST (q); m; m = TAILQ_NEXT (m, link))
@@ -1289,16 +1346,16 @@ message_add_payload (struct message *msg, u_int8_t payload, u_int8_t *buf,
   payload_node = malloc (sizeof *payload_node);
   if (!payload_node)
     {
-      log_error ("message_add_payload: malloc (%d) failed",
-		 sizeof *payload_node);
+      log_error ("message_add_payload: malloc (%lu) failed",
+		 (unsigned long)sizeof *payload_node);
       return -1;
     }
   new_iov
     = (struct iovec *)realloc (msg->iov, (msg->iovlen + 1) * sizeof *msg->iov);
   if (!new_iov)
     {
-      log_error ("message_add_payload: realloc (%p, %d) failed", msg->iov,
-		 (msg->iovlen + 1) * sizeof *msg->iov);
+      log_error ("message_add_payload: realloc (%p, %lu) failed", msg->iov,
+		 (msg->iovlen + 1) * (unsigned long)sizeof *msg->iov);
       free (payload_node);
       return -1;
     }
@@ -1428,7 +1485,7 @@ message_send_info (struct message *msg)
   buf = calloc (1, sz);
   if (!buf)
     {
-      log_error ("message_send_info: calloc (1, %d) failed", sz);
+      log_error ("message_send_info: calloc (1, %lu) failed", (unsigned long)sz);
       message_free (msg);
       return -1;
     }
@@ -1537,7 +1594,7 @@ message_dump_raw (char *header, struct message *msg, int class)
   for (i = 0; i < msg->iovlen; i++)
     for (j = 0; j < msg->iov[i].iov_len; j++)
       {
-	snprintf (p, 80 - (int)(p - buf), "%02x", 
+	snprintf (p, 80 - (int)(p - buf), "%02x",
 		  ((u_int8_t *)msg->iov[i].iov_base)[j]);
 	p += 2;
 	if (++k % 32 == 0)
@@ -1609,8 +1666,8 @@ message_encrypt (struct message *msg)
   buf = realloc (msg->iov[1].iov_base, sz);
   if (!buf)
     {
-      log_error ("message_encrypt: realloc (%p, %d) failed",
-		 msg->iov[1].iov_base, sz);
+      log_error ("message_encrypt: realloc (%p, %lu) failed",
+		 msg->iov[1].iov_base, (unsigned long)sz);
       return -1;
     }
   msg->iov[1].iov_base = buf;
@@ -1655,7 +1712,7 @@ message_check_duplicate (struct message *msg)
   if (!exchange)
     return 0;
 
-  LOG_DBG ((LOG_MESSAGE, 90, "message_check_duplicate: last_received 0x%x",
+  LOG_DBG ((LOG_MESSAGE, 90, "message_check_duplicate: last_received %p",
 	    exchange->last_received));
   if (exchange->last_received)
     {
@@ -1922,7 +1979,8 @@ message_add_sa_payload (struct message *msg)
       sa_buf = malloc (sa_len);
       if (!sa_buf)
 	{
-	  log_error ("message_add_sa_payload: malloc (%d) failed", sa_len);
+	  log_error ("message_add_sa_payload: malloc (%lu) failed",
+		(unsigned long)sa_len);
 	  goto cleanup;
 	}
 
@@ -1939,32 +1997,32 @@ message_add_sa_payload (struct message *msg)
       transforms = calloc (nprotos, sizeof *transforms);
       if (!transforms)
 	{
-	  log_error ("message_add_sa_payload: calloc (%d, %d) failed", nprotos,
-		     sizeof *transforms);
+	  log_error ("message_add_sa_payload: calloc (%d, %lu) failed", nprotos,
+		     (unsigned long)sizeof *transforms);
 	  goto cleanup;
 	}
 
       transform_lens = calloc (nprotos, sizeof *transform_lens);
       if (!transform_lens)
 	{
-	  log_error ("message_add_sa_payload: calloc (%d, %d) failed", nprotos,
-		     sizeof *transform_lens);
+	  log_error ("message_add_sa_payload: calloc (%d, %lu) failed", nprotos,
+		     (unsigned long)sizeof *transform_lens);
 	  goto cleanup;
 	}
 
       proposals = calloc (nprotos, sizeof *proposals);
       if (!proposals)
 	{
-	  log_error ("message_add_sa_payload: calloc (%d, %d) failed", nprotos,
-		     sizeof *proposals);
+	  log_error ("message_add_sa_payload: calloc (%d, %lu) failed", nprotos,
+		     (unsigned long)sizeof *proposals);
 	  goto cleanup;
 	}
 
       proposal_lens = calloc (nprotos, sizeof *proposal_lens);
       if (!proposal_lens)
 	{
-	  log_error ("message_add_sa_payload: calloc (%d, %d) failed", nprotos,
-		     sizeof *proposal_lens);
+	  log_error ("message_add_sa_payload: calloc (%d, %lu) failed", nprotos,
+		     (unsigned long)sizeof *proposal_lens);
 	  goto cleanup;
 	}
 
@@ -1976,8 +2034,8 @@ message_add_sa_payload (struct message *msg)
 	  transforms[i] = malloc (transform_lens[i]);
 	  if (!transforms[i])
 	    {
-	      log_error ("message_add_sa_payload: malloc (%d) failed",
-			 transform_lens[i]);
+	      log_error ("message_add_sa_payload: malloc (%lu) failed",
+			 (unsigned long)transform_lens[i]);
 	      goto cleanup;
 	    }
 
@@ -2000,8 +2058,8 @@ message_add_sa_payload (struct message *msg)
 	  proposals[i] = malloc (proposal_lens[i]);
 	  if (!proposals[i])
 	    {
-	      log_error ("message_add_sa_payload: malloc (%d) failed",
-			 proposal_lens[i]);
+	      log_error ("message_add_sa_payload: malloc (%lu) failed",
+			 (unsigned long)proposal_lens[i]);
 	      goto cleanup;
 	    }
 
@@ -2104,7 +2162,8 @@ message_copy (struct message *msg, size_t offset, size_t *szp)
   p = buf;
   for (i = skip + 1; i < msg->iovlen; i++)
     {
-      memcpy (p, msg->iov[i].iov_base + start, msg->iov[i].iov_len - start);
+      memcpy (p, (u_int8_t *)msg->iov[i].iov_base + start,
+	      msg->iov[i].iov_len - start);
       p += msg->iov[i].iov_len - start;
       start = 0;
     }

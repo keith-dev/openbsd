@@ -1,4 +1,4 @@
-/*	$OpenBSD: state.c,v 1.8 2001/01/28 22:45:18 niklas Exp $	*/
+/*	$OpenBSD: state.c,v 1.10 2002/06/10 19:58:20 espie Exp $	*/
 
 /*
  * Copyright 1997-2000 Niels Provos <provos@citi.umich.edu>
@@ -73,7 +73,7 @@ state_unlink(struct stateob *ob)
 	return (1);
 }
 
-int 
+int
 state_save_verification(struct stateob *st, u_int8_t *buf, u_int16_t len)
 {
 	if (st->verification == NULL || len > st->versize) {
@@ -82,7 +82,7 @@ state_save_verification(struct stateob *st, u_int8_t *buf, u_int16_t len)
 
 		st->verification = calloc(len, sizeof(u_int8_t));
 		if (st->verification == NULL) {
-			log_error(__FUNCTION__": calloc()");
+			log_error("%s: calloc()", __func__);
 			return (-1);
 		}
 	}
@@ -102,7 +102,7 @@ void
 state_copy_flags(struct stateob *src, struct stateob *dst)
 {
 	dst->initiator = src->initiator;
-     
+
 	if (src->user != NULL)
 		dst->user = strdup(src->user);
 
@@ -122,13 +122,13 @@ state_new(void)
 	struct stateob *p;
 
 	if((p = calloc(1, sizeof(struct stateob)))==NULL) {
-		log_error(__FUNCTION__": calloc");
+		log_error("%s: calloc", __func__);
 		return (NULL);
 	}
 
 	p->modulus = BN_new();
 	p->generator = BN_new();
-  
+
 	p->exchange_lifetime = exchange_lifetime;
 	p->spi_lifetime = spi_lifetime;
 
@@ -137,7 +137,7 @@ state_new(void)
 
 int
 state_value_reset(struct stateob *ob)
-{ 
+{
      BN_clear_free(ob->modulus);
      BN_clear_free(ob->generator);
 
@@ -194,7 +194,7 @@ state_value_reset(struct stateob *ob)
      return (1);
 }
 
-/* 
+/*
  * find the state ob with matching address
  */
 
@@ -211,18 +211,18 @@ state_find(char *address)
 	return (tmp);
 }
 
-struct stateob * 
-state_find_next(struct stateob *prev, char *address) 
-{ 
-     struct stateob *tmp; 
+struct stateob *
+state_find_next(struct stateob *prev, char *address)
+{
+     struct stateob *tmp;
 
      for (tmp = TAILQ_NEXT(prev, next); tmp; tmp = TAILQ_NEXT(tmp, next)) {
-	     if (address == NULL || !strcmp(address, tmp->address)) 
+	     if (address == NULL || !strcmp(address, tmp->address))
 		     break;
-     } 
+     }
 
-     return (tmp); 
-} 
+     return (tmp);
+}
 
 struct stateob *
 state_find_icookie(u_int8_t *cookie)
@@ -237,15 +237,15 @@ state_find_icookie(u_int8_t *cookie)
 	return (tmp);
 }
 
-struct stateob * 
-state_find_cookies(char *address, u_int8_t *icookie, u_int8_t *rcookie) 
+struct stateob *
+state_find_cookies(char *address, u_int8_t *icookie, u_int8_t *rcookie)
 {
      struct stateob *tmp;
 
-     
+
      for (tmp = state_find(address); tmp;
 	  tmp = state_find_next(tmp, address)) {
-	  if (!bcmp(tmp->icookie, icookie, COOKIE_SIZE) && 
+	  if (!bcmp(tmp->icookie, icookie, COOKIE_SIZE) &&
 	      (rcookie == NULL || !bcmp(tmp->rcookie, rcookie, COOKIE_SIZE)))
 		  break;
      }
@@ -280,9 +280,9 @@ state_expire(void)
 		    (tmp->lifetime == -1 || tmp->lifetime > tm))
 			continue;
 
-		LOG_DBG((LOG_MISC, 35, __FUNCTION__
-			 ": Expiring state to %s in phase %d",
-			 tmp->address, tmp->phase));
+		LOG_DBG((LOG_MISC, 35, 
+			 "%s: Expiring state to %s in phase %d",
+			 __func__, tmp->address, tmp->phase));
 
 		state_value_reset(tmp);
 		state_unlink(tmp);

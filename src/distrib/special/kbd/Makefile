@@ -1,23 +1,23 @@
-#	$OpenBSD: Makefile,v 1.1 2002/04/12 02:15:31 deraadt Exp $
+#	$OpenBSD: Makefile,v 1.3 2002/08/12 10:46:52 miod Exp $
 
+.if (${MACHINE} == "alpha") || (${MACHINE} == "hppa") || \
+    (${MACHINE} == "i386") || (${MACHINE} == "macppc") || \
+    (${MACHINE} == "sparc") || (${MACHINE} == "sparc64") || \
+    (${MACHINE} == "vax")
 PROG=	kbd
-MAN=
 COPTS+=	-Os
+
+SRCS=	main.c kbd_wscons.c
 CFLAGS+=-DNOKVM -I${.CURDIR}/../../../sbin/kbd
 .PATH:  ${.CURDIR}/../../../sbin/kbd
 
-SRCS=	main.c
+LDADD=	-lkvm
+DPADD=	${LIBKVM}
 
-.if (${MACHINE} == "arc")
-SRCS+=	kbd_i386.c
-.elif (${MACHINE} == "i386") || (${MACHINE} == "macppc")  || \
-      (${MACHINE} == "vax") || (${MACHINE} == "alpha") || \
-      (${MACHINE} == "sparc64")
-SRCS+=	kbd_wscons.c
-.elif (${MACHINE} == "sparc")
-SRCS+=	kbd_sparc.c
 .else
-SRCS+=	kbd_void.c
+NOPROG=	Yes
 .endif
+
+MAN=
 
 .include <bsd.prog.mk>

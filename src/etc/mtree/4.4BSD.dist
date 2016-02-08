@@ -1,4 +1,4 @@
-#	$OpenBSD: 4.4BSD.dist,v 1.122 2002/03/31 18:38:56 brad Exp $
+#	$OpenBSD: 4.4BSD.dist,v 1.135 2002/09/06 21:30:22 deraadt Exp $
 
 /set type=dir uname=root gname=wheel mode=0755
 # .
@@ -31,6 +31,11 @@ afs
 # ./etc/amd
 amd
 # ./etc/amd
+..
+
+# ./etc/authpf
+authpf		uname=root mode=0755
+# ./etc/authpf
 ..
 
 # ./etc/disklabels
@@ -84,11 +89,6 @@ mtree
 # ./etc/mtree
 ..
 
-# ./etc/photuris
-photuris
-# ./etc/photuris
-..
-
 # ./etc/ppp
 ppp
 # ./etc/ppp
@@ -123,6 +123,11 @@ lib
 ..
 
 # ./etc/ssl
+..
+
+# ./etc/systrace
+systrace
+# ./etc/systrace
 ..
 
 # ./etc/tcfs
@@ -174,11 +179,6 @@ bin
 # ./usr/games
 games
 
-# ./usr/games/hide
-hide            gname=games uname=root mode=0550
-# ./usr/games/hide
-..
-
 # ./usr/games
 ..
 
@@ -192,11 +192,6 @@ arpa		gname=bin uname=root mode=0755
 
 # ./usr/include/g++
 g++		gname=bin uname=root mode=0755
-
-# ./usr/include/g++/gen
-gen		gname=bin uname=root mode=0755
-# ./usr/include/g++/gen
-..
 
 # ./usr/include/g++/std
 std             gname=bin uname=root mode=0755
@@ -1099,6 +1094,10 @@ vax
 # ./usr/share/man/cat2
 cat2
 
+# ./usr/share/man/cat2/alpha
+alpha
+..
+
 # ./usr/share/man/cat2/i386
 i386
 
@@ -1836,6 +1835,11 @@ account
 # ./var/account
 ..
 
+# ./var/authpf
+authpf		uname=root gname=authpf mode=0770
+# ./var/authpf
+..
+
 # ./var/empty
 empty		mode=0755
 # ./var/empty
@@ -1845,13 +1849,8 @@ empty		mode=0755
 at		gname=daemon
 
 # ./var/at/jobs
-jobs		mode=0700
+jobs		gname=crontab mode=01770
 # ./var/at/jobs
-..
-
-# ./var/at/spool
-spool		mode=0700
-# ./var/at/spool
 ..
 
 # ./var/at
@@ -1876,7 +1875,7 @@ crash		mode=770
 cron		mode=0555
 
 # ./var/cron/tabs
-tabs		mode=0700
+tabs		gname=crontab mode=1730
 # ./var/cron/tabs
 ..
 
@@ -2038,7 +2037,7 @@ lock		uname=uucp gname=dialer mode=1775
 ..
 
 # ./var/spool/lpd
-lpd
+lpd		gname=daemon mode=0775
 # ./var/spool/lpd
 ..
 
@@ -2048,7 +2047,7 @@ mqueue		mode=0700
 ..
 
 # ./var/spool/output
-output
+output		gname=daemon mode=0775
 # ./var/spool/output
 ..
 
@@ -2168,6 +2167,11 @@ logs  type=dir uname=root gname=daemon mode=755
 #./www/conf
 conf  type=dir uname=root gname=daemon mode=755
 #./www/conf
+..
+
+#./www/users
+users  type=dir uname=root gname=daemon mode=755
+#./www/users
 ..
 
 #./www

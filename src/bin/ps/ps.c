@@ -1,4 +1,4 @@
-/*	$OpenBSD: ps.c,v 1.27 2002/04/06 23:55:40 millert Exp $	*/
+/*	$OpenBSD: ps.c,v 1.30 2002/06/12 03:44:35 art Exp $	*/
 /*	$NetBSD: ps.c,v 1.15 1995/05/18 20:33:25 mycroft Exp $	*/
 
 /*-
@@ -44,7 +44,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)ps.c	8.4 (Berkeley) 4/2/94";
 #else
-static char rcsid[] = "$OpenBSD: ps.c,v 1.27 2002/04/06 23:55:40 millert Exp $";
+static char rcsid[] = "$OpenBSD: ps.c,v 1.30 2002/06/12 03:44:35 art Exp $";
 #endif
 #endif /* not lint */
 
@@ -104,6 +104,7 @@ char ufmt[] = "user pid %cpu %mem vsz rss tt state start time command";
 char vfmt[] = "pid state time sl re pagein vsz rss lim tsiz %cpu %mem command";
 
 kvm_t *kd;
+int kvm_sysctl_only;
 
 int
 main(argc, argv)
@@ -276,21 +277,15 @@ main(argc, argv)
 		}
 	}
 #endif
-	/*
-	 * Discard setgid privileges if not the running kernel so that bad
-	 * guys can't print interesting stuff from kernel memory.
-	 */
-	if (nlistf != NULL || memf != NULL || swapf != NULL) {
-		setegid(getgid());
-		setgid(getgid());
-	}
 
-	kd = kvm_openfiles(nlistf, memf, swapf, O_RDONLY, errbuf);
+	if (nlistf == NULL && memf == NULL && swapf == NULL) {
+		kd = kvm_openfiles(NULL, NULL, NULL, KVM_NO_FILES, errbuf);
+		kvm_sysctl_only = 1;
+	} else {
+		kd = kvm_openfiles(nlistf, memf, swapf, O_RDONLY, errbuf);
+	}
 	if (kd == NULL && (nlistf != NULL || memf != NULL || swapf != NULL))
 		errx(1, "%s", errbuf);
-
-	setegid(getgid());
-	setgid(getgid());
 
 	if (!fmt)
 		parsefmt(dfmt);
@@ -416,24 +411,15 @@ static void
 saveuser(ki)
 	KINFO *ki;
 {
-	struct pstats pstats;
 	struct usave *usp;
 
 	usp = &ki->ki_u;
-	if (kd != NULL && kvm_read(kd, (u_long)&KI_PROC(ki)->p_addr->u_stats,
-	    &pstats, sizeof(pstats)) == sizeof(pstats)) {
-		/*
-		 * The u-area might be swapped out, and we can't get
-		 * at it because we have a crashdump and no swap.
-		 * If it's here fill in these fields, otherwise, just
-		 * leave them 0.
-		 */
-		usp->u_start = pstats.p_start;
-		usp->u_ru = pstats.p_ru;
-		usp->u_cru = pstats.p_cru;
-		usp->u_valid = 1;
-	} else
-		usp->u_valid = 0;
+	usp->u_valid = KI_EPROC(ki)->e_pstats_valid;
+	if (!usp->u_valid)
+		return;
+	usp->u_start = KI_EPROC(ki)->e_pstats.p_start;
+	usp->u_ru = KI_EPROC(ki)->e_pstats.p_ru;
+	usp->u_cru = KI_EPROC(ki)->e_pstats.p_cru;
 }
 
 static int

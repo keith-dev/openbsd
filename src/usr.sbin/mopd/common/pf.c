@@ -1,4 +1,4 @@
-/*	$OpenBSD: pf.c,v 1.4 2000/02/20 17:45:33 bitblt Exp $ */
+/*	$OpenBSD: pf.c,v 1.6 2002/09/07 08:09:49 maja Exp $ */
 
 /*
  * Copyright (c) 1993-95 Mats O Jansson.  All rights reserved.
@@ -34,7 +34,7 @@
  */
 
 #ifndef LINT
-static char rcsid[] = "$OpenBSD: pf.c,v 1.4 2000/02/20 17:45:33 bitblt Exp $";
+static char rcsid[] = "$OpenBSD: pf.c,v 1.6 2002/09/07 08:09:49 maja Exp $";
 #endif
 
 #include <stdio.h>
@@ -116,7 +116,7 @@ pfInit(interface, mode, protocol, typ)
 	
   	/* Go through all the minors and find one that isn't in use. */
 	do {
-		(void) sprintf(device, "/dev/bpf%d", n++);
+		(void) snprintf(device, sizeof device, "/dev/bpf%d", n++);
 		fd = open(device, mode);
 	} while (fd < 0 && errno == EBUSY);
 
@@ -177,7 +177,7 @@ pfAddMulti(s, interface, addr)
 	int	fd;
 	
 	strncpy(ifr.ifr_name, interface,sizeof(ifr.ifr_name) - 1);
-	ifr.ifr_name[sizeof(ifr.ifr_name)] = 0;
+	ifr.ifr_name[sizeof(ifr.ifr_name)-1] = 0;
 
 	ifr.ifr_addr.sa_family = AF_UNSPEC;
 	bcopy(addr, ifr.ifr_addr.sa_data, 6);
@@ -213,7 +213,7 @@ pfDelMulti(s, interface, addr)
 	int	fd;
 	
 	strncpy(ifr.ifr_name, interface, sizeof (ifr.ifr_name) - 1);
-	ifr.ifr_name[sizeof(ifr.ifr_name)] = 0;
+	ifr.ifr_name[sizeof(ifr.ifr_name)-1] = 0;
 	
 	ifr.ifr_addr.sa_family = AF_UNSPEC;
 	bcopy(addr, ifr.ifr_addr.sa_data, 6);

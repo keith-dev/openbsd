@@ -117,9 +117,9 @@ static int res_hnok(const char *dn);
 
 char *option_as_string (unsigned int code, unsigned char *data, int len);
 
-int main (argc, argv, envp)
+int main (argc, argv)
 	int argc;
-	char **argv, **envp;
+	char **argv;
 {
 	int i, fd;
 	struct servent *ent;
@@ -207,6 +207,7 @@ int main (argc, argv, envp)
 	/* Get the current time... */
 	GET_TIME(&cur_time);
 
+	memset(&sockaddr_broadcast, 0, sizeof(sockaddr_broadcast));
 	sockaddr_broadcast.sin_family = AF_INET;
 	sockaddr_broadcast.sin_port = remote_port;
 	sockaddr_broadcast.sin_addr.s_addr = INADDR_BROADCAST;
@@ -306,10 +307,10 @@ static void usage (appname)
 	note("%s", message);
 	note("%s", copyright);
 	note("%s", arr);
-	note("");
+	note("%s", "");
 	note("%s", contrib);
 	note("%s", url);
-	note("");
+	note("%s", "");
 
 	warn("Usage: %s [-c1u] [-p <port>] [-lf lease-file]", appname);
 	error("       [-pf pidfile] [interface]");
@@ -896,7 +897,7 @@ struct client_lease *packet_to_lease (packet)
 	lease = (struct client_lease *)malloc (sizeof (struct client_lease));
 
 	if (!lease) {
-		warn ("dhcpoffer: no memory to record lease.\n");
+		warn ("dhcpoffer: no memory to record lease.");
 		return (struct client_lease *)0;
 	}
 
@@ -909,7 +910,7 @@ struct client_lease *packet_to_lease (packet)
 				(unsigned char *)
 					malloc (packet->options [i].len + 1);
 			if (!lease->options [i].data) {
-				warn ("dhcpoffer: no memory for option %d\n",
+				warn ("dhcpoffer: no memory for option %d",
 				      i);
 				free_client_lease (lease);
 				return (struct client_lease *)0;
@@ -1110,7 +1111,7 @@ void send_discover (ipp)
 		ip->client->packet.secs = htons (65535);
 	ip->client->secs = ip->client->packet.secs;
 
-	note ("DHCPDISCOVER on %s to %s port %d interval %ld",
+	note ("DHCPDISCOVER on %s to %s port %d interval %d",
 	      ip->name,
 	      inet_ntoa (sockaddr_broadcast.sin_addr),
 	      ntohs (sockaddr_broadcast.sin_port), ip->client->interval);
@@ -1329,6 +1330,7 @@ void send_request (ipp)
 
 	/* If the lease T2 time has elapsed, or if we're not yet bound,
 	   broadcast the DHCPREQUEST rather than unicasting. */
+	memset(&destination, 0, sizeof(destination));
 	if (ip->client->state == S_REQUESTING ||
 	    ip->client->state == S_REBOOTING ||
 	    cur_time > ip->client->active->rebind)

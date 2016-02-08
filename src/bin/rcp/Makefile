@@ -1,15 +1,15 @@
-#	$OpenBSD: Makefile,v 1.6 2000/09/03 18:41:11 espie Exp $
+#	$OpenBSD: Makefile,v 1.8 2002/05/09 18:44:45 millert Exp $
 
 PROG=	rcp
 SRCS=	rcp.c util.c
 BINOWN=	root
-BINMODE=4555
+BINMODE=555
 #INSTALLFLAGS=-fschg
 
 .include <bsd.own.mk>	# For KERBEROS
 
 .if (${KERBEROS:L} == "yes")
-.PATH:	${.CURDIR}/../../usr.bin/rlogin
+.PATH:	${.CURDIR}/../../usr.bin/rsh
 SRCS+=	krcmd.c kcmd.c
 CFLAGS+=-DKERBEROS
 LDADD+=	-lkrb -ldes

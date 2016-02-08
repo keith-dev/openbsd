@@ -1,3 +1,5 @@
+/*	$OpenBSD: mod_mime.c,v 1.10 2002/08/15 16:06:11 henning Exp $ */
+
 /* ====================================================================
  * The Apache Software License, Version 1.1
  *
@@ -344,6 +346,8 @@ static void init_mime(server_rec *s, pool *p)
         types_confname = TYPES_CONFIG_FILE;
 
     types_confname = ap_server_root_relative(p, types_confname);
+
+    ap_server_strip_chroot(types_confname, 0); /* only needed at restart */
 
     if (!(f = ap_pcfg_openfile(p, types_confname))) {
         ap_log_error(APLOG_MARK, APLOG_ERR, s,

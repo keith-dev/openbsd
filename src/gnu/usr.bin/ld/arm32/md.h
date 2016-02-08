@@ -1,4 +1,4 @@
-/*	$OpenBSD: md.h,v 1.2 2000/02/01 21:01:39 espie Exp $	*/
+/*	$OpenBSD: md.h,v 1.4 2002/07/17 20:33:29 marc Exp $	*/
 /*	$NetBSD: md.h,v 1.1 1996/05/17 21:51:10 mark Exp $	*/
 
 /*
@@ -126,13 +126,13 @@ typedef struct jmpslot {
 #define get_byte(p)	( ((unsigned char *)(p))[0] )
 
 #define get_short(p)	( ( ((unsigned char *)(p))[1] << 8) | \
-			  ( ((unsigned char *)(p))[0]     )   \
+			  ( ((unsigned char *)(p))[0]	  )   \
 			)
 
 #define get_long(p)	( ( ((unsigned char *)(p))[3] << 24) | \
 			  ( ((unsigned char *)(p))[2] << 16) | \
 			  ( ((unsigned char *)(p))[1] << 8 ) | \
-			  ( ((unsigned char *)(p))[0]      )   \
+			  ( ((unsigned char *)(p))[0]	   )   \
 			)
 
 #define put_byte(p, v)	{ ((unsigned char *)(p))[0] = ((unsigned long)(v)); }
@@ -140,7 +140,7 @@ typedef struct jmpslot {
 #define put_short(p, v)	{ ((unsigned char *)(p))[1] =			\
 				((((unsigned long)(v)) >> 8) & 0xff); 	\
 			  ((unsigned char *)(p))[0] =			\
-				((((unsigned long)(v))     ) & 0xff); }
+				((((unsigned long)(v))	   ) & 0xff); }
 
 #define put_long(p, v)	{ ((unsigned char *)(p))[3] =			\
 				((((unsigned long)(v)) >> 24) & 0xff); 	\
@@ -149,17 +149,17 @@ typedef struct jmpslot {
 			  ((unsigned char *)(p))[1] =			\
 				((((unsigned long)(v)) >>  8) & 0xff); 	\
 			  ((unsigned char *)(p))[0] =			\
-				((((unsigned long)(v))      ) & 0xff); }
+				((((unsigned long)(v))	    ) & 0xff); }
 
 #ifdef NEED_SWAP
 
 /* Define IO byte swapping routines */
 
-void	md_swapin_exec_hdr __P((struct exec *));
-void	md_swapout_exec_hdr __P((struct exec *));
-void	md_swapin_reloc __P((struct relocation_info *, int));
-void	md_swapout_reloc __P((struct relocation_info *, int));
-void	md_swapout_jmpslot __P((jmpslot_t *, int));
+void	md_swapin_exec_hdr(struct exec *);
+void	md_swapout_exec_hdr(struct exec *);
+void	md_swapin_reloc(struct relocation_info *, int);
+void	md_swapout_reloc(struct relocation_info *, int);
+void	md_swapout_jmpslot(jmpslot_t *, int);
 
 #define md_swapin_symbols(s,n)			swap_symbols(s,n)
 #define md_swapout_symbols(s,n)			swap_symbols(s,n)
@@ -181,7 +181,7 @@ void	md_swapout_jmpslot __P((jmpslot_t *, int));
 
 #define md_swap_short(x) ( (((x) >> 8) & 0xff) | (((x) & 0xff) << 8) )
 
-#define md_swap_long(x) ( (((x) >> 24) & 0xff    ) | (((x) >> 8 ) & 0xff00   ) | \
+#define md_swap_long(x) ( (((x) >> 24) & 0xff	 ) | (((x) >> 8 ) & 0xff00   ) | \
 			(((x) << 8 ) & 0xff0000) | (((x) << 24) & 0xff000000))
 
 #else	/* We need not swap, but must pay attention to alignment: */

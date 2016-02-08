@@ -32,9 +32,10 @@
  */
 
 #if defined(LIBC_SCCS) && !defined(lint)
-static char rcsid[] = "$OpenBSD: verr.c,v 1.3 2002/02/19 19:39:36 millert Exp $";
+static char rcsid[] = "$OpenBSD: verr.c,v 1.5 2002/06/12 03:16:20 fgsch Exp $";
 #endif /* LIBC_SCCS and not lint */
 
+#include <sys/cdefs.h>
 #include <err.h>
 #include <errno.h>
 #include <stdio.h>
@@ -61,3 +62,6 @@ _verr(eval, fmt, ap)
 	(void)fprintf(stderr, "%s\n", strerror(sverrno));
 	exit(eval);
 }
+
+__weak_alias(verr, _verr);
+

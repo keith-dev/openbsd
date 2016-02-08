@@ -1,4 +1,4 @@
-/*	$OpenBSD: ldd.c,v 1.9 2001/10/25 22:22:22 espie Exp $	*/
+/*	$OpenBSD: ldd.c,v 1.12 2002/09/07 01:25:34 marc Exp $	*/
 /*	$NetBSD: ldd.c,v 1.12 1995/10/09 00:14:41 pk Exp $	*/
 /*
  * Copyright (c) 1993 Paul Kranenburg
@@ -14,7 +14,7 @@
  *    documentation and/or other materials provided with the distribution.
  * 3. All advertising materials mentioning features or use of this software
  *    must display the following acknowledgement:
- *      This product includes software developed by Paul Kranenburg.
+ *	This product includes software developed by Paul Kranenburg.
  * 4. The name of the author may not be used to endorse or promote products
  *    derived from this software without specific prior written permission
  *
@@ -45,10 +45,11 @@
 #include <string.h>
 #include <unistd.h>
 
-extern void scan_library(int, struct exec *, const char *, const char *, const char *);
+extern void scan_library(int, struct exec *, const char *, const char *,
+			 const char *); 
 
-void
-usage()
+static void
+usage(void)
 {
 	extern char *__progname;
 
@@ -57,9 +58,7 @@ usage()
 }
 
 int
-main(argc, argv)
-int	argc;
-char	*argv[];
+main(int argc, char *argv[])
 {
 	char		*fmt1 = NULL, *fmt2 = NULL;
 	int		rval;

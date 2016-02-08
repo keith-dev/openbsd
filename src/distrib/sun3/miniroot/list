@@ -1,43 +1,27 @@
-#	$OpenBSD: list,v 1.4 2001/10/08 19:26:14 deraadt Exp $
+#	$OpenBSD: list,v 1.12 2002/05/01 19:21:28 mickey Exp $
 
 # Sun3 extras
-LINK	instbin			sbin/disklabel
-LINK	instbin			sbin/dmesg
-LINK	instbin			sbin/dhclient
-
-SYMLINK	../../instbin		usr/bin/basename
-SYMLINK ../../instbin		usr/bin/cksum usr/bin/sum
-SYMLINK ../../instbin		usr/bin/cut
-SYMLINK ../../instbin		usr/bin/getopt
-SYMLINK ../../instbin		usr/bin/grep usr/bin/egrep usr/bin/fgrep
-SYMLINK ../../instbin		usr/bin/netstat
-SYMLINK ../../instbin		usr/bin/rsh
-SYMLINK ../../instbin		usr/bin/strings
-SYMLINK ../../instbin		usr/bin/tset usr/bin/reset
-SYMLINK	../../instbin		usr/bin/less usr/bin/more
-SYMLINK	../../instbin		usr/sbin/installboot
-SYMLINK	../../instbin		usr/sbin/sysctl
+LINK	instbin				sbin/disklabel
+LINK	instbin				sbin/dmesg
+LINK	instbin				sbin/dhclient
+LINK	instbin				usr/bin/cksum usr/bin/sum
+LINK	instbin				usr/bin/grep usr/bin/egrep usr/bin/fgrep
+LINK	instbin				usr/bin/less usr/bin/more
+LINK	instbin				usr/sbin/installboot
 
 SRCDIRS	sys/arch/sun3/stand
-
-# crunchgen source directory specials
-#CRUNCHSPECIAL installboot srcdir sys/arch/sun3/stand/installboot
 
 # Minimize use of MFS
 SYMLINK	/tmp	var/tmp
 
 # copy the MAKEDEV script and make some devices
-COPY	${DESTDIR}/dev/MAKEDEV		dev/MAKEDEV
-COPY	${DESTDIR}/dev/MAKEDEV.local	dev/MAKEDEV.local
+SCRIPT	${DESTDIR}/dev/MAKEDEV		dev/MAKEDEV
 SPECIAL	cd dev; sh MAKEDEV all
-#SPECIAL	/bin/rm dev/MAKEDEV
 
 # we need the contents of /usr/mdec
+COPY	${DESTDIR}/usr/mdec/ufsboot	boot
 COPY	${DESTDIR}/usr/mdec/bootxx	/usr/mdec/bootxx
 COPY	${DESTDIR}/usr/mdec/ufsboot	/usr/mdec/ufsboot
-
-# and a few useful bits of the termcap file (512K and still growing 8-)
-SPECIAL tic -C ${CURDIR}/../../share/termtypes/termtypes.master | sed -n -e 's,/usr/share/lib/tabset,/usr/share/tabset,g' -e 's,/usr/lib/tabset,/usr/share/tabset,g' -e '/^dumb|/,/:[ 	]*$/p' -e '/^unknown|/,/:[ 	]*$/p' -e '/^sun.*|/,/:[ 	]*$/p' -e '/^vt.*|/,/:[ 	]*$/p' -e '/^pc3|/,/:[ 	]*$/p' -e '/^pcvt.*|/,/:[ 	]*$/p' > usr/share/misc/termcap
 
 # copy the kernel
 COPY	bsd	bsd
@@ -48,9 +32,10 @@ SYMLINK	/tmp/disktab.shadow		etc/disktab
 SYMLINK	/tmp/fstab.shadow		etc/fstab
 SYMLINK	/tmp/resolv.conf.shadow		etc/resolv.conf
 SYMLINK	/tmp/hosts			etc/hosts
+TERMCAP	vt100,vt220,dumb,sun		usr/share/misc/termcap
 
 # and the installation tools
-COPY	${ARCHDIR}/dot.profile		.profile
-SPECIAL sed -e '/^#[ 	].*$/d' -e "s/^ARCH=ARCH$/ARCH=`arch -ks`" < ${CURDIR}/../common/install.md	 > install.md
-COPY	${DESTDIR}/usr/mdec/ufsboot	boot
-SPECIAL sync; ${DESTDIR}/usr/mdec/installboot ${TARGDIR}/boot ${DESTDIR}/usr/mdec/bootxx /dev/rsvnd0c
+SCRIPT	${CURDIR}/../common/install.md	install.md
+
+SPECIAL sync
+SPECIAL ${DESTDIR}/usr/mdec/installboot ${TARGDIR}/boot ${DESTDIR}/usr/mdec/bootxx /dev/rsvnd0c

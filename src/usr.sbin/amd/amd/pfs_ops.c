@@ -36,7 +36,7 @@
  * SUCH DAMAGE.
  *
  *	from: @(#)pfs_ops.c	8.1 (Berkeley) 6/6/93
- *	$Id: pfs_ops.c,v 1.2 2001/03/02 06:22:04 deraadt Exp $
+ *	$Id: pfs_ops.c,v 1.5 2002/08/05 07:24:26 pvalchev Exp $
  */
 
 #include "am.h"
@@ -52,10 +52,11 @@
 /*
  * Execute needs a mount and unmount command.
  */
-static char *pfs_match(fo)
-am_opts *fo;
+static char *
+pfs_match(am_opts *fo)
 {
 	char *prog;
+
 	if (!fo->opt_mount || !fo->opt_unmount) {
 		plog(XLOG_USER, "program: no mount/unmount specified");
 		return 0;
@@ -64,21 +65,21 @@ am_opts *fo;
 	return strdup(prog ? prog+1 : fo->opt_mount);
 }
 
-static int pfs_init(mf)
-mntfs *mf;
+static int
+pfs_init(mntfs *mf)
 {
 	/*
 	 * Save unmount command
 	 */
 	if (mf->mf_refc == 1) {
-		mf->mf_private = (voidp) strdup(mf->mf_fo->opt_unmount);
+		mf->mf_private = (void *)strdup(mf->mf_fo->opt_unmount);
 		mf->mf_prfree = (void (*) ()) free;
 	}
 	return 0;
 }
 
-static int pfs_exec(info)
-char *info;
+static int
+pfs_exec(char *info)
 {
 	char **xivec;
 	int error;
@@ -106,7 +107,7 @@ char *info;
 		char **cp = xivec;
 		plog(XLOG_DEBUG, "executing (un)mount command...");
 		while (*cp) {
-	  		plog(XLOG_DEBUG, "arg[%d] = '%s'", cp-xivec, *cp);
+			plog(XLOG_DEBUG, "arg[%d] = '%s'", cp-xivec, *cp);
 			cp++;
 		}
 	}
@@ -126,22 +127,22 @@ char *info;
 	/*
 	 * Free allocate memory
 	 */
-	free((voidp) info);
-	free((voidp) xivec);
+	free((void *)info);
+	free((void *)xivec);
 	/*
 	 * Return error
 	 */
 	return error;
 }
 
-static int pfs_fmount(mf)
-mntfs *mf;
+static int
+pfs_fmount(mntfs *mf)
 {
 	return pfs_exec(mf->mf_fo->opt_mount);
 }
 
-static int pfs_fumount(mf)
-mntfs *mf;
+static int
+pfs_fumount(mntfs *mf)
 {
 	return pfs_exec((char *) mf->mf_private);
 }

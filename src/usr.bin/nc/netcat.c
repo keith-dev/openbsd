@@ -1,4 +1,4 @@
-/* $OpenBSD: netcat.c,v 1.47 2002/03/10 20:26:09 ericj Exp $ */
+/* $OpenBSD: netcat.c,v 1.52 2002/07/04 04:42:25 vincent Exp $ */
 /*
  * Copyright (c) 2001 Eric Jackson <ericj@monkey.org>
  *
@@ -50,6 +50,11 @@
 #include <unistd.h>
 #include <fcntl.h>
 
+#ifndef SUN_LEN
+#define SUN_LEN(su) \
+	(sizeof(*(su)) - sizeof((su)->sun_path) + strlen((su)->sun_path))
+#endif
+
 #define PORT_MAX 65535
 
 /* Command Line Options */
@@ -66,7 +71,7 @@ int	vflag;					/* Verbosity */
 int	xflag;					/* Socks proxy */
 int	zflag;					/* Port Scan Flag */
 
-int timeout;
+int timeout = -1;
 int family = AF_UNSPEC;
 char *portlist[PORT_MAX];
 
@@ -160,6 +165,9 @@ main(int argc, char *argv[])
 			timeout = (int)strtoul(optarg, &endp, 10);
 			if (timeout < 0 || *endp != '\0')
 				errx(1, "timeout cannot be negative");
+			if (timeout >= (INT_MAX / 1000))
+				errx(1, "timeout too large");
+			timeout *= 1000;
 			break;
 		case 'x':
 			xflag = 1;
@@ -210,7 +218,7 @@ main(int argc, char *argv[])
 		if (nflag)
 			hints.ai_flags |= AI_NUMERICHOST;
 	}
-		
+
 
 	if (xflag) {
 		if (uflag)
@@ -306,7 +314,6 @@ main(int argc, char *argv[])
 
 		/* Cycle through portlist, connecting to each port */
 		for (i = 0; portlist[i] != NULL; i++) {
-			
 			if (s)
 				close(s);
 
@@ -323,7 +330,7 @@ main(int argc, char *argv[])
 			if (vflag || zflag) {
 				/* For UDP, make sure we are connected */
 				if (uflag) {
-					if ((udptest(s)) == -1) {
+					if (udptest(s) == -1) {
 						ret = 1;
 						continue;
 					}
@@ -337,7 +344,7 @@ main(int argc, char *argv[])
 					    ntohs(atoi(portlist[i])),
 					    uflag ? "udp" : "tcp");
 				}
-				
+
 				printf("Connection to %s %s port [%s/%s] succeeded!\n",
 				    host, portlist[i], uflag ? "udp" : "tcp",
 				    sv ? sv->s_name : "*");
@@ -364,20 +371,18 @@ unix_connect(char *path)
 	int s;
 
 	if ((s = socket(AF_UNIX, SOCK_STREAM, 0)) < 0)
-			return (-1);
+		return (-1);
 	(void)fcntl(s, F_SETFD, 1);
 
 	memset(&sun, 0, sizeof(struct sockaddr_un));
-	sun.sun_len = sizeof(path);
 	sun.sun_family = AF_UNIX;
 	strlcpy(sun.sun_path, path, sizeof(sun.sun_path));
-
-	if (connect(s, (struct sockaddr *)&sun, sizeof(sun)) < 0) {
-			close(s);
-			return (-1);
+	if (connect(s, (struct sockaddr *)&sun, SUN_LEN(&sun)) < 0) {
+		close(s);
+		return (-1);
 	}
 	return (s);
-		
+
 }
 
 /*
@@ -394,10 +399,9 @@ unix_listen(char *path)
 	if ((s = socket(AF_UNIX, SOCK_STREAM, 0)) < 0)
 		return (-1);
 
-	sun.sun_family = AF_UNIX;
 	strlcpy(sun.sun_path, path, sizeof(sun.sun_path));
-
-	if (bind(s, (struct sockaddr *)&sun, sizeof(sun)) < 0) {
+	sun.sun_family = AF_UNIX;
+	if (bind(s, (struct sockaddr *)&sun, SUN_LEN(&sun)) < 0) {
 		close(s);
 		return (-1);
 	}
@@ -449,7 +453,7 @@ remote_connect(char *host, char *port, struct addrinfo hints)
 				errx(1, "%s", gai_strerror(error));
 
 			if (bind(s, (struct sockaddr *)ares->ai_addr,
-			     ares->ai_addrlen) < 0) {
+			    ares->ai_addrlen) < 0) {
 				errx(1, "bind failed: %s", strerror(errno));
 				freeaddrinfo(ares);
 				continue;
@@ -529,12 +533,10 @@ local_listen(char *host, char *port, struct addrinfo hints)
 void
 readwrite(int nfd)
 {
-	struct pollfd *pfd;
+	struct pollfd pfd[2];
 	char buf[BUFSIZ];
 	int wfd = fileno(stdin), n, ret;
 	int lfd = fileno(stdout);
-
-	pfd = malloc(2 * sizeof(struct pollfd));
 
 	/* Setup Network FD */
 	pfd[0].fd = nfd;
@@ -544,20 +546,25 @@ readwrite(int nfd)
 	pfd[1].fd = wfd;
 	pfd[1].events = POLLIN;
 
-	for (;;) {
+	while (pfd[0].fd != -1 || pfd[1].fd != -1) {
 		if (iflag)
 			sleep(iflag);
 
-		if (poll(pfd, 2, timeout) < 0) {
+		if ((n = poll(pfd, 2, timeout)) < 0) {
 			close(nfd);
-			close(wfd);
-			free(pfd);
-			errx(1, "Polling Error");
+			err(1, "Polling Error");
 		}
 
+		if (n == 0)
+			return;
+
 		if (pfd[0].revents & POLLIN) {
-			if ((n = read(nfd, buf, sizeof(buf))) <= 0) {
+			if ((n = read(nfd, buf, sizeof(buf))) < 0)
 				return;
+			else if (n == 0) {
+				shutdown(nfd, SHUT_RD);
+				pfd[0].fd = -1;
+				pfd[0].events = 0;
 			} else {
 				if (tflag)
 					atelnet(nfd, buf, n);
@@ -567,14 +574,20 @@ readwrite(int nfd)
 		}
 
 		if (pfd[1].revents & POLLIN) {
-			if ((n = read(wfd, buf, sizeof(buf))) < 0) {
+			if ((n = read(wfd, buf, sizeof(buf))) < 0)
 				return;
-			} else
+			else if (n == 0) {
+				shutdown(nfd, SHUT_WR);
+				pfd[1].fd = -1;
+				pfd[1].events = 0;
+			} else {
 				if((ret = atomicio(write, nfd, buf, n)) != n)
 					return;
+			}
 		}
 	}
 }
+
 /* Deal with RFC854 WILL/WONT DO/DONT negotiation */
 void
 atelnet(int nfd, unsigned char *buf, unsigned int size)
@@ -592,12 +605,10 @@ atelnet(int nfd, unsigned char *buf, unsigned int size)
 
 		obuf[0] = IAC;
 		p++;
-		if ((*p == WILL) || (*p == WONT)) {
+		if ((*p == WILL) || (*p == WONT))
 			obuf[1] = DONT;
-		}
-		if ((*p == DO) || (*p == DONT)) {
+		if ((*p == DO) || (*p == DONT))
 			obuf[1] = WONT;
-		}
 		if (obuf) {
 			p++;
 			obuf[2] = *p;
@@ -645,7 +656,7 @@ build_ports(char *p)
 		/* Load ports sequentially */
 		for (cp = lo; cp <= hi; cp++) {
 			portlist[x] = calloc(1, PORT_MAX);
-			sprintf(portlist[x], "%d", cp);
+			snprintf(portlist[x], PORT_MAX, "%d", cp);
 			x++;
 		}
 
@@ -681,7 +692,7 @@ udptest(int s)
 {
 	int i, rv, ret;
 
-	for (i=0; i <= 3; i++) {
+	for (i = 0; i <= 3; i++) {
 		if ((rv = write(s, "X", 1)) == 1)
 			ret = 1;
 		else

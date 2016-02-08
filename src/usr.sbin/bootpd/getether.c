@@ -11,6 +11,8 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 
+#include <unistd.h>
+#include <string.h>
 #include <ctype.h>
 #include <syslog.h>
 
@@ -31,7 +33,8 @@
 #include <net/if.h>				/* struct ifdevea */
 
 getether(ifname, eap)
-	char *ifname, *eap;
+	char *ifname;
+	u_char *eap;
 {
 	int rc = -1;
 	int fd;
@@ -108,6 +111,7 @@ getether(ifname, eap)
 #include <net/if_dl.h>
 #include <net/if_types.h>
 
+int
 getether(ifname, eap)
 	char *ifname;				/* interface name from ifconfig structure */
 	char *eap;					/* Ether address (output) */

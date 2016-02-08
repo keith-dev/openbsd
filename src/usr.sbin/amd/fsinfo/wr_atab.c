@@ -36,7 +36,7 @@
  * SUCH DAMAGE.
  *
  *	from: @(#)wr_atab.c	8.1 (Berkeley) 6/6/93
- *	$Id: wr_atab.c,v 1.1.1.1 1995/10/18 08:47:19 deraadt Exp $
+ *	$Id: wr_atab.c,v 1.3 2002/06/11 05:29:55 itojun Exp $
  */
 
 #include "../fsinfo/fsinfo.h"
@@ -96,7 +96,7 @@ int sk;
 			 */
 			if (mp->m_dk->d_host->h_lochost) {
 				char amountpt[1024];
-				compute_automount_point(amountpt, mp->m_dk->d_host, mp->m_exported->m_volname);
+				compute_automount_point(amountpt, sizeof(amountpt), mp->m_dk->d_host, mp->m_exported->m_volname);
 				if (strcmp(mp->m_dk->d_mountpt, amountpt) != 0) {
 					/*
 					 * ap->a_volname is the name of the aliased volume
@@ -177,12 +177,17 @@ int sk;
 				char sublink[1024];
 				sublink[0] = '\0';
 				if (exp_namelen < namelen) {
-					strcat(sublink, mp->m_name + exp_namelen + 1);
+					strlcat(sublink,
+					    mp->m_name + exp_namelen + 1,
+					    sizeof(sublink));
 					if (mvolnlen < volnlen)
-						strcat(sublink, "/");
+						strlcat(sublink, "/",
+						    sizeof(sublink));
 				}
 				if (mvolnlen < volnlen)
-					strcat(sublink, ap->a_volname + mvolnlen + 1);
+					strlcat(sublink,
+					    ap->a_volname + mvolnlen + 1,
+					    sizeof(sublink));
 
 				fprintf(af, ";sublink:=%s", sublink);
 			}

@@ -1,4 +1,4 @@
-.\"     $OpenBSD: mbuf.9,v 1.4 2002/02/16 21:27:39 millert Exp $
+.\"     $OpenBSD: mbuf.9,v 1.6 2002/06/14 17:25:19 aaron Exp $
 .\"
 .\" Copyright (c) 2001 Jean-Jacques Bernard-Gundol <jjbg@openbsd.org>
 .\" All rights reserved.
@@ -167,7 +167,8 @@ union mcluster {
 .Sh DESCRIPTION
 The
 .Nm
-functions provide a way to manage the memory buffers used by the
+functions provide a way to manage the memory buffers used by the kernel's
+networking subsystem.
 Several functions and macros are used to allocate and deallocate mbufs,
 but also to get, inject, remove, copy, modify, prepend or append data
 inside these mbufs.
@@ -340,7 +341,7 @@ The same as
 .Fn m_copym
 except that it copies cluster mbufs, where
 .Fn m_copym
-just increase the reference count of the clusters.
+just increases the reference count of the clusters.
 .It Fn m_free "struct mbuf *m"
 Free the mbuf pointed to by
 .Fa m .

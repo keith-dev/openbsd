@@ -1,8 +1,8 @@
-/*	$OpenBSD: syscall.h,v 1.5 2002/03/17 00:22:04 art Exp $ */
+/*	$OpenBSD: syscall.h,v 1.13 2002/07/24 04:11:10 deraadt Exp $ */
 
 /*
  * Copyright (c) 1998 Per Fogelstrom, Opsycon AB
- * 
+ *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
@@ -34,111 +34,119 @@
 #ifndef __DL_SYSCALL_H__
 #define __DL_SYSCALL_H__
 
-#ifdef USE_CACHE
 #include <sys/stat.h>
-#endif
 
 #include <sys/syscall.h>
+
+
+static off_t	_dl_lseek(int, off_t, int);
 
 #ifndef _dl_MAX_ERRNO
 #define _dl_MAX_ERRNO 4096
 #endif
-#define _dl_check_error(__res)	\
-  ((int) __res < 0 && (int) __res >= -_dl_MAX_ERRNO)
+#define _dl_check_error(__res) \
+	((int) __res < 0 && (int) __res >= -_dl_MAX_ERRNO)
 
 /*
  *  Inlined system call functions that can be used before
- *  any dynamic address resoving has been done.
+ *  any dynamic address resolving has been done.
  */
 
 static inline int
 _dl_exit (int status)
-{ 
-  register int __status __asm__ ("3");
-  __asm__ volatile ("mr  0,%1\n\t"
-		    "mr  3,%2\n\t"
-                    "sc"
-                    : "=r" (__status)
-                    : "r" (SYS_exit), "r" (status) : "0", "3");
-  while(1);
-} 
+{
+	register int __status __asm__ ("3");
+
+	__asm__ volatile ("mr  0,%1\n\t"
+	    "mr  3,%2\n\t"
+	    "sc"
+	    : "=r" (__status)
+	    : "r" (SYS_exit), "r" (status) : "0", "3");
+
+	while (1)
+		;
+}
 
 static inline int
-_dl_open (const char* addr, unsigned int flags)
-{ 
-  register int status __asm__ ("3");
-  __asm__ volatile ("mr    0,%1\n\t"
-                    "mr    3,%2\n\t"
-                    "mr    4,%3\n\t"
-                    "sc\n\t"
-		    "cmpwi   0, 0\n\t"
-		    "beq   1f\n\t"
-		    "li    3,-1\n\t"
-		    "1:"
-                    : "=r" (status)
-                    : "r" (SYS_open), "r" (addr), "r" (flags)
-                    : "0", "3", "4" );
-  return status;
-} 
+_dl_open (const char* addr, int flags)
+{
+	register int status __asm__ ("3");
+
+	__asm__ volatile ("mr    0,%1\n\t"
+	    "mr    3,%2\n\t"
+	    "mr    4,%3\n\t"
+	    "sc\n\t"
+	    "cmpwi   0, 0\n\t"
+	    "beq   1f\n\t"
+	    "li    3,-1\n\t"
+	    "1:"
+	    : "=r" (status)
+	    : "r" (SYS_open), "r" (addr), "r" (flags)
+	    : "0", "3", "4" );
+	return status;
+}
 
 static inline int
 _dl_close (int fd)
-{ 
-  register int status __asm__ ("3");
-  __asm__ volatile ("mr    0,%1\n\t"
-                    "mr    3,%2\n\t"
-                    "sc\n\t"
-		    "cmpwi   0, 0\n\t"
-		    "beq   1f\n\t"
-		    "li    3,-1\n\t"
-		    "1:"
-                    : "=r" (status)
-                    : "r" (SYS_close), "r" (fd)
-                    : "0", "3");
-  return status;
-} 
+{
+	register int status __asm__ ("3");
 
-static inline int
-_dl_write (int fd, const char* buf, int len)
-{ 
-  register int status __asm__ ("3");
-  __asm__ volatile ("mr    0,%1\n\t"
-                    "mr    3,%2\n\t"
-                    "mr    4,%3\n\t"
-                    "mr    5,%4\n\t"
-                    "sc\n\t"
-		    "cmpwi   0, 0\n\t"
-		    "beq   1f\n\t"
-		    "li    3,-1\n\t"
-		    "1:"
-                    : "=r" (status)
-                    : "r" (SYS_write), "r" (fd), "r" (buf), "r" (len)
-                    : "0", "3", "4", "5" );
-  return status;
-} 
+	__asm__ volatile ("mr    0,%1\n\t"
+	    "mr    3,%2\n\t"
+	    "sc\n\t"
+	    "cmpwi   0, 0\n\t"
+	    "beq   1f\n\t"
+	    "li    3,-1\n\t"
+	    "1:"
+	    : "=r" (status)
+	    : "r" (SYS_close), "r" (fd)
+	    : "0", "3");
+	return status;
+}
 
-static inline int
-_dl_read (int fd, const char* buf, int len)
-{ 
-  register int status __asm__ ("3");
-  __asm__ volatile ("mr    0,%1\n\t"
-                    "mr    3,%2\n\t"
-                    "mr    4,%3\n\t"
-                    "mr    5,%4\n\t"
-                    "sc\n\t"
-		    "cmpwi   0, 0\n\t"
-		    "beq   1f\n\t"
-		    "li    3,-1\n\t"
-		    "1:"
-                    : "=r" (status)
-                    : "r" (SYS_read), "r" (fd), "r" (buf), "r" (len)
-                    : "0", "3", "4", "5");
-  return status;
-} 
+static inline ssize_t
+_dl_write (int fd, const char* buf, size_t len)
+{
+	register ssize_t status __asm__ ("3");
+
+	__asm__ volatile ("mr    0,%1\n\t"
+	    "mr    3,%2\n\t"
+	    "mr    4,%3\n\t"
+	    "mr    5,%4\n\t"
+	    "sc\n\t"
+	    "cmpwi   0, 0\n\t"
+	    "beq   1f\n\t"
+	    "li    3,-1\n\t"
+	    "1:"
+	    : "=r" (status)
+	    : "r" (SYS_write), "r" (fd), "r" (buf), "r" (len)
+	    : "0", "3", "4", "5" );
+	return status;
+}
+
+static inline ssize_t
+_dl_read (int fd, const char* buf, size_t len)
+{
+	register ssize_t status __asm__ ("3");
+
+	__asm__ volatile ("mr    0,%1\n\t"
+	    "mr    3,%2\n\t"
+	    "mr    4,%3\n\t"
+	    "mr    5,%4\n\t"
+	    "sc\n\t"
+	    "cmpwi   0, 0\n\t"
+	    "beq   1f\n\t"
+	    "li    3,-1\n\t"
+	    "1:"
+	    : "=r" (status)
+	    : "r" (SYS_read), "r" (fd), "r" (buf), "r" (len)
+	    : "0", "3", "4", "5");
+	return status;
+}
 
 #define STRINGIFY(x)  #x
 #define XSTRINGIFY(x) STRINGIFY(x)
-int _dl__syscall(quad_t val, ...);
+long _dl__syscall(quad_t val, ...);
 __asm__(".align 2\n\t"
 	".type _dl__syscall,@function\n"
 	"_dl__syscall:\n\t"
@@ -150,86 +158,152 @@ __asm__(".align 2\n\t"
 	"1:\n\t"
 	"blr");
 
-static int
-_dl_mmap (void *addr, unsigned int len, unsigned int prot,
-          unsigned int flags, int fd, off_t offset)
-{ 
-	return((int)_dl__syscall((quad_t)SYS_mmap, addr, len, prot,
-		flags, fd, 0, offset));
+static inline void *
+_dl_mmap (void *addr, size_t len, int prot, int flags, int fd, off_t offset)
+{
+	return((void *)_dl__syscall((quad_t)SYS_mmap, addr, len, prot,
+	    flags, fd, 0, offset));
 }
 
 static inline int
-_dl_munmap (const void* addr, unsigned int len)
-{ 
-  register int status __asm__ ("3");
-  __asm__ volatile ("mr    0,%1\n\t"
-                    "mr    3,%2\n\t"
-                    "mr    4,%3\n\t"
-                    "sc\n\t"
-		    "cmpwi   0, 0\n\t"
-		    "beq   1f\n\t"
-		    "li    3,-1\n\t"
-		    "1:"
-                    : "=r" (status)
-                    : "r" (SYS_munmap), "r" (addr), "r" (len)
-                    : "0", "3", "4");
-  return status;
-} 
+_dl_munmap (const void* addr, size_t len)
+{
+	register int status __asm__ ("3");
+
+	__asm__ volatile ("mr    0,%1\n\t"
+	    "mr    3,%2\n\t"
+	    "mr    4,%3\n\t"
+	    "sc\n\t"
+	    "cmpwi   0, 0\n\t"
+	    "beq   1f\n\t"
+	    "li    3,-1\n\t"
+	    "1:"
+	    : "=r" (status)
+	    : "r" (SYS_munmap), "r" (addr), "r" (len)
+	    : "0", "3", "4");
+	return status;
+}
 
 static inline int
-_dl_mprotect (const void *addr, int size, int prot)
-{ 
-  register int status __asm__ ("3");
-  __asm__ volatile ("mr    0,%1\n\t"
-                    "mr    3,%2\n\t"
-                    "mr    4,%3\n\t"
-                    "mr    5,%4\n\t"
-                    "sc\n\t"
-		    "cmpwi   0, 0\n\t"
-		    "beq   1f\n\t"
-		    "li    3,-1\n\t"
-		    "1:"
-                    : "=r" (status)
-                    : "r" (SYS_mprotect), "r" (addr), "r" (size), "r" (prot)
-                    : "0", "3", "4", "5");
-  return status;
-} 
+_dl_mprotect (const void *addr, size_t size, int prot)
+{
+	register int status __asm__ ("3");
 
-#ifdef USE_CACHE
+	__asm__ volatile ("mr    0,%1\n\t"
+	    "mr    3,%2\n\t"
+	    "mr    4,%3\n\t"
+	    "mr    5,%4\n\t"
+	    "sc\n\t"
+	    "cmpwi   0, 0\n\t"
+	    "beq   1f\n\t"
+	    "li    3,-1\n\t"
+	    "1:"
+	    : "=r" (status)
+	    : "r" (SYS_mprotect), "r" (addr), "r" (size), "r" (prot)
+	    : "0", "3", "4", "5");
+	return status;
+}
+
 static inline int
 _dl_stat (const char *addr, struct stat *sb)
-{ 
-  register int status __asm__ ("3");
-  __asm__ volatile ("mr    0,%1\n\t"
-                    "mr    3,%2\n\t"
-                    "mr    4,%3\n\t"
-                    "sc\n\t"
-		    "cmpwi   0, 0\n\t"
-		    "beq   1f\n\t"
-		    "li    3,-1\n\t"
-		    "1:"
-                    : "=r" (status)
-                    : "r" (SYS_stat), "r" (addr), "r" (sb)
-                    : "0", "3", "4");
-  return status;
-} 
+{
+	register int status __asm__ ("3");
 
-#endif
+	__asm__ volatile ("mr    0,%1\n\t"
+	    "mr    3,%2\n\t"
+	    "mr    4,%3\n\t"
+	    "sc\n\t"
+	    "cmpwi   0, 0\n\t"
+	    "beq   1f\n\t"
+	    "li    3,-1\n\t"
+	    "1:"
+	    : "=r" (status)
+	    : "r" (SYS_stat), "r" (addr), "r" (sb)
+	    : "0", "3", "4");
+	return status;
+}
+
+static inline int
+_dl_fstat (int fd, struct stat *sb)
+{
+	register int status __asm__ ("3");
+
+	__asm__ volatile ("mr    0,%1\n\t"
+	    "mr    3,%2\n\t"
+	    "mr    4,%3\n\t"
+	    "sc\n\t"
+	    "cmpwi   0, 0\n\t"
+	    "beq   1f\n\t"
+	    "li    3,-1\n\t"
+	    "1:"
+	    : "=r" (status)
+	    : "r" (SYS_fstat), "r" (fd), "r" (sb)
+	    : "0", "3", "4");
+	return status;
+}
+
+static inline int
+_dl_fcntl (int fd, int cmd, int flag)
+{
+	register int status __asm__ ("3");
+
+	__asm__ volatile ("mr    0,%1\n\t"
+	    "mr    3,%2\n\t"
+	    "mr    4,%3\n\t"
+	    "mr    5,%4\n\t"
+	    "sc\n\t"
+	    "cmpwi   0, 0\n\t"
+	    "beq   1f\n\t"
+	    "li    3,-1\n\t"
+	    "1:"
+	    : "=r" (status)
+	    : "r" (SYS_fcntl), "r" (fd), "r" (cmd), "r"(flag)
+	    : "0", "3", "4", "5");
+	return status;
+}
+
+static inline int
+_dl_getdirentries(int fd, char *buf, int nbytes, long *basep)
+{
+	register int status __asm__ ("3");
+
+	__asm__ volatile ("mr    0,%1\n\t"
+	    "mr    3,%2\n\t"
+	    "mr    4,%3\n\t"
+	    "mr    5,%4\n\t"
+	    "mr    6,%5\n\t"
+	    "sc\n\t"
+	    "cmpwi   0, 0\n\t"
+	    "beq   1f\n\t"
+	    "li    3,-1\n\t"
+	    "1:"
+	    : "=r" (status)
+	    : "r" (SYS_getdirentries), "r" (fd), "r" (buf), "r"(nbytes),
+	    "r" (basep)
+	    : "0", "3", "4", "5", "6");
+	return status;
+}
 
 static inline int
 _dl_issetugid()
-{ 
-  register int status __asm__ ("3");
-  __asm__ volatile ("mr    0,%1\n\t"
-                    "sc\n\t"
-		    "cmpwi   0, 0\n\t"
-		    "beq   1f\n\t"
-		    "li    3,-1\n\t"
-		    "1:"
-                    : "=r" (status)
-                    : "r" (SYS_issetugid)
-                    : "0", "3");
-  return status;
-} 
-#include <elf_abi.h>
+{
+	register int status __asm__ ("3");
+
+	__asm__ volatile ("mr    0,%1\n\t"
+	    "sc\n\t"
+	    "cmpwi   0, 0\n\t"
+	    "beq   1f\n\t"
+	    "li    3,-1\n\t"
+	    "1:"
+	    : "=r" (status)
+	    : "r" (SYS_issetugid)
+	    : "0", "3");
+	return status;
+}
+
+static inline off_t
+_dl_lseek(int fildes, off_t offset, int whence)
+{
+	return _dl__syscall((quad_t)SYS_lseek, fildes, 0, offset, whence);
+}
 #endif /*__DL_SYSCALL_H__*/

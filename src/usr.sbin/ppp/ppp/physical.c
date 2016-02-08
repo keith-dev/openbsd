@@ -16,7 +16,7 @@
  * IMPLIED WARRANTIES, INCLUDING, WITHOUT LIMITATION, THE IMPLIED
  * WARRANTIES OF MERCHANTIBILITY AND FITNESS FOR A PARTICULAR PURPOSE.
  *
- *  $OpenBSD: physical.c,v 1.33 2002/03/31 02:38:49 brian Exp $
+ *  $OpenBSD: physical.c,v 1.36 2002/06/15 08:02:01 brian Exp $
  *
  */
 
@@ -30,9 +30,6 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <paths.h>
-#ifdef NOSUID
-#include <signal.h>
-#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -71,7 +68,6 @@
 #include "iplist.h"
 #include "slcompress.h"
 #include "ncpaddr.h"
-#include "ip.h"
 #include "ipcp.h"
 #include "filter.h"
 #include "descriptor.h"
@@ -369,8 +365,8 @@ physical_Close(struct physical *p)
   throughput_log(&p->link.stats.total, LogPHASE, p->link.name);
 
   if (p->session_owner != (pid_t)-1) {
-    log_Printf(LogPHASE, "%s: HUPing %d\n", p->link.name,
-               (int)p->session_owner);
+    log_Printf(LogPHASE, "%s: HUPing %ld\n", p->link.name,
+               (long)p->session_owner);
     ID0kill(p->session_owner, SIGHUP);
     p->session_owner = (pid_t)-1;
   }
@@ -460,7 +456,7 @@ physical_ShowStatus(struct cmdargs const *arg)
                 *p->name.full ?  p->name.full :
                 p->type == PHYS_DIRECT ? "unknown" : "N/A");
   if (p->session_owner != (pid_t)-1)
-    prompt_Printf(arg->prompt, " (session owner: %d)", (int)p->session_owner);
+    prompt_Printf(arg->prompt, " (session owner: %ld)", (long)p->session_owner);
 
   prompt_Printf(arg->prompt, "\n Link Type:       %s\n", mode2Nam(p->type));
   prompt_Printf(arg->prompt, " Connect Count:   %d\n", p->connect_count);
@@ -483,7 +479,7 @@ physical_ShowStatus(struct cmdargs const *arg)
     prompt_Printf(arg->prompt, "\"%s\"", dev);
     dev += strlen(dev) + 1;
   }
-  
+
   prompt_Printf(arg->prompt, "\n Characteristics: ");
   if (physical_IsSync(arg->cx->physical))
     prompt_Printf(arg->prompt, "sync");
@@ -1113,4 +1109,13 @@ physical_SetAsyncParams(struct physical *p, u_int32_t mymap, u_int32_t hismap)
     return (*p->handler->setasyncparams)(p, mymap, hismap);
 
   async_SetLinkParams(&p->async, mymap, hismap);
+}
+
+int
+physical_Slot(struct physical *p)
+{
+  if (p->handler && p->handler->slot)
+    return (*p->handler->slot)(p);
+
+  return -1;
 }

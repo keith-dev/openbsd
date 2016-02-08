@@ -1,4 +1,4 @@
-/* 	$OpenBSD: modload.c,v 1.33 2002/02/16 21:27:35 millert Exp $	*/
+/* 	$OpenBSD: modload.c,v 1.35 2002/07/11 21:23:28 deraadt Exp $	*/
 /*	$NetBSD: modload.c,v 1.30 2001/11/08 15:33:15 christos Exp $	*/
 
 /*
@@ -71,16 +71,16 @@ static	void	cleanup(void);
 
 /* prelink the module */
 static int
-prelink(const char *kernel, 
-	const char *entry, 
-	const char *outfile, 
-	const void *address, 
+prelink(const char *kernel,
+	const char *entry,
+	const char *outfile,
+	const void *address,
 	const char *object)
 {
 	char cmdbuf[1024];
 	int error = 0;
 
-	linkcmd(cmdbuf, sizeof(cmdbuf), 
+	linkcmd(cmdbuf, sizeof(cmdbuf),
 		kernel, entry, outfile, address, object);
 
 	if (debug)
@@ -160,6 +160,8 @@ verify_entry(const char *entry, char *filename)
 
 	memset(names, 0, sizeof(names));
 	s = malloc(strlen(entry) + 2);
+	if (s == NULL)
+		err(1, "malloc");
 	sprintf(s, "_%s", entry);	/* safe */
 #ifdef	_AOUT_INCLUDE_
 	names[0].n_un.n_name = s;
@@ -173,8 +175,8 @@ verify_entry(const char *entry, char *filename)
 	return n;
 }
 
-/* 
- * Transfer data to kernel memory in chunks 
+/*
+ * Transfer data to kernel memory in chunks
  * of MODIOBUF size at a time.
  */
 void
@@ -210,8 +212,8 @@ loadspace(size_t len)
 	}
 }
 
-/* 
- * Transfer symbol table to kernel memory in chunks 
+/*
+ * Transfer symbol table to kernel memory in chunks
  * of MODIOBUF size at a time.
  */
 void
@@ -323,6 +325,8 @@ main(int argc, char **argv)
 			else
 				p = modout;
 			entry = malloc(strlen(p) + strlen(DFLT_ENTRYEXT) + 1);
+			if (entry == NULL)
+				err(1, "malloc");
 			sprintf(entry, "%s%s", p, DFLT_ENTRYEXT); /* safe */
 			if (verify_entry(entry, modobj))
 				errx(1, "entry point _%s not found in %s",
@@ -339,7 +343,7 @@ main(int argc, char **argv)
 		errx(1, "can't prelink `%s' creating `%s'", modobj, out);
 	if (Sflag == 0)
 		fileopen |= OUTFILE_CREAT;
-  
+
  	/*
  	 * Pre-open the 0-linked module to get the size information
  	 */

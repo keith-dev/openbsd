@@ -1,4 +1,4 @@
-/*	$OpenBSD: pread.c,v 1.2 2001/05/05 22:58:29 millert Exp $	*/
+/*	$OpenBSD: pread.c,v 1.4 2002/09/17 21:16:01 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1992, 1993
@@ -34,7 +34,7 @@
  */
 
 #if defined(SYSLIBC_SCCS) && !defined(lint)
-static char rcsid[] = "$OpenBSD: pread.c,v 1.2 2001/05/05 22:58:29 millert Exp $";
+static char rcsid[] = "$OpenBSD: pread.c,v 1.4 2002/09/17 21:16:01 deraadt Exp $";
 #endif /* SYSLIBC_SCCS and not lint */
 
 #include <sys/types.h>

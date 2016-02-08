@@ -56,16 +56,13 @@
  * [including the GNU Public Licence.]
  */
 
-#ifndef NO_SHA
+#ifndef OPENSSL_NO_SHA
 #include <stdio.h>
 #include <time.h>
 #include "cryptlib.h"
-#include <openssl/sha.h>
 #include <openssl/bn.h>
 #include <openssl/dsa.h>
 #include <openssl/rand.h>
-
-extern int	__BN_rand_range(BIGNUM *r, BIGNUM *range);
 
 int DSA_generate_key(DSA *dsa)
 	{
@@ -83,7 +80,7 @@ int DSA_generate_key(DSA *dsa)
 		priv_key=dsa->priv_key;
 
 	do
-		if (!__BN_rand_range(priv_key,dsa->q)) goto err;
+		if (!BN_rand_range(priv_key,dsa->q)) goto err;
 	while (BN_is_zero(priv_key));
 
 	if (dsa->pub_key == NULL)

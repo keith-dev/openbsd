@@ -1,4 +1,4 @@
-/*	$OpenBSD: mille.c,v 1.10 2001/09/03 21:36:12 pjanzen Exp $	*/
+/*	$OpenBSD: mille.c,v 1.12 2002/05/31 05:11:37 pjanzen Exp $	*/
 /*	$NetBSD: mille.c,v 1.4 1995/03/24 05:01:48 cgd Exp $	*/
 
 /*
@@ -44,7 +44,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)mille.c	8.1 (Berkeley) 5/31/93";
 #else
-static char rcsid[] = "$OpenBSD: mille.c,v 1.10 2001/09/03 21:36:12 pjanzen Exp $";
+static char rcsid[] = "$OpenBSD: mille.c,v 1.12 2002/05/31 05:11:37 pjanzen Exp $";
 #endif
 #endif /* not lint */
 
@@ -61,10 +61,6 @@ main(ac, av)
 	char	*av[];
 {
 	bool	restore;
-
-	/* revoke */
-	setegid(getgid());
-	setgid(getgid());
 
 #ifdef DEBUG
 	if (strcmp(av[0], "a.out") == 0) {
@@ -104,7 +100,7 @@ main(ac, av)
 # else
 	srandom(0);
 # endif
-	crmode();
+	cbreak();
 	noecho();
 	signal(SIGINT, rub);
 	for (;;) {

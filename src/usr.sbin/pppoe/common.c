@@ -1,4 +1,4 @@
-/*	$OpenBSD: common.c,v 1.6 2002/02/16 21:28:07 millert Exp $	*/
+/*	$OpenBSD: common.c,v 1.9 2002/09/08 05:10:56 jason Exp $	*/
 
 /*
  * Copyright (c) 2000 Network Security Technologies, Inc. http://www.netsec.net
@@ -53,8 +53,6 @@
 #include <unistd.h>
 #include <sysexits.h>
 #include <stdlib.h>
-#include <grp.h>
-#include <syslog.h>
 #include <md5.h>
 
 #include "pppoe.h"
@@ -66,7 +64,7 @@ void debugv(char *, struct iovec *, int);
 int
 runppp(bpffd, sysname)
 	int bpffd;
-	char *sysname;
+	u_int8_t *sysname;
 {
 	int socks[2], fdm, fds, closeit;
 	pid_t pid;
@@ -118,8 +116,9 @@ runppp(bpffd, sysname)
 
 	execlp(PPP_PROG, "ppp", "-direct", sysname, (char *)NULL);
 	perror("execlp");
-	syslog(LOG_INFO, "%s exec failed: %m", PPP_PROG);
 	_exit(1);
+	/*NOTREACHED*/
+	return (-1);
 }
 
 int
@@ -147,10 +146,8 @@ bpf_to_ppp(pppfd, len, pkt)
 }
 
 int
-ppp_to_bpf(bfd, pppfd, myea, rmea, id)
-	int bfd, pppfd;
-	struct ether_addr *myea, *rmea;
-	u_int16_t id;
+ppp_to_bpf(int bfd, int pppfd, struct ether_addr *myea,
+    struct ether_addr *rmea, u_int16_t id)
 {
 	static u_int8_t *pktbuf = NULL;
 	struct pppoe_header ph;
@@ -243,10 +240,8 @@ out:
 }
 
 int
-send_padt(bpffd, src_ea, dst_ea, id)
-	int bpffd;
-	struct ether_addr *src_ea, *dst_ea;
-	u_int16_t id;
+send_padt(int bpffd, struct ether_addr *src_ea,
+    struct ether_addr *dst_ea, u_int16_t id)
 {
 	struct iovec iov[4];
 	struct pppoe_header ph;
@@ -273,13 +268,13 @@ u_int32_t
 cookie_bake()
 {
 	MD5_CTX ctx;
-	char buf[40];
+	unsigned char buf[40];
 	u_int32_t x, y;
 
 	x = arc4random();
 	MD5Init(&ctx);
 	MD5Update(&ctx, (unsigned char *)&x, sizeof(x));
-	MD5Final(buf, &ctx);
+	MD5Final((unsigned char *)buf, &ctx);
 	bcopy(buf, &y, sizeof(y));
 	x = x ^ y;
 	bcopy(buf + 4, &y, sizeof(y));

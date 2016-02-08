@@ -52,7 +52,7 @@
  */
 
 #if defined(LIBC_SCCS) && !defined(lint)
-static char rcsid[] = "$OpenBSD: gethostnamadr.c,v 1.45 2002/02/17 19:42:23 millert Exp $";
+static char rcsid[] = "$OpenBSD: gethostnamadr.c,v 1.53 2002/08/27 08:53:13 itojun Exp $";
 #endif /* LIBC_SCCS and not lint */
 
 #include <sys/param.h>
@@ -99,7 +99,7 @@ static FILE *hostf = NULL;
 static int stayopen = 0;
 
 static void map_v4v6_address(const char *src, char *dst);
-static void map_v4v6_hostent(struct hostent *hp, char **bp, int *len);
+static void map_v4v6_hostent(struct hostent *hp, char **bp, char *);
 
 #ifdef RESOLVSORT
 static void addrsort(char **, int);
@@ -110,11 +110,7 @@ int _hokchar(const char *);
 static const char AskedForGot[] =
 			  "gethostby*.getanswer: asked for \"%s\", got \"%s\"";
 
-#if PACKETSZ > 1024
-#define	MAXPACKET	PACKETSZ
-#else
-#define	MAXPACKET	1024
-#endif
+#define	MAXPACKET	(64*1024)
 
 typedef union {
 	HEADER hdr;
@@ -168,8 +164,8 @@ getanswer(answer, anslen, qname, qtype)
 	register const u_char *cp;
 	register int n;
 	const u_char *eom;
-	char *bp, **ap, **hap;
-	int type, class, buflen, ancount, qdcount;
+	char *bp, **ap, **hap, *ep;
+	int type, class, ancount, qdcount;
 	int haveanswer, had_error;
 	int toobig = 0;
 	char tbuf[MAXDNAME];
@@ -203,13 +199,13 @@ getanswer(answer, anslen, qname, qtype)
 	ancount = ntohs(hp->ancount);
 	qdcount = ntohs(hp->qdcount);
 	bp = hostbuf;
-	buflen = sizeof hostbuf;
+	ep = hostbuf + sizeof hostbuf;
 	cp = answer->buf + HFIXEDSZ;
 	if (qdcount != 1) {
 		h_errno = NO_RECOVERY;
 		return (NULL);
 	}
-	n = dn_expand(answer->buf, eom, cp, bp, buflen);
+	n = dn_expand(answer->buf, eom, cp, bp, ep - bp);
 	if ((n < 0) || !(*name_ok)(bp)) {
 		h_errno = NO_RECOVERY;
 		return (NULL);
@@ -223,7 +219,6 @@ getanswer(answer, anslen, qname, qtype)
 		n = strlen(bp) + 1;		/* for the \0 */
 		host.h_name = bp;
 		bp += n;
-		buflen -= n;
 		/* The qname can be abbreviated, but h_name is now absolute. */
 		qname = host.h_name;
 	}
@@ -236,7 +231,7 @@ getanswer(answer, anslen, qname, qtype)
 	haveanswer = 0;
 	had_error = 0;
 	while (ancount-- > 0 && cp < eom && !had_error) {
-		n = dn_expand(answer->buf, eom, cp, bp, buflen);
+		n = dn_expand(answer->buf, eom, cp, bp, ep - bp);
 		if ((n < 0) || !(*name_ok)(bp)) {
 			had_error++;
 			continue;
@@ -271,17 +266,15 @@ getanswer(answer, anslen, qname, qtype)
 			*ap++ = bp;
 			n = strlen(bp) + 1;	/* for the \0 */
 			bp += n;
-			buflen -= n;
 			/* Get canonical name. */
 			n = strlen(tbuf) + 1;	/* for the \0 */
-			if (n > buflen) {
+			if (n > ep - bp) {
 				had_error++;
 				continue;
 			}
-			strcpy(bp, tbuf);
+			strlcpy(bp, tbuf, ep - bp);
 			host.h_name = bp;
 			bp += n;
-			buflen -= n;
 			continue;
 		}
 		if (qtype == T_PTR && type == T_CNAME) {
@@ -297,14 +290,13 @@ getanswer(answer, anslen, qname, qtype)
 			cp += n;
 			/* Get canonical name. */
 			n = strlen(tbuf) + 1;	/* for the \0 */
-			if (n > buflen) {
+			if (n > ep - bp) {
 				had_error++;
 				continue;
 			}
-			strcpy(bp, tbuf);
+			strlcpy(bp, tbuf, ep - bp);
 			tname = bp;
 			bp += n;
-			buflen -= n;
 			continue;
 		}
 		if (type != qtype) {
@@ -323,7 +315,7 @@ getanswer(answer, anslen, qname, qtype)
 				cp += n;
 				continue;	/* XXX - had_error++ ? */
 			}
-			n = dn_expand(answer->buf, eom, cp, bp, buflen);
+			n = dn_expand(answer->buf, eom, cp, bp, ep - bp);
 #ifdef USE_RESOLV_NAME_OK
 			if ((n < 0) || !res_hnok(bp)) {
 #else
@@ -343,7 +335,6 @@ getanswer(answer, anslen, qname, qtype)
 			if (n != -1) {
 				n = strlen(bp) + 1;	/* for the \0 */
 				bp += n;
-				buflen -= n;
 			}
 			break;
 #else
@@ -351,8 +342,7 @@ getanswer(answer, anslen, qname, qtype)
 			if (_res.options & RES_USE_INET6) {
 				n = strlen(bp) + 1;	/* for the \0 */
 				bp += n;
-				buflen -= n;
-				map_v4v6_hostent(&host, &bp, &buflen);
+				map_v4v6_hostent(&host, &bp, ep);
 			}
 			h_errno = NETDB_SUCCESS;
 			return (&host);
@@ -369,13 +359,20 @@ getanswer(answer, anslen, qname, qtype)
 				cp += n;
 				continue;
 			}
+			if (type == T_AAAA) {
+				struct in6_addr in6;
+				memcpy(&in6, cp, IN6ADDRSZ);
+				if (IN6_IS_ADDR_V4MAPPED(&in6)) {
+					cp += n;
+					continue;
+				}
+			}
 			if (!haveanswer) {
 				register int nn;
 
 				host.h_name = bp;
 				nn = strlen(bp) + 1;	/* for the \0 */
 				bp += nn;
-				buflen -= nn;
 			}
 
 			bp += sizeof(align) - ((u_long)bp % sizeof(align));
@@ -399,7 +396,6 @@ getanswer(answer, anslen, qname, qtype)
 			}
 			bcopy(cp, *hap++ = bp, n);
 			bp += n;
-			buflen -= n;
 			cp += n;
 			break;
 		}
@@ -420,15 +416,14 @@ getanswer(answer, anslen, qname, qtype)
 # endif /*RESOLVSORT*/
 		if (!host.h_name) {
 			n = strlen(qname) + 1;	/* for the \0 */
-			if (n > buflen)
+			if (n > ep - bp)
 				goto try_again;
-			strcpy(bp, qname);
+			strlcpy(bp, qname, ep - bp);
 			host.h_name = bp;
 			bp += n;
-			buflen -= n;
 		}
 		if (_res.options & RES_USE_INET6)
-			map_v4v6_hostent(&host, &bp, &buflen);
+			map_v4v6_hostent(&host, &bp, ep);
 		h_errno = NETDB_SUCCESS;
 		return (&host);
 	}
@@ -518,10 +513,10 @@ gethostbyname2(name, af)
 	const char *name;
 	int af;
 {
-	querybuf buf;
+	querybuf *buf;
 	register const char *cp;
-	char *bp;
-	int n, size, type, len, i;
+	char *bp, *ep;
+	int n, size, type, i;
 	extern struct hostent *_gethtbyname2(), *_yp_gethtbyname();
 	register struct hostent *hp;
 	char lookups[MAXDNSLUS];
@@ -575,7 +570,7 @@ gethostbyname2(name, af)
 				}
 				strlcpy(hostbuf, name, MAXHOSTNAMELEN);
 				bp = hostbuf + MAXHOSTNAMELEN;
-				len = sizeof hostbuf - MAXHOSTNAMELEN;
+				ep = hostbuf + sizeof(hostbuf);
 				host.h_name = hostbuf;
 				host.h_aliases = host_aliases;
 				host_aliases[0] = NULL;
@@ -583,7 +578,7 @@ gethostbyname2(name, af)
 				h_addr_ptrs[1] = NULL;
 				host.h_addr_list = h_addr_ptrs;
 				if (_res.options & RES_USE_INET6)
-					map_v4v6_hostent(&host, &bp, &len);
+					map_v4v6_hostent(&host, &bp, ep);
 				h_errno = NETDB_SUCCESS;
 				return (&host);
 			}
@@ -607,7 +602,7 @@ gethostbyname2(name, af)
 				}
 				strlcpy(hostbuf, name, MAXHOSTNAMELEN);
 				bp = hostbuf + MAXHOSTNAMELEN;
-				len = sizeof hostbuf - MAXHOSTNAMELEN;
+				ep = hostbuf + sizeof(hostbuf);
 				host.h_name = hostbuf;
 				host.h_aliases = host_aliases;
 				host_aliases[0] = NULL;
@@ -623,7 +618,7 @@ gethostbyname2(name, af)
 
 	bcopy(_res.lookups, lookups, sizeof lookups);
 	if (lookups[0] == '\0')
-		strncpy(lookups, "bf", sizeof lookups);
+		strlcpy(lookups, "bf", sizeof lookups);
 
 	hp = (struct hostent *)NULL;
 	for (i = 0; i < MAXDNSLUS && hp == NULL && lookups[i]; i++) {
@@ -636,15 +631,20 @@ gethostbyname2(name, af)
 			break;
 #endif
 		case 'b':
-			if ((n = res_search(name, C_IN, type, buf.buf,
-			    sizeof(buf))) < 0) {
+			buf = malloc(sizeof(*buf));
+			if (buf == NULL)
+				break;
+			if ((n = res_search(name, C_IN, type, buf->buf,
+			    sizeof(buf->buf))) < 0) {
+				free(buf);
 #ifdef DEBUG
 				if (_res.options & RES_DEBUG)
 					printf("res_search failed\n");
 #endif
 				break;
 			}
-			hp = getanswer(&buf, n, name, type);
+			hp = getanswer(buf, n, name, type);
+			free(buf);
 			break;
 		case 'f':
 			hp = _gethtbyname2(name, af);
@@ -662,7 +662,7 @@ gethostbyaddr(addr, len, af)
 {
 	const u_char *uaddr = (const u_char *)addr;
 	int n, size, i;
-	querybuf buf;
+	querybuf *buf;
 	register struct hostent *hp;
 	char qbuf[MAXDNAME+1], *qp;
 	extern struct hostent *_gethtbyaddr(), *_yp_gethtbyaddr();
@@ -676,6 +676,12 @@ gethostbyaddr(addr, len, af)
 		return (res);
 	}
 
+	if (af == AF_INET6 && len == IN6ADDRSZ &&
+	    (IN6_IS_ADDR_LINKLOCAL((struct in6_addr *)uaddr) ||
+	     IN6_IS_ADDR_SITELOCAL((struct in6_addr *)uaddr))) {
+		h_errno = HOST_NOT_FOUND;
+		return (NULL);
+	}
 	if (af == AF_INET6 && len == IN6ADDRSZ &&
 	    (IN6_IS_ADDR_V4MAPPED((struct in6_addr *)uaddr) ||
 	     IN6_IS_ADDR_V4COMPAT((struct in6_addr *)uaddr))) {
@@ -706,26 +712,22 @@ gethostbyaddr(addr, len, af)
 	}
 	switch (af) {
 	case AF_INET:
-		(void) sprintf(qbuf, "%u.%u.%u.%u.in-addr.arpa",
-			       (uaddr[3] & 0xff),
-			       (uaddr[2] & 0xff),
-			       (uaddr[1] & 0xff),
-			       (uaddr[0] & 0xff));
+		(void) snprintf(qbuf, sizeof qbuf, "%u.%u.%u.%u.in-addr.arpa",
+		    (uaddr[3] & 0xff), (uaddr[2] & 0xff),
+		    (uaddr[1] & 0xff), (uaddr[0] & 0xff));
 		break;
 	case AF_INET6:
 		qp = qbuf;
 		for (n = IN6ADDRSZ - 1; n >= 0; n--) {
 			qp += sprintf(qp, "%x.%x.",
-				       uaddr[n] & 0xf,
-				       (uaddr[n] >> 4) & 0xf);
+			    uaddr[n] & 0xf, (uaddr[n] >> 4) & 0xf);
 		}
-		strcpy(qp, "ip6.int");
 		break;
 	}
 
 	bcopy(_res.lookups, lookups, sizeof lookups);
 	if (lookups[0] == '\0')
-		strncpy(lookups, "bf", sizeof lookups);
+		strlcpy(lookups, "bf", sizeof lookups);
 
 	hp = (struct hostent *)NULL;
 	for (i = 0; i < MAXDNSLUS && hp == NULL && lookups[i]; i++) {
@@ -738,17 +740,31 @@ gethostbyaddr(addr, len, af)
 			break;
 #endif
 		case 'b':
-			n = res_query(qbuf, C_IN, T_PTR, (u_char *)buf.buf,
-			    sizeof buf.buf);
+			if (af == AF_INET6)
+				strcpy(qp, "ip6.arpa");
+			buf = malloc(sizeof(*buf));
+			if (!buf)
+				break;
+			n = res_query(qbuf, C_IN, T_PTR, buf->buf,
+			    sizeof(buf->buf));
+			if (n < 0 && af == AF_INET6) {
+				strcpy(qp, "ip6.int");
+				n = res_query(qbuf, C_IN, T_PTR,
+				    buf->buf, sizeof(buf->buf));
+			}
 			if (n < 0) {
+				free(buf);
 #ifdef DEBUG
 				if (_res.options & RES_DEBUG)
 					printf("res_query failed\n");
 #endif
 				break;
 			}
-			if (!(hp = getanswer(&buf, n, qbuf, T_PTR)))
+			if (!(hp = getanswer(buf, n, qbuf, T_PTR))) {
+				free(buf);
 				break;
+			}
+			free(buf);
 			hp->h_addrtype = af;
 			hp->h_length = len;
 			bcopy(addr, host_addr, len);
@@ -866,9 +882,9 @@ _gethtent()
 	*q = NULL;
 	if (_res.options & RES_USE_INET6) {
 		char *bp = hostbuf;
-		int buflen = sizeof hostbuf;
+		char *ep = hostbuf + sizeof hostbuf;
 
-		map_v4v6_hostent(&host, &bp, &buflen);
+		map_v4v6_hostent(&host, &bp, ep);
 	}
 	h_errno = NETDB_SUCCESS;
 	return (&host);
@@ -1019,11 +1035,9 @@ _yp_gethtbyaddr(addr)
 		if (_yp_check(&__ypdomain) == 0)
 			return (hp);
 	}
-	sprintf(name, "%u.%u.%u.%u",
-		((unsigned)addr[0] & 0xff),
-		((unsigned)addr[1] & 0xff),
-		((unsigned)addr[2] & 0xff),
-		((unsigned)addr[3] & 0xff));
+	snprintf(name, sizeof name, "%u.%u.%u.%u",
+	    ((unsigned)addr[0] & 0xff), ((unsigned)addr[1] & 0xff),
+	    ((unsigned)addr[2] & 0xff), ((unsigned)addr[3] & 0xff));
 	if (__ypcurrent)
 		free(__ypcurrent);
 	__ypcurrent = NULL;
@@ -1084,10 +1098,10 @@ map_v4v6_address(src, dst)
 }
 
 static void
-map_v4v6_hostent(hp, bpp, lenp)
+map_v4v6_hostent(hp, bpp, ep)
 	struct hostent *hp;
 	char **bpp;
-	int *lenp;
+	char *ep;
 {
 	char **ap;
 
@@ -1098,17 +1112,15 @@ map_v4v6_hostent(hp, bpp, lenp)
 	for (ap = hp->h_addr_list; *ap; ap++) {
 		int i = sizeof(align) - ((u_long)*bpp % sizeof(align));
 
-		if (*lenp < (i + IN6ADDRSZ)) {
+		if (ep - *bpp < (i + IN6ADDRSZ)) {
 			/* Out of memory.  Truncate address list here.  XXX */
 			*ap = NULL;
 			return;
 		}
 		*bpp += i;
-		*lenp -= i;
 		map_v4v6_address(*ap, *bpp);
 		*ap = *bpp;
 		*bpp += IN6ADDRSZ;
-		*lenp -= IN6ADDRSZ;
 	}
 }
 
@@ -1131,34 +1143,33 @@ addrsort(ap, num)
 
 	p = ap;
 	for (i = 0; i < num; i++, p++) {
-	    for (j = 0 ; (unsigned)j < _res.nsort; j++)
-		if (_res.sort_list[j].addr.s_addr == 
-		    (((struct in_addr *)(*p))->s_addr & _res.sort_list[j].mask))
-			break;
-	    aval[i] = j;
-	    if (needsort == 0 && i > 0 && j < aval[i-1])
-		needsort = i;
+		for (j = 0 ; (unsigned)j < _res.nsort; j++)
+			if (_res.sort_list[j].addr.s_addr == 
+			    (((struct in_addr *)(*p))->s_addr & _res.sort_list[j].mask))
+				break;
+		aval[i] = j;
+		if (needsort == 0 && i > 0 && j < aval[i-1])
+			needsort = i;
 	}
 	if (!needsort)
-	    return;
+		return;
 
 	while (needsort < num) {
-	    for (j = needsort - 1; j >= 0; j--) {
-		if (aval[j] > aval[j+1]) {
-		    char *hp;
+		for (j = needsort - 1; j >= 0; j--) {
+			if (aval[j] > aval[j+1]) {
+				char *hp;
 
-		    i = aval[j];
-		    aval[j] = aval[j+1];
-		    aval[j+1] = i;
+				i = aval[j];
+				aval[j] = aval[j+1];
+				aval[j+1] = i;
 
-		    hp = ap[j];
-		    ap[j] = ap[j+1];
-		    ap[j+1] = hp;
-
-		} else
-		    break;
-	    }
-	    needsort++;
+				hp = ap[j];
+				ap[j] = ap[j+1];
+				ap[j+1] = hp;
+			} else
+				break;
+		}
+		needsort++;
 	}
 }
 #endif

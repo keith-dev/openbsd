@@ -1,4 +1,4 @@
-.\" $OpenBSD: isakmpd.8,v 1.39 2002/04/10 20:56:28 ho Exp $
+.\" $OpenBSD: isakmpd.8,v 1.43 2002/09/06 21:36:52 deraadt Exp $
 .\" $EOM: isakmpd.8,v 1.23 2000/05/02 00:30:23 niklas Exp $
 .\"
 .\" Copyright (c) 1998, 1999, 2000, 2001 Niklas Hallqvist.
@@ -329,6 +329,13 @@ and put it in
 .Pa /etc/isakmpd/ca/.
 .El
 .Pp
+To revoke certificates, create a Certificate Revocation List (CRL) file
+and install it to the
+.Pa /etc/isakmpd/crls/
+directory. See
+.Xr openssl 1
+and the 'crl' subcommand for more info.
+.Pp
 It is also possible to store trusted public keys to make them directly
 usable by
 .Nm isakmpd .
@@ -375,7 +382,7 @@ Phase 1 SA.
 .It Ic "D T"
 Set debug class <class> to level <level>. If <class> is specified as
 "A", the level applies to all debug classes.
-"D T" toggles all debug classes to level zero. 
+"D T" toggles all debug classes to level zero.
 Another "D T" command will toggle them back to the earlier levels.
 .Pp
 .It Ic "p on[=<path>]"
@@ -393,7 +400,7 @@ Report
 .Nm
 internal state to a file. See
 .Fl R
-option. Same as when sent a SIGUSR1 signal. 
+option. Same as when sent a SIGUSR1 signal.
 .Pp
 .It Ic "R"
 Reinitialize
@@ -432,6 +439,8 @@ The directory where CA certificates can be found.
 The directory where IKE certificates can be found, both the local
 certificate(s) and those of the peers, if a choice to have them kept
 permanently has been made.
+.It Pa /etc/isakmpd/crls/
+The directory where CRLs can be found.
 .It Pa /etc/isakmpd/isakmpd.conf
 The configuration file.
 As this file can contain sensitive information
@@ -475,7 +484,6 @@ and keynote policy configuration files.
 .Xr getnameinfo 3 ,
 .Xr openssl 1 ,
 .Xr pcap 3 ,
-.Xr photurisd 8 ,
 .Xr ssl 8 ,
 .Xr tcpdump 8 ,
 .Xr vpn 8

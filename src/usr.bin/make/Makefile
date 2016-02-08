@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.33 2001/11/11 12:35:02 espie Exp $
+#	$OpenBSD: Makefile,v 1.36 2002/07/25 18:40:24 art Exp $
 
 PROG=	make
 CFLAGS+= -I${.OBJDIR} -I${.CURDIR}
@@ -9,9 +9,7 @@ CFLAGS+=-DUSE_TIMESPEC
 CFLAGS+=-DHAS_BOOL_H
 CFLAGS+=-DHAS_PATHS_H
 CFLAGS+=-DHAS_EXTENDED_GETCWD
-.if (${MACHINE_ARCH} == "m88k")
-CFLAGS+=-O0
-.endif
+#CFLAGS+=-DHAS_STATS
 
 SRCS=	arch.c buf.c cmd_exec.c compat.c cond.c dir.c error.c for.c \
 	init.c job.c lowparse.c main.c make.c memory.c parse.c \
@@ -31,7 +29,7 @@ CLEANFILES+= varhashconsts.h condhashconsts.h generate.o generate
 beforedepend: varhashconsts.h condhashconsts.h
 # may need tweaking if you add variable synonyms or change the hash function
 MAGICVARSLOTS=77
-MAGICCONDSLOTS=43
+MAGICCONDSLOTS=65
 
 varhashconsts.h: generate
 	${.OBJDIR}/generate 1 ${MAGICVARSLOTS} >${.TARGET}
@@ -40,7 +38,7 @@ condhashconsts.h: generate
 	${.OBJDIR}/generate 2 ${MAGICCONDSLOTS} >${.TARGET}
 
 generate: generate.c stats.c memory.c
-	${HOSTCC} -o ${.TARGET} ${CFLAGS} ${.ALLSRC} ${LDADD}
+	${HOSTCC} ${LDSTATIC} -o ${.TARGET} ${CFLAGS} ${.ALLSRC} ${LDADD}
 
 check: regress.o str.o memory.o buf.o
 	${CC} -o ${.TARGET} ${CFLAGS} ${.ALLSRC} ${LDADD}
@@ -50,6 +48,7 @@ regress: check
 
 # kludge for people who forget to make depend
 var.o: varhashconsts.h
+cond.o: condhashconsts.h
 
 .if make(install)
 SUBDIR+= PSD.doc

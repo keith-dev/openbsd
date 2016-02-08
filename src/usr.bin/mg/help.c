@@ -1,4 +1,4 @@
-/*	$OpenBSD: help.c,v 1.17 2002/03/16 19:30:29 vincent Exp $	*/
+/*	$OpenBSD: help.c,v 1.20 2002/08/22 23:28:19 deraadt Exp $	*/
 
 /*
  * Help functions for Mg 2
@@ -28,7 +28,7 @@ desckey(f, n)
 {
 	KEYMAP	*curmap;
 	PF	 funct;
-	int	 c, m, i;
+	int	 c, m, i, num;
 	char	*pep;
 	char	 prompt[80];
 
@@ -36,7 +36,10 @@ desckey(f, n)
 	if (inmacro)
 		return TRUE;	/* ignore inside keyboard macro */
 #endif /* !NO_MACRO */
-	pep = prompt + strlcpy(prompt, "Describe key briefly: ", sizeof(prompt));
+	num = strlcpy(prompt, "Describe key briefly: ", sizeof(prompt));
+	if (num >= sizeof prompt)
+		num = sizeof prompt - 1;
+	pep = prompt + num;
 	key.k_count = 0;
 	m = curbp->b_nmodes;
 	curmap = curbp->b_modes[m]->p_map;
@@ -107,7 +110,7 @@ wallchart(f, n)
 	if (bclear(bp) != TRUE)
 		/* clear it out */
 		return FALSE;
-	bp->b_flag |= BFREADONLY;	
+	bp->b_flag |= BFREADONLY;
 	for (m = curbp->b_nmodes; m > 0; m--) {
 		if ((addlinef(bp, "Local keybindings for mode %s:",
 				curbp->b_modes[m]->p_name) == FALSE) ||
@@ -138,7 +141,7 @@ showall(BUFFER *bp, KEYMAP *map, char *prefix)
 		if (fun == rescan || fun == selfinsert)
 			continue;
 		keyname(buf, sizeof(buf), c);
-		snprintf(key, sizeof key, "%s%s ", prefix, buf);
+		(void)snprintf(key, sizeof key, "%s%s ", prefix, buf);
 		if (fun == NULL) {
 			if (showall(bp, newmap, key) == FALSE)
 				return FALSE;
@@ -226,7 +229,7 @@ findbind(KEYMAP *map, PF fun, char *buf, size_t len)
 		if (nfun == NULL) {
 			if (findbind(newmap, fun, buf2, sizeof(buf2)) == TRUE) {
 				keyname(key, sizeof(key), c);
-				snprintf(buf, len, "%s %s", key, buf2);
+				(void)snprintf(buf, len, "%s %s", key, buf2);
 				return TRUE;
 			}
 		}

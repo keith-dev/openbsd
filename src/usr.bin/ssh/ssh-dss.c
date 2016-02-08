@@ -23,7 +23,7 @@
  */
 
 #include "includes.h"
-RCSID("$OpenBSD: ssh-dss.c,v 1.14 2002/02/28 15:46:33 markus Exp $");
+RCSID("$OpenBSD: ssh-dss.c,v 1.17 2002/07/04 10:41:47 markus Exp $");
 
 #include <openssl/bn.h>
 #include <openssl/evp.h>
@@ -40,15 +40,13 @@ RCSID("$OpenBSD: ssh-dss.c,v 1.14 2002/02/28 15:46:33 markus Exp $");
 #define SIGBLOB_LEN	(2*INTBLOB_LEN)
 
 int
-ssh_dss_sign(
-    Key *key,
-    u_char **sigp, u_int *lenp,
+ssh_dss_sign(Key *key, u_char **sigp, u_int *lenp,
     u_char *data, u_int datalen)
 {
 	DSA_SIG *sig;
 	const EVP_MD *evp_md = EVP_sha1();
 	EVP_MD_CTX md;
-	u_char *ret, digest[EVP_MAX_MD_SIZE], sigblob[SIGBLOB_LEN];
+	u_char digest[EVP_MAX_MD_SIZE], sigblob[SIGBLOB_LEN];
 	u_int rlen, slen, len, dlen;
 	Buffer b;
 
@@ -71,7 +69,7 @@ ssh_dss_sign(
 	rlen = BN_num_bytes(sig->r);
 	slen = BN_num_bytes(sig->s);
 	if (rlen > INTBLOB_LEN || slen > INTBLOB_LEN) {
-		error("bad sig size %d %d", rlen, slen);
+		error("bad sig size %u %u", rlen, slen);
 		DSA_SIG_free(sig);
 		return -1;
 	}
@@ -81,32 +79,30 @@ ssh_dss_sign(
 	DSA_SIG_free(sig);
 
 	if (datafellows & SSH_BUG_SIGBLOB) {
-		ret = xmalloc(SIGBLOB_LEN);
-		memcpy(ret, sigblob, SIGBLOB_LEN);
 		if (lenp != NULL)
 			*lenp = SIGBLOB_LEN;
-		if (sigp != NULL)
-			*sigp = ret;
+		if (sigp != NULL) {
+			*sigp = xmalloc(SIGBLOB_LEN);
+			memcpy(*sigp, sigblob, SIGBLOB_LEN);
+		}
 	} else {
 		/* ietf-drafts */
 		buffer_init(&b);
 		buffer_put_cstring(&b, "ssh-dss");
 		buffer_put_string(&b, sigblob, SIGBLOB_LEN);
 		len = buffer_len(&b);
-		ret = xmalloc(len);
-		memcpy(ret, buffer_ptr(&b), len);
-		buffer_free(&b);
 		if (lenp != NULL)
 			*lenp = len;
-		if (sigp != NULL)
-			*sigp = ret;
+		if (sigp != NULL) {
+			*sigp = xmalloc(len);
+			memcpy(*sigp, buffer_ptr(&b), len);
+		}
+		buffer_free(&b);
 	}
 	return 0;
 }
 int
-ssh_dss_verify(
-    Key *key,
-    u_char *signature, u_int signaturelen,
+ssh_dss_verify(Key *key, u_char *signature, u_int signaturelen,
     u_char *data, u_int datalen)
 {
 	DSA_SIG *sig;
@@ -151,7 +147,7 @@ ssh_dss_verify(
 	}
 
 	if (len != SIGBLOB_LEN) {
-		fatal("bad sigbloblen %d != SIGBLOB_LEN", len);
+		fatal("bad sigbloblen %u != SIGBLOB_LEN", len);
 	}
 
 	/* parse signature */

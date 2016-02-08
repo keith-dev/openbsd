@@ -1,4 +1,5 @@
-/*	$OpenBSD: cmds.c,v 1.15 2002/02/16 21:28:03 millert Exp $	*/
+/*	$OpenBSD: cmds.c,v 1.17 2002/06/08 01:53:43 millert Exp $	*/
+/*	$NetBSD: cmds.c,v 1.12 1997/10/05 15:12:06 mrg Exp $	*/
 
 /*
  * Copyright (c) 1983, 1993
@@ -44,7 +45,7 @@ static const char copyright[] =
 #if 0
 static const char sccsid[] = "@(#)cmds.c	8.2 (Berkeley) 4/28/95";
 #else
-static const char rcsid[] = "$OpenBSD: cmds.c,v 1.15 2002/02/16 21:28:03 millert Exp $";
+static const char rcsid[] = "$OpenBSD: cmds.c,v 1.17 2002/06/08 01:53:43 millert Exp $";
 #endif
 #endif /* not lint */
 
@@ -72,30 +73,26 @@ static const char rcsid[] = "$OpenBSD: cmds.c,v 1.15 2002/02/16 21:28:03 millert
 #include "extern.h"
 #include "pathnames.h"
 
-extern uid_t	uid, euid;
-
-void	abortpr(int);
-void	cleanpr(void);
-void	disablepr(void);
-int	doarg(char *);
-int	doselect(struct dirent *);
-void	enablepr(void);
-void	prstat(void);
-void	putmsg(int, char **);
-int	sortq(const void *, const void *);
-void	startpr(int);
-void	stoppr(void);
-int	touch(struct queue *);
-void	unlinkf(char *);
-void	upstat(char *);
+static void	abortpr(int);
+static void	cleanpr(void);
+static void	disablepr(void);
+static int	doarg(char *);
+static int	doselect(struct dirent *);
+static void	enablepr(void);
+static void	prstat(void);
+static void	putmsg(int, char **);
+static int	sortq(const void *, const void *);
+static void	startpr(int);
+static void	stoppr(void);
+static int	touch(struct queue *);
+static void	unlinkf(char *);
+static void	upstat(char *);
 
 /*
  * kill an existing daemon and disable printing.
  */
 void
-doabort(argc, argv)
-	int argc;
-	char *argv[];
+doabort(int argc, char **argv)
 {
 	int c, status;
 	char *cp1, *cp2;
@@ -105,7 +102,7 @@ doabort(argc, argv)
 		printf("Usage: abort {all | printer ...}\n");
 		return;
 	}
-	if (argc == 2 && !strcmp(argv[1], "all")) {
+	if (argc == 2 && strcmp(argv[1], "all") == 0) {
 		printer = prbuf;
 		while (cgetnext(&bp, printcapdb) > 0) {
 			cp1 = prbuf;
@@ -132,9 +129,8 @@ doabort(argc, argv)
 	}
 }
 
-void
-abortpr(dis)
-	int dis;
+static void
+abortpr(int dis)
 {
 	FILE *fp;
 	struct stat stbuf;
@@ -144,26 +140,29 @@ abortpr(dis)
 		SD = _PATH_DEFSPOOL;
 	if (cgetstr(bp, "lo", &LO) == -1)
 		LO = DEFLOCK;
-	(void) snprintf(line, sizeof(line), "%s/%s", SD, LO);
+	(void)snprintf(line, sizeof(line), "%s/%s", SD, LO);
 	printf("%s:\n", printer);
 
+	PRIV_START;
 	/*
 	 * Turn on the owner execute bit of the lock file to disable printing.
 	 */
 	if (dis) {
-		seteuid(euid);
 		if (stat(line, &stbuf) >= 0) {
-			if (chmod(line, (stbuf.st_mode & 0777) | 0100) < 0)
+			stbuf.st_mode |= S_IXUSR;
+			if (chmod(line, stbuf.st_mode & 0777) < 0)
 				printf("\tcannot disable printing\n");
 			else {
 				upstat("printing disabled\n");
 				printf("\tprinting disabled\n");
 			}
 		} else if (errno == ENOENT) {
-			if ((fd = open(line, O_WRONLY|O_CREAT, 0760)) < 0)
+			if ((fd = safe_open(line, O_WRONLY|O_CREAT|O_NOFOLLOW,
+			    0760)) < 0)
 				printf("\tcannot create lock file\n");
 			else {
-				(void) close(fd);
+				(void)fchown(fd, DEFUID, -1);
+				(void)close(fd);
 				upstat("printing disabled\n");
 				printf("\tprinting disabled\n");
 				printf("\tno daemon to abort\n");
@@ -177,16 +176,19 @@ abortpr(dis)
 	/*
 	 * Kill the current daemon to stop printing now.
 	 */
-	if ((fp = fopen(line, "r")) == NULL) {
+	fd = safe_open(line, O_RDONLY|O_NOFOLLOW, 0);
+	if (fd < 0 || (fp = fdopen(fd, "r")) == NULL) {
+		if (fd >= 0)
+			close(fd);
 		printf("\tcannot open lock file\n");
 		goto out;
 	}
 	if (!getline(fp) || flock(fileno(fp), LOCK_SH|LOCK_NB) == 0) {
-		(void) fclose(fp);	/* unlocks as well */
+		(void)fclose(fp);	/* unlocks as well */
 		printf("\tno daemon to abort\n");
 		goto out;
 	}
-	(void) fclose(fp);
+	(void)fclose(fp);
 	if (kill(pid = atoi(line), SIGTERM) < 0) {
 		if (errno == ESRCH)
 			printf("\tno daemon to abort\n");
@@ -195,43 +197,40 @@ abortpr(dis)
 	} else
 		printf("\tdaemon (pid %d) killed\n", pid);
 out:
-	seteuid(uid);
+	PRIV_END;
 }
 
 /*
- * Write a message into the status file.
+ * Write a message into the status file (assumes PRIV_START already called)
  */
-void
-upstat(msg)
-	char *msg;
+static void
+upstat(char *msg)
 {
 	int fd;
 	char statfile[MAXPATHLEN];
 
 	if (cgetstr(bp, "st", &ST) == -1)
 		ST = DEFSTAT;
-	(void) snprintf(statfile, sizeof(statfile), "%s/%s", SD, ST);
-	umask(0);
-	fd = open(statfile, O_WRONLY|O_CREAT, 0664);
+	(void)snprintf(statfile, sizeof(statfile), "%s/%s", SD, ST);
+	fd = safe_open(statfile, O_WRONLY|O_CREAT|O_NOFOLLOW, 0660);
 	if (fd < 0 || flock(fd, LOCK_EX) < 0) {
 		printf("\tcannot create status file\n");
 		return;
 	}
-	(void) ftruncate(fd, 0);
+	(void)fchown(fd, DEFUID, -1);
+	(void)ftruncate(fd, 0);
 	if (msg == (char *)NULL)
-		(void) write(fd, "\n", 1);
+		(void)write(fd, "\n", 1);
 	else
-		(void) write(fd, msg, strlen(msg));
-	(void) close(fd);
+		(void)write(fd, msg, strlen(msg));
+	(void)close(fd);
 }
 
 /*
  * Remove all spool files and temporaries from the spooling area.
  */
 void
-clean(argc, argv)
-	int argc;
-	char *argv[];
+clean(int argc, char **argv)
 {
 	int c, status;
 	char *cp1, *cp2;
@@ -241,7 +240,7 @@ clean(argc, argv)
 		printf("Usage: clean {all | printer ...}\n");
 		return;
 	}
-	if (argc == 2 && !strcmp(argv[1], "all")) {
+	if (argc == 2 && strcmp(argv[1], "all") == 0) {
 		printer = prbuf;
 		while (cgetnext(&bp, printcapdb) > 0) {
 			cp1 = prbuf;
@@ -269,9 +268,8 @@ clean(argc, argv)
 	}
 }
 
-int
-doselect(d)
-	struct dirent *d;
+static int
+doselect(struct dirent *d)
 {
 	int c = d->d_name[0];
 
@@ -284,16 +282,15 @@ doselect(d)
  * Comparison routine for scandir. Sort by job number and machine, then
  * by `cf', `tf', or `df', then by the sequence letter A-Z, a-z.
  */
-int
-sortq(a, b)
-	const void *a, *b;
+static int
+sortq(const void *a, const void *b)
 {
-	struct dirent **d1, **d2;
+	const struct dirent **d1, **d2;
 	int c1, c2;
 
-	d1 = (struct dirent **)a;
-	d2 = (struct dirent **)b;
-	if ((c1 = strcmp((*d1)->d_name + 3, (*d2)->d_name + 3)))
+	d1 = (const struct dirent **)a;
+	d2 = (const struct dirent **)b;
+	if ((c1 = strcmp((*d1)->d_name + 3, (*d2)->d_name + 3)) != 0)
 		return(c1);
 	c1 = (*d1)->d_name[0];
 	c2 = (*d2)->d_name[0];
@@ -309,8 +306,8 @@ sortq(a, b)
 /*
  * Remove incomplete jobs from spooling area.
  */
-void
-cleanpr()
+static void
+cleanpr(void)
 {
 	int i, n;
 	char *cp, *cp1, *lp;
@@ -321,7 +318,9 @@ cleanpr()
 		SD = _PATH_DEFSPOOL;
 	printf("%s:\n", printer);
 
-	for (lp = line, cp = SD; (lp - line) < sizeof(line) && (*lp++ = *cp++);)
+	/* XXX depends on SD being non-NUL */
+	for (lp = line, cp = SD; (lp - line) < sizeof(line) &&
+	    (*lp++ = *cp++) != '\0'; )
 		;
 	lp[-1] = '/';
 	if (lp - line >= sizeof(line)) {
@@ -329,9 +328,9 @@ cleanpr()
 		return;
 	}
 
-	seteuid(euid);
+	PRIV_START;
 	nitems = scandir(SD, &queue, doselect, sortq);
-	seteuid(uid);
+	PRIV_END;
 	if (nitems < 0) {
 		printf("\tcannot examine spool directory\n");
 		return;
@@ -351,8 +350,8 @@ cleanpr()
 				n++;
 			}
 			if (n == 0) {
-				if (strlcpy(lp, cp, sizeof(line) - (lp - line)) >=
-				    sizeof(line) - (lp - line))
+				if (strlcpy(lp, cp, sizeof(line) - (lp - line))
+				    >= sizeof(line) - (lp - line))
 					printf("\tpath too long, %s/%s", SD, cp);
 				else
 					unlinkf(line);
@@ -372,25 +371,22 @@ cleanpr()
      	} while (++i < nitems);
 }
  
-void
-unlinkf(name)
-	char	*name;
+static void
+unlinkf(char *name)
 {
-	seteuid(euid);
+	PRIV_START;
 	if (unlink(name) < 0)
 		printf("\tcannot remove %s\n", name);
 	else
 		printf("\tremoved %s\n", name);
-	seteuid(uid);
+	PRIV_END;
 }
 
 /*
  * Enable queuing to the printer (allow lpr's).
  */
 void
-enable(argc, argv)
-	int argc;
-	char *argv[];
+enable(int argc, char **argv)
 {
 	int c, status;
 	char *cp1, *cp2;
@@ -400,7 +396,7 @@ enable(argc, argv)
 		printf("Usage: enable {all | printer ...}\n");
 		return;
 	}
-	if (argc == 2 && !strcmp(argv[1], "all")) {
+	if (argc == 2 && strcmp(argv[1], "all") == 0) {
 		printer = prbuf;
 		while (cgetnext(&bp, printcapdb) > 0) {
 			cp1 = prbuf;
@@ -428,8 +424,8 @@ enable(argc, argv)
 	}
 }
 
-void
-enablepr()
+static void
+enablepr(void)
 {
 	struct stat stbuf;
 
@@ -437,29 +433,28 @@ enablepr()
 		SD = _PATH_DEFSPOOL;
 	if (cgetstr(bp, "lo", &LO) == -1)
 		LO = DEFLOCK;
-	(void) snprintf(line, sizeof(line), "%s/%s", SD, LO);
+	(void)snprintf(line, sizeof(line), "%s/%s", SD, LO);
 	printf("%s:\n", printer);
 
 	/*
 	 * Turn off the group execute bit of the lock file to enable queuing.
 	 */
-	seteuid(euid);
+	PRIV_START;
 	if (stat(line, &stbuf) >= 0) {
-		if (chmod(line, stbuf.st_mode & 0767) < 0)
+		stbuf.st_mode &= ~S_IXGRP;
+		if (chmod(line, stbuf.st_mode & 0777) < 0)
 			printf("\tcannot enable queuing\n");
 		else
 			printf("\tqueuing enabled\n");
 	}
-	seteuid(uid);
+	PRIV_END;
 }
 
 /*
  * Disable queuing.
  */
 void
-disable(argc, argv)
-	int argc;
-	char *argv[];
+disable(int argc, char **argv)
 {
 	int c, status;
 	char *cp1, *cp2;
@@ -469,7 +464,7 @@ disable(argc, argv)
 		printf("Usage: disable {all | printer ...}\n");
 		return;
 	}
-	if (argc == 2 && !strcmp(argv[1], "all")) {
+	if (argc == 2 && strcmp(argv[1], "all") == 0) {
 		printer = prbuf;
 		while (cgetnext(&bp, printcapdb) > 0) {
 			cp1 = prbuf;
@@ -497,8 +492,8 @@ disable(argc, argv)
 	}
 }
 
-void
-disablepr()
+static void
+disablepr(void)
 {
 	int fd;
 	struct stat stbuf;
@@ -507,27 +502,29 @@ disablepr()
 		SD = _PATH_DEFSPOOL;
 	if (cgetstr(bp, "lo", &LO) == -1)
 		LO = DEFLOCK;
-	(void) snprintf(line, sizeof(line), "%s/%s", SD, LO);
+	(void)snprintf(line, sizeof(line), "%s/%s", SD, LO);
 	printf("%s:\n", printer);
 	/*
 	 * Turn on the group execute bit of the lock file to disable queuing.
 	 */
-	seteuid(euid);
+	PRIV_START;
 	if (stat(line, &stbuf) >= 0) {
-		if (chmod(line, (stbuf.st_mode & 0777) | 010) < 0)
+		stbuf.st_mode |= S_IXGRP;
+		if (chmod(line, stbuf.st_mode & 0777) < 0)
 			printf("\tcannot disable queuing\n");
 		else
 			printf("\tqueuing disabled\n");
 	} else if (errno == ENOENT) {
-		if ((fd = open(line, O_WRONLY|O_CREAT, 0670)) < 0)
+		if ((fd = safe_open(line, O_WRONLY|O_CREAT|O_NOFOLLOW, 0670)) < 0)
 			printf("\tcannot create lock file\n");
 		else {
-			(void) close(fd);
+			(void)fchown(fd, DEFUID, -1);
+			(void)close(fd);
 			printf("\tqueuing disabled\n");
 		}
 	} else
 		printf("\tcannot stat lock file\n");
-	seteuid(uid);
+	PRIV_END;
 }
 
 /*
@@ -535,9 +532,7 @@ disablepr()
  * (reason for being down).
  */
 void
-down(argc, argv)
-	int argc;
-	char *argv[];
+down(int argc, char **argv)
 {
 	int c, status;
 	char *cp1, *cp2;
@@ -547,7 +542,7 @@ down(argc, argv)
 		printf("Usage: down {all | printer} [message ...]\n");
 		return;
 	}
-	if (!strcmp(argv[1], "all")) {
+	if (strcmp(argv[1], "all") == 0) {
 		printer = prbuf;
 		while (cgetnext(&bp, printcapdb) > 0) {
 			cp1 = prbuf;
@@ -573,10 +568,8 @@ down(argc, argv)
 	putmsg(argc - 2, argv + 2);
 }
 
-void
-putmsg(argc, argv)
-	int argc;
-	char **argv;
+static void
+putmsg(int argc, char **argv)
 {
 	int fd;
 	char *cp1, *cp2;
@@ -594,39 +587,42 @@ putmsg(argc, argv)
 	 * Turn on the group execute bit of the lock file to disable queuing and
 	 * turn on the owner execute bit of the lock file to disable printing.
 	 */
-	(void) snprintf(line, sizeof(line), "%s/%s", SD, LO);
-	seteuid(euid);
+	(void)snprintf(line, sizeof(line), "%s/%s", SD, LO);
+	PRIV_START;
 	if (stat(line, &stbuf) >= 0) {
-		if (chmod(line, (stbuf.st_mode & 0777) | 0110) < 0)
+		stbuf.st_mode |= (S_IXGRP|S_IXUSR);
+		if (chmod(line, stbuf.st_mode & 0777) < 0)
 			printf("\tcannot disable queuing\n");
 		else
 			printf("\tprinter and queuing disabled\n");
 	} else if (errno == ENOENT) {
-		if ((fd = open(line, O_WRONLY|O_CREAT, 0770)) < 0)
+		if ((fd = safe_open(line, O_WRONLY|O_CREAT|O_NOFOLLOW, 0770)) < 0)
 			printf("\tcannot create lock file\n");
 		else {
-			(void) close(fd);
+			(void)fchown(fd, DEFUID, -1);
+			(void)close(fd);
 			printf("\tprinter and queuing disabled\n");
 		}
-		seteuid(uid);
+		PRIV_END;
 		return;
 	} else
 		printf("\tcannot stat lock file\n");
 	/*
 	 * Write the message into the status file.
 	 */
-	(void) snprintf(line, sizeof(line), "%s/%s", SD, ST);
-	fd = open(line, O_WRONLY|O_CREAT, 0664);
+	(void)snprintf(line, sizeof(line), "%s/%s", SD, ST);
+	fd = safe_open(line, O_WRONLY|O_CREAT|O_NOFOLLOW, 0660);
 	if (fd < 0 || flock(fd, LOCK_EX) < 0) {
 		printf("\tcannot create status file\n");
-		seteuid(uid);
+		PRIV_END;
 		return;
 	}
-	seteuid(uid);
-	(void) ftruncate(fd, 0);
+	PRIV_END;
+	(void)fchown(fd, DEFUID, -1);
+	(void)ftruncate(fd, 0);
 	if (argc <= 0) {
-		(void) write(fd, "\n", 1);
-		(void) close(fd);
+		(void)write(fd, "\n", 1);
+		(void)close(fd);
 		return;
 	}
 	cp1 = buf;
@@ -638,17 +634,15 @@ putmsg(argc, argv)
 	}
 	cp1[-1] = '\n';
 	*cp1 = '\0';
-	(void) write(fd, buf, strlen(buf));
-	(void) close(fd);
+	(void)write(fd, buf, strlen(buf));
+	(void)close(fd);
 }
 
 /*
  * Exit lpc
  */
 void
-quit(argc, argv)
-	int argc;
-	char *argv[];
+quit(int argc, char **argv)
 {
 	exit(0);
 }
@@ -657,9 +651,7 @@ quit(argc, argv)
  * Kill and restart the daemon.
  */
 void
-restart(argc, argv)
-	int argc;
-	char *argv[];
+restart(int argc, char **argv)
 {
 	int c, status;
 	char *cp1, *cp2;
@@ -669,7 +661,7 @@ restart(argc, argv)
 		printf("Usage: restart {all | printer ...}\n");
 		return;
 	}
-	if (argc == 2 && !strcmp(argv[1], "all")) {
+	if (argc == 2 && strcmp(argv[1], "all") == 0) {
 		printer = prbuf;
 		while (cgetnext(&bp, printcapdb) > 0) {
 			cp1 = prbuf;
@@ -703,9 +695,7 @@ restart(argc, argv)
  * Enable printing on the specified printer and startup the daemon.
  */
 void
-startcmd(argc, argv)
-	int argc;
-	char *argv[];
+startcmd(int argc, char **argv)
 {
 	int c, status;
 	char *cp1, *cp2;
@@ -715,7 +705,7 @@ startcmd(argc, argv)
 		printf("Usage: start {all | printer ...}\n");
 		return;
 	}
-	if (argc == 2 && !strcmp(argv[1], "all")) {
+	if (argc == 2 && strcmp(argv[1], "all") == 0) {
 		printer = prbuf;
 		while (cgetnext(&bp, printcapdb) > 0) {
 			cp1 = prbuf;
@@ -743,9 +733,8 @@ startcmd(argc, argv)
 	}
 }
 
-void
-startpr(enable)
-	int enable;
+static void
+startpr(int enable)
 {
 	struct stat stbuf;
 
@@ -753,39 +742,42 @@ startpr(enable)
 		SD = _PATH_DEFSPOOL;
 	if (cgetstr(bp, "lo", &LO) == -1)
 		LO = DEFLOCK;
-	(void) snprintf(line, sizeof(line), "%s/%s", SD, LO);
+	(void)snprintf(line, sizeof(line), "%s/%s", SD, LO);
 	printf("%s:\n", printer);
 
 	/*
 	 * Turn off the owner execute bit of the lock file to enable printing.
+	 * If we are marking the printer "up" also turn off group execute bit.
 	 */
-	seteuid(euid);
+	PRIV_START;
 	if (enable && stat(line, &stbuf) >= 0) {
-		if (chmod(line, stbuf.st_mode & (enable==2 ? 0666 : 0677)) < 0)
+		if (enable == 2)
+			stbuf.st_mode &= ~(S_IXUSR|S_IXGRP);
+		else
+			stbuf.st_mode &= ~S_IXUSR;
+		if (chmod(line, stbuf.st_mode & 0777) < 0)
 			printf("\tcannot enable printing\n");
 		else
 			printf("\tprinting enabled\n");
 	}
+	PRIV_END;
 	if (!startdaemon(printer))
 		printf("\tcouldn't start daemon\n");
 	else
 		printf("\tdaemon started\n");
-	seteuid(uid);
 }
 
 /*
  * Print the status of each queue listed or all the queues.
  */
 void
-status(argc, argv)
-	int argc;
-	char *argv[];
+status(int argc, char **argv)
 {
 	int c, status;
 	char *cp1, *cp2;
 	char prbuf[100];
 
-	if (argc == 1 || (argc == 2 && !strcmp(argv[1], "all"))) {
+	if (argc == 1 || (argc == 2 && strcmp(argv[1], "all") == 0)) {
 		printer = prbuf;
 		while (cgetnext(&bp, printcapdb) > 0) {
 			cp1 = prbuf;
@@ -816,8 +808,8 @@ status(argc, argv)
 /*
  * Print the status of the printer queue.
  */
-void
-prstat()
+static void
+prstat(void)
 {
 	struct stat stbuf;
 	int fd, i;
@@ -831,8 +823,11 @@ prstat()
 	if (cgetstr(bp, "st", &ST) == -1)
 		ST = DEFSTAT;
 	printf("%s:\n", printer);
-	(void) snprintf(line, sizeof(line), "%s/%s", SD, LO);
-	if (stat(line, &stbuf) >= 0) {
+	(void)snprintf(line, sizeof(line), "%s/%s", SD, LO);
+	PRIV_START;
+	i = stat(line, &stbuf);
+	PRIV_END;
+	if (i >= 0) {
 		printf("\tqueuing is %s\n",
 			(stbuf.st_mode & 010) ? "disabled" : "enabled");
 		printf("\tprinting is %s\n",
@@ -841,7 +836,10 @@ prstat()
 		printf("\tqueuing is enabled\n");
 		printf("\tprinting is enabled\n");
 	}
-	if ((dirp = opendir(SD)) == NULL) {
+	PRIV_START;
+	dirp = opendir(SD);
+	PRIV_END;
+	if (dirp == NULL) {
 		printf("\tcannot examine spool directory\n");
 		return;
 	}
@@ -857,21 +855,27 @@ prstat()
 		printf("\t1 entry in spool area\n");
 	else
 		printf("\t%d entries in spool area\n", i);
-	fd = open(line, O_RDONLY);
+	PRIV_START;
+	fd = safe_open(line, O_RDONLY|O_NOFOLLOW, 0);
+	PRIV_END;
 	if (fd < 0 || flock(fd, LOCK_SH|LOCK_NB) == 0) {
-		(void) close(fd);	/* unlocks as well */
+		(void)close(fd);	/* unlocks as well */
 		printf("\tprinter idle\n");
 		return;
 	}
-	(void) close(fd);
-	putchar('\t');
-	(void) snprintf(line, sizeof(line), "%s/%s", SD, ST);
-	fd = open(line, O_RDONLY);
+	(void)close(fd);
+	(void)snprintf(line, sizeof(line), "%s/%s", SD, ST);
+	PRIV_START;
+	fd = safe_open(line, O_RDONLY|O_NOFOLLOW, 0);
+	PRIV_END;
 	if (fd >= 0) {
-		(void) flock(fd, LOCK_SH);
-		while ((i = read(fd, line, sizeof(line))) > 0)
-			(void) fwrite(line, 1, i, stdout);
-		(void) close(fd);	/* unlocks as well */
+		(void)flock(fd, LOCK_SH);
+		if (fstat(fd, &stbuf) == 0 && stbuf.st_size > 0) {
+			putchar('\t');
+			while ((i = read(fd, line, sizeof(line))) > 0)
+				(void)fwrite(line, 1, i, stdout);
+		}
+		(void)close(fd);	/* unlocks as well */
 	}
 }
 
@@ -880,9 +884,7 @@ prstat()
  * printing.
  */
 void
-stop(argc, argv)
-	int argc;
-	char *argv[];
+stop(int argc, char **argv)
 {
 	int c, status;
 	char *cp1, *cp2;
@@ -892,7 +894,7 @@ stop(argc, argv)
 		printf("Usage: stop {all | printer ...}\n");
 		return;
 	}
-	if (argc == 2 && !strcmp(argv[1], "all")) {
+	if (argc == 2 && strcmp(argv[1], "all") == 0) {
 		printer = prbuf;
 		while (cgetnext(&bp, printcapdb) > 0) {
 			cp1 = prbuf;
@@ -920,8 +922,8 @@ stop(argc, argv)
 	}
 }
 
-void
-stoppr()
+static void
+stoppr(void)
 {
 	int fd;
 	struct stat stbuf;
@@ -930,31 +932,33 @@ stoppr()
 		SD = _PATH_DEFSPOOL;
 	if (cgetstr(bp, "lo", &LO) == -1)
 		LO = DEFLOCK;
-	(void) snprintf(line, sizeof(line), "%s/%s", SD, LO);
+	(void)snprintf(line, sizeof(line), "%s/%s", SD, LO);
 	printf("%s:\n", printer);
 
 	/*
 	 * Turn on the owner execute bit of the lock file to disable printing.
 	 */
-	seteuid(euid);
+	PRIV_START;
 	if (stat(line, &stbuf) >= 0) {
-		if (chmod(line, (stbuf.st_mode & 0777) | 0100) < 0)
+		stbuf.st_mode |= S_IXUSR;
+		if (chmod(line, stbuf.st_mode & 0777) < 0)
 			printf("\tcannot disable printing\n");
 		else {
 			upstat("printing disabled\n");
 			printf("\tprinting disabled\n");
 		}
 	} else if (errno == ENOENT) {
-		if ((fd = open(line, O_WRONLY|O_CREAT, 0760)) < 0)
+		if ((fd = safe_open(line, O_WRONLY|O_CREAT|O_NOFOLLOW, 0760)) < 0)
 			printf("\tcannot create lock file\n");
 		else {
-			(void) close(fd);
+			(void)fchown(fd, DEFUID, -1);
+			(void)close(fd);
 			upstat("printing disabled\n");
 			printf("\tprinting disabled\n");
 		}
 	} else
 		printf("\tcannot stat lock file\n");
-	seteuid(uid);
+	PRIV_END;
 }
 
 struct	queue **queue;
@@ -965,9 +969,7 @@ time_t	mtime;
  * Put the specified jobs at the top of printer queue.
  */
 void
-topq(argc, argv)
-	int argc;
-	char *argv[];
+topq(int argc, char **argv)
 {
 	int i;
 	struct stat stbuf;
@@ -996,12 +998,12 @@ topq(argc, argv)
 		LO = DEFLOCK;
 	printf("%s:\n", printer);
 
-	seteuid(euid);
+	PRIV_START;
 	if (chdir(SD) < 0) {
 		printf("\tcannot chdir to %s\n", SD);
 		goto out;
 	}
-	seteuid(uid);
+	PRIV_END;
 	nitems = getq(&queue);
 	if (nitems == 0)
 		return;
@@ -1025,30 +1027,31 @@ topq(argc, argv)
 	 * Turn on the public execute bit of the lock file to
 	 * get lpd to rebuild the queue after the current job.
 	 */
-	seteuid(euid);
-	if (changed && stat(LO, &stbuf) >= 0)
-		(void) chmod(LO, (stbuf.st_mode & 0777) | 01);
+	PRIV_START;
+	if (changed && stat(LO, &stbuf) >= 0) {
+		stbuf.st_mode |= S_IXOTH;
+		(void)chmod(LO, stbuf.st_mode & 0777);
+	}
 
 out:
-	seteuid(uid);
+	PRIV_END;
 } 
 
 /*
  * Reposition the job by changing the modification time of
  * the control file.
  */
-int
-touch(q)
-	struct queue *q;
+static int
+touch(struct queue *q)
 {
 	struct timeval tvp[2];
 	int ret;
 
 	tvp[0].tv_sec = tvp[1].tv_sec = --mtime;
 	tvp[0].tv_usec = tvp[1].tv_usec = 0;
-	seteuid(euid);
+	PRIV_START;
 	ret = utimes(q->q_name, tvp);
-	seteuid(uid);
+	PRIV_END;
 	return (ret);
 }
 
@@ -1057,11 +1060,10 @@ touch(q)
  * Returns:  negative (-1) if argument name is not in the queue.
  */
 int
-doarg(job)
-	char *job;
+doarg(char *job)
 {
 	struct queue **qq;
-	int jobnum, n;
+	int jobnum, fd, n;
 	char *cp, *machine;
 	int cnt = 0;
 	FILE *fp;
@@ -1106,15 +1108,18 @@ doarg(job)
 	 * Process item consisting of owner's name (example: henry).
 	 */
 	for (qq = queue + nitems; --qq >= queue; ) {
-		seteuid(euid);
-		fp = fopen((*qq)->q_name, "r");
-		seteuid(uid);
-		if (fp == NULL)
+		PRIV_START;
+		fd = safe_open((*qq)->q_name, O_RDONLY|O_NOFOLLOW, 0);
+		PRIV_END;
+		if (fd < 0 || (fp = fdopen(fd, "r")) == NULL) {
+			if (fd >= 0)
+				close(fd);
 			continue;
+		}
 		while (getline(fp) > 0)
 			if (line[0] == 'P')
 				break;
-		(void) fclose(fp);
+		(void)fclose(fp);
 		if (line[0] != 'P' || strcmp(job, line+1) != 0)
 			continue;
 		if (touch(*qq) == 0) {
@@ -1129,9 +1134,7 @@ doarg(job)
  * Enable everything and start printer (undo `down').
  */
 void
-up(argc, argv)
-	int argc;
-	char *argv[];
+up(int argc, char **argv)
 {
 	int c, status;
 	char *cp1, *cp2;
@@ -1141,7 +1144,7 @@ up(argc, argv)
 		printf("Usage: up {all | printer ...}\n");
 		return;
 	}
-	if (argc == 2 && !strcmp(argv[1], "all")) {
+	if (argc == 2 && strcmp(argv[1], "all") == 0) {
 		printer = prbuf;
 		while (cgetnext(&bp, printcapdb) > 0) {
 			cp1 = prbuf;

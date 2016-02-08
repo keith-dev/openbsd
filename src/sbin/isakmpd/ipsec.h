@@ -1,4 +1,4 @@
-/*	$OpenBSD: ipsec.h,v 1.19 2001/08/22 08:49:00 niklas Exp $	*/
+/*	$OpenBSD: ipsec.h,v 1.21 2002/06/09 08:13:06 todd Exp $	*/
 /*	$EOM: ipsec.h,v 1.42 2000/12/03 07:58:20 angelos Exp $	*/
 
 /*
@@ -107,7 +107,8 @@ struct ipsec_exch {
 #ifdef USE_ISAKMP_CFG
   /* ISAKMP configuration mode parameters */
   u_int16_t cfg_id;
-  LIST_HEAD (, isakmp_cfg_attr) attrs;
+  u_int16_t cfg_type;
+  LIST_HEAD (isakmp_cfg_attr_head, isakmp_cfg_attr) attrs;
 #endif
 };
 
@@ -158,7 +159,7 @@ extern int ipsec_esp_authkeylength (struct proto *);
 extern int ipsec_esp_enckeylength (struct proto *);
 extern int ipsec_fill_in_hash (struct message *msg);
 extern int ipsec_gen_g_x (struct message *);
-extern int ipsec_get_id (char *, int *, struct sockaddr **, 
+extern int ipsec_get_id (char *, int *, struct sockaddr **,
 			 struct sockaddr **, u_int8_t *, u_int16_t *);
 extern ssize_t ipsec_id_size (char *, u_int8_t *);
 extern char *ipsec_id_string (u_int8_t *, size_t);

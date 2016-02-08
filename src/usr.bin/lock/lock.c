@@ -1,4 +1,4 @@
-/*	$OpenBSD: lock.c,v 1.15 2002/02/16 21:27:48 millert Exp $	*/
+/*	$OpenBSD: lock.c,v 1.19 2002/08/15 21:49:40 deraadt Exp $	*/
 /*	$NetBSD: lock.c,v 1.8 1996/05/07 18:32:31 jtc Exp $	*/
 
 /*
@@ -47,7 +47,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)lock.c	8.1 (Berkeley) 6/6/93";
 #endif
-static char rcsid[] = "$OpenBSD: lock.c,v 1.15 2002/02/16 21:27:48 millert Exp $";
+static char rcsid[] = "$OpenBSD: lock.c,v 1.19 2002/08/15 21:49:40 deraadt Exp $";
 #endif /* not lint */
 
 /*
@@ -90,17 +90,15 @@ extern	char *__progname;
 
 /*ARGSUSED*/
 int
-main(argc, argv)
-	int argc;
-	char **argv;
+main(int argc, char *argv[])
 {
-	struct passwd *pw;
+	char hostname[MAXHOSTNAMELEN], s[BUFSIZ], s1[BUFSIZ], date[256];
+	char *p, *style, *nstyle, *ttynam;
 	struct itimerval ntimer, otimer;
+	int ch, sectimeout, usemine;
+	struct passwd *pw;
 	struct tm *timp;
 	time_t curtime;
-	int ch, sectimeout, usemine;
-	char *p, *style, *nstyle, *ttynam;
-	char hostname[MAXHOSTNAMELEN], s[BUFSIZ], s1[BUFSIZ], date[256];
 	login_cap_t *lc;
 
 	sectimeout = TIMEOUT;
@@ -109,12 +107,12 @@ main(argc, argv)
 	no_timeout = 0;
 
 	if (!(pw = getpwuid(getuid())))
-		errx(1, "unknown uid %d.", getuid());
+		errx(1, "unknown uid %u.", getuid());
 
 	lc = login_getclass(pw->pw_class);
 	
 	while ((ch = getopt(argc, argv, "a:npt:")) != -1)
-		switch(ch) {
+		switch (ch) {
 		case 'a':
 			if (lc) {
 				style = login_getstyle(lc, optarg, "auth-lock");
@@ -220,8 +218,7 @@ main(argc, argv)
 }
 
 void
-hi(dummy)
-	int dummy;
+hi(int dummy)
 {
 	char buf[1024], buf2[1024];
 	time_t now;
@@ -239,10 +236,10 @@ hi(dummy)
 }
 
 void
-bye(dummy)
-	int dummy;
+bye(int dummy)
 {
 
 	if (!no_timeout)
-		errx(1, "timeout");
+		warnx("timeout");
+	_exit(1);
 }

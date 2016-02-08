@@ -1,4 +1,4 @@
-/*	$OpenBSD: hash.c,v 1.8 2001/08/17 14:12:54 niklas Exp $	*/
+/*	$OpenBSD: hash.c,v 1.10 2002/08/23 18:17:17 ho Exp $	*/
 /*	$EOM: hash.c,v 1.10 1999/04/17 23:20:34 niklas Exp $	*/
 
 /*
@@ -37,8 +37,13 @@
 
 #include <sys/param.h>
 #include <string.h>
+#if defined (__APPLE__)
+#include <openssl/md5.h>
+#include <openssl/sha.h>
+#else
 #include <md5.h>
 #include <sha1.h>
+#endif /* __APPLE__ */
 
 #include "sysdep.h"
 
@@ -62,14 +67,14 @@ static unsigned char digest[HASH_MAX];
 static struct hash hashes[] = {
   { HASH_MD5, 5, MD5_SIZE, (void *)&Ctx.md5ctx, digest,
     sizeof (MD5_CTX), (void *)&Ctx2.md5ctx,
-    (void (*) (void *))MD5Init, 
-    (void (*) (void *, unsigned char *, unsigned int))MD5Update, 
+    (void (*) (void *))MD5Init,
+    (void (*) (void *, unsigned char *, unsigned int))MD5Update,
     (void (*) (unsigned char *, void *))MD5Final,
     hmac_init, hmac_final },
   { HASH_SHA1, 6, SHA1_SIZE, (void *)&Ctx.sha1ctx, digest,
     sizeof (SHA1_CTX), (void *)&Ctx2.sha1ctx,
-    (void (*) (void *))SHA1Init, 
-    (void (*) (void *, unsigned char *, unsigned int))SHA1Update, 
+    (void (*) (void *))SHA1Init,
+    (void (*) (void *, unsigned char *, unsigned int))SHA1Update,
     (void (*) (unsigned char *, void *))SHA1Final,
     hmac_init, hmac_final },
 };
@@ -101,7 +106,7 @@ hmac_init (struct hash *hash, unsigned char *okey, int len)
   unsigned char key[HMAC_BLOCKLEN];
 
   memset (key, 0, blocklen);
-  if (len > blocklen) 
+  if (len > blocklen)
     {
       /* Truncate key down to blocklen */
       hash->Init (hash->ctx);
@@ -125,7 +130,7 @@ hmac_init (struct hash *hash, unsigned char *okey, int len)
 
   hash->Init (hash->ctx2);
   hash->Update (hash->ctx2, key, blocklen);
-  
+
   memset (key, 0, blocklen);
 }
 

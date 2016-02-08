@@ -1,4 +1,4 @@
-/*	$OpenBSD: util.c,v 1.26 2002/01/23 18:44:48 ho Exp $	*/
+/*	$OpenBSD: util.c,v 1.28 2002/06/09 08:13:07 todd Exp $	*/
 /*	$EOM: util.c,v 1.23 2000/11/23 12:22:08 niklas Exp $	*/
 
 /*
@@ -380,7 +380,7 @@ sockaddr2text (struct sockaddr *sa, char **address, int zflag)
 		free (*address);
 		return -1;
 	      }
-	    snprintf (*address + strlen (*address), 
+	    snprintf (*address + strlen (*address),
 		      addrlen - strlen (*address), "%03ld", val);
 	    if (bstart)
 	      strlcat (*address, ".", addrlen);
@@ -489,7 +489,7 @@ util_ntoa (char **buf, int af, u_int8_t *addr)
  * Also, if FILE_SIZE is a not a null pointer, store file size here.
  */
 int
-check_file_secrecy (char *name, off_t *file_size)
+check_file_secrecy (char *name, size_t *file_size)
 {
   struct stat st;
 
@@ -514,7 +514,7 @@ check_file_secrecy (char *name, off_t *file_size)
     }
 
   if (file_size)
-    *file_size = st.st_size;
+    *file_size = (size_t)st.st_size;
 
   return 0;
 }

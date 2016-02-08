@@ -1,4 +1,4 @@
-/*	$OpenBSD: extend.c,v 1.24 2002/03/11 13:08:51 vincent Exp $	*/
+/*	$OpenBSD: extend.c,v 1.29 2002/09/15 14:48:50 vincent Exp $	*/
 
 /*
  *	Extended (M-X) commands, rebinding, and	startup file processing.
@@ -22,7 +22,7 @@
 #endif /* FKEYS */
 
 static int	 remap(KEYMAP *, int, PF, KEYMAP *);
-static KEYMAP	*realocmap(KEYMAP *);
+static KEYMAP	*reallocmap(KEYMAP *);
 static void	 fixmap(KEYMAP *, KEYMAP *, KEYMAP *);
 static int	 dobind(KEYMAP *, const char *, int);
 static char	*skipwhite(char *);
@@ -137,7 +137,7 @@ remap(KEYMAP *curmap,		/* pointer to the map being changed */
 			ele->k_funcp = pfp;
 		} else {
 			if (curmap->map_num >= curmap->map_max &&
-			    (curmap = realocmap(curmap)) == NULL)
+			    (curmap = reallocmap(curmap)) == NULL)
 				return FALSE;
 			if ((pfp = malloc(sizeof(PF))) == NULL) {
 				ewprintf("Out of memory");
@@ -158,11 +158,11 @@ remap(KEYMAP *curmap,		/* pointer to the map being changed */
 			curmap->map_num++;
 		}
 		if (funct == NULL) {
-			if (pref_map != NULL) {
+			if (pref_map != NULL)
 				ele->k_prefmap = pref_map;
-			} else {
-				if (!(mp = (KEYMAP *)malloc(sizeof(KEYMAP) +
-				    (MAPINIT - 1) * sizeof(MAP_ELEMENT)))) {
+			else {
+				if ((mp = (KEYMAP *)malloc(sizeof(KEYMAP) +
+				    (MAPINIT - 1) * sizeof(MAP_ELEMENT))) == NULL) {
 					ewprintf("Out of memory");
 					ele->k_funcp[c - ele->k_base] =
 					    curmap->map_default;
@@ -189,9 +189,9 @@ remap(KEYMAP *curmap,		/* pointer to the map being changed */
 				if (pref_map != NULL)
 					ele->k_prefmap = pref_map;
 				else {
-					if (!(mp = malloc(sizeof(KEYMAP) +
+					if ((mp = malloc(sizeof(KEYMAP) +
 					    (MAPINIT - 1) *
-					    sizeof(MAP_ELEMENT)))) {
+					    sizeof(MAP_ELEMENT))) == NULL) {
 						ewprintf("Out of memory");
 						ele->k_funcp[c - ele->k_base] =
 						    curmap->map_default;
@@ -213,7 +213,7 @@ remap(KEYMAP *curmap,		/* pointer to the map being changed */
 			for (i = 0; n2 && i < n1; i++)
 				n2 &= ele->k_funcp[i] != NULL;
 			if (curmap->map_num >= curmap->map_max &&
-			    (curmap = realocmap(curmap)) == NULL)
+			    (curmap = reallocmap(curmap)) == NULL)
 				return FALSE;
 			if ((pfp = malloc((ele->k_num - c + !n2) *
 			    sizeof(PF))) == NULL) {
@@ -259,7 +259,7 @@ remap(KEYMAP *curmap,		/* pointer to the map being changed */
  * Reallocate a keymap, used above.
  */
 static KEYMAP *
-realocmap(KEYMAP *curmap)
+reallocmap(KEYMAP *curmap)
 {
 	MAPS *mps;
 	KEYMAP	*mp;
@@ -319,7 +319,7 @@ dobind(KEYMAP *curmap, const char *p, int unbind)
 	PF	 funct;
 	char	 prompt[80];
 	char	*pep;
-	int	 c, s;
+	int	 c, s, n;
 
 #ifndef NO_MACRO
 	if (macrodef) {
@@ -345,7 +345,10 @@ dobind(KEYMAP *curmap, const char *p, int unbind)
 	} else {
 #endif /* !NO_STARTUP */
 #endif /* !NO_MACRO */
-		pep = prompt + strlcpy(prompt, p, sizeof(prompt));
+		n = strlcpy(prompt, p, sizeof prompt);
+		if (n >= sizeof prompt)
+			n = sizeof prompt - 1;
+		pep = prompt + n;
 		for (;;) {
 			ewprintf("%s", prompt);
 			pep[-1] = ' ';
@@ -504,8 +507,7 @@ unbindtokey(int f, int n)
 }
 
 int
-localunbind(f, n)
-	int f, n;
+localunbind(int f, int n)
 {
 	return dobind(curbp->b_modes[curbp->b_nmodes]->p_map,
 	    "Local unset key: ", TRUE);
@@ -625,7 +627,7 @@ evalfile(int f, int n)
 int
 load(const char *fname)
 {
-	int	 s = TRUE;
+	int	 s = TRUE, line;
 	int	 nbytes = 0;
 	char	 excbuf[128];
 
@@ -636,11 +638,13 @@ load(const char *fname)
 	if (ffropen(fname, NULL) != FIOSUC)
 		return FALSE;
 
+	line = 0;
 	while ((s = ffgetline(excbuf, sizeof(excbuf) - 1, &nbytes)) == FIOSUC) {
+		line++;
 		excbuf[nbytes] = '\0';
 		if (excline(excbuf) != TRUE) {
 			s = FIOERR;
-			ewprintf("Error loading file %s", fname);
+			ewprintf("Error loading file %s at line %d", fname, line);
 			break;
 		}
 	}

@@ -1,4 +1,4 @@
-/*	$OpenBSD: mkalias.c,v 1.8 2002/03/27 02:19:57 fgsch Exp $ */
+/*	$OpenBSD: mkalias.c,v 1.12 2002/09/06 21:37:38 maja Exp $ */
 
 /*
  * Copyright (c) 1997 Mats O Jansson <moj@stacken.kth.se>
@@ -32,7 +32,7 @@
  */
 
 #ifndef LINT
-static char rcsid[] = "$OpenBSD: mkalias.c,v 1.8 2002/03/27 02:19:57 fgsch Exp $";
+static char rcsid[] = "$OpenBSD: mkalias.c,v 1.12 2002/09/06 21:37:38 maja Exp $";
 #endif
 
 #include <ctype.h>
@@ -49,18 +49,13 @@ static char rcsid[] = "$OpenBSD: mkalias.c,v 1.8 2002/03/27 02:19:57 fgsch Exp $
 #include "ypdb.h"
 #include "ypdef.h"
 
-extern char *__progname;		/* from crt0.o */
-
 void
-split_address(address, len, user, host)
-	char *address;
-	int    len;
-	char  *user, *host;
+split_address(char *address, int len, char *user, char *host)
 {
 	char *c, *s, *r;
 	int  i = 0;
 
-	if (index(address, '@')) {
+	if (strchr(address, '@')) {
 		s = user;
 		for (c = address; i < len; i++) {
 			if (*c == '@') {
@@ -72,10 +67,9 @@ split_address(address, len, user, host)
 			c++;
 		}
 		*s = '\0';
-	
 	}
-		
-	if (r = rindex(address, '!')) {
+
+	if ((r = strrchr(address, '!'))) {
 		s = host;
 		for (c = address; i < len; i++) {
 			if (c == r) {
@@ -91,15 +85,13 @@ split_address(address, len, user, host)
 }
 
 int
-check_host(address, host, dflag, uflag, Eflag)
-	char *address, *host;
-	int   dflag, uflag, Eflag;
+check_host(char *address, char *host, int dflag, int uflag, int Eflag)
 {
-	char answer[PACKETSZ];
+	u_char answer[PACKETSZ];
 	int  status;
 
-	if ((dflag && index(address, '@')) ||
-	    (uflag && index(address, '!')))
+	if ((dflag && strchr(address, '@')) ||
+	    (uflag && strchr(address, '!')))
 		return(0);
 
 	if ((_res.options & RES_INIT) == 0)
@@ -117,9 +109,7 @@ check_host(address, host, dflag, uflag, Eflag)
 }
 
 void
-capitalize(name, len)
-	char *name;
-	int len;
+capitalize(char *name, int len)
 {
 	char last = ' ';
 	char *c;
@@ -130,7 +120,7 @@ capitalize(name, len)
 			last = '.';
 		c++;
 	}
-	
+
 	i = 0;
 	if (last == '.') {
 		for (c = name; i < len; i++) {
@@ -139,39 +129,34 @@ capitalize(name, len)
 			last = *c++;
 		}
 	}
-	
+}
+
+void
+usage(void)
+{
+	fprintf(stderr,
+	    "usage: mkalias [-v] [-e|-E [-d] [-u]] [-n] input [output]\n");
+	exit(1);
 }
 
 int
-main(argc, argv)
-	int argc;
-	char *argv[];
+main(int argc, char *argv[])
 {
-	int	usage = 0;
-	int	eflag = 0;
-	int	dflag = 0;
-	int	nflag = 0;
-	int	sflag = 0;
-	int	uflag = 0;
-	int	vflag = 0;
-	int	Eflag = 0;
-	int	ch, fd;
-	char	*input = NULL;
-	char	*output = NULL;
+	int	eflag = 0, dflag = 0, nflag = 0, sflag = 0;
+	int	uflag = 0, vflag = 0, Eflag = 0;
+	int	status, ch, fd;
+	char	*input = NULL, *output = NULL;
 	DBM	*db;
 	datum	key, val;
-	char	*slash;
 	DBM	*new_db = NULL;
 	static	char mapname[] = "ypdbXXXXXXXXXX";
-	char	db_mapname[MAXPATHLEN], db_outfile[MAXPATHLEN],
-		db_tempname[MAXPATHLEN];
-	int	status;
+	char	db_mapname[MAXPATHLEN], db_outfile[MAXPATHLEN];
+	char	db_tempname[MAXPATHLEN];
 	char	user[4096], host[4096]; /* XXX: DB bsize = 4096 in ypdb.c */
-	char	datestr[11];
-	char	myname[MAXHOSTNAMELEN];
-	
+	char	myname[MAXHOSTNAMELEN], datestr[11], *slash;
+
 	while ((ch = getopt(argc, argv, "Edensuv")) != -1)
-		switch(ch) {
+		switch (ch) {
 		case 'E':
 			eflag++;	/* Check hostname */
 			Eflag++;	/* .. even check MX records */
@@ -195,61 +180,52 @@ main(argc, argv)
 			vflag++;	/* Verbose */
 			break;
 		default:
-			usage++;
+			usage();
 			break;
 		}
 
-	if (optind == argc) {
-		usage++;
-	} else {
-		input = argv[optind++];
-		if (optind < argc)
-			output = argv[optind++];
-		if (optind < argc)
-			usage++;
-	}
+	if (optind == argc)
+		usage();
 
-	if (usage) {
-		fprintf(stderr,
-			"usage: %s [-v] [-e|-E [-d] [-u]] [-n] input [output]\n",
-			__progname);
-		exit(1);
-	}
-	
+	input = argv[optind++];
+	if (optind < argc)
+		output = argv[optind++];
+	if (optind < argc)
+		usage();
+
 	db = ypdb_open(input, O_RDONLY, 0444);
 	if (db == NULL) {
 		fprintf(stderr,
-			"%s: Unable to open input database %s\n",
-			__progname,
-			input);
+		    "mkalias: Unable to open input database %s\n",
+		    input);
 		exit(1);
 	}
 
 	if (output != NULL) {
 		if (strlen(output) + strlen(YPDB_SUFFIX) > MAXPATHLEN) {
-			fprintf(stderr,"%s: %s: file name too long\n",
-			        __progname, output);
+			fprintf(stderr,"mkalias: %s: file name too long\n",
+			    output);
 		}
 		snprintf(db_outfile, sizeof(db_outfile),
-			 "%s%s", output, YPDB_SUFFIX);
+		    "%s%s", output, YPDB_SUFFIX);
 
 		slash = strrchr(output, '/');
-		if (slash != NULL) 
-			slash[1] = 0; 			/* truncate to dir */
+		if (slash != NULL)
+			slash[1] = 0;			/* truncate to dir */
 		else
 			*output = 0;			/* elminate */
-	
+
 		/* note: output is now directory where map goes ! */
-	
-		if (strlen(output) + strlen(mapname) 
-				+ strlen(YPDB_SUFFIX) > MAXPATHLEN) {
-			fprintf(stderr,"%s: %s: directory name too long\n",
-				__progname, output);
+
+		if (strlen(output) + strlen(mapname) +
+		    strlen(YPDB_SUFFIX) > MAXPATHLEN) {
+			fprintf(stderr,"mkalias: %s: directory name too long\n",
+			    output);
 			exit(1);
 		}
-	
+
 		snprintf(db_tempname, sizeof(db_tempname), "%s%s%s", output,
-			mapname, YPDB_SUFFIX);
+		    mapname, YPDB_SUFFIX);
 		fd = mkstemps(db_tempname, 3);
 		if (fd == -1)
 			goto fail;
@@ -264,18 +240,15 @@ fail:
 			if (fd != -1)
 				unlink(db_tempname);
 			fprintf(stderr,
-				"%s: Unable to open output database %s\n",
-				__progname,
-				db_outfile);
+			    "mkalias: Unable to open output database %s\n",
+			    db_outfile);
 			exit(1);
 		}
 	}
 
-	for (key = ypdb_firstkey(db);
-	     key.dptr != NULL;
-	     key = ypdb_nextkey(db)) {
-		
-	        val = ypdb_fetch(db, key);
+	for (key = ypdb_firstkey(db); key.dptr != NULL;
+	    key = ypdb_nextkey(db)) {
+		val = ypdb_fetch(db, key);
 
 		if (val.dptr == NULL)
 			continue;			/* No value */
@@ -283,20 +256,19 @@ fail:
 			continue;			/* Sendmail token */
 		if (strncmp(key.dptr, "YP_", 3)==0)	/* YP token */
 			continue;
-		if (index(val.dptr, ','))
+		if (strchr(val.dptr, ','))
 			continue;			/* List... */
-		if (index(val.dptr, '|'))
+		if (strchr(val.dptr, '|'))
 			continue;			/* Pipe... */
 
-		if (!(index(val.dptr, '@') || index(val.dptr, '!')))
+		if (!(strchr(val.dptr, '@') || strchr(val.dptr, '!')))
 			continue;		/* Skip local users */
 
 		split_address(val.dptr, val.dsize, user, host);
 
 		if (eflag && check_host(val.dptr, host, dflag, uflag, Eflag)) {
 			printf("Invalid host %s in %*.*s:%*.*s\n",
-			    host,
-			    key.dsize, key.dsize, key.dptr,
+			    host, key.dsize, key.dsize, key.dptr,
 			    val.dsize, val.dsize, val.dptr);
 			continue;
 		}
@@ -307,48 +279,45 @@ fail:
 		if (new_db != NULL) {
 			status = ypdb_store(new_db, val, key, YPDB_INSERT);
 			if (status != 0) {
-				printf("%s: problem storing %*.*s %*.*s\n",
-				   __progname,
-				   val.dsize, val.dsize, val.dptr,
-				   key.dsize, key.dsize, key.dptr);
+				printf("mkalias: problem storing %*.*s %*.*s\n",
+				    val.dsize, val.dsize, val.dptr,
+				    key.dsize, key.dsize, key.dptr);
 			}
 		}
 
 		if (vflag) {
 			printf("%*.*s --> %*.*s\n",
-			   val.dsize, val.dsize, val.dptr,
-			   key.dsize, key.dsize, key.dptr);
+			    val.dsize, val.dsize, val.dptr,
+			    key.dsize, key.dsize, key.dptr);
 		}
 
 	}
 
 	if (new_db != NULL) {
-	  	snprintf(datestr, sizeof datestr, "%010u", time(NULL));
+		snprintf(datestr, sizeof datestr, "%010u", time(NULL));
 		key.dptr = YP_LAST_KEY;
 		key.dsize = strlen(YP_LAST_KEY);
 		val.dptr = datestr;
 		val.dsize = strlen(datestr);
 		status = ypdb_store(new_db, key, val, YPDB_INSERT);
 		if (status != 0) {
-			printf("%s: problem storing %*.*s %*.*s\n",
-			   __progname,
-			   key.dsize, key.dsize, key.dptr,
-			   val.dsize, val.dsize, val.dptr);
+			printf("mkalias: problem storing %*.*s %*.*s\n",
+			    key.dsize, key.dsize, key.dptr,
+			    val.dsize, val.dsize, val.dptr);
 		}
 	}
 
 	if (new_db != NULL) {
-	  	gethostname(myname, sizeof(myname));
+		gethostname(myname, sizeof(myname));
 		key.dptr = YP_MASTER_KEY;
 		key.dsize = strlen(YP_MASTER_KEY);
 		val.dptr = myname;
 		val.dsize = strlen(myname);
 		status = ypdb_store(new_db, key, val, YPDB_INSERT);
 		if (status != 0) {
-			printf("%s: problem storing %*.*s %*.*s\n",
-			   __progname,
-			   key.dsize, key.dsize, key.dptr,
-			   val.dsize, val.dsize, val.dptr);
+			printf("mkalias: problem storing %*.*s %*.*s\n",
+			    key.dsize, key.dsize, key.dptr,
+			    val.dsize, val.dsize, val.dptr);
 		}
 	}
 

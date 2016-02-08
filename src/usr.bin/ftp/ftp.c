@@ -1,4 +1,4 @@
-/*	$OpenBSD: ftp.c,v 1.43 2002/02/19 19:39:38 millert Exp $	*/
+/*	$OpenBSD: ftp.c,v 1.49 2002/07/04 10:08:00 jakob Exp $	*/
 /*	$NetBSD: ftp.c,v 1.27 1997/08/18 10:20:23 lukem Exp $	*/
 
 /*
@@ -67,7 +67,7 @@
 #if 0
 static char sccsid[] = "@(#)ftp.c	8.6 (Berkeley) 10/27/94";
 #else
-static char rcsid[] = "$OpenBSD: ftp.c,v 1.43 2002/02/19 19:39:38 millert Exp $";
+static char rcsid[] = "$OpenBSD: ftp.c,v 1.49 2002/07/04 10:08:00 jakob Exp $";
 #endif
 #endif /* not lint */
 
@@ -139,7 +139,7 @@ hookup(host, port)
 	memset((char *)&hisctladdr, 0, sizeof (hisctladdr));
 	memset(&hints, 0, sizeof(hints));
 	hints.ai_flags = AI_CANONNAME;
-	hints.ai_family = AF_UNSPEC;
+	hints.ai_family = family;
 	hints.ai_socktype = SOCK_STREAM;
 	hints.ai_protocol = 0;
 	error = getaddrinfo(host, port, &hints, &res0);
@@ -400,9 +400,10 @@ getreply(expecteof)
 			if (dig > 4 && pflag == 1 && isdigit(c))
 				pflag = 2;
 			if (pflag == 2) {
-				if (c != '\r' && c != ')')
-					*pt++ = c;
-				else {
+				if (c != '\r' && c != ')') {
+					if (pt < &pasv[sizeof(pasv) - 1])
+						*pt++ = c;
+				} else {
 					*pt = '\0';
 					pflag = 3;
 				}
@@ -430,7 +431,7 @@ getreply(expecteof)
 			if (len > sizeof(reply_string))
 				len = sizeof(reply_string);
 
-			(void)strlcpy(reply_string, current_line, len + 1);
+			(void)strlcpy(reply_string, current_line, len);
 		}
 		if (continuation && code != originalcode) {
 			if (originalcode == 0)
@@ -1414,6 +1415,20 @@ noport:
 			warn("setsockopt (reuse address)");
 			goto bad;
 		}
+	switch (data_addr.su_family) {
+	case AF_INET:
+		on = IP_PORTRANGE_HIGH;
+		if (setsockopt(data, IPPROTO_IP, IP_PORTRANGE,
+		    (char *)&on, sizeof(on)) < 0)
+			warn("setsockopt IP_PORTRANGE (ignored)");
+		break;
+	case AF_INET6:
+		on = IPV6_PORTRANGE_HIGH;
+		if (setsockopt(data, IPPROTO_IPV6, IPV6_PORTRANGE,
+		    (char *)&on, sizeof(on)) < 0)
+			warn("setsockopt IPV6_PORTRANGE (ignored)");
+		break;
+	}
 	if (bind(data, (struct sockaddr *)&data_addr, data_addr.su_len) < 0) {
 		warn("bind");
 		goto bad;
@@ -1433,10 +1448,12 @@ noport:
 #define	UC(b)	(((int)b)&0xff)
 
 	if (sendport) {
-		char hname[INET6_ADDRSTRLEN];
+		char hname[NI_MAXHOST], pbuf[NI_MAXSERV];
 		int af;
+		union sockunion tmp;
 
-		switch (data_addr.su_family) {
+		tmp = data_addr;
+		switch (tmp.su_family) {
 		case AF_INET:
 			if (!epsv4 || epsv4bad) {
 				result = COMPLETE +1;
@@ -1444,14 +1461,16 @@ noport:
 			}
 			/*FALLTHROUGH*/
 		case AF_INET6:
-			af = (data_addr.su_family == AF_INET) ? 1 : 2;
-			if (getnameinfo((struct sockaddr *)&data_addr,
-					data_addr.su_len, hname, sizeof(hname),
-					NULL, 0, NI_NUMERICHOST)) {
+			if (tmp.su_family == AF_INET6)
+				tmp.su_sin6.sin6_scope_id = 0;
+			af = (tmp.su_family == AF_INET) ? 1 : 2;
+			if (getnameinfo((struct sockaddr *)&tmp,
+			    tmp.su_len, hname, sizeof(hname),
+			    pbuf, sizeof(pbuf), NI_NUMERICHOST | NI_NUMERICSERV)) {
 				result = ERROR;
 			} else {
-				result = command("EPRT |%d|%s|%d|",
-					af, hname, ntohs(data_addr.su_port));
+				result = command("EPRT |%d|%s|%s|",
+				    af, hname, pbuf);
 				if (result != COMPLETE) {
 					epsv4bad = 1;
 					if (debug) {
@@ -1882,7 +1901,7 @@ abort_remote(din)
 	 * send IAC in urgent mode instead of DM because 4.3BSD places oob mark
 	 * after urgent byte rather than before as is protocol now
 	 */
-	sprintf(buf, "%c%c%c", IAC, IP, IAC);
+	snprintf(buf, sizeof buf, "%c%c%c", IAC, IP, IAC);
 	if (send(fileno(cout), buf, 3, MSG_OOB) != 3)
 		warn("abort");
 	fprintf(cout, "%cABOR\r\n", DM);

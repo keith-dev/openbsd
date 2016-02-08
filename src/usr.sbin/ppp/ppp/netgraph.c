@@ -312,6 +312,7 @@ static const struct device basengdevice = {
   ng_Write,
   ng_device2iov,
   NULL,
+  NULL,
   NULL
 };
 
@@ -614,7 +615,7 @@ ng_Create(struct physical *p)
             break;
           }
         }
-        
+
         if (f == ninfo->hooks) {
           /* Attempt to load the module */
           snprintf(modname, sizeof modname, "ng_%s", nodetype);

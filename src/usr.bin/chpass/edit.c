@@ -1,4 +1,4 @@
-/*	$OpenBSD: edit.c,v 1.21 2001/07/12 05:16:57 deraadt Exp $	*/
+/*	$OpenBSD: edit.c,v 1.23 2002/07/31 22:08:42 millert Exp $	*/
 /*	$NetBSD: edit.c,v 1.6 1996/05/15 21:50:45 jtc Exp $	*/
 
 /*-
@@ -38,7 +38,7 @@
 #if 0
 static char sccsid[] = "@(#)edit.c	8.3 (Berkeley) 4/2/94";
 #else
-static char rcsid[] = "$OpenBSD: edit.c,v 1.21 2001/07/12 05:16:57 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: edit.c,v 1.23 2002/07/31 22:08:42 millert Exp $";
 #endif
 #endif /* not lint */
 
@@ -58,7 +58,7 @@ static char rcsid[] = "$OpenBSD: edit.c,v 1.21 2001/07/12 05:16:57 deraadt Exp $
 
 #include "chpass.h"
 
-void
+int
 edit(tempname, pw)
 	char *tempname;
 	struct passwd *pw;
@@ -67,19 +67,20 @@ edit(tempname, pw)
 
 	for (;;) {
 		if (lstat(tempname, &begin) == -1 || S_ISLNK(begin.st_mode))
-			pw_error(tempname, 1, 1);
+			return (EDIT_ERROR);
 		pw_edit(1, tempname);
 		if (lstat(tempname, &end) == -1 || S_ISLNK(end.st_mode))
-			pw_error(tempname, 1, 1);
+			return (EDIT_ERROR);
 		if (begin.st_mtime == end.st_mtime &&
 		    begin.st_size == end.st_size) {
 			warnx("no changes made");
-			pw_error(NULL, 0, 0);
+			return (EDIT_NOCHANGE);
 		}
 		if (verify(tempname, pw))
 			break;
 		pw_prompt();
 	}
+	return(EDIT_OK);
 }
 
 /*
@@ -145,12 +146,12 @@ verify(tempname, pw)
 	char *tempname;
 	struct passwd *pw;
 {
-	ENTRY *ep;
-	char *p, *q;
-	struct stat sb;
-	FILE *fp;
 	unsigned int len, alen, line;
 	static char buf[LINE_MAX];
+	struct stat sb;
+	char *p, *q;
+	ENTRY *ep;
+	FILE *fp;
 
 	if (!(fp = fopen(tempname, "r")))
 		pw_error(tempname, 1, 1);
@@ -166,13 +167,13 @@ verify(tempname, pw)
 		if (!buf[0] || buf[0] == '#')
 			continue;
 		if (!(p = strchr(buf, '\n'))) {
-			warnx("line %d too long", line);
+			warnx("line %u too long", line);
 			goto bad;
 		}
 		*p = '\0';
 		for (ep = list;; ++ep) {
 			if (!ep->prompt) {
-				warnx("unrecognized field on line %d", line);
+				warnx("unrecognized field on line %u", line);
 				goto bad;
 			}
 			if (!strncasecmp(buf, ep->prompt, ep->len)) {
@@ -183,7 +184,7 @@ verify(tempname, pw)
 					goto bad;
 				}
 				if (!(p = strchr(buf, ':'))) {
-					warnx("line %d corrupted", line);
+					warnx("line %u corrupted", line);
 					goto bad;
 				}
 				while (isspace(*++p));
@@ -224,8 +225,9 @@ bad:					(void)fclose(fp);
 			alen = alen + strlen(pw->pw_name) - 1;
 	if (!(p = malloc(len)))
 		err(1, NULL);
-	(void)sprintf(pw->pw_gecos = p, "%s,%s,%s,%s", list[E_NAME].save,
+	(void)snprintf(p, len, "%s,%s,%s,%s", list[E_NAME].save,
 	    list[E_LOCATE].save, list[E_BPHONE].save, list[E_HPHONE].save);
+	pw->pw_gecos = p;
 
 	if (snprintf(buf, sizeof(buf),
 	    "%s:%s:%u:%u:%s:%ld:%ld:%s:%s:%s",

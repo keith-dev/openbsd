@@ -9,7 +9,7 @@
 #define MROUTED
 #include "snmpd/snmp_vars.h"
 
-    u_short dest_port = 0;
+    in_port_t dest_port = 0;
     int sdlen = 0;
 
 struct addrCache {
@@ -27,7 +27,7 @@ static struct addrCache addrCache[10];
  */
 int /* returns: 0 on success, true on error */
 snmp_init(dest_port)
-    u_short dest_port;
+    in_port_t dest_port;
 {
    u_long myaddr;
    int ret;
@@ -90,6 +90,7 @@ snmp_init(dest_port)
        perror("socket");
        return 1;
    }
+   memset(&me, 0, sizeof me);
    me.sin_family = AF_INET;
    me.sin_addr.s_addr = INADDR_ANY;
    /* already in network byte order (I think) */

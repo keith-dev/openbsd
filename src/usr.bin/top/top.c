@@ -1,4 +1,4 @@
-/*	$OpenBSD: top.c,v 1.15 2002/02/16 21:27:55 millert Exp $	*/
+/*	$OpenBSD: top.c,v 1.18 2002/07/15 17:20:36 deraadt Exp $	*/
 
 const char copyright[] = "Copyright (c) 1984 through 1996, William LeFebvre";
 
@@ -6,11 +6,28 @@ const char copyright[] = "Copyright (c) 1984 through 1996, William LeFebvre";
  *  Top users/processes display for Unix
  *  Version 3
  *
- *  This program may be freely redistributed,
- *  but this entire comment MUST remain intact.
+ * Copyright (c) 1984, 1989, William LeFebvre, Rice University
+ * Copyright (c) 1989, 1990, 1992, William LeFebvre, Northwestern University
  *
- *  Copyright (c) 1984, 1989, William LeFebvre, Rice University
- *  Copyright (c) 1989, 1990, 1992, William LeFebvre, Northwestern University
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
+ * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+ * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+ * IN NO EVENT SHALL THE AUTHOR OR HIS EMPLOYER BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
+ * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+ * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+ * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
+ * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
 /*
@@ -117,7 +134,7 @@ char *argv[];
     static char tempbuf2[50];
     sigset_t mask, oldmask;
     int topn = Default_TOPN;
-    int delay = Default_DELAY;
+    double delay = Default_DELAY;
     int displays = 0;		/* indicates unspecified */
     time_t curr_time;
     char *(*get_userid)() = username;
@@ -279,11 +296,12 @@ char *argv[];
 		{
 		  char *endp;
 
-		  delay = strtoul(optarg, &endp, 10);
-		  if (delay < 0 || *endp != '\0')
+		  delay = strtod(optarg, &endp);
+
+		  if (delay < 0 || delay >= 1000000 || *endp != '\0')
 		  {
 		    fprintf(stderr,
-			"%s: warning: seconds delay should be non-negative -- using default\n",
+			"%s: warning: delay should be a non-negative number -- using default\n",
 			myname);
 		    delay = Default_DELAY;
 		    warnings++;
@@ -543,7 +561,7 @@ restart:
 	{
 	    /* determine number of processes to actually display */
 	    /* this number will be the smallest of:  active processes,
-	       number user requested, number current screen accomodates */
+	       number user requested, number current screen accommodates */
 	    active_procs = system_info.p_active;
 	    if (active_procs > topn)
 	    {
@@ -611,8 +629,8 @@ restart:
 		/* set up arguments for select with timeout */
 		FD_ZERO(&readfds);
 		FD_SET(STDIN_FILENO, &readfds);	/* for standard input */
-		timeout.tv_sec  = delay;
-		timeout.tv_usec = 0;
+		timeout.tv_sec  = (long)delay;
+		timeout.tv_usec = (long)((delay - timeout.tv_sec) * 1000000);
 
 		if (leaveflag) {
 		    end_screen();
@@ -775,9 +793,14 @@ restart:
 	    
 			    case CMD_delay:	/* new seconds delay */
 				new_message(MT_standout, "Seconds to delay: ");
-				if ((i = readline(tempbuf1, 8, Yes)) > -1)
+				if (readline(tempbuf2, sizeof(tempbuf2), No) > 0)
 				{
-				    delay = i;
+				    char *endp;
+				    double newdelay = strtod(tempbuf2, &endp);
+				    if (newdelay >= 0 && newdelay < 1000000 && *endp == '\0')
+				    {
+					delay = newdelay;
+				    }
 				}
 				clear_message();
 				break;

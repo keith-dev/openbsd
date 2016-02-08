@@ -11,14 +11,13 @@ NOMAN= not yet kiddies
 SSLEAYDIST= lib/libssl/src
 
 SSLEAY_SRC= ${.CURDIR}/../../${SSLEAYDIST}/apps
+SSLEAY_SRC_TOP= ${.CURDIR}/../../${SSLEAYDIST}
 
 .if ${MACHINE_ARCH} == "i386"
 CFLAGS+= -g -DL_ENDIAN -DBN_ASM
 .else
-.if ${MACHINE_ARCH} == "arc"
-CFLAGS+= -DL_ENDIAN
-.else
-.if ${MACHINE_ARCH} == "pmax"
+.if (${MACHINE_ARCH} == "arc") || (${MACHINE_ARCH} == "pmax") || \
+    (${MACHINE_ARCH} == "vax")
 CFLAGS+= -DL_ENDIAN
 .else
 .if ${MACHINE_ARCH} == "alpha"
@@ -27,11 +26,11 @@ CFLAGS+= -DL_ENDIAN
 CFLAGS+= -DB_ENDIAN
 .endif
 .endif
-.endif
 .endif 
 
-CFLAGS+= -DMONOLITH -DNO_IDEA -DTERMIOS -DANSI_SOURCE -DNO_RC5
-CFLAGS+= -I/usr/include/ssl
+CFLAGS+= -DMONOLITH -DOPENSSL_NO_IDEA -DTERMIOS -DANSI_SOURCE -DOPENSSL_NO_RC5
+CFLAGS+= -DOPENSSL_NO_MDC2
+CFLAGS+= -I/usr/include/ssl -I${SSLEAY_SRC_TOP}
 
 SRCS=	verify.c asn1pars.c req.c dgst.c dh.c enc.c passwd.c gendh.c errstr.c\
 	pkcs7.c crl2p7.c crl.c ca.c \
@@ -39,7 +38,7 @@ SRCS=	verify.c asn1pars.c req.c dgst.c dh.c enc.c passwd.c gendh.c errstr.c\
 	x509.c genrsa.c gendsa.c s_server.c s_client.c speed.c \
 	s_time.c apps.c s_cb.c s_socket.c version.c sess_id.c \
 	app_rand.c ciphers.c nseq.c pkcs12.c pkcs8.c spkac.c smime.c \
-	dhparam.c openssl.c rand.c rsautl.c
+	dhparam.c openssl.c rand.c rsautl.c engine.c ocsp.c
 
 .PATH:	${SSLEAY_SRC}
 

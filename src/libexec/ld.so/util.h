@@ -1,8 +1,10 @@
-/*	$OpenBSD: util.h,v 1.2 2002/04/09 19:59:47 drahn Exp $	*/
+/*	$OpenBSD: util.h,v 1.12 2002/08/31 15:11:59 drahn Exp $	*/
 
 /*
+ * Copyright (c) 1998 Todd C. Miller <Todd.Miller@courtesan.com>
+ * All rights reserved.
  * Copyright (c) 1998 Per Fogelstrom, Opsycon AB
- * 
+ *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
@@ -34,11 +36,12 @@
 
 #ifndef __DL_UTIL_H__
 #define __DL_UTIL_H__
-int _dl_write __P((int, const char *, int));
-void *_dl_malloc(const int size);
+void *_dl_malloc(const size_t size);
 void _dl_free(void *);
 char *_dl_strdup(const char *);
 void _dl_printf(const char *fmt, ...);
+void _dl_fdprintf(int, const char *fmt, ...);
+void _dl_show_objects(void);
 
 /*
  *	The following functions are declared inline so they can
@@ -47,75 +50,94 @@ void _dl_printf(const char *fmt, ...);
 static inline void
 _dl_wrstderr(const char *s)
 {
-	while(*s) {
+	while (*s) {
 		_dl_write(2, s, 1);
 		s++;
 	}
 }
 
 static inline void *
-_dl_memset(void *p, const char v, size_t c)
+_dl_memset(void *dst, const int c, size_t n)
 {
-	char *ip = p;
+	if (n != 0) {
+		register char *d = dst;
 
-	while(c--)
-		*ip++ = v;
-	return(p);
-}
-
-static inline int
-_dl_strlen(const char *p)
-{
-	const char *s = p;
-
-	while(*s != '\0')
-		s++;
-	return(s - p);
-}
-
-static inline char *
-_dl_strcpy(char *d, const char *s)
-{
-	char *rd = d;
-
-	while((*d++ = *s++) != '\0');
-
-	return(rd);
-}
-
-static inline int
-_dl_strncmp(const char *d, const char *s, int c)
-{
-	while(c-- && *d && *d == *s) {
-		d++;
-		s++;
-	};
-	if(c < 0) {
-		return(0);
+		do
+			*d++ = c;
+		while (--n != 0);
 	}
-	return(*d - *s);
+	return (dst);
 }
- 
+
 static inline int
-_dl_strcmp(const char *d, const char *s)
+_dl_strlen(const char *str)
 {
-	while(*d && *d == *s) {
-		d++;
-		s++;
-	}
-	return(*d - *s);
+	const char *s;
+
+	for (s = str; *s; ++s)
+		;
+	return (s - str);
 }
- 
+
+static inline size_t
+_dl_strlcpy(char *dst, const char *src, size_t siz)
+{
+	char *d = dst;
+	const char *s = src;
+	size_t n = siz;
+
+	/* Copy as many bytes as will fit */
+	if (n != 0 && --n != 0) {
+		do {
+			if ((*d++ = *s++) == 0)
+				break;
+		} while (--n != 0);
+	}
+
+	/* Not enough room in dst, add NUL and traverse rest of src */
+	if (n == 0) {
+		if (siz != 0)
+			*d = '\0';		/* NUL-terminate dst */
+		while (*s++)
+			;
+	}
+
+	return(s - src - 1);	/* count does not include NUL */
+}
+
+static inline int
+_dl_strncmp(const char *s1, const char *s2, size_t n)
+{
+	if (n == 0)
+		return (0);
+	do {
+		if (*s1 != *s2++)
+			return (*(unsigned char *)s1 - *(unsigned char *)--s2);
+		if (*s1++ == 0)
+			break;
+	} while (--n != 0);
+	return (0);
+}
+
+static inline int
+_dl_strcmp(const char *s1, const char *s2)
+{
+	while (*s1 == *s2++)
+		if (*s1++ == 0)
+			return (0);
+	return (*(unsigned char *)s1 - *(unsigned char *)--s2);
+}
+
 static inline const char *
-_dl_strchr(const char *p, const int c)
+_dl_strchr(const char *p, const int ch)
 {
-	while(*p) {
-		if(*p == c) {
-			return(p);
-		}
-		p++;
+	for (;; ++p) {
+		if (*p == ch)
+			return((char *)p);
+		if (!*p)
+			return((char *)NULL);
 	}
-	return(0);
+	/* NOTREACHED */
 }
 
 #endif /*__DL_UTIL_H__*/

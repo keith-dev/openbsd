@@ -53,6 +53,7 @@ char *usage = "bootptest [-h] server-name [vendor-data-template-file]";
 #include <ctype.h>
 #include <netdb.h>
 #include <assert.h>
+#include <unistd.h>
 
 #include "bootp.h"
 #include "bootptest.h"
@@ -72,7 +73,8 @@ unsigned char *packetp;
 unsigned char *snapend;
 int snaplen;
 
-
+extern int getether(char *ifname, u_char *eap);
+extern int send_request(int s);
 /*
  * IP port numbers for client and server obtained from /etc/services
  */
@@ -127,7 +129,8 @@ main(argc, argv)
 	char *vendor_file = NULL;
 	char *bp_file = NULL;
 	int s;				/* Socket file descriptor */
-	int n, tolen, fromlen, recvcnt;
+	int n, tolen, recvcnt;
+	socklen_t fromlen;
 	int use_hwa = 0;
 	int32 vend_magic;
 	int32 xid;
@@ -284,7 +287,7 @@ main(argc, argv)
 	bp = (struct bootp *) sndbuf;
 	bzero(bp, sizeof(*bp));
 	bp->bp_op = BOOTREQUEST;
-	xid = (int32) getpid();
+	xid = (int32) getpid();			/* XXX should use arc4random()? */
 	bp->bp_xid = (u_int32) htonl(xid);
 	if (bp_file)
 		strlcpy(bp->bp_file, bp_file, BP_FILE_LEN);
@@ -420,8 +423,7 @@ main(argc, argv)
 	exit(1);
 }
 
-send_request(s)
-	int s;
+int send_request(int s)
 {
 	/* Print the request packet. */
 	printf("Sending to %s", inet_ntoa(sin_server.sin_addr));
@@ -436,6 +438,7 @@ send_request(s)
 		perror("sendto server");
 		exit(1);
 	}
+	return 0;
 }
 
 /*

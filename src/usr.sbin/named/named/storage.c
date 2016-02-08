@@ -1,4 +1,4 @@
-/*	$OpenBSD: storage.c,v 1.4 2002/02/16 21:28:06 millert Exp $	*/
+/*	$OpenBSD: storage.c,v 1.7 2002/07/31 09:19:40 deraadt Exp $	*/
 
 /*
  * ++Copyright++ 1985, 1989
@@ -58,6 +58,8 @@
 #include <sys/types.h>
 #include <sys/param.h>
 #include <syslog.h>
+#include <limits.h>
+#include <errno.h>
 
 #include "../conf/portability.h"
 #include "../conf/options.h"
@@ -125,7 +127,7 @@ unsigned int cnt;
 			mp->mdb_str = "???";
 			goto ok;
 		}
-		syslog(LOG_ERR, "rt_malloc:  memdebug overflow\n");
+		syslog(LOG_ERR, "rt_malloc:  memdebug overflow");
 	}
 ok:	;
 	{
@@ -190,6 +192,10 @@ calloc(num, size)
 {
 	register char *p;
 
+	if (num && size && SIZE_T_MAX / num < size) {
+		errno = ENOMEM;
+		return NULL;
+	}
 	size *= num;
 	if (p = rt_malloc(size))
 		bzero(p, size);

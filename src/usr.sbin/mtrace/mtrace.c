@@ -52,7 +52,7 @@
 
 #ifndef lint
 static char rcsid[] =
-    "@(#) $Id: mtrace.c,v 1.12 2002/02/19 19:39:40 millert Exp $";
+    "@(#) $Id: mtrace.c,v 1.15 2002/08/09 02:12:15 itojun Exp $";
 #endif
 
 #include <netdb.h>
@@ -409,7 +409,7 @@ send_recv(dst, type, code, tries, save)
     else local = INADDR_ANY;
 
     /*
-     * If the reply address was not explictly specified, start off
+     * If the reply address was not explicitly specified, start off
      * with the unicast address of this host.  Then, if there is no
      * response after trying half the tries with unicast, switch to
      * the standard multicast reply address.  If the TTL was also not
@@ -457,6 +457,8 @@ send_recv(dst, type, code, tries, save)
 	 */
 	while (TRUE) {
 	    FD_ZERO(&fds);
+	    if (igmp_socket >= FD_SETSIZE)
+		log(LOG_ERR, 0, "descriptor too big");
 	    FD_SET(igmp_socket, &fds);
 	    gettimeofday(&tv, 0);
 	    tv.tv_sec = tq.tv_sec + timeout - tv.tv_sec;
@@ -624,8 +626,6 @@ passive_mode()
     int ipdatalen, iphdrlen, igmpdatalen;
     int len, recvlen, dummy = 0;
     u_int32_t smask;
-
-    init_igmp();
 
     if (raddr) {
 	if (IN_MULTICAST(ntohl(raddr))) k_join(raddr, INADDR_ANY);
@@ -1311,6 +1311,7 @@ Usage: mtrace [-Mlnps] [-w wait] [-m max_hops] [-q nqueries] [-g gateway]\n\
     /*
      * Get default local address for multicasts to use in setting defaults.
      */
+    memset(&addr, 0, sizeof addr);
     addr.sin_family = AF_INET;
 #if (defined(BSD) && (BSD >= 199103))
     addr.sin_len = sizeof(addr);
@@ -1329,7 +1330,7 @@ Usage: mtrace [-Mlnps] [-w wait] [-m max_hops] [-q nqueries] [-g gateway]\n\
     /*
      * SunOS 5.X prior to SunOS 2.6, getsockname returns 0 for udp socket.
      * This call to sysinfo will return the hostname.
-     * If the default multicast interfface (set with the route
+     * If the default multicast interface (set with the route
      * for 224.0.0.0) is not the same as the hostname,
      * mtrace -i [if_addr] will have to be used.
      */
@@ -1675,18 +1676,16 @@ void
 log(int severity, int syserr, char *format, ...)
 {
     va_list ap;
-    char    fmt[100];
 
     switch (debug) {
 	case 0: if (severity > LOG_WARNING) return;
 	case 1: if (severity > LOG_NOTICE) return;
 	case 2: if (severity > LOG_INFO  ) return;
 	default:
-	    fmt[0] = '\0';
-	    if (severity == LOG_WARNING) strcat(fmt, "warning - ");
-	    strncat(fmt, format, 80);
+	    if (severity == LOG_WARNING)
+		fprintf(stderr, "warning - ");
 	    va_start(ap, format);
-	    vfprintf(stderr, fmt, ap);
+	    vfprintf(stderr, format, ap);
 	    va_end(ap);
 	    if (syserr == 0)
 		fprintf(stderr, "\n");

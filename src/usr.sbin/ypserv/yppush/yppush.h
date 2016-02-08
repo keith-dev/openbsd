@@ -1,4 +1,4 @@
-/*	$OpenBSD: yppush.h,v 1.5 2002/02/19 19:39:41 millert Exp $ */
+/*	$OpenBSD: yppush.h,v 1.7 2002/09/06 18:40:02 deraadt Exp $ */
 
 /*
  * Copyright (c) 1996 Mats O Jansson <moj@stacken.kth.se>
@@ -52,7 +52,7 @@ enum yppush_status {
 	YPPUSH_CLEAR = -11,
 	YPPUSH_FORCE = -12,
 	YPPUSH_XFRERR = -13,
-	YPPUSH_REFUSED = -14,
+	YPPUSH_REFUSED = -14
 };
 typedef enum yppush_status yppush_status;
 
@@ -68,8 +68,8 @@ typedef struct yppushresp_xfr yppushresp_xfr;
 #define YPPUSHPROC_XFRRESP	((u_long)1)
 
 __BEGIN_DECLS
-bool_t xdr_yppush_status(XDR *, yppush_status*);
-bool_t xdr_yppushresp_xfr(XDR *, yppushresp_xfr*);
+bool_t xdr_yppush_status(XDR *, yppush_status *);
+bool_t xdr_yppushresp_xfr(XDR *, yppushresp_xfr *);
 void * yppushproc_null_1(void *, CLIENT *);
 void * yppushproc_null_1_svc(void *, struct svc_req *);
 void * yppushproc_xfrresp_1(yppushresp_xfr *, CLIENT *);

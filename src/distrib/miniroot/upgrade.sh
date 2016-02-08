@@ -1,5 +1,5 @@
 #!/bin/sh
-#	$OpenBSD: upgrade.sh,v 1.31 2002/04/13 21:03:31 deraadt Exp $
+#	$OpenBSD: upgrade.sh,v 1.43 2002/10/03 00:56:44 krw Exp $
 #	$NetBSD: upgrade.sh,v 1.2.4.5 1996/08/27 18:15:08 gwr Exp $
 #
 # Copyright (c) 1997-2002 Todd Miller, Theo de Raadt, Ken Westerback
@@ -56,79 +56,61 @@ MODE=upgrade
 # work!
 THESETS=`echo $THESETS | sed -e 's/ etc / /'`
 
-# XXX Work around vnode aliasing bug (thanks for the tip, Chris...)
-ls -l /dev > /dev/null 2>&1
-
-while [ "X${ROOTDISK}" = "X" ]; do
-	getrootdisk
-done
-
-# Assume partition 'a' of $ROOTDISK is for the root filesystem. Confirm
-# this with the user. Check and mount the root filesystem.
+# Have the user confirm that $ROOTDEV is the root filesystem.
 resp=
-while [ "X${resp}" = "X" ]; do
-	echo -n	"Root filesystem? [${ROOTDISK}a] "
-	getresp "${ROOTDISK}a"
-	_root_filesystem=/dev/`basename $resp`
-	if [ ! -b ${_root_filesystem} ]; then
-		echo "Sorry, ${_root_filesystem} is not a block device."
+while [ -z "$resp" ]; do
+	ask "Root filesystem?" "$ROOTDEV"
+	resp=${resp##*/}
+	if [ ! -b /dev/$resp ]; then
+		echo "Sorry, ${resp} is not a block device."
 		resp=
 	fi
 done
+ROOTDEV=$resp
 
-echo -n "Checking root filesystem (fsck -fp ${_root_filesystem}) ... "
-if fsck -fp ${_root_filesystem} > /dev/null 2>&1; then
-	echo	"OK."
-else
-	echo	"FAILED.\nYou must fsck ${_root_filesystem} manually."
-	exit 1
+echo -n "Checking root filesystem (fsck -fp /dev/${ROOTDEV}) ... "
+if ! fsck -fp /dev/$ROOTDEV > /dev/null 2>&1; then
+	echo	"FAILED.\nYou must fsck ${ROOTDEV} manually."
+	exit
 fi
+echo	"OK."
 
 echo -n "Mounting root filesystem ... "
-if mount -o ro ${_root_filesystem} /mnt; then
-	echo	"Done."
-else
+if ! mount -o ro /dev/$ROOTDEV /mnt; then
 	echo	"ERROR: can't mount root filesystem!"
-	exit 1
+	exit
 fi
+echo	"Done."
 
-# fstab and hosts are required for upgrade
-for _file in fstab hosts; do
+# The fstab, hosts and myname files are required.
+for _file in fstab hosts myname; do
 	if [ ! -f /mnt/etc/$_file ]; then
 		echo "ERROR: no /etc/${_file}!"
-		exit 1
+		exit
 	fi
 	cp /mnt/etc/$_file /tmp/$_file
 done
 
+# Set the FQDN and system hostname (short form).
+HOSTNAME=`cat /tmp/myname`
+FQDN=$HOSTNAME
+HOSTNAME=${HOSTNAME%%.*}
+FQDN=${FQDN#${HOSTNAME}}
+FQDN=${FQDN#.}
+[[ -n $FQDN ]] || get_resolv_fqdn /mnt/etc/resolv.conf
+hostname $HOSTNAME.$FQDN
+
 # Start up the network in same/similar configuration as the installed system
 # uses.
-cat << __EOT
-
-The upgrade program would now like to enable the network. It will use the
-configuration already stored on the root filesystem. This is required
-if you wish to use the network installation capabilities of this program.
-
-__EOT
-echo -n	"Enable network? [y] "
-getresp y
+ask "Enable network using configuration stored on root filesystem?" y
 case $resp in
 y*|Y*)
 	if ! enable_network; then
 		echo "ERROR: can't enable network!"
-		exit 1
+		exit
 	fi
 
-	cat << __EOT
-
-You will now be given the opportunity to escape to the command shell to
-do any additional network configuration you may need. This may include
-adding additional routes, if needed. In addition, you might take this
-opportunity to redo the default route in the event that it failed above.
-
-__EOT
-	echo -n "Escape to shell? [n] "
-	getresp n
+	ask "Do you want to do more, manual, network configuration?" n
 	case $resp in
 	y*|Y*)	echo "Type 'exit' to return to upgrade."
 		sh
@@ -137,93 +119,41 @@ __EOT
 	;;
 esac
 
-echo	"The fstab is configured as follows:\n"
-cat /tmp/fstab
-
 cat << __EOT
 
-You may wish to edit the fstab. For example, you may need to resolve
-dependencies in the order which the filesystems are mounted.
+The fstab is configured as follows:
 
-NOTE:	1) this fstab is used only during the upgrade. It will not be
-	   copied into the root filesystem.
+$(</tmp/fstab)
 
-	2) all non-ffs filesystems, and filesystems with the 'noauto'
-	   option, will be ignored during the upgrade.
+You can edit the fstab now, before it is used, but the edited fstab will
+only be used during the upgrade. It will not be copied back to disk.
+
+Filesystems in the fstab will be mounted only if the 'noauto' option is
+absent, /sbin/mount_<fstype> is found, and the fstype is not nfs. Only
+filesystems with a fstype of ffs will be mounted read-write.
 
 __EOT
-echo -n	"Edit the fstab with ${EDITOR}? [n] "
-getresp n
+ask "Edit the fstab with ${EDITOR}?" n
 case $resp in
 y*|Y*)	${EDITOR} /tmp/fstab
 	;;
 esac
 
-echo
+# Create /etc/fstab.
+munge_fstab
 
-# Create a fstab containing only ffs filesystems w/o 'noauto'.
-munge_fstab < /tmp/fstab
+# fsck -p non-root filesystems in /etc/fstab.
+check_fs
 
+# Mount filesystems in /etc/fstab.
 if ! umount /mnt; then
 	echo	"ERROR: can't unmount previously mounted root!"
-	exit 1
+	exit
 fi
-
-# Check filesystems.
-echo "Checking non-root filesystems..."
-if ! check_fs $_root_filesystem; then
-	# Prevent check_fs() invocation in cleanup_on_exit from fsck'ing.
-	# Remember /etc/fstab is a link, /tmp/fstab.shadow is the file!
-	rm /tmp/fstab.shadow
-fi
-echo "...Done."
-
-if [ ! -f /etc/fstab ]; then
-	exit 2
-else
-	# Mount filesystems.
-	mount_fs
-fi
-
-# If Xfree86 v3 directories that would prevent upgrading to XFree86 v4
-# are found, move them and replace them with links that the upgrade
-# can replace with new values.
-(
-if [ -d /mnt/usr/X11R6/lib/X11 ]; then
-	cd /mnt/usr/X11R6/lib/X11
-	for xf3dir in twm xkb xsm xinit rstart; do
-		if [ -e $xf3dir -a ! -L $xf3dir ]; then
-			mkdir -p XF3
-			mv $xf3dir XF3/.
-			ln -s XF3/$xf3dir $xf3dir
-		fi
-	done
-fi
-)
-
-echo -n	"Are the upgrade sets on one of your normally mounted (local) filesystems? [y] "
-getresp y
-case $resp in
-y*|Y*)	get_localdir /mnt
-	;;
-esac
+mount_fs
 
 # Install sets.
 install_sets $THESETS
-
-# Copy in configuration information and make devices in target root.
-(
-	if [ -f /mnt/etc/sendmail.cf -a ! -f /mnt/etc/mail/sendmail.cf ]; then
-		echo "Moving /etc/sendmail.cf -> /etc/mail/sendmail.cf"
-		[ -d /mnt/etc/mail ] || mkdir /mnt/etc/mail
-		mv /mnt/etc/sendmail.cf /mnt/etc/mail/sendmail.cf
-		ed - /mnt/etc/rc << __EOT
-1,$s/etc\/sendmail.cf/etc\/mail\/sendmail.cf/g
-w
-q
-__EOT
-	fi
-)
 
 # Perform final steps common to both an install and an upgrade.
 finish_up

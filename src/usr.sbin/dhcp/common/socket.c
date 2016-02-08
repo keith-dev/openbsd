@@ -51,10 +51,10 @@ int if_register_socket (info)
 	int flag;
 
 	/* Set up the address we're going to bind to. */
+	memset(&name, 0, sizeof name);
 	name.sin_family = AF_INET;
 	name.sin_port = local_port;
 	name.sin_addr.s_addr = INADDR_ANY;
-	memset (name.sin_zero, 0, sizeof (name.sin_zero));
 
 	/* Make a socket... */
 	if ((sock = socket (AF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0)
@@ -142,7 +142,7 @@ void fallback_discard (protocol)
 {
 	char buf [1540];
 	struct sockaddr_in from;
-	int flen = sizeof from;
+	socklen_t flen = sizeof from;
 	int status;
 	struct interface_info *interface = protocol -> local;
 

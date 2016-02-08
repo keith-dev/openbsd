@@ -1,5 +1,5 @@
 # Build wrapper for Apache 
-# $OpenBSD: Makefile.bsd-wrapper,v 1.26 2002/03/17 04:52:14 brad Exp $
+# $OpenBSD: Makefile.bsd-wrapper,v 1.34 2002/09/18 16:34:52 henning Exp $
 
 # Our lndir is hacked; specify a full path to avoid potential conflicts
 # with the one installed with X11.
@@ -135,6 +135,7 @@ MUNGEDFILES =	${.OBJDIR}/src/ap/Makefile \
 		${.OBJDIR}/src/modules/extra/Makefile \
 		${.OBJDIR}/src/modules/proxy/Makefile \
 		${.OBJDIR}/src/modules/standard/Makefile \
+		${.OBJDIR}/src/modules/keynote/Makefile \
 		${.OBJDIR}/src/modules/ssl/Makefile \
 		${.OBJDIR}/src/modules/ssl/ssl_expr_parse.c \
 		${.OBJDIR}/src/modules/ssl/ssl_expr_parse.h \
@@ -154,11 +155,11 @@ MUNGEDFILES =	${.OBJDIR}/src/ap/Makefile \
 BINFILES= 	src/support/htdigest src/support/htpasswd
 
 SBINFILES= \
-	src/httpd src/support/ab \
+	src/httpd \
 	src/support/logresolve src/support/rotatelogs src/support/suexec
 
 MAN+=	src/support/dbmmanage.1 src/support/htdigest.1 src/support/htpasswd.1 \
-	src/support/ab.8 src/support/apachectl.8 src/support/logresolve.8 \
+	src/support/apachectl.8 src/support/logresolve.8 \
 	httpd.8 src/support/rotatelogs.8 src/support/apxs.8 \
 	src/support/suexec.8
 
@@ -180,6 +181,7 @@ INCFILES= \
 	src/include/conf.h \
 	src/include/explain.h \
 	src/include/fnmatch.h \
+	src/include/fdcache.h \
 	src/include/hsregex.h \
 	src/include/http_conf_globals.h \
 	src/include/http_config.h \
@@ -196,9 +198,9 @@ INCFILES= \
 	src/include/util_date.h \
 	src/include/util_md5.h \
 	src/include/util_script.h \
+	src/include/util_uri.h \
 	src/os/unix/os-inline.c \
-	src/os/unix/os.h \
-	src/include/util_uri.h
+	src/os/unix/os.h
 
 XMLFILES= \
 	src/lib/expat-lite/asciitab.h \
@@ -214,9 +216,8 @@ XMLFILES= \
 	src/lib/expat-lite/xmltok_impl.h
 
 CONFFILES= \
-	conf/srm.conf-dist conf/access.conf-dist conf/httpd.conf-dist \
-	conf/mime.types conf/access.conf conf/httpd.conf \
-	conf/magic conf/srm.conf 
+	conf/httpd.conf-dist conf/httpd.conf \
+	conf/mime.types conf/magic
 
 HTDOCS= \
 	htdocs/apache_pb.gif htdocs/index.html htdocs/openbsdpower.gif \
@@ -227,38 +228,134 @@ HTDOCS= \
 CGIFILES=	cgi-bin/printenv cgi-bin/test-cgi	
 
 MANUALFILES= \
-	manual/mod/directive-dict.html \
-	manual/mod/footer.html \
-	manual/mod/header.html \
-	manual/mod/mod_access.html \
-	manual/mod/mod_actions.html \
-	manual/mod/mod_alias.html \
-	manual/mod/mod_asis.html \
-	manual/mod/mod_auth.html \
-	manual/mod/mod_auth_anon.html \
-	manual/mod/mod_auth_db.html \
-	manual/mod/mod_auth_dbm.html \
-	manual/mod/mod_auth_digest.html \
-	manual/mod/mod_autoindex.html \
-	manual/mod/mod_browser.html \
-	manual/mod/mod_cern_meta.html \
-	manual/mod/mod_so.html \
-	manual/mod/mod_cgi.html \
-	manual/mod/mod_cookies.html \
-	manual/mod/mod_digest.html \
-	manual/mod/mod_dld.html \
-	manual/mod/mod_dll.html \
-	manual/mod/mod_example.html \
-	manual/mod/mod_expires.html \
-	manual/mod/mod_headers.html \
-	manual/mod/mod_imap.html \
-	manual/mod/mod_include.html \
-	manual/mod/mod_info.html \
-	manual/mod/mod_isapi.html \
-	manual/mod/mod_log_agent.html \
-	manual/mod/mod_log_common.html \
-	manual/mod/mod_log_config.html \
-	manual/mod/mod_log_referer.html \
+	manual/howto/auth.html \
+	manual/howto/cgi.html.en \
+	manual/howto/cgi.html.html \
+	manual/howto/cgi.html.ja.jis \
+	manual/howto/footer.html \
+	manual/howto/header.html \
+	manual/howto/ssi.html.en \
+	manual/howto/ssi.html.html \
+	manual/howto/ssi.html.ja.jis \
+	manual/LICENSE \
+	manual/bind.html.en \
+	manual/bind.html.fr \
+	manual/bind.html.html \
+	manual/bind.html.ja.jis \
+	manual/cgi_path.html.en \
+	manual/cgi_path.html.fr \
+	manual/cgi_path.html.html \
+	manual/cgi_path.html.ja.jis \
+	manual/configuring.html.en \
+	manual/configuring.html.fr \
+	manual/configuring.html.html \
+	manual/configuring.html.ja.jis \
+	manual/content-negotiation.html \
+	manual/custom-error.html.en \
+	manual/custom-error.html.fr \
+	manual/custom-error.html.html \
+	manual/custom-error.html.ja.jis \
+	manual/cygwin.html \
+	manual/dns-caveats.html.en \
+	manual/dns-caveats.html.fr \
+	manual/dns-caveats.html.html \
+	manual/dso.html \
+	manual/ebcdic.html \
+	manual/env.html.en \
+	manual/env.html.html \
+	manual/env.html.ja.jis \
+	manual/footer.html \
+	manual/handler.html.en \
+	manual/handler.html.html \
+	manual/handler.html.ja.jis \
+	manual/header.html \
+	manual/index.html.en \
+	manual/index.html.fr \
+	manual/index.html.html \
+	manual/index.html.ja.jis \
+	manual/install-tpf.html \
+	manual/install.html.en \
+	manual/install.html.es \
+	manual/install.html.fr \
+	manual/install.html.html \
+	manual/install.html.ja.jis \
+	manual/invoking.html.en \
+	manual/invoking.html.fr \
+	manual/invoking.html.html \
+	manual/keepalive.html.en \
+	manual/keepalive.html.html \
+	manual/keepalive.html.ja.jis \
+	manual/location.html \
+	manual/logs.html \
+	manual/images/apache_header.gif \
+	manual/images/apache_pb.gif \
+	manual/images/custom_errordocs.gif \
+	manual/images/feather.jpg \
+	manual/images/home.gif \
+	manual/images/index.gif \
+	manual/images/mod_rewrite_fig1.fig \
+	manual/images/mod_rewrite_fig1.gif \
+	manual/images/mod_rewrite_fig2.fig \
+	manual/images/mod_rewrite_fig2.gif \
+	manual/images/mod_ssl_sb.gif \
+	manual/images/openssl_ics.gif \
+	manual/images/pixel.gif \
+	manual/images/sub.gif \
+	manual/man-template.html \
+	manual/mpeix.html \
+	manual/multilogs.html \
+	manual/netware.html \
+	manual/new_features_1_0.html \
+	manual/new_features_1_1.html \
+	manual/new_features_1_2.html \
+	manual/new_features_1_3.html.en \
+	manual/new_features_1_3.html.html \
+	manual/new_features_1_3.html.ja.jis \
+	manual/new_features_2_0.html \
+	manual/process-model.html.en \
+	manual/process-model.html.html \
+	manual/process-model.html.ja.jis \
+	manual/misc/API.html \
+	manual/misc/FAQ.html \
+	manual/misc/HTTP_Features.tsv \
+	manual/misc/client_block_api.html \
+	manual/misc/compat_notes.html \
+	manual/misc/custom_errordocs.html \
+	manual/misc/descriptors.html \
+	manual/misc/fin_wait_2.html \
+	manual/misc/footer.html \
+	manual/misc/header.html \
+	manual/misc/howto.html \
+	manual/misc/index.html \
+	manual/misc/known_client_problems.html \
+	manual/misc/nopgp.html \
+	manual/misc/perf-bsd44.html \
+	manual/misc/perf-dec.html \
+	manual/misc/perf-hp.html \
+	manual/misc/perf-tuning.html \
+	manual/misc/perf.html \
+	manual/misc/rewriteguide.html \
+	manual/misc/security_tips.html \
+	manual/misc/tutorials.html \
+	manual/misc/vif-info.html \
+	manual/misc/windoz_keepalive.html \
+	manual/readme-tpf.html \
+	manual/sections.html.en \
+	manual/sections.html.html \
+	manual/sections.html.ja.jis \
+	manual/server-wide.html.en \
+	manual/server-wide.html.fr \
+	manual/server-wide.html.html \
+	manual/server-wide.html.ja.jis \
+	manual/sitemap.html \
+	manual/sourcereorg.html \
+	manual/stopping.html.en \
+	manual/stopping.html.fr \
+	manual/stopping.html.html \
+	manual/suexec.html.en \
+	manual/suexec.html.html \
+	manual/suexec.html.ja.jis \
+	manual/suexec_1_2.html \
 	manual/mod/mod_ssl/index.html \
 	manual/mod/mod_ssl/ssl_compat.gfont000.gif \
 	manual/mod/mod_ssl/ssl_compat.html \
@@ -292,12 +389,12 @@ MANUALFILES= \
 	manual/mod/mod_ssl/ssl_template.head-num-2.gif \
 	manual/mod/mod_ssl/ssl_template.head-num-3.gif \
 	manual/mod/mod_ssl/ssl_template.head-num-4.gif \
-	manual/mod/mod_ssl/ssl_template.inc \
 	manual/mod/mod_ssl/ssl_template.head-num-5.gif \
 	manual/mod/mod_ssl/ssl_template.head-num-6.gif \
 	manual/mod/mod_ssl/ssl_template.head-num-7.gif \
 	manual/mod/mod_ssl/ssl_template.imgdot-1x1-000000.gif \
 	manual/mod/mod_ssl/ssl_template.imgdot-1x1-transp.gif \
+	manual/mod/mod_ssl/ssl_template.inc \
 	manual/mod/mod_ssl/ssl_template.navbut-next-n.gif \
 	manual/mod/mod_ssl/ssl_template.navbut-next-s.gif \
 	manual/mod/mod_ssl/ssl_template.navbut-prev-n.gif \
@@ -313,241 +410,378 @@ MANUALFILES= \
 	manual/mod/mod_ssl/ssl_template.title-ref.gif \
 	manual/mod/mod_ssl/ssl_template.title-toc.gif \
 	manual/mod/mod_ssl/ssl_template.title-tutor.gif \
+	manual/mod/core.html.en \
+	manual/mod/core.html.fr \
+	manual/mod/core.html.html \
+	manual/mod/directive-dict.html.en \
+	manual/mod/directive-dict.html.fr \
+	manual/mod/directive-dict.html.html \
+	manual/mod/directive-dict.html.ja.jis \
+	manual/mod/directives.html.de \
+	manual/mod/directives.html.en \
+	manual/mod/directives.html.fr \
+	manual/mod/directives.html.html \
+	manual/mod/directives.html.ja.jis \
+	manual/mod/footer.html \
+	manual/mod/header.html \
+	manual/mod/index.html.en \
+	manual/mod/index-bytype.html.en \
+	manual/mod/index-bytype.html.fr \
+	manual/mod/index-bytype.html.html \
+	manual/mod/index-bytype.html.ja.jis \
+	manual/mod/index.html.fr \
+	manual/mod/index.html.html \
+	manual/mod/index.html.ja.jis \
+	manual/mod/mod_access.html.en \
+	manual/mod/mod_access.html.html \
+	manual/mod/mod_access.html.ja.jis \
+	manual/mod/mod_actions.html.en \
+	manual/mod/mod_actions.html.html \
+	manual/mod/mod_actions.html.ja.jis \
+	manual/mod/mod_alias.html \
+	manual/mod/mod_asis.html.en \
+	manual/mod/mod_asis.html.html \
+	manual/mod/mod_asis.html.ja.jis \
+	manual/mod/mod_auth.html \
+	manual/mod/mod_auth_anon.html \
+	manual/mod/mod_auth_db.html \
+	manual/mod/mod_auth_dbm.html \
+	manual/mod/mod_auth_digest.html \
+	manual/mod/mod_autoindex.html \
+	manual/mod/mod_browser.html \
+	manual/mod/mod_cern_meta.html \
+	manual/mod/mod_cgi.html.en \
+	manual/mod/mod_cgi.html.html \
+	manual/mod/mod_cgi.html.ja.jis \
+	manual/mod/mod_cookies.html \
+	manual/mod/mod_define.html \
+	manual/mod/mod_digest.html \
+	manual/mod/mod_dir.html.en \
+	manual/mod/mod_dir.html.html \
+	manual/mod/mod_dir.html.ja.jis \
+	manual/mod/mod_dld.html \
+	manual/mod/mod_env.html.en \
+	manual/mod/mod_env.html.html \
+	manual/mod/mod_env.html.ja.jis \
+	manual/mod/mod_example.html \
+	manual/mod/mod_expires.html \
+	manual/mod/mod_headers.html \
+	manual/mod/mod_imap.html \
+	manual/mod/mod_include.html \
+	manual/mod/mod_info.html.en \
+	manual/mod/mod_info.html.html \
+	manual/mod/mod_info.html.ja.jis \
+	manual/mod/mod_isapi.html \
+	manual/mod/mod_log_agent.html \
+	manual/mod/mod_log_common.html \
+	manual/mod/mod_log_config.html \
+	manual/mod/mod_log_referer.html \
+	manual/mod/mod_mime.html.en \
+	manual/mod/mod_mime.html.html \
+	manual/mod/mod_mime.html.ja.jis \
 	manual/mod/mod_mime_magic.html \
 	manual/mod/mod_mmap_static.html \
-	manual/mod/mod_negotiation.html \
+	manual/mod/mod_negotiation.html.en \
+	manual/mod/mod_negotiation.html.html \
+	manual/mod/mod_negotiation.html.ja.jis \
 	manual/mod/mod_proxy.html \
 	manual/mod/mod_rewrite.html \
-	manual/mod/mod_speling.html \
+	manual/mod/mod_setenvif.html.en \
+	manual/mod/mod_setenvif.html.html \
+	manual/mod/mod_so.html.en \
+	manual/mod/mod_setenvif.html.ja.jis \
+	manual/mod/mod_so.html.html \
+	manual/mod/mod_so.html.ja.jis \
+	manual/mod/mod_speling.html.en \
+	manual/mod/mod_speling.html.html \
+	manual/mod/mod_speling.html.ja.jis \
 	manual/mod/mod_status.html \
-	manual/mod/mod_unique_id.html \
-	manual/mod/mod_userdir.html \
+	manual/mod/mod_unique_id.html.en \
+	manual/mod/mod_unique_id.html.html \
+	manual/mod/mod_unique_id.html.ja.jis \
+	manual/mod/mod_userdir.html.en \
+	manual/mod/mod_userdir.html.html \
+	manual/mod/mod_userdir.html.ja.jis \
 	manual/mod/mod_usertrack.html \
 	manual/mod/mod_vhost_alias.html \
-	manual/mod/mod_define.html \
-	manual/LICENSE \
-	manual/content-negotiation.html \
-	manual/custom-error.html \
-	manual/dso.html \
-	manual/ebcdic.html \
-	manual/footer.html \
-	manual/handler.html \
-	manual/header.html \
-	manual/index.html \
-	manual/install-tpf.html \
-	manual/install.html \
-	manual/location.html \
-	manual/man-template.html \
-	manual/multilogs.html \
-	manual/new_features_1_0.html \
-	manual/new_features_1_1.html \
-	manual/new_features_1_2.html \
-	manual/new_features_1_3.html \
-	manual/netware.html \
-	manual/process-model.html \
-	manual/readme-tpf.html \
-	manual/sections.html \
-	manual/sourcereorg.html \
-	manual/suexec_1_2.html \
+	manual/mod/module-dict.html.en \
+	manual/mod/module-dict.html.html \
+	manual/mod/module-dict.html.ja.jis \
 	manual/unixware.html \
 	manual/upgrading_to_1_3.html \
-	manual/windows.html \
-	manual/images/custom_errordocs.gif \
-	manual/images/home.gif \
-	manual/images/index.gif \
-	manual/images/mod_rewrite_fig1.fig \
-	manual/images/mod_rewrite_fig1.gif \
-	manual/images/mod_rewrite_fig2.fig \
-	manual/images/mod_rewrite_fig2.gif \
-	manual/images/sub.gif \
-	manual/images/apache_pb.gif \
-	manual/images/mod_ssl_sb.gif \
-	manual/images/openssl_ics.gif \
-	manual/images/feather.jpg \
-	manual/misc/API.html \
-	manual/misc/fin_wait_2.html \
-	manual/misc/FAQ.html \
-	manual/misc/known_client_problems.html \
-	manual/misc/client_block_api.html \
-	manual/misc/compat_notes.html \
-	manual/misc/custom_errordocs.html \
-	manual/misc/descriptors.html \
-	manual/misc/HTTP_Features.tsv \
-	manual/misc/footer.html \
-	manual/misc/header.html \
-	manual/misc/howto.html \
-	manual/misc/index.html \
-	manual/misc/perf-bsd44.html \
-	manual/misc/nopgp.html \
-	manual/misc/perf-tuning.html \
-	manual/misc/perf-dec.html \
-	manual/misc/perf-hp.html \
-	manual/misc/security_tips.html \
-	manual/misc/perf.html \
-	manual/misc/vif-info.html \
-	manual/misc/rewriteguide.html \
-	manual/misc/windoz_keepalive.html \
-	manual/search/manual-index.cgi \
-	manual/vhosts/details.html \
-	manual/vhosts/details_1_2.html \
-	manual/vhosts/examples.html \
-	manual/vhosts/fd-limits.html \
-	manual/vhosts/footer.html \
-	manual/vhosts/header.html \
-	manual/vhosts/host.html \
-	manual/vhosts/index.html \
-	manual/vhosts/ip-based.html \
-	manual/vhosts/mass.html \
-	manual/vhosts/vhosts-in-depth.html \
-	manual/vhosts/virtual-host.html \
-	manual/configuring.html \
-	manual/mpeix.html \
-	manual/new_features_2_0.html \
-	manual/win_compiling.html \
-	manual/misc/tutorials.html \
-	manual/mod/module-dict.html \
-	manual/vhosts/index.html.ja.jis \
-	manual/vhosts/index.html.en \
-	manual/vhosts/index.html.html \
-	manual/mod/module-dict.html.ja.jis \
-	manual/mod/module-dict.html.html \
-	manual/mod/module-dict.html.en \
-	manual/mod/mod_negotiation.html.ja.jis \
-	manual/mod/mod_negotiation.html.html \
-	manual/mod/mod_negotiation.html.en \
-	manual/mod/directive-dict.html.ja.jis \
-	manual/mod/directive-dict.html.html \
-	manual/mod/directive-dict.html.en \
-	manual/images/apache_header.gif \
-	manual/images/pixel.gif \
 	manual/urlmapping.html \
-	manual/configuring.html.en \
-	manual/configuring.html.html \
-	manual/configuring.html.ja.jis \
-	manual/custom-error.html.en \
-	manual/custom-error.html.html \
-	manual/custom-error.html.ja.jis \
-	manual/handler.html.en \
-	manual/handler.html.html \
-	manual/handler.html.ja.jis \
-	manual/index.html.en \
-	manual/index.html.fr \
-	manual/index.html.html \
-	manual/index.html.ja.jis \
-	manual/install.html.en \
-	manual/install.html.fr \
-	manual/install.html.html \
-	manual/install.html.ja.jis \
-	manual/invoking.html.fr \
-	manual/new_features_1_3.html.en \
-	manual/new_features_1_3.html.html \
-	manual/new_features_1_3.html.ja.jis \
-	manual/server-wide.html.en \
-	manual/server-wide.html.fr \
-	manual/server-wide.html.html \
-	manual/server-wide.html.ja.jis \
+	manual/win_compiling.html.en \
+	manual/win_compiling.html.html \
+	manual/win_compiling.html.ja.jis \
+	manual/win_service.html.en \
+	manual/win_service.html.html \
+	manual/win_service.html.ja.jis \
+	manual/windows.html.en \
+	manual/windows.html.ja.jis \
 	manual/programs/ab.html \
-	manual/programs/apachectl.html \
+	manual/programs/apachectl.html.en \
+	manual/programs/apachectl.html.html \
+	manual/programs/apachectl.html.ja.jis \
 	manual/programs/apxs.html \
 	manual/programs/dbmmanage.html \
 	manual/programs/footer.html \
 	manual/programs/header.html \
 	manual/programs/htdigest.html \
-	manual/programs/htpasswd.html \
-	manual/programs/httpd.html \
+	manual/programs/htpasswd.html.en \
+	manual/programs/htpasswd.html.html \
+	manual/programs/htpasswd.html.ja.jis \
+	manual/programs/httpd.html.en \
+	manual/programs/httpd.html.html \
+	manual/programs/httpd.html.ja.jis \
+	manual/programs/index.html.en \
+	manual/programs/index.html.html \
+	manual/programs/index.html.ja.jis \
 	manual/programs/logresolve.html \
 	manual/programs/other.html \
 	manual/programs/rotatelogs.html \
-	manual/programs/suexec.html \
-	manual/howto/cgi.html.en \
-	manual/howto/cgi.html.html \
-	manual/howto/cgi.html.ja.jis \
-	manual/howto/footer.html \
-	manual/howto/header.html \
-	manual/howto/ssi.html.en \
-	manual/howto/ssi.html.html \
-	manual/howto/ssi.html.ja.jis \
-	manual/vhosts/index.html.ja.jis \
-	manual/vhosts/index.html.html \
+	manual/programs/suexec.html.en \
+	manual/programs/suexec.html.html \
+	manual/programs/suexec.html.ja.jis \
+	manual/search/manual-index.cgi \
+	manual/vhosts/details.html \
+	manual/vhosts/details_1_2.html \
+	manual/vhosts/examples.html \
+	manual/vhosts/fd-limits.html.en \
+	manual/vhosts/fd-limits.html.html \
+	manual/vhosts/fd-limits.html.ja.jis \
+	manual/vhosts/footer.html \
+	manual/vhosts/header.html \
+	manual/vhosts/host.html \
 	manual/vhosts/index.html.en \
-	manual/mod/module-dict.html.ja.jis \
-	manual/mod/module-dict.html.html \
-	manual/mod/module-dict.html.en \
-	manual/mod/mod_negotiation.html.ja.jis \
-	manual/mod/mod_negotiation.html.html \
-	manual/mod/mod_negotiation.html.en \
-	manual/mod/directive-dict.html.ja.jis \
-	manual/mod/directive-dict.html.html \
-	manual/mod/directive-dict.html.en \
-	manual/images/apache_header.gif \
-	manual/images/pixel.gif \
-	manual/urlmapping.html \
-	manual/configuring.html.en \
-	manual/configuring.html.html \
-	manual/configuring.html.ja.jis \
-	manual/custom-error.html.en \
-	manual/custom-error.html.html \
-	manual/custom-error.html.ja.jis \
-	manual/handler.html.en \
-	manual/handler.html.html \
-	manual/handler.html.ja.jis \
-	manual/index.html.en \
-	manual/index.html.fr \
-	manual/index.html.html \
-	manual/index.html.ja.jis \
-	manual/install.html.en \
-	manual/install.html.fr \
-	manual/install.html.html \
-	manual/install.html.ja.jis \
-	manual/invoking.html.fr \
-	manual/new_features_1_3.html.en \
-	manual/new_features_1_3.html.html \
-	manual/new_features_1_3.html.ja.jis \
-	manual/server-wide.html.en \
-	manual/server-wide.html.fr \
-	manual/server-wide.html.html \
-	manual/server-wide.html.ja.jis 
+	manual/vhosts/index.html.html \
+	manual/vhosts/index.html.ja.jis \
+	manual/vhosts/ip-based.html \
+	manual/vhosts/mass.html \
+	manual/vhosts/name-based.html.en \
+	manual/vhosts/name-based.html.html \
+	manual/vhosts/name-based.html.ja.jis \
+	manual/vhosts/vhosts-in-depth.html \
+	manual/vhosts/virtual-host.html
 	
 ICONFILES= \
-	icons/README icons/a.gif icons/alert.black.gif \
-	icons/alert.red.gif icons/apache_pb.gif icons/back.gif \
-	icons/ball.gray.gif icons/ball.red.gif icons/binary.gif \
-	icons/binhex.gif icons/blank.gif icons/bomb.gif icons/box1.gif \
-	icons/box2.gif icons/broken.gif icons/burst.gif icons/c.gif \
-	icons/comp.blue.gif icons/comp.gray.gif icons/compressed.gif \
-	icons/continued.gif icons/dir.gif icons/dvi.gif icons/down.gif \
-	icons/f.gif icons/folder.gif icons/folder.open.gif \
-	icons/folder.sec.gif icons/forward.gif icons/generic.gif \
-	icons/generic.red.gif icons/generic.sec.gif \
-	icons/hand.right.gif icons/hand.up.gif icons/icon.sheet.gif \
-	icons/image1.gif icons/image2.gif icons/image3.gif \
-	icons/index.gif icons/layout.gif icons/left.gif icons/link.gif \
-	icons/movie.gif icons/p.gif icons/patch.gif icons/pdf.gif \
-	icons/pie0.gif icons/pie1.gif icons/pie2.gif icons/pie3.gif \
-	icons/pie4.gif icons/pie5.gif icons/pie6.gif icons/pie7.gif \
-	icons/pie8.gif icons/portal.gif icons/ps.gif icons/quill.gif \
-	icons/right.gif icons/screw1.gif icons/screw2.gif \
-	icons/script.gif icons/sound1.gif icons/sound2.gif \
-	icons/sphere1.gif icons/sphere2.gif icons/tar.gif \
-	icons/tex.gif icons/text.gif icons/transfer.gif \
-	icons/unknown.gif icons/up.gif icons/uu.gif \
-	icons/uuencoded.gif icons/world1.gif icons/world2.gif \
-	icons/small/README.txt icons/small/back.gif \
-	icons/small/binary.gif icons/small/binhex.gif \
-	icons/small/blank.gif icons/small/broken.gif \
-	icons/small/burst.gif icons/small/comp1.gif \
-	icons/small/comp2.gif icons/small/compressed.gif \
-	icons/small/continued.gif icons/small/dir.gif \
-	icons/small/dir2.gif icons/small/doc.gif \
-	icons/small/forward.gif icons/small/generic.gif \
-	icons/small/generic2.gif icons/small/generic3.gif \
-	icons/small/image.gif icons/small/image2.gif \
-	icons/small/index.gif icons/small/key.gif \
-	icons/small/movie.gif icons/small/patch.gif icons/small/ps.gif \
-	icons/small/rainbow.gif icons/small/sound.gif \
-	icons/small/sound2.gif icons/small/tar.gif \
-	icons/small/text.gif icons/small/transfer.gif \
-	icons/small/unknown.gif icons/small/uu.gif  
+	icons/back.gif \
+	icons/README \
+	icons/a.gif \
+	icons/a.png \
+	icons/small/README.txt \
+	icons/small/back.gif \
+	icons/small/back.png \
+	icons/small/binary.gif \
+	icons/small/binary.png \
+	icons/small/binhex.gif \
+	icons/small/binhex.png \
+	icons/small/blank.gif \
+	icons/small/blank.png \
+	icons/small/broken.gif \
+	icons/small/broken.png \
+	icons/small/burst.gif \
+	icons/small/burst.png \
+	icons/small/comp1.gif \
+	icons/small/comp1.png \
+	icons/small/comp2.gif \
+	icons/small/comp2.png \
+	icons/small/compressed.gif \
+	icons/small/compressed.png \
+	icons/small/continued.gif \
+	icons/small/continued.png \
+	icons/small/dir.gif \
+	icons/small/dir.png \
+	icons/small/dir2.gif \
+	icons/small/dir2.png \
+	icons/small/doc.gif \
+	icons/small/doc.png \
+	icons/small/forward.gif \
+	icons/small/forward.png \
+	icons/small/generic.gif \
+	icons/small/generic.png \
+	icons/small/generic2.gif \
+	icons/small/generic2.png \
+	icons/small/generic3.gif \
+	icons/small/generic3.png \
+	icons/small/image.gif \
+	icons/small/image.png \
+	icons/small/image2.gif \
+	icons/small/image2.png \
+	icons/small/index.gif \
+	icons/small/index.png \
+	icons/small/key.gif \
+	icons/small/key.png \
+	icons/small/movie.gif \
+	icons/small/movie.png \
+	icons/small/patch.gif \
+	icons/small/patch.png \
+	icons/small/ps.gif \
+	icons/small/ps.png \
+	icons/small/rainbow.gif \
+	icons/small/rainbow.png \
+	icons/small/sound.gif \
+	icons/small/sound.png \
+	icons/small/sound2.gif \
+	icons/small/sound2.png \
+	icons/small/tar.gif \
+	icons/small/tar.png \
+	icons/small/text.gif \
+	icons/small/text.png \
+	icons/small/transfer.gif \
+	icons/small/transfer.png \
+	icons/small/unknown.gif \
+	icons/small/unknown.png \
+	icons/small/uu.gif \
+	icons/small/uu.png \
+	icons/alert.black.gif \
+	icons/alert.black.png \
+	icons/alert.red.gif \
+	icons/alert.red.png \
+	icons/apache_pb.gif \
+	icons/apache_pb.png \
+	icons/back.png \
+	icons/ball.gray.gif \
+	icons/ball.gray.png \
+	icons/ball.red.gif \
+	icons/ball.red.png \
+	icons/binary.gif \
+	icons/binary.png \
+	icons/binhex.gif \
+	icons/binhex.png \
+	icons/blank.gif \
+	icons/blank.png \
+	icons/bomb.gif \
+	icons/bomb.png \
+	icons/box1.gif \
+	icons/box1.png \
+	icons/box2.gif \
+	icons/box2.png \
+	icons/broken.gif \
+	icons/broken.png \
+	icons/burst.gif \
+	icons/burst.png \
+	icons/c.gif \
+	icons/c.png \
+	icons/comp.blue.gif \
+	icons/comp.blue.png \
+	icons/comp.gray.gif \
+	icons/comp.gray.png \
+	icons/compressed.gif \
+	icons/compressed.png \
+	icons/continued.gif \
+	icons/continued.png \
+	icons/dir.gif \
+	icons/dir.png \
+	icons/diskimg.gif \
+	icons/diskimg.png \
+	icons/dvi.gif \
+	icons/down.gif \
+	icons/down.png \
+	icons/dvi.png \
+	icons/f.gif \
+	icons/f.png \
+	icons/folder.gif \
+	icons/folder.open.gif \
+	icons/folder.open.png \
+	icons/folder.png \
+	icons/folder.sec.gif \
+	icons/folder.sec.png \
+	icons/forward.gif \
+	icons/forward.png \
+	icons/generic.gif \
+	icons/generic.png \
+	icons/generic.red.gif \
+	icons/generic.red.png \
+	icons/generic.sec.gif \
+	icons/generic.sec.png \
+	icons/hand.right.gif \
+	icons/hand.right.png \
+	icons/hand.up.gif \
+	icons/hand.up.png \
+	icons/icon.sheet.gif \
+	icons/icon.sheet.png \
+	icons/image1.gif \
+	icons/image1.png \
+	icons/image2.gif \
+	icons/image2.png \
+	icons/image3.gif \
+	icons/image3.png \
+	icons/index.gif \
+	icons/index.png \
+	icons/layout.gif \
+	icons/layout.png \
+	icons/left.gif \
+	icons/left.png \
+	icons/link.gif \
+	icons/link.png \
+	icons/movie.gif \
+	icons/movie.png \
+	icons/p.gif \
+	icons/p.png \
+	icons/patch.gif \
+	icons/patch.png \
+	icons/pdf.gif \
+	icons/pdf.png \
+	icons/pie0.gif \
+	icons/pie0.png \
+	icons/pie1.gif \
+	icons/pie1.png \
+	icons/pie2.gif \
+	icons/pie2.png \
+	icons/pie3.gif \
+	icons/pie3.png \
+	icons/pie4.gif \
+	icons/pie4.png \
+	icons/pie5.gif \
+	icons/pie5.png \
+	icons/pie6.gif \
+	icons/pie6.png \
+	icons/pie7.gif \
+	icons/pie7.png \
+	icons/pie8.gif \
+	icons/pie8.png \
+	icons/portal.gif \
+	icons/portal.png \
+	icons/ps.gif \
+	icons/ps.png \
+	icons/quill.gif \
+	icons/quill.png \
+	icons/right.gif \
+	icons/right.png \
+	icons/screw1.gif \
+	icons/screw1.png \
+	icons/screw2.gif \
+	icons/screw2.png \
+	icons/script.gif \
+	icons/script.png \
+	icons/sound1.gif \
+	icons/sound1.png \
+	icons/sound2.gif \
+	icons/sound2.png \
+	icons/sphere1.gif \
+	icons/sphere1.png \
+	icons/sphere2.gif \
+	icons/sphere2.png \
+	icons/tar.gif \
+	icons/tar.png \
+	icons/tex.gif \
+	icons/tex.png \
+	icons/text.gif \
+	icons/text.png \
+	icons/transfer.gif \
+	icons/transfer.png \
+	icons/unknown.gif \
+	icons/unknown.png \
+	icons/up.gif \
+	icons/up.png \
+	icons/uu.gif \
+	icons/uu.png \
+	icons/uuencoded.gif \
+	icons/uuencoded.png \
+	icons/world1.gif \
+	icons/world1.png \
+	icons/world2.gif \
+	icons/world2.png
 
 .include <bsd.own.mk>
 
@@ -631,10 +865,10 @@ install: maninstall
 	rm -rf $$d
 
 .if ${.OBJDIR} == ${.CURDIR}
-clean: prereq
+clean: prereq cleanman
 	@cd ${.OBJDIR} && ${MAKE} clean  && rm -f ${MUNGEDFILES}
 .else 	
-clean:
+clean: cleanman
 	@cd ${.OBJDIR} && find . \! -type d -print | xargs rm
 .endif
 
@@ -654,6 +888,8 @@ tags:
 
 .ifdef NOMAN
 maninstall:
+	@echo NOMAN is set
+cleanman:
 	@echo NOMAN is set
 .endif
 

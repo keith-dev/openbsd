@@ -1,4 +1,4 @@
-/*	$OpenBSD: chpass.c,v 1.22 2002/03/14 06:51:41 mpech Exp $	*/
+/*	$OpenBSD: chpass.c,v 1.26 2002/07/31 22:08:41 millert Exp $	*/
 /*	$NetBSD: chpass.c,v 1.8 1996/05/15 21:50:43 jtc Exp $	*/
 
 /*-
@@ -43,8 +43,8 @@ static char copyright[] =
 #ifndef lint
 #if 0
 static char sccsid[] = "@(#)chpass.c	8.4 (Berkeley) 4/2/94";
-#else 
-static char rcsid[] = "$OpenBSD: chpass.c,v 1.22 2002/03/14 06:51:41 mpech Exp $";
+#else
+static char rcsid[] = "$OpenBSD: chpass.c,v 1.26 2002/07/31 22:08:41 millert Exp $";
 #endif
 #endif /* not lint */
 
@@ -68,33 +68,25 @@ static char rcsid[] = "$OpenBSD: chpass.c,v 1.22 2002/03/14 06:51:41 mpech Exp $
 #include "chpass.h"
 #include "pathnames.h"
 
-char tempname[] = __CONCAT(_PATH_VARTMP,"pw.XXXXXXXX");
-enum { NEWSH, LOADENTRY, EDITENTRY } op;
-uid_t uid;
-
 extern char *__progname;
 
+enum { NEWSH, LOADENTRY, EDITENTRY } op;
+uid_t uid;
 #ifdef	YP
-int use_yp;
-int force_yp = 0;
-extern struct passwd *ypgetpwnam(), *ypgetpwuid();
-int _yp_check(char **);
-int pw_yp(struct passwd *, uid_t);
+int	use_yp;
+int	force_yp = 0;
 #endif
 
 void	baduser(void);
-void	tempcleanup(void);
 void	kbintr(int);
 void	usage(void);
 
 int
-main(argc, argv)
-	int argc;
-	char **argv;
+main(int argc, char *argv[])
 {
-	struct passwd *pw, lpw;
+	struct passwd *pw = NULL, lpw;
 	int i, ch, pfd, tfd, dfd;
-	char *arg;
+	char *arg = NULL;
 	sigset_t fullset;
 
 #ifdef	YP
@@ -133,7 +125,7 @@ main(argc, argv)
 
 #ifdef	YP
 	if (op == LOADENTRY && use_yp)
-		errx(1, "cannot load entry using NIS.\n\tUse the -l flag to load local.");
+		errx(1, "cannot load using YP, use -l to load local.");
 #endif
 	uid = getuid();
 
@@ -185,12 +177,28 @@ main(argc, argv)
 
 	/* Edit the user passwd information if requested. */
 	if (op == EDITENTRY) {
+		char tempname[] = __CONCAT(_PATH_VARTMP,"pw.XXXXXXXX");
+		int edit_status;
+
 		dfd = mkstemp(tempname);
 		if (dfd == -1 || fcntl(dfd, F_SETFD, 1) == -1)
 			pw_error(tempname, 1, 1);
-		atexit(tempcleanup);
 		display(tempname, dfd, pw);
-		edit(tempname, pw);
+		edit_status = edit(tempname, pw);
+		close(dfd);
+		unlink(tempname);
+
+		switch (edit_status) {
+		case EDIT_OK:
+			break;
+		case EDIT_NOCHANGE:
+			pw_error(NULL, 0, 0);
+			break;
+		case EDIT_ERROR:
+		default:
+			pw_error(tempname, 1, 1);
+			break;
+		}
 	}
 
 	/* Drop user's real uid and block all signals to avoid a DoS. */
@@ -240,22 +248,14 @@ main(argc, argv)
 }
 
 void
-baduser()
+baduser(void)
 {
 
 	errx(1, "%s", strerror(EACCES));
 }
 
 void
-tempcleanup()
-{
-
-	unlink(tempname);
-}
-
-void
-kbintr(signo)
-	int signo;
+kbintr(int signo)
 {
 	struct iovec iv[5];
 
@@ -271,14 +271,11 @@ kbintr(signo)
 	iv[4].iov_len = 11;
 	writev(STDERR_FILENO, iv, 5);
 
-	if (op == EDITENTRY)
-		unlink(tempname);
-
 	_exit(1);
 }
 
 void
-usage()
+usage(void)
 {
 
 #ifdef	YP

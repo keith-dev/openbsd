@@ -1,4 +1,4 @@
-.\"	$OpenBSD: traceroute.8,v 1.25 2002/03/31 19:12:32 stevesk Exp $
+.\"	$OpenBSD: traceroute.8,v 1.30 2002/08/30 02:17:34 stevesk Exp $
 .\"	$NetBSD: traceroute.8,v 1.6 1995/10/12 03:05:50 mycroft Exp $
 .\"
 .\" Copyright (c) 1990, 1991, 1993
@@ -94,7 +94,7 @@ Turn on socket-level debugging.
 .It Fl f Ar first_ttl
 Set the first time-to-live used in outgoing probe packets. The effect is that
 the first first_ttl - 1 hosts will be skipped in the output of
-.Nm
+.Nm traceroute .
 The default value is 1 (skip no hosts).
 .It Fl g Ar gateway_addr
 Add
@@ -108,9 +108,9 @@ This is useful for checking for asymmetric routing.
 .It Fl m Ar max_ttl
 Set the max time-to-live (max number of hops) used in outgoing probe
 packets.
-The default is 64 hops (the same default used for
-.Tn TCP
-connections).
+The default is the value of the system's
+.Cm net.inet.ip.ttl
+MIB variable, which defaults to 64.
 .It Fl n
 Print hop addresses numerically rather than symbolically and numerically
 (saves a nameserver address-to-name lookup for each gateway found on the
@@ -363,6 +363,7 @@ non-standard
 software, expect to see this problem
 frequently and/or take care picking the target host of your
 probes.
+.Pp
 Other possible annotations after the time are
 .Sy !H ,
 .Sy !N ,
@@ -371,11 +372,19 @@ Other possible annotations after the time are
 .Sy !A ,
 .Sy !C
 (access to the network or host, respectively, is prohibited),
+.Sy !X
+(communication administratively prohibited by filtering),
 .Sy !S
 or
 .Sy !F
 (source route failed or fragmentation needed \- neither of these should
-ever occur and the associated gateway is busted if you see one).
+ever occur and the associated gateway is busted if you see one),
+.Sy !U
+(destination network or host unknown),
+.Sy !T
+(destination network or host unreachable for TOS),
+.Sy !<code>
+(other ICMP unreachable code).
 If almost all the probes result in some kind of unreachable,
 .Nm
 will give up and exit.
@@ -407,6 +416,18 @@ C. Philip Wood, Tim Seaver and Ken Adelman.
 .Xr netstat 1 ,
 .Xr ping 8
 .Sh HISTORY
+The very first
+.Nm
+(never released) used ICMP ECHO_REQUEST
+datagrams as probe packets.  During the first night of testing it was
+discovered that more than half the router vendors of the time would
+not return an ICMP TIME_EXCEEDED for an ECHO_REQUEST.
+.Nm
+was then changed to use UDP probe packets.
+Most modern TCP/IP implementations will now generate an ICMP error
+message to ICMP query messages, and the option to use ECHO_REQUEST probes
+was re-implemented.
+.Pp
 The
 .Nm
 command first appeared in

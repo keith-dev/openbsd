@@ -1,4 +1,4 @@
-/*	$OpenBSD: ypdb.c,v 1.7 2002/03/04 12:14:01 maja Exp $ */
+/*	$OpenBSD: ypdb.c,v 1.9 2002/07/19 20:59:40 deraadt Exp $ */
 
 /*
  * Copyright (c) 1990, 1993
@@ -51,19 +51,17 @@
 
 /*
  * Returns:
- * 	*DBM on success
- *	 NULL on failure
+ *	*DBM on success
+ *	NULL on failure
  */
-
 extern DBM *
-ypdb_open(file, flags, mode)
-	const char *file;
-	int flags, mode;
+ypdb_open(const char *file, int flags, int mode)
 {
 	BTREEINFO info;
 	char path[MAXPATHLEN];
 	DBM *db;
 
+	memset(&info, 0, sizeof info);
 	info.flags = 0;
 	info.cachesize = 0;
 	info.maxkeypage = 0;
@@ -79,18 +77,16 @@ ypdb_open(file, flags, mode)
 
 /*
  * Returns:
- * 	*DBM on success
- *	 NULL on failure
+ *	*DBM on success
+ *	NULL on failure
  */
-
 extern DBM *
-ypdb_open_suf(file, flags, mode)
-	const char *file;
-	int flags, mode;
+ypdb_open_suf(const char *file, int flags, int mode)
 {
 	BTREEINFO info;
 	DBM *db;
 
+	memset(&info, 0, sizeof info);
 	info.flags = 0;
 	info.cachesize = 0;
 	info.maxkeypage = 0;
@@ -104,8 +100,7 @@ ypdb_open_suf(file, flags, mode)
 }
 
 extern void
-ypdb_close(db)
-	DBM *db;
+ypdb_close(DBM *db)
 {
 	(void)(db->close)(db);
 }
@@ -115,11 +110,8 @@ ypdb_close(db)
  *	DATUM on success
  *	NULL on failure
  */
-
 extern datum
-ypdb_fetch(db, key)
-	DBM *db;
-	datum key;
+ypdb_fetch(DBM *db, datum key)
 {
 	datum retval;
 	DBT nk, nd;
@@ -146,8 +138,7 @@ ypdb_fetch(db, key)
  */
 
 extern datum
-ypdb_firstkey(db)
-	DBM *db;
+ypdb_firstkey(DBM *db)
 {
 	int status;
 	datum retkey;
@@ -171,8 +162,7 @@ ypdb_firstkey(db)
  */
 
 extern datum
-ypdb_nextkey(db)
-	DBM *db;
+ypdb_nextkey(DBM *db)
 {
 	int status;
 	datum retkey;
@@ -196,9 +186,7 @@ ypdb_nextkey(db)
  */
 
 extern datum
-ypdb_setkey(db, key)
-	DBM *db;
-	datum key;
+ypdb_setkey(DBM *db, datum key)
 {
 	int status;
 	DBT nk, nd;
@@ -219,9 +207,7 @@ ypdb_setkey(db, key)
  *	<0 failure
  */
 int
-ypdb_delete(db, key)
-	DBM *db;
-	datum key;
+ypdb_delete(DBM *db, datum key)
 {
 	int status;
 	DBT nk;
@@ -242,10 +228,7 @@ ypdb_delete(db, key)
  *	 1 if YPDB_INSERT and entry exists
  */
 int
-ypdb_store(db, key, content, flags)
-	DBM *db;
-	datum key, content;
-	int flags;
+ypdb_store(DBM *db, datum key, datum content, int flags)
 {
 	DBT nk, nd;
 

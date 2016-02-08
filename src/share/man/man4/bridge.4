@@ -1,4 +1,4 @@
-.\"	$OpenBSD: bridge.4,v 1.39 2001/12/15 08:40:56 jason Exp $
+.\"	$OpenBSD: bridge.4,v 1.45 2002/09/18 07:35:13 deraadt Exp $
 .\"
 .\" Copyright (c) 1999-2001 Jason L. Wright (jason@thought.net)
 .\" All rights reserved.
@@ -83,7 +83,7 @@ Before forwarding a frame, the bridge will check to see if the packet
 contains an
 .Xr ip 4
 or
-.Xr ip 6
+.Xr ip6 4
 datagram; if so, the datagram is run through the
 .Xr pf 4
 interface so that it can be filtered.
@@ -537,15 +537,46 @@ Since bridged packets pass through the filter twice with the source
 and destination addresses reversed between interfaces, two state
 entries (one for each direction) are required when all interfaces
 are filtered statefully.
+.Pp
+If an IP packet is too large for the outgoing interface the bridge
+will perform IP fragmentation.
+This can happen when bridge members
+have different mtu's or when IP fragments are reassembled by
+.Xr pf 4 . 
+Non-IP packets which are too large for the outgoing interface will be
+dropped.
+.Pp
+If the LINK2 flag is set on the
+.Xr bridge 4
+interface, the bridge will also perform transparent
+.Xr ipsec 4
+processing on the packets (encrypt or decrypt them), according to the
+policies set with the
+.Xr ipsecadm 8
+command by the administrator.
+If appropriate security associations (SAs) do not exist, any key
+management daemons such as
+.Xr isakmpd 8 .
+that are running on the bridge will be invoked to establish the
+necessary SAs.
+These daemons have to be configured as if they were running on the
+host whose traffic they are protecting (i.e., they need to have the
+appropriate authentication and authorization material, such as keys
+and certificates, to impersonate the protected host(s).
 .Sh SEE ALSO
 .Xr errno 2 ,
 .Xr ioctl 2 ,
+.Xr arp 4 ,
 .Xr gif 4 ,
 .Xr ip 4 ,
+.Xr ip6 4 ,
+.Xr ipsec 4 ,
 .Xr netintro 4 ,
 .Xr pf 4 ,
 .Xr bridgename.if 5 ,
-.Xr brconfig 8
+.Xr brconfig 8 ,
+.Xr ipsecadm 8 ,
+.Xr isakmpd 8
 .Sh AUTHORS
 The
 .Xr brconfig 8

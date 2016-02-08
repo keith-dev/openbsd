@@ -1,4 +1,4 @@
-/*	$OpenBSD: def.h,v 1.39 2002/03/18 01:45:54 vincent Exp $	*/
+/*	$OpenBSD: def.h,v 1.44 2002/07/24 14:08:33 vincent Exp $	*/
 
 #include <sys/queue.h>
 
@@ -200,11 +200,11 @@ typedef struct MGWIN {
  * Because commands set bits in the "w_flag", update will see
  * all change flags, and do the most general one.
  */
-#define WFFORCE 0x01		/* Force reframe.		 */
-#define WFMOVE	0x02		/* Movement from line to line.	 */
-#define WFEDIT	0x04		/* Editing within a line.	 */
-#define WFHARD	0x08		/* Better to a full display.	 */
-#define WFMODE	0x10		/* Update mode line.		 */
+#define WFFORCE 0x01			/* Force reframe.		 */
+#define WFMOVE	0x02			/* Movement from line to line.	 */
+#define WFEDIT	0x04			/* Editing within a line.	 */
+#define WFHARD	0x08			/* Better to a full display.	 */
+#define WFMODE	0x10			/* Update mode line.		 */
 
 struct undo_rec;
 
@@ -252,13 +252,13 @@ typedef struct BUFFER {
 #define b_bufp	b_list.l_p.x_bp
 #define b_bname b_list.l_name
 
-#define BFCHG	0x01		/* Changed.			 */
-#define BFBAK	0x02		/* Need to make a backup.	 */
+#define BFCHG	0x01			/* Changed.			 */
+#define BFBAK	0x02			/* Need to make a backup.	 */
 #ifdef	NOTAB
-#define BFNOTAB 0x04		/* no tab mode			 */
+#define BFNOTAB 0x04			/* no tab mode			 */
 #endif
-#define BFOVERWRITE 0x08	/* overwrite mode		 */
-#define BFREADONLY  0x10	/* read only mode */
+#define BFOVERWRITE 0x08		/* overwrite mode		 */
+#define BFREADONLY  0x10		/* read only mode */
 
 
 /*
@@ -269,7 +269,6 @@ struct undo_rec {
 	enum {
 		INSERT = 1,
 		DELETE,
-		CHANGE,
 		BOUNDARY
 	} type;
 	REGION		 region;
@@ -330,6 +329,7 @@ int	 d_rename(int, int);
 /* file.c X */
 int	 fileinsert(int, int);
 int	 filevisit(int, int);
+int	 filevisitro(int, int);
 int	 poptofile(int, int);
 BUFFER  *findbuffer(char *);
 int	 readin(char *);
@@ -588,6 +588,11 @@ int	 undo_add_delete(LINE *, int, int);
 int	 undo_add_change(LINE *, int, int);
 int	 undo(int, int);
 
+/* autoexec.c X */
+int	 auto_execute(int, int);
+PF	*find_autoexec(const char *);
+int	 add_autoexec(const char *, const char *);
+
 /*
  * Externals.
  */
@@ -608,7 +613,6 @@ extern int	 ttcol;
 extern int	 tttop;
 extern int	 ttbot;
 extern int	 tthue;
-extern int	 undoaction;
 extern int	 defb_nmodes;
 extern int	 defb_flag;
 extern const char cinfo[];

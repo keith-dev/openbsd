@@ -1,4 +1,4 @@
-/*	$OpenBSD: fingerd.c,v 1.26 2002/02/19 19:39:38 millert Exp $	*/
+/*	$OpenBSD: fingerd.c,v 1.29 2002/09/06 19:43:54 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1983, 1993
@@ -43,7 +43,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "from: @(#)fingerd.c	8.1 (Berkeley) 6/4/93";
 #else
-static char rcsid[] = "$OpenBSD: fingerd.c,v 1.26 2002/02/19 19:39:38 millert Exp $";
+static char rcsid[] = "$OpenBSD: fingerd.c,v 1.29 2002/09/06 19:43:54 deraadt Exp $";
 #endif
 #endif /* not lint */
 
@@ -66,7 +66,7 @@ void err(const char *, ...);
 void usage(void);
 
 void
-usage()
+usage(void)
 {
 	syslog(LOG_ERR,
 	    "usage: fingerd [-slumMpS] [-P filename]");
@@ -75,9 +75,7 @@ usage()
 
 
 int
-main(argc, argv)
-	int argc;
-	char *argv[];
+main(int argc, char *argv[])
 {
 	FILE *fp;
 	int ch, ac = 2;
@@ -130,7 +128,7 @@ main(argc, argv)
 	if (logging) {
 		struct sockaddr_storage ss;
 		struct sockaddr *sa;
-		int sval;
+		socklen_t sval;
 
 		sval = sizeof(ss);
 		if (getpeername(0, (struct sockaddr *)&ss, &sval) < 0) {
@@ -207,7 +205,7 @@ main(argc, argv)
 	if (pipe(p) < 0)
 		err("pipe: %s", strerror(errno));
 
-	switch(vfork()) {
+	switch (vfork()) {
 	case 0:
 		(void) close(p[0]);
 		if (p[1] != 1) {

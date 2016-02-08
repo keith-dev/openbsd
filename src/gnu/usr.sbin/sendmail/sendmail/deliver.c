@@ -14,11 +14,15 @@
 #include <sendmail.h>
 #include <sys/time.h>
 
-SM_RCSID("@(#)$Sendmail: deliver.c,v 8.928 2002/01/10 03:23:29 gshapiro Exp $")
+SM_RCSID("@(#)$Sendmail: deliver.c,v 8.940.2.3 2002/08/16 14:56:01 ca Exp $")
 
 #if HASSETUSERCONTEXT
 # include <login_cap.h>
 #endif /* HASSETUSERCONTEXT */
+
+#if NETINET || NETINET6
+# include <arpa/inet.h>
+#endif /* NETINET || NETINET6 */
 
 #if STARTTLS || SASL
 # include "sfsasl.h"
@@ -1009,6 +1013,16 @@ dup_queue_file(e, ee, type)
 
 	(void) sm_strlcpy(f1buf, queuename(e, type), sizeof f1buf);
 	(void) sm_strlcpy(f2buf, queuename(ee, type), sizeof f2buf);
+
+	/* Force the df to disk if it's not there yet */
+	if (type == DATAFL_LETTER && e->e_dfp != NULL &&
+	    sm_io_setinfo(e->e_dfp, SM_BF_COMMIT, NULL) < 0 &&
+	    errno != EINVAL)
+	{
+		syserr("!dup_queue_file: can't commit %s", f1buf);
+		/* NOTREACHED */
+	}
+
 	if (link(f1buf, f2buf) < 0)
 	{
 		int save_errno = errno;
@@ -1280,6 +1294,7 @@ deliver(e, firstto)
 	char *mxhosts[MAXMXHOSTS + 1];
 	char *pv[MAXPV + 1];
 	char buf[MAXNAME + 1];
+	char cbuf[MAXPATHLEN];
 
 	errno = 0;
 	if (!QS_IS_OK(to->q_state))
@@ -1540,7 +1555,8 @@ deliver(e, firstto)
 		quarantine = (e->e_quarmsg != NULL);
 #endif /* _FFR_QUARANTINE */
 		rcode = rscheck("check_compat", e->e_from.q_paddr, to->q_paddr,
-				e, true, true, 3, NULL, e->e_id);
+				e, RSF_RMCOMM|RSF_COUNT, 3, NULL,
+				e->e_id);
 		if (rcode == EX_OK)
 		{
 			/* do in-code checking if not discarding */
@@ -2112,6 +2128,7 @@ tryhost:
 			if (i == EX_OK)
 			{
 				goodmxfound = true;
+				markstats(e, firstto, STATS_CONNECT);
 				mci->mci_state = MCIS_OPENING;
 				mci_cache(mci);
 				if (TrafficLogFile != NULL)
@@ -2330,7 +2347,7 @@ tryhost:
 
 # if HASSETUSERCONTEXT
 			/*
-			**  Set user resources and login name.
+			**  Set user resources.
 			*/
 
 			if (contextaddr != NULL)
@@ -2341,23 +2358,16 @@ tryhost:
 					pwd = sm_getpwnam(contextaddr->q_ruser);
 				else
 					pwd = sm_getpwnam(contextaddr->q_user);
-				if (pwd != NULL)
-					(void) setusercontext(NULL,
-							      pwd, pwd->pw_uid,
-							      LOGIN_SETRESOURCES|LOGIN_SETPRIORITY|LOGIN_SETLOGIN);
+				if (pwd != NULL &&
+				    setusercontext(NULL, pwd, pwd->pw_uid,
+						   LOGIN_SETRESOURCES|LOGIN_SETPRIORITY) == -1 &&
+				    suidwarn)
+				{
+					syserr("openmailer: setusercontext() failed");
+					exit(EX_TEMPFAIL);
+				}
 			}
 # endif /* HASSETUSERCONTEXT */
-# if HASSETLOGIN && !HASSETUSERCONTEXT
-			/* set login name */
-			if (ctladdr != NULL)
-			{
-				user = ctladdr->q_ruser;
-				if (user == NULL)
-					user = ctladdr->q_user;
-				(void)setlogin(user);
-
-			}
-# endif /* HASSETLOGIN && !!HASSETUSERCONTEXT*/
 
 #if HASNICE
 			/* tweak niceness */
@@ -2456,14 +2466,14 @@ tryhost:
 			/* change root to some "safe" directory */
 			if (m->m_rootdir != NULL)
 			{
-				expand(m->m_rootdir, buf, sizeof buf, e);
+				expand(m->m_rootdir, cbuf, sizeof cbuf, e);
 				if (tTd(11, 20))
 					sm_dprintf("openmailer: chroot %s\n",
-						   buf);
-				if (chroot(buf) < 0)
+						   cbuf);
+				if (chroot(cbuf) < 0)
 				{
 					syserr("openmailer: Cannot chroot(%s)",
-						buf);
+					       cbuf);
 					exit(EX_TEMPFAIL);
 				}
 				if (chdir("/") < 0)
@@ -2512,6 +2522,22 @@ tryhost:
 				new_ruid = m->m_uid;
 			else
 				new_ruid = DefUid;
+
+# if _FFR_USE_SETLOGIN
+			/* run disconnected from terminal and set login name */
+			if (setsid() >= 0 &&
+			    ctladdr != NULL && ctladdr->q_uid != 0 &&
+			    new_euid == ctladdr->q_uid)
+			{
+				struct passwd *pwd;
+
+				pwd = sm_getpwuid(ctladdr->q_uid);
+				if (pwd != NULL && suidwarn)
+					(void) setlogin(pwd->pw_name);
+				endpwent();
+			}
+# endif /* _FFR_USE_SETLOGIN */
+
 			if (new_euid != NO_UID)
 			{
 				if (RunAsUid != 0 && new_euid != RunAsUid)
@@ -2574,13 +2600,14 @@ tryhost:
 					q = strchr(p, ':');
 					if (q != NULL)
 						*q = '\0';
-					expand(p, buf, sizeof buf, e);
+					expand(p, cbuf, sizeof cbuf, e);
 					if (q != NULL)
 						*q++ = ':';
 					if (tTd(11, 20))
 						sm_dprintf("openmailer: trydir %s\n",
-							   buf);
-					if (buf[0] != '\0' && chdir(buf) >= 0)
+							   cbuf);
+					if (cbuf[0] != '\0' &&
+					    chdir(cbuf) >= 0)
 						break;
 				}
 			}
@@ -2642,8 +2669,10 @@ tryhost:
 						     j | FD_CLOEXEC);
 			}
 
+# if !_FFR_USE_SETLOGIN
 			/* run disconnected from terminal */
 			(void) setsid();
+# endif /* !_FFR_USE_SETLOGIN */
 
 			/* try to execute the mailer */
 			(void) execve(m->m_mailer, (ARGV_T) pv,
@@ -2865,8 +2894,8 @@ reconnect:	/* after switching to an encrypted connection */
 				olderrors = Errors;
 				QuickAbort = false;
 				SuprErrs = true;
-				if (rscheck("try_tls", host, NULL, e, true,
-					    false, 7, host, NOQID) != EX_OK
+				if (rscheck("try_tls", host, NULL, e,
+					    RSF_RMCOMM, 7, host, NOQID) != EX_OK
 				    || Errors > olderrors)
 					usetls = false;
 				SuprErrs = saveSuprErrs;
@@ -2934,8 +2963,8 @@ reconnect:	/* after switching to an encrypted connection */
 
 			if (rscheck("tls_server",
 				    macvalue(macid("{verify}"), e),
-				    NULL, e, true, true, 5, host,
-				    NOQID) != EX_OK ||
+				    NULL, e, RSF_RMCOMM|RSF_COUNT, 5,
+				    host, NOQID) != EX_OK ||
 			    Errors > olderrors ||
 			    rcode == EX_SOFTWARE)
 			{
@@ -3017,7 +3046,11 @@ reconnect:	/* after switching to an encrypted connection */
 
 				/* Get security strength (features) */
 				result = sasl_getprop(mci->mci_conn, SASL_SSF,
+# if SASL >= 20000
+						      (const void **) &ssf);
+# else /* SASL >= 20000 */
 						      (void **) &ssf);
+# endif /* SASL >= 20000 */
 
 				/* XXX authid? */
 				if (LogLevel > 9)
@@ -3223,8 +3256,8 @@ do_transfer:
 				e->e_to = to->q_paddr;
 # if STARTTLS
 				i = rscheck("tls_rcpt", to->q_user, NULL, e,
-					    true, true, 3, mci->mci_host,
-					    e->e_id);
+					    RSF_RMCOMM|RSF_COUNT, 3,
+					    mci->mci_host, e->e_id);
 				if (i != EX_OK)
 				{
 					markfailure(e, to, mci, i, false);
@@ -3264,7 +3297,7 @@ do_transfer:
 				if (i != EX_OK)
 				{
 					markfailure(e, to, mci, i, false);
-					giveresponse(i, to->q_status,  m, mci,
+					giveresponse(i, to->q_status, m, mci,
 						     ctladdr, xstart, e, to);
 					if (i == EX_TEMPFAIL)
 						to->q_state = QS_RETRY;
@@ -3939,6 +3972,13 @@ giveresponse(status, dsn, m, mci, ctladdr, xstart, e, to)
 		{
 			(void) sm_snprintf(buf, sizeof buf, "%s: %s", statmsg,
 					   sm_errstring(errnum));
+			statmsg = buf;
+			usestat = true;
+		}
+		else if (bitnset(M_LMTP, m->m_flags) && e->e_statmsg != NULL)
+		{
+			(void) sm_snprintf(buf, sizeof buf, "%s (%s)", statmsg,
+					   shortenstring(e->e_statmsg, 403));
 			statmsg = buf;
 			usestat = true;
 		}
@@ -4955,8 +4995,8 @@ mailfile(filename, mailer, ctladdr, sfflags, e)
 	char *p;
 	char *volatile realfile;
 	SM_EVENT *ev;
-	char buf[MAXLINE + 1];
-	char targetfile[MAXPATHLEN + 1];
+	char buf[MAXPATHLEN];
+	char targetfile[MAXPATHLEN];
 
 	if (tTd(11, 1))
 	{
@@ -5009,11 +5049,17 @@ mailfile(filename, mailer, ctladdr, sfflags, e)
 		}
 		(void) sm_strlcpy(targetfile, SafeFileEnv, sizeof targetfile);
 		realfile = targetfile + len;
-		if (targetfile[len - 1] != '/')
-			(void) sm_strlcat(targetfile, "/", sizeof targetfile);
 		if (*filename == '/')
 			filename++;
-		(void) sm_strlcat(targetfile, filename, sizeof targetfile);
+		if (*filename != '\0')
+		{
+			/* paranoia: trailing / should be removed in readcf */
+			if (targetfile[len - 1] != '/')
+				(void) sm_strlcat(targetfile,
+						  "/", sizeof targetfile);
+			(void) sm_strlcat(targetfile, filename,
+					  sizeof targetfile);
+		}
 	}
 	else if (mailer->m_rootdir != NULL)
 	{
@@ -5055,6 +5101,14 @@ mailfile(filename, mailer, ctladdr, sfflags, e)
 	**	Note that we MUST use fork, not vfork, because of
 	**	the complications of calling subroutines, etc.
 	*/
+
+
+	/*
+	**  Dispose of SIGCHLD signal catchers that may be laying
+	**  around so that the waitfor() below will get it.
+	*/
+
+	(void) sm_signal(SIGCHLD, SIG_DFL);
 
 	DOFORK(fork);
 
@@ -5245,6 +5299,9 @@ mailfile(filename, mailer, ctladdr, sfflags, e)
 
 		if (realfile != targetfile)
 		{
+			char save;
+
+			save = *realfile;
 			*realfile = '\0';
 			if (tTd(11, 20))
 				sm_dprintf("mailfile: chroot %s\n", targetfile);
@@ -5254,7 +5311,7 @@ mailfile(filename, mailer, ctladdr, sfflags, e)
 				       targetfile);
 				RETURN(EX_CANTCREAT);
 			}
-			*realfile = '/';
+			*realfile = save;
 		}
 
 		if (tTd(11, 40))

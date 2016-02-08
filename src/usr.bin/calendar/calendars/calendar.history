@@ -1,7 +1,7 @@
 /*
  * History
  *
- * $OpenBSD: calendar.history,v 1.11 2002/01/31 00:49:14 mickey Exp $
+ * $OpenBSD: calendar.history,v 1.19 2002/09/04 16:32:35 mickey Exp $
  */
 
 #ifndef _calendar_history_
@@ -15,14 +15,13 @@
 01/05	-50 degrees F, Strawberry UT, 1913
 01/05	The FCC hears the first demonstration of FM radio, 1940
 01/05	Twelfth night
-01/06	Millard Fillmore's birthday (let's party!)
 01/08	Battle of New Orleans
 01/09	Plough Monday
 01/10	First meeting of United Nations General Assembly in London, 1946
 01/10	Thomas Paine's Common Sense published, 1776
 01/11	Anniversary of the Peoples Republic of Albania
 01/11	De Hostos' Birthday in Puerto Rico
-01/11	Milk delivered in bottles for first time, 1878
+01/11	Milk delivered in bottles for the first time, 1878
 01/11	Prithvi Jayanti in Nepal
 01/11	Surgeon General condemned cigarettes, 1964
 01/11	The Whiskey-A-Go-Go opens on Sunset Boulevard in Los Angeles, 1963
@@ -32,6 +31,8 @@
 01/20	St. Agnes Eve (Ah, bitter chill it was...)
 01/24	Eskimo Pie patented by Christian Nelson, 1922
 01/24	Gold discovered in California at Sutter's Mill, 1848
+01/24	A B-52 bomber carrying two 24 megaton bombs crashes at Goldsboro,
+	North Carolina; 5 of 6 safety devices failed on one of them, 1961
 01/26	Sydney Aust. settled, 1788
 01/27	Grissom, White and Chaffe burned to death in Apollo 1, 1967
 01/27	Vietnam War cease-fire signed, 1973
@@ -39,7 +40,6 @@
 01/28	Space Shuttle Challenger (51-L) explodes 74 seconds after liftoff
 	killing Scobee, Smith, McNair, Resnick, Jarvis, Onizuka and McAuliffe,
 	1986
-01/29	Anre the Giant died, 1993
 01/30	Mohandas Gandhi assassinated in New Delhi by Hindu fanatic, 1948
 01/30	Tet Offensive, 1968
 01/31	"Ham" the chimpanzee soars into space aboard Mercury-Redstone 2, 1961
@@ -88,6 +88,7 @@
 03/25	Triangle Shirt Waist Fire, 1911
 03/26	Popeye statue unveiled, Crystal City TX Spinach Festival, 1937
 03/27	Khrushchev becomes Premier of Soviet Union, 1958
+03/28	First reaction thrust motor demonstration, 1883
 03/28	Three Mile Island releases radioactive gas, 1979
 03/29	Swedish settled Christiana (Wilmington) DE, 1638
 03/30	Alaska purchased from Russia for $7.2 million, 1867
@@ -100,10 +101,9 @@
 04/07	Albert Hofmann synthesizes LSD in Switzerland, 1943
 04/07	Alewives run, Cape Cod
 04/09	Lee surrenders to Grant at Appomattox Courthouse, 1865
-04/12	Columbia launched, 1981
 04/12	Confederate troops fire first shots of Civil War at Ft Sumter, 1861
-04/12	Space Shuttle Columbia launched, 1981
 04/12	Yuri Gagarin becomes the first man in space, 1961
+04/12	Space Shuttle Columbia launched, 1981
 04/13	Laotian New Year (3 days) in Laos
 04/14	Lincoln shot,  1865
 04/14	Titanic hits iceberg and sinks, 1912
@@ -115,7 +115,6 @@
 04/18	San Francisco earthquake, 1906
 04/19	Landing of the "33" in Uruguay
 04/19	Warsaw Ghetto uprising, 1943
-04/19	Andre the Giant (Rousinoff) born in Grunoble, France, 1946
 04/20	Supreme Court unanimously rules in favor of busing, 1971
 04/21	Lyrid meteor shower
 04/23	Hank Aaron hits his first home run, 1954
@@ -152,6 +151,10 @@
 05/30	US Marines sent to Nicaragua, 1912
 06/02	Native Americans "granted" citizenship, 1924
 06/03	Last Star Trek episode first aired ("Turnabout Intruder"), 1969
+06/03	A 46-cent computer chip fails, causing the mistaken detection
+	of a Soviet missile attack by the NORAD system. About a 100 B-52
+	bombers were readied for take off along with the President's
+	airborne command post before the error is detected, 1980
 06/05	Robert Kennedy assassinated, 1968
 06/05	US leaves the Gold Standard, 1933
 06/06	First drive-in movie, 1933
@@ -219,6 +222,7 @@
 08/01	Lughnasa; Feast of the god Lugh, a 30 day Celtic feast centers on
 	this day
 08/03	Columbus sets sail for Cathay, 1492
+08/03	First ICBM (P-7) test (5T of iron is launched to Kamchatka), 1957
 08/03	USS Nautilus crosses under north polar ice cap, 1958
 08/04	Axe murder of Andrew and Abbey Borden, 1892
 08/04	Bombing of N. Vietnam begins, 1964
@@ -258,6 +262,7 @@
 08/24	"Alice's Restaurant" premieres in New York and Los Angeles, 1969
 08/24	-126.9 F at Vostok, Antarctica, 1960
 08/24	British troops burn Washington, 1814
+08/25	First reaction thrust motor design, 1898
 08/25	Gen. DeGaulle leads French forces into Paris, 1944
 08/26	Women get the vote, 1920
 08/27	"Tarzan of the Apes" published, 1912
@@ -404,6 +409,7 @@
 	price controls (but okayed by Price Commission after formal request
 	from McDonald's), 1971
 11/15	Niagara Falls power plant startup, 1896
+11/15	Space Shuttle Buran launched, 1988
 11/16	Opening of the Suez Canal, 1869
 11/17	46,000 meteoroids fall over AZ in 20 minutes, 1966
 11/17	Richard Nixon says "I am not a crook.", 1973

@@ -73,9 +73,9 @@ char *path_dhcpd_conf = _PATH_DHCPD_CONF;
 char *path_dhcpd_db = _PATH_DHCPD_DB;
 char *path_dhcpd_pid = _PATH_DHCPD_PID;
 
-int main (argc, argv, envp)
+int main (argc, argv)
 	int argc;
-	char **argv, **envp;
+	char **argv;
 {
 	int i, status;
 	struct servent *ent;
@@ -164,12 +164,12 @@ int main (argc, argv, envp)
 
 	if (!quiet) {
 		note ("%s %s", message, DHCP_VERSION);
-		note (copyright);
-		note (arr);
-		note ("");
-		note (contrib);
-		note (url);
-		note ("");
+		note ("%s", copyright);
+		note ("%s", arr);
+		note ("%s", "");
+		note ("%s", contrib);
+		note ("%s", url);
+		note ("%s", "");
 	} else
 		log_perror = 0;
 
@@ -287,13 +287,13 @@ int main (argc, argv, envp)
 static void usage (appname)
 	char *appname;
 {
-	note (message);
-	note (copyright);
-	note (arr);
-	note ("");
-	note (contrib);
-	note (url);
-	note ("");
+	note ("%s", message);
+	note ("%s", copyright);
+	note ("%s", arr);
+	note ("%s", "");
+	note ("%s", contrib);
+	note ("%s", url);
+	note ("%s", "");
 
 	warn ("Usage: %s [-p <UDP port #>] [-d] [-f] [-cf config-file]",
 	      appname);
@@ -326,7 +326,7 @@ void lease_pinged (from, packet, length)
 	}
 
 	if (!lp -> state && ! lp -> releasing) {
-		warn ("ICMP Echo Reply for %s arrived late or is spurious.\n",
+		warn ("ICMP Echo Reply for %s arrived late or is spurious.",
 		      piaddr (from));
 		return;
 	}

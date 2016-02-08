@@ -1,4 +1,4 @@
-/*	$OpenBSD: funcs.h,v 1.4 2002/02/16 21:28:01 millert Exp $	*/
+/*	$OpenBSD: funcs.h,v 1.8 2002/07/15 19:13:29 millert Exp $	*/
 
 /*
  * Copyright (c) 1997,2000 by Internet Software Consortium, Inc.
@@ -38,20 +38,24 @@ void		set_cron_uid(void),
 		acquire_daemonlock(int),
 		skip_comments(FILE *),
 		log_it(const char *, int, const char *, const char *),
-		log_close(void);
+		log_close(void),
+		atrun(at_db *, double, time_t);
 
 int		job_runqueue(void),
-		set_debug_flags(char *),
+		set_debug_flags(const char *),
 		get_char(FILE *),
 		get_string(char *, int, FILE *, char *),
-		swap_uids(void),
-		swap_uids_back(void),
+		swap_gids(void),
+		swap_gids_back(void),
 		load_env(char *, FILE *),
 		cron_pclose(FILE *),
-		glue_strings(char *, int, char *, char *, int),
-		strcmp_until(const char *, const char *, int),
-		allowed(char *),
-		strdtb(char *);
+		glue_strings(char *, size_t, const char *, const char *, char),
+		strcmp_until(const char *, const char *, char),
+		allowed(const char *),
+		strdtb(char *),
+		open_socket(void),
+		safe_p(const char *, const char *),
+		scan_atjobs(at_db *, struct timeval *);
 
 char		*env_get(char *, char **),
 		*arpadate(time_t *),
@@ -64,10 +68,9 @@ char		*env_get(char *, char **),
 user		*load_user(int, struct passwd *, const char *),
 		*find_user(cron_db *, const char *);
 
-entry		*load_entry(FILE *, void (*)(),
-				 struct passwd *, char **);
+entry		*load_entry(FILE *, void (*)(), struct passwd *, char **);
 
-FILE		*cron_popen(char *, char *, entry *);
+FILE		*cron_popen(char *, char *, struct passwd *);
 
 #ifndef HAVE_TM_GMTOFF
 long		get_gmtoff(time_t *, struct tm *);

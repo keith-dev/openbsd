@@ -45,7 +45,7 @@
 #include <sys/capability.h>
 #endif
 
-RCSID("$KTH: login.c,v 1.125.2.2 2000/06/23 02:33:07 assar Exp $");
+RCSID("$KTH: login.c,v 1.132 2001/02/20 23:07:50 assar Exp $");
 
 #ifdef OTP
 #include <otp.h>
@@ -131,7 +131,7 @@ static void
 motd(void)
 {
 	int fd, nchars;
-	RETSIGTYPE (*oldint)();
+	RETSIGTYPE (*oldint)(int);
 	char tbuf[8192];
 
 	if ((fd = open(_PATH_MOTDFILE, O_RDONLY, 0)) < 0)
@@ -188,8 +188,6 @@ main(int argc, char **argv)
 #endif
 	int mask = 022;		/* Default umask (set below) */
 	int maxtrys = 5;	/* Default number of allowed failed logins */
-
-	set_progname(argv[0]);
 
 	openlog("login", LOG_ODELAY, LOG_AUTH);
 
@@ -267,7 +265,7 @@ main(int argc, char **argv)
 			break;
 	        case 'r':
 			if (rflag || hflag) {
-				warnx("Only one of -r and -h allowed\n");
+				warnx("Only one of -r and -h allowed");
 				exit(1);
                         }
 			if (getuid()) {
@@ -665,8 +663,7 @@ main(int argc, char **argv)
         sysv_newenv(argc, argv, pwd, term, pflag);
 #ifdef KERBEROS
 	if (krbtkfile_env)
-	    if(setenv("KRBTKFILE", krbtkfile_env, 1) != 0)
-		errx(1, "cannot set KRBTKFILE");
+	    esetenv("KRBTKFILE", krbtkfile_env, 1);
 #endif
 
 	if (tty[sizeof("tty")-1] == 'd')
@@ -847,7 +844,7 @@ main(int argc, char **argv)
 
 	execlp(pwd->pw_shell, tbuf, (char *)NULL);
 	if (getuid() == 0) {
-		warnx("Can't exec %s, trying %s\n", 
+		warnx("Can't exec %s, trying %s", 
 		      pwd->pw_shell, _PATH_BSHELL);
 		execlp(_PATH_BSHELL, tbuf, (char *)NULL);
 		err(1, "%s", _PATH_BSHELL);

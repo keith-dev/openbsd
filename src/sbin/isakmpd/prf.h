@@ -1,4 +1,4 @@
-/*	$OpenBSD: prf.h,v 1.5 2001/01/27 12:03:36 niklas Exp $	*/
+/*	$OpenBSD: prf.h,v 1.7 2002/09/11 09:50:44 ho Exp $	*/
 /*	$EOM: prf.h,v 1.1 1998/07/11 20:06:22 provos Exp $	*/
 
 /*
@@ -40,7 +40,7 @@
 
 /* Enumeration of possible PRF - Pseudo-Random Functions.  */
 enum prfs {
-  PRF_HMAC = 0,			/* No PRFs in drafts, this is the default */
+  PRF_HMAC = 0			/* No PRFs in drafts, this is the default */
 };
 
 struct prf {
@@ -57,7 +57,7 @@ struct prf_hash_ctx {
   void *ctx, *ctx2;		/* Contexts we need for later */
 };
 
-struct prf *prf_alloc (enum prfs, int, char *, int);
+struct prf *prf_alloc (enum prfs, int, unsigned char *, int);
 void prf_free (struct prf *);
 
 #endif /* _PRF_H_ */

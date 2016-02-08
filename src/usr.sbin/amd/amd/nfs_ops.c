@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_ops.c,v 1.9 2002/02/13 22:32:33 deraadt Exp $	*/
+/*	$OpenBSD: nfs_ops.c,v 1.16 2002/08/05 07:24:26 pvalchev Exp $	*/
 
 /*-
  * Copyright (c) 1990 Jan-Simon Pendry
@@ -40,7 +40,7 @@
 
 #ifndef lint
 /*static char sccsid[] = "from: @(#)nfs_ops.c	8.1 (Berkeley) 6/6/93";*/
-static char *rcsid = "$OpenBSD: nfs_ops.c,v 1.9 2002/02/13 22:32:33 deraadt Exp $";
+static char *rcsid = "$OpenBSD: nfs_ops.c,v 1.16 2002/08/05 07:24:26 pvalchev Exp $";
 #endif /* not lint */
 
 #include "am.h"
@@ -93,7 +93,7 @@ typedef nfs_fh fhandle_t;
 typedef struct fh_cache fh_cache;
 struct fh_cache {
 	qelem	fh_q;			/* List header */
-	voidp	fh_wchan;		/* Wait channel */
+	void	*fh_wchan;		/* Wait channel */
 	int	fh_error;		/* Valid data? */
 	int	fh_id;			/* Unique id */
 	int	fh_cid;			/* Callout id */
@@ -116,14 +116,12 @@ static int fh_id = 0;
 extern qelem fh_head;
 qelem fh_head = { &fh_head, &fh_head };
 
-static int call_mountd P((fh_cache*, unsigned long, fwd_fun, voidp));
+static int call_mountd(fh_cache*, unsigned long, fwd_fun, void *);
 
 AUTH *nfs_auth;
 
-static fh_cache *find_nfs_fhandle_cache P((voidp idv, int done));
-static fh_cache *find_nfs_fhandle_cache(idv, done)
-voidp idv;
-int done;
+static fh_cache *
+find_nfs_fhandle_cache(void *idv, int done)
 {
 	fh_cache *fp, *fp2 = 0;
 	/* XXX EVIL XXX */
@@ -155,21 +153,16 @@ int done;
 /*
  * Called when a filehandle appears
  */
-static void got_nfs_fh P((voidp pkt, int len, struct sockaddr_in *sa,
-				struct sockaddr_in *ia, voidp idv, int done));
-static void got_nfs_fh(pkt, len, sa, ia, idv, done)
-voidp pkt;
-int len;
-struct sockaddr_in *sa, *ia;
-voidp idv;
-int done;
+static void
+got_nfs_fh(void *pkt, int len, struct sockaddr_in *sa,
+    struct sockaddr_in *ia, void *idv, int done)
 {
 	fh_cache *fp = find_nfs_fhandle_cache(idv, done);
 	if (fp) {
 #if NFS_PROTOCOL_VERSION >= 3
 		fp->fh_handle.fhs_vers = MOUNTVERS;
 #endif
-		fp->fh_error = pickup_rpc_reply(pkt, len, (voidp) &fp->fh_handle, xdr_fhstatus);
+		fp->fh_error = pickup_rpc_reply(pkt, len, (void *)&fp->fh_handle, xdr_fhstatus);
 		if (!fp->fh_error) {
 #ifdef DEBUG
 			dlog("got filehandle for %s:%s", fp->fh_fs->fs_host, fp->fh_path);
@@ -187,9 +180,8 @@ int done;
 	}
 }
 
-void flush_nfs_fhandle_cache P((fserver *fs));
-void flush_nfs_fhandle_cache(fs)
-fserver *fs;
+void
+flush_nfs_fhandle_cache(fserver *fs)
 {
 	fh_cache *fp;
 	ITER(fp, fh_cache, &fh_head) {
@@ -200,28 +192,23 @@ fserver *fs;
 	}
 }
 
-static void discard_fh P((fh_cache *fp));
-static void discard_fh(fp)
-fh_cache *fp;
+static void
+discard_fh(fh_cache *fp)
 {
 	rem_que(&fp->fh_q);
 #ifdef DEBUG
 	dlog("Discarding filehandle for %s:%s", fp->fh_fs->fs_host, fp->fh_path);
 #endif /* DEBUG */
 	free_srvr(fp->fh_fs);
-	free((voidp) fp->fh_path);
-	free((voidp) fp);
+	free((void *)fp->fh_path);
+	free((void *)fp);
 }
 
 /*
  * Determine the file handle for a node
  */
-static int prime_nfs_fhandle_cache P((char *path, fserver *fs, fhstatus *fhbuf, voidp wchan));
-static int prime_nfs_fhandle_cache(path, fs, fhbuf, wchan)
-char *path;
-fserver *fs;
-fhstatus *fhbuf;
-voidp wchan;
+static int
+prime_nfs_fhandle_cache(char *path, fserver *fs, fhstatus *fhbuf, void *wchan)
 {
 	fh_cache *fp, *fp_save = 0;
 	int error;
@@ -241,11 +228,11 @@ voidp wchan;
 				error = fp->fh_error = unx_error(fp->fh_handle.fhs_stat);
 				if (error == 0) {
 					if (fhbuf)
-						bcopy((voidp) &fp->fh_handle, (voidp) fhbuf,
+						bcopy((void *)&fp->fh_handle, (void *)fhbuf,
 							sizeof(fp->fh_handle));
 					if (fp->fh_cid)
 						untimeout(fp->fh_cid);
-					fp->fh_cid = timeout(FH_TTL, discard_fh, (voidp) fp);
+					fp->fh_cid = timeout(FH_TTL, discard_fh, (void *)fp);
 				} else if (error == EACCES) {
 					/*
 					 * Now decode the file handle return code.
@@ -304,14 +291,14 @@ voidp wchan;
 		free(fp->fh_path);
 	} else {
 		fp = ALLOC(fh_cache);
-		bzero((voidp) fp, sizeof(*fp));
+		bzero((void *)fp, sizeof(*fp));
 		ins_que(&fp->fh_q, &fh_head);
 	}
 	if (!reuse_id)
 		fp->fh_id = FHID_ALLOC();
 	fp->fh_wchan = wchan;
 	fp->fh_error = -1;
-	fp->fh_cid = timeout(FH_TTL, discard_fh, (voidp) fp);
+	fp->fh_cid = timeout(FH_TTL, discard_fh, (void *)fp);
 
 	/*
 	 * If the address has changed then don't try to re-use the
@@ -332,7 +319,7 @@ voidp wchan;
 		 */
 		untimeout(fp->fh_cid);
 		fp->fh_cid = timeout(error < 0 ? 2 * ALLOWED_MOUNT_TIME : FH_TTL_ERROR,
-						discard_fh, (voidp) fp);
+						discard_fh, (void *)fp);
 		fp->fh_error = error;
 	} else {
 		error = fp->fh_error;
@@ -340,7 +327,8 @@ voidp wchan;
 	return error;
 }
 
-int make_nfs_auth P((void))
+int
+make_nfs_auth(void)
 {
 #ifdef HAS_NFS_QUALIFIED_NAMES
 	/*
@@ -359,12 +347,8 @@ int make_nfs_auth P((void))
 	return 0;
 }
 
-static int call_mountd P((fh_cache *fp, u_long proc, fwd_fun f, voidp wchan));
-static int call_mountd(fp, proc, f, wchan)
-fh_cache *fp;
-u_long proc;
-fwd_fun f;
-voidp wchan;
+static int
+call_mountd(fh_cache *fp, u_long proc, fwd_fun f, void *wchan)
 {
 	struct rpc_msg mnt_msg;
 	int len;
@@ -387,7 +371,7 @@ voidp wchan;
 
 	rpc_msg_init(&mnt_msg, MOUNTPROG, MOUNTVERS, (unsigned long) 0);
 	len = make_rpc_packet(iobuf, sizeof(iobuf), proc,
-			&mnt_msg, (voidp) &fp->fh_path, xdr_nfspath,  nfs_auth);
+			&mnt_msg, (void *)&fp->fh_path, xdr_nfspath,  nfs_auth);
 
 	/*
 	 * XXX EVIL!  We cast fh_id to a pointer, then back to an int
@@ -395,7 +379,7 @@ voidp wchan;
 	 */
 	if (len > 0) {
 		error = fwd_packet(MK_RPC_XID(RPC_XID_MOUNTD, fp->fh_id),
-			(voidp) iobuf, len, &fp->fh_sin, &fp->fh_sin, (voidp) ((long)fp->fh_id), f);
+			(void *)iobuf, len, &fp->fh_sin, &fp->fh_sin, (void *)((long)fp->fh_id), f);
 	} else {
 		error = -len;
 	}
@@ -420,8 +404,8 @@ voidp wchan;
  * remote hostname.
  * Local filesystem defaults to remote and vice-versa.
  */
-static char *nfs_match(fo)
-am_opts *fo;
+static char *
+nfs_match(am_opts *fo)
 {
 	char *xmtab;
 	if (fo->opt_fs && !fo->opt_rfs)
@@ -438,7 +422,8 @@ am_opts *fo;
 	 * Determine magic cookie to put in mtab
 	 */
 	xmtab = (char *) xmalloc(strlen(fo->opt_rhost) + strlen(fo->opt_rfs) + 2);
-	sprintf(xmtab, "%s:%s", fo->opt_rhost, fo->opt_rfs);
+	snprintf(xmtab, strlen(fo->opt_rhost) + strlen(fo->opt_rfs) + 2,
+		"%s:%s", fo->opt_rhost, fo->opt_rfs);
 #ifdef DEBUG
 	dlog("NFS: mounting remote server \"%s\", remote fs \"%s\" on \"%s\"",
 		fo->opt_rhost, fo->opt_rfs, fo->opt_fs);
@@ -450,22 +435,22 @@ am_opts *fo;
 /*
  * Initialise am structure for nfs
  */
-static int nfs_init(mf)
-mntfs *mf;
+static int
+nfs_init(mntfs *mf)
 {
 	if (!mf->mf_private) {
 		int error;
 		fhstatus fhs;
-	
+
 		char *colon = strchr(mf->mf_info, ':');
 		if (colon == 0)
 			return ENOENT;
 
-		error = prime_nfs_fhandle_cache(colon+1, mf->mf_server, &fhs, (voidp) mf);
+		error = prime_nfs_fhandle_cache(colon+1, mf->mf_server, &fhs, (void *)mf);
 		if (!error) {
-			mf->mf_private = (voidp) ALLOC(fhstatus);
+			mf->mf_private = (void *)ALLOC(fhstatus);
 			mf->mf_prfree = (void (*)()) free;
-			bcopy((voidp) &fhs, mf->mf_private, sizeof(fhs));
+			bcopy((void *)&fhs, mf->mf_private, sizeof(fhs));
 		}
 		return error;
 	}
@@ -473,13 +458,9 @@ mntfs *mf;
 	return 0;
 }
 
-int mount_nfs_fh P((fhstatus *fhp, char *dir, char *fs_name, char *opts, mntfs *mf));
-int mount_nfs_fh(fhp, dir, fs_name, opts, mf)
-fhstatus *fhp;
-char *dir;
-char *fs_name;
-char *opts;
-mntfs *mf;
+int
+mount_nfs_fh(fhstatus *fhp, char *dir, char *fs_name, char *opts,
+    mntfs *mf)
 {
 	struct nfs_args nfs_args;
 	struct mntent mnt;
@@ -497,7 +478,7 @@ mntfs *mf;
 
 	MTYPE_TYPE type = MOUNT_TYPE_NFS;
 
-	bzero((voidp) &nfs_args, sizeof(nfs_args));	/* Paranoid */
+	bzero((void *)&nfs_args, sizeof(nfs_args));	/* Paranoid */
 
 	/*
 	 * Extract host name to give to kernel
@@ -507,7 +488,7 @@ mntfs *mf;
 #ifndef NFS_ARGS_NEEDS_PATH
 	*colon = '\0';
 #endif
-	strncpy(host, fs_name, sizeof(host));
+	strlcpy(host, fs_name, sizeof(host));
 #ifndef NFS_ARGS_NEEDS_PATH
 	*colon = ':';
 #endif /* NFS_ARGS_NEEDS_PATH */
@@ -518,7 +499,7 @@ mntfs *mf;
 	else
 		xopts = strdup(opts);
 
-	bzero((voidp) &nfs_args, sizeof(nfs_args));
+	bzero((void *)&nfs_args, sizeof(nfs_args));
 
 	mnt.mnt_dir = dir;
 	mnt.mnt_fsname = fs_name;
@@ -598,7 +579,7 @@ mntfs *mf;
  * This isn't supported by the ping algorithm yet.
  * In any case, it is all done in nfs_init().
  */
- 	if (port = hasmntval(&mnt, "port"))
+	if (port = hasmntval(&mnt, "port"))
 		sin.sin_port = htons(port);
 	else
 		sin.sin_port = htons(NFS_PORT);	/* XXX should use portmapper */
@@ -693,11 +674,8 @@ mntfs *mf;
 	return error;
 }
 
-static int mount_nfs(dir, fs_name, opts, mf)
-char *dir;
-char *fs_name;
-char *opts;
-mntfs *mf;
+static int
+mount_nfs(char *dir, char *fs_name, char *opts, mntfs *mf)
 {
 #ifdef notdef
 	int error;
@@ -710,7 +688,7 @@ mntfs *mf;
 #ifdef DEBUG
 	dlog("locating fhandle for %s", fs_name);
 #endif /* DEBUG */
-	error = prime_nfs_fhandle_cache(colon+1, mf->mf_server, &fhs, (voidp) 0);
+	error = prime_nfs_fhandle_cache(colon+1, mf->mf_server, &fhs, (void *)0);
 
 	if (error)
 		return error;
@@ -725,8 +703,8 @@ mntfs *mf;
 	return mount_nfs_fh((fhstatus *) mf->mf_private, dir, fs_name, opts, mf);
 }
 
-static int nfs_fmount(mf)
-mntfs *mf;
+static int
+nfs_fmount(mntfs *mf)
 {
 	int error;
 
@@ -741,8 +719,8 @@ mntfs *mf;
 	return error;
 }
 
-static int nfs_fumount(mf)
-mntfs *mf;
+static int
+nfs_fumount(mntfs *mf)
 {
 	int error = UMOUNT_FS(mf->mf_mount);
 	if (error)
@@ -751,8 +729,8 @@ mntfs *mf;
 	return 0;
 }
 
-static void nfs_umounted(mp)
-am_node *mp;
+static void
+nfs_umounted(am_node *mp)
 {
 #ifdef INFORM_MOUNTD
 	/*
@@ -794,8 +772,8 @@ am_node *mp;
 		f.fh_fs = fs;
 		f.fh_id = 0;
 		f.fh_error = 0;
-		(void) prime_nfs_fhandle_cache(colon+1, mf->mf_server, (fhstatus *) 0, (voidp) mf);
-		(void) call_mountd(&f, MOUNTPROC_UMNT, (fwd_fun) 0, (voidp) 0);
+		(void) prime_nfs_fhandle_cache(colon+1, mf->mf_server, (fhstatus *) 0, (void *)mf);
+		(void) call_mountd(&f, MOUNTPROC_UMNT, (fwd_fun) 0, (void *)0);
 		*colon = ':';
 	}
 #endif /* INFORM_MOUNTD */
@@ -811,7 +789,7 @@ am_node *mp;
 	if (mp->am_parent && mp->am_parent->am_path &&
 	    STREQ(mp->am_parent->am_mnt->mf_ops->fs_type, "direct")) {
 		struct stat stb;
-		int pid;
+		pid_t pid;
 		if ((pid = background()) == 0) {
 			if (lstat(mp->am_parent->am_path, &stb) < 0) {
 				plog(XLOG_ERROR, "lstat(%s) after unmount: %m", mp->am_parent->am_path);

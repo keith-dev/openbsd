@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	$OpenBSD: chat.c,v 1.18 2002/03/31 02:38:49 brian Exp $
+ *	$OpenBSD: chat.c,v 1.20 2002/06/15 08:02:00 brian Exp $
  */
 
 #include <sys/param.h>
@@ -65,7 +65,6 @@
 #include "slcompress.h"
 #include "iplist.h"
 #include "ncpaddr.h"
-#include "ip.h"
 #include "ipcp.h"
 #include "filter.h"
 #include "cbcp.h"
@@ -450,7 +449,7 @@ chat_Read(struct fdescriptor *d, struct bundle *bundle, const fd_set *fdset)
         /* Got it ! */
         timer_Stop(&c->timeout);
         if (memchr(begin + c->arglen - 1, '\n',
-            c->bufend - begin - c->arglen + 1) == NULL) { 
+            c->bufend - begin - c->arglen + 1) == NULL) {
           /* force it into the log */
           end = c->bufend;
           c->bufend = begin + c->arglen;
@@ -468,7 +467,7 @@ chat_Read(struct fdescriptor *d, struct bundle *bundle, const fd_set *fdset)
           if (!strncmp(begin, c->abort.string[n].data,
                        c->abort.string[n].len)) {
             if (memchr(begin + c->abort.string[n].len - 1, '\n',
-                c->bufend - begin - c->abort.string[n].len + 1) == NULL) { 
+                c->bufend - begin - c->abort.string[n].len + 1) == NULL) {
               /* force it into the log */
               end = c->bufend;
               c->bufend = begin + c->abort.string[n].len;

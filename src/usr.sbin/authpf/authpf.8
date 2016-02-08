@@ -1,4 +1,4 @@
-.\" $OpenBSD: authpf.8,v 1.9 2002/04/06 17:34:14 beck Exp $
+.\" $OpenBSD: authpf.8,v 1.17 2002/07/27 07:27:04 nordin Exp $
 .\"
 .\" Copyright (c) 2002 Bob Beck (beck@openbsd.org>.  All rights reserved.
 .\"
@@ -54,10 +54,8 @@ This, combined with properly set up filter rules and secure switches
 can be used to ensure users are held accountable for their network traffic.
 .Pp
 .Nm
-can add and filter rules using the syntax of
-.Xr pf.conf 5
-and translation rules using the syntax of
-.Xr nat.conf 5 .
+can add filter and translation rules using the syntax described in
+.Xr pf.conf 5 .
 .Nm
 requires that the
 .Xr pf 4
@@ -72,22 +70,19 @@ On startup,
 retrieves the client's connecting IP address via the
 .Ev SSH_CLIENT
 environment variable, and after performing additional access checks,
-a filter rule template file is read to determine what filter rules to add.
-Optionally, a translation rule template file is read to determine translation
-rules to add. On session exit the same rules that were added at startup are
-removed.
+a template file is read to determine what filter and translation (if
+any) rules to add.
+On session exit the same rules that were added at startup are removed.
 By default, filter rules are added at the end of the active
 .Xr pf 4
 filter list, and translation rules are added at the start of the active
 .Xr pf 4
 nat and rdr lists.
 .Sh FILTER AND TRANSLATION RULES
-Filter and Translation rules for
+Filter and translation rules for
 .Nm
 use the same format described in
-.Xr pf.conf 5
-and
-.Xr nat.conf 5 .
+.Xr pf.conf 5 .
 The only difference is that these rules may (and probably should) use
 the macro
 .Em user_ip
@@ -97,16 +92,16 @@ is run.
 .Pp
 Filter and nat rules will be searched for first in
 .Pa /etc/authpf/users/$USER/
-and then in 
+and then in
 .Pa /etc/authpf/ .
-Per-user rules from the   
+Per-user rules from the
 .Pa /etc/authpf/users/$USER/
 directory are intended to be used when non-default rules
-are needed on an individual user basis. It is important to ensure
-that a user can not write or change these configuration files in
-this case.
+are needed on an individual user basis.
+It is important to ensure that a user can not write or change
+these configuration files in this case.
 .Pp
-Filter rules are loaded from the file
+Filter and translation rules are loaded from the file
 .Pa /etc/authpf/users/$USER/authpf.rules .
 If this file does not exist the file
 .Pa /etc/authpf/authpf.rules
@@ -117,13 +112,9 @@ file must exist in one of the above locations for
 .Nm
 to run.
 .Pp
-Translation rules are loaded from the file
-.Pa /etc/authpf/users/$USER/authpf.nat .
-If this file does not exist the file
-.Pa /etc/authpf/authpf.nat
-is used.
+Translation rules are also loaded from this file.
 The use of translation rules in an
-.Pa authpf.nat
+.Pa authpf.rules
 file is optional.
 .Sh CONFIGURATION
 Options are controlled by the
@@ -151,7 +142,7 @@ meaning filter rules are added to the start of the active rdr list.
 .Sh USER MESSAGES
 On successful invocation,
 .Nm
-displays a message telling the user they have been authenticated.
+displays a message telling the user he or she has been authenticated.
 It will additionally display the contents of the file
 .Pa /etc/authpf/authpf.message
 if the file exists and is readable.
@@ -220,7 +211,7 @@ allowed to pass after the controlling
 session has been closed.
 .Pp
 .Nm
-is designed for gateway machines with don't typically have regular
+is designed for gateway machines which don't typically have regular
 (non-administrative) users using the machine.
 An administrator must remember that
 .Nm
@@ -268,7 +259,7 @@ powers-that-be, they can prohibit him from using the gateway by creating
 the file
 .Pa /etc/authpf/banned/bob
 containing a message about why he has been banned from using the network.
-Once bob has done suitable pennance, his access may be restored by moving or
+Once bob has done suitable penance, his access may be restored by moving or
 removing the file
 .Pa /etc/authpf/banned/bob.
 .Pp
@@ -394,7 +385,7 @@ Example
 external_if = "xl0"
 internal_if = "fxp0"
 
-pass in quick log on $internal_if proto tcp from $user_ip/32 to any \\
+pass in log quick on $internal_if proto tcp from $user_ip/32 to any \\
  keep state
 pass in quick on $internal_if from $user_ip/32 to any
 .Ed
@@ -417,12 +408,12 @@ internal_if="fxp1"
 ipsec_gw="10.2.3.4"
 # allow out ftp, ssh, www and https only, and allow user to negotiate
 # ipsec with the ipsec server.
-pass in quick log on $internal_if proto tcp from $user_ip/32 to any \\
- { port 21, 22, 80, 443 } flags S/SA
+pass in log quick on $internal_if proto tcp from $user_ip/32 to any \\
+ port { 21, 22, 80, 443 } flags S/SA
 pass in quick on $internal_if proto tcp from $user_ip/32 to any \\
- { port 21, 22, 80, 443 }
+ port { 21, 22, 80, 443 }
 pass in quick proto udp from $user_ip/32 to $ipsec_gw/32 port = isakmp \\
- keep-state
+ keep state
 pass in quick proto esp from $user_ip/32 to $ipsec_gw/32
 .Ed
 .Sh FILES
@@ -436,7 +427,6 @@ pass in quick proto esp from $user_ip/32 to $ipsec_gw/32
 .El
 .Sh SEE ALSO
 .Xr pf 4 ,
-.Xr nat.conf 5 ,
 .Xr pf.conf 5 ,
 .Xr ftp-proxy 8
 .Sh BUGS

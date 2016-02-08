@@ -1,5 +1,5 @@
 vers(__file__,
-	{-$OpenBSD: MAKEDEV.md,v 1.19 2002/04/10 06:09:43 deraadt Exp $-},
+	{-$OpenBSD: MAKEDEV.md,v 1.23 2002/07/31 16:47:50 jason Exp $-},
 etc.MACHINE)dnl
 dnl
 dnl Copyright (c) 2001 Todd T. Fries <todd@OpenBSD.org>
@@ -27,7 +27,7 @@ dnl
 dnl
 _TITLE(make)
 __devitem(uperf, uperf, performance counters)dnl
-_mkdev(uperf, uperf, {-M uperf c major_uperf_c 0 664-}, 664)dnl
+_mkdev(uperf, uperf, {-M uperf c major_uperf_c 0 664-})dnl
 _DEV(all)
 _DEV(ramdisk)
 _DEV(std)
@@ -94,18 +94,19 @@ _DEV(bppsp, 109)
 _DEV(cry, 75)
 _DEV(pci, 52)
 _DEV(uperf, 25)
+_DEV(systrace, 50)
 dnl
 divert(7)dnl
 dnl
 ramdisk)
 	_recurse std fd0 wd0 wd1 wd2 sd0 sd1 sd2 rd0
-	_recurse st0 cd0 random
+	_recurse st0 cd0 bpf0 random
 	;;
 
 _std(2, 3, 76, 7, 16)
 	M mouse		c 13 0 666
 	M fb		c 22 0 666
-	M openprom	c 70 0 644
+	M openprom	c 70 0 640 kmem
 	;;
 
 mouse*)

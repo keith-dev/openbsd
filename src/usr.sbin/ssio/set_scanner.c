@@ -1,4 +1,4 @@
-static char *rcs_id = "$Id: set_scanner.c,v 1.3 1999/05/23 17:19:23 aaron Exp $";
+static char *rcs_id = "$Id: set_scanner.c,v 1.5 2002/06/01 20:27:15 deraadt Exp $";
 /*
  * Copyright (c) 1995 Kenneth Stailey
  * All rights reserved.
@@ -124,55 +124,55 @@ main(int argc, char *argv[])
 
 #ifdef __IBMR2
   if (defaults) {
-    sprintf(command, "chdev -l %s", logical_name);
+    snprintf(command, sizeof command, "chdev -l %s", logical_name);
 
     if (width != UNINITIALIZED)
-      sprintf(command, "%s -a window_width=%d", command, width);
+      snprintf(command, sizeof command, "%s -a window_width=%d", command, width);
 
     if (height != UNINITIALIZED)
-      sprintf(command, "%s -a window_length=%d", command, height);
+      snprintf(command, sizeof command, "%s -a window_length=%d", command, height);
 
     if (x_origin != UNINITIALIZED)
-      sprintf(command, "%s -a x_origin=%d", command, x_origin);
+      snprintf(command, sizeof command, "%s -a x_origin=%d", command, x_origin);
 
     if (y_origin != UNINITIALIZED)
-      sprintf(command, "%s -a y_origin=%d", command, y_origin);
+      snprintf(command, sizeof command, "%s -a y_origin=%d", command, y_origin);
 
     if (brightness != UNINITIALIZED)
-      sprintf(command, "%s -a brightness=%d", command, brightness);
+      snprintf(command, sizeof command, "%s -a brightness=%d", command, brightness);
 
     /* note that the FUJITSU doesn't support contrast via the ODM */
     if (contrast != UNINITIALIZED && scanner_type(logical_name) != FUJITSU)
-      sprintf(command, "%s -a contrast=%d", command, contrast);
+      snprintf(command, sizeof command, "%s -a contrast=%d", command, contrast);
 
     if (resolution != UNINITIALIZED) {
-      sprintf(command, "%s -a x_resolution=%d", command, resolution);
-      sprintf(command, "%s -a y_resolution=%d", command, resolution);
+      snprintf(command, sizeof command, "%s -a x_resolution=%d", command, resolution);
+      snprintf(command, sizeof command, "%s -a y_resolution=%d", command, resolution);
     }
 
     if (image_mode != UNINITIALIZED) {
-      sprintf(command, "%s -a image_mode=", command);
+      snprintf(command, sizeof command, "%s -a image_mode=", command);
       switch (image_mode) {
       case SIM_BINARY_MONOCHROME:
-	sprintf(command, "%smonochrome ", command);
+	snprintf(command, sizeof command, "%smonochrome ", command);
 	break;
       case SIM_DITHERED_MONOCHROME:
-	sprintf(command, "%sdithered ", command);
+	snprintf(command, sizeof command, "%sdithered ", command);
 	break;
       case SIM_GRAYSCALE:
-	sprintf(command, "%sgrayscale ", command);
+	snprintf(command, sizeof command, "%sgrayscale ", command);
 	break;
       case SIM_COLOR:
-	sprintf(command, "%scolor ", command);
+	snprintf(command, sizeof command, "%scolor ", command);
 	break;
       case SIM_RED:
-	sprintf(command, "%sred ", command);
+	snprintf(command, sizeof command, "%sred ", command);
 	break;
       case SIM_GREEN:
-	sprintf(command, "%sgreen ", command);
+	snprintf(command, sizeof command, "%sgreen ", command);
 	break;
       case SIM_BLUE:
-	sprintf(command, "%sblue ", command);
+	snprintf(command, sizeof command, "%sblue ", command);
 	break;
       }
     }
@@ -181,16 +181,16 @@ main(int argc, char *argv[])
 
   } else { 			/* use ioctl() instead of chdev */
 #endif
-    sprintf(device_special, "/dev/%s", logical_name);
+    snprintf(device_special, sizeof device_special, "/dev/%s", logical_name);
     if ((s_fd = open(device_special, O_RDONLY)) < 0) {
       fprintf(stderr, "open of %s failed: ", device_special);
       perror("");
-      exit(-1);
+      exit(1);
     }
 
     if (ioctl(s_fd, SCIOCGET, &s_io) < 0) {
       perror("ioctl SCIOCGET");
-      exit(-1);
+      exit(1);
     }
 
     if (width != UNINITIALIZED)
@@ -221,7 +221,7 @@ main(int argc, char *argv[])
 
     if (ioctl(s_fd, SCIOCSET, &s_io) < 0) {
       perror("ioctl SCIOCSET");
-      exit(-1);
+      exit(1);
     }
 #ifdef __IBMR2
   }
@@ -256,14 +256,14 @@ inches_to_1200th(char *numeral)
 
   if ((bc = fopen("/tmp/set_scanner.bc_work", "w")) == NULL) {
     perror("creating temp file '/tmp/set_scanner.bc_work'");
-    exit(-1);
+    exit(1);
   }
   fprintf(bc, "%s * 1200\nquit\n", numeral);
   fclose(bc);
 
   if ((bc = popen("bc -l /tmp/set_scanner.bc_work", "r")) == NULL) {
     perror("running bc");
-    exit(-1);
+    exit(1);
   }
   fgets(result, 50, bc);
   result[strlen(result) - 1] = '\0';  /* eat newline from fgets */
@@ -277,7 +277,7 @@ inches_to_1200th(char *numeral)
 	fprintf(stderr, "set_scanner: please do not use fractions with a  ");
 	fprintf(stderr, "granularity less than\nset_scanner: one ");
 	fprintf(stderr, "twelve-thousandths of an inch\n");
-	exit(-1);
+	exit(1);
       }
   }
 
@@ -290,7 +290,7 @@ usage(char *prog_name)
   fprintf(stderr,
 	  "usage: %s [-w width] [-h height] [-x x_origin] [-y y_origin]\n[-r resolution] [-l logical name] [-i image mode] [-d (for setting defaults)]\n",
 	  prog_name);
-  exit(-1);
+  exit(1);
 }
 
 int xlate_image_code(char *image_code)
@@ -321,7 +321,7 @@ int scanner_type(char *lname)
   int scan_fd;
   struct scan_io sp;
 
-  sprintf(special_file, "/dev/%s", lname);
+  snprintf(special_file, sizeof special_file, "/dev/%s", lname);
 
   if ((scan_fd = open(special_file, O_RDONLY)) < 0) {
     perror("set_scanner: can't open scanner--");

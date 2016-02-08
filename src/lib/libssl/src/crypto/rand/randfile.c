@@ -61,7 +61,11 @@
 #include <stdlib.h>
 #include <string.h>
 
-#ifdef VMS
+#include "e_os.h"
+#include <openssl/crypto.h>
+#include <openssl/rand.h>
+
+#ifdef OPENSSL_SYS_VMS
 #include <unixio.h>
 #endif
 #ifndef NO_SYS_TYPES_H
@@ -72,10 +76,6 @@
 #else
 # include <sys/stat.h>
 #endif
-
-#include "openssl/e_os.h"
-#include <openssl/crypto.h>
-#include <openssl/rand.h>
 
 #undef BUFSIZE
 #define BUFSIZE	1024
@@ -99,12 +99,11 @@ int RAND_load_file(const char *file, long bytes)
 	if (file == NULL) return(0);
 
 	i=stat(file,&sb);
-	if (i < 0) { 
-	  /* If the state fails, put some crap in anyway */
-	  RAND_add(&sb,sizeof(sb),0);
-	  return(0);
-	}
+	/* If the state fails, put some crap in anyway */
+	RAND_add(&sb,sizeof(sb),0);
+	if (i < 0) return(0);
 	if (bytes == 0) return(ret);
+
 	in=fopen(file,"rb");
 	if (in == NULL) goto err;
 	if (sb.st_mode & (S_IFBLK | S_IFCHR)) {
@@ -145,7 +144,7 @@ int RAND_write_file(const char *file)
 	FILE *out = NULL;
 	int n;
 	struct stat sb;
-
+	
 	i=stat(file,&sb);
 	if (i != -1) { 
 	  if (sb.st_mode & (S_IFBLK | S_IFCHR)) {
@@ -158,7 +157,7 @@ int RAND_write_file(const char *file)
 	  }
 	}
 
-#if defined(O_CREAT) && !defined(WIN32)
+#if defined(O_CREAT) && !defined(OPENSSL_SYS_WIN32)
 	/* For some reason Win32 can't write to files created this way */
 	
 	/* chmod(..., 0600) is too late to protect the file,
@@ -190,7 +189,7 @@ int RAND_write_file(const char *file)
 		ret+=i;
 		if (n <= 0) break;
                 }
-#ifdef VMS
+#ifdef OPENSSL_SYS_VMS
 	/* Try to delete older versions of the file, until there aren't
 	   any */
 	{
@@ -208,7 +207,7 @@ int RAND_write_file(const char *file)
 				      some point... */
 		}
 	}
-#endif /* VMS */
+#endif /* OPENSSL_SYS_VMS */
 
 	fclose(out);
 	memset(buf,0,BUFSIZE);
@@ -218,12 +217,12 @@ err:
 
 const char *RAND_file_name(char *buf, size_t size)
 	{
-	char *s = NULL;
+	char *s=NULL;
 	int ok = 0;
 	struct stat sb;
 
 	if (issetugid() == 0)
-		s = getenv("RANDFILE");
+		s=getenv("RANDFILE");
 	if (s != NULL && *s && strlen(s) + 1 < size)
 		{
 		strlcpy(buf,s,size);
@@ -242,7 +241,7 @@ const char *RAND_file_name(char *buf, size_t size)
 		if (s && *s && strlen(s)+strlen(RFILE)+2 < size)
 			{
 			strlcpy(buf,s,size);
-#ifndef VMS
+#ifndef OPENSSL_SYS_VMS
 			strcat(buf,"/");
 #endif
 			strlcat(buf,RFILE,size);
@@ -252,24 +251,23 @@ const char *RAND_file_name(char *buf, size_t size)
 		  	buf[0] = '\0'; /* no file name */
 		}
 
-#ifdef DEVRANDOM
+#ifdef __OpenBSD__
 	/* given that all random loads just fail if the file can't be 
 	 * seen on a stat, we stat the file we're returning, if it
-	 * fails, use DEVRANDOM instead. this allows the user to 
+	 * fails, use /dev/arandom instead. this allows the user to 
 	 * use their own source for good random data, but defaults
 	 * to something hopefully decent if that isn't available. 
 	 */
 
 	if (!ok)
-		if (strlcpy(buf,DEVRANDOM,size) >= size) {
+		if (strlcpy(buf,"/dev/arandom",size) >= size) {
 			return(NULL);
 		}	
 	if (stat(buf,&sb) == -1)
-		if (strlcpy(buf,DEVRANDOM,size) >= size) {
+		if (strlcpy(buf,"/dev/arandom",size) >= size) {
 			return(NULL);
 		}	
 
 #endif
 	return(buf);
 	}
-

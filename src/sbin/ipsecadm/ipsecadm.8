@@ -1,4 +1,4 @@
-.\" $OpenBSD: ipsecadm.8,v 1.49 2001/12/21 11:41:50 mpech Exp $
+.\" $OpenBSD: ipsecadm.8,v 1.52 2002/09/06 21:36:52 deraadt Exp $
 .\"
 .\" Copyright 1997 Niels Provos <provos@physnet.uni-hamburg.de>
 .\" All rights reserved.
@@ -433,9 +433,10 @@ The
 should be chosen in random (ideally, using some true-random source like
 coin flipping).
 It is very important that the key is not guessable.
-One practical way of generating keys is by using the
-.Xr random 4
-device (e.g., dd if=/dev/urandom bs=1024 count=1 | sha1)
+One practical way of generating 160-bit (20-byte) keys is as follows:
+.Bd -literal
+	$ openssl rand 20 | hexdump -e '20/1 "%02x"'
+.Ed
 .It Fl keyfile
 Read the key from a file.
 May be used instead of the
@@ -455,9 +456,10 @@ The
 should be chosen in random (ideally, using some true-random source like
 coin flipping).
 It is very important that the key is not guessable.
-One practical way of generating keys is by using the
-.Xr random 4
-device (e.g., dd if=/dev/urandom bs=1024 count=1 | sha1)
+One practical way of generating 160-bit (20-byte) keys is as follows:
+.Bd -literal
+	$ openssl rand 20 | hexdump -e '20/1 "%02x"'
+.Ed
 .It Fl authkeyfile
 Read the authkey from a file.
 May be used instead of the
@@ -641,13 +643,13 @@ authentication:
 .Bd -literal
 # ipsecadm new esp -enc 3des -auth sha1 -spi 100a -dst 169.20.12.2 \e\
 	-src 169.20.12.3 \e\
-	-key 638063806380638063806380638063806380638063806380 \e\
+	-key 638063806380638063806380638063806380638063806380 \e\ 
 	-authkey 1234123412341234123412341234123412341234
 .Ed
 .Pp
 Setup a SA for authentication with old ah only:
 .Bd -literal
-# ipsecadm old ah -auth md5 -spi 10f2 -dst 169.20.12.2 -src 169.20.12.3 \e\
+# ipsecadm old ah -auth md5 -spi 10f2 -dst 169.20.12.2 -src 169.20.12.3 \e\ 
 	-key 12341234deadbeef
 .Ed
 .Pp
@@ -688,6 +690,5 @@ Delete all esp SAs and their flows and routing information:
 .Xr protocols 5 ,
 .Xr services 5 ,
 .Xr sysctl.conf 5 ,
-.Xr isakmpd 8 ,
-.Xr photurisd 8 ,
+.Xr isakmpd 8
 .Xr vpn 8

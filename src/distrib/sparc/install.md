@@ -1,4 +1,4 @@
-#	$OpenBSD: install.md,v 1.37 2002/03/31 17:30:31 deraadt Exp $
+#	$OpenBSD: install.md,v 1.46 2002/09/24 23:45:05 deraadt Exp $
 #	$NetBSD: install.md,v 1.3.2.5 1996/08/26 15:45:28 gwr Exp $
 #
 #
@@ -42,47 +42,11 @@
 
 # Machine-dependent install sets
 MDSETS=kernel
+MDTERM=sun
+MDDISKDEVS='/^sd[0-9] /s/ .*//p;/^x[dy][0-9] /s/ .*//p'
 ARCH=ARCH
 
 md_set_term() {
-	test -n "$TERM" && return
-	echo -n "Specify terminal type [sun]: "
-	getresp sun
-	TERM=$resp
-	export TERM
-}
-
-md_get_msgbuf() {
-	# Only want to see one boot's worth of info
-	dmesg > /tmp/msgbuf
-	sed -n -f /dev/stdin /tmp/msgbuf <<- OOF
-		/^OpenBSD /h
-		/^OpenBSD /!H
-		\${
-			g
-			p
-		}
-	OOF
-}
-
-md_get_diskdevs() {
-	# return available disk devices
-	md_get_msgbuf | sed -n 	-e '/^sd[0-9] /{s/ .*//;p;}' \
-	    -e '/^x[dy][0-9] /{s/ .*//;p;}'
-}
-
-md_get_cddevs() {
-	# return available CDROM devices
-	md_get_msgbuf | sed -n 	-e '/^cd[0-9] /{s/ .*//;p;}'
-}
-
-md_get_partition_range() {
-	# return range of valid partition letters
-	echo [a-p]
-}
-
-md_questions() {
-	:
 }
 
 md_installboot() {
@@ -110,14 +74,6 @@ md_installboot() {
 	installboot -v /mnt/boot ${_prefix}/bootxx ${_rawdev}
 }
 
-md_native_fstype() {
-	:
-}
-
-md_native_fsopts() {
-	:
-}
-
 md_checkfordisklabel() {
 	# $1 is the disk to check
 	local rval
@@ -142,7 +98,7 @@ md_prep_disklabel()
 	md_checkfordisklabel $_disk
 	case $? in
 	0)	;;
-	1)	echo WARNING: Label on disk $_disk has no label. You will be creating a new one.
+	1)	echo WARNING: Disk $_disk has no label. You will be creating a new one.
 		echo
 		;;
 	2)	echo WARNING: Label on disk $_disk is corrupted. You will be repairing.
@@ -150,77 +106,9 @@ md_prep_disklabel()
 		;;
 	esac
 
-	# display example
-	cat << __EOT
-If you are unsure of how to use multiple partitions properly
-(ie. separating /, /usr, /tmp, /var, /usr/local, and other things)
-just split the space into a root and swap partition for now.
-
-__EOT
 	disklabel -W ${_disk}
 	disklabel -f /tmp/fstab.${_disk} -E ${_disk}
 }
 
-md_welcome_banner() {
-{
-	if [ "$MODE" = install ]; then
-		cat << __EOT
-Welcome to the OpenBSD/sparc ${VERSION_MAJOR}.${VERSION_MINOR} installation program.
-
-This program is designed to help you put OpenBSD on your disk in a simple and
-rational way.
-__EOT
-
-	else
-		cat << __EOT
-Welcome to the OpenBSD/sparc ${VERSION_MAJOR}.${VERSION_MINOR} upgrade program.
-
-This program is designed to help you upgrade your OpenBSD system in a
-simple and rational way.
-
-As a reminder, installing the 'etc' binary set is NOT recommended.
-Once the rest of your system has been upgraded, you should manually
-merge any changes to files in the 'etc' set into those files which
-already exist on your system.
-__EOT
-	fi
-
-cat << __EOT
-
-As with anything which modifies your disk's contents, this program can
-cause SIGNIFICANT data loss, and you are advised to make sure your
-data is backed up before beginning the installation process.
-
-Default answers are displayed in brackets after the questions.  You
-can hit Control-C at any time to quit, but if you do so at a prompt,
-you may have to hit return.  Also, quitting in the middle of
-installation may leave your system in an inconsistent state.
-
-__EOT
-} | more
-}
-
-md_not_going_to_install() {
-	cat << __EOT
-
-OK, then.  Enter 'halt' at the prompt to halt the machine.  Once the
-machine has halted, power-cycle the system to load new boot code.
-
-__EOT
-}
-
 md_congrats() {
-	local what;
-	if [ "$MODE" = install ]; then
-		what=installed
-	else
-		what=upgraded
-	fi
-	cat << __EOT
-
-CONGRATULATIONS!  You have successfully $what OpenBSD!
-To boot the installed system, enter halt at the command prompt. Once the
-system has halted, reset the machine and boot from the disk.
-
-__EOT
 }

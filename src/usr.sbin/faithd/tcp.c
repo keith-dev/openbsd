@@ -1,5 +1,5 @@
-/*	$OpenBSD: tcp.c,v 1.10 2002/02/16 21:28:02 millert Exp $	*/
-/*	$KAME: tcp.c,v 1.6 2001/07/02 14:36:49 itojun Exp $	*/
+/*	$OpenBSD: tcp.c,v 1.12 2002/09/08 01:20:15 itojun Exp $	*/
+/*	$KAME: tcp.c,v 1.10 2002/08/20 23:01:01 itojun Exp $	*/
 
 /*
  * Copyright (C) 1997 and 1998 WIDE Project.
@@ -99,7 +99,7 @@ sig_child(int sig)
 	pid = wait3(&status, WNOHANG, (struct rusage *)0);
 	if (pid > 0 && WEXITSTATUS(status))
 		syslog_r(LOG_WARNING, &sdata,
-		    "child %d exit status 0x%x", pid, status);
+		    "child %ld exit status 0x%x", (long)pid, status);
 	exit_success("terminate connection due to child termination");
 }
 
@@ -161,6 +161,8 @@ send_data(int s_rcv, int s_snd, const char *service, int direction)
 		if (cc == -1)
 			goto retry_or_err;
 		oob_exists = 0;
+		if (s_rcv >= FD_SETSIZE)
+			exit_failure("descriptor too big");
 		FD_SET(s_rcv, &exceptfds);
 	}
 
@@ -179,12 +181,18 @@ send_data(int s_rcv, int s_snd, const char *service, int direction)
 	}
 #endif /* DEBUG */
 	tblen = 0; tboff = 0;
+	if (s_snd >= FD_SETSIZE)
+		exit_failure("descriptor too big");
 	FD_CLR(s_snd, &writefds);
+	if (s_rcv >= FD_SETSIZE)
+		exit_failure("descriptor too big");
 	FD_SET(s_rcv, &readfds);
 	return;
     retry_or_err:
 	if (errno != EAGAIN)
 		exit_failure("writing relay data failed: %s", strerror(errno));
+	if (s_snd >= FD_SETSIZE)
+		exit_failure("descriptor too big");
 	FD_SET(s_snd, &writefds);
 }
 
@@ -200,6 +208,8 @@ relay(int s_rcv, int s_snd, const char *service, int direction)
 	FD_ZERO(&exceptfds);
 	fcntl(s_snd, F_SETFD, O_NONBLOCK);
 	oreadfds = readfds; owritefds = writefds; oexceptfds = exceptfds;
+	if (s_rcv >= FD_SETSIZE)
+		exit_failure("descriptor too big");
 	FD_SET(s_rcv, &readfds);
 	FD_SET(s_rcv, &exceptfds);
 	oob_exists = 0;
@@ -234,7 +244,11 @@ relay(int s_rcv, int s_snd, const char *service, int direction)
 			    oob_read_retry:
 				cc = read(s_rcv, atmark_buf, 1);
 				if (cc == 1) {
+					if (s_rcv >= FD_SETSIZE)
+						exit_failure("descriptor too big");
 					FD_CLR(s_rcv, &exceptfds);
+					if (s_snd >= FD_SETSIZE)
+						exit_failure("descriptor too big");
 					FD_SET(s_snd, &writefds);
 					oob_exists = 1;
 				} else if (cc == -1) {
@@ -267,7 +281,11 @@ relay(int s_rcv, int s_snd, const char *service, int direction)
 				exit_success("terminating %s relay", service);
 				/* NOTREACHED */
 			default:
+				if (s_rcv >= FD_SETSIZE)
+					exit_failure("descriptor too big");
 				FD_CLR(s_rcv, &readfds);
+				if (s_snd >= FD_SETSIZE)
+					exit_failure("descriptor too big");
 				FD_SET(s_snd, &writefds);
 				break;
 			}

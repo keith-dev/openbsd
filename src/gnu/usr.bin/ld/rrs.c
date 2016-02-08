@@ -1,4 +1,4 @@
-/*	$OpenBSD: rrs.c,v 1.7 2000/09/21 12:03:12 espie Exp $*/
+/*	$OpenBSD: rrs.c,v 1.10 2002/09/07 01:25:34 marc Exp $*/
 /*
  * Copyright (c) 1993 Paul Kranenburg
  * All rights reserved.
@@ -13,7 +13,7 @@
  *    documentation and/or other materials provided with the distribution.
  * 3. All advertising materials mentioning features or use of this software
  *    must display the following acknowledgement:
- *      This product includes software developed by Paul Kranenburg.
+ *	This product includes software developed by Paul Kranenburg.
  * 4. The name of the author may not be used to endorse or promote products
  *    derived from this software without specific prior written permission
  *
@@ -78,7 +78,6 @@ static int	current_got_offset;
 static int	max_got_offset;
 static int	min_got_offset;
 static int	got_origin;
-static int	current_reloc_offset;
 static int	current_hash_index;
 int		number_of_shobjs;
 
@@ -93,60 +92,60 @@ struct shobj {
 /*
 RRS text segment:
 		+-------------------+  <-- sdt_rel (rrs_text_start)
-		|                   |
-		|    relocation     |
-		|                   |
+		|		    |
+		|    relocation	    |
+		|		    |
 		+-------------------+  <-- <sdt>.sdt_hash
-		|                   |
+		|		    |
 		|    hash buckets   |
-		|                   |
+		|		    |
 		+-------------------+  <-- <sdt>.sdt_nzlist
-		|                   |
-		|     symbols       |
-		|                   |
+		|		    |
+		|     symbols	    |
+		|		    |
 		+-------------------+  <-- <sdt>.sdt_strings
-		|                   |
-		|     strings       |
-		|                   |
+		|		    |
+		|     strings	    |
+		|		    |
 		+-------------------+  <-- <sdt>.sdt_sods
-		|                   |
-		|     shobjs        |
-		|                   |
+		|		    |
+		|     shobjs	    |
+		|		    |
 		+-------------------+
-		|                   |
+		|		    |
 		|  shobjs strings   |  <-- <shobj>.sod_name
-		|                   |
+		|		    |
 		+-------------------+
 
 
 RRS data segment:
 
 		+-------------------+  <-- __DYNAMIC (rrs_data_start)
-		|                   |
-		|     _dymamic      |
-		|                   |
+		|		    |
+		|     _dymamic	    |
+		|		    |
 		+-------------------+  <-- __DYNAMIC.d_debug
-		|                   |
-		|    so_debug       |
-		|                   |
+		|		    |
+		|    so_debug	    |
+		|		    |
 		+-------------------+  <-- __DYNAMIC.d_un.d_sdt
-		|                   |
-		|       sdt         |
-		|                   |
+		|		    |
+		|	sdt	    |
+		|		    |
 		+-------------------+  <-- sdt_got
-		|                   |
-		|      _GOT_        |  <-- _GLOBAL_OFFSET_TABLE_
-		|                   |		( == sdt_got + got_origin)
-		|                   |
+		|		    |
+		|      _GOT_	    |  <-- _GLOBAL_OFFSET_TABLE_
+		|		    |		( == sdt_got + got_origin)
+		|		    |
 		+-------------------+  <-- sdt_plt
-		|                   |
-		|       PLT         |
-		|                   |
+		|		    |
+		|	PLT	    |
+		|		    |
 		+-------------------+
 */
 
 static int
-dlopen_is_used()
+dlopen_is_used(void)
 {
 	symbol *sym;
 	struct localsymbol *lsp;
@@ -175,8 +174,7 @@ dlopen_is_used()
  * Return 1 if ENTRY was added to the list.
  */
 int
-rrs_add_shobj(entry)
-	struct file_entry	*entry;
+rrs_add_shobj(struct file_entry *entry)
 {
 	struct shobj	**p;
 
@@ -192,9 +190,7 @@ rrs_add_shobj(entry)
 }
 
 void
-alloc_rrs_reloc(entry, sp)
-	struct file_entry	*entry;
-	symbol			*sp;
+alloc_rrs_reloc(struct file_entry *entry, symbol *sp)
 {
 #ifdef DEBUG
 printf("alloc_rrs_reloc: %s in %s\n", sp->name, get_file_name(entry));
@@ -203,9 +199,7 @@ printf("alloc_rrs_reloc: %s in %s\n", sp->name, get_file_name(entry));
 }
 
 void
-alloc_rrs_segment_reloc(entry, r)
-	struct file_entry	*entry;
-	struct relocation_info	*r;
+alloc_rrs_segment_reloc(struct file_entry *entry, struct relocation_info *r)
 {
 #ifdef DEBUG
 printf("alloc_rrs_segment_reloc at %#x in %s\n",
@@ -215,9 +209,7 @@ printf("alloc_rrs_segment_reloc at %#x in %s\n",
 }
 
 void
-alloc_rrs_jmpslot(entry, sp)
-	struct file_entry	*entry;
-	symbol			*sp;
+alloc_rrs_jmpslot(struct file_entry *entry, symbol *sp)
 {
 	if (sp->flags & GS_HASJMPSLOT)
 		return;
@@ -228,10 +220,8 @@ alloc_rrs_jmpslot(entry, sp)
 }
 
 void
-alloc_rrs_gotslot(entry, r, lsp)
-	struct file_entry	*entry;
-	struct relocation_info	*r;
-	struct localsymbol	*lsp;
+alloc_rrs_gotslot(struct file_entry *entry, struct relocation_info *r,
+		  struct localsymbol *lsp)
 {
 	symbol	*sp = lsp->symbol;
 
@@ -276,9 +266,7 @@ alloc_rrs_gotslot(entry, r, lsp)
 }
 
 void
-alloc_rrs_cpy_reloc(entry, sp)
-	struct file_entry	*entry;
-	symbol			*sp;
+alloc_rrs_cpy_reloc(struct file_entry *entry, symbol *sp)
 {
 	if (sp->flags & GS_CPYRELOCRESERVED)
 		return;
@@ -290,7 +278,7 @@ printf("alloc_rrs_copy: %s in %s\n", sp->name, get_file_name(entry));
 }
 
 static struct relocation_info *
-rrs_next_reloc()
+rrs_next_reloc(void)
 {
 	struct relocation_info	*r;
 
@@ -307,7 +295,7 @@ static unsigned long total_text_relocs = 0;
 
 /* called at cleanup time */
 void
-rrs_summarize_warnings()
+rrs_summarize_warnings(void)
 {
 	if (total_text_relocs >= TEXT_RELOC_THRESHOLD)
 		warnx("Total: %lu RRS text relocations",
@@ -323,11 +311,8 @@ rrs_summarize_warnings()
  * written to a.out.
  */
 int
-claim_rrs_reloc(entry, rp, sp, relocation)
-	struct file_entry	*entry;
-	struct relocation_info	*rp;
-	symbol			*sp;
-	long			*relocation;
+claim_rrs_reloc(struct file_entry *entry, struct relocation_info *rp,
+		symbol *sp, long *relocation)
 {
 	struct relocation_info	*r = rrs_next_reloc();
 
@@ -360,11 +345,8 @@ printf("claim_rrs_reloc: %s in %s\n", sp->name, get_file_name(entry));
  * Claim a jmpslot. Setup RRS relocation if claimed for the first time.
  */
 long
-claim_rrs_jmpslot(entry, rp, sp, addend)
-	struct file_entry	*entry;
-	struct relocation_info	*rp;
-	symbol			*sp;
-	long			addend;
+claim_rrs_jmpslot(struct file_entry *entry, struct relocation_info *rp,
+		  symbol *sp, long addend)
 {
 	struct relocation_info *r;
 
@@ -431,11 +413,8 @@ printf("claim_rrs_jmpslot: %s: %s(%d) -> offset %x\n",
  * Return offset into the GOT allocated to this symbol.
  */
 long
-claim_rrs_gotslot(entry, rp, lsp, addend)
-	struct file_entry	*entry;
-	struct relocation_info	*rp;
-	struct localsymbol	*lsp;
-	long			addend;
+claim_rrs_gotslot(struct file_entry *entry, struct relocation_info *rp,
+		  struct localsymbol *lsp, long addend)
 {
 	struct relocation_info	*r;
 	symbol	*sp = lsp->symbol;
@@ -549,11 +528,8 @@ printf("claim_rrs_gotslot: %s(%d,%#x) slot offset %#x, addend %#x\n",
  * the GOT.
  */
 long
-claim_rrs_internal_gotslot(entry, rp, lsp, addend)
-	struct file_entry	*entry;
-	struct relocation_info	*rp;
-	struct localsymbol	*lsp;
-	long			addend;
+claim_rrs_internal_gotslot(struct file_entry *entry, struct relocation_info *rp,
+			   struct localsymbol *lsp, long addend)
 {
 	struct relocation_info	*r;
 
@@ -570,7 +546,7 @@ claim_rrs_internal_gotslot(entry, rp, lsp, addend)
 	if (lsp->gotslot_offset != -1) {
 		/* Already claimed */
 		if (*GOTP(lsp->gotslot_offset) != addend)
-			errx(1, "%s: gotslot at %#x is multiple valued",
+			errx(1, "%s: gotslot at %#lx is multiple valued",
 				get_file_name(entry), lsp->gotslot_offset);
 		return lsp->gotslot_offset;
 	}
@@ -609,10 +585,8 @@ printf("claim_rrs_internal_gotslot: %s: slot offset %#x, addend = %#x\n",
 }
 
 void
-claim_rrs_cpy_reloc(entry, rp, sp)
-	struct file_entry	*entry;
-	struct relocation_info	*rp;
-	symbol			*sp;
+claim_rrs_cpy_reloc(struct file_entry *entry, struct relocation_info *rp,
+		    symbol *sp)
 {
 	struct relocation_info	*r;
 
@@ -638,9 +612,7 @@ printf("claim_rrs_copy: %s: %s -> %x\n",
 }
 
 void
-claim_rrs_segment_reloc(entry, rp)
-	struct file_entry	*entry;
-	struct relocation_info	*rp;
+claim_rrs_segment_reloc(struct file_entry *entry, struct relocation_info *rp)
 {
 	struct relocation_info	*r = rrs_next_reloc();
 
@@ -660,10 +632,8 @@ printf("claim_rrs_segment_reloc: %s at %#x\n",
  * Fill the RRS hash table for the given symbol name.
  * NOTE: the hash value computation must match the one in rtld.
  */
-void
-rrs_insert_hash(cp, index)
-	char	*cp;
-	int	index;
+static void
+rrs_insert_hash(char *cp, int index)
 {
 	int		hashval = 0;
 	struct rrs_hash	*hp;
@@ -702,12 +672,14 @@ rrs_insert_hash(cp, index)
  *    goes into a.out.
  */
 void
-consider_rrs_section_lengths()
+consider_rrs_section_lengths(void)
 {
 	int		n;
-	struct shobj	*shp, **shpp;
+	struct shobj	*shp;
 
 #ifdef notyet
+	struct shobj	**shpp;
+
 /* We run into trouble with this as long as shared object symbols
    are not checked for definitions */
 	/*
@@ -886,7 +858,7 @@ consider_rrs_section_lengths()
 }
 
 void
-relocate_rrs_addresses()
+relocate_rrs_addresses(void)
 {
 	int gotsize;
 
@@ -976,8 +948,8 @@ relocate_rrs_addresses()
 
 }
 
-void
-write_rrs_data()
+static void
+write_rrs_data(void)
 {
 	long	pos;
 
@@ -1018,8 +990,8 @@ write_rrs_data()
 	mywrite(rrs_plt, number_of_jmpslots, sizeof(jmpslot_t), outstream);
 }
 
-void
-write_rrs_text()
+static void
+write_rrs_text(void)
 {
 	long			pos;
 	int			i;
@@ -1268,7 +1240,7 @@ write_rrs_text()
 }
 
 void
-write_rrs()
+write_rrs(void)
 {
 
 	/*

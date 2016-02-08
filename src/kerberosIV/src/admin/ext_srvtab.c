@@ -9,7 +9,7 @@
 
 #include "adm_locl.h"
 
-RCSID("$KTH: ext_srvtab.c,v 1.18 1999/09/16 20:37:20 assar Exp $");
+RCSID("$KTH: ext_srvtab.c,v 1.20 2001/09/02 23:58:56 assar Exp $");
 
 static des_cblock master_key;
 static des_cblock session_key;
@@ -39,7 +39,7 @@ FWrite(void *p, int size, int n, FILE *f)
 {
     if (fwrite(p, size, n, f) != n) {
         StampOutSecrets();
-	errx(1, "Error writing output file.  Terminating.\n");
+	errx(1, "Error writing output file.  Terminating.");
     }
 }
 
@@ -55,11 +55,12 @@ main(int argc, char **argv)
     int prompt = KDB_GET_PROMPT;
     int n, i;
     
-    set_progname (argv[0]);
     memset(realm, 0, sizeof(realm));
     
-#ifdef HAVE_ATEXIT
+#if defined(HAVE_ATEXIT)
     atexit(StampOutSecrets);
+#elif defined(HAVE_ON_EXIT)
+    on_exit(StampOutSecrets);
 #endif
 
     /* Parse commandline arguments */

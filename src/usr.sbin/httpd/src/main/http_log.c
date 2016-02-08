@@ -1,3 +1,5 @@
+/*	$OpenBSD: http_log.c,v 1.13 2002/08/15 15:49:33 henning Exp $ */
+
 /* ====================================================================
  * The Apache Software License, Version 1.1
  *
@@ -339,18 +341,6 @@ static void log_error_core(const char *file, int line, int level,
 	    return;
 	logf = s->error_log;
     }
-#ifdef TPF
-    else if (tpf_child) {
-    /*
-     * If we are doing normal logging, don't log messages that are
-     * above the server log level unless it is a startup/shutdown notice
-     */
-    if (((level & APLOG_LEVELMASK) != APLOG_NOTICE) &&
-        ((level & APLOG_LEVELMASK) > s->loglevel))
-        return;
-    logf = stderr;
-    }
-#endif /* TPF */
     else {
 	/*
 	 * If we are doing syslog logging, don't log messages that are
@@ -523,7 +513,8 @@ API_EXPORT(void) ap_log_pid(pool *p, char *fname)
 
     fname = ap_server_root_relative(p, fname);
     mypid = getpid();
-    if (mypid != saved_pid && stat(fname, &finfo) == 0) {
+    if (!ap_server_chroot_desired() && mypid != saved_pid 
+      && stat(fname, &finfo) == 0) {
       /* USR1 and HUP call this on each restart.
        * Only warn on first time through for this pid.
        *

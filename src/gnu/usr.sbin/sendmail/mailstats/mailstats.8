@@ -1,4 +1,4 @@
-.\" Copyright (c) 1998-2001 Sendmail, Inc. and its suppliers.
+.\" Copyright (c) 1998-2002 Sendmail, Inc. and its suppliers.
 .\"	All rights reserved.
 .\"
 .\" By using this file, you agree to the terms and conditions set
@@ -6,9 +6,9 @@
 .\" the sendmail distribution.
 .\"
 .\"
-.\"	$Sendmail: mailstats.8,v 8.25 2001/04/18 04:53:31 gshapiro Exp $
+.\"	$Sendmail: mailstats.8,v 8.30 2002/04/12 00:42:33 ca Exp $
 .\"
-.Dd April 18, 2001
+.Dd April 12, 2002
 .Dt MAILSTATS 1
 .Os
 .Sh NAME
@@ -16,6 +16,7 @@
 .Nd display mail statistics
 .Sh SYNOPSIS
 .Nm mailstats
+.Op Fl c
 .Op Fl o
 .Op Fl p
 .Op Fl P
@@ -60,12 +61,16 @@ separated from the previous information by a line containing only equals
 characters.
 Another line preceded with a
 .Dq C
-lists the number of connections.
+lists the number of TCP connections.
 .Pp
 The options are as follows:
 .Bl -tag -width Ds
 .It Fl C
 Read the specified file instead of the default
+.Nm sendmail
+configuration file.
+.It Fl c
+Try to use submit.cf instead of the default
 .Nm sendmail
 configuration file.
 .It Fl f

@@ -14,12 +14,7 @@
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
  * 
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *      This product includes software developed by the Kungliga Tekniska
- *      Högskolan and its contributors.
- * 
- * 4. Neither the name of the Institute nor the names of its contributors
+ * 3. Neither the name of the Institute nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  * 
@@ -59,7 +54,7 @@
 #include <unistd.h>
 #endif
 
-RCSID("$Id: netinit.c,v 1.1 2000/09/11 14:41:15 art Exp $");
+RCSID("$KTH: netinit.c,v 1.14 2000/10/03 00:18:19 lha Exp $");
 
 /*
  * Network functions
@@ -104,7 +99,7 @@ server_get_key(void *appl, int kvno, des_cblock *key)
 	     * Try also afs.realm@REALM
 	     */
 
-	    strlcpy(cell_name, realm_name, sizeof(realm_name));
+	    strlcpy(cell_name, realm_name, sizeof(cell_name));
 	    strlwr (cell_name);
 	    ret = read_service_key("afs", cell_name, realm_name, 
 				   0, srvtab_filename,
@@ -175,7 +170,7 @@ network_init (int serviceport,
 	return errno;
 
     if (rx_Init(0) != 0) 
-	errx(1, "Cant open serverport port\n") ;
+	errx(1, "Cant open serverport port") ;
     
     secObjs[0] = rxnull_NewServerSecurityObject();   /* XXX 0 */
     if (secObjs[0] == NULL ) 

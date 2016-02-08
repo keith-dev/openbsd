@@ -1,11 +1,11 @@
-/*	$OpenBSD: db_dump.c,v 1.5 2002/02/16 21:28:06 millert Exp $	*/
+/*	$OpenBSD: db_dump.c,v 1.7 2002/06/09 01:58:54 kjell Exp $	*/
 
 #if !defined(lint) && !defined(SABER)
 #if 0
 static char sccsid[] = "@(#)db_dump.c	4.33 (Berkeley) 3/3/91";
 static char rcsid[] = "$From: db_dump.c,v 8.19 1996/10/08 04:51:03 vixie Exp $";
 #else
-static char rcsid[] = "$OpenBSD: db_dump.c,v 1.5 2002/02/16 21:28:06 millert Exp $";
+static char rcsid[] = "$OpenBSD: db_dump.c,v 1.7 2002/06/09 01:58:54 kjell Exp $";
 #endif
 #endif /* not lint */
 
@@ -264,7 +264,7 @@ doadump()
 	FILE	*fp;
 
 	dprintf(3, (ddt, "doadump()\n"));
-	syslog(LOG_NOTICE, "dumping nameserver data\n");
+	syslog(LOG_NOTICE, "dumping nameserver data");
 
 	if ((fp = fopen(dumpfile, "w")) == NULL)
 		return;
@@ -285,7 +285,7 @@ doadump()
 	if (fcachetab != NULL)
 		(void) db_dump(fcachetab, fp, DB_Z_ALL, "");
 	(void) my_fclose(fp);
-	syslog(LOG_NOTICE, "finished dumping nameserver data\n");
+	syslog(LOG_NOTICE, "finished dumping nameserver data");
 }
 
 int
@@ -314,9 +314,9 @@ zt_dump(fp)
 		fprintf(fp, ";\trefresh=%u, retry=%u, expire=%u, minimum=%u\n",
 			zp->z_refresh, zp->z_retry,
 			zp->z_expire, zp->z_minimum);
-		fprintf(fp, ";\tftime=%lu, xaddr=[%s], state=%04x, pid=%d\n",
+		fprintf(fp, ";\tftime=%lu, xaddr=[%s], state=%04x, pid=%ld\n",
 			(u_long)zp->z_ftime, inet_ntoa(zp->z_xaddr),
-			zp->z_flags, (int)zp->z_xferpid);
+			zp->z_flags, (long)zp->z_xferpid);
 		sprintf(buf, ";\tz_addr[%d]: ", zp->z_addrcnt);		/*SAFE*/
 		pre = buf;
 		for (cnt = 0;  cnt < zp->z_addrcnt;  cnt++) {

@@ -1,4 +1,4 @@
-/*	$OpenBSD: login.c,v 1.46 2002/03/30 18:16:05 vincent Exp $	*/
+/*	$OpenBSD: login.c,v 1.48 2002/07/02 01:36:19 millert Exp $	*/
 /*	$NetBSD: login.c,v 1.13 1996/05/15 23:50:16 jtc Exp $	*/
 
 /*-
@@ -77,7 +77,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)login.c	8.4 (Berkeley) 4/2/94";
 #endif
-static char rcsid[] = "$OpenBSD: login.c,v 1.46 2002/03/30 18:16:05 vincent Exp $";
+static char rcsid[] = "$OpenBSD: login.c,v 1.48 2002/07/02 01:36:19 millert Exp $";
 #endif /* not lint */
 
 /*
@@ -100,7 +100,6 @@ static char rcsid[] = "$OpenBSD: login.c,v 1.46 2002/03/30 18:16:05 vincent Exp 
 #include <login_cap.h>
 #include <netdb.h>
 #include <pwd.h>
-#include <setjmp.h>
 #include <signal.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -152,25 +151,24 @@ char		term[64], *hostname, *tty;
 char		*style;
 char		*username = NULL, *rusername = NULL;
 
+extern char **environ;
+
 int
-main(argc, argv)
-	int argc;
-	char *argv[];
+main(int argc, char *argv[])
 {
-	extern char **environ;
-	struct addrinfo *ai, hints;
-	struct group *gr;
-	struct rlimit cds, scds;
-	struct stat st;
-	struct utmp utmp;
-	quad_t expire, warning;
-	uid_t uid;
+	char *domain, *p, *ttyn, *shell, *fullname, *instance;
+	char *lipaddr, *script, *ripaddr, *style, *type, *fqdn;
+	char tbuf[MAXPATHLEN + 2], tname[sizeof(_PATH_TTY) + 10];
+	char localhost[MAXHOSTNAMELEN], *copyright;
 	int ask, ch, cnt, fflag, pflag, quietlog, rootlogin, lastchance;
 	int error, homeless, needto, authok, tries, backoff;
-	char *domain, *p, *ttyn, *shell, *fullname, *instance;
-	char *lipaddr, *script, *ripaddr, *style, *type, *fqdn, *copyright;
-	char tbuf[MAXPATHLEN + 2], tname[sizeof(_PATH_TTY) + 10];
-	char localhost[MAXHOSTNAMELEN];
+	struct addrinfo *ai, hints;
+	struct rlimit cds, scds;
+	quad_t expire, warning;
+	struct utmp utmp;
+	struct group *gr;
+	struct stat st;
+	uid_t uid;
 
 	(void)signal(SIGALRM, timedout);
 	if (argc > 1) {
@@ -297,7 +295,8 @@ main(argc, argv)
 			if (!uid)
 				syslog(LOG_ERR, "invalid flag %c", ch);
 			(void)fprintf(stderr,
-			    "usage: login [-fp] [-h hostname] [-L lipaddr] [-R ripaddr] [-u username] [user]\n");
+			    "usage: login [-fp] [-h hostname] [-L lipaddr] "
+			    "[-R ripaddr] [-u username] [user]\n");
 			quickexit(1);
 		}
 	argc -= optind;
@@ -337,7 +336,7 @@ main(argc, argv)
 #endif
 
 	/* get the default login class */
-	if ((lc = login_getclass(0)) == NULL) { /* get the default class */ 
+	if ((lc = login_getclass(0)) == NULL) { /* get the default class */
 		warnx("Failure to retrieve default class");
 		quickexit(1);
 	}
@@ -352,7 +351,7 @@ main(argc, argv)
 		}
 		shell = strrchr(script, '/') + 1;
 		auth_setstate(as, AUTH_OKAY);
-		auth_call(as, script, shell, 
+		auth_call(as, script, shell,
 		    fflag ? "-f" : username, fflag ? username : 0, 0);
 		if (!(auth_getstate(as) & AUTH_ALLOW))
 			quickexit(1);
@@ -404,7 +403,7 @@ main(argc, argv)
 			needto = 0;
 			alarm(timeout);
 		}
-    	    	if ((style = strchr(username, ':')) != NULL)
+		if ((style = strchr(username, ':')) != NULL)
 			*style++ = '\0';
 		if (fullname)
 			free(fullname);
@@ -504,7 +503,7 @@ main(argc, argv)
 		/*
 		 * explicitly reject users without password file entries
 		 */
-		if (pwd == 0)
+		if (pwd == NULL)
 			goto failed;
 
 		/*
@@ -535,7 +534,7 @@ failed:
 			else
 				syslog(LOG_NOTICE,
 				    "LOGIN %s REFUSED ON TTY %s",
-				     fullname, tty);
+				    fullname, tty);
 		} else {
 			if (!as || (p = auth_getvalue(as, "errormsg")) == NULL)
 				p = "Login incorrect";
@@ -655,7 +654,7 @@ failed:
 		warning = login_getcaptime(lc, "expire-warn",
 		    2 * DAYSPERWEEK * SECSPERDAY, 2 * DAYSPERWEEK * SECSPERDAY);
 		if (expire < warning)
-			(void)printf("Warning: your account expires on %s",  
+			(void)printf("Warning: your account expires on %s",
 			    ctime(&pwd->pw_expire));
 	}
 
@@ -689,12 +688,6 @@ failed:
 	}
 
 	if (!quietlog) {
-#if 0
-		(void)printf("%s\n\t%s  %s\n\n",
-	    "Copyright (c) 1980, 1983, 1986, 1988, 1990, 1991, 1993, 1994",
-		    "The Regents of the University of California. ",
-		    "All rights reserved.");
-#endif
 		if ((copyright =
 		    login_getcapstr(lc, "copyright", NULL, NULL)) != NULL)
 			auth_cat(copyright);
@@ -721,7 +714,8 @@ failed:
 		syslog(LOG_ERR, "couldn't reset core dump size: %m");
 
 	if (lastchance)
-		(void)printf("WARNING: Your password has expired.  You must change your password, now!\n");
+		(void)printf("WARNING: Your password has expired."
+		    "  You must change your password, now!\n");
 
 	if (setusercontext(lc, pwd, rootlogin ? 0 : pwd->pw_uid,
 	    LOGIN_SETALL & ~LOGIN_SETPATH) < 0) {
@@ -762,7 +756,7 @@ failed:
 	auth_close(as);
 
 #ifdef KERBEROS
-        kgettokens(pwd->pw_dir);
+	kgettokens(pwd->pw_dir);
 #endif
 
 	execlp(shell, tbuf, (char *)NULL);
@@ -776,11 +770,10 @@ failed:
 #define NBUFSIZ		(UT_NAMESIZE + 1 + 16 + 1 + 16)
 
 void
-getloginname()
+getloginname(void)
 {
+	static char nbuf[NBUFSIZ], *p;
 	int ch;
-	char *p;
-	static char nbuf[NBUFSIZ];
 
 	for (;;) {
 		(void)printf("login: ");
@@ -806,8 +799,7 @@ getloginname()
 }
 
 int
-rootterm(ttyn)
-	char *ttyn;
+rootterm(char *ttyn)
 {
 	struct ttyent *t;
 
@@ -815,50 +807,56 @@ rootterm(ttyn)
 	return ((t = getttynam(ttyn)) && t->ty_status & TTY_SECURE);
 }
 
-jmp_buf motdinterrupt;
-
 void
-motd()
+motd(void)
 {
+	char tbuf[8192], *motd;
 	int fd, nchars;
-	sig_t oldint;
-	char tbuf[8192];
-	char *motd;
+	struct sigaction sa, osa;
 
 	motd = login_getcapstr(lc, "welcome", _PATH_MOTDFILE, _PATH_MOTDFILE);
 
 	if ((fd = open(motd, O_RDONLY, 0)) < 0)
 		return;
-	oldint = signal(SIGINT, sigint);
-	if (setjmp(motdinterrupt) == 0)
-		while ((nchars = read(fd, tbuf, sizeof(tbuf))) > 0)
-			(void)write(fileno(stdout), tbuf, nchars);
-	(void)signal(SIGINT, oldint);
+
+	memset(&sa, 0, sizeof(sa));
+	sa.sa_handler = sigint;
+	sigemptyset(&sa.sa_mask);
+	sa.sa_flags = 0;		/* don't set SA_RESTART */
+	(void)sigaction(SIGINT, &sa, &osa);
+
+	/* read and spew motd until EOF, error, or SIGINT */
+	while ((nchars = read(fd, tbuf, sizeof(tbuf))) > 0 &&
+	    write(STDOUT_FILENO, tbuf, nchars) == nchars)
+		;
+
+	(void)sigaction(SIGINT, &osa, NULL);
 	(void)close(fd);
 }
 
 /* ARGSUSED */
 void
-sigint(signo)
-	int signo;
+sigint(int signo)
 {
-	longjmp(motdinterrupt, 1);
+	return;			/* just interupt syscall */
 }
 
 /* ARGSUSED */
 void
-timedout(signo)
-	int signo;
+timedout(int signo)
 {
-	(void)fprintf(stderr, "Login timed out after %d seconds\n", timeout);
+	char warn[1024];
+
+	snprintf(warn, sizeof warn,
+	    "Login timed out after %d seconds\n", timeout);
+	write(STDERR_FILENO, warn, strlen(warn));
 	if (username)
 		badlogin(username);
-	exit(0);
+	_exit(0);
 }
 
 void
-dolastlog(quiet)
-	int quiet;
+dolastlog(int quiet)
 {
 	struct lastlog ll;
 	int fd;
@@ -893,24 +891,27 @@ dolastlog(quiet)
 }
 
 void
-badlogin(name)
-	char *name;
+badlogin(char *name)
 {
+	struct syslog_data sdata = SYSLOG_DATA_INIT;
+
 	if (failures == 0)
 		return;
 	if (hostname) {
-		syslog(LOG_NOTICE, "%d LOGIN FAILURE%s FROM %s%s%s",
+		syslog_r(LOG_NOTICE, &sdata,
+		    "%d LOGIN FAILURE%s FROM %s%s%s",
 		    failures, failures > 1 ? "S" : "",
 		    rusername ? rusername : "", rusername ? "@" : "", hostname);
-		syslog(LOG_AUTHPRIV|LOG_NOTICE,
+		syslog_r(LOG_AUTHPRIV|LOG_NOTICE, &sdata,
 		    "%d LOGIN FAILURE%s FROM %s%s%s, %s",
 		    failures, failures > 1 ? "S" : "",
 		    rusername ? rusername : "", rusername ? "@" : "",
 		    hostname, name);
 	} else {
-		syslog(LOG_NOTICE, "%d LOGIN FAILURE%s ON %s",
+		syslog_r(LOG_NOTICE, &sdata,
+		    "%d LOGIN FAILURE%s ON %s",
 		    failures, failures > 1 ? "S" : "", tty);
-		syslog(LOG_AUTHPRIV|LOG_NOTICE,
+		syslog_r(LOG_AUTHPRIV|LOG_NOTICE, &sdata,
 		    "%d LOGIN FAILURE%s ON %s, %s",
 		    failures, failures > 1 ? "S" : "", tty, name);
 	}
@@ -920,8 +921,7 @@ badlogin(name)
 #define	UNKNOWN	"su"
 
 char *
-stypeof(ttyid)
-	char *ttyid;
+stypeof(char *ttyid)
 {
 	struct ttyent *t;
 
@@ -930,8 +930,7 @@ stypeof(ttyid)
 }
 
 void
-sleepexit(eval)
-	int eval;
+sleepexit(int eval)
 {
 	auth_close(as);
 	(void)sleep(5);
@@ -939,8 +938,7 @@ sleepexit(eval)
 }
 
 void
-quickexit(eval)
-	int eval;
+quickexit(int eval)
 {
 	if (as)
 		auth_close(as);
@@ -949,26 +947,24 @@ quickexit(eval)
 
 
 void
-sighup(signum)
-	int signum;
+sighup(int signum)
 {
 	if (username)
 		badlogin(username);
-	exit(0);
+	_exit(0);
 }
 
 #ifdef KERBEROS
 void
-kgettokens(homedir)
-	char *homedir;
+kgettokens(char *homedir)
 {
-  
+
 	/* buy AFS-tokens for homedir */
-	if (k_hasafs()) {  
+	if (k_hasafs()) {
 		char cell[128];
+
 		k_setpag();
-		if (k_afs_cell_of_file(homedir,  
-				       cell, sizeof(cell)) == 0)
+		if (k_afs_cell_of_file(homedir, cell, sizeof(cell)) == 0)
 			krb_afslog(cell, 0);
 		krb_afslog(0, 0);
 	}

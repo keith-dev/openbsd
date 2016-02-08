@@ -1,4 +1,4 @@
-.\"	$OpenBSD: named.8,v 1.11 2001/09/18 01:58:54 millert Exp $
+.\"	$OpenBSD: named.8,v 1.14 2002/09/18 07:33:48 deraadt Exp $
 .\" ++Copyright++ 1985
 .\" -
 .\" Copyright (c) 1985
@@ -85,7 +85,7 @@ named \- Internet domain name server
 .SH DESCRIPTION
 .I Named
 is the Internet domain name server.
-See RFC's 1033, 1034, and 1035 for more information on the Internet
+See RFCs 1033, 1034, and 1035 for more information on the Internet
 name-domain system.  Without any arguments,
 .I named
 will read the default boot file
@@ -393,7 +393,7 @@ Comments are introduced by semicolons and continue to the end of the line.
 .PP
 Note that there are other resource record types, not shown here.  You should
 consult the \s-1BIND\s+1 Operations Guide (``\s-1BOG\s+1'') for the complete
-list.  Some resource record types may have been standardized in newer RFC's
+list.  Some resource record types may have been standardized in newer RFCs
 but not yet implemented in this version of \s-1BIND\s+1.
 .PP
 Each master zone file should begin with an SOA record for the zone.
@@ -443,10 +443,9 @@ also cause the server to check the serial number on all secondary zones.
 Normally the serial numbers are only checked at the SOA-specified intervals.
 .IP SIGINT
 Dumps the current data base and cache to /var/named/named_dump.db
-.IP SIGIOT
-Dumps statistics data into /var/named/named.stats if the server is
-compiled with -DSTATS.  Statistics data is appended to the file.  Some
-systems use SIGABRT rather than SIGIOT for this.
+.IP SIGABRT
+Dumps statistics data into /var/named/named.stats.
+Statistics data is appended to the file.
 .IP SIGSYS
 Dumps the profiling data in /var/named if the server is compiled
 with profiling (server forks, chdirs and exits).
@@ -474,7 +473,7 @@ Toggles logging of all incoming queries via syslog(8)
 /var/named/named.stats	nameserver statistics data
 .fi
 .SH "SEE ALSO"
-kill(1), gethostbyname(3), signal(2),
+kill(1), gethostbyname(3), signal(3),
 resolver(3), resolver(5), hostname(7),
 RFC 882, RFC 883, RFC 973, RFC 974, RFC 1033, RFC 1034, RFC 1035, RFC 1123,
 \fIName Server Operations Guide for \s-1BIND\s+1\fR

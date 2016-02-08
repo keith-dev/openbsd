@@ -1,4 +1,4 @@
-/*	$Id: cmds.c,v 1.13 2002/03/14 16:44:25 mpech Exp $	*/
+/*	$OpenBSD: cmds.c,v 1.15 2002/09/06 19:28:01 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 1985, 1993 The Regents of the University of California.
@@ -38,7 +38,7 @@ static char sccsid[] = "@(#)cmds.c	5.1 (Berkeley) 5/11/93";
 #endif /* not lint */
 
 #ifdef sgi
-#ident "$Revision: 1.13 $"
+#ident "$Revision: 1.15 $"
 #endif
 
 #include "timedc.h"
@@ -93,8 +93,8 @@ daydiff(char *hostname)
 	struct timeval now;
 	struct pollfd pfd;
 	unsigned long sec;
-	int i, fromlen;
-	int trials;
+	int i, trials;
+	socklen_t fromlen;
 
 	for (trials = 0; trials < 10; trials++) {
 		/* ask for the time */
@@ -295,7 +295,8 @@ msite(int argc, char *argv[])
 {
 	struct sockaddr_in dest, from;
 	struct servent *srvp;
-	int i, length, cc;
+	int i, cc;
+	socklen_t length;
 	struct pollfd pfd;
 	struct tsp msg;
 	char *tgtname;
@@ -482,8 +483,8 @@ tracing(int argc, char *argv[])
 	struct tsp msg;
 	struct servent *srvp;
 	struct pollfd pfd;
-	int cc, length;
-	int onflag;
+	int cc, onflag;
+	socklen_t length;
 
 	if (argc != 2) {
 		printf("Usage: tracing { on | off }\n");
@@ -570,37 +571,4 @@ tracing(int argc, char *argv[])
 	}
 bail:
 	siginterrupt(SIGINT, 0);
-}
-
-int
-priv_resources()
-{
-	struct sockaddr_in sin;
-
-	sock_raw = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
-	if (sock_raw < 0)  {
-		perror("opening raw socket");
-		return (-1);
-	}
-
-	(void) seteuid(getuid());
-	(void) setuid(getuid());
-
-	sock = socket(AF_INET, SOCK_DGRAM, 0);
-	if (sock < 0) {
-		perror("opening socket");
-		(void)close(sock_raw);
-		return (-1);
-	}
-
-	memset(&sin, 0, sizeof sin);
-	sin.sin_family = AF_INET;
-	sin.sin_addr.s_addr = INADDR_ANY;
-	if (bind(sock, (struct sockaddr *)&sin, sizeof(sin)) < 0) {
-		fprintf(stderr, "all reserved ports in use\n");
-		(void)close(sock_raw);
-		return (-1);
-	}
-
-	return (1);
 }

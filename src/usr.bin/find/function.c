@@ -1,4 +1,4 @@
-/*	$OpenBSD: function.c,v 1.23 2002/02/17 19:42:30 millert Exp $	*/
+/*	$OpenBSD: function.c,v 1.25 2002/06/30 15:16:41 matthieu Exp $	*/
 
 /*-
  * Copyright (c) 1990, 1993
@@ -38,7 +38,7 @@
 
 #ifndef lint
 /*static char sccsid[] = "from: @(#)function.c	8.1 (Berkeley) 6/6/93";*/
-static char rcsid[] = "$OpenBSD: function.c,v 1.23 2002/02/17 19:42:30 millert Exp $";
+static char rcsid[] = "$OpenBSD: function.c,v 1.25 2002/06/30 15:16:41 matthieu Exp $";
 #endif /* not lint */
 
 #include <sys/param.h>
@@ -1047,7 +1047,7 @@ c_anewer(filename)
 
 	if (stat(filename, &sb))
 		err(1, "%s", filename);
-	new = palloc(N_NEWER, f_newer);
+	new = palloc(N_NEWER, f_anewer);
 	memcpy(&new->t_data, &sb.st_atimespec, sizeof(struct timespec));
 	return (new);
 }
@@ -1081,7 +1081,7 @@ c_cnewer(filename)
 
 	if (stat(filename, &sb))
 		err(1, "%s", filename);
-	new = palloc(N_NEWER, f_newer);
+	new = palloc(N_NEWER, f_cnewer);
 	memcpy(&new->t_data, &sb.st_ctimespec, sizeof(struct timespec));
 	return (new);
 }
@@ -1097,8 +1097,6 @@ f_nogroup(plan, entry)
 	PLAN *plan;
 	FTSENT *entry;
 {
-	char *group_from_gid();
-
 	return (group_from_gid(entry->fts_statp->st_gid, 1) ? 0 : 1);
 }
  
@@ -1121,8 +1119,6 @@ f_nouser(plan, entry)
 	PLAN *plan;
 	FTSENT *entry;
 {
-	char *user_from_uid();
-
 	return (user_from_uid(entry->fts_statp->st_uid, 1) ? 0 : 1);
 }
  

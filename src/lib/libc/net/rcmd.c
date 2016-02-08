@@ -34,7 +34,7 @@
  */
 
 #if defined(LIBC_SCCS) && !defined(lint)
-static char *rcsid = "$OpenBSD: rcmd.c,v 1.41 2002/02/17 19:42:23 millert Exp $";
+static char *rcsid = "$OpenBSD: rcmd.c,v 1.44 2002/09/06 18:35:12 deraadt Exp $";
 #endif /* LIBC_SCCS and not lint */
 
 #include <sys/param.h>
@@ -175,7 +175,7 @@ rcmd_af(ahost, rport, locuser, remuser, cmd, fd2p, af)
 			hbuf[0] = '\0';
 			if (getnameinfo(r->ai_addr, r->ai_addrlen,
 			    hbuf, sizeof(hbuf), NULL, 0, niflags) != 0)
-				strcpy(hbuf, "(invalid)");
+				strlcpy(hbuf, "(invalid)", sizeof hbuf);
 			(void)fprintf(stderr, "connect to address %s: ", hbuf);
 			errno = oerrno;
 			perror(0);
@@ -183,7 +183,7 @@ rcmd_af(ahost, rport, locuser, remuser, cmd, fd2p, af)
 			hbuf[0] = '\0';
 			if (getnameinfo(r->ai_addr, r->ai_addrlen,
 			    hbuf, sizeof(hbuf), NULL, 0, niflags) != 0)
-				strcpy(hbuf, "(invalid)");
+				strlcpy(hbuf, "(invalid)", sizeof hbuf);
 			(void)fprintf(stderr, "Trying %s...\n", hbuf);
 			continue;
 		}
@@ -216,7 +216,7 @@ rcmd_af(ahost, rport, locuser, remuser, cmd, fd2p, af)
 	} else {
 		char num[8];
 		int s2 = rresvport_af(&lport, af), s3;
-		int len = sizeof(from);
+		socklen_t len = sizeof(from);
 		int fdssize = howmany(MAX(s, s2)+1, NFDBITS) * sizeof(fd_mask);
 
 		if (s2 < 0)
@@ -407,8 +407,7 @@ again:
 		first = 0;
 		if ((pwd = getpwnam(luser)) == NULL)
 			return (-1);
-		(void)strcpy(pbuf, pwd->pw_dir);
-		(void)strcat(pbuf, "/.rhosts");
+		snprintf(pbuf, sizeof pbuf, "%s/.rhosts", pwd->pw_dir);
 
 		/*
 		 * Change effective uid while opening .rhosts.  If root and

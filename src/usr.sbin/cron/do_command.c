@@ -1,4 +1,4 @@
-/*	$OpenBSD: do_command.c,v 1.13 2002/02/19 18:38:02 mpech Exp $	*/
+/*	$OpenBSD: do_command.c,v 1.22 2002/08/08 18:17:50 millert Exp $	*/
 /* Copyright 1988,1990,1993,1994 by Paul Vixie
  * All rights reserved
  */
@@ -21,19 +21,18 @@
  */
 
 #if !defined(lint) && !defined(LINT)
-static char rcsid[] = "$OpenBSD: do_command.c,v 1.13 2002/02/19 18:38:02 mpech Exp $";
+static char const rcsid[] = "$OpenBSD: do_command.c,v 1.22 2002/08/08 18:17:50 millert Exp $";
 #endif
 
 #include "cron.h"
 
 static void		child_process(entry *, user *);
-static int		safe_p(const char *, const char *);
 
 void
 do_command(entry *e, user *u) {
-	Debug(DPROC, ("[%ld] do_command(%s, (%s,%ld,%ld))\n",
+	Debug(DPROC, ("[%ld] do_command(%s, (%s,%lu,%lu))\n",
 		      (long)getpid(), e->cmd, u->name,
-		      (long)e->uid, (long)e->gid))
+		      (u_long)e->pwd->pw_uid, (u_long)e->pwd->pw_gid))
 
 	/* fork to become asynchronous -- parent process is done immediately,
 	 * and continues to run the normal cron code, which means return to
@@ -84,12 +83,12 @@ child_process(entry *e, user *u) {
 
 	/* discover some useful and important environment settings
 	 */
-	usernm = env_get("LOGNAME", e->envp);
+	usernm = e->pwd->pw_name;
 	mailto = env_get("MAILTO", e->envp);
 
 	/* our parent is watching for our death by catching SIGCHLD.  we
 	 * do not care to watch for our children's deaths this way -- we
-	 * use wait() explictly.  so we have to reset the signal (which
+	 * use wait() explicitly.  so we have to reset the signal (which
 	 * was inherited from the parent).
 	 */
 	(void) signal(SIGCHLD, SIG_DFL);
@@ -104,10 +103,9 @@ child_process(entry *e, user *u) {
 	 *
 	 * if a % is present in the command, previous characters are the
 	 * command, and subsequent characters are the additional input to
-	 * the command.  Subsequent %'s will be transformed into newlines,
+	 * the command.  An escaped % will have the escape character stripped
+	 * from it.  Subsequent %'s will be transformed into newlines,
 	 * but that happens later.
-	 *
-	 * If there are escaped %'s, remove the escape character.
 	 */
 	/*local*/{
 		int escaped = FALSE;
@@ -120,7 +118,7 @@ child_process(entry *e, user *u) {
 			if (p != input_data)
 				*p = ch;
 			if (escaped) {
-				if (ch == '%' || ch == '\\')
+				if (ch == '%')
 					*--p = ch;
 				escaped = FALSE;
 				continue;
@@ -141,11 +139,11 @@ child_process(entry *e, user *u) {
 	 */
 	switch (fork()) {
 	case -1:
-		log_it("CRON", getpid(), "error", "can't vfork");
+		log_it("CRON", getpid(), "error", "can't fork");
 		exit(ERROR_EXIT);
 		/*NOTREACHED*/
 	case 0:
-		Debug(DPROC, ("[%ld] grandchild process Vfork()'ed\n",
+		Debug(DPROC, ("[%ld] grandchild process fork()'ed\n",
 			      (long)getpid()))
 
 		/* write a log message.  we've waited this long to do it
@@ -162,9 +160,7 @@ child_process(entry *e, user *u) {
 
 		/* that's the last thing we'll log.  close the log files.
 		 */
-#ifdef SYSLOG
-		closelog();
-#endif
+		log_close();
 
 		/* get new pgrp, void tty, etc.
 		 */
@@ -187,8 +183,8 @@ child_process(entry *e, user *u) {
 			close(stdin_pipe[READ_PIPE]);
 		}
 		if (stdout_pipe[WRITE_PIPE] != STDOUT) {
-			close(STDOUT);
 			dup2(stdout_pipe[WRITE_PIPE], STDOUT);
+			close(stdout_pipe[WRITE_PIPE]);
 		}
 		dup2(STDOUT, STDERR);
 
@@ -197,45 +193,57 @@ child_process(entry *e, user *u) {
 		 */
 #ifdef LOGIN_CAP
 		{
-			struct passwd *pwd;
-			char *ep, *np;
+#ifdef BSD_AUTH
+			auth_session_t *as;
+#endif
+			login_cap_t *lc;
+			char **p;
+			extern char **environ;
 
 			/* XXX - should just pass in a login_cap_t * */
-			pwd = getpwuid(e->uid);
-			if (pwd == NULL) {
-				fprintf(stderr, "getpwuid: couldn't get entry for %d\n", e->uid);
+			if ((lc = login_getclass(e->pwd->pw_class)) == NULL) {
+				fprintf(stderr,
+				    "unable to get login class for %s\n",
+				    e->pwd->pw_name);
 				_exit(ERROR_EXIT);
 			}
-			if (setusercontext(0, pwd, e->uid, LOGIN_SETALL) < 0) {
-				fprintf(stderr, "setusercontext failed for %d\n", e->uid);
+			if (setusercontext(lc, e->pwd, e->pwd->pw_uid, LOGIN_SETALL) < 0) {
+				fprintf(stderr, "setusercontext failed for %s\n", e->pwd->pw_name);
 				_exit(ERROR_EXIT);
 			}
 #ifdef BSD_AUTH
-			if (auth_approval(0, 0, pwd->pw_name, "cron") <= 0) {
-				fprintf(stderr, "approval failed for %d\n", e->uid);
+			as = auth_open();
+			if (as == NULL || auth_setpwd(as, e->pwd) != 0) {
+				fprintf(stderr, "can't malloc\n");
 				_exit(ERROR_EXIT);
 			}
+			if (auth_approval(as, lc, usernm, "cron") <= 0) {
+				fprintf(stderr, "approval failed for %s\n",
+				    e->pwd->pw_name);
+				_exit(ERROR_EXIT);
+			}
+			auth_close(as);
 #endif /* BSD_AUTH */
+			login_close(lc);
+
 			/* If no PATH specified in crontab file but
 			 * we just added one via login.conf, add it to
 			 * the crontab environment.
 			 */
-			if (env_get("PATH", e->envp) == NULL &&
-			    (ep = getenv("PATH"))) {
-				np = malloc(strlen(ep) + 6);
-				if (np) {
-					strcpy(np, "PATH=");
-					strcat(np, ep);
-					e->envp = env_set(e->envp, np);
+			if (env_get("PATH", e->envp) == NULL && environ != NULL) {
+				for (p = environ; *p; p++) {
+					if (strncmp(*p, "PATH=", 5) == 0) {
+						e->envp = env_set(e->envp, *p);
+						break;
+					}
 				}
 			}
-			
 		}
 #else
-		setgid(e->gid);
-		initgroups(env_get("LOGNAME", e->envp), e->gid);
+		setgid(e->pwd->pw_gid);
+		initgroups(usernm, e->pwd->pw_gid);
 		setlogin(usernm);
-		setuid(e->uid);		/* we aren't root after this... */
+		setuid(e->pwd->pw_uid);	/* we aren't root after this... */
 
 #endif /* LOGIN_CAP */
 		chdir(env_get("HOME", e->envp));
@@ -402,7 +410,7 @@ child_process(entry *e, user *u) {
 					fprintf(stderr, "mailcmd too long\n");
 					(void) _exit(ERROR_EXIT);
 				}
-				if (!(mail = cron_popen(mailcmd, "w", e))) {
+				if (!(mail = cron_popen(mailcmd, "w", e->pwd))) {
 					perror(mailcmd);
 					(void) _exit(ERROR_EXIT);
 				}
@@ -499,7 +507,7 @@ child_process(entry *e, user *u) {
 	}
 }
 
-static int
+int
 safe_p(const char *usernm, const char *s) {
 	static const char safe_delim[] = "@!:%-.,";     /* conservative! */
 	const char *t;

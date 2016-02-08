@@ -1,4 +1,4 @@
-/*	$OpenBSD: login.c,v 1.3 2001/12/06 05:37:04 millert Exp $	*/
+/*	$OpenBSD: login.c,v 1.5 2002/09/06 18:45:06 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 1995 Berkeley Software Design, Inc. All rights reserved.
@@ -55,7 +55,7 @@ main(int argc, char **argv)
 	openlog(NULL, LOG_ODELAY, LOG_AUTH);
 
 	while ((opt = getopt(argc, argv, "ds:v:")) != -1) {
-		switch(opt) {
+		switch (opt) {
 		case 'd':
 			back = stdout;
 			break;
@@ -91,7 +91,7 @@ main(int argc, char **argv)
 		}
 	}
 
-	switch(argc - optind) {
+	switch (argc - optind) {
 	case 2:
 		class = argv[optind + 1];
 	case 1:
@@ -113,7 +113,7 @@ main(int argc, char **argv)
 	 *
 	 * XXX  This is completely ungrokkable, and should be rewritten.
 	 */
-	switch(mode) {
+	switch (mode) {
 	case MODE_RESPONSE: {
 		int count;
 		mode = 0;
@@ -136,7 +136,6 @@ main(int argc, char **argv)
 	case MODE_LOGIN:
 		password = getpass("Password:");
 		break;
-		
 	case MODE_CHALLENGE:
 		fprintf(back, BI_AUTH "\n");
 		exit(0);

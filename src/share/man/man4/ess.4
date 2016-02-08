@@ -1,4 +1,4 @@
-.\"	$OpenBSD: ess.4,v 1.4 2001/10/05 14:45:53 mpech Exp $
+.\"	$OpenBSD: ess.4,v 1.6 2002/09/26 07:55:39 miod Exp $
 .\"	$NetBSD: ess.4,v 1.6 1999/04/13 20:25:29 augustss Exp $
 .\"
 .\" Copyright (c) 1999 The NetBSD Foundation, Inc.
@@ -74,13 +74,15 @@ The AudioDrive devices have a SoundBlaster compatibility mode, and may
 be detected by the SoundBlaster driver (see
 .Xr sb 4 )
 rather than the AudioDrive driver.
-The workaround is to remove the SoundBlaster driver from the kernel
+The workaround is to remove or disable the SoundBlaster driver from the kernel
 configuration.
 .Sh SEE ALSO
 .Xr audio 4 ,
-.Xr isa 4 ,
+.Xr intro 4 ,
+.\" .Xr isa 4 ,
 .Xr isapnp 4 ,
-.Xr joy 4
+.Xr joy 4 ,
+.Xr sb 4
 .Sh HISTORY
 The
 .Nm

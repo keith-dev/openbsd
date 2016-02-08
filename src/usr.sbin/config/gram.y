@@ -1,5 +1,5 @@
 %{
-/*	$OpenBSD: gram.y,v 1.12 2002/02/16 21:28:01 millert Exp $	*/
+/*	$OpenBSD: gram.y,v 1.14 2002/05/30 07:36:44 deraadt Exp $	*/
 /*	$NetBSD: gram.y,v 1.14 1997/02/02 21:12:32 thorpej Exp $	*/
 
 /*
@@ -286,9 +286,13 @@ locdefault:
 value:
 	WORD				{ $$ = $1; } |
 	EMPTY				{ $$ = $1; } |
-	signed_number			{ char bf[40];
-					    (void)sprintf(bf, FORMAT($1), $1);
-					    $$ = intern(bf); };
+	signed_number			{
+						char bf[40];
+
+						(void)snprintf(bf, sizeof bf,
+						    FORMAT($1), $1);
+						$$ = intern(bf);
+					};
 
 signed_number:
 	NUMBER				{ $$ = $1; } |
@@ -449,15 +453,15 @@ setmachine(mch, mcharch)
 	machine = mch;
 	machinearch = mcharch;
 
-	(void)sprintf(buf, "arch/%s/conf/files.%s", machine, machine);
+	(void)snprintf(buf, sizeof buf, "arch/%s/conf/files.%s", machine, machine);
 	if (include(buf, ENDFILE) != 0)
 		exit(1);
 
 	if (machinearch != NULL)
-		(void)sprintf(buf, "arch/%s/conf/files.%s",
+		(void)snprintf(buf, sizeof buf, "arch/%s/conf/files.%s",
 		    machinearch, machinearch);
 	else
-		strcpy(buf, _PATH_DEVNULL);
+		strlcpy(buf, _PATH_DEVNULL, sizeof buf);
 	if (include(buf, ENDFILE) != 0)
 		exit(1);
 

@@ -59,7 +59,7 @@
  */
 
 #include "includes.h"
-RCSID("$OpenBSD: clientloop.c,v 1.99 2002/03/21 23:07:37 markus Exp $");
+RCSID("$OpenBSD: clientloop.c,v 1.104 2002/08/22 19:38:42 stevesk Exp $");
 
 #include "ssh.h"
 #include "ssh1.h"
@@ -481,7 +481,7 @@ process_cmdline(void)
 	int local = 0;
 
 	leave_raw_mode();
- 	handler = signal(SIGINT, SIG_IGN);
+	handler = signal(SIGINT, SIG_IGN);
 	cmd = s = read_passphrase("\r\nssh> ", RP_ECHO);
 	if (s == NULL)
 		goto out;
@@ -635,16 +635,18 @@ process_escapes(Buffer *bin, Buffer *bout, Buffer *berr, char *buf, int len)
 				snprintf(string, sizeof string,
 "%c?\r\n\
 Supported escape sequences:\r\n\
-~.  - terminate connection\r\n\
-~C  - open a command line\r\n\
-~R  - Request rekey (SSH protocol 2 only)\r\n\
-~^Z - suspend ssh\r\n\
-~#  - list forwarded connections\r\n\
-~&  - background ssh (when waiting for connections to terminate)\r\n\
-~?  - this message\r\n\
-~~  - send the escape character by typing it twice\r\n\
+%c.  - terminate connection\r\n\
+%cC  - open a command line\r\n\
+%cR  - Request rekey (SSH protocol 2 only)\r\n\
+%c^Z - suspend ssh\r\n\
+%c#  - list forwarded connections\r\n\
+%c&  - background ssh (when waiting for connections to terminate)\r\n\
+%c?  - this message\r\n\
+%c%c  - send the escape character by typing it twice\r\n\
 (Note that escapes are only recognized immediately after newline.)\r\n",
-					 escape_char);
+				    escape_char, escape_char, escape_char, escape_char,
+				    escape_char, escape_char, escape_char, escape_char,
+				    escape_char, escape_char);
 				buffer_append(berr, string, strlen(string));
 				continue;
 
@@ -1114,7 +1116,7 @@ client_input_exit_status(int type, u_int32_t seq, void *ctxt)
 static Channel *
 client_request_forwarded_tcpip(const char *request_type, int rchan)
 {
-	Channel* c = NULL;
+	Channel *c = NULL;
 	char *listen_address, *originator_address;
 	int listen_port, originator_port;
 	int sock;
@@ -1144,7 +1146,7 @@ client_request_forwarded_tcpip(const char *request_type, int rchan)
 	return c;
 }
 
-static Channel*
+static Channel *
 client_request_x11(const char *request_type, int rchan)
 {
 	Channel *c = NULL;
@@ -1180,7 +1182,7 @@ client_request_x11(const char *request_type, int rchan)
 	return c;
 }
 
-static Channel*
+static Channel *
 client_request_agent(const char *request_type, int rchan)
 {
 	Channel *c = NULL;
@@ -1208,10 +1210,8 @@ client_input_channel_open(int type, u_int32_t seq, void *ctxt)
 {
 	Channel *c = NULL;
 	char *ctype;
-	u_int len;
 	int rchan;
-	int rmaxpack;
-	int rwindow;
+	u_int rmaxpack, rwindow, len;
 
 	ctype = packet_get_string(&len);
 	rchan = packet_get_int();
@@ -1314,6 +1314,7 @@ static void
 client_init_dispatch_20(void)
 {
 	dispatch_init(&dispatch_protocol_error);
+
 	dispatch_set(SSH2_MSG_CHANNEL_CLOSE, &channel_input_oclose);
 	dispatch_set(SSH2_MSG_CHANNEL_DATA, &channel_input_data);
 	dispatch_set(SSH2_MSG_CHANNEL_EOF, &channel_input_ieof);
@@ -1327,6 +1328,10 @@ client_init_dispatch_20(void)
 
 	/* rekeying */
 	dispatch_set(SSH2_MSG_KEXINIT, &kex_input_kexinit);
+
+	/* global request reply messages */
+	dispatch_set(SSH2_MSG_REQUEST_FAILURE, &client_global_request_reply);
+	dispatch_set(SSH2_MSG_REQUEST_SUCCESS, &client_global_request_reply);
 }
 static void
 client_init_dispatch_13(void)

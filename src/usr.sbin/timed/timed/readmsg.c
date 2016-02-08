@@ -1,4 +1,4 @@
-/*	$OpenBSD: readmsg.c,v 1.9 2002/03/14 16:44:25 mpech Exp $	*/
+/*	$OpenBSD: readmsg.c,v 1.11 2002/09/06 19:28:01 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 1985, 1993 The Regents of the University of California.
@@ -36,10 +36,6 @@
 #ifndef lint
 static char sccsid[] = "@(#)readmsg.c	5.1 (Berkeley) 5/11/93";
 #endif /* not lint */
-
-#ifdef sgi
-#ident "$Revision: 1.9 $"
-#endif
 
 #include "globals.h"
 
@@ -80,6 +76,7 @@ readmsg(int type, char *machfrom, struct timeval *intvl,
 	struct netinfo *netfrom)
 {
 	int length;
+	socklen_t salength;
 	fd_set ready;
 	static struct tsplist *head = &msgslist;
 	static struct tsplist *tail = &msgslist;
@@ -205,9 +202,9 @@ again:
 				return(0);
 			continue;
 		}
-		length = sizeof(from);
+		salength = sizeof(from);
 		if ((n = recvfrom(sock, (char *)&msgin, sizeof(struct tsp), 0,
-			     (struct sockaddr*)&from, &length)) < 0) {
+			     (struct sockaddr *)&from, &salength)) < 0) {
 			syslog(LOG_ERR, "recvfrom: %m");
 			exit(1);
 		}

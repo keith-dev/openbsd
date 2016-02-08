@@ -40,7 +40,7 @@
  */
 
 #include "includes.h"
-RCSID("$OpenBSD: ssh.c,v 1.169 2002/03/26 11:37:05 markus Exp $");
+RCSID("$OpenBSD: ssh.c,v 1.186 2002/09/19 01:58:18 djm Exp $");
 
 #include <openssl/evp.h>
 #include <openssl/err.h>
@@ -53,7 +53,6 @@ RCSID("$OpenBSD: ssh.c,v 1.169 2002/03/26 11:37:05 markus Exp $");
 #include "xmalloc.h"
 #include "packet.h"
 #include "buffer.h"
-#include "uidswap.h"
 #include "channels.h"
 #include "key.h"
 #include "authfd.h"
@@ -99,7 +98,7 @@ int stdin_null_flag = 0;
 
 /*
  * Flag indicating that ssh should fork after authentication.  This is useful
- * so that the pasphrase can be entered manually, and then ssh goes to the
+ * so that the passphrase can be entered manually, and then ssh goes to the
  * background.
  */
 int fork_after_authentication_flag = 0;
@@ -124,19 +123,23 @@ char *host;
 struct sockaddr_storage hostaddr;
 
 /* Private host keys. */
-struct {
-	Key     **keys;
-	int	nkeys;
-} sensitive_data;
+Sensitive sensitive_data;
 
 /* Original real UID. */
 uid_t original_real_uid;
+uid_t original_effective_uid;
 
 /* command to be executed */
 Buffer command;
 
 /* Should we execute a command or invoke a subsystem? */
 int subsystem_flag = 0;
+
+/* # of replies received for global requests */
+static int client_global_request_id = 0;
+
+/* pid of proxycommand child process */
+pid_t proxy_command_pid = 0;
 
 /* Prints a help message to the user.  This function never returns. */
 
@@ -166,7 +169,6 @@ usage(void)
 	fprintf(stderr, "  -v          Verbose; display verbose debugging messages.\n");
 	fprintf(stderr, "              Multiple -v increases verbosity.\n");
 	fprintf(stderr, "  -V          Display version number only.\n");
-	fprintf(stderr, "  -P          Don't allocate a privileged port.\n");
 	fprintf(stderr, "  -q          Quiet; don't display any warning messages.\n");
 	fprintf(stderr, "  -f          Fork into background after authentication.\n");
 	fprintf(stderr, "  -e char     Set escape character; ``none'' = disable (default: ~).\n");
@@ -192,44 +194,6 @@ usage(void)
 	exit(1);
 }
 
-/*
- * Connects to the given host using rsh (or prints an error message and exits
- * if rsh is not available).  This function never returns.
- */
-static void
-rsh_connect(char *host, char *user, Buffer * command)
-{
-	char *args[10];
-	int i;
-
-	log("Using rsh.  WARNING: Connection will not be encrypted.");
-	/* Build argument list for rsh. */
-	i = 0;
-	args[i++] = _PATH_RSH;
-	/* host may have to come after user on some systems */
-	args[i++] = host;
-	if (user) {
-		args[i++] = "-l";
-		args[i++] = user;
-	}
-	if (buffer_len(command) > 0) {
-		buffer_append(command, "\0", 1);
-		args[i++] = buffer_ptr(command);
-	}
-	args[i++] = NULL;
-	if (debug_flag) {
-		for (i = 0; args[i]; i++) {
-			if (i != 0)
-				fprintf(stderr, " ");
-			fprintf(stderr, "%s", args[i]);
-		}
-		fprintf(stderr, "\n");
-	}
-	execv(_PATH_RSH, args);
-	perror(_PATH_RSH);
-	exit(1);
-}
-
 static int ssh_session(void);
 static int ssh_session2(void);
 static void load_public_identity_files(void);
@@ -240,14 +204,13 @@ static void load_public_identity_files(void);
 int
 main(int ac, char **av)
 {
-	int i, opt, exit_status, cerr;
+	int i, opt, exit_status;
 	u_short fwd_port, fwd_host_port;
 	char sfwd_port[6], sfwd_host_port[6];
 	char *p, *cp, buf[256];
 	struct stat st;
 	struct passwd *pw;
 	int dummy;
-	uid_t original_effective_uid;
 	extern int optind, optreset;
 	extern char *optarg;
 
@@ -257,6 +220,15 @@ main(int ac, char **av)
 	 */
 	original_real_uid = getuid();
 	original_effective_uid = geteuid();
+
+	/*
+	 * Use uid-swapping to give up root privileges for the duration of
+	 * option processing.  We will re-instantiate the rights when we are
+	 * ready to create the privileged port, and will permanently drop
+	 * them when the port has been created (actually, when the connection
+	 * has been made, as we may need to create the port several times).
+	 */
+	PRIV_END;
 
 	/* If we are installed setuid root be careful to not drop core. */
 	if (original_real_uid != original_effective_uid) {
@@ -273,15 +245,6 @@ main(int ac, char **av)
 	}
 	/* Take a copy of the returned structure. */
 	pw = pwcopy(pw);
-
-	/*
-	 * Use uid-swapping to give up root privileges for the duration of
-	 * option processing.  We will re-instantiate the rights when we are
-	 * ready to create the privileged port, and will permanently drop
-	 * them when the port has been created (actually, when the connection
-	 * has been made, as we may need to create the port several times).
-	 */
-	temporarily_use_uid(pw);
 
 	/*
 	 * Set our umask to something reasonable, as some files are created
@@ -329,7 +292,7 @@ again:
 		case 'g':
 			options.gateway_ports = 1;
 			break;
-		case 'P':
+		case 'P':	/* deprecated */
 			options.use_privileged_port = 0;
 			break;
 		case 'a':
@@ -578,7 +541,7 @@ again:
 	if (buffer_len(&command) == 0)
 		tty_flag = 1;
 
-	/* Force no tty*/
+	/* Force no tty */
 	if (no_tty_flag)
 		tty_flag = 0;
 	/* Do not allocate a tty if stdin is not a tty. */
@@ -630,52 +593,50 @@ again:
 		    "originating port will not be trusted.");
 		options.rhosts_authentication = 0;
 	}
-	/*
-	 * If using rsh has been selected, exec it now (without trying
-	 * anything else).  Note that we must release privileges first.
-	 */
-	if (options.use_rsh) {
-		/*
-		 * Restore our superuser privileges.  This must be done
-		 * before permanently setting the uid.
-		 */
-		restore_uid();
-
-		/* Switch to the original uid permanently. */
-		permanently_set_uid(pw);
-
-		/* Execute rsh. */
-		rsh_connect(host, options.user, &command);
-		fatal("rsh_connect returned");
-	}
-	/* Restore our superuser privileges. */
-	restore_uid();
-
 	/* Open a connection to the remote host. */
 
-	cerr = ssh_connect(host, &hostaddr, options.port, IPv4or6,
+	if (ssh_connect(host, &hostaddr, options.port, IPv4or6,
 	    options.connection_attempts,
-	    original_effective_uid != 0 || !options.use_privileged_port,
-	    pw, options.proxy_command);
+	    original_effective_uid == 0 && options.use_privileged_port,
+	    options.proxy_command) != 0)
+		exit(1);
 
 	/*
 	 * If we successfully made the connection, load the host private key
 	 * in case we will need it later for combined rsa-rhosts
 	 * authentication. This must be done before releasing extra
 	 * privileges, because the file is only readable by root.
+	 * If we cannot access the private keys, load the public keys
+	 * instead and try to execute the ssh-keysign helper instead.
 	 */
 	sensitive_data.nkeys = 0;
 	sensitive_data.keys = NULL;
-	if (!cerr && (options.rhosts_rsa_authentication ||
-	    options.hostbased_authentication)) {
+	sensitive_data.external_keysign = 0;
+	if (options.rhosts_rsa_authentication ||
+	    options.hostbased_authentication) {
 		sensitive_data.nkeys = 3;
-		sensitive_data.keys = xmalloc(sensitive_data.nkeys*sizeof(Key));
+		sensitive_data.keys = xmalloc(sensitive_data.nkeys *
+		    sizeof(Key));
+
+		PRIV_START;
 		sensitive_data.keys[0] = key_load_private_type(KEY_RSA1,
 		    _PATH_HOST_KEY_FILE, "", NULL);
 		sensitive_data.keys[1] = key_load_private_type(KEY_DSA,
 		    _PATH_HOST_DSA_KEY_FILE, "", NULL);
 		sensitive_data.keys[2] = key_load_private_type(KEY_RSA,
 		    _PATH_HOST_RSA_KEY_FILE, "", NULL);
+		PRIV_END;
+
+		if (options.hostbased_authentication == 1 &&
+		    sensitive_data.keys[0] == NULL &&
+		    sensitive_data.keys[1] == NULL &&
+		    sensitive_data.keys[2] == NULL) {
+			sensitive_data.keys[1] = key_load_public(
+			    _PATH_HOST_DSA_KEY_FILE, NULL);
+			sensitive_data.keys[2] = key_load_public(
+			    _PATH_HOST_RSA_KEY_FILE, NULL);
+			sensitive_data.external_keysign = 1;
+		}
 	}
 	/*
 	 * Get rid of any extra privileges that we may have.  We will no
@@ -684,15 +645,8 @@ again:
 	 * user's home directory if it happens to be on a NFS volume where
 	 * root is mapped to nobody.
 	 */
-
-	/*
-	 * Note that some legacy systems need to postpone the following call
-	 * to permanently_set_uid() until the private hostkey is destroyed
-	 * with RSA_free().  Otherwise the calling user could ptrace() the
-	 * process, read the private hostkey and impersonate the host.
-	 * OpenBSD does not allow ptracing of setuid processes.
-	 */
-	permanently_set_uid(pw);
+	seteuid(original_real_uid);
+	setuid(original_real_uid);
 
 	/*
 	 * Now that we are back to our own permissions, create ~/.ssh
@@ -703,21 +657,6 @@ again:
 		if (mkdir(buf, 0700) < 0)
 			error("Could not create directory '%.200s'.", buf);
 
-	/* Check if the connection failed, and try "rsh" if appropriate. */
-	if (cerr) {
-		if (!options.fallback_to_rsh)
-			exit(1);
-		if (options.port != 0)
-			log("Secure connection to %.100s on port %hu refused; "
-			    "reverting to insecure method",
-			    host, options.port);
-		else
-			log("Secure connection to %.100s refused; "
-			    "reverting to insecure method.", host);
-
-		rsh_connect(host, options.user, &command);
-		fatal("rsh_connect returned");
-	}
 	/* load options.identity_files */
 	load_public_identity_files();
 
@@ -735,8 +674,7 @@ again:
 	signal(SIGPIPE, SIG_IGN); /* ignore SIGPIPE early */
 
 	/* Log into the remote system.  This never returns if the login fails. */
-	ssh_login(sensitive_data.keys, sensitive_data.nkeys,
-	    host, (struct sockaddr *)&hostaddr, pw);
+	ssh_login(&sensitive_data, host, (struct sockaddr *)&hostaddr, pw);
 
 	/* We no longer need the private host keys.  Clear them now. */
 	if (sensitive_data.nkeys != 0) {
@@ -763,6 +701,14 @@ again:
 
 	exit_status = compat20 ? ssh_session2() : ssh_session();
 	packet_close();
+
+	/*
+	 * Send SIGHUP to proxy command if used. We don't wait() in 
+	 * case it hangs and instead rely on init to reap the child
+	 */
+	if (proxy_command_pid > 1)
+		kill(proxy_command_pid, SIGHUP);
+
 	return exit_status;
 }
 
@@ -774,11 +720,19 @@ x11_get_proto(char **_proto, char **_data)
 	FILE *f;
 	int got_data = 0, i;
 	char *display;
+	struct stat st;
 
 	*_proto = proto;
 	*_data = data;
 	proto[0] = data[0] = '\0';
-	if (options.xauth_location && (display = getenv("DISPLAY"))) {
+	if (!options.xauth_location ||
+	    (stat(options.xauth_location, &st) == -1)) {
+		debug("No xauth program.");
+	} else {
+		if ((display = getenv("DISPLAY")) == NULL) {
+			debug("x11_get_proto: DISPLAY not set");
+			return;
+		}
 		/* Try to get Xauthority information for the display. */
 		if (strncmp(display, "localhost:", 10) == 0)
 			/*
@@ -788,12 +742,12 @@ x11_get_proto(char **_proto, char **_data)
 			 * XXX: "localhost" match to determine FamilyLocal
 			 *      is not perfect.
 			 */
-			snprintf(line, sizeof line, "%.100s list unix:%s 2>"
+			snprintf(line, sizeof line, "%s list unix:%s 2>"
 			    _PATH_DEVNULL, options.xauth_location, display+10);
 		else
-			snprintf(line, sizeof line, "%.100s list %.200s 2>"
+			snprintf(line, sizeof line, "%s list %.200s 2>"
 			    _PATH_DEVNULL, options.xauth_location, display);
-		debug2("x11_get_proto %s", line);
+		debug2("x11_get_proto: %s", line);
 		f = popen(line, "r");
 		if (f && fgets(line, sizeof(line), f) &&
 		    sscanf(line, "%*s %511s %511s", proto, data) == 2)
@@ -812,6 +766,7 @@ x11_get_proto(char **_proto, char **_data)
 	if (!got_data) {
 		u_int32_t rand = 0;
 
+		log("Warning: No xauth data; using fake authentication data for X11 forwarding.");
 		strlcpy(proto, "MIT-MAGIC-COOKIE-1", sizeof proto);
 		for (i = 0; i < 16; i++) {
 			if (i % 4 == 0)
@@ -861,11 +816,8 @@ check_agent_present(void)
 {
 	if (options.forward_agent) {
 		/* Clear agent forwarding if we don\'t have an agent. */
-		int authfd = ssh_get_authentication_socket();
-		if (authfd < 0)
+		if (!ssh_agent_present())
 			options.forward_agent = 0;
-		else
-			ssh_close_authentication_socket(authfd);
 	}
 }
 
@@ -1021,6 +973,27 @@ client_subsystem_reply(int type, u_int32_t seq, void *ctxt)
 		    len, (u_char *)buffer_ptr(&command), id);
 }
 
+void
+client_global_request_reply(int type, u_int32_t seq, void *ctxt)
+{
+	int i;
+
+	i = client_global_request_id++;
+	if (i >= options.num_remote_forwards) {
+		debug("client_global_request_reply: too many replies %d > %d",
+		    i, options.num_remote_forwards);
+		return;
+	}
+	debug("remote forward %s for: listen %d, connect %s:%d",
+	    type == SSH2_MSG_REQUEST_SUCCESS ? "success" : "failure",
+	    options.remote_forwards[i].port,
+	    options.remote_forwards[i].host,
+	    options.remote_forwards[i].host_port);
+	if (type == SSH2_MSG_REQUEST_FAILURE)
+		log("Warning: remote port forwarding failed for listen port %d",
+		    options.remote_forwards[i].port);
+}
+
 /* request pty/x11/agent/tcpfwd/shell for channel */
 static void
 ssh_session2_setup(int id, void *arg)
@@ -1080,7 +1053,7 @@ ssh_session2_setup(int id, void *arg)
 			debug("Sending subsystem: %.*s", len, (u_char *)buffer_ptr(&command));
 			channel_request_start(id, "subsystem", /*want reply*/ 1);
 			/* register callback for reply */
-			/* XXX we asume that client_loop has already been called */
+			/* XXX we assume that client_loop has already been called */
 			dispatch_set(SSH2_MSG_CHANNEL_FAILURE, &client_subsystem_reply);
 			dispatch_set(SSH2_MSG_CHANNEL_SUCCESS, &client_subsystem_reply);
 		} else {

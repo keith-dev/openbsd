@@ -1,4 +1,5 @@
-/*	$OpenBSD: lp.h,v 1.8 2002/02/17 19:42:36 millert Exp $	*/
+/*	$OpenBSD: lp.h,v 1.13 2002/06/13 06:48:40 millert Exp $	*/
+/*	$NetBSD: lp.h,v 1.14 2000/04/16 14:43:58 mrg Exp $	*/
 
 /*
  * Copyright (c) 1983, 1993
@@ -44,7 +45,7 @@ extern char	*AF;		/* accounting file */
 extern long	 BR;		/* baud rate if lp is a tty */
 extern char	*CF;		/* name of cifplot filter (per job) */
 extern char	*DF;		/* name of tex filter (per job) */
-extern long	 DU;		/* daeomon user-id */
+extern long	 DU;		/* daemon user-id */
 extern long	 FC;		/* flags to clear if lp is a tty */
 extern char	*FF;		/* form feed string */
 extern long	 FS;		/* flags to set if lp is a tty */
@@ -56,7 +57,7 @@ extern char	*LO;		/* lock file name */
 extern char	*LP;		/* line printer device name */
 extern long	 MC;		/* maximum number of copies allowed */
 extern char	*MS;		/* stty flags to set if lp is a tty */
-extern long  MX;		/* maximum number of blocks to copy */
+extern long	 MX;		/* maximum number of blocks to copy */
 extern char	*NF;		/* name of ditroff(1) filter (per job) */
 extern char	*OF;		/* name of output filter (created once) */
 extern long	 PL;		/* page length */
@@ -88,7 +89,11 @@ extern char	*printer;	/* printer name */
 extern char	host[MAXHOSTNAMELEN];
 extern char	*from;		/* client's machine name */
 extern int	remote;		/* true if sending files to a remote host */
-extern char	*printcapdb[];  /* printcap database array */
+extern char	*printcapdb[];	/* printcap database array */
+extern u_int	wait_time;	/* time to wait for remote responses */
+
+extern uid_t	real_uid, effective_uid;
+extern gid_t	real_gid, effective_gid;
 
 extern volatile sig_atomic_t	gotintr;
 
@@ -100,6 +105,23 @@ struct queue {
 	char	q_name[MAXNAMLEN+1];	/* control file name */
 };
 
+/*
+ * Macros to raise/lower permissions.
+ */
+#define PRIV_START do {				\
+	int save_errno = errno;			\
+	(void)seteuid(effective_uid);		\
+	(void)setegid(effective_gid);		\
+	errno = save_errno;			\
+} while (0)
+
+#define PRIV_END do {				\
+	int save_errno = errno;			\
+	(void)setegid(real_gid);		\
+	(void)seteuid(real_uid);		\
+	errno = save_errno;			\
+} while (0)
+
 #include <sys/cdefs.h>
 
 __BEGIN_DECLS
@@ -110,17 +132,16 @@ char	*checkremote(void);
 int      chk(char *);
 void     displayq(int);
 void     dump(char *, char *, int);
-void	 fatal(const char *, ...);
+__dead void fatal(const char *, ...)
+	__attribute__((__format__(__printf__, 1, 2)));
 int	 getline(FILE *);
 int	 getport(char *, int);
-int	 getq(struct queue *(*[]));
+int	 getq(struct queue ***);
 void     header(void);
-void     inform(char *);
 int      inlist(char *, char *);
 int      iscf(struct dirent *);
 int      isowner(char *, char *);
 void     ldump(char *, char *, int);
-int      lockchk(char *);
 void     prank(int);
 void     process(char *);
 void     rmjob(void);
@@ -129,4 +150,5 @@ void     show(char *, char *, int);
 int      startdaemon(char *);
 void     nodaemon(void);
 void     delay(int);
+int	 safe_open(const char *, int, mode_t);
 __END_DECLS

@@ -1,4 +1,4 @@
-/*	$OpenBSD: display.c,v 1.13 2002/03/27 17:42:37 millert Exp $	*/
+/*	$OpenBSD: display.c,v 1.19 2002/09/15 13:59:16 vincent Exp $	*/
 
 /*
  * The functions in this file handle redisplay. The
@@ -14,6 +14,8 @@
  */
 #include	"def.h"
 #include	"kbd.h"
+
+#include <ctype.h>
 
 /*
  * You can change these back to the types
@@ -56,7 +58,7 @@ typedef struct {
  * trace trajectory, and the cost of redisplay, when
  * the dynamic programming redisplay code is used.
  * If no fancy redisplay, this isn't used. The trace index
- * fields can be "char", and the score a "short", but
+ * fields can be "char", and the cost a "short", but
  * this makes the code worse on the VAX.
  */
 typedef struct {
@@ -118,9 +120,8 @@ vtresize(int force, int newrow, int newcol)
 	static int first_run = 1;
 	VIDEO *vp;
 
-	if (newrow < 1 || newcol < 1) {
-		return -1;
-	}
+	if (newrow < 1 || newcol < 1)
+		return (FALSE);
 
 	rowchanged = (newrow != nrow);
 	colchanged = (newcol != ncol);
@@ -129,13 +130,13 @@ vtresize(int force, int newrow, int newcol)
 		void *tmp;					\
 		if ((tmp = realloc((a), (n))) == NULL) {	\
 			panic("out of memory in display code");	\
-		}	\
+		}						\
 		(a) = tmp;					\
 	} while (0)
 
 	/* No update needed */
 	if (!first_run && !force && !rowchanged && !colchanged) {
-		return 0;
+		return (TRUE);
 	}
 
 	if (first_run) {
@@ -173,9 +174,8 @@ vtresize(int force, int newrow, int newcol)
 		/*
 		 * Zero-out the entries we just allocated
 		 */
-		for (i = vidstart; i < 2 * (newrow - 1); i++) {
+		for (i = vidstart; i < 2 * (newrow - 1); i++)
 			memset(&video[i], 0, sizeof(VIDEO));
-		}
 
 		/*
 		 * Reinitialize vscreen and pscreen arrays completely.
@@ -189,9 +189,8 @@ vtresize(int force, int newrow, int newcol)
 		}
 	}
 	if (rowchanged || colchanged || first_run) {
-		for (i = 0; i < 2 * (newrow - 1); i++) {
+		for (i = 0; i < 2 * (newrow - 1); i++)
 			TRYREALLOC(video[i].v_text, newcol * sizeof(char));
-		}
 		TRYREALLOC(blanks.v_text, newcol * sizeof(char));
 	}
 
@@ -204,7 +203,7 @@ vtresize(int force, int newrow, int newcol)
 		ttcol = ncol;
 
 	first_run = 0;
-	return 0;
+	return (TRUE);
 }
 
 #undef TRYREALLOC
@@ -296,17 +295,23 @@ vtputc(int c)
 		vp->v_text[ncol - 1] = '$';
 	else if (c == '\t'
 #ifdef	NOTAB
-		 && !(curbp->b_flag & BFNOTAB)
+	    && !(curbp->b_flag & BFNOTAB)
 #endif
-		) {
+	    ) {
 		do {
 			vtputc(' ');
 		} while (vtcol < ncol && (vtcol & 0x07) != 0);
 	} else if (ISCTRL(c)) {
 		vtputc('^');
 		vtputc(CCHR(c));
-	} else
+	} else if (isprint(c))
 		vp->v_text[vtcol++] = c;
+	else {
+		char bf[5];
+
+		snprintf(bf, sizeof bf, "\\%o", c);
+		vtputs(bf);
+	}
 }
 
 /*
@@ -326,9 +331,9 @@ vtpute(int c)
 		vp->v_text[ncol - 1] = '$';
 	else if (c == '\t'
 #ifdef	NOTAB
-		 && !(curbp->b_flag & BFNOTAB)
+	    && !(curbp->b_flag & BFNOTAB)
 #endif
-		) {
+	    ) {
 		do {
 			vtpute(' ');
 		} while (((vtcol + lbound) & 0x07) != 0 && vtcol < ncol);
@@ -481,11 +486,19 @@ update(void)
 #ifdef	NOTAB
 		    && !(curbp->b_flag & BFNOTAB)
 #endif
-			)
+			) {
 			curcol |= 0x07;
-		else if (ISCTRL(c) != FALSE)
-			++curcol;
-		++curcol;
+			curcol++;
+		} else if (ISCTRL(c) != FALSE)
+			curcol += 2;
+		else if (isprint(c))
+			curcol++;
+		else {
+			char bf[5];
+
+			snprintf(bf, sizeof bf, "\\%o", c);
+			curcol += strlen(bf);
+		}
 	}
 	if (curcol >= ncol - 1) {	/* extended line. */
 		/* flag we are extended and changed */
@@ -768,13 +781,16 @@ modeline(MGWIN *wp)
 	bp = wp->w_bufp;
 	vtputc('-');
 	vtputc('-');
- 	if ((bp->b_flag & BFREADONLY) != 0) {
+	if ((bp->b_flag & BFREADONLY) != 0) {
 		vtputc('%');
-		vtputc('%');
+		if ((bp->b_flag & BFCHG) != 0)
+			vtputc('*');
+		else
+			vtputc('%');
 	} else if ((bp->b_flag & BFCHG) != 0) {	/* "*" if changed.	 */
 		vtputc('*');
 		vtputc('*');
- 	} else {
+	} else {
 		vtputc('-');
 		vtputc('-');
 	}

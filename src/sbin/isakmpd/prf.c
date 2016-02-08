@@ -1,4 +1,4 @@
-/*	$OpenBSD: prf.c,v 1.7 1999/05/02 19:16:41 niklas Exp $	*/
+/*	$OpenBSD: prf.c,v 1.10 2002/09/11 09:50:44 ho Exp $	*/
 /*	$EOM: prf.c,v 1.7 1999/05/02 12:50:29 niklas Exp $	*/
 
 /*
@@ -76,7 +76,7 @@ prf_hash_final (unsigned char *digest, struct prf_hash_ctx *ctx)
  * the HMAC version of a hash. See RFC-2104 for reference.
  */
 struct prf *
-prf_alloc (enum prfs type, int subtype, char *shared, int sharedsize)
+prf_alloc (enum prfs type, int subtype, unsigned char *shared, int sharedsize)
 {
   struct hash *hash;
   struct prf *prf;
@@ -100,7 +100,7 @@ prf_alloc (enum prfs type, int subtype, char *shared, int sharedsize)
   prf = malloc (sizeof *prf);
   if (!prf)
     {
-      log_error ("prf_alloc: malloc (%d) failed", sizeof *prf);
+      log_error ("prf_alloc: malloc (%lu) failed", (unsigned long)sizeof *prf);
       return 0;
     }
 
@@ -110,7 +110,8 @@ prf_alloc (enum prfs type, int subtype, char *shared, int sharedsize)
       prfctx = malloc (sizeof *prfctx);
       if (!prfctx)
 	{
-	  log_error ("prf_alloc: malloc (%d) failed", sizeof *prfctx);
+	  log_error ("prf_alloc: malloc (%lu) failed",
+		     (unsigned long)sizeof *prfctx);
 	  goto cleanprf;
 	}
       prf->prfctx = prfctx;

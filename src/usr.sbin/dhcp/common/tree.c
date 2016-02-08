@@ -92,13 +92,13 @@ struct dns_host_entry *enter_dns_host (name)
 	char *name;
 {
 	struct dns_host_entry *dh;
+	int len = strlen (name) + 1;
 
 	if (!(dh = (struct dns_host_entry *)dmalloc
 	      (sizeof (struct dns_host_entry), "enter_dns_host"))
-	    || !(dh -> hostname = dmalloc (strlen (name) + 1,
-					   "enter_dns_host")))
+	    || !(dh -> hostname = dmalloc (len, "enter_dns_host")))
 		error ("Can't allocate space for new host.");
-	strcpy (dh -> hostname, name);
+	strlcpy (dh -> hostname, name, len);
 	dh -> data = (unsigned char *)0;
 	dh -> data_len = 0;
 	dh -> buf_len = 0;
@@ -270,7 +270,7 @@ static TIME tree_evaluate_recurse (bufix, bufp, bufcount, tree)
 		return t1;
 
 	      default:
-		warn ("Bad node id in tree: %d.");
+		warn ("Bad node id in tree: %d.", tree -> op);
 		t1 = MAX_TIME;
 		return t1;
 	}

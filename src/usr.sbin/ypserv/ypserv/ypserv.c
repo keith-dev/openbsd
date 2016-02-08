@@ -1,4 +1,4 @@
-/*	$OpenBSD: ypserv.c,v 1.21 2002/02/19 19:39:41 millert Exp $ */
+/*	$OpenBSD: ypserv.c,v 1.25 2002/09/06 19:13:10 deraadt Exp $ */
 
 /*
  * Copyright (c) 1994 Mats O Jansson <moj@stacken.kth.se>
@@ -32,36 +32,34 @@
  */
 
 #ifndef LINT
-static char rcsid[] = "$OpenBSD: ypserv.c,v 1.21 2002/02/19 19:39:41 millert Exp $";
+static char rcsid[] = "$OpenBSD: ypserv.c,v 1.25 2002/09/06 19:13:10 deraadt Exp $";
 #endif
 
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/ioctl.h>
-#include <sys/ttycom.h>/* TIOCNOTTY */
+#include <sys/ttycom.h>
 #include <netinet/in.h>
 #include "yp.h"
 #include "ypv1.h"
 #include <stdio.h>
-#include <stdlib.h>/* getenv, exit */
-#include <string.h> /* strcmp */ 
+#include <stdlib.h>
+#include <string.h>
 #include <netdb.h>
 #include <signal.h>
 #include <errno.h>
+#include <util.h>
 #include <unistd.h>
 #include <fcntl.h>
-#include <rpc/pmap_clnt.h> /* for pmap_unset */
+#include <rpc/pmap_clnt.h>
 #include <memory.h>
-#ifdef SYSLOG
 #include <syslog.h>
-#else
-#define LOG_ERR 1
-#define openlog(a, b, c)
-#endif
 #include "acl.h"
 #include "yplog.h"
 #include "ypdef.h"
 #include <sys/wait.h>
+
+void ypdb_init(void);
 
 #ifdef DEBUG
 #define RPC_SVC_FG
@@ -73,7 +71,6 @@ static int _rpcfdtype;		/* Whether Stream or Datagram ? */
 static int _rpcsvcdirty;	/* Still serving ? */
 
 int	usedns = FALSE;
-char   *progname = "ypserv";
 char   *aclfile = NULL;
 
 void	sig_child(int);
@@ -84,8 +81,8 @@ extern	int __svc_fdsetsize;
 extern	fd_set *__svc_fdset;
 extern	void svc_getreqset2(fd_set *, int);
 
-static
-void _msgout(char* msg)
+static void
+_msgout(char *msg)
 {
 #ifdef RPC_SVC_FG
 	if (_rpcpmstart)
@@ -392,17 +389,22 @@ my_svc_run()
 	}
 }
 
-int
-main(argc, argv)
-	int argc;
-	char *argv[];
+void
+usage(void)
 {
-	int usage = 0, xflag = 0, allowv1 = 0, ch, sock, proto;
+	(void)fprintf(stderr, "usage: ypserv [-a aclfile] [-d] [-x]\n");
+	exit(1);
+}
+
+int
+main(int argc, char *argv[])
+{
+	int xflag = 0, allowv1 = 0, ch, sock, proto;
 	struct sockaddr_in saddr;
-	int asize = sizeof (saddr);
+	socklen_t asize = sizeof (saddr);
 	extern char *optarg;
 	SVCXPRT *transp;
-	
+
 	while ((ch = getopt(argc, argv, "1a:dx")) != -1)
 		switch (ch) {
 		case '1':
@@ -418,17 +420,12 @@ main(argc, argv)
 			xflag = TRUE;
 			break;
 		default:
-			usage++;
+			usage();
 			break;
 		}
-	
-	if (usage) {
-		(void)fprintf(stderr, "usage: %s [-a aclfile] [-d] [-x]\n",progname);
-		exit(1);
-	}
 
 	if (geteuid() != 0) {
-		(void)fprintf(stderr, "%s: must be root to run.\n",progname);
+		(void)fprintf(stderr, "ypserv: must be root to run.\n");
 		exit(1);
 	}
 
@@ -441,7 +438,7 @@ main(argc, argv)
 		exit(1);
 
 	if (getsockname(0, (struct sockaddr *)&saddr, &asize) == 0) {
-		int ssize = sizeof (int);
+		socklen_t ssize = sizeof (int);
 
 		if (saddr.sin_family != AF_INET)
 			exit(1);
@@ -454,8 +451,8 @@ main(argc, argv)
 		openlog("ypserv", LOG_PID, LOG_DAEMON);
 	} else {
 #ifndef RPC_SVC_FG
-		int size;
-		int pid, i;
+		int size, i;
+		pid_t pid;
 
 		pid = fork();
 		if (pid < 0) {
@@ -486,7 +483,7 @@ main(argc, argv)
 	ypdb_init();	/* init db stuff */
 
 	chdir("/");
-	
+
 	(void)signal(SIGCHLD, sig_child);
 	(void)signal(SIGHUP, sig_hup);
 	pidfile(NULL);

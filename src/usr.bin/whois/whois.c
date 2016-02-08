@@ -1,4 +1,4 @@
-/*	$OpenBSD: whois.c,v 1.14 2002/02/16 21:27:59 millert Exp $	*/
+/*	$OpenBSD: whois.c,v 1.16 2002/09/05 17:22:16 fgsch Exp $	*/
 
 /*
  * Copyright (c) 1980, 1993
@@ -43,7 +43,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)whois.c	8.1 (Berkeley) 6/6/93";
 #else
-static char rcsid[] = "$OpenBSD: whois.c,v 1.14 2002/02/16 21:27:59 millert Exp $";
+static char rcsid[] = "$OpenBSD: whois.c,v 1.16 2002/09/05 17:22:16 fgsch Exp $";
 #endif
 #endif /* not lint */
 
@@ -68,6 +68,7 @@ static char rcsid[] = "$OpenBSD: whois.c,v 1.14 2002/02/16 21:27:59 millert Exp 
 #define	PNICHOST	"whois.apnic.net"
 #define	RUNICHOST	"whois.ripn.net"
 #define	MNICHOST	"whois.ra.net"
+#define LNICHOST	"whois.lacnic.net"
 #define	QNICHOST_TAIL	".whois-servers.net"
 #define	WHOIS_PORT	43
 
@@ -97,7 +98,7 @@ main(argc, argv)
 	qnichost = NULL;
 	flags = 0;
 	use_qnichost = 0;
-	while ((ch = getopt(argc, argv, "adgh:impqQrR")) != -1)
+	while ((ch = getopt(argc, argv, "adgh:ilmpqQrR")) != -1)
 		switch((char)ch) {
 		case 'a':
 			host = ANICHOST;
@@ -113,6 +114,9 @@ main(argc, argv)
 			break;
 		case 'i':
 			host = INICHOST;
+			break;
+		case 'l':
+			host = LNICHOST;
 			break;
 		case 'm':
 			host = MNICHOST;
@@ -162,21 +166,22 @@ main(argc, argv)
 				if ((*argv)[i] == '.')
 					j = i;
 			if (j != 0) {
-				qnichost = (char *) calloc(i - j + 1 +
-				    strlen(QNICHOST_TAIL), sizeof(char));
+				int len = i - j + 1 + strlen(QNICHOST_TAIL);
+
+				qnichost = (char *) calloc(len, sizeof(char));
 				if (!qnichost)
 					err(1, "malloc");
-				strcpy(qnichost, *argv + j + 1);
-				strcat(qnichost, QNICHOST_TAIL);
+				strlcpy(qnichost, *argv + j + 1, len);
+				strlcat(qnichost, QNICHOST_TAIL, len);
 				memset(&hints, 0, sizeof(hints));
 				hints.ai_flags = 0;
 				hints.ai_family = AF_UNSPEC;
 				hints.ai_socktype = SOCK_STREAM;
 				error = getaddrinfo(qnichost, "whois",
-						&hints, &res);
+				    &hints, &res);
 				if (error != 0)
 					errx(EX_NOHOST, "%s: %s", qnichost,
-						gai_strerror(error));
+					    gai_strerror(error));
 			}
 		}
 		if (!qnichost) {
@@ -187,7 +192,7 @@ main(argc, argv)
 			error = getaddrinfo(host, "whois", &hints, &res);
 			if (error != 0)
 				errx(EX_NOHOST, "%s: %s", host,
-					gai_strerror(error));
+				    gai_strerror(error));
 		}
 
 		whois(*argv++, res, flags);
@@ -303,6 +308,6 @@ usage()
 {
 
 	(void)fprintf(stderr,
-	    "usage: whois [-adgimpqQrR] [-h hostname] name ...\n");
+	    "usage: whois [-adgilmpqQrR] [-h hostname] name ...\n");
 	exit(EX_USAGE);
 }

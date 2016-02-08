@@ -1,4 +1,4 @@
-/*	$OpenBSD: x509.h,v 1.14 2001/11/03 13:15:35 ho Exp $	*/
+/*	$OpenBSD: x509.h,v 1.17 2002/08/07 13:19:20 ho Exp $	*/
 /*	$EOM: x509.h,v 1.11 2000/09/28 12:53:27 niklas Exp $	*/
 
 /*
@@ -51,7 +51,7 @@ struct x509_attribval {
 };
 
 /*
- * The acceptable certification authority. 
+ * The acceptable certification authority.
  * XXX We only support two names at the moment, as of ASN this can
  * be dynamic but we don't care for now.
  */
@@ -72,6 +72,7 @@ void *x509_cert_get (u_int8_t *, u_int32_t);
 int x509_cert_get_key (void *, void *);
 int x509_cert_get_subjects (void *, int *, u_int8_t ***, u_int32_t **);
 int x509_cert_init (void);
+int x509_crl_init (void);
 int x509_cert_obtain (u_int8_t *, size_t, void *, u_int8_t **, u_int32_t *);
 int x509_cert_validate (void *);
 void x509_free_aca (void *);
@@ -88,5 +89,6 @@ int x509_cert_subjectaltname (X509 *cert, u_char **, u_int *);
 X509 *x509_from_asn (u_char *, u_int);
 int x509_generate_kn(int, X509 *);
 int x509_read_from_dir (X509_STORE *, char *, int);
+int x509_read_crls_from_dir (X509_STORE *, char *);
 
 #endif /* _X509_H_ */

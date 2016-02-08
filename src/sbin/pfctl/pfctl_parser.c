@@ -1,4 +1,4 @@
-/*	$OpenBSD: pfctl_parser.c,v 1.63 2002/03/27 18:16:23 mickey Exp $ */
+/*	$OpenBSD: pfctl_parser.c,v 1.94 2002/07/20 18:58:44 deraadt Exp $ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
@@ -38,8 +38,6 @@
 #include <netinet/ip.h>
 #include <netinet/ip_icmp.h>
 #include <netinet/icmp6.h>
-#define TCPSTATES
-#include <netinet/tcp_fsm.h>
 #include <net/pfvar.h>
 #include <arpa/inet.h>
 
@@ -53,17 +51,19 @@
 #include <err.h>
 
 #include "pfctl_parser.h"
+#include "pf_print_state.h"
 
-int		 unmask (struct pf_addr *, u_int8_t);
-void		 print_addr (struct pf_addr *, struct pf_addr *, u_int8_t);
-void		 print_host (struct pf_state_host *, u_int8_t, int);
-void		 print_seq (struct pf_state_peer *);
+void		 print_op (u_int8_t, const char *, const char *);
 void		 print_port (u_int8_t, u_int16_t, u_int16_t, char *);
+void		 print_uid (u_int8_t, uid_t, uid_t, const char *);
+void		 print_gid (u_int8_t, gid_t, gid_t, const char *);
 void		 print_flags (u_int8_t);
+void		 print_fromto(struct pf_rule_addr *, struct pf_rule_addr *,
+		    u_int8_t, u_int8_t);
 
-char *tcpflags = "FSRPAU";
+char *tcpflags = "FSRPAUEW";
 
-struct icmptypeent icmp_type[] = {
+static const struct icmptypeent icmp_type[] = {
 	{ "echoreq",	ICMP_ECHO },
 	{ "echorep",	ICMP_ECHOREPLY },
 	{ "unreach",	ICMP_UNREACH },
@@ -89,10 +89,9 @@ struct icmptypeent icmp_type[] = {
 	{ "mobregrep",	ICMP_MOBILE_REGREPLY },
 	{ "skip",	ICMP_SKIP },
 	{ "photuris",	ICMP_PHOTURIS }
-
 };
 
-struct icmptypeent icmp6_type[] = {
+static const struct icmptypeent icmp6_type[] = {
 	{ "unreach",	ICMP6_DST_UNREACH },
 	{ "toobig",	ICMP6_PACKET_TOO_BIG },
 	{ "timex",	ICMP6_TIME_EXCEEDED },
@@ -120,8 +119,8 @@ struct icmptypeent icmp6_type[] = {
 	{ "mtraceresp",	MLD6_MTRACE_RESP },
 	{ "mtrace",	MLD6_MTRACE }
 };
-	
-struct icmpcodeent icmp_code[] = {
+
+static const struct icmpcodeent icmp_code[] = {
 	{ "net-unr",		ICMP_UNREACH,	ICMP_UNREACH_NET },
 	{ "host-unr",		ICMP_UNREACH,	ICMP_UNREACH_HOST },
 	{ "proto-unr",		ICMP_UNREACH,	ICMP_UNREACH_PROTOCOL },
@@ -154,7 +153,7 @@ struct icmpcodeent icmp_code[] = {
 	{ "decrypt-fail",	ICMP_PHOTURIS,	ICMP_PHOTURIS_DECRYPT_FAILED }
 };
 
-struct icmpcodeent icmp6_code[] = {
+static const struct icmpcodeent icmp6_code[] = {
 	{ "admin-unr", ICMP6_DST_UNREACH, ICMP6_DST_UNREACH_ADMIN },
 	{ "noroute-unr", ICMP6_DST_UNREACH, ICMP6_DST_UNREACH_NOROUTE },
 	{ "notnbr-unr",	ICMP6_DST_UNREACH, ICMP6_DST_UNREACH_NOTNEIGHBOR },
@@ -168,61 +167,80 @@ struct icmpcodeent icmp6_code[] = {
 	{ "redironlink", ND_REDIRECT, ND_REDIRECT_ONLINK },
 	{ "redirrouter", ND_REDIRECT, ND_REDIRECT_ROUTER }
 };
-	
 
-struct icmptypeent *
+const struct pf_timeout pf_timeouts[] = {
+	{ "tcp.first",		PFTM_TCP_FIRST_PACKET },
+	{ "tcp.opening",	PFTM_TCP_OPENING },
+	{ "tcp.established",	PFTM_TCP_ESTABLISHED },
+	{ "tcp.closing",	PFTM_TCP_CLOSING },
+	{ "tcp.finwait",	PFTM_TCP_FIN_WAIT },
+	{ "tcp.closed",		PFTM_TCP_CLOSED },
+	{ "udp.first",		PFTM_UDP_FIRST_PACKET },
+	{ "udp.single",		PFTM_UDP_SINGLE },
+	{ "udp.multiple",	PFTM_UDP_MULTIPLE },
+	{ "icmp.first",		PFTM_ICMP_FIRST_PACKET },
+	{ "icmp.error",		PFTM_ICMP_ERROR_REPLY },
+	{ "other.first",	PFTM_OTHER_FIRST_PACKET },
+	{ "other.single",	PFTM_OTHER_SINGLE },
+	{ "other.multiple",	PFTM_OTHER_MULTIPLE },
+	{ "frag",		PFTM_FRAG },
+	{ "interval",		PFTM_INTERVAL },
+	{ NULL,			0 }
+};
+
+const struct icmptypeent *
 geticmptypebynumber(u_int8_t type, u_int8_t af)
 {
-	unsigned i;
+	unsigned int i;
 
 	if (af != AF_INET6) {
-		for(i=0; i < (sizeof (icmp_type) / sizeof(icmp_type[0])); i++) {
-			if(type == icmp_type[i].type)
+		for (i=0; i < (sizeof (icmp_type) / sizeof(icmp_type[0])); i++) {
+			if (type == icmp_type[i].type)
 				return (&icmp_type[i]);
 		}
 	} else {
-		for(i=0; i < (sizeof (icmp6_type) /
+		for (i=0; i < (sizeof (icmp6_type) /
 		    sizeof(icmp6_type[0])); i++) {
-			if(type == icmp6_type[i].type)
+			if (type == icmp6_type[i].type)
 				 return (&icmp6_type[i]);
 		}
 	}
 	return (NULL);
 }
 
-struct icmptypeent *
+const struct icmptypeent *
 geticmptypebyname(char *w, u_int8_t af)
 {
-	unsigned i;
+	unsigned int i;
 
 	if (af != AF_INET6) {
-		for(i=0; i < (sizeof (icmp_type) / sizeof(icmp_type[0])); i++) {
-			if(!strcmp(w, icmp_type[i].name))
+		for (i=0; i < (sizeof (icmp_type) / sizeof(icmp_type[0])); i++) {
+			if (!strcmp(w, icmp_type[i].name))
 				return (&icmp_type[i]);
 		}
 	} else {
-		for(i=0; i < (sizeof (icmp6_type) /
+		for (i=0; i < (sizeof (icmp6_type) /
 		    sizeof(icmp6_type[0])); i++) {
-			if(!strcmp(w, icmp6_type[i].name))
+			if (!strcmp(w, icmp6_type[i].name))
 				return (&icmp6_type[i]);
 		}
 	}
 	return (NULL);
 }
 
-struct icmpcodeent *
+const struct icmpcodeent *
 geticmpcodebynumber(u_int8_t type, u_int8_t code, u_int8_t af)
 {
-	unsigned i;
+	unsigned int i;
 
 	if (af != AF_INET6) {
-		for(i=0; i < (sizeof (icmp_code) / sizeof(icmp_code[0])); i++) {
+		for (i=0; i < (sizeof (icmp_code) / sizeof(icmp_code[0])); i++) {
 			if (type == icmp_code[i].type &&
 			    code == icmp_code[i].code)
 				return (&icmp_code[i]);
 		}
 	} else {
-		for(i=0; i < (sizeof (icmp6_code) /
+		for (i=0; i < (sizeof (icmp6_code) /
 		   sizeof(icmp6_code[0])); i++) {
 			if (type == icmp6_code[i].type &&
 			    code == icmp6_code[i].code)
@@ -232,19 +250,19 @@ geticmpcodebynumber(u_int8_t type, u_int8_t code, u_int8_t af)
 	return (NULL);
 }
 
-struct icmpcodeent *
+const struct icmpcodeent *
 geticmpcodebyname(u_long type, char *w, u_int8_t af)
 {
-	unsigned i;
+	unsigned int i;
 
 	if (af != AF_INET6) {
-		for(i=0; i < (sizeof (icmp_code) / sizeof(icmp_code[0])); i++) {
+		for (i=0; i < (sizeof (icmp_code) / sizeof(icmp_code[0])); i++) {
 			if (type == icmp_code[i].type &&
 			    !strcmp(w, icmp_code[i].name))
 				return (&icmp_code[i]);
 		}
 	} else {
-		for(i=0; i < (sizeof (icmp6_code) /
+		for (i=0; i < (sizeof (icmp6_code) /
 		    sizeof(icmp6_code[0])); i++) {
 			if (type == icmp6_code[i].type &&
 			    !strcmp(w, icmp6_code[i].name))
@@ -254,120 +272,70 @@ geticmpcodebyname(u_long type, char *w, u_int8_t af)
 	return (NULL);
 }
 
-int
-unmask(struct pf_addr *m, u_int8_t af)
-{
-	int i = 31, j = 0, b = 0, msize;
-	u_int32_t tmp;
-
-	if (af == AF_INET)
-		msize = 1;
-	else
-		msize = 4;
-	while (j < msize && m->addr32[j] == 0xffffffff) {
-			b += 32;	
-			j++;
-	}
-	if (j < msize) {
-		tmp = ntohl(m->addr32[j]);
-		for (i = 31; tmp & (1 << i); --i)
-			b++;
-	}
-	return (b);
-}
-
 void
-print_addr(struct pf_addr *addr, struct pf_addr *mask, u_int8_t af)
+print_op(u_int8_t op, const char *a1, const char *a2)
 {
-	char buf[48];
-
-	if (inet_ntop(af, addr, buf, sizeof(buf)) == NULL)
-		printf("?");
-	else
-		printf("%s", buf);
-	if (mask != NULL) {
-		if (!PF_AZERO(mask, af))
-			printf("/%u", unmask(mask, af));
-	} 
-}
-
-void
-print_name(struct pf_addr *addr, struct pf_addr *mask, int af)
-{
-	char buf[48];
-	struct hostent *hp;
-
-	if (inet_ntop(af, addr, buf, sizeof(buf)) == NULL)
-		printf("?");
-	else {
-		hp = getpfhostname(buf); 
-		printf("%s", hp->h_name);
-	}
-	if (mask != NULL) {
-		if (!PF_AZERO(mask, af))
-			printf("/%u", unmask(mask, af));
-	}
-}
-
-void
-print_host(struct pf_state_host *h, u_int8_t af, int opts)
-{
-	u_int16_t p = ntohs(h->port);
-
-	if (opts & PF_OPT_USEDNS)
-		print_name(&h->addr, NULL, af);
-	else
-		print_addr(&h->addr, NULL, af);
-
-	if (p) {
-		if (af == AF_INET)
-			printf(":%u", p);
-		else
-			printf("[%u]", p);
-	}
-}
-		
-
-void
-print_seq(struct pf_state_peer *p)
-{
-	if (p->seqdiff)
-		printf("[%u + %u](+%u)", p->seqlo, p->seqhi - p->seqlo,
-		    p->seqdiff);
-	else
-		printf("[%u + %u]", p->seqlo, p->seqhi - p->seqlo);
+	if (op == PF_OP_IRG)
+		printf("%s >< %s ", a1, a2);
+	else if (op == PF_OP_XRG)
+		printf("%s <> %s ", a1, a2);
+	else if (op == PF_OP_EQ)
+		printf("= %s ", a1);
+	else if (op == PF_OP_NE)
+		printf("!= %s ", a1);
+	else if (op == PF_OP_LT)
+		printf("< %s ", a1);
+	else if (op == PF_OP_LE)
+		printf("<= %s ", a1);
+	else if (op == PF_OP_GT)
+		printf("> %s ", a1);
+	else if (op == PF_OP_GE)
+		printf(">= %s ", a1);
 }
 
 void
 print_port(u_int8_t op, u_int16_t p1, u_int16_t p2, char *proto)
 {
+	char a1[6], a2[6];
 	struct servent *s = getservbyport(p1, proto);
 
 	p1 = ntohs(p1);
 	p2 = ntohs(p2);
+	snprintf(a1, sizeof(a1), "%u", p1);
+	snprintf(a2, sizeof(a2), "%u", p2);
 	printf("port ");
-	if (op == PF_OP_IRG)
-		printf("%u >< %u ", p1, p2);
-	else if (op == PF_OP_XRG)
-		printf("%u <> %u ", p1, p2);
-	else if (op == PF_OP_EQ) {
-		if (s != NULL)
-			printf("= %s ", s->s_name);
-		else
-			printf("= %u ", p1);
-	} else if (op == PF_OP_NE) {
-		if (s != NULL)
-			printf("!= %s ", s->s_name);
-		else
-			printf("!= %u ", p1);
-	} else if (op == PF_OP_LT)
-		printf("< %u ", p1);
-	else if (op == PF_OP_LE)
-		printf("<= %u ", p1);
-	else if (op == PF_OP_GT)
-		printf("> %u ", p1);
-	else if (op == PF_OP_GE)
-		printf(">= %u ", p1);
+	if (s != NULL && (op == PF_OP_EQ || op == PF_OP_NE))
+		print_op(op, s->s_name, a2);
+	else
+		print_op(op, a1, a2);
+}
+
+void
+print_uid(u_int8_t op, uid_t u1, uid_t u2, const char *t)
+{
+	char a1[11], a2[11];
+
+	snprintf(a1, sizeof(a1), "%u", u1);
+	snprintf(a2, sizeof(a2), "%u", u2);
+	printf("%s ", t);
+	if (u1 == UID_MAX && (op == PF_OP_EQ || op == PF_OP_NE))
+		print_op(op, "unknown", a2);
+	else
+		print_op(op, a1, a2);
+}
+
+void
+print_gid(u_int8_t op, gid_t g1, gid_t g2, const char *t)
+{
+	char a1[11], a2[11];
+
+	snprintf(a1, sizeof(a1), "%u", g1);
+	snprintf(a2, sizeof(a2), "%u", g2);
+	printf("%s ", t);
+	if (g1 == GID_MAX && (op == PF_OP_EQ || op == PF_OP_NE))
+		print_op(op, "unknown", a2);
+	else
+		print_op(op, a1, a2);
 }
 
 void
@@ -375,9 +343,56 @@ print_flags(u_int8_t f)
 {
 	int i;
 
-	for (i = 0; i < 6; ++i)
+	for (i = 0; tcpflags[i]; ++i)
 		if (f & (1 << i))
 			printf("%c", tcpflags[i]);
+}
+
+void
+print_fromto(struct pf_rule_addr *src, struct pf_rule_addr *dst,
+    u_int8_t af, u_int8_t proto)
+{
+	if (PF_AZERO(&src->addr.addr, AF_INET6) &&
+	    PF_AZERO(&src->mask, AF_INET6) &&
+	    !src->noroute && !dst->noroute &&
+	    !src->port_op && PF_AZERO(&dst->addr.addr, AF_INET6) &&
+	    PF_AZERO(&dst->mask, AF_INET6) && !dst->port_op)
+		printf("all ");
+	else {
+		printf("from ");
+		if (src->noroute)
+			printf("no-route ");
+		else if (PF_AZERO(&src->addr.addr, AF_INET6) &&
+		    PF_AZERO(&src->mask, AF_INET6))
+			printf("any ");
+		else {
+			if (src->not)
+				printf("! ");
+			print_addr(&src->addr, &src->mask, af);
+			printf(" ");
+		}
+		if (src->port_op)
+			print_port(src->port_op, src->port[0],
+			    src->port[1],
+			    proto == IPPROTO_TCP ? "tcp" : "udp");
+
+		printf("to ");
+		if (dst->noroute)
+			printf("no-route ");
+		else if (PF_AZERO(&dst->addr.addr, AF_INET6) &&
+		    PF_AZERO(&dst->mask, AF_INET6))
+			printf("any ");
+		else {
+			if (dst->not)
+				printf("! ");
+			print_addr(&dst->addr, &dst->mask, af);
+			printf(" ");
+		}
+		if (dst->port_op)
+			print_port(dst->port_op, dst->port[0],
+			    dst->port[1],
+			    proto == IPPROTO_TCP ? "tcp" : "udp");
+	}
 }
 
 void
@@ -392,32 +407,32 @@ print_nat(struct pf_nat *n)
 			printf("! ");
 		printf("%s ", n->ifname);
 	}
+	if (n->af) {
+		if (n->af == AF_INET)
+			printf("inet ");
+		else
+			printf("inet6 ");
+	}
 	if (n->proto) {
 		struct protoent *p = getprotobynumber(n->proto);
+
 		if (p != NULL)
 			printf("proto %s ", p->p_name);
 		else
 			printf("proto %u ", n->proto);
 	}
-	printf("from ");
-	if (!PF_AZERO(&n->saddr, n->af) || !PF_AZERO(&n->smask, n->af)) {
-		if (n->snot)
-			printf("! ");
-		print_addr(&n->saddr, &n->smask, n->af);
-		printf(" ");
-	} else
-		printf("any ");
-	printf("to ");
-	if (!PF_AZERO(&n->daddr, n->af) || !PF_AZERO(&n->dmask, n->af)) {
-		if (n->dnot)
-			printf("! ");
-		print_addr(&n->daddr, &n->dmask, n->af);
-		printf(" ");
-	} else
-		printf("any ");
+	print_fromto(&n->src, &n->dst, n->af, n->proto);
 	if (!n->no) {
 		printf("-> ");
 		print_addr(&n->raddr, NULL, n->af);
+		if (n->proxy_port[0] != PF_NAT_PROXY_PORT_LOW ||
+		    n->proxy_port[1] != PF_NAT_PROXY_PORT_HIGH) {
+			if (n->proxy_port[0] == n->proxy_port[1])
+				printf(" port %u", n->proxy_port[0]);
+			else
+				printf(" port %u:%u", n->proxy_port[0],
+				    n->proxy_port[1]);
+		}
 	}
 	printf("\n");
 }
@@ -432,8 +447,15 @@ print_binat(struct pf_binat *b)
 		printf("on ");
 		printf("%s ", b->ifname);
 	}
+	if (b->af) {
+		if (b->af == AF_INET)
+			printf("inet ");
+		else
+			printf("inet6 ");
+	}
 	if (b->proto) {
 		struct protoent *p = getprotobynumber(b->proto);
+
 		if (p != NULL)
 			printf("proto %s ", p->p_name);
 		else
@@ -443,7 +465,7 @@ print_binat(struct pf_binat *b)
 	print_addr(&b->saddr, NULL, b->af);
 	printf(" ");
 	printf("to ");
-	if (!PF_AZERO(&b->daddr, b->af) || !PF_AZERO(&b->dmask, b->af)) {
+	if (!PF_AZERO(&b->daddr.addr, b->af) || !PF_AZERO(&b->dmask, b->af)) {
 		if (b->dnot)
 			printf("! ");
 		print_addr(&b->daddr, &b->dmask, b->af);
@@ -451,7 +473,7 @@ print_binat(struct pf_binat *b)
 	} else
 		printf("any ");
 	if (!b->no) {
-	 	printf("-> ");
+		printf("-> ");
 		print_addr(&b->raddr, NULL, b->af);
 	}
 	printf("\n");
@@ -469,15 +491,22 @@ print_rdr(struct pf_rdr *r)
 			printf("! ");
 		printf("%s ", r->ifname);
 	}
+	if (r->af) {
+		if (r->af == AF_INET)
+			printf("inet ");
+		else
+			printf("inet6 ");
+	}
 	if (r->proto) {
 		struct protoent *p = getprotobynumber(r->proto);
+
 		if (p != NULL)
 			printf("proto %s ", p->p_name);
 		else
 			printf("proto %u ", r->proto);
 	}
 	printf("from ");
-	if (!PF_AZERO(&r->saddr, r->af) || !PF_AZERO(&r->smask, r->af)) {
+	if (!PF_AZERO(&r->saddr.addr, r->af) || !PF_AZERO(&r->smask, r->af)) {
 		if (r->snot)
 			printf("! ");
 		print_addr(&r->saddr, &r->smask, r->af);
@@ -485,7 +514,7 @@ print_rdr(struct pf_rdr *r)
 	} else
 		printf("any ");
 	printf("to ");
-	if (!PF_AZERO(&r->daddr, r->af) || !PF_AZERO(&r->dmask, r->af)) {
+	if (!PF_AZERO(&r->daddr.addr, r->af) || !PF_AZERO(&r->dmask, r->af)) {
 		if (r->dnot)
 			printf("! ");
 		print_addr(&r->daddr, &r->dmask, r->af);
@@ -516,133 +545,100 @@ char *pf_fcounters[FCNT_MAX+1] = FCNT_NAMES;
 void
 print_status(struct pf_status *s)
 {
-
-	time_t t = time(NULL);
+	time_t runtime;
 	int i;
+	char statline[80];
 
-	printf("Status: %s  Time: %u  Since: %u  Debug: ",
-	    s->running ? "Enabled" : "Disabled",
-	    t, s->since);
+	runtime = time(NULL) - s->since;
+
+	if (s->running) {
+		unsigned sec, min, hrs, day = runtime;
+
+		sec = day % 60;
+		day /= 60;
+		min = day % 60;
+		day /= 60;
+		hrs = day % 24;
+		day /= 24;
+		snprintf(statline, sizeof(statline),
+		    "Status: Enabled for %u days %.2u:%.2u:%.2u",
+		    day, hrs, min, sec);
+	} else
+		snprintf(statline, sizeof(statline), "Status: Disabled");
+	printf("%-44s", statline);
 	switch (s->debug) {
-		case 0:
-			printf("None");
-			break;
-		case 1:
-			printf("Urgent");
-			break;
-		case 2:
-			printf("Misc");
-			break;
+	case 0:
+		printf("%15s\n\n", "Debug: None");
+		break;
+	case 1:
+		printf("%15s\n\n", "Debug: Urgent");
+		break;
+	case 2:
+		printf("%15s\n\n", "Debug: Misc");
+		break;
 	}
-	printf("\nBytes In IPv4: %-10llu  Bytes Out: %-10llu\n",
-	    s->bcounters[0][PF_IN], s->bcounters[0][PF_OUT]);
-	printf("         IPv6: %-10llu  Bytes Out: %-10llu\n",
-	    s->bcounters[1][PF_IN], s->bcounters[1][PF_OUT]);
-	printf("Inbound Packets IPv4:  Passed: %-10llu  Dropped: %-10llu\n",
-	    s->pcounters[0][PF_IN][PF_PASS],
-	    s->pcounters[0][PF_IN][PF_DROP]);
-	printf("                IPv6:  Passed: %-10llu  Dropped: %-10llu\n",
-	    s->pcounters[1][PF_IN][PF_PASS],
-	    s->pcounters[1][PF_IN][PF_DROP]);
-	printf("Outbound Packets IPv4: Passed: %-10llu  Dropped: %-10llu\n",
-	    s->pcounters[0][PF_OUT][PF_PASS],
-	    s->pcounters[0][PF_OUT][PF_DROP]);
-	printf("                 IPv6: Passed: %-10llu  Dropped: %-10llu\n",
-	    s->pcounters[1][PF_OUT][PF_PASS],
-	    s->pcounters[1][PF_OUT][PF_DROP]);
-	printf("States: %u\n", s->states);
-	printf("pf Counters\n");
-	for (i = 0; i < FCNT_MAX; i++)
-		printf("%-25s %-8lld\n", pf_fcounters[i],
-		    s->fcounters[i]);
-	printf("Counters\n");
-	for (i = 0; i < PFRES_MAX; i++)
-		printf("%-25s %-8lld\n", pf_reasons[i],
-		    s->counters[i]);
-}
-
-void
-print_state(struct pf_state *s, int opts)
-{
-	struct pf_state_peer *src, *dst;
-	struct protoent *p;
-	u_int8_t hrs, min, sec;
-
-	if (s->direction == PF_OUT) {
-		src = &s->src;
-		dst = &s->dst;
-	} else {
-		src = &s->dst;
-		dst = &s->src;
+	if (s->ifname[0] != 0) {
+		printf("Interface Stats for %-16s %5s %16s\n",
+		    s->ifname, "IPv4", "IPv6");
+		printf("  %-25s %14llu %16llu\n", "Bytes In",
+		    s->bcounters[0][PF_IN], s->bcounters[1][PF_IN]);
+		printf("  %-25s %14llu %16llu\n", "Bytes Out",
+		    s->bcounters[0][PF_OUT], s->bcounters[1][PF_OUT]);
+		printf("  Packets In\n");
+		printf("    %-23s %14llu %16llu\n", "Passed",
+		    s->pcounters[0][PF_IN][PF_PASS],
+		    s->pcounters[1][PF_IN][PF_PASS]);
+		printf("    %-23s %14llu %16llu\n", "Blocked",
+		    s->pcounters[0][PF_IN][PF_DROP],
+		    s->pcounters[1][PF_IN][PF_DROP]);
+		printf("  Packets Out\n");
+		printf("    %-23s %14llu %16llu\n", "Passed",
+		    s->pcounters[0][PF_OUT][PF_PASS],
+		    s->pcounters[1][PF_OUT][PF_PASS]);
+		printf("    %-23s %14llu %16llu\n\n", "Blocked",
+		    s->pcounters[0][PF_OUT][PF_DROP],
+		    s->pcounters[1][PF_OUT][PF_DROP]);
 	}
-	if ((p = getprotobynumber(s->proto)) != NULL)
-		printf("%s ", p->p_name);
-	else
-		printf("%u ", s->proto);
-	if (PF_ANEQ(&s->lan.addr, &s->gwy.addr, s->af) ||
-	    (s->lan.port != s->gwy.port)) {
-		print_host(&s->lan, s->af, opts);
-		if (s->direction == PF_OUT)
-			printf(" -> ");
+	printf("%-27s %14s %16s\n", "State Table", "Total", "Rate");
+	printf("  %-25s %14u %14s\n", "current entries", s->states, "");
+	for (i = 0; i < FCNT_MAX; i++) {
+		printf("  %-25s %14lld ", pf_fcounters[i],
+			    s->fcounters[i]);
+		if (runtime > 0)
+			printf("%14.1f/s\n",
+			    (double)s->fcounters[i] / (double)runtime);
 		else
-			printf(" <- ");
+			printf("%14s\n", "");
 	}
-	print_host(&s->gwy, s->af, opts);
-	if (s->direction == PF_OUT)
-		printf(" -> ");
-	else
-		printf(" <- ");
-	print_host(&s->ext, s->af, opts);
-
-	printf("    ");
-	if (s->proto == IPPROTO_TCP) {
-		if (src->state <= TCPS_TIME_WAIT &&
-		    dst->state <= TCPS_TIME_WAIT) {
-			printf("   %s:%s\n", tcpstates[src->state],
-			    tcpstates[dst->state]);
-		} else {
-			printf("   <BAD STATE LEVELS>\n");
-		}
-		if (opts & PF_OPT_VERBOSE) {
-			printf("   ");
-			print_seq(src);
-			printf("  ");
-			print_seq(dst);
-			printf("\n");
-		}
-	} else {
-		printf("   %u:%u\n", src->state, dst->state);
-	}
-
-	if (opts & PF_OPT_VERBOSE) {
-		sec = s->creation % 60;
-		s->creation /= 60;
-		min = s->creation % 60;
-		s->creation /= 60;
-		hrs = s->creation;
-		printf("   age %.2u:%.2u:%.2u", hrs, min, sec);
-		sec = s->expire % 60;
-		s->expire /= 60;
-		min = s->expire % 60;
-		s->expire /= 60;
-		hrs = s->expire;
-		printf(", expires in %.2u:%.2u:%.2u", hrs, min, sec);
-		printf(", %u pkts, %u bytes\n", s->packets, s->bytes);
+	printf("Counters\n");
+	for (i = 0; i < PFRES_MAX; i++) {
+		printf("  %-25s %14lld ", pf_reasons[i],
+		    s->counters[i]);
+		if (runtime > 0)
+			printf("%14.1f/s\n",
+			    (double)s->counters[i] / (double)runtime);
+		else
+			printf("%14s\n", "");
 	}
 }
 
 void
 print_rule(struct pf_rule *r)
 {
+	int i, opts;
+
 	printf("@%d ", r->nr);
 	if (r->action == PF_PASS)
 		printf("pass ");
 	else if (r->action == PF_DROP) {
 		printf("block ");
-		if (r->rule_flag & PFRULE_RETURNRST)
-			printf("return-rst ");
-		else if (r->return_icmp) {
-			struct icmpcodeent *ic;
+		if (r->rule_flag & PFRULE_RETURNRST) {
+			if (!r->return_ttl)
+				printf("return-rst ");
+			else
+				printf("return-rst(ttl %d) ", r->return_ttl);
+		} else if (r->return_icmp) {
+			const struct icmpcodeent *ic;
 
 			if (r->af != AF_INET6)
 				printf("return-icmp");
@@ -661,8 +657,9 @@ print_rule(struct pf_rule *r)
 			else
 				printf(" ");
 		}
-	} else
+	} else {
 		printf("scrub ");
+	}
 	if (r->direction == 0)
 		printf("in ");
 	else
@@ -673,8 +670,12 @@ print_rule(struct pf_rule *r)
 		printf("log-all ");
 	if (r->quick)
 		printf("quick ");
-	if (r->ifname[0])
-		printf("on %s ", r->ifname);
+	if (r->ifname[0]) {
+		if (r->ifnot)
+			printf("on ! %s ", r->ifname);
+		else
+			printf("on %s ", r->ifname);
+	}
 	if (r->rt) {
 		if (r->rt == PF_ROUTETO)
 			printf("route-to ");
@@ -682,68 +683,37 @@ print_rule(struct pf_rule *r)
 			printf("dup-to ");
 		else if (r->rt == PF_FASTROUTE)
 			printf("fastroute");
-		if (r->rt_ifname[0])
-			printf("%s", r->rt_ifname);
 		if (r->af && !PF_AZERO(&r->rt_addr, r->af)) {
-			printf(":");
-			print_addr(&r->rt_addr, NULL, r->af);
-		}
+			struct pf_addr_wrap aw;
+
+			printf("(%s ", r->rt_ifname);
+			aw.addr = r->rt_addr;
+			aw.addr_dyn = NULL;
+			print_addr(&aw, NULL, r->af);
+			printf(")");
+		} else if (r->rt_ifname[0])
+			printf("%s", r->rt_ifname);
 		printf(" ");
 	}
 	if (r->af) {
-		if (r->af == AF_INET) 
+		if (r->af == AF_INET)
 			printf("inet ");
 		else
 			printf("inet6 ");
 	}
 	if (r->proto) {
 		struct protoent *p = getprotobynumber(r->proto);
+
 		if (p != NULL)
 			printf("proto %s ", p->p_name);
 		else
 			printf("proto %u ", r->proto);
 	}
-	if (PF_AZERO(&r->src.addr, AF_INET6) &&
-	    PF_AZERO(&r->src.mask, AF_INET6) &&
-	    !r->src.noroute && !r->dst.noroute &&
-	    !r->src.port_op && PF_AZERO(&r->dst.addr, AF_INET6) &&
-	    PF_AZERO(&r->dst.mask, AF_INET6) && !r->dst.port_op)
-		printf("all ");
-	else {
-		printf("from ");
-		if (r->src.noroute)
-			printf("no-route ");
-		else if (PF_AZERO(&r->src.addr, AF_INET6) &&
-		    PF_AZERO(&r->src.mask, AF_INET6))
-			printf("any ");
-		else {
-			if (r->src.not)
-				printf("! ");
-			print_addr(&r->src.addr, &r->src.mask, r->af);
-			printf(" ");
-		}
-		if (r->src.port_op)
-			print_port(r->src.port_op, r->src.port[0],
-			    r->src.port[1],
-			    r->proto == IPPROTO_TCP ? "tcp" : "udp");
-
-		printf("to ");
-		if (r->dst.noroute)
-			printf("no-route ");
-		else if (PF_AZERO(&r->dst.addr, AF_INET6) &&
-		    PF_AZERO(&r->dst.mask, AF_INET6))
-			printf("any ");
-		else {
-			if (r->dst.not)
-				printf("! ");
-			print_addr(&r->dst.addr, &r->dst.mask, r->af);
-			printf(" ");
-		}
-		if (r->dst.port_op)
-			print_port(r->dst.port_op, r->dst.port[0],
-			    r->dst.port[1],
-			    r->proto == IPPROTO_TCP ? "tcp" : "udp");
-	}
+	print_fromto(&r->src, &r->dst, r->af, r->proto);
+	if (r->uid.op)
+		print_uid(r->uid.op, r->uid.uid[0], r->uid.uid[1], "user");
+	if (r->gid.op)
+		print_gid(r->gid.op, r->gid.gid[0], r->gid.gid[1], "group");
 	if (r->flags || r->flagset) {
 		printf("flags ");
 		print_flags(r->flags);
@@ -752,7 +722,7 @@ print_rule(struct pf_rule *r)
 		printf(" ");
 	}
 	if (r->type) {
-		struct icmptypeent *p;
+		const struct icmptypeent *p;
 
 		p = geticmptypebynumber(r->type-1, r->af);
 		if (r->af != AF_INET6)
@@ -764,7 +734,7 @@ print_rule(struct pf_rule *r)
 		else
 			printf(" %u ", r->type-1);
 		if (r->code) {
-			struct icmpcodeent *p;
+			const struct icmpcodeent *p;
 
 			p = geticmpcodebynumber(r->type-1, r->code-1, r->af);
 			if (p != NULL)
@@ -777,12 +747,46 @@ print_rule(struct pf_rule *r)
 		printf("keep state ");
 	else if (r->keep_state == PF_STATE_MODULATE)
 		printf("modulate state ");
+	opts = 0;
+	if (r->max_states)
+		opts = 1;
+	for (i = 0; !opts && i < PFTM_MAX; ++i)
+		if (r->timeout[i])
+			opts = 1;
+	if (opts) {
+		printf("(");
+		if (r->max_states) {
+			printf("max %u", r->max_states);
+			opts = 0;
+		}
+		for (i = 0; i < PFTM_MAX; ++i)
+			if (r->timeout[i]) {
+				if (!opts)
+					printf(", ");
+				opts = 0;
+				printf("%s %u", pf_timeouts[i].name,
+				    r->timeout[i]);
+			}
+		printf(") ");
+	}
+	if (r->rule_flag & PFRULE_FRAGMENT)
+		printf("fragment ");
 	if (r->rule_flag & PFRULE_NODF)
 		printf("no-df ");
 	if (r->min_ttl)
 		printf("min-ttl %d ", r->min_ttl);
+	if (r->max_mss)
+		printf("max-mss %d ", r->max_mss);
 	if (r->allow_opts)
 		printf("allow-opts ");
+	if (r->action == PF_SCRUB) {
+		if (r->rule_flag & PFRULE_FRAGDROP)
+			printf("fragment drop-ovl ");
+		else if (r->rule_flag & PFRULE_FRAGCROP)
+			printf("fragment crop ");
+		else
+			printf("fragment reassemble ");
+	}
 	if (r->label[0])
 		printf("label %s", r->label);
 
@@ -801,26 +805,5 @@ parse_flags(char *s)
 		else
 			f |= 1 << (q - tcpflags);
 	}
-	return (f ? f : 63);
-}
-
-struct hostent *
-getpfhostname(const char *addr_str)
-{
-	unsigned long		 addr_num;
-	struct hostent		*hp;
-	static struct hostent	 myhp;
-
-	addr_num = inet_addr(addr_str);
-	if (addr_num == INADDR_NONE) {
-		myhp.h_name = (char *)addr_str;
-		hp = &myhp;
-		return (hp);
-	}
-	hp = gethostbyaddr((char *)&addr_num, sizeof(addr_num), AF_INET);
-	if (hp == NULL) {
-		myhp.h_name = (char *)addr_str;
-		hp = &myhp;
-	}
-	return (hp);
+	return (f ? f : PF_TH_ALL);
 }

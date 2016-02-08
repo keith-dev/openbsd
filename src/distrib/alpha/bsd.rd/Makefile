@@ -1,10 +1,9 @@
-#	$OpenBSD: Makefile,v 1.3 2001/09/18 17:35:00 jason Exp $
+#	$OpenBSD: Makefile,v 1.7 2002/06/09 05:53:53 todd Exp $
 
 TOP=		${.CURDIR}/..
 
 .include "${TOP}/Makefile.inc"
 IMAGE=		ramdisk${REV}.fs
-CRUNCHCONF?=    ${TOP}/common/${CBIN}.conf
 
 MOUNT_POINT=	/mnt
 
@@ -28,8 +27,9 @@ RDSETROOT=	elfrdsetroot
 
 .include "${TOP}/inst-common/Makefile.inc"
 
+LISTS+=		${.CURDIR}/list
+
 all: ${CBIN} bsd.rd
-	@echo "all done"
 
 DISKTYPE=       rdroot
 NBLKS=          5744
@@ -57,9 +57,6 @@ bsd:
 ${IMAGE}:	do_prep do_mount do_files do_umount
 	mv -f ${REALIMAGE} ${IMAGE}
 
-ecoffrdsetroot:	${TOP}/ecoffrdsetroot.c
-	${HOSTCC} ${HOSTCFLAGS} -o ecoffrdsetroot ${TOP}/ecoffrdsetroot.c
-
 elfrdsetroot: ${TOP}/../common/elfrdsetroot.c
 	${HOSTCC} ${HOSTCFLAGS} -o elfrdsetroot ${TOP}/../common/elfrdsetroot.c
 
@@ -71,7 +68,7 @@ do_prep:
 do_mount:
 	newfs ${NEWFSARGS} ${NEWFSARGS_RD} -s ${NBLKS} ${VND_RDEV}
 	mount ${VND_DEV} ${MOUNT_POINT}
- 
+
 do_umount:
 	@echo ""
 	@df -i ${MOUNT_POINT}

@@ -23,20 +23,21 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD$
+ * $OpenBSD: ncpaddr.c,v 1.6 2002/06/15 08:02:01 brian Exp $
  */
 
 #include <sys/types.h>
 #include <sys/socket.h>
+#ifdef __OpenBSD__
 #include <net/if_types.h>
 #include <net/route.h>
+#endif
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
 #include <netinet/ip.h>
 #include <arpa/inet.h>
 #include <sys/un.h>
 
-#include <limits.h>
 #include <netdb.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -52,11 +53,8 @@
 #include "iplist.h"
 #include "throughput.h"
 #include "mbuf.h"
-#include "ip.h"
 #include "ipcp.h"
-#include "filter.h"
 #include "descriptor.h"
-#include "route.h"
 #include "layer.h"
 #include "lqr.h"
 #include "hdlc.h"
@@ -64,12 +62,8 @@
 #include "ccp.h"
 #include "link.h"
 #include "mp.h"
-#ifndef NORADIUS
-#include "radius.h"
-#endif
 #include "ipv6cp.h"
 #include "ncp.h"
-#include "bundle.h"
 
 
 #define ncprange_ip4addr	u.ip4.ipaddr
@@ -411,7 +405,7 @@ ncpaddr_aton(struct ncpaddr *addr, struct ncp *ncp, const char *data)
 
   if (!ncprange_aton(&range, ncp, data))
     return 0;
-  
+
   if (range.ncprange_family == AF_INET && range.ncprange_ip4width != 32) {
     log_Printf(LogWARN, "ncpaddr_aton: %s: Only 32 bits allowed\n", data);
     return 0;

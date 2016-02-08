@@ -1,4 +1,4 @@
-/*	$OpenBSD: stdethers.c,v 1.4 2001/11/19 09:01:29 deraadt Exp $ */
+/*	$OpenBSD: stdethers.c,v 1.6 2002/07/19 20:59:40 deraadt Exp $ */
 
 /*
  * Copyright (c) 1995 Mats O Jansson <moj@stacken.kth.se>
@@ -32,7 +32,7 @@
  */
 
 #ifndef LINT
-static char rcsid[] = "$OpenBSD: stdethers.c,v 1.4 2001/11/19 09:01:29 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: stdethers.c,v 1.6 2002/07/19 20:59:40 deraadt Exp $";
 #endif
 
 #include <sys/types.h>
@@ -43,8 +43,6 @@ static char rcsid[] = "$OpenBSD: stdethers.c,v 1.4 2001/11/19 09:01:29 deraadt E
 #include <stdio.h>
 #include <string.h>
 #include <ctype.h>
-
-char *ProgramName = "stdethers";
 
 extern int   ether_line(char *, struct ether_addr *, char *);
 extern char *ether_ntoa(struct ether_addr *);
@@ -60,8 +58,7 @@ extern char *ether_ntoa(struct ether_addr *);
  */
 
 char *
-working_ntoa(e)
-	u_char	*e;
+working_ntoa(u_char *e)
 {
 	static char a[] = "xx:xx:xx:xx:xx:xx";
 
@@ -71,20 +68,20 @@ working_ntoa(e)
 }
 #endif
 
-static int read_line(fp, buf, size)
-FILE *fp;
-char *buf;
-int size;
+static int
+read_line(FILE *fp, char *buf, int size)
 {
 	int done = 0;
 
 	do {
 		while (fgets(buf, size, fp)) {
 			int len = strlen(buf);
+
 			done += len;
 			if (len > 1 && buf[len-2] == '\\' &&
 			    buf[len-1] == '\n') {
 				int ch;
+
 				buf += len - 2;
 				size -= len - 2;
 				*buf = '\n';
@@ -101,53 +98,52 @@ int size;
 				return done;
 		}
 	} while (size > 0 && !feof(fp));
-	return done;
+	return (done);
+}
+
+void
+usage(void)
+{
+	fprintf(stderr, "usage: stdethers [file]\n");
+	exit(1);
 }
 
 int
-main(argc, argv)
-	int argc;
-	char *argv[];
+main(int argc, char *argv[])
 {
 	FILE	*data_file;
 	char	 data_line[1024];
-	int	 usage = 0;
 	int	 line_no = 0;
 	int	 len;
 	char	*p, *k, *v;
 	struct ether_addr eth_addr;
 	char	 hostname[256];
-	
+
 	if (argc > 2)
-		usage++;
-	
-	if (usage) {
-		fprintf(stderr, "usage: %s [file]\n", ProgramName);
-		exit(1);
-	}
-	
+		usage();
+
 	if (argc == 2) {
 		data_file = fopen(argv[1], "r");
 		if (data_file == NULL) {
-			fprintf(stderr, "%s: can't open %s\n",
-			    ProgramName, argv[1]);
+			fprintf(stderr, "stdethers: can't open %s\n",
+			    argv[1]);
 			exit(1);
 		}
 	} else
 		data_file = stdin;
-	
+
 	while (read_line(data_file, data_line, sizeof(data_line))) {
 		line_no++;
 		len = strlen(data_line);
-		
+
 		if (len > 0) {
 			if (data_line[0] == '#')
 				continue;
 		}
-		
+
 		/*
 		 * Check if we have the whole line
-		 */ 
+		 */
 		if (data_line[len-1] != '\n') {
 			if (argc == 2) {
 				fprintf(stderr,
@@ -160,25 +156,25 @@ main(argc, argv)
 			}
 		} else
 			data_line[len-1] = '\0';
-		
+
 		p = (char *) &data_line;
-		
+
 		k  = p;				/* save start of key */
 		while (!isspace(*p))		/* find first "space" */
 			p++;
 		while (isspace(*p))		/* move over "space" */
 			p++;
-		
+
 		v = p;				/* save start of value */
-		while(*p != '\0')		/* find end of string */
+		while (*p != '\0')		/* find end of string */
 			p++;
-		
+
 		if (ether_line(data_line, &eth_addr, hostname) == 0) {
 			fprintf(stdout, "%s\t%s\n", NTOA(&eth_addr),
 			    hostname);
 		} else {
-			fprintf(stderr, "%s: ignoring line %d: \"%s\"\n",
-			    ProgramName, line_no, data_line);
+			fprintf(stderr, "stdethers: ignoring line %d: \"%s\"\n",
+			    line_no, data_line);
 		}
 	}
 	return(0);

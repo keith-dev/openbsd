@@ -1,12 +1,12 @@
-#	$OpenBSD: Makefile.inc,v 1.51 2002/02/22 21:06:01 drahn Exp $
+#	$OpenBSD: Makefile.inc,v 1.56 2002/08/05 22:42:12 art Exp $
 #	$NetBSD: Makefile.inc,v 1.35 1995/10/16 23:49:07 jtc Exp $
 #	@(#)Makefile.inc	8.1 (Berkeley) 6/17/93
 
 # sys sources
 .PATH: ${LIBCSRCDIR}/arch/${MACHINE_ARCH}/sys ${LIBCSRCDIR}/sys
 
-# for now, only i386 has usable weak aliases
-.if ${MACHINE_ARCH} != "i386"
+# for now, only arch's below have weak aliases enabled
+.if ${MACHINE_ARCH} != "i386" && ${ELF_TOOLCHAIN} != "yes"
 CFLAGS+=	-D_NO_WEAK_ALIASES
 .endif
 
@@ -49,7 +49,6 @@ ASM=	accept.o access.o acct.o adjtime.o bind.o chdir.o chflags.o chmod.o \
 	mkfifo.o mknod.o mlock.o mlockall.o \
 	mount.o mprotect.o msgctl.o msgget.o msgrcv.o msgsnd.o msync.o \
 	munlock.o munlockall.o munmap.o nanosleep.o nfssvc.o \
-	ntp_gettime.o ntp_adjtime.o \
 	open.o pathconf.o pipe.o poll.o profil.o quotactl.o \
 	read.o readlink.o readv.o reboot.o recvfrom.o recvmsg.o rename.o \
 	revoke.o rmdir.o select.o semget.o semop.o sendmsg.o sendto.o \

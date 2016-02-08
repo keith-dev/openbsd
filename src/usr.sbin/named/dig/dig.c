@@ -1,10 +1,10 @@
-/*	$OpenBSD: dig.c,v 1.5 1998/08/30 03:39:18 deraadt Exp $	*/
+/*	$OpenBSD: dig.c,v 1.7 2002/07/12 21:11:10 deraadt Exp $	*/
 
 #ifndef lint
 #if 0
 static char rcsid[] = "$From: dig.c,v 8.8 1996/05/21 07:32:40 vixie Exp $";
 #else
-static char rcsid[] = "$OpenBSD: dig.c,v 1.5 1998/08/30 03:39:18 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: dig.c,v 1.7 2002/07/12 21:11:10 deraadt Exp $";
 #endif
 #endif
 
@@ -392,7 +392,12 @@ main(argc, argv)
  * More cmd-line options than anyone should ever have to
  * deal with ....
  */
-		while (*(++argv) != NULL && **argv != '\0') { 
+		while (*(++argv) != NULL && **argv != '\0') {
+			if ((strlen(*argv) + 2) >
+			    (sizeof(cmd)/sizeof(char) - strlen(cmd))) {
+				fprintf(stderr, "Command line too long.\n");
+				exit(1);
+			}
 			strcat(cmd,*argv); strcat(cmd," ");
 			if (**argv == '@') {
 				srv = (*argv+1);
@@ -557,7 +562,7 @@ main(argc, argv)
  * try to resolve domain-name (if so, save and turn off print 
  * options, this domain-query is not the one we want. Restore
  * user options when done.
- * Things get a bit wierd since we need to use resolver to be
+ * Things get a bit weird since we need to use resolver to be
  * able to "put the resolver to work".
  */
 

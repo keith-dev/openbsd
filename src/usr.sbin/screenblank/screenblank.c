@@ -1,4 +1,4 @@
-/*	$OpenBSD: screenblank.c,v 1.12 2002/02/16 21:28:09 millert Exp $	*/
+/*	$OpenBSD: screenblank.c,v 1.14 2002/07/12 21:14:07 jason Exp $	*/
 /*	$NetBSD: screenblank.c,v 1.2 1996/02/28 01:18:34 thorpej Exp $	*/
 
 /*-
@@ -288,7 +288,7 @@ change_state(state, sig)
 				if (sig)
 					_exit(1);
 				else {
-					syslog(LOG_ERR, "open(%s): %m",
+					syslog(LOG_WARNING, "open(%s): %m",
 					    dsp->ds_path);
 					exit(1);
 				}
@@ -342,7 +342,7 @@ logpid()
 	FILE *fp;
 
 	if ((fp = fopen(_PATH_SCREENBLANKPID, "w")) != NULL) {
-		fprintf(fp, "%u\n", getpid());
+		fprintf(fp, "%ld\n", (long)getpid());
 		(void)fclose(fp);
 	}
 }

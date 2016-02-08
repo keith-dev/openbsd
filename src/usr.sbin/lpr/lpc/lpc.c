@@ -1,4 +1,5 @@
-/*	$OpenBSD: lpc.c,v 1.12 2002/02/16 21:28:03 millert Exp $	*/
+/*	$OpenBSD: lpc.c,v 1.15 2002/06/19 01:24:14 deraadt Exp $	*/
+/*	$NetBSD: lpc.c,v 1.11 2001/11/14 03:01:15 enami Exp $	*/
 
 /*
  * Copyright (c) 1983, 1993
@@ -44,7 +45,7 @@ static const char copyright[] =
 #if 0
 static const char sccsid[] = "@(#)lpc.c	8.3 (Berkeley) 4/28/95";
 #else
-static const char rcsid[] = "$OpenBSD: lpc.c,v 1.12 2002/02/16 21:28:03 millert Exp $";
+static const char rcsid[] = "$OpenBSD: lpc.c,v 1.15 2002/06/19 01:24:14 deraadt Exp $";
 #endif
 #endif /* not lint */
 
@@ -56,11 +57,12 @@ static const char rcsid[] = "$OpenBSD: lpc.c,v 1.12 2002/02/16 21:28:03 millert 
 #include <unistd.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <err.h>
 #include <errno.h>
 #include <ctype.h>
 #include <string.h>
 #include <grp.h>
-#include <sys/param.h>
+
 #include "lp.h"
 #include "lpc.h"
 #include "extern.h"
@@ -80,26 +82,25 @@ int	fromatty;
 char	cmdline[MAX_CMDLINE];
 int	margc;
 char	*margv[MAX_MARGV];
-uid_t	uid, euid;
 
-void		 cmdscanner(void);
-struct cmd	*getcmd(char *);
-void		 intr(int);
-void		 makeargv(void);
-int		 ingroup(char *);
+static void		 cmdscanner(void);
+static struct cmd	*getcmd(char *);
+static void		 intr(int);
+static void		 makeargv(void);
+static int		 ingroup(char *);
 
 int
-main(argc, argv)
-	int argc;
-	char *argv[];
+main(int argc, char **argv)
 {
 	struct cmd *c;
 
-	euid = geteuid();
-	uid = getuid();
-	seteuid(uid);
-	openlog("lpd", 0, LOG_LPR);
+	effective_uid = geteuid();
+	real_uid = getuid();
+	effective_gid = getegid();
+	real_gid = getgid();
+	PRIV_END;	/* be safe */
 
+	openlog("lpc", 0, LOG_LPR);
 	if (--argc > 0) {
 		c = getcmd(*++argv);
 		if (c == (struct cmd *)-1) {
@@ -110,7 +111,7 @@ main(argc, argv)
 			printf("?Invalid command\n");
 			exit(1);
 		}
-		if (c->c_priv && getuid() && ingroup(LPR_OPER) == 0) {
+		if (c->c_priv && real_uid && ingroup(LPR_OPER) == 0) {
 			printf("?Privileged command\n");
 			exit(1);
 		}
@@ -125,9 +126,8 @@ main(argc, argv)
 
 volatile sig_atomic_t gotintr;
 
-void
-intr(signo)
-	int signo;
+static void
+intr(int signo)
 {
 	if (!fromatty)
 		_exit(0);
@@ -137,7 +137,7 @@ intr(signo)
 /*
  * Command parser.
  */
-void
+static void
 cmdscanner(void)
 {
 	struct cmd *c;
@@ -183,9 +183,8 @@ cmdscanner(void)
 	}
 }
 
-struct cmd *
-getcmd(name)
-	char *name;
+static struct cmd *
+getcmd(char *name)
 {
 	char *p, *q;
 	struct cmd *c, *found;
@@ -194,7 +193,7 @@ getcmd(name)
 	longest = 0;
 	nmatches = 0;
 	found = 0;
-	for (c = cmdtab; (p = c->c_name); c++) {
+	for (c = cmdtab; (p = c->c_name) != NULL; c++) {
 		for (q = name; *q == *p++; q++)
 			if (*q == 0)		/* exact match? */
 				return(c);
@@ -215,8 +214,8 @@ getcmd(name)
 /*
  * Slice a string up into argc/argv.
  */
-void
-makeargv()
+static void
+makeargv(void)
 {
 	char *cp;
 	char **argp = margv;
@@ -240,22 +239,19 @@ makeargv()
 	*argp++ = 0;
 }
 
-#define HELPINDENT (sizeof ("directory"))
+#define HELPINDENT ((int)sizeof("directory"))
 
 /*
  * Help command.
  */
 void
-help(argc, argv)
-	int argc;
-	char *argv[];
+help(int argc, char **argv)
 {
 	struct cmd *c;
 
 	if (argc == 1) {
 		int i, j, w;
 		int columns, width = 0, lines;
-		extern int NCMDS;
 
 		printf("Commands may be abbreviated.  Commands are:\n\n");
 		for (c = cmdtab; c->c_name; c++) {
@@ -289,6 +285,7 @@ help(argc, argv)
 	}
 	while (--argc > 0) {
 		char *arg;
+
 		arg = *++argv;
 		c = getcmd(arg);
 		if (c == (struct cmd *)-1)
@@ -304,29 +301,25 @@ help(argc, argv)
 /*
  * return non-zero if the user is a member of the given group
  */
-int
-ingroup(grname)
-	char *grname;
+static int
+ingroup(char *grname)
 {
-	gid_t gid;
-	int i;
 	static struct group *gptr = NULL;
 	static gid_t groups[NGROUPS];
-	static int maxgroups;
+	static int ngroups;
+	gid_t gid;
+	int i;
 
 	if (gptr == NULL) {
 		if ((gptr = getgrnam(grname)) == NULL) {
-			fprintf(stderr, "Warning: unknown group '%s'\n",
-				grname);
+			warnx("Warning: unknown group `%s'", grname);
 			return(0);
 		}
-		if ((maxgroups = getgroups(NGROUPS, groups)) < 0) {
-			perror("getgroups");
-			exit(1);
-		}
+		if ((ngroups = getgroups(NGROUPS, groups)) < 0)
+			err(1, "getgroups");
 	}
 	gid = gptr->gr_gid;
-	for (i = 0; i < maxgroups; i++)
+	for (i = 0; i < ngroups; i++)
 		if (gid == groups[i])
 			return(1);
 	return(0);

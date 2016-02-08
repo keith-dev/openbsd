@@ -1,4 +1,4 @@
-/*	$OpenBSD: syscall.h,v 1.5 2002/03/17 00:22:04 art Exp $ */
+/*	$OpenBSD: syscall.h,v 1.9 2002/07/24 04:11:10 deraadt Exp $ */
 
 /*
  * Copyright (c) 2001 Niklas Hallqvist
@@ -34,9 +34,8 @@
 #ifndef __DL_SYSCALL_H__
 #define __DL_SYSCALL_H__
 
-#ifdef USE_CACHE
 #include <sys/stat.h>
-#endif
+#include <sys/syscall.h>
 
 #ifndef _dl_MAX_ERRNO
 #define _dl_MAX_ERRNO 4096
@@ -47,15 +46,22 @@
 int	_dl_close(int);
 int	_dl_exit(int);
 int	_dl_issetugid(void);
-long	_dl_mmap(void *, unsigned int, unsigned int, unsigned int, int, off_t);
-int	_dl_mprotect(const void *, int, int);
-int	_dl_munmap(const void*, unsigned int);
-int	_dl_open(const char*, unsigned int);
-int	_dl_read(int, const char*, int);
-#ifdef USE_CACHE
+void *	_dl_mmap(void *, size_t, int, int, int, off_t);
+int	_dl_mprotect(const void *, size_t, int);
+int	_dl_munmap(const void*, size_t);
+int	_dl_open(const char*, int);
+ssize_t	_dl_read(int, const char*, size_t);
 int	_dl_stat(const char *, struct stat *);
-#endif
-int	_dl_write(int, const char*, int);
+ssize_t	_dl_write(int, const char*, size_t);
+int	_dl_fstat(int, struct stat *);
+int	_dl_fcntl(int, int, ...);
+int	_dl_getdirentries(int, char*, int, long *);
+long	_dl__syscall(quad_t, ...);
 
-#include <elf_abi.h>
+static inline off_t
+_dl_lseek(int fildes, off_t offset, int whence)
+{
+        return _dl__syscall((quad_t)SYS_lseek, fildes, 0, offset, whence);
+}
+
 #endif /*__DL_SYSCALL_H__*/

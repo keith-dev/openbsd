@@ -1,4 +1,4 @@
-/*	$OpenBSD: token.c,v 1.6 2001/08/18 18:31:21 deraadt Exp $	*/
+/*	$OpenBSD: token.c,v 1.8 2002/07/16 12:38:40 jufi Exp $	*/
 
 /*-
  * Copyright (c) 1995 Migration Associates Corp. All Rights Reserved
@@ -115,16 +115,16 @@ tokenchallenge(char *user, char *challenge, int size, char *card_type)
 	    tokendb_getrec(user, &tr) == 0 &&
 	    (tr.mode & TOKEN_RIM)) {
 		c = 0;
-        	while ((r = tokendb_lockrec(user, &tr, TOKEN_LOCKED)) == 1) {
+		while ((r = tokendb_lockrec(user, &tr, TOKEN_LOCKED)) == 1) {
 			if (c++ >= 60)
 				break;
-                	sleep(1);
+			sleep(1);
 		}
 		tr.flags &= ~TOKEN_LOCKED;
 		if (r == 0 && tr.rim[0]) {
 			h2cb(tr.secret, &cb);
 			des_fixup_key_parity(&cb.cb);
-        		des_key_sched(&cb.cb, ks);
+			des_key_sched(&cb.cb, ks);
 			des_ecb_encrypt(&tr.rim, &cb.cb, ks, DES_ENCRYPT);
 			memcpy(tr.rim, cb.cb, 8);
 			for (r = 0; r < 8; ++r) {
@@ -274,7 +274,7 @@ tokenuserinit(int flags, char *username, unsigned char *usecret, unsigned mode)
 	des_fixup_key_parity(&secret.cb);
 
 	/*
-	 * Check if the db record already exists.  If no
+	 * Check if the db record already exists.  If there's no
 	 * force-init flag and it exists, go away. Else,
 	 * create the user's db record and put to the db.
 	 */
@@ -311,8 +311,7 @@ tokenuserinit(int flags, char *username, unsigned char *usecret, unsigned mode)
 	printf("Shared secret for %s\'s token: "
 	    "%03o %03o %03o %03o %03o %03o %03o %03o\n",
 	    username, secret.cb[0], secret.cb[1], secret.cb[2], secret.cb[3],
-	    secret.cb[4], secret.cb[5], secret.cb[6], secret.cb[7]); 
-
+	    secret.cb[4], secret.cb[5], secret.cb[6], secret.cb[7]);
 
 	des_key_sched(&secret.cb, key_schedule);
 	memset(&secret.ct, 0, sizeof(secret));

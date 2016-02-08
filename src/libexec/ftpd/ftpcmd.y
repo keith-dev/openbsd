@@ -1,4 +1,4 @@
-/*	$OpenBSD: ftpcmd.y,v 1.39 2002/02/19 17:58:24 mpech Exp $	*/
+/*	$OpenBSD: ftpcmd.y,v 1.41 2002/07/02 18:09:53 danh Exp $	*/
 /*	$NetBSD: ftpcmd.y,v 1.7 1996/04/08 19:03:11 jtc Exp $	*/
 
 /*
@@ -45,9 +45,10 @@
 
 #ifndef lint
 #if 0
-static char sccsid[] = "@(#)ftpcmd.y	8.3 (Berkeley) 4/6/94";
+static const char sccsid[] = "@(#)ftpcmd.y	8.3 (Berkeley) 4/6/94";
 #else
-static char rcsid[] = "$OpenBSD: ftpcmd.y,v 1.39 2002/02/19 17:58:24 mpech Exp $";
+static const char rcsid[] = 
+    "$OpenBSD: ftpcmd.y,v 1.41 2002/07/02 18:09:53 danh Exp $";
 #endif
 #endif /* not lint */
 
@@ -1187,7 +1188,6 @@ yylex()
 		switch (state) {
 
 		case CMD:
-			(void) signal(SIGALRM, toolong);
 			(void) alarm((unsigned) timeout);
 			if (getline(cbuf, sizeof(cbuf)-1, stdin) == NULL) {
 				reply(221, "You could at least say goodbye.");
