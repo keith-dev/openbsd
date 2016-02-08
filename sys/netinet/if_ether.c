@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ether.c,v 1.96 2012/10/18 00:36:22 deraadt Exp $	*/
+/*	$OpenBSD: if_ether.c,v 1.102 2013/07/04 08:22:19 mpi Exp $	*/
 /*	$NetBSD: if_ether.c,v 1.31 1996/05/11 12:59:58 mycroft Exp $	*/
 
 /*
@@ -47,9 +47,9 @@
 #include <sys/systm.h>
 #include <sys/mbuf.h>
 #include <sys/socket.h>
+#include <sys/timeout.h>
 #include <sys/kernel.h>
 #include <sys/syslog.h>
-#include <sys/proc.h>
 
 #include <net/if.h>
 #include <net/if_dl.h>
@@ -105,7 +105,6 @@ struct ifnet *revarp_ifp;
 #endif /* NFSCLIENT */
 
 #ifdef DDB
-#include <uvm/uvm_extern.h>
 
 void	db_print_sa(struct sockaddr *);
 void	db_print_ifa(struct ifaddr *);
@@ -126,8 +125,7 @@ arptimer(void *arg)
 
 	s = splsoftnet();
 	timeout_add_sec(to, arpt_prune);
-	for (la = LIST_FIRST(&llinfo_arp); la != LIST_END(&llinfo_arp);
-	    la = nla) {
+	for (la = LIST_FIRST(&llinfo_arp); la != NULL; la = nla) {
 		struct rtentry *rt = la->la_rt;
 
 		nla = LIST_NEXT(la, la_list);
@@ -297,7 +295,7 @@ arp_rtrequest(int req, struct rtentry *rt, struct rt_addrinfo *info)
 			 */
 			ifa = &ia->ia_ifa;
 			if (ifa != rt->rt_ifa) {
-				IFAFREE(rt->rt_ifa);
+				ifafree(rt->rt_ifa);
 				ifa->ifa_refcnt++;
 				rt->rt_ifa = ifa;
 			}
@@ -830,7 +828,7 @@ arplookup(u_int32_t addr, int create, int proxy, u_int tableid)
 	sin.sin_family = AF_INET;
 	sin.sin_addr.s_addr = addr;
 	sin.sin_other = proxy ? SIN_PROXY : 0;
-	rt = rtalloc1(sintosa(&sin), create, tableid);
+	rt = rtalloc1((struct sockaddr *)&sin, create, tableid);
 	if (rt == 0)
 		return (0);
 	rt->rt_refcnt--;
@@ -853,6 +851,35 @@ arplookup(u_int32_t addr, int create, int proxy, u_int tableid)
 		return (0);
 	}
 	return ((struct llinfo_arp *)rt->rt_llinfo);
+}
+
+/*
+ * Check whether we do proxy ARP for this address and we point to ourselves.
+ */
+int
+arpproxy(struct in_addr in, u_int rdomain)
+{
+	struct llinfo_arp *la;
+	struct ifnet *ifp;
+	int found = 0;
+
+	la = arplookup(in.s_addr, 0, SIN_PROXY, rdomain);
+	if (la == NULL)
+		return (0);
+
+	TAILQ_FOREACH(ifp, &ifnet, if_list) {
+		if (ifp->if_rdomain != rdomain)
+			continue;
+
+		if (!bcmp(LLADDR((struct sockaddr_dl *)la->la_rt->rt_gateway),
+		    LLADDR((struct sockaddr_dl *)ifp->if_lladdr->ifa_addr),
+		    ETHER_ADDR_LEN)) {
+		    	found = 1;
+		    	break;
+		}
+	}
+
+	return (found);
 }
 
 void

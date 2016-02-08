@@ -1,4 +1,4 @@
-/*	$OpenBSD: rtsx.c,v 1.2 2012/12/07 22:18:56 stsp Exp $	*/
+/*	$OpenBSD: rtsx.c,v 1.4 2013/05/31 21:28:31 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2006 Uwe Stuehler <uwe@openbsd.org>
@@ -215,16 +215,20 @@ rtsx_init(struct rtsx_softc *sc, int attaching)
 {
 	u_int32_t status;
 
-	/* Enable interrupts. */
-	WRITE4(sc, RTSX_BIER,
-	    RTSX_TRANS_OK_INT_EN | RTSX_TRANS_FAIL_INT_EN | RTSX_SD_INT_EN);
-
 	/* Enable interrupt write-clear (default is read-clear). */
 	RTSX_CLR(sc, RTSX_NFTS_TX_CTRL, RTSX_INT_READ_CLR);
 
 	/* Clear any pending interrupts. */
 	status = READ4(sc, RTSX_BIPR);
 	WRITE4(sc, RTSX_BIPR, status);
+
+	/* Check for cards already inserted at attach time. */
+	if (attaching && (status & RTSX_SD_EXIST))
+		sc->flags |= RTSX_F_CARD_PRESENT;
+
+	/* Enable interrupts. */
+	WRITE4(sc, RTSX_BIER,
+	    RTSX_TRANS_OK_INT_EN | RTSX_TRANS_FAIL_INT_EN | RTSX_SD_INT_EN);
 
 	/* Power on SSC clock. */
 	RTSX_CLR(sc, RTSX_FPDCTL, RTSX_SSC_POWER_DOWN);
@@ -268,10 +272,6 @@ rtsx_init(struct rtsx_softc *sc, int attaching)
 	RTSX_WRITE(sc, RTSX_CARD_GPIO, 0x03);
 	RTSX_WRITE(sc, RTSX_CARD_GPIO_DIR, 0x03);
 
-	/* Check for cards already inserted at attach time. */
-	if (attaching && (status & RTSX_SD_EXIST))
-		sc->flags |= RTSX_F_CARD_PRESENT;
-
 	return (0);
 }
 
@@ -283,12 +283,11 @@ rtsx_activate(struct device *self, int act)
 
 	switch (act) {
 	case DVACT_QUIESCE:
-		/* XXX abort commands in progress? */
 		rv = config_activate_children(self, act);
 		break;
 	case DVACT_SUSPEND:
-		rtsx_save_regs(sc);
 		rv = config_activate_children(self, act);
+		rtsx_save_regs(sc);
 		break;
 	case DVACT_POWERDOWN:
 		rv = config_activate_children(self, act);

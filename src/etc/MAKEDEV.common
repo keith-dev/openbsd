@@ -1,4 +1,4 @@
-vers(a, {-$OpenBSD: MAKEDEV.common,v 1.61 2013/01/30 01:59:20 yasuoka Exp $-})dnl
+vers(a, {-$OpenBSD: MAKEDEV.common,v 1.68 2013/07/06 17:33:44 naddy Exp $-})dnl
 dnl
 dnl Copyright (c) 2001-2006 Todd T. Fries <todd@OpenBSD.org>
 dnl
@@ -144,7 +144,7 @@ twrget(all, mac_tty0, tty0, 0, 1)dnl
 twrget(all, tzs, tty, a, b, c, d)dnl
 twrget(all, czs, cua, a, b, c, d)dnl
 target(all, ttyc, 0, 1, 2, 3, 4, 5, 6, 7)dnl
-twrget(all, com, tty0, 0, 1, 2, 3)dnl
+twrget(all, com, tty0, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, a, b)dnl
 target(all, lkm)dnl
 twrget(all, mmcl, mmclock)dnl
 target(all, lpt, 0, 1, 2)dnl
@@ -155,7 +155,6 @@ target(all, uk, 0)dnl
 twrget(all, vi, video, 0, 1)dnl
 twrget(all, speak, speaker)dnl
 target(all, asc, 0)dnl
-target(all, music, 0)dnl
 target(all, radio, 0)dnl
 target(all, tuner, 0)dnl
 target(all, rmidi, 0, 1, 2, 3, 4, 5, 6, 7)dnl
@@ -171,6 +170,7 @@ target(all, gpr, 0)dnl
 target(all, ptm)dnl
 target(all, hotplug)dnl
 target(all, pppx)dnl
+target(all, fuse)dnl
 dnl
 _mkdev(all, {-all-}, {-dnl
 show_target(all)dnl
@@ -208,6 +208,8 @@ __devitem(cd, {-cd*-}, ATAPI and SCSI CD-ROM drives)dnl
 _mkdev(cd, cd*, {-dodisk2 cd $U major_cd_b major_cd_c $U 0{--}ifstep(cd)-})dnl
 __devitem(bthub, {-bthub*-}, Bluetooth Hubs)dnl
 _mcdev(bthub, bthub*, bthub, {-major_bthub_c-})dnl
+__devitem(fuse, fuse, Userland Filesystem, fuse 4)dnl
+_mcdev(fuse, fuse, fuse, {-major_fuse_c-}, 600)dnl
 __devitem(ch, {-ch*-}, SCSI media changers)dnl
 _mcdev(ch, ch*, ch, {-major_ch_c-}, 660, operator)dnl
 __devitem(uk, uk*, Unknown SCSI devices)dnl
@@ -447,11 +449,6 @@ __devitem(asc, asc*, ASC Audio device)dnl
 _mkdev(asc, asc*, {-M asc$U major_asc_c 0-})dnl
 __devitem(bio, bio, {-ioctl tunnel pseudo-device-})dnl
 _mkdev(bio, bio, {-M bio c major_bio_c 0 600-})dnl
-__devitem(music, music*, MIDI sequencer,music)dnl
-_mkdev(music, music*, {-M music$U     c major_music_c $U
-	M sequencer$U c major_music_c Add($U, 128)
-	MKlist[${#MKlist[*]}]=";[ -e music ] || ln -s music$U music"
-	MKlist[${#MKlist[*]}]=";[ -e sequencer ] || ln -s sequencer$U sequencer"-})dnl
 __devitem(radio, radio*, FM tuner devices)dnl
 _mkdev(radio, radio*, {-M radio$U     c major_radio_c $U
 	MKlist[${#MKlist[*]}]=";[ -e radio ] || ln -s radio$U radio"-})dnl
@@ -519,7 +516,7 @@ _mkdev(spif, spif*, {-case $U in
 	M bpp${nam}0 c major_bppsp_c Add($offset, 0) 600-})dnl
 __devitem(bpp, bpp*, Parallel port)dnl
 _mkdev(bpp, {-bpp*-}, {-M bpp$U c major_bpp_c $U 600-}, 600)dnl
-__devitem(vscsi, vscsi*, Virtual SCSI controller, vscsi 8)dnl
+__devitem(vscsi, vscsi*, Virtual SCSI controller, vscsi 4)dnl
 _mcdev(vscsi, vscsi*, vscsi, {-major_vscsi_c-}, 600)dnl
 __devitem(rmidi, rmidi*, Raw MIDI devices,midi)dnl
 _mcdev(rmidi, rmidi*, rmidi, {-major_rmidi_c-}, 666)dnl

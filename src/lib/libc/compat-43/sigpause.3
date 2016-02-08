@@ -25,16 +25,16 @@
 .\" OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 .\" SUCH DAMAGE.
 .\"
-.\"	$OpenBSD: sigpause.3,v 1.12 2007/05/31 19:19:27 jmc Exp $
+.\"	$OpenBSD: sigpause.3,v 1.14 2013/07/17 05:42:10 schwarze Exp $
 .\"
-.Dd $Mdocdate: May 31 2007 $
+.Dd $Mdocdate: July 17 2013 $
 .Dt SIGPAUSE 3
 .Os
 .Sh NAME
 .Nm sigpause
 .Nd atomically release blocked signals and wait for interrupt
 .Sh SYNOPSIS
-.Fd #include <signal.h>
+.In signal.h
 .Ft int
 .Fn sigpause "int sigmask"
 .Sh DESCRIPTION
@@ -63,8 +63,13 @@ set to
 .Xr sigblock 3 ,
 .Xr sigvec 3
 .Sh HISTORY
-The
+A
 .Fn sigpause
-function call appeared in
-.Bx 4.2
-and has been deprecated.
+system call first appeared in
+.Bx 4.2 .
+In
+.Bx 4.3 Reno ,
+it was reimplemented as a wrapper around
+.Xr sigsuspend 2 .
+The old system call was kept for compatibility until
+.Ox 4.9 .

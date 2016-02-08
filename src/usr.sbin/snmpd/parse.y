@@ -1,4 +1,4 @@
-/*	$OpenBSD: parse.y,v 1.23 2012/09/17 19:00:06 reyk Exp $	*/
+/*	$OpenBSD: parse.y,v 1.25 2013/03/29 12:53:41 gerhard Exp $	*/
 
 /*
  * Copyright (c) 2007, 2008, 2012 Reyk Floeter <reyk@openbsd.org>
@@ -46,6 +46,7 @@
 #include <stdio.h>
 #include <netdb.h>
 #include <string.h>
+#include <syslog.h>
 
 #include "snmpd.h"
 #include "mib.h"
@@ -117,7 +118,7 @@ typedef struct {
 %token  LISTEN ON
 %token	SYSTEM CONTACT DESCR LOCATION NAME OBJECTID SERVICES RTFILTER
 %token	READONLY READWRITE OCTETSTRING INTEGER COMMUNITY TRAP RECEIVER
-%token	SECLEVEL NONE AUTH ENC USER AUTHKEY ENCKEY ERROR
+%token	SECLEVEL NONE AUTH ENC USER AUTHKEY ENCKEY ERROR DISABLED
 %token	<v.string>	STRING
 %token  <v.number>	NUMBER
 %type	<v.string>	hostcmn
@@ -217,6 +218,9 @@ main		: LISTEN ON STRING		{
 			}
 			free($3);
 		}
+		| READWRITE DISABLED {
+			conf->sc_readonly = 1;
+ 		}
 		| TRAP COMMUNITY STRING		{
 			if (strlcpy(conf->sc_trcommunity, $3,
 			    sizeof(conf->sc_trcommunity)) >=
@@ -458,13 +462,15 @@ int
 yyerror(const char *fmt, ...)
 {
 	va_list		 ap;
+	char		*nfmt;
 
 	file->errors++;
 	va_start(ap, fmt);
-	fprintf(stderr, "%s:%d: ", file->name, yylval.lineno);
-	vfprintf(stderr, fmt, ap);
-	fprintf(stderr, "\n");
+	if (asprintf(&nfmt, "%s:%d: %s", file->name, yylval.lineno, fmt) == -1)
+		fatalx("yyerror asprintf");
+	vlog(LOG_CRIT, nfmt, ap);
 	va_end(ap);
+	free(nfmt);
 	return (0);
 }
 
@@ -484,6 +490,7 @@ lookup(char *s)
 		{ "community",		COMMUNITY },
 		{ "contact",		CONTACT },
 		{ "description",	DESCR },
+		{ "disabled",		DISABLED},
 		{ "enc",		ENC },
 		{ "enckey",		ENCKEY },
 		{ "filter-routes",	RTFILTER },

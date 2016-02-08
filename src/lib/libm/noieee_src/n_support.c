@@ -1,4 +1,4 @@
-/*	$OpenBSD: n_support.c,v 1.21 2013/01/13 03:44:59 martynas Exp $	*/
+/*	$OpenBSD: n_support.c,v 1.23 2013/07/15 04:08:26 espie Exp $	*/
 /*	$NetBSD: n_support.c,v 1.1 1995/10/10 23:37:06 ragge Exp $	*/
 /*
  * Copyright (c) 1985, 1993
@@ -116,7 +116,7 @@ scalbn(double x, int N)
         return(x);
 }
 
-__weak_alias(scalbnl, scalbn);
+__strong_alias(scalbnl, scalbn);
 
 double
 copysign(double x, double y)
@@ -132,7 +132,7 @@ copysign(double x, double y)
         return(x);
 }
 
-__weak_alias(copysignl, copysign);
+__strong_alias(copysignl, copysign);
 
 double
 logb(double x)
@@ -157,7 +157,7 @@ logb(double x)
 #endif	/* defined(__vax__) */
 }
 
-__weak_alias(logbl, logb);
+__strong_alias(logbl, logb);
 
 double
 remainder(double x, double p)
@@ -239,6 +239,12 @@ drem(double x, double p)
 	return remainder(x, p);
 }
 
+float
+sqrtf(float x)
+{
+	return (float)sqrt((double) x);
+}
+
 double
 sqrt(double x)
 {
@@ -308,7 +314,7 @@ sqrt(double x)
 end:        return(scalbn(q,n));
 }
 
-__weak_alias(sqrtl, sqrt);
+__strong_alias(sqrtl, sqrt);
 
 #if 0
 /* REMAINDER(X,Y)

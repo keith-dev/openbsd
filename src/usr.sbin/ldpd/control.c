@@ -1,4 +1,4 @@
-/*	$OpenBSD: control.c,v 1.10 2012/04/12 17:33:43 claudio Exp $ */
+/*	$OpenBSD: control.c,v 1.12 2013/06/04 02:25:28 claudio Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -120,7 +120,8 @@ control_accept(int listenfd, short event, void *bula)
 		 */
 		if (errno == ENFILE || errno == EMFILE)
 			accept_pause();
-		else if (errno != EWOULDBLOCK && errno != EINTR)
+		else if (errno != EWOULDBLOCK && errno != EINTR &&
+		    errno != ECONNABORTED)
 			log_warn("control_accept: accept");
 		return;
 	}
@@ -246,6 +247,9 @@ control_dispatch_imsg(int fd, short event, void *bula)
 				imsg_compose_event(&c->iev, IMSG_CTL_END, 0,
 				    0, -1, NULL, 0);
 			}
+			break;
+		case IMSG_CTL_SHOW_DISCOVERY:
+			ldpe_adj_ctl(c);
 			break;
 		case IMSG_CTL_SHOW_LIB:
 			c->iev.ibuf.pid = imsg.hdr.pid;

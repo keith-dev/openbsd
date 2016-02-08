@@ -1,4 +1,4 @@
-/*	$OpenBSD: ldexp.c,v 1.6 2012/12/05 23:20:00 deraadt Exp $	*/
+/*	$OpenBSD: ldexp.c,v 1.8 2013/07/03 04:46:36 espie Exp $	*/
 /* @(#)s_scalbn.c 5.1 93/09/24 */
 /* @(#)fdlibm.h 5.1 93/09/24 */
 /*
@@ -11,8 +11,6 @@
  * is preserved.
  * ====================================================
  */
-
-/* LINTLIBRARY */
 
 #include <sys/types.h>
 #include <machine/endian.h>
@@ -123,11 +121,6 @@ ldexp(double x, int n)
         return x*twom54;
 }
 
-#if	LDBL_MANT_DIG == 53
-#ifdef	lint
-/* PROTOLIB1 */
-long double ldexpl(long double, int);
-#else	/* lint */
-__weak_alias(ldexpl, ldexp);
-#endif	/* lint */
-#endif	/* LDBL_MANT_DIG == 53 */
+#if	LDBL_MANT_DIG == DBL_MANT_DIG
+__strong_alias(ldexpl, ldexp);
+#endif	/* LDBL_MANT_DIG == DBL_MANT_DIG */

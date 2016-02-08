@@ -1,4 +1,4 @@
-/*	$OpenBSD: rde_rib.c,v 1.134 2012/09/12 05:56:22 claudio Exp $ */
+/*	$OpenBSD: rde_rib.c,v 1.137 2013/07/17 14:09:13 benno Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Claudio Jeker <claudio@openbsd.org>
@@ -507,12 +507,14 @@ path_remove(struct rde_aspath *asp)
 
 /* remove all stale routes or if staletime is 0 remove all routes for
    a specified AID. */
-void
+u_int32_t
 path_remove_stale(struct rde_aspath *asp, u_int8_t aid)
 {
 	struct prefix	*p, *np;
 	time_t		 staletime;
+	u_int32_t	 rprefixes;
 
+	rprefixes=0;
 	staletime = asp->peer->staletime[aid];
 	for (p = LIST_FIRST(&asp->prefix_h); p != NULL; p = np) {
 		np = LIST_NEXT(p, path_l);
@@ -530,8 +532,14 @@ path_remove_stale(struct rde_aspath *asp, u_int8_t aid)
 			rde_send_pftable(p->aspath->pftableid, &addr,
 			    p->prefix->prefixlen, 1);
 		}
+
+		/* only count Adj-RIB-In */
+		if (p->rib->ribid == 0)
+			rprefixes++;
+
 		prefix_destroy(p);
 	}
+	return (rprefixes);
 }
 
 
@@ -840,6 +848,7 @@ prefix_writebuf(struct ibuf *buf, struct bgpd_addr *prefix, u_int8_t plen)
 	case AID_VPN_IPv4:
 		totlen = PREFIX_SIZE(plen) + sizeof(prefix->vpn4.rd) +
 		    prefix->vpn4.labellen;
+		break;
 	default:
 		return (-1);
 	}
@@ -1052,7 +1061,7 @@ nexthop_init(u_int32_t hashsize)
 
 	for (hs = 1; hs < hashsize; hs <<= 1)
 		;
-	nexthoptable.nexthop_hashtbl = calloc(hs, sizeof(struct nexthop_table));
+	nexthoptable.nexthop_hashtbl = calloc(hs, sizeof(struct nexthop_head));
 	if (nexthoptable.nexthop_hashtbl == NULL)
 		fatal("nextop_init");
 

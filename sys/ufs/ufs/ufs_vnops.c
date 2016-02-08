@@ -1,4 +1,4 @@
-/*	$OpenBSD: ufs_vnops.c,v 1.104 2012/06/20 17:30:22 matthew Exp $	*/
+/*	$OpenBSD: ufs_vnops.c,v 1.107 2013/06/11 16:42:19 deraadt Exp $	*/
 /*	$NetBSD: ufs_vnops.c,v 1.18 1996/05/11 18:28:04 mycroft Exp $	*/
 
 /*
@@ -446,7 +446,7 @@ ufs_chown(struct vnode *vp, uid_t uid, gid_t gid, struct ucred *cred,
 	uid_t ouid;
 	gid_t ogid;
 	int error = 0;
-	daddr64_t change;
+	daddr_t change;
 	enum ufs_quota_flags quota_flags = 0;
 
 	if (uid == (uid_t)VNOVAL)
@@ -1725,23 +1725,11 @@ ufs_pathconf(void *v)
 	case _PC_NAME_MAX:
 		*ap->a_retval = NAME_MAX;
 		break;
-	case _PC_PATH_MAX:
-		*ap->a_retval = PATH_MAX;
-		break;
-	case _PC_PIPE_BUF:
-		*ap->a_retval = PIPE_BUF;
-		break;
 	case _PC_CHOWN_RESTRICTED:
 		*ap->a_retval = 1;
 		break;
 	case _PC_NO_TRUNC:
 		*ap->a_retval = 1;
-		break;
-	case _PC_PRIO_IO:
-		*ap->a_retval = 0;
-		break;
-	case _PC_SYNC_IO:
-		*ap->a_retval = 0;
 		break;
 	case _PC_ALLOC_SIZE_MIN:
 		*ap->a_retval = ap->a_vp->v_mount->mnt_stat.f_bsize;
@@ -1765,6 +1753,9 @@ ufs_pathconf(void *v)
 		*ap->a_retval = MAXPATHLEN;
 		break;
 	case _PC_2_SYMLINKS:
+		*ap->a_retval = 1;
+		break;
+	case _PC_TIMESTAMP_RESOLUTION:
 		*ap->a_retval = 1;
 		break;
 	default:

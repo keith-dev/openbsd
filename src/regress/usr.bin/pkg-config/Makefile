@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.36 2012/12/10 10:23:27 jasper Exp $
+#	$OpenBSD: Makefile,v 1.39 2013/06/02 16:12:27 jasper Exp $
 
 REGRESS_TARGETS=cmp-vers1-1 \
 		cmp-vers1-2 \
@@ -52,6 +52,7 @@ REGRESS_TARGETS=cmp-vers1-1 \
 		whitespace-libs \
 		whitespace-linebreak \
 		whitespace-name \
+		quoting \
 		broken-require-1 \
 		broken-require-2 \
 		min-version-1 \
@@ -59,7 +60,9 @@ REGRESS_TARGETS=cmp-vers1-1 \
 		exact-version-1 \
 		exact-version-2 \
 		max-version-1 \
-		max-version-2
+		max-version-2 \
+		find-config-1 \
+		find-config-2
 
 PKG_CONFIG?=	pkg-config
 PCONFIG =	PKG_CONFIG_PATH=${.CURDIR}/pcdir/ ${PKG_CONFIG}
@@ -82,7 +85,7 @@ corrupt2:
 
 corrupt3:
 	# Test for empty file
-	@echo "Package file '$@.pc' appears to be empty" > ${WANT}
+	@echo "Package file '${.CURDIR}/pcdir//$@.pc' appears to be empty" > ${WANT}
 	@echo "Package '$@' has no Name: field" >> ${WANT}
 	@if ${VPCONFIG} --libs $@; then false; fi
 	@diff -u ${WANT} ${GOT}
@@ -398,6 +401,12 @@ whitespace-name:
 	@if ${VPCONFIG} "whitespace > 0.2.0"; then false; fi
 	@diff -u ${WANT} ${GOT}
 
+quoting:
+	# Test for stripping out quotes from variables
+	@echo "-I/usr/X11R6/include/freetype2" > ${WANT}
+	@${VPCONFIG} --cflags quotes
+	@diff -u ${WANT} ${GOT}
+
 broken-require-1:
 	# Test expanded variables with special parsing requirements
 	@${PCONFIG} requires-test3
@@ -429,6 +438,21 @@ max-version-1:
 max-version-2:
 	# Test --max-version (doesn't match)
 	@if ${PCONFIG} --max-version=0.0.9 vers1 ; then false; fi
+
+find-config-1:
+	# Test a regular module name being resolved
+	@echo "1.0.0" > ${WANT}
+	@${VPCONFIG} --modversion public-dep
+	@diff -u ${WANT} ${GOT}
+
+# Need to use ${PKG_CONFIG} instead of ${VPCONFIG} as the latter sets PKG_CONFIG_PATH,
+# which is exactly what we don't want for this test.
+find-config-2:
+	# Test a full path to a .pc file
+	@echo "1.0.0" > ${WANT}
+	@${PKG_CONFIG} --errors-to-stdout --print-errors --modversion \
+		${.CURDIR}/pcdir/public-dep.pc > ${GOT}
+	@diff -u ${WANT} ${GOT}
 
 clean:
 	rm -f *.want *.got

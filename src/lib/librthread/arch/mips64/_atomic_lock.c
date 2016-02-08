@@ -1,24 +1,27 @@
-/*	$OpenBSD: _atomic_lock.c,v 1.4 2009/06/01 23:17:53 miod Exp $	*/
+/*	$OpenBSD: _atomic_lock.c,v 1.7 2013/06/03 16:19:45 miod Exp $	*/
 
 /*
  * Atomic lock for mips
  * Written by Miodrag Vallat <miod@openbsd.org> - placed in the public domain.
  */
 
-#include "spinlock.h"
+#include <machine/spinlock.h>
 
 int
-_atomic_lock(volatile _spinlock_lock_t *lock)
+_atomic_lock(volatile _atomic_lock_t *lock)
 {
-	_spinlock_lock_t old;
+	_atomic_lock_t old;
 
 	__asm__ __volatile__ (
+	".set	noreorder\n"
 	"1:	ll	%0,	0(%1)\n"
 	"	sc	%2,	0(%1)\n"
 	"	beqz	%2,	1b\n"
-	"	 nop\n" :
-		"=r"(old) :
-		"r"(lock), "r"(_SPINLOCK_LOCKED) : "memory");
+	"	 addi	%2,	$0, %3\n"
+	".set	reorder\n"
+		: "=&r"(old)
+		: "r"(lock), "r"(_ATOMIC_LOCK_LOCKED), "i"(_ATOMIC_LOCK_LOCKED)
+		: "memory");
 
-	return (old != _SPINLOCK_UNLOCKED);
+	return (old != _ATOMIC_LOCK_UNLOCKED);
 }

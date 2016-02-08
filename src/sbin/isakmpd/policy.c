@@ -1,4 +1,4 @@
-/* $OpenBSD: policy.c,v 1.94 2012/06/30 14:51:31 naddy Exp $	 */
+/* $OpenBSD: policy.c,v 1.96 2013/04/16 19:26:00 deraadt Exp $	 */
 /* $EOM: policy.c,v 1.49 2000/10/24 13:33:39 niklas Exp $ */
 
 /*
@@ -32,7 +32,6 @@
  */
 
 #include <sys/types.h>
-#include <sys/param.h>
 #include <sys/mman.h>
 #include <sys/queue.h>
 #include <sys/stat.h>
@@ -1737,12 +1736,12 @@ policy_callback(char *name)
 		return phase_1;
 
 	if (strcmp(name, "GMTTimeOfDay") == 0) {
-		tt = time((time_t *)NULL);
+		tt = time(NULL);
 		strftime(mytimeofday, 14, "%Y%m%d%H%M%S", gmtime(&tt));
 		return mytimeofday;
 	}
 	if (strcmp(name, "LocalTimeOfDay") == 0) {
-		tt = time((time_t *)NULL);
+		tt = time(NULL);
 		strftime(mytimeofday, 14, "%Y%m%d%H%M%S", localtime(&tt));
 		return mytimeofday;
 	}

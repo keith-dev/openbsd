@@ -1,4 +1,4 @@
-/*	$OpenBSD: config.c,v 1.30 2012/09/05 05:52:10 deraadt Exp $	*/
+/*	$OpenBSD: config.c,v 1.39 2013/06/01 21:57:12 brad Exp $	*/
 /*	$KAME: config.c,v 1.62 2002/05/29 10:13:10 itojun Exp $	*/
 
 /*
@@ -52,7 +52,6 @@
 #include <errno.h>
 #include <string.h>
 #include <stdlib.h>
-#include <search.h>
 #include <unistd.h>
 #include <ifaddrs.h>
 #include <stdint.h>
@@ -110,6 +109,7 @@ getconfig(intface)
 		fatal("malloc");
 
 	TAILQ_INIT(&tmp->prefixes);
+	TAILQ_INIT(&tmp->rtinfos);
 	TAILQ_INIT(&tmp->rdnsss);
 	TAILQ_INIT(&tmp->dnssls);
 	SLIST_INIT(&tmp->soliciters);
@@ -166,10 +166,6 @@ getconfig(intface)
 	MAYHAVE(val, "raflags", 0);
 	tmp->managedflg = val & ND_RA_FLAG_MANAGED;
 	tmp->otherflg = val & ND_RA_FLAG_OTHER;
-#ifndef ND_RA_FLAG_RTPREF_MASK
-#define ND_RA_FLAG_RTPREF_MASK	0x18 /* 00011000 */
-#define ND_RA_FLAG_RTPREF_RSV	0x10 /* 00010000 */
-#endif
 	tmp->rtpref = val & ND_RA_FLAG_RTPREF_MASK;
 	if (tmp->rtpref == ND_RA_FLAG_RTPREF_RSV) {
 		log_warnx("invalid router preference (%02x) on %s",
@@ -239,7 +235,7 @@ getconfig(intface)
 		char entbuf[256];
 
 		makeentry(entbuf, sizeof(entbuf), i, "addr");
-		addr = (char *)agetstr(entbuf, &bp);
+		addr = agetstr(entbuf, &bp);
 		if (addr == NULL)
 			continue;
 
@@ -325,6 +321,77 @@ getconfig(intface)
 	}
 	if (tmp->pfxs == 0 && !agetflag("noifprefix"))
 		get_prefix(tmp);
+
+	tmp->rtinfocnt = 0;
+	for (i = -1; i < MAXRTINFO; i++) {
+		struct rtinfo *rti;
+		char entbuf[256];
+		const char *flagstr;
+
+		makeentry(entbuf, sizeof(entbuf), i, "rtprefix");
+		addr = agetstr(entbuf, &bp);
+		if (addr == NULL)
+			continue;
+
+		rti = malloc(sizeof(struct rtinfo));
+		if (rti == NULL)
+			fatal("malloc");
+
+		if (inet_pton(AF_INET6, addr, &rti->prefix) != 1) {
+			log_warn("inet_pton failed for %s", addr);
+			exit(1);
+		}
+
+		makeentry(entbuf, sizeof(entbuf), i, "rtplen");
+		MAYHAVE(val, entbuf, 64);
+		if (val < 0 || val > 128) {
+			log_warnx("route prefixlen (%ld) for %s "
+                            "on %s out of range",
+			    val, addr, intface);
+			exit(1);
+		}
+		rti->prefixlen = (int)val;
+
+		makeentry(entbuf, sizeof(entbuf), i, "rtflags");
+		if ((flagstr = agetstr(entbuf, &bp))) {
+			val = 0;
+			if (strchr(flagstr, 'h'))
+				val |= ND_RA_FLAG_RTPREF_HIGH;
+			if (strchr(flagstr, 'l')) {
+				if (val & ND_RA_FLAG_RTPREF_HIGH) {
+					log_warnx("the \'h\' and \'l\'"
+					    " route preferences are"
+					    " exclusive");
+					exit(1);
+				}
+				val |= ND_RA_FLAG_RTPREF_LOW;
+			}
+		} else
+			MAYHAVE(val, entbuf, 0);
+
+		rti->rtpref = val & ND_RA_FLAG_RTPREF_MASK;
+		if (rti->rtpref == ND_RA_FLAG_RTPREF_RSV) {
+			log_warnx("invalid route preference (%02x)"
+			    " for %s/%d on %s",
+			    rti->rtpref, addr, rti->prefixlen, intface);
+			exit(1);
+		}
+
+		makeentry(entbuf, sizeof(entbuf), i, "rtltime");
+		MAYHAVE(val64, entbuf, -1);
+		if (val64 == -1)
+			val64 = tmp->lifetime;
+		if (val64 < 0 || val64 >= 0xffffffff) {
+			log_warnx("route lifetime (%d) "
+			    " for %s/%d on %s out of range",
+			    rti->rtpref, addr, rti->prefixlen, intface);
+			exit(1);
+		}
+		rti->lifetime = (uint32_t)val64;
+
+		TAILQ_INSERT_TAIL(&tmp->rtinfos, rti, entry);
+		tmp->rtinfocnt++;
+	}
 
 	tmp->rdnsscnt = 0;
 	for (i = -1; i < MAXRDNSS; ++i) {
@@ -435,7 +502,7 @@ getconfig(intface)
 	if (tmp->linkmtu == 0) {
 		char *mtustr;
 
-		if ((mtustr = (char *)agetstr("mtu", &bp)) &&
+		if ((mtustr = agetstr("mtu", &bp)) &&
 		    strcmp(mtustr, "auto") == 0)
 			tmp->linkmtu = tmp->phymtu;
 	}
@@ -699,9 +766,11 @@ make_packet(struct rainfo *rainfo)
 	struct nd_router_advert *ra;
 	struct nd_opt_prefix_info *ndopt_pi;
 	struct nd_opt_mtu *ndopt_mtu;
+	struct nd_opt_route_info *ndopt_rti;
 	struct nd_opt_rdnss *ndopt_rdnss;
 	struct nd_opt_dnssl *ndopt_dnssl;
 	struct prefix *pfx;
+	struct rtinfo *rti;
 	struct rdnss *rds;
 	struct dnssl *dsl;
 	struct dnssldom *dnsd;
@@ -721,6 +790,9 @@ make_packet(struct rainfo *rainfo)
 		packlen += sizeof(struct nd_opt_prefix_info) * rainfo->pfxs;
 	if (rainfo->linkmtu)
 		packlen += sizeof(struct nd_opt_mtu);
+	TAILQ_FOREACH(rti, &rainfo->rtinfos, entry)
+		packlen += sizeof(struct nd_opt_route_info) +
+		    ((rti->prefixlen + 0x3f) >> 6) * 8;
 	TAILQ_FOREACH(rds, &rainfo->rdnsss, entry)
 		packlen += sizeof(struct nd_opt_rdnss) + 16 * rds->servercnt;
 	TAILQ_FOREACH(dsl, &rainfo->dnssls, entry) {
@@ -728,8 +800,12 @@ make_packet(struct rainfo *rainfo)
 
 		packlen += sizeof(struct nd_opt_dnssl);
 
+		/*
+		 * Each domain in the packet ends with a null byte. Account for
+		 * that here.
+		 */
 		TAILQ_FOREACH(dnsd, &dsl->dnssldoms, entry)
-			domains_size += dnsd->length;
+			domains_size += dnsd->length + 1;
 
 		domains_size = (domains_size + 7) & ~7;
 
@@ -785,8 +861,6 @@ make_packet(struct rainfo *rainfo)
 		buf += sizeof(struct nd_opt_mtu);
 	}
 
-	
-	
 	TAILQ_FOREACH(pfx, &rainfo->prefixes, entry) {
 		u_int32_t vltime, pltime;
 		struct timeval now;
@@ -807,13 +881,13 @@ make_packet(struct rainfo *rainfo)
 		if (pfx->vltimeexpire == 0)
 			vltime = pfx->validlifetime;
 		else
-			vltime = (pfx->vltimeexpire > now.tv_sec) ?
-				pfx->vltimeexpire - now.tv_sec : 0;
+			vltime = (u_int32_t)(pfx->vltimeexpire > now.tv_sec ?
+				pfx->vltimeexpire - now.tv_sec : 0);
 		if (pfx->pltimeexpire == 0)
 			pltime = pfx->preflifetime;
 		else
-			pltime = (pfx->pltimeexpire > now.tv_sec) ? 
-				pfx->pltimeexpire - now.tv_sec : 0;
+			pltime = (u_int32_t)(pfx->pltimeexpire > now.tv_sec ? 
+				pfx->pltimeexpire - now.tv_sec : 0);
 		if (vltime < pltime) {
 			/*
 			 * this can happen if vltime is decrement but pltime
@@ -829,9 +903,26 @@ make_packet(struct rainfo *rainfo)
 		buf += sizeof(struct nd_opt_prefix_info);
 	}
 
+	TAILQ_FOREACH(rti, &rainfo->rtinfos, entry) {
+		uint8_t psize = (rti->prefixlen + 0x3f) >> 6;
+
+		ndopt_rti = (struct nd_opt_route_info *)buf;
+		ndopt_rti->nd_opt_rti_type = ND_OPT_ROUTE_INFO;
+		ndopt_rti->nd_opt_rti_len = 1 + psize;
+		ndopt_rti->nd_opt_rti_prefixlen = rti->prefixlen;
+		ndopt_rti->nd_opt_rti_flags = 0xff & rti->rtpref;
+		ndopt_rti->nd_opt_rti_lifetime = htonl(rti->lifetime);
+		memcpy(ndopt_rti + 1, &rti->prefix, psize * 8);
+		buf += sizeof(struct nd_opt_route_info) + psize * 8;
+	}
+
 	TAILQ_FOREACH(rds, &rainfo->rdnsss, entry) {
 		ndopt_rdnss = (struct nd_opt_rdnss *)buf;
 		ndopt_rdnss->nd_opt_rdnss_type = ND_OPT_RDNSS;
+		/*
+		 * An IPv6 address is 16 bytes, so multiply the number of
+		 * addresses by two to get a size in units of 8 bytes.
+		 */
 		ndopt_rdnss->nd_opt_rdnss_len = 1 + rds->servercnt * 2;
 		ndopt_rdnss->nd_opt_rdnss_reserved = 0;
 		ndopt_rdnss->nd_opt_rdnss_lifetime = htonl(rds->lifetime);
@@ -844,8 +935,6 @@ make_packet(struct rainfo *rainfo)
 
 	TAILQ_FOREACH(dsl, &rainfo->dnssls, entry) {
 		u_int32_t size;
-		char *curlabel_begin;
-		char *curlabel_end;
 
 		ndopt_dnssl = (struct nd_opt_dnssl *)buf;
 		ndopt_dnssl->nd_opt_dnssl_type = ND_OPT_DNSSL;
@@ -854,7 +943,7 @@ make_packet(struct rainfo *rainfo)
 
 		size = 0;
 		TAILQ_FOREACH(dnsd, &dsl->dnssldoms, entry)
-			size += dnsd->length;
+			size += dnsd->length + 1;
 		/* align size on the next 8 byte boundary */
 		size = (size + 7) & ~7;
 		ndopt_dnssl->nd_opt_dnssl_len = 1 + size / 8;
@@ -862,16 +951,18 @@ make_packet(struct rainfo *rainfo)
 		buf += sizeof(struct nd_opt_dnssl);
 
 		TAILQ_FOREACH(dnsd, &dsl->dnssldoms, entry) {
+			char *curlabel_begin;
+			char *curlabel_end;
+
 			curlabel_begin = dnsd->domain;
-			while ((curlabel_end = strchr(curlabel_begin, '.')) &&
-			    (curlabel_end - curlabel_begin) > 1)
+			while ((curlabel_end = strchr(curlabel_begin, '.'))
+			    != NULL && curlabel_end > curlabel_begin)
 			{
 				size_t curlabel_size;
 
 				curlabel_size = curlabel_end - curlabel_begin;
-				*buf = curlabel_size;
-				++buf;
-				strncpy(buf, curlabel_begin, curlabel_size);
+				*buf++ = curlabel_size;
+				memcpy(buf, curlabel_begin, curlabel_size);
 				buf += curlabel_size;
 				curlabel_begin = curlabel_end + 1;
 			}

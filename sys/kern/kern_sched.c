@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_sched.c,v 1.27 2012/07/10 18:20:37 kettenis Exp $	*/
+/*	$OpenBSD: kern_sched.c,v 1.30 2013/06/06 13:09:37 haesbaert Exp $	*/
 /*
  * Copyright (c) 2007, 2008 Artur Grabowski <art@openbsd.org>
  *
@@ -105,8 +105,19 @@ sched_kthreads_create(void *v)
 	struct schedstate_percpu *spc = &ci->ci_schedstate;
 	static int num;
 
-	if (kthread_create(sched_idle, ci, &spc->spc_idleproc, "idle%d", num))
+	if (fork1(&proc0, 0, FORK_SHAREVM|FORK_SHAREFILES|FORK_NOZOMBIE|
+	    FORK_SIGHAND|FORK_IDLE, NULL, 0, sched_idle, ci, NULL,
+	    &spc->spc_idleproc))
 		panic("fork idle");
+
+	/*
+	 * Mark it as a system process.
+	 */
+	atomic_setbits_int(&spc->spc_idleproc->p_flag, P_SYSTEM);
+
+	/* Name it as specified. */
+	snprintf(spc->spc_idleproc->p_comm, sizeof(spc->spc_idleproc->p_comm),
+	    "idle%d", num);
 
 	num++;
 }
@@ -190,13 +201,13 @@ void
 sched_exit(struct proc *p)
 {
 	struct schedstate_percpu *spc = &curcpu()->ci_schedstate;
-	struct timeval tv;
+	struct timespec ts;
 	struct proc *idle;
 	int s;
 
-	microuptime(&tv);
-	timersub(&tv, &spc->spc_runtime, &tv);
-	timeradd(&p->p_rtime, &tv, &p->p_rtime);
+	nanouptime(&ts);
+	timespecsub(&ts, &spc->spc_runtime, &ts);
+	timespecadd(&p->p_rtime, &ts, &p->p_rtime);
 
 	LIST_INSERT_HEAD(&spc->spc_deadproc, p, p_hash);
 
@@ -315,6 +326,7 @@ again:
 struct cpu_info *
 sched_choosecpu_fork(struct proc *parent, int flags)
 {
+#ifdef MULTIPROCESSOR
 	struct cpu_info *choice = NULL;
 	fixpt_t load, best_load = ~0;
 	int run, best_run = INT_MAX;
@@ -362,11 +374,15 @@ sched_choosecpu_fork(struct proc *parent, int flags)
 	}
 
 	return (choice);
+#else
+	return (curcpu());
+#endif
 }
 
 struct cpu_info *
 sched_choosecpu(struct proc *p)
 {
+#ifdef MULTIPROCESSOR
 	struct cpu_info *choice = NULL;
 	int last_cost = INT_MAX;
 	struct cpu_info *ci;
@@ -421,6 +437,9 @@ sched_choosecpu(struct proc *p)
 		sched_nomigrations++;
 
 	return (choice);
+#else
+	return (curcpu());
+#endif
 }
 
 /*
@@ -429,8 +448,9 @@ sched_choosecpu(struct proc *p)
 struct proc *
 sched_steal_proc(struct cpu_info *self)
 {
-	struct schedstate_percpu *spc;
 	struct proc *best = NULL;
+#ifdef MULTIPROCESSOR
+	struct schedstate_percpu *spc;
 	int bestcost = INT_MAX;
 	struct cpu_info *ci;
 	struct cpuset set;
@@ -469,10 +489,11 @@ sched_steal_proc(struct cpu_info *self)
 	best->p_cpu = self;
 
 	sched_stolen++;
-
+#endif
 	return (best);
 }
 
+#ifdef MULTIPROCESSOR
 /*
  * Base 2 logarithm of an int. returns 0 for 0 (yeye, I know).
  */
@@ -502,17 +523,17 @@ int sched_cost_load = 1;
 int sched_cost_priority = 1;
 int sched_cost_runnable = 3;
 int sched_cost_resident = 1;
+#endif
 
 int
 sched_proc_to_cpu_cost(struct cpu_info *ci, struct proc *p)
 {
+	int cost = 0;
+#ifdef MULTIPROCESSOR
 	struct schedstate_percpu *spc;
 	int l2resident = 0;
-	int cost;
 
 	spc = &ci->ci_schedstate;
-
-	cost = 0;
 
 	/*
 	 * First, account for the priority of the proc we want to move.
@@ -541,7 +562,7 @@ sched_proc_to_cpu_cost(struct cpu_info *ci, struct proc *p)
 		    log2(pmap_resident_count(p->p_vmspace->vm_map.pmap));
 		cost -= l2resident * sched_cost_resident;
 	}
-
+#endif
 	return (cost);
 }
 

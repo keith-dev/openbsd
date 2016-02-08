@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_spppsubr.c,v 1.99 2012/11/23 20:12:03 sthen Exp $	*/
+/*	$OpenBSD: if_spppsubr.c,v 1.106 2013/07/15 13:30:37 mpi Exp $	*/
 /*
  * Synchronous PPP/Cisco link level subroutines.
  * Keepalive protocol implemented in both Cisco and PPP modes.
@@ -43,7 +43,6 @@
 #include <sys/kernel.h>
 #include <sys/sockio.h>
 #include <sys/socket.h>
-#include <sys/proc.h>
 #include <sys/syslog.h>
 #include <sys/malloc.h>
 #include <sys/mbuf.h>
@@ -68,7 +67,6 @@
 #include <machine/random.h>
 #endif
 #if defined (__NetBSD__) || defined (__OpenBSD__)
-#include <machine/cpu.h> /* XXX for softnet */
 #endif
 #include <sys/stdarg.h>
 
@@ -4741,11 +4739,6 @@ sppp_set_ip_addrs(void *arg1, void *arg2)
 		struct sockaddr_in new_sin = *si;
 		struct sockaddr_in new_dst = *dest;
 
-		/*
-		 * Scrub old routes now instead of calling in_ifinit with
-		 * scrub=1, because we may change the dstaddr
-		 * before the call to in_ifinit.
-		 */
 		in_ifscrub(ifp, ifatoia(ifa));
 
 		if (myaddr != 0)
@@ -4757,7 +4750,7 @@ sppp_set_ip_addrs(void *arg1, void *arg2)
 				*dest = new_dst; /* fix dstaddr in place */
 			}
 		}
-		if (!(error = in_ifinit(ifp, ifatoia(ifa), &new_sin, 0, 0)))
+		if (!(error = in_ifinit(ifp, ifatoia(ifa), &new_sin, 0)))
 			dohooks(ifp->if_addrhooks, 0);
 		if (debug && error) {
 			log(LOG_DEBUG, SPP_FMT "sppp_set_ip_addrs: in_ifinit "
@@ -4818,7 +4811,7 @@ sppp_clear_ip_addrs(void *arg1, void *arg2)
 		if (sp->ipcp.flags & IPCP_HISADDR_DYN)
 			/* replace peer addr in place */
 			dest->sin_addr.s_addr = sp->ipcp.saved_hisaddr;
-		if (!(error = in_ifinit(ifp, ifatoia(ifa), &new_sin, 0, 0)))
+		if (!(error = in_ifinit(ifp, ifatoia(ifa), &new_sin, 0)))
 			dohooks(ifp->if_addrhooks, 0);
 		if (debug && error) {
 			log(LOG_DEBUG, SPP_FMT "sppp_clear_ip_addrs: in_ifinit "
@@ -4963,22 +4956,8 @@ sppp_get_params(struct sppp *sp, struct ifreq *ifr)
 		struct spppreq *spr;
 
 		spr = malloc(sizeof(*spr), M_DEVBUF, M_WAITOK);
-
-		/*
-		 * We copy over the entire current state, but clean
-		 * out some of the stuff we don't wanna pass up.
-		 * Remember, SIOCGIFGENERIC is unprotected, and can be
-		 * called by any user.  No need to ever get PAP or
-		 * CHAP secrets back to userland anyway.
-		 */
-
 		spr->cmd = cmd;
-		bcopy(sp, &spr->defs, sizeof(struct sppp));
-		
-		explicit_bzero(&spr->defs.myauth, sizeof(spr->defs.myauth));
-		explicit_bzero(&spr->defs.hisauth, sizeof(spr->defs.hisauth));
-		explicit_bzero(&spr->defs.chap_challenge,
-		    sizeof(spr->defs.chap_challenge));
+		spr->phase = sp->pp_phase;
 
 		if (copyout(spr, (caddr_t)ifr->ifr_data, sizeof(*spr)) != 0) {
 			free(spr, M_DEVBUF);

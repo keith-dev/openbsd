@@ -1,4 +1,4 @@
-/*	$OpenBSD: dns.c,v 1.64 2013/01/26 09:37:23 gilles Exp $	*/
+/*	$OpenBSD: dns.c,v 1.67 2013/07/12 14:38:34 eric Exp $	*/
 
 /*
  * Copyright (c) 2008 Gilles Chehade <gilles@poolp.org>
@@ -48,7 +48,7 @@ struct dns_session {
 	struct mproc		*p;
 	uint64_t		 reqid;
 	int			 type;
-	char			 name[MAXHOSTNAMELEN];
+	char			 name[SMTPD_MAXHOSTNAMELEN];
 	size_t			 mxfound;
 	int			 error;
 	int			 refcount;
@@ -69,7 +69,7 @@ static void dns_dispatch_mx_preference(int, struct async_res *, void *);
 void
 dns_query_host(uint64_t id, const char *host)
 {
-	m_create(p_lka,  IMSG_DNS_HOST, 0, 0, -1, 128);
+	m_create(p_lka,  IMSG_DNS_HOST, 0, 0, -1);
 	m_add_id(p_lka, id);
 	m_add_string(p_lka, host);
 	m_close(p_lka);
@@ -78,7 +78,7 @@ dns_query_host(uint64_t id, const char *host)
 void
 dns_query_ptr(uint64_t id, const struct sockaddr *sa)
 {
-	m_create(p_lka,  IMSG_DNS_PTR, 0, 0, -1, 128);
+	m_create(p_lka,  IMSG_DNS_PTR, 0, 0, -1);
 	m_add_id(p_lka, id);
 	m_add_sockaddr(p_lka, sa);
 	m_close(p_lka);
@@ -87,7 +87,7 @@ dns_query_ptr(uint64_t id, const struct sockaddr *sa)
 void
 dns_query_mx(uint64_t id, const char *domain)
 {
-	m_create(p_lka,  IMSG_DNS_MX, 0, 0, -1, 128);
+	m_create(p_lka,  IMSG_DNS_MX, 0, 0, -1);
 	m_add_id(p_lka, id);
 	m_add_string(p_lka, domain);
 	m_close(p_lka);
@@ -96,7 +96,7 @@ dns_query_mx(uint64_t id, const char *domain)
 void
 dns_query_mx_preference(uint64_t id, const char *domain, const char *mx)
 {
-	m_create(p_lka,  IMSG_DNS_MX_PREFERENCE, 0, 0, -1, 128);
+	m_create(p_lka,  IMSG_DNS_MX_PREFERENCE, 0, 0, -1);
 	m_add_id(p_lka, id);
 	m_add_string(p_lka, domain);
 	m_add_string(p_lka, mx);
@@ -141,7 +141,7 @@ dns_imsg(struct mproc *p, struct imsg *imsg)
 		m_get_string(&m, &domain);
 		m_end(&m);
 		strlcpy(s->name, domain, sizeof(s->name));
-		as = res_query_async(s->name, C_IN, T_MX, NULL, 0, NULL);
+		as = res_query_async(s->name, C_IN, T_MX, NULL);
 		async_run_event(as, dns_dispatch_mx, s);
 		return;
 
@@ -150,7 +150,7 @@ dns_imsg(struct mproc *p, struct imsg *imsg)
 		m_get_string(&m, &mx);
 		m_end(&m);
 		strlcpy(s->name, mx, sizeof(s->name));
-		as = res_query_async(domain, C_IN, T_MX, NULL, 0, NULL);
+		as = res_query_async(domain, C_IN, T_MX, NULL);
 		async_run_event(as, dns_dispatch_mx_preference, s);
 		return;
 
@@ -171,7 +171,7 @@ dns_dispatch_host(int ev, struct async_res *ar, void *arg)
 
 	for (ai = ar->ar_addrinfo; ai; ai = ai->ai_next) {
 		s->mxfound++;
-		m_create(s->p, IMSG_DNS_HOST, 0, 0, -1, 128);
+		m_create(s->p, IMSG_DNS_HOST, 0, 0, -1);
 		m_add_id(s->p, s->reqid);
 		m_add_sockaddr(s->p, ai->ai_addr);
 		m_add_int(s->p, lookup->preference);
@@ -187,7 +187,7 @@ dns_dispatch_host(int ev, struct async_res *ar, void *arg)
 	if (--s->refcount)
 		return;
 
-	m_create(s->p, IMSG_DNS_HOST_END, 0, 0, -1, 24);
+	m_create(s->p, IMSG_DNS_HOST_END, 0, 0, -1);
 	m_add_id(s->p, s->reqid);
 	m_add_int(s->p, s->mxfound ? DNS_OK : DNS_ENOTFOUND);
 	m_close(s->p);
@@ -200,7 +200,7 @@ dns_dispatch_ptr(int ev, struct async_res *ar, void *arg)
 	struct dns_session	*s = arg;
 
 	/* The error code could be more precise, but we don't currently care */
-	m_create(s->p,  IMSG_DNS_PTR, 0, 0, -1, 512);
+	m_create(s->p,  IMSG_DNS_PTR, 0, 0, -1);
 	m_add_id(s->p, s->reqid);
 	m_add_int(s->p, ar->ar_gai_errno ? DNS_ENOTFOUND : DNS_OK);
 	if (ar->ar_gai_errno == 0)
@@ -222,7 +222,7 @@ dns_dispatch_mx(int ev, struct async_res *ar, void *arg)
 
 	if (ar->ar_h_errno && ar->ar_h_errno != NO_DATA) {
 
-		m_create(s->p,  IMSG_DNS_HOST_END, 0, 0, -1, 24);
+		m_create(s->p,  IMSG_DNS_HOST_END, 0, 0, -1);
 		m_add_id(s->p, s->reqid);
 		if (ar->ar_rcode == NXDOMAIN)
 			m_add_int(s->p, DNS_ENONAME);
@@ -236,13 +236,13 @@ dns_dispatch_mx(int ev, struct async_res *ar, void *arg)
 		return;
 	}
 
-	unpack_init(&pack, ar->ar_data, ar->ar_datalen);
-	unpack_header(&pack, &h);
-	unpack_query(&pack, &q);
+	asr_unpack_init(&pack, ar->ar_data, ar->ar_datalen);
+	asr_unpack_header(&pack, &h);
+	asr_unpack_query(&pack, &q);
 
 	found = 0;
 	for (; h.ancount; h.ancount--) {
-		unpack_rr(&pack, &rr);
+		asr_unpack_rr(&pack, &rr);
 		if (rr.rr_type != T_MX)
 			continue;
 		print_dname(rr.rr.mx.exchange, buf, sizeof(buf));
@@ -279,11 +279,11 @@ dns_dispatch_mx_preference(int ev, struct async_res *ar, void *arg)
 	}
 	else {
 		error = DNS_ENOTFOUND;
-		unpack_init(&pack, ar->ar_data, ar->ar_datalen);
-		unpack_header(&pack, &h);
-		unpack_query(&pack, &q);
+		asr_unpack_init(&pack, ar->ar_data, ar->ar_datalen);
+		asr_unpack_header(&pack, &h);
+		asr_unpack_query(&pack, &q);
 		for (; h.ancount; h.ancount--) {
-			unpack_rr(&pack, &rr);
+			asr_unpack_rr(&pack, &rr);
 			if (rr.rr_type != T_MX)
 				continue;
 			print_dname(rr.rr.mx.exchange, buf, sizeof(buf));
@@ -297,7 +297,7 @@ dns_dispatch_mx_preference(int ev, struct async_res *ar, void *arg)
 
 	free(ar->ar_data);
 
-	m_create(s->p, IMSG_DNS_MX_PREFERENCE, 0, 0, -1, 36);
+	m_create(s->p, IMSG_DNS_MX_PREFERENCE, 0, 0, -1);
 	m_add_id(s->p, s->reqid);
 	m_add_int(s->p, error);
 	if (error == DNS_OK)
@@ -364,7 +364,7 @@ async_event_dispatch(int fd, short ev, void *arg)
 	int			 r;
 	struct timeval		 tv;
 
-	while ((r = async_run(aev->async, &ar)) == ASYNC_YIELD)
+	while ((r = asr_async_run(aev->async, &ar)) == ASYNC_YIELD)
 		aev->callback(r, &ar, aev->arg);
 
 	event_del(&aev->ev);

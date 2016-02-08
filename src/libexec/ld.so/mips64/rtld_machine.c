@@ -1,4 +1,4 @@
-/*	$OpenBSD: rtld_machine.c,v 1.14 2010/09/11 11:13:20 kettenis Exp $ */
+/*	$OpenBSD: rtld_machine.c,v 1.17 2013/06/13 04:13:47 brad Exp $ */
 
 /*
  * Copyright (c) 1998-2004 Opsycon AB, Sweden.
@@ -50,6 +50,8 @@ _dl_md_reloc(elf_object_t *object, int rel, int relsz)
 	Elf64_Addr got_start, got_end;
 	Elf64_Rel  *relocs;
 	const Elf64_Sym *sym, *this;
+	Elf64_Addr prev_value = 0;
+	const Elf64_Sym *prev_sym = NULL;
 
 	loff = object->obj_base;
 	numrel = object->Dyn.info[relsz] / sizeof(Elf64_Rel);
@@ -102,17 +104,23 @@ _dl_md_reloc(elf_object_t *object, int rel, int relsz)
 		type = ELF64_R_TYPE(relocs->r_info);
 
 		this = NULL;
-		if (ELF64_R_SYM(relocs->r_info) &&
-		    !(ELF64_ST_BIND(sym->st_info) == STB_LOCAL &&
-		    ELF64_ST_TYPE (sym->st_info) == STT_NOTYPE)) {
-			ooff = _dl_find_symbol(symn, &this,
-			SYM_SEARCH_ALL | SYM_WARNNOTFOUND | SYM_PLT,
-			sym, object, NULL);
+		if (ELF64_R_SYM(relocs->r_info)) {
+			if (sym == prev_sym)
+				this = sym;	/* XXX non-NULL */
+			else if (!(ELF64_ST_BIND(sym->st_info) == STB_LOCAL &&
+			    ELF64_ST_TYPE (sym->st_info) == STT_NOTYPE)) {
+				ooff = _dl_find_symbol(symn, &this,
+				SYM_SEARCH_ALL | SYM_WARNNOTFOUND | SYM_PLT,
+				sym, object, NULL);
 
-			if (this == NULL) {
-				if (ELF_ST_BIND(sym->st_info) != STB_WEAK)
-					fails++;
-				continue;
+				if (this == NULL) {
+					if (ELF_ST_BIND(sym->st_info) !=
+					    STB_WEAK)
+						fails++;
+					continue;
+				}
+				prev_sym = sym;
+				prev_value = this->st_value + ooff;
 			}
 		}
 
@@ -134,10 +142,10 @@ _dl_md_reloc(elf_object_t *object, int rel, int relsz)
 				}
 			} else if (this && ((long)r_addr & 7)) {
 				_dl_bcopy((char *)r_addr, &robj, sizeof(robj));
-				robj += this->st_value + ooff;
+				robj += prev_value;
 				_dl_bcopy(&robj, (char *)r_addr, sizeof(robj));
 			} else if (this) {
-				*(u_int64_t *)r_addr += this->st_value + ooff;
+				*(u_int64_t *)r_addr += prev_value;
 			}
 			break;
 
@@ -224,6 +232,9 @@ _dl_md_reloc_got(elf_object_t *object, int lazy)
 	if (this != NULL)
 		object->got_size = ooff + this->st_value  - object->got_start;
 
+	if (object->traced)
+		lazy = 1;
+
 	/*
 	 *  Then do all global references according to the ABI.
 	 *  Quickstart is not yet implemented.
@@ -282,6 +293,7 @@ _dl_bind(elf_object_t *object, int symidx)
 	Elf_Addr *addr, ooff;
 	const Elf_Sym *sym, *this;
 	const char *symn;
+	const elf_object_t *sobj;
 	sigset_t savedmask;
 	int n;
 
@@ -293,11 +305,14 @@ _dl_bind(elf_object_t *object, int symidx)
 
 	this = NULL;
 	ooff = _dl_find_symbol(symn, &this,
-	    SYM_SEARCH_ALL|SYM_WARNNOTFOUND|SYM_PLT, sym, object, NULL);
+	    SYM_SEARCH_ALL|SYM_WARNNOTFOUND|SYM_PLT, sym, object, &sobj);
 	if (this == NULL) {
 		_dl_printf("lazy binding failed\n");
-		*((int *)0) = 0;	/* XXX */
+		*(volatile int *)0 = 0;		/* XXX */
 	}
+
+	if (sobj->traced && _dl_trace_plt(sobj, symn))
+		return ooff + this->st_value;
 
 	addr = &gotp[n + symidx];
 

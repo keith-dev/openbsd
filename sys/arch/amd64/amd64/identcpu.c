@@ -1,4 +1,4 @@
-/*	$OpenBSD: identcpu.c,v 1.43 2012/11/10 09:45:05 mglocker Exp $	*/
+/*	$OpenBSD: identcpu.c,v 1.49 2013/07/30 20:42:34 kettenis Exp $	*/
 /*	$NetBSD: identcpu.c,v 1.1 2003/04/26 18:39:28 fvdl Exp $	*/
 
 /*
@@ -45,6 +45,8 @@
 #include <machine/cpufunc.h>
 
 void	replacesmap(void);
+u_int64_t cpu_tsc_freq(struct cpu_info *);
+u_int64_t cpu_tsc_freq_ctr(struct cpu_info *);
 
 /* sysctl wants this. */
 char cpu_model[48];
@@ -216,6 +218,8 @@ void (*setperf_setup)(struct cpu_info *);
 
 void via_nano_setup(struct cpu_info *ci);
 
+void cpu_topology(struct cpu_info *ci);
+
 void
 via_nano_setup(struct cpu_info *ci)
 {
@@ -321,10 +325,62 @@ via_update_sensor(void *args)
 }
 #endif
 
+u_int64_t
+cpu_tsc_freq_ctr(struct cpu_info *ci)
+{
+	u_int64_t count, last_count, msr;
+
+	if ((ci->ci_flags & CPUF_CONST_TSC) == 0 ||
+	    (cpu_perf_eax & CPUIDEAX_VERID) <= 1 ||
+	    CPUIDEDX_NUM_FC(cpu_perf_edx) <= 1)
+		return (0);
+
+	msr = rdmsr(MSR_PERF_FIXED_CTR_CTRL);
+	if (msr & MSR_PERF_FIXED_CTR_FC(1, MSR_PERF_FIXED_CTR_FC_MASK)) {
+		/* some hypervisor is dicking us around */
+		return (0);
+	}
+
+	msr |= MSR_PERF_FIXED_CTR_FC(1, MSR_PERF_FIXED_CTR_FC_1);
+	wrmsr(MSR_PERF_FIXED_CTR_CTRL, msr);
+
+	msr = rdmsr(MSR_PERF_GLOBAL_CTRL) | MSR_PERF_GLOBAL_CTR1_EN;
+	wrmsr(MSR_PERF_GLOBAL_CTRL, msr);
+
+	last_count = rdmsr(MSR_PERF_FIXED_CTR1);
+	delay(100000);
+	count = rdmsr(MSR_PERF_FIXED_CTR1);
+
+	msr = rdmsr(MSR_PERF_FIXED_CTR_CTRL);
+	msr &= MSR_PERF_FIXED_CTR_FC(1, MSR_PERF_FIXED_CTR_FC_MASK);
+	wrmsr(MSR_PERF_FIXED_CTR_CTRL, msr);
+
+	msr = rdmsr(MSR_PERF_GLOBAL_CTRL);
+	msr &= ~MSR_PERF_GLOBAL_CTR1_EN;
+	wrmsr(MSR_PERF_GLOBAL_CTRL, msr);
+
+	return ((count - last_count) * 10);
+}
+
+u_int64_t
+cpu_tsc_freq(struct cpu_info *ci)
+{
+	u_int64_t last_count, count;
+
+	count = cpu_tsc_freq_ctr(ci);
+	if (count != 0)
+		return (count);
+
+	last_count = rdtsc();
+	delay(100000);
+	count = rdtsc();
+
+	return ((count - last_count) * 10);
+}
+
 void
 identifycpu(struct cpu_info *ci)
 {
-	u_int64_t last_count, count, msr;
 	u_int32_t dummy, val, pnfeatset;
 	u_int32_t brand[12];
 	char mycpu_model[48];
@@ -339,6 +395,8 @@ identifycpu(struct cpu_info *ci)
 
 		CPUID(0x80000001, dummy, dummy,
 		    ecx, ci->ci_feature_eflags);
+		/* Other bits may clash */
+		ci->ci_feature_flags |= (ci->ci_feature_eflags & CPUID_NXE);
 		if (ci->ci_flags & CPUF_PRIMARY)
 			ecpu_ecxfeature = ecx;
 		/* Let cpu_fature be the common bits */
@@ -401,30 +459,7 @@ identifycpu(struct cpu_info *ci)
 		}
 	}
 
-	if ((ci->ci_flags & CPUF_CONST_TSC) &&
-	    (cpu_perf_eax & CPUIDEAX_VERID) > 1 &&
-	    CPUIDEDX_NUM_FC(cpu_perf_edx) > 1) {
-		msr = rdmsr(MSR_PERF_FIXED_CTR_CTRL) | MSR_PERF_FIXED_CTR1_EN;
-		wrmsr(MSR_PERF_FIXED_CTR_CTRL, msr);
-		msr = rdmsr(MSR_PERF_GLOBAL_CTRL) | MSR_PERF_GLOBAL_CTR1_EN;
-		wrmsr(MSR_PERF_GLOBAL_CTRL, msr);
-
-		last_count = rdmsr(MSR_PERF_FIXED_CTR1);
-		delay(100000);
-		count = rdmsr(MSR_PERF_FIXED_CTR1);
-
-		msr = rdmsr(MSR_PERF_FIXED_CTR_CTRL);
-		msr &= ~MSR_PERF_FIXED_CTR1_EN;
-		wrmsr(MSR_PERF_FIXED_CTR_CTRL, msr);
-		msr = rdmsr(MSR_PERF_GLOBAL_CTRL);
-		msr &= ~MSR_PERF_GLOBAL_CTR1_EN;
-		wrmsr(MSR_PERF_GLOBAL_CTRL, msr);
-	} else {
-		last_count = rdtsc();
-		delay(100000);
-		count = rdtsc();
-	}
-	ci->ci_tsc_freq = (count - last_count) * 10;
+	ci->ci_tsc_freq = cpu_tsc_freq(ci);
 
 	amd_cpu_cacheinfo(ci);
 
@@ -497,8 +532,10 @@ identifycpu(struct cpu_info *ci)
 		if (cpu_ecxfeature & CPUIDECX_EST)
 			setperf_setup = est_init;
 
+#ifdef CRYPTO
 		if (cpu_ecxfeature & CPUIDECX_AES)
 			amd64_has_aesni = 1;
+#endif
 
 		if (cpu_ecxfeature & CPUIDECX_RDRAND)
 			has_rdrand = 1;
@@ -512,6 +549,9 @@ identifycpu(struct cpu_info *ci)
 		CPUID(0x01, dummy, cflushsz, dummy, dummy);
 		/* cflush cacheline size is equal to bits 15-8 of ebx * 8 */
 		ci->ci_cflushsz = ((cflushsz >> 8) & 0xff) * 8;
+	}
+
+	if (!strcmp(cpu_vendor, "GenuineIntel") && cpuid_level >= 0x06 ) {
 		CPUID(0x06, val, dummy, dummy, dummy);
 		if (val & 0x1) {
 			strlcpy(ci->ci_sensordev.xname, ci->ci_dev->dv_xname,
@@ -539,4 +579,127 @@ identifycpu(struct cpu_info *ci)
 		sensordev_install(&ci->ci_sensordev);
 #endif
 	}
+
+	cpu_topology(ci);
+}
+
+#ifndef SMALL_KERNEL
+/*
+ * Base 2 logarithm of an int. returns 0 for 0 (yeye, I know).
+ */
+static int
+log2(unsigned int i)
+{
+	int ret = 0;
+
+	while (i >>= 1)
+		ret++;
+
+	return (ret);
+}
+
+static int
+mask_width(u_int x)
+{
+	int bit;
+	int mask;
+	int powerof2;
+
+	powerof2 = ((x - 1) & x) == 0;
+	mask = (x << (1 - powerof2)) - 1;
+
+	/* fls */
+	if (mask == 0)
+		return (0);
+	for (bit = 1; mask != 1; bit++)
+		mask = (unsigned int)mask >> 1;
+
+	return (bit);
+}
+#endif
+
+/*
+ * Build up cpu topology for given cpu, must run on the core itself.
+ */
+void
+cpu_topology(struct cpu_info *ci)
+{
+#ifndef SMALL_KERNEL
+	u_int32_t eax, ebx, ecx, edx;
+	u_int32_t apicid, max_apicid, max_coreid;
+	u_int32_t smt_bits, core_bits, pkg_bits;
+	u_int32_t smt_mask, core_mask, pkg_mask;
+
+	/* We need at least apicid at CPUID 1 */
+	CPUID(0, eax, ebx, ecx, edx);
+	if (eax < 1)
+		goto no_topology;
+
+	/* Initial apicid */
+	CPUID(1, eax, ebx, ecx, edx);
+	apicid = (ebx >> 24) & 0xff;
+
+	if (strcmp(cpu_vendor, "AuthenticAMD") == 0) {
+		/* We need at least apicid at CPUID 0x80000008 */
+		CPUID(0x80000000, eax, ebx, ecx, edx);
+		if (eax < 0x80000008)
+			goto no_topology;
+
+		CPUID(0x80000008, eax, ebx, ecx, edx);
+		core_bits = (ecx >> 12) & 0xf;
+		if (core_bits == 0)
+			goto no_topology;
+		/* So coreidsize 2 gives 3, 3 gives 7... */
+		core_mask = (1 << core_bits) - 1;
+		/* Core id is the least significant considering mask */
+		ci->ci_core_id = apicid & core_mask;
+		/* Pkg id is the upper remaining bits */
+		ci->ci_pkg_id = apicid & ~core_mask;
+		ci->ci_pkg_id >>= core_bits;
+	} else if (strcmp(cpu_vendor, "GenuineIntel") == 0) {
+		/* We only support leaf 1/4 detection */
+		CPUID(0, eax, ebx, ecx, edx);
+		if (eax < 4)
+			goto no_topology;
+		/* Get max_apicid */
+		CPUID(1, eax, ebx, ecx, edx);
+		max_apicid = (ebx >> 16) & 0xff;
+		/* Get max_coreid */
+		CPUID_LEAF(4, 0, eax, ebx, ecx, edx);
+		max_coreid = ((eax >> 26) & 0x3f) + 1;
+		/* SMT */
+		smt_bits = mask_width(max_apicid / max_coreid);
+		smt_mask = (1 << smt_bits) - 1;
+		/* Core */
+		core_bits = log2(max_coreid);
+		core_mask = (1 << (core_bits + smt_bits)) - 1;
+		core_mask ^= smt_mask;
+		/* Pkg */
+		pkg_bits = core_bits + smt_bits;
+		pkg_mask = -1 << core_bits;
+
+		ci->ci_smt_id = apicid & smt_mask;
+		ci->ci_core_id = (apicid & core_mask) >> smt_bits;
+		ci->ci_pkg_id = (apicid & pkg_mask) >> pkg_bits;
+	} else
+		goto no_topology;
+#ifdef DEBUG
+	printf("cpu%d: smt %u, core %u, pkg %u "
+		"(apicid 0x%x, max_apicid 0x%x, max_coreid 0x%x, smt_bits 0x%x, smt_mask 0x%x, "
+		"core_bits 0x%x, core_mask 0x%x, pkg_bits 0x%x, pkg_mask 0x%x)\n",
+		ci->ci_cpuid, ci->ci_smt_id, ci->ci_core_id, ci->ci_pkg_id,
+		apicid, max_apicid, max_coreid, smt_bits, smt_mask, core_bits,
+		core_mask, pkg_bits, pkg_mask);
+#else
+	printf("cpu%d: smt %u, core %u, package %u\n", ci->ci_cpuid,
+		ci->ci_smt_id, ci->ci_core_id, ci->ci_pkg_id);
+
+#endif
+	return;
+	/* We can't map, so consider ci_core_id as ci_cpuid */
+no_topology:
+#endif
+	ci->ci_smt_id  = 0;
+	ci->ci_core_id = ci->ci_cpuid;
+	ci->ci_pkg_id  = 0;
 }

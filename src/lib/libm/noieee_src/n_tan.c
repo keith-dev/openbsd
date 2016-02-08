@@ -1,4 +1,4 @@
-/*	$OpenBSD: n_tan.c,v 1.12 2013/01/13 03:44:59 martynas Exp $	*/
+/*	$OpenBSD: n_tan.c,v 1.14 2013/07/15 04:08:26 espie Exp $	*/
 /*	$NetBSD: n_tan.c,v 1.1 1995/10/10 23:37:07 ragge Exp $	*/
 /*
  * Copyright (c) 1987, 1993
@@ -33,6 +33,12 @@
 
 #include "mathimpl.h"
 
+float
+tanf(float x)
+{
+	return (float)tan((double) x);
+}
+
 double
 tan(double x)
 {
@@ -65,4 +71,4 @@ tan(double x)
 		return c/(x+x*ss);		/* ... cos/sin */
 }
 
-__weak_alias(tanl, tan);
+__strong_alias(tanl, tan);

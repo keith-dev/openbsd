@@ -1,5 +1,5 @@
 /*	$NetBSD: vmstat.c,v 1.29.4.1 1996/06/05 00:21:05 cgd Exp $	*/
-/*	$OpenBSD: vmstat.c,v 1.119 2012/04/12 12:33:04 deraadt Exp $	*/
+/*	$OpenBSD: vmstat.c,v 1.122 2013/07/18 08:42:50 bluhm Exp $	*/
 
 /*
  * Copyright (c) 1980, 1986, 1991, 1993
@@ -78,8 +78,6 @@ struct nlist namelist[] = {
 	{ "_nselcoll" },
 #define X_POOLHEAD	7		/* sysctl */
 	{ "_pool_head" },
-#define X_KMPAGESFREE	8		/* sysctl */
-	{ "_uvm_km_pages_free" },
 	{ "" },
 };
 
@@ -539,8 +537,6 @@ dosum(void)
 	(void)printf("%11u software interrupts\n", uvmexp.softs);
 	(void)printf("%11u syscalls\n", uvmexp.syscalls);
 	(void)printf("%11u pagein operations\n", uvmexp.pageins);
-	(void)printf("%11u swap ins\n", uvmexp.swapins);
-	(void)printf("%11u swap outs\n", uvmexp.swapouts);
 	(void)printf("%11u forks\n", uvmexp.forks);
 	(void)printf("%11u forks where vmspace is shared\n",
 		     uvmexp.forks_sharevm);
@@ -1030,14 +1026,14 @@ dopool_sysctl(void)
 void
 dopool_kvm(void)
 {
-	TAILQ_HEAD(,pool) pool_head;
+	SIMPLEQ_HEAD(,pool) pool_head;
 	struct pool pool, *pp = &pool;
 	long total = 0, inuse = 0;
 	u_long addr;
 	int kmfp;
 
 	kread(X_POOLHEAD, &pool_head, sizeof(pool_head));
-	addr = (u_long)TAILQ_FIRST(&pool_head);
+	addr = (u_long)SIMPLEQ_FIRST(&pool_head);
 
 	while (addr != 0) {
 		char name[32];
@@ -1062,13 +1058,11 @@ dopool_kvm(void)
 		inuse += (pp->pr_nget - pp->pr_nput) * pp->pr_size;
 		total += pp->pr_npages * getpagesize();	/* XXX */
 
-		addr = (u_long)TAILQ_NEXT(pp, pr_poollist);
+		addr = (u_long)SIMPLEQ_NEXT(pp, pr_poollist);
 	}
 
 	inuse /= 1024;
 	total /= 1024;
-	kread(X_KMPAGESFREE, &kmfp, sizeof(kmfp));
-	total += kmfp * (getpagesize() / 1024);
 	printf("\nIn use %ldK, total allocated %ldK; utilization %.1f%%\n",
 	    inuse, total, (double)(100 * inuse) / total);
 }

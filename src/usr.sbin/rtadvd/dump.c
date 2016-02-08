@@ -1,4 +1,4 @@
-/*	$OpenBSD: dump.c,v 1.11 2012/07/08 10:46:00 phessler Exp $	*/
+/*	$OpenBSD: dump.c,v 1.13 2013/04/30 12:29:04 florian Exp $	*/
 /*	$KAME: dump.c,v 1.27 2002/05/29 14:23:55 itojun Exp $	*/
 
 /*
@@ -121,17 +121,15 @@ rtadvd_dump()
 
 		/* control information */
 		if (rai->lastsent.tv_sec) {
+			time_t t = rai->lastsent.tv_sec;
 			/* note that ctime() appends CR by itself */
-			log_info("  Last RA sent: %s",
-			    ctime((time_t *)&rai->lastsent.tv_sec));
+			log_info("  Last RA sent: %s", ctime(&t));
 
 		}
 		if (rai->timer) {
-			log_info("  Next RA will be sent: %s",
-			    ctime((time_t *)&rai->timer->tm.tv_sec));
-
-		}
-		else
+			time_t t = rai->timer->tm.tv_sec;
+			log_info("  Next RA will be sent: %s", ctime(&t));
+		} else
 			log_info("  RA timer is stopped");
 		log_info("  waits: %d, initcount: %d",
 
@@ -184,13 +182,15 @@ rtadvd_dump()
 				origin = "";
 			}
 			if (pfx->vltimeexpire != 0)
-				asprintf(&vltimexpire, "(decr,expire %ld)", (long)
-				    pfx->vltimeexpire > now.tv_sec ?
-				    pfx->vltimeexpire - now.tv_sec : 0);
+				/* truncate to onwire value */
+				asprintf(&vltimexpire, "(decr,expire %u)",
+				    (u_int32_t)(pfx->vltimeexpire > now.tv_sec ?
+				    pfx->vltimeexpire - now.tv_sec : 0));
 			if (pfx->pltimeexpire != 0)
-				asprintf(&pltimexpire, "(decr,expire %ld)", (long)
-				    pfx->pltimeexpire > now.tv_sec ?
-				    pfx->pltimeexpire - now.tv_sec : 0);
+				/* truncate to onwire value */
+				asprintf(&pltimexpire, "(decr,expire %u)",
+				    (u_int32_t)(pfx->pltimeexpire > now.tv_sec ?
+				    pfx->pltimeexpire - now.tv_sec : 0));
 
 			vltime = lifetime(pfx->validlifetime);
 			pltime = lifetime(pfx->preflifetime);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: vnode.h,v 1.113 2012/10/08 15:43:08 jsing Exp $	*/
+/*	$OpenBSD: vnode.h,v 1.118 2013/07/05 21:28:21 guenther Exp $	*/
 /*	$NetBSD: vnode.h,v 1.38 1996/02/29 20:59:05 cgd Exp $	*/
 
 /*
@@ -38,8 +38,6 @@
 #include <sys/buf.h>
 #include <sys/types.h>
 #include <sys/queue.h>
-#include <sys/lock.h>
-#include <sys/namei.h>
 #include <sys/selinfo.h>
 #include <sys/tree.h>
 
@@ -71,13 +69,13 @@ enum vtype	{ VNON, VREG, VDIR, VBLK, VCHR, VLNK, VSOCK, VFIFO, VBAD };
 enum vtagtype	{
 	VT_NON, VT_UFS, VT_NFS, VT_MFS, VT_MSDOSFS,
 	VT_PORTAL, VT_PROCFS, VT_AFS, VT_ISOFS, VT_ADOSFS,
-	VT_EXT2FS, VT_VFS, VT_NTFS, VT_UDF,
+	VT_EXT2FS, VT_VFS, VT_NTFS, VT_UDF, VT_FUSEFS
 };
 
 #define	VTAG_NAMES \
     "NON", "UFS", "NFS", "MFS", "MSDOSFS",			\
     "PORTAL", "PROCFS", "AFS", "ISOFS", "ADOSFS",		\
-    "EXT2FS", "VFS", "NTFS", "UDF"
+    "EXT2FS", "VFS", "NTFS", "UDF", "FUSEFS"
 
 /*
  * Each underlying filesystem allocates its own private area and hangs
@@ -255,7 +253,7 @@ extern struct freelst vnode_free_list;	/* vnode free list */
 extern	struct vnode *rootvnode;	/* root (i.e. "/") vnode */
 extern	int desiredvnodes;		/* XXX number of vnodes desired */
 extern	int maxvnodes;			/* XXX number of vnodes to allocate */
-extern	time_t syncdelay;		/* time to delay syncing vnodes */
+extern	int syncdelay;			/* seconds to delay syncing vnodes */
 extern	int rushjob;			/* # of slots syncer should run ASAP */
 extern void    vhold(struct vnode *);
 extern void    vdrop(struct vnode *);
@@ -537,12 +535,12 @@ int VOP_UNLOCK(struct vnode *, int, struct proc *);
 
 struct vop_bmap_args {
 	struct vnode *a_vp;
-	daddr64_t a_bn;
+	daddr_t a_bn;
 	struct vnode **a_vpp;
-	daddr64_t *a_bnp;
+	daddr_t *a_bnp;
 	int *a_runp;
 };
-int VOP_BMAP(struct vnode *, daddr64_t, struct vnode **, daddr64_t *, int *);
+int VOP_BMAP(struct vnode *, daddr_t, struct vnode **, daddr_t *, int *);
 
 struct vop_print_args {
 	struct vnode *a_vp;

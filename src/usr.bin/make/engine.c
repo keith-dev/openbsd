@@ -1,4 +1,4 @@
-/*	$OpenBSD: engine.c,v 1.40 2012/12/07 15:08:03 espie Exp $ */
+/*	$OpenBSD: engine.c,v 1.45 2013/05/30 08:58:38 espie Exp $ */
 /*
  * Copyright (c) 2012 Marc Espie.
  *
@@ -63,15 +63,16 @@
 #include <sys/time.h>
 #include <sys/wait.h>
 #include <assert.h>
-#include <limits.h>
-#include <stdio.h>
-#include <stdlib.h>
 #include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
-#include <unistd.h>
-#include <string.h>
+#include <limits.h>
 #include <signal.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
 #include "config.h"
 #include "defines.h"
 #include "dir.h"
@@ -285,8 +286,9 @@ Job_Touch(GNode *gn)
 void
 Make_TimeStamp(GNode *parent, GNode *child)
 {
-	if (is_strictly_before(parent->cmtime, child->mtime))
-		parent->cmtime = child->mtime;
+	if (is_strictly_before(parent->youngest->mtime, child->mtime)) {
+ 		parent->youngest = child;
+	}
 }
 
 void
@@ -379,7 +381,7 @@ Make_DoAllVar(GNode *gn)
 			if (child->built_status == MADE)
 				do_oodate = true;
 		} else if (is_strictly_before(gn->mtime, child->mtime) ||
-		   (!is_strictly_before(child->mtime, now) &&
+		   (!is_strictly_before(child->mtime, starttime) &&
 		   child->built_status == MADE))
 		   	do_oodate = true;
 		if (do_oodate) {
@@ -443,7 +445,7 @@ Make_OODate(GNode *gn)
 		if (DEBUG(MAKE)) {
 			if (!is_out_of_date(gn->mtime))
 				printf("modified %s...",
-				    time_to_string(gn->mtime));
+				    time_to_string(&gn->mtime));
 			else
 				printf("non-existent...");
 		}
@@ -488,18 +490,19 @@ Make_OODate(GNode *gn)
 				printf(".EXEC node...");
 		}
 		oodate = true;
-	} else if (is_strictly_before(gn->mtime, gn->cmtime) ||
-	   (is_out_of_date(gn->cmtime) &&
+	} else if (is_strictly_before(gn->mtime, gn->youngest->mtime) ||
+	   (gn == gn->youngest &&
 	    (is_out_of_date(gn->mtime) || (gn->type & OP_DOUBLEDEP)))) {
 		/*
 		 * A node whose modification time is less than that of its
-		 * youngest child or that has no children (cmtime ==
-		 * OUT_OF_DATE) and either doesn't exist (mtime == OUT_OF_DATE)
+		 * youngest child or that has no children (gn->youngest == gn)
+		 * and either doesn't exist (mtime == OUT_OF_DATE)
 		 * or was the object of a :: operator is out-of-date.
 		 */
 		if (DEBUG(MAKE)) {
-			if (is_strictly_before(gn->mtime, gn->cmtime))
-				printf("modified before source...");
+			if (is_strictly_before(gn->mtime, gn->youngest->mtime))
+				printf("modified before source(%s)...",
+				    gn->youngest->name);
 			else if (is_out_of_date(gn->mtime))
 				printf("non-existent and no sources...");
 			else

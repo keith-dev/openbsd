@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile.vax,v 1.66 2012/08/22 16:58:26 pascal Exp $
+#	$OpenBSD: Makefile.vax,v 1.69 2013/07/05 21:11:57 miod Exp $
 
 # For instructions on building kernels consult the config(8) and options(4)
 # manual pages.
@@ -21,7 +21,7 @@ S!=	cd ../../../..; pwd
 _machdir?=	$S/arch/${_mach}
 _archdir?=	$S/arch/${_arch}
 
-INCLUDES=	-nostdinc -I. -I$S -I$S/arch
+INCLUDES=	-nostdinc -I$S -I. -I$S/arch
 CPPFLAGS=	${INCLUDES} ${IDENT} ${PARAM} -D_KERNEL -MD -MP
 CWARNFLAGS=	-Werror -Wall -Wstrict-prototypes -Wmissing-prototypes \
 		-Wno-main -Wno-uninitialized -Wno-format \
@@ -37,8 +37,9 @@ CMACHFLAGS+=	-fno-stack-protector
 
 COPTS?=		-O2
 CFLAGS=		${DEBUG} ${CWARNFLAGS} ${CMACHFLAGS} ${COPTS} ${PIPE}
-AFLAGS=		-D_LOCORE -x assembler-with-cpp -traditional-cpp ${CMACHFLAGS}
-LINKFLAGS=	-N -Ttext 80000000 -e start
+AFLAGS=		-D_LOCORE -x assembler-with-cpp -traditional-cpp \
+		${CWARNFLAGS} ${CMACHFLAGS}
+LINKFLAGS=	-N -Ttext 80000000 -e __start --warn-common
 
 .if ${IDENT:M-DDDB_STRUCT}
 DB_STRUCTINFO=	db_structinfo.h
@@ -77,13 +78,13 @@ SYSTEM_LD_TAIL=	@${SIZE} $@; chmod 755 $@
 DEBUG?=
 .if ${DEBUG} == "-g"
 LINKFLAGS+=	-X
-STRIPFLAGS=	-g
+STRIPFLAGS=	-g -x
 SYSTEM_LD_TAIL+=; \
 		echo mv $@ $@.gdb; rm -f $@.gdb; mv $@ $@.gdb; \
 		echo ${STRIP} ${STRIPFLAGS} -o $@ $@.gdb; \
 		${STRIP} ${STRIPFLAGS} -o $@ $@.gdb
 .else
-LINKFLAGS+=	-S
+LINKFLAGS+=	-S -x
 .endif
 
 %LOAD

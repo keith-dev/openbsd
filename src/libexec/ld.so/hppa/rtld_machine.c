@@ -1,4 +1,4 @@
-/*	$OpenBSD: rtld_machine.c,v 1.25 2012/12/05 23:20:06 deraadt Exp $	*/
+/*	$OpenBSD: rtld_machine.c,v 1.28 2013/06/13 04:13:47 brad Exp $	*/
 
 /*
  * Copyright (c) 2004 Michael Shalayeff
@@ -42,7 +42,10 @@
 
 #include "syscall.h"
 #include "archdep.h"
+#define	_dl_bind XXX_dl_bind
 #include "resolve.h"
+#undef	_dl_bind
+uint64_t _dl_bind(elf_object_t *object, int reloff);
 
 typedef
 struct hppa_plabel {
@@ -329,6 +332,9 @@ _dl_md_reloc_got(elf_object_t *object, int lazy)
 		object->got_size = ELF_ROUND(object->got_size, _dl_pagesz);
 	}
 
+	if (object->traced)
+		lazy = 1;
+
 	if (!lazy) {
 		fails = _dl_md_reloc(object, DT_JMPREL, DT_PLTRELSZ);
 	} else {
@@ -367,13 +373,8 @@ _dl_md_reloc_got(elf_object_t *object, int lazy)
 		__asm __volatile("fdc 0(%0)" :: "r" (&got[-7]));
 		__asm __volatile("fdc 0(%0)" :: "r" (&got[-6]));
 		__asm __volatile("sync");
-#if 0
 		__asm __volatile("fic 0(%%sr0,%0)" :: "r" (&got[-7]));
 		__asm __volatile("fic 0(%%sr0,%0)" :: "r" (&got[-6]));
-#else
-		__asm __volatile("fic 0(%0)" :: "r" (&got[-7]));
-		__asm __volatile("fic 0(%0)" :: "r" (&got[-6]));
-#endif
 		__asm __volatile("sync");
 
 		/*
@@ -393,8 +394,8 @@ _dl_md_reloc_got(elf_object_t *object, int lazy)
 		__asm __volatile("fdc 0(%0)" :: "r" (&got[-2]));
 		__asm __volatile("fdc 0(%0)" :: "r" (&got[-1]));
 		__asm __volatile("sync");
-		__asm __volatile("fic 0(%0)" :: "r" (&got[-2]));
-		__asm __volatile("fic 0(%0)" :: "r" (&got[-1]));
+		__asm __volatile("fic 0(%%sr0,%0)" :: "r" (&got[-2]));
+		__asm __volatile("fic 0(%%sr0,%0)" :: "r" (&got[-1]));
 		__asm __volatile("sync");
 		for (i = 0; i < numrela; i++, rela++) {
 			Elf_Addr *r_addr = (Elf_Addr *)(ooff + rela->r_offset);
@@ -425,7 +426,7 @@ _dl_md_reloc_got(elf_object_t *object, int lazy)
 /*
  * Resolve a symbol at run-time.
  */
-Elf_Addr
+uint64_t
 _dl_bind(elf_object_t *object, int reloff)
 {
 	const elf_object_t *sobj;
@@ -448,11 +449,14 @@ _dl_bind(elf_object_t *object, int reloff)
 	    SYM_SEARCH_ALL|SYM_WARNNOTFOUND|SYM_PLT, sym, object, &sobj);
 	if (this == NULL) {
 		_dl_printf("lazy binding failed!\n");
-		*((int *)0) = 0;	/* XXX */
+		*(volatile int *)0 = 0;		/* XXX */
 	}
 	DL_DEB(("%s: %s\n", symn, sobj->load_name));
 
 	value = ooff + this->st_value + rela->r_addend;
+
+	if (sobj->traced && _dl_trace_plt(sobj, symn))
+		return ((uint64_t)value << 32) | (Elf_Addr)sobj->dyn.pltgot;
 
 	/* if PLT+GOT is protected, allow the write */
 	if (object->got_size != 0) {
@@ -473,5 +477,5 @@ _dl_bind(elf_object_t *object, int reloff)
 		_dl_thread_bind_lock(1, &savedmask);
 	}
 
-	return ((Elf_Addr)addr);
+	return ((uint64_t)addr[0] << 32) | addr[1];
 }

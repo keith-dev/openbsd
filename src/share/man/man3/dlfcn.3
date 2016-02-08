@@ -1,4 +1,4 @@
-.\"	$OpenBSD: dlfcn.3,v 1.23 2010/02/20 21:08:11 schwarze Exp $
+.\"	$OpenBSD: dlfcn.3,v 1.26 2013/07/10 06:43:38 jmc Exp $
 .\"	$NetBSD: dlfcn.3,v 1.3 1996/01/09 19:43:34 pk Exp $
 .\"
 .\" Copyright (c) 1995 Paul Kranenburg
@@ -29,7 +29,7 @@
 .\" (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
 .\" THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 .\"
-.Dd $Mdocdate: February 20 2010 $
+.Dd $Mdocdate: July 10 2013 $
 .Dt DLFCN 3
 .Os
 .Sh NAME
@@ -41,7 +41,7 @@
 .Nm dlerror
 .Nd dynamic link interface
 .Sh SYNOPSIS
-.Fd #include <dlfcn.h>
+.In dlfcn.h
 .Ft "void *"
 .Fn dlopen "const char *path" "int mode"
 .Ft "int"
@@ -52,7 +52,7 @@
 .Fn dladdr "const void *addr" "Dl_info *info"
 .Ft "int"
 .Fn dlctl "void *handle" "int cmd" "void *data"
-.Ft "const char *"
+.Ft "char *"
 .Fn dlerror "void"
 .Sh DESCRIPTION
 These functions provide an interface to the run-time linker
@@ -282,7 +282,7 @@ being returned.
 .Sh SEE ALSO
 .Xr ld 1 ,
 .Xr ld.so 1 ,
-.Xr link 5
+.Xr elf 5
 .Sh HISTORY
 Some of the
 .Nm dl*

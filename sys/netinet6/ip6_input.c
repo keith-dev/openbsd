@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip6_input.c,v 1.105 2012/11/06 12:32:42 henning Exp $	*/
+/*	$OpenBSD: ip6_input.c,v 1.114 2013/06/26 09:12:40 henning Exp $	*/
 /*	$KAME: ip6_input.c,v 1.188 2001/03/29 05:34:31 itojun Exp $	*/
 
 /*
@@ -74,9 +74,9 @@
 #include <sys/socketvar.h>
 #include <sys/errno.h>
 #include <sys/time.h>
+#include <sys/timeout.h>
 #include <sys/kernel.h>
 #include <sys/syslog.h>
-#include <sys/proc.h>
 
 #include <net/if.h>
 #include <net/if_types.h>
@@ -101,7 +101,6 @@
 
 #include <netinet6/ip6protosw.h>
 
-#include "faith.h"
 #include "gif.h"
 #include "bpfilter.h"
 
@@ -118,12 +117,7 @@
 #include <netinet/ip_carp.h>
 #endif
 
-extern struct domain inet6domain;
-extern struct ip6protosw inet6sw[];
-
-u_char ip6_protox[IPPROTO_MAX];
-static int ip6qmaxlen = IFQ_MAXLEN;
-struct in6_ifaddr *in6_ifaddr;
+struct in6_ifaddrhead in6_ifaddr;
 struct ifqueue ip6intrq;
 
 struct ip6stat ip6stat;
@@ -155,7 +149,8 @@ ip6_init(void)
 		    pr->pr_protocol && pr->pr_protocol != IPPROTO_RAW &&
 		    pr->pr_protocol < IPPROTO_MAX)
 			ip6_protox[pr->pr_protocol] = pr - inet6sw;
-	IFQ_SET_MAXLEN(&ip6intrq, ip6qmaxlen);
+	IFQ_SET_MAXLEN(&ip6intrq, IFQ_MAXLEN);
+	TAILQ_INIT(&in6_ifaddr);
 	ip6_randomid_init();
 	nd6_init();
 	frag6_init();
@@ -355,14 +350,9 @@ ip6_input(struct mbuf *m)
 	}
 
 	/* drop packets if interface ID portion is already filled */
-	if ((m->m_pkthdr.rcvif->if_flags & IFF_LOOPBACK) == 0) {
-		if (IN6_IS_SCOPE_EMBED(&ip6->ip6_src) &&
-		    ip6->ip6_src.s6_addr16[1]) {
-			ip6stat.ip6s_badscope++;
-			goto bad;
-		}
-		if (IN6_IS_SCOPE_EMBED(&ip6->ip6_dst) &&
-		    ip6->ip6_dst.s6_addr16[1]) {
+	if ((IN6_IS_SCOPE_EMBED(&ip6->ip6_src) && ip6->ip6_src.s6_addr16[1]) ||
+	    (IN6_IS_SCOPE_EMBED(&ip6->ip6_dst) && ip6->ip6_dst.s6_addr16[1])) {
+		if ((m->m_pkthdr.rcvif->if_flags & IFF_LOOPBACK) == 0) {
 			ip6stat.ip6s_badscope++;
 			goto bad;
 		}
@@ -488,7 +478,7 @@ ip6_input(struct mbuf *m)
 #endif
 	    ip6_forward_rt.ro_rt->rt_ifp->if_type == IFT_LOOP) {
 		struct in6_ifaddr *ia6 =
-			(struct in6_ifaddr *)ip6_forward_rt.ro_rt->rt_ifa;
+			ifatoia6(ip6_forward_rt.ro_rt->rt_ifa);
 		if (ia6->ia6_flags & IN6_IFF_ANYCAST)
 			isanycast = 1;
 		/*
@@ -510,21 +500,6 @@ ip6_input(struct mbuf *m)
 			goto bad;
 		}
 	}
-
-	/*
-	 * FAITH (Firewall Aided Internet Translator)
-	 */
-#if defined(NFAITH) && 0 < NFAITH
-	if (ip6_keepfaith) {
-		if (ip6_forward_rt.ro_rt && ip6_forward_rt.ro_rt->rt_ifp
-		 && ip6_forward_rt.ro_rt->rt_ifp->if_type == IFT_FAITH) {
-			/* XXX do we need more sanity checks? */
-			ours = 1;
-			deliverifp = ip6_forward_rt.ro_rt->rt_ifp; /*faith*/
-			goto hbhcheck;
-		}
-	}
-#endif
 
 #if 0
     {
@@ -669,6 +644,9 @@ ip6_input(struct mbuf *m)
 		ip6_forward(m, srcrt);
 		return;
 	}	
+
+	/* pf might have changed things */
+	in6_proto_cksum_out(m, NULL);
 
 	ip6 = mtod(m, struct ip6_hdr *);
 

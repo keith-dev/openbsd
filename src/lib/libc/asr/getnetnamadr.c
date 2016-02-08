@@ -1,4 +1,4 @@
-/*	$OpenBSD: getnetnamadr.c,v 1.2 2012/11/24 15:12:48 eric Exp $	*/
+/*	$OpenBSD: getnetnamadr.c,v 1.6 2013/07/12 14:36:22 eric Exp $	*/
 /*
  * Copyright (c) 2012 Eric Faurot <eric@openbsd.org>
  *
@@ -40,8 +40,15 @@ _fillnetent(const struct netent *e, struct netent *r, char *buf, size_t len)
 	size_t	n, i;
 	int	naliases;
 
+	bzero(buf, len);
+	bzero(r, sizeof(*r));
+	r->n_aliases = _empty;
+
 	end = buf + len;
-	ptr = (char**)buf; /* XXX align */
+	ptr = (char **)ALIGN(buf);
+
+	if ((char *)ptr >= end)
+		return;
 
 	for (naliases = 0; e->n_aliases[naliases]; naliases++)
 		;
@@ -52,11 +59,8 @@ _fillnetent(const struct netent *e, struct netent *r, char *buf, size_t len)
 	r->n_aliases = ptr;
 
 	pos = (char *)(ptr + (naliases + 1));
-	if (pos > end) {
+	if (pos > end)
 		r->n_aliases = _empty;
-		return;
-	}
-	bzero(ptr, pos - (char *)ptr);
 
 	n = strlcpy(pos, e->n_name, end - pos);
 	if (n >= end - pos)
@@ -79,13 +83,15 @@ getnetbyname(const char *name)
 	struct async	*as;
 	struct async_res ar;
 
+	res_init();
+
 	as = getnetbyname_async(name, NULL);
 	if (as == NULL) {
 		h_errno = NETDB_INTERNAL;
 		return (NULL);
 	}
 
-	async_run_sync(as, &ar);
+	asr_async_run_sync(as, &ar);
 
 	errno = ar.ar_errno;
 	h_errno = ar.ar_h_errno;
@@ -104,13 +110,15 @@ getnetbyaddr(in_addr_t net, int type)
 	struct async	*as;
 	struct async_res ar;
 
+	res_init();
+
 	as = getnetbyaddr_async(net, type, NULL);
 	if (as == NULL) {
 		h_errno = NETDB_INTERNAL;
 		return (NULL);
 	}
 
-	async_run_sync(as, &ar);
+	asr_async_run_sync(as, &ar);
 
 	errno = ar.ar_errno;
 	h_errno = ar.ar_h_errno;

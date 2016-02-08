@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.19 2013/01/18 21:09:04 espie Exp $
+#	$OpenBSD: Makefile,v 1.21 2013/06/02 21:01:48 guenther Exp $
 
 MAN=	cdboot.8
 

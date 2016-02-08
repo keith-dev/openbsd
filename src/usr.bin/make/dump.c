@@ -1,4 +1,4 @@
-/* $OpenBSD: dump.c,v 1.3 2012/10/09 19:45:34 espie Exp $ */
+/* $OpenBSD: dump.c,v 1.5 2013/05/22 12:14:08 espie Exp $ */
 /*
  * Copyright (c) 2012 Marc Espie.
  *
@@ -23,13 +23,13 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-#include <stdint.h>
-#include <stddef.h>
-#include <stdio.h>
-#include <string.h>
-#include <stdlib.h>
 #include <limits.h>
-#include "ohash.h"
+#include <stddef.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <ohash.h>
 #include "defines.h"
 #include "gnode.h"
 #include "dump.h"
@@ -120,7 +120,7 @@ TargPrintNode(GNode *gn, bool full)
 		if (! (gn->type & (OP_JOIN|OP_USE|OP_EXEC))) {
 			if (!is_out_of_date(gn->mtime)) {
 				printf("# last modified %s: %s\n",
-				      time_to_string(gn->mtime),
+				      time_to_string(&gn->mtime),
 				      status_to_string(gn));
 			} else if (gn->built_status != UNKNOWN) {
 				printf("# non-existent (maybe): %s\n",

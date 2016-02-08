@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.328 2013/02/01 09:06:40 phessler Exp $
+#	$OpenBSD: Makefile,v 1.333 2013/07/10 05:12:15 ajacoutot Exp $
 
 TZDIR=		/usr/share/zoneinfo
 LOCALTIME=	Canada/Mountain
@@ -53,10 +53,10 @@ RCDAEMONS=	amd apmd bgpd bootparamd cron dhcpd dhcrelay dvmrpd \
 		inetd isakmpd ldapd npppd ldattach ldpd lpd mopd mrouted \
 		named nginx nsd ntpd ospfd ospf6d portmap pflogd rarpd rbootd \
 		relayd ripd route6d rtadvd rtsold rwhod sasyncd sendmail \
-		sensorsd smtpd snmpd spamd sshd syslogd watchdogd wsmoused \
-		xdm ypbind ypldap yppasswdd ypserv kdc kadmind kpasswdd nfsd \
-		mountd lockd statd spamlogd sndiod popa3d tftpd tftpproxy \
-		ldomd
+		sensorsd slowcgi smtpd snmpd spamd sshd syslogd watchdogd \
+		wsmoused xdm ypbind ypldap yppasswdd ypserv kdc kadmind \
+		kpasswdd nfsd mountd lockd statd spamlogd sndiod popa3d \
+		tftpd tftpproxy ldomd
 
 MISETS=	base${OSrev}.tgz comp${OSrev}.tgz \
 	man${OSrev}.tgz game${OSrev}.tgz etc${OSrev}.tgz
@@ -144,6 +144,8 @@ distribution-etc-root-var: distrib-dirs
 		    ${DESTDIR}/root/.profile; \
 		${INSTALL} -c -o root -g wheel -m 644 dot.Xdefaults \
 		    ${DESTDIR}/root/.Xdefaults; \
+		${INSTALL} -c -o root -g wheel -m 644 dot.cvsrc \
+		    ${DESTDIR}/root/.cvsrc; \
 		rm -f ${DESTDIR}/.cshrc ${DESTDIR}/.profile; \
 		${INSTALL} -c -o root -g wheel -m 644 dot.cshrc \
 		    ${DESTDIR}/.cshrc; \
@@ -160,11 +162,11 @@ distribution-etc-root-var: distrib-dirs
 		    ${DESTDIR}/etc/skel/.profile; \
 		${INSTALL} -c -o root -g wheel -m 644 dot.Xdefaults \
 		    ${DESTDIR}/etc/skel/.Xdefaults; \
+		${INSTALL} -c -o root -g wheel -m 644 dot.cvsrc \
+		    ${DESTDIR}/etc/skel/.cvsrc; \
 		${INSTALL} -c -o root -g wheel -m 600 /dev/null \
 		    ${DESTDIR}/etc/skel/.ssh/authorized_keys
 	cd kerberosV; \
-		${INSTALL} -c -o root -g wheel -m 644 README \
-		    ${DESTDIR}/etc/kerberosV; \
 		${INSTALL} -c -o root -g wheel -m 644 krb5.conf.example \
 		    ${DESTDIR}/etc/kerberosV
 	cd amd; \
@@ -348,8 +350,8 @@ moduli.8192:
 	
 
 SUBDIR+= etc.alpha etc.amd64 etc.armish etc.aviion etc.beagle etc.hp300
-SUBDIR+= etc.hppa etc.hppa64 etc.i386 etc.landisk etc.loongson etc.luna88k 
-SUBDIR+= etc.macppc etc.mvme68k etc.mvme88k etc.palm
+SUBDIR+= etc.hppa etc.hppa64 etc.i386 etc.landisk etc.loongson etc.luna88k
+SUBDIR+= etc.macppc etc.mvme68k etc.mvme88k etc.octeon
 SUBDIR+= etc.sgi etc.socppc etc.sparc etc.sparc64 etc.vax etc.zaurus
 
 .include <bsd.subdir.mk>

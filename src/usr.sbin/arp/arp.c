@@ -1,4 +1,4 @@
-/*	$OpenBSD: arp.c,v 1.51 2012/11/08 11:05:41 phessler Exp $ */
+/*	$OpenBSD: arp.c,v 1.53 2013/07/20 18:21:11 bluhm Exp $ */
 /*	$NetBSD: arp.c,v 1.12 1995/04/24 13:25:18 cgd Exp $ */
 
 /*
@@ -248,8 +248,8 @@ getsocket(void)
 struct sockaddr_in	so_mask = { 8, 0, 0, { 0xffffffff } };
 struct sockaddr_inarp	blank_sin = { sizeof(blank_sin), AF_INET }, sin_m;
 struct sockaddr_dl	blank_sdl = { sizeof(blank_sdl), AF_LINK }, sdl_m;
-int			expire_time, flags, export_only, doing_proxy,
-			    found_entry;
+time_t			expire_time;
+int			flags, export_only, doing_proxy, found_entry;
 struct	{
 	struct rt_msghdr	m_rtm;
 	char			m_space[512];
@@ -282,7 +282,8 @@ set(int argc, char *argv[])
 		errx(1, "invalid ethernet address: %s", eaddr);
 	memcpy(LLADDR(&sdl_m), ea, sizeof(*ea));
 	sdl_m.sdl_alen = 6;
-	doing_proxy = flags = export_only = expire_time = 0;
+	expire_time = 0;
+	doing_proxy = flags = export_only = 0;
 	while (argc-- > 0) {
 		if (strncmp(argv[0], "temp", 4) == 0) {
 			struct timeval time;
@@ -442,7 +443,7 @@ search(in_addr_t addr, void (*action)(struct sockaddr_dl *sdl,
 {
 	int mib[7];
 	size_t needed;
-	char *lim, *buf, *next;
+	char *lim, *buf = NULL, *next;
 	struct rt_msghdr *rtm;
 	struct sockaddr_inarp *sin;
 	struct sockaddr_dl *sdl;
@@ -454,15 +455,21 @@ search(in_addr_t addr, void (*action)(struct sockaddr_dl *sdl,
 	mib[4] = NET_RT_FLAGS;
 	mib[5] = RTF_LLINFO;
 	mib[6] = rdomain;
-	if (sysctl(mib, 7, NULL, &needed, NULL, 0) < 0)
-		err(1, "route-sysctl-estimate");
-	if (needed == 0)
-		return;
-	if ((buf = malloc(needed)) == NULL)
-		err(1, "malloc");
-	if (sysctl(mib, 7, buf, &needed, NULL, 0) < 0)
-		err(1, "actual retrieval of routing table");
-	lim = buf + needed;
+	while (1) {
+		if (sysctl(mib, 7, NULL, &needed, NULL, 0) == -1)
+			err(1, "route-sysctl-estimate");
+		if (needed == 0)
+			return;
+		if ((buf = realloc(buf, needed)) == NULL)
+			err(1, "malloc");
+		if (sysctl(mib, 7, buf, &needed, NULL, 0) == -1) {
+			if (errno == ENOMEM)
+				continue;
+			err(1, "actual retrieval of routing table");
+		}
+		lim = buf + needed;
+		break;
+	}
 	for (next = buf; next < lim; next += rtm->rtm_msglen) {
 		rtm = (struct rt_msghdr *)next;
 		if (rtm->rtm_version != RTM_VERSION)

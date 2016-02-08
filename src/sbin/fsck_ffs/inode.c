@@ -1,4 +1,4 @@
-/*	$OpenBSD: inode.c,v 1.36 2011/05/08 14:38:40 otto Exp $	*/
+/*	$OpenBSD: inode.c,v 1.38 2013/06/11 16:42:04 deraadt Exp $	*/
 /*	$NetBSD: inode.c,v 1.23 1996/10/11 20:15:47 thorpej Exp $	*/
 
 /*
@@ -175,8 +175,8 @@ iblock(struct inodesc *idesc, long ilevel, off_t isize)
 			if (IBLK(bp, i) == 0)
 				continue;
 			(void)snprintf(buf, sizeof buf,
-			    "PARTIALLY TRUNCATED INODE I=%u",
-			    idesc->id_number);
+			    "PARTIALLY TRUNCATED INODE I=%llu",
+			    (unsigned long long)idesc->id_number);
 			if (preen)
 				pfatal("%s", buf);
 			else if (dofix(idesc, buf)) {
@@ -229,7 +229,7 @@ iblock(struct inodesc *idesc, long ilevel, off_t isize)
  * Return 0 if in range, 1 if out of range.
  */
 int
-chkrange(daddr64_t blk, int cnt)
+chkrange(daddr_t blk, int cnt)
 {
 	int c;
 
@@ -274,10 +274,11 @@ chkrange(daddr64_t blk, int cnt)
 union dinode *
 ginode(ino_t inumber)
 {
-	daddr64_t iblk;
+	daddr_t iblk;
 
 	if (inumber < ROOTINO || inumber > maxino)
-		errexit("bad inode number %d to ginode\n", inumber);
+		errexit("bad inode number %llu to ginode\n",
+		    (unsigned long long)inumber);
 	if (startinum == 0 ||
 	    inumber < startinum || inumber >= startinum + INOPB(&sblock)) {
 		iblk = ino_to_fsba(&sblock, inumber);
@@ -304,12 +305,14 @@ union dinode *
 getnextinode(ino_t inumber)
 {
 	long size;
-	daddr64_t dblk;
+	daddr_t dblk;
 	union dinode *dp;
 	static caddr_t nextinop;
 
 	if (inumber != nextino++ || inumber > maxino)
-		errexit("bad inode number %d to nextinode %d\n", inumber, nextino);
+		errexit("bad inode number %llu to nextinode %llu\n",
+		    (unsigned long long)inumber,
+		    (unsigned long long)nextino);
 	if (inumber >= lastinum) {
 		readcnt++;
 		dblk = fsbtodb(&sblock, ino_to_fsba(&sblock, lastinum));
@@ -391,7 +394,7 @@ cacheino(union dinode *dp, ino_t inumber)
 	blks = howmany(DIP(dp, di_size), sblock.fs_bsize);
 	if (blks > NDADDR)
 		blks = NDADDR + NIADDR;
-	inp = malloc(sizeof(*inp) + (blks ? blks - 1 : 0) * sizeof(daddr64_t));
+	inp = malloc(sizeof(*inp) + (blks ? blks - 1 : 0) * sizeof(daddr_t));
 	if (inp == NULL)
 		errexit("cannot allocate memory for inode cache\n");
 	inpp = &inphead[inumber % numdirs];
@@ -436,7 +439,7 @@ getinoinfo(ino_t inumber)
 			continue;
 		return (inp);
 	}
-	errexit("cannot find inode %d\n", inumber);
+	errexit("cannot find inode %llu\n", (unsigned long long)inumber);
 	return (NULL);
 }
 
@@ -519,7 +522,7 @@ pinode(ino_t ino)
 	struct passwd *pw;
 	time_t t;
 
-	printf(" I=%u ", ino);
+	printf(" I=%llu ", (unsigned long long)ino);
 	if (ino < ROOTINO || ino > maxino)
 		return;
 	dp = ginode(ino);
@@ -540,10 +543,10 @@ pinode(ino_t ino)
 }
 
 void
-blkerror(ino_t ino, char *type, daddr64_t blk)
+blkerror(ino_t ino, char *type, daddr_t blk)
 {
 
-	pfatal("%lld %s I=%u", blk, type, ino);
+	pfatal("%lld %s I=%llu", blk, type, (unsigned long long)ino);
 	printf("\n");
 	switch (GET_ISTATE(ino)) {
 

@@ -1,4 +1,4 @@
-/* $OpenBSD: softraidvar.h,v 1.126 2013/01/18 09:39:03 jsing Exp $ */
+/* $OpenBSD: softraidvar.h,v 1.139 2013/06/11 16:42:13 deraadt Exp $ */
 /*
  * Copyright (c) 2006 Marco Peereboom <marco@peereboom.us>
  * Copyright (c) 2008 Chris Kuethe <ckuethe@openbsd.org>
@@ -355,7 +355,7 @@ struct sr_ccb {
 #define SR_CCB_OK		2
 #define SR_CCB_FAILED		3
 
-	int			ccb_flag;
+	int			ccb_flags;
 #define SR_CCBF_FREEBUF		(1<<0)		/* free ccb_buf.b_data */
 
 	void			*ccb_opaque; /* discipline usable pointer */
@@ -379,17 +379,20 @@ struct sr_workunit {
 #define SR_WU_PENDING		6
 #define SR_WU_RESTART		7
 #define SR_WU_REQUEUE		8
+#define SR_WU_CONSTRUCT		9
 
 	int			swu_flags;	/* additional hints */
 #define SR_WUF_REBUILD		(1<<0)		/* rebuild io */
-#define SR_WUF_REBUILDIOCOMP	(1<<1)		/* rbuild io complete */
+#define SR_WUF_REBUILDIOCOMP	(1<<1)		/* rebuild io complete */
 #define SR_WUF_FAIL		(1<<2)		/* RAID6: failure */
 #define SR_WUF_FAILIOCOMP	(1<<3)
+#define SR_WUF_WAKEUP		(1<<4)		/* Wakeup on I/O completion. */
+#define SR_WUF_DISCIPLINE	(1<<5)		/* Discipline specific I/O. */
 
 	int			swu_fake;	/* faked wu */
 	/* workunit io range */
-	daddr64_t		swu_blk_start;
-	daddr64_t		swu_blk_end;
+	daddr_t			swu_blk_start;
+	daddr_t			swu_blk_end;
 
 	/* in flight totals */
 	u_int32_t		swu_ios_complete;
@@ -583,7 +586,7 @@ struct sr_discipline {
 	int			(*sd_assemble)(struct sr_discipline *,
 				    struct bioc_createraid *, int, void *);
 	int			(*sd_alloc_resources)(struct sr_discipline *);
-	int			(*sd_free_resources)(struct sr_discipline *);
+	void			(*sd_free_resources)(struct sr_discipline *);
 	int			(*sd_ioctl_handler)(struct sr_discipline *,
 				    struct bioc_discipline *);
 	int			(*sd_start_discipline)(struct sr_discipline *);
@@ -598,6 +601,7 @@ struct sr_discipline {
 	struct scsi_sense_data	sd_scsi_sense;
 	int			(*sd_scsi_rw)(struct sr_workunit *);
 	void			(*sd_scsi_intr)(struct buf *);
+	int			(*sd_scsi_wu_done)(struct sr_workunit *);
 	void			(*sd_scsi_done)(struct sr_workunit *);
 	int			(*sd_scsi_sync)(struct sr_workunit *);
 	int			(*sd_scsi_tur)(struct sr_workunit *);
@@ -608,7 +612,11 @@ struct sr_discipline {
 
 	/* background operation */
 	struct proc		*sd_background_proc;
+
+	TAILQ_ENTRY(sr_discipline) sd_link;
 };
+
+TAILQ_HEAD(sr_discipline_list, sr_discipline);
 
 struct sr_softc {
 	struct device		sc_dev;
@@ -629,11 +637,9 @@ struct sr_softc {
 	struct scsi_link	sc_link;	/* scsi prototype link */
 	struct scsibus_softc	*sc_scsibus;
 
-	/*
-	 * XXX expensive, alternative would be nice but has to be cheap
-	 * since the target lookup happens on each IO
-	 */
-	struct sr_discipline	*sc_dis[SR_MAX_LD];
+	/* The target lookup has to be cheap since it happens for each I/O. */
+	struct sr_discipline	*sc_targets[SR_MAX_LD];
+	struct sr_discipline_list sc_dis_list;
 };
 
 /* hotplug */
@@ -648,8 +654,8 @@ int			sr_ccb_alloc(struct sr_discipline *);
 void			sr_ccb_free(struct sr_discipline *);
 struct sr_ccb		*sr_ccb_get(struct sr_discipline *);
 void			sr_ccb_put(struct sr_ccb *);
-struct sr_ccb		*sr_ccb_rw(struct sr_discipline *, int, daddr64_t,
-			    daddr64_t, u_int8_t *, int, int);
+struct sr_ccb		*sr_ccb_rw(struct sr_discipline *, int, daddr_t,
+			    daddr_t, u_int8_t *, int, int);
 void			sr_ccb_done(struct sr_ccb *);
 int			sr_wu_alloc(struct sr_discipline *);
 void			sr_wu_free(struct sr_discipline *);
@@ -680,11 +686,14 @@ void			sr_meta_opt_load(struct sr_softc *,
 			    struct sr_metadata *, struct sr_meta_opt_head *);
 void			sr_checksum(struct sr_softc *, void *, void *,
 			    u_int32_t);
-int			sr_validate_io(struct sr_workunit *, daddr64_t *,
+int			sr_validate_io(struct sr_workunit *, daddr_t *,
 			    char *);
-int			sr_check_io_collision(struct sr_workunit *);
+void			sr_schedule_wu(struct sr_workunit *);
 void			sr_scsi_done(struct sr_discipline *,
 			    struct scsi_xfer *);
+struct sr_workunit	*sr_scsi_wu_get(struct sr_discipline *, int);
+void			sr_scsi_wu_put(struct sr_discipline *,
+			    struct sr_workunit *);
 int			sr_chunk_in_use(struct sr_softc *, dev_t);
 
 /* discipline functions */
@@ -694,7 +703,9 @@ int			sr_raid_tur(struct sr_workunit *);
 int			sr_raid_request_sense( struct sr_workunit *);
 int			sr_raid_start_stop(struct sr_workunit *);
 int			sr_raid_sync(struct sr_workunit *);
+void			sr_raid_intr(struct buf *);
 void			sr_raid_startwu(struct sr_workunit *);
+void			sr_raid_recreate_wu(struct sr_workunit *);
 
 /* Discipline specific initialisation. */
 void			sr_raid0_discipline_init(struct sr_discipline *);

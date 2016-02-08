@@ -1,4 +1,4 @@
-/*	$OpenBSD: bgpctl.c,v 1.168 2012/11/27 05:38:08 guenther Exp $ */
+/*	$OpenBSD: bgpctl.c,v 1.170 2013/04/09 14:51:33 gilles Exp $ */
 
 /*
  * Copyright (c) 2003 Henning Brauer <henning@openbsd.org>
@@ -310,6 +310,10 @@ main(int argc, char *argv[])
 		imsg_compose(ibuf, IMSG_CTL_NEIGHBOR_RREFRESH, 0, 0, -1,
 		    &neighbor, sizeof(neighbor));
 		break;
+	case NEIGHBOR_DESTROY:
+		imsg_compose(ibuf, IMSG_CTL_NEIGHBOR_DESTROY, 0, 0, -1,
+		    &neighbor, sizeof(neighbor));
+		break;
 	case NETWORK_ADD:
 	case NETWORK_REMOVE:
 		bzero(&net, sizeof(net));
@@ -436,6 +440,7 @@ main(int argc, char *argv[])
 			case NEIGHBOR_DOWN:
 			case NEIGHBOR_CLEAR:
 			case NEIGHBOR_RREFRESH:
+			case NEIGHBOR_DESTROY:
 			case NONE:
 			case RELOAD:
 			case FIB:
@@ -625,7 +630,7 @@ show_neighbor_msg(struct imsg *imsg, enum neighbor_views nv)
 			printf("remote AS %s", log_as(p->conf.remote_as));
 		if (p->conf.template)
 			printf(", Template");
-		if (p->conf.cloned)
+		if (p->template)
 			printf(", Cloned");
 		if (p->conf.passive)
 			printf(", Passive");
@@ -819,7 +824,8 @@ fmt_timeframe_core(time_t t)
 	char		*buf;
 	static char	 tfbuf[TF_BUFS][TF_LEN];	/* ring buffer */
 	static int	 idx = 0;
-	unsigned int	 sec, min, hrs, day, week;
+	unsigned int	 sec, min, hrs, day;
+	unsigned long long	week;
 
 	buf = tfbuf[idx++];
 	if (idx == TF_BUFS)
@@ -837,7 +843,7 @@ fmt_timeframe_core(time_t t)
 	week /= 7;
 
 	if (week > 0)
-		snprintf(buf, TF_LEN, "%02uw%01ud%02uh", week, day, hrs);
+		snprintf(buf, TF_LEN, "%02lluw%01ud%02uh", week, day, hrs);
 	else if (day > 0)
 		snprintf(buf, TF_LEN, "%01ud%02uh%02um", day, hrs, min);
 	else
@@ -1604,8 +1610,9 @@ show_result(struct imsg *imsg)
 	else {
 		if (rescode >
 		    sizeof(ctl_res_strerror)/sizeof(ctl_res_strerror[0]))
-			errx(1, "illegal error code %u", rescode);
-		printf("%s\n", ctl_res_strerror[rescode]);
+			printf("unknown result error code %u\n", rescode);
+		else
+			printf("%s\n", ctl_res_strerror[rescode]);
 	}
 
 	return (1);

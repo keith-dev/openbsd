@@ -1,4 +1,4 @@
-/*	$OpenBSD: rtld_machine.c,v 1.48 2011/04/06 11:36:25 miod Exp $ */
+/*	$OpenBSD: rtld_machine.c,v 1.51 2013/06/13 04:13:47 brad Exp $ */
 
 /*
  * Copyright (c) 1999 Dale Rahn
@@ -77,6 +77,7 @@ _dl_md_reloc(elf_object_t *object, int rel, int relasz)
 {
 	int	i;
 	int	numrela;
+	long	relrel;
 	int	fails = 0;
 	struct load_list *llist;
 	Elf32_Addr loff;
@@ -86,11 +87,11 @@ _dl_md_reloc(elf_object_t *object, int rel, int relasz)
 	Elf32_Addr *pltcall;
 	Elf32_Addr *plttable;
 	Elf32_Addr *pltinfo;
-
 	Elf32_Addr *first_rela;
 
 	loff = object->obj_base;
 	numrela = object->Dyn.info[relasz] / sizeof(Elf32_Rela);
+	relrel = rel == DT_RELA ? object->relacount : 0;
 	relas = (Elf32_Rela *)(object->Dyn.info[rel]);
 
 #ifdef DL_PRINTF_DEBUG
@@ -100,6 +101,11 @@ _dl_printf("object relocation size %x, numrela %x\n",
 
 	if (relas == NULL)
 		return(0);
+
+	if (relrel > numrela) {
+		_dl_printf("relcount > numrel: %ld > %ld\n", relrel, numrela);
+		_dl_exit(20);
+	}
 
 	pltresolve = NULL;
 	pltcall = NULL;
@@ -168,13 +174,36 @@ _dl_printf("object relocation size %x, numrela %x\n",
 		}
 	}
 
+	/* tight loop for leading RELATIVE relocs */
+	for (i = 0; i < relrel; i++, relas++) {
+		Elf_Addr *r_addr;
+#ifdef DEBUG
+		const Elf32_Sym *sym;
 
-	for (i = 0; i < numrela; i++, relas++) {
+		if (ELF32_R_TYPE(relas->r_info) != RELOC_RELATIVE) {
+			_dl_printf("RELCOUNT wrong\n");
+			_dl_exit(20);
+		}
+		sym = object->dyn.symtab;
+		sym += ELF32_R_SYM(relas->r_info);
+		if (ELF32_ST_BIND(sym->st_info) != STB_LOCAL ||
+		    (ELF32_ST_TYPE(sym->st_info) != STT_SECTION &&
+		    ELF32_ST_TYPE(sym->st_info) != STT_NOTYPE)) {
+			_dl_printf("RELATIVE relocation against symbol\n");
+			_dl_exit(20);
+		}
+#endif
+		r_addr = (Elf_Addr *)(relas->r_offset + loff);
+		*r_addr = loff + relas->r_addend;
+	}
+	for (; i < numrela; i++, relas++) {
 		Elf32_Addr *r_addr = (Elf32_Addr *)(relas->r_offset + loff);
 		Elf32_Addr ooff;
 		const Elf32_Sym *sym, *this;
 		const char *symn;
 		int type;
+		Elf32_Addr prev_value = 0, prev_ooff = 0;
+		const Elf32_Sym *prev_sym = NULL;
 
 		if (ELF32_R_SYM(relas->r_info) == 0xffffff)
 			continue;
@@ -193,16 +222,25 @@ _dl_printf("object relocation size %x, numrela %x\n",
 		if (ELF32_R_SYM(relas->r_info) &&
 		    !(ELF32_ST_BIND(sym->st_info) == STB_LOCAL &&
 		    ELF32_ST_TYPE (sym->st_info) == STT_NOTYPE)) {
-			ooff = _dl_find_symbol_bysym(object,
-			    ELF32_R_SYM(relas->r_info), &this,
-			    SYM_SEARCH_ALL|SYM_WARNNOTFOUND|
-			    ((type == RELOC_JMP_SLOT) ? SYM_PLT:SYM_NOTPLT),
-			    sym, NULL);
+			if (sym == prev_sym) {
+				this = sym;	/* XXX any non-NULL */
+				ooff = prev_ooff;
+			} else {
+				ooff = _dl_find_symbol_bysym(object,
+				    ELF32_R_SYM(relas->r_info), &this,
+				    SYM_SEARCH_ALL|SYM_WARNNOTFOUND|
+				    ((type == RELOC_JMP_SLOT) ?
+				    SYM_PLT:SYM_NOTPLT), sym, NULL);
 
-			if (this == NULL) {
-				if (ELF_ST_BIND(sym->st_info) != STB_WEAK)
-					fails++;
-				continue;
+				if (this == NULL) {
+					if (ELF_ST_BIND(sym->st_info) !=
+					    STB_WEAK)
+						fails++;
+					continue;
+				}
+				prev_sym = sym;
+				prev_value = this->st_value;
+				prev_ooff = ooff;
 			}
 		}
 
@@ -214,7 +252,7 @@ _dl_printf("object relocation size %x, numrela %x\n",
 			    ELF32_ST_TYPE(sym->st_info) == STT_NOTYPE) ) {
 				*r_addr = ooff + relas->r_addend;
 			} else {
-				*r_addr = ooff + this->st_value +
+				*r_addr = ooff + prev_value +
 				    relas->r_addend;
 			}
 			break;
@@ -231,13 +269,13 @@ _dl_printf("rel1 r_addr %x val %x loff %x ooff %x addend %x\n", r_addr,
 #endif
 
 			} else {
-				*r_addr = loff + this->st_value +
+				*r_addr = loff + prev_value +
 				    relas->r_addend;
 			}
 			break;
 		case RELOC_JMP_SLOT:
 		    {
-			Elf32_Addr target = ooff + this->st_value +
+			Elf32_Addr target = ooff + prev_value +
 			    relas->r_addend;
 			Elf32_Addr val = target - (Elf32_Addr)r_addr;
 
@@ -246,7 +284,7 @@ _dl_printf("rel1 r_addr %x val %x loff %x ooff %x addend %x\n", r_addr,
 #ifdef DL_PRINTF_DEBUG
 _dl_printf(" ooff %x, sym val %x, addend %x"
 	" r_addr %x symn [%s] -> %x\n",
-	ooff, this->st_value, relas->r_addend,
+	ooff, prev_value, relas->r_addend,
 	r_addr, symn, val);
 #endif
 				/* if offset is > RELOC_24 deal with it */
@@ -264,7 +302,7 @@ _dl_printf(" ooff %x, sym val %x, addend %x"
 				}
 				_dl_dcbf(&r_addr[0]);
 				_dl_dcbf(&r_addr[2]);
-				val= ooff + this->st_value +
+				val= ooff + prev_value +
 				    relas->r_addend;
 #ifdef DL_PRINTF_DEBUG
 _dl_printf(" symn [%s] val 0x%x\n", symn, val);
@@ -281,13 +319,13 @@ _dl_printf(" symn [%s] val 0x%x\n", symn, val);
 
 			break;
 		case RELOC_GLOB_DAT:
-			*r_addr = ooff + this->st_value + relas->r_addend;
+			*r_addr = ooff + prev_value + relas->r_addend;
 			break;
 #if 1
 		/* should not be supported ??? */
 		case RELOC_REL24:
 		    {
-			Elf32_Addr val = ooff + this->st_value +
+			Elf32_Addr val = ooff + prev_value +
 			    relas->r_addend - (Elf32_Addr)r_addr;
 			if (!B24_VALID_RANGE(val)){
 				/* invalid offset */
@@ -342,7 +380,7 @@ _dl_printf(" symn [%s] val 0x%x\n", symn, val);
 		case RELOC_REL14:
 		case RELOC_REL14_NTAKEN:
 		    {
-			Elf32_Addr val = ooff + this->st_value +
+			Elf32_Addr val = ooff + prev_value +
 			    relas->r_addend - (Elf32_Addr)r_addr;
 			if (((val & 0xffff8000) != 0) &&
 			    ((val & 0xffff8000) != 0xffff8000)) {
@@ -364,7 +402,7 @@ _dl_printf(" symn [%s] val 0x%x\n", symn, val);
 #ifdef DL_PRINTF_DEBUG
 			_dl_printf("copy r_addr %x, sym %x [%s] size %d val %x\n",
 			    r_addr, sym, symn, sym->st_size,
-			    (ooff + this->st_value+
+			    (ooff + prev_value+
 			    relas->r_addend));
 #endif
 			/*
@@ -492,6 +530,9 @@ _dl_md_reloc_got(elf_object_t *object, int lazy)
 		object->plt_size = ELF_ROUND(object->plt_size, _dl_pagesz);
 	}
 
+	if (object->traced)
+		lazy = 1;
+
 	if (!lazy) {
 		fails = _dl_md_reloc(object, DT_JMPREL, DT_PLTRELSZ);
 	} else {
@@ -541,6 +582,7 @@ _dl_bind(elf_object_t *object, int reloff)
 	const Elf_Sym *sym, *this;
 	Elf_Addr *r_addr, ooff;
 	const char *symn;
+	const elf_object_t *sobj;
 	Elf_Addr value;
 	Elf_RelA *relas;
 	Elf32_Addr val;
@@ -559,12 +601,16 @@ _dl_bind(elf_object_t *object, int reloff)
 	r_addr = (Elf_Addr *)(object->obj_base + relas->r_offset);
 	this = NULL;
 	ooff = _dl_find_symbol(symn, &this,
-	    SYM_SEARCH_ALL|SYM_WARNNOTFOUND|SYM_PLT, sym,
-	    object, NULL);
+	    SYM_SEARCH_ALL|SYM_WARNNOTFOUND|SYM_PLT, sym, object, &sobj);
 	if (this == NULL) {
 		_dl_printf("lazy binding failed!\n");
-		*((int *)0) = 0;	/* XXX */
+		*(volatile int *)0 = 0;		/* XXX */
 	}
+
+	value = ooff + this->st_value;
+
+	if (sobj->traced && _dl_trace_plt(sobj, symn))
+		return value;
 
 	/* if PLT is protected, allow the write */
 	if (object->plt_size != 0)  {
@@ -572,8 +618,6 @@ _dl_bind(elf_object_t *object, int reloff)
 		_dl_mprotect((void*)object->plt_start, object->plt_size,
 		    PROT_READ|PROT_WRITE|PROT_EXEC);
 	}
-
-	value = ooff + this->st_value;
 
 	val = value - (Elf32_Addr)r_addr;
 

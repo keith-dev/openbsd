@@ -1,4 +1,4 @@
-/*	$OpenBSD: ntfs_vfsops.c,v 1.33 2013/01/18 05:09:21 jsing Exp $	*/
+/*	$OpenBSD: ntfs_vfsops.c,v 1.35 2013/05/30 20:11:06 guenther Exp $	*/
 /*	$NetBSD: ntfs_vfsops.c,v 1.7 2003/04/24 07:50:19 christos Exp $	*/
 
 /*-
@@ -125,6 +125,7 @@ ntfs_mount(struct mount *mp, const char *path, void *data,
 	int		err = 0;
 	struct vnode	*devvp;
 	struct ntfs_args args;
+	char fname[MNAMELEN];
 	char fspec[MNAMELEN];
 	mode_t amode;
 
@@ -167,9 +168,11 @@ ntfs_mount(struct mount *mp, const char *path, void *data,
 	err = copyinstr(args.fspec, fspec, sizeof(fspec), NULL);
 	if (err)
 		goto error_1;
-	disk_map(fspec, fspec, MNAMELEN, DM_OPENBLCK);
 
-	NDINIT(ndp, LOOKUP, FOLLOW, UIO_SYSSPACE, fspec, p);
+	if (disk_map(fspec, fname, sizeof(fname), DM_OPENBLCK) == -1)
+		bcopy(fspec, fname, sizeof(fname));
+
+	NDINIT(ndp, LOOKUP, FOLLOW, UIO_SYSSPACE, fname, p);
 	err = namei(ndp);
 	if (err) {
 		/* can't get devvp!*/
@@ -238,7 +241,9 @@ ntfs_mount(struct mount *mp, const char *path, void *data,
 		bzero(mp->mnt_stat.f_mntonname, MNAMELEN);
 		strlcpy(mp->mnt_stat.f_mntonname, path, MNAMELEN);
 		bzero(mp->mnt_stat.f_mntfromname, MNAMELEN);
-		strlcpy(mp->mnt_stat.f_mntfromname, fspec, MNAMELEN);
+		strlcpy(mp->mnt_stat.f_mntfromname, fname, MNAMELEN);
+		bzero(mp->mnt_stat.f_mntfromspec, MNAMELEN);
+		strlcpy(mp->mnt_stat.f_mntfromspec, fspec, MNAMELEN);
 		bcopy(&args, &mp->mnt_stat.mount_info.ntfs_args, sizeof(args));
 		if ( !err) {
 			err = ntfs_mountfs(devvp, mp, &args, p);
@@ -675,7 +680,7 @@ ntfs_vptofh(struct vnode *vp, struct fid *fhp)
 }
 
 int
-ntfs_vgetex(struct mount *mp, ino_t ino, u_int32_t attrtype, char *attrname,
+ntfs_vgetex(struct mount *mp, ntfsino_t ino, u_int32_t attrtype, char *attrname,
     u_long lkflags, u_long flags, struct proc *p, struct vnode **vpp) 
 {
 	int error;
@@ -789,6 +794,8 @@ ntfs_vgetex(struct mount *mp, ino_t ino, u_int32_t attrtype, char *attrname,
 int
 ntfs_vget(struct mount *mp, ino_t ino, struct vnode **vpp) 
 {
+	if (ino > (ntfsino_t)-1)
+		panic("ntfs_vget: alien ino_t %llu", (unsigned long long)ino);
 	return ntfs_vgetex(mp, ino, NTFS_A_DATA, NULL,
 			LK_EXCLUSIVE | LK_RETRY, 0, curproc, vpp); /* XXX */
 }

@@ -1,4 +1,4 @@
-;	$OpenBSD: syscalls.master,v 1.126 2012/09/10 02:22:17 deraadt Exp $
+;	$OpenBSD: syscalls.master,v 1.133 2013/06/09 13:10:19 miod Exp $
 ;	$NetBSD: syscalls.master,v 1.32 1996/04/23 10:24:21 mycroft Exp $
 
 ;	@(#)syscalls.master	8.2 (Berkeley) 1/13/94
@@ -145,10 +145,13 @@
 			    char * const *argp, char * const *envp); }
 60	STD		{ mode_t sys_umask(mode_t newmask); }
 61	STD		{ int sys_chroot(const char *path); }
-62	OBSOL		fstat43
-63	OBSOL		ogetkerninfo
-64	OBSOL		ogetpagesize
-65	OBSOL		omsync25
+62	STD		{ int sys_getfsstat(struct statfs *buf, size_t bufsize, \
+			    int flags); }
+63	STD		{ int sys_statfs(const char *path, \
+			    struct statfs *buf); }
+64	STD		{ int sys_fstatfs(int fd, struct statfs *buf); }
+65	STD		{ int sys_fhstatfs(const fhandle_t *fhp, \
+			    struct statfs *buf); }
 66	STD		{ int sys_vfork(void); }
 67	OBSOL		vread
 68	OBSOL		vwrite
@@ -204,8 +207,12 @@
 106	STD		{ int sys_listen(int s, int backlog); }
 107	OBSOL		vtimes
 108	OBSOL		osigvec
-109	OBSOL		osigblock
-110	OBSOL		osigsetmask
+109	STD		{ int sys_ppoll(struct pollfd *fds, \
+			    u_int nfds, const struct timespec *ts, \
+			    const sigset_t *mask); }
+110	STD		{ int sys_pselect(int nd, fd_set *in, fd_set *ou, \
+			    fd_set *ex, const struct timespec *ts, \
+			    const sigset_t *mask); }
 111	STD		{ int sys_sigsuspend(int mask); }
 112	OBSOL		osigstack
 113	OBSOL		orecvmsg
@@ -326,7 +333,7 @@
 200	STD		{ int sys_truncate(const char *path, int pad, \
 			    off_t length); }
 201	STD		{ int sys_ftruncate(int fd, int pad, off_t length); }
-202	STD		{ int sys___sysctl(int *name, u_int namelen, \
+202	STD		{ int sys___sysctl(const int *name, u_int namelen, \
 			    void *old, size_t *oldlenp, void *new, \
 			    size_t newlen); }
 203	STD		{ int sys_mlock(const void *addr, size_t len); }
@@ -336,7 +343,8 @@
 			    const struct timeval *tptr); }
 207	STD		{ pid_t sys_getpgid(pid_t pid); }
 208	OBSOL		nnpfspioctl
-209	UNIMPL
+209	STD		{ int sys_utrace(const char *label, const void *addr, \
+			    size_t len); }
 ;
 ; Syscalls 210-219 are reserved for dynamically loaded syscalls
 ;
@@ -523,13 +531,13 @@
 304	STD		{ int sys___getcwd(char *buf, size_t len); }
 305	STD		{ int sys_adjfreq(const int64_t *freq, \
 			    int64_t *oldfreq); }
-306	STD		{ int sys_getfsstat(struct statfs *buf, size_t bufsize, \
-			    int flags); }
-307	STD		{ int sys_statfs(const char *path, \
-			    struct statfs *buf); }
-308	STD		{ int sys_fstatfs(int fd, struct statfs *buf); }
-309	STD		{ int sys_fhstatfs(const fhandle_t *fhp, \
-			    struct statfs *buf); }
+306	COMPAT_O53	{ int sys_getfsstat(struct statfs53 *buf, \
+			    size_t bufsize, int flags); }
+307	COMPAT_O53	{ int sys_statfs(const char *path, \
+			    struct statfs53 *buf); }
+308	COMPAT_O53	{ int sys_fstatfs(int fd, struct statfs53 *buf); }
+309	COMPAT_O53	{ int sys_fhstatfs(const fhandle_t *fhp, \
+			    struct statfs53 *buf); }
 310	STD		{ int sys_setrtable(int rtableid); }
 311	STD		{ int sys_getrtable(void); }
 312	STD		{ int sys_getdirentries(int fd, char *buf, \

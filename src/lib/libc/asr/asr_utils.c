@@ -1,4 +1,4 @@
-/*	$OpenBSD: asr_utils.c,v 1.3 2012/11/24 15:12:48 eric Exp $	*/
+/*	$OpenBSD: asr_utils.c,v 1.8 2013/07/12 14:36:21 eric Exp $	*/
 /*
  * Copyright (c) 2009-2012	Eric Faurot	<eric@faurot.net>
  *
@@ -17,33 +17,36 @@
 
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <net/if.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <arpa/nameser.h>
 
 #include <ctype.h>
 #include <errno.h>
+#include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
 #include "asr.h"
 #include "asr_private.h"
 
-static int dname_check_label(const char*, size_t);
-static ssize_t dname_expand(const unsigned char*, size_t, size_t, size_t*,
+static int dname_check_label(const char *, size_t);
+static ssize_t dname_expand(const unsigned char *, size_t, size_t, size_t *,
     char *, size_t);
 
-static int unpack_data(struct unpack*, void*, size_t);
-static int unpack_u16(struct unpack*, uint16_t*);
-static int unpack_u32(struct unpack*, uint32_t*);
-static int unpack_inaddr(struct unpack*, struct in_addr*);
-static int unpack_in6addr(struct unpack*, struct in6_addr*);
-static int unpack_dname(struct unpack*, char*, size_t);
+static int unpack_data(struct unpack *, void *, size_t);
+static int unpack_u16(struct unpack *, uint16_t *);
+static int unpack_u32(struct unpack *, uint32_t *);
+static int unpack_inaddr(struct unpack *, struct in_addr *);
+static int unpack_in6addr(struct unpack *, struct in6_addr *);
+static int unpack_dname(struct unpack *, char *, size_t);
 
-static int pack_data(struct pack*, const void*, size_t);
-static int pack_u16(struct pack*, uint16_t);
-static int pack_dname(struct pack*, const char*);
+static int pack_data(struct pack *, const void *, size_t);
+static int pack_u16(struct pack *, uint16_t);
+static int pack_dname(struct pack *, const char *);
 
 static int
 dname_check_label(const char *s, size_t l)
@@ -59,7 +62,7 @@ dname_check_label(const char *s, size_t l)
 }
 
 ssize_t
-dname_from_fqdn(const char *str, char *dst, size_t max)
+asr_dname_from_fqdn(const char *str, char *dst, size_t max)
 {
 	ssize_t	 res;
 	size_t	 l, n;
@@ -130,7 +133,7 @@ dname_expand(const unsigned char *data, size_t len, size_t offset,
 				return (-1);
 			if (end < offset + 2)
 				end = offset + 2;
-			offset = ptr;
+			offset = start = ptr;
 			continue;
 		}
 		if (offset + n + 1 > len)
@@ -162,7 +165,7 @@ dname_expand(const unsigned char *data, size_t len, size_t offset,
 }
 
 void
-pack_init(struct pack *pack, char *buf, size_t len)
+asr_pack_init(struct pack *pack, char *buf, size_t len)
 {
 	pack->buf = buf;
 	pack->len = len;
@@ -171,7 +174,7 @@ pack_init(struct pack *pack, char *buf, size_t len)
 }
 
 void
-unpack_init(struct unpack *unpack, const char *buf, size_t len)
+asr_unpack_init(struct unpack *unpack, const char *buf, size_t len)
 {
 	unpack->buf = buf;
 	unpack->len = len;
@@ -252,7 +255,7 @@ unpack_dname(struct unpack *p, char *dst, size_t max)
 }
 
 int
-unpack_header(struct unpack *p, struct header *h)
+asr_unpack_header(struct unpack *p, struct header *h)
 {
 	if (unpack_data(p, h, HFIXEDSZ) == -1)
 		return (-1);
@@ -267,7 +270,7 @@ unpack_header(struct unpack *p, struct header *h)
 }
 
 int
-unpack_query(struct unpack *p, struct query *q)
+asr_unpack_query(struct unpack *p, struct query *q)
 {
 	unpack_dname(p, q->q_dname, sizeof(q->q_dname));
 	unpack_u16(p, &q->q_type);
@@ -277,7 +280,7 @@ unpack_query(struct unpack *p, struct query *q)
 }
 
 int
-unpack_rr(struct unpack *p, struct rr *rr)
+asr_unpack_rr(struct unpack *p, struct rr *rr)
 {
 	uint16_t	rdlen;
 	size_t		save_offset;
@@ -390,7 +393,7 @@ pack_dname(struct pack *p, const char *dname)
 }
 
 int
-pack_header(struct pack *p, const struct header *h)
+asr_pack_header(struct pack *p, const struct header *h)
 {
 	struct header c;
 
@@ -405,7 +408,7 @@ pack_header(struct pack *p, const struct header *h)
 }
 
 int
-pack_query(struct pack *p, uint16_t type, uint16_t class, const char *dname)
+asr_pack_query(struct pack *p, uint16_t type, uint16_t class, const char *dname)
 {
 	pack_dname(p, dname);
 	pack_u16(p, type);
@@ -415,18 +418,20 @@ pack_query(struct pack *p, uint16_t type, uint16_t class, const char *dname)
 }
 
 int
-sockaddr_from_str(struct sockaddr *sa, int family, const char *str)
+asr_sockaddr_from_str(struct sockaddr *sa, int family, const char *str)
 {
 	struct in_addr		 ina;
 	struct in6_addr		 in6a;
 	struct sockaddr_in	*sin;
 	struct sockaddr_in6	*sin6;
+	char			*cp, *str2;
+	const char		*errstr;
 
 	switch (family) {
 	case PF_UNSPEC:
-		if (sockaddr_from_str(sa, PF_INET, str) == 0)
+		if (asr_sockaddr_from_str(sa, PF_INET, str) == 0)
 			return (0);
-		return sockaddr_from_str(sa, PF_INET6, str);
+		return asr_sockaddr_from_str(sa, PF_INET6, str);
 
 	case PF_INET:
 		if (inet_pton(PF_INET, str, &ina) != 1)
@@ -440,7 +445,19 @@ sockaddr_from_str(struct sockaddr *sa, int family, const char *str)
 		return (0);
 
 	case PF_INET6:
-		if (inet_pton(PF_INET6, str, &in6a) != 1)
+		cp = strchr(str, SCOPE_DELIMITER);
+		if (cp) {
+			str2 = strdup(str);
+			if (str2 == NULL)
+				return (-1);
+			str2[cp - str] = '\0';
+			if (inet_pton(PF_INET6, str2, &in6a) != 1) {
+				free(str2);
+				return (-1);
+			}
+			cp++;
+			free(str2);
+		} else if (inet_pton(PF_INET6, str, &in6a) != 1)
 			return (-1);
 
 		sin6 = (struct sockaddr_in6 *)sa;
@@ -448,6 +465,19 @@ sockaddr_from_str(struct sockaddr *sa, int family, const char *str)
 		sin6->sin6_len = sizeof(struct sockaddr_in6);
 		sin6->sin6_family = PF_INET6;
 		sin6->sin6_addr = in6a;
+
+		if (cp == NULL)
+			return (0);
+
+		if (IN6_IS_ADDR_LINKLOCAL(&in6a) ||
+		    IN6_IS_ADDR_MC_LINKLOCAL(&in6a) ||
+		    IN6_IS_ADDR_MC_INTFACELOCAL(&in6a))
+			if ((sin6->sin6_scope_id = if_nametoindex(cp)))
+				return (0);
+
+		sin6->sin6_scope_id = strtonum(cp, 0, UINT32_MAX, &errstr);
+		if (errstr)
+			return (-1);
 		return (0);
 
 	default:
@@ -455,4 +485,65 @@ sockaddr_from_str(struct sockaddr *sa, int family, const char *str)
 	}
 
 	return (-1);
+}
+
+ssize_t
+asr_addr_as_fqdn(const char *addr, int family, char *dst, size_t max)
+{
+	const struct in6_addr	*in6_addr;
+	in_addr_t		 in_addr;
+
+	switch (family) {
+	case AF_INET:
+		in_addr = ntohl(*((const in_addr_t *)addr));
+		snprintf(dst, max,
+		    "%d.%d.%d.%d.in-addr.arpa.",
+		    in_addr & 0xff,
+		    (in_addr >> 8) & 0xff,
+		    (in_addr >> 16) & 0xff,
+		    (in_addr >> 24) & 0xff);
+		break;
+	case AF_INET6:
+		in6_addr = (const struct in6_addr *)addr;
+		snprintf(dst, max,
+		    "%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x."
+		    "%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x."
+		    "ip6.arpa.",
+		    in6_addr->s6_addr[15] & 0xf,
+		    (in6_addr->s6_addr[15] >> 4) & 0xf,
+		    in6_addr->s6_addr[14] & 0xf,
+		    (in6_addr->s6_addr[14] >> 4) & 0xf,
+		    in6_addr->s6_addr[13] & 0xf,
+		    (in6_addr->s6_addr[13] >> 4) & 0xf,
+		    in6_addr->s6_addr[12] & 0xf,
+		    (in6_addr->s6_addr[12] >> 4) & 0xf,
+		    in6_addr->s6_addr[11] & 0xf,
+		    (in6_addr->s6_addr[11] >> 4) & 0xf,
+		    in6_addr->s6_addr[10] & 0xf,
+		    (in6_addr->s6_addr[10] >> 4) & 0xf,
+		    in6_addr->s6_addr[9] & 0xf,
+		    (in6_addr->s6_addr[9] >> 4) & 0xf,
+		    in6_addr->s6_addr[8] & 0xf,
+		    (in6_addr->s6_addr[8] >> 4) & 0xf,
+		    in6_addr->s6_addr[7] & 0xf,
+		    (in6_addr->s6_addr[7] >> 4) & 0xf,
+		    in6_addr->s6_addr[6] & 0xf,
+		    (in6_addr->s6_addr[6] >> 4) & 0xf,
+		    in6_addr->s6_addr[5] & 0xf,
+		    (in6_addr->s6_addr[5] >> 4) & 0xf,
+		    in6_addr->s6_addr[4] & 0xf,
+		    (in6_addr->s6_addr[4] >> 4) & 0xf,
+		    in6_addr->s6_addr[3] & 0xf,
+		    (in6_addr->s6_addr[3] >> 4) & 0xf,
+		    in6_addr->s6_addr[2] & 0xf,
+		    (in6_addr->s6_addr[2] >> 4) & 0xf,
+		    in6_addr->s6_addr[1] & 0xf,
+		    (in6_addr->s6_addr[1] >> 4) & 0xf,
+		    in6_addr->s6_addr[0] & 0xf,
+		    (in6_addr->s6_addr[0] >> 4) & 0xf);
+		break;
+	default:
+		return (-1);
+	}
+	return (0);
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: acpi_machdep.c,v 1.52 2012/11/27 17:38:45 pirofti Exp $	*/
+/*	$OpenBSD: acpi_machdep.c,v 1.55 2013/07/01 10:08:08 kettenis Exp $	*/
 /*
  * Copyright (c) 2005 Thorsten Lockert <tholo@sigmasoft.com>
  *
@@ -183,7 +183,7 @@ acpi_acquire_glk(uint32_t *lock)
 		new = (old & ~GL_BIT_PENDING) | GL_BIT_OWNED;
 		if ((old & GL_BIT_OWNED) != 0)
 			new |= GL_BIT_PENDING;
-	} while (x86_atomic_cas_int32(lock, old, new) == 0);
+	} while (x86_atomic_cas_int32(lock, old, new) != old);
 
 	return ((new & GL_BIT_PENDING) == 0);
 }
@@ -201,7 +201,7 @@ acpi_release_glk(uint32_t *lock)
 	do {
 		old = *lock;
 		new = old & ~(GL_BIT_PENDING | GL_BIT_OWNED);
-	} while (x86_atomic_cas_int32(lock, old, new) == 0);
+	} while (x86_atomic_cas_int32(lock, old, new) != old);
 
 	return ((old & GL_BIT_PENDING) != 0);
 }
@@ -356,22 +356,17 @@ acpi_sleep_mp(void)
 	sched_stop_secondary_cpus();
 	KASSERT(CPU_IS_PRIMARY(curcpu()));
 
-	/* Wait for cpus to save their floating point context */
-	x86_broadcast_ipi(X86_IPI_SYNCH_FPU);
-	for (i = 0; i < ncpus; i++) {
-		struct cpu_info *ci = cpu_info[i];
-
-		while (!CPU_IS_PRIMARY(curcpu()) && ci->ci_fpcurproc)
-			;
-	}
-
-	/* Wait for cpus to halt so we know their caches are written back */
+	/* 
+	 * Wait for cpus to halt so we know their FPU state has been
+	 * saved and their caches have been written back.
+	 */
 	x86_broadcast_ipi(X86_IPI_HALT);
 	for (i = 0; i < ncpus; i++) {
 		struct cpu_info *ci = cpu_info[i];
 
-		while (!CPU_IS_PRIMARY(curcpu()) &&
-		    (ci->ci_flags & CPUF_RUNNING))
+		if (CPU_IS_PRIMARY(ci))
+			continue;
+		while (ci->ci_flags & CPUF_RUNNING)
 			;
 	}
 }

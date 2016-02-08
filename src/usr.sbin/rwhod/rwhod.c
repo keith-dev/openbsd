@@ -219,6 +219,7 @@ handleread(int s)
 	char path[64];
 	struct whod wd;
 	int cc, whod;
+	time_t t;
 	socklen_t len = sizeof(from);
 
 	cc = recvfrom(s, (char *)&wd, sizeof(struct whod), 0,
@@ -280,7 +281,8 @@ handleread(int s)
 		}
 	}
 #endif
-	(void) time((time_t *)&wd.wd_recvtime);
+	(void) time(&t);
+	wd.wd_recvtime = t;	/* XXX protocol breaks in 2038 */
 	(void) write(whod, (char *)&wd, cc);
 	if (fstat(whod, &st) < 0 || st.st_size > cc)
 		ftruncate(whod, (off_t)cc);
@@ -469,7 +471,7 @@ configure(void)
 	struct sockaddr_dl *sdl;
 	size_t needed;
 	int mib[6], flags = 0, len;
-	char *buf, *lim, *next;
+	char *buf = NULL, *lim, *next;
 	struct rt_addrinfo info;
 
 	mib[0] = CTL_NET;
@@ -478,13 +480,21 @@ configure(void)
 	mib[3] = AF_INET;
 	mib[4] = NET_RT_IFLIST;
 	mib[5] = 0;
-	if (sysctl(mib, 6, NULL, &needed, NULL, 0) < 0)
-		quit("route-sysctl-estimate");
-	if ((buf = malloc(needed)) == NULL)
-		quit("malloc");
-	if (sysctl(mib, 6, buf, &needed, NULL, 0) < 0)
-		quit("actual retrieval of interface table");
-	lim = buf + needed;
+	while (1) {
+		if (sysctl(mib, 6, NULL, &needed, NULL, 0) == -1)
+			quit("route-sysctl-estimate");
+		if (needed == 0)
+			break;
+		if ((buf = realloc(buf, needed)) == NULL)
+			quit("realloc");
+		if (sysctl(mib, 6, buf, &needed, NULL, 0) == -1) {
+			if (errno == ENOMEM)
+				continue;
+			quit("actual retrieval of interface table");
+		}
+		lim = buf + needed;
+		break;
+	}
 
 	sdl = NULL;		/* XXX just to keep gcc -Wall happy */
 	for (next = buf; next < lim; next += ifm->ifm_msglen) {

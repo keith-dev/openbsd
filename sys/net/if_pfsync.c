@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_pfsync.c,v 1.195 2012/10/30 12:09:05 florian Exp $	*/
+/*	$OpenBSD: if_pfsync.c,v 1.200 2013/06/20 12:03:40 mpi Exp $	*/
 
 /*
  * Copyright (c) 2002 Michael Shalayeff
@@ -43,7 +43,6 @@
  */
 
 #include <sys/param.h>
-#include <sys/proc.h>
 #include <sys/systm.h>
 #include <sys/time.h>
 #include <sys/malloc.h>
@@ -326,7 +325,7 @@ pfsync_clone_create(struct if_clone *ifc, int unit)
 	ifp->if_output = pfsyncoutput;
 	ifp->if_start = pfsyncstart;
 	ifp->if_type = IFT_PFSYNC;
-	IFQ_SET_MAXLEN(&ifp->if_snd, ifqmaxlen);
+	IFQ_SET_MAXLEN(&ifp->if_snd, IFQ_MAXLEN);
 	ifp->if_hdrlen = sizeof(struct pfsync_header);
 	ifp->if_mtu = ETHERMTU;
 	timeout_set(&sc->sc_tmo, pfsync_timeout, sc);
@@ -613,7 +612,7 @@ pfsync_state_import(struct pfsync_state *sp, int flags)
 	if (!ISSET(flags, PFSYNC_SI_IOCTL))
 		SET(st->state_flags, PFSTATE_NOSYNC);
 
-	if (pf_state_insert(kif, skw, sks, st) != 0) {
+	if (pf_state_insert(kif, &skw, &sks, st) != 0) {
 		/* XXX when we have anchors, use STATE_DEC_COUNTERS */
 		r->states_cur--;
 		error = EEXIST;

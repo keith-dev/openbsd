@@ -1,4 +1,4 @@
-/*	$OpenBSD: ldasm.S,v 1.4 2013/01/26 20:40:42 miod Exp $	*/
+/*	$OpenBSD: ldasm.S,v 1.6 2013/06/01 09:57:58 miod Exp $	*/
 
 /*
  * Copyright (c) 2013 Miodrag Vallat.
@@ -195,6 +195,18 @@ DL_SYSCALL(fcntl)
 	jmp	%r1
 
 DL_SYSCALL(gettimeofday)
+	jmp	%r1
+
+DL_SYSCALL(readlink)
+	jmp	%r1
+
+DL_SYSCALL(lstat)
+	jmp	%r1
+
+DL_SYSCALL(utrace)
+	jmp	%r1
+
+DL_SYSCALL2(getcwd,__getcwd)
 	jmp	%r1
 
 DL_SYSCALL2(sysctl,__sysctl)

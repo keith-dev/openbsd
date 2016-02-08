@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.78 2013/02/12 08:06:22 mpi Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.81 2013/06/04 15:29:16 haesbaert Exp $	*/
 /*	$NetBSD: cpu.h,v 1.1 2003/04/26 18:39:39 fvdl Exp $	*/
 
 /*-
@@ -41,15 +41,18 @@
 /*
  * Definitions unique to x86-64 cpu support.
  */
+#ifdef _KERNEL
 #include <machine/frame.h>
 #include <machine/segments.h>
-#include <machine/intrdefs.h>
 #include <machine/cacheinfo.h>
+#include <machine/intrdefs.h>
 
 #ifdef MULTIPROCESSOR
 #include <machine/i82489reg.h>
 #include <machine/i82489var.h>
 #endif
+
+#endif /* _KERNEL */
 
 #include <sys/device.h>
 #include <sys/lock.h>
@@ -102,6 +105,11 @@ struct cpu_info {
 	u_int32_t	ci_cflushsz;
 	u_int64_t	ci_tsc_freq;
 
+#define ARCH_HAVE_CPU_TOPOLOGY
+	u_int32_t	ci_smt_id;
+	u_int32_t	ci_core_id;
+	u_int32_t	ci_pkg_id;
+
 	struct cpu_functions *ci_func;
 	void (*cpu_setup)(struct cpu_info *);
 	void (*ci_info)(struct cpu_info *);
@@ -128,6 +136,9 @@ struct cpu_info {
 
 	struct ksensordev	ci_sensordev;
 	struct ksensor		ci_sensor;
+#ifdef GPROF
+	struct gmonparam	*ci_gmon;
+#endif
 };
 
 #define CPUF_BSP	0x0001		/* CPU is the original BSP */
@@ -208,9 +219,9 @@ extern struct cpu_info cpu_info_primary;
 
 #endif	/* MULTIPROCESSOR */
 
-#endif /* _KERNEL */
-
 #include <machine/psl.h>
+
+#endif /* _KERNEL */
 
 #ifdef MULTIPROCESSOR
 #include <sys/mplock.h>

@@ -1,4 +1,4 @@
-/* $OpenBSD: softraid_raid0.c,v 1.33 2013/01/18 11:48:05 jsing Exp $ */
+/* $OpenBSD: softraid_raid0.c,v 1.41 2013/06/11 16:42:13 deraadt Exp $ */
 /*
  * Copyright (c) 2008 Marco Peereboom <marco@peereboom.us>
  *
@@ -48,10 +48,8 @@ int	sr_raid0_create(struct sr_discipline *, struct bioc_createraid *,
 	    int, int64_t);
 int	sr_raid0_assemble(struct sr_discipline *, struct bioc_createraid *,
 	    int, void *);
-int	sr_raid0_alloc_resources(struct sr_discipline *);
-int	sr_raid0_free_resources(struct sr_discipline *);
+int	sr_raid0_init(struct sr_discipline *);
 int	sr_raid0_rw(struct sr_workunit *);
-void	sr_raid0_intr(struct buf *);
 
 /* Discipline initialisation. */
 void
@@ -65,12 +63,9 @@ sr_raid0_discipline_init(struct sr_discipline *sd)
 	sd->sd_max_wu = SR_RAID0_NOWU;
 
 	/* Setup discipline specific function pointers. */
-	sd->sd_alloc_resources = sr_raid0_alloc_resources;
 	sd->sd_assemble = sr_raid0_assemble;
 	sd->sd_create = sr_raid0_create;
-	sd->sd_free_resources = sr_raid0_free_resources;
 	sd->sd_scsi_rw = sr_raid0_rw;
-	sd->sd_scsi_intr = sr_raid0_intr;
 }
 
 int
@@ -78,7 +73,8 @@ sr_raid0_create(struct sr_discipline *sd, struct bioc_createraid *bc,
     int no_chunk, int64_t coerced_size)
 {
 	if (no_chunk < 2) {
-		sr_error(sd->sd_sc, "RAID 0 requires two or more chunks");
+		sr_error(sd->sd_sc, "%s requires two or more chunks",
+		    sd->sd_name);
 		return EINVAL;
         }
 
@@ -90,68 +86,31 @@ sr_raid0_create(struct sr_discipline *sd, struct bioc_createraid *bc,
 	sd->sd_meta->ssdi.ssd_size = (coerced_size &
 	    ~((sd->sd_meta->ssdi.ssd_strip_size >> DEV_BSHIFT) - 1)) * no_chunk;
 
-	sd->sd_max_ccb_per_wu =
-	    (MAXPHYS / sd->sd_meta->ssdi.ssd_strip_size + 1) *
-	    SR_RAID0_NOWU * no_chunk;
-
-	return 0;
+	return sr_raid0_init(sd);
 }
 
 int
 sr_raid0_assemble(struct sr_discipline *sd, struct bioc_createraid *bc,
     int no_chunks, void *data)
 {
+	return sr_raid0_init(sd);
+}
 
+int
+sr_raid0_init(struct sr_discipline *sd)
+{
+	/* Initialise runtime values. */
+	sd->mds.mdd_raid0.sr0_strip_bits =
+	    sr_validate_stripsize(sd->sd_meta->ssdi.ssd_strip_size);
+	if (sd->mds.mdd_raid0.sr0_strip_bits == -1) {
+		sr_error(sd->sd_sc, "invalid strip size", sd->sd_name);
+		return EINVAL;
+	}
 	sd->sd_max_ccb_per_wu =
 	    (MAXPHYS / sd->sd_meta->ssdi.ssd_strip_size + 1) *
 	    SR_RAID0_NOWU * sd->sd_meta->ssdi.ssd_chunk_no;
 
 	return 0;
-}
-
-int
-sr_raid0_alloc_resources(struct sr_discipline *sd)
-{
-	int			rv = EINVAL;
-
-	if (!sd)
-		return (rv);
-
-	DNPRINTF(SR_D_DIS, "%s: sr_raid0_alloc_resources\n",
-	    DEVNAME(sd->sd_sc));
-
-	if (sr_wu_alloc(sd))
-		goto bad;
-	if (sr_ccb_alloc(sd))
-		goto bad;
-
-	/* setup runtime values */
-	sd->mds.mdd_raid0.sr0_strip_bits =
-	    sr_validate_stripsize(sd->sd_meta->ssdi.ssd_strip_size);
-	if (sd->mds.mdd_raid0.sr0_strip_bits == -1)
-		goto bad;
-
-	rv = 0;
-bad:
-	return (rv);
-}
-
-int
-sr_raid0_free_resources(struct sr_discipline *sd)
-{
-	int			rv = EINVAL;
-
-	if (!sd)
-		return (rv);
-
-	DNPRINTF(SR_D_DIS, "%s: sr_raid0_free_resources\n",
-	    DEVNAME(sd->sd_sc));
-
-	sr_wu_free(sd);
-	sr_ccb_free(sd);
-
-	rv = 0;
-	return (rv);
 }
 
 int
@@ -161,10 +120,9 @@ sr_raid0_rw(struct sr_workunit *wu)
 	struct scsi_xfer	*xs = wu->swu_xs;
 	struct sr_ccb		*ccb;
 	struct sr_chunk		*scp;
-	int			s;
-	daddr64_t		blk, lbaoffs, strip_no, chunk, stripoffs;
-	daddr64_t		strip_size, no_chunk, chunkoffs, physoffs;
-	daddr64_t		strip_bits, length, leftover;
+	daddr_t			blk, lbaoffs, strip_no, chunk, stripoffs;
+	daddr_t			strip_size, no_chunk, chunkoffs, physoffs;
+	daddr_t			strip_bits, length, leftover;
 	u_int8_t		*data;
 
 	/* blk and scsi error will be handled by sr_validate_io */
@@ -228,36 +186,11 @@ sr_raid0_rw(struct sr_workunit *wu)
 		length = MIN(leftover,strip_size);
 	}
 
-	s = splbio();
+	sr_schedule_wu(wu);
 
-	if (sr_check_io_collision(wu))
-		goto queued;
-
-	sr_raid_startwu(wu);
-queued:
-	splx(s);
 	return (0);
+
 bad:
 	/* wu is unwound by sr_wu_put */
 	return (1);
-}
-
-void
-sr_raid0_intr(struct buf *bp)
-{
-	struct sr_ccb		*ccb = (struct sr_ccb *)bp;
-	struct sr_workunit	*wu = ccb->ccb_wu;
-#ifdef SR_DEBUG
-	struct scsi_xfer	*xs = wu->swu_xs;
-	struct sr_discipline	*sd = wu->swu_dis;
-#endif
-	int			s;
-
-	DNPRINTF(SR_D_INTR, "%s: %s %s intr bp %x xs %x\n",
-	    DEVNAME(sd->sd_sc), sd->sd_meta.ssd_name, sd->sd_name, bp, xs);
-
-	s = splbio();
-	sr_ccb_done(ccb);
-	sr_wu_done(wu);
-	splx(s);
 }

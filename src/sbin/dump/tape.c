@@ -1,4 +1,4 @@
-/*	$OpenBSD: tape.c,v 1.32 2012/08/22 05:20:51 halex Exp $	*/
+/*	$OpenBSD: tape.c,v 1.36 2013/06/11 16:42:04 deraadt Exp $	*/
 /*	$NetBSD: tape.c,v 1.11 1997/06/05 11:13:26 lukem Exp $	*/
 
 /*-
@@ -79,7 +79,7 @@ static	void rollforward(void);
  * The following structure defines the instruction packets sent to slaves.
  */
 struct req {
-	daddr64_t dblk;
+	daddr_t dblk;
 	int count;
 };
 int reqsiz;
@@ -152,7 +152,7 @@ void
 writerec(char *dp, int isspcl)
 {
 
-	slp->req[trecno].dblk = (daddr64_t)0;
+	slp->req[trecno].dblk = (daddr_t)0;
 	slp->req[trecno].count = 1;
 	*(union u_spcl *)(*(nextblock)++) = *(union u_spcl *)dp;
 	if (isspcl)
@@ -164,10 +164,10 @@ writerec(char *dp, int isspcl)
 }
 
 void
-dumpblock(daddr64_t blkno, int size)
+dumpblock(daddr_t blkno, int size)
 {
 	int avail, tpblks;
-	daddr64_t dblkno;
+	daddr_t dblkno;
 
 	dblkno = fsbtodb(sblock, blkno);
 	tpblks = size >> tp_bshift;
@@ -231,8 +231,9 @@ do_stats(void)
 	blocks = spcl.c_tapea - tapea_volume;
 	msg("Volume %d completed at: %s", tapeno, ctime(&tnow));
 	if (ttaken > 0) {
-		msg("Volume %d took %d:%02d:%02d\n", tapeno,
-		    ttaken / 3600, (ttaken % 3600) / 60, ttaken % 60);
+		msg("Volume %d took %lld:%02lld:%02lld\n", tapeno,
+		    (long long)ttaken / 3600, ((long long)ttaken % 3600) / 60,
+		    (long long)ttaken % 60);
 		blocks /= ttaken;
 		msg("Volume %d transfer rate: %lld KB/s\n", tapeno, blocks);
 		xferrate += blocks;
@@ -256,7 +257,7 @@ statussig(int signo)
 
 	if (blockswritten < 500)
 		return;
-	(void) time((time_t *) &tnow);
+	(void) time(&tnow);
 	deltat = tstart_writing - tnow + (1.0 * (tnow - tstart_writing))
 		/ blockswritten * tapesize;
 	(void)snprintf(msgbuf, sizeof(msgbuf),
@@ -682,8 +683,8 @@ restore_check_point:
 			spcl.c_flags &=~ DR_NEWHEADER;
 		msg("Volume %d started at: %s", tapeno, ctime(&tstart_volume));
 		if (tapeno > 1)
-			msg("Volume %d begins with blocks from inode %d\n",
-				tapeno, slp->inode);
+			msg("Volume %d begins with blocks from inode %llu\n",
+			    tapeno, (unsigned long long)slp->inode);
 	}
 }
 

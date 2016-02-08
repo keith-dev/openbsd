@@ -1,4 +1,4 @@
-/*	$OpenBSD: kroute.c,v 1.191 2012/11/13 22:07:28 florian Exp $ */
+/*	$OpenBSD: kroute.c,v 1.195 2013/05/22 21:00:36 sthen Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -16,7 +16,6 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-#include <sys/param.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/sysctl.h>
@@ -506,8 +505,10 @@ kr4_change(struct ktable *kt, struct kroute_full *kl)
 		kr->r.priority = RTP_BGP;
 		kr->r.labelid = labelid;
 
-		if (kroute_insert(kt, kr) == -1)
+		if (kroute_insert(kt, kr) == -1) {
 			free(kr);
+			return (-1);
+		}
 	} else {
 		kr->r.nexthop.s_addr = kl->nexthop.v4.s_addr;
 		rtlabel_unref(kr->r.labelid);
@@ -563,8 +564,10 @@ kr6_change(struct ktable *kt, struct kroute_full *kl)
 		kr6->r.priority = RTP_BGP;
 		kr6->r.labelid = labelid;
 
-		if (kroute6_insert(kt, kr6) == -1)
+		if (kroute6_insert(kt, kr6) == -1) {
 			free(kr6);
+			return (-1);
+		}
 	} else {
 		memcpy(&kr6->r.nexthop, &kl->nexthop.v6,
 		    sizeof(struct in6_addr));
@@ -633,8 +636,10 @@ krVPN4_change(struct ktable *kt, struct kroute_full *kl)
 		kr->r.labelid = labelid;
 		kr->r.mplslabel = mplslabel;
 
-		if (kroute_insert(kt, kr) == -1)
+		if (kroute_insert(kt, kr) == -1) {
 			free(kr);
+			return (-1);
+		}
 	} else {
 		kr->r.mplslabel = mplslabel;
 		kr->r.nexthop.s_addr = kl->nexthop.v4.s_addr;
@@ -1555,7 +1560,7 @@ kroute_remove(struct ktable *kt, struct kroute_node *kr)
 			    inet_ntoa(kr->r.prefix), kr->r.prefixlen);
 			return (-1);
 		}
-	       	if (kr->next != NULL) {
+		if (kr->next != NULL) {
 			if (RB_INSERT(kroute_tree, &kt->krt, kr->next) !=
 			    NULL) {
 				log_warnx("kroute_remove failed to add %s/%u",
@@ -1707,7 +1712,7 @@ kroute6_remove(struct ktable *kt, struct kroute6_node *kr)
 			    log_in6addr(&kr->r.prefix), kr->r.prefixlen);
 			return (-1);
 		}
-	       	if (kr->next != NULL) {
+		if (kr->next != NULL) {
 			if (RB_INSERT(kroute6_tree, &kt->krt6, kr->next) !=
 			    NULL) {
 				log_warnx("kroute6_remove failed to add %s/%u",
@@ -2622,6 +2627,7 @@ send_rt6msg(int fd, int action, struct ktable *kt, struct kroute6 *kroute)
 	hdr.rtm_version = RTM_VERSION;
 	hdr.rtm_type = action;
 	hdr.rtm_tableid = kt->rtableid;
+	hdr.rtm_priority = RTP_BGP;
 	if (kroute->flags & F_BLACKHOLE)
 		hdr.rtm_flags |= RTF_BLACKHOLE;
 	if (kroute->flags & F_REJECT)

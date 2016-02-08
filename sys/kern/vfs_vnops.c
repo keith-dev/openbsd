@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfs_vnops.c,v 1.71 2012/07/11 12:39:20 guenther Exp $	*/
+/*	$OpenBSD: vfs_vnops.c,v 1.73 2013/06/05 01:26:00 guenther Exp $	*/
 /*	$NetBSD: vfs_vnops.c,v 1.20 1996/02/04 02:18:41 christos Exp $	*/
 
 /*
@@ -482,10 +482,11 @@ vn_ioctl(struct file *fp, u_long com, caddr_t data, struct proc *p)
 		error = VOP_IOCTL(vp, com, data, fp->f_flag, p->p_ucred, p);
 		if (error == 0 && com == TIOCSCTTY) {
 			struct session *s = p->p_p->ps_session;
-			if (s->s_ttyvp)
-				vrele(s->s_ttyvp);
+			struct vnode *ovp = s->s_ttyvp;
 			s->s_ttyvp = vp;
 			vref(vp);
+			if (ovp)
+				vrele(ovp);
 		}
 		return (error);
 	}
@@ -535,7 +536,7 @@ vn_closefile(struct file *fp, struct proc *p)
 	struct vnode *vp = fp->f_data;
 	struct flock lf;
 	
-	if ((fp->f_flag & FHASLOCK)) {
+	if ((fp->f_iflags & FIF_HASLOCK)) {
 		lf.l_whence = SEEK_SET;
 		lf.l_start = 0;
 		lf.l_len = 0;

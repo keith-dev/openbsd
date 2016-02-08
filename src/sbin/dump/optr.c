@@ -1,4 +1,4 @@
-/*	$OpenBSD: optr.c,v 1.31 2009/10/27 23:59:32 deraadt Exp $	*/
+/*	$OpenBSD: optr.c,v 1.33 2013/04/25 06:43:20 otto Exp $	*/
 /*	$NetBSD: optr.c,v 1.11 1997/05/27 08:34:36 mrg Exp $	*/
 
 /*-
@@ -201,7 +201,7 @@ timeest(void)
 {
 	time_t	tnow, deltat;
 
-	(void) time((time_t *) &tnow);
+	(void) time(&tnow);
 	if (tnow >= tschedule) {
 		tschedule = tnow + 300;
 		if (blockswritten < 500)
@@ -209,9 +209,10 @@ timeest(void)
 		deltat = tstart_writing - tnow +
 			(1.0 * (tnow - tstart_writing))
 			/ blockswritten * tapesize;
-		msg("%3.2f%% done, finished in %d:%02d\n",
-			(blockswritten * 100.0) / tapesize,
-			deltat / 3600, (deltat % 3600) / 60);
+		msg("%3.2f%% done, finished in %lld:%02lld\n",
+		    (blockswritten * 100.0) / tapesize,
+		    (long long)deltat / 3600,
+		    ((long long)deltat % 3600) / 60);
 	}
 }
 

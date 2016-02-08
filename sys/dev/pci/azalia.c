@@ -1,4 +1,4 @@
-/*	$OpenBSD: azalia.c,v 1.203 2013/02/09 21:02:17 miod Exp $	*/
+/*	$OpenBSD: azalia.c,v 1.206 2013/05/30 16:15:02 deraadt Exp $	*/
 /*	$NetBSD: azalia.c,v 1.20 2006/05/07 08:31:44 kent Exp $	*/
 
 /*-
@@ -528,8 +528,8 @@ azalia_pci_attach(struct device *parent, struct device *self, void *aux)
 		return;
 	}
 	interrupt_str = pci_intr_string(pa->pa_pc, ih);
-	sc->ih = pci_intr_establish(pa->pa_pc, ih, IPL_AUDIO, azalia_intr,
-	    sc, sc->dev.dv_xname);
+	sc->ih = pci_intr_establish(pa->pa_pc, ih, IPL_AUDIO | IPL_MPSAFE,
+	    azalia_intr, sc, sc->dev.dv_xname);
 	if (sc->ih == NULL) {
 		printf(": can't establish interrupt");
 		if (interrupt_str != NULL)
@@ -550,8 +550,6 @@ azalia_pci_attach(struct device *parent, struct device *self, void *aux)
 
 	sc->audiodev = audio_attach_mi(&azalia_hw_if, sc, &sc->dev);
 
-	shutdownhook_establish(azalia_shutdown, sc);
-
 	return;
 
 err_exit:
@@ -571,6 +569,9 @@ azalia_pci_activate(struct device *self, int act)
 		break;
 	case DVACT_SUSPEND:
 		azalia_suspend(sc);
+		break;
+	case DVACT_POWERDOWN:
+		azalia_shutdown(sc);
 		break;
 	case DVACT_RESUME:
 		azalia_resume(sc);
@@ -665,16 +666,39 @@ azalia_pci_detach(struct device *self, int flags)
 	return 0;
 }
 
+/*
+#define AZALIA_LOG_MP
+*/
+#ifdef AZALIA_LOG_MP
+#include <machine/lock.h>
+#include <machine/cpufunc.h>
+#endif
+
 int
 azalia_intr(void *v)
 {
+#ifdef AZALIA_LOG_MP
+	volatile struct cpu_info *ci;
+#endif
 	azalia_t *az = v;
 	uint32_t intsts;
 	int ret = 0;
 
+#ifdef AZALIA_LOG_MP
+	ci = kernel_lock.mpl_cpu;
+	if (ci == NULL)
+		printf("azalia_intr: mp not held\n");
+	else {
+		printf("azalia_intr: lock held by %p, id = %u\n",
+		    ci, ci->ci_cpuid);
+	}
+#endif
+	mtx_enter(&audio_lock);
 	intsts = AZ_READ_4(az, INTSTS);
-	if (intsts == 0 || intsts == 0xffffffff)
+	if (intsts == 0 || intsts == 0xffffffff) {
+		mtx_leave(&audio_lock);
 		return (ret);
+	}
 
 	AZ_WRITE_4(az, INTSTS, intsts);
 
@@ -694,7 +718,7 @@ azalia_intr(void *v)
 		azalia_rirb_intr(az);
 		ret = 1;
 	}
-
+	mtx_leave(&audio_lock);
 	return (ret);
 }
 
@@ -1143,17 +1167,16 @@ int
 azalia_comresp(const codec_t *codec, nid_t nid, uint32_t control,
     uint32_t param, uint32_t* result)
 {
-	int err, s;
+	int err;
 
-	s = splaudio();
+	mtx_enter(&audio_lock);
 	err = azalia_set_command(codec->az, codec->address, nid, control,
 	    param);
 	if (err)
 		goto exit;
 	err = azalia_get_response(codec->az, result);
 exit:
-	splx(s);
-
+	mtx_leave(&audio_lock);
 	return(err);
 }
 
@@ -3763,7 +3786,6 @@ azalia_stream_start(stream_t *this)
 	STR_WRITE_1(this, CTL, STR_READ_1(this, CTL) |
 	    HDA_SD_CTL_DEIE | HDA_SD_CTL_FEIE | HDA_SD_CTL_IOCE |
 	    HDA_SD_CTL_RUN);
-
 	return (0);
 }
 

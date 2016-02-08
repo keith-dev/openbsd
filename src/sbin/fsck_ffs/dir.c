@@ -1,4 +1,4 @@
-/*	$OpenBSD: dir.c,v 1.27 2011/05/08 14:38:40 otto Exp $	*/
+/*	$OpenBSD: dir.c,v 1.29 2013/06/11 16:42:04 deraadt Exp $	*/
 /*	$NetBSD: dir.c,v 1.20 1996/09/27 22:45:11 christos Exp $	*/
 
 /*
@@ -59,7 +59,7 @@ struct	odirtemplate odirhead = {
 static int expanddir(union dinode *, char *);
 static void freedir(ino_t, ino_t);
 static struct direct *fsck_readdir(struct inodesc *);
-static struct bufarea *getdirblk(daddr64_t, long);
+static struct bufarea *getdirblk(daddr_t, long);
 static int lftempname(char *, ino_t);
 static int mkentry(struct inodesc *);
 static int chgino(struct  inodesc *);
@@ -414,9 +414,11 @@ linkup(ino_t orphan, ino_t parentdir)
 		DIP_SET(dp, di_nlink, DIP(dp, di_nlink) + 1);
 		inodirty();
 		ILNCOUNT(lfdir)++;
-		pwarn("DIR I=%u CONNECTED. ", orphan);
+		pwarn("DIR I=%llu CONNECTED. ",
+		    (unsigned long long)orphan);
 		if (parentdir != (ino_t)-1) {
-			printf("PARENT WAS I=%u\n", parentdir);
+			printf("PARENT WAS I=%llu\n",
+			    (unsigned long long)parentdir);
 			/*
 			 * The parent directory, because of the ordering
 			 * guarantees, has had the link count incremented
@@ -493,7 +495,7 @@ makeentry(ino_t parent, ino_t ino, char *name)
 static int
 expanddir(union dinode *dp, char *name)
 {
-	daddr64_t lastbn, newblk;
+	daddr_t lastbn, newblk;
 	struct bufarea *bp;
 	char *cp, firstblk[DIRBLKSIZ];
 	u_int64_t dis;
@@ -655,7 +657,7 @@ lftempname(char *bufp, ino_t ino)
  * Insure that it is held until another is requested.
  */
 static struct bufarea *
-getdirblk(daddr64_t blkno, long size)
+getdirblk(daddr_t blkno, long size)
 {
 
 	if (pdirbp != 0)

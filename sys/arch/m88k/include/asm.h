@@ -1,4 +1,4 @@
-/*	$OpenBSD: asm.h,v 1.12 2013/01/11 21:19:45 miod Exp $	*/
+/*	$OpenBSD: asm.h,v 1.14 2013/05/17 22:28:21 miod Exp $	*/
 
 /*
  * Mach Operating System
@@ -75,19 +75,19 @@
 	.comm	_ASM_LABEL(name), size
 
 #ifdef	__ELF__
+#define	STRONG_ALIAS(alias,sym)						\
+	.global alias;							\
+	alias = sym
 #define	WEAK_ALIAS(alias,sym)						\
 	.weak alias;							\
 	alias = sym
 #else
-#ifdef	__STDC__
+#define	STRONG_ALIAS(alias,sym)						\
+	.global _##alias;						\
+	_##alias = _##sym
 #define	WEAK_ALIAS(alias,sym)						\
 	.weak _##alias;							\
 	_##alias = _##sym
-#else
-#define	WEAK_ALIAS(alias,sym)						\
-	.weak _/**/alias;						\
-	_/**/alias = _/**/sym
-#endif
 #endif
 
 #ifdef _KERNEL
@@ -181,7 +181,7 @@
 #define	PSR_GRAPHICS_DISABLE_BIT	4	/* SFU2 - MC88110 */
 #define	PSR_SERIALIZE_BIT		25	/* MC88110 */
 #define	PSR_CARRY_BIT			28
-#define	PSR_SERIAL_MODE_BIT		29	/* MC88110 */
+#define	PSR_SERIAL_MODE_BIT		29
 #define	PSR_BIG_ENDIAN_MODE		30
 #define	PSR_SUPERVISOR_MODE_BIT		31
 

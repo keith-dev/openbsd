@@ -1,4 +1,4 @@
-/*	$OpenBSD: dirent.h,v 1.29 2012/11/29 02:15:44 guenther Exp $	*/
+/*	$OpenBSD: dirent.h,v 1.31 2013/06/02 16:14:59 guenther Exp $	*/
 /*	$NetBSD: dirent.h,v 1.9 1995/03/26 20:13:37 jtc Exp $	*/
 
 /*-
@@ -40,8 +40,10 @@
 /*
  * POSIX doesn't mandate this, but X/Open XPG 4.2 does.
  */
-#if __BSD_VISIBLE || __XPG_VISIBLE >= 420
+#if __BSD_VISIBLE || __XPG_VISIBLE >= 400
 #include <sys/types.h>
+#else
+#include <sys/_types.h>
 #endif
 
 /*
@@ -73,7 +75,6 @@ typedef struct _dirdesc DIR;
 
 #endif /* __BSD_VISIBLE */
 
-#ifndef _KERNEL
 __BEGIN_DECLS
 DIR *opendir(const char *);
 #if __POSIX_VISIBLE >= 200809
@@ -107,7 +108,5 @@ int alphasort(const void *, const void *);
 int dirfd(DIR *);
 #endif
 __END_DECLS
-
-#endif /* !_KERNEL */
 
 #endif /* !_DIRENT_H_ */

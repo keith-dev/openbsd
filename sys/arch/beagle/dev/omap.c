@@ -1,4 +1,4 @@
-/* $OpenBSD: omap.c,v 1.3 2011/11/15 23:01:11 drahn Exp $ */
+/* $OpenBSD: omap.c,v 1.10 2013/06/14 23:13:54 patrick Exp $ */
 /*
  * Copyright (c) 2005,2008 Dale Rahn <drahn@openbsd.com>
  *
@@ -66,6 +66,19 @@ struct board_dev beagleboard_devs[] = {
 	{ NULL,		0 }
 };
 
+struct board_dev beaglebone_devs[] = {
+	{ "prcm",	0 },
+	{ "sitaracm",	0 },
+	{ "intc",	0 },
+	{ "dmtimer",	0 },
+	{ "dmtimer",	1 },
+	{ "omdog",	0 },
+	{ "ommmc",	0 },		/* HSMMC0 */
+	{ "com",	0 },		/* UART0 */
+	{ "cpsw",	0 },
+	{ NULL,		0 }
+};
+
 struct board_dev overo_devs[] = {
 	{ "prcm",	0 },
 	{ "intc",	0 },
@@ -84,8 +97,8 @@ struct board_dev overo_devs[] = {
 };
 
 struct board_dev pandaboard_devs[] = {
-	{ "ampintc",	0 },
-	{ "amptimer",	0 },
+	{ "omapid",	0 },
+	{ "prcm",	0 },
 	{ "omdog",	0 },
 	{ "omgpio",	0 },
 	{ "omgpio",	1 },
@@ -95,6 +108,7 @@ struct board_dev pandaboard_devs[] = {
 	{ "omgpio",	5 },
 	{ "ommmc",	0 },		/* HSMMC1 */
 	{ "com",	2 },		/* UART3 */
+	{ "ehci",	0 },
 	{ NULL,		0 }
 };
 
@@ -135,6 +149,11 @@ omap_attach(struct device *parent, struct device *self, void *aux)
 		omap3_init();
 		board_devs = beagleboard_devs;
 		break;
+	case BOARD_ID_AM335X_BEAGLEBONE:
+		printf(": BeagleBone\n");
+		am335x_init();
+		board_devs = beaglebone_devs;
+		break;
 	case BOARD_ID_OMAP3_OVERO:
 		printf(": Gumstix Overo\n");
 		omap3_init();
@@ -155,9 +174,11 @@ omap_attach(struct device *parent, struct device *self, void *aux)
 		struct omap_dev *od = omap_find_dev(bd->name, bd->unit);
 		struct omap_attach_args oa;
 
-		if (od == NULL)
+		if (od == NULL) {
 			printf("%s: device %s unit %d not found\n",
 			    self->dv_xname, bd->name, bd->unit);
+			continue;
+		}
 
 		memset(&oa, 0, sizeof(oa));
 		oa.oa_dev = od;

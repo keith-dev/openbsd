@@ -1,4 +1,4 @@
-/*	$OpenBSD: asr_debug.c,v 1.10 2012/11/24 15:12:48 eric Exp $	*/
+/*	$OpenBSD: asr_debug.c,v 1.14 2013/07/12 14:36:21 eric Exp $	*/
 /*
  * Copyright (c) 2012 Eric Faurot <eric@openbsd.org>
  *
@@ -26,11 +26,11 @@
 #include "asr.h"
 #include "asr_private.h"
 
-static const char* rcodetostr(uint16_t);
-static const char* print_dname(const char *, char *, size_t);
-static const char* print_header(const struct header *, char *, size_t);
-static const char* print_query(const struct query *, char *, size_t);
-static const char* print_rr(const struct rr*, char *, size_t);
+static const char *rcodetostr(uint16_t);
+static const char *print_dname(const char *, char *, size_t);
+static const char *print_header(const struct header *, char *, size_t);
+static const char *print_query(const struct query *, char *, size_t);
+static const char *print_rr(const struct rr *, char *, size_t);
 
 FILE *asr_debug = NULL;
 
@@ -51,13 +51,13 @@ rcodetostr(uint16_t v)
 	}
 }
 
-static const char*
+static const char *
 print_dname(const char *_dname, char *buf, size_t max)
 {
 	return (asr_strdname(_dname, buf, max));
 }
 
-static const char*
+static const char *
 print_rr(const struct rr *rr, char *buf, size_t max)
 {
 	char	*res;
@@ -129,7 +129,7 @@ print_rr(const struct rr *rr, char *buf, size_t max)
 	return (res);
 }
 
-static const char*
+static const char *
 print_query(const struct query *q, char *buf, size_t max)
 {
 	char b[256];
@@ -141,7 +141,7 @@ print_query(const struct query *q, char *buf, size_t max)
 	return (buf);
 }
 
-static const char*
+static const char *
 print_header(const struct header *h, char *buf, size_t max)
 {
 	snprintf(buf, max,
@@ -173,9 +173,9 @@ asr_dump_packet(FILE *f, const void *data, size_t len)
 	if (f == NULL)
 		return;
 
-	unpack_init(&p, data, len);
+	asr_unpack_init(&p, data, len);
 
-	if (unpack_header(&p, &h) == -1) {
+	if (asr_unpack_header(&p, &h) == -1) {
 		fprintf(f, ";; BAD PACKET: %s\n", p.err);
 		return;
 	}
@@ -185,7 +185,7 @@ asr_dump_packet(FILE *f, const void *data, size_t len)
 	if (h.qdcount)
 		fprintf(f, ";; QUERY SECTION:\n");
 	for (i = 0; i < h.qdcount; i++) {
-		if (unpack_query(&p, &q) == -1)
+		if (asr_unpack_query(&p, &q) == -1)
 			goto error;
 		fprintf(f, "%s\n", print_query(&q, buf, sizeof buf));
 	}
@@ -203,7 +203,7 @@ asr_dump_packet(FILE *f, const void *data, size_t len)
 		if (i == ar)
 			fprintf(f, "\n;; ADDITIONAL SECTION:\n");
 
-		if (unpack_rr(&p, &rr) == -1)
+		if (asr_unpack_rr(&p, &rr) == -1)
 			goto error;
 		fprintf(f, "%s\n", print_rr(&rr, buf, sizeof buf));
 	}
@@ -293,7 +293,7 @@ asr_dump_config(FILE *f, struct asr *a)
 	fprintf(f, " ndots: %i\n", ac->ac_ndots);
 	fprintf(f, " family:");
 	for (i = 0; ac->ac_family[i] != -1; i++)
-		fprintf(f, " %s", (ac->ac_family[i] == AF_INET)?"inet":"inet6");
+		fprintf(f, " %s", (ac->ac_family[i] == AF_INET)?"inet4":"inet6");
 	fprintf(f, "\n");
 	fprintf(f, "NAMESERVERS timeout=%i retry=%i\n",
 		    ac->ac_nstimeout,
@@ -302,22 +302,7 @@ asr_dump_config(FILE *f, struct asr *a)
 		fprintf(f, "	%s\n", print_sockaddr(ac->ac_ns[i], buf,
 		    sizeof buf));
 	fprintf(f, "HOSTFILE %s\n", ac->ac_hostfile);
-	fprintf(f, "LOOKUP");
-	for (i = 0; i < ac->ac_dbcount; i++) {
-		switch (ac->ac_db[i]) {
-		case ASR_DB_FILE:
-			fprintf(f, " file");
-			break;
-		case ASR_DB_DNS:
-			fprintf(f, " dns");
-			break;
-		case ASR_DB_YP:
-			fprintf(f, " yp");
-			break;
-		default:
-			fprintf(f, " ?%i", ac->ac_db[i]);
-		}
-	}
+	fprintf(f, "LOOKUP %s", ac->ac_db);
 	fprintf(f, "\n------------------------------------\n");
 }
 

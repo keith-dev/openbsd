@@ -1,4 +1,4 @@
-/*	$OpenBSD: omohci.c,v 1.6 2011/11/10 19:37:01 uwe Exp $ */
+/*	$OpenBSD: omohci.c,v 1.8 2013/05/14 12:01:17 rapha Exp $ */
 
 /*
  * Copyright (c) 2005 David Gwynne <dlg@openbsd.org>
@@ -98,13 +98,13 @@ int	omohci_detach(struct device *, int);
 int	omohci_activate(struct device *, int);
 
 struct omohci_softc {
-	ohci_softc_t	sc;
-	void		*sc_ihc0;
-	void		*sc_ihc1;
-	void		*sc_ihc2;
-	void		*sc_ih0;
-	void		*sc_ih1;
-	void		*sc_ihotg;
+	struct ohci_softc	sc;
+	void			*sc_ihc0;
+	void			*sc_ihc1;
+	void			*sc_ihc2;
+	void			*sc_ih0;
+	void			*sc_ih1;
+	void			*sc_ihotg;
 };
 
 void	omohci_enable(struct omohci_softc *);
@@ -193,7 +193,7 @@ omohci_attach(struct device *parent, struct device *self, void *aux)
 		return;
 	}
 
-	prcm_enableclock(PRCM_CLK_EN_USB);
+	prcm_enablemodule(PRCM_USB);
 
 	bus_space_write_4(sc->sc.iot, sc->sc.ioh, OTG_SYSCON_2,
 	    OTG_SYSCON2_UHOST_EN | OTG_SYSCON2_MODE_HOST);

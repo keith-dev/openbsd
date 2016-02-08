@@ -1,4 +1,4 @@
-/*	$OpenBSD: n_atan.c,v 1.11 2013/01/13 03:44:59 martynas Exp $	*/
+/*	$OpenBSD: n_atan.c,v 1.13 2013/07/15 04:09:44 espie Exp $	*/
 /*	$NetBSD: n_atan.c,v 1.1 1995/10/10 23:36:36 ragge Exp $	*/
 /*
  * Copyright (c) 1985, 1993
@@ -82,4 +82,11 @@ atan(double x)
 	return(atan2(x,one));
 }
 
-__weak_alias(atanl, atan);
+__strong_alias(atanl, atan);
+
+float
+atanf(float x)
+{
+	float one=1.0f;
+	return(atan2f(x,one));
+}

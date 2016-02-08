@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_pppx.c,v 1.16 2013/02/06 22:58:18 sthen Exp $ */
+/*	$OpenBSD: if_pppx.c,v 1.23 2013/06/24 09:34:59 mpi Exp $ */
 
 /*
  * Copyright (c) 2010 Claudio Jeker <claudio@openbsd.org>
@@ -48,7 +48,6 @@
 #include <sys/kernel.h>
 #include <sys/malloc.h>
 #include <sys/device.h>
-#include <sys/proc.h>
 #include <sys/conf.h>
 #include <sys/queue.h>
 #include <sys/rwlock.h>
@@ -131,7 +130,7 @@ struct pppx_dev {
 };
 
 struct rwlock			pppx_devs_lk = RWLOCK_INITIALIZER("pppxdevs");
-LIST_HEAD(, pppx_dev)		pppx_devs = LIST_HEAD_INITIALIZER(&pppx_devs);
+LIST_HEAD(, pppx_dev)		pppx_devs = LIST_HEAD_INITIALIZER(pppx_devs);
 struct pool			*pppx_if_pl;
 
 struct pppx_dev			*pppx_dev_lookup(int);
@@ -916,7 +915,7 @@ pppx_add_session(struct pppx_dev *pxd, struct pipex_session_req *req)
 	
 	ia->ia_netmask = ia->ia_sockmask.sin_addr.s_addr;
 
-	error = in_ifinit(ifp, ia, &ifaddr, 0, 1);
+	error = in_ifinit(ifp, ia, &ifaddr, 1);
 	if (error) {
 		printf("pppx: unable to set addresses for %s, error=%d\n",
 		    ifp->if_xname, error);

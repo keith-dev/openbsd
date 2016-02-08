@@ -1,4 +1,4 @@
-/*	$OpenBSD: umidi.c,v 1.33 2012/03/30 08:18:19 ratchov Exp $	*/
+/*	$OpenBSD: umidi.c,v 1.37 2013/05/15 08:29:26 ratchov Exp $	*/
 /*	$NetBSD: umidi.c,v 1.16 2002/07/11 21:14:32 augustss Exp $	*/
 /*
  * Copyright (c) 2001 The NetBSD Foundation, Inc.
@@ -38,8 +38,6 @@
 #include <sys/conf.h>
 #include <sys/file.h>
 #include <sys/selinfo.h>
-#include <sys/proc.h>
-#include <sys/vnode.h>
 #include <sys/poll.h>
 
 #include <dev/usb/usb.h>
@@ -52,6 +50,7 @@
 #include <dev/usb/umidivar.h>
 #include <dev/usb/umidi_quirks.h>
 
+#include <dev/audio_if.h>
 #include <dev/midi_if.h>
 
 #ifdef UMIDI_DEBUG
@@ -115,8 +114,8 @@ static usbd_status start_input_transfer(struct umidi_endpoint *);
 static usbd_status start_output_transfer(struct umidi_endpoint *);
 static int out_jack_output(struct umidi_jack *, int);
 static void out_jack_flush(struct umidi_jack *);
-static void in_intr(usbd_xfer_handle, usbd_private_handle, usbd_status);
-static void out_intr(usbd_xfer_handle, usbd_private_handle, usbd_status);
+static void in_intr(struct usbd_xfer *, void *, usbd_status);
+static void out_intr(struct usbd_xfer *, void *, usbd_status);
 static int out_build_packet(int, struct umidi_packet *, uByte, u_char *);
 
 
@@ -793,7 +792,7 @@ free_all_jacks(struct umidi_softc *sc)
 {
 	int s;
 
-	s = splaudio();
+	s = splusb();
 	if (sc->sc_out_jacks) {
 		free(sc->sc_jacks, M_USBDEV);
 		sc->sc_jacks = sc->sc_in_jacks = sc->sc_out_jacks = NULL;
@@ -1111,7 +1110,7 @@ start_input_transfer(struct umidi_endpoint *ep)
 {
 	usbd_status err;
 	usbd_setup_xfer(ep->xfer, ep->pipe,
-			(usbd_private_handle)ep,
+			(void *)ep,
 			ep->buffer, ep->packetsize,
 			USBD_SHORT_XFER_OK | USBD_NO_COPY, USBD_NO_TIMEOUT, in_intr);
 	err = usbd_transfer(ep->xfer);
@@ -1128,7 +1127,7 @@ start_output_transfer(struct umidi_endpoint *ep)
 {
 	usbd_status err;
 	usbd_setup_xfer(ep->xfer, ep->pipe,
-			(usbd_private_handle)ep,
+			(void *)ep,
 			ep->buffer, ep->used,
 			USBD_NO_COPY, USBD_NO_TIMEOUT, out_intr);
 	err = usbd_transfer(ep->xfer);
@@ -1209,7 +1208,7 @@ out_jack_flush(struct umidi_jack *j)
 
 
 static void
-in_intr(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
+in_intr(struct usbd_xfer *xfer, void *priv, usbd_status status)
 {
 	int cn, evlen, remain, i;
 	unsigned char *buf;
@@ -1230,8 +1229,10 @@ in_intr(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
 		if (cn < ep->num_jacks && (jack = ep->jacks[cn]) &&
 		    jack->binded && jack->opened &&  jack->u.in.intr) {
 		    	evlen = packet_length[GET_CIN(buf[0])];
+			mtx_enter(&audio_lock);
 			for (i=0; i<evlen; i++)
 				(*jack->u.in.intr)(jack->arg, buf[i+1]);
+			mtx_leave(&audio_lock);
 		}
 		buf += UMIDI_PACKET_SIZE;
 		remain -= UMIDI_PACKET_SIZE;
@@ -1240,7 +1241,7 @@ in_intr(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
 }
 
 static void
-out_intr(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
+out_intr(struct usbd_xfer *xfer, void *priv, usbd_status status)
 {
 	struct umidi_endpoint *ep = (struct umidi_endpoint *)priv;
 	struct umidi_softc *sc = ep->sc;
@@ -1263,8 +1264,10 @@ out_intr(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
 		SIMPLEQ_REMOVE_HEAD(&ep->intrq, intrq_entry);
 		ep->pending--;
 		j->intr = 0;
+		mtx_enter(&audio_lock);
 		if (j->opened && j->u.out.intr)
 			(*j->u.out.intr)(j->arg);
+		mtx_leave(&audio_lock);
 	}
 }
 

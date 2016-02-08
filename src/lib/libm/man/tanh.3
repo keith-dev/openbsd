@@ -1,4 +1,4 @@
-.\"	$OpenBSD: tanh.3,v 1.10 2011/07/07 01:34:52 martynas Exp $
+.\"	$OpenBSD: tanh.3,v 1.12 2013/07/17 05:42:11 schwarze Exp $
 .\" Copyright (c) 1991 The Regents of the University of California.
 .\" All rights reserved.
 .\"
@@ -28,7 +28,7 @@
 .\"
 .\"     from: @(#)tanh.3	5.1 (Berkeley) 5/2/91
 .\"
-.Dd $Mdocdate: July 7 2011 $
+.Dd $Mdocdate: July 17 2013 $
 .Dt TANH 3
 .Os
 .Sh NAME
@@ -37,7 +37,7 @@
 .Nm tanhl
 .Nd hyperbolic tangent functions
 .Sh SYNOPSIS
-.Fd #include <math.h>
+.In math.h
 .Ft double
 .Fn tanh "double x"
 .Ft float
@@ -79,3 +79,8 @@ The
 .Fn tanh
 function conforms to
 .St -ansiC .
+.Sh HISTORY
+The
+.Fn tanh
+function first appeared in
+.At v7 .

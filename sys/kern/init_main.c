@@ -1,4 +1,4 @@
-/*	$OpenBSD: init_main.c,v 1.186 2013/01/01 19:39:50 jasper Exp $	*/
+/*	$OpenBSD: init_main.c,v 1.189 2013/06/03 16:55:22 guenther Exp $	*/
 /*	$NetBSD: init_main.c,v 1.84.4.1 1996/06/02 09:08:06 mrg Exp $	*/
 
 /*
@@ -83,7 +83,6 @@
 
 #include <ufs/ufs/quota.h>
 
-#include <machine/cpu.h>
 
 #include <uvm/uvm.h>
 
@@ -126,7 +125,7 @@ extern	struct user *proc0paddr;
 
 struct	vnode *rootvp, *swapdev_vp;
 int	boothowto;
-struct	timeval boottime;
+struct	timespec boottime;
 int	ncpus =  1;
 int	ncpusfound = 1;			/* number of cpus we find */
 __volatile int start_init_exec;		/* semaphore for start_init() */
@@ -350,6 +349,8 @@ main(void *framep)
 	/* Configure the devices */
 	cpu_configure();
 
+	random_hostseed();
+
 	/* Configure virtual memory system, set vm rlimits. */
 	uvm_init_limits(p);
 
@@ -495,11 +496,11 @@ main(void *framep)
 	 * from the file system.  Reset p->p_rtime as it may have been
 	 * munched in mi_switch() after the time got set.
 	 */
-	microtime(&boottime);
+	nanotime(&boottime);
 	LIST_FOREACH(p, &allproc, p_list) {
 		p->p_p->ps_start = boottime;
-		microuptime(&p->p_cpu->ci_schedstate.spc_runtime);
-		p->p_rtime.tv_sec = p->p_rtime.tv_usec = 0;
+		nanouptime(&p->p_cpu->ci_schedstate.spc_runtime);
+		timespecclear(&p->p_rtime);
 	}
 
 	uvm_swap_init();

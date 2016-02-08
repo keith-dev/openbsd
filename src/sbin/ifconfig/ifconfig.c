@@ -1,4 +1,4 @@
-/*	$OpenBSD: ifconfig.c,v 1.260 2012/12/04 14:54:32 deraadt Exp $	*/
+/*	$OpenBSD: ifconfig.c,v 1.267 2013/07/16 08:21:10 mpi Exp $	*/
 /*	$NetBSD: ifconfig.c,v 1.40 1997/10/01 02:19:43 enami Exp $	*/
 
 /*
@@ -232,7 +232,6 @@ void	setsppppeername(const char *, int);
 void	setsppppeerkey(const char *, int);
 void	setsppppeerflag(const char *, int);
 void	unsetsppppeerflag(const char *, int);
-void	spppinfo(struct spppreq *);
 void	sppp_status(void);
 void	sppp_printproto(const char *, struct sauthreq *);
 void	settrunkport(const char *, int);
@@ -3097,6 +3096,7 @@ in6_alias(struct in6_ifreq *creq)
 
 	if (Lflag) {
 		struct in6_addrlifetime *lifetime;
+
 		(void) memset(&ifr6, 0, sizeof(ifr6));
 		(void) strlcpy(ifr6.ifr_name, name, sizeof(ifr6.ifr_name));
 		ifr6.ifr_addr = creq->ifr_addr;
@@ -3106,11 +3106,12 @@ in6_alias(struct in6_ifreq *creq)
 				warn("SIOCGIFALIFETIME_IN6");
 		} else if (lifetime->ia6t_preferred || lifetime->ia6t_expire) {
 			time_t t = time(NULL);
+
 			printf(" pltime ");
 			if (lifetime->ia6t_preferred) {
 				printf("%s", lifetime->ia6t_preferred < t
 				    ? "0" :
-				    sec2str( lifetime->ia6t_preferred - t));
+				    sec2str(lifetime->ia6t_preferred - t));
 			} else
 				printf("infty");
 
@@ -3388,7 +3389,7 @@ setcarp_passwd(const char *val, int d)
 	if (ioctl(s, SIOCGVH, (caddr_t)&ifr) == -1)
 		err(1, "SIOCGVH");
 
-	/* XXX Should hash the password into the key here, perhaps? */
+	bzero(carpr.carpr_key, CARP_KEY_LEN);
 	strlcpy((char *)carpr.carpr_key, val, CARP_KEY_LEN);
 
 	if (ioctl(s, SIOCSVH, (caddr_t)&ifr) == -1)
@@ -3428,7 +3429,7 @@ setcarp_advskew(const char *val, int d)
 	struct carpreq carpr;
 	int advskew;
 
-	advskew = strtonum(val, 0, 255, &errmsg);
+	advskew = strtonum(val, 0, 254, &errmsg);
 	if (errmsg)
 		errx(1, "advskew %s: %s", val, errmsg);
 
@@ -3452,7 +3453,7 @@ setcarp_advbase(const char *val, int d)
 	struct carpreq carpr;
 	int advbase;
 
-	advbase = strtonum(val, 0, 255, &errmsg);
+	advbase = strtonum(val, 0, 254, &errmsg);
 	if (errmsg)
 		errx(1, "advbase %s: %s", val, errmsg);
 
@@ -3607,7 +3608,7 @@ setcarp_nodes(const char *val, int d)
 		if (sscanf(str, "%u:%u", &vhid, &advskew) != 2) {
 			errx(1, "non parsable arg: %s", str);
 		}
-		if (vhid >= 255)
+		if (vhid > 255)
 			errx(1, "vhid %u: value too large", vhid);
 		if (advskew >= 255)
 			errx(1, "advskew %u: value too large", advskew);
@@ -3943,14 +3944,8 @@ pppoe_status(void)
 {
 	struct pppoediscparms parms;
 	struct pppoeconnectionstate state;
-	struct timeval temp_time;
-	long diff_time;
-	unsigned long day, hour, min, sec;
-
-	day = hour = min = sec = 0; /* XXX make gcc happy */
 
 	memset(&state, 0, sizeof(state));
-	timerclear(&temp_time);
 
 	strlcpy(parms.ifname, name, sizeof(parms.ifname));
 	if (ioctl(s, PPPOEGETPARMS, &parms))
@@ -3985,6 +3980,10 @@ pppoe_status(void)
 	printf(" PADR retries: %d", state.padr_retry_no);
 
 	if (state.state == PPPOE_STATE_SESSION) {
+		struct timeval temp_time;
+		time_t diff_time, day = 0;
+		unsigned int hour = 0, min = 0, sec = 0;
+
 		if (state.session_time.tv_sec != 0) {
 			gettimeofday(&temp_time, NULL);
 			diff_time = temp_time.tv_sec -
@@ -4003,8 +4002,8 @@ pppoe_status(void)
 		}
 		printf(" time: ");
 		if (day != 0)
-			printf("%ldd ", day);
-		printf("%02ld:%02ld:%02ld", hour, min, sec);
+			printf("%lldd ", (long long)day);
+		printf("%02u:%02u:%02u", hour, min, sec);
 	}
 	putchar('\n');
 }
@@ -4061,17 +4060,6 @@ setpppoe_ac(const char *val, int d)
 
 	if (ioctl(s, PPPOESETPARMS, &parms))
 		err(1, "PPPOESETPARMS");
-}
-
-void
-spppinfo(struct spppreq *spr)
-{
-	bzero(spr, sizeof(struct spppreq));
-
-	ifr.ifr_data = (caddr_t)spr;
-	spr->cmd = SPPPIOGDEFS;
-	if (ioctl(s, SIOCGIFGENERIC, &ifr) == -1)
-		err(1, "SIOCGIFGENERIC(SPPPIOGDEFS)");
 }
 
 void
@@ -4228,10 +4216,10 @@ sppp_status(void)
 		return;
 	}
 
-	if (spr.defs.pp_phase == PHASE_DEAD)
+	if (spr.cmd != SPPPIOGDEFS || spr.phase == PHASE_DEAD)
 		return;
 	printf("\tsppp: phase ");
-	switch (spr.defs.pp_phase) {
+	switch (spr.phase) {
 	case PHASE_ESTABLISH:
 		printf("establish ");
 		break;
@@ -4718,7 +4706,7 @@ printifhwfeatures(const char *unused, int show)
 
 	if (ioctl(s, SIOCGIFHARDMTU, (caddr_t)&ifr) != -1) {
 		if (ifr.ifr_hardmtu)
-			printf(" hardmtu %lu", ifr.ifr_hardmtu);
+			printf(" hardmtu %u", ifr.ifr_hardmtu);
 	}
 	putchar('\n');
 }
@@ -4729,43 +4717,10 @@ char *
 sec2str(time_t total)
 {
 	static char result[256];
-	int days, hours, mins, secs;
-	int first = 1;
 	char *p = result;
 	char *end = &result[sizeof(result)];
-	int n;
 
-	if (0) {	/*XXX*/
-		days = total / 3600 / 24;
-		hours = (total / 3600) % 24;
-		mins = (total / 60) % 60;
-		secs = total % 60;
-
-		if (days) {
-			first = 0;
-			n = snprintf(p, end - p, "%dd", days);
-			if (n < 0 || n >= end - p)
-				return (result);
-			p += n;
-		}
-		if (!first || hours) {
-			first = 0;
-			n = snprintf(p, end - p, "%dh", hours);
-			if (n < 0 || n >= end - p)
-				return (result);
-			p += n;
-		}
-		if (!first || mins) {
-			first = 0;
-			n = snprintf(p, end - p, "%dm", mins);
-			if (n < 0 || n >= end - p)
-				return (result);
-			p += n;
-		}
-		snprintf(p, end - p, "%ds", secs);
-	} else
-		snprintf(p, end - p, "%lu", (u_long)total);
-
+	snprintf(p, end - p, "%lld", (long long)total);
 	return (result);
 }
 #endif /* INET6 */

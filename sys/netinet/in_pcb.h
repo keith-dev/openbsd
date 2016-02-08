@@ -1,4 +1,4 @@
-/*	$OpenBSD: in_pcb.h,v 1.75 2013/01/16 00:07:22 bluhm Exp $	*/
+/*	$OpenBSD: in_pcb.h,v 1.79 2013/05/31 13:15:53 bluhm Exp $	*/
 /*	$NetBSD: in_pcb.h,v 1.14 1996/02/13 23:42:00 christos Exp $	*/
 
 /*
@@ -69,6 +69,8 @@
 #include <netinet6/ip6_var.h>
 #include <netinet/icmp6.h>
 #include <netinet/ip_ipsp.h>
+
+struct pf_state_key;
 
 union inpaddru {
 	struct in6_addr iau_addr6;
@@ -145,7 +147,7 @@ struct inpcb {
 #define inp_csumoffset	in6p_cksum
 #endif
 	struct	icmp6_filter *inp_icmp6filt;
-	void	*inp_pf_sk;
+	struct	pf_state_key *inp_pf_sk;
 	u_int	inp_rtableid;
 	int	inp_pipex;		/* pipex indication */
 	int	inp_divertfl;		/* divert flags */
@@ -208,7 +210,6 @@ struct inpcbtable {
 #define IN6P_AUTOFLOWLABEL	0x800000 /* attach flowlabel automatically */
 
 #define IN6P_ANONPORT		0x4000000 /* port chosen for user */
-#define IN6P_FAITH		0x8000000 /* accept FAITH'ed connections */
 #define IN6P_RFC2292		0x40000000 /* used RFC2292 API on the socket */
 #define IN6P_MTU		0x80000000 /* receive path MTU */
 
@@ -247,6 +248,8 @@ struct baddynamicports {
 
 #ifdef _KERNEL
 
+extern struct baddynamicports baddynamicports;
+
 #define sotopf(so)  (so->so_proto->pr_domain->dom_family)
 
 void	 in_losing(struct inpcb *);
@@ -263,8 +266,8 @@ struct inpcb *
 	    struct mbuf *, u_int);
 #ifdef INET6
 struct inpcb *
-	 in6_pcbhashlookup(struct inpcbtable *, struct in6_addr *,
-			       u_int, struct in6_addr *, u_int);
+	 in6_pcbhashlookup(struct inpcbtable *, const struct in6_addr *,
+			       u_int, const struct in6_addr *, u_int);
 struct inpcb *
 	 in6_pcblookup_listen(struct inpcbtable *,
 			       struct in6_addr *, u_int, int, struct mbuf *);
@@ -290,8 +293,8 @@ struct rtentry *
 	in_pcbrtentry(struct inpcb *);
 
 /* INET6 stuff */
-int	in6_pcbnotify(struct inpcbtable *, struct sockaddr *,
-	u_int, struct sockaddr *, u_int, int, void *,
+int	in6_pcbnotify(struct inpcbtable *, struct sockaddr_in6 *,
+	u_int, const struct sockaddr_in6 *, u_int, int, void *,
 	void (*)(struct inpcb *, int));
 int	in6_selecthlim(struct inpcb *, struct ifnet *);
 int	in6_pcbsetport(struct in6_addr *, struct inpcb *, struct proc *);

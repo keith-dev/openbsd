@@ -1,4 +1,4 @@
-/*	$OpenBSD: pfkeyv2_convert.c,v 1.37 2012/09/18 09:24:45 markus Exp $	*/
+/*	$OpenBSD: pfkeyv2_convert.c,v 1.40 2013/06/05 02:03:15 reyk Exp $	*/
 /*
  * The author of this code is Angelos D. Keromytis (angelos@keromytis.org)
  *
@@ -99,6 +99,7 @@
 #include <sys/mbuf.h>
 #include <sys/kernel.h>
 #include <sys/socket.h>
+#include <sys/timeout.h>
 #include <net/route.h>
 #include <net/if.h>
 
@@ -1005,10 +1006,11 @@ export_tag(void **p, struct tdb *tdb)
 	char *s = (char *)(stag + 1);
 
 	pf_tag2tagname(tdb->tdb_tag, s);
+
 	stag->sadb_x_tag_taglen = strlen(s) + 1;
 	stag->sadb_x_tag_len = (sizeof(struct sadb_x_tag) +
 	    PADUP(stag->sadb_x_tag_taglen)) / sizeof(uint64_t);
-	*p += PADUP(stag->sadb_x_tag_taglen) + sizeof(struct sadb_x_tag);
+	*p += sizeof(struct sadb_x_tag) + PADUP(stag->sadb_x_tag_taglen);
 }
 
 /* Import enc(4) tap device information for SA */

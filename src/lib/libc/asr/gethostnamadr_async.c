@@ -1,4 +1,4 @@
-/*	$OpenBSD: gethostnamadr_async.c,v 1.12 2012/12/17 21:13:16 eric Exp $	*/
+/*	$OpenBSD: gethostnamadr_async.c,v 1.22 2013/07/17 07:43:23 eric Exp $	*/
 /*
  * Copyright (c) 2012 Eric Faurot <eric@openbsd.org>
  *
@@ -48,8 +48,6 @@ struct hostent_ext {
 	char		*pos;
 };
 
-ssize_t addr_as_fqdn(const char *, int, char *, size_t);
-
 static int gethostnamadr_async_run(struct async *, struct async_res *);
 static struct hostent_ext *hostent_alloc(int);
 static int hostent_set_cname(struct hostent_ext *, const char *, int);
@@ -83,7 +81,7 @@ gethostbyname2_async(const char *name, int af, struct asr *asr)
 	}
 
 	ac = asr_use_resolver(asr);
-	if ((as = async_new(ac, ASR_GETHOSTBYNAME)) == NULL)
+	if ((as = asr_async_new(ac, ASR_GETHOSTBYNAME)) == NULL)
 		goto abort; /* errno set */
 	as->as_run = gethostnamadr_async_run;
 
@@ -101,7 +99,7 @@ gethostbyname2_async(const char *name, int af, struct asr *asr)
 
     abort:
 	if (as)
-		async_free(as);
+		asr_async_free(as);
 	asr_ctx_unref(ac);
 	return (NULL);
 }
@@ -125,7 +123,7 @@ gethostbyaddr_async_ctx(const void *addr, socklen_t len, int af,
 {
 	struct async	*as;
 
-	if ((as = async_new(ac, ASR_GETHOSTBYADDR)) == NULL)
+	if ((as = asr_async_new(ac, ASR_GETHOSTBYADDR)) == NULL)
 		goto abort; /* errno set */
 	as->as_run = gethostnamadr_async_run;
 
@@ -138,7 +136,7 @@ gethostbyaddr_async_ctx(const void *addr, socklen_t len, int af,
 
     abort:
 	if (as)
-		async_free(as);
+		asr_async_free(as);
 	return (NULL);
 }
 
@@ -148,7 +146,7 @@ gethostnamadr_async_run(struct async *as, struct async_res *ar)
 	struct hostent_ext	*h;
 	int			 r, type, saved_errno;
 	FILE			*f;
-	char			 dname[MAXDNAME], *data, addr[16], *c;
+	char			 name[MAXDNAME], *data, addr[16], *c;
 
     next:
 	switch (as->as_state) {
@@ -192,42 +190,16 @@ gethostnamadr_async_run(struct async *as, struct async_res *ar)
 					ar->ar_h_errno = NETDB_SUCCESS;
 				}
 				async_set_state(as, ASR_STATE_HALT);
+				break;
 			}
-			else
-				async_set_state(as, ASR_STATE_NEXT_DOMAIN);
 		}
-		else
-			async_set_state(as, ASR_STATE_NEXT_DB);
-		break;
-
-	case ASR_STATE_NEXT_DOMAIN:
-
-		r = asr_iter_domain(as, as->as.hostnamadr.name, dname,
-		    sizeof(dname));
-		if (r == -1) {
-			async_set_state(as, ASR_STATE_NOT_FOUND);
-			break;
-		}
-
-		if (as->as.hostnamadr.dname)
-			free(as->as.hostnamadr.dname);
-		if ((as->as.hostnamadr.dname = strdup(dname)) == NULL) {
-			ar->ar_h_errno = NETDB_INTERNAL;
-			ar->ar_errno = errno;
-			async_set_state(as, ASR_STATE_HALT);
-		}
-
-		as->as_db_idx = 0;
 		async_set_state(as, ASR_STATE_NEXT_DB);
 		break;
 
 	case ASR_STATE_NEXT_DB:
 
 		if (asr_iter_db(as) == -1) {
-			if (as->as_type == ASR_GETHOSTBYNAME)
-				async_set_state(as, ASR_STATE_NEXT_DOMAIN);
-			else
-				async_set_state(as, ASR_STATE_NOT_FOUND);
+			async_set_state(as, ASR_STATE_NOT_FOUND);
 			break;
 		}
 
@@ -240,15 +212,15 @@ gethostnamadr_async_run(struct async *as, struct async_res *ar)
 			if (as->as_type == ASR_GETHOSTBYNAME) {
 				type = (as->as.hostnamadr.family == AF_INET) ?
 				    T_A : T_AAAA;
-				as->as.hostnamadr.subq = res_query_async_ctx(
-				    as->as.hostnamadr.dname,
-				    C_IN, type, NULL, 0, as->as_ctx);
+				as->as.hostnamadr.subq = res_search_async_ctx(
+				    as->as.hostnamadr.name,
+				    C_IN, type, as->as_ctx);
 			} else {
-				addr_as_fqdn(as->as.hostnamadr.addr,
+				asr_addr_as_fqdn(as->as.hostnamadr.addr,
 				    as->as.hostnamadr.family,
-				    dname, sizeof(dname));
+				    name, sizeof(name));
 				as->as.hostnamadr.subq = res_query_async_ctx(
-				    dname, C_IN, T_PTR, NULL, 0, as->as_ctx);
+				    name, C_IN, T_PTR, as->as_ctx);
 			}
 
 			if (as->as.hostnamadr.subq == NULL) {
@@ -268,8 +240,12 @@ gethostnamadr_async_run(struct async *as, struct async_res *ar)
 			if ((f = fopen(as->as_ctx->ac_hostfile, "r")) == NULL)
 				break;
 
-			if (as->as_type == ASR_GETHOSTBYNAME)
-				data = as->as.hostnamadr.dname;
+			if (as->as_type == ASR_GETHOSTBYNAME) {
+				data = asr_hostalias(as->as_ctx,
+				    as->as.hostnamadr.name, name, sizeof(name));
+				if (data == NULL)
+					data = as->as.hostnamadr.name;
+			}
 			else
 				data = as->as.hostnamadr.addr;
 
@@ -298,8 +274,12 @@ gethostnamadr_async_run(struct async *as, struct async_res *ar)
 			/* IPv4 only */
 			if (as->as.hostnamadr.family != AF_INET)
 				break;
-			if (as->as_type == ASR_GETHOSTBYNAME)
-				data = as->as.hostnamadr.dname;
+			if (as->as_type == ASR_GETHOSTBYNAME) {
+				data = asr_hostalias(as->as_ctx,
+				    as->as.hostnamadr.name, name, sizeof(name));
+				if (data == NULL)
+					data = as->as.hostnamadr.name;
+			}
 			else
 				data = as->as.hostnamadr.addr;
 			h = _yp_gethostnamadr(as->as_type, data);
@@ -324,7 +304,7 @@ gethostnamadr_async_run(struct async *as, struct async_res *ar)
 
 		/* Run the DNS subquery. */
 
-		if ((r = async_run(as->as.hostnamadr.subq, ar)) == ASYNC_COND)
+		if ((r = asr_async_run(as->as.hostnamadr.subq, ar)) == ASYNC_COND)
 			return (ASYNC_COND);
 
 		/* Done. */
@@ -338,6 +318,7 @@ gethostnamadr_async_run(struct async *as, struct async_res *ar)
 		/* If we got a packet but no anwser, use the next DB. */
 		if (ar->ar_count == 0) {
 			free(ar->ar_data);
+			as->as.hostnamadr.subq_h_errno = ar->ar_h_errno;
 			async_set_state(as, ASR_STATE_NEXT_DB);
 			break;
 		}
@@ -369,8 +350,10 @@ gethostnamadr_async_run(struct async *as, struct async_res *ar)
 		 * No address found in the dns packet. The blocking version
 		 * reports this as an error.
 		 */
-		if (as->as_type == ASR_GETHOSTBYNAME &&
-		    h->h.h_addr_list[0] == NULL) {
+		if ((as->as_type == ASR_GETHOSTBYNAME &&
+		     h->h.h_addr_list[0] == NULL) ||
+		    (as->as_type == ASR_GETHOSTBYADDR &&
+		     h->h.h_name == NULL)) {
 			free(h);
 			async_set_state(as, ASR_STATE_NEXT_DB);
 			break;
@@ -383,7 +366,10 @@ gethostnamadr_async_run(struct async *as, struct async_res *ar)
 
 	case ASR_STATE_NOT_FOUND:
 		ar->ar_errno = 0;
-		ar->ar_h_errno = HOST_NOT_FOUND;
+		if (as->as.hostnamadr.subq_h_errno)
+			ar->ar_h_errno = as->as.hostnamadr.subq_h_errno;
+		else
+			ar->ar_h_errno = HOST_NOT_FOUND;
 		async_set_state(as, ASR_STATE_HALT);
 		break;
 
@@ -484,16 +470,19 @@ hostent_from_packet(int reqtype, int family, char *pkt, size_t pktlen)
 	struct header	 hdr;
 	struct query	 q;
 	struct rr	 rr;
+	char		 dname[MAXDNAME];
 
 	if ((h = hostent_alloc(family)) == NULL)
 		return (NULL);
 
-	unpack_init(&p, pkt, pktlen);
-	unpack_header(&p, &hdr);
+	asr_unpack_init(&p, pkt, pktlen);
+	asr_unpack_header(&p, &hdr);
 	for (; hdr.qdcount; hdr.qdcount--)
-		unpack_query(&p, &q);
+		asr_unpack_query(&p, &q);
+	strlcpy(dname, q.q_dname, sizeof(dname));
+
 	for (; hdr.ancount; hdr.ancount--) {
-		unpack_rr(&p, &rr);
+		asr_unpack_rr(&p, &rr);
 		if (rr.rr_class != C_IN)
 			continue;
 		switch (rr.rr_type) {
@@ -503,14 +492,17 @@ hostent_from_packet(int reqtype, int family, char *pkt, size_t pktlen)
 				if (hostent_add_alias(h, rr.rr_dname, 1) == -1)
 					goto fail;
 			} else {
-				if (hostent_set_cname(h, rr.rr_dname, 1) == -1)
-					goto fail;
+				if (strcasecmp(rr.rr_dname, dname) == 0)
+					strlcpy(dname, rr.rr.cname.cname,
+					    sizeof(dname));
 			}
 			break;
 
 		case T_PTR:
 			if (reqtype != ASR_GETHOSTBYADDR)
 				break;
+			if (strcasecmp(rr.rr_dname, dname) != 0)
+				continue;
 			if (hostent_set_cname(h, rr.rr.ptr.ptrname, 1) == -1)
 				goto fail;
 			/* XXX See if we need MULTI_PTRS_ARE_ALIASES */
@@ -522,7 +514,7 @@ hostent_from_packet(int reqtype, int family, char *pkt, size_t pktlen)
 			if (family != AF_INET)
 				break;
 			if (hostent_set_cname(h, rr.rr_dname, 1) == -1)
-				goto fail;
+				;
 			if (hostent_add_addr(h, &rr.rr.in_a.addr, 4) == -1)
 				goto fail;
 			break;
@@ -533,7 +525,7 @@ hostent_from_packet(int reqtype, int family, char *pkt, size_t pktlen)
 			if (family != AF_INET6)
 				break;
 			if (hostent_set_cname(h, rr.rr_dname, 1) == -1)
-				goto fail;
+				;
 			if (hostent_add_addr(h, &rr.rr.in_aaaa.addr6, 16) == -1)
 				goto fail;
 			break;
@@ -549,7 +541,7 @@ fail:
 static struct hostent_ext *
 hostent_alloc(int family)
 {
-	struct hostent_ext     *h;
+	struct hostent_ext	*h;
 	size_t			alloc;
 
 	alloc = sizeof(*h) + 1024;
@@ -560,7 +552,7 @@ hostent_alloc(int family)
 	h->h.h_length = (family == AF_INET) ? 4 : 16;
 	h->h.h_aliases = h->aliases;
 	h->h.h_addr_list = h->addrs;
-	h->pos = (char*)(h) + sizeof(*h);
+	h->pos = (char *)(h) + sizeof(*h);
 	h->end = h->pos + 1024;
 
 	return (h);
@@ -636,67 +628,6 @@ hostent_add_addr(struct hostent_ext *h, const void *addr, size_t size)
 	h->addrs[i] = h->pos;
 	memmove(h->pos, addr, size);
 	h->pos += size;
-	return (0);
-}
-
-ssize_t
-addr_as_fqdn(const char *addr, int family, char *dst, size_t max)
-{
-	const struct in6_addr	*in6_addr;
-	in_addr_t		 in_addr;
-
-	switch (family) {
-	case AF_INET:
-		in_addr = ntohl(*((const in_addr_t *)addr));
-		snprintf(dst, max,
-		    "%d.%d.%d.%d.in-addr.arpa.",
-		    in_addr & 0xff,
-		    (in_addr >> 8) & 0xff,
-		    (in_addr >> 16) & 0xff,
-		    (in_addr >> 24) & 0xff);
-		break;
-	case AF_INET6:
-		in6_addr = (const struct in6_addr *)addr;
-		snprintf(dst, max,
-		    "%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x."
-		    "%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x.%x."
-		    "ip6.arpa.",
-		    in6_addr->s6_addr[15] & 0xf,
-		    (in6_addr->s6_addr[15] >> 4) & 0xf,
-		    in6_addr->s6_addr[14] & 0xf,
-		    (in6_addr->s6_addr[14] >> 4) & 0xf,
-		    in6_addr->s6_addr[13] & 0xf,
-		    (in6_addr->s6_addr[13] >> 4) & 0xf,
-		    in6_addr->s6_addr[12] & 0xf,
-		    (in6_addr->s6_addr[12] >> 4) & 0xf,
-		    in6_addr->s6_addr[11] & 0xf,
-		    (in6_addr->s6_addr[11] >> 4) & 0xf,
-		    in6_addr->s6_addr[10] & 0xf,
-		    (in6_addr->s6_addr[10] >> 4) & 0xf,
-		    in6_addr->s6_addr[9] & 0xf,
-		    (in6_addr->s6_addr[9] >> 4) & 0xf,
-		    in6_addr->s6_addr[8] & 0xf,
-		    (in6_addr->s6_addr[8] >> 4) & 0xf,
-		    in6_addr->s6_addr[7] & 0xf,
-		    (in6_addr->s6_addr[7] >> 4) & 0xf,
-		    in6_addr->s6_addr[6] & 0xf,
-		    (in6_addr->s6_addr[6] >> 4) & 0xf,
-		    in6_addr->s6_addr[5] & 0xf,
-		    (in6_addr->s6_addr[5] >> 4) & 0xf,
-		    in6_addr->s6_addr[4] & 0xf,
-		    (in6_addr->s6_addr[4] >> 4) & 0xf,
-		    in6_addr->s6_addr[3] & 0xf,
-		    (in6_addr->s6_addr[3] >> 4) & 0xf,
-		    in6_addr->s6_addr[2] & 0xf,
-		    (in6_addr->s6_addr[2] >> 4) & 0xf,
-		    in6_addr->s6_addr[1] & 0xf,
-		    (in6_addr->s6_addr[1] >> 4) & 0xf,
-		    in6_addr->s6_addr[0] & 0xf,
-		    (in6_addr->s6_addr[0] >> 4) & 0xf);
-		break;
-	default:
-		return (-1);
-	}
 	return (0);
 }
 

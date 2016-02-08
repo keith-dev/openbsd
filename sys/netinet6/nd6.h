@@ -1,4 +1,4 @@
-/*	$OpenBSD: nd6.h,v 1.29 2012/02/14 18:05:41 sthen Exp $	*/
+/*	$OpenBSD: nd6.h,v 1.31 2013/07/01 14:22:20 bluhm Exp $	*/
 /*	$KAME: nd6.h,v 1.95 2002/06/08 11:31:06 itojun Exp $	*/
 
 /*
@@ -270,8 +270,6 @@ struct nd_prefix {
 	int	ndpr_refcnt;	/* reference counter from addresses */
 };
 
-#define ndpr_next		ndpr_entry.le_next
-
 #define ndpr_raf		ndpr_flags
 #define ndpr_raf_onlink		ndpr_flags.onlink
 #define ndpr_raf_auto		ndpr_flags.autonomous
@@ -305,7 +303,6 @@ struct inet6_ndpr_msghdr {
 
 struct nd_pfxrouter {
 	LIST_ENTRY(nd_pfxrouter) pfr_entry;
-#define pfr_next pfr_entry.le_next
 	struct nd_defrouter *router;
 };
 
@@ -327,9 +324,6 @@ extern int nd6_debug;
 #define nd6log(x)	do { if (nd6_debug) log x; } while (0)
 
 extern struct timeout nd6_timer_ch;
-
-/* nd6_rtr.c */
-extern int nd6_defifindex;
 
 union nd_opts {
 	struct nd_opt_hdr *nd_opt_array[9];
@@ -416,7 +410,6 @@ struct nd_prefix *nd6_prefix_lookup(struct nd_prefix *);
 int in6_ifdel(struct ifnet *, struct in6_addr *);
 int in6_init_prefix_ltimes(struct nd_prefix *ndpr);
 void rt6_flush(struct in6_addr *, struct ifnet *);
-int nd6_setdefaultiface(int);
 
 #endif /* _KERNEL */
 

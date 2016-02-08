@@ -1,4 +1,4 @@
-/*	$OpenBSD: rthread_tls.c,v 1.13 2011/11/06 11:48:59 guenther Exp $ */
+/*	$OpenBSD: rthread_tls.c,v 1.15 2013/07/30 16:19:33 guenther Exp $ */
 /*
  * Copyright (c) 2004,2005 Ted Unangst <tedu@openbsd.org>
  * All Rights Reserved.
@@ -27,7 +27,7 @@
 #include "rthread.h"
 
 static struct rthread_key rkeys[PTHREAD_KEYS_MAX];
-static _spinlock_lock_t rkeyslock = _SPINLOCK_UNLOCKED;
+static struct _spinlock rkeyslock = _SPINLOCK_UNLOCKED;
 
 int
 pthread_key_create(pthread_key_t *key, void (*destructor)(void*))
@@ -175,6 +175,10 @@ _rthread_tls_destructors(pthread_t thread)
 				_spinlock(&rkeyslock);
 			}
 		}
+	}
+	for (rs = thread->local_storage; rs; rs = thread->local_storage) {
+		thread->local_storage = rs->next;
+		free(rs);
 	}
 	_spinunlock(&rkeyslock);
 }

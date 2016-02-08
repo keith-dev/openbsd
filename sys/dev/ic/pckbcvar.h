@@ -1,4 +1,4 @@
-/* $OpenBSD: pckbcvar.h,v 1.12 2012/08/10 17:49:31 shadchin Exp $ */
+/* $OpenBSD: pckbcvar.h,v 1.14 2013/05/23 18:29:51 tobias Exp $ */
 /* $NetBSD: pckbcvar.h,v 1.4 2000/06/09 04:58:35 soda Exp $ */
 
 /*

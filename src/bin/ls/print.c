@@ -1,4 +1,4 @@
-/*	$OpenBSD: print.c,v 1.28 2012/07/12 09:41:09 guenther Exp $	*/
+/*	$OpenBSD: print.c,v 1.30 2013/05/30 16:34:32 guenther Exp $	*/
 /*	$NetBSD: print.c,v 1.15 1996/12/11 03:25:39 thorpej Exp $	*/
 
 /*
@@ -83,14 +83,15 @@ printlong(DISPLAY *dp)
 	char buf[20];
 
 	if (dp->list->fts_level != FTS_ROOTLEVEL && (f_longform || f_size))
-		(void)printf("total %lu\n", howmany(dp->btotal, blocksize));
+		(void)printf("total %llu\n", howmany(dp->btotal, blocksize));
 
 	for (p = dp->list; p; p = p->fts_link) {
 		if (IS_NOPRINT(p))
 			continue;
 		sp = p->fts_statp;
 		if (f_inode)
-			(void)printf("%*u ", dp->s_inode, sp->st_ino);
+			(void)printf("%*llu ", dp->s_inode,
+			    (unsigned long long)sp->st_ino);
 		if (f_size)
 			(void)printf("%*qd ",
 			    dp->s_block, howmany(sp->st_blocks, blocksize));
@@ -192,7 +193,7 @@ printcol(DISPLAY *dp)
 		++numrows;
 
 	if (dp->list->fts_level != FTS_ROOTLEVEL && (f_longform || f_size))
-		(void)printf("total %lu\n", howmany(dp->btotal, blocksize));
+		(void)printf("total %llu\n", howmany(dp->btotal, blocksize));
 	for (row = 0; row < numrows; ++row) {
 		for (base = row, col = 0;;) {
 			chcnt = printaname(array[base], dp->s_inode, dp->s_block);
@@ -220,7 +221,8 @@ printaname(FTSENT *p, u_long inodefield, u_long sizefield)
 	sp = p->fts_statp;
 	chcnt = 0;
 	if (f_inode)
-		chcnt += printf("%*u ", (int)inodefield, sp->st_ino);
+		chcnt += printf("%*llu ", (int)inodefield,
+		    (unsigned long long)sp->st_ino);
 	if (f_size)
 		chcnt += printf("%*qd ",
 		    (int)sizefield, howmany(sp->st_blocks, blocksize));
@@ -272,7 +274,7 @@ printacol(DISPLAY *dp)
 		return;
 
 	if (dp->list->fts_level != FTS_ROOTLEVEL && (f_longform || f_size))
-		(void)printf("total %lu\n", howmany(dp->btotal, blocksize));
+		(void)printf("total %llu\n", howmany(dp->btotal, blocksize));
 	col = 0;
 	for (p = dp->list; p; p = p->fts_link) {
 		if (IS_NOPRINT(p))

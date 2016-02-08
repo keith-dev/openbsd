@@ -1,10 +1,10 @@
-.\" $OpenBSD: MAKEDEV.8,v 1.57 2012/08/23 06:17:00 deraadt Exp $
+.\" $OpenBSD: MAKEDEV.8,v 1.63 2013/06/21 21:35:44 syl Exp $
 .\"
 .\" THIS FILE AUTOMATICALLY GENERATED.  DO NOT EDIT.
 .\" generated from:
 .\"
-.\"	OpenBSD: etc.amd64/MAKEDEV.md,v 1.48 2012/08/23 06:15:28 deraadt Exp 
-.\"	OpenBSD: MAKEDEV.common,v 1.60 2012/08/23 06:15:28 deraadt Exp 
+.\"	OpenBSD: etc.amd64/MAKEDEV.md,v 1.50 2013/06/03 16:06:42 tedu Exp 
+.\"	OpenBSD: MAKEDEV.common,v 1.66 2013/06/21 21:30:38 syl Exp 
 .\"	OpenBSD: MAKEDEV.man,v 1.7 2009/03/18 17:34:25 sobrado Exp 
 .\"	OpenBSD: MAKEDEV.mansub,v 1.2 2004/02/20 19:13:01 miod Exp 
 .\"
@@ -23,7 +23,7 @@
 .\" ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 .\" OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 .\"
-.Dd $Mdocdate: August 23 2012 $
+.Dd $Mdocdate: June 21 2013 $
 .Dt MAKEDEV 8 amd64
 .Os
 .Sh NAME
@@ -226,6 +226,9 @@ Direct Rendering Manager, see
 .It Ar fd
 fd/* nodes, see
 .Xr fd 4 .
+.It Ar fuse
+Userland Filesystem, see
+.Xr fuse 4 .
 .It Ar gpio*
 General Purpose Input/Output, see
 .Xr gpio 4 .
@@ -241,9 +244,6 @@ I2O controller devices, see
 .It Ar lkm
 Loadable kernel modules interface, see
 .Xr lkm 4 .
-.It Ar music*
-MIDI sequencer, see
-.Xr music 4 .
 .It Ar nvram
 NVRAM access, see
 .Xr nvram 4 .
@@ -288,7 +288,7 @@ Video V4L2 devices, see
 .Xr video 4 .
 .It Ar vscsi*
 Virtual SCSI controller, see
-.Xr vscsi 8 .
+.Xr vscsi 4 .
 .El
 .Sh FILES
 .Bl -tag -width /dev -compact

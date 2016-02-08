@@ -1,4 +1,4 @@
-/*	$OpenBSD: icmp6.h,v 1.34 2012/07/08 10:45:46 phessler Exp $	*/
+/*	$OpenBSD: icmp6.h,v 1.36 2013/06/01 01:30:53 brad Exp $	*/
 /*	$KAME: icmp6.h,v 1.84 2003/04/23 10:26:51 itojun Exp $	*/
 
 /*
@@ -224,6 +224,14 @@ struct nd_router_advert {	/* router advertisement */
 #define nd_ra_flags_reserved	nd_ra_hdr.icmp6_data8[1]
 #define ND_RA_FLAG_MANAGED	0x80
 #define ND_RA_FLAG_OTHER	0x40
+
+#define ND_RA_FLAG_RTPREF_MASK	0x18	/* 00011000 */
+
+#define ND_RA_FLAG_RTPREF_HIGH	0x08	/* 00001000 */ 
+#define ND_RA_FLAG_RTPREF_MEDIUM	0x00	/* 00000000 */
+#define ND_RA_FLAG_RTPREF_LOW	0x18	/* 00011000 */
+#define ND_RA_FLAG_RTPREF_RSV	0x10	/* 00010000 */
+
 #define nd_ra_router_lifetime	nd_ra_hdr.icmp6_data16[1]
 
 struct nd_neighbor_solicit {	/* neighbor solicitation */
@@ -282,6 +290,7 @@ struct nd_opt_hdr {		/* Neighbor discovery option header */
 #define ND_OPT_PREFIX_INFORMATION	3
 #define ND_OPT_REDIRECTED_HEADER	4
 #define ND_OPT_MTU			5
+#define ND_OPT_ROUTE_INFO		24
 #define ND_OPT_RDNSS			25
 #define ND_OPT_DNSSL			31
 
@@ -312,6 +321,14 @@ struct nd_opt_mtu {		/* MTU option */
 	u_int8_t	nd_opt_mtu_len;
 	u_int16_t	nd_opt_mtu_reserved;
 	u_int32_t	nd_opt_mtu_mtu;
+} __packed;
+
+struct nd_opt_route_info {	/* route info */
+	u_int8_t	nd_opt_rti_type;
+	u_int8_t	nd_opt_rti_len;
+	u_int8_t	nd_opt_rti_prefixlen;
+	u_int8_t	nd_opt_rti_flags;
+	u_int32_t	nd_opt_rti_lifetime;
 } __packed;
 
 struct nd_opt_rdnss {		/* RDNSS option */

@@ -1,4 +1,4 @@
-/*	$OpenBSD: asr.c,v 1.14 2012/11/24 15:12:48 eric Exp $	*/
+/*	$OpenBSD: asr.c,v 1.31 2013/07/12 14:36:21 eric Exp $	*/
 /*
  * Copyright (c) 2010-2012 Eric Faurot <eric@openbsd.org>
  *
@@ -57,7 +57,7 @@
 
 #define DEFAULT_CONFFILE	"/etc/resolv.conf"
 #define DEFAULT_HOSTFILE	"/etc/hosts"
-#define DEFAULT_CONF		"lookup bind file\nnameserver 127.0.0.1\n"
+#define DEFAULT_CONF		"lookup file\n"
 #define DEFAULT_LOOKUP		"lookup bind file"
 
 #define RELOAD_DELAY		15 /* seconds */
@@ -74,9 +74,6 @@ static int asr_parse_nameserver(struct sockaddr *, const char *);
 static int asr_ndots(const char *);
 static void pass0(char **, int, struct asr_ctx *);
 static int strsplit(char *, char **, int);
-#if ASR_OPT_HOSTALIASES
-static char *asr_hostalias(const char *, char *, size_t);
-#endif
 #if ASR_OPT_ENVOPTS
 static void asr_ctx_envopts(struct asr_ctx *);
 #endif
@@ -90,7 +87,7 @@ static struct asr *_asr = NULL;
 
 /* Allocate and configure an async "resolver". */
 struct asr *
-async_resolver(const char *conf)
+asr_resolver(const char *conf)
 {
 	static int	 init = 0;
 	struct asr	*asr;
@@ -124,6 +121,8 @@ async_resolver(const char *conf)
 	} else {
 		/* Use the given config file */
 		asr->a_path = strdup(conf);
+		if (asr->a_path == NULL)
+			goto fail;
 		asr_check_reload(asr);
 		if (asr->a_ctx == NULL) {
 			if ((asr->a_ctx = asr_ctx_create()) == NULL)
@@ -145,6 +144,7 @@ async_resolver(const char *conf)
 	if (asr) {
 		if (asr->a_ctx)
 			asr_ctx_free(asr->a_ctx);
+		free(asr->a_path);
 		free(asr);
 	}
 
@@ -156,12 +156,12 @@ async_resolver(const char *conf)
  * Drop the reference to the current context.
  */
 void
-async_resolver_done(struct asr *asr)
+asr_resolver_done(struct asr *asr)
 {
 	struct asr **priv;
 
 	if (asr == NULL) {
-		priv = _THREAD_PRIVATE(_asr, asr, &_asr);
+		priv = _THREAD_PRIVATE(_asr, _asr, &_asr);
 		if (*priv == NULL)
 			return;
 		asr = *priv;
@@ -169,8 +169,7 @@ async_resolver_done(struct asr *asr)
 	}
 
 	asr_ctx_unref(asr->a_ctx);
-	if (asr->a_path)
-		free(asr->a_path);
+	free(asr->a_path);
 	free(asr);
 }
 
@@ -178,9 +177,9 @@ async_resolver_done(struct asr *asr)
  * Cancel an async query.
  */
 void
-async_abort(struct async *as)
+asr_async_abort(struct async *as)
 {
-	async_free(as);
+	asr_async_free(as);
 }
 
 /*
@@ -189,7 +188,7 @@ async_abort(struct async *as)
  * the user-allocated memory at "ar".
  */
 int
-async_run(struct async *as, struct async_res *ar)
+asr_async_run(struct async *as, struct async_res *ar)
 {
 	int	r, saved_errno = errno;
 
@@ -204,7 +203,7 @@ async_run(struct async *as, struct async_res *ar)
 		DPRINT(" fd=%i timeout=%i", ar->ar_fd, ar->ar_timeout);
 	DPRINT("\n");
 	if (r == ASYNC_DONE)
-		async_free(as);
+		asr_async_free(as);
 
 	errno = saved_errno;
 
@@ -215,12 +214,12 @@ async_run(struct async *as, struct async_res *ar)
  * Same as above, but run in a loop that handles the fd conditions result.
  */
 int
-async_run_sync(struct async *as, struct async_res *ar)
+asr_async_run_sync(struct async *as, struct async_res *ar)
 {
 	struct pollfd	 fds[1];
 	int		 r, saved_errno = errno;
 
-	while ((r = async_run(as, ar)) == ASYNC_COND) {
+	while ((r = asr_async_run(as, ar)) == ASYNC_COND) {
 		fds[0].fd = ar->ar_fd;
 		fds[0].events = (ar->ar_cond == ASYNC_READ) ? POLLIN : POLLOUT;
 	again:
@@ -228,7 +227,7 @@ async_run_sync(struct async *as, struct async_res *ar)
 		if (r == -1 && errno == EINTR)
 			goto again;
 		/*
-		 * Otherwise, just ignore the error and let async_run()
+		 * Otherwise, just ignore the error and let asr_async_run()
 		 * catch the failure.
 		 */
 	}
@@ -244,13 +243,13 @@ async_run_sync(struct async *as, struct async_res *ar)
  * is running.
  */
 struct async *
-async_new(struct asr_ctx *ac, int type)
+asr_async_new(struct asr_ctx *ac, int type)
 {
 	struct async	*as;
 
-	DPRINT("asr: async_new(ctx=%p) type=%i refcount=%i\n", ac, type,
-	    ac->ac_refcount);
-	if ((as = calloc(1, sizeof(*as))) == NULL)
+	DPRINT("asr: asr_async_new(ctx=%p) type=%i refcount=%i\n", ac, type,
+	    ac ? ac->ac_refcount : 0);
+	if (ac == NULL || (as = calloc(1, sizeof(*as))) == NULL)
 		return (NULL);
 
 	ac->ac_refcount += 1;
@@ -266,16 +265,16 @@ async_new(struct asr_ctx *ac, int type)
  * Free an async query and unref the associated context.
  */
 void
-async_free(struct async *as)
+asr_async_free(struct async *as)
 {
-	DPRINT("asr: async_free(%p)\n", as);
+	DPRINT("asr: asr_async_free(%p)\n", as);
 	switch (as->as_type) {
 	case ASR_SEND:
 		if (as->as_fd != -1)
 			close(as->as_fd);
 		if (as->as.dns.obuf && !(as->as.dns.flags & ASYNC_EXTOBUF))
 			free(as->as.dns.obuf);
-		if (as->as.dns.ibuf && !(as->as.dns.flags & ASYNC_EXTIBUF))
+		if (as->as.dns.ibuf)
 			free(as->as.dns.ibuf);
 		if (as->as.dns.dname)
 			free(as->as.dns.dname);
@@ -283,14 +282,14 @@ async_free(struct async *as)
 
 	case ASR_SEARCH:
 		if (as->as.search.subq)
-			async_free(as->as.search.subq);
+			asr_async_free(as->as.search.subq);
 		if (as->as.search.name)
 			free(as->as.search.name);
 		break;
 
 	case ASR_GETRRSETBYNAME:
 		if (as->as.rrset.subq)
-			async_free(as->as.rrset.subq);
+			asr_async_free(as->as.rrset.subq);
 		if (as->as.rrset.name)
 			free(as->as.rrset.name);
 		break;
@@ -298,24 +297,22 @@ async_free(struct async *as)
 	case ASR_GETHOSTBYNAME:
 	case ASR_GETHOSTBYADDR:
 		if (as->as.hostnamadr.subq)
-			async_free(as->as.hostnamadr.subq);
+			asr_async_free(as->as.hostnamadr.subq);
 		if (as->as.hostnamadr.name)
 			free(as->as.hostnamadr.name);
-		if (as->as.hostnamadr.dname)
-			free(as->as.hostnamadr.dname);
 		break;
 
 	case ASR_GETNETBYNAME:
 	case ASR_GETNETBYADDR:
 		if (as->as.netnamadr.subq)
-			async_free(as->as.netnamadr.subq);
+			asr_async_free(as->as.netnamadr.subq);
 		if (as->as.netnamadr.name)
 			free(as->as.netnamadr.name);
 		break;
 
 	case ASR_GETADDRINFO:
 		if (as->as.ai.subq)
-			async_free(as->as.ai.subq);
+			asr_async_free(as->as.ai.subq);
 		if (as->as.ai.aifirst)
 			freeaddrinfo(as->as.ai.aifirst);
 		if (as->as.ai.hostname)
@@ -328,7 +325,7 @@ async_free(struct async *as)
 
 	case ASR_GETNAMEINFO:
 		if (as->as.ni.subq)
-			async_free(as->as.ni.subq);
+			asr_async_free(as->as.ni.subq);
 		break;
 	}
 
@@ -348,17 +345,19 @@ asr_use_resolver(struct asr *asr)
 
 	if (asr == NULL) {
 		DPRINT("using thread-local resolver\n");
-		priv = _THREAD_PRIVATE(_asr, asr, &_asr);
+		priv = _THREAD_PRIVATE(_asr, _asr, &_asr);
 		if (*priv == NULL) {
 			DPRINT("setting up thread-local resolver\n");
-			*priv = async_resolver(NULL);
+			*priv = asr_resolver(NULL);
 		}
 		asr = *priv;
 	}
-
-	asr_check_reload(asr);
-	asr_ctx_ref(asr->a_ctx);
-	return (asr->a_ctx);
+	if (asr != NULL) {
+		asr_check_reload(asr);
+		asr_ctx_ref(asr->a_ctx);
+		return (asr->a_ctx);
+	}
+	return (NULL);
 }
 
 static void
@@ -375,7 +374,10 @@ asr_ctx_ref(struct asr_ctx *ac)
 void
 asr_ctx_unref(struct asr_ctx *ac)
 {
-	DPRINT("asr: asr_ctx_unref(ctx=%p) refcount=%i\n", ac, ac->ac_refcount);
+	DPRINT("asr: asr_ctx_unref(ctx=%p) refcount=%i\n", ac,
+	    ac ? ac->ac_refcount : 0);
+	if (ac == NULL)
+		return;
 	if (--ac->ac_refcount)
 		return;
 
@@ -389,9 +391,9 @@ asr_ctx_free(struct asr_ctx *ac)
 
 	if (ac->ac_domain)
 		free(ac->ac_domain);
-	for (i = 0; i < ac->ac_nscount; i++)
+	for (i = 0; i < ASR_MAXNS; i++)
 		free(ac->ac_ns[i]);
-	for (i = 0; i < ac->ac_domcount; i++)
+	for (i = 0; i < ASR_MAXDOM; i++)
 		free(ac->ac_dom[i]);
 
 	free(ac);
@@ -406,19 +408,19 @@ asr_check_reload(struct asr *asr)
 	struct asr_ctx	*ac;
 #if ASR_OPT_RELOADCONF
 	struct stat	 st;
-	struct timespec	 tp;
+	struct timespec	 ts;
 #endif
 
 	if (asr->a_path == NULL)
 		return;
 
 #if ASR_OPT_RELOADCONF
-	if (clock_gettime(CLOCK_MONOTONIC, &tp) == -1)
+	if (clock_gettime(CLOCK_MONOTONIC, &ts) == -1)
 		return;
 
-	if ((tp.tv_sec - asr->a_rtime) < RELOAD_DELAY)
+	if ((ts.tv_sec - asr->a_rtime) < RELOAD_DELAY && asr->a_rtime != 0)
 		return;
-	asr->a_rtime = tp.tv_sec;
+	asr->a_rtime = ts.tv_sec;
 
 	DPRINT("asr: checking for update of \"%s\"\n", asr->a_path);
 	if (stat(asr->a_path, &st) == -1 ||
@@ -445,7 +447,7 @@ asr_check_reload(struct asr *asr)
 	asr->a_ctx = ac;
 }
 
-/* 
+/*
  * Construct a fully-qualified domain name for the given name and domain.
  * If "name" ends with a '.' it is considered as a FQDN by itself.
  * Otherwise, the domain, which must be a FQDN, is appended to "name" (it
@@ -467,34 +469,21 @@ asr_make_fqdn(const char *name, const char *domain, char *buf, size_t buflen)
 
 	len = strlen(name);
 	if (len == 0) {
-		strlcpy(buf, domain, buflen);
+		if (strlcpy(buf, domain, buflen) >= buflen)
+			return (0);
 	} else if (name[len - 1] !=  '.') {
 		if (domain[0] == '.')
 			domain += 1;
-		strlcpy(buf, name, buflen);
-		strlcat(buf, ".", buflen);
-		strlcat(buf, domain, buflen);
+		if (strlcpy(buf, name, buflen) >= buflen ||
+		    strlcat(buf, ".", buflen) >= buflen ||
+		    strlcat(buf, domain, buflen) >= buflen)
+			return (0);
 	} else {
-		strlcpy(buf, name, buflen);
+		if (strlcpy(buf, name, buflen) >= buflen)
+			return (0);
 	}
 
 	return (strlen(buf));
-}
-
-/*
- * Concatenate a name and a domain name. The result has no trailing dot.
- */
-size_t
-asr_domcat(const char *name, const char *domain, char *buf, size_t buflen)
-{
-	size_t	r;
-
-	r = asr_make_fqdn(name, domain, buf, buflen);
-	if (r == 0)
-		return (0);
-	buf[r - 1] = '\0';
-
-	return (r - 1);
 }
 
 /*
@@ -512,7 +501,7 @@ asr_ndots(const char *s)
 	return (n);
 }
 
-/* 
+/*
  * Allocate a new empty context.
  */
 static struct asr_ctx *
@@ -533,8 +522,8 @@ asr_ctx_create(void)
 	ac->ac_hostfile = DEFAULT_HOSTFILE;
 
 	ac->ac_nscount = 0;
-	ac->ac_nstimeout = 1000;
-	ac->ac_nsretries = 3;
+	ac->ac_nstimeout = 5;
+	ac->ac_nsretries = 4;
 
 	return (ac);
 }
@@ -592,7 +581,7 @@ pass0(char **tok, int n, struct asr_ctx *ac)
 			return;
 		if (n != 2)
 			return;
-		if (asr_parse_nameserver((struct sockaddr*)&ss, tok[1]))
+		if (asr_parse_nameserver((struct sockaddr *)&ss, tok[1]))
 			return;
 		if ((ac->ac_ns[ac->ac_nscount] = calloc(1, ss.ss_len)) == NULL)
 			return;
@@ -607,32 +596,23 @@ pass0(char **tok, int n, struct asr_ctx *ac)
 		ac->ac_domain = strdup(tok[1]);
 
 	} else if (!strcmp(tok[0], "lookup")) {
-		/* ignore the line if we already set lookup */
-		if (ac->ac_dbcount != 0)
-			return;
-		if (n - 1 > ASR_MAXDB)
-			return;
 		/* ensure that each lookup is only given once */
 		for (i = 1; i < n; i++)
 			for (j = i + 1; j < n; j++)
 				if (!strcmp(tok[i], tok[j]))
 					return;
-		for (i = 1; i < n; i++, ac->ac_dbcount++) {
-			if (!strcmp(tok[i], "yp")) {
-				ac->ac_db[i-1] = ASR_DB_YP;
-			} else if (!strcmp(tok[i], "bind")) {
-				ac->ac_db[i-1] = ASR_DB_DNS;
-			} else if (!strcmp(tok[i], "file")) {
-				ac->ac_db[i-1] = ASR_DB_FILE;
-			} else {
-				/* ignore the line */
-				ac->ac_dbcount = 0;
-				return;
-			}
+		ac->ac_dbcount = 0;
+		for (i = 1; i < n && ac->ac_dbcount < ASR_MAXDB; i++) {
+			if (!strcmp(tok[i], "yp"))
+				ac->ac_db[ac->ac_dbcount++] = ASR_DB_YP;
+			else if (!strcmp(tok[i], "bind"))
+				ac->ac_db[ac->ac_dbcount++] = ASR_DB_DNS;
+			else if (!strcmp(tok[i], "file"))
+				ac->ac_db[ac->ac_dbcount++] = ASR_DB_FILE;
 		}
 	} else if (!strcmp(tok[0], "search")) {
 		/* resolv.conf says the last line wins */
-		for (i = 0; i < ac->ac_domcount; i++)
+		for (i = 0; i < ASR_MAXDOM; i++)
 			free(ac->ac_dom[i]);
 		ac->ac_domcount = 0;
 		for (i = 1; i < n; i++)
@@ -801,7 +781,7 @@ asr_ctx_envopts(struct asr_ctx *ac)
 
 /*
  * Parse a resolv.conf(5) nameserver string into a sockaddr.
- */ 
+ */
 static int
 asr_parse_nameserver(struct sockaddr *sa, const char *s)
 {
@@ -828,7 +808,7 @@ asr_parse_nameserver(struct sockaddr *sa, const char *s)
 			return (-1);
 	}
 
-	if (sockaddr_from_str(sa, PF_UNSPEC, s) == -1)
+	if (asr_sockaddr_from_str(sa, PF_UNSPEC, s) == -1)
 		return (-1);
 
 	if (sa->sa_family == PF_INET)
@@ -844,7 +824,7 @@ asr_parse_nameserver(struct sockaddr *sa, const char *s)
  * where labels are separated by dots. The result is put into the "buf" buffer,
  * truncated if it exceeds "max" chars. The function returns "buf".
  */
-char*
+char *
 asr_strdname(const char *_dname, char *buf, size_t max)
 {
 	const unsigned char *dname = _dname;
@@ -914,160 +894,30 @@ asr_iter_db(struct async *as)
 	}
 
 	as->as_db_idx += 1;
-	as->as_ns_idx = 0;
 	DPRINT("asr_iter_db: %i\n", as->as_db_idx);
 
 	return (0);
 }
 
 /*
- * Set the async context nameserver index to the next nameserver of the
- * currently used DB (assuming it is DNS), cycling over the list until the
- * maximum retry counter is reached.  Return 0 on success, or -1 if all
- * nameservers were used.
- */
-int
-asr_iter_ns(struct async *as)
-{
-	for (;;) {
-		if (as->as_ns_cycles >= as->as_ctx->ac_nsretries)
-			return (-1);
-
-		as->as_ns_idx += 1;
-		if (as->as_ns_idx <= as->as_ctx->ac_nscount)
-			break;
-		as->as_ns_idx = 0;
-		as->as_ns_cycles++;
-		DPRINT("asr: asr_iter_ns(): cycle %i\n", as->as_ns_cycles);
-	}
-
-	return (0);
-}
-
-enum {
-	DOM_INIT,
-	DOM_DOMAIN,
-	DOM_DONE
-};
-
-/*
- * Implement the search domain strategy.
- *
- * This function works as a generator that constructs complete domains in
- * buffer "buf" of size "len" for the given host name "name", according to the
- * search rules defined by the resolving context.  It is supposed to be called
- * multiple times (with the same name) to generate the next possible domain
- * name, if any.
- *
- * It returns 0 if it could generate a new domain name, or -1 when all
- * possibilites have been exhausted.
- */
-int
-asr_iter_domain(struct async *as, const char *name, char * buf, size_t len)
-{
-#if ASR_OPT_HOSTALIASES
-	char	*alias;
-#endif
-
-	switch (as->as_dom_step) {
-
-	case DOM_INIT:
-		/* First call */
-
-		/*
-		 * If "name" is an FQDN, that's the only result and we
-		 * don't try anything else.
-		 */
-		if (strlen(name) && name[strlen(name) - 1] ==  '.') {
-			DPRINT("asr: asr_iter_domain(\"%s\") fqdn\n", name);
-			as->as_dom_flags |= ASYNC_DOM_FQDN;
-			as->as_dom_step = DOM_DONE;
-			return (asr_domcat(name, NULL, buf, len));
-		}
-
-#if ASR_OPT_HOSTALIASES
-		/*
-		 * If "name" has no dots, it might be an alias. If so,
-		 * That's also the only result.
-		 */
-		if ((as->as_ctx->ac_options & RES_NOALIASES) == 0 &&
-		    asr_ndots(name) == 0 &&
-		    (alias = asr_hostalias(name, buf, len)) != NULL) {
-			DPRINT("asr: asr_iter_domain(\"%s\") is alias \"%s\"\n",
-			    name, alias);
-			as->as_dom_flags |= ASYNC_DOM_HOSTALIAS;
-			as->as_dom_step = DOM_DONE;
-			return (asr_domcat(alias, NULL, buf, len));
-		}
-#endif
-
-		/*
-		 * Otherwise, we iterate through the specified search domains.
-		 */
-		as->as_dom_step = DOM_DOMAIN;
-		as->as_dom_idx = 0;
-
-		/*
-		 * If "name" as enough dots, use it as-is first, as indicated
-		 * in resolv.conf(5).
-		 */
-		if ((asr_ndots(name)) >= as->as_ctx->ac_ndots) {
-			DPRINT("asr: asr_iter_domain(\"%s\") ndots\n", name);
-			as->as_dom_flags |= ASYNC_DOM_NDOTS;
-			strlcpy(buf, name, len);
-			return (0);
-		}
-		/* Otherwise, starts using the search domains */
-		/* FALLTHROUGH */
-
-	case DOM_DOMAIN:
-		if (as->as_dom_idx < as->as_ctx->ac_domcount) {
-			DPRINT("asr: asr_iter_domain(\"%s\") domain \"%s\"\n",
-			    name, as->as_ctx->ac_dom[as->as_dom_idx]);
-			as->as_dom_flags |= ASYNC_DOM_DOMAIN;
-			return (asr_domcat(name,
-			    as->as_ctx->ac_dom[as->as_dom_idx++], buf, len));
-		}
-
-		/* No more domain to try. */
-
-		as->as_dom_step = DOM_DONE;
-
-		/*
-		 * If the name was not tried as an absolute name before,
-		 * do it now.
-		 */
-		if (!(as->as_dom_flags & ASYNC_DOM_NDOTS)) {
-			DPRINT("asr: asr_iter_domain(\"%s\") as is\n", name);
-			as->as_dom_flags |= ASYNC_DOM_ASIS;
-			strlcpy(buf, name, len);
-			return (0);
-		}
-		/* Otherwise, we are done. */
-
-	case DOM_DONE:
-	default:
-		DPRINT("asr: asr_iter_domain(\"%s\") done\n", name);
-		return (-1);
-	}
-}
-
-#if ASR_OPT_HOSTALIASES
-/*
  * Check if the hostname "name" is a user-defined alias as per hostname(7).
  * If so, copies the result in the buffer "abuf" of size "abufsz" and
  * return "abuf". Otherwise return NULL.
  */
-static char *
-asr_hostalias(const char *name, char *abuf, size_t abufsz)
+char *
+asr_hostalias(struct asr_ctx *ac, const char *name, char *abuf, size_t abufsz)
 {
+#if ASR_OPT_HOSTALIASES
 	FILE	 *fp;
 	size_t	  len;
 	char	 *file, *buf, *tokens[2];
 	int	  ntok;
 
-	file = getenv("HOSTALIASES");
-	if (file == NULL || issetugid() != 0 || (fp = fopen(file, "r")) == NULL)
+	if (ac->ac_options & RES_NOALIASES ||
+	    asr_ndots(name) != 0 ||
+	    issetugid() ||
+	    (file = getenv("HOSTALIASES")) == NULL ||
+	    (fp = fopen(file, "r")) == NULL)
 		return (NULL);
 
 	DPRINT("asr: looking up aliases in \"%s\"\n", file);
@@ -1088,6 +938,6 @@ asr_hostalias(const char *name, char *abuf, size_t abufsz)
 	}
 
 	fclose(fp);
+#endif
 	return (NULL);
 }
-#endif

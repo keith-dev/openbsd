@@ -1,4 +1,4 @@
-/*	$OpenBSD: res_mkquery.c,v 1.3 2012/11/24 15:12:48 eric Exp $	*/
+/*	$OpenBSD: res_mkquery.c,v 1.6 2013/07/12 14:36:22 eric Exp $	*/
 /*
  * Copyright (c) 2012 Eric Faurot <eric@openbsd.org>
  *
@@ -43,13 +43,13 @@ res_mkquery(int op, const char *dname, int class, int type,
 		return (-1);
 
 	if (dname[0] == '\0' || dname[strlen(dname) - 1] != '.') {
-		strlcpy(fqdn, dname, sizeof fqdn);
-		if (strlcat(fqdn, ".", sizeof fqdn) >= sizeof fqdn)
+		if (strlcpy(fqdn, dname, sizeof(fqdn)) >= sizeof(fqdn) ||
+		    strlcat(fqdn, ".", sizeof(fqdn)) >= sizeof(fqdn))
 			return (-1);
 		dname = fqdn;
 	}
 
-	if (dname_from_fqdn(dname, dn, sizeof(dn)) == -1)
+	if (asr_dname_from_fqdn(dname, dn, sizeof(dn)) == -1)
 		return (-1);
 
 	ac = asr_use_resolver(NULL);
@@ -60,9 +60,9 @@ res_mkquery(int op, const char *dname, int class, int type,
 		h.flags |= RD_MASK;
 	h.qdcount = 1;
 
-	pack_init(&p, buf, buflen);
-	pack_header(&p, &h);
-	pack_query(&p, type, class, dn);
+	asr_pack_init(&p, buf, buflen);
+	asr_pack_header(&p, &h);
+	asr_pack_query(&p, type, class, dn);
 
 	asr_ctx_unref(ac);
 
@@ -89,13 +89,17 @@ res_querydomain(const char *name,
 
 	/* we really want domain to end with a dot for now */
 	if (domain && ((n = strlen(domain)) == 0 || domain[n - 1 ] != '.')) {
+		if (strlcpy(ndom, domain, sizeof(ndom)) >= sizeof(ndom) ||
+		    strlcat(ndom, ".", sizeof(ndom)) >= sizeof(ndom)) {
+			h_errno = NETDB_INTERNAL;
+			errno = EINVAL;
+			return (-1);
+		}
 		domain = ndom;
-		strlcpy(ndom, domain, sizeof ndom);
-		strlcat(ndom, ".", sizeof ndom);
 	}
 
 	if (asr_make_fqdn(name, domain, fqdn, sizeof fqdn) == 0) {
-		h_errno = NO_RECOVERY;
+		h_errno = NETDB_INTERNAL;
 		errno = EINVAL;
 		return (-1);
 	}

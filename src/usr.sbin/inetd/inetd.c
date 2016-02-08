@@ -1,4 +1,4 @@
-/*	$OpenBSD: inetd.c,v 1.133 2012/04/19 14:33:24 gsoares Exp $	*/
+/*	$OpenBSD: inetd.c,v 1.135 2013/04/19 18:03:16 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1983,1991 The Regents of the University of California.
@@ -496,9 +496,10 @@ gettcp(struct servtab *sep)
 	if (debug)
 		fprintf(stderr, "accept, ctrl %d\n", ctrl);
 	if (ctrl < 0) {
-		if (errno == EINTR)
-			return -1;
-		syslog(LOG_WARNING, "accept (for %s): %m", sep->se_service);
+		if (errno != EWOULDBLOCK && errno != EINTR &&
+		    errno != ECONNABORTED)
+			syslog(LOG_WARNING, "accept (for %s): %m",
+			    sep->se_service);
 		return -1;
 	}
 	if ((sep->se_family == AF_INET || sep->se_family == AF_INET6) &&
@@ -565,8 +566,8 @@ dg_badinput(struct sockaddr *sa)
 		}
 		break;
 	default:
-		/* XXX unsupported af, is it safe to assume it to be safe? */
-		return 0;
+		/* Unsupported AF */
+		goto bad;
 	}
 
 	if (port < IPPORT_RESERVED || port == NFS_PORT)

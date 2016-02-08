@@ -1,4 +1,4 @@
-/*	$OpenBSD: asr_private.h,v 1.10 2012/11/24 15:12:48 eric Exp $	*/
+/*	$OpenBSD: asr_private.h,v 1.23 2013/07/12 14:36:21 eric Exp $	*/
 /*
  * Copyright (c) 2012 Eric Faurot <eric@openbsd.org>
  *
@@ -121,11 +121,9 @@ enum async_type {
 	ASR_GETNAMEINFO,
 };
 
-enum asr_db_type {
-	ASR_DB_FILE,
-	ASR_DB_DNS,
-	ASR_DB_YP,
-};
+#define	ASR_DB_FILE	'f'
+#define	ASR_DB_DNS	'b'
+#define	ASR_DB_YP	'y'
 
 struct asr_ctx {
 	int		 ac_refcount;
@@ -135,7 +133,7 @@ struct asr_ctx {
 	int		 ac_domcount;
 	char		*ac_dom[ASR_MAXDOM];
 	int		 ac_dbcount;
-	int		 ac_db[ASR_MAXDB];
+	char		 ac_db[ASR_MAXDB + 1];
 	int		 ac_family[3];
 
 	char		*ac_hostfile;
@@ -157,14 +155,12 @@ struct asr {
 
 #define	ASYNC_DOM_FQDN		0x00000001
 #define	ASYNC_DOM_NDOTS		0x00000002
-#define	ASYNC_DOM_HOSTALIAS	0x00000004
-#define	ASYNC_DOM_DOMAIN	0x00000008
-#define ASYNC_DOM_ASIS		0x00000010
+#define	ASYNC_DOM_DOMAIN	0x00000004
+#define ASYNC_DOM_ASIS		0x00000008
 
 #define	ASYNC_NODATA		0x00000100
 #define	ASYNC_AGAIN		0x00000200
 
-#define	ASYNC_EXTIBUF		0x00001000
 #define	ASYNC_EXTOBUF		0x00002000
 
 
@@ -184,8 +180,6 @@ struct async {
 	int		 as_dom_flags;
 	int		 as_family_idx;
 	int		 as_db_idx;
-	int		 as_ns_idx;
-	int		 as_ns_cycles;
 
 	int		 as_count;
 
@@ -199,6 +193,9 @@ struct async {
 			int		 rcode;		/* response code */
 			int		 ancount;	/* answer count */
 
+			int		 nsidx;
+			int		 nsloop;
+
 			/* io buffers for query/response */
 			unsigned char	*obuf;
 			size_t		 obuflen;
@@ -206,8 +203,8 @@ struct async {
 			unsigned char	*ibuf;
 			size_t		 ibuflen;
 			size_t		 ibufsize;
-			size_t		 bufpos;
 			size_t		 datalen; /* for tcp io */
+			uint16_t	 pktlen;
 		} dns;
 
 		struct {
@@ -217,9 +214,6 @@ struct async {
 			char		*name;
 			struct async	*subq;
 			int		 saved_h_errno;
-			unsigned char	*ibuf;
-			size_t		 ibuflen;
-			size_t		 ibufsize;
 		} search;
 
 		struct {
@@ -233,10 +227,10 @@ struct async {
 		struct {
 			char		*name;
 			int		 family;
-			char		*dname;
 			struct async	*subq;
 			char		 addr[16];
 			int		 addrlen;
+			int		 subq_h_errno;
 		} hostnamadr;
 
 		struct {
@@ -305,35 +299,31 @@ enum asr_state {
 
 
 /* asr_utils.c */
-void	pack_init(struct pack *, char *, size_t);
-int	pack_header(struct pack*, const struct header*);
-int	pack_query(struct pack*, uint16_t, uint16_t, const char*);
-
-void	unpack_init(struct unpack *, const char *, size_t);
-int	unpack_header(struct unpack*, struct header*);
-int	unpack_query(struct unpack*, struct query*);
-int	unpack_rr(struct unpack*, struct rr*);
-int	sockaddr_from_str(struct sockaddr *, int, const char *);
-ssize_t dname_from_fqdn(const char*, char*, size_t);
+void	asr_pack_init(struct pack *, char *, size_t);
+int	asr_pack_header(struct pack *, const struct header *);
+int	asr_pack_query(struct pack *, uint16_t, uint16_t, const char *);
+void	asr_unpack_init(struct unpack *, const char *, size_t);
+int	asr_unpack_header(struct unpack *, struct header *);
+int	asr_unpack_query(struct unpack *, struct query *);
+int	asr_unpack_rr(struct unpack *, struct rr *);
+int	asr_sockaddr_from_str(struct sockaddr *, int, const char *);
+ssize_t asr_dname_from_fqdn(const char *, char *, size_t);
+ssize_t asr_addr_as_fqdn(const char *, int, char *, size_t);
 
 /* asr.c */
 struct asr_ctx *asr_use_resolver(struct asr *);
 void asr_ctx_unref(struct asr_ctx *);
-struct async *async_new(struct asr_ctx *, int);
-void async_free(struct async *);
+struct async *asr_async_new(struct asr_ctx *, int);
+void asr_async_free(struct async *);
 size_t asr_make_fqdn(const char *, const char *, char *, size_t);
-size_t asr_domcat(const char *, const char *, char *, size_t);
 char *asr_strdname(const char *, char *, size_t);
 int asr_iter_db(struct async *);
-int asr_iter_ns(struct async *);
-int asr_iter_domain(struct async *, const char *, char *, size_t);
 int asr_parse_namedb_line(FILE *, char **, int);
+char *asr_hostalias(struct asr_ctx *, const char *, char *, size_t);
 
 /* <*>_async.h */
-struct async *res_query_async_ctx(const char *, int, int, unsigned char *, int,
-    struct asr_ctx *);
-struct async *res_search_async_ctx(const char *, int, int, unsigned char *, int,
-    struct asr_ctx *);
+struct async *res_query_async_ctx(const char *, int, int, struct asr_ctx *);
+struct async *res_search_async_ctx(const char *, int, int, struct asr_ctx *);
 struct async *gethostbyaddr_async_ctx(const void *, socklen_t, int,
     struct asr_ctx *);
 

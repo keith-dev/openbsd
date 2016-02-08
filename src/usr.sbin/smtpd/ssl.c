@@ -1,4 +1,4 @@
-/*	$OpenBSD: ssl.c,v 1.52 2013/01/26 09:37:24 gilles Exp $	*/
+/*	$OpenBSD: ssl.c,v 1.54 2013/07/19 09:04:06 eric Exp $	*/
 
 /*
  * Copyright (c) 2008 Pierre-Yves Ritschard <pyr@openbsd.org>
@@ -21,7 +21,6 @@
 #include <sys/types.h>
 #include <sys/queue.h>
 #include <sys/tree.h>
-#include <sys/param.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 
@@ -29,6 +28,7 @@
 #include <event.h>
 #include <fcntl.h>
 #include <imsg.h>
+#include <limits.h>
 #include <pwd.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -90,6 +90,8 @@ ssl_setup(SSL_CTX **ctxp, struct ssl *ssl)
 		    ssl->ssl_dhparams_len);
 	ssl_set_ephemeral_key_exchange(ctx, dh);
 	DH_free(dh);
+
+	ssl_set_ecdh_curve(ctx);
 
 	*ctxp = ctx;
 	return 1;
@@ -320,11 +322,8 @@ ssl_error(const char *where)
 {
 	unsigned long	code;
 	char		errbuf[128];
-	extern int	debug;
 
 	for (; (code = ERR_get_error()) != 0 ;) {
-		if (!debug)
-			continue;
 		ERR_error_string_n(code, errbuf, sizeof(errbuf));
 		log_debug("debug: SSL library error: %s: %s", where, errbuf);
 	}
@@ -409,4 +408,27 @@ ssl_set_ephemeral_key_exchange(SSL_CTX *ctx, DH *dh)
 		ssl_error("ssl_set_ephemeral_key_exchange");
 		fatal("ssl_set_ephemeral_key_exchange: cannot set tmp dh");
 	}
+}
+
+void
+ssl_set_ecdh_curve(SSL_CTX *ctx)
+{
+	int	nid;
+	EC_KEY *ecdh;
+
+	if ((nid = OBJ_sn2nid(SSL_ECDH_CURVE)) == 0) {
+		ssl_error("ssl_set_ecdh_curve");
+		fatal("ssl_set_ecdh_curve: unknown curve name "
+		    SSL_ECDH_CURVE);
+	}
+
+	if ((ecdh = EC_KEY_new_by_curve_name(nid)) == NULL) {
+		ssl_error("ssl_set_ecdh_curve");
+		fatal("ssl_set_ecdh_curve: unable to create curve "
+		    SSL_ECDH_CURVE);
+	}
+
+	SSL_CTX_set_tmp_ecdh(ctx, ecdh);
+	SSL_CTX_set_options(ctx, SSL_OP_SINGLE_ECDH_USE);
+	EC_KEY_free(ecdh);
 }

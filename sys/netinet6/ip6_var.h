@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip6_var.h,v 1.44 2012/01/09 14:47:53 bluhm Exp $	*/
+/*	$OpenBSD: ip6_var.h,v 1.46 2013/06/01 16:22:05 bluhm Exp $	*/
 /*	$KAME: ip6_var.h,v 1.33 2000/06/11 14:59:20 jinmei Exp $	*/
 
 /*
@@ -241,7 +241,6 @@ extern int	ip6_sendredirects;	/* send IP redirects when forwarding? */
 extern int	ip6_maxfragpackets; /* Maximum packets in reassembly queue */
 extern int	ip6_maxfrags;	/* Maximum fragments in reassembly queue */
 extern int	ip6_accept_rtadv;	/* Acts as a host not a router */
-extern int	ip6_keepfaith;		/* Firewall Aided Internet Translator */
 extern int	ip6_log_interval;
 extern time_t	ip6_log_time;
 extern int	ip6_hdrnestlimit; /* upper limit of # of extension headers */
@@ -296,7 +295,7 @@ void	frag6_drain(void);
 
 void	rip6_init(void);
 int	rip6_input(struct mbuf **mp, int *offp, int proto);
-void	rip6_ctlinput(int, struct sockaddr *, void *);
+void	rip6_ctlinput(int, struct sockaddr *, u_int, void *);
 int	rip6_ctloutput(int, struct socket *, int, int, struct mbuf **);
 int	rip6_output(struct mbuf *, ...);
 int	rip6_usrreq(struct socket *,

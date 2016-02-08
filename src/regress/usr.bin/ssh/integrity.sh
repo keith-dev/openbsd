@@ -1,4 +1,4 @@
-#	$OpenBSD: integrity.sh,v 1.7 2013/02/20 08:27:50 djm Exp $
+#	$OpenBSD: integrity.sh,v 1.10 2013/05/17 01:32:11 dtucker Exp $
 #	Placed in the Public Domain.
 
 tid="integrity"
@@ -19,7 +19,7 @@ macs="hmac-sha1 hmac-md5 umac-64@openssh.com umac-128@openssh.com
 macs="$macs aes128-gcm@openssh.com aes256-gcm@openssh.com"
 
 # sshd-command for proxy (see test-exec.sh)
-cmd="sh ${SRC}/sshd-log-wrapper.sh ${SSHD} ${TEST_SSH_LOGFILE} -i -f $OBJ/sshd_proxy"
+cmd="sh ${SRC}/sshd-log-wrapper.sh ${SSHD} ${TEST_SSHD_LOGFILE} -i -f $OBJ/sshd_proxy"
 
 for m in $macs; do
 	trace "test $tid: mac $m"
@@ -39,14 +39,15 @@ for m in $macs; do
 			aes*gcm*)	macopt="-c $m";;
 			*)		macopt="-m $m";;
 		esac
-		output=$(${SSH} $macopt -2F $OBJ/ssh_proxy -o "$pxy" \
-		    999.999.999.999 'printf "%4096s" " "' 2>&1)
+		verbose "test $tid: $m @$off"
+		${SSH} $macopt -2F $OBJ/ssh_proxy -o "$pxy" \
+		    999.999.999.999 'printf "%4096s" " "' >/dev/null
 		if [ $? -eq 0 ]; then
 			fail "ssh -m $m succeeds with bit-flip at $off"
 		fi
 		ecnt=$((ecnt+1))
-		output=$(echo $output | tr -s '\r\n' '.')
-		verbose "test $tid: $m @$off $output"
+		output=$(tail -2 $TEST_SSH_LOGFILE | egrep -v "^debug" | \
+		     tr -s '\r\n' '.')
 		case "$output" in
 		Bad?packet*)	elen=$((elen+1)); skip=2;;
 		Corrupted?MAC* | Decryption?integrity?check?failed*)

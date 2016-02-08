@@ -1,4 +1,4 @@
-/*	$OpenBSD: targ.c,v 1.69 2012/10/09 19:45:34 espie Exp $ */
+/*	$OpenBSD: targ.c,v 1.74 2013/05/30 08:58:38 espie Exp $ */
 /*	$NetBSD: targ.c,v 1.11 1997/02/20 16:51:50 christos Exp $	*/
 
 /*
@@ -97,13 +97,13 @@
 
 #include <limits.h>
 #include <stddef.h>
-#include <stdio.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ohash.h>
 #include "config.h"
 #include "defines.h"
-#include "ohash.h"
 #include "stats.h"
 #include "suff.h"
 #include "var.h"
@@ -158,7 +158,7 @@ Targ_NewGNi(const char *name, const char *ename)
 	gn->childMade =	false;
 	gn->order = 0;
 	ts_set_out_of_date(gn->mtime);
-	ts_set_out_of_date(gn->cmtime);
+	gn->youngest = gn;
 	Lst_Init(&gn->cohorts);
 	Lst_Init(&gn->parents);
 	Lst_Init(&gn->children);

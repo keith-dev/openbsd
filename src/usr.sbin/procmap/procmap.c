@@ -1,4 +1,4 @@
-/*	$OpenBSD: procmap.c,v 1.42 2013/01/16 00:13:23 deraadt Exp $ */
+/*	$OpenBSD: procmap.c,v 1.49 2013/05/14 20:18:52 miod Exp $ */
 /*	$NetBSD: pmap.c,v 1.1 2002/09/01 20:32:44 atatat Exp $ */
 
 /*
@@ -177,10 +177,6 @@ size_t dump_vm_map_entry(kvm_t *, struct kbit *, struct vm_map_entry *,
 char *findname(kvm_t *, struct kbit *, struct vm_map_entry *, struct kbit *,
     struct kbit *, struct kbit *);
 int search_cache(kvm_t *, struct kbit *, char **, char *, size_t);
-#if 0
-void load_name_cache(kvm_t *);
-void cache_enter(struct namecache *);
-#endif
 static void __dead usage(void);
 static pid_t strtopid(const char *);
 void print_sum(struct sum *, struct sum *);
@@ -403,7 +399,9 @@ process_map(kvm_t *kd, pid_t pid, struct kinfo_proc *proc, struct sum *sum)
 		printf(" vm_refcnt = %d,", D(vmspace, vmspace)->vm_refcnt);
 		printf(" vm_shm = %p,\n", D(vmspace, vmspace)->vm_shm);
 		printf("    vm_rssize = %d,", D(vmspace, vmspace)->vm_rssize);
+#if 0
 		printf(" vm_swrss = %d,", D(vmspace, vmspace)->vm_swrss);
+#endif
 		printf(" vm_tsize = %d,", D(vmspace, vmspace)->vm_tsize);
 		printf(" vm_dsize = %d,\n", D(vmspace, vmspace)->vm_dsize);
 		printf("    vm_ssize = %d,", D(vmspace, vmspace)->vm_ssize);
@@ -710,7 +708,7 @@ dump_vm_map_entry(kvm_t *kd, struct kbit *vmspace,
 	}
 
 	if (print_maps)
-		printf("%0*lx-%0*lx %c%c%c%c %0*lx %02x:%02x %u     %s\n",
+		printf("%0*lx-%0*lx %c%c%c%c %0*lx %02x:%02x %llu     %s\n",
 		    (int)sizeof(void *) * 2, vme->start,
 		    (int)sizeof(void *) * 2, vme->end,
 		    (vme->protection & VM_PROT_READ) ? 'r' : '-',
@@ -719,7 +717,8 @@ dump_vm_map_entry(kvm_t *kd, struct kbit *vmspace,
 		    (vme->etype & UVM_ET_COPYONWRITE) ? 'p' : 's',
 		    (int)sizeof(void *) * 2,
 		    (unsigned long)vme->offset,
-		    major(dev), minor(dev), inode, inode ? name : "");
+		    major(dev), minor(dev), (unsigned long long)inode,
+		    inode ? name : "");
 
 	if (print_ddb) {
 		printf(" - <lost address>: 0x%lx->0x%lx: "
@@ -735,8 +734,9 @@ dump_vm_map_entry(kvm_t *kd, struct kbit *vmspace,
 		    vme->protection, vme->max_protection,
 		    vme->inheritance, vme->wired_count, vme->advice);
 		if (inode && verbose)
-			printf("\t(dev=%d,%d ino=%u [%s] [%p])\n",
-			    major(dev), minor(dev), inode, inode ? name : "", P(vp));
+			printf("\t(dev=%d,%d ino=%llu [%s] [%p])\n",
+			    major(dev), minor(dev), (unsigned long long)inode,
+			    inode ? name : "", P(vp));
 		else if (name[0] == ' ' && verbose)
 			printf("\t(%s)\n", &name[2]);
 	}
@@ -761,7 +761,7 @@ dump_vm_map_entry(kvm_t *kd, struct kbit *vmspace,
 
 	if (print_all) {
 		sz = (size_t)((vme->end - vme->start) / 1024);
-		printf("%0*lx-%0*lx %7luk %0*lx %c%c%c%c%c (%c%c%c) %d/%d/%d %02d:%02d %7u - %s",
+		printf("%0*lx-%0*lx %7luk %0*lx %c%c%c%c%c (%c%c%c) %d/%d/%d %02d:%02d %7llu - %s",
 		    (int)sizeof(void *) * 2, vme->start, (int)sizeof(void *) * 2,
 		    vme->end - (vme->start != vme->end ? 1 : 0), (unsigned long)sz,
 		    (int)sizeof(void *) * 2, (unsigned long)vme->offset,
@@ -774,7 +774,7 @@ dump_vm_map_entry(kvm_t *kd, struct kbit *vmspace,
 		    (vme->max_protection & VM_PROT_WRITE) ? 'w' : '-',
 		    (vme->max_protection & VM_PROT_EXECUTE) ? 'x' : '-',
 		    vme->inheritance, vme->wired_count, vme->advice,
-		    major(dev), minor(dev), inode, name);
+		    major(dev), minor(dev), (unsigned long long)inode, name);
 		if (A(vp))
 			printf(" [%p]", P(vp));
 		printf("\n");
@@ -885,11 +885,6 @@ search_cache(kvm_t *kd, struct kbit *vp, char **name, char *buf, size_t blen)
 	char *o, *e;
 	u_long cid;
 
-#if 0
-	if (nchashtbl == NULL)
-		load_name_cache(kd);
-#endif
-
 	P(&svp) = P(vp);
 	S(&svp) = sizeof(struct vnode);
 	cid = D(vp, vnode)->v_id;
@@ -921,75 +916,6 @@ search_cache(kvm_t *kd, struct kbit *vp, char **name, char *buf, size_t blen)
 	KDEREF(kd, &svp);
 	return (D(&svp, vnode)->v_flag & VROOT);
 }
-
-#if 0
-void
-load_name_cache(kvm_t *kd)
-{
-	struct namecache _ncp, *ncp, *oncp;
-	struct nchashhead _ncpp, *ncpp;
-	u_long nchash;
-	int i;
-
-	LIST_INIT(&lcache);
-
-	_KDEREF(kd, nchash_addr, &nchash, sizeof(nchash));
-	nchashtbl = calloc(sizeof(nchashtbl), (int)nchash);
-	if (nchashtbl == NULL)
-		err(1, "load_name_cache");
-	_KDEREF(kd, nchashtbl_addr, nchashtbl,
-	    sizeof(nchashtbl) * (int)nchash);
-
-	ncpp = &_ncpp;
-
-	for (i = 0; i < nchash; i++) {
-		ncpp = &nchashtbl[i];
-		oncp = NULL;
-		LIST_FOREACH(ncp, ncpp, nc_hash) {
-			if (ncp == oncp ||
-			    ncp == (void*)0xdeadbeef)
-				break;
-			oncp = ncp;
-			_KDEREF(kd, (u_long)ncp, &_ncp, sizeof(*ncp));
-			ncp = &_ncp;
-			if (ncp->nc_nlen > 0) {
-				if (ncp->nc_nlen > 2 ||
-				    ncp->nc_name[0] != '.' ||
-				    (ncp->nc_name[1] != '.' &&
-				    ncp->nc_nlen != 1))
-					cache_enter(ncp);
-			}
-		}
-	}
-}
-
-void
-cache_enter(struct namecache *ncp)
-{
-	struct cache_entry *ce;
-
-	if (debug & DUMP_NAMEI_CACHE)
-		printf("ncp->nc_vp %10p, ncp->nc_dvp %10p, ncp->nc_nlen "
-		    "%3d [%.*s] (nc_dvpid=%lu, nc_vpid=%lu)\n",
-		    ncp->nc_vp, ncp->nc_dvp,
-		    ncp->nc_nlen, ncp->nc_nlen, ncp->nc_name,
-		    ncp->nc_dvpid, ncp->nc_vpid);
-
-	ce = malloc(sizeof(struct cache_entry));
-	if (ce == NULL)
-		err(1, "cache_enter");
-
-	ce->ce_vp = ncp->nc_vp;
-	ce->ce_pvp = ncp->nc_dvp;
-	ce->ce_cid = ncp->nc_vpid;
-	ce->ce_pcid = ncp->nc_dvpid;
-	/* safe since nc_nlen is maximum NCHNAMLEN */
-	ce->ce_nlen = (unsigned int)ncp->nc_nlen;
-	strlcpy(ce->ce_name, ncp->nc_name, sizeof(ce->ce_name));
-
-	LIST_INSERT_HEAD(&lcache, ce, ce_next);
-}
-#endif
 
 static void __dead
 usage(void)

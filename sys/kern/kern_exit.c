@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_exit.c,v 1.119 2012/09/08 14:52:00 kettenis Exp $	*/
+/*	$OpenBSD: kern_exit.c,v 1.125 2013/06/05 00:53:26 tedu Exp $	*/
 /*	$NetBSD: kern_exit.c,v 1.39 1996/04/22 01:38:25 christos Exp $	*/
 
 /*
@@ -70,7 +70,6 @@
 #include <sys/mount.h>
 #include <sys/syscallargs.h>
 
-#include <machine/cpu.h>
 
 #include <uvm/uvm_extern.h>
 
@@ -97,14 +96,10 @@ sys___threxit(struct proc *p, void *v, register_t *retval)
 		syscallarg(pid_t *) notdead;
 	} */ *uap = v;
 
-	if (!rthreads_enabled)
-		return (EINVAL);
-
 	if (SCARG(uap, notdead) != NULL) {
 		pid_t zero = 0;
-		if (copyout(&zero, SCARG(uap, notdead), sizeof(zero))) {
+		if (copyout(&zero, SCARG(uap, notdead), sizeof(zero)))
 			psignal(p, SIGSEGV);
-		}
 	}
 	exit1(p, 0, EXIT_THREAD);
 
@@ -121,6 +116,7 @@ exit1(struct proc *p, int rv, int flags)
 {
 	struct process *pr, *qr, *nqr;
 	struct rusage *rup;
+	struct vnode *ovp;
 
 	if (p->p_pid == 1)
 		panic("init died (signal %d, exit %d)",
@@ -132,9 +128,9 @@ exit1(struct proc *p, int rv, int flags)
 
 	/* single-threaded? */
 	if (TAILQ_FIRST(&pr->ps_threads) == p &&
-	    TAILQ_NEXT(p, p_thr_link) == NULL)
+	    TAILQ_NEXT(p, p_thr_link) == NULL) {
 		flags = EXIT_NORMAL;
-	else {
+	} else {
 		/* nope, multi-threaded */
 		if (flags == EXIT_NORMAL)
 			single_thread_set(p, SINGLE_EXIT, 0);
@@ -162,20 +158,20 @@ exit1(struct proc *p, int rv, int flags)
 	TAILQ_REMOVE(&pr->ps_threads, p, p_thr_link);
 	if ((p->p_flag & P_THREAD) == 0) {
 		/* main thread gotta wait because it has the pid, et al */
-		while (! TAILQ_EMPTY(&pr->ps_threads))
+		while (!TAILQ_EMPTY(&pr->ps_threads))
 			tsleep(&pr->ps_threads, PUSER, "thrdeath", 0);
 		if (pr->ps_flags & PS_PROFIL)
 			stopprofclock(pr);
-	} else if (TAILQ_EMPTY(&pr->ps_threads))
+	} else if (TAILQ_EMPTY(&pr->ps_threads)) {
 		wakeup(&pr->ps_threads);
+	}
 
 	rup = pr->ps_ru;
 	if (rup == NULL) {
 		rup = pool_get(&rusage_pool, PR_WAITOK | PR_ZERO);
-
-		if (pr->ps_ru == NULL)
+		if (pr->ps_ru == NULL) {
 			pr->ps_ru = rup;
-		else {
+		} else {
 			pool_put(&rusage_pool, rup);
 			rup = pr->ps_ru;
 		}
@@ -208,7 +204,7 @@ exit1(struct proc *p, int rv, int flags)
 					if (sp->s_ttyp->t_pgrp)
 						pgsignal(sp->s_ttyp->t_pgrp,
 						    SIGHUP, 1);
-					(void) ttywait(sp->s_ttyp);
+					ttywait(sp->s_ttyp);
 					/*
 					 * The tty could have been revoked
 					 * if we blocked.
@@ -217,9 +213,10 @@ exit1(struct proc *p, int rv, int flags)
 						VOP_REVOKE(sp->s_ttyvp,
 						    REVOKEALL);
 				}
-				if (sp->s_ttyvp)
-					vrele(sp->s_ttyvp);
+				ovp = sp->s_ttyvp;
 				sp->s_ttyvp = NULL;
+				if (ovp)
+					vrele(ovp);
 				/*
 				 * s_ttyp is not zero'd; we use this to
 				 * indicate that the session once had a
@@ -232,7 +229,7 @@ exit1(struct proc *p, int rv, int flags)
 		fixjobc(pr, pr->ps_pgrp, 0);
 
 #ifdef ACCOUNTING
-		(void)acct_process(p);
+		acct_process(p);
 #endif
 
 #ifdef KTRACE
@@ -330,13 +327,13 @@ exit1(struct proc *p, int rv, int flags)
 		    SAS_NOCLDWAIT)) {
 			struct process *ppr = pr->ps_pptr;
 			proc_reparent(pr, initproc->p_p);
+
 			/*
-			 * If this was the last child of our parent, notify
-			 * parent, so in case he was wait(2)ing, he will
+			 * Notify parent, so in case he was wait(2)ing or
+			 * executing waitpid(2) with our pid, he will
 			 * continue.
 			 */
-			if (LIST_EMPTY(&ppr->ps_children))
-				wakeup(ppr);
+			wakeup(ppr);
 		}
 	}
 
@@ -605,6 +602,7 @@ void
 proc_zap(struct proc *p)
 {
 	struct process *pr = p->p_p;
+	struct vnode *otvp;
 
 	/*
 	 * Finally finished with old proc entry.
@@ -625,8 +623,10 @@ proc_zap(struct proc *p)
 	/*
 	 * Release reference to text vnode
 	 */
-	if (p->p_textvp)
-		vrele(p->p_textvp);
+	otvp = p->p_textvp;
+	p->p_textvp = NULL;
+	if (otvp)
+		vrele(otvp);
 
 	/*
 	 * Remove us from our process list, possibly killing the process
@@ -644,6 +644,7 @@ proc_zap(struct proc *p)
 		nprocesses--;
 	}
 
+	freepid(p->p_pid);
 	pool_put(&proc_pool, p);
 	nthreads--;
 }

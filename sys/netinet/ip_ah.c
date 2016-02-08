@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_ah.c,v 1.105 2013/02/14 16:22:34 mikeb Exp $ */
+/*	$OpenBSD: ip_ah.c,v 1.107 2013/06/11 18:15:53 deraadt Exp $ */
 /*
  * The authors of this code are John Ioannidis (ji@tla.org),
  * Angelos D. Keromytis (kermit@csd.uch.gr) and
@@ -81,7 +81,14 @@
 #define DPRINTF(x)
 #endif
 
+int	ah_output_cb(void *);
+int	ah_input_cb(void *);
+int	ah_massage_headers(struct mbuf **, int, int, int, int);
+
 struct ahstat ahstat;
+
+unsigned char ipseczeroes[IPSEC_ZEROES_SIZE]; /* zeroes! */
+
 
 /*
  * ah_attach() is called from the transformation initialization code.
@@ -493,7 +500,7 @@ ah_massage_headers(struct mbuf **m0, int proto, int skip, int alg, int out)
 							addr[i].s6_addr16[1] = 0;
 
 					finaldst = addr[rh0->ip6r0_segleft - 1];
-					ovbcopy(&addr[0], &addr[1],
+					memmove(&addr[1], &addr[0],
 					    sizeof(struct in6_addr) *
 					    (rh0->ip6r0_segleft - 1));
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: fsirand.c,v 1.26 2010/05/18 04:41:14 dlg Exp $	*/
+/*	$OpenBSD: fsirand.c,v 1.29 2013/06/11 16:42:04 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1997 Todd C. Miller <Todd.Miller@courtesan.com>
@@ -101,7 +101,7 @@ fsirand(char *device)
 	size_t ibufsize;
 	struct fs *sblock, *tmpsblock;
 	ino_t inumber;
-	daddr64_t sblockloc, dblk;
+	daddr_t sblockloc, dblk;
 	char sbuf[SBSIZE], sbuftmp[SBSIZE];
 	int devfd, n, cg, i;
 	char *devpath;
@@ -216,9 +216,11 @@ fsirand(char *device)
 	}
 
 	if (printonly && (sblock->fs_id[0] || sblock->fs_id[1])) {
-		if (sblock->fs_inodefmt >= FS_44INODEFMT && sblock->fs_id[0])
+		if (sblock->fs_inodefmt >= FS_44INODEFMT && sblock->fs_id[0]) {
+			time_t t = sblock->fs_id[0];	/* XXX 2038 */
 			(void)printf("%s was randomized on %s", devpath,
-			    ctime((const time_t *)&(sblock->fs_id[0])));
+			    ctime(&t));
+		}
 		(void)printf("fsid: %x %x\n", sblock->fs_id[0],
 		    sblock->fs_id[1]);
 	}
@@ -277,7 +279,8 @@ fsirand(char *device)
 				dp2 = &((struct ufs2_dinode *)inodebuf)[n];
 			if (inumber >= ROOTINO) {
 				if (printonly)
-					(void)printf("ino %d gen %x\n", inumber,
+					(void)printf("ino %llu gen %x\n",
+					    (unsigned long long)inumber,
 					    sblock->fs_magic == FS_UFS1_MAGIC ?
 					    dp1->di_gen : dp2->di_gen);
 				else if (sblock->fs_magic == FS_UFS1_MAGIC)

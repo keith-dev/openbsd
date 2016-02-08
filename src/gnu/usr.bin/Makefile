@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.51 2011/11/21 01:36:18 jsg Exp $
+#	$OpenBSD: Makefile,v 1.53 2013/07/05 21:29:51 miod Exp $
 #	$NetBSD: Makefile,v 1.35 1996/04/03 21:20:52 chuck Exp $
 
 .include <bsd.own.mk>
@@ -19,12 +19,11 @@ SUBDIR+=	cxxfilt cvs lynx
 .if make(obj)
 SUBDIR+=	binutils binutils-2.17
 .else
-SUBDIR+=	${BINUTILS_VERSION}
+# binutils-2.17 needs to build gdb in binutils at the moment
+.if ${BINUTILS_VERSION} == "binutils-2.17"
+SUBDIR+=	binutils
 .endif
-
-# most ports use binutils gas and ld, some do not (yet).
-.if ${ELF_TOOLCHAIN:L} == "no"
-SUBDIR+=	gas ld
+SUBDIR+=	${BINUTILS_VERSION}
 .endif
 
 # Do these last; texinfo builds the info 'dir' file, perl must be after binutils

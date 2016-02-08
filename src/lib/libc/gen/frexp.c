@@ -1,4 +1,4 @@
-/*	$OpenBSD: frexp.c,v 1.8 2012/12/05 23:19:59 deraadt Exp $	*/
+/*	$OpenBSD: frexp.c,v 1.10 2013/07/03 04:46:36 espie Exp $	*/
 
 /*-
  * Copyright (c) 2004 David Schultz <das@FreeBSD.ORG>
@@ -27,8 +27,6 @@
  *
  * $FreeBSD: frexp.c,v 1.1 2004/07/18 21:23:39 das Exp $
  */
-
-/* LINTLIBRARY */
 
 #include <sys/types.h>
 #include <machine/ieee.h>
@@ -68,11 +66,6 @@ frexp(double v, int *ex)
 	return (u.v);
 }
 
-#if	LDBL_MANT_DIG == 53
-#ifdef	lint
-/* PROTOLIB1 */
-long double frexpl(long double, int *);
-#else	/* lint */
-__weak_alias(frexpl, frexp);
-#endif	/* lint */
-#endif	/* LDBL_MANT_DIG == 53 */
+#if	LDBL_MANT_DIG == DBL_MANT_DIG
+__strong_alias(frexpl, frexp);
+#endif	/* LDBL_MANT_DIG == DBL_MANT_DIG */

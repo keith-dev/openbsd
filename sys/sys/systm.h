@@ -1,4 +1,4 @@
-/*	$OpenBSD: systm.h,v 1.95 2013/02/09 20:56:35 miod Exp $	*/
+/*	$OpenBSD: systm.h,v 1.100 2013/06/11 18:15:54 deraadt Exp $	*/
 /*	$NetBSD: systm.h,v 1.50 1996/06/09 04:55:09 briggs Exp $	*/
 
 /*-
@@ -110,8 +110,6 @@ struct proc;
 struct process;
 #define curproc curcpu()->ci_curproc
 
-extern int rthreads_enabled;
-
 typedef int	sy_call_t(struct proc *, void *, register_t *);
 
 extern struct sysent {		/* system call table */
@@ -196,9 +194,6 @@ int	kcopy(const void *, void *, size_t)
 void	bcopy(const void *, void *, size_t)
 		__attribute__ ((__bounded__(__buffer__,1,3)))
 		__attribute__ ((__bounded__(__buffer__,2,3)));
-void	ovbcopy(const void *, void *, size_t)
-		__attribute__ ((__bounded__(__buffer__,1,3)))
-		__attribute__ ((__bounded__(__buffer__,2,3)));
 void	bzero(void *, size_t)
 		__attribute__ ((__bounded__(__buffer__,1,2)));
 void	explicit_bzero(void *, size_t)
@@ -223,8 +218,10 @@ int	copyin(const void *, void *, size_t)
 int	copyout(const void *, void *, size_t);
 
 struct timeval;
+struct timespec;
 int	hzto(const struct timeval *);
 int	tvtohz(const struct timeval *);
+int	tstohz(const struct timespec *);
 void	realitexpire(void *);
 
 struct clockframe;

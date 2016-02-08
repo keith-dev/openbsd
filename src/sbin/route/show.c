@@ -1,4 +1,4 @@
-/*	$OpenBSD: show.c,v 1.92 2012/12/04 02:30:33 deraadt Exp $	*/
+/*	$OpenBSD: show.c,v 1.94 2013/07/19 20:10:23 guenther Exp $	*/
 /*	$NetBSD: show.c,v 1.1 1996/11/15 18:01:41 gwr Exp $	*/
 
 /*
@@ -103,6 +103,7 @@ static const struct bits bits[] = {
 	{ 0 }
 };
 
+int	 WID_DST(int);
 void	 pr_rthdr(int);
 void	 p_rtentry(struct rt_msghdr *);
 void	 p_pfkentry(struct sadb_msg *);
@@ -115,6 +116,8 @@ void	 p_sockaddr_mpls(struct sockaddr *, struct sockaddr *, int, int);
 void	 p_flags(int, char *);
 char	*routename4(in_addr_t);
 char	*routename6(struct sockaddr_in6 *);
+char	*netname4(in_addr_t, struct sockaddr_in *);
+char	*netname6(struct sockaddr_in6 *, struct sockaddr_in6 *);
 void	 index_pfk(struct sadb_msg *, void **);
 
 /*
@@ -142,14 +145,20 @@ p_rttables(int af, u_int tableid, int hastable)
 	} else
 		mcnt = 6;
 
-	if (sysctl(mib, mcnt, NULL, &needed, NULL, 0) < 0)
-		err(1, "route-sysctl-estimate");
-	if (needed > 0) {
-		if ((buf = malloc(needed)) == 0)
-			err(1, NULL);
-		if (sysctl(mib, mcnt, buf, &needed, NULL, 0) < 0)
+	while (1) {
+		if (sysctl(mib, mcnt, NULL, &needed, NULL, 0) == -1)
+			err(1, "route-sysctl-estimate");
+		if (needed == 0)
+			break;
+		if ((buf = realloc(buf, needed)) == NULL)
+			err(1, "realloc");
+		if (sysctl(mib, mcnt, buf, &needed, NULL, 0) == -1) {
+			if (errno == ENOMEM)
+				continue;
 			err(1, "sysctl of routing table");
+		}
 		lim = buf + needed;
+		break;
 	}
 
 	printf("Routing tables\n");
@@ -756,7 +765,7 @@ netname6(struct sockaddr_in6 *sa6, struct sockaddr_in6 *mask)
 	if (mask) {
 		lim = mask->sin6_len - offsetof(struct sockaddr_in6, sin6_addr);
 		lim = lim < (int)sizeof(struct in6_addr) ?
-		    lim : sizeof(struct in6_addr);
+		    lim : (int)sizeof(struct in6_addr);
 		for (p = (u_char *)&mask->sin6_addr, i = 0; i < lim; p++) {
 			if (final && *p) {
 				illegal++;
@@ -810,7 +819,7 @@ netname6(struct sockaddr_in6 *sa6, struct sockaddr_in6 *mask)
 			else
 				sin6.sin6_addr.s6_addr[i++] = 0x00;
 		}
-		while (i < sizeof(struct in6_addr))
+		while (i < (int)sizeof(struct in6_addr))
 			sin6.sin6_addr.s6_addr[i++] = 0x00;
 	} else
 		masklen = 128;

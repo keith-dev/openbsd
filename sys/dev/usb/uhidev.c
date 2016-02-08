@@ -1,4 +1,4 @@
-/*	$OpenBSD: uhidev.c,v 1.42 2011/07/03 15:47:17 matthew Exp $	*/
+/*	$OpenBSD: uhidev.c,v 1.44 2013/05/07 08:44:38 mpi Exp $	*/
 /*	$NetBSD: uhidev.c,v 1.14 2003/03/11 16:44:00 augustss Exp $	*/
 
 /*
@@ -67,7 +67,7 @@ int	uhidevdebug = 0;
 #define DPRINTFN(n,x)
 #endif
 
-void uhidev_intr(usbd_xfer_handle, usbd_private_handle, usbd_status);
+void uhidev_intr(struct usbd_xfer *, void *, usbd_status);
 
 int uhidev_maxrepid(void *buf, int len);
 int uhidevprint(void *aux, const char *pnp);
@@ -114,7 +114,7 @@ uhidev_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct uhidev_softc *sc = (struct uhidev_softc *)self;
 	struct usb_attach_arg *uaa = aux;
-	usbd_interface_handle iface = uaa->iface;
+	struct usbd_interface *iface = uaa->iface;
 	usb_interface_descriptor_t *id;
 	usb_endpoint_descriptor_t *ed;
 	struct uhidev_attach_arg uha;
@@ -145,7 +145,6 @@ uhidev_attach(struct device *parent, struct device *self, void *aux)
 		if (ed == NULL) {
 			printf("%s: could not read endpoint descriptor\n",
 			    sc->sc_dev.dv_xname);
-			sc->sc_dying = 1;
 			return;
 		}
 
@@ -166,7 +165,6 @@ uhidev_attach(struct device *parent, struct device *self, void *aux)
 			sc->sc_oep_addr = ed->bEndpointAddress;
 		} else {
 			printf("%s: unexpected endpoint\n", sc->sc_dev.dv_xname);
-			sc->sc_dying = 1;
 			return;
 		}
 	}
@@ -177,7 +175,6 @@ uhidev_attach(struct device *parent, struct device *self, void *aux)
 	 */
 	if (sc->sc_iep_addr == -1) {
 		printf("%s: no input interrupt endpoint\n", sc->sc_dev.dv_xname);
-		sc->sc_dying = 1;
 		return;
 	}
 
@@ -219,7 +216,6 @@ uhidev_attach(struct device *parent, struct device *self, void *aux)
 	}
 	if (err) {
 		printf("%s: no report descriptor\n", sc->sc_dev.dv_xname);
-		sc->sc_dying = 1;
 		return;
 	}
 
@@ -341,10 +337,9 @@ uhidev_activate(struct device *self, int act)
 			if (sc->sc_subdevs[i] != NULL) {
 				r = config_deactivate(
 				    &sc->sc_subdevs[i]->sc_dev);
-				if (r)
+				if (r && r != EOPNOTSUPP)
 					rv = r;
 			}
-		sc->sc_dying = 1;
 		break;
 	}
 	return (rv);
@@ -376,7 +371,7 @@ uhidev_detach(struct device *self, int flags)
 }
 
 void
-uhidev_intr(usbd_xfer_handle xfer, usbd_private_handle addr, usbd_status status)
+uhidev_intr(struct usbd_xfer *xfer, void *addr, usbd_status status)
 {
 	struct uhidev_softc *sc = addr;
 	struct uhidev *scd;

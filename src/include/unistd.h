@@ -1,4 +1,4 @@
-/*	$OpenBSD: unistd.h,v 1.74 2012/12/05 23:19:57 deraadt Exp $ */
+/*	$OpenBSD: unistd.h,v 1.79 2013/06/17 19:11:54 guenther Exp $ */
 /*	$NetBSD: unistd.h,v 1.26.4.1 1996/05/28 02:31:51 mrg Exp $	*/
 
 /*-
@@ -66,7 +66,7 @@
 #define _POSIX_BARRIERS				200112L
 #define _POSIX_CHOWN_RESTRICTED			1
 #define _POSIX_CLOCK_SELECTION			(-1)
-#define _POSIX_CPUTIME				(-1)
+#define _POSIX_CPUTIME				200809L
 #define _POSIX_FSYNC				200112L
 #define _POSIX_IPV6				0
 #define _POSIX_JOB_CONTROL			1
@@ -85,7 +85,7 @@
 #define _POSIX_REGEXP				1
 #define _POSIX_SAVED_IDS			1
 #define _POSIX_SEMAPHORES			200112L
-#define _POSIX_SHARED_MEMORY_OBJECTS		(-1)
+#define _POSIX_SHARED_MEMORY_OBJECTS		200809L
 #define _POSIX_SHELL				1
 #define _POSIX_SPAWN				200112L
 #define _POSIX_SPIN_LOCKS			200112L
@@ -93,7 +93,7 @@
 #define _POSIX_SYNCHRONIZED_IO			(-1)
 #define _POSIX_THREAD_ATTR_STACKADDR		200112L
 #define _POSIX_THREAD_ATTR_STACKSIZE		200112L
-#define _POSIX_THREAD_CPUTIME			(-1)
+#define _POSIX_THREAD_CPUTIME			200809L
 #define _POSIX_THREAD_PRIO_INHERIT		(-1)
 #define _POSIX_THREAD_PRIO_PROTECT		(-1)
 #define _POSIX_THREAD_PRIORITY_SCHEDULING	(-1)
@@ -282,7 +282,38 @@
 #define	_SC_NPROCESSORS_ONLN	503
 
 /* configurable system strings */
-#define	_CS_PATH		 1
+#define	_CS_PATH				 1
+#define	_CS_POSIX_V6_ILP32_OFF32_CFLAGS		 2
+#define	_CS_POSIX_V6_ILP32_OFF32_LDFLAGS	 3
+#define	_CS_POSIX_V6_ILP32_OFF32_LIBS		 4
+#define	_CS_POSIX_V6_ILP32_OFFBIG_CFLAGS	 5
+#define	_CS_POSIX_V6_ILP32_OFFBIG_LDFLAGS	 6
+#define	_CS_POSIX_V6_ILP32_OFFBIG_LIBS		 7
+#define	_CS_POSIX_V6_LP64_OFF64_CFLAGS		 8
+#define	_CS_POSIX_V6_LP64_OFF64_LDFLAGS		 9
+#define	_CS_POSIX_V6_LP64_OFF64_LIBS		10
+#define	_CS_POSIX_V6_LPBIG_OFFBIG_CFLAGS	11
+#define	_CS_POSIX_V6_LPBIG_OFFBIG_LDFLAGS	12
+#define	_CS_POSIX_V6_LPBIG_OFFBIG_LIBS		13
+#define	_CS_POSIX_V6_WIDTH_RESTRICTED_ENVS	14
+#define	_CS_V6_ENV				15
+#define	_CS_POSIX_V7_ILP32_OFF32_CFLAGS		16
+#define	_CS_POSIX_V7_ILP32_OFF32_LDFLAGS	17
+#define	_CS_POSIX_V7_ILP32_OFF32_LIBS		18
+#define	_CS_POSIX_V7_ILP32_OFFBIG_CFLAGS	19
+#define	_CS_POSIX_V7_ILP32_OFFBIG_LDFLAGS	20
+#define	_CS_POSIX_V7_ILP32_OFFBIG_LIBS		21
+#define	_CS_POSIX_V7_LP64_OFF64_CFLAGS		22
+#define	_CS_POSIX_V7_LP64_OFF64_LDFLAGS		23
+#define	_CS_POSIX_V7_LP64_OFF64_LIBS		24
+#define	_CS_POSIX_V7_LPBIG_OFFBIG_CFLAGS	25
+#define	_CS_POSIX_V7_LPBIG_OFFBIG_LDFLAGS	26
+#define	_CS_POSIX_V7_LPBIG_OFFBIG_LIBS		27
+#define	_CS_POSIX_V7_THREADS_CFLAGS		28
+#define	_CS_POSIX_V7_THREADS_LDFLAGS		29
+#define	_CS_POSIX_V7_WIDTH_RESTRICTED_ENVS	30
+#define	_CS_V7_ENV				31
+
 
 #ifndef NULL
 #ifdef 	__GNUG__
@@ -372,6 +403,9 @@ int	 ftruncate(int, off_t);
 int	 getlogin_r(char *, size_t)
 		__attribute__((__bounded__(__string__,1,2)));
 #endif
+#if __POSIX_VISIBLE >= 199506
+int	 fdatasync(int);
+#endif
 
 #if __XPG_VISIBLE || __BSD_VISIBLE
 char	*crypt(const char *, const char *);
@@ -399,7 +433,7 @@ int	 usleep(useconds_t);
 pid_t	 vfork(void);
 #endif
 
-#if __XPG_VISIBLE >= 420
+#if __POSIX_VISIBLE >= 200809 || __XPG_VISIBLE >= 420
 pid_t	 getpgid(pid_t);
 pid_t	 getsid(pid_t);
 #endif

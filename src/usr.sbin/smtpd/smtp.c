@@ -1,4 +1,4 @@
-/*	$OpenBSD: smtp.c,v 1.123 2013/01/26 09:37:23 gilles Exp $	*/
+/*	$OpenBSD: smtp.c,v 1.127 2013/07/19 11:14:08 eric Exp $	*/
 
 /*
  * Copyright (c) 2008 Gilles Chehade <gilles@poolp.org>
@@ -21,7 +21,6 @@
 #include <sys/types.h>
 #include <sys/queue.h>
 #include <sys/tree.h>
-#include <sys/param.h>
 #include <sys/socket.h>
 
 #include <err.h>
@@ -241,7 +240,6 @@ smtp(void)
 	case -1:
 		fatal("smtp: cannot fork");
 	case 0:
-		env->sc_pid = getpid();
 		break;
 	default:
 		return (pid);
@@ -249,9 +247,10 @@ smtp(void)
 
 	purge_config(PURGE_EVERYTHING);
 
-	pw = env->sc_pw;
+	if ((pw = getpwnam(SMTPD_USER)) == NULL)
+		fatalx("unknown user " SMTPD_USER);
 
-	if (chroot(pw->pw_dir) == -1)
+	if (chroot(PATH_CHROOT) == -1)
 		fatal("smtp: chroot");
 	if (chdir("/") == -1)
 		fatal("smtp: chdir(\"/\")");
@@ -354,7 +353,7 @@ static int
 smtp_enqueue(uid_t *euid)
 {
 	static struct listener	 local, *listener = NULL;
-	char			 buf[MAXHOSTNAMELEN], *hostname;
+	char			 buf[SMTPD_MAXHOSTNAMELEN], *hostname;
 	int			 fd[2];
 
 	if (listener == NULL) {
@@ -418,7 +417,8 @@ smtp_accept(int fd, short event, void *p)
 			log_warn("warn: Disabling incoming SMTP connections");
 			goto pause;
 		}
-		if (errno == EINTR || errno == ECONNABORTED)
+		if (errno == EINTR || errno == EWOULDBLOCK ||
+		    errno == ECONNABORTED)
 			return;
 		fatal("smtp_accept");
 	}
@@ -428,6 +428,7 @@ smtp_accept(int fd, short event, void *p)
 		close(sock);
 		return;
 	}
+	io_set_blocking(sock, 0);
 
 	sessions++;
 	stat_increment("smtp.session", 1);

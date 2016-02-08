@@ -1,4 +1,4 @@
-/*	$OpenBSD: rtld_machine.c,v 1.4 2013/01/26 20:41:39 miod Exp $	*/
+/*	$OpenBSD: rtld_machine.c,v 1.9 2013/06/13 04:13:47 brad Exp $	*/
 
 /*
  * Copyright (c) 2013 Miodrag Vallat.
@@ -81,7 +81,7 @@ _dl_md_reloc(elf_object_t *object, int rel, int relasz)
 
 	/*
 	 * Change protection of all write protected segments in the object
-	 * so we can do relocations such as PC32. After relocation,
+	 * so we can do relocations such as DISP26. After relocation,
 	 * restore protection.
 	 */
 	if (object->dyn.textrel == 1 && (rel == DT_REL || rel == DT_RELA)) {
@@ -100,6 +100,8 @@ _dl_md_reloc(elf_object_t *object, int rel, int relasz)
 		const Elf32_Sym *sym, *this;
 		const char *symn;
 		int type;
+		Elf32_Addr prev_value = 0, prev_ooff = 0;
+		const Elf32_Sym *prev_sym = NULL;
 
 		type = ELF32_R_TYPE(relas->r_info);
 
@@ -144,28 +146,39 @@ _dl_md_reloc(elf_object_t *object, int rel, int relasz)
 			continue;
 		}
 
-		ooff = 0;
-		this = NULL;
 		if (ELF32_R_SYM(relas->r_info) &&
 		    !(ELF32_ST_BIND(sym->st_info) == STB_LOCAL &&
-		    ELF32_ST_TYPE (sym->st_info) == STT_NOTYPE)) {
-			ooff = _dl_find_symbol_bysym(object,
-			    ELF32_R_SYM(relas->r_info), &this,
-			    SYM_SEARCH_ALL | SYM_WARNNOTFOUND |
-			    ((type == RELOC_GOTP_ENT) ? SYM_PLT : SYM_NOTPLT),
-			    sym, NULL);
+		    ELF32_ST_TYPE (sym->st_info) == STT_NOTYPE) &&
+		    sym != prev_sym) {
+			if (ELF32_ST_BIND(sym->st_info) == STB_LOCAL &&
+			    ELF32_ST_TYPE(sym->st_info) == STT_SECTION) {
+				prev_sym = sym;
+				prev_value = 0;
+				prev_ooff = object->obj_base;
+			} else {
+				this = NULL;
+				ooff = _dl_find_symbol_bysym(object,
+				    ELF32_R_SYM(relas->r_info), &this,
+				    SYM_SEARCH_ALL | SYM_WARNNOTFOUND |
+				    ((type == RELOC_GOTP_ENT) ?
+				    SYM_PLT : SYM_NOTPLT), sym, NULL);
 
-			if (this == NULL) {
-				if (ELF_ST_BIND(sym->st_info) != STB_WEAK)
-					fails++;
-				continue;
+				if (this == NULL) {
+					if (ELF_ST_BIND(sym->st_info) !=
+					    STB_WEAK)
+						fails++;
+					continue;
+				}
+				prev_sym = sym;
+				prev_value = this->st_value;
+				prev_ooff = ooff;
 			}
 		}
 
 		if (type == RELOC_GOTP_ENT) {
 			_dl_md_reloc_gotp_ent((Elf_Addr)r_addr,
 			    relas->r_addend + loff,
-			    ooff + this->st_value);
+			    prev_ooff + prev_value);
 			continue;
 		}
 
@@ -174,11 +187,35 @@ _dl_md_reloc(elf_object_t *object, int rel, int relasz)
 		    ELF32_ST_TYPE(sym->st_info) == STT_NOTYPE))
 			addend = relas->r_addend;
 		else
-			addend = this->st_value + relas->r_addend;
+			addend = prev_value + relas->r_addend;
 
 		switch (type) {
+		case RELOC_16L:
+			newval = prev_ooff + addend;
+			*(unsigned short *)r_addr = newval & 0xffff;
+			_dl_cacheflush((unsigned long)r_addr, 2);
+			break;
+		case RELOC_16H:
+			newval = prev_ooff + addend;
+			*(unsigned short *)r_addr = newval >> 16;
+			_dl_cacheflush((unsigned long)r_addr, 2);
+			break;
+		case RELOC_DISP26:
+			newval = prev_ooff + addend;
+			newval -= (Elf_Addr)r_addr;
+			if ((newval >> 28) != 0 && (newval >> 28) != 0x0f) {
+				_dl_printf("%s: %s: out of range DISP26"
+				    " relocation to '%s' at %x\n",
+				    _dl_progname, object->load_name, symn,
+				    r_addr);
+				_dl_exit(1);
+			}
+			*r_addr = (*r_addr & 0xfc000000) |
+			    (((int32_t)newval >> 2) & 0x03ffffff);
+			_dl_cacheflush((unsigned long)r_addr, 4);
+			break;
 		case RELOC_32:
-			newval = ooff + addend;
+			newval = prev_ooff + addend;
 			*r_addr = newval;
 			break;
 		case RELOC_BBASED_32:
@@ -235,7 +272,7 @@ _dl_md_reloc_got(elf_object_t *object, int lazy)
 	int	fails = 0;
 	Elf_Addr *pltgot = (Elf_Addr *)object->Dyn.info[DT_PLTGOT];
 	Elf_Addr ooff;
-	Elf_Addr plt_addr;
+	Elf_Addr plt_start, plt_end;
 	const Elf_Sym *this;
 
 	if (pltgot == NULL)
@@ -246,6 +283,9 @@ _dl_md_reloc_got(elf_object_t *object, int lazy)
 
 	if (object->Dyn.info[DT_PLTREL] != DT_RELA)
 		return (0);
+
+	if (object->traced)
+		lazy = 1;
 
 	object->got_addr = 0;
 	object->got_size = 0;
@@ -269,26 +309,42 @@ _dl_md_reloc_got(elf_object_t *object, int lazy)
 		object->got_size = ELF_ROUND(object->got_size, _dl_pagesz);
 	}
 
-	plt_addr = 0;
-	object->plt_size = 0;
-	this = NULL;
-	ooff = _dl_find_symbol("__plt_start", &this,
-	    SYM_SEARCH_OBJ | SYM_NOWARNNOTFOUND | SYM_PLT, NULL, object, NULL);
-	if (this != NULL)
-		plt_addr = ooff + this->st_value;
+	/*
+	 * Post-5.3 binaries use dynamic tags to provide the .plt boundaries.
+	 * If the tags are missing, fall back to the special symbol search.
+	 */
+	plt_start = object->Dyn.info[DT_88K_PLTSTART - DT_LOPROC + DT_NUM];
+	plt_end = object->Dyn.info[DT_88K_PLTEND - DT_LOPROC + DT_NUM];
+	if (plt_start == 0 || plt_end == 0) {
+		this = NULL;
+		ooff = _dl_find_symbol("__plt_start", &this,
+		    SYM_SEARCH_OBJ | SYM_NOWARNNOTFOUND | SYM_PLT, NULL,
+		    object, NULL);
+		if (this != NULL)
+			plt_start = ooff + this->st_value;
+		else
+			plt_start = 0;
 
-	this = NULL;
-	ooff = _dl_find_symbol("__plt_end", &this,
-	    SYM_SEARCH_OBJ | SYM_NOWARNNOTFOUND | SYM_PLT, NULL, object, NULL);
-	if (this != NULL)
-		object->plt_size = ooff + this->st_value  - plt_addr;
+		this = NULL;
+		ooff = _dl_find_symbol("__plt_end", &this,
+		    SYM_SEARCH_OBJ | SYM_NOWARNNOTFOUND | SYM_PLT, NULL,
+		    object, NULL);
+		if (this != NULL)
+			plt_end = ooff + this->st_value;
+		else
+			plt_end = 0;
+	} else {
+		plt_start += object->obj_base;
+		plt_end += object->obj_base;
+	}
 
-	if (plt_addr == 0)
+	if (plt_start == 0) {
 		object->plt_start = 0;
-	else {
-		object->plt_start = ELF_TRUNC(plt_addr, _dl_pagesz);
-		object->plt_size += plt_addr - object->plt_start;
-		object->plt_size = ELF_ROUND(object->plt_size, _dl_pagesz);
+		object->plt_size = 0;
+	} else {
+		object->plt_start = ELF_TRUNC(plt_start, _dl_pagesz);
+		object->plt_size =
+		    ELF_ROUND(plt_end, _dl_pagesz) - object->plt_start;
 
 		/*
 		 * GOT relocation will require PLT to be writeable.
@@ -345,6 +401,7 @@ _dl_bind(elf_object_t *object, int reloff)
 	Elf_Addr *r_addr, ooff, value;
 	const Elf_Sym *sym, *this;
 	const char *symn;
+	const elf_object_t *sobj;
 	sigset_t savedmask;
 
 	rel = (Elf_RelA *)(object->Dyn.info[DT_JMPREL] + reloff);
@@ -356,13 +413,16 @@ _dl_bind(elf_object_t *object, int reloff)
 	r_addr = (Elf_Addr *)(object->obj_base + rel->r_offset);
 	this = NULL;
 	ooff = _dl_find_symbol(symn, &this,
-	    SYM_SEARCH_ALL | SYM_WARNNOTFOUND | SYM_PLT, sym, object, NULL);
+	    SYM_SEARCH_ALL | SYM_WARNNOTFOUND | SYM_PLT, sym, object, &sobj);
 	if (this == NULL) {
 		_dl_printf("lazy binding failed!\n");
-		*((int *)0) = 0;	/* XXX */
+		*(volatile int *)0 = 0;		/* XXX */
 	}
 
 	value = ooff + this->st_value;
+
+	if (sobj->traced && _dl_trace_plt(sobj, symn))
+		return value;
 
 	/* if GOT is protected, allow the write */
 	if (object->got_size != 0)  {

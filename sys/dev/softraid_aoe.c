@@ -1,4 +1,4 @@
-/* $OpenBSD: softraid_aoe.c,v 1.29 2013/01/16 06:42:22 jsing Exp $ */
+/* $OpenBSD: softraid_aoe.c,v 1.33 2013/06/11 16:42:13 deraadt Exp $ */
 /*
  * Copyright (c) 2008 Ted Unangst <tedu@openbsd.org>
  * Copyright (c) 2008 Marco Peereboom <marco@openbsd.org>
@@ -60,7 +60,7 @@ int	sr_aoe_create(struct sr_discipline *, struct bioc_createraid *,
 int	sr_aoe_assemble(struct sr_discipline *, struct bioc_createraid *,
 	    int, void *);
 int	sr_aoe_alloc_resources(struct sr_discipline *);
-int	sr_aoe_free_resources(struct sr_discipline *);
+void	sr_aoe_free_resources(struct sr_discipline *);
 int	sr_aoe_rw(struct sr_workunit *);
 
 /* AOE target functions. */
@@ -69,7 +69,7 @@ int	sr_aoe_server_create(struct sr_discipline *, struct bioc_createraid *,
 int	sr_aoe_server_assemble(struct sr_discipline *, struct bioc_createraid *,
 	    int, void *);
 int	sr_aoe_server_alloc_resources(struct sr_discipline *);
-int	sr_aoe_server_free_resources(struct sr_discipline *);
+void	sr_aoe_server_free_resources(struct sr_discipline *);
 int	sr_aoe_server_start(struct sr_discipline *);
 
 void	sr_aoe_request_done(struct aoe_req *, struct aoe_packet *);
@@ -130,9 +130,11 @@ int
 sr_aoe_create(struct sr_discipline *sd, struct bioc_createraid *bc,
     int no_chunk, int64_t coerced_size)
 {
-
-	if (no_chunk != 1)
+	if (no_chunk != 1) {
+		sr_error(sd->sd_sc, "%s requires exactly one chunk",
+		    sd->sd_name);
 		return EINVAL;
+	}
 
 	sd->sd_max_ccb_per_wu = no_chunk;
 
@@ -243,9 +245,6 @@ out:
 int
 sr_aoe_alloc_resources(struct sr_discipline *sd)
 {
-	if (!sd)
-		return (EINVAL);
-
 	DNPRINTF(SR_D_DIS, "%s: sr_aoe_alloc_resources\n",
 	    DEVNAME(sd->sd_sc));
 
@@ -255,20 +254,14 @@ sr_aoe_alloc_resources(struct sr_discipline *sd)
 	return 0;
 }
 
-int
+void
 sr_aoe_free_resources(struct sr_discipline *sd)
 {
-	int			s, rv = EINVAL;
 	struct aoe_handler	*ah;
-
-	if (!sd)
-		return (rv);
+	int			s;
 
 	DNPRINTF(SR_D_DIS, "%s: sr_aoe_free_resources\n",
 	    DEVNAME(sd->sd_sc));
-
-	sr_wu_free(sd);
-	sr_ccb_free(sd);
 
 	ah = sd->mds.mdd_aoe.sra_ah;
 	if (ah) {
@@ -281,18 +274,18 @@ sr_aoe_free_resources(struct sr_discipline *sd)
 	if (sd->sd_meta)
 		free(sd->sd_meta, M_DEVBUF);
 
-	rv = 0;
-	return (rv);
+	sr_wu_free(sd);
+	sr_ccb_free(sd);
 }
 
-int sr_send_aoe_chunk(struct sr_workunit *wu, daddr64_t blk, int i);
+int sr_send_aoe_chunk(struct sr_workunit *wu, daddr_t blk, int i);
 int
-sr_send_aoe_chunk(struct sr_workunit *wu, daddr64_t blk, int i)
+sr_send_aoe_chunk(struct sr_workunit *wu, daddr_t blk, int i)
 {
 	struct sr_discipline	*sd = wu->swu_dis;
 	struct scsi_xfer	*xs = wu->swu_xs;
 	int			s;
-	daddr64_t		fragblk;
+	daddr_t			fragblk;
 	struct mbuf		*m;
 	struct ether_header	*eh;
 	struct aoe_packet	*ap;
@@ -389,7 +382,7 @@ sr_aoe_rw(struct sr_workunit *wu)
 	struct sr_discipline	*sd = wu->swu_dis;
 	struct scsi_xfer	*xs = wu->swu_xs;
 	struct sr_chunk		*scp;
-	daddr64_t		blk;
+	daddr_t			blk;
 	int			s, ios, rt;
 	int			rv, i;
 	const int		aoe_frags = 2;
@@ -475,7 +468,7 @@ sr_aoe_request_done(struct aoe_req *ar, struct aoe_packet *ap)
 	struct sr_discipline	*sd;
 	struct scsi_xfer	*xs;
 	struct sr_workunit	*wu;
-	daddr64_t		blk, offset;
+	daddr_t			blk, offset;
 	int			len, s;
 
 	wu = ar->v;
@@ -571,9 +564,11 @@ int
 sr_aoe_server_create(struct sr_discipline *sd, struct bioc_createraid *bc,
     int no_chunk, int64_t coerced_size)
 {
-
-	if (no_chunk != 1)
+	if (no_chunk != 1) {
+		sr_error(sd->sd_sc, "%s requires exactly one chunk",
+		    sd->sd_name);
 		return EINVAL;
+	}
 
 	sd->sd_meta->ssdi.ssd_size = coerced_size;
 
@@ -603,9 +598,6 @@ sr_aoe_server_alloc_resources(struct sr_discipline *sd)
 	const char		*nic;
 	struct aoe_handler	*ah;
 	struct ifnet		*ifp;
-
-	if (!sd)
-		return (rv);
 
 	DNPRINTF(SR_D_DIS, "%s: sr_aoe_server_alloc_resources\n",
 	    DEVNAME(sd->sd_sc));
@@ -650,19 +642,13 @@ bad:
 	return (rv);
 }
 
-int
+void
 sr_aoe_server_free_resources(struct sr_discipline *sd)
 {
 	int			s;
 
-	if (!sd)
-		return (EINVAL);
-
 	DNPRINTF(SR_D_DIS, "%s: sr_aoe_server_free_resources\n",
 	    DEVNAME(sd->sd_sc));
-
-	sr_wu_free(sd);
-	sr_ccb_free(sd);
 
 	s = splnet();
 	if (sd->mds.mdd_aoe.sra_ah) {
@@ -671,7 +657,8 @@ sr_aoe_server_free_resources(struct sr_discipline *sd)
 	}
 	splx(s);
 
-	return (0);
+	sr_wu_free(sd);
+	sr_ccb_free(sd);
 }
 
 int
@@ -707,7 +694,7 @@ sr_aoe_server_thread(void *arg)
 	struct mbuf		*m, *m2;
 	struct ether_header	*eh;
 	struct buf		buf;
-	daddr64_t		blk;
+	daddr_t			blk;
 	int			len;
 	int			rv, s;
 

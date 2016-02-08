@@ -1,4 +1,4 @@
-/* $OpenBSD: cpu.h,v 1.48 2013/02/12 08:06:22 mpi Exp $ */
+/* $OpenBSD: cpu.h,v 1.50 2013/05/31 17:00:57 tedu Exp $ */
 /* $NetBSD: cpu.h,v 1.45 2000/08/21 02:03:12 thorpej Exp $ */
 
 /*-
@@ -174,10 +174,6 @@ struct cpu_info {
 	 * Public members.
 	 */
 	struct schedstate_percpu ci_schedstate;	/* scheduler state */
-#if defined(DIAGNOSTIC) || defined(LOCKDEBUG)
-	u_long ci_spin_locks;		/* # of spin locks held */
-	u_long ci_simple_locks;		/* # of simple locks held */
-#endif
 #ifdef DIAGNOSTIC
 	int	ci_mutex_level;
 #endif
@@ -203,6 +199,9 @@ struct cpu_info {
 	u_long ci_ipis;			/* interprocessor interrupts pending */
 #endif
 	u_int32_t ci_randseed;
+#ifdef GPROF
+	struct gmonparam *ci_gmon;
+#endif
 };
 
 #define	CPUF_PRIMARY	0x01		/* CPU is primary CPU */

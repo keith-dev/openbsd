@@ -1,4 +1,4 @@
-/*	$OpenBSD: session.h,v 1.114 2012/09/12 05:56:22 claudio Exp $ */
+/*	$OpenBSD: session.h,v 1.116 2013/05/30 20:29:27 florian Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -214,6 +214,7 @@ struct peer {
 	struct msgbuf		 wbuf;
 	struct ibuf_read	*rbuf;
 	struct peer		*next;
+	struct peer		*template;
 	int			 fd;
 	int			 lasterr;
 	u_int			 errcnt;
@@ -268,6 +269,7 @@ void		 mrt_dump_bgp_msg(struct mrt *, void *, u_int16_t,
 		     struct peer *);
 void		 mrt_dump_state(struct mrt *, u_int16_t, u_int16_t,
 		     struct peer *);
+void		 mrt_done(void *);
 
 /* parse.y */
 int	 parse_config(char *, struct bgpd_config *, struct mrt_head *,

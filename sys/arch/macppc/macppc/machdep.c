@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.135 2012/12/06 12:35:22 mpi Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.138 2013/06/11 16:42:09 deraadt Exp $	*/
 /*	$NetBSD: machdep.c,v 1.4 1996/10/16 19:33:11 ws Exp $	*/
 
 /*
@@ -113,6 +113,9 @@ int system_type = SYS_TYPE;	/* XXX Hardwire it for now */
 char ofw_eth_addr[6];		/* Save address of first network ifc found */
 char *bootpath;
 char bootpathbuf[512];
+
+/* from autoconf.c */
+extern void parseofwbp(char *);
 
 struct firmware *fw = NULL;
 
@@ -367,7 +370,8 @@ initppc(startkernel, endkernel, args)
 			}
 		}
 	}
-	bootpath= &bootpathbuf[0];
+	bootpath = &bootpathbuf[0];
+	parseofwbp(bootpath);
 
 #ifdef DDB
 	ddb_init();
@@ -717,7 +721,7 @@ int cpu_dump(void);
 int
 cpu_dump()
 {
-	int (*dump) (dev_t, daddr64_t, caddr_t, size_t);
+	int (*dump) (dev_t, daddr_t, caddr_t, size_t);
 	long buf[dbtob(1) / sizeof (long)];
 	kcore_seg_t	*segp;
 
@@ -740,8 +744,8 @@ dumpsys()
 #if 0
 	u_int npg;
 	u_int i, j;
-	daddr64_t blkno;
-	int (*dump) (dev_t, daddr64_t, caddr_t, size_t);
+	daddr_t blkno;
+	int (*dump) (dev_t, daddr_t, caddr_t, size_t);
 	char *str;
 	int maddr;
 	extern int msgbufmapped;
@@ -1067,7 +1071,7 @@ bus_space_map(bus_space_tag_t t, bus_addr_t bpa, bus_size_t size,
 			printf("bus_space_map: can't free region\n");
 		}
 	}
-	return 0;
+	return error;
 }
 bus_addr_t
 bus_space_unmap_p(bus_space_tag_t t, bus_space_handle_t bsh, bus_size_t size)

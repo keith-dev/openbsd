@@ -1,4 +1,4 @@
-/*	$OpenBSD: dir.c,v 1.61 2012/12/07 07:15:31 espie Exp $ */
+/*	$OpenBSD: dir.c,v 1.63 2013/05/22 12:14:08 espie Exp $ */
 /*	$NetBSD: dir.c,v 1.14 1997/03/29 16:51:26 christos Exp $	*/
 
 /*
@@ -66,13 +66,13 @@
 #include <dirent.h>
 #include <limits.h>
 #include <stddef.h>
-#include <stdio.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ohash.h>
 #include "config.h"
 #include "defines.h"
-#include "ohash.h"
 #include "dir.h"
 #include "lst.h"
 #include "memory.h"
@@ -196,7 +196,7 @@ static struct ohash_info file_info = {
  * entry, and we don't look up in this cache except as a last resort.
  */
 struct file_stamp {
-	TIMESTAMP mtime;		/* time stamp... */
+	struct timespec mtime;		/* time stamp... */
 	char name[1];			/* ...for that file.  */
 };
 
@@ -228,7 +228,7 @@ static char *find_file_hashi(struct PathEntry *, const char *, const char *,
 static struct file_stamp *find_stampi(const char *, const char *);
 /* record_stamp(name, timestamp): record timestamp for name in the global
  * 	cache. */
-static void record_stamp(const char *, TIMESTAMP);
+static void record_stamp(const char *, struct timespec);
 
 static bool read_directory(struct PathEntry *);
 /* p = DirReaddiri(name, end): read an actual directory, caching results
@@ -242,7 +242,7 @@ static void DirPrintDir(void *);
  ***/
 
 static void
-record_stamp(const char *file, TIMESTAMP t)
+record_stamp(const char *file, struct timespec t)
 {
 	unsigned int slot;
 	const char *end = NULL;
@@ -548,7 +548,7 @@ Dir_FindFileComplexi(const char *name, const char *ename, Lst path,
 				printf("checking %s...", file);
 
 			if (stat(file, &stb) == 0) {
-				TIMESTAMP mtime;
+				struct timespec mtime;
 
 				ts_set_from_stat(stb, mtime);
 				if (DEBUG(DIR))
@@ -570,7 +570,7 @@ Dir_FindFileComplexi(const char *name, const char *ename, Lst path,
 				* needed, we don't have to fetch it again.  */
 				if (DEBUG(DIR))
 					printf("Caching %s for %s\n",
-					    time_to_string(mtime), file);
+					    time_to_string(&mtime), file);
 				record_stamp(file, mtime);
 				return file;
 			} else
@@ -610,11 +610,12 @@ Dir_FindFileComplexi(const char *name, const char *ename, Lst path,
 			printf("got it (in mtime cache)\n");
 		return q;
 	} else if (stat(q, &stb) == 0) {
-		TIMESTAMP mtime;
+		struct timespec mtime;
 
 		ts_set_from_stat(stb, mtime);
 		if (DEBUG(DIR))
-			printf("Caching %s for %s\n", time_to_string(mtime), q);
+			printf("Caching %s for %s\n", time_to_string(&mtime), 
+			    q);
 		record_stamp(q, mtime);
 		return q;
 	} else {
@@ -694,14 +695,14 @@ Dir_PrintPath(Lst path)
 	Lst_Every(path, DirPrintDir);
 }
 
-TIMESTAMP
+struct timespec
 Dir_MTime(GNode *gn)
 {
 	char *fullName;
 	struct stat stb;
 	struct file_stamp *entry;
 	unsigned int slot;
-	TIMESTAMP	  mtime;
+	struct timespec	  mtime;
 
 	if (gn->type & OP_PHONY)
 		return gn->mtime;
@@ -724,7 +725,7 @@ Dir_MTime(GNode *gn)
 		 * actually go to the file system.	*/
 		if (DEBUG(DIR))
 			printf("Using cached time %s for %s\n",
-			    time_to_string(entry->mtime), fullName);
+			    time_to_string(&entry->mtime), fullName);
 		mtime = entry->mtime;
 		free(entry);
 		ohash_remove(&mtimes, slot);

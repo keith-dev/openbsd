@@ -1,4 +1,4 @@
-/*	$OpenBSD: tty.c,v 1.96 2013/01/17 21:24:58 deraadt Exp $	*/
+/*	$OpenBSD: tty.c,v 1.99 2013/06/10 04:44:30 guenther Exp $	*/
 /*	$NetBSD: tty.c,v 1.68.4.2 1996/06/06 16:04:52 thorpej Exp $	*/
 
 /*-
@@ -71,6 +71,7 @@ void ttyunblock(struct tty *);
 static void ttyecho(int, struct tty *);
 static void ttyrubo(struct tty *, int);
 static int proc_compare(struct proc *, struct proc *);
+void	ttkqflush(struct klist *klist);
 int	filt_ttyread(struct knote *kn, long hint);
 void 	filt_ttyrdetach(struct knote *kn);
 int	filt_ttywrite(struct knote *kn, long hint);
@@ -1113,12 +1114,30 @@ ttkqfilter(dev_t dev, struct knote *kn)
 }
 
 void
+ttkqflush(struct klist *klist)
+{
+	struct knote *kn, *kn1;
+
+	SLIST_FOREACH_SAFE(kn, klist, kn_selnext, kn1) {
+		SLIST_REMOVE(klist, kn, knote, kn_selnext);
+		kn->kn_hook = (caddr_t)((u_long)NODEV);
+		kn->kn_flags |= EV_EOF;
+		knote_activate(kn);
+	}
+}
+
+void
 filt_ttyrdetach(struct knote *kn)
 {
 	dev_t dev = (dev_t)((u_long)kn->kn_hook);
-	struct tty *tp = (*cdevsw[major(dev)].d_tty)(dev);
-	int s = spltty();
+	struct tty *tp;
+	int s;
 
+	if (dev == NODEV)
+		return;
+	tp = (*cdevsw[major(dev)].d_tty)(dev);
+
+	s = spltty();
 	SLIST_REMOVE(&tp->t_rsel.si_note, kn, knote, kn_selnext);
 	splx(s);
 }
@@ -1127,8 +1146,14 @@ int
 filt_ttyread(struct knote *kn, long hint)
 {
 	dev_t dev = (dev_t)((u_long)kn->kn_hook);
-	struct tty *tp = (*cdevsw[major(dev)].d_tty)(dev);
+	struct tty *tp;
 	int s;
+
+	if (dev == NODEV) {
+		kn->kn_flags |= EV_EOF;
+		return (1);
+	}
+	tp = (*cdevsw[major(dev)].d_tty)(dev);
 
 	s = spltty();
 	kn->kn_data = ttnread(tp);
@@ -1144,9 +1169,14 @@ void
 filt_ttywdetach(struct knote *kn)
 {
 	dev_t dev = (dev_t)((u_long)kn->kn_hook);
-	struct tty *tp = (*cdevsw[major(dev)].d_tty)(dev);
-	int s = spltty();
+	struct tty *tp;
+	int s;
 
+	if (dev == NODEV)
+		return;
+	tp = (*cdevsw[major(dev)].d_tty)(dev);
+
+	s = spltty();
 	SLIST_REMOVE(&tp->t_wsel.si_note, kn, knote, kn_selnext);
 	splx(s);
 }
@@ -1155,8 +1185,14 @@ int
 filt_ttywrite(struct knote *kn, long hint)
 {
 	dev_t dev = (dev_t)((u_long)kn->kn_hook);
-	struct tty *tp = (*cdevsw[major(dev)].d_tty)(dev);
+	struct tty *tp;
 	int canwrite, s;
+
+	if (dev == NODEV) {
+		kn->kn_flags |= EV_EOF;
+		return (1);
+	}
+	tp = (*cdevsw[major(dev)].d_tty)(dev);
 
 	s = spltty();
 	kn->kn_data = tp->t_outq.c_cn - tp->t_outq.c_cc;
@@ -2086,7 +2122,7 @@ ttyinfo(struct tty *tp)
 {
 	struct process *pr;
 	struct proc *pick;
-	struct timeval utime, stime;
+	struct timespec utime, stime;
 	int tmp;
 
 	if (ttycheckoutq(tp,0) == 0)
@@ -2116,30 +2152,31 @@ ttyinfo(struct tty *tp)
 		rss = pick->p_stat == SIDL || P_ZOMBIE(pick) ? 0 :
 		    vm_resident_count(pick->p_vmspace);
 
-		calcru(&pick->p_p->ps_tu, &utime, &stime, NULL);
+		calctsru(&pick->p_p->ps_tu, &utime, &stime, NULL);
 
 		/* Round up and print user time. */
-		utime.tv_usec += 5000;
-		if (utime.tv_usec >= 1000000) {
+		utime.tv_nsec += 5000000;
+		if (utime.tv_nsec >= 1000000000) {
 			utime.tv_sec += 1;
-			utime.tv_usec -= 1000000;
+			utime.tv_nsec -= 1000000000;
 		}
 
 		/* Round up and print system time. */
-		stime.tv_usec += 5000;
-		if (stime.tv_usec >= 1000000) {
+		stime.tv_nsec += 5000000;
+		if (stime.tv_nsec >= 1000000000) {
 			stime.tv_sec += 1;
-			stime.tv_usec -= 1000000;
+			stime.tv_nsec -= 1000000000;
 		}
 
 		ttyprintf(tp,
-		    " cmd: %s %d [%s] %ld.%02ldu %ld.%02lds %d%% %ldk\n",
+		    " cmd: %s %d [%s] %lld.%02ldu %lld.%02lds %d%% %ldk\n",
 		    pick->p_comm, pick->p_pid,
 		    pick->p_stat == SONPROC ? "running" :
 		    pick->p_stat == SRUN ? "runnable" :
 		    pick->p_wmesg ? pick->p_wmesg : "iowait",
-		    utime.tv_sec, utime.tv_usec / 10000,
-		    stime.tv_sec, stime.tv_usec / 10000, pctcpu / 100, rss);
+		    (long long)utime.tv_sec, utime.tv_nsec / 10000000,
+		    (long long)stime.tv_sec, stime.tv_nsec / 10000000,
+		    pctcpu / 100, rss);
 	}
 	tp->t_rocount = 0;	/* so pending input will be retyped if BS */
 }
@@ -2308,6 +2345,9 @@ ttyfree(struct tty *tp)
 		panic("ttyfree: tty_count < 0");
 #endif
 	TAILQ_REMOVE(&ttylist, tp, tty_link);
+
+	ttkqflush(&tp->t_rsel.si_note);
+	ttkqflush(&tp->t_wsel.si_note);
 
 	clfree(&tp->t_rawq);
 	clfree(&tp->t_canq);

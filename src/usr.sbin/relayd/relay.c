@@ -1,7 +1,7 @@
-/*	$OpenBSD: relay.c,v 1.162 2013/02/05 21:36:33 bluhm Exp $	*/
+/*	$OpenBSD: relay.c,v 1.166 2013/05/30 20:17:12 reyk Exp $	*/
 
 /*
- * Copyright (c) 2006 - 2012 Reyk Floeter <reyk@openbsd.org>
+ * Copyright (c) 2006 - 2013 Reyk Floeter <reyk@openbsd.org>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -69,9 +69,6 @@ void		 relay_accept(int, short, void *);
 void		 relay_input(struct rsession *);
 
 u_int32_t	 relay_hash_addr(struct sockaddr_storage *, u_int32_t);
-
-int		 relay_splice(struct ctl_relay_event *);
-int		 relay_splicelen(struct ctl_relay_event *);
 
 SSL_CTX		*relay_ssl_ctx_create(struct relay *);
 void		 relay_ssl_transaction(struct rsession *,
@@ -321,8 +318,7 @@ relay_statistics(int fd, short events, void *arg)
 	 */
 
 	timerclear(&tv);
-	if (gettimeofday(&tv_now, NULL) == -1)
-		fatal("relay_init: gettimeofday");
+	getmonotime(&tv_now);
 
 	TAILQ_FOREACH(rlay, env->sc_relays, rl_entry) {
 		bzero(&crs, sizeof(crs));
@@ -743,10 +739,19 @@ relay_write(struct bufferevent *bev, void *arg)
 {
 	struct ctl_relay_event	*cre = arg;
 	struct rsession		*con = cre->con;
-	if (gettimeofday(&con->se_tv_last, NULL) == -1)
-		con->se_done = 1;
+
+	getmonotime(&con->se_tv_last);
+
 	if (con->se_done)
-		relay_close(con, "last write (done)");
+		goto done;
+	if (relay_splice(cre->dst) == -1)
+		goto fail;
+	return;
+ done:
+	relay_close(con, "last write (done)");
+	return;
+ fail:
+	relay_close(con, strerror(errno));
 }
 
 void
@@ -774,8 +779,8 @@ relay_read(struct bufferevent *bev, void *arg)
 	struct rsession		*con = cre->con;
 	struct evbuffer		*src = EVBUFFER_INPUT(bev);
 
-	if (gettimeofday(&con->se_tv_last, NULL) == -1)
-		goto fail;
+	getmonotime(&con->se_tv_last);
+
 	if (!EVBUFFER_LENGTH(src))
 		return;
 	if (relay_bufferevent_write_buffer(cre->dst, src) == -1)
@@ -824,11 +829,31 @@ relay_splice(struct ctl_relay_event *cre)
 	    (proto->tcpflags & TCPFLAG_NSPLICE))
 		return (0);
 
-	if (cre->bev->readcb != relay_read)
+	if (cre->splicelen >= 0)
 		return (0);
+
+	/* still not connected */
+	if (cre->bev == NULL || cre->dst->bev == NULL)
+		return (0);
+
+	if (! (cre->toread == TOREAD_UNLIMITED || cre->toread > 0)) {
+		DPRINTF("%s: session %d: splice dir %d, nothing to read %lld",
+		    __func__, con->se_id, cre->dir, cre->toread);
+		return (0);
+	}
+
+	/* do not splice before buffers have not been completely flushed */
+	if (EVBUFFER_LENGTH(cre->bev->input) ||
+	    EVBUFFER_LENGTH(cre->dst->bev->output)) {
+		DPRINTF("%s: session %d: splice dir %d, dirty buffer",
+		    __func__, con->se_id, cre->dir);
+		bufferevent_disable(cre->bev, EV_READ);
+		return (0);
+	}
 
 	bzero(&sp, sizeof(sp));
 	sp.sp_fd = cre->dst->s;
+	sp.sp_max = cre->toread > 0 ? cre->toread : 0;
 	sp.sp_idle = rlay->rl_conf.timeout;
 	if (setsockopt(cre->s, SOL_SOCKET, SO_SPLICE, &sp, sizeof(sp)) == -1) {
 		log_debug("%s: session %d: splice dir %d failed: %s",
@@ -836,9 +861,12 @@ relay_splice(struct ctl_relay_event *cre)
 		return (-1);
 	}
 	cre->splicelen = 0;
-	DPRINTF("%s: session %d: splice dir %d successful",
-	    __func__, con->se_id, cre->dir);
-	return (1);
+	bufferevent_enable(cre->bev, EV_READ);
+
+	DPRINTF("%s: session %d: splice dir %d, maximum %lld, successful",
+	    __func__, con->se_id, cre->dir, cre->toread);
+
+	return (0);
 }
 
 int
@@ -848,16 +876,40 @@ relay_splicelen(struct ctl_relay_event *cre)
 	off_t			 len;
 	socklen_t		 optlen;
 
+	if (cre->splicelen < 0)
+		return (0);
+
 	optlen = sizeof(len);
 	if (getsockopt(cre->s, SOL_SOCKET, SO_SPLICE, &len, &optlen) == -1) {
 		log_debug("%s: session %d: splice dir %d get length failed: %s",
 		    __func__, con->se_id, cre->dir, strerror(errno));
 		return (-1);
 	}
+
+	DPRINTF("%s: session %d: splice dir %d, length %lld",
+	    __func__, con->se_id, cre->dir, len);
+
 	if (len > cre->splicelen) {
+		getmonotime(&con->se_tv_last);
+
 		cre->splicelen = len;
 		return (1);
 	}
+
+	return (0);
+}
+
+int
+relay_spliceadjust(struct ctl_relay_event *cre)
+{
+	if (cre->splicelen < 0)
+		return (0);
+	if (relay_splicelen(cre) == -1)
+		return (-1);
+	if (cre->splicelen > 0 && cre->toread > 0)
+		cre->toread -= cre->splicelen;
+	cre->splicelen = -1;
+
 	return (0);
 }
 
@@ -900,8 +952,16 @@ relay_error(struct bufferevent *bev, short error, void *arg)
 				break;
 			}
 		}
+		if (relay_spliceadjust(cre) == -1)
+			goto fail;
 		if (relay_splice(cre) == -1)
 			goto fail;
+		return;
+	}
+	if (error & EVBUFFER_ERROR && errno == EFBIG) {
+		if (relay_spliceadjust(cre) == -1)
+			goto fail;
+		bufferevent_enable(cre->bev, EV_READ);
 		return;
 	}
 	if (error & (EVBUFFER_READ|EVBUFFER_WRITE|EVBUFFER_EOF)) {
@@ -988,10 +1048,6 @@ relay_accept(int fd, short event, void *arg)
 	con->se_out.dir = RELAY_DIR_RESPONSE;
 	con->se_retry = rlay->rl_conf.dstretry;
 	con->se_bnds = -1;
-	if (gettimeofday(&con->se_tv_start, NULL) == -1)
-		goto err;
-	bcopy(&con->se_tv_start, &con->se_tv_last, sizeof(con->se_tv_last));
-	bcopy(&ss, &con->se_in.ss, sizeof(con->se_in.ss));
 	con->se_out.port = rlay->rl_conf.dstport;
 	switch (ss.ss_family) {
 	case AF_INET:
@@ -1001,6 +1057,10 @@ relay_accept(int fd, short event, void *arg)
 		con->se_in.port = ((struct sockaddr_in6 *)&ss)->sin6_port;
 		break;
 	}
+	bcopy(&ss, &con->se_in.ss, sizeof(con->se_in.ss));
+
+	getmonotime(&con->se_tv_start);
+	bcopy(&con->se_tv_start, &con->se_tv_last, sizeof(con->se_tv_last));
 
 	relay_sessions++;
 	SPLAY_INSERT(session_tree, &rlay->rl_sessions, con);
@@ -1064,6 +1124,11 @@ relay_accept(int fd, short event, void *arg)
 		evtimer_set(&con->se_ev, relay_natlook, con);
 		bcopy(&rlay->rl_conf.timeout, &tv, sizeof(tv));
 		evtimer_add(&con->se_ev, &tv);
+		return;
+	}
+
+	if (rlay->rl_conf.flags & F_SSLINSPECT) {
+		relay_preconnect(con);
 		return;
 	}
 
@@ -1384,17 +1449,34 @@ relay_connect_retry(int fd, short sig, void *arg)
 }
 
 int
+relay_preconnect(struct rsession *con)
+{
+	log_debug("%s: session %d: process %d", __func__,
+	    con->se_id, privsep_process);
+	return (relay_connect(con));
+}
+
+int
 relay_connect(struct rsession *con)
 {
 	struct relay	*rlay = con->se_relay;
 	struct timeval	 evtpause = { 1, 0 };
 	int		 bnds = -1, ret;
 
+	/* Connection is already established but session not active */
+	if ((rlay->rl_conf.flags & F_SSLINSPECT) && con->se_out.s != -1) {
+		if (con->se_out.ssl == NULL) {
+			log_debug("%s: ssl connect failed", __func__);
+			return (-1);
+		}
+		relay_connected(con->se_out.s, EV_WRITE, con);
+		return (0);
+	}
+
 	if (relay_inflight < 1)
 		fatalx("relay_connect: no connection in flight");
 
-	if (gettimeofday(&con->se_tv_start, NULL) == -1)
-		return (-1);
+	getmonotime(&con->se_tv_start);
 
 	if (!TAILQ_EMPTY(&rlay->rl_tables)) {
 		if (relay_from_table(con) != 0)
@@ -1514,6 +1596,8 @@ relay_close(struct rsession *con, const char *msg)
 			SSL_shutdown(con->se_in.ssl);
 		SSL_free(con->se_in.ssl);
 	}
+	if (con->se_in.sslcert != NULL)
+		X509_free(con->se_in.sslcert);
 	if (con->se_in.s != -1) {
 		close(con->se_in.s);
 		if (con->se_out.s == -1) {
@@ -1543,6 +1627,8 @@ relay_close(struct rsession *con, const char *msg)
 			SSL_shutdown(con->se_out.ssl);
 		SSL_free(con->se_out.ssl);
 	}
+	if (con->se_out.sslcert != NULL)
+		X509_free(con->se_out.sslcert);
 	if (con->se_out.s != -1) {
 		close(con->se_out.s);
 
@@ -1763,7 +1849,8 @@ relay_ssl_ctx_create(struct relay *rlay)
 		goto err;
 
 	/* Modify session timeout and cache size*/
-	SSL_CTX_set_timeout(ctx, rlay->rl_conf.timeout.tv_sec);
+	SSL_CTX_set_timeout(ctx,
+	    (long)MIN(rlay->rl_conf.timeout.tv_sec, LONG_MAX));
 	if (proto->cache < -1) {
 		SSL_CTX_set_session_cache_mode(ctx, SSL_SESS_CACHE_OFF);
 	} else if (proto->cache >= -1) {
@@ -1843,6 +1930,10 @@ relay_ssl_transaction(struct rsession *con, struct ctl_relay_event *cre)
 		cb = relay_ssl_accept;
 		method = SSLv23_server_method();
 		flag = EV_READ;
+
+		/* Use session-specific certificate for SSL inspection. */
+		if (cre->sslcert != NULL)
+			SSL_use_certificate(ssl, cre->sslcert);
 	} else {
 		cb = relay_ssl_connect;
 		method = SSLv23_client_method();
@@ -1940,6 +2031,7 @@ relay_ssl_connect(int fd, short event, void *arg)
 	int		 retry_flag = 0;
 	int		 ssl_err = 0;
 	int		 ret;
+	X509		*servercert = NULL;
 
 	if (event == EV_TIMEOUT) {
 		relay_close(con, "SSL connect timeout");
@@ -1976,8 +2068,27 @@ relay_ssl_connect(int fd, short event, void *arg)
 #else
 	log_debug(
 #endif
-	    "relay %s, session %d connected (%d active)",
+	    "relay %s, ssl session %d connected (%d active)",
 	    rlay->rl_conf.name, con->se_id, relay_sessions);
+
+	if (rlay->rl_conf.flags & F_SSLINSPECT) {
+		if ((servercert =
+		    SSL_get_peer_certificate(con->se_out.ssl)) != NULL) {
+			con->se_in.sslcert =
+			    ssl_update_certificate(servercert,
+			    rlay->rl_ssl_key, rlay->rl_conf.ssl_key_len,
+			    rlay->rl_ssl_cakey, rlay->rl_conf.ssl_cakey_len,
+			    rlay->rl_ssl_cacert, rlay->rl_conf.ssl_cacert_len);
+		} else
+			con->se_in.sslcert = NULL;
+		if (servercert != NULL)
+			X509_free(servercert);
+		if (con->se_in.sslcert == NULL)
+			relay_close(con, "could not create certificate");
+		else
+			relay_session(con);
+		return;
+	}
 
 	relay_connected(fd, EV_WRITE, con);
 	return;
@@ -2300,11 +2411,31 @@ relay_load_certfiles(struct relay *rlay)
 	struct protocol *proto = rlay->rl_proto;
 	int	 useport = htons(rlay->rl_conf.port);
 
-	if ((rlay->rl_conf.flags & F_SSLCLIENT) && strlen(proto->sslca)) {
-		if ((rlay->rl_ssl_ca = relay_load_file(proto->sslca,
-		    &rlay->rl_conf.ssl_ca_len)) == NULL)
-			return (-1);
-		log_debug("%s: using ca %s", __func__, proto->sslca);
+	if (rlay->rl_conf.flags & F_SSLCLIENT) {
+		if (strlen(proto->sslca)) {
+			if ((rlay->rl_ssl_ca =
+			    relay_load_file(proto->sslca,
+			    &rlay->rl_conf.ssl_ca_len)) == NULL)
+				return (-1);
+			log_debug("%s: using ca %s", __func__, proto->sslca);
+		}
+		if (strlen(proto->sslcacert)) {
+			if ((rlay->rl_ssl_cacert =
+			    relay_load_file(proto->sslcacert,
+			    &rlay->rl_conf.ssl_cacert_len)) == NULL)
+				return (-1);
+			log_debug("%s: using ca certificate %s", __func__,
+			    proto->sslcacert);
+		}
+		if (strlen(proto->sslcakey) && proto->sslcapass != NULL) {
+			if ((rlay->rl_ssl_cakey =
+			    ssl_load_key(env, proto->sslcakey,
+			    &rlay->rl_conf.ssl_cakey_len,
+			    proto->sslcapass)) == NULL)
+				return (-1);
+			log_debug("%s: using ca key %s", __func__,
+			    proto->sslcakey);
+		}
 	}
 
 	if ((rlay->rl_conf.flags & F_SSL) == 0)
@@ -2337,8 +2468,8 @@ relay_load_certfiles(struct relay *rlay)
 		    "/etc/ssl/private/%s.key", hbuf) == -1)
 			return -1;
 	}
-	if ((rlay->rl_ssl_key = relay_load_file(certfile,
-	    &rlay->rl_conf.ssl_key_len)) == NULL)
+	if ((rlay->rl_ssl_key = ssl_load_key(env, certfile,
+	    &rlay->rl_conf.ssl_key_len, NULL)) == NULL)
 		return (-1);
 	log_debug("%s: using private key %s", __func__, certfile);
 

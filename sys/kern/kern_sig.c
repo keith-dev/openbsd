@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_sig.c,v 1.148 2013/02/08 04:30:37 guenther Exp $	*/
+/*	$OpenBSD: kern_sig.c,v 1.152 2013/06/01 04:05:26 tedu Exp $	*/
 /*	$NetBSD: kern_sig.c,v 1.54 1996/04/22 01:38:32 christos Exp $	*/
 
 /*
@@ -66,7 +66,6 @@
 #include <sys/mount.h>
 #include <sys/syscallargs.h>
 
-#include <machine/cpu.h>
 
 #include <uvm/uvm_extern.h>
 
@@ -864,11 +863,11 @@ ptsignal(struct proc *p, int signum, enum signal_type type)
 		 */
 		if (p->p_sigacts->ps_sigignore & mask)
 			return;
-		if (p->p_sigmask & mask)
+		if (p->p_sigmask & mask) {
 			action = SIG_HOLD;
-		else if (p->p_sigacts->ps_sigcatch & mask)
+		} else if (p->p_sigacts->ps_sigcatch & mask) {
 			action = SIG_CATCH;
-		else {
+		} else {
 			action = SIG_DFL;
 
 			if (prop & SA_KILL &&  pr->ps_nice > NZERO)
@@ -887,9 +886,8 @@ ptsignal(struct proc *p, int signum, enum signal_type type)
 		atomic_setbits_int(&p->p_siglist, mask);
 	}
 
-	if (prop & SA_CONT) {
+	if (prop & SA_CONT)
 		atomic_clearbits_int(&p->p_siglist, stopsigmask);
-	}
 
 	if (prop & SA_STOP) {
 		atomic_clearbits_int(&p->p_siglist, contsigmask);
@@ -899,12 +897,10 @@ ptsignal(struct proc *p, int signum, enum signal_type type)
 	/*
 	 * XXX delay processing of SA_STOP signals unless action == SIG_DFL?
 	 */
-	if (prop & (SA_CONT | SA_STOP) && type != SPROPAGATED) {
-		TAILQ_FOREACH(q, &pr->ps_threads, p_thr_link) {
+	if (prop & (SA_CONT | SA_STOP) && type != SPROPAGATED)
+		TAILQ_FOREACH(q, &pr->ps_threads, p_thr_link)
 			if (q != p)
 				ptsignal(q, signum, SPROPAGATED);
-		}
-	}
 
 	/*
 	 * Defer further processing for signals which are held,
@@ -1138,7 +1134,6 @@ issignal(struct proc *p)
 		 * to clear it from the pending mask.
 		 */
 		switch ((long)p->p_sigacts->ps_sigact[signum]) {
-
 		case (long)SIG_DFL:
 			/*
 			 * Don't take default actions on system processes.
@@ -1182,7 +1177,6 @@ issignal(struct proc *p)
 			} else
 				goto keep;
 			/*NOTREACHED*/
-
 		case (long)SIG_IGN:
 			/*
 			 * Masking above should prevent us ever trying
@@ -1193,7 +1187,6 @@ issignal(struct proc *p)
 			    (pr->ps_flags & PS_TRACED) == 0)
 				printf("issignal\n");
 			break;		/* == ignore */
-
 		default:
 			/*
 			 * This signal has an action, let
@@ -1338,8 +1331,9 @@ postsig(int signum)
 		if (p->p_flag & P_SIGSUSPEND) {
 			atomic_clearbits_int(&p->p_flag, P_SIGSUSPEND);
 			returnmask = p->p_oldmask;
-		} else
+		} else {
 			returnmask = p->p_sigmask;
+		}
 		p->p_sigmask |= ps->ps_catchmask[signum];
 		if ((ps->ps_sigreset & mask) != 0) {
 			ps->ps_sigcatch &= ~mask;
@@ -1565,7 +1559,7 @@ coredump_write(void *cookie, enum uio_seg segflg, const void *data, size_t len)
 			    " at %lld failed: %d\n",
 			    io->io_proc->p_pid, io->io_proc->p_comm,
 			    segflg == UIO_USERSPACE ? "user" : "system",
-			    len, data, (long long) io->io_offset, error);
+			    len, data, (long long)io->io_offset, error);
 			return (error);
 		}
 
@@ -1612,9 +1606,6 @@ sys___thrsigdivert(struct proc *p, void *v, register_t *retval)
 	sigset_t *m;
 	long long to_ticks = 0;
 	int error;
-
-	if (!rthreads_enabled)
-		return (ENOTSUP);
 
 	m = NULL;
 	mask = SCARG(uap, sigmask) &~ sigcantmask;
@@ -1747,6 +1738,20 @@ userret(struct proc *p)
 
 	while ((sig = CURSIG(p)) != 0)
 		postsig(sig);
+
+	/*
+	 * If P_SIGSUSPEND is still set here, then we still need to restore
+	 * the original sigmask before returning to userspace.  Also, this
+	 * might unmask some pending signals, so we need to check a second
+	 * time for signals to post.
+	 */
+	if (p->p_flag & P_SIGSUSPEND) {
+		atomic_clearbits_int(&p->p_flag, P_SIGSUSPEND);
+		p->p_sigmask = p->p_oldmask;
+
+		while ((sig = CURSIG(p)) != 0)
+			postsig(sig);
+	}
 
 	if (p->p_flag & P_SUSPSINGLE) {
 		KERNEL_LOCK();

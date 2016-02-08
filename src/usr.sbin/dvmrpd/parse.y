@@ -1,4 +1,4 @@
-/*	$OpenBSD: parse.y,v 1.22 2010/12/31 21:22:42 guenther Exp $ */
+/*	$OpenBSD: parse.y,v 1.24 2013/04/21 04:33:41 deraadt Exp $ */
 
 /*
  * Copyright (c) 2004, 2005, 2006 Esben Norby <norby@openbsd.org>
@@ -358,14 +358,16 @@ struct keywords {
 int
 yyerror(const char *fmt, ...)
 {
-	va_list	ap;
+	va_list		 ap;
+	char		*nfmt;
 
 	file->errors++;
 	va_start(ap, fmt);
-	fprintf(stderr, "%s:%d: ", file->name, yylval.lineno);
-	vfprintf(stderr, fmt, ap);
-	fprintf(stderr, "\n");
+	if (asprintf(&nfmt, "%s:%d: %s", file->name, yylval.lineno, fmt) == -1)
+		fatalx("yyerror asprintf");
+	vlog(LOG_CRIT, nfmt, ap);
 	va_end(ap);
+	free(nfmt);
 	return (0);
 }
 
@@ -743,9 +745,8 @@ parse_config(char *filename, int opts)
 	}
 	topfile = file;
 
-	/* Generation ID must be non decreasing */
 	gettimeofday(&now, NULL);
-	conf->gen_id = now.tv_sec;
+	conf->gen_id = (u_int32_t)now.tv_sec;	/* for a while after 2038 */
 	conf->opts = opts;
 
 	yyparse();

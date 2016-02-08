@@ -1,4 +1,4 @@
-/*	$OpenBSD: s_cproj.c,v 1.5 2013/01/13 03:45:00 martynas Exp $	*/
+/*	$OpenBSD: s_cproj.c,v 1.7 2013/07/03 04:46:36 espie Exp $	*/
 /*
  * Copyright (c) 2008 Martynas Venckus <martynas@openbsd.org>
  *
@@ -34,6 +34,6 @@ cproj(double complex z)
 	return res;
 }
 
-#if	LDBL_MANT_DIG == 53
-__weak_alias(cprojl, cproj);
-#endif	/* LDBL_MANT_DIG == 53 */
+#if	LDBL_MANT_DIG == DBL_MANT_DIG
+__strong_alias(cprojl, cproj);
+#endif	/* LDBL_MANT_DIG == DBL_MANT_DIG */

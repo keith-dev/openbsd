@@ -1,4 +1,4 @@
-/*	$OpenBSD: paragraph.c,v 1.23 2013/02/17 15:42:21 lum Exp $	*/
+/*	$OpenBSD: paragraph.c,v 1.29 2013/06/15 19:58:39 lum Exp $	*/
 
 /* This file is in the public domain. */
 
@@ -7,6 +7,8 @@
  * and GNU-ified by mwm@ucbvax.	 Several bug fixes by blarson@usc-oberon.
  */
 
+#include <ctype.h>
+
 #include "def.h"
 
 static int	fillcol = 70;
@@ -14,44 +16,40 @@ static int	fillcol = 70;
 #define MAXWORD 256
 
 /*
- * Move to start of paragraph.  Go back to the beginning of the current
- * paragraph here we look for a <NL><NL> or <NL><TAB> or <NL><SPACE>
- * combination to delimit the beginning of a paragraph.
+ * Move to start of paragraph.
+ * Move backwards by line, checking from the 1st character forwards for the
+ * existence a non-space. If a non-space character is found, move to the 
+ * preceding line. Keep doing this until a line with only spaces is found or
+ * the start of buffer.
  */
 /* ARGSUSED */
 int
 gotobop(int f, int n)
 {
+	int col, nospace;
+
 	/* the other way... */
 	if (n < 0)
 		return (gotoeop(f, -n));
 
 	while (n-- > 0) {
-		/* first scan back until we are in a word */
-		while (backchar(FFRAND, 1) && inword() == 0);
+		while (lback(curwp->w_dotp) != curbp->b_headp) {
+			curwp->w_dotp = lback(curwp->w_dotp);
+			curwp->w_dotline--;
+			curwp->w_doto = 0;
+			col = 0;
 
-		/* and go to the B-O-Line */
-		curwp->w_doto = 0;
+			while (col < llength(curwp->w_dotp) &&
+			    (isspace(lgetc(curwp->w_dotp, col))))
+				col++;
 
-		/*
-		 * and scan back until we hit a <NL><SP> <NL><TAB> or
-		 * <NL><NL>
-		 */
-		while (lback(curwp->w_dotp) != curbp->b_headp)
-			if (llength(lback(curwp->w_dotp)) &&
-			    lgetc(curwp->w_dotp, 0) != ' ' &&
-			    lgetc(curwp->w_dotp, 0) != '.' &&
-			    lgetc(curwp->w_dotp, 0) != '\t') {
-				curwp->w_dotp = lback(curwp->w_dotp);
-				curwp->w_dotline--;
-			} else {
-				if (llength(lback(curwp->w_dotp)) &&
-				    lgetc(curwp->w_dotp, 0) == '.') {
-					curwp->w_dotp = lforw(curwp->w_dotp);
-					curwp->w_dotline++;	 
-				}
-				break;
-			}
+			if (col >= llength(curwp->w_dotp)) {
+				if (nospace)
+					break;
+			} else
+				nospace = 1;
+		}
+		nospace = 0;
 	}
 	/* force screen update */
 	curwp->w_rflag |= WFMOVE;
@@ -59,45 +57,39 @@ gotobop(int f, int n)
 }
 
 /*
- * Move to end of paragraph.  Go forward to the end of the current paragraph
- * here we look for a <NL><NL> or <NL><TAB> or <NL><SPACE> combination to
- * delimit the beginning of a paragraph.
+ * Move to end of paragraph.
+ * See comments for gotobop(). Same, but moving forwards.
  */
 /* ARGSUSED */
 int
 gotoeop(int f, int n)
 {
+	int col, nospace;
+
 	/* the other way... */
 	if (n < 0)
 		return (gotobop(f, -n));
 
 	/* for each one asked for */
 	while (n-- > 0) {
-		/* Find the first word on/after the current line */
-		curwp->w_doto = 0;
-		while (forwchar(FFRAND, 1) && inword() == 0);
+		while (lforw(curwp->w_dotp) != curbp->b_headp) {
+			col = 0;
+			curwp->w_doto = 0;
 
-		curwp->w_doto = 0;
-		curwp->w_dotp = lforw(curwp->w_dotp);
+			while (col < llength(curwp->w_dotp) &&
+			    (isspace(lgetc(curwp->w_dotp, col))))
+				col++;
 
-		/* and scan forword until we hit a <NL><SP> or ... */
-		while (curwp->w_dotp != curbp->b_headp) {
-			if (llength(curwp->w_dotp) &&
-			    lgetc(curwp->w_dotp, 0) != ' ' &&
-			    lgetc(curwp->w_dotp, 0) != '.' &&
-			    lgetc(curwp->w_dotp, 0) != '\t') {
-				curwp->w_dotp = lforw(curwp->w_dotp);
-				curwp->w_dotline++;
+			if (col >= llength(curwp->w_dotp)) {
+				if (nospace)
+					break;
 			} else
-				break;
-		}
-		if (curwp->w_dotp == curbp->b_headp) {
-			/* beyond end of buffer, cleanup time */
-			curwp->w_dotp = lback(curwp->w_dotp);
-			curwp->w_doto = llength(curwp->w_dotp);
-			break;
-		} else
+				nospace = 1;
+
+			curwp->w_dotp = lforw(curwp->w_dotp);
 			curwp->w_dotline++;
+		}
+		nospace = 0;
 	}
 	/* force screen update */
 	curwp->w_rflag |= WFMOVE;
@@ -266,9 +258,6 @@ killpara(int f, int n)
 		/* and delete it */
 		if ((status = killregion(FFRAND, 1)) != TRUE)
 			return (status);
-
-		/* and clean up the 2 extra lines */
-		(void)ldelete((RSIZE) 1, KFORW);
 	}
 	return (TRUE);
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: urio.c,v 1.39 2011/07/03 15:47:17 matthew Exp $	*/
+/*	$OpenBSD: urio.c,v 1.42 2013/05/17 09:14:08 mpi Exp $	*/
 /*	$NetBSD: urio.c,v 1.15 2002/10/23 09:14:02 jdolecek Exp $	*/
 
 /*
@@ -45,7 +45,6 @@
 #include <sys/conf.h>
 #include <sys/file.h>
 #include <sys/selinfo.h>
-#include <sys/proc.h>
 #include <sys/vnode.h>
 #include <sys/poll.h>
 
@@ -72,13 +71,13 @@ int	uriodebug = 0;
 
 struct urio_softc {
  	struct device		sc_dev;
-	usbd_device_handle	sc_udev;
-	usbd_interface_handle	sc_iface;
+	struct usbd_device	*sc_udev;
+	struct usbd_interface	*sc_iface;
 
 	int			sc_in_addr;
-	usbd_pipe_handle	sc_in_pipe;
+	struct usbd_pipe	*sc_in_pipe;
 	int			sc_out_addr;
-	usbd_pipe_handle	sc_out_pipe;
+	struct usbd_pipe	*sc_out_pipe;
 
 	int			sc_refcnt;
 	char			sc_dying;
@@ -131,8 +130,8 @@ urio_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct urio_softc	*sc = (struct urio_softc *)self;
 	struct usb_attach_arg	*uaa = aux;
-	usbd_device_handle	dev = uaa->device;
-	usbd_interface_handle	iface;
+	struct usbd_device	*dev = uaa->device;
+	struct usbd_interface	*iface;
 	usbd_status		err;
 	usb_endpoint_descriptor_t *ed;
 	u_int8_t		epcount;
@@ -302,7 +301,7 @@ int
 urioread(dev_t dev, struct uio *uio, int flag)
 {
 	struct urio_softc *sc;
-	usbd_xfer_handle xfer;
+	struct usbd_xfer *xfer;
 	usbd_status err;
 	void *bufp;
 	u_int32_t n, tn;
@@ -359,7 +358,7 @@ int
 uriowrite(dev_t dev, struct uio *uio, int flag)
 {
 	struct urio_softc *sc;
-	usbd_xfer_handle xfer;
+	struct usbd_xfer *xfer;
 	usbd_status err;
 	void *bufp;
 	u_int32_t n;
@@ -428,7 +427,6 @@ urioioctl(dev_t dev, u_long cmd, caddr_t addr, int flag, struct proc *p)
 	struct uio uio;
 	usb_device_request_t req;
 	usbd_status err;
-	int req_flags = 0;
 	u_int32_t req_actlen = 0;
 	void *ptr = NULL;
 	int error = 0;
@@ -493,7 +491,7 @@ urioioctl(dev_t dev, u_long cmd, caddr_t addr, int flag, struct proc *p)
 
 	sc->sc_refcnt++;
 
-	err = usbd_do_request_flags(sc->sc_udev, &req, ptr, req_flags,
+	err = usbd_do_request_flags(sc->sc_udev, &req, ptr, 0,
 		  &req_actlen, USBD_DEFAULT_TIMEOUT);
 
 	if (--sc->sc_refcnt < 0)
@@ -502,8 +500,8 @@ urioioctl(dev_t dev, u_long cmd, caddr_t addr, int flag, struct proc *p)
 	if (err) {
 		error = EIO;
 	} else {
-		if (len != 0 && uio.uio_rw == UIO_READ)
-			error = uiomove(ptr, len, &uio);
+		if (req_actlen != 0 && uio.uio_rw == UIO_READ)
+			error = uiomove(ptr, req_actlen, &uio);
 	}
 
 ret:

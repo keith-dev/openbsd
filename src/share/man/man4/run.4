@@ -1,4 +1,4 @@
-.\" $OpenBSD: run.4,v 1.36 2013/02/14 07:40:42 jmc Exp $
+.\" $OpenBSD: run.4,v 1.40 2013/07/16 16:05:49 schwarze Exp $
 .\"
 .\" Copyright (c) 2008 Damien Bergamini <damien.bergamini@free.fr>
 .\"
@@ -14,7 +14,7 @@
 .\" ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 .\" OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 .\"
-.Dd $Mdocdate: February 14 2013 $
+.Dd $Mdocdate: July 16 2013 $
 .Dt RUN 4
 .Os
 .Sh NAME
@@ -114,6 +114,7 @@ The following adapters should work:
 .It D-Link DWA-140
 .It DrayTek Vigor N61
 .It Edimax EW-7711UAn
+.It Edimax EW-7711USn
 .It Edimax EW-7711UTn
 .It Edimax EW-7717Un
 .It Edimax EW-7718Un
@@ -125,6 +126,7 @@ The following adapters should work:
 .It Hawking HWUN1
 .It Hawking HWUN2
 .It Hercules HWNU-300
+.It Keebox W150NU
 .It Linksys AE1000
 .It Linksys WUSB54GC v3
 .It Linksys WUSB600N
@@ -173,14 +175,14 @@ dhcp
 .Ed
 .Sh DIAGNOSTICS
 .Bl -diag
-.It "run%d: error %d, could not read firmware %s"
+.It "run0: error N, could not read firmware ..."
 For some reason, the driver was unable to read the microcode file from the
 filesystem.
 The file might be missing or corrupted.
-.It "run%d: could not load 8051 microcode"
+.It "run0: could not load 8051 microcode"
 An error occurred while attempting to upload the microcode to the onboard 8051
 microcontroller unit.
-.It "run%d: device timeout"
+.It "run0: device timeout"
 A frame dispatched to the hardware for transmission did not complete in time.
 The driver will reset the hardware.
 This should not happen.
@@ -205,7 +207,7 @@ driver first appeared in
 The
 .Nm
 driver was written by
-.An Damien Bergamini Aq damien@openbsd.org .
+.An Damien Bergamini Aq Mt damien@openbsd.org .
 .Sh CAVEATS
 The
 .Nm

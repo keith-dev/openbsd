@@ -1,4 +1,4 @@
-/*	$OpenBSD: sysctl.c,v 1.184 2012/09/20 20:11:58 yuo Exp $	*/
+/*	$OpenBSD: sysctl.c,v 1.194 2013/07/18 05:02:57 guenther Exp $	*/
 /*	$NetBSD: sysctl.c,v 1.9 1995/09/30 07:12:50 thorpej Exp $	*/
 
 /*
@@ -33,7 +33,6 @@
 #include <sys/param.h>
 #include <sys/gmon.h>
 #include <sys/mount.h>
-#include <sys/stat.h>
 #include <sys/sem.h>
 #include <sys/shm.h>
 #include <sys/sysctl.h>
@@ -44,7 +43,6 @@
 #include <sys/tty.h>
 #include <sys/namei.h>
 #include <sys/sensors.h>
-#include <machine/cpu.h>
 #include <net/route.h>
 #include <net/if.h>
 
@@ -88,10 +86,10 @@
 
 #include <ufs/ufs/quota.h>
 #include <ufs/ufs/inode.h>
-#include <ufs/ffs/fs.h>
 #include <ufs/ffs/ffs_extern.h>
 
-#include <nfs/rpcv2.h>
+#include <miscfs/fuse/fusefs.h>
+
 #include <nfs/nfsproto.h>
 #include <nfs/nfs.h>
 
@@ -105,6 +103,8 @@
 #include <string.h>
 #include <ctype.h>
 
+#include <machine/cpu.h>
+
 #ifdef CPU_BIOS
 #include <machine/biosvar.h>
 #endif
@@ -115,7 +115,6 @@ struct ctlname vmname[] = CTL_VM_NAMES;
 struct ctlname fsname[] = CTL_FS_NAMES;
 struct ctlname netname[] = CTL_NET_NAMES;
 struct ctlname hwname[] = CTL_HW_NAMES;
-struct ctlname username[] = CTL_USER_NAMES;
 struct ctlname debugname[CTL_DEBUG_MAXID];
 struct ctlname kernmallocname[] = CTL_KERN_MALLOC_NAMES;
 struct ctlname forkstatname[] = CTL_KERN_FORKSTAT_NAMES;
@@ -154,7 +153,7 @@ struct list secondlevel[] = {
 #else
 	{ 0, 0 },			/* CTL_MACHDEP */
 #endif
-	{ username, USER_MAXID },	/* CTL_USER_NAMES */
+	{ 0, 0 },			/* was CTL_USER */
 	{ ddbname, DBCTL_MAXID },	/* CTL_DDB_NAMES */
 	{ 0, 0 },			/* CTL_VFS */
 };
@@ -680,7 +679,6 @@ parse(char *string, int flags)
 		}
 		return;
 
-	case CTL_USER:
 	case CTL_DDB:
 		break;
 
@@ -804,7 +802,7 @@ parse(char *string, int flags)
 			boottime = btp->tv_sec;
 			(void)printf("%s%s%s", string, equ, ctime(&boottime));
 		} else
-			(void)printf("%ld\n", btp->tv_sec);
+			(void)printf("%lld\n", (long long)btp->tv_sec);
 		return;
 	}
 	if (special & BLKDEV) {
@@ -869,33 +867,27 @@ parse(char *string, int flags)
 
 		if (!nflag)
 			(void)printf("%s%s", string, equ);
-		(void)printf(
-		"%llu %llu %llu %llu %llu %llu %llu %llu %llu %llu %llu %llu %llu %llu %llu %llu",
-		    (unsigned long long)rndstats->rnd_total,
-		    (unsigned long long)rndstats->rnd_used,
-		    (unsigned long long)rndstats->rnd_reads,
-		    (unsigned long long)rndstats->arc4_reads,
-		    (unsigned long long)rndstats->arc4_nstirs,
-		    (unsigned long long)rndstats->arc4_stirs,
-		    (unsigned long long)rndstats->rnd_pad[0],
-		    (unsigned long long)rndstats->rnd_pad[1],
-		    (unsigned long long)rndstats->rnd_pad[2],
-		    (unsigned long long)rndstats->rnd_pad[3],
-		    (unsigned long long)rndstats->rnd_pad[4],
-		    (unsigned long long)rndstats->rnd_waits,
-		    (unsigned long long)rndstats->rnd_enqs,
-		    (unsigned long long)rndstats->rnd_deqs,
-		    (unsigned long long)rndstats->rnd_drops,
-		    (unsigned long long)rndstats->rnd_drople);
-		for (i = 0; i < sizeof(rndstats->rnd_ed)/sizeof(rndstats->rnd_ed[0]);
+		printf("tot: %llu used: %llu read: %llu stirs: %llu"
+		    " enqs: %llu deqs: %llu drops: %llu ledrops: %llu",
+		    rndstats->rnd_total, rndstats->rnd_used,
+		    rndstats->arc4_reads, rndstats->arc4_nstirs,
+		    rndstats->rnd_enqs, rndstats->rnd_deqs,
+		    rndstats->rnd_drops, rndstats->rnd_drople);
+		printf(" ed:");
+		for (i = 0;
+		    i < sizeof(rndstats->rnd_ed)/sizeof(rndstats->rnd_ed[0]);
 		    i++)
-			(void)printf(" %llu", (unsigned long long)rndstats->rnd_ed[i]);
-		for (i = 0; i < sizeof(rndstats->rnd_sc)/sizeof(rndstats->rnd_sc[0]);
+			printf(" %llu", (unsigned long long)rndstats->rnd_ed[i]);
+		printf(" sc:");
+		for (i = 0;
+		    i < sizeof(rndstats->rnd_sc)/sizeof(rndstats->rnd_sc[0]);
 		    i++)
-			(void)printf(" %llu", (unsigned long long)rndstats->rnd_sc[i]);
-		for (i = 0; i < sizeof(rndstats->rnd_sb)/sizeof(rndstats->rnd_sb[0]);
+			printf(" %llu", (unsigned long long)rndstats->rnd_sc[i]);
+		printf(" sb:");
+		for (i = 0;
+		    i < sizeof(rndstats->rnd_sb)/sizeof(rndstats->rnd_sb[0]);
 		    i++)
-			(void)printf(" %llu", (unsigned long long)rndstats->rnd_sb[i]);
+			printf(" %llu", (unsigned long long)rndstats->rnd_sb[i]);
 		printf("\n");
 		return;
 	}
@@ -1113,6 +1105,7 @@ debuginit(void)
 struct ctlname vfsgennames[] = CTL_VFSGENCTL_NAMES;
 struct ctlname ffsname[] = FFS_NAMES;
 struct ctlname nfsname[] = FS_NFS_NAMES;
+struct ctlname fusefsname[] = FUSEFS_NAMES;
 struct list *vfsvars;
 int *vfs_typenums;
 
@@ -1134,7 +1127,11 @@ vfsinit(void)
 	buflen = 4;
 	if (sysctl(mib, 3, &maxtypenum, &buflen, (void *)0, (size_t)0) < 0)
 		return;
-	maxtypenum++;	/* + generic */
+	/*
+         * We need to do 0..maxtypenum so add one, and then we offset them
+	 * all by (another) one by inserting VFS_GENERIC entries at zero
+	 */
+	maxtypenum += 2;
 	if ((vfs_typenums = calloc(maxtypenum, sizeof(int))) == NULL)
 		return;
 	if ((vfsvars = calloc(maxtypenum, sizeof(*vfsvars))) == NULL) {
@@ -1166,6 +1163,10 @@ vfsinit(void)
 		if (!strcmp(vfc.vfc_name, MOUNT_NFS)) {
 			vfsvars[cnt].list = nfsname;
 			vfsvars[cnt].size = NFS_MAXID;
+		}
+		if (!strcmp(vfc.vfc_name, MOUNT_FUSEFS)) {
+			vfsvars[cnt].list = fusefsname;
+			vfsvars[cnt].size = FUSEFS_MAXID;
 		}
 		vfs_typenums[cnt] = vfc.vfc_typenum;
 		strlcat(&names[loc], vfc.vfc_name, sizeof names - loc);
@@ -2185,6 +2186,7 @@ sysctl_mpls(char *string, char **bufpp, int mib[], int flags, int *typep)
 int
 sysctl_pipex(char *string, char **bufpp, int mib[], int flags, int *typep)
 {
+	struct list *lp;
 	int indx;
 
 	if (*bufpp == NULL) {
@@ -2195,6 +2197,20 @@ sysctl_pipex(char *string, char **bufpp, int mib[], int flags, int *typep)
 		return (-1);
 	mib[2] = indx;
 	*typep = pipexlist.list[indx].ctl_type;
+	if (*typep == CTLTYPE_NODE) {
+		int tindx;
+
+		if (*bufpp == NULL) {
+			listall(string, &ifqlist);
+			return(-1);
+		}
+		lp = &ifqlist;
+		if ((tindx = findname(string, "fourth", bufpp, lp)) == -1)
+			return (-1);
+		mib[3] = tindx;
+		*typep = lp->list[tindx].ctl_type;
+		return(4);
+	}
 	return (3);
 }
 

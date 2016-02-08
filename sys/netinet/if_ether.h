@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ether.h,v 1.48 2012/10/18 00:36:22 deraadt Exp $	*/
+/*	$OpenBSD: if_ether.h,v 1.50 2013/07/04 08:22:19 mpi Exp $	*/
 /*	$NetBSD: if_ether.h,v 1.22 1996/05/11 13:00:00 mycroft Exp $	*/
 
 /*
@@ -244,7 +244,7 @@ struct ether_multistep {
 	/* struct ether_multi *enm; */					\
 do {									\
 	for ((enm) = LIST_FIRST(&(ac)->ac_multiaddrs);			\
-	    (enm) != LIST_END(&(ac)->ac_multiaddrs) &&			\
+	    (enm) != NULL &&			\
 	    (bcmp((enm)->enm_addrlo, (addrlo), ETHER_ADDR_LEN) != 0 ||	\
 	     bcmp((enm)->enm_addrhi, (addrhi), ETHER_ADDR_LEN) != 0);	\
 		(enm) = LIST_NEXT((enm), enm_list));			\
@@ -281,6 +281,7 @@ extern struct ifnet *revarp_ifp;
 #endif /* NFSCLIENT */
 
 void arprequest(struct ifnet *, u_int32_t *, u_int32_t *, u_int8_t *);
+int arpproxy(struct in_addr, u_int);
 void revarpinput(struct mbuf *);
 void in_revarpinput(struct mbuf *);
 void revarprequest(struct ifnet *);

@@ -1,7 +1,7 @@
-/*	$OpenBSD: table_sqlite.c,v 1.2 2013/01/31 18:34:43 eric Exp $	*/
+/*	$OpenBSD: table_sqlite.c,v 1.6 2013/07/22 13:14:49 eric Exp $	*/
 
 /*
- * Copyright (c) 2012 Gilles Chehade <gilles@poolp.org>
+ * Copyright (c) 2013 Eric Faurot <eric@openbsd.org>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -17,416 +17,510 @@
  */
 
 #include <sys/types.h>
-#include <sys/queue.h>
-#include <sys/tree.h>
-#include <sys/param.h>
-#include <sys/socket.h>
 
 #include <ctype.h>
-#include <err.h>
-#include <event.h>
 #include <fcntl.h>
-#include <imsg.h>
 #include <sqlite3.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
+#include <unistd.h>
 
-#include "smtpd.h"
+#include "smtpd-defines.h"
+#include "smtpd-api.h"
 #include "log.h"
 
-/* sqlite(3) backend */
-static int table_sqlite_config(struct table *, const char *);
-static int table_sqlite_update(struct table *);
-static void *table_sqlite_open(struct table *);
-static int table_sqlite_lookup(void *, const char *, enum table_service,
-    void **);
-static void  table_sqlite_close(void *);
+enum {
+	SQL_ALIAS = 0,
+	SQL_DOMAIN,
+	SQL_CREDENTIALS,
+	SQL_NETADDR,
+	SQL_USERINFO,
+	SQL_SOURCE,
+	SQL_MAILADDR,
+	SQL_ADDRNAME,
 
-struct table_backend table_backend_sqlite = {
-	K_ALIAS|K_CREDENTIALS|K_DOMAIN|K_NETADDR|K_USERINFO,
-	table_sqlite_config,
-	table_sqlite_open,
-	table_sqlite_update,
-	table_sqlite_close,
-	table_sqlite_lookup,
+	SQL_MAX
 };
 
-struct table_sqlite_handle {
-	sqlite3	        *ppDb;	
-	struct table	*table;
-};
+static int table_sqlite_update(void);
+static int table_sqlite_lookup(int, const char *, char *, size_t);
+static int table_sqlite_check(int, const char *);
+static int table_sqlite_fetch(int, char *, size_t);
 
-static int table_sqlite_alias(struct table_sqlite_handle *, const char *, void **);
-static int table_sqlite_domain(struct table_sqlite_handle *, const char *, void **);
-static int table_sqlite_userinfo(struct table_sqlite_handle *, const char *, void **);
-static int table_sqlite_credentials(struct table_sqlite_handle *, const char *, void **);
-static int table_sqlite_netaddr(struct table_sqlite_handle *, const char *, void **);
+static sqlite3_stmt *table_sqlite_query(const char *, int);
 
-static int
-table_sqlite_config(struct table *table, const char *config)
+#define	DEFAULT_EXPIRE	60
+#define	DEFAULT_REFRESH	1000
+
+static char		*config;
+static sqlite3		*db;
+static sqlite3_stmt	*statements[SQL_MAX];
+static sqlite3_stmt	*stmt_fetch_source;
+static struct dict	 sources;
+static void		*source_iter;
+static size_t		 source_refresh = 1000;
+static size_t		 source_ncall;
+static int		 source_expire = 60;
+static time_t		 source_update;
+
+int
+main(int argc, char **argv)
 {
-	void	*cfg;
+	int	ch;
 
-	/* no config ? broken */
-	if (config == NULL)
-		return 0;
+	log_init(1);
+	log_verbose(~0);
 
-	cfg = table_config_create();
-	if (! table_config_parse(cfg, config, T_HASH))
-		goto err;
+	while ((ch = getopt(argc, argv, "")) != -1) {
+		switch (ch) {
+		default:
+			log_warnx("warn: table-sqlite: bad option");
+			return (1);
+			/* NOTREACHED */
+		}
+	}
+	argc -= optind;
+	argv += optind;
 
-	/* sanity checks */
-	if (table_config_get(cfg, "dbpath") == NULL) {
-		log_warnx("table_sqlite: missing 'dbpath' configuration");
-		return 0;
+	if (argc != 1) {
+		log_warnx("warn: table-sqlite: bogus argument(s)");
+		return (1);
 	}
 
-	table_set_configuration(table, cfg);
-	return 1;
+	config = argv[0];
 
-err:
-	table_config_destroy(cfg);
-	return 0;
-}
+	dict_init(&sources);
 
-static int
-table_sqlite_update(struct table *table)
-{
-	log_info("info: Table \"%s\" successfully updated", table->t_name);
-	return 1;
-}
-
-static void *
-table_sqlite_open(struct table *table)
-{
-	struct table_sqlite_handle	*tsh;
-	void		*cfg;
-	const char	*dbpath;
-
-	tsh = xcalloc(1, sizeof *tsh, "table_sqlite_open");
-	tsh->table = table;
-
-	cfg = table_get_configuration(table);
-	dbpath = table_get(cfg, "dbpath");
-
-	if (sqlite3_open(dbpath, &tsh->ppDb) != SQLITE_OK) {
-		log_warnx("table_sqlite: open: %s", sqlite3_errmsg(tsh->ppDb));
-		free(tsh);
-		return NULL;
+	if (table_sqlite_update() == 0) {
+		log_warnx("warn: table-sqlite: error parsing config file");
+		return (1);
 	}
 
-	return tsh;
-}
+	table_api_on_update(table_sqlite_update);
+	table_api_on_check(table_sqlite_check);
+	table_api_on_lookup(table_sqlite_lookup);
+	table_api_on_fetch(table_sqlite_fetch);
+	table_api_dispatch();
 
-static void
-table_sqlite_close(void *hdl)
-{
-	return;
+	return (0);
 }
 
 static int
-table_sqlite_lookup(void *hdl, const char *key, enum table_service service,
-    void **retp)
+table_sqlite_getconfstr(const char *key, const char *value, char **var)
 {
-	struct table_sqlite_handle	*tsh = hdl;
+	if (*var) {
+		log_warnx("warn: table-sqlite: duplicate %s %s", key, value);
+		free(*var);
+	}
+	*var = strdup(value);
+	if (*var == NULL) {
+		log_warn("warn: table-sqlite: strdup");
+		return (-1);
+	}
+	return (0);
+}
 
-	switch (service) {
+static sqlite3_stmt *
+table_sqlite_prepare_stmt(sqlite3 *_db, const char *query, int ncols)
+{
+	sqlite3_stmt	*stmt;
+
+	if (sqlite3_prepare_v2(_db, query, -1, &stmt, 0) != SQLITE_OK) {
+		log_warnx("warn: table-sqlite: sqlite3_prepare_v2: %s",
+		    sqlite3_errmsg(_db));
+		goto end;
+	}
+	if (sqlite3_column_count(stmt) != ncols) {
+		log_warnx("warn: table-sqlite: columns: invalid resultset");
+		goto end;
+	}
+
+	return (stmt);
+    end:
+	sqlite3_finalize(stmt);
+	return (NULL);
+}
+
+static int
+table_sqlite_update(void)
+{
+	static const struct {
+		const char	*name;
+		int		 cols;
+	} qspec[SQL_MAX] = {
+		{ "query_alias",	1 },
+		{ "query_domain",	1 },
+		{ "query_credentials",	2 },
+		{ "query_netaddr",	1 },
+		{ "query_userinfo",	4 },
+		{ "query_source",	1 },
+		{ "query_mailaddr",	1 },
+		{ "query_addrname",	1 },
+	};
+	sqlite3		*_db;
+	sqlite3_stmt	*_statements[SQL_MAX];
+	sqlite3_stmt	*_stmt_fetch_source;
+	char		*_query_fetch_source;
+	char		*queries[SQL_MAX];
+	size_t		 flen;
+	size_t		 _source_refresh;
+	int		 _source_expire;
+	FILE		*fp;
+	char		*key, *value, *buf, *lbuf, *dbpath;
+	const char	*e;
+	int		 i, ret;
+	long long	 ll;
+
+	dbpath = NULL;
+	_db = NULL;
+	bzero(queries, sizeof(queries));
+	bzero(_statements, sizeof(_statements));
+	_query_fetch_source = NULL;
+	_stmt_fetch_source = NULL;
+
+	_source_refresh = DEFAULT_REFRESH;
+	_source_expire = DEFAULT_EXPIRE;
+
+	ret = 0;
+
+	/* Parse configuration */
+
+	fp = fopen(config, "r");
+	if (fp == NULL)
+		return (0);
+
+	lbuf = NULL;
+	while ((buf = fgetln(fp, &flen))) {
+		if (buf[flen - 1] == '\n')
+			buf[flen - 1] = '\0';
+		else {
+			lbuf = malloc(flen + 1);
+			if (lbuf == NULL) {
+				log_warn("warn: table-sqlite: malloc");
+				return (0);
+			}
+			memcpy(lbuf, buf, flen);
+			lbuf[flen] = '\0';
+			buf = lbuf;
+		}
+
+		key = buf;
+		while (isspace((int)*key))
+			++key;
+		if (*key == '\0' || *key == '#')
+			continue;
+		value = key;
+		strsep(&value, " \t:");
+		if (value) {
+			while (*value) {
+				if (!isspace(*value) &&
+				    !(*value == ':' && isspace(*(value + 1))))
+					break;
+				++value;
+			}
+			if (*value == '\0')
+				value = NULL;
+		}
+
+		if (value == NULL) {
+			log_warnx("warn: table-sqlite: missing value for key %s", key);
+			continue;
+		}
+
+		if (!strcmp("dbpath", key)) {
+			if (table_sqlite_getconfstr(key, value, &dbpath) == -1)
+				goto end;
+			continue;
+		}
+		if (!strcmp("fetch_source", key)) {
+			if (table_sqlite_getconfstr(key, value, &_query_fetch_source) == -1)
+				goto end;
+			continue;
+		}
+		if (!strcmp("fetch_source_expire", key)) {
+			e = NULL;
+			ll = strtonum(value, 0, INT_MAX, &e);
+			if (e) {
+				log_warnx("warn: table-sqlite: bad value for %s: %s", key, e);
+				goto end;
+			}
+			_source_expire = ll;
+			continue;
+		}
+		if (!strcmp("fetch_source_refresh", key)) {
+			e = NULL;
+			ll = strtonum(value, 0, INT_MAX, &e);
+			if (e) {
+				log_warnx("warn: table-sqlite: bad value for %s: %s", key, e);
+				goto end;
+			}
+			_source_refresh = ll;
+			continue;
+		}
+
+		for(i = 0; i < SQL_MAX; i++)
+			if (!strcmp(qspec[i].name, key))
+				break;
+		if (i == SQL_MAX) {
+			log_warnx("warn: table-sqlite: bogus key %s", key);
+			continue;
+		}
+
+		if (queries[i]) {
+			log_warnx("warn: table-sqlite: duplicate key %s", key);
+			continue;
+		}
+
+		queries[i] = strdup(value);
+		if (queries[i] == NULL) {
+			log_warnx("warn: table-sqlite: strdup");
+			goto end;
+		}
+	}
+
+	/* Setup db */
+
+	log_debug("debug: table-sqlite: opening %s", dbpath);
+
+	if (sqlite3_open(dbpath, &_db) != SQLITE_OK) {
+		log_warnx("warn: table-sqlite: open: %s",
+		    sqlite3_errmsg(_db));
+		goto end;
+	}
+
+	for (i = 0; i < SQL_MAX; i++) {
+		if (queries[i] == NULL)
+			continue;
+		if ((_statements[i] = table_sqlite_prepare_stmt(_db, queries[i], qspec[i].cols)) == NULL)
+			goto end;
+	}
+
+	if (_query_fetch_source &&
+	    (_stmt_fetch_source = table_sqlite_prepare_stmt(_db, _query_fetch_source, 1)) == NULL)
+		goto end;
+
+	/* Replace previous setup */
+
+	for (i = 0; i < SQL_MAX; i++) {
+		if (statements[i])
+			sqlite3_finalize(statements[i]);
+		statements[i] = _statements[i];
+		_statements[i] = NULL;
+	}
+	if (stmt_fetch_source)
+		sqlite3_finalize(stmt_fetch_source);
+	stmt_fetch_source = _stmt_fetch_source;
+	_stmt_fetch_source = NULL;
+
+	if (db)
+		sqlite3_close(_db);
+	db = _db;
+	_db = NULL;
+
+	source_update = 0; /* force update */
+	source_expire = _source_expire;
+	source_refresh = _source_refresh;
+
+	log_debug("debug: table-sqlite: config successfully updated");
+	ret = 1;
+
+    end:
+
+	/* Cleanup */
+	for (i = 0; i < SQL_MAX; i++) {
+		if (_statements[i])
+			sqlite3_finalize(_statements[i]);
+		free(queries[i]);
+	}
+	if (_db)
+		sqlite3_close(_db);
+
+	free(dbpath);
+	free(_query_fetch_source);
+
+	free(lbuf);
+	fclose(fp);
+	return (ret);
+}
+
+static sqlite3_stmt *
+table_sqlite_query(const char *key, int service)
+{
+	int		 i;
+	sqlite3_stmt	*stmt;
+
+	stmt = NULL;
+	for(i = 0; i < SQL_MAX; i++)
+		if (service == 1 << i) {
+			stmt = statements[i];
+			break;
+		}
+
+	if (stmt == NULL)
+		return (NULL);
+
+	if (sqlite3_bind_text(stmt, 1, key, strlen(key), NULL) != SQLITE_OK) {
+		log_warnx("warn: table-sqlite: sqlite3_bind_text: %s",
+		    sqlite3_errmsg(db));
+		return (NULL);
+	}
+
+	return (stmt);
+}
+
+static int
+table_sqlite_check(int service, const char *key)
+{
+	sqlite3_stmt	*stmt;
+	int		 r;
+
+	stmt = table_sqlite_query(key, service);
+	if (stmt == NULL)
+		return (-1);
+
+	r = sqlite3_step(stmt);
+	sqlite3_reset(stmt);
+
+	if (r == SQLITE_ROW)
+		return (1);
+
+	if (r == SQLITE_DONE)
+		return (0);
+
+	return (-1);
+}
+
+static int
+table_sqlite_lookup(int service, const char *key, char *dst, size_t sz)
+{
+	sqlite3_stmt	*stmt;
+	const char	*value;
+	int		 r, s;
+
+	stmt = table_sqlite_query(key, service);
+	if (stmt == NULL)
+		return (-1);
+
+	s = sqlite3_step(stmt);
+	if (s == SQLITE_DONE) {
+		sqlite3_reset(stmt);
+		return (0);
+	}
+
+	if (s != SQLITE_ROW) {
+		log_warnx("warn: table-sqlite: sqlite3_step: %s",
+		    sqlite3_errmsg(db));
+		sqlite3_reset(stmt);
+		return (-1);
+	}
+
+	r = 1;
+
+	switch(service) {
 	case K_ALIAS:
-		return table_sqlite_alias(tsh, key, retp);
-	case K_DOMAIN:
-		return table_sqlite_domain(tsh, key, retp);
-	case K_USERINFO:
-		return table_sqlite_userinfo(tsh, key, retp);
+		do {
+			value = sqlite3_column_text(stmt, 0);
+			if (dst[0] && strlcat(dst, ", ", sz) >= sz) {
+				log_warnx("warn: table-sqlite: result too large");
+				r = -1;
+				break;
+			}
+			if (strlcat(dst, value, sz) >= sz) {
+				log_warnx("warn: table-sqlite: result too large");
+				r = -1;
+				break;
+			}
+			s = sqlite3_step(stmt);
+		} while (s == SQLITE_ROW);
+
+		if (s !=  SQLITE_ROW && s != SQLITE_DONE) {
+			log_warnx("warn: table-sqlite: sqlite3_step: %s",
+			    sqlite3_errmsg(db));
+			r = -1;
+		}
+		break;
 	case K_CREDENTIALS:
-		return table_sqlite_credentials(tsh, key, retp);
+		if (snprintf(dst, sz, "%s:%s",
+		    sqlite3_column_text(stmt, 0),
+		    sqlite3_column_text(stmt, 1)) > (ssize_t)sz) {
+			log_warnx("warn: table-sqlite: result too large");
+			r = -1;
+		}
+		break;
+	case K_USERINFO:
+		if (snprintf(dst, sz, "%s:%i:%i:%s",
+		    sqlite3_column_text(stmt, 0),
+		    sqlite3_column_int(stmt, 1),
+		    sqlite3_column_int(stmt, 2),
+		    sqlite3_column_text(stmt, 3)) > (ssize_t)sz) {
+			log_warnx("warn: table-sqlite: result too large");
+			r = -1;
+		}
+		break;
+	case K_DOMAIN:
 	case K_NETADDR:
-		return table_sqlite_netaddr(tsh, key, retp);
+	case K_SOURCE:
+	case K_MAILADDR:
+	case K_ADDRNAME:
+		if (strlcpy(dst, sqlite3_column_text(stmt, 0), sz) >= sz) {
+			log_warnx("warn: table-sqlite: result too large");
+			r = -1;
+		}
+		break;
 	default:
-		log_warnx("table_sqlite: lookup: unsupported lookup service");
-		return -1;
+		log_warnx("warn: table-sqlite: unknown service %i", service);
+		r = -1;
 	}
 
-	return 0;
+	return (r);
 }
 
 static int
-table_sqlite_alias(struct table_sqlite_handle *tsh, const char *key, void **retp)
-
+table_sqlite_fetch(int service, char *dst, size_t sz)
 {
-	struct table	       *cfg = table_get_configuration(tsh->table);
-	const char	       *query = table_get(cfg, "query_alias");
-	sqlite3_stmt	       *stmt;
-	struct expand	       *xp = NULL;
-	struct expandnode	xn;
-	int			nrows;
-	
-	if (query == NULL) {
-		log_warnx("table_sqlite: lookup: no query configured for aliases");
-		return -1;
+	const char	*k;
+	int		 s;
+
+	if (service != K_SOURCE)
+		return (-1);
+
+	if (stmt_fetch_source == NULL)
+		return (-1);
+
+	if (source_ncall < source_refresh &&
+	    time(NULL) - source_update < source_expire)
+	    goto fetch;
+
+	source_iter = NULL;
+	while(dict_poproot(&sources, NULL, NULL))
+		;
+
+	while ((s = sqlite3_step(stmt_fetch_source)) == SQLITE_ROW)
+		dict_set(&sources, sqlite3_column_text(stmt_fetch_source, 0), NULL);
+
+	if (s != SQLITE_DONE)
+		log_warnx("warn: table-sqlite: sqlite3_step: %s",
+		    sqlite3_errmsg(db));
+
+	sqlite3_reset(stmt_fetch_source);
+
+	source_update = time(NULL);
+	source_ncall = 0;
+
+    fetch:
+
+	source_ncall += 1;
+
+        if (! dict_iter(&sources, &source_iter, &k, (void **)NULL)) {
+		source_iter = NULL;
+		if (! dict_iter(&sources, &source_iter, &k, (void **)NULL))
+			return (0);
 	}
 
-	if (sqlite3_prepare_v2(tsh->ppDb, query, -1, &stmt, 0) != SQLITE_OK) {
-		log_warnx("table_sqlite: prepare: %s", sqlite3_errmsg(tsh->ppDb));
-		return -1;
-	}
+	if (strlcpy(dst, k, sz) >= sz)
+		return (-1);
 
-	if (sqlite3_column_count(stmt) != 1) {
-		log_warnx("table_sqlite: columns: invalid resultset");
-		sqlite3_finalize(stmt);
-		return -1;
-	}
-
-	if (retp)
-		xp = xcalloc(1, sizeof *xp, "table_sqlite_alias");
-
-	nrows = 0;
-
-	sqlite3_bind_text(stmt, 1, key, strlen(key), NULL);
-	while (sqlite3_step(stmt) == SQLITE_ROW) {
-		if (retp == NULL) {
-			sqlite3_finalize(stmt);
-			return 1;
-		}
-		if (! text_to_expandnode(&xn, sqlite3_column_text(stmt, 0)))
-			goto error;
-		expand_insert(xp, &xn);
-		nrows++;
-	}
-
-	sqlite3_finalize(stmt);
-	if (retp)
-		*retp = xp;
-	return nrows ? 1 : 0;
-
-error:
-	if (retp)
-		*retp = NULL;
-	if (xp)
-		expand_free(xp);
-	return -1;
-}
-
-static int
-table_sqlite_domain(struct table_sqlite_handle *tsh, const char *key, void **retp)
-{
-	struct table	       *cfg = table_get_configuration(tsh->table);
-	const char	       *query = table_get(cfg, "query_domain");
-	sqlite3_stmt	       *stmt;
-	struct destination     *domain = NULL;
-	
-	if (query == NULL) {
-		log_warnx("table_sqlite: lookup: no query configured for domain");
-		return -1;
-	}
-
-	if (sqlite3_prepare_v2(tsh->ppDb, query, -1, &stmt, 0) != SQLITE_OK) {
-		log_warnx("table_sqlite: prepare: %s", sqlite3_errmsg(tsh->ppDb));
-		return -1;
-	}
-
-	if (sqlite3_column_count(stmt) != 1) {
-		log_warnx("table_sqlite: columns: invalid resultset");
-		sqlite3_finalize(stmt);
-		return -1;
-	}
-
-	sqlite3_bind_text(stmt, 1, key, strlen(key), NULL);
-
-	switch (sqlite3_step(stmt)) {
-	case SQLITE_ROW:
-		if (retp) {
-			domain = xcalloc(1, sizeof *domain, "table_sqlite_domain");
-			strlcpy(domain->name, sqlite3_column_text(stmt, 0), sizeof domain->name);
-			*retp = domain;
-		}
-		sqlite3_finalize(stmt);
-		return 1;
-
-	case SQLITE_DONE:
-		sqlite3_finalize(stmt);
-		return 0;
-
-	default:
-		sqlite3_finalize(stmt);
-	}
-
-	free(domain);
-	if (retp)
-		*retp = NULL;
-	return -1;
-}
-
-static int
-table_sqlite_userinfo(struct table_sqlite_handle *tsh, const char *key, void **retp)
-{
-	struct table	       *cfg = table_get_configuration(tsh->table);
-	const char	       *query = table_get(cfg, "query_userinfo");
-	sqlite3_stmt	       *stmt;
-	struct userinfo	       *userinfo = NULL;
-	size_t			s;
-	
-	if (query == NULL) {
-		log_warnx("table_sqlite: lookup: no query configured for user");
-		return -1;
-	}
-
-	if (sqlite3_prepare_v2(tsh->ppDb, query, -1, &stmt, 0) != SQLITE_OK) {
-		log_warnx("table_sqlite: prepare: %s", sqlite3_errmsg(tsh->ppDb));
-		return -1;
-	}
-
-	if (sqlite3_column_count(stmt) != 4) {
-		log_warnx("table_sqlite: columns: invalid resultset");
-		sqlite3_finalize(stmt);
-		return -1;
-	}
-
-	sqlite3_bind_text(stmt, 1, key, strlen(key), NULL);
-
-	switch (sqlite3_step(stmt)) {
-	case SQLITE_ROW:
-		if (retp) {
-			userinfo = xcalloc(1, sizeof *userinfo, "table_sqlite_userinfo");
-			s = strlcpy(userinfo->username, sqlite3_column_text(stmt, 0),
-			    sizeof(userinfo->username));
-			if (s >= sizeof(userinfo->username))
-				goto error;
-			userinfo->uid = sqlite3_column_int(stmt, 1);
-			userinfo->gid = sqlite3_column_int(stmt, 2);
-			s = strlcpy(userinfo->directory, sqlite3_column_text(stmt, 3),
-			    sizeof(userinfo->directory));
-			if (s >= sizeof(userinfo->directory))
-				goto error;
-			*retp = userinfo;
-		}
-		sqlite3_finalize(stmt);
-		return 1;
-
-	case SQLITE_DONE:
-		sqlite3_finalize(stmt);
-		return 0;
-
-	default:
-		goto error;
-	}
-
-error:
-	sqlite3_finalize(stmt);
-	free(userinfo);
-	if (retp)
-		*retp = NULL;
-	return -1;
-}
-
-static int
-table_sqlite_credentials(struct table_sqlite_handle *tsh, const char *key, void **retp)
-{
-	struct table	       *cfg = table_get_configuration(tsh->table);
-	const char	       *query = table_get(cfg, "query_credentials");
-	sqlite3_stmt	       *stmt;
-	struct credentials     *creds = NULL;
-	size_t			s;
-	
-	if (query == NULL) {
-		log_warnx("table_sqlite: lookup: no query configured for credentials");
-		return -1;
-	}
-
-	if (sqlite3_prepare_v2(tsh->ppDb, query, -1, &stmt, 0) != SQLITE_OK) {
-		log_warnx("table_sqlite: prepare: %s", sqlite3_errmsg(tsh->ppDb));
-		return -1;
-	}
-
-	if (sqlite3_column_count(stmt) != 2) {
-		log_warnx("table_sqlite: columns: invalid resultset");
-		sqlite3_finalize(stmt);
-		return -1;
-	}
-
-	sqlite3_bind_text(stmt, 1, key, strlen(key), NULL);
-	switch (sqlite3_step(stmt)) {
-	case SQLITE_ROW:
-		if (retp) {
-			creds = xcalloc(1, sizeof *creds, "table_sqlite_credentials");
-			s = strlcpy(creds->username, sqlite3_column_text(stmt, 0),
-			    sizeof(creds->username));
-			if (s >= sizeof(creds->username))
-				goto error;
-			s = strlcpy(creds->password, sqlite3_column_text(stmt, 1),
-			    sizeof(creds->password));
-			if (s >= sizeof(creds->password))
-				goto error;
-			*retp = creds;
-		}
-		sqlite3_finalize(stmt);
-		return 1;
-
-	case SQLITE_DONE:
-		sqlite3_finalize(stmt);
-		return 0;
-
-	default:
-		goto error;
-	}
-
-error:
-	sqlite3_finalize(stmt);
-	free(creds);
-	if (retp)
-		*retp = NULL;
-	return -1;
-}
-
-
-static int
-table_sqlite_netaddr(struct table_sqlite_handle *tsh, const char *key, void **retp)
-{
-	struct table	       *cfg = table_get_configuration(tsh->table);
-	const char	       *query = table_get(cfg, "query_netaddr");
-	sqlite3_stmt	       *stmt;
-	struct netaddr	       *netaddr = NULL;
-	
-	if (query == NULL) {
-		log_warnx("table_sqlite: lookup: no query configured for netaddr");
-		return -1;
-	}
-
-	if (sqlite3_prepare_v2(tsh->ppDb, query, -1, &stmt, 0) != SQLITE_OK) {
-		log_warnx("table_sqlite: prepare: %s", sqlite3_errmsg(tsh->ppDb));
-		return -1;
-	}
-
-	if (sqlite3_column_count(stmt) != 1) {
-		log_warnx("table_sqlite: columns: invalid resultset");
-		sqlite3_finalize(stmt);
-		return -1;
-	}
-
-	sqlite3_bind_text(stmt, 1, key, strlen(key), NULL);
-	switch (sqlite3_step(stmt)) {
-	case SQLITE_ROW:
-		if (retp) {
-			netaddr = xcalloc(1, sizeof *netaddr, "table_sqlite_netaddr");
-			if (! text_to_netaddr(netaddr, sqlite3_column_text(stmt, 0)))
-				goto error;
-			*retp = netaddr;
-		}
-		sqlite3_finalize(stmt);
-		return 1;
-
-	case SQLITE_DONE:
-		sqlite3_finalize(stmt);
-		return 0;
-
-	default:
-		goto error;
-	}
-
-error:
-	sqlite3_finalize(stmt);
-	free(netaddr);
-	if (retp)
-		*retp = NULL;
-	return -1;
+	return (1);
 }

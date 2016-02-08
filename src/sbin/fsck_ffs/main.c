@@ -1,4 +1,4 @@
-/*	$OpenBSD: main.c,v 1.38 2011/04/24 07:07:03 otto Exp $	*/
+/*	$OpenBSD: main.c,v 1.40 2013/06/11 16:42:04 deraadt Exp $	*/
 /*	$NetBSD: main.c,v 1.22 1996/10/11 20:15:48 thorpej Exp $	*/
 
 /*
@@ -150,7 +150,7 @@ argtoi(int flag, char *req, char *str, int base)
 int
 checkfilesys(char *filesys, char *mntpt, long auxdata, int child)
 {
-	daddr64_t n_ffree, n_bfree;
+	daddr_t n_ffree, n_bfree;
 	struct dups *dp;
 	struct zlncnt *zlnp;
 	int cylno;
@@ -262,7 +262,8 @@ checkfilesys(char *filesys, char *mntpt, long auxdata, int child)
 		if (zlnhead != NULL) {
 			printf("The following zero link count inodes remain:");
 			for (zlnp = zlnhead; zlnp; zlnp = zlnp->next)
-				printf(" %u,", zlnp->zlncnt);
+				printf(" %llu,",
+				    (unsigned long long)zlnp->zlncnt);
 			printf("\n");
 		}
 	}

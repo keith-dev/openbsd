@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.520 2013/02/13 21:21:34 martynas Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.523 2013/06/11 16:42:08 deraadt Exp $	*/
 /*	$NetBSD: machdep.c,v 1.214 1996/11/10 03:16:17 thorpej Exp $	*/
 
 /*-
@@ -166,6 +166,7 @@ extern struct proc *npxproc;
 #endif /* NCOM > 0 */
 
 void	replacesmap(void);
+int     intr_handler(struct intrframe *, struct intrhand *);
 
 /* the following is used externally (sysctl_hw) */
 char machine[] = MACHINE;
@@ -2682,7 +2683,7 @@ dumpconf(void)
 int
 cpu_dump()
 {
-	int (*dump)(dev_t, daddr64_t, caddr_t, size_t);
+	int (*dump)(dev_t, daddr_t, caddr_t, size_t);
 	long buf[dbtob(1) / sizeof (long)];
 	kcore_seg_t	*segp;
 
@@ -2719,8 +2720,8 @@ dumpsys()
 {
 	u_int i, j, npg;
 	int maddr;
-	daddr64_t blkno;
-	int (*dump)(dev_t, daddr64_t, caddr_t, size_t);
+	daddr_t blkno;
+	int (*dump)(dev_t, daddr_t, caddr_t, size_t);
 	int error;
 	char *str;
 	extern int msgbufmapped;
@@ -3867,20 +3868,6 @@ splassert_check(int wantipl, const char *func)
 
 #ifdef MULTIPROCESSOR
 void
-i386_intlock(int ipl)
-{
-	if (ipl < IPL_SCHED)
-		__mp_lock(&kernel_lock);
-}
-
-void
-i386_intunlock(int ipl)
-{
-	if (ipl < IPL_SCHED)
-		__mp_unlock(&kernel_lock);
-}
-
-void
 i386_softintlock(void)
 {
 	__mp_lock(&kernel_lock);
@@ -3947,3 +3934,27 @@ spllower(int ncpl)
 	splx(ncpl);
 	return (ocpl);
 }
+
+int
+intr_handler(struct intrframe *frame, struct intrhand *ih)
+{
+	int rc;
+#ifdef MULTIPROCESSOR
+	int need_lock;
+
+	if (ih->ih_flags & IPL_MPSAFE)
+		need_lock = 0;
+	else
+		need_lock = frame->if_ppl < IPL_SCHED;
+
+	if (need_lock)
+		__mp_lock(&kernel_lock);
+#endif
+	rc = (*ih->ih_fun)(ih->ih_arg ? ih->ih_arg : frame);
+#ifdef MULTIPROCESSOR
+	if (need_lock)
+		__mp_unlock(&kernel_lock);
+#endif
+	return rc;
+}
+

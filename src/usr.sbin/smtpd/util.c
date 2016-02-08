@@ -1,4 +1,4 @@
-/*	$OpenBSD: util.c,v 1.92 2013/02/05 11:45:18 gilles Exp $	*/
+/*	$OpenBSD: util.c,v 1.97 2013/07/19 08:28:43 eric Exp $	*/
 
 /*
  * Copyright (c) 2000,2001 Markus Friedl.  All rights reserved.
@@ -20,7 +20,6 @@
  */
 
 #include <sys/types.h>
-#include <sys/param.h>
 #include <sys/queue.h>
 #include <sys/tree.h>
 #include <sys/socket.h>
@@ -175,7 +174,7 @@ mkdirs_component(char *path, mode_t mode)
 int
 mkdirs(char *path, mode_t mode)
 {
-	char	 buf[MAXPATHLEN];
+	char	 buf[SMTPD_MAXPATHLEN];
 	int	 i = 0;
 	int	 done = 0;
 	char	*p;
@@ -184,7 +183,7 @@ mkdirs(char *path, mode_t mode)
 	if (*path != '/')
 		return 0;
 
-	/* make sure we don't exceed MAXPATHLEN */
+	/* make sure we don't exceed SMTPD_MAXPATHLEN */
 	if (strlen(path) >= sizeof buf)
 		return 0;
 
@@ -333,7 +332,7 @@ mvpurge(char *from, char *to)
 	size_t		 n;
 	int		 retry;
 	const char	*sep;
-	char		 buf[MAXPATHLEN];
+	char		 buf[SMTPD_MAXPATHLEN];
 
 	if ((n = strlen(to)) == 0)
 		fatalx("to is empty");
@@ -341,7 +340,7 @@ mvpurge(char *from, char *to)
 	sep = (to[n - 1] == '/') ? "" : "/";
 	retry = 0;
 
-    again:
+again:
 	snprintf(buf, sizeof buf, "%s%s%u", to, sep, arc4random());
 	if (rename(from, buf) == -1) {
 		/* ENOTDIR has actually 2 meanings, and incorrect input
@@ -363,12 +362,12 @@ mvpurge(char *from, char *to)
 int
 mktmpfile(void)
 {
-	char		path[MAXPATHLEN];
+	char		path[SMTPD_MAXPATHLEN];
 	int		fd;
 	mode_t		omode;
 
 	if (! bsnprintf(path, sizeof(path), "%s/smtpd.XXXXXXXXXX",
-	    PATH_TEMPORARY))
+		PATH_TEMPORARY))
 		err(1, "snprintf");
 
 	omode = umask(7077);
@@ -431,7 +430,7 @@ valid_localpart(const char *s)
  * RFC 5322 defines theses characters as valid: !#$%&'*+-/=?^_`{|}~
  * some of them are potentially dangerous, and not so used after all.
  */
-#define IS_ATEXT(c)     (isalnum((int)(c)) || strchr("%+-/=_", (c)))
+#define IS_ATEXT(c)     (isalnum((int)(c)) || strchr("!%+-/=_", (c)))
 nextatom:
 	if (! IS_ATEXT(*s) || *s == '\0')
 		return 0;
@@ -454,25 +453,32 @@ valid_domainpart(const char *s)
 {
 	struct in_addr	 ina;
 	struct in6_addr	 ina6;
-	char		*c, domain[MAX_DOMAINPART_SIZE];
+	char		*c, domain[SMTPD_MAXDOMAINPARTSIZE];
+	const char	*p;
 
 	if (*s == '[') {
-		strlcpy(domain, s + 1, sizeof domain);
+		if (strncasecmp("[IPv6:", s, 6) == 0)
+			p = s + 6;
+		else
+			p = s + 1;
+	
+		if (strlcpy(domain, p, sizeof domain) >= sizeof domain)
+			return 0;
 
 		c = strchr(domain, (int)']');
 		if (!c || c[1] != '\0')
 			return 0;
-
+		
 		*c = '\0';
-
+		
 		if (inet_pton(AF_INET6, domain, &ina6) == 1)
 			return 1;
 		if (inet_pton(AF_INET, domain, &ina) == 1)
 			return 1;
-
+		
 		return 0;
 	}
-
+	
 nextsub:
 	if (!isalnum((int)*s))
 		return 0;
@@ -492,15 +498,14 @@ nextsub:
 	return 1;
 }
 
-
 /*
  * Check file for security. Based on usr.bin/ssh/auth.c.
  */
 int
 secure_file(int fd, char *path, char *userdir, uid_t uid, int mayread)
 {
-	char		 buf[MAXPATHLEN];
-	char		 homedir[MAXPATHLEN];
+	char		 buf[PATH_MAX];
+	char		 homedir[PATH_MAX];
 	struct stat	 st;
 	char		*cp;
 
@@ -591,6 +596,23 @@ lowercase(char *buf, const char *s, size_t len)
 	return 1;
 }
 
+int
+uppercase(char *buf, const char *s, size_t len)
+{
+	if (len == 0)
+		return 0;
+
+	if (strlcpy(buf, s, len) >= len)
+		return 0;
+
+	while (*buf != '\0') {
+		*buf = toupper((int)*buf);
+		buf++;
+	}
+
+	return 1;
+}
+
 void
 xlowercase(char *buf, const char *s, size_t len)
 {
@@ -599,33 +621,6 @@ xlowercase(char *buf, const char *s, size_t len)
 
 	if (! lowercase(buf, s, len))
 		fatalx("lowercase: truncation");
-}
-
-void
-sa_set_port(struct sockaddr *sa, int port)
-{
-	char hbuf[NI_MAXHOST], sbuf[NI_MAXSERV];
-	struct addrinfo hints, *res;
-	int error;
-
-	error = getnameinfo(sa, sa->sa_len, hbuf, sizeof(hbuf), NULL, 0,
-	    NI_NUMERICHOST);
-	if (error)
-		fatalx("sa_set_port: getnameinfo failed");
-
-	memset(&hints, 0, sizeof(hints));
-	hints.ai_family = PF_UNSPEC;
-	hints.ai_socktype = SOCK_STREAM;
-	hints.ai_flags = AI_NUMERICHOST|AI_NUMERICSERV;
-
-	snprintf(sbuf, sizeof(sbuf), "%d", port);
-
-	error = getaddrinfo(hbuf, sbuf, &hints, &res);
-	if (error)
-		fatalx("sa_set_port: getaddrinfo failed");
-
-	memcpy(sa, res->ai_addr, res->ai_addrlen);
-	freeaddrinfo(res);
 }
 
 uint64_t
@@ -699,7 +694,7 @@ parse_smtp_response(char *line, size_t len, char **msg, int *cont)
 {
 	size_t	 i;
 
-	if (len >= SMTP_LINE_MAX)
+	if (len >= SMTPD_MAXLINESIZE)
 		return "line too long";
 
 	if (len > 3) {

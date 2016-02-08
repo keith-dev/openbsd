@@ -1,4 +1,4 @@
-/*	$OpenBSD: res_send.c,v 1.1 2012/09/08 11:08:21 eric Exp $	*/
+/*	$OpenBSD: res_send.c,v 1.5 2013/07/12 14:36:22 eric Exp $	*/
 /*
  * Copyright (c) 2012 Eric Faurot <eric@openbsd.org>
  *
@@ -29,22 +29,31 @@ res_send(const u_char *buf, int buflen, u_char *ans, int anslen)
 {
 	struct async	*as;
 	struct async_res ar;
+	size_t		 len;
+
+	res_init();
 
 	if (ans == NULL || anslen <= 0) {
 		errno = EINVAL;
 		return (-1);
 	}
 
-	as = res_send_async(buf, buflen, ans, anslen, NULL);
+	as = res_send_async(buf, buflen, NULL);
 	if (as == NULL)
 		return (-1); /* errno set */
 
-	async_run_sync(as, &ar);
+	asr_async_run_sync(as, &ar);
 
 	if (ar.ar_errno) {
 		errno = ar.ar_errno;
 		return (-1);
 	}
+
+	len = anslen;
+	if (ar.ar_datalen < len)
+		len = ar.ar_datalen;
+	memmove(ans, ar.ar_data, len);
+	free(ar.ar_data);
 
 	return (ar.ar_datalen);
 }

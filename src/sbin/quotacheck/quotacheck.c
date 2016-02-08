@@ -1,4 +1,4 @@
-/*	$OpenBSD: quotacheck.c,v 1.29 2012/05/31 13:55:54 krw Exp $	*/
+/*	$OpenBSD: quotacheck.c,v 1.31 2013/06/11 16:42:05 deraadt Exp $	*/
 /*	$NetBSD: quotacheck.c,v 1.12 1996/03/30 22:34:25 mark Exp $	*/
 
 /*
@@ -111,7 +111,7 @@ u_int32_t highid[MAXQUOTAS];	/* highest addid()'ed identifier per type */
 struct fileusage *
 	 addid(u_int32_t, int, char *);
 char	*blockcheck(char *);
-void	 bread(daddr64_t, char *, long);
+void	 bread(daddr_t, char *, long);
 int	 chkquota(const char *, const char *, const char *, void *, pid_t *);
 void	 freeinodebuf(void);
 union dinode *
@@ -654,12 +654,13 @@ union dinode *
 getnextinode(ino_t inumber)
 {
 	long size;
-	daddr64_t dblk;
+	daddr_t dblk;
 	union dinode *dp;
 	static caddr_t nextinop;
 
 	if (inumber != nextino++ || inumber > lastvalidinum)
-		err(1, "bad inode number %u to nextinode", inumber);
+		err(1, "bad inode number %llu to nextinode",
+		    (unsigned long long)inumber);
 	if (inumber >= lastinum) {
 		readcnt++;
 		dblk = fsbtodb(&sblock, ino_to_fsba(&sblock, lastinum));
@@ -693,7 +694,8 @@ setinodebuf(ino_t inum)
 {
 
 	if (inum % sblock.fs_ipg != 0)
-		errx(1, "bad inode number %d to setinodebuf", inum);
+		errx(1, "bad inode number %llu to setinodebuf",
+		    (unsigned long long)inum);
 	lastvalidinum = inum + sblock.fs_ipg - 1;
 	nextino = inum;
 	lastinum = inum;
@@ -733,7 +735,7 @@ freeinodebuf(void)
  * Read specified disk blocks.
  */
 void
-bread(daddr64_t bno, char *buf, long cnt)
+bread(daddr_t bno, char *buf, long cnt)
 {
 
 	if (lseek(fi, (off_t)bno * dev_bsize, SEEK_SET) < 0 ||

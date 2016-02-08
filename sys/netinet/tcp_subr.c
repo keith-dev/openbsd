@@ -1,4 +1,4 @@
-/*	$OpenBSD: tcp_subr.c,v 1.114 2012/12/28 17:52:06 gsoares Exp $	*/
+/*	$OpenBSD: tcp_subr.c,v 1.120 2013/06/01 16:22:05 bluhm Exp $	*/
 /*	$NetBSD: tcp_subr.c,v 1.22 1996/02/13 23:44:00 christos Exp $	*/
 
 /*
@@ -70,10 +70,10 @@
 
 #include <sys/param.h>
 #include <sys/systm.h>
-#include <sys/proc.h>
 #include <sys/mbuf.h>
 #include <sys/socket.h>
 #include <sys/socketvar.h>
+#include <sys/timeout.h>
 #include <sys/protosw.h>
 #include <sys/kernel.h>
 #include <sys/pool.h>
@@ -84,6 +84,7 @@
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
 #include <netinet/ip.h>
+#include <netinet/in_var.h>
 #include <netinet/in_pcb.h>
 #include <netinet/ip_var.h>
 #include <netinet/ip_icmp.h>
@@ -97,6 +98,7 @@
 
 #ifdef INET6
 #include <netinet6/in6_var.h>
+#include <netinet6/ip6_var.h>
 #include <netinet6/ip6protosw.h>
 #endif /* INET6 */
 
@@ -136,10 +138,6 @@ int tcp_reass_limit = NMBCLUSTERS / 2; /* hardlimit for tcpqe_pool */
 #ifdef TCP_SACK
 int tcp_sackhole_limit = 32*1024; /* hardlimit for sackhl_pool */
 #endif
-
-#ifdef INET6
-extern int ip6_defhlim;
-#endif /* INET6 */
 
 struct pool tcpcb_pool;
 struct pool tcpqe_pool;
@@ -459,7 +457,7 @@ tcp_newtcpcb(struct inpcb *inp)
 
 	tp = pool_get(&tcpcb_pool, PR_NOWAIT|PR_ZERO);
 	if (tp == NULL)
-		return ((struct tcpcb *)0);
+		return (NULL);
 	TAILQ_INIT(&tp->t_segq);
 	tp->t_maxseg = tcp_mssdflt;
 	tp->t_maxopd = 0;
@@ -576,7 +574,7 @@ tcp_close(struct tcpcb *tp)
 	inp->inp_ppcb = 0;
 	soisdisconnected(so);
 	in_pcbdetach(inp);
-	return ((struct tcpcb *)0);
+	return (NULL);
 }
 
 void
@@ -629,7 +627,7 @@ tcp_notify(inp, error)
 	struct inpcb *inp;
 	int error;
 {
-	struct tcpcb *tp = (struct tcpcb *)inp->inp_ppcb;
+	struct tcpcb *tp = intotcpcb(inp);
 	struct socket *so = inp->inp_socket;
 
 	/*
@@ -655,17 +653,14 @@ tcp_notify(inp, error)
 
 #ifdef INET6
 void
-tcp6_ctlinput(cmd, sa, d)
-	int cmd;
-	struct sockaddr *sa;
-	void *d;
+tcp6_ctlinput(int cmd, struct sockaddr *sa, u_int rdomain, void *d)
 {
 	struct tcphdr th;
 	struct tcpcb *tp;
 	void (*notify)(struct inpcb *, int) = tcp_notify;
 	struct ip6_hdr *ip6;
 	const struct sockaddr_in6 *sa6_src = NULL;
-	struct sockaddr_in6 *sa6 = (struct sockaddr_in6 *)sa;
+	struct sockaddr_in6 *sa6 = satosin6(sa);
 	struct inpcb *inp;
 	struct mbuf *m;
 	tcp_seq seq;
@@ -762,8 +757,8 @@ tcp6_ctlinput(cmd, sa, d)
 			syn_cache_unreach((struct sockaddr *)sa6_src,
 			    sa, &th, /* XXX */ 0);
 	} else {
-		(void) in6_pcbnotify(&tcbtable, sa, 0,
-		    (struct sockaddr *)sa6_src, 0, cmd, NULL, notify);
+		(void) in6_pcbnotify(&tcbtable, sa6, 0,
+		    sa6_src, 0, cmd, NULL, notify);
 	}
 }
 #endif
@@ -778,7 +773,6 @@ tcp_ctlinput(int cmd, struct sockaddr *sa, u_int rdomain, void *v)
 	struct in_addr faddr;
 	tcp_seq seq;
 	u_int mtu;
-	extern int inetctlerrmap[];
 	void (*notify)(struct inpcb *, int) = tcp_notify;
 	int errno;
 
@@ -909,8 +903,8 @@ tcp6_mtudisc_callback(faddr)
 	sin6.sin6_family = AF_INET6;
 	sin6.sin6_len = sizeof(struct sockaddr_in6);
 	sin6.sin6_addr = *faddr;
-	(void) in6_pcbnotify(&tcbtable, (struct sockaddr *)&sin6, 0,
-	    (struct sockaddr *)&sa6_any, 0, PRC_MSGSIZE, NULL, tcp_mtudisc);
+	(void) in6_pcbnotify(&tcbtable, &sin6, 0,
+	    &sa6_any, 0, PRC_MSGSIZE, NULL, tcp_mtudisc);
 }
 #endif /* INET6 */
 

@@ -93,7 +93,6 @@
 #include <sys/kernel.h>
 #include <sys/ioctl.h>
 #include <sys/syslog.h>
-#include <sys/proc.h>
 #include <sys/sysctl.h>
 
 #include <net/if.h>
@@ -584,9 +583,7 @@ add_m6if(struct mif6ctl *mifcp)
 	mifp = mif6table + mifcp->mif6c_mifi;
 	if (mifp->m6_ifp)
 		return EADDRINUSE; /* XXX: is it appropriate? */
-	if (mifcp->mif6c_pifi == 0 || mifcp->mif6c_pifi >= if_indexlim)
-		return ENXIO;
-	ifp = ifindex2ifnet[mifcp->mif6c_pifi];
+	ifp = if_get(mifcp->mif6c_pifi);
 	if (!ifp)
 		return ENXIO;
 
@@ -645,9 +642,9 @@ add_m6if(struct mif6ctl *mifcp)
 #ifdef MRT6DEBUG
 	if (mrt6debug)
 		log(LOG_DEBUG,
-		    "add_mif #%d, phyint %s%d\n",
+		    "add_mif #%d, phyint %s\n",
 		    mifcp->mif6c_mifi,
-		    ifp->if_name, ifp->if_unit);
+		    ifp->if_xname);
 #endif
 
 	return 0;
@@ -944,9 +941,7 @@ int
 socket_send(struct socket *s, struct mbuf *mm, struct sockaddr_in6 *src)
 {
 	if (s) {
-		if (sbappendaddr(&s->so_rcv,
-				 (struct sockaddr *)src,
-				 mm, (struct mbuf *)0) != 0) {
+		if (sbappendaddr(&s->so_rcv, sin6tosa(src), mm, NULL) != 0) {
 			sorwakeup(s);
 			return 0;
 		}
@@ -1300,11 +1295,8 @@ ip6_mdq(struct mbuf *m, struct ifnet *ifp, struct mf6c *rt)
 	int plen = m->m_pkthdr.len;
 
 /*
- * Macro to send packet on mif.  Since RSVP packets don't get counted on
- * input, they shouldn't get counted on output, so statistics keeping is
- * separate.
+ * Macro to send packet on mif.
  */
-
 #define MC6_SEND(ip6, mifp, m) do {				\
 		if ((mifp)->m6_flags & MIFF_REGISTER)		\
 		    register_send((ip6), (mifp), (m));		\
@@ -1521,13 +1513,13 @@ phyint_send(struct ip6_hdr *ip6, struct mif6 *mifp, struct mbuf *m)
 	 * If we belong to the destination multicast group
 	 * on the outgoing interface, loop back a copy.
 	 */
-	dst6 = (struct sockaddr_in6 *)&ro.ro_dst;
+	dst6 = &ro.ro_dst;
 	IN6_LOOKUP_MULTI(ip6->ip6_dst, ifp, in6m);
 	if (in6m != NULL) {
 		dst6->sin6_len = sizeof(struct sockaddr_in6);
 		dst6->sin6_family = AF_INET6;
 		dst6->sin6_addr = ip6->ip6_dst;
-		ip6_mloopback(ifp, m, (struct sockaddr_in6 *)&ro.ro_dst);
+		ip6_mloopback(ifp, m, &ro.ro_dst);
 	}
 	/*
 	 * Put the packet into the sending queue of the outgoing interface
@@ -1543,7 +1535,7 @@ phyint_send(struct ip6_hdr *ip6, struct mif6 *mifp, struct mbuf *m)
 		 * we need no ND for a multicast forwarded packet...right?
 		 */
 		error = (*ifp->if_output)(ifp, mb_copy,
-		    (struct sockaddr *)&ro.ro_dst, NULL);
+		    sin6tosa(&ro.ro_dst), NULL);
 #ifdef MRT6DEBUG
 		if (mrt6debug & DEBUG_XMIT)
 			log(LOG_DEBUG, "phyint_send on mif %d err %d\n",
@@ -1841,8 +1833,7 @@ pim6_input(struct mbuf **mp, int *offp, int proto)
 #endif
 
 		looutput(mif6table[reg_mif_num].m6_ifp, m,
-			      (struct sockaddr *) &dst,
-			      (struct rtentry *) NULL);
+		    sin6tosa(&dst), NULL);
 	
 		/* prepare the register head to send to the mrouting daemon */
 		m = mcp;

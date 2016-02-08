@@ -1,4 +1,4 @@
-/*	$OpenBSD: ldasm.S,v 1.8 2012/10/27 08:30:35 kettenis Exp $	*/
+/*	$OpenBSD: ldasm.S,v 1.10 2013/06/01 09:57:58 miod Exp $	*/
 
 /*
  * Copyright (c) 2004 Michael Shalayeff
@@ -149,9 +149,8 @@ ENTRY(_dl_bind_start,32)
 	bl	_dl_bind, rp
 	copy	r21, r19
 
-	/* load &func and sl from plt entry returned */
-	ldw	0(ret0), r21
-	ldw	4(ret0), r19
+	copy	ret0, r21	/* &func */
+	copy	ret1, r19	/* sl */
 
 	ldw	HPPA_FRAME_ARG(0)(r3), arg0
 	ldw	HPPA_FRAME_ARG(1)(r3), arg1
@@ -262,6 +261,30 @@ ENTRY(_dl_gettimeofday,0)
 	bv	r0(rp)
 	nop
 EXIT(_dl_gettimeofday)
+
+ENTRY(_dl_readlink,0)
+	SYSCALL(readlink)
+	bv	r0(rp)
+	nop
+EXIT(_dl_readlink)
+
+ENTRY(_dl_lstat,0)
+	SYSCALL(lstat)
+	bv	r0(rp)
+	nop
+EXIT(_dl_lstat)
+
+ENTRY(_dl_getcwd,0)
+	SYSCALL(__getcwd)
+	bv	r0(rp)
+	nop
+EXIT(_dl_getcwd)
+
+ENTRY(_dl_utrace,0)
+	SYSCALL(utrace)
+	bv	r0(rp)
+	nop
+EXIT(_dl_utrace)
 
 ENTRY(_dl_sigprocmask,0)
 	stw	arg2, HPPA_FRAME_ARG(2)(sp)

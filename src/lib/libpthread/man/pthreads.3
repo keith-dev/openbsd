@@ -1,6 +1,6 @@
-.\" $OpenBSD: pthreads.3,v 1.38 2012/09/02 13:29:29 jmc Exp $
+.\" $OpenBSD: pthreads.3,v 1.41 2013/07/16 15:21:11 schwarze Exp $
 .\" David Leonard <d@openbsd.org>, 1998. Public domain.
-.Dd $Mdocdate: September 2 2012 $
+.Dd $Mdocdate: July 16 2013 $
 .Dt PTHREADS 3
 .Os
 .Sh NAME
@@ -269,6 +269,8 @@ Set cancelability state.
 Set cancelability state.
 .It Fn pthread_sigmask
 Examine/change a thread's signal mask.
+.It Fn pthread_getcpuclockid
+Get a CPU time clock for a thread.
 .El
 .Ss Thread stacks
 Each thread has a different stack, whether it be provided by a
@@ -419,6 +421,7 @@ with larger numbers generating more verbose output.
 .Xr pthread_detach 3 ,
 .Xr pthread_equal 3 ,
 .Xr pthread_exit 3 ,
+.Xr pthread_getcpuclockid 3 ,
 .Xr pthread_getspecific 3 ,
 .Xr pthread_join 3 ,
 .Xr pthread_key_create 3 ,
@@ -472,9 +475,9 @@ it became the default implementation and was renamed to
 .Dq libpthread .
 .Sh AUTHORS
 .An -nosplit
-.An Ted Unangst Aq tedu@openbsd.org ,
-.An Kurt Miller Aq kurt@openbsd.org ,
-.An Marco S Hyman Aq marc@openbsd.org ,
-.An Otto Moerbeek Aq otto@openbsd.org ,
+.An Ted Unangst Aq Mt tedu@openbsd.org ,
+.An Kurt Miller Aq Mt kurt@openbsd.org ,
+.An Marco S Hyman Aq Mt marc@openbsd.org ,
+.An Otto Moerbeek Aq Mt otto@openbsd.org ,
 and
-.An Philip Guenther Aq guenther@openbsd.org .
+.An Philip Guenther Aq Mt guenther@openbsd.org .

@@ -1,5 +1,5 @@
 #!/bin/ksh
-#	$OpenBSD: install.sh,v 1.231 2012/09/28 16:23:25 rpe Exp $
+#	$OpenBSD: install.sh,v 1.233 2013/05/31 06:27:08 rpe Exp $
 #	$NetBSD: install.sh,v 1.5.2.8 1996/08/27 18:15:05 gwr Exp $
 #
 # Copyright (c) 1997-2009 Todd Miller, Theo de Raadt, Ken Westerback
@@ -105,7 +105,7 @@ while :; do
 	md_prep_disklabel $DISK || { DISK= ; continue ; }
 
 	# Make sure there is a '/' mount point.
-	grep -qs " / ffs " /tmp/fstab.$ROOTDISK || \
+	grep -qs " / ffs " /tmp/fstab.$ROOTDISK ||
 		{ DISK= ; echo "'/' must be configured!" ; continue ; }
 
 	if [[ -f /tmp/fstab.$DISK ]]; then
@@ -117,7 +117,7 @@ while :; do
 				continue
 			fi
 			# Non-swap mountpoints must be in only one file.
-			[[ /tmp/fstab.$DISK == $(grep -l " $_mp " /tmp/fstab.*) ]] || \
+			[[ /tmp/fstab.$DISK == $(grep -l " $_mp " /tmp/fstab.*) ]] ||
 				{ _rest=$DISK ; DISK= ; break ; }
 		done </tmp/fstab.$DISK
 		if [[ -z $DISK ]]; then
@@ -207,7 +207,7 @@ fi
 
 # If we got a timestamp from the ftplist server, and that time diffs by more
 # than 120 seconds, ask if the user wants to adjust the time
-if _time=$(ftp_time) && _now=$(date +%s) && \
+if _time=$(ftp_time) && _now=$(date +%s) &&
 	(( _now - _time > 120 || _time - _now > 120 )); then
 	_tz=/mnt/usr/share/zoneinfo/$TZ
 	ask_yn "Time appears wrong.  Set to '$(TZ=$_tz date -r "$(ftp_time)")'?" yes
@@ -276,7 +276,7 @@ done)
     ifconfig -A; hostname) >/mnt/dev/arandom 2>&1
 
 echo -n "done.\nGenerating initial host.random file..."
-/mnt/bin/dd if=/mnt/dev/arandom of=/mnt/var/db/host.random \
+dd if=/mnt/dev/arandom of=/mnt/var/db/host.random \
 	bs=65536 count=1 >/dev/null 2>&1
 chmod 600 /mnt/var/db/host.random >/dev/null 2>&1
 echo "done."
@@ -299,14 +299,14 @@ if [[ -n $user ]]; then
 	chown -R 1000:1000 /mnt/home/$user /mnt/var/mail/$user
 	echo "1,s@wheel:.:0:root\$@wheel:\*:0:root,${user}@
 w
-q" | /mnt/bin/ed /mnt/etc/group 2>/dev/null
+q" | ed /mnt/etc/group 2>/dev/null
 fi
 
 if [[ -n "$_rootpass" ]]; then
 	_encr=$(/mnt/usr/bin/encrypt -b 8 -- "$_rootpass")
 	echo "1,s@^root::@root:${_encr}:@
 w
-q" | /mnt/bin/ed /mnt/etc/master.passwd 2>/dev/null
+q" | ed /mnt/etc/master.passwd 2>/dev/null
 fi
 /mnt/usr/sbin/pwd_mkdb -p -d /mnt/etc /etc/master.passwd
 

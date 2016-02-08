@@ -1,4 +1,4 @@
-/*	$OpenBSD: parse.y,v 1.115 2013/02/17 12:28:30 gilles Exp $	*/
+/*	$OpenBSD: parse.y,v 1.123 2013/07/19 21:14:52 eric Exp $	*/
 
 /*
  * Copyright (c) 2008 Gilles Chehade <gilles@poolp.org>
@@ -25,7 +25,6 @@
 #include <sys/types.h>
 #include <sys/queue.h>
 #include <sys/tree.h>
-#include <sys/param.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/ioctl.h>
@@ -47,6 +46,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <syslog.h>
 #include <unistd.h>
 #include <util.h>
 
@@ -91,6 +91,7 @@ static int		 errors = 0;
 struct table		*table = NULL;
 struct rule		*rule = NULL;
 struct listener		 l;
+struct mta_limits	*limits;
 
 struct listener	*host_v4(const char *, in_port_t);
 struct listener	*host_v6(const char *, in_port_t);
@@ -98,16 +99,17 @@ int		 host_dns(const char *, const char *, const char *,
 		    struct listenerlist *, int, in_port_t, uint8_t);
 int		 host(const char *, const char *, const char *,
     struct listenerlist *, int, in_port_t, const char *, uint8_t, const char *);
-int		 interface(const char *, const char *, const char *,
+int		 interface(const char *, int, const char *, const char *,
     struct listenerlist *, int, in_port_t, const char *, uint8_t, const char *);
 void		 set_localaddrs(void);
 int		 delaytonum(char *);
 int		 is_if_in_group(const char *, const char *);
+int		 getmailname(char *, size_t);
 
 typedef struct {
 	union {
 		int64_t		 number;
-		objid_t		 object;
+		struct table	*table;
 		char		*string;
 		struct host	*host;
 		struct mailaddr	*maddr;
@@ -117,17 +119,17 @@ typedef struct {
 
 %}
 
-%token	AS QUEUE COMPRESSION MAXMESSAGESIZE LISTEN ON ANY PORT EXPIRE
-%token	TABLE SSL SMTPS CERTIFICATE DOMAIN BOUNCEWARN
-%token  RELAY BACKUP VIA DELIVER TO MAILDIR MBOX HOSTNAME HELO
-%token	ACCEPT REJECT INCLUDE ERROR MDA FROM FOR SOURCE
+%token	AS QUEUE COMPRESSION ENCRYPTION MAXMESSAGESIZE LISTEN ON ANY PORT EXPIRE
+%token	TABLE SSL SMTPS CERTIFICATE DOMAIN BOUNCEWARN LIMIT INET4 INET6
+%token  RELAY BACKUP VIA DELIVER TO LMTP MAILDIR MBOX HOSTNAME HELO
+%token	ACCEPT REJECT INCLUDE ERROR MDA FROM FOR SOURCE MTA
 %token	ARROW AUTH TLS LOCAL VIRTUAL TAG TAGGED ALIAS FILTER KEY
 %token	AUTH_OPTIONAL TLS_REQUIRE USERBASE SENDER
 %token	<v.string>	STRING
 %token  <v.number>	NUMBER
 %type	<v.table>	table
-%type	<v.number>	port from auth ssl size expire sender
-%type	<v.object>	tables tablenew tableref destination alias virtual usermapping userbase credentials
+%type	<v.number>	port auth ssl size expire address_family
+%type	<v.table>	tables tablenew tableref destination alias virtual usermapping userbase credentials from sender
 %type	<v.maddr>	relay_as
 %type	<v.string>	certificate tag tagged relay_source listen_helo relay_helo relay_backup
 %%
@@ -246,11 +248,11 @@ auth		: AUTH				{
 			$$ = F_AUTH;
 		}
 		| AUTH tables  			{
-			strlcpy(l.authtable, table_find($2)->t_name, sizeof l.authtable);
+			strlcpy(l.authtable, ($2)->t_name, sizeof l.authtable);
 			$$ = F_AUTH|F_AUTH_REQUIRE;
 		}
 		| AUTH_OPTIONAL tables 		{
-			strlcpy(l.authtable, table_find($2)->t_name, sizeof l.authtable);
+			strlcpy(l.authtable, ($2)->t_name, sizeof l.authtable);
 			$$ = F_AUTH;
 		}
 		| /* empty */			{ $$ = 0; }
@@ -316,7 +318,7 @@ bouncedelays	: bouncedelays ',' bouncedelay
 		;
 
 credentials	: AUTH tables	{
-			struct table   *t = table_find($2);
+			struct table   *t = $2;
 
 			if (! table_check_use(t, T_DYNAMIC|T_HASH, K_CREDENTIALS)) {
 				yyerror("invalid use of table \"%s\" as AUTH parameter",
@@ -324,17 +326,50 @@ credentials	: AUTH tables	{
 				YYERROR;
 			}
 
-			$$ = t->t_id;
+			$$ = t;
 		}
 		| /* empty */	{ $$ = 0; }
 		;
 
+address_family	: INET4			{ $$ = AF_INET; }
+		| INET6			{ $$ = AF_INET6; }
+		| /* empty */		{ $$ = AF_UNSPEC; }
+		;
+
 listen_helo	: HOSTNAME STRING	{ $$ = $2; }
 		| /* empty */		{ $$ = NULL; }
+		;
+
+opt_limit	: INET4 {
+			limits->family = AF_INET;
+		}
+		| INET6 {
+			limits->family = AF_INET6;
+		}
+		| STRING NUMBER {
+			if (!limit_mta_set(limits, $1, $2)) {
+				yyerror("invalid limit keyword");
+				free($1);
+				YYERROR;
+			}
+			free($1);
+		}
+		;
+
+limits		: opt_limit limits
+		| /* empty */
+		;
 
 main		: BOUNCEWARN {
 			bzero(conf->sc_bounce_warn, sizeof conf->sc_bounce_warn);
 		} bouncedelays
+		| QUEUE COMPRESSION {
+			conf->sc_queue_flags |= QUEUE_COMPRESSION;
+		}
+		| QUEUE ENCRYPTION KEY STRING {
+			conf->sc_queue_flags |= QUEUE_ENCRYPTION;
+			conf->sc_queue_key = $4;
+		}
 		| EXPIRE STRING {
 			conf->sc_qexpire = delaytonum($2);
 			if (conf->sc_qexpire == -1) {
@@ -347,16 +382,32 @@ main		: BOUNCEWARN {
 		| MAXMESSAGESIZE size {
 			conf->sc_maxsize = $2;
 		}
+		| LIMIT MTA FOR DOMAIN STRING {
+			struct mta_limits	*d;
+
+			limits = dict_get(conf->sc_limits_dict, $5);
+			if (limits == NULL) {
+				limits = xcalloc(1, sizeof(*limits), "mta_limits");
+				dict_xset(conf->sc_limits_dict, $5, limits);
+				d = dict_xget(conf->sc_limits_dict, "default");
+				memmove(limits, d, sizeof(*limits));
+			}
+			free($5);
+		} limits
+		| LIMIT MTA {
+			limits = dict_get(conf->sc_limits_dict, "default");
+		} limits
 		| LISTEN {
 			bzero(&l, sizeof l);
-		} ON STRING port ssl certificate auth tag listen_helo {
+		} ON STRING address_family port ssl certificate auth tag listen_helo {
 			char	       *ifx  = $4;
-			in_port_t	port = $5;
-			uint8_t		ssl  = $6;
-			char	       *cert = $7;
-			uint8_t		auth = $8;
-			char	       *tag  = $9;
-			char	       *helo = $10;
+			int		family = $5;
+			in_port_t	port = $6;
+			uint8_t		ssl  = $7;
+			char	       *cert = $8;
+			uint8_t		auth = $9;
+			char	       *tag  = $10;
+			char	       *helo = $11;
 
 			if (port != 0 && ssl == F_SSL) {
 				yyerror("invalid listen option: tls/smtps on same port");
@@ -370,7 +421,7 @@ main		: BOUNCEWARN {
 
 			if (port == 0) {
 				if (ssl & F_SMTPS) {
-					if (! interface(ifx, tag, cert, conf->sc_listeners,
+					if (! interface(ifx, family, tag, cert, conf->sc_listeners,
 						MAX_LISTEN, 465, l.authtable, F_SMTPS|auth, helo)) {
 						if (host(ifx, tag, cert, conf->sc_listeners,
 							MAX_LISTEN, 465, l.authtable, ssl|auth, helo) <= 0) {
@@ -380,7 +431,7 @@ main		: BOUNCEWARN {
 					}
 				}
 				if (! ssl || (ssl & ~F_SMTPS)) {
-					if (! interface(ifx, tag, cert, conf->sc_listeners,
+					if (! interface(ifx, family, tag, cert, conf->sc_listeners,
 						MAX_LISTEN, 25, l.authtable, (ssl&~F_SMTPS)|auth, helo)) {
 						if (host(ifx, tag, cert, conf->sc_listeners,
 							MAX_LISTEN, 25, l.authtable, ssl|auth, helo) <= 0) {
@@ -391,7 +442,7 @@ main		: BOUNCEWARN {
 				}
 			}
 			else {
-				if (! interface(ifx, tag, cert, conf->sc_listeners,
+				if (! interface(ifx, family, tag, cert, conf->sc_listeners,
 					MAX_LISTEN, port, l.authtable, ssl|auth, helo)) {
 					if (host(ifx, tag, cert, conf->sc_listeners,
 						MAX_LISTEN, port, l.authtable, ssl|auth, helo) <= 0) {
@@ -486,8 +537,8 @@ table		: TABLE STRING STRING	{
 				free($3);
 				YYERROR;
 			}
-			table = table_create(backend, $2, config);
-			if (! table->t_backend->config(table, config)) {
+			table = table_create(backend, $2, NULL, config);
+			if (!table_config(table)) {
 				yyerror("invalid backend configuration for table %s",
 				    table->t_name);
 				free($2);
@@ -498,7 +549,7 @@ table		: TABLE STRING STRING	{
 			free($3);
 		}
 		| TABLE STRING {
-			table = table_create("static", $2, NULL);
+			table = table_create("static", $2, NULL, NULL);
 			free($2);
 		} '{' tableval_list '}' {
 			table = NULL;
@@ -537,30 +588,29 @@ tableval_list	: string_list			{ }
 tablenew	: STRING			{
 			struct table	*t;
 
-			t = table_create("static", NULL, NULL);
+			t = table_create("static", NULL, NULL, NULL);
 			t->t_type = T_LIST;
 			table_add(t, $1, NULL);
 			free($1);
-			$$ = t->t_id;
-			table = table_create("static", NULL, NULL);
+			$$ = t;
 		}
 		| '{'				{
-			table = table_create("static", NULL, NULL);
+			table = table_create("static", NULL, NULL, NULL);
 		} tableval_list '}'		{
-			$$ = table->t_id;
+			$$ = table;
 		}
 		;
 
 tableref       	: '<' STRING '>'       		{
 			struct table	*t;
 
-			if ((t = table_findbyname($2)) == NULL) {
+			if ((t = table_find($2, NULL)) == NULL) {
 				yyerror("no such table: %s", $2);
 				free($2);
 				YYERROR;
 			}
 			free($2);
-			$$ = t->t_id;
+			$$ = t;
 		}
 		;
 
@@ -569,7 +619,7 @@ tables		: tablenew			{ $$ = $1; }
 		;
 
 alias		: ALIAS tables			{
-			struct table   *t = table_find($2);
+			struct table   *t = $2;
 
 			if (! table_check_use(t, T_DYNAMIC|T_HASH, K_ALIAS)) {
 				yyerror("invalid use of table \"%s\" as ALIAS parameter",
@@ -577,20 +627,20 @@ alias		: ALIAS tables			{
 				YYERROR;
 			}
 
-			$$ = t->t_id;
+			$$ = t;
 		}
 		;
 
 virtual		: VIRTUAL tables		{
-			struct table   *t = table_find($2);
+			struct table   *t = $2;
 
-			if (! table_check_service(t, K_ALIAS)) {
+			if (! table_check_use(t, T_DYNAMIC|T_HASH, K_ALIAS)) {
 				yyerror("invalid use of table \"%s\" as VIRTUAL parameter",
 				    t->t_name);
 				YYERROR;
 			}
 
-			$$ = t->t_id;
+			$$ = t;
 		}
 		;
 
@@ -609,7 +659,7 @@ usermapping	: alias		{
 		;
 
 userbase	: USERBASE tables	{
-			struct table   *t = table_find($2);
+			struct table   *t = $2;
 
 			if (! table_check_use(t, T_DYNAMIC|T_HASH, K_USERINFO)) {
 				yyerror("invalid use of table \"%s\" as USERBASE parameter",
@@ -617,16 +667,16 @@ userbase	: USERBASE tables	{
 				YYERROR;
 			}
 
-			$$ = t->t_id;
+			$$ = t;
 		}
-		| /**/	{ $$ = table_findbyname("<getpwnam>")->t_id; }
+		| /**/	{ $$ = table_find("<getpwnam>", NULL); }
 		;
 
 		
 
 
 destination	: DOMAIN tables			{
-			struct table   *t = table_find($2);
+			struct table   *t = $2;
 
 			if (! table_check_use(t, T_DYNAMIC|T_LIST, K_DOMAIN)) {
 				yyerror("invalid use of table \"%s\" as DOMAIN parameter",
@@ -634,14 +684,14 @@ destination	: DOMAIN tables			{
 				YYERROR;
 			}
 
-			$$ = t->t_id;
+			$$ = t;
 		}
-		| LOCAL		{ $$ = table_findbyname("<localnames>")->t_id; }
+		| LOCAL		{ $$ = table_find("<localnames>", NULL); }
 		| ANY		{ $$ = 0; }
 		;
 
 relay_source	: SOURCE tables			{
-			struct table	*t = table_find($2);
+			struct table	*t = $2;
 			if (! table_check_use(t, T_DYNAMIC|T_LIST, K_SOURCE)) {
 				yyerror("invalid use of table \"%s\" as "
 				    "SOURCE parameter", t->t_name);
@@ -653,7 +703,7 @@ relay_source	: SOURCE tables			{
 		;
 
 relay_helo	: HELO tables			{
-			struct table	*t = table_find($2);
+			struct table	*t = $2;
 			if (! table_check_use(t, T_DYNAMIC|T_HASH, K_ADDRNAME)) {
 				yyerror("invalid use of table \"%s\" as "
 				    "HELO parameter", t->t_name);
@@ -697,7 +747,7 @@ relay_as     	: AS STRING		{
 		;
 
 action		: userbase DELIVER TO MAILDIR			{
-			rule->r_userbase = table_find($1);
+			rule->r_userbase = $1;
 			rule->r_action = A_MAILDIR;
 			if (strlcpy(rule->r_value.buffer, "~/Maildir",
 			    sizeof(rule->r_value.buffer)) >=
@@ -705,7 +755,7 @@ action		: userbase DELIVER TO MAILDIR			{
 				fatal("pathname too long");
 		}
 		| userbase DELIVER TO MAILDIR STRING		{
-			rule->r_userbase = table_find($1);
+			rule->r_userbase = $1;
 			rule->r_action = A_MAILDIR;
 			if (strlcpy(rule->r_value.buffer, $5,
 			    sizeof(rule->r_value.buffer)) >=
@@ -713,8 +763,20 @@ action		: userbase DELIVER TO MAILDIR			{
 				fatal("pathname too long");
 			free($5);
 		}
+		| userbase DELIVER TO LMTP STRING		{
+			rule->r_userbase = $1;
+			rule->r_action = A_LMTP;
+			if (strchr($5, ':') || $5[0] == '/') {
+				if (strlcpy(rule->r_value.buffer, $5,
+					sizeof(rule->r_value.buffer))
+					>= sizeof(rule->r_value.buffer))
+					fatal("lmtp destination too long");
+			} else
+				fatal("invalid lmtp destination");
+			free($5);
+		}
 		| userbase DELIVER TO MBOX			{
-			rule->r_userbase = table_find($1);
+			rule->r_userbase = $1;
 			rule->r_action = A_MBOX;
 			if (strlcpy(rule->r_value.buffer, _PATH_MAILDIR "/%u",
 			    sizeof(rule->r_value.buffer))
@@ -722,7 +784,7 @@ action		: userbase DELIVER TO MAILDIR			{
 				fatal("pathname too long");
 		}
 		| userbase DELIVER TO MDA STRING	       	{
-			rule->r_userbase = table_find($1);
+			rule->r_userbase = $1;
 			rule->r_action = A_MDA;
 			if (strlcpy(rule->r_value.buffer, $5,
 			    sizeof(rule->r_value.buffer))
@@ -730,13 +792,9 @@ action		: userbase DELIVER TO MAILDIR			{
 				fatal("command too long");
 			free($5);
 		}
-		| RELAY relay_as relay_source relay_helo       	{
+		| RELAY relay_as relay_source relay_helo	{
 			rule->r_action = A_RELAY;
 			rule->r_as = $2;
-			if ($4 != NULL && $3 == NULL) {
-				yyerror("HELO can only be used with SOURCE");
-				YYERROR;
-			}
 			if ($3)
 				strlcpy(rule->r_value.relayhost.sourcetable, $3,
 				    sizeof rule->r_value.relayhost.sourcetable);
@@ -753,14 +811,11 @@ action		: userbase DELIVER TO MAILDIR			{
 				strlcpy(rule->r_value.relayhost.hostname, $2,
 				    sizeof (rule->r_value.relayhost.hostname));
 			else
-				strlcpy(rule->r_value.relayhost.hostname, env->sc_hostname,
+				strlcpy(rule->r_value.relayhost.hostname,
+				    env->sc_hostname,
 				    sizeof (rule->r_value.relayhost.hostname));
 			free($2);
 
-			if ($5 != NULL && $4 == NULL) {
-				yyerror("HELO can only be used with SOURCE");
-				YYERROR;
-			}
 			if ($4)
 				strlcpy(rule->r_value.relayhost.sourcetable, $4,
 				    sizeof rule->r_value.relayhost.sourcetable);
@@ -791,7 +846,7 @@ action		: userbase DELIVER TO MAILDIR			{
 					free($6);
 					YYERROR;
 				}
-				t = table_find($5);
+				t = $5;
 				strlcpy(rule->r_value.relayhost.authtable, t->t_name,
 				    sizeof(rule->r_value.relayhost.authtable));
 			}
@@ -803,10 +858,7 @@ action		: userbase DELIVER TO MAILDIR			{
 					fatal("certificate path too long");
 			}
 			free($4);
-			if ($8 != NULL && $7 == NULL) {
-				yyerror("HELO can only be used with SOURCE");
-				YYERROR;
-			}
+
 			if ($7)
 				strlcpy(rule->r_value.relayhost.sourcetable, $7,
 				    sizeof rule->r_value.relayhost.sourcetable);
@@ -817,7 +869,7 @@ action		: userbase DELIVER TO MAILDIR			{
 		;
 
 from		: FROM tables			{
-			struct table   *t = table_find($2);
+			struct table   *t = $2;
 
 			if (! table_check_use(t, T_DYNAMIC|T_LIST, K_NETADDR)) {
 				yyerror("invalid use of table \"%s\" as FROM parameter",
@@ -825,21 +877,21 @@ from		: FROM tables			{
 				YYERROR;
 			}
 
-			$$ = t->t_id;
+			$$ = t;
 		}
 		| FROM ANY			{
-			$$ = table_findbyname("<anyhost>")->t_id;
+			$$ = table_find("<anyhost>", NULL);
 		}
 		| FROM LOCAL			{
-			$$ = table_findbyname("<localhost>")->t_id;
+			$$ = table_find("<localhost>", NULL);
 		}
 		| /* empty */			{
-			$$ = table_findbyname("<localhost>")->t_id;
+			$$ = table_find("<localhost>", NULL);
 		}
 		;
 
 sender		: SENDER tables			{
-			struct table   *t = table_find($2);
+			struct table   *t = $2;
 
 			if (! table_check_use(t, T_DYNAMIC|T_LIST, K_MAILADDR)) {
 				yyerror("invalid use of table \"%s\" as SENDER parameter",
@@ -847,9 +899,9 @@ sender		: SENDER tables			{
 				YYERROR;
 			}
 
-			$$ = t->t_id;
+			$$ = t;
 		}
-		| /* empty */			{ $$ = 0; }
+		| /* empty */			{ $$ = NULL; }
 		;
 
 rule		: ACCEPT {
@@ -857,10 +909,10 @@ rule		: ACCEPT {
 		 } tagged from sender FOR destination usermapping action expire {
 
 			rule->r_decision = R_ACCEPT;
-			rule->r_sources = table_find($4);
-			rule->r_senders = table_find($5);
-			rule->r_destination = table_find($7);
-			rule->r_mapping = table_find($8);
+			rule->r_sources = $4;
+			rule->r_senders = $5;
+			rule->r_destination = $7;
+			rule->r_mapping = $8;
 			if ($3) {
 				if (strlcpy(rule->r_tag, $3, sizeof rule->r_tag)
 				    >= sizeof rule->r_tag) {
@@ -900,10 +952,10 @@ rule		: ACCEPT {
 			rule = xcalloc(1, sizeof(*rule), "parse rule: REJECT");
 		} tagged from sender FOR destination usermapping {
 			rule->r_decision = R_REJECT;
-			rule->r_sources = table_find($4);
-			rule->r_sources = table_find($5);
-			rule->r_destination = table_find($7);
-			rule->r_mapping = table_find($8);
+			rule->r_sources = $4;
+			rule->r_senders = $5;
+			rule->r_destination = $7;
+			rule->r_mapping = $8;
 			if ($3) {
 				if (strlcpy(rule->r_tag, $3, sizeof rule->r_tag)
 				    >= sizeof rule->r_tag) {
@@ -928,13 +980,15 @@ int
 yyerror(const char *fmt, ...)
 {
 	va_list		 ap;
+	char		*nfmt;
 
 	file->errors++;
 	va_start(ap, fmt);
-	fprintf(stderr, "%s:%d: ", file->name, yylval.lineno);
-	vfprintf(stderr, fmt, ap);
-	fprintf(stderr, "\n");
+	if (asprintf(&nfmt, "%s:%d: %s", file->name, yylval.lineno, fmt) == -1)
+		fatalx("yyerror asprintf");
+	vlog(LOG_CRIT, nfmt, ap);
 	va_end(ap);
+	free(nfmt);
 	return (0);
 }
 
@@ -958,8 +1012,10 @@ lookup(char *s)
 		{ "backup",		BACKUP },
 		{ "bounce-warn",	BOUNCEWARN },
 		{ "certificate",	CERTIFICATE },
+		{ "compression",	COMPRESSION },
 		{ "deliver",		DELIVER },
 		{ "domain",		DOMAIN },
+		{ "encryption",		ENCRYPTION },
 		{ "expire",		EXPIRE },
 		{ "filter",		FILTER },
 		{ "for",		FOR },
@@ -967,13 +1023,18 @@ lookup(char *s)
 		{ "helo",		HELO },
 		{ "hostname",		HOSTNAME },
 		{ "include",		INCLUDE },
+		{ "inet4",		INET4 },
+		{ "inet6",		INET6 },
 		{ "key",		KEY },
+		{ "limit",		LIMIT },
 		{ "listen",		LISTEN },
+		{ "lmtp",		LMTP },
 		{ "local",		LOCAL },
 		{ "maildir",		MAILDIR },
 		{ "max-message-size",  	MAXMESSAGESIZE },
 		{ "mbox",		MBOX },
 		{ "mda",		MDA },
+		{ "mta",		MTA },
 		{ "on",			ON },
 		{ "port",		PORT },
 		{ "queue",		QUEUE },
@@ -1321,12 +1382,11 @@ parse_config(struct smtpd *x_conf, const char *filename, int opts)
 {
 	struct sym     *sym, *next;
 	struct table   *t;
-	char		hostname[MAXHOSTNAMELEN];
+	char		hostname[SMTPD_MAXHOSTNAMELEN];
+	char		hostname_copy[SMTPD_MAXHOSTNAMELEN];
 
-	if (gethostname(hostname, sizeof hostname) == -1) {
-		fprintf(stderr, "invalid hostname: gethostname() failed\n");
+	if (! getmailname(hostname, sizeof hostname))
 		return (-1);
-	}
 
 	conf = x_conf;
 	bzero(conf, sizeof(*conf));
@@ -1334,25 +1394,25 @@ parse_config(struct smtpd *x_conf, const char *filename, int opts)
 	conf->sc_maxsize = DEFAULT_MAX_BODY_SIZE;
 
 	conf->sc_tables_dict = calloc(1, sizeof(*conf->sc_tables_dict));
-	conf->sc_tables_tree = calloc(1, sizeof(*conf->sc_tables_tree));
 	conf->sc_rules = calloc(1, sizeof(*conf->sc_rules));
 	conf->sc_listeners = calloc(1, sizeof(*conf->sc_listeners));
 	conf->sc_ssl_dict = calloc(1, sizeof(*conf->sc_ssl_dict));
+	conf->sc_limits_dict = calloc(1, sizeof(*conf->sc_limits_dict));
 
 	/* Report mails delayed for more than 4 hours */
 	conf->sc_bounce_warn[0] = 3600 * 4;
 
 	if (conf->sc_tables_dict == NULL	||
-	    conf->sc_tables_tree == NULL	||
 	    conf->sc_rules == NULL		||
 	    conf->sc_listeners == NULL		||
-	    conf->sc_ssl_dict == NULL) {
+	    conf->sc_ssl_dict == NULL		||
+	    conf->sc_limits_dict == NULL) {
 		log_warn("warn: cannot allocate memory");
 		free(conf->sc_tables_dict);
-		free(conf->sc_tables_tree);
 		free(conf->sc_rules);
 		free(conf->sc_listeners);
 		free(conf->sc_ssl_dict);
+		free(conf->sc_limits_dict);
 		return (-1);
 	}
 
@@ -1365,7 +1425,11 @@ parse_config(struct smtpd *x_conf, const char *filename, int opts)
 
 	dict_init(conf->sc_ssl_dict);
 	dict_init(conf->sc_tables_dict);
-	tree_init(conf->sc_tables_tree);
+
+	dict_init(conf->sc_limits_dict);
+	limits = xcalloc(1, sizeof(*limits), "mta_limits");
+	limit_mta_set_defaults(limits);
+	dict_xset(conf->sc_limits_dict, "default", limits);
 
 	TAILQ_INIT(conf->sc_listeners);
 	TAILQ_INIT(conf->sc_rules);
@@ -1384,12 +1448,19 @@ parse_config(struct smtpd *x_conf, const char *filename, int opts)
 	 */
 	set_localaddrs();
 
-	t = table_create("static", "<localnames>", NULL);
+	t = table_create("static", "<localnames>", NULL, NULL);
 	t->t_type = T_LIST;
 	table_add(t, "localhost", NULL);
 	table_add(t, hostname, NULL);
 
-	table_create("getpwnam", "<getpwnam>", NULL);
+	/* can't truncate here */
+	(void)strlcpy(hostname_copy, hostname, sizeof hostname_copy);
+
+	hostname_copy[strcspn(hostname_copy, ".")] = '\0';
+	if (strcmp(hostname, hostname_copy) != 0)
+		table_add(t, hostname_copy, NULL);
+
+	table_create("getpwnam", "<getpwnam>", NULL, NULL);
 
 	/*
 	 * parse configuration
@@ -1420,12 +1491,7 @@ parse_config(struct smtpd *x_conf, const char *filename, int opts)
 	}
 
 	if (strlen(conf->sc_hostname) == 0)
-		if (gethostname(conf->sc_hostname,
-		    sizeof(conf->sc_hostname)) == -1) {
-			log_warn("warn: could not determine host name");
-			bzero(conf->sc_hostname, sizeof(conf->sc_hostname));
-			errors++;
-		}
+		strlcpy(conf->sc_hostname, hostname, sizeof conf->sc_hostname);
 
 	if (errors) {
 		purge_config(PURGE_EVERYTHING);
@@ -1654,7 +1720,7 @@ host(const char *s, const char *tag, const char *cert, struct listenerlist *al,
 }
 
 int
-interface(const char *s, const char *tag, const char *cert,
+interface(const char *s, int family, const char *tag, const char *cert,
     struct listenerlist *al, int max, in_port_t port, const char *authtable, uint8_t flags,
     const char *helo)
 {
@@ -1674,6 +1740,8 @@ interface(const char *s, const char *tag, const char *cert,
 			continue;
 		if (strcmp(p->ifa_name, s) != 0 &&
 		    ! is_if_in_group(p->ifa_name, s))
+			continue;
+		if (family != AF_UNSPEC && family != p->ifa_addr->sa_family)
 			continue;
 
 		h = xcalloc(1, sizeof(*h), "interface");
@@ -1732,7 +1800,7 @@ set_localaddrs(void)
 	struct sockaddr_in6	*sin6;
 	struct table		*t;
 
-	t = table_create("static", "<anyhost>", NULL);
+	t = table_create("static", "<anyhost>", NULL, NULL);
 	table_add(t, "local", NULL);
 	table_add(t, "0.0.0.0/0", NULL);
 	table_add(t, "::/0", NULL);
@@ -1740,7 +1808,7 @@ set_localaddrs(void)
 	if (getifaddrs(&ifap) == -1)
 		fatal("getifaddrs");
 
-	t = table_create("static", "<localhost>", NULL);
+	t = table_create("static", "<localhost>", NULL, NULL);
 	table_add(t, "local", NULL);
 
 	for (p = ifap; p != NULL; p = p->ifa_next) {
@@ -1851,5 +1919,74 @@ is_if_in_group(const char *ifname, const char *groupname)
 
 end:
 	close(s);
+	return ret;
+}
+
+int
+getmailname(char *hostname, size_t len)
+{
+	struct addrinfo	hints, *res = NULL;
+	FILE   *fp;
+	char   *buf, *lbuf = NULL;
+	size_t	buflen;
+	int	error;
+	int	ret = 0;
+
+	/* First, check if we have "/etc/mailname" */
+	if ((fp = fopen("/etc/mailname", "r")) == NULL)
+		goto nomailname;
+
+	if ((buf = fgetln(fp, &buflen)) == NULL)
+		goto end;
+
+	if (buf[buflen-1] == '\n')
+		buf[buflen - 1] = '\0';
+	else {
+		if ((lbuf = calloc(buflen + 1, 1)) == NULL)
+			err(1, "calloc");
+		memcpy(lbuf, buf, buflen);
+	}
+
+	if (strlcpy(hostname, buf, len) >= len)
+		fprintf(stderr, "/etc/mailname entry too long");
+	else {
+		ret = 1;
+		goto end;
+	}
+	
+
+nomailname:
+	if (gethostname(hostname, len) == -1) {
+		fprintf(stderr, "invalid hostname: gethostname() failed\n");
+		goto end;
+	}
+
+	if (strchr(hostname, '.') == NULL) {
+		memset(&hints, 0, sizeof hints);
+		hints.ai_family = PF_UNSPEC;
+		hints.ai_socktype = SOCK_STREAM;
+		hints.ai_protocol = IPPROTO_TCP;
+		hints.ai_flags = AI_CANONNAME;
+		error = getaddrinfo(hostname, NULL, &hints, &res);
+		if (error) {
+			fprintf(stderr, "invalid hostname: getaddrinfo() failed: %s\n",
+			    gai_strerror(error));
+			goto end;
+		}
+		
+		if (strlcpy(hostname, res->ai_canonname, len) >= len) {
+			fprintf(stderr, "hostname too long");
+			goto end;
+		}
+	}
+
+	ret = 1;
+
+end:
+	free(lbuf);
+	if (res)
+		freeaddrinfo(res);
+	if (fp)
+		fclose(fp);
 	return ret;
 }

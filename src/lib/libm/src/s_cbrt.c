@@ -78,6 +78,6 @@ cbrt(double x)
 	return(t);
 }
 
-#if	LDBL_MANT_DIG == 53
-__weak_alias(cbrtl, cbrt);
-#endif	/* LDBL_MANT_DIG == 53 */
+#if	LDBL_MANT_DIG == DBL_MANT_DIG
+__strong_alias(cbrtl, cbrt);
+#endif	/* LDBL_MANT_DIG == DBL_MANT_DIG */

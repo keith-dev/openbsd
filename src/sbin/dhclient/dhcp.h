@@ -1,6 +1,6 @@
-/*	$OpenBSD: dhcp.h,v 1.11 2013/01/13 18:38:02 krw Exp $	*/
+/*	$OpenBSD: dhcp.h,v 1.15 2013/06/09 16:21:50 krw Exp $	*/
 
-/* Protocol structures... */
+/* Protocol structures. */
 
 /*
  * Copyright (c) 1995, 1996 The Internet Software Consortium.
@@ -76,13 +76,13 @@ struct dhcp_packet {
 #define BOOTREQUEST	1
 #define BOOTREPLY	2
 
-/* Possible values for flags field... */
+/* Possible values for flags field. */
 #define BOOTP_BROADCAST 32768L
 
-/* Possible values for hardware type (htype) field... */
+/* Possible values for hardware type (htype) field. */
 #define HTYPE_ETHER		1	/* Ethernet			*/
-#define HTYPE_IEEE802		6	/* IEEE 802.2 Token Ring...	*/
-#define HTYPE_FDDI		8	/* FDDI...			*/
+#define HTYPE_IEEE802		6	/* IEEE 802.2 Token Ring	*/
+#define HTYPE_FDDI		8	/* FDDI				*/
 #define HTYPE_IPSEC_TUNNEL	31	/* IPsec Tunnel (RFC3456)	*/
 
 /* Magic cookie validating dhcp options field (and bootp vendor
@@ -173,6 +173,7 @@ struct dhcp_packet {
 #define DHO_NDS_SERVERS			85
 #define DHO_NDS_TREE_NAME		86
 #define DHO_NDS_CONTEXT			87
+#define DHO_CLASSLESS_STATIC_ROUTES	121
 #define DHO_TFTP_CONFIG_FILE		144
 #define DHO_VOIP_CONFIGURATION_SERVER	150
 #define DHO_AUTOPROXY_SCRIPT		252

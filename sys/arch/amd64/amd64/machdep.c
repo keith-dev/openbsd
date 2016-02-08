@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.160 2013/01/16 05:49:48 dlg Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.165 2013/06/29 21:06:15 brad Exp $	*/
 /*	$NetBSD: machdep.c,v 1.3 2003/05/07 22:58:18 fvdl Exp $	*/
 
 /*-
@@ -101,7 +101,6 @@
 
 #include <machine/cpu.h>
 #include <machine/cpufunc.h>
-#include <machine/gdt.h>
 #include <machine/pio.h>
 #include <machine/psl.h>
 #include <machine/reg.h>
@@ -800,7 +799,7 @@ long	dumplo = 0; 		/* blocks */
 int
 cpu_dump(void)
 {
-	int (*dump)(dev_t, daddr64_t, caddr_t, size_t);
+	int (*dump)(dev_t, daddr_t, caddr_t, size_t);
 	char buf[dbtob(1)];
 	kcore_seg_t *segp;
 	cpu_kcore_hdr_t *cpuhdrp;
@@ -895,9 +894,9 @@ dumpsys(void)
 {
 	u_long totalbytesleft, bytes, i, n, memseg;
 	u_long maddr;
-	daddr64_t blkno;
+	daddr_t blkno;
 	void *va;
-	int (*dump)(dev_t, daddr64_t, caddr_t, size_t);
+	int (*dump)(dev_t, daddr_t, caddr_t, size_t);
 	int error;
 
 	/* Save registers. */
@@ -1403,6 +1402,24 @@ init_x86_64(paddr_t first_avail)
 		uvm_page_physload(atop(seg_start), atop(seg_end),
 		    atop(seg_start), atop(seg_end), 0);
 	}
+
+	/*
+         * Now, load the memory between the end of I/O memory "hole"
+         * and the kernel.
+	 */
+	{
+		paddr_t seg_start = round_page(IOM_END);
+		paddr_t seg_end = trunc_page(KERNTEXTOFF - KERNBASE);
+
+		if (seg_start < seg_end) {
+#if DEBUG_MEMLOAD
+			printf("loading 0x%lx-0x%lx\n", seg_start, seg_end);
+#endif
+			uvm_page_physload(atop(seg_start), atop(seg_end),
+			    atop(seg_start), atop(seg_end), 0);
+		}
+	}
+
 #if DEBUG_MEMLOAD
 	printf("avail_start = 0x%lx\n", avail_start);
 	printf("avail_end = 0x%lx\n", avail_end);
@@ -1532,9 +1549,6 @@ init_x86_64(paddr_t first_avail)
 		idt_allocmap[x] = 1;
 	}
 
-	/* 128 was the old interrupt gate for syscalls; remove in 2013 */
-	idt_allocmap[128] = 1;
-
 	setregion(&region, gdtstore, GDT_SIZE - 1);
 	lgdt(&region);
 
@@ -1661,7 +1675,7 @@ amd64_pa_used(paddr_t addr)
 		return 1;
 
 	/* Low memory used for various bootstrap things */
-	if (addr >= 0 && addr < avail_start)
+	if (addr < avail_start)
 		return 1;
 
 	/*

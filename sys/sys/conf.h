@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.h,v 1.119 2012/08/23 06:12:49 deraadt Exp $	*/
+/*	$OpenBSD: conf.h,v 1.124 2013/06/21 21:30:38 syl Exp $	*/
 /*	$NetBSD: conf.h,v 1.33 1996/05/03 20:03:32 christos Exp $	*/
 
 /*-
@@ -89,9 +89,9 @@ struct bdevsw {
 	void	(*d_strategy)(struct buf *bp);
 	int	(*d_ioctl)(dev_t dev, u_long cmd, caddr_t data,
 				     int fflag, struct proc *p);
-	int	(*d_dump)(dev_t dev, daddr64_t blkno, caddr_t va,
+	int	(*d_dump)(dev_t dev, daddr_t blkno, caddr_t va,
 				    size_t size);
-	daddr64_t (*d_psize)(dev_t dev);
+	daddr_t (*d_psize)(dev_t dev);
 	u_int	d_type;
 	/* u_int	d_flags; */
 };
@@ -101,8 +101,8 @@ struct bdevsw {
 extern struct bdevsw bdevsw[];
 
 /* bdevsw-specific types */
-#define	dev_type_dump(n)	int n(dev_t, daddr64_t, caddr_t, size_t)
-#define	dev_type_size(n)	daddr64_t n(dev_t)
+#define	dev_type_dump(n)	int n(dev_t, daddr_t, caddr_t, size_t)
+#define	dev_type_size(n)	daddr_t n(dev_t)
 
 /* bdevsw-specific initializations */
 #define	dev_size_init(c,n)	(c > 0 ? __CONCAT(n,size) : 0)
@@ -509,6 +509,13 @@ extern struct cdevsw cdevsw[];
 	(dev_type_stop((*))) enodev, 0, selfalse, \
 	(dev_type_mmap((*))) enodev }
 
+/* open, close, read, write, poll, ioctl */
+#define cdev_fuse_init(c,n) { \
+	dev_init(c,n,open), dev_init(c,n,close), dev_init(c,n,read), \
+	dev_init(c,n,write), dev_init(c,n,ioctl), \
+	(dev_type_stop((*))) enodev, 0, dev_init(c,n,poll), \
+	(dev_type_mmap((*))) enodev, 0, D_CLONE, dev_init(c,n,kqfilter) }
+
 #endif
 
 /*
@@ -538,7 +545,6 @@ extern struct linesw linesw[];
 struct swdevt {
 	dev_t	sw_dev;
 	int	sw_flags;
-	struct	vnode *sw_vp;
 };
 #define	SW_FREED	0x01
 #define	SW_SEQUENTIAL	0x02
@@ -583,7 +589,6 @@ cdev_decl(ctty);
 
 cdev_decl(audio);
 cdev_decl(midi);
-cdev_decl(sequencer);
 cdev_decl(radio);
 cdev_decl(video);
 cdev_decl(cn);
@@ -657,6 +662,7 @@ cdev_decl(urio);
 cdev_decl(hotplug);
 cdev_decl(gpio);
 cdev_decl(amdmsr);
+cdev_decl(fuse);
 
 #endif
 

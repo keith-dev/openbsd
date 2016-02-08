@@ -1,4 +1,4 @@
-/*	$OpenBSD: syslogd.c,v 1.105 2013/02/10 10:47:08 markus Exp $	*/
+/*	$OpenBSD: syslogd.c,v 1.107 2013/04/16 19:24:55 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1983, 1988, 1993, 1994
@@ -1686,7 +1686,7 @@ markit(void)
 {
 	struct filed *f;
 
-	now = time((time_t *)NULL);
+	now = time(NULL);
 	MarkSeq += TIMERINTVL;
 	if (MarkSeq >= MarkInterval) {
 		logmsg(LOG_INFO, "-- MARK --",
@@ -1805,7 +1805,8 @@ ctlsock_accept_handler(void)
 	dprintf("Accepting control connection\n");
 	fd = accept(pfd[PFD_CTLSOCK].fd, NULL, NULL);
 	if (fd == -1) {
-		if (errno != EINTR && errno != ECONNABORTED)
+		if (errno != EINTR && errno != EWOULDBLOCK &&
+		    errno != ECONNABORTED)
 			logerror("accept ctlsock");
 		return;
 	}

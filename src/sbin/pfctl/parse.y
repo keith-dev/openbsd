@@ -1,4 +1,4 @@
-/*	$OpenBSD: parse.y,v 1.621 2013/01/16 01:49:20 henning Exp $	*/
+/*	$OpenBSD: parse.y,v 1.623 2013/06/01 21:51:54 henning Exp $	*/
 
 /*
  * Copyright (c) 2001 Markus Friedl.  All rights reserved.
@@ -461,7 +461,7 @@ int	parseport(char *, struct range *r, int);
 %token	LOAD RULESET_OPTIMIZATION RTABLE RDOMAIN PRIO ONCE
 %token	STICKYADDRESS MAXSRCSTATES MAXSRCNODES SOURCETRACK GLOBAL RULE
 %token	MAXSRCCONN MAXSRCCONNRATE OVERLOAD FLUSH SLOPPY PFLOW
-%token	TAGGED TAG IFBOUND FLOATING STATEPOLICY STATEDEFAULTS ROUTE SETTOS
+%token	TAGGED TAG IFBOUND FLOATING STATEPOLICY STATEDEFAULTS ROUTE
 %token	DIVERTTO DIVERTREPLY DIVERTPACKET NATTO AFTO RDRTO RECEIVEDON NE LE GE
 %token	<v.string>		STRING
 %token	<v.number>		NUMBER
@@ -979,14 +979,6 @@ scrub_opt	: NODF	{
 			}
 			scrub_opts.marker |= FOM_MAXMSS;
 			scrub_opts.maxmss = $2;
-		}
-		| SETTOS tos {	/* XXX remove in 5.3-current */
-			if (scrub_opts.marker & FOM_SETTOS) {
-				yyerror("set-tos cannot be respecified");
-				YYERROR;
-			}
-			scrub_opts.marker |= FOM_SETTOS;
-			scrub_opts.settos = $2;
 		}
 		| REASSEMBLE STRING {
 			if (strcasecmp($2, "tcp") != 0) {
@@ -2232,7 +2224,6 @@ filter_opt	: USER uids {
 		| SCRUB '(' scrub_opts ')' {
 			filter_opts.nodf = $3.nodf;
 			filter_opts.minttl = $3.minttl;
-			filter_opts.settos = $3.settos;
 			filter_opts.randomid = $3.randomid;
 			filter_opts.max_mss = $3.maxmss;
 			if ($3.reassemble_tcp)
@@ -5295,7 +5286,6 @@ lookup(char *s)
 		{ "ruleset-optimization",	RULESET_OPTIMIZATION},
 		{ "scrub",		SCRUB},
 		{ "set",		SET},
-		{ "set-tos",		SETTOS},
 		{ "skip",		SKIP},
 		{ "sloppy",		SLOPPY},
 		{ "source-hash",	SOURCEHASH},

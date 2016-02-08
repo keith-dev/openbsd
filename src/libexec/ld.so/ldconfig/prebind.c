@@ -1,4 +1,4 @@
-/* $OpenBSD: prebind.c,v 1.18 2013/01/23 19:15:58 miod Exp $ */
+/* $OpenBSD: prebind.c,v 1.22 2013/07/15 00:01:58 jca Exp $ */
 /*
  * Copyright (c) 2006 Dale Rahn <drahn@dalerahn.com>
  *
@@ -32,6 +32,7 @@
 #include <err.h>
 #include "resolve.h"
 #include "link.h"
+#include "path.h"
 #include "sod.h"
 #ifndef __mips64__
 #include "machine/reloc.h"
@@ -71,6 +72,9 @@ char *shstrtab;
 #endif
 #ifdef __m88k__
 #define RELOC_JMP_SLOT	RELOC_GOTP_ENT
+#endif
+#ifdef __vax__
+#define	RELOC_JMP_SLOT	R_VAX_JMP_SLOT
 #endif
 /* powerpc uses RELOC_JMP_SLOT */
 /* sparc uses RELOC_JMP_SLOT */
@@ -148,7 +152,7 @@ struct elf_object * elf_lookup_object_devino(dev_t dev, ino_t inode,
 void	elf_free_curbin_list(struct elf_object *obj);
 void	elf_resolve_curbin(void);
 struct proglist *elf_newbin(void);
-void	elf_sum_reloc();
+void	elf_sum_reloc(void);
 int	elf_prep_lib_prebind(struct elf_object *object);
 int	elf_prep_bin_prebind(struct proglist *pl);
 void	add_fixup_prog(struct elf_object *prog, struct elf_object *obj, int idx,
@@ -471,12 +475,10 @@ done:
 int
 elf_check_note(void *buf, Elf_Phdr *phdr)
 {
-	Elf_Ehdr *ehdr;
 	u_long address;
 	u_int *pint;
 	char *osname;
 
-	ehdr = (Elf_Ehdr *)buf;
 	address = phdr->p_offset;
 	pint = (u_int *)((char *)buf + address);
 	osname = (char *)buf + address + sizeof(*pint) * 3;
@@ -671,8 +673,8 @@ elf_load_object(void *pexe, const char *name)
 			object->dyn.jmprel = 0;
 		}
 		if (object->dyn.rpath != NULL){
-			object->dyn.rpath = strdup(object->dyn.rpath);
-			if (object->dyn.rpath == NULL) {
+			object->rpath = _dl_split_path(object->dyn.rpath);
+			if (object->rpath == NULL) {
 				printf("unable to allocate rpath for %s\n",
 				    name);
 				exit(10);
@@ -1421,7 +1423,7 @@ elf_init_objarray(void)
 }
 
 void
-elf_sum_reloc()
+elf_sum_reloc(void)
 {
 	int numobjs;
 	int err = 0;
@@ -1711,7 +1713,7 @@ elf_write_lib(struct elf_object *object, struct nameidx *nameidx,
 	u_int32_t next_start, *fixuptab = NULL;
 	struct stat ifstat;
 	off_t base_offset;
-	size_t len;
+	ssize_t len;
 	int fd = -1, i;
 	int readonly = 0;
 
@@ -1727,8 +1729,24 @@ elf_write_lib(struct elf_object *object, struct nameidx *nameidx,
 		}
 		readonly = 1;
 	}
-	lseek(fd, -((off_t)sizeof(struct prebind_footer)), SEEK_END);
+	if (lseek(fd, -((off_t)sizeof(struct prebind_footer)), SEEK_END)
+	    == -1) {
+		perror(object->load_name);
+		close(fd);
+		return 1;
+	}
+
 	len = read(fd, &footer, sizeof(struct prebind_footer));
+	if (len != sizeof(struct prebind_footer)) {
+		close(fd);
+		if (len == -1)
+			perror(object->load_name);
+		else
+			/* paranoia */
+			warnx("%s on %s: short read (corrupted file?)",
+			    __func__, object->load_name);
+		return 1;
+	}
 
 	if (fstat(fd, &ifstat) == -1) {
 		perror(object->load_name);
@@ -2001,8 +2019,8 @@ prebind_writenewfile(int infd, char *name, struct stat *st, off_t orig_size,
 	return (0);
 
 fail:
-	free(newname);
 	unlink(newname);
+	free(newname);
 	close(outfd);
 	return (-1);
 }
@@ -2209,7 +2227,6 @@ void
 copy_oldsymcache(int objidx, void *prebind_map)
 {
 	struct prebind_footer *footer;
-	struct elf_object *object;
 	struct elf_object *tobj;
 	struct symcache_noflag *tcache;
 	struct symcachetab *symcache;
@@ -2218,8 +2235,6 @@ copy_oldsymcache(int objidx, void *prebind_map)
 	u_int32_t offset;
 	u_int32_t *poffset;
 	struct nameidx *nameidx;
-
-	object = objarray[objidx].obj;
 
 	poffset = (u_int32_t *)prebind_map;
 	c = prebind_map;

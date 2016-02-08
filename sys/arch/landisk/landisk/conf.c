@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.23 2012/08/23 06:12:49 deraadt Exp $	*/
+/*	$OpenBSD: conf.c,v 1.25 2013/06/03 15:54:47 tedu Exp $	*/
 
 /*
  * Copyright (c) 1994-1998 Mark Brinicombe.
@@ -107,7 +107,6 @@ cdev_decl(pci);
 #include "audio.h"
 #include "video.h"
 #include "midi.h"
-#include "sequencer.h"
 
 /*
  * USB devices
@@ -256,6 +255,7 @@ struct bdevsw bdevsw[] = {
 #include "scif.h"
 #include "vscsi.h"
 #include "pppx.h"
+#include "fuse.h"
 
 struct cdevsw cdevsw[] = {
 	cdev_cn_init(1,cn),			/*  0: virtual console */
@@ -316,7 +316,7 @@ struct cdevsw cdevsw[] = {
 	cdev_lkm_dummy(),			/* 55: Reserved for bypass device */	
 	cdev_notdef(),				/* 56: reserved */
 	cdev_midi_init(NMIDI,midi),		/* 57: MIDI I/O */
-	cdev_midi_init(NSEQUENCER,sequencer),	/* 58: sequencer I/O */
+	cdev_notdef(),				/* 58 was: sequencer I/O */
 	cdev_notdef(),				/* 59: reserved */
 	cdev_wsdisplay_init(NWSDISPLAY,wsdisplay), /* 60: frame buffers, etc.*/
 	cdev_mouse_init(NWSKBD,wskbd),		/* 61: keyboards */
@@ -365,6 +365,7 @@ struct cdevsw cdevsw[] = {
 	cdev_bthub_init(NBTHUB,bthub),		/* 100: bthub */
 	cdev_disk_init(1,diskmap),		/* 101: disk mapper */
 	cdev_pppx_init(NPPPX,pppx),		/* 102: pppx */
+	cdev_fuse_init(NFUSE,fuse),		/* 103: fuse */
 };
 
 int nblkdev = nitems(bdevsw);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: server.c,v 1.32 2009/10/27 23:59:41 deraadt Exp $	*/
+/*	$OpenBSD: server.c,v 1.34 2013/06/02 06:20:35 guenther Exp $	*/
 
 /*
  * Copyright (c) 1983, 1993
@@ -361,7 +361,7 @@ sendf(rname, opts)
 	int sizerr, f, u, len;
 	off_t i;
 	DIR *d;
-	struct direct *dp;
+	struct dirent *dp;
 	char *otp, *cp;
 	extern struct subcmd *subcmds;
 	static char user[15], group[15];
@@ -947,7 +947,7 @@ differ:			buf[0] = '\0';
 	/*
 	 * Set last modified time
 	 */
-	tvp[0].tv_sec = time(0);
+	tvp[0].tv_sec = time(NULL);
 	tvp[0].tv_usec = 0;
 	tvp[1].tv_sec = mtime;
 	tvp[1].tv_usec = 0;
@@ -1218,7 +1218,7 @@ clean(cp)
 	char *cp;
 {
 	DIR *d;
-	struct direct *dp;
+	struct dirent *dp;
 	struct stat stb;
 	char *otp;
 	int len, opts;
@@ -1292,7 +1292,7 @@ removeit(stp)
 	struct stat *stp;
 {
 	DIR *d;
-	struct direct *dp;
+	struct dirent *dp;
 	char *cp;
 	struct stat stb;
 	char *otp;

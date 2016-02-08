@@ -1,4 +1,4 @@
-/*	$OpenBSD: ess.c,v 1.16 2010/07/15 03:43:11 jakemsr Exp $	*/
+/*	$OpenBSD: ess.c,v 1.18 2013/05/24 07:58:46 ratchov Exp $	*/
 /*	$NetBSD: ess.c,v 1.44.4.1 1999/06/21 01:18:00 thorpej Exp $	*/
 
 /*
@@ -904,7 +904,8 @@ essattach(sc)
 	sc->sc_audio1.polled = sc->sc_audio1.irq == -1;
 	if (!sc->sc_audio1.polled) {
 		sc->sc_audio1.ih = isa_intr_establish(sc->sc_ic,
-		    sc->sc_audio1.irq, sc->sc_audio1.ist, IPL_AUDIO,
+		    sc->sc_audio1.irq, sc->sc_audio1.ist,
+		    IPL_AUDIO | IPL_MPSAFE,
 		    ess_audio1_intr, sc, sc->sc_dev.dv_xname);
 		printf("%s: audio1 interrupting at irq %d\n",
 		    sc->sc_dev.dv_xname, sc->sc_audio1.irq);
@@ -921,7 +922,8 @@ essattach(sc)
 		sc->sc_audio2.polled = sc->sc_audio2.irq == -1;
 		if (!sc->sc_audio2.polled) {
 			sc->sc_audio2.ih = isa_intr_establish(sc->sc_ic,
-			    sc->sc_audio2.irq, sc->sc_audio2.ist, IPL_AUDIO,
+			    sc->sc_audio2.irq, sc->sc_audio2.ist,
+			    IPL_AUDIO | IPL_MPSAFE,
 			    ess_audio2_intr, sc, sc->sc_dev.dv_xname);
 			printf("%s: audio2 interrupting at irq %d\n",
 			    sc->sc_dev.dv_xname, sc->sc_audio2.irq);
@@ -1301,6 +1303,7 @@ ess_audio1_trigger_output(addr, start, end, blksize, intr, arg, param)
 	struct ess_softc *sc = addr;
 	u_int8_t reg;
 
+	mtx_enter(&audio_lock);
 	DPRINTFN(1, ("ess_audio1_trigger_output: sc=%p start=%p end=%p blksize=%d intr=%p(%p)\n",
 	    addr, start, end, blksize, intr, arg));
 
@@ -1363,7 +1366,7 @@ ess_audio1_trigger_output(addr, start, end, blksize, intr, arg, param)
 	reg &= ~(ESS_AUDIO1_CTRL2_DMA_READ | ESS_AUDIO1_CTRL2_ADC_ENABLE);
 	reg |= ESS_AUDIO1_CTRL2_FIFO_ENABLE | ESS_AUDIO1_CTRL2_AUTO_INIT;
 	ess_write_x_reg(sc, ESS_XCMD_AUDIO1_CTRL2, reg);
-
+	mtx_leave(&audio_lock);
 	return (0);
 }
 
@@ -1379,6 +1382,7 @@ ess_audio2_trigger_output(addr, start, end, blksize, intr, arg, param)
 	struct ess_softc *sc = addr;
 	u_int8_t reg;
 
+	mtx_enter(&audio_lock);
 	DPRINTFN(1, ("ess_audio2_trigger_output: sc=%p start=%p end=%p blksize=%d intr=%p(%p)\n",
 	    addr, start, end, blksize, intr, arg));
 
@@ -1432,7 +1436,7 @@ ess_audio2_trigger_output(addr, start, end, blksize, intr, arg, param)
 	reg |= ESS_AUDIO2_CTRL1_DAC_ENABLE | ESS_AUDIO2_CTRL1_FIFO_ENABLE |
 	       ESS_AUDIO2_CTRL1_AUTO_INIT;
 	ess_write_mix_reg(sc, ESS_MREG_AUDIO2_CTRL1, reg);
-
+	mtx_leave(&audio_lock);
 	return (0);
 }
 
@@ -1448,6 +1452,7 @@ ess_audio1_trigger_input(addr, start, end, blksize, intr, arg, param)
 	struct ess_softc *sc = addr;
 	u_int8_t reg;
 
+	mtx_enter(&audio_lock);
 	DPRINTFN(1, ("ess_audio1_trigger_input: sc=%p start=%p end=%p blksize=%d intr=%p(%p)\n",
 	    addr, start, end, blksize, intr, arg));
 
@@ -1510,7 +1515,7 @@ ess_audio1_trigger_input(addr, start, end, blksize, intr, arg, param)
 	reg |= ESS_AUDIO1_CTRL2_DMA_READ | ESS_AUDIO1_CTRL2_ADC_ENABLE;
 	reg |= ESS_AUDIO1_CTRL2_FIFO_ENABLE | ESS_AUDIO1_CTRL2_AUTO_INIT;
 	ess_write_x_reg(sc, ESS_XCMD_AUDIO1_CTRL2, reg);
-
+	mtx_leave(&audio_lock);
 	return (0);
 }
 
@@ -1521,7 +1526,7 @@ ess_audio1_halt(addr)
 	struct ess_softc *sc = addr;
 
 	DPRINTF(("ess_audio1_halt: sc=%p\n", sc));
-
+	mtx_enter(&audio_lock);
 	if (sc->sc_audio1.active) {
 		ess_clear_xreg_bits(sc, ESS_XCMD_AUDIO1_CTRL2,
 		    ESS_AUDIO1_CTRL2_FIFO_ENABLE);
@@ -1530,7 +1535,7 @@ ess_audio1_halt(addr)
 			timeout_del(&sc->sc_tmo1);
 		sc->sc_audio1.active = 0;
 	}
-
+	mtx_leave(&audio_lock);
 	return (0);
 }
 
@@ -1541,7 +1546,7 @@ ess_audio2_halt(addr)
 	struct ess_softc *sc = addr;
 
 	DPRINTF(("ess_audio2_halt: sc=%p\n", sc));
-
+	mtx_enter(&audio_lock);
 	if (sc->sc_audio2.active) {
 		ess_clear_mreg_bits(sc, ESS_MREG_AUDIO2_CTRL1,
 		    ESS_AUDIO2_CTRL1_DAC_ENABLE |
@@ -1551,7 +1556,7 @@ ess_audio2_halt(addr)
 			timeout_del(&sc->sc_tmo2);
 		sc->sc_audio2.active = 0;
 	}
-
+	mtx_leave(&audio_lock);
 	return (0);
 }
 
@@ -1564,19 +1569,25 @@ ess_audio1_intr(arg)
 
 	DPRINTFN(1,("ess_audio1_intr: intr=%p\n", sc->sc_audio1.intr));
 
+	mtx_enter(&audio_lock);
 	/* Check and clear interrupt on Audio1. */
 	reg = EREAD1(sc->sc_iot, sc->sc_ioh, ESS_DSP_RW_STATUS);
-	if ((reg & ESS_DSP_READ_OFLOW) == 0)
+	if ((reg & ESS_DSP_READ_OFLOW) == 0) {
+		mtx_leave(&audio_lock);
 		return (0);
+	}
 	reg = EREAD1(sc->sc_iot, sc->sc_ioh, ESS_CLEAR_INTR);
 
 	sc->sc_audio1.nintr++;
 
 	if (sc->sc_audio1.active) {
 		(*sc->sc_audio1.intr)(sc->sc_audio1.arg);
+		mtx_leave(&audio_lock);
 		return (1);
-	} else
+	} else {
+		mtx_leave(&audio_lock);
 		return (0);
+	}
 }
 
 int
@@ -1588,10 +1599,13 @@ ess_audio2_intr(arg)
 
 	DPRINTFN(1,("ess_audio2_intr: intr=%p\n", sc->sc_audio2.intr));
 
+	mtx_enter(&audio_lock);
 	/* Check and clear interrupt on Audio2. */
 	reg = ess_read_mix_reg(sc, ESS_MREG_AUDIO2_CTRL2);
-	if ((reg & ESS_AUDIO2_CTRL2_IRQ_LATCH) == 0)
+	if ((reg & ESS_AUDIO2_CTRL2_IRQ_LATCH) == 0) {
+		mtx_leave(&audio_lock);
 		return (0);
+	}
 	reg &= ~ESS_AUDIO2_CTRL2_IRQ_LATCH;
 	ess_write_mix_reg(sc, ESS_MREG_AUDIO2_CTRL2, reg);
 
@@ -1599,9 +1613,12 @@ ess_audio2_intr(arg)
 
 	if (sc->sc_audio2.active) {
 		(*sc->sc_audio2.intr)(sc->sc_audio2.arg);
+		mtx_leave(&audio_lock);
 		return (1);
-	} else
+	} else {
+		mtx_leave(&audio_lock);
 		return (0);
+	}
 }
 
 void
@@ -1614,6 +1631,7 @@ ess_audio1_poll(addr)
 	if (!sc->sc_audio1.active)
 		return;
 
+	mtx_enter(&audio_lock);
 	sc->sc_audio1.nintr++;
 
 	dmapos = isa_dmacount(sc->sc_isa, sc->sc_audio1.drq);
@@ -1631,8 +1649,8 @@ ess_audio1_poll(addr)
 #else
 	(*sc->sc_audio1.intr)(sc->sc_audio1.arg, dmacount);
 #endif
-
 	timeout_add_msec(&sc->sc_tmo1, 1000/30);
+	mtx_leave(&audio_lock);
 }
 
 void
@@ -1645,6 +1663,7 @@ ess_audio2_poll(addr)
 	if (!sc->sc_audio2.active)
 		return;
 
+	mtx_enter(&audio_lock);
 	sc->sc_audio2.nintr++;
 
 	dmapos = isa_dmacount(sc->sc_isa, sc->sc_audio2.drq);
@@ -1662,8 +1681,8 @@ ess_audio2_poll(addr)
 #else
 	(*sc->sc_audio2.intr)(sc->sc_audio2.arg, dmacount);
 #endif
-
 	timeout_add_msec(&sc->sc_tmo2, 1000/30);
+	mtx_leave(&audio_lock);
 }
 
 int
@@ -2677,14 +2696,13 @@ ess_write_mix_reg(sc, reg, val)
 {
 	bus_space_tag_t iot = sc->sc_iot;
 	bus_space_handle_t ioh = sc->sc_ioh;
-	int s;
 
 	DPRINTFN(2,("ess_write_mix_reg: %x=%x\n", reg, val));
 
-	s = splaudio();
+	mtx_enter(&audio_lock);
 	EWRITE1(iot, ioh, ESS_MIX_REG_SELECT, reg);
 	EWRITE1(iot, ioh, ESS_MIX_REG_DATA, val);
-	splx(s);
+	mtx_leave(&audio_lock);
 }
 
 /*
@@ -2697,13 +2715,12 @@ ess_read_mix_reg(sc, reg)
 {
 	bus_space_tag_t iot = sc->sc_iot;
 	bus_space_handle_t ioh = sc->sc_ioh;
-	int s;
 	u_char val;
 
-	s = splaudio();
+	mtx_enter(&audio_lock);
 	EWRITE1(iot, ioh, ESS_MIX_REG_SELECT, reg);
 	val = EREAD1(iot, ioh, ESS_MIX_REG_DATA);
-	splx(s);
+	mtx_leave(&audio_lock);
 
 	DPRINTFN(2,("ess_read_mix_reg: %x=%x\n", reg, val));
 	return val;
@@ -2736,10 +2753,9 @@ ess_read_multi_mix_reg(sc, reg, datap, count)
 {
 	bus_space_tag_t iot = sc->sc_iot;
 	bus_space_handle_t ioh = sc->sc_ioh;
-	int s;
 
-	s = splaudio();
+	mtx_enter(&audio_lock);
 	EWRITE1(iot, ioh, ESS_MIX_REG_SELECT, reg);
 	bus_space_read_multi_1(iot, ioh, ESS_MIX_REG_DATA, datap, count);
-	splx(s);
+	mtx_leave(&audio_lock);
 }

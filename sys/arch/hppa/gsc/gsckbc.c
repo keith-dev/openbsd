@@ -1,4 +1,4 @@
-/*	$OpenBSD: gsckbc.c,v 1.14 2012/08/10 17:49:31 shadchin Exp $	*/
+/*	$OpenBSD: gsckbc.c,v 1.17 2013/05/23 18:29:51 tobias Exp $	*/
 /*
  * Copyright (c) 2003, Miodrag Vallat.
  * All rights reserved.

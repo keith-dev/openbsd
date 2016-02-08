@@ -1,4 +1,4 @@
-/*	$OpenBSD: rtsock.c,v 1.123 2012/09/20 20:53:13 blambert Exp $	*/
+/*	$OpenBSD: rtsock.c,v 1.126 2013/05/17 11:13:37 krw Exp $	*/
 /*	$NetBSD: rtsock.c,v 1.18 1996/03/29 00:32:10 cgd Exp $	*/
 
 /*
@@ -621,6 +621,7 @@ route_output(struct mbuf *m, ...)
 		rn = (struct radix_node *)rt;
 		if (rn == NULL || (rn->rn_flags & RNF_ROOT) != 0) {
 			error = ESRCH;
+			rt = NULL;
 			goto flush;
 		}
 #ifndef SMALL_KERNEL
@@ -784,7 +785,7 @@ report:
 				    if (oifa && oifa->ifa_rtrequest)
 					oifa->ifa_rtrequest(RTM_DELETE, rt,
 					    &info);
-				    IFAFREE(rt->rt_ifa);
+				    ifafree(rt->rt_ifa);
 				    rt->rt_ifa = ifa;
 				    ifa->ifa_refcnt++;
 				    rt->rt_ifp = ifp;
@@ -1346,8 +1347,7 @@ sysctl_iflist(int af, struct walkarg *w)
 			w->w_where += len;
 		}
 		ifpaddr = 0;
-		while ((ifa = TAILQ_NEXT(ifa, ifa_list)) !=
-		    TAILQ_END(&ifp->if_addrlist)) {
+		while ((ifa = TAILQ_NEXT(ifa, ifa_list)) != NULL) {
 			if (af && af != ifa->ifa_addr->sa_family)
 				continue;
 			ifaaddr = ifa->ifa_addr;

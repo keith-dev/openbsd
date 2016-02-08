@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_tun.c,v 1.112 2011/07/09 00:47:18 henning Exp $	*/
+/*	$OpenBSD: if_tun.c,v 1.115 2013/05/25 10:05:52 mikeb Exp $	*/
 /*	$NetBSD: if_tun.c,v 1.24 1996/05/07 02:40:48 thorpej Exp $	*/
 
 /*
@@ -56,7 +56,6 @@
 #include <sys/poll.h>
 #include <sys/conf.h>
 
-#include <machine/cpu.h>
 
 #include <net/if.h>
 #include <net/if_types.h>
@@ -186,7 +185,7 @@ tun_create(struct if_clone *ifc, int unit, int flags)
 	ifp->if_start = tunstart;
 	ifp->if_hardmtu = TUNMRU;
 	ifp->if_link_state = LINK_STATE_DOWN;
-	IFQ_SET_MAXLEN(&ifp->if_snd, ifqmaxlen);
+	IFQ_SET_MAXLEN(&ifp->if_snd, IFQ_MAXLEN);
 	IFQ_SET_READY(&ifp->if_snd);
 
 	if ((flags & TUN_LAYER2) == 0) {
@@ -317,6 +316,7 @@ tun_switch(struct tun_softc *tp, int flags)
 		/* already opened before ifconfig tunX link0 */
 		s = splnet();
 		tp->tun_flags |= open;
+		ifp->if_flags |= IFF_RUNNING;
 		tun_link_state(tp);
 		splx(s);
 		TUNDEBUG(("%s: already open\n", tp->tun_if.if_xname));

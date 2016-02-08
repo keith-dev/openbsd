@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile.inc,v 1.109 2013/02/03 10:38:40 miod Exp $
+#	$OpenBSD: Makefile.inc,v 1.113 2013/06/05 04:06:08 guenther Exp $
 #	$NetBSD: Makefile.inc,v 1.35 1995/10/16 23:49:07 jtc Exp $
 #	@(#)Makefile.inc	8.1 (Berkeley) 6/17/93
 
@@ -45,7 +45,7 @@ ASM=	__get_tcb.o __getcwd.o __semctl.o __set_tcb.o __syscall.o \
 	mknod.o mknodat.o mlock.o mlockall.o mount.o mprotect.o \
 	msgctl.o msgget.o msgrcv.o msgsnd.o msync.o munlock.o \
 	munlockall.o munmap.o nanosleep.o nfssvc.o \
-	open.o openat.o pathconf.o pipe.o poll.o profil.o \
+	open.o openat.o pathconf.o pipe.o poll.o ppoll.o profil.o pselect.o \
 	quotactl.o read.o readlink.o readlinkat.o readv.o reboot.o \
 	recvfrom.o recvmsg.o rename.o renameat.o revoke.o rmdir.o \
 	sched_yield.o select.o semget.o semop.o sendmsg.o sendto.o \
@@ -56,7 +56,7 @@ ASM=	__get_tcb.o __getcwd.o __semctl.o __set_tcb.o __syscall.o \
 	shmget.o shutdown.o sigaction.o sigaltstack.o socket.o \
 	socketpair.o stat.o statfs.o swapctl.o symlink.o \
 	symlinkat.o sync.o sysarch.o umask.o unlink.o unlinkat.o \
-	unmount.o utimensat.o utimes.o wait4.o write.o writev.o
+	unmount.o utimensat.o utimes.o utrace.o wait4.o write.o writev.o
 
 # modules with specific implementations on some architectures, and the
 # default implementation elsewhere:
@@ -195,10 +195,11 @@ MAN+=	__get_tcb.2 __thrsigdivert.2 __thrsleep.2 _exit.2 accept.2 \
 	sigprocmask.2 sigreturn.2 sigsuspend.2 socket.2 \
 	socketpair.2 stat.2 statfs.2 swapctl.2 symlink.2 \
 	sync.2 sysarch.2 syscall.2 truncate.2 umask.2 unlink.2 \
-	utimes.2 vfork.2 wait.2 write.2
+	utimes.2 utrace.2 vfork.2 wait.2 write.2
 
 MLINKS+=__get_tcb.2 __set_tcb.2
 MLINKS+=__thrsleep.2 __thrwakeup.2
+MLINKS+=_exit.2 _Exit.2
 MLINKS+=access.2 faccessat.2
 MLINKS+=brk.2 sbrk.2
 MLINKS+=chdir.2 fchdir.2
@@ -210,6 +211,7 @@ MLINKS+=clock_gettime.2 clock_settime.2
 MLINKS+=dup.2 dup2.2
 MLINKS+=execve.2 exect.2
 MLINKS+=fhopen.2 fhstat.2 fhopen.2 fhstatfs.2
+MLINKS+=fsync.2 fdatasync.2
 MLINKS+=getgid.2 getegid.2
 MLINKS+=getitimer.2 setitimer.2
 MLINKS+=getitimer.2 timeradd.3
@@ -238,10 +240,12 @@ MLINKS+=mlockall.2 munlockall.2
 MLINKS+=mount.2 unmount.2
 MLINKS+=open.2 openat.2
 MLINKS+=pathconf.2 fpathconf.2
+MLINKS+=poll.2 ppoll.2
 MLINKS+=read.2 readv.2 read.2 pread.2 read.2 preadv.2
 MLINKS+=readlink.2 readlinkat.2
 MLINKS+=recv.2 recvfrom.2 recv.2 recvmsg.2
 MLINKS+=rename.2 renameat.2
+MLINKS+=select.2 pselect.2
 MLINKS+=select.2 FD_ISSET.3 select.2 FD_ZERO.3
 MLINKS+=select.2 FD_SET.3 select.2 FD_CLR.3
 MLINKS+=send.2 sendmsg.2 send.2 sendto.2

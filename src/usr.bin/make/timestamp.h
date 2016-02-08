@@ -1,7 +1,7 @@
 #ifndef TIMESTAMP_H
 #define TIMESTAMP_H
 
-/*	$OpenBSD: timestamp.h,v 1.7 2011/12/10 04:12:36 guenther Exp $ */
+/*	$OpenBSD: timestamp.h,v 1.10 2013/05/22 12:14:08 espie Exp $ */
 
 /*
  * Copyright (c) 2001 Marc Espie.
@@ -31,29 +31,24 @@
 /* This module handles time stamps on files in a relatively high-level way.
  * Most of the interface is achieved through inlineable code.
  *
- * TIMESTAMP: 			opaque data type to store a date.
  * ts_set_out_of_date(t):	set up t so that it is out-of-date.
  * b = is_out_of_date(t):	check whether t is out-of-date.
  * ts_set_from_stat(s, t):	grab date out of stat(2) buffer.
  * b = is_strictly_before(t1, t2):
  *				check whether t1 is before t2.
- * stamp = timestamp2time_t(t):	extract time_t from timestamp.
  * ts_set_from_time_t(d, t):	create timestamp from time_t.
- * ts_set_from_now(n):		grab current date.
  */
 
 /* sysresult = set_times(name):	set modification times on a file.
  * 				system call results.
  */
 
-#define Init_Timestamp()	ts_set_from_now(now)
+#define Init_Timestamp()	clock_gettime(CLOCK_REALTIME, &starttime)
 
-#ifndef TIMESTAMP_TYPE
-#include "timestamp_t.h"
-#endif
-#ifdef USE_TIMESPEC
-#define ts_set_out_of_date(t)	(t).tv_sec = INT_MIN, (t).tv_nsec = 0
-#define is_out_of_date(t)	((t).tv_sec == INT_MIN && (t).tv_nsec == 0)
+#define TMIN (sizeof(time_t) == sizeof(int32_t) ? INT32_MIN : INT64_MIN)
+#define ts_set_out_of_date(t)	(t).tv_sec = TMIN, (t).tv_nsec = 0
+#define is_out_of_date(t)	((t).tv_sec == TMIN && (t).tv_nsec == 0)
+
 #define ts_set_from_stat(s, t) \
 do { \
 	(t).tv_sec = (s).st_mtime; \
@@ -69,33 +64,12 @@ do { \
 	if (is_out_of_date(t)) \
 		(t).tv_nsec++; \
 } while (0)
-#define ts_set_from_now(n)	clock_gettime(CLOCK_REALTIME, &(n))
-#define timestamp2time_t(t)	((t).tv_sec)
-#else
-#define is_out_of_date(t)	((t) == INT_MIN)
-#define ts_set_out_of_date(t)	(t) = INT_MIN
-#define ts_set_from_stat(s, t) \
-do { \
-	(t) = (s).st_mtime; \
-	if (is_out_of_date(t)) \
-		(t)++; \
-} while (0)
-#define is_strictly_before(t1, t2)	((t1) < (t2))
-#define ts_set_from_time_t(d, t) \
-do { \
-	(t) = d; \
-	if (is_out_of_date(t)) \
-		(t)++; \
-} while (0)
-#define ts_set_from_now(n) time(&(n))
-#define timestamp2time_t(t)	(t)
-#endif
 
 extern int set_times(const char *);
 
-extern TIMESTAMP now;		/* The time at the start of this whole
-				 * process */
-extern char *time_to_string(TIMESTAMP t);
+extern struct timespec starttime;	/* The time at the start 
+					 * of this whole process */
+extern char *time_to_string(struct timespec *);
 
 
 #endif

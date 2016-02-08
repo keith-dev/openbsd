@@ -1,4 +1,4 @@
-/*	$OpenBSD: fd.c,v 1.37 2013/01/01 01:00:14 miod Exp $	*/
+/*	$OpenBSD: fd.c,v 1.39 2013/06/11 16:42:12 deraadt Exp $	*/
 /*	$NetBSD: fd.c,v 1.112 2003/08/07 16:29:35 agc Exp $	*/
 
 /*-
@@ -251,7 +251,7 @@ struct fd_softc {
 	struct timeout sc_motoron_to;
 	struct timeout sc_motoroff_to;
 
-	daddr64_t sc_blkno;	/* starting block number */
+	daddr_t sc_blkno;	/* starting block number */
 	int sc_bcount;		/* byte count left */
 	int sc_skip;		/* bytes already transferred */
 	int sc_nblks;		/* number of blocks currently transferring */
@@ -265,8 +265,6 @@ struct fd_softc {
 	int sc_cylin;		/* where we think the head is */
 	int sc_opts;		/* user-set options */
 
-	void	*sc_sdhook;	/* shutdownhook cookie */
-
 	TAILQ_ENTRY(fd_softc) sc_drivechain;
 	int sc_ops;		/* I/O ops since last switch */
 	struct buf sc_q;	/* pending I/O requests */
@@ -275,9 +273,11 @@ struct fd_softc {
 /* floppy driver configuration */
 int	fdmatch(struct device *, void *, void *);
 void	fdattach(struct device *, struct device *, void *);
+int	fdactivate(struct device *, int);
 
 struct cfattach fd_ca = {
-	sizeof(struct fd_softc), fdmatch, fdattach
+	sizeof(struct fd_softc), fdmatch, fdattach,
+	NULL, fdactivate
 };
 
 struct cfdriver fd_cd = {
@@ -670,9 +670,21 @@ fdattach(parent, self, aux)
 	fd->sc_dk.dk_flags = DKF_NOLABELREAD;
 	fd->sc_dk.dk_name = fd->sc_dv.dv_xname;
 	disk_attach(&fd->sc_dv, &fd->sc_dk);
+}
 
-	/* Make sure the drive motor gets turned off at shutdown time. */
-	fd->sc_sdhook = shutdownhook_establish(fd_motor_off, fd);
+int
+fdactivate(struct device *self, int act)
+{
+	int ret = 0;
+
+	switch (act) {
+	case DVACT_POWERDOWN:
+		/* Make sure the drive motor gets turned off at shutdown time. */
+		fd_motor_off(self);
+		break;
+	}
+
+	return (ret);
 }
 
 __inline struct fd_type *
@@ -1439,7 +1451,7 @@ loop:
 		sec -= head * type->sectrac;
 #ifdef DIAGNOSTIC
 		{
-			daddr64_t block;
+			daddr_t block;
 
 			block = (fd->sc_cylin * type->heads + head) *
 			    type->sectrac + sec;
@@ -1787,7 +1799,7 @@ fdcretry(fdc)
 	fdc->sc_errors++;
 }
 
-daddr64_t
+daddr_t
 fdsize(dev)
 	dev_t dev;
 {
@@ -1799,7 +1811,7 @@ fdsize(dev)
 int
 fddump(dev, blkno, va, size)
 	dev_t dev;
-	daddr64_t blkno;
+	daddr_t blkno;
 	caddr_t va;
 	size_t size;
 {
@@ -2013,7 +2025,7 @@ fdgetdisklabel(dev_t dev, struct fd_softc *fd, struct disklabel *lp,
 	lp->d_nsectors = fd->sc_type->sectrac;
 	lp->d_ncylinders = fd->sc_type->tracks;
 	lp->d_ntracks = fd->sc_type->heads;	/* Go figure... */
-	DL_SETDSIZE(lp, (daddr64_t)lp->d_secpercyl * lp->d_ncylinders);
+	DL_SETDSIZE(lp, (daddr_t)lp->d_secpercyl * lp->d_ncylinders);
 
 	strncpy(lp->d_typename, "floppy disk", sizeof(lp->d_typename));
 	strncpy(lp->d_packname, "fictitious", sizeof(lp->d_packname));

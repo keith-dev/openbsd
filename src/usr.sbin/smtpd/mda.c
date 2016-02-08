@@ -1,4 +1,4 @@
-/*	$OpenBSD: mda.c,v 1.89 2013/02/05 11:45:18 gilles Exp $	*/
+/*	$OpenBSD: mda.c,v 1.94 2013/07/19 15:14:23 eric Exp $	*/
 
 /*
  * Copyright (c) 2008 Gilles Chehade <gilles@poolp.org>
@@ -22,7 +22,6 @@
 #include <sys/types.h>
 #include <sys/queue.h>
 #include <sys/tree.h>
-#include <sys/param.h>
 #include <sys/socket.h>
 
 #include <ctype.h>
@@ -68,8 +67,8 @@ struct mda_envelope {
 struct mda_user {
 	TAILQ_ENTRY(mda_user)		entry;
 	TAILQ_ENTRY(mda_user)		entry_runnable;
-	char				name[MAXLOGNAME];
-	char				usertable[MAXPATHLEN];
+	char				name[SMTPD_MAXLOGNAME];
+	char				usertable[SMTPD_MAXPATHLEN];
 	size_t				evpcount;
 	TAILQ_HEAD(, mda_envelope)	envelopes;
 	int				flags;
@@ -119,7 +118,7 @@ mda_imsg(struct mproc *p, struct imsg *imsg)
 	const char		*username, *usertable;
 	uint64_t		 reqid;
 	size_t			 sz;
-	char			 out[256], buf[MAX_LINE_SIZE];
+	char			 out[256], buf[SMTPD_MAXLINESIZE];
 	int			 n, v;
 	enum lka_resp_status	status;
 
@@ -189,7 +188,7 @@ mda_imsg(struct mproc *p, struct imsg *imsg)
 
 			if (evpcount >= MDA_MAXEVP) {
 				log_debug("debug: mda: too many envelopes");
-				queue_tempfail(e->id,
+				queue_tempfail(e->id, 0,
 				    "Too many envelopes in the delivery agent: "
 				    "will try again later");
 				mda_log(e, "TempFail",
@@ -218,8 +217,7 @@ mda_imsg(struct mproc *p, struct imsg *imsg)
 				strlcpy(u->name, username, sizeof u->name);
 				strlcpy(u->usertable, usertable, sizeof u->usertable);
 				u->flags |= FLAG_USER_WAITINFO;
-				m_create(p_lka, IMSG_LKA_USERINFO, 0, 0, -1,
-				    32 + strlen(usertable) + strlen(username));
+				m_create(p_lka, IMSG_LKA_USERINFO, 0, 0, -1);
 				m_add_string(p_lka, usertable);
 				m_add_string(p_lka, username);
 				m_close(p_lka);
@@ -227,7 +225,7 @@ mda_imsg(struct mproc *p, struct imsg *imsg)
 			} else if (u->evpcount >= MDA_MAXEVPUSER) {
 				log_debug("debug: mda: too many envelopes for "
 				    "\"%s\"", u->name);
-				queue_tempfail(e->id,
+				queue_tempfail(e->id, 0,
 				    "Too many envelopes for this user in the "
 				    "delivery agent: will try again later");
 				mda_log(e, "TempFail",
@@ -266,7 +264,7 @@ mda_imsg(struct mproc *p, struct imsg *imsg)
 
 			if (imsg->fd == -1) {
 				log_debug("debug: mda: cannot get message fd");
-				queue_tempfail(e->id, "Cannot get message fd");
+				queue_tempfail(e->id, 0, "Cannot get message fd");
 				mda_log(e, "TempFail", "Cannot get message fd");
 				mda_done(s);
 				return;
@@ -278,7 +276,7 @@ mda_imsg(struct mproc *p, struct imsg *imsg)
 
 			if ((s->datafp = fdopen(imsg->fd, "r")) == NULL) {
 				log_warn("warn: mda: fdopen");
-				queue_tempfail(e->id, "fdopen failed");
+				queue_tempfail(e->id, 0, "fdopen failed");
 				mda_log(e, "TempFail", "fdopen failed");
 				mda_done(s);
 				close(imsg->fd);
@@ -307,7 +305,7 @@ mda_imsg(struct mproc *p, struct imsg *imsg)
 			if (n == -1) {
 				log_warn("warn: mda: "
 				    "fail to write delivery info");
-				queue_tempfail(e->id, "Out of memory");
+				queue_tempfail(e->id, 0, "Out of memory");
 				mda_log(e, "TempFail", "Out of memory");
 				mda_done(s);
 				return;
@@ -358,6 +356,17 @@ mda_imsg(struct mproc *p, struct imsg *imsg)
 				    sizeof deliver.to);
 				break;
 
+			case A_LMTP:
+				deliver.mode = A_LMTP;
+				deliver.userinfo = *userinfo;
+				strlcpy(deliver.user, userinfo->username,
+				    sizeof(deliver.user));
+				strlcpy(deliver.to, e->buffer,
+				    sizeof(deliver.to));
+				strlcpy(deliver.from, e->sender,
+				    sizeof(deliver.from));
+				break;
+
 			default:
 				errx(1, "mda: unknown delivery method: %d",
 				    e->method);
@@ -367,8 +376,7 @@ mda_imsg(struct mproc *p, struct imsg *imsg)
 			    "for session %016"PRIx64 " evpid %016"PRIx64,
 			    s->id, s->evp->id);
 
-			m_create(p_parent, IMSG_PARENT_FORK_MDA, 0, 0, -1,
-			    32 + sizeof(deliver));
+			m_create(p_parent, IMSG_PARENT_FORK_MDA, 0, 0, -1);
 			m_add_id(p_parent, reqid);
 			m_add_data(p_parent, &deliver, sizeof(deliver));
 			m_close(p_parent);
@@ -387,7 +395,7 @@ mda_imsg(struct mproc *p, struct imsg *imsg)
 			e = s->evp;
 			if (imsg->fd == -1) {
 				log_warn("warn: mda: fail to retrieve mda fd");
-				queue_tempfail(e->id, "Cannot get mda fd");
+				queue_tempfail(e->id, 0, "Cannot get mda fd");
 				mda_log(e, "TempFail", "Cannot get mda fd");
 				mda_done(s);
 				return;
@@ -430,7 +438,7 @@ mda_imsg(struct mproc *p, struct imsg *imsg)
 
 			/* update queue entry */
 			if (error) {
-				queue_tempfail(e->id, error);
+				queue_tempfail(e->id, 0, error);
 				snprintf(buf, sizeof buf, "Error (%s)", error);
 				mda_log(e, "TempFail", buf);
 			}
@@ -492,7 +500,6 @@ mda(void)
 	case -1:
 		fatal("mda: cannot fork");
 	case 0:
-		env->sc_pid = getpid();
 		break;
 	default:
 		return (pid);
@@ -500,9 +507,10 @@ mda(void)
 
 	purge_config(PURGE_EVERYTHING);
 
-	pw = env->sc_pw;
+	if ((pw = getpwnam(SMTPD_USER)) == NULL)
+		fatalx("unknown user " SMTPD_USER);
 
-	if (chroot(pw->pw_dir) == -1)
+	if (chroot(PATH_CHROOT) == -1)
 		fatal("mda: chroot");
 	if (chdir("/") == -1)
 		fatal("mda: chdir(\"/\")");
@@ -557,6 +565,7 @@ mda_io(struct io *io, int evt)
 	case IO_LOWAT:
 
 		/* done */
+	   done:
 		if (s->datafp == NULL) {
 			log_debug("debug: mda: all data sent for session"
 			    " %016"PRIx64 " evpid %016"PRIx64,
@@ -570,7 +579,7 @@ mda_io(struct io *io, int evt)
 				break;
 			if (iobuf_queue(&s->iobuf, ln, len) == -1) {
 				m_create(p_parent, IMSG_PARENT_KILL_MDA,
-				    0, 0, -1, 128);
+				    0, 0, -1);
 				m_add_id(p_parent, s->id);
 				m_add_string(p_parent, "Out of memory");
 				m_close(p_parent);
@@ -587,7 +596,7 @@ mda_io(struct io *io, int evt)
 		if (ferror(s->datafp)) {
 			log_debug("debug: mda: ferror on session %016"PRIx64,
 			    s->id);
-			m_create(p_parent, IMSG_PARENT_KILL_MDA, 0, 0, -1, 128);
+			m_create(p_parent, IMSG_PARENT_KILL_MDA, 0, 0, -1);
 			m_add_id(p_parent, s->id);
 			m_add_string(p_parent, "Error reading body");
 			m_close(p_parent);
@@ -601,6 +610,8 @@ mda_io(struct io *io, int evt)
 			    s->id, s->evp->id);
 			fclose(s->datafp);
 			s->datafp = NULL;
+ 			if (iobuf_queued(&s->iobuf) == 0)
+				goto done;
 		}
 		return;
 
@@ -674,7 +685,7 @@ static int
 mda_getlastline(int fd, char *dst, size_t dstsz)
 {
 	FILE	*fp;
-	char	*ln, buf[MAX_LINE_SIZE];
+	char	*ln, buf[SMTPD_MAXLINESIZE];
 	size_t	 len;
 
 	bzero(buf, sizeof buf);
@@ -723,7 +734,7 @@ mda_fail(struct mda_user *user, int permfail, const char *error)
 		}
 		else {
 			mda_log(e, "TempFail", error);
-			queue_tempfail(e->id, error);
+			queue_tempfail(e->id, 0, error);
 		}
 		free(e->sender);
 		free(e->dest);
@@ -793,7 +804,7 @@ mda_drain(void)
 		    " for user \"%s\" evpid %016" PRIx64, s->id, u->name,
 		    s->evp->id);
 
-		m_create(p_queue, IMSG_QUEUE_MESSAGE_FD, 0, 0, -1, 18);
+		m_create(p_queue, IMSG_QUEUE_MESSAGE_FD, 0, 0, -1);
 		m_add_id(p_queue, s->id);
 		m_add_msgid(p_queue, evpid_to_msgid(s->evp->id));
 		m_close(p_queue);
@@ -852,7 +863,7 @@ mda_done(struct mda_session *s)
 static void
 mda_log(const struct mda_envelope *evp, const char *prefix, const char *status)
 {
-	char rcpt[MAX_LINE_SIZE];
+	char rcpt[SMTPD_MAXLINESIZE];
 	const char *method;
 
 	rcpt[0] = '\0';
@@ -867,6 +878,8 @@ mda_log(const struct mda_envelope *evp, const char *prefix, const char *status)
 		method = "file";
 	else if (evp->method == A_MDA)
 		method = "mda";
+	else if (evp->method == A_LMTP)
+		method = "lmtp";
 	else
 		method = "???";
 

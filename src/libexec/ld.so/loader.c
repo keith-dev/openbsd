@@ -1,4 +1,4 @@
-/*	$OpenBSD: loader.c,v 1.130 2013/01/11 21:17:07 miod Exp $ */
+/*	$OpenBSD: loader.c,v 1.133 2013/06/01 09:57:55 miod Exp $ */
 
 /*
  * Copyright (c) 1998 Per Fogelstrom, Opsycon AB
@@ -40,6 +40,7 @@
 
 #include "syscall.h"
 #include "archdep.h"
+#include "path.h"
 #include "resolve.h"
 #include "sod.h"
 #include "stdlib.h"
@@ -50,8 +51,6 @@
 /*
  * Local decls.
  */
-static char *_dl_getenv(const char *, char **);
-static void _dl_unsetenv(const char *, char **);
 unsigned long _dl_boot(const char **, char **, const long, long *);
 void _dl_debug_state(void);
 void _dl_setup_env(char **);
@@ -63,7 +62,8 @@ void _dl_call_init_recurse(elf_object_t *object, int initfirst);
 const char *_dl_progname;
 int  _dl_pagesz;
 
-char *_dl_libpath;
+char **_dl_libpath;
+
 char *_dl_preload;
 char *_dl_bindnow;
 char *_dl_traceld;
@@ -73,6 +73,8 @@ char *_dl_norandom;
 char *_dl_noprebind;
 char *_dl_prebind_validate;
 char *_dl_tracefmt1, *_dl_tracefmt2, *_dl_traceprog;
+
+int _dl_trust;
 
 struct r_debug *_dl_debug_map;
 
@@ -212,14 +214,14 @@ _dl_setup_env(char **envp)
 	/*
 	 * Get paths to various things we are going to use.
 	 */
-	_dl_libpath = _dl_getenv("LD_LIBRARY_PATH", envp);
+	_dl_debug = _dl_getenv("LD_DEBUG", envp);
+	_dl_libpath = _dl_split_path(_dl_getenv("LD_LIBRARY_PATH", envp));
 	_dl_preload = _dl_getenv("LD_PRELOAD", envp);
 	_dl_bindnow = _dl_getenv("LD_BIND_NOW", envp);
 	_dl_traceld = _dl_getenv("LD_TRACE_LOADED_OBJECTS", envp);
 	_dl_tracefmt1 = _dl_getenv("LD_TRACE_LOADED_OBJECTS_FMT1", envp);
 	_dl_tracefmt2 = _dl_getenv("LD_TRACE_LOADED_OBJECTS_FMT2", envp);
 	_dl_traceprog = _dl_getenv("LD_TRACE_LOADED_OBJECTS_PROGNAME", envp);
-	_dl_debug = _dl_getenv("LD_DEBUG", envp);
 	_dl_norandom = _dl_getenv("LD_NORANDOM", envp);
 	_dl_noprebind = _dl_getenv("LD_NOPREBIND", envp);
 	_dl_prebind_validate = _dl_getenv("LD_PREBINDVALIDATE", envp);
@@ -228,8 +230,10 @@ _dl_setup_env(char **envp)
 	 * Don't allow someone to change the search paths if he runs
 	 * a suid program without credentials high enough.
 	 */
-	if (_dl_issetugid()) {	/* Zap paths if s[ug]id... */
+	_dl_trust = !_dl_issetugid();
+	if (!_dl_trust) {	/* Zap paths if s[ug]id... */
 		if (_dl_libpath) {
+			_dl_free_path(_dl_libpath);
 			_dl_libpath = NULL;
 			_dl_unsetenv("LD_LIBRARY_PATH", envp);
 		}
@@ -251,6 +255,8 @@ _dl_setup_env(char **envp)
 		}
 	}
 	_dl_so_envp = envp;
+
+	_dl_trace_setup(envp);
 }
 
 int
@@ -908,7 +914,7 @@ _dl_call_init_recurse(elf_object_t *object, int initfirst)
 	object->status |= STAT_INIT_DONE;
 }
 
-static char *
+char *
 _dl_getenv(const char *var, char **env)
 {
 	const char *ep;
@@ -926,7 +932,7 @@ _dl_getenv(const char *var, char **env)
 	return(NULL);
 }
 
-static void
+void
 _dl_unsetenv(const char *var, char **env)
 {
 	char *ep;

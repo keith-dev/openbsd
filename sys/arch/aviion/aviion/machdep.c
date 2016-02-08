@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.49 2012/12/26 22:32:13 miod Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.51 2013/06/11 16:42:07 deraadt Exp $	*/
 /*
  * Copyright (c) 2007 Miodrag Vallat.
  *
@@ -395,9 +395,9 @@ dumpsys()
 {
 	int maj;
 	int psize;
-	daddr64_t blkno;	/* current block to write */
+	daddr_t blkno;	/* current block to write */
 				/* dump routine */
-	int (*dump)(dev_t, daddr64_t, caddr_t, size_t);
+	int (*dump)(dev_t, daddr_t, caddr_t, size_t);
 	int pg;			/* page being dumped */
 	paddr_t maddr;		/* PA being dumped */
 	int error;		/* error code from (*dump)() */
@@ -570,7 +570,7 @@ secondary_main()
 	ncpus++;
 
 	sched_init_cpu(ci);
-	microuptime(&ci->ci_schedstate.spc_runtime);
+	nanouptime(&ci->ci_schedstate.spc_runtime);
 	ci->ci_curproc = NULL;
 	ci->ci_randseed = random();
 

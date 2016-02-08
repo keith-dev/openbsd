@@ -1,4 +1,4 @@
-/*	$OpenBSD: ext2fs_vfsops.c,v 1.65 2012/09/10 11:11:00 jsing Exp $	*/
+/*	$OpenBSD: ext2fs_vfsops.c,v 1.68 2013/06/11 16:42:18 deraadt Exp $	*/
 /*	$NetBSD: ext2fs_vfsops.c,v 1.1 1997/06/11 09:34:07 bouyer Exp $	*/
 
 /*
@@ -167,11 +167,12 @@ ext2fs_mount(struct mount *mp, const char *path, void *data,
 	struct ufs_args args;
 	struct ufsmount *ump = NULL;
 	struct m_ext2fs *fs;
+	char fname[MNAMELEN];
 	char fspec[MNAMELEN];
 	int error, flags;
 	mode_t accessmode;
 
-	error = copyin(data, (caddr_t)&args, sizeof (struct ufs_args));
+	error = copyin(data, &args, sizeof(struct ufs_args));
 	if (error)
 		return (error);
 
@@ -238,9 +239,11 @@ ext2fs_mount(struct mount *mp, const char *path, void *data,
 	error = copyinstr(args.fspec, fspec, sizeof(fspec), NULL);
 	if (error)
 		goto error;
-	disk_map(fspec, fspec, MNAMELEN, DM_OPENBLCK);
 
-	NDINIT(ndp, LOOKUP, FOLLOW, UIO_SYSSPACE, fspec, p);
+	if (disk_map(fspec, fname, MNAMELEN, DM_OPENBLCK) == -1)
+		bcopy(fspec, fname, sizeof(fname));
+
+	NDINIT(ndp, LOOKUP, FOLLOW, UIO_SYSSPACE, fname, p);
 	if ((error = namei(ndp)) != 0)
 		goto error;
 	devvp = ndp->ni_vp;
@@ -289,7 +292,9 @@ ext2fs_mount(struct mount *mp, const char *path, void *data,
 	}
 	bcopy(fs->e2fs_fsmnt, mp->mnt_stat.f_mntonname, MNAMELEN);
 	bzero(mp->mnt_stat.f_mntfromname, MNAMELEN);
-	strlcpy(mp->mnt_stat.f_mntfromname, fspec, MNAMELEN);
+	strlcpy(mp->mnt_stat.f_mntfromname, fname, MNAMELEN);
+	bzero(mp->mnt_stat.f_mntfromspec, MNAMELEN);
+	strlcpy(mp->mnt_stat.f_mntfromspec, fspec, MNAMELEN);
 
 	if (fs->e2fs_fmod != 0) {	/* XXX */
 		fs->e2fs_fmod = 0;
@@ -298,7 +303,7 @@ ext2fs_mount(struct mount *mp, const char *path, void *data,
 		else
 			printf("%s: file system not clean; please fsck(8)\n",
 				mp->mnt_stat.f_mntfromname);
-		(void)ext2fs_cgupdate(ump, MNT_WAIT);
+		ext2fs_cgupdate(ump, MNT_WAIT);
 	}
 
 	goto success;
@@ -402,7 +407,7 @@ ext2fs_reload(struct mount *mountp, struct ucred *cred, struct proc *p)
 	/*
 	 * Step 2: re-read superblock from disk.
 	 */
-	error = bread(devvp, (daddr64_t)(SBOFF / DEV_BSIZE), SBSIZE, &bp);
+	error = bread(devvp, (daddr_t)(SBOFF / DEV_BSIZE), SBSIZE, &bp);
 	if (error) {
 		brelse(bp);
 		return (error);
@@ -501,7 +506,7 @@ ext2fs_mountfs(struct vnode *devvp, struct mount *mp, struct proc *p)
 #ifdef DEBUG_EXT2
 	printf("ext2 sb size: %d\n", sizeof(struct ext2fs));
 #endif
-	error = bread(devvp, (daddr64_t)(SBOFF / DEV_BSIZE), SBSIZE, &bp);
+	error = bread(devvp, (daddr_t)(SBOFF / DEV_BSIZE), SBSIZE, &bp);
 	if (error)
 		goto out;
 	fs = (struct ext2fs *)bp->b_data;
@@ -695,6 +700,7 @@ ext2fs_statfs(struct mount *mp, struct statfs *sbp, struct proc *p)
 	if (sbp != &mp->mnt_stat) {
 		bcopy(mp->mnt_stat.f_mntonname, sbp->f_mntonname, MNAMELEN);
 		bcopy(mp->mnt_stat.f_mntfromname, sbp->f_mntfromname, MNAMELEN);
+		bcopy(mp->mnt_stat.f_mntfromspec, sbp->f_mntfromspec, MNAMELEN);
 	}
 	strncpy(sbp->f_fstypename, mp->mnt_vfc->vfc_name, MFSNAMELEN);
 	return (0);
@@ -803,6 +809,10 @@ ext2fs_vget(struct mount *mp, ino_t ino, struct vnode **vpp)
 	struct vnode *vp;
 	dev_t dev;
 	int error;
+
+	if (ino > (ufsino_t)-1)
+		panic("ext2fs_vget: alien ino_t %llu",
+		    (unsigned long long)ino);
 
 	ump = VFSTOUFS(mp);
 	dev = ump->um_dev;

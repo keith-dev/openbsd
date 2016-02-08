@@ -1,4 +1,4 @@
-/*	$OpenBSD: getrrsetbyname.c,v 1.1 2012/09/08 11:08:21 eric Exp $	*/
+/*	$OpenBSD: getrrsetbyname.c,v 1.3 2013/07/12 14:36:22 eric Exp $	*/
 /*
  * Copyright (c) 2012 Eric Faurot <eric@openbsd.org>
  *
@@ -32,6 +32,8 @@ getrrsetbyname(const char *name, unsigned int class, unsigned int type,
 	struct async_res ar;
 	int		 r, saved_errno = errno;
 
+	res_init();
+
 	as = getrrsetbyname_async(name, class, type, flags, NULL);
 	if (as == NULL) {
 		r = (errno == ENOMEM) ? ERRSET_NOMEMORY : ERRSET_FAIL;
@@ -39,7 +41,7 @@ getrrsetbyname(const char *name, unsigned int class, unsigned int type,
 		return (r);
 	}
 
-	async_run_sync(as, &ar);
+	asr_async_run_sync(as, &ar);
 
 	*res = ar.ar_rrsetinfo;
 

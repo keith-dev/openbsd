@@ -1,12 +1,10 @@
-/* $OpenBSD: rthread_stack.c,v 1.8 2012/08/04 21:56:51 guenther Exp $ */
+/* $OpenBSD: rthread_stack.c,v 1.10 2013/06/01 20:47:40 tedu Exp $ */
 /* $snafu: rthread_stack.c,v 1.12 2005/01/11 02:45:28 marc Exp $ */
 
 /* PUBLIC DOMAIN: No Rights Reserved. Marco S Hyman <marc@snafu.org> */
 
-#include <sys/types.h>
+#include <sys/param.h>
 #include <sys/mman.h>
-
-#include <machine/param.h>
 
 #include <errno.h>
 #include <pthread.h>
@@ -21,7 +19,7 @@
  * attributes for possible reuse.
  */
 static SLIST_HEAD(, stack) def_stacks = SLIST_HEAD_INITIALIZER(head);
-static _spinlock_lock_t def_stacks_lock = _SPINLOCK_UNLOCKED;
+static struct _spinlock def_stacks_lock = _SPINLOCK_UNLOCKED;
 
 struct stack *
 _rthread_alloc_stack(pthread_t thread)

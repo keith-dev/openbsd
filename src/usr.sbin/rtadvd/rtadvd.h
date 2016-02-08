@@ -1,4 +1,4 @@
-/*	$OpenBSD: rtadvd.h,v 1.13 2012/07/11 10:40:47 phessler Exp $	*/
+/*	$OpenBSD: rtadvd.h,v 1.16 2013/06/01 01:30:54 brad Exp $	*/
 /*	$KAME: rtadvd.h,v 1.20 2002/05/29 10:13:10 itojun Exp $	*/
 
 /*
@@ -72,9 +72,9 @@ struct prefix {
 	TAILQ_ENTRY(prefix) entry;
 
 	u_int32_t validlifetime; /* AdvValidLifetime */
-	long	vltimeexpire;	/* expiration of vltime; decrement case only */
+	time_t	vltimeexpire;	/* expiration of vltime; decrement case only */
 	u_int32_t preflifetime;	/* AdvPreferredLifetime */
-	long	pltimeexpire;	/* expiration of pltime; decrement case only */
+	time_t	pltimeexpire;	/* expiration of pltime; decrement case only */
 	u_int onlinkflg;	/* bool: AdvOnLinkFlag */
 	u_int autoconfflg;	/* bool: AdvAutonomousFlag */
 	int prefixlen;
@@ -82,19 +82,36 @@ struct prefix {
 	struct in6_addr prefix;
 };
 
+struct rtinfo {
+	TAILQ_ENTRY(rtinfo) entry;
+
+	uint32_t lifetime;
+	int rtpref;
+	int prefixlen;
+	struct in6_addr prefix;
+};
+
+/*
+ * `struct rdnss` may contain an arbitrary number of `servers` and `struct
+ * dnssldom` will contain a variable-sized `domain`. Space required for these
+ * elements will be dynamically allocated. We do not use flexible array members
+ * here because this breaks compile on some architectures using gcc2. Instead,
+ * we just have an array with a single (unused) element.
+ */
+
 struct rdnss {
 	TAILQ_ENTRY(rdnss) entry;
 
 	u_int32_t lifetime;
 	int servercnt;
-	struct in6_addr servers[100];
+	struct in6_addr servers[1];
 };
 
 struct dnssldom {
 	TAILQ_ENTRY(dnssldom) entry;
 
 	u_int32_t length;
-	char domain[100];
+	char domain[1];
 };
 
 struct dnssl {
@@ -139,6 +156,8 @@ struct	rainfo {
 	u_int	hoplimit;	/* AdvCurHopLimit */
 	TAILQ_HEAD(prefixlist, prefix) prefixes; /* AdvPrefixList(link head) */
 	int	pfxs;		/* number of prefixes */
+	TAILQ_HEAD(rtinfolist, rtinfo) rtinfos;
+	int     rtinfocnt;
 	TAILQ_HEAD(rdnsslist, rdnss) rdnsss; /* advertised recursive dns servers */
 	int	rdnsscnt;	/* number of rdnss entries */
 	TAILQ_HEAD(dnssllist, dnssl) dnssls;

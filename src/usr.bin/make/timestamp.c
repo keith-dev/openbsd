@@ -1,4 +1,4 @@
-/*	$OpenBSD: timestamp.c,v 1.7 2011/12/10 04:12:36 guenther Exp $ */
+/*	$OpenBSD: timestamp.c,v 1.10 2013/05/22 12:14:08 espie Exp $ */
 
 /*
  * Copyright (c) 2001 Marc Espie.
@@ -24,42 +24,37 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+#include <sys/time.h>
+#include <stdio.h>
+#include <string.h>
 #include "config.h"
 #include "defines.h"
 #include "timestamp.h"
 
-#ifndef USE_TIMESPEC
-#include <sys/types.h>
-#include <utime.h>
-#endif
 
-TIMESTAMP now;		/* The time at the start of this whole process */
+struct timespec starttime;
 
 int
 set_times(const char *f)
 {
-#ifdef USE_TIMESPEC
     return utimes(f, NULL);
-#else
-    struct utimbuf times;
-
-    time(&times.actime);
-    times.modtime = times.actime;
-    return utime(f, &times);
-#endif
 }
 
+#define PLACEHOLDER "XXXXXXXXX "
 char *
-time_to_string(TIMESTAMP time)
+time_to_string(struct timespec *t)
 {
 	struct tm *parts;
 	static char buf[128];
-	time_t t;
+	char *s;
 
-	t = timestamp2time_t(time);
-
-	parts = localtime(&t);
-	strftime(buf, sizeof buf, "%H:%M:%S %b %d, %Y", parts);
+	parts = localtime(&t->tv_sec);
+	strftime(buf, sizeof buf, "%H:%M:%S." PLACEHOLDER "%b %d, %Y", parts);
+	s = strstr(buf, PLACEHOLDER);
+	if (s) {
+		snprintf(s, sizeof(PLACEHOLDER), "%09ld", t->tv_nsec);
+		s[9] = ' ';
+	}
 	buf[sizeof(buf) - 1] = '\0';
 	return buf;
 }

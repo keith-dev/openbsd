@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.24 2013/02/12 08:06:22 mpi Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.26 2013/06/11 16:42:10 deraadt Exp $	*/
 /*	$NetBSD: cpu.h,v 1.41 2006/01/21 04:24:12 uwe Exp $	*/
 
 /*-
@@ -64,6 +64,9 @@ struct cpu_info {
 	u_int32_t ci_randseed;
 #ifdef DIAGNOSTIC
 	int	ci_mutex_level;
+#endif
+#ifdef GPROF
+	struct gmonparam *ci_gmon;
 #endif
 };
 
@@ -262,7 +265,7 @@ void savectx(struct pcb *);
 struct fpreg;
 void fpu_save(struct fpreg *);
 void fpu_restore(struct fpreg *);
-u_int cpu_dump(int (*)(dev_t, daddr64_t, caddr_t, size_t), daddr64_t *);
+u_int cpu_dump(int (*)(dev_t, daddr_t, caddr_t, size_t), daddr_t *);
 u_int cpu_dumpsize(void);
 void dumpconf(void);
 void dumpsys(void);

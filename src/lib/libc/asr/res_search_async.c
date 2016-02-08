@@ -1,4 +1,4 @@
-/*	$OpenBSD: res_search_async.c,v 1.3 2012/11/24 15:12:48 eric Exp $	*/
+/*	$OpenBSD: res_search_async.c,v 1.10 2013/07/12 14:36:22 eric Exp $	*/
 /*
  * Copyright (c) 2012 Eric Faurot <eric@openbsd.org>
  *
@@ -25,25 +25,19 @@
 #include <string.h>
 #include <unistd.h>
 
-/* 
- * TODO:
- *
- * - make it possible to reuse ibuf if it was NULL when first called,
- *   to avoid reallocating buffers everytime.
- */
-
 #include "asr.h"
 #include "asr_private.h"
 
 static int res_search_async_run(struct async *, struct async_res *);
+static size_t domcat(const char *, const char *, char *, size_t);
+static int iter_domain(struct async *, const char *, char *, size_t);
 
 /*
  * Unlike res_query_async(), this function returns a valid packet only if
  * h_errno is NETDB_SUCCESS.
  */
 struct async *
-res_search_async(const char *name, int class, int type, unsigned char *ans,
-	int anslen, struct asr *asr)
+res_search_async(const char *name, int class, int type, struct asr *asr)
 {
 	struct asr_ctx	*ac;
 	struct async	*as;
@@ -51,36 +45,29 @@ res_search_async(const char *name, int class, int type, unsigned char *ans,
 	DPRINT("asr: res_search_async(\"%s\", %i, %i)\n", name, class, type);
 
 	ac = asr_use_resolver(asr);
-	as = res_search_async_ctx(name, class, type, ans, anslen, ac);
+	as = res_search_async_ctx(name, class, type, ac);
 	asr_ctx_unref(ac);
 
 	return (as);
 }
 
 struct async *
-res_search_async_ctx(const char *name, int class, int type, unsigned char *ans,
-	int anslen, struct asr_ctx *ac)
+res_search_async_ctx(const char *name, int class, int type, struct asr_ctx *ac)
 {
 	struct async	*as;
+	char		 alias[MAXDNAME];
 
 	DPRINT("asr: res_search_async_ctx(\"%s\", %i, %i)\n", name, class,
 	    type);
 
-	if ((as = async_new(ac, ASR_SEARCH)) == NULL)
+	if (asr_hostalias(ac, name, alias, sizeof(alias)))
+		return res_query_async_ctx(alias, class, type, ac);
+
+	if ((as = asr_async_new(ac, ASR_SEARCH)) == NULL)
 		goto err; /* errno set */
 	as->as_run  = res_search_async_run;
 	if ((as->as.search.name = strdup(name)) == NULL)
 		goto err; /* errno set */
-
-	if (ans) {
-		as->as.search.flags |= ASYNC_EXTIBUF;
-		as->as.search.ibuf = ans;
-		as->as.search.ibufsize = anslen;
-	} else {
-		as->as.search.ibuf = NULL;
-		as->as.search.ibufsize = 0;
-	}
-	as->as.search.ibuflen = 0;
 
 	as->as.search.class = class;
 	as->as.search.type = type;
@@ -88,7 +75,7 @@ res_search_async_ctx(const char *name, int class, int type, unsigned char *ans,
 	return (as);
     err:
 	if (as)
-		async_free(as);
+		asr_async_free(as);
 	return (NULL);
 }
 
@@ -116,12 +103,12 @@ res_search_async_run(struct async *as, struct async_res *ar)
 		 */
 		as->as_dom_flags = 0;
 
-		r = asr_iter_domain(as, as->as.search.name, fqdn, sizeof(fqdn));
+		r = iter_domain(as, as->as.search.name, fqdn, sizeof(fqdn));
 		if (r == -1) {
 			async_set_state(as, ASR_STATE_NOT_FOUND);
 			break;
 		}
-		if (r > sizeof(fqdn)) {
+		if (r == 0) {
 			ar->ar_errno = EINVAL;
 			ar->ar_h_errno = NO_RECOVERY;
 			ar->ar_datalen = -1;
@@ -130,8 +117,7 @@ res_search_async_run(struct async *as, struct async_res *ar)
 			break;
 		}
 		as->as.search.subq = res_query_async_ctx(fqdn,
-		    as->as.search.class, as->as.search.type,
-		    as->as.search.ibuf, as->as.search.ibufsize, as->as_ctx);
+		    as->as.search.class, as->as.search.type, as->as_ctx);
 		if (as->as.search.subq == NULL) {
 			ar->ar_errno = errno;
 			if (errno == EINVAL)
@@ -148,7 +134,7 @@ res_search_async_run(struct async *as, struct async_res *ar)
 
 	case ASR_STATE_SUBQUERY:
 
-		if ((r = async_run(as->as.search.subq, ar)) == ASYNC_COND)
+		if ((r = asr_async_run(as->as.search.subq, ar)) == ASYNC_COND)
 			return (ASYNC_COND);
 		as->as.search.subq = NULL;
 
@@ -169,15 +155,10 @@ res_search_async_run(struct async *as, struct async_res *ar)
 			break;
 		}
 
-		/*
-		 * If we don't use an external buffer, the packet was allocated
-		 * by the subquery and it must be freed now.
-		 */
-		if ((as->as.search.flags & ASYNC_EXTIBUF) == 0)
-			free(ar->ar_data);
+		free(ar->ar_data);
 
 		/*
-		 * The original resolver does something like this, to 
+		 * The original resolver does something like this.
 		 */
 		if (as->as_dom_flags & (ASYNC_DOM_NDOTS | ASYNC_DOM_ASIS))
 			as->as.search.saved_h_errno = ar->ar_h_errno;
@@ -200,7 +181,7 @@ res_search_async_run(struct async *as, struct async_res *ar)
 			ar->ar_h_errno = NO_DATA;
 		else if (as->as.search.flags & ASYNC_AGAIN)
 			ar->ar_h_errno = TRY_AGAIN;
-		/* 
+		/*
 		 * Else, we got the ar_h_errno value set by res_query_async()
 		 * for the last domain.
 		 */
@@ -220,4 +201,117 @@ res_search_async_run(struct async *as, struct async_res *ar)
 		break;
 	}
 	goto next;
+}
+
+/*
+ * Concatenate a name and a domain name. The result has no trailing dot.
+ * Return the resulting string length, or 0 in case of error.
+ */
+static size_t
+domcat(const char *name, const char *domain, char *buf, size_t buflen)
+{
+	size_t	r;
+
+	r = asr_make_fqdn(name, domain, buf, buflen);
+	if (r == 0)
+		return (0);
+	buf[r - 1] = '\0';
+
+	return (r - 1);
+}
+
+enum {
+	DOM_INIT,
+	DOM_DOMAIN,
+	DOM_DONE
+};
+
+/*
+ * Implement the search domain strategy.
+ *
+ * This function works as a generator that constructs complete domains in
+ * buffer "buf" of size "len" for the given host name "name", according to the
+ * search rules defined by the resolving context.  It is supposed to be called
+ * multiple times (with the same name) to generate the next possible domain
+ * name, if any.
+ *
+ * It returns -1 if all possibilities have been exhausted, 0 if there was an
+ * error generating the next name, or the resulting name length.
+ */
+int
+iter_domain(struct async *as, const char *name, char * buf, size_t len)
+{
+	const char	*c;
+	int		 dots;
+
+	switch (as->as_dom_step) {
+
+	case DOM_INIT:
+		/* First call */
+
+		/*
+		 * If "name" is an FQDN, that's the only result and we
+		 * don't try anything else.
+		 */
+		if (strlen(name) && name[strlen(name) - 1] ==  '.') {
+			DPRINT("asr: iter_domain(\"%s\") fqdn\n", name);
+			as->as_dom_flags |= ASYNC_DOM_FQDN;
+			as->as_dom_step = DOM_DONE;
+			return (domcat(name, NULL, buf, len));
+		}
+
+		/*
+		 * Otherwise, we iterate through the specified search domains.
+		 */
+		as->as_dom_step = DOM_DOMAIN;
+		as->as_dom_idx = 0;
+
+		/*
+		 * If "name" as enough dots, use it as-is first, as indicated
+		 * in resolv.conf(5).
+		 */
+		dots = 0;
+		for (c = name; *c; c++)
+			dots += (*c == '.');
+		if (dots >= as->as_ctx->ac_ndots) {
+			DPRINT("asr: iter_domain(\"%s\") ndots\n", name);
+			as->as_dom_flags |= ASYNC_DOM_NDOTS;
+			if (strlcpy(buf, name, len) >= len)
+				return (0);
+			return (strlen(buf));
+		}
+		/* Otherwise, starts using the search domains */
+		/* FALLTHROUGH */
+
+	case DOM_DOMAIN:
+		if (as->as_dom_idx < as->as_ctx->ac_domcount) {
+			DPRINT("asr: iter_domain(\"%s\") domain \"%s\"\n",
+			    name, as->as_ctx->ac_dom[as->as_dom_idx]);
+			as->as_dom_flags |= ASYNC_DOM_DOMAIN;
+			return (domcat(name,
+			    as->as_ctx->ac_dom[as->as_dom_idx++], buf, len));
+		}
+
+		/* No more domain to try. */
+
+		as->as_dom_step = DOM_DONE;
+
+		/*
+		 * If the name was not tried as an absolute name before,
+		 * do it now.
+		 */
+		if (!(as->as_dom_flags & ASYNC_DOM_NDOTS)) {
+			DPRINT("asr: iter_domain(\"%s\") as is\n", name);
+			as->as_dom_flags |= ASYNC_DOM_ASIS;
+			if (strlcpy(buf, name, len) >= len)
+				return (0);
+			return (strlen(buf));
+		}
+		/* Otherwise, we are done. */
+
+	case DOM_DONE:
+	default:
+		DPRINT("asr: iter_domain(\"%s\") done\n", name);
+		return (-1);
+	}
 }

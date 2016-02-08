@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_output.c,v 1.235 2012/11/06 12:32:42 henning Exp $	*/
+/*	$OpenBSD: ip_output.c,v 1.243 2013/07/04 19:10:40 sf Exp $	*/
 /*	$NetBSD: ip_output.c,v 1.28 1996/02/13 23:43:07 christos Exp $	*/
 
 /*
@@ -70,19 +70,7 @@
 #else
 #define DPRINTF(x)
 #endif
-
-extern u_int8_t get_sa_require(struct inpcb *);
-
-extern int ipsec_auth_default_level;
-extern int ipsec_esp_trans_default_level;
-extern int ipsec_esp_network_default_level;
-extern int ipsec_ipcomp_default_level;
-extern int ipforwarding;
 #endif /* IPSEC */
-
-#ifdef MROUTING
-extern int ipmforwarding;
-#endif
 
 struct mbuf *ip_insertoptions(struct mbuf *, struct mbuf *, int *);
 void ip_mloopback(struct ifnet *, struct mbuf *, struct sockaddr_in *);
@@ -279,7 +267,7 @@ reroute:
 	if (mtag != NULL) {
 #ifdef DIAGNOSTIC
 		if (mtag->m_tag_len != sizeof (struct tdb_ident))
-			panic("ip_output: tag of length %d (should be %d",
+			panic("ip_output: tag of length %hu (should be %zu",
 			    mtag->m_tag_len, sizeof (struct tdb_ident));
 #endif
 		tdbi = (struct tdb_ident *)(mtag + 1);
@@ -523,8 +511,6 @@ reroute:
 			 * above, will be forwarded by the ip_input() routine,
 			 * if necessary.
 			 */
-			extern struct socket *ip_mrouter;
-
 			if (ipmforwarding && ip_mrouter &&
 			    (flags & IP_FORWARDING) == 0) {
 				if (ip_mforward(m, ifp) != 0) {
@@ -627,6 +613,7 @@ sendit:
 		 * What's the behaviour?
 		 */
 #endif
+		in_proto_cksum_out(m, encif);
 
 		/* Check if we are allowed to fragment */
 		if (ip_mtudisc && (ip->ip_off & htons(IP_DF)) && tdb->tdb_mtu &&
@@ -697,8 +684,6 @@ sendit:
 	}
 #endif /* IPSEC */
 
-	in_proto_cksum_out(m, ifp);
-
 	/*
 	 * Packet filter
 	 */
@@ -724,6 +709,7 @@ sendit:
 		goto reroute;
 	}
 #endif
+	in_proto_cksum_out(m, ifp);
 
 #ifdef IPSEC
 	if (ipsec_in_use && (flags & IP_FORWARDING) && (ipforwarding == 2) &&
@@ -930,10 +916,7 @@ sendorfree:
  * as indicated by a non-zero in_addr at the start of the options.
  */
 struct mbuf *
-ip_insertoptions(m, opt, phlen)
-	struct mbuf *m;
-	struct mbuf *opt;
-	int *phlen;
+ip_insertoptions(struct mbuf *m, struct mbuf *opt, int *phlen)
 {
 	struct ipoption *p = mtod(opt, struct ipoption *);
 	struct mbuf *n;
@@ -962,7 +945,7 @@ ip_insertoptions(m, opt, phlen)
 		m->m_data -= optlen;
 		m->m_len += optlen;
 		m->m_pkthdr.len += optlen;
-		ovbcopy((caddr_t)ip, mtod(m, caddr_t), sizeof(struct ip));
+		memmove(mtod(m, caddr_t), (caddr_t)ip, sizeof(struct ip));
 	}
 	ip = mtod(m, struct ip *);
 	bcopy((caddr_t)p->ipopt_list, (caddr_t)(ip + 1), optlen);
@@ -976,8 +959,7 @@ ip_insertoptions(m, opt, phlen)
  * omitting those not copied during fragmentation.
  */
 int
-ip_optcopy(ip, jp)
-	struct ip *ip, *jp;
+ip_optcopy(struct ip *ip, struct ip *jp)
 {
 	u_char *cp, *dp;
 	int opt, optlen, cnt;
@@ -1021,11 +1003,8 @@ ip_optcopy(ip, jp)
  * IP socket option processing.
  */
 int
-ip_ctloutput(op, so, level, optname, mp)
-	int op;
-	struct socket *so;
-	int level, optname;
-	struct mbuf **mp;
+ip_ctloutput(int op, struct socket *so, int level, int optname,
+    struct mbuf **mp)
 {
 	struct inpcb *inp = sotoinpcb(so);
 	struct mbuf *m = *mp;
@@ -1046,12 +1025,7 @@ ip_ctloutput(op, so, level, optname, mp)
 	case PRCO_SETOPT:
 		switch (optname) {
 		case IP_OPTIONS:
-#ifdef notyet
-		case IP_RETOPTS:
-			return (ip_pcbopts(optname, &inp->inp_options, m));
-#else
 			return (ip_pcbopts(&inp->inp_options, m));
-#endif
 
 		case IP_TOS:
 		case IP_TTL:
@@ -1199,7 +1173,7 @@ ip_ctloutput(op, so, level, optname, mp)
 
 			switch (optname) {
 			case IP_AUTH_LEVEL:
-				if (optval < ipsec_auth_default_level &&
+				if (optval < IPSEC_AUTH_LEVEL_DEFAULT &&
 				    suser(p, 0)) {
 					error = EACCES;
 					break;
@@ -1208,7 +1182,7 @@ ip_ctloutput(op, so, level, optname, mp)
 				break;
 
 			case IP_ESP_TRANS_LEVEL:
-				if (optval < ipsec_esp_trans_default_level &&
+				if (optval < IPSEC_ESP_TRANS_LEVEL_DEFAULT &&
 				    suser(p, 0)) {
 					error = EACCES;
 					break;
@@ -1217,7 +1191,7 @@ ip_ctloutput(op, so, level, optname, mp)
 				break;
 
 			case IP_ESP_NETWORK_LEVEL:
-				if (optval < ipsec_esp_network_default_level &&
+				if (optval < IPSEC_ESP_NETWORK_LEVEL_DEFAULT &&
 				    suser(p, 0)) {
 					error = EACCES;
 					break;
@@ -1225,7 +1199,7 @@ ip_ctloutput(op, so, level, optname, mp)
 				inp->inp_seclevel[SL_ESP_NETWORK] = optval;
 				break;
 			case IP_IPCOMP_LEVEL:
-				if (optval < ipsec_ipcomp_default_level &&
+				if (optval < IPSEC_IPCOMP_LEVEL_DEFAULT &&
 				    suser(p, 0)) {
 					error = EACCES;
 					break;
@@ -1647,14 +1621,7 @@ ip_ctloutput(op, so, level, optname, mp)
  * with destination address if source routed.
  */
 int
-#ifdef notyet
-ip_pcbopts(optname, pcbopt, m)
-	int optname;
-#else
-ip_pcbopts(pcbopt, m)
-#endif
-	struct mbuf **pcbopt;
-	struct mbuf *m;
+ip_pcbopts(struct mbuf **pcbopt, struct mbuf *m)
 {
 	int cnt, optlen;
 	u_char *cp;
@@ -1686,7 +1653,7 @@ ip_pcbopts(pcbopt, m)
 	cnt = m->m_len;
 	m->m_len += sizeof(struct in_addr);
 	cp = mtod(m, u_char *) + sizeof(struct in_addr);
-	ovbcopy(mtod(m, caddr_t), (caddr_t)cp, (unsigned)cnt);
+	memmove((caddr_t)cp, mtod(m, caddr_t), (unsigned)cnt);
 	bzero(mtod(m, caddr_t), sizeof(struct in_addr));
 
 	for (; cnt > 0; cnt -= optlen, cp += optlen) {
@@ -1732,9 +1699,9 @@ ip_pcbopts(pcbopt, m)
 			 * Then copy rest of options back
 			 * to close up the deleted entry.
 			 */
-			ovbcopy((caddr_t)(&cp[IPOPT_OFFSET+1] +
-			    sizeof(struct in_addr)),
-			    (caddr_t)&cp[IPOPT_OFFSET+1],
+			memmove((caddr_t)&cp[IPOPT_OFFSET+1],
+			    (caddr_t)(&cp[IPOPT_OFFSET+1] +
+			    sizeof(struct in_addr)),			    
 			    (unsigned)cnt - (IPOPT_OFFSET+1));
 			break;
 		}
@@ -2021,10 +1988,7 @@ ip_setmoptions(int optname, struct ip_moptions **imop, struct mbuf *m,
  * Return the IP multicast options in response to user getsockopt().
  */
 int
-ip_getmoptions(optname, imo, mp)
-	int optname;
-	struct ip_moptions *imo;
-	struct mbuf **mp;
+ip_getmoptions(int optname, struct ip_moptions *imo, struct mbuf **mp)
 {
 	u_char *ttl;
 	u_char *loop;
@@ -2070,8 +2034,7 @@ ip_getmoptions(optname, imo, mp)
  * Discard the IP multicast options.
  */
 void
-ip_freemoptions(imo)
-	struct ip_moptions *imo;
+ip_freemoptions(struct ip_moptions *imo)
 {
 	int i;
 
@@ -2090,10 +2053,7 @@ ip_freemoptions(imo)
  * pointer that might NOT be &loif -- easier than replicating that code here.
  */
 void
-ip_mloopback(ifp, m, dst)
-	struct ifnet *ifp;
-	struct mbuf *m;
-	struct sockaddr_in *dst;
+ip_mloopback(struct ifnet *ifp, struct mbuf *m, struct sockaddr_in *dst)
 {
 	struct ip *ip;
 	struct mbuf *copym;
@@ -2166,13 +2126,10 @@ in_proto_cksum_out(struct mbuf *m, struct ifnet *ifp)
 		struct icmp *icp;
 
 		hlen = ip->ip_hl << 2;
-		m->m_data += hlen;
-		m->m_len -= hlen;
-		icp = mtod(m, struct icmp *);
+		icp = (struct icmp *)(mtod(m, caddr_t) + hlen);
 		icp->icmp_cksum = 0;
-		icp->icmp_cksum = in_cksum(m, ntohs(ip->ip_len) - hlen);
-		m->m_data -= hlen;
-		m->m_len += hlen;
+		icp->icmp_cksum = in4_cksum(m, 0, hlen,
+		    ntohs(ip->ip_len) - hlen);
 		m->m_pkthdr.csum_flags &= ~M_ICMP_CSUM_OUT; /* Clear */
 	}
 }

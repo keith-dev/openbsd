@@ -1,4 +1,4 @@
-/*	$OpenBSD: icmp6.c,v 1.118 2012/04/03 14:58:45 mikeb Exp $	*/
+/*	$OpenBSD: icmp6.c,v 1.130 2013/06/05 15:22:32 bluhm Exp $	*/
 /*	$KAME: icmp6.c,v 1.217 2001/06/20 15:03:29 jinmei Exp $	*/
 
 /*
@@ -61,7 +61,6 @@
  *	@(#)ip_icmp.c	8.2 (Berkeley) 1/4/94
  */
 
-#include "faith.h"
 #include "carp.h"
 #include "pf.h"
 
@@ -130,10 +129,6 @@
  */
 #define in6p_ip6_nxt	inp_ipv6.ip6_nxt
 
-extern struct domain inet6domain;
-extern struct ip6protosw inet6sw[];
-extern u_char ip6_protox[];
-
 struct icmp6stat icmp6stat;
 
 extern struct inpcbtable rawin6pcbtable;
@@ -151,7 +146,7 @@ struct icmp6_mtudisc_callback {
 };
 
 LIST_HEAD(, icmp6_mtudisc_callback) icmp6_mtudisc_callbacks =
-    LIST_HEAD_INITIALIZER(&icmp6_mtudisc_callbacks);
+    LIST_HEAD_INITIALIZER(icmp6_mtudisc_callbacks);
 
 static struct rttimer_queue *icmp6_mtudisc_timeout_q = NULL;
 extern int pmtu_expire;
@@ -458,23 +453,23 @@ icmp6_input(struct mbuf **mp, int *offp, int proto)
 		goto freeit;
 	}
 
-#if defined(NFAITH) && 0 < NFAITH
-	if (m->m_pkthdr.rcvif && m->m_pkthdr.rcvif->if_type == IFT_FAITH) {
-		/*
-		 * Deliver very specific ICMP6 type only.
-		 * This is important to deliver TOOBIG.  Otherwise PMTUD
-		 * will not work.
-		 */
+#if NPF > 0
+	if (m->m_pkthdr.pf.flags & PF_TAG_DIVERTED) {
 		switch (icmp6->icmp6_type) {
+		/*
+		 * These ICMP6 types map to other connections.  They must be
+		 * delivered to pr_ctlinput() also for diverted connections.
+		 */
 		case ICMP6_DST_UNREACH:
 		case ICMP6_PACKET_TOO_BIG:
 		case ICMP6_TIME_EXCEEDED:
+		case ICMP6_PARAM_PROB:
 			break;
 		default:
-			goto freeit;
+			goto raw;
 		}
 	}
-#endif
+#endif /* NPF */
 
 #if NCARP > 0
 	if (m->m_pkthdr.rcvif->if_type == IFT_CARP &&
@@ -883,6 +878,9 @@ badlen:
 		break;
 	}
 
+#if NPF > 0
+raw:
+#endif
 	/* deliver the packet to appropriate sockets */
 	icmp6_rip6_input(&m, *offp);
 
@@ -915,7 +913,7 @@ icmp6_notify_error(struct mbuf *m, int off, int icmp6len, int code)
 
 	/* Detect the upper level protocol */
 	{
-		void (*ctlfunc)(int, struct sockaddr *, void *);
+		void (*ctlfunc)(int, struct sockaddr *, u_int, void *);
 		u_int8_t nxt = eip6->ip6_nxt;
 		int eoff = off + sizeof(struct icmp6_hdr) +
 			sizeof(struct ip6_hdr);
@@ -1085,12 +1083,10 @@ icmp6_notify_error(struct mbuf *m, int off, int icmp6len, int code)
 			ip6cp.ip6c_cmdarg = (void *)&notifymtu;
 		}
 
-		ctlfunc = (void (*)(int, struct sockaddr *, void *))
-			(inet6sw[ip6_protox[nxt]].pr_ctlinput);
-		if (ctlfunc) {
-			(void) (*ctlfunc)(code, (struct sockaddr *)&icmp6dst,
-					  &ip6cp);
-		}
+		ctlfunc = inet6sw[ip6_protox[nxt]].pr_ctlinput;
+		if (ctlfunc)
+			(*ctlfunc)(code, sin6tosa(&icmp6dst),
+			    m->m_pkthdr.rdomain, &ip6cp);
 	}
 	return (0);
 
@@ -1147,7 +1143,7 @@ icmp6_mtudisc_update(struct ip6ctlparam *ip6cp, int validated)
 		    htons(m->m_pkthdr.rcvif->if_index);
 	}
 	/* sin6.sin6_scope_id = XXX: should be set if DST is a scoped addr */
-	rt = icmp6_mtudisc_clone((struct sockaddr *)&sin6, m->m_pkthdr.rdomain);
+	rt = icmp6_mtudisc_clone(sin6tosa(&sin6), m->m_pkthdr.rdomain);
 
 	if (rt && (rt->rt_flags & RTF_HOST) &&
 	    !(rt->rt_rmx.rmx_locks & RTV_MTU) &&
@@ -1217,7 +1213,7 @@ ni6_input(struct mbuf *m, int off)
 	sin6.sin6_len = sizeof(struct sockaddr_in6);
 	bcopy(&ip6->ip6_dst, &sin6.sin6_addr, sizeof(sin6.sin6_addr));
 	/* XXX scopeid */
-	if (ifa_ifwithaddr((struct sockaddr *)&sin6, m->m_pkthdr.rdomain))
+	if (ifa_ifwithaddr(sin6tosa(&sin6), m->m_pkthdr.rdomain))
 		; /* unicast/anycast, fine */
 	else if (IN6_IS_ADDR_MC_LINKLOCAL(&sin6.sin6_addr))
 		; /* link-local multicast, fine */
@@ -1683,7 +1679,7 @@ ni6_addrs(struct icmp6_nodeinfo *ni6, struct mbuf *m, struct ifnet **ifpp,
 		TAILQ_FOREACH(ifa, &ifp->if_addrlist, ifa_list) {
 			if (ifa->ifa_addr->sa_family != AF_INET6)
 				continue;
-			ifa6 = (struct in6_ifaddr *)ifa;
+			ifa6 = ifatoia6(ifa);
 
 			if ((niflags & NI_NODEADDR_FLAG_ALL) == 0 &&
 			    IN6_ARE_ADDR_EQUAL(&subj_ip6->sin6_addr,
@@ -1757,11 +1753,11 @@ ni6_store_addrs(struct icmp6_nodeinfo *ni6, struct icmp6_nodeinfo *nni6,
 
   again:
 
-	for (; ifp != TAILQ_END(&ifnet); ifp = TAILQ_NEXT(ifp, if_list)) {
+	for (; ifp != NULL; ifp = TAILQ_NEXT(ifp, if_list)) {
 		TAILQ_FOREACH(ifa, &ifp->if_addrlist, ifa_list) {
 			if (ifa->ifa_addr->sa_family != AF_INET6)
 				continue;
-			ifa6 = (struct in6_ifaddr *)ifa;
+			ifa6 = ifatoia6(ifa);
 
 			if ((ifa6->ia6_flags & IN6_IFF_DEPRECATED) != 0 &&
 			    allow_deprecated == 0) {
@@ -1838,11 +1834,15 @@ ni6_store_addrs(struct icmp6_nodeinfo *ni6, struct icmp6_nodeinfo *nni6,
 			if (ifa6->ia6_lifetime.ia6t_expire == 0)
 				ltime = ND6_INFINITE_LIFETIME;
 			else {
-				if (ifa6->ia6_lifetime.ia6t_expire >
-				    time_second)
-					ltime = htonl(ifa6->ia6_lifetime.ia6t_expire - time_second);
-				else
+				time_t diff = ifa6->ia6_lifetime.ia6t_expire -
+				    time_second;
+
+				if (diff <= 0)
 					ltime = 0;
+				else if (diff >= ND6_INFINITE_LIFETIME)
+					ltime = ND6_INFINITE_LIFETIME;
+				else
+					ltime = htonl((u_int32_t)diff);
 			}
 
 			bcopy(&ltime, cp, sizeof(u_int32_t));
@@ -1905,6 +1905,18 @@ icmp6_rip6_input(struct mbuf **mp, int off)
 			continue;
 		if (in6p->in6p_ip6_nxt != IPPROTO_ICMPV6)
 			continue;
+#if NPF > 0
+		if (m->m_pkthdr.pf.flags & PF_TAG_DIVERTED) {
+			struct pf_divert *divert;
+
+			/* XXX rdomain support */
+			if ((divert = pf_find_divert(m)) == NULL)
+				continue;
+			if (!IN6_ARE_ADDR_EQUAL(&in6p->in6p_laddr,
+			    &divert->addr.v6))
+				continue;
+		} else
+#endif
 		if (!IN6_IS_ADDR_UNSPECIFIED(&in6p->in6p_laddr) &&
 		   !IN6_ARE_ADDR_EQUAL(&in6p->in6p_laddr, &ip6->ip6_dst))
 			continue;
@@ -1923,8 +1935,7 @@ icmp6_rip6_input(struct mbuf **mp, int off)
 				/* strip intermediate headers */
 				m_adj(n, off);
 				if (sbappendaddr(&last->in6p_socket->so_rcv,
-						 (struct sockaddr *)&rip6src,
-						 n, opts) == 0) {
+				    sin6tosa(&rip6src), n, opts) == 0) {
 					/* should notify about lost packet */
 					m_freem(n);
 					if (opts)
@@ -1942,8 +1953,7 @@ icmp6_rip6_input(struct mbuf **mp, int off)
 		/* strip intermediate headers */
 		m_adj(m, off);
 		if (sbappendaddr(&last->in6p_socket->so_rcv,
-				 (struct sockaddr *)&rip6src,
-				 m, opts) == 0) {
+		    sin6tosa(&rip6src), m, opts) == 0) {
 			m_freem(m);
 			if (opts)
 				m_freem(opts);
@@ -2059,7 +2069,7 @@ icmp6_reflect(struct mbuf *m, size_t off)
 	 * (for example) when we encounter an error while forwarding procedure
 	 * destined to a duplicated address of ours.
 	 */
-	for (ia = in6_ifaddr; ia; ia = ia->ia_next)
+	TAILQ_FOREACH(ia, &in6_ifaddr, ia_list)
 		if (IN6_ARE_ADDR_EQUAL(&t, &ia->ia_addr.sin6_addr) &&
 		    (ia->ia6_flags & (IN6_IFF_ANYCAST|IN6_IFF_NOTREADY)) == 0) {
 			src = &t;
@@ -2228,7 +2238,7 @@ icmp6_redirect_input(struct mbuf *m, int off)
 	sin6.sin6_family = AF_INET6;
 	sin6.sin6_len = sizeof(struct sockaddr_in6);
 	bcopy(&reddst6, &sin6.sin6_addr, sizeof(reddst6));
-	rt = rtalloc1((struct sockaddr *)&sin6, 0, m->m_pkthdr.rdomain);
+	rt = rtalloc1(sin6tosa(&sin6), 0, m->m_pkthdr.rdomain);
 	if (rt) {
 		if (rt->rt_gateway == NULL ||
 		    rt->rt_gateway->sa_family != AF_INET6) {
@@ -2240,7 +2250,7 @@ icmp6_redirect_input(struct mbuf *m, int off)
 			goto bad;
 		}
 
-		gw6 = &(((struct sockaddr_in6 *)rt->rt_gateway)->sin6_addr);
+		gw6 = &(satosin6(rt->rt_gateway)->sin6_addr);
 		if (bcmp(&src6, gw6, sizeof(struct in6_addr)) != 0) {
 			nd6log((LOG_ERR,
 				"ICMP6 redirect rejected; "
@@ -2337,10 +2347,9 @@ icmp6_redirect_input(struct mbuf *m, int off)
 		bcopy(&redtgt6, &sgw.sin6_addr, sizeof(struct in6_addr));
 		bcopy(&reddst6, &sdst.sin6_addr, sizeof(struct in6_addr));
 		bcopy(&src6, &ssrc.sin6_addr, sizeof(struct in6_addr));
-		rtredirect((struct sockaddr *)&sdst, (struct sockaddr *)&sgw,
-			   (struct sockaddr *)NULL, RTF_GATEWAY | RTF_HOST,
-			   (struct sockaddr *)&ssrc,
-			   &newrt, /* XXX */ 0);
+		rtredirect(sin6tosa(&sdst), sin6tosa(&sgw), NULL,
+		    RTF_GATEWAY | RTF_HOST, sin6tosa(&ssrc),
+		    &newrt, /* XXX */ 0);
 
 		if (newrt) {
 			(void)rt_timer_add(newrt, icmp6_redirect_timeout,
@@ -2356,7 +2365,7 @@ icmp6_redirect_input(struct mbuf *m, int off)
 		sdst.sin6_family = AF_INET6;
 		sdst.sin6_len = sizeof(struct sockaddr_in6);
 		bcopy(&reddst6, &sdst.sin6_addr, sizeof(struct in6_addr));
-		pfctlinput(PRC_REDIRECT_HOST, (struct sockaddr *)&sdst);
+		pfctlinput(PRC_REDIRECT_HOST, sin6tosa(&sdst));
 	}
 
  freeit:
@@ -2450,7 +2459,7 @@ icmp6_redirect_output(struct mbuf *m0, struct rtentry *rt)
 	/* get ip6 linklocal address for the router. */
 	if (rt->rt_gateway && (rt->rt_flags & RTF_GATEWAY)) {
 		struct sockaddr_in6 *sin6;
-		sin6 = (struct sockaddr_in6 *)rt->rt_gateway;
+		sin6 = satosin6(rt->rt_gateway);
 		nexthop = &sin6->sin6_addr;
 		if (!IN6_IS_ADDR_LINKLOCAL(nexthop))
 			nexthop = NULL;
@@ -2828,7 +2837,6 @@ icmp6_redirect_timeout(struct rtentry *rt, struct rttimer *r)
 }
 
 #include <uvm/uvm_extern.h>
-#include <sys/proc.h>
 #include <sys/sysctl.h>
 
 int *icmpv6ctl_vars[ICMPV6CTL_MAXID] = ICMPV6CTL_VARS;

@@ -1,4 +1,4 @@
-/* $OpenBSD: user.c,v 1.93 2013/02/16 07:25:54 ajacoutot Exp $ */
+/* $OpenBSD: user.c,v 1.95 2013/04/02 05:04:47 deraadt Exp $ */
 /* $NetBSD: user.c,v 1.69 2003/04/14 17:40:07 agc Exp $ */
 
 /*
@@ -923,7 +923,7 @@ scantime(time_t *tp, char *s)
 		} else if (strptime(s, "%B %d %Y", &tm) != NULL) {
 			*tp = mktime(&tm);
 		} else if (isdigit((unsigned char) s[0]) != 0) {
-			*tp = atoi(s);
+			*tp = (time_t)atoll(s);
 		} else {
 			return 0;
 		}
@@ -1464,10 +1464,15 @@ moduser(char *login_name, char *newlogin, user_t *up)
 		}
 		if (up->u_flags & F_ACCTUNLOCK) {
 			/* unlock the password */
-			if (strncmp(pwp->pw_passwd, pwlock_str, sizeof(pwlock_str)-1) == 0) {
-				pwp->pw_passwd += sizeof(pwlock_str)-1;
+			if (strcmp(pwp->pw_passwd, pwlock_str) != 0 &&
+			    strcmp(pwp->pw_passwd, "*************") != 0) {
+				if (strncmp(pwp->pw_passwd, pwlock_str, sizeof(pwlock_str)-1) == 0) {
+					pwp->pw_passwd += sizeof(pwlock_str)-1;
+				} else {
+					unlocked++;
+				}
 			} else {
-				unlocked++;
+				warnx("account `%s' has no password: cannot fully unlock", pwp->pw_name);
 			}
 			/* unlock the account */
 			if (*shell_last_char == *acctlock_str) {

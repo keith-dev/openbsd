@@ -1,4 +1,4 @@
-#	$OpenBSD: files,v 1.540 2013/01/21 11:17:48 patrick Exp $
+#	$OpenBSD: files,v 1.549 2013/07/11 01:20:31 jsg Exp $
 #	$NetBSD: files,v 1.87 1996/05/19 17:17:50 jonathan Exp $
 
 #	@(#)files.newconf	7.5 (Berkeley) 5/10/93
@@ -54,6 +54,12 @@ define	rasops24
 define	rasops32
 define	rasops_bswap
 define	rasops_rotation
+
+# I2C bus bit-banging
+define	i2c_bitbang
+
+# 1-Wire bus bit-banging
+define	onewire_bitbang
 
 # net device attributes - we have generic code for ether(net),
 # and fddi.
@@ -125,9 +131,6 @@ define	atapi {[channel = -1]}
 # Common code for ESDI/IDE/etc. controllers
 device	wdc: ata, atapi, wdc_base
 file	dev/ic/wdc.c			wdc_base
-
-# 1-Wire bus bit-banging
-define	onewire_bitbang
 
 # "Chipset" drivers.  These are the bus-independent routines which
 # contain the cfdrivers.  Attachments are provided by files.<bus>
@@ -529,7 +532,6 @@ pseudo-device bridge: ifnet, ether
 pseudo-device vlan: ifnet, ether
 pseudo-device carp: ifnet, ether
 pseudo-device sppp: ifnet
-pseudo-device faith: ifnet
 pseudo-device gif: ifnet
 pseudo-device gre: ifnet
 pseudo-device crypto: ifnet
@@ -538,11 +540,18 @@ pseudo-device mpe: ifnet, ether
 pseudo-device vether: ifnet, ether
 pseudo-device pppx: ifnet
 
-pseudo-device sequencer
 pseudo-device systrace
 
 pseudo-device ksyms
 file	dev/ksyms.c			ksyms needs-flag
+
+pseudo-device fuse
+file	miscfs/fuse/fuse_device.c	fuse	needs-flag
+file	miscfs/fuse/fuse_file.c		fuse
+file	miscfs/fuse/fuse_lookup.c	fuse
+file	miscfs/fuse/fuse_vfsops.c	fuse
+file	miscfs/fuse/fuse_vnops.c	fuse
+file	miscfs/fuse/fusebuf.c		fuse
 
 pseudo-device pf: ifnet
 file	net/pf.c			pf	needs-flag
@@ -617,7 +626,6 @@ file dev/ic/tc921x.c			tc921x
 file dev/ic/pt2254a.c			pt2254a
 file dev/midi.c				midi | midibus		needs-flag
 file dev/mulaw.c			mulaw
-file dev/sequencer.c			sequencer		needs-flag
 file dev/systrace.c			systrace		needs-flag
 file dev/vnd.c				vnd			needs-flag
 file dev/rnd.c
@@ -681,6 +689,7 @@ file kern/subr_evcount.c
 file kern/subr_extent.c
 file kern/subr_hibernate.c		hibernate
 file kern/subr_log.c
+file kern/subr_poison.c			diagnostic
 file kern/subr_pool.c
 file kern/dma_alloc.c
 file kern/subr_prf.c
@@ -934,7 +943,6 @@ file uvm/uvm_glue.c
 file uvm/uvm_init.c
 file uvm/uvm_io.c
 file uvm/uvm_km.c
-#file uvm/uvm_loan.c
 file uvm/uvm_map.c
 file uvm/uvm_meter.c
 file uvm/uvm_mmap.c
@@ -951,7 +959,6 @@ file uvm/uvm_user.c
 file uvm/uvm_vnode.c
 
 # IPv6
-file net/if_faith.c			faith			needs-count
 file net/if_gif.c			gif			needs-count
 file netinet/ip_ecn.c			inet | inet6
 file netinet/in_gif.c			gif & inet
@@ -986,7 +993,6 @@ file net/pfkeyv2_parsemessage.c		key | ipsec | tcp_signature
 file net/pfkeyv2_convert.c		key | ipsec | tcp_signature
 
 # COMPAT_* support code (base and other shared code)
-file compat/common/compat_exec.c	!small_kernel
 file compat/common/compat_util.c	!small_kernel
 file compat/common/compat_dir.c		!small_kernel
 file compat/common/tty_43.c		compat_43
@@ -1017,10 +1023,11 @@ file lib/libkern/arch/${MACHINE_ARCH}/memcmp.S | lib/libkern/memcmp.c
 file lib/libkern/arch/${MACHINE_ARCH}/bcmp.S | lib/libkern/bcmp.c
 file lib/libkern/arch/${MACHINE_ARCH}/bzero.S | lib/libkern/bzero.c
 file lib/libkern/arch/${MACHINE_ARCH}/bcopy.S | lib/libkern/bcopy.c
-file lib/libkern/arch/${MACHINE_ARCH}/ovbcopy.S | lib/libkern/ovbcopy.c
 file lib/libkern/arch/${MACHINE_ARCH}/memcpy.S | lib/libkern/memcpy.c
 file lib/libkern/arch/${MACHINE_ARCH}/memmove.S | lib/libkern/memmove.c
 file lib/libkern/arch/${MACHINE_ARCH}/ffs.S | lib/libkern/ffs.c
+file lib/libkern/arch/${MACHINE_ARCH}/fls.S | lib/libkern/fls.c
+file lib/libkern/arch/${MACHINE_ARCH}/flsl.S | lib/libkern/flsl.c
 file lib/libkern/arch/${MACHINE_ARCH}/memset.S | lib/libkern/memset.c
 file lib/libkern/arch/${MACHINE_ARCH}/strcmp.S | lib/libkern/strcmp.c
 file lib/libkern/arch/${MACHINE_ARCH}/strlcat.S | lib/libkern/strlcat.c

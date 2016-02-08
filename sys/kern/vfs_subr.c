@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfs_subr.c,v 1.202 2013/02/17 17:39:29 miod Exp $	*/
+/*	$OpenBSD: vfs_subr.c,v 1.204 2013/06/24 18:52:37 beck Exp $	*/
 /*	$NetBSD: vfs_subr.c,v 1.53 1996/04/22 01:39:13 christos Exp $	*/
 
 /*
@@ -224,7 +224,8 @@ vfs_rootmountalloc(char *fstypename, char *devname, struct mount **mpp)
 	mp->mnt_flag |= vfsp->vfc_flags & MNT_VISFLAGMASK;
 	strncpy(mp->mnt_stat.f_fstypename, vfsp->vfc_name, MFSNAMELEN);
 	mp->mnt_stat.f_mntonname[0] = '/';
-	(void)copystr(devname, mp->mnt_stat.f_mntfromname, MNAMELEN - 1, 0);
+	copystr(devname, mp->mnt_stat.f_mntfromname, MNAMELEN, 0);
+	copystr(devname, mp->mnt_stat.f_mntfromspec, MNAMELEN, 0);
 	*mpp = mp;
  	return (0);
  }
@@ -1819,6 +1820,7 @@ vinvalbuf(struct vnode *vp, int flags, struct ucred *cred, struct proc *p,
 		panic("vinvalbuf(): vp isn't locked");
 #endif
 
+loop:
 	if (flags & V_SAVE) {
 		s = splbio();
 		vwaitforio(vp, 0, "vinvalbuf", 0);
@@ -1833,7 +1835,6 @@ vinvalbuf(struct vnode *vp, int flags, struct ucred *cred, struct proc *p,
 		}
 		splx(s);
 	}
-loop:
 	s = splbio();
 	for (;;) {
 		if ((blist = LIST_FIRST(&vp->v_cleanblkhd)) &&
@@ -1856,24 +1857,13 @@ loop:
 				bp->b_flags |= B_WANTED;
 				error = tsleep(bp, slpflag | (PRIBIO + 1),
 				    "vinvalbuf", slptimeo);
+				splx(s);
 				if (error) {
-					splx(s);
 					return (error);
 				}
-				break;
-			}
-			bremfree(bp);
-			/*
-			 * XXX Since there are no node locks for NFS, I believe
-			 * there is a slight chance that a delayed write will
-			 * occur while sleeping just above, so check for it.
-			 */
-			if ((bp->b_flags & B_DELWRI) && (flags & V_SAVE)) {
-				buf_acquire(bp);
-				splx(s);
-				(void) VOP_BWRITE(bp);
 				goto loop;
 			}
+			bremfree(bp);
 			buf_acquire_nomap(bp);
 			bp->b_flags |= B_INVAL;
 			brelse(bp);
@@ -2244,9 +2234,9 @@ vfs_mount_print(struct mount *mp, int full,
  	(*pr)("  syncreads %llu asyncreads = %llu\n",
 	    mp->mnt_stat.f_syncreads, mp->mnt_stat.f_asyncreads);
 
-	(*pr)("  fstype \"%s\" mnton \"%s\" mntfrom \"%s\"\n",
+	(*pr)("  fstype \"%s\" mnton \"%s\" mntfrom \"%s\" mntspec \"%s\"\n",
 	    mp->mnt_stat.f_fstypename, mp->mnt_stat.f_mntonname,
-	    mp->mnt_stat.f_mntfromname);
+	    mp->mnt_stat.f_mntfromname, mp->mnt_stat.f_mntfromspec);
 
 	(*pr)("locked vnodes:");
 	/* XXX would take mountlist lock, except ddb has no context */
@@ -2296,6 +2286,7 @@ copy_statfs_info(struct statfs *sbp, const struct mount *mp)
 	sbp->f_namemax = mbp->f_namemax;
 	bcopy(mp->mnt_stat.f_mntonname, sbp->f_mntonname, MNAMELEN);
 	bcopy(mp->mnt_stat.f_mntfromname, sbp->f_mntfromname, MNAMELEN);
+	bcopy(mp->mnt_stat.f_mntfromspec, sbp->f_mntfromspec, MNAMELEN);
 	bcopy(&mp->mnt_stat.mount_info.ufs_args, &sbp->mount_info.ufs_args,
 	    sizeof(struct ufs_args));
 }

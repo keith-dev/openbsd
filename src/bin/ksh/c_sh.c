@@ -1,4 +1,4 @@
-/*	$OpenBSD: c_sh.c,v 1.41 2010/03/27 09:10:01 jmc Exp $	*/
+/*	$OpenBSD: c_sh.c,v 1.43 2013/04/19 17:39:45 deraadt Exp $	*/
 
 /*
  * built-in Bourne commands
@@ -465,29 +465,13 @@ c_trap(char **wp)
 	wp += builtin_opt.optind;
 
 	if (*wp == NULL) {
-		int anydfl = 0;
-
 		for (p = sigtraps, i = NSIG+1; --i >= 0; p++) {
-			if (p->trap == NULL)
-				anydfl = 1;
-			else {
+			if (p->trap != NULL) {
 				shprintf("trap -- ");
 				print_value_quoted(p->trap);
 				shprintf(" %s\n", p->name);
 			}
 		}
-#if 0 /* this is ugly and not clear POSIX needs it */
-		/* POSIX may need this so output of trap can be saved and
-		 * used to restore trap conditions
-		 */
-		if (anydfl) {
-			shprintf("trap -- -");
-			for (p = sigtraps, i = NSIG+1; --i >= 0; p++)
-				if (p->trap == NULL && p->name)
-					shprintf(" %s", p->name);
-			shprintf(newline);
-		}
-#endif
 		return 0;
 	}
 
@@ -681,11 +665,12 @@ p_time(struct shf *shf, int posix, struct timeval *tv, int width, char *prefix,
     char *suffix)
 {
 	if (posix)
-		shf_fprintf(shf, "%s%*ld.%02ld%s", prefix ? prefix : "",
-		    width, tv->tv_sec, tv->tv_usec / 10000, suffix);
+		shf_fprintf(shf, "%s%*lld.%02ld%s", prefix ? prefix : "",
+		    width, (long long)tv->tv_sec, tv->tv_usec / 10000, suffix);
 	else
-		shf_fprintf(shf, "%s%*ldm%ld.%02lds%s", prefix ? prefix : "",
-		    width, tv->tv_sec / 60, tv->tv_sec % 60,
+		shf_fprintf(shf, "%s%*lldm%lld.%02lds%s", prefix ? prefix : "",
+		    width, (long long)tv->tv_sec / 60,
+		    (long long)tv->tv_sec % 60,
 		    tv->tv_usec / 10000, suffix);
 }
 

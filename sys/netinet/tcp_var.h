@@ -1,4 +1,4 @@
-/*	$OpenBSD: tcp_var.h,v 1.99 2011/07/06 23:44:20 sthen Exp $	*/
+/*	$OpenBSD: tcp_var.h,v 1.101 2013/06/01 16:22:05 bluhm Exp $	*/
 /*	$NetBSD: tcp_var.h,v 1.17 1996/02/13 23:44:24 christos Exp $	*/
 
 /*
@@ -538,7 +538,9 @@ extern	struct inpcbtable tcbtable;	/* head of queue of active tcpcb's */
 extern	struct tcpstat tcpstat;	/* tcp statistics */
 extern	u_int32_t tcp_now;		/* for RFC 1323 timestamps */
 extern	int tcp_do_rfc1323;	/* enabled/disabled? */
+extern	int tcptv_keep_init;	/* time to keep alive the initial SYN packet */
 extern	int tcp_mssdflt;	/* default maximum segment size */
+extern	int tcp_rst_ppslim;	/* maximum outgoing RST packet per second */
 extern	int tcp_ack_on_push;	/* ACK immediately on PUSH */
 #ifdef TCP_SACK
 extern	int tcp_do_sack;	/* SACK enabled/disabled */
@@ -565,7 +567,7 @@ struct tcpcb *
 void	 tcp_reaper(void *);
 int	 tcp_freeq(struct tcpcb *);
 #ifdef INET6
-void	 tcp6_ctlinput(int, struct sockaddr *, void *);
+void	 tcp6_ctlinput(int, struct sockaddr *, u_int, void *);
 #endif
 void	 *tcp_ctlinput(int, struct sockaddr *, u_int, void *);
 int	 tcp_ctloutput(int, struct socket *, int, int, struct mbuf **);

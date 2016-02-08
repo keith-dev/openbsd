@@ -1,4 +1,4 @@
-/*	$OpenBSD: inode.c,v 1.17 2011/03/12 17:50:47 deraadt Exp $	*/
+/*	$OpenBSD: inode.c,v 1.19 2013/04/24 13:46:27 deraadt Exp $	*/
 /*	$NetBSD: inode.c,v 1.8 2000/01/28 16:01:46 bouyer Exp $	*/
 
 /*
@@ -230,7 +230,8 @@ iblock(struct inodesc *idesc, long ilevel, u_int64_t isize)
 			if (*ap == 0)
 				continue;
 			(void)snprintf(buf, sizeof(buf),
-			    "PARTIALLY TRUNCATED INODE I=%u", idesc->id_number);
+			    "PARTIALLY TRUNCATED INODE I=%llu",
+			    (unsigned long long)idesc->id_number);
 			if (dofix(idesc, buf)) {
 				*ap = 0;
 				dirty(bp);
@@ -330,7 +331,8 @@ ginode(ino_t inumber)
 
 	if ((inumber < EXT2_FIRSTINO && inumber != EXT2_ROOTINO)
 		|| inumber > maxino)
-		errexit("bad inode number %d to ginode\n", inumber);
+		errexit("bad inode number %llu to ginode\n",
+		    (unsigned long long)inumber);
 	if (startinum == 0 ||
 	    inumber < startinum || inumber >= startinum + sblock.e2fs_ipb) {
 		iblk = fsck_ino_to_fsba(&sblock, inumber);
@@ -358,7 +360,8 @@ getnextinode(ino_t inumber)
 	static struct ext2fs_dinode *dp;
 
 	if (inumber != nextino++ || inumber > maxino)
-		errexit("bad inode number %d to nextinode\n", inumber);
+		errexit("bad inode number %llu to nextinode\n",
+		    (unsigned long long)inumber);
 	if (inumber >= lastinum) {
 		readcnt++;
 		dblk = fsbtodb(&sblock, fsck_ino_to_fsba(&sblock, lastinum));
@@ -468,7 +471,7 @@ getinoinfo(ino_t inumber)
 			continue;
 		return (inp);
 	}
-	errexit("cannot find inode %d\n", inumber);
+	errexit("cannot find inode %llu\n", (unsigned long long)inumber);
 	return (NULL);
 }
 
@@ -557,7 +560,7 @@ pinode(ino_t ino)
 	time_t t;
 	u_int32_t uid;
 
-	printf(" I=%u ", ino);
+	printf(" I=%llu ", (unsigned long long)ino);
 	if ((ino < EXT2_FIRSTINO && ino != EXT2_ROOTINO) || ino > maxino)
 		return;
 	dp = ginode(ino);
@@ -573,7 +576,7 @@ pinode(ino_t ino)
 	if (preen)
 		printf("%s: ", cdevname());
 	printf("SIZE=%llu ", (long long)inosize(dp));
-	t = fs2h32(dp->e2di_mtime);
+	t = (time_t)fs2h32(dp->e2di_mtime);
 	p = ctime(&t);
 	printf("MTIME=%12.12s %4.4s ", &p[4], &p[20]);
 }
@@ -582,7 +585,7 @@ void
 blkerror(ino_t ino, char *type, daddr32_t blk)
 {
 
-	pfatal("%d %s I=%u", blk, type, ino);
+	pfatal("%d %s I=%llu", blk, type, (unsigned long long)ino);
 	printf("\n");
 	switch (statemap[ino]) {
 
@@ -645,7 +648,7 @@ allocino(ino_t request, int type)
 	}
 	dp->e2di_mode = h2fs16(type);
 	(void)time(&t);
-	dp->e2di_atime = h2fs32(t);
+	dp->e2di_atime = (u_int32_t)h2fs32(t);
 	dp->e2di_mtime = dp->e2di_ctime = dp->e2di_atime;
 	dp->e2di_dtime = 0;
 	inossize(dp, sblock.e2fs_bsize);

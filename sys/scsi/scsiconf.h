@@ -1,4 +1,4 @@
-/*	$OpenBSD: scsiconf.h,v 1.150 2012/07/01 01:41:13 krw Exp $	*/
+/*	$OpenBSD: scsiconf.h,v 1.153 2013/06/11 16:42:17 deraadt Exp $	*/
 /*	$NetBSD: scsiconf.h,v 1.35 1997/04/02 02:29:38 mycroft Exp $	*/
 
 /*
@@ -54,7 +54,6 @@
 #include <sys/timeout.h>
 #include <sys/workq.h>
 #include <sys/mutex.h>
-#include <machine/cpu.h>
 #include <scsi/scsi_debug.h>
 
 static __inline void _lto2b(u_int32_t val, u_int8_t *bytes);
@@ -390,7 +389,7 @@ struct scsi_attach_args {
  * (via the scsi_link structure)
  */
 struct scsi_xfer {
-	LIST_ENTRY(scsi_xfer) free_list;
+	SIMPLEQ_ENTRY(scsi_xfer) xfer_list;
 	int	flags;
 	struct	scsi_link *sc_link;	/* all about our device and adapter */
 	int	retries;		/* the number of times to retry */
@@ -414,6 +413,7 @@ struct scsi_xfer {
 
 	void *io;			/* adapter io resource */
 };
+SIMPLEQ_HEAD(scsi_xfer_list, scsi_xfer);
 
 /*
  * Per-request Flag values
@@ -472,7 +472,7 @@ const void *scsi_inqmatch(struct scsi_inquiry_data *, const void *, int,
     workq_add_task(NULL, (_fl), (_f), (_a1), (_a2))
 
 void	scsi_init(void);
-daddr64_t scsi_size(struct scsi_link *, int, u_int32_t *);
+daddr_t scsi_size(struct scsi_link *, int, u_int32_t *);
 int	scsi_test_unit_ready(struct scsi_link *, int, int);
 int	scsi_inquire(struct scsi_link *, struct scsi_inquiry_data *, int);
 int	scsi_inquire_vpd(struct scsi_link *, void *, u_int, u_int8_t, int);

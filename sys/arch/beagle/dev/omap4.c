@@ -1,4 +1,4 @@
-/* $OpenBSD: omap4.c,v 1.5 2011/11/15 23:01:11 drahn Exp $ */
+/* $OpenBSD: omap4.c,v 1.10 2013/06/14 23:13:54 patrick Exp $ */
 
 /*
  * Copyright (c) 2011 Uwe Stuehler <uwe@openbsd.org>
@@ -24,13 +24,8 @@
 
 #include <beagle/dev/omapvar.h>
 
-#define ICP_ADDR	0x48240100
-#define ICP_SIZE	0x100
-#define ICD_ADDR	0x48241000
-#define ICD_SIZE	0x1000
-
-#define GTIMER_ADDR	0x48240000
-#define GTIMER_SIZE	0x300
+#define OMAPID_ADDR	0x4a002000
+#define OMAPID_SIZE	0x1000
 
 #define WD_ADDR		0x4a314000
 #define WD_SIZE		0x80
@@ -65,27 +60,49 @@
 #define HSMMC1_ADDR	0x4809c000
 #define HSMMC1_IRQ	83
 
+#define PRM_ADDR	0x4a306000
+#define PRM_SIZE	0x2000
+#define CM1_ADDR	0x4a004000
+#define CM1_SIZE	0x1000
+#define CM2_ADDR	0x4a008000
+#define CM2_SIZE	0x2000
+#define SCRM_ADDR	0x4a30a000
+#define SCRM_SIZE	0x1000
+#define PCNF1_ADDR	0x4a100000
+#define PCNF1_SIZE	0x1000
+#define PCNF2_ADDR	0x4a31e000
+#define PCNF2_SIZE	0x1000
+
+#define HSUSBHOST_ADDR	0x4a064000
+#define HSUSBHOST_SIZE	0x800
+#define USBEHCI_ADDR	0x4a064c00
+#define USBEHCI_SIZE	0x400
+#define USBOHCI_ADDR	0x4a064800
+#define USBOHCI_SIZE	0x400
+#define USBEHCI_IRQ	77
+
 struct omap_dev omap4_devs[] = {
 
 	/*
-	 * Cortex-A9 Interrupt Controller
+	 * Power, Reset and Clock Manager
 	 */
 
-	{ .name = "ampintc",
+	{ .name = "prcm",
 	  .unit = 0,
 	  .mem = {
-	    { ICP_ADDR, ICD_SIZE },
-	    { ICD_ADDR, ICD_SIZE },
+	    { PRM_ADDR, PRM_SIZE },
+	    { CM1_ADDR, CM1_SIZE },
+	    { CM2_ADDR, CM2_SIZE },
 	  },
 	},
 
 	/*
-	 * Cortex-A9 Global Timer
+	 * OMAP identification registers/fuses
 	 */
 
-	{ .name = "amptimer",
+	{ .name = "omapid",
 	  .unit = 0,
-	  .mem = { { GTIMER_ADDR, GTIMER_SIZE } },
+	  .mem = { { OMAPID_ADDR, OMAPID_SIZE } },
 	},
 
 	/*
@@ -155,8 +172,25 @@ struct omap_dev omap4_devs[] = {
 	  .unit = 0,
 	  .mem = { { HSMMC1_ADDR, HSMMCx_SIZE } },
 	  .irq = { HSMMC1_IRQ }
-	}
+	},
 
+	/*
+	 * USB
+	 */
+
+	{ .name = "ehci",
+	  .unit = 0,
+	  .mem = {
+		  { USBEHCI_ADDR, USBEHCI_SIZE },
+		  { HSUSBHOST_ADDR, HSUSBHOST_SIZE },
+	  },
+	  .irq = { USBEHCI_IRQ }
+	},
+
+	/* Terminator */
+	{ .name = NULL,
+	  .unit = 0,
+	}
 };
 
 void

@@ -1,4 +1,4 @@
-/*	$OpenBSD: dispatch.c,v 1.75 2013/02/18 15:57:08 krw Exp $	*/
+/*	$OpenBSD: dispatch.c,v 1.81 2013/07/06 01:12:20 krw Exp $	*/
 
 /*
  * Copyright 2004 Henning Brauer <henning@openbsd.org>
@@ -59,7 +59,9 @@ discover_interface(void)
 {
 	struct ifaddrs *ifap, *ifa;
 	struct ifreq *tif;
-	int len = IFNAMSIZ + sizeof(struct sockaddr_storage);
+	struct option_data *opt;
+	char *data;
+	int len;
 
 	if (getifaddrs(&ifap) != 0)
 		error("getifaddrs failed");
@@ -83,10 +85,24 @@ discover_interface(void)
 			ifi->index = foo->sdl_index;
 			ifi->hw_address.hlen = foo->sdl_alen;
 			ifi->hw_address.htype = HTYPE_ETHER; /* XXX */
-			memcpy(ifi->hw_address.haddr,
-			    LLADDR(foo), foo->sdl_alen);
+			memcpy(ifi->hw_address.haddr, LLADDR(foo),
+			    foo->sdl_alen);
+			opt = &config->send_options[DHO_DHCP_CLIENT_IDENTIFIER];
+			if (opt->len == 0) {
+				/* Build default client identifier. */
+				data = calloc(1, foo->sdl_alen + 1);
+				if (data != NULL) {
+					data[0] = ifi->hw_address.htype;
+					memcpy(&data[1], LLADDR(foo),
+					    foo->sdl_alen);
+					opt->data = data;
+					opt->len = foo->sdl_alen + 1;
+				}
+			}
 		}
+
 		if (!ifi->ifp) {
+			len = IFNAMSIZ + sizeof(struct sockaddr_storage);
 			if ((tif = malloc(len)) == NULL)
 				error("no space to remember ifp");
 			strlcpy(tif->ifr_name, ifa->ifa_name, IFNAMSIZ);
@@ -167,10 +183,10 @@ another:
 		if (unpriv_ibuf->w.queued)
 			fds[2].events |= POLLOUT;
 
-		/* Wait for a packet or a timeout or unpriv_ibuf->fd ... XXX */
+		/* Wait for a packet or a timeout or unpriv_ibuf->fd. XXX */
 		count = poll(fds, 3, to_msec);
 
-		/* Not likely to be transitory... */
+		/* Not likely to be transitory. */
 		if (count == -1) {
 			if (errno == EAGAIN || errno == EINTR) {
 				continue;
@@ -239,7 +255,7 @@ got_one(void)
 
 	memcpy(&ifrom, &from.sin_addr, sizeof(ifrom));
 
-	do_packet(result, from.sin_port, ifrom, &hfrom);
+	do_packet(from.sin_port, ifrom, &hfrom);
 }
 
 void
@@ -290,7 +306,7 @@ interface_status(char *ifname)
 	if ((sock = socket(AF_INET, SOCK_DGRAM, 0)) == -1)
 		error("Can't create socket");
 
-	/* get interface flags */
+	/* Get interface flags. */
 	memset(&ifr, 0, sizeof(ifr));
 	strlcpy(ifr.ifr_name, ifname, sizeof(ifr.ifr_name));
 	if (ioctl(sock, SIOCGIFFLAGS, &ifr) == -1) {
@@ -298,22 +314,18 @@ interface_status(char *ifname)
 		    strerror(errno));
 	}
 
-	/*
-	 * if one of UP and RUNNING flags is dropped,
-	 * the interface is not active.
-	 */
 	if ((ifr.ifr_flags & (IFF_UP|IFF_RUNNING)) != (IFF_UP|IFF_RUNNING))
 		goto inactive;
 
-	/* Next, check carrier on the interface, if possible */
+	/* Next, check carrier on the interface if possible. */
 	if (ifi->noifmedia)
 		goto active;
 	memset(&ifmr, 0, sizeof(ifmr));
 	strlcpy(ifmr.ifm_name, ifname, sizeof(ifmr.ifm_name));
 	if (ioctl(sock, SIOCGIFMEDIA, (caddr_t)&ifmr) == -1) {
 		/*
-		 * EINVAL or ENOTTY simply means that the interface
-		 * does not support the SIOCGIFMEDIA ioctl. We regard it alive.
+		 * EINVAL or ENOTTY simply means that the interface does not
+		 * support the SIOCGIFMEDIA ioctl. We regard it alive.
 		 */
 #ifdef DEBUG
 		if (errno != EINVAL && errno != ENOTTY)
@@ -351,7 +363,7 @@ set_timeout(time_t when, void (*where)(void))
 void
 set_timeout_interval(time_t secs, void (*where)(void))
 {
-	timeout.when = time(NULL) + secs; 
+	timeout.when = time(NULL) + secs;
 	timeout.func = where;
 }
 
@@ -382,7 +394,7 @@ get_rdomain(char *name)
 
 int
 subnet_exists(struct client_lease *l)
- {
+{
 	struct ifaddrs *ifap, *ifa;
 	struct in_addr mymask, myaddr, mynet, hismask, hisaddr, hisnet;
 	int myrdomain, hisrdomain;
@@ -405,7 +417,7 @@ subnet_exists(struct client_lease *l)
 		if (ifa->ifa_addr->sa_family != AF_INET)
 			continue;
 
-		hisrdomain = get_rdomain(ifi->name);
+		hisrdomain = get_rdomain(ifa->ifa_name);
 		if (hisrdomain != myrdomain)
 			continue;
 
@@ -438,4 +450,4 @@ subnet_exists(struct client_lease *l)
 	freeifaddrs(ifap);
 
 	return (0);
- }
+}

@@ -60,7 +60,7 @@ rtx m88k_compare_op1;		/* cmpsi operand 1 */
 
 enum processor_type m88k_cpu;	/* target cpu */
 
-static void m88k_frame_related PARAMS ((rtx, rtx, int));
+static void m88k_frame_related PARAMS ((rtx, rtx, HOST_WIDE_INT));
 static void m88k_maybe_dead PARAMS ((rtx));
 static void m88k_output_function_epilogue PARAMS ((FILE *, HOST_WIDE_INT));
 static int m88k_adjust_cost PARAMS ((rtx, rtx, rtx, int));
@@ -105,10 +105,10 @@ classify_integer (mode, value)
     return m88k_or_lo16;
   else if (mode == QImode)
     return m88k_or_lo8;
-  else if ((value & 0xffff) == 0)
-    return m88k_oru_hi16;
   else if (integer_ok_for_set (value))
     return m88k_set;
+  else if ((value & 0xffff) == 0)
+    return m88k_oru_hi16;
   else
     return m88k_oru_or;
 }
@@ -121,17 +121,32 @@ condition_value (condition)
 {
   switch (GET_CODE (condition))
     {
-    case EQ: return 2;
-    case NE: return 3;
-    case GT: return 4;
-    case LE: return 5;
-    case LT: return 6;
-    case GE: return 7;
-    case GTU: return 8;
-    case LEU: return 9;
-    case LTU: return 10;
-    case GEU: return 11;
-    default: abort ();
+    case UNORDERED:
+      return 0;
+    case ORDERED:
+      return 1;
+    case EQ:
+      return 2;
+    case NE:
+      return 3;
+    case GT:
+      return 4;
+    case LE:
+      return 5;
+    case LT:
+      return 6;
+    case GE:
+      return 7;
+    case GTU:
+      return 8;
+    case LEU:
+      return 9;
+    case LTU:
+      return 10;
+    case GEU:
+      return 11;
+    default:
+      abort ();
     }
 }
 
@@ -738,7 +753,6 @@ block_move_sequence (dest, dest_mem, src, src_mem, size, align, offset)
 
   do
     {
-      rtx srcp, dstp;
       next = phase;
       phase = !phase;
 
@@ -752,11 +766,8 @@ block_move_sequence (dest, dest_mem, src, src_mem, size, align, offset)
 	      temp[next] = gen_reg_rtx (mode[next]);
 	    }
 	  size -= amount[next];
-	  srcp = gen_rtx_MEM (MEM_IN_STRUCT_P (src_mem) ? mode[next] : BLKmode,
-			      plus_constant (src, offset_ld));
-
-	  MEM_COPY_ATTRIBUTES (srcp, src_mem);
-	  emit_insn (gen_rtx_SET (VOIDmode, temp[next], srcp));
+	  emit_move_insn (temp[next],
+			  adjust_address (src_mem, mode[next], offset_ld));
 	  offset_ld += amount[next];
 	  active[next] = TRUE;
 	}
@@ -764,12 +775,8 @@ block_move_sequence (dest, dest_mem, src, src_mem, size, align, offset)
       if (active[phase])
 	{
 	  active[phase] = FALSE;
-	  dstp
-	    = gen_rtx_MEM (MEM_IN_STRUCT_P (dest_mem) ? mode[phase] : BLKmode,
-			   plus_constant (dest, offset_st));
-
-	  MEM_COPY_ATTRIBUTES (dstp, dest_mem);
-	  emit_insn (gen_rtx_SET (VOIDmode, dstp, temp[phase]));
+	  emit_move_insn (adjust_address (dest_mem, mode[phase], offset_st),
+			  temp[phase]);
 	  offset_st += amount[phase];
 	}
     }
@@ -2741,10 +2748,6 @@ print_operand (file, x, code)
 
   switch (code)
     {
-    case '*': /* addressing base register for PIC */
-      asm_fprintf (file, "%R%s", reg_names[PIC_OFFSET_TABLE_REGNUM]);
-      return;
-
     case '#': /* register prefix character (may be empty) */
       fputs (m88k_register_prefix, file);
       return;
@@ -2828,12 +2831,6 @@ print_operand (file, x, code)
       if (xc != CONST_INT)
 	output_operand_lossage ("invalid %%q value");
       fprintf (file, "%d", value & 0xff);
-      return;
-
-    case 'w': /* print the integer constant (X == 32 ? 0 : 32 - X) */
-      if (xc != CONST_INT)
-	output_operand_lossage ("invalid %%o value");
-      fprintf (file, "%d", value == 32 ? 0 : 32 - value);
       return;
 
     case 'p': /* print the logarithm of the integer constant */
@@ -2931,7 +2928,11 @@ print_operand (file, x, code)
 	    fputs (m88k_register_prefix, file);
 	  fputs ("gt0", file);
 	  return;
-	case LE: fputs ("0xe", file); return;
+	case LE:
+	  if (0) /* SVR4 */
+	    fputs (m88k_register_prefix, file);
+	  fputs ("le0", file);
+	  return;
 	case LT: fputs ("0x4", file); return;
 	case GE: fputs ("0xb", file); return;
 	default: output_operand_lossage ("invalid %%D value");
@@ -3191,4 +3192,9 @@ m88k_override_options ()
 
   if (TARGET_OMIT_LEAF_FRAME_POINTER)	/* keep nonleaf frame pointers */
     flag_omit_frame_pointer = 1;
+
+  /* On the m88100, it is desirable to align functions to a cache line.
+     The m88110 cache is small, so align to an 8 byte boundary.  */
+  if (align_functions == 0)
+    align_functions = TARGET_88100 ? 16 : 8;
 }

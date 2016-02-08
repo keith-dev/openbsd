@@ -1,4 +1,4 @@
-.\" $OpenBSD: bsd.port.mk.5,v 1.364 2013/02/16 11:35:12 ajacoutot Exp $
+.\" $OpenBSD: bsd.port.mk.5,v 1.382 2013/07/16 18:38:51 schwarze Exp $
 .\"
 .\" Copyright (c) 2000-2008 Marc Espie
 .\"
@@ -24,7 +24,7 @@
 .\" (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
 .\" THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 .\"
-.Dd $Mdocdate: February 16 2013 $
+.Dd $Mdocdate: July 16 2013 $
 .Dt BSD.PORT.MK 5
 .Os
 .Sh NAME
@@ -43,8 +43,7 @@ also uses quite a few helper scripts.
 Those live under
 .Pa ${PORTSDIR}/infrastructure/bin ,
 and they do have manpages under
-.Pa ${PORTSDIR}/infrastructure/man ,
-which is not currently part of the default manpath.
+.Pa ${PORTSDIR}/infrastructure/man .
 .Pp
 Other BSD variants, as well as older versions of
 .Nm bsd.port.mk ,
@@ -77,7 +76,7 @@ instead.
 provides an overview of the result.
 .Sh TARGETS
 .Bl -tag -width do-configure
-.It Ar {build,run,all,regress}-dir-depends
+.It Ar {build,run,all,test}-dir-depends
 Print all dependencies for a port in order to build it, run it, build and
 run it, or to run regression tests.
 The output is formatted as package specification pairs, in a form suitable
@@ -86,9 +85,9 @@ for
 .It Ar full-{build,run,all}-depends
 Print all dependencies a package depends upon for building, running,
 or both, as a list of package names.
-.It Ar {build,lib,regress,run}-depends-list
+.It Ar {build,lib,test,run}-depends-list
 Print a list of first level package specifications a port depends as
-build dependencies, library dependencies, regress dependencies or
+build dependencies, library dependencies, test dependencies or
 run dependencies.
 .It Ar print-{build,run}-depends
 User convenience target that displays the result of
@@ -114,14 +113,14 @@ Specialization hooks exist for
 .Ar fake ,
 .Ar install ,
 .Ar patch ,
-.Ar regress .
+.Ar test .
 See individual targets for exceptions.
 .It Ar addsum
 Complete the ${CHECKSUM_FILE} record of checksums with files that have been
 added since
 .Ar makesum .
 Complain if anything does not match.
-.It Ar all-lib-depends
+.It Ar all-lib-depends-args
 Process the full
 .Ev LIB_DEPENDS
 list into a form suitable for
@@ -231,7 +230,7 @@ Check all the port's dependencies, that is:
 .Ar build-depends ,
 .Ar lib-depends ,
 .Ar run-depends ,
-.Ar regress-depends .
+.Ar test-depends .
 .It Ar describe
 Prints a one-line index entry of the port, suitable for
 .Pa ${PORTSDIR}/INDEX .
@@ -302,6 +301,7 @@ and
 .Ev PATCHFILES
 lists is retrieved, if necessary, from the list of sites in
 .Ev MASTER_SITES .
+.Pp
 If a filename ends with a
 .Sq :0
 to
@@ -311,6 +311,17 @@ extension, it will be retrieved from
 to
 .Ev MASTER_SITES9
 instead.
+After stripping that extension if necessary,
+if the entry parses as
+.Sq Ar filename Ns { Ns Ar url Ns }
+it will be fetched as
+.Ar url
+instead, yet still stored as
+.Ar filename .
+.Pp
+Transfers in progress will be stored as
+.Ar filename.part .
+.Pp
 The ports framework uses
 .Pa ${DISTDIR}/${DIST_SUBDIR}
 (aliased to
@@ -321,6 +332,14 @@ which will also retrieve
 .Ev SUPDISTFILES ,
 to fill with supplementary distribution files which are not needed for
 every configuration.
+.Pp
+Note that fetching a significant number of distfiles, or fetching all distfiles
+relevant to a port and dependencies is better accomplished using
+.Xr dpb 1
+with the
+.Fl F
+option.
+.Pp
 Use of
 .Ar {pre,do,post}-fetch
 hooks is forbidden, as this would make mirroring of distfiles very complicated.
@@ -341,12 +360,18 @@ See
 .Ev PATCHFILES ,
 .Ev SUPDISTFILES ,
 .Ev REFETCH .
+.It Ar fetch-all
+also fetches
+.Ev SUPDISTFILES ,
+for use with e.g.,
+.Ar makesum .
 .It Ar index
 Top-level target, see
 .Xr ports 7 .
 .It Ar install
 Install the package after building.
-See the description of THE FAKE FRAMEWORK
+See the description of
+.Qq THE FAKE FRAMEWORK
 for the non-intuitive details of the way
 .Ar {pre,do,post}-install
 hooks are actually used by the ports tree.
@@ -398,7 +423,7 @@ Seldom used, see
 for details.
 .It Ar makesum
 Create the ${CHECKSUM_FILE} list of recorded checksums by running the
-cryptographic fingerprints sha256, sha1, md5 and rmd160 on ${MAKESUMFILES}.
+cryptographic fingerprint sha256 on ${MAKESUMFILES}.
 That normally includes ${DISTFILES}, ${SUPDISTFILES} and ${PATCHFILES}.
 .Ev NO_CHECKSUM
 can be used to avoid all checksumming steps.
@@ -644,22 +669,22 @@ and
 so that the packing-list is complete.
 .It Ar rebuild
 Force rebuild of the port.
-.It Ar regress
+.It Ar test
 Run regression tests for the port.
 Essentially depend on a correct build and invoke
 .Bd -literal
-env -i ${MAKE_ENV} ${MAKE_PROGRAM} ${ALL_REGRESS_FLAGS} \e
-	-f ${MAKE_FILE} ${REGRESS_TARGET} ${REGRESS_LOG}
+env -i ${MAKE_ENV} ${MAKE_PROGRAM} ${ALL_TEST_FLAGS} \e
+	-f ${MAKE_FILE} ${TEST_TARGET} ${TEST_LOG}
 .Ed
 .Pp
 If a port needs some other ports installed to run regression tests,
 use
-.Ev REGRESS_DEPENDS .
+.Ev TEST_DEPENDS .
 If a port needs special configuration or build options to enable regression
 testing, define a
-.Sq regress
+.Sq test
 .Ev FLAVOR .
-.It Ar regress-depends
+.It Ar test-depends
 Verify packages needed for regression tests, using the same scheme as
 .Ar build-depends .
 Only invoked when regression tests are run, or explicitly through
@@ -859,10 +884,10 @@ Flags passed to ${MAKE} invocations during the fake process.
 Equals
 .Li ${MAKE_FLAGS} ${DESTDIRNAME}=${WRKINST} ${FAKE_FLAGS} .
 Read-only.
-.It Ev ALL_REGRESS_FLAGS
-Flags passed to ${MAKE} invocations during regress.
+.It Ev ALL_TEST_FLAGS
+Flags passed to ${MAKE} invocations during test.
 Equals
-.Li ${MAKE_FLAGS} ${REGRESS_FLAGS} .
+.Li ${MAKE_FLAGS} ${TEST_FLAGS} .
 Read-only.
 .It Ev ALL_TARGET
 Target used to build software.
@@ -932,7 +957,7 @@ Read-only.
 User settings.
 Base location for system-wide state directory.
 Defaults to
-.Pa /var .
+.Pa ${VARBASE} .
 See
 .Ev LOCALSTATEDIR .
 .It Ev BASESYSCONFDIR
@@ -1394,6 +1419,13 @@ to
 .Sq :9
 appended to select a different
 .Ev MASTER_SITES .
+Each entry may optionally be of the form
+.Sq Ar filename Ns { Ns Ar url Ns }
+to deal with sites that only offer archives as weird urls, doing the transfer
+of
+.Ar url
+into result file
+.Ar filename .
 If ${DISTFILES} varies depending on FLAVORS or architecture,
 use
 .Ev SUPDISTFILES
@@ -1483,7 +1515,7 @@ cd ${WRKDIR}
 for archive in ${EXTRACT_ONLY}
 do
     case $$archive in
-    	*.tar.xz)
+	*.tar.xz)
 	  xzcat ${FULLDISTDIR}/$$archive| tar xf -;;
 	*.zip)
 	  unzip -q ${FULLDISTDIR}/$$archive -d ${WRKDIR};;
@@ -1517,6 +1549,14 @@ fake invocation.
 Empty by default.
 Also see
 .Ev ALL_FAKE_FLAGS .
+.It Ev FAKE_SETUP
+List of environment values normally set during fake invocations.
+Exposed so that modules may provide their own
+.Ar do-install .
+Read-only,
+see
+.Qq THE FAKE FRAMEWORK
+for details.
 .It Ev FAKE_TARGET
 Target built by ${MAKE_PROGRAM} on fake invocation.
 Defaults to ${INSTALL_TARGET}.
@@ -1533,6 +1573,12 @@ Command used to fetch distribution files for this port.
 Defaults to
 .Xr ftp 1 .
 Can be used to go through excessively paranoid firewalls.
+Note that
+.Ev FETCH_CMD
+should support
+.Fl C
+and
+.Fl o Ar dest .
 .It Ev FETCH_MANUALLY
 Some ports' distfiles cannot be fetched automatically for licensing reasons.
 In this case, set
@@ -1712,8 +1758,7 @@ related targets, see
 .Ar print-package-args
 for details.
 .It Ev LIBTOOL
-Location of the libtool binary for ports that set
-.Ev USE_LIBTOOL
+Location of the libtool binary.
 Default:
 .Pa /usr/bin/libtool .
 .It Ev LIBTOOL_FLAGS
@@ -1756,7 +1801,8 @@ Use with
 .Ev NOT_FOR_ARCHS .
 .It Ev MAINTAINER
 E-mail address with full name of the port's maintainer.
-Defaults to ports@openbsd.org.
+Defaults to
+.Mt ports@openbsd.org .
 .It Ev MAKE_ENV
 Environment variables passed to make invocations.
 Sets at least PATH, PREFIX, LOCALBASE, X11BASE, CFLAGS, TRUEPREFIX, DESTDIR,
@@ -1768,10 +1814,10 @@ stage, which adds
 .Ev FAKE_FLAGS
 (see
 .Ev ALL_FAKE_FLAGS )
-and for the regress stage, which adds
-.Ev REGRESS_FLAGS
+and for the test stage, which adds
+.Ev TEST_FLAGS
 (see
-.Ev ALL_REGRESS_FLAGS ) .
+.Ev ALL_TEST_FLAGS ) .
 .It Ev MAKE_FILE
 Name of the Makefile used for ports building.
 Defaults to Makefile.
@@ -1854,6 +1900,20 @@ tedious.
 .It Ev MODGNU_CONFIG_GUESS_DIRS
 If a port uses config.guess outside WRKSRC, the directories
 containing the other copies must be set here.
+.It Ev MODPERL_ADJ_FILES
+If any files have a Perl shebang line, which needs to be replaced
+with
+.Dq #!/usr/bin/perl ,
+list them in
+.Ev MODPERL_ADJ_FILES .
+File paths here should be relative to
+.Ev WRKSRC .
+These files are patched automatically at the end of
+.Ar pre-configure .
+.It Ev MODPERL_BIN_ADJ
+Shell fragment to patch the Perl interpreter path in executable scripts.
+Used by
+.Ev MODPERL_ADJ_FILES .
 .It Ev MODPERL_BUILD_TARGET
 Normal content of
 .Ar do-build
@@ -1866,9 +1926,9 @@ for its own reasons.
 .It Ev MODPERL_INSTALL_TARGET
 Likewise for
 .Ar do-install .
-.It Ev MODPERL_REGRESS_TARGET
+.It Ev MODPERL_TEST_TARGET
 Likewise for
-.Ar do-regress .
+.Ar do-test .
 .It Ev MODULES
 External modules mechanism, documented separately.
 Modules such as
@@ -1885,7 +1945,7 @@ to just get the effects of
 and
 .Ev MODGNU_CONFIG_GUESS_DIRS
 along with the default
-.Ev REGRESS_TARGET ,
+.Ev TEST_TARGET ,
 in case the normal GNU configure script was wrapped in a separate script that
 takes different arguments.
 See
@@ -1955,12 +2015,12 @@ See also
 .Ev IGNORE
 and
 .Ev TRY_BROKEN .
-.It Ev NO_REGRESS
-Port does not have any regression targets.
+.It Ev NO_TEST
+Port does not have any regression tests.
 Only set to
 .Sq Yes
-for ports with no regression targets.
-It should be left alone for ports with empty regression targets, and for
+for ports with no regression test.
+It should be left alone for ports with empty regression tests, and for
 ports with failing tests.
 That way, if a subsequent update of a port acquires actual regression tests,
 they will be picked up automatically.
@@ -2048,7 +2108,7 @@ shell fragment:
 .Bd -literal
 set -e
 cd ${FULLDISTDIR}
-for patchfile in ${_PATCHFILES}
+for patchfile in ${_LIST_PATCHFILES}
 do
     case $$patchfile in
 	*.bz2)
@@ -2112,7 +2172,7 @@ PATCH_LIST=${PORTSDIR}/x11/kde/libs2/patches/p-* patch-*
 .It Ev PATCH_STRIP
 Patch option used to strip directory levels while applying port's patches.
 Defaults to -p0 .
-.It Ev PERMIT_{DISTFILES,PACKAGE}_{CDROM,FTP}
+.It Ev PERMIT_DISTFILES_FTP , PERMIT_PACKAGE_CDROM , PERMIT_PACKAGE_FTP
 Set to
 .Sq Yes
 if package or distribution files can be allowed on FTP sites or CD-ROM without
@@ -2122,6 +2182,24 @@ PERMIT_* lines in the Makefile should be preceded with a comment explaining
 details about licensing and patents issues the port may have.
 Porters must be very thorough in their checks.
 In case of doubt, ask.
+.Pp
+If
+.Ev PERMIT_PACKAGE_CDROM
+is set to
+.Sq Yes ,
+.Ev PERMIT_PACKAGE_FTP
+and
+.Ev PERMIT_DISTFILES_FTP
+will default to
+.Sq Yes .
+.Pp
+If
+.Ev PERMIT_PACKAGE_FTP
+is set to
+.Sq Yes ,
+.Ev PERMIT_DISTFILES_FTP
+will default to
+.Sq Yes .
 .It Ev PKG_ADD
 User settings.
 Path to
@@ -2158,6 +2236,12 @@ lines obtained from
 the ports tree with
 .Cm @wantlib
 lines that come from the installed system.
+Set to
+.Sq Warn
+to have the differences printed as a warning instead of an error
+.Po
+the default
+.Pc .
 .It Ev PKG_DBDIR
 User settings.
 Path to package installation records.
@@ -2270,13 +2354,15 @@ This is highly experimental and not recommended.
 .It Ev PREFERRED_CIPHERS
 List of cryptographic ciphers to use, in order of preference.
 Default is
-.Sq sha256 sha1 rmd160 md5 .
+.Sq sha256 .
 The first cipher that matches in ${CHECKSUM_FILE} is verified.
 .It Ev PREFIX
 Base directory for the current port installation.
 Usually ${LOCALBASE}, though some ports may elect a location under
-.Pa /var ,
+.Pa ${VARBASE} ,
 and some multi-package ports may install under several locations.
+Additionally, firmware files generally install under
+.Pa ${BASESYSCONFDIR} .
 .It Ev PREPARE_CHECK_ONLY
 Build settings.
 Prevent the
@@ -2410,25 +2496,25 @@ checksum off
 .Pa ftp.openbsd.org ,
 in the directory
 .Pa /pub/OpenBSD/distfiles/$cipher/$value/$file .
-.It Ev REGRESS_DEPENDS
+.It Ev TEST_DEPENDS
 See
 .Ev BUILD_DEPENDS
 for specification.
-Regress dependencies are only checked if the regress stage is invoked.
-.It Ev REGRESS_FLAGS
+Test dependencies are only checked if the test stage is invoked.
+.It Ev TEST_FLAGS
 Extra flags passed to ${MAKE_PROGRAM} to run the regression tests.
 Empty by default.
-.It Ev REGRESS_IS_INTERACTIVE
+.It Ev TEST_IS_INTERACTIVE
 Set to
 .Sq Yes
 if port needs human interaction to run its tests, or set to
 .Sq X11
 if the tests need an active X11 display to work.
-.It Ev REGRESS_LOG
-Command used to log the results of regression tests to REGRESS_LOGFILE.
-.It Ev REGRESS_LOGFILE
+.It Ev TEST_LOG
+Command used to log the results of regression tests to TEST_LOGFILE.
+.It Ev TEST_LOGFILE
 Log file containing the results of regression tests.
-.It Ev REGRESS_TARGET
+.It Ev TEST_TARGET
 Target to run regression tests.
 Defaults to
 .Sq regress ,
@@ -2520,9 +2606,7 @@ the rules for shared library versions, thus breaking the update mechanism.
 For that reason it is advised to set libversion to 0.0 when first importing a
 port.
 .Pp
-Porters of software using libtool should also set
-.Ev USE_LIBTOOL
-and make sure
+Porters of software using libtool should make sure
 .Ev MAKE_FLAGS
 get propagated to the libtool invocations.
 This should be enough in most cases.
@@ -2582,7 +2666,7 @@ Read-only.
 ${SUBST_CMD}
 can be used like
 .Xr install 1 :
-.Dl ${SUBST_CMD} Oo Fl g Ar group Oc Oo Fl o Ar owner Oc file...
+.Dl ${SUBST_CMD} Oo Fl g Ar group Oc Oo Fl o Ar owner Oc Oo Fl m Ar mode Oc file...
 to set file
 .Ar owner ,
 .Ar group
@@ -2768,12 +2852,18 @@ This sets groff as a build dependency, and also tells
 .Xr pkg_create 1
 to format manpages behind the scene using groff while building packages.
 .It Ev USE_LIBTOOL
-Set to
-.Sq Yes
-if libtool is required for correct behavior of this port.
+Defaults to
+.Sq Yes .
 Set to
 .Sq gnu
-if the ports tree libtool is insufficient and GNU libtool is required.
+if the base
+.Xr libtool 1
+is insufficient and GNU libtool is required.
+Set to
+.Sq \&No
+to disable the use of
+.Xr libtool 1
+entirely; this should not be set under normal circumstances.
 Adds dependencies if necessary, and passes LIBTOOL environment variable to
 scripts invocations.
 .It Ev USE_MFS
@@ -2806,6 +2896,12 @@ automatically based on
 .Ev WANTLIB
 values, there are a few ports (about 20) that require X11 components without
 any library telltale.
+.It Ev VARBASE
+User settings.
+Base location for ports that install stuff outside of
+.Pa ${LOCALBASE} .
+Defaults to
+.Pa /var .
 .It Ev VMEM_WARNING
 Set to
 .Sq Yes
@@ -2972,15 +3068,6 @@ resulting in a double inclusion.
 This would lead to weird results, such as
 .Ev PKG_ARGS
 being defined twice.
-.It "Fatal: <PORTSDIR> is a symlink. Please set to the real directory"
-A few ports get lost if
-.Pa /usr/ports
-points elsewhere.
-You should set
-.Ev PORTSDIR
-in
-.Pa /etc/mk.conf
-to the real location of the ports directory.
 .It "Fatal: SUBPACKAGES should always begin with -: <offending list>"
 That is the only way to differentiate between
 .Ev FLAVOR
@@ -2989,6 +3076,14 @@ and
 in
 .Xr pkgpath 7
 specifications.
+.It "Fatal: building ports requires correctly installed X11"
+All file sets of the base OS, including xenocara, must be installed
+before building ports.
+.It "Fatal: /usr/local/lib/X11/app-defaults should exist and be a symlink"
+/usr/local/lib/X11/app-defaults is distributed as a symlink in the
+xshare*.tgz file set.
+If xenocara was not fully installed before packages were added, it may
+have been created as a directory instead.
 .It "Fatal: the licencing info for <pkgname> is incomplete..."
 Every port must have explicit defines of all
 .Ev PERMIT_*
@@ -3190,8 +3285,14 @@ it would be installed if the port's dependencies were present).
 If
 .Ar {pre,do,post}-install
 overrides are present, they are used with some
-important changes: PREFIX is set to ${WRKINST}${PREFIX}, ${DESTDIRNAME}
-is set to ${WRKINST}, and TRUEPREFIX is set to ${PREFIX}.
+important changes, listed in
+.Ev FAKE_SETUP :
+.Bd -literal -offset indent
+TRUEPREFIX=${PREFIX}
+PREFIX=${WRKINST}${PREFIX}
+${DESTDIRNAME}=${WRKINST}
+.Ed
+.Pp
 Essentially, old install targets work transparently, except for a need to
 change PREFIX to TRUEPREFIX for symbolic links and similar path lookups.
 Specific traditional post install work can be simply removed, as it will
@@ -3202,9 +3303,7 @@ If no
 .Ar do-install
 override is present, the port is installed using
 .Bd -literal -offset 2n
-env -i ${MAKE_ENV}
-PREFIX=${WRKINST}${PREFIX} ${DESTDIRNAME}=${WRKINST} TRUEPREFIX=${PREFIX}
-${MAKE_PROGRAM} ${ALL_FAKE_FLAGS} -f ${MAKE_FILE} ${FAKE_TARGET}
+env -i ${MAKE_ENV} ${FAKE_SETUP} ${MAKE_PROGRAM} ${ALL_FAKE_FLAGS} -f ${MAKE_FILE} ${FAKE_TARGET}
 .Ed
 .Pp
 Note that this does set both PREFIX and ${DESTDIRNAME}.
@@ -3591,7 +3690,7 @@ There is no port that requires special treatment during packaging,
 as
 .Ar {pre,do,post}-install
 should take care of every necessity.
-.It Ar fetch-all , Ar fetch-list , Ar mirror-distfiles , Ar fetch-makefile
+.It Ar fetch-list , Ar mirror-distfiles , Ar fetch-makefile
 See
 .Xr mirroring-ports 7
 for more efficient and flexible ways to build mirrors.
@@ -3730,8 +3829,6 @@ instead.
 .It Ev MIRROR_DISTFILE
 Use
 .Ev PERMIT_DISTFILES_FTP
-and
-.Ev PERMIT_DISTFILES_CDROM
 to determine which files can be mirrored instead.
 See
 .Xr mirroring-ports 7 .
@@ -3829,6 +3926,13 @@ becomes
 PATCHFILES=foo.diff.gz:0
 MASTER_SITES0=ftp://ftp.zoinx.org/pub/
 .Ed
+.It Ev PERMIT_DISTFILES_CDROM
+The
+.Ox
+project does not ship distfiles on cdrom.
+Concentrate on real questions instead, make sure
+.Ev PERMIT_PACKAGE_CDROM
+is set correctly.
 .It Ev PKG_CMD
 replaced by
 .Ev PKG_CREATE .

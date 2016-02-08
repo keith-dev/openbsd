@@ -1,4 +1,4 @@
-/*	$OpenBSD: resolve.h,v 1.65 2011/11/28 20:59:03 guenther Exp $ */
+/*	$OpenBSD: resolve.h,v 1.69 2013/06/01 09:57:55 miod Exp $ */
 
 /*
  * Copyright (c) 1998 Per Fogelstrom, Opsycon AB
@@ -98,6 +98,9 @@ struct elf_object {
 	} Dyn;
 #define dyn Dyn.u
 
+	Elf_Addr	relacount;	/* DT_RELACOUNT */
+	Elf_Addr	relcount;	/* DT_RELCOUNT */
+
 	int		status;
 #define	STAT_RELOC_DONE	0x01
 #define	STAT_GOT_DONE	0x02
@@ -149,6 +152,11 @@ struct elf_object {
 	/* last symbol lookup on this object, to avoid mutiple searches */
 	int lastlookup_head;
 	int lastlookup;
+
+	char **rpath;
+
+	/* nonzero if trace enabled for this object */
+	int traced;
 };
 
 struct dep_node {
@@ -223,13 +231,20 @@ void _dl_run_all_dtors(void);
 Elf_Addr _dl_bind(elf_object_t *object, int index);
 
 int	_dl_match_file(struct sod *sodp, const char *name, int namelen);
-char	*_dl_find_shlib(struct sod *sodp, const char *searchpath, int nohints);
+char	*_dl_find_shlib(struct sod *sodp, char **searchpath, int nohints);
 void	_dl_load_list_free(struct load_list *load_list);
 
 void	_dl_thread_kern_go(void);
 void	_dl_thread_kern_stop(void);
 
 void	_dl_thread_bind_lock(int, sigset_t *);
+
+char	*_dl_getenv(const char *, char **);
+void	_dl_unsetenv(const char *, char **);
+
+void	_dl_trace_setup(char **);
+void	_dl_trace_object_setup(elf_object_t *);
+int	_dl_trace_plt(const elf_object_t *, const char *);
 
 extern elf_object_t *_dl_objects;
 extern elf_object_t *_dl_last_object;
@@ -242,7 +257,8 @@ extern struct r_debug *_dl_debug_map;
 extern int  _dl_pagesz;
 extern int  _dl_errno;
 
-extern char *_dl_libpath;
+extern char **_dl_libpath;
+
 extern char *_dl_preload;
 extern char *_dl_bindnow;
 extern char *_dl_traceld;
@@ -250,6 +266,8 @@ extern char *_dl_tracefmt1;
 extern char *_dl_tracefmt2;
 extern char *_dl_traceprog;
 extern char *_dl_debug;
+
+extern int _dl_trust;
 
 #define DL_DEB(P) do { if (_dl_debug) _dl_printf P ; } while (0)
 

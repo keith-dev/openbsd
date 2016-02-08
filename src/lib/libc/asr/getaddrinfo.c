@@ -1,4 +1,4 @@
-/*	$OpenBSD: getaddrinfo.c,v 1.1 2012/09/08 11:08:21 eric Exp $	*/
+/*	$OpenBSD: getaddrinfo.c,v 1.3 2013/07/12 14:36:21 eric Exp $	*/
 /*
  * Copyright (c) 2012 Eric Faurot <eric@openbsd.org>
  *
@@ -31,6 +31,8 @@ getaddrinfo(const char *hostname, const char *servname,
 	struct async_res ar;
 	int		 saved_errno = errno;
 
+	res_init();
+
 	as = getaddrinfo_async(hostname, servname, hints, NULL);
 	if (as == NULL) {
 		if (errno == ENOMEM) {
@@ -40,7 +42,7 @@ getaddrinfo(const char *hostname, const char *servname,
 		return (EAI_SYSTEM);
 	}
 
-	async_run_sync(as, &ar);
+	asr_async_run_sync(as, &ar);
 
 	*res = ar.ar_addrinfo;
 	if (ar.ar_gai_errno == EAI_SYSTEM)

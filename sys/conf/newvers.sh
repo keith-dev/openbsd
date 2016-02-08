@@ -1,6 +1,6 @@
 #!/bin/sh -
 #
-#	$OpenBSD: newvers.sh,v 1.123 2013/02/21 15:26:20 deraadt Exp $
+#	$OpenBSD: newvers.sh,v 1.127 2013/07/17 13:35:57 deraadt Exp $
 #	$NetBSD: newvers.sh,v 1.17.2.1 1995/10/12 05:17:11 jtc Exp $
 #
 # Copyright (c) 1984, 1986, 1990, 1993
@@ -39,7 +39,7 @@ fi
 
 touch version
 v=`cat version` u=${USER-root} d=`pwd` h=`hostname` t=`date`
-id=`basename ${d}`
+id=`basename "${d}"`
 
 # additional things which need version number upgrades:
 #	sys/sys/param.h:
@@ -61,14 +61,14 @@ id=`basename ${d}`
 #	and disable POOL_DEBUG in sys/conf/GENERIC
 
 ost="OpenBSD"
-osr="5.3"
+osr="5.4"
 
 cat >vers.c <<eof
+#define STATUS ""			/* release */
 #if 0
 #define STATUS "-current"		/* just after a release */
 #define STATUS "-beta"			/* just before a release */
 #endif
-#define STATUS ""			/* release */
 
 const char ostype[] = "${ost}";
 const char osrelease[] = "${osr}";

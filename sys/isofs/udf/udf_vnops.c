@@ -1,4 +1,4 @@
-/*	$OpenBSD: udf_vnops.c,v 1.45 2012/06/20 17:30:22 matthew Exp $	*/
+/*	$OpenBSD: udf_vnops.c,v 1.50 2013/06/11 16:42:16 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2001, 2002 Scott Long <scottl@freebsd.org>
@@ -54,7 +54,7 @@
 #include <isofs/udf/udf.h>
 #include <isofs/udf/udf_extern.h>
 
-int udf_bmap_internal(struct unode *, off_t, daddr64_t *, uint32_t *);
+int udf_bmap_internal(struct unode *, off_t, daddr_t *, uint32_t *);
 
 struct vops udf_vops = {
 	.vop_access	= udf_access,
@@ -72,15 +72,16 @@ struct vops udf_vops = {
 	.vop_strategy	= udf_strategy,
 	.vop_lock	= udf_lock,
 	.vop_unlock	= udf_unlock,
+	.vop_pathconf	= udf_pathconf,
 	.vop_islocked	= udf_islocked,
 	.vop_print	= udf_print
 };
 
 #define UDF_INVALID_BMAP	-1
 
-/* Look up a unode based on the ino_t passed in and return its vnode */
+/* Look up a unode based on the udfino_t passed in and return its vnode */
 int
-udf_hashlookup(struct umount *ump, ino_t id, int flags, struct vnode **vpp)
+udf_hashlookup(struct umount *ump, udfino_t id, int flags, struct vnode **vpp)
 {
 	struct unode *up;
 	struct udf_hash_lh *lh;
@@ -251,16 +252,17 @@ udf_timetotimespec(struct timestamp *time, struct timespec *t)
 		int16_t		s_tz_offset;
 	} tz;
 
-	t->tv_nsec = 0;
-
 	/* DirectCD seems to like using bogus year values */
 	year = letoh16(time->year);
 	if (year < 1970) {
 		t->tv_sec = 0;
+		t->tv_nsec = 0;
 		return;
 	}
 
 	/* Calculate the time and day */
+	t->tv_nsec = 1000 * time->usec + 100000 * time->hund_usec
+	    + 10000000 * time->centisec;
 	t->tv_sec = time->second;
 	t->tv_sec += time->minute * 60;
 	t->tv_sec += time->hour * 3600;
@@ -388,10 +390,10 @@ udf_ioctl(void *v)
  * I'm not sure that this has much value in a read-only filesystem, but
  * cd9660 has it too.
  */
-#if 0
-static int
-udf_pathconf(struct vop_pathconf_args *a)
+int
+udf_pathconf(void *v)
 {
+	struct vop_pathconf_args *ap = v;
 	int error = 0;
 
 	switch (ap->a_name) {
@@ -401,11 +403,14 @@ udf_pathconf(struct vop_pathconf_args *a)
 	case _PC_NAME_MAX:
 		*ap->a_retval = NAME_MAX;
 		break;
-	case _PC_PATH_MAX:
-		*ap->a_retval = PATH_MAX;
+	case _PC_CHOWN_RESTRICTED:
+		*ap->a_retval = 1;
 		break;
 	case _PC_NO_TRUNC:
 		*ap->a_retval = 1;
+		break;
+	case _PC_TIMESTAMP_RESOLUTION:
+		*ap->a_retval = 1000;		/* 1 microsecond */
 		break;
 	default:
 		error = EINVAL;
@@ -414,7 +419,6 @@ udf_pathconf(struct vop_pathconf_args *a)
 
 	return (error);
 }
-#endif
 
 int
 udf_read(void *v)
@@ -951,7 +955,7 @@ udf_bmap(void *v)
 	struct vop_bmap_args *ap = v;
 	struct unode *up;
 	uint32_t max_size;
-	daddr64_t lsector;
+	daddr_t lsector;
 	int error;
 
 	up = VTOU(ap->a_vp);
@@ -995,7 +999,7 @@ udf_lookup(void *v)
 	u_long flags;
 	char *nameptr;
 	long namelen;
-	ino_t id = 0;
+	udfino_t id = 0;
 	int offset, error = 0;
 	int numdirpasses, fsize;
 
@@ -1208,7 +1212,7 @@ udf_readatoffset(struct unode *up, int *size, off_t offset,
 	struct file_entry *fentry = NULL;
 	struct buf *bp1;
 	uint32_t max_size;
-	daddr64_t sector;
+	daddr_t sector;
 	int error;
 
 	ump = up->u_ump;
@@ -1255,7 +1259,7 @@ udf_readatoffset(struct unode *up, int *size, off_t offset,
  * block.
  */
 int
-udf_bmap_internal(struct unode *up, off_t offset, daddr64_t *sector,
+udf_bmap_internal(struct unode *up, off_t offset, daddr_t *sector,
     uint32_t *max_size)
 {
 	struct umount *ump;
@@ -1264,7 +1268,7 @@ udf_bmap_internal(struct unode *up, off_t offset, daddr64_t *sector,
 	void *icb;
 	struct icb_tag *tag;
 	uint32_t icblen = 0;
-	daddr64_t lsector;
+	daddr_t lsector;
 	int ad_offset, ad_num = 0;
 	int i, p_offset, l_ea, l_ad;
 

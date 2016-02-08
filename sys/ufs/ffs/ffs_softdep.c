@@ -1,4 +1,4 @@
-/*	$OpenBSD: ffs_softdep.c,v 1.116 2013/02/17 17:39:29 miod Exp $	*/
+/*	$OpenBSD: ffs_softdep.c,v 1.119 2013/06/11 16:42:18 deraadt Exp $	*/
 
 /*
  * Copyright 1998, 2000 Marshall Kirk McKusick. All Rights Reserved.
@@ -120,7 +120,7 @@ STATIC	void clear_remove(struct proc *);
 STATIC	void clear_inodedeps(struct proc *);
 STATIC	int flush_pagedep_deps(struct vnode *, struct mount *,
 	    struct diraddhd *);
-STATIC	int flush_inodedep_deps(struct fs *, ino_t);
+STATIC	int flush_inodedep_deps(struct fs *, ufsino_t);
 STATIC	int handle_written_filepage(struct pagedep *, struct buf *);
 STATIC  void diradd_inode_written(struct diradd *, struct inodedep *);
 STATIC	int handle_written_inodeblock(struct inodedep *, struct buf *);
@@ -139,7 +139,7 @@ STATIC	struct dirrem *newdirrem(struct buf *, struct inode *,
 STATIC	void free_diradd(struct diradd *);
 STATIC	void free_allocindir(struct allocindir *, struct inodedep *);
 STATIC	void free_newdirblk(struct newdirblk *);
-STATIC	int indir_trunc(struct inode *, daddr64_t, int, daddr64_t, long *);
+STATIC	int indir_trunc(struct inode *, daddr_t, int, daddr_t, long *);
 STATIC	void deallocate_dependencies(struct buf *, struct inodedep *);
 STATIC	void free_allocdirect(struct allocdirectlst *,
 	    struct allocdirect *, int);
@@ -149,17 +149,17 @@ STATIC	void handle_workitem_freeblocks(struct freeblks *);
 STATIC	void merge_inode_lists(struct inodedep *);
 STATIC	void setup_allocindir_phase2(struct buf *, struct inode *,
 	    struct allocindir *);
-STATIC	struct allocindir *newallocindir(struct inode *, int, daddr64_t,
-	    daddr64_t);
+STATIC	struct allocindir *newallocindir(struct inode *, int, daddr_t,
+	    daddr_t);
 STATIC	void handle_workitem_freefrag(struct freefrag *);
-STATIC	struct freefrag *newfreefrag(struct inode *, daddr64_t, long);
+STATIC	struct freefrag *newfreefrag(struct inode *, daddr_t, long);
 STATIC	void allocdirect_merge(struct allocdirectlst *,
 	    struct allocdirect *, struct allocdirect *);
 STATIC	struct bmsafemap *bmsafemap_lookup(struct buf *);
-STATIC	int newblk_lookup(struct fs *, daddr64_t, int,
+STATIC	int newblk_lookup(struct fs *, daddr_t, int,
 	    struct newblk **);
-STATIC	int inodedep_lookup(struct fs *, ino_t, int, struct inodedep **);
-STATIC	int pagedep_lookup(struct inode *, daddr64_t, int, struct pagedep **);
+STATIC	int inodedep_lookup(struct fs *, ufsino_t, int, struct inodedep **);
+STATIC	int pagedep_lookup(struct inode *, daddr_t, int, struct pagedep **);
 STATIC	void pause_timer(void *);
 STATIC	int request_cleanup(int, int);
 STATIC	int process_worklist_item(struct mount *, int);
@@ -956,7 +956,7 @@ STATIC struct sema pagedep_in_progress;
  * This routine must be called with splbio interrupts blocked.
  */
 STATIC int
-pagedep_lookup(struct inode *ip, daddr64_t lbn, int flags,
+pagedep_lookup(struct inode *ip, daddr_t lbn, int flags,
     struct pagedep **pagedeppp)
 {
 	struct pagedep *pagedep;
@@ -1026,7 +1026,7 @@ STATIC struct sema inodedep_in_progress;
  * This routine must be called with splbio interrupts blocked.
  */
 STATIC int
-inodedep_lookup(struct fs *fs, ino_t inum, int flags,
+inodedep_lookup(struct fs *fs, ufsino_t inum, int flags,
     struct inodedep **inodedeppp)
 {
 	struct inodedep *inodedep;
@@ -1102,7 +1102,7 @@ STATIC struct sema newblk_in_progress;
  * Found or allocated entry is returned in newblkpp.
  */
 STATIC int
-newblk_lookup(struct fs *fs, daddr64_t newblkno, int flags,
+newblk_lookup(struct fs *fs, daddr_t newblkno, int flags,
     struct newblk **newblkpp)
 {
 	struct newblk *newblk;
@@ -1276,7 +1276,7 @@ softdep_mount(struct vnode *devvp, struct mount *mp, struct fs *fs,
 /* inode related to allocation */
 /* new inode number being allocated */
 void
-softdep_setup_inomapdep(struct buf *bp, struct inode *ip, ino_t newinum)
+softdep_setup_inomapdep(struct buf *bp, struct inode *ip, ufsino_t newinum)
 {
 	struct inodedep *inodedep;
 	struct bmsafemap *bmsafemap;
@@ -1308,7 +1308,7 @@ softdep_setup_inomapdep(struct buf *bp, struct inode *ip, ino_t newinum)
 /* filesystem doing allocation */
 /* number of newly allocated block */
 void
-softdep_setup_blkmapdep(struct buf *bp, struct fs *fs, daddr64_t newblkno)
+softdep_setup_blkmapdep(struct buf *bp, struct fs *fs, daddr_t newblkno)
 {
 	struct newblk *newblk;
 	struct bmsafemap *bmsafemap;
@@ -1398,8 +1398,8 @@ bmsafemap_lookup(struct buf *bp)
 /* size of new block */
 /* bp for allocated block */
 void 
-softdep_setup_allocdirect(struct inode *ip, daddr64_t lbn, daddr64_t newblkno,
-    daddr64_t oldblkno, long newsize, long oldsize, struct buf *bp)
+softdep_setup_allocdirect(struct inode *ip, daddr_t lbn, daddr_t newblkno,
+    daddr_t oldblkno, long newsize, long oldsize, struct buf *bp)
 {
 	struct allocdirect *adp, *oldadp;
 	struct allocdirectlst *adphead;
@@ -1573,7 +1573,7 @@ allocdirect_merge(struct allocdirectlst *adphead, struct allocdirect *newadp,
  * Allocate a new freefrag structure if needed.
  */
 STATIC struct freefrag *
-newfreefrag(struct inode *ip, daddr64_t blkno, long size)
+newfreefrag(struct inode *ip, daddr_t blkno, long size)
 {
 	struct freefrag *freefrag;
 	struct fs *fs;
@@ -1648,8 +1648,8 @@ handle_workitem_freefrag(struct freefrag *freefrag)
 /* disk block number being added */
 /* previous block number, 0 if none */
 STATIC struct allocindir *
-newallocindir(struct inode *ip, int ptrno, daddr64_t newblkno,
-    daddr64_t oldblkno)
+newallocindir(struct inode *ip, int ptrno, daddr_t newblkno,
+    daddr_t oldblkno)
 {
 	struct allocindir *aip;
 
@@ -1675,8 +1675,8 @@ newallocindir(struct inode *ip, int ptrno, daddr64_t newblkno,
 /* previous block number, 0 if none */
 /* buffer holding allocated page */
 void
-softdep_setup_allocindir_page(struct inode *ip, daddr64_t lbn, struct buf *bp,
-    int ptrno, daddr64_t newblkno, daddr64_t oldblkno, struct buf *nbp)
+softdep_setup_allocindir_page(struct inode *ip, daddr_t lbn, struct buf *bp,
+    int ptrno, daddr_t newblkno, daddr_t oldblkno, struct buf *nbp)
 {
 	struct allocindir *aip;
 	struct pagedep *pagedep;
@@ -1713,7 +1713,7 @@ softdep_setup_allocindir_page(struct inode *ip, daddr64_t lbn, struct buf *bp,
 /* disk block number being added */
 void
 softdep_setup_allocindir_meta(struct buf *nbp, struct inode *ip,
-    struct buf *bp, int ptrno, daddr64_t newblkno)
+    struct buf *bp, int ptrno, daddr_t newblkno)
 {
 	struct allocindir *aip;
 
@@ -2219,7 +2219,7 @@ free_newdirblk(struct newdirblk *newdirblk)
  * done until the zero'ed inode has been written to disk.
  */
 void
-softdep_freefile(struct vnode *pvp, ino_t ino, mode_t mode)
+softdep_freefile(struct vnode *pvp, ufsino_t ino, mode_t mode)
 {
 	struct inode *ip = VTOI(pvp);
 	struct inodedep *inodedep;
@@ -2331,7 +2331,7 @@ STATIC void
 handle_workitem_freeblocks(struct freeblks *freeblks)
 {
 	struct inode tip;
-	daddr64_t bn;
+	daddr_t bn;
 	union {
 		struct ufs1_dinode di1;
 		struct ufs2_dinode di2;
@@ -2340,7 +2340,7 @@ handle_workitem_freeblocks(struct freeblks *freeblks)
 	int i, level, bsize;
 	long nblocks, blocksreleased = 0;
 	int error, allerror = 0;
-	daddr64_t baselbns[NIADDR], tmpval;
+	daddr_t baselbns[NIADDR], tmpval;
 
 	if (VFSTOUFS(freeblks->fb_mnt)->um_fstype == UM_UFS1)
 		tip.i_din1 = &di.di1;
@@ -2401,7 +2401,7 @@ handle_workitem_freeblocks(struct freeblks *freeblks)
  * blocks.
  */
 STATIC int
-indir_trunc(struct inode *ip, daddr64_t dbn, int level, daddr64_t lbn,
+indir_trunc(struct inode *ip, daddr_t dbn, int level, daddr_t lbn,
     long *countp)
 {
 	struct buf *bp;
@@ -2546,7 +2546,7 @@ softdep_setup_directory_add(struct buf *bp, struct inode *dp, off_t diroffset,
     long newinum, struct buf *newdirbp, int isnewblk)
 {
 	int offset;		/* offset of new entry within directory block */
-	daddr64_t lbn;		/* block in directory containing new entry */
+	daddr_t lbn;		/* block in directory containing new entry */
 	struct fs *fs;
 	struct diradd *dap;
 	struct allocdirect *adp;
@@ -2694,7 +2694,7 @@ softdep_change_directoryentry_offset(struct inode *dp, caddr_t base,
 	int offset, oldoffset, newoffset;
 	struct pagedep *pagedep;
 	struct diradd *dap;
-	daddr64_t lbn;
+	daddr_t lbn;
 
 	ACQUIRE_LOCK(&lk);
 	lbn = lblkno(dp->i_fs, dp->i_offset);
@@ -2850,7 +2850,7 @@ newdirrem(struct buf *bp, struct inode *dp, struct inode *ip, int isrmdir,
     struct dirrem **prevdirremp)
 {
 	int offset;
-	daddr64_t lbn;
+	daddr_t lbn;
 	struct diradd *dap;
 	struct dirrem *dirrem;
 	struct pagedep *pagedep;
@@ -3077,7 +3077,7 @@ handle_workitem_remove(struct dirrem *dirrem)
 	struct inodedep *inodedep;
 	struct vnode *vp;
 	struct inode *ip;
-	ino_t oldinum;
+	ufsino_t oldinum;
 	int error;
 
 	if ((error = VFS_VGET(dirrem->dm_mnt, dirrem->dm_oldinum, &vp)) != 0) {
@@ -3374,7 +3374,7 @@ initiate_write_inodeblock_ufs1(struct inodedep *inodedep, struct buf *bp)
 	struct ufs1_dinode *dp;
 	struct fs *fs;
 #ifdef DIAGNOSTIC
-	daddr64_t prevlbn = 0;
+	daddr_t prevlbn = 0;
 	int32_t d1, d2;
 #endif
 	int i, deplist;
@@ -3521,7 +3521,7 @@ initiate_write_inodeblock_ufs2(struct inodedep *inodedep, struct buf *bp)
 	struct ufs2_dinode *dp;
 	struct fs *fs = inodedep->id_fs;
 #ifdef DIAGNOSTIC
-	daddr64_t prevlbn = -1, d1, d2;
+	daddr_t prevlbn = -1, d1, d2;
 #endif
 	int deplist, i;
 
@@ -4486,8 +4486,8 @@ softdep_fsync(struct vnode *vp)
 	struct fs *fs;
 	struct proc *p = CURPROC;		/* XXX */
 	int error, flushparent;
-	ino_t parentino;
-	daddr64_t lbn;
+	ufsino_t parentino;
+	daddr_t lbn;
 
 	ip = VTOI(vp);
 	fs = ip->i_fs;
@@ -4927,7 +4927,7 @@ loop:
  * Called with splbio blocked.
  */
 STATIC int
-flush_inodedep_deps(struct fs *fs, ino_t ino)
+flush_inodedep_deps(struct fs *fs, ufsino_t ino)
 {
 	struct inodedep *inodedep;
 	struct allocdirect *adp;
@@ -5033,7 +5033,7 @@ flush_pagedep_deps(struct vnode *pvp, struct mount *mp,
 	struct vnode *vp;
 	int gotit, error = 0;
 	struct buf *bp;
-	ino_t inum;
+	ufsino_t inum;
 
 	splassert(IPL_BIO);
 
@@ -5317,12 +5317,12 @@ clear_remove(struct proc *p)
 	struct mount *mp;
 	struct vnode *vp;
 	int error, cnt;
-	ino_t ino;
+	ufsino_t ino;
 
 	ACQUIRE_LOCK(&lk);
-	for (cnt = 0; cnt < pagedep_hash; cnt++) {
+	for (cnt = 0; cnt <= pagedep_hash; cnt++) {
 		pagedephd = &pagedep_hashtbl[next++];
-		if (next >= pagedep_hash)
+		if (next > pagedep_hash)
 			next = 0;
 		LIST_FOREACH(pagedep, pagedephd, pd_hash) {
 			if (LIST_FIRST(&pagedep->pd_dirremhd) == NULL)
@@ -5368,7 +5368,7 @@ clear_inodedeps(struct proc *p)
 	struct vnode *vp;
 	struct fs *fs;
 	int error, cnt;
-	ino_t firstino, lastino, ino;
+	ufsino_t firstino, lastino, ino;
 
 	ACQUIRE_LOCK(&lk);
 	/*
@@ -5376,9 +5376,9 @@ clear_inodedeps(struct proc *p)
 	 * We will then gather up all the inodes in its block 
 	 * that have dependencies and flush them out.
 	 */
-	for (cnt = 0; cnt < inodedep_hash; cnt++) {
+	for (cnt = 0; cnt <= inodedep_hash; cnt++) {
 		inodedephd = &inodedep_hashtbl[next++];
-		if (next >= inodedep_hash)
+		if (next > inodedep_hash)
 			next = 0;
 		if ((inodedep = LIST_FIRST(inodedephd)) != NULL)
 			break;

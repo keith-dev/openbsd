@@ -1,4 +1,4 @@
-/*	$OpenBSD: relay_http.c,v 1.9 2013/02/15 12:15:12 bluhm Exp $	*/
+/*	$OpenBSD: relay_http.c,v 1.15 2013/06/02 18:02:45 reyk Exp $	*/
 
 /*
  * Copyright (c) 2006 - 2012 Reyk Floeter <reyk@openbsd.org>
@@ -78,8 +78,8 @@ relay_read_http(struct bufferevent *bev, void *arg)
 	const char		*errstr;
 	size_t			 size;
 
-	if (gettimeofday(&con->se_tv_last, NULL) == -1)
-		goto fail;
+	getmonotime(&con->se_tv_last);
+
 	size = EVBUFFER_LENGTH(src);
 	DPRINTF("%s: size %lu, to read %lld", __func__, size, cre->toread);
 	if (!size) {
@@ -332,11 +332,11 @@ relay_read_http(struct bufferevent *bev, void *arg)
 				bev->readcb = relay_read_httpcontent;
 
 			/* Single-pass HTTP response */
-			if (cre->toread < 0) {
+			if (cre->dir == RELAY_DIR_RESPONSE &&
+			    cre->toread < 0) {
 				cre->toread = TOREAD_UNLIMITED;
 				bev->readcb = relay_read;
 			}
-
 			break;
 		default:
 			/* HTTP handler */
@@ -375,6 +375,8 @@ relay_read_http(struct bufferevent *bev, void *arg)
 	if (EVBUFFER_LENGTH(src) && bev->readcb != relay_read_http)
 		bev->readcb(bev, arg);
 	bufferevent_enable(bev, EV_READ);
+	if (relay_splice(cre) == -1)
+		relay_close(con, strerror(errno));
 	return;
  fail:
 	relay_abort_http(con, 500, strerror(errno), 0);
@@ -391,13 +393,15 @@ relay_read_httpcontent(struct bufferevent *bev, void *arg)
 	struct evbuffer		*src = EVBUFFER_INPUT(bev);
 	size_t			 size;
 
-	if (gettimeofday(&con->se_tv_last, NULL) == -1)
-		goto fail;
+	getmonotime(&con->se_tv_last);
+
 	size = EVBUFFER_LENGTH(src);
 	DPRINTF("%s: dir %d, size %lu, to read %lld",
 	    __func__, cre->dir, size, cre->toread);
 	if (!size)
 		return;
+	if (relay_spliceadjust(cre) == -1)
+		goto fail;
 
 	if (cre->toread > 0) {
 		/* Read content data */
@@ -439,16 +443,18 @@ relay_read_httpchunks(struct bufferevent *bev, void *arg)
 	struct rsession		*con = cre->con;
 	struct evbuffer		*src = EVBUFFER_INPUT(bev);
 	char			*line;
-	long			 lval;
+	long long		 llval;
 	size_t			 size;
 
-	if (gettimeofday(&con->se_tv_last, NULL) == -1)
-		goto fail;
+	getmonotime(&con->se_tv_last);
+
 	size = EVBUFFER_LENGTH(src);
 	DPRINTF("%s: dir %d, size %lu, to read %lld",
 	    __func__, cre->dir, size, cre->toread);
 	if (!size)
 		return;
+	if (relay_spliceadjust(cre) == -1)
+		goto fail;
 
 	if (cre->toread > 0) {
 		/* Read chunk data */
@@ -479,8 +485,11 @@ relay_read_httpchunks(struct bufferevent *bev, void *arg)
 			goto next;
 		}
 
-		/* Read prepended chunk size in hex, ingore the trailer */
-		if (sscanf(line, "%lx", &lval) != 1) {
+		/*
+		 * Read prepended chunk size in hex, ignore the trailer.
+		 * The returned signed value must not be negative.
+		 */
+		if (sscanf(line, "%llx", &llval) != 1 || llval < 0) {
 			free(line);
 			relay_close(con, "invalid chunk size");
 			return;
@@ -494,7 +503,7 @@ relay_read_httpchunks(struct bufferevent *bev, void *arg)
 		free(line);
 
 		/* Last chunk is 0 bytes followed by optional trailer */
-		if ((cre->toread = lval) == 0) {
+		if ((cre->toread = llval) == 0) {
 			DPRINTF("%s: last chunk", __func__);
 			cre->toread = TOREAD_HTTP_CHUNK_TRAILER;
 		}
@@ -840,7 +849,7 @@ relay_abort_http(struct rsession *con, u_int code, const char *msg,
 
 	/* Generate simple HTTP+HTML error document */
 	if (asprintf(&httpmsg,
-	    "HTTP/1.x %03d %s\r\n"
+	    "HTTP/1.0 %03d %s\r\n"
 	    "Date: %s\r\n"
 	    "Server: %s\r\n"
 	    "Connection: close\r\n"
@@ -926,8 +935,8 @@ relay_expand_http(struct ctl_relay_event *cre, char *val, char *buf, size_t len)
 		}
 	}
 	if (strstr(val, "$TIMEOUT") != NULL) {
-		snprintf(ibuf, sizeof(ibuf), "%lu",
-		    rlay->rl_conf.timeout.tv_sec);
+		snprintf(ibuf, sizeof(ibuf), "%lld",
+		    (long long)rlay->rl_conf.timeout.tv_sec);
 		if (expand_string(buf, len, "$TIMEOUT", ibuf) != 0)
 			return (NULL);
 	}

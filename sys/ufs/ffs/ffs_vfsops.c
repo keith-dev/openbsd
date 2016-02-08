@@ -1,4 +1,4 @@
-/*	$OpenBSD: ffs_vfsops.c,v 1.135 2012/09/10 11:11:00 jsing Exp $	*/
+/*	$OpenBSD: ffs_vfsops.c,v 1.138 2013/06/11 16:42:18 deraadt Exp $	*/
 /*	$NetBSD: ffs_vfsops.c,v 1.19 1996/02/09 22:22:26 christos Exp $	*/
 
 /*
@@ -70,7 +70,7 @@ int ffs_reload_vnode(struct vnode *, void *);
 int ffs_sync_vnode(struct vnode *, void *);
 int ffs_validate(struct fs *);
 
-void ffs1_compat_read(struct fs *, struct ufsmount *, daddr64_t);
+void ffs1_compat_read(struct fs *, struct ufsmount *, daddr_t);
 void ffs1_compat_write(struct fs *, struct ufsmount *);
 
 const struct vfsops ffs_vfsops = {
@@ -170,13 +170,13 @@ ffs_mount(struct mount *mp, const char *path, void *data,
 	struct ufs_args args;
 	struct ufsmount *ump = NULL;
 	struct fs *fs;
+	char fname[MNAMELEN];
 	char fspec[MNAMELEN];
 	int error = 0, flags;
 	int ronly;
 	mode_t accessmode;
-	size_t size;
 
-	error = copyin(data, &args, sizeof (struct ufs_args));
+	error = copyin(data, &args, sizeof(struct ufs_args));
 	if (error)
 		return (error);
 
@@ -336,10 +336,12 @@ ffs_mount(struct mount *mp, const char *path, void *data,
 	 */
 	error = copyinstr(args.fspec, fspec, sizeof(fspec), NULL);
 	if (error)
-		goto error_1; 
-	disk_map(fspec, fspec, MNAMELEN, DM_OPENBLCK);
+		goto error_1;
 
-	NDINIT(ndp, LOOKUP, FOLLOW, UIO_SYSSPACE, fspec, p);
+	if (disk_map(fspec, fname, MNAMELEN, DM_OPENBLCK) == -1)
+		bcopy(fspec, fname, sizeof(fname));
+
+	NDINIT(ndp, LOOKUP, FOLLOW, UIO_SYSSPACE, fname, p);
 	if ((error = namei(ndp)) != 0)
 		goto error_1;
 
@@ -392,10 +394,10 @@ ffs_mount(struct mount *mp, const char *path, void *data,
 			/*
 			 * Save "mounted from" info for mount point (NULL pad)
 			 */
-			size = strlcpy(mp->mnt_stat.f_mntfromname, fspec,
-			    MNAMELEN - 1);
-			bzero(mp->mnt_stat.f_mntfromname + size,
-			      MNAMELEN - size);
+			bzero(mp->mnt_stat.f_mntfromname, MNAMELEN);
+			strlcpy(mp->mnt_stat.f_mntfromname, fname, MNAMELEN);
+			bzero(mp->mnt_stat.f_mntfromspec, MNAMELEN);
+			strlcpy(mp->mnt_stat.f_mntfromspec, fspec, MNAMELEN);
 		}
 	} else {
 		/*
@@ -407,7 +409,9 @@ ffs_mount(struct mount *mp, const char *path, void *data,
 		bzero(mp->mnt_stat.f_mntonname, MNAMELEN);
 		strlcpy(mp->mnt_stat.f_mntonname, path, MNAMELEN);
 		bzero(mp->mnt_stat.f_mntfromname, MNAMELEN);
-		strlcpy(mp->mnt_stat.f_mntfromname, fspec, MNAMELEN);
+		strlcpy(mp->mnt_stat.f_mntfromname, fname, MNAMELEN);
+		bzero(mp->mnt_stat.f_mntfromspec, MNAMELEN);
+		strlcpy(mp->mnt_stat.f_mntfromspec, fspec, MNAMELEN);
 
 		error = ffs_mountfs(devvp, mp, p);
 	}
@@ -659,7 +663,7 @@ ffs_mountfs(struct vnode *devvp, struct mount *mp, struct proc *p)
 	struct fs *fs;
 	dev_t dev;
 	caddr_t space;
-	daddr64_t sbloc;
+	daddr_t sbloc;
 	int error, i, blks, size, ronly;
 	int32_t *lp;
 	size_t strsize;
@@ -949,7 +953,7 @@ ffs_oldfscompat(struct fs *fs)
  * Auxiliary function for reading FFS1 super blocks.
  */
 void
-ffs1_compat_read(struct fs *fs, struct ufsmount *ump, daddr64_t sbloc)
+ffs1_compat_read(struct fs *fs, struct ufsmount *ump, daddr_t sbloc)
 {
 	if (fs->fs_magic == FS_UFS2_MAGIC)
 		return; /* UFS2 */
@@ -1231,6 +1235,9 @@ ffs_vget(struct mount *mp, ino_t ino, struct vnode **vpp)
 	dev_t dev;
 	int error;
 
+	if (ino > (ufsino_t)-1)
+		panic("ffs_vget: alien ino_t %llu", (unsigned long long)ino);
+
 	ump = VFSTOUFS(mp);
 	dev = ump->um_dev;
 retry:
@@ -1368,7 +1375,8 @@ ffs_fhtovp(struct mount *mp, struct fid *fhp, struct vnode **vpp)
 
 	ufhp = (struct ufid *)fhp;
 	fs = VFSTOUFS(mp)->um_fs;
-	if (ufhp->ufid_ino < ROOTINO ||
+	if (ufhp->ufid_len != sizeof(*ufhp) ||
+	    ufhp->ufid_ino < ROOTINO ||
 	    ufhp->ufid_ino >= fs->fs_ncg * fs->fs_ipg)
 		return (ESTALE);
 	return (ufs_fhtovp(mp, ufhp, vpp));

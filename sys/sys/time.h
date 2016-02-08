@@ -1,4 +1,4 @@
-/*	$OpenBSD: time.h,v 1.29 2012/12/05 23:20:24 deraadt Exp $	*/
+/*	$OpenBSD: time.h,v 1.31 2013/07/10 03:05:35 guenther Exp $	*/
 /*	$NetBSD: time.h,v 1.18 1996/04/23 10:29:33 mycroft Exp $	*/
 
 /*
@@ -36,10 +36,6 @@
 #define _SYS_TIME_H_
 
 #include <sys/types.h>
-
-#if __XPG_VISIBLE >= 420 && __XPG_VISIBLE < 600
-#include <sys/select.h>
-#endif
 
 /*
  * Structure returned by gettimeofday(2) system call,
@@ -134,6 +130,35 @@ struct timezone {
 		}							\
 	} while (0)
 
+/*
+ * Names of the interval timers, and structure
+ * defining a timer setting.
+ */
+#define	ITIMER_REAL	0
+#define	ITIMER_VIRTUAL	1
+#define	ITIMER_PROF	2
+
+struct	itimerval {
+	struct	timeval it_interval;	/* timer interval */
+	struct	timeval it_value;	/* current value */
+};
+
+#if __BSD_VISIBLE
+/*
+ * clock information structure for sysctl({CTL_KERN, KERN_CLOCKRATE})
+ */
+struct clockinfo {
+	int	hz;		/* clock frequency */
+	int	tick;		/* micro-seconds per hz tick */
+	int	tickadj;	/* clock skew rate for adjtime() */
+	int	stathz;		/* statistics clock frequency */
+	int	profhz;		/* profiling clock frequency */
+};
+#endif /* __BSD_VISIBLE */
+
+#if defined(_KERNEL) || defined(_STANDALONE)
+#include <sys/_time.h>
+
 /* Time expressed as seconds and fractions of a second + operations on it. */
 struct bintime {
 	time_t	sec;
@@ -223,33 +248,6 @@ timeval2bintime(struct timeval *tv, struct bintime *bt)
 	bt->frac = (uint64_t)tv->tv_usec * (uint64_t)18446744073709ULL;
 }
 
-/*
- * Names of the interval timers, and structure
- * defining a timer setting.
- */
-#define	ITIMER_REAL	0
-#define	ITIMER_VIRTUAL	1
-#define	ITIMER_PROF	2
-
-struct	itimerval {
-	struct	timeval it_interval;	/* timer interval */
-	struct	timeval it_value;	/* current value */
-};
-
-/*
- * Getkerninfo clock information structure
- */
-struct clockinfo {
-	int	hz;		/* clock frequency */
-	int	tick;		/* micro-seconds per hz tick */
-	int	tickadj;	/* clock skew rate for adjtime() */
-	int	stathz;		/* statistics clock frequency */
-	int	profhz;		/* profiling clock frequency */
-};
-
-#if defined(_KERNEL) || defined(_STANDALONE)
-#include <sys/_time.h>
-
 extern volatile time_t time_second;	/* Seconds since epoch, wall time. */
 extern volatile time_t time_uptime;	/* Seconds since reboot. */
 
@@ -328,6 +326,10 @@ void clock_secs_to_ymdhms(time_t, struct clock_ymdhms *);
 
 #else /* !_KERNEL */
 #include <time.h>
+
+#if __XPG_VISIBLE >= 420 && __XPG_VISIBLE < 600
+#include <sys/select.h>	/* must be after type declarations */
+#endif
 
 #if __BSD_VISIBLE || __XPG_VISIBLE
 __BEGIN_DECLS

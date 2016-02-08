@@ -1,4 +1,4 @@
-/*	$OpenBSD: signbit.c,v 1.5 2012/12/05 23:20:00 deraadt Exp $	*/
+/*	$OpenBSD: signbit.c,v 1.7 2013/07/03 04:46:36 espie Exp $	*/
 /*
  * Copyright (c) 2008 Martynas Venckus <martynas@openbsd.org>
  *
@@ -14,8 +14,6 @@
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
-
-/* LINTLIBRARY */
 
 #include <sys/types.h>
 #include <machine/ieee.h>
@@ -38,11 +36,6 @@ __signbitf(float f)
 	return p->sng_sign;
 }
 
-#if	LDBL_MANT_DIG == 53
-#ifdef	lint
-/* PROTOLIB1 */
-int __signbitl(long double);
-#else	/* lint */
-__weak_alias(__signbitl, __signbit);
-#endif	/* lint */
-#endif	/* LDBL_MANT_DIG == 53 */
+#if	LDBL_MANT_DIG == DBL_MANT_DIG
+__strong_alias(__signbitl, __signbit);
+#endif	/* LDBL_MANT_DIG == DBL_MANT_DIG */

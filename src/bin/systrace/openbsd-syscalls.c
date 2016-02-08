@@ -1,4 +1,4 @@
-/*	$OpenBSD: openbsd-syscalls.c,v 1.41 2011/09/18 23:24:14 matthew Exp $	*/
+/*	$OpenBSD: openbsd-syscalls.c,v 1.43 2013/04/29 00:28:23 okan Exp $	*/
 /*
  * Copyright 2002 Niels Provos <provos@citi.umich.edu>
  * All rights reserved.
@@ -42,7 +42,6 @@
 #define SYSVSEM
 #define SYSVMSG
 #define SYSVSHM
-#define LFS
 #include <kern/syscalls.c>
 
 #include <compat/linux/linux_syscalls.c>
@@ -53,7 +52,6 @@
 #undef SYSVSEM
 #undef SYSVMSG
 #undef SYSVSHM
-#undef LFS
 
 #include <sys/ioctl.h>
 #include <sys/tree.h>
@@ -166,7 +164,7 @@ obsd_open(void)
 		goto out;
 	}
 
-	if (fcntl(cfd, F_SETFD, 1) == -1)
+	if (fcntl(cfd, F_SETFD, FD_CLOEXEC) == -1)
 		warn("fcntl(F_SETFD)");
 
  out:

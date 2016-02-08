@@ -1,4 +1,4 @@
-/*	$OpenBSD: gus.c,v 1.35 2012/02/25 22:33:22 miod Exp $	*/
+/*	$OpenBSD: gus.c,v 1.38 2013/06/26 09:39:56 kettenis Exp $	*/
 /*	$NetBSD: gus.c,v 1.51 1998/01/25 23:48:06 mycroft Exp $	*/
 
 /*-
@@ -471,7 +471,7 @@ gusmax_dma_output(addr, buf, size, intr, arg)
 }
 
 /*
- * called at splgus() from interrupt handler.
+ * called at splaudio() from interrupt handler.
  */
 void
 stereo_dmaintr(arg)
@@ -513,7 +513,7 @@ stereo_dmaintr(arg)
 
 /*
  * Start up DMA output to the card.
- * Called at splgus/splaudio already, either from intr handler or from
+ * Called at splaudio(), either from intr handler or from
  * generic audio code.
  */
 int
@@ -530,10 +530,11 @@ gus_dma_output(addr, buf, size, intr, arg)
 	int flags;
 
 	DMAPRINTF(("gus_dma_output %d @ %p\n", size, buf));
-
+	mtx_enter(&audio_lock);
 	if (size != sc->sc_blocksize) {
 	    DPRINTF(("gus_dma_output reqsize %d not sc_blocksize %d\n",
 		     size, sc->sc_blocksize));
+	    mtx_leave(&audio_lock);
 	    return EINVAL;
 	}
 
@@ -556,8 +557,10 @@ gus_dma_output(addr, buf, size, intr, arg)
 			DPRINTF(("gus_dma_output: unpaired samples"));
 			size &= 1;
 		}
-		if (size == 0)
+		if (size == 0) {
+			mtx_leave(&audio_lock);
 			return 0;
+		}
 
 		gus_deinterleave(sc, (void *)buffer, size);
 
@@ -596,7 +599,7 @@ gus_dma_output(addr, buf, size, intr, arg)
 #endif
 
 	gusdmaout(sc, flags, boarddma, (caddr_t) buffer, size);
-
+	mtx_leave(&audio_lock);
 	return 0;
 }
 
@@ -615,7 +618,7 @@ gusmax_close(addr)
 }
 
 /*
- * Close out device stuff.  Called at splgus() from generic audio layer.
+ * Close out device stuff.  Called at splaudio() from generic audio layer.
  */
 void
 gusclose(addr)
@@ -674,6 +677,7 @@ gusintr(arg)
 #endif
 	if (HAS_CODEC(sc))
 		retval = ad1848_intr(&sc->sc_codec);
+	mtx_enter(&audio_lock);
 	if ((intr = bus_space_read_1(iot, ioh1, GUS_IRQ_STATUS)) & GUSMASK_IRQ_DMATC) {
 		DMAPRINTF(("gusintr dma flags=%x\n", sc->sc_flags));
 #ifdef AUDIO_DEBUG
@@ -695,8 +699,11 @@ gusintr(arg)
 #endif
 		retval += gus_voice_intr(sc);
 	}
-	if (retval)
+	if (retval) {
+		mtx_leave(&audio_lock);
 		return 1;
+	}
+	mtx_leave(&audio_lock);
 	return retval;
 }
 
@@ -727,14 +734,13 @@ gus_dmaout_timeout(arg)
 	struct gus_softc *sc = arg;
 	bus_space_tag_t iot = sc->sc_iot;
 	bus_space_handle_t ioh2 = sc->sc_ioh2;
-	int s;
 
 	printf("%s: dmaout timeout\n", sc->sc_dev.dv_xname);
 	/*
 	 * Stop any DMA.
 	 */
 
-	s = splgus();
+	mtx_enter(&audio_lock);
 	SELECT_GUS_REG(iot, ioh2, GUSREG_DMA_CONTROL);
 	bus_space_write_1(iot, ioh2, GUS_DATA_HIGH, 0);
  
@@ -744,7 +750,7 @@ gus_dmaout_timeout(arg)
 #endif
  
 	gus_dmaout_dointr(sc);
-	splx(s);
+	mtx_leave(&audio_lock);
 }
 
 
@@ -1249,7 +1255,7 @@ gus_continue_playing(sc, voice)
 }
 
 /*
- * Send/receive data into GUS's DRAM using DMA.  Called at splgus()
+ * Send/receive data into GUS's DRAM using DMA.  Called at splaudio()
  */
 
 void
@@ -1323,7 +1329,7 @@ gusdmaout(sc, flags, gusaddr, buffaddr, length)
 
 /*
  * Start a voice playing on the GUS.  Called from interrupt handler at
- * splgus().
+ * splaudio().
  */
 
 void
@@ -1420,7 +1426,7 @@ gus_start_voice(sc, voice, intrs)
 }
 
 /*
- * Stop a given voice.  called at splgus()
+ * Stop a given voice.  Called at splaudio().
  */
 
 void
@@ -1464,7 +1470,7 @@ gus_stop_voice(sc, voice, intrs_too)
 
 
 /*
- * Set the volume of a given voice.  Called at splgus().
+ * Set the volume of a given voice.  Called at splaudio().
  */
 void
 gus_set_volume(sc, voice, volume)
@@ -1522,7 +1528,6 @@ gus_set_params(addr, setmode, usemode, p, r)
 	struct audio_params *p, *r;
 {
 	struct gus_softc *sc = addr;
-	int s;
 
 	switch (p->encoding) {
 	case AUDIO_ENCODING_ULAW:
@@ -1536,7 +1541,8 @@ gus_set_params(addr, setmode, usemode, p, r)
 		return (EINVAL);
 	}
 
-	s = splaudio();
+	/* XXX: why?! this is called with interrupts disabled */
+	mtx_enter(&audio_lock);
 
 	if (p->precision == 8) {
 		sc->sc_voc[GUS_VOICE_LEFT].voccntl &= ~GUSMASK_DATA_SIZE16;
@@ -1550,7 +1556,7 @@ gus_set_params(addr, setmode, usemode, p, r)
 	sc->sc_precision = p->precision;
 	sc->sc_channels = p->channels;
 
-	splx(s);
+	mtx_leave(&audio_lock);
 
 	if (p->sample_rate > gus_max_frequency[sc->sc_voices - GUS_MIN_VOICES])
 		p->sample_rate = gus_max_frequency[sc->sc_voices - GUS_MIN_VOICES];
@@ -1685,19 +1691,19 @@ gus_commit_settings(addr)
 	void * addr;
 {
 	struct gus_softc *sc = addr;
-	int s;
 
 	DPRINTF(("gus_commit_settings called (gain = %d)\n",sc->sc_ogain));
 
 
-	s = splgus();
+	/* XXX: why?! this is called with interrupts disabled */
+	mtx_enter(&audio_lock);
 
 	gus_set_recrate(sc, sc->sc_irate);
 	gus_set_volume(sc, GUS_VOICE_LEFT, sc->sc_ogain);
 	gus_set_volume(sc, GUS_VOICE_RIGHT, sc->sc_ogain);
 	gus_set_samprate(sc, GUS_VOICE_LEFT, sc->sc_orate);
 	gus_set_samprate(sc, GUS_VOICE_RIGHT, sc->sc_orate);
-	splx(s);
+	mtx_leave(&audio_lock);
 	gus_set_chan_addrs(sc);
 
 	return 0;
@@ -1738,7 +1744,7 @@ struct gus_softc *sc;
 }
 
 /*
- * Set the sample rate of the given voice.  Called at splgus().
+ * Set the sample rate of the given voice.  Called at splaudio().
  */
 
 void
@@ -1777,7 +1783,7 @@ gus_set_samprate(sc, voice, freq)
 
 /*
  * Set the sample rate of the recording frequency.  Formula is from the GUS
- * SDK.  Called at splgus().
+ * SDK.  Called at splaudio().
  */
 
 void
@@ -1886,7 +1892,7 @@ gus_mic_ctl(addr, newstate)
 }
 
 /*
- * Set the end address of a give voice.  Called at splgus()
+ * Set the end address of a give voice.  Called at splaudio().
  */
 
 void
@@ -1912,7 +1918,7 @@ gus_set_endaddr(sc, voice, addr)
 
 #ifdef GUSPLAYDEBUG
 /*
- * Set current address.  called at splgus()
+ * Set current address.  Called at splaudio().
  */
 void
 gus_set_curaddr(sc, voice, addr)
@@ -1938,7 +1944,7 @@ gus_set_curaddr(sc, voice, addr)
 }
 
 /*
- * Get current GUS playback address.  Called at splgus().
+ * Get current GUS playback address.  Called at splaudio().
  */
 u_long
 gus_get_curaddr(sc, voice)
@@ -2052,9 +2058,9 @@ gusreset(sc, voices)
 	bus_space_handle_t ioh1 = sc->sc_ioh1;
 	bus_space_handle_t ioh2 = sc->sc_ioh2;
 	bus_space_handle_t ioh4 = sc->sc_ioh4;
-	int i,s;
+	int i;
 
-	s = splgus();
+	mtx_enter(&audio_lock);
 
 	/*
 	 * Reset the GF1 chip
@@ -2171,7 +2177,7 @@ gusreset(sc, voices)
 	bus_space_write_1(iot, ioh2, GUS_DATA_HIGH, GUSMASK_MASTER_RESET | GUSMASK_DAC_ENABLE |
 		GUSMASK_IRQ_ENABLE);
 
-	splx(s);
+	mtx_leave(&audio_lock);
 }
 
 
@@ -2273,7 +2279,7 @@ gusmax_dma_input(addr, buf, size, callback, arg)
 
 /*
  * Start sampling the input source into the requested DMA buffer.
- * Called at splgus(), either from top-half or from interrupt handler.
+ * Called at splaudio(), either from top-half or from interrupt handler.
  */
 int
 gus_dma_input(addr, buf, size, callback, arg)
@@ -2289,12 +2295,14 @@ gus_dma_input(addr, buf, size, callback, arg)
 	u_char dmac;
 	DMAPRINTF(("gus_dma_input called\n"));
 
+	mtx_enter(&audio_lock);
 	/*
 	 * Sample SIZE bytes of data from the card, into buffer at BUF.
 	 */
-
-	if (sc->sc_precision == 16)
+	if (sc->sc_precision == 16) {
+	    mtx_leave(&audio_lock);
 	    return EINVAL;		/* XXX */
+	}
 
 	/* set DMA modes */
 	dmac = GUSMASK_SAMPLE_IRQ|GUSMASK_SAMPLE_START;
@@ -2322,7 +2330,7 @@ gus_dma_input(addr, buf, size, callback, arg)
 
 
 	DMAPRINTF(("gus_dma_input returning\n"));
-
+	mtx_leave(&audio_lock);
 	return 0;
 }
 
@@ -2372,7 +2380,7 @@ gusmax_halt_in_dma(addr)
 }
 
 /*
- * Stop any DMA output.  Called at splgus().
+ * Stop any DMA output.  Called at splaudio().
  */
 int
 gus_halt_out_dma(addr)
@@ -2382,6 +2390,7 @@ gus_halt_out_dma(addr)
 	bus_space_tag_t iot = sc->sc_iot;
 	bus_space_handle_t ioh2 = sc->sc_ioh2;
 
+	mtx_enter(&audio_lock);
 	DMAPRINTF(("gus_halt_out_dma called\n"));
 	/*
 	 * Make sure the GUS _isn't_ setup for DMA
@@ -2403,12 +2412,12 @@ gus_halt_out_dma(addr)
 	/* also stop playing */
 	gus_stop_voice(sc, GUS_VOICE_LEFT, 1);
 	gus_stop_voice(sc, GUS_VOICE_RIGHT, 0);
-
+	mtx_leave(&audio_lock);
 	return 0;
 }
 
 /*
- * Stop any DMA output.  Called at splgus().
+ * Stop any DMA output.  Called at splaudio().
  */
 int
 gus_halt_in_dma(addr)
@@ -2417,6 +2426,8 @@ gus_halt_in_dma(addr)
 	struct gus_softc *sc = addr;
 	bus_space_tag_t iot = sc->sc_iot;
 	bus_space_handle_t ioh2 = sc->sc_ioh2;
+
+	mtx_enter(&audio_lock);
 	DMAPRINTF(("gus_halt_in_dma called\n"));
 
 	/*
@@ -2433,7 +2444,7 @@ gus_halt_in_dma(addr)
 	sc->sc_inarg = 0;
 	sc->sc_dmainaddr = 0;
 	sc->sc_dmaincnt = 0;
-
+	mtx_leave(&audio_lock);
 	return 0;
 }
 
@@ -3581,11 +3592,9 @@ gus_subattach(sc, ia)
 	 * Setup a default interrupt handler
 	 */
 
-	/* XXX we shouldn't have to use splgus == splclock, nor should
-	 * we use IPL_CLOCK.
-	 */
-	sc->sc_ih = isa_intr_establish(ia->ia_ic, ia->ia_irq, IST_EDGE,
-	    IPL_AUDIO, gusintr, sc /* sc->sc_gusdsp */, sc->sc_dev.dv_xname);
+	sc->sc_ih = isa_intr_establish(ia->ia_ic, ia->ia_irq,
+	    IST_EDGE, IPL_AUDIO | IPL_MPSAFE,
+	    gusintr, sc /* sc->sc_gusdsp */, sc->sc_dev.dv_xname);
 
 	/*
 	 * Set some default values
@@ -3636,7 +3645,7 @@ gus_test_iobase (iot, iobase)
 {
 	bus_space_handle_t ioh1, ioh2, ioh3, ioh4;
 	u_char s1, s2;
-	int s, rv = 0;
+	int rv = 0;
 
 	/* Map i/o space */
 	if (bus_space_map(iot, iobase, GUS_NPORT1, 0, &ioh1))
@@ -3656,7 +3665,7 @@ gus_test_iobase (iot, iobase)
 	 * Reset GUS to an initial state before we do anything.
 	 */
 
-	s = splgus();
+	mtx_enter(&audio_lock);
 	delay(500);
 
 	SELECT_GUS_REG(iot, ioh2, GUSREG_RESET);
@@ -3669,7 +3678,7 @@ gus_test_iobase (iot, iobase)
 
 	delay(500);
 
-	splx(s);
+	mtx_leave(&audio_lock);
 
 	/*
 	 * See if we can write to the board's memory

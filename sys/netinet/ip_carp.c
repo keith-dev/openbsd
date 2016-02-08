@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_carp.c,v 1.198 2012/10/08 18:48:25 camield Exp $	*/
+/*	$OpenBSD: ip_carp.c,v 1.209 2013/06/20 12:03:40 mpi Exp $	*/
 
 /*
  * Copyright (c) 2002 Michael Shalayeff. All rights reserved.
@@ -37,19 +37,17 @@
 #include "ether.h"
 
 #include <sys/param.h>
-#include <sys/proc.h>
 #include <sys/systm.h>
 #include <sys/mbuf.h>
 #include <sys/socket.h>
 #include <sys/socketvar.h>
+#include <sys/timeout.h>
 #include <sys/ioctl.h>
 #include <sys/errno.h>
 #include <sys/device.h>
 #include <sys/kernel.h>
 #include <sys/sysctl.h>
 #include <sys/syslog.h>
-
-#include <machine/cpu.h>
 
 #include <net/if.h>
 #include <net/if_types.h>
@@ -167,6 +165,7 @@ struct carp_softc {
 	u_int32_t sc_lsmask;		/* load sharing mask */
 	int sc_lscount;			/* # load sharing interfaces (max 32) */
 	int sc_delayed_arp;		/* delayed ARP request countdown */
+	int sc_realmac;			/* using real mac */
 
 	struct in_addr sc_peer;
 
@@ -306,8 +305,8 @@ carp_hmac_prepare_ctx(struct carp_vhost_entry *vhe, u_int8_t ctx)
 	}
 
 	/* the rest of the precomputation */
-	if (vhe->vhe_leader && bcmp(sc->sc_ac.ac_enaddr, vhe->vhe_enaddr,
-	    ETHER_ADDR_LEN) != 0)
+	if (!sc->sc_realmac && vhe->vhe_leader &&
+	    bcmp(sc->sc_ac.ac_enaddr, vhe->vhe_enaddr, ETHER_ADDR_LEN) != 0)
 		SHA1Update(&vhe->vhe_sha1[ctx], sc->sc_ac.ac_enaddr,
 		    ETHER_ADDR_LEN);
 
@@ -894,7 +893,7 @@ carp_clone_create(ifc, unit)
 	ifp->if_addrlen = ETHER_ADDR_LEN;
 	ifp->if_hdrlen = ETHER_HDR_LEN;
 	ifp->if_mtu = ETHERMTU;
-	IFQ_SET_MAXLEN(&ifp->if_snd, ifqmaxlen);
+	IFQ_SET_MAXLEN(&ifp->if_snd, IFQ_MAXLEN);
 	IFQ_SET_READY(&ifp->if_snd);
 	if_attach(ifp);
 
@@ -1028,8 +1027,7 @@ carp_destroy_vhosts(struct carp_softc *sc)
 	/* XXX bow out? */
 	struct carp_vhost_entry *vhe, *nvhe;
 
-	for (vhe = LIST_FIRST(&sc->carp_vhosts);
-	     vhe != LIST_END(&sc->carp_vhosts); vhe = nvhe) {
+	for (vhe = LIST_FIRST(&sc->carp_vhosts); vhe != NULL; vhe = nvhe) {
 		nvhe = LIST_NEXT(vhe, vhost_entries);
 		free(vhe, M_DEVBUF);
 	}
@@ -1705,6 +1703,12 @@ carp_setrun(struct carp_vhost_entry *vhe, sa_family_t af)
 		return;
 	}
 
+	if (bcmp(((struct arpcom *)sc->sc_carpdev)->ac_enaddr,
+	    sc->sc_ac.ac_enaddr, ETHER_ADDR_LEN) == 0)
+		sc->sc_realmac = 1;
+	else
+		sc->sc_realmac = 0;
+
 	if (sc->sc_if.if_flags & IFF_UP && vhe->vhid > 0 &&
 	    (sc->sc_naddrs || sc->sc_naddrs6) && !sc->sc_suppress) {
 		sc->sc_if.if_flags |= IFF_RUNNING;
@@ -2026,18 +2030,15 @@ carp_set_addr(struct carp_softc *sc, struct sockaddr_in *sin)
 
 	/* we have to do this by hand to ensure we don't match on ourselves */
 	ia_if = NULL;
-	for (ia = TAILQ_FIRST(&in_ifaddr); ia;
-	    ia = TAILQ_NEXT(ia, ia_list)) {
-
+	TAILQ_FOREACH(ia, &in_ifaddr, ia_list) {
 		/* and, yeah, we need a multicast-capable iface too */
 		if (ia->ia_ifp != &sc->sc_if &&
 		    ia->ia_ifp->if_type != IFT_CARP &&
 		    (ia->ia_ifp->if_flags & IFF_MULTICAST) &&
 		    ia->ia_ifp->if_rdomain == sc->sc_if.if_rdomain &&
-		    (sin->sin_addr.s_addr & ia->ia_netmask) ==
-		    ia->ia_net) {
-			if (!ia_if)
-				ia_if = ia;
+		    (sin->sin_addr.s_addr & ia->ia_netmask) == ia->ia_net) {
+			ia_if = ia;
+			break;
 		}
 	}
 
@@ -2110,7 +2111,7 @@ carp_set_addr6(struct carp_softc *sc, struct sockaddr_in6 *sin6)
 
 	/* we have to do this by hand to ensure we don't match on ourselves */
 	ia_if = NULL;
-	for (ia = in6_ifaddr; ia; ia = ia->ia_next) {
+	TAILQ_FOREACH(ia, &in6_ifaddr, ia_list) {
 		int i;
 
 		for (i = 0; i < 4; i++) {
@@ -2223,7 +2224,7 @@ carp_ioctl(struct ifnet *ifp, u_long cmd, caddr_t addr)
 		case AF_INET:
 			sc->sc_if.if_flags |= IFF_UP;
 			/*
-			 * emulate arp_ifinit() without doing a gratious arp
+			 * emulate arp_ifinit() without doing a gratuitous arp
 			 * request so that the routes are setup correctly.
 			 */
 			ifa->ifa_rtrequest = arp_rtrequest;

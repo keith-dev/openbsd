@@ -1,4 +1,4 @@
-/*	$OpenBSD: s_clog.c,v 1.4 2013/01/13 03:45:00 martynas Exp $	*/
+/*	$OpenBSD: s_clog.c,v 1.6 2013/07/03 04:46:36 espie Exp $	*/
 /*
  * Copyright (c) 2008 Stephen L. Moshier <steve@moshier.net>
  *
@@ -72,6 +72,6 @@ clog(double complex z)
 	return (w);
 }
 
-#if	LDBL_MANT_DIG == 53
-__weak_alias(clogl, clog);
-#endif	/* LDBL_MANT_DIG == 53 */
+#if	LDBL_MANT_DIG == DBL_MANT_DIG
+__strong_alias(clogl, clog);
+#endif	/* LDBL_MANT_DIG == DBL_MANT_DIG */

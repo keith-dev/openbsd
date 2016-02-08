@@ -1,4 +1,4 @@
-/* $OpenBSD: machdep.c,v 1.123 2012/12/02 07:03:32 guenther Exp $ */
+/* $OpenBSD: machdep.c,v 1.126 2013/07/05 21:11:57 miod Exp $ */
 /* $NetBSD: machdep.c,v 1.108 2000/09/13 15:00:23 thorpej Exp $	 */
 
 /*
@@ -573,14 +573,14 @@ haltsys:
 		 * rely on that.
 		 */
 #ifdef notyet
-		asm("	movl	sp, (0x80000200)
-			movl	0x80000200, sp
-			mfpr	$0x10, -(sp)	# PR_PCBB
-			mfpr	$0x11, -(sp)	# PR_SCBB
-			mfpr	$0xc, -(sp)	# PR_SBR
-			mfpr	$0xd, -(sp)	# PR_SLR
-			mtpr	$0, $0x38	# PR_MAPEN
-		");
+		asm("	movl	sp, (0x80000200);"
+		"	movl	0x80000200, sp;"
+		"	mfpr	$0x10, -(sp);	# PR_PCBB"
+		"	mfpr	$0x11, -(sp);	# PR_SCBB"
+		"	mfpr	$0xc, -(sp);	# PR_SBR"
+		"	mfpr	$0xd, -(sp);	# PR_SLR"
+		"	mtpr	$0, $0x38;	# PR_MAPEN"
+		);
 #endif
 
 		if (dep_call->cpu_reboot)
@@ -592,8 +592,8 @@ haltsys:
 
 		mtpr(GC_CONS|GC_BTFL, PR_TXDB);
 	}
-	asm("movl %0, r5":: "g" (showto)); /* How to boot */
-	asm("movl %0, r11":: "r"(showto)); /* ??? */
+	asm("movl %0, %%r5":: "g" (showto)); /* How to boot */
+	asm("movl %0, %%r11":: "r"(showto)); /* ??? */
 	asm("halt");
 	for (;;) ;
 	/* NOTREACHED */
@@ -603,8 +603,8 @@ void
 dumpsys()
 {
 	int maj, psize, pg;
-	daddr64_t blkno;
-	int (*dump)(dev_t, daddr64_t, caddr_t, size_t);
+	daddr_t blkno;
+	int (*dump)(dev_t, daddr_t, caddr_t, size_t);
 	paddr_t maddr;
 	int error;
 	kcore_seg_t *kseg_p;
@@ -1048,7 +1048,7 @@ splassert_check(int wantipl, const char *func)
 }
 #endif
 
-void	start(struct rpb *);
+void	_start(struct rpb *);
 void	main(void);
 
 extern	paddr_t avail_end;
@@ -1082,7 +1082,7 @@ extern struct cpu_dep vxt_calls;
  * management is disabled, and no interrupt system is active.
  */
 void
-start(struct rpb *prpb)
+_start(struct rpb *prpb)
 {
 	extern vaddr_t scratch;
 	int preserve_cca = 0;

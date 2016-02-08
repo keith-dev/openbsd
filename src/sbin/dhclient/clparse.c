@@ -1,6 +1,6 @@
-/*	$OpenBSD: clparse.c,v 1.53 2013/02/09 23:37:21 krw Exp $	*/
+/*	$OpenBSD: clparse.c,v 1.60 2013/06/09 16:21:50 krw Exp $	*/
 
-/* Parser for dhclient config and lease files... */
+/* Parser for dhclient config and lease files. */
 
 /*
  * Copyright (c) 1997 The Internet Software Consortium.
@@ -57,7 +57,7 @@ read_client_conf(void)
 
 	new_parse(path_dhclient_conf);
 
-	/* Set some defaults... */
+	/* Set some defaults. */
 	config->link_timeout = 10;
 	config->timeout = 60;
 	config->select_interval = 0;
@@ -72,6 +72,9 @@ read_client_conf(void)
 	    [config->requested_option_count++] = DHO_BROADCAST_ADDRESS;
 	config->requested_options
 	    [config->requested_option_count++] = DHO_TIME_OFFSET;
+	/* RFC 3442 says CLASSLESS_STATIC_ROUTES must be before ROUTERS! */
+	config->requested_options
+	    [config->requested_option_count++] = DHO_CLASSLESS_STATIC_ROUTES;
 	config->requested_options
 	    [config->requested_option_count++] = DHO_ROUTERS;
 	config->requested_options
@@ -413,6 +416,7 @@ void
 parse_client_lease_statement(FILE *cfile, int is_static)
 {
 	struct client_lease	*lease, *lp, *pl;
+	struct option_data	*opt1, *opt2;
 	int			 token;
 
 	token = next_token(NULL, cfile);
@@ -432,7 +436,7 @@ parse_client_lease_statement(FILE *cfile, int is_static)
 		token = peek_token(NULL, cfile);
 		if (token == EOF) {
 			parse_warn("unterminated lease declaration.");
-			free(lease);
+			free_client_lease(lease);
 			return;
 		}
 		if (token == '}')
@@ -442,22 +446,29 @@ parse_client_lease_statement(FILE *cfile, int is_static)
 	token = next_token(NULL, cfile);
 
 	/*
+	 * If the new lease is for an obsolete client-identifier, toss it.
+	 */
+	opt1 = &lease->options[DHO_DHCP_CLIENT_IDENTIFIER];
+	opt2 = &config->send_options[DHO_DHCP_CLIENT_IDENTIFIER];
+	if (opt1->len && opt2->len && (opt1->len != opt2->len ||
+	    memcmp(opt1->data, opt2->data, opt1->len))) {
+		note("Obsolete client identifier (%s) in recorded lease",
+		    pretty_print_option( DHO_DHCP_CLIENT_IDENTIFIER, opt1, 0));
+		free_client_lease(lease);
+		return;
+	}
+
+	/*
 	 * The new lease may supersede a lease that's not the active
 	 * lease but is still on the lease list, so scan the lease list
 	 * looking for a lease with the same address, and if we find it,
 	 * toss it.
 	 */
-	pl = NULL;
-	for (lp = client->leases; lp; lp = lp->next) {
+	TAILQ_FOREACH_SAFE(lp, &client->leases, next, pl) {
 		if (lp->address.s_addr == lease->address.s_addr) {
-			if (pl)
-				pl->next = lp->next;
-			else
-				client->leases = lp->next;
+			TAILQ_REMOVE(&client->leases, lp, next);
 			free_client_lease(lp);
-			break;
-		} else
-			pl = lp;
+		}
 	}
 
 	/*
@@ -465,8 +476,7 @@ parse_client_lease_statement(FILE *cfile, int is_static)
 	 * recorded leases - don't make it the active lease.
 	 */
 	if (is_static) {
-		lease->next = client->leases;
-		client->leases = lease;
+		TAILQ_INSERT_HEAD(&client->leases, lease, next);
 		return;
 	}
 
@@ -491,8 +501,8 @@ parse_client_lease_statement(FILE *cfile, int is_static)
 		    lease->address.s_addr)
 			free_client_lease(client->active);
 		else {
-			client->active->next = client->leases;
-			client->leases = client->active;
+			TAILQ_INSERT_HEAD(&client->leases, client->active,
+			    next);
 		}
 	}
 	client->active = lease;
@@ -606,7 +616,7 @@ parse_option_decl(FILE *cfile, struct option_data *options)
 		return (-1);
 	}
 
-	/* Parse the option data... */
+	/* Parse the option data. */
 	do {
 		for (fmt = dhcp_options[code].format; *fmt; fmt++) {
 			if (*fmt == 'A')
@@ -617,7 +627,7 @@ parse_option_decl(FILE *cfile, struct option_data *options)
 				    sizeof(hunkbuf) - hunkix);
 				hunkix += len;
 				break;
-			case 't': /* Text string... */
+			case 't': /* Text string. */
 				token = next_token(&val, cfile);
 				if (token != TOK_STRING) {
 					parse_warn("expecting string.");
@@ -650,8 +660,8 @@ alloc:
 				memcpy(&hunkbuf[hunkix], dp, len);
 				hunkix += len;
 				break;
-			case 'L':	/* Unsigned 32-bit integer... */
-			case 'l':	/* Signed 32-bit integer... */
+			case 'L':	/* Unsigned 32-bit integer. */
+			case 'l':	/* Signed 32-bit integer. */
 				token = next_token(&val, cfile);
 				if (token != TOK_NUMBER) {
 need_number:

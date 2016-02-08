@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_pflow.c,v 1.24 2013/02/05 11:58:39 florian Exp $	*/
+/*	$OpenBSD: if_pflow.c,v 1.32 2013/07/05 17:14:27 florian Exp $	*/
 
 /*
  * Copyright (c) 2011 Florian Obser <florian@narrans.de>
@@ -25,9 +25,9 @@
 #include <sys/systm.h>
 #include <sys/mbuf.h>
 #include <sys/socket.h>
+#include <sys/timeout.h>
 #include <sys/ioctl.h>
 #include <sys/kernel.h>
-#include <sys/proc.h>
 #include <sys/sysctl.h>
 #include <dev/rndvar.h>
 
@@ -89,15 +89,20 @@ void	pflow_timeout(void *);
 void	pflow_timeout6(void *);
 void	pflow_timeout_tmpl(void *);
 void	copy_flow_data(struct pflow_flow *, struct pflow_flow *,
-	struct pf_state *, int, int);
+	struct pf_state *, struct pf_state_key *, int, int);
 void	copy_flow4_data(struct pflow_flow4 *, struct pflow_flow4 *,
-	struct pf_state *, struct pflow_softc *, int, int);
+	struct pf_state *, struct pf_state_key *, struct pflow_softc *, int,
+	int);
 void	copy_flow6_data(struct pflow_flow6 *, struct pflow_flow6 *,
-	struct pf_state *, struct pflow_softc *, int, int);
-int	pflow_pack_flow(struct pf_state *, struct pflow_softc *);
-int	pflow_pack_flow_ipfix(struct pf_state *, struct pflow_softc *);
+	struct pf_state *, struct pf_state_key *, struct pflow_softc *, int,
+	int);
+int	pflow_pack_flow(struct pf_state *, struct pf_state_key *,
+	struct pflow_softc *);
+int	pflow_pack_flow_ipfix(struct pf_state *, struct pf_state_key *,
+	struct pflow_softc *);
 int	pflow_get_dynport(void);
-int	export_pflow_if(struct pf_state*, struct pflow_softc *);
+int	export_pflow_if(struct pf_state*, struct pf_state_key *,
+	struct pflow_softc *);
 int	copy_flow_to_m(struct pflow_flow *flow, struct pflow_softc *sc);
 int	copy_flow4_to_m(struct pflow_flow4 *flow, struct pflow_softc *sc);
 int	copy_flow6_to_m(struct pflow_flow6 *flow, struct pflow_softc *sc);
@@ -105,10 +110,6 @@ int	copy_flow6_to_m(struct pflow_flow6 *flow, struct pflow_softc *sc);
 struct if_clone	pflow_cloner =
     IF_CLONE_INITIALIZER("pflow", pflow_clone_create,
     pflow_clone_destroy);
-
-/* from in_pcb.c */
-extern int ipport_hifirstauto;
-extern int ipport_hilastauto;
 
 /* from udp_usrreq.c */
 extern int udpcksum;
@@ -156,6 +157,12 @@ pflow_clone_create(struct if_clone *ifc, int unit)
 	pflowif->sc_tmpl.ipv4_tmpl.dest_ip.field_id =
 	    htons(PFIX_IE_destinationIPv4Address);
 	pflowif->sc_tmpl.ipv4_tmpl.dest_ip.len = htons(4);
+	pflowif->sc_tmpl.ipv4_tmpl.if_index_in.field_id =
+	    htons(PFIX_IE_ingressInterface);
+	pflowif->sc_tmpl.ipv4_tmpl.if_index_in.len = htons(4);
+	pflowif->sc_tmpl.ipv4_tmpl.if_index_out.field_id =
+	    htons(PFIX_IE_egressInterface);
+	pflowif->sc_tmpl.ipv4_tmpl.if_index_out.len = htons(4);
 	pflowif->sc_tmpl.ipv4_tmpl.packets.field_id =
 	    htons(PFIX_IE_packetDeltaCount);
 	pflowif->sc_tmpl.ipv4_tmpl.packets.len = htons(8);
@@ -195,6 +202,12 @@ pflow_clone_create(struct if_clone *ifc, int unit)
 	pflowif->sc_tmpl.ipv6_tmpl.dest_ip.field_id =
 	    htons(PFIX_IE_destinationIPv6Address);
 	pflowif->sc_tmpl.ipv6_tmpl.dest_ip.len = htons(16);
+	pflowif->sc_tmpl.ipv6_tmpl.if_index_in.field_id =
+	    htons(PFIX_IE_ingressInterface);
+	pflowif->sc_tmpl.ipv6_tmpl.if_index_in.len = htons(4);
+	pflowif->sc_tmpl.ipv6_tmpl.if_index_out.field_id =
+	    htons(PFIX_IE_egressInterface);
+	pflowif->sc_tmpl.ipv6_tmpl.if_index_out.len = htons(4);
 	pflowif->sc_tmpl.ipv6_tmpl.packets.field_id =
 	    htons(PFIX_IE_packetDeltaCount);
 	pflowif->sc_tmpl.ipv6_tmpl.packets.len = htons(8);
@@ -231,7 +244,7 @@ pflow_clone_create(struct if_clone *ifc, int unit)
 	ifp->if_output = pflowoutput;
 	ifp->if_start = pflowstart;
 	ifp->if_type = IFT_PFLOW;
-	IFQ_SET_MAXLEN(&ifp->if_snd, ifqmaxlen);
+	IFQ_SET_MAXLEN(&ifp->if_snd, IFQ_MAXLEN);
 	ifp->if_hdrlen = PFLOW_HDRLEN;
 	ifp->if_flags = IFF_UP;
 	ifp->if_flags &= ~IFF_RUNNING;	/* not running, need receiver */
@@ -556,10 +569,8 @@ pflow_get_mbuf(struct pflow_softc *sc, u_int16_t set_id)
 
 void
 copy_flow_data(struct pflow_flow *flow1, struct pflow_flow *flow2,
-    struct pf_state *st, int src, int dst)
+    struct pf_state *st, struct pf_state_key *sk, int src, int dst)
 {
-	struct pf_state_key	*sk = st->key[PF_SK_WIRE];
-
 	flow1->src_ip = flow2->dest_ip = sk->addr[src].v4.s_addr;
 	flow1->src_port = flow2->dest_port = sk->port[src];
 	flow1->dest_ip = flow2->src_ip = sk->addr[dst].v4.s_addr;
@@ -567,8 +578,10 @@ copy_flow_data(struct pflow_flow *flow1, struct pflow_flow *flow2,
 
 	flow1->dest_as = flow2->src_as =
 	    flow1->src_as = flow2->dest_as = 0;
-	flow1->if_index_out = flow2->if_index_in =
-	    flow1->if_index_in = flow2->if_index_out = 0;
+	flow1->if_index_in = htons(st->if_index_in);
+	flow1->if_index_out = htons(st->if_index_out);
+	flow2->if_index_in = htons(st->if_index_out);
+	flow2->if_index_out = htons(st->if_index_in);
 	flow1->dest_mask = flow2->src_mask =
 	    flow1->src_mask = flow2->dest_mask = 0;
 
@@ -593,14 +606,18 @@ copy_flow_data(struct pflow_flow *flow1, struct pflow_flow *flow2,
 
 void
 copy_flow4_data(struct pflow_flow4 *flow1, struct pflow_flow4 *flow2,
-    struct pf_state *st, struct pflow_softc *sc, int src, int dst)
+    struct pf_state *st, struct pf_state_key *sk, struct pflow_softc *sc,
+    int src, int dst)
 {
-	struct pf_state_key	*sk = st->key[PF_SK_WIRE];
-
 	flow1->src_ip = flow2->dest_ip = sk->addr[src].v4.s_addr;
 	flow1->src_port = flow2->dest_port = sk->port[src];
 	flow1->dest_ip = flow2->src_ip = sk->addr[dst].v4.s_addr;
 	flow1->dest_port = flow2->src_port = sk->port[dst];
+
+	flow1->if_index_in = htonl(st->if_index_in);
+	flow1->if_index_out = htonl(st->if_index_out);
+	flow2->if_index_in = htonl(st->if_index_out);
+	flow2->if_index_out = htonl(st->if_index_in);
 
 	flow1->flow_packets = htobe64(st->packets[0]);
 	flow2->flow_packets = htobe64(st->packets[1]);
@@ -637,15 +654,20 @@ copy_flow4_data(struct pflow_flow4 *flow1, struct pflow_flow4 *flow2,
 
 void
 copy_flow6_data(struct pflow_flow6 *flow1, struct pflow_flow6 *flow2,
-    struct pf_state *st, struct pflow_softc *sc, int src, int dst)
+    struct pf_state *st, struct pf_state_key *sk, struct pflow_softc *sc,
+    int src, int dst)
 {
-	struct pf_state_key	*sk = st->key[PF_SK_WIRE];
 	bcopy(&sk->addr[src].v6, &flow1->src_ip, sizeof(flow1->src_ip));
 	bcopy(&sk->addr[src].v6, &flow2->dest_ip, sizeof(flow2->dest_ip));
 	flow1->src_port = flow2->dest_port = sk->port[src];
 	bcopy(&sk->addr[dst].v6, &flow1->dest_ip, sizeof(flow1->dest_ip));
 	bcopy(&sk->addr[dst].v6, &flow2->src_ip, sizeof(flow2->src_ip));
 	flow1->dest_port = flow2->src_port = sk->port[dst];
+
+	flow1->if_index_in = htonl(st->if_index_in);
+	flow1->if_index_out = htonl(st->if_index_out);
+	flow2->if_index_in = htonl(st->if_index_out);
+	flow2->if_index_out = htonl(st->if_index_in);
 
 	flow1->flow_packets = htobe64(st->packets[0]);
 	flow2->flow_packets = htobe64(st->packets[1]);
@@ -684,19 +706,21 @@ int
 export_pflow(struct pf_state *st)
 {
 	struct pflow_softc	*sc = NULL;
-	struct pf_state_key	*sk = st->key[PF_SK_WIRE];
+	struct pf_state_key	*sk;
+
+	sk = st->key[st->direction == PF_IN ? PF_SK_WIRE : PF_SK_STACK];
 
 	SLIST_FOREACH(sc, &pflowif_list, sc_next) {
 		switch (sc->sc_version) {
 		case PFLOW_PROTO_5:
 			if( sk->af == AF_INET )
-				export_pflow_if(st, sc);
+				export_pflow_if(st, sk, sc);
 			break;
 		case PFLOW_PROTO_9:
 			/* ... fall through ... */
 		case PFLOW_PROTO_10:
 			if( sk->af == AF_INET || sk->af == AF_INET6 )
-				export_pflow_if(st, sc);
+				export_pflow_if(st, sk, sc);
 			break;
 		default: /* NOTREACHED */
 			break;
@@ -707,7 +731,8 @@ export_pflow(struct pf_state *st)
 }
 
 int
-export_pflow_if(struct pf_state *st, struct pflow_softc *sc)
+export_pflow_if(struct pf_state *st, struct pf_state_key *sk,
+    struct pflow_softc *sc)
 {
 	struct pf_state		 pfs_copy;
 	struct ifnet		*ifp = &sc->sc_if;
@@ -718,12 +743,12 @@ export_pflow_if(struct pf_state *st, struct pflow_softc *sc)
 		return (0);
 
 	if (sc->sc_version == PFLOW_PROTO_9 || sc->sc_version == PFLOW_PROTO_10)
-		return (pflow_pack_flow_ipfix(st, sc));
+		return (pflow_pack_flow_ipfix(st, sk, sc));
 
 	/* PFLOW_PROTO_5 */
 	if ((st->bytes[0] < (u_int64_t)PFLOW_MAXBYTES)
 	    && (st->bytes[1] < (u_int64_t)PFLOW_MAXBYTES))
-		return (pflow_pack_flow(st, sc));
+		return (pflow_pack_flow(st, sk, sc));
 
 	/* flow > PFLOW_MAXBYTES need special handling */
 	bcopy(st, &pfs_copy, sizeof(pfs_copy));
@@ -734,7 +759,7 @@ export_pflow_if(struct pf_state *st, struct pflow_softc *sc)
 		pfs_copy.bytes[0] = PFLOW_MAXBYTES;
 		pfs_copy.bytes[1] = 0;
 
-		if ((ret = pflow_pack_flow(&pfs_copy, sc)) != 0)
+		if ((ret = pflow_pack_flow(&pfs_copy, sk, sc)) != 0)
 			return (ret);
 		if ((bytes[0] - PFLOW_MAXBYTES) > 0)
 			bytes[0] -= PFLOW_MAXBYTES;
@@ -744,7 +769,7 @@ export_pflow_if(struct pf_state *st, struct pflow_softc *sc)
 		pfs_copy.bytes[1] = PFLOW_MAXBYTES;
 		pfs_copy.bytes[0] = 0;
 
-		if ((ret = pflow_pack_flow(&pfs_copy, sc)) != 0)
+		if ((ret = pflow_pack_flow(&pfs_copy, sk, sc)) != 0)
 			return (ret);
 		if ((bytes[1] - PFLOW_MAXBYTES) > 0)
 			bytes[1] -= PFLOW_MAXBYTES;
@@ -753,7 +778,7 @@ export_pflow_if(struct pf_state *st, struct pflow_softc *sc)
 	pfs_copy.bytes[0] = bytes[0];
 	pfs_copy.bytes[1] = bytes[1];
 
-	return (pflow_pack_flow(&pfs_copy, sc));
+	return (pflow_pack_flow(&pfs_copy, sk, sc));
 }
 
 int
@@ -846,7 +871,8 @@ copy_flow6_to_m(struct pflow_flow6 *flow, struct pflow_softc *sc)
 }
 
 int
-pflow_pack_flow(struct pf_state *st, struct pflow_softc *sc)
+pflow_pack_flow(struct pf_state *st, struct pf_state_key *sk,
+    struct pflow_softc *sc)
 {
 	struct pflow_flow	 flow1;
 	struct pflow_flow	 flow2;
@@ -856,9 +882,9 @@ pflow_pack_flow(struct pf_state *st, struct pflow_softc *sc)
 	bzero(&flow2, sizeof(flow2));
 
 	if (st->direction == PF_OUT)
-		copy_flow_data(&flow1, &flow2, st, 1, 0);
+		copy_flow_data(&flow1, &flow2, st, sk, 1, 0);
 	else
-		copy_flow_data(&flow1, &flow2, st, 0, 1);
+		copy_flow_data(&flow1, &flow2, st, sk, 0, 1);
 
 	if (st->bytes[0] != 0) /* first flow from state */
 		ret = copy_flow_to_m(&flow1, sc);
@@ -870,9 +896,9 @@ pflow_pack_flow(struct pf_state *st, struct pflow_softc *sc)
 }
 
 int
-pflow_pack_flow_ipfix(struct pf_state *st, struct pflow_softc *sc)
+pflow_pack_flow_ipfix(struct pf_state *st, struct pf_state_key *sk,
+    struct pflow_softc *sc)
 {
-	struct pf_state_key	*sk = st->key[PF_SK_WIRE];
 	struct pflow_flow4	 flow4_1, flow4_2;
 	struct pflow_flow6	 flow6_1, flow6_2;
 	int			 ret = 0;
@@ -881,9 +907,9 @@ pflow_pack_flow_ipfix(struct pf_state *st, struct pflow_softc *sc)
 		bzero(&flow4_2, sizeof(flow4_2));
 
 		if (st->direction == PF_OUT)
-			copy_flow4_data(&flow4_1, &flow4_2, st, sc, 1, 0);
+			copy_flow4_data(&flow4_1, &flow4_2, st, sk, sc, 1, 0);
 		else
-			copy_flow4_data(&flow4_1, &flow4_2, st, sc, 0, 1);
+			copy_flow4_data(&flow4_1, &flow4_2, st, sk, sc, 0, 1);
 
 		if (st->bytes[0] != 0) /* first flow from state */
 			ret = copy_flow4_to_m(&flow4_1, sc);
@@ -895,9 +921,9 @@ pflow_pack_flow_ipfix(struct pf_state *st, struct pflow_softc *sc)
 		bzero(&flow6_2, sizeof(flow6_2));
 
 		if (st->direction == PF_OUT)
-			copy_flow6_data(&flow6_1, &flow6_2, st, sc, 1, 0);
+			copy_flow6_data(&flow6_1, &flow6_2, st, sk, sc, 1, 0);
 		else
-			copy_flow6_data(&flow6_1, &flow6_2, st, sc, 0, 1);
+			copy_flow6_data(&flow6_1, &flow6_2, st, sk, sc, 0, 1);
 
 		if (st->bytes[0] != 0) /* first flow from state */
 			ret = copy_flow6_to_m(&flow6_1, sc);

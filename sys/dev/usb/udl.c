@@ -1,4 +1,4 @@
-/*	$OpenBSD: udl.c,v 1.71 2012/09/18 17:24:51 jasper Exp $ */
+/*	$OpenBSD: udl.c,v 1.76 2013/05/30 16:15:02 deraadt Exp $ */
 
 /*
  * Copyright (c) 2009 Marcus Glocker <mglocker@openbsd.org>
@@ -32,8 +32,9 @@
 #include <sys/device.h>
 #include <sys/kernel.h>
 #include <sys/malloc.h>
-#include <sys/proc.h>
-#include <uvm/uvm.h>
+#include <sys/systm.h>
+
+#include <uvm/uvm_extern.h>
 
 #include <machine/bus.h>
 
@@ -135,8 +136,7 @@ void		udl_cmd_write_reg_1(struct udl_softc *, uint8_t, uint8_t);
 void		udl_cmd_write_reg_3(struct udl_softc *, uint8_t, uint32_t);
 usbd_status	udl_cmd_send(struct udl_softc *);
 usbd_status	udl_cmd_send_async(struct udl_softc *);
-void		udl_cmd_send_async_cb(usbd_xfer_handle, usbd_private_handle,
-		    usbd_status);
+void		udl_cmd_send_async_cb(struct usbd_xfer *, void *, usbd_status);
 
 usbd_status	udl_init_chip(struct udl_softc *);
 void		udl_init_fb_offsets(struct udl_softc *, uint32_t, uint32_t,
@@ -486,14 +486,16 @@ int
 udl_activate(struct device *self, int act)
 {
 	struct udl_softc *sc = (struct udl_softc *)self;
+	int ret = 0;
 
 	switch (act) {
 	case DVACT_DEACTIVATE:
 		usbd_deactivate(sc->sc_udev);
 		break;
 	}
+	ret = config_activate_children(self, act);
 
-	return (0);
+	return (ret);
 }
 
 /* ---------- */
@@ -1780,9 +1782,9 @@ udl_cmd_send(struct udl_softc *sc)
 	bcopy(cb->buf, cx->buf, cb->off);
 
 	len = cb->off;
-	error = usbd_bulk_transfer(cx->xfer, sc->sc_tx_pipeh,
-	    USBD_NO_COPY | USBD_SHORT_XFER_OK, 1000, cx->buf, &len,
-	    "udl_bulk_xmit");
+	usbd_setup_xfer(cx->xfer, sc->sc_tx_pipeh, 0, cx->buf, len,
+	    USBD_NO_COPY | USBD_SHORT_XFER_OK | USBD_SYNCHRONOUS, 1000, NULL);
+	error = usbd_transfer(cx->xfer);
 	if (error != USBD_NORMAL_COMPLETION) {
 		printf("%s: %s: %s!\n", DN(sc), FUNC, usbd_errstr(error));
 		/* we clear our buffer now to avoid growing out of bounds */
@@ -1853,8 +1855,7 @@ udl_cmd_send_async(struct udl_softc *sc)
 }
 
 void
-udl_cmd_send_async_cb(usbd_xfer_handle xfer, usbd_private_handle priv,
-    usbd_status status)
+udl_cmd_send_async_cb(struct usbd_xfer *xfer, void *priv, usbd_status status)
 {
 	struct udl_cmd_xfer *cx = priv;
 	struct udl_softc *sc = cx->sc;

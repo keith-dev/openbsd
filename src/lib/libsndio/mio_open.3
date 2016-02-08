@@ -1,4 +1,4 @@
-.\" $OpenBSD: mio_open.3,v 1.10 2012/09/15 08:58:08 stsp Exp $
+.\" $OpenBSD: mio_open.3,v 1.13 2013/07/04 21:49:10 ratchov Exp $
 .\"
 .\" Copyright (c) 2007 Alexandre Ratchov <alex@caoua.org>
 .\"
@@ -14,7 +14,7 @@
 .\" ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 .\" OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 .\"
-.Dd $Mdocdate: September 15 2012 $
+.Dd $Mdocdate: July 4 2013 $
 .Dt MIO_OPEN 3
 .Os
 .Sh NAME
@@ -28,7 +28,7 @@
 .Nm mio_eof
 .Nd interface to MIDI streams
 .Sh SYNOPSIS
-.Fd #include <sndio.h>
+.In sndio.h
 .Ft "struct mio_hdl *"
 .Fn "mio_open" "const char *name" "unsigned int mode" "int nbio_flag"
 .Ft "void"
@@ -60,13 +60,6 @@ function to obtain a handle representing the newly created stream;
 later it will be passed as the
 .Ar hdl
 argument of most other functions.
-The
-.Fn mio_open
-function tries to connect to the
-.Xr sndiod 1
-MIDI thru box or to use the
-.Xr midi 4
-hardware port.
 The
 .Ar name
 parameter gives the device string discussed in
@@ -248,16 +241,6 @@ value if there's an error.
 .It Ev SNDIO_DEBUG
 The debug level:
 may be a value between 0 and 2.
-.El
-.Sh FILES
-.Bl -tag -width "/tmp/aucat-<uid>/aucat0" -compact
-.It Pa /tmp/aucat-<uid>/aucat0
-Default path to
-.Xr sndiod 1
-socket to connect to.
-.It Pa /dev/rmidiX
-.Xr midi 4
-devices.
 .El
 .Sh SEE ALSO
 .Xr sndiod 1 ,

@@ -1,4 +1,4 @@
-/*	$OpenBSD: res_query.c,v 1.1 2012/09/08 11:08:21 eric Exp $	*/
+/*	$OpenBSD: res_query.c,v 1.5 2013/07/12 14:36:22 eric Exp $	*/
 /*
  * Copyright (c) 2012 Eric Faurot <eric@openbsd.org>
  *
@@ -29,6 +29,9 @@ res_query(const char *name, int class, int type, u_char *ans, int anslen)
 {
 	struct async	*as;
 	struct async_res ar;
+	size_t		 len;
+
+	res_init();
 
 	if (ans == NULL || anslen <= 0) {
 		h_errno = NO_RECOVERY;
@@ -36,7 +39,7 @@ res_query(const char *name, int class, int type, u_char *ans, int anslen)
 		return (-1);
 	}
 
-	as = res_query_async(name, class, type, ans, anslen, NULL);
+	as = res_query_async(name, class, type, NULL);
 	if (as == NULL) {
 		if (errno == EINVAL)
 			h_errno = NO_RECOVERY;
@@ -45,7 +48,7 @@ res_query(const char *name, int class, int type, u_char *ans, int anslen)
 		return (-1); /* errno set */
 	}
 
-	async_run_sync(as, &ar);
+	asr_async_run_sync(as, &ar);
 
 	if (ar.ar_errno)
 		errno = ar.ar_errno;
@@ -53,6 +56,12 @@ res_query(const char *name, int class, int type, u_char *ans, int anslen)
 
 	if (ar.ar_h_errno != NETDB_SUCCESS)
 		return (-1);
+
+	len = anslen;
+	if (ar.ar_datalen < len)
+		len = ar.ar_datalen;
+	memmove(ans, ar.ar_data, len);
+	free(ar.ar_data);
 
 	return (ar.ar_datalen);
 }
@@ -62,6 +71,9 @@ res_search(const char *name, int class, int type, u_char *ans, int anslen)
 {
 	struct async	*as;
 	struct async_res ar;
+	size_t		 len;
+
+	res_init();
 
 	if (ans == NULL || anslen <= 0) {
 		h_errno = NO_RECOVERY;
@@ -69,7 +81,7 @@ res_search(const char *name, int class, int type, u_char *ans, int anslen)
 		return (-1);
 	}
 
-	as = res_search_async(name, class, type, ans, anslen, NULL);
+	as = res_search_async(name, class, type, NULL);
 	if (as == NULL) {
 		if (errno == EINVAL)
 			h_errno = NO_RECOVERY;
@@ -78,7 +90,7 @@ res_search(const char *name, int class, int type, u_char *ans, int anslen)
 		return (-1); /* errno set */
 	}
 
-	async_run_sync(as, &ar);
+	asr_async_run_sync(as, &ar);
 
 	if (ar.ar_errno)
 		errno = ar.ar_errno;
@@ -86,6 +98,12 @@ res_search(const char *name, int class, int type, u_char *ans, int anslen)
 
 	if (ar.ar_h_errno != NETDB_SUCCESS)
 		return (-1);
+
+	len = anslen;
+	if (ar.ar_datalen < len)
+		len = ar.ar_datalen;
+	memmove(ans, ar.ar_data, len);
+	free(ar.ar_data);
 
 	return (ar.ar_datalen);
 }

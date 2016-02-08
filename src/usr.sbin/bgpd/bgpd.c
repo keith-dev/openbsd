@@ -1,4 +1,4 @@
-/*	$OpenBSD: bgpd.c,v 1.170 2012/11/02 18:02:45 florian Exp $ */
+/*	$OpenBSD: bgpd.c,v 1.172 2013/05/31 23:10:13 claudio Exp $ */
 
 /*
  * Copyright (c) 2003, 2004 Henning Brauer <henning@openbsd.org>
@@ -479,12 +479,9 @@ reconfigure(char *conffile, struct bgpd_config *conf, struct mrt_head *mrt_l,
 		free(rr);
 	}
 
-	/* send peer list and listeners to the SE and RDE */
+	/* send peer list to the SE */
 	for (p = *peer_l; p != NULL; p = p->next) {
 		if (imsg_compose(ibuf_se, IMSG_RECONF_PEER, p->conf.id, 0, -1,
-		    &p->conf, sizeof(struct peer_config)) == -1)
-			return (-1);
-		if (imsg_compose(ibuf_rde, IMSG_RECONF_PEER, p->conf.id, 0, -1,
 		    &p->conf, sizeof(struct peer_config)) == -1)
 			return (-1);
 	}
@@ -544,16 +541,8 @@ reconfigure(char *conffile, struct bgpd_config *conf, struct mrt_head *mrt_l,
 		free(rd);
 	}
 
-	/* signal both childs to replace their config */
-	if (imsg_compose(ibuf_se, IMSG_RECONF_DONE, 0, 0, -1, NULL, 0) == -1 ||
-	    imsg_compose(ibuf_rde, IMSG_RECONF_DONE, 0, 0, -1, NULL, 0) == -1)
-		return (-1);
-
-	/* fix kroute information */
-	ktable_postload();
-
-	/* redistribute list needs to be reloaded too */
-	if (kr_reload() == -1)
+	/* signal the SE first then the RDE to activate the new config */
+	if (imsg_compose(ibuf_se, IMSG_RECONF_DONE, 0, 0, -1, NULL, 0) == -1)
 		return (-1);
 
 	/* mrt changes can be sent out of bound */
@@ -710,6 +699,16 @@ dispatch_imsg(struct imsgbuf *ibuf, int idx)
 		case IMSG_RECONF_DONE:
 			if (reconfpending == 0)
 				log_warnx("unexpected RECONF_DONE received");
+			else if (reconfpending == 2) {
+				imsg_compose(ibuf_rde, IMSG_RECONF_DONE, 0,
+				    0, -1, NULL, 0);
+
+				/* finally fix kroute information */
+				ktable_postload();
+
+				/* redistribute list needs to be reloaded too */
+				kr_reload();
+			}
 			reconfpending--;
 			break;
 		default:

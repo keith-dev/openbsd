@@ -1,4 +1,4 @@
-/*	$OpenBSD: rnd.c,v 1.141 2012/06/24 18:25:12 matthew Exp $	*/
+/*	$OpenBSD: rnd.c,v 1.143 2013/07/09 08:57:24 blambert Exp $	*/
 
 /*
  * Copyright (c) 2011 Theo de Raadt.
@@ -390,7 +390,7 @@ enqueue_randomness(int state, int val)
 	rndstats.rnd_sb[state] += nbits;
 
 	if (rnd_qlen() > QEVSLOW/2 && timeout_initialized(&rnd_timeout) &&
-	    timeout_pending(&rnd_timeout))
+	    !timeout_pending(&rnd_timeout))
 		timeout_add(&rnd_timeout, 1);
 done:
 	mtx_leave(&entropylock);
@@ -405,7 +405,7 @@ done:
  *
  * Rotate the input word by a changing number of bits, to help assure
  * that all bits in the entropy get toggled.  Otherwise, if the pool
- * is consistently feed small numbers (such as keyboard scan codes)
+ * is consistently fed small numbers (such as keyboard scan codes)
  * then the upper bits of the entropy pool will frequently remain
  * untouched.
  */
@@ -484,7 +484,7 @@ void
 extract_entropy(u_int8_t *buf, int nbytes)
 {
 	static u_int32_t extract_pool[POOLWORDS];
-	u_char buffer[16];
+	u_char buffer[MD5_DIGEST_LENGTH];
 	MD5_CTX tmp;
 	u_int i;
 
@@ -681,6 +681,12 @@ random_init(void)
 void
 random_start(void)
 {
+	/*
+	 * On a cold start the message buffer does not contain any
+	 * unique information yet, just the copyright message and the
+	 * kernel version string.  Unique information like MAC adresses
+	 * will be added during autoconf.
+	 */
 	if (msgbufp && msgbufp->msg_magic == MSG_MAGIC)
 		add_entropy_words((u_int32_t *)msgbufp->msg_bufc,
 		    msgbufp->msg_bufs / sizeof(u_int32_t));
@@ -690,6 +696,16 @@ random_start(void)
 	timeout_set(&arc4_timeout, arc4_reinit, NULL);
 	arc4_reinit(NULL);
 	timeout_set(&rnd_timeout, dequeue_randomness, NULL);
+}
+
+void
+random_hostseed(void)
+{
+	if (msgbufp == NULL || msgbufp->msg_magic != MSG_MAGIC)
+		return;
+	add_entropy_words((u_int32_t *)msgbufp->msg_bufc,
+	    msgbufp->msg_bufs / sizeof(u_int32_t));
+	arc4_init(NULL, NULL);
 }
 
 int

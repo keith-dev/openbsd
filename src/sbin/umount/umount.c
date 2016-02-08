@@ -1,4 +1,4 @@
-/*	$OpenBSD: umount.c,v 1.22 2012/05/29 18:44:40 landry Exp $	*/
+/*	$OpenBSD: umount.c,v 1.24 2013/07/21 21:07:10 millert Exp $	*/
 /*	$NetBSD: umount.c,v 1.16 1996/05/11 14:13:55 mycroft Exp $	*/
 
 /*-
@@ -48,6 +48,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <util.h>
 
 typedef enum { MNTON, MNTFROM } mntwhat;
 
@@ -153,7 +154,7 @@ umountfs(char *oname)
 	char *delimp, *hostp, *mntpt;
 	char *name, *newname, rname[MAXPATHLEN], type[MFSNAMELEN];
 
-	if (realpath(oname, rname) == NULL)
+	if (isduid(oname, 0) || realpath(oname, rname) == NULL)
 		mntpt = name = oname;
 	else
 		mntpt = name = rname;
@@ -211,7 +212,7 @@ umountfs(char *oname)
 	}
 
 	if (verbose)
-		(void)printf("%s: unmount from %s\n", name, mntpt);
+		printf("%s: unmount from %s\n", name, mntpt);
 
 	if (unmount(mntpt, fflag) < 0) {
 		warn("%s", mntpt);
@@ -252,24 +253,27 @@ char *
 getmntname(char *name, mntwhat what, char *type)
 {
 	struct statfs *mntbuf;
-	int i, mntsize;
+	int n;
 
-	if ((mntsize = getmntinfo(&mntbuf, MNT_NOWAIT)) == 0) {
+	if ((n = getmntinfo(&mntbuf, MNT_NOWAIT)) == 0) {
 		warn("getmntinfo");
 		return (NULL);
 	}
-	for (i = 0; i < mntsize; i++) {
-		if ((what == MNTON) && !strcmp(mntbuf[i].f_mntfromname, name)) {
+	while (--n >= 0) {
+		if ((what == MNTON) &&
+		    (strncmp(mntbuf[n].f_mntfromname, name, MNAMELEN) == 0 ||
+		     strncmp(mntbuf[n].f_mntfromspec, name, MNAMELEN) == 0)) {
 			if (type)
-				memcpy(type, mntbuf[i].f_fstypename,
-				    sizeof(mntbuf[i].f_fstypename));
-			return (mntbuf[i].f_mntonname);
+				memcpy(type, mntbuf[n].f_fstypename,
+				    sizeof(mntbuf[n].f_fstypename));
+			return (mntbuf[n].f_mntonname);
 		}
-		if ((what == MNTFROM) && !strcmp(mntbuf[i].f_mntonname, name)) {
+		if ((what == MNTFROM) &&
+		    (strncmp(mntbuf[n].f_mntonname, name, MNAMELEN) == 0)) {
 			if (type)
-				memcpy(type, mntbuf[i].f_fstypename,
-				    sizeof(mntbuf[i].f_fstypename));
-			return (mntbuf[i].f_mntfromname);
+				memcpy(type, mntbuf[n].f_fstypename,
+				    sizeof(mntbuf[n].f_fstypename));
+			return (mntbuf[n].f_mntfromname);
 		}
 	}
 	return (NULL);
@@ -367,7 +371,7 @@ xdr_dir(XDR *xdrsp, char *dirp)
 void
 usage(void)
 {
-	(void)fprintf(stderr,
+	fprintf(stderr,
 	    "usage: %s\n       %s\n",
 	    "umount [-fv] special | node",
 	    "umount -a [-fv] [-h host] [-t type]");

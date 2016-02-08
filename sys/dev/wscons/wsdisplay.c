@@ -1,4 +1,4 @@
-/* $OpenBSD: wsdisplay.c,v 1.106 2012/07/13 12:37:08 deraadt Exp $ */
+/* $OpenBSD: wsdisplay.c,v 1.112 2013/07/06 14:35:45 kettenis Exp $ */
 /* $NetBSD: wsdisplay.c,v 1.82 2005/02/27 00:27:52 perry Exp $ */
 
 /*
@@ -156,7 +156,6 @@ int	wsdisplay_getscreen(struct wsdisplay_softc *,
 	    struct wsdisplay_addscreendata *);
 void	wsdisplay_resume_device(struct device *);
 void	wsdisplay_suspend_device(struct device *);
-void	wsdisplay_shutdownhook(void *);
 void	wsdisplay_addscreen_print(struct wsdisplay_softc *, int, int);
 void	wsdisplay_closescreen(struct wsdisplay_softc *, struct wsscreen *);
 int	wsdisplay_delscreen(struct wsdisplay_softc *, int, int);
@@ -216,13 +215,15 @@ int	wsdisplay_emul_match(struct device *, void *, void *);
 void	wsdisplay_emul_attach(struct device *, struct device *, void *);
 int	wsdisplay_emul_detach(struct device *, int);
 
+int	wsdisplay_activate(struct device *, int);
+
 struct cfdriver wsdisplay_cd = {
 	NULL, "wsdisplay", DV_TTY
 };
 
 struct cfattach wsdisplay_emul_ca = {
 	sizeof(struct wsdisplay_softc), wsdisplay_emul_match,
-	    wsdisplay_emul_attach, wsdisplay_emul_detach
+	wsdisplay_emul_attach, wsdisplay_emul_detach, wsdisplay_activate
 };
 
 void	wsdisplaystart(struct tty *);
@@ -585,6 +586,20 @@ wsdisplay_emul_detach(struct device *self, int flags)
 }
 
 int
+wsdisplay_activate(struct device *self, int act)
+{
+	int ret = 0;
+
+	switch (act) {
+	case DVACT_POWERDOWN:
+		wsdisplay_switchtoconsole();
+		break;
+	}
+
+	return (ret);
+}
+
+int
 wsdisplay_common_detach(struct wsdisplay_softc *sc, int flags)
 {
 	int i;
@@ -653,13 +668,26 @@ wsemuldisplaydevprint(void *aux, const char *pnp)
 	return (UNCONF);
 }
 
+/* Submatch function (for parent devices). */
+int
+wsemuldisplaydevsubmatch(struct device *parent, void *match, void *aux)
+{
+	extern struct cfdriver wsdisplay_cd;
+	struct cfdata *cf = match;
+
+	/* only allow wsdisplay to attach */
+	if (cf->cf_driver == &wsdisplay_cd)
+		return ((*cf->cf_attach->ca_match)(parent, match, aux));
+
+	return (0);
+}
+
 void
 wsdisplay_common_attach(struct wsdisplay_softc *sc, int console, int kbdmux,
     const struct wsscreen_list *scrdata,
     const struct wsdisplay_accessops *accessops, void *accesscookie,
     u_int defaultscreens)
 {
-	static int hookset = 0;
 	int i, start = 0;
 #if NWSKBD > 0
 	struct wsevsrc *kme;
@@ -754,10 +782,6 @@ wsdisplay_common_attach(struct wsdisplay_softc *sc, int console, int kbdmux,
 	wsdisplay_burn(sc, sc->sc_burnflags);
 #endif
 
-	if (hookset == 0)
-		shutdownhook_establish(wsdisplay_shutdownhook, NULL);
-	hookset = 1;
-
 #if NWSKBD > 0 && NWSMUX == 0
 	if (console == 0) {
 		/*
@@ -783,7 +807,6 @@ wsdisplay_cnattach(const struct wsscreen_descr *type, void *cookie, int ccol,
 	const struct wsemul_ops *wsemul;
 	const struct wsdisplay_emulops *emulops;
 
-	KASSERT(!wsdisplay_console_initted);
 	KASSERT(type->nrows > 0);
 	KASSERT(type->ncols > 0);
 	KASSERT(crow < type->nrows);
@@ -808,7 +831,8 @@ wsdisplay_cnattach(const struct wsscreen_descr *type, void *cookie, int ccol,
 	wsdisplay_console_conf.wsemulcookie =
 	    (*wsemul->cnattach)(type, cookie, ccol, crow, defattr);
 
-	cn_tab = &wsdisplay_cons;
+	if (!wsdisplay_console_initted)
+		cn_tab = &wsdisplay_cons;
 
 	wsdisplay_console_initted = 1;
 }
@@ -1147,14 +1171,18 @@ wsdisplay_internal_ioctl(struct wsdisplay_softc *sc, struct wsscreen *scr,
 			if (sc->sc_burnman)
 				wsdisplay_burner(sc);
 			/* ...and disable the burner while X is running */
-			if (sc->sc_burnout)
+			if (sc->sc_burnout) {
 				timeout_del(&sc->sc_burner);
+				sc->sc_burnout = 0;
+			}
 #endif
 		} else {
 #ifdef BURNER_SUPPORT
 			/* reenable the burner after exiting from X */
-			if (!sc->sc_burnman)
+			if (!sc->sc_burnman) {
+				sc->sc_burnout = sc->sc_burnoutintvl;
 				wsdisplay_burn(sc, sc->sc_burnflags);
+			}
 #endif
 
 #ifdef WSMOUSED_SUPPORT
@@ -2183,7 +2211,7 @@ wsdisplay_switchtoconsole(void)
 	struct wsdisplay_softc *sc;
 	struct wsscreen *scr;
 
-	if (wsdisplay_console_device != NULL) {
+	if (wsdisplay_console_device != NULL && cn_tab == &wsdisplay_cons) {
 		sc = wsdisplay_console_device;
 		if ((scr = sc->sc_scr[0]) == NULL)
 			return;
@@ -2352,15 +2380,6 @@ wsdisplay_burner(void *v)
 	}
 }
 #endif
-
-/*
- * Switch the console at shutdown.
- */
-void
-wsdisplay_shutdownhook(void *arg)
-{
-	wsdisplay_switchtoconsole();
-}
 
 #ifdef WSMOUSED_SUPPORT
 /*

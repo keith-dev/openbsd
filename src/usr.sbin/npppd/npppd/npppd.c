@@ -1,4 +1,4 @@
-/*	$OpenBSD: npppd.c,v 1.27 2013/02/13 22:10:38 yasuoka Exp $ */
+/*	$OpenBSD: npppd.c,v 1.31 2013/06/03 23:26:57 yasuoka Exp $ */
 
 /*-
  * Copyright (c) 2005-2008,2009 Internet Initiative Japan Inc.
@@ -29,7 +29,7 @@
  * Next pppd(nppd). This file provides a npppd daemon process and operations
  * for npppd instance.
  * @author	Yasuoka Masahiko
- * $Id: npppd.c,v 1.27 2013/02/13 22:10:38 yasuoka Exp $
+ * $Id: npppd.c,v 1.31 2013/06/03 23:26:57 yasuoka Exp $
  */
 #include "version.h"
 #include <sys/types.h>
@@ -111,7 +111,6 @@ static void            npppd_timer(int, short, void *);
 static void            npppd_auth_finalizer_periodic(npppd *);
 static int  rd2slist_walk (struct radish *, void *);
 static int  rd2slist (struct radish_head *, slist *);
-static inline void     seed_random(long *);
 
 #ifndef	NO_ROUTE_FOR_POOLED_ADDRESS
 static struct in_addr loop;	/* initialize at npppd_init() */
@@ -280,12 +279,20 @@ npppd_init(npppd *_this, const char *config_file)
 	/* we assume 4.4 compatible realpath().  See realpath(3) on BSD. */
 	NPPPD_ASSERT(_this->config_file[0] == '/');
 
-	/* initialize random seeds */
-	seed_random(&seed);
-	srandom(seed);
+	_this->boot_id = arc4random();
 
-	_this->boot_id = (uint32_t)random();
-
+#ifdef	USE_NPPPD_L2TP
+	if (l2tpd_init(&_this->l2tpd) != 0)
+		return (-1);
+#endif
+#ifdef	USE_NPPPD_PPTP
+	if (pptpd_init(&_this->pptpd) != 0)
+		return (-1);
+#endif
+#ifdef	USE_NPPPD_PPPOE
+	if (pppoed_init(&_this->pppoed) != 0)
+		return (-1);
+#endif
 	/* load configuration */
 	if ((status = npppd_reload_config(_this)) != 0)
 		return status;
@@ -784,7 +791,7 @@ npppd_check_user_max_session(npppd *_this, npppd_ppp *ppp)
 	slist *uppp;
 
 	/* user_max_session == 0 means unlimit */
-	if (_this->user_max_session == 0)
+	if (_this->conf.user_max_session == 0)
 		return 1;
 
 	count = 0;
@@ -797,7 +804,7 @@ npppd_check_user_max_session(npppd *_this, npppd_ppp *ppp)
 		}
 	}
 
-	return (count < _this->user_max_session)? 1 : 0;
+	return (count < _this->conf.user_max_session)? 1 : 0;
 }
 
 /***********************************************************************
@@ -1193,25 +1200,35 @@ pipex_periodic(npppd *_this)
 {
 	struct pipex_session_list_req  req;
 	npppd_ppp                     *ppp;
-	int                            i, error;
+	int                            i, devf, error;
 	u_int                          ppp_id;
 	slist                          dlist, users;
 
 	slist_init(&dlist);
 	slist_init(&users);
-	do {
-		error = ioctl(_this->iface[0].devf, PIPEXGCLOSED, &req);
-		if (error) {
-			if (errno != ENXIO)
-				log_printf(LOG_WARNING,
-				    "PIPEXGCLOSED failed: %m");
+
+	devf = -1;
+	for (i = 0; i < nitems(_this->iface); i++) {
+		if (_this->iface[i].initialized != 0) {
+			devf = _this->iface[i].devf;
 			break;
 		}
-		for (i = 0; i < req.plr_ppp_id_count; i++) {
-			ppp_id = req.plr_ppp_id[i];
-			slist_add(&dlist, (void *)(uintptr_t)ppp_id);
-		}
-	} while (req.plr_flags & PIPEX_LISTREQ_MORE);
+	}
+	if (devf >= 0) {
+		do {
+			error = ioctl(devf, PIPEXGCLOSED, &req);
+			if (error) {
+				if (errno != ENXIO)
+					log_printf(LOG_WARNING,
+					    "PIPEXGCLOSED failed: %m");
+				break;
+			}
+			for (i = 0; i < req.plr_ppp_id_count; i++) {
+				ppp_id = req.plr_ppp_id[i];
+				slist_add(&dlist, (void *)(uintptr_t)ppp_id);
+			}
+		} while (req.plr_flags & PIPEX_LISTREQ_MORE);
+	}
 
 	if (slist_length(&dlist) <= 0)
 		goto pipex_done;
@@ -2108,10 +2125,11 @@ npppd_ppp_bind_iface(npppd *_this, npppd_ppp *ppp)
 	if (ifidx < 0)
 		return 1;
 
-	if (_this->max_session > 0 && _this->nsession++ >= _this->max_session) {
+	if (_this->conf.max_session > 0 &&
+	    _this->nsession++ >= _this->conf.max_session) {
 		ppp_log(ppp, LOG_WARNING,
 		    "Number of sessions reaches out of the limit=%d",
-		    _this->max_session);
+		    _this->conf.max_session);
 		return 1;
 	}
 	ppp->ifidx = ifidx;
@@ -2246,25 +2264,6 @@ npppd_ppp_get_username_for_auth(npppd *_this, npppd_ppp *ppp,
 
 	return npppd_auth_username_for_auth(ppp->realm, username,
 	    username_buffer);
-}
-
-static inline void
-seed_random(long *seed)
-{
-	struct timeval t;
-#ifdef KERN_URND
-	size_t seedsiz;
-	int mib[] = { CTL_KERN, KERN_URND };
-
-	seedsiz = sizeof(*seed);
-	if (sysctl(mib, countof(mib), seed, &seedsiz, NULL, 0) == 0) {
-		NPPPD_ASSERT(seedsiz == sizeof(long));
-		return;
-	}
-	log_printf(LOG_WARNING, "Could not set random seed from the system: %m");
-#endif
-	gettimeofday(&t, NULL);
-	*seed = gethostid() ^ t.tv_sec ^ t.tv_usec ^ getpid();
 }
 
 const char *

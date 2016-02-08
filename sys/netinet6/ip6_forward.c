@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip6_forward.c,v 1.57 2012/11/06 12:32:42 henning Exp $	*/
+/*	$OpenBSD: ip6_forward.c,v 1.60 2013/07/04 19:10:41 sf Exp $	*/
 /*	$KAME: ip6_forward.c,v 1.75 2001/06/29 12:42:13 jinmei Exp $	*/
 
 /*
@@ -160,7 +160,7 @@ reroute:
 	if (mtag != NULL) {
 #ifdef DIAGNOSTIC
 		if (mtag->m_tag_len != sizeof (struct tdb_ident))
-			panic("ip6_forward: tag of length %d (should be %d",
+			panic("ip6_forward: tag of length %hu (should be %zu",
 			    mtag->m_tag_len, sizeof (struct tdb_ident));
 #endif
 		tdbi = (struct tdb_ident *)(mtag + 1);
@@ -370,6 +370,7 @@ reroute:
 		 * What's the behaviour?
 		 */
 #endif
+		in6_proto_cksum_out(m, encif);
 
 		m->m_flags &= ~(M_BCAST | M_MCAST);	/* just in case */
 
@@ -382,7 +383,7 @@ reroute:
 #endif /* IPSEC */
 
 	if (rt->rt_flags & RTF_GATEWAY)
-		dst = (struct sockaddr_in6 *)rt->rt_gateway;
+		dst = satosin6(rt->rt_gateway);
 
 	/*
 	 * If we are to forward the packet using the same interface
@@ -396,7 +397,7 @@ reroute:
 	if (rt->rt_ifp == m->m_pkthdr.rcvif && !srcrt && ip6_sendredirects &&
 	    (rt->rt_flags & (RTF_DYNAMIC|RTF_MODIFIED)) == 0) {
 		if ((rt->rt_ifp->if_flags & IFF_POINTOPOINT) &&
-		    nd6_is_addr_neighbor((struct sockaddr_in6 *)&ip6_forward_rt.ro_dst, rt->rt_ifp)) {
+		    nd6_is_addr_neighbor(&ip6_forward_rt.ro_dst, rt->rt_ifp)) {
 			/*
 			 * If the incoming interface is equal to the outgoing
 			 * one, the link attached to the interface is
@@ -470,7 +471,6 @@ reroute:
 	}
 	if (m == NULL)
 		goto senderr;
-
 	ip6 = mtod(m, struct ip6_hdr *);
 	if ((m->m_pkthdr.pf.flags & (PF_TAG_REROUTE | PF_TAG_GENERATED)) ==
 	    (PF_TAG_REROUTE | PF_TAG_GENERATED)) {
@@ -483,6 +483,7 @@ reroute:
 		goto reroute;
 	}
 #endif 
+	in6_proto_cksum_out(m, rt->rt_ifp);
 
 	/* Check the size after pf_test to give pf a chance to refragment. */
 	if (m->m_pkthdr.len > IN6_LINKMTU(rt->rt_ifp)) {

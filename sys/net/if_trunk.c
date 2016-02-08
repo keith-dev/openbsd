@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_trunk.c,v 1.79 2013/02/25 22:00:46 dlg Exp $	*/
+/*	$OpenBSD: if_trunk.c,v 1.84 2013/06/20 12:03:40 mpi Exp $	*/
 
 /*
  * Copyright (c) 2005, 2006, 2007 Reyk Floeter <reyk@openbsd.org>
@@ -27,7 +27,7 @@
 #include <sys/socket.h>
 #include <sys/sockio.h>
 #include <sys/systm.h>
-#include <sys/proc.h>
+#include <sys/timeout.h>
 #include <sys/hash.h>
 
 #include <dev/rndvar.h>
@@ -59,8 +59,6 @@
 
 
 SLIST_HEAD(__trhead, trunk_softc) trunk_list;	/* list of trunks */
-
-extern struct ifaddr **ifnet_addrs;
 
 void	 trunkattach(int);
 int	 trunk_clone_create(struct if_clone *, int);
@@ -251,7 +249,7 @@ trunk_lladdr(struct arpcom *ac, u_int8_t *lladdr)
 	struct ifaddr *ifa;
 	struct sockaddr_dl *sdl;
 
-	ifa = ifnet_addrs[ifp->if_index];
+	ifa = ifp->if_lladdr;
 	sdl = (struct sockaddr_dl *)ifa->ifa_addr;
 	sdl->sdl_type = IFT_ETHER;
 	sdl->sdl_alen = ETHER_ADDR_LEN;
@@ -314,6 +312,19 @@ trunk_port_create(struct trunk_softc *tr, struct ifnet *ifp)
 	/* XXX Disallow non-ethernet interfaces (this should be any of 802) */
 	if (ifp->if_type != IFT_ETHER)
 		return (EPROTONOSUPPORT);
+
+	/* Take MTU from the first member port */
+	if (SLIST_EMPTY(&tr->tr_ports)) {
+		if (tr->tr_ifflags & IFF_DEBUG)
+			printf("%s: first port, setting trunk mtu %u\n",
+			    tr->tr_ifname, ifp->if_mtu);
+		tr->tr_ac.ac_if.if_mtu = ifp->if_mtu;
+		tr->tr_ac.ac_if.if_hardmtu = ifp->if_mtu;
+	} else if (tr->tr_ac.ac_if.if_mtu != ifp->if_mtu) {
+		printf("%s: adding %s failed, MTU %u != %u\n", tr->tr_ifname,
+		    ifp->if_xname, ifp->if_mtu, tr->tr_ac.ac_if.if_mtu);
+		return (EINVAL);
+	}
 
 	if ((error = ifpromisc(ifp, 1)) != 0)
 		return (error);
@@ -510,6 +521,10 @@ trunk_port_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		}
 
 		trunk_port2req(tp, rp);
+		break;
+	case SIOCSIFMTU:
+		/* Do not allow the MTU to be changed once joined */
+		error = EINVAL;
 		break;
 	default:
 		error = ENOTTY;

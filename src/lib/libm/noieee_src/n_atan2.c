@@ -1,4 +1,4 @@
-/*	$OpenBSD: n_atan2.c,v 1.16 2013/01/13 03:44:59 martynas Exp $	*/
+/*	$OpenBSD: n_atan2.c,v 1.18 2013/07/15 04:08:26 espie Exp $	*/
 /*	$NetBSD: n_atan2.c,v 1.1 1995/10/10 23:36:37 ragge Exp $	*/
 /*
  * Copyright (c) 1985, 1993
@@ -127,6 +127,12 @@ static const double a10 = -4.4895863157820361210E-2;
 static const double a11 = 3.3006147437343875094E-2;
 static const double a12 = -1.4614844866464185439E-2;
 
+float
+atan2f(float x, float y)
+{
+	return (float)atan2((double)x, (double)y);
+}
+
 double
 atan2(double y, double x)
 {
@@ -238,4 +244,4 @@ begin:
 	return(copysign((signx>zero)?z:PI-z,signy));
 }
 
-__weak_alias(atan2l, atan2);
+__strong_alias(atan2l, atan2);

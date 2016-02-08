@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_icmp.c,v 1.96 2012/09/18 12:35:51 blambert Exp $	*/
+/*	$OpenBSD: ip_icmp.c,v 1.102 2013/06/17 02:31:37 lteo Exp $	*/
 /*	$NetBSD: ip_icmp.c,v 1.19 1996/02/13 23:42:22 christos Exp $	*/
 
 /*
@@ -105,17 +105,21 @@
  * host table maintenance routines.
  */
 
+#ifdef ICMPPRINTFS
+int	icmpprintfs = 0;	/* Settable from ddb */
+#endif
+
+/* values controllable via sysctl */
 int	icmpmaskrepl = 0;
 int	icmpbmcastecho = 0;
 int	icmptstamprepl = 1;
-#ifdef ICMPPRINTFS
-int	icmpprintfs = 0;
-#endif
 int	icmperrppslim = 100;
-int	icmperrpps_count = 0;
-struct timeval icmperrppslim_last;
 int	icmp_rediraccept = 0;
 int	icmp_redirtimeout = 10 * 60;
+
+static int icmperrpps_count = 0;
+static struct timeval icmperrppslim_last;
+
 static struct rttimer_queue *icmp_redirect_timeout_q = NULL;
 struct	icmpstat icmpstat;
 
@@ -124,8 +128,6 @@ int *icmpctl_vars[ICMPCTL_MAXID] = ICMPCTL_VARS;
 void icmp_mtudisc_timeout(struct rtentry *, struct rttimer *);
 int icmp_ratelimit(const struct in_addr *, const int, const int);
 void icmp_redirect_timeout(struct rtentry *, struct rttimer *);
-
-extern	struct protosw inetsw[];
 
 void
 icmp_init(void)
@@ -312,8 +314,6 @@ icmp_input(struct mbuf *m, ...)
 	struct in_ifaddr *ia;
 	void *(*ctlfunc)(int, struct sockaddr *, u_int, void *);
 	int code;
-	extern u_char ip_protox[];
-	extern int ipforwarding;
 	int hlen;
 	va_list ap;
 	struct rtentry *rt;
@@ -347,16 +347,12 @@ icmp_input(struct mbuf *m, ...)
 		return;
 	}
 	ip = mtod(m, struct ip *);
-	m->m_len -= hlen;
-	m->m_data += hlen;
-	icp = mtod(m, struct icmp *);
-	if (in_cksum(m, icmplen)) {
+	if (in4_cksum(m, 0, hlen, icmplen)) {
 		icmpstat.icps_checksum++;
 		goto freeit;
 	}
-	m->m_len += hlen;
-	m->m_data -= hlen;
 
+	icp = (struct icmp *)(mtod(m, caddr_t) + hlen);
 #ifdef ICMPPRINTFS
 	/*
 	 * Message type specific processing.
@@ -367,6 +363,29 @@ icmp_input(struct mbuf *m, ...)
 #endif
 	if (icp->icmp_type > ICMP_MAXTYPE)
 		goto raw;
+#if NPF > 0
+	if (m->m_pkthdr.pf.flags & PF_TAG_DIVERTED) {
+		switch (icp->icmp_type) {
+		/*
+		 * These ICMP types map to other connections.  They must be
+		 * delivered to pr_ctlinput() also for diverted connections.
+		 */
+		case ICMP_UNREACH:
+		case ICMP_TIMXCEED:
+		case ICMP_PARAMPROB:
+		case ICMP_SOURCEQUENCH:
+			break;
+		 /*
+		  * Although pf_icmp_mapping() considers redirects belonging
+		  * to a diverted connection, we must process it here anyway.
+		  */
+		case ICMP_REDIRECT:
+			break;
+		default:
+			goto raw;
+		}
+	}
+#endif /* NPF */
 	icmpstat.icps_inhist[icp->icmp_type]++;
 	code = icp->icmp_code;
 	switch (icp->icmp_type) {
@@ -807,13 +826,9 @@ icmp_send(struct mbuf *m, struct mbuf *opts)
 	struct icmp *icp;
 
 	hlen = ip->ip_hl << 2;
-	m->m_data += hlen;
-	m->m_len -= hlen;
-	icp = mtod(m, struct icmp *);
+	icp = (struct icmp *)(mtod(m, caddr_t) + hlen);
 	icp->icmp_cksum = 0;
-	icp->icmp_cksum = in_cksum(m, ntohs(ip->ip_len) - hlen);
-	m->m_data -= hlen;
-	m->m_len += hlen;
+	icp->icmp_cksum = in4_cksum(m, 0, hlen, ntohs(ip->ip_len) - hlen);
 #ifdef ICMPPRINTFS
 	if (icmpprintfs) {
 		char buf[4 * sizeof("123")];
@@ -1007,7 +1022,6 @@ icmp_mtudisc_timeout(struct rtentry *rt, struct rttimer *r)
 	if ((rt->rt_flags & (RTF_DYNAMIC | RTF_HOST)) ==
 	    (RTF_DYNAMIC | RTF_HOST)) {
 		void *(*ctlfunc)(int, struct sockaddr *, u_int, void *);
-		extern u_char ip_protox[];
 		struct sockaddr_in sa;
 		struct rt_addrinfo info;
 
@@ -1121,13 +1135,8 @@ icmp_do_exthdr(struct mbuf *m, u_int16_t class, u_int8_t ctype, void *buf,
 	n = m_getptr(m, hlen + off, &off);
 	if (n == NULL)
 		panic("icmp_do_exthdr: m_getptr failure");
-	/* this is disgusting, in_cksum() is stupid */
-	n->m_data += off;
-	n->m_len -= off;
-	ieh = mtod(n, struct icmp_ext_hdr *);
-	ieh->ieh_cksum = in_cksum(n, sizeof(hdr) + len);
-	n->m_data -= off;
-	n->m_len += off;
+	ieh = (struct icmp_ext_hdr *)(mtod(n, caddr_t) + off);
+	ieh->ieh_cksum = in4_cksum(n, 0, off, sizeof(hdr) + len);
 
 	ip->ip_len = htons(m->m_pkthdr.len);
 

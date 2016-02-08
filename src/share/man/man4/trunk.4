@@ -1,4 +1,4 @@
-.\"	$OpenBSD: trunk.4,v 1.26 2009/10/22 09:22:46 sobrado Exp $
+.\"	$OpenBSD: trunk.4,v 1.28 2013/07/16 16:05:49 schwarze Exp $
 .\"
 .\" Copyright (c) 2005, 2006 Reyk Floeter <reyk@openbsd.org>
 .\"
@@ -14,7 +14,7 @@
 .\" ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 .\" OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 .\"
-.Dd $Mdocdate: October 22 2009 $
+.Dd $Mdocdate: July 16 2013 $
 .Dt TRUNK 4
 .Os
 .Sh NAME
@@ -131,7 +131,7 @@ device first appeared in
 The
 .Nm
 driver was written by
-.An Reyk Floeter Aq reyk@openbsd.org .
+.An Reyk Floeter Aq Mt reyk@openbsd.org .
 .Sh CAVEATS
 The trunk protocols
 .Ic loadbalance
@@ -148,3 +148,10 @@ There is no way to configure LACP administrative variables, including
 system and port priorities.
 The current implementation always performs active-mode LACP and uses
 0x8000 as system and port priorities.
+.Pp
+The
+.Nm
+interface takes its MTU from the first
+.Ic trunkport .
+To avoid mismatches, adding a child interface with a different
+MTU is not permitted.

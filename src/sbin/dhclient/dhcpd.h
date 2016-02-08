@@ -1,4 +1,4 @@
-/*	$OpenBSD: dhcpd.h,v 1.111 2013/02/18 15:57:08 krw Exp $	*/
+/*	$OpenBSD: dhcpd.h,v 1.121 2013/06/09 22:39:51 krw Exp $	*/
 
 /*
  * Copyright (c) 2004 Henning Brauer <henning@openbsd.org>
@@ -73,6 +73,9 @@
 #define	LOCAL_PORT	68
 #define	REMOTE_PORT	67
 #define	INTERNALSIG	INT_MAX
+#define DB_TIMEFMT	"%w %Y/%m/%d %T UTC"
+#define BAD_DB_TIMEFMT	"%u %Y/%m/%d %T"
+#define OLD_DB_TIMEFMT	"%w %Y/%m/%d %T"
 
 struct option {
 	char *name;
@@ -96,7 +99,7 @@ struct hardware {
 };
 
 struct client_lease {
-	struct client_lease	*next;
+	TAILQ_ENTRY(client_lease) next;
 	time_t			 expiry, renewal, rebind;
 	struct in_addr		 address;
 	char			*server_name;
@@ -150,10 +153,12 @@ struct client_config {
 struct client_state {
 	struct client_lease	*active;
 	struct client_lease	*new;
-	struct client_lease	*offered_leases;
-	struct client_lease	*leases;
+	TAILQ_HEAD(, client_lease) offered_leases;
+	TAILQ_HEAD(, client_lease) leases;
 	enum dhcp_state		 state;
 	struct in_addr		 destination;
+	int			 flags;
+#define IS_RESPONSIBLE	0x1
 	u_int32_t		 xid;
 	u_int16_t		 secs;
 	time_t			 first_sending;
@@ -195,7 +200,7 @@ struct dhcp_timeout {
 #define	_PATH_DHCLIENT_DB	"/var/db/dhclient.leases"
 #define	DHCPD_LOG_FACILITY	LOG_DAEMON
 
-/* External definitions... */
+/* External definitions. */
 
 extern struct interface_info *ifi;
 extern struct client_state *client;
@@ -209,7 +214,7 @@ extern volatile sig_atomic_t quit;
 /* options.c */
 int cons_options(struct option_data *);
 char *pretty_print_option(unsigned int, struct option_data *, int);
-void do_packet(int, unsigned int, struct in_addr, struct hardware *);
+void do_packet(unsigned int, struct in_addr, struct hardware *);
 
 /* errwarn.c */
 extern int warnings_occurred;
@@ -336,6 +341,6 @@ void delete_address(char *, int, struct in_addr);
 
 void add_address(char *, int, struct in_addr, struct in_addr);
 
-void flush_routes_and_arp_cache(char *, int);
+void flush_routes(char *, int);
 
-void add_default_route(int, struct in_addr, struct in_addr);
+void add_route(int, struct in_addr, struct in_addr, struct in_addr, int, int);

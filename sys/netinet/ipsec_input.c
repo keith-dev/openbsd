@@ -1,4 +1,4 @@
-/*	$OpenBSD: ipsec_input.c,v 1.108 2012/09/26 14:53:23 markus Exp $	*/
+/*	$OpenBSD: ipsec_input.c,v 1.115 2013/06/01 16:29:00 bluhm Exp $	*/
 /*
  * The authors of this code are John Ioannidis (ji@tla.org),
  * Angelos D. Keromytis (kermit@csd.uch.gr) and
@@ -42,9 +42,9 @@
 #include <sys/protosw.h>
 #include <sys/mbuf.h>
 #include <sys/socket.h>
-#include <sys/proc.h>
 #include <sys/sysctl.h>
 #include <sys/kernel.h>
+#include <sys/timeout.h>
 
 #include <net/if.h>
 #include <net/netisr.h>
@@ -83,6 +83,17 @@
 #include "bpfilter.h"
 
 void *ipsec_common_ctlinput(u_int, int, struct sockaddr *, void *, int);
+#ifdef INET
+int ah4_input_cb(struct mbuf *, ...);
+int esp4_input_cb(struct mbuf *, ...);
+int ipcomp4_input_cb(struct mbuf *, ...);
+#endif
+
+#ifdef INET6
+int ah6_input_cb(struct mbuf *, int, int);
+int esp6_input_cb(struct mbuf *, int, int);
+int ipcomp6_input_cb(struct mbuf *, int, int);
+#endif
 
 #ifdef ENCDEBUG
 #define DPRINTF(x)	if (encdebug) printf x
@@ -98,11 +109,6 @@ int ipcomp_enable = 0;
 int *espctl_vars[ESPCTL_MAXID] = ESPCTL_VARS;
 int *ahctl_vars[AHCTL_MAXID] = AHCTL_VARS;
 int *ipcompctl_vars[IPCOMPCTL_MAXID] = IPCOMPCTL_VARS;
-
-#ifdef INET6
-extern struct ip6protosw inet6sw[];
-extern u_char ip6_protox[];
-#endif
 
 /*
  * ipsec_common_input() gets called when we receive an IPsec-protected packet
@@ -137,6 +143,9 @@ ipsec_common_input(struct mbuf *m, int skip, int protoff, int af, int sproto,
 
 	if ((sproto == IPPROTO_ESP && !esp_enable) ||
 	    (sproto == IPPROTO_AH && !ah_enable) ||
+#if NPF > 0
+	    (m->m_pkthdr.pf.flags & PF_TAG_DIVERTED) ||
+#endif
 	    (sproto == IPPROTO_IPCOMP && !ipcomp_enable)) {
 		switch (af) {
 #ifdef INET
@@ -949,7 +958,6 @@ void *
 ipsec_common_ctlinput(u_int rdomain, int cmd, struct sockaddr *sa,
     void *v, int proto)
 {
-	extern u_int ip_mtudisc_timeout;
 	struct ip *ip = v;
 	int s;
 
@@ -988,7 +996,7 @@ ipsec_common_ctlinput(u_int rdomain, int cmd, struct sockaddr *sa,
 			return (NULL);
 		}
 
-		/* Walk the chain backswards to the first tdb */
+		/* Walk the chain backwards to the first tdb */
 		for (; tdbp; tdbp = tdbp->tdb_inext) {
 			if (tdbp->tdb_flags & TDBF_INVALID ||
 			    (adjust = ipsec_hdrsz(tdbp)) == -1) {

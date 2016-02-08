@@ -1,4 +1,4 @@
-/*	$OpenBSD: getnetnamadr_async.c,v 1.7 2012/11/24 18:58:49 eric Exp $	*/
+/*	$OpenBSD: getnetnamadr_async.c,v 1.10 2013/07/12 14:36:22 eric Exp $	*/
 /*
  * Copyright (c) 2012 Eric Faurot <eric@openbsd.org>
  *
@@ -39,8 +39,6 @@ struct netent_ext {
 	char		*pos;
 };
 
-ssize_t addr_as_fqdn(const char *, int, char *, size_t);
-
 static int getnetnamadr_async_run(struct async *, struct async_res *);
 static struct netent_ext *netent_alloc(int);
 static int netent_set_cname(struct netent_ext *, const char *, int);
@@ -61,7 +59,7 @@ getnetbyname_async(const char *name, struct asr *asr)
 	}
 
 	ac = asr_use_resolver(asr);
-	if ((as = async_new(ac, ASR_GETNETBYNAME)) == NULL)
+	if ((as = asr_async_new(ac, ASR_GETNETBYNAME)) == NULL)
 		goto abort; /* errno set */
 	as->as_run = getnetnamadr_async_run;
 
@@ -75,7 +73,7 @@ getnetbyname_async(const char *name, struct asr *asr)
 
     abort:
 	if (as)
-		async_free(as);
+		asr_async_free(as);
 	asr_ctx_unref(ac);
 	return (NULL);
 }
@@ -87,7 +85,7 @@ getnetbyaddr_async(in_addr_t net, int family, struct asr *asr)
 	struct async	*as;
 
 	ac = asr_use_resolver(asr);
-	if ((as = async_new(ac, ASR_GETNETBYADDR)) == NULL)
+	if ((as = asr_async_new(ac, ASR_GETNETBYADDR)) == NULL)
 		goto abort; /* errno set */
 	as->as_run = getnetnamadr_async_run;
 
@@ -99,7 +97,7 @@ getnetbyaddr_async(in_addr_t net, int family, struct asr *asr)
 
     abort:
 	if (as)
-		async_free(as);
+		asr_async_free(as);
 	asr_ctx_unref(ac);
 	return (NULL);
 }
@@ -148,17 +146,17 @@ getnetnamadr_async_run(struct async *as, struct async_res *ar)
 				type = T_PTR;
 				name = as->as.netnamadr.name;
 				as->as.netnamadr.subq = res_search_async_ctx(
-				    name, C_IN, type, NULL, 0, as->as_ctx);
+				    name, C_IN, type, as->as_ctx);
 			} else {
 				type = T_PTR;
 				name = dname;
 
 				in = htonl(as->as.netnamadr.addr);
-				addr_as_fqdn((char*)&in,
+				asr_addr_as_fqdn((char *)&in,
 				    as->as.netnamadr.family,
 				    dname, sizeof(dname));
 				as->as.netnamadr.subq = res_query_async_ctx(
-				    name, C_IN, type, NULL, 0, as->as_ctx);
+				    name, C_IN, type, as->as_ctx);
 			}
 
 			if (as->as.netnamadr.subq == NULL) {
@@ -177,7 +175,7 @@ getnetnamadr_async_run(struct async *as, struct async_res *ar)
 			if (as->as_type == ASR_GETNETBYNAME)
 				data = as->as.netnamadr.name;
 			else
-				data = (void*)&as->as.netnamadr.addr;
+				data = (void *)&as->as.netnamadr.addr;
 
 			n = netent_file_match(f, as->as_type, data);
 			saved_errno = errno;
@@ -202,7 +200,7 @@ getnetnamadr_async_run(struct async *as, struct async_res *ar)
 
 	case ASR_STATE_SUBQUERY:
 
-		if ((r = async_run(as->as.netnamadr.subq, ar)) == ASYNC_COND)
+		if ((r = asr_async_run(as->as.netnamadr.subq, ar)) == ASYNC_COND)
 			return (ASYNC_COND);
 		as->as.netnamadr.subq = NULL;
 
@@ -329,12 +327,12 @@ netent_from_packet(int reqtype, char *pkt, size_t pktlen)
 	if ((n = netent_alloc(AF_INET)) == NULL)
 		return (NULL);
 
-	unpack_init(&p, pkt, pktlen);
-	unpack_header(&p, &hdr);
+	asr_unpack_init(&p, pkt, pktlen);
+	asr_unpack_header(&p, &hdr);
 	for (; hdr.qdcount; hdr.qdcount--)
-		unpack_query(&p, &q);
+		asr_unpack_query(&p, &q);
 	for (; hdr.ancount; hdr.ancount--) {
-		unpack_rr(&p, &rr);
+		asr_unpack_rr(&p, &rr);
 		if (rr.rr_class != C_IN)
 			continue;
 		switch (rr.rr_type) {
@@ -384,7 +382,7 @@ netent_alloc(int family)
 
 	n->n.n_addrtype = family;
 	n->n.n_aliases = n->aliases;
-	n->pos = (char*)(n) + sizeof(*n);
+	n->pos = (char *)(n) + sizeof(*n);
 	n->end = n->pos + 1024;
 
 	return (n);
