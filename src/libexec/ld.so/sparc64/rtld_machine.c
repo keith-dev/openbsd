@@ -1,4 +1,4 @@
-/*	$OpenBSD: rtld_machine.c,v 1.8 2001/09/27 06:58:33 art Exp $ */
+/*	$OpenBSD: rtld_machine.c,v 1.11 2002/03/15 14:52:39 drahn Exp $ */
 
 /*
  * Copyright (c) 1999 Dale Rahn
@@ -289,6 +289,7 @@ resolve_failed:
 					fails++;
 					continue;
 				}
+				value += (Elf_Addr)(ooff + this->st_value);
 #ifdef notyet
 /*
  * XXX Hmm, we should change the API of _dl_find_symbol and do this in there,
@@ -304,7 +305,6 @@ resolve_failed:
 				}
 #endif
 			}
-			value += (Elf_Addr)(ooff + this->st_value);
 		}
 
 		if (type == R_TYPE(JMP_SLOT)) {
@@ -316,7 +316,6 @@ resolve_failed:
 			void *dstaddr = where;
 			const void *srcaddr;
 			const Elf_Sym *dstsym = sym, *srcsym = NULL;
-			const char *name = symn;
 			size_t size = dstsym->st_size;
 			Elf_Addr soff;
 
@@ -599,8 +598,8 @@ _dl_reloc_plt(Elf_Word *where, Elf_Addr value, Elf_RelA *rela)
 		where[3] = OR      | LOVAL((value) >> 32);
 		where[2] = SETHIG5 | HIVAL(value, 10);
 		where[1] = SETHI   | HIVAL(value, 42);
+		__asm __volatile("iflush %0+24" : : "r" (where));
 		__asm __volatile("iflush %0+20" : : "r" (where));
-		__asm __volatile("iflush %0+16" : : "r" (where));
 		__asm __volatile("iflush %0+16" : : "r" (where));
 		__asm __volatile("iflush %0+12" : : "r" (where));
 		__asm __volatile("iflush %0+8" : : "r" (where));
@@ -613,7 +612,7 @@ _dl_reloc_plt(Elf_Word *where, Elf_Addr value, Elf_RelA *rela)
  * Resolve a symbol at run-time.
  */
 void *
-_dl_bind(elf_object_t *object, Elf_Word reloff)
+_dl_bind(elf_object_t *object, int index)
 {
 	Elf_RelA *rela;
 	Elf_Word *addr;
@@ -621,7 +620,30 @@ _dl_bind(elf_object_t *object, Elf_Word reloff)
 	const Elf_Sym *sym, *this;
 	const char *symn;
 
-	rela = (Elf_RelA *)(object->Dyn.info[DT_JMPREL] + reloff);
+	rela = (Elf_RelA *)(object->Dyn.info[DT_JMPREL]);
+	if (ELF_R_TYPE(rela->r_info) == R_TYPE(JMP_SLOT)) {
+		/*
+		 * XXXX
+		 *
+		 * The first four PLT entries are reserved.  There
+		 * is some disagreement whether they should have
+		 * associated relocation entries.  Both the SPARC
+		 * 32-bit and 64-bit ELF specifications say that
+		 * they should have relocation entries, but the
+		 * 32-bit SPARC binutils do not generate them,
+		 * and now the 64-bit SPARC binutils have stopped
+		 * generating them too.
+		 *
+		 * So, to provide binary compatibility, we will
+		 * check the first entry, if it is reserved it
+		 * should not be of the type JMP_SLOT.  If it
+		 * is JMP_SLOT, then the 4 reserved entries were
+		 * not generated and our index is 4 entries too far.
+		 */
+		index -= 4;
+	}
+
+	rela += index;
 
 	sym = object->dyn.symtab;
 	sym += ELF64_R_SYM(rela->r_info);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: mpool.c,v 1.6 1999/02/15 05:11:25 millert Exp $	*/
+/*	$OpenBSD: mpool.c,v 1.10 2002/02/25 23:45:15 millert Exp $	*/
 
 /*-
  * Copyright (c) 1990, 1993, 1994
@@ -37,7 +37,7 @@
 #if 0
 static char sccsid[] = "@(#)mpool.c	8.7 (Berkeley) 11/2/95";
 #else
-static char rcsid[] = "$OpenBSD: mpool.c,v 1.6 1999/02/15 05:11:25 millert Exp $";
+static char rcsid[] = "$OpenBSD: mpool.c,v 1.10 2002/02/25 23:45:15 millert Exp $";
 #endif
 #endif /* LIBC_SCCS and not lint */
 
@@ -56,9 +56,9 @@ static char rcsid[] = "$OpenBSD: mpool.c,v 1.6 1999/02/15 05:11:25 millert Exp $
 #define	__MPOOLINTERFACE_PRIVATE
 #include <mpool.h>
 
-static BKT *mpool_bkt __P((MPOOL *));
-static BKT *mpool_look __P((MPOOL *, pgno_t));
-static int  mpool_write __P((MPOOL *, BKT *));
+static BKT *mpool_bkt(MPOOL *);
+static BKT *mpool_look(MPOOL *, pgno_t);
+static int  mpool_write(MPOOL *, BKT *);
 
 /*
  * mpool_open --
@@ -108,8 +108,8 @@ mpool_open(key, fd, pagesize, maxcache)
 void
 mpool_filter(mp, pgin, pgout, pgcookie)
 	MPOOL *mp;
-	void (*pgin) __P((void *, pgno_t, void *));
-	void (*pgout) __P((void *, pgno_t, void *));
+	void (*pgin)(void *, pgno_t, void *);
+	void (*pgout)(void *, pgno_t, void *);
 	void *pgcookie;
 {
 	mp->pgin = pgin;
@@ -238,20 +238,21 @@ mpool_get(mp, pgno, flags)
 	++mp->pageread;
 #endif
 	off = mp->pagesize * pgno;
-	if (lseek(mp->fd, off, SEEK_SET) != off)
-		return (NULL);
-
-	if ((nr = read(mp->fd, bp->page, mp->pagesize)) != mp->pagesize) {
-		if (nr > 0) {
-			/* A partial read is definitely bad. */
-			errno = EINVAL;
+	if ((nr = pread(mp->fd, bp->page, mp->pagesize, off)) != mp->pagesize) {
+		switch (nr) {
+		case -1:
+			/* errno is set for us by pread(). */
 			return (NULL);
-		} else {
+		case 0:
 			/*
-			 * A zero-length reads, means you need to create a
+			 * A zero-length read means you need to create a
 			 * new page.
 			 */
 			memset(bp->page, 0, mp->pagesize);
+		default:
+			/* A partial read is definitely bad. */
+			errno = EINVAL;
+			return (NULL);
 		}
 	}
 
@@ -426,10 +427,17 @@ mpool_write(mp, bp)
 		(mp->pgout)(mp->pgcookie, bp->pgno, bp->page);
 
 	off = mp->pagesize * bp->pgno;
-	if (lseek(mp->fd, off, SEEK_SET) != off)
+	if (pwrite(mp->fd, bp->page, mp->pagesize, off) != mp->pagesize)
 		return (RET_ERROR);
-	if (write(mp->fd, bp->page, mp->pagesize) != mp->pagesize)
-		return (RET_ERROR);
+
+	/*
+	 * Re-run through the input filter since this page may soon be
+	 * accessed via the cache, and whatever the user's output filter
+	 * did may screw things up if we don't let the input filter
+	 * restore the in-core copy.
+	 */
+	if (mp->pgin)
+		(mp->pgin)(mp->pgcookie, bp->pgno, bp->page);
 
 	bp->flags &= ~MPOOL_DIRTY;
 	return (RET_SUCCESS);
@@ -450,7 +458,7 @@ mpool_look(mp, pgno)
 	head = &mp->hqh[HASHKEY(pgno)];
 	for (bp = head->cqh_first; bp != (void *)head; bp = bp->hq.cqe_next)
 		if ((bp->pgno == pgno) &&
-			(bp->flags & MPOOL_INUSE == MPOOL_INUSE)) {
+			((bp->flags & MPOOL_INUSE) == MPOOL_INUSE)) {
 #ifdef STATISTICS
 			++mp->cachehit;
 #endif

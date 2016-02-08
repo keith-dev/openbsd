@@ -1,4 +1,4 @@
-/*	$OpenBSD: dlfcn.c,v 1.10 2001/09/29 03:18:59 drahn Exp $ */
+/*	$OpenBSD: dlfcn.c,v 1.14 2002/03/17 04:50:57 drahn Exp $ */
 
 /*
  * Copyright (c) 1998 Per Fogelstrom, Opsycon AB
@@ -58,9 +58,9 @@ dlopen(const char *libname, int how)
 	Elf_Dyn	*dynp;
 
 	if (libname == NULL) {
-		return NULL;
+		return _dl_objects;
 	}
-	DL_DEB(("loading: %s\n", libname));
+	DL_DEB(("dlopen: loading: %s\n", libname));
 
 	object = _dl_load_shlib(libname, _dl_objects, OBJTYPE_DLO);
 	if (object == 0) {
@@ -104,14 +104,12 @@ dlopen(const char *libname, int how)
 	_dl_rtld(object);
 	_dl_call_init(object);
 
-#ifdef __mips__
 	if(_dl_debug_map->r_brk) {
 		_dl_debug_map->r_state = RT_ADD;
 		(*((void (*)())_dl_debug_map->r_brk))();
 		_dl_debug_map->r_state = RT_CONSISTENT;
 		(*((void (*)())_dl_debug_map->r_brk))();
 	}
-#endif /* __mips__ */
 
 	return((void *)object);
 }
@@ -124,16 +122,6 @@ dlsym(void *handle, const char *name)
 	void		*retval;
 	const Elf_Sym	*sym = NULL;
 
-	if (handle == NULL) {
-		object = _dl_objects;
-		retval = (void *)_dl_find_symbol(name, object, &sym, 1, 1);
-		if (sym != NULL) {
-			retval += sym->st_value;
-		} else {
-			_dl_errno = DL_NO_SYMBOL;
-		}
-		return retval;
-	}
 	object = (elf_object_t *)handle;
 	dynobj = _dl_objects;
 	while (dynobj && dynobj != object) {
@@ -177,16 +165,17 @@ dlclose(void *handle)
 {
 	int retval;
 
+	if (handle == _dl_objects) {
+		return 0;
+	}
 	retval = _dl_real_close(handle);
 
-#ifdef __mips__
 	if (_dl_debug_map->r_brk) {
 		_dl_debug_map->r_state = RT_DELETE;
 		(*((void (*)())_dl_debug_map->r_brk))();
 		_dl_debug_map->r_state = RT_CONSISTENT;
 		(*((void (*)())_dl_debug_map->r_brk))();
 	}
-#endif /* __mips__ */
 
 	return (retval);
 }
@@ -278,7 +267,7 @@ _dl_show_objects()
 
 	object = _dl_objects;
 
-	_dl_printf("\tStart    End      Type Ref Name\n");
+	_dl_printf("\tStart    Size     Type Ref Name\n");
 
 	while (object) {
 		switch (object->obj_type) {
@@ -299,8 +288,9 @@ _dl_show_objects()
 			break;
 		}
 		_dl_printf("\t%X %X %s  %d  %s\n", object->load_addr,
-				object->load_size, objtypename,
-				object->refcount, object->load_name);
+				object->load_addr + object->load_size,
+				objtypename, object->refcount,
+				object->load_name);
 		object = object->next;
 	}
 }

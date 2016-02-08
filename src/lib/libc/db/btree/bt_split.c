@@ -1,4 +1,4 @@
-/*	$OpenBSD: bt_split.c,v 1.6 1999/02/15 05:11:23 millert Exp $	*/
+/*	$OpenBSD: bt_split.c,v 1.9 2002/02/25 23:45:14 millert Exp $	*/
 
 /*-
  * Copyright (c) 1990, 1993, 1994
@@ -38,9 +38,9 @@
 
 #if defined(LIBC_SCCS) && !defined(lint)
 #if 0
-static char rcsid[] = "$OpenBSD: bt_split.c,v 1.6 1999/02/15 05:11:23 millert Exp $";
-#else
 static char sccsid[] = "@(#)bt_split.c	8.10 (Berkeley) 1/9/95";
+#else
+static char rcsid[] = "$OpenBSD: bt_split.c,v 1.9 2002/02/25 23:45:14 millert Exp $";
 #endif
 #endif /* LIBC_SCCS and not lint */
 
@@ -54,16 +54,13 @@ static char sccsid[] = "@(#)bt_split.c	8.10 (Berkeley) 1/9/95";
 #include <db.h>
 #include "btree.h"
 
-static int	 bt_broot __P((BTREE *, PAGE *, PAGE *, PAGE *));
-static PAGE	*bt_page
-		    __P((BTREE *, PAGE *, PAGE **, PAGE **, indx_t *, size_t));
-static int	 bt_preserve __P((BTREE *, pgno_t));
-static PAGE	*bt_psplit
-		    __P((BTREE *, PAGE *, PAGE *, PAGE *, indx_t *, size_t));
-static PAGE	*bt_root
-		    __P((BTREE *, PAGE *, PAGE **, PAGE **, indx_t *, size_t));
-static int	 bt_rroot __P((BTREE *, PAGE *, PAGE *, PAGE *));
-static recno_t	 rec_total __P((PAGE *));
+static int	 bt_broot(BTREE *, PAGE *, PAGE *, PAGE *);
+static PAGE	*bt_page(BTREE *, PAGE *, PAGE **, PAGE **, indx_t *, size_t);
+static int	 bt_preserve(BTREE *, pgno_t);
+static PAGE	*bt_psplit(BTREE *, PAGE *, PAGE *, PAGE *, indx_t *, size_t);
+static PAGE	*bt_root(BTREE *, PAGE *, PAGE **, PAGE **, indx_t *, size_t);
+static int	 bt_rroot(BTREE *, PAGE *, PAGE *, PAGE *);
+static recno_t	 rec_total(PAGE *);
 
 #ifdef STATISTICS
 u_long	bt_rootsplit, bt_split, bt_sortsplit, bt_pfxsaved;
@@ -731,7 +728,7 @@ bt_psplit(t, h, l, r, pskip, ilen)
 	 * the right page.
 	 */
 	if (skip <= off) {
-		skip = 0;
+		skip = MAX_PAGE_OFFSET;
 		rval = l;
 	} else {
 		rval = r;
@@ -741,7 +738,7 @@ bt_psplit(t, h, l, r, pskip, ilen)
 	for (off = 0; nxt < top; ++off) {
 		if (skip == nxt) {
 			++off;
-			skip = 0;
+			skip = MAX_PAGE_OFFSET;
 		}
 		switch (h->flags & P_TYPE) {
 		case P_BINTERNAL:

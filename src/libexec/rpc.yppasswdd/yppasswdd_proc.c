@@ -1,4 +1,4 @@
-/*	$OpenBSD: yppasswdd_proc.c,v 1.5 1997/08/19 07:00:52 niklas Exp $	*/
+/*	$OpenBSD: yppasswdd_proc.c,v 1.7 2002/02/16 21:27:31 millert Exp $	*/
 
 /*
  * Copyright (c) 1994 Mats O Jansson <moj@stacken.kth.se>
@@ -32,17 +32,18 @@
  */
 
 #ifndef LINT
-static char rcsid[] = "$OpenBSD: yppasswdd_proc.c,v 1.5 1997/08/19 07:00:52 niklas Exp $";
+static char rcsid[] = "$OpenBSD: yppasswdd_proc.c,v 1.7 2002/02/16 21:27:31 millert Exp $";
 #endif
 
 #include <sys/types.h>
 #include <rpc/rpc.h>
 #include <stdio.h>
 #include <string.h>
+#include <syslog.h>
 
 #include "yppasswd.h"
 
-int make_passwd __P((yppasswd *));
+int make_passwd(yppasswd *);
 
 int *
 yppasswdproc_update_1_svc(argp, rqstp, transp)
@@ -59,7 +60,7 @@ yppasswdproc_update_1_svc(argp, rqstp, transp)
 		svcerr_systemerr(transp);
 
 	if (!svc_freeargs(transp, xdr_yppasswd, (caddr_t) argp)) {
-		(void)fprintf(stderr, "unable to free arguments\n");
+		syslog(LOG_ERR, "unable to free arguments");
 		exit(1);
 	}
 	return ((void *)&res);

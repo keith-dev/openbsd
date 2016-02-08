@@ -1,4 +1,4 @@
-.\"	$OpenBSD: rusers.1,v 1.9 2000/11/09 17:52:36 aaron Exp $
+.\"	$OpenBSD: rusers.1,v 1.12 2001/11/07 00:02:58 millert Exp $
 .\"
 .\" Copyright (c) 1983, 1990 The Regents of the University of California.
 .\" All rights reserved.
@@ -42,7 +42,8 @@
 .Sh SYNOPSIS
 .Nm rusers
 .Op Fl al
-.Op Ar host ...
+.Op Fl h | Fl i | Fl u
+.Op Ar hosts ...
 .Sh DESCRIPTION
 The
 .Nm
@@ -54,19 +55,33 @@ the hostname with the names of the users currently logged
 on is printed on each line.
 The
 .Nm
-command will wait for
-one minute to catch late responders.
+command will wait for 30 seconds to catch late responders.
 .Pp
 The options are as follows:
 .Bl -tag -width Ds
 .It Fl a
 Print all machines responding even if no one is currently logged in.
+.It Fl h
+Sort alphabetically by hostname.
+.It Fl i
+Sort by idle time in ascending order.
+Unlike other implementations, when the
+.Fl i
+and
+.Fl l
+flags are mixed the output is sorted by the idle time of each individual user.
+If the
+.Fl l
+flag is not specified, the idle time for a machine is considered to be
+the lowest idle time of a user on that host.
 .It Fl l
 Print a long format listing.
 This includes the user name, host name,
 tty that the user is logged in to, the date and time the user
 logged in, the amount of time since the user typed on the keyboard,
 and the remote host they logged in from (if applicable).
+.It Fl u
+Sort by number of users logged in.
 .El
 .Sh DIAGNOSTICS
 .Bl -tag -width indent
@@ -94,8 +109,5 @@ The host may be down.
 .Sh HISTORY
 The
 .Nm
-command
-appeared in
+command appeared in
 .Tn SunOS .
-.Sh BUGS
-The sorting options are not implemented.

@@ -1,4 +1,4 @@
-/*	$OpenBSD: mountd.c,v 1.38 2001/10/03 18:54:29 hin Exp $	*/
+/*	$OpenBSD: mountd.c,v 1.44 2002/04/04 20:57:17 millert Exp $	*/
 /*	$NetBSD: mountd.c,v 1.31 1996/02/18 11:57:53 fvdl Exp $	*/
 
 /*
@@ -149,50 +149,49 @@ struct fhreturn {
 };
 
 /* Global defs */
-char	*add_expdir __P((struct dirlist **, char *, int));
-void	add_dlist __P((struct dirlist **, struct dirlist *,
-	    struct grouplist *, int));
-void	add_mlist __P((char *, char *));
-int	check_dirpath __P((char *));
-int	check_options __P((struct dirlist *));
-int	chk_host __P((struct dirlist *, in_addr_t, int *, int *));
-void	del_mlist __P((char *, char *));
-struct dirlist *dirp_search __P((struct dirlist *, char *));
-int	do_mount __P((struct exportlist *, struct grouplist *, int,
-	    struct ucred *, char *, int, struct statfs *));
-int	do_opt __P((char **, char **, struct exportlist *, struct grouplist *,
-	    int *, int *, struct ucred *));
-struct	exportlist *ex_search __P((fsid_t *));
-struct	exportlist *get_exp __P((void));
-void	free_dir __P((struct dirlist *));
-void	free_exp __P((struct exportlist *));
-void	free_grp __P((struct grouplist *));
-void	free_host __P((struct hostlist *));
-void	new_exportlist __P((void));
-void	get_exportlist __P((void));
-int	get_host __P((char *, struct grouplist *, struct grouplist *));
-int	get_num __P((char *));
-struct hostlist *get_ht __P((void));
-int	get_line __P((void));
-void	get_mountlist __P((void));
-int	get_net __P((char *, struct netmsk *, int));
-void	getexp_err __P((struct exportlist *, struct grouplist *));
-struct grouplist *get_grp __P((void));
-void	hang_dirp __P((struct dirlist *, struct grouplist *,
-	    struct exportlist *, int));
-void	mntsrv __P((struct svc_req *, SVCXPRT *));
-void	nextfield __P((char **, char **));
-void	out_of_mem __P((void));
-void	parsecred __P((char *, struct ucred *));
-int	put_exlist __P((struct dirlist *, XDR *, struct dirlist *, int *));
-int	scan_tree __P((struct dirlist *, in_addr_t));
-void	send_umntall __P((void));
-int	umntall_each __P((caddr_t, struct sockaddr_in *));
-int	xdr_dir __P((XDR *, char *));
-int	xdr_explist __P((XDR *, caddr_t));
-int	xdr_fhs __P((XDR *, caddr_t));
-int	xdr_mlist __P((XDR *, caddr_t));
-void	mountd_svc_run __P((void));
+char	*add_expdir(struct dirlist **, char *, int);
+void	add_dlist(struct dirlist **, struct dirlist *, struct grouplist *, int);
+void	add_mlist(char *, char *);
+int	check_dirpath(char *);
+int	check_options(struct dirlist *);
+int	chk_host(struct dirlist *, in_addr_t, int *, int *);
+void	del_mlist(char *, char *);
+struct dirlist *dirp_search(struct dirlist *, char *);
+int	do_mount(struct exportlist *, struct grouplist *, int, struct ucred *,
+	    char *, int, struct statfs *);
+int	do_opt(char **, char **, struct exportlist *, struct grouplist *,
+	    int *, int *, struct ucred *);
+struct	exportlist *ex_search(fsid_t *);
+struct	exportlist *get_exp(void);
+void	free_dir(struct dirlist *);
+void	free_exp(struct exportlist *);
+void	free_grp(struct grouplist *);
+void	free_host(struct hostlist *);
+void	new_exportlist(void);
+void	get_exportlist(void);
+int	get_host(char *, struct grouplist *, struct grouplist *);
+int	get_num(char *);
+struct hostlist *get_ht(void);
+int	get_line(void);
+void	get_mountlist(void);
+int	get_net(char *, struct netmsk *, int);
+void	getexp_err(struct exportlist *, struct grouplist *);
+struct grouplist *get_grp(void);
+void	hang_dirp(struct dirlist *, struct grouplist *, struct exportlist *,
+	    int);
+void	mntsrv(struct svc_req *, SVCXPRT *);
+void	nextfield(char **, char **);
+void	out_of_mem(void);
+void	parsecred(char *, struct ucred *);
+int	put_exlist(struct dirlist *, XDR *, struct dirlist *, int *);
+int	scan_tree(struct dirlist *, in_addr_t);
+void	send_umntall(void);
+int	umntall_each(caddr_t, struct sockaddr_in *);
+int	xdr_dir(XDR *, char *);
+int	xdr_explist(XDR *, caddr_t);
+int	xdr_fhs(XDR *, caddr_t);
+int	xdr_mlist(XDR *, caddr_t);
+void	mountd_svc_run(void);
 
 struct exportlist *exphead;
 struct mountlist *mlhead;
@@ -216,8 +215,8 @@ int opt_flags;
 
 int debug = 0;
 
-sig_atomic_t gothup;
-sig_atomic_t gotterm;
+volatile sig_atomic_t gothup;
+volatile sig_atomic_t gotterm;
 
 /*
  * Mountd server for NFS mount protocol as described in:
@@ -250,7 +249,7 @@ main(argc, argv)
 		default:
 			fprintf(stderr, "Usage: mountd [-dn] [export_file]\n");
 			exit(1);
-		};
+		}
 	argc -= optind;
 	argv += optind;
 	grphead = NULL;
@@ -289,8 +288,8 @@ main(argc, argv)
 	fprintf(pidfile, "%d\n", getpid());
 	fclose(pidfile);
 
-	signal(SIGHUP, (void (*) __P((int))) new_exportlist);
-	signal(SIGTERM, (void (*) __P((int))) send_umntall);
+	signal(SIGHUP, (void (*)(int)) new_exportlist);
+	signal(SIGTERM, (void (*)(int)) send_umntall);
 	signal(SIGSYS, SIG_IGN);
 	if ((udptransp = svcudp_create(RPC_ANYSOCK)) == NULL ||
 	    (tcptransp = svctcp_create(RPC_ANYSOCK, 0, 0)) == NULL) {
@@ -394,7 +393,14 @@ mntsrv(rqstp, transp)
 			syslog(LOG_ERR, "Can't send reply");
 		return;
 	case RPCMNT_MOUNT:
+		if (debug)
+			fprintf(stderr,
+			    "Got mount request from %s\n", 
+			    inet_ntoa(transp->xp_raddr.sin_addr));
 		if (sport >= IPPORT_RESERVED && resvport_only) {
+			syslog(LOG_NOTICE, 
+			    "Refused mount RPC from host %s port %d",
+			    inet_ntoa(transp->xp_raddr.sin_addr), sport);
 			svcerr_weakauth(transp);
 			return;
 		}
@@ -402,6 +408,8 @@ mntsrv(rqstp, transp)
 			svcerr_decode(transp);
 			return;
 		}
+		if (debug)
+			fprintf(stderr, "rpcpath: %s\n", rpcpath);
 
 		/*
 		 * Get the real pathname and make sure it is a file or
@@ -465,8 +473,12 @@ mntsrv(rqstp, transp)
 			else
 				add_mlist(inet_ntoa(transp->xp_raddr.sin_addr),
 					dirpath);
-			if (debug)
-				fprintf(stderr, "Mount successful.\n");
+			if (debug) {
+				fprintf(stderr,
+				    "Mount successful for %s by %s.\n",
+				    dirpath,
+				    inet_ntoa(transp->xp_raddr.sin_addr));
+			}
 		} else
 			bad = EACCES;
 
@@ -535,7 +547,7 @@ xdr_fhs(xdrsp, cp)
 	XDR *xdrsp;
 	caddr_t cp;
 {
-	register struct fhreturn *fhrp = (struct fhreturn *)cp;
+	struct fhreturn *fhrp = (struct fhreturn *)cp;
 	long ok = 0, len, auth;
 
 	if (!xdr_long(xdrsp, &ok))
@@ -554,7 +566,7 @@ xdr_fhs(xdrsp, cp)
 		if (!xdr_long(xdrsp, &len))
 			return (0);
 		return (xdr_long(xdrsp, &auth));
-	};
+	}
 	return (0);
 }
 
@@ -1266,7 +1278,7 @@ chk_host(dp, saddr, defsetp, hostsetp)
 				return (1);
 			    }
 			    break;
-			};
+			}
 			hp = hp->ht_next;
 		}
 	}
@@ -1639,7 +1651,7 @@ do_mount(ep, grp, exflags, anoncrp, dirp, dirplen, fsb)
 			if (cp)
 				*cp = savedc;
 			return (1);
-		};
+		}
 
 		/*
 		 * XXX:

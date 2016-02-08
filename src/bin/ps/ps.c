@@ -1,4 +1,4 @@
-/*	$OpenBSD: ps.c,v 1.23 2001/09/27 12:53:47 mpech Exp $	*/
+/*	$OpenBSD: ps.c,v 1.27 2002/04/06 23:55:40 millert Exp $	*/
 /*	$NetBSD: ps.c,v 1.15 1995/05/18 20:33:25 mycroft Exp $	*/
 
 /*-
@@ -44,7 +44,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)ps.c	8.4 (Berkeley) 4/2/94";
 #else
-static char rcsid[] = "$OpenBSD: ps.c,v 1.23 2001/09/27 12:53:47 mpech Exp $";
+static char rcsid[] = "$OpenBSD: ps.c,v 1.27 2002/04/06 23:55:40 millert Exp $";
 #endif
 #endif /* not lint */
 
@@ -89,11 +89,11 @@ int	needcomm, needenv, commandonly;
 
 enum sort { DEFAULT, SORTMEM, SORTCPU } sortby = DEFAULT;
 
-static char	*kludge_oldps_options __P((char *));
-static int	 pscomp __P((const void *, const void *));
-static void	 saveuser __P((KINFO *));
-static void	 scanvars __P((void));
-static void	 usage __P((void));
+static char	*kludge_oldps_options(char *);
+static int	 pscomp(const void *, const void *);
+static void	 saveuser(KINFO *);
+static void	 scanvars(void);
+static void	 usage(void);
 
 char dfmt[] = "pid tt state time command";
 char jfmt[] = "user pid ppid pgid sess jobc state tt time command";
@@ -301,7 +301,7 @@ main(argc, argv)
 
 	/*
 	 * scan requested variables, noting what structures are needed,
-	 * and adjusting header widths as appropiate.
+	 * and adjusting header widths as appropriate.
 	 */
 	scanvars();
 	/*
@@ -420,7 +420,7 @@ saveuser(ki)
 	struct usave *usp;
 
 	usp = &ki->ki_u;
-	if (kvm_read(kd, (u_long)&KI_PROC(ki)->p_addr->u_stats,
+	if (kd != NULL && kvm_read(kd, (u_long)&KI_PROC(ki)->p_addr->u_stats,
 	    &pstats, sizeof(pstats)) == sizeof(pstats)) {
 		/*
 		 * The u-area might be swapped out, and we can't get
@@ -522,7 +522,7 @@ static void
 usage()
 {
 	(void)fprintf(stderr,
-            "usage: %s [-][aChjlmrSTuvwx] [-O|o fmt] [-p pid] [-t tty] [-U user]\n",
+            "usage: %s [-][acCehjklmrSTuvwx] [-O|o fmt] [-p pid] [-t tty] [-U user]\n",
 	     __progname);	
 	(void)fprintf(stderr,
 	    "%-*s[-M core] [-N system] [-W swap]\n", strlen(__progname) + 8, "");

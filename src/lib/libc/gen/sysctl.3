@@ -1,4 +1,4 @@
-.\"	$OpenBSD: sysctl.3,v 1.75 2001/08/25 14:45:32 aaron Exp $
+.\"	$OpenBSD: sysctl.3,v 1.84 2002/04/03 20:33:49 angelos Exp $
 .\"
 .\" Copyright (c) 1993
 .\"	The Regents of the University of California.  All rights reserved.
@@ -133,7 +133,7 @@ listed here, and described in separate sections below.
 .It Dv CTL_MACHDEP No "	sys/sysctl.h	Machine dependent"
 .It Dv CTL_NET No "	sys/socket.h	Networking"
 .It Dv CTL_USER No "	sys/sysctl.h	User-level"
-.It Dv CTL_VM No "	vm/vm_param.h	Virtual memory"
+.It Dv CTL_VM No "	uvm/uvm_param.h	Virtual memory"
 .El
 .Pp
 For example, the following retrieves the maximum number of processes allowed
@@ -266,7 +266,7 @@ The types of data currently available are process information,
 system vnodes, the open file entries, routing table entries,
 virtual memory statistics, load average history, and clock rate
 information.
-.Bl -column "KERNXCHOWNXRESTRICTEDXXX" "struct clockrateXXX" -offset indent
+.Bl -column "KERNXCRYPTODEVALLOWSOFTXXX" "struct clockrateXXX" -offset indent
 .It Sy Second level name	Type	Changeable
 .It Dv KERN_ARGMAX No "	integer	no"
 .It Dv KERN_ARND No "	integer	no"
@@ -304,6 +304,7 @@ information.
 .It Dv KERN_SECURELVL No "	integer	raise only"
 .It Dv KERN_SOMINCONN No "	integer	yes"
 .It Dv KERN_SOMAXCONN No "	integer	yes"
+.It Dv KERN_SYSVIPC_INFO No "	node	not applicable"
 .It Dv KERN_SYSVMSG No "	integer	no"
 .It Dv KERN_SYSVSEM No "	integer	no"
 .It Dv KERN_SYSVSHM No "	integer	no"
@@ -312,6 +313,8 @@ information.
 .It Dv KERN_VERSION No "	string	no"
 .It Dv KERN_VNODE No "	struct vnode	no"
 .It Dv KERN_STACKGAPRANDOM No "	integer	yes"
+.It Dv KERN_USERCRYPTO No "	integer	yes"
+.It Dv KERN_CRYPTODEVALLOWSOFT No "	integer	yes"
 .El
 .Pp
 .Bl -tag -width "123456"
@@ -531,6 +534,33 @@ Lower bound on the number of half-open connections a process can allow
 to be associated with a socket, using
 .Xr listen 2 .
 The default value is 80.
+.It Li KERN_SYSVIPC_INFO
+Return System V style IPC configuration and run-time information.
+The third level name selects the System V style IPC facility.
+.Bl -column "KERN_SYSVIPC_MSG_INFOXXX" "struct shm_sysctl_infoXXX" -offset indent
+.It Sy Pa Third level name	Type
+.It KERN\_SYSVIPC\_MSG\_INFO	struct msg_sysctl_info
+.It KERN\_SYSVIPC\_SEM\_INFO	struct sem_sysctl_info
+.It KERN\_SYSVIPC\_SHM\_INFO	struct shm_sysctl_info
+.El
+.Pp
+.Bl -tag -width "123456"
+.It Li KERN_SYSVIPC_MSG_INFO
+Return information on the System V style message facility.  The
+.Sy msg_sysctl_info
+structure is defined in
+.Aq Pa sys/msg.h .
+.It Li KERN_SYSVIPC_SEM_INFO
+Return information on the System V style semaphore facility.  The
+.Sy sem_sysctl_info
+structure is defined in
+.Aq Pa sys/sem.h .
+.It Li KERN_SYSVIPC_SHM_INFO
+Return information on the System V style shared memory facility.  The
+.Sy shm_sysctl_info
+structure is defined in
+.Aq Pa sys/shm.h .
+.El
 .It Dv KERN_SYSVMSG
 Returns 1 if System V style message queue functionality is available on this
 system, otherwise 0.
@@ -590,6 +620,14 @@ The random value is added to make buffer overflow exploitation slightly
 harder.
 The bigger the number, the harder it is to brute force this added protection,
 but it also means bigger waste of memory.
+.It Dv KERN_USERCRYPTO
+Permits userland to use
+.Pa /dev/crypto
+for cryptographic support via hardware cryptographic devices.
+.It Dv KERN_CRYPTODEVALLOWSOFT
+Permits userland to use
+.Pa /dev/crypto
+even if there is no hardware crypto accelerator in the system.
 .El
 .Ss CTL_MACHDEP
 The set of variables defined is architecture dependent.
@@ -667,6 +705,8 @@ The currently defined protocols and names are:
 .It icmp	maskrepl	integer	yes
 .It icmp	bmcastecho	integer	yes
 .It icmp	errppslimit	integer	yes
+.It icmp	rediraccept	integer	yes
+.It icmp	redirtimeout	integer	yes
 .It ipip	allow	integer	yes
 .It tcp	rfc1323	integer	yes
 .It tcp	ident	structure	no
@@ -680,11 +720,13 @@ The currently defined protocols and names are:
 .It tcp	sack	integer	yes
 .It tcp	mssdflt	integer	yes
 .It tcp	rstppslimit	integer	yes
+.It tcp	ackonpush	integer	yes
 .It udp	checksum	integer	yes
 .It udp	baddynamic	array	yes
 .It udp	recvspace	integer	yes
 .It udp	sendspace	integer	yes
 .It gre	allow	integer	yes
+.It gre	wccp	integer	yes
 .It esp	enable	integer	yes
 .It ah	enable	integer	yes
 .It ipcomp	enable	integer	yes
@@ -848,6 +890,10 @@ in production systems.
 .It Li gre.allow
 If set to 0, incoming GRE packets will not be processed.
 If set to any other value, processing will occur.
+.It Li gre.wccp
+If set to 0, incoming WCCPv1-style GRE packets will not be processed.
+If set to any other value, and gre.allow allows GRE packet processing,
+WCCPv1-style GRE packets will be processed.
 .It Li mobileip.allow
 If set to 0, incoming MobileIP encapsulated packets (RFC 2004) will not be processed.
 If set to any other value, processing will occur.
@@ -864,6 +910,13 @@ per second.
 ICMP error messages that exceeded the value are subject to rate limitation
 and will not go out from the node.
 Negative value disables rate limitation.
+.It Li icmp.rediraccept
+If set to non-zero, the host will accept ICMP redirect packets.
+Note that routers will never accept ICMP redirect packets,
+and the variable is meaningful on IP hosts only.
+.It Li icmp.redirtimeout
+The variable specifies lifetime of routing entries generated by incoming
+ICMP redirect.  The default timeout is 10 minutes.
 .It Li tcp.rfc1323
 Returns 1 if RFC1323 extensions to
 .Tn TCP
@@ -917,6 +970,10 @@ per second.
 TCP RST packet that exceeded the value are subject to rate limitation
 and will not go out from the node.
 Negative value disables rate limitation.
+.It Li tcp.ackonpush
+Returns 1 if tcp segments with the
+.Dv TH_PUSH
+set are being acknowledged immediately, otherwise 0.
 .It Li udp.checksum
 Returns 1 when
 .Tn UDP

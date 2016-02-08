@@ -1,4 +1,4 @@
-/*	$OpenBSD: files.c,v 1.7 1997/11/13 08:21:53 deraadt Exp $	*/
+/*	$OpenBSD: files.c,v 1.11 2002/03/14 16:44:24 mpech Exp $	*/
 /*	$NetBSD: files.c,v 1.6 1996/03/17 13:18:17 cgd Exp $	*/
 
 /*
@@ -68,13 +68,13 @@ static struct files **unchecked;
 
 static struct objects **nextobject;
 
-static int	checkaux __P((const char *, void *));
-static int	fixcount __P((const char *, void *));
-static int	fixfsel __P((const char *, void *));
-static int	fixsel __P((const char *, void *));
-static int	expr_eval __P((struct nvlist *,
-		    int (*)(const char *, void *), void *));
-static void	expr_free __P((struct nvlist *));
+static int	checkaux(const char *, void *);
+static int	fixcount(const char *, void *);
+static int	fixfsel(const char *, void *);
+static int	fixsel(const char *, void *);
+static int	expr_eval(struct nvlist *,
+		    int (*)(const char *, void *), void *);
+static void	expr_free(struct nvlist *);
 
 void
 initfiles()
@@ -177,7 +177,7 @@ addobject(path, optx, flags)
 		error("duplicate file %s", path);
 		xerror(oi->oi_srcfile, oi->oi_srcline,
 		    "here is the original definition");
-	} 
+	}
 	oi->oi_next = NULL;
 	oi->oi_srcfile = yyfile;
 	oi->oi_srcline = currentline();
@@ -187,7 +187,7 @@ addobject(path, optx, flags)
 	oi->oi_optf = NULL;
 	*nextobject = oi;
 	nextobject = &oi->oi_next;
-}     
+}
 
 /*
  * We have finished reading some "files" file, either ../../conf/files
@@ -198,7 +198,7 @@ addobject(path, optx, flags)
 void
 checkfiles()
 {
-	register struct files *fi, *last;
+	struct files *fi, *last;
 
 	last = NULL;
 	for (fi = *unchecked; fi != NULL; last = fi, fi = fi->fi_next)
@@ -217,7 +217,7 @@ checkaux(name, context)
 	const char *name;
 	void *context;
 {
-	register struct files *fi = context;
+	struct files *fi = context;
 
 	if (ht_lookup(devbasetab, name) == NULL) {
 		xerror(fi->fi_srcfile, fi->fi_srcline,
@@ -237,7 +237,7 @@ checkaux(name, context)
 int
 fixfiles()
 {
-	register struct files *fi, *ofi;
+	struct files *fi, *ofi;
 	struct nvlist *flathead, **flatp;
 	int err, sel;
 
@@ -290,16 +290,16 @@ fixfiles()
 	return (err);
 }
 
-/*    
+/*
  * We have finished reading everything.  Tack the objects down: calculate
  * selection.
- */   
-int    
+ */
+int
 fixobjects()
-{     
+{
 	struct objects *oi;
 	struct nvlist *flathead, **flatp;
-	int err, sel; 
+	int err, sel;
 
 	err = 0;
 	for (oi = allobjects; oi != NULL; oi = oi->oi_next) {
@@ -316,10 +316,10 @@ fixobjects()
 				continue;
 		}
 
-		oi->oi_flags |= OI_SEL;  
+		oi->oi_flags |= OI_SEL;
 	}
 	return (err);
-}     
+}
 
 /*
  * Called when evaluating a needs-count expression.  Make sure the
@@ -332,12 +332,12 @@ fixobjects()
  */
 static int
 fixcount(name, context)
-	register const char *name;
+	const char *name;
 	void *context;
 {
-	register struct nvlist ***p = context;
-	register struct devbase *dev;
-	register struct nvlist *nv;
+	struct nvlist ***p = context;
+	struct devbase *dev;
+	struct nvlist *nv;
 
 	dev = ht_lookup(devbasetab, name);
 	if (dev == NULL)	/* cannot occur here; we checked earlier */
@@ -358,9 +358,9 @@ fixfsel(name, context)
 	const char *name;
 	void *context;
 {
-	register struct nvlist ***p = context;
-	register struct nvlist *nv;
-	register int sel;
+	struct nvlist ***p = context;
+	struct nvlist *nv;
+	int sel;
 
 	sel = ht_lookup(selecttab, name) != NULL;
 	nv = newnv(name, NULL, NULL, sel, NULL);
@@ -391,9 +391,9 @@ fixsel(name, context)
  */
 static int
 expr_eval(expr, fn, context)
-	register struct nvlist *expr;
-	register int (*fn) __P((const char *, void *));
-	register void *context;
+	struct nvlist *expr;
+	int (*fn)(const char *, void *);
+	void *context;
 {
 	int lhs, rhs;
 
@@ -424,9 +424,9 @@ expr_eval(expr, fn, context)
  */
 static void
 expr_free(expr)
-	register struct nvlist *expr;
+	struct nvlist *expr;
 {
-	register struct nvlist *rhs;
+	struct nvlist *rhs;
 
 	/* This loop traverses down the RHS of each subexpression. */
 	for (; expr != NULL; expr = rhs) {
@@ -469,7 +469,7 @@ prexpr(expr)
 
 static void
 pr0(e)
-	register struct nvlist *e;
+	struct nvlist *e;
 {
 
 	switch (e->nv_int) {

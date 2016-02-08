@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfontedpr.c,v 1.4 2001/07/12 05:17:29 deraadt Exp $	*/
+/*	$OpenBSD: vfontedpr.c,v 1.6 2002/02/16 21:27:56 millert Exp $	*/
 /*	$NetBSD: vfontedpr.c,v 1.4 1996/03/21 18:08:30 jtc Exp $	*/
 
 /*
@@ -44,7 +44,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)vfontedpr.c	8.1 (Berkeley) 6/6/93";
 #endif
-static char rcsid[] = "$OpenBSD: vfontedpr.c,v 1.4 2001/07/12 05:17:29 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: vfontedpr.c,v 1.6 2002/02/16 21:27:56 millert Exp $";
 #endif /* not lint */
 
 #include <sys/types.h>
@@ -74,13 +74,13 @@ static char rcsid[] = "$OpenBSD: vfontedpr.c,v 1.4 2001/07/12 05:17:29 deraadt E
 #define PNAMELEN 40		/* length of a function/procedure name */
 #define PSMAX 20		/* size of procedure name stacking */
 
-static int       iskw __P((char *));
-static boolean   isproc __P((char *));
-static void      putKcp __P((char *, char *, boolean));
-static void      putScp __P((char *));
-static void      putcp __P((int));
-static int       tabs __P((char *, char *));
-static int       width __P((char *, char *));
+static int       iskw(char *);
+static boolean   isproc(char *);
+static void      putKcp(char *, char *, boolean);
+static void      putScp(char *);
+static void      putcp(int);
+static int       tabs(char *, char *);
+static int       width(char *, char *);
 
 /*
  *	The state variables
@@ -356,7 +356,7 @@ static void
 putScp(os)
     char *os;
 {
-    register char *s = os;		/* pointer to unmatched string */
+    char *s = os;			/* pointer to unmatched string */
     char dummy[BUFSIZ];			/* dummy to be used by expmatch */
     char *comptr;			/* end of a comment delimiter */
     char *acmptr;			/* end of a comment delimiter */
@@ -593,9 +593,9 @@ tabs(s, os)
 
 static int
 width(s, os)
-	register char *s, *os;
+	char *s, *os;
 {
-	register int i = 0;
+	int i = 0;
 
 	while (s < os) {
 		if (*s == '\t') {
@@ -614,7 +614,7 @@ width(s, os)
 
 static void
 putcp(c)
-	register int c;
+	int c;
 {
 
 	switch(c) {
@@ -695,11 +695,11 @@ isproc(s)
 
 static int
 iskw(s)
-	register char *s;
+	char *s;
 {
-	register char **ss = l_keywds;
-	register int i = 1;
-	register char *cp = s;
+	char **ss = l_keywds;
+	int i = 1;
+	char *cp = s;
 
 	while (++cp, isidchr(*cp))
 		i++;

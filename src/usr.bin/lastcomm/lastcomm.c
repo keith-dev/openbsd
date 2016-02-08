@@ -1,4 +1,4 @@
-/*	$OpenBSD: lastcomm.c,v 1.8 2001/07/18 17:17:39 pvalchev Exp $	*/
+/*	$OpenBSD: lastcomm.c,v 1.10 2002/02/16 21:27:47 millert Exp $	*/
 /*	$NetBSD: lastcomm.c,v 1.9 1995/10/22 01:43:42 ghudson Exp $	*/
 
 /*
@@ -44,7 +44,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)lastcomm.c	8.2 (Berkeley) 4/29/95";
 #endif
-static char rcsid[] = "$OpenBSD: lastcomm.c,v 1.8 2001/07/18 17:17:39 pvalchev Exp $";
+static char rcsid[] = "$OpenBSD: lastcomm.c,v 1.10 2002/02/16 21:27:47 millert Exp $";
 #endif /* not lint */
 
 #include <sys/param.h>
@@ -64,11 +64,11 @@ static char rcsid[] = "$OpenBSD: lastcomm.c,v 1.8 2001/07/18 17:17:39 pvalchev E
 #include <utmp.h>
 #include "pathnames.h"
 
-time_t	 expand __P((u_int));
-char	*flagbits __P((int));
-char	*getdev __P((dev_t));
-int	 requested __P((char *[], struct acct *));
-void	 usage __P((void));
+time_t	 expand(u_int);
+char	*flagbits(int);
+char	*getdev(dev_t);
+int	 requested(char *[], struct acct *);
+void	 usage(void);
 char	*user_from_uid();
 
 int
@@ -76,7 +76,7 @@ main(argc, argv)
 	int argc;
 	char *argv[];
 {
-	register char *p;
+	char *p;
 	struct acct ab;
 	struct stat sb;
 	FILE *fp;
@@ -164,7 +164,7 @@ time_t
 expand(t)
 	u_int t;
 {
-	register time_t nt;
+	time_t nt;
 
 	nt = t & 017777;
 	t >>= 13;
@@ -177,7 +177,7 @@ expand(t)
 
 char *
 flagbits(f)
-	register int f;
+	int f;
 {
 	static char flags[20] = "-";
 	char *p;
@@ -196,8 +196,8 @@ flagbits(f)
 
 int
 requested(argv, acp)
-	register char *argv[];
-	register struct acct *acp;
+	char *argv[];
+	struct acct *acp;
 {
 	do {
 		if (!strcmp(user_from_uid(acp->ac_uid, 0), *argv))

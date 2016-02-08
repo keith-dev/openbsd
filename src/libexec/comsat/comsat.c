@@ -1,4 +1,4 @@
-/*	$OpenBSD: comsat.c,v 1.17 2001/07/08 21:18:06 deraadt Exp $	*/
+/*	$OpenBSD: comsat.c,v 1.21 2002/02/16 21:27:29 millert Exp $	*/
 
 /*
  * Copyright (c) 1980, 1993
@@ -41,7 +41,7 @@ static char copyright[] =
 
 #ifndef lint
 /*static char sccsid[] = "from: @(#)comsat.c	8.1 (Berkeley) 6/4/93";*/
-static char rcsid[] = "$OpenBSD: comsat.c,v 1.17 2001/07/08 21:18:06 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: comsat.c,v 1.21 2002/02/16 21:27:29 millert Exp $";
 #endif /* not lint */
 
 #include <sys/param.h>
@@ -77,14 +77,14 @@ struct	utmp *utmp = NULL;
 time_t	lastmsgtime;
 int	nutmp, uf;
 
-void jkfprintf __P((FILE *, char[], off_t));
-void mailfor __P((char *));
-void notify __P((struct utmp *, off_t));
-void readutmp __P((int));
-void doreadutmp __P((void));
-void reapchildren __P((int));
+void jkfprintf(FILE *, char[], off_t);
+void mailfor(char *);
+void notify(struct utmp *, off_t);
+void readutmp(int);
+void doreadutmp(void);
+void reapchildren(int);
 
-sig_atomic_t wantreadutmp;
+volatile sig_atomic_t wantreadutmp;
 
 int
 main(argc, argv)
@@ -92,7 +92,8 @@ main(argc, argv)
 	char *argv[];
 {
 	struct sockaddr_storage from;
-	register int cc;
+	struct sigaction sa;
+	int cc;
 	int fromlen;
 	char msgbuf[100];
 	sigset_t sigset;
@@ -118,9 +119,19 @@ main(argc, argv)
 	(void)time(&lastmsgtime);
 	(void)gethostname(hostname, sizeof(hostname));
 	doreadutmp();
-	(void)signal(SIGALRM, readutmp);
+
 	(void)signal(SIGTTOU, SIG_IGN);
-	(void)signal(SIGCHLD, reapchildren);
+
+	bzero(&sa, sizeof sa);
+	sigemptyset(&sa.sa_mask);
+	sa.sa_handler = readutmp;
+	sa.sa_flags = 0;			/* no SA_RESTART */
+	(void)sigaction(SIGALRM, &sa, NULL);
+
+	sa.sa_handler = reapchildren;
+	sa.sa_flags = SA_RESTART;
+	(void)sigaction(SIGCHLD, &sa, NULL);
+
 	for (;;) {
 		if (wantreadutmp) {
 			doreadutmp();
@@ -170,11 +181,9 @@ doreadutmp(void)
 	static u_int utmpsize;		/* last malloced size for utmp */
 	static u_int utmpmtime;		/* last modification time for utmp */
 	struct stat statbf;
-	int save_errno = errno;
 
 	if (time(NULL) - lastmsgtime >= MAXIDLE)
 		exit(0);
-	(void)alarm((u_int)15);
 	(void)fstat(uf, &statbf);
 	if (statbf.st_mtime > utmpmtime) {
 		utmpmtime = statbf.st_mtime;
@@ -188,15 +197,15 @@ doreadutmp(void)
 		(void)lseek(uf, (off_t)0, SEEK_SET);
 		nutmp = read(uf, utmp, (int)statbf.st_size)/sizeof(struct utmp);
 	}
-	errno = save_errno;
+	(void)alarm((u_int)15);
 }
 
 void
 mailfor(name)
 	char *name;
 {
-	register struct utmp *utp = &utmp[nutmp];
-	register char *cp;
+	struct utmp *utp = &utmp[nutmp];
+	char *cp;
 	off_t offset;
 
 	if (!(cp = strchr(name, '@')))
@@ -212,13 +221,13 @@ static char *cr;
 
 void
 notify(utp, offset)
-	register struct utmp *utp;
+	struct utmp *utp;
 	off_t offset;
 {
 	FILE *tp;
 	struct stat stb;
 	struct termios ttybuf;
-	char tty[20], name[sizeof(utmp[0].ut_name) + 1];
+	char tty[MAXPATHLEN], name[sizeof(utmp[0].ut_name) + 1];
 
 	(void)snprintf(tty, sizeof(tty), "%s%.*s",
 	    _PATH_DEV, (int)sizeof(utp->ut_line), utp->ut_line);
@@ -253,15 +262,15 @@ notify(utp, offset)
 
 void
 jkfprintf(tp, name, offset)
-	register FILE *tp;
+	FILE *tp;
 	char name[];
 	off_t offset;
 {
-	register char *cp, ch;
+	char *cp, ch;
 	char visout[5], *s2;
-	register FILE *fi;
-	register int linecnt, charcnt, inheader;
-	register struct passwd *p;
+	FILE *fi;
+	int linecnt, charcnt, inheader;
+	struct passwd *p;
 	char line[BUFSIZ];
 
 	/* Set effective uid to user in case mail drop is on nfs */

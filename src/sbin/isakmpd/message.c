@@ -1,10 +1,10 @@
-/*	$OpenBSD: message.c,v 1.45 2001/07/01 20:43:39 niklas Exp $	*/
+/*	$OpenBSD: message.c,v 1.49 2002/03/26 13:19:28 ho Exp $	*/
 /*	$EOM: message.c,v 1.156 2000/10/10 12:36:39 provos Exp $	*/
 
 /*
  * Copyright (c) 1998, 1999, 2000, 2001 Niklas Hallqvist.  All rights reserved.
  * Copyright (c) 1999 Angelos D. Keromytis.  All rights reserved.
- * Copyright (c) 1999, 2000 Håkan Olsson.  All rights reserved.
+ * Copyright (c) 1999, 2000, 2001 Håkan Olsson.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -213,7 +213,12 @@ message_free (struct message *msg)
 
   /* If we are on the send queue, remove us from there.  */
   if (msg->flags & MSG_IN_TRANSIT)
-    TAILQ_REMOVE (&msg->transport->sendq, msg, link);
+    {
+      if (msg->flags & MSG_PRIORITIZED)
+	TAILQ_REMOVE (&msg->transport->prio_sendq, msg, link);
+      else
+	TAILQ_REMOVE (&msg->transport->sendq, msg, link);
+    }
   transport_release (msg->transport);
 
   if (msg->isakmp_sa)
@@ -880,9 +885,6 @@ message_recv (struct message *msg)
   struct proto tmp_proto;
   struct sa tmp_sa;
 
-  /* Possibly dump a raw hex image of the message to the log channel.  */
-  message_dump_raw ("message_recv", msg, LOG_MESSAGE);
-
   /* Messages shorter than an ISAKMP header are bad.  */
   if (sz < ISAKMP_HDR_SZ || sz != GET_ISAKMP_HDR_LENGTH (buf))
     {
@@ -890,6 +892,11 @@ message_recv (struct message *msg)
       message_drop (msg, ISAKMP_NOTIFY_UNEQUAL_PAYLOAD_LENGTHS, 0, 1, 1);
       return -1;
     }
+
+#ifdef USE_DEBUG
+  /* Possibly dump a raw hex image of the message to the log channel.  */
+  message_dump_raw ("message_recv", msg, LOG_MESSAGE);
+#endif
 
   /*
    * If the responder cookie is zero, this is a request to setup an ISAKMP SA.
@@ -1178,6 +1185,7 @@ message_send (struct message *msg)
 {
   struct exchange *exchange = msg->exchange;
   struct message *m;
+  struct msg_head *q;
 
   /* Remove retransmissions on this message  */
   if (msg->retrans)
@@ -1216,7 +1224,9 @@ message_send (struct message *msg)
 			  GET_ISAKMP_HDR_FLAGS (msg->iov[0].iov_base)
 			  | ISAKMP_FLAGS_COMMIT);
 
+#ifdef USE_DEBUG
   message_dump_raw ("message_send", msg, LOG_MESSAGE);
+#endif
   msg->flags |= MSG_IN_TRANSIT;
   exchange->in_transit = msg;
   
@@ -1225,15 +1235,18 @@ message_send (struct message *msg)
    * has left the queue, don't queue it again, as it will result
    * in a circular list.
    */
-  for (m = TAILQ_FIRST (&msg->transport->sendq); m; m = TAILQ_NEXT (m, link))
+  q = msg->flags & MSG_PRIORITIZED ? &msg->transport->prio_sendq : 
+    &msg->transport->sendq;
+
+  for (m = TAILQ_FIRST (q); m; m = TAILQ_NEXT (m, link))
     if (m == msg)
       {
-	LOG_DBG ((LOG_MESSAGE, 60, "message_send: msg %p already on sendq", 
-		  m));
+	LOG_DBG ((LOG_MESSAGE, 60,
+		  "message_send: msg %p already on sendq %p", m, q));
 	return;
       }
 
-  TAILQ_INSERT_TAIL (&msg->transport->sendq, msg, link);
+  TAILQ_INSERT_TAIL (q, msg, link);
 }
 
 /*
@@ -1373,7 +1386,7 @@ message_send_delete (struct sa *sa)
   struct sockaddr *dst;
 
   sa->transport->vtbl->get_dst (sa->transport, &dst);
-  isakmp_sa = sa_isakmp_lookup_by_peer (dst, dst->sa_len);
+  isakmp_sa = sa_isakmp_lookup_by_peer (dst, sysdep_sa_len (dst));
   if (!isakmp_sa)
     {
       /*
@@ -1442,6 +1455,7 @@ message_send_info (struct message *msg)
       SET_ISAKMP_DELETE_NSPIS (buf, args->u.d.nspis);
       memcpy (buf + ISAKMP_DELETE_SPI_OFF, args->u.d.spis,
 	      args->u.d.nspis * args->spi_sz);
+      msg->flags |= MSG_PRIORITIZED;
       break;
     }
 
@@ -1523,7 +1537,8 @@ message_dump_raw (char *header, struct message *msg, int class)
   for (i = 0; i < msg->iovlen; i++)
     for (j = 0; j < msg->iov[i].iov_len; j++)
       {
-	sprintf (p, "%02x", ((u_int8_t *)msg->iov[i].iov_base)[j]);
+	snprintf (p, 80 - (int)(p - buf), "%02x", 
+		  ((u_int8_t *)msg->iov[i].iov_base)[j]);
 	p += 2;
 	if (++k % 32 == 0)
 	  {
@@ -1674,8 +1689,12 @@ message_check_duplicate (struct message *msg)
     {
       if (exchange->last_sent == exchange->in_transit)
 	{
-	  TAILQ_REMOVE (&exchange->in_transit->transport->sendq,
-			exchange->in_transit, link);
+	  if (exchange->in_transit->flags & MSG_PRIORITIZED)
+	    TAILQ_REMOVE (&exchange->in_transit->transport->prio_sendq,
+			  exchange->in_transit, link);
+	  else
+	    TAILQ_REMOVE (&exchange->in_transit->transport->sendq,
+			  exchange->in_transit, link);
 	  exchange->in_transit = 0;
 	}
       message_free (exchange->last_sent);

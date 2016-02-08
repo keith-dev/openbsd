@@ -1,4 +1,4 @@
-#       $OpenBSD: install.md,v 1.2 2001/06/23 19:44:34 deraadt Exp $
+#       $OpenBSD: install.md,v 1.4 2002/03/31 17:30:30 deraadt Exp $
 #
 # Copyright (c) 1996 The NetBSD Foundation, Inc.
 # All rights reserved.
@@ -34,15 +34,13 @@
 # ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 #
-
 #
 # machine dependent section of installation/upgrade script.
 #
 
-ARCH=ARCH
-
 # Machine-dependent install sets
 MDSETS=kernel
+ARCH=ARCH
 
 md_set_term() {
 	test -n "$TERM" && return
@@ -126,14 +124,11 @@ md_prep_disklabel()
 
 	md_checkfordisklabel $_disk
 	case $? in
-	0)
-		;;
-	1)
-		echo WARNING: Disk $_disk has no label. You will be creating a new one.
+	0)	;;
+	1)	echo WARNING: Disk $_disk has no label. You will be creating a new one.
 		echo
 		;;
-	2)
-		echo WARNING: Label on disk $_disk is corrupted. You will be repairing.
+	2)	echo WARNING: Label on disk $_disk is corrupted. You will be repairing.
 		echo
 		;;
 	esac
@@ -158,7 +153,6 @@ Welcome to the OpenBSD/alpha ${VERSION_MAJOR}.${VERSION_MINOR} installation prog
 
 This program is designed to help you put OpenBSD on your system in a
 simple and rational way.
-
 __EOT
 	else
 		cat << __EOT
@@ -171,7 +165,6 @@ As a reminder, installing the 'etc' binary set is NOT recommended.
 Once the rest of your system has been upgraded, you should manually
 merge any changes to files in the 'etc' set into those files which
 already exist on your system.
-
 __EOT
 	fi
 

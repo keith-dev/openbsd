@@ -1,4 +1,4 @@
-/*	$OpenBSD: supscan.c,v 1.11 2001/05/04 22:16:17 millert Exp $	*/
+/*	$OpenBSD: supscan.c,v 1.13 2002/02/19 19:39:39 millert Exp $	*/
 
 /*
  * Copyright (c) 1992 Carnegie Mellon University
@@ -115,11 +115,7 @@
 #include <c.h>
 #include <netdb.h>
 #include <setjmp.h>
-#ifdef __STDC__
 #include <stdarg.h>
-#else
-#include <varargs.h>
-#endif
 #include <sys/time.h>
 #include <sys/types.h>
 #include "supcdefs.h"
@@ -160,11 +156,11 @@ TREE *listT;		/* final list of files in collection */
 TREE *refuseT = NULL;	/* list of all files specified by <coll>.list */
 
 
-void usage __P((void));
-void init __P((int, char **));
-static SCAN_COLLECTION *getscancoll __P((char *, char *, char *));
-int localhost __P((char *));
-int main __P((int, char **));
+void usage(void);
+void init(int, char **);
+static SCAN_COLLECTION *getscancoll(char *, char *, char *);
+int localhost(char *);
+int main(int, char **);
 
 /*************************************
  ***    M A I N   R O U T I N E    ***
@@ -388,25 +384,11 @@ getscancoll(filename, collname, basedir)
 }
 
 void
-#ifdef __STDC__
 goaway(char *fmt,...)
-#else
-/*VARARGS*//*ARGSUSED*/
-goaway(va_alist)
-va_dcl
-#endif
 {
 	va_list ap;
 
-#ifdef __STDC__
 	va_start(ap,fmt);
-#else
-	char *fmt;
-
-	va_start(ap);
-	fmt = va_arg(ap, char *);
-#endif
-
 	vfprintf(stderr, fmt, ap);
 	va_end(ap);
 	(void) putc ('\n', stderr);

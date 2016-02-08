@@ -1,4 +1,4 @@
-/*	$OpenBSD: ukc.h,v 1.5 2001/08/12 12:03:03 heko Exp $ */
+/*	$OpenBSD: ukc.h,v 1.9 2002/03/23 13:30:24 espie Exp $ */
 
 /*
  * Copyright (c) 1999-2001 Mats O Jansson.  All rights reserved.
@@ -50,7 +50,12 @@
 #define P_PDEVNAMES	15
 #define I_PDEVSIZE	16
 #define S_PDEVINIT	17
-#define NLENTRIES	18
+#define I_NMBCLUSTERS	18
+#define I_BUFCACHEPCT	19
+#define I_NKMEMPG	20
+#define I_SHMSEG	21
+#define I_SHMMAXPGS	22
+#define NLENTRIES	23
 
 #ifdef UKC_MAIN
 struct nlist nl[] = {
@@ -72,6 +77,11 @@ struct nlist nl[] = {
 	{ "_pdevnames" },
 	{ "_pdevnames_size" },
 	{ "_pdevinit" },
+	{ "_nmbclust" },
+	{ "_bufcachepercent" },
+	{ "_nkmempages" },
+	{ "_shmseg" },
+	{ "_shmmaxpgs" },
 	{ NULL },
 };
 struct nlist knl[] = {
@@ -93,6 +103,11 @@ struct nlist knl[] = {
 	{ "_pdevnames" },
 	{ "_pdevnames_size" },
 	{ "_pdevinit" },
+	{ "_nmbclust" },
+	{ "_bufcachepercent" },
+	{ "_nkmempages" },
+	{ "_shmseg" },
+	{ "_shmmaxpgs" },
 	{ NULL },
 };
 int	maxdev = 0;
@@ -117,34 +132,34 @@ extern int oldkernel;
 extern int nopdev;
 #endif
 
-struct cfdata   *get_cfdata __P((int));
-short	        *get_locnamp __P((int));
-caddr_t	        *get_locnames __P((int));
-int	        *get_extraloc __P((int));
-caddr_t	        *get_pdevnames __P((int));
-struct pdevinit *get_pdevinit __P((int));
+struct cfdata   *get_cfdata(int);
+short	        *get_locnamp(int);
+caddr_t	        *get_locnames(int);
+int	        *get_extraloc(int);
+char	        *get_pdevnames(int);
+struct pdevinit *get_pdevinit(int);
 
-int	more __P(());
-void	pnum __P((int));
-void	pdevnam __P((short));
-void	pdev __P((short));
-int	number __P((char *, int *));
-int	device __P((char *, int *, short *, short *));
-int	attr __P((char *, int *));
-void	modify __P((char *, int *));
-void	change __P((int));
-void	disable __P((int));
-void	enable __P((int));
-void	show __P((void));
-void	common_attr_val __P((short, int *, char));
-void	show_attr __P((char *));
-void	common_dev __P((char *, int, short, short, char));
-void	common_attr __P((char *, int, char));
-void	add_read __P((char *, char, char *, int, int *));
-void	add __P((char *, int, short, short));
+int	more();
+void	pnum(int);
+void	pdevnam(short);
+void	pdev(short);
+int	number(const char *, int *);
+int	device(char *, int *, short *, short *);
+int	attr(char *, int *);
+void	modify(char *, int *);
+void	change(int);
+void	disable(int);
+void	enable(int);
+void	show(void);
+void	common_attr_val(short, int *, char);
+void	show_attr(char *);
+void	common_dev(char *, int, short, short, char);
+void	common_attr(char *, int, char);
+void	add_read(char *, char, char *, int, int *);
+void	add(char *, int, short, short);
 
-int	config __P(());
-void	process_history __P((int, char *));
+int	config();
+void	process_history(int, char *);
 
 #define UC_CHANGE 'c'
 #define UC_DISABLE 'd'

@@ -1,4 +1,4 @@
-/*	$OpenBSD: fsutil.c,v 1.4 2001/07/03 13:03:44 ian Exp $	*/
+/*	$OpenBSD: fsutil.c,v 1.6 2002/02/19 19:39:38 millert Exp $	*/
 /*	$NetBSD: fsutil.c,v 1.2 1996/10/03 20:06:31 christos Exp $	*/
 
 /*
@@ -40,11 +40,7 @@ static char rcsid[] = "$NetBSD: fsutil.c,v 1.2 1996/10/03 20:06:31 christos Exp 
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
-#ifdef __STDC__
 #include <stdarg.h>
-#else
-#include <varargs.h>
-#endif
 #include <errno.h>
 #include <fstab.h>
 #include <err.h>
@@ -60,7 +56,7 @@ static int preen = 0;
 
 extern char *__progname;
 
-static void vmsg __P((int, const char *, va_list));
+static void vmsg(int, const char *, va_list);
 
 void
 setcdevname(cd, pr)
@@ -85,21 +81,11 @@ hotroot()
 
 /*VARARGS*/
 void
-#ifdef __STDC__
 errexit(const char *fmt, ...)
-#else
-errexit(fmt, va_alist)
-	char *fmt;
-	va_dcl
-#endif
 {
 	va_list ap;
 	
-#ifdef __STDC__
 	va_start(ap, fmt);
-#else
-	va_start(ap);
-#endif
 	(void) vfprintf(stderr, fmt, ap);
 	va_end(ap);
 	exit(8);
@@ -127,42 +113,22 @@ vmsg(fatal, fmt, ap)
 
 /*VARARGS*/
 void
-#ifdef __STDC__
 pfatal(const char *fmt, ...)
-#else
-pfatal(fmt, va_alist)
-	char *fmt;
-	va_dcl
-#endif
 {
 	va_list ap;
 	
-#ifdef __STDC__
 	va_start(ap, fmt);
-#else
-	va_start(ap);
-#endif
 	vmsg(1, fmt, ap);
 	va_end(ap);
 }
 
 /*VARARGS*/
 void
-#ifdef __STDC__
 pwarn(const char *fmt, ...)
-#else
-pwarn(fmt, va_alist)
-	char *fmt;
-	va_dcl
-#endif
 {
 	va_list ap;
 	
-#ifdef __STDC__
 	va_start(ap, fmt);
-#else
-	va_start(ap);
-#endif
 	vmsg(0, fmt, ap);
 	va_end(ap);
 }
@@ -175,21 +141,11 @@ perror(s)
 }
 
 void
-#ifdef __STDC__
 panic(const char *fmt, ...)
-#else
-panic(fmt, va_alist)
-	char *fmt;
-	va_dcl
-#endif
 {
 	va_list ap;
 	
-#ifdef __STDC__
 	va_start(ap, fmt);
-#else
-	va_start(ap);
-#endif
 	vmsg(1, fmt, ap);
 	va_end(ap);
 	exit(8);

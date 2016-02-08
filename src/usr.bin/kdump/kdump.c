@@ -1,4 +1,4 @@
-/*	$OpenBSD: kdump.c,v 1.12 2001/08/18 00:48:57 espie Exp $	*/
+/*	$OpenBSD: kdump.c,v 1.15 2002/03/12 10:40:33 art Exp $	*/
 
 /*-
  * Copyright (c) 1988, 1993
@@ -43,7 +43,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)kdump.c	8.4 (Berkeley) 4/28/95";
 #endif
-static char *rcsid = "$OpenBSD: kdump.c,v 1.12 2001/08/18 00:48:57 espie Exp $";
+static char *rcsid = "$OpenBSD: kdump.c,v 1.15 2002/03/12 10:40:33 art Exp $";
 #endif /* not lint */
 
 #include <sys/param.h>
@@ -142,20 +142,20 @@ struct emulation *current;
 static char *ptrace_ops[] = {
 	"PT_TRACE_ME",	"PT_READ_I",	"PT_READ_D",	"PT_READ_U",
 	"PT_WRITE_I",	"PT_WRITE_D",	"PT_WRITE_U",	"PT_CONTINUE",
-	"PT_KILL",	"PT_ATTACH",	"PT_DETACH",
+	"PT_KILL",	"PT_ATTACH",	"PT_DETACH",	"PT_IO",
 };
 
-static int fread_tail __P((void *, int, int));
-static void dumpheader __P((struct ktr_header *));
-static void ktrcsw __P((struct ktr_csw *));
-static void ktremul __P((char *, int));
-static void ktrgenio __P((struct ktr_genio *, int));
-static void ktrnamei __P((const char *, int));
-static void ktrpsig __P((struct ktr_psig *));
-static void ktrsyscall __P((struct ktr_syscall *));
-static void ktrsysret __P((struct ktr_sysret *));
-static void setemul __P((const char *));
-static void usage __P((void));
+static int fread_tail(void *, int, int);
+static void dumpheader(struct ktr_header *);
+static void ktrcsw(struct ktr_csw *);
+static void ktremul(char *, int);
+static void ktrgenio(struct ktr_genio *, int);
+static void ktrnamei(const char *, int);
+static void ktrpsig(struct ktr_psig *);
+static void ktrsyscall(struct ktr_syscall *);
+static void ktrsysret(struct ktr_sysret *);
+static void setemul(const char *);
+static void usage(void);
 
 int
 main(argc, argv)
@@ -521,10 +521,22 @@ ktrpsig(psig)
 {
 	(void)printf("SIG%s ", sys_signame[psig->signo]);
 	if (psig->action == SIG_DFL)
-		(void)printf("SIG_DFL\n");
+		(void)printf("SIG_DFL code %d", psig->code);
 	else
-		(void)printf("caught handler=0x%lx mask=0x%x code=0x%x\n",
-		    (u_long)psig->action, psig->mask, psig->code);
+		(void)printf("caught handler=0x%lx mask=0x%x",
+		    (u_long)psig->action, psig->mask);
+	switch (psig->signo) {
+	case SIGSEGV:
+	case SIGILL:
+	case SIGBUS:
+	case SIGFPE:
+		printf(" addr=%p trapno=%d", psig->si.si_addr,
+		    psig->si.si_trapno);
+		break;
+	default:
+		break;
+	}
+	printf("\n");
 }
 
 static void

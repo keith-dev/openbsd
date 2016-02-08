@@ -1,4 +1,4 @@
-/* $OpenBSD: pwd_gensalt.c,v 1.10 2001/06/18 21:09:24 millert Exp $ */
+/* $OpenBSD: pwd_gensalt.c,v 1.12 2002/02/16 21:27:50 millert Exp $ */
 /*
  * Copyright 1997 Niels Provos <provos@physnet.uni-hamburg.de>
  * All rights reserved.
@@ -41,7 +41,7 @@
 #include <time.h>
 #include <login_cap.h>
 
-void to64 __P((char *, int32_t, int n));
+void to64(char *, int32_t, int n);
 
 int
 pwd_gensalt(salt, max, pwd, lc, type)
@@ -51,7 +51,7 @@ pwd_gensalt(salt, max, pwd, lc, type)
 	login_cap_t *lc;
 	char    type;
 {
-	char   *bcrypt_gensalt __P((u_int8_t));
+	char   *bcrypt_gensalt(u_int8_t);
 	char    option[LINE_MAX];
 	char   *next, *now;
 	char   *cipher;
@@ -139,9 +139,9 @@ static unsigned char itoa64[] =	 /* 0 ... 63 => ascii - 64 */
 
 void
 to64(s, v, n)
-	register char *s;
-	register int32_t v;
-	register int n;
+	char *s;
+	int32_t v;
+	int n;
 {
 	while (--n >= 0) {
 		*s++ = itoa64[v&0x3f];

@@ -1,4 +1,4 @@
-/*	$OpenBSD: err.c,v 1.3 1998/07/27 16:53:40 deraadt Exp $	*/
+/*	$OpenBSD: err.c,v 1.5 2002/02/19 19:39:39 millert Exp $	*/
 /*	$NetBSD: err.c,v 1.8 1995/10/02 17:37:00 jpo Exp $	*/
 
 /*
@@ -33,7 +33,7 @@
  */
 
 #ifndef lint
-static char rcsid[] = "$OpenBSD: err.c,v 1.3 1998/07/27 16:53:40 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: err.c,v 1.5 2002/02/19 19:39:39 millert Exp $";
 #endif
 
 /* number of errors found */
@@ -43,17 +43,13 @@ int	nerr;
 int	sytxerr;
 
 #include <stdlib.h>
-#ifdef __STDC__
 #include <stdarg.h>
-#else
-#include <varargs.h>
-#endif
 
 #include "lint1.h"
 
-static	const	char *basename __P((const char *));
-static	void	verror __P((int, va_list));
-static	void	vwarning __P((int, va_list));
+static	const	char *basename(const char *);
+static	void	verror(int, va_list);
+static	void	vwarning(int, va_list);
 
 
 const	char *msgs[] = {
@@ -424,42 +420,22 @@ vwarning(n, ap)
 }
 
 void
-#ifdef __STDC__
 error(int n, ...)
-#else
-error(n, va_alist)
-	int	n;
-	va_dcl
-#endif
 {
 	va_list	ap;
 
-#ifdef __STDC__
 	va_start(ap, n);
-#else
-	va_start(ap);
-#endif
 	verror(n, ap);
 	va_end(ap);
 }
 
 void
-#ifdef __STDC__
 lerror(const char *msg, ...)
-#else
-lerror(msg, va_alist)
-	const	char *msg;
-	va_dcl
-#endif
 {
 	va_list	ap;
 	const	char *fn;
 
-#ifdef __STDC__
 	va_start(ap, msg);
-#else
-	va_start(ap);
-#endif
 	fn = basename(curr_pos.p_file);
 	(void)fprintf(stderr, "%s(%d): lint error: ", fn, curr_pos.p_line);
 	(void)vfprintf(stderr, msg, ap);
@@ -469,42 +445,22 @@ lerror(msg, va_alist)
 }
 
 void
-#ifdef __STDC__
 warning(int n, ...)
-#else
-warning(n, va_alist)
-	int	n;
-	va_dcl
-#endif
 {
 	va_list	ap;
 
-#ifdef __STDC__
 	va_start(ap, n);
-#else
-	va_start(ap);
-#endif
 	vwarning(n, ap);
 	va_end(ap);
 }
 
 void
-#ifdef __STDC__
 message(int n, ...)
-#else
-message(n, va_alist)
-	int	n;
-	va_dcl
-#endif
 {
 	va_list	ap;
 	const	char *fn;
 
-#ifdef __STDC__
 	va_start(ap, n);
-#else
-	va_start(ap);
-#endif
 	fn = basename(curr_pos.p_file);
 	(void)printf("%s(%d): ", fn, curr_pos.p_line);
 	(void)vprintf(msgs[n], ap);
@@ -513,22 +469,12 @@ message(n, va_alist)
 }
 
 int
-#ifdef __STDC__
 gnuism(int n, ...)
-#else
-gnuism(n, va_alist)
-	int	n;
-	va_dcl
-#endif
 {
 	va_list	ap;
 	int	msg;
 
-#ifdef __STDC__
 	va_start(ap, n);
-#else
-	va_start(ap);
-#endif
 	if (sflag && !gflag) {
 		verror(n, ap);
 		msg = 1;

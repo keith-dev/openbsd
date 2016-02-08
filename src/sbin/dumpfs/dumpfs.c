@@ -1,4 +1,4 @@
-/*	$OpenBSD: dumpfs.c,v 1.11 2001/04/13 02:39:06 gluk Exp $	*/
+/*	$OpenBSD: dumpfs.c,v 1.14 2002/02/16 21:27:33 millert Exp $	*/
 /*	$NetBSD: dumpfs.c,v 1.12 1997/04/26 05:41:33 lukem Exp $	*/
 
 /*
@@ -44,7 +44,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)dumpfs.c	8.2 (Berkeley) 2/2/94";
 #else
-static char rcsid[] = "$OpenBSD: dumpfs.c,v 1.11 2001/04/13 02:39:06 gluk Exp $";
+static char rcsid[] = "$OpenBSD: dumpfs.c,v 1.14 2002/02/16 21:27:33 millert Exp $";
 #endif
 #endif /* not lint */
 
@@ -77,17 +77,17 @@ union {
 
 long	dev_bsize = 1;
 
-int	dumpfs __P((char *));
-int	dumpcg __P((char *, int, int));
-void	pbits __P((void *, int));
-void	usage __P((void));
+int	dumpfs(char *);
+int	dumpcg(char *, int, int);
+void	pbits(void *, int);
+void	usage(void);
 
 int
 main(argc, argv)
 	int argc;
 	char *argv[];
 {
-	register struct fstab *fs;
+	struct fstab *fs;
 	int ch, eval;
 
 	while ((ch = getopt(argc, argv, "")) != -1)
@@ -145,7 +145,7 @@ dumpfs(name)
 	if (afs.fs_postblformat != FS_42POSTBLFMT) {
 		i++;
 		if (afs.fs_inodefmt >= FS_44INODEFMT) {
-			int max, siz;
+			int max;
 
 			i++;
 			max = afs.fs_maxcontig;
@@ -330,11 +330,11 @@ dumpcg(name, fd, c)
 
 void
 pbits(vp, max)
-	register void *vp;
+	void *vp;
 	int max;
 {
-	register int i;
-	register char *p;
+	int i;
+	char *p;
 	int count, j;
 
 	for (count = i = 0, p = vp; i < max; i++)

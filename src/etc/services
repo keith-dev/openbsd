@@ -1,4 +1,4 @@
-#	$OpenBSD: services,v 1.35 2001/09/13 01:44:39 millert Exp $
+#	$OpenBSD: services,v 1.40 2002/02/26 16:09:12 lebel Exp $
 #
 # Network services, Internet style
 #
@@ -7,6 +7,7 @@
 # even if the protocol doesn't support UDP operations.
 # Updated from RFC 1340, ``Assigned Numbers'' (July 1992).  Not all ports
 # are included, only the more common ones.
+# See also http://www.iana.org/assignments/port-numbers
 #
 #	from: @(#)services	5.8 (Berkeley) 5/9/91
 #
@@ -126,7 +127,7 @@ svrloc		427/udp
 nnsp		433/tcp		usenet		# Network News Transfer
 https		443/tcp				# secure http (SSL)
 kpasswd		464/udp				# Kerberos 5 password changing
-kpasswd		464/tdp				# Kerberos 5 password changing
+kpasswd		464/tcp				# Kerberos 5 password changing
 photuris	468/tcp				# Photuris Key Management
 photuris	468/udp
 isakmp		500/udp				# ISAKMP key management
@@ -193,16 +194,15 @@ kx		2111/tcp		# X over kerberos
 kip		2112/tcp		# IP over kerberos
 kauth		2120/tcp		# Remote kauth
 krb524		4444/udp		# Kerberos 5->4
+krb524		4444/tcp		# Kerberos 5->4
 iprop		2121/tcp		# Kerberos incremental propagation
 rfe		5002/tcp		# Radio Free Ethernet
 rfe		5002/udp		# Actually uses UDP only
 sip		5060/tcp		# SIP
 sip		5060/udp		# SIP
 #
-#
 # Kerberos (Project Athena/MIT) services
-# Note that these are for Kerberos v4, and are unofficial.  Sites running
-# v5 should comment these out and uncomment the v5 entries above.
+# Note that these are for Kerberos v4, and are unofficial.
 #
 kerberos-sec	88/udp				# Kerberos secondary port UDP
 kerberos-sec	88/tcp				# Kerberos secondary port TCP
@@ -223,7 +223,7 @@ rkinit		2108/tcp			# Kerberos remote kinit
 kx		2111/tcp			# X over kerberos
 kip		2112/tcp			# IP over kerberos
 kauth		2120/tcp			# Remote kauth
-# 
+#
 # AFS Services
 #
 afs3-fileserver		7000/udp	# AFS fileserver
@@ -247,6 +247,7 @@ datametrics	1645/udp
 sa-msg-port	1646/udp
 radius		1812/udp		# radius authentication
 radacct		1813/udp		# radius accounting
+cvspserver	2401/tcp		# cvs pserver
 webster		2627/tcp		# Network dictionary
 webster		2627/udp
 mysql		3306/tcp		# MySQL

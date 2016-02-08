@@ -1,4 +1,4 @@
-/*	$OpenBSD: xargs.c,v 1.8 1998/06/23 00:22:58 deraadt Exp $	*/
+/*	$OpenBSD: xargs.c,v 1.11 2002/02/18 18:22:54 millert Exp $	*/
 /*	$NetBSD: xargs.c,v 1.7 1994/11/14 06:51:41 jtc Exp $	*/
 
 /*-
@@ -47,7 +47,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)xargs.c	8.1 (Berkeley) 6/6/93";
 #endif
-static char rcsid[] = "$OpenBSD: xargs.c,v 1.8 1998/06/23 00:22:58 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: xargs.c,v 1.11 2002/02/18 18:22:54 millert Exp $";
 #endif /* not lint */
 
 #include <sys/types.h>
@@ -66,16 +66,16 @@ static char rcsid[] = "$OpenBSD: xargs.c,v 1.8 1998/06/23 00:22:58 deraadt Exp $
 int tflag, rval;
 int zflag;
 
-void run __P((char **));
-void usage __P((void));
+void run(char **);
+void usage(void);
 
 int
 main(argc, argv)
 	int argc;
 	char **argv;
 {
-	register int ch;
-	register char *p, *bbp, *ebp, **bxp, **exp, **xp;
+	int ch;
+	char *p, *bbp, *ebp, **bxp, **exp, **xp;
 	int cnt, indouble, insingle, nargs, nflag, nline, xflag;
 	char **av, *argp;
 	int arg_max;
@@ -125,9 +125,6 @@ main(argc, argv)
 	}
 	argc -= optind;
 	argv += optind;
-
-	if (xflag && !nflag)
-		usage();
 
 	/*
 	 * Allocate pointers for the utility name, the utility arguments,
@@ -279,7 +276,7 @@ run(argv)
 	char **argv;
 {
 	volatile int noinvoke;
-	register char **p;
+	char **p;
 	pid_t pid;
 	int status;
 

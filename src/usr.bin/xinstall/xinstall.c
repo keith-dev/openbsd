@@ -1,4 +1,4 @@
-/*	$OpenBSD: xinstall.c,v 1.28 2001/08/25 19:52:05 heko Exp $	*/
+/*	$OpenBSD: xinstall.c,v 1.31 2002/02/16 21:27:59 millert Exp $	*/
 /*	$NetBSD: xinstall.c,v 1.9 1995/12/20 10:25:17 jonathan Exp $	*/
 
 /*
@@ -44,7 +44,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)xinstall.c	8.1 (Berkeley) 7/21/93";
 #endif
-static char rcsid[] = "$OpenBSD: xinstall.c,v 1.28 2001/08/25 19:52:05 heko Exp $";
+static char rcsid[] = "$OpenBSD: xinstall.c,v 1.31 2002/02/16 21:27:59 millert Exp $";
 #endif /* not lint */
 
 #include <sys/param.h>
@@ -82,15 +82,15 @@ char *suffix = BACKUP_SUFFIX;
 uid_t uid;
 gid_t gid;
 
-void	copy __P((int, char *, int, char *, off_t, int));
-int	compare __P((int, const char *, size_t, int, const char *, size_t));
-void	install __P((char *, char *, u_long, u_int));
-void	install_dir __P((char *));
-void	strip __P((char *));
-void	usage __P((void));
-int	create_newfile __P((char *, struct stat *));
-int	create_tempfile __P((char *, char *, size_t));
-int	file_write __P((int, char *, register size_t, int *, int *, int));
+void	copy(int, char *, int, char *, off_t, int);
+int	compare(int, const char *, size_t, int, const char *, size_t);
+void	install(char *, char *, u_long, u_int);
+void	install_dir(char *);
+void	strip(char *);
+void	usage(void);
+int	create_newfile(char *, struct stat *);
+int	create_tempfile(char *, char *, size_t);
+int	file_write(int, char *, size_t, int *, int *, int);
 
 int
 main(argc, argv)
@@ -376,7 +376,7 @@ install(from_name, to_name, fset, flags)
 	}
 
 	/*
-	 * Preserve the timestamp of the source file if necesary.
+	 * Preserve the timestamp of the source file if necessary.
 	 */
 	if (dopreserve && !files_match) {
 		utb.actime = from_sb.st_atime;
@@ -420,12 +420,12 @@ install(from_name, to_name, fset, flags)
  */
 void
 copy(from_fd, from_name, to_fd, to_name, size, sparse)
-	register int from_fd, to_fd;
+	int from_fd, to_fd;
 	char *from_name, *to_name;
 	off_t size;
 	int sparse;
 {
-	register ssize_t nr, nw;
+	ssize_t nr, nw;
 	int serrno;
 	char *p, buf[MAXBSIZE];
 
@@ -579,7 +579,7 @@ void
 install_dir(path)
         char *path;
 {
-	register char *p;
+	char *p;
 	struct stat sb;
 	int ch;
 
@@ -644,7 +644,7 @@ create_tempfile(path, temp, tsize)
 
 /*
  * create_newfile --
- *	create a new file, overwriting an existing one if necesary
+ *	create a new file, overwriting an existing one if necessary
  */
 int
 create_newfile(path, sbp)
@@ -724,15 +724,15 @@ int
 file_write(fd, str, cnt, rem, isempt, sz)
 	int fd;
 	char *str;
-	register size_t cnt;
+	size_t cnt;
 	int *rem;
 	int *isempt;
 	int sz;
 {
-	register char *pt;
-	register char *end;
-	register size_t wcnt;
-	register char *st = str;
+	char *pt;
+	char *end;
+	size_t wcnt;
+	char *st = str;
 
 	/*
 	 * while we have data to process

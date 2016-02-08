@@ -1,4 +1,4 @@
-/*	$OpenBSD: wsconsctl.c,v 1.8 2001/08/26 17:35:13 deraadt Exp $	*/
+/*	$OpenBSD: wsconsctl.c,v 1.10 2002/02/16 21:27:38 millert Exp $	*/
 /*	$NetBSD: wsconsctl.c,v 1.2 1998/12/29 22:40:20 hannken Exp $ */
 
 /*-
@@ -54,14 +54,14 @@ extern struct field keyboard_field_tab[];
 extern struct field mouse_field_tab[];
 extern struct field display_field_tab[];
 
-void usage __P((char *));
+void usage(char *);
 
 struct vartypesw {
 	const char *name, *file;
 	int fd;
 	struct field *field_tab;
-	void (*getval) __P((const char *pre, int));
-	void (*putval) __P((const char *pre, int));
+	void (*getval)(const char *pre, int);
+	void (*putval)(const char *pre, int);
 } typesw[] = {
 	{ "keyboard", PATH_KEYBOARD, -1, keyboard_field_tab,
 	  keyboard_get_values, keyboard_put_values },
@@ -72,7 +72,7 @@ struct vartypesw {
 	{ NULL }
 };
 
-struct vartypesw *tab_by_name __P((const char *));
+struct vartypesw *tab_by_name(const char *);
 
 void
 usage(msg)
@@ -82,9 +82,9 @@ usage(msg)
 		fprintf(stderr, "%s: %s\n", __progname, msg);
 
 	fprintf(stderr,
-	    "usage: %s [-f file] [-n] name ...\n"
-	    "       %s [-f file] [-n] -w name=value ...\n"
-	    "       %s [-f file] [-n] -a\n", __progname,
+	    "usage: %s [-n] name ...\n"
+	    "       %s [-n] -w name=value ...\n"
+	    "       %s [-n] -a\n", __progname,
 		__progname, __progname);
 
 	exit(1);
@@ -117,7 +117,6 @@ main(argc, argv)
 		case 'w':
 			wflag = 1;
 			break;
-		case '?':
 		default:
 			usage(NULL);
 		}

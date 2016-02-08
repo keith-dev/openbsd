@@ -1,4 +1,4 @@
-/*	$OpenBSD: rstat_proc.c,v 1.17 2001/10/02 01:14:42 millert Exp $	*/
+/*	$OpenBSD: rstat_proc.c,v 1.21 2002/02/16 21:27:31 millert Exp $	*/
 
 /*
  * Sun RPC is a product of Sun Microsystems, Inc. and is provided for
@@ -31,7 +31,7 @@
 #ifndef lint
 /*static char sccsid[] = "from: @(#)rpc.rstatd.c 1.1 86/09/25 Copyr 1984 Sun Micro";*/
 /*static char sccsid[] = "from: @(#)rstat_proc.c	2.2 88/08/01 4.0 RPCSRC";*/
-static char rcsid[] = "$OpenBSD: rstat_proc.c,v 1.17 2001/10/02 01:14:42 millert Exp $";
+static char rcsid[] = "$OpenBSD: rstat_proc.c,v 1.21 2002/02/16 21:27:31 millert Exp $";
 #endif
 
 /*
@@ -46,7 +46,6 @@ static char rcsid[] = "$OpenBSD: rstat_proc.c,v 1.17 2001/10/02 01:14:42 millert
 #include <sys/socket.h>
 #include <sys/sysctl.h>
 #include <net/if.h>
-#include <vm/vm.h>
 #include <uvm/uvm_extern.h>
 
 #include <stdio.h>
@@ -88,9 +87,11 @@ union {
 	struct statstime s3;
 } stats_all;
 
-int stats_service();
-void updatestat(int);
-void setup(void);
+void	updatestat(void);
+void	updatestatsig(int sig);
+void	setup(void);
+
+volatile sig_atomic_t wantupdatestat;
 
 static int stat_is_init = 0;
 
@@ -103,8 +104,8 @@ stat_init()
 {
 	stat_is_init = 1;
 	setup();
-	updatestat(0);
-	(void) signal(SIGALRM, updatestat);	/* XXX huge signal race */
+	updatestat();
+	(void) signal(SIGALRM, updatestatsig);
 	alarm(1);
 }
 
@@ -172,7 +173,13 @@ rstatproc_havedisk_1_svc(arg, rqstp)
 }
 
 void
-updatestat(int sig)
+updatestatsig(int sig)
+{
+	wantupdatestat = 1;
+}
+
+void
+updatestat()
 {
 	int i, mib[2], save_errno = errno;
 	struct uvmexp uvmexp;
@@ -268,8 +275,9 @@ updatestat(int sig)
 		stats_all.s1.if_collisions += ifdp->ifi_collisions;
 	}
 	freeifaddrs(ifaddrs);
-	gettimeofday((struct timeval *)&stats_all.s3.curtime,
-	    (struct timezone *) 0);
+	stats_all.s3.curtime.tv_sec = tm.tv_sec;
+	stats_all.s3.curtime.tv_usec = tm.tv_usec;
+
 	alarm(1);
 	errno = save_errno;
 }
@@ -290,7 +298,7 @@ rstat_service(rqstp, transp)
 	} argument;
 	char *result;
 	xdrproc_t xdr_argument, xdr_result;
-	char *(*local) __P((void *, struct svc_req *));
+	char *(*local)(void *, struct svc_req *);
 
 	switch (rqstp->rq_proc) {
 	case NULLPROC:
@@ -302,15 +310,15 @@ rstat_service(rqstp, transp)
 		xdr_result = (xdrproc_t)xdr_statstime;
 		switch (rqstp->rq_vers) {
 		case RSTATVERS_ORIG:
-			local = (char *(*) __P((void *, struct svc_req *)))
+			local = (char *(*)(void *, struct svc_req *))
 				rstatproc_stats_1_svc;
 			break;
 		case RSTATVERS_SWTCH:
-			local = (char *(*) __P((void *, struct svc_req *)))
+			local = (char *(*)(void *, struct svc_req *))
 				rstatproc_stats_2_svc;
 			break;
 		case RSTATVERS_TIME:
-			local = (char *(*) __P((void *, struct svc_req *)))
+			local = (char *(*)(void *, struct svc_req *))
 				rstatproc_stats_3_svc;
 			break;
 		default:
@@ -324,15 +332,15 @@ rstat_service(rqstp, transp)
 		xdr_result = (xdrproc_t)xdr_u_int;
 		switch (rqstp->rq_vers) {
 		case RSTATVERS_ORIG:
-			local = (char *(*) __P((void *, struct svc_req *)))
+			local = (char *(*)(void *, struct svc_req *))
 				rstatproc_havedisk_1_svc;
 			break;
 		case RSTATVERS_SWTCH:
-			local = (char *(*) __P((void *, struct svc_req *)))
+			local = (char *(*)(void *, struct svc_req *))
 				rstatproc_havedisk_2_svc;
 			break;
 		case RSTATVERS_TIME:
-			local = (char *(*) __P((void *, struct svc_req *)))
+			local = (char *(*)(void *, struct svc_req *))
 				rstatproc_havedisk_3_svc;
 			break;
 		default:

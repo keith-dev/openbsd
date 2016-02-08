@@ -1,4 +1,4 @@
-/*	$OpenBSD: mkswap.c,v 1.7 1996/11/12 08:37:58 niklas Exp $	*/
+/*	$OpenBSD: mkswap.c,v 1.9 2002/03/14 16:44:24 mpech Exp $	*/
 /*	$NetBSD: mkswap.c,v 1.5 1996/08/31 20:58:27 mycroft Exp $	*/
 
 /*
@@ -53,7 +53,7 @@
 #include "config.h"
 #include "sem.h"
 
-static int mkoneswap __P((struct config *));
+static int mkoneswap(struct config *);
 
 /*
  * Make the various swap*.c files.  Nothing to do for generic swap.
@@ -61,7 +61,7 @@ static int mkoneswap __P((struct config *));
 int
 mkswap()
 {
-	register struct config *cf;
+	struct config *cf;
 
 	for (cf = allcf; cf != NULL; cf = cf->cf_next)
 		if (cf->cf_root != NULL && mkoneswap(cf))
@@ -84,10 +84,10 @@ dev_t d;
 
 static int
 mkoneswap(cf)
-	register struct config *cf;
+	struct config *cf;
 {
-	register struct nvlist *nv;
-	register FILE *fp;
+	struct nvlist *nv;
+	FILE *fp;
 	char fname[200];
 	char *mountroot;
 
@@ -120,7 +120,7 @@ mkoneswap(cf)
 		goto wrerror;
 	mountroot =
 	    cf->cf_root->nv_str == s_nfs ? "nfs_mountroot" : "dk_mountroot";
-	if (fprintf(fp, "int (*mountroot) __P((void)) = %s;\n", mountroot) < 0)
+	if (fprintf(fp, "int (*mountroot)(void) = %s;\n", mountroot) < 0)
 		goto wrerror;
 
 	if (fclose(fp)) {

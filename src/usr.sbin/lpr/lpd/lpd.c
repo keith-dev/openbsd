@@ -1,4 +1,4 @@
-/*	$OpenBSD: lpd.c,v 1.21 2001/09/05 00:22:49 deraadt Exp $ */
+/*	$OpenBSD: lpd.c,v 1.28 2002/02/16 21:28:03 millert Exp $ */
 /*	$NetBSD: lpd.c,v 1.7 1996/04/24 14:54:06 mrg Exp $	*/
 
 /*
@@ -45,7 +45,7 @@ static const char copyright[] =
 #if 0
 static const char sccsid[] = "@(#)lpd.c	8.7 (Berkeley) 5/10/95";
 #else
-static const char rcsid[] = "$OpenBSD: lpd.c,v 1.21 2001/09/05 00:22:49 deraadt Exp $";
+static const char rcsid[] = "$OpenBSD: lpd.c,v 1.28 2002/02/16 21:28:03 millert Exp $";
 #endif
 #endif /* not lint */
 
@@ -104,17 +104,20 @@ static const char rcsid[] = "$OpenBSD: lpd.c,v 1.21 2001/09/05 00:22:49 deraadt 
 #include "pathnames.h"
 #include "extern.h"
 
-extern int __ivaliduser __P((FILE *, in_addr_t, const char *, const char *));
+extern int __ivaliduser(FILE *, in_addr_t, const char *, const char *);
 
 int	lflag;				/* log requests flag */
 int	from_remote;			/* from remote socket */
 
-static void       reapchild __P((int));
-static void       mcleanup __P((int));
-static void       doit __P((void));
-static void       startup __P((void));
-static void       chkhost __P((struct sockaddr_in *));
-static int	  ckqueue __P((char *));
+static void       reapchild(int);
+static void       mcleanup(int);
+static void       doit(void);
+static void       startup(void);
+static void       chkhost(struct sockaddr_in *);
+static int	  ckqueue(char *);
+
+/* unused, needed for lpc */
+volatile sig_atomic_t gotintr;
 
 uid_t	uid, euid;
 
@@ -134,8 +137,6 @@ main(argc, argv)
 	uid = getuid();
 	options = 0;
 	gethostname(host, sizeof(host));
-
-	name = "lpd";
 
 	if (euid != 0) {
 		fprintf(stderr,"lpd: must run as root\n");
@@ -171,7 +172,7 @@ main(argc, argv)
 		exit(1);
 	}
 	if (flock(lfd, LOCK_EX|LOCK_NB) < 0) {
-		if (errno == EWOULDBLOCK)	/* active deamon present */
+		if (errno == EWOULDBLOCK)	/* active daemon present */
 			exit(0);
 		syslog(LOG_ERR, "%s: %m", _PATH_MASTERLOCK);
 		exit(1);
@@ -290,7 +291,7 @@ main(argc, argv)
 			continue;
 		}
 		if (fork() == 0) {
-			signal(SIGCHLD, SIG_IGN);
+			signal(SIGCHLD, SIG_DFL);
 			signal(SIGHUP, SIG_IGN);
 			signal(SIGINT, SIG_IGN);
 			signal(SIGQUIT, SIG_IGN);
@@ -317,8 +318,8 @@ static void
 reapchild(signo)
 	int signo;
 {
-	int status;
 	int save_errno = errno;
+	int status;
 
 	while (waitpid((pid_t)-1, &status, WNOHANG) > 0)
 		;
@@ -329,10 +330,12 @@ static void
 mcleanup(signo)
 	int signo;
 {
+	struct syslog_data sdata = SYSLOG_DATA_INIT;
+
 	if (lflag)
-		syslog(LOG_INFO, "exiting");
+		syslog_r(LOG_INFO, &sdata, "exiting");
 	unlink(_PATH_SOCKETNAME);
-	exit(0);
+	_exit(0);
 }
 
 /*

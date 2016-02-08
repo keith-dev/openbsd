@@ -1,4 +1,4 @@
-/*	$OpenBSD: ypbind.c,v 1.39 2001/07/27 20:34:36 pvalchev Exp $ */
+/*	$OpenBSD: ypbind.c,v 1.43 2002/03/14 16:44:25 mpech Exp $ */
 
 /*
  * Copyright (c) 1997,1998 Theo de Raadt <deraadt@OpenBSD.org>
@@ -35,13 +35,12 @@
  */
 
 #ifndef LINT
-static char rcsid[] = "$OpenBSD: ypbind.c,v 1.39 2001/07/27 20:34:36 pvalchev Exp $";
+static char rcsid[] = "$OpenBSD: ypbind.c,v 1.43 2002/03/14 16:44:25 mpech Exp $";
 #endif
 
 #include <sys/param.h>
 #include <sys/types.h>
 #include <sys/ioctl.h>
-#include <sys/signal.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/file.h>
@@ -94,14 +93,14 @@ extern bool_t xdr_domainname(), xdr_ypbind_resp();
 extern bool_t xdr_ypreq_key(), xdr_ypresp_val();
 extern bool_t xdr_ypbind_setdom();
 
-void rpc_received __P((char *dom, struct sockaddr_in *raddrp, int force));
-void checkwork __P((void));
-enum clnt_stat handle_replies __P((void));
-enum clnt_stat handle_ping __P((void));
-int broadcast __P((struct _dom_binding *ypdb, char *, int));
-int direct __P((struct _dom_binding *ypdb, char *, int));
-int ping __P((struct _dom_binding *ypdb));
-int pings __P((struct _dom_binding *ypdb));
+void rpc_received(char *dom, struct sockaddr_in *raddrp, int force);
+void checkwork(void);
+enum clnt_stat handle_replies(void);
+enum clnt_stat handle_ping(void);
+int broadcast(struct _dom_binding *ypdb, char *, int);
+int direct(struct _dom_binding *ypdb, char *, int);
+int ping(struct _dom_binding *ypdb);
+int pings(struct _dom_binding *ypdb);
 
 char *domain;
 
@@ -122,8 +121,8 @@ u_long rmtcr_port;
 SVCXPRT *udptransp, *tcptransp;
 SVCXPRT *ludptransp, *ltcptransp;
 
-struct _dom_binding *xid2ypdb __P((u_int32_t xid));
-u_int32_t unique_xid __P((struct _dom_binding *ypdb));
+struct _dom_binding *xid2ypdb(u_int32_t xid);
+u_int32_t unique_xid(struct _dom_binding *ypdb);
 
 /*
  * We name the local RPC functions ypbindproc_XXX_2x() instead
@@ -283,7 +282,7 @@ ypbindproc_setdom_2x(transp, argp, clnt)
 static void
 ypbindprog_2(rqstp, transp)
 	struct svc_req *rqstp;
-	register SVCXPRT *transp;
+	SVCXPRT *transp;
 {
 	union {
 		domainname ypbindproc_domain_2_arg;
@@ -993,6 +992,7 @@ int force;
 		strncpy(ypdb->dom_domain, dom, sizeof ypdb->dom_domain-1);
 		ypdb->dom_domain[sizeof (ypdb->dom_domain)-1] = '\0';
 		ypdb->dom_lockfd = -1;
+		ypdb->dom_xid = unique_xid(ypdb);
 		ypdb->dom_pnext = ypbindlist;
 		ypbindlist = ypdb;
 	}

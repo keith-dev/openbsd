@@ -1,4 +1,4 @@
-.\" $OpenBSD: ipsecadm.8,v 1.44 2001/09/06 06:34:13 jufi Exp $
+.\" $OpenBSD: ipsecadm.8,v 1.49 2001/12/21 11:41:50 mpech Exp $
 .\"
 .\" Copyright 1997 Niels Provos <provos@physnet.uni-hamburg.de>
 .\" All rights reserved.
@@ -41,12 +41,12 @@
 .Op command
 .Ar modifiers ...
 .Sh NOTE
-Before
-.Xr ipsecadm 8
-can be used, IPsec must be enabled by setting one or more of the following
+To use
+.Xr ipsecadm 8 ,
+IPsec must be enabled by having one or more of the following
 .Xr sysctl 3
-variables:
-.Bl -tag -width xxxxxxxxxxxxxxxxxxxxxx
+variables set:
+.Bl -tag -offset 4n -width xxxxxxxxxxxxxxxxxxxxxx
 .It net.inet.esp.enable
 Enable the ESP IPsec protocol
 .It net.inet.ah.enable
@@ -55,8 +55,9 @@ Enable the AH IPsec protocol
 Enable the IPComp protocol
 .El
 .Pp
-To enable these operations across reboots, see
-.Pa /etc/sysctl.conf .
+Both the ESP and AH protocols are enabled by default.
+To keep local modifications of these variables across reboots, see
+.Xr sysctl.conf 5 .
 .Sh DESCRIPTION
 The
 .Nm ipsecadm
@@ -196,18 +197,18 @@ Allowed modifiers are:
 .Fl delete ,
 .Fl in ,
 .Fl out ,
-.Fl deny ,
 .Fl srcid ,
 .Fl dstid ,
 .Fl srcid_type ,
 .Fl dstid_type ,
-.Fl use ,
 .Fl acquire ,
 .Fl require ,
 .Fl dontacq ,
-.Fl permit ,
+.Fl use ,
+.Fl bypass ,
+.Fl permit
 and
-.Fl bypass .
+.Fl deny .
 The
 .Xr netstat 1
 command shows all specified flows.
@@ -224,7 +225,7 @@ If the destination address is set to all zeroes (0.0.0.0) or left
 unspecified, the destination address from the packet will be used
 to locate an SA (the source address is used for incoming flows).
 For incoming flows, the destination address (if specified) should
-point to the expected source of the SA (the remote SA peer). 
+point to the expected source of the SA (the remote SA peer).
 If no such SA exists, key management daemons will be used to generate
 them if
 .Fl acquire
@@ -255,6 +256,8 @@ or
 flow is used to specify a flow for which IPsec processing will be
 bypassed, i.e packets will/need not be processed by any SAs.
 For
+.Nm bypass
+or
 .Nm permit
 flows, additional modifiers are restricted to:
 .Fl addr ,
@@ -288,10 +291,12 @@ Default action is to flush all types of security associations
 from the kernel.
 .It ipcomp
 Setup an IP Compression Association (IPCA) which will use the IPcomp
-transforms. Just like an SA, an IPCA consists of the destination
+transforms.
+Just like an SA, an IPCA consists of the destination
 address, a Compression Parameter Index (CPI) and a protocol (which is
-fixed to IPcomp). Compression algorithms are applied. Allowed
-modifiers are: 
+fixed to IPcomp).
+Compression algorithms are applied.
+Allowed modifiers are:
 .Fl dst ,
 .Fl src ,
 .Fl cpi ,
@@ -299,9 +304,11 @@ modifiers are:
 and
 .Fl forcetunnel .
 To create an IPsec SA using compression, an IPCA and an SA must first
-be created. After this a IPCA/SA bundle must be created using the 
+be created.
+After this a IPCA/SA bundle must be created using the
 .Nm group
-keyword. The IPCA must be applied first. 
+keyword.
+The IPCA must be applied first.
 .El
 .Pp
 If no command is given
@@ -339,7 +346,7 @@ The Security Parameter Index (SPI), given as a hexadecimal number.
 The second SPI used by
 .Nm group .
 .It Fl cpi
-The Compression Parameter Index (CPI), given as a hexadecimal number.
+The Compression Parameter Index (CPI), given as a 16 bit hexadecimal number.
 .It Fl tunnel
 This option has been deprecated.
 The arguments are ignored, and it otherwise has the same effect as the
@@ -402,8 +409,8 @@ Also
 .Nm rmd160
 for both new ah and esp.
 .It Fl comp
-The compression algorithm to be used with the IPCA. The only possible value
-currently is:
+The compression algorithm to be used with the IPCA.
+The only possible value currently is:
 .Nm deflate .
 .It Fl key
 The secret symmetric key used for encryption and authentication.
@@ -430,7 +437,8 @@ One practical way of generating keys is by using the
 .Xr random 4
 device (e.g., dd if=/dev/urandom bs=1024 count=1 | sha1)
 .It Fl keyfile
-Read the key from a file.  May be used instead of the
+Read the key from a file.
+May be used instead of the
 .Fl key
 flag, and has the same syntax considerations.
 .It Fl authkey
@@ -451,7 +459,8 @@ One practical way of generating keys is by using the
 .Xr random 4
 device (e.g., dd if=/dev/urandom bs=1024 count=1 | sha1)
 .It Fl authkeyfile
-Read the authkey from a file.  May be used instead of the
+Read the authkey from a file.
+May be used instead of the
 .Fl authkey
 flag, and has the same syntax considerations.
 .It Fl iv
@@ -560,6 +569,9 @@ create or delete a
 .Nm bypass
 flow.
 Packets matching this flow will not be processed by IPsec.
+.It Fl permit
+Same as
+.Fl bypass .
 .It Fl deny
 For
 .Nm flow ,
@@ -582,8 +594,8 @@ traffic.
 For
 .Nm flow ,
 specify that packets matching this flow must use IPsec, and establish
-SAs dynamically as needed. If no SAs are established, traffic is not
-allowed through.
+SAs dynamically as needed.
+If no SAs are established, traffic is not allowed through.
 .It Fl dontacq
 For
 .Nm flow ,
@@ -627,47 +639,47 @@ only flush SAs of type ip4.
 Setup a SA which uses new esp with 3des encryption and HMAC-SHA1
 authentication:
 .Bd -literal
-ipsecadm new esp -enc 3des -auth sha1 -spi 100a -dst 169.20.12.2 \e\ 
-	-src 169.20.12.3 \e\ 
-	-key 638063806380638063806380638063806380638063806380 \e\ 
+# ipsecadm new esp -enc 3des -auth sha1 -spi 100a -dst 169.20.12.2 \e\
+	-src 169.20.12.3 \e\
+	-key 638063806380638063806380638063806380638063806380 \e\
 	-authkey 1234123412341234123412341234123412341234
 .Ed
 .Pp
 Setup a SA for authentication with old ah only:
 .Bd -literal
-ipsecadm old ah -auth md5 -spi 10f2 -dst 169.20.12.2 -src 169.20.12.3 \e\ 
+# ipsecadm old ah -auth md5 -spi 10f2 -dst 169.20.12.2 -src 169.20.12.3 \e\
 	-key 12341234deadbeef
 .Ed
 .Pp
 Setup a flow requiring use of AH:
 .Bd -literal
-ipsecadm flow -dst 169.20.12.2 -proto ah \e\ 
+# ipsecadm flow -dst 169.20.12.2 -proto ah \e\
 	-addr 10.1.1.0 255.255.255.0 10.0.0.0 255.0.0.0 -out -require
 .Ed
 .Pp
 Setup an inbound SA:
 .Bd -literal
-ipsecadm new esp -enc blf -auth md5 -spi 1002 -dst 169.20.12.3 \e\ 
-	-src 169.20.12.2 \e\ 
-	-key abadbeef15deadbeefabadbeef15deadbeefabadbeef15deadbeef \e\ 
+# ipsecadm new esp -enc blf -auth md5 -spi 1002 -dst 169.20.12.3 \e\
+	-src 169.20.12.2 \e\
+	-key abadbeef15deadbeefabadbeef15deadbeefabadbeef15deadbeef \e\
 	-authkey 12349876432167890192837465098273
 .Ed
 .Pp
 Setup an ingress flow on for the inbound SA:
 .Bd -literal
-ipsecadm flow -addr 10.0.0.0 255.0.0.0 10.1.1.0 255.255.255.0 \e\ 
+# ipsecadm flow -addr 10.0.0.0 255.0.0.0 10.1.1.0 255.255.255.0 \e\
 	-dst 169.20.12.2 -proto esp -in -require
 .Ed
 .Pp
 Setup a bypass flow:
 .Bd -literal
-ipsecadm flow -bypass -out \e\ 
+# ipsecadm flow -bypass -out \e\
 	-addr 10.1.1.0 255.255.255.0 10.1.1.0 255.255.255.0
 .Ed
 .Pp
 Delete all esp SAs and their flows and routing information:
 .Bd -literal
-ipsecadm flush -esp
+# ipsecadm flush -esp
 .Ed
 .Sh SEE ALSO
 .Xr netstat 1 ,
@@ -675,6 +687,7 @@ ipsecadm flush -esp
 .Xr ipsec 4 ,
 .Xr protocols 5 ,
 .Xr services 5 ,
+.Xr sysctl.conf 5 ,
 .Xr isakmpd 8 ,
 .Xr photurisd 8 ,
 .Xr vpn 8

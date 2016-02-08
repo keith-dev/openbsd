@@ -32,7 +32,7 @@
  */
 
 #if defined(LIBC_SCCS) && !defined(lint)
-static char rcsid[] = "$OpenBSD: mktemp.c,v 1.13 1998/06/30 23:03:13 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: mktemp.c,v 1.15 2002/02/16 21:27:24 millert Exp $";
 #endif /* LIBC_SCCS and not lint */
 
 #include <sys/types.h>
@@ -44,7 +44,7 @@ static char rcsid[] = "$OpenBSD: mktemp.c,v 1.13 1998/06/30 23:03:13 deraadt Exp
 #include <ctype.h>
 #include <unistd.h>
 
-static int _gettemp __P((char *, int *, int, int));
+static int _gettemp(char *, int *, int, int);
 
 int
 mkstemps(path, slen)
@@ -72,7 +72,7 @@ mkdtemp(path)
 	return(_gettemp(path, (int *)NULL, 1, 0) ? path : (char *)NULL);
 }
 
-char *_mktemp __P((char *));
+char *_mktemp(char *);
 
 char *
 _mktemp(path)
@@ -101,7 +101,8 @@ _gettemp(path, doopen, domkdir, slen)
 {
 	register char *start, *trv, *suffp;
 	struct stat sbuf;
-	int pid, rval;
+	int rval;
+	pid_t pid;
 
 	if (doopen && domkdir) {
 		errno = EINVAL;

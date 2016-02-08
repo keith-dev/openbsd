@@ -1,4 +1,4 @@
-/*	$OpenBSD: echo.c,v 1.16 2001/05/24 09:47:33 art Exp $	*/
+/*	$OpenBSD: echo.c,v 1.21 2002/03/11 13:02:56 vincent Exp $	*/
 
 /*
  *	Echo line reading and writing.
@@ -17,15 +17,15 @@
 
 #include <stdarg.h>
 
-static int	veread		__P((const char *, char *buf, int, int, va_list));
-static int	complt		__P((int, int, char *, int));
-static int	complt_list	__P((int, int, char *, int));
-static void	eformat		__P((const char *, va_list));
-static void	eputi		__P((int, int));
-static void	eputl		__P((long, int));
-static void	eputs		__P((char *));
-static void	eputc		__P((char));
-static LIST	*copy_list	__P((LIST *));
+static int	veread(const char *, char *buf, int, int, va_list);
+static int	complt(int, int, char *, int);
+static int	complt_list(int, int, char *, int);
+static void	eformat(const char *, va_list);
+static void	eputi(int, int);
+static void	eputl(long, int);
+static void	eputs(const char *);
+static void	eputc(char);
+static LIST	*copy_list(LIST *);
 
 int		epresf = FALSE;		/* stuff in echo line flag */
 
@@ -33,7 +33,7 @@ int		epresf = FALSE;		/* stuff in echo line flag */
  * Erase the echo line.
  */
 void
-eerase()
+eerase(void)
 {
 	ttcolor(CTEXT);
 	ttmove(nrow - 1, 0);
@@ -49,8 +49,7 @@ eerase()
  * required.
  */
 int
-eyorn(sp)
-	char *sp;
+eyorn(const char *sp)
 {
 	int	 s;
 
@@ -77,8 +76,7 @@ eyorn(sp)
  * "yes" or "no" and the trainling newline.
  */
 int
-eyesno(sp)
-	char *sp;
+eyesno(const char *sp)
 {
 	int	 s;
 	char	 buf[64];
@@ -101,14 +99,14 @@ eyesno(sp)
 				free((char *)lp);
 			}
 #endif /* !NO_MACRO */
-			if ((buf[0] == 'y' || buf[0] == 'Y')
-			    && (buf[1] == 'e' || buf[1] == 'E')
-			    && (buf[2] == 's' || buf[2] == 'S')
-			    && (buf[3] == '\0'))
+			if ((buf[0] == 'y' || buf[0] == 'Y') &&
+			    (buf[1] == 'e' || buf[1] == 'E') &&
+			    (buf[2] == 's' || buf[2] == 'S') &&
+			    (buf[3] == '\0'))
 				return TRUE;
-			if ((buf[0] == 'n' || buf[0] == 'N')
-			    && (buf[1] == 'o' || buf[0] == 'O')
-			    && (buf[2] == '\0'))
+			if ((buf[0] == 'n' || buf[0] == 'N') &&
+			    (buf[1] == 'o' || buf[0] == 'O') &&
+			    (buf[2] == '\0'))
 				return FALSE;
 		}
 		s = ereply("Please answer yes or no.  %s? (yes or no) ",
@@ -307,9 +305,7 @@ done:
  * do completion on a list of objects.
  */
 static int
-complt(flags, c, buf, cpos)
-	int   flags, c, cpos;
-	char *buf;
+complt(int flags, int c, char *buf, int cpos)
 {
 	LIST	*lh, *lh2;
 	LIST	*wholelist = NULL;
@@ -403,11 +399,7 @@ complt(flags, c, buf, cpos)
  * do completion on a list of objects, listing instead of completing
  */
 static int
-complt_list(flags, c, buf, cpos)
-	int   flags;
-	int   c;
-	char *buf;
-	int   cpos;
+complt_list(int flags, int c, char *buf, int cpos)
 {
 	LIST	*lh, *lh2, *lh3;
 	LIST	*wholelist = NULL;
@@ -417,8 +409,8 @@ complt_list(flags, c, buf, cpos)
 	int	 oldrow = ttrow;
 	int	 oldcol = ttcol;
 	int	 oldhue = tthue;
-	char	 linebuf[NCOL + 1];
-	char	*cp;
+	char	 *linebuf;
+	const char *cp;
 
 	lh = NULL;
 
@@ -467,9 +459,9 @@ complt_list(flags, c, buf, cpos)
 		 * order.
 		 */
 		lh2 = lh;
-		while (lh2) {
+		while (lh2 != NULL) {
 			lh3 = lh2->l_next;
-			while (lh3) {
+			while (lh3 != NULL) {
 				if (strcmp(lh2->l_name, lh3->l_name) > 0) {
 					cp = lh2->l_name;
 					lh2->l_name = lh3->l_name;
@@ -504,34 +496,40 @@ complt_list(flags, c, buf, cpos)
 		 * Now do the display.  objects are written into linebuf until
 		 * it fills, and then put into the help buffer.
 		 */
-		cp = linebuf;
+		if ((linebuf = malloc((nrow + 1) * sizeof(char))) == NULL)
+			return FALSE;
 		width = 0;
-		lh2 = lh;
-		while (lh2 != NULL) {
+
+		/* 
+		 * We're going to strlcat() into the buffer, so it has to be
+		 * NUL terminated
+		 */
+		linebuf[0] = '\0';
+		for (lh2 = lh; lh2 != NULL; lh2 = lh2->l_next) {
 			for (i = 0; i < cpos; ++i) {
 				if (buf[i] != lh2->l_name[i])
 					break;
 			}
+			/* if we have a match */
 			if (i == cpos) {
+				/* if it wraps */
 				if ((width + maxwidth) > ncol) {
-					*cp = 0;
 					addline(bp, linebuf);
-					cp = linebuf;
+					linebuf[0] = '\0';
 					width = 0;
-				}
-				strcpy(cp, lh2->l_name + preflen);
-				i = strlen(lh2->l_name + preflen);
-				cp += i;
-				for (; i < maxwidth; i++)
-					*cp++ = ' ';
+		 		}
+				strlcat(linebuf, lh2->l_name + preflen, nrow+1);				i = strlen(lh2->l_name + preflen);
+				/* make all the objects nicely line up */
+				memset(linebuf + strlen(linebuf), ' ',
+					maxwidth - i);
 				width += maxwidth;
+				linebuf[width] = '\0';
 			}
-			lh2 = lh2->l_next;
 		}
 		if (width > 0) {
-			*cp = 0;
 			addline(bp, linebuf);
 		}
+		free(linebuf);
 	}
 	/*
 	 * Note that we free lists only if they are put in wholelist lists
@@ -556,10 +554,7 @@ complt_list(flags, c, buf, cpos)
  * this is normal.
  */
 int
-getxtra(lp1, lp2, cpos, wflag)
-	LIST *lp1, *lp2;
-	int   cpos;
-	int   wflag;
+getxtra(LIST *lp1, LIST *lp2, int cpos, int wflag)
 {
 	int	i;
 
@@ -673,8 +668,7 @@ eformat(const char *fp, va_list ap)
  * Put integer, in radix "r".
  */
 static void
-eputi(i, r)
-	int i, r;
+eputi(int i, int r)
 {
 	int	 q;
 
@@ -691,9 +685,7 @@ eputi(i, r)
  * Put long, in radix "r".
  */
 static void
-eputl(l, r)
-	long l;
-	int  r;
+eputl(long l, int r)
 {
 	long	 q;
 
@@ -710,8 +702,7 @@ eputl(l, r)
  * Put string.
  */
 static void
-eputs(s)
-	char *s;
+eputs(const char *s)
 {
 	int	 c;
 
@@ -724,8 +715,7 @@ eputs(s)
  * too long.
  */
 static void
-eputc(c)
-	char	 c;
+eputc(char c)
 {
 	if (ttcol + 2 < ncol) {
 		if (ISCTRL(c)) {
@@ -738,8 +728,7 @@ eputc(c)
 }
 
 void
-free_file_list(lp)
-	LIST *lp;
+free_file_list(LIST *lp)
 {
 	LIST	*next;
 
@@ -751,8 +740,7 @@ free_file_list(lp)
 }
 
 static LIST *
-copy_list(lp)
-	LIST *lp;
+copy_list(LIST *lp)
 {
 	LIST	*current, *last;
 

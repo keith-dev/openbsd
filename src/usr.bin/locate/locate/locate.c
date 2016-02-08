@@ -1,5 +1,5 @@
 /*
- *	$OpenBSD: locate.c,v 1.9 2001/05/11 15:56:14 art Exp $
+ *	$OpenBSD: locate.c,v 1.13 2002/03/14 06:51:42 mpech Exp $
  *
  * Copyright (c) 1995 Wolfram Schneider <wosch@FreeBSD.org>. Berlin.
  * Copyright (c) 1989, 1993
@@ -36,7 +36,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *      $Id: locate.c,v 1.9 2001/05/11 15:56:14 art Exp $
+ *      $Id: locate.c,v 1.13 2002/03/14 06:51:42 mpech Exp $
  */
 
 #ifndef lint
@@ -50,7 +50,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)locate.c    8.1 (Berkeley) 6/6/93";
 #else
-static char rcsid[] = "$OpenBSD: locate.c,v 1.9 2001/05/11 15:56:14 art Exp $";
+static char rcsid[] = "$OpenBSD: locate.c,v 1.13 2002/03/14 06:51:42 mpech Exp $";
 #endif
 #endif /* not lint */
 
@@ -102,9 +102,6 @@ static char rcsid[] = "$OpenBSD: locate.c,v 1.9 2001/05/11 15:56:14 art Exp $";
 
 #ifdef sun
 #include <netinet/in.h> /* SunOS byteorder(3) htohl(3) */
-#ifndef __P
-#define __P(x) x
-#endif
 #endif
 
 #include "locate.h"
@@ -126,23 +123,23 @@ int f_limit;            /* limit number of output lines, 0 == infinite */
 u_int counter;          /* counter for matches [-c] */
 
 
-void    usage __P((void));
-void    statistic __P((FILE *, char *));
-void    fastfind __P((FILE *, char *, char *));
-void    fastfind_icase __P((FILE *, char *, char *));
-void    fastfind_mmap __P((char *, caddr_t, int, char *));
-void    fastfind_mmap_icase __P((char *, caddr_t, int, char *));
-void	search_mmap __P((char *, char **));
-void	search_fopen __P((char *, char **));
-unsigned long cputime __P((void));
+void    usage(void);
+void    statistic(FILE *, char *);
+void    fastfind(FILE *, char *, char *);
+void    fastfind_icase(FILE *, char *, char *);
+void    fastfind_mmap(char *, caddr_t, int, char *);
+void    fastfind_mmap_icase(char *, caddr_t, int, char *);
+void	search_mmap(char *, char **);
+void	search_fopen(char *, char **);
+unsigned long cputime(void);
 
-extern char     **colon __P((char **, char*, char*));
-extern void     print_matches __P((u_int));
-extern int      getwm __P((caddr_t));
-extern int      getwf __P((FILE *));
-extern u_char   *tolower_word __P((u_char *));
-extern int	check_bigram_char __P((int));
-extern char 	*patprep __P((char *));
+extern char     **colon(char **, char*, char*);
+extern void     print_matches(u_int);
+extern int      getwm(caddr_t);
+extern int      getwf(FILE *);
+extern u_char   *tolower_word(u_char *);
+extern int	check_bigram_char(int);
+extern char 	*patprep(char *);
 
 extern char     *optarg;
 extern int      optind;
@@ -153,7 +150,7 @@ main(argc, argv)
         int argc;
         char **argv;
 {
-        register int ch;
+        int ch;
         char **dbv = NULL;
 #ifdef MMAP
         f_mmap = 1;		/* mmap is default */
@@ -273,7 +270,7 @@ search_fopen(db, s)
 #endif
 		if (!f_stdin &&
 		    fseek(fp, (long)0, SEEK_SET) == -1)
-			err(1, "fseek to begin of ``%s''\n", path_fcodes);
+			err(1, "fseek to begin of ``%s''", path_fcodes);
 
 		if (f_icase)
 			fastfind_icase(fp, *s, path_fcodes);
@@ -326,7 +323,7 @@ search_mmap(db, s)
 	}
 
 	if (munmap(p, (size_t)len) == -1)
-		warn("munmap %s\n", path_fcodes);
+		warn("munmap %s", path_fcodes);
 	
 	(void)close(fd);
 }

@@ -1,4 +1,4 @@
-.\"     $OpenBSD: nc.1,v 1.19 2001/09/02 18:45:41 jakob Exp $
+.\"     $OpenBSD: nc.1,v 1.22 2002/02/28 18:05:36 markus Exp $
 .\"
 .\" Copyright (c) 1996 David Sacerdote
 .\" All rights reserved.
@@ -33,12 +33,13 @@
 .Nd "arbitrary TCP and UDP connections and listens"
 .Sh SYNOPSIS
 .Nm nc
-.Op Fl 46hklnrtuvz
+.Op Fl 46hklnrtuvzU
 .Op Fl i Ar interval
 .Op Fl p Ar source port
 .Op Fl s Ar source ip address
 .Op Fl x Ar proxy address Op :port
 .Op Fl w Ar timeout
+.Op Fl X Ar socks version
 .Op Ar hostname
 .Op Ar port[s]
 .Sh DESCRIPTION
@@ -95,7 +96,7 @@ Also causes a delay time between connections to multiple ports.
 .It Fl k
 Forces
 .Nm
-to stay listening for another connection after it's current connection
+to stay listening for another connection after its current connection
 is completed.
 .It Fl l
 Used to specify that
@@ -103,8 +104,8 @@ Used to specify that
 should listen for an incoming connection rather than initiate a
 connection to a remote host.
 .It Fl n
-Do not do any DNS or service lookups on any specified addresses or
-hostnames, or ports.
+Do not do any DNS or service lookups on any specified addresses,
+hostnames or ports.
 .It Fl p Ar port
 Specifies the source port
 .Nm
@@ -112,7 +113,7 @@ should use, subject to privilege restrictions and availability.
 .It Fl r
 Specifies that source and/or destination ports should be chosen randomly
 instead of sequentially within a range or in the order that the system
-assigns.
+assigns them.
 .It Fl s Ar hostname/ip address
 Specifies the IP of the interface which is used to send the packets.
 .It Fl t
@@ -133,12 +134,20 @@ Requests that
 .Nm
 should connect to
 .Ar hostname
-using a socks5 proxy at address and port.
+using a SOCKS proxy at address and port.
 If port is not specified, port 1080 is used.
 .It Fl z
 Specifies that
 .Nm
 should just scan for listening daemons, without sending any data to them.
+.It Fl U
+Specifies to use Unix Domain Sockets.
+.It Fl X Ar version
+Requests that
+.Nm
+should use the specified version of the SOCKS protocol when talking to
+a SOCKS proxy.
+If version is not specified, SOCKS version 5 is used.
 .El
 .Sh EXAMPLES
 .Bl -tag -width x
@@ -158,9 +167,6 @@ IP for the local end of the connection.
 .It Li "nc -v hostname 42"
 Open a TCP connection to port 42 of hostname, displaying some
 diagnostic messages on stderr.
-.It Li "nc -v -v hostname 42"
-Open a TCP connection to port 42 of hostname, displaying all
-diagnostic messages on stderr.
 .It Li "nc -v -z hostname 20-30"
 Attempt to open TCP connections to ports 20 through 30 of
 hostname, and report which ones
@@ -176,6 +182,10 @@ the remote host, and send data from the remote host to stdout.
 Connect to port 1000 of hostname, send the string "foobar"
 followed by a newline, and move data from port 1000 of hostname to
 stdout until hostname closes the connection.
+.It Li "nc -U /var/tmp/dsocket"
+Connect to a Unix Domain Socket.
+.It Li "nc -lU /var/tmp/dsocket"
+Create and listen on a Unix Domain Socket.
 .El
 .Sh SEE ALSO
 .Xr cat 1 ,

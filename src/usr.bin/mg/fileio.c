@@ -1,4 +1,4 @@
-/*	$OpenBSD: fileio.c,v 1.20 2001/09/21 15:08:16 wilfried Exp $	*/
+/*	$OpenBSD: fileio.c,v 1.27 2002/03/27 17:42:37 millert Exp $	*/
 
 /*
  *	POSIX fileio.c
@@ -10,7 +10,7 @@ static FILE	*ffp;
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/dir.h>
-#include <errno.h>
+#include <string.h>
 #include <fcntl.h>
 #include <unistd.h>
 
@@ -18,9 +18,7 @@ static FILE	*ffp;
  * Open a file for reading.
  */
 int
-ffropen(fn, bp)
-	char	*fn;
-	BUFFER	*bp;
+ffropen(const char *fn, BUFFER *bp)
 {
 	struct stat	statbuf;
 
@@ -41,20 +39,31 @@ ffropen(fn, bp)
  * FALSE on error (cannot create).
  */
 int
-ffwopen(fn, bp)
-	char   *fn;
-	BUFFER *bp;
+ffwopen(const char *fn, BUFFER *bp)
 {
+	int fd;
+	mode_t mode = DEFFILEMODE;
 
-	if ((ffp = fopen(fn, "w")) == NULL) {
-		ewprintf("Cannot open file for writing");
+	if (bp && bp->b_fi.fi_mode)
+		mode = bp->b_fi.fi_mode & 07777;
+
+	fd = open(fn, O_RDWR | O_CREAT | O_TRUNC, mode);
+	if (fd == -1) {
+		ffp = NULL;
+		ewprintf("Cannot open file for writing : %s", strerror(errno));
 		return (FIOERR);
+	}		
+
+	if ((ffp = fdopen(fd, "w")) == NULL) {
+		ewprintf("Cannot open file for writing : %s", strerror(errno));
+		close(fd);
+		return (FIOERR);	
 	}
 
 	/*
 	 * If we have file information, use it.  We don't bother to check for
 	 * errors, because there's no a lot we can do about it.  Certainly
-	 * trying to change ownership will fail if we aren' root.  That's
+	 * trying to change ownership will fail if we aren't root.  That's
 	 * probably OK.  If we don't have info, no need to get it, since any
 	 * future writes will do the same thing.
 	 */
@@ -71,8 +80,7 @@ ffwopen(fn, bp)
  */
 /* ARGSUSED */
 int
-ffclose(bp)
-	BUFFER *bp;
+ffclose(BUFFER *bp)
 {
 
 	(void) fclose(ffp);
@@ -87,8 +95,7 @@ ffclose(bp)
  * end of buffer.
  */
 int
-ffputbuf(bp)
-	BUFFER *bp;
+ffputbuf(BUFFER *bp)
 {
 	char   *cp;
 	char   *cpend;
@@ -124,10 +131,7 @@ ffputbuf(bp)
  * of data without the normally implied \n.
  */
 int
-ffgetline(buf, nbuf, nbytes)
-	char	*buf;
-	int	nbuf;
-	int	*nbytes;
+ffgetline(char *buf, int nbuf, int *nbytes)
 {
 	int	c, i;
 
@@ -155,35 +159,33 @@ ffgetline(buf, nbuf, nbytes)
  * a problem when using mg with things like crontab and vipw.
  */
 int
-fbackupfile(fn)
-	char  *fn;
+fbackupfile(const char *fn)
 {
 	struct stat	sb;
 	int		from, to, serrno;
 	size_t		nread;
-	size_t		len;
 	char		buf[BUFSIZ];
 	char		*nname;
 
-	len = strlen(fn);
-	if ((nname = malloc(len + 1 + 1)) == NULL) {
-		ewprintf("Can't get %d bytes", len + 1 + 1);
+	if (asprintf(&nname, "%s~", fn) == -1) {
+		ewprintf("Can't allocate temp file name : %s",
+		    strerror(errno));
 		return (ABORT);
 	}
-	(void) strcpy(nname, fn);
-	(void) strcpy(nname + len, "~");
-
 	if (stat(fn, &sb) == -1) {
-		ewprintf("Can't stat %s", fn);
+		ewprintf("Can't stat %s : %s", fn, strerror(errno));
 		return (FALSE);
 	}
 
-	if ((from = open(fn, O_RDONLY)) == -1)
+	if ((from = open(fn, O_RDONLY)) == -1) {
+		free(nname);
 		return (FALSE);
+	}
 	to = open(nname, O_WRONLY|O_CREAT|O_TRUNC, (sb.st_mode & 0777));
 	if (to == -1) {
 		serrno = errno;
 		close(from);
+		free(nname);
 		errno = serrno;
 		return (FALSE);
 	}
@@ -196,10 +198,13 @@ fbackupfile(fn)
 	serrno = errno;
 	close(from);
 	close(to);
-	if (nread == -1)
-		unlink(nname);
+	if (nread == -1) {
+		if (unlink(nname) == -1)
+			ewprintf("Can't unlink temp : %s", strerror(errno));
+	}
 	free(nname);
 	errno = serrno;
+
 	return (nread == -1 ? FALSE : TRUE);
 }
 #endif
@@ -223,8 +228,7 @@ extern char	*wdir;
 #endif
 
 char *
-adjustname(fn)
-	char	*fn;
+adjustname(const char *fn)
 {
 	char		*cp;
 	static char	fnb[NFILEN];
@@ -293,8 +297,8 @@ adjustname(fn)
 				     != -1;) {
 					if (linkbuf[0] != '/') {
 						--cp;
-						while (cp > fnb && *--cp != '/') {
-						}
+						while (cp > fnb && *--cp != '/')
+							;
 						++cp;
 						(void) strncpy(cp, linkbuf, i);
 						cp += i;
@@ -310,8 +314,8 @@ adjustname(fn)
 				cp[-1] = '/';
 #endif
 				--cp;
-				while (cp > fnb && *--cp != '/') {
-				}
+				while (cp > fnb && *--cp != '/')
+					;
 				++cp;
 				if (fn[2] == '\0') {
 					*--cp = '\0';
@@ -329,8 +333,8 @@ adjustname(fn)
 		default:
 			break;
 		}
-		while (*fn && (*cp++ = *fn++) != '/') {
-		}
+		while (*fn && (*cp++ = *fn++) != '/')
+			;
 	}
 	if (cp[-1] == '/')
 		--cp;
@@ -346,8 +350,7 @@ adjustname(fn)
  * to the startup file name.
  */
 char *
-startupfile(suffix)
-	char	*suffix;
+startupfile(char *suffix)
 {
 	static char	file[NFILEN];
 	char		*home;
@@ -369,7 +372,7 @@ startupfile(suffix)
 		return file;
 nohome:
 #ifdef STARTUPFILE
-	if (suffix == NULL)
+	if (suffix == NULL) {
 		if (snprintf(file, sizeof(file), "%s", STARTUPFILE)
 			    >= sizeof(file))
 			return NULL;
@@ -391,9 +394,7 @@ nohome:
 #include "kbd.h"
 
 int
-copy(frname, toname)
-	char	*frname;
-	char	*toname;
+copy(char *frname, char *toname)
 {
 	pid_t	pid;
 	int	status;
@@ -410,9 +411,11 @@ copy(frname, toname)
 	}
 }
 
+/*
+ * dirname needs to have enough place to store an additional '/'.
+ */
 BUFFER *
-dired_(dirname)
-	char	*dirname;
+dired_(char *dirname)
 {
 	BUFFER	*bp;
 	FILE	*dirpipe;
@@ -435,6 +438,7 @@ dired_(dirname)
 	}
 	if (bclear(bp) != TRUE)
 		return FALSE;
+	bp->b_flag |= BFREADONLY;
 	if (snprintf(line, sizeof(line), "ls -al %s", dirname) >= sizeof(line)){
 		ewprintf("Path too long");
 		return NULL;
@@ -453,7 +457,7 @@ dired_(dirname)
 		return NULL;
 	}
 	bp->b_dotp = lforw(bp->b_linep);	/* go to first line */
-	(void) strncpy(bp->b_fname, dirname, NFILEN);
+	(void) strlcpy(bp->b_fname, dirname, sizeof bp->b_fname);
 	if ((bp->b_modes[0] = name_mode("dired")) == NULL) {
 		bp->b_modes[0] = name_mode("fundamental");
 		ewprintf("Could not find mode dired");
@@ -463,19 +467,25 @@ dired_(dirname)
 	return bp;
 }
 
-int
-d_makename(lp, fn)
-	LINE  *lp;
-	char  *fn;
-{
-	char  *cp;
+#define NAME_FIELD	8
 
-	if (llength(lp) <= 56)
-		return ABORT;
-	(void) strcpy(fn, curbp->b_fname);
-	cp = fn + strlen(fn);
-	bcopy(&lp->l_text[56], cp, llength(lp) - 56);
-	cp[llength(lp) - 56] = '\0';
+int
+d_makename(LINE *lp, char *fn, int len)
+{
+	int i;
+	char *p, *np;
+	
+	strlcpy(fn, curbp->b_fname, len);
+	p = lp->l_text;
+	for (i = 0; i < NAME_FIELD; i++) {
+		np = strpbrk(p, "\t ");
+		if (np == NULL)
+			return ABORT;
+		p = np + 1;
+		while (*p != '\0' && strchr("\t ", *p))
+			p++;
+	}
+	strlcat(fn, p, len);
 	return lgetc(lp, 2) == 'd';
 }
 #endif				/* NO_DIRED */
@@ -490,8 +500,7 @@ struct filelist {
  */
 
 LIST *
-make_file_list(buf)
-	char	*buf;
+make_file_list(char *buf)
 {
 	char		*dir, *file, *cp;
 	int		len, preflen;
@@ -539,7 +548,7 @@ make_file_list(buf)
 		}
 	}
 	/* Now we get the prefix of the name the user typed. */
-	strcpy(prefixx, buf);
+	strlcpy(prefixx, buf, sizeof prefixx);
 	cp = strrchr(prefixx, '/');
 	if (cp == NULL)
 		prefixx[0] = 0;

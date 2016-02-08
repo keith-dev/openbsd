@@ -1,4 +1,4 @@
-/*	$OpenBSD: parse.c,v 1.26 2001/08/08 07:02:42 deraadt Exp $	*/
+/*	$OpenBSD: parse.c,v 1.29 2002/02/16 21:27:30 millert Exp $	*/
 
 /*
  * This program is in the public domain and may be used freely by anyone
@@ -30,10 +30,10 @@
 
 #define IO_TIMEOUT	30	/* Timeout I/O operations after N seconds */
 
-int check_noident __P((char *));
-ssize_t timed_read __P((int, void *, size_t, time_t));
-ssize_t timed_write __P((int, const void *, size_t, time_t));
-void gentoken __P((char *, int));
+int check_noident(char *);
+ssize_t timed_read(int, void *, size_t, time_t);
+ssize_t timed_write(int, const void *, size_t, time_t);
+void gentoken(char *, int);
 
 /*
  * A small routine to check for the existence of the ".noident"
@@ -174,16 +174,18 @@ timed_write(fd, buf, siz, timeout)
 	time_t timeout;
 {
 	int error;
-	fd_set writeds;
+	struct pollfd wfd[2];
 	struct timeval tv;
 
-	FD_ZERO(&writeds);
-	FD_SET(fd, &writeds);
+	wfd[0].fd = fd;
+	wfd[0].events = POLLOUT;
+	wfd[0].revents = 0;
 
 	tv.tv_sec = timeout;
 	tv.tv_usec = 0;
 
-	if ((error = select(fd + 1, 0, &writeds, 0, &tv)) <= 0)
+	if ((error = poll(wfd, 1, tv.tv_sec * 1000 +
+	    tv.tv_usec / 1000)) <= 0)
 		return error;
 	return(write(fd, buf, siz));
 }
@@ -280,10 +282,10 @@ parse(fd, laddr, faddr)
 	if (!pw) {
 		if (syslog_flag)
 			syslog(LOG_WARNING,
-			    "getpwuid() could not map uid (%d) to name",
+			    "getpwuid() could not map uid (%u) to name",
 			    uid);
 		n = snprintf(buf, sizeof(buf),
-		    "%d , %d : USERID : %s%s%s :%d\r\n",
+		    "%d , %d : USERID : %s%s%s :%u\r\n",
 		    lport, fport, opsys_name, charset_sep, charset_name, uid);
 		if (timed_write(fd, buf, n, IO_TIMEOUT) != n && syslog_flag) {
 			syslog(LOG_NOTICE, "write to %s: %m", gethost4_addr(faddr));
@@ -339,7 +341,7 @@ parse(fd, laddr, faddr)
 
 	if (number_flag) {
 		n = snprintf(buf, sizeof(buf),
-		    "%d , %d : USERID : %s%s%s :%d\r\n",
+		    "%d , %d : USERID : %s%s%s :%u\r\n",
 		    lport, fport, opsys_name, charset_sep, charset_name, uid);
 		if (timed_write(fd, buf, n, IO_TIMEOUT) != n && syslog_flag) {
 			syslog(LOG_NOTICE, "write to %s: %m", gethost4_addr(faddr));
@@ -450,10 +452,10 @@ parse6(fd, laddr, faddr)
 	if (!pw) {
 		if (syslog_flag)
 			syslog(LOG_WARNING,
-			    "getpwuid() could not map uid (%d) to name",
+			    "getpwuid() could not map uid (%u) to name",
 			    uid);
 		n = snprintf(buf, sizeof(buf),
-		    "%d , %d : USERID : %s%s%s :%d\r\n",
+		    "%d , %d : USERID : %s%s%s :%u\r\n",
 		    lport, fport, opsys_name, charset_sep, charset_name, uid);
 		if (timed_write(fd, buf, n, IO_TIMEOUT) != n && syslog_flag) {
 			syslog(LOG_NOTICE, "write to %s: %m", gethost6(faddr));
@@ -509,7 +511,7 @@ parse6(fd, laddr, faddr)
 
 	if (number_flag) {
 		n = snprintf(buf, sizeof(buf),
-		    "%d , %d : USERID : %s%s%s :%d\r\n",
+		    "%d , %d : USERID : %s%s%s :%u\r\n",
 		    lport, fport, opsys_name, charset_sep, charset_name, uid);
 		if (timed_write(fd, buf, n, IO_TIMEOUT) != n && syslog_flag) {
 			syslog(LOG_NOTICE, "write to %s: %m", gethost6(faddr));

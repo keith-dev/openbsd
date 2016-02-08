@@ -1,4 +1,4 @@
-/*	$OpenBSD: rsh.c,v 1.21 2001/09/27 16:24:45 deraadt Exp $	*/
+/*	$OpenBSD: rsh.c,v 1.25 2002/02/19 19:39:39 millert Exp $	*/
 
 /*-
  * Copyright (c) 1983, 1990 The Regents of the University of California.
@@ -41,7 +41,7 @@ char copyright[] =
 
 #ifndef lint
 /*static char sccsid[] = "from: @(#)rsh.c	5.24 (Berkeley) 7/1/91";*/
-static char rcsid[] = "$OpenBSD: rsh.c,v 1.21 2001/09/27 16:24:45 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: rsh.c,v 1.25 2002/02/19 19:39:39 millert Exp $";
 #endif /* not lint */
 
 #include <sys/types.h>
@@ -59,11 +59,7 @@ static char rcsid[] = "$OpenBSD: rsh.c,v 1.21 2001/09/27 16:24:45 deraadt Exp $"
 #include <unistd.h>
 #include <errno.h>
 #include <string.h>
-#ifdef __STDC__
 #include <stdarg.h>
-#else
-#include <varargs.h>
-#endif
 #include "pathnames.h"
 
 #ifdef KERBEROS
@@ -75,19 +71,19 @@ Key_schedule schedule;
 int use_kerberos = 1, doencrypt;
 char dst_realm_buf[REALM_SZ], *dest_realm;
 
-void warning __P((const char *, ...));
-void desrw_set_key __P((des_cblock *, des_key_schedule *));
-int des_read __P((int, char *, int));
-int des_write __P((int, char *, int));
+void warning(const char *, ...);
+void desrw_set_key(des_cblock *, des_key_schedule *);
+int des_read(int, char *, int);
+int des_write(int, char *, int);
 
-int krcmd __P((char **, u_short, char *, char *, int *, char *));
-int krcmd_mutual __P((char **, u_short, char *, char *, int *, char *,
-		      CREDENTIALS *, Key_schedule));
+int krcmd(char **, u_short, char *, char *, int *, char *);
+int krcmd_mutual(char **, u_short, char *, char *, int *, char *,
+    CREDENTIALS *, Key_schedule);
 #endif
 
-void usage __P((void));
+void usage(void);
 
-void talk __P((int, sigset_t *, int, register int));
+void talk(int, sigset_t *, int, int);
 
 /*
  * rsh - remote shell
@@ -105,7 +101,7 @@ main(argc, argv)
 	struct servent *sp;
 	sigset_t mask, omask;
 	int argoff, asrsh, ch, dflag, nflag, one, pid = 0, rem, uid;
-	register char *p;
+	char *p;
 	char *args, *host, *user, *copyargs();
 	void sendsig();
 
@@ -333,10 +329,10 @@ void
 talk(nflag, omask, pid, rem)
 	int nflag, pid;
 	sigset_t *omask;
-	register int rem;
+	int rem;
 {
-	register int cc, wc;
-	register char *bp;
+	int cc, wc;
+	char *bp;
 	fd_set readfrom, ready, rembits;
 	char buf[BUFSIZ];
 
@@ -444,28 +440,15 @@ sendsig(signo)
 #ifdef KERBEROS
 /* VARARGS */
 void
-#ifdef __STDC__
 warning(const char *fmt, ...)
-#else
-warning(va_alist)
-va_dcl
-#endif
 {
 	va_list ap;
-#ifndef __STDC__
-	char *fmt;
-#endif
 	char myrealm[REALM_SZ];
 
 	if (krb_get_lrealm(myrealm, 0) != KSUCCESS)
 		return;
 	(void)fprintf(stderr, "rsh: warning, using standard rsh: ");
-#ifdef __STDC__
 	va_start(ap, fmt);
-#else
-	va_start(ap);
-	fmt = va_arg(ap, char *);
-#endif
 	vfprintf(stderr, fmt, ap);
 	va_end(ap);
 	(void)fprintf(stderr, ".\n");
@@ -476,8 +459,8 @@ char *
 copyargs(argv)
 	char **argv;
 {
-	register int cc;
-	register char **ap, *p;
+	int cc;
+	char **ap, *p;
 	char *args, *malloc();
 
 	cc = 0;

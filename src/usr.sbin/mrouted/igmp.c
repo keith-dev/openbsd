@@ -28,8 +28,8 @@ u_int32_t	dvmrp_genid;		     /* IGMP generation id          */
  * Local function definitions.
  */
 /* u_char promoted to u_int */
-static char *	packet_kind __P((u_int type, u_int code));
-static int	igmp_log_level __P((u_int type, u_int code));
+static char *	packet_kind(u_int type, u_int code);
+static int	igmp_log_level(u_int type, u_int code);
 
 /*
  * Open and initialize the igmp socket, and fill in the non-changing
@@ -152,7 +152,7 @@ accept_igmp(recvlen)
     }
 
     iphdrlen  = ip->ip_hl << 2;
-    ipdatalen = ip->ip_len;
+    ipdatalen = ntohs(ip->ip_len);
     if (iphdrlen + ipdatalen != recvlen) {
 	log(LOG_WARNING, 0,
 	    "received packet from %s shorter (%u bytes) than hdr+data length (%u+%u)",

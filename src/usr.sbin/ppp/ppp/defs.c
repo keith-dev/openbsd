@@ -23,11 +23,11 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	$OpenBSD: defs.c,v 1.20 2001/06/15 13:58:16 brian Exp $
+ *	$OpenBSD: defs.c,v 1.23 2002/03/31 02:38:49 brian Exp $
  */
 
 
-#include <sys/types.h>
+#include <sys/param.h>
 #include <netdb.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -35,15 +35,24 @@
 
 #include <ctype.h>
 #include <errno.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#if defined(__FreeBSD__) && !defined(NOKLDLOAD)
+#include <sys/linker.h>
+#include <sys/module.h>
+#endif
 #include <termios.h>
 #if !defined(__FreeBSD__) || __FreeBSD__ < 3
 #include <time.h>
 #endif
 #include <unistd.h>
 
+#if defined(__FreeBSD__) && !defined(NOKLDLOAD)
+#include "id.h"
+#include "log.h"
+#endif
 #include "defs.h"
 
 #define	issep(c)	((c) == '\t' || (c) == ' ')
@@ -230,6 +239,12 @@ static const struct speeds {
 #ifdef B230400
   { 230400, B230400, },
 #endif
+#ifdef B460800
+  { 460800, B460800, },
+#endif
+#ifdef B921600
+  { 921600, B921600, },
+#endif
 #ifdef EXTA
   { 19200, EXTA, },
 #endif
@@ -386,4 +401,38 @@ void
 zerofdset(fd_set *s)
 {
   memset(s, '\0', howmany(getdtablesize(), NFDBITS) * sizeof (fd_mask));
+}
+
+void
+Concatinate(char *buf, size_t sz, int argc, const char *const *argv)
+{
+  int i, n, pos;
+
+  *buf = '\0';
+  for (pos = i = 0; i < argc; i++) {
+    n = snprintf(buf + pos, sz - pos, "%s%s", i ? " " : "", argv[i]);
+    if (n < 0) {
+      buf[pos] = '\0';
+      break;
+    }
+    if ((pos += n) >= sz)
+      break;
+  }
+}
+
+void
+loadmodules(int how, const char *module, ...)
+{
+#if defined(__FreeBSD__) && !defined(NOKLDLOAD)
+  va_list ap;
+
+  va_start(ap, module);
+  while (module != NULL) {
+    if (modfind(module) == -1 && ID0kldload(module) == -1 &&
+        how == LOAD_VERBOSLY)
+      log_Printf(LogWARN, "%s: Cannot load module\n", module);
+    module = va_arg(ap, const char *);
+  }
+  va_end(ap);
+#endif
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: mount_nfs.c,v 1.24 2001/10/03 18:50:07 hin Exp $	*/
+/*	$OpenBSD: mount_nfs.c,v 1.28 2002/03/21 21:16:07 millert Exp $	*/
 /*	$NetBSD: mount_nfs.c,v 1.12.4.1 1996/05/25 22:48:05 fvdl Exp $	*/
 
 /*
@@ -168,25 +168,24 @@ u_short port_no = 0;
 int force2 = 0;
 int force3 = 0;
 
-int	getnfsargs __P((char *, struct nfs_args *));
+int	getnfsargs(char *, struct nfs_args *);
 #ifdef ISO
-struct	iso_addr *iso_addr __P((const char *));
+struct	iso_addr *iso_addr(const char *);
 #endif
-void	set_rpc_maxgrouplist __P((int));
-__dead	void usage __P((void));
-int	xdr_dir __P((XDR *, char *));
-int	xdr_fh __P((XDR *, struct nfhret *));
+void	set_rpc_maxgrouplist(int);
+__dead	void usage(void);
+int	xdr_dir(XDR *, char *);
+int	xdr_fh(XDR *, struct nfhret *);
 
 int
 main(argc, argv)
 	int argc;
 	char *argv[];
 {
-	register int c;
-	register struct nfs_args *nfsargsp;
+	int c;
+	struct nfs_args *nfsargsp;
 	struct nfs_args nfsargs;
-	struct nfsd_cargs ncd;
-	int mntflags, altflags, i, nfssvc_flag, num;
+	int mntflags, altflags, num;
 	char *name, *p, *spec;
 
 	retrycnt = DEF_RETRY;
@@ -196,7 +195,7 @@ main(argc, argv)
 	nfsargs = nfsdefargs;
 	nfsargsp = &nfsargs;
 	while ((c = getopt(argc, argv,
-	    "23a:bcdD:g:I:iL:l:o:PpqR:r:sTt:w:x:U")) != EOF)
+	    "23a:bcdD:g:I:iL:lo:PpqR:r:sTt:w:x:U")) != -1)
 		switch (c) {
 		case '3':
 			if (force2)
@@ -393,7 +392,7 @@ getnfsargs(spec, nfsargsp)
 	char *spec;
 	struct nfs_args *nfsargsp;
 {
-	register CLIENT *clp;
+	CLIENT *clp;
 	struct hostent *hp;
 	static struct sockaddr_in saddr;
 #ifdef ISO
@@ -583,9 +582,9 @@ xdr_dir(xdrsp, dirp)
 int
 xdr_fh(xdrsp, np)
 	XDR *xdrsp;
-	register struct nfhret *np;
+	struct nfhret *np;
 {
-	register int i;
+	int i;
 	long auth, authcnt, authfnd = 0;
 
 	if (!xdr_u_long(xdrsp, &np->stat))
@@ -626,9 +625,9 @@ __dead void
 usage()
 {
 	(void)fprintf(stderr, "usage: mount_nfs %s\n%s\n%s\n%s\n",
-"[-23bcdiklMPsT] [-a maxreadahead] [-D deadthresh]",
-"\t[-g maxgroups] [-L leaseterm] [-o options] [-R retrycnt]",
-"\t[-r readsize] [-t timeout] [-w writesize] [-x retrans]",
+"[-23PTUbcdilqs] [-a maxreadahead] [-D deadthresh]",
+"\t[-I readdirsize] [-g maxgroups] [-L leaseterm] [-o options]",
+"\t[-R retrycnt] [-r readsize] [-t timeout] [-w writesize] [-x retrans]",
 "\trhost:path node");
 	exit(1);
 }

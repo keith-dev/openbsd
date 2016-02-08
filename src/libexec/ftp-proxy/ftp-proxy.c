@@ -1,4 +1,4 @@
-/*	$OpenBSD: ftp-proxy.c,v 1.17 2001/10/10 15:32:39 beck Exp $ */
+/*	$OpenBSD: ftp-proxy.c,v 1.20 2002/03/12 08:01:51 dhartmei Exp $ */
 
 /*
  * Copyright (c) 1996-2001
@@ -53,7 +53,7 @@
  *
  * supports tcp wrapper lookups/access control with the -w flag using
  * the real destination address - the tcp wrapper stuff is done after
- * the real destination address is retreived from pf
+ * the real destination address is retrieved from pf
  *
  */
 
@@ -164,8 +164,9 @@ static void
 usage()
 {
 	syslog(LOG_NOTICE,
-	    "usage: %s [-ArVw] [-t timeout] [-D debuglevel] %s",
-	    __progname, "[-m min_port] [-M max_port]\n");
+	    "usage: %s [-AnrVw] [-t timeout] [-D debuglevel] %s %s",
+	    __progname, "[-g group] [-u user] [-m min_port]",
+	    "[-M max_port]\n");
 	exit(EX_USAGE);
 }
 
@@ -368,7 +369,7 @@ show_xfer_stats()
 			goto logit;
 		len -= i;
 	}
-	strlcat(tbuf, ")", len);
+	strlcat(tbuf, ")", sizeof(tbuf));
  logit:
 	syslog(LOG_INFO, "%s", tbuf);
 }
@@ -889,15 +890,18 @@ do_server_reply(struct csiob *server, struct csiob *client)
 
 		tailptr = strchr((char *)server->line_buffer, '(');
 		if (tailptr == NULL) {
-			syslog(LOG_NOTICE, "malformed 227 reply");
-			exit(EX_DATAERR);
+			tailptr = strrchr((char *)server->line_buffer, ' ');
+			if (tailptr == NULL) {
+				syslog(LOG_NOTICE, "malformed 227 reply");
+				exit(EX_DATAERR);
+			}
 		}
+		tailptr++; /* skip past space or ( */ 
 
 		byte_number = 0;
 		values[0] = 0;
 
-
-		i = sscanf(tailptr, "(%u,%u,%u,%u,%u,%u)", &values[0],
+		i = sscanf(tailptr, "%u,%u,%u,%u,%u,%u", &values[0],
 		    &values[1], &values[2], &values[3], &values[4],
 		    &values[5]);
 		if (i != 6) {
@@ -1103,11 +1107,11 @@ main(int argc, char **argv)
 	 * of our end of the server socket so we know our IP address
 	 * from the real server's perspective.
 	 */
-	i = getnameinfo((struct sockaddr *)&client_iob.sa,
-	    sizeof(client_iob.sa), OurName, sizeof(OurName), NULL, 0, flags);
-
 	salen = sizeof(server_iob.sa);
 	getsockname(server_iob.fd, (struct sockaddr *)&server_iob.sa, &salen);
+
+	i = getnameinfo((struct sockaddr *)&server_iob.sa,
+	    sizeof(server_iob.sa), OurName, sizeof(OurName), NULL, 0, flags);
 
 	debuglog(1, "our end of socket to server is %s:%u\n", OurName,
 	    ntohs(server_iob.sa.sin_port));

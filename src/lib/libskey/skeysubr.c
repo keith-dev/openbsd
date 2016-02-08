@@ -9,7 +9,7 @@
  *
  * S/Key misc routines.
  *
- * $OpenBSD: skeysubr.c,v 1.20 2001/06/23 21:03:47 millert Exp $
+ * $OpenBSD: skeysubr.c,v 1.23 2002/02/16 21:27:28 millert Exp $
  */
 
 #include <stdio.h>
@@ -18,6 +18,7 @@
 #include <ctype.h>
 #include <signal.h>
 #include <termios.h>
+#include <unistd.h>
 #include <md4.h>
 #include <md5.h>
 #include <sha1.h>
@@ -30,13 +31,13 @@
 #define SKEY_HASH_DEFAULT	1
 #endif
 
-static int keycrunch_md4 __P((char *, char *, char *));
-static int keycrunch_md5 __P((char *, char *, char *));
-static int keycrunch_sha1 __P((char *, char *, char *));
-static int keycrunch_rmd160 __P((char *, char *, char *));
-static void lowcase __P((char *));
-static void skey_echo __P((int));
-static void trapped __P((int));
+static int keycrunch_md4(char *, char *, char *);
+static int keycrunch_md5(char *, char *, char *);
+static int keycrunch_sha1(char *, char *, char *);
+static int keycrunch_rmd160(char *, char *, char *);
+static void lowcase(char *);
+static void skey_echo(int);
+static void trapped(int);
 
 /* Current hash type (index into skey_hash_types array) */
 static int skey_hash_type = SKEY_HASH_DEFAULT;
@@ -48,7 +49,7 @@ static int skey_hash_type = SKEY_HASH_DEFAULT;
 #define SKEY_ALGORITH_LAST	4
 struct skey_algorithm_table {
 	const char *name;
-	int (*keycrunch) __P((char *, char *, char *));
+	int (*keycrunch)(char *, char *, char *);
 };
 static struct skey_algorithm_table skey_algorithm_table[] = {
 	{ "md4", keycrunch_md4 },
@@ -292,7 +293,7 @@ readpass(buf, n)
 	char *buf;
 	int n;
 {
-	void (*old_handler) __P(());
+	void (*old_handler)();
 
 	/* Turn off echoing */
 	skey_echo(0);
@@ -335,13 +336,12 @@ static void
 trapped(sig)
 	int sig;
 {
-	(void)fputs("^C\n", stderr);
-	(void)fflush(stderr);
+	write(STDERR_FILENO, "^C\n", 3);
 
-	/* Turn on echo if necesary */
+	/* Turn on echo if necessary */
 	skey_echo(1);
 
-	exit(-1);
+	_exit(-1);
 }
 
 /*

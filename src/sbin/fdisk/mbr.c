@@ -1,4 +1,4 @@
-/*	$OpenBSD: mbr.c,v 1.12 2001/01/28 00:51:46 weingart Exp $	*/
+/*	$OpenBSD: mbr.c,v 1.15 2002/01/18 08:38:26 kjell Exp $	*/
 
 /*
  * Copyright (c) 1997 Tobias Weingartner
@@ -107,8 +107,6 @@ MBR_parse(disk, mbr_buf, offset, reloff, mbr)
 	memcpy(mbr->code, mbr_buf, MBR_CODE_SIZE);
 	mbr->offset = offset;
 	mbr->reloffset = reloff;
-	mbr->nt_serial = getlong(&mbr_buf[MBR_NTSER_OFF]);
-	mbr->spare = getshort(&mbr_buf[MBR_SPARE_OFF]);
 	mbr->signature = getshort(&mbr_buf[MBR_SIG_OFF]);
 
 	for (i = 0; i < NDOSPART; i++)
@@ -124,8 +122,6 @@ MBR_make(mbr, mbr_buf)
 	int i;
 
 	memcpy(mbr_buf, mbr->code, MBR_CODE_SIZE);
-	putlong(&mbr_buf[MBR_NTSER_OFF], mbr->nt_serial);
-	putshort(&mbr_buf[MBR_SPARE_OFF], mbr->spare);
 	putshort(&mbr_buf[MBR_SIG_OFF], mbr->signature);
 
 	for (i = 0; i < NDOSPART; i++)
@@ -134,19 +130,20 @@ MBR_make(mbr, mbr_buf)
 }
 
 void
-MBR_print(mbr)
+MBR_print(mbr, units)
 	mbr_t *mbr;
+	char *units;
 {
 	int i;
 
 	/* Header */
-	printf("Signatures: 0x%X,0x%X\n",
-	    (int)mbr->signature, (int)mbr->nt_serial);
-	PRT_print(0, NULL);
+	printf("Signature: 0x%X\n",
+	    (int)mbr->signature);
+	PRT_print(0, NULL, units);
 
 	/* Entries */
 	for (i = 0; i < NDOSPART; i++)
-		PRT_print(i, &mbr->part[i]);
+		PRT_print(i, &mbr->part[i], units);
 }
 
 int
@@ -186,4 +183,30 @@ MBR_write(fd, where, buf)
 		return (len);
 	(void) ioctl(fd, DIOCRLDINFO, 0);
 	return (0);
+}
+
+void 
+MBR_pcopy(disk, mbr)
+	disk_t *disk;
+	mbr_t *mbr;
+{
+	/* 
+	 * Copy partition table from the disk indicated
+	 * to the supplied mbr structure 
+	 */
+
+	int i, fd, offset = 0, reloff = 0;
+	mbr_t mbrd;
+	char mbr_disk[DEV_BSIZE];
+	
+	fd = DISK_open(disk->name, O_RDONLY);
+	MBR_read(fd, offset, mbr_disk);
+	DISK_close(fd);
+	MBR_parse(disk, mbr_disk, offset, reloff, &mbrd);
+	for (i = 0; i < NDOSPART; i++) {
+		PRT_parse(disk, &mbr_disk[MBR_PART_OFF +
+					 MBR_PART_SIZE * i], 
+			  offset, reloff, &mbr->part[i], i);
+		PRT_print(i, &mbr->part[i], NULL);
+	}
 }

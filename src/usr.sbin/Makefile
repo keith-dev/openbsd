@@ -1,10 +1,11 @@
-#	$OpenBSD: Makefile,v 1.85 2001/09/25 21:15:40 deraadt Exp $
+#	$OpenBSD: Makefile,v 1.88 2002/04/01 17:47:53 beck Exp $
 
 # not yet done: catman
 
 .include <bsd.own.mk>
 
-SUBDIR=	ac accton adduser altq amd arp bootpd bootpgw bootpef bootptest \
+SUBDIR=	ac accton adduser altq amd arp authpf \
+	bootpd bootpgw bootpef bootptest \
 	chroot config cron dev_mkdb dhcp \
 	edquota gspa httpd inetd iostat \
 	kgmon kvm_mkdb lpr \
@@ -16,7 +17,7 @@ SUBDIR=	ac accton adduser altq amd arp bootpd bootpgw bootpef bootptest \
 	syslogd tcpdump timed tokenadm tokeninit traceroute trpt trsp \
 	usbdevs user vipw vnconfig wsmoused zdump zic
 
-# LICENSING ISSUES:
+# LICENSING ISSUES: mrouted has non-free parts, and the following use them:
 # mrouted mrinfo mtrace map-mbone
 
 # IPv6
@@ -27,6 +28,9 @@ SUBDIR+=iteconfig grfconfig videomode
 SUBDIR+=bad144 apm apmd fdformat memconfig
 SUBDIR+=eeprom screenblank grfinfo hilinfo
 SUBDIR+=wsconscfg wsfontload
+
+# Extended Attribute tools
+SUBDIR+=extattrctl setextattr getextattr
 
 .if (${AFS:L} == "yes")
 SUBDIR+=afs

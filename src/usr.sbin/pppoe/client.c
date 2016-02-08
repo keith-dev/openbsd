@@ -1,4 +1,4 @@
-/*	$OpenBSD: client.c,v 1.11 2001/04/24 05:09:23 jason Exp $	*/
+/*	$OpenBSD: client.c,v 1.14 2002/02/17 19:42:39 millert Exp $	*/
 
 /*
  * Copyright (c) 2000 Network Security Technologies, Inc. http://www.netsec.net
@@ -66,25 +66,23 @@ u_int32_t client_cookie;
 u_int16_t client_sessionid;
 int pppfd, client_state;
 
-static int getpackets __P((int, char *, char *, struct ether_addr *,
-    struct ether_addr *));
-static int send_padi __P((int, struct ether_addr *, u_int8_t *));
-static int send_padr __P((int, char *, struct ether_addr *,
+static int getpackets(int, char *, char *, struct ether_addr *,
+    struct ether_addr *);
+static int send_padi(int, struct ether_addr *, u_int8_t *);
+static int send_padr(int, char *, struct ether_addr *, struct ether_addr *,
+    struct ether_header *, struct pppoe_header *, struct tag_list *);
+static int recv_pado(int, char *, struct ether_addr *, struct ether_addr *,
+    struct ether_header *, struct pppoe_header *, u_long, u_int8_t *);
+static int recv_pads(int, char *, char *, struct ether_addr *,
     struct ether_addr *, struct ether_header *, struct pppoe_header *,
-    struct tag_list *));
-static int recv_pado __P((int, char *, struct ether_addr *,
-    struct ether_addr *, struct ether_header *, struct pppoe_header *,
-    u_long, u_int8_t *));
-static int recv_pads __P((int, char *, char *, struct ether_addr *,
-    struct ether_addr *, struct ether_header *, struct pppoe_header *,
-    u_long, u_int8_t *));
-static int recv_padt __P((int, struct ether_addr *, struct ether_addr *,
-    struct ether_header *, struct pppoe_header *, u_long, u_int8_t *));
+    u_long, u_int8_t *);
+static int recv_padt(int, struct ether_addr *, struct ether_addr *,
+    struct ether_header *, struct pppoe_header *, u_long, u_int8_t *);
 
-void timer_handler __P((int));
-int timer_set __P((u_int));
-int timer_clr __P((void));
-int timer_hit __P((void));
+void timer_handler(int);
+int timer_set(u_int);
+int timer_clr(void);
+int timer_hit(void);
 
 int
 client_mode(bfd, sysname, srvname, myea)
@@ -536,7 +534,7 @@ recv_padt(bfd, myea, rmea, eh, ph, len, pkt)
 	return (0);
 }
 
-sig_atomic_t timer_alarm;
+volatile sig_atomic_t timer_alarm;
 static struct sigaction timer_oact;
 
 void

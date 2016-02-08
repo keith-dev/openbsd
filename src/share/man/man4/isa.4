@@ -1,4 +1,4 @@
-.\"	$OpenBSD: isa.4,v 1.12 2001/10/05 14:45:53 mpech Exp $
+.\"	$OpenBSD: isa.4,v 1.15 2002/01/24 22:43:55 mickey Exp $
 .\"	$NetBSD: isa.4,v 1.19 2000/03/18 16:54:37 augustss Exp $
 .\"
 .\" Copyright (c) 2000 Theo de Raadt.  All rights reserved.
@@ -88,7 +88,7 @@ interfaces, including
 the Adaptec 152x, SoundBlaster
 .Tn SCSI
 interfaces, and a variety of compatibles.
-.It Xr bt 4
+.It Xr bha 4
 BusLogic BT-445
 .Tn SCSI
 interfaces.
@@ -209,6 +209,17 @@ Soundblaster, Soundblaster 16, and Soundblaster Pro sound cards.
 .It Xr wss 4
 Windows Sound System-compatible sound cards based on the AD1848 and
 compatible chips.
+.El
+.Ss Radio receiver devices
+.Bl -tag -width sf24xx -offset ind
+.It Xr az 4
+Aztech/PackardBell radio card devices.
+.It Xr rt 4
+AIMS Lab Radiotrack FM radio device driver.
+.It Xr rtii 4
+AIMS Lab Radiotrack II FM radio device driver.
+.It Xr sf2r 4
+SoundForte RadioLink SF16-FMR2 FM radio devices.
 .El
 .Pp
 Note that some

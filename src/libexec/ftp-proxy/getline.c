@@ -1,3 +1,5 @@
+/*	$OpenBSD: getline.c,v 1.7 2001/12/07 18:45:32 mpech Exp $ */
+
 /*
  * Copyright (c) 1985, 1988 Regents of the University of California.
  * All rights reserved.
@@ -39,6 +41,7 @@
 #include <netinet/in.h>
 #include <arpa/telnet.h>
 
+#include <ctype.h>
 #include <errno.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -56,7 +59,7 @@
  */
 
 int
-refill_buffer(register struct csiob *iobp)
+refill_buffer(struct csiob *iobp)
 {
 	int rqlen, rlen;
 	
@@ -78,8 +81,8 @@ refill_buffer(register struct csiob *iobp)
 	 */
 	
 	if (iobp->next_byte < iobp->io_buffer_len) {
-		register int dst_ix, src_ix;
-		register int amount;
+		int dst_ix, src_ix;
+		int amount;
 		dst_ix = 0;
 		src_ix = iobp->next_byte;
 		amount = iobp->io_buffer_len - iobp->next_byte;
@@ -104,8 +107,10 @@ refill_buffer(register struct csiob *iobp)
 
 		iobp->io_buffer_size += 128;
 		tmp = realloc(iobp->io_buffer, iobp->io_buffer_size);
-		if (tmp == NULL) 
-			return(0);
+		if (tmp == NULL) {
+			syslog(LOG_INFO, "Insufficient memory");
+			exit(EX_UNAVAILABLE);
+		}
 		iobp->io_buffer = tmp;		
 		rqlen = iobp->io_buffer_size - iobp->io_buffer_len;
 	}
@@ -149,13 +154,14 @@ refill_buffer(register struct csiob *iobp)
  *
  * This code is derived from the getline routine found in the UC Berkeley
  * ftpd code.
+ *
  */
 
 int
-telnet_getline(register struct csiob *iobp, struct csiob *telnet_passthrough)
+telnet_getline(struct csiob *iobp, struct csiob *telnet_passthrough)
 {
 	unsigned char ch;
-	register int ix;
+	int ix;
 	char tbuf[100];
 	
 	iobp->line_buffer[0] = '\0';
@@ -255,13 +261,19 @@ telnet_getline(register struct csiob *iobp, struct csiob *telnet_passthrough)
 			iobp->line_buffer_size = 256 + ix - iobp->next_byte;
 			tmp = realloc(iobp->line_buffer, 
 			    iobp->line_buffer_size);
-			if (tmp == NULL)
-				return(0);
+			if (tmp == NULL) {
+				syslog(LOG_INFO, "Insufficient memory");
+				exit(EX_UNAVAILABLE);
+			}
 			iobp->line_buffer = tmp;
 		}
 		
 		/* +1 is for the newline */
 		clen = (ix+1) - iobp->next_byte;
+		while (clen > 0 && isspace(iobp->io_buffer[iobp->next_byte])) {
+			iobp->next_byte++;
+			clen--;
+		}
 		memcpy(iobp->line_buffer, &iobp->io_buffer[iobp->next_byte],
 		    clen);
 		iobp->next_byte += clen;

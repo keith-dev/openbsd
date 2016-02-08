@@ -1,4 +1,4 @@
-/*	$OpenBSD: fmt.c,v 1.17 2001/07/12 05:17:05 deraadt Exp $	*/
+/*	$OpenBSD: fmt.c,v 1.19 2001/11/29 00:33:06 millert Exp $	*/
 
 /* Sensible version of fmt
  *
@@ -30,6 +30,8 @@
  *    preceded by a non-blank non-message-header line, is
  *    taken to start a new paragraph, which also contains
  *    any subsequent lines with non-empty leading whitespace.
+ *    Unless the `-n' option is given, lines beginning with
+ *    a . (dot) are not formatted.
  * 3. The "everything else" is split into words; a word
  *    includes its trailing whitespace, and a word at the
  *    end of a line is deemed to be followed by a single
@@ -168,51 +170,19 @@
 
 #ifndef lint
 static const char rcsid[] =
-  "$OpenBSD: fmt.c,v 1.17 2001/07/12 05:17:05 deraadt Exp $";
+  "$OpenBSD: fmt.c,v 1.19 2001/11/29 00:33:06 millert Exp $";
 static const char copyright[] =
   "Copyright (c) 1997 Gareth McCaughan. All rights reserved.\n";
 #endif /* not lint */
 
-/* Cater for BSD and non-BSD systems.
- * I hate the C preprocessor.
- */
-
-#undef HAVE_errx
-#undef HAVE_sysexits
-
-#ifdef unix
-# include <sys/param.h>
-# ifdef BSD
-#  define HAVE_errx
-#  if BSD >= 199306
-#   define HAVE_sysexits
-#  endif
-# endif
-#endif
-
-#ifdef HAVE_errx
-# include <err.h>
-#else
-# define errx(rc,str) { fprintf(stderr,"fmt: %s\n",str); exit(rc); }
-#endif
-
-#ifdef HAVE_sysexits
-# include <sysexits.h>
-#else
-# define EX_USAGE 1
-# define EX_NOINPUT 1
-# define EX_SOFTWARE 1
-# define EX_OSERR 1
-#endif
-
 #include <ctype.h>
+#include <err.h>
+#include <locale.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-#ifdef NEED_getopt_h
-# include "getopt.h"
-#endif
+#include <sysexits.h>
+#include <unistd.h>
 
 /* Something that, we hope, will never be a genuine line length,
  * indentation etc.
@@ -225,21 +195,14 @@ static const char copyright[] =
  * If |fussyp==0| then we don't complain about non-numbers
  * (returning 0 instead), but we do complain about bad numbers.
  */
-size_t get_positive(const char *s, const char *err_mess, int fussyP) {
+static size_t
+get_positive(const char *s, const char *err_mess, int fussyP) {
   char *t;
   long result = strtol(s,&t,0);
   if (*t) { if (fussyP) goto Lose; else return 0; }
   if (result<=0) { Lose: errx(EX_USAGE, err_mess); }
   return (size_t) result;
 }
-
-/* Just for the sake of linguistic purity: */
-
-#ifdef BRITISH
-# define CENTER "centre"
-#else
-# define CENTER "center"
-#endif
 
 /* Global variables */
 
@@ -249,9 +212,10 @@ static size_t max_length=0;	/* Maximum length for output lines */
 static int coalesce_spaces_P=0;	/* Coalesce multiple whitespace -> ' ' ? */
 static int allow_indented_paragraphs=0;	/* Can first line have diff. ind.? */
 static int tab_width=8;		/* Number of spaces per tab stop */
-static int output_tab_width=0;	/* Ditto, when squashing leading spaces */
-static char *sentence_enders=".?!";	/* Double-space after these */
+static size_t output_tab_width=0;	/* Ditto, when squashing leading spaces */
+static const char *sentence_enders=".?!";	/* Double-space after these */
 static int grok_mail_headers=0;	/* treat embedded mail headers magically? */
+static int format_troff=0;	/* Format troff? */
 
 static int n_errors=0;		/* Number of failed files. Return on exit. */
 static char *output_buffer=0;	/* Output line will be built here */
@@ -262,16 +226,16 @@ static int output_in_paragraph=0;	/* Any of current para written out yet? */
 
 /* Prototypes */
 
-static void process_named_file (const char *);
-static void     process_stream (FILE *, const char *);
-static size_t    indent_length (const char *, size_t);
-static int     might_be_header (const char *);
-static void      new_paragraph (size_t, size_t);
-static void        output_word (size_t, size_t, const char *, size_t, size_t);
-static void      output_indent (size_t);
-static void      center_stream (FILE *, const char *);
-static char *         get_line (FILE *, size_t *);
-static void *         xrealloc (void *, size_t);
+static void process_named_file(const char *);
+static void     process_stream(FILE *, const char *);
+static size_t    indent_length(const char *, size_t);
+static int     might_be_header(const unsigned char *);
+static void      new_paragraph(size_t, size_t);
+static void        output_word(size_t, size_t, const char *, size_t, size_t);
+static void      output_indent(size_t);
+static void      center_stream(FILE *, const char *);
+static char *         get_line(FILE *, size_t *);
+static void *         xrealloc(void *, size_t);
 
 #define XMALLOC(x) xrealloc(0,x)
 
@@ -282,16 +246,18 @@ int
 main(int argc, char *argv[]) {
   int ch;			/* used for |getopt| processing */
 
+
+  (void)setlocale(LC_CTYPE, "");
+
   /* 1. Grok parameters. */
 
-  while ((ch = getopt(argc, argv, "0123456789cd:hl:mpst:w:")) != -1)
+  while ((ch = getopt(argc, argv, "0123456789cd:hl:mnpst:w:")) != -1)
   switch(ch) {
     case 'c':
       centerP = 1;
       continue;
     case 'd':
-      sentence_enders = XMALLOC(strlen(optarg)+1);
-      strcpy(sentence_enders, optarg);	/* ok */
+      sentence_enders = optarg;
       continue;
     case 'l':
       output_tab_width
@@ -299,6 +265,9 @@ main(int argc, char *argv[]) {
       continue;
     case 'm':
       grok_mail_headers = 1;
+      continue;
+    case 'n':
+      format_troff = 1;
       continue;
     case 'p':
       allow_indented_paragraphs = 1;
@@ -331,10 +300,11 @@ main(int argc, char *argv[]) {
       fprintf(stderr,
 "Usage:   fmt [-cmps] [-d chars] [-l num] [-t num]\n"
 "             [-w width | -width | goal [maximum]] [file ...]\n"
-"Options: -c     " CENTER " each line instead of formatting\n"
+"Options: -c     center each line instead of formatting\n"
 "         -d <chars> double-space after <chars> at line end\n"
 "         -l <n> turn each <n> spaces at start of line into a tab\n"
 "         -m     try to make sure mail header lines stay separate\n"
+"         -n     format lines beginning with a dot\n"
 "         -p     allow indented paragraphs\n"
 "         -s     coalesce whitespace inside lines\n"
 "         -t <n> have tabs every <n> columns\n"
@@ -423,6 +393,7 @@ process_stream(FILE *stream, const char *name) {
       }
       /* We need a new paragraph if and only if:
        *   this line is blank,
+       *   OR it's a troff request,
        *   OR it's a mail header,
        *   OR it's not a mail header AND the last line was one,
        *   OR the indentation has changed
@@ -430,6 +401,7 @@ process_stream(FILE *stream, const char *name) {
        *      AND this isn't the second line of an indented paragraph.
        */
       if ( length==0
+           || (line[0]=='.' && !format_troff)
            || header_type==hdr_Header
            || (header_type==hdr_NonHeader && prev_header_type>hdr_NonHeader)
            || (np!=last_indent
@@ -439,6 +411,11 @@ process_stream(FILE *stream, const char *name) {
         para_line_number = 0;
         first_indent = np;
         last_indent = np;
+        /* nroff compatibility */
+        if (length>0 && line[0]=='.' && !format_troff) {
+          printf("%.*s\n", (int)length, line);
+          continue;
+        }
         if (header_type==hdr_Header) last_indent=2;	/* for cont. lines */
         if (length==0) {
           putchar('\n');
@@ -493,7 +470,7 @@ indent_length(const char *line, size_t length) {
  * conservative to avoid mangling ordinary civilised text.
  */
 static int
-might_be_header(const char *line) {
+might_be_header(const unsigned char *line) {
   if (!isupper(*line++)) return 0;
   while (*line && (isalnum(*line) || *line=='-')) ++line;
   return (*line==':' && isspace(line[1]));
@@ -622,11 +599,13 @@ get_line(FILE *stream, size_t *lengthp) {
   size_t len=0;
   int ch;
   size_t spaces_pending=0;
+  int troff=0;
 
   if (buf==NULL) { length=100; buf=XMALLOC(length); }
   while ((ch=getc(stream)) != '\n' && ch != EOF) {
+    if (len+spaces_pending==0 && ch=='.' && !format_troff) troff=1;
     if (ch==' ') ++spaces_pending;
-    else if (!iscntrl(ch)) {
+    else if (troff || !iscntrl(ch)) {
       while (len+spaces_pending >= length) {
         length*=2; buf=xrealloc(buf, length);
       }

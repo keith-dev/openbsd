@@ -1,7 +1,7 @@
 #ifndef GNODE_H
 #define GNODE_H
 /*	$OpenPackages$ */
-/*	$OpenBSD: gnode.h,v 1.2 2001/09/19 10:58:07 mpech Exp $ */
+/*	$OpenBSD: gnode.h,v 1.4 2001/11/23 23:42:45 deraadt Exp $ */
 
 /*
  * Copyright (c) 2001 Marc Espie.

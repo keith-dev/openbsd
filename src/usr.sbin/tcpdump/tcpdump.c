@@ -1,4 +1,4 @@
-/*	$OpenBSD: tcpdump.c,v 1.22 2001/06/25 23:05:17 provos Exp $	*/
+/*	$OpenBSD: tcpdump.c,v 1.27 2002/01/23 23:32:20 mickey Exp $	*/
 
 /*
  * Copyright (c) 1988, 1989, 1990, 1991, 1992, 1993, 1994, 1995, 1996, 1997
@@ -26,7 +26,7 @@ static const char copyright[] =
     "@(#) Copyright (c) 1988, 1989, 1990, 1991, 1992, 1993, 1994, 1995, 1996, 1997\n\
 The Regents of the University of California.  All rights reserved.\n";
 static const char rcsid[] =
-    "@(#) $Header: /cvs/src/usr.sbin/tcpdump/tcpdump.c,v 1.22 2001/06/25 23:05:17 provos Exp $ (LBL)";
+    "@(#) $Header: /cvs/src/usr.sbin/tcpdump/tcpdump.c,v 1.27 2002/01/23 23:32:20 mickey Exp $ (LBL)";
 #endif
 
 /*
@@ -108,7 +108,7 @@ static struct printer printers[] = {
 	{ null_if_print,	DLT_NULL },
 	{ raw_if_print,		DLT_RAW },
 	{ atm_if_print,		DLT_ATM_RFC1483 },
-	{ null_if_print, 	DLT_LOOP },
+	{ loop_if_print, 	DLT_LOOP },
 	{ enc_if_print, 	DLT_ENC },
 	{ pflog_if_print, 	DLT_PFLOG },
 	{ NULL,			0 },
@@ -357,9 +357,16 @@ main(int argc, char **argv)
 	if (pcap_setfilter(pd, &fcode) < 0)
 		error("%s", pcap_geterr(pd));
 	if (WFileName) {
-		pcap_dumper_t *p = pcap_dump_open(pd, WFileName);
+		pcap_dumper_t *p;
+
+		p = pcap_dump_open(pd, WFileName);
 		if (p == NULL)
 			error("%s", pcap_geterr(pd));
+		{
+			FILE *fp = (FILE *)p;	/* XXX touching pcap guts! */
+			fflush(fp);
+			setvbuf(fp, NULL, _IONBF, 0);
+		}
 		printer = pcap_dump;
 		pcap_userdata = (u_char *)p;
 	} else {
@@ -385,23 +392,28 @@ RETSIGTYPE
 cleanup(int signo)
 {
 	struct pcap_stat stat;
+	char buf[1024];
 
 	/* Can't print the summary if reading from a savefile */
 	if (pd != NULL && pcap_file(pd) == NULL) {
-		/* XXX unsafe */
-		(void)fflush(stdout);
-		putc('\n', stderr);
-		if (pcap_stats(pd, &stat) < 0)
-			(void)fprintf(stderr, "pcap_stats: %s\n",
-			    pcap_geterr(pd));
-		else {
-			(void)fprintf(stderr, "%d packets received by filter\n",
-			    stat.ps_recv);
-			(void)fprintf(stderr, "%d packets dropped by kernel\n",
-			    stat.ps_drop);
+#if 0
+		(void)fflush(stdout);	/* XXX unsafe */
+#endif
+		(void)write(STDERR_FILENO, "\n", 1);
+		if (pcap_stats(pd, &stat) < 0) {
+			(void)snprintf(buf, sizeof buf,
+			    "pcap_stats: %s\n", pcap_geterr(pd));
+			write(STDOUT_FILENO, buf, strlen(buf));
+		} else {
+			(void)snprintf(buf, sizeof buf,
+			    "%d packets received by filter\n", stat.ps_recv);
+			write(STDOUT_FILENO, buf, strlen(buf));
+			(void)snprintf(buf, sizeof buf,
+			    "%d packets dropped by kernel\n", stat.ps_drop);
+			write(STDOUT_FILENO, buf, strlen(buf));
 		}
 	}
-	exit(0);
+	_exit(0);
 }
 
 /* dump the buffer in `emacs-hexl' style */
@@ -410,44 +422,39 @@ default_print_hexl(const u_char *cp, unsigned int length, unsigned int offset)
 {
 	unsigned int i, j, jm;
 	int c;
-	char ln[128];
+	char ln[128], buf[128];
 
 	printf("\n");
 	for (i = 0; i < length; i += 0x10) {
-		snprintf(ln, 
-			 sizeof(ln),
-			 "  %04x: ", (unsigned int)(i + offset));
+		snprintf(ln, sizeof(ln), "  %04x: ",
+		    (unsigned int)(i + offset));
 		jm = length - i;
 		jm = jm > 16 ? 16 : jm;
 
 		for (j = 0; j < jm; j++) {
 			if ((j % 2) == 1)
-				snprintf(ln + strlen(ln),
-					 sizeof(ln) - strlen(ln),
-					 "%02x ", (unsigned int)cp[i+j]);
+				snprintf(buf, sizeof(buf), "%02x ",
+				    (unsigned int)cp[i+j]);
 			else
-				snprintf(ln + strlen(ln), 
-					 sizeof(ln) - strlen(ln),
-					 "%02x", (unsigned int)cp[i+j]);
+				snprintf(buf, sizeof(buf), "%02x",
+				    (unsigned int)cp[i+j]);
+			strlcat(ln, buf, sizeof ln);
 		}
 		for (; j < 16; j++) {
 			if ((j % 2) == 1)
-				snprintf(ln + strlen(ln), 
-					 sizeof(ln) - strlen(ln),
-					 "   ");
+				snprintf(buf, sizeof buf, "   ");
 			else
-				snprintf(ln + strlen(ln), 
-					 sizeof(ln) - strlen(ln),
-					 "  ");
+				snprintf(buf, sizeof buf, "  ");
+			strlcat(ln, buf, sizeof ln);
 		}
 
-		snprintf(ln + strlen(ln), sizeof(ln) - strlen(ln), " ");
+		strlcat(ln, " ", sizeof ln);
 		for (j = 0; j < jm; j++) {
 			c = cp[i+j];
 			c = isprint(c) ? c : '.';
-			snprintf(ln + strlen(ln), 
-				 sizeof(ln) - strlen(ln), 
-				 "%c", c);
+			buf[0] = c;
+			buf[1] = '\0';
+			strlcat(ln, buf, sizeof ln);
 		}
 		printf("%s\n", ln);
 	}

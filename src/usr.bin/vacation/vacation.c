@@ -1,4 +1,4 @@
-/*	$OpenBSD: vacation.c,v 1.14 2001/07/09 07:04:56 deraadt Exp $	*/
+/*	$OpenBSD: vacation.c,v 1.17 2002/02/16 21:27:56 millert Exp $	*/
 /*	$NetBSD: vacation.c,v 1.7 1995/04/29 05:58:27 cgd Exp $	*/
 
 /*
@@ -44,7 +44,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)vacation.c	8.2 (Berkeley) 1/26/94";
 #endif
-static char rcsid[] = "$OpenBSD: vacation.c,v 1.14 2001/07/09 07:04:56 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: vacation.c,v 1.17 2002/02/16 21:27:56 millert Exp $";
 #endif /* not lint */
 
 /*
@@ -92,14 +92,14 @@ DB *db;
 char from[MAXLINE];
 char subj[MAXLINE];
 
-int junkmail __P((void));
-int nsearch __P((char *, char *));
-void readheaders __P((void));
-int recent __P((void));
-void sendmessage __P((char *));
-void setinterval __P((time_t));
-void setreply __P((void));
-void usage __P((void));
+int junkmail(void);
+int nsearch(char *, char *);
+void readheaders(void);
+int recent(void);
+void sendmessage(char *);
+void setinterval(time_t);
+void setreply(void);
+void usage(void);
 
 int
 main(argc, argv)
@@ -209,8 +209,8 @@ main(argc, argv)
 void
 readheaders()
 {
-	register ALIAS *cur;
-	register char *p;
+	ALIAS *cur;
+	char *p;
 	int tome, cont;
 	char buf[MAXLINE];
 
@@ -218,8 +218,9 @@ readheaders()
 	while (fgets(buf, sizeof(buf), stdin) && *buf != '\n')
 		switch(*buf) {
 		case 'F':		/* "From " */
+		case 'f':
 			cont = 0;
-			if (!strncmp(buf, "From ", 5)) {
+			if (!strncasecmp(buf, "From ", 5)) {
 				for (p = buf + 5; *p && *p != ' '; ++p)
 					;
 				*p = '\0';
@@ -231,6 +232,7 @@ readheaders()
 			}
 			break;
 		case 'R':		/* "Return-Path:" */
+		case 'r':
 			cont = 0;
 			if (strncasecmp(buf, "Return-Path:",
 					sizeof("Return-Path:")-1) ||
@@ -249,6 +251,7 @@ readheaders()
 				exit(0);
 			break;
 		case 'P':		/* "Precedence:" */
+		case 'p':
 			cont = 0;
 			if (strncasecmp(buf, "Precedence", 10) ||
 			    (buf[10] != ':' && buf[10] != ' ' &&
@@ -265,6 +268,7 @@ readheaders()
 				exit(0);
 			break;
 		case 'S':		/* Subject: */
+		case 's':
 			cont = 0;
 			if (strncasecmp(buf, "Subject:",
 					sizeof("Subject:")-1) ||
@@ -281,12 +285,14 @@ readheaders()
 				*p = '\0';
 			break;
 		case 'C':		/* "Cc:" */
-			if (strncmp(buf, "Cc:", 3))
+		case 'c':
+			if (strncasecmp(buf, "Cc:", 3))
 				break;
 			cont = 1;
 			goto findme;
 		case 'T':		/* "To:" */
-			if (strncmp(buf, "To:", 3))
+		case 't':
+			if (strncasecmp(buf, "To:", 3))
 				break;
 			cont = 1;
 			goto findme;
@@ -312,9 +318,9 @@ findme:			for (cur = names; !tome && cur; cur = cur->next)
  */
 int
 nsearch(name, str)
-	register char *name, *str;
+	char *name, *str;
 {
-	register int len;
+	int len;
 
 	for (len = strlen(name); *str; ++str)
 		if (!strncasecmp(name, str, len))
@@ -341,9 +347,9 @@ junkmail()
 		{ "-relay", 6 },
 		{ NULL, 0 }
 	};
-	register struct ignore *cur;
-	register int len;
-	register char *p;
+	struct ignore *cur;
+	int len;
+	char *p;
 
 	/*
 	 * This is mildly amusing, and I'm not positive it's right; trying

@@ -1,4 +1,4 @@
-/*	$OpenBSD: msg.c,v 1.8 2001/01/29 01:58:30 niklas Exp $	*/
+/*	$OpenBSD: msg.c,v 1.10 2002/02/19 19:39:39 millert Exp $	*/
 
 /*-
  * Copyright (c) 1991, 1993, 1994
@@ -26,16 +26,11 @@ static const char sccsid[] = "@(#)msg.c	10.48 (Berkeley) 9/15/96";
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-
-#ifdef __STDC__
-#include <stdarg.h>
-#else
-#include <varargs.h>
-#endif
 
 #include "common.h"
 #include "../vi/vi.h"
@@ -44,18 +39,10 @@ static const char sccsid[] = "@(#)msg.c	10.48 (Berkeley) 9/15/96";
  * msgq --
  *	Display a message.
  *
- * PUBLIC: void msgq __P((SCR *, mtype_t, const char *, ...));
+ * PUBLIC: void msgq(SCR *, mtype_t, const char *, ...);
  */
 void
-#ifdef __STDC__
 msgq(SCR *sp, mtype_t mt, const char *fmt, ...)
-#else
-msgq(sp, mt, fmt, va_alist)
-	SCR *sp;
-	mtype_t mt;
-        const char *fmt;
-        va_dcl
-#endif
 {
 #ifndef NL_ARGMAX
 #define	__NL_ARGMAX	20		/* Set to 9 by System V. */
@@ -275,11 +262,7 @@ retry:		FREE_SPACE(sp, bp, blen);
 #endif
 
 format:	/* Format the arguments into the string. */
-#ifdef __STDC__
         va_start(ap, fmt);
-#else
-        va_start(ap);
-#endif
 	len = vsnprintf(mp, REM, fmt, ap);
 	va_end(ap);
 	if (len >= nlen)
@@ -358,7 +341,7 @@ alloc_err:
  * msgq_str --
  *	Display a message with an embedded string.
  *
- * PUBLIC: void msgq_str __P((SCR *, mtype_t, char *, char *));
+ * PUBLIC: void msgq_str(SCR *, mtype_t, char *, char *);
  */
 void
 msgq_str(sp, mtype, str, fmt)
@@ -400,7 +383,7 @@ msgq_str(sp, mtype, str, fmt)
  * the command 2d}, from the 'b' would report that two lines were deleted,
  * not one.
  *
- * PUBLIC: void mod_rpt __P((SCR *));
+ * PUBLIC: void mod_rpt(SCR *);
  */
 void
 mod_rpt(sp)
@@ -510,7 +493,7 @@ alloc_err:
  * msgq_status --
  *	Report on the file's status.
  *
- * PUBLIC: void msgq_status __P((SCR *, recno_t, u_int));
+ * PUBLIC: void msgq_status(SCR *, recno_t, u_int);
  */
 void
 msgq_status(sp, lno, flags)
@@ -676,7 +659,7 @@ alloc_err:
  * msg_open --
  *	Open the message catalogs.
  *
- * PUBLIC: int msg_open __P((SCR *, char *));
+ * PUBLIC: int msg_open(SCR *, char *);
  */
 int
 msg_open(sp, file)
@@ -747,7 +730,7 @@ msg_open(sp, file)
  * msg_close --
  *	Close the message catalogs.
  *
- * PUBLIC: void msg_close __P((GS *));
+ * PUBLIC: void msg_close(GS *);
  */
 void
 msg_close(gp)
@@ -761,7 +744,7 @@ msg_close(gp)
  * msg_cont --
  *	Return common continuation messages.
  *
- * PUBLIC: const char *msg_cmsg __P((SCR *, cmsg_t, size_t *));
+ * PUBLIC: const char *msg_cmsg(SCR *, cmsg_t, size_t *);
  */
 const char *
 msg_cmsg(sp, which, lenp)
@@ -799,7 +782,7 @@ msg_cmsg(sp, which, lenp)
  * Only a single catalog message can be accessed at a time, if multiple
  * ones are needed, they must be copied into local memory.
  *
- * PUBLIC: const char *msg_cat __P((SCR *, const char *, size_t *));
+ * PUBLIC: const char *msg_cat(SCR *, const char *, size_t *);
  */
 const char *
 msg_cat(sp, str, lenp)
@@ -849,7 +832,7 @@ msg_cat(sp, str, lenp)
  * msg_print --
  *	Return a printable version of a string, in allocated memory.
  *
- * PUBLIC: char *msg_print __P((SCR *, const char *, int *));
+ * PUBLIC: char *msg_print(SCR *, const char *, int *);
  */
 char *
 msg_print(sp, s, needfree)

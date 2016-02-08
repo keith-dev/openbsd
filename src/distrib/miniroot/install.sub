@@ -1,8 +1,8 @@
 #!/bin/sh
-#	$OpenBSD: install.sub,v 1.170 2001/10/15 22:58:59 krw Exp $
+#	$OpenBSD: install.sub,v 1.205 2002/04/13 21:03:58 deraadt Exp $
 #	$NetBSD: install.sub,v 1.5.2.8 1996/09/02 23:25:02 pk Exp $
 #
-# Copyright (c) 1997,1998 Todd Miller, Theo de Raadt
+# Copyright (c) 1997-2002 Todd Miller, Theo de Raadt, Ken Westerback
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -66,46 +66,27 @@
 # POSSIBILITY OF SUCH DAMAGE.
 #
 
-#	OpenBSD installation/upgrade script - common subroutines.
+# OpenBSD install/upgrade script common subroutines and initialization code
 
-ROOTDISK=				# filled in below
-VERSION=30
-VERSION_MAJOR=$(( $VERSION / 10 ))
-VERSION_MINOR=$(( $VERSION % 10 ))
-export VERSION VERSION_MAJOR VERSION_MINOR
+# include machine-dependent functions
+# The following functions must be provided:
+#	md_get_diskdevs()	- return available disk devices
+#	md_get_cddevs()		- return available CD-ROM devices
+#	md_get_partition_range() - return range of valid partition letters
+#	md_installboot()	- install boot-blocks on disk
+#	md_prep_disklabel()	- label the root disk
+#	md_welcome_banner()	- display friendly message
+#	md_not_going_to_install() - display friendly message
+#	md_congrats()		- display friendly message
+#	md_native_fstype()	- native filesystem type for disk installs
+#	md_native_fsopts()	- native filesystem options for disk installs
 
-# extra "site" set can be provided by person doing install
-ALLSETS="base etc misc comp man game xbase xshare xfont xserv site"	# install
-UPGRSETS="base misc comp man game xbase xshare xfont xserv site"	# upgrade
-SNAPSETS="bin dev etc games man misc sbin \
-	  usr.bin usr.binutils usr.games usr.include \
-	  usr.lib usr.libexec usr.misc usr.sbin usr.share var"
-THESETS=					# one of the above
+# include machine dependent subroutines
+. install.md
 
-# Path searched for sets by install_sets on the local filesystems
-local_sets_dir=
-
-# decide upon an editor
-if [ "X$EDITOR" = X ]; then
-	if [ -x /usr/bin/vi ]; then
-		EDITOR=vi
-	else
-		EDITOR=ed
-	fi
-	export EDITOR
-fi
-
-# Please don't use the 1 of n form below, good idea, wrong implementation!
-# get a reponse with default[s]
 getresp() {
-	local _shell_aware=0
 	local _no_shell=0
 
-	# -s option means exit after a shell (caller is shell-aware)
-	if [ "$1" = "-s" ]; then
-		_shell_aware=1
-		shift
-	fi
 	# -n option means don't try to run shell commands
 	if [ "$1" = "-n" ]; then
 		_no_shell=1
@@ -113,43 +94,31 @@ getresp() {
 	fi
 
 	set -o noglob
-	valid="false"
-	while [ "X$valid" = "Xfalse" ]; do
+	valid=
+	while [ -z "$valid" ]; do
 		read resp
 		if [ ${_no_shell} -eq 1 ]; then
-			test -z "$resp" && resp=$1
+			[ -z "$resp" ] && resp=$1
 		else
-			case "$resp" in
-				"")	resp=$1
-					;;
-				!)	echo "Type 'exit' to return to install."
-					sh
-					test $_shell_aware -eq 0 && continue
-					;;
-				!*)
-					eval ${resp#?}
-					test $_shell_aware -eq 0 && continue
-					;;
+			case $resp in
+			"")	resp=$1
+				;;
+			!)	echo "Type 'exit' to return to install."
+				sh
+				continue
+				;;
+			!*)	eval ${resp#?}
+				continue
+				;;
 			esac
 		fi
-		if [ $# -gt 1 ]; then
-			for i in $@; do
-				if [ "X$resp" = "X$i" ]; then
-					valid="true"
-				fi
-			done
-		else
-			valid="true"
-		fi
-		if [ "X$valid" = "Xfalse" ]; then
-			echo "Try again: Enter one of [$@]"
-		fi
-	done	
+		valid=true
+	done
 	set +o noglob
 }
 
+# test the first argument against the remaining ones, return success on a match
 isin() {
-# test the first argument against the remaining ones, return succes on a match
 	local	_a=$1
 
 	shift
@@ -160,26 +129,26 @@ isin() {
 	return 1
 }
 
-addel() {
 # add first argument to list formed by the remaining arguments
 # adds to the tail if the element does not already exist
+addel() {
 	local	_a=$1 _seen=
 
 	shift
 	while [ $# != 0 ]; do
 		echo "$1"
 		if [ "$_a" = "$1" ]; then
-			_seen="yes"
+			_seen=yes
 		fi
 		shift
 	done
-	if [ "X$_seen" = "X" ]; then
+	if [ -z "$_seen" ]; then
 		echo "$_a"
 	fi
 }
 
-rmel() {
 # remove first argument from list formed by the remaining arguments
+rmel() {
 	local	_a=$1
 
 	shift
@@ -191,42 +160,42 @@ rmel() {
 	done
 }
 
-cutword () {
 # read lines on stdin, return Nth element of each line, like cut(1)
-	local _a _n _oifs="$IFS"
+cutword () {
+	local _a _n _oifs=$IFS
 
 	# optional field separator
-	case "$1" in
-		-t?*) IFS=${1#-t}; shift;;
+	case $1 in
+	-t?*) IFS=${1#-t}; shift;;
 	esac
 
 	_n=$1
 	while read _a; do
 		set -- $_a
-		test "$1" = "" && break
+		[ -z "$1" ] && break
 		eval echo \$$_n
 	done
-	IFS="$_oifs"
+	IFS=$_oifs
 }
 
-cutlast () {
 # read a line of data, return last element. Equiv. of awk '{print $NF}'.
-	local _a _oifs="$IFS"
+cutlast () {
+	local _a _oifs=$IFS
 
 	# optional field separator
-	case "$1" in
-		-t?*) IFS=${1#-t}; shift;;
+	case $1 in
+	-t?*)	IFS=${1#-t}; shift;;
 	esac
 
 	read _a; set -- $_a
-	IFS="$_oifs"
-	if [ "$1" = "" ]; then return; fi
+	IFS=$_oifs
+	[ -z "$1" ] && return
 	while [ "$#" -gt 10 ]; do shift 10; done
 	eval echo \$$#
 }
 
-firstchar () {
 # return first character of argument
+firstchar () {
 	local _a=$1
 
 	while [ ${#_a} != 1 ]; do
@@ -238,11 +207,11 @@ firstchar () {
 basename () {
 	local _oifs
 
-	if [ "$1" = "" ]; then return; fi
-	_oifs="$IFS"
-	IFS="/"
+	[ -z "$1" ] && return
+	_oifs=$IFS
+	IFS=/
 	set -- $1
-	IFS="$_oifs"
+	IFS=$_oifs
 	while [ "$#" -gt 10 ]; do shift 10; done
 	eval echo \$$#
 }
@@ -252,16 +221,16 @@ isnumeric() {
 
 	while [ ${#_a} != 0 ]; do
 		case $_a in
-			[0-9]*) ;;
-			*)	echo 0; return;;
+		[0-9]*)	;;
+		*)	echo 0; return;;
 		esac
 		_a=${_a#?}
 	done
 	echo 1; return
 }
 
+# return available network devices
 get_ifdevs() {
-	# return available network devices
 	/sbin/ifconfig -a | egrep -v '^([[:space:]]|(lo|enc|gre|ppp|sl|tun|bridge)[[:digit:]])' | cutword -t: 1
 }
 
@@ -289,140 +258,138 @@ bsort() {
 		shift
 	done
 
-	echo -n "$_a "; bsort $_l
+	echo -n $_a
+
+	# Prevent a trailing blank on the output, and thus a bad value
+	# for cutlast or cutword, by outputting blanks only when $_l
+	# has values to sort.
+
+	if [[ -n "$_l" ]] ; then
+		echo -n " "
+		bsort $_l
+	fi
 }
 
-dir_has_sets() {
-	# return true when the directory $1 contains a set for $2...$n
-	local _dir=$1 _file
-
-	shift
-	for _file in $*
-	do
-		if [ -f $_dir/${_file}${VERSION}.tar.gz ]; then
-			return 0
-		fi
-		# Try for stupid msdos convention
-		if [ -f $_dir/${_file}${VERSION}.tgz ]; then
-			return 0
-		fi
-		# Special check for kernel
-		if [ $_file = "kernel" -a -f $_dir/bsd ]; then
-			return 0
-		fi
-	done
-	return 1
-}
-
+# return true when the list $1 contains a set also in one of $2 ... $n
 list_has_sets() {
-	# return true when the list $1 contains a set, given dir $2 for $3...$n
-	local _list=$1 _file
+	local _list=$1 _f
 
 	shift
-	for _file in $*
+	for _f in $*
 	do
-		if isin ${_file}${VERSION}.tar.gz $_list; then
+		if isin ${_f}${VERSION}.tar.gz $_list; then
 			return 0
 		fi
 		# Try for stupid msdos convention
-		if isin ${_file}${VERSION}.tgz $_list; then
+		if isin ${_f}${VERSION}.tgz $_list; then
 			return 0
 		fi
 		# Special check for kernel
-		if test $_file = "kernel" && isin bsd $_list; then
+		if [ "$_f" = "kernel" ] && isin bsd $_list; then
 			return 0
 		fi
 	done
+
 	return 1
 }
 
+# log in via ftp to host $1 as user $2 with password $3
+# and return a list of all files in the directory $4 on stdout
 ftp_list_files() {
-	# log in via ftp to host $1 as user $2 with password $3
-	# and return a list of all files in the directory $4 on stdout
-	local _host=$1 _user=$2 _pass=$3 _dir=$4
-
-	shift; shift; shift; shift
-
-	ftp ${_ftp_active} -V -n $_host  << __ptf
-user $_user $_pass
-cd $_dir
+	ftp ${_ftp_active} -V -n "$1" << __EOT
+user "$2" "$3"
+cd "$4"
 ls
 quit
-__ptf
+__EOT
 }
 
+# $1 is relative mountpoint
 get_localdir() {
-	# $1 is relative mountpoint
 	local _mp=$1 _dir=
 
 	while : ; do
-	    echo -n "Enter the pathname where the sets are stored [$_dir] "
-	    getresp "$_dir"
-	    _dir=$resp
+		echo -n "Enter the pathname where the sets are stored: [$_dir] "
+		getresp "$_dir"
+		_dir=$resp
 
-	    # Allow break-out with empty response
-	    if [ -z "$_dir" ]; then
-		echo -n "Are you sure you don't want to set the pathname? [n] "
-		getresp "n"
-		case "$resp" in
-			y*|Y*)
-				break
+		# Allow break-out with empty response
+		if [ -z "$_dir" ]; then
+			echo -n "Are you sure you don't want to set the pathname? [n] "
+			getresp n
+			case $resp in
+			y*|Y*)	break
 				;;
-			*)
-				continue
+			*)	continue
 				;;
-		esac
-	    fi
+			esac
+		fi
 
-	    if dir_has_sets "$_mp/$_dir" $THESETS
-	    then
-		local_sets_dir="$_mp/$_dir"
-		break
-	    else
+		if list_has_sets "`ls -l ${_mp}/${_dir}`" $THESETS
+		then
+			local_sets_dir=$_mp/$_dir
+			break
+		fi
+
 		cat << __EOT
-The directory \"$local_sets_dir\" does not exist, or does not hold any of the
-upgrade sets.
+The directory "${_mp}/${_dir}" does not exist, or does not hold any
+OpenBSD ${VERSION_MAJOR}.${VERSION_MINOR} ${MODE} sets.
 __EOT
 		echo -n "Re-enter pathname? [y] "
-		getresp "y"
-		case "$resp" in
-			y*|Y*)
-				;;
-			*)
-				local_sets_dir=
-				break
-				;;
+		getresp y
+		case $resp in
+		y*|Y*)	;;
+		*)	local_sets_dir=
+			break
+			;;
 		esac
-	    fi
 	done
+}
+
+makedev() {
+	local _d=$1
+
+	if [ ! -c /dev/r${_d}c ]; then
+		if [ -r /dev/MAKEDEV ]; then
+			(cd /dev; sh MAKEDEV $_d)
+		else
+			echo "Device nodes for $_d are missing, and MAKEDEV"
+			echo "does not exist to create them with.  Sorry."
+			false
+		fi
+	fi
 }
 
 getanotherdisk() {
 	cat << __EOT
 
-Now you can select another disk to initialize.  (Do not re-select a disk
-you have already entered information for).  Available disks are:
+Now you can select another disk to initialize. (Do not re-select a disk
+you have already entered information for). Available disks are:
+
+$_DKDEVS
 
 __EOT
-	_DKDEVS=`md_get_diskdevs`
-	echo	"$_DKDEVS"
-	echo
 	echo -n	"Which one? [done] "
-	getresp ""
-	if [ "X${resp}" = "X" ]; then
-		DISK=done
-	elif [ "X${resp}" = "Xdone" ]; then
+	getresp done
+	if [ "X${resp}" = "Xdone" ]; then
 		DISK=done
 	elif isin $resp $_DKDEVS ; then
-		DISK="$resp"
+		DISK=$resp
+		makedev $resp || DISK=
 	else
-		echo
-		echo "The disk $resp does not exist."
+		echo "\nThe disk $resp does not exist."
 		DISK=
 	fi
 }
 
 getrootdisk() {
+	local _defdsk
+
+	_defdsk=`echo $_DKDEVS | cutlast`
+	if [ "${_defdsk}" != "${_DKDEVS}" ]; then
+		_defdsk=
+	fi
+
 	cat << __EOT
 
 The installation program needs to know which disk to consider the root disk.
@@ -430,52 +397,38 @@ Note the unit number may be different than the unit number you used in the
 boot program (especially on a PC with multiple disk controllers).
 Available disks are:
 
-__EOT
-	local _defdsk;
+$_DKDEVS
 
-	_DKDEVS=`md_get_diskdevs`
-	_defdsk=`echo $_DKDEVS | cutlast`
-	if [ "${_defdsk}" != "${_DKDEVS}" ]; then
-		_defdsk=
-	fi
-	echo	"$_DKDEVS"
-	echo
+__EOT
 	echo -n "Which disk is the root disk? [${_defdsk}] "
-	getresp "${_defdsk}"
+	getresp "$_defdsk"
 	if isin $resp $_DKDEVS ; then
-		ROOTDISK="$resp"
+		ROOTDISK=$resp
+		makedev $resp || ROOTDISK=
 	else
-		echo
-		echo "The disk $resp does not exist."
+		echo "\nThe disk '$resp' does not exist."
 		ROOTDISK=
 	fi
 }
 
+# Create an entry in the hosts file. If an entry with the
+# same symbolic name already exists, delete it.
+# $1 - IP address
+# $2 - symbolic name
 addhostent() {
-	# $1 - IP address
-	# $2 - symbolic name
-
-	# Create an entry in the hosts table.  If no host table
-	# exists, create one.  If the symbolic name already exists,
-	# replace its entry.
-	if [ ! -f /tmp/hosts ]; then
-		echo "127.0.0.1 localhost" > /tmp/hosts
-	fi
-
-	sed "/ $2.$FQDN $2\$/d" < /tmp/hosts > /tmp/hosts.new
+	sed "/ $2\$/d" < /tmp/hosts > /tmp/hosts.new
 	mv /tmp/hosts.new /tmp/hosts
 
-	echo "$1 $2.$FQDN $2" >> /tmp/hosts
+	echo "$1 $2" >> /tmp/hosts
 }
 
+# Create a hostname.* file for the interface.
+# $1 - interface name
+# $2 - interface symbolic name
+# $3 - interface IP address
+# $4 - interface netmask
+# $5 - (optional) interface media directives
 addifconfig() {
-	# $1 - interface name
-	# $2 - interface symbolic name
-	# $3 - interface IP address
-	# $4 - interface netmask
-	# $5 - (optional) interface media directives
-
-	# Create a hostname.* file for the interface.
 	if [ "$3" = "dhcp" ]; then
 		echo "dhcp NONE NONE NONE $5" > /tmp/hostname.$1
 		addhostent 127.0.0.1 $2
@@ -485,11 +438,12 @@ addifconfig() {
 	fi
 }
 
-configurenetwork() {
+configure_all_interfaces() {
 	local _ifsdone= _ifs _ouranswer= _reprompt=1
 
 	_IFS=`get_ifdevs`
-	resp=		# force at least one iteration
+
+	resp=
 	while [ "X${resp}" != X"done" ]; do
 		if [ $_reprompt = 1 ]; then
 			cat << __EOT
@@ -500,7 +454,7 @@ marked with [X] have been successfully configured):
 __EOT
 
 			for _ifs in $_IFS; do
-				if [ "X${_ouranswer}" = "X" ]; then
+				if [ -z "$_ouranswer" ]; then
 					_ouranswer=$_ifs
 				fi
 				if isin $_ifs $_ifsdone ; then
@@ -512,17 +466,14 @@ __EOT
 			done
 			echo
 		fi
-		echo -n	"Configure which interface? (or, enter 'done') [$_ouranswer] "
+		echo -n	"Configure which interface? (or 'done') [$_ouranswer] "
 		getresp "$_ouranswer"
-		case "$resp" in
-		"done")
+		case $resp in
+		"done")	;;
+		"")	_reprompt=0
 			;;
-		"")
-			_reprompt=0
-			;;
-		*)
-			_ifs=$resp
-			_ouranswer="done"
+		*)	_ifs=$resp
+			_ouranswer=done
 			if isin $_ifs $_IFS ; then
 				if configure_ifs $_ifs ; then
 					_ifsdone="$_ifs $_ifsdone"
@@ -530,7 +481,7 @@ __EOT
 				_ouranswer=
 				fi
 			else
-				echo "Invalid response: \"$resp\" is not in list"
+				echo "Invalid response: '$resp' is not in list"
 			fi
 			_reprompt=1
 			;;
@@ -563,16 +514,15 @@ configure_ifs() {
 	fi
 
 	if [ ! -x /sbin/dhclient ]; then
-		echo "DHCP install not supported"
-		echo
+		echo "DHCP install not supported\n"
 	else
 		_dhcp_prompt=" (or 'dhcp')"
 	fi
 
 	# Get IP address
-	resp=		# force one iteration
-	while [ "X${resp}" = X"" ]; do
-		echo -n "IP address${_dhcp_prompt} ? [$_if_ip] "
+	resp=
+	while [ -z "$resp" ] ; do
+		echo -n "IP address${_dhcp_prompt}? [$_if_ip] "
 		getresp "$_if_ip"
 		if [ ! -x /sbin/dhclient -a "X$resp" == "Xdhcp" ]; then
 			resp=
@@ -582,8 +532,8 @@ configure_ifs() {
 
 	# Get symbolic name
 	_hostname=`hostname`
-	resp=		# force one iteration
-	while [ "X${resp}" = X"" ]; do
+	resp=
+	while [ -z "$resp" ] ; do
 		echo -n "Symbolic (host) name? [$_hostname] "
 		getresp "$_hostname"
 		_if_symname=$resp
@@ -592,19 +542,21 @@ configure_ifs() {
 	# Get netmask
 	if [ "$_if_ip" != "dhcp" ]; then
 		resp=
-		if [ "X${_if_mask}" = X"" ]; then
+		if [ -z "$_if_mask" ]; then
 			_if_mask=255.255.255.0
 		fi
-		while [ "X${resp}" = X"" ]; do
-			echo -n "Netmask ? [$_if_mask] "
+		while [ -z "$resp" ]; do
+			echo -n "Netmask? [$_if_mask] "
 			getresp "$_if_mask"
 			_if_mask=$resp
 		done
 	fi
 
 	if [ -n "`ifconfig -m ${_if_name} | sed -n '/media/p'`" ]; then
-		echo "Your use of the network interface may require non-default"
-		echo "media directives.  The default media is:"
+		cat << __EOT
+Your use of the network interface may require non-default
+media directives. The default media is:
+__EOT
 		ifconfig -m ${_if_name} | sed -n '
 			/supported/D
 			/media:/p'
@@ -613,25 +565,27 @@ configure_ifs() {
 			/media:/D
 			s/^	//
 			/media/p'
-		echo "If the default is not satisfactory, and you wish to use another"
-		echo "media, copy that line from above (e.g. \"media 100baseTX\")"
+		cat << __EOT
+If the default is not satisfactory, and you wish to use another
+media, copy that line from above (e.g. "media 100baseTX")
+__EOT
 		echo -n "Media directives? [$_if_extra] "
 		getresp "$_if_extra"
-		if [ "X${resp}" != X"" ]; then
+		if [ -n "$resp" ]; then
 			_if_extra=$resp
 		fi
 	fi
 
-	# Configure the interface.  If it
+	# Configure the interface. If it
 	# succeeds, add it to the permanent
 	# network configuration info.
 	if [ "$_if_ip" = "dhcp" ]; then
 		ifconfig ${_if_name} down ${_if_extra}
-cat > /etc/dhclient.conf << __EOT
+		cat > /etc/dhclient.conf << __EOT
 initial-interval 1;
 send host-name "$_hostname";
 request subnet-mask, broadcast-address, routers,
-       domain-name, domain-name-servers, host-name;
+	domain-name, domain-name-servers, host-name;
 __EOT
 		dhclient -1 ${_if_name}
 
@@ -652,7 +606,7 @@ __EOT
 			cat > /etc/dhclient.conf << __EOT
 initial-interval 1;
 request subnet-mask, broadcast-address, routers,
-       domain-name, domain-name-servers, host-name;
+	domain-name, domain-name-servers, host-name;
 __EOT
 			dhclient -1 ${_if_name}
 			set -- `ifconfig $_if_name | sed -n '
@@ -682,8 +636,9 @@ __EOT
 	else
 		ifconfig ${_if_name} down
 		if ifconfig ${_if_name} inet \
-		    ${_if_ip} \
-		    netmask ${_if_mask} ${_if_extra} up ; then
+			${_if_ip} \
+			netmask ${_if_mask} ${_if_extra} up
+			then
 			addifconfig ${_if_name} ${_if_symname} ${_if_ip} ${_if_mask} "${_if_extra}"
 			return 0
 		fi
@@ -697,8 +652,8 @@ isalphanumeric() {
 	_n=$1
 	while [ ${#_n} != 0 ]; do
 		case $_n in
-			[A-Za-z0-9]*)	;;
-			*)		return 1;;
+		[A-Za-z0-9]*)	;;
+		*)		return 1;;
 		esac
 		_n=${_n#?}
 	done
@@ -716,7 +671,7 @@ enable_network() {
 	done
 
 	# Copy any required or optional files found
-	for _netfile in hosts myname dhclient.conf resolv.conf resolv.conf.tail; do
+	for _netfile in hosts myname dhclient.conf resolv.conf resolv.conf.tail protocols services; do
 		if [ -f /mnt/etc/${_netfile} ]; then
 			cp /mnt/etc/${_netfile} /etc/${_netfile}
 		fi
@@ -737,55 +692,53 @@ enable_network() {
 	# configure all of the non-loopback interfaces which we know about.
 	# refer to hostname.if(5)
 	for hn in /mnt/etc/hostname.*; do
-    		# Strip off /mnt/etc/hostname. prefix
-    		if=${hn#/mnt/etc/hostname.}
+		# Strip off /mnt/etc/hostname. prefix
+		if=${hn#/mnt/etc/hostname.}
 
-    		# Interface names must be alphanumeric only.  We check to avoid
-    		# configuring backup or temp files, and to catch the "*" case.
-    		if ! isalphanumeric "$if"; then
+		# Interface names must be alphanumeric only. We check to avoid
+		# configuring backup or temp files, and to catch the "*" case.
+		if ! isalphanumeric "$if"; then
 			continue
-    		fi
-    		ifconfig $if > /dev/null 2>&1
-    		if [ "$?" != "0" ]; then
+		fi
+		ifconfig $if > /dev/null 2>&1
+		if [ $? -ne 0 ]; then
 			continue
-    		fi
+		fi
 
-    		# Now parse the hostname.* file
-    		while :; do
+		# Now parse the hostname.* file
+		while :; do
 			if [ "$cmd2" ]; then
-	    			# we are carrying over from the 'read dt dtaddr' last time
-	    			set -- $cmd2
-	    			af="$1" name="$2" mask="$3" bcaddr="$4" ext1="$5" cmd2=
-	    			# make sure and get any remaining args in ext2, like the read below
-	    			i=1; while [ i -lt 6 -a -n "$1" ]; do shift; let i=i+1; done
-	    			ext2="$@"
+				# we are carrying over from the 'read dt dtaddr' last time
+				set -- $cmd2
+				af=$1 name=$2 mask=$3 bcaddr=$4 ext1=$5 cmd2=
+				# make sure and get any remaining args in ext2, like the read below
+				i=1; while [ i -lt 6 -a -n "$1" ]; do shift; let i=i+1; done
+				ext2="$@"
 			else
-	    			# read the next line or exit the while loop
-	    			read af name mask bcaddr ext1 ext2 || break
+				# read the next line or exit the while loop
+				read af name mask bcaddr ext1 ext2 || break
 			fi
 			# $af can be "dhcp", "up", "rtsol", an address family, commands, or
 			# a comment.
-			case "$af" in
+			case $af in
 			"#"*|"!"*|"bridge"|""|"rtsol")
 				# skip comments, user commands, bridges,
 				# IPv6 rtsol and empty lines
-	    			continue
-	    			;;
-			"dhcp")
-	   			[ "$name" = "NONE" ] && name=
-	    			[ "$mask" = "NONE" ] && mask=
-	    			[ "$bcaddr" = "NONE" ] && bcaddr=
-	    			ifconfig $if $name $mask $bcaddr $ext1 $ext2 down
-	    			cmd="dhclient $if"
-	    			;;
+				continue
+				;;
+			"dhcp")	[ "$name" = "NONE" ] && name=
+				[ "$mask" = "NONE" ] && mask=
+				[ "$bcaddr" = "NONE" ] && bcaddr=
+				ifconfig $if $name $mask $bcaddr $ext1 $ext2 down
+				cmd="dhclient $if"
+				;;
 			"up")
-	   			# The only one of these guaranteed to be set is $if
-	    			# the remaining ones exist so that media controls work
-	    			cmd="ifconfig $if $name $mask $bcaddr $ext1 $ext2 up"
-	    			;;
-			*)
-	    			read dt dtaddr
-	    			if [ "$name"  = "alias" ]; then
+				# The only one of these guaranteed to be set is $if
+				# the remaining ones exist so that media controls work
+				cmd="ifconfig $if $name $mask $bcaddr $ext1 $ext2 up"
+				;;
+			*)	read dt dtaddr
+				if [ "$name" = "alias" ]; then
 					# perform a 'shift' of sorts
 					alias=$name
 					name=$mask
@@ -793,41 +746,39 @@ enable_network() {
 					bcaddr=$ext1
 					ext1=$ext2
 					ext2=
-	    			else
+				else
 					alias=
-	    			fi
-	    			cmd="ifconfig $if $af $alias $name "
-	    			case "$dt" in
-	    			dest)
-					cmd="$cmd $dtaddr"
+				fi
+				cmd="ifconfig $if $af $alias $name "
+				case $dt in
+				dest)	cmd="$cmd $dtaddr"
 					;;
-	    			[a-z!]*)
+				[a-z!]*)
 					cmd2="$dt $dtaddr"
 					;;
-	    			esac
-	    			if [ ! -n "$name" ]; then
-		    			echo "/mnt/etc/hostname.$if: invalid network configuration file"
+				esac
+				if [ ! -n "$name" ]; then
+					echo "/mnt/etc/hostname.$if: invalid network configuration file"
 					return
-	    			fi
-	    			case $af in
-	    			inet)
-					[ "$mask" ] && cmd="$cmd netmask $mask"
+				fi
+				case $af in
+				inet)	[ "$mask" ] && cmd="$cmd netmask $mask"
 					if [ "$bcaddr" -a "X$bcaddr" != "XNONE" ]; then
-		   			 	cmd="$cmd broadcast $bcaddr"
+						cmd="$cmd broadcast $bcaddr"
 					fi
 					[ "$alias" ] && rtcmd="; route -n add -host $name 127.0.0.1"
 					;;
-	    			inet6)
+				inet6)
 					# Ignore IPv6 setup
 					continue
 					;;
-	    			*)      cmd="$cmd $mask $bcaddr"
-	    			esac
-	    			cmd="$cmd $ext1 $ext2$rtcmd" rtcmd=
-	    			;;
+				*)	cmd="$cmd $mask $bcaddr"
+				esac
+				cmd="$cmd $ext1 $ext2$rtcmd" rtcmd=
+				;;
 			esac
 			eval "$cmd"
-    		done < /mnt/etc/hostname.$if
+		done < /mnt/etc/hostname.$if
 	done
 
 	# /mnt/etc/mygate, if it exists, contains the name of my gateway host
@@ -843,7 +794,7 @@ enable_network() {
 	# Display results...
 	echo "Network interface configuration:"
 	ifconfig -am
- 
+
 	# enable the resolver if resolv.conf is available
 	if [ -f /etc/resolv.conf ]; then
 		route show
@@ -856,20 +807,18 @@ enable_network() {
 	return 0
 }
 
-
 # Print the selector and get a response
 # The list of sets is passed in as $1, sets $resp
 get_selection() {
-	local _next= _f _sets=$1
+	local _next=done _f _sets=$1
 
 	for _f in $_sets ; do
 		if isin $_f $_setsdone ; then
 			echo -n "	[X] "
-			_next=
 		else
 			echo -n "	[ ] "
-			if [ -z "$_next" ]; then
-			    _next=$_f
+			if [ "X$_next" = "Xdone" ]; then
+				_next=$_f
 			fi
 		fi
 		echo $_f
@@ -878,26 +827,31 @@ get_selection() {
 	# Get the name of the file.
 	echo -n "File name? [$_next] "
 	getresp "$_next"
+
+	# Ignore a bare '-' or '+'
+	case $resp in
+	+|-)	resp=
+	esac
 }
 
-# Do globbing on the selection and parse +/-, sets _get_files and _setsdone
-# (which must exist in the local namespace) as side effects.
+# Do globbing on the selection and parse +/-, sets the global 
+# _get_files and _setsdone appropriately.
 glob_selection() {
-	local _selection="$1" _parent_dir="$2" _sets="$3"
+	local _selection=$1 _src=$2 _sets=$3
 	local _action _matched _tfile _f
 
-	if [ "X${_selection}" = X"" ]; then
+	if [ -z "$_selection" ]; then
 		return
 	fi
 
 	# Change +/- into add/remove
 	_action=add
-	case "$_selection" in
-		+*)	_selection="${_selection#?}"
-			;;
-		-*)	_selection="${_selection#?}"
-			_action=remove
-			;;
+	case $_selection in
+	+*)	_selection=${_selection#?}
+		;;
+	-*)	_selection=${_selection#?}
+		_action=remove
+		;;
 	esac
 
 	# Major hack to allow the user to select globbing patterns
@@ -905,23 +859,25 @@ glob_selection() {
 	if [ X"$_selection" = X"all" ]; then
 		_selection=*
 	fi
-	_tfile=/tmp/install_case.$$	# safe in single user mode
-	cat >$_tfile << OOF
+	# This is safe in single user mode.
+	_tfile=/tmp/install_case.$$
+	cat >$_tfile << __EOT
 	case \$_f in
-		$_selection)	# Add/remove file to extraction list
-			if [ "\$_action" = "add" ]; then
-				_get_files=\`addel \${_f} \${_get_files}\`
-				_setsdone=\`addel \${_f} \${_setsdone}\`
-			elif [ "\$_action" = "remove" ]; then
-				_get_files=\`rmel \${_f} \${_get_files}\`
-				_setsdone=\`rmel \${_f} \${_setsdone}\`
-			else
-				echo "Unknown action: \$_action"
-			fi
-			_matched=\$(( \$_matched + 1 ))
-			;;
+	$_selection)
+		# Add/remove file to extraction list
+		if [ "\$_action" = "add" ]; then
+			_get_files=\`addel \${_f} \${_get_files}\`
+			_setsdone=\`addel \${_f} \${_setsdone}\`
+		elif [ "\$_action" = "remove" ]; then
+			_get_files=\`rmel \${_f} \${_get_files}\`
+			_setsdone=\`rmel \${_f} \${_setsdone}\`
+		else
+			echo "Unknown action: \$_action"
+		fi
+		_matched=\$(( \$_matched + 1 ))
+		;;
 	esac
-OOF
+__EOT
 	set +o noglob
 
 	# Eww.
@@ -932,58 +888,235 @@ OOF
 	rm -f $_tfile
 
 	if [ $_matched -eq 0 ]; then
-		echo "File $_parent_dir/$_selection does not exist.  Check to make"
-		echo "sure you entered the information properly or enter 'list' for a file list."
+		cat << __EOT
+The file
+
+    '${_src}/${_selection}'
+
+does not exist. Check to make sure you entered the name properly.
+__EOT
 	fi
 }
 
-install_url() {
+display_failure_msg() {
+		cat << __EOT
+
+The following files failed to extract correctly.
+Choose which one(s) to retry or 'done' to exit selector.
+You may de-select a file by prepending a '-' to its name.
+
+__EOT
+}
+
+display_selection_msg() {
+	cat << __EOT
+
+The following sets are available. Enter a filename, 'all' to select
+all the sets, or 'done'. You may de-select a set by prepending a '-'
+to its name.
+
+__EOT
+}
+
+display_extract_msg() {
+
+	cat << __EOT
+
+You will now be asked which sets to ${MODE}. Some of these sets are required
+for your ${MODE} and some are optional. You will want at least the
+base and bsd sets. Consult the installation notes if you are not sure
+which sets are required!
+__EOT
+
+}
+
+# Set global _sets to either 
+#     1) a list of sets found in both $1 and $THESETS, where
+#        $2 is the location that generated the list of files in $1.
+# or
+#     2) a list of .tgz or .tar.gz files found in $2
+get_sets_list () {
+	local _f _file_list=$1 _src=$2
+
+	_sets=
+
+	for _f in $THESETS ; do
+		if [ "X${_f}" = "Xkernel" ]; then
+			if isin bsd $_file_list; then
+				_sets="$_sets bsd"
+			fi
+		elif isin ${_f}${VERSION}.tar.gz $_file_list; then
+			_sets="$_sets ${_f}${VERSION}.tar.gz"
+		elif isin ${_f}${VERSION}.tgz $_file_list; then
+			_sets="$_sets ${_f}${VERSION}.tgz"
+		fi
+	done
+
+	if [ -z "$_sets" ]; then
+		cat << __EOT
+The directory
+
+    '${_src}'
+
+contains no OpenBSD ${VERSION_MAJOR}.${VERSION_MINOR} ${MODE} sets.
+__EOT
+		echo -n "Search for other *.tar.gz and *.tgz files? [y] "
+		getresp y
+		case $resp in
+		n*|N*)	return ;;
+		esac
+		# *.tar.gz and *.tgz are possible sets
+		for _f in $_file_list ; do
+			case $_f in
+			*.tar.gz|*.tgz)	_sets="$_sets ${_f}"
+			esac
+		done
+	fi
+
+	if [ -z "$_sets" ]; then
+		eval echo "There are no *.tar.gz or *.tgz files in ${_src}."
+		echo -n "See a directory listing? [y] "
+		getresp y
+		case $resp in
+		n*|N*)	return ;;
+		esac
+		echo "\n${_file_list}\n"
+		return
+	fi
+}
+
+# Set global _get_files to the list of sets requested by the user
+# from $1. Add this list to _setsdone after saving current value
+# of _setsdone.
+get_get_files_list () {
+	local _src=$1
+
+	_get_files=
+	_osetsdone=$_setsdone
+
+	# Set the default list of files
+	for _f in $_sets ; do
+		# $_sets contains only .tgz and .tar.gz file names and 'bsd'.
+		case $_f in
+		base*|bsd|comp*|etc*|game*|man*|misc*)
+			if ! isin ${_f} ${_setsdone}; then
+				_get_files=`addel ${_f} ${_get_files}`
+				_setsdone=`addel ${_f} ${_setsdone}`
+			fi
+			;;
+		esac
+	done
+
+	# Allow the user to select/de-select additional sets
+	while : ; do
+
+		display_selection_msg
+
+		get_selection "$_sets"
+
+		if [ "X${resp}" = "Xdone" ]; then
+			break
+		fi
+
+		glob_selection "$resp" "$_src" "$_sets"
+	done
+}
+
+# Install the list of files in the global _get_files from the source
+# in $1, aka $2. For mounted file system installs $1==file:$2. For URL
+# installs $1 == $_url_base and $2 == $1 w/o passwords, etc.
+#
+# Return 0 if install was attempted, 1 if user aborted before install
+# was tried.
+install_get_files_list () {
+	local _f _failed_files _src=$1 _public_src=$2
+
+	echo -n "Ready to ${MODE} sets? [y] "
+	getresp y
+	case $resp in
+	y*|Y*)	;;
+	*)	_setsdone=$_osetsdone
+		return 1
+		;;
+	esac
+
+	# Install/Upgrade the sets one at a time. Keep track of which
+	# ones fail.
+	while [ -n "${_get_files}" ] ; do
+		_failed_files=
+		echo
+		for _f in $_get_files ; do
+			echo "Getting ${_f} ..."
+			case $_f in
+			*.tar.gz|*.tgz)
+				ftp ${_ftp_active} -o - -V -m "${_src}/${_f}" | tar zxpf - -C /mnt
+				;;
+			*)
+				ftp ${_ftp_active} -o "/mnt/${_f}" -V -m "${_src}/${_f}"
+				;;
+			esac
+			if [ $? -ne 0 ]; then
+				# Mark xfer as having failed,.
+				_setsdone=`rmel $_f $_setsdone`
+				_failed_files="${_failed_files} ${_f}"
+			fi
+		done
+
+		# Offer the option of re-fetching failed files.
+		_get_files=
+		while [ -n "${_failed_files}" ] ; do
+			display_failure_msg
+
+			get_selection "$_failed_files"
+
+			if [ "X${resp}" = X"done" ]; then
+				break
+			fi
+
+			glob_selection "$resp" "$_public_src" "$_failed_files"
+		done
+	done
+}
+
+# Encode $1 as specified for usercodes and passwords in RFC 1738
+# section 3.1, and now supported by our in-tree ftp:
+#
+#    ':' -> '%3a'
+#    '@' -> '%40'
+#    '/' -> '%2f'
+#
+# *NOTE* quotes around $1 are required to preserve trailing or
+# embeddded blanks in usercodes and passwords!
+encode_for_url() {
+	echo "$1" | sed -e 's/:/%3a/g' -e 's/@/%40/g' -e 's/\//%2f/g'
+}
+
 # Get several parameters from the user, and xfer
 # files from the server.
 # Note:	_ftp_server_ip, _ftp_server_dir, _ftp_server_login,
 #	_ftp_server_password, and _ftp_active must be global.
+install_url() {
+	local _f _file_list _url_type _url_base _url_login _url_pass _oifs
 
-local _sets _kernel _f _file_list _get_files _failed_files _osetsdone
-local _url_type _url_base _reuse _minpat
-
-# Parse arguments, shell style
-while test $# != 0; do
-	case "$1" in
-		-ftp) _url_type=ftp ;;
-		-http) _url_type=http ;;
-		-reuse) _reuse=1 ;;
-		-minpat) shift; _minpat="$1" ;;
+	# Parse arguments, shell style
+	case $1 in
+	-ftp)	_url_type=ftp ;;
+	-http)	_url_type=http ;;
 	esac
-	shift
-done
-if [ X"${_minpat}" = X ]; then
-	_minpat='base*.tar.gz|base*.tgz|man*.tar.gz|man*.tgz|etc*.tar.gz|etc*.tgz|bsd'
-fi
 
-echo
-echo "This is an automated ${_url_type}-based installation process.  You will be asked"
-echo "questions and then the files will be retrieved iteratively via ${_url_type}."
-echo
+	cat << __EOT
 
-# Reuse old values w/o prompting for anything?
-if [ X"$_reuse" = X"1" ]; then
-	_reuse=
-	if eval test X"\$_installed_via_${_url_type}" = X"1"; then
-		echo -n "Use values from previous ${_url_type} install? [y] "
-		getresp y
-		case "$resp" in
-			y*|Y*)
-				_reuse=1;;
-		esac
-	fi
-fi
-if [ X"$_reuse" = X ]; then
+This is an automated ${_url_type}-based installation process. You will be asked
+questions and then the files will be retrieved iteratively via ${_url_type}.
+
+__EOT
+
 	# Proxy the connections?
-	if [ "X${_proxy_host}" = X"" ]; then
+	if [ -z "$_proxy_host" ]; then
 		_proxy_host=none
 	fi
-	echo -n "HTTP/FTP proxy URL? (e.g. \"http://proxy:8080\", or \"none\") [${_proxy_host}] "
-	getresp "${_proxy_host}"
+	echo -n "HTTP/FTP proxy URL? (e.g. 'http://proxy:8080', or 'none') [${_proxy_host}] "
+	getresp "$_proxy_host"
 	if [ "X${resp}" = X"none" ]; then
 		unset _proxy_host ftp_proxy http_proxy
 	else
@@ -991,29 +1124,32 @@ if [ X"$_reuse" = X ]; then
 		export ftp_proxy=${_proxy_host}
 		export http_proxy=${_proxy_host}
 	fi
-	if [ "${_url_type}" = "ftp" -a "X$ftp_proxy" = "X" ]; then
+	if [ "${_url_type}" = "ftp" -a -z "$ftp_proxy" ]; then
 		# Use active mode ftp? (irrelevant if using a proxy)
-		case "${_ftp_active}" in
-			-A)	resp=y ;;
-			*)	resp=n ;;
+		case $_ftp_active in
+		-A)	resp=y ;;
+		*)	resp=n ;;
 		esac
-		echo "By default, ftp will attempt a passive connection and fall back to a normal"
-		echo "(active) connection if that doesn't work.  However, there are some very"
-		echo "old ftp servers that claim to support passive mode, but really do not."
-		echo "In this case, you should explicitly request an active session."
+
+		cat << __EOT
+By default, ftp will attempt a passive connection and fall back to a normal
+(active) connection if that does not work. However, there are some very
+old ftp servers that claim to support passive mode, but really do not.
+In this case, you should explicitly request an active session.
+__EOT
 		echo -n "Do you want to use active ftp? [${resp}] "
-		getresp "${resp}"
-		case "$resp" in
-			y*|Y*)	_ftp_active=-A ;;
-			*)	unset _ftp_active ;;
+		getresp "$resp"
+		case $resp in
+		y*|Y*)	_ftp_active=-A ;;
+		*)	unset _ftp_active ;;
 		esac
 	fi
 
 	# Provide a list of possible servers
-	test -z "$_ftp_getlist" && _ftp_getlist=y
+	[ -z "$_ftp_getlist" ] && _ftp_getlist=y
 	echo -n "Do you want a list of potential ${_url_type} servers? [${_ftp_getlist}] "
-	getresp $_ftp_getlist
-	case "$resp" in
+	getresp "$_ftp_getlist"
+	case $resp in
 	n*|N*)	_ftp_getlist=n
 		;;
 	*)
@@ -1028,8 +1164,8 @@ if [ X"$_reuse" = X ]; then
 	esac
 
 	# Get server IP address
-	resp=		# force one iteration
-	while [ "X${resp}" = X"" ]; do
+	resp=
+	while [ -z "$resp" ] ; do
 		if [ -f /tmp/ftplist ]; then
 			eval echo -n "Server IP address, hostname, or list#? [\$_${_url_type}_server_ip]\ "
 		else
@@ -1039,10 +1175,13 @@ if [ X"$_reuse" = X ]; then
 		if [ "X$resp" = "X?" -a -f /tmp/ftplist ]; then
 			cat /tmp/ftplist | grep "^${_url_type}:" | cat -n | less -XE
 			resp=
-		elif [ -n "$resp" -a `isnumeric $resp` -eq 1 -a ${resp:-0} -ge 1 \
-		    -a -f /tmp/ftplist ]; then
+		elif [ -n "$resp" \
+			-a `isnumeric $resp` -eq 1 \
+			-a ${resp:-0} -ge 1 \
+			-a -f /tmp/ftplist ]
+			then
 			maxlines=`grep "^${_url_type}:" /tmp/ftplist | cat -n |
-			    sed -n -e '$p' | cutword 1`
+				sed -n -e '$p' | cutword 1`
 			if [ $maxlines -lt $resp ]; then
 				echo "There is no ${resp}th line in the list."
 				resp=
@@ -1050,26 +1189,27 @@ if [ X"$_reuse" = X ]; then
 			fi
 			tline=`grep "^${_url_type}:" /tmp/ftplist | sed -n -e "${resp}p"`
 			url=`echo $tline | sed -e "s/^${_url_type}:\/\///" |
-			    cutword -t' ' 1 | cutword -t' ' 1`
+				cutword -t' ' 1 | cutword -t' ' 1`
 			host=`echo $url | cutword -t/ 1`
 			path=`echo $url | sed -e "s/^${host}\///"`
-			path="${path}/${VERSION_MAJOR}.${VERSION_MINOR}/${ARCH}"
+			path=${path}/${VERSION_MAJOR}.${VERSION_MINOR}/${ARCH}
 			eval _${_url_type}_server_ip=$host
 			eval _${_url_type}_server_dir=$path
-			resp=		# do it again, just to double check
+			# do it again, just to double check
+			resp=
 			echo "Using	$tline"
 		else
-			eval _${_url_type}_server_ip="$resp"
+			eval _${_url_type}_server_ip=$resp
 		fi
 	done
 
 	# Get server directory
-	if [ "${_url_type}" = "ftp" -a "X${_ftp_server_dir}" = X"" ]; then
+	if [ "${_url_type}" = "ftp" -a -z "$_ftp_server_dir" ] ; then
 		# Default ftp dir
-		_ftp_server_dir="pub/OpenBSD/${VERSION_MAJOR}.${VERSION_MINOR}/${ARCH}"
+		_ftp_server_dir=pub/OpenBSD/${VERSION_MAJOR}.${VERSION_MINOR}/${ARCH}
 	fi
-	resp=		# force one iteration
-	while [ "X${resp}" = X"" ]; do
+	resp=
+	while [ -z "$resp" ] ; do
 		eval echo -n "Server directory? [\$_${_url_type}_server_dir]\ "
 		eval getresp "\$_${_url_type}_server_dir"
 		eval _${_url_type}_server_dir=$resp
@@ -1077,28 +1217,31 @@ if [ X"$_reuse" = X ]; then
 
 	if [ "${_url_type}" = "ftp" ]; then
 		# Need default values even if we proxy ftp...
-		if [ "X${_ftp_server_login}" = X"" ]; then
+		if [ -z "$_ftp_server_login" ] ; then
 			_ftp_server_login=anonymous
 		fi
-		if [ "X${_ftp_server_password}" = X"" ]; then
+		if [ -z "$_ftp_server_password" ] ; then
 			_ftp_server_password=root@`hostname`.${FQDN}
 		fi
 
-		# Get login name
-		resp=		# force one iteration
-		while [ "X${resp}" = X"" ]; do
+		# Get login name, setting IFS to nothing so trailing or
+		# embedded blanks are preserved!
+		_oifs=$IFS
+		IFS=
+		resp=
+		while [ -z "$resp" ] ; do
 			echo -n "Login? [${_ftp_server_login}] "
-			getresp "${_ftp_server_login}"
+			getresp "$_ftp_server_login"
 			_ftp_server_login=$resp
 		done
 
 		# Get password unless anonymous
-		if [ ${_ftp_server_login} != "anonymous" ]; then
-			resp=		# force one iteration
-			while [ "X${resp}" = X"" ]; do
+		if [ "${_ftp_server_login}" != "anonymous" ]; then
+			resp=
+			while [ -z "$resp" ] ; do
 				echo -n "Password (will not echo): "
 				stty -echo
-				getresp -n "${_ftp_server_password}"
+				getresp -n "$_ftp_server_password"
 				stty echo
 				echo
 				_ftp_server_password=$resp
@@ -1107,343 +1250,87 @@ if [ X"$_reuse" = X ]; then
 			# only used by ftp_list_files()
 			_ftp_server_password=root@`hostname`.${FQDN}
 		fi
+		IFS=$_oifs
 	fi
-fi
 
-# Build up the base url since it is so nasty...
-if [ "${_url_type}" = "ftp" -a "${_ftp_server_login}" != "anonymous" ]; then
-	_url_base=ftp://${_ftp_server_login}:${_ftp_server_password}@${_ftp_server_ip}/${_ftp_server_dir}
-else
-	eval _url_base=${_url_type}://\$_${_url_type}_server_ip/\$_${_url_type}_server_dir
-fi
-
-# Get list of files from the server.
-# XXX - check for nil $_file_list and deal
-if [ "${_url_type}" = "ftp" -a "X${ftp_proxy}" = X"" ]; then
-	_file_list=`ftp_list_files "$_ftp_server_ip" "$_ftp_server_login" "$_ftp_server_password" "$_ftp_server_dir"`
-else
-	# Assumes index file is "index.txt" for http (or proxy)
-	# We can't use index.html since the format is server-dependent
-	_file_list=`ftp -o - -V ${_url_base}/index.txt | sed 's///'`
-fi
-
-_sets=
-if list_has_sets "$_file_list" $THESETS; then
-	for _f in $THESETS ; do
-		if [ "X${_f}" = "Xkernel" ]; then
-			if isin bsd $_file_list; then
-				_kernel=bsd
-			fi
-		elif isin ${_f}${VERSION}.tar.gz $_file_list; then
-			_sets="$_sets ${_f}${VERSION}.tar.gz"
-		elif isin ${_f}${VERSION}.tgz $_file_list; then
-			_sets="$_sets ${_f}${VERSION}.tgz"
-		fi
-	done
-else
-	eval echo "There are no OpenBSD install sets available in \"\$_${_url_type}_server_dir\"."
-	echo -n "Search for *.tar.gz and *.tgz files? [y] "
-	getresp "y"
-	case "$resp" in
-		n*|N*)	return ;;
-		*)	;;
-	esac
-	# *.tar.gz and *.tgz are possible sets
-	_sets=
-	_kernel=
-	for _f in ${_file_list} ; do
-		case "$_f" in
-		    *.tar.gz|*.tgz)	_sets="$_sets ${_f}"
-		esac
-	done
-	if [ "X${_sets}" = X"" ]; then
-		echo "There are no *.tar.gz or *.tgz files in that dir."
-		echo -n "See a directory listing? [y] "
-		getresp "y"
-		case "$resp" in
-			n*|N*)	return ;;
-			*)	;;
-		esac
-		echo
-		echo "${_file_list}"
-		echo
-		return
+	# Build up the base url since it is so nasty...
+	if [ "${_url_type}" = "ftp" -a "${_ftp_server_login}" != "anonymous" ]; then
+		_url_login=`encode_for_url "${_ftp_server_login}"`
+		_url_pass=`encode_for_url "${_ftp_server_password}"`
+		_url_base=ftp://${_url_login}:${_url_pass}@${_ftp_server_ip}/${_ftp_server_dir}
 	else
-		echo "Adding *.tar.gz and *.tgz files to selector."
-	fi
-fi
-
-# Yes, all those blackslashes really are necesary...
-eval echo "\\\\n"\
-"You will now be asked for files to extract. In addition to the files listed,\\\\n"\
-"you may select any file located at\\\\n"\
-"	\$_${_url_type}_server_ip:\$_${_url_type}_server_dir\\\\n"\
-"You can also enter \'all\' to install all the standard sets, or \'list\' to list\\\\n"\
-"the files available.  When you are done selecting files, enter \'done\'. Some of\\\\n"\
-"these sets are required for your ${MODE} and some are optional -- you will want\\\\n"\
-"at least the base and bsd sets.  Consult the installation notes if you are not\\\\n"\
-"sure which sets are required!"
-_osetsdone="$_setsdone"
-# Set the minimal default
-for _f in $_sets $_kernel; do
-	eval "case $_f in \
-		${_minpat}) \
-			if ! isin \${_f} \${_setsdone}; then \
-				_get_files=\`addel \${_f} \${_get_files}\` ; \
-				_setsdone=\`addel \${_f} \${_setsdone}\` ; \
-			fi ;; \
-	esac"
-done
-
-# Allow the user to select/de-select additional sets
-while : ; do
-	echo
-	echo "The following sets are available for extraction."
-	echo "Enter filename, \`list', \`all', or \`done'."
-	echo "You may de-select a set by prepending a '-' to its name."
-	echo
-	get_selection "$_sets $_kernel"
-
-	if [ "X${resp}" = X"done" ]; then
-		break
-	elif [ "X${resp}" = X"list" ]; then
-		echo
-		eval echo "\$_${_url_type}_server_dir:"
-		echo "${_file_list}"
-		continue
+		eval _url_base=${_url_type}://\$_${_url_type}_server_ip/\$_${_url_type}_server_dir
 	fi
 
-	eval glob_selection \"$resp\" \$_${_url_type}_server_dir \"$_sets $_kernel\"
-done
+	# Get list of files from the server.
+	# XXX - check for nil $_file_list and deal
+	if [ "${_url_type}" = "ftp" -a -z "$ftp_proxy" ] ; then
+		_file_list=`ftp_list_files "$_ftp_server_ip" "$_ftp_server_login" "$_ftp_server_password" "$_ftp_server_dir"`
+	else
+		# Assumes index file is "index.txt" for http (or proxy)
+		# We can't use index.html since the format is server-dependent
+		_file_list=`ftp -o - -V "${_url_base}/index.txt" | sed 's///'`
+	fi
 
-# User may have said "done" without selecting any files
-if [ "X${_get_files}" = X"" ]; then
-	return
-fi
+	get_sets_list  "$_file_list" "`eval echo \\$_${_url_type}_server_dir`"
 
-# Stash the fact that we configured and downloaded via this url method
-eval _installed_via_${_url_type}=1
+	[ -z "$_sets" ] && return
 
-echo
-echo "Fetching files via ${_url_type} may take a long time, especially over a slow network"
-echo -n "connection.  Ready to download files? [y] "
-getresp "y"
-case "$resp" in
-	y*|Y*)
-		;;
-	*)
-		_setsdone="$_osetsdone"
-		return
-		;;
-esac
+	display_extract_msg
 
-# Download the files one at a time and keep track of which ones failed
-while test -n "${_get_files}" ; do
-	_failed_files=
-	echo
-	for _f in $_get_files ; do
-		echo "Getting ${_f} ..."
-		if [ "X${_f}" = "X${_kernel}" ]; then
-			( cd /mnt ; ftp ${_ftp_active} -V -m ${_url_base}/${_f} )
-		else
-			( cd /mnt ; ftp ${_ftp_active} -o - -V -m ${_url_base}/${_f} | tar zxpf - )
-		fi
-		if [ $? -ne 0 ]; then
-			# Mark xfer as having failed,.
-			_setsdone=`rmel $_f $_setsdone`
-			_failed_files="${_failed_files} ${_f}"
-		fi
-	done
+	get_get_files_list "`eval echo \\$_${_url_type}_server_dir`" 
 
-	# Give them the option of refetching failed files.
-	_get_files=
-	while test -n "${_failed_files}" ; do
-		echo
-		echo "The following files failed to transfer and extract correctly:"
-		echo "Choose which one(s) to refetch or 'done' to exit selector."
-		echo "You may de-select a file by prepending a '-' to its name."
-		echo
-		get_selection "$_failed_files"
+	# User may have selected no files
+	[ -z "$_get_files" ] && return
 
-		if [ "X${resp}" = X"done" ]; then
-			break
-		elif [ "X${resp}" = X"list" ]; then
-			echo
-			eval echo "\$_${_url_type}_server_dir:"
-			echo "${_file_list}"
-			echo
-			continue
-		fi
+	cat << __EOT
 
-		eval glob_selection \"$resp\" \$_${_url_type}_server_dir \"$_failed_files\"
-	done
-done
+Fetching files via ${_url_type} may take a long time, especially over a slow
+network connection.
+__EOT
+
+	install_get_files_list "$_url_base" "`eval echo \$_${_url_type}_server_dir`"
+	if [ $? -eq 0 ] ; then
+		# Stash the fact that we configured and downloaded via this url method
+		eval _installed_via_${_url_type}=1
+	fi
 }
 
-install_from_mounted_fs() {
 # $1 - directory containing installation sets
-local _sets= _kernel _f _get_files _failed_files _osetsdone
+install_from_mounted_fs() {
+	local _f _get_files _file_list
 
-if [ ! -d $1 ]; then
-	echo "No such directory: $1"
-	return
-fi
-
-if dir_has_sets $1 $THESETS; then
-	for _f in $THESETS ; do
-		if [ "X${_f}" = "Xkernel" ]; then
-			if [ -f $1/bsd ]; then
-				_kernel=bsd
-			fi
-		elif [ -f $1/${_f}${VERSION}.tar.gz ]; then
-			_sets="$_sets ${_f}${VERSION}.tar.gz"
-		elif [ -f $1/${_f}${VERSION}.tgz ]; then
-			_sets="$_sets ${_f}${VERSION}.tgz"
-		fi
-	done
-else
-	echo "There are no OpenBSD install sets available in \"$1\"."
-	echo -n "Search for *.tar.gz and *.tgz files? [y] "
-	getresp "y"
-	case "$resp" in
-		n*|N*)	return ;;
-		*)	;;
-	esac
-	# *.tar.gz and *.tgz are possible sets
-	_sets=
-	_kernel=
-	_sets=`cd $1 ; echo *.tar.gz *.tgz`
-	if [ "X${_sets}" = X'*.tar.gz *.tgz' ]; then
-		echo "There are no *.tar.gz or *.tgz files in that dir."
-		echo -n "See a directory listing? [y] "
-		getresp "y"
-		case "$resp" in
-			n*|N*)	return ;;
-			*)	;;
-		esac
-		echo
-		( cd $1 && ls )
-		echo
+	if [ ! -d "$1" ]; then
+		echo "No such directory: '$1'"
 		return
-	else
-		echo "Adding *.tar.gz and *.tgz files to selector."
-	fi
-fi
-
-echo "\n"\
-"You will now be asked for files to extract.  In addition to the\n"\
-"files listed in the selector you may enter any file located in\n"\
-"$1.  You can also enter 'all' to install all the standard\n"\
-"sets, or 'list' to list the files avilable in $1.\n"\
-"When you are done selecting files, enter 'done'.\n"\
-"Some of these sets are required for your ${MODE} and some are optional --\n"\
-"You will want at least the base and bsd sets.\n"\
-"Consult the installation notes if you are not sure which sets are required!"
-_osetsdone="$_setsdone"
-# Set a minimal default
-for _f in $_sets $_kernel; do
-	case "$_f" in
-		base*.tar.gz|base*.tgz|man*.tar.gz|man*.tgz|etc*.tar.gz|etc*.tgz|bsd)
-			if ! isin ${_f} ${_setsdone}; then
-				_get_files=`addel ${_f} ${_get_files}`
-				_setsdone=`addel ${_f} ${_setsdone}`
-			fi
-			;;
-	esac
-done
-
-# Allow the user to select/de-select additional sets
-while : ; do
-	echo
-	echo "The following sets are available for extraction."
-	echo "Enter filename, \`list', \`all', or \`done'."
-	echo "You may de-select a set by prepending a '-' to its name."
-	echo
-	get_selection "$_sets $_kernel"
-
-	if [ "X${resp}" = X"done" ]; then
-		break
-	elif [ "X${resp}" = X"list" ]; then
-		echo
-		echo "${1}:"
-		( cd $1 && ls )
-		continue
 	fi
 
-	glob_selection "$resp" "$1" "$_sets $_kernel"
-done
+	_file_list=`ls -l ${1}`
 
-# User may have said "done" without selecting any files
-if [ "X${_get_files}" = X"" ]; then
-	return
-fi
+	get_sets_list "$_file_list" "$1"
 
-echo
-echo -n "Ready to extract selected file sets? [y] "
-getresp "y"
-case "$resp" in
-	y*|Y*)
-		;;
-	*)
-		_setsdone="$_osetsdone"
-		return
-		;;
-esac
+	[ -z "$_sets" ] && return
 
-# Extract the files one at a time and keep track of which ones failed
-while test -n "${_get_files}" ; do
-	_failed_files=
-	echo
-	for _f in $_get_files ; do
-		echo "$1/${_f}:"
-		if [ "X${_f}" = "X${_kernel}" ]; then
-			ftp -V -m -o /mnt/$_f file:$1/$_f
-		else
-			ftp -V -m -o - file:$1/$_f | (cd /mnt; tar -zxpf -)
-		fi
-		if [ $? -ne 0 ]; then
-			# Mark xfer as having failed,.
-			_setsdone=`rmel $_f $_setsdone`
-			_failed_files="${_failed_files} ${_f}"
-		fi
-	done
+	display_extract_msg
 
-	# Give them the option of retrying failed files.
-	_get_files=
-	while test -n "${_failed_files}" ; do
-		echo
-		echo "The following files failed to extract correctly:"
-		echo "Choose which one(s) to retry or 'done' to exit selector."
-		echo "You may de-select a file by prepending a '-' to its name."
-		echo
-		get_selection "$_failed_files"
+	get_get_files_list "$1" 
 
-		if [ "X${resp}" = X"done" ]; then
-			break
-		elif [ "X${resp}" = X"list" ]; then
-			echo
-			echo "${1}:"
-			( cd $1 && ls )
-			echo
-			continue
-		fi
+	# User may have selected no files
+	[ -z "$_get_files" ] && return
 
-		glob_selection "$resp" "$1" "$_failed_files"
-	done
-done
+	install_get_files_list "file:$1" "$1"
 }
 
 install_cdrom() {
-local _drive _range _part _fstype _directory _n
+	local _drive _range _part _fstype _directory _n
 
-# Get the cdrom device info
-_CDDEVS=`md_get_cddevs`
-if [ "X${_CDDEVS}" = X"" ]; then
-	echo "No CD-ROM devices were found.  Aborting."
-	return
-fi
+	# Get the cdrom device info
+	if [ -z "$_CDDEVS" ]; then
+		echo "No CD-ROM devices were found. Aborting."
+		return
+	fi
 
-cat << __EOT
+	cat << __EOT
 
 The following CD-ROM devices are installed on your system.
 Please make sure the CD is in the CD-ROM drive and select
@@ -1452,372 +1339,347 @@ the device containing the CD with the installation sets:
 $_CDDEVS
 
 __EOT
-_drive=`echo $_CDDEVS | cutword 1`
-echo -n	"Which CD-ROM contains the installation media? [$_drive] "
-getresp "$_drive"
-case "$resp" in
-	abort)
-		echo "Aborting."
+
+	_drive=`echo $_CDDEVS | cutword 1`
+	echo -n	"Which CD-ROM contains the installation media? [$_drive] "
+	getresp "$_drive"
+	case $resp in
+	abort)	echo "Aborting."
 		return
 		;;
-
-	*)
-		if isin $resp $_CDDEVS ; then
+	*)	if isin $resp $_CDDEVS ; then
 			_drive=$resp
 		else
-			echo
-			echo "The CD-ROM $resp does not exist."
-			echo "Aborting."
+			echo "\nThe CD-ROM $resp does not exist.\nAborting."
 			return
 		fi
 		;;
-esac
+	esac
 
-# If it is an ISO9660 CD-ROM, we don't need to ask any other questions
-_n=0
-until disklabel $_drive >/tmp/label.$_drive 2>&1; do
-	# Try up to 6 times to access the CD
-	if egrep -q '(Input/output error)|(sector size 0)' /tmp/label.$_drive; then
-		_n=$(( $_n + 1 ))
-		if [ _n -le 5 ]; then
-			echo "I/O error accessing $_drive; retrying"
-			sleep 10
+	# If it is an ISO9660 CD-ROM, we don't need to ask any other questions
+	_n=0
+	until disklabel $_drive >/tmp/label.$_drive 2>&1; do
+		# Try up to 6 times to access the CD
+		if egrep -q '(Input/output error)|(sector size 0)' /tmp/label.$_drive; then
+			_n=$(( $_n + 1 ))
+			if [ _n -le 5 ]; then
+				echo "I/O error accessing $_drive; retrying"
+				sleep 10
+			else
+				echo "Cannot access $_drive. Aborting."
+				return
+			fi
 		else
-			echo "Cannot access $_drive.  Aborting."
-			return
+			break
 		fi
+	done
+
+	echo
+	if grep -q '^ *c: .*ISO9660' /tmp/label.$_drive; then
+		_fstype=cd9660
+		_part=c
 	else
-		break
-	fi
-done
-echo
-if grep -q '^ *c: .*ISO9660' /tmp/label.$_drive; then
-	_fstype=cd9660
-	_part=c
-else
-	# Get partition from user
-	_range=`md_get_partition_range`
-	resp=		# force one iteration
-	while [ "X${resp}" = X"" ]; do
-		echo -n 'CD-ROM partition to mount (normally "c")? [c] '
-		getresp c
-		case "$resp" in
+		# Get partition from user
+		_range=`md_get_partition_range`
+		resp=
+		while [ -z "$resp" ] ; do
+			echo -n 'CD-ROM partition to mount? (normally "c") [c] '
+			getresp c
+			case $resp in
 			$_range)
 				_part=$resp
 				;;
-
-			*)
-				echo "Invalid response: $resp"
-				resp=		# force loop to repeat
+			*)	echo "Invalid response: $resp"
+				# force loop to repeat
+				resp=
 				;;
-		esac
-	done
+			esac
+		done
 
-	# Ask for filesystem type
-	cat << __EOT
+		# Ask for filesystem type
+		cat << __EOT
 
 There are two CD-ROM filesystem types currently supported by this program:
 cd9660		ISO-9660
 ffs		Berkeley Fast Filesystem
 
 __EOT
-	resp=		# force one iteration
-	while [ "X${resp}" = X"" ]; do
-		echo -n "Which filesystem type? [cd9660] "
-		getresp "cd9660"
-		case "$resp" in
+		resp=
+		while [ -z "$resp" ] ; do
+			echo -n "Which filesystem type? [cd9660] "
+			getresp cd9660
+			case $resp in
 			cd9660|ffs)
 				_fstype=$resp
 				;;
-
-			*)
-				echo "Invalid response: $resp"
-				resp=		# force loop to repeat
+			*)	echo "Invalid response: '$resp'"
+				# force loop to repeat
+				resp=
 				;;
-		esac
-	done
-fi
-rm -f /tmp/label.$_drive
+			esac
+		done
+	fi
 
-# Mount the CD-ROM
-if ! mount -t ${_fstype} -o ro \
-    /dev/${_drive}${_part} /mnt2 ; then
-	echo "Cannot mount CD-ROM drive.  Aborting."
-	return
-fi
+	rm -f /tmp/label.$_drive
 
-# Get the directory where the file lives
-if [ "X${_directory}" = X"" ]; then
-	_directory="/${VERSION_MAJOR}.${VERSION_MINOR}/${ARCH}"
-fi
-resp=		# force one iteration
-while [ "X${resp}" = X"" ]; do
-	echo "Enter the directory relative to the mount point that"
-	echo -n "contains the file. [${_directory}] "
-	getresp "${_directory}"
-done
-_directory=$resp
+	# Mount the CD-ROM
+	if ! mount -t ${_fstype} -o ro /dev/${_drive}${_part} /mnt2 ; then
+		echo "Cannot mount CD-ROM drive. Aborting."
+		return
+	fi
 
-install_from_mounted_fs /mnt2/${_directory}
-umount -f /mnt2 > /dev/null 2>&1
+	# Get the directory where the file lives
+	resp=
+	_directory=${VERSION_MAJOR}.${VERSION_MINOR}/${ARCH}
+	echo "Enter the directory relative to the mount point that contains"
+	echo -n "the file: [${_directory}] "
+
+	getresp "$_directory"
+
+	install_from_mounted_fs "/mnt2/${resp}"
+	umount -f /mnt2 > /dev/null 2>&1
 }
 
 mount_a_disk() {
-# Mount a disk on /mnt2. The set of disk devices to choose from
-# is $_DKDEVS.
-# returns 0 on failure.
+	# Mount a disk on /mnt2. The set of disk devices to choose from
+	# is $_DKDEVS.
+	# returns 0 on failure.
 
-local _drive _def_partition _partition_range _partition _fstype
-local _fsopts _directory _md_fstype _md_fsopts
+	local _drive _def_partition _partition_range _partition _fstype
+	local _fsopts _md_fstype _md_fsopts
 
-getresp "abort"
-case "$resp" in
-	abort)
-		echo "Aborting."
+	cat << __EOT
+
+The following disk devices are installed on your system; please select
+the disk device containing the partition with the installation sets:
+
+$_DKDEVS
+
+__EOT
+
+	echo -n	"Which is the disk with the installation sets? [abort] "
+	getresp abort
+
+	case $resp in
+	abort)	echo "Aborting."
 		return 0
 		;;
-
-	*)
-		if isin $resp $_DKDEVS ; then
+	*)	if isin $resp $_DKDEVS ; then
 			_drive=$resp
 		else
-			echo
-			echo "The disk $resp does not exist."
-			echo "Aborting."
+			echo "\nThe disk $resp does not exist.\nAborting."
 			return 0
 		fi
 		;;
-esac
+	esac
 
-# Get partition
-cat << __EOT
+	# Get partition
+	cat << __EOT
 
 The following partitions have been found on $_drive:
 
 __EOT
-disklabel $_drive 2>/dev/null | grep '^  .:'
-echo
-_likely_partition_range=`disklabel $_drive 2>/dev/null | \
-    sed -n -e '/swap/s/.*//' -e '/unused/s/.*//' \
-	-e '/^  .:/{s/^  \(.\).*/\1/;H;}' \
-	-e '${g;s/\n//g;s/^/[/;s/$/]/p;}'`
-_partition_range=`disklabel $_drive 2>/dev/null | \
-    sed -n -e '/^  .:/{s/^  \(.\).*/\1/;H;}' \
-	-e '${g;s/\n//g;s/^/[/;s/$/]/p;}'`
-_def_partition=`echo $_likely_partition_range | \
-    sed -n 's/^\[\(.\).*\]/\1/p'`
-if [ -z "$_def_partition" ]; then
-	_def_partition=`echo $_partition_range | \
-	    sed -n 's/^\[\(.\).*\]/\1/p'`
+	disklabel $_drive 2>/dev/null | grep '^  .:'
+	echo
+	_likely_partition_range=`disklabel $_drive 2>/dev/null | \
+		sed -n	-e '/swap/s/.*//' -e '/unused/s/.*//' \
+			-e '/^  .:/{s/^  \(.\).*/\1/;H;}' \
+			-e '${g;s/\n//g;s/^/[/;s/$/]/p;}'`
+	_partition_range=`disklabel $_drive 2>/dev/null | \
+		sed -n	-e '/^  .:/{s/^  \(.\).*/\1/;H;}' \
+			-e '${g;s/\n//g;s/^/[/;s/$/]/p;}'`
+	_def_partition=`echo $_likely_partition_range | \
+		sed -n 's/^\[\(.\).*\]/\1/p'`
 	if [ -z "$_def_partition" ]; then
-		echo "There are no usable partitions on that disk"
-		return 0
+		_def_partition=`echo $_partition_range | \
+			sed -n 's/^\[\(.\).*\]/\1/p'`
+		if [ -z "$_def_partition" ]; then
+			echo "There are no usable partitions on that disk"
+			return 0
+		fi
 	fi
-fi
-resp=		# force one iteration
-while [ "X${resp}" = X"" ]; do
-	echo -n "Partition? [$_def_partition] "
-	getresp "$_def_partition"
-	case "$resp" in
+
+	resp=
+	while [ -z "$resp" ]; do
+		echo -n "Partition? [$_def_partition] "
+		getresp "$_def_partition"
+		case $resp in
 		$_partition_range)
 			_partition=$resp
 			;;
-
-		*)
-			echo "Invalid response: $resp"
-			resp=		# force loop to repeat
+		*)	echo "Invalid response: $resp"
+			# force loop to repeat
+			resp=
 			;;
-	esac
-done
+		esac
+	done
 
-# Ask for filesystem type
-cat << __EOT
+	# Ask for filesystem type
+	cat << __EOT
 
 The following filesystem types are supported:
 default		(deduced from the disklabel)
 ffs
 __EOT
-_md_fstype=`md_native_fstype`
-_md_fsopts=`md_native_fsopts`
-if [ ! -z "$_md_fstype" ]; then
-	echo "	$_md_fstype"
-else
-	_md_fstype="_undefined_"
-fi
-resp=		# force one iteration
-while [ "X${resp}" = X"" ]; do
-	echo -n "Which filesystem type? [default] "
-	getresp "default"
-	case "$resp" in
+
+	_md_fstype=`md_native_fstype`
+	_md_fsopts=`md_native_fsopts`
+	if [ -n "$_md_fstype" ]; then
+		echo "	$_md_fstype"
+	else
+		_md_fstype=_undefined_
+	fi
+
+	resp=
+	while [ -z "$resp" ]; do
+		echo -n "Which filesystem type? [default] "
+		getresp default
+		case $resp in
 		default)
 			_fstype=
-			_fsopts="ro"
+			_fsopts=ro
 			;;
-		ffs)
-			_fstype="-t $resp"
-			_fsopts="async,ro"
+		ffs)	_fstype="-t $resp"
+			_fsopts=async,ro
 			;;
 		$_md_fstype)
 			_fstype="-t $resp"
 			_fsopts=$_md_fsopts
 			;;
-		*)
-			echo "Invalid response: $resp"
-			resp=		# force loop to repeat
+		*)	echo "Invalid response: $resp"
+			# force loop to repeat
+			resp=
 			;;
-	esac
-done
+		esac
+	done
 
-# Mount the disk
-if ! mount $_fstype -o $_fsopts /dev/${_drive}${_partition} /mnt2; then
-	echo "Cannot mount disk.  Aborting."
-	return 0
-fi
-return 1
+	# Mount the disk
+	if ! mount $_fstype -o $_fsopts /dev/${_drive}${_partition} /mnt2; then
+		echo "Cannot mount disk. Aborting."
+		return 0
+	fi
+
+	return 1
 }
 
 install_disk() {
-local _directory
+	if mount_a_disk ; then
+		return
+	fi
 
-cat << __EOT
-
-The following disk devices are installed on your system; please select
-the disk device containing the partition with the installation sets:
-
-__EOT
-_DKDEVS=`md_get_diskdevs`
-echo    "$_DKDEVS"
-echo
-echo -n	"Which is the disk with the installation sets? [abort] "
-
-if mount_a_disk ; then
-	return
-fi
-
-# Get the directory where the file lives
-resp=		# force one iteration
-while [ "X${resp}" = X"" ]; do
+	# Get the directory where the file lives
 	echo "Enter the directory relative to the mount point that"
-	echo -n "contains the file. [${_directory}] "
-	getresp "${_directory}"
-done
-_directory=$resp
+	echo -n "contains the file: [.] "
+	getresp "."
 
-install_from_mounted_fs /mnt2/${_directory}
-umount -f /mnt2 > /dev/null 2>&1
+	install_from_mounted_fs "/mnt2/${resp}"
+	umount -f /mnt2 > /dev/null 2>&1
 }
 
 install_nfs() {
-# Get the IP address of the server
-resp=		# force one iteration
-while [ "X${resp}" = X"" ]; do
-	echo -n "Server IP address or hostname? [${_nfs_server_ip}] "
-	getresp "${_nfs_server_ip}"
-done
-_nfs_server_ip=$resp
+	# Get the IP address of the server
+	resp=
+	while [ -z "$resp" ] ; do
+		echo -n "Server IP address or hostname? [${_nfs_server_ip}] "
+		getresp "$_nfs_server_ip"
+	done
+	_nfs_server_ip=$resp
 
-# Get server path to mount
-resp=		# force one iteration
-while [ "X${resp}" = X"" ]; do
-	echo -n "Filesystem on server to mount? [${_nfs_server_path}] "
-	getresp "${_nfs_server_path}"
-done
-_nfs_server_path=$resp
+	# Get server path to mount
+	resp=
+	while [ -z "$resp" ]; do
+		echo -n "Filesystem on server to mount? [${_nfs_server_path}] "
+		getresp "$_nfs_server_path"
+	done
+	_nfs_server_path=$resp
 
-# Determine use of TCP
-echo -n "Use TCP transport (only works with capable NFS server)? [n] "
-getresp "n"
-case "$resp" in
-	y*|Y*)
-		_nfs_tcp="-T"
+	# Determine use of TCP
+	echo -n "Use TCP transport? (only works with capable NFS server) [n] "
+	getresp n
+	case $resp in
+	y*|Y*)	_nfs_tcp=-T
 		;;
-
-	*)
-		_nfs_tcp=
+	*)	_nfs_tcp=
 		;;
-esac
+	esac
 
-# Mount the server
-mkdir /mnt2 > /dev/null 2>&1
-if ! mount_nfs $_nfs_tcp ${_nfs_server_ip}:${_nfs_server_path} \
-    /mnt2 ; then
-	echo "Cannot mount NFS server.  Aborting."
-	return
-fi
+	# Mount the server
+	mkdir /mnt2 > /dev/null 2>&1
+	if ! mount_nfs $_nfs_tcp ${_nfs_server_ip}:${_nfs_server_path} /mnt2 ; then
+		echo "Cannot mount NFS server. Aborting."
+		return
+	fi
 
-# Get the directory where the file lives
-resp=		# force one iteration
-while [ "X${resp}" = X"" ]; do
-	echo "Enter the directory relative to the mount point that"
-	echo -n "contains the file. [${_nfs_directory}] "
-	getresp "${_nfs_directory}"
-done
-_nfs_directory=$resp
+	# Get the directory where the file lives
+	resp=
+	while [ -z "$resp" ]; do
+		echo "Enter the directory relative to the mount point that"
+		echo -n "contains the file: [.] "
+		getresp
+	done
 
-install_from_mounted_fs /mnt2/${_nfs_directory}
-umount -f /mnt2 > /dev/null 2>&1
+	install_from_mounted_fs "/mnt2/${resp}"
+	umount -f /mnt2 > /dev/null 2>&1
 }
 
 install_tape() {
-local _xcmd
+	local _xcmd
 
-# Get the name of the tape from the user.
-cat << __EOT
+	# Get the name of the tape from the user.
+	cat << __EOT
 
-The installation program needs to know which tape device to use.  Make
+The installation program needs to know which tape device to use. Make
 sure you use a "no rewind on close" device.
 
 __EOT
-_tape=`basename $TAPE`
-resp=		# force one iteration
-while [ "X${resp}" = X"" ]; do
-	echo -n "Name of tape device? [${_tape}]"
-	getresp "${_tape}"
-done
-_tape=`basename $resp`
-TAPE="/dev/${_tape}"
-if [ ! -c $TAPE ]; then
-	echo "$TAPE does not exist or is not a character special file."
-	echo "Aborting."
-	return
-fi
-export TAPE
-
-# Rewind the tape device
-echo -n "Rewinding tape..."
-if ! mt rewind ; then
-	echo "$TAPE may not be attached to the system or may not be"
-	echo "a tape device.  Aborting."
-	return
-fi
-echo "done."
-
-# Get the file number
-resp=		# force one iteration
-while [ "X${resp}" = X"" ]; do
-	echo -n "File number? "
-	getresp ""
-	case "$resp" in
-		[1-9]*)
-			_nskip=$(( $resp - 1 ))
-			;;
-
-		*)
-			echo "Invalid file number ${resp}."
-			resp=		# force loop to repeat
-			;;
-	esac
-done
-
-# Skip to correct file.
-echo -n "Skipping to source file..."
-if [ "X${_nskip}" != X"0" ]; then
-	if ! mt fsf $_nskip ; then
-		echo "Could not skip $_nskip files.  Aborting."
+	_tape=`basename $TAPE`
+	resp=
+	while [ -z "$resp" ]; do
+		echo -n "Name of tape device? [${_tape}]"
+		getresp "$_tape"
+	done
+	_tape=`basename $resp`
+	TAPE=/dev/${_tape}
+	if [ ! -c $TAPE ]; then
+		echo "$TAPE does not exist or is not a character special file."
+		echo "Aborting."
 		return
 	fi
-fi
-echo "done."
+	export TAPE
+
+	# Rewind the tape device
+	echo -n "Rewinding tape..."
+	if ! mt rewind ; then
+		echo "$TAPE may not be attached to the system or may not be"
+		echo "a tape device. Aborting."
+		return
+	fi
+	echo "done."
+
+	# Get the file number
+	resp=
+	while [ -z "$resp" ]; do
+		echo -n "File number? "
+		getresp
+		case $resp in
+		[1-9]*)	_nskip=$(( $resp - 1 ))
+			;;
+		*)	echo "Invalid file number ${resp}."
+			# force loop to repeat
+			resp=
+			;;
+		esac
+	done
+
+	# Skip to correct file.
+	echo -n "Skipping to source file..."
+	if [ "X${_nskip}" != X"0" ]; then
+		if ! mt fsf $_nskip ; then
+			echo "Could not skip $_nskip files. Aborting."
+			return
+		fi
+	fi
+	echo "done."
 
 cat << __EOT
 
@@ -1827,129 +1689,121 @@ There are 2 different ways the file can be stored on tape:
 2) a standard tar image
 
 __EOT
-resp=		# force one iteration
-while [ "X${resp}" = X"" ]; do
-	echo -n "Which way is it? [1] "
-	getresp "1"
-	case "$resp" in
-	1)
-		_xcmd="tar -zxvpf -"
-		;;
 
-	2)
-		_xcmd="tar -xvpf -"
-		;;
-
-	*)
-		echo "Invalid response: $resp."
-		resp=		# force loop to repeat
-		;;
-	esac
-	( cd /mnt; dd if=$TAPE | $_xcmd )
-done
-echo "Extraction complete."
+	resp=
+	while [ -z "$resp" ]; do
+		echo -n "Which way is it? [1] "
+		getresp 1
+		case $resp in
+		1)	_xcmd="tar -zxvpf -"
+			;;
+		2)	_xcmd="tar -xvpf -"
+			;;
+		*)	echo "Invalid response: $resp."
+			# force loop to repeat
+			resp=
+			;;
+		esac
+		( cd /mnt; dd if=$TAPE | $_xcmd )
+	done
+	echo "Extraction complete."
 }
 
 get_timezone() {
-local _a _zonepath
+	local _zoneroot=/mnt/usr/share/zoneinfo/ _zonepath
 
-#
-# If the zoneinfo is not on the installation medium or on the
-# installed filesystem, set TZ to GMT and return immediatly.
-#
-if [ ! -e /usr/share/zoneinfo -a ! -e /mnt/usr/share/zoneinfo ]; then
-	TZ=GMT
-	return
-fi
-if [ ! -d /usr/share/zoneinfo ]; then
-	_zonepath=/mnt
-else
-	_zonepath=
-fi
-	
-cat << __EOT
+	# If the timezone directory structure is not
+	# available, return immediately.
+
+	[ ! -d $_zoneroot ] && return
+
+	cat << __EOT
 
 Select a time zone for your location. Timezones are represented on the system
 by a directory structure rooted in "/usr/share/timezone". Most timezones can
-be selected by entering a token like "CET" or "GMT-6".  Other zones are
+be selected by entering a token like "CET" or "GMT-6". Other zones are
 grouped by continent or country, with detailed zone information separated by
 a slash ("/"), e.g. "US/Pacific" or "Canada/Mountain".
 
-To get a listing of what's available in /usr/share/zoneinfo, enter "?"
-at the prompts below.
-
 __EOT
-if [ X$TZ = X ]; then
-	TZ=`ls -l /mnt/etc/localtime 2>/dev/null | cutlast`
-	TZ=${TZ#/usr/share/zoneinfo/}
-fi
-while : ; do
-	echo -n	"What timezone are you in? [\`?' for list] [$TZ] "
-	getresp "$TZ"
-	case "$resp" in
-	"")
-		echo "Timezone defaults to GMT"
-		TZ="GMT"
-		break;
-		;;
-	"?")
-		ls -F ${_zonepath}/usr/share/zoneinfo
-		;;
-	*)
-		_a=$resp
-		while [ -d ${_zonepath}/usr/share/zoneinfo/$_a ]; do
-			echo -n "There are several timezones available"
-			echo " within zone '$_a'"
-			echo -n "Select a sub-timezone [\`?' for list]: "
-			getresp ""
-			case "$resp" in
-			"?") ls -F ${_zonepath}/usr/share/zoneinfo/$_a ;;
-			*)	_a=${_a}/${resp}
-				if [ -f ${_zonepath}/usr/share/zoneinfo/$_a ]; then
-					break;
-				fi
-				;;
-			esac
+
+	if [ -L /mnt/etc/localtime ]; then
+		TZ=`ls -l /mnt/etc/localtime 2>/dev/null | cutlast`
+		TZ=${TZ#${_zoneroot#/mnt}}
+	fi
+
+	[ -z "$TZ" ] && TZ=GMT
+
+	while : ; do
+		_zonepath=$_zoneroot
+
+		echo -n	"What timezone are you in? ('?' for list) [$TZ] "
+		getresp "$TZ"
+
+		if [ "$resp" = "?" ]; then
+			ls -F ${_zonepath}
+			continue;
+		fi
+
+		_zonepath=${_zonepath}${resp}
+
+		while [ -d "$_zonepath" ]; do
+			echo -n "Select a sub-timezone of "
+			echo -n "'${_zonepath#$_zoneroot}' ('?' for list): "
+			getresp
+			if [ "$resp" = "?" ]; then
+				ls -F ${_zonepath}
+			else
+				_zonepath=${_zonepath}/${resp}
+			fi
 		done
-		if [ -f ${_zonepath}/usr/share/zoneinfo/$_a ]; then
-			TZ="$_a"
-			echo "You have selected timezone \"$_a\"".
+
+		if [ -f "$_zonepath" ]; then
+			TZ=${_zonepath#$_zoneroot}
+			echo "You have selected timezone '$TZ'".
+			ln -sf /usr/share/zoneinfo/$TZ /mnt/etc/localtime
 			return
 		fi
-		echo "'/usr/share/zoneinfo/$_a' is not a valid timezone on this system."
-		;;
-	esac
-done
+
+		echo -n "'${_zonepath#$_zoneroot}'"
+		echo " is not a valid timezone on this system."
+	done
 }
 
 sane_install() {
 	if [ ! -s /mnt/bsd ]; then
 		cat << __EOT
 
-Warning, no kernel (/mnt/bsd) installed!  You did not unpack a file set
-containing a kernel--this is needed to boot.  Please note that the install
+Warning, no kernel (/mnt/bsd) installed! You did not unpack a file set
+containing a kernel -- this is needed to boot. Please note that the install
 kernel is *not* suitable for general use.
 __EOT
 	elif [ ! -f /mnt/bin/cat ]; then
 		cat << __EOT
 
 You still do not have a /bin/cat in your filesystem (i.e. a sample random file
-which you probably want).  This seems to indicate that you are still missing
+which you probably want). This seems to indicate that you are still missing
 important distribution files.
 __EOT
+	elif [ ! -x /mnt/dev/MAKEDEV ]; then
+		cat << __EOT
+
+No /dev/MAKEDEV has been installed yet.
+__EOT
+
 	elif [ ! -d /mnt/etc -o ! -d /mnt/usr/share/zoneinfo -o ! -d /mnt/dev ]; then
 		cat << __EOT
 
-Something needed to complete the installation seems to be missing, did you
+One or more of /etc, /usr/share/zoneinfo or /dev is missing. Did you
 forget to extract a required set?
 __EOT
 	else
-		return 0;
+		return 0
 	fi
 
 	cat << __EOT
 
-You will now be given the chance to install the missing set(s).  You can
+You will now be given the chance to install the missing set(s). You can
 enter '!' at the prompt to escape to a shell and fix things by hand if you wish.
 
 __EOT
@@ -1958,260 +1812,214 @@ __EOT
 }
 
 install_sets() {
-local _yup="FALSE" _have_nfs
+	local _yup=FALSE _have_nfs
 
-# Can we do an NFS install?
-test -f /sbin/mount_nfs && _have_nfs=true
+	# Can we do an NFS install?
+	[ -f /sbin/mount_nfs ] && _have_nfs=true
 
-# Ask the user which media to load the distribution from.
-cat << __EOT
-It is now time to extract the installation sets onto the hard disk.  Make sure
-the sets are either on a local device (i.e. tape, CD-ROM) or on a network
-server.  You will have the chance to repeat this step or to extract sets from
-several places, so you don't have to try to load all the sets in one try and
-can recover from some errors.
-
-__EOT
-
-if [ "X$local_sets_dir" != "X" ]; then
-	install_from_mounted_fs ${local_sets_dir}
-	if [ X"$_setsdone" != X ]; then
-		_yup="TRUE"
-	fi
-fi
-
-# Go on prodding for alternate locations
-resp=		# force at least one iteration
-while [ X"${resp}" = X ]; do
-	# If _yup is not FALSE, it means that we extracted sets above.
-	# If that's the case, bypass the menu the first time.
-	if [ X"$_yup" = X"FALSE" ]; then
-		echo -n	"Install from (f)tp, (h)ttp, (t)ape, (C)D-ROM"
-		test -n "$_have_nfs" && echo -n ", (N)FS"
-		echo -n " or local (d)isk? "
-		getresp ""
-		case "$resp" in
-		d*|D*)
-			install_disk
-			resp=d
-			;;
-		f*|F*)
-			test -n "$_didnet" || donetconfig
-			install_url -ftp
-			resp=f
-			;;
-		h*|H*)
-			test -n "$_didnet" || donetconfig
-			install_url -http
-			resp=h
-			;;
-		t*|T*)
-			install_tape
-			resp=t
-			;;
-		c*|C*)
-			install_cdrom
-			resp=c
-			;;
-		n*|N*)
-			test -n "$_didnet" || donetconfig
-			if [ -n "$_have_nfs" ]; then
-				install_nfs
-				resp=n
-			else
-				echo "Invalid response: $resp"
-				resp=
-			fi
-			;;
-		*)
-			echo "Invalid response: $resp"
-			resp=
-			;;
-		esac
-	else
-		_yup="FALSE"	# So we'll ask next time
-	fi
-
-	# Perform sanity checks...
-	if sane_install; then
-		# Give the user the opportunity to extract more sets. They
-		# don't necessarily have to come from the same media.
-		echo
-		echo -n	"Extract more sets? [n] "
-		getresp "n"
-		case "$resp" in
-		y*|Y*)
-			# Force loop to repeat
-			resp=
-			;;
-
-		*)
-			;;
-		esac
-	else
-		# Not sane, don't exit loop.
-		resp=
-	fi
-done
-}
-
-munge_fstab() {
-local _fstab _fstab_shadow _dev _mp _fstype _dev _options
-
-# Create a 'shadow' fstab to use for mounting and unmounting all
-# of the target filesystems relative to /mnt.
-_fstab=$1
-_fstab_shadow=$2
-( while read _dev _mp _fstype _options _rest; do
-	# Skip comment lines, non-ffs filesystems and
-        # 'noauto' filesystems.
-	case "$_dev" in
-		\#*)	continue;;
-		*)	;;
-	esac
-	case "$_fstype" in
-		ffs)	;;
-		*)	continue;;
-	esac
-	case "$_options" in
-		*noauto*)    continue;;
-		*)      ;;
-	esac
-	# Don't use soft updates
-        _options="$(echo ${_options} | sed 's/,softdep,/,/; s/,softdep//; s/softdep,//')"
-	if [ "$_mp" = "/" ]; then
-	        _mp=""
-	fi
-	echo $_dev /mnt$_mp $_fstype $_options $_rest
-    done ) < $_fstab > $_fstab_shadow
-}
-
-mount_fs() {
-# Must mount filesystems manually, one at a time, so we can make
-# sure the mount points exist.
-# $1 is a file in fstab format
-local _fstab=$1
-local _async=$2
-
-( while read line; do
-	set -- $line
-	_dev=$1
-	_mp=$2
-	_fstype=$3
-	_opt=$4
-
-	# If not the root filesystem, make sure the mount
-	# point is present.
-	if [ "X{$_mp}" != X"/mnt" ]; then
-		mkdir -p $_mp
-	fi
-
-	# Mount the filesystem.  If the mount fails, exit
-	# with an error condition to tell the outer
-	# later to bail.
-	if ! mount -v -t $_fstype $_async -o $_opt $_dev $_mp ; then
-		# error message displayed by mount
-		exit 1
-	fi
-done ) < $_fstab
-
-if [ "X${?}" != X"0" ]; then
+	# Ask the user which media to load the distribution from.
 	cat << __EOT
 
-FATAL ERROR:  Cannot mount filesystems.  Double-check your configuration
-and restart the installation process.
+You must now specify where the ${MODE} sets you want to use are. They
+must either be on a local device (disk, tape, or CD-ROM), an
+accessible NFS filesystem or an accessible ftp or http network
+server. You will have the chance to repeat this step or to extract
+sets from several places, so you do not have to try to load all the
+sets in one try and can recover from some errors.
+
 __EOT
-	exit
-fi
-}
 
-unmount_fs() {
-# Unmount all filesystems and check their integrity.
-# Usage: [-check] <fstab file>
-local _check _fstab _pid
-
-if [ "$1" = "-check" ]; then
-	_check=1
-	_fstab=$2
-else
-	_check=0
-	_fstab=$1
-fi
-
-if [ ! \( -f $_fstab -a -s $_fstab \) ]; then
-	echo "fstab empty" > /dev/tty
-	return
-fi
-
-(
-	_devs=
-	_mps=
-	# maintain reverse order
-	while read line; do
-		set -- $line
-		_devs="$1 ${_devs}"
-		_mps="$2 ${_mps}"
-	done
-	echo -n "Unmounting filesystems... "
-	for _mp in ${_mps}; do
-		echo -n "${_mp} "
-		umount ${_mp}
-	done
-	echo "... Done."
-
-	if [ $_check = 1 ]; then
-		echo "Checking filesystem integrity..."
-		for _dev in ${_devs}; do
-			echo  "${_dev}"
-			fsck -f ${_dev}
-		done
-		echo "... Done."
+	if [ -n "$local_sets_dir" ]; then
+		install_from_mounted_fs "${local_sets_dir}"
+		[ -n "$_setsdone" ] && _yup=TRUE
 	fi
-) < $_fstab
+
+	# Go on prodding for alternate locations
+	resp=
+	while [ -z "$resp" ]; do
+		# If _yup is not FALSE, it means that we extracted sets above.
+		# If that's the case, bypass the menu the first time.
+		if [ X"$_yup" = X"FALSE" ]; then
+			echo -n	"Install from (f)tp, (h)ttp, (t)ape, (C)D-ROM"
+			[ -n "$_have_nfs" ] && echo -n ", (N)FS"
+			echo -n " or local (d)isk? "
+			getresp
+			case $resp in
+			d*|D*)	install_disk
+				resp=d
+				;;
+			f*|F*)	[ -n "$_didnet" ] || donetconfig
+				install_url -ftp
+				resp=f
+				;;
+			h*|H*)	[ -n "$_didnet" ] || donetconfig
+				install_url -http
+				resp=h
+				;;
+			t*|T*)	install_tape
+				resp=t
+				;;
+			c*|C*)	install_cdrom
+				resp=c
+				;;
+			n*|N*)	[ -n "$_didnet" ] || donetconfig
+				if [ -n "$_have_nfs" ]; then
+					install_nfs
+					resp=n
+				else
+					echo "Invalid response: $resp"
+					resp=
+				fi
+				;;
+			*)	echo "Invalid response: $resp"
+				resp=
+				;;
+			esac
+		else
+			# So we'll ask next time
+			_yup=FALSE
+		fi
+
+		# Perform sanity checks...
+		if sane_install; then
+			# Give the user the opportunity to extract more sets. They
+			# don't necessarily have to come from the same media.
+			echo -n	"\nExtract more sets? [n] "
+			getresp n
+			case $resp in
+			y*|Y*)	# Force loop to repeat
+				resp=
+				;;
+			esac
+		else
+			# Not sane, don't exit loop.
+			resp=
+		fi
+	done
 }
 
-remount_fs() {
-( while read line; do
-	set -- $line
-	_dev=$1
-	_mp=$2
-	_fstype=$3
-	_opt=$4
+# Create a fstab to use for fsck'ing, mounting and unmounting all
+# of the target filesystems relative to /mnt.
+munge_fstab() {
+	local _dev _mp _fstype _opt _rest
 
-	if ! mount -u -o $_opt $_dev $_mp ; then
-		# error message displayed by mount
-		exit 1
+	while read _dev _mp _fstype _opt _rest; do
+		# Skip comment lines, non-ffs filesystems and
+		# 'noauto' filesystems.
+		case $_dev in
+		\#*)	continue ;;
+		esac
+		case $_fstype in
+		ffs)	;;
+		*)	continue ;;
+		esac
+		case $_opt in
+		*noauto*)
+			continue ;;
+		esac
+
+		# Don't use soft updates
+		_opt="$(echo ${_opt} | sed 's/,softdep,/,/; s/,softdep//; s/softdep,//')"
+
+		if [ "$_mp" = "/" ]; then
+			_mp=
+		fi
+
+		echo $_dev /mnt$_mp $_fstype $_opt $_rest
+	done > /etc/fstab
+}
+
+# Must mount filesystems manually, one at a time, so we can make
+# sure the mount points exist.
+mount_fs() {
+	local _async=$1 _dev _mp _fstype _opt _rest
+
+	while read _dev _mp _fstype _opt _rest; do
+		# If not the root filesystem, make sure the mount
+		# point is present.
+		if [ "X{$_mp}" != X"/mnt" ]; then
+			mkdir -p $_mp
+		fi
+
+		# Mount the filesystem. If the mount fails, exit.
+		if ! mount -v -t $_fstype $_async -o $_opt $_dev $_mp ; then
+			# In addition to the error message displayed by mount ...
+			cat << __EOT
+
+FATAL ERROR:	Cannot mount filesystems. Double-check your configuration
+		and restart the ${MODE}.
+
+__EOT
+			exit
+		fi
+	done < /etc/fstab
+}
+
+# Script is exiting. Clean up as much as possible.
+cleanup_on_exit() {
+	local _bad_devs
+
+	echo "\nCleaning up..."
+
+	# Kill any running dhclient, so a restart will not
+	# find /dev/bpf0 busy. Do this first so a user who
+	# interrupts out of any fsck'ing will not be stuck
+	# with an active dhclient.
+
+	if [ -f /var/run/dhclient.pid ]; then
+		echo "Stopping dhclient"
+		kill -HUP `sed -ne "1p" /var/run/dhclient.pid` > /dev/null 2>&1
+		rm -f /var/run/dhclient.pid
 	fi
-done ) < $1
-}
 
-check_fs() {
-# Check filesystem integrity.
-# $1 is a file in fstab format
-local _fstab=$1
+	if [ -f /etc/fstab ]; then
+		umount -av
+	elif [ ! "`df /`" = "`df /mnt`" ]; then
+		umount -v /mnt
+	fi
 
-(
-	_devs=
-	_mps=
-	while read line; do
-		set -- $line
-		_devs="$1 ${_devs}"
-		_mps="$2 ${_mps}"
-	done
-
-	echo "Checking filesystem integrity..."
-	for _dev in ${_devs}; do
-		echo  "${_dev}"
-		fsck -f ${_dev}
-	done
 	echo "Done."
-) < $_fstab
 }
 
-get_fqdn() {
-	# Find LAST instance of DOMAIN or SEARCH and extract first domain name
-	# on that line as FQDN. Then ask user, just to be sure.
+# Remount all filesystems in /etc/fstab with the options from
+# /etc/fstab, i.e. without any options such as async which
+# may have been used in the first mount.
+remount_fs() {
+	local _dev _mp _fstype _opt _rest
 
+	while read _dev _mp _fstype _opt _rest; do
+		if ! mount -u -o $_opt $_dev $_mp ; then
+			# error message displayed by mount
+			exit 1
+		fi
+	done < /etc/fstab
+}
+
+# Preen all filesystems in /etc/fstab, showing individual results,
+# but skipping the root filesystem device given in $1. This was
+# already fsck'ed successfully.
+check_fs() {
+	local _dev _rest _badfsck=0 _root=$1
+
+	while read _dev _rest; do
+		[ "$_dev" = "$_root" ] && continue
+		echo -n "fsck -p ${_dev}..."
+		if ! fsck -fp ${_dev} > /dev/null 2>&1; then
+			echo "FAILED. You must fsck this device manually."
+			_badfsck=1
+		else
+			echo "OK."
+		fi
+	done < /etc/fstab
+
+	return $_badfsck
+}
+
+# Find LAST instance of DOMAIN or SEARCH and extract first domain name
+# on that line as FQDN. Then ask user, just to be sure.
+# $1 = resolv.conf file to search for FQDN
+# $2 = hosts file to add FQDN information to
+get_fqdn() {
 	if [ -f "$1" ]; then
 		FQDN=`sed -n \
 			-e '/^domain[[:space:]][[:space:]]*/{s///;s/\([^[:space:]]*\).*$/\1/;h;}' \
@@ -2219,54 +2027,91 @@ get_fqdn() {
 			-e '${g;p;}' $1`
 	fi
 
-	resp=		# force at least one iteration
-	while [ "X${resp}" = X"" ]; do
-		echo -n "Enter DNS domain name (e.g. \"bar.com\"): [$FQDN] "
+	if [ -f "$2" -a -n "$FQDN" ]; then
+		# Add FQDN to hosts file entries created by addhostent, changing
+		# lines like
+		#    1.2.3.4 hostname
+		# to
+		#    1.2.3.4 hostname.$FQDN hostname
+		sed "s/\\(.*\\)[[:space:]]\\(.*\\)\$/\\1 \\2.$FQDN \\2/" < $2 > $2.new
+		mv $2.new $2
+	else
+		echo -n "Enter DNS domain name (e.g. 'bar.com'): [$FQDN] "
 		getresp "$FQDN"
-	done
-
-	FQDN=$resp
+		FQDN=$resp
+	fi
 }
 
 donetconfig() {
 	_didnet=1
-	resp=		# force at least one iteration
+
 	_nam=
 	if [ -f /tmp/myname ]; then
 		_nam=`cat /tmp/myname`
 	fi
-	while [ "X${resp}" = X"" ]; do
-		echo -n "Enter system hostname (short form, e.g. \"foo\"): [$_nam] "
+
+	resp=
+	while [ -z "$resp" ] ; do
+		echo -n "Enter system hostname (short form, e.g. 'foo'): [$_nam] "
 		getresp "$_nam"
 	done
 	hostname $resp
 	echo $resp > /tmp/myname
 
-	echo
-	echo "If you have any devices being configured by a DHCP server"
-	echo "it is recommended that you do not enter a default route or"
-	echo "any name servers."
-	echo
+	# Always create new hosts file. If install.sh has been
+	# restarted, an existing one may contain information which
+	# will conflict with the information about to be entered.
+	# Also ensures logic to put FQDN in hosts file will create
+	# hosts file lines in correct format.
+	echo "::1 localhost\n127.0.0.1 localhost" > /tmp/hosts
 
-	configurenetwork
+	# Remove any existing hostname.* files. If install.sh has
+	# been restarted, this ensures a correct list of configured
+	# interfaces is displayed, and gives the user a chance to
+	# change which interfaces are to be configured.
+	rm -f /tmp/hostname.*
 
-	# Get FQDN after possible DHCP invocation
+	# Revoke any previous decision on whether or not to use
+	# a nameserver during installation.
+	rm -f /tmp/resolv.conf.shadow
+
+	cat << __EOT
+
+If any interfaces will be configured using a DHCP server
+it is recommended that you do not enter a DNS domain name,
+a default route, or any name servers.
+
+__EOT
+
+	FQDN=
+	get_fqdn /tmp/resolv.conf
+
+	configure_all_interfaces
+
+	# As dhclient will populate /etc/resolv.conf, a symbolic link to
+	# /tmp/resolv.conf.shadow, mv any such file to /tmp/resolv.conf
+	# so it will eventually be copied to /mnt/etc/resolv.conf and will
+	# not in the meantime remove the user's ability to choose to use it
+	# or not, during the rest of the install.
 	if [ -f /tmp/resolv.conf.shadow ]; then
-		get_fqdn /tmp/resolv.conf.shadow
-	else
-		# If install is being re-run, save a few keystrokes
-		get_fqdn /tmp/resolv.conf
+		mv /tmp/resolv.conf.shadow /tmp/resolv.conf
 	fi
 
+	# Get any DHCP supplied FQDN, and in any case apply FQDN to
+	# the host names in /tmp/hosts, all without asking for any more
+	# user confirmation. This means DHCP supplied information will
+	# override a user supplied (or previous DHCP supplied) FQDN.
+	get_fqdn /tmp/resolv.conf /tmp/hosts
+
 	resp=`route -n show |
-	    grep '^default' |
-	    sed -e 's/^default          //' -e 's/ .*//'`
-	if [ "X${resp}" = "X" ]; then
+		grep '^default' |
+		sed -e 's/^default *//' -e 's/ .*//'`
+	if [ -z "$resp" ] ; then
 		resp=none
 		if [ -f /tmp/mygate ]; then
 			resp=`cat /etc/mygate`
-			if [ "X${resp}" = "X" ]; then
-				resp="none";
+			if [ -z "$resp" ]; then
+				resp=none
 			fi
 		fi
 	fi
@@ -2279,23 +2124,14 @@ donetconfig() {
 		fi
 	fi
 
-	resp="none"
-	if [ -f /etc/resolv.conf ]; then
-		resp=
-		for n in `grep '^nameserver ' /etc/resolv.conf | \
-		    sed -e 's/^nameserver //'`; do
-			if [ "X${resp}" = "X" ]; then
-				resp="$n"
-			else
-				resp="$resp $n"
-			fi
-		done
-	elif [ -f /tmp/resolv.conf ]; then
+	resp=none
+	if [ -f /tmp/resolv.conf ]; then
 		resp=
 		for n in `grep '^nameserver ' /tmp/resolv.conf | \
-		    sed -e 's/^nameserver //'`; do
-			if [ "X${resp}" = "X" ]; then
-				resp="$n"
+			sed -e 's/^nameserver //'`
+			do
+			if [ -z "$resp" ] ; then
+				resp=$n
 			else
 				resp="$resp $n"
 			fi
@@ -2311,58 +2147,43 @@ donetconfig() {
 		echo "lookup file bind" >> /tmp/resolv.conf
 
 		echo -n "Would you like to use the nameserver now? [y] "
-		getresp "y"
-		case "$resp" in
-			y*|Y*)
-				cp /tmp/resolv.conf \
-				    /tmp/resolv.conf.shadow
-				;;
-
-			*)
-				;;
+		getresp y
+		case $resp in
+		y*|Y*)	cp /tmp/resolv.conf /tmp/resolv.conf.shadow
+			;;
 		esac
 	fi
 
-	if [ ! -f /tmp/resolv.conf.shadow ]; then 
-		echo
-		echo "The host table is as follows:"
-		echo
+	if [ ! -f /tmp/resolv.conf.shadow ]; then
+		echo "\nThe host table is as follows:\n"
 		cat /tmp/hosts
-	cat << __hosts_table_1
+	cat << __EOT
 
 You may want to edit the host table in the event that you are doing an
 NFS installation or an FTP installation without a name server and want
 to refer to the server by name rather than by its numeric ip address.
-__hosts_table_1
+__EOT
 		echo -n "Would you like to edit the host table with ${EDITOR}? [n] "
-		getresp "n"
-		case "$resp" in
-			y*|Y*)
-				${EDITOR} /tmp/hosts
-				;;
-
-			*)
-				;;
+		getresp n
+		case $resp in
+		y*|Y*)	${EDITOR} /tmp/hosts
+			;;
 		esac
 	fi
 
-	cat << \__network_config_2
+	cat << __EOT
 
 You will now be given the opportunity to escape to the command shell to do
-any additional network configuration you may need.  This may include adding
-additional routes, if needed.  In addition, you might take this opportunity
+any additional network configuration you may need. This may include adding
+additional routes, if needed. In addition, you might take this opportunity
 to redo the default route in the event that it failed above.
-__network_config_2
+__EOT
 	echo -n "Escape to shell? [n] "
-	getresp "n"
-	case "$resp" in
-		y*|Y*)
-			echo "Type 'exit' to return to install."
-			sh
-			;;
-
-		*)
-			;;
+	getresp n
+	case $resp in
+	y*|Y*)	echo "Type 'exit' to return to install."
+		sh
+		;;
 	esac
 }
 
@@ -2371,3 +2192,111 @@ populateusrlocal() {
 		/mnt/usr/sbin/chroot /mnt /usr/sbin/mtree -Uedqn -p /usr/local -f /etc/mtree/BSD.local.dist >/dev/null
 	fi
 }
+
+finish_up() {
+	# Get timezone info
+	get_timezone
+
+	echo -n "Making all device nodes (by running /dev/MAKEDEV all) ..."
+	cd /mnt/dev
+	sh MAKEDEV all
+	echo "... done."
+	cd /
+
+	md_installboot ${ROOTDISK}
+
+	populateusrlocal
+
+	# XXXXX - what is this for?
+	[ -x /mnt/${MODE}.site ] && /mnt/usr/sbin/chroot /mnt /${MODE}.site
+
+	# Unmount filesystems, etc. Disable trap that would do same on exit.
+	# Do this manually rather than through the trap so md_congrats is
+	# the last message printed.
+	trap - HUP INT QUIT TERM EXIT
+	cleanup_on_exit
+
+	# Pat on the back.
+	md_congrats
+
+	exit 0
+}
+
+########################################################################
+#
+# Initial actions common to both installs and upgrades.
+#
+# Some may require machine dependent routines, which may
+# call functions defined above, so it's safest to put this
+# code here rather than at the top of the file.
+#
+########################################################################
+
+ROOTDISK=
+VERSION=31
+VERSION_MAJOR=$(( $VERSION / 10 ))
+VERSION_MINOR=$(( $VERSION % 10 ))
+export VERSION VERSION_MAJOR VERSION_MINOR
+
+# Use install.md routines to get lists of devices on system
+_DKDEVS=`md_get_diskdevs`
+_CDDEVS=`md_get_cddevs`
+
+# extra "site" set can be provided by person doing install or
+# upgrade.
+THESETS="base etc misc comp man game xbase xshare xfont xserv site $MDSETS"
+
+# Global variable using during sets installation
+local_sets_dir=
+_sets=
+_setsdone=
+_osetsdone=
+_get_files=
+
+# decide upon an editor
+if [ -z "$EDITOR" ] ; then
+	EDITOR=ed
+	if [ -x /usr/bin/vi ]; then
+		EDITOR=vi
+	fi
+	export EDITOR
+fi
+
+# Cleanup when the script exits.
+trap 'cleanup_on_exit' EXIT
+trap 'exit 2' HUP INT QUIT TERM
+
+# Good {morning,afternoon,evening,night}.
+echo
+md_welcome_banner
+
+if [ -f /etc/fstab -a "${MODE}" = "install" ]; then
+	cat << __EOT
+You seem to be trying to restart an interrupted installation!
+You can skip the disk preparation steps and continue,
+or you can reboot and start over.
+
+__EOT
+	echo -n "Skip disk initialization and p"
+else
+	echo -n "P"
+fi
+	
+echo -n "roceed with ${MODE}? [n] "
+getresp n
+case $resp in
+y*|Y*)	echo "\nCool!  Let's get to it...\n"
+	;;
+*)	md_not_going_to_install
+	exit
+	;;
+esac
+
+# Deal with terminal issues
+md_set_term
+
+cat << __EOT
+
+At any prompt except password prompts you can run a shell command by
+typing '!foo', or escape to a shell by typing '!'.
+__EOT

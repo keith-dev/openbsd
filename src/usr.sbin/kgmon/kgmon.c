@@ -1,4 +1,4 @@
-/*	$OpenBSD: kgmon.c,v 1.6 2001/09/17 13:42:35 art Exp $	*/
+/*	$OpenBSD: kgmon.c,v 1.9 2002/03/14 16:44:25 mpech Exp $	*/
 
 /*
  * Copyright (c) 1983, 1992, 1993
@@ -41,7 +41,7 @@ static char copyright[] =
 
 #ifndef lint
 /*static char sccsid[] = "from: @(#)kgmon.c	8.1 (Berkeley) 6/6/93";*/
-static char *rcsid = "$OpenBSD: kgmon.c,v 1.6 2001/09/17 13:42:35 art Exp $";
+static char *rcsid = "$OpenBSD: kgmon.c,v 1.9 2002/03/14 16:44:25 mpech Exp $";
 #endif /* not lint */
 
 #include <sys/param.h>
@@ -75,13 +75,13 @@ struct kvmvars {
 
 int	bflag, hflag, kflag, rflag, pflag;
 int	debug = 0;
-void	setprof __P((struct kvmvars *kvp, int state));
-void	dumpstate __P((struct kvmvars *kvp));
-void	reset __P((struct kvmvars *kvp));
-void	kern_readonly __P((int));
-int	getprof __P((struct kvmvars *kvp));
-int	getprofhz __P((struct kvmvars *kvp));
-int	openfiles __P((char *system, char *kmemf, struct kvmvars *kvp));
+void	setprof(struct kvmvars *kvp, int state);
+void	dumpstate(struct kvmvars *kvp);
+void	reset(struct kvmvars *kvp);
+void	kern_readonly(int);
+int	getprof(struct kvmvars *kvp);
+int	getprofhz(struct kvmvars *kvp);
+int	openfiles(char *system, char *kmemf, struct kvmvars *kvp);
 
 int
 main(int argc, char **argv)
@@ -302,7 +302,7 @@ void
 dumpstate(kvp)
 	struct kvmvars *kvp;
 {
-	register FILE *fp;
+	FILE *fp;
 	struct rawarc rawarc;
 	struct tostruct *tos;
 	u_long frompc;
@@ -399,7 +399,7 @@ dumpstate(kvp)
 		for (toindex = froms[fromindex]; toindex != 0;
 		   toindex = tos[toindex].link) {
 			if (debug)
-			  warnx("[mcleanup] frompc 0x%lx selfpc 0x%lx count %ld\n",
+			  warnx("[mcleanup] frompc 0x%lx selfpc 0x%lx count %ld",
 			    frompc, tos[toindex].selfpc, tos[toindex].count);
 			rawarc.raw_frompc = frompc;
 			rawarc.raw_selfpc = (u_long)tos[toindex].selfpc;
@@ -464,7 +464,7 @@ reset(kvp)
 			errx(13, "tickbuf zero: %s", kvm_geterr(kvp->kd));
 		if (kvm_write(kvp->kd, (u_long)kvp->gpm.froms, zbuf,
 		    kvp->gpm.fromssize) != kvp->gpm.fromssize)
-			errx(14, "froms zero: %s\n", kvm_geterr(kvp->kd));
+			errx(14, "froms zero: %s", kvm_geterr(kvp->kd));
 		if (kvm_write(kvp->kd, (u_long)kvp->gpm.tos, zbuf,
 		    kvp->gpm.tossize) != kvp->gpm.tossize)
 			errx(15, "tos zero: %s", kvm_geterr(kvp->kd));

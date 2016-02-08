@@ -1,4 +1,4 @@
-/*	$OpenBSD: sem.c,v 1.8 2001/06/22 21:07:35 deraadt Exp $	*/
+/*	$OpenBSD: sem.c,v 1.11 2002/02/19 19:39:35 millert Exp $	*/
 /*	$NetBSD: sem.c,v 1.9 1995/09/27 00:38:50 jtc Exp $	*/
 
 /*-
@@ -38,7 +38,7 @@
 #if 0
 static char sccsid[] = "@(#)sem.c	8.1 (Berkeley) 5/31/93";
 #else
-static char rcsid[] = "$OpenBSD: sem.c,v 1.8 2001/06/22 21:07:35 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: sem.c,v 1.11 2002/02/19 19:39:35 millert Exp $";
 #endif
 #endif /* not lint */
 
@@ -50,20 +50,16 @@ static char rcsid[] = "$OpenBSD: sem.c,v 1.8 2001/06/22 21:07:35 deraadt Exp $";
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#ifdef __STDC__
-# include <stdarg.h>
-#else
-# include <varargs.h>
-#endif
+#include <stdarg.h>
 
 #include "csh.h"
 #include "proc.h"
 #include "extern.h"
 
-static void	 vffree __P((int));
-static Char	*splicepipe __P((struct command *t, Char *));
-static void	 doio __P((struct command *t, int *, int *));
-static void	 chkclob __P((char *));
+static void	 vffree(int);
+static Char	*splicepipe(struct command *t, Char *);
+static void	 doio(struct command *t, int *, int *);
+static void	 chkclob(char *);
 
 void
 execute(t, wanttty, pipein, pipeout)
@@ -208,7 +204,7 @@ execute(t, wanttty, pipein, pipeout)
 	 * We have to fork for eval too.
 	 */
 	    (bifunc && (t->t_dflg & (F_PIPEIN | F_PIPEOUT)) != 0 &&
-	     bifunc->bfunct == doeval))
+	     bifunc->bfunct == doeval)) {
 	    if (t->t_dtyp == NODE_PAREN ||
 		t->t_dflg & (F_REPEAT | F_AMPERSAND) || bifunc) {
 		forked++;
@@ -351,6 +347,7 @@ execute(t, wanttty, pipein, pipeout)
 		}
 
 	    }
+	}
 	if (pid != 0) {
 	    /*
 	     * It would be better if we could wait for the whole job when we

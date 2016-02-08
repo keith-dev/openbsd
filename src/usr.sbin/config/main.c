@@ -1,4 +1,4 @@
-/*	$OpenBSD: main.c,v 1.20 2000/01/04 14:23:43 angelos Exp $	*/
+/*	$OpenBSD: main.c,v 1.25 2002/03/14 16:44:24 mpech Exp $	*/
 /*	$NetBSD: main.c,v 1.22 1997/02/02 21:12:33 thorpej Exp $	*/
 
 /*
@@ -62,8 +62,8 @@ static char copyright[] =
 #include <unistd.h>
 #include "config.h"
 
-int	firstfile __P((const char *));
-int	yyparse __P((void));
+int	firstfile(const char *);
+int	yyparse(void);
 
 extern char *optarg;
 extern int optind;
@@ -73,15 +73,15 @@ static struct nvlist **nextopt;
 static struct nvlist **nextdefopt;
 static struct nvlist **nextmkopt;
 
-static __dead void stop __P((void));
-static int do_option __P((struct hashtab *, struct nvlist ***,
-			const char *, const char *, const char *));
-static int crosscheck __P((void));
-static int badstar __P((void));
-static int mksymlinks __P((void));
-static int hasparent __P((struct devi *));
-static int cfcrosscheck __P((struct config *, const char *, struct nvlist *));
-static void optiondelta __P((void));
+static __dead void stop(void);
+static int do_option(struct hashtab *, struct nvlist ***,
+    const char *, const char *, const char *);
+static int crosscheck(void);
+static int badstar(void);
+static int mksymlinks(void);
+static int hasparent(struct devi *);
+static int cfcrosscheck(struct config *, const char *, struct nvlist *);
+static void optiondelta(void);
 
 int	madedir = 0;
 
@@ -101,7 +101,7 @@ main(argc, argv)
 	int argc;
 	char **argv;
 {
-	register char *p;
+	char *p;
 	const char *last_component;
 	char *outfile = NULL;
 	int pflag, ch, eflag, uflag, fflag;
@@ -169,8 +169,14 @@ main(argc, argv)
 	if (argc > 1 || (eflag && argv[0] == NULL))
 		usage();
 
-	if (eflag)
+	if (eflag) {
+#ifdef MAKE_BOOTSTRAP
+		fprintf(stderr, "config: UKC not available in this binary\n");
+		exit(1);
+#else
 		return (ukc(argv[0], outfile, uflag, fflag));
+#endif
+	}
 
 	conffile = (argc == 1) ? argv[0] : "CONFIG";
 	if (firstfile(conffile)) {
@@ -320,8 +326,8 @@ void
 defoption(name)
 	const char *name;
 {
-	register const char *n;
-	register char *p, c;
+	const char *n;
+	char *p, c;
 	char low[500];
 
 	/*
@@ -352,9 +358,9 @@ void
 removeoption(name)
         const char *name;
 {
-	register struct nvlist *nv, *nvt;
-	register const char *n;
-	register char *p, c;
+	struct nvlist *nv, *nvt;
+	const char *n;
+	char *p, c;
 	char low[500];
 
 	if ((nv = ht_lookup(opttab, name)) != NULL) {
@@ -394,8 +400,8 @@ void
 addoption(name, value)
 	const char *name, *value;
 {
-	register const char *n;
-	register char *p, c;
+	const char *n;
+	char *p, c;
 	char low[500];
 
 	if (do_option(opttab, &nextopt, name, value, "options"))
@@ -429,7 +435,7 @@ do_option(ht, nppp, name, value, type)
 	struct nvlist ***nppp;
 	const char *name, *value, *type;
 {
-	register struct nvlist *nv;
+	struct nvlist *nv;
 
 	/* assume it will work */
 	nv = newnv(name, value, NULL, 0, NULL);
@@ -456,10 +462,10 @@ do_option(ht, nppp, name, value, type)
  */
 int
 deva_has_instances(deva, unit)
-	register struct deva *deva;
+	struct deva *deva;
 	int unit;
 {
-	register struct devi *i;
+	struct devi *i;
 
 	if (unit == WILD)
 		return (deva->d_ihead != NULL);
@@ -475,10 +481,10 @@ deva_has_instances(deva, unit)
  */
 int
 devbase_has_instances(dev, unit)
-	register struct devbase *dev;
+	struct devbase *dev;
 	int unit;
 {
-	register struct deva *da;
+	struct deva *da;
 
 	for (da = dev->d_ahead; da != NULL; da = da->d_bsame)
 		if (deva_has_instances(da, unit))
@@ -488,9 +494,9 @@ devbase_has_instances(dev, unit)
 
 static int
 hasparent(i)
-	register struct devi *i;
+	struct devi *i;
 {
-	register struct nvlist *nv;
+	struct nvlist *nv;
 	int atunit = i->i_atunit;
 
 	/*
@@ -523,12 +529,12 @@ hasparent(i)
 
 static int
 cfcrosscheck(cf, what, nv)
-	register struct config *cf;
+	struct config *cf;
 	const char *what;
-	register struct nvlist *nv;
+	struct nvlist *nv;
 {
-	register struct devbase *dev;
-	register struct devi *pd;
+	struct devbase *dev;
+	struct devi *pd;
 	int errs, devminor;
 
 	if (maxpartitions <= 0)
@@ -569,8 +575,8 @@ loop:
 int
 crosscheck()
 {
-	register struct devi *i;
-	register struct config *cf;
+	struct devi *i;
+	struct config *cf;
 	int errs;
 
 	errs = 0;
@@ -605,10 +611,10 @@ crosscheck()
 int
 badstar()
 {
-	register struct devbase *d;
-	register struct deva *da;
-	register struct devi *i;
-	register int errs, n;
+	struct devbase *d;
+	struct deva *da;
+	struct devi *i;
+	int errs, n;
 
 	errs = 0;
 	for (d = allbases; d != NULL; d = d->d_next) {
@@ -694,7 +700,7 @@ optcmp(sp1, sp2)
 	r = strcmp(sp1->name, sp2->name);
 	if (r == 0) {
 		if (!sp1->val && !sp2->val)
-			r = 0;	
+			r = 0;
 		else if (sp1->val && !sp2->val)
 			r = -1;
 		else if (sp2->val && !sp1->val)
@@ -707,7 +713,7 @@ optcmp(sp1, sp2)
 void
 optiondelta()
 {
-	register struct nvlist *nv;
+	struct nvlist *nv;
 	char nbuf[BUFSIZ], obuf[BUFSIZ];	/* XXX size */
 	int nnewopts, ret = 0, i;
 	struct opt *newopts;

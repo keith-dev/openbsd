@@ -1,4 +1,4 @@
-/*	$OpenBSD: grep.c,v 1.1 2001/05/24 10:58:34 art Exp $	*/
+/*	$OpenBSD: grep.c,v 1.5 2002/03/18 01:22:31 vincent Exp $	*/
 /*
  * Copyright (c) 2001 Artur Grabowski <art@openbsd.org>.  All rights reserved.
  *
@@ -77,11 +77,11 @@ grep(int f, int n)
 	BUFFER *bp;
 	MGWIN *wp;
 
-	strcpy(prompt, "grep -n ");
+	strlcpy(prompt, "grep -n ", sizeof prompt);
 	if (eread("Run grep: ", prompt, NFILEN, EFDEF|EFNEW|EFCR) == ABORT)
 		return ABORT;
 
-	sprintf(command, "%s /dev/null", prompt);
+	snprintf(command, sizeof command, "%s /dev/null", prompt);
 
 	if ((bp = compile_mode("*grep*", command)) == NULL)
 		return FALSE;
@@ -100,11 +100,11 @@ compile(int f, int n)
 	BUFFER *bp;
 	MGWIN *wp;
 
-	strcpy(prompt, "make ");
+	strlcpy(prompt, "make ", sizeof prompt);
 	if (eread("Compile command: ", prompt, NFILEN, EFDEF|EFNEW|EFCR) == ABORT)
 		return ABORT;
 
-	sprintf(command, "%s 2>&1", prompt);
+	snprintf(command, sizeof command, "%s 2>&1", prompt);
 
 	if ((bp = compile_mode("*compile*", command)) == NULL)
 		return FALSE;
@@ -127,7 +127,7 @@ gid(int f, int n)
 	if (eread("Run gid (with args): ", prompt, NFILEN, EFNEW|EFCR) == ABORT)
 		return ABORT;
 
-	sprintf(command, "gid %s", prompt);
+	snprintf(command, sizeof command, "gid %s", prompt);
 
 	if ((bp = compile_mode("*gid*", command)) == NULL)
 		return FALSE;
@@ -151,7 +151,7 @@ compile_mode(char *name, char *command)
 	if (bclear(bp) != TRUE)
 		return NULL;
 
-	addlinef(bp, "Running (%s).", command); 
+	addlinef(bp, "Running (%s).", command);
 	addline(bp, "");
 
 	if ((pipe = popen(command, "r")) == NULL) {
@@ -224,14 +224,14 @@ retry:
 	gotoline(FFARG, lineno);
 	return TRUE;
 fail:
- 	free(line);
+	free(line);
 	if (curwp->w_dotp != lback(curbp->b_linep)) {
 		curwp->w_dotp = lforw(curwp->w_dotp);
 		curwp->w_flag |= WFMOVE;
 		goto retry;
 	}
 	ewprintf("No more hits");
- 	return FALSE;
+	return FALSE;
 }
 
 static int

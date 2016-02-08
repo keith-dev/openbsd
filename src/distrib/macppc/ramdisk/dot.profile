@@ -1,4 +1,4 @@
-#       $OpenBSD: dot.profile,v 1.3 2001/09/17 14:52:18 millert Exp $
+#       $OpenBSD: dot.profile,v 1.5 2002/04/01 01:31:39 deraadt Exp $
 #
 # Copyright (c) 1994 Christopher G. Demetriou
 # All rights reserved.
@@ -30,11 +30,7 @@
 #
 
 export PATH=/sbin:/bin:/usr/bin:/usr/sbin:/
-export HISTFILE=/.sh_history
-export HOME=/
-
 umask 022
-
 set -o emacs # emacs-style command line editing
 
 if [ "X${DONEPROFILE}" = "X" ]; then
@@ -46,27 +42,19 @@ if [ "X${DONEPROFILE}" = "X" ]; then
 	echo 'erase ^?, werase ^W, kill ^U, intr ^C, status ^T'
 	stty newcrt werase ^W intr ^C kill ^U erase ^? status ^T 9600
 
-
 	# Installing or upgrading?
 	_forceloop=""
 	while [ "X$_forceloop" = X"" ]; do
 		echo -n '(I)nstall, (U)pgrade or (S)hell? '
 		read _forceloop
 		case "$_forceloop" in
-			i*|I*)
-				/install
-				;;
-
-			u*|U*)
-				/upgrade
-				;;
-
-			s*|S*)
-				;;
-
-			*)
-				_forceloop=""
-				;;
+		i*|I*)	/install
+			;;
+		u*|U*)	/upgrade
+			;;
+		s*|S*)	;;
+		*)	_forceloop=""
+			;;
 		esac
 	done
 fi

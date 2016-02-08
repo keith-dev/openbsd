@@ -1,4 +1,4 @@
-/*	$OpenBSD: in_gif.c,v 1.21 2001/08/19 06:31:56 angelos Exp $	*/
+/*	$OpenBSD: in_gif.c,v 1.23 2002/03/15 18:19:52 millert Exp $	*/
 /*	$KAME: in_gif.c,v 1.50 2001/01/22 07:27:16 itojun Exp $	*/
 
 /*
@@ -28,10 +28,6 @@
  * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
- */
-
-/*
- * in_gif.c
  */
 
 #include <sys/param.h>
@@ -170,13 +166,7 @@ in_gif_output(ifp, family, m, rt)
 }
 
 void
-#if __STDC__
 in_gif_input(struct mbuf *m, ...)
-#else
-in_gif_input(m, va_alist)
-	struct mbuf *m;
-	va_dcl
-#endif
 {
 	int off;
 	struct gif_softc *sc;

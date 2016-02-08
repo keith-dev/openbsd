@@ -1,4 +1,4 @@
-/*	$OpenBSD: syscall.h,v 1.3 2000/10/01 00:51:20 rahnds Exp $ */
+/*	$OpenBSD: syscall.h,v 1.5 2002/03/17 00:22:04 art Exp $ */
 
 /*
  * Copyright (c) 1998 Per Fogelstrom, Opsycon AB
@@ -31,6 +31,8 @@
  * SUCH DAMAGE.
  *
  */
+#ifndef __DL_SYSCALL_H__
+#define __DL_SYSCALL_H__
 
 #ifdef USE_CACHE
 #include <sys/stat.h>
@@ -48,8 +50,6 @@
  *  Inlined system call functions that can be used before
  *  any dynamic address resoving has been done.
  */
-
-void _dl_printf(const char *, ...);
 
 static inline int
 _dl_exit (int status)
@@ -216,11 +216,8 @@ _dl_stat (const char *addr, struct stat *sb)
 
 #endif
 
-/* Not an actual syscall, but we need something in assembly to say
-   whether this is OK or not.  */
-
 static inline int
-_dl_getuid ()
+_dl_issetugid()
 { 
   register int status __asm__ ("3");
   __asm__ volatile ("mr    0,%1\n\t"
@@ -230,65 +227,9 @@ _dl_getuid ()
 		    "li    3,-1\n\t"
 		    "1:"
                     : "=r" (status)
-                    : "r" (SYS_getuid)
+                    : "r" (SYS_issetugid)
                     : "0", "3");
   return status;
 } 
-static inline int
-_dl_geteuid ()
-{ 
-  register int status __asm__ ("3");
-  __asm__ volatile ("mr    0,%1\n\t"
-                    "sc\n\t"
-		    "cmpwi   0, 0\n\t"
-		    "beq   1f\n\t"
-		    "li    3,-1\n\t"
-		    "1:"
-                    : "=r" (status)
-                    : "r" (SYS_geteuid)
-                    : "0", "3");
-  return status;
-} 
-static inline int
-_dl_getgid ()
-{ 
-  register int status __asm__ ("3");
-  __asm__ volatile ("mr    0,%1\n\t"
-                    "sc\n\t"
-		    "cmpwi   0, 0\n\t"
-		    "beq   1f\n\t"
-		    "li    3,-1\n\t"
-		    "1:"
-                    : "=r" (status)
-                    : "r" (SYS_getgid)
-                    : "0", "3");
-  return status;
-} 
-static inline int
-_dl_getegid ()
-{ 
-  register int status __asm__ ("3");
-  __asm__ volatile ("mr    0,%1\n\t"
-                    "sc\n\t"
-		    "cmpwi   0, 0\n\t"
-		    "beq   1f\n\t"
-		    "li    3,-1\n\t"
-		    "1:"
-                    : "=r" (status)
-                    : "r" (SYS_getgid)
-                    : "0", "3");
-  return status;
-} 
-static inline int
-_dl_suid_ok (void)
-{
-  unsigned int uid, euid, gid, egid;
-
-	uid = _dl_getuid();
-	euid = _dl_geteuid();
-	gid = _dl_getgid();
-	egid = _dl_getegid();
-  	return (uid == euid && gid == egid);
-}
-
 #include <elf_abi.h>
+#endif /*__DL_SYSCALL_H__*/

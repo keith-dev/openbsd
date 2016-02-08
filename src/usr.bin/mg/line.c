@@ -1,4 +1,4 @@
-/*	$OpenBSD: line.c,v 1.8 2001/05/24 03:05:23 mickey Exp $	*/
+/*	$OpenBSD: line.c,v 1.16 2002/03/18 01:45:54 vincent Exp $	*/
 
 /*
  *		Text line handling.
@@ -40,53 +40,40 @@ static RSIZE	 kused = 0;	/* # of bytes used in KB.	 */
 static RSIZE	 ksize = 0;	/* # of bytes allocated in KB.	 */
 static RSIZE	 kstart = 0;	/* # of first used byte in KB.	 */
 
-static int	 kgrow		__P((int));
+static int	 kgrow(int);
 
 /*
- * This routine allocates a block of memory large enough to hold a LINE
- * containing "used" characters. The block is rounded up to whatever
- * needs to be allocated. (use lallocx for lines likely to grow.)
- * Return a pointer to the new block, or NULL if there isn't any memory
- * left. Print a message in the message line if no space.
+ * Allocate a new line of size `used'.  lrealloc() can be called if the line
+ * ever needs to grow beyond that.
  */
 LINE *
-lalloc(used)
-	int used;
+lalloc(int used)
 {
-	LINE	*lp;
-	int	 size;
+	LINE *lp;
 
-	/* any padding at the end of the structure is used */
-	if ((size = used + OFFSET(LINE, l_text[0])) < sizeof(LINE))
-	    size = sizeof(LINE);
-#ifdef MALLOCROUND
-	MALLOCROUND(size);	/* round up to a size optimal to malloc */
-#endif
-	if ((lp = malloc((unsigned)size)) == NULL) {
-		ewprintf("Can't get %d bytes", size);
+	if ((lp = malloc(sizeof *lp)) == NULL)
+		return FALSE;
+	lp->l_text = NULL;
+	lp->l_size = 0;
+	lp->l_used = used;	/* XXX */
+	if (lrealloc(lp, used) == FALSE) {
+		free(lp);
 		return NULL;
 	}
-	lp->l_size = size - OFFSET(LINE, l_text[0]);
-	lp->l_used = used;
 	return lp;
 }
 
-/*
- * Like lalloc, only round amount desired up because this line will
- * probably grow.  We always make room for at least one more char.
- * (thus making 0 not a special case anymore.)
- */
-LINE *
-lallocx(used)
-	int used;
+int
+lrealloc(LINE *lp, int newsize)
 {
-	int	 size;
-	LINE	*lp;
+	char *tmp;
 
-	size = (NBLOCK + used) & ~(NBLOCK - 1);
-	if ((lp = lalloc(size)) != NULL)
-		lp->l_used = used;
-	return lp;
+	if ((tmp = realloc(lp->l_text, newsize)) == NULL)
+		return FALSE;
+	lp->l_text = tmp;
+	lp->l_size = newsize;
+
+	return TRUE;
 }
 
 /*
@@ -96,8 +83,7 @@ lallocx(used)
  * magic conditions described in the above comments don't hold here.
  */
 void
-lfree(lp)
-	LINE *lp;
+lfree(LINE *lp)
 {
 	BUFFER	*bp;
 	MGWIN	*wp;
@@ -128,7 +114,9 @@ lfree(lp)
 	}
 	lp->l_bp->l_fp = lp->l_fp;
 	lp->l_fp->l_bp = lp->l_bp;
-	free((char *)lp);
+	if (lp->l_text != NULL)
+		free(lp->l_text);
+	free(lp);
 }
 
 /*
@@ -139,8 +127,7 @@ lfree(lp)
  * mode line needs to be updated (the "*" has to be set).
  */
 void
-lchange(flag)
-	int flag;
+lchange(int flag)
 {
 	MGWIN	*wp;
 
@@ -168,14 +155,17 @@ lchange(flag)
  * if all is well, and FALSE on errors.
  */
 int
-linsert(n, c)
-	int n, c;
+linsert(int n, int c)
 {
-	LINE	*lp1, *lp2, *lp3;
+	LINE *lp1;
 	MGWIN	*wp;
 	RSIZE	 i;
 	int	 doto;
-	char	*cp1, *cp2;
+
+	if (curbp->b_flag & BFREADONLY) {
+		ewprintf("Buffer is read only");
+		return FALSE;
+	}
 
 	lchange(WFEDIT);
 
@@ -184,13 +174,15 @@ linsert(n, c)
 
 	/* special case for the end */
 	if (lp1 == curbp->b_linep) {
+		LINE *lp2, *lp3;
+
 		/* now should only happen in empty buffer */
 		if (curwp->w_doto != 0) {
 			ewprintf("bug: linsert");
 			return FALSE;
 		}
 		/* allocate a new line */
-		if ((lp2 = lallocx(n)) == NULL)
+		if ((lp2 = lalloc(n)) == NULL)
 			return FALSE;
 		/* previous line */
 		lp3 = lp1->l_bp;
@@ -209,62 +201,37 @@ linsert(n, c)
 			if (wp->w_markp == lp1)
 				wp->w_markp = lp2;
 		}
-		/* NOSTRICT */
+		undo_add_insert(lp2, 0, n);
 		curwp->w_doto = n;
 		return TRUE;
 	}
 	/* save for later */
 	doto = curwp->w_doto;
-	/* NOSTRICT (2) */
-	/* Hard case: reallocate */
-	if (lp1->l_used + n > lp1->l_size) {
-		if ((lp2 = lallocx(lp1->l_used + n)) == NULL)
-			return FALSE;
-		cp1 = &lp1->l_text[0];
-		cp2 = &lp2->l_text[0];
-		while (cp1 != &lp1->l_text[doto])
-			*cp2++ = *cp1++;
-		/* NOSTRICT */
-		cp2 += n;
-		while (cp1 != &lp1->l_text[lp1->l_used])
-			*cp2++ = *cp1++;
-		lp1->l_bp->l_fp = lp2;
-		lp2->l_fp = lp1->l_fp;
-		lp1->l_fp->l_bp = lp2;
-		lp2->l_bp = lp1->l_bp;
-		free((char *)lp1);
-	/* Easy case: in place */
-	} else {
-		/* pretend there's a new line */
-		lp2 = lp1;
-		/* NOSTRICT */
-		lp2->l_used += n;
-		cp2 = &lp1->l_text[lp1->l_used];
 
-		cp1 = cp2 - n;
-		while (cp1 != &lp1->l_text[doto])
-			*--cp2 = *--cp1;
+
+	if ((lp1->l_used + n) > lp1->l_size) {
+		if (lrealloc(lp1, lp1->l_used + n) == FALSE)
+			return FALSE;
 	}
+	lp1->l_used += n;
+	if (lp1->l_used != n)
+		memmove(&lp1->l_text[doto + n], &lp1->l_text[doto],
+		    lp1->l_used - n - doto);
+
 	/* Add the characters */
 	for (i = 0; i < n; ++i)
-		lp2->l_text[doto + i] = c;
-
+		lp1->l_text[doto + i] = c;
 	for (wp = wheadp; wp != NULL; wp = wp->w_wndp) {
-		if (wp->w_linep == lp1)
-			wp->w_linep = lp2;
 		if (wp->w_dotp == lp1) {
-			wp->w_dotp = lp2;
 			if (wp == curwp || wp->w_doto > doto)
-				/* NOSTRICT */
 				wp->w_doto += n;
 		}
 		if (wp->w_markp == lp1) {
-			wp->w_markp = lp2;
 			if (wp->w_marko > doto)
-				/* NOSTRICT */
 				wp->w_marko += n;
 		}
 	}
+	undo_add_insert(curwp->w_dotp, doto, n);
 	return TRUE;
 }
 
@@ -273,13 +240,22 @@ linsert(n, c)
  * current window.  The funny ass-backwards way is no longer used.
  */
 int
-lnewline()
+lnewline(void)
 {
 	LINE	*lp1, *lp2;
 	int	 doto, nlen;
 	MGWIN	*wp;
 
+	if (curbp->b_flag & BFREADONLY) {
+		ewprintf("Buffer is read only");
+		return FALSE;
+	}
+
 	lchange(WFHARD);
+
+	/* XXX */
+	undo_add_custom(1,INSERT, curwp->w_dotp, curwp->w_doto,
+	    strdup("\n"), 1);
 
 	/* Get the address and offset of "." */
 	lp1 = curwp->w_dotp;
@@ -288,7 +264,7 @@ lnewline()
 	/* avoid unnecessary copying */
 	if (doto == 0) {
 		/* new first part */
-		if ((lp2 = lallocx(0)) == NULL)
+		if ((lp2 = lalloc(0)) == NULL)
 			return FALSE;
 		lp2->l_bp = lp1->l_bp;
 		lp1->l_bp->l_fp = lp2;
@@ -304,7 +280,7 @@ lnewline()
 	nlen = llength(lp1) - doto;
 
 	/* new second half line */
-	if ((lp2 = lallocx(nlen)) == NULL)
+	if ((lp2 = lalloc(nlen)) == NULL)
 		return FALSE;
 	if (nlen != 0)
 		bcopy(&lp1->l_text[doto], &lp2->l_text[0], nlen);
@@ -335,15 +311,20 @@ lnewline()
  * of insertion into the kill buffer.
  */
 int
-ldelete(n, kflag)
-	RSIZE n;
-	int   kflag;
+ldelete(RSIZE n, int kflag)
 {
 	LINE	*dotp;
 	RSIZE	 chunk;
 	MGWIN	*wp;
 	int	 doto;
 	char	*cp1, *cp2;
+
+	if (curbp->b_flag & BFREADONLY) {
+		ewprintf("Buffer is read only");
+		return FALSE;
+	}
+
+	undo_add_delete(curwp->w_dotp, curwp->w_doto, n);
 
 	/*
 	 * HACK - doesn't matter, and fixes back-over-nl bug for empty
@@ -424,10 +405,15 @@ ldelete(n, kflag)
  * TRUE if all looks ok.
  */
 int
-ldelnewline()
+ldelnewline(void)
 {
 	LINE	*lp1, *lp2, *lp3;
 	MGWIN	*wp;
+
+	if (curbp->b_flag & BFREADONLY) {
+		ewprintf("Buffer is read only");
+		return FALSE;
+	}
 
 	lp1 = curwp->w_dotp;
 	lp2 = lp1->l_fp;
@@ -483,6 +469,7 @@ ldelnewline()
 	return TRUE;
 }
 
+
 /*
  * Replace plen characters before dot with argument string.  Control-J
  * characters in st are interpreted as newlines.  There is a casehack
@@ -490,15 +477,19 @@ ldelnewline()
  * was there).
  */
 int
-lreplace(plen, st, f)
-	RSIZE	plen;	/* length to remove		 */
-	char	*st;	/* replacement string		 */
-	int	f;	/* case hack disable		 */
+lreplace(RSIZE plen, char *st, int f)
 {
 	RSIZE	rlen;	/* replacement length		 */
 	int	rtype;	/* capitalization		 */
 	int	c;	/* used for random characters	 */
 	int	doto;	/* offset into line		 */
+
+	if (curbp->b_flag & BFREADONLY) {
+		ewprintf("Buffer is read only");
+		return FALSE;
+	}
+
+	undo_add_change(curwp->w_dotp, curwp->w_doto, plen);
 
 	/*
 	 * Find the capitalization of the word that was found.  f says use
@@ -507,17 +498,18 @@ lreplace(plen, st, f)
 	 */
 	/* NOSTRICT */
 	(void)backchar(FFARG | FFRAND, (int)plen);
-	rtype = _L;
+	rtype = _MG_L;
 	c = lgetc(curwp->w_dotp, curwp->w_doto);
 	if (ISUPPER(c) != FALSE && f == FALSE) {
-		rtype = _U | _L;
+		rtype = _MG_U | _MG_L;
 		if (curwp->w_doto + 1 < llength(curwp->w_dotp)) {
 			c = lgetc(curwp->w_dotp, curwp->w_doto + 1);
 			if (ISUPPER(c) != FALSE) {
-				rtype = _U;
+				rtype = _MG_U;
 			}
 		}
 	}
+
 	/*
 	 * make the string lengths match (either pad the line
 	 * so that it will fit, or scrunch out the excess).
@@ -539,10 +531,10 @@ lreplace(plen, st, f)
 	 * If inserting upper, check replacement for case.
 	 */
 	while ((c = CHARMASK(*st++)) != '\0') {
-		if ((rtype & _U) != 0 && ISLOWER(c) != 0)
+		if ((rtype & _MG_U) != 0 && ISLOWER(c) != 0)
 			c = TOUPPER(c);
-		if (rtype == (_U | _L))
-			rtype = _L;
+		if (rtype == (_MG_U | _MG_L))
+			rtype = _MG_L;
 		if (c == CCHR('J')) {
 			if (curwp->w_doto == llength(curwp->w_dotp))
 				(void)forwchar(FFRAND, 1);
@@ -561,6 +553,7 @@ lreplace(plen, st, f)
 	lchange(WFHARD);
 	return (TRUE);
 }
+
 
 /*
  * Delete all of the text saved in the kill buffer.  Called by commands when

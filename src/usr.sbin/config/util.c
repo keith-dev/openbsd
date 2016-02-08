@@ -1,4 +1,4 @@
-/*	$OpenBSD: util.c,v 1.6 1997/07/25 20:12:10 mickey Exp $	*/
+/*	$OpenBSD: util.c,v 1.9 2002/03/14 16:44:24 mpech Exp $	*/
 /*	$NetBSD: util.c,v 1.5 1996/08/31 20:58:29 mycroft Exp $	*/
 
 /*
@@ -45,20 +45,16 @@
  *	from: @(#)util.c	8.1 (Berkeley) 6/6/93
  */
 
+#include <sys/types.h>
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#ifdef __STDC__
 #include <stdarg.h>
-#else
-#include <varargs.h>
-#endif
-#include <sys/types.h>
 #include "config.h"
 
-static void nomem __P((void));
-static void vxerror __P((const char *, int, const char *, va_list));
+static void nomem(void);
+static void vxerror(const char *, int, const char *, va_list);
 
 /*
  * Malloc, with abort on error.
@@ -104,7 +100,7 @@ char *
 sourcepath(file)
 	const char *file;
 {
-	register char *cp;
+	char *cp;
 
 	cp = emalloc(strlen(srcdir) + 1 + strlen(file) + 1);
 	(void)sprintf(cp, "%s/%s", srcdir, file);
@@ -120,7 +116,7 @@ newnv(name, str, ptr, i, next)
 	int i;
 	struct nvlist *next;
 {
-	register struct nvlist *nv;
+	struct nvlist *nv;
 
 	if ((nv = nvhead) == NULL)
 		nv = emalloc(sizeof(*nv));
@@ -144,7 +140,7 @@ newnv(name, str, ptr, i, next)
  */
 void
 nvfree(nv)
-	register struct nvlist *nv;
+	struct nvlist *nv;
 {
 
 	nv->nv_next = nvhead;
@@ -156,9 +152,9 @@ nvfree(nv)
  */
 void
 nvfreel(nv)
-	register struct nvlist *nv;
+	struct nvlist *nv;
 {
-	register struct nvlist *next;
+	struct nvlist *next;
 
 	for (; nv != NULL; nv = next) {
 		next = nv->nv_next;
@@ -172,22 +168,12 @@ nvfreel(nv)
  * and line number.
  */
 void
-#ifdef __STDC__
 error(const char *fmt, ...)
-#else
-error(fmt, va_alist)
-	const char *fmt;
-	va_dcl
-#endif
 {
 	va_list ap;
 	extern const char *yyfile;
 
-#ifdef __STDC__
 	va_start(ap, fmt);
-#else
-	va_start(ap);
-#endif
 	vxerror(yyfile, currentline(), fmt, ap);
 	va_end(ap);
 }
@@ -197,23 +183,11 @@ error(fmt, va_alist)
  * find out about it until later).
  */
 void
-#ifdef __STDC__
 xerror(const char *file, int line, const char *fmt, ...)
-#else
-xerror(file, line, fmt, va_alist)
-	const char *file;
-	int line;
-	const char *fmt;
-	va_dcl
-#endif
 {
 	va_list ap;
 
-#ifdef __STDC__
 	va_start(ap, fmt);
-#else
-	va_start(ap);
-#endif
 	vxerror(file, line, fmt, ap);
 	va_end(ap);
 }
@@ -239,21 +213,11 @@ vxerror(file, line, fmt, ap)
  * Internal error, abort.
  */
 __dead void
-#ifdef __STDC__
 panic(const char *fmt, ...)
-#else
-panic(fmt, va_alist)
-	const char *fmt;
-	va_dcl
-#endif
 {
 	va_list ap;
 
-#ifdef __STDC__
 	va_start(ap, fmt);
-#else
-	va_start(ap);
-#endif
 	(void)fprintf(stderr, "config: panic: ");
 	(void)vfprintf(stderr, fmt, ap);
 	(void)putc('\n', stderr);

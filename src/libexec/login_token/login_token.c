@@ -1,4 +1,4 @@
-/*	$OpenBSD: login_token.c,v 1.2 2000/12/20 20:08:23 markus Exp $	*/
+/*	$OpenBSD: login_token.c,v 1.5 2001/12/07 17:16:18 millert Exp $	*/
 
 /*-
  * Copyright (c) 1995, 1996 Berkeley Software Design, Inc. All rights reserved.
@@ -41,6 +41,7 @@
 
 #include <err.h>
 #include <readpassphrase.h>
+#include <signal.h>
 #include <stdio.h>
 #include <syslog.h>
 #include <stdlib.h>
@@ -66,10 +67,15 @@ main(argc, argv)
 	int c;
 	int mode = 0;
 	struct rlimit cds;
+	sigset_t blockset;
 
-	(void)signal(SIGQUIT, SIG_IGN);
-	(void)signal(SIGINT, SIG_IGN);
 	(void)setpriority(PRIO_PROCESS, 0, 0);
+
+	/* We block keyboard-generated signals during database accesses. */
+	sigemptyset(&blockset);
+	sigaddset(&blockset, SIGINT);
+	sigaddset(&blockset, SIGQUIT);
+	sigaddset(&blockset, SIGTSTP);
 
 	openlog(NULL, LOG_ODELAY, LOG_AUTH);
 
@@ -78,12 +84,14 @@ main(argc, argv)
 	if (setrlimit(RLIMIT_CORE, &cds) < 0)
 		syslog(LOG_ERR, "couldn't set core dump size to 0: %m");
 
+	(void)sigprocmask(SIG_BLOCK, &blockset, NULL);
 	if (token_init(argv[0]) < 0) {
 		syslog(LOG_ERR, "unknown token type");
 		errx(1, "unknown token type");
 	}
+	(void)sigprocmask(SIG_UNBLOCK, &blockset, NULL);
 
-	while ((c = getopt(argc, argv, "ds:v:")) != EOF)
+	while ((c = getopt(argc, argv, "ds:v:")) != -1)
 		switch(c) {
 		case 'd':		/* to remain undocumented */
 			back = stdout;
@@ -138,8 +146,10 @@ main(argc, argv)
 			exit(1);
 		}
 	} else {
+		(void)sigprocmask(SIG_BLOCK, &blockset, NULL);
 		tokenchallenge(username, challenge, sizeof(challenge),
 		    tt->proper);
+		(void)sigprocmask(SIG_UNBLOCK, &blockset, NULL);
 		if (mode == 1) {
 			fprintf(back, BI_VALUE " challenge %s\n",
 			    auth_mkvalue(challenge));
@@ -157,6 +167,7 @@ main(argc, argv)
 		}
 	}
 
+	(void)sigprocmask(SIG_BLOCK, &blockset, NULL);
 	if (tokenverify(username, challenge, pp) == 0) {
 		fprintf(back, BI_AUTH "\n");
 

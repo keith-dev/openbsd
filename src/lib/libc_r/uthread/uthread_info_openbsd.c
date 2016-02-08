@@ -1,3 +1,5 @@
+/*	$OpenBSD: uthread_info_openbsd.c,v 1.5 2001/12/11 00:19:47 fgsch Exp $	*/
+
 /*
  * Copyright (c) 1995-1998 John Birrell <jb@cimlogic.com.au>
  * All rights reserved.
@@ -29,7 +31,6 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $OpenBSD: uthread_info_openbsd.c,v 1.3 2000/02/26 13:32:01 d Exp $
  */
 #include <stdio.h>
 #include <fcntl.h>
@@ -129,8 +130,7 @@ _thread_dump_entry(pthread, fd, verbose)
 	    pthread->active_priority,
 	    (pthread->flags & PTHREAD_FLAGS_PRIVATE)	  ? 'p' : '-',
 	    (pthread->flags & PTHREAD_EXITING)		  ? 'E' :
-	    (pthread->flags & PTHREAD_FLAGS_CANCELED)	  ? 'C' :
-	    (pthread->flags & PTHREAD_FLAGS_CANCELPT)	  ? 'c' : '-',
+	    (pthread->cancelflags & PTHREAD_AT_CANCEL_POINT) ? 'c' : '-',
 	    (pthread->flags & PTHREAD_FLAGS_TRACE)	  ? 't' : '-',
 	    (pthread->flags & PTHREAD_FLAGS_IN_CONDQ)     ? 'C' : '-',
 	    (pthread->flags & PTHREAD_FLAGS_IN_WORKQ)     ? 'R' : '-',
@@ -221,6 +221,7 @@ _thread_dump_entry(pthread, fd, verbose)
 		    pthread->data.cond);
 		_thread_sys_write(fd, s, strlen(s));
 		break;
+#ifdef notyet
 	case PS_JOIN:
 		{
 			struct pthread *t, * volatile *last;
@@ -244,6 +245,7 @@ _thread_dump_entry(pthread, fd, verbose)
 			_thread_sys_write(fd, s, strlen(s));
 		}
 		break;
+#endif
 	case PS_SLEEP_WAIT:
 		{
 			struct timeval tv;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: print-ipx.c,v 1.7 2000/10/03 14:31:57 ho Exp $	*/
+/*	$OpenBSD: print-ipx.c,v 1.9 2002/02/19 19:39:40 millert Exp $	*/
 
 /*
  * Copyright (c) 1994, 1995, 1996
@@ -26,7 +26,7 @@
 
 #ifndef lint
 static const char rcsid[] =
-    "@(#) $Header: /cvs/src/usr.sbin/tcpdump/print-ipx.c,v 1.7 2000/10/03 14:31:57 ho Exp $";
+    "@(#) $Header: /cvs/src/usr.sbin/tcpdump/print-ipx.c,v 1.9 2002/02/19 19:39:40 millert Exp $";
 #endif
 
 #include <sys/param.h>
@@ -41,10 +41,8 @@ static const char rcsid[] =
 #include <netinet/udp_var.h>
 #include <netinet/tcp.h>
 
-#ifdef __STDC__
-#include <stdlib.h>
-#endif
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "interface.h"
@@ -90,7 +88,7 @@ ipxaddr_string(u_int32_t net, const u_char *node)
 {
     static char line[256];
 
-    sprintf(line, "%x.%02x:%02x:%02x:%02x:%02x:%02x",
+    snprintf(line, sizeof(line), "%x.%02x:%02x:%02x:%02x:%02x:%02x",
 	    net, node[0], node[1], node[2], node[3], node[4], node[5]);
 
     return line;

@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	$OpenBSD: server.c,v 1.12 2001/08/19 23:22:18 brian Exp $
+ *	$OpenBSD: server.c,v 1.14 2002/01/16 14:13:06 brian Exp $
  */
 
 #include <sys/param.h>

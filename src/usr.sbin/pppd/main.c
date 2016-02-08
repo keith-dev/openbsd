@@ -1,4 +1,4 @@
-/*	$OpenBSD: main.c,v 1.31 2001/05/15 19:56:06 deraadt Exp $	*/
+/*	$OpenBSD: main.c,v 1.34 2002/02/19 19:39:40 millert Exp $	*/
 
 /*
  * main.c - Point-to-Point Protocol main module
@@ -23,7 +23,7 @@
 #if 0
 static char rcsid[] = "Id: main.c,v 1.49 1998/05/05 05:24:17 paulus Exp $";
 #else
-static char rcsid[] = "$OpenBSD: main.c,v 1.31 2001/05/15 19:56:06 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: main.c,v 1.34 2002/02/19 19:39:40 millert Exp $";
 #endif
 #endif
 
@@ -113,27 +113,27 @@ char *no_ppp_msg = "Sorry - this system lacks PPP kernel support\n";
 
 /* Prototypes for procedures local to this file. */
 
-static void create_pidfile __P((void));
-static void cleanup __P((void));
-static void close_tty __P((void));
-static void get_input __P((void));
-static void calltimeout __P((void));
-static struct timeval *timeleft __P((struct timeval *));
-static void kill_my_pg __P((int));
-static void hup __P((int));
-static void term __P((int));
-static void chld __P((int));
-static void toggle_debug __P((int));
-static void open_ccp __P((int));
-static void bad_signal __P((int));
-static void holdoff_end __P((void *));
-static int device_script __P((char *, int, int));
-static void reap_kids __P((void));
-static void pr_log __P((void *, char *, ...));
+static void create_pidfile(void);
+static void cleanup(void);
+static void close_tty(void);
+static void get_input(void);
+static void calltimeout(void);
+static struct timeval *timeleft(struct timeval *);
+static void kill_my_pg(int);
+static void hup(int);
+static void term(int);
+static void chld(int);
+static void toggle_debug(int);
+static void open_ccp(int);
+static void bad_signal(int);
+static void holdoff_end(void *);
+static int device_script(char *, int, int);
+static void reap_kids(void);
+static void pr_log(void *, char *, ...);
 
-extern	char	*ttyname __P((int));
-extern	char	*getlogin __P((void));
-int main __P((int, char *[]));
+extern	char	*ttyname(int);
+extern	char	*getlogin(void);
+int main(int, char *[]);
 
 #ifdef ultrix
 #undef	O_NONBLOCK
@@ -751,9 +751,11 @@ void
 die(status)
     int status;
 {
+    struct syslog_data sdata = SYSLOG_DATA_INIT;
+
     cleanup();
-    syslog(LOG_INFO, "Exit.");
-    exit(status);
+    syslog_r(LOG_INFO, &sdata, "Exit.");
+    _exit(status);
 }
 
 /*
@@ -807,7 +809,7 @@ close_tty()
 struct	callout {
     struct timeval	c_time;		/* time at which to call routine */
     void		*c_arg;		/* argument to routine */
-    void		(*c_func) __P((void *)); /* routine */
+    void		(*c_func)(void *); /* routine */
     struct		callout *c_next;
 };
 
@@ -822,7 +824,7 @@ static struct timeval timenow;		/* Current time */
  */
 void
 timeout(func, arg, time)
-    void (*func) __P((void *));
+    void (*func)(void *);
     void *arg;
     int time;
 {
@@ -862,7 +864,7 @@ timeout(func, arg, time)
  */
 void
 untimeout(func, arg)
-    void (*func) __P((void *));
+    void (*func)(void *);
     void *arg;
 {
     struct callout **copp, *freep;
@@ -962,10 +964,11 @@ hup(sig)
     int sig;
 {
     int save_errno = errno;
+    struct syslog_data sdata = SYSLOG_DATA_INIT;
 
     if (crashed)
 	_exit(127);
-    syslog(LOG_INFO, "Hangup (SIGHUP)");		/* XXX unsafe */
+    syslog_r(LOG_INFO, &sdata, "Hangup (SIGHUP)");
     kill_link = 1;
     if (conn_running)
 	/* Send the signal to the [dis]connector process(es) also */
@@ -985,10 +988,11 @@ term(sig)
     int sig;
 {
     int save_errno = errno;
+    struct syslog_data sdata = SYSLOG_DATA_INIT;
 
     if (crashed)
 	_exit(127);
-    syslog(LOG_INFO, "Terminating on signal %d.", sig);	/* XXX unsafe */
+    syslog_r(LOG_INFO, &sdata, "Terminating on signal %d.", sig);
     persist = 0;		/* don't try to restart */
     kill_link = 1;
     if (conn_running)
@@ -1053,10 +1057,12 @@ static void
 bad_signal(sig)
     int sig;
 {
+    struct syslog_data sdata = SYSLOG_DATA_INIT;
+
     if (crashed)
 	_exit(127);
     crashed = 1;
-    syslog(LOG_ERR, "Fatal signal %d", sig);	/* XXX unsafe */
+    syslog_r(LOG_ERR, &sdata, "Fatal signal %d", sig);
     if (conn_running)
 	kill_my_pg(SIGTERM);
     die(1);					/* XXX unsafe! */
@@ -1260,7 +1266,7 @@ void
 format_packet(p, len, printer, arg)
     u_char *p;
     int len;
-    void (*printer) __P((void *, char *, ...));
+    void (*printer)(void *, char *, ...);
     void *arg;
 {
     int i, n;
@@ -1293,21 +1299,13 @@ format_packet(p, len, printer, arg)
 }
 
 static void
-pr_log __V((void *arg, char *fmt, ...))
+pr_log(void *arg, char *fmt, ...)
 {
     int n;
     va_list pvar;
     char buf[256];
 
-#ifdef __STDC__
     va_start(pvar, fmt);
-#else
-    void *arg;
-    char *fmt;
-    va_start(pvar);
-    arg = va_arg(pvar, void *);
-    fmt = va_arg(pvar, char *);
-#endif
 
     n = vfmtmsg(buf, sizeof(buf), fmt, pvar);
     va_end(pvar);
@@ -1328,7 +1326,7 @@ void
 print_string(p, len, printer, arg)
     char *p;
     int len;
-    void (*printer) __P((void *, char *, ...));
+    void (*printer)(void *, char *, ...);
     void *arg;
 {
     int c;
@@ -1378,22 +1376,12 @@ novm(msg)
  * Returns the number of chars put into buf.
  */
 int
-fmtmsg __V((char *buf, int buflen, char *fmt, ...))
+fmtmsg(char *buf, int buflen, char *fmt, ...)
 {
     va_list args;
     int n;
 
-#ifdef __STDC__
     va_start(args, fmt);
-#else
-    char *buf;
-    int buflen;
-    char *fmt;
-    va_start(args);
-    buf = va_arg(args, char *);
-    buflen = va_arg(args, int);
-    fmt = va_arg(args, char *);
-#endif
     n = vfmtmsg(buf, buflen, fmt, args);
     va_end(args);
     return n;

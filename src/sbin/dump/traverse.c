@@ -1,4 +1,4 @@
-/*	$OpenBSD: traverse.c,v 1.6 2000/01/22 20:24:55 deraadt Exp $	*/
+/*	$OpenBSD: traverse.c,v 1.10 2002/03/14 20:41:50 mickey Exp $	*/
 /*	$NetBSD: traverse.c,v 1.17 1997/06/05 11:13:27 lukem Exp $	*/
 
 /*-
@@ -38,7 +38,7 @@
 #if 0
 static char sccsid[] = "@(#)traverse.c	8.2 (Berkeley) 9/23/93";
 #else
-static char rcsid[] = "$OpenBSD: traverse.c,v 1.6 2000/01/22 20:24:55 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: traverse.c,v 1.10 2002/03/14 20:41:50 mickey Exp $";
 #endif
 #endif /* not lint */
 
@@ -63,25 +63,17 @@ static char rcsid[] = "$OpenBSD: traverse.c,v 1.6 2000/01/22 20:24:55 deraadt Ex
 #include <errno.h>
 #include <fts.h>
 #include <stdio.h>
-#ifdef __STDC__
 #include <string.h>
 #include <unistd.h>
-#endif
 
 #include "dump.h"
 
 #define	HASDUMPEDFILE	0x1
 #define	HASSUBDIRS	0x2
 
-#ifdef	FS_44INODEFMT
-typedef	quad_t fsizeT;
-#else
-typedef	int32_t fsizeT;
-#endif
-
-static	int dirindir __P((ino_t ino, daddr_t blkno, int level, long *size));
-static	void dmpindir __P((ino_t ino, daddr_t blk, int level, fsizeT *size));
-static	int searchdir __P((ino_t ino, daddr_t blkno, long size, long filesize));
+static	int dirindir(ino_t ino, daddr_t blkno, int level, off_t *size);
+static	void dmpindir(ino_t ino, daddr_t blk, int level, off_t *size);
+static	int searchdir(ino_t ino, daddr_t blkno, long size, off_t filesize);
 
 /*
  * This is an estimation of the number of TP_BSIZE blocks in the file.
@@ -90,11 +82,11 @@ static	int searchdir __P((ino_t ino, daddr_t blkno, long size, long filesize));
  * (when some of the blocks are usually used for indirect pointers);
  * hence the estimate may be high.
  */
-long
+off_t
 blockest(dp)
-	register struct dinode *dp;
+	struct dinode *dp;
 {
-	long blkest, sizeest;
+	off_t blkest, sizeest;
 
 	/*
 	 * dp->di_size is the size of the file in bytes.
@@ -110,7 +102,7 @@ blockest(dp)
 	 *	dump blocks (sizeest vs. blkest in the indirect block
 	 *	calculation).
 	 */
-	blkest = howmany(dbtob(dp->di_blocks), TP_BSIZE);
+	blkest = howmany(dbtob((off_t)dp->di_blocks), TP_BSIZE);
 	sizeest = howmany(dp->di_size, TP_BSIZE);
 	if (blkest > sizeest)
 		blkest = sizeest;
@@ -142,7 +134,7 @@ blockest(dp)
 void
 mapfileino(ino, tapesize, dirskipped)
 	ino_t ino;
-	u_int64_t *tapesize;
+	off_t *tapesize;
 	int *dirskipped;
 {
 	int mode;
@@ -176,7 +168,7 @@ mapfileino(ino, tapesize, dirskipped)
 int
 mapfiles(maxino, tapesize, disk, dirv)
 	ino_t maxino;
-	u_int64_t *tapesize;
+	off_t *tapesize;
 	char *disk;
 	char * const *dirv;
 {
@@ -193,7 +185,7 @@ mapfiles(maxino, tapesize, disk, dirv)
 			dumpabort(0);
 		}
 		if ((dirh = fts_open(dirv, FTS_PHYSICAL|FTS_SEEDOT|FTS_XDEV,
-		    		    (int (*)())NULL)) == NULL) {
+				    (int (*)())NULL)) == NULL) {
 			msg("fts_open failed: %s\n", strerror(errno));
 			dumpabort(0);
 		}
@@ -279,13 +271,13 @@ mapfiles(maxino, tapesize, disk, dirv)
 int
 mapdirs(maxino, tapesize)
 	ino_t maxino;
-	u_int64_t *tapesize;
+	off_t *tapesize;
 {
-	register struct	dinode *dp;
-	register int i, isdir;
-	register char *map;
-	register ino_t ino;
-	long filesize;
+	struct	dinode *dp;
+	int i, isdir;
+	char *map;
+	ino_t ino;
+	off_t filesize;
 	int ret, change = 0;
 
 	isdir = 0;		/* XXX just to get gcc to shut up */
@@ -301,8 +293,7 @@ mapdirs(maxino, tapesize)
 		for (ret = 0, i = 0; filesize > 0 && i < NDADDR; i++) {
 			if (dp->di_db[i] != 0)
 				ret |= searchdir(ino, dp->di_db[i],
-					(long)dblksize(sblock, dp, i),
-					filesize);
+				    dblksize(sblock, dp, i), filesize);
 			if (ret & HASDUMPEDFILE)
 				filesize = 0;
 			else
@@ -339,10 +330,10 @@ dirindir(ino, blkno, ind_level, filesize)
 	ino_t ino;
 	daddr_t blkno;
 	int ind_level;
-	long *filesize;
+	off_t *filesize;
 {
 	int ret = 0;
-	register int i;
+	int i;
 	daddr_t	idblk[MAXNINDIR];
 
 	bread(fsbtodb(sblock, blkno), (char *)idblk, (int)sblock->fs_bsize);
@@ -377,12 +368,13 @@ static int
 searchdir(ino, blkno, size, filesize)
 	ino_t ino;
 	daddr_t blkno;
-	register long size;
-	long filesize;
+	long size;
+	off_t filesize;
 {
-	register struct direct *dp;
-	register long loc, ret = 0;
+	struct direct *dp;
+	long loc;
 	char dblk[MAXBSIZE];
+	int ret = 0;
 
 	bread(fsbtodb(sblock, blkno), dblk, (int)size);
 	if (filesize < size)
@@ -423,11 +415,11 @@ searchdir(ino, blkno, size, filesize)
  */
 void
 dumpino(dp, ino)
-	register struct dinode *dp;
+	struct dinode *dp;
 	ino_t ino;
 {
 	int ind_level, cnt;
-	fsizeT size;
+	off_t size;
 	char buf[TP_BSIZE];
 
 	if (newtape) {
@@ -506,7 +498,7 @@ dmpindir(ino, blk, ind_level, size)
 	ino_t ino;
 	daddr_t blk;
 	int ind_level;
-	fsizeT *size;
+	off_t *size;
 {
 	int i, cnt;
 	daddr_t idblk[MAXNINDIR];
@@ -541,7 +533,7 @@ blksout(blkp, frags, ino)
 	int frags;
 	ino_t ino;
 {
-	register daddr_t *bp;
+	daddr_t *bp;
 	int i, j, count, blks, tbperdb;
 
 	blks = howmany(frags * sblock->fs_fsize, TP_BSIZE);
@@ -579,7 +571,7 @@ dumpmap(map, type, ino)
 	int type;
 	ino_t ino;
 {
-	register int i;
+	int i;
 	char *cp;
 
 	spcl.c_type = type;
@@ -596,7 +588,7 @@ void
 writeheader(ino)
 	ino_t ino;
 {
-	register int32_t sum, cnt, *lp;
+	int32_t sum, cnt, *lp;
 
 	spcl.c_inumber = ino;
 	spcl.c_magic = NFS_MAGIC;
@@ -637,14 +629,14 @@ getino(inum)
  * Error recovery is attempted at most BREADEMAX times before seeking
  * consent from the operator to continue.
  */
-int	breaderrors = 0;		
+int	breaderrors = 0;
 #define	BREADEMAX 32
 
 void
 bread(blkno, buf, size)
 	daddr_t blkno;
 	char *buf;
-	int size;	
+	int size;
 {
 	int cnt, i;
 

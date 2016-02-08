@@ -1,4 +1,4 @@
-/* $OpenBSD: netcat.c,v 1.37 2001/09/02 19:11:46 jakob Exp $ */
+/* $OpenBSD: netcat.c,v 1.47 2002/03/10 20:26:09 ericj Exp $ */
 /*
  * Copyright (c) 2001 Eric Jackson <ericj@monkey.org>
  *
@@ -34,6 +34,7 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/time.h>
+#include <sys/un.h>
 
 #include <netinet/in.h>
 #include <arpa/telnet.h>
@@ -47,6 +48,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <fcntl.h>
 
 #define PORT_MAX 65535
 
@@ -68,43 +70,56 @@ int timeout;
 int family = AF_UNSPEC;
 char *portlist[PORT_MAX];
 
-ssize_t	atomicio __P((ssize_t (*)(), int, void *, size_t));
-void	atelnet __P((int, unsigned char *, unsigned int));
-void	build_ports __P((char *));
-void	help __P((void));
-int	local_listen __P((char *, char *, struct addrinfo));
-void	readwrite __P((int));
-int	remote_connect __P((char *, char *, struct addrinfo));
-int	udptest __P((int));
-void	usage __P((int));
+ssize_t	atomicio(ssize_t (*)(), int, void *, size_t);
+void	atelnet(int, unsigned char *, unsigned int);
+void	build_ports(char *);
+void	help(void);
+int	local_listen(char *, char *, struct addrinfo);
+void	readwrite(int);
+int	remote_connect(char *, char *, struct addrinfo);
+int	socks_connect(char *, char *, struct addrinfo, char *, char *,
+	struct addrinfo, int);
+int	udptest(int);
+int	unix_connect(char *);
+int	unix_listen(char *);
+void	usage(int);
 
 int
 main(int argc, char *argv[])
 {
-	int ch, s, ret;
+	int ch, s, ret, socksv;
 	char *host, *uport, *endp;
 	struct addrinfo hints;
 	struct servent *sv;
 	socklen_t len;
 	struct sockaddr *cliaddr;
 	char *proxy;
-	char *proxyhost, *proxyport;
+	char *proxyhost = "", *proxyport = NULL;
 	struct addrinfo proxyhints;
 
 	ret = 1;
 	s = 0;
+	socksv = 5;
 	host = NULL;
 	uport = NULL;
 	endp = NULL;
 	sv = NULL;
 
-	while ((ch = getopt(argc, argv, "46hi:klnp:rs:tuvw:x:z")) != -1) {
+	while ((ch = getopt(argc, argv, "46UX:hi:klnp:rs:tuvw:x:z")) != -1) {
 		switch (ch) {
 		case '4':
 			family = AF_INET;
 			break;
 		case '6':
 			family = AF_INET6;
+			break;
+		case 'U':
+			family = AF_UNIX;
+			break;
+		case 'X':
+			socksv = (int)strtoul(optarg, &endp, 10);
+			if ((socksv != 4 && socksv != 5) || *endp != '\0')
+				errx(1, "only SOCKS version 4 and 5 supported");
 			break;
 		case 'h':
 			help();
@@ -161,7 +176,12 @@ main(int argc, char *argv[])
 	argv += optind;
 
 	/* Cruft to make sure options are clean, and used properly. */
-	if (argv[0] && !argv[1]) {
+	if (argv[0] && !argv[1] && family == AF_UNIX) {
+		if (uflag)
+			errx(1, "cannot use -u and -U");
+		host = argv[0];
+		uport = NULL;
+	} else if (argv[0] && !argv[1]) {
 		if  (!lflag)
 			usage(1);
 		uport = argv[0];
@@ -182,12 +202,15 @@ main(int argc, char *argv[])
 		errx(1, "must use -l with -k");
 
 	/* Initialize addrinfo structure */
-	memset(&hints, 0, sizeof(struct addrinfo));
-	hints.ai_family = family;
-	hints.ai_socktype = uflag ? SOCK_DGRAM : SOCK_STREAM;
-	hints.ai_protocol = uflag ? IPPROTO_UDP : IPPROTO_TCP;
-	if (nflag)
-		hints.ai_flags |= AI_NUMERICHOST;
+	if (family != AF_UNIX) {
+		memset(&hints, 0, sizeof(struct addrinfo));
+		hints.ai_family = family;
+		hints.ai_socktype = uflag ? SOCK_DGRAM : SOCK_STREAM;
+		hints.ai_protocol = uflag ? IPPROTO_UDP : IPPROTO_TCP;
+		if (nflag)
+			hints.ai_flags |= AI_NUMERICHOST;
+	}
+		
 
 	if (xflag) {
 		if (uflag)
@@ -195,6 +218,9 @@ main(int argc, char *argv[])
 
 		if (lflag)
 			errx(1, "no proxy support for listen");
+
+		if (family == AF_UNIX)
+			errx(1, "no proxy support for unix sockets");
 
 		/* XXX IPv6 transport to proxy would probably work */
 		if (family == AF_INET6)
@@ -218,9 +244,14 @@ main(int argc, char *argv[])
 		int connfd;
 		ret = 0;
 
+		if (family == AF_UNIX)
+			s = unix_listen(host);
+
 		/* Allow only one connection at a time, but stay alive */
 		for (;;) {
-			if ((s = local_listen(host, uport, hints)) < 0)
+			if (family != AF_UNIX)
+				s = local_listen(host, uport, hints);
+			if (s < 0)
 				err(1, NULL);
 			/*
 			 * For UDP, we will use recvfrom() initially
@@ -250,11 +281,23 @@ main(int argc, char *argv[])
 
 			readwrite(connfd);
 			close(connfd);
-			close(s);
+			if (family != AF_UNIX)
+				close(s);
 
 			if (!kflag)
 				break;
 		}
+	} else if (family == AF_UNIX) {
+		ret = 0;
+
+		if ((s = unix_connect(host)) > 0 && !zflag) {
+			readwrite(s);
+			close(s);
+		} else
+			ret = 1;
+
+		exit(ret);
+
 	} else {
 		int i = 0;
 
@@ -269,7 +312,7 @@ main(int argc, char *argv[])
 
 			if (xflag)
 				s = socks_connect(host, portlist[i], hints,
-				    proxyhost, proxyport, proxyhints);
+				    proxyhost, proxyport, proxyhints, socksv);
 			else
 				s = remote_connect(host, portlist[i], hints);
 
@@ -311,6 +354,62 @@ main(int argc, char *argv[])
 }
 
 /*
+ * unix_connect()
+ * Return's a socket connected to a local unix socket. Return's -1 on failure.
+ */
+int
+unix_connect(char *path)
+{
+	struct sockaddr_un sun;
+	int s;
+
+	if ((s = socket(AF_UNIX, SOCK_STREAM, 0)) < 0)
+			return (-1);
+	(void)fcntl(s, F_SETFD, 1);
+
+	memset(&sun, 0, sizeof(struct sockaddr_un));
+	sun.sun_len = sizeof(path);
+	sun.sun_family = AF_UNIX;
+	strlcpy(sun.sun_path, path, sizeof(sun.sun_path));
+
+	if (connect(s, (struct sockaddr *)&sun, sizeof(sun)) < 0) {
+			close(s);
+			return (-1);
+	}
+	return (s);
+		
+}
+
+/*
+ * unix_listen()
+ * create a unix domain socket, and listen on it.
+ */
+int
+unix_listen(char *path)
+{
+	struct sockaddr_un sun;
+	int s;
+
+	/* create unix domain socket */
+	if ((s = socket(AF_UNIX, SOCK_STREAM, 0)) < 0)
+		return (-1);
+
+	sun.sun_family = AF_UNIX;
+	strlcpy(sun.sun_path, path, sizeof(sun.sun_path));
+
+	if (bind(s, (struct sockaddr *)&sun, sizeof(sun)) < 0) {
+		close(s);
+		return (-1);
+	}
+
+	if (listen(s, 5) < 0) {
+		close(s);
+		return (-1);
+	}
+	return (s);
+}
+
+/*
  * remote_connect()
  * Return's a socket connected to a remote host. Properly bind's to a local
  * port or source address if needed. Return's -1 on failure.
@@ -346,7 +445,7 @@ remote_connect(char *host, char *port, struct addrinfo hints)
 			ahints.ai_socktype = uflag ? SOCK_DGRAM : SOCK_STREAM;
 			ahints.ai_protocol = uflag ? IPPROTO_UDP : IPPROTO_TCP;
 			ahints.ai_flags = AI_PASSIVE;
-			if (getaddrinfo(sflag, pflag, &ahints, &ares))
+			if ((error = getaddrinfo(sflag, pflag, &ahints, &ares)))
 				errx(1, "%s", gai_strerror(error));
 
 			if (bind(s, (struct sockaddr *)ares->ai_addr,
@@ -361,9 +460,6 @@ remote_connect(char *host, char *port, struct addrinfo hints)
 		if (connect(s, res0->ai_addr, res0->ai_addrlen) == 0)
 			break;
 
-		if (error == 0)
-			break;
-		
 		close(s);
 		s = -1;
 	} while ((res0 = res0->ai_next) != NULL);
@@ -416,7 +512,7 @@ local_listen(char *host, char *port, struct addrinfo hints)
 		s = -1;
 	} while ((res0 = res0->ai_next) != NULL);
 
-	if (!uflag) {
+	if (!uflag && s != -1) {
 		if (listen(s, 1) < 0)
 			errx(1, "%s", strerror(errno));
 	}
@@ -471,7 +567,7 @@ readwrite(int nfd)
 		}
 
 		if (pfd[1].revents & POLLIN) {
-			if ((n = read(wfd, buf, sizeof(buf))) <= 0) {
+			if ((n = read(wfd, buf, sizeof(buf))) < 0) {
 				return;
 			} else
 				if((ret = atomicio(write, nfd, buf, n)) != n)
@@ -601,6 +697,7 @@ help()
 	fprintf(stderr, "\tCommand Summary:\n\
 	\t-4		Use IPv4\n\
 	\t-6		Use IPv6\n\
+	\t-U		Use UNIX domain socket\n\
 	\t-h		This help text\n\
 	\t-i secs\t	Delay interval for lines sent, ports scanned\n\
 	\t-k		Keep inbound sockets open for multiple connects\n\
@@ -622,7 +719,7 @@ help()
 void
 usage(int ret)
 {
-	fprintf(stderr, "usage: nc [-46hklnrtuvz] [-i interval] [-p source port]\n");
+	fprintf(stderr, "usage: nc [-46Uhklnrtuvz] [-i interval] [-p source port]\n");
 	fprintf(stderr, "\t  [-s ip address] [-w timeout] [-x proxy address [:port]]\n");
 	fprintf(stderr, "\t  [hostname] [port[s...]]\n");
 	if (ret)

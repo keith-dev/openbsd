@@ -1,4 +1,4 @@
-/*	$OpenBSD: tape.c,v 1.18 2001/07/07 18:26:20 deraadt Exp $	*/
+/*	$OpenBSD: tape.c,v 1.21 2002/02/19 19:39:38 millert Exp $	*/
 /*	$NetBSD: tape.c,v 1.26 1997/04/15 07:12:25 lukem Exp $	*/
 
 /*
@@ -93,23 +93,23 @@ static int	Qcvt;		/* Swap quads (for sun) */
 
 #define	FLUSHTAPEBUF()	blkcnt = ntrec + 1
 
-static void	 accthdr __P((struct s_spcl *));
-static int	 checksum __P((int *));
-static void	 findinode __P((struct s_spcl *));
-static void	 findtapeblksize __P((void));
-static int	 gethead __P((struct s_spcl *));
-static void	 readtape __P((char *));
-static void	 setdumpnum __P((void));
-static u_long	 swabl __P((u_long));
-static u_char	*swablong __P((u_char *, int));
-static u_char	*swabshort __P((u_char *, int));
-static void	 terminateinput __P((void));
-static void	 xtrfile __P((char *, long));
-static void	 xtrlnkfile __P((char *, long));
-static void	 xtrlnkskip __P((char *, long));
-static void	 xtrmap __P((char *, long));
-static void	 xtrmapskip __P((char *, long));
-static void	 xtrskip __P((char *, long));
+static void	 accthdr(struct s_spcl *);
+static int	 checksum(int *);
+static void	 findinode(struct s_spcl *);
+static void	 findtapeblksize(void);
+static int	 gethead(struct s_spcl *);
+static void	 readtape(char *);
+static void	 setdumpnum(void);
+static u_long	 swabl(u_long);
+static u_char	*swablong(u_char *, int);
+static u_char	*swabshort(u_char *, int);
+static void	 terminateinput(void);
+static void	 xtrfile(char *, long);
+static void	 xtrlnkfile(char *, long);
+static void	 xtrlnkskip(char *, long);
+static void	 xtrmap(char *, long);
+static void	 xtrmapskip(char *, long);
+static void	 xtrskip(char *, long);
 
 /*
  * Set up an input source
@@ -642,10 +642,10 @@ skipfile()
  */
 void
 getfile(fill, skip)
-	void	(*fill) __P((char *, long));
-	void	(*skip) __P((char *, long));
+	void	(*fill)(char *, long);
+	void	(*skip)(char *, long);
 {
-	register int i;
+	int i;
 	volatile int curblk = 0;
 	volatile long size = spcl.c_dinode.di_size;
 	static char clearedbuf[MAXBSIZE];
@@ -923,7 +923,7 @@ getmore:
 static void
 findtapeblksize()
 {
-	register long i;
+	long i;
 
 	for (i = 0; i < ntrec; i++)
 		((struct s_spcl *)&tapebuf[i * TP_BSIZE])->c_magic = 0;
@@ -1242,9 +1242,9 @@ findinode(header)
 
 static int
 checksum(buf)
-	register int *buf;
+	int *buf;
 {
-	register int i, j;
+	int i, j;
 
 	j = sizeof(union u_spcl) / sizeof(int);
 	i = 0;
@@ -1269,27 +1269,14 @@ checksum(buf)
 }
 
 #ifdef RRESTORE
-#ifdef __STDC__
 #include <stdarg.h>
-#else
-#include <varargs.h>
-#endif
 
 void
-#ifdef __STDC__
 msg(const char *fmt, ...)
-#else
-msg(fmt, va_alist)
-	char *fmt;
-	va_dcl
-#endif
 {
 	va_list ap;
-#ifdef __STDC__
+
 	va_start(ap, fmt);
-#else
-	va_start(ap);
-#endif
 	(void)vfprintf(stderr, fmt, ap);
 	va_end(ap);
 }
@@ -1297,8 +1284,8 @@ msg(fmt, va_alist)
 
 static u_char *
 swabshort(sp, n)
-	register u_char *sp;
-	register int n;
+	u_char *sp;
+	int n;
 {
 	char c;
 
@@ -1311,8 +1298,8 @@ swabshort(sp, n)
 
 static u_char *
 swablong(sp, n)
-	register u_char *sp;
-	register int n;
+	u_char *sp;
+	int n;
 {
 	char c;
 
@@ -1326,7 +1313,7 @@ swablong(sp, n)
 
 void
 swabst(cp, sp)
-	register u_char *cp, *sp;
+	u_char *cp, *sp;
 {
 	int n = 0;
 

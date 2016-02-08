@@ -1,4 +1,4 @@
-/*	$OpenBSD: union_lkm.c,v 1.1 1997/01/20 09:15:32 mickey Exp $	*/
+/*	$OpenBSD: union_lkm.c,v 1.3 2002/02/17 19:42:26 millert Exp $	*/
 
 /*
  * union_lkm.c (was: kernfsmod.c)
@@ -56,11 +56,11 @@
 extern struct vfsops union_vfsops;
 extern struct vnodeopv_desc union_vnodeop_opv_desc;
 
-extern int (*union_check_p) __P((off_t, struct proc *, struct vnode *, 
-				 struct file *, struct uio, int *));
-extern int union_check __P((off_t, struct proc *, struct vnode *, 
-			    struct file *, struct uio, int *));
-static int union_load __P((struct lkm_table *, int));
+extern int (*union_check_p)(off_t, struct proc *, struct vnode *, 
+	    struct file *, struct uio, int *);
+extern int union_check(off_t, struct proc *, struct vnode *, struct file *,
+	    struct uio, int *);
+static int union_load(struct lkm_table *, int);
 
 /*
  * declare the filesystem

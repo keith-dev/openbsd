@@ -1,4 +1,4 @@
-/*	$OpenBSD: key.h,v 1.3 2001/07/02 02:28:35 deraadt Exp $	*/
+/*	$OpenBSD: key.h,v 1.5 2002/03/06 13:55:12 ho Exp $	*/
 /*
  * The author of this code is Angelos D. Keromytis (angelos@cis.upenn.edu)
  *

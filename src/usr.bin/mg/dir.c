@@ -1,4 +1,4 @@
-/*	$OpenBSD: dir.c,v 1.6 2001/05/24 03:05:21 mickey Exp $	*/
+/*	$OpenBSD: dir.c,v 1.8 2002/03/11 13:02:56 vincent Exp $	*/
 
 /*
  * Name:	MG 2a
@@ -17,9 +17,8 @@ static char	cwd[NFILEN];
  * Initialize anything the directory management routines need
  */
 void
-dirinit()
+dirinit(void)
 {
-
 	if (!(wdir = getcwd(cwd, sizeof(cwd))))
 		panic("Can't get current directory!");
 }
@@ -29,8 +28,7 @@ dirinit()
  */
 /* ARGSUSED */
 int
-changedir(f, n)
-	int	f, n;
+changedir(int f, int n)
 {
 	int	s;
 	char	bufc[NPAT];
@@ -38,7 +36,7 @@ changedir(f, n)
 	if ((s = ereply("Change default directory: ", bufc, NPAT)) != TRUE)
 		return (s);
 	if (bufc[0] == '\0')
-		(void) strcpy(bufc, wdir);
+		(void) strlcpy(bufc, wdir, sizeof bufc);
 	if (chdir(bufc) == -1) {
 		ewprintf("Can't change dir to %s", bufc);
 		return (FALSE);
@@ -55,7 +53,7 @@ changedir(f, n)
  */
 /* ARGSUSED */
 int
-showcwdir(f, n)
+showcwdir(int f, int n)
 {
 
 	ewprintf("Current directory: %s", wdir);

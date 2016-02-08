@@ -1,4 +1,4 @@
-.\" $OpenBSD: login_reject.8,v 1.2 2001/07/08 01:09:51 millert Exp $
+.\" $OpenBSD: login_reject.8,v 1.4 2002/03/13 22:34:06 marc Exp $
 .\"
 .\" Copyright (c) 1995 Berkeley Software Design, Inc. All rights reserved.
 .\"
@@ -56,19 +56,20 @@ name, which is optional, is also ignored.
 The
 .Nm reject
 authentication mechanism is intended to be used to disallow certain
-types of logins.  For example, a class entry (see
+types of logins.
+For example, a class entry (see
 .Xr login.conf 5 )
 may contain:
+.Pp
 .Bd -literal -compact
-
 	:auth=krb-or-pwd,kerberos,passwd:
 	:auth-ftp=reject:
-
 .Ed
+.Pp
 which would allow authentication for this class in most situations
 but would reject attempts to authenticate from
 .Xr ftpd 8 .
 .Sh SEE ALSO
+.Xr login 1 ,
 .Xr login.conf 5 ,
-.Xr ftpd 8 ,
-.Xr login 8
+.Xr ftpd 8

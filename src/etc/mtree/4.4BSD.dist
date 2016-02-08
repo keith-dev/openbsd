@@ -1,8 +1,8 @@
-#	$OpenBSD: 4.4BSD.dist,v 1.117 2001/09/25 10:26:39 espie Exp $
+#	$OpenBSD: 4.4BSD.dist,v 1.122 2002/03/31 18:38:56 brad Exp $
 
 /set type=dir uname=root gname=wheel mode=0755
 # .
-.
+. nochange
 
 # ./altroot
 altroot
@@ -102,6 +102,11 @@ skel
 # ./etc/sliphome
 sliphome
 # ./etc/sliphome
+..
+
+# ./etc/ssh
+ssh
+# ./etc/ssh
 ..
 
 # ./etc/ssl
@@ -488,6 +493,11 @@ sbin
 
 # ./usr/share
 share
+
+# ./usr/share/altq
+altq
+# ./usr/share/altq
+..
 
 # ./usr/share/calendar
 calendar
@@ -1058,8 +1068,6 @@ alpha
 ..
 amiga
 ..
-arc
-..
 hp300
 ..
 hppa
@@ -1107,8 +1115,6 @@ alpha
 ..
 amiga
 ..
-arc
-..
 hp300
 ..
 hppa
@@ -1149,8 +1155,6 @@ alpha
 ..
 amiga
 ..
-arc
-..
 hp300
 ..
 hppa
@@ -1185,8 +1189,6 @@ cat5
 alpha
 ..
 amiga
-..
-arc
 ..
 hp300
 ..
@@ -1233,8 +1235,6 @@ alpha
 ..
 amiga
 ..
-arc
-..
 hp300
 ..
 hppa
@@ -1270,8 +1270,6 @@ alpha
 ..
 amiga
 ..
-arc
-..
 hp300
 ..
 hppa
@@ -1306,8 +1304,6 @@ ps1
 alpha
 ..
 amiga
-..
-arc
 ..
 hp300
 ..
@@ -1356,8 +1352,6 @@ alpha
 ..
 amiga
 ..
-arc
-..
 hp300
 ..
 hppa
@@ -1398,8 +1392,6 @@ alpha
 ..
 amiga
 ..
-arc
-..
 hp300
 ..
 hppa
@@ -1434,8 +1426,6 @@ ps5
 alpha
 ..
 amiga
-..
-arc
 ..
 hp300
 ..
@@ -1482,8 +1472,6 @@ alpha
 ..
 amiga
 ..
-arc
-..
 hp300
 ..
 hppa
@@ -1519,8 +1507,6 @@ alpha
 ..
 amiga
 ..
-arc
-..
 hp300
 ..
 hppa
@@ -1555,8 +1541,6 @@ man1
 alpha
 ..
 amiga
-..
-arc
 ..
 hp300
 ..
@@ -1608,8 +1592,6 @@ alpha
 ..
 amiga
 ..
-arc
-..
 hp300
 ..
 hppa
@@ -1659,8 +1641,6 @@ man8
 alpha
 ..
 amiga
-..
-arc
 ..
 hp300
 ..

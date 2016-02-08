@@ -1,4 +1,4 @@
-/*	$OpenBSD: printf.c,v 1.4 2000/12/22 22:53:10 deraadt Exp $	*/
+/*	$OpenBSD: printf.c,v 1.7 2002/02/19 19:39:39 millert Exp $	*/
 
 /*
  * Copyright (c) 1989 The Regents of the University of California.
@@ -43,7 +43,7 @@ char copyright[] =
 
 #ifndef lint
 /*static char sccsid[] = "from: @(#)printf.c	5.9 (Berkeley) 6/1/90";*/
-static char rcsid[] = "$OpenBSD: printf.c,v 1.4 2000/12/22 22:53:10 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: printf.c,v 1.7 2002/02/19 19:39:39 millert Exp $";
 #endif /* not lint */
 
 #include <ctype.h>
@@ -55,18 +55,18 @@ static char rcsid[] = "$OpenBSD: printf.c,v 1.4 2000/12/22 22:53:10 deraadt Exp 
 #include <errno.h>
 #include <err.h>
 
-static int	 print_escape_str __P((const char *));
-static int	 print_escape __P((const char *));
+static int	 print_escape_str(const char *);
+static int	 print_escape(const char *);
 
-static int	 getchr __P((void));
-static double	 getdouble __P((void));
-static int	 getint __P((void));
-static long	 getlong __P((void));
-static unsigned long getulong __P ((void));
-static char	*getstr __P((void));
-static char	*mklong __P((const char *, int)); 
-static void      check_conversion __P((const char *, const char *));
-static void	 usage __P((void)); 
+static int	 getchr(void);
+static double	 getdouble(void);
+static int	 getint(void);
+static long	 getlong(void);
+static unsigned long getulong(void);
+static char	*getstr(void);
+static char	*mklong(const char *, int); 
+static void      check_conversion(const char *, const char *);
+static void	 usage(void); 
      
 static int	rval;
 static char  **gargv;
@@ -78,31 +78,16 @@ static char  **gargv;
 #ifdef SHELL
 #define main printfcmd
 #include "../../bin/sh/bltin/bltin.h"
-
-#ifdef __STDC__
 #include <stdarg.h>
-#else
-#include <vararg.h>
-#endif
 
 static void 
-#ifdef __STDC__
 warnx(const char *fmt, ...)
-#else
-warnx(fmt, va_alist)
-	const char *fmt;
-	va_dcl
-#endif
 {
 	
 	char buf[64];
 	va_list ap;
 
-#ifdef __STDC__
 	va_start(ap, fmt);
-#else
-	va_start(ap);
-#endif
 	vsprintf(buf, fmt, ap);
 	va_end(ap);
 
@@ -131,8 +116,8 @@ main(argc, argv)
 	int argc;
 	char **argv;
 {
-	register char *fmt, *start;
-	register int fieldwidth, precision;
+	char *fmt, *start;
+	int fieldwidth, precision;
 	char convch, nextch;
 	char *format;
 	int ch;
@@ -282,7 +267,7 @@ main(argc, argv)
  */
 static int
 print_escape_str(str)
-	register const char *str;
+	const char *str;
 {
 	int value;
 	int c;
@@ -323,7 +308,7 @@ print_escape_str(str)
  */
 static int
 print_escape(str)
-	register const char *str;
+	const char *str;
 {
 	const char *start = str;
 	int value;
@@ -369,11 +354,7 @@ print_escape(str)
 		break;
 
 	case 'a':			/* alert */
-#ifdef __STDC__
 		putchar('\a');
-#else
-		putchar(007);
-#endif
 		break;
 
 	case 'b':			/* backspace */

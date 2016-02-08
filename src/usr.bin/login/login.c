@@ -1,4 +1,4 @@
-/*	$OpenBSD: login.c,v 1.43 2001/08/12 02:45:33 millert Exp $	*/
+/*	$OpenBSD: login.c,v 1.46 2002/03/30 18:16:05 vincent Exp $	*/
 /*	$NetBSD: login.c,v 1.13 1996/05/15 23:50:16 jtc Exp $	*/
 
 /*-
@@ -77,7 +77,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)login.c	8.4 (Berkeley) 4/2/94";
 #endif
-static char rcsid[] = "$OpenBSD: login.c,v 1.43 2001/08/12 02:45:33 millert Exp $";
+static char rcsid[] = "$OpenBSD: login.c,v 1.46 2002/03/30 18:16:05 vincent Exp $";
 #endif /* not lint */
 
 /*
@@ -120,21 +120,21 @@ static char rcsid[] = "$OpenBSD: login.c,v 1.43 2001/08/12 02:45:33 millert Exp 
 
 #include "pathnames.h"
 
-void	 badlogin __P((char *));
-void	 dolastlog __P((int));
-void	 getloginname __P((void));
-void	 motd __P((void));
-void	 quickexit __P((int));
-int	 rootterm __P((char *));
-void	 sigint __P((int));
-void	 sighup __P((int));
-void	 sleepexit __P((int));
-char	*stypeof __P((char *));
-void	 timedout __P((int));
-int	 main __P((int, char **));
+void	 badlogin(char *);
+void	 dolastlog(int);
+void	 getloginname(void);
+void	 motd(void);
+void	 quickexit(int);
+int	 rootterm(char *);
+void	 sigint(int);
+void	 sighup(int);
+void	 sleepexit(int);
+char	*stypeof(char *);
+void	 timedout(int);
+int	 main(int, char **);
 
-extern int check_failedlogin __P((uid_t));
-extern void log_failedlogin __P((uid_t, char *, char *, char *));
+extern int check_failedlogin(uid_t);
+extern void log_failedlogin(uid_t, char *, char *, char *);
 
 #define	TTYGRPNAME	"tty"		/* name of group to own ttys */
 
@@ -235,7 +235,7 @@ main(argc, argv)
 			break;
 		case 'h':
 			if (uid) {
-				warn("-h option: %s", strerror(EPERM));
+				warnx("-h option: %s", strerror(EPERM));
 				quickexit(1);
 			}
 			if ((fqdn = strdup(optarg)) == NULL) {
@@ -472,9 +472,7 @@ main(argc, argv)
 		/*
 		 * If we do not have the force flag authenticate the user
 		 */
-		if (fflag)
-			authok = AUTH_SECURE;
-		else {
+		if (!fflag) {
 			lastchance =
 			    login_getcaptime(lc, "password-dead", 0, 0) != 0;
 			if (lastchance)
@@ -509,14 +507,12 @@ main(argc, argv)
 		if (pwd == 0)
 			goto failed;
 
-		authok &= AUTH_SECURE;
-
 		/*
 		 * If trying to log in as root on an insecure terminal,
 		 * refuse the login attempt unless the authentication
 		 * style explicitly says a root login is okay.
 		 */
-		if (authok == 0 && pwd && rootlogin && !rootterm(tty))
+		if (pwd && rootlogin && !rootterm(tty))
 			goto failed;
 
 		if (fflag) {

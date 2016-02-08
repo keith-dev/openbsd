@@ -1,4 +1,4 @@
-/*	$OpenBSD: utilities.c,v 1.6 2001/09/05 22:32:37 deraadt Exp $	*/
+/*	$OpenBSD: utilities.c,v 1.9 2002/02/23 21:18:11 deraadt Exp $	*/
 /*	$NetBSD: utilities.c,v 1.11 1997/03/19 08:42:56 lukem Exp $	*/
 
 /*
@@ -38,7 +38,7 @@
 #if 0
 static char sccsid[] = "@(#)utilities.c	8.4 (Berkeley) 10/18/94";
 #else
-static char rcsid[] = "$OpenBSD: utilities.c,v 1.6 2001/09/05 22:32:37 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: utilities.c,v 1.9 2002/02/23 21:18:11 deraadt Exp $";
 #endif
 #endif /* not lint */
 
@@ -49,6 +49,7 @@ static char rcsid[] = "$OpenBSD: utilities.c,v 1.6 2001/09/05 22:32:37 deraadt E
 #include <ufs/ufs/dir.h>
 
 #include <err.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -64,7 +65,7 @@ void
 pathcheck(name)
 	char *name;
 {
-	register char *cp;
+	char *cp;
 	struct entry *ep;
 	char *start;
 
@@ -91,7 +92,7 @@ pathcheck(name)
  */
 void
 mktempname(ep)
-	register struct entry *ep;
+	struct entry *ep;
 {
 	char oldname[MAXPATHLEN];
 
@@ -164,7 +165,7 @@ newnode(np)
  */
 void
 removenode(ep)
-	register struct entry *ep;
+	struct entry *ep;
 {
 	char *cp;
 
@@ -187,7 +188,7 @@ removenode(ep)
  */
 void
 removeleaf(ep)
-	register struct entry *ep;
+	struct entry *ep;
 {
 	char *cp;
 
@@ -254,7 +255,7 @@ addwhiteout(name)
  */
 void
 delwhiteout(ep)
-	register struct entry *ep;
+	struct entry *ep;
 {
 	char *name;
 
@@ -277,7 +278,7 @@ ino_t
 lowerbnd(start)
 	ino_t start;
 {
-	register struct entry *ep;
+	struct entry *ep;
 
 	for ( ; start < maxino; start++) {
 		ep = lookupino(start);
@@ -296,7 +297,7 @@ ino_t
 upperbnd(start)
 	ino_t start;
 {
-	register struct entry *ep;
+	struct entry *ep;
 
 	for ( ; start > ROOTINO; start--) {
 		ep = lookupino(start);
@@ -313,7 +314,7 @@ upperbnd(start)
  */
 void
 badentry(ep, msg)
-	register struct entry *ep;
+	struct entry *ep;
 	char *msg;
 {
 
@@ -340,7 +341,7 @@ badentry(ep, msg)
  */
 char *
 flagvalues(ep)
-	register struct entry *ep;
+	struct entry *ep;
 {
 	static char flagbuf[BUFSIZ];
 
@@ -385,7 +386,7 @@ int
 reply(question)
 	char *question;
 {
-	char c;
+	int c;
 
 	do	{
 		fprintf(stderr, "%s? [yn] ", question);
@@ -403,27 +404,11 @@ reply(question)
 /*
  * handle unexpected inconsistencies
  */
-#ifdef __STDC__
-#include <stdarg.h>
-#else
-#include <varargs.h>
-#endif
-
 void
-#ifdef __STDC__
 panic(const char *fmt, ...)
-#else
-panic(fmt, va_alist)
-	char *fmt;
-	va_dcl
-#endif
 {
 	va_list ap;
-#ifdef __STDC__
 	va_start(ap, fmt);
-#else
-	va_start(ap);
-#endif
 
 	vfprintf(stderr, fmt, ap);
 	va_end(ap);

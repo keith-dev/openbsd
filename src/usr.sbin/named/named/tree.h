@@ -1,4 +1,4 @@
-/*	$OpenBSD: tree.h,v 1.3 1998/05/22 00:47:49 millert Exp $	*/
+/*	$OpenBSD: tree.h,v 1.5 2002/02/17 19:42:37 millert Exp $	*/
 
 /* tree.h - declare structures used by tree library
  *
@@ -12,14 +12,6 @@
 #ifndef	_TREE_H_INCLUDED
 #define	_TREE_H_INCLUDED
 
-
-#ifndef __P
-# if defined(__STDC__) || defined(__GNUC__)
-#  define __P(x) x
-# else
-#  define __P(x) ()
-# endif
-#endif
 
 /*
  * tree_t is our package-specific anonymous pointer.
@@ -39,12 +31,12 @@ typedef	struct tree_s {
 	tree;
 
 
-void	tree_init	__P((tree **));
-tree_t	tree_srch	__P((tree **, int (*)(), tree_t));
-tree_t	tree_add	__P((tree **, int (*)(), tree_t, void (*)()));
-int	tree_delete	__P((tree **, int (*)(), tree_t, void (*)()));
-int	tree_trav	__P((tree **, int (*)()));
-void	tree_mung	__P((tree **, void (*)()));
+void	tree_init(tree **);
+tree_t	tree_srch(tree **, int (*)(), tree_t);
+tree_t	tree_add(tree **, int (*)(), tree_t, void (*)());
+int	tree_delete(tree **, int (*)(), tree_t, void (*)());
+int	tree_trav(tree **, int (*)());
+void	tree_mung(tree **, void (*)());
 
 
 #endif	/* _TREE_H_INCLUDED */

@@ -1,4 +1,4 @@
-/*	$OpenBSD: mbr.h,v 1.6 2001/08/12 12:03:01 heko Exp $	*/
+/*	$OpenBSD: mbr.h,v 1.10 2002/02/16 21:27:34 millert Exp $	*/
 
 /*
  * Copyright (c) 1997 Tobias Weingartner
@@ -36,11 +36,9 @@
 #include "part.h"
 
 /* Various constants */
-#define MBR_CODE_SIZE 0x1B8
+#define MBR_CODE_SIZE 0x1BE
 #define MBR_PART_SIZE	0x10
 #define MBR_PART_OFF 0x1BE
-#define MBR_NTSER_OFF 0x1B8
-#define MBR_SPARE_OFF 0x1BC		/* Spare short, not used */
 #define MBR_SIG_OFF 0x1FE
 
 
@@ -49,20 +47,19 @@ typedef struct _mbr_t {
 	off_t reloffset;
 	off_t offset;
 	unsigned char code[MBR_CODE_SIZE];
-	unsigned long nt_serial;
-	unsigned short spare;
 	prt_t part[NDOSPART];
 	unsigned short signature;
 } mbr_t;
 
 /* Prototypes */
-void MBR_print_disk __P((char *));
-void MBR_print __P((mbr_t *));
-void MBR_parse __P((disk_t *, char *, off_t, off_t, mbr_t *));
-void MBR_make __P((mbr_t *, char *));
-void MBR_init __P((disk_t *, mbr_t *));
-int MBR_read __P((int, off_t, char *));
-int MBR_write __P((int, off_t, char *));
+void MBR_print_disk(char *);
+void MBR_print(mbr_t *, char *);
+void MBR_parse(disk_t *, char *, off_t, off_t, mbr_t *);
+void MBR_make(mbr_t *, char *);
+void MBR_init(disk_t *, mbr_t *);
+int MBR_read(int, off_t, char *);
+int MBR_write(int, off_t, char *);
+void MBR_pcopy(disk_t *, mbr_t *);
 
 /* Sanity check */
 #include <machine/param.h>

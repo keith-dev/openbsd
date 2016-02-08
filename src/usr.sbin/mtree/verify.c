@@ -1,4 +1,4 @@
-/*	$OpenBSD: verify.c,v 1.7 2001/08/10 02:37:14 millert Exp $	*/
+/*	$OpenBSD: verify.c,v 1.11 2002/03/14 16:44:25 mpech Exp $	*/
 /*	$NetBSD: verify.c,v 1.10 1995/03/07 21:26:28 cgd Exp $	*/
 
 /*-
@@ -38,7 +38,7 @@
 #if 0
 static const char sccsid[] = "@(#)verify.c	8.1 (Berkeley) 6/6/93";
 #else
-static const char rcsid[] = "$OpenBSD: verify.c,v 1.7 2001/08/10 02:37:14 millert Exp $";
+static const char rcsid[] = "$OpenBSD: verify.c,v 1.11 2002/03/14 16:44:25 mpech Exp $";
 #endif
 #endif /* not lint */
 
@@ -61,8 +61,8 @@ extern char fullpath[MAXPATHLEN];
 static NODE *root;
 static char path[MAXPATHLEN];
 
-static void	miss __P((NODE *, char *));
-static int	vwalk __P((void));
+static void	miss(NODE *, char *);
+static int	vwalk(void);
 
 int
 verify()
@@ -78,9 +78,9 @@ verify()
 static int
 vwalk()
 {
-	register FTS *t;
-	register FTSENT *p;
-	register NODE *ep, *level;
+	FTS *t;
+	FTSENT *p;
+	NODE *ep, *level;
 	int specdepth, rval;
 	char *argv[2];
 
@@ -119,7 +119,8 @@ vwalk()
 			    !fnmatch(ep->name, p->fts_name, FNM_PATHNAME)) ||
 			    !strcmp(ep->name, p->fts_name)) {
 				ep->flags |= F_VISIT;
-				if (compare(ep->name, ep, p))
+				if ((ep->flags & F_NOCHANGE) == 0 &&
+				    compare(ep->name, ep, p))
 					rval = MISMATCHEXIT;
 				if (ep->flags & F_IGN)
 					(void)fts_set(t, p, FTS_SKIP);
@@ -157,11 +158,11 @@ extra:
 
 static void
 miss(p, tail)
-	register NODE *p;
-	register char *tail;
+	NODE *p;
+	char *tail;
 {
-	register int create;
-	register char *tp;
+	int create;
+	char *tp;
 
 	for (; p; p = p->next) {
 		if ((p->flags & F_OPT) && !(p->flags & F_VISIT))

@@ -1,4 +1,4 @@
-/*	$OpenBSD: log.c,v 1.24 2001/10/05 08:18:37 ho Exp $	*/
+/*	$OpenBSD: log.c,v 1.27 2002/02/19 19:39:38 millert Exp $	*/
 /*	$EOM: log.c,v 1.30 2000/09/29 08:19:23 niklas Exp $	*/
 
 /*
@@ -62,12 +62,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <syslog.h>
-
-#ifdef __STDC__
 #include <stdarg.h>
-#else
-#include <varargs.h>
-#endif
 
 #include "isakmp_num.h"
 #include "log.h"
@@ -162,15 +157,15 @@ _log_print (int error, int syslog_level, const char *fmt, va_list ap,
       t = now.tv_sec;
       tm = localtime (&t);
       if (class >= 0)
-	sprintf (nbuf, "%02d%02d%02d.%06ld %s %02d ", tm->tm_hour, 
-		 tm->tm_min, tm->tm_sec, now.tv_usec, _log_get_class (class), 
-		 level);
+	snprintf (nbuf, LOG_SIZE + 32, "%02d%02d%02d.%06ld %s %02d ",
+		  tm->tm_hour, tm->tm_min, tm->tm_sec, now.tv_usec,
+		  _log_get_class (class), level);
       else /* LOG_PRINT (-1) or LOG_REPORT (-2) */
-	sprintf (nbuf, "%02d%02d%02d.%06ld %s ", tm->tm_hour, 
-		 tm->tm_min, tm->tm_sec, now.tv_usec,
-		 class == LOG_PRINT ? "Default" : "Report>");	
-      strcat (nbuf, buffer);
-      strcat (nbuf, "\n");
+	snprintf (nbuf, LOG_SIZE + 32, "%02d%02d%02d.%06ld %s ", tm->tm_hour, 
+		  tm->tm_min, tm->tm_sec, now.tv_usec,
+		  class == LOG_PRINT ? "Default" : "Report>");	
+      strlcat (nbuf, buffer, LOG_SIZE + 32);
+      strlcat (nbuf, "\n", LOG_SIZE + 32);
 
       if (fwrite (nbuf, strlen (nbuf), 1, log_output) == 0)
 	{
@@ -202,15 +197,7 @@ _log_print (int error, int syslog_level, const char *fmt, va_list ap,
 
 #ifdef USE_DEBUG
 void
-#ifdef __STDC__
 log_debug (int cls, int level, const char *fmt, ...)
-#else
-log_debug (cls, level, fmt, va_alist)
-     int cls;
-     int level;
-     const char *fmt;
-     va_dcl
-#endif
 {
   va_list ap;
 
@@ -219,12 +206,7 @@ log_debug (cls, level, fmt, va_alist)
    */
   if (cls >= 0 && (log_level[cls] == 0 || level > log_level[cls]))
     return;
-#ifdef __STDC__
   va_start (ap, fmt);
-#else
-  va_start (ap);
-  fmt = va_arg (ap, const char *);
-#endif
   _log_print (0, LOG_DEBUG, fmt, ap, cls, level);
   va_end (ap);
 }
@@ -245,7 +227,7 @@ log_debug_buf (int cls, int level, const char *header, const u_int8_t *buf,
   log_debug (cls, level, "%s:", header);
   for (i = j = 0; i < sz;)
     {
-      sprintf (s + j, "%02x", buf[i++]);
+      snprintf (s + j, 73 - j, "%02x", buf[i++]);
       j += 2;
       if (i % 4 == 0)
 	{
@@ -313,64 +295,31 @@ log_debug_toggle (void)
 #endif /* USE_DEBUG */
 
 void
-#ifdef __STDC__
 log_print (const char *fmt, ...)
-#else
-log_print (fmt, va_alist)
-     const char *fmt;
-     va_dcl
-#endif
 {
   va_list ap;
 
-#ifdef __STDC__
   va_start (ap, fmt);
-#else
-  va_start (ap);
-  fmt = va_arg (ap, const char *);
-#endif
   _log_print (0, LOG_NOTICE, fmt, ap, LOG_PRINT, 0);
   va_end (ap);
 }
 
 void
-#ifdef __STDC__
 log_error (const char *fmt, ...)
-#else
-log_error (fmt, va_alist)
-     const char *fmt;
-     va_dcl
-#endif
 {
   va_list ap;
 
-#ifdef __STDC__
   va_start (ap, fmt);
-#else
-  va_start (ap);
-  fmt = va_arg (ap, const char *);
-#endif
   _log_print (1, LOG_ERR, fmt, ap, LOG_PRINT, 0);
   va_end (ap);
 }
 
 void
-#ifdef __STDC__
 log_fatal (const char *fmt, ...)
-#else
-log_fatal (fmt, va_alist)
-     const char *fmt;
-     va_dcl
-#endif
 {
   va_list ap;
 
-#ifdef __STDC__
   va_start (ap, fmt);
-#else
-  va_start (ap);
-  fmt = va_arg (ap, const char *);
-#endif
   _log_print (1, LOG_CRIT, fmt, ap, LOG_PRINT, 0);
   va_end (ap);
   exit (1);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: commands.c,v 1.38 2001/09/03 05:28:51 itojun Exp $	*/
+/*	$OpenBSD: commands.c,v 1.41 2002/02/17 17:20:49 millert Exp $	*/
 /*	$NetBSD: commands.c,v 1.14 1996/03/24 22:03:48 jtk Exp $	*/
 
 /*
@@ -45,7 +45,7 @@ char	*hostname;
 static char _hostname[MAXHOSTNAMELEN];
 
 typedef int (*intrtn_t)(int, char**);
-static int call __P((intrtn_t, ...));
+static int call(intrtn_t, ...);
 
 typedef struct {
 	char	*name;		/* command name */
@@ -95,8 +95,8 @@ skey_calc(argc, argv)
     static void
 makeargv()
 {
-    register char *cp, *cp2, c;
-    register char **argp = margv;
+    char *cp, *cp2, c;
+    char **argp = margv;
 
     margc = 0;
     cp = line;
@@ -107,7 +107,7 @@ makeargv()
 	cp++;
     }
     while ((c = *cp)) {
-	register int inquote = 0;
+	int inquote = 0;
 	while (isspace(c))
 	    c = *++cp;
 	if (c == '\0')
@@ -151,9 +151,9 @@ makeargv()
 
 	static char
 special(s)
-	register char *s;
+	char *s;
 {
-	register char c;
+	char c;
 	char b;
 
 	switch (*s) {
@@ -178,7 +178,7 @@ special(s)
  */
 	static char *
 control(c)
-	register cc_t c;
+	cc_t c;
 {
 	static char buf[5];
 	/*
@@ -188,7 +188,7 @@ control(c)
 	 * was to assign "c" to an unsigned int variable...
 	 * Arggg....
 	 */
-	register unsigned int uic = (unsigned int)c;
+	unsigned int uic = (unsigned int)c;
 
 	if (uic == 0x7f)
 		return ("^?");
@@ -232,12 +232,12 @@ struct sendlist {
 
 
 static int
-	send_esc P((void)),
-	send_help P((void)),
-	send_docmd P((char *)),
-	send_dontcmd P((char *)),
-	send_willcmd P((char *)),
-	send_wontcmd P((char *));
+	send_esc(void),
+	send_help(void),
+	send_docmd(char *),
+	send_dontcmd(char *),
+	send_willcmd(char *),
+	send_wontcmd(char *);
 
 static struct sendlist Sendlist[] = {
     { "ao",	"Send Telnet Abort output",		1, 0, 0, 2, AO },
@@ -397,10 +397,10 @@ send_tncmd(func, cmd, name)
 {
     char **cpp;
     extern char *telopts[];
-    register int val = 0;
+    int val = 0;
 
     if (isprefix(name, "help") || isprefix(name, "?")) {
-	register int col, len;
+	int col, len;
 
 	printf("Usage: send %s <value|option>\r\n", cmd);
 	printf("\"value\" must be from 0 to 255\r\n");
@@ -428,7 +428,7 @@ send_tncmd(func, cmd, name)
     if (cpp) {
 	val = cpp - telopts;
     } else {
-	register char *cp = name;
+	char *cp = name;
 
 	while (*cp >= '0' && *cp <= '9') {
 	    val *= 10;
@@ -602,15 +602,15 @@ togxbinary(val)
 }
 
 
-static int togglehelp P((void));
+static int togglehelp(void);
 #if	defined(AUTHENTICATION)
-extern int auth_togdebug P((int));
+extern int auth_togdebug(int);
 #endif
 #if    defined(ENCRYPTION)
-extern int EncryptAutoEnc P((int));
-extern int EncryptAutoDec P((int));
-extern int EncryptDebug P((int));
-extern int EncryptVerbose P((int));
+extern int EncryptAutoEnc(int);
+extern int EncryptAutoDec(int);
+extern int EncryptDebug(int);
+extern int EncryptVerbose(int);
 #endif
 
 
@@ -988,7 +988,7 @@ unsetcmd(argc, argv)
 {
     struct setlist *ct;
     struct togglelist *c;
-    register char *name;
+    char *name;
 
     if (argc < 2) {
 	fprintf(stderr,
@@ -1128,7 +1128,7 @@ struct modelist {
 	int	arg1;
 };
 
-static int modehelp __P((void));
+static int modehelp(void);
 
 static struct modelist ModeList[] = {
     { "character", "Disable LINEMODE option",	docharmode, 1 },
@@ -1287,7 +1287,7 @@ setescape(argc, argv)
 	int argc;
 	char *argv[];
 {
-	register char *arg;
+	char *arg;
 	char buf[50];
 
 	printf(
@@ -1372,7 +1372,7 @@ shell(argc, argv)
 	    /*
 	     * Fire up the shell in the child.
 	     */
-	    register char *shellp, *shellname;
+	    char *shellp, *shellname;
 
 	    shellp = getenv("SHELL");
 	    if (shellp == NULL)
@@ -1539,7 +1539,7 @@ struct envlist {
 	int	narg;
 };
 
-static void	env_help P((void));
+static void	env_help(void);
 
 struct envlist EnvList[] = {
     { "define",	"Define an environment variable",
@@ -1634,7 +1634,7 @@ struct env_lst envlisthead;
 env_find(var)
 	unsigned char *var;
 {
-	register struct env_lst *ep;
+	struct env_lst *ep;
 
 	for (ep = envlisthead.next; ep; ep = ep->next) {
 		if (strcmp((char *)ep->var, (char *)var) == 0)
@@ -1705,7 +1705,7 @@ env_init()
 env_define(var, value)
 	unsigned char *var, *value;
 {
-	register struct env_lst *ep;
+	struct env_lst *ep;
 
 	if ((ep = env_find(var))) {
 		if (ep->var)
@@ -1734,7 +1734,7 @@ env_define(var, value)
 env_undefine(var)
 	unsigned char *var;
 {
-	register struct env_lst *ep;
+	struct env_lst *ep;
 
 	if ((ep = env_find(var))) {
 		ep->prev->next = ep->next;
@@ -1752,7 +1752,7 @@ env_undefine(var)
 env_export(var)
 	unsigned char *var;
 {
-	register struct env_lst *ep;
+	struct env_lst *ep;
 
 	if ((ep = env_find(var)))
 		ep->export = 1;
@@ -1762,7 +1762,7 @@ env_export(var)
 env_unexport(var)
 	unsigned char *var;
 {
-	register struct env_lst *ep;
+	struct env_lst *ep;
 
 	if ((ep = env_find(var)) != NULL)
 		ep->export = 0;
@@ -1772,7 +1772,7 @@ env_unexport(var)
 env_send(var)
 	unsigned char *var;
 {
-	register struct env_lst *ep;
+	struct env_lst *ep;
 
 	if (my_state_is_wont(TELOPT_NEW_ENVIRON)
 #ifdef	OLD_ENVIRON
@@ -1798,7 +1798,7 @@ env_send(var)
 	void
 env_list()
 {
-	register struct env_lst *ep;
+	struct env_lst *ep;
 
 	for (ep = envlisthead.next; ep; ep = ep->next) {
 		printf("%c %-20s %s\r\n", ep->export ? '*' : ' ',
@@ -1829,7 +1829,7 @@ env_default(init, welldefined)
 env_getvalue(var)
 	unsigned char *var;
 {
-	register struct env_lst *ep;
+	struct env_lst *ep;
 
 	if ((ep = env_find(var)))
 		return(ep->value);
@@ -1887,7 +1887,7 @@ struct authlist {
 };
 
 static int
-	auth_help P((void));
+	auth_help(void);
 
 struct authlist AuthList[] = {
     { "status",	"Display current status of authentication information",
@@ -2536,7 +2536,7 @@ static char
 	envhelp[] =	"change environment variables ('environ ?' for more)",
 	modestring[] = "try to enter line or character mode ('mode ?' for more)";
 
-static int	help __P((int, char**));
+static int	help(int, char**);
 
 static Command cmdtab[] = {
 	{ "close",	closehelp,	bye,		1 },
@@ -2622,7 +2622,7 @@ command(top, tbuf, cnt)
     char *tbuf;
     int cnt;
 {
-    register Command *c;
+    Command *c;
 
     setcommandmode();
     if (!top) {
@@ -2637,7 +2637,7 @@ command(top, tbuf, cnt)
 	if (rlogin == _POSIX_VDISABLE)
 		printf("%s> ", prompt);
 	if (tbuf) {
-	    register char *cp;
+	    char *cp;
 	    cp = line;
 	    while (cnt > 0 && (*cp++ = *tbuf++) != '\n')
 		cnt--;
@@ -2705,7 +2705,7 @@ help(argc, argv)
 	int argc;
 	char *argv[];
 {
-	register Command *c;
+	Command *c;
 
 	if (argc == 1) {
 		printf("Commands may be abbreviated.  Commands are:\r\n\r\n");
@@ -2717,7 +2717,7 @@ help(argc, argv)
 		return 0;
 	}
 	while (--argc > 0) {
-		register char *arg;
+		char *arg;
 		arg = *++argv;
 		c = getcmd(arg);
 		if (Ambiguous(c))
@@ -2782,10 +2782,10 @@ sourceroute(arg, cpp, lenp)
 	static IOPTN ipopt;
 #endif
 	char *cp, *cp2, *lsrp, *lsrep;
-	register int tmp;
+	int tmp;
 	struct in_addr sin_addr;
-	register struct hostent *host = 0;
-	register char c;
+	struct hostent *host = 0;
+	char c;
 
 	/*
 	 * Verify the arguments, and make sure we have

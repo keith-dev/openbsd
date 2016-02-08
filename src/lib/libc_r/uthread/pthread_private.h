@@ -1,4 +1,4 @@
-/*	$OpenBSD: pthread_private.h,v 1.29 2001/09/04 23:28:31 fgsch Exp $	*/
+/*	$OpenBSD: pthread_private.h,v 1.35 2002/02/21 20:57:41 fgsch Exp $	*/
 /*
  * Copyright (c) 1995-1998 John Birrell <jb@cimlogic.com.au>.
  * All rights reserved.
@@ -62,6 +62,11 @@
 #include "uthread_machdep.h"
 
 /*
+ * Workaround until we have ENOTSUP in errno.h
+ */
+#define ENOTSUP			EOPNOTSUPP
+
+/*
  * Kernel fatal error handler macro.
  */
 #define PANIC(string)   _thread_exit(__FILE__,__LINE__,string)
@@ -120,6 +125,14 @@
  * called with preemption deferred (see thread_kern_sched_[un]defer).
  */
 #if defined(_PTHREADS_INVARIANTS)
+#include <assert.h>
+#define PTHREAD_ASSERT(cond, msg) do {	\
+	if (!(cond))			\
+		PANIC(msg);		\
+} while (0)
+#define PTHREAD_ASSERT_NOT_IN_SYNCQ(thrd) \
+	PTHREAD_ASSERT((((thrd)->flags & PTHREAD_FLAGS_IN_SYNCQ) == 0),	\
+	    "Illegal call from signal handler");
 #define PTHREAD_NEW_STATE(thrd, newstate) do {				\
 	if (_thread_kern_new_state != 0)				\
 		PANIC("Recursive PTHREAD_NEW_STATE");			\
@@ -137,6 +150,8 @@
 	PTHREAD_SET_STATE(thrd, newstate);				\
 } while (0)
 #else
+#define PTHREAD_ASSERT(cond, msg)
+#define PTHREAD_ASSERT_NOT_IN_SYNCQ(thrd)
 #define PTHREAD_NEW_STATE(thrd, newstate) do {				\
 	if ((thrd)->state != newstate) {				\
 		if ((thrd)->state == PS_RUNNING) {			\
@@ -245,14 +260,14 @@ struct pthread_mutex {
 };
 
 /*
- * Flags for mutexes. 
+ * Flags for mutexes.
  */
 #define MUTEX_FLAGS_PRIVATE	0x01
 #define MUTEX_FLAGS_INITED	0x02
 #define MUTEX_FLAGS_BUSY	0x04
 
 /*
- * Static mutex initialization values. 
+ * Static mutex initialization values.
  */
 #define PTHREAD_MUTEX_STATIC_INITIALIZER   \
 	{ PTHREAD_MUTEX_DEFAULT, PTHREAD_PRIO_NONE, TAILQ_INITIALIZER, \
@@ -304,7 +319,7 @@ struct pthread_cond_attr {
 #define COND_FLAGS_BUSY		0x04
 
 /*
- * Static cond initialization values. 
+ * Static cond initialization values.
  */
 #define PTHREAD_COND_STATIC_INITIALIZER    \
 	{ COND_TYPE_FAST, TAILQ_INITIALIZER, NULL, NULL, \
@@ -402,14 +417,15 @@ enum pthread_susp {
 #define PTHREAD_BASE_PRIORITY(prio)	((prio) & PTHREAD_MAX_PRIORITY)
 
 /*
- * Clock resolution in nanoseconds.
+ * Clock resolution in microseconds.
  */
-#define CLOCK_RES_NSEC				10000000
+#define CLOCK_RES_USEC				10000
+#define CLOCK_RES_USEC_MIN			1000
 
 /*
  * Time slice period in microseconds.
  */
-#define TIMESLICE_USEC				100000
+#define TIMESLICE_USEC				20000
 
 /*
  * Define a thread-safe macro to get the current time of day
@@ -538,6 +554,12 @@ typedef void	(*thread_continuation_t) (void *);
 
 typedef V_TAILQ_ENTRY(pthread) pthread_entry_t;
 
+struct join_status {
+	struct pthread	*thread;
+	void		*ret;
+	int		error;
+};
+
 /*
  * Thread structure.
  */
@@ -588,12 +610,6 @@ struct pthread {
 	int	sig_saved;
 
 	/*
-	 * Cancelability state.
-	 */
-	int	cancelstate;
-	int	canceltype;
-
-	/*
 	 * Cancelability flags - the lower 2 bits are used by cancel
 	 * definitions in pthread.h
 	 */
@@ -617,11 +633,11 @@ struct pthread {
 	/* Thread state: */
 	enum pthread_state	state;
 
-	/* Time that this thread was last made active. */
-	struct  timeval		last_active;
+	/* Scheduling clock when this thread was last made active. */
+	long	last_active;
 
-	/* Time that this thread was last made inactive. */
-	struct  timeval		last_inactive;
+	/* Scheduling clock when this thread was last made inactive. */
+	long	last_inactive;
 
 	/*
 	 * Number of microseconds accumulated by this thread when
@@ -640,35 +656,46 @@ struct pthread {
 
 	/*
 	 * Error variable used instead of errno. The function __error()
-	 * returns a pointer to this. 
+	 * returns a pointer to this.
 	 */
 	int	error;
 
-	/* Join queue head and link for waiting threads: */
-	V_TAILQ_HEAD(join_head, pthread)	join_queue;
+	/*
+	 * The joiner is the thread that is joining to this thread.  The
+	 * join status keeps track of a join operation to another thread.
+	 */
+	struct pthread		*joiner;
+	struct join_status	join_status;
 
 	/*
 	 * The current thread can belong to only one scheduling queue at
-	 * a time (ready or waiting queue).  It can also belong to (only)
-	 * one of:
+	 * a time (ready or waiting queue).  It can also belong to:
 	 *
 	 *   o A queue of threads waiting for a mutex
 	 *   o A queue of threads waiting for a condition variable
-	 *   o A queue of threads waiting for another thread to terminate
-	 *     (the join queue above)
 	 *   o A queue of threads waiting for a file descriptor lock
 	 *   o A queue of threads needing work done by the kernel thread
 	 *     (waiting for a spinlock or file I/O)
 	 *
+	 * A thread can also be joining a thread (the joiner field above).
+	 *
+	 * It must not be possible for a thread to belong to any of the
+	 * above queues while it is handling a signal.  Signal handlers
+	 * may longjmp back to previous stack frames circumventing normal
+	 * control flow.  This could corrupt queue integrity if the thread
+	 * retains membership in the queue.  Therefore, if a thread is a
+	 * member of one of these queues when a signal handler is invoked,
+	 * it must remove itself from the queue before calling the signal
+	 * handler and reinsert itself after normal return of the handler.
+	 *
 	 * Use pqe for the scheduling queue link (both ready and waiting),
-	 * and qe for other links.
+	 * sqe for synchronization (mutex and condition variable) queue
+	 * links, and qe for all other links.
 	 */
 
-	/* Priority queue entry for this thread: */
-	pthread_entry_t		pqe;
-
-	/* Queue entry for this thread: */
-	pthread_entry_t		qe;
+	pthread_entry_t		pqe;	/* priority queue link */
+	pthread_entry_t		sqe;	/* synchronization queue link */
+	pthread_entry_t		qe;	/* all other queues link */
 
 	/* Wait data. */
 	union pthread_wait_data data;
@@ -699,17 +726,20 @@ struct pthread {
 	 */
 	int		yield_on_sig_undefer;
 
-	/* Miscellaneous data. */
+	/* Miscellaneous flags; only set with signals deferred. */
 	int		flags;
 #define PTHREAD_FLAGS_PRIVATE	0x0001
 #define PTHREAD_EXITING		0x0002
-#define PTHREAD_FLAGS_IN_CONDQ	0x0004	/* in condition queue using qe link*/
-#define PTHREAD_FLAGS_IN_WORKQ	0x0008	/* in work queue using qe link */
-#define PTHREAD_FLAGS_IN_WAITQ	0x0010	/* in waiting queue using pqe link*/
-#define PTHREAD_FLAGS_IN_PRIOQ	0x0020	/* in priority queue using pqe link*/
-#define PTHREAD_FLAGS_TRACE	0x0040	/* for debugging purposes */
-#define PTHREAD_FLAGS_CANCELED	0x1000	/* thread has been cancelled */
-#define PTHREAD_FLAGS_CANCELPT	0x2000	/* thread at cancel point */
+#define PTHREAD_FLAGS_IN_WAITQ	0x0004	/* in waiting queue using pqe link */
+#define PTHREAD_FLAGS_IN_PRIOQ	0x0008	/* in priority queue using pqe link */
+#define PTHREAD_FLAGS_IN_WORKQ	0x0010	/* in work queue using qe link */
+#define PTHREAD_FLAGS_IN_FILEQ	0x0020	/* in file lock queue using qe link */
+#define PTHREAD_FLAGS_IN_FDQ	0x0040	/* in fd lock queue using qe link */
+#define PTHREAD_FLAGS_IN_CONDQ	0x0080	/* in condition queue using sqe link */
+#define PTHREAD_FLAGS_IN_MUTEXQ	0x0100	/* in mutex queue using sqe link */
+#define PTHREAD_FLAGS_TRACE	0x0200	/* for debugging purposes */
+#define PTHREAD_FLAGS_IN_SYNCQ	\
+    (PTHREAD_FLAGS_IN_CONDQ | PTHREAD_FLAGS_IN_MUTEXQ)
 
 	/*
 	 * Base priority is the user setable and retrievable priority
@@ -935,9 +965,9 @@ SCLASS int    _thread_dtablesize	/* Descriptor table size.	*/
 ;
 #endif
 
-SCLASS int    _clock_res_nsec		/* Clock resolution in nsec.	*/
+SCLASS int    _clock_res_usec		/* Clock resolution in usec.	*/
 #ifdef GLOBAL_PTHREAD_PRIVATE
-= CLOCK_RES_NSEC;
+= CLOCK_RES_USEC;
 #else
 ;
 #endif
@@ -967,6 +997,16 @@ SCLASS struct  sigaction _thread_sigact[NSIG];
 SCLASS int	_thread_dfl_count[NSIG];
 
 /*
+ * Pending signals and mask for this process:
+ */
+SCLASS sigset_t		_process_sigpending;
+SCLASS sigset_t		_process_sigmask
+#ifdef GLOBAL_PTHREAD_PRIVATE
+= 0
+#endif
+;
+
+/*
  * Scheduling queues:
  */
 SCLASS pq_queue_t		_readyq;
@@ -984,12 +1024,30 @@ SCLASS volatile int	_spinblock_count
 #endif
 ;
 
+/* Used to maintain pending and active signals: */
+struct sigstatus {
+	int		pending;	/* Is this a pending signal? */
+	int		blocked;	/*
+					 * A handler is currently active for
+					 * this signal; ignore subsequent
+					 * signals until the handler is done.
+					 */
+	int		signo;		/* arg 1 to signal handler */
+	siginfo_t	siginfo;	/* arg 2 to signal handler */
+	struct sigcontext uc;		/* arg 3 to signal handler */
+};
+
+SCLASS struct sigstatus	_thread_sigq[NSIG];
+
 /* Indicates that the signal queue needs to be checked. */
 SCLASS volatile int	_sigq_check_reqd
 #ifdef GLOBAL_PTHREAD_PRIVATE
 = 0
 #endif
 ;
+
+/* The signal stack. */
+SCLASS struct sigaltstack _thread_sigstack;
 
 /* Thread switch hook. */
 SCLASS pthread_switch_routine_t _sched_switch_hook
@@ -1021,7 +1079,6 @@ SCLASS int	_thread_kern_new_state
  * Function prototype definitions.
  */
 __BEGIN_DECLS
-int     _find_dead_thread(pthread_t);
 int     _find_thread(pthread_t);
 struct pthread *_get_curthread(void);
 void	_set_curthread(struct pthread *);
@@ -1051,6 +1108,7 @@ void    _thread_cleanupspecific(void);
 void    _thread_dump_info(void);
 void    _thread_init(void);
 void    _thread_kern_sched(struct sigcontext *);
+void    _thread_kern_sched_sig(void);
 void    _thread_kern_sched_state(enum pthread_state,char *fname,int lineno);
 void	_thread_kern_sched_state_unlock(enum pthread_state state,
 	    spinlock_t *lock, char *fname, int lineno);

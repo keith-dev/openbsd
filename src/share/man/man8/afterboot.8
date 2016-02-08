@@ -1,4 +1,4 @@
-.\"	$OpenBSD: afterboot.8,v 1.66 2001/10/14 17:24:19 millert Exp $
+.\"	$OpenBSD: afterboot.8,v 1.72 2002/02/22 02:02:33 miod Exp $
 .Dd October 20, 1997
 .Dt AFTERBOOT 8
 \!\" Originally created by Marshall M. Midden -- 1997-10-20, m4@umn.edu
@@ -43,7 +43,7 @@ Login as
 You can do so on the console, or over the network using
 .Xr ssh 1 .
 If you wish to deny root logins over the network, edit the
-.Pa /etc/sshd_config
+.Pa /etc/ssh/sshd_config
 file and set
 .Cm PermitRootLogin
 to
@@ -157,10 +157,9 @@ ppp0: flags=8051<UP,POINTOPOINT,RUNNING,MULTICAST>
         inet 203.3.131.108 --> 198.181.0.253 netmask 0xffff0000
 .Ed
 .Pp
-If you wish to turn on multicast routing, see the section titled
-.Dq Multicast routing.
-in
-.Pa /etc/netstart .
+See
+.Xr netstart 8
+for instructions on configuring multicast routing.
 .Pp
 See
 .Xr dhcp 8
@@ -212,6 +211,11 @@ and
 .Ic route delete
 commands (see
 .Xr route 8 ) .
+If you run
+.Xr dhclient 8
+you will have to kill it by running
+.Ic kill `cat /var/run/dhclient.pid`
+after you flush the routes.
 .Pp
 If you wish to route packets between interfaces, add the directive
 .Bd -literal -offset indent
@@ -289,10 +293,7 @@ line to
 +:*::::::::
 .Pp
 You do this by using
-.Xr vipw 8 ,
-once this is done, you'll need to run
-.Ic pwd_mkdb /etc/master.passwd
-to regenerate the password databases.
+.Xr vipw 8 .
 .Pp
 There are many more YP man pages available to help you.
 You can find more information by starting with
@@ -374,7 +375,7 @@ to
 .Pa master
 and editing it and creating other maps as needed.
 Alternatively, you can get your maps with YP.
-.Sh CHANGING /ETC FILES
+.Sh CHANGING /etc FILES
 The system should be usable now, but you may wish to do more customizing,
 such as adding users, etc.
 Many of the following sections may be skipped
@@ -448,6 +449,20 @@ Consult
 and
 .Xr printcap 5
 if needed.
+.Ss Set keyboard type
+Some architectures permit keyboard type control.
+Use the
+.Xr kbd 8
+command to change the keyboard encoding.
+.Ic kbd -l
+will list all available encodings.
+.Ic kbd xxx
+will select the
+.Ic xxx
+encoding.
+Store the encoding in
+.Pa /etc/kbdtype
+to make sure it is set automatically at boot time.
 .Ss Tighten up security
 You might wish to tighten up security more by editing
 .Pa /etc/fbtab
@@ -823,6 +838,7 @@ boot time in the kernel image.
 .Xr mount 8 ,
 .Xr mtree 8 ,
 .Xr named 8 ,
+.Xr netstart 8 ,
 .Xr newaliases 8 ,
 .Xr rbootd 8 ,
 .Xr rc 8 ,

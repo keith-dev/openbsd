@@ -1,4 +1,4 @@
-/*	$OpenBSD: rpc.yppasswdd.c,v 1.9 1997/08/19 07:00:51 niklas Exp $	*/
+/*	$OpenBSD: rpc.yppasswdd.c,v 1.11 2001/12/09 14:58:30 miod Exp $	*/
 
 /*
  * Copyright (c) 1994 Mats O Jansson <moj@stacken.kth.se>
@@ -32,7 +32,7 @@
  */
 
 #ifndef LINT
-static char rcsid[] = "$OpenBSD: rpc.yppasswdd.c,v 1.9 1997/08/19 07:00:51 niklas Exp $";
+static char rcsid[] = "$OpenBSD: rpc.yppasswdd.c,v 1.11 2001/12/09 14:58:30 miod Exp $";
 #endif
 
 #include <sys/types.h>
@@ -46,6 +46,7 @@ static char rcsid[] = "$OpenBSD: rpc.yppasswdd.c,v 1.9 1997/08/19 07:00:51 nikla
 #include <string.h>
 #include <pwd.h>
 #include <util.h>
+#include <syslog.h>
 
 #include <rpc/rpc.h>
 #include <rpc/pmap_clnt.h>
@@ -90,8 +91,16 @@ main(argc, argv)
 			} else if (strcmp("-m", argv[i]) == 0) {
 				domake = 1;
 				while (i < argc) {
-					strcat(make_arg, " ");
-					strcat(make_arg, argv[i]);
+					if (strlcat(make_arg, " ",
+					    sizeof(make_arg)) >=
+					    sizeof(make_arg) ||
+					    strlcat(make_arg, argv[i],
+					    sizeof(make_arg)) >=
+					    sizeof(make_arg)) {
+						(void) fprintf(stderr,
+						    "-m argument too long.\n");
+						exit(1);
+					}
 					i++;
 				}
 			} else if (strcmp("-d", argv[i]) == 0
@@ -108,37 +117,32 @@ main(argc, argv)
 	(void) daemon(0, 0);
 	chdir("/etc");
 
-/*
-	freopen("/dev/null", "r", stdin);
-	freopen("/var/yp/stderr", "w", stderr);
-	freopen("/var/yp/stdout", "w", stdout);
-*/
 	(void) pmap_unset(YPPASSWDPROG, YPPASSWDVERS);
 
 	(void) signal(SIGCHLD, sig_child);
 
 	transp = svcudp_create(RPC_ANYSOCK);
 	if (transp == NULL) {
-		(void) fprintf(stderr, "cannot create udp service.\n");
+		syslog(LOG_ERR, "cannot create udp service");
 		exit(1);
 	}
 	if (!svc_register(transp, YPPASSWDPROG, YPPASSWDVERS, yppasswddprog_1,
 	    IPPROTO_UDP)) {
-		fprintf(stderr, "unable to register YPPASSWDPROG, YPPASSWDVERS, udp\n");
+		syslog(LOG_ERR, "unable to register YPPASSWDPROG, YPPASSWDVERS, udp");
 		exit(1);
 	}
 	transp = svctcp_create(RPC_ANYSOCK, 0, 0);
 	if (transp == NULL) {
-		(void) fprintf(stderr, "cannot create tcp service.\n");
+		syslog(LOG_ERR, "cannot create tcp service");
 		exit(1);
 	}
 	if (!svc_register(transp, YPPASSWDPROG, YPPASSWDVERS, yppasswddprog_1,
 	    IPPROTO_TCP)) {
-		fprintf(stderr, "unable to register YPPASSWDPROG, YPPASSWDVERS, tcp\n");
+		syslog(LOG_ERR, "unable to register YPPASSWDPROG, YPPASSWDVERS, tcp");
 		exit(1);
 	}
 	svc_run();
-	(void) fprintf(stderr, "svc_run returned\n");
+	syslog(LOG_ERR, "svc_run returned");
 	exit(1);
 }
 

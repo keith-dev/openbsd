@@ -1,4 +1,4 @@
-.\"	$OpenBSD: options.4,v 1.85 2001/10/14 14:39:03 art Exp $
+.\"	$OpenBSD: options.4,v 1.97 2002/04/07 19:29:55 millert Exp $
 .\"	$NetBSD: options.4,v 1.21 1997/06/25 03:13:00 thorpej Exp $
 .\"
 .\" Copyright (c) 1998 Theo de Raadt
@@ -61,7 +61,7 @@ This makes it possible to run binaries that use old versions of the
 .Xr msgctl 2 ,
 .Xr shmctl 2
 and
-.Xr __semctl
+.Xr semctl 2
 system calls which changed semantics in
 .Ox 2.4 .
 .It Cd option COMPAT_25
@@ -236,12 +236,11 @@ is useful for debugging kernels and their crashdumps with gdb.
 Note that
 .Xr gdb Ns 's
 .Fl k
-flag
-is obsolete and should not be used.
+flag is obsolete and should not be used.
 Instead, a crashdump can be debugged by starting
 .Xr gdb
 with the kernel name as an argument (no core file) and then use the
-.Xr gdb
+.Xr gdb 1
 command
 .Dq target kcore COREFILE .
 .It Cd option DEBUG
@@ -283,6 +282,17 @@ Adds hooks for the system call tracing facility, which allows users to
 watch the system call invocation behavior of processes.
 See
 .Xr ktrace 1
+for details.
+.It Cd option PTRACE
+Adds hooks for the process tracing facility, allowing a process to
+control and observe another process.
+See
+.Xr ptrace 2
+for details.
+.It Cd option RAIDDEBUG
+Be verbose on what RAIDframe does.
+See
+.Xr raid 4
 for details.
 .El
 .Ss File Systems
@@ -438,6 +448,13 @@ This filesystem is still experimental and is known to be somewhat unstable.
 See
 .Xr mount_union 8
 for details.
+.It Cd option XFS
+Includes the kernel support for the AFS-compatible Arla filesystem.
+Since the xfs interface is simple and generic it can be used for other
+filesystems as well.
+See
+.Xr mount_xfs 8
+for details.
 .El
 .Ss File System Options
 .Bl -ohang
@@ -508,6 +525,8 @@ With this option, only the superuser can set them, and they can't be cleared
 if the securelevel is greater than 0.
 See also
 .Xr chflags 1 .
+.It Cd option UFS_EXTATTR
+This option enables Extended Attribute support for UFS filesystems.
 .El
 .Ss Miscellaneous Options
 .Bl -ohang
@@ -598,6 +617,14 @@ Adds support for the
 boot option (User Kernel Config).
 Allows modification of kernel settings (e.g., device parameters) before
 booting the system.
+.It Cd option RAID_AUTOCONFIG
+Adds support for auto-configuring the RAIDframe devices during the kernel
+initialization.
+See
+.Xr raid 4
+and
+.Xr raidctl 8
+for details.
 .It Cd option UVM_SWAP_ENCRYPT
 Enables kernel support for encrypting pages that are written out to
 swap storage.
@@ -755,7 +782,7 @@ Both communication endpoints need to support
 .Em SACK .
 The fallback behaviour is NewReno fast recovery phase, which allows
 one lost segment to be recovered per round trip time.
-When more then one segment has been dropped per window, the transmission can
+When more than one segment has been dropped per window, the transmission can
 continue without waiting for a retransmission timeout.
 .It Cd option TCP_FACK
 Turns on forward acknowledgements allowing a more precise estimate of
@@ -817,18 +844,18 @@ For simple rate-limiting, use
 .Xr tbrconfig 8
 to set up the interface transmission rate.
 To use queueing disciplines, their options should also be defined.
+.Em ALTQ_CBQ
+and
+.Em ALTQ_RED
+are enabled by default with option
+.Em ALTQ
+in
+.Ox .
 Queueing disciplines are managed by
 .Xr altqd 8 .
 See
 .Xr altq 9
 for details on ALTQ.
-.It Cd option ALTQ_CBQ
-Enables ALTQ's CBQ (Class-based Queueing) module.
-CBQ achieves both partitioning and sharing of link bandwidth by hierarchically
-structured classes.
-Each class has its own queue and is assigned its share of bandwidth.
-A child class can borrow bandwidth from its parent class as long as excess
-bandwidth is available.
 .It Cd option ALTQ_HFSC
 Enables ALTQ's HFSC (Hierarchical Fair Service Curve) module.
 HFSC supports both link-sharing and guaranteed real-time services.
@@ -847,13 +874,6 @@ A hash function is used to map a flow to one of a set of queues.
 .It Cd option ALTQ_FIFOQ
 Enables ALTQ's FIFO queue module.
 FIFOQ is a simple drop-tail FIFO queue.
-.It Cd option ALTQ_RED
-Enables ALTQ's RED (Random Early Detection) module.
-RED is an implicit congestion notification mechanism that exercises
-packet dropping or packet marking stochastically according to the
-average queue length.
-RED can be viewed as an active buffer management mechanism and can be
-integrated into other queueing disciplines.
 .It Cd option ALTQ_RIO
 Enables ALTQ's RIO (RED with In/Oout) module.
 The original RIO has 2 sets of RED parameters; one for in-profile
@@ -888,7 +908,7 @@ which affects processor cycle counter.
 .Bl -ohang
 .It Cd option SCSITERSE
 Terser SCSI error messages.
-This omits the table for decoding ASC/ASCQ info, saving about 8 bytes or so.
+This omits the table for decoding ASC/ASCQ info, saving about 8KB.
 .It Cd option SCSIDEBUG
 Prints extra debugging info for the SCSI subsystem to the console.
 .El
@@ -965,17 +985,30 @@ for exact default information.
 Increase this value if
 .Dq mclpool limit reached
 messages appear.
-.It Cd option NKMEMCLUSTERS=value
-Size of kernel malloc area in CLBYTES-sized logical pages.
+.It Cd option NKMEMPAGES=value
+.It Cd option NKMEMPAGES_MIN=value
+.It Cd option NKMEMPAGES_MAX=value
+Size of kernel malloc area in PAGE_SIZE-sized logical pages.
 This area is covered by the kernel submap
 .Em kmem_map .
+The kernel attempts to auto-size this map based on the amount of
+physical memory in the system.  Platform-specific code may place
+bounds on this computed size, which may be viewed with the
+.Xr sysctl 8
+variable
+.Em vm.nkmempages .
 See
 .Pa /usr/include/machine/param.h
-for the default value, which is port specific.
-Increase this value if
+for the default upper and lower bounds.
+The related options
+.Sq NKMEMPAGES_MIN
+and
+.Sq NKMEMPAGES_MAX
+allow the bounds to be overridden in the kernel configuration file.
+These options are provided in the event the computed value is
+insufficient resulting in an
 .Dq out of space in kmem_map
-panics happen.
-.\" , which mean the system has run out of malloc-able kernel memory.
+panic.
 .It Cd option NBUF=value
 .It Cd option BUFPAGES=value
 These options set the number of pages available for the buffer cache.
@@ -983,7 +1016,7 @@ Their default value is a machine dependent value, often calculated as
 between 5% and 10% of total available RAM.
 .It Cd option NTP
 Modify the scheduler code to add hooks necessary for running an NTP daemon.
-.Xr xntpd 8
+.Em ntpd
 is available as part of the port collection.
 .It Cd option APM_NOPRINT
 This option is supported on the i386 architecture.
@@ -996,14 +1029,6 @@ status can still be obtained using
 .Xr apm 8
 and/or
 .Xr apmd 8 .
-.It Cd RFORK_FDSHARE
-This option enables sharing of filedescriptor tables between processes that
-request it.
-It is needed for the
-.Xr rfork
-system call to work properly and for some programs run under Linux emulation.
-It's disabled by default for security reasons because it allows any malicious
-user to crash the system.
 .El
 .\" The following requests should be uncommented and used where appropriate.
 .\" .Sh FILES
@@ -1019,6 +1044,7 @@ user to crash the system.
 .Xr msgget 2 ,
 .Xr msgrcv 2 ,
 .Xr msgsnd 2 ,
+.Xr ptrace 2 ,
 .Xr semctl 2 ,
 .Xr semget 2 ,
 .Xr semop 2 ,

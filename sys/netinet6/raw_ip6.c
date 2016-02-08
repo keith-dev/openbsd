@@ -1,4 +1,4 @@
-/*	$OpenBSD: raw_ip6.c,v 1.5 2001/04/06 04:42:09 csapuntz Exp $	*/
+/*	$OpenBSD: raw_ip6.c,v 1.10 2002/03/19 01:39:04 itojun Exp $	*/
 /*	$KAME: raw_ip6.c,v 1.69 2001/03/04 15:55:44 itojun Exp $	*/
 
 /*
@@ -93,14 +93,6 @@
 #include <netinet6/scope6_var.h>
 #endif
 
-#ifdef __OpenBSD__
-#undef IPSEC
-#endif
-
-#ifdef IPSEC
-#include <netinet6/ipsec.h>
-#endif /*IPSEC*/
-
 #include <machine/stdarg.h>
 
 #include "faith.h"
@@ -180,7 +172,7 @@ rip6_input(mp, offp, proto)
 	bzero(&rip6src, sizeof(rip6src));
 	rip6src.sin6_len = sizeof(struct sockaddr_in6);
 	rip6src.sin6_family = AF_INET6;
-#if 0 /*XXX inbound flowlabel */
+#if 0 /* XXX inbound flowlabel */
 	rip6src.sin6_flowinfo = ip6->ip6_flow & IPV6_FLOWINFO_MASK;
 #endif
 	/* KAME hack: recover scopeid */
@@ -267,7 +259,7 @@ rip6_ctlinput(cmd, sa, d)
 	struct ip6ctlparam *ip6cp = NULL;
 	const struct sockaddr_in6 *sa6_src = NULL;
 	void *cmdarg;
-	void (*notify) __P((struct in6pcb *, int)) = in6_rtchange;
+	void (*notify)(struct in6pcb *, int) = in6_rtchange;
 	int nxt;
 
 	if (sa->sa_family != AF_INET6 ||
@@ -363,13 +355,7 @@ rip6_ctlinput(cmd, sa, d)
  * Tack on options user may have setup with control call.
  */
 int
-#if __STDC__
 rip6_output(struct mbuf *m, ...)
-#else
-rip6_output(m, va_alist)
-	struct mbuf *m;
-	va_dcl
-#endif
 {
 	struct socket *so;
 	struct sockaddr_in6 *dstsock;
@@ -490,13 +476,6 @@ rip6_output(m, va_alist)
 		sum = in6_cksum(m, ip6->ip6_nxt, sizeof(*ip6), plen);
 		m_copyback(m, off, sizeof(sum), (caddr_t)&sum);
 	}
-
-#ifdef IPSEC
-	if (ipsec_setsocket(m, so) != 0) {
-		error = ENOBUFS;
-		goto bad;
-	}
-#endif /*IPSEC*/
 
 	flags = 0;
 #ifdef IN6P_MINMTU
@@ -621,13 +600,6 @@ rip6_usrreq(so, req, m, nam, control, p)
 		in6p = sotoin6pcb(so);
 		in6p->in6p_ip6.ip6_nxt = (long)nam;
 		in6p->in6p_cksum = -1;
-#ifdef IPSEC
-		error = ipsec_init_policy(so, &in6p->in6p_sp);
-		if (error != 0) {
-			in6_pcbdetach(in6p);
-			break;
-		}
-#endif /*IPSEC*/
 		
 		MALLOC(in6p->in6p_icmp6filt, struct icmp6_filter *,
 			sizeof(struct icmp6_filter), M_PCB, M_NOWAIT);
@@ -712,9 +684,9 @@ rip6_usrreq(so, req, m, nam, control, p)
 		in6p->in6p_laddr = addr->sin6_addr;
 		break;
 	    }
-		
+
 	case PRU_CONNECT:
-	    {
+	{
 		struct sockaddr_in6 *addr = mtod(nam, struct sockaddr_in6 *);
 		struct in6_addr *in6a = NULL;
 #ifdef ENABLE_DEFAULT_SCOPE
@@ -760,7 +732,7 @@ rip6_usrreq(so, req, m, nam, control, p)
 		in6p->in6p_faddr = addr->sin6_addr;
 		soisconnected(so);
 		break;
-	    }
+	}
 
 	case PRU_CONNECT2:
 		error = EOPNOTSUPP;
@@ -777,7 +749,7 @@ rip6_usrreq(so, req, m, nam, control, p)
 	 * routine handles any messaging necessary.
 	 */
 	case PRU_SEND:
-	    {
+	{
 		struct sockaddr_in6 tmp;
 		struct sockaddr_in6 *dst;
 
@@ -799,8 +771,18 @@ rip6_usrreq(so, req, m, nam, control, p)
 				error = ENOTCONN;
 				break;
 			}
+			if (nam->m_len != sizeof(tmp)) {
+				error = EINVAL;
+				break;
+			}
+
 			tmp = *mtod(nam, struct sockaddr_in6 *);
 			dst = &tmp;
+
+			if (dst->sin6_family != AF_INET6) {
+				error = EAFNOSUPPORT;
+				break;
+			}
 		}
 #ifdef ENABLE_DEFAULT_SCOPE
 		if (dst->sin6_scope_id == 0) {
@@ -811,7 +793,7 @@ rip6_usrreq(so, req, m, nam, control, p)
 		error = rip6_output(m, so, dst, control);
 		m = NULL;
 		break;
-	    }
+	}
 
 	case PRU_SENSE:
 		/*

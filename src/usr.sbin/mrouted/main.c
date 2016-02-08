@@ -20,12 +20,9 @@
 
 
 #include "defs.h"
-#ifdef __STDC__
 #include <stdarg.h>
-#else
-#include <varargs.h>
-#endif
 #include <fcntl.h>
+#include <util.h>
 
 #ifdef SNMP
 #include "snmp.h"
@@ -33,13 +30,12 @@
 
 #ifndef lint
 static char rcsid[] =
-	"@(#) $Id: main.c,v 1.6 2001/09/04 23:35:59 millert Exp $";
+	"@(#) $Id: main.c,v 1.9 2002/02/19 19:39:40 millert Exp $";
 #endif
 
 extern char *configfilename;
 char versionstring[100];
 
-static char pidfilename[]  = _PATH_MROUTED_PID;
 static char dumpfilename[] = _PATH_MROUTED_DUMP;
 static char cachefilename[] = _PATH_MROUTED_CACHE;
 static char genidfilename[] = _PATH_MROUTED_GENID;
@@ -65,18 +61,18 @@ static int nhandlers = 0;
 /*
  * Forward declarations.
  */
-static void fasttimer __P((int));
-static void done __P((int));
-static void dump __P((int));
-static void fdump __P((int));
-static void cdump __P((int));
-static void restart __P((int));
-static void timer __P((void));
-static void cleanup __P((void));
-static void resetlogging __P((void *));
+static void fasttimer(int);
+static void done(int);
+static void dump(int);
+static void fdump(int);
+static void cdump(int);
+static void restart(int);
+static void timer(void);
+static void cleanup(void);
+static void resetlogging(void *);
 
 /* To shut up gcc -Wstrict-prototypes */
-int main __P((int argc, char **argv));
+int main(int argc, char **argv);
 
 int
 register_input_handler(fd, func)
@@ -259,23 +255,17 @@ usage:	fprintf(stderr,
     rsrr_init();
 #endif /* RSRR */
 
-#if defined(__STDC__) || defined(__GNUC__)
     /*
      * Allow cleanup if unexpected exit.  Apparently some architectures
      * have a kernel bug where closing the socket doesn't do an
      * ip_mrouter_done(), so we attempt to do it on exit.
      */
     atexit(cleanup);
-#endif
 
     if (debug)
 	fprintf(stderr, "pruning %s\n", pruning ? "on" : "off");
 
-    fp = fopen(pidfilename, "w");		
-    if (fp != NULL) {
-	fprintf(fp, "%d\n", (int)getpid());
-	(void) fclose(fp);
-    }
+    pidfile(NULL);
 
     (void)signal(SIGALRM, fasttimer);
 
@@ -642,7 +632,6 @@ resetlogging(arg)
  * according to the severity of the message and the current debug level.
  * For errors of severity LOG_ERR or worse, terminate the program.
  */
-#ifdef __STDC__
 void
 log(int severity, int syserr, char *format, ...)
 {
@@ -655,24 +644,6 @@ log(int severity, int syserr, char *format, ...)
     time_t t;
 
     va_start(ap, format);
-#else
-/*VARARGS3*/
-void
-log(severity, syserr, format, va_alist)
-    int severity, syserr;
-    char *format;
-    va_dcl
-{
-    va_list ap;
-    static char fmt[211] = "warning - ";
-    char *msg;
-    char tbuf[20];
-    struct timeval now;
-    struct tm *thyme;
-    time_t t;
-
-    va_start(ap);
-#endif
     vsprintf(&fmt[10], format, ap);
     va_end(ap);
     msg = (severity == LOG_WARNING) ? fmt : &fmt[10];

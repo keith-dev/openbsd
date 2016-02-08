@@ -1,4 +1,4 @@
-/*	$OpenBSD: ui.c,v 1.22 2001/10/05 08:18:37 ho Exp $	*/
+/*	$OpenBSD: ui.c,v 1.28 2002/03/19 04:00:59 angelos Exp $	*/
 /*	$EOM: ui.c,v 1.43 2000/10/05 09:25:12 niklas Exp $	*/
 
 /*
@@ -49,6 +49,7 @@
 #include "connection.h"
 #include "doi.h"
 #include "exchange.h"
+#include "init.h"
 #include "isakmp.h"
 #include "log.h"
 #include "sa.h"
@@ -61,6 +62,9 @@
 
 /* from isakmpd.c */
 void daemon_shutdown_now (int);
+
+/* Report all SA configuration information. */
+void ui_report_sa (char *cmd);
 
 char *ui_fifo = FIFO;
 int ui_socket;
@@ -89,10 +93,9 @@ ui_init (void)
       if (mkfifo (ui_fifo, 0600) == -1)
 	log_fatal ("ui_init: mkfifo (\"%s\", 0600) failed", ui_fifo);
 
-      /* XXX Is O_RDWR needed on some OSes?  Photurisd seems to imply that.  */
-      ui_socket = open (ui_fifo, O_RDONLY | O_NONBLOCK, 0);
+      ui_socket = open (ui_fifo, O_RDWR | O_NONBLOCK, 0);
       if (ui_socket == -1)
-	log_fatal ("ui_init: open (\"%s\", O_RDONLY | O_NONBLOCK, 0) failed",
+	log_fatal ("ui_init: open (\"%s\", O_RDWR | O_NONBLOCK, 0) failed",
 		   ui_fifo);
     }
 }
@@ -131,6 +134,14 @@ ui_teardown (char *cmd)
   connection_teardown (name);
   while ((sa = sa_lookup_by_name (name, 2)) != 0)
     sa_delete (sa, 1);
+}
+
+/* Tear down all phase 2 connections.  */
+static void
+ui_teardown_all (char *cmd)
+{
+  /* Skip 'cmd' as arg. */
+  sa_teardown_all();
 }
 
 /*
@@ -307,6 +318,14 @@ ui_report (char *cmd)
   conf_report ();
 }
 
+/* Report all SA configuration information.  */
+void
+ui_report_sa (char *cmd)
+{
+  /* Skip 'cmd' as arg? */
+  sa_report_all ();
+}
+
 /*
  * Call the relevant command handler based on the first character of the
  * line (the command).
@@ -333,9 +352,7 @@ ui_handle_command (char *line)
     case 'D':
       ui_debug (line);
       break;
-#endif
 
-#ifdef USE_DEBUG
     case 'p':
       ui_packetlog (line);
       break;
@@ -345,12 +362,24 @@ ui_handle_command (char *line)
       ui_shutdown_daemon (line);
       break;
 
+    case 'R':
+      reinit ();
+      break;
+
+    case 'S':
+      ui_report_sa (line);
+      break;
+
     case 'r':
       ui_report (line);
       break;
 
     case 't':
       ui_teardown (line);
+      break;
+
+    case 'T':
+      ui_teardown_all (line);
       break;
 
     default:

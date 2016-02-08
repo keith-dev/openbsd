@@ -1,4 +1,4 @@
-/*	$OpenBSD: tr.c,v 1.5 1997/07/25 21:14:04 mickey Exp $	*/
+/*	$OpenBSD: tr.c,v 1.8 2002/02/16 21:27:55 millert Exp $	*/
 /*	$NetBSD: tr.c,v 1.5 1995/08/31 22:13:48 jtc Exp $	*/
 
 /*
@@ -44,7 +44,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)tr.c	8.2 (Berkeley) 5/4/95";
 #endif
-static char rcsid[] = "$OpenBSD: tr.c,v 1.5 1997/07/25 21:14:04 mickey Exp $";
+static char rcsid[] = "$OpenBSD: tr.c,v 1.8 2002/02/16 21:27:55 millert Exp $";
 #endif /* not lint */
 
 #include <sys/types.h>
@@ -95,15 +95,15 @@ static int string1[NCHARS] = {
 STR s1 = { STRING1, NORMAL, 0, OOBCH, { 0, OOBCH }, NULL, NULL };
 STR s2 = { STRING2, NORMAL, 0, OOBCH, { 0, OOBCH }, NULL, NULL };
 
-static void setup __P((int *, char *, STR *, int));
-static void usage __P((void));
+static void setup(int *, char *, STR *, int);
+static void usage(void);
 
 int
 main(argc, argv)
 	int argc;
 	char **argv;
 {
-	register int ch, cnt, lastch, *p;
+	int ch, cnt, lastch, *p;
 	int cflag, dflag, sflag, isstring2;
 
 	cflag = dflag = sflag = 0;
@@ -209,6 +209,7 @@ main(argc, argv)
 		errx(1, "empty string2");
 
 	/* If string2 runs out of characters, use the last one specified. */
+	ch = s2.lastch;
 	if (sflag)
 		while (next(&s1)) {
 			string1[s1.lastch] = ch = s2.lastch;
@@ -246,7 +247,7 @@ setup(string, arg, str, cflag)
 	STR *str;
 	int cflag;
 {
-	register int cnt, *p;
+	int cnt, *p;
 
 	str->str = arg;
 	bzero(string, NCHARS * sizeof(int));

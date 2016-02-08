@@ -1,4 +1,4 @@
-/*	$OpenBSD: top.c,v 1.11 2001/09/05 06:25:39 deraadt Exp $	*/
+/*	$OpenBSD: top.c,v 1.15 2002/02/16 21:27:55 millert Exp $	*/
 
 const char copyright[] = "Copyright (c) 1984 through 1996, William LeFebvre";
 
@@ -58,18 +58,18 @@ char stdoutbuf[Buffersize];
 extern int overstrike;
 
 /* signal handling routines */
-static void leave __P((int));
-static void onalrm __P((int));
-static void tstop __P((int));
+static void leave(int);
+static void onalrm(int);
+static void tstop(int);
 #ifdef SIGWINCH
-static void winch __P((int));
+static void winch(int);
 #endif
 
-sig_atomic_t leaveflag;
-sig_atomic_t tstopflag;
-sig_atomic_t winchflag;
+volatile sig_atomic_t leaveflag;
+volatile sig_atomic_t tstopflag;
+volatile sig_atomic_t winchflag;
 
-static void reset_display __P((void));
+static void reset_display(void);
 
 /* values which need to be accessed by signal handlers */
 static int max_topn;		/* maximum displayable processes */
@@ -105,9 +105,9 @@ int  argc;
 char *argv[];
 
 {
-    register int i;
-    register int active_procs;
-    register int change;
+    int i;
+    int active_procs;
+    int change;
 
     struct system_info system_info;
     struct statics statics;
@@ -153,9 +153,9 @@ char *argv[];
     fd_set readfds;
 
 #ifdef ORDER
-    static char command_chars[] = "\f qh?en#sdkriIuo";
+    static char command_chars[] = "\f qh?en#sdkriIuSo";
 #else
-    static char command_chars[] = "\f qh?en#sdkriIu";
+    static char command_chars[] = "\f qh?en#sdkriIuS";
 #endif
 /* these defines enumerate the "strchr"s of the commands in command_chars */
 #define CMD_redraw	0
@@ -174,8 +174,9 @@ char *argv[];
 #define CMD_idletog     12
 #define CMD_idletog2    13
 #define CMD_user	14
+#define CMD_system	15
 #ifdef ORDER
-#define CMD_order       15
+#define CMD_order       16
 #endif
 
     /* set the buffer for stdout */
@@ -871,7 +872,14 @@ restart:
 				    clear_message();
 				}
 				break;
-	    
+
+			    case CMD_system:
+				ps.system = !ps.system;
+				new_message(MT_standout | MT_delayed,
+				    " %sisplaying system processes.",
+				    ps.system ? "D" : "Not d");
+				break;
+
 #ifdef ORDER
 			    case CMD_order:
 				new_message(MT_standout,

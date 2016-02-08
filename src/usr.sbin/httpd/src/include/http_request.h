@@ -1,7 +1,7 @@
 /* ====================================================================
  * The Apache Software License, Version 1.1
  *
- * Copyright (c) 2000 The Apache Software Foundation.  All rights
+ * Copyright (c) 2000-2002 The Apache Software Foundation.  All rights
  * reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -107,7 +107,7 @@ API_EXPORT(time_t) ap_update_mtime(request_rec *r, time_t dependency_mtime);
 
 #ifdef CORE_PRIVATE
 /* Function called by main.c to handle first-level request */
-void ap_process_request(request_rec *);
+API_EXPORT(void) ap_process_request(request_rec *);
 API_EXPORT(void) ap_die(int type, request_rec *r);
 #endif
 

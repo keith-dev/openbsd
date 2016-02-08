@@ -1,7 +1,7 @@
-#	$OpenBSD: install.md,v 1.13 2001/06/23 19:44:42 deraadt Exp $
+#	$OpenBSD: install.md,v 1.17 2002/04/12 02:15:28 deraadt Exp $
 #
 #
-# Copyright rc) 1996 The NetBSD Foundation, Inc.
+# Copyright (c) 1996 The NetBSD Foundation, Inc.
 # All rights reserved.
 #
 # This code is derived from software contributed to The NetBSD Foundation
@@ -35,7 +35,6 @@
 # ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 #
-
 #
 # machine dependent section of installation/upgrade script.
 #
@@ -45,11 +44,64 @@ MDSETS=kernel
 ARCH=ARCH
 
 md_set_term() {
+	local _tables
+
 	test -n "$TERM" && return
 	echo -n "Specify terminal type [vt220]: "
 	getresp vt220
 	TERM=$resp
 	export TERM
+
+	echo -n "Do you wish to select a keyboard encoding table? [n] "
+	getresp n
+
+	case $resp in
+	Y*|y*)	;;
+	*)	return
+		;;
+	esac
+
+	resp=
+	while : ; do
+		echo -n "Select your keyboard type: (P)C-AT/XT, (U)SB or 'done' [P] "
+		getresp P
+		case $resp in
+		P*|p*)  _tables="be de dk es fr it jp lt no pt ru sf sg sv ua uk us"
+			;;
+		U*|u*)	_tables="de dk es fr it jp no sf sg sv uk us"
+			;;
+		done)	;;
+		*)	echo "'$resp' is not a valid keyboard type."
+			resp=
+			continue
+			;;
+		esac
+		break;
+	done
+
+	[ -z "$_tables" ] && return
+
+	while : ; do
+		cat << __EOT
+The available keyboard encoding tables are:
+
+	${_tables}
+
+__EOT
+		echo -n "Table name? (or 'done') [us] "
+		getresp us
+		case $resp in
+		done)	;;
+		*)	if kbd $resp ; then
+				echo $resp > /tmp/kbdtype
+			else
+				echo "'${resp}' is not a valid table name."
+				continue
+			fi
+			;;
+		esac
+		break;
+	done
 }
 
 md_get_diskdevs() {
@@ -63,8 +115,8 @@ md_get_cddevs() {
 }
 
 md_get_partition_range() {
-    # return range of valid partition letters
-    echo [a-p]
+	# return range of valid partition letters
+	echo [a-p]
 }
 
 md_questions() {
@@ -72,11 +124,9 @@ md_questions() {
 	echo -n "Do you expect to run the X Window System? [y] "
 	getresp y
 	case "$resp" in
-		y*|Y*)
-			xfree86=y
-			;;
-		*)
-			;;
+	y*|Y*)
+		xfree86=y
+		;;
 	esac
 	echo
 }
@@ -97,11 +147,11 @@ q' | ed /mnt/etc/sysctl.conf 2> /dev/null
 }
 
 md_native_fstype() {
-    echo msdos
+	echo msdos
 }
 
 md_native_fsopts() {
-    echo "ro,-l"
+	echo "ro,-l"
 }
 
 md_checkfordisklabel() {
@@ -167,8 +217,8 @@ md_prep_disklabel()
 	echo -n 'Do you want to use the *entire* disk for OpenBSD? [no] '
 	getresp "no"
 	case $resp in
-		y*|Y*)	md_prep_fdisk ${_disk} Y ;;
-		*)	md_prep_fdisk ${_disk} ;;
+	y*|Y*)	md_prep_fdisk ${_disk} Y ;;
+	*)	md_prep_fdisk ${_disk} ;;
 	esac
 
 	cat << __EOT
@@ -184,14 +234,11 @@ __EOT
 
 	md_checkfordisklabel $_disk
 	case $? in
-	0)
-		;;
-	1)
-		echo WARNING: Disk $_disk has no label. You will be creating a new one.
+	0)	;;
+	1)	echo WARNING: Disk $_disk has no label. You will be creating a new one.
 		echo
 		;;
-	2)
-		echo WARNING: Label on disk $_disk is corrupted. You will be repairing.
+	2)	echo WARNING: Label on disk $_disk is corrupted. You will be repairing.
 		echo
 		;;
 	esac
@@ -229,7 +276,6 @@ and rational way.  As a reminder, installing the 'etc' binary set is NOT
 recommended.  Once the rest of your system has been upgraded, you should
 manually merge any changes to files in the 'etc' set into those files which
 already exist on your system.
-
 __EOT
 	fi
 

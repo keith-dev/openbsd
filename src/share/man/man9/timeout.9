@@ -1,4 +1,4 @@
-.\"	$OpenBSD: timeout.9,v 1.15 2001/07/17 02:32:51 krw Exp $
+.\"	$OpenBSD: timeout.9,v 1.18 2002/02/15 02:02:50 art Exp $
 .\"
 .\" Copyright (c) 2000 Artur Grabowski <art@openbsd.org>
 .\" All rights reserved.
@@ -147,13 +147,6 @@ The
 and
 .Fn timeout_del
 functions clear the triggered state for that timeout.
-.Pp
-The old
-.Fn timeout
-and
-.Fn untimeout
-interface is implemented as wrappers around the new API, but it's
-obsolete and will be removed in the future.
 .Sh CODE REFERENCES
 These functions are implemented in the file
 .Pa sys/kern/kern_timeout.c .
@@ -161,11 +154,5 @@ These functions are implemented in the file
 .Xr hz 9 ,
 .Xr hzto 9 ,
 .Xr sleep 9 ,
-.Xr splclock 9
-.Sh BUGS
-The
-.Fn timeout_add
-function executes in linear time depending on the number of pending timeouts.
-It will also block all interrupts while inserting the timeout
-to the timeout queue.
-Thus it is not recommended to use a large number of timeouts in the system.
+.Xr splclock 9 ,
+.Xr tvtohz 9

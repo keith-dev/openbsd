@@ -1,3 +1,5 @@
+/*	$OpenBSD: readpassphrase.c,v 1.12 2001/12/15 05:41:00 millert Exp $	*/
+
 /*
  * Copyright (c) 2000 Todd C. Miller <Todd.Miller@courtesan.com>
  * All rights reserved.
@@ -26,7 +28,7 @@
  */
 
 #if defined(LIBC_SCCS) && !defined(lint)
-static const char rcsid[] = "$OpenBSD: readpassphrase.c,v 1.7 2001/08/07 19:34:11 millert Exp $";
+static const char rcsid[] = "$OpenBSD: readpassphrase.c,v 1.12 2001/12/15 05:41:00 millert Exp $";
 #endif /* LIBC_SCCS and not lint */
 
 #include <ctype.h>
@@ -40,17 +42,19 @@ static const char rcsid[] = "$OpenBSD: readpassphrase.c,v 1.7 2001/08/07 19:34:1
 #include <unistd.h>
 #include <readpassphrase.h>
 
+static volatile sig_atomic_t signo;
+
+static void handler(int);
+
 char *
-readpassphrase(prompt, buf, bufsiz, flags)
-	const char *prompt;
-	char *buf;
-	size_t bufsiz;
-	int flags;
+readpassphrase(const char *prompt, char *buf, size_t bufsiz, int flags)
 {
-	struct termios term, oterm;
+	ssize_t nr;
+	int input, output, save_errno;
 	char ch, *p, *end;
-	int input, output;
-	sigset_t oset, nset;
+	struct termios term, oterm;
+	struct sigaction sa, saveint, savehup, savequit, saveterm;
+	struct sigaction savetstp, savettin, savettou;
 
 	/* I suppose we could alloc on demand in this case (XXX). */
 	if (bufsiz == 0) {
@@ -58,6 +62,7 @@ readpassphrase(prompt, buf, bufsiz, flags)
 		return(NULL);
 	}
 
+restart:
 	/*
 	 * Read and write to /dev/tty if available.  If not, read from
 	 * stdin and write to stderr unless a tty is required.
@@ -72,20 +77,26 @@ readpassphrase(prompt, buf, bufsiz, flags)
 	}
 
 	/*
-	 * We block SIGINT and SIGTSTP so the terminal is not left
-	 * in an inconsistent state (ie: no echo).  It would probably
-	 * be better to simply catch these though.
+	 * Catch signals that would otherwise cause the user to end
+	 * up with echo turned off in the shell.  Don't worry about
+	 * things like SIGALRM and SIGPIPE for now.
 	 */
-	sigemptyset(&nset);
-	sigaddset(&nset, SIGINT);
-	sigaddset(&nset, SIGTSTP);
-	(void)sigprocmask(SIG_BLOCK, &nset, &oset);
+	sigemptyset(&sa.sa_mask);
+	sa.sa_flags = 0;		/* don't restart system calls */
+	sa.sa_handler = handler;
+	(void)sigaction(SIGINT, &sa, &saveint);
+	(void)sigaction(SIGHUP, &sa, &savehup);
+	(void)sigaction(SIGQUIT, &sa, &savequit);
+	(void)sigaction(SIGTERM, &sa, &saveterm);
+	(void)sigaction(SIGTSTP, &sa, &savetstp);
+	(void)sigaction(SIGTTIN, &sa, &savettin);
+	(void)sigaction(SIGTTOU, &sa, &savettou);
 
 	/* Turn off echo if possible. */
 	if (tcgetattr(input, &oterm) == 0) {
 		memcpy(&term, &oterm, sizeof(term));
-		if (!(flags & RPP_ECHO_ON) && (term.c_lflag & ECHO))
-			term.c_lflag &= ~ECHO;
+		if (!(flags & RPP_ECHO_ON))
+			term.c_lflag &= ~(ECHO | ECHONL);
 		if (term.c_cc[VSTATUS] != _POSIX_VDISABLE)
 			term.c_cc[VSTATUS] = _POSIX_VDISABLE;
 		(void)tcsetattr(input, TCSAFLUSH|TCSASOFT, &term);
@@ -96,7 +107,7 @@ readpassphrase(prompt, buf, bufsiz, flags)
 
 	(void)write(output, prompt, strlen(prompt));
 	end = buf + bufsiz - 1;
-	for (p = buf; read(input, &ch, 1) == 1 && ch != '\n' && ch != '\r';) {
+	for (p = buf; (nr = read(input, &ch, 1)) == 1 && ch != '\n' && ch != '\r';) {
 		if (p < end) {
 			if ((flags & RPP_SEVENBIT))
 				ch &= 0x7f;
@@ -110,23 +121,52 @@ readpassphrase(prompt, buf, bufsiz, flags)
 		}
 	}
 	*p = '\0';
+	save_errno = errno;
 	if (!(term.c_lflag & ECHO))
 		(void)write(output, "\n", 1);
 
-	/* Restore old terminal settings and signal mask. */
+	/* Restore old terminal settings and signals. */
 	if (memcmp(&term, &oterm, sizeof(term)) != 0)
-		(void)tcsetattr(input, TCSAFLUSH|TCSASOFT, &oterm);
-	(void)sigprocmask(SIG_SETMASK, &oset, NULL);
+		(void)tcsetattr(input, TCSANOW|TCSASOFT, &oterm);
+	(void)sigaction(SIGINT, &saveint, NULL);
+	(void)sigaction(SIGHUP, &savehup, NULL);
+	(void)sigaction(SIGQUIT, &savequit, NULL);
+	(void)sigaction(SIGTERM, &saveterm, NULL);
+	(void)sigaction(SIGTSTP, &savetstp, NULL);
+	(void)sigaction(SIGTTIN, &savettin, NULL);
+	(void)sigaction(SIGTTOU, &savettou, NULL);
 	if (input != STDIN_FILENO)
 		(void)close(input);
-	return(buf);
+
+	/*
+	 * If we were interrupted by a signal, resend it to ourselves
+	 * now that we have restored the signal handlers.
+	 */
+	if (signo) {
+		kill(getpid(), signo); 
+		switch (signo) {
+		case SIGTSTP:
+		case SIGTTIN:
+		case SIGTTOU:
+			signo = 0;
+			goto restart;
+		}
+	}
+
+	errno = save_errno;
+	return(nr == -1 ? NULL : buf);
 }
 
 char *
-getpass(prompt)
-        const char *prompt;
+getpass(const char *prompt)
 {
 	static char buf[_PASSWORD_LEN + 1];
 
 	return(readpassphrase(prompt, buf, sizeof(buf), RPP_ECHO_OFF));
+}
+
+static void handler(int s)
+{
+
+	signo = s;
 }

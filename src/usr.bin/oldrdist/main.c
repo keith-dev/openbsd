@@ -1,4 +1,4 @@
-/*	$OpenBSD: main.c,v 1.9 2001/07/18 17:17:39 pvalchev Exp $	*/
+/*	$OpenBSD: main.c,v 1.12 2002/02/19 19:39:38 millert Exp $	*/
 
 /*
  * Copyright (c) 1983, 1993
@@ -41,9 +41,10 @@ static char copyright[] =
 
 #ifndef lint
 /* from: static char sccsid[] = "@(#)main.c	8.1 (Berkeley) 6/9/93"; */
-static char *rcsid = "$OpenBSD: main.c,v 1.9 2001/07/18 17:17:39 pvalchev Exp $";
+static char *rcsid = "$OpenBSD: main.c,v 1.12 2002/02/19 19:39:38 millert Exp $";
 #endif /* not lint */
 
+#include <stdarg.h>
 #include "defs.h"
 
 #define NHOSTS 100
@@ -75,15 +76,15 @@ int	groupid;	/* user's group ID */
 struct	passwd *pw;	/* pointer to static area used by getpwent */
 struct	group *gr;	/* pointer to static area used by getgrent */
 
-static void usage __P((void));
-static void docmdargs __P((int, char *[]));
+static void usage(void);
+static void docmdargs(int, char *[]);
 
 int
 main(argc, argv)
 	int argc;
 	char *argv[];
 {
-	register char *arg;
+	char *arg;
 	int cmdargs = 0;
 	char *dhosts[NHOSTS], **hp = dhosts;
 
@@ -244,8 +245,8 @@ docmdargs(nargs, args)
 	int nargs;
 	char *args[];
 {
-	register struct namelist *nl, *prev;
-	register char *cp;
+	struct namelist *nl, *prev;
+	char *cp;
 	struct namelist *files, *hosts;
 	struct subcmd *cmds;
 	char *dest;
@@ -297,7 +298,7 @@ docmdargs(nargs, args)
  */
 void
 prnames(nl)
-	register struct namelist *nl;
+	struct namelist *nl;
 {
 	printf("( ");
 	while (nl != NULL) {
@@ -307,28 +308,13 @@ prnames(nl)
 	printf(")\n");
 }
 
-#ifdef __STDC__
-#include <stdarg.h>
-#else
-#include <varargs.h>
-#endif
-
 void
-#ifdef __STDC__
 warn(const char *fmt, ...)
-#else
-warn(fmt, va_alist)
-	char *fmt;
-        va_dcl
-#endif
 {
 	extern int yylineno;
 	va_list ap;
-#ifdef __STDC__
+
 	va_start(ap, fmt);
-#else
-	va_start(ap);
-#endif
 	(void)fprintf(stderr, "rdist: line %d: Warning: ", yylineno);
 	(void)vfprintf(stderr, fmt, ap);
 	(void)fprintf(stderr, "\n");
@@ -341,7 +327,7 @@ warn(fmt, va_alist)
 char *xbasename(path)
 	char *path;
 {
-	register char *cp;
+	char *cp;
 
 	if (cp = strrchr(path, '/'))
 		return(cp+1);

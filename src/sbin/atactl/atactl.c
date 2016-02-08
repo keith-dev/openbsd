@@ -1,4 +1,4 @@
-/*	$OpenBSD: atactl.c,v 1.8 2001/07/07 18:26:09 deraadt Exp $	*/
+/*	$OpenBSD: atactl.c,v 1.12 2002/03/27 17:42:37 gluk Exp $	*/
 /*	$NetBSD: atactl.c,v 1.4 1999/02/24 18:49:14 jwise Exp $	*/
 
 /*-
@@ -58,7 +58,7 @@
 
 struct command {
 	const char *cmd_name;
-	void (*cmd_func) __P((int, char *[]));
+	void (*cmd_func)(int, char *[]);
 };
 
 struct bitinfo {
@@ -66,10 +66,10 @@ struct bitinfo {
 	const char *string;
 };
 
-int	main __P((int, char *[]));
-void	usage __P((void));
-void	ata_command __P((struct atareq *));
-void	print_bitinfo __P((const char *, u_int, struct bitinfo *));
+int	main(int, char *[]);
+void	usage(void);
+void	ata_command(struct atareq *);
+void	print_bitinfo(const char *, u_int, struct bitinfo *);
 
 int	fd;				/* file descriptor for device */
 const	char *dvname;			/* device name */
@@ -78,16 +78,18 @@ const	char *cmdname;			/* command user issued */
 
 extern const char *__progname;		/* from crt0.o */
 
-void	device_identify __P((int, char *[]));
-void	device_setidle __P((int, char *[]));
-void	device_idle __P((int, char *[]));
-void	device_checkpower __P((int, char *[]));
-void	device_acoustic __P((int, char *[]));
-void	device_apm __P((int, char *[]));
-void	device_feature __P((int, char *[]));
-void	device_smart __P((int, char *[]));
+void    device_dump(int, char*[]);
+void	device_identify(int, char *[]);
+void	device_setidle(int, char *[]);
+void	device_idle(int, char *[]);
+void	device_checkpower(int, char *[]);
+void	device_acoustic(int, char *[]);
+void	device_apm(int, char *[]);
+void	device_feature(int, char *[]);
+void	device_smart(int, char *[]);
 
 struct command commands[] = {
+	{ "dump",               device_dump },
 	{ "identify",		device_identify },
 	{ "setidle",		device_setidle },
 	{ "setstandby",		device_setidle },
@@ -239,7 +241,7 @@ main(argc, argv)
 		if (strcmp(cmdname, commands[i].cmd_name) == 0)
 			break;
 	if (commands[i].cmd_name == NULL)
-		errx(1, "unknown command: %s\n", cmdname);
+		errx(1, "unknown command: %s", cmdname);
 
 	(*commands[i].cmd_func)(argc, argv);
 
@@ -314,6 +316,26 @@ print_bitinfo(f, bits, binfo)
 /*
  * DEVICE COMMANDS
  */
+
+void
+device_dump(argc, argv)
+	int argc;
+	char *argv[]; 
+{
+	unsigned char buf[131072];
+	int error;
+	struct atagettrace agt = { sizeof(buf), &buf, 0 };
+
+	error = ioctl(fd, ATAIOGETTRACE, &agt);
+	if (error == -1) {
+		err(1, "ATAIOGETTRACE failed");
+	}
+
+	write(1, agt.buf, agt.bytes_copied);
+	fprintf(stderr, "%d bytes written\n", agt.bytes_copied);
+	
+	return;
+}
 
 /*
  * device_identify:
@@ -416,9 +438,10 @@ device_identify(argc, argv)
 		    (inqbuf->atap_capacity[1] << 16) |
 		    inqbuf->atap_capacity[0]);
 
-	if (inqbuf->atap_queuedepth & WDC_QUEUE_DEPTH_MASK)
+	if ((inqbuf->atap_cmd_set2 & ATA_CMD2_RWQ) &&
+	    (inqbuf->atap_queuedepth & WDC_QUEUE_DEPTH_MASK))
 		printf("Device supports command queue depth of %d\n",
-		    inqbuf->atap_queuedepth & 0xf);
+		    (inqbuf->atap_queuedepth & WDC_QUEUE_DEPTH_MASK) + 1);
 
 	printf("Device capabilities:\n");
 	print_bitinfo("\t%s\n", inqbuf->atap_capabilities1, ata_caps);

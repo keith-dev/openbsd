@@ -1,4 +1,4 @@
-/*	$OpenBSD: region.c,v 1.6 2001/05/24 03:05:26 mickey Exp $	*/
+/*	$OpenBSD: region.c,v 1.9 2002/02/20 22:30:54 vincent Exp $	*/
 
 /*
  *		Region based commands.
@@ -9,8 +9,8 @@
 
 #include "def.h"
 
-static	int	getregion	__P((REGION *));
-static	int	setsize		__P((REGION *, RSIZE));
+static	int	getregion(REGION *);
+static	int	setsize(REGION *, RSIZE);
 
 /*
  * Kill the region.  Ask "getregion" to figure out the bounds of the region.
@@ -95,6 +95,9 @@ lowerregion(f, n)
 
 	if ((s = getregion(&region)) != TRUE)
 		return s;
+
+	undo_add_change(region.r_linep, region.r_offset, region.r_size);
+	
 	lchange(WFHARD);
 	linep = region.r_linep;
 	loffs = region.r_offset;
@@ -129,6 +132,9 @@ upperregion(f, n)
 
 	if ((s = getregion(&region)) != TRUE)
 		return s;
+	
+	undo_add_change(region.r_linep, region.r_offset, region.r_size);
+		
 	lchange(WFHARD);
 	linep = region.r_linep;
 	loffs = region.r_offset;
@@ -298,10 +304,52 @@ setprefix(f, n)
 		s = ereply("Prefix string (default %s): ",
 			   buf, sizeof buf, prefix_string);
 	if (s == TRUE)
-		(void)strcpy(prefix_string, buf);
+		(void)strlcpy(prefix_string, buf, sizeof prefix_string);
 	/* CR -- use old one */
 	if ((s == FALSE) && (prefix_string[0] != '\0'))
 		s = TRUE;
 	return s;
 }
 #endif /* PREFIXREGION */
+
+
+int
+region_get_data(REGION *reg, char *buf, int len)
+{
+	int i, off;
+	LINE *lp;
+	
+	i = 0;
+	off = reg->r_offset;
+	lp = reg->r_linep;
+	while (i < len) {
+		if (off == llength(lp)) {
+			lp = lforw(lp);
+			if (lp == curwp->w_linep)
+				break;
+			off = 0;
+			buf[i] = '\n';
+		} else {
+			buf[i] = lgetc(lp, off);
+			off++;
+		}
+		i++;
+	}
+	return i;
+}
+
+int
+region_put_data(const char *buf, int len)
+{
+	int i;
+
+	for (i = 0; i < len; i++) {
+		if (buf[i] == '\n')
+			lnewline();
+		else
+			linsert(1, buf[i]);
+	}
+	return 0;
+}
+
+

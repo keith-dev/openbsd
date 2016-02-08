@@ -1,4 +1,4 @@
-/*	$OpenBSD: tail.c,v 1.6 2000/11/21 22:01:48 art Exp $	*/
+/*	$OpenBSD: tail.c,v 1.8 2002/02/16 21:27:54 millert Exp $	*/
 
 /*-
  * Copyright (c) 1991, 1993
@@ -46,7 +46,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)tail.c	8.1 (Berkeley) 6/6/93";
 #endif
-static char rcsid[] = "$OpenBSD: tail.c,v 1.6 2000/11/21 22:01:48 art Exp $";
+static char rcsid[] = "$OpenBSD: tail.c,v 1.8 2002/02/16 21:27:54 millert Exp $";
 #endif /* not lint */
 
 #include <sys/types.h>
@@ -65,8 +65,8 @@ int fflag, rflag, rval;
 char *fname;
 int is_stdin;
 
-static void obsolete __P((char **));
-static void usage __P((void));
+static void obsolete(char **);
+static void usage(void);
 
 int
 main(argc, argv)
@@ -225,7 +225,7 @@ static void
 obsolete(argv)
 	char *argv[];
 {
-	register char *ap, *p, *t;
+	char *ap, *p, *t;
 	int len;
 	char *start;
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: passwd.c,v 1.28 2001/08/26 03:28:30 millert Exp $	*/
+/*	$OpenBSD: passwd.c,v 1.32 2002/04/10 10:11:03 mpech Exp $	*/
 
 /*
  * Copyright (c) 1987, 1993, 1994, 1995
@@ -34,7 +34,7 @@
  */
 
 #if defined(LIBC_SCCS) && !defined(lint)
-static char rcsid[] = "$OpenBSD: passwd.c,v 1.28 2001/08/26 03:28:30 millert Exp $";
+static char rcsid[] = "$OpenBSD: passwd.c,v 1.32 2002/04/10 10:11:03 mpech Exp $";
 #endif /* LIBC_SCCS and not lint */
 
 #include <sys/types.h>
@@ -60,7 +60,7 @@ static char rcsid[] = "$OpenBSD: passwd.c,v 1.28 2001/08/26 03:28:30 millert Exp
 
 #define NUM_OPTIONS     2       /* Number of hardcoded defaults */
 
-static void	pw_cont __P((int sig));
+static void	pw_cont(int sig);
 
 static const char options[NUM_OPTIONS][2][80] =
 {
@@ -336,9 +336,11 @@ static void
 pw_cont(sig)
 	int sig;
 {
+	int save_errno = errno;
 
 	if (editpid != -1)
 		kill(editpid, sig);
+	errno = save_errno;
 }
 
 void
@@ -377,12 +379,10 @@ pw_edit(notsetuid, filename)
 	const char *filename;
 {
 	int pstat;
-	char *p, *editor;
+	char *p;
+	char * volatile editor;
 	char *argp[] = {"sh", "-c", NULL, NULL};
 
-#ifdef __GNUC__
-	(void)&editor;
-#endif
 	if (!filename) {
 		filename = pw_lck;
 		if (!filename)
@@ -607,8 +607,11 @@ pw_error(name, err, eval)
 		else
 			warn(NULL);
 	}
-	if (master)
+	if (master) {
 		warnx("%s: unchanged", master);
+		free(master);
+	}
+
 	pw_abort();
 	exit(eval);
 }

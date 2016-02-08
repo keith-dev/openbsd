@@ -1,4 +1,4 @@
-/*	$OpenBSD: kvm.c,v 1.23 2001/06/27 09:11:51 deraadt Exp $ */
+/*	$OpenBSD: kvm.c,v 1.30 2002/03/05 00:15:08 deraadt Exp $ */
 /*	$NetBSD: kvm.c,v 1.43 1996/05/05 04:31:59 gwr Exp $	*/
 
 /*-
@@ -42,7 +42,7 @@
 #if 0
 static char sccsid[] = "@(#)kvm.c	8.2 (Berkeley) 2/13/94";
 #else
-static char *rcsid = "$OpenBSD: kvm.c,v 1.23 2001/06/27 09:11:51 deraadt Exp $";
+static char *rcsid = "$OpenBSD: kvm.c,v 1.30 2002/03/05 00:15:08 deraadt Exp $";
 #endif
 #endif /* LIBC_SCCS and not lint */
 
@@ -57,9 +57,6 @@ static char *rcsid = "$OpenBSD: kvm.c,v 1.23 2001/06/27 09:11:51 deraadt Exp $";
 #include <sys/exec_aout.h>
 #include <sys/kcore.h>
 
-#include <vm/vm.h>
-#include <vm/vm_param.h>
-
 #include <ctype.h>
 #include <db.h>
 #include <fcntl.h>
@@ -72,14 +69,15 @@ static char *rcsid = "$OpenBSD: kvm.c,v 1.23 2001/06/27 09:11:51 deraadt Exp $";
 #include <string.h>
 #include <unistd.h>
 #include <kvm.h>
+#include <stdarg.h>
 
 #include "kvm_private.h"
 
-static int	kvm_dbopen __P((kvm_t *, const char *));
-static int	_kvm_get_header __P((kvm_t *));
-static kvm_t	*_kvm_open __P((kvm_t *, const char *, const char *,
-		    const char *, int, char *));
-static int	clear_gap __P((kvm_t *, FILE *, int));
+static int	kvm_dbopen(kvm_t *, const char *);
+static int	_kvm_get_header(kvm_t *);
+static kvm_t	*_kvm_open(kvm_t *, const char *, const char *, const char *,
+		    int, char *);
+static int	clear_gap(kvm_t *, FILE *, int);
 
 char *
 kvm_geterr(kd)
@@ -88,28 +86,13 @@ kvm_geterr(kd)
 	return (kd->errbuf);
 }
 
-#ifdef __STDC__
-#include <stdarg.h>
-#else
-#include <varargs.h>
-#endif
-
 /*
  * Wrapper around pread.
  */
 ssize_t
-#ifdef	__STDC__
 _kvm_pread(kvm_t *kd, int fd, void *buf, size_t nbytes, off_t offset)
-#else
-_kvm_pread(kd, fd, buf, nbytes, offset)
-	kvm_t *kd;
-	int fd;
-	void *buf;
-	size_t nbytes;
-	off_t offset;
-#endif
 {
-ssize_t rval;
+	ssize_t rval;
 
 	errno = 0;
 	rval = pread(fd, buf, nbytes, offset);
@@ -123,18 +106,9 @@ ssize_t rval;
  * Wrapper around pwrite.
  */
 ssize_t
-#ifdef	__STDC__
 _kvm_pwrite(kvm_t *kd, int fd, void *buf, size_t nbytes, off_t offset)
-#else
-_kvm_pwrite(kd, fd, buf, nbytes, offset)
-	kvm_t *kd;
-	int fd;
-	void *buf;
-	size_t nbytes;
-	off_t offset;
-#endif
 {
-ssize_t rval;
+	ssize_t rval;
 
 	errno = 0;
 	rval = pwrite(fd, buf, nbytes, offset);
@@ -151,22 +125,11 @@ ssize_t rval;
  * generate tons of error messages when trying to access bogus pointers).
  */
 void
-#ifdef __STDC__
 _kvm_err(kvm_t *kd, const char *program, const char *fmt, ...)
-#else
-_kvm_err(kd, program, fmt, va_alist)
-	kvm_t *kd;
-	char *program, *fmt;
-	va_dcl
-#endif
 {
 	va_list ap;
 
-#ifdef __STDC__
 	va_start(ap, fmt);
-#else
-	va_start(ap);
-#endif
 	if (program != NULL) {
 		(void)fprintf(stderr, "%s: ", program);
 		(void)vfprintf(stderr, fmt, ap);
@@ -179,23 +142,12 @@ _kvm_err(kd, program, fmt, va_alist)
 }
 
 void
-#ifdef __STDC__
 _kvm_syserr(kvm_t *kd, const char *program, const char *fmt, ...)
-#else
-_kvm_syserr(kd, program, fmt, va_alist)
-	kvm_t *kd;
-	char *program, *fmt;
-	va_dcl
-#endif
 {
 	va_list ap;
 	register int n;
 
-#ifdef __STDC__
 	va_start(ap, fmt);
-#else
-	va_start(ap);
-#endif
 	if (program != NULL) {
 		(void)fprintf(stderr, "%s: ", program);
 		(void)vfprintf(stderr, fmt, ap);
@@ -285,7 +237,7 @@ _kvm_open(kd, uf, mf, sf, flag, errout)
 				 "%s: not physical memory device", mf);
 			goto failed;
 		}
-		if ((kd->vmfd = open(_PATH_KMEM, flag)) < 0) {
+		if ((kd->vmfd = open(_PATH_KMEM, flag, 0)) < 0) {
 			_kvm_syserr(kd, kd->program, "%s", _PATH_KMEM);
 			goto failed;
 		}
@@ -303,9 +255,9 @@ _kvm_open(kd, uf, mf, sf, flag, errout)
 		 * fall back to _PATH_UNIX.
 		 */
 		if (kvm_dbopen(kd, uf ? uf : _PATH_UNIX) == -1 &&
-		    ((uf && (kd->nlfd = open(uf, O_RDONLY)) == -1) || (!uf &&
-		    (kd->nlfd = open((uf = _PATH_KSYMS), O_RDONLY)) == -1 &&
-		    (kd->nlfd = open((uf = _PATH_UNIX), O_RDONLY)) == -1))) {
+		    ((uf && (kd->nlfd = open(uf, O_RDONLY, 0)) == -1) || (!uf &&
+		    (kd->nlfd = open((uf = _PATH_KSYMS), O_RDONLY, 0)) == -1 &&
+		    (kd->nlfd = open((uf = _PATH_UNIX), O_RDONLY, 0)) == -1))) {
 			_kvm_syserr(kd, kd->program, "%s", uf);
 			goto failed;
 		}
@@ -317,9 +269,9 @@ _kvm_open(kd, uf, mf, sf, flag, errout)
 		 * If no file is specified, try opening _PATH_KSYMS and
 		 * fall back to _PATH_UNIX.
 		 */
-		if ((uf && (kd->nlfd = open(uf, O_RDONLY)) == -1) || (!uf &&
-		    (kd->nlfd = open((uf = _PATH_KSYMS), O_RDONLY)) == -1 &&
-		    (kd->nlfd = open((uf = _PATH_UNIX), O_RDONLY)) == -1)) {
+		if ((uf && (kd->nlfd = open(uf, O_RDONLY, 0)) == -1) || (!uf &&
+		    (kd->nlfd = open((uf = _PATH_KSYMS), O_RDONLY, 0)) == -1 &&
+		    (kd->nlfd = open((uf = _PATH_UNIX), O_RDONLY, 0)) == -1)) {
 			_kvm_syserr(kd, kd->program, "%s", uf);
 			goto failed;
 		}
@@ -865,7 +817,7 @@ int kvm_dump_inval(kd)
 kvm_t	*kd;
 {
 	struct nlist	nlist[2];
-	u_long		pa;
+	u_long		pa, x;
 
 	if (ISALIVE(kd)) {
 		_kvm_err(kd, kd->program, "clearing dump on live kernel");
@@ -881,8 +833,8 @@ kvm_t	*kd;
 	if (_kvm_kvatop(kd, (u_long)nlist[0].n_value, &pa) == 0)
 		return (-1);
 
-	pa = 0;
-	if (_kvm_pwrite(kd, kd->pmfd, &pa, sizeof(pa), (off_t)_kvm_pa2off(kd, pa)) != sizeof(pa)) {
+	x = 0;
+	if (_kvm_pwrite(kd, kd->pmfd, &x, sizeof(x), (off_t)_kvm_pa2off(kd, pa)) != sizeof(x)) {
 		_kvm_err(kd, 0, "cannot invalidate dump");
 		return (-1);
 	}

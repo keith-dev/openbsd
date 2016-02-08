@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile.inc,v 1.48 2001/09/25 20:36:44 niklas Exp $
+#	$OpenBSD: Makefile.inc,v 1.51 2002/02/22 21:06:01 drahn Exp $
 #	$NetBSD: Makefile.inc,v 1.35 1995/10/16 23:49:07 jtc Exp $
 #	@(#)Makefile.inc	8.1 (Berkeley) 6/17/93
 
@@ -11,7 +11,7 @@ CFLAGS+=	-D_NO_WEAK_ALIASES
 .endif
 
 # modules with non-default implementations on at least one architecture:
-SRCS+=	Ovfork.S brk.S cerror.S exect.S fork.S \
+SRCS+=	Ovfork.S brk.S cerror.S exect.S fork.S rfork.S \
 	sbrk.S sigpending.S sigprocmask.S sigreturn.S \
 	sigsuspend.S syscall.S
 
@@ -52,8 +52,7 @@ ASM=	accept.o access.o acct.o adjtime.o bind.o chdir.o chflags.o chmod.o \
 	ntp_gettime.o ntp_adjtime.o \
 	open.o pathconf.o pipe.o poll.o profil.o quotactl.o \
 	read.o readlink.o readv.o reboot.o recvfrom.o recvmsg.o rename.o \
-	revoke.o rfork.o \
-	rmdir.o select.o semget.o semop.o sendmsg.o sendto.o \
+	revoke.o rmdir.o select.o semget.o semop.o sendmsg.o sendto.o \
 	setegid.o seteuid.o setgid.o setgroups.o setitimer.o setpgid.o \
 	setpriority.o setrlimit.o setsid.o setsockopt.o settimeofday.o \
 	setuid.o shmat.o shmctl.o shmdt.o shmget.o shutdown.o sigaction.o \
@@ -61,6 +60,10 @@ ASM=	accept.o access.o acct.o adjtime.o bind.o chdir.o chflags.o chmod.o \
 	symlink.o sync.o sysarch.o umask.o undelete.o unlink.o unmount.o \
 	utimes.o vadvise.o wait4.o write.o writev.o xfspioctl.o __semctl.o \
 	__syscall.o __sysctl.o
+
+ASM+=	extattrctl.o extattr_set_file.o extattr_get_file.o \
+	extattr_delete_file.o extattr_set_fd.o extattr_get_fd.o \
+	extattr_delete_fd.o
 
 GASM=	${ASM:.o=.go}
 PASM=	${ASM:.o=.po}
@@ -226,6 +229,14 @@ MAN+=	accept.2 access.2 acct.2 adjtime.2 bind.2 brk.2 chdir.2 chflags.2 \
 	socket.2 socketpair.2 stat.2 statfs.2 swapctl.2 symlink.2 sync.2 \
 	sysarch.2 syscall.2 truncate.2 umask.2 unlink.2 utimes.2 vfork.2 \
 	wait.2 write.2
+
+MAN+=	extattr_get_file.2
+MLINKS+=extattr_get_file.2 extattr_set_file.2 \
+	extattr_get_file.2 extattr_delete_file.2 \
+	extattr_get_file.2 extattr_get_fd.2 \
+	extattr_get_file.2 extattr_set_fd.2 \
+	extattr_get_file.2 extattr_delete_fd.2 \
+	extattr_get_file.2 extattr.2
 
 MAN+=	msgctl.2 shmctl.2 shmat.2 semop.2 semget.2 semctl.2 msgsnd.2 msgrcv.2 \
 	msgget.2 shmget.2

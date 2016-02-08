@@ -1,4 +1,4 @@
-/*	$OpenBSD: print-atalk.c,v 1.16 2000/10/31 16:06:48 deraadt Exp $	*/
+/*	$OpenBSD: print-atalk.c,v 1.19 2002/02/19 19:39:40 millert Exp $	*/
 
 /*
  * Copyright (c) 1988, 1989, 1990, 1991, 1992, 1993, 1994, 1995, 1996, 1997
@@ -25,17 +25,15 @@
 
 #ifndef lint
 static const char rcsid[] =
-    "@(#) $Header: /cvs/src/usr.sbin/tcpdump/print-atalk.c,v 1.16 2000/10/31 16:06:48 deraadt Exp $ (LBL)";
+    "@(#) $Header: /cvs/src/usr.sbin/tcpdump/print-atalk.c,v 1.19 2002/02/19 19:39:40 millert Exp $ (LBL)";
 #endif
 
 #include <sys/param.h>
 #include <sys/time.h>
 #include <sys/socket.h>
 
-#ifdef __STDC__
 struct mbuf;
 struct rtentry;
-#endif
 #include <net/if.h>
 
 #include <netinet/in.h>
@@ -223,6 +221,22 @@ static void
 ddp_print(register const u_char *bp, register u_int length, register int t,
 	  register u_short snet, register u_char snode, u_char skt)
 {
+
+#ifdef LBL_ALIGN
+	if ((long)bp & 3) {
+		static u_char *abuf = NULL;
+
+		if (abuf == NULL) {
+			abuf = (u_char *)malloc(snaplen);
+			if (abuf == NULL)
+				error("ddp_print: malloc");
+		}
+		memcpy(abuf, bp, min(length, snaplen));
+		snapend += abuf - bp;
+		packetp = abuf;
+		bp = abuf;
+	}
+#endif
 
 	switch (t) {
 
@@ -624,7 +638,7 @@ ddpskt_string(register int skt)
 	static char buf[10];
 
 	if (nflag) {
-		(void)sprintf(buf, "%d", skt);
+		(void)snprintf(buf, sizeof buf, "%d", skt);
 		return (buf);
 	}
 	return (tok2str(skt2str, "%d", skt));

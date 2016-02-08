@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	$OpenBSD: mp.c,v 1.25 2001/08/19 23:22:18 brian Exp $
+ *	$OpenBSD: mp.c,v 1.27 2002/01/16 14:13:06 brian Exp $
  */
 
 #include <sys/param.h>
@@ -1000,7 +1000,7 @@ mp_SetEnddisc(struct cmdargs const *arg)
       else
         addr = arg->bundle->ncp.ipcp.my_ip;
 
-      s = ID0socket(AF_INET, SOCK_DGRAM, 0);
+      s = ID0socket(PF_INET, SOCK_DGRAM, 0);
       if (s < 0) {
         log_Printf(LogERROR, "set enddisc: socket(): %s\n", strerror(errno));
         return 2;

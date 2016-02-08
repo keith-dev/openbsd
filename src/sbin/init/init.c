@@ -1,4 +1,4 @@
-/*	$OpenBSD: init.c,v 1.22 2001/07/09 07:04:45 deraadt Exp $	*/
+/*	$OpenBSD: init.c,v 1.25 2002/02/19 19:39:38 millert Exp $	*/
 /*	$NetBSD: init.c,v 1.22 1996/05/15 23:29:33 jtc Exp $	*/
 
 /*-
@@ -47,7 +47,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)init.c	8.2 (Berkeley) 4/28/95";
 #else
-static char rcsid[] = "$OpenBSD: init.c,v 1.22 2001/07/09 07:04:45 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: init.c,v 1.25 2002/02/19 19:39:38 millert Exp $";
 #endif
 #endif /* not lint */
 
@@ -60,6 +60,7 @@ static char rcsid[] = "$OpenBSD: init.c,v 1.22 2001/07/09 07:04:45 deraadt Exp $
 #include <errno.h>
 #include <fcntl.h>
 #include <signal.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -68,12 +69,6 @@ static char rcsid[] = "$OpenBSD: init.c,v 1.22 2001/07/09 07:04:45 deraadt Exp $
 #include <ttyent.h>
 #include <unistd.h>
 #include <util.h>
-
-#ifdef __STDC__
-#include <stdarg.h>
-#else
-#include <varargs.h>
-#endif
 
 #ifdef SECURE
 #include <pwd.h>
@@ -105,38 +100,38 @@ static char rcsid[] = "$OpenBSD: init.c,v 1.22 2001/07/09 07:04:45 deraadt Exp $
 #define DEFAULT_STATE		runcom
 #endif
 
-void handle __P((sig_t, ...));
-void delset __P((sigset_t *, ...));
+void handle(sig_t, ...);
+void delset(sigset_t *, ...);
 
-void stall __P((char *, ...));
-void warning __P((char *, ...));
-void emergency __P((char *, ...));
-void disaster __P((int));
-void badsys __P((int));
+void stall(char *, ...);
+void warning(char *, ...);
+void emergency(char *, ...);
+void disaster(int);
+void badsys(int);
 
 /*
  * We really need a recursive typedef...
  * The following at least guarantees that the return type of (*state_t)()
  * is sufficiently wide to hold a function pointer.
  */
-typedef long (*state_func_t) __P((void));
-typedef state_func_t (*state_t) __P((void));
+typedef long (*state_func_t)(void);
+typedef state_func_t (*state_t)(void);
 
-state_func_t single_user __P((void));
-state_func_t runcom __P((void));
-state_func_t read_ttys __P((void));
-state_func_t multi_user __P((void));
-state_func_t clean_ttys __P((void));
-state_func_t catatonia __P((void));
-state_func_t death __P((void));
-state_func_t nice_death __P((void));
+state_func_t single_user(void);
+state_func_t runcom(void);
+state_func_t read_ttys(void);
+state_func_t multi_user(void);
+state_func_t clean_ttys(void);
+state_func_t catatonia(void);
+state_func_t death(void);
+state_func_t nice_death(void);
 
 enum { AUTOBOOT, FASTBOOT } runcom_mode = AUTOBOOT;
 
-void transition __P((state_t));
+void transition(state_t);
 state_t requested_transition = DEFAULT_STATE;
 
-void setctty __P((char *));
+void setctty(char *);
 
 typedef struct init_session {
 	int	se_index;		/* index of entry in ttys file */
@@ -155,33 +150,33 @@ typedef struct init_session {
 	struct	init_session *se_next;
 } session_t;
 
-void free_session __P((session_t *));
-session_t *new_session __P((session_t *, int, struct ttyent *));
+void free_session(session_t *);
+session_t *new_session(session_t *, int, struct ttyent *);
 session_t *sessions;
 
-char **construct_argv __P((char *));
-void start_window_system __P((session_t *));
-void collect_child __P((pid_t));
-pid_t start_getty __P((session_t *));
-void transition_handler __P((int));
-void alrm_handler __P((int));
-void setsecuritylevel __P((int));
-int getsecuritylevel __P((void));
-int setupargv __P((session_t *, struct ttyent *));
+char **construct_argv(char *);
+void start_window_system(session_t *);
+void collect_child(pid_t);
+pid_t start_getty(session_t *);
+void transition_handler(int);
+void alrm_handler(int);
+void setsecuritylevel(int);
+int getsecuritylevel(void);
+int setupargv(session_t *, struct ttyent *);
 int clang;
 
 #ifdef LOGIN_CAP
-void setprocresources __P((char *));
+void setprocresources(char *);
 #else
 #define setprocresources(p)
 #endif
 
-void clear_session_logs __P((session_t *));
+void clear_session_logs(session_t *);
 
-int start_session_db __P((void));
-void add_session __P((session_t *));
-void del_session __P((session_t *));
-session_t *find_session __P((pid_t));
+int start_session_db(void);
+void add_session(session_t *);
+void del_session(session_t *);
+session_t *find_session(pid_t);
 DB *session_db;
 
 /*
@@ -289,25 +284,14 @@ main(argc, argv)
  * Associate a function with a signal handler.
  */
 void
-#ifdef __STDC__
 handle(sig_t handler, ...)
-#else
-handle(va_alist)
-	va_dcl
-#endif
 {
 	int sig;
 	struct sigaction sa;
 	sigset_t mask_everything;
 	va_list ap;
-#ifndef __STDC__
-	sig_t handler;
 
-	va_start(ap);
-	handler = va_arg(ap, sig_t);
-#else
 	va_start(ap, handler);
-#endif
 
 	memset(&sa, 0, sizeof sa);
 	sa.sa_handler = handler;
@@ -326,24 +310,12 @@ handle(va_alist)
  * Delete a set of signals from a mask.
  */
 void
-#ifdef __STDC__
 delset(sigset_t *maskp, ...)
-#else
-delset(va_alist)
-	va_dcl
-#endif
 {
 	int sig;
 	va_list ap;
-#ifndef __STDC__
-	sigset_t *maskp;
 
-	va_start(ap);
-	maskp = va_arg(ap, sigset_t *);
-#else
 	va_start(ap, maskp);
-#endif
-
 	while ((sig = va_arg(ap, int)))
 		sigdelset(maskp, sig);
 	va_end(ap);
@@ -355,23 +327,11 @@ delset(va_alist)
  * NB: should send a message to the session logger to avoid blocking.
  */
 void
-#ifdef __STDC__
 stall(char *message, ...)
-#else
-stall(va_alist)
-	va_dcl
-#endif
 {
 	va_list ap;
-#ifndef __STDC__
-	char *message;
 
-	va_start(ap);
-	message = va_arg(ap, char *);
-#else
 	va_start(ap, message);
-#endif
-
 	vsyslog(LOG_ALERT, message, ap);
 	va_end(ap);
 	closelog();
@@ -384,23 +344,11 @@ stall(va_alist)
  * NB: should send a message to the session logger to avoid blocking.
  */
 void
-#ifdef __STDC__
 warning(char *message, ...)
-#else
-warning(va_alist)
-	va_dcl
-#endif
 {
 	va_list ap;
-#ifndef __STDC__
-	char *message;
 
-	va_start(ap);
-	message = va_arg(ap, char *);
-#else
 	va_start(ap, message);
-#endif
-
 	vsyslog(LOG_ALERT, message, ap);
 	va_end(ap);
 	closelog();
@@ -411,23 +359,11 @@ warning(va_alist)
  * NB: should send a message to the session logger to avoid blocking.
  */
 void
-#ifdef __STDC__
 emergency(char *message, ...)
-#else
-emergency(va_alist)
-	va_dcl
-#endif
 {
 	va_list ap;
-#ifndef __STDC__
-	char *message;
 
-	va_start(ap);
-	message = va_arg(ap, char *);
-#else
 	va_start(ap, message);
-#endif
-
 	vsyslog(LOG_EMERG, message, ap);
 	va_end(ap);
 	closelog();
@@ -879,12 +815,7 @@ del_session(sp)
  * Look up a login session by pid.
  */
 session_t *
-#ifdef __STDC__
 find_session(pid_t pid)
-#else
-find_session(pid)
-	pid_t pid;
-#endif
 {
 	DBT key;
 	DBT data;
@@ -905,8 +836,8 @@ char **
 construct_argv(command)
 	char *command;
 {
-	register int argc = 0;
-	register char **argv = (char **) malloc(((strlen(command) + 1) / 2 + 1)
+	int argc = 0;
+	char **argv = (char **) malloc(((strlen(command) + 1) / 2 + 1)
 						* sizeof (char *));
 	static const char separators[] = " \t";
 
@@ -922,7 +853,7 @@ construct_argv(command)
  */
 void
 free_session(sp)
-	register session_t *sp;
+	session_t *sp;
 {
 	free(sp->se_device);
 	if (sp->se_getty) {
@@ -943,9 +874,9 @@ session_t *
 new_session(sprev, session_index, typ)
 	session_t *sprev;
 	int session_index;
-	register struct ttyent *typ;
+	struct ttyent *typ;
 {
-	register session_t *sp;
+	session_t *sp;
 
 	if ((typ->ty_status & TTY_ON) == 0 ||
 	    typ->ty_name == 0 ||
@@ -1023,8 +954,8 @@ state_func_t
 read_ttys()
 {
 	int session_index = 0;
-	register session_t *sp, *snext;
-	register struct ttyent *typ;
+	session_t *sp, *snext;
+	struct ttyent *typ;
 
 	/*
 	 * Destroy any previous session state.
@@ -1180,14 +1111,9 @@ start_getty(sp)
  * If an exiting login, start a new login running.
  */
 void
-#ifdef __STDC__
 collect_child(pid_t pid)
-#else
-collect_child(pid)
-	pid_t pid;
-#endif
 {
-	register session_t *sp, *sprev, *snext;
+	session_t *sp, *sprev, *snext;
 
 	if (! sessions)
 		return;
@@ -1256,7 +1182,7 @@ state_func_t
 multi_user()
 {
 	pid_t pid;
-	register session_t *sp;
+	session_t *sp;
 
 	requested_transition = 0;
 
@@ -1295,10 +1221,10 @@ multi_user()
 state_func_t
 clean_ttys()
 {
-	register session_t *sp, *sprev;
-	register struct ttyent *typ;
-	register int session_index = 0;
-	register int devlen;
+	session_t *sp, *sprev;
+	struct ttyent *typ;
+	int session_index = 0;
+	int devlen;
 
 	for (sp = sessions; sp; sp = sp->se_next)
 		sp->se_flags &= ~SE_PRESENT;
@@ -1355,7 +1281,7 @@ clean_ttys()
 state_func_t
 catatonia()
 {
-	register session_t *sp;
+	session_t *sp;
 
 	for (sp = sessions; sp; sp = sp->se_next)
 		sp->se_flags |= SE_SHUTDOWN;
@@ -1379,8 +1305,8 @@ alrm_handler(sig)
 state_func_t
 nice_death()
 {
-	register session_t *sp;
-	register int i;
+	session_t *sp;
+	int i;
 	pid_t pid;
 	static const int death_sigs[3] = { SIGHUP, SIGTERM, SIGKILL };
 	int howto = RB_HALT;
@@ -1457,8 +1383,8 @@ die:
 state_func_t
 death()
 {
-	register session_t *sp;
-	register int i;
+	session_t *sp;
+	int i;
 	pid_t pid;
 	static const int death_sigs[3] = { SIGHUP, SIGTERM, SIGKILL };
 

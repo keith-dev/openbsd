@@ -1,4 +1,4 @@
-/*	$OpenBSD: dl_printf.c,v 1.2 2001/06/06 12:38:44 art Exp $	*/
+/*	$OpenBSD: dl_printf.c,v 1.5 2002/02/19 19:39:38 millert Exp $	*/
 
 /*-
  * Copyright (c) 1993
@@ -60,18 +60,14 @@
 
 #include <sys/cdefs.h>
 #include <sys/types.h>
-#ifdef __STDC__
 #include <stdarg.h>
-#else
-#include <varargs.h>
-#endif
 #include "syscall.h"
 
-static void kprintn __P((void (*)(int), u_long, int));
-static void kdoprnt __P((void (*)(int), const char *, va_list));
+static void kprintn(void (*)(int), u_long, int);
+static void kdoprnt(void (*)(int), const char *, va_list);
 
-static void putchar __P((int));
-static void sputchar __P((int));
+static void putchar(int);
+static void sputchar(int);
 static char *sbuf;
 
 static void

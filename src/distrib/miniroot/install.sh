@@ -1,8 +1,8 @@
 #!/bin/sh
-#	$OpenBSD: install.sh,v 1.79 2001/10/14 02:35:57 millert Exp $
+#	$OpenBSD: install.sh,v 1.95 2002/04/12 03:24:02 millert Exp $
 #	$NetBSD: install.sh,v 1.5.2.8 1996/08/27 18:15:05 gwr Exp $
 #
-# Copyright (c) 1997,1998 Todd Miller, Theo de Raadt
+# Copyright (c) 1997-2002 Todd Miller, Theo de Raadt, Ken Westerback
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -70,71 +70,20 @@
 #	In a perfect world, this would be a nice C program, with a reasonable
 #	user interface.
 
-FILESYSTEMS="/tmp/filesystems"		# used throughout
-FQDN=					# domain name
+# A list of devices holding filesystems and the associated mount points
+# is kept in the file named FILESYSTEMS.
+FILESYSTEMS=/tmp/filesystems
 
-trap "umount /tmp > /dev/null 2>&1" 0
+# The Fully Qualified Domain Name
+FQDN=
 
-MODE="install"
+# install.sub needs to know the MODE
+MODE=install
 
-# include machine-dependent functions
-# The following functions must be provided:
-#	md_get_diskdevs()	- return available disk devices
-#	md_get_cddevs()		- return available CD-ROM devices
-#	md_get_partition_range() - return range of valid partition letters
-#	md_installboot()	- install boot-blocks on disk
-#	md_prep_disklabel()	- label the root disk
-#	md_welcome_banner()	- display friendly message
-#	md_not_going_to_install() - display friendly message
-#	md_congrats()		- display friendly message
-#	md_native_fstype()	- native filesystem type for disk installs
-#	md_native_fsopts()	- native filesystem options for disk installs
-
-# include machine dependent subroutines
-. install.md
-
-# include common subroutines
+# include common subroutines and initialization code
 . install.sub
 
-# which sets?
-THESETS="$ALLSETS $MDSETS"
-
-if [ "`df /`" = "`df /mnt`" ]; then
-	# Good {morning,afternoon,evening,night}.
-	echo ==================================================
-	md_welcome_banner
-else
-	echo "You seem to be trying to restart an interrupted installation!"
-	echo
-	echo "You can try to skip the disk preparation steps and continue,"
-	echo "otherwise you should reboot the miniroot and start over..."
-	echo -n "Skip disk initialization? [n] "
-	getresp "n"
-	case "$resp" in
-		y*|Y*)
-			echo
-			echo "Cool!  Let's get to it..."
-			echo
-			;;
-		*)
-			md_not_going_to_install
-			exit
-			;;
-	esac
-fi
-
-
-echo "You can run a shell command at any prompt via '!foo'"
-echo "or escape to a shell by simply typing '!'."
-echo
-
-# Deal with terminal issues
-md_set_term
-
-# Get timezone info
-get_timezone
-
-if [ "`df /`" = "`df /mnt`" ]; then
+if [ ! -f /etc/fstab ]; then
 	# Install the shadowed disktab file; lets us write to it for temporary
 	# purposes without mounting the miniroot read-write.
 	if [ -f /etc/disktab.shadow ]; then
@@ -158,27 +107,29 @@ if [ "`df /`" = "`df /mnt`" ]; then
 		fi
 
 		# Deal with disklabels, including editing the root disklabel
-		# and labeling additional disks.  This is machine-dependent since
+		# and labeling additional disks. This is machine-dependent since
 		# some platforms may not be able to provide this functionality.
 		md_prep_disklabel ${DISK}
 
 		# Assume partition 'a' of $ROOTDISK is for the root filesystem.
 		# Loop and get the rest.
 		# XXX ASSUMES THAT THE USER DOESN'T PROVIDE BOGUS INPUT.
-		cat << __get_filesystems_1
+		cat << __EOT
 
 You will now have the opportunity to enter filesystem information for ${DISK}.
 You will be prompted for the mount point (full path, including the prepending
-'/' character) for each BSD partition on ${DISK}.  Enter "none" to skip a
+'/' character) for each BSD partition on ${DISK}. Enter "none" to skip a
 partition or "done" when you are finished.
-__get_filesystems_1
+__EOT
 
 		if [ "${DISK}" = "${ROOTDISK}" ]; then
-			echo
-			echo	"The following partitions will be used for the root filesystem and swap:"
-			echo	"	${ROOTDISK}a	/"
-			echo	"	${ROOTDISK}b	swap"
+			cat << __EOT
 
+The following partitions will be used for the root filesystem and swap:
+	${ROOTDISK}a    /
+	${ROOTDISK}b	swap
+
+__EOT
 			echo	"${ROOTDISK}a /" > ${FILESYSTEMS}
 		fi
 
@@ -201,10 +152,10 @@ __get_filesystems_1
 			_npartitions=$(( ${_npartitions} + 1 ))
 		done
 
-		# Now prompt the user for the mount points.  Loop until "done"
+		# Now prompt the user for the mount points. Loop until "done"
 		echo
 		_i=0
-		resp="X"
+		resp=X
 		while [ $_npartitions -gt 0 -a X${resp} != X"done" ]; do
 			_pp=${_partitions[${_i}]}
 			_ps=$(( ${_psizes[${_i}]} / 2 ))
@@ -214,14 +165,18 @@ __get_filesystems_1
 			while : ; do
 				echo -n "Mount point for ${DISK}${_pp} (size=${_ps}k) [$_mp, RET, none, or done]? "
 				getresp "$_mp"
-				case "X${resp}" in
-					X/*)	_mount_points[${_i}]=$resp
-						break ;;
-					Xdone|X)
-						break ;;
-					Xnone)	_mount_points[${_i}]=
-						break;;
-					*)	echo "mount point must be an absolute path!";;
+				case $resp in
+				/*)	_mount_points[${_i}]=$resp
+					break
+					;;
+				done|"")break
+					;;
+				none)	_mount_points[${_i}]=
+					break
+					;;
+				*)	echo "mount point must be an absolute path!"
+					break
+					;;
 				esac
 			done
 			_i=$(( ${_i} + 1 ))
@@ -230,25 +185,30 @@ __get_filesystems_1
 			fi
 		done
 
-		# Now write it out
-		_i=0
-		while test $_i -lt $_npartitions; do
-			if [ -n "${_mount_points[${_i}]}" ]; then
-				echo "${DISK}${_partitions[${_i}]} ${_mount_points[${_i}]}" >> ${FILESYSTEMS}
-				_mount_points[${_i}]=
-			fi
-			_i=$(( ${_i} + 1 ))
+		# Now write it out, sorted by mount point
+		for _mp in `bsort ${_mount_points[*]}`; do
+			_i=0
+			while [ $_i -lt $_npartitions ] ; do
+				if [ $_mp = "${_mount_points[${_i}]}" ]; then
+					echo "${DISK}${_partitions[${_i}]} ${_mount_points[${_i}]}" >> ${FILESYSTEMS}
+					_mount_points[${_i}]=
+					break
+				fi
+				_i=$(( ${_i} + 1 ))
+			done
 		done
 		rm -f /tmp/fstab.${DISK}
 	done
 
-	echo
-	echo	"You have configured the following devices and mount points:"
-	echo
-	cat ${FILESYSTEMS}
-	echo
-	echo "============================================================"
-	echo "The next step will overwrite any existing data on:"
+	cat << __EOT
+
+You have configured the following devices and mount points:
+
+$(<${FILESYSTEMS})
+
+============================================================
+The next step will overwrite any existing data on:
+__EOT
 	(
 		echo -n "	"
 		while read _device_name _junk; do
@@ -256,17 +216,14 @@ __get_filesystems_1
 		done
 		echo
 	) < ${FILESYSTEMS}
-	echo
 
-	echo -n	"Are you really sure that you're ready to proceed? [n] "
-	getresp "n"
-	case "$resp" in
-		y*|Y*)
-			;;
-		*)
-			echo "ok, try again later..."
-			exit
-			;;
+	echo -n	"\nAre you really sure that you're ready to proceed? [n] "
+	getresp n
+	case $resp in
+	y*|Y*)	;;
+	*)	echo "ok, try again later..."
+		exit
+		;;
 	esac
 
 	# Loop though the file, place filesystems on each device.
@@ -286,25 +243,22 @@ fi
 
 # Get network configuration information, and store it for placement in the
 # root filesystem later.
-cat << \__network_config_1
+cat << __EOT
 
-You will now be given the opportunity to configure the network.  This will be
+You will now be given the opportunity to configure the network. This will be
 useful if you need to transfer the installation sets via FTP, HTTP, or NFS.
 Even if you choose not to transfer installation sets that way, this information
 will be preserved and copied into the new root filesystem.
 
-__network_config_1
+__EOT
 echo -n	"Configure the network? [y] "
-getresp "y"
-case "$resp" in
-	y*|Y*)
-		donetconfig
-		;;
-	*)
-		;;
+getresp y
+case $resp in
+y*|Y*)	donetconfig
+	;;
 esac
 
-if [ "`df /`" = "`df /mnt`" ]; then
+if [ ! -f /etc/fstab ]; then
 	# Now that the network has been configured, it is safe to configure the
 	# fstab.
 	(
@@ -317,40 +271,39 @@ if [ "`df /`" = "`df /mnt`" ]; then
 		done
 	) < ${FILESYSTEMS} > /tmp/fstab
 
-	munge_fstab /tmp/fstab /tmp/fstab.shadow
-	mount_fs /tmp/fstab.shadow "-o async"
+	munge_fstab < /tmp/fstab
 fi
+
+mount_fs "-o async"
 
 mount | while read line; do
 	set -- $line
-	if [ "$2" = "/" -a "$3" = "nfs" ]; then
+	if [ "$3" = "/" -a "$5" = "nfs" ]; then
 		echo "You appear to be running diskless."
 		echo -n	"Are the install sets on one of your currently mounted filesystems? [n] "
-		getresp "n"
-		case "$resp" in
-			y*|Y*)
-				get_localdir
-				;;
-			*)
-				;;
+		getresp n
+		case $resp in
+		y*|Y*)	get_localdir
+			;;
 		esac
 	fi
 done
 
-resp=		# force one iteration
-echo
-echo 'Please enter the initial password that the root account will have.'
-while [ "X${resp}" = X"" ]; do
+echo '\nPlease enter the initial password that the root account will have.'
+_oifs=$IFS
+IFS=
+resp=
+while [ -z "$resp" ]; do
 	echo -n "Password (will not echo): "
 	stty -echo
-	getresp -n "${_password}"
+	getresp -n
 	stty echo
 	echo
-	_password="$resp"
+	_password=$resp
 
 	echo -n "Password (again): "
 	stty -echo
-	getresp -n ""
+	getresp -n
 	stty echo
 	echo
 	if [ "${_password}" != "${resp}" ]; then
@@ -358,16 +311,31 @@ while [ "X${resp}" = X"" ]; do
 		resp=
 	fi
 done
+IFS=$_oifs
 
 md_questions
 
 install_sets $THESETS
 
 # Copy in configuration information and make devices in target root.
+cfgfiles="fstab hostname.* hosts myname mygate resolv.conf kbdtype"
+
 echo
+if [ -f /etc/dhclient.conf ]; then
+	echo -n "Saving dhclient configuration..."
+	cat /etc/dhclient.conf >> /mnt/etc/dhclient.conf
+	echo "lookup file bind" > /mnt/etc/resolv.conf.tail
+	cp /var/db/dhclient.leases /mnt/var/db/.
+	# Don't install mygate for dhcp installations.
+	# Note that mygate should not be the first or last file
+	# in cfgfiles or this won't work.
+	cfgfiles=`echo $cfgfiles | sed -e 's/ mygate / /'`
+	echo "done."
+fi
+
 cd /tmp
-echo -n "Copying "
-for file in fstab hostname.* hosts myname mygate resolv.conf; do
+echo -n "Copying... "
+for file in $cfgfiles; do
 	if [ -f $file ]; then
 		echo -n "$file "
 		cp $file /mnt/etc/$file
@@ -376,39 +344,9 @@ for file in fstab hostname.* hosts myname mygate resolv.conf; do
 done
 echo "...done."
 
-if [ -f /etc/dhclient.conf ]; then
-	echo -n "Modifying dhclient.conf..."
-	cat /etc/dhclient.conf >> /mnt/etc/dhclient.conf
-fi
+remount_fs
 
-# If no zoneinfo on the installfs, give them a second chance
-if [ ! -e /usr/share/zoneinfo ]; then
-	get_timezone
-fi
-if [ ! -e /mnt/usr/share/zoneinfo ]; then
-	echo "Cannot install timezone link."
-else
-	echo "Installing timezone link."
-	rm -f /mnt/etc/localtime
-	ln -s /usr/share/zoneinfo/$TZ /mnt/etc/localtime
-fi
-
-
-if [ ! -x /mnt/dev/MAKEDEV ]; then
-	echo "No /dev/MAKEDEV installed, something is wrong here..."
-	exit
-fi
-
-echo -n "Making all device nodes (by running /dev/MAKEDEV all) ..."
-cd /mnt/dev
-sh MAKEDEV all
-echo "... done."
-cd /
-
-remount_fs /tmp/fstab.shadow
-md_installboot ${ROOTDISK}
-
-_encr=`echo "${_password}" | /mnt/usr/bin/encrypt -b 7`
+_encr=`/mnt/usr/bin/encrypt -b 7 "${_password}"`
 echo "1,s@^root::@root:${_encr}:@
 w
 q" | ed /mnt/etc/master.passwd 2> /dev/null
@@ -416,13 +354,6 @@ q" | ed /mnt/etc/master.passwd 2> /dev/null
 
 dd if=/mnt/dev/urandom of=/mnt/var/db/host.random bs=1024 count=64 >/dev/null 2>&1
 chmod 600 /mnt/var/db/host.random >/dev/null 2>&1
-populateusrlocal
-test -x /mnt/install.site && /mnt/usr/sbin/chroot /mnt /install.site
 
-unmount_fs /tmp/fstab.shadow
-
-# Pat on the back.
-md_congrats
-
-# ALL DONE!
-exit 0
+# Perform final steps common to both an install and an upgrade.
+finish_up

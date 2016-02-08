@@ -1,8 +1,8 @@
-#	$OpenBSD: Makefile,v 1.14 2001/09/29 15:22:27 millert Exp $
+#	$OpenBSD: Makefile,v 1.17 2002/01/14 03:21:39 millert Exp $
 #
 #  Makefile for configuration files.
 #
-#	$Sendmail: Makefile,v 8.54 2001/08/20 15:16:48 gshapiro Exp $
+#	$Sendmail: Makefile,v 8.56 2001/12/13 23:56:37 gshapiro Exp $
 #
 
 #
@@ -27,8 +27,7 @@ RM=	rm -f
 
 ALL=	submit.cf clientproto.cf tcpproto.cf openbsd-localhost.cf \
 	openbsd-proto.cf courtesan.cf courtesan-nonet.cf courtesan-lists.cf \
-	openbsd-lists.cf gandalf.cf alatar.cf lucifier.cf \
-	elbereth.cf corpse.cf knecht.cf
+	openbsd-lists.cf lucifier.cf elbereth.cf corpse.cf knecht.cf
 
 all: $(ALL)
 
@@ -68,7 +67,6 @@ M4FILES=\
 	${CFDIR}/domain/S2K.Berkeley.EDU.m4 \
 	${CFDIR}/domain/berkeley-only.m4 \
 	${CFDIR}/domain/generic.m4 \
-	${CFDIR}/domain/sigmasoft.m4 \
 	${CFDIR}/feature/accept_unqualified_senders.m4 \
 	${CFDIR}/feature/accept_unresolvable_domains.m4 \
 	${CFDIR}/feature/access_db.m4 \
@@ -151,6 +149,7 @@ M4FILES=\
 	${CFDIR}/ostype/domainos.m4 \
 	${CFDIR}/ostype/dynix3.2.m4 \
 	${CFDIR}/ostype/freebsd4.m4 \
+	${CFDIR}/ostype/freebsd5.m4 \
 	${CFDIR}/ostype/gnu.m4 \
 	${CFDIR}/ostype/hpux10.m4 \
 	${CFDIR}/ostype/hpux11.m4 \
@@ -162,6 +161,7 @@ M4FILES=\
 	${CFDIR}/ostype/linux.m4 \
 	${CFDIR}/ostype/maxion.m4 \
 	${CFDIR}/ostype/mklinux.m4 \
+	${CFDIR}/ostype/mpeix.m4 \
 	${CFDIR}/ostype/nextstep.m4 \
 	${CFDIR}/ostype/openbsd.m4 \
 	${CFDIR}/ostype/osf1.m4 \

@@ -1,4 +1,4 @@
-/*	$OpenBSD: send.c,v 1.13 2001/01/16 05:36:09 millert Exp $	*/
+/*	$OpenBSD: send.c,v 1.15 2001/11/28 01:26:35 millert Exp $	*/
 /*	$NetBSD: send.c,v 1.6 1996/06/08 19:48:39 christos Exp $	*/
 
 /*
@@ -36,14 +36,16 @@
 
 #ifndef lint
 #if 0
-static char sccsid[] = "@(#)send.c	8.1 (Berkeley) 6/6/93";
+static const char sccsid[] = "@(#)send.c	8.1 (Berkeley) 6/6/93";
 #else
-static char rcsid[] = "$OpenBSD: send.c,v 1.13 2001/01/16 05:36:09 millert Exp $";
+static const char rcsid[] = "$OpenBSD: send.c,v 1.15 2001/11/28 01:26:35 millert Exp $";
 #endif
 #endif /* not lint */
 
 #include "rcv.h"
 #include "extern.h"
+
+static volatile sig_atomic_t sendsignal;	/* Interrupted by a signal? */
 
 /*
  * Mail -- a mail program
@@ -59,11 +61,8 @@ static char rcsid[] = "$OpenBSD: send.c,v 1.13 2001/01/16 05:36:09 millert Exp $
  * prefix is a string to prepend to each output line.
  */
 int
-sendmessage(mp, obuf, doign, prefix)
-	struct message *mp;
-	FILE *obuf;
-	struct ignoretab *doign;
-	char *prefix;
+sendmessage(struct message *mp, FILE *obuf, struct ignoretab *doign,
+	    char *prefix)
 {
 	int count;
 	FILE *ibuf;
@@ -73,6 +72,17 @@ sendmessage(mp, obuf, doign, prefix)
 	int c = 0;
 	int length;
 	int prefixlen = 0;
+	int rval;
+	struct sigaction act, saveint;
+	sigset_t oset;
+
+	sendsignal = 0;
+	rval = -1;
+	sigemptyset(&act.sa_mask);
+	act.sa_flags = SA_RESTART;
+	act.sa_handler = sendint;
+	(void)sigaction(SIGINT, &act, &saveint);
+	(void)sigprocmask(SIG_UNBLOCK, &intset, &oset);
 
 	/*
 	 * Compute the prefix string, without trailing whitespace
@@ -112,7 +122,8 @@ sendmessage(mp, obuf, doign, prefix)
 			 * fields
 			 */
 			if (dostat) {
-				statusput(mp, obuf, prefix);
+				if (statusput(mp, obuf, prefix) == -1)
+					goto out;
 				dostat = 0;
 			}
 			ishead = 0;
@@ -140,7 +151,8 @@ sendmessage(mp, obuf, doign, prefix)
 				 * there are no headers at all.
 				 */
 				if (dostat) {
-					statusput(mp, obuf, prefix);
+					if (statusput(mp, obuf, prefix) == -1)
+						goto out;
 					dostat = 0;
 				}
 				if (doign != ignoreall)
@@ -163,7 +175,8 @@ sendmessage(mp, obuf, doign, prefix)
 					 * and print the real Status: field
 					 */
 					if (dostat) {
-						statusput(mp, obuf, prefix);
+						if (statusput(mp, obuf, prefix) == -1)
+							goto out;
 						dostat = 0;
 					}
 					ignoring = 1;
@@ -188,8 +201,10 @@ sendmessage(mp, obuf, doign, prefix)
 			}
 			(void)fwrite(line, sizeof(*line), length, obuf);
 			if (ferror(obuf))
-				return(-1);
+				goto out;
 		}
+		if (sendsignal == SIGINT)
+			goto out;
 	}
 	/*
 	 * Copy out message body
@@ -222,24 +237,26 @@ sendmessage(mp, obuf, doign, prefix)
 		if (strncmp(line, "From ", 5) == 0)
 			(void)fwrite(">", 1, 1, obuf); /* '>' before 'From ' */
 		(void)fwrite(line, sizeof(*line), c, obuf);
-		if (ferror(obuf))
-			return(-1);
+		if (ferror(obuf) || sendsignal == SIGINT)
+			goto out;
 	}
 	if (doign == ignoreall && c > 0 && line[c - 1] != '\n')
 		/* no final blank line */
 		if ((c = getc(ibuf)) != EOF && putc(c, obuf) == EOF)
-			return(-1);
-	return(0);
+			goto out;
+	rval = 0;
+out:
+	sendsignal = 0;
+	(void)sigprocmask(SIG_SETMASK, &oset, NULL);
+	(void)sigaction(SIGINT, &saveint, NULL);
+	return(rval);
 }
 
 /*
  * Output a reasonable looking status field.
  */
-void
-statusput(mp, obuf, prefix)
-	struct message *mp;
-	FILE *obuf;
-	char *prefix;
+int
+statusput(struct message *mp, FILE *obuf, char *prefix)
 {
 	char statout[3];
 	char *cp = statout;
@@ -249,9 +266,12 @@ statusput(mp, obuf, prefix)
 	if ((mp->m_flag & MNEW) == 0)
 		*cp++ = 'O';
 	*cp = 0;
-	if (statout[0])
+	if (statout[0]) {
 		fprintf(obuf, "%sStatus: %s\n",
 			prefix == NULL ? "" : prefix, statout);
+		return(ferror(obuf) ? -1 : 0);
+	}
+	return(0);
 }
 
 /*
@@ -259,9 +279,8 @@ statusput(mp, obuf, prefix)
  * which does all the dirty work.
  */
 int
-mail(to, cc, bcc, smopts, subject)
-	struct name *to, *cc, *bcc, *smopts;
-	char *subject;
+mail(struct name *to, struct name *cc, struct name *bcc, struct name *smopts,
+     char *subject)
 {
 	struct header head;
 
@@ -280,17 +299,16 @@ mail(to, cc, bcc, smopts, subject)
  * the mail routine below.
  */
 int
-sendmail(v)
-	void *v;
+sendmail(void *v)
 {
 	char *str = v;
 	struct header head;
 
 	head.h_to = extract(str, GTO);
 	head.h_subject = NULL;
-	head.h_cc = NIL;
-	head.h_bcc = NIL;
-	head.h_smopts = NIL;
+	head.h_cc = NULL;
+	head.h_bcc = NULL;
+	head.h_smopts = NULL;
 	mail1(&head, 0);
 	return(0);
 }
@@ -300,12 +318,10 @@ sendmail(v)
  * in the passed header.  (Internal interface).
  */
 void
-mail1(hp, printheaders)
-	struct header *hp;
-	int printheaders;
+mail1(struct header *hp, int printheaders)
 {
 	char *cp;
-	int pid;
+	pid_t pid;
 	char **namelist;
 	struct name *to;
 	FILE *mtf;
@@ -329,7 +345,7 @@ mail1(hp, printheaders)
 	 */
 	senderr = 0;
 	to = usermap(cat(hp->h_bcc, cat(hp->h_to, hp->h_cc)));
-	if (to == NIL) {
+	if (to == NULL) {
 		puts("No recipients specified");
 		senderr++;
 	}
@@ -403,16 +419,14 @@ out:
  * the distribution list into the appropriate fields.
  */
 void
-fixhead(hp, tolist)
-	struct header *hp;
-	struct name *tolist;
+fixhead(struct header *hp, struct name *tolist)
 {
 	struct name *np;
 
-	hp->h_to = NIL;
-	hp->h_cc = NIL;
-	hp->h_bcc = NIL;
-	for (np = tolist; np != NIL; np = np->n_flink)
+	hp->h_to = NULL;
+	hp->h_cc = NULL;
+	hp->h_bcc = NULL;
+	for (np = tolist; np != NULL; np = np->n_flink)
 		if ((np->n_type & GMASK) == GTO)
 			hp->h_to =
 				cat(hp->h_to, nalloc(np->n_name, np->n_type));
@@ -429,9 +443,7 @@ fixhead(hp, tolist)
  * and return the new file.
  */
 FILE *
-infix(hp, fi)
-	struct header *hp;
-	FILE *fi;
+infix(struct header *hp, FILE *fi)
 {
 	FILE *nfo, *nfi;
 	int c, fd;
@@ -481,21 +493,18 @@ infix(hp, fi)
  * passed file buffer.
  */
 int
-puthead(hp, fo, w)
-	struct header *hp;
-	FILE *fo;
-	int w;
+puthead(struct header *hp, FILE *fo, int w)
 {
 	int gotcha;
 
 	gotcha = 0;
-	if (hp->h_to != NIL && w & GTO)
+	if (hp->h_to != NULL && w & GTO)
 		fmt("To:", hp->h_to, fo, w&GCOMMA), gotcha++;
 	if (hp->h_subject != NULL && w & GSUBJECT)
 		fprintf(fo, "Subject: %s\n", hp->h_subject), gotcha++;
-	if (hp->h_cc != NIL && w & GCC)
+	if (hp->h_cc != NULL && w & GCC)
 		fmt("Cc:", hp->h_cc, fo, w&GCOMMA), gotcha++;
-	if (hp->h_bcc != NIL && w & GBCC)
+	if (hp->h_bcc != NULL && w & GBCC)
 		fmt("Bcc:", hp->h_bcc, fo, w&GCOMMA), gotcha++;
 	if (gotcha && w & GNL)
 		(void)putc('\n', fo);
@@ -506,11 +515,7 @@ puthead(hp, fo, w)
  * Format the given header line to not exceed 72 characters.
  */
 void
-fmt(str, np, fo, comma)
-	char *str;
-	struct name *np;
-	FILE *fo;
-	int comma;
+fmt(char *str, struct name *np, FILE *fo, int comma)
 {
 	int col, len;
 
@@ -518,8 +523,8 @@ fmt(str, np, fo, comma)
 	col = strlen(str);
 	if (col)
 		fputs(str, fo);
-	for (; np != NIL; np = np->n_flink) {
-		if (np->n_flink == NIL)
+	for (; np != NULL; np = np->n_flink) {
+		if (np->n_flink == NULL)
 			comma = 0;
 		len = strlen(np->n_name);
 		col++;		/* for the space */
@@ -539,12 +544,9 @@ fmt(str, np, fo, comma)
 /*
  * Save the outgoing mail on the passed file.
  */
-
 /*ARGSUSED*/
 int
-savemail(name, fi)
-	char name[];
-	FILE *fi;
+savemail(char *name, FILE *fi)
 {
 	FILE *fo;
 	char buf[BUFSIZ];
@@ -574,4 +576,12 @@ savemail(name, fi)
 	(void)Fclose(fo);
 	rewind(fi);
 	return(0);
+}
+
+/*ARGSUSED*/
+void
+sendint(int s)
+{
+
+	sendsignal = s;
 }

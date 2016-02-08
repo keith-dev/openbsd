@@ -1,4 +1,4 @@
-/*	$OpenBSD: loader.c,v 1.23 2001/09/26 22:58:23 jason Exp $ */
+/*	$OpenBSD: loader.c,v 1.28 2002/03/31 21:56:58 drahn Exp $ */
 
 /*
  * Copyright (c) 1998 Per Fogelstrom, Opsycon AB
@@ -49,16 +49,8 @@
  */
 static char *_dl_getenv(const char *var, const char **env);
 
-/*
- * Static vars usable after bootsrapping.
- */
-static void *_dl_malloc_base;
-static void *_dl_malloc_pool = 0;
-static long *_dl_malloc_free = 0;
-
 const char *_dl_progname;
 int  _dl_pagesz;
-int  _dl_trusted;
 
 char *_dl_libpath;
 char *_dl_preload;
@@ -111,16 +103,13 @@ _dl_boot(const char **argv, const char **envp, const long loff,
 	Elf_Dyn *dynp, long *dl_data)
 {
 	int		n;
-	int		brk_addr;
 	Elf_Phdr	*phdp;
 	char		*us = "";
 	elf_object_t	*dynobj;
-	struct elf_object  *exe_obj;	/* Pointer to executable object */
-	struct elf_object  *dyn_obj;	/* Pointer to executable object */
-	struct r_debug * debug_map;
-#ifdef __mips__
-	struct r_debug	   **map_link;	/* Where to put pointer for gdb */
-#endif /* __mips__ */
+	struct elf_object *exe_obj;	/* Pointer to executable object */
+	struct elf_object *dyn_obj;	/* Pointer to executable object */
+	struct r_debug *debug_map;
+	struct r_debug **map_link;	/* Where to put pointer for gdb */
 
 	/*
 	 *  Get paths to various things we are going to use.
@@ -143,7 +132,7 @@ _dl_boot(const char **argv, const char **envp, const long loff,
 	 *  Don't allow someone to change the search paths if he runs
 	 *  a suid program without credentials high enough.
 	 */
-	if ((_dl_trusted = !_dl_suid_ok())) {	/* Zap paths if s[ug]id... */
+	if (_dl_issetugid()) {	/* Zap paths if s[ug]id... */
 		if (_dl_preload) {
 			*_dl_preload = '\0';
 		}
@@ -157,17 +146,13 @@ _dl_boot(const char **argv, const char **envp, const long loff,
 	 */
 	phdp = (Elf_Phdr *)dl_data[AUX_phdr];
 	for (n = 0; n < dl_data[AUX_phnum]; n++) {
-		if (phdp->p_type == PT_LOAD) {				/*XXX*/
-			if (phdp->p_vaddr + phdp->p_memsz > brk_addr)	/*XXX*/
-				brk_addr = phdp->p_vaddr + phdp->p_memsz;
-		}							/*XXX*/
 		if (phdp->p_type == PT_DYNAMIC) {
-			exe_obj = _dl_add_object("", (Elf_Dyn *)phdp->p_vaddr,
-						   dl_data, OBJTYPE_EXE, 0, 0);
+			exe_obj = _dl_add_object(argv[0],
+			    (Elf_Dyn *)phdp->p_vaddr, dl_data, OBJTYPE_EXE,
+			    0, 0);
 		}
 		if (phdp->p_type == PT_INTERP) {
-			us = (char *)_dl_malloc(_dl_strlen((char *)phdp->p_vaddr) + 1);
-			_dl_strcpy(us, (char *)phdp->p_vaddr);
+			us = _dl_strdup((char *)phdp->p_vaddr);
 		}
 		phdp++;
 	}
@@ -217,16 +202,18 @@ _dl_boot(const char **argv, const char **envp, const long loff,
 	 * it is responsible for running it's own ctors/dtors
 	 * thus do NOT run the ctors for the executable, all of
 	 * the shared libraries which follow.
+	 * Do not run init code if run from ldd.
 	 */
-	if (_dl_objects->next) {
+	if ((_dl_traceld == NULL) && (_dl_objects->next != NULL)) {
 		_dl_call_init(_dl_objects->next);
 	}
 
 	/*
 	 * Schedule a routine to be run at shutdown, by using atexit.
 	 * cannot call atexit directly from ld.so?
+	 * Do not schedule destructors if run from ldd.
 	 */
-	{
+	if (_dl_traceld == NULL) {
 		const Elf_Sym  *sym;
 		Elf_Addr ooff;
 
@@ -243,31 +230,20 @@ _dl_boot(const char **argv, const char **envp, const long loff,
 	/*
 	 * Finally make something to help gdb when poking around in the code.
 	 */
-#if defined(__powerpc__) || defined(__alpha__) || defined(__sparc64__)
-	debug_map = (struct r_debug *)_dl_malloc(sizeof(*debug_map));
-	debug_map->r_version = 1;
-	debug_map->r_map = (struct link_map *)_dl_objects;
-	debug_map->r_brk = (Elf_Addr)_dl_debug_state;
-	debug_map->r_state = RT_CONSISTENT;
-	debug_map->r_ldbase = loff;
-	_dl_debug_map = debug_map;
-
-	/* Picks up the first object, the executable itself */
-	dynobj = _dl_objects;
-
-	for (dynp = dynobj->load_dyn; dynp->d_tag; dynp++) {
+#ifdef __mips__
+	map_link = (struct r_debug **)(exe_obj->Dyn.info[DT_MIPS_RLD_MAP - DT_LOPROC + DT_NUM]);
+#else
+	for (dynp = exe_obj->load_dyn; dynp->d_tag; dynp++) {
 		if (dynp->d_tag == DT_DEBUG) {
-			dynp->d_un.d_ptr = (Elf_Addr) debug_map;
+			map_link = (struct r_debug **)&dynp->d_un.d_ptr;
 			break;
 		}
 	}
 	if (dynp->d_tag != DT_DEBUG) {
-		_dl_printf("failed to mark DTDEBUG\n");
+		map_link = NULL;
+		DL_DEB(("failed to mark DTDEBUG\n"));
 	}
 #endif
-
-#ifdef __mips__
-	map_link = (struct r_debug **)(exe_obj->Dyn.info[DT_MIPS_RLD_MAP - DT_LOPROC + DT_NUM]);
 	if (map_link) {
 		debug_map = (struct r_debug *)_dl_malloc(sizeof(*debug_map));
 		debug_map->r_version = 1;
@@ -278,7 +254,6 @@ _dl_boot(const char **argv, const char **envp, const long loff,
 		_dl_debug_map = debug_map;
 		*map_link = _dl_debug_map;
 	}
-#endif
 
 	_dl_debug_state();
 
@@ -291,6 +266,7 @@ _dl_boot(const char **argv, const char **envp, const long loff,
 		_dl_exit(0);
 	}
 
+	DL_DEB(("entry point: 0x%lx\n", dl_data[AUX_entry]));
 	/*
 	 * Return the entry point.
 	 */
@@ -509,7 +485,6 @@ _dl_call_init(elf_object_t *object)
 {
 	Elf_Addr ooff;
 	const Elf_Sym  *sym;
-	static void (*_dl_atexit)(Elf_Addr) = NULL;
 
 	if (object->next) {
 		_dl_call_init(object->next);
@@ -582,61 +557,4 @@ _dl_getenv(const char *var, const char **env)
 	}
 
 	return(0);
-}
-
-
-/*
- *  The following malloc/free code is a very simplified implementation
- *  of a malloc function. However, we do not need to be very complex here
- *  because we only free memory when 'dlclose()' is called and we can
- *  reuse at least the memory allocated for the object descriptor. We have
- *  one dynamic string allocated, the library name and it is likely that
- *  we can reuse that one to without a lot of complex colapsing code.
- */
-
-void *
-_dl_malloc(int size)
-{
-	long *p;
-	long *t, *n;
-
-	size = (size + 8 + DL_MALLOC_ALIGN - 1) & ~(DL_MALLOC_ALIGN - 1);
-
-	if ((t = _dl_malloc_free) != 0) {	/* Try free list first */
-		n = (long *)&_dl_malloc_free;
-		while (t && t[-1] < size) {
-			n = t;
-			t = (long *)*t;
-		}
-		if (t) {
-			*n = *t;
-			_dl_memset(t, 0, t[-1] - 4);
-			return((void *)t);
-		}
-	}
-	if ((_dl_malloc_pool == 0) ||
-	    (_dl_malloc_pool + size > _dl_malloc_base + 4096)) {
-		_dl_malloc_pool = (void *)_dl_mmap((void *)0, 4096,
-						PROT_READ|PROT_WRITE,
-						MAP_ANON|MAP_PRIVATE, -1, 0);
-		if (_dl_malloc_pool == 0 || _dl_malloc_pool == MAP_FAILED ) {
-			_dl_printf("Dynamic loader failure: malloc.\n");
-			_dl_exit(7);
-		}
-		_dl_malloc_base = _dl_malloc_pool;
-	}
-	p = _dl_malloc_pool;
-	_dl_malloc_pool += size;
-	_dl_memset(p, 0, size);
-	*p = size;
-	return((void *)(p + 1));
-}
-
-void
-_dl_free(void *p)
-{
-	long *t = (long *)p;
-
-	*t = (long)_dl_malloc_free;
-	_dl_malloc_free = p;
 }

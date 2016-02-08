@@ -1,8 +1,9 @@
-# $OpenBSD: Makefile,v 1.1.1.1 2001/08/15 14:37:16 fgsch Exp $
+# $OpenBSD: Makefile,v 1.3 2002/01/03 00:43:48 art Exp $
 
 PROG=	stdarg
-SRCS=	stdarg.c
 
 CFLAGS+= -I${.CURDIR}/../include
 
-.include <bsd.prog.mk>
+REGRESSMAXTIME= 10
+
+.include <bsd.regress.mk>

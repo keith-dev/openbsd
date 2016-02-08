@@ -1,4 +1,4 @@
-/* $OpenBSD: blf.h,v 1.1 2001/01/26 11:33:59 niklas Exp $ */
+/* $OpenBSD: blf.h,v 1.3 2002/02/17 19:42:28 millert Exp $ */
 /*
  * Blowfish - a fast block cipher designed by Bruce Schneier
  *
@@ -34,10 +34,6 @@
 #ifndef _BLF_H_
 #define _BLF_H_
 
-#ifndef __P
-#define __P(args) args
-#endif
-
 /* Schneier states the maximum key length to be 56 bytes.
  * The way how the subkeys are initalized by the key up
  * to (N+2)*4 i.e. 72 bytes are utilized.
@@ -60,20 +56,20 @@ typedef struct BlowfishContext {
  *	Blowfish_expand0state( state, key, keylen )
  */
 
-void Blowfish_encipher __P((blf_ctx *, u_int32_t *, u_int32_t *));
-void Blowfish_decipher __P((blf_ctx *, u_int32_t *, u_int32_t *));
-void Blowfish_initstate __P((blf_ctx *));
-void Blowfish_expand0state __P((blf_ctx *, const u_int8_t *, u_int16_t));
+void Blowfish_encipher(blf_ctx *, u_int32_t *, u_int32_t *);
+void Blowfish_decipher(blf_ctx *, u_int32_t *, u_int32_t *);
+void Blowfish_initstate(blf_ctx *);
+void Blowfish_expand0state(blf_ctx *, const u_int8_t *, u_int16_t);
 void Blowfish_expandstate
-    __P((blf_ctx *, const u_int8_t *, u_int16_t, const u_int8_t *, u_int16_t));
+(blf_ctx *, const u_int8_t *, u_int16_t, const u_int8_t *, u_int16_t);
 
 /* Standard Blowfish */
 
-void blf_key __P((blf_ctx *, const u_int8_t *, u_int16_t));
-void blf_enc __P((blf_ctx *, u_int32_t *, u_int16_t));
-void blf_dec __P((blf_ctx *, u_int32_t *, u_int16_t));
+void blf_key(blf_ctx *, const u_int8_t *, u_int16_t);
+void blf_enc(blf_ctx *, u_int32_t *, u_int16_t);
+void blf_dec(blf_ctx *, u_int32_t *, u_int16_t);
 
 /* Converts u_int8_t to u_int32_t */
-u_int32_t Blowfish_stream2word __P((const u_int8_t *, u_int16_t , u_int16_t *));
+u_int32_t Blowfish_stream2word(const u_int8_t *, u_int16_t , u_int16_t *);
 
 #endif

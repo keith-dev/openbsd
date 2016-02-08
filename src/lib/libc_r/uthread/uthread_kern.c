@@ -1,4 +1,4 @@
-/*	$OpenBSD: uthread_kern.c,v 1.16 2001/09/04 22:17:45 fgsch Exp $	*/
+/*	$OpenBSD: uthread_kern.c,v 1.21 2002/02/21 20:57:41 fgsch Exp $	*/
 /*
  * Copyright (c) 1995-1998 John Birrell <jb@cimlogic.com.au>
  * All rights reserved.
@@ -34,10 +34,10 @@
  *
  */
 #include <errno.h>
+#include <poll.h>
 #include <stdlib.h>
 #include <stdarg.h>
 #include <string.h>
-#include <poll.h>
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -51,8 +51,8 @@
 #include "pthread_private.h"
 
 /* Static function prototype definitions: */
-static void 
-_thread_kern_poll(int wait_reqd);
+static void
+thread_kern_poll(int wait_reqd);
 
 static void
 dequeue_signals(void);
@@ -60,28 +60,28 @@ dequeue_signals(void);
 static inline void
 thread_run_switch_hook(pthread_t thread_out, pthread_t thread_in);
 
-static void
-_thread_check_cancel()
+/* Static variables: */
+static int	last_tick = 0;
+
+void
+_thread_kern_sched_sig(void)
 {
-	if (!(_thread_run->flags & PTHREAD_FLAGS_CANCELPT) &&
-	    (_thread_run->canceltype == PTHREAD_CANCEL_ASYNCHRONOUS))
-		/*
-		 * Check if an async-cancellable thread
-		 * has been cancelled.
-		 */
-		_thread_cancellation_point();
+	struct pthread	*curthread = _get_curthread();
+
+	curthread->check_pending = 1;
+	_thread_kern_sched(NULL);
 }
 
 void
 _thread_kern_sched(struct sigcontext * scp)
 {
+	struct timespec	ts;
+	struct timeval	tv;
 	struct pthread	*curthread = _get_curthread();
-	pthread_t       pthread, pthread_h = NULL;
+	pthread_t       pthread, pthread_h;
+	unsigned int	current_tick;
+	int		add_to_prioq;
 	pthread_t	old_thread_run;
-	struct itimerval itimer;
-	struct timespec ts, ts1;
-	struct timeval  tv, tv1;
-	int		set_timer = 0;
 
 	/*
 	 * Flag the pthread kernel as executing scheduler code
@@ -93,31 +93,41 @@ _thread_kern_sched(struct sigcontext * scp)
 	/* Check if this function was called from the signal handler: */
 	if (scp != NULL) {
 		/*
-		 * Copy the signal context to the current thread's jump
-		 * buffer: 
+		 * The signal handler should have saved the state of
+		 * the current thread. Restore the process signal
+		 * mask.
 		 */
-		memcpy(&_thread_run->saved_sigcontext, scp, sizeof(_thread_run->saved_sigcontext));
+		if (_thread_sys_sigprocmask(SIG_SETMASK,
+		    &_process_sigmask, NULL) != 0)
+			PANIC("Unable to restore process mask after signal");
+
+		/*
+		 * Copy the signal context to the current thread's jump
+		 * buffer:
+		 */
+		memcpy(&curthread->saved_sigcontext, scp,
+		    sizeof(curthread->saved_sigcontext));
 
 		/*
 		 * Save floating point state.
 		 */
-		_thread_machdep_save_float_state(&_thread_run->_machdep);
+		_thread_machdep_save_float_state(&curthread->_machdep);
 
 		/* Flag the signal context as the last state saved: */
-		_thread_run->sig_saved = 1;
+		curthread->sig_saved = 1;
 	} else
 		/* Flag the jump buffer was the last state saved: */
-		_thread_run->sig_saved = 0;
+		curthread->sig_saved = 0;
 
 	/* If the currently running thread is a user thread, save it: */
-	if ((_thread_run->flags & PTHREAD_FLAGS_PRIVATE) == 0)
-		_last_user_thread = _thread_run;
+	if ((curthread->flags & PTHREAD_FLAGS_PRIVATE) == 0)
+		_last_user_thread = curthread;
 
 	/* Save errno. */
-	_thread_run->error = errno;
+	curthread->error = errno;
 
 	/* Save the current thread to switch from */
-	old_thread_run = _thread_run;
+	old_thread_run = curthread;
 
 	/*
 	 * Enter a scheduling loop that finds the next thread that is
@@ -128,37 +138,48 @@ _thread_kern_sched(struct sigcontext * scp)
 	 */
 	while (!(TAILQ_EMPTY(&_thread_list))) {
 		/* Get the current time of day: */
-		gettimeofday(&tv, NULL);
+		GET_CURRENT_TOD(tv);
 		TIMEVAL_TO_TIMESPEC(&tv, &ts);
+		current_tick = _sched_ticks;
 
 		/*
 		 * Protect the scheduling queues from access by the signal
 		 * handler.
 		 */
 		_queue_signals = 1;
+		add_to_prioq = 0;
 
-		if (_thread_run != &_thread_kern_thread) {
-
+		if (curthread != &_thread_kern_thread) {
 			/*
 			 * This thread no longer needs to yield the CPU.
 			 */
-			_thread_run->yield_on_sig_undefer = 0;
+			curthread->yield_on_sig_undefer = 0;
 	
-			/*
-			 * Save the current time as the time that the thread
-			 * became inactive: 
-			 */
-			_thread_run->last_inactive.tv_sec = tv.tv_sec;
-			_thread_run->last_inactive.tv_usec = tv.tv_usec;
-	
+			if (curthread->state != PS_RUNNING) {
+				/*
+				 * Save the current time as the time that the
+				 * thread became inactive:
+				 */
+				curthread->last_inactive = (long)current_tick;
+				if (curthread->last_inactive <
+				    curthread->last_active) {
+					/* Account for a rollover: */
+					curthread->last_inactive =+
+					    UINT_MAX + 1;
+				}
+			}
+
 			/*
 			 * Place the currently running thread into the
 			 * appropriate queue(s).
 			 */
-			switch (_thread_run->state) {
+			switch (curthread->state) {
 			case PS_DEAD:
+			case PS_STATE_MAX: /* to silence -Wall */
+			case PS_SUSPENDED:
 				/*
-				 * Dead threads are not placed in any queue:
+				 * Dead and suspended threads are not placed
+				 * in any queue:
 				 */
 				break;
 
@@ -169,27 +190,12 @@ _thread_kern_sched(struct sigcontext * scp)
 				 * are polled (to preserve round-robin
 				 * scheduling).
 				 */
-				if ((_thread_run->slice_usec != -1) &&
-				    (_thread_run->attr.sched_policy != SCHED_FIFO)) {
-					/*
-					 * Accumulate the number of microseconds that
-					 * this thread has run for:
-					 */
-					_thread_run->slice_usec +=
-					    (_thread_run->last_inactive.tv_sec -
-					    _thread_run->last_active.tv_sec) * 1000000 +
-					    _thread_run->last_inactive.tv_usec -
-					    _thread_run->last_active.tv_usec;
-	
-					/* Check for time quantum exceeded: */
-					if (_thread_run->slice_usec > TIMESLICE_USEC)
-						_thread_run->slice_usec = -1;
-				}
+				add_to_prioq = 1;
 				break;
 
 			/*
 			 * States which do not depend on file descriptor I/O
-			 * operations or timeouts: 
+			 * operations or timeouts:
 			 */
 			case PS_DEADLOCK:
 			case PS_FDLR_WAIT:
@@ -200,65 +206,97 @@ _thread_kern_sched(struct sigcontext * scp)
 			case PS_SIGSUSPEND:
 			case PS_SIGTHREAD:
 			case PS_SIGWAIT:
-			case PS_SUSPENDED:
 			case PS_WAIT_WAIT:
 				/* No timeouts for these states: */
-				_thread_run->wakeup_time.tv_sec = -1;
-				_thread_run->wakeup_time.tv_nsec = -1;
+				curthread->wakeup_time.tv_sec = -1;
+				curthread->wakeup_time.tv_nsec = -1;
 
 				/* Restart the time slice: */
-				_thread_run->slice_usec = -1;
+				curthread->slice_usec = -1;
 
 				/* Insert into the waiting queue: */
-				PTHREAD_WAITQ_INSERT(_thread_run);
+				PTHREAD_WAITQ_INSERT(curthread);
 				break;
 
 			/* States which can timeout: */
 			case PS_COND_WAIT:
 			case PS_SLEEP_WAIT:
 				/* Restart the time slice: */
-				_thread_run->slice_usec = -1;
+				curthread->slice_usec = -1;
 
 				/* Insert into the waiting queue: */
-				PTHREAD_WAITQ_INSERT(_thread_run);
+				PTHREAD_WAITQ_INSERT(curthread);
 				break;
 	
 			/* States that require periodic work: */
 			case PS_SPINBLOCK:
 				/* No timeouts for this state: */
-				_thread_run->wakeup_time.tv_sec = -1;
-				_thread_run->wakeup_time.tv_nsec = -1;
+				curthread->wakeup_time.tv_sec = -1;
+				curthread->wakeup_time.tv_nsec = -1;
 
 				/* Increment spinblock count: */
 				_spinblock_count++;
 
-				/* fall through */
+				/* FALLTHROUGH */
 			case PS_FDR_WAIT:
 			case PS_FDW_WAIT:
 			case PS_POLL_WAIT:
 			case PS_SELECT_WAIT:
 				/* Restart the time slice: */
-				_thread_run->slice_usec = -1;
+				curthread->slice_usec = -1;
 	
 				/* Insert into the waiting queue: */
-				PTHREAD_WAITQ_INSERT(_thread_run);
+				PTHREAD_WAITQ_INSERT(curthread);
 	
 				/* Insert into the work queue: */
-				PTHREAD_WORKQ_INSERT(_thread_run);
+				PTHREAD_WORKQ_INSERT(curthread);
+				break;
 			}
+
+			/*
+			 * Are there pending signals for this thread?
+			 *
+			 * This check has to be performed after the thread
+			 * has been placed in the queue(s) appropriate for
+			 * its state.  The process of adding pending signals
+			 * can change a threads state, which in turn will
+			 * attempt to add or remove the thread from any
+			 * scheduling queue to which it belongs.
+			 */
+#ifdef notyet
+			if (curthread->check_pending != 0) {
+				curthread->check_pending = 0;
+				_thread_sig_check_pending(curthread);
+			}
+#endif
 		}
 
-		/* Unprotect the scheduling queues: */
-		_queue_signals = 0;
-
 		/*
-		 * Poll file descriptors to update the state of threads
-		 * waiting on file I/O where data may be available: 
+		 * Avoid polling file descriptors if there are none
+		 * waiting:
 		 */
-		_thread_kern_poll(0);
+		if (TAILQ_EMPTY(&_workq) != 0) {
+		}
+		/*
+		 * Poll file descriptors only if a new scheduling signal
+		 * has occurred or if we have no more runnable threads.
+		 */
+		else if (((current_tick = _sched_ticks) != last_tick) ||
+		    ((curthread->state != PS_RUNNING) &&
+		    (PTHREAD_PRIOQ_FIRST() == NULL))) {
+			/* Unprotect the scheduling queues: */
+			_queue_signals = 0;
 
-		/* Protect the scheduling queues: */
-		_queue_signals = 1;
+			/*
+			 * Poll file descriptors to update the state of threads
+			 * waiting on file I/O where data may be available:
+			 */
+			thread_kern_poll(0);
+
+			/* Protect the scheduling queues: */
+			_queue_signals = 1;
+		}
+		last_tick = current_tick;
 
 		/*
 		 * Wake up threads that have timedout.  This has to be
@@ -300,27 +338,52 @@ _thread_kern_sched(struct sigcontext * scp)
 		PTHREAD_WAITQ_CLEARACTIVE();
 
 		/*
-		 * Check if there is a current runnable thread that isn't
-		 * already in the ready queue:
+		 * Check to see if the current thread needs to be added
+		 * to the priority queue:
 		 */
-		if ((_thread_run != &_thread_kern_thread) &&
-		    (_thread_run->state == PS_RUNNING) &&
-		    ((_thread_run->flags & PTHREAD_FLAGS_IN_PRIOQ) == 0)) {
-			if (_thread_run->slice_usec == -1) {
+		if (add_to_prioq != 0) {
+			/*
+			 * Save the current time as the time that the
+			 * thread became inactive:
+			 */
+			current_tick = _sched_ticks;
+			curthread->last_inactive = (long)current_tick;
+			if (curthread->last_inactive <
+			    curthread->last_active) {
+				/* Account for a rollover: */
+				curthread->last_inactive =+ UINT_MAX + 1;
+			}
+
+			if ((curthread->slice_usec != -1) &&
+			   (curthread->attr.sched_policy != SCHED_FIFO)) {
+				/*
+				 * Accumulate the number of microseconds for
+				 * which the current thread has run:
+				 */
+				curthread->slice_usec +=
+				    (curthread->last_inactive -
+				    curthread->last_active) *
+				    (long)_clock_res_usec;
+				/* Check for time quantum exceeded: */
+				if (curthread->slice_usec > TIMESLICE_USEC)
+					curthread->slice_usec = -1;
+			}
+
+			if (curthread->slice_usec == -1) {
 				/*
 				 * The thread exceeded its time
 				 * quantum or it yielded the CPU;
 				 * place it at the tail of the
 				 * queue for its priority.
 				 */
-				PTHREAD_PRIOQ_INSERT_TAIL(_thread_run);
+				PTHREAD_PRIOQ_INSERT_TAIL(curthread);
 			} else {
 				/*
 				 * The thread hasn't exceeded its
 				 * interval.  Place it at the head
 				 * of the queue for its priority.
 				 */
-				PTHREAD_PRIOQ_INSERT_HEAD(_thread_run);
+				PTHREAD_PRIOQ_INSERT_HEAD(curthread);
 			}
 		}
 
@@ -334,7 +397,7 @@ _thread_kern_sched(struct sigcontext * scp)
 			/*
 			 * Lock the pthread kernel by changing the pointer to
 			 * the running thread to point to the global kernel
-			 * thread structure: 
+			 * thread structure:
 			 */
 			_set_curthread(&_thread_kern_thread);
 			curthread = &_thread_kern_thread;
@@ -344,23 +407,29 @@ _thread_kern_sched(struct sigcontext * scp)
 
 			/*
 			 * There are no threads ready to run, so wait until
-			 * something happens that changes this condition: 
+			 * something happens that changes this condition:
 			 */
-			_thread_kern_poll(1);
+			thread_kern_poll(1);
+
+			/*
+			 * This process' usage will likely be very small
+			 * while waiting in a poll.  Since the scheduling
+			 * clock is based on the profiling timer, it is
+			 * unlikely that the profiling timer will fire
+			 * and update the time of day.  To account for this,
+			 * get the time of day after polling with a timeout.
+			 */
+			gettimeofday((struct timeval *) &_sched_tod, NULL);
+
+			/* Check once more for a runnable thread: */
+			_queue_signals = 1;
+			pthread_h = PTHREAD_PRIOQ_FIRST();
+			_queue_signals = 0;
 		}
-		else {
+
+		if (pthread_h != NULL) {
 			/* Remove the thread from the ready queue: */
 			PTHREAD_PRIOQ_REMOVE(pthread_h);
-
-			/* Get first thread on the waiting list: */
-			pthread = TAILQ_FIRST(&_waitingq);
-
-			/* Check to see if there is more than one thread: */
-			if (pthread_h != TAILQ_FIRST(&_thread_list) ||
-			    TAILQ_NEXT(pthread_h, tle) != NULL)
-				set_timer = 1;
-			else
-				set_timer = 0;
 
 			/* Unprotect the scheduling queues: */
 			_queue_signals = 0;
@@ -384,31 +453,18 @@ _thread_kern_sched(struct sigcontext * scp)
 				 */
 				if (((pthread = PTHREAD_PRIOQ_FIRST()) != NULL) &&
 				    (pthread->active_priority > pthread_h->active_priority)) {
+					/* Remove the thread from the ready queue: */
+					PTHREAD_PRIOQ_REMOVE(pthread);
+
 					/*
 					 * Insert the lower priority thread
 					 * at the head of its priority list:
 					 */
 					PTHREAD_PRIOQ_INSERT_HEAD(pthread_h);
 
-					/* Remove the thread from the ready queue: */
-					PTHREAD_PRIOQ_REMOVE(pthread);
-
 					/* There's a new thread in town: */
 					pthread_h = pthread;
 				}
-
-				/* Get first thread on the waiting list: */
-				pthread = TAILQ_FIRST(&_waitingq);
-
-				/*
-				 * Check to see if there is more than one
-				 * thread:
-				 */
-				if (pthread_h != TAILQ_FIRST(&_thread_list) ||
-				    TAILQ_NEXT(pthread_h, tle) != NULL)
-					set_timer = 1;
-				else
-					set_timer = 0;
 
 				/* Unprotect the scheduling queues: */
 				_queue_signals = 0;
@@ -420,125 +476,40 @@ _thread_kern_sched(struct sigcontext * scp)
 
 			/*
 			 * Save the current time as the time that the thread
-			 * became active: 
+			 * became active:
 			 */
-			curthread->last_active.tv_sec = tv.tv_sec;
-			curthread->last_active.tv_usec = tv.tv_usec;
-
-			/*
-			 * Define the maximum time before a scheduling signal
-			 * is required: 
-			 */
-			itimer.it_value.tv_sec = 0;
-			itimer.it_value.tv_usec = TIMESLICE_USEC;
-
-			/*
-			 * The interval timer is not reloaded when it
-			 * times out. The interval time needs to be
-			 * calculated every time. 
-			 */
-			itimer.it_interval.tv_sec = 0;
-			itimer.it_interval.tv_usec = 0;
-
-			/* Get first thread on the waiting list: */
-			if ((pthread != NULL) &&
-			    (pthread->wakeup_time.tv_sec != -1)) {
-				/*
-				 * Calculate the time until this thread
-				 * is ready, allowing for the clock
-				 * resolution: 
-				 */
-				ts1.tv_sec = pthread->wakeup_time.tv_sec
-				    - ts.tv_sec;
-				ts1.tv_nsec = pthread->wakeup_time.tv_nsec
-				    - ts.tv_nsec + _clock_res_nsec;
-
-				/*
-				 * Check for underflow of the nanosecond field:
-				 */
-				while (ts1.tv_nsec < 0) {
-					/*
-					 * Allow for the underflow of the
-					 * nanosecond field: 
-					 */
-					ts1.tv_sec--;
-					ts1.tv_nsec += 1000000000;
-				}
-				/*
-				 * Check for overflow of the nanosecond field: 
-				 */
-				while (ts1.tv_nsec >= 1000000000) {
-					/*
-					 * Allow for the overflow of the
-					 * nanosecond field: 
-					 */
-					ts1.tv_sec++;
-					ts1.tv_nsec -= 1000000000;
-				}
-				/*
-				 * Convert the timespec structure to a
-				 * timeval structure: 
-				 */
-				TIMESPEC_TO_TIMEVAL(&tv1, &ts1);
-
-				/*
-				 * Check if the thread will be ready
-				 * sooner than the earliest ones found
-				 * so far: 
-				 */
-				if (timercmp(&tv1, &itimer.it_value, <)) {
-					/*
-					 * Update the time value: 
-					 */
-					itimer.it_value.tv_sec = tv1.tv_sec;
-					itimer.it_value.tv_usec = tv1.tv_usec;
-				}
-			}
+			current_tick = _sched_ticks;
+			curthread->last_active = (long) current_tick;
 
 			/*
 			 * Check if this thread is running for the first time
 			 * or running again after using its full time slice
-			 * allocation: 
+			 * allocation:
 			 */
-			if (_thread_run->slice_usec == -1) {
+			if (curthread->slice_usec == -1) {
 				/* Reset the accumulated time slice period: */
-				_thread_run->slice_usec = 0;
-			}
-
-			/* Check if there is more than one thread: */
-			if (set_timer != 0) {
-				/*
-				 * Start the interval timer for the
-				 * calculated time interval: 
-				 */
-				if (setitimer(_ITIMER_SCHED_TIMER, &itimer, NULL) != 0) {
-					/*
-					 * Cannot initialise the timer, so
-					 * abort this process: 
-					 */
-					PANIC("Cannot set scheduling timer");
-				}
+				curthread->slice_usec = 0;
 			}
 
 			/* Restore errno. */
-			errno = _thread_run->error;
+			errno = curthread->error;
 
 			/*
 			 * Restore the new thread, saving current.
 			 */
-			_thread_machdep_switch(&_thread_run->_machdep,
+			_thread_machdep_switch(&curthread->_machdep,
 			    &old_thread_run->_machdep);
 
 			/* Check if a signal context was saved: */
-			if (_thread_run->sig_saved == 1) {
+			if (curthread->sig_saved == 1) {
 				/*
 				 * Restore floating point state.
 				 */
-				_thread_machdep_restore_float_state(&_thread_run->_machdep);
+				_thread_machdep_restore_float_state(&curthread->_machdep);
 
 				/*
 				 * Do a sigreturn to restart the thread that
-				 * was interrupted by a signal: 
+				 * was interrupted by a signal:
 				 */
 				_thread_kern_in_sched = 0;
 
@@ -547,12 +518,23 @@ _thread_kern_sched(struct sigcontext * scp)
 				 * installed switch hooks.
 				 */
 				if ((_sched_switch_hook != NULL) &&
-				    (_last_user_thread != _thread_run)) {
+				    (_last_user_thread != curthread)) {
 					thread_run_switch_hook(_last_user_thread,
-					    _thread_run);
+					    curthread);
 				}
-				_thread_check_cancel();
-				_thread_sys_sigreturn(&_thread_run->saved_sigcontext);
+
+				if (((curthread->cancelflags &
+				    PTHREAD_AT_CANCEL_POINT) == 0) &&
+				    ((curthread->cancelflags &
+				     PTHREAD_CANCEL_ASYNCHRONOUS) != 0))
+					pthread_testcancel();
+
+				/* return to signal handler.   This code
+				   should be:
+				   _thread_sys_sigreturn(&curthread->saved_sigcontext);
+				   but that doesn't currently work on the
+				   sparc */
+				return;
 			} else {
 				/*
 				 * This is the normal way out of the scheduler.
@@ -562,10 +544,14 @@ _thread_kern_sched(struct sigcontext * scp)
 				if (_sched_switch_hook != NULL) {
 					/* Run the installed switch hook: */
 					thread_run_switch_hook(_last_user_thread,
-					    _thread_run);
+					    curthread);
 				}
 
-				_thread_check_cancel();
+				if (((curthread->cancelflags &
+				    PTHREAD_AT_CANCEL_POINT) == 0) &&
+				    ((curthread->cancelflags &
+				     PTHREAD_CANCEL_ASYNCHRONOUS) != 0))
+					pthread_testcancel();
 				return;
 			}
 
@@ -637,7 +623,7 @@ _thread_kern_sched_state_unlock(enum pthread_state state,
 }
 
 static void
-_thread_kern_poll(int wait_reqd)
+thread_kern_poll(int wait_reqd)
 {
 	int             count = 0;
 	int             i, found;
@@ -654,7 +640,7 @@ _thread_kern_poll(int wait_reqd)
 	}
 	else {
 		/* Get the current time of day: */
-		gettimeofday(&tv, NULL);
+		GET_CURRENT_TOD(tv);
 		TIMEVAL_TO_TIMESPEC(&tv, &ts);
 
 		_queue_signals = 1;
@@ -666,16 +652,19 @@ _thread_kern_poll(int wait_reqd)
 			 * Either there are no threads in the waiting queue,
 			 * or there are no threads that can timeout.
 			 */
-			timeout_ms = -1;
+			timeout_ms = INFTIM;
 		}
+		else if (pthread->wakeup_time.tv_sec - ts.tv_sec > 60000)
+			/* Limit maximum timeout to prevent rollover. */
+			timeout_ms = 60000;
 		else {
 			/*
 			 * Calculate the time left for the next thread to
-			 * timeout allowing for the clock resolution:
+			 * timeout:
 			 */
 			timeout_ms = ((pthread->wakeup_time.tv_sec - ts.tv_sec) *
-			    1000) + ((pthread->wakeup_time.tv_nsec - ts.tv_nsec +
-			    _clock_res_nsec) / 1000000);
+			    1000) + ((pthread->wakeup_time.tv_nsec - ts.tv_nsec) /
+			    1000000);
 			/*
 			 * Don't allow negative timeouts:
 			 */
@@ -789,14 +778,14 @@ _thread_kern_poll(int wait_reqd)
 
 	/*
 	 * Wait for a file descriptor to be ready for read, write, or
-	 * an exception, or a timeout to occur: 
+	 * an exception, or a timeout to occur:
 	 */
 	count = _thread_sys_poll(_thread_pfd_table, nfds, timeout_ms);
 
 	if (kern_pipe_added != 0)
 		/*
 		 * Remove the pthread kernel pipe file descriptor
-		 * from the pollfd table: 
+		 * from the pollfd table:
 		 */
 		nfds = 1;
 	else
@@ -810,7 +799,7 @@ _thread_kern_poll(int wait_reqd)
 	    (_thread_pfd_table[0].revents & POLLRDNORM))) {
 		/*
 		 * If the kernel read pipe was included in the
-		 * count: 
+		 * count:
 		 */
 		if (count > 0) {
 			/* Decrement the count of file descriptors: */
@@ -832,7 +821,7 @@ _thread_kern_poll(int wait_reqd)
 		/*
 		 * Enter a loop to look for threads waiting on file
 		 * descriptors that are flagged as available by the
-		 * _poll syscall: 
+		 * _poll syscall:
 		 */
 		PTHREAD_WAITQ_SETACTIVE();
 		TAILQ_FOREACH(pthread, &_workq, qe) {
@@ -960,9 +949,6 @@ _thread_kern_poll(int wait_reqd)
 		/* Unprotect the scheduling queues: */
 		_queue_signals = 0;
 	}
-
-	/* Nothing to return. */
-	return;
 }
 
 void
@@ -979,7 +965,7 @@ _thread_kern_set_timeout(const struct timespec * timeout)
 	if (timeout == NULL) {
 		/*
 		 * Set the wakeup time to something that can be recognised as
-		 * different to an actual time of day: 
+		 * different to an actual time of day:
 		 */
 		curthread->wakeup_time.tv_sec = -1;
 		curthread->wakeup_time.tv_nsec = -1;
@@ -991,7 +977,7 @@ _thread_kern_set_timeout(const struct timespec * timeout)
 		curthread->wakeup_time.tv_nsec = 0;
 	} else {
 		/* Get the current time: */
-		gettimeofday(&tv, NULL);
+		GET_CURRENT_TOD(tv);
 		TIMEVAL_TO_TIMESPEC(&tv, &current_time);
 
 		/* Calculate the time for the current thread to wake up: */
@@ -1005,7 +991,6 @@ _thread_kern_set_timeout(const struct timespec * timeout)
 			curthread->wakeup_time.tv_nsec -= 1000000000;
 		}
 	}
-	return;
 }
 
 void
@@ -1020,9 +1005,7 @@ _thread_kern_sig_defer(void)
 void
 _thread_kern_sig_undefer(void)
 {
-        struct pthread  *curthread = _get_curthread();
-	pthread_t pthread;
-	int need_resched = 0;
+	struct pthread	*curthread = _get_curthread();
 
 	/*
 	 * Perform checks to yield only if we are about to undefer
@@ -1039,33 +1022,25 @@ _thread_kern_sig_undefer(void)
 		/*
 		 * Check if there are queued signals:
 		 */
-		while (_sigq_check_reqd != 0) {
-			/* Defer scheduling while we process queued signals: */
-			curthread->sig_defer_count = 1;
+		if (_sigq_check_reqd != 0)
+			_thread_kern_sched(NULL);
 
-			/* Clear the flag before checking the signal queue: */
-			_sigq_check_reqd = 0;
+		/*
+		 * Check for asynchronous cancellation before delivering any
+		 * pending signals:
+		 */
+		if (((curthread->cancelflags & PTHREAD_AT_CANCEL_POINT) == 0) &&
+		    ((curthread->cancelflags & PTHREAD_CANCEL_ASYNCHRONOUS) != 0))
+			pthread_testcancel();
 
-			/* Dequeue and handle signals: */
-			dequeue_signals();
-
-			/*
-			 * Avoiding an unnecessary check to reschedule, check
-			 * to see if signal handling caused a higher priority
-			 * thread to become ready.
-			 */
-			if ((need_resched == 0) &&
-			    (((pthread = PTHREAD_PRIOQ_FIRST()) != NULL) &&
-			    (pthread->active_priority > curthread->active_priority))) {
-				need_resched = 1;
-			}
-
-			/* Reenable signals: */
-			curthread->sig_defer_count = 0;
-		}
-
-		/* Yield the CPU if necessary: */
-		if (need_resched || curthread->yield_on_sig_undefer != 0) {
+		/*
+		 * If there are pending signals or this thread has
+		 * to yield the CPU, call the kernel scheduler:
+		 *
+		 * XXX - Come back and revisit the pending signal problem
+		 */
+		if ((curthread->yield_on_sig_undefer != 0) ||
+		    curthread->sigpend != 0) {
 			curthread->yield_on_sig_undefer = 0;
 			_thread_kern_sched(NULL);
 		}
@@ -1080,7 +1055,7 @@ dequeue_signals(void)
 
 	/*
 	 * Enter a loop to read and handle queued signals from the
-	 * pthread kernel pipe: 
+	 * pthread kernel pipe:
 	 */
 	while (((num = _thread_sys_read(_thread_kern_pipe[0], bufr,
 	    sizeof(bufr))) > 0) || (num == -1 && errno == EINTR)) {
@@ -1117,10 +1092,10 @@ thread_run_switch_hook(pthread_t thread_out, pthread_t thread_in)
 	pthread_t tid_in = thread_in;
 
 	if ((tid_out != NULL) &&
-	    ((tid_out->flags & PTHREAD_FLAGS_PRIVATE) != 0))
+	    (tid_out->flags & PTHREAD_FLAGS_PRIVATE) != 0)
 		tid_out = NULL;
 	if ((tid_in != NULL) &&
-	    ((tid_in->flags & PTHREAD_FLAGS_PRIVATE) != 0))
+	    (tid_in->flags & PTHREAD_FLAGS_PRIVATE) != 0)
 		tid_in = NULL;
 
 	if ((_sched_switch_hook != NULL) && (tid_out != tid_in)) {

@@ -1,9 +1,9 @@
-/*	$OpenBSD: extend.c,v 1.18 2001/07/05 17:36:05 matthieu Exp $	*/
+/*	$OpenBSD: extend.c,v 1.24 2002/03/11 13:08:51 vincent Exp $	*/
 
 /*
  *	Extended (M-X) commands, rebinding, and	startup file processing.
  */
-
+#include "chrdef.h"
 #include "def.h"
 #include "kbd.h"
 #include "funmap.h"
@@ -21,21 +21,20 @@
 #endif /* !NO_STARTUP */
 #endif /* FKEYS */
 
-static int	 remap		__P((KEYMAP *, int, PF, KEYMAP *));
-static KEYMAP	*realocmap	__P((KEYMAP *));
-static void	 fixmap		__P((KEYMAP *, KEYMAP *, KEYMAP *));
-static int	 dobind		__P((KEYMAP *, char *, int));
-static char	*skipwhite	__P((char *));
-static char	*parsetoken	__P((char *));
-static int	 bindkey	__P((KEYMAP **, char *, KCHAR *, int));
+static int	 remap(KEYMAP *, int, PF, KEYMAP *);
+static KEYMAP	*realocmap(KEYMAP *);
+static void	 fixmap(KEYMAP *, KEYMAP *, KEYMAP *);
+static int	 dobind(KEYMAP *, const char *, int);
+static char	*skipwhite(char *);
+static char	*parsetoken(char *);
+static int	 bindkey(KEYMAP **, const char *, KCHAR *, int);
 
 /*
  * Insert a string, mainly for use from macros (created by selfinsert)
  */
 /* ARGSUSED */
 int
-insert(f, n)
-	int f, n;
+insert(int f, int n)
 {
 	char	*cp;
 	char	 buf[128];
@@ -84,12 +83,12 @@ insert(f, n)
  * the keymap in a usable state.
  */
 static int
-remap(curmap, c, funct, pref_map)
-	KEYMAP	*curmap;	/* pointer to the map being changed */
-	int	c;		/* character being changed */
-	PF	funct;		/* function being changed to */
-	KEYMAP	*pref_map;	/* if funct==NULL, map to bind to or
+remap(KEYMAP *curmap,		/* pointer to the map being changed */
+      int c,			/* character being changed */
+      PF funct,			/* function being changed to */
+      KEYMAP *pref_map		/* if funct==NULL, map to bind to or
 				   NULL for new */
+      )
 {
 	int		 i, n1, n2, nold;
 	KEYMAP		*mp;
@@ -260,8 +259,7 @@ remap(curmap, c, funct, pref_map)
  * Reallocate a keymap, used above.
  */
 static KEYMAP *
-realocmap(curmap)
-	KEYMAP *curmap;
+realocmap(KEYMAP *curmap)
 {
 	MAPS *mps;
 	KEYMAP	*mp;
@@ -296,10 +294,7 @@ realocmap(curmap)
  * Fix references to a reallocated keymap (recursive).
  */
 static void
-fixmap(curmap, mp, mt)
-	KEYMAP *mt;
-	KEYMAP *curmap;
-	KEYMAP *mp;
+fixmap(KEYMAP *curmap, KEYMAP *mp, KEYMAP *mt)
 {
 	int	 i;
 
@@ -318,10 +313,7 @@ fixmap(curmap, mp, mt)
  * then call remap to do the work.
  */
 static int
-dobind(curmap, p, unbind)
-	KEYMAP	*curmap;
-	char	*p;
-	int	unbind;
+dobind(KEYMAP *curmap, const char *p, int unbind)
 {
 	KEYMAP	*pref_map = NULL;
 	PF	 funct;
@@ -390,11 +382,7 @@ dobind(curmap, p, unbind)
  */
 #ifdef	BINDKEY
 static int
-bindkey(mapp, fname, keys, kcount)
-	KEYMAP	**mapp;
-	char	*fname;
-	KCHAR	*keys;
-	int	kcount;
+bindkey(KEYMAP **mapp, const char *fname, KCHAR *keys, int kcount)
 {
 	KEYMAP	*curmap = *mapp;
 	KEYMAP	*pref_map = NULL;
@@ -428,10 +416,7 @@ bindkey(mapp, fname, keys, kcount)
  * Wrapper for bindkey() that converts escapes.
  */
 int
-dobindkey(map, func, str)
-	KEYMAP *map;
-	char   *func;
-	char   *str;
+dobindkey(KEYMAP *map, const char *func, const char *str)
 {
 	int	 i;
 
@@ -472,8 +457,7 @@ dobindkey(map, func, str)
  */
 /* ARGSUSED */
 int
-bindtokey(f, n)
-	int f, n;
+bindtokey(int f, int n)
 {
 	return dobind(fundamental_map, "Global set key: ", FALSE);
 }
@@ -483,8 +467,7 @@ bindtokey(f, n)
  */
 /* ARGSUSED */
 int
-localbind(f, n)
-	int f, n;
+localbind(int f, int n)
 {
 	return dobind(curbp->b_modes[curbp->b_nmodes]->p_map,
 	    "Local set key: ", FALSE);
@@ -495,26 +478,27 @@ localbind(f, n)
  */
 /* ARGSUSED */
 int
-define_key(f, n)
-	int f, n;
+define_key(int f, int n)
 {
-	static char	 buf[48] = "Define key map: ";
-	KEYMAP		*mp;
+	static char buf[48];
+	char tmp[32];
+	KEYMAP *mp;
 
-	buf[16] = '\0';
-	if (eread(buf, &buf[16], 48 - 16, EFNEW) != TRUE)
+	strlcpy(buf, "Define key map: ", sizeof buf);
+	if (eread(buf, tmp, sizeof tmp, EFNEW) != TRUE)
 		return FALSE;
-	if ((mp = name_map(&buf[16])) == NULL) {
-		ewprintf("Unknown map %s", &buf[16]);
+	strlcat(buf, tmp, sizeof buf);
+	if ((mp = name_map(tmp)) == NULL) {
+		ewprintf("Unknown map %s", tmp);
 		return FALSE;
 	}
-	(void)strncat(&buf[16], " key: ", 48 - 16 - 1);
+	strlcat(buf, "key: ", sizeof buf);
+
 	return dobind(mp, buf, FALSE);
 }
 
 int
-unbindtokey(f, n)
-	int f, n;
+unbindtokey(int f, int n)
 {
 	return dobind(fundamental_map, "Global unset key: ", TRUE);
 }
@@ -534,8 +518,7 @@ localunbind(f, n)
  * error if there is anything wrong.
  */
 int
-extend(f, n)
-	int f, n;
+extend(int f, int n)
 {
 	PF	 funct;
 	int	 s;
@@ -584,8 +567,7 @@ extend(f, n)
  */
 /* ARGSUSED */
 int
-evalexpr(f, n)
-	int f, n;
+evalexpr(int f, int n)
 {
 	int	 s;
 	char	 exbuf[128];
@@ -601,8 +583,7 @@ evalexpr(f, n)
  */
 /* ARGSUSED */
 int
-evalbuffer(f, n)
-	int f, n;
+evalbuffer(int f, int n)
 {
 	LINE		*lp;
 	BUFFER		*bp = curbp;
@@ -628,8 +609,7 @@ evalbuffer(f, n)
  */
 /* ARGSUSED */
 int
-evalfile(f, n)
-	int f, n;
+evalfile(int f, int n)
 {
 	int	 s;
 	char	 fname[NFILEN];
@@ -643,8 +623,7 @@ evalfile(f, n)
  * load - go load the file name we got passed.
  */
 int
-load(fname)
-	char *fname;
+load(const char *fname)
 {
 	int	 s = TRUE;
 	int	 nbytes = 0;
@@ -678,14 +657,14 @@ load(fname)
  * have to fit in type char.
  */
 int
-excline(line)
-	char *line;
+excline(char *line)
 {
 	PF	 fp;
 	LINE	*lp, *np;
 	int	 status, c, f, n;
-	char	*funcp;
+	char	*funcp, *tmp;
 	char	*argp = NULL;
+	long	 nl;
 #ifdef	FKEYS
 	int	 bind;
 	KEYMAP	*curmap;
@@ -713,14 +692,19 @@ excline(line)
 	if (*line != '\0') {
 		*line++ = '\0';
 		line = skipwhite(line);
-		if ((*line >= '0' && *line <= '9') || *line == '-') {
+		if (ISDIGIT(*line) || *line == '-') {
 			argp = line;
 			line = parsetoken(line);
 		}
 	}
 	if (argp != NULL) {
 		f = FFARG;
-		n = atoi(argp);
+		nl = strtol(argp, &tmp, 10);
+		if (*tmp != '\0')
+			return FALSE;
+		if (nl >= INT_MAX || nl <= INT_MIN)
+			return FALSE;
+		n = (int)nl;
 	}
 	if ((fp = name_function(funcp)) == NULL) {
 		ewprintf("Unknown function: %s", funcp);
@@ -750,7 +734,8 @@ excline(line)
 		if (*argp != '"') {
 			if (*argp == '\'')
 				++argp;
-			if (!(lp = lalloc((int) (line - argp) + BINDEXT))) {
+			if ((lp = lalloc((int) (line - argp) + BINDEXT)) ==
+			    NULL) {
 				status = FALSE;
 				goto cleanup;
 			}
@@ -922,8 +907,7 @@ cleanup:
  * a pair of utility functions for the above
  */
 static char *
-skipwhite(s)
-	char *s;
+skipwhite(char *s)
 {
 	while (*s == ' ' || *s == '\t' || *s == ')' || *s == '(')
 		s++;
@@ -933,8 +917,7 @@ skipwhite(s)
 }
 
 static char *
-parsetoken(s)
-	char  *s;
+parsetoken(char *s)
 {
 	if (*s != '"') {
 		while (*s && *s != ' ' && *s != '\t' && *s != ')' && *s != '(')

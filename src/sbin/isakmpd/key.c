@@ -1,4 +1,4 @@
-/*	$OpenBSD: key.c,v 1.4 2001/07/02 02:28:35 deraadt Exp $	*/
+/*	$OpenBSD: key.c,v 1.9 2002/03/06 13:55:12 ho Exp $	*/
 /*
  * The author of this code is Angelos D. Keromytis (angelos@cis.upenn.edu)
  *
@@ -25,9 +25,10 @@
 #include "sysdep.h"
 
 #include "dyn.h"
-#include "util.h"
-#include "log.h"
 #include "key.h"
+#include "libcrypto.h"
+#include "log.h"
+#include "util.h"
 #include "x509.h"
 
 void
@@ -105,14 +106,14 @@ key_printable (int type, int private, u_int8_t *data, int datalen)
       return strdup ((char *)data);
 
     case ISAKMP_KEY_RSA:
-      s = malloc (datalen * 2);
+      s = malloc (datalen * 2 + 1);
       if (!s)
 	{
-	  log_error ("key_printable: malloc (%d) failed", datalen * 2);
+	  log_error ("key_printable: malloc (%d) failed", datalen * 2 + 1);
 	  return 0;
 	}
       for (i = 0; i < datalen; i++)
-	sprintf (s + (2 * i), "%02x", data[i]);
+	snprintf (s + (2 * i), 2 * (datalen - i) + 1, "%02x", data[i]);
       return s;
 
     default:
@@ -132,10 +133,19 @@ key_internalize (int type, int private, u_int8_t *data, int datalen)
     case ISAKMP_KEY_RSA:
       switch (private)
 	{
+#if OPENSSL_VERSION_NUMBER >= 0x00907000L
+	case ISAKMP_KEYTYPE_PUBLIC:
+	  return LC (d2i_RSAPublicKey, (NULL, (const u_int8_t **)&data,
+					datalen));
+	case ISAKMP_KEYTYPE_PRIVATE:
+	  return LC (d2i_RSAPrivateKey, (NULL, (const u_int8_t **)&data,
+					 datalen));
+#else
 	case ISAKMP_KEYTYPE_PUBLIC:
 	  return LC (d2i_RSAPublicKey, (NULL, &data, datalen));
 	case ISAKMP_KEYTYPE_PRIVATE:
 	  return LC (d2i_RSAPrivateKey, (NULL, &data, datalen));
+#endif
 	default:
 	  log_error ("key_internalize: not public or private RSA key passed");
 	  return 0;

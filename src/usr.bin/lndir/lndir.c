@@ -1,4 +1,4 @@
-/*	$OpenBSD: lndir.c,v 1.6 2001/07/04 04:56:15 jasoni Exp $	*/
+/*	$OpenBSD: lndir.c,v 1.8 2002/03/28 02:36:03 form Exp $	*/
 /* $XConsortium: lndir.c /main/15 1995/08/30 10:56:18 gildea $ */
 
 /* 
@@ -67,10 +67,10 @@ int ignore_links = 0;		/* -ignorelinks */
 char *rcurdir;
 char *curdir;
 
-int equivalent __P((char *, char *));
-void addexcept __P((char *));
-int dodir __P((char *, struct stat *, struct stat *, int));
-void usage __P((void));
+int equivalent(char *, char *);
+void addexcept(char *);
+int dodir(char *, struct stat *, struct stat *, int);
+void usage(void);
 
 struct except {
 	char *name;
@@ -119,17 +119,17 @@ main (argc, argv)
 
     /* to directory */
     if (stat(tn, &ts) < 0)
-	errx(1, "%s", tn);
+	err(1, "%s", tn);
     if (!(S_ISDIR(ts.st_mode)))
-	errx(2, "%s: Not a directory", tn);
+	errx(2, "%s: %s", tn, strerror(ENOTDIR));
     if (chdir(tn) < 0)
-	errx(1, "%s", tn);
+	err(1, "%s", tn);
 
     /* from directory */
     if (stat(fn, &fs) < 0)
-	errx(1, "%s", fn);
+	err(1, "%s", fn);
     if (!(S_ISDIR(fs.st_mode)))
-	errx(2, "%s: Not a directory", fn);
+	err(2, "%s: %s", fn, strerror(ENOTDIR));
 
     exit(dodir (fn, &fs, &ts, 0));
 }
@@ -158,10 +158,10 @@ addexcept(name)
 
     new = (struct except *)malloc(sizeof(struct except));
     if (new == (struct except *)NULL)
-        errx(1, "addexcept");
+        err(1, "addexcept");
     new->name = strdup(name);
     if (new->name == (char *)NULL)
-        errx(1, "addexcept");
+        err(1, "addexcept");
     
     new->next = exceptions;
     exceptions = new;
@@ -267,7 +267,7 @@ dodir(fn, fs, ts, rel)
 		}
 		dodir(buf, &sb, &sc, (buf[0] != '/'));
 		if (chdir ("..") < 0)
-		    errx (1, "..");
+		    err (1, "..");
 		curdir = rcurdir = ocurdir;
 		continue;
 	    }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: lex.c,v 1.23 2001/06/23 23:04:23 millert Exp $	*/
+/*	$OpenBSD: lex.c,v 1.27 2001/11/21 20:41:55 millert Exp $	*/
 /*	$NetBSD: lex.c,v 1.10 1997/05/17 19:55:13 pk Exp $	*/
 
 /*
@@ -36,9 +36,9 @@
 
 #ifndef lint
 #if 0
-static char sccsid[] = "@(#)lex.c	8.2 (Berkeley) 4/20/95";
+static const char sccsid[] = "@(#)lex.c	8.2 (Berkeley) 4/20/95";
 #else
-static char rcsid[] = "$OpenBSD: lex.c,v 1.23 2001/06/23 23:04:23 millert Exp $";
+static const char rcsid[] = "$OpenBSD: lex.c,v 1.27 2001/11/21 20:41:55 millert Exp $";
 #endif
 #endif /* not lint */
 
@@ -64,8 +64,7 @@ const struct cmd *com;	/* command we are running */
  * signficance for mbox and so forth.
  */
 int
-setfile(name)
-	char *name;
+setfile(char *name)
 {
 	FILE *ibuf;
 	int i, fd;
@@ -114,7 +113,6 @@ setfile(name)
 	 * while we are reading the new file, else we will ruin
 	 * the message[] data structure.
 	 */
-
 	holdsigs();
 	if (shudclob)
 		quit();
@@ -123,9 +121,8 @@ setfile(name)
 	 * Copy the messages into /tmp
 	 * and set pointers.
 	 */
-
 	readonly = 0;
-	if ((i = open(name, 1)) < 0)
+	if ((i = open(name, O_WRONLY, 0)) < 0)
 		readonly++;
 	else
 		(void)close(i);
@@ -135,11 +132,9 @@ setfile(name)
 	}
 	shudclob = 1;
 	edit = isedit;
-	strcpy(prevfile, mailname);
-	if (name != mailname) {
-		strncpy(mailname, name, sizeof(mailname) - 1);
-		mailname[sizeof(mailname) - 1] = '\0';
-	}
+	strlcpy(prevfile, mailname, PATHSIZE);
+	if (name != mailname)
+		strlcpy(mailname, name, sizeof(mailname));
 	mailsize = fsize(ibuf);
 	(void)snprintf(tempname, sizeof(tempname),
 	    "%s/mail.RxXXXXXXXXXX", tmpdir);
@@ -175,7 +170,7 @@ nomail:
  * started reading mail.
  */
 int
-incfile()
+incfile(void)
 {
 	int newsize;
 	int omsgCount = msgCount;
@@ -185,11 +180,15 @@ incfile()
 	if (ibuf == NULL)
 		return(-1);
 	holdsigs();
-	if (!spool_lock())
+	if (!spool_lock()) {
+		(void)Fclose(ibuf);
+		relsesigs();
 		return(-1);
+	}
 	newsize = fsize(ibuf);
 	/* make sure mail box has grown and is non-empty */
 	if (newsize == 0 || newsize <= mailsize) {
+		(void)Fclose(ibuf);
 		spool_unlock();
 		relsesigs();
 		return(newsize == mailsize ? 0 : -1);
@@ -205,29 +204,20 @@ incfile()
 
 
 int	*msgvec;
-int	reset_on_stop;			/* do a reset() if stopped */
+int	reset_on_stop;			/* reset prompt if stopped */
 
 /*
  * Interpret user commands one by one.  If standard input is not a tty,
  * print no prompt.
  */
 void
-commands()
+commands(void)
 {
-	int n;
-	volatile int eofloop = 0;
+	int n, sig, *sigp;
+	int eofloop = 0;
 	char linebuf[LINESIZE];
 
-	if (!sourcing) {
-		if (signal(SIGINT, SIG_IGN) != SIG_IGN)
-			(void)signal(SIGINT, intr);
-		if (signal(SIGHUP, SIG_IGN) != SIG_IGN)
-			(void)signal(SIGHUP, hangup);
-		(void)signal(SIGTSTP, stop);
-		(void)signal(SIGTTOU, stop);
-		(void)signal(SIGTTIN, stop);
-	}
-	setexit();
+	prompt:
 	for (;;) {
 		/*
 		 * Print the prompt, if needed.  Clear out
@@ -246,8 +236,24 @@ commands()
 		 * and handle end of file specially.
 		 */
 		n = 0;
+		sig = 0;
+		sigp = sourcing ? NULL : &sig;
 		for (;;) {
-			if (readline(input, &linebuf[n], LINESIZE - n) < 0) {
+			if (readline(input, &linebuf[n], LINESIZE - n, sigp) < 0) {
+				if (sig) {
+					if (sig == SIGINT)
+						dointr();
+					else if (sig == SIGHUP)
+						/* nothing to do? */
+						exit(1);
+					else {
+						/* Stopped by job control */
+						(void)kill(0, sig);
+						if (reset_on_stop)
+							reset_on_stop = 0;
+					}
+					goto prompt;
+				}
 				if (n == 0)
 					n = -1;
 				break;
@@ -290,9 +296,7 @@ commands()
  * Contxt is non-zero if called while composing mail.
  */
 int
-execute(linebuf, contxt)
-	char linebuf[];
-	int contxt;
+execute(char *linebuf, int contxt)
 {
 	char word[LINESIZE];
 	char *arglist[MAXARGC];
@@ -310,7 +314,6 @@ execute(linebuf, contxt)
 	 * Handle ! escapes differently to get the correct
 	 * lexical conventions.
 	 */
-
 	for (cp = linebuf; isspace(*cp); cp++)
 		;
 	if (*cp == '!') {
@@ -333,11 +336,10 @@ execute(linebuf, contxt)
 	 * however, we ignore blank lines to eliminate
 	 * confusion.
 	 */
-
 	if (sourcing && *word == '\0')
 		return(0);
 	com = lex(word);
-	if (com == NONE) {
+	if (com == NULL) {
 		printf("Unknown command: \"%s\"\n", word);
 		goto out;
 	}
@@ -346,7 +348,6 @@ execute(linebuf, contxt)
 	 * See if we should execute the command -- if a conditional
 	 * we always execute it, otherwise, check the state of cond.
 	 */
-
 	if ((com->c_argtype & F) == 0)
 		if ((cond == CRCV && !rcvmode) || (cond == CSEND && rcvmode))
 			return(0);
@@ -357,7 +358,6 @@ execute(linebuf, contxt)
 	 * If we are sourcing an interactive command, it's
 	 * an error.
 	 */
-
 	if (!rcvmode && (com->c_argtype & M) == 0) {
 		printf("May not execute \"%s\" while sending\n",
 		    com->c_name);
@@ -536,13 +536,14 @@ out:
  * lists to message list functions.
  */
 void
-setmsize(sz)
-	int sz;
+setmsize(int n)
 {
+	size_t msize;
 
-	if (msgvec != 0)
-		(void)free(msgvec);
-	msgvec = (int *)calloc(sz + 1, sizeof(*msgvec));
+	msize = (n + 1) * sizeof(*msgvec);
+	if ((msgvec = realloc(msgvec, msize)) == NULL)
+		errx(1, "Out of memory");
+	memset(msgvec, 0, msize);
 }
 
 /*
@@ -551,8 +552,7 @@ setmsize(sz)
  */
 
 const struct cmd *
-lex(word)
-	char word[];
+lex(char *word)
 {
 	extern const struct cmd cmdtab[];
 	const struct cmd *cp;
@@ -562,7 +562,7 @@ lex(word)
 	for (cp = &cmdtab[0]; cp->c_name != NULL; cp++)
 		if (isprefix(word, cp->c_name))
 			return(cp);
-	return(NONE);
+	return(NULL);
 }
 
 /*
@@ -570,8 +570,7 @@ lex(word)
  * Return true if yep.
  */
 int
-isprefix(as1, as2)
-	char *as1, *as2;
+isprefix(char *as1, char *as2)
 {
 	char *s1, *s2;
 
@@ -590,13 +589,10 @@ isprefix(as1, as2)
  * Close all open files except 0, 1, 2, and the temporary.
  * Also, unstack all source files.
  */
-
 int	inithdr;			/* am printing startup headers */
 
-/*ARGSUSED*/
 void
-intr(s)
-	int s;
+dointr(void)
 {
 
 	noreset = 0;
@@ -613,42 +609,6 @@ intr(s)
 		image = -1;
 	}
 	fputs("Interrupt\n", stderr);
-	reset(0);
-}
-
-/*
- * When we wake up after ^Z, reprint the prompt.
- */
-void
-stop(s)
-	int s;
-{
-	sig_t old_action = signal(s, SIG_DFL);
-	sigset_t nset;
-
-	(void)sigemptyset(&nset);
-	(void)sigaddset(&nset, s);
-	(void)sigprocmask(SIG_UNBLOCK, &nset, NULL);
-	(void)kill(0, s);
-	(void)sigprocmask(SIG_BLOCK, &nset, NULL);
-	(void)signal(s, old_action);
-	if (reset_on_stop) {
-		reset_on_stop = 0;
-		reset(0);
-	}
-}
-
-/*
- * Branch here on hangup signal and simulate "exit".
- */
-/*ARGSUSED*/
-void
-hangup(s)
-	int s;
-{
-
-	/* nothing to do? */
-	exit(1);
 }
 
 /*
@@ -656,7 +616,7 @@ hangup(s)
  * give the message count, and print a header listing.
  */
 void
-announce()
+announce(void)
 {
 	int vec[2], mdot;
 
@@ -676,8 +636,7 @@ announce()
  * Return a likely place to set dot.
  */
 int
-newfileinfo(omsgCount)
-	int omsgCount;
+newfileinfo(int omsgCount)
 {
 	struct message *mp;
 	int u, n, mdot, d, s;
@@ -707,7 +666,7 @@ newfileinfo(omsgCount)
 	}
 	ename = mailname;
 	if (getfold(fname, sizeof(fname)) >= 0) {
-		strncat(fname, "/", sizeof(fname) - strlen(fname) - 1);
+		strlcat(fname, "/", sizeof(fname));
 		if (strncmp(fname, mailname, strlen(fname)) == 0) {
 			(void)snprintf(zname, sizeof(zname), "+%s",
 			    mailname + strlen(fname));
@@ -736,13 +695,11 @@ newfileinfo(omsgCount)
 /*
  * Print the current version number.
  */
-
 /*ARGSUSED*/
 int
-pversion(v)
-	void *v;
+pversion(void *v)
 {
-	extern char *version;
+	extern const char version[];
 
 	printf("Version %s\n", version);
 	return(0);
@@ -752,8 +709,7 @@ pversion(v)
  * Load a file of user definitions.
  */
 void
-load(name)
-	char *name;
+load(char *name)
 {
 	FILE *in, *oldin;
 

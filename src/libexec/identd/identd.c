@@ -1,4 +1,4 @@
-/*	$OpenBSD: identd.c,v 1.21 2001/09/19 10:58:07 mpech Exp $	*/
+/*	$OpenBSD: identd.c,v 1.26 2002/03/12 19:45:09 millert Exp $	*/
 
 /*
  * This program is in the public domain and may be used freely by anyone
@@ -36,6 +36,7 @@
 #include "error.h"
 
 extern char *version;
+extern char *__progname;
 
 int     verbose_flag = 0;
 int     debug_flag = 0;
@@ -56,21 +57,16 @@ char   *charset_name = "";
 char   *indirect_host = NULL;
 char   *indirect_password = NULL;
 
-static int child_pid;
-
-#ifdef LOG_DAEMON
-static int syslog_facility = LOG_DAEMON;
-#endif
+static pid_t child_pid;
 
 void
 usage()
 {
 	syslog(LOG_ERR,
-	    "identd [-i | -w | -b] [-t seconds] [-u uid] [-g gid] [-p port] "
-	    "[-a address] [-c charset] [-noelVvmNUdh]");
+	    "%s [-i | -w | -b] [-t seconds] [-u uid] [-g gid] [-p port] "
+	    "[-a address] [-c charset] [-noelVvmNUdh]", __progname);
 	exit(2);
 }
-
 
 /*
  * Return the name of the connecting host, or the IP number as a string.
@@ -134,7 +130,7 @@ gethost6(addr)
 	return(hbuf[bb]);
 }
 
-sig_atomic_t alarm_fired;
+volatile sig_atomic_t alarm_fired;
 
 /*
  * Exit cleanly after our time's up.
@@ -166,12 +162,13 @@ main(argc, argv)
 	int     timeout = 0;
 	char   *portno = "auth";
 	char   *bind_address = NULL;
-	int     set_uid = 0;
-	int     set_gid = 0;
+	uid_t   set_uid = 0;
+	gid_t   set_gid = 0;
 	extern char *optarg;
 	extern int optind;
 	int ch;
 
+	openlog(__progname, LOG_PID, LOG_DAEMON);
 	/*
 	 * Parse the command line arguments
 	 */
@@ -199,21 +196,24 @@ main(argc, argv)
 			bind_address = optarg;
 			break;
 		case 'u':
-			if (isdigit(optarg[0])) {
-				set_uid = atoi(optarg);
-				break;
-			}
 			pwd = getpwnam(optarg);
-			if (!pwd)
-				ERROR1("no such user (%s) for -u option", optarg);
+			if (pwd == NULL && isdigit(optarg[0])) {
+				set_uid = atoi(optarg);
+				if ((pwd = getpwuid(set_uid)) == NULL)
+					break;
+			}
+			if (pwd == NULL)
+				ERROR1("no such user (%s) for -u option",
+				    optarg);
 			else {
 				set_uid = pwd->pw_uid;
-				if (setgid == 0)
+				if (set_gid == 0)
 					set_gid = pwd->pw_gid;
 			}
 			break;
 		case 'g':
-			if (isdigit(optarg[0])) {
+			grp = getgrnam(optarg);
+			if (grp == NULL && isdigit(optarg[0])) {
 				set_gid = atoi(optarg);
 				break;
 			}
@@ -243,7 +243,7 @@ main(argc, argv)
 			number_flag = 1;
 			break;
 		case 'V':	/* Give version of this daemon */
-			printf("[identd version %s]\r\n", version);
+			(void)fprintf(stderr, "[identd version %s]\r\n", version);
 			exit(0);
 			break;
 		case 'v':	/* Be verbose */
@@ -447,14 +447,9 @@ main(argc, argv)
 	/*
 	 * Open the connection to the Syslog daemon if requested
 	 */
-	if (syslog_flag) {
-#ifdef LOG_DAEMON
-		openlog("identd", LOG_PID, syslog_facility);
-#else
-		openlog("identd", LOG_PID);
-#endif
+	if (syslog_flag)
 		syslog(LOG_INFO, "Connection from %s", gethost(&sa));
-	}
+
 	/*
 	 * Get local internet address
 	 */

@@ -1,4 +1,4 @@
-# $OpenBSD: Makefile.inc,v 1.1.1.1 2001/08/15 14:37:10 fgsch Exp $
+# $OpenBSD: Makefile.inc,v 1.3 2002/01/03 00:43:47 art Exp $
 # Copyright (c) 1993 Chris Provenzano, proven@athena.mit.edu
 
 LIBC_R?=	/usr/lib/libc_r.a
@@ -19,12 +19,4 @@ CFLAGS+=	-I${.CURDIR}/../include
 
 NOMAN=
 
-MAXTIME=	5
-
-regress: ${PROG}
-	@echo; echo "*** $? ***"; \
-	if (ulimit -t ${MAXTIME}; ${.OBJDIR}/$?); then \
-		echo "-- $? passed"; \
-	else \
-		echo "-- $? FAILED (exit code $$?)" >&2; \
-	fi; 
+REGRESSMAXTIME?=5

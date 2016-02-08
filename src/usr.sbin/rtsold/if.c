@@ -1,4 +1,4 @@
-/*	$OpenBSD: if.c,v 1.7 2001/07/09 22:37:33 itojun Exp $	*/
+/*	$OpenBSD: if.c,v 1.10 2002/02/17 19:42:39 millert Exp $	*/
 /*	$KAME: if.c,v 1.15 2001/05/22 06:04:17 jinmei Exp $	*/
 
 /*
@@ -76,12 +76,12 @@
 extern int rssock;
 static int ifsock;
 
-static int get_llflag __P((const char *name));
+static int get_llflag(const char *name);
 #ifndef HAVE_GETIFADDRS
-static unsigned int if_maxindex __P((void));
+static unsigned int if_maxindex(void);
 #endif
-static void get_rtaddrs __P((int addrs, struct sockaddr *sa,
-			     struct sockaddr **rti_info));
+static void get_rtaddrs(int addrs, struct sockaddr *sa,
+    struct sockaddr **rti_info);
 
 int
 ifinit()
@@ -353,7 +353,7 @@ get_llflag(const char *name)
 			continue;
 
 		memset(&ifr6, 0, sizeof(ifr6));
-		strcpy(ifr6.ifr_name, name);
+		strncpy(ifr6.ifr_name, name, sizeof(ifr6.ifr_name));
 		memcpy(&ifr6.ifr_ifru.ifru_addr, sin6, sin6->sin6_len);
 		if (ioctl(s, SIOCGIFAFLAG_IN6, &ifr6) < 0) {
 			warnmsg(LOG_ERR, __FUNCTION__,
@@ -415,7 +415,7 @@ get_llflag(const char *name)
 			continue;
 
 		memset(&ifr6, 0, sizeof(ifr6));
-		strcpy(ifr6.ifr_name, name);
+		strncpy(ifr6.ifr_name, name, sizeof(ifr6.ifr_name));
 		memcpy(&ifr6.ifr_ifru.ifru_addr, sin6, sin6->sin6_len);
 		if (ioctl(s, SIOCGIFAFLAG_IN6, &ifr6) < 0) {
 			warnmsg(LOG_ERR, __FUNCTION__,

@@ -1,4 +1,4 @@
-/*	$OpenBSD: head.c,v 1.7 2001/07/04 06:31:25 deraadt Exp $	*/
+/*	$OpenBSD: head.c,v 1.9 2002/03/14 16:44:24 mpech Exp $	*/
 
 /*
  * Copyright (c) 1980, 1987 Regents of the University of California.
@@ -41,7 +41,7 @@ char copyright[] =
 
 #ifndef lint
 /*static char sccsid[] = "from: @(#)head.c	5.5 (Berkeley) 6/1/90";*/
-static char rcsid[] = "$OpenBSD: head.c,v 1.7 2001/07/04 06:31:25 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: head.c,v 1.9 2002/03/14 16:44:24 mpech Exp $";
 #endif /* not lint */
 
 #include <stdio.h>
@@ -52,7 +52,7 @@ static char rcsid[] = "$OpenBSD: head.c,v 1.7 2001/07/04 06:31:25 deraadt Exp $"
 #include <errno.h>
 #include <unistd.h>
 
-static void usage __P((void));
+static void usage(void);
 
 /*
  * head - give the first few lines of a stream or of each of a set of files
@@ -65,7 +65,7 @@ main(argc, argv)
 	int	argc;
 	char	**argv;
 {
-	register long cnt;
+	long 	cnt;
 	int	ch, firsttime;
 	long	linecnt = 10;
 	char	*inval = NULL, *p = NULL;

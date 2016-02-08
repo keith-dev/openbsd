@@ -1,4 +1,4 @@
-/*	$OpenBSD: SYS.h,v 1.10 2001/09/20 21:13:27 drahn Exp $	*/
+/*	$OpenBSD: SYS.h,v 1.12 2002/02/19 22:12:36 millert Exp $	*/
 /*-
  * Copyright (c) 1994
  *	Andrew Cagney.  All rights reserved.

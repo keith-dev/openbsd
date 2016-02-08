@@ -1,4 +1,4 @@
-/*	$OpenBSD: fio.c,v 1.18 2001/01/16 05:36:08 millert Exp $	*/
+/*	$OpenBSD: fio.c,v 1.22 2002/03/14 06:51:42 mpech Exp $	*/
 /*	$NetBSD: fio.c,v 1.8 1997/07/07 22:57:55 phil Exp $	*/
 
 /*
@@ -36,9 +36,9 @@
 
 #ifndef lint
 #if 0
-static char sccsid[] = "@(#)fio.c	8.2 (Berkeley) 4/20/95";
+static const char sccsid[] = "@(#)fio.c	8.2 (Berkeley) 4/20/95";
 #else
-static char rcsid[] = "$OpenBSD: fio.c,v 1.18 2001/01/16 05:36:08 millert Exp $";
+static const char rcsid[] = "$OpenBSD: fio.c,v 1.22 2002/03/14 06:51:42 mpech Exp $";
 #endif
 #endif /* not lint */
 
@@ -57,14 +57,13 @@ static char rcsid[] = "$OpenBSD: fio.c,v 1.18 2001/01/16 05:36:08 millert Exp $"
  * File I/O.
  */
 
+static volatile sig_atomic_t fiosignal;
+
 /*
  * Wrapper for read() to catch EINTR.
  */
 ssize_t
-myread(fd, buf, len)
-	int fd;
-	char *buf;
-	int len;
+myread(int fd, char *buf, int len)
 {
 	ssize_t nread;
 
@@ -77,9 +76,7 @@ myread(fd, buf, len)
  * Set up the input pointers while copying the mail file into /tmp.
  */
 void
-setptr(ibuf, offset)
-	FILE *ibuf;
-	off_t offset;
+setptr(FILE *ibuf, off_t offset)
 {
 	int c, count;
 	char *cp, *cp2;
@@ -182,10 +179,7 @@ setptr(ibuf, offset)
  * characters written, including the newline if requested.
  */
 int
-putline(obuf, linebuf, outlf)
-	FILE *obuf;
-	char *linebuf;
-	int   outlf;
+putline(FILE *obuf, char *linebuf, int outlf)
 {
 	int c;
 
@@ -206,22 +200,63 @@ putline(obuf, linebuf, outlf)
  * include the newline (or carriage return) at the end.
  */
 int
-readline(ibuf, linebuf, linesize)
-	FILE *ibuf;
-	char *linebuf;
-	int linesize;
+readline(FILE *ibuf, char *linebuf, int linesize, int *signo)
 {
+	struct sigaction act;
+	struct sigaction savetstp;
+	struct sigaction savettou;
+	struct sigaction savettin;
+	struct sigaction saveint;
+	struct sigaction savehup;
+	sigset_t oset;
 	int n;
 
-	clearerr(ibuf);
-	if (fgets(linebuf, linesize, ibuf) == NULL)
-		return(-1);
+	/*
+	 * Setup signal handlers if the caller asked us to catch signals.
+	 * Note that we do not restart system calls since we need the
+	 * read to be interuptible.
+	 */
+	if (signo) {
+		fiosignal = 0;
+		sigemptyset(&act.sa_mask);
+		act.sa_flags = 0;
+		act.sa_handler = fioint;
+		if (sigaction(SIGINT, NULL, &saveint) == 0 &&
+		    saveint.sa_handler != SIG_IGN) {
+			(void)sigaction(SIGINT, &act, &saveint);
+			(void)sigprocmask(SIG_UNBLOCK, &intset, &oset);
+		}
+		if (sigaction(SIGHUP, NULL, &savehup) == 0 &&
+		    savehup.sa_handler != SIG_IGN)
+			(void)sigaction(SIGHUP, &act, &savehup);
+		(void)sigaction(SIGTSTP, &act, &savetstp);
+		(void)sigaction(SIGTTOU, &act, &savettou);
+		(void)sigaction(SIGTTIN, &act, &savettin);
+	}
 
-	n = strlen(linebuf);
-	if (n > 0 && linebuf[n - 1] == '\n')
-		linebuf[--n] = '\0';
-	if (n > 0 && linebuf[n - 1] == '\r')
-		linebuf[--n] = '\0';
+	clearerr(ibuf);
+	if (fgets(linebuf, linesize, ibuf) == NULL) {
+		if (ferror(ibuf))
+			clearerr(ibuf);
+		n = -1;
+	} else {
+		n = strlen(linebuf);
+		if (n > 0 && linebuf[n - 1] == '\n')
+			linebuf[--n] = '\0';
+		if (n > 0 && linebuf[n - 1] == '\r')
+			linebuf[--n] = '\0';
+	}
+
+	if (signo) {
+		(void)sigprocmask(SIG_SETMASK, &oset, NULL);
+		(void)sigaction(SIGINT, &saveint, NULL);
+		(void)sigaction(SIGHUP, &savehup, NULL);
+		(void)sigaction(SIGTSTP, &savetstp, NULL);
+		(void)sigaction(SIGTTOU, &savettou, NULL);
+		(void)sigaction(SIGTTIN, &savettin, NULL);
+		*signo = fiosignal;
+	}
+
 	return(n);
 }
 
@@ -230,8 +265,7 @@ readline(ibuf, linebuf, linesize)
  * passed message pointer.
  */
 FILE *
-setinput(mp)
-	struct message *mp;
+setinput(struct message *mp)
 {
 
 	fflush(otf);
@@ -245,25 +279,21 @@ setinput(mp)
  * a dynamically allocated message structure.
  */
 void
-makemessage(f, omsgCount)
-	FILE *f;
-	int omsgCount;
+makemessage(FILE *f, int omsgCount)
 {
-	size_t size = (msgCount + 1) * sizeof(struct message);
+	size_t size;
+	struct message *nmessage;
 
-	if (omsgCount) {
-		message = (struct message *)realloc(message, size);
-		if (message == 0)
-			errx(1, "Insufficient memory for %d messages\n",
-			    msgCount);
-	} else {
-		if (message != 0)
-			(void)free(message);
-		if ((message = (struct message *)malloc(size)) == NULL)
-			errx(1, "Insufficient memory for %d messages",
-			    msgCount);
-		dot = message;
-	}
+	size = (msgCount + 1) * sizeof(struct message);
+	nmessage = (struct message *)realloc(message, size);
+	if (nmessage == 0)
+		errx(1, "Insufficient memory for %d messages",
+		    msgCount);
+	if (omsgCount == 0 || message == NULL)
+		dot = nmessage;
+	else
+		dot = nmessage + (dot - message);
+	message = nmessage;
 	size -= (omsgCount + 1) * sizeof(struct message);
 	fflush(f);
 	(void)lseek(fileno(f), (off_t)sizeof(*message), 0);
@@ -279,10 +309,9 @@ makemessage(f, omsgCount)
  * If the write fails, return 1, else 0
  */
 int
-append(mp, f)
-	struct message *mp;
-	FILE *f;
+append(struct message *mp, FILE *f)
 {
+
 	return(fwrite((char *) mp, sizeof(*mp), 1, f) != 1);
 }
 
@@ -290,8 +319,7 @@ append(mp, f)
  * Delete or truncate a file, but only if the file is a plain file.
  */
 int
-rm(name)
-	char *name;
+rm(char *name)
 {
 	struct stat sb;
 
@@ -316,7 +344,7 @@ static sigset_t nset, oset;
  * Hold signals SIGHUP, SIGINT, and SIGQUIT.
  */
 void
-holdsigs()
+holdsigs(void)
 {
 
 	if (sigdepth++ == 0) {
@@ -332,7 +360,7 @@ holdsigs()
  * Release signals SIGHUP, SIGINT, and SIGQUIT.
  */
 void
-relsesigs()
+relsesigs(void)
 {
 
 	if (--sigdepth == 0)
@@ -340,12 +368,36 @@ relsesigs()
 }
 
 /*
+ * Unblock and ignore a signal
+ */
+int
+ignoresig(int sig, struct sigaction *oact, sigset_t *oset)
+{
+	struct sigaction act;
+	sigset_t nset;
+	int error;
+
+	sigemptyset(&act.sa_mask);
+	act.sa_flags = SA_RESTART;
+	act.sa_handler = SIG_IGN;
+	error = sigaction(sig, &act, oact);
+
+	if (error == 0) {
+		sigemptyset(&nset);
+		sigaddset(&nset, sig);
+		(void)sigprocmask(SIG_UNBLOCK, &nset, oset);
+	} else if (oset != NULL)
+		(void)sigprocmask(SIG_BLOCK, NULL, oset);
+
+	return(error);
+}
+
+/*
  * Determine the size of the file possessed by
  * the passed buffer.
  */
 off_t
-fsize(iob)
-	FILE *iob;
+fsize(FILE *iob)
 {
 	struct stat sbuf;
 
@@ -366,12 +418,12 @@ fsize(iob)
  * Return the file name as a dynamic string.
  */
 char *
-expand(name)
-	char *name;
+expand(char *name)
 {
 	char xname[PATHSIZE];
 	char cmdbuf[PATHSIZE];		/* also used for file names */
-	int pid, l;
+	pid_t pid;
+	int l;
 	char *cp, *shell;
 	int pivec[2];
 	struct stat sbuf;
@@ -409,8 +461,9 @@ expand(name)
 		(void)snprintf(xname, sizeof(xname), "%s%s", homedir, name + 1);
 		name = savestr(xname);
 	}
-	if (!anyof(name, "~{[*?$`'\"\\"))
+	if (strpbrk(name, "~{[*?$`'\"\\") == NULL)
 		return(name);
+	/* XXX - just use glob(3) and env expansion instead? */
 	if (pipe(pivec) < 0) {
 		warn("pipe");
 		return(name);
@@ -458,18 +511,15 @@ expand(name)
  * Determine the current folder directory name.
  */
 int
-getfold(name, namelen)
-	char *name;
-	int namelen;
+getfold(char *name, int namelen)
 {
 	char *folder;
 
 	if ((folder = value("folder")) == NULL)
 		return(-1);
-	if (*folder == '/') {
-		strncpy(name, folder, namelen-1);
-		name[namelen-1] = '\0';
-	} else
+	if (*folder == '/')
+		strlcpy(name, folder, namelen);
+	else
 		(void)snprintf(name, namelen, "%s/%s", homedir ? homedir : ".",
 		    folder);
 	return(0);
@@ -479,7 +529,7 @@ getfold(name, namelen)
  * Return the name of the dead.letter file.
  */
 char *
-getdeadletter()
+getdeadletter(void)
 {
 	char *cp;
 
@@ -492,4 +542,15 @@ getdeadletter()
 		cp = expand(buf);
 	}
 	return(cp);
+}
+
+/*
+ * Signal handler used by readline() to catch SIGINT, SIGHUP, SIGTSTP,
+ * SIGTTOU, SIGTTIN.
+ */
+void
+fioint(int s)
+{
+
+	fiosignal = s;
 }

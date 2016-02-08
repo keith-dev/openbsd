@@ -1,4 +1,4 @@
-/*	$OpenBSD: kbd_wscons.c,v 1.4 2001/07/07 18:26:14 deraadt Exp $ */
+/*	$OpenBSD: kbd_wscons.c,v 1.6 2002/04/12 02:16:01 deraadt Exp $ */
 
 /*
  * Copyright (c) 2001 Mats O Jansson.  All rights reserved.
@@ -49,12 +49,14 @@
 #define SA_UKBD  1
 #define SA_AKBD	 2
 #define SA_ZSKBD 3
+#define SA_SUNKBD 4
 	
 struct nlist nl[] = {
 	{ "_pckbd_keydesctab" },
 	{ "_ukbd_keydesctab" },
 	{ "_akbd_keydesctab" },
 	{ "_zskbd_keydesctab" },
+	{ "_sunkbd_keydesctab" },
 	{ NULL },
 };
 
@@ -63,6 +65,7 @@ char *kbtype_tab[] = {
 	"usb",
 	"adb",
 	"lk201",
+	"sun",
 };
 
 struct nameint {
@@ -85,6 +88,7 @@ struct nameint kbdvar_tab[] = {
 extern char *__progname;
 int rebuild = 0;
 
+#ifndef NOKVM
 void
 kbd_show_enc(kd, idx)
 	kvm_t *kd;
@@ -134,6 +138,7 @@ kbd_show_enc(kd, idx)
 	}
 	printf("\n");
 }
+#endif
 
 void
 kbd_list()
@@ -146,6 +151,7 @@ kbd_list()
 	int	usb_kbd = 0;
 	int	adb_kbd = 0;
 	int	zs_kbd = 0;
+	int	sun_kbd = 0;
 
 	/* Go through all keyboards. */
 	for (i = 0; i < NUM_KBD; i++) {
@@ -165,10 +171,13 @@ kbd_list()
 				adb_kbd++;
 			if (kbtype == WSKBD_TYPE_LK201)
 				zs_kbd++;
+			if (kbtype == WSKBD_TYPE_SUN)
+				sun_kbd++;
 			close(fd);
 		}
 	}
 
+#ifndef NOKVM
 	if ((kd = kvm_openfiles(NULL,NULL,NULL,O_RDONLY, errbuf)) == 0)
 		errx(1, "kvm_openfiles: %s", errbuf);
 
@@ -187,11 +196,17 @@ kbd_list()
 	if (zs_kbd > 0)
 		kbd_show_enc(kd, SA_ZSKBD);
 
+	if (sun_kbd > 0)
+		kbd_show_enc(kd, SA_SUNKBD);
+
 	kvm_close(kd);
 	
 	if (rebuild > 0) {
 		printf("Unknown encoding or variant. kbd(1) needs to be rebuild.\n");
 	}
+#else
+	printf("List not available, sorry.\n");
+#endif
 }
 
 void

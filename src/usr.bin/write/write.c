@@ -1,4 +1,4 @@
-/*	$OpenBSD: write.c,v 1.12 2001/06/27 06:53:55 jasoni Exp $	*/
+/*	$OpenBSD: write.c,v 1.16 2002/02/21 07:32:55 fgsch Exp $	*/
 /*	$NetBSD: write.c,v 1.5 1995/08/31 21:48:32 jtc Exp $	*/
 
 /*
@@ -47,7 +47,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)write.c	8.2 (Berkeley) 4/27/95";
 #endif
-static char *rcsid = "$OpenBSD: write.c,v 1.12 2001/06/27 06:53:55 jasoni Exp $";
+static char *rcsid = "$OpenBSD: write.c,v 1.16 2002/02/21 07:32:55 fgsch Exp $";
 #endif /* not lint */
 
 #include <sys/types.h>
@@ -66,19 +66,19 @@ static char *rcsid = "$OpenBSD: write.c,v 1.12 2001/06/27 06:53:55 jasoni Exp $"
 #include <err.h>
 #include <vis.h>
 
-void done __P((int sig));
-void do_write __P((char *, char *, uid_t));
-void wr_fputs __P((char *));
-void search_utmp __P((char *, char *, char *, uid_t));
-int term_chk __P((char *, int *, time_t *, int));
-int utmp_chk __P((char *, char *));
+void done(int sig);
+void do_write(char *, char *, uid_t);
+void wr_fputs(char *);
+void search_utmp(char *, char *, char *, uid_t);
+int term_chk(char *, int *, time_t *, int);
+int utmp_chk(char *, char *);
 
 int
 main(argc, argv)
 	int argc;
 	char **argv;
 {
-	register char *cp;
+	char *cp;
 	time_t atime;
 	uid_t myuid;
 	int msgsok, myttyfd;
@@ -111,8 +111,8 @@ main(argc, argv)
 		do_write(tty, mytty, myuid);
 		break;
 	case 3:
-		if (!strncmp(argv[2], _PATH_DEV, strlen(_PATH_DEV)))
-			argv[2] += strlen(_PATH_DEV);
+		if (!strncmp(argv[2], _PATH_DEV, sizeof(_PATH_DEV) - 1))
+			argv[2] += sizeof(_PATH_DEV) - 1;
 		if (utmp_chk(argv[1], argv[2]))
 			errx(1, "%s is not logged in on %s",
 			    argv[1], argv[2]);
@@ -251,8 +251,8 @@ do_write(tty, mytty, myuid)
 	char *tty, *mytty;
 	uid_t myuid;
 {
-	register char *login, *nows;
-	register struct passwd *pwd;
+	char *login, *nows;
+	struct passwd *pwd;
 	time_t now;
 	char path[MAXPATHLEN], host[MAXHOSTNAMELEN], line[512];
 
@@ -290,7 +290,7 @@ do_write(tty, mytty, myuid)
 void
 done(int sig)
 {
-	(void)printf("EOF\r\n");	/* XXX signal race */
+	(void)write(STDOUT_FILENO, "EOF\r\n", 5);
 	if (sig)
 		_exit(0);
 	else
@@ -303,9 +303,9 @@ done(int sig)
  */
 void
 wr_fputs(s)
-	register char *s;
+	char *s;
 {
-	register u_char c;
+	u_char c;
 	char visout[5], *s2;
 
 #define	PUTC(c)	if (putchar(c) == EOF) goto err;

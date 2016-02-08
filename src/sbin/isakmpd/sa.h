@@ -1,4 +1,4 @@
-/*	$OpenBSD: sa.h,v 1.24 2001/06/27 00:48:21 angelos Exp $	*/
+/*	$OpenBSD: sa.h,v 1.27 2002/03/17 21:50:59 angelos Exp $	*/
 /*	$EOM: sa.h,v 1.58 2000/10/10 12:39:01 provos Exp $	*/
 
 /*
@@ -205,12 +205,16 @@ struct sa {
 /* This SA should always be actively renegotiated (with us as initiator).  */
 #define SA_FLAG_ACTIVE_ONLY	0x20
 
+/* Outfile for detailed SA information. */
+#define SA_FILE "/var/run/isakmpd_sa"
+
 extern void proto_free (struct proto *proto);
 extern int sa_add_transform (struct sa *, struct payload *, int,
 			     struct proto **);
 extern int sa_create (struct exchange *, struct transport *);
 extern int sa_enter (struct sa *);
 extern void sa_delete (struct sa *, int);
+extern void sa_teardown_all (void);
 extern struct sa *sa_find (int (*) (struct sa *, void *), void *);
 extern int sa_flag (char *);
 extern void sa_free (struct sa *);
@@ -228,5 +232,7 @@ extern void sa_reference (struct sa *);
 extern void sa_release (struct sa *);
 extern void sa_remove (struct sa *);
 extern void sa_report (void);
+extern void sa_dump (int, int, char *, struct sa *);
+extern void sa_report_all (void);
 extern int sa_setup_expirations (struct sa *);
 #endif /* _SA_H_ */

@@ -39,11 +39,7 @@
 #include <sys/time.h>
 #include "defs.h"
 #include <arpa/inet.h>
-#ifdef __STDC__
 #include <stdarg.h>
-#else
-#include <varargs.h>
-#endif
 
 #define DEFAULT_TIMEOUT	2	/* How long to wait before retrying requests */
 #define DEFAULT_RETRIES 1	/* How many times to ask each router */
@@ -87,22 +83,22 @@ int	show_names = TRUE;
 vifi_t  numvifs;		/* to keep loader happy */
 				/* (see COPY_TABLES macro called in kern.c) */
 
-Node *			find_node __P((u_int32_t addr, Node **ptr));
-Interface *		find_interface __P((u_int32_t addr, Node *node));
-Neighbor *		find_neighbor __P((u_int32_t addr, Node *node));
-int			main __P((int argc, char *argv[]));
-void			ask __P((u_int32_t dst));
-void			ask2 __P((u_int32_t dst));
-int			retry_requests __P((Node *node));
-char *			inet_name __P((u_int32_t addr));
-void			print_map __P((Node *node));
-char *			graph_name __P((u_int32_t addr, char *buf));
-void			graph_edges __P((Node *node));
-void			elide_aliases __P((Node *node));
-void			graph_map __P((void));
-int			get_number __P((int *var, int deflt, char ***pargv,
-						int *pargc));
-u_int32_t			host_addr __P((char *name));
+Node *			find_node(u_int32_t addr, Node **ptr);
+Interface *		find_interface(u_int32_t addr, Node *node);
+Neighbor *		find_neighbor(u_int32_t addr, Node *node);
+int			main(int argc, char *argv[]);
+void			ask(u_int32_t dst);
+void			ask2(u_int32_t dst);
+int			retry_requests(Node *node);
+char *			inet_name(u_int32_t addr);
+void			print_map(Node *node);
+char *			graph_name(u_int32_t addr, char *buf, size_t len);
+void			graph_edges(Node *node);
+void			elide_aliases(Node *node);
+void			graph_map(void);
+int			get_number(int *var, int deflt, char ***pargv,
+			    int *pargc);
+u_int32_t		host_addr(char *name);
 
 
 Node *find_node(addr, ptr)
@@ -171,33 +167,18 @@ Neighbor *find_neighbor(addr, node)
  * message and the current debug level.  For errors of severity LOG_ERR or
  * worse, terminate the program.
  */
-#ifdef __STDC__
 void
 log(int severity, int syserr, char *format, ...)
 {
-	va_list ap;
-	char    fmt[100];
-
-	va_start(ap, format);
-#else
-/*VARARGS3*/
-void 
-log(severity, syserr, format, va_alist)
-	int     severity, syserr;
-	char   *format;
-	va_dcl
-{
-	va_list ap;
-	char    fmt[100];
-
-	va_start(ap);
-#endif
+    va_list ap;
+    char    fmt[100];
 
     switch (debug) {
 	case 0: if (severity > LOG_WARNING) return;
 	case 1: if (severity > LOG_NOTICE ) return;
 	case 2: if (severity > LOG_INFO   ) return;
 	default:
+	    va_start(ap, format);
 	    fmt[0] = '\0';
 	    if (severity == LOG_WARNING)
 		strcat(fmt, "warning - ");
@@ -712,14 +693,15 @@ void print_map(node)
 }
 
 
-char *graph_name(addr, buf)
+char *graph_name(addr, buf, len)
     u_int32_t addr;
     char *buf;
+    size_t len;
 {
     char *name;
 
     if (show_names  &&  (name = inet_name(addr)))
-	strcpy(buf, name);
+	strlcpy(buf, name, len);
     else
 	inet_fmt(addr, buf);
 
@@ -732,7 +714,7 @@ void graph_edges(node)
 {
     Interface *ifc;
     Neighbor *nb;
-    char name[100];
+    char name[MAXHOSTNAMELEN];
 
     if (node) {
 	graph_edges(node->left);
@@ -740,7 +722,7 @@ void graph_edges(node)
 	    printf("  %d {$ NP %d0 %d0 $} \"%s%s\" \n",
 		   (int) node->addr,
 		   node->addr & 0xFF, (node->addr >> 8) & 0xFF,
-		   graph_name(node->addr, name),
+		   graph_name(node->addr, name, sizeof(name)),
 		   node->u.interfaces ? "" : "*");
 	    for (ifc = node->u.interfaces; ifc; ifc = ifc->next)
 		for (nb = ifc->neighbors; nb; nb = nb->next) {

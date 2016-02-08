@@ -1,4 +1,4 @@
-/*	$OpenBSD: print.c,v 1.18 2001/08/13 22:41:16 heko Exp $	*/
+/*	$OpenBSD: print.c,v 1.26 2002/03/19 23:54:41 millert Exp $	*/
 /*	$NetBSD: print.c,v 1.27 1995/09/29 21:58:12 cgd Exp $	*/
 
 /*-
@@ -38,7 +38,7 @@
 #if 0
 static char sccsid[] = "@(#)print.c	8.6 (Berkeley) 4/16/94";
 #else
-static char rcsid[] = "$OpenBSD: print.c,v 1.18 2001/08/13 22:41:16 heko Exp $";
+static char rcsid[] = "$OpenBSD: print.c,v 1.26 2002/03/19 23:54:41 millert Exp $";
 #endif
 #endif /* not lint */
 
@@ -50,7 +50,7 @@ static char rcsid[] = "$OpenBSD: print.c,v 1.18 2001/08/13 22:41:16 heko Exp $";
 
 #include <sys/ucred.h>
 #include <sys/sysctl.h>
-#include <vm/vm.h>
+#include <uvm/uvm_extern.h>
 
 #include <err.h>
 #include <grp.h>
@@ -70,7 +70,7 @@ static char rcsid[] = "$OpenBSD: print.c,v 1.18 2001/08/13 22:41:16 heko Exp $";
 extern kvm_t *kd;
 extern int needenv, needcomm, commandonly;
 
-static char *cmdpart __P((char *));
+static char *cmdpart(char *);
 
 #define	min(a,b)	((a) < (b) ? (a) : (b))
 
@@ -123,7 +123,7 @@ command(ki, ve)
 			left = v->width;
 	} else
 		left = -1;
-	if (needenv) {
+	if (needenv && kd != NULL) {
 		argv = kvm_getenvv(kd, ki->ki_p, termwidth);
 		if ((p = argv) != NULL) {
 			while (*p) {
@@ -132,18 +132,21 @@ command(ki, ve)
 				fmt_putc(' ', &left);
 			}
 		}
-	}
+	} else
+		argv = NULL;
 	if (needcomm) {
 		if (!commandonly) {
-			argv = kvm_getargv(kd, ki->ki_p, termwidth);
-			if ((p = argv) != NULL) {
-				while (*p) {
-					fmt_puts(*p, &left);
-					p++;
-					fmt_putc(' ', &left);
+			if (kd != NULL) {
+				argv = kvm_getargv(kd, ki->ki_p, termwidth);
+				if ((p = argv) != NULL) {
+					while (*p) {
+						fmt_puts(*p, &left);
+						p++;
+						fmt_putc(' ', &left);
+					}
 				}
 			}
-			if (argv == 0 || argv[0] == 0 ||
+			if (argv == NULL || argv[0] == '\0' ||
 			    strcmp(cmdpart(argv[0]), KI_PROC(ki)->p_comm)) {
 				fmt_putc('(', &left);
 				fmt_puts(KI_PROC(ki)->p_comm, &left);
@@ -211,7 +214,7 @@ state(k, ve)
 
 	case SSLEEP:
 		if (flag & P_SINTR)	/* interruptible (long) */
-			*cp = p->p_slptime >= MAXSLP ? 'I' : 'S';
+			*cp = p->p_slptime >= maxslp ? 'I' : 'S';
 		else
 			*cp = 'D';
 		break;
@@ -397,13 +400,9 @@ started(k, ve)
 	if (!now)
 		(void)time(&now);
 	if (now - k->ki_u.u_start.tv_sec < 24 * SECSPERHOUR) {
-		/* I *hate* SCCS... */
-		static char fmt[] = __CONCAT("%l:%", "M%p");
-		(void)strftime(buf, sizeof(buf) - 1, fmt, tp);
+		(void)strftime(buf, sizeof(buf) - 1, "%l:%M%p", tp);
 	} else if (now - k->ki_u.u_start.tv_sec < 7 * SECSPERDAY) {
-		/* I *hate* SCCS... */
-		static char fmt[] = __CONCAT("%a%", "I%p");
-		(void)strftime(buf, sizeof(buf) - 1, fmt, tp);
+		(void)strftime(buf, sizeof(buf) - 1, "%a%I%p", tp);
 	} else
 		(void)strftime(buf, sizeof(buf) - 1, "%e%b%y", tp);
 	(void)printf("%-*s", v->width, buf);
@@ -629,7 +628,7 @@ maxrss(k, ve)
 	VAR *v;
 
 	v = ve->var;
-		(void)printf("%*d", v->width, KI_EPROC(k)->e_maxrss / 1024);
+	(void)printf("%*lld", v->width, KI_EPROC(k)->e_maxrss / 1024);
 }
 
 void

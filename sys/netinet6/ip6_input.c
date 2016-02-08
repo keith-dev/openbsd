@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip6_input.c,v 1.33 2001/09/15 03:54:40 frantzen Exp $	*/
+/*	$OpenBSD: ip6_input.c,v 1.41 2002/03/14 01:27:12 millert Exp $	*/
 /*	$KAME: ip6_input.c,v 1.188 2001/03/29 05:34:31 itojun Exp $	*/
 
 /*
@@ -128,11 +128,11 @@ int ip6_sourcecheck_interval;		/* XXX */
 
 struct ip6stat ip6stat;
 
-static void ip6_init2 __P((void *));
+static void ip6_init2(void *);
 
-static int ip6_hopopts_input __P((u_int32_t *, u_int32_t *, struct mbuf **, int *));
+static int ip6_hopopts_input(u_int32_t *, u_int32_t *, struct mbuf **, int *);
 #ifdef PULLDOWN_TEST
-static struct mbuf *ip6_pullexthdr __P((struct mbuf *, size_t, int));
+static struct mbuf *ip6_pullexthdr(struct mbuf *, size_t, int);
 #endif
 
 /*
@@ -220,17 +220,6 @@ ip6_input(m)
 	int nxt, ours = 0;
 	struct ifnet *deliverifp = NULL;
 
-#if 0 /* IPSEC */
-	/*
-	 * should the inner packet be considered authentic?
-	 * see comment in ah4_input().
-	 */
-	if (m) {
-		m->m_flags &= ~M_AUTHIPHDR;
-		m->m_flags &= ~M_AUTHIPDGM;
-	}
-#endif
-
 	/*
 	 * mbuf statistics by kazu
 	 */
@@ -261,14 +250,6 @@ ip6_input(m)
 	IP6_EXTHDR_CHECK(m, 0, sizeof(struct ip6_hdr), /*nothing*/);
 #endif
 
-#if NPF > 0 
-        /*
-         * Packet filter
-         */
-        if (pf_test6(PF_IN, m->m_pkthdr.rcvif, &m) != PF_PASS)
-                goto bad;
-#endif
-
 	if (m->m_len < sizeof(struct ip6_hdr)) {
 		struct ifnet *inifp;
 		inifp = m->m_pkthdr.rcvif;
@@ -287,6 +268,18 @@ ip6_input(m)
 		goto bad;
 	}
 
+#if NPF > 0 
+        /*
+         * Packet filter
+         */
+	if (pf_test6(PF_IN, m->m_pkthdr.rcvif, &m) != PF_PASS)
+		goto bad;
+	if (m == NULL)
+		return;
+
+	ip6 = mtod(m, struct ip6_hdr *);
+#endif
+
 	ip6stat.ip6s_nxthist[ip6->ip6_nxt]++;
 
 #ifdef ALTQ
@@ -297,25 +290,28 @@ ip6_input(m)
 #endif
 
 	/*
-	 * Scope check
+	 * Check against address spoofing/corruption.
 	 */
 	if (IN6_IS_ADDR_MULTICAST(&ip6->ip6_src) ||
 	    IN6_IS_ADDR_UNSPECIFIED(&ip6->ip6_dst)) {
+		/*
+		 * XXX: "badscope" is not very suitable for a multicast source.
+		 */
 		ip6stat.ip6s_badscope++;
 		in6_ifstat_inc(m->m_pkthdr.rcvif, ifs6_in_addrerr);
 		goto bad;
 	}
 	/*
-	 * The following check is not documented in the spec.  Malicious party
-	 * may be able to use IPv4 mapped addr to confuse tcp/udp stack and
-	 * bypass security checks (act as if it was from 127.0.0.1 by using
-	 * IPv6 src ::ffff:127.0.0.1).	Be cautious.
+	 * The following check is not documented in specs.  A malicious
+	 * party may be able to use IPv4 mapped addr to confuse tcp/udp stack
+	 * and bypass security checks (act as if it was from 127.0.0.1 by using
+	 * IPv6 src ::ffff:127.0.0.1).  Be cautious.
 	 *
-	 * This check chokes if we are in SIIT cloud.  As none of BSDs support
-	 * IPv4-less kernel compilation, we cannot support SIIT environment
-	 * at all.  So, it makes more sense for us to reject any malicious
-	 * packets for non-SIIT environment, than try to do a partical support
-	 * for SIIT environment.
+	 * This check chokes if we are in an SIIT cloud.  As none of BSDs
+	 * support IPv4-less kernel compilation, we cannot support SIIT
+	 * environment at all.  So, it makes more sense for us to reject any
+	 * malicious packets for non-SIIT environment, than try to do a
+	 * partical support for SIIT environment.
 	 */
 	if (IN6_IS_ADDR_V4MAPPED(&ip6->ip6_src) ||
 	    IN6_IS_ADDR_V4MAPPED(&ip6->ip6_dst)) {
@@ -562,7 +558,7 @@ ip6_input(m)
 		ip6 = mtod(m, struct ip6_hdr *);
 
 		/*
-		 * if the payload length field is 0 and the next header field  
+		 * if the payload length field is 0 and the next header field
 		 * indicates Hop-by-Hop Options header, then a Jumbo Payload
 		 * option MUST be included.
 		 */
@@ -1178,6 +1174,7 @@ ip6_savecontrol(in6p, mp, ip6, m)
 #endif
 		}
 	  loopend:
+	  	;
 	}
 	if ((in6p->in6p_flags & IN6P_HOPOPTS) && privileged) {
 		/* to be done */
@@ -1347,6 +1344,8 @@ ip6_nexthdr(m, off, proto, nxtp)
 		if (nxtp)
 			*nxtp = ip6e.ip6e_nxt;
 		off += (ip6e.ip6e_len + 2) << 2;
+		if (m->m_pkthdr.len < off)
+			return -1;
 		return off;
 
 	case IPPROTO_HOPOPTS:
@@ -1358,6 +1357,8 @@ ip6_nexthdr(m, off, proto, nxtp)
 		if (nxtp)
 			*nxtp = ip6e.ip6e_nxt;
 		off += (ip6e.ip6e_len + 1) << 3;
+		if (m->m_pkthdr.len < off)
+			return -1;
 		return off;
 
 	case IPPROTO_NONE:
@@ -1417,7 +1418,7 @@ u_char	inet6ctlerrmap[PRC_NCMDS] = {
 	ENOPROTOOPT
 };
 
-#include <vm/vm.h>
+#include <uvm/uvm_extern.h>
 #include <sys/sysctl.h>
 
 int

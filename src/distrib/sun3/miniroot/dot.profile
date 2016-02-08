@@ -1,4 +1,4 @@
-#	$OpenBSD: dot.profile,v 1.5 2001/09/17 14:52:18 millert Exp $
+#	$OpenBSD: dot.profile,v 1.10 2002/04/13 17:36:56 deraadt Exp $
 #
 # Copyright (c) 1995 Jason R. Thorpe
 # Copyright (c) 1994 Christopher G. Demetriou
@@ -31,25 +31,29 @@
 #
 
 export PATH=/sbin:/bin:/usr/bin:/usr/sbin:/
-export HISTFILE=/.sh_history
-
 umask 022
-
 set -o emacs # emacs-style command line editing
 
 # XXX
 # the TERM/EDITOR stuff is really well enough parameterized to be moved
 # into install.sub where it could use the routines there and be invoked
 # from the various (semi) MI install and upgrade scripts
-
 # terminals believed to be in termcap, default TERM
-TERMS="sun vt* pcvt* pc3 dumb"
+TERMS="sun vt* pcvt* dumb"
 TERM=sun
+
+rootdisk=`dmesg|sed -n -e '/OpenBSD /h' -e '//!H' -e '${
+	g
+	p
+}'|sed -n -e '/^root on \([0-9a-z]*\).*/{
+	s//\/dev\/\1/
+	p
+}'`
 
 if [ "X${DONEPROFILE}" = "X" ]; then
 	DONEPROFILE=YES
 
-	mount -u /dev/rd0a /
+	mount -u ${rootdisk:-/dev/rd0a} /
 
 	# set up some sane defaults
 	echo 'erase ^?, werase ^W, kill ^U, intr ^C, status ^T'
@@ -72,20 +76,13 @@ if [ "X${DONEPROFILE}" = "X" ]; then
 		echo -n '(I)nstall, (U)pgrade, or (S)hell? '
 		read _forceloop
 		case "$_forceloop" in
-			i*|I*)
-				/install
-				;;
-
-			u*|U*)
-				/upgrade
-				;;
-
-			s*|S*)
-				;;
-
-			*)
-				_forceloop=""
-				;;
+		i*|I*)	/install
+			;;
+		u*|U*)	/upgrade
+			;;
+		s*|S*)	;;
+		*)	_forceloop=""
+			;;
 		esac
 	done
 fi

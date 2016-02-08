@@ -1,5 +1,5 @@
 #
-#	$OpenBSD: dot.profile,v 1.3 2001/06/23 19:44:34 deraadt Exp $
+#	$OpenBSD: dot.profile,v 1.8 2002/04/13 17:36:56 deraadt Exp $
 #
 # Copyright (c) 1994 Christopher G. Demetriou
 # All rights reserved.
@@ -31,16 +31,8 @@
 #
 
 export PATH=/sbin:/bin:/usr/bin:/usr/sbin:/
-export HISTFILE=/.sh_history
-
 umask 022
-
 set -o emacs # emacs-style command line editing
-
-# XXX
-# the TERM/EDITOR stuff is really well enough parameterized to be moved
-# into install.sub where it could use the routines there and be invoked
-# from the various (semi) MI install and upgrade scripts
 
 # Terminals in termcap, default TERM.
 # This assumes a *small* termcap file.
@@ -48,11 +40,18 @@ TERMS=`grep '^[A-z]' /usr/share/misc/termcap | sed -e 's/|[^|]*$//' -e 's/|/ /g'
 TERM=vt220
 PAGER=more
 
+rootdisk=`dmesg|sed -n -e '/OpenBSD /h' -e '//!H' -e '${
+	g
+	p
+}'|sed -n -e '/^root on \([0-9a-z]*\).*/{
+	s//\/dev\/\1/
+	p
+}'`
+
 if [ "X${DONEPROFILE}" = "X" ]; then
 	DONEPROFILE=YES
 
-	# need a writable root
-	mount -u /dev/rd0a /
+	mount -u ${rootdisk:-/dev/rd0a} /
 
 	isin() {
 		local   _a
@@ -95,20 +94,13 @@ if [ "X${DONEPROFILE}" = "X" ]; then
 		echo -n '(I)nstall, (U)pgrade, or (S)hell? '
 		read _forceloop
 		case "$_forceloop" in
-			i*|I*)
-				/install
-				;;
-
-			u*|U*)
-				/upgrade
-				;;
-
-			s*|S*)
-				;;
-
-			*)
-				_forceloop=""
-				;;
+		i*|I*)	/install
+			;;
+		u*|U*)	/upgrade
+			;;
+		s*|S*)	;;
+		*)	_forceloop=""
+			;;
 		esac
 	done
 fi

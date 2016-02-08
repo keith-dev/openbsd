@@ -1,4 +1,4 @@
-/*	$OpenBSD: res_comp.c,v 1.8 1997/07/09 01:08:49 millert Exp $	*/
+/*	$OpenBSD: res_comp.c,v 1.10 2002/02/19 19:39:36 millert Exp $	*/
 
 /*
  * ++Copyright++ 1985, 1993
@@ -60,7 +60,7 @@
 static char sccsid[] = "@(#)res_comp.c	8.1 (Berkeley) 6/4/93";
 static char rcsid[] = "$From: res_comp.c,v 8.11 1996/12/02 09:17:22 vixie Exp $";
 #else
-static char rcsid[] = "$OpenBSD: res_comp.c,v 1.8 1997/07/09 01:08:49 millert Exp $";
+static char rcsid[] = "$OpenBSD: res_comp.c,v 1.10 2002/02/19 19:39:36 millert Exp $";
 #endif
 #endif /* LIBC_SCCS and not lint */
 
@@ -76,8 +76,7 @@ static char rcsid[] = "$OpenBSD: res_comp.c,v 1.8 1997/07/09 01:08:49 millert Ex
 #include <unistd.h>
 #include <string.h>
 
-static int	dn_find __P((u_char *exp_dn, u_char *msg,
-			     u_char **dnptrs, u_char **lastdnptr));
+static int dn_find(u_char *, u_char *, u_char **, u_char **);
 
 /*
  * Expand compressed domain name 'comp_dn' to full domain name.
@@ -490,13 +489,7 @@ _getlong(msgp)
 }
 
 void
-#if defined(__STDC__) || defined(__cplusplus)
-__putshort(register u_int16_t s, register u_char *msgp)	/* must match proto */
-#else
-__putshort(s, msgp)
-	register u_int16_t s;
-	register u_char *msgp;
-#endif
+__putshort(register u_int16_t s, register u_char *msgp)
 {
 	PUTSHORT(s, msgp);
 }

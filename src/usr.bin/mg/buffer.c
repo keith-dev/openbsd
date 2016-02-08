@@ -1,4 +1,4 @@
-/*	$OpenBSD: buffer.c,v 1.16 2001/08/18 21:36:11 deraadt Exp $	*/
+/*	$OpenBSD: buffer.c,v 1.28 2002/03/16 19:30:29 vincent Exp $	*/
 
 /*
  *		Buffer handling.
@@ -8,7 +8,23 @@
 #include "kbd.h"		/* needed for modes */
 #include <stdarg.h>
 
-static BUFFER  *makelist	__P((void));
+static BUFFER  *makelist(void);
+
+int
+togglereadonly(void)
+{
+	if (!(curbp->b_flag & BFREADONLY)) {
+		curbp->b_flag |= BFREADONLY;
+		ewprintf("Now readonly");
+	} else {
+		curbp->b_flag &=~ BFREADONLY;
+		if (curbp->b_flag & BFCHG)
+			ewprintf("Warning: Buffer was modified");
+	}
+	curwp->w_flag |= WFMODE;
+
+	return(1);
+}
 
 /*
  * Attach a buffer to a window. The values of dot and mark come
@@ -18,16 +34,15 @@ static BUFFER  *makelist	__P((void));
  */
 /* ARGSUSED */
 int
-usebuffer(f, n)
-	int     f, n;
+usebuffer(int f, int n)
 {
 	BUFFER *bp;
 	int     s;
 	char    bufn[NBUFN];
 
 	/* Get buffer to use from user */
-	if ((curbp->b_altb == NULL)
-	    && ((curbp->b_altb = bfind("*scratch*", TRUE)) == NULL))
+	if ((curbp->b_altb == NULL) &&
+	    ((curbp->b_altb = bfind("*scratch*", TRUE)) == NULL))
 		s = eread("Switch to buffer: ", bufn, NBUFN, EFNEW | EFBUF);
 	else
 		s = eread("Switch to buffer: (default %s) ", bufn, NBUFN,
@@ -50,8 +65,7 @@ usebuffer(f, n)
  */
 /* ARGSUSED */
 int
-poptobuffer(f, n)
-	int     f, n;
+poptobuffer(int f, int n)
 {
 	BUFFER *bp;
 	MGWIN  *wp;
@@ -59,8 +73,8 @@ poptobuffer(f, n)
 	char    bufn[NBUFN];
 
 	/* Get buffer to use from user */
-	if ((curbp->b_altb == NULL)
-	    && ((curbp->b_altb = bfind("*scratch*", TRUE)) == NULL))
+	if ((curbp->b_altb == NULL) &&
+	    ((curbp->b_altb = bfind("*scratch*", TRUE)) == NULL))
 		s = eread("Switch to buffer in other window: ", bufn, NBUFN,
 			  EFNEW | EFBUF);
 	else
@@ -90,8 +104,7 @@ poptobuffer(f, n)
  */
 /* ARGSUSED */
 int
-killbuffer(f, n)
-	int     f, n;
+killbuffer(int f, int n)
 {
 	BUFFER *bp;
 	BUFFER *bp1;
@@ -99,9 +112,10 @@ killbuffer(f, n)
 	MGWIN  *wp;
 	int     s;
 	char    bufn[NBUFN];
+	struct undo_rec *rec, *next;
 
 	if ((s = eread("Kill buffer: (default %s) ", bufn, NBUFN, EFNEW | EFBUF,
-		       curbp->b_bname)) == ABORT)
+	    curbp->b_bname)) == ABORT)
 		return (s);
 	else if (s == FALSE)
 		bp = curbp;
@@ -157,7 +171,13 @@ killbuffer(f, n)
 			bp1->b_altb = (bp->b_altb == bp1) ? NULL : bp->b_altb;
 		bp1 = bp1->b_bufp;
 	}
-	free(bp->b_bname);			/* Release name block	 */
+	rec = LIST_FIRST(&bp->b_undo);
+	while (rec != NULL) {
+		next = LIST_NEXT(rec, next);
+		free_undo_record(rec);
+		rec = next;
+	}
+	free((char *)bp->b_bname);		/* Release name block	 */
 	free(bp);				/* Release buffer block */
 	return TRUE;
 }
@@ -167,13 +187,32 @@ killbuffer(f, n)
  */
 /* ARGSUSED */
 int
-savebuffers(f, n)
-	int f, n;
+savebuffers(int f, int n)
 {
 	if (anycb(f) == ABORT)
 		return ABORT;
 	return TRUE;
 }
+
+/*
+ * Listing buffers.
+ */
+static int listbuf_ncol;
+
+static int	listbuf_goto_buffer(int f, int n);
+
+static PF listbuf_pf[] = {
+	listbuf_goto_buffer,
+};
+
+static struct KEYMAPE (1 + IMAPEXT) listbufmap = {
+	1,
+	1 + IMAPEXT,
+	rescan,
+	{
+		{ CCHR('M'), CCHR('M'), listbuf_pf, NULL },
+	}
+};
 
 /*
  * Display the buffer list. This is done
@@ -184,16 +223,25 @@ savebuffers(f, n)
  */
 /* ARGSUSED */
 int
-listbuffers(f, n)
-	int f, n;
+listbuffers(int f, int n)
 {
+	static int initialized = 0;
 	BUFFER *bp;
 	MGWIN  *wp;
+
+	if (!initialized) {
+		maps_add((KEYMAP *)&listbufmap, "listbufmap");
+		initialized = 1;
+	}
 
 	if ((bp = makelist()) == NULL || (wp = popbuf(bp)) == NULL)
 		return FALSE;
 	wp->w_dotp = bp->b_dotp;/* fix up if window already on screen */
 	wp->w_doto = bp->b_doto;
+	bp->b_modes[0] = name_mode("fundamental");
+	bp->b_modes[1] = name_mode("listbufmap");
+	bp->b_nmodes = 1;
+
 	return TRUE;
 }
 
@@ -204,17 +252,21 @@ listbuffers(f, n)
  * is an error (if there is no memory).
  */
 static BUFFER *
-makelist()
+makelist(void)
 {
 	int	w = ncol / 2;
 	BUFFER *bp, *blp;
 	LINE   *lp;
+
 
 	if ((blp = bfind("*Buffer List*", TRUE)) == NULL)
 		return NULL;
 	if (bclear(blp) != TRUE)
 		return NULL;
 	blp->b_flag &= ~BFCHG;		/* Blow away old.	 */
+	blp->b_flag |= BFREADONLY;
+
+	listbuf_ncol = ncol;		/* cache ncol for listbuf_goto_buffer */
 
 	if (addlinef(blp, "%-*s%s", w, " MR Buffer", "Size   File") == FALSE ||
 	    addlinef(blp, "%-*s%s", w, " -- ------", "----   ----") == FALSE)
@@ -234,12 +286,14 @@ makelist()
 				nbytes--;	/* no bonus newline	 */
 		}
 
-		if (addlinef(blp, "%c%c%c %-*s%-6d %-*s",
+		if (addlinef(blp, "%c%c%c %-*.*s%c%-6d %-*s",
 		    (bp == curbp) ? '.' : ' ',	/* current buffer ? */
 		    ((bp->b_flag & BFCHG) != 0) ? '*' : ' ',	/* changed ? */
-		    ' ',			/* no readonly buffers yet */
-		    w - 4,		/* four chars already written */
+		    ((bp->b_flag & BFREADONLY) != 0) ? ' ' : '*',
+		    w - 5,		/* four chars already written */
+		    w - 5,		/* four chars already written */
 		    bp->b_bname,	/* buffer name */
+		    strlen(bp->b_bname) < w - 5 ? ' ' : '$', /* truncated? */
 		    nbytes,		/* buffer size */
 		    w - 7,		/* seven chars already written */
 		    bp->b_fname) == FALSE)
@@ -249,6 +303,48 @@ makelist()
 						 * buffer */
 	blp->b_doto = 0;
 	return blp;				/* All done		 */
+}
+
+static int
+listbuf_goto_buffer(int f, int n)
+{
+	BUFFER *bp;
+	MGWIN *wp;
+	char *line;
+	int i;
+
+	if (curwp->w_dotp->l_text[listbuf_ncol/2 - 1] == '$') {
+		ewprintf("buffer name truncated");
+		return FALSE;
+	}
+
+	if ((line = malloc(listbuf_ncol/2)) == NULL)
+		return FALSE;
+
+	memcpy(line, curwp->w_dotp->l_text + 4, listbuf_ncol/2 - 5);
+	for (i = listbuf_ncol/2 - 6; i > 0; i--) {
+		if (line[i] != ' ') {
+			line[i + 1] = '\0';
+			break;
+		}
+	}
+	if (i == 0) {
+		return FALSE;
+	}
+
+	for (bp = bheadp; bp != NULL; bp = bp->b_bufp) {
+		if (strcmp(bp->b_bname, line) == 0)
+			break;
+	}
+	if (bp == NULL) {
+		return FALSE;
+	}
+	if ((wp = popbuf(bp)) == NULL)
+		return FALSE;
+	curbp = bp;
+	curwp = wp;
+
+	return TRUE;
 }
 
 /*
@@ -265,15 +361,18 @@ addlinef(BUFFER *bp, char *fmt, ...)
 	char   dummy[1];
 
 	va_start(ap, fmt);
-	ntext = vsnprintf(dummy, 1, fmt, ap) + 1;
+	ntext = vsnprintf(dummy, 1, fmt, ap);
 	if (ntext == -1) {
 		va_end(ap);
 		return FALSE;
 	}
+	ntext++;
 	if ((lp = lalloc(ntext)) == NULL) {
 		va_end(ap);
 		return FALSE;
 	}
+	va_end(ap);
+	va_start(ap, fmt);
 	vsnprintf(lp->l_text, ntext, fmt, ap);
 	lp->l_used--;
 	va_end(ap);
@@ -293,19 +392,19 @@ addlinef(BUFFER *bp, char *fmt, ...)
  * no changed buffers.
  */
 int
-anycb(f)
-	int     f;
+anycb(int f)
 {
 	BUFFER *bp;
 	int     s = FALSE, save = FALSE;
 	char    prompt[NFILEN + 11];
 
 	for (bp = bheadp; bp != NULL; bp = bp->b_bufp) {
-		if (*(bp->b_fname) != '\0'
-		    && (bp->b_flag & BFCHG) != 0) {
-			sprintf(prompt, "Save file %s", bp->b_fname);
-			if ((f == TRUE || (save = eyorn(prompt)) == TRUE)
-			    && buffsave(bp) == TRUE) {
+		if (bp->b_fname != NULL && *(bp->b_fname) != '\0' &&
+		    (bp->b_flag & BFCHG) != 0) {
+			snprintf(prompt, sizeof prompt, "Save file %s",
+			    bp->b_fname);
+			if ((f == TRUE || (save = eyorn(prompt)) == TRUE) &&
+			    buffsave(bp) == TRUE) {
 				bp->b_flag &= ~BFCHG;
 				upmodes(bp);
 			} else
@@ -328,9 +427,7 @@ anycb(f)
  * block for the buffer.
  */
 BUFFER *
-bfind(bname, cflag)
-	char *bname;
-	int   cflag;
+bfind(const char *bname, int cflag)
 {
 	BUFFER	*bp;
 	LINE	*lp;
@@ -349,13 +446,13 @@ bfind(bname, cflag)
 		ewprintf("Can't get %d bytes", sizeof(BUFFER));
 		return NULL;
 	}
-	if ((bp->b_bname = malloc((strlen(bname) + 1))) == NULL) {
+	if ((bp->b_bname = strdup(bname)) == NULL) {
 		ewprintf("Can't get %d bytes", strlen(bname) + 1);
 		free((char *) bp);
 		return NULL;
 	}
 	if ((lp = lalloc(0)) == NULL) {
-		free(bp->b_bname);
+		free((char *) bp->b_bname);
 		free((char *) bp);
 		return NULL;
 	}
@@ -368,13 +465,13 @@ bfind(bname, cflag)
 	bp->b_nwnd = 0;
 	bp->b_linep = lp;
 	bp->b_nmodes = defb_nmodes;
+	LIST_INIT(&bp->b_undo);
 	i = 0;
 	do {
 		bp->b_modes[i] = defb_modes[i];
 	} while (i++ < defb_nmodes);
 	bp->b_fname[0] = '\0';
 	bzero(&bp->b_fi, sizeof(bp->b_fi));
-	(void) strcpy(bp->b_bname, bname);
 	lp->l_fp = lp;
 	lp->l_bp = lp;
 	bp->b_bufp = bheadp;
@@ -393,14 +490,13 @@ bfind(bname, cflag)
  * looks good.
  */
 int
-bclear(bp)
-	BUFFER *bp;
+bclear(BUFFER *bp)
 {
 	LINE  *lp;
 	int    s;
 
-	if ((bp->b_flag & BFCHG) != 0	/* Changed.		 */
-	    && (s = eyesno("Buffer modified; kill anyway")) != TRUE)
+	if ((bp->b_flag & BFCHG) != 0 &&	/* Changed.		 */
+	    (s = eyesno("Buffer modified; kill anyway")) != TRUE)
 		return (s);
 	bp->b_flag &= ~BFCHG;	/* Not changed		 */
 	while ((lp = lforw(bp->b_linep)) != bp->b_linep)
@@ -417,10 +513,7 @@ bclear(bp)
  * action on redisplay.
  */
 int
-showbuffer(bp, wp, flags)
-	BUFFER *bp;
-	MGWIN  *wp;
-	int     flags;
+showbuffer(BUFFER *bp, MGWIN *wp, int flags)
 {
 	BUFFER *obp;
 	MGWIN  *owp;
@@ -465,8 +558,7 @@ showbuffer(bp, wp, flags)
  * Returns a status.
  */
 MGWIN *
-popbuf(bp)
-	BUFFER *bp;
+popbuf(BUFFER *bp)
 {
 	MGWIN  *wp;
 
@@ -489,7 +581,7 @@ popbuf(bp)
  */
 /* ARGSUSED */
 int
-bufferinsert(f, n)
+bufferinsert(int f, int n)
 {
 	BUFFER *bp;
 	LINE   *clp;
@@ -548,7 +640,7 @@ bufferinsert(f, n)
  */
 /* ARGSUSED */
 int
-notmodified(f, n)
+notmodified(int f, int n)
 {
 	MGWIN *wp;
 
@@ -569,8 +661,7 @@ notmodified(f, n)
  * help functions.
  */
 int
-popbuftop(bp)
-	BUFFER *bp;
+popbuftop(BUFFER *bp)
 {
 	MGWIN *wp;
 

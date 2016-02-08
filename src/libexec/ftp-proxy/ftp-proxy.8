@@ -1,4 +1,4 @@
-.\"	$OpenBSD: ftp-proxy.8,v 1.7 2001/09/05 20:40:10 beck Exp $
+.\"	$OpenBSD: ftp-proxy.8,v 1.15 2002/03/27 08:56:07 mpech Exp $
 .\"
 .\" Copyright (c) 1996-2001
 .\"	Obtuse Systems Corporation, All rights reserved.
@@ -84,12 +84,12 @@ to
 .Nm maxport
 as described below.
 .It Fl n
-Activate network address translation mode.
-In this mode, the proxy will not attempt to proxy passive mode (PASV or EPSV)
-data connections, for this to work on a gateway you will need to be forwarding
-packets and doing network address translation to allow the outbound passive
-connections from the client to reach the server.
-See
+Activate network address translation mode.  In this mode, the proxy
+will not attempt to proxy passive mode (PASV or EPSV) data
+connections, In order for this to work, the machine running the proxy
+will need to be forwarding packets and doing network address
+translation to allow the outbound passive connections from the client
+to reach the server.  See
 .Xr nat.conf 5
 for more details on nat.
 The proxy only ignores passive mode data connections when using this flag,
@@ -115,7 +115,7 @@ The proxy does libwrap operations after determining the destination
 of the captured control connection, so that tcp wrapper rules may
 be written based on the destination as well as the source of ftp connections.
 .It Fl r
-Use reverse host (reverse DNS) lookups for logging and libwrap use
+Use reverse host (reverse DNS) lookups for logging and libwrap use.
 By default the proxy does not look up hostnames for libwrap or logging
 purposes.
 .It Fl m Ar minport
@@ -146,7 +146,8 @@ Meaningful values of debuglevel are 0-3, where 0 is no debug output and
 3 is lots of debug output, the default being 0.
 .El
 .Pp
-ftp-proxy is run from
+.Nm ftp-proxy
+is run from
 .Xr inetd 8
 and requires that ftp connections are redirected to it using an rdr
 rule.
@@ -154,23 +155,43 @@ A typical way to do this would be to use a rule such as
 .Pp
 rdr on xl0 from any to any port 21 -> 127.0.0.1 port 8081
 .Pp
-In
+in
 .Xr nat.conf 5
-(this assumes you are on a gateway where xl0 would be your inside interface).
-You would then need to configure
+(this example assumes xl0 is the interface facing an internal network).
 .Xr inetd 8
-to run ftp-proxy on the port from above
-using
+must then be configured to run
+.Nm ftp-proxy
+on the port from above using
 .Pp
-8081 stream tcp nowait root /usr/libexec/ftp-proxy ftp-proxy
+127.0.0.1:8081 stream tcp nowait root /usr/libexec/ftp-proxy ftp-proxy
 .Pp
 in
 .Xr inetd.conf 5 .
+.Pp
+.Nm ftp-proxy
+accepts the redirected control connections and forwards them
+to the server.
+The proxy replaces the address and port number that the client
+sends through the control connection to the server with his own
+address and proxy port, where it listens for the data connection.
+When the server opens the data connection back to this port, the
+proxy forwards it to the client.
+The
+.Xr pf.conf 5
+rules need to let pass connections to these proxy ports
+(see options -u, -m and -M above) in on the external interface.
+The following example allows only ports 49152 to 65535 to pass in
+statefully (assuming xl1 is the external interface):
+.Bd -literal
+block in on xl1 proto tcp all
+pass  in on xl1 proto tcp from any to xl1 port > 49151 keep state
+.Ed
 .Sh SEE ALSO
 .Xr ftp 1 ,
 .Xr hosts.allow 5 ,
 .Xr hosts.deny 5 ,
 .Xr nat.conf 5 ,
+.Xr pf.conf 5 ,
 .Xr pfctl 8 ,
 .Xr syslogd 8
 .Sh BUGS
@@ -184,5 +205,3 @@ EPSV will work in network address translation mode, assuming a
 setup which allows the EPSV connections through to their destinations.
 .Pp
 IPv6 is not yet supported.
-This will have to wait for corresponding support from
-.Xr pf 4 .

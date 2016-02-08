@@ -1,4 +1,4 @@
-/*	$OpenBSD: supmsg.c,v 1.7 2001/05/04 22:16:17 millert Exp $	*/
+/*	$OpenBSD: supmsg.c,v 1.10 2002/02/19 19:39:39 millert Exp $	*/
 
 /*
  * Copyright (c) 1992 Carnegie Mellon University
@@ -69,11 +69,11 @@ extern int	pgmversion;		/* my program version */
 extern char	*scmver;		/* scm version of partner */
 extern int	fspid;			/* process id of fileserver */
 
-static int refuseone __P((TREE *, void *));
-static int listone __P((TREE *, void *));
-static int needone __P((TREE *, void *));
-static int denyone __P((TREE *, void *));
-static int writeone __P((TREE *, void *));
+static int refuseone(TREE *, void *);
+static int listone(TREE *, void *);
+static int needone(TREE *, void *);
+static int denyone(TREE *, void *);
+static int writeone(TREE *, void *);
 
 int
 msgsignon()
@@ -571,27 +571,13 @@ writeone(t, v)
 }
 
 
-#ifdef __STDC__
 int
 msgrecv(int (*xferfile)(TREE *, va_list),...)
-#else
-/*VARARGS*//*ARGSUSED*/
-int
-msgrecv(va_alist)
-va_dcl
-#endif
 {
 	va_list args;
 	int x;
 	TREE *t = upgradeT;
-#ifdef __STDC__
 	va_start(args,xferfile);
-#else
-	int (*xferfile)(TREE *, void *);
-
-	va_start(args);
-	xferfile = va_arg(args, int (*)(TREE *, void *));
-#endif
 	if (server) {
 		x = writemsg (MSGRECV);
 		if (t == NULL) {
@@ -599,7 +585,7 @@ va_dcl
 				x = writestring(NULL);
 			if (x == SCMOK)
 				x = writemend();
-			return (x);
+			goto done;
 		}
 		if (x == SCMOK)
 			x = writestring(t->Tname);
@@ -608,7 +594,7 @@ va_dcl
 		if (t->Tmode == 0) {
 			if (x == SCMOK)
 				x = writemend();
-			return (x);
+			goto done;
 		}
 		if (x == SCMOK)
 			x = writeint(t->Tflags);
@@ -633,8 +619,10 @@ va_dcl
 	} else {
 		char *linkname, *execcmd;
 
-		if (t == NULL)
-			return (SCMERR);
+		if (t == NULL) {
+			x = SCMERR;
+			goto done;
+		}
 		x = readmsg (MSGRECV);
 		if (x == SCMOK)
 			x = readstring(&t->Tname);
@@ -642,7 +630,7 @@ va_dcl
 			x = readmend();
 			if (x == SCMOK)
 				x = (*xferfile)(NULL, args);
-			return (x);
+			goto done;
 		}
 		if (x == SCMOK)
 			x = readint(&t->Tmode);
@@ -650,7 +638,7 @@ va_dcl
 			x = readmend();
 			if (x == SCMOK)
 				x = (*xferfile)(t, args);
-			return (x);
+			goto done;
 		}
 		if (x == SCMOK)
 			x = readint(&t->Tflags);
@@ -685,6 +673,8 @@ va_dcl
 		if (x == SCMOK)
 			x = readmend();
 	}
+
+done:
 	va_end(args);
 	return (x);
 }

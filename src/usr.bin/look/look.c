@@ -1,4 +1,4 @@
-/*	$OpenBSD: look.c,v 1.5 2000/10/12 10:01:18 art Exp $	*/
+/*	$OpenBSD: look.c,v 1.8 2002/03/01 00:51:08 millert Exp $	*/
 /*	$NetBSD: look.c,v 1.7 1995/08/31 22:41:02 jtc Exp $	*/
 
 /*-
@@ -47,7 +47,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)look.c	8.2 (Berkeley) 5/4/95";
 #endif
-static char rcsid[] = "$OpenBSD: look.c,v 1.5 2000/10/12 10:01:18 art Exp $";
+static char rcsid[] = "$OpenBSD: look.c,v 1.8 2002/03/01 00:51:08 millert Exp $";
 #endif /* not lint */
 
 /*
@@ -91,12 +91,12 @@ static char rcsid[] = "$OpenBSD: look.c,v 1.5 2000/10/12 10:01:18 art Exp $";
 
 int dflag, fflag;
 
-char	*binary_search __P((char *, char *, char *));
-int	 compare __P((char *, char *, char *));
-char	*linear_search __P((char *, char *, char *));
-int	 look __P((char *, char *, char *));
-void	 print_from __P((char *, char *, char *));
-void	 usage __P((void));
+char	*binary_search(char *, char *, char *);
+int	 compare(char *, char *, char *);
+char	*linear_search(char *, char *, char *);
+int	 look(char *, char *, char *);
+void	 print_from(char *, char *, char *);
+void	 usage(void);
 
 int
 main(argc, argv)
@@ -146,7 +146,7 @@ main(argc, argv)
 	if ((fd = open(file, O_RDONLY, 0)) < 0 || fstat(fd, &sb))
 		err(2, "%s", file);
 	if (sb.st_size > SIZE_T_MAX)
-		err(2, "%s: %s", file, strerror(EFBIG));
+		errx(2, "%s: %s", file, strerror(EFBIG));
 	if ((front = mmap(NULL,
 	    (size_t)sb.st_size, PROT_READ, MAP_PRIVATE, fd, (off_t)0)) == MAP_FAILED)
 		err(2, "%s", file);
@@ -158,8 +158,8 @@ int
 look(string, front, back)
 	char *string, *front, *back;
 {
-	register int ch;
-	register char *readp, *writep;
+	int ch;
+	char *readp, *writep;
 
 	/* Reformat string string to avoid doing it multiple times later. */
 	for (readp = writep = string; ch = *readp++;) {
@@ -224,9 +224,9 @@ look(string, front, back)
 
 char *
 binary_search(string, front, back)
-	register char *string, *front, *back;
+	char *string, *front, *back;
 {
-	register char *p;
+	char *p;
 
 	p = front + (back - front) / 2;
 	SKIP_PAST_NEWLINE(p, back);
@@ -282,7 +282,7 @@ linear_search(string, front, back)
  */
 void 
 print_from(string, front, back)
-	register char *string, *front, *back;
+	char *string, *front, *back;
 {
 	for (; front < back && compare(string, front, back) == EQUAL; ++front) {
 		for (; front < back && *front != '\n'; ++front)
@@ -308,9 +308,9 @@ print_from(string, front, back)
  */
 int
 compare(s1, s2, back)
-	register char *s1, *s2, *back;
+	char *s1, *s2, *back;
 {
-	register int ch;
+	int ch;
 
 	for (; *s1 && s2 < back && *s2 != '\n'; ++s1, ++s2) {
 		ch = *s2;

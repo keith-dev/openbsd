@@ -1,3 +1,5 @@
+/*	$OpenBSD: theo.c,v 1.21 2002/04/01 00:34:07 miod Exp $	*/
+
 #include "def.h"
 #include "kbd.h"
 #include "funmap.h"
@@ -66,7 +68,7 @@ static const char *talk[] = {
 	"Lazy bums slacking on your asses.",
 	"35 commits an hour? That's pathetic!",
 	"Fine software takes time to prepare.  Give a little slack.",
-	"I need a vax!",
+	"emacs on the vax",
 	"Just a minute ago we were hugging and now you, guys, do not love me anymore",
 	"I'll let you know when I need to floss my teeth",
 	"If you can't figure out yourself, you're lacking some mental faculties",
@@ -78,7 +80,9 @@ static const char *talk[] = {
 	"i let you guys do whatever you wanted",
 	"you bring new meaning to the terms slackass. I will have to invent a new term.",
 	"if they cut you out, muddy their back yards",
-	"Make them want to start over, and play nice the next time."
+	"Make them want to start over, and play nice the next time.",
+	"It is clear that this has not been thought through.",
+	"if you do not test that, you are banned from editing theo.c"
 };
 
 static const int ntalk = sizeof(talk)/sizeof(talk[0]);

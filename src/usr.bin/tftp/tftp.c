@@ -1,4 +1,4 @@
-/*	$OpenBSD: tftp.c,v 1.8 2001/07/31 14:32:15 mpech Exp $	*/
+/*	$OpenBSD: tftp.c,v 1.10 2002/02/16 21:27:55 millert Exp $	*/
 /*	$NetBSD: tftp.c,v 1.5 1995/04/29 05:55:25 cgd Exp $	*/
 
 /*
@@ -38,7 +38,7 @@
 #if 0
 static char sccsid[] = "@(#)tftp.c	8.1 (Berkeley) 6/6/93";
 #endif
-static char rcsid[] = "$OpenBSD: tftp.c,v 1.8 2001/07/31 14:32:15 mpech Exp $";
+static char rcsid[] = "$OpenBSD: tftp.c,v 1.10 2002/02/16 21:27:55 millert Exp $";
 #endif /* not lint */
 
 /* Many bug fixes are from Jim Guyton <guyton@rand-unix> */
@@ -79,13 +79,13 @@ int	timeout;
 jmp_buf	toplevel;
 jmp_buf	timeoutbuf;
 
-static void nak __P((int));
-static int makerequest __P((int, const char *, struct tftphdr *, const char *));
-static void printstats __P((const char *, unsigned long));
-static void startclock __P((void));
-static void stopclock __P((void));
-static void timer __P((int));
-static void tpacket __P((const char *, struct tftphdr *, int));
+static void nak(int);
+static int makerequest(int, const char *, struct tftphdr *, const char *);
+static void printstats(const char *, unsigned long);
+static void startclock(void);
+static void stopclock(void);
+static void timer(int);
+static void tpacket(const char *, struct tftphdr *, int);
 
 /*
  * Send the requested file.
@@ -96,9 +96,9 @@ sendfile(fd, name, mode)
 	char *name;
 	char *mode;
 {
-	register struct tftphdr *ap;	   /* data and ack packets */
+	struct tftphdr *ap;	   /* data and ack packets */
 	struct tftphdr *r_init(), *dp;
-	register int n;
+	int n;
 	volatile int block, size, convert;
 	volatile unsigned long amount;
 	struct sockaddr_in from;
@@ -201,9 +201,9 @@ recvfile(fd, name, mode)
 	char *name;
 	char *mode;
 {
-	register struct tftphdr *ap;
+	struct tftphdr *ap;
 	struct tftphdr *dp, *w_init();
-	register int n;
+	int n;
 	volatile int block, size, firsttrip;
 	volatile unsigned long amount;
 	struct sockaddr_in from;
@@ -311,7 +311,7 @@ makerequest(request, name, tp, mode)
 	struct tftphdr *tp;
 	const char *mode;
 {
-	register char *cp;
+	char *cp;
 
 	tp->th_opcode = htons((u_short)request);
 	cp = tp->th_stuff;
@@ -349,8 +349,8 @@ static void
 nak(error)
 	int error;
 {
-	register struct errmsg *pe;
-	register struct tftphdr *tp;
+	struct errmsg *pe;
+	struct tftphdr *tp;
 	int length;
 
 	tp = (struct tftphdr *)ackbuf;
@@ -381,7 +381,7 @@ tpacket(s, tp, n)
 {
 	static char *opcodes[] =
 	   { "#0", "RRQ", "WRQ", "DATA", "ACK", "ERROR" };
-	register char *cp, *file;
+	char *cp, *file;
 	u_short op = ntohs(tp->th_opcode);
 
 	if (op < RRQ || op > ERROR)

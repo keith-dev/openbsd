@@ -1,4 +1,4 @@
-/*	$OpenBSD: rbootd.c,v 1.8 2001/09/04 23:35:59 millert Exp $	*/
+/*	$OpenBSD: rbootd.c,v 1.13 2002/03/14 16:44:25 mpech Exp $	*/
 /*	$NetBSD: rbootd.c,v 1.5 1995/10/06 05:12:17 thorpej Exp $	*/
 
 /*
@@ -55,7 +55,7 @@ static char copyright[] =
 
 #ifndef lint
 /*static char sccsid[] = "@(#)rbootd.c	8.1 (Berkeley) 6/4/93";*/
-static char rcsid[] = "$OpenBSD: rbootd.c,v 1.8 2001/09/04 23:35:59 millert Exp $";
+static char rcsid[] = "$OpenBSD: rbootd.c,v 1.13 2002/03/14 16:44:25 mpech Exp $";
 #endif /* not lint */
 
 #include <sys/param.h>
@@ -73,6 +73,22 @@ static char rcsid[] = "$OpenBSD: rbootd.c,v 1.8 2001/09/04 23:35:59 millert Exp 
 #include "defs.h"
 
 extern	char *__progname;	/* from crt0.o */
+
+volatile sig_atomic_t	dodebugoff;
+volatile sig_atomic_t	dodebugon;
+volatile sig_atomic_t	doreconfig;
+
+void DebugOff(int);
+void DebugOn(int);
+void ReConfig(int);
+void Exit(int);
+
+void DoDebugOff(void);
+void DoDebugOn(void);
+void DoReConfig(void);
+
+void DoTimeout(void);
+CLIENT *FindClient(RMPCONN *);
 
 int
 main(argc, argv)
@@ -155,7 +171,7 @@ main(argc, argv)
 			syslog(LOG_NOTICE, "restarted (??)");
 			/* BpfGetIntfName() returns safe names, using %m */
 			syslog(LOG_ERR, "%s", errmsg);
-			Exit(0);
+			DoExit();
 		}
 	}
 
@@ -170,24 +186,15 @@ main(argc, argv)
 	 */
 	if (gethostname(MyHost, MAXHOSTNAMELEN) < 0) {
 		syslog(LOG_ERR, "gethostname: %m");
-		Exit(0);
+		DoExit();
 	}
 	MyHost[MAXHOSTNAMELEN] = '\0';
-
-	MyPid = getpid();
 
 	/*
 	 *  Write proc's pid to a file.
 	 */
-	{
-		FILE *fp;
-
-		if ((fp = fopen(PidFile, "w")) != NULL) {
-			(void) fprintf(fp, "%d\n", (int) MyPid);
-			(void) fclose(fp);
-		} else {
-			syslog(LOG_WARNING, "fopen: failed (%s)", PidFile);
-		}
+	if (pidfile(NULL) < 0) {
+		syslog(LOG_WARNING, "pidfile: failed");
 	}
 
 	/*
@@ -196,7 +203,7 @@ main(argc, argv)
 	 */
 	if (chdir(BootDir) < 0) {
 		syslog(LOG_ERR, "chdir: %m (%s)", BootDir);
-		Exit(0);
+		DoExit();
 	}
 
 	/*
@@ -206,13 +213,13 @@ main(argc, argv)
 	sigaddset(&hmask, SIGHUP);
 	sigprocmask(SIG_BLOCK, &hmask, &omask);	/* prevent reconfig's */
 	if (GetBootFiles() == 0)		/* get list of boot files */
-		Exit(0);
+		DoExit();
 	if (ParseConfig() == 0)			/* parse config file */
-		Exit(0);
+		DoExit();
 
 	/*
 	 *  Open and initialize a BPF device for the appropriate interface.
-	 *  If an error is encountered, a message is displayed and Exit()
+	 *  If an error is encountered, a message is displayed and DoExit()
 	 *  is called.
 	 */
 	fd = BpfOpen();
@@ -231,6 +238,22 @@ main(argc, argv)
 		fd_set r;
 		int nsel;
 
+		/*
+		 * Check pending actions
+		 */
+		if (dodebugoff) {
+			DoDebugOff();
+			dodebugoff = 0;
+		}
+		if (dodebugon) {
+			DoDebugOn();
+			dodebugon = 0;
+		}
+		if (doreconfig) {
+			DoReConfig();
+			doreconfig = 0;
+		}
+
 		r = rset;
 
 		if (RmpConns == NULL) {		/* timeout isnt necessary */
@@ -245,7 +268,7 @@ main(argc, argv)
 			if (errno == EINTR)
 				continue;
 			syslog(LOG_ERR, "select: %m");
-			Exit(0);
+			DoExit();
 		} else if (nsel == 0) {		/* timeout */
 			DoTimeout();			/* clear stale conns */
 			continue;
@@ -304,7 +327,7 @@ main(argc, argv)
 void
 DoTimeout()
 {
-	register RMPCONN *rtmp;
+	RMPCONN *rtmp;
 	struct timeval now;
 
 	(void) gettimeofday(&now, (struct timezone *)0);
@@ -325,7 +348,7 @@ DoTimeout()
 **  FindClient -- Find client associated with a packet.
 **
 **	Parameters:
-**		rconn - the new packet. 
+**		rconn - the new packet.
 **
 **	Returns:
 **		Pointer to client info if found, NULL otherwise.
@@ -340,9 +363,9 @@ DoTimeout()
 
 CLIENT *
 FindClient(rconn)
-	register RMPCONN *rconn;
+	RMPCONN *rconn;
 {
-	register CLIENT *ctmp;
+	CLIENT *ctmp;
 
 	for (ctmp = Clients; ctmp != NULL; ctmp = ctmp->next)
 		if (bcmp((char *)&rconn->rmp.hp_hdr.saddr[0],
@@ -368,12 +391,16 @@ void
 Exit(sig)
 	int sig;
 {
-	/* XXX race */
-	if (sig > 0)
-		syslog(LOG_ERR, "going down on signal %d", sig);
-	else
-		syslog(LOG_ERR, "going down with fatal error");
-	BpfClose();
+	struct syslog_data sdata = SYSLOG_DATA_INIT;
+
+	syslog_r(LOG_ERR, &sdata, "going down on signal %d", sig);
+	_exit(1);
+}
+
+void
+DoExit()
+{
+	syslog(LOG_ERR, "going down on fatal error");
 	exit(1);
 }
 
@@ -398,16 +425,21 @@ void
 ReConfig(signo)
 	int signo;
 {
-	/* XXX race */
+	doreconfig = 1;
+}
+
+void
+DoReConfig()
+{
 	syslog(LOG_NOTICE, "reconfiguring boot server");
 
 	FreeConns();
 
 	if (GetBootFiles() == 0)
-		Exit(0);
+		DoExit();
 
 	if (ParseConfig() == 0)
-		Exit(0);
+		DoExit();
 }
 
 /*
@@ -426,8 +458,12 @@ void
 DebugOff(signo)
 	int signo;
 {
-	/* XXX race */
+	dodebugoff = 1;
+}
 
+void
+DoDebugOff()
+{
 	if (DbgFp != NULL)
 		(void) fclose(DbgFp);
 
@@ -451,7 +487,12 @@ void
 DebugOn(signo)
 	int signo;
 {
-	/* XXX race */
+	dodebugon = 1;
+}
+
+void
+DoDebugOn()
+{
 	if (DbgFp == NULL) {
 		if ((DbgFp = fopen(DbgFile, "w")) == NULL)
 			syslog(LOG_ERR, "can't open debug file (%s)", DbgFile);

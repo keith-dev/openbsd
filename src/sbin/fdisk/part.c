@@ -1,4 +1,4 @@
-/*	$OpenBSD: part.c,v 1.24 2001/07/02 13:51:18 millert Exp $	*/
+/*	$OpenBSD: part.c,v 1.29 2002/02/12 17:56:35 kjell Exp $	*/
 
 /*
  * Copyright (c) 1997 Tobias Weingartner
@@ -73,6 +73,7 @@ static const struct part_type {
 	{ 0x17, "OS/2 hidden ", "OS/2 BM: hidden IFS"},
 	{ 0x18, "AST swap    ", "AST Windows swapfile"},
 	{ 0x19, "Willowtech  ", "Willowtech Photon coS"},
+	{ 0x1C, "Thinkpad Rec", "IBM Thinkpad recovery partition"},
 	{ 0x20, "Willowsoft  ", "Willowsoft OFS1"},
 	{ 0x24, "NEC DOS     ", "NEC DOS"},
 	{ 0x38, "Theos       ", "Theos"},
@@ -120,7 +121,9 @@ static const struct part_type {
 	{ 0xA5, "FreeBSD     ",	"FreeBSD"},
 	{ 0xA6, "OpenBSD     ", "OpenBSD"},
 	{ 0xA7, "NEXTSTEP    ", "NEXTSTEP"},
+	{ 0xA8, "MacOS X     ",	"MacOS X main partition"},
 	{ 0xA9, "NetBSD      ",	"NetBSD"},
+	{ 0xAB, "MacOS X boot",	"MacOS X boot partition"},
 	{ 0xB7, "BSDI filesy*", "BSDI BSD/386 filesystem"},
 	{ 0xB8, "BSDI swap   ", "BSDI BSD/386 swap"},
 	{ 0xC0, "CTOS        ", "CTOS"},
@@ -129,6 +132,7 @@ static const struct part_type {
 	{ 0xC6, "DRDOSs >=32M", "DRDOS/sec (FAT-16, >= 32M)"},
 	{ 0xC7, "HPFS Disbled", "Syrinx (Cyrnix?) or HPFS disabled"},
 	{ 0xDB, "CPM/C.DOS/C*", "Concurrent CPM or C.DOS or CTOS"},
+	{ 0xDE, "Dell Maint  ", "Dell maintenance partition"},
 	{ 0xE1, "SpeedStor   ", "DOS access or SpeedStor 12-bit FAT extended partition"},
 	{ 0xE3, "SpeedStor   ", "DOS R/O or SpeedStor or Storage Dimensions"},
 	{ 0xE4, "SpeedStor   ", "SpeedStor 16-bit FAT extended partition < 1024 cyl."},
@@ -236,23 +240,16 @@ PRT_make(partn, offset, reloff, prt)
 	void *prt;
 {
 	unsigned char *p = prt;
-	prt_t tmp;
+	int ecsave, scsave;
+	int modified = 0;
 	off_t off;
 
-	tmp.shead = partn->shead;
-	tmp.ssect = partn->ssect;
-	tmp.scyl = (partn->scyl > 1023)? 1023: partn->scyl; 
-	tmp.ehead = partn->ehead;
-	tmp.esect = partn->ssect;
-	tmp.ecyl = (partn->ecyl > 1023)? 1023: partn->ecyl; 
-	if (!PRT_check_chs(partn) && PRT_check_chs(&tmp)) {
-		partn->shead = tmp.shead;
-		partn->ssect = tmp.ssect;
-		partn->scyl = tmp.scyl;
-		partn->ehead = tmp.ehead;
-		partn->esect = tmp.esect;
-		partn->ecyl = tmp.ecyl;
-		printf("Cylinder values are modified to fit in CHS.\n");
+	if ((partn->scyl > 1023) || (partn->ecyl > 1023)) {
+		scsave = partn->scyl;
+		ecsave = partn->ecyl;
+		partn->scyl = (partn->scyl > 1023)? 1023: partn->scyl; 
+		partn->ecyl = (partn->ecyl > 1023)? 1023: partn->ecyl; 
+		modified = 1;
 	}
 	if ((partn->id == DOSPTYP_EXTEND) || (partn->id == DOSPTYP_EXTENDL))
 		off = reloff;
@@ -286,25 +283,36 @@ PRT_make(partn, offset, reloff, prt)
 
 	putlong(p, partn->bs - off);
 	putlong(p+4, partn->ns);
+	if (modified) {
+		partn->scyl = scsave;
+		partn->ecyl = ecsave;
+	}
 }
 
 void
-PRT_print(num, partn)
+PRT_print(num, partn, units)
 	int num;
 	prt_t *partn;
+	char *units;
 {
+	double size;
+	int i;
+	i = unit_lookup(units);
 
 	if (partn == NULL) {
-		printf("         Starting       Ending\n");
-		printf(" #: id  cyl  hd sec -  cyl  hd sec [     start -       size]\n");
+		printf("         Starting       Ending       LBA Info:\n");
+		printf(" #: id    C   H  S -    C   H  S [       start:      size   ]\n");
 		printf("------------------------------------------------------------------------\n");
 	} else {
-		printf("%c%1d: %.2X %4d %3d %3d - %4d %3d %3d [%10d - %10d] %s\n",
+		size = (double)partn->ns * DEV_BSIZE / 
+		    unit_types[i].conversion;
+		printf("%c%1d: %.2X %4d %3d %2d - %4d %3d %2d [%12d:%12.f%s] %s\n",
 			(partn->flag == 0x80)?'*':' ',
 			num, partn->id,
-			partn->scyl, partn->shead, partn->ssect,
+		        partn->scyl, partn->shead, partn->ssect,
 			partn->ecyl, partn->ehead, partn->esect,
-			partn->bs, partn->ns,
+			partn->bs, size,
+		        unit_types[i].abbr,
 			PRT_ascii_id(partn->id));
 	}
 }
@@ -376,10 +384,6 @@ PRT_fix_CHS(disk, part, pn)
 	head = (start / spt); start -= (head * spt);
 	sect = (start + 1);
 
-	if (cyl > 1023) {
-		cyl = 1023;
-		printf("Only LBA values are valid in starting cylinder for partition #%d.\n", pn);
-	}
 	part->scyl = cyl;
 	part->shead = head;
 	part->ssect = sect;
@@ -389,10 +393,6 @@ PRT_fix_CHS(disk, part, pn)
 	head = (end / spt); end -= (head * spt);
 	sect = (end + 1);
 
-	if (cyl > 1023) {
-		cyl = 1023;
-		printf("Only LBA values are valid in ending cylinder for partition #%d.\n", pn);
-	}
 	part->ecyl = cyl;
 	part->ehead = head;
 	part->esect = sect;

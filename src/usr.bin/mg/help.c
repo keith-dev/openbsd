@@ -1,4 +1,4 @@
-/*	$OpenBSD: help.c,v 1.14 2001/05/24 09:47:34 art Exp $	*/
+/*	$OpenBSD: help.c,v 1.17 2002/03/16 19:30:29 vincent Exp $	*/
 
 /*
  * Help functions for Mg 2
@@ -83,7 +83,7 @@ nextmode:
 found:
 	if (funct == rescan || funct == selfinsert)
 		ewprintf("%k is not bound to any function");
-	else if ((pep = function_name(funct)) != NULL)
+	else if ((pep = (char *)function_name(funct)) != NULL)
 		ewprintf("%k runs the command %s", pep);
 	else
 		ewprintf("%k is bound to an unnamed function");
@@ -107,6 +107,7 @@ wallchart(f, n)
 	if (bclear(bp) != TRUE)
 		/* clear it out */
 		return FALSE;
+	bp->b_flag |= BFREADONLY;	
 	for (m = curbp->b_nmodes; m > 0; m--) {
 		if ((addlinef(bp, "Local keybindings for mode %s:",
 				curbp->b_modes[m]->p_name) == FALSE) ||
@@ -137,7 +138,7 @@ showall(BUFFER *bp, KEYMAP *map, char *prefix)
 		if (fun == rescan || fun == selfinsert)
 			continue;
 		keyname(buf, sizeof(buf), c);
-		sprintf(key, "%s%s ", prefix, buf);
+		snprintf(key, sizeof key, "%s%s ", prefix, buf);
 		if (fun == NULL) {
 			if (showall(bp, newmap, key) == FALSE)
 				return FALSE;

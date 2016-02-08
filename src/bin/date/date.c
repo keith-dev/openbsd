@@ -1,4 +1,4 @@
-/*	$OpenBSD: date.c,v 1.18 2001/09/06 13:29:08 mpech Exp $	*/
+/*	$OpenBSD: date.c,v 1.21 2002/02/16 21:27:06 millert Exp $	*/
 /*	$NetBSD: date.c,v 1.11 1995/09/07 06:21:05 jtc Exp $	*/
 
 /*
@@ -44,7 +44,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)date.c	8.2 (Berkeley) 4/28/95";
 #else
-static char rcsid[] = "$OpenBSD: date.c,v 1.18 2001/09/06 13:29:08 mpech Exp $";
+static char rcsid[] = "$OpenBSD: date.c,v 1.21 2002/02/16 21:27:06 millert Exp $";
 #endif
 #endif /* not lint */
 
@@ -70,10 +70,11 @@ extern	char *__progname;
 
 time_t tval;
 int retval, nflag;
+int slidetime;
 
-static void setthetime __P((char *));
-static void badformat __P((void));
-static void usage __P((void));
+static void setthetime(char *);
+static void badformat(void);
+static void usage(void);
 
 int
 main(argc, argv)
@@ -92,6 +93,9 @@ main(argc, argv)
 		switch((char)ch) {
 		case 'd':		/* daylight saving time */
 			tz.tz_dsttime = atoi(optarg) ? 1 : 0;
+			break;
+		case 'a':
+			slidetime++;
 			break;
 		case 'n':		/* don't set network */
 			nflag = 1;
@@ -152,9 +156,9 @@ main(argc, argv)
 #define	ATOI2(ar)	((ar)[0] - '0') * 10 + ((ar)[1] - '0'); (ar) += 2;
 void
 setthetime(p)
-	register char *p;
+	char *p;
 {
-	register struct tm *lt;
+	struct tm *lt;
 	struct timeval tv;
 	char *dot, *t;
 	int bigyear;
@@ -232,12 +236,24 @@ setthetime(p)
 
 	/* set the time */
 	if (nflag || netsettime(tval)) {
-		logwtmp("|", "date", "");
-		tv.tv_sec = tval;
-		tv.tv_usec = 0;
-		if (settimeofday(&tv, NULL))
-			errx(1, "settimeofday");
-		logwtmp("{", "date", "");
+		if (slidetime) {
+			struct timeval tv_current;
+
+			if (gettimeofday(&tv_current, NULL) == -1)
+				err(1, "Could not get local time of day");
+
+			tv.tv_sec = tval - tv_current.tv_sec;
+			tv.tv_usec = 0;
+			if (adjtime(&tv, NULL) == -1)
+				errx(1, "adjtime");
+		} else {
+			logwtmp("|", "date", "");
+			tv.tv_sec = tval;
+			tv.tv_usec = 0;
+			if (settimeofday(&tv, NULL))
+				errx(1, "settimeofday");
+			logwtmp("{", "date", "");
+		}
 	}
 
 	if ((p = getlogin()) == NULL)
@@ -256,7 +272,7 @@ static void
 usage()
 {
 	(void)fprintf(stderr,
-	    "usage: %s [-nu] [-d dst] [-r seconds] [-t west] [+format]\n",
+	    "usage: %s [-anu] [-d dst] [-r seconds] [-t west] [+format]\n",
              __progname);
 	(void)fprintf(stderr,
 	    "%-*s[[[[[[cc]yy]mm]dd]HH]MM[.SS]]\n", strlen(__progname) + 8, "");

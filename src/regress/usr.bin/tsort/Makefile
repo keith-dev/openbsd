@@ -1,9 +1,7 @@
-# $OpenBSD: Makefile,v 1.4 2001/07/12 14:06:02 espie Exp $
+# $OpenBSD: Makefile,v 1.6 2002/01/03 01:24:32 art Exp $
 
-NOMAN=
-NOPROG=
-
-regress: t1 t2 t3 t4 t5 t6
+REGRESSTARGETS=t1 t2 t3 t4 t5 t6
+REGRESSSLOWTARGETS=t4
 
 t1: t1.out
 	perl ${.CURDIR}/tsort-check t1.out ${.CURDIR}/pairs1
@@ -47,7 +45,8 @@ pairs3:
 pairs4:
 	perl ${.CURDIR}/build-tree 5 10 >$@
 
-.PHONY: t1 t2 regress
+.PHONY: t1 t2
 CLEANFILES+=t1.out t2.out t3.out t4.out t5.out t6.out pairs3 pairs4
 
-.include <bsd.prog.mk>
+.include <bsd.regress.mk>
+

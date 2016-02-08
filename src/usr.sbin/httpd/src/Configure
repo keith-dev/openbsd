@@ -1,9 +1,9 @@
 #!/bin/sh
-# $OpenBSD: Configure,v 1.14 2001/03/29 10:21:38 beck Exp $
+# $OpenBSD: Configure,v 1.19 2002/03/29 02:08:05 beck Exp $
 ## ====================================================================
 ## The Apache Software License, Version 1.1
 ##
-## Copyright (c) 2000 The Apache Software Foundation.  All rights
+## Copyright (c) 2000-2002 The Apache Software Foundation.  All rights
 ## reserved.
 ##
 ## Redistribution and use in source and binary forms, with or without
@@ -237,6 +237,7 @@ RULE_IRIXNIS=`${SHELL} helpers/CutRule IRIXNIS $file`
 RULE_IRIXN32=`${SHELL} helpers/CutRule IRIXN32 $file`
 RULE_PARANOID=`${SHELL} helpers/CutRule PARANOID $file`
 RULE_EXPAT=`${SHELL} helpers/CutRule EXPAT $file`
+RULE_CYGWIN_WINSOCK=`${SHELL} helpers/CutRule CYGWIN_WINSOCK $file` 
 RULE_SHARED_CORE=`${SHELL} helpers/CutRule SHARED_CORE $file`
 RULE_SHARED_CHAIN=`${SHELL} helpers/CutRule SHARED_CHAIN $file`
 
@@ -324,6 +325,13 @@ case "$PLAT" in
     *-ibm-aix4.3)
 	OS='IBM AIX 4.3'
 	CFLAGS="$CFLAGS -DAIX=43 -DUSE_PTHREAD_SERIALIZED_ACCEPT -U__STR__"
+	LDFLAGS="$LDFLAGS -lm -lpthread"
+	RULE_SHARED_CORE=no
+	DEF_SHARED_CORE=no
+	;;
+    *-ibm-aix5.1)
+	OS='IBM AIX 5.1'
+	CFLAGS="$CFLAGS -DAIX=51 -DUSE_PTHREAD_SERIALIZED_ACCEPT -U__STR__"
 	LDFLAGS="$LDFLAGS -lm -lpthread"
 	RULE_SHARED_CORE=no
 	DEF_SHARED_CORE=no
@@ -443,6 +451,7 @@ case "$PLAT" in
 	LIBS="$LIBS -lm"
 	;;
     *-linux22)
+        # This handles linux 2.2 and above (2.4, ...)
 	DEF_WANTHSREGEX=yes
 	OS='Linux'
 	CFLAGS="$CFLAGS -DLINUX=22"
@@ -579,7 +588,7 @@ case "$PLAT" in
     	PLATOSVERS=`echo $PLAT | sed 's/^.*solaris2.//'`
 	OS="Solaris $PLATOSVERS"
 	CFLAGS="$CFLAGS -DSOLARIS2=$PLATOSVERS"
-	LIBS="$LIBS -lsocket -lnsl"
+	LIBS="$LIBS -lsocket -lnsl -lpthread"
 	DBM_LIB=""
 	case "$PLATOSVERS" in
 	    2[01234]*)
@@ -661,7 +670,7 @@ case "$PLAT" in
 	;;
     *-siemens-sysv4*)
 	OS='SVR4'
-	CFLAGS="$CFLAGS -DSVR4 -D_XPG_IV -DHAS_DLFCN -DUSE_MMAP_FILES -DUSE_SYSVSEM_SERIALIZED_ACCEPT -DNEED_UNION_SEMUN"
+	CFLAGS="$CFLAGS -DSVR4 -D_XPG_IV -DHAS_DLFCN -DUSE_MMAP_FILES -DNEED_UNION_SEMUN"
 	DEF_WANTHSREGEX=yes
 	LIBS="$LIBS -lsocket -lnsl -lc"
 	DBM_LIB=""
@@ -792,7 +801,7 @@ case "$PLAT" in
     *-BeOS*)
 	PLATOSVER=`uname -r`
         case "$PLATOSVER" in
-            5.1*)
+            5.0.4*)
                 OS="BeOS BONE"
                 LIBS="-lbind -lsocket -lbe -lroot"
                 CFLAGS="$CFLAGS -DBONE"
@@ -836,6 +845,25 @@ case "$PLAT" in
        DEF_WANTHSREGEX=yes
        LIBS="$LIBS"
        ;;
+    *-cygwin*)
+	OS='Cygwin'
+	OSDIR="os/cygwin"
+	CFLAGS="$CFLAGS -DCYGWIN"
+	DEF_WANTHSREGEX=yes
+	DBM_LIB="-lgdbm"
+	LIBS="$LIBS -lcrypt $DBM_LIB"
+	if [ "x$RULE_CYGWIN_WINSOCK" = "xyes" ]; then 
+	    CFLAGS="$CFLAGS -DCYGWIN_WINSOCK" 
+	    LIBS="$LIBS -lwsock32" 
+	fi 
+
+	;;
+    *atheos*)
+	DEF_WANTSREGEX=yes
+	OS='AtheOS'
+	CFLAGS="$CFLAGS -DATHEOS"
+	LIBS="$LIBS -lcrypt"
+	;;
     *) # default: Catch systems we don't know about
 	OS='Unknown and unsupported OS'
     	echo Sorry, but we cannot grok \"$PLAT\"
@@ -1104,6 +1132,9 @@ if [ "x$using_shlib" = "x1" ] ; then
 		*)
 		   LD_SHLIB="gcc"
 		   LDFLAGS_SHLIB="-shared \$(CFLAGS_SHLIB)"
+		   if [ -z "`echo __ELF__ | ${CC} -E - | grep __ELF__`" ]; then
+		     LDFLAGS_SHLIB_EXPORT="-Wl,-E"
+		   fi
 		;;
 	    esac
 	    LDFLAGS_MOD_SHLIB=$LDFLAGS_SHLIB
@@ -1142,7 +1173,14 @@ if [ "x$using_shlib" = "x1" ] ; then
 	*-apple-rhapsody* | *-apple-darwin* )
 	    LD_SHLIB="cc"
 	    CFLAGS_SHLIB=""
-	    LDFLAGS_SHLIB='$(EXTRA_LDFLAGS) -bundle -undefined suppress'
+	    case "$PLAT" in
+		*-apple-rhapsody* | *-apple-darwin1.[0-3]* )
+		    LDFLAGS_SHLIB='$(EXTRA_LDFLAGS) -bundle -undefined suppress'
+		    ;;
+		* )
+		    LDFLAGS_SHLIB='$(EXTRA_LDFLAGS) -bundle -undefined suppress -flat_namespace'
+		    ;;
+	    esac
 	    LDFLAGS_MOD_SHLIB=$LDFLAGS_SHLIB
 	    LDFLAGS_SHLIB_EXPORT=""
 	    SHLIB_SUFFIX_DEPTH=0
@@ -1379,6 +1417,21 @@ if [ "x$using_shlib" = "x1" ] ; then
 	    LDFLAGS_MOD_SHLIB=$LDFLAGS_SHLIB
 	    LDFLAGS_SHLIB_EXPORT=""
             ;;
+	*-cygwin*)
+	    DEF_SHARED_CORE=yes
+	    LDFLAGS_SHLIB="--export-all"
+	    LDFLAGS_MOD_SHLIB=$LDFLAGS_SHLIB
+	    SHLIB_SUFFIX_NAME=dll
+	    SHMOD_SUFFIX_NAME=dll
+	    SHLIB_SUFFIX_DEPTH=0
+	    LD_SHLIB='dllwrap'
+	    LD_SHCORE_DEF=''
+	    LD_SHCORE_LIBS="$LIBS"
+	    LIBS_SHLIB='$(EXTRA_LIBS)'
+	    SHARED_CORE_EP='lib$(TARGET).ep'
+	    SHCORE_IMPLIB='lib$(TARGET).dll'
+	    OS_MODULE_INCLUDE='$(SRCDIR)/modules/standard/Makefile.Cygwin'
+	    ;;
 	*)
 	    ##  ok, no known explict support for shared objects
 	    ##  on this platform, but we give not up immediately.
@@ -1585,14 +1638,22 @@ case "$PLAT" in
 	    LIBS="-lsocket $LIBS"
 	fi
 	# Auto-detect presence of libdl for dynamic loading
-	if ${SHELL} /helpers/TestCompile lib dl; then
-	    if ${SHELL} /helpers/TestCompile func dlopen; then
+	if ${SHELL} ./helpers/TestCompile lib dl; then
+	    if ${SHELL} ./helpers/TestCompile func dlopen; then
 		LIBS="$LIBS -ldl"
 		TLIB='-ldl'
     	   fi
 	fi
+	# Test for the presence of the "union semun":
+	if TCADDINCL='#include <sys/types.h>
+#include <sys/ipc.h>
+#include <sys/sem.h>' ./helpers/TestCompile sizeof "union semun"; then
+            : Okay, union semun is defined
+	else
+	    CFLAGS="$CFLAGS -DNEED_UNION_SEMUN"
+	fi
 	# Test for the presence of the _rini_struct typedef:
-	if TCADDINCL='#include <pwd.h>' ${SHELL} /helpers/TestCompile sizeof _rini_struct; then
+	if TCADDINCL='#include <pwd.h>' ${SHELL} ./helpers/TestCompile sizeof _rini_struct; then
 	    CFLAGS="$CFLAGS -DHAVE_RINI_STRUCT"
 	fi
 	# Test whether initgroups() must be emulated:
@@ -1827,7 +1888,7 @@ if [ "x$RULE_EAPI" = "xyes" ]; then
     esac
     #   MM Shared Memory Library support for EAPI
     if [ "x$EAPI_MM" = "x" ]; then
-        EAPI_MM=`egrep '^EAPI_MM=' $file | tail -1 | awk -F= '{print $2}'`
+        EAPI_MM=`egrep '^EAPI_MM=' $file | sed -n -e '$p' | awk -F= '{print $2}'`
     fi
     if [ "x$EAPI_MM" != "x" ]; then
         case $EAPI_MM in
@@ -1878,22 +1939,31 @@ fi
 ####################################################################
 ## Add in the Expat library if needed/wanted.
 ##
-if [ -d ./lib/expat-lite/ ]; then
-    if [ "x$RULE_EXPAT" = "xdefault" ]; then
+
+# set the default, based on whether expat-lite is bundled. if it is present,
+# then we can always include expat.
+if [ "x$RULE_EXPAT" = "xdefault" ]; then
+    if [ -d ./lib/expat-lite/ ]; then
         RULE_EXPAT=yes
-    fi
-else
-    if [ "$xRULE_EXPAT" = "xyes" ]; then
-        echo "ERROR: RULE_EXPAT set to \"yes\" but is not available."
-	exit 1
     else
         RULE_EXPAT=no
     fi
 fi
+
 if [ "x$RULE_EXPAT" = "xyes" ]; then
-    EXPATLIB="lib/expat-lite/libexpat.a"
-    APLIBDIRS="expat-lite $APLIBDIRS"
-    CFLAGS="$CFLAGS -DUSE_EXPAT -I\$(SRCDIR)/lib/expat-lite"
+    if ${SHELL} ./helpers/TestCompile lib expat; then
+        echo " + using system Expat"
+        LIBS="$LIBS -lexpat"
+    else
+        if [ ! -d ./lib/expat-lite/ ]; then
+            echo "ERROR: RULE_EXPAT set to \"yes\" but is not available."
+	    exit 1
+        fi
+        echo " + using builtin Expat"
+        EXPATLIB="lib/expat-lite/libexpat.a"
+        APLIBDIRS="expat-lite $APLIBDIRS"
+        CFLAGS="$CFLAGS -DUSE_EXPAT -I\$(SRCDIR)/lib/expat-lite"
+    fi
 fi
 
 ####################################################################
@@ -1922,7 +1992,11 @@ if [ "x$using_shlib" = "x1" ] ; then
 	RULE_SHARED_CORE=$DEF_SHARED_CORE
     fi
     if [ "x$RULE_SHARED_CORE" = "xyes" ]; then
-	echo " + enabling generation of Apache core as DSO"
+	DSO_STRING="DSO"
+	if [ "$OS" = "Cygwin" ]; then
+	    DSO_STRING="DLL"
+	fi
+	echo " + enabling generation of Apache core as $DSO_STRING"
 	#    shuffle compiler flags from shlib variant to standard
 	CFLAGS="$CFLAGS $CFLAGS_SHLIB"
 	CFLAGS_SHLIB=""
@@ -1931,7 +2005,7 @@ if [ "x$using_shlib" = "x1" ] ; then
 	#    select the special subtarget for shared core generation
 	SUBTARGET=target_shared
 	#    determine additional suffixes for libhttpd.so
-	V=1 R=3 P=19
+	V=1 R=3 P=24
 	if [ "x$SHLIB_SUFFIX_DEPTH" = "x0" ]; then
 	    SHLIB_SUFFIX_LIST=""
 	fi
@@ -2227,6 +2301,41 @@ echo "#endif" >>$AP_CONFIG_AUTO_H
 ####################################################################
 ## More building ap_config_auto.h
 ##
+## Check for availability of isinf() and isnan()
+##
+if ${SHELL} ./helpers/TestCompile func isinf ; then
+    echo "" >>$AP_CONFIG_AUTO_H
+    echo "/* determine: isinf() found in libc */ " >>$AP_CONFIG_AUTO_H
+    echo "#ifndef HAVE_ISINF" >>$AP_CONFIG_AUTO_H
+    echo "#define HAVE_ISINF 1" >>$AP_CONFIG_AUTO_H
+    echo "#endif" >>$AP_CONFIG_AUTO_H
+elif ${SHELL} ./helpers/TestCompile lib m isinf ; then
+    echo "" >>$AP_CONFIG_AUTO_H
+    echo "/* determine: isinf() found in libm */ " >>$AP_CONFIG_AUTO_H
+    echo "#ifndef HAVE_ISINF" >>$AP_CONFIG_AUTO_H
+    echo "#define HAVE_ISINF 1" >>$AP_CONFIG_AUTO_H
+    echo "#endif" >>$AP_CONFIG_AUTO_H
+    LIBS="$LIBS -lm"
+    ADDED_LM="yes"
+fi
+
+if ${SHELL} ./helpers/TestCompile func isnan ; then
+    echo "" >>$AP_CONFIG_AUTO_H
+    echo "/* determine: isnan() found in libc */ " >>$AP_CONFIG_AUTO_H
+    echo "#ifndef HAVE_ISNAN" >>$AP_CONFIG_AUTO_H
+    echo "#define HAVE_ISNAN 1" >>$AP_CONFIG_AUTO_H
+    echo "#endif" >>$AP_CONFIG_AUTO_H
+elif ${SHELL} ./helpers/TestCompile lib m isnan ; then
+    echo "" >>$AP_CONFIG_AUTO_H
+    echo "/* determine: isnan() found in libm */ " >>$AP_CONFIG_AUTO_H
+    echo "#ifndef HAVE_ISNAN" >>$AP_CONFIG_AUTO_H
+    echo "#define HAVE_ISNAN 1" >>$AP_CONFIG_AUTO_H
+    echo "#endif" >>$AP_CONFIG_AUTO_H
+    if [ "x$ADDED_LM" != "xyes" ]; then
+        LIBS="$LIBS -lm"
+    fi
+fi
+
 ## We check for the endianess of the machine
 ##
 AP_BYTE_ORDER=`${SHELL} helpers/TestCompile -r byteorder`
@@ -2360,7 +2469,7 @@ else
       echo "** Apache requires an ANSI C Compiler, such as gcc. "
       echo ""
       echo "======== Error Output for sanity check ========"
-      (./helpers/TestCompile -v sanity)
+      (${SHELL} ./helpers/TestCompile -v sanity) 2>&1
       echo "============= End of Error Report ============="
       echo ""
       echo " Aborting!"

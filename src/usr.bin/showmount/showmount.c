@@ -1,4 +1,4 @@
-/*	$OpenBSD: showmount.c,v 1.8 2001/08/12 12:03:03 heko Exp $	*/
+/*	$OpenBSD: showmount.c,v 1.10 2002/02/16 21:27:52 millert Exp $	*/
 /*	$NetBSD: showmount.c,v 1.7 1996/05/01 18:14:10 cgd Exp $	*/
 
 /*
@@ -47,7 +47,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)showmount.c	8.3 (Berkeley) 3/29/95";
 #endif
-static char rcsid[] = "$OpenBSD: showmount.c,v 1.8 2001/08/12 12:03:03 heko Exp $";
+static char rcsid[] = "$OpenBSD: showmount.c,v 1.10 2002/02/16 21:27:52 millert Exp $";
 #endif /* not lint */
 
 #include <sys/types.h>
@@ -96,10 +96,10 @@ static struct mountlist *mntdump;
 static struct exportslist *exports;
 static int type = 0;
 
-void	print_dump __P((struct mountlist *));
-void	usage __P((void));
-int	xdr_mntdump __P((XDR *, struct mountlist **));
-int	xdr_exports __P((XDR *, struct exportslist **));
+void	print_dump(struct mountlist *);
+void	usage(void);
+int	xdr_mntdump(XDR *, struct mountlist **);
+int	xdr_exports(XDR *, struct exportslist **);
 
 /*
  * This command queries the NFS mount daemon for it's mount list and/or
@@ -210,7 +210,7 @@ main(argc, argv)
 		default:
 			printf("Hosts on %s:\n", host);
 			break;
-		};
+		}
 		print_dump(mntdump);
 	}
 	if (rpcs & DOEXPORTS) {
@@ -402,7 +402,7 @@ print_dump(mp)
 		strvis(vn, mp->ml_host, VIS_CSTYLE);
 		printf("%s\n", vn);
 		break;
-	};
+	}
 	if (mp->ml_right)
 		print_dump(mp->ml_right);
 }

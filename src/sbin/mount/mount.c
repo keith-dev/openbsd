@@ -1,4 +1,4 @@
-/*	$OpenBSD: mount.c,v 1.22 2001/06/24 17:03:16 csapuntz Exp $	*/
+/*	$OpenBSD: mount.c,v 1.26 2002/02/17 19:42:28 millert Exp $	*/
 /*	$NetBSD: mount.c,v 1.24 1995/11/18 03:34:29 cgd Exp $	*/
 
 /*
@@ -44,7 +44,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)mount.c	8.19 (Berkeley) 4/19/94";
 #else
-static char rcsid[] = "$OpenBSD: mount.c,v 1.22 2001/06/24 17:03:16 csapuntz Exp $";
+static char rcsid[] = "$OpenBSD: mount.c,v 1.26 2002/02/17 19:42:28 millert Exp $";
 #endif
 #endif /* not lint */
 
@@ -75,18 +75,18 @@ static char rcsid[] = "$OpenBSD: mount.c,v 1.22 2001/06/24 17:03:16 csapuntz Exp
 int	debug, verbose;
 char	**typelist = NULL;
 
-int	selected __P((const char *));
-char   *catopt __P((char *, const char *));
+int	selected(const char *);
+char   *catopt(char *, const char *);
 struct statfs
-       *getmntpt __P((const char *));
-int	hasopt __P((const char *, const char *));
-void	maketypelist __P((char *));
-void	mangle __P((char *, int *, const char **));
-int	mountfs __P((const char *, const char *, const char *,
-			int, const char *, const char *, int));
-void	prmount __P((struct statfs *));
-int	disklabelcheck __P((struct fstab *));
-void	usage __P((void));
+       *getmntpt(const char *);
+int	hasopt(const char *, const char *);
+void	maketypelist(char *);
+void	mangle(char *, int *, const char **);
+int	mountfs(const char *, const char *, const char *, int, const char *,
+	    const char *, int);
+void	prmount(struct statfs *);
+int	disklabelcheck(struct fstab *);
+void	usage(void);
 
 /* Map from mount options to printable formats. */
 static struct opt {
@@ -404,7 +404,7 @@ mountfs(vfstype, spec, name, flags, options, mntopts, skipmounted)
 		} while (*++edir != NULL);
 
 		if (errno == ENOENT)
-			warn("exec %s for %s", execname, name);
+			warn("no mount helper program found for %s", vfstype);
 		exit(1);
 		/* NOTREACHED */
 	default:				/* Parent. */
@@ -460,6 +460,16 @@ prmount(sf)
 	if (flags)
 		(void)printf("%sunknown flag%s %#x", !f++ ? " (" : ", ", 
 		    flags & (flags - 1) ? "s" : "", flags);
+
+
+	if (verbose) {
+		char buf[26];
+		time_t time = sf->f_ctime;
+
+		ctime_r(&time, buf);
+		buf[24] = '\0';
+		printf(", ctime=%s", buf);
+	}
 
 	/*
 	 * Filesystem-specific options

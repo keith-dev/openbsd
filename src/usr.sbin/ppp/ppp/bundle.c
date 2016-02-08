@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	$OpenBSD: bundle.c,v 1.60 2001/08/21 11:06:04 brian Exp $
+ *	$OpenBSD: bundle.c,v 1.63 2002/03/31 02:38:49 brian Exp $
  */
 
 #include <sys/param.h>
@@ -49,12 +49,6 @@
 #include <string.h>
 #include <sys/uio.h>
 #include <sys/wait.h>
-#if defined(__FreeBSD__) && !defined(NOKLDLOAD)
-#ifdef NOSUID
-#include <sys/linker.h>
-#endif
-#include <sys/module.h>
-#endif
 #include <termios.h>
 #include <unistd.h>
 
@@ -100,7 +94,7 @@
 #include "iface.h"
 #include "server.h"
 #include "probe.h"
-#ifdef HAVE_DES
+#ifndef NODES
 #include "mppe.h"
 #endif
 
@@ -135,7 +129,7 @@ bundle_NewPhase(struct bundle *bundle, u_int new)
   switch (new) {
   case PHASE_DEAD:
     bundle->phase = new;
-#ifdef HAVE_DES
+#ifndef NODES
     MPPE_MasterKeyValid = 0;
 #endif
     log_DisplayPrompts();
@@ -336,9 +330,11 @@ bundle_LayerDown(void *v, struct fsm *fp)
                    fp->link->name);
     }
 
-    if (!others_active)
+    if (!others_active) {
       /* Down the NCPs.  We don't expect to get fsm_Close()d ourself ! */
       ncp2initial(&bundle->ncp);
+      mp_Down(&bundle->ncp.mp);
+    }
   }
 }
 
@@ -348,6 +344,7 @@ bundle_LayerFinish(void *v, struct fsm *fp)
   /* The given fsm is now down (fp cannot be NULL)
    *
    * If it's the last NCP, fsm_Close all LCPs
+   * If it's the last NCP, bring any MP layer down
    */
 
   struct bundle *bundle = (struct bundle *)v;
@@ -360,6 +357,7 @@ bundle_LayerFinish(void *v, struct fsm *fp)
       if (dl->state == DATALINK_OPEN)
         datalink_Close(dl, CLOSE_STAYDOWN);
     fsm2initial(fp);
+    mp_Down(&bundle->ncp.mp);
   }
 }
 
@@ -406,6 +404,7 @@ bundle_Close(struct bundle *bundle, const char *name, int how)
       ncp_Close(&bundle->ncp);
     else {
       ncp2initial(&bundle->ncp);
+      mp_Down(&bundle->ncp.mp);
       for (dl = bundle->links; dl; dl = dl->next)
         datalink_Close(dl, how);
     }
@@ -625,11 +624,18 @@ bundle_DescriptorWrite(struct fdescriptor *d, struct bundle *bundle,
 
   /* This is not actually necessary as struct mpserver doesn't Write() */
   if (descriptor_IsSet(&bundle->ncp.mp.server.desc, fdset))
-    descriptor_Write(&bundle->ncp.mp.server.desc, bundle, fdset);
+    if (descriptor_Write(&bundle->ncp.mp.server.desc, bundle, fdset) == 1)
+      result++;
 
   for (dl = bundle->links; dl; dl = dl->next)
     if (descriptor_IsSet(&dl->desc, fdset))
-      result += descriptor_Write(&dl->desc, bundle, fdset);
+      switch (descriptor_Write(&dl->desc, bundle, fdset)) {
+      case -1:
+        datalink_ComeDown(dl, CLOSE_NORMAL);
+        break;
+      case 1:
+        result++;
+      }
 
   return result;
 }
@@ -705,13 +711,8 @@ bundle_Create(const char *prefix, int type, int unit)
 	 * Attempt to load the tunnel interface KLD if it isn't loaded
 	 * already.
          */
-        if (modfind("if_tun") == -1) {
-          if (ID0kldload("if_tun") != -1) {
-            bundle.unit--;
-            continue;
-          }
-          log_Printf(LogWARN, "kldload: if_tun: %s\n", strerror(errno));
-        }
+        loadmodules(LOAD_VERBOSLY, "if_tun", NULL);
+        continue;
       }
 #endif
       if (errno != ENOENT || ++enoentcount > 2) {
@@ -938,6 +939,7 @@ bundle_LinkClosed(struct bundle *bundle, struct datalink *dl)
     if (dl->physical->type != PHYS_AUTO)	/* Not in -auto mode */
       bundle_DownInterface(bundle);
     ncp2initial(&bundle->ncp);
+    mp_Down(&bundle->ncp.mp);
     bundle_NewPhase(bundle, PHASE_DEAD);
     bundle_StopIdleTimer(bundle);
   }
@@ -1034,7 +1036,7 @@ bundle_ShowStatus(struct cmdargs const *arg)
                 arg->bundle->iface->name, arg->bundle->bandwidth);
 
   if (arg->bundle->upat) {
-    int secs = time(NULL) - arg->bundle->upat;
+    int secs = bundle_Uptime(arg->bundle);
 
     prompt_Printf(arg->prompt, ", up time %d:%02d:%02d", secs / 3600,
                   (secs / 60) % 60, secs % 60);
@@ -1364,8 +1366,8 @@ bundle_ReceiveDatalink(struct bundle *bundle, int s)
     return;
   }
 
-  fd = (int *)(cmsg + 1);
-  nfd = (cmsg->cmsg_len - sizeof *cmsg) / sizeof(int);
+  fd = (int *)CMSG_DATA(cmsg);
+  nfd = ((caddr_t)cmsg + cmsg->cmsg_len - (caddr_t)fd) / sizeof(int);
 
   if (nfd < 2) {
     log_Printf(LogERROR, "Recvmsg: %d descriptor%s received (too few) !\n",
@@ -1457,7 +1459,7 @@ bundle_ReceiveDatalink(struct bundle *bundle, int s)
 void
 bundle_SendDatalink(struct datalink *dl, int s, struct sockaddr_un *sun)
 {
-  char cmsgbuf[sizeof(struct cmsghdr) + sizeof(int) * SEND_MAXFD];
+  char cmsgbuf[CMSG_SPACE(sizeof(int) * SEND_MAXFD)];
   const char *constlock;
   char *lock;
   struct cmsghdr *cmsg;
@@ -1507,7 +1509,7 @@ bundle_SendDatalink(struct datalink *dl, int s, struct sockaddr_un *sun)
     msg.msg_iovlen = 1;
     msg.msg_iov = iov;
     msg.msg_control = cmsgbuf;
-    msg.msg_controllen = sizeof *cmsg + sizeof(int) * nfd;
+    msg.msg_controllen = CMSG_SPACE(sizeof(int) * nfd);
     msg.msg_flags = 0;
 
     cmsg = (struct cmsghdr *)cmsgbuf;
@@ -1516,7 +1518,7 @@ bundle_SendDatalink(struct datalink *dl, int s, struct sockaddr_un *sun)
     cmsg->cmsg_type = SCM_RIGHTS;
 
     for (f = 0; f < nfd; f++)
-      *((int *)(cmsg + 1) + f) = fd[f];
+      *((int *)CMSG_DATA(cmsg) + f) = fd[f];
 
     for (f = 1, expect = 0; f < niov; f++)
       expect += iov[f].iov_len;
@@ -1924,4 +1926,13 @@ bundle_ChangedPID(struct bundle *bundle)
 #ifdef TUNSIFPID
   ioctl(bundle->dev.fd, TUNSIFPID, 0);
 #endif
+}
+
+int
+bundle_Uptime(struct bundle *bundle)
+{
+  if (bundle->upat)
+    return time(NULL) - bundle->upat;
+
+  return 0;
 }

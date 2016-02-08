@@ -1,4 +1,4 @@
-/*	$OpenBSD: pack.c,v 1.9 1999/01/19 01:11:25 niklas Exp $	*/
+/*	$OpenBSD: pack.c,v 1.11 2002/03/14 16:44:24 mpech Exp $	*/
 /*	$NetBSD: pack.c,v 1.5 1996/08/31 21:15:11 mycroft Exp $	*/
 
 /*
@@ -88,7 +88,7 @@
  * (So it goes.)
  */
 
-typedef int (*vec_cmp_func) __P((const void *, int, int));
+typedef int (*vec_cmp_func)(const void *, int, int);
 
 #define	TAILHSIZE	128
 #define	PVHASH(i)	((i) & (TAILHSIZE - 1))
@@ -103,27 +103,27 @@ static int locspace;
 static int pvecspace;
 static int longest_pvec;
 
-static void packdevi __P((void));
-static void packlocs __P((void));
-static void packpvec __P((void));
+static void packdevi(void);
+static void packlocs(void);
+static void packpvec(void);
 
-static void addparents __P((struct devi *src, struct devi *dst));
-static int nparents __P((struct devi **, struct devbase *, int));
-static int sameas __P((struct devi *, struct devi *));
-static int findvec __P((const void *, int, int, vec_cmp_func, int));
-static int samelocs __P((const void *, int, int));
-static int addlocs __P((const char **, int));
-static int loclencmp __P((const void *, const void *));
-static int samepv __P((const void *, int, int));
-static int addpv __P((short *, int));
-static int pvlencmp __P((const void *, const void *));
-static void resettails __P((void));
+static void addparents(struct devi *src, struct devi *dst);
+static int nparents(struct devi **, struct devbase *, int);
+static int sameas(struct devi *, struct devi *);
+static int findvec(const void *, int, int, vec_cmp_func, int);
+static int samelocs(const void *, int, int);
+static int addlocs(const char **, int);
+static int loclencmp(const void *, const void *);
+static int samepv(const void *, int, int);
+static int addpv(short *, int);
+static int pvlencmp(const void *, const void *);
+static void resettails(void);
 
 void
 pack()
 {
-	register struct devi *i;
-	register int n;
+	struct devi *i;
+	int n;
 
 	/* Pack instances and make parent vectors. */
 	packdevi();
@@ -165,9 +165,9 @@ pack()
 void
 packdevi()
 {
-	register struct devi *i, *l, *p;
-	register struct deva *d;
-	register int j, m, n;
+	struct devi *i, *l, *p;
+	struct deva *d;
+	int j, m, n;
 
 	packed = emalloc((ndevi + 1) * sizeof *packed);
 	n = 0;
@@ -217,9 +217,9 @@ packdevi()
  */
 static int
 sameas(i1, i2)
-	register struct devi *i1, *i2;
+	struct devi *i1, *i2;
 {
-	register const char **p1, **p2;
+	const char **p1, **p2;
 
 	if (i1->i_atattr != i2->i_atattr)
 		return (0);
@@ -237,11 +237,11 @@ sameas(i1, i2)
  */
 static void
 addparents(src, dst)
-	register struct devi *src, *dst;
+	struct devi *src, *dst;
 {
-	register struct nvlist *nv;
-	register struct devi *i, **p, **q;
-	register int j, n, old, new, ndup;
+	struct nvlist *nv;
+	struct devi *i, **p, **q;
+	int j, n, old, new, ndup;
 
 	if (dst->i_collapsed)
 		panic("addparents() i_collapsed");
@@ -302,12 +302,12 @@ addparents(src, dst)
  */
 static int
 nparents(p, dev, unit)
-	register struct devi **p;
-	register struct devbase *dev;
-	register int unit;
+	struct devi **p;
+	struct devbase *dev;
+	int unit;
 {
-	register struct devi *i, *l;
-	register int n;
+	struct devi *i, *l;
+	int n;
 
 	n = 0;
 	/* for each instance ... */
@@ -328,8 +328,8 @@ nparents(p, dev, unit)
 static void
 packlocs()
 {
-	register struct devi **p, *i;
-	register int l, o;
+	struct devi **p, *i;
+	int l, o;
 
 	qsort(packed, npacked, sizeof *packed, loclencmp);
 	for (p = packed; (i = *p) != NULL; p++) {
@@ -346,9 +346,9 @@ packlocs()
 static void
 packpvec()
 {
-	register struct devi **p, *i, **par;
-	register int l, v, o;
-	register short *vec;
+	struct devi **p, *i, **par;
+	int l, v, o;
+	short *vec;
 
 	vec = emalloc(longest_pvec * sizeof(*vec));
 	qsort(packed, npacked, sizeof *packed, pvlencmp);
@@ -381,8 +381,8 @@ findvec(ptr, hash, len, cmp, nextplace)
 	vec_cmp_func cmp;
 	int nextplace;
 {
-	register struct tails *t, **hp;
-	register int off;
+	struct tails *t, **hp;
+	int off;
 
 	hp = &tails[hash];
 	for (t = *hp; t != NULL; t = t->t_next) {
@@ -404,9 +404,9 @@ static int
 samelocs(ptr, off, len)
 	const void *ptr;
 	int off;
-	register int len;
+	int len;
 {
-	register const char **p, **q;
+	const char **p, **q;
 
 	for (p = &locators.vec[off], q = (const char **)ptr; --len >= 0;)
 		if (*p++ != *q++)
@@ -419,11 +419,11 @@ samelocs(ptr, off, len)
  */
 static int
 addlocs(locs, len)
-	register const char **locs;
-	register int len;
+	const char **locs;
+	int len;
 {
-	register const char **p;
-	register int ret;
+	const char **p;
+	int ret;
 
 	ret = locators.used;
 	if ((locators.used = ret + len) > locspace)
@@ -441,7 +441,7 @@ static int
 loclencmp(a, b)
 	const void *a, *b;
 {
-	register int l1, l2;
+	int l1, l2;
 
 	l1 = (*(struct devi **)a)->i_atattr->a_loclen;
 	l2 = (*(struct devi **)b)->i_atattr->a_loclen;
@@ -455,9 +455,9 @@ static int
 samepv(ptr, off, len)
 	const void *ptr;
 	int off;
-	register int len;
+	int len;
 {
-	register short *p, *q;
+	short *p, *q;
 
 	for (p = &parents.vec[off], q = (short *)ptr; --len >= 0;)
 		if (*p++ != *q++)
@@ -470,11 +470,11 @@ samepv(ptr, off, len)
  */
 static int
 addpv(pv, len)
-	register short *pv;
-	register int len;
+	short *pv;
+	int len;
 {
-	register short *p;
-	register int ret;
+	short *p;
+	int ret;
 	static int firstend = -1;
 
 	/*
@@ -505,7 +505,7 @@ static int
 pvlencmp(a, b)
 	const void *a, *b;
 {
-	register int l1, l2;
+	int l1, l2;
 
 	l1 = (*(struct devi **)a)->i_pvlen;
 	l2 = (*(struct devi **)b)->i_pvlen;
@@ -515,8 +515,8 @@ pvlencmp(a, b)
 static void
 resettails()
 {
-	register struct tails **p, *t, *next;
-	register int i;
+	struct tails **p, *t, *next;
+	int i;
 
 	for (p = tails, i = TAILHSIZE; --i >= 0; p++) {
 		for (t = *p; t != NULL; t = next) {

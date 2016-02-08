@@ -1,4 +1,4 @@
-.\" $OpenBSD: vpn.8,v 1.56 2001/10/05 14:45:54 mpech Exp $
+.\" $OpenBSD: vpn.8,v 1.62 2002/02/19 21:11:22 miod Exp $
 .\"
 .\" Copyright 1998 Niels Provos <provos@physnet.uni-hamburg.de>
 .\" All rights reserved.
@@ -86,8 +86,9 @@ option    IPSEC           # IPSEC VPN
 pseudo-device enc 4       # Encapsulation device used by IPSEC
 .Ed
 .Pp
+To use IPsec,
 .Xr ipsec 4
-operations must be first enabled using
+operations must be enabled using
 .Xr sysctl 8 .
 Before doing either manual or automated keying, or performing
 encryption (ESP) or authentication (AH) operations, ensure the appropriate
@@ -97,13 +98,19 @@ kernel operation has been enabled:
 	# sysctl -w net.inet.ah.enable=1
 .Ed
 .Pp
-For security gateways, enabling packet forwarding is often
-required:
+The ESP and AH protocols default to 'on'.
+.Pp
+For security gateways, proper operation often also requires packet
+forwarding to be enabled:
 .Bd -literal
 	# sysctl -w net.inet.ip.forwarding=1
+	# sysctl -w net.inet6.ip6.forwarding=1
 .Ed
 .Pp
-For more permanent operation, these options should be enabled in your
+Packet forwarding defaults to 'off'.
+.Pp
+For more permanent operation,
+the appropriate option(s) should be enabled in your
 .Xr sysctl.conf 5 .
 .Ss Generating Manual Keys [manual keying]
 The shared secret symmetric keys used to create a VPN can
@@ -131,6 +138,7 @@ Different cipher types may require different sized keys.
 .It Em Cipher	Key Length
 .It Li DES Ta "56 bits"
 .It Li 3DES Ta "168 bits"
+.It Li AES Ta "Variable (128 bits recommended)"
 .It Li BLF Ta "Variable (160 bits recommended)"
 .It Li CAST Ta "Variable (128 bits maximum and recommended)"
 .It Li SKIPJACK Ta "80 bits"
@@ -203,7 +211,7 @@ On the security gateway of subnet A:
 	    -addr B_INTERNAL_NETWORK B_INTERNAL_NETMASK
 	          A_INTERNAL_NETWORK A_INTERNAL_NETMASK
 	    -require -in -src A_EXTERNAL_IP
-	# ipsecadm flow -dst A_EXTERNAL_IP -proto esp
+	# ipsecadm flow -dst B_EXTERNAL_IP -proto esp
 	    -addr B_EXTERNAL_IP 255.255.255.255
 	          A_INTERNAL_NETWORK A_INTERNAL_NETMASK
 	    -require -in -src A_EXTERNAL_IP
@@ -284,23 +292,27 @@ rules for a tunnel which uses encryption (the ESP IPsec protocol) and
 .Xr photurisd 8
 on security gateway A might look like this:
 .Bd -literal
+gatewA = "192.168.1.254/32"
+gatewB = "192.168.2.1/32"
+netA = "10.0.50.0/24"
+netB = "10.0.99.0/24"
+
+# default deny
 # ne0 is the only interface going to the outside.
-block in log on ne0 from any to any
-block out log on ne0 from any to any
-block in log on enc0 from any to any
-block out log on enc0 from any to any
+block in log on { enc0, ne0 } all
+block out log on { enc0, ne0 } all
 
 # Passing in encrypted traffic from security gateways
-pass in proto esp from gatewB/32 to gatewA/32
-pass out proto esp from gatewA/32 to gatewB/32
+pass in proto esp from $gatewB to $gatewA
+pass out proto esp from $gatewA to $gatewB
 
 # Passing in traffic from the designated subnets.
-pass in on enc0 from netB/netBmask to netA/netAmask
-pass out on enc0 from natA/netAmask to netB/netBmask
+pass in on enc0 from $netB to $netA
+pass out on enc0 from $netA to $netB
 
 # Passing in Photuris traffic from the security gateways
-pass in on ne0 proto udp from gatewB/32 port = 468 to gatewA/32 port = 468
-pass out on ne0 proto udp from gatewA/32 port = 468 to gatewB/32 port = 468
+pass in on ne0 proto udp from $gatewB port = 468 to $gatewA port = 468
+pass out on ne0 proto udp from $gatewA port = 468 to $gatewB port = 468
 .Ed
 .Pp
 If there are no other
@@ -429,38 +441,26 @@ Create the ipsec flows on machine B:
     -require -in -src 192.168.2.1
 .Ed
 .It
-Configure the firewall rules on machine A:
+Configure the firewall rules on machine A
+using the previously defined ruleset:
 .Bd -literal
-# ne0 is the only interface going to the outside.
-block in log on ne0 from any to any
-block out log on ne0 from any to any
-block in log on enc0 from any to any
-block out log on enc0 from any to any
+gatewA = "192.168.1.254/32"
+gatewB = "192.168.2.1/32"
+netA = "10.0.50.0/24"
+netB = "10.0.99.0/24"
 
-# Passing in encrypted traffic from security gateways
-pass in proto esp from 192.168.2.1/32 to 192.168.1.254/32
-pass out proto esp from 192.168.1.254/32 to 192.168.2.1/32
-
-# Passing in traffic from the designated subnets.
-pass in quick on enc0 from 10.0.99.0/24 to 10.0.50.0/24
-pass out quick on enc0 from 10.0.50.0/24 to 10.0.99.0/24 
+(rest of ruleset)
 .Ed
 .It
-Configure the firewall rules on machine B:
+Configure the firewall rules on machine B, modifying the
+definitions as appropriate:
 .Bd -literal
-# ne0 is the only interface going to the outside.
-block in log on ne0 from any to any
-block out log on ne0 from any to any
-block in log on enc0 from any to any
-block out log on enc0 from any to any
+gatewB = "192.168.1.254/32"
+gatewA = "192.168.2.1/32"
+netB = "10.0.50.0/24"
+netA = "10.0.99.0/24"
 
-# Passing in encrypted traffic from security gateways
-pass in proto esp from 192.168.1.254/32 to 192.168.2.1/32
-pass out proto esp from 192.168.2.1/32 to 192.168.1.254/32
-
-# Passing in traffic from the designated subnets.
-pass in quick on enc0 from 10.0.50.0/24 to 10.0.99.0/24
-pass out quick on enc0 from 10.0.99.0/24 to 10.0.50.0/24
+(rest of ruleset)
 .Ed
 .El
 .Ss Automated keying
@@ -598,14 +598,14 @@ Suites=			QM-ESP-3DES-SHA-SUITE
 .Pp
 .It
 Read through the configuration one more time.
-The only real differences between the two files in this example is
+The only real differences between the two files in this example are
 the IP-addresses, and ordering of Local- and Remote-ID for the VPN
 itself.
 Note that the shared secret (the
 .Em Authentication
 tag) must match between machineA and machineB.
 .Pp
-Do to the shared secret information in the configuration file, it must
+Due to the shared secret information in the configuration file, it must
 be installed without any permissions for "group" or "other".
 .Bd -literal
 # chmod og-rwx /etc/isakmpd/isakmpd.conf
@@ -670,7 +670,7 @@ On both machines, run:
 # /sbin/isakmpd
 .Ed
 .Pp
-For run with verbose debugging enabled, instead start with:
+To run with verbose debugging enabled, instead start with:
 .Bd -literal
 # /sbin/isakmpd -d -DA=99
 .Ed
@@ -683,16 +683,17 @@ Sample VPN configuration file
 .Xr isakmpd 8
 configuration file
 .It Pa /etc/photuris/photuris.conf
-Photuris configuration file
+.Xr photurisd 8
+configuration file
 .It Pa /etc/pf.conf
 Firewall configuration file
 .El
 .Sh BUGS
 .Xr photurisd 8
 can not be used in VPN mode unless both of the security gateway IP addresses
-lie within the network ranges being tunnelled to.
-In situations where the gateway IP is outside the desired netrange, such
-as with private (RFC 1918) networks,
+lie within the network ranges being tunnelled.
+In situations where the gateway IPs are outside the tunnelled network
+range, such as when tunnelling private (RFC 1918) networks over the Internet,
 .Xr isakmpd 8
 or manual keying must be used.
 .Sh SEE ALSO

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip6_output.c,v 1.52 2001/10/01 16:03:09 jasoni Exp $	*/
+/*	$OpenBSD: ip6_output.c,v 1.58 2002/03/14 01:27:12 millert Exp $	*/
 /*	$KAME: ip6_output.c,v 1.172 2001/03/25 09:55:56 itojun Exp $	*/
 
 /*
@@ -102,7 +102,7 @@
 #include <netinet/tcp.h>
 #include <net/pfkeyv2.h>
 
-extern u_int8_t get_sa_require  __P((struct inpcb *));
+extern u_int8_t get_sa_require(struct inpcb *);
 
 extern int ipsec_auth_default_level;
 extern int ipsec_esp_trans_default_level;
@@ -118,15 +118,15 @@ struct ip6_exthdrs {
 	struct mbuf *ip6e_dest2;
 };
 
-static int ip6_pcbopts __P((struct ip6_pktopts **, struct mbuf *,
-			    struct socket *));
-static int ip6_setmoptions __P((int, struct ip6_moptions **, struct mbuf *));
-static int ip6_getmoptions __P((int, struct ip6_moptions *, struct mbuf **));
-static int ip6_copyexthdr __P((struct mbuf **, caddr_t, int));
-static int ip6_insertfraghdr __P((struct mbuf *, struct mbuf *, int,
-				  struct ip6_frag **));
-static int ip6_insert_jumboopt __P((struct ip6_exthdrs *, u_int32_t));
-static int ip6_splithdr __P((struct mbuf *, struct ip6_exthdrs *));
+static int ip6_pcbopts(struct ip6_pktopts **, struct mbuf *,
+			    struct socket *);
+static int ip6_setmoptions(int, struct ip6_moptions **, struct mbuf *);
+static int ip6_getmoptions(int, struct ip6_moptions *, struct mbuf **);
+static int ip6_copyexthdr(struct mbuf **, caddr_t, int);
+static int ip6_insertfraghdr(struct mbuf *, struct mbuf *, int,
+				  struct ip6_frag **);
+static int ip6_insert_jumboopt(struct ip6_exthdrs *, u_int32_t);
+static int ip6_splithdr(struct mbuf *, struct ip6_exthdrs *);
 
 /*
  * IP6 output. The packet in mbuf chain m contains a skeletal IP6
@@ -398,61 +398,6 @@ ip6_output(m0, opt, ro, flags, im6o, ifpp)
 			   nexthdrp, IPPROTO_DSTOPTS);
 		MAKE_CHAIN(exthdrs.ip6e_rthdr, mprev,
 			   nexthdrp, IPPROTO_ROUTING);
-
-#if 0 /*KAME IPSEC*/
-		if (!needipsec)
-			goto skip_ipsec2;
-
-		/*
-		 * pointers after IPsec headers are not valid any more.
-		 * other pointers need a great care too.
-		 * (IPsec routines should not mangle mbufs prior to AH/ESP)
-		 */
-		exthdrs.ip6e_dest2 = NULL;
-
-	    {
-		struct ip6_rthdr *rh = NULL;
-		int segleft_org = 0;
-		struct ipsec_output_state state;
-
-		if (exthdrs.ip6e_rthdr) {
-			rh = mtod(exthdrs.ip6e_rthdr, struct ip6_rthdr *);
-			segleft_org = rh->ip6r_segleft;
-			rh->ip6r_segleft = 0;
-		}
-
-		bzero(&state, sizeof(state));
-		state.m = m;
-		error = ipsec6_output_trans(&state, nexthdrp, mprev, sp, flags,
-			&needipsectun);
-		m = state.m;
-		if (error) {
-			/* mbuf is already reclaimed in ipsec6_output_trans. */
-			m = NULL;
-			switch (error) {
-			case EHOSTUNREACH:
-			case ENETUNREACH:
-			case EMSGSIZE:
-			case ENOBUFS:
-			case ENOMEM:
-				break;
-			default:
-				printf("ip6_output (ipsec): error code %d\n", error);
-				/*fall through*/
-			case ENOENT:
-				/* don't show these error codes to the user */
-				error = 0;
-				break;
-			}
-			goto bad;
-		}
-		if (exthdrs.ip6e_rthdr) {
-			/* ah6_output doesn't modify mbuf chain */
-			rh->ip6r_segleft = segleft_org;
-		}
-	    }
-skip_ipsec2:;
-#endif
 	}
 
 	/*
@@ -560,7 +505,7 @@ skip_ipsec2:;
 
 		/* Latch to PCB */
 		if (inp)
-		        tdb_add_inp(tdb, inp, 0);
+			tdb_add_inp(tdb, inp, 0);
 
 		m->m_flags &= ~(M_BCAST | M_MCAST);	/* just in case */
 
@@ -817,9 +762,8 @@ skip_ipsec2:;
 		 * We eventually have sockaddr_in6 and use the sin6_scope_id
 		 * field of the structure here.
 		 * We rely on the consistency between two scope zone ids
-		 * of source add destination, which should already be assured
-		 * Larger scopes than link will be supported in the near
-		 * future.
+		 * of source and destination, which should already be assured.
+		 * Larger scopes than link will be supported in the future. 
 		 */
 		origifp = NULL;
 		if (IN6_IS_SCOPE_LINKLOCAL(&ip6->ip6_src))
@@ -881,11 +825,13 @@ skip_ipsec2:;
 	}
 
 #if NPF > 0 
-        if (pf_test6(PF_OUT, ifp, &m) != PF_PASS) {
-                error = EHOSTUNREACH;
+	if (pf_test6(PF_OUT, ifp, &m) != PF_PASS) {
+		error = EHOSTUNREACH;
 		m_freem(m);
-                goto done;
-        }
+		goto done;
+	}
+	if (m == NULL)
+		goto done;
 	ip6 = mtod(m, struct ip6_hdr *);
 #endif 
 
@@ -910,12 +856,7 @@ skip_ipsec2:;
 #endif
 	    )
 	{
-#ifdef OLDIP6OUTPUT
-		error = (*ifp->if_output)(ifp, m, (struct sockaddr *)dst,
-					  ro->ro_rt);
-#else
 		error = nd6_output(ifp, origifp, m, dst, ro->ro_rt);
-#endif
 		goto done;
 	} else if (mtu < IPV6_MMTU) {
 		/*
@@ -972,7 +913,8 @@ skip_ipsec2:;
 
 		/*
 		 * Loop through length of segment after first fragment,
-		 * make new header and copy data of each part and link onto chain.
+		 * make new header and copy data of each part and link onto
+		 * chain.
 		 */
 		m0 = m;
 		for (off = hlen; off < tlen; off += len) {
@@ -1031,13 +973,7 @@ sendorfree:
 		m0 = m->m_nextpkt;
 		m->m_nextpkt = 0;
 		if (error == 0) {
-#ifdef OLDIP6OUTPUT
-			error = (*ifp->if_output)(ifp, m,
-						  (struct sockaddr *)dst,
-						  ro->ro_rt);
-#else
 			error = nd6_output(ifp, origifp, m, dst, ro->ro_rt);
-#endif
 		} else
 			m_freem(m);
 	}
@@ -1390,18 +1326,6 @@ ip6_ctloutput(op, so, level, optname, mp)
 # undef in6p_flags
 				break;
 
-#if 0 /*KAME IPSEC*/
-			case IPV6_IPSEC_POLICY:
-			    {
-				caddr_t req = NULL;
-				if (m != 0)
-					req = mtod(m, caddr_t);
-				error = ipsec6_set_policy(in6p, optname, req,
-				                          privileged);
-			    }
-				break;
-#endif /* IPSEC */
-
 			case IPSEC6_OUTSA:
 #ifndef IPSEC
 				error = EINVAL;
@@ -1614,21 +1538,6 @@ ip6_ctloutput(op, so, level, optname, mp)
 				error = ip6_getmoptions(optname, inp->inp_moptions6, mp);
 				break;
 
-#if 0 /*KAME IPSEC*/
-			case IPV6_IPSEC_POLICY:
-			  {
-				caddr_t req = NULL;
-				int len = 0;
-
-				if (m != 0) {
-					req = mtod(m, caddr_t);
-					len = m->m_len;
-				}
-				error = ipsec6_get_policy(in6p, req, mp);
-				break;
-			  }
-#endif /* IPSEC */
-
 			case IPSEC6_OUTSA:
 #ifndef IPSEC
 				error = EINVAL;
@@ -1659,21 +1568,21 @@ ip6_ctloutput(op, so, level, optname, mp)
 #else
 				m->m_len = sizeof(int);
 				switch (optname) {
-				case IP_AUTH_LEVEL:
+				case IPV6_AUTH_LEVEL:
 					optval = inp->inp_seclevel[SL_AUTH];
 					break;
 
-				case IP_ESP_TRANS_LEVEL:
+				case IPV6_ESP_TRANS_LEVEL:
 					optval =
 					    inp->inp_seclevel[SL_ESP_TRANS];
 					break;
 
-				case IP_ESP_NETWORK_LEVEL:
+				case IPV6_ESP_NETWORK_LEVEL:
 					optval =
 					    inp->inp_seclevel[SL_ESP_NETWORK];
 					break;
 
-				case IP_IPCOMP_LEVEL:
+				case IPV6_IPCOMP_LEVEL:
 					optval = inp->inp_seclevel[SL_IPCOMP];
 					break;
 				}
@@ -1848,7 +1757,8 @@ ip6_setmoptions(optname, im6op, m)
 			 * all multicast addresses. Only super user is allowed
 			 * to do this.
 			 */
-			if (suser(p->p_ucred, &p->p_acflag)) {
+			if (suser(p->p_ucred, &p->p_acflag))
+			{
 				error = EACCES;
 				break;
 			}
@@ -1952,7 +1862,8 @@ ip6_setmoptions(optname, im6op, m)
 		}
 		mreq = mtod(m, struct ipv6_mreq *);
 		if (IN6_IS_ADDR_UNSPECIFIED(&mreq->ipv6mr_multiaddr)) {
-			if (suser(p->p_ucred, &p->p_acflag)) {
+			if (suser(p->p_ucred, &p->p_acflag))
+			{
 				error = EACCES;
 				break;
 			}

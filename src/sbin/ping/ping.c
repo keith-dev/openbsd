@@ -1,4 +1,4 @@
-/*	$OpenBSD: ping.c,v 1.46 2001/10/04 07:37:24 jakob Exp $	*/
+/*	$OpenBSD: ping.c,v 1.50 2002/02/17 02:04:38 deraadt Exp $	*/
 /*	$NetBSD: ping.c,v 1.20 1995/08/11 22:37:58 cgd Exp $	*/
 
 /*
@@ -47,7 +47,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)ping.c	8.1 (Berkeley) 6/5/93";
 #else
-static char rcsid[] = "$OpenBSD: ping.c,v 1.46 2001/10/04 07:37:24 jakob Exp $";
+static char rcsid[] = "$OpenBSD: ping.c,v 1.50 2002/02/17 02:04:38 deraadt Exp $";
 #endif
 #endif /* not lint */
 
@@ -170,19 +170,18 @@ quad_t tsumsq = 0;		/* sum of all times squared, for std. dev. */
 int reset_kerninfo;
 #endif
 
-#define DEFAULT_BUFSPACE	60*1024 /* default read buffer size */
-int bufspace = DEFAULT_BUFSPACE;
+int bufspace = IP_MAXPACKET;
 
-void fill __P((char *, char *));
+void fill(char *, char *);
 void catcher(), prtsig(), finish(), summary(int);
-int in_cksum __P((u_short *, int));
+int in_cksum(u_short *, int);
 void pinger();
-char *pr_addr __P((in_addr_t));
-int check_icmph __P((struct ip *));
-void pr_icmph __P((struct icmp *));
-void pr_pack __P((char *, int, struct sockaddr_in *));
-void pr_retip __P((struct ip *));
-quad_t qsqrt __P((quad_t));
+char *pr_addr(in_addr_t);
+int check_icmph(struct ip *);
+void pr_icmph(struct icmp *);
+void pr_pack(char *, int, struct sockaddr_in *);
+void pr_retip(struct ip *);
+quad_t qsqrt(quad_t);
 void usage();
 
 int
@@ -195,7 +194,7 @@ main(argc, argv)
 	struct sockaddr_in *to;
 	struct protoent *proto;
 	struct in_addr saddr;
-	register int i;
+	int i;
 	int ch, hold = 1, packlen, preload;
 	int maxsize, maxsizelen, fdmasks;
 	u_char *datap, *packet;
@@ -467,9 +466,9 @@ main(argc, argv)
 		if ((bufspace -= 1024) <= 0)
 			err(1, "Cannot set the receive buffer size");
 	}
-	if (bufspace < DEFAULT_BUFSPACE)
+	if (bufspace < IP_MAXPACKET)
 		warnx("Could only allocate a receive buffer of %i bytes (default %i)",
-		    bufspace, DEFAULT_BUFSPACE);
+		    bufspace, IP_MAXPACKET);
 
 	if (to->sin_family == AF_INET)
 		(void)printf("PING %s (%s): %d data bytes\n", hostname,
@@ -496,7 +495,7 @@ main(argc, argv)
 
 	for (;;) {
 		struct sockaddr_in from;
-		register int cc;
+		int cc;
 		int fromlen;
 		sigset_t omask, nmask;
 
@@ -589,8 +588,8 @@ prtsig()
 void
 pinger()
 {
-	register struct icmp *icp;
-	register int cc;
+	struct icmp *icp;
+	int cc;
 	int i;
 	char *packet = outpack;
 
@@ -653,10 +652,10 @@ pr_pack(buf, cc, from)
 	int cc;
 	struct sockaddr_in *from;
 {
-	register struct icmp *icp;
-	register in_addr_t l;
-	register u_int i, j;
-	register u_char *cp, *dp;
+	struct icmp *icp;
+	in_addr_t l;
+	u_int i, j;
+	u_char *cp, *dp;
 	static int old_rrlen;
 	static char old_rr[MAX_IPOPTLEN];
 	struct ip *ip, *ip2;
@@ -854,8 +853,8 @@ pr_pack(buf, cc, from)
 			break;
 		default:
 			(void)printf("\nunknown option %x", *cp);
-			hlen = hlen + cp[1] - 1;
-			cp = cp + cp[1] - 1;
+			hlen = hlen - (cp[IPOPT_OLEN] - 1);
+			cp = cp + (cp[IPOPT_OLEN] - 1);
 			break;
 		}
 	if (!(options & F_FLOOD)) {
@@ -873,9 +872,9 @@ in_cksum(addr, len)
 	u_short *addr;
 	int len;
 {
-	register int nleft = len;
-	register u_short *w = addr;
-	register int sum = 0;
+	int nleft = len;
+	u_short *w = addr;
+	int sum = 0;
 	u_short answer = 0;
 
 	/*
@@ -1259,7 +1258,7 @@ void
 fill(bp, patp)
 	char *bp, *patp;
 {
-	register int ii, jj, kk;
+	int ii, jj, kk;
 	int pat[16];
 	char *cp;
 

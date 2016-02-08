@@ -1,4 +1,4 @@
-/*	$OpenBSD: mld6.c,v 1.10 2001/06/09 06:43:38 angelos Exp $	*/
+/*	$OpenBSD: mld6.c,v 1.13 2002/03/14 01:27:12 millert Exp $	*/
 /*	$KAME: mld6.c,v 1.26 2001/02/16 14:50:35 itojun Exp $	*/
 
 /*
@@ -104,7 +104,7 @@ static int mld6_timers_are_running;
 static struct in6_addr mld6_all_nodes_linklocal = IN6ADDR_LINKLOCAL_ALLNODES_INIT;
 static struct in6_addr mld6_all_routers_linklocal = IN6ADDR_LINKLOCAL_ALLROUTERS_INIT;
 
-static void mld6_sendpkt __P((struct in6_multi *, int, const struct in6_addr *));
+static void mld6_sendpkt(struct in6_multi *, int, const struct in6_addr *);
 
 void
 mld6_init()
@@ -201,15 +201,16 @@ mld6_input(m, off)
 	/* source address validation */
 	ip6 = mtod(m, struct ip6_hdr *);/* in case mpullup */
 	if (!IN6_IS_ADDR_LINKLOCAL(&ip6->ip6_src)) {
+#if 0
 		log(LOG_ERR,
 		    "mld6_input: src %s is not link-local (grp=%s)\n",
 		    ip6_sprintf(&ip6->ip6_src),
 		    ip6_sprintf(&mldh->mld6_addr));
+#endif
 		/*
 		 * spec (RFC2710) does not explicitly
 		 * specify to discard the packet from a non link-local
 		 * source address. But we believe it's expected to do so.
-		 * XXX: do we have to allow :: as source?
 		 */
 		m_freem(m);
 		return;
@@ -285,7 +286,7 @@ mld6_input(m, off)
 					in6m->in6m_timer = 0; /* reset timer */
 					in6m->in6m_state = MLD6_IREPORTEDLAST;
 				}
-				else if (in6m->in6m_timer == 0 || /*idle state*/
+				else if (in6m->in6m_timer == 0 || /* idle */
 					in6m->in6m_timer > timer) {
 					in6m->in6m_timer =
 						MLD6_RANDOM_DELAY(timer);
@@ -330,7 +331,9 @@ mld6_input(m, off)
 			mldh->mld6_addr.s6_addr16[1] = 0; /* XXX */
 		break;
 	default:		/* this is impossible */
+#if 0
 		log(LOG_ERR, "mld6_input: illegal type(%d)", mldh->mld6_type);
+#endif
 		break;
 	}
 

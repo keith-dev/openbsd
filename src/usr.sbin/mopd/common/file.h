@@ -1,4 +1,4 @@
-/*	$OpenBSD: file.h,v 1.3 2001/08/12 12:03:03 heko Exp $ */
+/*	$OpenBSD: file.h,v 1.5 2002/02/17 19:42:36 millert Exp $ */
 
 /*
  * Copyright (c) 1993-95 Mats O Jansson.  All rights reserved.
@@ -28,7 +28,7 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- *	$OpenBSD: file.h,v 1.3 2001/08/12 12:03:03 heko Exp $
+ *	$OpenBSD: file.h,v 1.5 2002/02/17 19:42:36 millert Exp $
  *
  */
 
@@ -50,19 +50,18 @@ int	GetFileInfo    (/* int, u_long *, u_long *, int *, u_long *, u_long *,
 			   u_long *, u_long *, u_long *, u_long * */);
 #else
 __BEGIN_DECLS
-void	mopFilePutLX    __P((u_char *, int, u_long, int));
-void	mopFilePutBX    __P((u_char *, int, u_long, int));
-u_long	mopFileGetLX    __P((u_char *, int, int));
-u_long	mopFileGetBX    __P((u_char *, int, int));
-void	mopFileSwapX    __P((u_char *, int, int));
-int	CheckMopFile    __P((int));
-int	GetMopFileInfo  __P((int, u_long *, u_long *));
-int	CheckAOutFile   __P((int));
-int	GetAOutFileInfo __P((int, u_long *, u_long *, u_long *, u_long *,
-			     u_long *, u_long *, u_long *, u_long *, int *));
-int	GetFileInfo     __P((int, u_long *, u_long *, int *,
-			     u_long *, u_long *, u_long *, u_long *,
-			     u_long *, u_long *));
+void	mopFilePutLX(u_char *, int, u_long, int);
+void	mopFilePutBX(u_char *, int, u_long, int);
+u_long	mopFileGetLX(u_char *, int, int);
+u_long	mopFileGetBX(u_char *, int, int);
+void	mopFileSwapX(u_char *, int, int);
+int	CheckMopFile(int);
+int	GetMopFileInfo(int, u_long *, u_long *);
+int	CheckAOutFile(int);
+int	GetAOutFileInfo(int, u_long *, u_long *, u_long *, u_long *,
+			u_long *, u_long *, u_long *, u_long *, int *);
+int	GetFileInfo(int, u_long *, u_long *, int *, u_long *, u_long *,
+		    u_long *, u_long *, u_long *, u_long *);
 __END_DECLS
 #endif
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: trpt.c,v 1.8 2000/02/25 23:32:55 deraadt Exp $	*/
+/*	$OpenBSD: trpt.c,v 1.12 2002/03/14 16:44:25 mpech Exp $	*/
 
 /*-
  * Copyright (c) 1997 The NetBSD Foundation, Inc.
@@ -133,12 +133,12 @@ static int aflag, follow, sflag, tflag;
 
 extern	char *__progname;
 
-int	main __P((int, char *[]));
-void	dotrace __P((caddr_t));
-void	tcp_trace __P((short, short, struct tcpcb *, struct tcpcb *,
-	    struct tcpiphdr *, int));
-int	numeric __P((const void *, const void *));
-void	usage __P((void));
+int	main(int, char *[]);
+void	dotrace(caddr_t);
+void	tcp_trace(short, short, struct tcpcb *, struct tcpcb *,
+	    struct tcpiphdr *, int);
+int	numeric(const void *, const void *);
+void	usage(void);
 
 kvm_t	*kd;
 
@@ -363,7 +363,7 @@ tcp_trace(act, ostate, atp, tp, ti, req)
 			printf("(win=%x)", win);
 		flags = ti->ti_flags;
 		if (flags) {
-			register char *cp = "<";
+			char *cp = "<";
 #define	pf(flag, string) { \
 	if (ti->ti_flags&flag) { \
 		(void)printf("%s%s", cp, string); \
@@ -399,13 +399,14 @@ tcp_trace(act, ostate, atp, tp, ti, req)
 	}
 	/* print out timers? */
 	if (tflag) {
-		register char *cp = "\t";
-		register int i;
+		char *cp = "\t";
+		int i;
 
 		for (i = 0; i < TCPT_NTIMERS; i++) {
-			if (tp->t_timer[i] == 0)
+			if (timeout_pending(&tp->t_timer[i]))
 				continue;
-			printf("%s%s=%d", cp, tcptimers[i], tp->t_timer[i]);
+			printf("%s%s=%d", cp, tcptimers[i],
+			    tp->t_timer[i].to_time);
 			if (i == TCPT_REXMT)
 				printf(" (t_rxtshft=%d)", tp->t_rxtshift);
 			cp = ", ";

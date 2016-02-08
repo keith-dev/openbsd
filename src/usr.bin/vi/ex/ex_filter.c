@@ -1,4 +1,4 @@
-/*	$OpenBSD: ex_filter.c,v 1.4 2001/07/09 07:04:57 deraadt Exp $	*/
+/*	$OpenBSD: ex_filter.c,v 1.6 2002/02/17 19:42:34 millert Exp $	*/
 
 /*-
  * Copyright (c) 1991, 1993, 1994
@@ -29,7 +29,7 @@ static const char sccsid[] = "@(#)ex_filter.c	10.34 (Berkeley) 10/23/96";
 
 #include "../common/common.h"
 
-static int filter_ldisplay __P((SCR *, FILE *));
+static int filter_ldisplay(SCR *, FILE *);
 
 /*
  * ex_filter --
@@ -37,8 +37,8 @@ static int filter_ldisplay __P((SCR *, FILE *));
  *	replace the original text with the stdout/stderr output of
  *	the utility.
  *
- * PUBLIC: int ex_filter __P((SCR *, 
- * PUBLIC:    EXCMD *, MARK *, MARK *, MARK *, char *, enum filtertype));
+ * PUBLIC: int ex_filter(SCR *, 
+ * PUBLIC:    EXCMD *, MARK *, MARK *, MARK *, char *, enum filtertype);
  */
 int
 ex_filter(sp, cmdp, fm, tm, rp, cmd, ftype)

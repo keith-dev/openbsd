@@ -1,5 +1,6 @@
-/*	$OpenBSD: raidctl.c,v 1.7 2001/07/07 18:26:19 deraadt Exp $	*/
-/*      $NetBSD: raidctl.c,v 1.11 2000/01/09 03:06:35 oster Exp $   */
+/*	$OpenBSD: raidctl.c,v 1.17 2002/03/31 13:12:09 tdeval Exp $	*/
+/*      $NetBSD: raidctl.c,v 1.27 2001/07/10 01:30:52 lukem Exp $   */
+
 /*-
  * Copyright (c) 1996, 1997, 1998 The NetBSD Foundation, Inc.
  * All rights reserved.
@@ -37,95 +38,112 @@
  */
 
 /* 
-
-   This program is a re-write of the original rf_ctrl program 
-   distributed by CMU with RAIDframe 1.1.
-
-   This program is the user-land interface to the RAIDframe kernel
-   driver in NetBSD.
-
+ * This program is a re-write of the original rf_ctrl program 
+ * distributed by CMU with RAIDframe 1.1.
+ *
+ * This program is the userland interface to the RAIDframe kernel
+ * driver in Net/OpenBSD.
  */
 
 #include <sys/param.h>
 #include <sys/ioctl.h>
 #include <sys/stat.h>
-#include <util.h>
-#include <stdio.h>
-#include <fcntl.h>
+#include <sys/sysctl.h>
+#ifdef NETBSD
+#include <sys/disklabel.h>
+#endif
+
 #include <ctype.h>
 #include <err.h>
 #include <errno.h>
-#include <sys/types.h>
-#include <string.h>
-#ifdef NETBSD
-#include <sys/disklabel.h>
-#include <machine/disklabel.h>
-#endif
+#include <fcntl.h>
+#include <paths.h>
+#include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <unistd.h>
+#include <util.h>
 
 #include "rf_raidframe.h"
 
 extern  char *__progname;
 
-int     main __P((int, char *[]));
-void do_ioctl __P((int, unsigned long, void *, char *));
-static  void rf_configure __P((int, char*, int));
-static  char *device_status __P((RF_DiskStatus_t));
-static  void rf_get_device_status __P((int));
-static  void get_component_number __P((int, char *, int *, int *));
-static  void rf_fail_disk __P((int, char *, int));
-static  void usage __P((void));
-static  void get_component_label __P((int, char *));
-static  void set_component_label __P((int, char *));
-static  void init_component_labels __P((int, int));
-static  void add_hot_spare __P((int, char *));
-static  void remove_hot_spare __P((int, char *));
-static  void rebuild_in_place __P((int, char *));
-static  void check_status __P((int));
-static  void check_parity __P((int,int,char *));
-static  void do_meter __P((int, int));
-static  void get_bar __P((char *, double, int));
-static  void get_time_string __P((char *, int));
+typedef struct {
+	int	fd;
+	int	id;
+} fdidpair;
 
-int verbose = 0;
+int     main(int, char *[]);
+void	do_ioctl(int, u_long, void *, const char *);
+static  void rf_configure(fdidpair *, char*, int);
+static  const char *device_status(RF_DiskStatus_t);
+static  void rf_get_device_status(fdidpair *, int);
+static	void rf_output_configuration(fdidpair *, int);
+static  void get_component_number(fdidpair *, char *, int *, int *);
+static  void rf_fail_disk(fdidpair *, char *, int);
+static  void usage(void);
+static  void get_component_label(fdidpair *, char *);
+static  void set_component_label(fdidpair *, char *);
+static  void init_component_labels(fdidpair *, int);
+static  void set_autoconfig(fdidpair *, char *);
+static  void add_hot_spare(fdidpair *, char *);
+static  void remove_hot_spare(fdidpair *, char *);
+static  void rebuild_in_place(fdidpair *, char *);
+static  void check_status(fdidpair *,int,int);
+static  void check_parity(fdidpair *,int,int);
+static  void do_meter(fdidpair *, int, u_long);
+static  void get_bar(char *, double, int);
+static  void get_time_string(char *, int);
+static  int open_device(fdidpair **, char *);
+static  int get_all_devices(char ***, const char *);
+
+int verbose;
+int do_all;
 
 int
-main(argc,argv)
+main(argc, argv)
 	int argc;
 	char *argv[];
 {
-	extern char *optarg;
-	extern int optind;
 	int ch;
 	int num_options;
-	unsigned long action;
+	unsigned int action;
 	char config_filename[PATH_MAX];
-	char dev_name[PATH_MAX];
 	char name[PATH_MAX];
 	char component[PATH_MAX];
+	char autoconf[10];
+	int do_output;
 	int do_recon;
 	int do_rewrite;
-	int is_clean;
-	int raidID;
-	int rawpart;
-	int serial_number = 0;
- 	struct stat st;
- 	int fd;
+	int serial_number;
+	int i, nfd;
+	fdidpair *fds;
 	int force;
+	u_long meter;
+	const char *actionstr;
 
 	num_options = 0;
 	action = 0;
+	meter = 0;
+	do_output = 0;
 	do_recon = 0;
 	do_rewrite = 0;
-	is_clean = 0;
+	do_all = 0;
+	serial_number = 0;
 	force = 0;
+	actionstr = NULL;
 
-	while ((ch = getopt(argc, argv, "a:Bc:C:f:F:g:iI:l:r:R:sSpPuv")) != -1)
+	while ((ch = getopt(argc, argv, "a:A:Bc:C:f:F:g:GiI:l:r:R:sSpPuv")) 
+	       != -1)
 		switch(ch) {
 		case 'a':
 			action = RAIDFRAME_ADD_HOT_SPARE;
-			strncpy(component, optarg, PATH_MAX);
+			strlcpy(component, optarg, PATH_MAX);
+			num_options++;
+			break;
+		case 'A':
+			action = RAIDFRAME_SET_AUTOCONFIG;
+			strlcpy(autoconf, optarg, sizeof(autoconf));
 			num_options++;
 			break;
 		case 'B':
@@ -134,31 +152,36 @@ main(argc,argv)
 			break;
 		case 'c':
 			action = RAIDFRAME_CONFIGURE;
-			strncpy(config_filename,optarg,PATH_MAX);
+			strlcpy(config_filename, optarg, PATH_MAX);
 			force = 0;
 			num_options++;
 			break;
 		case 'C':
-			strncpy(config_filename,optarg,PATH_MAX);
+			strlcpy(config_filename, optarg, PATH_MAX);
 			action = RAIDFRAME_CONFIGURE;
 			force = 1;
 			num_options++;
 			break;
 		case 'f':
 			action = RAIDFRAME_FAIL_DISK;
-			strncpy(component, optarg, PATH_MAX);
+			strlcpy(component, optarg, PATH_MAX);
 			do_recon = 0;
 			num_options++;
 			break;
 		case 'F':
 			action = RAIDFRAME_FAIL_DISK;
-			strncpy(component, optarg, PATH_MAX);
+			strlcpy(component, optarg, PATH_MAX);
 			do_recon = 1;
 			num_options++;
 			break;
 		case 'g':
 			action = RAIDFRAME_GET_COMPONENT_LABEL;
-			strncpy(component, optarg, PATH_MAX);
+			strlcpy(component, optarg, PATH_MAX);
+			num_options++;
+			break;
+		case 'G':
+			action = RAIDFRAME_GET_INFO;
+			do_output = 1;
 			num_options++;
 			break;
 		case 'i':
@@ -172,16 +195,16 @@ main(argc,argv)
 			break;
 		case 'l': 
 			action = RAIDFRAME_SET_COMPONENT_LABEL;
-			strncpy(component, optarg, PATH_MAX);
+			strlcpy(component, optarg, PATH_MAX);
 			num_options++;
 			break;
 		case 'r':
 			action = RAIDFRAME_REMOVE_HOT_SPARE;
-			strncpy(component, optarg, PATH_MAX);
+			strlcpy(component, optarg, PATH_MAX);
 			num_options++;
 			break;
 		case 'R':
-			strncpy(component,optarg,PATH_MAX);
+			strlcpy(component, optarg, PATH_MAX);
 			action = RAIDFRAME_REBUILD_IN_PLACE;
 			num_options++;
 			break;
@@ -190,7 +213,7 @@ main(argc,argv)
 			num_options++;
 			break;
 		case 'S':
-			action = RAIDFRAME_CHECK_RECON_STATUS;
+			action = RAIDFRAME_CHECK_RECON_STATUS_EXT;
 			num_options++;
 			break;
 		case 'p':
@@ -208,9 +231,6 @@ main(argc,argv)
 			break;
 		case 'v':
 			verbose = 1;
-			/* Don't bump num_options, as '-v' is not 
-			   an option like the others */
-			/* num_options++; */
 			break;
 		default:
 			usage();
@@ -221,102 +241,113 @@ main(argc,argv)
 	if ((num_options > 1) || (argc == NULL)) 
 		usage();
 
-	strncpy(name,argv[0],PATH_MAX);
+	strlcpy(name, argv[0], PATH_MAX);
 
-	if ((name[0] == '/') || (name[0] == '.')) {
-		/* they've (apparently) given a full path... */
-		strncpy(dev_name, name, PATH_MAX);
-	} else {
-		if (isdigit(name[strlen(name)-1])) {
-			rawpart = getrawpartition();
-			snprintf(dev_name,PATH_MAX,"/dev/%s%c",name,
-				 'a'+rawpart);		
-		} else {
-			snprintf(dev_name,PATH_MAX,"/dev/%s",name);
+	if ((nfd = open_device(&fds, name)) < 1) {
+		/* No configured raid device */
+		free(fds);
+		return (0);
+	}
+
+	if (do_all) {
+		switch(action) {
+		case RAIDFRAME_ADD_HOT_SPARE:
+		case RAIDFRAME_REMOVE_HOT_SPARE:
+		case RAIDFRAME_CONFIGURE:
+		case RAIDFRAME_SET_AUTOCONFIG:
+		case RAIDFRAME_FAIL_DISK:
+		case RAIDFRAME_SET_COMPONENT_LABEL:
+		case RAIDFRAME_GET_COMPONENT_LABEL:
+		case RAIDFRAME_INIT_LABELS:
+		case RAIDFRAME_REBUILD_IN_PLACE:
+			errx(1,
+			    "This action doesn't work with the 'all' device");
+			break;
+		default:
+			break;
 		}
-	}	
-
-	if (stat(dev_name, &st) != 0) {
-		fprintf(stderr,"%s: stat failure on: %s\n",
-			__progname,dev_name);
-		return (errno);
 	}
-	if (!S_ISBLK(st.st_mode) && !S_ISCHR(st.st_mode)) {
-		fprintf(stderr,"%s: invalid device: %s\n",
-			__progname,dev_name);
-		return (EINVAL);
-	}
-
-	raidID = RF_DEV2RAIDID(st.st_rdev);
-
-	if ((fd = open( dev_name, O_RDWR, 0640)) < 0) {
-		fprintf(stderr, "%s: unable to open device file: %s\n",
-			__progname, dev_name);
-		return (1);
-	}
-	
 
 	switch(action) {
 	case RAIDFRAME_ADD_HOT_SPARE:
-		add_hot_spare(fd,component);
+		add_hot_spare(fds, component);
 		break;
 	case RAIDFRAME_REMOVE_HOT_SPARE:
-		remove_hot_spare(fd,component);
+		remove_hot_spare(fds, component);
 		break;
 	case RAIDFRAME_CONFIGURE:
-		rf_configure(fd, config_filename, force);
+		rf_configure(fds, config_filename, force);
+		break;
+	case RAIDFRAME_SET_AUTOCONFIG:
+		set_autoconfig(fds, autoconf);
 		break;
 	case RAIDFRAME_COPYBACK:
-		printf("Copyback.\n");
-		do_ioctl(fd, RAIDFRAME_COPYBACK, NULL, "RAIDFRAME_COPYBACK");
-		if (verbose) {
-			sleep(3); /* XXX give the copyback a chance to start */
-			printf("Copyback status:\n");
-			do_meter(fd,RAIDFRAME_CHECK_COPYBACK_STATUS);
+		i = nfd;
+		while (i--) {
+			do_ioctl(fds[i].fd, RAIDFRAME_COPYBACK, NULL,
+				 "RAIDFRAME_COPYBACK");
 		}
+		actionstr = "Copyback";
+		meter = RAIDFRAME_CHECK_COPYBACK_STATUS_EXT;
 		break;
 	case RAIDFRAME_FAIL_DISK:
-		rf_fail_disk(fd,component,do_recon);
+		rf_fail_disk(fds, component, do_recon);
 		break;
 	case RAIDFRAME_SET_COMPONENT_LABEL:
-		set_component_label(fd,component);
+		set_component_label(fds, component);
 		break;
 	case RAIDFRAME_GET_COMPONENT_LABEL:
-		get_component_label(fd,component);
+		get_component_label(fds, component);
 		break;
 	case RAIDFRAME_INIT_LABELS:
-		init_component_labels(fd,serial_number);
+		init_component_labels(fds, serial_number);
 		break;
 	case RAIDFRAME_REWRITEPARITY:
-		printf("Initiating re-write of parity\n");
-		do_ioctl(fd, RAIDFRAME_REWRITEPARITY, NULL, 
-			 "RAIDFRAME_REWRITEPARITY");
-		if (verbose) {
-			sleep(3); /* XXX give it time to get started */
-			printf("Parity Re-write status:\n");
-			do_meter(fd,RAIDFRAME_CHECK_PARITYREWRITE_STATUS);
+		i = nfd;
+		while (i--) {
+			do_ioctl(fds[i].fd, RAIDFRAME_REWRITEPARITY, NULL, 
+				 "RAIDFRAME_REWRITEPARITY");
 		}
+		actionstr = "Parity Re-Write";
+		meter = RAIDFRAME_CHECK_PARITYREWRITE_STATUS_EXT;
 		break;
-	case RAIDFRAME_CHECK_RECON_STATUS:
-		check_status(fd);
+	case RAIDFRAME_CHECK_RECON_STATUS_EXT:
+		check_status(fds, nfd, 1);
 		break;
 	case RAIDFRAME_GET_INFO:
-		rf_get_device_status(fd);
+		if (do_output)
+			rf_output_configuration(fds, nfd);
+		else
+			rf_get_device_status(fds, nfd);
 		break;
 	case RAIDFRAME_REBUILD_IN_PLACE:
-		rebuild_in_place(fd,component);
+		rebuild_in_place(fds, component);
 		break;
 	case RAIDFRAME_CHECK_PARITY:
-		check_parity(fd,do_rewrite,dev_name);
+		check_parity(fds, nfd, do_rewrite);
 		break;
 	case RAIDFRAME_SHUTDOWN:
-		do_ioctl(fd, RAIDFRAME_SHUTDOWN, NULL, "RAIDFRAME_SHUTDOWN");
+		i = nfd;
+		while (i--) {
+			do_ioctl(fds[i].fd, RAIDFRAME_SHUTDOWN, NULL,
+				 "RAIDFRAME_SHUTDOWN");
+		}
 		break;
 	default:
 		break;
 	}
 
-	close(fd);
+	if (verbose && meter) {
+		sleep(3);	/* XXX give the action a chance to start */
+		printf("%s status:\n", actionstr);
+		do_meter(fds, nfd, meter);
+	}
+
+	i = nfd;
+	while (i--)
+		close(fds[i].fd);
+
+	free(fds);
 	return (0);
 }
 
@@ -325,121 +356,218 @@ do_ioctl(fd, command, arg, ioctl_name)
 	int fd;
 	unsigned long command;
 	void *arg;
-	char *ioctl_name;
+	const char *ioctl_name;
 {
-	if (ioctl(fd, command, arg) < 0) {
-		warn("ioctl (%s) failed", ioctl_name);
-		exit(1);
-	}
+	if (ioctl(fd, command, arg) < 0)
+		errx(1, "ioctl (%s) failed", ioctl_name);
 }
 
 
 static void
-rf_configure(fd,config_file,force)
-	int fd;
+rf_configure(fds, config_file, force)
+	fdidpair *fds;
 	char *config_file;
 	int force;
 {
 	void *generic;
 	RF_Config_t cfg;
 
-	if (rf_MakeConfig( config_file, &cfg ) != 0) {
-		fprintf(stderr,"%s: unable to create RAIDframe %s\n",
-			__progname, "configuration structure\n");
-		exit(1);
-	}
+	if (rf_MakeConfig(config_file, &cfg) != 0)
+		errx(1, "unable to create RAIDframe configuration structure");
 	
 	cfg.force = force;
 
 	/* 
-
-	   Note the extra level of redirection needed here, since
-	   what we really want to pass in is a pointer to the pointer to 
-	   the configuration structure. 
-
+	 * Note the extra level of redirection needed here, since
+	 * what we really want to pass in is a pointer to the pointer to 
+	 * the configuration structure. 
 	 */
 
 	generic = (void *) &cfg;
-	do_ioctl(fd, RAIDFRAME_CONFIGURE, &generic, "RAIDFRAME_CONFIGURE");
+	do_ioctl(fds->fd, RAIDFRAME_CONFIGURE, &generic, "RAIDFRAME_CONFIGURE");
 }
 
-static char *
+static const char *
 device_status(status)
 	RF_DiskStatus_t status;
 {
-	static char status_string[256];
 
 	switch (status) {
 	case rf_ds_optimal:
-		strcpy(status_string,"optimal");
-		break;
+		return ("optimal");
 	case rf_ds_failed:
-		strcpy(status_string,"failed");
-		break;
+		return ("failed");
 	case rf_ds_reconstructing:
-		strcpy(status_string,"reconstructing");
-		break;
+		return ("reconstructing");
 	case rf_ds_dist_spared:
-		strcpy(status_string,"dist_spared");
-		break;
+		return ("dist_spared");
 	case rf_ds_spared:
-		strcpy(status_string,"spared");
-		break;
+		return ("spared");
 	case rf_ds_spare:
-		strcpy(status_string,"spare");
-		break;
+		return ("spare");
 	case rf_ds_used_spare:
-		strcpy(status_string,"used_spare");
-		break;
+		return ("used_spare");
 	default:
-		strcpy(status_string,"UNKNOWN");
-		break;
+		return ("UNKNOWN");
 	}
-	return(status_string);
+	/* NOTREACHED */
 }
 
 static void
-rf_get_device_status(fd)
-	int fd;
+rf_get_device_status(fds, nfd)
+	fdidpair *fds;
+	int nfd;
 {
 	RF_DeviceConfig_t device_config;
 	void *cfg_ptr;
 	int is_clean;
-	int i;
+	int i,j;
 
 	cfg_ptr = &device_config;
 
-	do_ioctl(fd, RAIDFRAME_GET_INFO, &cfg_ptr, "RAIDFRAME_GET_INFO");
+	i = nfd;
+	while (i--) {
+		do_ioctl(fds[i].fd, RAIDFRAME_GET_INFO, &cfg_ptr,
+			 "RAIDFRAME_GET_INFO");
 
-	printf("Components:\n");
-	for(i=0; i < device_config.ndevs; i++) {
-		printf("%20s: %s\n", device_config.devs[i].devname, 
-		       device_status(device_config.devs[i].status));
-	}
-	if (device_config.nspares > 0) {
-		printf("Spares:\n");
-		for(i=0; i < device_config.nspares; i++) {
-			printf("%20s: %s\n",
-			       device_config.spares[i].devname, 
-			       device_status(device_config.spares[i].status));
+		printf("raid%d Components:\n", fds[i].id);
+		for (j = 0; j < device_config.ndevs; j++) {
+			printf("%20s: %s\n", device_config.devs[j].devname, 
+			       device_status(device_config.devs[j].status));
 		}
-	} else {
-		printf("No spares.\n");
-	}
-	do_ioctl(fd, RAIDFRAME_CHECK_PARITY, &is_clean,
-		 "RAIDFRAME_CHECK_PARITY");
-	if (is_clean) {
-		printf("Parity status: clean\n");
-	} else {
-		printf("Parity status: DIRTY\n");
-	}
-	check_status(fd);
+		if (device_config.nspares > 0) {
+			printf("Spares:\n");
+			for (j = 0; j < device_config.nspares; j++) {
+				printf("%20s: %s\n",
+				       device_config.spares[j].devname, 
+				       device_status(device_config.spares[j].status));
+			}
+		} else {
+			printf("No spares.\n");
+		}
+		if (verbose) {
+			for(j=0; j < device_config.ndevs; j++) {
+				if (device_config.devs[j].status ==
+				    rf_ds_optimal) {
+					get_component_label(&fds[i],
+					   device_config.devs[j].devname);
+				} else {
+					printf("%s status is: %s.  "
+					   "Skipping label.\n",
+					   device_config.devs[j].devname,
+					   device_status(device_config.devs[j].status));
+				}
+			}
 
+			if (device_config.nspares > 0) {
+				for(j=0; j < device_config.nspares; j++) {
+					if ((device_config.spares[j].status == 
+					     rf_ds_optimal) ||
+					    (device_config.spares[j].status == 
+					     rf_ds_used_spare)) {
+						get_component_label(&fds[i], 
+						   device_config.spares[j].devname);
+					} else {
+						printf("%s status is: %s.  "
+						   "Skipping label.\n",
+						   device_config.spares[j].devname,
+						   device_status(device_config.spares[j].status));
+					}		
+				}
+			}
+		}
+
+		do_ioctl(fds[i].fd, RAIDFRAME_CHECK_PARITY, &is_clean,
+			 "RAIDFRAME_CHECK_PARITY");
+		if (is_clean) {
+			printf("Parity status: clean\n");
+		} else {
+			printf("Parity status: DIRTY\n");
+		}
+		check_status(&fds[i], 1, 0);
+	}
 }
 
 static void
-get_component_number(fd, component_name, component_number, num_columns)
-	int fd;
+rf_output_configuration(fds, nfd)
+	fdidpair *fds;
+	int nfd;
+{
+	RF_DeviceConfig_t device_config;
+	void *cfg_ptr;
+	int i,j;
+	RF_ComponentLabel_t component_label;
+	void *label_ptr;
+	int component_num;
+	int num_cols;
+	char name[PATH_MAX];
+
+	cfg_ptr = &device_config;
+
+	i = nfd;
+	while (i--) {
+		snprintf(name, PATH_MAX, "/dev/raid%dc", fds[i].id);
+
+		printf("# raidctl config file for %s\n", name);
+		printf("\n");
+		do_ioctl(fds[i].fd, RAIDFRAME_GET_INFO, &cfg_ptr,
+			 "RAIDFRAME_GET_INFO");
+
+		printf("START array\n");
+		printf("# numRow numCol numSpare\n");
+		printf("%d %d %d\n", device_config.rows, device_config.cols,
+		    device_config.nspares);
+		printf("\n");
+
+		printf("START disks\n");
+		for(j = 0; j < device_config.ndevs; j++)
+			printf("%s\n", device_config.devs[j].devname);
+		printf("\n");
+
+		if (device_config.nspares > 0) {
+			printf("START spare\n");
+			for(j = 0; j < device_config.nspares; j++)
+				printf("%s\n", device_config.spares[j].devname);
+			printf("\n");
+		}
+
+		for(j = 0; j < device_config.ndevs; j++) {
+			if (device_config.devs[j].status == rf_ds_optimal)
+				break;
+		}
+		if (j == device_config.ndevs) {
+			printf("# WARNING: no optimal components; using %s\n",
+			    device_config.devs[0].devname);
+			j = 0;
+		}
+		get_component_number(&fds[i], device_config.devs[j].devname,
+		    &component_num, &num_cols);
+		memset(&component_label, 0, sizeof(RF_ComponentLabel_t));
+		component_label.row = component_num / num_cols;
+		component_label.column = component_num % num_cols;
+		label_ptr = &component_label;
+		do_ioctl(fds[i].fd, RAIDFRAME_GET_COMPONENT_LABEL, &label_ptr,
+			 "RAIDFRAME_GET_COMPONENT_LABEL");
+
+		printf("START layout\n");
+		printf(
+		    "# sectPerSU SUsPerParityUnit SUsPerReconUnit "
+		    "RAID_level_%c\n",
+		    (char) component_label.parityConfig);
+		printf("%d %d %d %c\n", 
+		    component_label.sectPerSU, component_label.SUsPerPU, 
+		    component_label.SUsPerRU,
+		    (char) component_label.parityConfig);
+		printf("\n");
+
+		printf("START queue\n");
+		printf("fifo %d\n", device_config.maxqdepth);
+	}
+}
+
+static void
+get_component_number(fds, component_name, component_number, num_columns)
+	fdidpair *fds;
 	char *component_name;
 	int *component_number;
 	int *num_columns;
@@ -453,29 +581,40 @@ get_component_number(fd, component_name, component_number, num_columns)
 		
 	/* Assuming a full path spec... */
 	cfg_ptr = &device_config;
-	do_ioctl(fd, RAIDFRAME_GET_INFO, &cfg_ptr, 
-		 "RAIDFRAME_GET_INFO");
+	do_ioctl(fds->fd, RAIDFRAME_GET_INFO, &cfg_ptr, "RAIDFRAME_GET_INFO");
 
 	*num_columns = device_config.cols;
 
 	found = 0;
-	for(i=0; i < device_config.ndevs; i++) {
+	for (i = 0; i < device_config.ndevs; i++) {
 		if (strncmp(component_name, device_config.devs[i].devname,
-			    PATH_MAX)==0) {
+			    PATH_MAX) == 0) {
 			found = 1;
 			*component_number = i;
 		}
 	}
-	if (!found) {
-		fprintf(stderr,"%s: %s is not a component %s", __progname, 
-			component_name, "of this device\n");
-		exit(1);
+	if (!found) { /* maybe it's a spare? */
+		for (i = 0; i < device_config.nspares; i++) {
+			if (strncmp(component_name, 
+				    device_config.spares[i].devname,
+				    PATH_MAX) == 0) {
+				found = 1;
+				*component_number = i + device_config.ndevs;
+				/* the way spares are done should
+				   really change... */
+				*num_columns = device_config.cols + 
+					device_config.nspares;
+			}
+		}
 	}
+
+	if (!found)
+		errx(1, "%s is not a component of this device", component_name);
 }
 
 static void
-rf_fail_disk(fd, component_to_fail, do_recon)
-	int fd;
+rf_fail_disk(fds, component_to_fail, do_recon)
+	fdidpair *fds;
 	char *component_to_fail;
 	int do_recon;
 {
@@ -483,7 +622,7 @@ rf_fail_disk(fd, component_to_fail, do_recon)
 	int component_num;
 	int num_cols;
 
-	get_component_number(fd, component_to_fail, &component_num, &num_cols);
+	get_component_number(fds, component_to_fail, &component_num, &num_cols);
 
 	recon_request.row = component_num / num_cols;
 	recon_request.col = component_num % num_cols;
@@ -492,18 +631,18 @@ rf_fail_disk(fd, component_to_fail, do_recon)
 	} else {
 		recon_request.flags = RF_FDFLAGS_NONE;
 	}
-	do_ioctl(fd, RAIDFRAME_FAIL_DISK, &recon_request, 
+	do_ioctl(fds->fd, RAIDFRAME_FAIL_DISK, &recon_request, 
 		 "RAIDFRAME_FAIL_DISK");
 	if (do_recon && verbose) {
 		printf("Reconstruction status:\n");
 		sleep(3); /* XXX give reconstruction a chance to start */
-		do_meter(fd,RAIDFRAME_CHECK_RECON_STATUS);
+		do_meter(fds, 1, RAIDFRAME_CHECK_RECON_STATUS_EXT);
 	}
 }
 
 static void
-get_component_label(fd, component)
-	int fd;
+get_component_label(fds, component)
+	fdidpair *fds;
 	char *component;
 {
 	RF_ComponentLabel_t component_label;
@@ -511,38 +650,51 @@ get_component_label(fd, component)
 	int component_num;
 	int num_cols;
 
-	get_component_number(fd, component, &component_num, &num_cols);
+	get_component_number(fds, component, &component_num, &num_cols);
 
-	memset( &component_label, 0, sizeof(RF_ComponentLabel_t));
+	memset(&component_label, 0, sizeof(RF_ComponentLabel_t));
 	component_label.row = component_num / num_cols;
 	component_label.column = component_num % num_cols;
 
 	label_ptr = &component_label;
-	do_ioctl( fd, RAIDFRAME_GET_COMPONENT_LABEL, &label_ptr,
-		  "RAIDFRAME_GET_COMPONENT_LABEL");
+	do_ioctl(fds->fd, RAIDFRAME_GET_COMPONENT_LABEL, &label_ptr,
+		 "RAIDFRAME_GET_COMPONENT_LABEL");
 
-	printf("Component label for %s:\n",component);
-	printf("Version: %d\n",component_label.version);
-	printf("Serial Number: %d\n",component_label.serial_number);
-	printf("Mod counter: %d\n",component_label.mod_counter);
-	printf("Row: %d\n", component_label.row);
-	printf("Column: %d\n", component_label.column);
-	printf("Num Rows: %d\n", component_label.num_rows);
-	printf("Num Columns: %d\n", component_label.num_columns);
-	printf("Clean: %d\n", component_label.clean);
-	printf("Status: %s\n", device_status(component_label.status));
+	printf("Component label for %s:\n", component);
+
+	printf("   Row: %d, Column: %d, Num Rows: %d, Num Columns: %d\n",
+	       component_label.row, component_label.column, 
+	       component_label.num_rows, component_label.num_columns);
+	printf("   Version: %d, Serial Number: %d, Mod Counter: %d\n",
+	       component_label.version, component_label.serial_number,
+	       component_label.mod_counter);
+	printf("   Clean: %s, Status: %d\n",
+	       component_label.clean ? "Yes" : "No", 
+	       component_label.status);
+	printf("   sectPerSU: %d, SUsPerPU: %d, SUsPerRU: %d\n",
+	       component_label.sectPerSU, component_label.SUsPerPU, 
+	       component_label.SUsPerRU);
+	printf("   Queue size: %d, blocksize: %d, numBlocks: %d\n",
+	       component_label.maxOutstanding, component_label.blockSize,
+	       component_label.numBlocks);
+	printf("   RAID Level: %c\n", (char) component_label.parityConfig);
+	printf("   Autoconfig: %s\n", 
+	       component_label.autoconfigure ? "Yes" : "No");
+	printf("   Root partition: %s\n",
+	       component_label.root_partition ? "Yes" : "No");
+	printf("   Last configured as: raid%d\n", component_label.last_unit);
 }
 
 static void
-set_component_label(fd, component)
-	int fd;
+set_component_label(fds, component)
+	fdidpair *fds;
 	char *component;
 {
 	RF_ComponentLabel_t component_label;
 	int component_num;
 	int num_cols;
 
-	get_component_number(fd, component, &component_num, &num_cols);
+	get_component_number(fds, component, &component_num, &num_cols);
 
 	/* XXX This is currently here for testing, and future expandability */
 
@@ -556,14 +708,14 @@ set_component_label(fd, component)
 	component_label.clean = 0;
 	component_label.status = 1;
 	
-	do_ioctl( fd, RAIDFRAME_SET_COMPONENT_LABEL, &component_label,
-		  "RAIDFRAME_SET_COMPONENT_LABEL");
+	do_ioctl(fds->fd, RAIDFRAME_SET_COMPONENT_LABEL, &component_label,
+		 "RAIDFRAME_SET_COMPONENT_LABEL");
 }
 
 
 static void
-init_component_labels(fd, serial_number)
-	int fd;
+init_component_labels(fds, serial_number)
+	fdidpair *fds;
 	int serial_number;
 {
 	RF_ComponentLabel_t component_label;
@@ -578,263 +730,369 @@ init_component_labels(fd, serial_number)
 	component_label.clean = 0;
 	component_label.status = 0;
 	
-	do_ioctl( fd, RAIDFRAME_INIT_LABELS, &component_label,
-		  "RAIDFRAME_SET_COMPONENT_LABEL");
+	do_ioctl(fds->fd, RAIDFRAME_INIT_LABELS, &component_label,
+		 "RAIDFRAME_SET_COMPONENT_LABEL");
 }
  
 static void
-add_hot_spare(fd, component)
-	int fd;
+set_autoconfig(fds, autoconf)
+	fdidpair *fds;
+	char *autoconf;
+{
+	int auto_config;
+	int root_config;
+
+	auto_config = 0;
+	root_config = 0;
+
+	if (strncasecmp(autoconf, "root", 4) == 0) {
+		root_config = 1;
+	}
+
+	if ((strncasecmp(autoconf, "yes", 3) == 0) ||
+	    root_config == 1) {
+		auto_config = 1;
+	}
+
+	do_ioctl(fds->fd, RAIDFRAME_SET_AUTOCONFIG, &auto_config,
+		 "RAIDFRAME_SET_AUTOCONFIG");
+
+	do_ioctl(fds->fd, RAIDFRAME_SET_ROOT, &root_config,
+		 "RAIDFRAME_SET_ROOT");
+
+	printf("raid%d: Autoconfigure: %s\n", fds->id,
+	       auto_config ? "Yes" : "No");
+
+	if (root_config == 1) {
+		printf("raid%d: Root: %s\n", fds->id,
+		       auto_config ? "Yes" : "No");
+	}
+}
+
+static void
+add_hot_spare(fds, component)
+	fdidpair *fds;
 	char *component;
 {
 	RF_SingleComponent_t hot_spare;
 
 	hot_spare.row = 0;
 	hot_spare.column = 0;
-	strncpy(hot_spare.component_name, component, 
+	strlcpy(hot_spare.component_name, component, 
 		sizeof(hot_spare.component_name));
 	
-	do_ioctl( fd, RAIDFRAME_ADD_HOT_SPARE, &hot_spare,
-		  "RAIDFRAME_ADD_HOT_SPARE");
+	do_ioctl(fds->fd, RAIDFRAME_ADD_HOT_SPARE, &hot_spare,
+		 "RAIDFRAME_ADD_HOT_SPARE");
 }
 
 static void
-remove_hot_spare(fd, component)
-	int fd;
+remove_hot_spare(fds, component)
+	fdidpair *fds;
 	char *component;
 {
 	RF_SingleComponent_t hot_spare;
 	int component_num;
 	int num_cols;
 
-	get_component_number(fd, component, &component_num, &num_cols);
+	get_component_number(fds, component, &component_num, &num_cols);
 
 	hot_spare.row = component_num / num_cols;
 	hot_spare.column = component_num % num_cols;
 
-	strncpy(hot_spare.component_name, component, 
+	strlcpy(hot_spare.component_name, component, 
 		sizeof(hot_spare.component_name));
 	
-	do_ioctl( fd, RAIDFRAME_REMOVE_HOT_SPARE, &hot_spare,
-		  "RAIDFRAME_REMOVE_HOT_SPARE");
+	do_ioctl(fds->fd, RAIDFRAME_REMOVE_HOT_SPARE, &hot_spare,
+		 "RAIDFRAME_REMOVE_HOT_SPARE");
 }
 
 static void
-rebuild_in_place( fd, component )
-	int fd;
+rebuild_in_place(fds, component)
+	fdidpair *fds;
 	char *component;
 {
 	RF_SingleComponent_t comp;
 	int component_num;
 	int num_cols;
 
-	get_component_number(fd, component, &component_num, &num_cols);
+	get_component_number(fds, component, &component_num, &num_cols);
 
 	comp.row = 0;
 	comp.column = component_num;
-	strncpy(comp.component_name, component, sizeof(comp.component_name));
+	strlcpy(comp.component_name, component, sizeof(comp.component_name));
 	
-	do_ioctl( fd, RAIDFRAME_REBUILD_IN_PLACE, &comp,
-		  "RAIDFRAME_REBUILD_IN_PLACE");
+	do_ioctl(fds->fd, RAIDFRAME_REBUILD_IN_PLACE, &comp,
+		 "RAIDFRAME_REBUILD_IN_PLACE");
 
 	if (verbose) {
 		printf("Reconstruction status:\n");
 		sleep(3); /* XXX give reconstruction a chance to start */
-		do_meter(fd,RAIDFRAME_CHECK_RECON_STATUS);
+		do_meter(fds, 1, RAIDFRAME_CHECK_RECON_STATUS_EXT);
 	}
 
 }
 
 static void
-check_parity( fd, do_rewrite, dev_name )
-	int fd;
+check_parity(fds, nfd, do_rewrite)
+	fdidpair *fds;
+	int nfd;
 	int do_rewrite;
-	char *dev_name;
 {
-	int is_clean;
+	int i, is_clean, all_dirty, was_dirty;
 	int percent_done;
+	char dev_name[PATH_MAX];
 
-	is_clean = 0;
-	percent_done = 0;
-	do_ioctl(fd, RAIDFRAME_CHECK_PARITY, &is_clean,
-		 "RAIDFRAME_CHECK_PARITY");
-	if (is_clean) {
-		printf("%s: Parity status: clean\n",dev_name);
-	} else {
-		printf("%s: Parity status: DIRTY\n",dev_name);
-		if (do_rewrite) {
-			printf("%s: Initiating re-write of parity\n",
-			       dev_name);
-			do_ioctl(fd, RAIDFRAME_REWRITEPARITY, NULL, 
-				 "RAIDFRAME_REWRITEPARITY");
-			sleep(3); /* XXX give it time to
-				     get started. */
-			if (verbose) {
-				printf("Parity Re-write status:\n");
-				do_meter(fd,
-					 RAIDFRAME_CHECK_PARITYREWRITE_STATUS);
-			} else {
-				do_ioctl(fd, 
-					 RAIDFRAME_CHECK_PARITYREWRITE_STATUS, 
-					 &percent_done, 
-					 "RAIDFRAME_CHECK_PARITYREWRITE_STATUS"
-					 );
-				while( percent_done < 100 ) {
-					do_ioctl(fd, RAIDFRAME_CHECK_PARITYREWRITE_STATUS, 
-						 &percent_done, "RAIDFRAME_CHECK_PARITYREWRITE_STATUS");
-				}
+	all_dirty = 0;
+	i = nfd;
+	while (i--) {
+		is_clean = 0;
+		percent_done = 0;
+		snprintf(dev_name, PATH_MAX, "raid%d", fds[i].id);
 
-			}
-			       printf("%s: Parity Re-write complete\n",
-				      dev_name);
+		do_ioctl(fds[i].fd, RAIDFRAME_CHECK_PARITY, &is_clean,
+		 	"RAIDFRAME_CHECK_PARITY");
+		if (is_clean) {
+			printf("%s: Parity status: clean\n", dev_name);
 		} else {
-			/* parity is wrong, and is not being fixed.
-			   Exit w/ an error. */
-			exit(1);
+			all_dirty |= 1 << fds[i].id;
+			printf("%s: Parity status: DIRTY\n", dev_name);
+			if (do_rewrite) {
+				printf("%s: Initiating re-write of parity\n",
+				    dev_name);
+				do_ioctl(fds[i].fd, RAIDFRAME_REWRITEPARITY,
+				    NULL, "RAIDFRAME_REWRITEPARITY");
+			} else {
+				/* parity is wrong, and is not being fixed. */
+				exit(1);
+			}
 		}
 	}
+
+	if (do_all)
+		strncpy(dev_name, "all raid", PATH_MAX);
+
+	was_dirty = all_dirty;
+	while (all_dirty) {
+		sleep(3); /* wait a bit... */
+		if (verbose) {
+			printf("Parity Re-write status:\n");
+			do_meter(fds, nfd,
+			    RAIDFRAME_CHECK_PARITYREWRITE_STATUS_EXT);
+			all_dirty = 0;
+		} else {
+			i = nfd;
+			while (i--) {
+				do_ioctl(fds[i].fd, 
+				 	RAIDFRAME_CHECK_PARITYREWRITE_STATUS, 
+				 	&percent_done, 
+				 	"RAIDFRAME_CHECK_PARITYREWRITE_STATUS"
+				 	);
+				if (percent_done == 100) {
+					all_dirty &= ~(1 << fds[i].id);
+				}
+			}
+		}
+	}
+	if (verbose && was_dirty)
+		printf("%s: Parity Re-write complete\n", dev_name);
 }
 
 
 static void
-check_status( fd )
-	int fd;
+check_status(fds, nfd, meter)
+	fdidpair *fds;
+	int nfd;
+	int meter;
 {
+	int i;
 	int recon_percent_done = 0;
 	int parity_percent_done = 0;
 	int copyback_percent_done = 0;
+	int do_recon = 0;
+	int do_parity = 0;
+	int do_copyback = 0;
+	u_long check = 0;
 
-	do_ioctl(fd, RAIDFRAME_CHECK_RECON_STATUS, &recon_percent_done, 
-		 "RAIDFRAME_CHECK_RECON_STATUS");
-	printf("Reconstruction is %d%% complete.\n", recon_percent_done);
-	do_ioctl(fd, RAIDFRAME_CHECK_PARITYREWRITE_STATUS, 
-		 &parity_percent_done, 
-		 "RAIDFRAME_CHECK_PARITYREWRITE_STATUS");
-	printf("Parity Re-write is %d%% complete.\n", parity_percent_done);
-	do_ioctl(fd, RAIDFRAME_CHECK_COPYBACK_STATUS, &copyback_percent_done, 
-		 "RAIDFRAME_CHECK_COPYBACK_STATUS");
-	printf("Copyback is %d%% complete.\n", copyback_percent_done);
+	i = nfd;
+	while (i--) {
+		if (meter) {
+			printf("raid%d Status:\n", fds[i].id);
+		}
+		do_ioctl(fds[i].fd, RAIDFRAME_CHECK_RECON_STATUS,
+			 &recon_percent_done, 
+			 "RAIDFRAME_CHECK_RECON_STATUS");
+		printf("Reconstruction is %d%% complete.\n",
+			recon_percent_done);
+		if (recon_percent_done < 100) {
+			do_recon |= 1 << fds[i].id;
+		}
+		do_ioctl(fds[i].fd, RAIDFRAME_CHECK_PARITYREWRITE_STATUS, 
+			 &parity_percent_done, 
+			 "RAIDFRAME_CHECK_PARITYREWRITE_STATUS");
+		printf("Parity Re-write is %d%% complete.\n",
+			parity_percent_done);
+		if (parity_percent_done < 100) {
+			do_parity |= 1 << fds[i].id;
+		}
+		do_ioctl(fds[i].fd, RAIDFRAME_CHECK_COPYBACK_STATUS,
+			 &copyback_percent_done, 
+			 "RAIDFRAME_CHECK_COPYBACK_STATUS");
+		printf("Copyback is %d%% complete.\n",
+			copyback_percent_done);
+		if (copyback_percent_done < 100) {
+			do_copyback |= 1 << fds[i].id;
+		}
+	}
 
-	/* These 3 should be mutually exclusive at this point */
-	if (recon_percent_done < 100) {
-		printf("Reconstruction status:\n");
-		do_meter(fd,RAIDFRAME_CHECK_RECON_STATUS);
-	} else if (parity_percent_done < 100) {
-		printf("Parity Re-write status:\n");
-		do_meter(fd,RAIDFRAME_CHECK_PARITYREWRITE_STATUS);
-	} else if (copyback_percent_done < 100) {
-		printf("Copyback status:\n");
-		do_meter(fd,RAIDFRAME_CHECK_COPYBACK_STATUS);
+	if (meter && verbose) {
+		/* These 3 should be mutually exclusive at this point */
+		if (do_recon) {
+			printf("Reconstruction status:\n");
+			check = RAIDFRAME_CHECK_RECON_STATUS_EXT;
+		} else if (do_parity) {
+			printf("Parity Re-write status:\n");
+			check = RAIDFRAME_CHECK_PARITYREWRITE_STATUS_EXT;
+		} else if (do_copyback) {
+			printf("Copyback status:\n");
+			check = RAIDFRAME_CHECK_COPYBACK_STATUS_EXT;
+		}
+		do_meter(fds, nfd, check);
 	}
 }
 
-char *tbits = "|/-\\";
+const char *tbits = "|/-\\";
 
 static void
-do_meter( fd, option )
-	int fd;
-	int option;
+do_meter(fds, nfd, option)
+	fdidpair *fds;
+	int nfd;
+	u_long option;
 {
 	int percent_done;
-	int last_percent;
-	int start_percent;
+	int start_value;
+	RF_ProgressInfo_t *progressInfo;
+	void *pInfoPtr;
 	struct timeval start_time;
-	struct timeval last_time;
 	struct timeval current_time;
 	double elapsed;
 	int elapsed_sec;
 	int elapsed_usec;
-	int simple_eta;
+	int progress_total, progress_completed;
+	int simple_eta, last_eta;
 	double rate;
 	int amount;
 	int tbit_value;
-	int wait_for_more_data;
 	char buffer[1024];
 	char bar_buffer[1024];
 	char eta_buffer[1024];
+	int not_done;
+	int i;
 
-	if (gettimeofday(&start_time,NULL)) {
-		fprintf(stderr,"%s: gettimeofday failed!?!?\n",__progname);
-		exit(errno);
-	}
+	not_done = 0;
 	percent_done = 0;
-	do_ioctl( fd, option, &percent_done, "");
-	last_percent = percent_done;
-	start_percent = percent_done;
-	last_time = start_time;
-	current_time = start_time;
-	
-	wait_for_more_data = 0;
 	tbit_value = 0;
+	start_value = 0;
+	last_eta = 0;
+	progress_total = progress_completed = 0;
+	progressInfo = malloc(nfd * sizeof(RF_ProgressInfo_t));
+	memset(&progressInfo[0], 0, nfd * sizeof(RF_ProgressInfo_t));
 
-	while(percent_done < 100) {
+	if (gettimeofday(&start_time, NULL))
+		err(1, "gettimeofday");
+
+	current_time = start_time;
+
+	i = nfd;
+	while (i--) {
+		pInfoPtr = &progressInfo[i];
+		do_ioctl(fds[i].fd, option, &pInfoPtr, "");
+		start_value += progressInfo[i].completed;
+		progress_total += progressInfo[i].total;
+
+		if (progressInfo[i].completed < progressInfo[i].total) {
+			not_done |= 1 << i;
+		}
+	}
+
+	while (not_done) {
+		progress_completed = 0;
+		percent_done = 0;
+		amount = 0;
+
+		i = nfd;
+		while (i--) {
+			pInfoPtr = &progressInfo[i];
+			do_ioctl(fds[i].fd, option, &pInfoPtr, "");
+			progress_completed += progressInfo[i].completed;
+
+			if (progressInfo[i].completed >=
+			    progressInfo[i].total) {
+				not_done &= ~(1 << i);
+			}
+		}
+		percent_done = (progress_completed * 100) / progress_total;
+		amount = progress_completed - start_value;
 
 		get_bar(bar_buffer, percent_done, 40);
-		
-		elapsed_sec = current_time.tv_sec - last_time.tv_sec;
-		
-		elapsed_usec = current_time.tv_usec - last_time.tv_usec;
-		
+
+		elapsed_sec =   current_time.tv_sec -
+				start_time.tv_sec;
+		elapsed_usec =  current_time.tv_usec -
+				start_time.tv_usec;
 		if (elapsed_usec < 0) {
-			elapsed_usec-=1000000;
-			elapsed_sec++;
+			elapsed_usec += 1000000;
+			elapsed_sec--;
 		}
-		
+
 		elapsed = (double) elapsed_sec + 
-			(double) elapsed_usec / 1000000.0;
-		if (elapsed <= 0.0) {
-			elapsed = 0.0001; /* XXX */
-		}
-		
-		amount = percent_done - last_percent;
+			  (double) elapsed_usec / 1000000.0;
+
 		if (amount <= 0) { /* we don't do negatives (yet?) */
 			amount = 0;
-			wait_for_more_data = 1;
-		} else {
-			wait_for_more_data = 0;
 		}
-		rate = amount / elapsed;
 
+		if (elapsed == 0)
+			rate = 0.0;
+		else
+			rate = amount / elapsed;
 
 		if (rate > 0.0) {
-			simple_eta = (int) ((100.0 - (double) last_percent ) / rate);
+			simple_eta = (int)
+				(((double)progress_total - 
+				  (double) progress_completed) 
+				 / rate);
 		} else {
 			simple_eta = -1;
 		}
 
+		if (simple_eta <= 0) { 
+			simple_eta = last_eta;
+		} else {
+			last_eta = simple_eta;
+		}
+
 		get_time_string(eta_buffer, simple_eta);
 
-		snprintf(buffer,1024,"\r%3d%% |%s| ETA: %s %c",
-			 percent_done,bar_buffer,eta_buffer,tbits[tbit_value]);
+		snprintf(buffer, 1024,
+			 "\r\t%3d%% |%s| ETA: %s %c",
+			 percent_done, bar_buffer,
+			 eta_buffer, tbits[tbit_value]);
 
-		write(fileno(stdout),buffer,strlen(buffer));
+		write(fileno(stdout), buffer, strlen(buffer));
 		fflush(stdout);
 
-		/* resolution wasn't high enough... wait until we get another
-		   timestamp and perhaps more "work" done. */
-
-		if (!wait_for_more_data) {
-			last_time = current_time;
-			last_percent = percent_done;
-		}
-
-		if (++tbit_value>3) 
+		if (++tbit_value > 3) 
 			tbit_value = 0;
 
-		sleep(2);
+		if (not_done)
+			sleep(2);
 
-		if (gettimeofday(&current_time,NULL)) {
-			fprintf(stderr,"%s: gettimeofday failed!?!?\n",
-				__progname);
-			exit(errno);
-		}
-
-		do_ioctl( fd, option, &percent_done, "");
-		
-
+		if (gettimeofday(&current_time, NULL))
+			err(1, "gettimeofday");
 	}
 	printf("\n");
 }
+
 /* 40 '*''s per line, then 40 ' ''s line. */
 /* If you've got a screen wider than 160 characters, "tough" */
 
@@ -846,11 +1104,10 @@ const char stars[] = "****************************************"
                      "                                        "
                      "                                        "
                      "                                        "
-                     "                                        "
                      "                                        ";
 
 static void
-get_bar(string,percent,max_strlen)
+get_bar(string, percent, max_strlen)
 	char *string;
 	double percent;
 	int max_strlen;
@@ -861,14 +1118,14 @@ get_bar(string,percent,max_strlen)
 		max_strlen = STAR_MIDPOINT;
 	}
 	offset = STAR_MIDPOINT - 
-		(int)((percent * max_strlen)/ 100);
+		(int)((percent * max_strlen) / 100);
 	if (offset < 0)
 		offset = 0;
-	snprintf(string,max_strlen,"%s",&stars[offset]);
+	snprintf(string, max_strlen, "%s", &stars[offset]);
 }
 
 static void
-get_time_string(string,simple_time)
+get_time_string(string, simple_time)
 	char *string;
 	int simple_time;
 {
@@ -880,50 +1137,131 @@ get_time_string(string,simple_time)
 	if (simple_time >= 0) {
 
 		minutes = (int) simple_time / 60;
-		seconds = ((int)simple_time - 60*minutes);
+		seconds = ((int)simple_time - 60 * minutes);
 		hours = minutes / 60;
-		minutes = minutes - 60*hours;
+		minutes = minutes - 60 * hours;
 		
 		if (hours > 0) {
-			snprintf(hours_buffer,5,"%02d:",hours);
+			snprintf(hours_buffer, sizeof(hours_buffer),
+				 "%02d:", hours);
 		} else {
-			snprintf(hours_buffer,5,"   ");
+			snprintf(hours_buffer, sizeof(hours_buffer), "   ");
 		}
 		
-		snprintf(minutes_buffer,5,"%02d:",minutes);
-		snprintf(seconds_buffer,5,"%02d",seconds);
-		snprintf(string,1024,"%s%s%s",
+		snprintf(minutes_buffer, sizeof(minutes_buffer),
+			 "%02d:", minutes);
+		snprintf(seconds_buffer, sizeof(seconds_buffer),
+			 "%02d", seconds);
+		snprintf(string, 1024, "%s%s%s",
 			 hours_buffer, minutes_buffer, seconds_buffer);
 	} else {
-		snprintf(string,1024,"   --:--");
+		snprintf(string, 1024, "   --:--");
 	}
 	
+}
+
+static int
+open_device(devfd, name)
+	fdidpair **devfd;
+	char *name;
+{
+	int nfd, i;
+ 	struct stat st;
+	char **devname;
+
+	if (strcmp(name, "all") == 0) {
+		do_all = 1;
+		nfd = get_all_devices(&devname, "raid");
+	} else {
+		nfd = 1;
+		devname = malloc(sizeof(void*));
+		devname[0] = malloc(PATH_MAX);
+
+		if ((name[0] == '/') || (name[0] == '.')) {
+			/* they've (apparently) given a full path... */
+			strlcpy(devname[0], name, PATH_MAX);
+		} else {
+			if (isdigit(name[strlen(name) - 1])) {
+				snprintf(devname[0], PATH_MAX, "%s%s%c",
+				    _PATH_DEV, name, 'a' + getrawpartition());		
+			} else {
+				snprintf(devname[0], PATH_MAX, "%s%s",
+				    _PATH_DEV, name);
+			}
+		}
+	}
+
+	if ((*devfd = malloc(nfd * sizeof(fdidpair))) == NULL)
+		errx(1, "malloc() error");
+
+	i = nfd;
+	while (i--) {
+		if (stat(devname[i], &st) != 0)
+			errx(errno, "stat failure on: %s", devname[i]);
+		if (!S_ISBLK(st.st_mode) && !S_ISCHR(st.st_mode))
+			errx(EINVAL, "invalid device: %s", devname[i]);
+
+		if (((*devfd)[i].fd = open(devname[i], O_RDWR, 0640)) < 0)
+			errx(1, "unable to open device file: %s", devname[i]);
+		(*devfd)[i].id = RF_DEV2RAIDID(st.st_rdev);
+
+		free(devname[i]);
+	}
+
+	if (devname != NULL)
+		free(devname);
+
+	return (nfd);
+}
+
+static int
+get_all_devices(diskarray, genericname)
+	char	 ***diskarray;
+	const char *genericname;
+{
+	int	i, numdevs, mib[2];
+	size_t	len;
+	char	*disks, *fp, *p;
+
+	numdevs = 0;
+
+	mib[0] = CTL_HW;
+	mib[1] = HW_DISKNAMES;
+	sysctl(mib, 2, NULL, &len, NULL, 0);
+	if ((disks = malloc(len + 1)) == NULL)
+		errx(1, "malloc() error");
+	sysctl(mib, 2, disks, &len, NULL, 0);
+	disks[len] = '\0';
+
+	fp = disks;
+	while ((fp = strstr((const char*)fp, genericname)) != NULL) {
+		numdevs++;
+		fp++;
+	}
+
+	*diskarray = (char**) malloc(numdevs * sizeof(void*));
+	i = 0;
+	fp = disks;
+	while ((p = strsep(&fp, ",")) != NULL) {
+		if (strstr((const char*)p, genericname) != NULL) {
+			(*diskarray)[i] = (char*) malloc(strlen(p) + 6);
+			sprintf((*diskarray)[i++], "/dev/%s%c", p,
+				'a' + getrawpartition());
+		}
+	}
+
+	free(disks);
+
+	return (numdevs);
 }
 
 static void
 usage()
 {
-	fprintf(stderr, "usage: %s [-v] -a component dev\n", __progname);
-	fprintf(stderr, "       %s [-v] -B dev\n", __progname);
-	fprintf(stderr, "       %s [-v] -c config_file dev\n", __progname);
-	fprintf(stderr, "       %s [-v] -C config_file dev\n", __progname);
-	fprintf(stderr, "       %s [-v] -f component dev\n", __progname);
-	fprintf(stderr, "       %s [-v] -F component dev\n", __progname);
-	fprintf(stderr, "       %s [-v] -g component dev\n", __progname);
-	fprintf(stderr, "       %s [-v] -i dev\n", __progname);
-	fprintf(stderr, "       %s [-v] -I serial_number dev\n", __progname);
-	fprintf(stderr, "       %s [-v] -r component dev\n", __progname); 
-	fprintf(stderr, "       %s [-v] -R component dev\n", __progname);
-	fprintf(stderr, "       %s [-v] -s dev\n", __progname);
-	fprintf(stderr, "       %s [-v] -S dev\n", __progname);
-	fprintf(stderr, "       %s [-v] -u dev\n", __progname);
-#if 0
-	fprintf(stderr, "usage: %s %s\n", __progname, 
-		"-a | -f | -F | -g | -r | -R component dev");
-	fprintf(stderr, "       %s -B | -i | -s | -S -u dev\n", __progname);
-	fprintf(stderr, "       %s -c | -C config_file dev\n", __progname);
-	fprintf(stderr, "       %s -I serial_number dev\n", __progname);
-#endif
+	fprintf(stderr,
+	    "usage: raidctl [-v] [-afFgrR component] [-BGipPsSu] [-cC config_file]\n");
+	fprintf(stderr,
+	    "               [-A [yes | no | root]] [-I serial_number] dev\n");
 	exit(1);
 	/* NOTREACHED */
 }

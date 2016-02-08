@@ -1,4 +1,4 @@
-/*	$OpenBSD: misc.c,v 1.9 2001/08/10 02:33:46 millert Exp $	*/
+/*	$OpenBSD: misc.c,v 1.14 2002/04/04 07:33:23 millert Exp $	*/
 /*	$NetBSD: misc.c,v 1.4 1995/03/07 21:26:23 cgd Exp $	*/
 
 /*-
@@ -40,6 +40,7 @@
 #include <sys/stat.h>
 #include <fts.h>
 #include <stdio.h>
+#include <stdarg.h>
 #include "mtree.h"
 #include "extern.h"
 
@@ -64,6 +65,7 @@ static KEY keylist[] = {
 	{"md5digest",	F_MD5,		NEEDVALUE},
 	{"mode",	F_MODE,		NEEDVALUE},
 	{"nlink",	F_NLINK,	NEEDVALUE},
+	{"nochange",	F_NOCHANGE,	0},
 	{"optional",	F_OPT,		0},
 	{"rmd160digest",F_RMD160,	NEEDVALUE},
 	{"sha1digest",	F_SHA1,		NEEDVALUE},
@@ -80,7 +82,7 @@ parsekey(name, needvaluep)
 	int *needvaluep;
 {
 	KEY *k, tmp;
-	int keycompare __P((const void *, const void *));
+	int keycompare(const void *, const void *);
 
 	tmp.name = name;
 	k = (KEY *)bsearch(&tmp, keylist, sizeof(keylist) / sizeof(KEY),
@@ -100,27 +102,12 @@ keycompare(a, b)
 	return (strcmp(((KEY *)a)->name, ((KEY *)b)->name));
 }
 
-#ifdef __STDC__
-#include <stdarg.h>
-#else
-#include <varargs.h>
-#endif
-
 void
-#ifdef __STDC__
 error(const char *fmt, ...)
-#else
-error(fmt, va_alist)
-	char *fmt;
-        va_dcl
-#endif
 {
 	va_list ap;
-#ifdef __STDC__
+
 	va_start(ap, fmt);
-#else
-	va_start(ap);
-#endif
 	(void)fflush(NULL);
 	(void)fprintf(stderr, "\nmtree: ");
 	(void)vfprintf(stderr, fmt, ap);

@@ -1,7 +1,9 @@
-/* *	$OpenBSD: hexdump.h,v 1.3 2001/09/30 07:17:03 pvalchev Exp $*/
+/*	$OpenBSD: hexdump.h,v 1.6 2002/04/08 15:59:05 millert Exp $	*/
+/*	$NetBSD: hexdump.h,v 1.7 2001/12/07 15:14:29 bjh21 Exp $	*/
+
 /*
- * Copyright (c) 1989 The Regents of the University of California.
- * All rights reserved.
+ * Copyright (c) 1989, 1993
+ *	The Regents of the University of California.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -31,7 +33,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	from: @(#)hexdump.h	5.4 (Berkeley) 6/1/90
+ *	from: @(#)hexdump.h	8.1 (Berkeley) 6/6/93
  */
 
 typedef struct _pr {
@@ -71,29 +73,37 @@ typedef struct _fs {			/* format strings */
 	int bcnt;
 } FS;
 
-extern FS *fshead;			/* head of format strings list */
-extern int blocksize;			/* data block size */
 enum _vflag { ALL, DUP, FIRST, WAIT };	/* -v values */
-char *emalloc();
 
-void	bpad __P((PR *));
-void	conv_c __P((PR *, u_char *));
-void	conv_u __P((PR *, u_char *));
-int	next __P((char **));
-void	doskip __P((char *, int));
-void	nomem __P((void));
-void	odoffset __P((int, char ***));
-void	newsyntax __P((int, char ***));
-void	oldsyntax __P((int, char ***));
-int	size __P((FS *));
-void	rewrite __P((FS *));
-void	display __P((void));
-void	badcnt __P((char *));
-void	add __P((char *));
-void	addfile __P((char *));
-void	badcnt __P((char *));
-void	badconv __P((char *));
-void	badfmt __P((char *));
-void	badsfmt __P((void));
-void	escape __P((char *));
-void	usage __P((void));
+extern int blocksize;			/* data block size */
+extern int deprecated;			/* od compatibility */
+extern FU *endfu;			/* format at end-of-data */
+extern int exitval;			/* final exit value */
+extern FS *fshead;			/* head of format strings list */
+extern int length;			/* max bytes to read */
+extern off_t skip;			/* bytes to skip */
+extern enum _vflag vflag;
+
+void	 add(const char *);
+void	 addfile(char *);
+void	 badcnt(char *);
+void	 badconv(char *);
+void	 badfmt(const char *);
+void	 badsfmt(void);
+void	 bpad(PR *);
+void	 conv_c(PR *, u_char *);
+void	 conv_u(PR *, u_char *);
+void	 display(void);
+void	 doskip(const char *, int);
+/*void	 err(const char *, ...);*/
+void	*emalloc(int);
+void	 escape(char *);
+u_char	*get(void);
+void	 newsyntax(int, char ***);
+int	 next(char **);
+void	 nomem(void);
+void	 oldsyntax(int, char ***);
+void	 rewrite(FS *);
+int	 size(FS *);
+void	 usage(void);
+void	 oldusage(void);

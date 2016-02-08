@@ -202,7 +202,7 @@ sparc_init_extra_frame_info (fromleaf, fi)
   fi->bottom =
     (fi->next ?
      (fi->frame == fi->next->frame ? fi->next->bottom : fi->next->frame) :
-     read_register (SP_REGNUM));
+     read_sp ());
 
   /* If fi->next is NULL, then we already set ->frame by passing read_fp()
      to create_new_frame.  */
@@ -217,6 +217,11 @@ sparc_init_extra_frame_info (fromleaf, fi)
 	 than error().  */
       get_saved_register (buf, 0, 0, fi, FP_REGNUM, 0);
       fi->frame = extract_address (buf, REGISTER_RAW_SIZE (FP_REGNUM));
+
+#ifdef GDB_TARGET_IS_SPARC64
+      if (fi->frame & 1)
+	fi->frame += 2047;
+#endif
     }
 
   /* Decide whether this is a function with a ``flat register window''
@@ -251,6 +256,11 @@ sparc_init_extra_frame_info (fromleaf, fi)
 	      /* Overwrite the frame's address with the value in %i7.  */
 	      get_saved_register (buf, 0, 0, fi, I7_REGNUM, 0);
 	      fi->frame = extract_address (buf, REGISTER_RAW_SIZE (I7_REGNUM));
+
+#ifdef GDB_TARGET_IS_SPARC64
+	      if (fi->frame & 1)
+		fi->frame += 2047;
+#endif
 
 	      /* Record where the fp got saved.  */
 	      fi->fp_addr = fi->frame + fi->sp_offset + X_SIMM13 (insn);
@@ -652,7 +662,7 @@ get_saved_register (raw_buffer, optimized, addrp, frame, regnum, lval)
   while (frame1 != NULL)
     {
       if (frame1->pc >= (frame1->bottom ? frame1->bottom :
-			 read_register (SP_REGNUM))
+			 read_sp ())
 	  && frame1->pc <= FRAME_FP (frame1))
 	{
 	  /* Dummy frame.  All but the window regs are in there somewhere.
@@ -787,9 +797,15 @@ sparc_push_dummy_frame ()
   CORE_ADDR sp, old_sp;
   char register_temp[DUMMY_STACK_SIZE];
 
-  old_sp = sp = read_register (SP_REGNUM);
+  old_sp = sp = read_sp ();
 
 #ifdef GDB_TARGET_IS_SPARC64
+  /* PC, NPC, CCR, FSR, FPRS, Y, ASI */
+  read_register_bytes (REGISTER_BYTE (PC_REGNUM), &register_temp[0],
+		       REGISTER_RAW_SIZE (PC_REGNUM) * 7);
+  read_register_bytes (REGISTER_BYTE (PSTATE_REGNUM), 
+		       &register_temp[7 * SPARC_INTREG_SIZE],
+		       REGISTER_RAW_SIZE (PSTATE_REGNUM));
   /* FIXME: not sure what needs to be saved here.  */
 #else
   /* Y, PS, WIM, TBR, PC, NPC, FPS, CPS regs */
@@ -813,12 +829,12 @@ sparc_push_dummy_frame ()
 
   sp -= DUMMY_STACK_SIZE;
 
-  write_register (SP_REGNUM, sp);
+  write_sp (sp);
 
   write_memory (sp + DUMMY_REG_SAVE_OFFSET, &register_temp[0],
 		DUMMY_STACK_REG_BUF_SIZE);
 
-  write_register (FP_REGNUM, old_sp);
+  write_fp (old_sp);
 
   /* Set return address register for the call dummy to the current PC.  */
   write_register (I7_REGNUM, read_pc() - 8);
@@ -875,7 +891,7 @@ sparc_frame_find_saved_regs (fi, saved_regs_addr)
   memset (saved_regs_addr, 0, sizeof (*saved_regs_addr));
 
   if (fi->pc >= (fi->bottom ? fi->bottom :
-		   read_register (SP_REGNUM))
+		   read_sp ())
       && fi->pc <= FRAME_FP(fi))
     {
       /* Dummy frame.  All but the window regs are in there somewhere. */
@@ -904,7 +920,7 @@ sparc_frame_find_saved_regs (fi, saved_regs_addr)
 	  frame_addr + (regnum - Y_REGNUM) * SPARC_INTREG_SIZE - 0xe0;
 	    - (FP_REGISTER_BYTES + 24 * SPARC_INTREG_SIZE);
       frame_addr = fi->bottom ?
-	fi->bottom : read_register (SP_REGNUM);
+	fi->bottom : read_sp ();
     }
   else if (fi->flat)
     {
@@ -920,7 +936,7 @@ sparc_frame_find_saved_regs (fi, saved_regs_addr)
     {
       /* Normal frame.  Just Local and In registers */
       frame_addr = fi->bottom ?
-	fi->bottom : read_register (SP_REGNUM);
+	fi->bottom : read_sp ();
       for (regnum = L0_REGNUM; regnum < L0_REGNUM+8; regnum++)
 	saved_regs_addr->regs[regnum] =
 	  (frame_addr + (regnum - L0_REGNUM) * SPARC_INTREG_SIZE
@@ -942,7 +958,7 @@ sparc_frame_find_saved_regs (fi, saved_regs_addr)
 	  CORE_ADDR next_next_frame_addr =
 	    (fi->next->bottom ?
 	     fi->next->bottom :
-	     read_register (SP_REGNUM));
+	     read_sp ());
 	  for (regnum = O0_REGNUM; regnum < O0_REGNUM+8; regnum++)
 	    saved_regs_addr->regs[regnum] =
 	      (next_next_frame_addr
@@ -1028,7 +1044,7 @@ sparc_pop_frame ()
 			read_memory_integer (fsr.regs[O0_REGNUM + 7],
 					     SPARC_INTREG_SIZE));
 
-      write_register (SP_REGNUM, frame->frame);
+      write_sp (frame->frame);
     }
   else if (fsr.regs[I0_REGNUM])
     {
@@ -1044,6 +1060,12 @@ sparc_pop_frame ()
 	 locals from the registers array, so we need to muck with the
 	 registers array.  */
       sp = fsr.regs[SP_REGNUM];
+
+#ifdef GDB_TARGET_IS_SPARC64
+      if (sp & 1)
+	sp += 2047;
+#endif
+
       read_memory (sp, reg_temp, SPARC_INTREG_SIZE * 16);
 
       /* Restore the out registers.
@@ -1571,3 +1593,50 @@ _initialize_sparc_tdep ()
   tm_print_insn = print_insn_sparc;
   tm_print_insn_info.mach = TM_PRINT_INSN_MACH;  /* Selects sparc/sparclite */
 }
+
+#ifdef GDB_TARGET_IS_SPARC64
+
+/* Compensate for stack bias. Note that we currently don't handle
+   mixed 32/64 bit code. */
+    
+CORE_ADDR
+sparc64_read_sp (void)
+{
+  CORE_ADDR sp = read_register (SP_REGNUM);
+
+  if (sp & 1)
+    sp += 2047;
+  return sp;
+}
+
+CORE_ADDR
+sparc64_read_fp (void)
+{
+  CORE_ADDR fp = read_register (FP_REGNUM);
+
+  if (fp & 1)
+    fp += 2047;
+  return fp;
+}
+
+void
+sparc64_write_sp (CORE_ADDR val)
+{
+  CORE_ADDR oldsp = read_register (SP_REGNUM);
+  if (oldsp & 1)
+    write_register (SP_REGNUM, val - 2047);
+  else
+    write_register (SP_REGNUM, val);
+}
+
+void
+sparc64_write_fp (CORE_ADDR val)
+{
+  CORE_ADDR oldfp = read_register (FP_REGNUM);
+  if (oldfp & 1)
+    write_register (FP_REGNUM, val - 2047);
+  else
+    write_register (FP_REGNUM, val);
+}
+
+#endif

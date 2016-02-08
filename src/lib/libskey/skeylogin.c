@@ -10,7 +10,7 @@
  *
  * S/Key verification check, lookups, and authentication.
  * 
- * $OpenBSD: skeylogin.c,v 1.39 2001/06/23 21:42:39 millert Exp $
+ * $OpenBSD: skeylogin.c,v 1.41 2002/02/16 21:27:28 millert Exp $
  */
 
 #include <sys/param.h>
@@ -36,8 +36,8 @@
 
 #include "skey.h"
 
-static void skey_fakeprompt __P((char *, char *));
-static char *tgetline __P((int, char *, size_t, int));
+static void skey_fakeprompt(char *, char *);
+static char *tgetline(int, char *, size_t, int);
 
 /*
  * Return an skey challenge string for user 'name'. If successful,
@@ -711,7 +711,7 @@ skey_unlock(mp)
 {
 	struct flock fl;
 
-	if (mp->logname == NULL)
+	if (mp->logname == NULL || mp->keyfile == NULL)
 		return(-1);
 
 	fl.l_start = mp->recstart;

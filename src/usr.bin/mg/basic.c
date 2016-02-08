@@ -1,4 +1,4 @@
-/*	$OpenBSD: basic.c,v 1.6 2001/05/23 22:20:34 art Exp $	*/
+/*	$OpenBSD: basic.c,v 1.13 2002/03/11 13:08:51 vincent Exp $	*/
 
 /*
  *		Basic cursor motion commands.
@@ -11,15 +11,14 @@
  */
 #include "def.h"
 
-void setgoal __P((void));
+void setgoal(void);
 
 /*
  * Go to beginning of line.
  */
 /* ARGSUSED */
 int
-gotobol(f, n)
-	int f, n;
+gotobol(int f, int n)
 {
 	curwp->w_doto = 0;
 	return (TRUE);
@@ -33,8 +32,7 @@ gotobol(f, n)
  */
 /* ARGSUSED */
 int
-backchar(f, n)
-	int	n;
+backchar(int f, int n)
 {
 	LINE   *lp;
 
@@ -61,8 +59,7 @@ backchar(f, n)
  */
 /* ARGSUSED */
 int
-gotoeol(f, n)
-	int f, n;
+gotoeol(int f, int n)
 {
 	curwp->w_doto = llength(curwp->w_dotp);
 	return (TRUE);
@@ -76,8 +73,7 @@ gotoeol(f, n)
  */
 /* ARGSUSED */
 int
-forwchar(f, n)
-	int f, n;
+forwchar(int f, int n)
 {
 
 	if (n < 0)
@@ -105,8 +101,7 @@ forwchar(f, n)
  * but almost always the case.
  */
 int
-gotobob(f, n)
-	int f, n;
+gotobob(int f, int n)
 {
 
 	(void) setmark(f, n);
@@ -122,8 +117,7 @@ gotobob(f, n)
  * almost always the case.
  */
 int
-gotoeob(f, n)
-	int f, n;
+gotoeob(int f, int n)
 {
 
 	(void) setmark(f, n);
@@ -142,8 +136,7 @@ gotoeob(f, n)
  */
 /* ARGSUSED */
 int
-forwline(f, n)
-	int f, n;
+forwline(int f, int n)
 {
 	LINE  *dlp;
 
@@ -166,7 +159,7 @@ forwline(f, n)
 		}
 		curwp->w_doto = 0;
 		while (n-- >= 0) {
-			if ((dlp = lallocx(0)) == NULL)
+			if ((dlp = lalloc(0)) == NULL)
 				return FALSE;
 			dlp->l_fp = curbp->b_linep;
 			dlp->l_bp = lback(dlp->l_fp);
@@ -189,8 +182,7 @@ forwline(f, n)
  */
 /* ARGSUSED */
 int
-backline(f, n)
-	int	f, n;
+backline(int f, int n)
 {
 	LINE   *dlp;
 
@@ -214,7 +206,7 @@ backline(f, n)
  * the edge of the screen; it's more like display then show position.
  */
 void
-setgoal()
+setgoal(void)
 {
 
 	curgoal = getcolpos() - 1;	/* Get the position.	 */
@@ -229,8 +221,7 @@ setgoal()
  * when a vertical motion is made into the line.
  */
 int
-getgoal(dlp)
-	LINE  *dlp;
+getgoal(LINE *dlp)
 {
 	int    c;
 	int    col;
@@ -269,8 +260,7 @@ getgoal(dlp)
  */
 /* ARGSUSED */
 int
-forwpage(f, n)
-	int    f, n;
+forwpage(int f, int n)
 {
 	LINE  *lp;
 
@@ -308,8 +298,7 @@ forwpage(f, n)
  */
 /* ARGSUSED */
 int
-backpage(f, n)
-	int    f, n;
+backpage(int f, int n)
 {
 	LINE  *lp;
 
@@ -341,39 +330,34 @@ backpage(f, n)
  * These functions are provided for compatibility with Gosling's Emacs. They
  * are used to scroll the display up (or down) one line at a time.
  */
-#ifdef GOSMACS
-void
-forw1page(f, n)
-	int f, n;
+int
+forw1page(int f, int n)
 {
-
 	if (!(f & FFARG)) {
 		n = 1;
 		f = FFUNIV;
 	}
 	forwpage(f | FFRAND, n);
+	return TRUE;
 }
 
-void
-back1page(f, n)
-	int f, n;
+int
+back1page(int f, int n)
 {
-
 	if (!(f & FFARG)) {
 		n = 1;
 		f = FFUNIV;
 	}
 	backpage(f | FFRAND, n);
+	return TRUE;
 }
-#endif
 
 /*
  * Page the other window. Check to make sure it exists, then
  * nextwind, forwpage and restore window pointers.
  */
 int
-pagenext(f, n)
-	int    f, n;
+pagenext(int f, int n)
 {
 	MGWIN *wp;
 
@@ -393,7 +377,7 @@ pagenext(f, n)
  * Internal set mark routine, used by other functions (daveb).
  */
 void
-isetmark()
+isetmark(void)
 {
 
 	curwp->w_markp = curwp->w_dotp;
@@ -407,8 +391,7 @@ isetmark()
  */
 /* ARGSUSED */
 int
-setmark(f, n)
-	int f, n;
+setmark(int f, int n)
 {
 
 	isetmark();
@@ -425,8 +408,7 @@ setmark(f, n)
  */
 /* ARGSUSED */
 int
-swapmark(f, n)
-	int    f, n;
+swapmark(int f, int n)
 {
 	LINE  *odotp;
 	int    odoto;
@@ -454,17 +436,27 @@ swapmark(f, n)
  */
 /* ARGSUSED */
 int
-gotoline(f, n)
-	int    f, n;
+gotoline(int f, int n)
 {
 	LINE  *clp;
 	int    s;
-	char   buf[32];
+	char   buf[32], *tmp;
+	long   nl;
 
 	if (!(f & FFARG)) {
 		if ((s = ereply("Goto line: ", buf, sizeof(buf))) != TRUE)
 			return s;
-		n = atoi(buf);
+
+		nl = strtol(buf, &tmp, 10);
+		if (buf[0] == '\0' || *tmp != '\0') {
+			ewprintf("Invalid number");
+			return FALSE;
+		}
+		if (nl >= INT_MAX || nl <= INT_MIN) {
+			ewprintf("Out of range");
+			return FALSE;
+		}
+		n = (int)nl;
 	}
 	if (n >= 0) {
 		clp = lforw(curbp->b_linep);	/* "clp" is first line */

@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.42 2001/10/04 22:33:49 gluk Exp $
+#	$OpenBSD: Makefile,v 1.48 2002/02/28 19:22:05 csapuntz Exp $
 #	$NetBSD: Makefile,v 1.4 1996/01/09 03:23:01 thorpej Exp $
 
 #	Makefile for section 9 (kernel function and variable) manual pages.
@@ -6,15 +6,18 @@
 MAN=	altq.9 audio.9 boot.9 bus_dma.9 bus_space.9 copy.9 crypto.9 ctxsw.9 \
 	disk.9 disklabel.9 \
 	dohooks.9 dopowerhooks.9 doshutdownhooks.9 dostartuphooks.9 \
-	fetch.9 fork1.9 extent.9 \
+	extattr.9 \
+	fetch.9 fork1.9 extent.9 getdevvp.9 getnewvnode.9 \
 	hardclock.9 hook_establish.9 hz.9 hzto.9 intro.9 inittodr.9 log.9 \
-	kthread.9 malloc.9 mbuf_tags.9 md5.9 microtime.9 \
+	kthread.9 malloc.9 mbuf.9 mbuf_tags.9 md5.9 microtime.9 \
 	panic.9 pfind.9 physio.9 \
 	pool.9 powerhook_establish.9 ppsratecheck.9 printf.9 psignal.9 \
 	ratecheck.9 resettodr.9 radio.9 random.9 \
 	shutdownhook_establish.9 sleep.9 spl.9 startuphook_establish.9 \
 	store.9 style.9 \
-	time.9 timeout.9 uvm.9 \
+	time.9 timeout.9 tvtohz.9 uvm.9 \
+	vaccess.9 vclean.9 vcount.9 vdevgone.9 vfinddev.9 vflush.9 vget.9 \
+	vgone.9 vhold.9 vinvalbuf.9 vput.9 vref.9 vrele.9 \
 	vm_allocate.9 vm_map_copy.9 vm_deallocate.9 \
 	vm_map_inherit.9 vm_map_protect.9 vnode.9 vn_lock.9 \
 	vwaitforio.9 vwaitforio.9
@@ -73,6 +76,17 @@ MLINKS+=kthread.9 kthread_create.9 kthread.9 kthread_exit.9 \
 	kthread.9 kthread_create_deferred.9
 MLINKS+=log.9 addlog.9
 MLINKS+=md5.9 MD5Init.9 md5.9 MD5Transform.9
+MLINKS+=mbuf.9 m_copym2.9 mbuf.9 m_copym.9 mbuf.9 m_free.9 mbuf.9 MFREE.9 \
+	mbuf.9 m_get.9 mbuf.9 MGET.9 mbuf.9 m_getclr.9 mbuf.9 m_gethdr.9 \
+	mbuf.9 MGETHDR.9 mbuf.9 m_prepend.9 mbuf.9 M_PREPEND.9 \
+	mbuf.9 m_pulldown.9 mbuf.9 m_pullup.9 mbuf.9 m_pullup2.9 \
+	mbuf.9 m_retry.9 mbuf.9 m_retryhdr.9 mbuf.9 m_split.9 \
+	mbuf.9 m_inject.9 mbuf.9 m_getptr.9 mbuf.9 m_adj.9 mbuf.9 m_copyback.9 \
+	mbuf.9 m_freem.9 mbuf.9 m_reclaim.9 mbuf.9 m_copydata.9 \
+	mbuf.9 m_cat.9 mbuf.9 m_devget.9 mbuf.9 m_zero.9 mbuf.9 m_apply.9 \
+	mbuf.9 MEXTALLOC.9 mbuf.9 MCLGET.9 mbuf.9 MEXTADD.9 mbuf.9 M_ALIGN.9 \
+	mbuf.9 MH_ALIGN.9 mbuf.9 M_READONLY.9 mbuf.9 M_LEADINGSPACE.9 \
+	mbuf.9 M_TRAILINGSPACE.9 mbuf.9 MCHTYPE.9
 MLINKS+=pfind.9 pgfind.9
 MLINKS+=pool.9 pool_init.9 pool.9 pool_destroy.9 pool.9 pool_get.9 \
 	pool.9 pool_put.9 pool.9 pool_prime.9 pool.9 pool_sethiwat.9 \

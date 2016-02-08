@@ -1,4 +1,4 @@
-/*	$OpenBSD: tc-m88k.c,v 1.3 1998/02/28 00:52:20 niklas Exp $	*/
+/*	$OpenBSD: tc-m88k.c,v 1.5 2001/12/27 00:49:47 miod Exp $	*/
 
 /* m88k.c -- Assembler for the Motorola 88000
    Contributed by Devon Bowen of Buffalo University
@@ -145,10 +145,10 @@ long omagic = OMAGIC;
 
 /* These chars start a comment anywhere in a source file (except inside
    another comment */
-char comment_chars[] = ";";
+const char comment_chars[] = "#|";
 
 /* These chars only start a comment at the beginning of a line. */
-char line_comment_chars[] = "#";
+const char line_comment_chars[] = ";";
 
 /* Chars that can be used to separate mant from exp in floating point nums */
 char EXP_CHARS[] = "eE";
@@ -377,10 +377,23 @@ calcop (format, param, insn)
   insn->opcode = format->opcode;
   opcode = 0;
 
+  /*
+   * Instructions which have no arguments (such as rte) will get
+   * correctly reported only if param == "", although there could be
+   * whitespace following the instruction.
+   * Rather than eating whitespace here, let's assume everything is
+   * fine. If there were non-wanted arguments, this will be parsed as
+   * an incorrect opcode at the offending line, so that's not too bad.
+   * -- miod
+   */
+  if (*fmt == '\0')
+	  return 1;
+
   for (;;)
     {
       if (param == 0)
 	return 0;
+
       f = *fmt++;
       switch (f)
 	{
@@ -456,7 +469,7 @@ calcop (format, param, insn)
 	  break;
 
 	case '?':
-	  /* Having this here repeats the warning somtimes.
+	  /* Having this here repeats the warning sometimes.
 	   But can't we stand that?  */
 	  as_warn ("Use of obsolete instruction");
 	  break;
@@ -1329,6 +1342,8 @@ emit_relocations (fixP, segment_address_in_file)
 }
 #endif /* comment */
 
+#endif /* 0 */
+
 /* Translate internal representation of relocation info to target format.
    
    On m88k: first 4 bytes are normal unsigned long address,
@@ -1384,14 +1399,6 @@ relax_addressT segment_address_in_file;
 	
 	return;
 } /* tc_aout_fix_to_chars() */
-
-
-#endif /* 0 */
-
-#if 0
-
-/* This routine can be subsumed by s_lcomm in read.c.
-   Ian Taylor, Cygnus Support 13 Jul 1993 */
 
 
 static void
@@ -1451,8 +1458,6 @@ s_bss()
 
   return;
 }
-
-#endif /* 0 */
 
 #ifdef M88KCOFF
 

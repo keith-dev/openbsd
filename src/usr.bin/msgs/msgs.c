@@ -1,4 +1,4 @@
-/*	$OpenBSD: msgs.c,v 1.18 2001/09/04 23:35:59 millert Exp $	*/
+/*	$OpenBSD: msgs.c,v 1.21 2002/02/16 21:27:49 millert Exp $	*/
 /*	$NetBSD: msgs.c,v 1.7 1995/09/28 06:57:40 tls Exp $	*/
 
 /*-
@@ -44,7 +44,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)msgs.c	8.2 (Berkeley) 4/28/95";
 #else
-static char rcsid[] = "$OpenBSD: msgs.c,v 1.18 2001/09/04 23:35:59 millert Exp $";
+static char rcsid[] = "$OpenBSD: msgs.c,v 1.21 2002/02/16 21:27:49 millert Exp $";
 #endif
 #endif /* not lint */
 
@@ -141,14 +141,14 @@ int	Lpp = 0;
 time_t	t;
 time_t	keep;
 
-void prmesg __P((int));
-void onintr __P((int));
-void onsusp __P((int));
-int linecnt __P((FILE *));
-int next __P((char *));
-void ask __P((char *));
-void gfrsub __P((FILE *));
-char *nxtfld __P((char *));
+void prmesg(int);
+void onintr(int);
+void onsusp(int);
+int linecnt(FILE *);
+int next(char *);
+void ask(char *);
+void gfrsub(FILE *);
+char *nxtfld(char *);
 
 /* option initialization */
 bool	hdrs = NO;
@@ -295,7 +295,7 @@ main(argc, argv)
 		lastmsg = 0;
 
 		for (dp = readdir(dirp); dp != NULL; dp = readdir(dirp)){
-			register int i = 0;
+			int i = 0;
 
 			cp = dp->d_name;
 			if (dp->d_ino == 0)
@@ -723,7 +723,7 @@ onsusp(unused)
 	kill(0, SIGTSTP);
 	signal(SIGTSTP, onsusp);
 	if (!mailing)
-		longjmp(tstpbuf, 0);
+		longjmp(tstpbuf, 1);
 }
 
 int

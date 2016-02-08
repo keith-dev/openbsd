@@ -1,4 +1,4 @@
-/*	$OpenBSD: tape.c,v 1.11 2001/01/19 17:57:35 deraadt Exp $	*/
+/*	$OpenBSD: tape.c,v 1.15 2002/02/19 19:39:38 millert Exp $	*/
 /*	$NetBSD: tape.c,v 1.11 1997/06/05 11:13:26 lukem Exp $	*/
 
 /*-
@@ -38,7 +38,7 @@
 #if 0
 static char sccsid[] = "@(#)tape.c	8.2 (Berkeley) 3/17/94";
 #else
-static char rcsid[] = "$OpenBSD: tape.c,v 1.11 2001/01/19 17:57:35 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: tape.c,v 1.15 2002/02/19 19:39:38 millert Exp $";
 #endif
 #endif /* not lint */
 
@@ -63,14 +63,10 @@ static char rcsid[] = "$OpenBSD: tape.c,v 1.11 2001/01/19 17:57:35 deraadt Exp $
 #include <setjmp.h>
 #include <signal.h>
 #include <stdio.h>
-#ifdef __STDC__
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
-#else
-int	write(), read();
-#endif
 
 #include "dump.h"
 #include "pathnames.h"
@@ -85,12 +81,12 @@ extern	int cartridge;
 extern	char *host;
 char	*nexttape;
 
-static	ssize_t atomic __P((ssize_t (*)(), int, char *, int));
-static	void doslave __P((int, int));
-static	void enslave __P((void));
-static	void flushtape __P((void));
-static	void killall __P((void));
-static	void rollforward __P((void));
+static	ssize_t atomic(ssize_t (*)(), int, char *, int);
+static	void doslave(int, int);
+static	void enslave(void);
+static	void flushtape(void);
+static	void killall(void);
+static	void rollforward(void);
 
 /*
  * Concurrent dump mods (Caltech) - disk block reading and tape writing
@@ -452,8 +448,8 @@ close_rewind()
 void
 rollforward()
 {
-	register struct req *p, *q, *prev;
-	register struct slave *tslp;
+	struct req *p, *q, *prev;
+	struct slave *tslp;
 	int i, size, savedtapea, got;
 	union u_spcl *ntb, *otb;
 	tslp = &slaves[SLAVES];
@@ -748,7 +744,7 @@ void
 enslave()
 {
 	int cmd[2];
-	register int i, j;
+	int i, j;
 
 	master = getpid();
 
@@ -792,7 +788,7 @@ enslave()
 void
 killall()
 {
-	register int i;
+	int i;
 
 	for (i = 0; i < SLAVES; i++)
 		if (slaves[i].pid > 0) {
@@ -810,10 +806,10 @@ killall()
  */
 static void
 doslave(cmd, slave_number)
-	register int cmd;
+	int cmd;
         int slave_number;
 {
-	register int nread;
+	int nread;
 	int nextslave, size, eot_count;
 	volatile int wrote;
 	sigset_t sigset;
@@ -837,7 +833,7 @@ doslave(cmd, slave_number)
 	 * Get list of blocks to dump, read the blocks into tape buffer
 	 */
 	while ((nread = atomic(read, cmd, (char *)slp->req, reqsiz)) == reqsiz) {
-		register struct req *p = slp->req;
+		struct req *p = slp->req;
 
 		for (trecno = 0; trecno < ntrec;
 		     trecno += p->count, p += p->count) {

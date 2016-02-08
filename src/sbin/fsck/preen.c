@@ -1,4 +1,4 @@
-/*	$OpenBSD: preen.c,v 1.5 1999/01/11 20:59:29 niklas Exp $	*/
+/*	$OpenBSD: preen.c,v 1.9 2002/03/14 06:51:41 mpech Exp $	*/
 /*	$NetBSD: preen.c,v 1.15 1996/09/28 19:21:42 christos Exp $	*/
 
 /*
@@ -78,18 +78,18 @@ TAILQ_HEAD(disk, diskentry) diskh;
 
 static int nrun = 0, ndisks = 0;
 
-static struct diskentry *finddisk __P((const char *));
-static void addpart __P((const char *, const char *, const char *, void *));
-static int startdisk __P((struct diskentry *, 
-    int (*)(const char *, const char *, const char *, void *, pid_t *)));
-static void printpart __P((void));
+static struct diskentry *finddisk(const char *);
+static void addpart(const char *, const char *, const char *, void *);
+static int startdisk(struct diskentry *, 
+    int (*)(const char *, const char *, const char *, void *, pid_t *));
+static void printpart(void);
 
 int
 checkfstab(flags, maxrun, docheck, checkit)
 	int flags, maxrun;
-	void *(*docheck) __P((struct fstab *));
-	int (*checkit) __P((const char *, const char *, const char *, void *,
-	    pid_t *));
+	void *(*docheck)(struct fstab *);
+	int (*checkit)(const char *, const char *, const char *, void *,
+	    pid_t *);
 {
 	struct fstab *fs;
 	struct diskentry *d, *nextdisk;
@@ -105,7 +105,7 @@ checkfstab(flags, maxrun, docheck, checkit)
 
 	for (passno = 1; passno <= 2; passno++) {
 		if (setfsent() == 0) {
-			warnx("Can't open checklist file: %s\n", _PATH_FSTAB);
+			warnx("Can't open checklist file: %s", _PATH_FSTAB);
 			return (8);
 		}
 		while ((fs = getfsent()) != 0) {
@@ -165,7 +165,7 @@ checkfstab(flags, maxrun, docheck, checkit)
 					break;
 
 			if (d == NULL) {
-				warnx("Unknown pid %d\n", pid);
+				warnx("Unknown pid %d", pid);
 				continue;
 			}
 
@@ -307,7 +307,7 @@ addpart(type, devname, mntpt, auxarg)
 
 	for (p = d->d_part.tqh_first; p != NULL; p = p->p_entries.tqe_next)
 		if (strcmp(p->p_devname, devname) == 0) {
-			warnx("%s in fstab more than once!\n", devname);
+			warnx("%s in fstab more than once!", devname);
 			return;
 		}
 
@@ -323,11 +323,11 @@ addpart(type, devname, mntpt, auxarg)
 
 static int
 startdisk(d, checkit)
-	register struct diskentry *d;
-	int (*checkit) __P((const char *, const char *, const char *, void *,
-	    pid_t *));
+	struct diskentry *d;
+	int (*checkit)(const char *, const char *, const char *, void *,
+	    pid_t *);
 {
-	register struct partentry *p = d->d_part.tqh_first;
+	struct partentry *p = d->d_part.tqh_first;
 	int rv;
 
 	while ((rv = (*checkit)(p->p_type, p->p_devname, p->p_mntpt,

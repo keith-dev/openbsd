@@ -1,4 +1,4 @@
-/*	$OpenBSD: mount_portal.c,v 1.14 2001/01/19 17:57:39 deraadt Exp $	*/
+/*	$OpenBSD: mount_portal.c,v 1.18 2002/02/16 21:27:36 millert Exp $	*/
 /*	$NetBSD: mount_portal.c,v 1.8 1996/04/13 01:31:54 jtc Exp $	*/
 
 /*
@@ -47,7 +47,7 @@ char copyright[] =
 #if 0
 static char sccsid[] = "@(#)mount_portal.c	8.6 (Berkeley) 4/26/95";
 #else
-static char rcsid[] = "$OpenBSD: mount_portal.c,v 1.14 2001/01/19 17:57:39 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: mount_portal.c,v 1.18 2002/02/16 21:27:36 millert Exp $";
 #endif
 #endif /* not lint */
 
@@ -79,21 +79,22 @@ extern char *__progname;	/* from crt0.o */
 
 static char *mountpt;		/* made available to signal handler */
 
-static void usage __P((void));
+static void usage(void);
 
-static sig_atomic_t readcf;	/* Set when SIGHUP received */
+static volatile sig_atomic_t readcf;	/* Set when SIGHUP received */
 
 static void
 sigchld(sig)
 	int sig;
 {
 	int save_errno = errno;
+	struct syslog_data sdata = SYSLOG_DATA_INIT;
 	pid_t pid;
 
 	while ((pid = waitpid((pid_t) -1, NULL, WNOHANG)) > 0)
 		;
 	if (pid < 0 && errno != ECHILD)
-		syslog(LOG_WARNING, "waitpid: %m");	/* XXX signal race */
+		syslog_r(LOG_WARNING, &sdata, "waitpid: %m");
 	errno = save_errno;
 }
 
@@ -109,10 +110,12 @@ static void
 sigterm(sig)
 	int sig;
 {
-	/* XXX signal races */
+	struct syslog_data sdata = SYSLOG_DATA_INIT;
+
 	if (unmount(mountpt, MNT_FORCE) < 0)
-		syslog(LOG_WARNING, "sigterm: unmounting %s failed: %m",
-		       mountpt);
+		syslog_r(LOG_WARNING, &sdata,
+		    "sigterm: unmounting %s failed: %m", mountpt);
+	_exit(1);
 }
 
 int
@@ -181,7 +184,6 @@ main(argc, argv)
 	/* XXX teeny race? */
 	if (bind(so, (struct sockaddr *) &un, sizeof(un)) < 0)
 		err(1, "bind(2)");
-	(void)unlink(un.sun_path);
 
 	(void)listen(so, 5);
 

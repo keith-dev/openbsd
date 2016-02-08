@@ -62,8 +62,8 @@
 
 int verbose = 0;
 
-void usage __P((void));
-int config __P((char *, char *, int, char *));
+void usage(void);
+int config(char *, char *, int, char *);
 
 int
 main(argc, argv)
@@ -147,7 +147,7 @@ config(dev, file, action, key)
 		if (rv)
 			warn("VNDIOCSET");
 		else if (verbose)
-			printf("%s: %d bytes on %s\n", dev, vndio.vnd_size,
+			printf("%s: %llu bytes on %s\n", dev, vndio.vnd_size,
 			    file);
 	}
 
@@ -164,7 +164,7 @@ usage()
 {
 
 	(void)fprintf(stderr, "%s%s",
-	    "usage: vnconfig -c [-vk] rawdev regular-file\n",
+	    "usage: vnconfig [-c] [-vk] rawdev regular-file\n",
 	    "       vnconfig -u [-v] rawdev\n");
 	exit(1);
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: faithd.c,v 1.13 2001/09/05 01:31:33 itojun Exp $	*/
+/*	$OpenBSD: faithd.c,v 1.18 2002/02/16 21:28:02 millert Exp $	*/
 /*	$KAME: faithd.c,v 1.40 2001/07/02 14:36:48 itojun Exp $	*/
 
 /*
@@ -36,7 +36,6 @@
  * Usage: faithd [<port> <progpath> <arg1(progname)> <arg2> ...]
  *   e.g. faithd telnet /usr/libexec/telnetd telnetd
  */
-#define HAVE_GETIFADDRS
 
 #include <sys/param.h>
 #include <sys/types.h>
@@ -72,9 +71,7 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <netdb.h>
-#ifdef HAVE_GETIFADDRS
 #include <ifaddrs.h>
-#endif
 
 #ifdef FAITH4
 #include <resolv.h>
@@ -106,30 +103,27 @@ static int pflag = 0;
 static int inetd = 0;
 static char *configfile = NULL;
 
-int main __P((int, char **));
+int main(int, char **);
 #if 0
-static int inetd_main __P((int, char **));
+static int inetd_main(int, char **);
 #endif
-static int daemon_main __P((int, char **));
-static void play_service __P((int));
-static void play_child __P((int, struct sockaddr *));
-static int faith_prefix __P((struct sockaddr *));
-static int map6to4 __P((struct sockaddr_in6 *, struct sockaddr_in *));
+static int daemon_main(int, char **);
+static void play_service(int);
+static void play_child(int, struct sockaddr *);
+static int faith_prefix(struct sockaddr *);
+static int map6to4(struct sockaddr_in6 *, struct sockaddr_in *);
 #ifdef FAITH4
-static int map4to6 __P((struct sockaddr_in *, struct sockaddr_in6 *));
+static int map4to6(struct sockaddr_in *, struct sockaddr_in6 *);
 #endif
-static void sig_child __P((int));
-static void sig_terminate __P((int));
-static void start_daemon __P((void));
-static void exit_stderr __P((const char *, ...))
+static void sig_child(int);
+static void sig_terminate(int);
+static void start_daemon(void);
+static void exit_stderr(const char *, ...)
 	__attribute__((__format__(__printf__, 1, 2)));
-#ifndef HAVE_GETIFADDRS
-static unsigned int if_maxindex __P((void));
-#endif
-static void grab_myaddrs __P((void));
-static void free_myaddrs __P((void));
-static void update_myaddrs __P((void));
-static void usage __P((void));
+static void grab_myaddrs(void);
+static void free_myaddrs(void);
+static void update_myaddrs(void);
+static void usage(void);
 
 int
 main(int argc, char **argv)
@@ -309,9 +303,13 @@ daemon_main(int argc, char **argv)
 			exit_stderr("too many arguments");
 
 		serverpath = malloc(strlen(argv[NUMPRG]) + 1);
+		if (!serverpath)
+			exit_stderr("not enough core");
 		strcpy(serverpath, argv[NUMPRG]);
 		for (i = 0; i < serverargc; i++) {
 			serverarg[i] = malloc(strlen(argv[i + NUMARG]) + 1);
+			if (!serverarg[i])
+				exit_stderr("not enough core");
 			strcpy(serverarg[i], argv[i + NUMARG]);
 		}
 		serverarg[i] = NULL;
@@ -320,6 +318,8 @@ daemon_main(int argc, char **argv)
 		service = argv[NUMPRT];
 		break;
 	}
+
+	start_daemon();
 
 	/*
 	 * Opening wild card socket for this service.
@@ -332,17 +332,17 @@ daemon_main(int argc, char **argv)
 	hints.ai_protocol = 0;
 	error = getaddrinfo(NULL, service, &hints, &res);
 	if (error)
-		exit_stderr("getaddrinfo: %s", gai_strerror(error));
+		exit_failure("getaddrinfo: %s", gai_strerror(error));
 
 	s_wld = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
 	if (s_wld == -1)
-		exit_stderr("socket: %s", strerror(errno));
+		exit_failure("socket: %s", strerror(errno));
 
 #ifdef IPV6_FAITH
 	if (res->ai_family == AF_INET6) {
 		error = setsockopt(s_wld, IPPROTO_IPV6, IPV6_FAITH, &on, sizeof(on));
 		if (error == -1)
-			exit_stderr("setsockopt(IPV6_FAITH): %s",
+			exit_failure("setsockopt(IPV6_FAITH): %s",
 			    strerror(errno));
 	}
 #endif
@@ -351,7 +351,7 @@ daemon_main(int argc, char **argv)
 	if (res->ai_family == AF_INET) {
 		error = setsockopt(s_wld, IPPROTO_IP, IP_FAITH, &on, sizeof(on));
 		if (error == -1)
-			exit_stderr("setsockopt(IP_FAITH): %s",
+			exit_failure("setsockopt(IP_FAITH): %s",
 			    strerror(errno));
 	}
 #endif
@@ -359,24 +359,24 @@ daemon_main(int argc, char **argv)
 
 	error = setsockopt(s_wld, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on));
 	if (error == -1)
-		exit_stderr("setsockopt(SO_REUSEADDR): %s", strerror(errno));
+		exit_failure("setsockopt(SO_REUSEADDR): %s", strerror(errno));
 	
 	error = setsockopt(s_wld, SOL_SOCKET, SO_OOBINLINE, &on, sizeof(on));
 	if (error == -1)
-		exit_stderr("setsockopt(SO_OOBINLINE): %s", strerror(errno));
+		exit_failure("setsockopt(SO_OOBINLINE): %s", strerror(errno));
 
 	error = bind(s_wld, (struct sockaddr *)res->ai_addr, res->ai_addrlen);
 	if (error == -1)
-		exit_stderr("bind: %s", strerror(errno));
+		exit_failure("bind: %s", strerror(errno));
 
 	error = listen(s_wld, 5);
 	if (error == -1)
-		exit_stderr("listen: %s", strerror(errno));
+		exit_failure("listen: %s", strerror(errno));
 
 #ifdef USE_ROUTE
 	sockfd = socket(PF_ROUTE, SOCK_RAW, PF_UNSPEC);
 	if (sockfd < 0) {
-		exit_stderr("socket(PF_ROUTE): %s", strerror(errno));
+		exit_failure("socket(PF_ROUTE): %s", strerror(errno));
 		/*NOTREACHED*/
 	}
 #endif
@@ -384,8 +384,6 @@ daemon_main(int argc, char **argv)
 	/*
 	 * Everything is OK.
 	 */
-
-	start_daemon();
 
 	snprintf(logname, sizeof(logname), "faithd %s", service);
 	snprintf(procname, sizeof(procname), "accepting port %s", service);
@@ -775,19 +773,26 @@ map4to6(struct sockaddr_in *dst4, struct sockaddr_in6 *dst6)
 static void
 sig_child(int sig)
 {
-	int status;
+	int save_errno = errno, status;
+	struct syslog_data sdata = SYSLOG_DATA_INIT;
 	pid_t pid;
 
-	pid = wait3(&status, WNOHANG, (struct rusage *)0);
-	if (pid && WEXITSTATUS(status))
-		syslog(LOG_WARNING, "child %d exit status 0x%x", pid, status);
+	while ((pid = wait3(&status, WNOHANG, (struct rusage *)0)) > 0) {
+		if (pid && WEXITSTATUS(status))
+			syslog_r(LOG_WARNING, &sdata,
+			    "child %d exit status 0x%x", pid, status);
+	}
+
+	errno = save_errno;
 }
 
 void
 sig_terminate(int sig)
 {
-	syslog(LOG_INFO, "Terminating faith daemon");	
-	exit(EXIT_SUCCESS);
+	struct syslog_data sdata = SYSLOG_DATA_INIT;
+
+	syslog_r(LOG_INFO, &sdata, "Terminating faith daemon");	
+	_exit(EXIT_SUCCESS);
 }
 
 static void
@@ -848,38 +853,21 @@ exit_failure(const char *fmt, ...)
 void
 exit_success(const char *fmt, ...)
 {
+	struct syslog_data sdata = SYSLOG_DATA_INIT;
 	va_list ap;
 	char buf[BUFSIZ];
 
 	va_start(ap, fmt);
 	vsnprintf(buf, sizeof(buf), fmt, ap);
 	va_end(ap);
-	syslog(LOG_INFO, "%s", buf);
-	exit(EXIT_SUCCESS);
+	syslog_r(LOG_INFO, &sdata, "%s", buf);
+	_exit(EXIT_SUCCESS);
 }
 
 #ifdef USE_ROUTE
-#ifndef HAVE_GETIFADDRS
-static unsigned int
-if_maxindex()
-{
-	struct if_nameindex *p, *p0;
-	unsigned int max = 0;
-
-	p0 = if_nameindex();
-	for (p = p0; p && p->if_index && p->if_name; p++) {
-		if (max < p->if_index)
-			max = p->if_index;
-	}
-	if_freenameindex(p0);
-	return max;
-}
-#endif
-
 static void
 grab_myaddrs()
 {
-#ifdef HAVE_GETIFADDRS
 	struct ifaddrs *ifap, *ifa;
 	struct myaddrs *p;
 	struct sockaddr_in6 *sin6;
@@ -931,94 +919,6 @@ grab_myaddrs()
 	}
 
 	freeifaddrs(ifap);
-#else
-	int s;
-	unsigned int maxif;
-	struct ifreq *iflist;
-	struct ifconf ifconf;
-	struct ifreq *ifr, *ifrp, *ifr_end;
-	struct myaddrs *p;
-	struct sockaddr_in6 *sin6;
-	size_t siz;
-	char ifrbuf[sizeof(struct ifreq) + 1024];
-
-	maxif = if_maxindex() + 1;
-	iflist = (struct ifreq *)malloc(maxif * BUFSIZ);	/* XXX */
-	if (!iflist) {
-		exit_failure("not enough core");
-		/*NOTREACHED*/
-	}
-
-	if ((s = socket(PF_INET, SOCK_DGRAM, 0)) < 0) {
-		exit_failure("socket(SOCK_DGRAM)");
-		/*NOTREACHED*/
-	}
-	memset(&ifconf, 0, sizeof(ifconf));
-	ifconf.ifc_req = iflist;
-	ifconf.ifc_len = maxif * BUFSIZ;	/* XXX */
-	if (ioctl(s, SIOCGIFCONF, &ifconf) < 0) {
-		exit_failure("ioctl(SIOCGIFCONF)");
-		/*NOTREACHED*/
-	}
-	close(s);
-
-	/* Look for this interface in the list */
-	ifr_end = (struct ifreq *) (ifconf.ifc_buf + ifconf.ifc_len);
-	for (ifrp = ifconf.ifc_req;
-	     ifrp < ifr_end;
-	     ifrp = (struct ifreq *)((char *)ifrp + siz)) {
-		memcpy(ifrbuf, ifrp, sizeof(*ifrp));
-		ifr = (struct ifreq *)ifrbuf;
-		siz = ifr->ifr_addr.sa_len;
-		if (siz < sizeof(ifr->ifr_addr))
-			siz = sizeof(ifr->ifr_addr);
-		siz += (sizeof(*ifrp) - sizeof(ifr->ifr_addr));
-		if (siz > sizeof(ifrbuf)) {
-			/* ifr too big */
-			break;
-		}
-		memcpy(ifrbuf, ifrp, siz);
-
-		switch (ifr->ifr_addr.sa_family) {
-		case AF_INET:
-		case AF_INET6:
-			p = (struct myaddrs *)malloc(sizeof(struct myaddrs)
-				+ ifr->ifr_addr.sa_len);
-			if (!p) {
-				exit_failure("not enough core");
-				/*NOTREACHED*/
-			}
-			memcpy(p + 1, &ifr->ifr_addr, ifr->ifr_addr.sa_len);
-			p->next = myaddrs;
-			p->addr = (struct sockaddr *)(p + 1);
-#ifdef __KAME__
-			if (ifr->ifr_addr.sa_family == AF_INET6) {
-				sin6 = (struct sockaddr_in6 *)p->addr;
-				if (IN6_IS_ADDR_LINKLOCAL(&sin6->sin6_addr)
-				 || IN6_IS_ADDR_SITELOCAL(&sin6->sin6_addr)) {
-					sin6->sin6_scope_id =
-						ntohs(*(u_int16_t *)&sin6->sin6_addr.s6_addr[2]);
-					sin6->sin6_addr.s6_addr[2] = 0;
-					sin6->sin6_addr.s6_addr[3] = 0;
-				}
-			}
-#endif
-			myaddrs = p;
-			if (dflag) {
-				char hbuf[NI_MAXHOST];
-				getnameinfo(p->addr, p->addr->sa_len,
-					hbuf, sizeof(hbuf), NULL, 0,
-					NI_NUMERICHOST);
-				syslog(LOG_INFO, "my interface: %s %s", hbuf, ifr->ifr_name);
-			}
-			break;
-		default:
-			break;
-		}
-	}
-
-	free(iflist);
-#endif
 }
 
 static void

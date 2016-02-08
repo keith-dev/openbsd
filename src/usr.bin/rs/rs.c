@@ -1,4 +1,4 @@
-/*	$OpenBSD: rs.c,v 1.4 1997/09/12 04:12:54 millert Exp $	*/
+/*	$OpenBSD: rs.c,v 1.7 2002/02/16 21:27:52 millert Exp $	*/
 
 /*-
  * Copyright (c) 1993
@@ -92,16 +92,16 @@ int	propgutter;
 char	isep = ' ', osep = ' ';
 int	owidth = 80, gutter = 2;
 
-void	  usage __P((char *, char *));
-void	  getargs __P((int, char *[]));
-void	  getfile __P((void));
-int	  getline __P((void));
-char	 *getlist __P((short **, char *));
-char	 *getnum __P((int *, char *, int));
-char	**getptrs __P((char **));
-void	  prepfile __P((void));
-void	  prints __P((char *, int));
-void	  putfile __P((void));
+void	  usage(char *, char *);
+void	  getargs(int, char *[]);
+void	  getfile(void);
+int	  getline(void);
+char	 *getlist(short **, char *);
+char	 *getnum(int *, char *, int);
+char	**getptrs(char **);
+void	  prepfile(void);
+void	  prints(char *, int);
+void	  putfile(void);
 
 #define INCR(ep) do {			\
 	if (++ep >= endelem)		\
@@ -127,9 +127,9 @@ main(argc, argv)
 void
 getfile()
 {
-	register char *p;
-	register char *endp;
-	register char **ep = 0;
+	char *p;
+	char *endp;
+	char **ep = 0;
 	int multisep = (flags & ONEISEPONLY ? 0 : 1);
 	int nullpad = flags & NULLPAD;
 	char **padto;
@@ -193,8 +193,8 @@ getfile()
 void
 putfile()
 {
-	register char **ep;
-	register int i, j, n;
+	char **ep;
+	int i, j, n;
 
 	ep = elem;
 	if (flags & TRANSPOSE) {
@@ -220,8 +220,8 @@ prints(s, col)
 	char *s;
 	int col;
 {
-	register int n;
-	register char *p = s;
+	int n;
+	char *p = s;
 
 	while (*p)
 		p++;
@@ -248,9 +248,9 @@ usage(msg, s)
 void
 prepfile()
 {
-	register char **ep;
-	register int  i;
-	register int  j;
+	char **ep;
+	int  i;
+	int  j;
 	char **lp;
 	int colw;
 	int max = 0;
@@ -300,7 +300,7 @@ prepfile()
 				colwidths[i] = max + gutter;
 			}
 		else
-			for (i = 0; i < ocols; i++) {
+			for (ep = elem, i = 0; i < ocols; i++) {
 				for (j = i; j < nelem; j += ocols)
 					if ((n = strlen(ep[j])) > max)
 						max = n;
@@ -343,8 +343,8 @@ getline()	/* get line; maintain curline, curlen; manage storage */
 {
 	static	int putlength;
 	static	char *endblock = ibuf + BSIZE;
-	register char *p;
-	register int c, i;
+	char *p;
+	int c, i;
 
 	if (!irows) {
 		curline = ibuf;
@@ -375,7 +375,7 @@ char **
 getptrs(sp)
 	char **sp;
 {
-	register char **p;
+	char **p;
 
 	allocsize += allocsize;
 	p = (char **)realloc(elem, allocsize * sizeof(char *));
@@ -392,7 +392,7 @@ getargs(ac, av)
 	int ac;
 	char *av[];
 {
-	register char *p;
+	char *p;
 
 	if (ac == 1) {
 		flags |= NOARGS | TRANSPOSE;
@@ -503,8 +503,8 @@ getlist(list, p)
 	short **list;
 	char *p;
 {
-	register int count = 1;
-	register char *t;
+	int count = 1;
+	char *t;
 
 	for (t = p + 1; *t; t++) {
 		if (!isdigit(*t))
@@ -536,7 +536,7 @@ getnum(num, p, strict)	/* num = number p points to; if (strict) complain */
 	int *num, strict;	/* returns pointer to end of num */
 	char *p;
 {
-	register char *t = p;
+	char *t = p;
 
 	if (!isdigit(*++t)) {
 		if (strict || *t == '-' || *t == '+')

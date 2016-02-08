@@ -1,4 +1,4 @@
-.\"	$OpenBSD: pkg_create.1,v 1.21 2001/09/06 15:04:34 mpech Exp $
+.\"	$OpenBSD: pkg_create.1,v 1.24 2002/04/06 01:07:19 espie Exp $
 .\"
 .\" FreeBSD install - a package for the installation and maintainance
 .\" of non-core utilities.
@@ -172,7 +172,7 @@ installation/deinstallation should proceed.
 Use
 .Ar template
 as the input to
-.Xr mktemp 3 .
+.Xr mkstemp 3 .
 By default, this is the string
 .Pa /tmp/instmp.XXXXXX ,
 but it may be necessary to override it in the situation where
@@ -182,7 +182,7 @@ directory is limited.
 Be sure to leave some number of
 .Dq X
 characters for
-.Xr mktemp 3
+.Xr mkstemp 3
  to fill in with a unique ID.
 .It Fl X Ar excludefile
 Pass
@@ -345,15 +345,6 @@ may trip someone up later.
 .It Cm @ignore
 Used internally to tell extraction to ignore the next file (don't
 copy it anywhere), as it's used for some special purpose.
-.It Cm @ignore_inst
-Similar to
-.Cm @ignore ,
-but the ignoring of the next file is delayed one evaluation cycle.
-This makes it possible to use this directive in the
-.Ar packinglist
-file, so you can pack a
-specialized datafile in with a distribution for your install script (or
-something) yet have the installer ignore it.
 .It Cm @name Ar name
 Set the name of the package.
 This is mandatory and is usually put at the top.
@@ -418,7 +409,7 @@ package must
 .Em not
 be installed if
 .Ar pkgname
-package gets installed cause they install the same files and thus conflict.
+package gets installed because they install the same files and thus conflict.
 .Ar pkgcflname
 may use
 .Xr fnmatch 3

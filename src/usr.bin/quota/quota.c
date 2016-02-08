@@ -1,4 +1,4 @@
-/*	$OpenBSD: quota.c,v 1.16 2000/10/18 23:05:16 pjanzen Exp $	*/
+/*	$OpenBSD: quota.c,v 1.19 2002/02/17 19:42:31 millert Exp $	*/
 
 /*
  * Copyright (c) 1980, 1990, 1993
@@ -44,7 +44,7 @@ static char copyright[] =
 
 #ifndef lint
 /*static char sccsid[] = "from: @(#)quota.c	8.1 (Berkeley) 6/6/93";*/
-static char rcsid[] = "$OpenBSD: quota.c,v 1.16 2000/10/18 23:05:16 pjanzen Exp $";
+static char rcsid[] = "$OpenBSD: quota.c,v 1.19 2002/02/17 19:42:31 millert Exp $";
 #endif /* not lint */
 
 /*
@@ -86,24 +86,23 @@ struct quotause {
 };
 #define	FOUND	0x01
 
-int	alldigits __P((char *));
-int	callaurpc __P((char *, int, int, int, xdrproc_t, void *,
-	    xdrproc_t, void *));
-int	main __P((int, char **));
-int	getnfsquota __P((struct statfs *, struct fstab *, struct quotause *,
-	    long, int));
-struct quotause	*getprivs __P((long id, int quotatype));
-int	getufsquota __P((struct statfs *, struct fstab *, struct quotause *,
-	    long, int));
-void	heading __P((int, u_long, const char *, const char *));
-void	showgid __P((gid_t));
-void	showgrpname __P((const char *));
-void	showquotas __P((int, u_long, const char *));
-void	showuid __P((uid_t));
-void	showusrname __P((const char *));
-char   *timeprt __P((time_t seconds));
-int	ufshasquota __P((struct fstab *, int, char **));
-void	usage __P((void));
+int	alldigits(char *);
+int	callaurpc(char *, int, int, int, xdrproc_t, void *, xdrproc_t, void *);
+int	main(int, char **);
+int	getnfsquota(struct statfs *, struct fstab *, struct quotause *,
+	    long, int);
+struct quotause	*getprivs(long id, int quotatype);
+int	getufsquota(struct statfs *, struct fstab *, struct quotause *,
+	    long, int);
+void	heading(int, u_long, const char *, const char *);
+void	showgid(gid_t);
+void	showgrpname(const char *);
+void	showquotas(int, u_long, const char *);
+void	showuid(uid_t);
+void	showusrname(const char *);
+char   *timeprt(time_t seconds);
+int	ufshasquota(struct fstab *, int, char **);
+void	usage(void);
 
 int	qflag;
 int	vflag;
@@ -370,23 +369,23 @@ showquotas(type, id, name)
 				printf("%s\n", qup->fsname);
 				nam = "";
 			} 
-			printf("%15s%8d%c%7d%8d%8s"
-			    , nam
-			    , (int)(dbtob((u_quad_t)qup->dqblk.dqb_curblocks)
-				/ 1024)
-			    , (msgb == (char *)0) ? ' ' : '*'
-			    , (int)(dbtob((u_quad_t)qup->dqblk.dqb_bsoftlimit)
-				/ 1024)
-			    , (int)(dbtob((u_quad_t)qup->dqblk.dqb_bhardlimit)
-				/ 1024)
-			    , (msgb == (char *)0) ? ""
+			printf("%15s%8d%c%7d%8d%8s",
+			    nam,
+			    (int)(dbtob((u_quad_t)qup->dqblk.dqb_curblocks)
+				/ 1024),
+			    (msgb == (char *)0) ? ' ' : '*',
+			    (int)(dbtob((u_quad_t)qup->dqblk.dqb_bsoftlimit)
+				/ 1024),
+			    (int)(dbtob((u_quad_t)qup->dqblk.dqb_bhardlimit)
+				/ 1024),
+			    (msgb == (char *)0) ? ""
 			        : timeprt(qup->dqblk.dqb_btime));
-			printf("%8d%c%7d%8d%8s\n"
-			    , qup->dqblk.dqb_curinodes
-			    , (msgi == (char *)0) ? ' ' : '*'
-			    , qup->dqblk.dqb_isoftlimit
-			    , qup->dqblk.dqb_ihardlimit
-			    , (msgi == (char *)0) ? ""
+			printf("%8d%c%7d%8d%8s\n",
+			    qup->dqblk.dqb_curinodes,
+			    (msgi == (char *)0) ? ' ' : '*',
+			    qup->dqblk.dqb_isoftlimit,
+			    qup->dqblk.dqb_ihardlimit,
+			    (msgi == (char *)0) ? ""
 			        : timeprt(qup->dqblk.dqb_itime)
 			);
 			continue;
@@ -406,17 +405,16 @@ heading(type, id, name, tag)
 	printf("Disk quotas for %s %s (%cid %ld): %s\n", qfextension[type],
 	    name, *qfextension[type], id, tag);
 	if (!qflag && tag[0] == '\0') {
-		printf("%15s%8s %7s%8s%8s%8s %7s%8s%8s\n"
-		    , "Filesystem"
-		    , "blocks"
-		    , "quota"
-		    , "limit"
-		    , "grace"
-		    , "files"
-		    , "quota"
-		    , "limit"
-		    , "grace"
-		);
+		printf("%15s%8s %7s%8s%8s%8s %7s%8s%8s\n",
+		    "Filesystem",
+		    "blocks",
+		    "quota",
+		    "limit",
+		    "grace",
+		    "files",
+		    "quota",
+		    "limit",
+		    "grace");
 	}
 }
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: login_chpass.c,v 1.1 2000/12/12 02:30:44 millert Exp $	*/
+/*	$OpenBSD: login_chpass.c,v 1.6 2002/02/16 21:27:30 millert Exp $	*/
 
 /*-
  * Copyright (c) 1995,1996 Berkeley Software Design, Inc. All rights reserved.
@@ -38,6 +38,7 @@
 #include <sys/time.h>
 #include <sys/resource.h>
 #include <sys/file.h>
+#include <sys/uio.h>
 #include <sys/wait.h>
 
 #include <err.h>
@@ -70,20 +71,25 @@
 
 #define	_PATH_LOGIN_LCHPASS	"/usr/libexec/auth/login_lchpass"
 
+#define BACK_CHANNEL	3
+
+struct iovec iov[2] = { { BI_SILENT, sizeof(BI_SILENT) - 1 }, { "\n", 1 } };
+
 #ifdef  YP
-int	_yp_check __P((char **));
-char	*ypgetnewpasswd __P((struct passwd *, char **));
-struct passwd *ypgetpwnam __P((char *));
+int	_yp_check(char **);
+char	*ypgetnewpasswd(struct passwd *, char **);
+struct passwd *ypgetpwnam(char *);
+void	kbintr(int);
 #endif
 
 #ifdef KERBEROS
-int	get_pw_new_pwd __P((char *, int, krb_principal *, int));
+int	get_pw_new_pwd(char *, int, krb_principal *, int);
 char	realm[REALM_SZ];
 #endif
 
-void	local_chpass __P((char **));
-void	krb_chpass __P((char *, char *, char **));
-void	yp_chpass __P((char *));
+void	local_chpass(char **);
+void	krb_chpass(char *, char *, char **);
+void	yp_chpass(char *);
 
 int
 main(argc, argv)
@@ -99,13 +105,11 @@ main(argc, argv)
 	rl.rlim_max = 0;
 	(void)setrlimit(RLIMIT_CORE, &rl);
 
-	(void)signal(SIGQUIT, SIG_IGN);
-	(void)signal(SIGINT, SIG_IGN);
 	(void)setpriority(PRIO_PROCESS, 0, 0);
 
 	openlog("login", LOG_ODELAY, LOG_AUTH);
 
-    	while ((c = getopt(argc, argv, "s:v:")) != EOF)
+    	while ((c = getopt(argc, argv, "s:v:")) != -1)
 		switch(c) {
 		case 'v':
 			break;
@@ -168,7 +172,6 @@ void
 yp_chpass(username)
 	char *username;
 {
-	FILE *back;
 	char *master;
 	int r, rpcport, status;
 	struct yppasswd yppasswd;
@@ -177,10 +180,8 @@ yp_chpass(username)
 	CLIENT *client;
 	extern char *domain;
 
-	if (!(back = fdopen(3, "a")))  {
-		syslog(LOG_ERR, "reopening back channel: %m");
-		exit(1);
-	}
+	(void)signal(SIGINT, kbintr);
+	(void)signal(SIGQUIT, kbintr);
 
 	if ((r = yp_get_default_domain(&domain)) != 0) {
 		warnx("can't get local YP domain. Reason: %s", yperr_string(r));
@@ -211,18 +212,23 @@ yp_chpass(username)
 	}
 
 	/* If user doesn't exist, just prompt for old password and exit. */
-	if ((pw = ypgetpwnam(username)) == NULL) {
+	pw = ypgetpwnam(username);
+	if (pw) {
+		if (pw->pw_uid == 0) {
+			syslog(LOG_ERR, "attempted root password change");
+			pw = NULL;
+		} else if (*pw->pw_passwd == '\0') {
+			syslog(LOG_ERR, "%s attempting to add password",
+			    username);
+			pw = NULL;
+		}
+	}
+	if (pw == NULL) {
 		char *p = getpass("Old password:");
 		crypt(p, "xx");
 		memset(p, 0, strlen(p));
 		warnx("YP passwd database unchanged.");
 		exit(1);
-	}
-
-	if (*pw->pw_passwd == '\0') {
-		syslog(LOG_ERR, "%s attempting to add password", username);
-		fprintf(back, BI_SILENT "\n");
-		exit(0);
 	}
 
 	/* prompt for new password */
@@ -258,8 +264,26 @@ yp_chpass(username)
 	printf("The YP password has been changed on %s, the master YP passwd server.\n",
 	    master);
 	free(yppasswd.newpw.pw_passwd);
-	fprintf(back, BI_SILENT "\n");
+	(void)writev(BACK_CHANNEL, iov, 2);
 	exit(0);
+}
+
+void kbintr(signo)
+	int signo;
+{
+	char msg[] = "YP passwd database unchanged.\n";
+	struct iovec iv[3];
+	extern char *__progname;
+
+	iv[0].iov_base = __progname;
+	iv[0].iov_len = strlen(__progname);
+	iv[1].iov_base = ": ";
+	iv[1].iov_len = 2;
+	iv[2].iov_base = msg;
+	iv[2].iov_len = sizeof(msg) - 1;
+	writev(STDERR_FILENO, iv, 3);
+
+	_exit(1);
 }
 #endif
 
@@ -270,16 +294,16 @@ krb_chpass(username, instance, argv)
 	char *instance;
 	char *argv[];
 {
-	FILE *back;
 	int rval;
 	char pword[MAX_KPW_LEN];
 	char tktstring[MAXPATHLEN];
 	krb_principal principal;
+	sigset_t set;
 
-	if (!(back = fdopen(3, "a")))  {
-		syslog(LOG_ERR, "reopening back channel: %m");
-		exit(1);
-	}
+	sigemptyset(&set);
+	sigaddset(&set, SIGINT);
+	sigaddset(&set, SIGQUIT);
+	(void)sigprocmask(SIG_BLOCK, &set, NULL);
 
 	memset(&principal, 0, sizeof(principal));
 	krb_get_default_principal(principal.name,
@@ -322,7 +346,7 @@ krb_chpass(username, instance, argv)
 	dest_tkt();
 
 	if (rval == 0)
-		fprintf(back, BI_SILENT "\n");
+		(void)writev(BACK_CHANNEL, iov, 2);
     	exit(rval);
 }
 #endif

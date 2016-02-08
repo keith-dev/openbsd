@@ -1,4 +1,4 @@
-#	$OpenBSD: install.md,v 1.10 2001/06/23 19:44:38 deraadt Exp $
+#	$OpenBSD: install.md,v 1.12 2002/03/31 17:30:30 deraadt Exp $
 #	$NetBSD: install.md,v 1.3.2.5 1996/08/26 15:45:28 gwr Exp $
 #
 #
@@ -36,13 +36,12 @@
 # ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 #
-
 #
 # machine dependent section of installation/upgrade script.
 #
 
 # Machine-dependent install sets
-MDSETS="kernel"
+MDSETS=kernel
 ARCH=ARCH
 
 md_set_term() {
@@ -66,8 +65,8 @@ md_get_cddevs() {
 }
 
 md_get_partition_range() {
-    # return range of valid partition letters
-    echo "[a-p]"
+	# return range of valid partition letters
+	echo "[a-p]"
 }
 
 md_questions() {
@@ -110,14 +109,11 @@ md_prep_disklabel()
 	_disk=$1
 	md_checkfordisklabel $_disk
 	case $? in
-	0)
-		;;
-	1)
-		echo "ERROR: Disk $_disk is not partitioned, read the"
+	0)	;;
+	1)	echo "ERROR: Disk $_disk is not partitioned, read the"
 		echo "preparation document on how to go about doing this."
 		;;
-	2)
-		echo "WARNING: Label on disk $_disk is corrupted.  Maybe"
+	2)	echo "WARNING: Label on disk $_disk is corrupted.  Maybe"
 		echo "you should interrupt the install process and recheck"
 		echo "your disk partitioning in AmigaOS?"
 		;;
@@ -128,7 +124,7 @@ md_welcome_banner() {
 {
 	if [ "$MODE" = "install" ]; then
 		echo ""
-		echo "Welcome to the OpenBSD/amiga ${VERSION} installation program."
+		echo "Welcome to the OpenBSD/amiga ${VERSION_MAJOR}.${VERSION_MINOR} installation program."
 		cat << \__welcome_banner_1
 
 This program is designed to help you put OpenBSD on your disk in a simple and
@@ -137,7 +133,7 @@ __welcome_banner_1
 
 	else
 		echo ""
-		echo "Welcome to the OpenBSD/amiga ${VERSION} upgrade program."
+		echo "Welcome to the OpenBSD/amiga ${VERSION_MAJOR}.${VERSION_MINOR} upgrade program."
 		cat << \__welcome_banner_2
 
 This program is designed to help you upgrade your OpenBSD system in a

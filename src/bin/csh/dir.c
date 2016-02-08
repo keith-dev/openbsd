@@ -1,4 +1,4 @@
-/*	$OpenBSD: dir.c,v 1.4 1998/05/18 20:37:19 deraadt Exp $	*/
+/*	$OpenBSD: dir.c,v 1.6 2002/02/19 19:39:35 millert Exp $	*/
 /*	$NetBSD: dir.c,v 1.9 1995/03/21 09:02:42 cgd Exp $	*/
 
 /*-
@@ -38,7 +38,7 @@
 #if 0
 static char sccsid[] = "@(#)dir.c	8.1 (Berkeley) 5/31/93";
 #else
-static char rcsid[] = "$OpenBSD: dir.c,v 1.4 1998/05/18 20:37:19 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: dir.c,v 1.6 2002/02/19 19:39:35 millert Exp $";
 #endif
 #endif /* not lint */
 
@@ -48,11 +48,7 @@ static char rcsid[] = "$OpenBSD: dir.c,v 1.4 1998/05/18 20:37:19 deraadt Exp $";
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#ifdef __STDC__
-# include <stdarg.h>
-#else
-# include <varargs.h>
-#endif
+#include <stdarg.h>
 
 #include "csh.h"
 #include "dir.h"
@@ -61,12 +57,12 @@ static char rcsid[] = "$OpenBSD: dir.c,v 1.4 1998/05/18 20:37:19 deraadt Exp $";
 /* Directory management. */
 
 static struct directory
-		*dfind __P((Char *));
-static Char	*dfollow __P((Char *));
-static void	 printdirs __P((void));
-static Char	*dgoto __P((Char *));
-static void	 dnewcwd __P((struct directory *));
-static void	 dset __P((Char *));
+		*dfind(Char *);
+static Char	*dfollow(Char *);
+static void	 printdirs(void);
+static Char	*dgoto(Char *);
+static void	 dnewcwd(struct directory *);
+static void	 dset(Char *);
 
 struct directory dhead;		/* "head" of loop */
 int     printd;			/* force name to be printed */

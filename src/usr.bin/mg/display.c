@@ -1,4 +1,4 @@
-/*	$OpenBSD: display.c,v 1.6 2001/05/24 03:05:22 mickey Exp $	*/
+/*	$OpenBSD: display.c,v 1.13 2002/03/27 17:42:37 millert Exp $	*/
 
 /*
  * The functions in this file handle redisplay. The
@@ -36,15 +36,15 @@
 /*
  * A video structure always holds
  * an array of characters whose length is equal to
- * the longest line possible. Only some of this is
- * used if "ncol" isn't the same as "NCOL".
+ * the longest line possible. v_text is allocated
+ * dynamically to fit the screen width.
  */
 typedef struct {
 	short	v_hash;		/* Hash code, for compares.	 */
 	short	v_flag;		/* Flag word.			 */
 	short	v_color;	/* Color of the line.		 */
 	XSHORT	v_cost;		/* Cost of display.		 */
-	char	v_text[NCOL];	/* The actual characters.	 */
+	char	*v_text;	/* The actual characters.	 */
 } VIDEO;
 
 #define VFCHG	0x0001			/* Changed.			 */
@@ -65,35 +65,34 @@ typedef struct {
 	XSHORT	s_cost;		/* Display cost.		 */
 } SCORE;
 
-
-void	vtmove __P((int, int));
-void	vtputc __P((int));
-void	vtpute __P((int));
-int	vtputs __P((char *));
-void	vteeol __P((void));
-void	updext __P((int, int));
-void	modeline __P((MGWIN *));
-void	setscores __P((int, int));
-void	traceback __P((int, int, int, int));
-void	ucopy __P((VIDEO *, VIDEO *));
-void	uline __P((int, VIDEO *, VIDEO *));
-void	hash __P((VIDEO *));
+void	vtmove(int, int);
+void	vtputc(int);
+void	vtpute(int);
+int	vtputs(const char *);
+void	vteeol(void);
+void	updext(int, int);
+void	modeline(MGWIN *);
+void	setscores(int, int);
+void	traceback(int, int, int, int);
+void	ucopy(VIDEO *, VIDEO *);
+void	uline(int, VIDEO *, VIDEO *);
+void	hash(VIDEO *);
 
 
 int	sgarbf = TRUE;		/* TRUE if screen is garbage.	 */
-int	vtrow = 0;		/* Virtual cursor row.		 */
-int	vtcol = 0;		/* Virtual cursor column.	 */
+int	vtrow = HUGE;		/* Virtual cursor row.		 */
+int	vtcol = HUGE;		/* Virtual cursor column.	 */
 int	tthue = CNONE;		/* Current color.		 */
 int	ttrow = HUGE;		/* Physical cursor row.		 */
 int	ttcol = HUGE;		/* Physical cursor column.	 */
 int	tttop = HUGE;		/* Top of scroll region.	 */
 int	ttbot = HUGE;		/* Bottom of scroll region.	 */
 int	lbound = 0;		/* leftmost bound of the current line */
-					/* being displayed		 */
+				/*     being displayed		 */
 
-VIDEO	*vscreen[NROW - 1];	/* Edge vector, virtual.	 */
-VIDEO	*pscreen[NROW - 1];	/* Edge vector, physical.	 */
-VIDEO	video[2 * (NROW - 1)];	/* Actual screen data.		 */
+VIDEO	**vscreen;		/* Edge vector, virtual.	 */
+VIDEO	**pscreen;		/* Edge vector, physical.	 */
+VIDEO	*video;			/* Actual screen data.		 */
 VIDEO	blanks;			/* Blank line image.		 */
 
 #ifdef	GOSLING
@@ -104,8 +103,111 @@ VIDEO	blanks;			/* Blank line image.		 */
  * It would be "SCORE	score[NROW][NROW]" in old speak.
  * Look at "setscores" to understand what is up.
  */
-SCORE score[NROW * NROW];
+SCORE *score;			/* [NROW * NROW] */
 #endif
+
+/*
+ * Reinit the display data structures, this is called when the terminal
+ * size changes.
+ */
+int
+vtresize(int force, int newrow, int newcol)
+{
+	int i;
+	int rowchanged, colchanged;
+	static int first_run = 1;
+	VIDEO *vp;
+
+	if (newrow < 1 || newcol < 1) {
+		return -1;
+	}
+
+	rowchanged = (newrow != nrow);
+	colchanged = (newcol != ncol);
+
+#define TRYREALLOC(a, n) do {					\
+		void *tmp;					\
+		if ((tmp = realloc((a), (n))) == NULL) {	\
+			panic("out of memory in display code");	\
+		}	\
+		(a) = tmp;					\
+	} while (0)
+
+	/* No update needed */
+	if (!first_run && !force && !rowchanged && !colchanged) {
+		return 0;
+	}
+
+	if (first_run) {
+		memset(&blanks, 0, sizeof(blanks));
+	}
+
+	if (rowchanged || first_run) {
+		int vidstart;
+
+		/*
+		 * This is not pretty.
+		 */
+		if (nrow == 0)
+			vidstart = 0;
+		else
+			vidstart = 2 * (nrow - 1);
+
+		/*
+		 * We're shrinking, free some internal data
+		 */
+		if (newrow < nrow) {
+			for (i = 2 * (newrow - 1); i < 2 * (nrow - 1); i++) {
+				free(video[i].v_text);
+				video[i].v_text = NULL;
+			}
+		}
+
+#ifdef GOSLING
+		TRYREALLOC(score, newrow * newrow * sizeof(SCORE));
+#endif
+		TRYREALLOC(vscreen, (newrow - 1) * sizeof(VIDEO *));
+		TRYREALLOC(pscreen, (newrow - 1) * sizeof(VIDEO *));
+		TRYREALLOC(video, (2 * (newrow - 1)) * sizeof(VIDEO));
+
+		/*
+		 * Zero-out the entries we just allocated
+		 */
+		for (i = vidstart; i < 2 * (newrow - 1); i++) {
+			memset(&video[i], 0, sizeof(VIDEO));
+		}
+
+		/*
+		 * Reinitialize vscreen and pscreen arrays completely.
+		 */
+		vp = &video[0];
+		for (i = 0; i < newrow - 1; ++i) {
+			vscreen[i] = vp;
+			++vp;
+			pscreen[i] = vp;
+			++vp;
+		}
+	}
+	if (rowchanged || colchanged || first_run) {
+		for (i = 0; i < 2 * (newrow - 1); i++) {
+			TRYREALLOC(video[i].v_text, newcol * sizeof(char));
+		}
+		TRYREALLOC(blanks.v_text, newcol * sizeof(char));
+	}
+
+	nrow = newrow;
+	ncol = newcol;
+
+	if (ttrow > nrow)
+		ttrow = nrow;
+	if (ttcol > ncol)
+		ttcol = ncol;
+
+	first_run = 0;
+	return 0;
+}
+
+#undef TRYREALLOC
 
 /*
  * Initialize the data structures used
@@ -119,22 +221,20 @@ SCORE score[NROW * NROW];
  * on the first call to redisplay.
  */
 void
-vtinit()
+vtinit(void)
 {
-	VIDEO	*vp;
 	int	i;
 
 	ttopen();
 	ttinit();
-	vp = &video[0];
-	for (i = 0; i < NROW - 1; ++i) {
-		vscreen[i] = vp;
-		++vp;
-		pscreen[i] = vp;
-		++vp;
-	}
+
+	/*
+	 * ttinit called ttresize(), which called vtresize(), so our data
+	 * structures are setup correctly.
+	 */
+
 	blanks.v_color = CTEXT;
-	for (i = 0; i < NCOL; ++i)
+	for (i = 0; i < ncol; ++i)
 		blanks.v_text[i] = ' ';
 }
 
@@ -146,7 +246,7 @@ vtinit()
  * close the terminal channel.
  */
 void
-vttidy()
+vttidy(void)
 {
 
 	ttcolor(CTEXT);
@@ -166,10 +266,8 @@ vttidy()
  * more efficient. No checking for errors.
  */
 void
-vtmove(row, col)
-	int row, col;
+vtmove(int row, int col)
 {
-
 	vtrow = row;
 	vtcol = col;
 }
@@ -187,10 +285,11 @@ vtmove(row, col)
  * Three guesses how we found this.
  */
 void
-vtputc(c)
-	int	c;
+vtputc(int c)
 {
 	VIDEO	*vp;
+
+	c &= 0xff;
 
 	vp = vscreen[vtrow];
 	if (vtcol >= ncol)
@@ -216,13 +315,13 @@ vtputc(c)
  * margin.
  */
 void
-vtpute(c)
-	int	c;
+vtpute(int c)
 {
 	VIDEO *vp;
 
-	vp = vscreen[vtrow];
+	c &= 0xff;
 
+	vp = vscreen[vtrow];
 	if (vtcol >= ncol)
 		vp->v_text[ncol - 1] = '$';
 	else if (c == '\t'
@@ -232,8 +331,7 @@ vtpute(c)
 		) {
 		do {
 			vtpute(' ');
-		}
-		while (((vtcol + lbound) & 0x07) != 0 && vtcol < ncol);
+		} while (((vtcol + lbound) & 0x07) != 0 && vtcol < ncol);
 	} else if (ISCTRL(c) != FALSE) {
 		vtpute('^');
 		vtpute(CCHR(c));
@@ -250,7 +348,7 @@ vtpute(c)
  * hardware erase to end of line command should be used to display this.
  */
 void
-vteeol()
+vteeol(void)
 {
 	VIDEO *vp;
 
@@ -269,7 +367,7 @@ vteeol()
  * virtual and physical screens the same.
  */
 void
-update()
+update(void)
 {
 	LINE	*lp;
 	MGWIN	*wp;
@@ -293,72 +391,81 @@ update()
 		}
 	}
 	hflag = FALSE;			/* Not hard.		 */
-	wp = wheadp;
-	while (wp != NULL) {
-		if (wp->w_flag != 0) {	/* Need update.		 */
-			if ((wp->w_flag & WFFORCE) == 0) {
-				lp = wp->w_linep;
-				for (i = 0; i < wp->w_ntrows; ++i) {
-					if (lp == wp->w_dotp)
-						goto out;
-					if (lp == wp->w_bufp->b_linep)
-						break;
-					lp = lforw(lp);
-				}
+	for (wp = wheadp; wp != NULL; wp = wp->w_wndp) {
+		/*
+		 * Nothing to be done.
+		 */
+		if (wp->w_flag == 0)
+			continue;
+
+		if ((wp->w_flag & WFFORCE) == 0) {
+			lp = wp->w_linep;
+			for (i = 0; i < wp->w_ntrows; ++i) {
+				if (lp == wp->w_dotp)
+					goto out;
+				if (lp == wp->w_bufp->b_linep)
+					break;
+				lp = lforw(lp);
 			}
-			i = wp->w_force;	/* Reframe this one.	 */
-			if (i > 0) {
-				--i;
-				if (i >= wp->w_ntrows)
-					i = wp->w_ntrows - 1;
-			} else if (i < 0) {
-				i += wp->w_ntrows;
-				if (i < 0)
-					i = 0;
-			} else
-				i = wp->w_ntrows / 2;
-			lp = wp->w_dotp;
-			while (i != 0 && lback(lp) != wp->w_bufp->b_linep) {
-				--i;
-				lp = lback(lp);
-			}
-			wp->w_linep = lp;
-			wp->w_flag |= WFHARD;	/* Force full.		 */
+		}
+		/*
+		 * Put the middle-line in place.
+		 */
+		i = wp->w_force;
+		if (i > 0) {
+			--i;
+			if (i >= wp->w_ntrows)
+				i = wp->w_ntrows - 1;
+		} else if (i < 0) {
+			i += wp->w_ntrows;
+			if (i < 0)
+				i = 0;
+		} else
+			i = wp->w_ntrows / 2; /* current center, no change */
+
+		/*
+		 * Find the line
+		 */
+		lp = wp->w_dotp;
+		while (i != 0 && lback(lp) != wp->w_bufp->b_linep) {
+			--i;
+			lp = lback(lp);
+		}
+		wp->w_linep = lp;
+		wp->w_flag |= WFHARD;	/* Force full.		 */
 	out:
-			lp = wp->w_linep;	/* Try reduced update.	 */
-			i = wp->w_toprow;
-			if ((wp->w_flag & ~WFMODE) == WFEDIT) {
-				while (lp != wp->w_dotp) {
-					++i;
-					lp = lforw(lp);
-				}
+		lp = wp->w_linep;	/* Try reduced update.	 */
+		i = wp->w_toprow;
+		if ((wp->w_flag & ~WFMODE) == WFEDIT) {
+			while (lp != wp->w_dotp) {
+				++i;
+				lp = lforw(lp);
+			}
+			vscreen[i]->v_color = CTEXT;
+			vscreen[i]->v_flag |= (VFCHG | VFHBAD);
+			vtmove(i, 0);
+			for (j = 0; j < llength(lp); ++j)
+				vtputc(lgetc(lp, j));
+			vteeol();
+		} else if ((wp->w_flag & (WFEDIT | WFHARD)) != 0) {
+			hflag = TRUE;
+			while (i < wp->w_toprow + wp->w_ntrows) {
 				vscreen[i]->v_color = CTEXT;
 				vscreen[i]->v_flag |= (VFCHG | VFHBAD);
 				vtmove(i, 0);
-				for (j = 0; j < llength(lp); ++j)
-					vtputc(lgetc(lp, j));
-				vteeol();
-			} else if ((wp->w_flag & (WFEDIT | WFHARD)) != 0) {
-				hflag = TRUE;
-				while (i < wp->w_toprow + wp->w_ntrows) {
-					vscreen[i]->v_color = CTEXT;
-					vscreen[i]->v_flag |= (VFCHG | VFHBAD);
-					vtmove(i, 0);
-					if (lp != wp->w_bufp->b_linep) {
-						for (j = 0; j < llength(lp); ++j)
-							vtputc(lgetc(lp, j));
-						lp = lforw(lp);
-					}
-					vteeol();
-					++i;
+				if (lp != wp->w_bufp->b_linep) {
+					for (j = 0; j < llength(lp); ++j)
+						vtputc(lgetc(lp, j));
+					lp = lforw(lp);
 				}
+				vteeol();
+				++i;
 			}
-			if ((wp->w_flag & WFMODE) != 0)
-				modeline(wp);
-			wp->w_flag = 0;
-			wp->w_force = 0;
 		}
-		wp = wp->w_wndp;
+		if ((wp->w_flag & WFMODE) != 0)
+			modeline(wp);
+		wp->w_flag = 0;
+		wp->w_force = 0;
 	}
 	lp = curwp->w_linep;	/* Cursor location.	 */
 	currow = curwp->w_toprow;
@@ -500,9 +607,7 @@ update()
  * display has done an update.
  */
 void
-ucopy(vvp, pvp)
-	VIDEO *vvp;
-	VIDEO *pvp;
+ucopy(VIDEO *vvp, VIDEO *pvp)
 {
 
 	vvp->v_flag &= ~VFCHG;		/* Changes done.	 */
@@ -519,17 +624,20 @@ ucopy(vvp, pvp)
  * left to let the user see where the cursor is
  */
 void
-updext(currow, curcol)
-	int	currow, curcol;
+updext(int currow, int curcol)
 {
 	LINE	*lp;			/* pointer to current line */
 	int	j;			/* index into line */
+
+	if (ncol < 2)
+		return;
 
 	/*
 	 * calculate what column the left bound should be
 	 * (force cursor into middle half of screen)
 	 */
 	lbound = curcol - (curcol % (ncol >> 1)) - (ncol >> 2);
+
 	/*
 	 * scan through the line outputing characters to the virtual screen
 	 * once we reach the left edge
@@ -552,20 +660,18 @@ updext(currow, curcol)
  * reverse video works on most terminals.
  */
 void
-uline(row, vvp, pvp)
-	int	row;
-	VIDEO	*vvp;
-	VIDEO	*pvp;
+uline(int row, VIDEO *vvp, VIDEO *pvp)
 {
-#ifdef	MEMMAP
-	putline(row + 1, 1, &vvp->v_text[0]);
-#else
 	char  *cp1;
 	char  *cp2;
 	char  *cp3;
 	char  *cp4;
 	char  *cp5;
 	int	nbflag;
+
+#ifdef	MEMMAP
+	putline(row + 1, 1, &vvp->v_text[0]);
+#else
 
 	if (vvp->v_color != pvp->v_color) {	/* Wrong color, do a	 */
 		ttmove(row, 0);			/* full redraw.		 */
@@ -649,12 +755,11 @@ uline(row, vvp, pvp)
  * characters may never be seen.
  */
 void
-modeline(wp)
-	MGWIN  *wp;
+modeline(MGWIN *wp)
 {
 	int	n;
 	BUFFER *bp;
-	int	mode;
+	int mode;
 
 	n = wp->w_toprow + wp->w_ntrows;	/* Location.		 */
 	vscreen[n]->v_color = CMODE;		/* Mode line color.	 */
@@ -663,10 +768,13 @@ modeline(wp)
 	bp = wp->w_bufp;
 	vtputc('-');
 	vtputc('-');
-	if ((bp->b_flag & BFCHG) != 0) {	/* "*" if changed.	 */
+ 	if ((bp->b_flag & BFREADONLY) != 0) {
+		vtputc('%');
+		vtputc('%');
+	} else if ((bp->b_flag & BFCHG) != 0) {	/* "*" if changed.	 */
 		vtputc('*');
 		vtputc('*');
-	} else {
+ 	} else {
 		vtputc('-');
 		vtputc('-');
 	}
@@ -681,7 +789,7 @@ modeline(wp)
 	}
 	vtputc('(');
 	++n;
-	for (mode = 0;;) {
+	for (mode = 0; ; ) {
 		n += vtputs(bp->b_modes[mode]->p_name);
 		if (++mode > bp->b_nmodes)
 			break;
@@ -699,10 +807,9 @@ modeline(wp)
  * output a string to the mode line, report how long it was.
  */
 int
-vtputs(s)
-	char  *s;
+vtputs(const char *s)
 {
-	int	n = 0;
+	int n = 0;
 
 	while (*s != '\0') {
 		vtputc(*s++);
@@ -721,8 +828,7 @@ vtputs(s)
  * just about any machine.
  */
 void
-hash(vp)
-	VIDEO *vp;
+hash(VIDEO *vp)
 {
 	int	i;
 	int	n;
@@ -771,9 +877,7 @@ hash(vp)
  * bit better; but it looks ugly.
  */
 void
-setscores(offs, size)
-	int offs;
-	int size;
+setscores(int offs, int size)
 {
 	SCORE	*sp;
 	SCORE	*sp1;
@@ -800,16 +904,16 @@ setscores(offs, size)
 		++vp;
 		++sp;
 	}
-	sp = &score[NROW];		/* Column 0, deletes.	 */
+	sp = &score[nrow];		/* Column 0, deletes.	 */
 	tempcost = 0;
 	for (i = 1; i <= size; ++i) {
 		sp->s_itrace = i - 1;
 		sp->s_jtrace = 0;
 		tempcost += tcdell;
 		sp->s_cost = tempcost;
-		sp += NROW;
+		sp += nrow;
 	}
-	sp1 = &score[NROW + 1];		/* [1, 1].		 */
+	sp1 = &score[nrow + 1];		/* [1, 1].		 */
 	pp = &pbase[1];
 	for (i = 1; i <= size; ++i) {
 		sp = sp1;
@@ -817,7 +921,7 @@ setscores(offs, size)
 		for (j = 1; j <= size; ++j) {
 			sp->s_itrace = i - 1;
 			sp->s_jtrace = j;
-			bestcost = (sp - NROW)->s_cost;
+			bestcost = (sp - nrow)->s_cost;
 			if (j != size)	/* Cd(A[i])=0 @ Dis.	 */
 				bestcost += tcdell;
 			tempcost = (sp - 1)->s_cost;
@@ -829,7 +933,7 @@ setscores(offs, size)
 				sp->s_jtrace = j - 1;
 				bestcost = tempcost;
 			}
-			tempcost = (sp - NROW - 1)->s_cost;
+			tempcost = (sp - nrow - 1)->s_cost;
 			if ((*pp)->v_color != (*vp)->v_color
 			    || (*pp)->v_hash != (*vp)->v_hash)
 				tempcost += (*vp)->v_cost;
@@ -843,7 +947,7 @@ setscores(offs, size)
 			++vp;
 		}
 		++pp;
-		sp1 += NROW;		/* Next row.		 */
+		sp1 += nrow;		/* Next row.		 */
 	}
 }
 
@@ -860,11 +964,7 @@ setscores(offs, size)
  * intensive then the code that builds the score matrix!
  */
 void
-traceback(offs, size, i, j)
-	int	offs;
-	int	size;
-	int	i;
-	int	j;
+traceback(int offs, int size, int i, int j)
 {
 	int	itrace;
 	int	jtrace;
@@ -875,17 +975,17 @@ traceback(offs, size, i, j)
 
 	if (i == 0 && j == 0)	/* End of update.	 */
 		return;
-	itrace = score[(NROW * i) + j].s_itrace;
-	jtrace = score[(NROW * i) + j].s_jtrace;
+	itrace = score[(nrow * i) + j].s_itrace;
+	jtrace = score[(nrow * i) + j].s_jtrace;
 	if (itrace == i) {	/* [i, j-1]		 */
 		ninsl = 0;	/* Collect inserts.	 */
 		if (i != size)
 			ninsl = 1;
 		ndraw = 1;
 		while (itrace != 0 || jtrace != 0) {
-			if (score[(NROW * itrace) + jtrace].s_itrace != itrace)
+			if (score[(nrow * itrace) + jtrace].s_itrace != itrace)
 				break;
-			jtrace = score[(NROW * itrace) + jtrace].s_jtrace;
+			jtrace = score[(nrow * itrace) + jtrace].s_jtrace;
 			if (i != size)
 				++ninsl;
 			++ndraw;
@@ -906,9 +1006,9 @@ traceback(offs, size, i, j)
 		if (j != size)
 			ndell = 1;
 		while (itrace != 0 || jtrace != 0) {
-			if (score[(NROW * itrace) + jtrace].s_jtrace != jtrace)
+			if (score[(nrow * itrace) + jtrace].s_jtrace != jtrace)
 				break;
-			itrace = score[(NROW * itrace) + jtrace].s_itrace;
+			itrace = score[(nrow * itrace) + jtrace].s_itrace;
 			if (j != size)
 				++ndell;
 		}

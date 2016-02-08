@@ -1,4 +1,4 @@
-/*	$OpenBSD: tokeninit.c,v 1.2 2000/12/20 20:08:22 markus Exp $	*/
+/*	$OpenBSD: tokeninit.c,v 1.4 2002/03/14 06:51:42 mpech Exp $	*/
 
 /*-
  * Copyright (c) 1995 Migration Associates Corp. All Rights Reserved
@@ -89,7 +89,7 @@ main(int argc, char **argv)
 	else
 		optstr = "fm:sv";
 
-    	while ((c = getopt(argc, argv, optstr)) != EOF)
+    	while ((c = getopt(argc, argv, optstr)) != -1)
 		switch (c) {
 		case 'f':	/* force initialize existing user account */
 			cmd |= TOKEN_FORCEINIT;
@@ -154,14 +154,14 @@ main(int argc, char **argv)
 			    *argv, tt->proper);
 			break;
 		case 1:
-			warnx("%s already exists in %s database!\n",
+			warnx("%s already exists in %s database!",
 			    *argv, tt->proper);
 			syslog(LOG_INFO, "%s already exists in %s database",
 			    *argv, tt->proper);
 			errors++;
 			break;
 		case -1:
-			warnx("Error initializing user %s in %s database.\n",
+			warnx("Error initializing user %s in %s database.",
 			    *argv, tt->proper);
 			syslog(LOG_INFO,
 			    "Error initializing user %s in %s database: %m",

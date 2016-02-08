@@ -1,4 +1,4 @@
-#	$OpenBSD: install.md,v 1.1 2001/10/10 04:21:02 deraadt Exp $
+#	$OpenBSD: install.md,v 1.6 2002/04/13 02:33:10 deraadt Exp $
 #	$NetBSD: install.md,v 1.3.2.5 1996/08/26 15:45:28 gwr Exp $
 #
 #
@@ -36,13 +36,12 @@
 # ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 #
-
 #
 # machine dependent section of installation/upgrade script.
 #
 
 # Machine-dependent install sets
-MDSETS="kernel xbin xman xinc xcon"
+MDSETS=kernel
 ARCH=ARCH
 
 md_set_term() {
@@ -57,12 +56,12 @@ md_get_msgbuf() {
 	# Only want to see one boot's worth of info
 	dmesg > /tmp/msgbuf
 	sed -n -f /dev/stdin /tmp/msgbuf <<- OOF
-                /^OpenBSD /h
-                /^OpenBSD /!H
-                \${
-                        g
-                        p
-                }
+		/^OpenBSD /h
+		/^OpenBSD /!H
+		\${
+			g
+			p
+		}
 	OOF
 }
 
@@ -77,12 +76,19 @@ md_get_cddevs() {
 }
 
 md_get_partition_range() {
-    # return range of valid partition letters
-    echo [a-p]
+	# return range of valid partition letters
+	echo [a-p]
 }
 
 md_questions() {
-	:
+	echo
+	echo -n "Do you expect to run the X Window System? [y] "
+	getresp y
+	case "$resp" in
+	y*|Y*)	xfree86=y
+		;;
+	esac
+	echo
 }
 
 md_installboot() {
@@ -103,7 +109,7 @@ md_installboot() {
 		echo No boot block prototypes found, you must run installboot manually.
 		return
 	fi
-		
+
 	echo Installing boot block...
 	${_prefix}/installboot -v ${_prefix}/bootblk ${_rawdev}
 	sync; sync; sync
@@ -118,6 +124,14 @@ md_installboot() {
 	fi
 	echo Copying ofwboot...
 	cp ${_prefix}/ofwboot /mnt/ofwboot
+	if [ "$xfree86" = y ]; then
+		echo
+		echo "Enabling machdep.allowaperture. Read xf86(4) for more information."
+		echo '1,$s/^#machdep\.allowaperture=1/machdep\.allowaperture=1	/
+w
+q' | ed /mnt/etc/sysctl.conf 2> /dev/null
+		echo
+	fi
 }
 
 md_native_fstype() {
@@ -151,14 +165,11 @@ md_prep_disklabel()
 
 	md_checkfordisklabel $_disk
 	case $? in
-	0)
-		;;
-	1)
-		echo WARNING: Label on disk $_disk has no label. You will be creating a new one.
+	0)	;;
+	1)	echo WARNING: Label on disk $_disk has no label. You will be creating a new one.
 		echo
 		;;
-	2)
-		echo WARNING: Label on disk $_disk is corrupted. You will be repairing.
+	2)	echo WARNING: Label on disk $_disk is corrupted. You will be repairing.
 		echo
 		;;
 	esac
@@ -182,12 +193,11 @@ Welcome to the OpenBSD/sparc64 ${VERSION_MAJOR}.${VERSION_MINOR} installation pr
 
 This program is designed to help you put OpenBSD on your disk in a simple and
 rational way.
-
 __EOT
 
 	else
 		cat << __EOT
-echo Welcome to the OpenBSD/sparc64 ${VERSION} upgrade program.
+Welcome to the OpenBSD/sparc64 ${VERSION_MAJOR}.${VERSION_MINOR} upgrade program.
 
 This program is designed to help you upgrade your OpenBSD system in a
 simple and rational way.
@@ -196,7 +206,6 @@ As a reminder, installing the 'etc' binary set is NOT recommended.
 Once the rest of your system has been upgraded, you should manually
 merge any changes to files in the 'etc' set into those files which
 already exist on your system.
-
 __EOT
 	fi
 

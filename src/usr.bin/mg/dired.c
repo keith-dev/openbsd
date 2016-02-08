@@ -1,33 +1,54 @@
-/*	$OpenBSD: dired.c,v 1.7 2001/05/24 03:05:21 mickey Exp $	*/
+/*	$OpenBSD: dired.c,v 1.10 2002/03/11 13:02:56 vincent Exp $	*/
 
 /* dired module for mg 2a	 */
 /* by Robert A. Larson		 */
 
 #include "def.h"
+#include "kbd.h"
 
 #ifndef NO_DIRED
 
+static PF dired_pf[] = {
+	d_findfile,
+};
+
+static struct KEYMAPE (1 + IMAPEXT) diredmap = {
+	1,
+	1 + IMAPEXT,
+	rescan,
+	{
+		{ CCHR('M'), CCHR('M'), dired_pf, NULL },
+	}
+};
+
 /* ARGSUSED */
 int
-dired(f, n)
-	int	f, n;
+dired(int f, int n)
 {
+	static int inited = 0;
 	char	dirname[NFILEN];
 	BUFFER *bp;
+
+	if (inited == 0) {
+		maps_add((KEYMAP *)&diredmap, "dired");
+		inited = 1;
+	}
 
 	dirname[0] = '\0';
 	if (eread("Dired: ", dirname, NFILEN, EFNEW | EFCR) == ABORT)
 		return ABORT;
 	if ((bp = dired_(dirname)) == NULL)
 		return FALSE;
+	bp->b_modes[0] = name_mode("fundamental");
+	bp->b_modes[1] = name_mode("dired");
+	bp->b_nmodes = 1;
 	curbp = bp;
 	return showbuffer(bp, curwp, WFHARD | WFMODE);
 }
 
 /* ARGSUSED */
 int
-d_otherwindow(f, n)
-	int	f, n;
+d_otherwindow(int f, int n)
 {
 	char	dirname[NFILEN];
 	BUFFER	*bp;
@@ -47,10 +68,8 @@ d_otherwindow(f, n)
 
 /* ARGSUSED */
 int
-d_del(f, n)
-	int f, n;
+d_del(int f, int n)
 {
-
 	if (n < 0)
 		return FALSE;
 	while (n--) {
@@ -66,8 +85,7 @@ d_del(f, n)
 
 /* ARGSUSED */
 int
-d_undel(f, n)
-	int f, n;
+d_undel(int f, int n)
 {
 	if (n < 0)
 		return d_undelbak(f, -n);
@@ -84,10 +102,8 @@ d_undel(f, n)
 
 /* ARGSUSED */
 int
-d_undelbak(f, n)
-	int f, n;
+d_undelbak(int f, int n)
 {
-
 	if (n < 0)
 		return d_undel(f, -n);
 	while (n--) {
@@ -103,14 +119,13 @@ d_undelbak(f, n)
 
 /* ARGSUSED */
 int
-d_findfile(f, n)
-	int f, n;
+d_findfile(int f, int n)
 {
 	BUFFER *bp;
 	int	s;
 	char	fname[NFILEN];
 
-	if ((s = d_makename(curwp->w_dotp, fname)) == ABORT)
+	if ((s = d_makename(curwp->w_dotp, fname, sizeof fname)) == ABORT)
 		return FALSE;
 	if ((bp = (s ? dired_(fname) : findbuffer(fname))) == NULL)
 		return FALSE;
@@ -124,15 +139,14 @@ d_findfile(f, n)
 
 /* ARGSUSED */
 int
-d_ffotherwindow(f, n)
-	int	f, n;
+d_ffotherwindow(int f, int n)
 {
 	char	fname[NFILEN];
 	int	s;
 	BUFFER *bp;
 	MGWIN  *wp;
 
-	if ((s = d_makename(curwp->w_dotp, fname)) == ABORT)
+	if ((s = d_makename(curwp->w_dotp, fname, sizeof fname)) == ABORT)
 		return FALSE;
 	if ((bp = (s ? dired_(fname) : findbuffer(fname))) == NULL)
 		return FALSE;
@@ -147,8 +161,7 @@ d_ffotherwindow(f, n)
 
 /* ARGSUSED */
 int
-d_expunge(f, n)
-	int	f, n;
+d_expunge(int f, int n)
 {
 	LINE	*lp, *nlp;
 	char	fname[NFILEN];
@@ -156,7 +169,7 @@ d_expunge(f, n)
 	for (lp = lforw(curbp->b_linep); lp != curbp->b_linep; lp = nlp) {
 		nlp = lforw(lp);
 		if (llength(lp) && lgetc(lp, 0) == 'D') {
-			switch (d_makename(lp, fname)) {
+			switch (d_makename(lp, fname, sizeof fname)) {
 			case ABORT:
 				ewprintf("Bad line in dired buffer");
 				return FALSE;
@@ -183,13 +196,12 @@ d_expunge(f, n)
 
 /* ARGSUSED */
 int
-d_copy(f, n)
-	int	f, n;
+d_copy(int f, int n)
 {
 	char	frname[NFILEN], toname[NFILEN];
 	int	stat;
 
-	if (d_makename(curwp->w_dotp, frname) != FALSE) {
+	if (d_makename(curwp->w_dotp, frname, sizeof frname) != FALSE) {
 		ewprintf("Not a file");
 		return FALSE;
 	}
@@ -201,13 +213,12 @@ d_copy(f, n)
 
 /* ARGSUSED */
 int
-d_rename(f, n)
-	int	f, n;
+d_rename(int f, int n)
 {
 	char	frname[NFILEN], toname[NFILEN];
 	int	stat;
 
-	if (d_makename(curwp->w_dotp, frname) != FALSE) {
+	if (d_makename(curwp->w_dotp, frname, sizeof frname) != FALSE) {
 		ewprintf("Not a file");
 		return FALSE;
 	}

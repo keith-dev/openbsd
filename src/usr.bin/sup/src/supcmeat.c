@@ -1,4 +1,4 @@
-/*	$OpenBSD: supcmeat.c,v 1.14 2001/05/04 22:16:16 millert Exp $	*/
+/*	$OpenBSD: supcmeat.c,v 1.16 2002/02/19 19:39:39 millert Exp $	*/
 
 /*
  * Copyright (c) 1992 Carnegie Mellon University
@@ -133,13 +133,13 @@ extern int noutime;			/* don't set utimes */
  ***    U P G R A D E   C O L L E C T I O N    ***
  *************************************************/
 
-static int needone __P((TREE *, void *));
-static int recvone __P((TREE *, va_list));
-static int denyone __P((TREE *, void *));
-static int deleteone __P((TREE *, void *));
-static int linkone __P((TREE *, void *));
-static int execone __P((TREE *, void *));
-static int finishone __P((TREE *, void *));
+static int needone(TREE *, void *);
+static int recvone(TREE *, va_list);
+static int denyone(TREE *, void *);
+static int deleteone(TREE *, void *);
+static int linkone(TREE *, void *);
+static int execone(TREE *, void *);
+static int finishone(TREE *, void *);
 
 
 /*
@@ -1501,27 +1501,12 @@ finishone(t, fv)
 }
 
 void
-#ifdef __STDC__
 done (int value,char *fmt,...)
-#else
-/*VARARGS*//*ARGSUSED*/
-done (va_alist)
-va_dcl
-#endif
 {
 	char buf[STRINGLENGTH];
 	va_list ap;
 
-#ifdef __STDC__
 	va_start(ap, fmt);
-#else
-	int value;
-	char *fmt;
-
-	va_start(ap);
-	value = va_arg(ap, int);
-	fmt = va_arg(ap, char *);
-#endif
 	(void) netcrypt(NULL);
 
 	if (fmt) 
@@ -1543,26 +1528,12 @@ va_dcl
 }
 
 void
-#ifdef __STDC__
 goaway (char *fmt,...)
-#else
-/*VARARGS*//*ARGSUSED*/
-goaway (va_alist)
-va_dcl
-#endif
 {
 	char buf[STRINGLENGTH];
 	va_list ap;
 
-#ifdef __STDC__
 	va_start(ap, fmt);
-#else
-	char *fmt;
-
-	va_start(ap);
-	fmt = va_arg(ap, char *);
-#endif
-
 	(void) netcrypt (NULL);
 	if (fmt) {
 		vsnprintf(buf, sizeof(buf), fmt, ap);

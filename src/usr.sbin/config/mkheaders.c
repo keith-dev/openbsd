@@ -1,4 +1,4 @@
-/*	$OpenBSD: mkheaders.c,v 1.10 1998/05/14 21:16:44 deraadt Exp $	*/
+/*	$OpenBSD: mkheaders.c,v 1.12 2002/03/14 16:44:24 mpech Exp $	*/
 /*	$NetBSD: mkheaders.c,v 1.12 1997/02/02 21:12:34 thorpej Exp $	*/
 
 /*
@@ -53,10 +53,10 @@
 #include <string.h>
 #include "config.h"
 
-static int emitcnt __P((struct nvlist *));
-static int emitopt __P((struct nvlist *));
-static int err __P((const char *, char *, FILE *));
-static char *cntname __P((const char *));
+static int emitcnt(struct nvlist *);
+static int emitopt(struct nvlist *);
+static int err(const char *, char *, FILE *);
+static char *cntname(const char *);
 
 /*
  * Make headers containing counts, as needed.
@@ -64,8 +64,8 @@ static char *cntname __P((const char *));
 int
 mkheaders()
 {
-	register struct files *fi;
-	register struct nvlist *nv;
+	struct files *fi;
+	struct nvlist *nv;
 
 	for (fi = allfiles; fi != NULL; fi = fi->fi_next) {
 		if (fi->fi_flags & FI_HIDDEN)
@@ -84,10 +84,10 @@ mkheaders()
 
 static int
 emitcnt(head)
-	register struct nvlist *head;
+	struct nvlist *head;
 {
-	register struct nvlist *nv;
-	register FILE *fp;
+	struct nvlist *nv;
+	FILE *fp;
 	int cnt;
 	char nam[100];
 	char buf[BUFSIZ];
@@ -199,9 +199,9 @@ err(what, fname, fp)
 
 static char *
 cntname(src)
-	register const char *src;
+	const char *src;
 {
-	register char *dst, c;
+	char *dst, c;
 	static char buf[100];
 
 	dst = buf;

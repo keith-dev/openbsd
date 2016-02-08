@@ -1,4 +1,4 @@
-/*	$OpenBSD: server.c,v 1.4 2001/01/16 05:34:15 jason Exp $	*/
+/*	$OpenBSD: server.c,v 1.7 2002/02/17 19:42:39 millert Exp $	*/
 
 /*
  * Copyright (c) 2000 Network Security Technologies, Inc. http://www.netsec.net
@@ -62,22 +62,22 @@
 
 static char ac_cookie_key[8];
 
-static void getpackets __P((int, char *, struct ether_addr *));
+static void getpackets(int, char *, struct ether_addr *);
 
-static void recv_padi __P((int, struct ether_addr *,
-    struct ether_header *, struct pppoe_header *, u_long, u_int8_t *));
-static void recv_padr __P((int, char *, struct ether_addr *,
-    struct ether_header *, struct pppoe_header *, u_long, u_int8_t *));
-static void recv_padt __P((int, struct ether_addr *,
-    struct ether_header *, struct pppoe_header *, u_long, u_int8_t *));
+static void recv_padi(int, struct ether_addr *,
+    struct ether_header *, struct pppoe_header *, u_long, u_int8_t *);
+static void recv_padr(int, char *, struct ether_addr *,
+    struct ether_header *, struct pppoe_header *, u_long, u_int8_t *);
+static void recv_padt(int, struct ether_addr *,
+    struct ether_header *, struct pppoe_header *, u_long, u_int8_t *);
 
-static void send_pado __P((int, struct ether_addr *,
-    struct ether_header *, struct pppoe_header *, u_long, u_int8_t *));
-static void send_pads __P((int, char *, struct ether_addr *,
-    struct ether_header *, struct pppoe_header *, u_long, u_int8_t *));
-static void key_gen __P((void));
-static u_int8_t *key_make __P((u_int8_t *, int, u_int8_t *, int));
-static int key_cmp __P((u_int8_t *, int, u_int8_t *, int, u_int8_t *, int));
+static void send_pado(int, struct ether_addr *,
+    struct ether_header *, struct pppoe_header *, u_long, u_int8_t *);
+static void send_pads(int, char *, struct ether_addr *,
+    struct ether_header *, struct pppoe_header *, u_long, u_int8_t *);
+static void key_gen(void);
+static u_int8_t *key_make(u_int8_t *, int, u_int8_t *, int);
+static int key_cmp(u_int8_t *, int, u_int8_t *, int, u_int8_t *, int);
 
 void
 server_mode(bpffd, sysname, srvname, ea)
@@ -92,7 +92,6 @@ server_mode(bpffd, sysname, srvname, ea)
 	key_gen();
 
 	while (1) {
-reselect:
 		n = bpffd;
 		LIST_FOREACH(ses, &session_master.sm_sessions, s_next) {
 			if (ses->s_fd != -1 && ses->s_fd > n)
@@ -120,7 +119,7 @@ reselect:
 		n = select(n, fdsp, NULL, NULL, NULL);
 		if (n < 0) {
 			if (errno == EINTR)
-				goto reselect;
+				continue;
 			err(EX_IOERR, "select");
 			break;
 		}

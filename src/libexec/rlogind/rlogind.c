@@ -1,4 +1,4 @@
-/*	$OpenBSD: rlogind.c,v 1.29 2001/07/08 21:18:09 deraadt Exp $	*/
+/*	$OpenBSD: rlogind.c,v 1.34 2002/02/16 21:27:31 millert Exp $	*/
 
 /*-
  * Copyright (c) 1983, 1988, 1989, 1993
@@ -41,7 +41,7 @@ static char copyright[] =
 
 #ifndef lint
 /* from: static char sccsid[] = "@(#)rlogind.c	8.1 (Berkeley) 6/4/93"; */
-static char *rcsid = "$OpenBSD: rlogind.c,v 1.29 2001/07/08 21:18:09 deraadt Exp $";
+static char *rcsid = "$OpenBSD: rlogind.c,v 1.34 2002/02/16 21:27:31 millert Exp $";
 #endif /* not lint */
 
 /*
@@ -109,18 +109,18 @@ int	check_all = 1;
 
 struct	passwd *pwd;
 
-void	doit __P((int, struct sockaddr *));
-int	control __P((int, char *, int));
-void	protocol __P((int, int));
-void	cleanup __P((int));
-void	fatal __P((int, char *, int));
-int	do_rlogin __P((struct sockaddr *));
-void	getstr __P((char *, int, char *));
-void	setup_term __P((int));
-int	do_krb_login __P((struct sockaddr_in *));
-void	usage __P((void));
-int	local_domain __P((char *));
-char	*topdomain __P((char *));
+void	doit(int, struct sockaddr *);
+int	control(int, char *, int);
+void	protocol(int, int);
+void	cleanup(int);
+void	fatal(int, char *, int);
+int	do_rlogin(struct sockaddr *);
+void	getstr(char *, int, char *);
+void	setup_term(int);
+int	do_krb_login(struct sockaddr_in *);
+void	usage(void);
+int	local_domain(char *);
+char	*topdomain(char *);
 
 int
 main(argc, argv)
@@ -377,7 +377,7 @@ doit(f, fromp)
 	ioctl(master, TIOCPKT, &on);
 	signal(SIGCHLD, cleanup);
 	protocol(f, master);
-	signal(SIGCHLD, SIG_IGN);
+	signal(SIGCHLD, SIG_DFL);
 	cleanup(0);
 }
 
@@ -414,10 +414,10 @@ control(pty, cp, n)
  */
 void
 protocol(f, p)
-	register int f, p;
+	int f, p;
 {
 	char pibuf[1024+1], fibuf[1024], *pbp, *fbp;
-	register int pcc = 0, fcc = 0;
+	int pcc = 0, fcc = 0;
 	int cc, nfd, n;
 	char cntl;
 
@@ -488,7 +488,7 @@ protocol(f, p)
 			if (fcc < 0 && errno == EWOULDBLOCK)
 				fcc = 0;
 			else {
-				register char *cp;
+				char *cp;
 				int left, n;
 
 				if (fcc <= 0)
@@ -594,21 +594,28 @@ fatal(f, msg, syserr)
 	char *msg;
 	int syserr;
 {
-	int len;
+	int len = 0;
 	char buf[BUFSIZ], *bp = buf;
 
 	/*
 	 * Prepend binary one to message if we haven't sent
 	 * the magic null as confirmation.
 	 */
-	if (!confirmed)
+	if (!confirmed) {
 		*bp++ = '\01';		/* error indicator */
+		len++;
+	}
 	if (syserr)
-		len = sprintf(bp, "rlogind: %s: %s.\r\n",
+		len += snprintf(bp, sizeof(buf) - len,
+		    "rlogind: %s: %s.\r\n",
 		    msg, strerror(errno));
 	else
-		len = sprintf(bp, "rlogind: %s.\r\n", msg);
-	(void) write(f, buf, bp + len - buf);
+		len += snprintf(bp, sizeof(buf) - len,
+		    "rlogind: %s.\r\n", msg);
+	if (len >= sizeof(buf))
+		len = sizeof(buf) - 1;
+
+	(void) write(f, buf, len);
 	exit(1);
 }
 
@@ -652,7 +659,7 @@ void
 setup_term(fd)
 	int fd;
 {
-	register char *cp = strchr(term+ENVSIZE, '/');
+	char *cp = strchr(term+ENVSIZE, '/');
 	char *speed;
 	struct termios tt;
 

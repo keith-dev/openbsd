@@ -1,4 +1,4 @@
-/*	$OpenBSD: print-dhcp6.c,v 1.2 2000/05/05 12:32:09 jakob Exp $	*/
+/*	$OpenBSD: print-dhcp6.c,v 1.5 2002/02/19 19:39:40 millert Exp $	*/
 
 /*
  * Copyright (C) 1998 and 1999 WIDE Project.
@@ -31,7 +31,7 @@
 
 #ifndef lint
 static const char rcsid[] =
-    "@(#) $Header: /cvs/src/usr.sbin/tcpdump/print-dhcp6.c,v 1.2 2000/05/05 12:32:09 jakob Exp $";
+    "@(#) $Header: /cvs/src/usr.sbin/tcpdump/print-dhcp6.c,v 1.5 2002/02/19 19:39:40 millert Exp $";
 #endif
 
 #ifdef INET6
@@ -40,10 +40,8 @@ static const char rcsid[] =
 #include <sys/time.h>
 #include <sys/socket.h>
 
-#if __STDC__
 struct mbuf;
 struct rtentry;
-#endif
 #include <net/if.h>
 
 #include <netinet/in.h>
@@ -62,10 +60,10 @@ struct rtentry;
 #include "dhcp6opt.h"
 
 #if 0
-static void dhcp6opttab_init __P((void));
-static struct dhcp6_opt *dhcp6opttab_byname __P((char *));
+static void dhcp6opttab_init(void);
+static struct dhcp6_opt *dhcp6opttab_byname(char *);
 #endif
-static struct dhcp6_opt *dhcp6opttab_bycode __P((u_int));
+static struct dhcp6_opt *dhcp6opttab_bycode(u_int);
 
 static char tstr[] = " [|dhcp6]";
 
@@ -208,7 +206,7 @@ dhcp6ext_print(u_char *cp, u_char *ep)
 			break;
 		case OT6_STR:
 			memset(&buf, 0, sizeof(buf));
-			strncpy(buf, &cp[4], len);
+			strlcpy(buf, &cp[4], len);
 			printf("%s", buf);
 			break;
 		case OT6_NUM:

@@ -1,4 +1,4 @@
-/*	$OpenBSD: rusers_proc.c,v 1.11 2001/08/18 21:38:55 deraadt Exp $	*/
+/*	$OpenBSD: rusers_proc.c,v 1.13 2002/02/16 21:27:31 millert Exp $	*/
 
 /*-
  *  Copyright (c) 1993 John Brezak
@@ -29,7 +29,7 @@
  */
 
 #ifndef lint
-static char rcsid[] = "$OpenBSD: rusers_proc.c,v 1.11 2001/08/18 21:38:55 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: rusers_proc.c,v 1.13 2002/02/16 21:27:31 millert Exp $";
 #endif /* not lint */
 
 #include <sys/param.h>
@@ -37,25 +37,15 @@ static char rcsid[] = "$OpenBSD: rusers_proc.c,v 1.11 2001/08/18 21:38:55 deraad
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/time.h>
-#include <signal.h>
 #include <utmp.h>
 #include <stdio.h>
 #include <syslog.h>
 #include <string.h>
 #include <rpc/rpc.h>
-#ifdef XIDLE
-#include <setjmp.h>
-#include <X11/Xlib.h>
-#include <X11/extensions/xidle.h>
-#endif
 #include <rpcsvc/rusers.h>	/* New version */
 #include <rpcsvc/rnusers.h>	/* Old version */
 
 #define	IGNOREUSER	"sleeper"
-
-#ifdef OSF
-#define _PATH_UTMP UTMP_FILE
-#endif
 
 #ifndef _PATH_UTMP
 #define _PATH_UTMP "/etc/utmp"
@@ -92,52 +82,6 @@ extern int from_inetd;
 
 FILE *ufp;
 
-#ifdef XIDLE
-Display *dpy;
-
-static sigjmp_buf openAbort;
-
-static void
-abortOpen()
-{
-	siglongjmp(openAbort, 1);	/* XXX signal/longjmp resource leaks */
-}
-
-XqueryIdle(display)
-	char *display;
-{
-	int first_event, first_error;
-	Time IdleTime;
-
-	(void) signal(SIGALRM, abortOpen);
-	(void) alarm(10);
-	if (!sigsetjmp(openAbort)) {
-		if ((dpy = XOpenDisplay(display)) == NULL) {
-			syslog(LOG_ERR, "cannot open display %s", display);
-			return (-1);
-		}
-		if (XidleQueryExtension(dpy, &first_event, &first_error)) {
-			if (!XGetIdleTime(dpy, &IdleTime)) {
-				syslog(LOG_ERR, "%s: unable to get idle time", display);
-				return (-1);
-			}
-		} else {
-			syslog(LOG_ERR, "%s: Xidle extension not loaded", display);
-			return (-1);
-		}
-		XCloseDisplay(dpy);
-	} else {
-		syslog(LOG_ERR, "%s: server grabbed for over 10 seconds", display);
-		return (-1);
-	}
-	(void) alarm(0);
-	(void) signal(SIGALRM, SIG_DFL);
-
-	IdleTime /= 1000;
-	return ((IdleTime + 30) / 60);
-}
-#endif
-
 static u_int
 getidle(tty, display)
 	char *tty, *display;
@@ -151,10 +95,6 @@ getidle(tty, display)
 	 * If this is an X terminal or console, then try the
 	 * XIdle extension
 	 */
-#ifdef XIDLE
-	if (display && *display && (idle = XqueryIdle(display)) >= 0)
-		return (idle);
-#endif
 	idle = 0;
 	if (*tty == 'X') {
 		u_long kbd_idle, mouse_idle;
@@ -417,7 +357,7 @@ rusers_service(rqstp, transp)
 	} argument;
 	char *result;
 	xdrproc_t xdr_argument, xdr_result;
-	char *(*local) __P((void *, struct svc_req *));
+	char *(*local)(void *, struct svc_req *);
 
 	switch (rqstp->rq_proc) {
 	case NULLPROC:
@@ -431,7 +371,7 @@ rusers_service(rqstp, transp)
 		case RUSERSVERS_3:
 		case RUSERSVERS_IDLE:
 		case RUSERSVERS_ORIG:
-			local = (char *(*) __P((void *, struct svc_req *)))
+			local = (char *(*)(void *, struct svc_req *))
 					rusers_num_svc;
 			break;
 		default:
@@ -446,19 +386,19 @@ rusers_service(rqstp, transp)
 		xdr_result = (xdrproc_t)xdr_utmp_array;
 		switch (rqstp->rq_vers) {
 		case RUSERSVERS_3:
-			local = (char *(*) __P((void *, struct svc_req *)))
+			local = (char *(*)(void *, struct svc_req *))
 					rusersproc_names_3_svc;
 			break;
 
 		case RUSERSVERS_IDLE:
 			xdr_result = (xdrproc_t)xdr_utmpidlearr;
-			local = (char *(*) __P((void *, struct svc_req *)))
+			local = (char *(*)(void *, struct svc_req *))
 					rusersproc_names_2_svc;
 			break;
 
 		case RUSERSVERS_ORIG:
 			xdr_result = (xdrproc_t)xdr_utmpidlearr;
-			local = (char *(*) __P((void *, struct svc_req *)))
+			local = (char *(*)(void *, struct svc_req *))
 					rusersproc_names_1_svc;
 			break;
 
@@ -474,19 +414,19 @@ rusers_service(rqstp, transp)
 		xdr_result = (xdrproc_t)xdr_utmp_array;
 		switch (rqstp->rq_vers) {
 		case RUSERSVERS_3:
-			local = (char *(*) __P((void *, struct svc_req *)))
+			local = (char *(*)(void *, struct svc_req *))
 					rusersproc_allnames_3_svc;
 			break;
 
 		case RUSERSVERS_IDLE:
 			xdr_result = (xdrproc_t)xdr_utmpidlearr;
-			local = (char *(*) __P((void *, struct svc_req *)))
+			local = (char *(*)(void *, struct svc_req *))
 					rusersproc_allnames_2_svc;
 			break;
 
 		case RUSERSVERS_ORIG:
 			xdr_result = (xdrproc_t)xdr_utmpidlearr;
-			local = (char *(*) __P((void *, struct svc_req *)))
+			local = (char *(*)(void *, struct svc_req *))
 					rusersproc_allnames_1_svc;
 			break;
 

@@ -1,5 +1,5 @@
 /*	$NetBSD: create.c,v 1.11 1996/09/05 09:24:19 mycroft Exp $	*/
-/*	$OpenBSD: create.c,v 1.13 2001/08/10 02:37:14 millert Exp $	*/
+/*	$OpenBSD: create.c,v 1.18 2002/03/14 17:01:16 millert Exp $	*/
 
 /*-
  * Copyright (c) 1989, 1993
@@ -38,7 +38,7 @@
 #if 0
 static const char sccsid[] = "@(#)create.c	8.1 (Berkeley) 6/6/93";
 #else
-static const char rcsid[] = "$OpenBSD: create.c,v 1.13 2001/08/10 02:37:14 millert Exp $";
+static const char rcsid[] = "$OpenBSD: create.c,v 1.18 2002/03/14 17:01:16 millert Exp $";
 #endif
 #endif /* not lint */
 
@@ -53,6 +53,8 @@ static const char rcsid[] = "$OpenBSD: create.c,v 1.13 2001/08/10 02:37:14 mille
 #include <errno.h>
 #include <unistd.h>
 #include <stdio.h>
+#include <stdarg.h>
+#include <vis.h>
 #include <md5.h>
 #include <sha1.h>
 #include <rmd160.h>
@@ -72,16 +74,16 @@ static gid_t gid;
 static uid_t uid;
 static mode_t mode;
 
-static int	dsort __P((const FTSENT **, const FTSENT **));
-static void	output __P((int, int *, const char *, ...));
-static int	statd __P((FTS *, FTSENT *, uid_t *, gid_t *, mode_t *));
-static void	statf __P((int, FTSENT *));
+static int	dsort(const FTSENT **, const FTSENT **);
+static void	output(int, int *, const char *, ...);
+static int	statd(FTS *, FTSENT *, uid_t *, gid_t *, mode_t *);
+static void	statf(int, FTSENT *);
 
 void
 cwalk()
 {
-	register FTS *t;
-	register FTSENT *p;
+	FTS *t;
+	FTSENT *p;
 	time_t clock;
 	char *argv[2], host[MAXHOSTNAMELEN];
 	int indent = 0;
@@ -143,11 +145,19 @@ statf(indent, p)
 	struct passwd *pw;
 	u_int32_t len, val;
 	int fd, offset;
+	char *name, *escaped_name;
+
+	escaped_name = malloc(p->fts_namelen * 4  +  1);
+	if (escaped_name == NULL)
+		error("statf: %s", strerror(errno));
+	strvis(escaped_name, p->fts_name, VIS_WHITE | VIS_OCTAL);
 
 	if (iflag || S_ISDIR(p->fts_statp->st_mode))
-		offset = printf("%*s%s", indent, "", p->fts_name);
+		offset = printf("%*s%s", indent, "", escaped_name);
 	else
-		offset = printf("%*s    %s", indent, "", p->fts_name);
+		offset = printf("%*s    %s", indent, "", escaped_name);
+
+	free(escaped_name);
 
 	if (offset > (INDENTNAMELEN + indent))
 		offset = MAXLINELEN;
@@ -225,8 +235,15 @@ statf(indent, p)
 			output(indent, &offset, "sha1digest=%s", sha1digest);
 	}
 	if (keys & F_SLINK &&
-	    (p->fts_info == FTS_SL || p->fts_info == FTS_SLNONE))
-		output(indent, &offset, "link=%s", rlink(p->fts_accpath));
+	    (p->fts_info == FTS_SL || p->fts_info == FTS_SLNONE)) {
+		name = rlink(p->fts_accpath);
+		escaped_name = malloc(strlen(name) * 4  +  1);
+		if (escaped_name == NULL)
+			error("statf: %s", strerror(errno));
+		strvis(escaped_name, name, VIS_WHITE | VIS_OCTAL);
+		output(indent, &offset, "link=%s", escaped_name);
+		free(escaped_name);
+	}
 	if (keys & F_FLAGS && !S_ISLNK(p->fts_statp->st_mode)) {
 		char *file_flags;
 
@@ -254,10 +271,10 @@ statd(t, parent, puid, pgid, pmode)
 	gid_t *pgid;
 	mode_t *pmode;
 {
-	register FTSENT *p;
-	register gid_t sgid;
-	register uid_t suid;
-	register mode_t smode;
+	FTSENT *p;
+	gid_t sgid;
+	uid_t suid;
+	mode_t smode;
 	struct group *gr;
 	struct passwd *pw;
 	gid_t savegid = *pgid;
@@ -354,30 +371,13 @@ dsort(a, b)
 	return (strcmp((*a)->fts_name, (*b)->fts_name));
 }
 
-#ifdef __STDC__
-#include <stdarg.h>
-#else
-#include <varargs.h>
-#endif
-
 void
-#ifdef __STDC__
 output(int indent, int *offset, const char *fmt, ...)
-#else
-output(indent, offset, fmt, va_alist)
-	int indent;
-	int *offset;
-	char *fmt;
-        va_dcl
-#endif
 {
 	va_list ap;
 	char buf[1024];
-#ifdef __STDC__
+
 	va_start(ap, fmt);
-#else
-	va_start(ap);
-#endif
 	(void)vsnprintf(buf, sizeof(buf), fmt, ap);
 	va_end(ap);
 

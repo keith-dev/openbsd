@@ -1,10 +1,10 @@
-/*	$OpenBSD: isakmpd.c,v 1.36 2001/08/24 13:53:02 ho Exp $	*/
+/*	$OpenBSD: isakmpd.c,v 1.39 2001/12/11 01:54:34 ho Exp $	*/
 /*	$EOM: isakmpd.c,v 1.54 2000/10/05 09:28:22 niklas Exp $	*/
 
 /*
  * Copyright (c) 1998, 1999, 2000, 2001 Niklas Hallqvist.  All rights reserved.
  * Copyright (c) 1999, 2000 Angelos D. Keromytis.  All rights reserved.
- * Copyright (c) 1999, 2000 Håkan Olsson.  All rights reserved.
+ * Copyright (c) 1999, 2000, 2001 Håkan Olsson.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -214,59 +214,6 @@ parse_args (int argc, char *argv[])
 #endif
 }
 
-/* Reinitialize after a SIGHUP reception.  */
-static void
-reinit (void)
-{
-  log_print ("SIGHUP received, reinitializing daemon.");
-
-  /*
-   * XXX Remove all(/some?) pending exchange timers? - they may not be
-   *     possible to complete after we've re-read the config file.
-   *     User-initiated SIGHUP's maybe "authorizes" a wait until
-   *     next connection-check.
-   * XXX This means we discard exchange->last_msg, is this really ok?
-   */
-
-  /* Reinitialize PRNG if we are in deterministic mode.  */
-  if (regrand)
-    srandom (seed);
-
-  /* Reread config file.  */
-  conf_reinit ();
-
-  /* Try again to link in libcrypto (good if we started without /usr).  */
-  libcrypto_init ();
-
-  /* Set timezone */
-  tzset ();
-
-#ifdef USE_POLICY
-  /* Reread the policies.  */
-  policy_init ();
-#endif
-
-  /* Reinitialize certificates */
-  cert_init ();
-
-  /* Reinitialize our connection list.  */
-  connection_reinit ();
-
-  /*
-   * Rescan interfaces.
-   */
-  transport_reinit ();
-
-  /*
-   * XXX "These" (non-existant) reinitializations should not be done.
-   *   cookie_reinit ();
-   *   ui_reinit ();
-   *   sa_reinit ();
-   */
-
-  sighupped = 0;
-}
-
 static void
 sighup (int sig)
 {
@@ -337,7 +284,6 @@ daemon_shutdown (void)
 {
   /* Perform a (protocol-wise) clean shutdown of the daemon.  */
   struct sa *sa;
-  static int msg_counter = 0;
 
   if (sigtermed == 1)
     {
@@ -347,34 +293,27 @@ daemon_shutdown (void)
       while ((sa = sa_find (phase2_sa_check, NULL)))
 	{
 	  /* Each DELETE is another (outgoing) message.  */
-	  msg_counter++;
 	  sa_delete (sa, 1);
 	}
-
-      /*
-       * As there may have been other messages queued before these, we
-       * add a 'grace factor' to make sure all the DELETEs actually get
-       * sent before we shut down. The select() loop will just spin
-       * a number of more times before we actually do the exit.
-       */
-      msg_counter = ++msg_counter * 2;
-
-      /* XXX Phase 1, transports, timers, exchanges, connections, ...?  */
+      sigtermed++;
     }
-  else if (sigtermed >= msg_counter)
+
+  if (transport_prio_sendqs_empty ())
     {
-      /* Goodbye.  */
+      /*
+       * When the prioritized transport sendq:s are empty, i.e all 
+       * the DELETE notifications have been sent, we can shutdown.
+       */
+	 
 #ifdef USE_DEBUG
       log_packet_stop ();
 #endif
       log_print ("isakmpd: exit");
       exit (0);
     }
-
-  sigtermed++;
 }
 
-/* called on SIGTERM */
+/* Called on SIGTERM, or by ui_shutdown_daemon().  */
 void
 daemon_shutdown_now (int sig)
 {
@@ -453,15 +392,25 @@ main (int argc, char *argv[])
     {
       /* If someone has sent SIGHUP to us, reconfigure.  */
       if (sighupped)
-	reinit ();
+	{
+	  log_print ("SIGHUP received");
+	  reinit ();
+	  sighupped = 0;
+	}
 
       /* and if someone sent SIGUSR1, do a state report.  */
       if (sigusr1ed)
-	report ();
+	{
+	  log_print ("SIGUSR1 received");
+	  report ();
+	}
 
       /* and if someone sent SIGUSR2, do a timer rehash.  */
       if (sigusr2ed)
-	rehash_timers ();
+	{
+	  log_print ("SIGUSR2 received");
+	  rehash_timers ();
+	}
 
       /*
        * and if someone set 'sigtermed' (SIGTERM or via the UI), this

@@ -1,4 +1,4 @@
-/*	$OpenBSD: exchange.c,v 1.62 2001/08/25 22:13:27 niklas Exp $	*/
+/*	$OpenBSD: exchange.c,v 1.64 2002/01/23 18:24:34 ho Exp $	*/
 /*	$EOM: exchange.c,v 1.143 2000/12/04 00:02:25 angelos Exp $	*/
 
 /*
@@ -808,7 +808,9 @@ exchange_establish_p1 (struct transport *t, u_int8_t type, u_int32_t doi,
   exchange->finalize_arg = arg;
   cookie_gen (t, exchange, exchange->cookies, ISAKMP_HDR_ICOOKIE_LEN);
   exchange_enter (exchange);
+#ifdef USE_DEBUG
   exchange_dump ("exchange_establish_p1", exchange);
+#endif
 
   msg = message_alloc (t, 0, ISAKMP_HDR_SZ);
   msg->exchange = exchange;
@@ -925,7 +927,9 @@ exchange_establish_p2 (struct sa *isakmp_sa, u_int8_t type, char *name,
   getrandom (exchange->message_id, ISAKMP_HDR_MESSAGE_ID_LEN);
   exchange->flags |= EXCHANGE_FLAG_ENCRYPT;
   exchange_enter (exchange);
+#ifdef USE_DEBUG
   exchange_dump ("exchange_establish_p2", exchange);
+#endif
 
   /*
    * Do not create SA's for informational exchanges.
@@ -1071,7 +1075,9 @@ exchange_setup_p1 (struct message *msg, u_int32_t doi)
 	      ISAKMP_HDR_RCOOKIE_LEN);
   GET_ISAKMP_HDR_ICOOKIE (msg->iov[0].iov_base, exchange->cookies);
   exchange_enter (exchange);
+#ifdef USE_DEBUG
   exchange_dump ("exchange_setup_p1", exchange);
+#endif
   return exchange;
 }
 
@@ -1089,7 +1095,9 @@ exchange_setup_p2 (struct message *msg, u_int8_t doi)
   GET_ISAKMP_HDR_RCOOKIE (buf, exchange->cookies + ISAKMP_HDR_ICOOKIE_LEN);
   GET_ISAKMP_HDR_MESSAGE_ID (buf, exchange->message_id);
   exchange_enter (exchange);
+#ifdef USE_DEBUG
   exchange_dump ("exchange_setup_p2", exchange);
+#endif
   return exchange;
 }
 
@@ -1118,12 +1126,12 @@ exchange_dump_real (char *header, struct exchange *exchange, int class,
   /* Include phase 2 SA list for this exchange */
   if (exchange->phase == 2)
     {
-      sprintf (buf, "sa_list ");
+      snprintf (buf, bufsize_max, "sa_list ");
       for (sa = TAILQ_FIRST (&exchange->sa_list);
 	   sa && strlen (buf) < bufsize_max; sa = TAILQ_NEXT (sa, next))
-	sprintf (buf + strlen (buf), "%p ", sa);
+	snprintf (buf + strlen (buf), bufsize_max - strlen (buf), "%p ", sa);
       if (sa)
-	strcat (buf, "...");
+	strlcat (buf, "...", bufsize_max);
     }
   else
     buf[0] = '\0';
@@ -1273,12 +1281,11 @@ exchange_check_old_sa (struct sa *sa, void *v_arg)
     return 0;
 
   if (sa->initiator)
-    strncpy (res1, ipsec_decode_ids ("%s %s", sa->id_i, sa->id_i_len, sa->id_r,
+    strlcpy (res1, ipsec_decode_ids ("%s %s", sa->id_i, sa->id_i_len, sa->id_r,
 				     sa->id_r_len, 0), sizeof res1);
   else
-    strncpy (res1, ipsec_decode_ids ("%s %s", sa->id_r, sa->id_r_len, sa->id_i,
+    strlcpy (res1, ipsec_decode_ids ("%s %s", sa->id_r, sa->id_r_len, sa->id_i,
 				     sa->id_i_len, 0), sizeof res1);
-  res1[sizeof res1 - 1] = '\0';
 
   LOG_DBG ((LOG_EXCHANGE, 30,
 	    "checking whether new SA replaces existing SA with IDs %s", res1));
@@ -1304,7 +1311,9 @@ exchange_finalize (struct message *msg)
   struct cert_handler *handler;
   int i;
 
+#ifdef USE_DEBUG
   exchange_dump ("exchange_finalize", exchange);
+#endif
 
   /*
    * Walk over all the SAs and noting them as ready.  If we set the

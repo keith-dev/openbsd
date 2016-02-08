@@ -1,4 +1,4 @@
-/*	$OpenBSD: docmd.c,v 1.13 2001/07/18 17:17:39 pvalchev Exp $	*/
+/*	$OpenBSD: docmd.c,v 1.16 2002/02/17 19:42:31 millert Exp $	*/
 
 /*
  * Copyright (c) 1983, 1993
@@ -35,7 +35,7 @@
 
 #ifndef lint
 /* from: static char sccsid[] = "@(#)docmd.c	8.1 (Berkeley) 6/9/93"; */
-static char *rcsid = "$OpenBSD: docmd.c,v 1.13 2001/07/18 17:17:39 pvalchev Exp $";
+static char *rcsid = "$OpenBSD: docmd.c,v 1.16 2002/02/17 19:42:31 millert Exp $";
 #endif /* not lint */
 
 #include "defs.h"
@@ -47,16 +47,14 @@ FILE	*lfp;			/* log file for recording files updated */
 struct	subcmd *subcmds;	/* list of sub-commands for current cmd */
 jmp_buf	env;
 
-static int	 makeconn __P((char *));
-static int	 okname __P((char *));
-static void	 closeconn __P((void));
-static void	 cmptime __P((char *));
-static void	 doarrow __P((char **,
-		    struct namelist *, char *, struct subcmd *));
-static void	 dodcolon __P((char **,
-		    struct namelist *, char *, struct subcmd *));
-static void	 notify __P((char *, char *, struct namelist *, time_t));
-static void	 rcmptime __P((struct stat *));
+static int	 makeconn(char *);
+static int	 okname(char *);
+static void	 closeconn(void);
+static void	 cmptime(char *);
+static void	 doarrow(char **, struct namelist *, char *, struct subcmd *);
+static void	 dodcolon(char **, struct namelist *, char *, struct subcmd *);
+static void	 notify(char *, char *, struct namelist *, time_t);
+static void	 rcmptime(struct stat *);
 
 /*
  * Do the commands in cmds (initialized by yyparse).
@@ -67,9 +65,9 @@ docmds(dhosts, argc, argv)
 	int argc;
 	char **argv;
 {
-	register struct cmd *c;
-	register struct namelist *f;
-	register char **cpp;
+	struct cmd *c;
+	struct namelist *f;
+	char **cpp;
 	extern struct cmd *cmds;
 
 	signal(SIGHUP, cleanup);
@@ -124,9 +122,9 @@ doarrow(filev, files, rhost, cmds)
 	char *rhost;
 	struct subcmd *cmds;
 {
-	register struct namelist *f;
-	register struct subcmd *sc;
-	register char **cpp;
+	struct namelist *f;
+	struct subcmd *sc;
+	char **cpp;
 	int n, ddir, opts = options;
 
 	if (debug)
@@ -213,7 +211,7 @@ static int
 makeconn(rhost)
 	char *rhost;
 {
-	register char *ruser, *cp;
+	char *ruser, *cp;
 	static char *cur_host = NULL;
 #if	defined(DIRECT_RCMD)
 	static int port = -1;
@@ -344,10 +342,10 @@ lostconn(signo)
 
 static int
 okname(name)
-	register char *name;
+	char *name;
 {
-	register char *cp = name;
-	register int c;
+	char *cp = name;
+	int c;
 
 	do {
 		c = *cp;
@@ -377,9 +375,9 @@ dodcolon(filev, files, stamp, cmds)
 	char *stamp;
 	struct subcmd *cmds;
 {
-	register struct subcmd *sc;
-	register struct namelist *f;
-	register char **cpp;
+	struct subcmd *sc;
+	struct namelist *f;
+	char **cpp;
 	struct timeval tv[2];
 	struct stat stb;
 
@@ -493,9 +491,9 @@ static void
 rcmptime(st)
 	struct stat *st;
 {
-	register DIR *d;
-	register struct direct *dp;
-	register char *cp;
+	DIR *d;
+	struct direct *dp;
+	char *cp;
 	char *otp;
 	int len;
 
@@ -536,10 +534,10 @@ rcmptime(st)
 static void
 notify(file, rhost, to, lmod)
 	char *file, *rhost;
-	register struct namelist *to;
+	struct namelist *to;
 	time_t lmod;
 {
-	register int fd, len;
+	int fd, len;
 	struct stat stb;
 	FILE *pf;
 
@@ -616,7 +614,7 @@ inlist(list, file)
 	struct namelist *list;
 	char *file;
 {
-	register struct namelist *nl;
+	struct namelist *nl;
 
 	for (nl = list; nl != NULL; nl = nl->n_next)
 		if (!strcmp(file, nl->n_name))
@@ -631,8 +629,8 @@ int
 except(file)
 	char *file;
 {
-	register struct	subcmd *sc;
-	register struct	namelist *nl;
+	struct	subcmd *sc;
+	struct	namelist *nl;
 	regex_t s;
 	int err;
 
@@ -664,7 +662,7 @@ except(file)
 
 char *
 colon(cp)
-	register char *cp;
+	char *cp;
 {
 
 	while (*cp) {

@@ -1,4 +1,4 @@
-/*	$OpenBSD: rtsold.c,v 1.10 2001/07/09 22:37:33 itojun Exp $	*/
+/*	$OpenBSD: rtsold.c,v 1.18 2002/03/25 20:46:49 deraadt Exp $	*/
 /*	$KAME: rtsold.c,v 1.32 2001/07/09 22:34:07 itojun Exp $	*/
 
 /*
@@ -50,6 +50,8 @@
 #include <err.h>
 #include <stdarg.h>
 #include <ifaddrs.h>
+#include <util.h>
+
 #include "rtsold.h"
 
 struct ifinfo *iflist;
@@ -81,28 +83,27 @@ static int fflag = 0;
 /* a == b */
 #define TIMEVAL_EQ(a, b) (((a).tv_sec==(b).tv_sec) && ((a).tv_usec==(b).tv_usec))
 
-int main __P((int argc, char *argv[]));
+int main(int argc, char *argv[]);
 
 /* static variables and functions */
 static int mobile_node = 0;
-static int do_dump;
+volatile sig_atomic_t do_dump;
 static char *dumpfilename = "/var/run/rtsold.dump"; /* XXX: should be configurable */
-static char *pidfilename = "/var/run/rtsold.pid"; /* should be configurable */
 
-static int ifconfig __P((char *ifname));
+static int ifconfig(char *ifname);
 #if 0
-static int ifreconfig __P((char *ifname));
+static int ifreconfig(char *ifname);
 #endif
-static int make_packet __P((struct ifinfo *ifinfo));
-static struct timeval *rtsol_check_timer __P((void));
-static void TIMEVAL_ADD __P((struct timeval *a, struct timeval *b,
-			     struct timeval *result));
-static void TIMEVAL_SUB __P((struct timeval *a, struct timeval *b,
-			     struct timeval *result));
+static int make_packet(struct ifinfo *ifinfo);
+static struct timeval *rtsol_check_timer(void);
+static void TIMEVAL_ADD(struct timeval *a, struct timeval *b,
+    struct timeval *result);
+static void TIMEVAL_SUB(struct timeval *a, struct timeval *b,
+    struct timeval *result);
 
-static void rtsold_set_dump_file __P((void));
-static void usage __P((char *progname));
-static char **autoifprobe __P((void));
+static void rtsold_set_dump_file(void);
+static void usage(char *progname);
+static char **autoifprobe(void);
 
 int
 main(argc, argv)
@@ -115,7 +116,7 @@ main(argc, argv)
 #endif
 	int once = 0;
 	struct timeval *timeout;
-	struct fd_set fdset;
+	fd_set fdset;
 	char *argv0;
 	char *opts;
 
@@ -216,19 +217,24 @@ main(argc, argv)
 		/*NOTREACHED*/
 	}
 
+	if (!fflag)
+		daemon(0, 0);		/* act as a daemon */
+
 	/*
 	 * Open a socket for sending RS and receiving RA.
 	 * This should be done before calling ifinit(), since the function
 	 * uses the socket.
 	 */
 	if ((s = sockopen()) < 0) {
-		errx(1, "failed to open a socket");
+		warnmsg(LOG_ERR, __FUNCTION__, "failed to open a socket");
+		exit(1);
 		/*NOTREACHED*/
 	}
 	maxfd = s;
 #if 0
 	if ((rtsock = rtsock_open()) < 0) {
-		errx(1, "failed to open a socket");
+		warnmsg(LOG_ERR, __FUNCTION__, "failed to open a socket");
+		exit(1);
 		/*NOTREACHED*/
 	}
 	if (rtsock > maxfd)
@@ -237,12 +243,16 @@ main(argc, argv)
 
 	/* configuration per interface */
 	if (ifinit()) {
-		errx(1, "failed to initilizatoin interfaces");
+		warnmsg(LOG_ERR, __FUNCTION__,
+		    "failed to initilizatoin interfaces");
+		exit(1);
 		/*NOTREACHED*/
 	}
 	while (argc--) {
 		if (ifconfig(*argv)) {
-			errx(1, "failed to initialize %s", *argv);
+			warnmsg(LOG_ERR, __FUNCTION__,
+			    "failed to initialize %s", *argv);
+			exit(1);
 			/*NOTREACHED*/
 		}
 		argv++;
@@ -250,25 +260,18 @@ main(argc, argv)
 
 	/* setup for probing default routers */
 	if (probe_init()) {
-		errx(1, "failed to setup for probing routers");
+		warnmsg(LOG_ERR, __FUNCTION__,
+		    "failed to setup for probing routers");
+		exit(1);
 		/*NOTREACHED*/
 	}
 
-	if (!fflag)
-		daemon(0, 0);		/* act as a daemon */
-
 	/* dump the current pid */
 	if (!once) {
-		pid_t pid = getpid();
-		FILE *fp;
-
-		if ((fp = fopen(pidfilename, "w")) == NULL)
+		if (pidfile(NULL) < 0) {
 			warnmsg(LOG_ERR, __FUNCTION__,
-				"failed to open a log file(%s): %s",
-				pidfilename, strerror(errno));
-		else {
-			fprintf(fp, "%d\n", pid);
-			fclose(fp);
+				"failed to open a pid log file: %s",
+				strerror(errno));
 		}
 	}
 
@@ -279,7 +282,7 @@ main(argc, argv)
 #endif
 	while (1) {		/* main loop */
 		int e;
-		struct fd_set select_fd = fdset;
+		fd_set select_fd = fdset;
 
 		if (do_dump) {	/* SIGUSR1 */
 			do_dump = 0;
@@ -339,7 +342,7 @@ ifconfig(char *ifname)
 	}
 	if (find_ifinfo(sdl->sdl_index)) {
 		warnmsg(LOG_ERR, __FUNCTION__,
-			"interface %s was already cofigured", ifname);
+			"interface %s was already configured", ifname);
 		free(sdl);
 		return(-1);
 	}
@@ -713,15 +716,7 @@ usage(char *progname)
 }
 
 void
-#if __STDC__
 warnmsg(int priority, const char *func, const char *msg, ...)
-#else
-warnmsg(priority, func, msg, va_alist)
-	int priority;
-	const char *func;
-	const char *msg;
-	va_dcl
-#endif
 {
 	va_list ap;
 	char buf[BUFSIZ];

@@ -1,4 +1,4 @@
-/*	$OpenBSD: iostat.c,v 1.9 2001/05/14 07:22:06 angelos Exp $	*/
+/*	$OpenBSD: iostat.c,v 1.13 2002/03/14 16:44:25 mpech Exp $	*/
 /*	$NetBSD: iostat.c,v 1.10 1996/10/25 18:21:58 scottr Exp $	*/
 
 /*
@@ -104,6 +104,8 @@ char	*nlistf, *memf;
 int		hz, reps, interval;
 static int	todo = 0;
 
+volatile sig_atomic_t wantheader;
+
 #define ISSET(x, a)	((x) & (a))
 #define SHOW_CPU	0x0001
 #define SHOW_TTY	0x0002
@@ -111,17 +113,18 @@ static int	todo = 0;
 #define SHOW_STATS_2	0x0008
 #define SHOW_TOTALS	0x0080
 
-static void cpustats __P((void));
-static void disk_stats __P((double));
-static void disk_stats2 __P((double));
-static void header __P((int));
-static void usage __P((void));
-static void display __P((void));
-static void selectdrives __P((int, char **));
+static void cpustats(void);
+static void disk_stats(double);
+static void disk_stats2(double);
+static void sigheader(int);
+static void header();
+static void usage(void);
+static void display(void);
+static void selectdrives(int, char **);
 
-void dkswap __P((void));
-void dkreadstats __P((void));
-int dkinit __P((int));
+void dkswap(void);
+void dkreadstats(void);
+int dkinit(int);
 
 int
 main(argc, argv)
@@ -180,12 +183,13 @@ main(argc, argv)
 	tv.tv_usec = 0;
 
 	/* print a new header on sigcont */
-	(void)signal(SIGCONT, header);
+	(void)signal(SIGCONT, sigheader);
 
 	for (hdrcnt = 1;;) {
-		if (!--hdrcnt) {
-			header(0);
+		if (!--hdrcnt || wantheader) {
+			header();
 			hdrcnt = 20;
+			wantheader = 0;
 		}
 
 		if (!ISSET(todo, SHOW_TOTALS))
@@ -201,10 +205,16 @@ main(argc, argv)
 }
 
 static void
-header(signo)
+sigheader(signo)
 	int signo;
 {
-	register int i;
+	wantheader = 1;
+}
+
+static void
+header(void)
+{
+	int i;
 
 	/* Main Headers. */
 	if (ISSET(todo, SHOW_TTY))
@@ -250,7 +260,7 @@ static void
 disk_stats(etime)
 double etime;
 {
-	register int dn;
+	int dn;
 	double atime, mbps;
 
 	for (dn = 0; dn < dk_ndrive; ++dn) {
@@ -284,7 +294,7 @@ static void
 disk_stats2(etime)
 double etime;
 {
-	register int dn;
+	int dn;
 	double atime;
 
 	for (dn = 0; dn < dk_ndrive; ++dn) {
@@ -307,7 +317,7 @@ double etime;
 static void
 cpustats()
 {
-	register int state;
+	int state;
 	double time;
 
 	time = 0;

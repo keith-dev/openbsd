@@ -34,7 +34,7 @@
 /* ====================================================================
  * The Apache Software License, Version 1.1
  *
- * Copyright (c) 2000 The Apache Software Foundation.  All rights
+ * Copyright (c) 2000-2002 The Apache Software Foundation.  All rights
  * reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -106,7 +106,7 @@
 #include "ap_md5.h"
 #include "ap.h"
 #ifdef CHARSET_EBCDIC
-#include "ebcdic.h"
+#include "ap_ebcdic.h"
 #endif /*CHARSET_EBCDIC*/
 #if HAVE_CRYPT_H
 #include <crypt.h>

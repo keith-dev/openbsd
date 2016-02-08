@@ -87,11 +87,7 @@ static char rcsid[] =
 #include <sys/time.h>
 #include "defs.h"
 #include <arpa/inet.h>
-#ifdef __STDC__
 #include <stdarg.h>
-#else
-#include <varargs.h>
-#endif
 
 #define DEFAULT_TIMEOUT	4	/* How long to wait before retrying requests */
 #define DEFAULT_RETRIES 3	/* How many times to ask each router */
@@ -105,16 +101,16 @@ int	target_level = 0;
 vifi_t  numvifs;		/* to keep loader happy */
 				/* (see COPY_TABLES macro called in kern.c) */
 
-char *			inet_name __P((u_int32_t addr));
-void			ask __P((u_int32_t dst));
-void			ask2 __P((u_int32_t dst));
-int			get_number __P((int *var, int deflt, char ***pargv,
-					int *pargc));
-u_int32_t			host_addr __P((char *name));
-void			usage __P((void));
+char *			inet_name(u_int32_t addr);
+void			ask(u_int32_t dst);
+void			ask2(u_int32_t dst);
+int			get_number(int *var, int deflt, char ***pargv,
+			    int *pargc);
+u_int32_t		host_addr(char *name);
+void			usage(void);
 
 /* to shut up -Wstrict-prototypes */
-int			main __P((int argc, char *argv[]));
+int			main(int argc, char *argv[]);
 
 
 char   *
@@ -140,26 +136,12 @@ inet_name(addr)
  * message and the current debug level.  For errors of severity LOG_ERR or
  * worse, terminate the program.
  */
-#ifdef __STDC__
 void
 log(int severity, int syserr, char *format, ...)
 {
 	va_list ap;
 	char    fmt[100];
 
-	va_start(ap, format);
-#else
-void 
-log(severity, syserr, format, va_alist)
-	int     severity, syserr;
-	char   *format;
-	va_dcl
-{
-	va_list ap;
-	char    fmt[100];
-
-	va_start(ap);
-#endif
 	switch (debug) {
 	case 0:
 		if (severity > LOG_WARNING)
@@ -175,6 +157,7 @@ log(severity, syserr, format, va_alist)
 		if (severity == LOG_WARNING)
 			strcat(fmt, "warning - ");
 		strncat(fmt, format, 80);
+		va_start(ap, format);
 		vfprintf(stderr, fmt, ap);
 		va_end(ap);
 		if (syserr == 0)
@@ -514,7 +497,7 @@ main(argc, argv)
 		src = ip->ip_src.s_addr;
 		dst = ip->ip_dst.s_addr;
 		iphdrlen = ip->ip_hl << 2;
-		ipdatalen = ip->ip_len;
+		ipdatalen = ntohs(ip->ip_len);
 		if (iphdrlen + ipdatalen != recvlen) {
 		    log(LOG_WARNING, 0,
 		      "packet shorter (%u bytes) than hdr+data length (%u+%u)",

@@ -1,4 +1,4 @@
-/*	$OpenBSD: gencode.c,v 1.13 2001/06/25 23:03:32 provos Exp $	*/
+/*	$OpenBSD: gencode.c,v 1.16 2002/03/23 01:33:16 frantzen Exp $	*/
 
 /*
  * Copyright (c) 1990, 1991, 1992, 1993, 1994, 1995, 1996, 1997, 1998
@@ -22,17 +22,15 @@
  */
 #ifndef lint
 static const char rcsid[] =
-    "@(#) $Header: /cvs/src/lib/libpcap/gencode.c,v 1.13 2001/06/25 23:03:32 provos Exp $ (LBL)";
+    "@(#) $Header: /cvs/src/lib/libpcap/gencode.c,v 1.16 2002/03/23 01:33:16 frantzen Exp $ (LBL)";
 #endif
 
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/time.h>
 
-#ifdef __STDC__
 struct mbuf;
 struct rtentry;
-#endif
 
 #include <net/if.h>
 
@@ -40,14 +38,14 @@ struct rtentry;
 #include <netinet/if_ether.h>
 #include <netinet/if_arc.h>
 
+#include <net/if_pflog.h>
+#include <net/pfvar.h>
+
 #include <stdlib.h>
+#include <stddef.h>
 #include <memory.h>
 #include <setjmp.h>
-#ifdef __STDC__
 #include <stdarg.h>
-#else
-#include <varargs.h>
-#endif
 
 #include "pcap-int.h"
 
@@ -79,21 +77,11 @@ int	pcap_fddipad;
 
 /* VARARGS */
 __dead void
-#ifdef __STDC__
 bpf_error(const char *fmt, ...)
-#else
-bpf_error(fmt, va_alist)
-	const char *fmt;
-	va_dcl
-#endif
 {
 	va_list ap;
 
-#ifdef __STDC__
 	va_start(ap, fmt);
-#else
-	va_start(ap);
-#endif
 	if (bpf_pcap != NULL)
 		(void)vsnprintf(pcap_geterr(bpf_pcap), PCAP_ERRBUF_SIZE,
 		    fmt, ap);
@@ -363,6 +351,20 @@ pcap_compile_nopcap(int snaplen_arg, int linktype_arg,
 }
 
 /*
+ * Clean up a "struct bpf_program" by freeing all the memory allocated
+ * in it.
+ */
+void
+pcap_freecode(struct bpf_program *program)
+{
+	program->bf_len = 0;
+	if (program->bf_insns != NULL) {
+		free((char *)program->bf_insns);
+		program->bf_insns = NULL;
+	}
+}
+
+/*
  * Backpatch the blocks in 'list' to 'target'.  The 'sense' field indicates
  * which of the jt and jf fields has been resolved and which is a pointer
  * back to another unresolved block (or nil).  At least one of the fields
@@ -616,7 +618,7 @@ init_linktype(type)
 		return;
 
 	case DLT_PFLOG:
-		off_linktype = -1;
+		off_linktype = 0;
 		off_nl = 28;
 		return;
 
@@ -719,7 +721,6 @@ gen_linktype(proto)
 
 	case DLT_LOOP:
 	case DLT_ENC:
-	case DLT_PFLOG:
 	case DLT_NULL:
 		/* XXX */
 		if (proto == ETHERTYPE_IP)
@@ -727,6 +728,16 @@ gen_linktype(proto)
 #ifdef INET6
 		else if (proto == ETHERTYPE_IPV6)
 			return (gen_cmp(0, BPF_W, (bpf_int32)htonl(AF_INET6)));
+#endif /* INET6 */
+		else
+			return gen_false();
+		break;
+	case DLT_PFLOG:
+		if (proto == ETHERTYPE_IP)
+			return (gen_cmp(0, BPF_W, (bpf_int32)AF_INET));
+#ifdef INET6
+		else if (proto == ETHERTYPE_IPV6)
+			return (gen_cmp(0, BPF_W, (bpf_int32)AF_INET6));
 #endif /* INET6 */
 		else
 			return gen_false();
@@ -2877,7 +2888,15 @@ gen_inbound(dir)
 	switch (linktype) {
 	case DLT_SLIP:
 	case DLT_PPP:
-		/* These are okay. */
+		b0 = gen_relation(BPF_JEQ,
+				  gen_load(Q_LINK, gen_loadi(0), 1),
+				  gen_loadi(0),
+				  dir);
+		break;
+
+	case DLT_PFLOG:
+		b0 = gen_cmp(offsetof(struct pfloghdr, dir), BPF_H,
+		    (bpf_int32)((dir == 0) ? PF_IN : PF_OUT));
 		break;
 
 	default:
@@ -2886,10 +2905,76 @@ gen_inbound(dir)
 		/* NOTREACHED */
 	}
 
-	b0 = gen_relation(BPF_JEQ,
-			  gen_load(Q_LINK, gen_loadi(0), 1),
-			  gen_loadi(0),
-			  dir);
+	return (b0);
+}
+
+
+/* PF firewall log matched interface */
+struct block *
+gen_pf_ifname(char *ifname)
+{
+	struct block *b0;
+
+	if (linktype != DLT_PFLOG) {
+		bpf_error("ifname not supported on linktype 0x%x\n", linktype);
+		/* NOTREACHED */
+	}
+	if (strlen(ifname) >= sizeof(((struct pfloghdr *)0)->ifname)) {
+		bpf_error("ifname interface names can only be %d characters\n",
+		    sizeof(((struct pfloghdr *)0)->ifname) - 1);
+
+		/* NOTREACHED */
+	}
+	b0 = gen_bcmp(offsetof(struct pfloghdr, ifname), strlen(ifname),
+	    ifname);
+	return (b0);
+}
+
+
+/* PF firewall log rule number */
+struct block *
+gen_pf_rnr(int rnr)
+{
+	struct block *b0;
+
+	if (linktype != DLT_PFLOG) {
+		bpf_error("rnr not supported on linktype 0x%x\n", linktype);
+		/* NOTREACHED */
+	}
+
+	b0 = gen_cmp(offsetof(struct pfloghdr, rnr), BPF_H, (bpf_int32)rnr);
+	return (b0);
+}
+
+/* PF firewall log reason code */
+struct block *
+gen_pf_reason(int reason)
+{
+	struct block *b0;
+
+	if (linktype != DLT_PFLOG) {
+		bpf_error("reason not supported on linktype 0x%x\n", linktype);
+		/* NOTREACHED */
+	}
+
+	b0 = gen_cmp(offsetof(struct pfloghdr, reason), BPF_H,
+	    (bpf_int32)reason);
+	return (b0);
+}
+
+/* PF firewall log action */
+struct block *
+gen_pf_action(int action)
+{
+	struct block *b0;
+
+	if (linktype != DLT_PFLOG) {
+		bpf_error("action not supported on linktype 0x%x\n", linktype);
+		/* NOTREACHED */
+	}
+
+	b0 = gen_cmp(offsetof(struct pfloghdr, action), BPF_H,
+	    (bpf_int32)action);
 	return (b0);
 }
 

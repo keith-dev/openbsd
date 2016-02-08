@@ -1,4 +1,4 @@
-/*	$OpenBSD: auth_subr.c,v 1.6 2001/07/02 19:22:34 millert Exp $	*/
+/*	$OpenBSD: auth_subr.c,v 1.9 2002/03/13 21:39:41 millert Exp $	*/
 
 /*-
  * Copyright (c) 1995,1996,1997 Berkeley Software Design, Inc.
@@ -81,7 +81,7 @@ struct auth_session_t {
 	char	*challenge;		/* last challenge issued */
 	int	flags;			/* see below */
 	struct	passwd *pwd;		/* password entry for user */
-        struct	timeval now;		/* time of authentication */
+	struct	timeval now;		/* time of authentication */
 
 	int	state;			/* authenticated state */
 
@@ -157,7 +157,8 @@ void
 auth_clean(auth_session_t *as)
 {
 	struct rmfiles *rm;
-        struct authdata *data;
+	struct authopts *opt;
+	struct authdata *data;
 
 	as->state = 0;
 
@@ -170,6 +171,14 @@ auth_clean(auth_session_t *as)
 		as->rmlist = rm->next;
 		unlink(rm->file);
 		free(rm);
+	}
+
+	/*
+	 * Clean out the opt list
+	 */
+	while ((opt = as->optlist) != NULL) {
+		as->optlist = opt->next;
+		free(opt);
 	}
 
 	/*
@@ -199,8 +208,8 @@ int
 auth_close(auth_session_t *as)
 {
 	struct rmfiles *rm;
-        struct authopts *opt;
-        struct authdata *data;
+	struct authopts *opt;
+	struct authdata *data;
 	int s;
 
 	/*
@@ -228,10 +237,10 @@ auth_close(auth_session_t *as)
 	/*
 	 * Clean out the opt list
 	 */
-        while ((opt = as->optlist) != NULL) {
-                as->optlist = opt->next;
-                free(opt);
-        }
+	while ((opt = as->optlist) != NULL) {
+		as->optlist = opt->next;
+		free(opt);
+	}
 
 	/*
 	 * Clean out data
@@ -241,6 +250,12 @@ auth_close(auth_session_t *as)
 			memset(as->data->ptr, 0, as->data->len);
 		as->data = data->next;
 		free(data);
+	}
+
+	if (as->pwd != NULL) {
+		memset(as->pwd->pw_passwd, 0, strlen(as->pwd->pw_passwd));
+		free(as->pwd);
+		as->pwd = NULL;
 	}
 
 	/*
@@ -281,7 +296,7 @@ auth_challenge(auth_session_t *as)
 	}
 
 	snprintf(path, sizeof(path), _PATH_AUTHPROG "%s", as->style);
-        auth_call(as, path, as->style, "-s", "challenge", as->name,
+	auth_call(as, path, as->style, "-s", "challenge", as->name,
 	    as->class, NULL);
 	if (as->state & AUTH_CHALLENGE)
 		as->challenge = auth_getvalue(as, "challenge");
@@ -833,12 +848,12 @@ auth_call(auth_session_t *as, char *path, ...)
 		_auth_spool(as, pfd[0]);
 		close(pfd[0]);
 		if (waitpid(pid, &status, 0) < 0) {
-			syslog(LOG_ERR, "%s: waitpid: %m", path);
-			_warnx("internal failure");
-			goto fail;
-		}
-
-		if (!WIFEXITED(status))
+			if (errno != ECHILD) {
+				syslog(LOG_ERR, "%s: waitpid: %m", path);
+				_warnx("internal failure");
+				goto fail;
+			}
+		} else if (!WIFEXITED(status))
 			goto fail;
 	}
 

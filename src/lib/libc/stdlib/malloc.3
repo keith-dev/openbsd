@@ -34,7 +34,7 @@
 .\" OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 .\" SUCH DAMAGE.
 .\"
-.\"	$OpenBSD: malloc.3,v 1.20 2000/10/25 15:23:15 aaron Exp $
+.\"	$OpenBSD: malloc.3,v 1.24 2001/12/05 09:49:39 deraadt Exp $
 .\"
 .Dd August 27, 1996
 .Dt MALLOC 3
@@ -79,6 +79,13 @@ If the space is of
 or larger, the memory returned will be page-aligned.
 .Pp
 Allocation of a zero size object returns a pointer to a zero size object.
+This zero size object is access protected, so any access to it will
+generate an exception (SIGSEGV).
+Many zero-sized objects can be placed consecutively in shared
+protected pages.
+The minimum size of the protection on each object is suitably aligned and
+sized as previously stated, but the protection may extend further depending
+on where in a protected zone the object lands.
 .Pp
 The
 .Fn calloc
@@ -206,13 +213,13 @@ Always reallocate when
 .Fn realloc
 is called, even if the initial allocation was big enough.
 This can substantially aid in compacting memory.
-.Pp
-.It Cm U
-.Dq utrace .
-Generate entries for
-.Xr ktrace 1
-for all operations.
-Consult the source for this one.
+.\".Pp
+.\".It Cm U
+.\".Dq utrace .
+.\"Generate entries for
+.\".Xr ktrace 1
+.\"for all operations.
+.\"Consult the source for this one.
 .Pp
 .It Cm X
 .Dq xmalloc .

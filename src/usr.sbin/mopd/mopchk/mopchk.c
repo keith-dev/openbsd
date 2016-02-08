@@ -1,4 +1,4 @@
-/*	$OpenBSD: mopchk.c,v 1.4 1998/03/04 20:21:54 deraadt Exp $
+/*	$OpenBSD: mopchk.c,v 1.6 2002/02/16 21:28:04 millert Exp $	*/
 
 /*
  * Copyright (c) 1995-96 Mats O Jansson.  All rights reserved.
@@ -30,7 +30,7 @@
  */
 
 #ifndef LINT
-static char rcsid[] = "$OpenBSD: mopchk.c,v 1.4 1998/03/04 20:21:54 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: mopchk.c,v 1.6 2002/02/16 21:28:04 millert Exp $";
 #endif
 
 /*
@@ -56,8 +56,8 @@ struct if_info *iflist;
 void   Usage         (/* void */);
 void   mopProcess    (/* struct if_info *, u_char * */);
 #else
-void   Usage         __P((void));
-void   mopProcess    __P((struct if_info *, u_char *));
+void   Usage(void);
+void   mopProcess(struct if_info *, u_char *);
 #endif
 
 int     AllFlag = 0;		/* listen on "all" interfaces  */

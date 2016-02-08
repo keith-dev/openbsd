@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.1 1996/06/12 11:21:41 deraadt Exp $
+#	$OpenBSD: Makefile,v 1.3 2002/02/24 00:00:36 hugh Exp $
 
 PROG=	scsi
 MAN=	scsi.8

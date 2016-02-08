@@ -1,5 +1,5 @@
 /*	$OpenPackages$ */
-/*	$OpenBSD: main.c,v 1.53 2001/06/05 11:59:11 espie Exp $ */
+/*	$OpenBSD: main.c,v 1.57 2002/03/02 00:23:14 espie Exp $ */
 /*	$NetBSD: main.c,v 1.34 1997/03/24 20:56:36 gwr Exp $	*/
 
 /*
@@ -200,11 +200,7 @@ MainParseArgs(argc, argv)
 	int forceJobs = 0;
 
 	optind = 1;	/* since we're called more than once */
-#ifdef REMOTE
-# define OPTFLAGS "BD:I:L:PSV:d:ef:ij:km:nqrst"
-#else
 # define OPTFLAGS "BD:I:PSV:d:ef:ij:km:nqrst"
-#endif
 # define OPTLETTERS "BPSiknqrst"
 rearg:	while ((c = getopt(argc, argv, OPTFLAGS)) != -1) {
 		switch (c) {
@@ -220,21 +216,6 @@ rearg:	while ((c = getopt(argc, argv, OPTFLAGS)) != -1) {
 			Lst_AtEnd(&varstoprint, optarg);
 			record_option(c, optarg);
 			break;
-#ifdef REMOTE
-		case 'L': {
-		   char *endptr;
-
-			maxLocal = strtol(optarg, &endptr, 0);
-			if (endptr == optarg) {
-				fprintf(stderr,
-					"make: illegal argument to -L option -- %s -- not a number\n",
-					optarg);
-				usage();
-			}
-			record_option(c, optend);
-			break;
-		}
-#endif
 		case 'd': {
 			char *modules = optarg;
 
@@ -307,9 +288,7 @@ rearg:	while ((c = getopt(argc, argv, OPTFLAGS)) != -1) {
 				usage();
 			}
 			maxJobs = atoi(optarg);
-#ifndef REMOTE
 			maxLocal = maxJobs;
-#endif
 			record_option(c, optarg);
 			break;
 		}
@@ -471,7 +450,7 @@ main(argc, argv)
 	int argc;
 	char **argv;
 {
-	LIST targs;			/* target nodes to create */
+	static LIST targs;	/* target nodes to create */
 	bool outOfDate = true;	/* false if all targets up to date */
 	struct stat sb, sa;
 	char *p, *path, *pathp, *pwd;
@@ -587,10 +566,10 @@ main(argc, argv)
 	esetenv("PWD", objdir);
 	unsetenv("CDPATH");
 
-	Lst_Init(create);
-	Lst_Init(&makefiles);
-	Lst_Init(&varstoprint);
-	Lst_Init(&targs);
+	Static_Lst_Init(create);
+	Static_Lst_Init(&makefiles);
+	Static_Lst_Init(&varstoprint);
+	Static_Lst_Init(&targs);
 
 	beSilent = false;		/* Print commands as executed */
 	ignoreErrors = false;		/* Pay attention to non-zero returns */
@@ -604,11 +583,7 @@ main(argc, argv)
 	debug = 0;			/* No debug verbosity, please. */
 
 	maxLocal = DEFMAXLOCAL; 	/* Set default local max concurrency */
-#ifdef REMOTE
-	maxJobs = DEFMAXJOBS;		/* Set default max concurrency */
-#else
 	maxJobs = maxLocal;
-#endif
 	compatMake = false;		/* No compat mode */
 
 

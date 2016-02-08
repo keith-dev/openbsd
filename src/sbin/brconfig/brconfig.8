@@ -1,6 +1,6 @@
-.\"	$OpenBSD: brconfig.8,v 1.27 2001/08/20 05:57:55 mpech Exp $
+.\"	$OpenBSD: brconfig.8,v 1.34 2002/01/17 15:55:30 espie Exp $
 .\"
-.\" Copyright (c) 1999, 2000 Jason L. Wright (jason@thought.net)
+.\" Copyright (c) 1999-2001 Jason L. Wright (jason@thought.net)
 .\" All rights reserved.
 .\"
 .\" Redistribution and use in source and binary forms, with or without
@@ -63,8 +63,11 @@ segment and to provide a transparent filter for
 .Xr ip 4
 datagrams.
 .Pp
-In the first synopsis, the command
-will list the status of all bridges in the system.
+In the first synopsis, the
+.Fl a
+flag will cause
+.Nm
+to list the status of all bridges in the system.
 In the second, its command line consists
 of the name of a bridge and a set of operations to be
 performed on that bridge.
@@ -100,6 +103,15 @@ removed from the bridge.
 .It Cm del
 Alias for
 .Cm delete .
+.It Cm addspan Ar interface-name
+Add the interface named by
+.Ar interface-name
+as a span port on the bridge.
+See the SPAN PORTS section for more details.
+.It Cm delspan Ar interface-name
+Delete the interface named by
+.Ar interface-name
+from the list of span ports of the bridge.
 .It Cm maxaddr Ar size
 Set the address cache size to
 .Ar size .
@@ -176,7 +188,7 @@ flag on the bridge interface.
 .It Cm rule Op Ar rulespec
 Add a filtering rule to an interface.
 Rules have a similiar syntax to
-.Xr ipf 4 .
+.Xr pf 4 .
 Rules can be used to selectively block or pass frames based on Ethernet
 MAC address.
 Rules are processed in the order in which they were added
@@ -216,22 +228,22 @@ Defaults to 128, minimum of 0, maximum of 255.
 .El
 .Sh EXAMPLES
 .Bl -tag -width brconfig
-.It Cm brconfig bridge0 add rl0 add xl0 up
+.It Cm # brconfig bridge0 add rl0 add xl0 up
 Add the Ethernet interfaces rl0 and xl0 to the bridge bridge0, and
 start the bridge forwarding packets.
-.It Cm brconfig bridge0
+.It Cm # brconfig bridge0
 Retrieve a list of interfaces that are members of bridge0, and the addresses
 learned by the bridge.
-.It Cm brconfig bridge0 down
+.It Cm # brconfig bridge0 down
 Stop bridge0 from forwarding packets.
-.It Cm brconfig bridge0 delete xl0
+.It Cm # brconfig bridge0 delete xl0
 Remove the interface xl0 from the bridge bridge0.
-.It Cm brconfig bridge0 flush
+.It Cm # brconfig bridge0 flush
 Flush all dynamically learned addresses from the address cache.
-.It Cm brconfig bridge0 flushall
+.It Cm # brconfig bridge0 flushall
 Remove all addresses, including static addresses, from the address cache.
-.It Cm brconfig bridge0 -learn xl0 static xl0 8:0:20:1e:2f:2b
-.It Cm brconfig bridge0 -discover xl0
+.It Cm # brconfig bridge0 -learn xl0 static xl0 8:0:20:1e:2f:2b
+.It Cm # brconfig bridge0 -discover xl0
 The examples above mark the xl0 interface so that it will not learn
 addresses and adds a static entry for the host 8:0:20:1e:2f:2b on the xl0
 segment.
@@ -242,10 +254,10 @@ and means that bogus MAC addresses seen by the xl0 side of the bridge
 will not be propagated to the rest of the network.
 Also, no packets will be sent on xl0 segment by the bridge unless they are
 broadcast packets or are for 8:0:20:1e:2f:2b.
-.It Cm "brconfig bridge0 rule pass in on fxp0 src 0:1:2:3:4:5 dst 5:4:3:2:1:0"
-.It Cm "brconfig bridge0 rule pass out on fxp0 src 5:4:3:2:1:0 dst 0:1:2:3:4:5"
-.It Cm brconfig bridge0 rule block in on fxp0
-.It Cm brconfig bridge0 rule block out on fxp0
+.It Cm "# brconfig bridge0 rule pass in on fxp0 src 0:1:2:3:4:5 dst 5:4:3:2:1:0"
+.It Cm "# brconfig bridge0 rule pass out on fxp0 src 5:4:3:2:1:0 dst 0:1:2:3:4:5"
+.It Cm # brconfig bridge0 rule block in on fxp0
+.It Cm # brconfig bridge0 rule block out on fxp0
 The above commands will set up a filter so that 0:1:2:3:4:5 can send frames
 through fxp0 only to 5:4:3:2:1, and 5:4:3:2:1:0 can return frames through
 fxp0 to 0:1:2:3:4:5.
@@ -255,21 +267,25 @@ All other traffic trying to go into and be sent from fxp0 will be blocked.
 The bridge can also be used to tunnel ethernet frames over IPv4 or
 IPv6 by using the
 .Xr gif 4
-interface.  In addition to adding Ethernet interfaces,
+interface.
+In addition to adding Ethernet interfaces,
 one or more
 .Xr gif 4 ,
-interfaces are added as members of the bridge.  Ethernet frames sent
+interfaces are added as members of the bridge.
+Ethernet frames sent
 through the
 .Xr gif 4
 interfaces are encapsulated inside
 .Xr ip 4
 datagrams and sent across the network to another bridge, which
 decapsulates the datagram and then processes the resulting Ethernet
-frame as if it had originated on a normal Ethernet interface.  This
-effectively allows a layer-2 network to be extended from one point to
-another, possibly through the Internet. This mechanism may be used in
+frame as if it had originated on a normal Ethernet interface.
+This effectively allows a layer-2 network to be extended from one point to
+another, possibly through the Internet.
+This mechanism may be used in
 conjunction with IPsec, by specifying the appropriate IPsec flows
-between the two bridges. To only protect the bridge traffic between
+between the two bridges.
+To only protect the bridge traffic between
 the two bridges, the transport protocol 97 (etherip) selector may be
 used in
 .Xr ipsecadm 8
@@ -344,7 +360,8 @@ and
 files, using the ! operator.
 .Sh SPANNING TREE
 The bridge has support for 802.1D Spanning Tree Protocol (STP), which can
-be used to detect and remove loops in a network topology.  Using the
+be used to detect and remove loops in a network topology.
+Using the
 .Cm stp
 or
 .Cm -stp
@@ -355,6 +372,16 @@ STP can be enabled or disabled on each port.
 STP will not work on
 .Xr gif 4
 members because they lack a hardware MAC address.
+.Sh SPAN PORTS
+The bridge can have interfaces added to it as span ports.
+Span ports transmit a copy of every frame received by the bridge.
+This is most useful for snooping a bridged network passively on
+another host connected to one of the span ports of the bridge.
+Span ports cannot be bridge members, instead the
+.Cm addspan
+and
+.Cm delspan
+commands are used to add and delete span ports to and from a bridge.
 .Sh SEE ALSO
 .Xr bridge 4 ,
 .Xr gif 4 ,
@@ -386,9 +413,3 @@ TI ThunderLAN (see
 which receives its own transmissions (this renders the address learning
 cache useless).
 Most other chipsets work fine though.
-.Pp
-The packets generated by the
-.Xr gif 4
-interfaces must not cause transmission over one of the "real" ethernet
-member interfaces of the bridge, or else an infinite packet forwarding loop
-will occur.

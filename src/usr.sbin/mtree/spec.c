@@ -1,5 +1,5 @@
 /*	$NetBSD: spec.c,v 1.6 1995/03/07 21:12:12 cgd Exp $	*/
-/*	$OpenBSD: spec.c,v 1.12 2001/08/10 02:37:14 millert Exp $	*/
+/*	$OpenBSD: spec.c,v 1.16 2002/03/14 17:01:16 millert Exp $	*/
 
 /*-
  * Copyright (c) 1989, 1993
@@ -38,7 +38,7 @@
 #if 0
 static const char sccsid[] = "@(#)spec.c	8.1 (Berkeley) 6/6/93";
 #else
-static const char rcsid[] = "$OpenBSD: spec.c,v 1.12 2001/08/10 02:37:14 millert Exp $";
+static const char rcsid[] = "$OpenBSD: spec.c,v 1.16 2002/03/14 17:01:16 millert Exp $";
 #endif
 #endif /* not lint */
 
@@ -51,19 +51,20 @@ static const char rcsid[] = "$OpenBSD: spec.c,v 1.12 2001/08/10 02:37:14 millert
 #include <unistd.h>
 #include <stdio.h>
 #include <ctype.h>
+#include <vis.h>
 #include "mtree.h"
 #include "extern.h"
 
 int lineno;				/* Current spec line number. */
 
-static void	 set __P((char *, NODE *));
-static void	 unset __P((char *, NODE *));
+static void	 set(char *, NODE *);
+static void	 unset(char *, NODE *);
 
 NODE *
 spec()
 {
-	register NODE *centry, *last;
-	register char *p;
+	NODE *centry, *last;
+	char *p;
 	NODE ginfo, *root;
 	int c_cur, c_next;
 	char buf[2048];
@@ -144,10 +145,14 @@ noparent:		error("no parent node");
 		if ((centry = calloc(1, sizeof(NODE) + strlen(p))) == NULL)
 			error("%s", strerror(errno));
 		*centry = ginfo;
-		(void)strcpy(centry->name, p);
 #define	MAGIC	"?*["
 		if (strpbrk(p, MAGIC))
 			centry->flags |= F_MAGIC;
+		if (strunvis(centry->name, p) == -1) {
+			fprintf(stderr,
+			    "mtree: filename (%s) encoded incorrectly\n", p);
+			strcpy(centry->name, p);
+		}
 		set(NULL, centry);
 
 		if (!root) {
@@ -168,9 +173,9 @@ noparent:		error("no parent node");
 static void
 set(t, ip)
 	char *t;
-	register NODE *ip;
+	NODE *ip;
 {
-	register int type;
+	int type;
 	char *kw, *val = NULL;
 	struct group *gr;
 	struct passwd *pw;
@@ -243,8 +248,13 @@ set(t, ip)
 				error("invalid size %s", val);
 			break;
 		case F_SLINK:
-			if ((ip->slink = strdup(val)) == NULL)
+			if ((ip->slink = malloc(strlen(val) + 1)) == NULL)
 				error("%s", strerror(errno));
+			if (strunvis(ip->slink, val) == -1) {
+				fprintf(stderr,
+				    "mtree: filename (%s) encoded incorrectly\n", val);
+				strcpy(ip->slink, val);
+			}
 			break;
 		case F_TIME:
 			ip->st_mtimespec.tv_sec = strtoul(val, &ep, 10);
@@ -304,9 +314,9 @@ set(t, ip)
 static void
 unset(t, ip)
 	char *t;
-	register NODE *ip;
+	NODE *ip;
 {
-	register char *p;
+	char *p;
 
 	while ((p = strtok(t, "\n\t ")))
 		ip->flags &= ~parsekey(p, NULL);

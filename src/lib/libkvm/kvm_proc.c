@@ -1,4 +1,4 @@
-/*	$OpenBSD: kvm_proc.c,v 1.8 2001/06/27 06:16:45 art Exp $	*/
+/*	$OpenBSD: kvm_proc.c,v 1.14 2002/02/17 19:42:25 millert Exp $	*/
 /*	$NetBSD: kvm_proc.c,v 1.30 1999/03/24 05:50:50 mrg Exp $	*/
 /*-
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
@@ -77,7 +77,7 @@
 #if 0
 static char sccsid[] = "@(#)kvm_proc.c	8.3 (Berkeley) 9/23/93";
 #else
-static char *rcsid = "$OpenBSD: kvm_proc.c,v 1.8 2001/06/27 06:16:45 art Exp $";
+static char *rcsid = "$OpenBSD: kvm_proc.c,v 1.14 2002/02/17 19:42:25 millert Exp $";
 #endif
 #endif /* LIBC_SCCS and not lint */
 
@@ -101,11 +101,10 @@ static char *rcsid = "$OpenBSD: kvm_proc.c,v 1.8 2001/06/27 06:16:45 art Exp $";
 #include <nlist.h>
 #include <kvm.h>
 
-#include <vm/vm.h>
-#include <vm/vm_param.h>
-
 #include <uvm/uvm_extern.h>
 #include <uvm/uvm_amap.h>
+#include <machine/vmparam.h>
+#include <machine/pmap.h>
 
 #include <sys/sysctl.h>
 
@@ -118,19 +117,17 @@ static char *rcsid = "$OpenBSD: kvm_proc.c,v 1.8 2001/06/27 06:16:45 art Exp $";
 #define KREAD(kd, addr, obj) \
 	(kvm_read(kd, addr, (void *)(obj), sizeof(*obj)) != sizeof(*obj))
 
-ssize_t		kvm_uread __P((kvm_t *, const struct proc *, u_long, char *,
-		    size_t));
+ssize_t		kvm_uread(kvm_t *, const struct proc *, u_long, char *, size_t);
 
-static char	**kvm_argv __P((kvm_t *, const struct proc *, u_long, int,
-		    int));
-static int	kvm_deadprocs __P((kvm_t *, int, int, u_long, u_long, int));
-static char	**kvm_doargv __P((kvm_t *, const struct kinfo_proc *, int,
-		    void (*)(struct ps_strings *, u_long *, int *)));
-static int	kvm_proclist __P((kvm_t *, int, int, struct proc *,
-		    struct kinfo_proc *, int));
-static int	proc_verify __P((kvm_t *, u_long, const struct proc *));
-static void	ps_str_a __P((struct ps_strings *, u_long *, int *));
-static void	ps_str_e __P((struct ps_strings *, u_long *, int *));
+static char	**kvm_argv(kvm_t *, const struct proc *, u_long, int, int);
+static int	kvm_deadprocs(kvm_t *, int, int, u_long, u_long, int);
+static char	**kvm_doargv(kvm_t *, const struct kinfo_proc *, int,
+		    void (*)(struct ps_strings *, u_long *, int *));
+static int	kvm_proclist(kvm_t *, int, int, struct proc *,
+		    struct kinfo_proc *, int);
+static int	proc_verify(kvm_t *, u_long, const struct proc *);
+static void	ps_str_a(struct ps_strings *, u_long *, int *);
+static void	ps_str_e(struct ps_strings *, u_long *, int *);
 
 char *
 _kvm_uread(kd, p, va, cnt)

@@ -1,4 +1,4 @@
-/*	$OpenBSD: sa.c,v 1.48 2001/08/15 13:06:53 ho Exp $	*/
+/*	$OpenBSD: sa.c,v 1.54 2002/03/17 21:50:59 angelos Exp $	*/
 /*	$EOM: sa.c,v 1.112 2000/12/12 00:22:52 niklas Exp $	*/
 
 /*
@@ -46,6 +46,7 @@
 
 #include "sysdep.h"
 
+#include "connection.h"
 #include "cookie.h"
 #include "doi.h"
 #include "exchange.h"
@@ -59,10 +60,8 @@
 #include "cert.h"
 #include "policy.h"
 #include "key.h"
-
-#ifndef SA_LEN
-#define SA_LEN(x)		(x)->sa_len
-#endif
+#include "ipsec.h"
+#include "ipsec_num.h"
 
 /* Initial number of bits from the cookies used as hash.  */
 #define INITIAL_BUCKET_BITS 6
@@ -77,7 +76,6 @@
 #if 0
 static void sa_resize (void);
 #endif
-static void sa_dump (char *, struct sa *);
 static void sa_soft_expire (void *);
 static void sa_hard_expire (void *);
 
@@ -206,8 +204,8 @@ sa_check_peer (struct sa *sa, void *v_addr)
     return 0;
 
   sa->transport->vtbl->get_dst (sa->transport, &dst);
-  return dst->sa_len == addr->len
-    && memcmp (dst, addr->addr, dst->sa_len) == 0;
+  return sysdep_sa_len (dst) == addr->len
+    && memcmp (dst, addr->addr, sysdep_sa_len (dst)) == 0;
 }
 
 struct dst_isakmpspi_arg {
@@ -231,8 +229,8 @@ isakmp_sa_check (struct sa *sa, void *v_arg)
   /* verify address is either src or dst for this sa */
   sa->transport->vtbl->get_dst (sa->transport, &dst);
   sa->transport->vtbl->get_src (sa->transport, &src);
-  if (memcmp (src, arg->dst, SA_LEN(src)) &&
-      memcmp (dst, arg->dst, SA_LEN(dst)))
+  if (memcmp (src, arg->dst, sysdep_sa_len (src)) &&
+      memcmp (dst, arg->dst, sysdep_sa_len (dst)))
     return 0;
 
   /* match icookie+rcookie against spi */
@@ -410,32 +408,33 @@ sa_create (struct exchange *exchange, struct transport *t)
  * Dump the internal state of SA to the report channel, with HEADER
  * prepended to each line.
  */
-static void
-sa_dump (char *header, struct sa *sa)
+void
+sa_dump (int cls, int level, char *header, struct sa *sa)
 {
   struct proto *proto;
   char spi_header[80];
   int i;
 
-  LOG_DBG ((LOG_REPORT, 0, "%s: %p %s phase %d doi %d flags 0x%x",
-	    header, sa, sa->name ? sa->name : "<unnamed>", sa->phase,
-	    sa->doi->id, sa->flags));
-  LOG_DBG ((LOG_REPORT, 0,
-	    "%s: icookie %08x%08x rcookie %08x%08x", header,
+  LOG_DBG ((cls, level, "%s: %p %s phase %d doi %d flags 0x%x", header, sa,
+	    sa->name ? sa->name : "<unnamed>", sa->phase, sa->doi->id,
+	    sa->flags));
+  LOG_DBG ((cls, level, "%s: icookie %08x%08x rcookie %08x%08x", header,
 	    decode_32 (sa->cookies), decode_32 (sa->cookies + 4),
 	    decode_32 (sa->cookies + 8), decode_32 (sa->cookies + 12)));
-  LOG_DBG ((LOG_REPORT, 0, "%s: msgid %08x refcnt %d", header,
+  LOG_DBG ((cls, level, "%s: msgid %08x refcnt %d", header,
 	    decode_32 (sa->message_id), sa->refcnt));
+  LOG_DBG ((cls, level, "%s: life secs %llu kb %llu", header, sa->seconds,
+	    sa->kilobytes));
   for (proto = TAILQ_FIRST (&sa->protos); proto;
        proto = TAILQ_NEXT (proto, link))
     {
-      LOG_DBG ((LOG_REPORT, 0,
-		"%s: suite %d proto %d", header, proto->no, proto->proto));
-      LOG_DBG ((LOG_REPORT, 0,
+      LOG_DBG ((cls, level, "%s: suite %d proto %d", header, proto->no,
+		proto->proto));
+      LOG_DBG ((cls, level, 
 		"%s: spi_sz[0] %d spi[0] %p spi_sz[1] %d spi[1] %p", header,
 		proto->spi_sz[0], proto->spi[0], proto->spi_sz[1],
 		proto->spi[1]));
-      LOG_DBG ((LOG_REPORT, 0, "%s: %s, %s", header,
+      LOG_DBG ((cls, level, "%s: %s, %s", header,
 		!sa->doi ? "<nodoi>"
 		: sa->doi->decode_ids ("initiator id: %s, responder id: %s",
 				     sa->id_i, sa->id_i_len,
@@ -446,9 +445,147 @@ sa_dump (char *header, struct sa *sa)
 	if (proto->spi[i])
 	  {
 	    snprintf (spi_header, 80, "%s: spi[%d]", header, i);
-	    LOG_DBG_BUF ((LOG_REPORT, 0, spi_header, proto->spi[i],
+	    LOG_DBG_BUF ((cls, level, spi_header, proto->spi[i],
 			  proto->spi_sz[i]));
 	  }
+    }
+}
+
+/*
+ * Display the SA's two SPI values.
+ */
+static void
+report_spi (FILE *fd, const u_int8_t *buf, size_t sz, int index)
+{
+  char s[73];
+  int i, j;
+
+  {
+    for (i = j = 0; i < sz;)
+      {
+	sprintf (s + j, "%02x", buf[i++]);
+	j += 2;
+	if (i % 4 == 0)
+	  {
+	    if (i % 32 == 0)
+	      {
+		s[j] = '\0';
+		fprintf(fd, "%s", s);
+		j = 0;
+	      }
+	    else
+	      s[j++] = ' ';
+	  }
+      }
+      if (j)
+	{
+	  s[j] = '\0';
+	  fprintf(fd, "SPI %d: %s\n", index, s);
+	}
+  }
+}
+
+
+/*
+ * Display the transform names to file SA_FILE.
+ * Structure is taken from pf_key_v2.c, pf_key_v2_set_spi.
+ * Transform names are taken from /usr/src/sys/crypto/xform.c.
+ */
+static void
+report_proto (FILE *fd, struct proto *proto)
+{
+  int keylen, hashlen;
+  struct ipsec_proto *iproto = proto->data;
+
+  switch (proto->proto)
+    {
+    case IPSEC_PROTO_IPSEC_ESP:
+      keylen = ipsec_esp_enckeylength (proto);
+      hashlen = ipsec_esp_authkeylength (proto);
+      fprintf(fd, "Transform: IPsec ESP\n");
+      fprintf(fd, "Encryption key length: %d\n", keylen);
+      fprintf(fd, "Authentication key length: %d\n", hashlen);
+
+      switch (proto->id)
+	{
+	case IPSEC_ESP_DES:
+	case IPSEC_ESP_DES_IV32:
+	case IPSEC_ESP_DES_IV64:
+	  fprintf(fd, "Encryption algorithm: DES\n");
+	  break;
+
+	case IPSEC_ESP_3DES:
+	  fprintf(fd, "Encryption algorithm: 3DES\n");
+	  break;
+
+	case IPSEC_ESP_AES:
+	  fprintf(fd, "Encryption algorithm: Rijndael-128/AES\n");
+	  break;
+
+	case IPSEC_ESP_CAST:
+	  fprintf(fd, "Encryption algorithm: Cast-128\n");
+	  break;
+
+	case IPSEC_ESP_BLOWFISH:
+	  fprintf(fd, "Encryption algorithm: Blowfish\n");
+	  break;
+
+	default:
+	  fprintf(fd, "Unknown encryption algorithm %d\n", proto->id);
+	}
+
+      switch (iproto->auth)
+	{
+	case IPSEC_AUTH_HMAC_MD5:
+	  fprintf(fd, "Authentication algorithm: HMAC-MD5\n");
+	  break;
+
+	case IPSEC_AUTH_HMAC_SHA:
+	  fprintf(fd, "Authentication algorithm: HMAC-SHA1\n");
+	  break;
+
+        case IPSEC_AUTH_HMAC_RIPEMD:
+	  fprintf(fd, "Authentication algorithm: HMAC-RIPEMD-160\n");
+	  break;
+
+	case IPSEC_AUTH_DES_MAC:
+	case IPSEC_AUTH_KPDK:
+	  /* XXX We should be supporting KPDK */
+	  fprintf(fd, "Unknown authentication algorithm: %d", iproto->auth); 
+	  break;
+
+	default:
+	  fprintf(fd, "Authentication algorithm not used.\n");
+	}
+      break;
+
+    case IPSEC_PROTO_IPSEC_AH:
+      hashlen = ipsec_ah_keylength (proto);
+      fprintf(fd, "Transform: IPsec AH\n");
+      fprintf(fd, "Encryption not used.\n");
+      fprintf(fd, "Authentication key length: %d\n", hashlen);
+
+      switch (proto->id)
+	{
+	case IPSEC_AH_MD5:
+	  fprintf(fd, "Authentication algorithm: HMAC-MD5\n");
+	  break;
+
+	case IPSEC_AH_SHA:
+	  fprintf(fd, "Authentication algorithm: HMAC-SHA1\n");
+	  break;
+
+	case IPSEC_AH_RIPEMD:
+	  fprintf(fd, "Authentication algorithm: HMAC-RIPEMD-160\n");
+	  break;
+
+	default:
+	  fprintf(fd, "Unknown authentication algorithm: %d\n", proto->id);
+	}
+      break;
+
+    default:
+      fprintf(fd, "report_proto: invalid proto %d\n", proto->proto);
     }
 }
 
@@ -461,7 +598,68 @@ sa_report (void)
 
   for (i = 0; i <= bucket_mask; i++)
     for (sa = LIST_FIRST (&sa_tab[i]); sa; sa = LIST_NEXT (sa, link))
-      sa_dump ("sa_report", sa);
+      sa_dump (LOG_REPORT, 0, "sa_report", sa);
+}
+
+
+/*
+ * Print an SA's connection details to file SA_FILE.
+ */
+static void
+sa_dump_all (FILE *fd, struct sa *sa)
+{
+  struct proto *proto;
+  int i;
+
+  /* SA name and phase. */
+  fprintf(fd, "SA name: %s", sa->name ? sa->name : "<unnamed>");
+  fprintf(fd, " (Phase %d)\n", sa->phase);
+
+  /* Source and destination IPs. */
+  fprintf(fd, sa->transport == NULL ? "<no transport>" :
+      sa->transport->vtbl->decode_ids (sa->transport));
+  fprintf(fd, "\n");
+
+  /* Transform information. */
+  for (proto = TAILQ_FIRST (&sa->protos); proto;
+      proto = TAILQ_NEXT (proto, link))
+    {
+      /* SPI values. */
+      for (i = 0; i < 2; i++)
+	if (proto->spi[i])
+	  report_spi(fd, proto->spi[i], proto->spi_sz[i], i);
+	else
+	  fprintf(fd, "SPI %d not defined.", i);
+
+        /* Proto values. */
+	report_proto(fd, proto);
+
+	/* SA separator. */
+	fprintf(fd, "\n");
+    }
+}
+
+/* Report info of all SAs to file SA_FILE.  */
+void
+sa_report_all (void)
+{
+  int i;
+  FILE *fd;
+  struct sa *sa;
+
+  /* Open SA_FILE. */
+  fd = fopen(SA_FILE, "w");
+
+  /* Start sa_config_report. */
+  for (i = 0; i <= bucket_mask; i++)
+    for (sa = LIST_FIRST (&sa_tab[i]); sa; sa = LIST_NEXT (sa, link))
+      if (sa->phase == 1)
+	fprintf(fd, "SA name: none (phase 1)\n\n");
+      else
+	sa_dump_all (fd, sa);
+
+  /* End sa_config_report. */
+  fclose(fd);
 }
 
 /* Free the protocol structure pointed to by PROTO.  */
@@ -699,6 +897,28 @@ sa_delete (struct sa *sa, int notify)
   sa_free (sa);
 }
 
+
+/* Teardown all SAs.  */
+void
+sa_teardown_all (void)
+{
+  int i;
+  struct sa *sa;
+
+  LOG_DBG((LOG_MISC, 70, "sa_teardown_all.a"));
+  /* Get Phase 2 SAs. */
+  for (i = 0; i <= bucket_mask; i++)
+    for (sa = LIST_FIRST (&sa_tab[i]); sa; sa = LIST_NEXT (sa, link))
+      if (sa->phase == 2)
+	{
+	  /* Teardown the phase 2 SAs by name, similar to ui_teardown. */
+	  LOG_DBG((LOG_MISC, 70, "sa_teardown_all: tearing down SA %s",
+	      sa->name));
+	  connection_teardown (sa->name);
+	  sa_delete (sa, 1);
+	}
+}
+
 /*
  * This function will get called when we are closing in on the death time of SA
  */
@@ -797,7 +1017,7 @@ sa_setup_expirations (struct sa *sa)
       /* XXX This should probably be configuration controlled somehow.  */
       seconds = sa->seconds * (850 + sysdep_random () % 100) / 1000;
       LOG_DBG ((LOG_TIMER, 95,
-		"sa_setup_expirations: SA %p soft timeout in %qd seconds",
+		"sa_setup_expirations: SA %p soft timeout in %llu seconds",
 		sa, seconds));
       expiration.tv_sec += seconds;
       sa->soft_death
@@ -815,7 +1035,7 @@ sa_setup_expirations (struct sa *sa)
     {
       gettimeofday (&expiration, 0);
       LOG_DBG ((LOG_TIMER, 95,
-		"sa_setup_expirations: SA %p hard timeout in %qd seconds",
+		"sa_setup_expirations: SA %p hard timeout in %llu seconds",
 		sa, sa->seconds));
       expiration.tv_sec += sa->seconds;
       sa->death

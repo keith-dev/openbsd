@@ -1,4 +1,4 @@
-/*	$OpenBSD: printjob.c,v 1.26 2001/09/19 10:58:08 mpech Exp $ */
+/*	$OpenBSD: printjob.c,v 1.31 2002/02/19 19:39:40 millert Exp $ */
 /*	$NetBSD: printjob.c,v 1.9.4.3 1996/07/12 22:31:39 jtc Exp $	*/
 
 /*
@@ -70,6 +70,7 @@ static const char sccsid[] = "@(#)printjob.c	8.7 (Berkeley) 5/10/95";
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <stdarg.h>
 #include <ctype.h>
 #include "lp.h"
 #include "lp.local.h"
@@ -115,25 +116,25 @@ static char	pxwidth[10] = "-x";	/* page width in pixels */
 static char	tempfile[] = "errsXXXXXXXXXX"; /* file name for filter output */
 static char	width[10] = "-w";	/* page width in static characters */
 
-static void       abortpr __P((int));
-static void       banner __P((char *, char *));
-static int        dofork __P((int));
-static int        dropit __P((int));
-static void       init __P((void));
-static void       openpr __P((void));
-static void       opennet __P((char *));
-static void       opentty __P((void));
-static void       openrem __P((void));
-static int        print __P((int, char *));
-static int        printit __P((char *));
-static void       pstatus __P((const char *, ...));
-static char       response __P((void));
-static void       scan_out __P((int, char *, int));
-static char      *scnline __P((int, char *, int));
-static int        sendfile __P((int, char *));
-static int        sendit __P((char *));
-static void       sendmail __P((char *, int));
-static void       setty __P((void));
+static void       abortpr(int);
+static void       banner(char *, char *);
+static int        dofork(int);
+static int        dropit(int);
+static void       init(void);
+static void       openpr(void);
+static void       opennet(char *);
+static void       opentty(void);
+static void       openrem(void);
+static int        print(int, char *);
+static int        printit(char *);
+static void       pstatus(const char *, ...);
+static char       response(void);
+static void       scan_out(int, char *, int);
+static char      *scnline(int, char *, int);
+static int        sendfile(int, char *);
+static int        sendit(char *);
+static void       sendmail(char *, int);
+static void       setty(void);
 
 void
 printjob()
@@ -177,7 +178,7 @@ printjob()
 		exit(1);
 	}
 	if (flock(lfd, LOCK_EX|LOCK_NB) < 0) {
-		if (errno == EWOULDBLOCK)	/* active deamon present */
+		if (errno == EWOULDBLOCK)	/* active daemon present */
 			exit(0);
 		syslog(LOG_ERR, "%s: %s: %m", printer, LO);
 		exit(1);
@@ -582,6 +583,14 @@ print(format, file)
 			return(ERROR);
 		}
 		fi = p[0];			/* use pipe for input */
+	case 'o':       /* print postscript file */
+		/*
+		 * For now, treat this as a plain-text file, and assume
+		 * the standard LPF_INPUT filter will recognize that it
+		 * is postscript and know what to do with it.  These
+		 * 'o'-file requests could come from MacOS 10.1 systems.
+		*/
+		/* FALLTHROUGH */
 	case 'f':	/* print plain text file */
 		prog = IF;
 		av[1] = width;
@@ -1166,7 +1175,7 @@ abortpr(signo)
 		kill(ofilter, SIGCONT);
 	while (wait(NULL) > 0)
 		;
-	exit(0);
+	_exit(0);
 }
 
 static void
@@ -1528,30 +1537,14 @@ setty()
 	return;
 }
 
-#ifdef __STDC__
-#include <stdarg.h>
-#else
-#include <varargs.h>
-#endif
-
 static void
-#ifdef __STDC__
 pstatus(const char *msg, ...)
-#else
-pstatus(msg, va_alist)
-	char *msg;
-        va_dcl
-#endif
 {
 	int fd;
 	char buf[BUFSIZ];
 	va_list ap;
-#ifdef __STDC__
-	va_start(ap, msg);
-#else
-	va_start(ap);
-#endif
 
+	va_start(ap, msg);
 	umask(0);
 	fd = open(ST, O_WRONLY|O_CREAT, 0664);
 	if (fd < 0 || flock(fd, LOCK_EX) < 0) {

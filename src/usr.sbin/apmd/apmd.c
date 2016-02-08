@@ -1,4 +1,4 @@
-/*	$OpenBSD: apmd.c,v 1.17 2001/08/17 22:35:01 mickey Exp $	*/
+/*	$OpenBSD: apmd.c,v 1.23 2002/02/22 00:32:16 mickey Exp $	*/
 
 /*
  *  Copyright (c) 1995, 1996 John T. Kohl
@@ -74,7 +74,7 @@ void do_etc_file(const char *file);
 void
 sigexit(int signo)
 {
-    _exit(1);
+	_exit(1);
 }
 
 void
@@ -84,6 +84,21 @@ usage(void)
 	    "usage: %s [-adempqs] [-f devfile] [-S sockfile] [-t timo]\n",
 	    __progname);
 	exit(1);
+}
+
+void
+error(const char *fmt, const char *arg)
+{
+	char buf[128];
+
+	if (debug)
+		err(1, fmt, arg);
+	else {
+		strlcpy(buf, fmt, sizeof(buf));
+		strlcat(buf, ": %m", sizeof(buf));
+		syslog(LOG_ERR, buf, arg);
+		exit(1);
+	}
 }
 
 
@@ -114,7 +129,19 @@ power_status(int fd, int force, struct apm_power_info *pinfo)
 		    bstate.battery_state != last.battery_state ||
 		    (bstate.minutes_left && bstate.minutes_left < 15) ||
 		     abs(bstate.battery_life - last.battery_life) > 20) {
+#ifdef __powerpc__
+			/*
+			 * When the battery is charging, the estimated life
+			 * time is in fact the estimated remaining charge time
+			 * on Apple machines, so lie in the stats.
+			 * We still want an useful message if the battery or
+			 * ac status changes, however.
+			 */
+			if (bstate.minutes_left != 0 &&
+			    bstate.battery_state != APM_BATT_CHARGING)
+#else
 			if (bstate.minutes_left)
+#endif
 				syslog(LOG_NOTICE, "battery status: %s. "
 				    "external power status: %s. "
 				    "estimated battery life %d%% (%u minutes)",
@@ -156,7 +183,7 @@ bind_socket(const char *sockname)
 
 	sock = socket(AF_UNIX, SOCK_STREAM, 0);
 	if (sock == -1)
-		err(1, "cannot create local socket");
+		error("cannot create local socket", NULL);
 
 	s_un.sun_family = AF_UNIX;
 	strncpy(s_un.sun_path, sockname, sizeof(s_un.sun_path));
@@ -167,9 +194,9 @@ bind_socket(const char *sockname)
 	umask (077);
 
 	if (bind(sock, (struct sockaddr *)&s_un, s_un.sun_len) == -1)
-		err(1, "cannot connect to APM socket");
+		error("cannot connect to APM socket", NULL);
 	if (chmod(sockname, 0660) == -1 || chown(sockname, 0, 0) == -1)
-		err(1, "cannot set socket mode/owner/group to 660/0/0");
+		error("cannot set socket mode/owner/group to 660/0/0", NULL);
 
 	listen(sock, 1);
 	socketname = strdup(sockname);
@@ -349,16 +376,28 @@ main(int argc, char *argv[])
 	argc -= optind;
 	argv += optind;
 
-	if ((ctl_fd = open(fname, O_RDWR)) == -1)
-		err(1, "cannot open device file `%s'", fname);
-
 	if (debug)
 		openlog(__progname, LOG_CONS, LOG_LOCAL1);
 	else {
+		daemon(0, 0);
 		openlog(__progname, LOG_CONS, LOG_DAEMON);
 		setlogmask(LOG_UPTO(LOG_NOTICE));
-		daemon(0, 0);
 	}
+
+	(void) signal(SIGTERM, sigexit);
+	(void) signal(SIGHUP, sigexit);
+	(void) signal(SIGINT, sigexit);
+
+	if ((ctl_fd = open(fname, O_RDWR)) == -1)
+		error("cannot open device file `%s'", fname);
+
+	if (fcntl(ctl_fd, F_SETFD, 1) == -1)
+		error("cannot set close-on-exec for `%s'", fname);
+
+	sock_fd = bind_socket(sockname);
+
+	if (fcntl(sock_fd, F_SETFD, 1) == -1)
+		error("cannot set close-on-exec for the socket", NULL);
 
 	power_status(ctl_fd, 1, 0);
 
@@ -378,21 +417,16 @@ main(int argc, char *argv[])
 	if (!messages)
 		set_driver_messages(ctl_fd, APM_PRINT_OFF);
 
-	(void) signal(SIGTERM, sigexit);
-	(void) signal(SIGHUP, sigexit);
-	(void) signal(SIGINT, sigexit);
-
-	sock_fd = bind_socket(sockname);
 	kq = kqueue();
 	if (kq <= 0)
-		err(1, "kqueue");
+		error("kqueue", NULL);
 
 	EV_SET(&ev[0], ctl_fd, EVFILT_READ, EV_ADD | EV_ENABLE | EV_CLEAR,
 	    0, 0, NULL);
 	EV_SET(&ev[1], sock_fd, EVFILT_READ, EV_ADD | EV_ENABLE | EV_CLEAR,
 	    0, 0, NULL);
 	if (kevent(kq, ev, 2, NULL, 0, &sts) < 0)
-		err(1, "kevent");
+		error("kevent", NULL);
 
 	for (;;) {
 		int rv;
@@ -487,7 +521,7 @@ main(int argc, char *argv[])
 				break;
 			}
 	}
-	syslog(LOG_ERR, "kevent failed: %m");
+	error("kevent loop", NULL);
 
 	return 1;
 }

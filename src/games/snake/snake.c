@@ -1,4 +1,4 @@
-/*	$OpenBSD: snake.c,v 1.3 2001/02/18 16:03:02 pjanzen Exp $	*/
+/*	$OpenBSD: snake.c,v 1.5 2002/02/16 21:27:11 millert Exp $	*/
 /*	$NetBSD: snake.c,v 1.8 1995/04/29 00:06:41 mycroft Exp $	*/
 
 /*
@@ -44,7 +44,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)snake.c	8.2 (Berkeley) 1/7/94";
 #else
-static char rcsid[] = "$OpenBSD: snake.c,v 1.3 2001/02/18 16:03:02 pjanzen Exp $";
+static char rcsid[] = "$OpenBSD: snake.c,v 1.5 2002/02/16 21:27:11 millert Exp $";
 #endif
 #endif /* not lint */
 
@@ -122,30 +122,31 @@ FILE	*logfile;
 int	lcnt, ccnt;	/* user's idea of screen size */
 int	chunk;		/* amount of money given at a time */
 
-void	snscore  __P((int, int));
+void	snscore(int, int);
 
-void	chase    __P((struct point *, struct point *));
-int	chk      __P((struct point *));
-void	drawbox  __P((void));
-void	length   __P((int));
-void	mainloop __P((void));
-int	post     __P((int, int));
-int	pushsnake __P((void));
-void	setup    __P((void));
-void	snrand   __P((struct point *));
-void	snap     __P((void));
-void	spacewarp __P((int));
-void	stop    __P((int));
-int	stretch  __P((struct point *));
-void	surround __P((struct point *));
-void	suspend  __P((void));
-void	win      __P((struct point *));
-void	winnings __P((int));
+void	chase(struct point *, struct point *);
+int	chk(struct point *);
+void	drawbox(void);
+void	length(int);
+void	mainloop(void);
+int	post(int, int);
+int	pushsnake(void);
+void	setup(void);
+void	snrand(struct point *);
+void	snap(void);
+void	spacewarp(int);
+void	stop(int);
+int	stretch(struct point *);
+void	surround(struct point *);
+void	suspend(void);
+void	win(struct point *);
+void	winnings(int);
 
 #ifdef LOGGING
-void	logit   __P((char *));
+void	logit(char *);
 #endif
 
+int	wantstop;
 
 int
 main(argc, argv)
@@ -155,6 +156,7 @@ main(argc, argv)
 	int	ch, i;
 	char	*p, **av;
 	time_t	tv;
+	struct sigaction sa;
 
 	/* don't create the score file if it doesn't exist. */
 	rawscores = open(_PATH_RAWSCORES, O_RDWR, 0664);
@@ -250,7 +252,10 @@ main(argc, argv)
 	i += 2;
 	chunk = (675.0 / (i + 6)) + 2.5;	/* min screen edge */
 
-	signal(SIGINT, stop);
+	memset(&sa, 0, sizeof sa);
+	sigemptyset(&sa.sa_mask);
+	sa.sa_handler = stop;
+	sigaction(SIGINT, &sa, NULL);
 
 	snrand(&finish);
 	snrand(&you);
@@ -274,6 +279,12 @@ mainloop()
 	int repeat = 1;
 
 	for (;;) {
+		if (wantstop) {
+			endwin();
+			length(moves);
+			exit(0);
+		}
+
 		/* Highlight you, not left & above */
 		move(you.line + 1, you.col + 1);
 		refresh();
@@ -953,10 +964,7 @@ void
 stop(dummy)
 	int	dummy;
 {
-	signal(SIGINT, SIG_IGN);
-	endwin();
-	length(moves);
-	exit(0);
+	wantstop = 1;
 }
 
 void

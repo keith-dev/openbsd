@@ -1,8 +1,11 @@
+dnl	$OpenBSD: install,v 1.23 2002/04/09 01:22:23 miod Exp $
 OpenBSDInstallPrelude
 
 There are several ways to install OpenBSD onto a disk. The easiest way
 in terms of preliminary setup is to use the OpenBSD installation
-cdrom, or an installation floppy.
+dnl XXX change back if more than one floppy again.
+dnl cdrom, or an installation floppy.
+cdrom, or the installation floppy.
 
 If your machine is hooked up in a network and you can find a server to
 arrange for a diskless setup, which is a convenient way to install on a
@@ -36,10 +39,15 @@ Booting from Floppy Disk installation media:
        ok boot floppy bsd
 
 This will cause the kernel contained in the floppy to be booted.
+Please note that PCI systems are not able to boot from floppy; also,
+Ultra 1, 1E and 2 systems might need a firmware update to be able to boot
+from floppy; refer to the ``Updating your firmware'' section earlier in
+this document for details.
 
 
 Booting From CD-ROM installation media:
 
+dnl No args! not a typo
 	ok boot cdrom
 
 If the boot is successful, you will get a loader version message,
@@ -120,9 +128,12 @@ OpenBSDBootMsgs
 	you should choose the terminal type from amongst those listed.
 	(If your terminal type is xterm, just use vt100).
 
+dnl put this back for 3.2
+dnl OpenBSDInstallpart3({:- or "wd0" for IDE drives-:})
 	After entering the terminal type you will be asked whether you
-	wish to do an "(I)nstall" or an "(U)pgrade".  Enter 'I' for a
-	fresh install or 'U' to upgrade an existing installation.
+	wish to do an "(I)nstall".  Enter 'I' for a fresh installation.
+	Note that you cannot upgrade a previous OpenBSD installation
+	to 3.1.
 
 	You will be presented with a welcome message and asked if
 	you really want to continue. Assuming you answered yes, the
@@ -130,70 +141,13 @@ OpenBSDBootMsgs
 	it can install on, and ask you which it should use.  The name
 	of the disk is typically "sd0" for SCSI drives and "wd0" for
 	IDE drives. Reply with the name of your disk.
+dnl end put this back
 
-	Next you will have to edit or create a disklabel for the disk
-	OpenBSD is being installed on.  The installation script will
-	invoke the text editor allowing you to do this.  Note that
-	partition 'c' inside this disk label should ALWAYS reflect the
-	entire disk, including any non-OpenBSD portions.  The root file
-	system should be in partition 'a', and swap is usually in partition
-	'b'.  It is recommended that you create separate partitions for
-	root and /usr, you may also want to specify /var and /home
-	partitions.
+OpenBSDInstallPart4
 
-	The swap partition (usually 'b') should have a type of "swap", all
-	other native OpenBSD partitions should have a type of "4.2BSD".
-	Block and fragment sizes are usually 8192 and 1024 bytes, but can
-	also be 16384 and 2048 bytes.
+OpenBSDInstallPart5(sd0)
 
-	The install program will now label your disk and ask which file
-	systems should be created on which partitions.  It will auto-
-	matically select the 'a' partition to be the root file system.
-	Next it will ask for which disk and partition you want a file
-	system created on.  This will be the same as the disk name (e.g.
-	"sd0") with the letter identifying the partition (e.g. "d")
-	appended (e.g. "sd0d").  Then it will ask where this partition is
-	to be mounted, e.g. /usr.  This process will be repeated until
-	you type "done".
-
-	At this point you will be asked to confirm that the file system
-	information you have entered is correct, and given an opportunity
-	to change the file system table.  Next it will create the new file
-	systems as specified, OVERWRITING ANY EXISTING DATA.  This is the
-	point of no return.
-
-	After all your file systems have been created, the install program
-	will give you an opportunity to configure the network.  The network
-	configuration you enter (if any) can then be used to do the install
-	from another system using NFS, HTTP or FTP, and will also be the
-	configuration used by the system after the installation is complete.
-
-	If you select to configure the network, the install program will
-	ask you for a name of your system and the DNS domain name to use.
-	Note that the host name should be without the domain part, and that
-	the domain name should NOT {:-include-:} the host name part.
-
-	Next the system will give you a list of network interfaces you can
-	configure.  For each network interface you select to configure, it
-	will ask for the IP address to use, the symbolic host name to use,
-	the netmask to use and any media flags to set. It is usually safe
-	to keep the default settings.
-
-	After all network interfaces have been configured the install pro-
-	gram will ask for a default route and IP address of the primary
-	name server to use.  You will also be presented with an opportunity
-	to edit the host table.
-
-	At this point you will be allowed to edit the file system table
-	that will be used for the remainder of the installation and that
-	will be used by the finished system, following which the new file
-	systems will be mounted to complete the installation.
-
-	After these preparatory steps have been completed, you will be
-	able to extract the distribution sets onto your system.  There
-	are several install methods supported; FTP, HTTP, tape, CD-ROM, NFS
-	or a local disk partition.  Note that installation from floppies
-	is not currently supported.
+OpenBSDInstallNet({:-CD-ROM, NFS, -:},nofloppy)
 
 OpenBSDFTPInstall
 
@@ -202,10 +156,10 @@ OpenBSDHTTPInstall
 OpenBSDTAPEInstall
 
 OpenBSDCDROMInstall
-
-	On some pci-based systems, installing files from CD-ROM yields
-	a lot of ``pciide bogus intr'' warning messages.  While annoying,
-	these messages do not prevent the installation from suceeding.
+dnl
+dnl	On some pci-based systems, installing files from CD-ROM yields
+dnl	a lot of ``pciide bogus intr'' warning messages.  While annoying,
+dnl	these messages do not prevent the installation from suceeding.
 		
 OpenBSDNFSInstall
 
@@ -217,12 +171,7 @@ OpenBSDCommonURL
 
 After completing an installation:
 
-Now try a reboot.  (If needed, swap your scsi id's first).  Initially
-I'd suggest you "boot sd()bsd -bs", then try multiuser after that.
-if you boot single-user the OpenBSD incantation to make the root
-filesystem writable is
-
-    OpenBSD# mount -u /dev/sd0a /
+Now try a reboot.  (If needed, swap your scsi id's first).
 
 The UltraSPARC OpenFirmware will normally load the kernel from the device
 and filename as instructed by the ``boot-device'' and ``boot-file''
@@ -392,7 +341,9 @@ filesystem for `/usr' with your diskless setup, make sure the "./usr" base
 files in base{:--:}OSrev.tgz end up in the correct location. One way to do this is
 to temporarily use a loopback mount on the server, re-routing <root>/usr to
 your server's exported OpenBSD "/usr" directory. Also put the kernel and
-the install/upgrade scripts into the root directory.
+dnl put back after 3.2
+dnl the install/upgrade scripts into the root directory.
+the install script into the root directory.
 
 A few configuration files need to be edited:
 

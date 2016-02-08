@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.4 2001/01/29 02:05:40 niklas Exp $
+#	$OpenBSD: Makefile,v 1.8 2002/01/03 01:19:17 art Exp $
 #	$NetBSD: Makefile,v 1.11 1995/12/12 01:54:15 cgd Exp $
 
 PROG=	dbtest
@@ -6,12 +6,17 @@ PROG=	dbtest
 # add -DSTATISTICS to CFLAGS to get usage statistics.  Note that
 # for this to work, libc must be compiled with -DSTATISTICS as well
 CFLAGS+= -g -D__DBINTERFACE_PRIVATE -DDEBUG
-NOMAN=  noman
 CLEANFILES+= t1 t2 t3
 
-install:
+DBTARGETS=1 2 3 4 5 6 7 8 9 10 11 12 13 20
 
-regress: ${PROG}
-	sh ${.CURDIR}/run.test
+.for DT in ${DBTARGETS}
+db-${DT}: ${PROG}
+	sh ${.CURDIR}/run.test ${DT}
+REGRESSTARGETS+=db-${DT}
+.PHONY: db-${DT}
+.endfor
 
-.include <bsd.prog.mk>
+REGRESSSLOWTARGETS+=db-3 db-12 db-20
+
+.include <bsd.regress.mk>

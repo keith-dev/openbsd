@@ -1,4 +1,4 @@
-/*	$OpenBSD: ftp_var.h,v 1.19 2000/06/21 19:22:54 itojun Exp $	*/
+/*	$OpenBSD: ftp_var.h,v 1.21 2002/02/16 21:27:46 millert Exp $	*/
 /*	$NetBSD: ftp_var.h,v 1.18 1997/08/18 10:20:25 lukem Exp $	*/
 
 /*
@@ -91,6 +91,7 @@ int fclose(FILE *);
 
 #define	FTP_PORT	21	/* default if ! getservbyname("ftp/tcp") */
 #define	HTTP_PORT	80	/* default if ! getservbyname("http/tcp") */
+#define	HTTP_USER_AGENT	"User-Agent: OpenBSD ftp"	/* User-Agent string sent to web server */
 #ifndef	GATE_PORT
 #define	GATE_PORT	21	/* default if ! getservbyname("ftpgate/tcp") */
 #endif
@@ -202,7 +203,7 @@ struct cmd {
 #ifndef SMALL
 	char	*c_complete;	/* context sensitive completion list */
 #endif /* !SMALL */
-	void	(*c_handler) __P((int, char **)); /* function to call */
+	void	(*c_handler)(int, char **); /* function to call */
 };
 
 struct macel {

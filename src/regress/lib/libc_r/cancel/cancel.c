@@ -1,4 +1,4 @@
-/*	$OpenBSD: cancel.c,v 1.3 2001/09/20 16:43:15 todd Exp $	*/
+/*	$OpenBSD: cancel.c,v 1.5 2002/02/17 05:44:38 marc Exp $	*/
 /* David Leonard <d@openbsd.org>, 1999. Public Domain. */
 
 #include <pthread.h>
@@ -13,7 +13,8 @@ static pthread_cond_t cond;
 static pthread_mutex_t mutex;
 static struct timespec expiretime;
 
-static int pv_state = 0;
+static volatile int pv_state = 0;
+
 void p() {
 	CHECKr(pthread_mutex_lock(&mutex));
 	if (pv_state <= 0) {
@@ -110,6 +111,7 @@ child2fn(arg)
 		message_seen++;
 		c2_in_test = 0;
 		ASSERT(message_seen == 1);
+		v();
 	}
 	PANIC("child 2");
 }
@@ -161,7 +163,7 @@ main()
 	p();
 
 	/* Give thread 2 a chance to go through its deferred loop once */
-	sleep(2);
+	p();
 	CHECKr(pthread_cancel(child2));
 	p();
 

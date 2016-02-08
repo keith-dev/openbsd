@@ -1,6 +1,6 @@
 #!/bin/sh -
 #
-#	$OpenBSD: daily,v 1.36 2001/09/09 01:07:31 deraadt Exp $
+#	$OpenBSD: daily,v 1.39 2001/11/19 03:03:33 deraadt Exp $
 #	From: @(#)daily	8.2 (Berkeley) 1/25/94
 #
 PATH=/bin:/usr/bin:/sbin:/usr/sbin:/usr/local/bin
@@ -22,7 +22,7 @@ echo ""
 echo "Removing scratch and junk files:"
 if [ -d /tmp -a ! -L /tmp ]; then
 	cd /tmp && {
-	find -x . \( -name 'ssh-*' -o -name '.X11-unix' \) -prune -o \
+	find -x . \( -path './ssh-*' -o -path './.X11-unix' \) -prune -o \
 	    -type f -atime +3 -execdir rm -f -- {} \;
 	find -x . ! -name . -type d -mtime +1 -execdir rmdir -- {} \; \
 	    >/dev/null 2>&1; }
@@ -30,7 +30,7 @@ fi
 
 if [ -d /var/tmp -a ! -L /var/tmp ]; then
 	cd /var/tmp && {
-	find -x . \( -name 'ssh-*' -o -name '.X11-unix' \) -prune -o \
+	find -x . \( -path './ssh-*' -o -path './.X11-unix' \) -prune -o \
 	    ! -type d -atime +7 -execdir rm -f -- {} \;
 	find -x . ! -name . -type d -mtime +1 -execdir rmdir -- {} \; \
 	    >/dev/null 2>&1; }
@@ -113,19 +113,6 @@ fi
 	}
 }
 
-echo ""
-if [ -d /var/yp/binding -a ! -d /var/yp/`domainname` -o "X$CALENDAR" = X0 ]
-then
-	if [ "X$CALENDAR" = X0 ]; then
-		echo "Not running calendar, (disabled)."
-	else
-		echo "Not running calendar, (yp client)."
-	fi
-else
-	echo "Running calendar in the background."
-	calendar -a &
-fi
-
 # Rotation of mail log now handled automatically by cron and 'newsyslog'
 
 echo ""
@@ -155,6 +142,19 @@ if [ "$t" != '/var/rwho/*' ]; then
 	ruptime
 fi
 
+echo ""
+if [ -d /var/yp/binding -a ! -d /var/yp/`domainname` -o "X$CALENDAR" = X0 ]
+then
+	if [ "X$CALENDAR" = X0 ]; then
+		echo "Not running calendar, (disabled)."
+	else
+		echo "Not running calendar, (yp client)."
+	fi
+else
+	echo "Running calendar in the background."
+	calendar -a &
+fi
+
 # If CHECKFILESYSTEMS is set to 1 in the environment, run fsck
 # with the no-write flag.
 [ "X$CHECKFILESYSTEMS" = X1 ] && {
@@ -170,7 +170,7 @@ if [ -f /etc/Distfile ]; then
 		logf=`date +%Y.%b.%e`
 		rdist -f /etc/Distfile 2>&1 | tee /var/log/rdist/$logf
 	else
-		rdist -f /etc/Distfile 
+		rdist -f /etc/Distfile
 	fi
 fi
 

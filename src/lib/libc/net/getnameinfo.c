@@ -1,4 +1,4 @@
-/*	$OpenBSD: getnameinfo.c,v 1.19 2001/08/20 02:23:33 itojun Exp $	*/
+/*	$OpenBSD: getnameinfo.c,v 1.23 2002/02/17 19:42:23 millert Exp $	*/
 /*	$KAME: getnameinfo.c,v 1.45 2000/09/25 22:43:56 itojun Exp $	*/
 
 /*
@@ -38,8 +38,10 @@
  *   modified).  ipngwg rough consensus seems to follow RFC2553.
  * - What is "local" in NI_FQDN?
  * - NI_NAMEREQD and NI_NUMERICHOST conflict with each other.
- * - (KAME extension) NI_WITHSCOPEID when called with global address,
- *   and sin6_scope_id filled
+ * - (KAME extension) always attach textual scopeid (fe80::1%lo0), if
+ *   sin6_scope_id is filled - standardization status?
+ *   XXX breaks backward compat for code that expects no scopeid.
+ *   beware on merge.
  */
 
 #ifndef INET6
@@ -57,12 +59,7 @@
 #include <string.h>
 #include <stddef.h>
 
-#define SUCCESS 0
-#define ANY 0
-#define YES 1
-#define NO  0
-
-static struct afd {
+static const struct afd {
 	int a_af;
 	int a_addrlen;
 	int a_socklen;
@@ -84,19 +81,10 @@ struct sockinet {
 };
 
 #ifdef INET6
-static int ip6_parsenumeric __P((const struct sockaddr *, const char *, char *,
-				 size_t, int));
-static int ip6_sa2str __P((const struct sockaddr_in6 *, char *, size_t, int));
+static int ip6_parsenumeric(const struct sockaddr *, const char *, char *,
+    size_t, int);
+static int ip6_sa2str(const struct sockaddr_in6 *, char *, size_t, int);
 #endif
-
-/* 2553bis: use EAI_xx for getnameinfo */
-#define ENI_NOSOCKET 	EAI_FAIL		/*XXX*/
-#define ENI_NOSERVNAME	EAI_NONAME
-#define ENI_NOHOSTNAME	EAI_NONAME
-#define ENI_MEMORY	EAI_MEMORY
-#define ENI_SYSTEM	EAI_SYSTEM
-#define ENI_FAMILY	EAI_FAMILY
-#define ENI_SALEN	EAI_FAMILY
 
 int
 getnameinfo(sa, salen, host, hostlen, serv, servlen, flags)
@@ -108,7 +96,7 @@ getnameinfo(sa, salen, host, hostlen, serv, servlen, flags)
 	size_t servlen;
 	int flags;
 {
-	struct afd *afd;
+	const struct afd *afd;
 	struct servent *sp;
 	struct hostent *hp;
 	u_short port;
@@ -120,10 +108,10 @@ getnameinfo(sa, salen, host, hostlen, serv, servlen, flags)
 	char numaddr[512];
 
 	if (sa == NULL)
-		return ENI_NOSOCKET;
+		return EAI_FAIL;
 
 	if (sa->sa_len != salen)
-		return ENI_SALEN;
+		return EAI_FAIL;
 	
 	family = sa->sa_family;
 	for (i = 0; afdl[i].a_af; i++)
@@ -131,12 +119,12 @@ getnameinfo(sa, salen, host, hostlen, serv, servlen, flags)
 			afd = &afdl[i];
 			goto found;
 		}
-	return ENI_FAMILY;
-	
+	return EAI_FAMILY;
+
  found:
 	if (salen != afd->a_socklen)
-		return ENI_SALEN;
-	
+		return EAI_FAIL;
+
 	/* network byte order */
 	port = ((const struct sockinet *)sa)->si_port;
 	addr = (const char *)sa + afd->a_off;
@@ -145,8 +133,8 @@ getnameinfo(sa, salen, host, hostlen, serv, servlen, flags)
 		/*
 		 * do nothing in this case.
 		 * in case you are wondering if "&&" is more correct than
-		 * "||" here: RFC2553 says that serv == NULL OR servlen == 0
-		 * means that the caller does not want the result.
+		 * "||" here: rfc2553bis-03 says that serv == NULL OR
+		 * servlen == 0 means that the caller does not want the result.
 		 */
 	} else {
 		if (flags & NI_NUMERICSERV)
@@ -157,12 +145,12 @@ getnameinfo(sa, salen, host, hostlen, serv, servlen, flags)
 		}
 		if (sp) {
 			if (strlen(sp->s_name) + 1 > servlen)
-				return ENI_MEMORY;
+				return EAI_MEMORY;
 			strcpy(serv, sp->s_name);
 		} else {
 			snprintf(numserv, sizeof(numserv), "%d", ntohs(port));
 			if (strlen(numserv) + 1 > servlen)
-				return ENI_MEMORY;
+				return EAI_MEMORY;
 			strcpy(serv, numserv);
 		}
 	}
@@ -207,15 +195,15 @@ getnameinfo(sa, salen, host, hostlen, serv, servlen, flags)
 		/*
 		 * do nothing in this case.
 		 * in case you are wondering if "&&" is more correct than
-		 * "||" here: RFC2553 says that host == NULL OR hostlen == 0
-		 * means that the caller does not want the result.
+		 * "||" here: rfc2553bis-03 says that host == NULL or
+		 * hostlen == 0 means that the caller does not want the result.
 		 */
 	} else if (flags & NI_NUMERICHOST) {
 		int numaddrlen;
 
 		/* NUMERICHOST and NAMEREQD conflicts with each other */
 		if (flags & NI_NAMEREQD)
-			return ENI_NOHOSTNAME;
+			return EAI_NONAME;
 
 		switch(afd->a_af) {
 #ifdef INET6
@@ -232,10 +220,10 @@ getnameinfo(sa, salen, host, hostlen, serv, servlen, flags)
 		default:
 			if (inet_ntop(afd->a_af, addr, numaddr, sizeof(numaddr))
 			    == NULL)
-				return ENI_SYSTEM;
+				return EAI_SYSTEM;
 			numaddrlen = strlen(numaddr);
 			if (numaddrlen + 1 > hostlen) /* don't forget terminator */
-				return ENI_MEMORY;
+				return EAI_MEMORY;
 			strcpy(host, numaddr);
 			break;
 		}
@@ -257,12 +245,12 @@ getnameinfo(sa, salen, host, hostlen, serv, servlen, flags)
 			}
 #endif
 			if (strlen(hp->h_name) + 1 > hostlen) {
-				return ENI_MEMORY;
+				return EAI_MEMORY;
 			}
 			strcpy(host, hp->h_name);
 		} else {
 			if (flags & NI_NAMEREQD)
-				return ENI_NOHOSTNAME;
+				return EAI_NONAME;
 			switch(afd->a_af) {
 #ifdef INET6
 			case AF_INET6:
@@ -279,12 +267,12 @@ getnameinfo(sa, salen, host, hostlen, serv, servlen, flags)
 			default:
 				if (inet_ntop(afd->a_af, addr, host,
 				    hostlen) == NULL)
-					return ENI_SYSTEM;
+					return EAI_SYSTEM;
 				break;
 			}
 		}
 	}
-	return SUCCESS;
+	return(0);
 }
 
 #ifdef INET6
@@ -299,39 +287,32 @@ ip6_parsenumeric(sa, addr, host, hostlen, flags)
 	int numaddrlen;
 	char numaddr[512];
 
-	if (inet_ntop(AF_INET6, addr, numaddr, sizeof(numaddr))
-	    == NULL)
-		return ENI_SYSTEM;
+	if (inet_ntop(AF_INET6, addr, numaddr, sizeof(numaddr)) == NULL)
+		return EAI_SYSTEM;
 
 	numaddrlen = strlen(numaddr);
 	if (numaddrlen + 1 > hostlen) /* don't forget terminator */
-		return ENI_MEMORY;
+		return EAI_MEMORY;
 	strcpy(host, numaddr);
 
-#ifdef NI_WITHSCOPEID
 	if (((const struct sockaddr_in6 *)sa)->sin6_scope_id) {
-		if (flags & NI_WITHSCOPEID)
-		{
-			char scopebuf[MAXHOSTNAMELEN];
-			int scopelen;
+		char zonebuf[MAXHOSTNAMELEN];
+		int zonelen;
 
-			scopelen = ip6_sa2str(
-			    (const struct sockaddr_in6 *)(const void *)sa,
-			    scopebuf, sizeof(scopebuf), 0);
-			if (scopelen < 0)
-				return ENI_MEMORY;
-			if (scopelen + 1 + numaddrlen + 1 > hostlen)
-				return ENI_MEMORY;
-			/*
-			 * construct <numeric-addr><delim><scopeid>
-			 */
-			memcpy(host + numaddrlen + 1, scopebuf,
-			    (size_t)scopelen);
-			host[numaddrlen] = SCOPE_DELIMITER;
-			host[numaddrlen + 1 + scopelen] = '\0';
-		}
+		zonelen = ip6_sa2str(
+		    (const struct sockaddr_in6 *)(const void *)sa,
+		    zonebuf, sizeof(zonebuf), flags);
+		if (zonelen < 0)
+			return EAI_MEMORY;
+		if (zonelen + 1 + numaddrlen + 1 > hostlen)
+			return EAI_MEMORY;
+
+		/* construct <numeric-addr><delim><zoneid> */
+		memcpy(host + numaddrlen + 1, zonebuf,
+		    (size_t)zonelen);
+		host[numaddrlen] = SCOPE_DELIMITER;
+		host[numaddrlen + 1 + zonelen] = '\0';
 	}
-#endif /* NI_WITHSCOPEID */
 
 	return 0;
 }

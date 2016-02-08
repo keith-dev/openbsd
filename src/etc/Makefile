@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.132 2001/09/21 22:13:51 deraadt Exp $
+#	$OpenBSD: Makefile,v 1.155 2002/04/03 20:56:36 deraadt Exp $
 
 TZDIR=		/usr/share/zoneinfo
 LOCALTIME=	US/Pacific
@@ -23,14 +23,14 @@ BIN1=	bootptab changelist ccd.conf csh.cshrc csh.login csh.logout \
 	mailer.conf
 
 .if (${MACHINE} == "alpha" || ${MACHINE} == "hppa" || \
-     ${MACHINE} == "i386" || ${MACHINE} == "macppc")
+     ${MACHINE} == "i386" || ${MACHINE} == "macppc" || ${MACHINE} == "sparc64")
 BIN1+=	wsconsctl.conf
 .endif
 
 # -rw-rw-r--
 BIN2=	motd
 
-NAMEDB=	localhost.rev root.cache
+NAMEDB=	localhost.rev localhost.v6.rev localhost.zone root.cache
 PCS=	pcs750.bin
 WCS1=	wcs fppwcs poc poc1 poc2 fppoc
 WCS2=	fpevent fppwcs fppwcs_dual hdcwcs load_diags start_fpp wcs wcs_dual
@@ -151,7 +151,7 @@ distribution-etc-root-var: distrib-dirs
 		    ${DESTDIR}/etc/ppp; \
 		${INSTALL} -c -o root -g wheel -m 600 pap-secrets \
 		    ${DESTDIR}/etc/ppp; \
-		${INSTALL} -c -o root -g wheel -m 644 ppp.conf.sample \
+		${INSTALL} -c -o root -g wheel -m 600 ppp.conf.sample \
 		    ${DESTDIR}/etc/ppp; \
 		${INSTALL} -c -o root -g wheel -m 644 ppp.linkup.sample \
 		    ${DESTDIR}/etc/ppp; \
@@ -216,8 +216,10 @@ distribution-etc-root-var: distrib-dirs
 	${INSTALL} -c -o ${BINOWN} -g utmp -m 664 /dev/null \
 		${DESTDIR}/var/run/utmp
 .if ${MACHINE} == "vax"
-	(cd etc.vax; ${INSTALL} -c -o ${BINOWN} -g ${BINGRP} -m 444 ${PCS} \
-	    ${DESTDIR}/)
+	uudecode -p etc.vax/${PCS}.uu > ${DESTDIR}/${PCS} && \
+	    chown ${BINOWN} ${DESTDIR}/${PCS} && \
+	    chgrp ${BINGRP} ${DESTDIR}/${PCS} && \
+	    chmod 644 ${DESTDIR}/${PCS}
 .endif
 	(cd ../gnu/usr.sbin/sendmail/cf/cf; ${MAKE} distribution)
 	(cd ../usr.sbin/ypserv/ypinit; ${MAKE} distribution)
@@ -240,8 +242,10 @@ distribution: distribution-etc-root-var
 	(cd ..; ${MAKE} install)
 
 distrib-dirs:
-	${INSTALL} -d -o root -g wheel -m 755 ${DESTDIR}
-	-mtree -qdef mtree/4.4BSD.dist -p ${DESTDIR}/ -u
+	if [ ! -d ${DESTDIR}/. ]; then \
+		${INSTALL} -d -o root -g wheel -m 755 ${DESTDIR}; \
+	fi
+	mtree -qdef mtree/4.4BSD.dist -p ${DESTDIR}/ -U
 	if [ ! -d ${DESTDIR}/usr/src ]; then \
 		${INSTALL} -d -o root -g wsrc -m 775 ${DESTDIR}/usr/src; \
 	fi
@@ -254,7 +258,7 @@ release:
 .else
 release: distribution snap_pre snap_md
 	cd ${.CURDIR}/../distrib/notes; ${MAKE}; ${MAKE} install
-	cd ${.CURDIR}/../distrib/sets; csh maketars ${OSrev}
+	cd ${.CURDIR}/../distrib/sets; sh maketars ${OSrev}
 	-cp ${DESTDIR}/snapshot/bsd* ${RELEASEDIR}
 	-cp ${DESTDIR}/snapshot/*boot* ${RELEASEDIR}
 	-cp ${DESTDIR}/snapshot/*BOOT* ${RELEASEDIR}
@@ -317,5 +321,42 @@ snap_md:
 # nothing here -- look in the machine-dependent Makefile.inc
 
 .endif	# DESTDIR check
+
+MAKEDEVARCHS+= alpha
+MAKEDEVARCHS+= amiga
+MAKEDEVARCHS+= hp300
+MAKEDEVARCHS+= hppa
+MAKEDEVARCHS+= i386
+MAKEDEVARCHS+= mac68k
+MAKEDEVARCHS+= macppc
+#MAKEDEVARCHS+= mvme68k
+#MAKEDEVARCHS+= mvme88k
+#MAKEDEVARCHS+= mvmeppc
+MAKEDEVARCHS+= sparc
+MAKEDEVARCHS+= sparc64
+MAKEDEVARCHS+= sun3
+#MAKEDEVARCHS+= vax
+
+all:
+#	make M=${MACHINE} m4
+
+clean:
+	rm -f etc.${MACHINE}/MAKEDEV
+
+cleandir:
+	cd ${.CURDIR}; for m in ${MAKEDEVARCHS}; do \
+	    make MACHINE=$$m clean; done
+
+m4: etc.${M}/MAKEDEV
+
+etc.${M}/MAKEDEV: MAKEDEV.sub MAKEDEV.mi etc.${M}/MAKEDEV.md
+	echo "==> etc.${M}/MAKEDEV"
+	m4 -DMACHINE=${M} MAKEDEV.mi > etc.${M}/.MAKEDEV.tmp && \
+	    mv etc.${M}/.MAKEDEV.tmp etc.${M}/MAKEDEV || \
+	    rm etc.${M}/.MAKEDEV.tmp
+
+allarchs: MAKEDEV.sub MAKEDEV.mi
+	cd ${.CURDIR}; for m in ${MAKEDEVARCHS}; do \
+	    make M=$$m m4; done
 
 .include <bsd.prog.mk>

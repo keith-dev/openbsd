@@ -1,36 +1,46 @@
-# $OpenBSD: Makefile,v 1.5 2001/09/07 17:49:16 todd Exp $
 
-NOMAN=
-NOPROG=
-        
-regress: t1
+# $OpenBSD: Makefile,v 1.12 2002/02/21 14:34:28 todd Exp $
 
 MAKEDEVARCHS+=alpha amiga hp300 hppa i386 mac68k macppc mvme68k mvme88k
 MAKEDEVARCHS+=mvmeppc sparc sparc64 sun3 vax
 
+MAKEDEVTARGS?=all ramdisk
+
 ETCSRCDIR?=	/usr/src/etc
 
+REGRESSSLOWTARGETS=${REGRESSTARGETS}
+
 # test separate targets, all, ramdisk/raminst, std, etc
+# t1 = all
+# t2 = ramdisk
 
-t1: ${MAKEDEVARCHS}
+REGRESSTARGETS+= ${MAKEDEVARCHS}
 
-${MAKEDEVARCHS}:
-	@echo "====> ${.TARGET}"
-	@exec ${SUDO} rm -rf test.${.TARGET}
-	@exec mkdir -p test.${.TARGET}
-	@exec cp ${ETCSRCDIR}/etc.${.TARGET}/MAKEDEV test.${.TARGET}
-	@exec ${SUDO} chown root.wheel test.${.TARGET}
-	@cd test.${.TARGET}; time ${SUDO} sh ./MAKEDEV all || true; \
-	time ${SUDO} sh ./MAKEDEV all || true; \
-	( ls -l; ls -l fd/; ls -l altq/ ) | \
-		awk '/^[bcps]/ {print $$1,$$2,$$3,$$4,$$5,$$6,$$10} \
-		     /^l/      {print $$1,$$2,$$3,$$4,$$5,$$9,$$10,$$11}' |\
-		sort +4 -n > ../t1.${.TARGET}.out
+${REGRESSTARGETS}:
+. for _T in ${MAKEDEVTARGS}
+	@echo "====> ${_T}.${.TARGET}"
+	@exec ${SUDO} rm -rf test.${_T}.${.TARGET}
+	@exec mkdir -p -m 700 test.${_T}.${.TARGET}
+	@exec cp ${ETCSRCDIR}/etc.${.TARGET}/MAKEDEV test.${_T}.${.TARGET}
+	@exec ${SUDO} chown root.wheel test.${_T}.${.TARGET}
+	@cd test.${_T}.${.TARGET}; \
+	time ${SUDO} sh ./MAKEDEV ${_T} || true; \
+	time ${SUDO} sh ./MAKEDEV ${_T} || true; \
+	( ls -ln; ls -ln fd/; ls -ln altq/ ) 2> /dev/null | \
+		awk '/^[bcps]/ {printf "%s %x.%x %x,%x%s\n",$$1,$$3,$$4,$$5,$$6,$$10} \
+		     /^l/      {printf "%s %s.%s%s>%s\n",$$1,$$3,$$4,$$9,$$11}' | \
+		sort +5 -n | \
+		sed -e 's/rwx/7/g;s/rw-/6/g;s/r-x/5/g;s/r--/4/g' \
+		    -e 's/-wx/3/g;s/-w-/2/g;s/--x/1/g;s/---/0/g' \
+		    -e 's/^\([bcpsl]\)\([0-9][0-9]*\) /\2\1/' \
+		> ../t1.${_T}.${.TARGET}.out
+.endfor
 
 clean:
 	for f in ${MAKEDEVARCHS}; do rm -rf test.$$f; done
+	rm -f ${CLEANFILES}
 
-.PHONY: t1 t2 t3 t4 t5 t6 t7 regress ${MAKEDEVARCHS}
+.PHONY: ${MAKEDEVARCHS}
 CLEANFILES+=t1.*.out
 
-.include <bsd.prog.mk>
+.include <bsd.regress.mk>

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ncheck_ffs.c,v 1.6 2001/07/07 18:26:16 deraadt Exp $	*/
+/*	$OpenBSD: ncheck_ffs.c,v 1.10 2002/03/14 06:51:41 mpech Exp $	*/
 
 /*-
  * Copyright (c) 1995, 1996 SigmaSoft, Th. Lockert <tholo@sigmasoft.com>
@@ -31,7 +31,7 @@
  */
 
 #ifndef lint
-static char rcsid[] = "$OpenBSD: ncheck_ffs.c,v 1.6 2001/07/07 18:26:16 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: ncheck_ffs.c,v 1.10 2002/03/14 06:51:41 mpech Exp $";
 #endif /* not lint */
 
 #include <sys/param.h>
@@ -72,20 +72,20 @@ struct icache_s {
 } *icache;
 int	nicache;
 
-void addinode __P((ino_t inum));
-struct dinode *getino __P((ino_t inum));
-void findinodes __P((ino_t));
-void bread __P((daddr_t, char *, int));
-void usage __P((void));
-void scanonedir __P((ino_t, const char *));
-void dirindir __P((ino_t, daddr_t, int, long *, const char *));
-void searchdir __P((ino_t, daddr_t, long, long, const char *));
-int matchino __P((const void *, const void *));
-int matchcache __P((const void *, const void *));
-void cacheino __P((ino_t, struct dinode *));
-struct dinode *cached __P((ino_t));
-int main __P((int, char *[]));
-char *rawname __P((char *));
+void addinode(ino_t inum);
+struct dinode *getino(ino_t inum);
+void findinodes(ino_t);
+void bread(daddr_t, char *, int);
+void usage(void);
+void scanonedir(ino_t, const char *);
+void dirindir(ino_t, daddr_t, int, long *, const char *);
+void searchdir(ino_t, daddr_t, long, long, const char *);
+int matchino(const void *, const void *);
+int matchcache(const void *, const void *);
+void cacheino(ino_t, struct dinode *);
+struct dinode *cached(ino_t);
+int main(int, char *[]);
+char *rawname(char *);
 
 /*
  * Check to see if the indicated inodes are the same
@@ -158,8 +158,8 @@ void
 findinodes(maxino)
 	ino_t maxino;
 {
-	register ino_t ino;
-	register struct dinode *dp;
+	ino_t ino;
+	struct dinode *dp;
 	mode_t mode;
 
 	for (ino = ROOTINO; ino < maxino; ino++) {
@@ -223,7 +223,7 @@ bread(blkno, buf, size)
 
 loop:
 	if (lseek(diskfd, ((off_t)blkno << dev_bshift), 0) < 0)
-		warnx("bread: lseek fails\n");
+		warnx("bread: lseek fails");
 	if ((cnt = read(diskfd, buf, size)) == size)
 		return;
 	if (blkno + (size / dev_bsize) > fsbtodb(sblock, sblock->fs_size)) {
@@ -241,28 +241,28 @@ loop:
 		goto loop;
 	}
 	if (cnt == -1)
-		warnx("read error from %s: %s: [block %d]: count=%d\n",
+		warnx("read error from %s: %s: [block %d]: count=%d",
 			disk, strerror(errno), blkno, size);
 	else
-		warnx("short read error from %s: [block %d]: count=%d, got=%d\n",
+		warnx("short read error from %s: [block %d]: count=%d, got=%d",
 			disk, blkno, size, cnt);
 	if (++breaderrors > BREADEMAX)
-		errx(1, "More than %d block read errors from %s\n", BREADEMAX, disk);
+		errx(1, "More than %d block read errors from %s", BREADEMAX, disk);
 	/*
 	 * Zero buffer, then try to read each sector of buffer separately.
 	 */
 	memset(buf, 0, size);
 	for (i = 0; i < size; i += dev_bsize, buf += dev_bsize, blkno++) {
 		if (lseek(diskfd, ((off_t)blkno << dev_bshift), 0) < 0)
-			warnx("bread: lseek2 fails!\n");
+			warnx("bread: lseek2 fails!");
 		if ((cnt = read(diskfd, buf, (int)dev_bsize)) == dev_bsize)
 			continue;
 		if (cnt == -1) {
-			warnx("read error from %s: %s: [sector %d]: count=%ld\n",
+			warnx("read error from %s: %s: [sector %d]: count=%ld",
 			    disk, strerror(errno), blkno, dev_bsize);
 			continue;
 		}
-		warnx("short read error from %s: [sector %d]: count=%ld, got=%d\n",
+		warnx("short read error from %s: [sector %d]: count=%ld, got=%d",
 		    disk, blkno, dev_bsize, cnt);
 	}
 }
@@ -301,7 +301,8 @@ scanonedir(ino, path)
 	filesize = dp->di_size;
 	for (i = 0; filesize > 0 && i < NDADDR; i++) {
 		if (dp->di_db[i])
-			searchdir(ino, dp->di_db[i], dblksize(sblock, dp, i), filesize, path);
+			searchdir(ino, dp->di_db[i], dblksize(sblock, dp, i),
+			    filesize, path);
 		filesize -= sblock->fs_bsize;
 	}
 	for (i = 0; filesize > 0 && i < NIADDR; i++) {
@@ -331,7 +332,8 @@ dirindir(ino, blkno, ind_level, filesize, path)
 		for (i = 0; *filesize > 0 && i < NINDIR(sblock); i++) {
 			blkno = idblk[i];
 			if (blkno)
-				searchdir(ino, blkno, sblock->fs_bsize, *filesize, path);
+				searchdir(ino, blkno, sblock->fs_bsize,
+				    *filesize, path);
 		}
 		return;
 	}
@@ -417,10 +419,10 @@ rawname(name)
 	if ((p = strrchr(name, '/')) == NULL)
 		return name;
 	*p = '\0';
-	strcpy(newname, name);
+	strlcpy(newname, name, sizeof newname - 2);
 	*p++ = '/';
-	strcat(newname, "/r");
-	strcat(newname, p);
+	strlcat(newname, "/r", sizeof newname);
+	strlcat(newname, p, sizeof newname);
 	return(newname);
 }
 
@@ -438,30 +440,49 @@ main(argc, argv)
 {
 	struct stat stblock;
 	struct fstab *fsp;
+	u_long ulval;
+	char *ep;
 	int c;
-	ino_t ino;
 
 	while ((c = getopt(argc, argv, "ai:ms")) != -1)
 		switch (c) {
-			case 'a':
-				aflag++;
-				break;
-			case 'i':
-				iflag++;
-				addinode(strtoul(optarg, NULL, 10));
-				while (optind < argc && (ino = strtoul(argv[optind], NULL, 10)) != 0) {
-					addinode(ino);
-					optind++;
-				}
-				break;
-			case 'm':
-				mflag++;
-				break;
-			case 's':
-				sflag++;
-				break;
-			case '?':
-				exit(2);
+		case 'a':
+			aflag++;
+			break;
+		case 'i':
+			iflag++;
+
+			errno = 0;
+			ulval = strtoul(optarg, &ep, 10);
+			if (optarg[0] == '\0' || *ep != '\0')
+				errx(1, "%s is not a number",
+				    optarg);
+			if (errno == ERANGE && ulval == ULONG_MAX)
+				errx(1, "%s is out or range",
+				    optarg);
+			addinode((ino_t)ulval);
+
+			while (optind < argc) {	
+				errno = 0;
+				ulval = strtoul(argv[optind], &ep, 10);
+				if (argv[optind][0] == '\0' || *ep != '\0')
+					break;
+				if (errno == ERANGE && ulval == ULONG_MAX)
+					errx(1, "%s is out or range",
+					    argv[optind]);
+				addinode((ino_t)ulval);
+				optind++;
+			}
+			break;
+		case 'm':
+			mflag++;
+			break;
+		case 's':
+			sflag++;
+			break;
+		default:
+			usage();
+			exit(2);
 		}
 	if (optind != argc - 1)
 		usage();

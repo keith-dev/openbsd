@@ -1,4 +1,4 @@
-/*	$OpenBSD: misc.c,v 1.6 1997/10/19 23:30:48 deraadt Exp $	*/
+/*	$OpenBSD: misc.c,v 1.10 2002/02/16 21:27:34 millert Exp $	*/
 
 /*
  * Copyright (c) 1997 Tobias Weingartner
@@ -35,9 +35,30 @@
 #include <ctype.h>
 #include <stdlib.h>
 #include <string.h>
+#include <errno.h>
 #include <sys/disklabel.h>
+#include <machine/limits.h>
 #include "misc.h"
 
+int
+unit_lookup(units)
+	char *units;
+{
+	int i = 0;
+	if (units == NULL)
+		return (UNIT_TYPE_DEFAULT);
+
+	while (unit_types[i].abbr != NULL) {
+		if (strncasecmp(unit_types[i].abbr, units, 1) == 0)
+			break;
+		i++;
+	}
+	/* default */
+	if (unit_types[i].abbr == NULL)
+		return (UNIT_TYPE_DEFAULT);
+	
+	return (i);
+}
 
 int
 ask_cmd(cmd)
@@ -55,9 +76,9 @@ ask_cmd(cmd)
 	buf = &buf[strspn(buf, " \t")];
 	cp = &buf[strcspn(buf, " \t")];
 	*cp++ = '\0';
-	strncpy(cmd->cmd, buf, 10);
+	strncpy(cmd->cmd, buf, sizeof(cmd->cmd));
 	buf = &cp[strspn(cp, " \t")];
-	strncpy(cmd->args, buf, 100);
+	strncpy(cmd->args, buf, sizeof(cmd->args));
 
 	return (0);
 }
@@ -69,7 +90,7 @@ ask_num(str, flags, dflt, low, high, help)
 	int dflt;
 	int low;
 	int high;
-	void (*help) __P((void));
+	void (*help)(void);
 {
 	char lbuf[100], *cp;
 	int num;
@@ -170,4 +191,138 @@ putlong(p, l)
 	*cp++ = l >> 8;
 	*cp++ = l >> 16;
 	*cp++ = l >> 24;
+}
+
+/*
+ * adapted from sbin/disklabel/editor.c
+ * Returns UINT_MAX on error
+ */
+u_int32_t
+getuint(disk, prompt, helpstring, oval, maxval, offset, flags)
+	disk_t *disk;
+	char *prompt;
+	char *helpstring;
+	u_int32_t oval;
+	u_int32_t maxval;
+	u_int32_t offset;
+	int flags;
+{
+	char buf[BUFSIZ], *endptr, *p, operator = '\0';
+	u_int32_t rval = oval;
+	size_t n;
+	int mult = 1;
+	double d;
+	int secpercyl;
+	
+	secpercyl = disk->real->sectors * disk->real->heads;
+
+	/* We only care about the remainder */
+	offset = offset % secpercyl;
+
+	buf[0] = '\0';
+	do {
+		printf("%s: [%u] ", prompt, oval);
+		if (fgets(buf, sizeof(buf), stdin) == NULL) {
+			buf[0] = '\0';
+			if (feof(stdin)) {
+				clearerr(stdin);
+				putchar('\n');
+				return(UINT_MAX - 1);
+			}
+		}
+		n = strlen(buf);
+		if (n > 0 && buf[n-1] == '\n')
+			buf[--n] = '\0';
+		if (buf[0] == '?')
+			puts(helpstring);
+	} while (buf[0] == '?');
+
+	if (buf[0] == '*' && buf[1] == '\0') {
+		rval = maxval;
+	} else {
+		/* deal with units */
+		if (buf[0] != '\0' && n > 0) {
+			if ((flags & DO_CONVERSIONS)) {
+				switch (tolower(buf[n-1])) {
+
+				case 'c':
+					mult = secpercyl;
+					buf[--n] = '\0';
+					break;
+				case 'b':
+					mult = -DEV_BSIZE;
+					buf[--n] = '\0';
+					break;
+				case 's':
+					buf[--n] = '\0';
+					break;
+				case 'k':
+					mult = 1024 / DEV_BSIZE;
+					buf[--n] = '\0';
+					break;
+				case 'm':
+					mult = 1048576 / DEV_BSIZE;
+					buf[--n] = '\0';
+					break;
+				case 'g':
+					mult = 1073741824 / DEV_BSIZE;
+					buf[--n] = '\0';
+					break;
+				}
+			}
+
+			/* Did they give us an operator? */
+			p = &buf[0];
+			if (*p == '+' || *p == '-')
+				operator = *p++;
+
+			endptr = p;
+			errno = 0;
+			d = strtod(p, &endptr);
+			if (errno == ERANGE)
+				rval = UINT_MAX;	/* too big/small */
+			else if (*endptr != '\0') {
+				errno = EINVAL;		/* non-numbers in str */
+				rval = UINT_MAX;
+			} else {
+				/* XXX - should check for overflow */
+				if (mult > 0)
+					rval = d * mult;
+				else
+					/* Negative mult means divide (fancy) */
+					rval = d / (-mult);
+
+				/* Apply the operator */
+				if (operator == '+')
+					rval += oval;
+				else if (operator == '-')
+					rval = oval - rval;
+			}
+		}
+	}
+	if ((flags & DO_ROUNDING) && rval < UINT_MAX) {
+#ifndef CYLCHECK
+		/* Round to nearest cylinder unless given in sectors */
+		if (mult != 1)
+#endif
+		{
+			u_int32_t cyls;
+
+			/* If we round up past the end, round down instead */
+			cyls = (u_int32_t)((rval / (double)secpercyl)
+			    + 0.5);
+			if (cyls != 0 && secpercyl != 0) {
+				if ((cyls * secpercyl) - offset > maxval)
+					cyls--;
+
+				if (rval != (cyls * secpercyl) - offset) {
+					rval = (cyls * secpercyl) - offset;
+					printf("Rounding to nearest cylinder: %u\n",
+					    rval);
+				}
+			}
+		}
+	}
+
+	return(rval);
 }

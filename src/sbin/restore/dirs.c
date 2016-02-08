@@ -1,4 +1,4 @@
-/*	$OpenBSD: dirs.c,v 1.17 1999/08/17 09:13:15 millert Exp $	*/
+/*	$OpenBSD: dirs.c,v 1.19 2002/02/16 21:27:37 millert Exp $	*/
 /*	$NetBSD: dirs.c,v 1.26 1997/07/01 05:37:49 lukem Exp $	*/
 
 /*
@@ -43,7 +43,7 @@
 #if 0
 static char sccsid[] = "@(#)dirs.c	8.5 (Berkeley) 8/31/94";
 #else
-static char rcsid[] = "$OpenBSD: dirs.c,v 1.17 1999/08/17 09:13:15 millert Exp $";
+static char rcsid[] = "$OpenBSD: dirs.c,v 1.19 2002/02/16 21:27:37 millert Exp $";
 #endif
 #endif /* not lint */
 
@@ -125,16 +125,16 @@ struct odirect {
 	char	d_name[ODIRSIZ];
 };
 
-static struct inotab	*allocinotab __P((ino_t, struct dinode *, long));
-static void		 dcvt __P((struct odirect *, struct direct *));
-static void		 flushent __P((void));
-static struct inotab	*inotablookup __P((ino_t));
-static RST_DIR		*opendirfile __P((const char *));
-static void		 putdir __P((char *, long));
-static void		 putent __P((struct direct *));
-static void		 rst_seekdir __P((RST_DIR *, long, long));
-static long		 rst_telldir __P((RST_DIR *));
-static struct direct	*searchdir __P((ino_t, char *));
+static struct inotab	*allocinotab(ino_t, struct dinode *, long);
+static void		 dcvt(struct odirect *, struct direct *);
+static void		 flushent(void);
+static struct inotab	*inotablookup(ino_t);
+static RST_DIR		*opendirfile(const char *);
+static void		 putdir(char *, long);
+static void		 putent(struct direct *);
+static void		 rst_seekdir(RST_DIR *, long, long);
+static long		 rst_telldir(RST_DIR *);
+static struct direct	*searchdir(ino_t, char *);
 
 /*
  *	Extract directory contents, building up a directory structure
@@ -146,8 +146,8 @@ void
 extractdirs(genmode)
 	int genmode;
 {
-	register int i;
-	register struct dinode *ip;
+	int i;
+	struct dinode *ip;
 	struct inotab *itp;
 	struct direct nulldir;
 	int fd;
@@ -231,10 +231,10 @@ void
 treescan(pname, ino, todo)
 	char *pname;
 	ino_t ino;
-	long (*todo) __P((char *, ino_t, int));
+	long (*todo)(char *, ino_t, int);
 {
-	register struct inotab *itp;
-	register struct direct *dp;
+	struct inotab *itp;
+	struct direct *dp;
 	int namelen;
 	long bpt;
 	char locname[MAXPATHLEN + 1];
@@ -324,8 +324,8 @@ searchdir(inum, name)
 	ino_t	inum;
 	char	*name;
 {
-	register struct direct *dp;
-	register struct inotab *itp;
+	struct direct *dp;
+	struct inotab *itp;
 	int len;
 
 	itp = inotablookup(inum);
@@ -350,9 +350,9 @@ putdir(buf, size)
 	long size;
 {
 	struct direct cvtbuf;
-	register struct odirect *odp;
+	struct odirect *odp;
 	struct odirect *eodp;
-	register struct direct *dp;
+	struct direct *dp;
 	long loc, i;
 
 	if (cvtflag) {
@@ -446,8 +446,8 @@ flushent()
 
 static void
 dcvt(odp, ndp)
-	register struct odirect *odp;
-	register struct direct *ndp;
+	struct odirect *odp;
+	struct direct *ndp;
 {
 
 	memset(ndp, 0, (size_t)(sizeof *ndp));
@@ -467,7 +467,7 @@ dcvt(odp, ndp)
  */
 static void
 rst_seekdir(dirp, loc, base)
-	register RST_DIR *dirp;
+	RST_DIR *dirp;
 	long loc, base;
 {
 
@@ -487,9 +487,9 @@ rst_seekdir(dirp, loc, base)
  */
 struct direct *
 rst_readdir(dirp)
-	register RST_DIR *dirp;
+	RST_DIR *dirp;
 {
-	register struct direct *dp;
+	struct direct *dp;
 
 	for (;;) {
 		if (dirp->dd_loc == 0) {
@@ -574,8 +574,8 @@ static RST_DIR *
 opendirfile(name)
 	const char *name;
 {
-	register RST_DIR *dirp;
-	register int fd;
+	RST_DIR *dirp;
+	int fd;
 
 	if ((fd = open(name, O_RDONLY)) == -1)
 		return (NULL);
@@ -657,7 +657,7 @@ genliteraldir(name, ino)
 	char *name;
 	ino_t ino;
 {
-	register struct inotab *itp;
+	struct inotab *itp;
 	int ofile, dp, i, size;
 	char buf[BUFSIZ];
 
@@ -714,7 +714,7 @@ allocinotab(ino, dip, seekpt)
 	struct dinode *dip;
 	long seekpt;
 {
-	register struct inotab	*itp;
+	struct inotab	*itp;
 	struct modeinfo node;
 
 	itp = calloc(1, sizeof(struct inotab));
@@ -746,7 +746,7 @@ static struct inotab *
 inotablookup(ino)
 	ino_t	ino;
 {
-	register struct inotab *itp;
+	struct inotab *itp;
 
 	for (itp = inotab[INOHASH(ino)]; itp != NULL; itp = itp->t_next)
 		if (itp->t_ino == ino)

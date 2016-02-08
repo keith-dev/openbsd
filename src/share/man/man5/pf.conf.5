@@ -1,4 +1,4 @@
-.\"	$OpenBSD: pf.conf.5,v 1.25 2001/10/15 16:22:22 dhartmei Exp $
+.\"	$OpenBSD: pf.conf.5,v 1.37 2002/03/28 02:43:47 mickey Exp $
 .\"
 .\" Copyright (c) 2001, Daniel Hartmeier
 .\" All rights reserved.
@@ -44,43 +44,55 @@ performed.
 .Sh GRAMMAR
 Syntax for filter rules in BNF:
 .Bd -literal
-rule       = action ( "in" | "out" )
-             [ "log" | "log-all" ] [ "quick" ]
-             [ "on" interface-name ] [ af ]
-             [ "proto" ( proto-name | proto-number | "{" proto-list "}" ) ]
-             hosts
-             [ flags ] ( [ icmp-type ] | [ ipv6-icmp-type ] )
-             [ "keep state" ] [ "modulate state" ]
-             [ "no-df" ] [ "min-ttl" number ] [ "allow-opts" ] .
+rule           = action ( "in" | "out" )
+                 [ "log" | "log-all" ] [ "quick" ]
+                 [ "on" ( interface-name | "{" interface-list "}" ) ]
+                 [ route ] [ af ]
+                 [ "proto" ( proto-name | proto-number |
+                             "{" proto-list "}" ) ]
+                 hosts
+                 [ flags ] ( [ icmp-type ] | [ ipv6-icmp-type ] )
+                 [ "keep state" ] [ "modulate state" ]
+                 [ "no-df" ] [ "min-ttl" number ] [ "allow-opts" ]
+                 [ "label" string ] .
 
-action     = "pass" | "block" [ return ] | "scrub" .
-return     = "return-rst" |
-             "return-icmp" [ "(" ( icmp-code-name | icmp-code-number ) ")" ] |
-             "return-icmp6" [ "(" ( icmp-code-name | icmp-code-number ) ")" ] .
+action         = "pass" | "block" [ return ] | "scrub" .
+return         = "return-rst" |
+                 "return-icmp"
+                     [ "(" ( icmp-code-name | icmp-code-number ) ")" ] |
+                 "return-icmp6"
+                     [ "(" ( icmp-code-name | icmp-code-number ) ")" ] .
 
-af	   = "inet" | "inet6" .
-proto-list = ( proto-name | proto-number ) [ "," proto-list ] .
+interface-list = interface-name [ "," interface-list ] .
+af	       = "inet" | "inet6" .
+proto-list     = ( proto-name | proto-number ) [ "," proto-list ] .
 
-hosts      = "all" |
-             "from" ( "any" | host | "{" host-list "}" ) [ port ]
-             "to"   ( "any" | host | "{" host-list "}" ) [ port ] .
+hosts          = "all" |
+                 "from" ( "any" | "no-route" | host | "{" host-list "}" ) [ port ]
+                 "to"   ( "any" | "no-route" | host | "{" host-list "}" ) [ port ] .
 
-host       = [ "!" ] address [ "/" mask-bits ] .
-host-list  = host [ "," host-list ] .
-port       = "port" ( unary-op | binary-op | "{" port-list "}" ) .
-port-list  = ( unary-op | binary-op ) [ "," port-list ] .
-unary-op   = ( "=" | "!=" | "<" | "<=" | ">" | ">=" )
-             ( port-name | port-number ) .
-binary-op  = port-number ( "<>" | "><" ) port-number .
+host           = [ "!" ] address [ "/" mask-bits ] .
+address        = ( interface-name | host-name | ipv4-dotted-quad |
+                   ipv6-coloned-hex ) .
+host-list      = host [ "," host-list ] .
+port           = "port" ( unary-op | binary-op | "{" port-list "}" ) .
+port-list      = ( unary-op | binary-op ) [ "," port-list ] .
+unary-op       = [ "=" | "!=" | "<" | "<=" | ">" | ">=" ]
+                 ( port-name | port-number ) .
+binary-op      = port-number ( "<>" | "><" ) port-number .
 
-flags      = "flags" ( flag-set | flag-set "/" flag-set | "/" flag-set ) .
-flag-set   = [ "F" ] [ "S" ] [ "R" ] [ "P" ] [ "A" ] [ "U" ] .
+flags          = "flags" ( flag-set | flag-set "/" flag-set | "/" flag-set ) .
+flag-set       = [ "F" ] [ "S" ] [ "R" ] [ "P" ] [ "A" ] [ "U" ] .
 
-icmp-type  = "icmp-type" ( icmp-type-code | "{" icmp-list "}" ) . 
+icmp-type      = "icmp-type" ( icmp-type-code | "{" icmp-list "}" ) . 
 ipv6-icmp-type = "ipv6-icmp-type" ( icmp-type-code | "{" icmp-list "}" ) . 
 icmp-type-code = ( icmp-type-name | icmp-type-number )
                  [ "code" ( icmp-code-name | icmp-code-number ) ] .
-icmp-list  = icmp-type-code [ "," icmp-list ] . 
+icmp-list      = icmp-type-code [ "," icmp-list ] . 
+
+route          = "fastroute" |
+                 "route-to" interface-name[":"address] |
+                 "dup-to" interface-name[":"address]
 
 .Ed
 .Sh FILTER RULES
@@ -158,6 +170,24 @@ If a packet matches a rule which has the
 option set, this rule
 is considered the last matching rule, and evaluation of subsequent rules
 is skipped.
+.Sh ROUTING
+If a packet matches a rule with a route option set, the packet filter will
+route the packet according to the type of route option.
+.Ss fastroute
+The
+.Em fastroute
+option does a normal route lookup to find the next hop for the packet.
+.Ss route-to
+The
+.Em route-to
+option routes the packet to the specified interface with an optional address
+for the next hop.
+.Ss dup-to
+The
+.Em dup-to
+option creates a duplicate of the packet and routes it like
+.Em route-to.
+The original packet gets routed as it normally would.
 .Sh PARAMETERS
 The rule parameters specify for what packets a rule applies.
 A packet always comes in on or goes out through one interface.
@@ -189,7 +219,14 @@ The rule applies only to packets with the specified source and destination
 addresses/ports.
 .Pp
 Addresses can be specified in CIDR notation (matching netblocks), as
-symbolic host names or interface names.
+symbolic host names or interface names, or as any of the following keywords:
+.Bl -tag -width no-route -compact
+.It Em any
+means any address;
+.It Em no-route
+means any address which is not currently routable.
+.El
+.Pp
 Host name resolution and interface to address translation are done at
 rule set load-time.
 When the address of an interface (or host name) changes (by DHCP or PPP,
@@ -226,7 +263,7 @@ show:
     pass in all
     pass in from any to any
     pass in proto tcp from any port <= 1024 to any
-    pass in proto tcp from any to any port = 25
+    pass in proto tcp from any to any port 25
     pass in proto tcp from 10.0.0.0/8 port > 1024 to ! 10.1.2.3 port != 22
 .Ed
 .Ss flags <a> | <a>/<b> | /<b>
@@ -272,13 +309,18 @@ The implicit
 .Em pass
 rule that is used when a packet doesn't match any rules does not
 allow IP options.
+.Ss label <string>
+Adds a label (name) to the rule, which can be used to identify the rule.
+For instance,
+.Em pfctl -s labels
+shows per-rule statistics for rules that have labels.
 .Sh MACROS
 .Em pfctl
 supports macro definition and expansion like:
 .Bd -literal
     ext_if = "kue0"
-    pass out on $ext_if from any to any           keep state
-    pass in  on $ext_if from any to any port = 25 keep state
+    pass out on $ext_if from any to any         keep state
+    pass in  on $ext_if from any to any port 25 keep state
 .Ed
 .Pp
 Macro names must start with a letter and may contain letters, digits
@@ -319,8 +361,8 @@ For instance:
 .Bd -literal
     block out all
     block in  all
-    pass out proto tcp from any to any           flags S/SA keep state
-    pass in  proto tcp from any to any port = 25 flags S/SA keep state
+    pass out proto tcp from any to any         flags S/SA keep state
+    pass in  proto tcp from any to any port 25 flags S/SA keep state
 .Ed
 .Pp
 This rule set blocks everything by default.
@@ -386,21 +428,33 @@ For instance:
 .Bd -literal
     block out all
     block in  all
-    pass out proto tcp from any to any                      modulate state
-    pass in  proto tcp from any to any port = 25 flags S/SA modulate state
+    pass out proto tcp from any to any                    modulate state
+    pass in  proto tcp from any to any port 25 flags S/SA modulate state
 .Ed
 .Pp
 Caveat:  If
 .Em pf
-picks up an already established connection (the firewall was rebooted, the
-state table was flushed, ...) it will not randomize the sequence number and it
-will fall back to operating as if "keep state" was specified for that
-connection.
+picks up an already established connection
+.Po
+the firewall was rebooted, the state table was flushed, ...
+.Pc
+it will not be able to safely modulate the state of that connection.
+.Em pf
+will fall back and operate as if "keep state" was specified instead.
+Without this fallback, modulation would cause both end hosts to
+each think that the other had somehow lost sync.
 .Pp
 Caveat:  If the state table is flushed or the firewall is rebooted,
-currently established modulated connections can not be continued or picked
-up again by the firewall.
-The sequence numbers will be out of sync without the modulator.
+currently modulated connections can not be continued or picked
+up again by the firewall.  State modulation causes the firewall to phase
+shift the sequencing of each side of a connection
+.Po
+add a random number to each side.
+.Pc
+The sudden withdrawl
+of the modulation will appear to each side of the connection that its
+peer has suddenly shifted its sequence by a random amount.  Neither side
+will be able to recover and the connection will stall then eventually close.
 .Sh NORMALIZATION
 Packet normalization is invoked via the
 .Pa scrub
@@ -417,7 +471,12 @@ Clears the
 .Pa dont-fragment
 bit from a matching ip packet.
 .Ss min-ttl <number>
-Enforces a minium ttl for matching ip packets.
+Enforces a minimum ttl for matching ip packets.
+.Pp
+Normalization occurs before filtering, scrub rules and pass/block
+rules are evaluated independantly.
+Hence, their relative position in the rule set is not relevant,
+and packets can't be blocked before normalization.
 .Sh EXAMPLES
 .Bd -literal
 # The external interface is kue0 (157.161.48.183, the only routable address)
@@ -436,6 +495,9 @@ block return-rst  out log on $ext_if proto tcp all
 block return-rst  in  log on $ext_if proto tcp all
 block return-icmp out log on $ext_if proto udp all
 block return-icmp in  log on $ext_if proto udp all
+
+# block anything coming form source we have no back routes for
+block in from no-route to any
 
 # block and log outgoing packets that don't have our address as source,
 # they are either spoofed or something is misconfigured (NAT disabled,
@@ -467,7 +529,7 @@ pass in  on $ext_if inet proto icmp all icmp-type 8 code 0 keep state
 pass out on $ext_if proto udp all keep state
 
 # pass in certain UDP connections and keep state (DNS)
-pass in on $ext_if proto udp from any to any port = domain keep state
+pass in on $ext_if proto udp from any to any port domain keep state
 
 # TCP
 
@@ -477,16 +539,27 @@ pass out on $ext_if proto tcp all modulate state
 # pass in certain TCP connections and keep state (SSH, SMTP, DNS, IDENT)
 pass in on $ext_if proto tcp from any to any port { ssh, smtp, domain, \\
 	auth } keep state
+
+# pass in data mode connections for ftp-proxy running on this host.
+# (see ftp-proxy(8) for details)
+pass in on $ext_if proto tcp from any to 157.161.48.183 port >= 41952 \\
+	keep state
+
 .Ed
 .Sh FILES
 .Bl -tag -width "/etc/pf.conf" -compact
+.It Pa /etc/hosts
 .It Pa /etc/pf.conf
+.It Pa /etc/protocols
 .It Pa /etc/services
 .El
 .Sh SEE ALSO
 .Xr pf 4 ,
+.Xr hosts 5 ,
 .Xr nat.conf 5 ,
+.Xr protocols 5 ,
 .Xr services 5 ,
+.Xr ftp-proxy 8 ,
 .Xr pfctl 8 ,
 .Xr pflogd 8
 .Sh HISTORY

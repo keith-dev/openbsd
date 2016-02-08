@@ -1,4 +1,4 @@
-/*	$OpenBSD: ypserv.c,v 1.15 2001/01/11 23:37:01 deraadt Exp $ */
+/*	$OpenBSD: ypserv.c,v 1.21 2002/02/19 19:39:41 millert Exp $ */
 
 /*
  * Copyright (c) 1994 Mats O Jansson <moj@stacken.kth.se>
@@ -32,25 +32,26 @@
  */
 
 #ifndef LINT
-static char rcsid[] = "$OpenBSD: ypserv.c,v 1.15 2001/01/11 23:37:01 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: ypserv.c,v 1.21 2002/02/19 19:39:41 millert Exp $";
 #endif
 
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <sys/ioctl.h>
+#include <sys/ttycom.h>/* TIOCNOTTY */
+#include <netinet/in.h>
 #include "yp.h"
 #include "ypv1.h"
 #include <stdio.h>
 #include <stdlib.h>/* getenv, exit */
-#include <rpc/pmap_clnt.h> /* for pmap_unset */
 #include <string.h> /* strcmp */ 
 #include <netdb.h>
 #include <signal.h>
 #include <errno.h>
-#include <sys/ttycom.h>/* TIOCNOTTY */
-#ifdef __cplusplus
-#include <sysent.h> /* getdtablesize, open */
-#endif /* __cplusplus */
+#include <unistd.h>
+#include <fcntl.h>
+#include <rpc/pmap_clnt.h> /* for pmap_unset */
 #include <memory.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
 #ifdef SYSLOG
 #include <syslog.h>
 #else
@@ -61,10 +62,6 @@ static char rcsid[] = "$OpenBSD: ypserv.c,v 1.15 2001/01/11 23:37:01 deraadt Exp
 #include "yplog.h"
 #include "ypdef.h"
 #include <sys/wait.h>
-
-#ifdef __STDC__
-#define SIG_PF void(*)(int)
-#endif
 
 #ifdef DEBUG
 #define RPC_SVC_FG
@@ -79,8 +76,13 @@ int	usedns = FALSE;
 char   *progname = "ypserv";
 char   *aclfile = NULL;
 
-void sig_child();
-void sig_hup();
+void	sig_child(int);
+void	sig_hup(int);
+volatile sig_atomic_t wantsighup;
+
+extern	int __svc_fdsetsize;
+extern	fd_set *__svc_fdset;
+extern	void svc_getreqset2(fd_set *, int);
 
 static
 void _msgout(char* msg)
@@ -96,8 +98,10 @@ void _msgout(char* msg)
 }
 
 static void
-closedown()
+closedown(int sig)
 {
+	int save_errno = errno;
+
 	if (_rpcsvcdirty == 0) {
 		extern fd_set *__svc_fdset;
 		extern int __svc_fdsetsize;
@@ -109,13 +113,14 @@ closedown()
 			if (FD_ISSET(i, __svc_fdset))
 				openfd++;
 		if (openfd <= (_rpcpmstart?0:1))
-			exit(0);
+			_exit(0);
 	}
 	(void) alarm(_RPCSVC_CLOSEDOWN);
+	errno = save_errno;
 }
 
 static void
-ypprog_1(struct svc_req *rqstp, register SVCXPRT *transp)
+ypprog_1(struct svc_req *rqstp, SVCXPRT *transp)
 {
 	union {
 		domainname ypproc_domain_1_arg;
@@ -214,11 +219,10 @@ ypprog_1(struct svc_req *rqstp, register SVCXPRT *transp)
 		exit(1);
 	}
 	_rpcsvcdirty = 0;
-	return;
 }
 
 static void
-ypprog_2(struct svc_req *rqstp, register SVCXPRT *transp)
+ypprog_2(struct svc_req *rqstp, SVCXPRT *transp)
 {
 	union {
 		domainname ypproc_domain_2_arg;
@@ -330,24 +334,74 @@ ypprog_2(struct svc_req *rqstp, register SVCXPRT *transp)
 		exit(1);
 	}
 	_rpcsvcdirty = 0;
-	return;
+}
+
+void
+hup()
+{
+	/* Handle the log. */
+	ypcloselog();
+	ypopenlog();
+
+	acl_reset();
+	if (aclfile != NULL) {
+		yplog("sig_hup: reread %s", aclfile);
+		(void)acl_init(aclfile);
+	} else {
+		yplog("sig_hup: reread %s", YP_SECURENET_FILE);
+		(void)acl_securenet(YP_SECURENET_FILE);
+	}
+}
+
+void
+my_svc_run()
+{
+	fd_set *fds;
+
+	for (;;) {
+		if (wantsighup) {
+			hup();
+			wantsighup = 0;
+		}
+		if (__svc_fdset) {
+			int bytes = howmany(__svc_fdsetsize, NFDBITS) *
+			    sizeof(fd_mask);
+			fds = (fd_set *)malloc(bytes);	/* XXX */
+			memcpy(fds, __svc_fdset, bytes);
+		} else
+			fds = NULL;
+		switch (select(svc_maxfd+1, fds, 0, 0, (struct timeval *)0)) {
+		case -1:
+			if (errno == EINTR) {
+				if (fds)
+					free(fds);
+				continue;
+			}
+			perror("svc_run: - select failed");
+			if (fds)
+				free(fds);
+			return;
+		case 0:
+			if (fds)
+				free(fds);
+			continue;
+		default:
+			svc_getreqset2(fds, svc_maxfd+1);
+			free(fds);
+		}
+	}
 }
 
 int
-main (argc,argv)
-int argc;
-char *argv[];
+main(argc, argv)
+	int argc;
+	char *argv[];
 {
-	register SVCXPRT *transp;
-	int sock;
-	int proto;
+	int usage = 0, xflag = 0, allowv1 = 0, ch, sock, proto;
 	struct sockaddr_in saddr;
 	int asize = sizeof (saddr);
-	int	 usage = 0;
-	int	 xflag = 0;
-	int	 allowv1 = 0;
-	int	 ch;
-	extern	 char *optarg;
+	extern char *optarg;
+	SVCXPRT *transp;
 	
 	while ((ch = getopt(argc, argv, "1a:dx")) != -1)
 		switch (ch) {
@@ -369,23 +423,22 @@ char *argv[];
 		}
 	
 	if (usage) {
-		(void)fprintf(stderr,"usage: %s [-a aclfile] [-d] [-x]\n",progname);
+		(void)fprintf(stderr, "usage: %s [-a aclfile] [-d] [-x]\n",progname);
 		exit(1);
 	}
 
 	if (geteuid() != 0) {
-		(void)fprintf(stderr,"%s: must be root to run.\n",progname);
+		(void)fprintf(stderr, "%s: must be root to run.\n",progname);
 		exit(1);
 	}
 
-	if (aclfile != NULL) {
+	if (aclfile != NULL)
 		(void)acl_init(aclfile);
-	} else {
+	else
 		(void)acl_securenet(YP_SECURENET_FILE);
-	}
-	if (xflag) {
+
+	if (xflag)
 		exit(1);
-	};
 
 	if (getsockname(0, (struct sockaddr *)&saddr, &asize) == 0) {
 		int ssize = sizeof (int);
@@ -393,7 +446,7 @@ char *argv[];
 		if (saddr.sin_family != AF_INET)
 			exit(1);
 		if (getsockopt(0, SOL_SOCKET, SO_TYPE,
-				(char *)&_rpcfdtype, &ssize) == -1)
+		    (char *)&_rpcfdtype, &ssize) == -1)
 			exit(1);
 		sock = 0;
 		_rpcpmstart = 1;
@@ -436,14 +489,9 @@ char *argv[];
 	
 	(void)signal(SIGCHLD, sig_child);
 	(void)signal(SIGHUP, sig_hup);
-	{ FILE *pidfile = fopen(YPSERV_PID_PATH, "w");
-	  if (pidfile != NULL) {
-		fprintf(pidfile, "%d\n", getpid());
-		fclose(pidfile);
-	  }
-	}
+	pidfile(NULL);
 
-	if ((_rpcfdtype == 0) || (_rpcfdtype == SOCK_DGRAM)) {
+	if (_rpcfdtype == 0 || _rpcfdtype == SOCK_DGRAM) {
 		transp = svcudp_create(sock);
 		if (transp == NULL) {
 			_msgout("cannot create udp service.");
@@ -467,7 +515,7 @@ char *argv[];
 		}
 	}
 
-	if ((_rpcfdtype == 0) || (_rpcfdtype == SOCK_STREAM)) {
+	if (_rpcfdtype == 0 || _rpcfdtype == SOCK_STREAM) {
 		if (_rpcpmstart)
 			transp = svcfd_create(sock, 0, 0);
 		else
@@ -499,17 +547,17 @@ char *argv[];
 		exit(1);
 	}
 	if (_rpcpmstart) {
-		(void) signal(SIGALRM, (SIG_PF) closedown);
+		(void) signal(SIGALRM, closedown);
 		(void) alarm(_RPCSVC_CLOSEDOWN);
 	}
-	svc_run();
+	my_svc_run();
 	_msgout("svc_run returned");
 	exit(1);
 	/* NOTREACHED */
 }
 
 void
-sig_child()
+sig_child(int signo)
 {
 	int save_errno = errno;
 
@@ -518,28 +566,8 @@ sig_child()
 	errno = save_errno;
 }
 
-/*
- * XXX
- * This is calling illegal functions inside a signal routine.
- * It's a massive race.
- */
 void
-sig_hup()
+sig_hup(int signo)
 {
-	int save_errno = errno;
-
-	/* Handle the log. */
-	ypcloselog();
-	ypopenlog();
-
-	acl_reset();
-	if (aclfile != NULL) {
-		yplog("sig_hup: reread %s",aclfile);
-		(void)acl_init(aclfile);
-	} else {
-		yplog("sig_hup: reread %s",YP_SECURENET_FILE);
-		(void)acl_securenet(YP_SECURENET_FILE);
-	}
-
-	errno = save_errno;
+	wantsighup = 1;
 }

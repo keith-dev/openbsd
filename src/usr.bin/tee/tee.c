@@ -1,4 +1,4 @@
-/*	$OpenBSD: tee.c,v 1.2 1996/06/26 05:40:32 deraadt Exp $	*/
+/*	$OpenBSD: tee.c,v 1.4 2002/02/16 21:27:54 millert Exp $	*/
 /*	$NetBSD: tee.c,v 1.5 1994/12/09 01:43:39 jtc Exp $	*/
 
 /*
@@ -44,7 +44,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)tee.c	8.1 (Berkeley) 6/6/93";
 #endif
-static char rcsid[] = "$OpenBSD: tee.c,v 1.2 1996/06/26 05:40:32 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: tee.c,v 1.4 2002/02/16 21:27:54 millert Exp $";
 #endif
 
 #include <sys/types.h>
@@ -66,16 +66,16 @@ typedef struct _list {
 } LIST;
 LIST *head;
 
-void add __P((int, char *));
+void add(int, char *);
 
 int
 main(argc, argv)
 	int argc;
 	char *argv[];
 {
-	register LIST *p;
-	register int n, fd, rval, wval;
-	register char *bp;
+	LIST *p;
+	int n, fd, rval, wval;
+	char *bp;
 	int append, ch, exitval;
 	char *buf;
 #define	BSIZE (8 * 1024)

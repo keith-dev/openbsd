@@ -1,4 +1,4 @@
-/*	$OpenBSD: time.c,v 1.5 1997/11/15 21:51:31 todd Exp $	*/
+/*	$OpenBSD: time.c,v 1.8 2002/02/19 19:39:35 millert Exp $	*/
 /*	$NetBSD: time.c,v 1.7 1995/03/21 13:55:25 mycroft Exp $	*/
 
 /*-
@@ -38,16 +38,12 @@
 #if 0
 static char sccsid[] = "@(#)time.c	8.1 (Berkeley) 5/31/93";
 #else
-static char rcsid[] = "$OpenBSD: time.c,v 1.5 1997/11/15 21:51:31 todd Exp $";
+static char rcsid[] = "$OpenBSD: time.c,v 1.8 2002/02/19 19:39:35 millert Exp $";
 #endif
 #endif /* not lint */
 
 #include <sys/types.h>
-#ifdef __STDC__
-# include <stdarg.h>
-#else
-# include <varargs.h>
-#endif
+#include <stdarg.h>
 
 #include "csh.h"
 #include "extern.h"
@@ -55,7 +51,7 @@ static char rcsid[] = "$OpenBSD: time.c,v 1.5 1997/11/15 21:51:31 todd Exp $";
 /*
  * C Shell - routines handling process timing and niceing
  */
-static void	pdeltat __P((struct timeval *, struct timeval *));
+static void	pdeltat(struct timeval *, struct timeval *);
 
 void
 settimes()
@@ -174,7 +170,7 @@ prusage(r0, r1, e, b)
 
 	    case 'P':		/* percent time spent running */
 		/* check if it did not run at all */
-		i = (ms == 0) ? 0 : (t * 1000 / ms);
+		i = (ms == 0) ? 0 : ((long long)t * 1000 / ms);
 		/* nn.n% */
 		(void) fprintf(cshout, "%ld.%01ld%%", i / 10, i % 10);
 		break;

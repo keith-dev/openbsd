@@ -1,4 +1,4 @@
-/*	$OpenBSD: getpar.c,v 1.4 1999/07/31 18:48:58 pjanzen Exp $	*/
+/*	$OpenBSD: getpar.c,v 1.8 2002/02/25 00:18:48 pvalchev Exp $	*/
 /*	$NetBSD: getpar.c,v 1.4 1995/04/24 12:25:57 cgd Exp $	*/
 
 /*
@@ -38,7 +38,7 @@
 #if 0
 static char sccsid[] = "@(#)getpar.c	8.1 (Berkeley) 5/31/93";
 #else
-static char rcsid[] = "$OpenBSD: getpar.c,v 1.4 1999/07/31 18:48:58 pjanzen Exp $";
+static char rcsid[] = "$OpenBSD: getpar.c,v 1.8 2002/02/25 00:18:48 pvalchev Exp $";
 #endif
 #endif /* not lint */
 
@@ -47,7 +47,7 @@ static char rcsid[] = "$OpenBSD: getpar.c,v 1.4 1999/07/31 18:48:58 pjanzen Exp 
 #include "getpar.h"
 #include "trek.h"
 
-static int testterm __P((void));
+static int testterm(void);
 
 /**
  **	get integer parameter
@@ -146,7 +146,7 @@ getcodpar(s, tab)
 		if (f)
 			getchar();		/* throw out the newline */
 		scanf("%*[ \t;]");
-		if ((c = scanf("%[^ \t;\n]", input)) < 0)
+		if ((c = scanf("%99[^ \t;\n]", input)) < 0)
 			exit(1);
 		if (c == 0)
 			continue;
@@ -241,12 +241,12 @@ getstrpar(s, r, l, t)
 int
 testnl()
 {
-	register char		c;
+	int	c;
 
 	while ((c = getchar()) != '\n')
 		if ((c >= '0' && c <= '9') || c == '.' || c == '!' ||
 				(c >= 'A' && c <= 'Z') ||
-				(c >= 'a' && c <= 'z') || c == '-')
+				(c >= 'a' && c <= 'z') || c == '-' || c == EOF)
 		{
 			ungetc(c, stdin);
 			return(0);
@@ -262,7 +262,7 @@ testnl()
 
 void
 skiptonl(c)
-	char	c;
+	int	c;
 {
 	while (c != '\n')
 		if (!(c = getchar()))
@@ -279,7 +279,7 @@ skiptonl(c)
 static int
 testterm()
 {
-	char		c;
+	int	c;
 
 	if (!(c = getchar()))
 		return (1);
@@ -301,9 +301,9 @@ testterm()
 
 int
 readdelim(d)
-	char	d;
+	int	d;
 {
-	register char	c;
+	int	c;
 
 	while ((c = getchar()))
 	{

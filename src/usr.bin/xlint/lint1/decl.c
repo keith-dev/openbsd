@@ -1,4 +1,4 @@
-/*	$OpenBSD: decl.c,v 1.5 2001/09/19 10:58:07 mpech Exp $	*/
+/*	$OpenBSD: decl.c,v 1.7 2002/02/16 21:27:59 millert Exp $	*/
 /*	$NetBSD: decl.c,v 1.11 1995/10/02 17:34:16 jpo Exp $	*/
 
 /*
@@ -33,7 +33,7 @@
  */
 
 #ifndef lint
-static char rcsid[] = "$OpenBSD: decl.c,v 1.5 2001/09/19 10:58:07 mpech Exp $";
+static char rcsid[] = "$OpenBSD: decl.c,v 1.7 2002/02/16 21:27:59 millert Exp $";
 #endif
 
 #include <sys/param.h>
@@ -60,25 +60,25 @@ int	enumval;
  */
 dinfo_t	*dcs;
 
-static	type_t	*tdeferr __P((type_t *, tspec_t));
-static	void	settdsym __P((type_t *, sym_t *));
-static	tspec_t	mrgtspec __P((tspec_t, tspec_t));
-static	void	align __P((int, int));
-static	sym_t	*newtag __P((sym_t *, scl_t, int, int));
-static	int	eqargs __P((type_t *, type_t *, int *));
-static	int	mnoarg __P((type_t *, int *));
-static	int	chkosdef __P((sym_t *, sym_t *));
-static	int	chkptdecl __P((sym_t *, sym_t *));
-static	sym_t	*nsfunc __P((sym_t *, sym_t *));
-static	void	osfunc __P((sym_t *, sym_t *));
-static	void	ledecl __P((sym_t *));
-static	int	chkinit __P((sym_t *));
-static	void	chkausg __P((int, sym_t *));
-static	void	chkvusg __P((int, sym_t *));
-static	void	chklusg __P((sym_t *));
-static	void	chktusg __P((sym_t *));
-static	void	chkglvar __P((sym_t *));
-static	void	glchksz __P((sym_t *));
+static	type_t	*tdeferr(type_t *, tspec_t);
+static	void	settdsym(type_t *, sym_t *);
+static	tspec_t	mrgtspec(tspec_t, tspec_t);
+static	void	align(int, int);
+static	sym_t	*newtag(sym_t *, scl_t, int, int);
+static	int	eqargs(type_t *, type_t *, int *);
+static	int	mnoarg(type_t *, int *);
+static	int	chkosdef(sym_t *, sym_t *);
+static	int	chkptdecl(sym_t *, sym_t *);
+static	sym_t	*nsfunc(sym_t *, sym_t *);
+static	void	osfunc(sym_t *, sym_t *);
+static	void	ledecl(sym_t *);
+static	int	chkinit(sym_t *);
+static	void	chkausg(int, sym_t *);
+static	void	chkvusg(int, sym_t *);
+static	void	chklusg(sym_t *);
+static	void	chktusg(sym_t *);
+static	void	chkglvar(sym_t *);
+static	void	glchksz(sym_t *);
 
 /*
  * initializes all global vars used in declarations
@@ -395,7 +395,7 @@ addtype(tp)
 		/* remeber specifiers "signed" and "unsigned" in dcs->d_smod */
 		if (dcs->d_smod != NOTSPEC)
 			/*
-			 * more then one "signed" and/or "unsigned"; print
+			 * more than one "signed" and/or "unsigned"; print
 			 * an error in deftyp()
 			 */
 			dcs->d_terr = 1;
@@ -493,7 +493,7 @@ tdeferr(td, t)
  * or enum tag if the typedef name is the first defined for this tag.
  *
  * If the tag is unnamed, the typdef name is used for identification
- * of this tag in lint2. Although its possible that more then one typedef
+ * of this tag in lint2. Although its possible that more than one typedef
  * name is defined for one tag, the first name defined should be unique
  * if the tag is unnamed.
  */

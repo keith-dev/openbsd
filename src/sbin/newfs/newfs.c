@@ -1,4 +1,4 @@
-/*	$OpenBSD: newfs.c,v 1.28 2001/07/07 18:26:16 deraadt Exp $	*/
+/*	$OpenBSD: newfs.c,v 1.32 2002/02/19 19:39:38 millert Exp $	*/
 /*	$NetBSD: newfs.c,v 1.20 1996/05/16 07:13:03 thorpej Exp $	*/
 
 /*
@@ -44,7 +44,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)newfs.c	8.8 (Berkeley) 4/18/94";
 #else
-static char rcsid[] = "$OpenBSD: newfs.c,v 1.28 2001/07/07 18:26:16 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: newfs.c,v 1.32 2002/02/19 19:39:38 millert Exp $";
 #endif
 #endif /* not lint */
 
@@ -65,6 +65,7 @@ static char rcsid[] = "$OpenBSD: newfs.c,v 1.28 2001/07/07 18:26:16 deraadt Exp 
 #include <errno.h>
 #include <fcntl.h>
 #include <paths.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -72,12 +73,6 @@ static char rcsid[] = "$OpenBSD: newfs.c,v 1.28 2001/07/07 18:26:16 deraadt Exp 
 #include <unistd.h>
 #include <util.h>
 #include <err.h>
-
-#ifdef __STDC__
-#include <stdarg.h>
-#else
-#include <varargs.h>
-#endif
 
 #include "mntopts.h"
 #include "pathnames.h"
@@ -89,11 +84,11 @@ struct mntopt mopts[] = {
 	{ NULL },
 };
 
-void	fatal __P((const char *fmt, ...));
-void	usage __P((void));
-void	mkfs __P((struct partition *, char *, int, int));
-void	rewritelabel __P((char *, int, struct disklabel *));
-u_short	dkcksum __P((struct disklabel *));
+void	fatal(const char *fmt, ...);
+void	usage(void);
+void	mkfs(struct partition *, char *, int, int);
+void	rewritelabel(char *, int, struct disklabel *);
+u_short	dkcksum(struct disklabel *);
 
 #define	COMPAT			/* allow non-labeled disks */
 
@@ -198,9 +193,9 @@ main(argc, argv)
 	int argc;
 	char *argv[];
 {
-	register int ch;
-	register struct partition *pp;
-	register struct disklabel *lp;
+	int ch;
+	struct partition *pp;
+	struct disklabel *lp;
 	struct disklabel mfsfakelabel;
 	struct disklabel *getdisklabel();
 	struct partition oldpartition;
@@ -220,7 +215,7 @@ main(argc, argv)
 		fatal("insane maxpartitions value %d", maxpartitions);
 
 	opstring = mfs ?
-	    "NT:a:b:c:d:e:f:i:m:o:s:" :
+	    "T:a:b:c:d:e:f:i:m:o:s:" :
 	    "NOS:T:a:b:c:d:e:f:g:h:i:k:l:m:n:o:p:qr:s:t:u:x:z:";
 	while ((ch = getopt(argc, argv, opstring)) != -1) {
 		switch (ch) {
@@ -645,7 +640,7 @@ void
 rewritelabel(s, fd, lp)
 	char *s;
 	int fd;
-	register struct disklabel *lp;
+	struct disklabel *lp;
 {
 #ifdef COMPAT
 	if (unlabeled)
@@ -659,7 +654,7 @@ rewritelabel(s, fd, lp)
 	}
 #ifdef __vax__
 	if (lp->d_type == DTYPE_SMD && lp->d_flags & D_BADSECT) {
-		register i;
+		int i;
 		int cfd;
 		daddr_t alt;
 		char specname[64];
@@ -698,21 +693,11 @@ rewritelabel(s, fd, lp)
 
 /*VARARGS*/
 void
-#ifdef __STDC__
 fatal(const char *fmt, ...)
-#else
-fatal(fmt, va_alist)
-	char *fmt;
-	va_dcl
-#endif
 {
 	va_list ap;
 
-#ifdef __STDC__
 	va_start(ap, fmt);
-#else
-	va_start(ap);
-#endif
 	if (fcntl(STDERR_FILENO, F_GETFL) < 0) {
 		openlog(__progname, LOG_CONS, LOG_DAEMON);
 		vsyslog(LOG_ERR, fmt, ap);
@@ -729,7 +714,7 @@ struct fsoptions {
 	char *str;
 	int mfs_too;
 } fsopts[] = {
-	{ "-N do not create file system, just print out parameters", 1 },
+	{ "-N do not create file system, just print out parameters", 0 },
 	{ "-O create a 4.3BSD format filesystem", 0 },
 	{ "-S sector size", 0 },
 #ifdef COMPAT

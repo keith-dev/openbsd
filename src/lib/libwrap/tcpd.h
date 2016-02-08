@@ -1,4 +1,4 @@
-/*	$OpenBSD: tcpd.h,v 1.10 2001/03/28 22:06:29 deraadt Exp $	*/
+/*	$OpenBSD: tcpd.h,v 1.13 2002/02/19 19:39:38 millert Exp $	*/
 
 /*
  * Copyright (c) 1997, Jason Downs.  All rights reserved.
@@ -44,7 +44,7 @@
 
 /* Structure to describe one communications endpoint. */
 
-#define STRING_LENGTH	128		/* hosts, users, processes */
+#define STRING_LENGTH	256		/* hosts, users, processes */
 
 struct host_info {
     char    name[STRING_LENGTH];	/* access via eval_hostname(host) */
@@ -106,21 +106,21 @@ extern "C" {
 #define fromhost sock_host		/* no TLI support needed */
 
 __BEGIN_DECLS
-extern int hosts_access __P((struct request_info *));
-extern int hosts_ctl __P((char *, char *, char *, char *));
-extern void shell_cmd __P((char *));
-extern char *percent_m __P((char *, char *));
-extern char *percent_x __P((char *, int, char *, struct request_info *));
-extern void rfc931 __P((struct sockaddr *, struct sockaddr *, char *));
-extern int rfc1413 __P((struct sockaddr *, struct sockaddr *, char *, size_t, int));
-extern void clean_exit __P((struct request_info *));
-extern void refuse __P((struct request_info *));
+extern int hosts_access(struct request_info *);
+extern int hosts_ctl(char *, char *, char *, char *);
+extern void shell_cmd(char *);
+extern char *percent_m(char *, char *);
+extern char *percent_x(char *, int, char *, struct request_info *);
+extern void rfc931(struct sockaddr *, struct sockaddr *, char *);
+extern int rfc1413(struct sockaddr *, struct sockaddr *, char *, size_t, int);
+extern void clean_exit(struct request_info *);
+extern void refuse(struct request_info *);
 #ifdef _STDIO_H_
-extern char *xgets __P((char *, int, FILE *));
+extern char *xgets(char *, int, FILE *);
 #endif	/* _STDIO_H_ */
-extern char *split_at __P((char *, int));
-extern int dot_quad_addr_new __P((char *, in_addr_t *));
-extern in_addr_t dot_quad_addr __P((char *));
+extern char *split_at(char *, int);
+extern int dot_quad_addr_new(char *, in_addr_t *);
+extern in_addr_t dot_quad_addr(char *);
 
 #ifdef __cplusplus
 }
@@ -141,8 +141,8 @@ extern int resident;			/* > 0 if resident process */
   * attributes. Each attribute has its own key.
   */
 
-extern struct request_info *request_init __P((struct request_info *, ...));
-extern struct request_info *request_set __P((struct request_info *, ...));
+extern struct request_info *request_init(struct request_info *, ...);
+extern struct request_info *request_set(struct request_info *, ...);
 
 #define RQ_FILE		1		/* file descriptor */
 #define RQ_DAEMON	2		/* server process (argv[0]) */
@@ -162,20 +162,20 @@ extern struct request_info *request_set __P((struct request_info *, ...));
   * host_info structures serve as caches for the lookup results.
   */
 
-extern char *eval_user __P((struct request_info *));
-extern char *eval_hostname __P((struct host_info *));
-extern char *eval_hostaddr __P((struct host_info *));
-extern char *eval_hostinfo __P((struct host_info *));
-extern char *eval_client __P((struct request_info *));
-extern char *eval_server __P((struct request_info *));
+extern char *eval_user(struct request_info *);
+extern char *eval_hostname(struct host_info *);
+extern char *eval_hostaddr(struct host_info *);
+extern char *eval_hostinfo(struct host_info *);
+extern char *eval_client(struct request_info *);
+extern char *eval_server(struct request_info *);
 #define eval_daemon(r)	((r)->daemon)	/* daemon process name */
 #define eval_pid(r)	((r)->pid)	/* process id */
 
 /* Socket-specific methods, including DNS hostname lookups. */
 
-extern void sock_host __P((struct request_info *));
-extern void sock_hostname __P((struct host_info *));
-extern void sock_hostaddr __P((struct host_info *));
+extern void sock_host(struct request_info *);
+extern void sock_hostname(struct host_info *);
+extern void sock_hostaddr(struct host_info *);
 #define sock_methods(r) \
 	{ (r)->hostname = sock_hostname; (r)->hostaddr = sock_hostaddr; }
 
@@ -185,8 +185,8 @@ extern void sock_hostaddr __P((struct host_info *));
   * everyone would have to include <setjmp.h>.
   */
 
-extern void tcpd_warn __P((char *, ...));
-extern void tcpd_jump __P((char *, ...));
+extern void tcpd_warn(char *, ...);
+extern void tcpd_jump(char *, ...);
 __END_DECLS
 
 struct tcpd_context {
@@ -215,28 +215,8 @@ extern struct tcpd_context tcpd_context;
   * behavior.
   */
 
-extern void process_options __P((char *, struct request_info *));
+extern void process_options(char *, struct request_info *);
 extern int dry_run;			/* verification flag */
 __END_DECLS
-
-
-#ifdef _TCPD_PRIVATE
- /*
-  * What follows is an attempt to unify varargs.h and stdarg.h. I'd rather
-  * have this than #ifdefs all over the code.
-  *
-  * The code using these must include the proper system header.
-  */
-
-#ifdef __STDC__
-#define VARARGS(func,type,arg) func(type arg, ...)
-#define VASTART(ap,type,name)  va_start(ap,name)
-#define VAEND(ap)              va_end(ap)
-#else
-#define VARARGS(func,type,arg) func(va_alist) va_dcl
-#define VASTART(ap,type,name)  {type name; va_start(ap); name = va_arg(ap, type)
-#define VAEND(ap)              va_end(ap);}
-#endif
-#endif	/* _TCPD_PRIVATE */
 
 #endif	/* _TCPD_H_ */

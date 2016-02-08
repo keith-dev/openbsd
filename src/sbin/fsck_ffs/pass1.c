@@ -1,4 +1,4 @@
-/*	$OpenBSD: pass1.c,v 1.9 2001/07/07 18:26:12 deraadt Exp $	*/
+/*	$OpenBSD: pass1.c,v 1.11 2002/02/16 21:27:34 millert Exp $	*/
 /*	$NetBSD: pass1.c,v 1.16 1996/09/27 22:45:15 christos Exp $	*/
 
 /*
@@ -38,7 +38,7 @@
 #if 0
 static char sccsid[] = "@(#)pass1.c	8.1 (Berkeley) 6/5/93";
 #else
-static char rcsid[] = "$OpenBSD: pass1.c,v 1.9 2001/07/07 18:26:12 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: pass1.c,v 1.11 2002/02/16 21:27:34 millert Exp $";
 #endif
 #endif /* not lint */
 
@@ -58,7 +58,7 @@ static char rcsid[] = "$OpenBSD: pass1.c,v 1.9 2001/07/07 18:26:12 deraadt Exp $
 
 static daddr_t badblk;
 static daddr_t dupblk;
-static void checkinode __P((ino_t, struct inodesc *));
+static void checkinode(ino_t, struct inodesc *);
 
 static ino_t info_inumber;
 
@@ -120,9 +120,9 @@ pass1()
 static void
 checkinode(inumber, idesc)
 	ino_t inumber;
-	register struct inodesc *idesc;
+	struct inodesc *idesc;
 {
-	register struct dinode *dp;
+	struct dinode *dp;
 	struct zlncnt *zlnp;
 	int ndb, j;
 	mode_t mode;
@@ -288,12 +288,12 @@ unknown:
 
 int
 pass1check(idesc)
-	register struct inodesc *idesc;
+	struct inodesc *idesc;
 {
 	int res = KEEPON;
 	int anyout, nfrags;
 	daddr_t blkno = idesc->id_blkno;
-	register struct dups *dlp;
+	struct dups *dlp;
 	struct dups *new;
 
 	if ((anyout = chkrange(blkno, idesc->id_numfrags)) != 0) {

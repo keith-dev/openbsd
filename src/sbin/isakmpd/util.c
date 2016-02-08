@@ -1,4 +1,4 @@
-/*	$OpenBSD: util.c,v 1.21 2001/07/03 23:39:01 angelos Exp $	*/
+/*	$OpenBSD: util.c,v 1.26 2002/01/23 18:44:48 ho Exp $	*/
 /*	$EOM: util.c,v 1.23 2000/11/23 12:22:08 niklas Exp $	*/
 
 /*
@@ -263,11 +263,11 @@ text2sockaddr (char *address, char *port, struct sockaddr **sa)
   if (getaddrinfo (address, port, &hints, &ai))
     return -1;
 
-  *sa = malloc (ai->ai_addr->sa_len);
+  *sa = malloc (sysdep_sa_len (ai->ai_addr));
   if (!sa)
     return -1;
 
-  memcpy (*sa, ai->ai_addr, ai->ai_addr->sa_len);
+  memcpy (*sa, ai->ai_addr, sysdep_sa_len (ai->ai_addr));
   freeaddrinfo (ai);
   return 0;
 #else
@@ -282,9 +282,11 @@ text2sockaddr (char *address, char *port, struct sockaddr **sa)
   if (!*sa)
     return -1;
 
+#ifndef USE_OLD_SOCKADDR
   (*sa)->sa_len = sz;
+#endif
   (*sa)->sa_family = af;
-  if (inet_pton (af, address, sockaddr_data (*sa)) != 1)
+  if (inet_pton (af, address, sockaddr_addrdata (*sa)) != 1)
     {
       free (*sa);
       return -1;
@@ -324,7 +326,7 @@ sockaddr2text (struct sockaddr *sa, char **address, int zflag)
   int i, j;
 
 #ifdef HAVE_GETNAMEINFO
-  if (getnameinfo (sa, sa->sa_len, buf, sizeof buf, 0, 0,
+  if (getnameinfo (sa, sysdep_sa_len (sa), buf, sizeof buf, 0, 0,
 		   allow_name_lookups ? 0 : NI_NUMERICHOST))
     return -1;
 #else
@@ -350,10 +352,9 @@ sockaddr2text (struct sockaddr *sa, char **address, int zflag)
 
   if (zflag == 0)
     {
-      *address = malloc (strlen (buf) + 1);
+      *address = strdup (buf);
       if (!*address)
 	return -1;
-      strcpy (*address, buf);
     }
   else
     switch (sa->sa_family)
@@ -379,9 +380,10 @@ sockaddr2text (struct sockaddr *sa, char **address, int zflag)
 		free (*address);
 		return -1;
 	      }
-	    sprintf (*address + strlen (*address), "%03ld", val);
+	    snprintf (*address + strlen (*address), 
+		      addrlen - strlen (*address), "%03ld", val);
 	    if (bstart)
-	      strcat (*address + strlen (*address), ".");
+	      strlcat (*address, ".", addrlen);
 	  }
 	break;
 
@@ -396,25 +398,27 @@ sockaddr2text (struct sockaddr *sa, char **address, int zflag)
 	  return -1;
 
 	for (i = 0, j = 0; i < 8; i++)
-	  j += sprintf ((*address) + j, "%02x%02x:",
-			((struct sockaddr_in6 *)sa)->sin6_addr.s6_addr[2 * i],
-			((struct sockaddr_in6 *)sa)->sin6_addr.s6_addr[2 * i + 1]);
+	  j += snprintf ((*address) + j, addrlen - j, "%02x%02x:",
+			 ((struct sockaddr_in6 *)sa)->sin6_addr.s6_addr[2 * i],
+			 ((struct sockaddr_in6 *)sa)->sin6_addr.s6_addr[2 * i + 1]);
 	(*address)[j - 1] = '\0';
 	break;
 
       default:
-	strcpy (*address, "<error>");
+	*address = strdup ("<error>");
+	if (!*address)
+	  return -1;
       }
 
   return 0;
 }
 
 /*
- * sockaddr_len and sockaddr_data return the relevant sockaddr info depending
- * on address family.  Useful to keep other code shorter(/clearer?).
+ * sockaddr_addrlen and sockaddr_addrdata return the relevant sockaddr info
+ * depending on address family.  Useful to keep other code shorter(/clearer?).
  */
 int
-sockaddr_len (struct sockaddr *sa)
+sockaddr_addrlen (struct sockaddr *sa)
 {
   switch (sa->sa_family)
     {
@@ -423,14 +427,14 @@ sockaddr_len (struct sockaddr *sa)
     case AF_INET:
       return sizeof ((struct sockaddr_in *)sa)->sin_addr.s_addr;
     default:
-      log_print ("sockaddr_len: unsupported protocol family %d",
+      log_print ("sockaddr_addrlen: unsupported protocol family %d",
 		 sa->sa_family);
       return 0;
     }
 }
 
 u_int8_t *
-sockaddr_data (struct sockaddr *sa)
+sockaddr_addrdata (struct sockaddr *sa)
 {
   switch (sa->sa_family)
     {
@@ -439,6 +443,8 @@ sockaddr_data (struct sockaddr *sa)
     case AF_INET:
       return (u_int8_t *)&((struct sockaddr_in *)sa)->sin_addr.s_addr;
     default:
+      log_print ("sockaddr_addrdata: unsupported protocol family %d",
+		 sa->sa_family);
       return 0;
     }
 }
@@ -453,23 +459,21 @@ util_ntoa (char **buf, int af, u_int8_t *addr)
   struct sockaddr_storage from;
   struct sockaddr *sfrom = (struct sockaddr *)&from;
   socklen_t fromlen = sizeof from;
-  u_int32_t ip4_buf;
 
   memset (&from, 0, fromlen);
   sfrom->sa_family = af;
+#ifndef USE_OLD_SOCKADDR
   switch (af)
     {
     case AF_INET:
       sfrom->sa_len = sizeof (struct sockaddr_in);
-      memcpy (&ip4_buf, addr, sizeof (struct in_addr));
-      ((struct sockaddr_in *)sfrom)->sin_addr.s_addr = ip4_buf;
       break;
-
     case AF_INET6:
       sfrom->sa_len = sizeof (struct sockaddr_in6);
-      memcpy (sockaddr_data (sfrom), addr, sizeof (struct in6_addr));
       break;
     }
+#endif
+  memcpy (sockaddr_addrdata (sfrom), addr, sockaddr_addrlen (sfrom));
 
   if (sockaddr2text (sfrom, buf, 0))
     {

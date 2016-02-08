@@ -1,4 +1,4 @@
-/*	$OpenBSD: login_skey.c,v 1.3 2001/06/25 22:10:29 millert Exp $	*/
+/*	$OpenBSD: login_skey.c,v 1.7 2002/02/16 21:27:30 millert Exp $	*/
 
 /*-
  * Copyright (c) 1995 Berkeley Software Design, Inc. All rights reserved.
@@ -40,10 +40,12 @@
 #include <sys/resource.h>
 
 #include <ctype.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <paths.h>
 #include <pwd.h>
 #include <readpassphrase.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -55,7 +57,11 @@
 #include <sha1.h>
 #include <skey.h>
 
-void timedout __P((int));
+void quit(int);
+void suspend(int);
+
+volatile sig_atomic_t resumed;
+struct skey skey;
 
 int
 main(argc, argv)
@@ -65,7 +71,6 @@ main(argc, argv)
 	FILE *back = NULL;
     	char *class = 0;
     	char *username = 0;
-	struct skey skey;
 	char skeyprompt[SKEY_MAX_CHALLENGE+17];
 	char passbuf[SKEY_MAX_PW_LEN+1];
 	int c, haskey;
@@ -73,14 +78,15 @@ main(argc, argv)
 
 	skeyprompt[0] = '\0';
 
-	(void)signal(SIGQUIT, SIG_IGN);
-	(void)signal(SIGINT, SIG_IGN);
-	(void)signal(SIGALRM, timedout);
+	(void)signal(SIGINT, quit);
+	(void)signal(SIGQUIT, quit);
+	(void)signal(SIGALRM, quit);
+	(void)signal(SIGTSTP, suspend);
 	(void)setpriority(PRIO_PROCESS, 0, 0);
 
 	openlog(NULL, LOG_ODELAY, LOG_AUTH);
 
-    	while ((c = getopt(argc, argv, "ds:v:")) != EOF)
+    	while ((c = getopt(argc, argv, "ds:v:")) != -1)
 		switch(c) {
 		case 'd':	/* to remain undocumented */
 			back = stdout;
@@ -177,12 +183,29 @@ main(argc, argv)
 		/* Time out getting passphrase after 2 minutes to avoid a DoS */
 		if (haskey)
 			alarm(120);
+		resumed = 0;
 		readpassphrase(skeyprompt, passbuf, sizeof(passbuf), 0);
 		if (passbuf[0] == '\0')
 			readpassphrase("S/Key Password [echo on]: ",
 			    passbuf, sizeof(passbuf), RPP_ECHO_ON);
 		alarm(0);
+		if (resumed) {
+			/*
+			 * We were suspended by the user.  Our lock is
+			 * no longer valid so we must regain it so
+			 * an attacker cannot do a partial guess of
+			 * an S/Key response already in progress.
+			 */
+			haskey = (skeylookup(&skey, username) == 0);
+		}
 	}
+
+	/*
+	 * Ignore keyboard interupt/suspend during database update.
+	 */
+	signal(SIGINT, SIG_IGN);
+	signal(SIGQUIT, SIG_IGN);
+	signal(SIGTSTP, SIG_IGN);
 
 	if (haskey && skeyverify(&skey, passbuf) == 0) {
 		if (mode == 0) {
@@ -201,9 +224,36 @@ main(argc, argv)
 }
 
 void
-timedout(signo)
+quit(signo)
 	int signo;
 {
 
 	_exit(1);
+}
+
+void
+suspend(signo)
+	int signo;
+{
+	sigset_t nset;
+	int save_errno = errno;
+
+	/*
+	 * Unlock the skey record so we don't sleep holding the lock.
+	 * Unblock SIGTSTP, set it to the default action and then
+	 * resend it so we are suspended properly.
+	 * When we resume, reblock SIGTSTP, reset the signal handler,
+	 * set a flag and restore errno.
+	 */
+	alarm(0);
+	skey_unlock(&skey);
+	(void)signal(signo, SIG_DFL);
+	(void)sigemptyset(&nset);
+	(void)sigaddset(&nset, signo);
+	(void)sigprocmask(SIG_UNBLOCK, &nset, NULL);
+	(void)kill(getpid(), signo);
+	(void)sigprocmask(SIG_BLOCK, &nset, NULL);
+	(void)signal(signo, suspend);
+	resumed = 1;
+	errno = save_errno;
 }

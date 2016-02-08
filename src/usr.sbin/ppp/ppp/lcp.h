@@ -25,7 +25,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $OpenBSD: lcp.h,v 1.10 2001/06/19 10:24:55 brian Exp $
+ * $OpenBSD: lcp.h,v 1.12 2002/03/31 02:38:49 brian Exp $
  */
 
 /* callback::opmask values */
@@ -59,6 +59,7 @@ struct lcp {
   unsigned his_shortseq : 1;	/* Peer would like only 12bit seqs (MP) */
   unsigned his_protocomp : 1;	/* Does peer do Protocol field compression */
   unsigned his_acfcomp : 1;	/* Does peer do addr & cntrl fld compression */
+  unsigned mru_req : 1;		/* Has the peer requested an MRU */
 
   u_short want_mru;		/* Our maximum packet size */
   u_short want_mrru;		/* Our maximum reassembled packet size (MP) */
@@ -91,7 +92,7 @@ struct lcp {
     struct fsm_retry fsm;	/* How often/frequently to resend requests */
     unsigned acfcomp : 2;	/* Address & Control Field Compression neg */
     unsigned chap05 : 2;	/* Challenge Handshake Authentication proto */
-#ifdef HAVE_DES
+#ifndef NODES
     unsigned chap80nt : 2;	/* Microsoft (NT) CHAP */
     unsigned chap80lm : 2;	/* Microsoft (LANMan) CHAP */
     unsigned chap81 : 2;	/* Microsoft CHAP v2 */

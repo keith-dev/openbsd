@@ -1,4 +1,4 @@
-/*	$OpenBSD: skeyinit.c,v 1.29 2001/06/23 22:29:14 millert Exp $	*/
+/*	$OpenBSD: skeyinit.c,v 1.31 2002/02/16 21:27:52 millert Exp $	*/
 
 /* OpenBSD S/Key (skeyinit.c)
  *
@@ -36,11 +36,11 @@
 #define SKEY_NAMELEN    4
 #endif
 
-void	lockeof __P((struct skey *, char *));
-void	usage __P((char *));
-void	secure_mode __P((int *, char *, char *, char *, char *, size_t));
-void	normal_mode __P((char *, int, char *, char *, char *));
-void	timedout __P((int));
+void	lockeof(struct skey *, char *);
+void	usage(char *);
+void	secure_mode(int *, char *, char *, char *, char *, size_t);
+void	normal_mode(char *, int, char *, char *, char *);
+void	timedout(int);
 
 int
 main(argc, argv)
@@ -294,7 +294,7 @@ main(argc, argv)
 	/* Don't save algorithm type for md4 (maintain record length) */
 	/* XXX - should check return values of fprintf + fclose */
 	if (oldmd4)
-		(void)fprintf(skey.keyfile, "%s %04d %-* %s %-21s\n",
+		(void)fprintf(skey.keyfile, "%s %04d %-*s %s %-21s\n",
 		    pp->pw_name, n, seedlen, seed, skey.val, tbuf);
 	else
 		(void)fprintf(skey.keyfile, "%s %s %04d %-*s %s %-21s\n",

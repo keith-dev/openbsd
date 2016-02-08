@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	$OpenBSD: chat.c,v 1.16 2001/08/19 23:22:17 brian Exp $
+ *	$OpenBSD: chat.c,v 1.18 2002/03/31 02:38:49 brian Exp $
  */
 
 #include <sys/param.h>
@@ -516,10 +516,12 @@ chat_Write(struct fdescriptor *d, struct bundle *bundle, const fd_set *fdset)
     }
 
     wrote = physical_Write(c->physical, c->argptr, c->arglen);
-    result = wrote ? 1 : 0;
+    result = wrote > 0 ? 1 : 0;
     if (wrote == -1) {
-      if (errno != EINTR)
-        log_Printf(LogERROR, "chat_Write: %s\n", strerror(errno));
+      if (errno != EINTR) {
+        log_Printf(LogWARN, "chat_Write: %s\n", strerror(errno));
+	result = -1;
+      }
       if (physical_IsSync(c->physical)) {
         c->argptr += 2;
         c->arglen -= 2;
@@ -716,8 +718,6 @@ ExecStr(struct physical *physical, char *command, char *out, int olen)
     *out = '\0';
     return;
   }
-  command_Expand(argv, argc, (char const *const *)vector,
-                 physical->dl->bundle, 0, getpid());
 
   if (pipe(fids) < 0) {
     log_Printf(LogCHAT, "Unable to create pipe in ExecStr: %s\n",
@@ -726,6 +726,8 @@ ExecStr(struct physical *physical, char *command, char *out, int olen)
     return;
   }
   if ((pid = fork()) == 0) {
+    command_Expand(argv, argc, (char const *const *)vector,
+                   physical->dl->bundle, 0, getpid());
     close(fids[0]);
     timer_TermService();
     if (fids[1] == STDIN_FILENO)

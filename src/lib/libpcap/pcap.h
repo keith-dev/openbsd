@@ -1,4 +1,4 @@
-/*	$OpenBSD: pcap.h,v 1.9 2001/10/02 18:04:35 deraadt Exp $	*/
+/*	$OpenBSD: pcap.h,v 1.11 2002/01/17 23:29:12 ericj Exp $	*/
 
 /*
  * Copyright (c) 1993, 1994, 1995, 1996, 1997
@@ -32,7 +32,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * @(#) $Header: /cvs/src/lib/libpcap/pcap.h,v 1.9 2001/10/02 18:04:35 deraadt Exp $ (LBL)
+ * @(#) $Header: /cvs/src/lib/libpcap/pcap.h,v 1.11 2002/01/17 23:29:12 ericj Exp $ (LBL)
  */
 
 #ifndef lib_pcap_h
@@ -111,6 +111,7 @@ int	pcap_dispatch(pcap_t *, int, pcap_handler, u_char *);
 const u_char*
 	pcap_next(pcap_t *, struct pcap_pkthdr *);
 int	pcap_stats(pcap_t *, struct pcap_stat *);
+int	pcap_inject(pcap_t *, const void *, size_t);
 int	pcap_setfilter(pcap_t *, struct bpf_program *);
 void	pcap_perror(pcap_t *, char *);
 char	*pcap_strerror(int);
@@ -119,8 +120,7 @@ int	pcap_compile(pcap_t *, struct bpf_program *, char *, int,
 	    bpf_u_int32);
 int	pcap_compile_nopcap(int, int, struct bpf_program *,
 	    char *, int, bpf_u_int32);
-/* XXX */
-int	pcap_freecode(pcap_t *, struct bpf_program *);
+void	pcap_freecode(struct bpf_program *);
 int	pcap_datalink(pcap_t *);
 int	pcap_snapshot(pcap_t *);
 int	pcap_is_swapped(pcap_t *);

@@ -1,9 +1,9 @@
-#	$OpenBSD: Makefile,v 1.6 2001/10/08 22:44:24 art Exp $
-#	$NetBSD: Makefile,v 1.2 1995/04/20 22:42:51 cgd Exp $
+#	$OpenBSD: Makefile,v 1.31 2002/03/25 05:21:17 nordin Exp $
 
-SUBDIR+= execve mmap dup2
-
-regress: _SUBDIRUSE
+SUBDIR+= execve getrusage kqueue mmap mmap2 dup2 minherit rlimit-file
+SUBDIR+= fcntl_dup dup2_self pread preadv exit pwrite pwritev
+SUBDIR+= syscall __syscall unfdpass accept nanosleep sysvmsg sysvsem
+SUBDIR+= sysvshm rfork gettimeofday
 
 install:
 

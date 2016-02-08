@@ -1,4 +1,4 @@
-/*	$OpenBSD: read.c,v 1.3 1998/07/29 03:14:54 millert Exp $	*/
+/*	$OpenBSD: read.c,v 1.5 2002/02/19 19:39:39 millert Exp $	*/
 /*	$NetBSD: read.c,v 1.2 1995/07/03 21:24:59 cgd Exp $	*/
 
 /*
@@ -33,7 +33,7 @@
  */
 
 #ifndef lint
-static char rcsid[] = "$OpenBSD: read.c,v 1.3 1998/07/29 03:14:54 millert Exp $";
+static char rcsid[] = "$OpenBSD: read.c,v 1.5 2002/02/19 19:39:39 millert Exp $";
 #endif
 
 #include <stdio.h>
@@ -83,20 +83,20 @@ static	size_t	tlstlen;		/* length of tlst */
 static	int	csrcfile;
 
 
-static	void	inperr __P((void));
-static	void	setsrc __P((const char *));
-static	void	setfnid __P((int, const char *));
-static	void	funccall __P((pos_t *, const char *));
-static	void	decldef __P((pos_t *, const char *));
-static	void	usedsym __P((pos_t *, const char *));
-static	u_short	inptype __P((const char *, const char **));
-static	int	gettlen __P((const char *, const char **));
-static	u_short	findtype __P((const char *, size_t, int));
-static	u_short	storetyp __P((type_t *, const char *, size_t, int));
-static	int	thash __P((const char *, size_t));
-static	char	*inpqstrg __P((const char *, const char **));
-static	const	char *inpname __P((const char *, const char **));
-static	int	getfnidx __P((const char *));
+static	void	inperr(void);
+static	void	setsrc(const char *);
+static	void	setfnid(int, const char *);
+static	void	funccall(pos_t *, const char *);
+static	void	decldef(pos_t *, const char *);
+static	void	usedsym(pos_t *, const char *);
+static	u_short	inptype(const char *, const char **);
+static	int	gettlen(const char *, const char **);
+static	u_short	findtype(const char *, size_t, int);
+static	u_short	storetyp(type_t *, const char *, size_t, int);
+static	int	thash(const char *, size_t);
+static	char	*inpqstrg(const char *, const char **);
+static	const	char *inpname(const char *, const char **);
+static	int	getfnidx(const char *);
 
 void
 readfile(name)
@@ -900,11 +900,7 @@ inpqstrg(src, epp)
 				c = '\t';
 				break;
 			case 'v':
-#ifdef __STDC__
 				c = '\v';
-#else
-				c = '\013';
-#endif
 				break;
 			case 'b':
 				c = '\b';
@@ -916,11 +912,7 @@ inpqstrg(src, epp)
 				c = '\f';
 				break;
 			case 'a':
-#ifdef __STDC__
 				c = '\a';
-#else
-				c = '\007';
-#endif
 				break;
 			case '\\':
 				c = '\\';

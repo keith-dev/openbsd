@@ -1,4 +1,4 @@
-/*	$OpenBSD: hash.c,v 1.10 2001/08/04 21:11:10 millert Exp $	*/
+/*	$OpenBSD: hash.c,v 1.14 2002/03/25 19:08:48 millert Exp $	*/
 
 /*-
  * Copyright (c) 1990, 1993, 1994
@@ -40,7 +40,7 @@
 #if 0
 static char sccsid[] = "@(#)hash.c	8.9 (Berkeley) 6/16/94";
 #else
-static char rcsid[] = "$OpenBSD: hash.c,v 1.10 2001/08/04 21:11:10 millert Exp $";
+static char rcsid[] = "$OpenBSD: hash.c,v 1.14 2002/03/25 19:08:48 millert Exp $";
 #endif
 #endif /* LIBC_SCCS and not lint */
 
@@ -62,23 +62,23 @@ static char rcsid[] = "$OpenBSD: hash.c,v 1.10 2001/08/04 21:11:10 millert Exp $
 #include "page.h"
 #include "extern.h"
 
-static int   alloc_segs __P((HTAB *, int));
-static int   flush_meta __P((HTAB *));
-static int   hash_access __P((HTAB *, ACTION, DBT *, DBT *));
-static int   hash_close __P((DB *));
-static int   hash_delete __P((const DB *, const DBT *, u_int32_t));
-static int   hash_fd __P((const DB *));
-static int   hash_get __P((const DB *, const DBT *, DBT *, u_int32_t));
-static int   hash_put __P((const DB *, DBT *, const DBT *, u_int32_t));
-static void *hash_realloc __P((SEGMENT **, int, int));
-static int   hash_seq __P((const DB *, DBT *, DBT *, u_int32_t));
-static int   hash_sync __P((const DB *, u_int32_t));
-static int   hdestroy __P((HTAB *));
-static HTAB *init_hash __P((HTAB *, const char *, HASHINFO *));
-static int   init_htab __P((HTAB *, int));
+static int   alloc_segs(HTAB *, int);
+static int   flush_meta(HTAB *);
+static int   hash_access(HTAB *, ACTION, DBT *, DBT *);
+static int   hash_close(DB *);
+static int   hash_delete(const DB *, const DBT *, u_int32_t);
+static int   hash_fd(const DB *);
+static int   hash_get(const DB *, const DBT *, DBT *, u_int32_t);
+static int   hash_put(const DB *, DBT *, const DBT *, u_int32_t);
+static void *hash_realloc(SEGMENT **, int, int);
+static int   hash_seq(const DB *, DBT *, DBT *, u_int32_t);
+static int   hash_sync(const DB *, u_int32_t);
+static int   hdestroy(HTAB *);
+static HTAB *init_hash(HTAB *, const char *, HASHINFO *);
+static int   init_htab(HTAB *, int);
 #if BYTE_ORDER == LITTLE_ENDIAN
-static void  swap_header __P((HTAB *));
-static void  swap_header_copy __P((HASHHDR *, HASHHDR *));
+static void  swap_header(HTAB *);
+static void  swap_header_copy(HASHHDR *, HASHHDR *);
 #endif
 
 /* Fast arithmetic, relying on powers of 2, */
@@ -102,8 +102,10 @@ int hash_accesses, hash_collisions, hash_expansions, hash_overflows;
 extern DB *
 __hash_open(file, flags, mode, info, dflags)
 	const char *file;
-	int flags, mode, dflags;
+	int flags;
+	int mode;
 	const HASHINFO *info;	/* Special directives for create */
+	int dflags;
 {
 	HTAB *hashp;
 	struct stat statbuf;
@@ -114,6 +116,7 @@ __hash_open(file, flags, mode, info, dflags)
 		errno = EINVAL;
 		return (NULL);
 	}
+
 	if (!(hashp = (HTAB *)calloc(1, sizeof(HTAB))))
 		return (NULL);
 	hashp->fp = -1;
@@ -212,7 +215,7 @@ __hash_open(file, flags, mode, info, dflags)
 
 #ifdef DEBUG
 	(void)fprintf(stderr,
-"%s\n%s%x\n%s%d\n%s%d\n%s%d\n%s%d\n%s%d\n%s%d\n%s%d\n%s%d\n%s%d\n%s%x\n%s%x\n%s%d\n%s%d\n",
+"%s\n%s%p\n%s%d\n%s%d\n%s%d\n%s%d\n%s%d\n%s%d\n%s%d\n%s%d\n%s%d\n%s%x\n%s%x\n%s%d\n%s%d\n",
 	    "init_htab:",
 	    "TABLE POINTER   ", hashp,
 	    "BUCKET SIZE     ", hashp->BSIZE,
@@ -432,6 +435,10 @@ hdestroy(hashp)
 	for (i = 0; i < hashp->nmaps; i++)
 		if (hashp->mapp[i])
 			free(hashp->mapp[i]);
+	if (hashp->tmp_key)
+		free(hashp->tmp_key);
+	if (hashp->tmp_buf)
+		free(hashp->tmp_buf);
 
 	if (hashp->fp != -1)
 		(void)close(hashp->fp);
@@ -502,8 +509,7 @@ flush_meta(hashp)
 	whdrp = &whdr;
 	swap_header_copy(&hashp->hdr, whdrp);
 #endif
-	if ((lseek(fp, (off_t)0, SEEK_SET) == -1) ||
-	    ((wsize = write(fp, whdrp, sizeof(HASHHDR))) == -1))
+	if ((wsize = pwrite(fp, whdrp, sizeof(HASHHDR), (off_t)0)) == -1)
 		return (-1);
 	else
 		if (wsize != sizeof(HASHHDR)) {

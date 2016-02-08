@@ -1,4 +1,4 @@
-/*	$OpenBSD: fsdb.c,v 1.7 1999/08/06 20:41:06 deraadt Exp $	*/
+/*	$OpenBSD: fsdb.c,v 1.10 2002/03/14 06:51:41 mpech Exp $	*/
 /*	$NetBSD: fsdb.c,v 1.7 1997/01/11 06:50:53 lukem Exp $	*/
 
 /*-
@@ -68,16 +68,16 @@ static char rcsid[] = "$NetBSD: fsdb.c,v 1.4 1996/03/21 17:56:15 jtc Exp $";
 
 extern char *__progname;	/* from crt0.o */
 
-int main __P((int, char *[]));
-static void usage __P((void));
-static int cmdloop __P((void));
-static int helpfn __P((int, char *[]));
-static char *prompt __P((EditLine *));
-static int scannames __P((struct inodesc *));
-static int dolookup __P((char *));
-static int chinumfunc __P((struct inodesc *));
-static int chnamefunc __P((struct inodesc *));
-static int dotime __P((char *, int32_t *, int32_t *));
+int main(int, char *[]);
+static void usage(void);
+static int cmdloop(void);
+static int helpfn(int, char *[]);
+static char *prompt(EditLine *);
+static int scannames(struct inodesc *);
+static int dolookup(char *);
+static int chinumfunc(struct inodesc *);
+static int chnamefunc(struct inodesc *);
+static int dotime(char *, int32_t *, int32_t *);
 
 int returntosingle = 0;
 struct dinode *curinode;
@@ -132,7 +132,7 @@ main(argc, argv)
 	exit(rval);
 }
 
-#define CMDFUNC(func) static int func __P((int argc, char *argv[]))
+#define CMDFUNC(func) static int func(int argc, char *argv[])
 #define CMDFUNCSTART(func) static int func(argc, argv)		\
 				int argc;		\
 				char *argv[];
@@ -203,7 +203,7 @@ helpfn(argc, argv)
 	int argc;
 	char *argv[];
 {
-    register struct cmdtable *cmdtp;
+    struct cmdtable *cmdtp;
 
     printf("Commands are:\n%-10s %5s %5s   %s\n",
 	   "command", "min argc", "max argc", "what");
@@ -393,7 +393,7 @@ static int
 scannames(idesc)
 	struct inodesc *idesc;
 {
-	register struct direct *dirp = idesc->id_dirp;
+	struct direct *dirp = idesc->id_dirp;
 
 	printf("slot %d ino %d reclen %d: %s, `%.*s'\n",
 	       slot++, dirp->d_ino, dirp->d_reclen, typename[dirp->d_type],
@@ -512,7 +512,7 @@ static int
 chinumfunc(idesc)
 	struct inodesc *idesc;
 {
-	register struct direct *dirp = idesc->id_dirp;
+	struct direct *dirp = idesc->id_dirp;
 
 	if (slotcount++ == desired) {
 	    dirp->d_ino = idesc->id_parent;
@@ -556,7 +556,7 @@ static int
 chnamefunc(idesc)
 	struct inodesc *idesc;
 {
-	register struct direct *dirp = idesc->id_dirp;
+	struct direct *dirp = idesc->id_dirp;
 	struct direct testdir;
 
 	if (slotcount++ == desired) {
@@ -598,7 +598,7 @@ CMDFUNCSTART(chname)
     if ((rval & (FOUND|ALTERED)) == (FOUND|ALTERED))
 	return 0;
     else if (rval & FOUND) {
-	warnx("new name `%s' does not fit in slot %s\n", argv[2], argv[1]);
+	warnx("new name `%s' does not fit in slot %s", argv[2], argv[1]);
 	return 1;
     } else {
 	warnx("no %sth slot in current directory", argv[1]);
@@ -704,7 +704,7 @@ CMDFUNCSTART(chaflags)
     }
     
     if (flags > UINT_MAX) {
-	warnx("flags set beyond 32-bit range of field (%lx)\n", flags);
+	warnx("flags set beyond 32-bit range of field (%lx)", flags);
 	return(1);
     }
     curinode->di_flags = flags;
@@ -729,7 +729,7 @@ CMDFUNCSTART(chgen)
     }
     
     if (gen > INT_MAX || gen < INT_MIN) {
-	warnx("gen set beyond 32-bit range of field (%lx)\n", gen);
+	warnx("gen set beyond 32-bit range of field (%lx)", gen);
 	return(1);
     }
     curinode->di_gen = gen;
@@ -753,7 +753,7 @@ CMDFUNCSTART(linkcount)
 	return 1;
     }
     if (lcnt > USHRT_MAX || lcnt < 0) {
-	warnx("max link count is %d\n", USHRT_MAX);
+	warnx("max link count is %d", USHRT_MAX);
 	return 1;
     }
     

@@ -1,8 +1,6 @@
-#	$OpenBSD: Makefile,v 1.1 2001/06/05 13:52:08 niklas Exp $
+#	$OpenBSD: Makefile,v 1.3 2002/02/27 19:57:17 dhartmei Exp $
 
-SUBDIR+= md5
-
-regress: _SUBDIRUSE
+SUBDIR+= md5 ksh
 
 install:
 

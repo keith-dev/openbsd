@@ -1,4 +1,4 @@
-/*	$OpenBSD: telnet.c,v 1.11 2000/11/10 15:33:13 provos Exp $	*/
+/*	$OpenBSD: telnet.c,v 1.15 2002/03/22 13:49:28 hin Exp $	*/
 /*	$NetBSD: telnet.c,v 1.7 1996/02/28 21:04:15 thorpej Exp $	*/
 
 /*
@@ -76,6 +76,7 @@ int
 	askedSGA = 0,	/* We have talked about suppress go ahead */
 #endif	/* defined(TN3270) */
 	telnetport,
+	wantencryption = 0,
 	SYNCHing,	/* we are in TELNET SYNCH mode */
 	flushout,	/* flush output */
 	autoflush = 0,	/* flush output when interrupting? */
@@ -90,6 +91,8 @@ int
 	clienteof = 0;
 
 char *prompt = 0;
+
+int scheduler_lockout_tty = 0;
 
 cc_t escape;
 cc_t rlogin;
@@ -178,7 +181,7 @@ init_telnet()
 
     void
 send_do(c, init)
-    register int c, init;
+    int c, init;
 {
     if (init) {
 	if (((do_dont_resp[c] == 0) && my_state_is_do(c)) ||
@@ -189,12 +192,12 @@ send_do(c, init)
     }
     NET2ADD(IAC, DO);
     NETADD(c);
-    printoption("SENT", DO, c);
+    printoption("SENT",DO, c);
 }
 
     void
 send_dont(c, init)
-    register int c, init;
+    int c, init;
 {
     if (init) {
 	if (((do_dont_resp[c] == 0) && my_state_is_dont(c)) ||
@@ -210,7 +213,7 @@ send_dont(c, init)
 
     void
 send_will(c, init)
-    register int c, init;
+    int c, init;
 {
     if (init) {
 	if (((will_wont_resp[c] == 0) && my_state_is_will(c)) ||
@@ -226,7 +229,7 @@ send_will(c, init)
 
     void
 send_wont(c, init)
-    register int c, init;
+    int c, init;
 {
     if (init) {
 	if (((will_wont_resp[c] == 0) && my_state_is_wont(c)) ||
@@ -538,7 +541,7 @@ dontoption(option)
  * bad, duplicate, or verbose names (names with spaces).
  */
 
-int is_unique P((char *, char **, char **));
+int is_unique(char *, char **, char **);
 
 static char *name_unknown = "UNKNOWN";
 static char *unknown[] = { 0, 0 };
@@ -547,8 +550,8 @@ static char *unknown[] = { 0, 0 };
 mklist(buf, name)
 	char *buf, *name;
 {
-	register int n;
-	register char c, *cp, **argvp, *cp2, **argv, **avt;
+	int n;
+	char c, *cp, **argvp, *cp2, **argv, **avt;
 
 	if (name) {
 		if ((int)strlen(name) > 40) {
@@ -657,10 +660,10 @@ mklist(buf, name)
 
 	int
 is_unique(name, as, ae)
-	register char *name, **as, **ae;
+	char *name, **as, **ae;
 {
-	register char **ap;
-	register int n;
+	char **ap;
+	int n;
 
 	n = strlen(name) + 1;
 	for (ap = as; ap < ae; ap++)
@@ -1109,7 +1112,7 @@ static int slc_mode = SLC_EXPORT;
 	void
 slc_init()
 {
-	register struct spc *spcp;
+	struct spc *spcp;
 
 	localchars = 1;
 	for (spcp = spc_data; spcp < &spc_data[NSLC+1]; spcp++) {
@@ -1220,7 +1223,7 @@ slc_import(def)
     void
 slc_export()
 {
-    register struct spc *spcp;
+    struct spc *spcp;
 
     TerminalDefaultChars();
 
@@ -1243,11 +1246,11 @@ slc_export()
 
 	void
 slc(cp, len)
-	register unsigned char *cp;
+	unsigned char *cp;
 	int len;
 {
-	register struct spc *spcp;
-	register int func,level;
+	struct spc *spcp;
+	int func,level;
 
 	slc_start_reply();
 
@@ -1314,7 +1317,7 @@ slc(cp, len)
     void
 slc_check()
 {
-    register struct spc *spcp;
+    struct spc *spcp;
 
     slc_start_reply();
     for (spcp = &spc_data[1]; spcp < &spc_data[NSLC+1]; spcp++) {
@@ -1362,7 +1365,7 @@ slc_add_reply(func, flags, value)
     void
 slc_end_reply()
 {
-    register int len;
+    int len;
 
     *slc_replyp++ = IAC;
     *slc_replyp++ = SE;
@@ -1379,7 +1382,7 @@ slc_end_reply()
 	int
 slc_update()
 {
-	register struct spc *spcp;
+	struct spc *spcp;
 	int need_update = 0;
 
 	for (spcp = &spc_data[1]; spcp < &spc_data[NSLC+1]; spcp++) {
@@ -1416,11 +1419,11 @@ int old_env_value = OLD_ENV_VALUE;
 
 	void
 env_opt(buf, len)
-	register unsigned char *buf;
-	register int len;
+	unsigned char *buf;
+	int len;
 {
-	register unsigned char *ep = 0, *epc = 0;
-	register int i;
+	unsigned char *ep = 0, *epc = 0;
+	int i;
 
 	switch(buf[0]&0xff) {
 	case TELQUAL_SEND:
@@ -1523,9 +1526,9 @@ env_opt_start_info()
 
 	void
 env_opt_add(ep)
-	register unsigned char *ep;
+	unsigned char *ep;
 {
-	register unsigned char *vp, c;
+	unsigned char *vp, c;
 
 	if (opt_reply == NULL)		/*XXX*/
 		return;			/*XXX*/
@@ -1546,7 +1549,7 @@ env_opt_add(ep)
 	if (opt_replyp + (vp ? strlen((char *)vp) : 0) +
 				strlen((char *)ep) + 6 > opt_replyend)
 	{
-		register int len;
+		int len;
 		unsigned char *p;
 		opt_replyend += OPT_REPLY_SIZE;
 		len = opt_replyend - opt_reply;
@@ -1614,9 +1617,9 @@ opt_welldefined(ep)
 }
 	void
 env_opt_end(emptyok)
-	register int emptyok;
+	int emptyok;
 {
-	register int len;
+	int len;
 
 	len = opt_replyp - opt_reply + 2;
 	if (emptyok || len > 6) {
@@ -1639,9 +1642,9 @@ env_opt_end(emptyok)
     int
 telrcv()
 {
-    register int c;
-    register int scc;
-    register unsigned char *sbp;
+    int c;
+    int scc;
+    unsigned char *sbp;
     int count;
     int returnValue = 0;
 
@@ -1931,8 +1934,8 @@ telsnd()
     tcc = 0;
     count = 0;
     while (NETROOM() > 2) {
-	register int sc;
-	register int c;
+	int sc;
+	int c;
 
 	if (tcc == 0) {
 	    if (count) {
@@ -2110,6 +2113,11 @@ Scheduler(block)
     netex = !SYNCHing;
 
     /* If we have seen a signal recently, reset things */
+
+    if (scheduler_lockout_tty) {
+	ttyin = ttyout = 0;
+    }
+
 #   if defined(TN3270) && defined(unix)
     if (HaveInput) {
 	HaveInput = 0;
@@ -2159,6 +2167,8 @@ Scheduler(block)
 telnet(user)
     char *user;
 {
+    int printed_encrypt = 0;
+
     sys_telnet_init();
 
 #if	defined(AUTHENTICATION) || defined(ENCRYPTION)
@@ -2198,6 +2208,68 @@ telnet(user)
     }
 #   endif /* !defined(TN3270) */
 
+#ifdef ENCRYPTION
+    /*
+     * Note: we assume a tie to the authentication option here.  This
+     * is necessary so that authentication fails, we don't spin
+     * forever. 
+     */
+    if (wantencryption) {
+	extern int auth_has_failed;
+	time_t timeout = time(0) + 60;
+	
+	send_do(TELOPT_ENCRYPT, 1);
+	send_will(TELOPT_ENCRYPT, 1);
+	while (1) {
+	    if (my_want_state_is_wont(TELOPT_AUTHENTICATION)) {
+		if (wantencryption == -1) {
+		    break;
+		} else {
+		    printf("\nServer refused to negotiate authentication,");
+		    printf(" which is required for encryption.\n");
+		    Exit(1);
+		}
+	    }
+	    if (auth_has_failed) {
+		printf("\nAuthentication negotation has failed,");
+		printf(" which is required for encryption.\n");
+		Exit(1);
+	    }
+	    if (my_want_state_is_dont(TELOPT_ENCRYPT) ||
+		my_want_state_is_wont(TELOPT_ENCRYPT)) {
+		printf("\nServer refused to negotiate encryption.\n");
+		Exit(1);
+	    }
+	    if (encrypt_is_encrypting())
+		break;
+	    if (time(0) > timeout) {
+		printf("\nEncryption could not be enabled.\n");
+		Exit(1);
+	    }
+	    if (printed_encrypt == 0) {
+		printed_encrypt = 1;
+		printf("Waiting for encryption to be negotiated...\n");
+		/*
+		 * Turn on MODE_TRAPSIG and then turn off localchars 
+		 * so that ^C will cause telnet to exit.
+		 */
+		TerminalNewMode(getconnmode()|MODE_TRAPSIG);
+		intr_waiting = 1;
+	    }
+	    if (intr_happened) {
+		printf("\nUser interrupt.\n");
+		Exit(1);
+	    }
+	    telnet_spin();
+	}
+	if (printed_encrypt) {
+	    printf("Encryption negotiated.\n");
+	    intr_waiting = 0;
+	    setconnmode(0);
+	}
+    }
+#endif
+    
 #   if !defined(TN3270)
     for (;;) {
 	int schedValue;
@@ -2282,7 +2354,7 @@ nextitem(current)
 	return current+3;
     case SB:		/* loop forever looking for the SE */
 	{
-	    register char *look = current+2;
+	    char *look = current+2;
 
 	    for (;;) {
 		if ((*look++&0xff) == IAC) {
@@ -2319,7 +2391,7 @@ nextitem(current)
 netclear()
 {
 #if	0	/* XXX */
-    register char *thisitem, *next;
+    char *thisitem, *next;
     char *good;
 #define	wewant(p)	((nfrontp > p) && ((*p&0xff) == IAC) && \
 				((*(p+1)&0xff) != EC) && ((*(p+1)&0xff) != EL))
@@ -2413,7 +2485,7 @@ int want_status_response = 0;
 get_status()
 {
     unsigned char tmp[16];
-    register unsigned char *cp;
+    unsigned char *cp;
 
     if (my_want_state_is_dont(TELOPT_STATUS)) {
 	printf("Remote side does not support STATUS option\n");
@@ -2514,7 +2586,7 @@ sendnaws()
 {
     long rows, cols;
     unsigned char tmp[16];
-    register unsigned char *cp;
+    unsigned char *cp;
 
     if (my_state_is_wont(TELOPT_NAWS))
 	return;

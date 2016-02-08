@@ -1,4 +1,4 @@
-/*	$OpenBSD: glob.c,v 1.5 1997/09/01 18:40:50 millert Exp $	*/
+/*	$OpenBSD: glob.c,v 1.7 2002/02/19 19:39:35 millert Exp $	*/
 /*	$NetBSD: glob.c,v 1.10 1995/03/21 09:03:01 cgd Exp $	*/
 
 /*-
@@ -38,7 +38,7 @@
 #if 0
 static char sccsid[] = "@(#)glob.c	8.1 (Berkeley) 5/31/93";
 #else
-static char rcsid[] = "$OpenBSD: glob.c,v 1.5 1997/09/01 18:40:50 millert Exp $";
+static char rcsid[] = "$OpenBSD: glob.c,v 1.7 2002/02/19 19:39:35 millert Exp $";
 #endif
 #endif /* not lint */
 
@@ -48,11 +48,7 @@ static char rcsid[] = "$OpenBSD: glob.c,v 1.5 1997/09/01 18:40:50 millert Exp $"
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#ifdef __STDC__
-# include <stdarg.h>
-#else
-# include <varargs.h>
-#endif
+#include <stdarg.h>
 
 #include "csh.h"
 #include "extern.h"
@@ -89,15 +85,15 @@ long    pargc = 0;
  * handled in glob() which is part of the 4.4BSD libc.
  *
  */
-static Char	*globtilde __P((Char **, Char *));
-static Char	**libglob __P((Char **));
-static Char	**globexpand __P((Char **));
-static int	globbrace __P((Char *, Char *, Char ***));
-static void	expbrace __P((Char ***, Char ***, int));
-static int	pmatch __P((Char *, Char *));
-static void	pword __P((void));
-static void	psave __P((int));
-static void	backeval __P((Char *, bool));
+static Char	*globtilde(Char **, Char *);
+static Char	**libglob(Char **);
+static Char	**globexpand(Char **);
+static int	globbrace(Char *, Char *, Char ***);
+static void	expbrace(Char ***, Char ***, int);
+static int	pmatch(Char *, Char *);
+static void	pword(void);
+static void	psave(int);
+static void	backeval(Char *, bool);
 
 
 static Char *

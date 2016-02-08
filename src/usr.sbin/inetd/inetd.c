@@ -1,4 +1,4 @@
-/*	$OpenBSD: inetd.c,v 1.85 2001/09/04 23:35:59 millert Exp $	*/
+/*	$OpenBSD: inetd.c,v 1.89 2002/03/14 16:44:25 mpech Exp $	*/
 /*	$NetBSD: inetd.c,v 1.11 1996/02/22 11:14:41 mycroft Exp $	*/
 /*
  * Copyright (c) 1983,1991 The Regents of the University of California.
@@ -41,7 +41,7 @@ char copyright[] =
 
 #ifndef lint
 /*static char sccsid[] = "from: @(#)inetd.c	5.30 (Berkeley) 6/3/91";*/
-static char rcsid[] = "$OpenBSD: inetd.c,v 1.85 2001/09/04 23:35:59 millert Exp $";
+static char rcsid[] = "$OpenBSD: inetd.c,v 1.89 2002/03/14 16:44:25 mpech Exp $";
 #endif /* not lint */
 
 /*
@@ -174,13 +174,14 @@ static char rcsid[] = "$OpenBSD: inetd.c,v 1.85 2001/09/04 23:35:59 millert Exp 
 #define	CNT_INTVL	60		/* servers in CNT_INTVL sec. */
 #define	RETRYTIME	(60*10)		/* retry after bind or server fail */
 
-void	config __P((int));
-void	doconfig __P((void));
-void	reap __P((int));
-void	doreap __P((void));
-void	retry __P((int));
-void	doretry __P((void));
-void	goaway __P((int));
+void	config(int);
+void	doconfig(void);
+void	reap(int);
+void	doreap(void);
+void	retry(int);
+void	doretry(void);
+void	die(int);
+void	dodie(void);
 
 int	 debug = 0;
 int	 nsock, maxsock;
@@ -245,23 +246,23 @@ struct	servtab {
 	struct	servtab *se_next;
 } *servtab;
 
-void echo_stream __P((int, struct servtab *));
-void discard_stream __P((int, struct servtab *));
-void machtime_stream __P((int, struct servtab *));
-void daytime_stream __P((int, struct servtab *));
-void chargen_stream __P((int, struct servtab *));
-void echo_dg __P((int, struct servtab *));
-void discard_dg __P((int, struct servtab *));
-void machtime_dg __P((int, struct servtab *));
-void daytime_dg __P((int, struct servtab *));
-void chargen_dg __P((int, struct servtab *));
+void echo_stream(int, struct servtab *);
+void discard_stream(int, struct servtab *);
+void machtime_stream(int, struct servtab *);
+void daytime_stream(int, struct servtab *);
+void chargen_stream(int, struct servtab *);
+void echo_dg(int, struct servtab *);
+void discard_dg(int, struct servtab *);
+void machtime_dg(int, struct servtab *);
+void daytime_dg(int, struct servtab *);
+void chargen_dg(int, struct servtab *);
 
 struct biltin {
 	char	*bi_service;		/* internally provided service name */
 	int	bi_socktype;		/* type of socket supported */
 	short	bi_fork;		/* 1 if should fork before call */
 	short	bi_wait;		/* 1 if should wait for child */
-	void	(*bi_fn) __P((int, struct servtab *));
+	void	(*bi_fn)(int, struct servtab *);
 } biltins[] = {
 	/* Echo received data */
 	{ "echo",	SOCK_STREAM,	1, 0,	echo_stream },
@@ -286,9 +287,10 @@ struct biltin {
 	{ 0 }
 };
 
-sig_atomic_t wantretry;
-sig_atomic_t wantconfig;
-sig_atomic_t wantreap;
+volatile sig_atomic_t wantretry;
+volatile sig_atomic_t wantconfig;
+volatile sig_atomic_t wantreap;
+volatile sig_atomic_t wantdie;
 
 #define NUMINT	(sizeof(intab) / sizeof(struct inent))
 char	*CONFIG = _PATH_INETDCONF;
@@ -296,7 +298,7 @@ char	**Argv;
 char	*LastArg;
 char	*progname;
 
-void logpid __P((void));
+void logpid(void);
 
 void
 fd_grow(fd_set **fdsp, int *bytes, int fd)
@@ -325,10 +327,10 @@ main(argc, argv, envp)
 {
 	extern char *optarg;
 	extern int optind;
-	register struct servtab *sep;
-	register struct passwd *pwd;
-	register struct group *grp = NULL;
-	register int tmpint;
+	struct servtab *sep;
+	struct passwd *pwd;
+	struct group *grp = NULL;
+	int tmpint;
 	struct sigaction sa, sapipe;
 	int ch, dofork;
 	pid_t pid;
@@ -430,9 +432,9 @@ main(argc, argv, envp)
 	sigaction(SIGHUP, &sa, NULL);
 	sa.sa_handler = reap;
 	sigaction(SIGCHLD, &sa, NULL);
-	sa.sa_handler = goaway;
+	sa.sa_handler = die;
 	sigaction(SIGTERM, &sa, NULL);
-	sa.sa_handler = goaway;
+	sa.sa_handler = die;
 	sigaction(SIGINT, &sa, NULL);
 	sa.sa_handler = SIG_IGN;
 	sigaction(SIGPIPE, &sa, &sapipe);
@@ -461,7 +463,7 @@ main(argc, argv, envp)
 		(void) sigprocmask(SIG_SETMASK, &emptymask, NULL);
 	    }
 	    
-	    if (wantretry || wantconfig || wantreap) {
+	    if (wantretry || wantconfig || wantreap || wantdie) {
 		if (wantretry) {
 		    doretry();
 		    wantretry = 0;
@@ -473,6 +475,9 @@ main(argc, argv, envp)
 		if (wantreap) {
 		    doreap();
 		    wantreap = 0;
+		}
+		if (wantdie) {
+		    dodie();
 		}
 		continue;
 	    }
@@ -524,7 +529,7 @@ main(argc, argv, envp)
 					continue;
 				}
 				if (ntohs(peer.sin_port) == 20) {
-					/* XXX ftp bounce */
+					/* ignore things that look like ftp bounce */
 					close(ctrl);
 					continue;
 				}
@@ -683,7 +688,7 @@ dg_badinput(sa)
 		case 0: case 127: case 255:
 			goto bad;
 		}
-		/* XXX check for subnet broadcast using getifaddrs(3) */
+		/* XXX should check for subnet broadcast using getifaddrs(3) */
 		break;
 	case AF_INET6:
 		in6 = &((struct sockaddr_in6 *)sa)->sin6_addr;
@@ -727,7 +732,7 @@ doreap(void)
 {
 	pid_t pid;
 	int status;
-	register struct servtab *sep;
+	struct servtab *sep;
 
 	if (debug)
 		fprintf(stderr, "reaping asked for\n");
@@ -759,17 +764,17 @@ doreap(void)
 	}
 }
 
-int setconfig __P((void));
-void endconfig __P((void));
+int setconfig(void);
+void endconfig(void);
 
-void register_rpc __P((struct servtab *));
-void unregister_rpc __P((struct servtab *));
-void freeconfig __P((struct servtab *));
-void print_service __P((char *, struct servtab *));
-void setup __P((struct servtab *));
-struct servtab *getconfigent __P((void));
-struct servtab *enter __P((struct servtab *));
-int matchconf __P((struct servtab *, struct servtab *));
+void register_rpc(struct servtab *);
+void unregister_rpc(struct servtab *);
+void freeconfig(struct servtab *);
+void print_service(char *, struct servtab *);
+void setup(struct servtab *);
+struct servtab *getconfigent(void);
+struct servtab *enter(struct servtab *);
+int matchconf(struct servtab *, struct servtab *);
 
 void
 config(int sig)
@@ -780,7 +785,7 @@ config(int sig)
 void
 doconfig(void)
 {
-	register struct servtab *sep, *cp, **sepp;
+	struct servtab *sep, *cp, **sepp;
 	int n, add;
 	char protoname[10];
 	sigset_t omask;
@@ -874,7 +879,7 @@ doconfig(void)
 				u_short port = htons(atoi(sep->se_service));
 
 				if (!port) {
-					/*XXX*/
+					/* XXX */
 					strncpy(protoname, sep->se_proto,
 						sizeof(protoname));
 					if (isdigit(protoname[strlen(protoname) - 1]))
@@ -929,7 +934,7 @@ doconfig(void)
 				u_short port = htons(atoi(sep->se_service));
 
 				if (!port) {
-					/*XXX*/
+					/* XXX */
 					strncpy(protoname, sep->se_proto,
 						sizeof(protoname));
 					if (isdigit(protoname[strlen(protoname) - 1]))
@@ -1009,7 +1014,7 @@ retry(int sig)
 void
 doretry(void)
 {
-	register struct servtab *sep;
+	struct servtab *sep;
 
 	timingout = 0;
 	for (sep = servtab; sep; sep = sep->se_next) {
@@ -1028,12 +1033,16 @@ doretry(void)
 }
 
 void
-goaway(sig)
-	int sig;
+die(int sig)
 {
-	register struct servtab *sep;
+	wantdie = 1;
+}
 
-	/* XXX signal race walking sep list */
+void
+dodie(void)
+{
+	struct servtab *sep;
+
 	for (sep = servtab; sep; sep = sep->se_next) {
 		if (sep->se_fd == -1)
 			continue;
@@ -1045,20 +1054,20 @@ goaway(sig)
 		case AF_INET:
 		case AF_INET6:
 			if (sep->se_wait == 1 && isrpcservice(sep))
-				unregister_rpc(sep);	/* XXX signal race */
+				unregister_rpc(sep);
 			break;
 		}
 		(void)close(sep->se_fd);
 	}
 	(void)unlink(_PATH_INETDPID);
-	_exit(0);
+	exit(0);
 }
 
-int bump_nofile __P((void));
+int bump_nofile(void);
 
 void
 setup(sep)
-	register struct servtab *sep;
+	struct servtab *sep;
 {
 	int on = 1;
 	int r;
@@ -1132,7 +1141,7 @@ setsockopt(fd, SOL_SOCKET, opt, (char *)&on, sizeof (on))
 
 void
 register_rpc(sep)
-	register struct servtab *sep;
+	struct servtab *sep;
 {
 	int n;
 	struct sockaddr_in sin;
@@ -1166,7 +1175,7 @@ register_rpc(sep)
 
 void
 unregister_rpc(sep)
-	register struct servtab *sep;
+	struct servtab *sep;
 {
 	int n;
 
@@ -1185,7 +1194,7 @@ struct servtab *
 enter(cp)
 	struct servtab *cp;
 {
-	register struct servtab *sep;
+	struct servtab *sep;
 	sigset_t omask;
 
 	sep = (struct servtab *)malloc(sizeof (*sep));
@@ -1246,10 +1255,10 @@ matchconf (old, new)
 FILE		*fconfig = NULL;
 char		line[1024];
 char		*defhost;
-char		*skip __P((char **, int));
-char		*nextline __P((FILE *));
-char		*newstr __P((char *));
-struct servtab	*dupconfig __P((struct servtab *));
+char		*skip(char **, int);
+char		*nextline(FILE *);
+char		*newstr(char *);
+struct servtab	*dupconfig(struct servtab *);
 
 int
 setconfig()
@@ -1280,7 +1289,7 @@ endconfig()
 struct servtab *
 getconfigent()
 {
-	register struct servtab *sep;
+	struct servtab *sep;
 	int argc;
 	char *cp, *arg, *s;
 	char *hostdelim;
@@ -1576,7 +1585,7 @@ skip:
 
 void
 freeconfig(cp)
-	register struct servtab *cp;
+	struct servtab *cp;
 {
 	int i;
 
@@ -1704,7 +1713,7 @@ inetd_setproctitle(a, s)
 	int s;
 {
 	int size;
-	register char *cp;
+	char *cp;
 	struct sockaddr_in sin;
 	char buf[80];
 
@@ -1846,7 +1855,7 @@ char *endring;
 void
 initring()
 {
-	register int i;
+	int i;
 
 	endring = ring;
 
@@ -1861,7 +1870,7 @@ chargen_stream(s, sep)		/* Character generator */
 	int s;
 	struct servtab *sep;
 {
-	register char *rs;
+	char *rs;
 	int len;
 	char text[LINESIZ+2];
 

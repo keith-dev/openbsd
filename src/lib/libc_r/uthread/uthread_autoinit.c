@@ -1,7 +1,7 @@
 /*
  * David Leonard, 1998. Public Domain. <david.leonard@csee.uq.edu.au>
  *
- * $OpenBSD: uthread_autoinit.c,v 1.8 2000/01/06 07:14:16 d Exp $
+ * $OpenBSD: uthread_autoinit.c,v 1.10 2002/02/16 21:27:25 millert Exp $
  */
 
 #include <stdio.h>
@@ -9,7 +9,7 @@
 #include "pthread_private.h"
 
 __BEGIN_DECLS
-extern void _thread_init __P((void));
+extern void _thread_init(void);
 __END_DECLS
 
 #ifdef DEBUG
@@ -36,29 +36,13 @@ Init _thread_initialiser;
  * The a.out ld.so dynamic linker calls the function
  * at symbol ".init" if it exists, just after linkage.
  */
-extern void _thread_dot_init __P((void)) asm(".init");
+extern void _thread_dot_init(void) asm(".init");
 void 
 _thread_dot_init()
 { 
 	init_debug("a.out .init");
 	_thread_init();
 }
-
-/*
- * The GNU ELF loader will place a function called _init
- * found in the .dynamic section into the _INIT field. This then gets
- * automatically run by GNU ELF's ld.so.
- */
-#ifdef __mips__
-extern int _init() __attribute__((constructor,section (".dynamic")));
-int 
-_init()
-{ 
-	init_debug("elf _init");
-	_thread_init();
-	return 0; 
-}
-#endif /* __mips__ */
 
 /*
  * A GNU C installation may know how to automatically run
@@ -69,7 +53,7 @@ _init()
  * to call it.
  */
 #if defined(__GNUC__) /* && defined(notyet) */ /* internal compiler error??? */
-void _thread_init_constructor __P((void)) __attribute__((constructor));
+void _thread_init_constructor(void) __attribute__((constructor));
 void
 _thread_init_constructor()
 {
@@ -83,3 +67,4 @@ _thread_init_constructor()
  * is always loaded from archives.
  */
 int _thread_autoinit_dummy_decl = 0;
+

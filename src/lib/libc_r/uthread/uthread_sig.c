@@ -1,4 +1,4 @@
-/*	$OpenBSD: uthread_sig.c,v 1.8 2001/08/21 19:24:53 fgsch Exp $	*/
+/*	$OpenBSD: uthread_sig.c,v 1.12 2001/12/31 18:23:15 fgsch Exp $	*/
 /*
  * Copyright (c) 1995-1998 John Birrell <jb@cimlogic.com.au>
  * All rights reserved.
@@ -71,6 +71,10 @@ _thread_sig_handler(int sig, int code, struct sigcontext * scp)
 
 	/* Check if an interval timer signal: */
 	if (sig == _SCHED_SIGNAL) {
+		/* Update the scheduling clock: */
+		gettimeofday((struct timeval *)&_sched_tod, NULL);
+		_sched_ticks++;
+
 		if (_thread_kern_in_sched != 0) {
 			/*
 			 * The scheduler is already running; ignore this
@@ -89,15 +93,21 @@ _thread_sig_handler(int sig, int code, struct sigcontext * scp)
 			/*
 			 * Schedule the next thread. This function is not
 			 * expected to return because it will do a longjmp
-			 * instead. 
+			 * instead.
 			 */
 			_thread_kern_sched(scp);
 
-			/*
-			 * This point should not be reached, so abort the
-			 * process: 
-			 */
-			PANIC("Returned to signal function from scheduler");
+			/* The scheduler currently returns here instead
+			   of calling sigreturn due to a sparc sigreturn
+			   bug.   We should also return.   That brings
+			   us back to the sigtramp code which will
+			   sigreturn to the context stored on the current
+			   stack (which is the same as scp, above).
+			   The code originally did this:
+
+			   PANIC("Returned to signal function from scheduler");
+			*/
+			return;
 		}
 	}
 	/*
@@ -237,7 +247,7 @@ _thread_sig_handle(int sig, struct sigcontext * scp)
 		if (_thread_sigact[sig - 1].sa_handler != SIG_IGN)
 			/*
 			 * Enter a loop to process each thread in the linked
-			 * list: 
+			 * list:
 			 */
 			TAILQ_FOREACH(pthread, &_thread_list, tle) {
 				pthread_t pthread_saved = curthread;
@@ -246,15 +256,15 @@ _thread_sig_handle(int sig, struct sigcontext * scp)
 				if (curthread->sig_defer_count > 0)
 					pthread->sig_defer_count++;
 
-				curthread = pthread;
 				_thread_signal(pthread,sig);
 
 				/*
 				 * Dispatch pending signals to the
 				 * running thread:
 				 */
+				_set_curthread(pthread);
 				_dispatch_signals();
-				curthread = pthread_saved;
+				_set_curthread(pthread_saved);
 
 				/* Current thread inside critical region? */
 				if (curthread->sig_defer_count > 0)
@@ -271,9 +281,13 @@ void
 _thread_signal(pthread_t pthread, int sig)
 {
 	/*
-	 * Flag the signal as pending. It will be dispatched later.
+	 * Flag the signal as pending. It may be dispatched later.
 	 */
 	sigaddset(&pthread->sigpend,sig);
+
+	/* skip this thread if signal is masked */
+	if (sigismember(&pthread->sigmask, sig))
+		return;
 
 	/*
 	 * Process according to thread state:
@@ -320,7 +334,7 @@ _thread_signal(pthread_t pthread, int sig)
 
 	/*
 	 * States that are interrupted by the occurrence of a signal
-	 * other than the scheduling alarm: 
+	 * other than the scheduling alarm:
 	 */
 	case PS_FDR_WAIT:
 	case PS_FDW_WAIT:
@@ -348,8 +362,7 @@ _thread_signal(pthread_t pthread, int sig)
 		 * Only wake up the thread if the signal is unblocked
 		 * and there is a handler installed for the signal.
 		 */
-		if (!sigismember(&pthread->sigmask, sig) &&
-		    _thread_sigact[sig - 1].sa_handler != SIG_DFL) {
+		if (_thread_sigact[sig - 1].sa_handler != SIG_DFL) {
 			/* Change the state of the thread to run: */
 			PTHREAD_NEW_STATE(pthread,PS_RUNNING);
 

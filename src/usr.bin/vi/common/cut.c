@@ -1,4 +1,4 @@
-/*	$OpenBSD: cut.c,v 1.5 2001/09/19 02:43:19 pvalchev Exp $	*/
+/*	$OpenBSD: cut.c,v 1.7 2002/02/16 21:27:56 millert Exp $	*/
 
 /*-
  * Copyright (c) 1992, 1993, 1994
@@ -29,7 +29,7 @@ static const char sccsid[] = "@(#)cut.c	10.10 (Berkeley) 9/15/96";
 
 #include "common.h"
 
-static void	cb_rotate __P((SCR *));
+static void	cb_rotate(SCR *);
 
 /*
  * cut --
@@ -63,7 +63,7 @@ static void	cb_rotate __P((SCR *));
  * replacing the contents.  Hopefully it's not worth getting right, and here
  * we just treat the numeric buffers like any other named buffer.
  *
- * PUBLIC: int cut __P((SCR *, CHAR_T *, MARK *, MARK *, int));
+ * PUBLIC: int cut(SCR *, CHAR_T *, MARK *, MARK *, int);
  */
 int
 cut(sp, namep, fm, tm, flags)
@@ -138,25 +138,24 @@ copyloop:
 	}
 
 
-#define	ENTIRE_LINE	-1
 	/* In line mode, it's pretty easy, just cut the lines. */
 	if (LF_ISSET(CUT_LINEMODE)) {
 		cbp->flags |= CB_LMODE;
 		for (lno = fm->lno; lno <= tm->lno; ++lno)
-			if (cut_line(sp, lno, 0, ENTIRE_LINE, cbp))
+			if (cut_line(sp, lno, 0, CUT_LINE_TO_EOL, cbp))
 				goto cut_line_err;
 	} else {
 		/*
-		 * Get the first line.  A length of ENTIRE_LINE causes cut_line
-		 * to cut from the MARK to the end of the line.
+		 * Get the first line.  A length of CUT_LINE_TO_EOL causes
+		 * cut_line() to cut from the MARK to the end of the line.
 		 */
 		if (cut_line(sp, fm->lno, fm->cno, fm->lno != tm->lno ?
-		    ENTIRE_LINE : (tm->cno - fm->cno) + 1, cbp))
+		    CUT_LINE_TO_EOL : (tm->cno - fm->cno) + 1, cbp))
 			goto cut_line_err;
 
 		/* Get the intermediate lines. */
 		for (lno = fm->lno; ++lno < tm->lno;)
-			if (cut_line(sp, lno, 0, ENTIRE_LINE, cbp))
+			if (cut_line(sp, lno, 0, CUT_LINE_TO_EOL, cbp))
 				goto cut_line_err;
 
 		/* Get the last line. */
@@ -240,7 +239,7 @@ cb_rotate(sp)
  * cut_line --
  *	Cut a portion of a single line.
  *
- * PUBLIC: int cut_line __P((SCR *, recno_t, size_t, size_t, CB *));
+ * PUBLIC: int cut_line(SCR *, recno_t, size_t, size_t, CB *);
  */
 int
 cut_line(sp, lno, fcno, clen, cbp)
@@ -266,7 +265,7 @@ cut_line(sp, lno, fcno, clen, cbp)
 	 * copy the portion we want, and reset the TEXT length.
 	 */
 	if (len != 0) {
-		if (clen == ENTIRE_LINE)
+		if (clen == CUT_LINE_TO_EOL)
 			clen = len - fcno;
 		memcpy(tp->lb, p + fcno, clen);
 		tp->len = clen;
@@ -283,7 +282,7 @@ cut_line(sp, lno, fcno, clen, cbp)
  * cut_close --
  *	Discard all cut buffers.
  *
- * PUBLIC: void cut_close __P((GS *));
+ * PUBLIC: void cut_close(GS *);
  */
 void
 cut_close(gp)
@@ -309,7 +308,7 @@ cut_close(gp)
  * text_init --
  *	Allocate a new TEXT structure.
  *
- * PUBLIC: TEXT *text_init __P((SCR *, const char *, size_t, size_t));
+ * PUBLIC: TEXT *text_init(SCR *, const char *, size_t, size_t);
  */
 TEXT *
 text_init(sp, p, len, total_len)
@@ -340,7 +339,7 @@ text_init(sp, p, len, total_len)
  * text_lfree --
  *	Free a chain of text structures.
  *
- * PUBLIC: void text_lfree __P((TEXTH *));
+ * PUBLIC: void text_lfree(TEXTH *);
  */
 void
 text_lfree(headp)
@@ -358,7 +357,7 @@ text_lfree(headp)
  * text_free --
  *	Free a text structure.
  *
- * PUBLIC: void text_free __P((TEXT *));
+ * PUBLIC: void text_free(TEXT *);
  */
 void
 text_free(tp)

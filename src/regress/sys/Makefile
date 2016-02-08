@@ -1,12 +1,10 @@
-#	$OpenBSD: Makefile,v 1.4 2001/01/29 02:05:50 niklas Exp $
+#	$OpenBSD: Makefile,v 1.9 2002/03/25 10:56:58 fgsch Exp $
 #	$NetBSD: Makefile,v 1.4 1995/04/20 22:41:08 cgd Exp $
 
-SUBDIR+= kern
+SUBDIR+= kern fdescfs uvm crypto
 .if exists(arch/${MACHINE})
 SUBDIR+= arch/${MACHINE}
 .endif
-
-regress: _SUBDIRUSE
 
 install:
 

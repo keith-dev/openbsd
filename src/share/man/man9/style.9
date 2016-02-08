@@ -22,7 +22,7 @@
 .\" OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 .\" SUCH DAMAGE.
 .\"
-.\"	$OpenBSD: style.9,v 1.22 2001/10/05 14:45:54 mpech Exp $
+.\"	$OpenBSD: style.9,v 1.25 2002/04/01 18:41:27 deraadt Exp $
 .\"
 .Dd June 18, 2001
 .Dt STYLE 9
@@ -122,15 +122,13 @@ Functions that are used locally in more than one module go into a
 separate header file, e.g.,
 .Pa extern.h .
 .Pp
-Only use the
-.Li __P
-macro from the include file
-.Pa Aq sys/cdefs.h
-if the source file in general is (to be) compilable with a K&R compiler.
 Use of the
 .Li __P
-macro in new code is discouraged, although modifications to existing
-files should be consistent with that file's conventions.
+macro has been deprecated.
+It is allowed in code imported from other sources but should not be
+used in native
+.Ox
+code.
 Prototypes should not have variable names associated with the types; i.e.:
 .Bd -literal -compact -offset 0i
 void	function(int);
@@ -390,11 +388,9 @@ Do YOU understand the following?
 	k = !(l & FLAGS);
 .Ed
 .Pp
-Exits should be 0 on success, or according to the predefined
-values in
-.Xr sysexits 3 .
+Exits should be 0 on success, or non-zero for errors.
 .Bd -literal -offset 0i
-	exit(EX_OK);	/*
+	exit(0);	/*
 			 * Avoid obvious comments such as
 			 * "Exit 0 on success."
 			 */
@@ -442,6 +438,57 @@ calls are not followed by a space.
 Note that
 .Xr indent 1
 does not understand this rule.
+.Pp
+Use of the
+.Dq register
+specifier is discouraged in new code.
+Optimizing compilers such as gcc can generally do a better job
+of choosing which variables to be placed in registers to improve
+code performance.
+The exception to this is in functions containing assembly code where the
+.Dq register
+specifier is required for proper code generation in the absence of
+compiler optimization.
+.Pp
+When using
+.Fn longjmp
+or
+.Fn vfork
+in a program, the
+.Fl W
+or
+.Fl Wall
+flag should be used to verify that that compiler does not generate
+warnings such as
+.Bd -literal -offset 0i
+warning: variable `foo' might be clobbered by `longjmp' or `vfork'.
+.Ed
+.Pp
+If any warnings of this type occur you must apply the
+.Dq volatile
+specifier to the variable in question.
+Failure to do so may result in improper code generation when optimization
+is enabled.
+Note that for pointers, the
+.Dq volatile
+should go after to the type, not before.
+Use
+.Bd -literal -offset 0i
+char * volatile foo;
+.Ed
+.Pp
+not:
+.Bd -literal -offset 0i
+volatile char *foo;
+.Ed
+.Pp
+Global flags set inside signal handlers should be of type
+.Dq volatile sig_atomic_t
+if possible.
+This guarantees that the variable may be accessed as an atomic entity,
+even when a signal has been delivered.
+Global variables of other types (such as structures) are not
+guaranteed to have consistent values when accessed via a signal handler.
 .Pp
 .Dv NULL
 is the preferred null pointer constant.
@@ -578,8 +625,7 @@ or lclint from the ports tree) and produce minimal warnings.
 .Sh SEE ALSO
 .Xr indent 1 ,
 .Xr err 3 ,
-.Xr queue 3 ,
-.Xr sysexits 3 ,
+.Xr queue 3
 .Xr warn 3
 .Sh HISTORY
 This man page is largely based on the src/admin/style/style file from

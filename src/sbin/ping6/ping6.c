@@ -1,4 +1,4 @@
-/*	$OpenBSD: ping6.c,v 1.33 2001/08/18 20:42:28 deraadt Exp $	*/
+/*	$OpenBSD: ping6.c,v 1.43 2002/03/11 02:11:18 itojun Exp $	*/
 /*	$KAME: ping6.c,v 1.129 2001/06/22 13:16:02 itojun Exp $	*/
 
 /*
@@ -140,10 +140,15 @@ static char sccsid[] = "@(#)ping.c	8.1 (Berkeley) 6/5/93";
 #include "md5.h"
 #endif
 
+struct ping6_timeval {
+	int32_t	tv_sec;
+	int32_t	tv_usec;
+};
+
 #define MAXPACKETLEN	131072
 #define	IP6LEN		40
 #define ICMP6ECHOLEN	8	/* icmp echo header len excluding time */
-#define ICMP6ECHOTMLEN sizeof(struct timeval)
+#define ICMP6ECHOTMLEN sizeof(struct ping6_timeval)
 #define ICMP6_NIQLEN	(ICMP6ECHOLEN + 8)
 /* FQDN case, 64 bits of nonce + 32 bits ttl */
 #define ICMP6_NIRLEN	(ICMP6ECHOLEN + 12)
@@ -242,43 +247,42 @@ struct msghdr smsghdr;
 struct iovec smsgiov;
 char *scmsg = 0;
 
-volatile int signo;
 volatile sig_atomic_t seenalrm;
 volatile sig_atomic_t seenint;
 #ifdef SIGINFO
 volatile sig_atomic_t seeninfo;
 #endif
 
-int	 main __P((int, char *[]));
-void	 fill __P((char *, char *));
-int	 get_hoplim __P((struct msghdr *));
-int	 get_pathmtu __P((struct msghdr *));
-struct in6_pktinfo *get_rcvpktinfo __P((struct msghdr *));
-void	 onsignal __P((int));
-void	 retransmit __P((void));
-void	 onint __P((int));
-size_t	 pingerlen __P((void));
-int	 pinger __P((void));
-const char *pr_addr __P((struct sockaddr *, int));
-void	 pr_icmph __P((struct icmp6_hdr *, u_char *));
-void	 pr_iph __P((struct ip6_hdr *));
-void	 pr_suptypes __P((struct icmp6_nodeinfo *, size_t));
-void	 pr_nodeaddr __P((struct icmp6_nodeinfo *, int));
-int	 myechoreply __P((const struct icmp6_hdr *));
-int	 mynireply __P((const struct icmp6_nodeinfo *));
-char *dnsdecode __P((const u_char **, const u_char *, const u_char *,
-	u_char *, size_t));
-void	 pr_pack __P((u_char *, int, struct msghdr *));
-void	 pr_exthdrs __P((struct msghdr *));
-void	 pr_ip6opt __P((void *));
-void	 pr_rthdr __P((void *));
-int	 pr_bitrange __P((u_int32_t, int, int));
-void	 pr_retip __P((struct ip6_hdr *, u_char *));
-void	 summary __P((void));
-void	 tvsub __P((struct timeval *, struct timeval *));
-int	 setpolicy __P((int, char *));
-char	*nigroup __P((char *));
-void	 usage __P((void));
+int	 main(int, char *[]);
+void	 fill(char *, char *);
+int	 get_hoplim(struct msghdr *);
+int	 get_pathmtu(struct msghdr *);
+struct in6_pktinfo *get_rcvpktinfo(struct msghdr *);
+void	 onsignal(int);
+void	 retransmit(void);
+void	 onint(int);
+size_t	 pingerlen(void);
+int	 pinger(void);
+const char *pr_addr(struct sockaddr *, int);
+void	 pr_icmph(struct icmp6_hdr *, u_char *);
+void	 pr_iph(struct ip6_hdr *);
+void	 pr_suptypes(struct icmp6_nodeinfo *, size_t);
+void	 pr_nodeaddr(struct icmp6_nodeinfo *, int);
+int	 myechoreply(const struct icmp6_hdr *);
+int	 mynireply(const struct icmp6_nodeinfo *);
+char	*dnsdecode(const u_char **, const u_char *, const u_char *, u_char *,
+	    size_t);
+void	 pr_pack(u_char *, int, struct msghdr *);
+void	 pr_exthdrs(struct msghdr *);
+void	 pr_ip6opt(void *);
+void	 pr_rthdr(void *);
+int	 pr_bitrange(u_int32_t, int, int);
+void	 pr_retip(struct ip6_hdr *, u_char *);
+void	 summary(void);
+void	 tvsub(struct timeval *, struct timeval *);
+int	 setpolicy(int, char *);
+char	*nigroup(char *);
+void	 usage(void);
 
 int
 main(argc, argv)
@@ -291,7 +295,7 @@ main(argc, argv)
 	struct addrinfo hints;
 	fd_set *fdmaskp;
 	int fdmasks;
-	register int cc, i;
+	int cc, i;
 	int ch, fromlen, hold, packlen, preload, optval, ret_ga;
 	u_char *datap, *packet;
 	char *e, *target, *ifname = NULL;
@@ -626,7 +630,7 @@ main(argc, argv)
 		errx(1, "-f and -i incompatible options");
 
 	if ((options & F_NOUSERDATA) == 0) {
-		if (datalen >= sizeof(struct timeval)) {
+		if (datalen >= sizeof(struct ping6_timeval)) {
 			/* we can time transfer */
 			timing = 1;
 		} else
@@ -994,7 +998,7 @@ main(argc, argv)
 	if ((fdmaskp = malloc(fdmasks)) == NULL)
 		err(1, "malloc");
 
-	signo = seenalrm = seenint = 0;
+	seenalrm = seenint = 0;
 #ifdef SIGINFO
 	seeninfo = 0;
 #endif
@@ -1091,11 +1095,10 @@ main(argc, argv)
 }
 
 void
-onsignal(sig)
-	int sig;
+onsignal(signo)
+	int signo;
 {
-	signo = sig;
-	switch (sig) {
+	switch (signo) {
 	case SIGALRM:
 		seenalrm++;
 		break;
@@ -1246,9 +1249,15 @@ pinger()
 		icp->icmp6_code = 0;
 		icp->icmp6_id = htons(ident);
 		icp->icmp6_seq = ntohs(seq);
-		if (timing)
-			(void)gettimeofday((struct timeval *)
-					   &outpack[ICMP6ECHOLEN], NULL);
+		if (timing) {
+			struct timeval tv;
+			struct ping6_timeval tv6;
+
+			(void)gettimeofday(&tv, NULL);
+			tv6.tv_sec = htonl(tv.tv_sec);
+			tv6.tv_usec = htonl(tv.tv_usec);
+			memcpy(&outpack[ICMP6ECHOLEN], &tv6, sizeof(tv6));
+		}
 		cc = ICMP6ECHOLEN + datalen;
 	}
 
@@ -1386,7 +1395,7 @@ pr_pack(buf, cc, mhdr)
 	int fromlen;
 	u_char *cp = NULL, *dp, *end = buf + cc;
 	struct in6_pktinfo *pktinfo = NULL;
-	struct timeval tv, *tp;
+	struct timeval tv, tv2;
 	double triptime = 0;
 	int dupflag;
 	size_t off;
@@ -1400,14 +1409,14 @@ pr_pack(buf, cc, mhdr)
 	    mhdr->msg_namelen != sizeof(struct sockaddr_in6) ||
 	    ((struct sockaddr *)mhdr->msg_name)->sa_family != AF_INET6) {
 		if (options & F_VERBOSE)
-			warnx("invalid peername\n");
+			warnx("invalid peername");
 		return;
 	}
 	from = (struct sockaddr *)mhdr->msg_name;
 	fromlen = mhdr->msg_namelen;
 	if (cc < sizeof(struct icmp6_hdr)) {
 		if (options & F_VERBOSE)
-			warnx("packet too short (%d bytes) from %s\n", cc,
+			warnx("packet too short (%d bytes) from %s", cc,
 			    pr_addr(from, fromlen));
 		return;
 	}
@@ -1428,8 +1437,12 @@ pr_pack(buf, cc, mhdr)
 		seq = ntohs(icp->icmp6_seq);
 		++nreceived;
 		if (timing) {
-			tp = (struct timeval *)(icp + 1);
-			tvsub(&tv, tp);
+			struct ping6_timeval tv6;
+
+			memcpy(&tv6, (void *)(icp + 1), sizeof(tv6));
+			tv2.tv_sec = ntohl(tv6.tv_sec);
+			tv2.tv_usec = ntohl(tv6.tv_usec);
+			tvsub(&tv, &tv2);
 			triptime = ((double)tv.tv_sec) * 1000.0 +
 			    ((double)tv.tv_usec) / 1000.0;
 			tsum += triptime;
@@ -2073,7 +2086,7 @@ get_pathmtu(mhdr)
  */
 void
 tvsub(out, in)
-	register struct timeval *out, *in;
+	struct timeval *out, *in;
 {
 	if ((out->tv_usec -= in->tv_usec) < 0) {
 		--out->tv_sec;
@@ -2531,7 +2544,7 @@ void
 fill(bp, patp)
 	char *bp, *patp;
 {
-	register int ii, jj, kk;
+	int ii, jj, kk;
 	int pat[16];
 	char *cp;
 
@@ -2547,7 +2560,7 @@ fill(bp, patp)
 /* xxx */
 	if (ii > 0)
 		for (kk = 0;
-		    kk <= MAXDATALEN - (8 + sizeof(struct timeval) + ii);
+		    kk <= MAXDATALEN - (8 + sizeof(struct ping6_timeval) + ii);
 		    kk += ii)
 			for (jj = 0; jj < ii; ++jj)
 				bp[jj + kk] = pat[jj];

@@ -1,4 +1,4 @@
-/*	$OpenBSD: getinfo.c,v 1.3 2001/06/18 18:17:39 millert Exp $	*/
+/*	$OpenBSD: getinfo.c,v 1.5 2002/02/16 21:27:44 millert Exp $	*/
 
 /*-
  * Copyright (c) 1992, 1993
@@ -33,7 +33,7 @@
  */
 
 #ifndef lint
-static char rcsid[] = "$OpenBSD: getinfo.c,v 1.3 2001/06/18 18:17:39 millert Exp $";
+static char rcsid[] = "$OpenBSD: getinfo.c,v 1.5 2002/02/16 21:27:44 millert Exp $";
 #endif /* not lint */
 
 #include <sys/types.h>
@@ -57,12 +57,12 @@ static char rcsid[] = "$OpenBSD: getinfo.c,v 1.3 2001/06/18 18:17:39 millert Exp
 #define TCERR	(char)1
 #define	SHADOW	(char)2
 
-static int 	 getent __P((char **, u_int *, char **, int, char *, int));
-static char	*igetcap __P((char *, char *, int));
-static int	 igetmatch __P((char *, char *));
-static int	 igetclose __P((void));
+static int 	 getent(char **, u_int *, char **, int, char *, int);
+static char	*igetcap(char *, char *, int);
+static int	 igetmatch(char *, char *);
+static int	 igetclose(void);
 
-int	igetnext __P((char **, char **));
+int	igetnext(char **, char **);
 
 /*
  * Cgetcap searches the capability record buf for the capability cap with
@@ -81,7 +81,7 @@ igetcap(buf, cap, type)
 	char *buf, *cap;
 	int type;
 {
-	register char *bp, *cp;
+	char *bp, *cp;
 
 	bp = buf;
 	for (;;) {
@@ -143,7 +143,7 @@ getent(cap, len, db_array, fd, name, depth)
 	u_int *len;
 	int fd, depth;
 {
-	register char *r_end, *rp, **db_p;
+	char *r_end, *rp, **db_p;
 	int myfd, eof, foundit;
 	char *record;
 	int tc_not_resolved;
@@ -193,8 +193,8 @@ getent(cap, len, db_array, fd, name, depth)
 		 */
 		{
 		char buf[BUFSIZ];
-		register char *b_end, *bp;
-		register int c;
+		char *b_end, *bp;
+		int c;
 
 		/*
 		 * Loop invariants:
@@ -321,8 +321,8 @@ getent(cap, len, db_array, fd, name, depth)
 	 * references in it ...
 	 */
 	{
-		register char *newicap, *s;
-		register int newilen;
+		char *newicap, *s;
+		int newilen;
 		u_int ilen;
 		int diff, iret, tclen;
 		char *icap, *scan, *tc, *tcstart, *tcend;
@@ -470,7 +470,7 @@ static int
 igetmatch(buf, name)
 	char *buf, *name;
 {
-	register char *np, *bp;
+	char *np, *bp;
 
 	/*
 	 * Start search at beginning of record.
@@ -528,7 +528,7 @@ igetclose()
  */
 int
 igetnext(bp, db_array)
-        register char **bp;
+        char **bp;
 	char **db_array;
 {
 	size_t len;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if.c,v 1.9 2001/01/21 15:42:35 itojun Exp $	*/
+/*	$OpenBSD: if.c,v 1.11 2002/02/17 19:42:39 millert Exp $	*/
 /*	$KAME: if.c,v 1.17 2001/01/21 15:27:30 itojun Exp $	*/
 
 /*
@@ -74,9 +74,9 @@ int iflist_init_ok;
 size_t ifblock_size;
 char *ifblock;
 
-static void get_iflist __P((char **buf, size_t *size));
-static void parse_iflist __P((struct if_msghdr ***ifmlist_p, char *buf,
-		       size_t bufsize));
+static void get_iflist(char **buf, size_t *size);
+static void parse_iflist(struct if_msghdr ***ifmlist_p, char *buf,
+    size_t bufsize);
 
 static void
 get_rtaddrs(int addrs, struct sockaddr *sa, struct sockaddr **rti_info)

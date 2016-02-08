@@ -1,4 +1,4 @@
-/*	$OpenBSD: file.c,v 1.9 2001/05/24 03:05:22 mickey Exp $	*/
+/*	$OpenBSD: file.c,v 1.16 2002/03/16 04:17:36 vincent Exp $	*/
 
 /*
  *	File commands.
@@ -13,8 +13,7 @@
  */
 /* ARGSUSED */
 int
-fileinsert(f, n)
-	int f, n;
+fileinsert(int f, int n)
 {
 	int	 s;
 	char	 fname[NFILEN];
@@ -34,8 +33,7 @@ fileinsert(f, n)
  */
 /* ARGSUSED */
 int
-filevisit(f, n)
-	int f, n;
+filevisit(int f, int n)
 {
 	BUFFER	*bp;
 	int	 s;
@@ -62,8 +60,7 @@ filevisit(f, n)
  */
 /* ARGSUSED */
 int
-poptofile(f, n)
-	int f, n;
+poptofile(int f, int n)
 {
 	BUFFER	*bp;
 	MGWIN	*wp;
@@ -72,7 +69,7 @@ poptofile(f, n)
 	char	*adjf;
 
 	if ((s = eread("Find file in other window: ", fname, NFILEN,
-		       EFNEW | EFCR | EFFILE)) != TRUE)
+	    EFNEW | EFCR | EFFILE)) != TRUE)
 		return s;
 	adjf = adjustname(fname);
 	if ((bp = findbuffer(adjf)) == NULL)
@@ -91,22 +88,21 @@ poptofile(f, n)
  * empty buffer to put it in.
  */
 BUFFER *
-findbuffer(fname)
-	char *fname;
+findbuffer(char *fname)
 {
 	BUFFER		*bp;
-	char		 bname[NBUFN], *cp;
-	unsigned int	 count = 1;
+	char		 bname[NBUFN];
+	unsigned int count, remain, i;
 
 	for (bp = bheadp; bp != NULL; bp = bp->b_bufp) {
 		if (strcmp(bp->b_fname, fname) == 0)
 			return bp;
 	}
-	/* new buffer name */
-	strcpy(bname, basename(fname));
-	cp = bname + strlen(bname);
-	for (count = 1; bfind(bname, FALSE) != NULL; count++)
-		sprintf(cp, "<%d>", count);
+	i = strlcpy(bname, basename(fname), sizeof(bname));
+	remain = sizeof(bname) - i;
+	for (count = 2; bfind(bname, FALSE) != NULL; count++)
+		snprintf(&bname[i], remain, "<%d>", count);
+
 	return bfind(bname, TRUE);
 }
 
@@ -138,6 +134,14 @@ readin(fname)
 			wp->w_marko = 0;
 		}
 	}
+
+	/* We need to set the READONLY flag after we insert the file */
+	if (access(fname, W_OK) && errno != ENOENT)
+		curbp->b_flag |= BFREADONLY;
+	else
+		curbp->b_flag &=~ BFREADONLY;
+
+
 	return status;
 }
 
@@ -182,7 +186,7 @@ insertfile(fname, newname, needinfo)
 	/* cheap */
 	bp = curbp;
 	if (newname != NULL)
-		(void)strcpy(bp->b_fname, newname);
+		(void)strlcpy(bp->b_fname, newname, sizeof bp->b_fname);
 
 	/* hard file open */
 	if ((s = ffropen(fname, needinfo ? bp : NULL)) == FIOERR)
@@ -334,13 +338,13 @@ filewrite(f, n)
 	char	*adjfname;
 
 	if ((s = eread("Write file: ", fname, NFILEN,
-		       EFNEW | EFCR | EFFILE)) != TRUE)
+	    EFNEW | EFCR | EFFILE)) != TRUE)
 		return (s);
 	adjfname = adjustname(fname);
 	/* old attributes are no longer current */
 	bzero(&curbp->b_fi, sizeof(curbp->b_fi));
 	if ((s = writeout(curbp, adjfname)) == TRUE) {
-		(void)strcpy(curbp->b_fname, adjfname);
+		(void)strlcpy(curbp->b_fname, adjfname, sizeof curbp->b_fname);
 #ifndef NO_BACKUP
 		curbp->b_flag &= ~(BFBAK | BFCHG);
 #else /* !NO_BACKUP */

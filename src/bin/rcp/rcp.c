@@ -1,4 +1,4 @@
-/*	$OpenBSD: rcp.c,v 1.24 2001/10/01 08:06:28 markus Exp $	*/
+/*	$OpenBSD: rcp.c,v 1.28 2002/02/19 19:39:35 millert Exp $	*/
 /*	$NetBSD: rcp.c,v 1.9 1995/03/21 08:19:06 cgd Exp $	*/
 
 /*
@@ -99,20 +99,20 @@ int pflag, iamremote, iamrecursive, targetshouldbedirectory;
 char cmd[CMDNEEDS];		/* must hold "rcp -r -p -d\0" */
 
 #ifdef KERBEROS
-int	 kerberos __P((char **, char *, char *, char *));
-void	 oldw __P((const char *, ...));
+int	 kerberos(char **, char *, char *, char *);
+void	 oldw(const char *, ...);
 /* XXX from ../../usr.bin/rlogin/krcmd.c */
-int krcmd __P((char **, u_short, char *, char *, int *, char *));
-int krcmd_mutual __P((char **, u_short, char *, char *, int *,
-		       char *, CREDENTIALS *, Key_schedule));
+int krcmd(char **, u_short, char *, char *, int *, char *);
+int krcmd_mutual(char **, u_short, char *, char *, int *,
+		 char *, CREDENTIALS *, Key_schedule);
 #endif
-int	 response __P((void));
-void	 rsource __P((char *, struct stat *));
-void	 sink __P((int, char *[]));
-void	 source __P((int, char *[]));
-void	 tolocal __P((int, char *[]));
-void	 toremote __P((char *, int, char *[]));
-void	 usage __P((void));
+int	 response(void);
+void	 rsource(char *, struct stat *);
+void	 sink(int, char *[]);
+void	 source(int, char *[]);
+void	 tolocal(int, char *[]);
+void	 toremote(char *, int, char *[]);
+void	 usage(void);
 
 int
 main(argc, argv)
@@ -551,9 +551,9 @@ sink(argc, argv)
 	struct timeval tv[2];
 	enum { YES, NO, DISPLAYED } wrerr;
 	BUF *bp;
-	off_t i, j;
+	off_t i, j, size;
 	int amt, count, exists, first, mask, mode, ofd, omode;
-	int setimes, size, targisdir, wrerrno = 0;
+	int setimes, targisdir, wrerrno = 0;
 	char ch, *cp, *np, *targ, *why, *vect[1], buf[BUFSIZ];
 
 #define	atime	tv[0]
@@ -869,32 +869,18 @@ usage()
 	exit(1);
 }
 
-#ifdef __STDC__
 #include <stdarg.h>
-#else
-#include <varargs.h>
-#endif
 
 #ifdef KERBEROS
 void
-#ifdef __STDC__
 oldw(const char *fmt, ...)
-#else
-oldw(fmt, va_alist)
-	char *fmt;
-	va_dcl
-#endif
 {
 	char realm[REALM_SZ];
 	va_list ap;
 
 	if (krb_get_lrealm(realm, 1) != KSUCCESS)
 		return;
-#ifdef __STDC__
 	va_start(ap, fmt);
-#else
-	va_start(ap);
-#endif
 	(void)fprintf(stderr, "rcp: ");
 	(void)vfprintf(stderr, fmt, ap);
 	(void)fprintf(stderr, ", using standard rcp\n");
@@ -903,13 +889,7 @@ oldw(fmt, va_alist)
 #endif
 
 void
-#ifdef __STDC__
 run_err(const char *fmt, ...)
-#else
-run_err(fmt, va_alist)
-	char *fmt;
-	va_dcl
-#endif
 {
 	static FILE *fp;
 	va_list ap;
@@ -919,22 +899,14 @@ run_err(fmt, va_alist)
 		return;
 	(void)fprintf(fp, "%c", 0x01);
 	(void)fprintf(fp, "rcp: ");
-#ifdef __STDC__
 	va_start(ap, fmt);
-#else
-	va_start(ap);
-#endif
 	(void)vfprintf(fp, fmt, ap);
 	va_end(ap);
 	(void)fprintf(fp, "\n");
 	(void)fflush(fp);
 
 	if (!iamremote) {
-#ifdef __STDC__
 		va_start(ap, fmt);
-#else
-		va_start(ap);
-#endif
 		vwarnx(fmt, ap);
 		va_end(ap);
 	}

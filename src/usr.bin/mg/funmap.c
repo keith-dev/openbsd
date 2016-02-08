@@ -1,4 +1,4 @@
-/*	$OpenBSD: funmap.c,v 1.3 2001/05/24 13:00:45 art Exp $	*/
+/*	$OpenBSD: funmap.c,v 1.7 2002/03/16 15:10:11 vincent Exp $	*/
 /*
  * Copyright (c) 2001 Artur Grabowski <art@openbsd.org>.  All rights reserved.
  *
@@ -32,8 +32,8 @@
  */
 
 struct funmap {
-	PF		fn_funct;
-	char		*fn_name;
+	PF		 fn_funct;
+	const		 char *fn_name;
 	struct funmap	*fn_next;
 };
 
@@ -167,9 +167,7 @@ static struct funmap functnames[] = {
 	{prefixregion, "prefix-region",},
 #endif /* PREFIXREGION */
 	{backline, "previous-line",},
-#ifdef GOSMACS
 	{prevwind, "previous-window",},
-#endif /* GOSEMACS */
 	{spawncli, "push-shell",},
 #ifndef NO_DIR
 	{showcwdir, "pwd",},
@@ -190,10 +188,8 @@ static struct funmap functnames[] = {
 	{quit, "save-buffers-kill-emacs",},
 	{savebuffers, "save-some-buffers",},
 	{backpage, "scroll-down",},
-#ifdef GOSMACS
 	{back1page, "scroll-one-line-down",},
 	{forw1page, "scroll-one-line-up",},
-#endif /* GOSMACS */
 	{pagenext, "scroll-other-window",},
 	{forwpage, "scroll-up",},
 	{searchagain, "search-again",},
@@ -221,6 +217,8 @@ static struct funmap functnames[] = {
 	{usebuffer, "switch-to-buffer",},
 	{poptobuffer, "switch-to-buffer-other-window",},
 	{twiddle, "transpose-chars",},
+	{ undo, "undo", },
+	{ undo_dump, "undo-list", },
 	{universal_argument, "universal-argument",},
 	{upperregion, "upcase-region",},
 	{upperword, "upcase-word",},
@@ -242,7 +240,7 @@ funmap_init(void)
 }
 
 int
-funmap_add(PF fun, char *fname)
+funmap_add(PF fun, const char *fname)
 {
 	struct funmap *fn;
 
@@ -261,7 +259,7 @@ funmap_add(PF fun, char *fname)
  * Translate from function name to function pointer.
  */
 PF
-name_function(char *fname)
+name_function(const char *fname)
 {
 	struct funmap *fn;
 
@@ -272,7 +270,7 @@ name_function(char *fname)
 	return NULL;
 }
 
-char *
+const char *
 function_name(PF fun)
 {
 	struct funmap *fn;
@@ -288,7 +286,7 @@ function_name(PF fun)
  * list possible function name completions.
  */
 LIST *
-complete_function_list(char *fname, int c)
+complete_function_list(const char *fname, int c)
 {
 	struct funmap *fn;
 	LIST *head, *el;

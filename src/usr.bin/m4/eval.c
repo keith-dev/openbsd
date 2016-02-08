@@ -1,4 +1,4 @@
-/*	$OpenBSD: eval.c,v 1.41 2001/10/10 23:25:31 espie Exp $	*/
+/*	$OpenBSD: eval.c,v 1.43 2002/02/16 21:27:48 millert Exp $	*/
 /*	$NetBSD: eval.c,v 1.7 1996/11/10 21:21:29 pk Exp $	*/
 
 /*
@@ -41,7 +41,7 @@
 #if 0
 static char sccsid[] = "@(#)eval.c	8.2 (Berkeley) 4/27/95";
 #else
-static char rcsid[] = "$OpenBSD: eval.c,v 1.41 2001/10/10 23:25:31 espie Exp $";
+static char rcsid[] = "$OpenBSD: eval.c,v 1.43 2002/02/16 21:27:48 millert Exp $";
 #endif
 #endif /* not lint */
 
@@ -67,25 +67,25 @@ static char rcsid[] = "$OpenBSD: eval.c,v 1.41 2001/10/10 23:25:31 espie Exp $";
 
 #define BUILTIN_MARKER	"__builtin_"
 
-static void	dodefn __P((const char *));
-static void	dopushdef __P((const char *, const char *));
-static void	dodump __P((const char *[], int));
-static void	dotrace __P((const char *[], int, int));
-static void	doifelse __P((const char *[], int));
-static int	doincl __P((const char *));
-static int	dopaste __P((const char *));
-static void	gnu_dochq __P((const char *[], int));
-static void	dochq __P((const char *[], int));
-static void	gnu_dochc __P((const char *[], int));
-static void	dochc __P((const char *[], int));
-static void	dodiv __P((int));
-static void	doundiv __P((const char *[], int));
-static void	dosub __P((const char *[], int));
-static void	map __P((char *, const char *, const char *, const char *));
-static const char *handledash __P((char *, char *, const char *));
-static void	expand_builtin __P((const char *[], int, int));
-static void	expand_macro __P((const char *[], int));
-static void	dump_one_def __P((ndptr));
+static void	dodefn(const char *);
+static void	dopushdef(const char *, const char *);
+static void	dodump(const char *[], int);
+static void	dotrace(const char *[], int, int);
+static void	doifelse(const char *[], int);
+static int	doincl(const char *);
+static int	dopaste(const char *);
+static void	gnu_dochq(const char *[], int);
+static void	dochq(const char *[], int);
+static void	gnu_dochc(const char *[], int);
+static void	dochc(const char *[], int);
+static void	dodiv(int);
+static void	doundiv(const char *[], int);
+static void	dosub(const char *[], int);
+static void	map(char *, const char *, const char *, const char *);
+static const char *handledash(char *, char *, const char *);
+static void	expand_builtin(const char *[], int, int);
+static void	expand_macro(const char *[], int);
+static void	dump_one_def(ndptr);
 
 unsigned long	expansion_id;
 
@@ -147,6 +147,7 @@ expand_builtin(argv, argc, td)
 	printf("argc = %d\n", argc);
 	for (n = 0; n < argc; n++)
 		printf("argv[%d] = %s\n", n, argv[n]);
+	fflush(stdout);
 #endif
 
  /*
@@ -395,12 +396,15 @@ expand_builtin(argv, argc, td)
 	 * characters in the "to" string.
 	 */
 		if (argc > 3) {
-			char temp[STRSPMAX+1];
+			char *temp;
+
+			temp = xalloc(strlen(argv[2])+1);
 			if (argc > 4)
 				map(temp, argv[2], argv[3], argv[4]);
 			else
 				map(temp, argv[2], argv[3], null);
 			pbstr(temp);
+			free(temp);
 		} else if (argc > 2)
 			pbstr(argv[2]);
 		break;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: optr.c,v 1.18 2001/06/13 20:13:28 markus Exp $	*/
+/*	$OpenBSD: optr.c,v 1.22 2002/02/21 16:16:26 millert Exp $	*/
 /*	$NetBSD: optr.c,v 1.11 1997/05/27 08:34:36 mrg Exp $	*/
 
 /*-
@@ -38,7 +38,7 @@
 #if 0
 static char sccsid[] = "@(#)optr.c	8.2 (Berkeley) 1/6/94";
 #else
-static char rcsid[] = "$OpenBSD: optr.c,v 1.18 2001/06/13 20:13:28 markus Exp $";
+static char rcsid[] = "$OpenBSD: optr.c,v 1.22 2002/02/21 16:16:26 millert Exp $";
 #endif
 #endif /* not lint */
 
@@ -51,25 +51,18 @@ static char rcsid[] = "$OpenBSD: optr.c,v 1.18 2001/06/13 20:13:28 markus Exp $"
 #include <grp.h>
 #include <signal.h>
 #include <stdio.h>
-#ifdef __STDC__
 #include <stdlib.h>
 #include <string.h>
 #include <stdarg.h>
-#endif
 #include <tzfile.h>
-#ifdef __STDC__
 #include <unistd.h>
-#endif
 #include <utmp.h>
-#ifndef __STDC__
-#include <varargs.h>
-#endif
 
 #include "dump.h"
 #include "pathnames.h"
 
-void	alarmcatch __P((/* int, int */));
-int	datesort __P((const void *, const void *));
+void	alarmcatch(int);
+int	datesort(const void *, const void *);
 
 /*
  *	Query the operator; This previously-fascist piece of code
@@ -100,7 +93,7 @@ query(question)
 		quit("fopen on %s fails: %s\n", _PATH_TTY, strerror(errno));
 	attnmessage = question;
 	timeout = 0;
-	alarmcatch();
+	alarmcatch(0);
 	back = -1;
 	errcount = 0;
 	do {
@@ -145,7 +138,8 @@ char lastmsg[BUFSIZ];
  * XXX not safe
  */
 void
-alarmcatch()
+alarmcatch(signo)
+	int signo;
 {
 	int save_errno = errno;
 
@@ -234,13 +228,7 @@ timeest()
 }
 
 void
-#ifdef __STDC__
 msg(const char *fmt, ...)
-#else
-msg(fmt, va_alist)
-	char *fmt;
-	va_dcl
-#endif
 {
 	va_list ap;
 
@@ -248,51 +236,28 @@ msg(fmt, va_alist)
 #ifdef TDEBUG
 	(void) fprintf(stderr, "pid=%d ", getpid());
 #endif
-#ifdef __STDC__
 	va_start(ap, fmt);
-#else
-	va_start(ap);
-#endif
 	(void) vfprintf(stderr, fmt, ap);
 	va_end(ap);
 	(void) fflush(stdout);
 	(void) fflush(stderr);
-#ifdef __STDC__
 	va_start(ap, fmt);
-#else
-	va_start(ap);
-#endif
 	(void) vsnprintf(lastmsg, sizeof(lastmsg), fmt, ap);
 	va_end(ap);
 }
 
 void
-#ifdef __STDC__
 msgtail(const char *fmt, ...)
-#else
-msgtail(fmt, va_alist)
-	char *fmt;
-	va_dcl
-#endif
 {
 	va_list ap;
-#ifdef __STDC__
+
 	va_start(ap, fmt);
-#else
-	va_start(ap);
-#endif
 	(void) vfprintf(stderr, fmt, ap);
 	va_end(ap);
 }
 
 void
-#ifdef __STDC__
 quit(const char *fmt, ...)
-#else
-quit(fmt, va_alist)
-	char *fmt;
-	va_dcl
-#endif
 {
 	va_list ap;
 
@@ -300,11 +265,7 @@ quit(fmt, va_alist)
 #ifdef TDEBUG
 	(void) fprintf(stderr, "pid=%d ", getpid());
 #endif
-#ifdef __STDC__
 	va_start(ap, fmt);
-#else
-	va_start(ap);
-#endif
 	(void) vfprintf(stderr, fmt, ap);
 	va_end(ap);
 	(void) fflush(stdout);
@@ -319,9 +280,9 @@ quit(fmt, va_alist)
 
 struct fstab *
 allocfsent(fs)
-	register struct fstab *fs;
+	struct fstab *fs;
 {
-	register struct fstab *new;
+	struct fstab *new;
 
 	new = (struct fstab *)malloc(sizeof(*fs));
 	if (new == NULL ||
@@ -344,8 +305,8 @@ static	struct pfstab *table;
 void
 getfstab()
 {
-	register struct fstab *fs;
-	register struct pfstab *pf;
+	struct fstab *fs;
+	struct pfstab *pf;
 
 	if (setfsent() == 0) {
 		msg("Can't open %s for dump table information: %s\n",
@@ -385,8 +346,8 @@ struct fstab *
 fstabsearch(key)
 	char *key;
 {
-	register struct pfstab *pf;
-	register struct fstab *fs;
+	struct pfstab *pf;
+	struct fstab *fs;
 	char *rn;
 
 	for (pf = table; pf != NULL; pf = pf->pf_next) {
@@ -416,9 +377,9 @@ void
 lastdump(arg)
 	char	arg;	/* w ==> just what to do; W ==> most recent dumps */
 {
-	register int i;
-	register struct fstab *dt;
-	register struct dumpdates *dtwalk;
+	int i;
+	struct fstab *dt;
+	struct dumpdates *dtwalk;
 	char *lastname, *date;
 	int dumpme;
 	time_t tnow;

@@ -1,15 +1,12 @@
-#	$OpenBSD: Makefile.inc,v 1.12 2001/05/11 15:23:07 deraadt Exp $
+#	$OpenBSD: Makefile.inc,v 1.15 2002/03/30 20:35:31 millert Exp $
 
 TOP=		${.CURDIR}/..
 
 .include "${TOP}/Makefile.inc"
 IMAGE=		mr.fs
 CBIN?=		instbin
-.if (${KERBEROS:L} == "yes")
-CRUNCHCONF?=    ${.CURDIR}/../common/${CBIN}.conf
-.else
-CRUNCHCONF?=    ${.CURDIR}/../common/${CBIN}-nokrb.conf
-.endif
+CRUNCHCONF?=	${CBIN}.conf
+CRUNCHCONFS?=	${.CURDIR}/../common/crunch.conf
 LISTS?=		${.CURDIR}/../common/list ${.CURDIR}
 
 MOUNT_POINT=	/mnt
@@ -23,7 +20,7 @@ VND_RDEV=	/dev/r${VND}a
 VND_CRDEV=	/dev/r${VND}c
 PID!=		echo $$$$
 REALIMAGE!=	echo /var/tmp/image.${PID}
-LISTFLOPPY=	${.CURDIR}/../common/list_floppy
+LISTFLOPPY?=	${.CURDIR}/../common/list_floppy
 FLOPPYSIZE?=	144
 FLOPPYSECS?=	18
 FLOPPYTYPE?=	floppy3
@@ -108,6 +105,9 @@ ${CBIN}.mk ${CBIN}.cache ${CBIN}.c: ${CRUNCHCONF}
 
 ${CBIN}: ${CBIN}.mk ${CBIN}.cache ${CBIN}.c
 	make -f ${CBIN}.mk all
+
+${CRUNCHCONF}: ${CRUNCHCONFS}
+	cat ${CRUNCHCONFS} > ${CRUNCHCONF}
 
 do_files:
 	mtree -def ${MTREE} -p ${MOUNT_POINT}/ -u

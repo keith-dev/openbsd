@@ -1,4 +1,4 @@
-/*	$OpenBSD: search.c,v 1.7 2001/05/24 03:05:26 mickey Exp $	*/
+/*	$OpenBSD: search.c,v 1.9 2002/02/16 21:27:49 millert Exp $	*/
 
 /*
  *		Search commands.
@@ -28,16 +28,16 @@ typedef struct {
 	int	 s_doto;
 } SRCHCOM;
 
-static int	isearch		__P((int));
-static void	is_cpush	__P((int));
-static void	is_lpush	__P((void));
-static void	is_pop		__P((void));
-static int	is_peek		__P((void));
-static void	is_undo		__P((int *, int *));
-static int	is_find		__P((int));
-static void	is_prompt	__P((int, int, int));
-static void	is_dspl		__P((char *, int));
-static int	eq		__P((int, int));
+static int	isearch(int);
+static void	is_cpush(int);
+static void	is_lpush(void);
+static void	is_pop(void);
+static int	is_peek(void);
+static void	is_undo(int *, int *);
+static int	is_find(int);
+static void	is_prompt(int, int, int);
+static void	is_dspl(char *, int);
+static int	eq(int, int);
 
 static SRCHCOM	cmds[NSRCH];
 static int	cip;
@@ -175,7 +175,7 @@ isearch(dir)
 	for (cip = 0; cip < NSRCH; cip++)
 		cmds[cip].s_code = SRCH_NOPR;
 
-	(void)strcpy(opat, pat);
+	(void)strlcpy(opat, pat, sizeof opat);
 	cip = 0;
 	pptr = -1;
 	clp = curwp->w_dotp;
@@ -216,7 +216,7 @@ isearch(dir)
 			curwp->w_flag |= WFMOVE;
 			srch_lastdir = dir;
 			(void)ctrlg(FFRAND, 0);
-			(void)strcpy(pat, opat);
+			(void)strlcpy(pat, opat, sizeof pat);
 			return ABORT;
 		case CCHR(']'):
 		case CCHR('S'):
@@ -689,7 +689,7 @@ readpattern(prompt)
 
 	/* specified */
 	if (s == TRUE)
-		(void) strcpy(pat, tpat);
+		(void) strlcpy(pat, tpat, sizeof pat);
 	/* CR, but old one */
 	else if (s == FALSE && pat[0] != 0)
 		s = TRUE;

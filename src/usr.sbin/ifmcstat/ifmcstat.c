@@ -1,4 +1,4 @@
-/*	$OpenBSD: ifmcstat.c,v 1.2 2000/02/26 08:15:38 itojun Exp $	*/
+/*	$OpenBSD: ifmcstat.c,v 1.4 2002/02/16 21:28:03 millert Exp $	*/
 
 /*
  * Copyright (C) 1995, 1996, 1997, and 1998 WIDE Project.
@@ -39,6 +39,8 @@
 
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <sys/queue.h>
+
 #include <net/if.h>
 #if defined(__FreeBSD__) && __FreeBSD__ >= 3
 # include <net/if_var.h>
@@ -74,16 +76,16 @@ struct	nlist nl[] = {
 	{ "" },
 };
 
-const char *inet6_n2a __P((struct in6_addr *));
-int main __P((void));
-char *ifname __P((struct ifnet *));
-void kread __P((u_long, void *, int));
+const char *inet6_n2a(struct in6_addr *);
+int main(int, char **);
+char *ifname(struct ifnet *);
+void kread(u_long, void *, int);
 #if !(defined(__FreeBSD__) && __FreeBSD__ >= 3)
-void acmc __P((struct ether_multi *));
+void acmc(struct ether_multi *);
 #endif
-void if6_addrlist __P((struct ifaddr *));
-void in6_multilist __P((struct in6_multi *));
-struct in6_multi * in6_multientry __P((struct in6_multi *));
+void if6_addrlist(struct ifaddr *);
+void in6_multilist(struct in6_multi *);
+struct in6_multi * in6_multientry(struct in6_multi *);
 
 #if !defined(__NetBSD__) && !(defined(__FreeBSD__) && __FreeBSD__ >= 3) && !defined(__OpenBSD__)
 #ifdef __bsdi__
@@ -91,7 +93,7 @@ struct ether_addr {
 	u_int8_t ether_addr_octet[6];
 };
 #endif
-static char *ether_ntoa __P((struct ether_addr *));
+static char *ether_ntoa(struct ether_addr *);
 #endif
 
 #define	KREAD(addr, buf, type) \
@@ -111,11 +113,7 @@ const char *inet6_n2a(p)
 	static char buf[NI_MAXHOST];
 	struct sockaddr_in6 sin6;
 	u_int32_t scopeid;
-#ifdef NI_WITHSCOPEID
-	const int niflags = NI_NUMERICHOST | NI_WITHSCOPEID;
-#else
 	const int niflags = NI_NUMERICHOST;
-#endif
 
 	memset(&sin6, 0, sizeof(sin6));
 	sin6.sin6_family = AF_INET6;
@@ -136,7 +134,9 @@ const char *inet6_n2a(p)
 		return "(invalid)";
 }
 
-int main()
+int main(argc, argv)
+	int argc;
+	char **argv;
 {
 	char	buf[_POSIX2_LINE_MAX], ifname[IFNAMSIZ];
 	struct	ifnet	*ifp, *nifp, ifnet;
@@ -146,8 +146,21 @@ int main()
 	struct ethercom ec;
 	struct sockaddr_dl sdl;
 #endif
+	const char *kernel = NULL;
 
-	if ((kvmd = kvm_openfiles(NULL, NULL, NULL, O_RDONLY, buf)) == NULL) {
+	switch (argc) {
+	case 1:
+		kernel = NULL;
+		break;
+	case 2:
+		kernel = argv[1];
+		break;
+	default:
+		fprintf(stderr, "usage: ifmcstat [kernel]\n");
+		exit(1);
+	}
+
+	if ((kvmd = kvm_openfiles(kernel, NULL, NULL, O_RDONLY, buf)) == NULL) {
 		perror("kvm_openfiles");
 		exit(1);
 	}
@@ -214,15 +227,18 @@ char *ifname(ifp)
 	struct ifnet *ifp;
 {
 	static char buf[BUFSIZ];
-#if defined(__NetBSD__) || defined(__OpenBSD__)
 	struct ifnet ifnet;
+#if !(defined(__NetBSD__) || defined(__OpenBSD__))
+	char ifnamebuf[IFNAMSIZ];
 #endif
 
-#if defined(__NetBSD__) || defined(__OpenBSD__)
 	KREAD(ifp, &ifnet, struct ifnet);
-	strncpy(buf, ifnet.if_xname, BUFSIZ);
+#if defined(__NetBSD__) || defined(__OpenBSD__)
+	strlcpy(buf, ifnet.if_xname, sizeof(buf));
 #else
-	KREAD(ifp->if_name, buf, IFNAMSIZ);
+	KREAD(ifnet.if_name, ifnamebuf, sizeof(ifnamebuf));
+	snprintf(buf, sizeof(buf), "%s%d", ifnamebuf,
+		 ifnet.if_unit); /* does snprintf allow overlap copy?? */
 #endif
 	return buf;
 }
@@ -338,6 +354,10 @@ if6_addrlist(ifap)
 		KREAD(ifap0, &ifa, struct ifaddr);
 
 		nam = strdup(ifname(ifa.ifa_ifp));
+		if (!nam) {
+			fprintf(stderr, "ifmcstat: not enough core\n");
+			exit(1);
+		}
 
 		for (mkp = in6_mk.lh_first; mkp; mkp = mk.mk_entry.le_next) {
 			KREAD(mkp, &mk, struct multi6_kludge);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: in6_ifattach.c,v 1.20 2001/08/23 14:10:33 itojun Exp $	*/
+/*	$OpenBSD: in6_ifattach.c,v 1.22 2002/03/14 01:27:11 millert Exp $	*/
 /*	$KAME: in6_ifattach.c,v 1.124 2001/07/18 08:32:51 jinmei Exp $	*/
 
 /*
@@ -60,12 +60,12 @@ size_t in6_ifstatmax = 0;
 size_t icmp6_ifstatmax = 0;
 unsigned long in6_maxmtu = 0;
 
-static int get_rand_ifid __P((struct ifnet *, struct in6_addr *));
-static int get_hw_ifid __P((struct ifnet *, struct in6_addr *));
-static int get_ifid __P((struct ifnet *, struct ifnet *, struct in6_addr *));
-static int in6_ifattach_addaddr __P((struct ifnet *, struct in6_ifaddr *));
-static int in6_ifattach_linklocal __P((struct ifnet *, struct ifnet *));
-static int in6_ifattach_loopback __P((struct ifnet *));
+static int get_rand_ifid(struct ifnet *, struct in6_addr *);
+static int get_hw_ifid(struct ifnet *, struct in6_addr *);
+static int get_ifid(struct ifnet *, struct ifnet *, struct in6_addr *);
+static int in6_ifattach_addaddr(struct ifnet *, struct in6_ifaddr *);
+static int in6_ifattach_linklocal(struct ifnet *, struct ifnet *);
+static int in6_ifattach_loopback(struct ifnet *);
 
 #define EUI64_GBIT	0x01
 #define EUI64_UBIT	0x02
@@ -88,7 +88,7 @@ static int in6_ifattach_loopback __P((struct ifnet *));
 static int
 get_rand_ifid(ifp, in6)
 	struct ifnet *ifp;
-	struct in6_addr *in6;	/*upper 64bits are preserved */
+	struct in6_addr *in6;	/* upper 64bits are preserved */
 {
 	MD5_CTX ctxt;
 	u_int8_t digest[16];
@@ -125,7 +125,7 @@ get_rand_ifid(ifp, in6)
 static int
 get_hw_ifid(ifp, in6)
 	struct ifnet *ifp;
-	struct in6_addr *in6;	/*upper 64bits are preserved */
+	struct in6_addr *in6;	/* upper 64bits are preserved */
 {
 	struct ifaddr *ifa;
 	struct sockaddr_dl *sdl;
@@ -251,7 +251,7 @@ found:
 static int
 get_ifid(ifp0, altifp, in6)
 	struct ifnet *ifp0;
-	struct ifnet *altifp;	/*secondary EUI64 source*/
+	struct ifnet *altifp;	/* secondary EUI64 source */
 	struct in6_addr *in6;
 {
 	struct ifnet *ifp;

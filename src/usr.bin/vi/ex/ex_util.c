@@ -1,4 +1,4 @@
-/*	$OpenBSD: ex_util.c,v 1.4 2001/01/29 01:58:45 niklas Exp $	*/
+/*	$OpenBSD: ex_util.c,v 1.6 2002/02/17 19:42:34 millert Exp $	*/
 
 /*-
  * Copyright (c) 1993, 1994
@@ -33,8 +33,7 @@ static const char sccsid[] = "@(#)ex_util.c	10.23 (Berkeley) 6/19/96";
  * ex_cinit --
  *	Create an EX command structure.
  *
- * PUBLIC: void ex_cinit __P((EXCMD *,
- * PUBLIC:    int, int, recno_t, recno_t, int, ARGS **));
+ * PUBLIC: void ex_cinit(EXCMD *, int, int, recno_t, recno_t, int, ARGS **);
  */
 void
 ex_cinit(cmdp, cmd_id, naddr, lno1, lno2, force, ap)
@@ -60,7 +59,7 @@ ex_cinit(cmdp, cmd_id, naddr, lno1, lno2, force, ap)
  * ex_cadd --
  *	Add an argument to an EX command structure.
  *
- * PUBLIC: void ex_cadd __P((EXCMD *, ARGS *, char *, size_t));
+ * PUBLIC: void ex_cadd(EXCMD *, ARGS *, char *, size_t);
  */
 void
 ex_cadd(cmdp, ap, arg, len)
@@ -79,7 +78,7 @@ ex_cadd(cmdp, ap, arg, len)
  * ex_getline --
  *	Return a line from the file.
  *
- * PUBLIC: int ex_getline __P((SCR *, FILE *, size_t *));
+ * PUBLIC: int ex_getline(SCR *, FILE *, size_t *);
  */
 int
 ex_getline(sp, fp, lenp)
@@ -122,7 +121,7 @@ ex_getline(sp, fp, lenp)
  * ex_ncheck --
  *	Check for more files to edit.
  *
- * PUBLIC: int ex_ncheck __P((SCR *, int));
+ * PUBLIC: int ex_ncheck(SCR *, int);
  */
 int
 ex_ncheck(sp, force)
@@ -153,7 +152,7 @@ ex_ncheck(sp, force)
  * ex_init --
  *	Init the screen for ex.
  *
- * PUBLIC: int ex_init __P((SCR *));
+ * PUBLIC: int ex_init(SCR *);
  */
 int
 ex_init(sp)
@@ -179,7 +178,7 @@ ex_init(sp)
  * ex_emsg --
  *	Display a few common ex and vi error messages.
  *
- * PUBLIC: void ex_emsg __P((SCR *, char *, exm_t));
+ * PUBLIC: void ex_emsg(SCR *, char *, exm_t);
  */
 void
 ex_emsg(sp, p, which)

@@ -1,4 +1,4 @@
-/*	$OpenBSD: cmd.c,v 1.28 2001/01/28 00:56:07 weingart Exp $	*/
+/*	$OpenBSD: cmd.c,v 1.31 2002/01/24 04:40:03 mickey Exp $	*/
 
 /*
  * Copyright (c) 1997 Tobias Weingartner
@@ -57,14 +57,14 @@ Xreinit(cmd, disk, mbr, tt, offset)
 
 	/* Copy template MBR */
 	MBR_make(tt, buf);
-	MBR_parse(disk, buf, 0, 0, mbr);
+	MBR_parse(disk, buf, mbr->offset, mbr->reloffset, mbr);
 
 	MBR_init(disk, mbr);
 
 	/* Tell em we did something */
 	printf("In memory copy is initialized to:\n");
 	printf("Offset: %d\t", offset);
-	MBR_print(mbr);
+	MBR_print(mbr, cmd->args);
 	printf("Use 'write' to update disk.\n");
 
 	return (CMD_DIRTY);
@@ -83,7 +83,7 @@ Xdisk(cmd, disk, mbr, tt, offset)
 	int maxsec  = 63;
 
 	/* Print out disk info */
-	DISK_printmetrics(disk);
+	DISK_printmetrics(disk, cmd->args);
 
 #if defined (__powerpc__) || defined (__mips__)
 	maxcyl  = 9999999;
@@ -133,8 +133,8 @@ Xedit(cmd, disk, mbr, tt, offset)
 
 	/* Print out current table entry */
 	pp = &mbr->part[pn];
-	PRT_print(0, NULL);
-	PRT_print(pn, pp);
+	PRT_print(0, NULL, NULL);
+	PRT_print(pn, pp, NULL);
 
 #define	EDIT(p, f, v, n, m, h)				\
 	if ((num = ask_num(p, f, v, n, m, h)) != v)	\
@@ -175,15 +175,20 @@ Xedit(cmd, disk, mbr, tt, offset)
 		u_int m;
 
 		/* Get data */
-		EDIT("Partition offset", ASK_DEC, pp->bs, 0,
-		    disk->real->size, NULL);
+		pp->bs = getuint(disk, "offset",
+		   "Starting sector for this partition.", pp->bs,
+		   disk->real->size, 0, DO_CONVERSIONS |
+		   (pp->id == FS_BSDFFS ? DO_ROUNDING : 0));
+
 		m = MAX(pp->ns, disk->real->size - pp->bs);
 		if ( m > disk->real->size - pp->bs) {
 			/* dont have default value extend beyond end of disk */
 			m = disk->real->size - pp->bs;
 		}
-		EDIT("Partition size", ASK_DEC, pp->ns, 1,
-		    m, NULL);
+		pp->ns = getuint(disk, "size", "Size of the partition.",
+		    pp->ns, m, pp->bs , DO_CONVERSIONS |
+		    ((pp->id == FS_BSDFFS || pp->id == FS_SWAP) ?
+		    DO_ROUNDING : 0));
 
 		/* Fix up CHS values */
 		PRT_fix_CHS(disk, pp, pn);
@@ -218,8 +223,8 @@ Xsetpid(cmd, disk, mbr, tt, offset)
 
 	/* Print out current table entry */
 	pp = &mbr->part[pn];
-	PRT_print(0, NULL);
-	PRT_print(pn, pp);
+	PRT_print(0, NULL, NULL);
+	PRT_print(pn, pp, NULL);
 
 #define	EDIT(p, f, v, n, m, h)				\
 	if ((num = ask_num(p, f, v, n, m, h)) != v)	\
@@ -284,9 +289,9 @@ Xprint(cmd, disk, mbr, tt, offset)
 	int offset;
 {
 
-	DISK_printmetrics(disk);
+	DISK_printmetrics(disk, cmd->args);
 	printf("Offset: %d\t", offset);
-	MBR_print(mbr);
+	MBR_print(mbr, cmd->args);
 
 	return (CMD_CONT);
 }

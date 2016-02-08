@@ -1,6 +1,6 @@
 #!/usr/bin/perl
 #
-#	$OpenBSD: adduser.perl,v 1.34 2001/10/09 18:25:31 millert Exp $
+#	$OpenBSD: adduser.perl,v 1.37 2002/03/05 17:23:45 millert Exp $
 #
 # Copyright (c) 1995-1996 Wolfram Schneider <wosch@FreeBSD.org>. Berlin.
 # All rights reserved.
@@ -89,7 +89,7 @@ sub variables {
     $group = "/etc/group";
     $pwd_mkdb = "pwd_mkdb -p";	# program for building passwd database
     $encryptionmethod = "blowfish";
-    $rcsid = '$OpenBSD: adduser.perl,v 1.34 2001/10/09 18:25:31 millert Exp $';
+    $rcsid = '$OpenBSD: adduser.perl,v 1.37 2002/03/05 17:23:45 millert Exp $';
 
     # List of directories where shells located
     @path = ('/bin', '/usr/bin', '/usr/local/bin');
@@ -446,7 +446,7 @@ sub add_group {
     local($gid, $name) = @_;
 
     return 0 if
-	$groupmembers{$gid} =~ /^(.+,)?$name(,.+)?$/;
+	$groupmembers{$gid} =~ /^(.*,)?$name(,.*)?$/;
 
     $groupmembers_bak{$gid} = $groupmembers{$gid};
     $groupmembers{$gid} .= "," if $groupmembers{$gid};
@@ -1530,11 +1530,12 @@ sub cleanup {
     local($sig) = @_;
 
     print STDERR "Caught signal SIG$sig -- cleaning up.\n";
+    system("stty", "echo");
     exit(0);
 }
 
 END {
-    if (-e $etc_ptmp && defined PTMP) {
+    if (-e $etc_ptmp && defined(fileno(PTMP))) {
 	    close PTMP;
 	    unlink($etc_ptmp) || warn "Error: unable to remove $etc_ptmp: $!\nPlease verify that $etc_ptmp no longer exists!\n";
     }

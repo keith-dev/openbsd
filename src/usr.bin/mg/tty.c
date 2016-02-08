@@ -1,4 +1,4 @@
-/*	$OpenBSD: tty.c,v 1.9 2001/05/24 03:05:26 mickey Exp $	*/
+/*	$OpenBSD: tty.c,v 1.16 2002/02/21 04:16:23 deraadt Exp $	*/
 
 /*
  * Terminfo display driver
@@ -27,17 +27,25 @@
 
 #include "def.h"
 
+#include <sys/types.h>
+#include <sys/time.h>
+#include <sys/ioctl.h>
 #include <term.h>
+#include <signal.h>
 
-#ifdef NO_RESIZE
-static int	 setttysize	__P((void));
-#endif /* NO_RESIZE */
-
-static int	 charcost	__P((char *));
+static int	 charcost(char *);
 
 static int	 cci;
 static int	 insdel;	/* Do we have both insert & delete line? */
 static char	*scroll_fwd;	/* How to scroll forward. */
+
+static void	winchhandler(int);
+
+static void
+winchhandler(int sig)
+{
+	winch_flag = 1;
+}
 
 /*
  * Initialize the terminal when the editor
@@ -48,18 +56,16 @@ ttinit()
 {
 	char	*tv_stype, *p;
 
-/* system dependent function to determine terminal type, if necessary. */
-#ifndef gettermtype
-	char	*gettermtype();
-#endif /* gettermtype */
-
-	if ((tv_stype = gettermtype()) == NULL)
+	if ((tv_stype = getenv("TERM")) == NULL)
 		panic("Could not determine terminal type!");
 
 	if (setupterm(tv_stype, 1, NULL)) {
 		(void)asprintf(&p, "Unknown terminal type: %s", tv_stype);
 		panic(p);
 	}
+
+	signal(SIGWINCH, winchhandler);
+	siginterrupt(SIGWINCH, 1);
 
 	scroll_fwd = scroll_forward;
 	if (scroll_fwd == NULL || *scroll_fwd == '\0') {
@@ -90,7 +96,7 @@ ttinit()
 		tcinsl = charcost(insert_line);
 	else
 		/* make this cost high enough */
-		tcinsl = NROW * NCOL;
+		tcinsl = nrow * ncol;
 
 	/* Estimate cost of deleting a line */
 	if (change_scroll_region)
@@ -102,7 +108,7 @@ ttinit()
 		tcdell = charcost(delete_line);
 	else
 		/* make this cost high enough */
-		tcdell = NROW * NCOL;
+		tcdell = nrow * ncol;
 
 	/* Flag to indicate that we can both insert and delete lines */
 	insdel = (insert_line || parm_insert_line) &&
@@ -112,7 +118,7 @@ ttinit()
 		/* enter application mode */
 		putpad(enter_ca_mode, 1);
 
-	setttysize();
+	ttresize();
 }
 
 /*
@@ -129,7 +135,7 @@ ttreinit()
 		/* turn on keypad */
 		putpad(keypad_xmit, 1);
 
-	setttysize();
+	ttresize();
 }
 
 /*
@@ -358,7 +364,7 @@ ttnowindow()
 {
 	if (change_scroll_region) {
 		putpad(tgoto(change_scroll_region,
-		       (nrow > lines ? nrow : lines) - 1, 0), nrow - ttrow);
+		    (nrow > lines ? nrow : lines) - 1, 0), nrow - ttrow);
 		ttrow = HUGE;	/* Unknown.		 */
 		ttcol = HUGE;
 		tttop = HUGE;	/* No scroll region.	 */
@@ -391,36 +397,35 @@ ttcolor(color)
 
 /*
  * This routine is called by the "refresh the screen" command to try
- * to resize the display. The new size, which must not exceed the NROW
- * and NCOL limits, is stored back into "nrow" and * "ncol". Display can
- * always deal with a screen NROW by NCOL. Look in "window.c" to see how
+ * to resize the display. Look in "window.c" to see how
  * the caller deals with a change.
+ *
+ * We use `newrow' and `newcol' so vtresize() know the difference between the
+ * new and old settings.
  */
 void
 ttresize()
 {
-	/* found in "ttyio.c" */
-	setttysize();
+	int newrow = 0, newcol = 0;
 
-	/* ask OS for tty size and check limits */
-	if (nrow < 1)
-		nrow = 1;
-	else if (nrow > NROW)
-		nrow = NROW;
-	if (ncol < 1)
-		ncol = 1;
-	else if (ncol > NCOL)
-		ncol = NCOL;
-}
+#ifdef	TIOCGWINSZ
+	struct	winsize winsize;
 
-#ifdef NO_RESIZE
-static
-setttysize()
-{
-	nrow = lines;
-	ncol = columns;
+	if (ioctl(0, TIOCGWINSZ, (char *) &winsize) == 0) {
+		newrow = winsize.ws_row;
+		newcol = winsize.ws_col;
+	}
+#endif
+	if ((newrow <= 0 || newcol <= 0) &&
+	    ((newrow = lines) <= 0 || (newcol = columns) <= 0)) {
+		newrow = 24;
+		newcol = 80;
+	}
+	if (vtresize(1, newrow, newcol))
+		panic("vtresize failed");
+	nrow = newrow;
+	ncol = newcol;
 }
-#endif /* NO_RESIZE */
 
 /*
  * fake char output for charcost()

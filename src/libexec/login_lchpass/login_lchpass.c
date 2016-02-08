@@ -1,4 +1,4 @@
-/*	$OpenBSD: login_lchpass.c,v 1.2 2001/06/25 22:10:28 millert Exp $	*/
+/*	$OpenBSD: login_lchpass.c,v 1.7 2002/02/16 21:27:30 millert Exp $	*/
 
 /*-
  * Copyright (c) 1995,1996 Berkeley Software Design, Inc. All rights reserved.
@@ -38,6 +38,7 @@
 #include <sys/time.h>
 #include <sys/resource.h>
 #include <sys/file.h>
+#include <sys/uio.h>
 #include <sys/wait.h>
 
 #include <err.h>
@@ -52,28 +53,33 @@
 #include <stdarg.h>
 #include <login_cap.h>
 
-int local_passwd __P((char *, int));
+#define BACK_CHANNEL	3
+
+int local_passwd(char *, int);
 
 int
 main(argc, argv)
 	int argc;
 	char *argv[];
 {
-	FILE *back;
+	struct iovec iov[2];
 	struct passwd *pwd;
 	char localhost[MAXHOSTNAMELEN];
-    	char *username = 0;
+    	char *username = NULL;
 	char *salt;
 	char *p;
     	int c;
 	struct rlimit rl;
 
+	iov[0].iov_base = BI_SILENT;
+	iov[0].iov_len = sizeof(BI_SILENT) - 1;
+	iov[1].iov_base = "\n";
+	iov[1].iov_len = 1;
+
 	rl.rlim_cur = 0;
 	rl.rlim_max = 0;
 	(void)setrlimit(RLIMIT_CORE, &rl);
 
-	(void)signal(SIGQUIT, SIG_IGN);
-	(void)signal(SIGINT, SIG_IGN);
 	(void)setpriority(PRIO_PROCESS, 0, 0);
 
 	openlog("login", LOG_ODELAY, LOG_AUTH);
@@ -81,7 +87,7 @@ main(argc, argv)
 	if (gethostname(localhost, sizeof(localhost)) < 0)
 		syslog(LOG_ERR, "couldn't get local hostname: %m");
 
-    	while ((c = getopt(argc, argv, "v:s:")) != EOF)
+    	while ((c = getopt(argc, argv, "v:s:")) != -1)
 		switch(c) {
 		case 'v':
 			break;
@@ -108,16 +114,15 @@ main(argc, argv)
 	}
 
 	pwd = getpwnam(username);
-
-	if (!(back = fdopen(3, "a")))  {
-		syslog(LOG_ERR, "reopening back channel");
-		exit(1);
-	}
-
-	if (pwd && *pwd->pw_passwd == '\0') {
-		syslog(LOG_ERR, "%s attempting to add password", username);
-		fprintf(back, BI_SILENT "\n");
-		exit(0);
+	if (pwd) {
+		if (pwd->pw_uid == 0) {
+			syslog(LOG_ERR, "attempted root password change");
+			pwd = NULL;
+		} else if (*pwd->pw_passwd == '\0') {
+			syslog(LOG_ERR, "%s attempting to add password",
+			    username);
+			pwd = NULL;
+		}
 	}
 
 	if (pwd)
@@ -127,14 +132,19 @@ main(argc, argv)
 
 	(void)setpriority(PRIO_PROCESS, 0, -4);
 
-	printf("Changing local password for %s.\n", pwd->pw_name);
+	(void)printf("Changing local password for %s.\n", username);
 	p = getpass("Old Password:");
 
 	salt = crypt(p, salt);
 	memset(p, 0, strlen(p));
 	if (!pwd || strcmp(salt, pwd->pw_passwd) != 0)
 		exit(1);
+
+	/*
+	 * We rely on local_passwd() to block signals during the
+	 * critical section.
+	 */
 	local_passwd(pwd->pw_name, 1);
-	fprintf(back, BI_SILENT "\n");
+	(void)writev(BACK_CHANNEL, iov, 2);
 	exit(0);
 }

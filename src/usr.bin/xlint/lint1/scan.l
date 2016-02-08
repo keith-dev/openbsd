@@ -1,5 +1,5 @@
 %{
-/*	$OpenBSD: scan.l,v 1.3 1996/06/26 05:44:18 deraadt Exp $	*/
+/*	$OpenBSD: scan.l,v 1.5 2002/02/19 19:39:39 millert Exp $	*/
 /*	$NetBSD: scan.l,v 1.8 1995/10/23 13:38:51 jpo Exp $	*/
 
 /*
@@ -34,7 +34,7 @@
  */
 
 #ifndef lint
-static char rcsid[] = "$OpenBSD: scan.l,v 1.3 1996/06/26 05:44:18 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: scan.l,v 1.5 2002/02/19 19:39:39 millert Exp $";
 #endif
 
 #include <stdlib.h>
@@ -52,7 +52,7 @@ static char rcsid[] = "$OpenBSD: scan.l,v 1.3 1996/06/26 05:44:18 deraadt Exp $"
 #define CHAR_MASK	(~(~0 << CHAR_BIT))
 
 /* XXX declaration of strtouq() is missing in stdlib.h ? */
-extern	u_quad_t strtouq __P((const char *, char **, int));
+extern	u_quad_t strtouq(const char *, char **, int);
 
 /* Current position (its also updated when an included file is parsed) */
 pos_t	curr_pos = { 1, "" };
@@ -63,25 +63,25 @@ pos_t	curr_pos = { 1, "" };
  */
 pos_t	csrc_pos = { 1, "" };
 
-static	void	incline __P((void));
-static	void	badchar __P((int));
-static	sbuf_t	*allocsb __P((void));
-static	void	freesb __P((sbuf_t *));
-static	int	inpc __P((void));
-static	int	hash __P((const char *));
-static	sym_t	*search __P((sbuf_t *));
-static	int	name __P((void));
-static	int	keyw __P((sym_t *));
-static	int	icon __P((int));
-static	int	fcon __P((void));
-static	int	operator __P((int, op_t));
-static	int	ccon __P((void));
-static	int	wccon __P((void));
-static	int	getescc __P((int));
-static	void	directive __P((void));
-static	void	comment __P((void));
-static	int	string __P((void));
-static	int	wcstrg __P((void));
+static	void	incline(void);
+static	void	badchar(int);
+static	sbuf_t	*allocsb(void);
+static	void	freesb(sbuf_t *);
+static	int	inpc(void);
+static	int	hash(const char *);
+static	sym_t	*search(sbuf_t *);
+static	int	name(void);
+static	int	keyw(sym_t *);
+static	int	icon(int);
+static	int	fcon(void);
+static	int	operator(int, op_t);
+static	int	ccon(void);
+static	int	wccon(void);
+static	int	getescc(int);
+static	void	directive(void);
+static	void	comment(void);
+static	int	string(void);
+static	int	wcstrg(void);
 
 %}
 
@@ -834,11 +834,7 @@ getescc(d)
 			if (tflag)
 				/* \a undefined in traditional C */
 				warning(81);
-#ifdef __STDC__
 			return ('\a');
-#else
-			return ('\007');
-#endif
 		case 'b':
 			return ('\b');
 		case 'f':
@@ -853,11 +849,7 @@ getescc(d)
 			if (tflag)
 				/* \v undefined in traditional C */
 				warning(264);
-#ifdef __STDC__
 			return ('\v');
-#else
-			return ('\013');
-#endif
 		case '8': case '9':
 			/* bad octal digit %c */
 			warning(77, c);
@@ -1009,7 +1001,7 @@ comment()
 	static struct {
 		const	char *keywd;
 		int	arg;
-		void	(*func) __P((int));
+		void	(*func)(int);
 	} keywtab[] = {
 		{ "ARGSUSED",		1,	argsused	},
 		{ "CONSTCOND",		0,	constcond	},

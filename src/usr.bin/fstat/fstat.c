@@ -1,4 +1,4 @@
-/*	$OpenBSD: fstat.c,v 1.31 2001/07/12 05:17:06 deraadt Exp $	*/
+/*	$OpenBSD: fstat.c,v 1.36 2002/03/14 06:51:41 mpech Exp $	*/
 
 /*-
  * Copyright (c) 1988, 1993
@@ -41,7 +41,7 @@ static char copyright[] =
 
 #ifndef lint
 /*static char sccsid[] = "from: @(#)fstat.c	8.1 (Berkeley) 6/6/93";*/
-static char *rcsid = "$OpenBSD: fstat.c,v 1.31 2001/07/12 05:17:06 deraadt Exp $";
+static char *rcsid = "$OpenBSD: fstat.c,v 1.36 2002/03/14 06:51:41 mpech Exp $";
 #endif /* not lint */
 
 #include <sys/param.h>
@@ -138,27 +138,27 @@ int maxfiles;
 	}
 
 /*
- * a kvm_read that returns true if everything is read 
+ * a kvm_read that returns true if everything is read
  */
 #define KVM_READ(kaddr, paddr, len) \
 	(kvm_read(kd, (u_long)(kaddr), (void *)(paddr), (len)) == (len))
 
 kvm_t *kd;
 
-int ufs_filestat __P((struct vnode *, struct filestat *));
-int ext2fs_filestat __P((struct vnode *, struct filestat *));
-int isofs_filestat __P((struct vnode *, struct filestat *));
-int msdos_filestat __P((struct vnode *, struct filestat *));
-int nfs_filestat __P((struct vnode *, struct filestat *));
-int xfs_filestat __P((struct vnode *, struct filestat *));
-int null_filestat __P((struct vnode *, struct filestat *));
-void dofiles __P((struct kinfo_proc *));
-void getinetproto __P((int));
-void socktrans __P((struct socket *, int));
-void usage __P((void));
-void vtrans __P((struct vnode *, int, int, off_t));
-int getfname __P((char *));
-void pipetrans __P((struct pipe *, int));
+int ufs_filestat(struct vnode *, struct filestat *);
+int ext2fs_filestat(struct vnode *, struct filestat *);
+int isofs_filestat(struct vnode *, struct filestat *);
+int msdos_filestat(struct vnode *, struct filestat *);
+int nfs_filestat(struct vnode *, struct filestat *);
+int xfs_filestat(struct vnode *, struct filestat *);
+int null_filestat(struct vnode *, struct filestat *);
+void dofiles(struct kinfo_proc *);
+void getinetproto(int);
+void socktrans(struct socket *, int);
+void usage(void);
+void vtrans(struct vnode *, int, int, off_t);
+int getfname(char *);
+void pipetrans(struct pipe *, int);
 
 int
 main(argc, argv)
@@ -167,7 +167,7 @@ main(argc, argv)
 {
 	extern char *optarg;
 	extern int optind;
-	register struct passwd *passwd;
+	struct passwd *passwd;
 	struct kinfo_proc *p, *plast;
 	int arg, ch, what;
 	char *memf, *nlistf;
@@ -199,7 +199,7 @@ main(argc, argv)
 			if (pflg++)
 				usage();
 			if (!isdigit(*optarg)) {
-				warnx( "-p requires a process id\n");
+				warnx( "-p requires a process id");
 				usage();
 			}
 			what = KERN_PROC_PID;
@@ -232,7 +232,7 @@ main(argc, argv)
 
 	ALLOC_OFILES(256);	/* reserve space for file pointers */
 
-	if (fsflg && !checkfile) {	
+	if (fsflg && !checkfile) {
 		/* -f with no files means use wd */
 		if (getfname(".") == 0)
 			exit(1);
@@ -280,7 +280,8 @@ main(argc, argv)
 char	*Uname, *Comm;
 pid_t	Pid;
 
-#define PREFIX(i) printf("%-8.8s %-10s %5d", Uname, Comm, Pid); \
+#define PREFIX(i) do { \
+	printf("%-8.8s %-10s %5d", Uname, Comm, Pid); \
 	switch(i) { \
 	case TEXT: \
 		printf(" text"); \
@@ -297,7 +298,8 @@ pid_t	Pid;
 	default: \
 		printf(" %4d", i); \
 		break; \
-	}
+	} \
+} while (0)
 
 /*
  * print open files attributed to this process
@@ -432,16 +434,17 @@ vtrans(vp, i, flag, offset)
 		case VT_NULL:
 			if (!null_filestat(&vn, &fst))
 				badtype = "error";
-			break;		
+			break;
 		default: {
 			static char unknown[30];
-			sprintf(badtype = unknown, "?(%x)", vn.v_tag);
+			snprintf(badtype = unknown, sizeof unknown,
+			    "?(%x)", vn.v_tag);
 			break;
 		}
 	}
 	if (checkfile) {
 		int fsmatch = 0;
-		register DEVS *d;
+		DEVS *d;
 
 		if (badtype)
 			return;
@@ -467,22 +470,22 @@ vtrans(vp, i, flag, offset)
 	else
 		(void)printf(" %-8s", getmnton(vn.v_mount));
 	if (nflg)
-		(void)sprintf(mode, "%o", fst.mode);
+		(void)snprintf(mode, sizeof mode, "%o", fst.mode);
 	else
 		strmode(fst.mode, mode);
 	(void)printf(" %6ld %11s", fst.fileid, mode);
 	rw[0] = '\0';
 	if (flag & FREAD)
-		strcat(rw, "r");
+		strlcat(rw, "r", sizeof rw);
 	if (flag & FWRITE)
-		strcat(rw, "w");
+		strlcat(rw, "w", sizeof rw);
 	printf(" %2s", rw);
 	switch (vn.v_type) {
 	case VBLK:
 	case VCHR: {
 		char *name;
 
-		if (nflg || ((name = devname(fst.rdev, vn.v_type == VCHR ? 
+		if (nflg || ((name = devname(fst.rdev, vn.v_type == VCHR ?
 		    S_IFCHR : S_IFBLK)) == NULL))
 			printf("   %2d,%-3d", major(fst.rdev), minor(fst.rdev));
 		else
@@ -569,7 +572,7 @@ nfs_filestat(vp, fsp)
 	struct filestat *fsp;
 {
 	struct nfsnode nfsnode;
-	register mode_t mode;
+	mode_t mode;
 
 	if (!KVM_READ(VTONFS(vp), &nfsnode, sizeof (nfsnode))) {
 		dprintf("can't read nfsnode at %p for pid %d", VTONFS(vp), Pid);
@@ -604,7 +607,7 @@ nfs_filestat(vp, fsp)
 		break;
 	default:
 		break;
-	};
+	}
 	fsp->mode = mode;
 
 	return 1;
@@ -698,7 +701,7 @@ null_filestat(vp, fsp)
 	if (fail)
 		fsp->fileid = (long)node.null_lowervp;
 	else
-		fsp->fileid = fst.fileid; 
+		fsp->fileid = fst.fileid;
 	fsp->mode = fst.mode;
 	fsp->size = fst.mode;
 	fsp->rdev = fst.mode;
@@ -716,7 +719,7 @@ getmnton(m)
 		struct mount *m;
 		char mntonname[MNAMELEN];
 	} *mhead = NULL;
-	register struct mtab *mt;
+	struct mtab *mt;
 
 	for (mt = mhead; mt != NULL; mt = mt->next)
 		if (m == mt->m)
@@ -761,10 +764,10 @@ pipetrans(pipe, i)
 	maxaddr = MAX(pipe, pi.pipe_peer);
 
 	printf("pipe %p state: %s%s%s", maxaddr,
-	       (pi.pipe_state & PIPE_WANTR) ? "R" : "",
-	       (pi.pipe_state & PIPE_WANTW) ? "W" : "",
-	       (pi.pipe_state & PIPE_EOF) ? "E" : "");
-	
+	    (pi.pipe_state & PIPE_WANTR) ? "R" : "",
+	    (pi.pipe_state & PIPE_WANTW) ? "W" : "",
+	    (pi.pipe_state & PIPE_EOF) ? "E" : "");
+
 	printf("\n");
 	return;
 bad:
@@ -861,7 +864,7 @@ socktrans(sock, i)
 	else
 		printf("* %s %s", dname, stypename[so.so_type]);
 
-	/* 
+	/*
 	 * protocol specific formatting
 	 *
 	 * Try to find interesting things to print.  For tcp, the interesting
@@ -962,13 +965,14 @@ socktrans(sock, i)
 			    IN6_IS_ADDR_UNSPECIFIED(&inpcb.inp_laddr6) ? "*" :
 			    xaddrbuf,
 			    ntohs(inpcb.inp_lport));
-			if (inpcb.inp_fport)
+			if (inpcb.inp_fport) {
 				snprintf(xaddrbuf, sizeof(xaddrbuf), "[%s]",
 				    inet6_addrstr(&inpcb.inp_faddr6));
 				printf(" <-> %s:%d",
 				    IN6_IS_ADDR_UNSPECIFIED(&inpcb.inp_faddr6) ? "*" :
 				    xaddrbuf,
 				    ntohs(inpcb.inp_fport));
+			}
 		} else if (so.so_pcb)
 			printf(" %p", so.so_pcb);
 		break;
@@ -1016,7 +1020,7 @@ getinetproto(number)
 	int number;
 {
 	static int isopen;
-	register struct protoent *pe;
+	struct protoent *pe;
 
 	if (!isopen)
 		setprotoent(++isopen);

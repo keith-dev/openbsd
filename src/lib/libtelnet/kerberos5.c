@@ -1,4 +1,4 @@
-/*     $OpenBSD: kerberos5.c,v 1.3 2001/06/28 14:22:16 hin Exp $       */
+/*     $OpenBSD: kerberos5.c,v 1.5 2002/02/06 09:17:55 hin Exp $       */
 
 /*-
  * Copyright (c) 1991, 1993
@@ -120,7 +120,7 @@ static  krb5_ticket *ticket;
 static krb5_context context;
 static krb5_auth_context auth_context;
 
-static int
+int
 check_krb5_tickets()
 {
     krb5_error_code ret;
@@ -271,7 +271,7 @@ kerberos5_send(char *name, Authenticator *ap)
 	return(0);
     }
 
-    krb5_auth_setkeytype (context, auth_context, KEYTYPE_DES);
+    krb5_auth_con_setkeytype (context, auth_context, KEYTYPE_DES);
 
     foo[0] = ap->type;
     foo[1] = ap->way;

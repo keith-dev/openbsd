@@ -25,7 +25,7 @@ changecom(,)dnl
 .\" OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 .\" SUCH DAMAGE.
 .\"
-.\" $OpenBSD: ppp.8.m4,v 1.3 2001/09/13 10:08:30 brian Exp $
+.\" $OpenBSD: ppp.8.m4,v 1.6 2002/03/31 02:38:49 brian Exp $
 .\"
 .Dd September 20, 1995
 .Dt PPP 8
@@ -67,8 +67,12 @@ to act as a NAT or masquerading engine for all machines on an internal
 LAN.
 ifdef({LOCALNAT},{},{Refer to
 .Xr libalias 3
-for details.
+for details on the technical side of the NAT engine.
 })dnl
+Refer to the
+.Sx NETWORK ADDRESS TRANSLATION (PACKET ALIASING)
+section of this manual page for details on how to configure NAT in
+.Nm ppp .
 .Pp
 The
 .Fl quiet
@@ -3406,7 +3410,7 @@ to redirect packets of protocol type
 .Ar proto
 (see
 .Xr protocols 5 )
-to the internall address
+to the internal address
 .Ar localIP .
 .Pp
 If
@@ -3541,6 +3545,8 @@ This is replaced with the current process id.
 .It Li VERSION
 This is replaced with the current version number of
 .Nm ppp .
+.It Li UPTIME
+This is replaced with the bundle uptime in HH:MM:SS format.
 .It Li USER
 This is replaced with the username that has been authenticated with PAP or
 CHAP.
@@ -3549,8 +3555,11 @@ This value is available irrespective of whether utmp logging is enabled.
 .El
 .Pp
 These substitutions are also done by the
-.Dq set proctitle
-command.
+.Dq set proctitle ,
+.Dq ident
+and
+.Dq log
+commands.
 .Pp
 If you wish to pause
 .Nm
@@ -3823,6 +3832,12 @@ or
 commands,
 .Nm
 will not attempt to make an immediate connection.
+.It log Ar word Ns No ...
+Send the given word(s) to the log file with the prefix
+.Dq LOG: .
+Word substitutions are done as explained under the
+.Dq !bg
+command above.
 .It open Op lcp|ccp|ipcp
 This is the opposite of the
 .Dq close
@@ -4480,6 +4495,12 @@ The given
 is passed as the service name in the PPPoE Discovery Initiation (PADI)
 packet.
 If no provider is given, an empty value will be used.
+.Pp
+When a PPPoE connection is established,
+.Nm
+will place the name of the Access Concentrator in the environment variable
+.Ev ACNAME .
+.Pp
 Refer to
 .Xr netgraph 4
 and

@@ -1,5 +1,5 @@
 #
-#	$OpenBSD: dot.profile,v 1.4 2001/06/23 19:44:44 deraadt Exp $
+#	$OpenBSD: dot.profile,v 1.7 2002/04/05 03:13:18 deraadt Exp $
 #	$NetBSD: dot.profile,v 1.1 1995/07/18 04:13:09 briggs Exp $
 #
 # Copyright (c) 1994 Christopher G. Demetriou
@@ -32,30 +32,21 @@
 #
 
 export PATH=/sbin:/bin:/usr/bin:/usr/sbin:/
-export HISTFILE=/.sh_history
 export TERM=vt220
-export HOME=/
-
 umask 022
-
 set -o emacs # emacs-style command line editing
-
-TMPWRITEABLE=/tmp/writeable
 
 if [ "X${DONEPROFILE}" = "X" ]; then
 	DONEPROFILE=YES
 	export DONEPROFILE
 
 	# set up some sane defaults
-	echo 'erase ^H, werase ^W, kill ^U, intr ^C, status ^T'
-	stty newcrt werase ^W intr ^C kill ^U erase ^H status ^T 9600
+	echo 'erase ^?, werase ^W, kill ^U, intr ^C, status ^T'
+	stty newcrt werase ^W intr ^C kill ^U erase ^? status ^T 9600
 	echo ''
 
 	echo 'Remounting /dev/rd0a as root...'
 	mount -u /dev/rd0a /
-
-	# tell install.md we've done it
-	> ${TMPWRITEABLE}
 
 	# pull in the functions that people will use from the shell prompt.
 	. /.commonutils
@@ -67,20 +58,13 @@ if [ "X${DONEPROFILE}" = "X" ]; then
 		echo -n '(I)nstall, (U)pgrade, or (S)hell? '
 		read _forceloop
 		case "$_forceloop" in
-			i*|I*)
-				/install
-				;;
-
-			u*|U*)
-				/upgrade
-				;;
-
-			s*|S*)
-				;;
-
-			*)
-				_forceloop=""
-				;;
+		i*|I*)	/install
+			;;
+		u*|U*)	/upgrade
+			;;
+		s*|S*)	;;
+		*)	_forceloop=""
+			;;
 		esac
 	done
 fi

@@ -1,4 +1,4 @@
-/*	$OpenBSD: rarpd.c,v 1.30 2001/06/13 20:13:29 markus Exp $ */
+/*	$OpenBSD: rarpd.c,v 1.35 2002/03/14 16:44:25 mpech Exp $ */
 /*	$NetBSD: rarpd.c,v 1.25 1998/04/23 02:48:33 mrg Exp $	*/
 
 /*
@@ -28,7 +28,7 @@ char    copyright[] =
 #endif				/* not lint */
 
 #ifndef lint
-static char rcsid[] = "$OpenBSD: rarpd.c,v 1.30 2001/06/13 20:13:29 markus Exp $";
+static char rcsid[] = "$OpenBSD: rarpd.c,v 1.35 2002/03/14 16:44:25 mpech Exp $";
 #endif
 
 
@@ -43,6 +43,7 @@ static char rcsid[] = "$OpenBSD: rarpd.c,v 1.30 2001/06/13 20:13:29 markus Exp $
 #include <stdlib.h>
 #include <syslog.h>
 #include <string.h>
+#include <stdarg.h>
 #include <sys/types.h>
 #include <unistd.h>
 #include <sys/time.h>
@@ -59,11 +60,10 @@ static char rcsid[] = "$OpenBSD: rarpd.c,v 1.30 2001/06/13 20:13:29 markus Exp $
 #include <netdb.h>
 #include <arpa/inet.h>
 #include <dirent.h>
+#include <util.h>
 #ifdef HAVE_IFADDRS_H
 #include <ifaddrs.h>
 #endif
-
-#include "pathnames.h"
 
 #define FATAL		1	/* fatal error occurred */
 #define NONFATAL	0	/* non fatal error occurred */
@@ -90,22 +90,22 @@ struct if_info {
  */
 struct if_info *iflist;
 
-int    rarp_open     __P((char *));
-void   init_one      __P((char *));
-void   init_all      __P((void));
-void   rarp_loop     __P((void));
-void   lookup_addrs  __P((char *, struct if_info *));
-void   usage         __P((void));
-void   rarp_process  __P((struct if_info *, u_char *));
-void   rarp_reply    __P((struct if_info *, struct if_addr *,
-	struct ether_header *, u_int32_t, struct hostent *));
-void   update_arptab __P((u_char *, u_int32_t));
-void   err           __P((int, const char *,...));
-void   debug         __P((const char *,...));
-u_int32_t ipaddrtonetmask __P((u_int32_t));
+int    rarp_open(char *);
+void   init_one(char *);
+void   init_all(void);
+void   rarp_loop(void);
+void   lookup_addrs(char *, struct if_info *);
+void   usage(void);
+void   rarp_process(struct if_info *, u_char *);
+void   rarp_reply(struct if_info *, struct if_addr *,
+	    struct ether_header *, u_int32_t, struct hostent *);
+void   update_arptab(u_char *, u_int32_t);
+void   err(int, const char *,...);
+void   debug(const char *,...);
+u_int32_t ipaddrtonetmask(u_int32_t);
 
 #ifdef REQUIRE_TFTPBOOT
-int    rarp_bootable __P((u_int32_t));
+int    rarp_bootable(u_int32_t);
 #endif
 
 int     aflag = 0;		/* listen on "all" interfaces  */
@@ -175,10 +175,7 @@ main(argc, argv)
 			}
 
 		/* write pid file */
-		if ((fp = fopen(_PATH_RARPDPID, "w")) != NULL) {
-			fprintf(fp, "%u\n", getpid());
-			(void)fclose(fp);
-		}
+		pidfile(NULL);
 
 		/* Fade into the background */
 		f = open("/dev/tty", O_RDWR);
@@ -538,7 +535,7 @@ rarp_loop()
 			bp = buf;
 			ep = bp + cc;
 			while (bp < ep) {
-				register int caplen, hdrlen;
+				int caplen, hdrlen;
 
 				caplen = bhp->bh_caplen;
 				hdrlen = bhp->bh_hdrlen;
@@ -567,8 +564,8 @@ int
 rarp_bootable(addr)
 	u_int32_t  addr;
 {
-	register struct dirent *dent;
-	register DIR *d;
+	struct dirent *dent;
+	DIR *d;
 	char    ipname[40];
 	static DIR *dd = 0;
 
@@ -839,7 +836,7 @@ lookup_addrs(ifname, p)
 #endif
 }
 
-int arptab_set __P((u_char *eaddr, u_int32_t host));
+int arptab_set(u_char *eaddr, u_int32_t host);
 
 /*
  * Poke the kernel arp tables with the ethernet/ip address combinataion
@@ -978,68 +975,37 @@ ipaddrtonetmask(addr)
 	/* NOTREACHED */
 }
 
-#ifdef __STDC__
-#include <stdarg.h>
-#else
-#include <varargs.h>
-#endif
-
 void
-#ifdef __STDC__
 err(int fatal, const char *fmt,...)
-#else
-err(fmt, va_alist)
-	int     fatal;
-	char   *fmt;
-va_dcl
-#endif
 {
 	va_list ap;
+
 	if (dflag) {
 		if (fatal)
 			(void) fprintf(stderr, "rarpd: error: ");
 		else
 			(void) fprintf(stderr, "rarpd: warning: ");
-#ifdef __STDC__
 		va_start(ap, fmt);
-#else
-		va_start(ap);
-#endif
 		(void) vfprintf(stderr, fmt, ap);
 		va_end(ap);
 		(void) fprintf(stderr, "\n");
 	}
-#ifdef __STDC__
 	va_start(ap, fmt);
-#else
-	va_start(ap);
-#endif
 	vsyslog(LOG_ERR, fmt, ap);
 	va_end(ap);
 	if (fatal) {
-		unlink(_PATH_RARPDPID);
 		exit(1);
 	}
 	/* NOTREACHED */
 }
 
 void
-#ifdef __STDC__
 debug(const char *fmt,...)
-#else
-debug(fmt, va_alist)
-	char   *fmt;
-va_dcl
-#endif
 {
 	va_list ap;
 
 	if (dflag) {
-#ifdef __STDC__
 		va_start(ap, fmt);
-#else
-		va_start(ap);
-#endif
 		(void) fprintf(stderr, "rarpd: ");
 		(void) vfprintf(stderr, fmt, ap);
 		va_end(ap);

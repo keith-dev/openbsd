@@ -1,4 +1,4 @@
-/*	$OpenBSD: reboot.c,v 1.21 2001/07/19 17:41:22 millert Exp $	*/
+/*	$OpenBSD: reboot.c,v 1.23 2002/02/16 21:27:37 millert Exp $	*/
 /*	$NetBSD: reboot.c,v 1.8 1995/10/05 05:36:22 mycroft Exp $	*/
 
 /*
@@ -44,7 +44,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)reboot.c	8.1 (Berkeley) 6/5/93";
 #else
-static char rcsid[] = "$OpenBSD: reboot.c,v 1.21 2001/07/19 17:41:22 millert Exp $";
+static char rcsid[] = "$OpenBSD: reboot.c,v 1.23 2002/02/16 21:27:37 millert Exp $";
 #endif
 #endif /* not lint */
 
@@ -66,7 +66,7 @@ static char rcsid[] = "$OpenBSD: reboot.c,v 1.21 2001/07/19 17:41:22 millert Exp
 #include <paths.h>
 #include <util.h>
 
-void usage __P((void));
+void usage(void);
 extern char *__progname;
 
 #define _PATH_RC	"/etc/rc"
@@ -76,7 +76,7 @@ main(argc, argv)
 	int argc;
 	char *argv[];
 {
-	register int i;
+	int i;
 	struct passwd *pw;
 	int ch, howto, dohalt, lflag, nflag, pflag, qflag, sverrno;
 	char *p, *user;

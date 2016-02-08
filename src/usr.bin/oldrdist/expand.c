@@ -1,4 +1,4 @@
-/*	$OpenBSD: expand.c,v 1.7 2001/07/18 17:17:39 pvalchev Exp $	*/
+/*	$OpenBSD: expand.c,v 1.9 2002/02/16 21:27:50 millert Exp $	*/
 
 /*
  * Copyright (c) 1983, 1993
@@ -35,7 +35,7 @@
 
 #ifndef lint
 /* from: static char sccsid[] = "@(#)expand.c	8.1 (Berkeley) 6/9/93"; */
-static char *rcsid = "$OpenBSD: expand.c,v 1.7 2001/07/18 17:17:39 pvalchev Exp $";
+static char *rcsid = "$OpenBSD: expand.c,v 1.9 2002/02/16 21:27:50 millert Exp $";
 #endif /* not lint */
 
 #include "defs.h"
@@ -63,16 +63,16 @@ char	**sortbase;
 #define sort()	qsort((char *)sortbase, &eargv[eargc] - sortbase, \
 		      sizeof(*sortbase), argcmp), sortbase = &eargv[eargc]
 
-static void	Cat __P((char *, char *));
-static void	addpath __P((int));
-static int	amatch __P((char *, char *));
-static int	argcmp __P((const void *, const void *));
-static int	execbrc __P((char *, char *));
-static void	expsh __P((char *));
-static void	expstr __P((char *));
-static int	match __P((char *, char *));
-static void	matchdir __P((char *));
-static int	smatch __P((char *, char *));
+static void	Cat(char *, char *);
+static void	addpath(int);
+static int	amatch(char *, char *);
+static int	argcmp(const void *, const void *);
+static int	execbrc(char *, char *);
+static void	expsh(char *);
+static void	expstr(char *);
+static int	match(char *, char *);
+static void	matchdir(char *);
+static int	smatch(char *, char *);
 
 /*
  * Take a list of names and expand any macros, etc.
@@ -88,8 +88,8 @@ expand(list, wh)
 	struct namelist *list;
 	int wh;
 {
-	register struct namelist *nl, *prev;
-	register int n;
+	struct namelist *nl, *prev;
+	int n;
 	char pathbuf[BUFSIZ];
 	char *argvbuf[GAVSIZ];
 
@@ -99,7 +99,7 @@ expand(list, wh)
 	}
 
 	if (wh == 0) {
-		register char *cp;
+		char *cp;
 
 		for (nl = list; nl != NULL; nl = nl->n_next)
 			for (cp = nl->n_name; *cp; cp++)
@@ -146,8 +146,8 @@ static void
 expstr(s)
 	char *s;
 {
-	register char *cp, *cp1;
-	register struct namelist *tp;
+	char *cp, *cp1;
+	struct namelist *tp;
 	char *tail;
 	char buf[BUFSIZ];
 	int savec, oeargc;
@@ -260,8 +260,8 @@ static void
 expsh(s)
 	char *s;
 {
-	register char *cp;
-	register char *spathp, *oldcp;
+	char *cp;
+	char *spathp, *oldcp;
 	struct stat stb;
 
 	spathp = pathp;
@@ -299,7 +299,7 @@ matchdir(pattern)
 	char *pattern;
 {
 	struct stat stb;
-	register struct direct *dp;
+	struct direct *dp;
 	DIR *dirp;
 
 	dirp = opendir(path);
@@ -340,7 +340,7 @@ execbrc(p, s)
 	char *p, *s;
 {
 	char restbuf[BUFSIZ + 2];
-	register char *pe, *pm, *pl;
+	char *pe, *pm, *pl;
 	int brclev = 0;
 	char *lm, savec, *spathp;
 
@@ -419,8 +419,8 @@ static int
 match(s, p)
 	char *s, *p;
 {
-	register int c;
-	register char *sentp;
+	int c;
+	char *sentp;
 	char sexpany = expany;
 
 	if (*s == '.' && *p != '.')
@@ -435,9 +435,9 @@ match(s, p)
 
 static int
 amatch(s, p)
-	register char *s, *p;
+	char *s, *p;
 {
-	register int scc;
+	int scc;
 	int ok, lc;
 	char *spathp;
 	struct stat stb;
@@ -524,9 +524,9 @@ slash:
 
 static int
 smatch(s, p)
-	register char *s, *p;
+	char *s, *p;
 {
-	register int scc;
+	int scc;
 	int ok, lc;
 	int c, cc;
 
@@ -583,10 +583,10 @@ smatch(s, p)
 
 static void
 Cat(s1, s2)
-	register char *s1, *s2;
+	char *s1, *s2;
 {
 	int len = strlen(s1) + strlen(s2) + 1;
-	register char *s;
+	char *s;
 
 	nleft -= len;
 	if (nleft <= 0 || ++eargc >= GAVSIZ)
@@ -623,10 +623,10 @@ addpath(c)
 char *
 exptilde(buf, file, maxlen)
 	char buf[];
-	register char *file;
+	char *file;
 	int maxlen;
 {
-	register char *s1, *s2, *s3;
+	char *s1, *s2, *s3;
 	extern char homedir[];
 
 	if (*file != '~') {

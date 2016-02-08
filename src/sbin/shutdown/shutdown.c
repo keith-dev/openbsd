@@ -1,4 +1,4 @@
-/*	$OpenBSD: shutdown.c,v 1.22 2001/07/09 07:04:47 deraadt Exp $	*/
+/*	$OpenBSD: shutdown.c,v 1.24 2002/02/16 21:27:38 millert Exp $	*/
 /*	$NetBSD: shutdown.c,v 1.9 1995/03/18 15:01:09 cgd Exp $	*/
 
 /*
@@ -44,7 +44,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)shutdown.c	8.2 (Berkeley) 2/16/94";
 #else
-static char rcsid[] = "$OpenBSD: shutdown.c,v 1.22 2001/07/09 07:04:47 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: shutdown.c,v 1.24 2002/02/16 21:27:38 millert Exp $";
 #endif
 #endif /* not lint */
 
@@ -106,23 +106,23 @@ static time_t offset, shuttime;
 static int dofast, dohalt, doreboot, dopower, dodump, killflg, mbuflen, nosync;
 static char *whom, mbuf[BUFSIZ];
 
-void badtime __P((void));
-void __attribute ((noreturn)) die_you_gravy_sucking_pig_dog __P((void));
-void doitfast __P((void));
-void __attribute ((noreturn)) finish __P((int));
-void getoffset __P((char *));
-void __attribute ((noreturn)) loop __P((void));
-void nolog __P((void));
-void timeout __P((int));
-void timewarn __P((int));
-void usage __P((void));
+void badtime(void);
+void __attribute ((noreturn)) die_you_gravy_sucking_pig_dog(void);
+void doitfast(void);
+void __attribute ((noreturn)) finish(int);
+void getoffset(char *);
+void __attribute ((noreturn)) loop(void);
+void nolog(void);
+void timeout(int);
+void timewarn(int);
+void usage(void);
 
 int
 main(argc, argv)
 	int argc;
 	char *argv[];
 {
-	register char *p, *endp;
+	char *p, *endp;
 	struct passwd *pw;
 	int arglen, ch, len, readstdin;
 
@@ -439,10 +439,10 @@ die_you_gravy_sucking_pig_dog()
 
 void
 getoffset(timearg)
-	register char *timearg;
+	char *timearg;
 {
-	register struct tm *lt;
-	register char *p;
+	struct tm *lt;
+	char *p;
 	time_t now;
 	int this_year;
 

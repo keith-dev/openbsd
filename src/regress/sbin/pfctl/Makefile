@@ -1,43 +1,33 @@
-# $OpenBSD: Makefile,v 1.10 2001/10/07 11:56:58 dhartmei Exp $
+# $OpenBSD: Makefile,v 1.13 2002/02/18 13:08:51 art Exp $
 
-NOMAN=
-NOPROG=
-PFTESTS=1 2 3 4 5 6 7 8 9 10 11 12
-PFFAIL=1 2 3 4 5 6 7
+PFTESTS=1 2 3 4 5 6 7 8 9 10 11 12 13
+PFFAIL=1 2 3 4 5 6 7 8
 
 .for n in ${PFFAIL}
-regress: pfail${n}
+REGRESSTARGETS+=pfail${n}
 
 pfail${n}:
-	@pfctl -nv -R - < ${.CURDIR}/pfail${n}.in > /dev/null 2>&1 && \
-	    echo 'test pfail${n} does not fail as expected' || true
+	if pfctl -nv -R - < ${.CURDIR}/pfail${n}.in > /dev/null 2>&1 ; then \
+		false ; \
+	fi
 
-.PHONY: pfail${n} regress
 .endfor
 
 .for n in ${PFTESTS}
-regress: pf${n}
+REGRESSTARGETS+=pf${n}
 
-pf${n}: pf${n}.out
-	@cmp -s ${.CURDIR}/pf${n}.ok pf${n}.out || \
-	    echo 'test pf${n} output does not match expected output'
-pf${n}.out:
-	pfctl -nv -R - < ${.CURDIR}/pf${n}.in > $@
+pf${n}:
+	pfctl -nv -R - < ${.CURDIR}/pf${n}.in | \
+	    cmp -s ${.CURDIR}/pf${n}.ok /dev/stdin
 
-.PHONY: pf${n} regress
-CLEANFILES+=pf${n}.out
 .endfor
 
-binat1: binat1.out
-	@cmp -s ${.CURDIR}/binat1.ok binat1.out || \
-	   echo 'test binat1 output does not match expected output'
+binat1:
+	pfctl -nv -N - < ${.CURDIR}/binat1.in | \
+	    cmp -s ${.CURDIR}/binat1.ok /dev/stdin
 
-binat1.out:
-	pfctl -nv -N - < ${.CURDIR}/binat1.in > $@
+REGRESSTARGETS+=binat1
 
-CLEANFILES+=binat1.out
+.PHONY: ${REGRESSTARGETS}
 
-regress: binat1
-
-.PHONY: regress
-.include <bsd.prog.mk>
+.include <bsd.regress.mk>

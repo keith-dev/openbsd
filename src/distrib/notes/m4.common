@@ -1,5 +1,5 @@
 dnl
-dnl	$OpenBSD: m4.common,v 1.27 2001/10/14 20:59:33 miod Exp $
+dnl	$OpenBSD: m4.common,v 1.34 2002/04/14 02:35:27 miod Exp $
 dnl
 dnl simulate an include path with a macro 'includeit'.
 define(`includeit',`sinclude('INCLUDE/`$1)sinclude('INCLUDE/../`$1)')dnl
@@ -94,7 +94,7 @@ define({:-OpenBSDcomp-:},
 		 call and library manual pages.showsize($1,$2)-:})dnl
 dnl
 dnl
-dnl OpenBSDetc( compressed size, uncompressed size )
+dnl OpenBSDetc( compressed size, uncompressed size [, noupgrade])
 dnl Describes etcXX.tgz.
 dnl
 define({:-OpenBSDetc-:},
@@ -102,9 +102,10 @@ define({:-OpenBSDetc-:},
 		 files that reside in /etc and in several other places.
 		 This set MUST be installed if you are installing the
 		 system from scratch, but should NOT be used if you are
-		 upgrading.  (If you are upgrading, it's recommended that
+		 upgrading.{:--:}ifelse(X$3,X,{:-(If you are upgrading, it's recommended that
 		 you get a copy of this set and CAREFULLY upgrade your
-		 configuration files by hand.)showsize($1,$2)-:})dnl
+		 configuration files by hand, see the section named "Upgrading
+		 a previously-installed OpenBSD System" below.)-:})showsize($1,$2)-:})dnl
 dnl
 dnl
 dnl OpenBSDgame( compressed size, uncompressed size )
@@ -129,9 +130,7 @@ dnl Describes miscXX.tgz.
 dnl
 define({:-OpenBSDmisc-:},
 {:-	misc{:--:}OSrev	 This set includes the system dictionaries (which are
-		 rather large), the typesettable document set, and
-		 man pages for other architectures which happen to be
-		 installed from the source tree by default.showsize($1,$2)-:})dnl
+		 rather large), and the typesettable document set.showsize($1,$2)-:})dnl
 dnl
 dnl
 dnl OpenBSDxbase( compressed size, uncompressed size )
@@ -139,7 +138,7 @@ dnl Describes xbaseXX.tgz.
 dnl
 define({:-OpenBSDxbase-:},
 {:-	xbase{:--:}OSrev  This set includes the base X distribution.  This includes
-		 programs, headers, libraries, configuration files.showsize($1,$2)-:})dnl
+		 programs, headers, libraries, and configuration files.showsize($1,$2)-:})dnl
 dnl
 dnl
 dnl OpenBSDxshare( compressed size, uncompressed size )
@@ -174,10 +173,10 @@ define({:-OpenBSDcdrom-:},
 				2.88mb floppy image that contains almost all
 				OpenBSD drivers; see below.-:})dnl
 dnl
-dnl OpenBSDfloppydesc(number of floppies, Article, optional plural 's')
+dnl OpenBSDfloppydesc(number of floppies, Article, plural)
 dnl
 dnl Describe what the boot floppy/ies contain and how they may be used.
-dnl Use as: OpenBSDfloppydesc(single, The) or OpenBSDfloppydesc(three, Each, s)
+dnl Use as: OpenBSDfloppydesc(single,The) or OpenBSDfloppydesc(three,Each,s)
 define({:-OpenBSDfloppydesc-:},
 {:-Bootable installation/upgrade floppy image$3:
 
@@ -267,6 +266,108 @@ define({:-OpenBSDBootMsgs-:},
 	you cannot read the messages as they scroll by, do not
 	worry -- you can get at this information later inside the
 	install program.-:})dnl
+dnl
+dnl OpenBSDInstallPart3(alternate common disk type description)
+dnl Describes the beginning of the bsd.rd operation
+dnl
+define({:-OpenBSDInstallPart3-:},
+{:-	After entering the terminal type you will be asked whether you
+	wish to do an "(I)nstall" or an "(U)pgrade".  Enter 'I' for a
+	fresh install or 'U' to upgrade an existing installation.
+
+	You will be presented with a welcome message and asked if
+	you really wish to install (or upgrade).  Assuming you
+	answered yes, the install program will then tell you which
+	disks of that type it can install on, and ask you which it
+	should use.  The name of the disk is typically "sd0" for
+	SCSI drives$2.
+	Reply with the name of your disk.-:})dnl
+dnl
+dnl OpenBSDInstallPart4(mention about other OS partitions)
+dnl Describes the disklabel operation
+dnl
+define({:-OpenBSDInstallPart4-:},
+{:-	Next the disk label which defines the layout of the OpenBSD
+	file systems must be set up.  The installation script will
+	invoke an interactive editor allowing you to do this.  Note
+	that partition 'c' inside this disk label should ALWAYS
+	reflect the entire disk, including any non-OpenBSD portions.
+	If you are labeling a new disk, you will probably start
+	out with an 'a' partition that spans the disk.  In this
+	case you should delete 'a' before adding new partitions.
+	The root file system should be in partition 'a', and swap
+	is usually in partition 'b'.$4
+
+	It is recommended that you create separate partitions for /usr,
+	/tmp and /var, and if you have room for it, one for /home.  In
+	doing this, remember to skip 'c', leaving it as type "unused".
+	For help in the disk label editor, enter '?' or 'M' to view the
+	manual page (see the info on the ``-E'' flag).-:})dnl
+dnl
+dnl OpenBSDInstallPart5
+dnl More disklabel notes(disk)
+define({:-OpenBSDInstallPart5-:},
+{:-	The swap partition (usually 'b') should have a type of "swap", all
+	other native OpenBSD partitions should have a type of "4.2BSD".
+	Block and fragment sizes are usually 8192 and 1024 bytes, but can
+	also be 4096 and 512 or even 16384 and 2048 bytes.
+
+	The install program will now label your disk and ask which file
+	systems should be created on which partitions.  It will auto-
+	matically select the 'a' partition to be the root file system.
+	Next it will ask for which disk and partition you want a file
+	system created on.  This will be the same as the disk name (e.g.
+	"$1") with the letter identifying the partition (e.g. "d")
+	appended (e.g. "$1d").  Then it will ask where this partition is
+	to be mounted, e.g. /usr.  This process will be repeated until
+	you enter "done".
+
+	At this point you will be asked to confirm that the file system
+	information you have entered is correct, and given an opportunity
+	to change the file system table.  Next it will create the new file
+	systems as specified, OVERWRITING ANY EXISTING DATA.  This is the
+	point of no return.-:})dnl
+dnl
+dnl OpenBSDInstallNet(other installation sources,hasfloppy)
+dnl Setting up the network
+define({:-OpenBSDInstallNet-:},
+{:-	After all your file systems have been created, the install program
+	will give you an opportunity to configure the network.  The network
+	configuration you enter (if any) can then be used to do the install
+	from another system using HTTP or FTP, and will also be the
+	configuration used by the system after the installation is complete.
+
+	If you select to configure the network, the install program will
+	ask you for a name of your system and the DNS domain name to use.
+	Note that the host name should be without the domain part, and that
+	the domain name should NOT {:-include-:} the host name part.
+
+	Next the system will give you a list of network interfaces you can
+	configure.  For each network interface you select to configure, it
+	will ask for the IP address to use, the symbolic host name to use,
+	the netmask to use and any interface-specific flags to set. The
+	interface-specific flags are usually used to determine which media
+	the network card is to use.  Typically no media flags are required
+	as autodetection normally works, but you will be prompted with a
+	list of the acceptable media flags, and asked if you want to provide
+	any.  In doubt, do not enter any media flags; or you can refer to
+	the manual page for your interface for the appropriate flags.
+
+	After all network interfaces has been configured the install pro-
+	gram will ask for a default route and IP address of the primary
+	name server to use.  You will also be presented with an opportunity
+	to edit the host table.
+
+	At this point you will be allowed to edit the file system table
+	that will be used for the remainder of the installation and that
+	will be used by the finished system, following which the new file
+	systems will be mounted to complete the installation.
+
+        After these preparatory steps have been completed, you will be
+        able to extract the distribution sets onto your system.  There
+        are several install methods supported; FTP, HTTP, tape,
+	$1or a local disk partition.
+	ifelse(X$2,X,,{:-Note that installation from floppies is not currently supported.-:})-:})dnl
 dnl
 dnl Notes for various installation methods.
 dnl
@@ -500,7 +601,7 @@ This you can do by running
 
 	mail
 
-and then just enter "1" to get the first message.  You quit mail by
+and then just enter "more 1" to get the first message.  You quit mail by
 entering "q".
 
 Some of the files in the OpenBSD OSREV distribution might need to be
@@ -642,7 +743,7 @@ dnl OpenBSDXferBareTape describes how to set up a non-bootable distribution
 dnl tape, and takes as an optional argument, the list of X11 sets which
 dnl may be put on the tape.
 define({:-OpenBSDXferBareTape-:},
-{:-Create an installation tape:
+{:-Creating an installation tape:
 
 	While you won't be able to boot OpenBSD from a tape, you can use
 	one to provide the installation sets.  To do so, you need to make
@@ -687,7 +788,7 @@ dnl on the tape. Then at least one, and up to three arguments list the first
 dnl files to be put on the tape to make it bootable. Each filename can be
 dnl followed by dd(1) arguments (such as conv=sync).
 define({:-OpenBSDXferBootTape-:},
-{:-Create an (optionally bootable) installation tape:
+{:-Creating an (optionally bootable) installation tape:
 
 	To install OpenBSD from a tape, you need to make a tape that
 	contains the distribution set files, each in "tar" format or in

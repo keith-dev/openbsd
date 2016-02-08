@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	$OpenBSD: datalink.c,v 1.37 2001/08/19 23:22:17 brian Exp $
+ *	$OpenBSD: datalink.c,v 1.40 2002/03/31 02:38:49 brian Exp $
  */
 
 #include <sys/param.h>
@@ -97,18 +97,16 @@ datalink_StartDialTimer(struct datalink *dl, int Timeout)
   int result = Timeout;
 
   timer_Stop(&dl->dial.timer);
-  if (Timeout) {
-    if (Timeout < 0)
-      result = (random() % DIAL_TIMEOUT) + 1;
-    dl->dial.timer.load = result * SECTICKS;
-    dl->dial.timer.func = datalink_OpenTimeout;
-    dl->dial.timer.name = "dial";
-    dl->dial.timer.arg = dl;
-    timer_Start(&dl->dial.timer);
-    if (dl->state == DATALINK_OPENING)
-      log_Printf(LogPHASE, "%s: Enter pause (%d) for redialing.\n",
-                dl->name, result);
-  }
+  if (Timeout < 0)
+    result = (random() % DIAL_TIMEOUT) + 1;
+  dl->dial.timer.load = result ? result * SECTICKS : 1;
+  dl->dial.timer.func = datalink_OpenTimeout;
+  dl->dial.timer.name = "dial";
+  dl->dial.timer.arg = dl;
+  timer_Start(&dl->dial.timer);
+  if (dl->state == DATALINK_OPENING)
+    log_Printf(LogPHASE, "%s: Enter pause (%d) for redialing.\n",
+               dl->name, result);
   return result;
 }
 
@@ -236,7 +234,7 @@ datalink_LoginDone(struct datalink *dl)
     dl->dial.incs = 0;
 
     hdlc_Init(&dl->physical->hdlc, &dl->physical->link.lcp);
-    async_Init(&dl->physical->async);
+    async_Setup(&dl->physical->async);
 
     lcp_Setup(&dl->physical->link.lcp, dl->state == DATALINK_READY ?
               0 : dl->physical->link.lcp.cfg.openmode);
@@ -491,7 +489,10 @@ datalink_Write(struct fdescriptor *d, struct bundle *bundle,
     case DATALINK_DIAL:
     case DATALINK_LOGOUT:
     case DATALINK_LOGIN:
-      result = descriptor_Write(&dl->chat.desc, bundle, fdset);
+      if ((result = descriptor_Write(&dl->chat.desc, bundle, fdset)) == -1) {
+        datalink_ComeDown(dl, CLOSE_NORMAL);
+        result = 0;
+      }
       break;
 
     case DATALINK_READY:
@@ -500,16 +501,28 @@ datalink_Write(struct fdescriptor *d, struct bundle *bundle,
     case DATALINK_CBCP:
     case DATALINK_OPEN:
       if (descriptor_IsSet(&dl->chap.desc, fdset))
-        result += descriptor_Write(&dl->chap.desc, bundle, fdset);
+        switch (descriptor_Write(&dl->chap.desc, bundle, fdset)) {
+        case -1:
+          datalink_ComeDown(dl, CLOSE_NORMAL);
+          break;
+        case 1:
+          result++;
+        }
       if (descriptor_IsSet(&dl->physical->desc, fdset))
-        result += descriptor_Write(&dl->physical->desc, bundle, fdset);
+        switch (descriptor_Write(&dl->physical->desc, bundle, fdset)) {
+        case -1:
+          datalink_ComeDown(dl, CLOSE_NORMAL);
+          break;
+        case 1:
+          result++;
+        }
       break;
   }
 
   return result;
 }
 
-static void
+void
 datalink_ComeDown(struct datalink *dl, int how)
 {
   int stayonline;

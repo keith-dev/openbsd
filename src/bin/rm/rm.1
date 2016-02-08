@@ -1,4 +1,4 @@
-.\"	$OpenBSD: rm.1,v 1.14 2001/08/13 21:00:05 heko Exp $
+.\"	$OpenBSD: rm.1,v 1.18 2002/02/11 18:43:51 mpech Exp $
 .\"	$NetBSD: rm.1,v 1.8 1995/07/25 19:37:30 jtc Exp $
 .\"
 .\" Copyright (c) 1990, 1993, 1994
@@ -121,6 +121,11 @@ It is an error to attempt to remove the files
 .Dq \&.
 or
 .Dq .. .
+It is forbidden to remove the file
+.Dq ..
+merely to avoid the antisocial consequences of inadvertently
+doing something like
+.Dq Cm rm -r .* .
 .Pp
 The
 .Nm
@@ -133,16 +138,17 @@ If an error occurs,
 .Nm
 exits with a value >0.
 .Sh EXAMPLES
-.Cm rm -rf foobar
+.Cm $ rm -rf foobar
 .Pp
 Recursively remove all files contained within the
 .Pa foobar
 directory hierarchy.
 .Pp
-.Cm rm -- -f ,
-.Cm rm ./-f
+.Cm $ rm -- -f
+.br
+.Cm $ rm ./-f
 .Pp
-Either of these commands will remove the file 
+Either of these commands will remove the file
 .Pa -f .
 .Sh SEE ALSO
 .Xr rmdir 1 ,
@@ -162,6 +168,11 @@ Also, historical
 .Bx
 implementations prompted on the standard output,
 not the standard error output.
+.Pp
+The interactive mode used to be a
+.Nm dsw
+command, a carryover from the ancient past with an
+amusing etymology.
 .Sh STANDARDS
 The
 .Nm
@@ -175,9 +186,11 @@ to act like
 .Xr rmdir 1
 when the
 .Ar file
-specified is a directory.  This implementation requires the
+specified is a directory.
+This implementation requires the
 .Fl d
-option if such behavior is desired.  This follows the historical
+option if such behavior is desired.
+This follows the historical
 behavior of
 .Nm
 with respect to directories.

@@ -1,4 +1,4 @@
-/*	$OpenBSD: cron.c,v 1.15 2001/08/11 20:47:14 millert Exp $	*/
+/*	$OpenBSD: cron.c,v 1.19 2002/02/16 21:28:01 millert Exp $	*/
 /* Copyright 1988,1990,1993,1994 by Paul Vixie
  * All rights reserved
  */
@@ -21,7 +21,7 @@
  */
 
 #if !defined(lint) && !defined(LINT)
-static char rcsid[] = "$OpenBSD: cron.c,v 1.15 2001/08/11 20:47:14 millert Exp $";
+static char rcsid[] = "$OpenBSD: cron.c,v 1.19 2002/02/16 21:28:01 millert Exp $";
 #endif
 
 #define	MAIN_PROGRAM
@@ -30,17 +30,20 @@ static char rcsid[] = "$OpenBSD: cron.c,v 1.15 2001/08/11 20:47:14 millert Exp $
 
 static	void	usage(void),
 		run_reboot_jobs(cron_db *),
-		find_jobs __P((int, cron_db *, int, int)),
-		set_time __P((int)),
-		cron_sleep __P((int)),
+		find_jobs(int, cron_db *, int, int),
+		set_time(int),
+		cron_sleep(int),
 		sigchld_handler(int),
 		sighup_handler(int),
+		sigusr1_handler(int),
 		sigchld_reaper(void),
+		check_sigs(int),
 		parse_args(int c, char *v[]);
 
-static	volatile sig_atomic_t	got_sighup, got_sigchld;
+static	volatile sig_atomic_t	got_sighup, got_sigchld, got_sigusr1;
 static	int			timeRunning, virtualTime, clockTime;
 static	long			GMToff;
+static	cron_db			database;
 
 static void
 usage(void) {
@@ -55,8 +58,8 @@ usage(void) {
 
 int
 main(int argc, char *argv[]) {
-	cron_db	database;
 	struct sigaction sact;
+	int fd;
 
 	ProgramName = argv[0];
 
@@ -105,6 +108,13 @@ main(int argc, char *argv[]) {
 			/* child process */
 			log_it("CRON",getpid(),"STARTUP","fork ok");
 			(void) setsid();
+			if ((fd = open(_PATH_DEVNULL, O_RDWR, 0)) != -1) {
+				(void) dup2(fd, STDIN);
+				(void) dup2(fd, STDOUT);
+				(void) dup2(fd, STDERR);
+				if (fd > STDERR)
+					(void) close(fd);
+			}
 			break;
 		default:
 			/* parent process should just die */
@@ -135,16 +145,7 @@ main(int argc, char *argv[]) {
 		int timeDiff;
 		int wakeupKind;
 
-		if (got_sighup) {
-			got_sighup = 0;
-			log_close();
-		}
-		if (got_sigchld) {
-			got_sigchld = 0;
-			sigchld_reaper();
-		}
-
-		load_database(&database);
+		check_sigs(TRUE);
 		/* ... wait for the time (in minutes) to change ... */
 		do {
 			cron_sleep(timeRunning + 1);
@@ -337,16 +338,40 @@ set_time(int initialize) {
  */
 static void
 cron_sleep(int target) {
-	time_t t;
+	time_t t1, t2;
 	int seconds_to_wait;
+	struct sigaction sact;
 
-	t = time(NULL) + GMToff;
-	seconds_to_wait = (int)(target * SECONDS_PER_MINUTE - t) + 1;
+	bzero((char *)&sact, sizeof sact);
+	sigemptyset(&sact.sa_mask);
+	sact.sa_flags = 0;
+#ifdef SA_RESTART
+	sact.sa_flags |= SA_RESTART;
+#endif
+	sact.sa_handler = sigusr1_handler;
+	(void) sigaction(SIGUSR1, &sact, NULL);
+
+	t1 = time(NULL) + GMToff;
+	seconds_to_wait = (int)(target * SECONDS_PER_MINUTE - t1) + 1;
 	Debug(DSCH, ("[%ld] Target time=%ld, sec-to-wait=%d\n",
 	    (long)getpid(), (long)target*SECONDS_PER_MINUTE, seconds_to_wait))
 
-	if (seconds_to_wait > 0 && seconds_to_wait < 65)
+	while (seconds_to_wait > 0 && seconds_to_wait < 65) {
 		sleep((unsigned int) seconds_to_wait);
+
+		/*
+		 * Check to see if we were interrupted by a signal.
+		 * If so, service the signal(s) then continue sleeping
+		 * where we left off.
+		 */
+		check_sigs(FALSE);
+		t2 = time(NULL) + GMToff;
+		seconds_to_wait -= (int)(t2 - t1);
+		t1 = t2;
+	}
+
+	sact.sa_handler = SIG_DFL;
+	(void) sigaction(SIGUSR1, &sact, NULL);
 }
 
 static void
@@ -357,6 +382,11 @@ sighup_handler(int x) {
 static void
 sigchld_handler(int x) {
 	got_sigchld = 1;
+}
+
+static void
+sigusr1_handler(int x) {
+	got_sigusr1 = 1;
 }
 
 static void
@@ -385,6 +415,22 @@ sigchld_reaper() {
 			       (long)getpid(), (long)pid, WEXITSTATUS(waiter)))
 		}
 	} while (pid > 0);
+}
+
+static void
+check_sigs(int force_dbload) {
+	if (got_sighup) {
+		got_sighup = 0;
+		log_close();
+	}
+	if (got_sigchld) {
+		got_sigchld = 0;
+		sigchld_reaper();
+	}
+	if (got_sigusr1 || force_dbload) {
+		got_sigusr1 = 0;
+		load_database(&database);
+	}
 }
 
 static void

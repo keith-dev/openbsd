@@ -1,4 +1,4 @@
-/*	$OpenBSD: uthread_cancel.c,v 1.6 2001/09/04 22:17:45 fgsch Exp $	*/
+/*	$OpenBSD: uthread_cancel.c,v 1.12 2002/03/07 23:05:10 fgsch Exp $	*/
 /*
  * David Leonard <d@openbsd.org>, 1999. Public domain.
  */
@@ -6,9 +6,10 @@
 #include <pthread.h>
 #include "pthread_private.h"
 
+static void	finish_cancellation(void *arg);
+
 int
-pthread_cancel(pthread)
-	pthread_t pthread;
+pthread_cancel(pthread_t pthread)
 {
 	int ret;
 
@@ -16,76 +17,134 @@ pthread_cancel(pthread)
 		/* NOTHING */
 	} else if (pthread->state == PS_DEAD || pthread->state == PS_DEADLOCK) {
 		ret = 0;
-	} else if ((pthread->flags & PTHREAD_FLAGS_CANCELED) == 0) {
-		/* Set the thread's I've-been-cancelled flag: */
-		pthread->flags |= PTHREAD_FLAGS_CANCELED;
-		/* Check if we need to kick it back into the run queue: */
-		if ((pthread->cancelstate == PTHREAD_CANCEL_ENABLE) &&
-		    ((pthread->canceltype == PTHREAD_CANCEL_ASYNCHRONOUS) ||
-		     (pthread->flags & PTHREAD_FLAGS_CANCELPT)))
+	} else {
+		/* Protect the scheduling queues: */
+		_thread_kern_sig_defer();
+
+		if (((pthread->cancelflags & PTHREAD_CANCEL_DISABLE) != 0) ||
+		    (((pthread->cancelflags & PTHREAD_CANCEL_ASYNCHRONOUS) == 0) &&
+		    ((pthread->cancelflags & PTHREAD_AT_CANCEL_POINT) == 0)))
+			/* Just mark it for cancellation: */
+			pthread->cancelflags |= PTHREAD_CANCELLING;
+		else {
+			/*
+			 * Check if we need to kick it back into the
+			 * run queue:
+			 */
 			switch (pthread->state) {
-			case PS_WAIT_WAIT:
+			case PS_RUNNING:
+				/* No need to resume: */
+				pthread->cancelflags |= PTHREAD_CANCELLING;
+				break;
+
+			case PS_SPINBLOCK:
 			case PS_FDR_WAIT:
 			case PS_FDW_WAIT:
-			case PS_SLEEP_WAIT:
-			case PS_SELECT_WAIT:
 			case PS_POLL_WAIT:
+			case PS_SELECT_WAIT:
+				/* Remove these threads from the work queue: */
+				if ((pthread->flags & PTHREAD_FLAGS_IN_WORKQ)
+				    != 0)
+					PTHREAD_WORKQ_REMOVE(pthread);
+				/* Fall through: */
+			case PS_SIGTHREAD:
+			case PS_SLEEP_WAIT:
+			case PS_WAIT_WAIT:
 			case PS_SIGSUSPEND:
+			case PS_SIGWAIT:
 				/* Interrupt and resume: */
 				pthread->interrupted = 1;
-				if (pthread->flags & PTHREAD_FLAGS_IN_WORKQ)
-					PTHREAD_WORKQ_REMOVE(pthread);
+				pthread->cancelflags |= PTHREAD_CANCELLING;
 				PTHREAD_NEW_STATE(pthread,PS_RUNNING);
 				break;
+
+			case PS_JOIN:
+				/*
+				 * Disconnect the thread from the joinee:
+				 */
+				if (pthread->join_status.thread != NULL) {
+					pthread->join_status.thread->joiner
+					    = NULL;
+					pthread->join_status.thread = NULL;
+				}
+				pthread->cancelflags |= PTHREAD_CANCELLING;
+				PTHREAD_NEW_STATE(pthread, PS_RUNNING);
+				break;
+
+			case PS_SUSPENDED:
+				if (pthread->suspended == SUSP_NO ||
+				    pthread->suspended == SUSP_YES ||
+				    pthread->suspended == SUSP_JOIN ||
+				    pthread->suspended == SUSP_NOWAIT) {
+					/*
+					 * This thread isn't in any scheduling
+					 * queues; just change it's state:
+					 */
+					pthread->cancelflags |=
+					    PTHREAD_CANCELLING;
+					PTHREAD_SET_STATE(pthread, PS_RUNNING);
+					break;
+				}
+				/* FALLTHROUGH */
 			case PS_MUTEX_WAIT:
 			case PS_COND_WAIT:
-			case PS_SIGWAIT:
 			case PS_FDLR_WAIT:
 			case PS_FDLW_WAIT:
 			case PS_FILE_WAIT:
-			case PS_JOIN:
-			case PS_SUSPENDED:
-			case PS_SIGTHREAD:
-				/* Simply wake: */
-				/* XXX may be incorrect */
+				/*
+				 * Threads in these states may be in queues.
+				 * In order to preserve queue integrity, the
+				 * cancelled thread must remove itself from the
+				 * queue.  Mark the thread as interrupted and
+				 * needing cancellation, and set the state to
+				 * running.  When the thread resumes, it will
+				 * remove itself from the queue and call the
+				 * cancellation completion routine.
+				 */
+				pthread->interrupted = 1;
+				pthread->cancelflags |= PTHREAD_CANCEL_NEEDED;
 				PTHREAD_NEW_STATE(pthread,PS_RUNNING);
+				pthread->continuation = finish_cancellation;
 				break;
-			case PS_RUNNING:
-			case PS_DEADLOCK:
-			case PS_SPINBLOCK:
+
 			case PS_DEAD:
-				/* Ignore */
+			case PS_DEADLOCK:
+			case PS_STATE_MAX:
+				/* Ignore - only here to silence -Wall: */
 				break;
+			}
 		}
+
+		/* Unprotect the scheduling queues: */
+		_thread_kern_sig_undefer();
+
 		ret = 0;
 	}
 	return (ret);
 }
 
 int
-pthread_setcancelstate(state, oldstate)
-	int state;
-	int *oldstate;
+pthread_setcancelstate(int state, int *oldstate)
 {
 	struct pthread	*curthread = _get_curthread();
 	int ostate;
 	int ret;
 
-	ostate = curthread->cancelstate;
+	ostate = curthread->cancelflags & PTHREAD_CANCEL_DISABLE;
 
 	switch (state) {
 	case PTHREAD_CANCEL_ENABLE:
-		if (oldstate)
+		if (oldstate != NULL)
 			*oldstate = ostate;
-		curthread->cancelstate = PTHREAD_CANCEL_ENABLE;
-		if (curthread->canceltype == PTHREAD_CANCEL_ASYNCHRONOUS)
-			_thread_cancellation_point();
+		curthread->cancelflags &= ~PTHREAD_CANCEL_DISABLE;
+		if ((curthread->cancelflags & PTHREAD_CANCEL_ASYNCHRONOUS) != 0)
+			pthread_testcancel();
 		ret = 0;
 		break;
 	case PTHREAD_CANCEL_DISABLE:
-		if (oldstate)
+		if (oldstate != NULL)
 			*oldstate = ostate;
-		curthread->cancelstate = PTHREAD_CANCEL_DISABLE;
+		curthread->cancelflags |= PTHREAD_CANCEL_DISABLE;
 		ret = 0;
 		break;
 	default:
@@ -97,27 +156,25 @@ pthread_setcancelstate(state, oldstate)
 
 
 int
-pthread_setcanceltype(type, oldtype)
-	int type;
-	int *oldtype;
+pthread_setcanceltype(int type, int *oldtype)
 {
 	struct pthread	*curthread = _get_curthread();
 	int otype;
 	int ret;
 
-	otype = curthread->canceltype;
+	otype = curthread->cancelflags & PTHREAD_CANCEL_ASYNCHRONOUS;
 	switch (type) {
 	case PTHREAD_CANCEL_ASYNCHRONOUS:
-		if (oldtype)
+		if (oldtype != NULL)
 			*oldtype = otype;
-		curthread->canceltype = PTHREAD_CANCEL_ASYNCHRONOUS;
-		_thread_cancellation_point();
+		curthread->cancelflags |= PTHREAD_CANCEL_ASYNCHRONOUS;
+		pthread_testcancel();
 		ret = 0;
 		break;
 	case PTHREAD_CANCEL_DEFERRED:
-		if (oldtype)
+		if (oldtype != NULL)
 			*oldtype = otype;
-		curthread->canceltype = PTHREAD_CANCEL_DEFERRED;
+		curthread->cancelflags &= ~PTHREAD_CANCEL_ASYNCHRONOUS;
 		ret = 0;
 		break;
 	default:
@@ -128,46 +185,59 @@ pthread_setcanceltype(type, oldtype)
 }
 
 void
-pthread_testcancel()
+pthread_testcancel(void)
 {
+	struct pthread	*curthread = _get_curthread();
 
-	_thread_cancellation_point();
+	if (((curthread->cancelflags & PTHREAD_CANCEL_DISABLE) == 0) &&
+	    ((curthread->cancelflags & PTHREAD_CANCELLING) != 0)) {
+		/*
+		 * It is possible for this thread to be swapped out
+		 * while performing cancellation; do not allow it
+		 * to be cancelled again.
+		 */
+		curthread->cancelflags &= ~PTHREAD_CANCELLING;
+#ifdef notyet
+		_thread_exit_cleanup();
+#endif
+		pthread_exit(PTHREAD_CANCELED);
+		PANIC("cancel");
+	}
 }
 
 void
-_thread_enter_cancellation_point()
+_thread_enter_cancellation_point(void)
 {
 	struct pthread	*curthread = _get_curthread();
 
 	/* Look for a cancellation before we block: */
-	_thread_cancellation_point();
-	curthread->flags |= PTHREAD_FLAGS_CANCELPT;
+	pthread_testcancel();
+	curthread->cancelflags |= PTHREAD_AT_CANCEL_POINT;
 }
 
 void
-_thread_leave_cancellation_point()
+_thread_leave_cancellation_point(void)
 {
 	struct pthread	*curthread = _get_curthread();
 
-	curthread->flags &=~ PTHREAD_FLAGS_CANCELPT;
+	curthread->cancelflags &= ~PTHREAD_AT_CANCEL_POINT;
 	/* Look for a cancellation after we unblock: */
-	_thread_cancellation_point();
+	pthread_testcancel();
 }
 
-/*
- * Must only be called when in asynchronous cancel mode, or
- * from pthread_testcancel().
- */
-void
-_thread_cancellation_point()
+static void
+finish_cancellation(void *arg)
 {
 	struct pthread	*curthread = _get_curthread();
 
-	if ((curthread->cancelstate == PTHREAD_CANCEL_ENABLE) &&
-	    ((curthread->flags & (PTHREAD_FLAGS_CANCELED|PTHREAD_EXITING)) ==
-		PTHREAD_FLAGS_CANCELED)) {
-		curthread->flags &=~ PTHREAD_FLAGS_CANCELED;
+	curthread->continuation = NULL;
+	curthread->interrupted = 0;
+
+	if ((curthread->cancelflags & PTHREAD_CANCEL_NEEDED) != 0) {
+		curthread->cancelflags &= ~PTHREAD_CANCEL_NEEDED;
+#ifdef notyet
+		_thread_exit_cleanup();
+#endif
 		pthread_exit(PTHREAD_CANCELED);
-		PANIC("cancel");
 	}
 }

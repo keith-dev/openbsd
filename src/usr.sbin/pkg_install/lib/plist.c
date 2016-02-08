@@ -1,6 +1,6 @@
-/*	$OpenBSD: plist.c,v 1.11 2001/04/08 16:45:48 espie Exp $	*/
+/*	$OpenBSD: plist.c,v 1.13 2001/11/07 20:57:24 espie Exp $	*/
 #ifndef lint
-static const char *rcsid = "$OpenBSD: plist.c,v 1.11 2001/04/08 16:45:48 espie Exp $";
+static const char *rcsid = "$OpenBSD: plist.c,v 1.13 2001/11/07 20:57:24 espie Exp $";
 #endif
 
 /*
@@ -46,7 +46,6 @@ static cmd_t	cmdv[] = {
 	{	"group",	PLIST_CHGRP,		1	},
 	{	"comment",	PLIST_COMMENT,		1	},
 	{	"ignore",	PLIST_IGNORE,		0	},
-	{	"ignore_inst",	PLIST_IGNORE_INST,	0	},
 	{	"name",		PLIST_NAME,		1	},
 	{	"display",	PLIST_DISPLAY,		1	},
 	{	"pkgdep",	PLIST_PKGDEP,		1	},
@@ -55,6 +54,7 @@ static cmd_t	cmdv[] = {
 	{	"dirrm",	PLIST_DIR_RM,		1	},
 	{	"option",	PLIST_OPTION,		1	},
 	{	"newdepend",	PLIST_NEWDEP,		1	},
+	{	"libdepend",	PLIST_LIBDEP,		1	},
 	{	NULL,		FAIL,			0	}
 };
 

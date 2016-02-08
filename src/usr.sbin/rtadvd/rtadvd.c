@@ -1,4 +1,4 @@
-/*	$OpenBSD: rtadvd.c,v 1.9 2001/02/04 06:22:05 itojun Exp $	*/
+/*	$OpenBSD: rtadvd.c,v 1.15 2002/02/17 19:42:39 millert Exp $	*/
 /*	$KAME: rtadvd.c,v 1.50 2001/02/04 06:15:15 itojun Exp $	*/
 
 /*
@@ -55,6 +55,8 @@
 #include <string.h>
 #include <stdlib.h>
 #include <syslog.h>
+#include <util.h>
+
 #include "rtadvd.h"
 #include "rrenum.h"
 #include "advcap.h"
@@ -68,8 +70,8 @@ static u_char *rcvcmsgbuf;
 static size_t rcvcmsgbuflen;
 static u_char *sndcmsgbuf = NULL;
 static size_t sndcmsgbuflen;
-static int do_dump;
-static int do_die;
+volatile sig_atomic_t do_dump;
+volatile sig_atomic_t do_die;
 struct msghdr sndmhdr;
 struct iovec rcviov[2];
 struct iovec sndiov[2];
@@ -77,7 +79,6 @@ struct sockaddr_in6 from;
 struct sockaddr_in6 sin6_allnodes = {sizeof(sin6_allnodes), AF_INET6};
 struct in6_addr in6a_site_allrouters;
 static char *dumpfilename = "/var/run/rtadvd.dump"; /* XXX: should be configurable */
-static char *pidfilename = "/var/run/rtadvd.pid"; /* should be configurable */
 static char *mcastif;
 int sock;
 int rtsock = -1;
@@ -124,26 +125,26 @@ u_int32_t ndopt_flags[] = {
 	NDOPT_FLAG_PREFIXINFO, NDOPT_FLAG_RDHDR, NDOPT_FLAG_MTU
 };
 
-int main __P((int, char *[]));
-static void set_die __P((int));
-static void die __P((void));
-static void sock_open __P((void));
-static void rtsock_open __P((void));
-static void rtadvd_input __P((void));
-static void rs_input __P((int, struct nd_router_solicit *,
-			  struct in6_pktinfo *, struct sockaddr_in6 *));
-static void ra_input __P((int, struct nd_router_advert *,
-			  struct in6_pktinfo *, struct sockaddr_in6 *));
-static int prefix_check __P((struct nd_opt_prefix_info *, struct rainfo *,
-			     struct sockaddr_in6 *));
-static int nd6_options __P((struct nd_opt_hdr *, int,
-			    union nd_opts *, u_int32_t));
-static void free_ndopts __P((union nd_opts *));
-static void ra_output __P((struct rainfo *));
-static void rtmsg_input __P((void));
-static void rtadvd_set_dump_file __P((void));
+int main(int, char *[]);
+static void set_die(int);
+static void die(void);
+static void sock_open(void);
+static void rtsock_open(void);
+static void rtadvd_input(void);
+static void rs_input(int, struct nd_router_solicit *,
+    struct in6_pktinfo *, struct sockaddr_in6 *);
+static void ra_input(int, struct nd_router_advert *,
+    struct in6_pktinfo *, struct sockaddr_in6 *);
+static int prefix_check(struct nd_opt_prefix_info *, struct rainfo *,
+    struct sockaddr_in6 *);
+static int nd6_options(struct nd_opt_hdr *, int,
+    union nd_opts *, u_int32_t);
+static void free_ndopts(union nd_opts *);
+static void ra_output(struct rainfo *);
+static void rtmsg_input(void);
+static void rtadvd_set_dump_file(void);
 
-struct prefix *find_prefix __P((struct rainfo *, struct in6_addr *, int));
+struct prefix *find_prefix(struct rainfo *, struct in6_addr *, int);
 
 int
 main(argc, argv)
@@ -155,8 +156,6 @@ main(argc, argv)
 	struct timeval *timeout;
 	int i, ch;
 	int fflag = 0;
-	FILE *pidfp;
-	pid_t pid;
 
 	openlog("rtadvd", LOG_NDELAY|LOG_PID, LOG_DAEMON);
 
@@ -235,20 +234,17 @@ main(argc, argv)
 		fprintf(stderr, "fatal: inet_pton failed\n");
 		exit(1);
 	}
-	sock_open();
 
 	if (!fflag)
 		daemon(1, 0);
 
+	sock_open();
+
 	/* record the current PID */
-	pid = getpid();
-	if ((pidfp = fopen(pidfilename, "w")) == NULL)
+	if (pidfile(NULL) < 0) {
 		syslog(LOG_ERR,
-		       "<%s> failed to open a log file(%s), run anyway.",
-		       __FUNCTION__, pidfilename);
-	else {
-		fprintf(pidfp, "%d\n", pid);
-		fclose(pidfp);
+		       "<%s> failed to open the pid log file, run anyway.",
+		       __FUNCTION__);
 	}
 
 	FD_ZERO(&fdset);
@@ -266,7 +262,7 @@ main(argc, argv)
 	signal(SIGUSR1, (void *)rtadvd_set_dump_file);
 
 	while (1) {
-		struct fd_set select_fd = fdset; /* reinitialize */
+		fd_set select_fd = fdset; /* reinitialize */
 
 		if (do_dump) {	/* SIGUSR1 */
 			do_dump = 0;

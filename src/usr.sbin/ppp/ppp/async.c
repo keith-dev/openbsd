@@ -25,7 +25,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $OpenBSD: async.c,v 1.9 2001/06/13 21:33:40 brian Exp $
+ * $OpenBSD: async.c,v 1.11 2002/03/31 02:38:49 brian Exp $
  */
 
 #include <sys/types.h>
@@ -56,17 +56,23 @@
 void
 async_Init(struct async *async)
 {
-  async->mode = MODE_HUNT;
-  async->length = 0;
-  async->my_accmap = async->his_accmap = 0xffffffff;
+  async_Setup(async);
   memset(async->cfg.EscMap, '\0', sizeof async->cfg.EscMap);
 }
 
 void
-async_SetLinkParams(struct async *async, struct lcp *lcp)
+async_Setup(struct async *async)
 {
-  async->my_accmap = lcp->want_accmap;
-  async->his_accmap = lcp->his_accmap | lcp->want_accmap;
+  async->mode = MODE_HUNT;
+  async->length = 0;
+  async->my_accmap = async->his_accmap = 0xffffffff;
+}
+
+void
+async_SetLinkParams(struct async *async, u_int32_t mymap, u_int32_t hismap)
+{
+  async->my_accmap = mymap;
+  async->his_accmap = hismap | mymap;
 }
 
 /*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip6_mroute.c,v 1.16 2001/06/09 06:43:38 angelos Exp $	*/
+/*	$OpenBSD: ip6_mroute.c,v 1.20 2002/03/24 20:53:49 itojun Exp $	*/
 /*	$KAME: ip6_mroute.c,v 1.45 2001/03/25 08:38:51 itojun Exp $	*/
 
 /*
@@ -80,15 +80,15 @@
 
 #define M_HASCL(m) ((m)->m_flags & M_EXT)
 
-static int ip6_mdq __P((struct mbuf *, struct ifnet *, struct mf6c *));
-static void phyint_send __P((struct ip6_hdr *, struct mif6 *, struct mbuf *));
+static int ip6_mdq(struct mbuf *, struct ifnet *, struct mf6c *);
+static void phyint_send(struct ip6_hdr *, struct mif6 *, struct mbuf *);
 
-static int set_pim6 __P((int *));
-static int get_pim6 __P((struct mbuf *));
-static int socket_send __P((struct socket *, struct mbuf *,
-			    struct sockaddr_in6 *));
-static int register_send __P((struct ip6_hdr *, struct mif6 *,
-			      struct mbuf *));
+static int set_pim6(int *);
+static int get_pim6(struct mbuf *);
+static int socket_send(struct socket *, struct mbuf *,
+			    struct sockaddr_in6 *);
+static int register_send(struct ip6_hdr *, struct mif6 *,
+			      struct mbuf *);
 
 /*
  * Globals.  All but ip6_mrouter, ip6_mrtproto and mrt6stat could be static,
@@ -115,7 +115,7 @@ u_int		mrt6debug = 0;	  /* debug level 	*/
 #define         DEBUG_PIM       0x40
 #endif
 
-static void	expire_upcalls __P((void *));
+static void	expire_upcalls(void *);
 #define		EXPIRE_TIMEOUT	(hz / 4)	/* 4x / second */
 #define		UPCALL_EXPIRE	6		/* number of timeouts */
 
@@ -144,11 +144,6 @@ static mifi_t nummifs = 0;
 static mifi_t reg_mif_num = (mifi_t)-1;
 
 static struct pim6stat pim6stat;
-
-/*
- * one-back cache used by ipip_input to locate a tunnel's mif
- * given a datagram's src ip address.
- */
 static int pim6;
 
 /*
@@ -213,13 +208,13 @@ u_long upcall_data[UPCALL_MAX + 1];
 static void collate();
 #endif /* UPCALL_TIMING */
 
-static int get_sg_cnt __P((struct sioc_sg_req6 *));
-static int get_mif6_cnt __P((struct sioc_mif_req6 *));
-static int ip6_mrouter_init __P((struct socket *, struct mbuf *, int));
-static int add_m6if __P((struct mif6ctl *));
-static int del_m6if __P((mifi_t *));
-static int add_m6fc __P((struct mf6cctl *));
-static int del_m6fc __P((struct mf6cctl *));
+static int get_sg_cnt(struct sioc_sg_req6 *);
+static int get_mif6_cnt(struct sioc_mif_req6 *);
+static int ip6_mrouter_init(struct socket *, struct mbuf *, int);
+static int add_m6if(struct mif6ctl *);
+static int del_m6if(mifi_t *);
+static int add_m6fc(struct mf6cctl *);
+static int del_m6fc(struct mf6cctl *);
 
 static struct timeout expire_upcalls_ch;
 
@@ -758,7 +753,8 @@ add_m6fc(mfccp)
 	if (nstl == 0) {
 #ifdef MRT6DEBUG
 		if (mrt6debug & DEBUG_MFC)
-			log(LOG_DEBUG,"add_mfc no upcall h %d o %s g %s p %x\n",
+			log(LOG_DEBUG,
+			    "add_m6fc no upcall h %d o %s g %s p %x\n",
 			    hash,
 			    ip6_sprintf(&mfccp->mf6cc_origin.sin6_addr),
 			    ip6_sprintf(&mfccp->mf6cc_mcastgrp.sin6_addr),
@@ -1263,7 +1259,7 @@ ip6_mdq(m, ifp, rt)
 /*
  * Macro to send packet on mif.  Since RSVP packets don't get counted on
  * input, they shouldn't get counted on output, so statistics keeping is
- * seperate.
+ * separate.
  */
 
 #define MC6_SEND(ip6, mifp, m) do {				\
@@ -1559,10 +1555,8 @@ register_send(ip6, mif, m)
 	if (i > len)
 		i = len;
 	mm = m_pullup(mm, i);
-	if (mm == NULL){
-		m_freem(mm);
+	if (mm == NULL)
 		return ENOBUFS;
-	}
 /* TODO: check it! */
 	mm->m_pkthdr.len = len + sizeof(struct ip6_hdr);
 

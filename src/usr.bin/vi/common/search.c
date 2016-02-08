@@ -1,4 +1,4 @@
-/*	$OpenBSD: search.c,v 1.5 2001/01/29 01:58:32 niklas Exp $	*/
+/*	$OpenBSD: search.c,v 1.7 2002/02/17 19:42:34 millert Exp $	*/
 
 /*-
  * Copyright (c) 1992, 1993, 1994
@@ -31,8 +31,8 @@ static const char sccsid[] = "@(#)search.c	10.25 (Berkeley) 6/30/96";
 
 typedef enum { S_EMPTY, S_EOF, S_NOPREV, S_NOTFOUND, S_SOF, S_WRAP } smsg_t;
 
-static void	search_msg __P((SCR *, smsg_t));
-static int	search_init __P((SCR *, dir_t, char *, size_t, char **, u_int));
+static void	search_msg(SCR *, smsg_t);
+static int	search_init(SCR *, dir_t, char *, size_t, char **, u_int);
 
 /*
  * search_init --
@@ -142,8 +142,7 @@ prev:			if (sp->re == NULL) {
  * f_search --
  *	Do a forward search.
  *
- * PUBLIC: int f_search __P((SCR *,
- * PUBLIC:    MARK *, MARK *, char *, size_t, char **, u_int));
+ * PUBLIC: int f_search(SCR *, MARK *, MARK *, char *, size_t, char **, u_int);
  */
 int
 f_search(sp, fm, rm, ptrn, plen, eptrn, flags)
@@ -286,8 +285,7 @@ f_search(sp, fm, rm, ptrn, plen, eptrn, flags)
  * b_search --
  *	Do a backward search.
  *
- * PUBLIC: int b_search __P((SCR *,
- * PUBLIC:    MARK *, MARK *, char *, size_t, char **, u_int));
+ * PUBLIC: int b_search(SCR *, MARK *, MARK *, char *, size_t, char **, u_int);
  */
 int
 b_search(sp, fm, rm, ptrn, plen, eptrn, flags)
@@ -483,7 +481,7 @@ search_msg(sp, msg)
  * search_busy --
  *	Put up the busy searching message.
  *
- * PUBLIC: void search_busy __P((SCR *, busy_t));
+ * PUBLIC: void search_busy(SCR *, busy_t);
  */
 void
 search_busy(sp, btype)

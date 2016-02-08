@@ -1,12 +1,12 @@
-/* $OpenBSD: wsmoused.h,v 1.1 2001/04/14 04:47:41 aaron Exp $ */
+/* $OpenBSD: wsmoused.h,v 1.4 2002/02/15 02:18:39 deraadt Exp $ */
 
 /*
  * Copyright (c) 2001 Jean-Baptiste Marchand, Julien Montagne and Jerome Verdon
- * 
+ *
  * Copyright (c) 1998 by Kazutaka Yokota
  *
  * Copyright (c) 1995 Michael Smith
- * 
+ *
  * Copyright (c) 1993 by David Dawes <dawes@xfree86.org>
  *
  * Copyright (c) 1990,91 by Thomas Roell, Dinkelscherben, Germany.
@@ -14,12 +14,12 @@
  * All rights reserved.
  *
  * Most of this code was taken from the FreeBSD moused daemon, written by
- * Michael Smith. The FreeBSD moused daemon already contained code from the 
+ * Michael Smith. The FreeBSD moused daemon already contained code from the
  * Xfree Project, written by David Dawes and Thomas Roell and Kazutaka Yokota.
  *
  * Adaptation to OpenBSD was done by Jean-Baptiste Marchand, Julien Montagne
  * and Jerome Verdon.
- * 
+ *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
@@ -55,27 +55,32 @@
 
 /* Logging macros */
 
+extern char *pidfile;
+
 #define debug(fmt,args...) \
 	if (debug&&nodaemon) printf(fmt, ##args)
 
-#define logerr(e, fmt, args...) {				\
-	if (background) {					\
-	    syslog(LOG_DAEMON | LOG_ERR, fmt, ##args);		\
-	    exit(e);						\
-	} else							\
-	    errx(e, fmt, ##args);				\
-}
+#define logerr(e, fmt, args...) 				\
+	do {							\
+		unlink(pidfile);				\
+		if (background) {				\
+			syslog(LOG_ERR, fmt, ##args);		\
+			exit(e);				\
+		} else						\
+			errx(e, fmt, ##args);			\
+	} while (0)
 
-#define logwarn(fmt, args...) {				\
-	if (background)						\
-	    syslog(LOG_DAEMON | LOG_WARNING, fmt, ##args);	\
-	else							\
-	    warnx(fmt, ##args);					\
-}
+#define logwarn(fmt, args...)					\
+	do {							\
+		if (background)					\
+		    syslog(LOG_WARNING, fmt, ##args);		\
+		else						\
+		    warnx(fmt, ##args);				\
+	} while (0)
 
 /* Daemon flags */
 
-#define	ChordMiddle	0x0001 /* avoid bug reporting middle button as down 
+#define	ChordMiddle	0x0001 /* avoid bug reporting middle button as down
 				  when left and right are pressed */
 #define Emulate3Button	0x0002 /* option to emulate a third button */
 #define ClearDTR	0x0004 /* for mousesystems protocol (3 button mouse) */
@@ -89,7 +94,7 @@
 
 #define IS_WSMOUSE_DEV(dev) (!(strncmp((dev), WSMOUSE_DEV,12)))
 #define IS_SERIAL_DEV(dev) (!(strncmp((dev), SERIAL_DEV, 9)))
- 
+
 /* mouse structure : main structure */
 typedef struct mouse_s {
     int flags;
@@ -116,5 +121,5 @@ typedef struct mouse_s {
 #define MOUSE_BUTTON6	5
 #define MOUSE_BUTTON7	6
 #define MOUSE_BUTTON8	7
-#define MOUSE_MAXBUTTON	8	
+#define MOUSE_MAXBUTTON	8
 

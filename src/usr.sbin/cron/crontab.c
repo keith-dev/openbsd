@@ -1,4 +1,4 @@
-/*	$OpenBSD: crontab.c,v 1.22 2001/08/19 18:30:38 millert Exp $	*/
+/*	$OpenBSD: crontab.c,v 1.27 2002/02/16 21:28:01 millert Exp $	*/
 /* Copyright 1988,1990,1993,1994 by Paul Vixie
  * All rights reserved
  */
@@ -21,7 +21,7 @@
  */
 
 #if !defined(lint) && !defined(LINT)
-static char rcsid[] = "$OpenBSD: crontab.c,v 1.22 2001/08/19 18:30:38 millert Exp $";
+static char rcsid[] = "$OpenBSD: crontab.c,v 1.27 2002/02/16 21:28:01 millert Exp $";
 #endif
 
 /* crontab - install and manage per-user crontab files
@@ -58,7 +58,7 @@ static	void		list_cmd(void),
 			check_error(const char *),
 			parse_args(int c, char *v[]);
 static	int		replace_cmd(void);
-static	void		clean_turds __P((int));
+static	void		clean_turds(int);
 
 static void
 usage(const char *msg) {
@@ -111,7 +111,7 @@ main(int argc, char *argv[]) {
 			exitstatus = ERROR_EXIT;
 		break;
 	default:
-		abort();
+		exit(1);
 	}
 	exit(0);
 	/*NOTREACHED*/
@@ -303,8 +303,8 @@ edit_cmd(void) {
 		}
 		fprintf(stderr, "no crontab for %s - using an empty one\n",
 			User);
-		if (!(f = fopen("/dev/null", "r"))) {
-			perror("/dev/null");
+		if (!(f = fopen(_PATH_DEVNULL, "r"))) {
+			perror(_PATH_DEVNULL);
 			exit(ERROR_EXIT);
 		}
 	}
@@ -675,10 +675,19 @@ done:
 
 static void
 poke_daemon() {
+	char pidfile[MAX_FNAME];
+	PID_T pid;
+	FILE *fp;
+
 	if (utime(SPOOL_DIR, NULL) < OK) {
 		fprintf(stderr, "crontab: can't update mtime on spooldir\n");
 		perror(SPOOL_DIR);
 		return;
+	}
+	if (glue_strings(pidfile, sizeof pidfile, PIDDIR, PIDFILE, '/')) {
+		if ((fp = fopen(pidfile, "r")) &&
+		    fscanf(fp, "%d", &pid) == 1)
+			kill(pid, SIGUSR1);
 	}
 }
 
@@ -686,10 +695,13 @@ static void
 clean_turds(signo)
 	int signo;
 {
+	int save_errno = errno;
+
 	if (TempFilename[0])
 		(void) unlink(TempFilename);
 	if (signo) {
 		(void) signal(signo, SIG_DFL);
 		(void) raise(signo);
 	}
+	errno = save_errno;
 }

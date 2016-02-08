@@ -1,4 +1,4 @@
-/*	$OpenBSD: mtrmt.c,v 1.7 1997/09/12 04:01:37 millert Exp $	*/
+/*	$OpenBSD: mtrmt.c,v 1.11 2002/03/14 16:44:24 mpech Exp $	*/
 /*	$NetBSD: mtrmt.c,v 1.2 1996/03/06 06:22:07 scottr Exp $	*/
 
 /*-
@@ -65,11 +65,9 @@
 #include <pwd.h>
 #include <signal.h>
 #include <stdio.h>
-#ifdef __STDC__
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#endif
 
 #include "pathnames.h"
 #include "mt.h"
@@ -81,13 +79,14 @@ static	int rmtstate = TS_CLOSED;
 static	int rmtape;
 static	char *rmtpeer;
 
-static	int okname __P((char *));
-static	int rmtcall __P((char *, char *));
-static	void rmtconnaborted __P((/* int, int */));
-static	int rmtgetb __P((void));
-static	void rmtgetconn __P((void));
-static	void rmtgets __P((char *, int));
-static	int rmtreply __P((char *));
+static	int okname(char *);
+static	int rmtcall(char *, char *);
+static	void rmtconnaborted(void);
+static	void sigrmtconnaborted(int);
+static	int rmtgetb(void);
+static	void rmtgetconn(void);
+static	void rmtgets(char *, int);
+static	int rmtreply(char *);
 
 int
 rmthost(host)
@@ -99,7 +98,7 @@ rmthost(host)
 		strcpy(rmtpeer, host);
 	else
 		rmtpeer = host;
-	signal(SIGPIPE, rmtconnaborted);
+	signal(SIGPIPE, sigrmtconnaborted);
 	rmtgetconn();
 	if (rmtape < 0)
 		return (0);
@@ -107,7 +106,15 @@ rmthost(host)
 }
 
 static void
-rmtconnaborted()
+sigrmtconnaborted(int sig)
+{
+
+	warnx("Lost connection to remote host.");
+	_exit(1);
+}
+
+static void
+rmtconnaborted(void)
 {
 
 	errx(1, "Lost connection to remote host.");
@@ -116,7 +123,7 @@ rmtconnaborted()
 void
 rmtgetconn()
 {
-	register char *cp;
+	char *cp;
 	static struct servent *sp = NULL;
 	static struct passwd *pwd = NULL;
 #ifdef notdef
@@ -173,8 +180,8 @@ static int
 okname(cp0)
 	char *cp0;
 {
-	register char *cp;
-	register int c;
+	char *cp;
+	int c;
 
 	for (cp = cp0; *cp; cp++) {
 		c = *cp;
@@ -213,8 +220,8 @@ struct	mtget mts;
 struct mtget *
 rmtstatus()
 {
-	register int i;
-	register char *cp;
+	int i;
+	char *cp;
 
 	if (rmtstate != TS_OPEN)
 		return (NULL);
@@ -250,7 +257,7 @@ static int
 rmtreply(cmd)
 	char *cmd;
 {
-	register char *cp;
+	char *cp;
 	char code[30], emsg[BUFSIZ];
 
 	rmtgets(code, sizeof (code));
@@ -292,7 +299,7 @@ rmtgets(line, len)
 	char *line;
 	int len;
 {
-	register char *cp = line;
+	char *cp = line;
 
 	while (len > 1) {
 		*cp = rmtgetb();

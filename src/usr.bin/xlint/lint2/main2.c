@@ -1,4 +1,4 @@
-/*	$OpenBSD: main2.c,v 1.2 1996/06/26 05:44:24 deraadt Exp $	*/
+/*	$OpenBSD: main2.c,v 1.4 2002/02/16 21:27:59 millert Exp $	*/
 /*	$NetBSD: main2.c,v 1.2 1995/07/03 21:24:53 cgd Exp $	*/
 
 /*
@@ -33,7 +33,7 @@
  */
 
 #ifndef lint
-static char rcsid[] = "$OpenBSD: main2.c,v 1.2 1996/06/26 05:44:24 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: main2.c,v 1.4 2002/02/16 21:27:59 millert Exp $";
 #endif
 
 #include <stdio.h>
@@ -59,7 +59,7 @@ const	char *libname;
 int	pflag;
 
 /*
- * warnings for (tentative) definitions of the same name in more then
+ * warnings for (tentative) definitions of the same name in more than
  * one translation unit
  */
 int	sflag;
@@ -84,7 +84,7 @@ int	Fflag;
  */
 const	char	**libs;
 
-static	void	usage __P((void));
+static	void	usage(void);
 
 
 int

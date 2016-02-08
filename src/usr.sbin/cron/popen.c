@@ -1,4 +1,4 @@
-/*	$OpenBSD: popen.c,v 1.11 2001/10/01 19:19:09 millert Exp $	*/
+/*	$OpenBSD: popen.c,v 1.13 2002/01/09 00:51:00 millert Exp $	*/
 
 /*
  * Copyright (c) 1988, 1993, 1994
@@ -38,7 +38,7 @@
 #if 0
 static char sccsid[] = "@(#)popen.c	8.3 (Berkeley) 4/6/94";
 #else
-static char rcsid[] = "$OpenBSD: popen.c,v 1.11 2001/10/01 19:19:09 millert Exp $";
+static char rcsid[] = "$OpenBSD: popen.c,v 1.13 2002/01/09 00:51:00 millert Exp $";
 #endif
 #endif /* not lint */
 
@@ -63,7 +63,7 @@ cron_popen(program, type, e)
 	entry *e;
 {
 	char *cp;
-	FILE * volatile iop;
+	FILE *iop;
 	int argc, pdes[2];
 	PID_T pid;
 	char *argv[MAX_ARGV];
@@ -153,15 +153,15 @@ cron_popen(program, type, e)
 		}
 		closelog();
 		if (*type == 'r') {
-			if (pdes[1] != STDOUT_FILENO) {
-				dup2(pdes[1], STDOUT_FILENO);
+			if (pdes[1] != STDOUT) {
+				dup2(pdes[1], STDOUT);
 				(void)close(pdes[1]);
 			}
-			dup2(STDOUT_FILENO, STDERR_FILENO); /* stderr too! */
+			dup2(STDOUT, STDERR);	/* stderr too! */
 			(void)close(pdes[0]);
 		} else {
-			if (pdes[0] != STDIN_FILENO) {
-				dup2(pdes[0], STDIN_FILENO);
+			if (pdes[0] != STDIN) {
+				dup2(pdes[0], STDIN);
 				(void)close(pdes[0]);
 			}
 			(void)close(pdes[1]);

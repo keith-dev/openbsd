@@ -1,4 +1,4 @@
-/*	$OpenBSD: ftpd.c,v 1.105 2001/10/02 17:43:47 wilfried Exp $	*/
+/*	$OpenBSD: ftpd.c,v 1.125 2002/03/30 22:01:51 deraadt Exp $	*/
 /*	$NetBSD: ftpd.c,v 1.15 1995/06/03 22:46:47 mycroft Exp $	*/
 
 /*
@@ -73,7 +73,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)ftpd.c	8.4 (Berkeley) 4/16/94";
 #else
-static char rcsid[] = "$OpenBSD: ftpd.c,v 1.105 2001/10/02 17:43:47 wilfried Exp $";
+static char rcsid[] = "$OpenBSD: ftpd.c,v 1.125 2002/03/30 22:01:51 deraadt Exp $";
 #endif
 #endif /* not lint */
 
@@ -97,6 +97,7 @@ static char rcsid[] = "$OpenBSD: ftpd.c,v 1.105 2001/10/02 17:43:47 wilfried Exp
 #include <arpa/inet.h>
 #include <arpa/telnet.h>
 
+#include <bsd_auth.h>
 #include <ctype.h>
 #include <dirent.h>
 #include <err.h>
@@ -107,8 +108,8 @@ static char rcsid[] = "$OpenBSD: ftpd.c,v 1.105 2001/10/02 17:43:47 wilfried Exp
 #include <login_cap.h>
 #include <netdb.h>
 #include <pwd.h>
-#include <setjmp.h>
 #include <signal.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -118,7 +119,6 @@ static char rcsid[] = "$OpenBSD: ftpd.c,v 1.105 2001/10/02 17:43:47 wilfried Exp
 #include <unistd.h>
 #include <util.h>
 #include <utmp.h>
-#include <bsd_auth.h>
 
 #if defined(TCPWRAPPERS)
 #include <tcpd.h>
@@ -126,12 +126,6 @@ static char rcsid[] = "$OpenBSD: ftpd.c,v 1.105 2001/10/02 17:43:47 wilfried Exp
 
 #include "pathnames.h"
 #include "extern.h"
-
-#ifdef __STDC__
-#include <stdarg.h>
-#else
-#include <varargs.h>
-#endif
 
 static char version[] = "Version 6.5/OpenBSD";
 
@@ -149,7 +143,6 @@ sigset_t allsigs;
 
 int	daemon_mode = 0;
 int	data;
-jmp_buf	errcatch, urgcatch;
 int	logged_in;
 struct	passwd *pw;
 int	debug = 0;
@@ -172,7 +165,7 @@ int	doutmp = 0;		/* update utmp file */
 int	usedefault = 1;		/* for data transfers */
 int	pdata = -1;		/* for passive mode */
 int	family = AF_INET;
-sig_atomic_t transflag;
+volatile sig_atomic_t transflag;
 off_t	file_size;
 off_t	byte_count;
 #if !defined(CMASK) || CMASK == 0
@@ -191,6 +184,7 @@ char	*tty = ttyline;		/* for klogin */
 static struct utmp utmp;	/* for utmp */
 static	login_cap_t *lc;
 static	auth_session_t *as;
+static	volatile sig_atomic_t recvurg;
 
 #if defined(TCPWRAPPERS)
 int	allow_severity = LOG_INFO;
@@ -236,28 +230,29 @@ char	proctitle[BUFSIZ];	/* initial part of title */
 			cmd, (*(file) == '/') ? "" : curdir(), file, cnt); \
 	}
 
-static void	 ack __P((char *));
-static void	 myoob __P((int));
-static int	 checkuser __P((char *, char *));
-static FILE	*dataconn __P((char *, off_t, char *));
-static void	 dolog __P((struct sockaddr *));
-static char	*copy_dir __P((char *, struct passwd *));
-static char	*curdir __P((void));
-static void	 end_login __P((void));
-static FILE	*getdatasock __P((char *));
-static int	guniquefd __P((char *, char **));
-static void	 lostconn __P((int));
-static void	 sigquit __P((int));
-static int	 receive_data __P((FILE *, FILE *));
-static void	 replydirname __P((const char *, const char *));
-static void	 send_data __P((FILE *, FILE *, off_t, off_t, int));
+static void	 ack(char *);
+static void	 sigurg(int);
+static void	 myoob(void);
+static int	 checkuser(char *, char *);
+static FILE	*dataconn(char *, off_t, char *);
+static void	 dolog(struct sockaddr *);
+static char	*copy_dir(char *, struct passwd *);
+static char	*curdir(void);
+static void	 end_login(void);
+static FILE	*getdatasock(char *);
+static int	guniquefd(char *, char **);
+static void	 lostconn(int);
+static void	 sigquit(int);
+static int	 receive_data(FILE *, FILE *);
+static void	 replydirname(const char *, const char *);
+static int	 send_data(FILE *, FILE *, off_t, off_t, int);
 static struct passwd *
-		 sgetpwnam __P((char *));
-static void	 reapchild __P((int));
-static int	 check_host __P((struct sockaddr *));
-static void	 usage __P((void));
+		 sgetpwnam(char *);
+static void	 reapchild(int);
+static int	 check_host(struct sockaddr *);
+static void	 usage(void);
 
-void	 logxfer __P((char *, off_t, time_t));
+void	 logxfer(char *, off_t, time_t);
 
 static char *
 curdir()
@@ -278,7 +273,7 @@ static void
 usage()
 {
 	syslog(LOG_ERR,
-	    "usage: ftpd [-AdDhlMSUv] [-t timeout] [-T maxtimeout] [-u mask]");
+	    "usage: ftpd [-AdDhlMPSU46] [-t timeout] [-T maxtimeout] [-u mask]");
 	exit(2);
 }
 
@@ -292,9 +287,12 @@ main(argc, argv, envp)
 	char *cp, line[LINE_MAX];
 	FILE *fp;
 	struct hostent *hp;
+	struct sigaction sa;
 
 	tzset();		/* in case no timezone database in ~ftp */
 	sigfillset(&allsigs);	/* used to block signals while root */
+	sigemptyset(&sa.sa_mask);
+	sa.sa_flags = SA_RESTART;
 
 	while ((ch = getopt(argc, argv, argstr)) != -1) {
 		switch (ch) {
@@ -303,6 +301,7 @@ main(argc, argv, envp)
 			break;
 
 		case 'd':
+		case 'v':		/* deprecated */
 			debug = 1;
 			break;
 
@@ -363,10 +362,6 @@ main(argc, argv, envp)
 			doutmp = 1;
 			break;
 
-		case 'v':
-			debug = 1;
-			break;
-
 		case '4':
 			family = AF_INET;
 			break;
@@ -400,7 +395,8 @@ main(argc, argv, envp)
 			syslog(LOG_ERR, "failed to become a daemon");
 			exit(1);
 		}
-		(void) signal(SIGCHLD, reapchild);
+		sa.sa_handler = reapchild;
+		(void) sigaction(SIGCHLD, &sa, NULL);
 		/*
 		 * Get port number for ftp/tcp.
 		 */
@@ -443,13 +439,8 @@ main(argc, argv, envp)
 			exit(1);
 		}
 		/* Stash pid in pidfile */
-		if ((fp = fopen(_PATH_FTPDPID, "w")) == NULL)
-			syslog(LOG_ERR, "can't open %s: %m", _PATH_FTPDPID);
-		else {
-			fprintf(fp, "%d\n", getpid());
-			fchmod(fileno(fp), S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH);
-			fclose(fp);
-		}
+		if (pidfile(NULL))
+			syslog(LOG_ERR, "can't open pidfile: %m");
 		/*
 		 * Loop forever accepting connection requests and forking off
 		 * children to handle them.
@@ -485,18 +476,27 @@ main(argc, argv, envp)
 	/* set this here so klogin can use it... */
 	(void)snprintf(ttyline, sizeof(ttyline), "ftp%d", getpid());
 
-	(void) signal(SIGHUP, sigquit);
-	(void) signal(SIGINT, sigquit);
-	(void) signal(SIGQUIT, sigquit);
-	(void) signal(SIGTERM, sigquit);
-	(void) signal(SIGPIPE, lostconn);
-	(void) signal(SIGCHLD, SIG_IGN);
-	if (signal(SIGURG, myoob) == SIG_ERR)
-		syslog(LOG_ERR, "signal: %m");
+	sa.sa_handler = SIG_DFL;
+	(void) sigaction(SIGCHLD, &sa, NULL);
+
+	sa.sa_handler = sigurg;
+	sa.sa_flags = 0;		/* don't restart syscalls for SIGURG */
+	(void) sigaction(SIGURG, &sa, NULL);
+
+	sigfillset(&sa.sa_mask);	/* block all signals in handler */
+	sa.sa_flags = SA_RESTART;
+	sa.sa_handler = sigquit;
+	(void) sigaction(SIGHUP, &sa, NULL);
+	(void) sigaction(SIGINT, &sa, NULL);
+	(void) sigaction(SIGQUIT, &sa, NULL);
+	(void) sigaction(SIGTERM, &sa, NULL);
+
+	sa.sa_handler = lostconn;
+	(void) sigaction(SIGPIPE, &sa, NULL);
 
 	addrlen = sizeof(ctrl_addr);
 	if (getsockname(0, (struct sockaddr *)&ctrl_addr, &addrlen) < 0) {
-		syslog(LOG_ERR, "getsockname (%s): %m", argv[0]);
+		syslog(LOG_ERR, "getsockname: %m");
 		exit(1);
 	}
 	if (his_addr.su_family == AF_INET6
@@ -597,7 +597,7 @@ main(argc, argv, envp)
 	/* Make sure hostname is fully qualified. */
 	hp = gethostbyname(hostname);
 	if (hp != NULL)
-		strcpy(hostname, hp->h_name);
+		strlcpy(hostname, hp->h_name, sizeof(hostname));
 
 	if (multihome) {
 		getnameinfo((struct sockaddr *)&ctrl_addr, ctrl_addr.su_len,
@@ -606,7 +606,6 @@ main(argc, argv, envp)
 
 	reply(220, "%s FTP server (%s) ready.",
 	    (multihome ? dhostname : hostname), version);
-	(void) setjmp(errcatch);
 	for (;;)
 		(void) yyparse();
 	/* NOTREACHED */
@@ -620,10 +619,10 @@ static void
 lostconn(signo)
 	int signo;
 {
+	struct syslog_data sdata = SYSLOG_DATA_INIT;
 
-	sigprocmask(SIG_BLOCK, &allsigs, NULL);
 	if (debug)
-		syslog(LOG_DEBUG, "lost connection");
+		syslog_r(LOG_DEBUG, &sdata, "lost connection");
 	dologout(1);
 }
 
@@ -631,9 +630,9 @@ static void
 sigquit(signo)
 	int signo;
 {
+	struct syslog_data sdata = SYSLOG_DATA_INIT;
 
-	sigprocmask(SIG_BLOCK, &allsigs, NULL);
-	syslog(LOG_ERR, "got signal %s", sys_signame[signo]);
+	syslog_r(LOG_ERR, &sdata, "got signal %s", sys_signame[signo]);
 	dologout(1);
 }
 
@@ -650,7 +649,7 @@ sgetpwnam(name)
 	struct passwd *pw;
 
 	if ((pw = getpwnam(name)) == NULL)
-		return (pw);
+		return (NULL);
 	if (save) {
 		memset(save->pw_passwd, 0, strlen(save->pw_passwd));
 		free(save);
@@ -683,7 +682,7 @@ void
 user(name)
 	char *name;
 {
-	char *cp, *shell, *style;
+	char *cp, *shell, *style, *host;
 	char *class = NULL;
 
 	if (logged_in) {
@@ -694,19 +693,24 @@ user(name)
 			reply(530, "Can't change user from chroot user.");
 			return;
 		}
+		end_login();
+	}
+
+	/* Close session from previous user if there was one. */
+	if (as) {
+		auth_close(as);
+		as = NULL;
+	}
+	if (lc) {
 		login_close(lc);
 		lc = NULL;
-		if (as) {
-			auth_close(as);
-			as = NULL;
-		}
-		end_login();
 	}
 
 	if ((style = strchr(name, ':')) != NULL)
 		*style++ = 0;
 
 	guest = 0;
+	host = multihome ? dhostname : hostname;
 	if (strcmp(name, "ftp") == 0 || strcmp(name, "anonymous") == 0) {
 		if (checkuser(_PATH_FTPUSERS, "ftp") ||
 		    checkuser(_PATH_FTPUSERS, "anonymous"))
@@ -715,6 +719,18 @@ user(name)
 			guest = 1;
 			askpasswd = 1;
 			lc = login_getclass(pw->pw_class);
+			if ((as = auth_open()) == NULL ||
+			    auth_setpwd(as, pw) != 0 ||
+			    auth_setoption(as, "FTPD_HOST", host) < 0) {
+				if (as) {
+					auth_close(as);
+					as = NULL;
+				}
+				login_close(lc);
+				lc = NULL;
+				reply(421, "Local resource failure");
+				return;
+			}
 			reply(331,
 			"Guest login ok, send your email address as password.");
 		} else
@@ -747,11 +763,13 @@ user(name)
 
 	/* Do pre-authentication setup. */
 	if (lc && ((as = auth_open()) == NULL ||
+	    (pw != NULL && auth_setpwd(as, pw) != 0) ||
 	    auth_setitem(as, AUTHV_STYLE, style) < 0 ||
 	    auth_setitem(as, AUTHV_NAME, name) < 0 ||
 	    auth_setitem(as, AUTHV_CLASS, class) < 0 ||
 	    auth_setoption(as, "login", "yes") < 0 ||
-	    auth_setoption(as, "notickets", "yes") < 0)) {
+	    auth_setoption(as, "notickets", "yes") < 0 ||
+	    auth_setoption(as, "FTPD_HOST", host) < 0)) {
 		if (as) {
 			auth_close(as);
 			as = NULL;
@@ -864,12 +882,16 @@ pass(passwd)
 	askpasswd = 0;
 	if (!guest) {		/* "ftp" is only account allowed no password */
 		authok = 0;
-		if (pw == NULL) {
+		if (pw == NULL || pw->pw_passwd[0] == '\0') {
 			useconds_t us;
 
 			/* Sleep between 1 and 3 seconds to emulate a crypt. */
 			us = arc4random() % 3000000;
 			usleep(us);
+			if (as != NULL) {
+				auth_close(as);
+				as = NULL;
+			}
 		} else {
 			authok = auth_userresponse(as, passwd, 0);
 			as = NULL;
@@ -891,14 +913,12 @@ pass(passwd)
 		}
 	} else if (lc != NULL) {
 		/* Save anonymous' password. */
+		if (guestpw != NULL)
+			free(guestpw);
 		guestpw = strdup(passwd);
-		if (guestpw == (char *)NULL)
-			fatal("Out of memory");
+		if (guestpw == NULL)
+			fatal("Out of memory.");
 
-		if ((as = auth_open()) == NULL)
-			fatal("Out of memory");
-		auth_setoption(as, "FTPD_HOST",
-		    multihome ? dhostname : hostname);
 		authok = auth_approval(as, lc, pw->pw_name, "ftp");
 		auth_close(as);
 		as = NULL;
@@ -906,14 +926,14 @@ pass(passwd)
 			syslog(LOG_INFO|LOG_AUTH,
 			    "FTP LOGIN FAILED (HOST) as %s: approval failure.",
 			    pw->pw_name);
-			reply(530, "Approval failure.\n");
+			reply(530, "Approval failure.");
 			exit(0);
 		}
 	} else {
 		syslog(LOG_INFO|LOG_AUTH,
 		    "FTP LOGIN CLASS %s MISSING for %s: approval failure.",
 		    pw->pw_class, pw->pw_name);
-		reply(530, "Permission denied.\n");
+		reply(530, "Permission denied.");
 		exit(0);
 	}
 	login_attempts = 0;		/* this time successful */
@@ -963,6 +983,21 @@ pass(passwd)
 		pw->pw_dir = newdir;
 	}
 
+	/* make sure pw->pw_dir is big enough to hold "/" */
+	if (strlen(pw->pw_dir) < 1) {
+		char *newdir;
+
+		newdir = malloc(2);
+		if (newdir == NULL) {
+			perror_reply(421, "Local resource failure: malloc");
+			dologout(1);
+			/* NOTREACHED */
+		}
+		strlcpy(newdir, pw->pw_dir, 2);
+		free(pw->pw_dir);
+		pw->pw_dir = newdir;
+	}
+
 	if (guest || dochroot) {
 		if (multihome && guest) {
 			struct stat ts;
@@ -975,7 +1010,7 @@ pass(passwd)
 					  pw->pw_dir, hostname);
 			}
 		} else
-			strcpy(rootdir, pw->pw_dir);
+			strlcpy(rootdir, pw->pw_dir, sizeof(rootdir));
 	}
 	if (guest) {
 		/*
@@ -1088,7 +1123,7 @@ retrieve(cmd, name)
 {
 	FILE *fin, *dout;
 	struct stat st;
-	int (*closefunc) __P((FILE *));
+	int (*closefunc)(FILE *);
 	time_t start;
 
 	if (cmd == 0) {
@@ -1162,7 +1197,7 @@ store(name, mode, unique)
 	int unique;
 {
 	FILE *fout, *din;
-	int (*closefunc) __P((FILE *));
+	int (*closefunc)(FILE *);
 	struct stat st;
 	int fd;
 
@@ -1458,7 +1493,7 @@ dataconn(name, size, mode)
  *
  * NB: Form isn't handled.
  */
-static void
+static int
 send_data(instr, outstr, blksize, filesize, isreg)
 	FILE *instr, *outstr;
 	off_t blksize;
@@ -1470,14 +1505,12 @@ send_data(instr, outstr, blksize, filesize, isreg)
 	size_t len;
 
 	transflag++;
-	if (setjmp(urgcatch)) {
-		transflag = 0;
-		return;
-	}
 	switch (type) {
 
 	case TYPE_A:
 		while ((c = getc(instr)) != EOF) {
+			if (recvurg)
+				goto got_oob;
 			byte_count++;
 			if (c == '\n') {
 				if (ferror(outstr))
@@ -1493,7 +1526,7 @@ send_data(instr, outstr, blksize, filesize, isreg)
 		if (ferror(outstr))
 			goto data_err;
 		reply(226, "Transfer complete.");
-		return;
+		return(0);
 
 	case TYPE_I:
 	case TYPE_L:
@@ -1516,6 +1549,10 @@ send_data(instr, outstr, blksize, filesize, isreg)
 			len = filesize;
 			do {
 				cnt = write(netfd, bp, len);
+				if (recvurg) {
+					munmap(buf, (size_t)filesize);
+					goto got_oob;
+				}
 				len -= cnt;
 				bp += cnt;
 				if (cnt > 0) byte_count += cnt;
@@ -1526,14 +1563,14 @@ send_data(instr, outstr, blksize, filesize, isreg)
 			if (cnt < 0)
 				goto data_err;
 			reply(226, "Transfer complete.");
-			return;
+			return(0);
 		}
 
 oldway:
 		if ((buf = malloc((u_int)blksize)) == NULL) {
 			transflag = 0;
 			perror_reply(451, "Local resource failure: malloc");
-			return;
+			return(-1);
 		}
 
 		while ((cnt = read(filefd, buf, (u_int)blksize)) > 0 &&
@@ -1547,21 +1584,28 @@ oldway:
 			goto data_err;
 		}
 		reply(226, "Transfer complete.");
-		return;
+		return(0);
 	default:
 		transflag = 0;
 		reply(550, "Unimplemented TYPE %d in send_data", type);
-		return;
+		return(-1);
 	}
 
 data_err:
 	transflag = 0;
 	perror_reply(426, "Data connection");
-	return;
+	return(-1);
 
 file_err:
 	transflag = 0;
 	perror_reply(551, "Error on input file");
+	return(-1);
+
+got_oob:
+	myoob();
+	recvurg = 0;
+	transflag = 0;
+	return(-1);
 }
 
 /*
@@ -1576,24 +1620,25 @@ receive_data(instr, outstr)
 {
 	int c;
 	int cnt;
-	volatile int bare_lfs = 0;
 	char buf[BUFSIZ];
+	struct sigaction sa;
+	volatile int bare_lfs = 0;
 
 	transflag++;
-	if (setjmp(urgcatch)) {
-		transflag = 0;
-		return (-1);
-	}
 	switch (type) {
 
 	case TYPE_I:
 	case TYPE_L:
-		signal (SIGALRM, lostconn);
+		sigfillset(&sa.sa_mask);
+		sa.sa_flags = SA_RESTART;
+		sigaction(SIGALRM, &sa, NULL);
 
 		do {
 			(void) alarm ((unsigned) timeout);
 			cnt = read(fileno(instr), buf, sizeof(buf));
 			(void) alarm (0);
+			if (recvurg)
+				goto got_oob;
 
 			if (cnt > 0) {
 				if (write(fileno(outstr), buf, cnt) != cnt)
@@ -1613,6 +1658,8 @@ receive_data(instr, outstr)
 
 	case TYPE_A:
 		while ((c = getc(instr)) != EOF) {
+			if (recvurg)
+				goto got_oob;
 			byte_count++;
 			if (c == '\n')
 				bare_lfs++;
@@ -1655,6 +1702,12 @@ data_err:
 file_err:
 	transflag = 0;
 	perror_reply(452, "Error writing file");
+	return (-1);
+
+got_oob:
+	myoob();
+	recvurg = 0;
+	transflag = 0;
 	return (-1);
 }
 
@@ -1828,29 +1881,19 @@ fatal(s)
 	char *s;
 {
 
-	reply(451, "Error in server: %s\n", s);
+	reply(451, "Error in server: %s", s);
 	reply(221, "Closing connection due to server error.");
 	dologout(0);
 	/* NOTREACHED */
 }
 
 void
-#ifdef __STDC__
 reply(int n, const char *fmt, ...)
-#else
-reply(n, fmt, va_alist)
-	int n;
-	char *fmt;
-	va_dcl
-#endif
 {
 	char *buf, *p, *next;
 	va_list ap;
-#ifdef __STDC__
+
 	va_start(ap, fmt);
-#else
-	va_start(ap);
-#endif
 	if (vasprintf(&buf, fmt, ap) == -1 || buf == NULL) {
 		printf("412 Local resource failure: malloc\r\n");
 		fflush(stdout);
@@ -1869,32 +1912,18 @@ reply(n, fmt, va_alist)
 }
 
 void
-#ifdef __STDC__
 lreply(int n, const char *fmt, ...)
-#else
-lreply(n, fmt, va_alist)
-	int n;
-	char *fmt;
-	va_dcl
-#endif
 {
 	va_list ap;
-#ifdef __STDC__
+
 	va_start(ap, fmt);
-#else
-	va_start(ap);
-#endif
 	(void)printf("%d- ", n);
 	(void)vprintf(fmt, ap);
 	va_end(ap);
 	(void)printf("\r\n");
 	(void)fflush(stdout);
 	if (debug) {
-#ifdef __STDC__
 		va_start(ap, fmt);
-#else
-		va_start(ap);
-#endif
 		syslog(LOG_DEBUG, "<--- %d- ", n);
 		vsyslog(LOG_DEBUG, fmt, ap);
 		va_end(ap);
@@ -2084,8 +2113,9 @@ dolog(sa)
 }
 
 /*
- * Record logout in wtmp file
- * and exit with supplied status.
+ * Record logout in wtmp file and exit with supplied status.
+ * NOTE: because this is called from signal handlers it cannot
+ *       use stdio (or call other functions that use stdio).
  */
 void
 dologout(status)
@@ -2106,11 +2136,17 @@ dologout(status)
 }
 
 static void
-myoob(signo)
+sigurg(signo)
 	int signo;
 {
+
+	recvurg = 1;
+}
+
+static void
+myoob()
+{
 	char *cp;
-	int save_errno = errno;
 
 	/* only process if transfer occurring */
 	if (!transflag)
@@ -2125,7 +2161,6 @@ myoob(signo)
 		tmpline[0] = '\0';
 		reply(426, "Transfer aborted. Data connection closed.");
 		reply(226, "Abort successful");
-		longjmp(urgcatch, 1);
 	}
 	if (strcmp(cp, "STAT\r\n") == 0) {
 		tmpline[0] = '\0';
@@ -2135,7 +2170,6 @@ myoob(signo)
 		else
 			reply(213, "Status: %qd bytes transferred", byte_count);
 	}
-	errno = save_errno;
 }
 
 /*
@@ -2267,7 +2301,7 @@ void
 long_passive(char *cmd, int pf)
 {
 	int len, on;
-	register u_char *p, *a;
+	u_char *p, *a;
 
 	if (!logged_in) {
 		syslog(LOG_NOTICE, "long passive but not logged in");
@@ -2593,10 +2627,6 @@ send_file_list(whichf)
 		simple = 1;
 	}
 
-	if (setjmp(urgcatch)) {
-		transflag = 0;
-		goto out;
-	}
 	while ((dirname = *dirlist++)) {
 		if (stat(dirname, &st) < 0) {
 			/*
@@ -2637,6 +2667,13 @@ send_file_list(whichf)
 
 		while ((dir = readdir(dirp)) != NULL) {
 			char nbuf[MAXPATHLEN];
+
+			if (recvurg) {
+				myoob();
+				recvurg = 0;
+				transflag = 0;
+				goto out;
+			}
 
 			if (dir->d_name[0] == '.' && dir->d_namlen == 1)
 				continue;
@@ -2700,9 +2737,11 @@ reapchild(signo)
 	int signo;
 {
 	int save_errno = errno;
+	int rval;
 
-	while (wait3(NULL, WNOHANG, NULL) > 0)
-		;
+	do {
+		rval = waitpid(-1, NULL, WNOHANG);
+	} while (rval > 0 || (rval == -1 && errno == EINTR));
 	errno = save_errno;
 }
 
@@ -2827,10 +2866,12 @@ copy_dir(dir, pw)
 		newdir = strdup(pw->pw_dir);
 	} else {
 		dirsiz = strlen(cp) + strlen(pw->pw_dir) + 1;
-		if ((newdir = malloc(dirsiz)) == NULL)
+		if ((newdir = malloc(dirsiz)) == NULL) {
+			free(user);		
 			return (NULL);
-		strcpy(newdir, pw->pw_dir);
-		strcat(newdir, cp);
+		}
+		strlcpy(newdir, pw->pw_dir, dirsiz);
+		strlcat(newdir, cp, dirsiz);
 	}
 
 	if (user)

@@ -1,4 +1,4 @@
-/*	$OpenBSD: print-decnet.c,v 1.8 2000/10/03 14:31:56 ho Exp $	*/
+/*	$OpenBSD: print-decnet.c,v 1.10 2002/02/19 19:39:40 millert Exp $	*/
 
 /*
  * Copyright (c) 1992, 1993, 1994, 1995, 1996, 1997
@@ -23,17 +23,15 @@
 
 #ifndef lint
 static const char rcsid[] =
-    "@(#) $Header: /cvs/src/usr.sbin/tcpdump/print-decnet.c,v 1.8 2000/10/03 14:31:56 ho Exp $ (LBL)";
+    "@(#) $Header: /cvs/src/usr.sbin/tcpdump/print-decnet.c,v 1.10 2002/02/19 19:39:40 millert Exp $ (LBL)";
 #endif
 
 #include <sys/param.h>
 #include <sys/time.h>
 #include <sys/socket.h>
 
-#ifdef __STDC__
 struct mbuf;
 struct rtentry;
-#endif
 #include <net/if.h>
 
 #ifdef	HAVE_LIBDNET
@@ -737,11 +735,12 @@ dnnum_string(u_short dnaddr)
 	char *str;
 	int area = (u_short)(dnaddr & AREAMASK) >> AREASHIFT;
 	int node = dnaddr & NODEMASK;
+	int len = sizeof("00.0000");
 
-	str = (char *)malloc(sizeof("00.0000"));
+	str = (char *)malloc(len);
 	if (str == NULL)
 		error("dnnum_string: malloc");
-	sprintf(str, "%d.%d", area, node);
+	snprintf(str, len, "%d.%d", area, node);
 	return(str);
 }
 

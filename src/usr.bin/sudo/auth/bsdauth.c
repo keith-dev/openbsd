@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000 Todd C. Miller <Todd.Miller@courtesan.com>
+ * Copyright (c) 2000-2001 Todd C. Miller <Todd.Miller@courtesan.com>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -34,23 +34,30 @@
 
 #include "config.h"
 
+#include <sys/types.h>
+#include <sys/param.h>
 #include <stdio.h>
 #ifdef STDC_HEADERS
-#include <stdlib.h>
+# include <stdlib.h>
+# include <stddef.h>
+#else
+# ifdef HAVE_STDLIB_H
+#  include <stdlib.h>
+# endif
 #endif /* STDC_HEADERS */
-#ifdef HAVE_UNISTD_H
-#include <unistd.h>
-#endif /* HAVE_UNISTD_H */
 #ifdef HAVE_STRING_H
-#include <string.h>
+# include <string.h>
+#else
+# ifdef HAVE_STRINGS_H
+#  include <strings.h>
+# endif
 #endif /* HAVE_STRING_H */
-#ifdef HAVE_STRINGS_H
-#include <strings.h>
-#endif /* HAVE_STRINGS_H */
+#ifdef HAVE_UNISTD_H
+# include <unistd.h>
+#endif /* HAVE_UNISTD_H */
 #include <ctype.h>
-#include <sys/param.h>
-#include <sys/types.h>
 #include <pwd.h>
+#include <signal.h>
 
 #include <login_cap.h>
 #include <bsd_auth.h>
@@ -59,7 +66,7 @@
 #include "sudo_auth.h"
 
 #ifndef lint
-static const char rcsid[] = "$Sudo: bsdauth.c,v 1.3 2000/10/30 03:45:11 millert Exp $";
+static const char rcsid[] = "$Sudo: bsdauth.c,v 1.8 2002/01/22 03:37:55 millert Exp $";
 #endif /* lint */
 
 extern char *login_style;		/* from sudo.c */
@@ -107,13 +114,16 @@ bsdauth_verify(pw, prompt, auth)
 {
     char *s, *pass;
     size_t len;
-    int authok;
-    sig_t childkiller;
+    int authok = 0;
+    sigaction_t sa, osa;
     auth_session_t *as = (auth_session_t *) auth->data;
     extern int nil_pw;
 
     /* save old signal handler */
-    childkiller = signal(SIGCHLD, SIG_DFL);
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = SA_RESTART;
+    sa.sa_handler = SIG_DFL;
+    (void) sigaction(SIGCHLD, &sa, &osa);
 
     /*
      * If there is a challenge then print that instead of the normal
@@ -122,10 +132,10 @@ bsdauth_verify(pw, prompt, auth)
      * S/Key.
      */
     if ((s = auth_challenge(as)) == NULL) {
-	pass = tgetpass(prompt, def_ival(I_PW_TIMEOUT) * 60, tgetpass_flags);
+	pass = tgetpass(prompt, def_ival(I_PASSWD_TIMEOUT) * 60, tgetpass_flags);
     } else {
-	pass = tgetpass(s, def_ival(I_PW_TIMEOUT) * 60, tgetpass_flags);
-	if (!pass || *pass == '\0') {
+	pass = tgetpass(s, def_ival(I_PASSWD_TIMEOUT) * 60, tgetpass_flags);
+	if (pass && *pass == '\0') {
 	    if ((prompt = strrchr(s, '\n')))
 		prompt++;
 	    else
@@ -139,19 +149,22 @@ bsdauth_verify(pw, prompt, auth)
 	    while (isspace(prompt[len]) || prompt[len] == ':')
 		prompt[len--] = '\0';
 	    easprintf(&s, "%s [echo on]: ", prompt);
-	    pass = tgetpass(s, def_ival(I_PW_TIMEOUT) * 60,
+	    pass = tgetpass(s, def_ival(I_PASSWD_TIMEOUT) * 60,
 		tgetpass_flags | TGP_ECHO);
 	    free(s);
 	}
     }
 
-    if (!pass || *pass == '\0')
-	nil_pw = 1;			/* empty password */
+    if (!pass || *pass == '\0')		/* ^C or empty password */
+	nil_pw = 1;
 
-    authok = auth_userresponse(as, pass, 1);
+    if (pass) {
+	authok = auth_userresponse(as, pass, 1);
+	memset(pass, 0, strlen(pass));
+    }
 
     /* restore old signal handler */
-    (void)signal(SIGCHLD, childkiller);
+    (void) sigaction(SIGCHLD, &osa, NULL);
 
     if (authok)
 	return(AUTH_SUCCESS);

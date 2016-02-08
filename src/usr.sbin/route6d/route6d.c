@@ -1,5 +1,5 @@
-/*	$OpenBSD: route6d.c,v 1.19 2001/09/05 01:27:13 itojun Exp $	*/
-/*	$KAME: route6d.c,v 1.73 2001/09/05 01:12:34 itojun Exp $	*/
+/*	$OpenBSD: route6d.c,v 1.26 2002/02/25 02:33:06 itojun Exp $	*/
+/*	$KAME: route6d.c,v 1.81 2002/02/25 02:27:22 itojun Exp $	*/
 
 /*
  * Copyright (C) 1995, 1996, 1997, and 1998 WIDE Project.
@@ -31,7 +31,7 @@
  */
 
 #if 0
-static char _rcsid[] = "$OpenBSD: route6d.c,v 1.19 2001/09/05 01:27:13 itojun Exp $";
+static char _rcsid[] = "$OpenBSD: route6d.c,v 1.26 2002/02/25 02:33:06 itojun Exp $";
 #endif
 
 #include <stdio.h>
@@ -41,15 +41,12 @@ static char _rcsid[] = "$OpenBSD: route6d.c,v 1.19 2001/09/05 01:27:13 itojun Ex
 #include <stdlib.h>
 #include <string.h>
 #include <signal.h>
-#ifdef __STDC__
 #include <stdarg.h>
-#else
-#include <varargs.h>
-#endif
 #include <syslog.h>
 #include <stddef.h>
 #include <errno.h>
 #include <err.h>
+#include <util.h>
 
 #include <sys/types.h>
 #include <sys/param.h>
@@ -138,7 +135,6 @@ int	nifc;		/* number of valid ifc's */
 struct	ifc **index2ifc;
 int	nindex2ifc;
 struct	ifc *loopifcp = NULL;	/* pointing to loopback */
-int	loopifindex = 0;	/* ditto */
 fd_set	sockvec;	/* vector to select() for receiving */
 int	rtsock;		/* the routing socket */
 int	ripsock;	/* socket to send/receive RIP datagram */
@@ -201,7 +197,6 @@ int logopened = 0;
 
 static	u_long	seq = 0;
 
-volatile int signo;
 volatile sig_atomic_t seenalrm;
 volatile sig_atomic_t seenquit;
 volatile sig_atomic_t seenusr1;
@@ -212,66 +207,65 @@ volatile sig_atomic_t seenusr1;
 #define RRTF_SENDANYWAY		0x40000000
 #define	RRTF_CHANGED		0x80000000
 
-int main __P((int, char **));
-void sighandler __P((int));
-void ripalarm __P((void));
-void riprecv __P((void));
-void ripsend __P((struct ifc *, struct sockaddr_in6 *, int));
-int out_filter __P((struct riprt *, struct ifc *));
-void init __P((void));
-void sockopt __P((struct ifc *));
-void ifconfig __P((void));
-void ifconfig1 __P((const char *, const struct sockaddr *, struct ifc *, int));
-void rtrecv __P((void));
-int rt_del __P((const struct sockaddr_in6 *, const struct sockaddr_in6 *,
-	const struct sockaddr_in6 *));
-int rt_deladdr __P((struct ifc *, const struct sockaddr_in6 *,
-	const struct sockaddr_in6 *));
-void filterconfig __P((void));
-int getifmtu __P((int));
-const char *rttypes __P((struct rt_msghdr *));
-const char *rtflags __P((struct rt_msghdr *));
-const char *ifflags __P((int));
-int ifrt __P((struct ifc *, int));
-void ifrt_p2p __P((struct ifc *, int));
-void applymask __P((struct in6_addr *, struct in6_addr *));
-void applyplen __P((struct in6_addr *, int));
-void ifrtdump __P((int));
-void ifdump __P((int));
-void ifdump0 __P((FILE *, const struct ifc *));
-void rtdump __P((int));
-void rt_entry __P((struct rt_msghdr *, int));
-void rtdexit __P((void));
-void riprequest __P((struct ifc *, struct netinfo6 *, int,
-	struct sockaddr_in6 *));
-void ripflush __P((struct ifc *, struct sockaddr_in6 *));
-void sendrequest __P((struct ifc *));
-int sin6mask2len __P((const struct sockaddr_in6 *));
-int mask2len __P((const struct in6_addr *, int));
-int sendpacket __P((struct sockaddr_in6 *, int));
-int addroute __P((struct riprt *, const struct in6_addr *, struct ifc *));
-int delroute __P((struct netinfo6 *, struct in6_addr *));
-struct in6_addr *getroute __P((struct netinfo6 *, struct in6_addr *));
-void krtread __P((int));
-int tobeadv __P((struct riprt *, struct ifc *));
-char *allocopy __P((char *));
-char *hms __P((void));
-const char *inet6_n2p __P((const struct in6_addr *));
-struct ifac *ifa_match __P((const struct ifc *, const struct in6_addr *, int));
-struct in6_addr *plen2mask __P((int));
-struct riprt *rtsearch __P((struct netinfo6 *, struct riprt **));
-int ripinterval __P((int));
-time_t ripsuptrig __P((void));
-void fatal __P((const char *, ...))
+int main(int, char **);
+void sighandler(int);
+void ripalarm(void);
+void riprecv(void);
+void ripsend(struct ifc *, struct sockaddr_in6 *, int);
+int out_filter(struct riprt *, struct ifc *);
+void init(void);
+void sockopt(struct ifc *);
+void ifconfig(void);
+void ifconfig1(const char *, const struct sockaddr *, struct ifc *, int);
+void rtrecv(void);
+int rt_del(const struct sockaddr_in6 *, const struct sockaddr_in6 *,
+    const struct sockaddr_in6 *);
+int rt_deladdr(struct ifc *, const struct sockaddr_in6 *,
+    const struct sockaddr_in6 *);
+void filterconfig(void);
+int getifmtu(int);
+const char *rttypes(struct rt_msghdr *);
+const char *rtflags(struct rt_msghdr *);
+const char *ifflags(int);
+int ifrt(struct ifc *, int);
+void ifrt_p2p(struct ifc *, int);
+void applymask(struct in6_addr *, struct in6_addr *);
+void applyplen(struct in6_addr *, int);
+void ifrtdump(int);
+void ifdump(int);
+void ifdump0(FILE *, const struct ifc *);
+void rtdump(int);
+void rt_entry(struct rt_msghdr *, int);
+void rtdexit(void);
+void riprequest(struct ifc *, struct netinfo6 *, int, struct sockaddr_in6 *);
+void ripflush(struct ifc *, struct sockaddr_in6 *);
+void sendrequest(struct ifc *);
+int sin6mask2len(const struct sockaddr_in6 *);
+int mask2len(const struct in6_addr *, int);
+int sendpacket(struct sockaddr_in6 *, int);
+int addroute(struct riprt *, const struct in6_addr *, struct ifc *);
+int delroute(struct netinfo6 *, struct in6_addr *);
+struct in6_addr *getroute(struct netinfo6 *, struct in6_addr *);
+void krtread(int);
+int tobeadv(struct riprt *, struct ifc *);
+char *allocopy(char *);
+char *hms(void);
+const char *inet6_n2p(const struct in6_addr *);
+struct ifac *ifa_match(const struct ifc *, const struct in6_addr *, int);
+struct in6_addr *plen2mask(int);
+struct riprt *rtsearch(struct netinfo6 *, struct riprt **);
+int ripinterval(int);
+time_t ripsuptrig(void);
+void fatal(const char *, ...)
 	__attribute__((__format__(__printf__, 1, 2)));
-void trace __P((int, const char *, ...))
+void trace(int, const char *, ...)
 	__attribute__((__format__(__printf__, 2, 3)));
-void tracet __P((int, const char *, ...))
+void tracet(int, const char *, ...)
 	__attribute__((__format__(__printf__, 2, 3)));
-unsigned int if_maxindex __P((void));
-struct ifc *ifc_find __P((char *));
-struct iff *iff_find __P((struct ifc *, int));
-void setindex2ifc __P((int, struct ifc *));
+unsigned int if_maxindex(void);
+struct ifc *ifc_find(char *);
+struct iff *iff_find(struct ifc *, int);
+void setindex2ifc(int, struct ifc *);
 
 #define	MALLOC(type)	((type *)malloc(sizeof(type)))
 
@@ -284,7 +278,6 @@ main(argc, argv)
 	int	error = 0;
 	struct	ifc *ifcp;
 	sigset_t mask, omask;
-	FILE	*pidfile;
 	char *progname;
 	char *ep;
 
@@ -350,6 +343,14 @@ main(argc, argv)
 		nflag = 1;
 		fprintf(stderr, "No kernel update is allowed\n");
 	}
+
+	if (dflag == 0) {
+		if (daemon(0, 0) < 0) {
+			fatal("daemon");
+			/*NOTREACHED*/
+		}
+	}
+
 	openlog(progname, LOG_NDELAY|LOG_PID, LOG_DAEMON);
 	logopened++;
 
@@ -377,7 +378,6 @@ main(argc, argv)
 		fatal("No loopback found");
 		/*NOTREACHED*/
 	}
-	loopifindex = loopifcp->ifc_index;
 	for (ifcp = ifc; ifcp; ifcp = ifcp->ifc_next)
 		ifrt(ifcp, 0);
 	filterconfig();
@@ -385,26 +385,7 @@ main(argc, argv)
 	if (dflag)
 		ifrtdump(0);
 
-	if (dflag == 0) {
-#if 1
-		if (daemon(0, 0) < 0) {
-			fatal("daemon");
-			/*NOTREACHED*/
-		}
-#else
-		if (fork())
-			exit(0);
-		if (setsid() < 0) {
-			fatal("setid");
-			/*NOTREACHED*/
-		}
-#endif
-	}
-	pid = getpid();
-	if ((pidfile = fopen(ROUTE6D_PID, "w")) != NULL) {
-		fprintf(pidfile, "%d\n", pid);
-		fclose(pidfile);
-	}
+	pidfile(NULL);
 
 	if ((ripbuf = (struct rip6 *)malloc(RIP6_MAXMTU)) == NULL) {
 		fatal("malloc");
@@ -462,7 +443,6 @@ main(argc, argv)
 		}
 
 		FD_COPY(&sockvec, &recvec);
-		signo = 0;
 		switch (select(maxfd + 1, &recvec, 0, 0, 0)) {
 		case -1:
 			if (errno != EINTR) {
@@ -488,11 +468,10 @@ main(argc, argv)
 }
 
 void
-sighandler(sig)
-	int sig;
+sighandler(signo)
+	int signo;
 {
 
-	signo = sig;
 	switch (signo) {
 	case SIGALRM:
 		seenalrm++;
@@ -968,11 +947,6 @@ sendpacket(sin6, len)
 	struct	sockaddr_in6 *sin6;
 	int	len;
 {
-	/*
-	 * MSG_DONTROUTE should not be specified when it responds with a
-	 * RIP6_REQUEST message.  SO_DONTROUTE has been specified to
-	 * other sockets.
-	 */
 	struct msghdr m;
 	struct cmsghdr *cm;
 	struct iovec iov[2];
@@ -985,10 +959,12 @@ sendpacket(sin6, len)
 	sincopy = *sin6;
 	sin6 = &sincopy;
 
-	if (IN6_IS_ADDR_LINKLOCAL(&sin6->sin6_addr)
-	 || IN6_IS_ADDR_MULTICAST(&sin6->sin6_addr)) {
+	if (IN6_IS_ADDR_LINKLOCAL(&sin6->sin6_addr) ||
+	    IN6_IS_ADDR_MULTICAST(&sin6->sin6_addr)) {
+		/* XXX: do not mix the interface index and link index */
 		idx = IN6_LINKLOCAL_IFINDEX(sin6->sin6_addr);
 		SET_IN6_LINKLOCAL_IFINDEX(sin6->sin6_addr, 0);
+		sin6->sin6_scope_id = idx;
 	} else
 		idx = 0;
 
@@ -1460,7 +1436,7 @@ ifconfig1(name, sa, ifcp, s)
 	if (IN6_IS_ADDR_SITELOCAL(&sin6->sin6_addr) && !lflag)
 		return;
 	ifr.ifr_addr = *sin6;
-	strcpy(ifr.ifr_name, name);
+	strncpy(ifr.ifr_name, name, sizeof(ifr.ifr_name));
 	if (ioctl(s, SIOCGIFNETMASK_IN6, (char *)&ifr) < 0) {
 		fatal("ioctl: SIOCGIFNETMASK_IN6");
 		/*NOTREACHED*/
@@ -1979,8 +1955,11 @@ ifrt(ifcp, again)
 	time_t t_lifetime;
 	int need_trigger = 0;
 
+#if 0
 	if (ifcp->ifc_flags & IFF_LOOPBACK)
 		return 0;			/* ignore loopback */
+#endif
+
 	if (ifcp->ifc_flags & IFF_POINTOPOINT) {
 		ifrt_p2p(ifcp, again);
 		return 0;
@@ -2002,6 +1981,13 @@ ifrt(ifcp, again)
 #endif
 			continue;
 		}
+		if (IN6_IS_ADDR_LOOPBACK(&ifa->ifa_addr)) {
+#if 0
+			trace(1, "route: %s: skip loopback address\n",
+			    ifcp->ifc_name);
+#endif
+			continue;
+		}
 		if (ifcp->ifc_flags & IFF_UP) {
 			if ((rrt = MALLOC(struct riprt)) == NULL)
 				fatal("malloc: struct riprt");
@@ -2013,7 +1999,10 @@ ifrt(ifcp, again)
 			rrt->rrt_info.rip6_tag = htons(routetag & 0xffff);
 			rrt->rrt_info.rip6_metric = 1 + ifcp->ifc_metric;
 			rrt->rrt_info.rip6_plen = ifa->ifa_plen;
-			rrt->rrt_flags = RTF_CLONING;
+			if (ifa->ifa_plen == 128)
+				rrt->rrt_flags = RTF_HOST;
+			else
+				rrt->rrt_flags = RTF_CLONING;
 			rrt->rrt_rflags |= RRTF_CHANGED;
 			applyplen(&rrt->rrt_info.rip6_dest, ifa->ifa_plen);
 			memset(&rrt->rrt_gw, 0, sizeof(struct in6_addr));
@@ -2073,7 +2062,7 @@ ifrt(ifcp, again)
 /*
  * there are couple of p2p interface routing models.  "behavior" lets
  * you pick one.  it looks that gated behavior fits best with BSDs,
- * since BSD kernels does not look at prefix length on p2p interfaces.
+ * since BSD kernels do not look at prefix length on p2p interfaces.
  */
 void
 ifrt_p2p(ifcp, again)
@@ -3084,7 +3073,7 @@ ifonly:
 		rrt->rrt_flags = RTF_UP | RTF_REJECT;
 		rrt->rrt_rflags = RRTF_AGGREGATE;
 		rrt->rrt_t = 0;
-		rrt->rrt_index = loopifindex;
+		rrt->rrt_index = loopifcp->ifc_index;
 #if 0
 		if (getroute(&rrt->rrt_info, &gw)) {
 #if 0
@@ -3269,6 +3258,11 @@ allocopy(p)
 {
 	char *q = (char *)malloc(strlen(p) + 1);
 
+	if (!q) {
+		fatal("malloc");
+		/*NOTREACHED*/
+	}
+
 	strcpy(q, p);
 	return q;
 }
@@ -3316,57 +3310,32 @@ ripsuptrig()
 }
 
 void
-#ifdef __STDC__
 fatal(const char *fmt, ...)
-#else
-fatal(fmt, va_alist)
-	char	*fmt;
-	va_dcl
-#endif
 {
 	va_list ap;
 	char buf[1024];
 
-#ifdef __STDC__
 	va_start(ap, fmt);
-#else
-	va_start(ap);
-#endif
 	vsnprintf(buf, sizeof(buf), fmt, ap);
+	va_end(ap);
 	perror(buf);
 	syslog(LOG_ERR, "%s: %s", buf, strerror(errno));
 	rtdexit();
-	va_end(ap);
 }
 
 void
-#ifdef __STDC__
 tracet(int level, const char *fmt, ...)
-#else
-tracet(level, fmt, va_alist)
-	int level;
-	char *fmt;
-	va_dcl
-#endif
 {
 	va_list ap;
 
 	if (level <= dflag) {
-#ifdef __STDC__
 		va_start(ap, fmt);
-#else
-		va_start(ap);
-#endif
 		fprintf(stderr, "%s: ", hms());
 		vfprintf(stderr, fmt, ap);
 		va_end(ap);
 	}
 	if (dflag) {
-#ifdef __STDC__
 		va_start(ap, fmt);
-#else
-		va_start(ap);
-#endif
 		if (level > 0)
 			vsyslog(LOG_DEBUG, fmt, ap);
 		else
@@ -3376,32 +3345,17 @@ tracet(level, fmt, va_alist)
 }
 
 void
-#ifdef __STDC__
 trace(int level, const char *fmt, ...)
-#else
-trace(level, fmt, va_alist)
-	int level;
-	char *fmt;
-	va_dcl
-#endif
 {
 	va_list ap;
 
 	if (level <= dflag) {
-#ifdef __STDC__
 		va_start(ap, fmt);
-#else
-		va_start(ap);
-#endif
 		vfprintf(stderr, fmt, ap);
 		va_end(ap);
 	}
 	if (dflag) {
-#ifdef __STDC__
 		va_start(ap, fmt);
-#else
-		va_start(ap);
-#endif
 		if (level > 0)
 			vsyslog(LOG_DEBUG, fmt, ap);
 		else

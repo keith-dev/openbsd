@@ -1,4 +1,4 @@
-/*	$OpenBSD: main.c,v 1.14 2001/10/11 20:59:46 millert Exp $	*/
+/*	$OpenBSD: main.c,v 1.17 2001/11/21 15:28:25 millert Exp $	*/
 /*	$NetBSD: main.c,v 1.7 1997/05/13 06:15:57 mikel Exp $	*/
 
 /*
@@ -35,16 +35,16 @@
  */
 
 #ifndef lint
-static char copyright[] =
+static const char copyright[] =
 "@(#) Copyright (c) 1980, 1993\n\
 	The Regents of the University of California.  All rights reserved.\n";
 #endif /* not lint */
 
 #ifndef lint
 #if 0
-static char sccsid[] = "@(#)main.c	8.2 (Berkeley) 4/20/95";
+static const char sccsid[] = "@(#)main.c	8.2 (Berkeley) 4/20/95";
 #else
-static char rcsid[] = "$OpenBSD: main.c,v 1.14 2001/10/11 20:59:46 millert Exp $";
+static const char rcsid[] = "$OpenBSD: main.c,v 1.17 2001/11/21 15:28:25 millert Exp $";
 #endif
 #endif /* not lint */
 
@@ -53,7 +53,8 @@ static char rcsid[] = "$OpenBSD: main.c,v 1.14 2001/10/11 20:59:46 millert Exp $
 #include <sys/ioctl.h>
 #include "extern.h"
 
-int	main __P((int, char **));
+__dead	void	usage(void);
+	int	main(int, char **);
 
 /*
  * Mail -- a mail program
@@ -61,20 +62,16 @@ int	main __P((int, char **));
  * Startup -- interface with user.
  */
 
-sigjmp_buf	hdrjmp;
-
 int
-main(argc, argv)
-	int argc;
-	char *argv[];
+main(int argc, char **argv)
 {
 	int i;
 	struct name *to, *cc, *bcc, *smopts;
 	char *subject;
 	char *ef;
 	char nosrc = 0;
-	sig_t prevint;
 	char *rc;
+	extern const char version[];
 
 	/*
 	 * Set up a reasonable environment.
@@ -82,6 +79,7 @@ main(argc, argv)
 	 * start the SIGCHLD catcher, and so forth.
 	 */
 	(void)signal(SIGCHLD, sigchild);
+	(void)signal(SIGPIPE, SIG_IGN);
 	if (isatty(0))
 		assign("interactive", "");
 	image = -1;
@@ -93,10 +91,10 @@ main(argc, argv)
 	 * first of these users.
 	 */
 	ef = NULL;
-	to = NIL;
-	cc = NIL;
-	bcc = NIL;
-	smopts = NIL;
+	to = NULL;
+	cc = NULL;
+	bcc = NULL;
+	smopts = NULL;
 	subject = NULL;
 	while ((i = getopt(argc, argv, "INT:b:c:dfins:u:v")) != -1) {
 		switch (i) {
@@ -188,13 +186,9 @@ main(argc, argv)
 			 */
 			bcc = cat(bcc, nalloc(optarg, GBCC));
 			break;
-		case '?':
-			fprintf(stderr, "\
-Usage: %s [-iInv] [-s subject] [-c cc-addr] [-b bcc-addr] to-addr ...\n\
-            [- sendmail-options ...]\n\
-       %s [-iInNv] -f [name]\n\
-       %s [-iInNv] [-u user]\n", __progname, __progname, __progname);
-			exit(1);
+		default:
+			usage();
+			/*NOTREACHED*/
 		}
 	}
 	for (i = optind; (argv[i]) && (*argv[i] != '-'); i++)
@@ -204,10 +198,19 @@ Usage: %s [-iInv] [-s subject] [-c cc-addr] [-b bcc-addr] to-addr ...\n\
 	/*
 	 * Check for inconsistent arguments.
 	 */
-	if (to == NIL && (subject != NULL || cc != NIL || bcc != NIL))
+	if (to == NULL && (subject != NULL || cc != NULL || bcc != NULL))
 		errx(1, "You must specify direct recipients with -s, -c, or -b");
-	if (ef != NULL && to != NIL)
+	if (ef != NULL && to != NULL)
 		errx(1, "Cannot give -f and people to send to");
+	/*
+	 * Block SIGINT except where we install an explicit handler for it.
+	 */
+	sigemptyset(&intset);
+	sigaddset(&intset, SIGINT);
+	(void)sigprocmask(SIG_BLOCK, &intset, NULL);
+	/*
+	 * Initialization.
+	 */
 	tinit();
 	setscreensize();
 	input = stdin;
@@ -238,37 +241,18 @@ Usage: %s [-iInv] [-s subject] [-c cc-addr] [-b bcc-addr] to-addr ...\n\
 		ef = "%";
 	if (setfile(ef) < 0)
 		exit(1);		/* error already reported */
-	if (sigsetjmp(hdrjmp, 1) == 0) {
-		extern char *version;
 
-		if ((prevint = signal(SIGINT, SIG_IGN)) != SIG_IGN)
-			(void)signal(SIGINT, hdrstop);
-		if (value("quiet") == NULL)
-			(void)printf("Mail version %s.  Type ? for help.\n",
-				version);
-		announce();
-		(void)fflush(stdout);
-		(void)signal(SIGINT, prevint);
-	}
+	if (value("quiet") == NULL)
+		(void)printf("Mail version %s.  Type ? for help.\n",
+			version);
+	announce();
+	(void)fflush(stdout);
 	commands();
-	(void)signal(SIGHUP, SIG_IGN);
-	(void)signal(SIGINT, SIG_IGN);
-	(void)signal(SIGQUIT, SIG_IGN);
+	(void)ignoresig(SIGHUP, NULL, NULL);
+	(void)ignoresig(SIGINT, NULL, NULL);
+	(void)ignoresig(SIGQUIT, NULL, NULL);
 	quit();
 	exit(0);
-}
-
-/*
- * Interrupt printing of the headers.
- */
-void
-hdrstop(signo)
-	int signo;
-{
-
-	fflush(stdout);
-	fputs("\nInterrupt\n", stderr);
-	siglongjmp(hdrjmp, 1);
 }
 
 /*
@@ -280,7 +264,7 @@ hdrstop(signo)
  * Width is either 80 or ws_col;
  */
 void
-setscreensize()
+setscreensize(void)
 {
 	struct termios tbuf;
 	struct winsize ws;
@@ -304,4 +288,17 @@ setscreensize()
 		realscreenheight = 24;
 	if ((screenwidth = ws.ws_col) == 0)
 		screenwidth = 80;
+}
+
+__dead void
+usage(void)
+{
+
+	fprintf(stderr, "usage: %s [-iInv] [-s subject] [-c cc-addr] "
+	    "[-b bcc-addr] to-addr ...\n", __progname);
+	fprintf(stderr, "       %*s [- sendmail-options ...]\n",
+	    (int)strlen(__progname), "");
+	fprintf(stderr, "       %s [-iInNv] -f [name]\n", __progname);
+	fprintf(stderr, "       %s [-iInNv] [-u user]\n", __progname);
+	exit(1);
 }

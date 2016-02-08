@@ -1,4 +1,4 @@
-/* $OpenBSD: res_random.c,v 1.9 2001/01/04 21:45:31 todd Exp $ */
+/* $OpenBSD: res_random.c,v 1.11 2002/02/19 19:39:36 millert Exp $ */
 
 /*
  * Copyright 1997 Niels Provos <provos@physnet.uni-hamburg.de>
@@ -92,22 +92,16 @@ static long ru_reseed;
 static u_int32_t tmp;                /* Storage for unused random */
 static struct timeval tv;
 
-static u_int16_t pmod __P((u_int16_t, u_int16_t, u_int16_t));
-static void res_initid __P((void));
+static u_int16_t pmod(u_int16_t, u_int16_t, u_int16_t);
+static void res_initid(void);
 
 /*
  * Do a fast modular exponation, returned value will be in the range
  * of 0 - (mod-1)
  */
 
-#ifdef __STDC__
 static u_int16_t
 pmod(u_int16_t gen, u_int16_t exp, u_int16_t mod)
-#else
-static u_int16_t
-pmod(gen, exp, mod)
-	u_int16_t gen, exp, mod;
-#endif
 {
 	u_int16_t s, t, u;
 

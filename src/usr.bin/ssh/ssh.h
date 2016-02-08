@@ -1,3 +1,5 @@
+/*	$OpenBSD: ssh.h,v 1.66 2002/03/29 19:18:33 stevesk Exp $	*/
+
 /*
  * Author: Tatu Ylonen <ylo@cs.hut.fi>
  * Copyright (c) 1995 Tatu Ylonen <ylo@cs.hut.fi>, Espoo, Finland
@@ -9,8 +11,6 @@
  * incompatible with the protocol description in the RFC file, it must be
  * called by a name other than "ssh" or "Secure Shell".
  */
-
-/* RCSID("$OpenBSD: ssh.h,v 1.63 2001/05/24 18:57:53 stevesk Exp $"); */
 
 #ifndef SSH_H
 #define SSH_H
@@ -84,5 +84,15 @@
 
 /* Used to identify ``EscapeChar none'' */
 #define SSH_ESCAPECHAR_NONE		-2
+
+/*
+ * unprivileged user when UsePrivilegeSeparation=yes;
+ * sshd will change its pivileges to this user and its
+ * primary group.
+ */
+#define SSH_PRIVSEP_USER		"nobody"
+
+/* Minimum modulus size (n) for RSA keys. */
+#define SSH_RSA_MINIMUM_MODULUS_SIZE	768
 
 #endif				/* SSH_H */

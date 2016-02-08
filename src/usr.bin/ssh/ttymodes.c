@@ -43,7 +43,7 @@
  */
 
 #include "includes.h"
-RCSID("$OpenBSD: ttymodes.c,v 1.14 2001/06/24 17:18:31 markus Exp $");
+RCSID("$OpenBSD: ttymodes.c,v 1.17 2002/03/19 10:49:35 markus Exp $");
 
 #include "packet.h"
 #include "log.h"
@@ -396,23 +396,23 @@ tty_parse_modes(int fd, int *n_bytes_ptr)
 
 		default:
 			debug("Ignoring unsupported tty mode opcode %d (0x%x)",
-			      opcode, opcode);
+			    opcode, opcode);
 			if (!compat20) {
 				/*
 				 * SSH1:
 				 * Opcodes 1 to 127 are defined to have
 				 * a one-byte argument.
-  				 * Opcodes 128 to 159 are defined to have
-  				 * an integer argument.
-  				 */
+				 * Opcodes 128 to 159 are defined to have
+				 * an integer argument.
+				 */
 				if (opcode > 0 && opcode < 128) {
 					n_bytes += 1;
 					(void) packet_get_char();
 					break;
 				} else if (opcode >= 128 && opcode < 160) {
-  					n_bytes += 4;
-  					(void) packet_get_int();
-  					break;
+					n_bytes += 4;
+					(void) packet_get_int();
+					break;
 				} else {
 					/*
 					 * It is a truly undefined opcode (160 to 255).
@@ -422,9 +422,8 @@ tty_parse_modes(int fd, int *n_bytes_ptr)
 					 * more coming after the mode data.
 					 */
 					log("parse_tty_modes: unknown opcode %d", opcode);
-					packet_integrity_check(0, 1, SSH_CMSG_REQUEST_PTY);
 					goto set;
-  				}
+				}
 			} else {
 				/*
 				 * SSH2:
@@ -441,7 +440,7 @@ tty_parse_modes(int fd, int *n_bytes_ptr)
 					log("parse_tty_modes: unknown opcode %d", opcode);
 					goto set;
 				}
-  			}
+			}
 		}
 	}
 

@@ -1,4 +1,4 @@
-.\"	$OpenBSD: pkg_info.1,v 1.8 2001/08/17 11:13:58 mpech Exp $
+.\"	$OpenBSD: pkg_info.1,v 1.10 2002/04/06 01:07:19 espie Exp $
 .\"
 .\" FreeBSD install - a package for the installation and maintainance
 .\" of non-core utilities.
@@ -126,7 +126,7 @@ Be
 in emitting report headers and such, just dump the
 raw info (basically, assume a non-human reading).
 .It Fl R
-Show which packages are required by each package.
+Show which packages require a given package.
 .It Fl r
 Show the requirements script (if any) for each package.
 .It Fl v
@@ -192,7 +192,7 @@ in
 .Xr pkg_add 1 ,
 .Xr pkg_create 1 ,
 .Xr pkg_delete 1 ,
-.Xr mktemp 3 ,
+.Xr mkstemp 3 ,
 .Xr mtree 8
 .Sh AUTHORS
 .Bl -tag -width indent -compact

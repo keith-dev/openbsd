@@ -1,4 +1,4 @@
-/*	$OpenBSD: pppoe.c,v 1.4 2001/04/15 20:41:46 jason Exp $	*/
+/*	$OpenBSD: pppoe.c,v 1.7 2002/02/16 21:28:07 millert Exp $	*/
 
 /*
  * Copyright (c) 2000 Network Security Technologies, Inc. http://www.netsec.net
@@ -59,12 +59,12 @@
 int option_verbose = 0;
 u_char etherbroadcastaddr[6] = { 0xff, 0xff, 0xff, 0xff, 0xff, 0xff };
 
-int main __P((int, char **));
-void usage __P((char *));
-int getifhwaddr __P((char *, char *, struct ether_addr *));
-int setupfilter __P((char *, struct ether_addr *, int));
-void child_handler __P((int));
-int signal_init __P((void));
+int main(int, char **);
+void usage(void);
+int getifhwaddr(char *, char *, struct ether_addr *);
+int setupfilter(char *, struct ether_addr *, int);
+void child_handler(int);
+int signal_init(void);
 
 int
 main(int argc, char **argv) {
@@ -77,28 +77,28 @@ main(int argc, char **argv) {
 		switch (c) {
 		case 'i':
 			if (ifname != NULL) {
-				usage(argv[0]);
+				usage();
 				return (EX_USAGE);
 			}
 			ifname = optarg;
 			break;
 		case 'n':
 			if (srvname != NULL) {
-				usage(argv[0]);
+				usage();
 				return (EX_USAGE);
 			}
 			srvname = optarg;
 			break;
 		case 'p':
 			if (sysname != NULL) {
-				usage(argv[0]);
+				usage();
 				return (EX_USAGE);
 			}
 			sysname = optarg;
 			break;
 		case 's':
 			if (smode) {
-				usage(argv[0]);
+				usage();
 				return (EX_USAGE);
 			}
 			smode = 1;
@@ -107,14 +107,14 @@ main(int argc, char **argv) {
 			option_verbose++;
 			break;
 		default:
-			usage(argv[0]);
+			usage();
 			return (EX_USAGE);
 		}
 	}
 
 	argc -= optind;
 	if (argc != 0) {
-		usage(argv[0]);
+		usage();
 		return (EX_USAGE);
 	}
 
@@ -275,8 +275,7 @@ setupfilter(ifn, ea, server_mode)
 		err(EX_IOERR, "set immediate");
 	}
 
-	strncpy(ifr.ifr_name, ifn, sizeof(ifr.ifr_name));
-	ifr.ifr_name[sizeof(ifr.ifr_name)-1] = '\0';
+	strlcpy(ifr.ifr_name, ifn, IFNAMSIZ);
 	if (ioctl(fd, BIOCSETIF, &ifr) < 0) {
 		close(fd);
 		err(EX_IOERR, "set interface");
@@ -340,8 +339,7 @@ getifhwaddr(ifnhint, ifnambuf, ea)
 		    sizeof(ifrp->ifr_name)))
 			continue;
 		if (ifnhint == NULL) {
-			strncpy(req.ifr_name, ifrp->ifr_name, IFNAMSIZ);
-			req.ifr_name[IFNAMSIZ-1] = '\0';
+			strlcpy(req.ifr_name, ifrp->ifr_name, IFNAMSIZ);
 			if (ioctl(s, SIOCGIFFLAGS, &req) < 0)
 				err(EX_IOERR, "get flags");
 			if ((req.ifr_flags & IFF_UP) == 0)
@@ -365,8 +363,7 @@ getifhwaddr(ifnhint, ifnambuf, ea)
 			return (-1);
 		}
 		bcopy(dl->sdl_data + dl->sdl_nlen, ea, sizeof(*ea));
-		strncpy(ifnambuf, ifrp->ifr_name, IFNAMSIZ);
-		ifnambuf[IFNAMSIZ-1] = '\0';
+		strlcpy(ifnambuf, ifrp->ifr_name, IFNAMSIZ);
 		free(inbuf);
 		close(s);
 		return (0);
@@ -381,10 +378,12 @@ getifhwaddr(ifnhint, ifnambuf, ea)
 }
 
 void
-usage(progname)
-	char *progname;
+usage()
 {
-	fprintf(stderr, "%s [-s] [-v] [-p system] [-i interface]\n", progname);
+	extern char *__progname;
+
+	fprintf(stderr,"%s [-sv] [-i interface] [-n service] [-p system]\n",
+	    __progname);
 }
 
 void

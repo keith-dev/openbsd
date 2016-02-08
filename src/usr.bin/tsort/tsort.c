@@ -1,4 +1,4 @@
-/* $OpenBSD: tsort.c,v 1.10 2001/07/14 14:18:50 espie Exp $ */
+/* $OpenBSD: tsort.c,v 1.14 2002/02/27 20:26:37 espie Exp $ */
 /* ex:ts=8 sw=4: 
  */
 
@@ -127,51 +127,51 @@ struct array {
 	struct node  **t;
 };
 
-static void nodes_init __P((struct ohash *));
-static struct node *node_lookup __P((struct ohash *, const char *, const char *));
-static void usage __P((void));
-static struct node *new_node __P((const char *, const char *));
+static void nodes_init(struct ohash *);
+static struct node *node_lookup(struct ohash *, const char *, const char *);
+static void usage(void);
+static struct node *new_node(const char *, const char *);
 
-static unsigned int read_pairs __P((FILE *, struct ohash *, int, 
-    const char *, unsigned int, int));
-static void split_nodes __P((struct ohash *, struct array *, struct array *));
-static void make_transparent __P((struct ohash *));
-static void insert_arc __P((struct node *, struct node *));
+static unsigned int read_pairs(FILE *, struct ohash *, int, 
+    const char *, unsigned int, int);
+static void split_nodes(struct ohash *, struct array *, struct array *);
+static void make_transparent(struct ohash *);
+static void insert_arc(struct node *, struct node *);
 
 #ifdef DEBUG
-static void dump_node __P((struct node *));
-static void dump_array __P((struct array *));
-static void dump_hash __P((struct ohash *));
+static void dump_node(struct node *);
+static void dump_array(struct array *);
+static void dump_hash(struct ohash *);
 #endif
-static unsigned int read_hints __P((FILE *, struct ohash *, int, 
-    const char *, unsigned int));
-static struct node *find_smallest_node __P((struct array *));
-static struct node *find_good_cycle_break __P((struct array *));
-static void print_cycle __P((struct array *));
-static struct node *find_cycle_from __P((struct node *, struct array *));
-static struct node *find_predecessor __P((struct array *, struct node *));
-static unsigned int traverse_node __P((struct node *, unsigned int, struct array *));
-static struct node *find_longest_cycle __P((struct array *, struct array *));
+static unsigned int read_hints(FILE *, struct ohash *, int, 
+    const char *, unsigned int);
+static struct node *find_smallest_node(struct array *);
+static struct node *find_good_cycle_break(struct array *);
+static void print_cycle(struct array *);
+static struct node *find_cycle_from(struct node *, struct array *);
+static struct node *find_predecessor(struct array *, struct node *);
+static unsigned int traverse_node(struct node *, unsigned int, struct array *);
+static struct node *find_longest_cycle(struct array *, struct array *);
 
-static void heap_down __P((struct array *, unsigned int));
-static void heapify __P((struct array *, int));
-static struct node *dequeue __P((struct array *));
-static void enqueue __P((struct array *, struct node *));
+static void heap_down(struct array *, unsigned int);
+static void heapify(struct array *, int);
+static struct node *dequeue(struct array *);
+static void enqueue(struct array *, struct node *);
 
 
 
 #define erealloc(n, s)	emem(realloc(n, s))
-static void *hash_alloc __P((size_t, void *));
-static void hash_free __P((void *, size_t, void *));
-static void* entry_alloc __P((size_t, void *));
-static void *emalloc __P((size_t));
-static void *emem __P((void *));
+static void *hash_alloc(size_t, void *);
+static void hash_free(void *, size_t, void *);
+static void* entry_alloc(size_t, void *);
+static void *emalloc(size_t);
+static void *emem(void *);
 #define DEBUG_TRAVERSE 0
 static struct ohash_info node_info = { 
 	offsetof(struct node, k), NULL, hash_alloc, hash_free, entry_alloc };
 
 
-int main __P((int, char *[]));
+int main(int, char *[]);
 
 
 /***
@@ -179,8 +179,7 @@ int main __P((int, char *[]));
  ***/
 
 static void *
-emem(p)
-	void 		*p;
+emem(void *p)
 {
 	if (p)
 		return p;
@@ -189,33 +188,25 @@ emem(p)
 }
 
 static void *
-hash_alloc(s, u)
-	size_t s;
-	void *u		UNUSED;
+hash_alloc(size_t s, void *u UNUSED)
 {
 	return emem(calloc(s, 1));
 }
 
 static void
-hash_free(p, s, u)
-	void *p;
-	size_t s	UNUSED;
-	void *u		UNUSED;
+hash_free(void *p, size_t s UNUSED, void *u UNUSED)
 {
 	free(p);
 }
 
 static void *
-entry_alloc(s, u)
-	size_t s;
-	void *u		UNUSED;
+entry_alloc(size_t s, void *u UNUSED)
 {
 	return emalloc(s);
 }
 
 static void *
-emalloc(s)
-	size_t s;
+emalloc(size_t s)
 {
 	return emem(malloc(s));
 }
@@ -228,9 +219,7 @@ emalloc(s)
 /* Inserting and finding nodes in the hash structure.
  * We handle interval strings for efficiency wrt fgetln.  */
 static struct node *
-new_node(start, end)
-	const char 	*start;
-	const char 	*end;
+new_node(const char *start, const char *end)
 {
 	struct node 	*n;
 
@@ -246,17 +235,13 @@ new_node(start, end)
 
 
 static void 
-nodes_init(h)
-	struct ohash 	*h;
+nodes_init(struct ohash *h)
 {
 	ohash_init(h, HASH_START, &node_info);
 }
 
 static struct node *
-node_lookup(h, start, end)
-	struct ohash 	*h;
-	const char 	*start;
-	const char 	*end;
+node_lookup(struct ohash *h, const char *start, const char *end)
 {
 	unsigned int	i;
 	struct node *	n;
@@ -271,8 +256,7 @@ node_lookup(h, start, end)
 	
 #ifdef DEBUG
 static void
-dump_node(n)
-    struct node 	*n;
+dump_node(struct node *n)
 {
 	struct link 	*l;
 
@@ -286,8 +270,7 @@ dump_node(n)
 }
 
 static void
-dump_array(a)
-	struct array	*a;
+dump_array(struct array *a)
 {
 	unsigned int 	i;
 
@@ -296,8 +279,7 @@ dump_array(a)
 }
 		
 static void 
-dump_hash(h)
-	struct ohash 	*h;
+dump_hash(struct ohash *h)
 {
 	unsigned int 	i;
 	struct node 	*n;
@@ -313,8 +295,7 @@ dump_hash(h)
  ***/
 
 static void 
-insert_arc(a, b)
-	struct node 	*a, *b;
+insert_arc(struct node *a, struct node *b)
 {
 	struct link 	*l;
 
@@ -331,13 +312,8 @@ insert_arc(a, b)
 }
 
 static unsigned int
-read_pairs(f, h, reverse, name, order, hint)
-	FILE 		*f;
-	struct ohash 	*h;
-	int 		reverse;
-	const char 	*name;
-	unsigned int	order;
-	int		hint;
+read_pairs(FILE *f, struct ohash *h, int reverse, const char *name, 
+    unsigned int order, int hint)
 {
 	int 		toggle;
 	struct node 	*a;
@@ -388,12 +364,8 @@ read_pairs(f, h, reverse, name, order, hint)
 }
 
 static unsigned int
-read_hints(f, h, quiet, name, order)
-	FILE 		*f;
-	struct ohash 	*h;
-	int 		quiet;
-	const char 	*name;
-	unsigned int	order;
+read_hints(FILE *f, struct ohash *h, int quiet, const char *name, 
+    unsigned int order)
 {
 	char 		*str;
 	size_t 		size;
@@ -432,9 +404,7 @@ read_hints(f, h, quiet, name, order)
  ***/
 
 static void 
-heap_down(h, i)
-	struct array 	*h;
-	unsigned int 	i;
+heap_down(struct array *h, unsigned int i)
 {
 	unsigned int 	j;
 	struct node 	*swap;
@@ -451,9 +421,7 @@ heap_down(h, i)
 }
 
 static void 
-heapify(h, verbose)
-	struct array 	*h;
-	int		verbose;
+heapify(struct array *h, int verbose)
 {
 	unsigned int 	i;
 
@@ -467,8 +435,7 @@ heapify(h, verbose)
 #define DEQUEUE(h) ( hints_flag ? dequeue(h) : (h)->t[--(h)->entries] )
 
 static struct node *
-dequeue(h)
-	struct array 	*h;
+dequeue(struct array *h)
 {
 	struct node 	*n;
 
@@ -492,9 +459,7 @@ dequeue(h)
 	} while(0);
 
 static void 
-enqueue(h, n)
-	struct array 	*h;
-	struct node 	*n;
+enqueue(struct array *h, struct node *n)
 {
 	unsigned int 	i, j;
 	struct node 	*swap;
@@ -514,8 +479,7 @@ enqueue(h, n)
  * Iterate until no nodes are left. 
  */
 static void
-make_transparent(hash)
-	struct ohash	*hash;
+make_transparent(struct ohash *hash)
 {
 	struct node 	*n;
 	unsigned int 	i;
@@ -571,10 +535,7 @@ make_transparent(hash)
 
 /* Split nodes into unrefed nodes/live nodes.  */
 static void
-split_nodes(hash, heap, remaining)
-	struct ohash 	*hash;
-	struct array 	*heap;
-	struct array	*remaining;
+split_nodes(struct ohash *hash, struct array *heap, struct array *remaining)
 {
 
 	struct node *n;
@@ -595,8 +556,7 @@ split_nodes(hash, heap, remaining)
 
 /* Good point to break a cycle: live node with as few refs as possible. */
 static struct node *
-find_good_cycle_break(h)
-	struct array 	*h;
+find_good_cycle_break(struct array *h)
 {
 	unsigned int 	i;
 	unsigned int 	best; 
@@ -622,8 +582,7 @@ find_good_cycle_break(h)
 			
 /*  Retrieve the node with the smallest order.  */
 static struct node * 
-find_smallest_node(h)
-	struct array 	*h;
+find_smallest_node(struct array *h)
 {
 	unsigned int 	i;
 	unsigned int 	best;
@@ -652,9 +611,7 @@ find_smallest_node(h)
 /* Explore the nodes reachable from i to find a cycle, store it in c.  
  * This may fail.  */
 static struct node * 
-find_cycle_from(i, c)
-	struct node 	*i;
-	struct array 	*c;
+find_cycle_from(struct node *i, struct array *c)
 {
 	struct node 	*n;
 
@@ -702,9 +659,7 @@ find_cycle_from(i, c)
  * to go through the whole array, but it is not needed often.
  */
 static struct node *
-find_predecessor(a, n)
-	struct array *a;
-	struct node *n;
+find_predecessor(struct array *a, struct node *n)
 {
 	unsigned int i;
 
@@ -729,10 +684,7 @@ find_predecessor(a, n)
    Update the largest cycle found so far.
  */
 static unsigned int 
-traverse_node(n, o, c)
-	struct node 	*n;
-	unsigned int 	o;
-	struct array 	*c;
+traverse_node(struct node *n, unsigned int o, struct array *c)
 {
 	unsigned int 	min, max;
 
@@ -743,7 +695,7 @@ traverse_node(n, o, c)
 	for (;;) {
 		n->mark = o;
 		if (DEBUG_TRAVERSE)
-			printf("%s(%d) ", n->k, n->mark);
+			printf("%s(%u) ", n->k, n->mark);
 		/* Find next arc to explore.  */
 		if (n->traverse) 
 			n->traverse = n->traverse->next;
@@ -797,8 +749,7 @@ traverse_node(n, o, c)
 }
 
 static void
-print_cycle(c)
-	struct array 	*c;
+print_cycle(struct array *c)
 {
 	unsigned int 	i;
 
@@ -811,9 +762,7 @@ print_cycle(c)
 }
 
 static struct node *
-find_longest_cycle(h, c)
-	struct array 	*h;
-	struct array 	*c;
+find_longest_cycle(struct array *h, struct array *c)
 {
 	unsigned int 	i;
 	unsigned int 	o;
@@ -863,9 +812,7 @@ find_longest_cycle(h, c)
 #define plural(n) ((n) > 1 ? "s" : "")
 
 int 
-main(argc, argv)
-    int 		argc;
-    char 		*argv[];
+main(int argc, char *argv[])
 {
 	struct ohash 	pairs;
 	int 		reverse_flag, quiet_flag, long_flag, 

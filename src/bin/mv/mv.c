@@ -1,4 +1,4 @@
-/*	$OpenBSD: mv.c,v 1.19 2001/09/06 13:29:08 mpech Exp $	*/
+/*	$OpenBSD: mv.c,v 1.23 2002/02/16 21:27:07 millert Exp $	*/
 /*	$NetBSD: mv.c,v 1.9 1995/03/21 09:06:52 cgd Exp $	*/
 
 /*
@@ -47,7 +47,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)mv.c	8.2 (Berkeley) 4/2/94";
 #else
-static char rcsid[] = "$OpenBSD: mv.c,v 1.19 2001/09/06 13:29:08 mpech Exp $";
+static char rcsid[] = "$OpenBSD: mv.c,v 1.23 2002/02/16 21:27:07 millert Exp $";
 #endif
 #endif /* not lint */
 
@@ -74,18 +74,18 @@ extern char *__progname;
 int fflg, iflg;
 int stdin_ok;
 
-int	copy __P((char *, char *));
-int	do_move __P((char *, char *));
-int	fastcopy __P((char *, char *, struct stat *));
-void	usage __P((void));
+int	copy(char *, char *);
+int	do_move(char *, char *);
+int	fastcopy(char *, char *, struct stat *);
+void	usage(void);
 
 int
 main(argc, argv)
 	int argc;
 	char *argv[];
 {
-	register int baselen, len, rval;
-	register char *p, *endp;
+	int baselen, len, rval;
+	char *p, *endp;
 	struct stat sb;
 	int ch;
 	char path[MAXPATHLEN];
@@ -174,6 +174,12 @@ do_move(from, to)
 	struct stat sb, fsb;
 	char modep[15];
 
+	/* Source path must exist (symlink is OK). */
+	if (lstat(from, &fsb)) {
+		warn("%s", from);
+		return (1);
+	}
+
 	/*
 	 * (1)	If the destination path exists, the -f option is not specified
 	 *	and either of the following conditions are true:
@@ -231,11 +237,6 @@ do_move(from, to)
 		return (1);
 	}
 
-	if (lstat(from, &fsb)) {
-		warn("%s", from);
-		return (1);
-	}
-
 	/* Disallow moving a mount point. */
 	if (S_ISDIR(fsb.st_mode)) {
 		struct statfs sfs;
@@ -280,8 +281,8 @@ fastcopy(from, to, sbp)
 	struct timeval tval[2];
 	static u_int blen;
 	static char *bp;
-	register int nread, from_fd, to_fd;
-	int badchown = 0, serrno;
+	int nread, from_fd, to_fd;
+	int badchown = 0, serrno = 0;
 
 	if ((from_fd = open(from, O_RDONLY, 0)) < 0) {
 		warn("%s", from);

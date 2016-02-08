@@ -52,7 +52,7 @@
 
 #ifndef lint
 static char rcsid[] =
-    "@(#) $Id: mtrace.c,v 1.8 2001/09/05 22:32:45 deraadt Exp $";
+    "@(#) $Id: mtrace.c,v 1.12 2002/02/19 19:39:40 millert Exp $";
 #endif
 
 #include <netdb.h>
@@ -63,11 +63,7 @@ static char rcsid[] =
 #include <sys/ioctl.h>
 #include "defs.h"
 #include <arpa/inet.h>
-#ifdef __STDC__
 #include <stdarg.h>
-#else
-#include <varargs.h>
-#endif
 #ifdef SUNOS5
 #include <sys/systeminfo.h>
 #endif
@@ -139,34 +135,32 @@ extern long random();
 #endif
 extern int errno;
 
-char *			inet_name __P((u_int32_t addr));
-u_int32_t			host_addr __P((char *name));
+char *			inet_name(u_int32_t addr);
+u_int32_t			host_addr(char *name);
 /* u_int is promoted u_char */
-char *			proto_type __P((u_int type));
-char *			flag_type __P((u_int type));
+char *			proto_type(u_int type);
+char *			flag_type(u_int type);
 
-u_int32_t			get_netmask __P((int s, u_int32_t dst));
-int			get_ttl __P((struct resp_buf *buf));
-int			t_diff __P((u_long a, u_long b));
-u_long			fixtime __P((u_long time));
-int			send_recv __P((u_int32_t dst, int type, int code,
-					int tries, struct resp_buf *save));
-char *			print_host __P((u_int32_t addr));
-char *			print_host2 __P((u_int32_t addr1, u_int32_t addr2));
-void			print_trace __P((int index, struct resp_buf *buf));
-int			what_kind __P((struct resp_buf *buf, char *why));
-char *			scale __P((int *hop));
-void			stat_line __P((struct tr_resp *r, struct tr_resp *s,
-					int have_next, int *res));
-void			fixup_stats __P((struct resp_buf *base,
-					struct resp_buf *prev,
-					struct resp_buf *new));
-int			print_stats __P((struct resp_buf *base,
-					struct resp_buf *prev,
-					struct resp_buf *new));
-void			check_vif_state __P((void));
+u_int32_t			get_netmask(int s, u_int32_t dst);
+int			get_ttl(struct resp_buf *buf);
+int			t_diff(u_long a, u_long b);
+u_long			fixtime(u_long time);
+int			send_recv(u_int32_t dst, int type, int code,
+			    int tries, struct resp_buf *save);
+char *			print_host(u_int32_t addr);
+char *			print_host2(u_int32_t addr1, u_int32_t addr2);
+void			print_trace(int index, struct resp_buf *buf);
+int			what_kind(struct resp_buf *buf, char *why);
+char *			scale(int *hop);
+void			stat_line(struct tr_resp *r, struct tr_resp *s,
+			    int have_next, int *res);
+void			fixup_stats(struct resp_buf *base,
+			    struct resp_buf *prev, struct resp_buf *new);
+int			print_stats(struct resp_buf *base,
+			    struct resp_buf *prev, struct resp_buf *new);
+void			check_vif_state(void);
 
-int			main __P((int argc, char *argv[]));
+int			main(int argc, char *argv[]);
 
 
 
@@ -501,7 +495,7 @@ send_recv(dst, type, code, tries, save)
 		continue;
 
 	    iphdrlen = ip->ip_hl << 2;
-	    ipdatalen = ip->ip_len;
+	    ipdatalen = ntohs(ip->ip_len);
 	    if (iphdrlen + ipdatalen != recvlen) {
 		fprintf(stderr,
 			"packet shorter (%u bytes) than hdr+data len (%u+%u)\n",
@@ -657,7 +651,7 @@ passive_mode()
 	    continue;
 
 	iphdrlen = ip->ip_hl << 2;
-	ipdatalen = ip->ip_len;
+	ipdatalen = ntohs(ip->ip_len);
 	if (iphdrlen + ipdatalen != recvlen) {
 	    fprintf(stderr,
 		    "packet shorter (%u bytes) than hdr+data len (%u+%u)\n",
@@ -1677,27 +1671,11 @@ check_vif_state()
  * of the message and the current debug level.  For errors of severity
  * LOG_ERR or worse, terminate the program.
  */
-#ifdef __STDC__
 void
 log(int severity, int syserr, char *format, ...)
 {
-	va_list ap;
-	char    fmt[100];
-
-	va_start(ap, format);
-#else
-/*VARARGS3*/
-void 
-log(severity, syserr, format, va_alist)
-	int     severity, syserr;
-	char   *format;
-	va_dcl
-{
-	va_list ap;
-	char    fmt[100];
-
-	va_start(ap);
-#endif
+    va_list ap;
+    char    fmt[100];
 
     switch (debug) {
 	case 0: if (severity > LOG_WARNING) return;
@@ -1707,6 +1685,7 @@ log(severity, syserr, format, va_alist)
 	    fmt[0] = '\0';
 	    if (severity == LOG_WARNING) strcat(fmt, "warning - ");
 	    strncat(fmt, format, 80);
+	    va_start(ap, format);
 	    vfprintf(stderr, fmt, ap);
 	    va_end(ap);
 	    if (syserr == 0)

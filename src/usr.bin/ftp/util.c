@@ -1,4 +1,4 @@
-/*	$OpenBSD: util.c,v 1.26 2001/07/12 05:17:08 deraadt Exp $	*/
+/*	$OpenBSD: util.c,v 1.29 2002/03/30 17:45:44 deraadt Exp $	*/
 /*	$NetBSD: util.c,v 1.12 1997/08/18 10:20:27 lukem Exp $	*/
 
 /*
@@ -35,7 +35,7 @@
  */
 
 #ifndef lint
-static char rcsid[] = "$OpenBSD: util.c,v 1.26 2001/07/12 05:17:08 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: util.c,v 1.29 2002/03/30 17:45:44 deraadt Exp $";
 #endif /* not lint */
 
 /*
@@ -63,7 +63,7 @@ static char rcsid[] = "$OpenBSD: util.c,v 1.26 2001/07/12 05:17:08 deraadt Exp $
 #include "ftp_var.h"
 #include "pathnames.h"
 
-static void updateprogressmeter __P((int));
+static void updateprogressmeter(int);
 
 /*
  * Connect to peer server and
@@ -242,7 +242,7 @@ login(host, user, pass)
 			else
 				user = pw->pw_name;
 		}
-		gethostname(hostname, MAXHOSTNAMELEN);
+		gethostname(hostname, sizeof(hostname));
 #ifndef DONT_CHEAT_ANONPASS
 		/*
 		 * Every anonymous FTP server I've encountered
@@ -665,7 +665,7 @@ progressmeter(flag)
 	off_t cursize, abbrevsize;
 	double elapsed;
 	int ratio, barlength, i, remaining;
-	char buf[256];
+	char buf[512];
 
 	if (flag == -1) {
 		(void)gettimeofday(&start, (struct timezone *)0);
@@ -690,8 +690,13 @@ progressmeter(flag)
 		i = barlength * ratio / 100;
 		snprintf(buf + strlen(buf), sizeof(buf) - strlen(buf),
 		    "|%.*s%*s|", i, 
-"*****************************************************************************"
-"*****************************************************************************",
+		    "*******************************************************"
+		    "*******************************************************"
+		    "*******************************************************"
+		    "*******************************************************"
+		    "*******************************************************"
+		    "*******************************************************"
+		    "*******************************************************",
 		    barlength - i, "");
 	}
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: pfctl.c,v 1.47 2001/10/04 21:54:15 dhartmei Exp $ */
+/*	$OpenBSD: pfctl.c,v 1.60 2002/04/01 20:01:16 dhartmei Exp $ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
@@ -33,17 +33,21 @@
 #include <sys/types.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
+
 #include <net/if.h>
 #include <netinet/in.h>
 #include <net/pfvar.h>
+#include <arpa/inet.h>
 
+#include <err.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <limits.h>
+#include <netdb.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <fcntl.h>
-#include <errno.h>
-#include <err.h>
 
 #include "pfctl_parser.h"
 
@@ -54,8 +58,9 @@ int	 pfctl_clear_stats(int, int);
 int	 pfctl_clear_rules(int, int);
 int	 pfctl_clear_nat(int, int);
 int	 pfctl_clear_states(int, int);
+int	 pfctl_kill_states(int, int);
 int	 pfctl_hint(int, const char *, int);
-int	 pfctl_show_rules(int, int);
+int	 pfctl_show_rules(int, int, int);
 int	 pfctl_show_nat(int);
 int	 pfctl_show_states(int, u_int8_t, int);
 int	 pfctl_show_status(int);
@@ -65,7 +70,11 @@ int	 pfctl_log(int, char *, int);
 int	 pfctl_timeout(int, char *, int);
 int	 pfctl_gettimeout(int, const char *);
 int	 pfctl_settimeout(int, const char *, int);
+int	 pfctl_limit(int, char *, int);
+int	 pfctl_getlimit(int, const char *);
+int	 pfctl_setlimit(int, const char *, unsigned);
 int	 pfctl_debug(int, u_int32_t, int);
+int	 pfctl_clear_rule_counters(int, int);
 
 int	 opts = 0;
 char	*clearopt;
@@ -75,7 +84,10 @@ char	*natopt;
 char	*rulesopt;
 char	*showopt;
 char	*timeoutopt;
+char	*limitopt;
 char	*debugopt;
+int	 state_killers;
+char 	*state_kill[2];
 
 char	*infile;
 
@@ -94,9 +106,20 @@ static const struct {
 	{ "udp.multiple",	PFTM_UDP_MULTIPLE },
 	{ "icmp.first",		PFTM_ICMP_FIRST_PACKET },
 	{ "icmp.error",		PFTM_ICMP_ERROR_REPLY },
+	{ "other.first",	PFTM_OTHER_FIRST_PACKET },
+	{ "other.single",	PFTM_OTHER_SINGLE },
+	{ "other.multiple",	PFTM_OTHER_MULTIPLE },
 	{ "frag",		PFTM_FRAG },
 	{ "interval",		PFTM_INTERVAL },
 	{ NULL,			0 }};
+
+static const struct {
+	const char	*name;
+	int		index;
+} pf_limits[] = {
+	{ "states",	PF_LIMIT_STATES },
+	{ "frags",	PF_LIMIT_FRAGS },
+	{ NULL,		0 }};
 
 struct pf_hint {
 	const char	*name;
@@ -148,13 +171,15 @@ static const struct {
 	{ NULL,			NULL }};
 
 void
-usage()
+usage(void)
 {
 	extern char *__progname;
 
-	fprintf(stderr, "usage: %s [-dehnqv] [-F set] [-l interface] ",
-	    __progname);
-	fprintf(stderr, "[-N file] [-O level] [-R file] [-s set] [-t set] [-x level]\n");
+	fprintf(stderr, "usage: %s [-dehnqrvz] [-F modifier] ", __progname);
+	fprintf(stderr, "[-N file] [-O level] [-R file] [-k host] ");
+	fprintf(stderr, "[-l interface] [-m modifier] [-s modifier] ");
+	fprintf(stderr, "[-t modifier] [-x level]\n");
+
 	exit(1);
 }
 
@@ -245,7 +270,108 @@ pfctl_clear_states(int dev, int opts)
 }
 
 int
-pfctl_show_rules(int dev, int opts)
+pfctl_kill_states(int dev, int opts)
+{
+	struct pfioc_state_kill psk;
+	struct addrinfo *res[2], *resp[2];
+	struct sockaddr last_src, last_dst;
+	int killed, sources, dests;
+	int ret_ga;
+
+	killed = sources = dests = 0;
+
+	memset(&psk, 0, sizeof(psk));
+	memset(&psk.psk_src.mask, 0xff, sizeof(psk.psk_src.mask));
+	memset(&last_src, 0xff, sizeof(last_src));
+	memset(&last_dst, 0xff, sizeof(last_dst));
+
+	if ((ret_ga = getaddrinfo(state_kill[0], NULL, NULL, &res[0]))) {
+		errx(1, "%s", gai_strerror(ret_ga));
+		/* NOTREACHED */
+	}
+	for (resp[0] = res[0]; resp[0]; resp[0] = resp[0]->ai_next) {
+		if (resp[0]->ai_addr == NULL)
+			continue;
+		/* We get lots of duplicates.  Catch the easy ones */
+		if (memcmp(&last_src, resp[0]->ai_addr, sizeof(last_src)) == 0)
+			continue;
+		last_src = *(struct sockaddr *)resp[0]->ai_addr;
+
+		psk.psk_af = resp[0]->ai_family;
+		sources++;
+
+		if (psk.psk_af == AF_INET)
+			psk.psk_src.addr.v4 =
+			    ((struct sockaddr_in *)resp[0]->ai_addr)->sin_addr;
+		else if (psk.psk_af == AF_INET6)
+			psk.psk_src.addr.v6 =
+			    ((struct sockaddr_in6 *)resp[0]->ai_addr)->
+			    sin6_addr;
+		else 
+			errx(1, "Unknown address family!?!?!");
+
+		if (state_killers > 1) {
+			dests = 0;
+			memset(&psk.psk_dst.mask, 0xff,
+			    sizeof(psk.psk_dst.mask));
+			memset(&last_dst, 0xff, sizeof(last_dst));
+			if ((ret_ga = getaddrinfo(state_kill[1], NULL, NULL,
+			    &res[1]))) {
+				errx(1, "%s", gai_strerror(ret_ga));
+				/* NOTREACHED */
+			}
+			for (resp[1] = res[1]; resp[1];
+			    resp[1] = resp[1]->ai_next) {
+				if (resp[1]->ai_addr == NULL)
+					continue;
+				if (psk.psk_af != resp[1]->ai_family)
+					continue;
+
+				if (memcmp(&last_dst, resp[1]->ai_addr,
+				    sizeof(last_dst)) == 0)
+					continue;
+				last_dst = *(struct sockaddr *)resp[1]->ai_addr;
+
+				dests++;
+
+				if (psk.psk_af == AF_INET)
+					psk.psk_dst.addr.v4 =
+					    ((struct sockaddr_in *)resp[1]->
+					    ai_addr)->sin_addr;
+				else if (psk.psk_af == AF_INET6)
+					psk.psk_dst.addr.v6 =
+					    ((struct sockaddr_in6 *)resp[1]->
+					    ai_addr)->sin6_addr;
+				else 
+					errx(1, "Unknown address family!?!?!");
+
+				if (ioctl(dev, DIOCKILLSTATES, &psk))
+					err(1, "DIOCKILLSTATES");
+				killed += psk.psk_af;
+				/* fixup psk.psk_af */
+				psk.psk_af = resp[1]->ai_family;
+			}
+		} else {
+			if (ioctl(dev, DIOCKILLSTATES, &psk))
+				err(1, "DIOCKILLSTATES");
+			killed += psk.psk_af;
+			/* fixup psk.psk_af */
+			psk.psk_af = res[0]->ai_family;
+		}
+	}
+
+	freeaddrinfo(res[0]);
+	if (res[1])
+		freeaddrinfo(res[1]);
+
+	if ((opts & PF_OPT_QUIET) == 0)
+		printf("killed %d states from %d sources and %d destinations\n",
+		    killed, sources, dests);
+	return 0;
+}
+
+int
+pfctl_show_rules(int dev, int opts, int format)
 {
 	struct pfioc_rule pr;
 	u_int32_t nr, mnr;
@@ -261,11 +387,25 @@ pfctl_show_rules(int dev, int opts)
 			warnx("DIOCGETRULE");
 			return (-1);
 		}
-		print_rule(&pr.rule);
-		if (opts & PF_OPT_VERBOSE)
-			printf("[ Evaluations: %-10llu  Packets: %-10llu  "
-			    "Bytes: %-10llu ]\n\n", pr.rule.evaluations,
-			    pr.rule.packets, pr.rule.bytes);
+		switch (format) {
+		case 1:
+			if (pr.rule.label[0]) {
+				if (opts & PF_OPT_VERBOSE)
+					print_rule(&pr.rule);
+				else
+					printf("%s ", pr.rule.label);
+				printf("%llu %llu %llu\n",
+				    pr.rule.evaluations, pr.rule.packets,
+				    pr.rule.bytes);
+			}
+			break;
+		default:
+			print_rule(&pr.rule);
+			if (opts & PF_OPT_VERBOSE)
+				printf("[ Evaluations: %-10llu  Packets: %-10llu  "
+				    "Bytes: %-10llu ]\n\n", pr.rule.evaluations,
+				    pr.rule.packets, pr.rule.bytes);
+		}
 	}
 	return (0);
 }
@@ -328,7 +468,7 @@ pfctl_show_states(int dev, u_int8_t proto, int opts)
 	char *inbuf = NULL;
 	int i, len = 0;
 
-	while (1) {
+	for (;;) {
 		ps.ps_len = len;
 		if (len) {
 			ps.ps_buf = inbuf = realloc(inbuf, len);
@@ -451,6 +591,7 @@ pfctl_rules(int dev, char *filename, int opts)
 	pf.dev = dev;
 	pf.opts = opts;
 	pf.prule = &pr;
+	pf.rule_nr = 0;
 	if (parse_rules(fin, &pf) < 0)
 		errx(1, "syntax error in rule file: pf rules not loaded");
 	if ((opts & PF_OPT_NOACTION) == 0) {
@@ -559,6 +700,100 @@ pfctl_hint(int dev, const char *opt, int opts)
 }
 
 int
+pfctl_limit(int dev, char *opt, int opts)
+{
+	char *arg, *serr = NULL;
+	unsigned limit;
+
+	arg = index(opt, '=');
+	if (arg == NULL)
+		return pfctl_getlimit(dev, opt);
+	else {
+		if (*arg)
+			*arg++ = 0;
+		if (strcasecmp(arg, "inf") == 0)
+			limit = UINT_MAX;
+		else {
+			limit = strtol(arg, &serr, 10);
+			if (*serr || !*arg) {
+				warnx("Bad limit argument.  "
+				    "Format -m name=limit");
+				return (1);
+			}
+		}
+		return pfctl_setlimit(dev, opt, limit);
+	}
+}
+
+int
+pfctl_getlimit(int dev, const char *opt)
+{
+	struct pfioc_limit pl;
+	int i, found = 0;
+
+	for (i = 0; pf_limits[i].name; i++) {
+		if (strcmp(opt, "all") == 0 ||
+		    strcasecmp(opt, pf_limits[i].name) == 0) {
+			found = 1;
+			pl.index = i;
+			if (ioctl(dev, DIOCGETLIMIT, &pl))
+				err(1, "DIOCGETLIMIT");
+			printf("%-10s ", pf_limits[i].name);
+			if (pl.limit == UINT_MAX)
+				printf("unlimited\n");
+			else
+				printf("hard limit %6u\n", pl.limit);
+		}
+	}
+	if (found == 0) {
+		warnx("Bad pool name.  Format -m name[=<limit>]");
+		return (1);
+	}
+	return (0);
+}
+
+int
+pfctl_setlimit(int dev, const char *opt, unsigned limit)
+{
+	struct pfioc_limit pl;
+	int i;
+
+	for (i = 0; pf_limits[i].name; i++) {
+		if (strcasecmp(opt, pf_limits[i].name) == 0) {
+			pl.index = i;
+			pl.limit = limit;
+			if (ioctl(dev, DIOCSETLIMIT, &pl)) {
+				if (errno == EBUSY) {
+					warnx("Current pool size exceeds "
+					    "requested hard limit");
+					return (1);
+				} else
+					err(1, "DIOCSETLIMIT");
+			}
+			if ((opts & PF_OPT_QUIET) == 0) {
+				printf("%s ", pf_limits[i].name);
+				if (pl.limit == UINT_MAX)
+					printf("unlimited");
+				else
+					printf("hard limit %u", pl.limit);
+				printf(" -> ");
+				if (limit == UINT_MAX)
+					printf("unlimited");
+				else
+					printf("hard limit %u", limit);
+				printf("\n");
+			}
+			break;
+		}
+	}
+	if (pf_limits[i].name == NULL) {
+		warnx("Bad pool name.  Format -m name[=<limit>]");
+		return (1);
+	}
+	return (0);
+}
+
+int
 pfctl_timeout(int dev, char *opt, int opts)
 {
 	char *seconds, *serr = NULL;
@@ -573,7 +808,7 @@ pfctl_timeout(int dev, char *opt, int opts)
 			*seconds++ = '\0';	/* Eat '=' */
 		setval = strtol(seconds, &serr, 10);
 		if (*serr != '\0' || *seconds == '\0' || setval < 0) {
-			warnx("Bad timeout arguement.  Format -t name=seconds");
+			warnx("Bad timeout argument.  Format -t name=seconds");
 			return 1;
 		}
 		return pfctl_settimeout(dev, opt, setval);
@@ -668,59 +903,101 @@ pfctl_debug(int dev, u_int32_t level, int opts)
 }
 
 int
+pfctl_clear_rule_counters(int dev, int opts)
+{
+	if (ioctl(dev, DIOCCLRRULECTRS))
+		err(1, "DIOCCLRRULECTRS");
+	if ((opts & PF_OPT_QUIET) == 0)
+		printf("pf: rule counters cleared\n");
+	return (0);
+}
+
+int
 main(int argc, char *argv[])
 {
-	extern char *optarg;
-	extern int optind;
 	int error = 0;
 	int dev = -1;
 	int ch;
+	int mode = O_RDONLY;
 
 	if (argc < 2)
 		usage();
 
-	while ((ch = getopt(argc, argv, "deqF:hl:nN:O:R:s:t:vx:")) != -1) {
+	while ((ch = getopt(argc, argv, "deqF:hk:l:m:nN:O:rR:s:t:vx:z")) != -1)
+	{
 		switch (ch) {
 		case 'd':
 			opts |= PF_OPT_DISABLE;
+			mode = O_RDWR;
 			break;
 		case 'e':
 			opts |= PF_OPT_ENABLE;
+			mode = O_RDWR;
 			break;
 		case 'q':
 			opts |= PF_OPT_QUIET;
 			break;
 		case 'F':
 			clearopt = optarg;
+			mode = O_RDWR;
+			break;
+		case 'k':
+			if (state_killers >= 2) {
+				warnx("can only specify -k twice");
+				usage();
+				/* NOTREACHED */
+			}
+			state_kill[state_killers++] = optarg;
+			mode = O_RDWR;
 			break;
 		case 'l':
 			logopt = optarg;
+			mode = O_RDWR;
+			break;
+		case 'm':
+			limitopt = optarg;
+			if (strchr(limitopt, '=') != NULL)
+				mode = O_RDWR;
 			break;
 		case 'n':
 			opts |= PF_OPT_NOACTION;
 			break;
 		case 'N':
 			natopt = optarg;
+			mode = O_RDWR;
 			break;
 		case 'O':
 			hintopt = optarg;
+			mode = O_RDWR;
+			break;
+		case 'r':
+			opts |= PF_OPT_USEDNS;
 			break;
 		case 'R':
 			rulesopt = optarg;
+			mode = O_RDWR;
 			break;
 		case 's':
 			showopt = optarg;
 			break;
 		case 't':
 			timeoutopt = optarg;
+			if (strchr(timeoutopt, '=') != NULL)
+				mode = O_RDWR;
 			break;
 		case 'v':
 			opts |= PF_OPT_VERBOSE;
 			break;
 		case 'x':
 			debugopt = optarg;
+			mode = O_RDWR;
+			break;
+		case 'z':
+			opts |= PF_OPT_CLRRULECTRS;
+			mode = O_RDWR;
 			break;
 		case 'h':
+			/* FALLTHROUGH */
 		default:
 			usage();
 			/* NOTREACHED */
@@ -733,8 +1010,10 @@ main(int argc, char *argv[])
 		/* NOTREACHED */
 	}
 
+	if (opts & PF_OPT_NOACTION)
+		mode = O_RDONLY;
 	if ((opts & PF_OPT_NOACTION) == 0) {
-		dev = open("/dev/pf", O_RDWR);
+		dev = open("/dev/pf", mode);
 		if (dev == -1)
 			err(1, "open(\"/dev/pf\")");
 	} else {
@@ -772,6 +1051,8 @@ main(int argc, char *argv[])
 			error = 1;
 		}
 	}
+	if (state_killers)
+		pfctl_kill_states(dev, opts);
 
 	if (rulesopt != NULL)
 		if (pfctl_rules(dev, rulesopt, opts))
@@ -784,7 +1065,10 @@ main(int argc, char *argv[])
 	if (showopt != NULL) {
 		switch (*showopt) {
 		case 'r':
-			pfctl_show_rules(dev, opts);
+			pfctl_show_rules(dev, opts, 0);
+			break;
+		case 'l':
+			pfctl_show_rules(dev, opts, 1);
 			break;
 		case 'n':
 			pfctl_show_nat(dev);
@@ -796,7 +1080,7 @@ main(int argc, char *argv[])
 			pfctl_show_status(dev);
 			break;
 		case 'a':
-			pfctl_show_rules(dev, opts);
+			pfctl_show_rules(dev, opts, 0);
 			pfctl_show_nat(dev);
 			pfctl_show_states(dev, 0, opts);
 			pfctl_show_status(dev);
@@ -819,6 +1103,10 @@ main(int argc, char *argv[])
 		if (pfctl_timeout(dev, timeoutopt, opts))
 			error = 1;
 
+	if (limitopt != NULL)
+		if (pfctl_limit(dev, limitopt, opts))
+			error = 1;
+
 	if (opts & PF_OPT_ENABLE)
 		if (pfctl_enable(dev, opts))
 			error = 1;
@@ -838,6 +1126,11 @@ main(int argc, char *argv[])
 			warnx("Unknown debug level '%s'", debugopt);
 			error = 1;
 		}
+	}
+
+	if (opts & PF_OPT_CLRRULECTRS) {
+		if (pfctl_clear_rule_counters(dev, opts))
+			error = 1;
 	}
 
 	close(dev);

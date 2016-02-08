@@ -1,4 +1,4 @@
-/*	$OpenBSD: server.c,v 1.14 2001/09/05 22:32:42 deraadt Exp $	*/
+/*	$OpenBSD: server.c,v 1.17 2002/02/19 19:39:38 millert Exp $	*/
 
 /*
  * Copyright (c) 1983, 1993
@@ -35,10 +35,11 @@
 
 #ifndef lint
 /* from: static char sccsid[] = "@(#)server.c	8.1 (Berkeley) 6/9/93"; */
-static char *rcsid = "$OpenBSD: server.c,v 1.14 2001/09/05 22:32:42 deraadt Exp $";
+static char *rcsid = "$OpenBSD: server.c,v 1.17 2002/02/19 19:39:38 millert Exp $";
 #endif /* not lint */
 
 #include <sys/wait.h>
+#include <stdarg.h>
 #include "defs.h"
 
 #define	ack() 	(void) write(rem, "\0\n", 2)
@@ -56,22 +57,22 @@ int	oumask;			/* old umask for creating files */
 
 extern	FILE *lfp;		/* log file for mailing changes */
 
-static int	chkparent __P((char *));
-static void	clean __P((char *));
-static void	comment __P((char *));
-static void	dospecial __P((char *));
-static int	fchog __P((int, char *, char *, char *, int));
-static void	hardlink __P((char *));
-static void	note __P((const char *, ...));
-static void	query __P((char *));
-static void	recvf __P((char *, int));
-static void	removeit __P((struct stat *));
-static int	response __P((void));
-static void	rmchk __P((int));
+static int	chkparent(char *);
+static void	clean(char *);
+static void	comment(char *);
+static void	dospecial(char *);
+static int	fchog(int, char *, char *, char *, int);
+static void	hardlink(char *);
+static void	note(const char *, ...);
+static void	query(char *);
+static void	recvf(char *, int);
+static void	removeit(struct stat *);
+static int	response(void);
+static void	rmchk(int);
 static struct linkbuf *
-		    savelink __P((struct stat *));
-static void	sendf __P((char *, int));
-static int	update __P((char *, int, struct stat *));
+		    savelink(struct stat *);
+static void	sendf(char *, int);
+static int	update(char *, int, struct stat *);
 
 /*
  * Server routine to read requests and process them.
@@ -84,7 +85,7 @@ void
 server()
 {
 	char cmdbuf[BUFSIZ];
-	register char *cp;
+	char *cp;
 
 	signal(SIGHUP, cleanup);
 	signal(SIGINT, cleanup);
@@ -361,7 +362,7 @@ sendf(rname, opts)
 	char *rname;
 	int opts;
 {
-	register struct subcmd *sc;
+	struct subcmd *sc;
 	struct stat stb;
 	int sizerr, f, u, len;
 	off_t i;
@@ -599,9 +600,9 @@ update(rname, opts, stp)
 	int opts;
 	struct stat *stp;
 {
-	register char *cp, *s;
-	register off_t size;
-	register time_t mtime;
+	char *cp, *s;
+	off_t size;
+	time_t mtime;
 
 	if (debug) 
 		printf("update(%s, %x, %x)\n", rname, opts, stp);
@@ -736,7 +737,7 @@ recvf(cmd, type)
 	char *cmd;
 	int type;
 {
-	register char *cp = cmd;
+	char *cp = cmd;
 	int f = -1, mode, opts = 0, wrerr, olderrno;
 	off_t i, size;
 	time_t mtime;
@@ -990,7 +991,7 @@ static void
 hardlink(cmd)
 	char *cmd;
 {
-	register char *cp = cmd;
+	char *cp = cmd;
 	struct stat stb;
 	char *oldname;
 	int opts = 0, exists = 0;
@@ -1046,7 +1047,7 @@ static int
 chkparent(name)
 	char *name;
 {
-	register char *cp;
+	char *cp;
 	struct stat stb;
 
 	cp = strrchr(name, '/');
@@ -1076,7 +1077,7 @@ fchog(fd, file, owner, group, mode)
 	char *file, *owner, *group;
 	int mode;
 {
-	register int i;
+	int i;
 	int uid, gid;
 	extern char user[];
 	extern int userid;
@@ -1138,7 +1139,7 @@ static void
 rmchk(opts)
 	int opts;
 {
-	register char *cp, *s;
+	char *cp, *s;
 	struct stat stb;
 
 	if (debug)
@@ -1219,10 +1220,10 @@ rmchk(opts)
  */
 static void
 clean(cp)
-	register char *cp;
+	char *cp;
 {
 	DIR *d;
-	register struct direct *dp;
+	struct direct *dp;
 	struct stat stb;
 	char *otp;
 	int len, opts;
@@ -1297,7 +1298,7 @@ removeit(stp)
 {
 	DIR *d;
 	struct direct *dp;
-	register char *cp;
+	char *cp;
 	struct stat stb;
 	char *otp;
 	int len;
@@ -1365,7 +1366,7 @@ dospecial(cmd)
 	char *cmd;
 {
 	int fd[2], status, pid, i;
-	register char *cp, *s;
+	char *cp, *s;
 	char sbuf[BUFSIZ];
 	extern int userid, groupid;
 
@@ -1432,28 +1433,12 @@ dospecial(cmd)
 		ack();
 }
 
-#ifdef __STDC__
-#include <stdarg.h>
-#else
-#include <varargs.h>
-#endif
-
 void
-#ifdef __STDC__
 log(FILE *fp, const char *fmt, ...)
-#else
-log(fp, fmt, va_alist)
-	FILE *fp;
-	char *fmt;
-        va_dcl
-#endif
 {
 	va_list ap;
-#ifdef __STDC__
+
 	va_start(ap, fmt);
-#else
-	va_start(ap);
-#endif
 	/* Print changes locally if not quiet mode */
 	if (!qflag)
 		(void) vprintf(fmt, ap);
@@ -1465,22 +1450,12 @@ log(fp, fmt, va_alist)
 }
 
 void
-#ifdef __STDC__
 error(const char *fmt, ...)
-#else
-error(fmt, va_alist)
-	char *fmt;
-        va_dcl
-#endif
 {
 	static FILE *fp;
 	va_list ap;
-#ifdef __STDC__
-	va_start(ap, fmt);
-#else
-	va_start(ap);
-#endif
 
+	va_start(ap, fmt);
 	++nerrs;
 	if (iamremote) {
 		if (!fp && (rem < 0 || !(fp = fdopen(rem, "w"))))
@@ -1504,22 +1479,12 @@ error(fmt, va_alist)
 }
 
 void
-#ifdef __STDC__
 fatal(const char *fmt, ...)
-#else
-fatal(fmt, va_alist)
-	char *fmt;
-        va_dcl
-#endif
 {
 	static FILE *fp;
 	va_list ap;
-#ifdef __STDC__
-	va_start(ap, fmt);
-#else
-	va_start(ap);
-#endif
 
+	va_start(ap, fmt);
 	++nerrs;
 	if (!fp && !(fp = fdopen(rem, "w")))
 		return;
@@ -1603,21 +1568,12 @@ cleanup(signo)
 }
 
 static void
-#ifdef __STDC__
 note(const char *fmt, ...)
-#else
-note(fmt, va_alist)
-	char *fmt;
-        va_dcl
-#endif
 {
 	static char buf[BUFSIZ];
 	va_list ap;
-#ifdef __STDC__
+
 	va_start(ap, fmt);
-#else
-	va_start(ap);
-#endif
 	(void) vsnprintf(buf, sizeof(buf), fmt, ap);
 	va_end(ap);
 	comment(buf);

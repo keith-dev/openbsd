@@ -1,4 +1,4 @@
-.\" $OpenBSD: bge.4,v 1.2 2001/10/05 19:08:14 nate Exp $
+.\" $OpenBSD: bge.4,v 1.5 2002/04/08 21:49:20 nate Exp $
 .\" Copyright (c) 2001 Wind River Systems
 .\" Copyright (c) 1997, 1998, 1999, 2000, 2001
 .\"	Bill Paul <wpaul@windriver.com>. All rights reserved.
@@ -51,6 +51,10 @@ following:
 .It
 3Com 3c996-T (10/100/1000baseTX)
 .It
+3Com 3c996-SX (1000baseSX)
+.It
+3Com 3c996B-T (10/100/1000baseTX)
+.It
 Dell PowerEdge 2550 integrated BCM5700 NIC (10/100/1000baseTX)
 .It
 SysKonnect SK-9D21 (10/100/1000baseTX)
@@ -61,7 +65,6 @@ SysKonnect SK-9D41 (1000baseSX)
 All of these NICs are capable of 10, 100 and 1000Mbps speeds over CAT5
 copper cable, except for the SysKonnect SK-9D41 which supports only
 1000Mbps over multimode fiber.
-The BCM570x builds upon the technology of the Alteon Tigon II.
 It has two R4000 CPU cores and is PCI v2.2 and PCI-X v1.0 compliant.
 It supports
 .\"IP, TCP
@@ -188,7 +191,12 @@ the network connection (cable).
 .El
 .Sh SEE ALSO
 .Xr arp 4 ,
+.Xr brgphy 4 ,
+.Xr ifmedia 4 ,
+.Xr intro 4 ,
 .Xr netintro 4 ,
+.Xr pci 4 ,
+.Xr vlan 4 ,
 .Xr ifconfig 8
 .Sh HISTORY
 The

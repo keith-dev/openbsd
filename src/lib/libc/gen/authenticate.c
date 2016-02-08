@@ -1,4 +1,4 @@
-/*	$OpenBSD: authenticate.c,v 1.5 2001/07/09 06:57:42 deraadt Exp $	*/
+/*	$OpenBSD: authenticate.c,v 1.9 2002/03/20 17:17:15 mpech Exp $	*/
 
 /*-
  * Copyright (c) 1997 Berkeley Software Design, Inc. All rights reserved.
@@ -112,37 +112,45 @@ _auth_checknologin(login_cap_t *lc, int print)
 {
 	struct stat sb;
 	char *nologin;
+	int mustfree;
+
+	if (login_getcapbool(lc, "ignorenologin", 0))
+		return (0);
 
 	/*
 	 * If we fail to get the nologin file due to a database error,
 	 * assume there should have been one...
 	 */
-	if ((nologin = login_getcapstr(lc, "nologin", "", NULL)) == NULL) {
-		if (print) {
-			printf("Logins are not allowed at this time.\n");
-			fflush(stdout);
-		}
-		return (-1);
-	}
-	if (*nologin && stat(nologin, &sb) >= 0) {
-		if (print && auth_cat(nologin) == 0) {
-			printf("Logins are not allowed at this time.\n");
-			fflush(stdout);
-		}
-		return (-1);
+	nologin = login_getcapstr(lc, "nologin", "", NULL);
+	mustfree = nologin && *nologin != '\0';
+	if (nologin == NULL)
+		goto print_nologin;
+
+	/* First try the nologin file specified in login.conf. */
+	if (*nologin != '\0' && stat(nologin, &sb) == 0)
+		goto print_nologin;
+	if (mustfree)
+		free(nologin);
+
+	/* If that doesn't exist try _PATH_NOLOGIN. */
+	if (stat(_PATH_NOLOGIN, &sb) == 0) {
+		nologin = _PATH_NOLOGIN;
+		goto print_nologin;
 	}
 
-	if (login_getcapbool(lc, "ignorenologin", 0))
-		return(0);
+	/* Couldn't stat any nologin files, must be OK to login. */
+	return (0);
 
-	if (stat(_PATH_NOLOGIN, &sb) >= 0) {
-		if (print && auth_cat(_PATH_NOLOGIN) == 0) {
-			printf("Logins are not allowed at this time.\n");
+print_nologin:
+	if (print) {
+		if (!nologin || *nologin == '\0' || auth_cat(nologin) == 0) {
+			puts("Logins are not allowed at this time.");
 			fflush(stdout);
 		}
-		return (-1);
 	}
-	return(0);
+	if (mustfree)
+		free(nologin);
+	return (-1);
 }
 
 int
@@ -228,6 +236,7 @@ auth_approval(auth_session_t *as, login_cap_t *lc, char *name, char *type)
 			login_close(lc);
 		syslog(LOG_ERR, "Invalid %s script: %s", s, approve);
 		_warnx("invalid path to approval script");
+               free(approve);
 		return (0);
 	}
 
@@ -236,6 +245,8 @@ auth_approval(auth_session_t *as, login_cap_t *lc, char *name, char *type)
 			login_close(lc);
 		syslog(LOG_ERR, "%m");
 		_warn(NULL);
+               if (approve)
+                       free(approve);
 		return (0);
 	}
 
@@ -245,7 +256,7 @@ auth_approval(auth_session_t *as, login_cap_t *lc, char *name, char *type)
 		_warn(NULL);
 		goto out;
 	}
-	if (auth_check_expire(as))	/* is this account expired */
+	if (auth_check_expire(as) < 0)	/* is this account expired */
 		goto out;
 	if (_auth_checknologin(lc,
 	    auth_getitem(as, AUTHV_INTERACTIVE) != NULL)) {
@@ -269,6 +280,8 @@ auth_approval(auth_session_t *as, login_cap_t *lc, char *name, char *type)
 		lc->lc_class, type, 0);
 
 out:
+       if (approve)
+               free(approve);
 	if (close_lc_on_exit)
 		login_close(lc);
 

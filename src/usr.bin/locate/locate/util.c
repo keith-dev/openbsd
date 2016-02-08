@@ -1,4 +1,4 @@
-/*	$OpenBSD: util.c,v 1.3 1997/01/17 07:12:42 millert Exp $
+/*	$OpenBSD: util.c,v 1.5 2002/02/16 21:27:48 millert Exp $
  *
  * Copyright (c) 1995 Wolfram Schneider <wosch@FreeBSD.org>. Berlin.
  * Copyright (c) 1989, 1993
@@ -35,7 +35,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $Id: util.c,v 1.3 1997/01/17 07:12:42 millert Exp $
+ * $Id: util.c,v 1.5 2002/02/16 21:27:48 millert Exp $
  */
 
 
@@ -47,13 +47,13 @@
 
 #include "locate.h"
 
-char 	**colon __P((char **, char*, char*));
-char 	*patprep __P((char *));
-void print_matches __P((u_int));
-u_char 	*tolower_word __P((u_char *));
-int 	getwm __P((caddr_t));
-int 	getwf __P((FILE *));
-int	check_bigram_char __P((int));
+char 	**colon(char **, char*, char*);
+char 	*patprep(char *);
+void print_matches(u_int);
+u_char 	*tolower_word(u_char *);
+int 	getwm(caddr_t);
+int 	getwf(FILE *);
+int	check_bigram_char(int);
 
 /* 
  * Validate bigram chars. If the test failed the database is corrupt 
@@ -154,7 +154,7 @@ char *
 patprep(name)
 	char *name;
 {
-	register char *endmark, *p, *subp;
+	char *endmark, *p, *subp;
 
 	subp = globfree;
 	*subp++ = '\0';   /* set first element to '\0' */
@@ -208,7 +208,7 @@ u_char *
 tolower_word(word)
 	u_char *word;
 {
-	register u_char *p;
+	u_char *p;
 
 	for(p = word; *p != '\0'; p++)
 		*p = TOLOWER(*p);
@@ -232,7 +232,7 @@ getwm(p)
 	caddr_t p;
 {
 	static char buf[INTSIZE];
-	register int i;
+	int i;
 
 	for (i = 0; i < INTSIZE; i++)
 		buf[i] = *p++;
@@ -263,7 +263,7 @@ int
 getwf(fp)
 	FILE *fp;
 {
-	register int word;
+	int word;
 
 	word = getw(fp);
 

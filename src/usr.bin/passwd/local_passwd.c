@@ -1,4 +1,4 @@
-/*	$OpenBSD: local_passwd.c,v 1.21 2001/08/27 02:57:07 millert Exp $	*/
+/*	$OpenBSD: local_passwd.c,v 1.25 2002/02/16 21:27:50 millert Exp $	*/
 
 /*-
  * Copyright (c) 1990 The Regents of the University of California.
@@ -35,7 +35,7 @@
 
 #ifndef lint
 /*static const char sccsid[] = "from: @(#)local_passwd.c	5.5 (Berkeley) 5/6/91";*/
-static const char rcsid[] = "$OpenBSD: local_passwd.c,v 1.21 2001/08/27 02:57:07 millert Exp $";
+static const char rcsid[] = "$OpenBSD: local_passwd.c,v 1.25 2002/02/16 21:27:50 millert Exp $";
 #endif /* not lint */
 
 #include <sys/types.h>
@@ -54,12 +54,12 @@ static const char rcsid[] = "$OpenBSD: local_passwd.c,v 1.21 2001/08/27 02:57:07
 #include <login_cap.h>
 
 static uid_t uid;
-extern int pwd_gensalt __P((char *, int, struct passwd *, login_cap_t *, char));
-extern int pwd_check __P((struct passwd *, login_cap_t *, char *));
-extern int pwd_gettries __P((struct passwd *, login_cap_t *));
+extern int pwd_gensalt(char *, int, struct passwd *, login_cap_t *, char);
+extern int pwd_check(struct passwd *, login_cap_t *, char *);
+extern int pwd_gettries(struct passwd *, login_cap_t *);
 
-char *getnewpasswd __P((struct passwd *, login_cap_t *, int));
-void kbintr __P((int));
+char *getnewpasswd(struct passwd *, login_cap_t *, int);
+void kbintr(int);
 
 int
 local_passwd(uname, authenticated)
@@ -148,9 +148,13 @@ getnewpasswd(pw, lc, authenticated)
 	login_cap_t *lc;
 	int authenticated;
 {
-	register char *p;
+	char *p;
 	int tries, pwd_tries;
 	char buf[_PASSWORD_LEN+1], salt[_PASSWORD_LEN];
+	sig_t saveint, savequit;
+
+	saveint = signal(SIGINT, kbintr);
+	savequit = signal(SIGQUIT, kbintr);
 
 	if (!authenticated) {
 		(void)printf("Changing local password for %s.\n", pw->pw_name);
@@ -187,6 +191,9 @@ getnewpasswd(pw, lc, authenticated)
 		(void)printf("Couldn't generate salt.\n");
 		pw_error(NULL, 0, 0);
 	}
+	(void)signal(SIGINT, saveint);
+	(void)signal(SIGQUIT, savequit);
+
 	return(crypt(buf, salt));
 }
 
@@ -198,7 +205,7 @@ kbintr(signo)
 	struct iovec iv[5];
 	extern char *__progname;
 
-	iv[0].iov_base = "\nPassword unchanged.\n";
+	iv[0].iov_base = msg;
 	iv[0].iov_len = sizeof(msg) - 1;
 	iv[1].iov_base = __progname;
 	iv[1].iov_len = strlen(__progname);

@@ -1,4 +1,4 @@
-/* $OpenBSD: stand.h,v 1.2 1999/10/04 21:46:30 espie Exp $ */
+/* $OpenBSD: stand.h,v 1.4 2002/02/17 19:42:38 millert Exp $ */
 
 /* provided to cater for BSD idiosyncrasies */
 
@@ -6,20 +6,12 @@
 #include <sys/param.h>
 #endif
 
-#ifndef __P
-#ifdef __STDC__
-#define __P(x)	x
-#else
-#define __P(x) ()
-#endif
-#endif
-
 #if defined(BSD4_4)
 #include <err.h>
 #else
-extern void set_program_name __P((const char * name));
-extern void warn __P((const char *fmt, ...));
-extern void warnx __P((const char *fmt, ...));
+extern void set_program_name(const char * name);
+extern void warn(const char *fmt, ...);
+extern void warnx(const char *fmt, ...);
 #endif
 
 #ifndef __GNUC__

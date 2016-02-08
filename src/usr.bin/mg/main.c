@@ -1,4 +1,4 @@
-/*	$OpenBSD: main.c,v 1.14 2001/06/23 04:22:44 art Exp $	*/
+/*	$OpenBSD: main.c,v 1.19 2002/03/18 01:45:55 vincent Exp $	*/
 
 /*
  *	Mainline.
@@ -21,18 +21,13 @@ MGWIN		*curwp;				/* current window	*/
 MGWIN		*wheadp;			/* MGWIN listhead	*/
 char		 pat[NPAT];			/* pattern		*/
 
-static void	 edinit		__P((void));
+static void	 edinit(void);
 
 int
-main(argc, argv)
-	int	argc;
-	char	**argv;
+main(int argc, char **argv)
 {
 	char	*cp;
 
-#ifdef SYSINIT
-	SYSINIT;		/* System dependent.		*/
-#endif	/* SYSINIT */
 	vtinit();		/* Virtual terminal.		*/
 #ifndef NO_DIR
 	dirinit();		/* Get current directory.	*/
@@ -80,6 +75,10 @@ main(argc, argv)
 		if (epresf == KPROMPT)
 			eerase();
 #endif	/* !NO_DPROMPT */
+		if (winch_flag) {
+			refresh(0, 0);
+			winch_flag = 0;
+		}
 		update();
 		lastflag = thisflag;
 		thisflag = 0;

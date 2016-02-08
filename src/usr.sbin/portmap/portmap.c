@@ -1,4 +1,4 @@
-/*	$OpenBSD: portmap.c,v 1.19 2001/07/27 20:34:36 pvalchev Exp $	*/
+/*	$OpenBSD: portmap.c,v 1.21 2002/03/14 16:44:25 mpech Exp $	*/
 
 /*-
  * Copyright (c) 1996, 1997 Theo de Raadt (OpenBSD). All rights reserved.
@@ -44,7 +44,7 @@ char copyright[] =
 #if 0
 static char sccsid[] = "from: @(#)portmap.c	5.4 (Berkeley) 4/19/91";
 #else
-static char rcsid[] = "$OpenBSD: portmap.c,v 1.19 2001/07/27 20:34:36 pvalchev Exp $";
+static char rcsid[] = "$OpenBSD: portmap.c,v 1.21 2002/03/14 16:44:25 mpech Exp $";
 #endif
 #endif /* not lint */
 
@@ -103,10 +103,10 @@ static char sccsid[] = "@(#)portmap.c 1.32 87/08/06 Copyr 1984 Sun Micro";
 #include <rpcsvc/nfs_prot.h>
 #include <arpa/inet.h>
 
-void reg_service __P((struct svc_req *, SVCXPRT *));
-void reap	__P((void));
-void callit __P((struct svc_req *, SVCXPRT *));
-int check_callit __P((struct sockaddr_in *, u_long, u_long, u_long));
+void reg_service(struct svc_req *, SVCXPRT *);
+void reap(void);
+void callit(struct svc_req *, SVCXPRT *);
+int check_callit(struct sockaddr_in *, u_long, u_long, u_long);
 
 struct pmaplist *pmaplist;
 int debugging = 0;
@@ -124,7 +124,7 @@ main(argc, argv)
 	struct sockaddr_in addr, laddr;
 	int on = 1;
 	int len = sizeof(struct sockaddr_in);
-	register struct pmaplist *pml;
+	struct pmaplist *pml;
 
 	while ((c = getopt(argc, argv, "d")) != -1) {
 		switch (c) {
@@ -260,8 +260,8 @@ struct pmaplist *
 find_service(prog, vers, prot)
 	u_long prog, vers, prot;
 {
-	register struct pmaplist *hit = NULL;
-	register struct pmaplist *pml;
+	struct pmaplist *hit = NULL;
+	struct pmaplist *pml;
 
 	for (pml = pmaplist; pml != NULL; pml = pml->pml_next) {
 		if ((pml->pml_map.pm_prog != prog) ||
@@ -502,8 +502,8 @@ struct rmtcallargs {
 
 static bool_t
 xdr_rmtcall_args(xdrs, cap)
-	register XDR *xdrs;
-	register struct rmtcallargs *cap;
+	XDR *xdrs;
+	struct rmtcallargs *cap;
 {
 
 	/* does not get a port number */
@@ -517,8 +517,8 @@ xdr_rmtcall_args(xdrs, cap)
 
 static bool_t
 xdr_rmtcall_result(xdrs, cap)
-	register XDR *xdrs;
-	register struct rmtcallargs *cap;
+	XDR *xdrs;
+	struct rmtcallargs *cap;
 {
 	if (xdr_u_long(xdrs, &(cap->rmt_port)))
 		return (xdr_encap_parms(xdrs, &(cap->rmt_args)));
@@ -544,10 +544,10 @@ xdr_opaque_parms(xdrs, cap)
  */
 static bool_t
 xdr_len_opaque_parms(xdrs, cap)
-	register XDR *xdrs;
+	XDR *xdrs;
 	struct rmtcallargs *cap;
 {
-	register u_int beginpos, lowpos, highpos, currpos, pos;
+	u_int beginpos, lowpos, highpos, currpos, pos;
 
 	beginpos = lowpos = pos = xdr_getpos(xdrs);
 	highpos = lowpos + ARGSIZE;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: parse.y,v 1.41 2001/10/15 16:22:22 dhartmei Exp $	*/
+/*	$OpenBSD: parse.y,v 1.57 2002/03/27 18:16:22 mickey Exp $	*/
 
 /*
  * Copyright (c) 2001 Markus Friedl.  All rights reserved.
@@ -72,6 +72,7 @@ struct node_host {
 	struct pf_addr		 mask;
 	u_int8_t		 af;
 	u_int8_t		 not;
+	u_int8_t		 noroute;
 	struct node_host	*next;
 };
 
@@ -96,7 +97,7 @@ struct peer {
 int			 rule_consistent(struct pf_rule *);
 int			 yyparse(void);
 struct pf_rule_addr	*new_addr(void);
-void		 	 ipmask(struct pf_addr *, u_int8_t, int);
+void		 	 ipmask(struct pf_addr *, u_int8_t);
 void			 expand_rule_hosts(struct pf_rule *,
 			    struct node_if *, struct node_proto *,
 			    struct node_host *, struct node_port *,
@@ -137,7 +138,7 @@ typedef struct {
 			u_int8_t	b2;
 			u_int16_t	w;
 		}			b;
-		struct {
+		struct range {
 			int		a;
 			int		b;
 			int		t;
@@ -151,6 +152,16 @@ typedef struct {
 		struct {
 			struct peer	src, dst;
 		}			fromto;
+		struct {
+			char		*string;
+			struct pf_addr	*addr;
+			u_int8_t	rt;
+			u_int8_t	af;
+		}			route;
+		struct redirection {
+			struct node_host	*address;
+			struct range		 rport;
+		}			*redirection;
 	} v;
 	int lineno;
 } YYSTYPE;
@@ -160,13 +171,14 @@ typedef struct {
 %token	PASS BLOCK SCRUB RETURN IN OUT LOG LOGALL QUICK ON FROM TO FLAGS
 %token	RETURNRST RETURNICMP RETURNICMP6 PROTO INET INET6 ALL ANY ICMPTYPE
 %token  ICMP6TYPE CODE KEEP MODULATE STATE PORT RDR NAT BINAT ARROW NODF
-%token	MINTTL IPV6ADDR ERROR ALLOWOPTS
+%token	MINTTL IPV6ADDR ERROR ALLOWOPTS FASTROUTE ROUTETO DUPTO NO LABEL
+%token	NOROUTE
 %token	<v.string> STRING
 %token	<v.number> NUMBER
 %token	<v.i>	PORTUNARY PORTBINARY
 %type	<v.interface>	interface if_list if_item_not if_item
 %type	<v.number>	port icmptype icmp6type minttl
-%type	<v.i>	dir log quick af keep nodf allowopts
+%type	<v.i>	no dir log quick af keep nodf allowopts
 %type	<v.b>	action flag flags blockspec
 %type	<v.range>	dport rport
 %type	<v.proto>	proto proto_list proto_item
@@ -175,6 +187,9 @@ typedef struct {
 %type	<v.peer>	ipportspec
 %type	<v.host>	ipspec xhost host address host_list IPV6ADDR
 %type	<v.port>	portspec port_list port_item
+%type	<v.route>	route
+%type	<v.redirection>	redirection
+%type	<v.string>	label
 %%
 
 ruleset		: /* empty */
@@ -198,7 +213,7 @@ varset		: STRING PORTUNARY STRING
 		}
 		;
 
-pfrule		: action dir log quick interface af proto fromto flags icmpspec keep nodf minttl allowopts
+pfrule		: action dir log quick interface route af proto fromto flags icmpspec keep nodf minttl allowopts label
 		{
 			struct pf_rule r;
 
@@ -217,20 +232,52 @@ pfrule		: action dir log quick interface af proto fromto flags icmpspec keep nod
 			r.log = $3;
 			r.quick = $4;
 
-			r.af = $6;
-			r.flags = $9.b1;
-			r.flagset = $9.b2;
 
-			r.keep_state = $11;
+			r.af = $7;
+			r.flags = $10.b1;
+			r.flagset = $10.b2;
 
-			if ($12)
-				r.rule_flag |= PFRULE_NODF;
+			r.keep_state = $12;
+
 			if ($13)
-				r.min_ttl = $13;
-			r.allow_opts = $14;
+				r.rule_flag |= PFRULE_NODF;
+			if ($14)
+				r.min_ttl = $14;
+			r.allow_opts = $15;
 
-			expand_rule(&r, $5, $7, $8.src.host, $8.src.port,
-			    $8.dst.host, $8.dst.port, $10);
+			if ($6.rt) {
+				r.rt = $6.rt;
+				if ($6.string) {
+					memcpy(r.rt_ifname, $6.string,
+					    sizeof(r.rt_ifname));
+					free($6.string);
+				}
+				if ($6.addr) {
+					if (!r.af)
+						r.af = $6.af;
+					else if (r.af != $6.af) {
+						yyerror("address family"
+						    " mismatch");
+						YYERROR;
+					}	
+					memcpy(&r.rt_addr, $6.addr,
+					    sizeof(r.rt_addr));
+					free($6.addr);
+				}
+			}
+
+			if ($16) {
+				if (strlen($16) >= PF_RULE_LABEL_SIZE) {
+					yyerror("rule label too long (max "
+					    "%d chars)", PF_RULE_LABEL_SIZE-1);
+					YYERROR;
+				}
+				strcpy(r.label, $16);
+				free($16);
+			}
+
+			expand_rule(&r, $5, $8, $9.src.host, $9.src.port,
+			    $9.dst.host, $9.dst.port, $11);
 		}
 		;
 
@@ -308,6 +355,10 @@ if_item_not	: '!' if_item			{ $$ = $2; $$->not = 1; }
 		| if_item			{ $$ = $1; }
 
 if_item		: STRING			{
+			if (ifa0_lookup($1) == NULL) {
+				yyerror("unknown interface %s", $1);
+				YYERROR;
+			}
 			$$ = malloc(sizeof(struct node_if));
 			if ($$ == NULL)
 				err(1, "if_item: malloc");
@@ -388,14 +439,20 @@ host_list	: xhost				{ $$ = $1; }
 
 xhost		: '!' host			{ $$ = $2; $$->not = 1; }
 		| host				{ $$ = $1; }
+		| NOROUTE			{
+			$$ = calloc(1, sizeof(struct node_host));
+			if ($$ == NULL)
+				err(1, "xhost: calloc");
+			$$->noroute = 1;
+		}
 		;
 
 host		: address			{
 			$$ = $1;
 			if ($$->af == AF_INET)
-				ipmask(&$$->mask, 32, AF_INET); 
+				ipmask(&$$->mask, 32); 
 			else
-				ipmask(&$$->mask, 128, AF_INET6);
+				ipmask(&$$->mask, 128);
 		}
 		| address '/' NUMBER		{
 			if ($$->af == AF_INET) {
@@ -410,7 +467,7 @@ host		: address			{
 				}
 			}
 			$$ = $1;
-			ipmask(&$$->mask, $3, $$->af);
+			ipmask(&$$->mask, $3);
 		}
 		;
 
@@ -526,7 +583,7 @@ port_item	: port				{
 		;
 
 port		: NUMBER			{
-			if (0 > $1 || $1 > 65535) {
+			if ($1 < 0 || $1 > 65535) {
 				yyerror("illegal port value %d", $1);
 				YYERROR;
 			}
@@ -716,7 +773,48 @@ nodf		: /* empty */			{ $$ = 0; }
 allowopts	: /* empty */			{ $$ = 0; }
 		| ALLOWOPTS			{ $$ = 1; }
 
-natrule		: NAT interface proto FROM ipspec TO ipspec ARROW address
+label		: /* empty */			{ $$ = NULL; }
+		| LABEL STRING			{
+			if (($$ = strdup($2)) == NULL) {
+				yyerror("rule label strdup() failed");
+				YYERROR;
+			}
+		}
+		;
+
+no		: /* empty */			{ $$ = 0; }
+		| NO				{ $$ = 1; }
+		;
+
+rport		: port				{
+			$$.a = $1;
+			$$.b = $$.t = 0;
+		}
+		| port ':' '*'			{
+			$$.a = $1;
+			$$.b = 0;
+			$$.t = PF_RPORT_RANGE;
+		}
+		;
+
+redirection	: /* empty */			{ $$ = NULL; }
+		| ARROW address			{
+			$$ = malloc(sizeof(struct redirection));
+			if ($$ == NULL)
+				err(1, "redirection: malloc");
+			$$->address = $2;
+			$$->rport.a = $$->rport.b = $$->rport.t = 0;
+		}
+		| ARROW address PORT rport	{
+			$$ = malloc(sizeof(struct redirection));
+			if ($$ == NULL)
+				err(1, "redirection: malloc");
+			$$->address = $2;
+			$$->rport = $4;
+		}
+		;
+
+natrule		: no NAT interface proto FROM ipspec TO ipspec redirection
 		{
 			struct pf_nat nat;
 
@@ -726,60 +824,66 @@ natrule		: NAT interface proto FROM ipspec TO ipspec ARROW address
 			}
 			memset(&nat, 0, sizeof(nat));
 
-			if ($2 != NULL) {
-				memcpy(nat.ifname, $2->ifname,
-				    sizeof(nat.ifname));
-				nat.ifnot = $2->not;
-			}
+			nat.no = $1;
 			if ($3 != NULL) {
-				nat.proto = $3->proto;
+				memcpy(nat.ifname, $3->ifname,
+				    sizeof(nat.ifname));
+				nat.ifnot = $3->not;
 				free($3);
 			}
-			if ($5 != NULL && $7 != NULL) {
-				if ($5->af && $7->af && $5->af != $7->af) {
-					yyerror("nat ip versions must match");
-					YYERROR;
-				} else {
-					if ($5->af)
-						nat.af = $5->af;
-					else if ($7->af)
-						nat.af = $7->af;
-				}
+			if ($4 != NULL) {
+				nat.proto = $4->proto;
+				free($4);
 			}
-			if ($5 != NULL) {
-				memcpy(&nat.saddr, &$5->addr,
-				    sizeof(nat.saddr));
-				memcpy(&nat.smask, &$5->mask,
-				    sizeof(nat.smask));
-				nat.snot  = $5->not;
-				free($5);
-			}
-			if ($7 != NULL) {
-				memcpy(&nat.daddr, &$7->addr,
-				    sizeof(nat.daddr));
-				memcpy(&nat.dmask, &$7->mask,
-				    sizeof(nat.dmask));
-				nat.dnot  = $7->not;
-				free($7);
-			}
-
-			if ($9 == NULL) {
-				yyerror("nat rule requires redirection address");
-				YYERROR;
-			}
-			/* we don't support IPv4 <-> IPv6 nat... yet */
-			if (nat.af && $9->af != nat.af) {
+			if ($6 != NULL && $8 != NULL && $6->af != $8->af) {
 				yyerror("nat ip versions must match");
 				YYERROR;
-			} else
-				nat.af = $9->af;
-			memcpy(&nat.raddr, &$9->addr, sizeof(nat.raddr));
-			free($9);
+			}
+			if ($6 != NULL) {
+				nat.af = $6->af;
+				memcpy(&nat.saddr, &$6->addr,
+				    sizeof(nat.saddr));
+				memcpy(&nat.smask, &$6->mask,
+				    sizeof(nat.smask));
+				nat.snot = $6->not;
+				free($6);
+			}
+			if ($8 != NULL) {
+				nat.af = $8->af;
+				memcpy(&nat.daddr, &$8->addr,
+				    sizeof(nat.daddr));
+				memcpy(&nat.dmask, &$8->mask,
+				    sizeof(nat.dmask));
+				nat.dnot = $8->not;
+				free($8);
+			}
+
+			if (nat.no) {
+				if ($9 != NULL) {
+					yyerror("'no nat' rule does not need '->'");
+					YYERROR;
+				}
+			} else {
+				if ($9 == NULL || $9->address == NULL) {
+					yyerror("'nat' rule requires '-> address'");
+					YYERROR;
+				}
+				if (nat.af && $9->address->af != nat.af) {
+					yyerror("nat ip versions must match");
+					YYERROR;
+				}
+				nat.af = $9->address->af;
+				memcpy(&nat.raddr, &$9->address->addr,
+				    sizeof(nat.raddr));
+				free($9->address);
+				free($9);
+			}
+
 			pfctl_add_nat(pf, &nat);
 		}
 		;
 
-binatrule	: BINAT interface proto FROM address TO ipspec ARROW address
+binatrule	: no BINAT interface proto FROM address TO ipspec redirection
 		{
 			struct pf_binat binat;
 
@@ -789,55 +893,63 @@ binatrule	: BINAT interface proto FROM address TO ipspec ARROW address
 			}
 			memset(&binat, 0, sizeof(binat));
 
-			if ($2 != NULL) {
-				memcpy(binat.ifname, $2->ifname,
-				    sizeof(binat.ifname));
-			}
+			binat.no = $1;
 			if ($3 != NULL) {
-				binat.proto = $3->proto;
+				memcpy(binat.ifname, $3->ifname,
+				    sizeof(binat.ifname));
 				free($3);
 			}
-			if ($5 != NULL && $7 != NULL) {
-				if ($5->af && $7->af && $5->af != $7->af) {
-					yyerror("binat ip versions must match");
-					YYERROR;
-				} else {
-					if ($5->af)
-						binat.af = $5->af;
-					else if ($7->af)
-						binat.af = $7->af;
-				}
+			if ($4 != NULL) {
+				binat.proto = $4->proto;
+				free($4);
 			}
-			if ($5 != NULL) {
-				memcpy(&binat.saddr, &$5->addr,
-				    sizeof(binat.saddr));
-				free($5);
-			}
-			if ($7 != NULL) {
-				memcpy(&binat.daddr, &$7->addr,
-				    sizeof(binat.daddr));
-				memcpy(&binat.dmask, &$7->mask,
-				    sizeof(binat.dmask));
-				binat.dnot  = $7->not;
-				free($7);
-			}
-
-			if ($9 == NULL) {
-				yyerror("binat rule requires redirection address");
-				YYERROR;
-			}
-			/* we don't support IPv4 <-> IPv6 binat... yet */
-			if (binat.af && $9->af != binat.af) {
+			if ($6 != NULL && $8 != NULL && $6->af != $8->af) {
 				yyerror("binat ip versions must match");
 				YYERROR;
-			} else
-				binat.af = $9->af;
-			memcpy(&binat.raddr, &$9->addr, sizeof(binat.raddr));
-			free($9);
+			}
+			if ($6 != NULL) {
+				binat.af = $6->af;
+				memcpy(&binat.saddr, &$6->addr,
+				    sizeof(binat.saddr));
+				free($6);
+			}
+			if ($8 != NULL) {
+				binat.af = $8->af;
+				memcpy(&binat.daddr, &$8->addr,
+				    sizeof(binat.daddr));
+				memcpy(&binat.dmask, &$8->mask,
+				    sizeof(binat.dmask));
+				binat.dnot  = $8->not;
+				free($8);
+			}
+
+			if (binat.no) {
+				if ($9 != NULL) {
+					yyerror("'no binat' rule does not need"
+					    " '->'");
+					YYERROR;
+				}
+			} else {
+				if ($9 == NULL || $9->address == NULL) {
+					yyerror("'binat' rule requires"
+					    " '-> address'");
+					YYERROR;
+				}
+				if (binat.af && $9->address->af != binat.af) {
+					yyerror("binat ip versions must match");
+					YYERROR;
+				}
+				binat.af = $9->address->af;
+				memcpy(&binat.raddr, &$9->address->addr,
+				    sizeof(binat.raddr));
+				free($9->address);
+				free($9);
+			}
+
 			pfctl_add_binat(pf, &binat);
 		}
 
-rdrrule		: RDR interface proto FROM ipspec TO ipspec dport ARROW address rport
+rdrrule		: no RDR interface proto FROM ipspec TO ipspec dport redirection
 		{
 			struct pf_rdr rdr;
 
@@ -847,67 +959,82 @@ rdrrule		: RDR interface proto FROM ipspec TO ipspec dport ARROW address rport
 			}
 			memset(&rdr, 0, sizeof(rdr));
 
-			if ($2 != NULL) {
-				memcpy(rdr.ifname, $2->ifname,
-				    sizeof(rdr.ifname));
-				rdr.ifnot = $2->not;
-			}
+			rdr.no = $1;
 			if ($3 != NULL) {
-				rdr.proto = $3->proto;
+				memcpy(rdr.ifname, $3->ifname,
+				    sizeof(rdr.ifname));
+				rdr.ifnot = $3->not;
 				free($3);
 			}
-			if ($5 != NULL && $7 != NULL) {
-				if ($5->af && $7->af && $5->af != $7->af) {
-					yyerror("rdr ip versions must match");
-					YYERROR; 
-				} else {
-					if ($5->af)
-						rdr.af = $5->af;
-					else if ($7->af)
-						rdr.af = $7->af;
-				}
+			if ($4 != NULL) {
+				rdr.proto = $4->proto;
+				free($4);
 			}
-			if ($5 != NULL) {
-				memcpy(&rdr.saddr, &$5->addr,
-				    sizeof(rdr.saddr));
-				memcpy(&rdr.smask, &$5->mask,
-				    sizeof(rdr.smask));
-				rdr.snot  = $5->not;
-				free($5);
-			}
-			if ($7 != NULL) {
-				memcpy(&rdr.daddr, &$7->addr,
-				    sizeof(rdr.daddr));
-				memcpy(&rdr.dmask, &$7->mask,
-				    sizeof(rdr.dmask));
-				rdr.dnot  = $7->not;
-				free($7);
-			}
-
-			rdr.dport  = $8.a;
-			rdr.dport2 = $8.b;
-			rdr.opts  |= $8.t;
-
-			if ($10 == NULL) {
-				yyerror("rdr rule requires redirection address");
-				YYERROR;
-			}
-			if (rdr.af && $10->af != rdr.af) {
+			if ($6 != NULL && $8 != NULL && $6->af != $8->af) {
 				yyerror("rdr ip versions must match");
 				YYERROR;
-			} else 
-				rdr.af = $10->af;
-			memcpy(&rdr.raddr, &$10->addr, sizeof(rdr.raddr));
-			free($10);
+			}
+			if ($6 != NULL) {
+				rdr.af = $6->af;
+				memcpy(&rdr.saddr, &$6->addr,
+				    sizeof(rdr.saddr));
+				memcpy(&rdr.smask, &$6->mask,
+				    sizeof(rdr.smask));
+				rdr.snot  = $6->not;
+				free($6);
+			}
+			if ($8 != NULL) {
+				rdr.af = $8->af;
+				memcpy(&rdr.daddr, &$8->addr,
+				    sizeof(rdr.daddr));
+				memcpy(&rdr.dmask, &$8->mask,
+				    sizeof(rdr.dmask));
+				rdr.dnot  = $8->not;
+				free($8);
+			}
 
-			rdr.rport  = $11.a;
-			rdr.opts  |= $11.t;
+			rdr.dport  = $9.a;
+			rdr.dport2 = $9.b;
+			rdr.opts  |= $9.t;
+
+			if (rdr.no) {
+				if ($10 != NULL) {
+					yyerror("'no rdr' rule does not need '->'");
+					YYERROR;
+				}
+			} else {
+				if ($10 == NULL || $10->address == NULL) {
+					yyerror("'rdr' rule requires '-> address'");
+					YYERROR;
+				}
+				if (rdr.af && $10->address->af != rdr.af) {
+					yyerror("rdr ip versions must match");
+					YYERROR;
+				}
+				rdr.af = $10->address->af;
+				memcpy(&rdr.raddr, &$10->address->addr,
+				    sizeof(rdr.raddr));
+				free($10->address);
+				rdr.rport  = $10->rport.a;
+				rdr.opts  |= $10->rport.t;
+				free($10);
+			}
+
+			if (rdr.proto && rdr.proto != IPPROTO_TCP &&
+			    rdr.proto != IPPROTO_UDP &&
+			    (rdr.dport || rdr.dport2 || rdr.rport)) {
+				yyerror("rdr ports are only valid for proto tcp/udp");
+				YYERROR;
+			}
 
 			pfctl_add_rdr(pf, &rdr);
 		}
 		;
 
-dport		: PORT port			{
+dport		: /* empty */			{
+			$$.a = $$.b = $$.t = 0;
+		}
+		| PORT port			{
 			$$.a = $2;
 			$$.b = $$.t = 0;
 		}
@@ -918,14 +1045,38 @@ dport		: PORT port			{
 		}
 		;
 
-rport		: PORT port			{
-			$$.a = $2;
-			$$.b = $$.t = 0;
+route		: /* empty */			{ 
+			$$.string = NULL; 
+			$$.rt = 0;
+			$$.addr = NULL;
+			$$.af = 0;
 		}
-		| PORT port ':' '*'		{
-			$$.a = $2;
-			$$.b = 0;
-			$$.t = PF_RPORT_RANGE;
+		| FASTROUTE {
+			$$.string = NULL;
+			$$.rt = PF_FASTROUTE;
+			$$.addr = NULL;
+		}
+		| ROUTETO STRING ':' address {
+			$$.string = strdup($2);
+			$$.rt = PF_ROUTETO;
+			$$.addr = &$4->addr;
+			$$.af = $4->af;
+		}
+		| ROUTETO STRING 		{
+			$$.string = strdup($2); 
+			$$.rt = PF_ROUTETO;
+			$$.addr = NULL;
+		}
+		| DUPTO STRING ':' address {
+			$$.string = strdup($2);
+			$$.rt = PF_DUPTO;
+			$$.addr = &$4->addr;
+			$$.af = $4->af;
+		}
+		| DUPTO STRING 		{ 
+			$$.string = strdup($2); 
+			$$.rt = PF_DUPTO;
+			$$.addr = NULL;
 		}
 		;
 %%
@@ -938,7 +1089,7 @@ yyerror(char *fmt, ...)
 	errors = 1;
 
 	va_start(ap, fmt);
-	fprintf(stderr, "%s:%d: ", infile, yyval.lineno);
+	fprintf(stderr, "%s:%d: ", infile, yylval.lineno);
 	vfprintf(stderr, fmt, ap);
 	fprintf(stderr, "\n");
 	va_end(ap);
@@ -1022,6 +1173,11 @@ rule_consistent(struct pf_rule *r)
 	return (-problems);
 }
 
+struct keywords {
+	const char	*k_name;
+	int	 k_val;
+};
+
 #define CHECK_ROOT(T,r) \
 	do { \
 		if (r == NULL) { \
@@ -1065,31 +1221,51 @@ void expand_rule_hosts(struct pf_rule *r,
 					r->proto = proto->proto;
 					r->src.addr = src_host->addr;
 					r->src.mask = src_host->mask;
+					r->src.noroute = src_host->noroute;
 					r->src.not = src_host->not;
 					r->src.port[0] = src_port->port[0];
 					r->src.port[1] = src_port->port[1];
 					r->src.port_op = src_port->op;
 					r->dst.addr = dst_host->addr;
 					r->dst.mask = dst_host->mask;
+					r->dst.noroute = dst_host->noroute;
 					r->dst.not = dst_host->not;
 					r->dst.port[0] = dst_port->port[0];
 					r->dst.port[1] = dst_port->port[1];
 					r->dst.port_op = dst_port->op;
 					r->type = icmp_type->type;
 					r->code = icmp_type->code;
-
-					if (src_host->af &&
-					    dst_host->af && 
-					    (src_host->af !=
-					    dst_host->af)) {
+					
+					if ((src_host->af && dst_host->af && 
+						r->af) && (src_host->af != 
+						    dst_host->af || 
+						    src_host->af != r->af || 
+						    dst_host->af != r->af)) {
 						yyerror("address family"
 						    " mismatch");
 						nomatch++;
-					} else if (src_host->af)
+					} else if ((src_host->af && 
+						       dst_host->af) && 
+					    (src_host->af != dst_host->af)) {
+						yyerror("address family"
+						    " mismatch");
+						nomatch++;
+					} else if ((src_host->af && r->af) && 
+					    (src_host->af != r->af)) {
+						yyerror("address family"
+						    " mismatch");
+						nomatch++;
+					} else if ((dst_host->af && r->af) && 
+					    (dst_host->af != r->af)) {
+						yyerror("address family"
+						    " mismatch");
+						nomatch++;
+					} else if (src_host->af && !r->af) {
 						r->af = src_host->af;
-					else if (dst_host->af)
-						r->af = dst_host->af;
-
+					} else if (dst_host->af && !r->af) {
+						r->af= dst_host->af;
+					}
+					
 					if (icmp_type->proto &&
 					    r->proto != icmp_type->proto) {
 						yyerror("icmp-type mismatch");
@@ -1099,8 +1275,10 @@ void expand_rule_hosts(struct pf_rule *r,
 					if (rule_consistent(r) < 0 || nomatch)
 						yyerror("skipping rule "
 						    "due to errors");
-					else
+					else {
+						r->nr = pf->rule_nr++;
 						pfctl_add_rule(pf, r);
+					}
 					dst_port = dst_port->next;
 				}
 				dst_host = dst_host->next;
@@ -1170,33 +1348,42 @@ expand_rule(struct pf_rule *r,
 #undef CHECK_ROOT
 
 int
+kw_cmp(k, e)
+	const void *k, *e;
+{
+	return (strcmp(k, ((struct keywords *)e)->k_name));
+}
+
+int
 lookup(char *s)
 {
-	int i;
-	struct keywords {
-		char	*k_name;
-		int	 k_val;
-	} keywords[] = {
+	/* this has to be sorted always */
+	static const struct keywords keywords[] = {
 		{ "all",	ALL},
 		{ "allow-opts",	ALLOWOPTS},
 		{ "any",	ANY},
 		{ "binat",	BINAT},
 		{ "block",	BLOCK},
 		{ "code",	CODE},
+		{ "dup-to",	DUPTO},
+		{ "fastroute",	FASTROUTE},
 		{ "flags",	FLAGS},
 		{ "from",	FROM},
 		{ "icmp-type",	ICMPTYPE},
-		{ "ipv6-icmp-type", ICMP6TYPE},
 		{ "in",		IN},
 		{ "inet",	INET},
 		{ "inet6",	INET6},
+		{ "ipv6-icmp-type", ICMP6TYPE},
 		{ "keep",	KEEP},
+		{ "label",	LABEL},
 		{ "log",	LOG},
 		{ "log-all",	LOGALL},
 		{ "min-ttl",	MINTTL},
 		{ "modulate",	MODULATE},
 		{ "nat",	NAT},
+		{ "no",		NO},
 		{ "no-df",	NODF},
+		{ "no-route",	NOROUTE},
 		{ "on",		ON},
 		{ "out",	OUT},
 		{ "pass",	PASS},
@@ -1208,23 +1395,25 @@ lookup(char *s)
 		{ "return-icmp",RETURNICMP},
 		{ "return-icmp6",RETURNICMP6},
 		{ "return-rst",	RETURNRST},
+		{ "route-to",	ROUTETO},
 		{ "scrub",	SCRUB},
 		{ "state",	STATE},
 		{ "to",		TO},
-		{ NULL,		0 },
 	};
+	const struct keywords *p;
 
-	for (i = 0; keywords[i].k_name != NULL; i++) {
-		if (strcmp(s, keywords[i].k_name) == 0) {
-			if (debug > 1)
-				fprintf(stderr, "%s: %d\n", s,
-				    keywords[i].k_val);
-			return (keywords[i].k_val);
-		}
+	p = bsearch(s, keywords, sizeof(keywords)/sizeof(keywords[0]),
+	    sizeof(keywords[0]), kw_cmp);
+
+	if (p) {
+		if (debug > 1)
+			fprintf(stderr, "%s: %d\n", s, p->k_val);
+		return (p->k_val);
+	} else {
+		if (debug > 1)
+			fprintf(stderr, "string: %s\n", s);
+		return (STRING);
 	}
-	if (debug > 1)
-		fprintf(stderr, "string: %s\n", s);
-	return (STRING);
 }
 
 char	*parsebuf;
@@ -1457,9 +1646,9 @@ top:
 				if (isdigit(c))
 					c -= '0';
 				else if (c >= 'a' && c <= 'f')
-					c -= 'a';
+					c -= 'a' - 10;
 				else if (c >= 'A' && c <= 'F')
-					c -= 'A';
+					c -= 'A' - 10;
 				else
 					break;
 			}
@@ -1489,8 +1678,9 @@ top:
 	}
 
 #define allowed_in_string(x) \
-	isalnum(x) || (ispunct(x) && x != '(' && x != ')' && x != '<' && \
-	x != '>' && x != '!' && x != '=' && x != '/' && x != '#' && x != ',')
+	(isalnum(x) || (ispunct(x) && x != '(' && x != ')' && \
+	x != '{' && x != '}' && x != '<' && x != '>' && \
+	x != '!' && x != '=' && x != '/' && x != '#' && x != ',' && x != ':'))
 
 	if (isalnum(c)) {
 		do {
@@ -1540,7 +1730,7 @@ parse_nat(FILE *input, struct pfctl *xpf)
 }
 
 void
-ipmask(struct pf_addr *m, u_int8_t b, int af)
+ipmask(struct pf_addr *m, u_int8_t b)
 {
 	int i, j = 0;
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ttyio.c,v 1.16 2001/05/24 03:05:27 mickey Exp $	*/
+/*	$OpenBSD: ttyio.c,v 1.21 2002/03/28 17:50:36 millert Exp $	*/
 
 /*
  * POSIX terminal I/O.
@@ -121,8 +121,7 @@ ttcooked()
  * to make things a little bit more efficient.
  */
 int
-ttputc(c)
-	int c;
+ttputc(int c)
 {
 
 	if (nobuf >= NOBUF)
@@ -137,12 +136,19 @@ ttputc(c)
 void
 ttflush()
 {
+	ssize_t written;
+	char *buf = obuf;
+	
+	if (nobuf == 0)
+		return;
 
-	if (nobuf != 0) {
-		if (write(1, obuf, nobuf) != nobuf)
+	while ((written = write(fileno(stdout), buf, nobuf)) != nobuf) {
+		if (written == -1)
 			panic("ttflush write failed");
-		nobuf = 0;
+		buf += written;
+		nobuf -= written;
 	}
+	nobuf = 0;
 }
 
 /*
@@ -154,38 +160,19 @@ int
 ttgetc()
 {
 	char	c;
+	int ret;
 
-	while (read(0, &c, 1) != 1)
-		;
+	do {
+		ret = read(0, &c, 1);
+		if (ret == -1 && errno == EINTR) {
+			if (winch_flag) {
+				refresh(0, 0);
+				winch_flag = 0;
+			}
+		} else if (ret == 1)
+			break;
+	} while (1);
 	return ((int) c);
-}
-
-/*
- * Set the tty size.
- * XXX - belongs in tty.c since it uses terminfo vars.
- */
-void
-setttysize()
-{
-#ifdef	TIOCGWINSZ
-	struct	winsize winsize;
-
-	if (ioctl(0, TIOCGWINSZ, (char *) &winsize) == 0) {
-		nrow = winsize.ws_row;
-		ncol = winsize.ws_col;
-	} else nrow = 0;
-#endif
-	if ((nrow <= 0 || ncol <= 0) &&
-	    ((nrow = lines) <= 0 || (ncol = columns) <= 0)) {
-		nrow = 24;
-		ncol = 80;
-	}
-
-	/* Enforce maximum screen size. */
-	if (nrow > NROW)
-		nrow = NROW;
-	if (ncol > NCOL)
-		ncol = NCOL;
 }
 
 /*
@@ -203,8 +190,7 @@ typeahead()
  * panic - just exit, as quickly as we can.
  */
 void
-panic(s)
-	char *s;
+panic(char *s)
 {
 
 	(void) fputs("panic: ", stderr);

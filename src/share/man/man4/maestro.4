@@ -1,4 +1,4 @@
-.\"   $OpenBSD: maestro.4,v 1.6 2001/10/05 14:45:53 mpech Exp $
+.\"   $OpenBSD: maestro.4,v 1.9 2002/04/08 01:51:25 frantzen Exp $
 .\"
 .\" Copyright (c) 2001 Marc Espie.
 .\" All rights reserved.
@@ -28,7 +28,7 @@
 .Os
 .Sh NAME
 .Nm maestro
-.Nd ESS Maestro 1 and 2 sound hardware driver
+.Nd ESS Maestro 1 and 2 audio driver
 .Sh SYNOPSIS
 .Cd "maestro* at pci? dev ? function ?"
 .Cd "audio* at maestro?"
@@ -37,9 +37,12 @@ The
 .Nm
 driver supports ESS maestro 1, 2 and 2E, including OEM products that
 identify as NEC Versa, or NEC VersaProNX VA26D, as long as they use
-an AC'97 compliant codec, which is always the case, except for very
+an AC97 compliant codec, which is always the case, except for very
 early models. 
-It does not support maestro 3 cards, which are entirely different.
+It does not support maestro 3 cards, which are entirely different and
+supported by the
+.Xr esa 4
+driver.
 .Pp
 Maestro cards have direct support for 16 bit signed little-endian
 mono and stereo, 8 bit signed and unsigned mono and stereo.
@@ -61,6 +64,7 @@ David Leonard and Marc Espie.
 .Sh SEE ALSO
 .Xr ac97 4 ,
 .Xr audio 4 ,
+.Xr esa 4 ,
 .Xr pci 4
 .Sh BUGS
 Very old cards with a PT101 mixer component should have partial support, e.g.,

@@ -1,4 +1,4 @@
-/*	$OpenBSD: uthread_setschedparam.c,v 1.3 2001/08/15 15:45:47 fgsch Exp $	*/
+/*	$OpenBSD: uthread_setschedparam.c,v 1.5 2002/01/19 23:49:32 fgsch Exp $	*/
 /*
  * Copyright (c) 1998 Daniel Eischen <eischen@vigrid.com>.
  * All rights reserved.
@@ -49,11 +49,7 @@ pthread_setschedparam(pthread_t pthread, int policy, const struct sched_param *p
 	} else if ((param->sched_priority < PTHREAD_MIN_PRIORITY) ||
 	    (param->sched_priority > PTHREAD_MAX_PRIORITY)) {
 		/* Return an unsupported value error. */
-#ifdef NOT_YET
 		ret = ENOTSUP;
-#else
-		ret = EOPNOTSUPP;
-#endif
 
 	/* Find the thread in the list of active threads: */
 	} else if ((ret = _find_thread(pthread)) == 0) {
@@ -63,19 +59,22 @@ pthread_setschedparam(pthread_t pthread, int policy, const struct sched_param *p
 		 */
 		_thread_kern_sig_defer();
 
-		if (param->sched_priority != pthread->base_priority) {
+		if (param->sched_priority !=
+		    PTHREAD_BASE_PRIORITY(pthread->base_priority)) {
 			/*
 			 * Remove the thread from its current priority
 			 * queue before any adjustments are made to its
 			 * active priority:
 			 */
+			old_prio = pthread->active_priority;
 			if ((pthread->flags & PTHREAD_FLAGS_IN_PRIOQ) != 0) {
 				in_readyq = 1;
-				old_prio = pthread->active_priority;
 				PTHREAD_PRIOQ_REMOVE(pthread);
 			}
 
 			/* Set the thread base priority: */
+			pthread->base_priority &=
+			    (PTHREAD_SIGNAL_PRIORITY | PTHREAD_RT_PRIORITY);
 			pthread->base_priority = param->sched_priority;
 
 			/* Recalculate the active priority: */

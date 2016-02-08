@@ -25,7 +25,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $OpenBSD: command.c,v 1.69 2001/08/21 04:09:18 brian Exp $
+ * $OpenBSD: command.c,v 1.72 2002/03/31 02:38:49 brian Exp $
  */
 
 #include <sys/param.h>
@@ -164,7 +164,7 @@
 #define NEG_MPPE	54
 #define NEG_CHAP81	55
 
-const char Version[] = "3.0.0";
+const char Version[] = "3.0.1";
 
 static int ShowCommand(struct cmdargs const *);
 static int TerminalCommand(struct cmdargs const *);
@@ -255,22 +255,9 @@ HelpCommand(struct cmdargs const *arg)
 static int
 IdentCommand(struct cmdargs const *arg)
 {
-  int f, max, n, pos;
-
-  *arg->cx->physical->link.lcp.cfg.ident = '\0';
-  max = sizeof arg->cx->physical->link.lcp.cfg.ident;
-
-  for (pos = 0, f = arg->argn; f < arg->argc && pos < max; f++) {
-    n = snprintf(arg->cx->physical->link.lcp.cfg.ident + pos, max - pos,
-                 "%s%s", f == arg->argn ? "" : " ", arg->argv[f]);
-    if (n < 0) {
-      arg->cx->physical->link.lcp.cfg.ident[pos] = '\0';
-      break;
-    }
-    if ((pos += n) >= max)
-      break;
-  }
-
+  Concatinate(arg->cx->physical->link.lcp.cfg.ident,
+              sizeof arg->cx->physical->link.lcp.cfg.ident,
+              arg->argc - arg->argn, arg->argv + arg->argn);
   return 0;
 }
 
@@ -333,7 +320,7 @@ RenameCommand(struct cmdargs const *arg)
   return 1;
 }
 
-int
+static int
 LoadCommand(struct cmdargs const *arg)
 {
   const char *err;
@@ -365,10 +352,33 @@ LoadCommand(struct cmdargs const *arg)
   return 0;
 }
 
-int
+static int
+LogCommand(struct cmdargs const *arg)
+{
+  char buf[LINE_LEN];
+
+  if (arg->argn < arg->argc) {
+    char *argv[MAXARGS];
+    int argc = arg->argc - arg->argn;
+
+    if (argc >= sizeof argv / sizeof argv[0]) {
+      argc = sizeof argv / sizeof argv[0] - 1;
+      log_Printf(LogWARN, "Truncating log command to %d args\n", argc);
+    }
+    command_Expand(argv, argc, arg->argv + arg->argn, arg->bundle, 1, getpid());
+    Concatinate(buf, sizeof buf, argc, (const char *const *)argv);
+    log_Printf(LogLOG, "%s\n", buf);
+    command_Free(argc, argv);
+    return 0;
+  }
+
+  return -1;
+}
+
+static int
 SaveCommand(struct cmdargs const *arg)
 {
-  log_Printf(LogWARN, "save command is not implemented (yet).\n");
+  log_Printf(LogWARN, "save command is not yet implemented.\n");
   return 1;
 }
 
@@ -452,7 +462,8 @@ void
 command_Expand(char **nargv, int argc, char const *const *oargv,
                struct bundle *bundle, int inc0, pid_t pid)
 {
-  int arg;
+  int arg, secs;
+  char buf[20];
   char pidstr[12];
 
   if (inc0)
@@ -494,8 +505,23 @@ command_Expand(char **nargv, int argc, char const *const *oargv,
                        inet_ntoa(bundle->ncp.ipcp.ns.dns[1]));
     nargv[arg] = subst(nargv[arg], "VERSION", Version);
     nargv[arg] = subst(nargv[arg], "COMPILATIONDATE", __DATE__);
+
+    secs = bundle_Uptime(bundle);
+    snprintf(buf, sizeof buf, "%d:%02d:%02d", secs / 3600, (secs / 60) % 60,
+             secs % 60);
+    nargv[arg] = subst(nargv[arg], "UPTIME", buf);
   }
   nargv[arg] = NULL;
+}
+
+void
+command_Free(int argc, char **argv)
+{
+  while (argc) {
+    free(*argv);
+    argc--;
+    argv++;
+  }
 }
 
 static int
@@ -750,6 +776,8 @@ static struct cmdtab const Commands[] = {
   "Link specific commands", "link name command ..."},
   {"load", NULL, LoadCommand, LOCAL_AUTH | LOCAL_CX_OPT,
   "Load settings", "load [system ...]"},
+  {"log", NULL, LogCommand, LOCAL_AUTH | LOCAL_CX_OPT,
+  "log information", "log word ..."},
 #ifndef NONAT
   {"nat", "alias", RunListCommand, LOCAL_AUTH,
   "NAT control", "nat option yes|no", NatCommands},
@@ -1645,7 +1673,7 @@ SetVariable(struct cmdargs const *arg)
     }
     break;
 
-#ifdef HAVE_DES
+#ifndef NODES
   case VAR_MPPE:
     if (arg->argc > arg->argn + 2) {
       res = -1;
@@ -2182,7 +2210,7 @@ static struct cmdtab const SetCommands[] = {
   {"deflate", NULL, SetVariable, LOCAL_AUTH | LOCAL_CX_OPT,
   "deflate window sizes", "set deflate out-winsize in-winsize",
   (const void *) VAR_WINSIZE},
-#ifdef HAVE_DES
+#ifndef NODES
   {"mppe", NULL, SetVariable, LOCAL_AUTH | LOCAL_CX_OPT,
   "MPPE key size and state", "set mppe [40|56|128|* [stateful|stateless|*]]", 
   (const void *) VAR_MPPE},
@@ -2646,7 +2674,7 @@ NegotiateSet(struct cmdargs const *arg)
       cx->physical->link.lcp.cfg.chap05 &= keep;
       cx->physical->link.lcp.cfg.chap05 |= add;
       break;
-#ifdef HAVE_DES
+#ifndef NODES
     case NEG_CHAP80:
       cx->physical->link.lcp.cfg.chap80nt &= keep;
       cx->physical->link.lcp.cfg.chap80nt |= add;
@@ -2771,7 +2799,7 @@ static struct cmdtab const NegotiateCommands[] = {
   {"chap", "chap05", NegotiateSet, LOCAL_AUTH | LOCAL_CX,
   "Challenge Handshake Authentication Protocol", "accept|deny|disable|enable",
   (const void *)NEG_CHAP05},
-#ifdef HAVE_DES
+#ifndef NODES
   {"mschap", "chap80nt", NegotiateSet, LOCAL_AUTH | LOCAL_CX,
   "Microsoft (NT) CHAP", "accept|deny|disable|enable",
   (const void *)NEG_CHAP80},
@@ -3046,8 +3074,8 @@ static int
 SetProcTitle(struct cmdargs const *arg)
 {
   static char title[LINE_LEN];
-  char *argv[MAXARGS], *ptr;
-  int len, remaining, f, argc = arg->argc - arg->argn;
+  char *argv[MAXARGS];
+  int argc = arg->argc - arg->argn;
 
   if (arg->argc == arg->argn) {
     SetTitle(NULL);
@@ -3059,24 +3087,9 @@ SetProcTitle(struct cmdargs const *arg)
     log_Printf(LogWARN, "Truncating proc title to %d args\n", argc);
   }
   command_Expand(argv, argc, arg->argv + arg->argn, arg->bundle, 1, getpid());
-
-  ptr = title;
-  remaining = sizeof title - 1;
-  for (f = 0; f < argc && remaining; f++) {
-    if (f) {
-      *ptr++ = ' ';
-      remaining--;
-    }
-    len = strlen(argv[f]);
-    if (len > remaining)
-      len = remaining;
-    memcpy(ptr, argv[f], len);
-    remaining -= len;
-    ptr += len;
-  }
-  *ptr = '\0';
-
+  Concatinate(title, sizeof title, argc, (const char *const *)argv);
   SetTitle(title);
+  command_Free(argc, argv);
 
   return 0;
 }

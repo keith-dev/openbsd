@@ -1,4 +1,4 @@
-#	$OpenBSD: rc,v 1.185 2001/10/09 18:44:17 angelos Exp $
+#	$OpenBSD: rc,v 1.193 2002/02/25 03:30:46 deraadt Exp $
 
 # System startup script run by init on autoboot
 # or after single-user.
@@ -60,9 +60,11 @@ fi
 for dev in 0 1 2 3; do
 	if [ -f /etc/raid$dev.conf ]; then
 		raidctl -c /etc/raid$dev.conf raid$dev
-		raidctl -v -P raid$dev
 	fi
 done
+
+# Check parity on raid devices.
+raidctl -P all
 
 swapctl -A -t blk
 
@@ -116,9 +118,9 @@ rm -f /fastboot		# XXX (root now writeable)
 echo 'setting tty flags'
 ttyflags -a
 
-if [ "X$pf" != X"NO" ]; then
+if [ "X${pf}" != X"NO" ]; then
 	RULES="block in all\nblock out all"
-	case `sysctl vfs.mounts.nfs` in
+	case `sysctl vfs.mounts.nfs 2>/dev/null` in
 	*[1-9]*)
 		# don't kill NFS
 		RULES="$RULES\npass in proto udp from any port { 111, 2049 } to any"
@@ -143,7 +145,7 @@ fi
 echo 'starting network'
 . /etc/netstart
 
-if [ "X$pf" != X"NO" ]; then
+if [ "X${pf}" != X"NO" ]; then
 	if [ -f ${nat_rules} ]; then
 		pfctl -N ${nat_rules}
 	fi
@@ -176,7 +178,7 @@ dd if=/dev/urandom of=/var/db/host.random bs=1024 count=64 \
 rm -f /etc/nologin
 rm -f /var/spool/lock/LCK.*
 rm -f /var/spool/uucp/STST/*
-(cd /var/run && { rm -rf -- *; install -c -m 664 -g utmp /dev/null utmp; })
+(cd /var/run && { test -r dhclient.pid && dhclient_pid=`cat dhclient.pid`; rm -rf -- *; install -c -m 664 -g utmp /dev/null utmp; test -n "$dhclient_pid" && echo "$dhclient_pid" > dhclient.pid; })
 
 # save a copy of the boot messages
 dmesg >/var/run/dmesg.boot
@@ -189,7 +191,7 @@ if [ "X${named_flags}" != X"NO" -a "X${named_chroot}" != "X" ]; then
 fi
 syslogd ${syslogd_flags}
 
-if [ "X$pf" != X"NO" ]; then
+if [ X"${pf}" != X"NO" -a X"${pflogd_flags}" != X"NO" ]; then
 	ifconfig pflog0 up
 	pflogd ${pflogd_flags}
 fi
@@ -302,7 +304,7 @@ swapctl -A -t noblk
 # /var/crash should be a directory or a symbolic link
 # to the crash directory if core dumps are to be saved.
 if [ -d /var/crash ]; then
-	savecore /var/crash
+	savecore ${savecore_flags} /var/crash
 fi
 
 if [ "X${afs}" = X"YES" -a -c ${afs_device} -a -d ${afs_mount_point} ]; then
@@ -382,25 +384,25 @@ if [ -f /sbin/ldconfig ]; then
 	ldconfig $shlib_dirs
 fi
 
-if [ ! -f /etc/ssh_host_dsa_key ]; then
+if [ ! -f /etc/ssh/ssh_host_dsa_key ]; then
 	echo -n "ssh-keygen: generating new DSA host key... "
-	if /usr/bin/ssh-keygen -q -t dsa -f /etc/ssh_host_dsa_key -N ''; then
+	if /usr/bin/ssh-keygen -q -t dsa -f /etc/ssh/ssh_host_dsa_key -N ''; then
 		echo done.
 	else
 		echo failed.
 	fi
 fi
-if [ ! -f /etc/ssh_host_rsa_key ]; then
+if [ ! -f /etc/ssh/ssh_host_rsa_key ]; then
 	echo -n "ssh-keygen: generating new RSA host key... "
-	if /usr/bin/ssh-keygen -q -t rsa -f /etc/ssh_host_rsa_key -N ''; then
+	if /usr/bin/ssh-keygen -q -t rsa -f /etc/ssh/ssh_host_rsa_key -N ''; then
 		echo done.
 	else
 		echo failed.
 	fi
 fi
-if [ ! -f /etc/ssh_host_key ]; then
-	echo -n "ssh-keygen: generating new RSA host key... "
-	if /usr/bin/ssh-keygen -q -t rsa1 -f /etc/ssh_host_key -N ''; then
+if [ ! -f /etc/ssh/ssh_host_key ]; then
+	echo -n "ssh-keygen: generating new RSA1 host key... "
+	if /usr/bin/ssh-keygen -q -t rsa1 -f /etc/ssh/ssh_host_key -N ''; then
 		echo done.
 	else
 		echo failed.

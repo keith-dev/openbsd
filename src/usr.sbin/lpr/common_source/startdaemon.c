@@ -1,4 +1,4 @@
-/*	$OpenBSD: startdaemon.c,v 1.4 2001/08/30 17:38:13 millert Exp $	*/
+/*	$OpenBSD: startdaemon.c,v 1.6 2001/12/06 03:12:30 ericj Exp $	*/
 
 /*
  * Copyright (c) 1983, 1993, 1994
@@ -37,10 +37,9 @@
 #if 0
 static const char sccsid[] = "@(#)startdaemon.c	8.2 (Berkeley) 4/17/94";
 #else
-static const char rcsid[] = "$OpenBSD: startdaemon.c,v 1.4 2001/08/30 17:38:13 millert Exp $";
+static const char rcsid[] = "$OpenBSD: startdaemon.c,v 1.6 2001/12/06 03:12:30 ericj Exp $";
 #endif
 #endif /* not lint */
-
 
 #include <sys/param.h>
 #include <sys/socket.h>
@@ -56,8 +55,6 @@ static const char rcsid[] = "$OpenBSD: startdaemon.c,v 1.4 2001/08/30 17:38:13 m
 
 extern uid_t	uid, euid;
 
-static void perr __P((char *));
-
 /*
  * Tell the printer daemon that there are new files in the spool directory.
  */
@@ -72,7 +69,7 @@ startdaemon(printer)
 
 	s = socket(AF_UNIX, SOCK_STREAM, 0);
 	if (s < 0) {
-		perr("socket");
+		perror("socket");
 		return(0);
 	}
 	memset(&un, 0, sizeof(un));
@@ -82,20 +79,31 @@ startdaemon(printer)
 #define SUN_LEN(unp) (strlen((unp)->sun_path) + 2)
 #endif
 	seteuid(euid);
+	siginterrupt(SIGINT, 1);
 	if (connect(s, (struct sockaddr *)&un, SUN_LEN(&un)) < 0) {
+		if (errno == EINTR && gotintr) {
+			siginterrupt(SIGINT, 0);
+			seteuid(uid);
+			close(s);
+			return(0);
+		}
+		siginterrupt(SIGINT, 0);
 		seteuid(uid);
-		perr("connect");
+		perror("connect");
 		(void) close(s);
 		return(0);
 	}
+	siginterrupt(SIGINT, 0);
 	seteuid(uid);
 	if (snprintf(buf, sizeof buf, "\1%s\n", printer) > sizeof buf-1) {
 		close(s);
 		return (0);
 	}
 	n = strlen(buf);
+
+	/* XXX atomicio inside siginterrupt? */
 	if (write(s, buf, n) != n) {
-		perr("write");
+		perror("write");
 		(void) close(s);
 		return(0);
 	}
@@ -108,15 +116,7 @@ startdaemon(printer)
 	}
 	while ((n = read(s, buf, sizeof(buf))) > 0)
 		fwrite(buf, 1, n, stdout);
+
 	(void) close(s);
 	return(0);
-}
-
-static void
-perr(msg)
-	char *msg;
-{
-	extern char *name;
-
-	(void)printf("%s: %s: %s\n", name, msg, strerror(errno));
 }

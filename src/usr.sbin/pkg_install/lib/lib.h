@@ -1,4 +1,4 @@
-/* $OpenBSD: lib.h,v 1.9 2001/06/06 20:56:35 espie Exp $ */
+/* $OpenBSD: lib.h,v 1.11 2001/11/07 20:57:24 espie Exp $ */
 
 /*
  * FreeBSD install - a package for the installation and maintainance
@@ -101,10 +101,10 @@ typedef enum pl_ent_t {
 	PLIST_PKGDEP,
 	PLIST_MTREE,
 	PLIST_DIR_RM,
-	PLIST_IGNORE_INST,
 	PLIST_OPTION,
 	PLIST_PKGCFL,
-	PLIST_NEWDEP
+	PLIST_NEWDEP,
+	PLIST_LIBDEP
 } pl_ent_t;
 
 /* Types */

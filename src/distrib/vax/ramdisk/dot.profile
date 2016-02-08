@@ -1,4 +1,4 @@
-#	$OpenBSD: dot.profile,v 1.5 2001/09/17 14:52:18 millert Exp $
+#	$OpenBSD: dot.profile,v 1.8 2002/04/05 03:13:01 deraadt Exp $
 #	$NetBSD: dot.profile,v 1.1 1995/12/18 22:54:43 pk Exp $
 #
 # Copyright (c) 1995 Jason R. Thorpe
@@ -32,19 +32,15 @@
 #
 
 export PATH=/sbin:/bin:/usr/bin:/usr/sbin:/
-export HISTFILE=/.sh_history
-
 umask 022
-
 set -o emacs # emacs-style command line editing
 
 # XXX
 # the TERM/EDITOR stuff is really well enough parameterized to be moved
 # into install.sub where it could use the routines there and be invoked
 # from the various (semi) MI install and upgrade scripts
-
 # terminals believed to be in termcap, default TERM
-TERMS="sun vt* pc3 dumb"
+TERMS="sun vt* dumb"
 TERM=vt100
 
 if [ "X${DONEPROFILE}" = "X" ]; then
@@ -53,22 +49,22 @@ if [ "X${DONEPROFILE}" = "X" ]; then
 	mount -u /dev/rd0a /
 
 	# set up some sane defaults
-	echo 'erase ^H, werase ^W, kill ^U, intr ^C'
-	stty newcrt werase ^W intr ^C kill ^U erase ^H 9600
+	echo 'erase ^?, werase ^W, kill ^U, intr ^C'
+	stty newcrt werase ^W intr ^C kill ^U erase ^? 9600
 
-	# get the terminal type
-	_forceloop=""
-	while [ "X$_forceloop" = X"" ]; do
-		echo "Supported terminals are: $TERMS"
-		eval `tset -s -m ":?$TERM"`
-		if [ "X$TERM" != X"unknown" ]; then
-			_forceloop="done"
-		fi
-	done
-	export TERM
-
-	EDITOR=""
-	export EDITOR
+#	# get the terminal type
+#	_forceloop=""
+#	while [ "X$_forceloop" = X"" ]; do
+#		echo "Supported terminals are: $TERMS"
+#		eval `tset -s -m ":?$TERM"`
+#		if [ "X$TERM" != X"unknown" ]; then
+#			_forceloop="done"
+#		fi
+#	done
+#	export TERM
+#
+#	EDITOR=""
+#	export EDITOR
 
 	# Installing or upgrading?
 	_forceloop=""
@@ -76,20 +72,13 @@ if [ "X${DONEPROFILE}" = "X" ]; then
 		echo -n '(I)nstall, (U)pgrade, or (S)hell? '
 		read _forceloop
 		case "$_forceloop" in
-			i*|I*)
-				/install
-				;;
-
-			u*|U*)
-				/upgrade
-				;;
-
-			s*|S*)
-				;;
-
-			*)
-				_forceloop=""
-				;;
+		i*|I*)	/install
+			;;
+		u*|U*)	/upgrade
+			;;
+		s*|S*)	;;
+		*)	_forceloop=""
+			;;
 		esac
 	done
 fi

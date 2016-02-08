@@ -1,4 +1,4 @@
-/*	$OpenBSD: fingerd.c,v 1.22 2001/08/18 18:31:21 deraadt Exp $	*/
+/*	$OpenBSD: fingerd.c,v 1.26 2002/02/19 19:39:38 millert Exp $	*/
 
 /*
  * Copyright (c) 1983, 1993
@@ -43,7 +43,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "from: @(#)fingerd.c	8.1 (Berkeley) 6/4/93";
 #else
-static char rcsid[] = "$OpenBSD: fingerd.c,v 1.22 2001/08/18 18:31:21 deraadt Exp $";
+static char rcsid[] = "$OpenBSD: fingerd.c,v 1.26 2002/02/19 19:39:38 millert Exp $";
 #endif
 #endif /* not lint */
 
@@ -59,10 +59,11 @@ static char rcsid[] = "$OpenBSD: fingerd.c,v 1.22 2001/08/18 18:31:21 deraadt Ex
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdarg.h>
 #include "pathnames.h"
 
-void err __P((const char *, ...));
-void usage __P((void));
+void err(const char *, ...);
+void usage(void);
 
 void
 usage()
@@ -78,8 +79,8 @@ main(argc, argv)
 	int argc;
 	char *argv[];
 {
-	register FILE *fp;
-	register int ch, ac = 2;
+	FILE *fp;
+	int ch, ac = 2;
 	int p[2], logging, secure, user_required, short_list;
 #define	ENTRIES	50
 	char **comp, *prog;
@@ -105,19 +106,23 @@ main(argc, argv)
 			user_required = 1;
 			break;
 		case 'S':
-			short_list = 1;
-			av[ac++] = "-s";
+			if (ac < ENTRIES) {
+				short_list = 1;
+				av[ac++] = "-s";
+			}
 			break;
 		case 'm':
-			av[ac++] = "-m";
+			if (ac < ENTRIES)
+				av[ac++] = "-m";
 			break;
 		case 'M':
-			av[ac++] = "-M";
+			if (ac < ENTRIES)
+				av[ac++] = "-M";
 			break;
 		case 'p':
-			av[ac++] = "-p";
+			if (ac < ENTRIES)
+				av[ac++] = "-p";
 			break;
-		case '?':
 		default:
 			usage();
 		}
@@ -226,27 +231,12 @@ main(argc, argv)
 	exit(0);
 }
 
-#ifdef __STDC__
-#include <stdarg.h>
-#else
-#include <varargs.h>
-#endif
-
 void
-#ifdef __STDC__
 err(const char *fmt, ...)
-#else
-err(fmt, va_alist)
-	char *fmt;
-	va_dcl
-#endif
 {
 	va_list ap;
-#ifdef __STDC__
+
 	va_start(ap, fmt);
-#else
-	va_start(ap);
-#endif
 	(void) vsyslog(LOG_ERR, fmt, ap);
 	va_end(ap);
 	exit(1);

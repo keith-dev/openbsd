@@ -1,4 +1,4 @@
-/*	$OpenBSD: traceroute6.c,v 1.15 2001/01/12 19:10:48 brad Exp $	*/
+/*	$OpenBSD: traceroute6.c,v 1.18 2002/02/19 02:34:10 itojun Exp $	*/
 /*	$KAME: traceroute6.c,v 1.39 2000/12/22 15:11:05 itojun Exp $	*/
 
 /*
@@ -312,23 +312,23 @@ struct opacket {
 u_char	packet[512];		/* last inbound (icmp) packet */
 struct opacket	*outpacket;	/* last output (udp) packet */
 
-int	main __P((int, char *[]));
-int	wait_for_reply __P((int, struct msghdr *));
+int	main(int, char *[]);
+int	wait_for_reply(int, struct msghdr *);
 #ifdef IPSEC
 #ifdef IPSEC_POLICY_IPSEC
-int	setpolicy __P((int so, char *policy));
+int	setpolicy(int so, char *policy);
 #endif
 #endif
-void	send_probe __P((int, int));
-struct udphdr *get_udphdr __P((struct ip6_hdr *, u_char *));
-int	get_hoplim __P((struct msghdr *));
-double	deltaT __P((struct timeval *, struct timeval *));
-char	*pr_type __P((int));
-int	packet_ok __P((struct msghdr *, int, int));
-void	print __P((struct msghdr *, int));
-void	tvsub __P((struct timeval *, struct timeval *));
-const char *inetname __P((struct sockaddr *));
-void	usage __P((void));
+void	send_probe(int, int);
+struct udphdr *get_udphdr(struct ip6_hdr *, u_char *);
+int	get_hoplim(struct msghdr *);
+double	deltaT(struct timeval *, struct timeval *);
+char	*pr_type(int);
+int	packet_ok(struct msghdr *, int, int);
+void	print(struct msghdr *, int);
+void	tvsub(struct timeval *, struct timeval *);
+const char *inetname(struct sockaddr *);
+void	usage(void);
 
 int rcvsock;			/* receive (icmp) socket file descriptor */
 int sndsock;			/* send (udp) socket file descriptor */
@@ -419,7 +419,7 @@ main(argc, argv)
 
 	seq = 0;
 	
-	while ((ch = getopt(argc, argv, "df:g:lm:np:q:rs:w:v")) != EOF)
+	while ((ch = getopt(argc, argv, "df:g:lm:np:q:rs:w:v")) != -1)
 		switch(ch) {
 		case 'd':
 			options |= SO_DEBUG;
@@ -1316,7 +1316,7 @@ inetname(sa)
 
 	if (first && !nflag) {
 		first = 0;
-		if (gethostname(domain, MAXHOSTNAMELEN) == 0 &&
+		if (gethostname(domain, sizeof(domain)) == 0 &&
 		    (cp = index(domain, '.')))
 			(void) strlcpy(domain, cp + 1, sizeof(domain));
 		else

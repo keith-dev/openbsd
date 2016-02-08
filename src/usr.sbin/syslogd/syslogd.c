@@ -1,4 +1,4 @@
-/*	$OpenBSD: syslogd.c,v 1.43 2001/08/03 20:24:16 millert Exp $	*/
+/*	$OpenBSD: syslogd.c,v 1.49 2002/02/16 21:28:09 millert Exp $	*/
 
 /*
  * Copyright (c) 1983, 1988, 1993, 1994
@@ -43,7 +43,7 @@ static char copyright[] =
 #if 0
 static char sccsid[] = "@(#)syslogd.c	8.3 (Berkeley) 4/4/94";
 #else
-static char rcsid[] = "$OpenBSD: syslogd.c,v 1.43 2001/08/03 20:24:16 millert Exp $";
+static char rcsid[] = "$OpenBSD: syslogd.c,v 1.49 2002/02/16 21:28:09 millert Exp $";
 #endif
 #endif /* not lint */
 
@@ -97,7 +97,6 @@ static char rcsid[] = "$OpenBSD: syslogd.c,v 1.43 2001/08/03 20:24:16 millert Ex
 #include <err.h>
 #include <fcntl.h>
 #include <paths.h>
-#include <setjmp.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -195,28 +194,31 @@ int	Initialized = 0;	/* set when we have initialized ourselves */
 int	MarkInterval = 20 * 60;	/* interval between marks in seconds */
 int	MarkSeq = 0;		/* mark sequence number */
 
-sig_atomic_t MarkSet;
-sig_atomic_t WantDie;
+volatile sig_atomic_t MarkSet;
+volatile sig_atomic_t WantDie;
+volatile sig_atomic_t DoInit;
 
 int	SecureMode = 1;		/* when true, speak only unix domain socks */
 
-void	cfline __P((char *, struct filed *, char *));
-char   *cvthname __P((struct sockaddr_in *));
-int	decode __P((const char *, CODE *));
-void	dodie __P((int));
-void	die __P((int));
-void	domark __P((int));
-void	markit __P((void));
-void	fprintlog __P((struct filed *, int, char *));
-void	init __P((int));
-void	logerror __P((char *));
-void	logmsg __P((int, char *, char *, int));
-void	printline __P((char *, char *));
-void	printsys __P((char *));
-void	reapchild __P((int));
-char   *ttymsg __P((struct iovec *, int, char *, int));
-void	usage __P((void));
-void	wallmsg __P((struct filed *, struct iovec *));
+void	cfline(char *, struct filed *, char *);
+char   *cvthname(struct sockaddr_in *);
+int	decode(const char *, CODE *);
+void	dodie(int);
+void	doinit(int);
+void	die(int);
+void	domark(int);
+void	markit(void);
+void	fprintlog(struct filed *, int, char *);
+void	init(void);
+void	logerror(char *);
+void	logmsg(int, char *, char *, int);
+void	printline(char *, char *);
+void	printsys(char *);
+void	reapchild(int);
+char   *ttymsg(struct iovec *, int, char *, int);
+void	usage(void);
+void	wallmsg(struct filed *, struct iovec *);
+int	getmsgbufsize(void);
 
 #define MAXFUNIX	21
 
@@ -293,6 +295,7 @@ main(argc, argv)
 	linesize++;
 	line = malloc(linesize);
 
+	(void)signal(SIGHUP, doinit);
 	(void)signal(SIGTERM, dodie);
 	(void)signal(SIGINT, Debug ? dodie : SIG_IGN);
 	(void)signal(SIGQUIT, Debug ? dodie : SIG_IGN);
@@ -358,8 +361,7 @@ main(argc, argv)
 
 	dprintf("off & running....\n");
 
-	init(0);
-	(void)signal(SIGHUP, init);
+	init();
 
 	if (fklog != -1 && fklog > fdsrmax)
 		fdsrmax = fklog;
@@ -380,6 +382,11 @@ main(argc, argv)
 			markit();
 		if (WantDie)
 			die(WantDie);
+
+		if (DoInit) {
+			init();
+			DoInit = 0;
+		}
 
 		bzero(fdsr, howmany(fdsrmax+1, NFDBITS) *
 		    sizeof(fd_mask));
@@ -854,8 +861,8 @@ void
 reapchild(signo)
 	int signo;
 {
-	int status;
 	int save_errno = errno;
+	int status;
 
 	while (waitpid(-1, &status, WNOHANG) > 0)
 		;
@@ -907,6 +914,13 @@ domark(signo)
 	int signo;
 {
 	MarkSet = 1;
+}
+
+void
+doinit(signo)
+	int signo;
+{
+	DoInit = 1;
 }
 
 /*
@@ -961,8 +975,7 @@ die(signo)
  *  INIT -- Initialize syslogd from configuration table
  */
 void
-init(signo)
-	int signo;
+init()
 {
 	int i;
 	FILE *cf;
@@ -970,7 +983,6 @@ init(signo)
 	char *p;
 	char cline[LINE_MAX];
  	char prog[NAME_MAX+1];
-	int save_errno = errno;
 
 	dprintf("init\n");
 
@@ -1008,7 +1020,6 @@ init(signo)
 		(*nextp)->f_next = (struct filed *)calloc(1, sizeof(*f));
 		cfline("*.PANIC\t*", (*nextp)->f_next, "*");
 		Initialized = 1;
-		errno = save_errno;
 		return;
 	}
 
@@ -1094,7 +1105,6 @@ init(signo)
 	logmsg(LOG_SYSLOG|LOG_INFO, "syslogd: restart", LocalHostName,
 	    ADDDATE);
 	dprintf("syslogd: restarted\n");
-	errno = save_errno;
 }
 
 /*
@@ -1194,8 +1204,7 @@ cfline(line, f, prog)
 	while (*p == '\t')
 		p++;
 
-	switch (*p)
-	{
+	switch (*p) {
 	case '@':
 		if (!InetInuse)
 			break;

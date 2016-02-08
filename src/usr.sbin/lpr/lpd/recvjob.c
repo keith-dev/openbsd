@@ -1,4 +1,4 @@
-/*	$OpenBSD: recvjob.c,v 1.15 2001/08/30 17:38:13 millert Exp $	*/
+/*	$OpenBSD: recvjob.c,v 1.19 2002/02/19 19:39:40 millert Exp $	*/
 
 /*
  * Copyright (c) 1983, 1993
@@ -44,7 +44,7 @@ static const char copyright[] =
 #if 0
 static const char sccsid[] = "@(#)recvjob.c	8.2 (Berkeley) 4/27/95";
 #else
-static const char rcsid[] = "$OpenBSD: recvjob.c,v 1.15 2001/08/30 17:38:13 millert Exp $";
+static const char rcsid[] = "$OpenBSD: recvjob.c,v 1.19 2002/02/19 19:39:40 millert Exp $";
 #endif
 #endif /* not lint */
 
@@ -62,8 +62,10 @@ static const char rcsid[] = "$OpenBSD: recvjob.c,v 1.15 2001/08/30 17:38:13 mill
 #include <dirent.h>
 #include <syslog.h>
 #include <stdio.h>
+#include <errno.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdarg.h>
 #include "lp.h"
 #include "lp.local.h"
 #include "extern.h"
@@ -76,13 +78,13 @@ static int	 minfree;       /* keep at least minfree blocks available */
 static char	*sp = "";
 static char	 tfname[NAME_MAX];	/* tmp copy of cf before linking */
 
-static int        chksize __P((int));
-static void       frecverr __P((const char *, ...));
-static int        noresponse __P((void));
-static void       rcleanup __P((int));
-static int        read_number __P((char *));
-static int        readfile __P((char *, int));
-static int        readjob __P((void));
+static int        chksize(int);
+static void       frecverr(const char *, ...);
+static int        noresponse(void);
+static void       rcleanup(int);
+static int        read_number(char *);
+static int        readfile(char *, int);
+static int        readjob(void);
 
 
 void
@@ -179,11 +181,10 @@ readjob()
 			 * returns
 			 */
 			strlcpy(cp + 6, from, sizeof(line) + line - cp - 6);
+			if (strchr(cp, '/'))
+				frecverr("readjob: %s: illegal path name", cp);
 			strlcpy(tfname, cp, sizeof tfname);
 			tfname[0] = 't';
-			if (strchr(tfname, '/'))
-				frecverr("readjob: %s: illegal path name",
-				    tfname);
 			if (!chksize(size)) {
 				(void) write(1, "\2", 1);
 				continue;
@@ -205,14 +206,13 @@ readjob()
 				size = size * 10 + (*cp++ - '0');
 			if (*cp++ != ' ')
 				break;
+			if (strchr(cp, '/'))
+				frecverr("readjob: %s: illegal path name", cp);
 			if (!chksize(size)) {
 				(void) write(1, "\2", 1);
 				continue;
 			}
 			(void) strlcpy(dfname, cp, sizeof dfname);
-			if (strchr(dfname, '/'))
-				frecverr("readjob: %s: illegal path name",
-					dfname);
 			(void) readfile(dfname, size);
 			continue;
 		}
@@ -328,6 +328,8 @@ static void
 rcleanup(signo)
 	int signo;
 {
+	int save_errno = errno;
+
 	if (tfname[0] && strchr(tfname, '/') == NULL)
 		(void) unlink(tfname);
 	if (dfname[0] && strchr(dfname, '/') == NULL) {
@@ -339,30 +341,16 @@ rcleanup(signo)
 		} while (dfname[0]-- != 'd');
 	}
 	dfname[0] = '\0';
+	errno = save_errno;
 }
 
-#ifdef __STDC__
-#include <stdarg.h>
-#else
-#include <varargs.h>
-#endif
-
 static void
-#ifdef __STDC__
 frecverr(const char *msg, ...)
-#else
-frecverr(msg, va_alist)
-	char *msg;
-        va_dcl
-#endif
 {
 	extern char fromb[];
 	va_list ap;
-#ifdef __STDC__
+
 	va_start(ap, msg);
-#else
-	va_start(ap);
-#endif
 	rcleanup(0);
 	syslog(LOG_ERR, "%s", fromb);
 	vsyslog(LOG_ERR, msg, ap);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: rtld.c,v 1.19 2001/06/09 21:51:58 espie Exp $	*/
+/*	$OpenBSD: rtld.c,v 1.22 2002/03/07 17:07:10 fgsch Exp $	*/
 /*	$NetBSD: rtld.c,v 1.43 1996/01/14 00:35:17 pk Exp $	*/
 /*
  * Copyright (c) 1993 Paul Kranenburg
@@ -294,6 +294,7 @@ rtld(version, crtp, dp)
 					(caddr_t)0, 0, crtp->crt_dp);
 	LM_PRIVATE(smp)->spd_refcount++;
 	LM_PRIVATE(smp)->spd_flags |= RTLD_MAIN;
+	main_map = smp;
 
 	smp = alloc_link_map(us, (struct sod *)0, (struct so_map *)0,
 					(caddr_t)crtp->crt_ba, 0, dp);
@@ -508,8 +509,6 @@ alloc_link_map(path, sodp, parent, addr, size, dp)
 	smp->som_sod = sodp;
 	smp->som_dynamic = dp;
 	smp->som_spd = (caddr_t)smpp;
-
-/*XXX*/	if (addr == 0) main_map = smp;
 
 	smpp->spd_refcount = 0;
 	smpp->spd_flags = 0;
@@ -975,11 +974,17 @@ lookup(name, src_map, strong)
 	int		strong;
 {
 	long			common_size = 0;
-	struct so_map		*smp;
+	struct so_map		*smp, *weak_smp;
 	struct rt_symbol	*rtsp;
+	struct nzlist		*weak_np = 0;
 
-	if ((rtsp = lookup_rts(name)) != NULL)
+	if ((rtsp = lookup_rts(name)) != NULL) {
+		/* Common symbol is not a member of particular shlib. */
+		*src_map = NULL;
 		return rtsp->rt_sp;
+	}
+
+	weak_smp = NULL; /* XXX - gcc! */
 
 	/*
 	 * Search all maps for a definition of NAME
@@ -1070,9 +1075,19 @@ restart:
 				continue;
 			}
 		}
+		if (N_BIND(&np->nlist) == BIND_WEAK && weak_np == 0) {
+			weak_np = np;
+			weak_smp = smp;
+			continue;
+		}
 
 		*src_map = smp;
 		return np;
+	}
+
+	if (weak_np) {
+		*src_map = weak_smp;
+		return weak_np;
 	}
 
 	if (common_size == 0)
@@ -1084,6 +1099,9 @@ restart:
 	 */
 	rtsp = enter_rts(name, (long)calloc(1, common_size),
 					N_UNDF + N_EXT, 0, common_size, NULL);
+
+	/* Common symbol is not a member of particular shlib. */
+	*src_map = NULL;
 
 #if DEBUG
 xprintf("Allocating common: %s size %d at %#x\n", name, common_size, rtsp->rt_sp->nz_value);
@@ -1101,10 +1119,10 @@ long
 binder(jsp)
 	jmpslot_t	*jsp;
 {
-	struct so_map	*smp, *src_map;
+	struct so_map	*smp, *src_map = NULL;
 	long		addr;
 	char		*sym;
-	struct nzlist	*np = NULL;
+	struct nzlist	*np;
 	int		index;
 
 	/*
@@ -1125,18 +1143,7 @@ binder(jsp)
 	sym = LM_STRINGS(smp) +
 		LM_SYMBOL(smp,RELOC_SYMBOL(&LM_REL(smp)[index]))->nz_strx;
 
-	/*
-	 * If this is a call from a dlopen(3) object, try to resolve locally
-	 * first
-	 */
-	if (LM_PRIVATE(smp)->spd_flags & RTLD_DL) {
-		src_map = smp;
-		np = lookup(sym, &src_map, 1);
-	}
-	if (np == NULL) {
-		src_map = NULL;
-		np = lookup(sym, &src_map, 1);
-	}
+	np = lookup(sym, &src_map, 1);
 	if (np == NULL)
 		errx(1, "Undefined symbol \"%s\" called from %s:%s at %#x",
 				sym, main_progname, smp->som_path, jsp);
@@ -1517,7 +1524,7 @@ __dlopen(name, mode)
 
 	build_sod(name, sodp);
 
-	if ((smp = map_object(sodp, 0)) == NULL) {
+	if ((smp = map_object(sodp, main_map)) == NULL) {
 #ifdef DEBUG
 xprintf("%s: %s\n", name, strerror(errno));
 #endif

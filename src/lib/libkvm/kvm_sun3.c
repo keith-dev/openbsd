@@ -1,4 +1,4 @@
-/*	$OpenBSD: kvm_sun3.c,v 1.3 1996/05/10 12:58:33 deraadt Exp $ */
+/*	$OpenBSD: kvm_sun3.c,v 1.6 2001/12/05 02:23:11 art Exp $ */
 /*	$NetBSD: kvm_sun3.c,v 1.4 1996/05/05 04:32:18 gwr Exp $	*/
 
 /*-
@@ -65,8 +65,9 @@ static char *rcsid = "$NetBSD: kvm_sun3.c,v 1.4 1996/05/05 04:32:18 gwr Exp $";
 #include <kvm.h>
 #include <db.h>
 
-#include <vm/vm.h>
-#include <vm/vm_param.h>
+#include <uvm/uvm_extern.h>
+#include <machine/vmparam.h>
+#include <machine/pmap.h>
 
 #include <machine/kcore.h>
 #include <machine/pte.h>

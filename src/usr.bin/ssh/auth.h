@@ -1,3 +1,5 @@
+/*	$OpenBSD: auth.h,v 1.35 2002/03/19 10:35:39 markus Exp $	*/
+
 /*
  * Copyright (c) 2000 Markus Friedl.  All rights reserved.
  *
@@ -21,8 +23,8 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $OpenBSD: auth.h,v 1.22 2001/06/26 17:27:22 markus Exp $
  */
+
 #ifndef AUTH_H
 #define AUTH_H
 
@@ -71,31 +73,36 @@ struct Authctxt {
 
 /*
  * Keyboard interactive device:
- * init_ctx	returns: non NULL upon success 
- * query	returns: 0 - success, otherwise failure 
+ * init_ctx	returns: non NULL upon success
+ * query	returns: 0 - success, otherwise failure
  * respond	returns: 0 - success, 1 - need further interaction,
  *		otherwise - failure
  */
 struct KbdintDevice
 {
 	const char *name;
-	void*	(*init_ctx)	__P((Authctxt*));
-	int	(*query)	__P((void *ctx, char **name, char **infotxt,
-				u_int *numprompts, char ***prompts,
-				u_int **echo_on));
-	int	(*respond)	__P((void *ctx, u_int numresp, char **responses));
-	void	(*free_ctx)	__P((void *ctx));
+	void*	(*init_ctx)(Authctxt*);
+	int	(*query)(void *ctx, char **name, char **infotxt,
+		    u_int *numprompts, char ***prompts, u_int **echo_on);
+	int	(*respond)(void *ctx, u_int numresp, char **responses);
+	void	(*free_ctx)(void *ctx);
 };
 
-int     auth_rhosts(struct passwd *, const char *);
+int      auth_rhosts(struct passwd *, const char *);
 int
 auth_rhosts2(struct passwd *, const char *, const char *, const char *);
 
-int	 auth_rhosts_rsa(struct passwd *, const char *, RSA *);
+int	 auth_rhosts_rsa(struct passwd *, char *, Key *);
 int      auth_password(Authctxt *, const char *);
 int      auth_rsa(struct passwd *, BIGNUM *);
-int      auth_rsa_read_key(char **, u_int *, BIGNUM *, BIGNUM *);
-int      auth_rsa_challenge_dialog(RSA *);
+int      auth_rsa_challenge_dialog(Key *);
+BIGNUM	*auth_rsa_generate_challenge(Key *);
+int	 auth_rsa_verify_response(Key *, BIGNUM *, u_char[]);
+int	 auth_rsa_key_allowed(struct passwd *, BIGNUM *, Key **);
+
+int	 auth_rhosts_rsa_key_allowed(struct passwd *, char *, char *, Key *);
+int	 hostbased_key_allowed(struct passwd *, const char *, char *, Key *);
+int	 user_key_allowed(struct passwd *, Key *);
 
 #ifdef KRB4
 #include <krb.h>
@@ -118,17 +125,25 @@ int	auth_krb5_password(Authctxt *authctxt, const char *password);
 void	krb5_cleanup_proc(void *authctxt);
 #endif /* KRB5 */
 
-void	do_authentication(void);
-void	do_authentication2(void);
+Authctxt *do_authentication(void);
+Authctxt *do_authentication2(void);
 
 Authctxt *authctxt_new(void);
 void	auth_log(Authctxt *, int, char *, char *);
 void	userauth_finish(Authctxt *, int, char *);
 int	auth_root_allowed(char *);
 
+void	privsep_challenge_enable(void);
+
 int	auth2_challenge(Authctxt *, char *);
+void	auth2_challenge_stop(Authctxt *);
+int	bsdauth_query(void *, char **, char **, u_int *, char ***, u_int **);
+int	bsdauth_respond(void *, u_int, char **);
+int	skey_query(void *, char **, char **, u_int *, char ***, u_int **);
+int	skey_respond(void *, u_int, char **);
 
 int	allowed_user(struct passwd *);
+struct passwd * getpwnamallow(const char *user);
 
 char	*get_challenge(Authctxt *);
 int	verify_response(Authctxt *, const char *);
@@ -146,8 +161,15 @@ HostStatus
 check_key_in_hostfiles(struct passwd *, Key *, const char *,
     const char *, const char *);
 
+/* hostkey handling */
+Key	*get_hostkey_by_index(int);
+Key	*get_hostkey_by_type(int);
+int	 get_hostkey_index(Key *);
+int	 ssh1_session_key(BIGNUM *);
+
 #define AUTH_FAIL_MAX 6
 #define AUTH_FAIL_LOG (AUTH_FAIL_MAX/2)
 #define AUTH_FAIL_MSG "Too many authentication failures for %.100s"
 
+#define SKEY_PROMPT "\nS/Key Password: "
 #endif
